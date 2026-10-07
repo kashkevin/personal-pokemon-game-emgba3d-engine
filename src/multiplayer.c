@@ -125,6 +125,8 @@ void Multiplayer_Init(void)
     sConnected = FALSE;
     gMultiplayerMailbox.abiVersion = MULTIPLAYER_ABI_VERSION;
     gMultiplayerMailbox.byteSize = sizeof(gMultiplayerMailbox);
+    gMultiplayerMailbox.local.mapEpoch = sMapEpoch;
+    gMultiplayerMailbox.local.direction = DIR_SOUTH;
     gMultiplayerMailbox.magic = MULTIPLAYER_MAGIC;
 }
 
@@ -154,10 +156,26 @@ static u8 MovementMode(void)
 
 static void PublishLocalPose(bool32 ready)
 {
-    struct MultiplayerPose pose = {0};
+    // Keep a canonical, valid pose even while unavailable. Consumers use the
+    // activity flag, rather than interpreting menus as a move to map 0,0.
+    struct MultiplayerPose pose = gMultiplayerMailbox.local;
     u32 generation = (gMultiplayerMailbox.localGeneration + 1) | 1;
+    if (gSaveBlock1Ptr != NULL)
+    {
+        u8 mapGroup = gSaveBlock1Ptr->location.mapGroup;
+        u8 mapNum = gSaveBlock1Ptr->location.mapNum;
+        if (pose.mapGroup != mapGroup || pose.mapNum != mapNum)
+        {
+            sMapEpoch++;
+            if (sMapEpoch == 0)
+                sMapEpoch = 1;
+        }
+        pose.mapGroup = mapGroup;
+        pose.mapNum = mapNum;
+    }
     pose.mapEpoch = sMapEpoch;
     pose.frame = sFrame;
+    pose.activity = MULTIPLAYER_ACTIVITY_UNAVAILABLE;
     if (ready)
     {
         const struct ObjectEvent *player = &gObjectEvents[gPlayerAvatar.objectEventId];
@@ -180,9 +198,7 @@ static bool32 ValidPose(const struct MultiplayerPose *pose)
 {
     if (pose->reserved != 0 || pose->activity > MULTIPLAYER_ACTIVITY_OVERWORLD)
         return FALSE;
-    if (pose->activity == MULTIPLAYER_ACTIVITY_UNAVAILABLE)
-        return TRUE;
-    return pose->mapEpoch != 0 && pose->x >= 0 && pose->y >= 0
+    return pose->x >= 0 && pose->y >= 0
         && pose->direction >= DIR_SOUTH && pose->direction <= DIR_EAST
         && pose->elevation <= 15 && pose->gender <= FEMALE
         && pose->movementMode <= PLAYER_AVATAR_STATE_UNDERWATER;
