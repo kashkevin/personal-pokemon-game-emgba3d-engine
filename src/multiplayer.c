@@ -332,6 +332,10 @@ static void UpdateRemote(u32 i)
             return;
         sRemotes[i].objectEventId = id;
         gObjectEvents[id].hideReflection = TRUE;
+        // Special-object spawn normally runs during camera refresh. Network
+        // spawn may run mid-step; this API also accounts for partial camera
+        // pixels, keeping the actor anchored to its actual map tile.
+        MoveObjectEventToMapCoords(&gObjectEvents[id], pose->x + MAP_OFFSET, pose->y + MAP_OFFSET);
         ObjectEventTurn(&gObjectEvents[id], pose->direction);
     }
     objectEvent = &gObjectEvents[id];
@@ -346,7 +350,8 @@ static void UpdateRemote(u32 i)
         ObjectEventSetGraphicsId(objectEvent, graphicsId);
         MoveObjectEventToMapCoords(objectEvent, x, y);
     }
-    ObjectEventClearHeldMovementIfFinished(objectEvent);
+    if (ObjectEventClearHeldMovementIfFinished(objectEvent) == TRUE)
+        MoveObjectEventToMapCoords(objectEvent, objectEvent->currentCoords.x, objectEvent->currentCoords.y);
     if (ObjectEventIsHeldMovementActive(objectEvent))
         return;
     dx = x - objectEvent->currentCoords.x;
