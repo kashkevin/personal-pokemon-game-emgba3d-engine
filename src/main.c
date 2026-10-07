@@ -22,6 +22,7 @@
 #include "text.h"
 #include "intro.h"
 #include "main.h"
+#include "multiplayer.h"
 #include "trainer_hill.h"
 #include "test_runner.h"
 #include "constants/rgb.h"
@@ -112,6 +113,7 @@ void AgbMain(void)
     ResetBgs();
     SetDefaultFontsPointer();
     InitHeap(gHeap, HEAP_SIZE);
+    Multiplayer_Init();
 
     gSoftResetDisabled = FALSE;
 
@@ -136,6 +138,7 @@ void AgbMainLoop(void)
     for (;;)
     {
         ReadKeys();
+        Multiplayer_Tick();
 
         if (gSoftResetDisabled == FALSE
          && JOY_HELD_RAW(A_BUTTON)
@@ -201,6 +204,8 @@ static void CallCallbacks(void)
 
 void SetMainCallback2(MainCallback callback)
 {
+    if (gMain.callback2 == CB2_Overworld && callback != CB2_Overworld)
+        Multiplayer_LeaveField();
     gMain.callback2 = callback;
     gMain.state = 0;
 }

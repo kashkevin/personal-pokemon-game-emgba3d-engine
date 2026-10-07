@@ -37,6 +37,7 @@
 #include "link_rfu.h"
 #include "load_save.h"
 #include "main.h"
+#include "multiplayer.h"
 #include "malloc.h"
 #include "m4a.h"
 #include "map_name_popup.h"
@@ -618,6 +619,7 @@ const struct MapLayout *GetMapLayout(u16 mapLayoutId)
 
 void ApplyCurrentWarp(void)
 {
+    Multiplayer_BeginMapTransition();
     gLastUsedWarp = gSaveBlock1Ptr->location;
     gSaveBlock1Ptr->location = sWarpDestination;
     sFixedDiveWarp = sDummyWarpData;

@@ -1,4 +1,5 @@
 #include "global.h"
+#include "multiplayer.h"
 #include "malloc.h"
 #include "berry_powder.h"
 #include "fake_rtc.h"
@@ -201,6 +202,7 @@ void SaveObjectEvents(void)
     int i;
     u16 graphicsId;
 
+    Multiplayer_PrepareSave();
     for (i = 0; i < OBJECT_EVENTS_COUNT; i++)
     {
         gSaveBlock1Ptr->objectEvents[i] = gObjectEvents[i];

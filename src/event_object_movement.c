@@ -25,6 +25,7 @@
 #include "item.h"
 #include "mauville_old_man.h"
 #include "metatile_behavior.h"
+#include "multiplayer.h"
 #include "overworld.h"
 #include "palette.h"
 #include "party_menu.h"
@@ -1449,7 +1450,8 @@ u8 GetObjectEventIdByXY(s16 x, s16 y)
     u8 i;
     for (i = 0; i < OBJECT_EVENTS_COUNT; i++)
     {
-        if (gObjectEvents[i].active && gObjectEvents[i].currentCoords.x == x && gObjectEvents[i].currentCoords.y == y)
+        if (gObjectEvents[i].active && !Multiplayer_IsRemoteObject(&gObjectEvents[i])
+         && gObjectEvents[i].currentCoords.x == x && gObjectEvents[i].currentCoords.y == y)
             break;
     }
 
@@ -3464,7 +3466,7 @@ u8 GetObjectEventIdByPosition(u16 x, u16 y, u8 elevation)
 
     for (i = 0; i < OBJECT_EVENTS_COUNT; i++)
     {
-        if (gObjectEvents[i].active)
+        if (gObjectEvents[i].active && !Multiplayer_IsRemoteObject(&gObjectEvents[i]))
         {
             if (gObjectEvents[i].currentCoords.x == x
              && gObjectEvents[i].currentCoords.y == y
@@ -6524,7 +6526,7 @@ u32 GetObjectObjectCollidesWith(struct ObjectEvent *objectEvent, s16 x, s16 y, b
     u8 i;
     struct ObjectEvent *curObject;
 
-    if (objectEvent->localId == OBJ_EVENT_ID_FOLLOWER)
+    if (Multiplayer_IsRemoteObject(objectEvent) || objectEvent->localId == OBJ_EVENT_ID_FOLLOWER)
         return OBJECT_EVENTS_COUNT; // follower cannot collide with other objects, but they can collide with it
 
     if (addCoords)
@@ -6536,7 +6538,8 @@ u32 GetObjectObjectCollidesWith(struct ObjectEvent *objectEvent, s16 x, s16 y, b
     for (i = 0; i < OBJECT_EVENTS_COUNT; i++)
     {
         curObject = &gObjectEvents[i];
-        if (curObject->active && (curObject->movementType != MOVEMENT_TYPE_FOLLOW_PLAYER || objectEvent != &gObjectEvents[gPlayerAvatar.objectEventId]) && curObject != objectEvent
+        if (curObject->active && !Multiplayer_IsRemoteObject(curObject)
+         && (curObject->movementType != MOVEMENT_TYPE_FOLLOW_PLAYER || objectEvent != &gObjectEvents[gPlayerAvatar.objectEventId]) && curObject != objectEvent
          && !FollowerNPC_IsCollisionExempt(curObject, objectEvent)
          )
         {

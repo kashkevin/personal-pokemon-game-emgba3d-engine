@@ -1,0 +1,374 @@
+#include "global.h"
+#include <stddef.h>
+#include "multiplayer.h"
+#include "event_object_movement.h"
+#include "field_player_avatar.h"
+#include "fieldmap.h"
+#include "main.h"
+#include "overworld.h"
+#include "palette.h"
+#include "script.h"
+#include "sprite.h"
+#include "constants/event_objects.h"
+
+#define HEARTBEAT_TIMEOUT_FRAMES 180
+#define MAX_ANIMATED_CATCHUP_TILES 4
+
+_Static_assert(sizeof(struct MultiplayerPose) == 20, "Multiplayer pose ABI");
+_Static_assert(sizeof(struct MultiplayerPeer) == 24, "Multiplayer peer ABI");
+_Static_assert(sizeof(struct MultiplayerMailbox) == MULTIPLAYER_MAILBOX_BYTES, "Multiplayer mailbox ABI");
+_Static_assert(offsetof(struct MultiplayerMailbox, frame) == 8, "Multiplayer frame offset");
+_Static_assert(offsetof(struct MultiplayerMailbox, localGeneration) == 12, "Multiplayer local generation offset");
+_Static_assert(offsetof(struct MultiplayerMailbox, local) == 16, "Multiplayer local offset");
+_Static_assert(offsetof(struct MultiplayerMailbox, inboundGeneration) == 36, "Multiplayer inbound offset");
+_Static_assert(offsetof(struct MultiplayerMailbox, connectionFlags) == 40, "Multiplayer connection offset");
+_Static_assert(offsetof(struct MultiplayerMailbox, heartbeat) == 44, "Multiplayer heartbeat offset");
+_Static_assert(offsetof(struct MultiplayerMailbox, rosterEpoch) == 48, "Multiplayer roster offset");
+_Static_assert(offsetof(struct MultiplayerMailbox, selfSlot) == 52, "Multiplayer slot offset");
+_Static_assert(offsetof(struct MultiplayerMailbox, peerCount) == 53, "Multiplayer count offset");
+_Static_assert(offsetof(struct MultiplayerMailbox, peers) == 56, "Multiplayer peers offset");
+_Static_assert(offsetof(struct MultiplayerPose, x) == 8, "Multiplayer x offset");
+_Static_assert(offsetof(struct MultiplayerPose, mapGroup) == 12, "Multiplayer map offset");
+_Static_assert(offsetof(struct MultiplayerPose, activity) == 18, "Multiplayer activity offset");
+_Static_assert(MULTIPLAYER_LOCAL_ID_BASE > OBJECT_EVENT_TEMPLATES_COUNT, "Remote IDs outside map templates");
+_Static_assert(MULTIPLAYER_LOCAL_ID_BASE + MULTIPLAYER_MAX_PEERS <= LOCALID_OW_ENCOUNTER_END - OWE_SPAWNS_MAX + 1, "Remote IDs outside generated encounters");
+
+EWRAM_DATA volatile struct MultiplayerMailbox gMultiplayerMailbox = {0};
+
+struct RemoteState
+{
+    struct MultiplayerPeer peer;
+    u8 objectEventId;
+};
+
+static EWRAM_DATA struct RemoteState sRemotes[MULTIPLAYER_MAX_PEERS] = {0};
+static EWRAM_DATA u32 sFrame = 0;
+static EWRAM_DATA u32 sMapEpoch = 0;
+static EWRAM_DATA u32 sSeenInboundGeneration = 0;
+static EWRAM_DATA u32 sHeartbeat = 0;
+static EWRAM_DATA u32 sRosterEpoch = 0;
+static EWRAM_DATA u32 sLastHeartbeatFrame = 0;
+static EWRAM_DATA u32 sSuppressThroughFrame = 0;
+static EWRAM_DATA bool8 sConnected = FALSE;
+
+bool32 Multiplayer_IsRemoteObject(const struct ObjectEvent *objectEvent)
+{
+    u32 i;
+    for (i = 0; i < MULTIPLAYER_MAX_PEERS; i++)
+    {
+        u32 id = sRemotes[i].objectEventId;
+        if (id < OBJECT_EVENTS_COUNT && objectEvent == &gObjectEvents[id]
+         && objectEvent->active && objectEvent->localId == MULTIPLAYER_LOCAL_ID_BASE + i)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static void RemoveRemote(u32 i)
+{
+    u32 id = sRemotes[i].objectEventId;
+    if (id < OBJECT_EVENTS_COUNT)
+    {
+        struct ObjectEvent *objectEvent = &gObjectEvents[id];
+        // A map reset or ordinary off-screen removal may already have recycled
+        // the slot. Never touch its replacement, or an unrelated sprite.
+        if (objectEvent->localId == MULTIPLAYER_LOCAL_ID_BASE + i)
+        {
+            u32 spriteId = objectEvent->spriteId;
+            if (objectEvent->active && spriteId < MAX_SPRITES
+             && gSprites[spriteId].inUse && gSprites[spriteId].data[0] == id)
+                RemoveObjectEvent(objectEvent);
+            ClearObjectEvent(objectEvent);
+        }
+    }
+    sRemotes[i].objectEventId = OBJECT_EVENTS_COUNT;
+}
+
+void Multiplayer_LeaveField(void)
+{
+    u32 i;
+    for (i = 0; i < MULTIPLAYER_MAX_PEERS; i++)
+        RemoveRemote(i);
+}
+
+void Multiplayer_BeginMapTransition(void)
+{
+    Multiplayer_LeaveField();
+    sMapEpoch++;
+    if (sMapEpoch == 0)
+        sMapEpoch = 1;
+    sSuppressThroughFrame = sFrame + 1;
+}
+
+void Multiplayer_PrepareSave(void)
+{
+    // SaveObjectEvents copies all live object slots. Remove ephemeral objects
+    // first and prevent the following tick from immediately recreating them.
+    Multiplayer_LeaveField();
+    sSuppressThroughFrame = sFrame + 1;
+}
+
+void Multiplayer_Init(void)
+{
+    u32 i;
+    memset((void *)&gMultiplayerMailbox, 0, sizeof(gMultiplayerMailbox));
+    memset(sRemotes, 0, sizeof(sRemotes));
+    for (i = 0; i < MULTIPLAYER_MAX_PEERS; i++)
+        sRemotes[i].objectEventId = OBJECT_EVENTS_COUNT;
+    sFrame = 0;
+    sMapEpoch = 1;
+    sSeenInboundGeneration = 0;
+    sHeartbeat = 0;
+    sRosterEpoch = 0;
+    sLastHeartbeatFrame = 0;
+    sSuppressThroughFrame = 0;
+    sConnected = FALSE;
+    gMultiplayerMailbox.abiVersion = MULTIPLAYER_ABI_VERSION;
+    gMultiplayerMailbox.byteSize = sizeof(gMultiplayerMailbox);
+    gMultiplayerMailbox.magic = MULTIPLAYER_MAGIC;
+}
+
+static bool32 FieldReady(void)
+{
+    u32 id = gPlayerAvatar.objectEventId;
+    return gMain.callback2 == CB2_Overworld && gMain.callback1 == CB1_Overworld
+        && gSaveBlock1Ptr != NULL && gMapHeader.mapLayout != NULL
+        && id < OBJECT_EVENTS_COUNT && gObjectEvents[id].active && gObjectEvents[id].isPlayer
+        && gObjectEvents[id].spriteId < MAX_SPRITES && gSprites[gObjectEvents[id].spriteId].inUse
+        && !gPaletteFade.active && !ArePlayerFieldControlsLocked()
+        && (s32)(sFrame - sSuppressThroughFrame) > 0;
+}
+
+static u8 MovementMode(void)
+{
+    if (gPlayerAvatar.flags & PLAYER_AVATAR_FLAG_UNDERWATER)
+        return PLAYER_AVATAR_STATE_UNDERWATER;
+    if (gPlayerAvatar.flags & PLAYER_AVATAR_FLAG_SURFING)
+        return PLAYER_AVATAR_STATE_SURFING;
+    if (gPlayerAvatar.flags & PLAYER_AVATAR_FLAG_ACRO_BIKE)
+        return PLAYER_AVATAR_STATE_ACRO_BIKE;
+    if (gPlayerAvatar.flags & PLAYER_AVATAR_FLAG_MACH_BIKE)
+        return PLAYER_AVATAR_STATE_MACH_BIKE;
+    return PLAYER_AVATAR_STATE_NORMAL;
+}
+
+static void PublishLocalPose(bool32 ready)
+{
+    struct MultiplayerPose pose = {0};
+    u32 generation = (gMultiplayerMailbox.localGeneration + 1) | 1;
+    pose.mapEpoch = sMapEpoch;
+    pose.frame = sFrame;
+    if (ready)
+    {
+        const struct ObjectEvent *player = &gObjectEvents[gPlayerAvatar.objectEventId];
+        pose.x = player->currentCoords.x - MAP_OFFSET;
+        pose.y = player->currentCoords.y - MAP_OFFSET;
+        pose.mapGroup = gSaveBlock1Ptr->location.mapGroup;
+        pose.mapNum = gSaveBlock1Ptr->location.mapNum;
+        pose.direction = player->facingDirection;
+        pose.elevation = player->currentElevation;
+        pose.gender = gPlayerAvatar.gender;
+        pose.movementMode = MovementMode();
+        pose.activity = MULTIPLAYER_ACTIVITY_OVERWORLD;
+    }
+    gMultiplayerMailbox.localGeneration = generation;
+    gMultiplayerMailbox.local = pose;
+    gMultiplayerMailbox.localGeneration = generation + 1;
+}
+
+static bool32 ValidPose(const struct MultiplayerPose *pose)
+{
+    if (pose->reserved != 0 || pose->activity > MULTIPLAYER_ACTIVITY_OVERWORLD)
+        return FALSE;
+    if (pose->activity == MULTIPLAYER_ACTIVITY_UNAVAILABLE)
+        return TRUE;
+    return pose->mapEpoch != 0 && pose->x >= 0 && pose->y >= 0
+        && pose->direction >= DIR_SOUTH && pose->direction <= DIR_EAST
+        && pose->elevation <= 15 && pose->gender <= FEMALE
+        && pose->movementMode <= PLAYER_AVATAR_STATE_UNDERWATER;
+}
+
+static void ReadInbound(void)
+{
+    struct MultiplayerPeer peers[MULTIPLAYER_MAX_PEERS];
+    u32 generation = gMultiplayerMailbox.inboundGeneration;
+    u32 flags, heartbeat, rosterEpoch;
+    u32 i, j;
+    u8 count, selfSlot;
+    u16 reserved;
+    if ((generation & 1) || generation == sSeenInboundGeneration)
+        return;
+    flags = gMultiplayerMailbox.connectionFlags;
+    heartbeat = gMultiplayerMailbox.heartbeat;
+    rosterEpoch = gMultiplayerMailbox.rosterEpoch;
+    selfSlot = gMultiplayerMailbox.selfSlot;
+    count = gMultiplayerMailbox.peerCount;
+    reserved = gMultiplayerMailbox.reserved;
+    for (i = 0; i < MULTIPLAYER_MAX_PEERS; i++)
+        peers[i] = gMultiplayerMailbox.peers[i];
+    if (generation != gMultiplayerMailbox.inboundGeneration)
+        return;
+    sSeenInboundGeneration = generation;
+    if (flags & ~MULTIPLAYER_CONNECTED || count > MULTIPLAYER_MAX_PEERS || selfSlot > 3 || reserved != 0)
+        return;
+    if (!(flags & MULTIPLAYER_CONNECTED))
+    {
+        sConnected = FALSE;
+        Multiplayer_LeaveField();
+        for (i = 0; i < MULTIPLAYER_MAX_PEERS; i++)
+            sRemotes[i].peer.playerId = 0;
+        return;
+    }
+    for (i = 0; i < count; i++)
+    {
+        if (peers[i].playerId == 0 || !ValidPose(&peers[i].pose))
+            return;
+        for (j = 0; j < i; j++)
+            if (peers[i].playerId == peers[j].playerId)
+                return;
+    }
+    if (!sConnected || heartbeat != sHeartbeat)
+        sLastHeartbeatFrame = sFrame;
+    if (!sConnected || rosterEpoch != sRosterEpoch)
+    {
+        Multiplayer_LeaveField();
+        for (i = 0; i < MULTIPLAYER_MAX_PEERS; i++)
+            sRemotes[i].peer.playerId = 0;
+    }
+    sConnected = TRUE;
+    sHeartbeat = heartbeat;
+    sRosterEpoch = rosterEpoch;
+    for (i = 0; i < MULTIPLAYER_MAX_PEERS; i++)
+    {
+        if (i >= count)
+        {
+            RemoveRemote(i);
+            sRemotes[i].peer.playerId = 0;
+            continue;
+        }
+        if (sRemotes[i].peer.playerId == peers[i].playerId
+         && (s32)(peers[i].pose.frame - sRemotes[i].peer.pose.frame) < 0)
+            continue;
+        if (sRemotes[i].peer.playerId != peers[i].playerId
+         || sRemotes[i].peer.pose.mapEpoch != peers[i].pose.mapEpoch)
+            RemoveRemote(i);
+        sRemotes[i].peer = peers[i];
+    }
+}
+
+static bool32 PeerVisible(const struct MultiplayerPose *pose)
+{
+    s32 x = pose->x + MAP_OFFSET;
+    s32 y = pose->y + MAP_OFFSET;
+    return pose->activity == MULTIPLAYER_ACTIVITY_OVERWORLD
+        && pose->mapGroup == gSaveBlock1Ptr->location.mapGroup
+        && pose->mapNum == gSaveBlock1Ptr->location.mapNum
+        && pose->x < gMapHeader.mapLayout->width && pose->y < gMapHeader.mapLayout->height
+        && x >= gSaveBlock1Ptr->pos.x - 2 && x <= gSaveBlock1Ptr->pos.x + 17
+        && y >= gSaveBlock1Ptr->pos.y && y <= gSaveBlock1Ptr->pos.y + 16;
+}
+
+static bool32 CanAllocateObject(u16 graphicsId)
+{
+    u32 i;
+    u16 paletteTag = GetObjectEventGraphicsInfo(graphicsId)->paletteTag;
+    if (GetFirstInactiveObjectEventId() == OBJECT_EVENTS_COUNT)
+        return FALSE;
+    // The upstream palette allocator can evict generated wild objects. Never
+    // request a new palette without a free slot in this presence adapter.
+    if (IndexOfSpritePaletteTag(paletteTag) == 0xFF && IndexOfSpritePaletteTag(TAG_NONE) == 0xFF)
+        return FALSE;
+    for (i = 0; i < MAX_SPRITES; i++)
+        if (!gSprites[i].inUse)
+            return TRUE;
+    return FALSE;
+}
+
+static void UpdateRemote(u32 i)
+{
+    const struct MultiplayerPose *pose = &sRemotes[i].peer.pose;
+    struct ObjectEvent *objectEvent;
+    u32 id = sRemotes[i].objectEventId;
+    u16 graphicsId;
+    s16 x, y, dx, dy;
+    enum Direction direction;
+    if (sRemotes[i].peer.playerId == 0 || !PeerVisible(pose))
+    {
+        RemoveRemote(i);
+        return;
+    }
+    graphicsId = GetPlayerAvatarGraphicsIdByStateIdAndGender(pose->movementMode, pose->gender);
+    if (id >= OBJECT_EVENTS_COUNT || !Multiplayer_IsRemoteObject(&gObjectEvents[id]))
+    {
+        struct ObjectEventTemplate template = {0};
+        sRemotes[i].objectEventId = OBJECT_EVENTS_COUNT;
+        if (!CanAllocateObject(graphicsId) || GetObjectEventIdByLocalId(MULTIPLAYER_LOCAL_ID_BASE + i) < OBJECT_EVENTS_COUNT)
+            return;
+        template.localId = MULTIPLAYER_LOCAL_ID_BASE + i;
+        template.graphicsId = graphicsId;
+        template.kind = OBJ_KIND_NORMAL;
+        template.x = pose->x;
+        template.y = pose->y;
+        template.elevation = pose->elevation;
+        template.movementType = MOVEMENT_TYPE_NONE;
+        id = SpawnSpecialObjectEvent(&template);
+        if (id >= OBJECT_EVENTS_COUNT)
+            return;
+        sRemotes[i].objectEventId = id;
+        gObjectEvents[id].hideReflection = TRUE;
+        ObjectEventTurn(&gObjectEvents[id], pose->direction);
+    }
+    objectEvent = &gObjectEvents[id];
+    x = pose->x + MAP_OFFSET;
+    y = pose->y + MAP_OFFSET;
+    if (objectEvent->graphicsId != graphicsId)
+    {
+        u16 paletteTag = GetObjectEventGraphicsInfo(graphicsId)->paletteTag;
+        if (IndexOfSpritePaletteTag(paletteTag) == 0xFF && IndexOfSpritePaletteTag(TAG_NONE) == 0xFF)
+            return;
+        ObjectEventClearHeldMovementIfActive(objectEvent);
+        ObjectEventSetGraphicsId(objectEvent, graphicsId);
+        MoveObjectEventToMapCoords(objectEvent, x, y);
+    }
+    ObjectEventClearHeldMovementIfFinished(objectEvent);
+    if (ObjectEventIsHeldMovementActive(objectEvent))
+        return;
+    dx = x - objectEvent->currentCoords.x;
+    dy = y - objectEvent->currentCoords.y;
+    objectEvent->currentElevation = pose->elevation;
+    objectEvent->previousElevation = pose->elevation;
+    if (abs(dx) + abs(dy) > MAX_ANIMATED_CATCHUP_TILES)
+    {
+        MoveObjectEventToMapCoords(objectEvent, x, y);
+        ObjectEventTurn(objectEvent, pose->direction);
+    }
+    else if (dx != 0 || dy != 0)
+    {
+        direction = dx > 0 ? DIR_EAST : dx < 0 ? DIR_WEST : dy > 0 ? DIR_SOUTH : DIR_NORTH;
+        ObjectEventSetHeldMovement(objectEvent, abs(dx) + abs(dy) > 1
+            ? GetWalkFastMovementAction(direction) : GetWalkNormalMovementAction(direction));
+    }
+    else if (objectEvent->facingDirection != pose->direction)
+    {
+        ObjectEventSetHeldMovement(objectEvent, GetFaceDirectionMovementAction(pose->direction));
+    }
+}
+
+void Multiplayer_Tick(void)
+{
+    u32 i;
+    bool32 ready;
+    gMultiplayerMailbox.frame = ++sFrame;
+    ready = FieldReady();
+    PublishLocalPose(ready);
+    ReadInbound();
+    if (sConnected && sFrame - sLastHeartbeatFrame >= HEARTBEAT_TIMEOUT_FRAMES)
+        sConnected = FALSE;
+    if (!ready || !sConnected)
+    {
+        Multiplayer_LeaveField();
+        return;
+    }
+    for (i = 0; i < MULTIPLAYER_MAX_PEERS; i++)
+        UpdateRemote(i);
+}
