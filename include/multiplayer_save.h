@@ -56,5 +56,7 @@ void MultiplayerSave_Tick(void);
 bool32 MultiplayerSave_IsHeld(void);
 bool32 MultiplayerSave_SkipCallbacks(void);
 bool32 MultiplayerSave_PauseClocks(void);
+bool32 MultiplayerSave_FieldReady(void);
+bool32 MultiplayerSave_CheckBinding(u32 session, u32 incarnation);
 
 #endif

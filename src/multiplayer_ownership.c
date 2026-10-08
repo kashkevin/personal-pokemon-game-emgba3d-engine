@@ -1,6 +1,7 @@
 #include "global.h"
 #include "multiplayer_ownership.h"
 #include "multiplayer_save.h"
+#include "multiplayer_battle.h"
 #include "pokemon.h"
 #include "pokemon_storage_system.h"
 #include "malloc.h"
@@ -127,6 +128,8 @@ bool32 MultiplayerOwnership_IsEnrolled(void)
 
 bool32 MultiplayerOwnership_CanSaveParty(void)
 {
+    if (MultiplayerBattle_IsActive())
+        return FALSE;
     if (!Ready())
         return FALSE;
     if (!MultiplayerOwnership_IsEnrolled())

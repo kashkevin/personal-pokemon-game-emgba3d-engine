@@ -1,4 +1,5 @@
 #include "global.h"
+#include "multiplayer_battle.h"
 #include "m4a.h"
 #include "malloc.h"
 #include "reload_save.h"
@@ -355,6 +356,9 @@ void OpenLink(void)
 {
     int i;
 
+    if (MultiplayerBattle_IsActive())
+        return;
+
     if (!gWirelessCommType)
     {
         ResetSerial();
@@ -383,6 +387,8 @@ void OpenLink(void)
 
 void CloseLink(void)
 {
+    if (MultiplayerBattle_IsActive())
+        return;
     gReceivedRemoteLinkPlayers = FALSE;
     if (gWirelessCommType)
         LinkRfu_Shutdown();
@@ -723,6 +729,8 @@ void ClearLinkCallback_2(void)
 
 u8 GetLinkPlayerCount(void)
 {
+    if (MultiplayerBattle_IsActive())
+        return MultiplayerBattle_GetPlayerCount();
     if (gWirelessCommType)
         return Rfu_GetLinkPlayerCount();
 
@@ -983,6 +991,8 @@ static void UNUSED SendBerryBlenderNoSpaceForPokeblocks(void)
 
 u8 GetMultiplayerId(void)
 {
+    if (MultiplayerBattle_IsActive())
+        return MultiplayerBattle_GetPlayerId();
     if (gWirelessCommType == TRUE)
         return Rfu_GetMultiplayerId();
 
@@ -999,6 +1009,8 @@ u8 BitmaskAllOtherLinkPlayers(void)
 
 bool8 SendBlock(u8 unused, const void *src, u16 size)
 {
+    if (MultiplayerBattle_IsActive())
+        return MultiplayerBattle_SendBlock(src, size);
     if (gWirelessCommType == TRUE)
         return Rfu_InitBlockSend(src, size);
 
@@ -1021,6 +1033,8 @@ bool8 SendBlockRequest(u8 blockReqType)
 
 bool8 IsLinkTaskFinished(void)
 {
+    if (MultiplayerBattle_IsActive())
+        return MultiplayerBattle_IsSendFinished();
     if (gWirelessCommType == TRUE)
         return IsLinkRfuTaskFinished();
 
@@ -1029,6 +1043,8 @@ bool8 IsLinkTaskFinished(void)
 
 u8 GetBlockReceivedStatus(void)
 {
+    if (MultiplayerBattle_IsActive())
+        return MultiplayerBattle_GetReceivedFlags();
     if (gWirelessCommType == TRUE)
         return Rfu_GetBlockReceivedStatus();
 
@@ -1047,6 +1063,12 @@ void ResetBlockReceivedFlags(void)
 {
     int i;
 
+    if (MultiplayerBattle_IsActive())
+    {
+        MultiplayerBattle_ResetReceivedFlags();
+        return;
+    }
+
     if (gWirelessCommType == TRUE)
     {
         for (i = 0; i < MAX_RFU_PLAYERS; i++)
@@ -1061,6 +1083,11 @@ void ResetBlockReceivedFlags(void)
 
 void ResetBlockReceivedFlag(u8 who)
 {
+    if (MultiplayerBattle_IsActive())
+    {
+        MultiplayerBattle_ResetReceivedFlag(who);
+        return;
+    }
     if (gWirelessCommType == TRUE)
     {
         Rfu_ResetBlockReceivedFlag(who);
@@ -1327,11 +1354,15 @@ void ResetLinkPlayerCount(void)
 
 u8 GetLinkPlayerCount_2(void)
 {
+    if (MultiplayerBattle_IsActive())
+        return MultiplayerBattle_GetPlayerCount();
     return EXTRACT_PLAYER_COUNT(gLinkStatus);
 }
 
 bool8 IsLinkMaster(void)
 {
+    if (MultiplayerBattle_IsActive())
+        return MultiplayerBattle_GetPlayerId() == 0;
     if (gWirelessCommType)
         return Rfu_IsMaster();
 
@@ -1340,6 +1371,8 @@ bool8 IsLinkMaster(void)
 
 void SetCloseLinkCallbackAndType(u16 type)
 {
+    if (MultiplayerBattle_IsActive())
+        return;
     if (gWirelessCommType == TRUE)
     {
         Rfu_SetCloseLinkCallback();
@@ -1695,7 +1728,7 @@ bool8 IsLinkConnectionEstablished(void)
 
 bool32 IsNativeLinkSessionActive(void)
 {
-    if (sLinkOpen || gReceivedRemoteLinkPlayers || IsOverworldLinkActive()
+    if (MultiplayerBattle_IsActive() || sLinkOpen || gReceivedRemoteLinkPlayers || IsOverworldLinkActive()
      || (gSaveBlock1Ptr != NULL && InUnionRoom()))
         return TRUE;
     if (!gWirelessCommType)
@@ -1751,6 +1784,9 @@ void LinkPlayerFromBlock(u32 who)
 bool8 HandleLinkConnection(void)
 {
     bool32 main1Failed, main2Failed;
+
+    if (MultiplayerBattle_IsActive())
+        return FALSE;
 
     if (gWirelessCommType == 0)
     {

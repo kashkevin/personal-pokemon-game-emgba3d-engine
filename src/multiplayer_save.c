@@ -1,6 +1,7 @@
 #include "global.h"
 #include "multiplayer_save.h"
 #include "multiplayer.h"
+#include "multiplayer_battle.h"
 #include "multiplayer_ownership.h"
 #include "event_data.h"
 #include "main.h"
@@ -149,7 +150,7 @@ bool32 MultiplayerSave_PauseClocks(void)
 static bool32 FieldReady(void)
 {
     u32 id = gPlayerAvatar.objectEventId;
-    return gMain.callback1 == CB1_Overworld && gMain.callback2 == CB2_Overworld
+    return !MultiplayerBattle_IsActive() && gMain.callback1 == CB1_Overworld && gMain.callback2 == CB2_Overworld
         && gSaveBlock1Ptr != NULL && gSaveBlock2Ptr != NULL && gMapHeader.mapLayout != NULL
         && id < OBJECT_EVENTS_COUNT && gObjectEvents[id].active && gObjectEvents[id].isPlayer
         && gObjectEvents[id].spriteId < MAX_SPRITES && gSprites[gObjectEvents[id].spriteId].inUse
@@ -160,6 +161,16 @@ static bool32 FieldReady(void)
         && !InBattlePyramid() && !GetSafariZoneFlag()
         && !gSaveBlock2Ptr->frontier.challengeStatus && !gSaveBlock2Ptr->frontier.challengePaused
         && (!B_FLAG_SKY_BATTLE || !FlagGet(B_FLAG_SKY_BATTLE));
+}
+
+bool32 MultiplayerSave_FieldReady(void)
+{
+    return !MultiplayerSave_IsHeld() && FieldReady();
+}
+
+bool32 MultiplayerSave_CheckBinding(u32 session, u32 incarnation)
+{
+    return session > sSession || (session == sSession && incarnation >= sIncarnation);
 }
 
 static void PublishResponse(const struct MultiplayerSaveControl *command, u8 status, const u8 *data, u16 length, u32 offset)
@@ -447,6 +458,15 @@ static void Handle(const struct MultiplayerSaveControl *command)
 {
     u8 data[80];
     u8 status = MP_SAVE_OK;
+    // The diagnostic channel owns the field hold. Neither rebinding nor a
+    // save cancellation may invalidate its ownership or release that hold.
+    if (MultiplayerBattle_IsActive() && command->opcode != MP_SAVE_QUERY && command->opcode != MP_SAVE_QUERY_TRADE)
+    {
+        struct MultiplayerSaveControl cached = sCachedResponse;
+        PublishResponse(command, MP_SAVE_BUSY, NULL, 0, sOffset);
+        sCachedResponse = cached;
+        return;
+    }
     if (command->status || command->length > 192 || !AllBytes(command->data + command->length, 192 - command->length, 0)
      || command->chunkCrc32 != Crc32(0, command->data, command->length)
      || command->totalSize != MULTIPLAYER_SAVE_FLASH_SIZE || !command->incarnation || !command->sessionEpoch
@@ -476,7 +496,7 @@ static void Handle(const struct MultiplayerSaveControl *command)
     {
         // A game process retains its binding fence across bridge reconnects.
         // Only the original, still-unprogressed BIND can be replayed verbatim.
-        if (command->sessionEpoch < sSession
+        if (!MultiplayerBattle_CheckBinding(command->sessionEpoch, command->incarnation) || command->sessionEpoch < sSession
          || (command->sessionEpoch == sSession && command->incarnation < sIncarnation))
             status = MP_SAVE_SESSION;
         else if (command->sessionEpoch == sSession && command->incarnation == sIncarnation)

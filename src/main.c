@@ -22,6 +22,7 @@
 #include "text.h"
 #include "intro.h"
 #include "main.h"
+#include "multiplayer_battle.h"
 #include "multiplayer.h"
 #include "multiplayer_save.h"
 #include "trainer_hill.h"
@@ -116,6 +117,7 @@ void AgbMain(void)
     InitHeap(gHeap, HEAP_SIZE);
     Multiplayer_Init();
     MultiplayerSave_Init();
+    MultiplayerBattle_Init();
 
     gSoftResetDisabled = FALSE;
 
@@ -141,6 +143,7 @@ void AgbMainLoop(void)
     {
         ReadKeys();
         MultiplayerSave_Tick();
+        MultiplayerBattle_Tick();
         Multiplayer_Tick();
 
         if (gSoftResetDisabled == FALSE
@@ -152,7 +155,7 @@ void AgbMainLoop(void)
             DoSoftReset();
         }
 
-        if (MultiplayerSave_SkipCallbacks())
+        if (MultiplayerSave_SkipCallbacks() || MultiplayerBattle_IsActive())
         {
             // The dedicated mailbox owns the transaction while ordinary field
             // callbacks stay paused. Audio and bridge frame publication continue.
@@ -178,7 +181,7 @@ void AgbMainLoop(void)
             }
         }
 
-        if (!MultiplayerSave_PauseClocks())
+        if (!MultiplayerSave_PauseClocks() && !MultiplayerBattle_PauseClocks())
             PlayTimeCounter_Update();
         MapMusicMain();
         WaitForVBlank();
@@ -365,7 +368,11 @@ void SetSerialCallback(IntrCallback callback)
 
 static void VBlankIntr(void)
 {
-    if (gWirelessCommType != 0)
+    if (MultiplayerBattle_IsActive())
+    {
+        // The virtual channel has no physical cable/RFU or battle controllers.
+    }
+    else if (gWirelessCommType != 0)
         RfuVSync();
     else if (gLinkVSyncDisabled == FALSE)
         LinkVSync();
@@ -388,7 +395,7 @@ static void VBlankIntr(void)
     m4aSoundMain();
     TryReceiveLinkBattleData();
 
-    if (!MultiplayerSave_PauseClocks() && !gTestRunnerEnabled && (!gMain.inBattle || !(gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_FRONTIER | BATTLE_TYPE_RECORDED))))
+    if (!MultiplayerSave_PauseClocks() && !MultiplayerBattle_PauseClocks() && !gTestRunnerEnabled && (!gMain.inBattle || !(gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_FRONTIER | BATTLE_TYPE_RECORDED))))
         AdvanceRandom();
 
     UpdateWirelessStatusIndicatorSprite();

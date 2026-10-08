@@ -1,4 +1,5 @@
 #include "global.h"
+#include "multiplayer_battle.h"
 #include "battle.h"
 #include "battle_ai_main.h"
 #include "battle_ai_util.h"
@@ -757,6 +758,9 @@ void TryReceiveLinkBattleData(void)
     u8 i;
     s32 j;
     u8 *recvBuffer;
+
+    if (MultiplayerBattle_IsActive())
+        return;
 
     if (gReceivedRemoteLinkPlayers && (gBattleTypeFlags & BATTLE_TYPE_LINK_IN_BATTLE))
     {
