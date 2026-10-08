@@ -4,6 +4,7 @@
 #include "decompress.h"
 #include "graphics.h"
 #include "main.h"
+#include "multiplayer_battle.h"
 #include "m4a.h"
 #include "pokeball.h"
 #include "pokemon.h"
@@ -415,6 +416,8 @@ static void Task_DoPokeballSendOutAnim(u8 taskId)
 
     throwCaseId = gTasks[taskId].tThrowId;
     battler = gTasks[taskId].tBattler;
+    if (!MultiplayerBattle_TrySendOutAnimation(battler))
+        return;
     ballId = GetBattlerPokeballItemId(battler);
     LoadBallGfx(ballId);
     ballSpriteId = CreateSprite(&gPokeBalls[ballId].spriteTemplate, 32, 80, 29);
