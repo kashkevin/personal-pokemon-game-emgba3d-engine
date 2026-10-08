@@ -61,10 +61,19 @@ DesertRuins_EventScript_Regirock::
 	playmoncry SPECIES_REGIROCK, CRY_MODE_ENCOUNTER
 	delay 40
 	waitmoncry
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerStaticReset_BeginCurrent
+	goto_if_eq VAR_RESULT, FALSE, DesertRuins_EventScript_RegirockResetReturn
+#endif
 	setwildbattle SPECIES_REGIROCK, 40
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	special StartRegiBattle
+DesertRuins_EventScript_RegirockPersonalReturn::
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerLocalReset_ConsumeResult
+	goto_if_eq VAR_RESULT, TRUE, DesertRuins_EventScript_RegirockResetReturn
+#endif
 	specialvar VAR_RESULT, GetBattleOutcome
 	goto_if_eq VAR_RESULT, B_OUTCOME_WON, DesertRuins_EventScript_DefeatedRegirock
 	goto_if_eq VAR_RESULT, B_OUTCOME_RAN, DesertRuins_EventScript_RanFromRegirock
@@ -72,6 +81,12 @@ DesertRuins_EventScript_Regirock::
 	setflag FLAG_DEFEATED_REGIROCK
 	release
 	end
+
+#if MP_LOCAL_RESET_STATIC || TESTING
+DesertRuins_EventScript_RegirockResetReturn::
+	release
+	end
+#endif
 
 DesertRuins_EventScript_DefeatedRegirock::
 	setflag FLAG_DEFEATED_REGIROCK

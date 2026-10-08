@@ -94,10 +94,19 @@ IslandCave_EventScript_Regice::
 	playmoncry SPECIES_REGICE, CRY_MODE_ENCOUNTER
 	delay 40
 	waitmoncry
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerStaticReset_BeginCurrent
+	goto_if_eq VAR_RESULT, FALSE, IslandCave_EventScript_RegiceResetReturn
+#endif
 	setwildbattle SPECIES_REGICE, 40
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	special StartRegiBattle
+IslandCave_EventScript_RegicePersonalReturn::
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerLocalReset_ConsumeResult
+	goto_if_eq VAR_RESULT, TRUE, IslandCave_EventScript_RegiceResetReturn
+#endif
 	specialvar VAR_RESULT, GetBattleOutcome
 	goto_if_eq VAR_RESULT, B_OUTCOME_WON, IslandCave_EventScript_DefeatedRegice
 	goto_if_eq VAR_RESULT, B_OUTCOME_RAN, IslandCave_EventScript_RanFromRegice
@@ -105,6 +114,12 @@ IslandCave_EventScript_Regice::
 	setflag FLAG_DEFEATED_REGICE
 	release
 	end
+
+#if MP_LOCAL_RESET_STATIC || TESTING
+IslandCave_EventScript_RegiceResetReturn::
+	release
+	end
+#endif
 
 IslandCave_EventScript_DefeatedRegice::
 	setflag FLAG_DEFEATED_REGICE
