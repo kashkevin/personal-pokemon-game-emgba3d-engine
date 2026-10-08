@@ -1261,3 +1261,229 @@ TEST("Multiplayer full Multi: delayed send-outs wait for the previous ball and p
     TearDown(&f);
     EXPECT(MultiplayerBattle_TrySendOutAnimation(0));
 }
+
+static u8 SubmitResume(struct ChannelFixture *f)
+{
+    u32 last = f->lastSuccessfulSequence;
+    u8 status = Submit(f);
+    f->lastSuccessfulSequence = last;
+    return status;
+}
+
+static void ResumeAuthorization(struct ChannelFixture *f, u32 epoch, u32 last)
+{
+    Next(f, MP_BATTLE_REAUTHORIZE);
+    f->command.length = 140;
+    memcpy(f->command.data, &f->binding, sizeof(f->binding));
+    f->command.data[116] = 0xA7;
+    PutWord(f->command.data + 132, epoch);
+    PutWord(f->command.data + 136, last);
+}
+
+TEST("Multiplayer resume: opt-in watchdog suspension retains preparation, cursor and exact cached acknowledgment across lease renewal")
+{
+    struct ChannelFixture f;
+    struct MultiplayerBattleControl read;
+    u8 trainer[28];
+    FullMultiBinding(&f, 0);
+    EXPECT_EQ(Send(&f, MP_BATTLE_ARM_RESUME), MP_BATTLE_OK);
+    Preparation(&f); EXPECT_EQ(Submit(&f), MP_BATTLE_OK);
+    Next(&f, MP_BATTLE_READ_OUT); f.command.blockSeq = 1;
+    f.command.kind = MP_BATTLE_KIND_TRAINER; f.command.totalSize = sizeof(trainer);
+    EXPECT_EQ(Submit(&f), MP_BATTLE_OK);
+    read = f.command; memcpy(trainer, (const void *)gMultiplayerBattleMailbox.response.data, sizeof(trainer));
+    for (u32 i = 0; i < MULTIPLAYER_BATTLE_DEADLINE; i++) MultiplayerBattle_Tick();
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_SUSPENDED);
+    EXPECT(MultiplayerBattle_IsActive()); EXPECT(MultiplayerBattle_PauseClocks());
+    Next(&f, MP_BATTLE_RESUME_QUERY);
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+    EXPECT_EQ(Word(gMultiplayerBattleMailbox.response.data + 24), read.commandSeq);
+    EXPECT_EQ(Word(gMultiplayerBattleMailbox.response.data + 44), sizeof(trainer));
+    EXPECT_EQ(Word(gMultiplayerBattleMailbox.response.data + 64), MP_BATTLE_SUSPENDED | (1 << 8) | (MP_BATTLE_PREPARED << 16));
+    for (u32 i = 0; i < 4; i++) f.binding.leases[i] += 10;
+    f.command.sessionEpoch = f.binding.leases[0];
+    ResumeAuthorization(&f, 1, read.commandSeq);
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK); // Exact reauthorization replay.
+    f.command = read;
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_SESSION); // Retired transport envelope.
+    f.command.sessionEpoch = f.binding.leases[0];
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK); // Existing successful read, not a second cursor advance.
+    EXPECT(!memcmp(trainer, (const void *)gMultiplayerBattleMailbox.response.data, sizeof(trainer)));
+    Next(&f, MP_BATTLE_RESUME); f.command.length = 20;
+    f.command.data[0] = 0xA7; PutWord(f.command.data + 16, 1);
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_PREPARED);
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+    EXPECT_EQ(Send(&f, MP_BATTLE_KEEP), MP_BATTLE_OK);
+    Next(&f, MP_BATTLE_SUSPEND); EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+    Next(&f, MP_BATTLE_RESUME); f.command.length = 20;
+    f.command.data[0] = 0xA7; PutWord(f.command.data + 16, 1);
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_SESSION); // Prior quorum cannot thaw a second loss.
+    ResumeAuthorization(&f, 1, f.lastSuccessfulSequence);
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_ORDER);
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_SUSPENDED);
+    ResumeAuthorization(&f, 2, f.lastSuccessfulSequence);
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+    Next(&f, MP_BATTLE_RESUME); f.command.length = 20;
+    f.command.data[0] = 0xA7; PutWord(f.command.data + 16, 2);
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+    TearDown(&f);
+}
+
+TEST("Multiplayer resume: replacement cores, changed parties of trainers, stale epochs and unarmed failures remain fenced")
+{
+    struct ChannelFixture f;
+    FullMultiBinding(&f, 0);
+    Next(&f, MP_BATTLE_SUSPEND); EXPECT_EQ(SubmitResume(&f), MP_BATTLE_UNSAFE);
+    EXPECT_EQ(Send(&f, MP_BATTLE_ARM_RESUME), MP_BATTLE_OK);
+    Next(&f, MP_BATTLE_SUSPEND); EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+    for (u32 i = 0; i < 4; i++) f.binding.leases[i] += 10;
+    f.command.sessionEpoch = f.binding.leases[0];
+    ResumeAuthorization(&f, 1, f.lastSuccessfulSequence);
+    f.command.data[96]++; // Original local core incarnation is immutable.
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_SESSION);
+    ResumeAuthorization(&f, 1, f.lastSuccessfulSequence);
+    f.command.data[16]++;
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_SESSION);
+    ResumeAuthorization(&f, 1, f.lastSuccessfulSequence + 1);
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_SESSION);
+    ResumeAuthorization(&f, 1, f.lastSuccessfulSequence);
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+    ResumeAuthorization(&f, 1, f.lastSuccessfulSequence); f.command.data[116]++;
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_ORDER);
+    Next(&f, MP_BATTLE_RESUME); f.command.length = 20; f.command.data[0] = 0xA8;
+    PutWord(f.command.data + 16, 1);
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_SESSION);
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_SUSPENDED);
+    MultiplayerBattle_FailNative();
+    Next(&f, MP_BATTLE_SUSPEND); EXPECT_EQ(SubmitResume(&f), MP_BATTLE_UNSAFE);
+    TearDown(&f);
+    FullMultiBinding(&f, 0);
+    for (u32 i = 0; i < MULTIPLAYER_BATTLE_DEADLINE; i++) MultiplayerBattle_Tick();
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_EXPIRED);
+    Next(&f, MP_BATTLE_SUSPEND); EXPECT_EQ(SubmitResume(&f), MP_BATTLE_UNSAFE);
+    TearDown(&f);
+}
+
+TEST("Multiplayer resume: initial opt-in binding arms suspension atomically before any follow-up command")
+{
+    struct ChannelFixture f;
+    SetUp(&f, 4, 0);
+    f.binding.mode = f.command.phase = MP_BATTLE_PHASE_FULL_MULTI;
+    f.binding.reserved = 1;
+    memcpy(f.command.data, &f.binding, sizeof(f.binding));
+    Bind(&f);
+    for (u32 i = 0; i < MULTIPLAYER_BATTLE_DEADLINE; i++) MultiplayerBattle_Tick();
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_SUSPENDED);
+    Next(&f, MP_BATTLE_RESUME_QUERY); EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+    EXPECT_EQ(Word(gMultiplayerBattleMailbox.response.data + 64), MP_BATTLE_SUSPENDED | (1 << 8) | (MP_BATTLE_CHANNEL << 16));
+    EXPECT_EQ(Word(gMultiplayerBattleMailbox.response.data + 24), 1);
+    TearDown(&f);
+}
+
+TEST("Multiplayer admission: exact original safe field stays held through disconnect and is consumed only by its full BIND")
+{
+    struct ChannelFixture f;
+    struct MultiplayerSaveControl save = {0};
+    struct MultiplayerBattleControl admission;
+    struct Pokemon party[6];
+    SetUp(&f, 4, 0);
+    f.binding.mode = f.command.phase = MP_BATTLE_PHASE_FULL_MULTI; f.binding.reserved = 1;
+    save.incarnation = f.command.incarnation; save.sessionEpoch = f.command.sessionEpoch;
+    save.commandSeq = 1; save.requestId[0] = 5; save.totalSize = 131072; save.opcode = MP_SAVE_BIND;
+    gMultiplayerSaveMailbox.command = save; gMultiplayerSaveMailbox.commandGeneration = 2;
+    MultiplayerSave_Tick(); EXPECT_EQ(gMultiplayerSaveMailbox.response.status, MP_SAVE_OK);
+    memcpy(party, gParties[B_TRAINER_PLAYER], sizeof(party));
+    Next(&f, MP_BATTLE_ADMIT); f.command.length = 48;
+    memcpy(f.command.data, f.binding.generation, 16); memcpy(f.command.data + 16, f.binding.players[0], 16);
+    f.command.data[32] = 91;
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK); admission = f.command;
+    EXPECT_EQ(Word(gMultiplayerBattleMailbox.response.data), 129);
+    EXPECT_EQ(Word(gMultiplayerBattleMailbox.response.data + 24), 0);
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_ADMITTING);
+    EXPECT(MultiplayerBattle_PauseClocks()); EXPECT(MultiplayerBattle_SkipCallbacks());
+    EXPECT(gSoftResetDisabled); EXPECT(!MultiplayerSave_FieldReady()); EXPECT(!MultiplayerOwnership_CanSaveParty());
+    for (u32 i = 0; i < MULTIPLAYER_BATTLE_DEADLINE * 2; i++) MultiplayerBattle_Tick();
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_ADMITTING);
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK); // Lost admission receipt is inert.
+    f.command.data[32]++;
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_SESSION);
+    EXPECT(!memcmp(party, gParties[B_TRAINER_PLAYER], sizeof(party)));
+    Next(&f, MP_BATTLE_BIND); f.command.commandSeq = 1;
+    f.command.length = sizeof(f.binding); memcpy(f.command.data, &f.binding, sizeof(f.binding));
+    f.command.data[0]++;
+    EXPECT_EQ(Submit(&f), MP_BATTLE_SESSION);
+    memcpy(f.command.data, &f.binding, sizeof(f.binding));
+    // A renewed authenticated transport cannot reset the original sequence base.
+    f.command.sessionEpoch += 10; f.binding.leases[0] += 10;
+    memcpy(f.command.data, &f.binding, sizeof(f.binding));
+    EXPECT_EQ(Submit(&f), MP_BATTLE_OK);
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_CHANNEL);
+    EXPECT_EQ(Word(gMultiplayerBattleMailbox.response.data + 24), 1);
+    f.command = admission; EXPECT_EQ(SubmitResume(&f), MP_BATTLE_SESSION);
+    TearDown(&f);
+}
+
+TEST("Multiplayer terminal: RELEASE remains field held until exact retirement and registered save handoff")
+{
+    struct ChannelFixture f;
+    struct LinkBattlerHeader header = {0};
+    struct MultiplayerBattleControl release, retired, handoff;
+    struct Pokemon original[6];
+    rng_value_t issued;
+    u8 end[16] = {B_COMM_TO_CONTROLLER, 0, 0, 0, 8, 0, 0, 0, CONTROLLER_ENDLINKBATTLE, B_OUTCOME_WON};
+    FullMultiBinding(&f, 0); EXPECT_EQ(Send(&f, MP_BATTLE_ARM_RESUME), MP_BATTLE_OK);
+    memcpy(original, gParties[B_TRAINER_PLAYER], sizeof(original));
+    StartFullMulti(&f); MultiplayerBattle_InstallNativeRng(); issued = gRngValue;
+    header.versionSignatureHi = 3; header.battleEnigmaBerry.name[0] = EOS;
+    EXPECT(MultiplayerBattle_SendBlock(&header, sizeof(header))); AcknowledgeNativeOutput(&f);
+    for (u32 i = 0; i < 3; i++)
+    {
+        EXPECT(MultiplayerBattle_SendPartyPair(i * 2)); AcknowledgeNativeOutput(&f);
+    }
+    EXPECT(MultiplayerBattle_SendBlock(&issued, sizeof(issued))); AcknowledgeNativeOutput(&f);
+    EXPECT(MultiplayerBattle_SendBlock(end, sizeof(end))); AcknowledgeNativeOutput(&f);
+    gBattleOutcome = B_OUTCOME_WON; gBattleControllerExecFlags = 0;
+    EXPECT(MultiplayerBattle_TryReturnNative());
+    gMain.callback1 = CB1_Overworld; gMain.callback2 = CB2_Overworld; gMain.inBattle = FALSE;
+    EXPECT_EQ(Send(&f, MP_BATTLE_QUERY), MP_BATTLE_OK);
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_FIELD_READY_HELD);
+    Next(&f, MP_BATTLE_RELEASE_SINGLES); f.command.length = 8;
+    PutWord(f.command.data, Crc((const u8 *)original, sizeof(original))); PutWord(f.command.data + 4, B_OUTCOME_WON);
+    EXPECT_EQ(Submit(&f), MP_BATTLE_OK); release = f.command;
+    EXPECT(!MultiplayerBattle_IsActive()); EXPECT(MultiplayerBattle_PauseClocks()); EXPECT(gSoftResetDisabled);
+    EXPECT_EQ(Send(&f, MP_BATTLE_QUERY), MP_BATTLE_OK);
+    EXPECT_EQ(Word(gMultiplayerBattleMailbox.response.data), 257);
+    Next(&f, MP_BATTLE_SUSPEND); EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+    ResumeAuthorization(&f, 1, release.commandSeq); EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+    Next(&f, MP_BATTLE_RESUME); f.command.length = 20; f.command.data[0] = 0xA7; PutWord(f.command.data + 16, 1);
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+    EXPECT(MultiplayerBattle_PauseClocks()); // Quorum does not retire an unsettled result.
+    Next(&f, MP_BATTLE_HANDOFF); f.command.length = 28;
+    memcpy(f.command.data, f.binding.generation, 16); PutWord(f.command.data + 16, release.commandSeq);
+    memcpy(f.command.data + 20, release.data, 8);
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_ORDER);
+    f.command.opcode = MP_BATTLE_RETIRE; f.command.data[20] ^= 1;
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_SESSION);
+    f.command.data[20] ^= 1; EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK); retired = f.command;
+    EXPECT_EQ(gMultiplayerBattleMailbox.response.length, 28);
+    EXPECT(MultiplayerBattle_PauseClocks()); EXPECT(MultiplayerSave_FieldReady());
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+    EXPECT_EQ(Send(&f, MP_BATTLE_QUERY), MP_BATTLE_OK);
+    EXPECT_EQ(Word(gMultiplayerBattleMailbox.response.data), 513);
+    f.command = retired; f.command.opcode = MP_BATTLE_HANDOFF;
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK); handoff = f.command;
+    EXPECT(!MultiplayerBattle_PauseClocks()); EXPECT(!gSoftResetDisabled);
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+    f.command = retired; EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+    EXPECT(!MultiplayerBattle_PauseClocks()); // Late retirement retry cannot recreate the old hold.
+    for (u32 i = 0; i < MULTIPLAYER_BATTLE_DEADLINE * 2; i++) MultiplayerBattle_Tick();
+    EXPECT(!MultiplayerBattle_PauseClocks());
+    Next(&f, MP_BATTLE_BIND); f.command.battleId[0]++; f.binding.generation[0]++;
+    f.command.length = sizeof(f.binding); memcpy(f.command.data, &f.binding, sizeof(f.binding));
+    EXPECT_EQ(Submit(&f), MP_BATTLE_OK);
+    f.command = handoff; EXPECT_EQ(SubmitResume(&f), MP_BATTLE_SESSION);
+    EXPECT(MultiplayerBattle_IsActive());
+    TearDown(&f);
+}
