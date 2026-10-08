@@ -5,6 +5,7 @@
 #include "multiplayer_ownership.h"
 #include "battle.h"
 #include "battle_controllers.h"
+#include "battle_message.h"
 #include "pokemon.h"
 #include "pokemon_storage_system.h"
 #include "main.h"
@@ -36,6 +37,7 @@ struct ChannelFixture {
     MainCallback savedCallback;
     rng_value_t rng, rng2;
     u32 battleFlags;
+    u32 controllerExecFlags;
     u16 linkType;
     struct LinkPlayer players[4];
     struct MapHeader header;
@@ -45,6 +47,7 @@ struct ChannelFixture {
     u32 generation;
     u32 lastSuccessfulSequence;
     u8 wireless, received;
+    u8 attacker, target, effect, absent, outcome;
     bool8 spriteInUse, resetDisabled;
 };
 
@@ -107,6 +110,9 @@ static void SetUp(struct ChannelFixture *f, u8 count, u8 local)
     f->cb1 = gMain.callback1; f->cb2 = gMain.callback2;
     f->savedCallback = gMain.savedCallback; f->rng = gRngValue; f->rng2 = gRng2Value;
     f->battleFlags = gBattleTypeFlags; f->linkType = gLinkType;
+    f->controllerExecFlags = gBattleControllerExecFlags;
+    f->attacker = gBattlerAttacker; f->target = gBattlerTarget; f->effect = gEffectBattler;
+    f->absent = gAbsentBattlerFlags; f->outcome = gBattleOutcome;
     memcpy(f->players, gLinkPlayers, sizeof(f->players));
     f->header = gMapHeader; f->avatar = gPlayerAvatar; f->object = gObjectEvents[0];
     f->rfu = gRfuLinkStatus; f->wireless = gWirelessCommType;
@@ -166,6 +172,9 @@ static void TearDown(struct ChannelFixture *f)
     gMain.callback1 = f->cb1; gMain.callback2 = f->cb2;
     gMain.savedCallback = f->savedCallback; gRngValue = f->rng; gRng2Value = f->rng2;
     gBattleTypeFlags = f->battleFlags; gLinkType = f->linkType; gMain.inBattle = FALSE;
+    gBattleControllerExecFlags = f->controllerExecFlags;
+    gBattlerAttacker = f->attacker; gBattlerTarget = f->target; gEffectBattler = f->effect;
+    gAbsentBattlerFlags = f->absent; gBattleOutcome = f->outcome;
     memcpy(gLinkPlayers, f->players, sizeof(f->players));
     gMapHeader = f->header; gPlayerAvatar = f->avatar; gObjectEvents[0] = f->object;
     gRfuLinkStatus = f->rfu; gWirelessCommType = f->wireless;
@@ -229,6 +238,26 @@ static void TrainerAndAck(struct ChannelFixture *f)
     f->command.kind = MP_BATTLE_KIND_TRAINER; f->command.totalSize = sizeof(peer);
     f->command.length = sizeof(peer); memcpy(f->command.data, &peer, sizeof(peer));
     EXPECT_EQ(Submit(f), MP_BATTLE_OK);
+}
+
+static void AcknowledgeNativeOutput(struct ChannelFixture *f)
+{
+    u32 sequence, size, crc, kind, offset;
+    EXPECT_EQ(Send(f, MP_BATTLE_QUERY), MP_BATTLE_OK);
+    sequence = Word(gMultiplayerBattleMailbox.response.data + 28);
+    kind = Word(gMultiplayerBattleMailbox.response.data + 32);
+    size = Word(gMultiplayerBattleMailbox.response.data + 36);
+    crc = Word(gMultiplayerBattleMailbox.response.data + 40);
+    for (offset = 0; offset < size; offset += 128)
+    {
+        Next(f, MP_BATTLE_READ_OUT); f->command.blockSeq = sequence;
+        f->command.kind = kind; f->command.totalSize = size; f->command.offset = offset;
+        EXPECT_EQ(Submit(f), MP_BATTLE_OK);
+    }
+    Next(f, MP_BATTLE_ACK_OUT); f->command.blockSeq = sequence;
+    f->command.kind = kind; f->command.totalSize = size; f->command.offset = size;
+    f->command.length = 8; PutWord(f->command.data, crc); PutWord(f->command.data + 4, 2);
+    EXPECT_EQ(Submit(f), MP_BATTLE_OK); ResetBlockReceivedFlag(0);
 }
 
 TEST("Multiplayer native singles: canonical preparation mismatches refuse before party or RNG changes")
@@ -343,6 +372,79 @@ TEST("Multiplayer native singles: fresh action sentinel canonicalizes stale item
     MultiplayerBattle_NoteController(wire, 0);
     wire[0] = B_COMM_TO_ENGINE; wire[8] = CONTROLLER_TWORETURNVALUES;
     EXPECT(!MultiplayerBattle_ValidateController(wire, size, 0)); // NONE is never a chosen action reply.
+    TearDown(&f);
+}
+
+TEST("Multiplayer native singles: only unused effect metadata canonicalizes a native loop sentinel")
+{
+    struct ChannelFixture f;
+    u8 payload[80] = {CONTROLLER_PRINTSTRING};
+    u8 wire[256];
+    u16 size;
+    NativeBinding(&f); Preparation(&f); EXPECT_EQ(Submit(&f), MP_BATTLE_OK);
+    TrainerAndAck(&f); EXPECT_EQ(Send(&f, MP_BATTLE_START_SINGLES), MP_BATTLE_OK);
+    gBattlerAttacker = 1; gBattlerTarget = 0; gAbsentBattlerFlags = 0; gEffectBattler = 2;
+    payload[2] = STRINGID_EMPTYSTRING3 & 0xFF; payload[3] = STRINGID_EMPTYSTRING3 >> 8;
+    payload[4 + offsetof(struct BattleMsgData, textBuffs)] = EOS;
+    payload[4 + offsetof(struct BattleMsgData, textBuffs) + 18] = EOS;
+    payload[4 + offsetof(struct BattleMsgData, textBuffs) + 36] = EOS;
+    size = MultiplayerBattle_PackController(wire, 1, B_COMM_TO_CONTROLLER, sizeof(payload), payload);
+    EXPECT_EQ(wire[7], 0); EXPECT(MultiplayerBattle_ValidateController(wire, size, 0));
+    payload[2] = STRINGID_PKMNFLINCHED & 0xFF; payload[3] = STRINGID_PKMNFLINCHED >> 8;
+    size = MultiplayerBattle_PackController(wire, 1, B_COMM_TO_CONTROLLER, sizeof(payload), payload);
+    EXPECT_EQ(wire[7], 2); EXPECT(!MultiplayerBattle_ValidateController(wire, size, 0));
+    memset(payload, 0, sizeof(payload)); payload[0] = CONTROLLER_BATTLEANIMATION;
+    size = MultiplayerBattle_PackController(wire, 1, B_COMM_TO_CONTROLLER, 12, payload);
+    EXPECT_EQ(wire[7], 2); EXPECT(!MultiplayerBattle_ValidateController(wire, size, 0));
+    memset(payload, 0, sizeof(payload)); payload[0] = CONTROLLER_CHOOSEACTION;
+    size = MultiplayerBattle_PackController(wire, 0, B_COMM_TO_CONTROLLER, 4, payload);
+    EXPECT_EQ(wire[7], 0); EXPECT(MultiplayerBattle_ValidateController(wire, size, 0));
+    MultiplayerBattle_NoteController(wire, 0);
+    payload[0] = CONTROLLER_TWORETURNVALUES;
+    size = MultiplayerBattle_PackController(wire, 0, B_COMM_TO_ENGINE, 6, payload);
+    EXPECT_EQ(wire[2], 0); EXPECT_EQ(wire[3], 0); EXPECT_EQ(wire[6], 0); EXPECT_EQ(wire[7], 0);
+    EXPECT(MultiplayerBattle_ValidateController(wire, size, 0)); MultiplayerBattle_NoteController(wire, 0);
+    payload[0] = 0;
+    size = MultiplayerBattle_PackController(wire, 0, B_COMM_CONTROLLER_IS_DONE, 4, payload);
+    EXPECT_EQ(wire[2], 0); EXPECT_EQ(wire[3], 0); EXPECT_EQ(wire[6], 0); EXPECT_EQ(wire[7], 0);
+    EXPECT(MultiplayerBattle_ValidateController(wire, size, 0));
+    TearDown(&f);
+}
+
+TEST("Multiplayer native singles: return publishes restoration only after field readiness and clears the block descriptor")
+{
+    struct ChannelFixture f;
+    struct LinkBattlerHeader header = {0};
+    struct Pokemon original[6];
+    rng_value_t personal, issued;
+    u8 end[16] = {B_COMM_TO_CONTROLLER, 0, 0, 0, 8, 0, 0, 0, CONTROLLER_ENDLINKBATTLE, B_OUTCOME_WON};
+    u32 i;
+    NativeBinding(&f); memcpy(original, gParties[B_TRAINER_PLAYER], sizeof(original)); personal = gRngValue;
+    Preparation(&f); memcpy(&issued, f.command.data + 16, sizeof(issued)); EXPECT_EQ(Submit(&f), MP_BATTLE_OK);
+    TrainerAndAck(&f); EXPECT_EQ(Send(&f, MP_BATTLE_START_SINGLES), MP_BATTLE_OK);
+    MultiplayerBattle_InstallNativeRng();
+    header.versionSignatureHi = 3; header.battleEnigmaBerry.name[0] = EOS;
+    EXPECT(MultiplayerBattle_SendBlock(&header, sizeof(header))); AcknowledgeNativeOutput(&f);
+    for (i = 0; i < 3; i++)
+    {
+        EXPECT(MultiplayerBattle_SendPartyPair(i * 2)); AcknowledgeNativeOutput(&f);
+    }
+    EXPECT(MultiplayerBattle_SendBlock(&issued, sizeof(issued))); AcknowledgeNativeOutput(&f);
+    EXPECT(MultiplayerBattle_SendBlock(end, sizeof(end))); AcknowledgeNativeOutput(&f);
+    gBattleOutcome = B_OUTCOME_WON; gBattleControllerExecFlags = 0;
+    gParties[B_TRAINER_PLAYER][0].hp = 1;
+    EXPECT(MultiplayerBattle_TryReturnNative());
+    EXPECT_EQ(Send(&f, MP_BATTLE_QUERY), MP_BATTLE_OK);
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_RETURNING);
+    EXPECT(!(Word(gMultiplayerBattleMailbox.response.data) & 32));
+    EXPECT(!memcmp(&issued, &gRngValue, sizeof(issued)));
+    EXPECT(!memcmp(original, gParties[B_TRAINER_PLAYER], sizeof(original)));
+    for (i = 28; i <= 44; i += 4) EXPECT_EQ(Word(gMultiplayerBattleMailbox.response.data + i), 0);
+    gMain.callback1 = CB1_Overworld; gMain.callback2 = CB2_Overworld; gMain.inBattle = FALSE;
+    EXPECT_EQ(Send(&f, MP_BATTLE_QUERY), MP_BATTLE_OK);
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_FIELD_READY_HELD);
+    EXPECT(Word(gMultiplayerBattleMailbox.response.data) & 32);
+    EXPECT(!memcmp(&personal, &gRngValue, sizeof(personal)));
     TearDown(&f);
 }
 

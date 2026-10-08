@@ -9,6 +9,7 @@
 #include "battle.h"
 #include "battle_main.h"
 #include "battle_controllers.h"
+#include "battle_message.h"
 #include "battle_setup.h"
 #include "overworld.h"
 #include "load_save.h"
@@ -405,6 +406,17 @@ u16 MultiplayerBattle_PackController(u8 *dest, u8 battler, u8 bufferId, u16 size
     memset(dest, 0, padded + 8);
     dest[0] = bufferId; dest[1] = battler; dest[2] = gBattlerAttacker; dest[3] = gBattlerTarget;
     dest[4] = padded; dest[5] = padded >> 8; dest[6] = gAbsentBattlerFlags; dest[7] = gEffectBattler;
+    // Replies/DONE never consume these auxiliary globals. Native loops may
+    // leave a past-the-end effect index before an empty print or selection UI;
+    // these audited handlers do not consume it either. Meaningful print and
+    // animation metadata must still pass the strict incoming index bounds.
+    if (bufferId == B_COMM_TO_ENGINE || bufferId == B_COMM_CONTROLLER_IS_DONE)
+        dest[2] = dest[3] = dest[6] = dest[7] = 0;
+    else if (dest[7] >= 2 && (data[0] == CONTROLLER_CHOOSEACTION || data[0] == CONTROLLER_CHOOSEMOVE
+          || data[0] == CONTROLLER_CHOOSEPOKEMON || ((data[0] == CONTROLLER_PRINTSTRING
+          || data[0] == CONTROLLER_PRINTSTRINGPLAYERONLY) && size >= 4
+          && (data[2] | data[3] << 8) == STRINGID_EMPTYSTRING3)))
+        dest[7] = 0;
     if (bufferId == B_COMM_CONTROLLER_IS_DONE)
     {
         if (size != 4 || *data != sBinding.localSlot)
@@ -528,7 +540,7 @@ bool32 MultiplayerBattle_TryReturnNative(void)
     {
         MultiplayerBattle_FailNative(); return FALSE;
     }
-    sRestored = TRUE; sState = MP_BATTLE_RETURNING;
+    sState = MP_BATTLE_RETURNING;
     // Result-held queries have no block descriptor. There are no further native
     // sends before release, so retire the complete descriptor together.
     sOutSeq = sOutCrc = sReadOffset = sOutSize = sOutKind = 0;
@@ -559,6 +571,7 @@ static void FinishNativeReturn(void)
         }
         gRngValue = sPersonalRng; gRng2Value = sPersonalRng2;
         gBattleTypeFlags = sSavedBattleFlags; gMain.savedCallback = sSavedCallback;
+        sRestored = TRUE;
         sState = MP_BATTLE_FIELD_READY_HELD;
     }
 }
