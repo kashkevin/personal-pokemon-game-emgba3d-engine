@@ -241,6 +241,9 @@ u32 MultiplayerLocalReset_HandlePlayerInput(enum BattlerId battler)
     if (sLocalResetRequested && !sLocalResetConfirming)
     {
         sLocalResetRequested = FALSE; sLocalResetConfirming = TRUE; sLocalResetCursor = 1;
+        // The action menu scrolls BG0 to its second page; native message and
+        // Yes/No windows live on the first page.
+        gBattle_BG0_X = gBattle_BG0_Y = 0;
         HandleBattleWindow(YESNOBOX_X_Y, 0);
         BattlePutTextOnWindow(sLocalResetPrompt, B_WIN_MSG);
         BattlePutTextOnWindow(gText_BattleYesNoChoice, B_WIN_YESNO);
