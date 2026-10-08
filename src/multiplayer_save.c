@@ -567,6 +567,19 @@ static void Handle(const struct MultiplayerSaveControl *command)
     switch (command->opcode)
     {
     case MP_SAVE_BEGIN_TRADE_EXPORT:
+        if (!command->revision || command->revision >= 0x7FFFFFFF) { status = MP_SAVE_ORDER; break; }
+        if (sTradeActive && !sTradeImportStarted && (sState == MP_SAVE_EXPORTING || sState == MP_SAVE_TRADE_HELD))
+        {
+            if (command->length || command->offset) { status = MP_SAVE_MALFORMED; break; }
+            // Restart a lost read buffer from the same frozen Flash snapshot.
+            // Never save again, mint again, or change the prepared revision.
+            sState = MP_SAVE_EXPORTING; sOffset = 0; sCrc = 0;
+            PutU32(data, gSaveCounter); PutU32(data + 4, gLastWrittenSector);
+            memcpy(data + 8, &gRngValue, 16); memcpy(data + 24, &gRng2Value, 16);
+            PublishResponse(command, MP_SAVE_OK, data, 40, 0); return;
+        }
+        // A fresh trade uses the same native save admission as ordinary export.
+        __attribute__((fallthrough));
     case MP_SAVE_BEGIN_EXPORT:
         if (sState != MP_SAVE_BOUND) { status = MP_SAVE_BUSY; break; }
         if (command->length || command->offset) { status = MP_SAVE_MALFORMED; break; }

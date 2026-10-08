@@ -25,6 +25,8 @@
 #include "constants/layouts.h"
 #include "test/test.h"
 
+static const u8 sTrainerName[] = _("TEST");
+
 struct TradeFixture {
     struct MultiplayerSaveControl command;
     MainCallback cb1, cb2;
@@ -100,9 +102,10 @@ static void SetUp(struct TradeFixture *f)
     gSaveBlock1Ptr->location.mapGroup = MAP_GROUP(MAP_OLDALE_TOWN);
     gSaveBlock1Ptr->location.mapNum = MAP_NUM(MAP_OLDALE_TOWN);
     gSaveBlock1Ptr->mapLayoutId = LAYOUT_OLDALE_TOWN;
-    StringCopy(gSaveBlock2Ptr->playerName, _("TEST"));
+    StringCopy(gSaveBlock2Ptr->playerName, sTrainerName);
     gSaveBlock2Ptr->playerTrainerId[0] = 42;
     CreateMon(&gParties[B_TRAINER_PLAYER][0], SPECIES_TORCHIC, 7, 0, OTID_STRUCT_PLAYER_ID);
+    CalculateMonStats(&gParties[B_TRAINER_PLAYER][0]);
     CalculatePlayerPartyCount();
     FieldCallbacks(); gMain.inBattle = FALSE;
     gMapHeader.mapLayout = (const void *)1; gMapHeader.mapLayoutId = LAYOUT_OLDALE_TOWN;
@@ -210,6 +213,12 @@ TEST("Multiplayer trade: unsafe admission refuses before freezing or assigning")
 {
     struct TradeFixture f;
     SetUp(&f);
+    f.command.revision = 0;
+    EXPECT_EQ(Send(&f, MP_SAVE_BEGIN_TRADE_EXPORT, 0), MP_SAVE_ORDER);
+    f.command.revision = 0x7FFFFFFF;
+    EXPECT_EQ(Send(&f, MP_SAVE_BEGIN_TRADE_EXPORT, 0), MP_SAVE_ORDER);
+    EXPECT(!MultiplayerSave_IsHeld()); EXPECT(!gSoftResetDisabled);
+    f.command.revision = 7;
     gMain.inBattle = TRUE;
     EXPECT_EQ(Send(&f, MP_SAVE_BEGIN_TRADE_EXPORT, 0), MP_SAVE_UNSAFE);
     EXPECT(!MultiplayerSave_IsHeld()); EXPECT(!gSoftResetDisabled);
@@ -291,6 +300,34 @@ TEST("Multiplayer trade: export acknowledgment stays held and newer lease rebind
     TearDown(&f);
 }
 
+TEST("Multiplayer trade: restarted export rereads the same frozen snapshot without saving or consuming RNG")
+{
+    struct TradeFixture f;
+    rng_value_t rng, rng2;
+    u32 crc;
+    u8 first[128];
+    SetUp(&f); BeginTrade(&f);
+    rng = gRngValue; rng2 = gRng2Value;
+    EXPECT_EQ(Send(&f, MP_SAVE_READ, 0), MP_SAVE_OK);
+    memcpy(first, (const void *)gMultiplayerSaveMailbox.response.data, 128);
+    EXPECT_EQ(Send(&f, MP_SAVE_BEGIN_TRADE_EXPORT, 0), MP_SAVE_OK);
+    EXPECT_EQ(Word(gMultiplayerSaveMailbox.response.data), f.counter);
+    EXPECT_EQ(gSaveCounter, f.counter);
+    EXPECT_EQ(Send(&f, MP_SAVE_READ, 0), MP_SAVE_OK);
+    EXPECT_EQ(memcmp(first, (const void *)gMultiplayerSaveMailbox.response.data, 128), 0);
+    EXPECT_EQ(Send(&f, MP_SAVE_BEGIN_TRADE_EXPORT, 0), MP_SAVE_OK);
+    crc = ReadAll(&f, 0);
+    EXPECT_EQ(Send(&f, MP_SAVE_END, 0), MP_SAVE_OK);
+    EXPECT_EQ(Word(gMultiplayerSaveMailbox.response.data), crc);
+    EXPECT_EQ(Send(&f, MP_SAVE_BEGIN_TRADE_EXPORT, 0), MP_SAVE_OK);
+    EXPECT_EQ(ReadAll(&f, 0), crc);
+    EXPECT_EQ(gSaveCounter, f.counter); EXPECT_EQ(gLastWrittenSector, f.rotation);
+    EXPECT_EQ(memcmp(&rng, &gRngValue, 16), 0); EXPECT_EQ(memcmp(&rng2, &gRng2Value, 16), 0);
+    EXPECT_EQ(Send(&f, MP_SAVE_END, 0), MP_SAVE_OK);
+    EXPECT_EQ(Send(&f, MP_SAVE_ABORT_TRADE, 0), MP_SAVE_OK);
+    TearDown(&f);
+}
+
 TEST("Multiplayer trade: staging failure stays held and exact postimage retry requires verified final release")
 {
     struct TradeFixture f;
@@ -313,7 +350,12 @@ TEST("Multiplayer trade: staging failure stays held and exact postimage retry re
     EXPECT_EQ(Send(&f, MP_SAVE_ABORT_TRADE, 0), MP_SAVE_ORDER);
     EXPECT_EQ(BeginImport(&f), MP_SAVE_OK);
     for (i = 0; i < 131072; i += 128)
-        EXPECT_EQ(WriteSource(&f, i, FALSE), MP_SAVE_OK);
+    {
+        u8 status = WriteSource(&f, i, FALSE);
+        if (status != MP_SAVE_OK)
+            Test_MgbaPrintf("write offset %d status %d state %d", i, status, gMultiplayerSaveMailbox.state);
+        EXPECT_EQ(status, MP_SAVE_OK);
+    }
     Send(&f, MP_SAVE_COMMIT, 0);
     EXPECT_EQ(gMultiplayerSaveMailbox.state, MP_SAVE_FINALIZING);
     for (i = 0; i < 14; i++) MultiplayerSave_Tick();

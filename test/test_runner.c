@@ -4,6 +4,7 @@
 #include "gpu_regs.h"
 #include "load_save.h"
 #include "main.h"
+#include "multiplayer_save.h"
 #include "malloc.h"
 #include "random.h"
 #include "task.h"
@@ -722,6 +723,9 @@ static NAKED void JumpToAgbMainLoop(void)
 
 static void ReinitCallbacks(void)
 {
+    // A failed held-mailbox assertion must not freeze the reporting callback.
+    MultiplayerSave_Init();
+    gSoftResetDisabled = FALSE;
     gMain.callback1 = NULL;
     SetMainCallback2(CB2_TestRunner);
     gMain.vblankCallback = NULL;
