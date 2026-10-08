@@ -99,6 +99,7 @@ struct MultiplayerBattlePreparation {
 extern const u32 gMultiplayerBattleAbiVersion;
 extern const u32 gMultiplayerBattleResumeAbiVersion;
 extern volatile struct MultiplayerBattleMailbox gMultiplayerBattleMailbox;
+extern volatile u32 gMultiplayerBattleHoldFlags;
 void MultiplayerBattle_Init(void);
 void MultiplayerBattle_Tick(void);
 bool32 MultiplayerBattle_IsActive(void);

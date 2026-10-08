@@ -561,7 +561,9 @@ static void Handle(const struct MultiplayerSaveControl *command)
     u8 status = MP_SAVE_OK;
     // The diagnostic channel owns the field hold. Neither rebinding nor a
     // save cancellation may invalidate its ownership or release that hold.
-    if (MultiplayerBattle_IsActive() && command->opcode != MP_SAVE_QUERY && command->opcode != MP_SAVE_QUERY_TRADE
+    if ((MultiplayerBattle_IsActive() || (MultiplayerMenu_IsBattleAdmissionHeld()
+         && command->opcode != MP_SAVE_BEGIN_EMERGENCY_EXPORT))
+     && command->opcode != MP_SAVE_QUERY && command->opcode != MP_SAVE_QUERY_TRADE
      && command->opcode != MP_SAVE_QUERY_EMERGENCY)
     {
         struct MultiplayerSaveControl cached = sCachedResponse;
@@ -720,6 +722,18 @@ static void Handle(const struct MultiplayerSaveControl *command)
      && command->opcode != MP_SAVE_QUERY_TRADE && command->opcode != MP_SAVE_QUERY)
     {
         PublishResponse(command, MP_SAVE_TIMEOUT, NULL, 0, sOffset); return;
+    }
+    if (command->opcode == MP_SAVE_BEGIN_EMERGENCY_EXPORT && sState == MP_SAVE_BOUND
+     && !sTradeActive && !sEmergencyActive && MultiplayerMenu_IsBattleAdmissionHeld()
+     && !command->length && !command->offset && command->revision && command->revision <= 0x7FFFFFFF)
+    {
+        // Enter already owns an immutable field hold before IPC. Preserve all
+        // save sequence/cache/grant/export/RNG state so exact ADMIT can consume
+        // that hold after its durable provisional identity has been published.
+        struct MultiplayerSaveControl cached = sCachedResponse;
+        PublishResponse(command, MP_SAVE_BATTLE_ADMISSION, NULL, 0, sOffset);
+        sCachedResponse = cached;
+        return;
     }
     sLastSeq = command->commandSeq; sLastCommand = *command;
     if (!sTradeActive || (command->opcode != MP_SAVE_QUERY && command->opcode != MP_SAVE_QUERY_TRADE))

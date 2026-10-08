@@ -1,5 +1,7 @@
 #include "global.h"
 #include "multiplayer_save.h"
+#include "multiplayer_menu.h"
+#include "multiplayer_battle.h"
 #include "multiplayer_ownership.h"
 #include "pokemon.h"
 #include "pokemon_storage_system.h"
@@ -430,4 +432,39 @@ TEST("Multiplayer emergency: promotion cannot steal a foreign ordinary or trade 
     EXPECT_EQ(Send(&f, MP_SAVE_QUERY_EMERGENCY, 0), MP_SAVE_OK);
     EXPECT_EQ(Word(gMultiplayerSaveMailbox.response.data), 0);
     TearDown(&f);
+}
+
+TEST("Multiplayer emergency: Enter latch refuses BEGIN without changing save ownership or clocks")
+{
+    struct EmergencyFixture f;
+    struct MultiplayerMenuScreen screen;
+    u32 counter, ownership, party;
+    u8 rng[16], rng2[16];
+    SetUp(&f); MultiplayerMenu_Init(); EXPECT(MultiplayerMenu_TestBegin());
+    memset(&screen, 0, sizeof(screen));
+    screen.ackRequest = 1; screen.screen = 1; screen.count = 1;
+    screen.rows[0].action = 1; screen.reserved[0] = 1;
+    gMultiplayerMenuMailbox.screen = screen; gMultiplayerMenuMailbox.inboundGeneration = 2;
+    MultiplayerMenu_TestReadScreen(); MultiplayerMenu_TestInput(A_BUTTON);
+    EXPECT(MultiplayerMenu_IsBattleAdmissionHeld());
+    counter = gSaveCounter;
+    ownership = TestCrc(0, (const u8 *)&gSaveBlock3Ptr->ownership, sizeof(gSaveBlock3Ptr->ownership));
+    party = TestCrc(0, (const u8 *)&gParties[B_TRAINER_PLAYER], sizeof(gParties[B_TRAINER_PLAYER]));
+    memcpy(rng, &gRngValue, 16); memcpy(rng2, &gRng2Value, 16);
+    EXPECT_EQ(Send(&f, MP_SAVE_BEGIN_EMERGENCY_EXPORT, 0), MP_SAVE_BATTLE_ADMISSION);
+    EXPECT_EQ(Submit(&f), MP_SAVE_BATTLE_ADMISSION); // Exact lost-refusal retry.
+    EXPECT_EQ(gMultiplayerSaveMailbox.state, MP_SAVE_BOUND);
+    EXPECT(!MultiplayerSave_IsHeld()); EXPECT_EQ(gSaveCounter, counter);
+    EXPECT_EQ(TestCrc(0, (const u8 *)&gSaveBlock3Ptr->ownership, sizeof(gSaveBlock3Ptr->ownership)), ownership);
+    EXPECT_EQ(TestCrc(0, (const u8 *)&gParties[B_TRAINER_PLAYER], sizeof(gParties[B_TRAINER_PLAYER])), party);
+    EXPECT_EQ(memcmp(rng, &gRngValue, 16), 0); EXPECT_EQ(memcmp(rng2, &gRng2Value, 16), 0);
+    f.command.sessionEpoch++;
+    EXPECT_EQ(Send(&f, MP_SAVE_BIND, 0), MP_SAVE_BUSY);
+    f.command.sessionEpoch--;
+    EXPECT_EQ(Send(&f, MP_SAVE_CANCEL, 0), MP_SAVE_BUSY);
+    EXPECT_EQ(Send(&f, MP_SAVE_QUERY_EMERGENCY, 0), MP_SAVE_OK);
+    EXPECT_EQ(Word(gMultiplayerSaveMailbox.response.data), 0);
+    EXPECT_EQ(Word(gMultiplayerSaveMailbox.response.data + 4), MP_SAVE_BOUND);
+    EXPECT(MultiplayerBattle_PauseClocks()); EXPECT_EQ(gMultiplayerBattleHoldFlags, 1);
+    MultiplayerMenu_Init(); TearDown(&f);
 }

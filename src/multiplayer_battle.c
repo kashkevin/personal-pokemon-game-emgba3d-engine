@@ -48,6 +48,8 @@ _Static_assert(sizeof(rng_value_t) == 16 && sizeof(struct Pokemon) == 100, "Nati
 const u32 gMultiplayerBattleAbiVersion = MULTIPLAYER_BATTLE_ABI;
 const u32 gMultiplayerBattleResumeAbiVersion = MULTIPLAYER_BATTLE_RESUME_ABI;
 EWRAM_DATA volatile struct MultiplayerBattleMailbox gMultiplayerBattleMailbox = {0};
+// Read-only proof observation; never an authority or command input.
+EWRAM_DATA volatile u32 gMultiplayerBattleHoldFlags = 0;
 static EWRAM_DATA struct MultiplayerBattleBinding sBinding = {0};
 static EWRAM_DATA struct MultiplayerBattleControl sLastCommand = {0};
 static EWRAM_DATA struct MultiplayerBattleControl sCachedResponse = {0};
@@ -148,12 +150,20 @@ static void LatchReleasedWait(void)
     }
 }
 
+static void ObserveHoldFlags(void)
+{
+    gMultiplayerBattleHoldFlags = (MultiplayerMenu_IsBattleAdmissionHeld() ? 1 : 0)
+        | (sState == MP_BATTLE_ADMITTING ? 2 : 0) | (sState == MP_BATTLE_SUSPENDED ? 4 : 0)
+        | (sReleasedWaiting ? 8 : 0) | (sRetiredWaiting ? 16 : 0);
+}
+
 bool32 MultiplayerBattle_PauseClocks(void)
 {
     // RELEASE may have succeeded locally while its acknowledgment was lost.
     // Freeze that exact terminal field on disconnect; reconnect alone cannot
     // thaw it before the original trainers complete a new quorum.
     if (sReleasedResumable && !Multiplayer_IsConnected()) LatchReleasedWait();
+    ObserveHoldFlags();
     return MultiplayerMenu_IsBattleAdmissionHeld() || sReleasedWaiting || sRetiredWaiting || (MultiplayerBattle_IsActive() && sState != MP_BATTLE_RUNNING && sState != MP_BATTLE_RETURNING);
 }
 
@@ -1168,6 +1178,7 @@ void MultiplayerBattle_Init(void)
     memset(&sLastCommand, 0, sizeof(sLastCommand)); memset(&sCachedResponse, 0, sizeof(sCachedResponse));
     memset((void *)&gMultiplayerBattleMailbox, 0, sizeof(gMultiplayerBattleMailbox));
     ClearBlocks();
+    ObserveHoldFlags();
     gMultiplayerBattleMailbox.abiVersion = *(const volatile u32 *)&gMultiplayerBattleAbiVersion;
     gMultiplayerBattleMailbox.byteSize = MULTIPLAYER_BATTLE_SIZE;
     gMultiplayerBattleMailbox.magic = MULTIPLAYER_BATTLE_MAGIC;
@@ -1196,4 +1207,5 @@ void MultiplayerBattle_Tick(void)
         }
     }
     gMultiplayerBattleMailbox.state = sState;
+    ObserveHoldFlags();
 }
