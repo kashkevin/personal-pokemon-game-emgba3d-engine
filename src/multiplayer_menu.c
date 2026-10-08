@@ -123,7 +123,8 @@ static void PrintAscii(const u8 *ascii, u32 capacity, u32 x, u32 y, bool32 disab
 static void Render(void)
 {
     if (sWindow == WINDOW_NONE) return;
-    FillWindowPixelBuffer(sWindow, PIXEL_FILL(1));
+    // Drawing the standard frame clears its pixel buffer. Do it before text.
+    DrawStdWindowFrame(sWindow, FALSE);
     if (!sMultiplayerMenuScreen.screen)
         AddTextPrinterParameterized(sWindow, FONT_NORMAL, sText_Title, 8, 0, TEXT_SKIP_DRAW, NULL);
     else
@@ -139,7 +140,6 @@ static void Render(void)
             AddTextPrinterParameterized(sWindow, FONT_SMALL, sText_Cursor, 4, 44 + row * 14, TEXT_SKIP_DRAW, NULL);
     }
     AddTextPrinterParameterized(sWindow, FONT_SMALL, sMultiplayerMenuScreen.backAction ? sText_Back : sText_Close, 8, 130, TEXT_SKIP_DRAW, NULL);
-    PutWindowTilemap(sWindow); DrawStdWindowFrame(sWindow, FALSE);
     CopyWindowToVram(sWindow, COPYWIN_FULL);
 }
 
