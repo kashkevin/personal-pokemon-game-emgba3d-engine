@@ -24,6 +24,7 @@
 #include "main.h"
 #include "multiplayer_battle.h"
 #include "multiplayer.h"
+#include "multiplayer_menu.h"
 #include "multiplayer_save.h"
 #include "multiplayer_local_reset.h"
 #include "trainer_hill.h"
@@ -119,6 +120,7 @@ void AgbMain(void)
     Multiplayer_Init();
     MultiplayerSave_Init();
     MultiplayerBattle_Init();
+    MultiplayerMenu_Init();
 
     gSoftResetDisabled = FALSE;
 
@@ -143,6 +145,7 @@ void AgbMainLoop(void)
     for (;;)
     {
         ReadKeys();
+        MultiplayerMenu_Tick();
         MultiplayerSave_Tick();
         MultiplayerBattle_Tick();
         Multiplayer_Tick();
@@ -162,7 +165,7 @@ void AgbMainLoop(void)
             DoSoftReset();
         }
 
-        if (MultiplayerSave_SkipCallbacks() || MultiplayerBattle_SkipCallbacks())
+        if (MultiplayerSave_SkipCallbacks() || MultiplayerBattle_SkipCallbacks() || MultiplayerMenu_IsActive())
         {
             // The dedicated mailbox owns the transaction while ordinary field
             // callbacks stay paused. Audio and bridge frame publication continue.
@@ -188,7 +191,7 @@ void AgbMainLoop(void)
             }
         }
 
-        if (!MultiplayerSave_PauseClocks() && !MultiplayerBattle_PauseClocks())
+        if (!MultiplayerSave_PauseClocks() && !MultiplayerBattle_PauseClocks() && !MultiplayerMenu_IsActive())
             PlayTimeCounter_Update();
         MapMusicMain();
         WaitForVBlank();
@@ -403,7 +406,7 @@ static void VBlankIntr(void)
     m4aSoundMain();
     TryReceiveLinkBattleData();
 
-    if (!MultiplayerSave_PauseClocks() && !MultiplayerBattle_PauseClocks() && !gTestRunnerEnabled && (!gMain.inBattle || !(gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_FRONTIER | BATTLE_TYPE_RECORDED))))
+    if (!MultiplayerSave_PauseClocks() && !MultiplayerBattle_PauseClocks() && !MultiplayerMenu_IsActive() && !gTestRunnerEnabled && (!gMain.inBattle || !(gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_FRONTIER | BATTLE_TYPE_RECORDED))))
         AdvanceRandom();
 
     UpdateWirelessStatusIndicatorSprite();

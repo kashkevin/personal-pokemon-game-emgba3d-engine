@@ -2,6 +2,7 @@
 #include "multiplayer_save.h"
 #include "multiplayer.h"
 #include "multiplayer_battle.h"
+#include "multiplayer_menu.h"
 #include "multiplayer_ownership.h"
 #include "multiplayer_local_reset.h"
 #include "event_data.h"
@@ -192,7 +193,7 @@ bool32 MultiplayerSave_PauseClocks(void)
 static bool32 FieldReady(void)
 {
     u32 id = gPlayerAvatar.objectEventId;
-    return !MultiplayerBattle_IsActive() && gMain.callback1 == CB1_Overworld && gMain.callback2 == CB2_Overworld
+    return !MultiplayerMenu_IsActive() && !MultiplayerBattle_IsActive() && gMain.callback1 == CB1_Overworld && gMain.callback2 == CB2_Overworld
         && gSaveBlock1Ptr != NULL && gSaveBlock2Ptr != NULL && gMapHeader.mapLayout != NULL
         && id < OBJECT_EVENTS_COUNT && gObjectEvents[id].active && gObjectEvents[id].isPlayer
         && gObjectEvents[id].spriteId < MAX_SPRITES && gSprites[gObjectEvents[id].spriteId].inUse

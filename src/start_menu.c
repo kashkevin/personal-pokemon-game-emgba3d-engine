@@ -23,6 +23,7 @@
 #include "link.h"
 #include "load_save.h"
 #include "main.h"
+#include "multiplayer_menu.h"
 #include "menu.h"
 #include "new_game.h"
 #include "option_menu.h"
@@ -69,6 +70,10 @@ enum
     MENU_ACTION_PYRAMID_BAG,
     MENU_ACTION_DEBUG,
     MENU_ACTION_DEXNAV,
+    MENU_ACTION_PLAYER_OPTIONS,
+    MENU_ACTION_TRAINER_CARD,
+    MENU_ACTION_PLAYERS,
+    MENU_ACTION_PLAYER_BACK,
 };
 
 // Save status
@@ -90,6 +95,8 @@ EWRAM_DATA static u8 sStartMenuCursorPos = 0;
 EWRAM_DATA static u8 sNumStartMenuActions = 0;
 EWRAM_DATA static u8 sCurrentStartMenuActions[9] = {0};
 EWRAM_DATA static s8 sInitStartMenuData[2] = {0};
+EWRAM_DATA static bool8 sPlayerSubmenu = FALSE;
+EWRAM_DATA static u8 sPlayerReturnCursor = 0;
 
 EWRAM_DATA static u8 (*sSaveDialogCallback)(void) = NULL;
 EWRAM_DATA static u8 sSaveDialogTimer = 0;
@@ -111,6 +118,9 @@ static bool8 StartMenuBattlePyramidRetireCallback(void);
 static bool8 StartMenuBattlePyramidBagCallback(void);
 static bool8 StartMenuDebugCallback(void);
 static bool8 StartMenuDexNavCallback(void);
+static bool8 StartMenuPlayerOptionsCallback(void);
+static bool8 StartMenuPlayersCallback(void);
+static bool8 StartMenuPlayerBackCallback(void);
 
 // Menu callbacks
 static bool8 SaveStartCallback(void);
@@ -188,6 +198,9 @@ static const struct WindowTemplate sWindowTemplate_PyramidPeak = {
 };
 
 static const u8 sText_MenuDebug[] = _("DEBUG");
+static const u8 sText_TrainerCard[] = _("CARD");
+static const u8 sText_Players[] = _("PLAYERS");
+static const u8 sText_PlayerBack[] = _("BACK");
 
 static const struct MenuAction sStartMenuItems[] =
 {
@@ -206,6 +219,10 @@ static const struct MenuAction sStartMenuItems[] =
     [MENU_ACTION_PYRAMID_BAG]     = {gText_MenuBag,     {.u8_void = StartMenuBattlePyramidBagCallback}},
     [MENU_ACTION_DEBUG]           = {sText_MenuDebug,   {.u8_void = StartMenuDebugCallback}},
     [MENU_ACTION_DEXNAV]          = {gText_MenuDexNav,  {.u8_void = StartMenuDexNavCallback}},
+    [MENU_ACTION_PLAYER_OPTIONS]  = {gText_MenuPlayer, {.u8_void = StartMenuPlayerOptionsCallback}},
+    [MENU_ACTION_TRAINER_CARD]    = {sText_TrainerCard, {.u8_void = StartMenuPlayerNameCallback}},
+    [MENU_ACTION_PLAYERS]         = {sText_Players, {.u8_void = StartMenuPlayersCallback}},
+    [MENU_ACTION_PLAYER_BACK]     = {sText_PlayerBack, {.u8_void = StartMenuPlayerBackCallback}},
 };
 
 static const struct BgTemplate sBgTemplates_LinkBattleSave[] =
@@ -284,6 +301,14 @@ static void BuildStartMenuActions(void)
 {
     sNumStartMenuActions = 0;
 
+    if (sPlayerSubmenu)
+    {
+        AddStartMenuAction(MENU_ACTION_TRAINER_CARD);
+        AddStartMenuAction(MENU_ACTION_PLAYERS);
+        AddStartMenuAction(MENU_ACTION_PLAYER_BACK);
+        return;
+    }
+
     if (IsOverworldLinkActive() == TRUE)
     {
         BuildLinkModeStartMenu();
@@ -338,7 +363,7 @@ static void BuildNormalStartMenu(void)
     if (FlagGet(FLAG_SYS_POKENAV_GET) == TRUE)
         AddStartMenuAction(MENU_ACTION_POKENAV);
 
-    AddStartMenuAction(MENU_ACTION_PLAYER);
+    AddStartMenuAction(MENU_ACTION_PLAYER_OPTIONS);
     AddStartMenuAction(MENU_ACTION_SAVE);
     AddStartMenuAction(MENU_ACTION_OPTION);
     AddStartMenuAction(MENU_ACTION_EXIT);
@@ -354,7 +379,7 @@ static void BuildDebugStartMenu(void)
     AddStartMenuAction(MENU_ACTION_BAG);
     if (FlagGet(FLAG_SYS_POKENAV_GET) == TRUE)
         AddStartMenuAction(MENU_ACTION_POKENAV);
-    AddStartMenuAction(MENU_ACTION_PLAYER);
+    AddStartMenuAction(MENU_ACTION_PLAYER_OPTIONS);
     AddStartMenuAction(MENU_ACTION_SAVE);
     AddStartMenuAction(MENU_ACTION_OPTION);
 }
@@ -486,7 +511,7 @@ static bool32 PrintStartMenuActions(s8 *pIndex, u32 count)
 
     do
     {
-        if (sStartMenuItems[sCurrentStartMenuActions[index]].func.u8_void == StartMenuPlayerNameCallback)
+        if (sCurrentStartMenuActions[index] == MENU_ACTION_PLAYER || sCurrentStartMenuActions[index] == MENU_ACTION_PLAYER_OPTIONS)
         {
             PrintPlayerNameOnWindow(GetStartMenuWindowId(), sStartMenuItems[sCurrentStartMenuActions[index]].text, 8, (index << 4) + 9);
         }
@@ -614,6 +639,7 @@ void Task_ShowStartMenu(u8 taskId)
 
 void ShowStartMenu(void)
 {
+    sPlayerSubmenu = FALSE;
     if (!IsOverworldLinkActive())
     {
         FreezeObjectEvents();
@@ -658,7 +684,9 @@ static bool8 HandleStartMenuInput(void)
             && gMenuCallback != StartMenuSafariZoneRetireCallback
             && gMenuCallback != StartMenuBattlePyramidRetireCallback)
         {
-           FadeScreen(FADE_TO_BLACK, 0);
+           if (gMenuCallback != StartMenuPlayerOptionsCallback && gMenuCallback != StartMenuPlayersCallback
+            && gMenuCallback != StartMenuPlayerBackCallback)
+               FadeScreen(FADE_TO_BLACK, 0);
         }
 
         return FALSE;
@@ -666,6 +694,8 @@ static bool8 HandleStartMenuInput(void)
 
     if (JOY_NEW(START_BUTTON | B_BUTTON))
     {
+        if (sPlayerSubmenu && JOY_NEW(B_BUTTON))
+            return StartMenuPlayerBackCallback();
         RemoveExtraStartMenuWindows();
         HideStartMenu();
         return TRUE;
@@ -739,6 +769,11 @@ static bool8 StartMenuPlayerNameCallback(void)
 {
     if (!gPaletteFade.active)
     {
+        if (sPlayerSubmenu)
+        {
+            sPlayerSubmenu = FALSE;
+            sStartMenuCursorPos = sPlayerReturnCursor;
+        }
         PlayRainStoppingSoundEffect();
         RemoveExtraStartMenuWindows();
         CleanupOverworldWindowsAndTilemaps();
@@ -754,6 +789,33 @@ static bool8 StartMenuPlayerNameCallback(void)
     }
 
     return FALSE;
+}
+
+static bool8 StartMenuPlayerOptionsCallback(void)
+{
+    sPlayerReturnCursor = sStartMenuCursorPos;
+    sPlayerSubmenu = TRUE; sStartMenuCursorPos = 0;
+    HideStartMenuDebug(); InitStartMenu();
+    gMenuCallback = HandleStartMenuInput;
+    return FALSE;
+}
+
+static bool8 StartMenuPlayerBackCallback(void)
+{
+    sPlayerSubmenu = FALSE; sStartMenuCursorPos = sPlayerReturnCursor;
+    HideStartMenuDebug(); InitStartMenu();
+    gMenuCallback = HandleStartMenuInput;
+    return FALSE;
+}
+
+static bool8 StartMenuPlayersCallback(void)
+{
+    sPlayerSubmenu = FALSE; sStartMenuCursorPos = sPlayerReturnCursor;
+    RemoveExtraStartMenuWindows(); HideStartMenu();
+    // No native tick runs between releasing the Start menu and claiming this
+    // overlay. Open refuses unbound/offline/unsafe state without sending input.
+    MultiplayerMenu_Open();
+    return TRUE;
 }
 
 static bool8 StartMenuSaveCallback(void)
