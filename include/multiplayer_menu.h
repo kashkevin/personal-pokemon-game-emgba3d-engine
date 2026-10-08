@@ -39,6 +39,10 @@ extern volatile struct MultiplayerMenuMailbox gMultiplayerMenuMailbox;
 void MultiplayerMenu_Init(void);
 void MultiplayerMenu_Tick(void);
 bool32 MultiplayerMenu_IsActive(void);
+bool32 MultiplayerMenu_CanAdmitBattle(u32 session, u32 incarnation);
+bool32 MultiplayerMenu_IsBattleAdmissionHeld(void);
+bool32 MultiplayerMenu_AdmissionResetWasDisabled(void);
+void MultiplayerMenu_TransferBattleAdmission(u32 session, u32 incarnation);
 bool32 MultiplayerMenu_Open(void); // Caller has closed the ordinary Start menu.
 bool32 MultiplayerMenu_ValidateScreen(const struct MultiplayerMenuScreen *screen);
 

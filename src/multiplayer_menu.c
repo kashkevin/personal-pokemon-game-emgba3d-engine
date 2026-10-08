@@ -27,6 +27,8 @@ _Static_assert(offsetof(struct MultiplayerMenuMailbox, screen) == 36, "Menu scre
 _Static_assert(offsetof(struct MultiplayerMenuScreen, rows) == 68, "Menu row offset");
 
 const u32 gMultiplayerMenuAbiVersion = MP_MENU_ABI;
+static EWRAM_DATA bool8 sBattleAdmissionLatched = FALSE;
+static EWRAM_DATA bool8 sAdmissionResetDisabled = FALSE;
 EWRAM_DATA volatile struct MultiplayerMenuMailbox gMultiplayerMenuMailbox = {0};
 static EWRAM_DATA struct MultiplayerMenuScreen sMultiplayerMenuScreen;
 static EWRAM_DATA u32 sSequence, sSeenGeneration, sSession, sIncarnation;
@@ -60,10 +62,14 @@ static bool32 ValidText(const u8 *text, u32 size)
 
 bool32 MultiplayerMenu_ValidateScreen(const struct MultiplayerMenuScreen *screen)
 {
+    u32 admissionAction = screen->reserved[0] | screen->reserved[1] << 8;
     if (!screen->ackRequest || !screen->screen || screen->flags > 2 || screen->count > 6
      || (screen->backAction != 0 && screen->backAction != 7)
      || !ValidText(screen->title, sizeof(screen->title)) || !ValidText(screen->status, sizeof(screen->status))
-     || !Zero(screen->reserved, sizeof(screen->reserved))) return FALSE;
+     || !Zero(screen->reserved + 2, 2)
+     || (admissionAction && (*(const volatile u32 *)&gMultiplayerBattleResumeAbiVersion != MULTIPLAYER_BATTLE_RESUME_ABI
+          || screen->flags || admissionAction > screen->count
+          || screen->rows[admissionAction - 1].action != admissionAction))) return FALSE;
     for (u32 row = 0; row < 6; row++)
     {
         if (row >= screen->count)
@@ -156,7 +162,8 @@ static void Publish(u8 kind, u16 action, u32 screen)
 static void Close(void)
 {
     u32 screen = sMultiplayerMenuScreen.screen;
-    if (!sMultiplayerMenuActive) return;
+    if (!sMultiplayerMenuActive || (sBattleAdmissionLatched && !MultiplayerBattle_IsActive())) return;
+    sBattleAdmissionLatched = FALSE;
     if (sWindow != WINDOW_NONE)
     {
         ClearStdWindowAndFrameToTransparent(sWindow, TRUE);
@@ -182,6 +189,8 @@ static bool32 Begin(void)
 
 void MultiplayerMenu_Init(void)
 {
+    if (sBattleAdmissionLatched) gSoftResetDisabled = sAdmissionResetDisabled;
+    sBattleAdmissionLatched = FALSE;
     memset((void *)&gMultiplayerMenuMailbox, 0, sizeof(gMultiplayerMenuMailbox));
     memset(&sMultiplayerMenuScreen, 0, sizeof(sMultiplayerMenuScreen));
     sSequence = sSeenGeneration = sSession = sIncarnation = 0;
@@ -192,6 +201,25 @@ void MultiplayerMenu_Init(void)
 }
 
 bool32 MultiplayerMenu_IsActive(void) { return sMultiplayerMenuActive; }
+bool32 MultiplayerMenu_IsBattleAdmissionHeld(void) { return sBattleAdmissionLatched; }
+bool32 MultiplayerMenu_AdmissionResetWasDisabled(void) { return sAdmissionResetDisabled; }
+
+bool32 MultiplayerMenu_CanAdmitBattle(u32 session, u32 incarnation)
+{
+    // A normal production window owns the original safe field. The awaiting
+    // CHOOSE response may transfer it; diagnostic Begin alone owns no field.
+    return sMultiplayerMenuActive && sMultiplayerMenuWaiting && sBattleAdmissionLatched && sWindow != WINDOW_NONE
+        && sSession == session && sIncarnation == incarnation;
+}
+
+void MultiplayerMenu_TransferBattleAdmission(u32 session, u32 incarnation)
+{
+    // The caller acquired the battle callback/clock hold first. Removing the
+    // menu lock and publishing CLOSE cannot expose an unheld field frame.
+    if (MultiplayerBattle_IsActive() && MultiplayerMenu_CanAdmitBattle(session, incarnation))
+        Close();
+}
+
 
 bool32 MultiplayerMenu_Open(void)
 {
@@ -209,7 +237,7 @@ static void ReadScreen(void)
 {
     struct MultiplayerMenuScreen screen;
     u32 generation = gMultiplayerMenuMailbox.inboundGeneration;
-    if ((generation & 1) || generation == sSeenGeneration) return;
+    if (sBattleAdmissionLatched || (generation & 1) || generation == sSeenGeneration) return;
     screen = gMultiplayerMenuMailbox.screen;
     if (generation != gMultiplayerMenuMailbox.inboundGeneration) return;
     sSeenGeneration = generation;
@@ -243,7 +271,7 @@ static void ReadScreen(void)
 
 static void Input(u16 keys)
 {
-    if (!sMultiplayerMenuActive) return;
+    if (!sMultiplayerMenuActive || sBattleAdmissionLatched) return;
     if (keys & B_BUTTON)
     {
         if (!sMultiplayerMenuWaiting && sMultiplayerMenuScreen.backAction && sSequence < 0xFFFFFFFEu)
@@ -257,6 +285,12 @@ static void Input(u16 keys)
             if (sMultiplayerMenuCursor < sMultiplayerMenuScreen.count && sMultiplayerMenuScreen.rows[sMultiplayerMenuCursor].action)
             {
                 if (sSequence >= 0xFFFFFFFEu) { Close(); return; }
+                if (sMultiplayerMenuScreen.rows[sMultiplayerMenuCursor].action
+                 == (sMultiplayerMenuScreen.reserved[0] | sMultiplayerMenuScreen.reserved[1] << 8))
+                {
+                    sBattleAdmissionLatched = TRUE;
+                    sAdmissionResetDisabled = gSoftResetDisabled; gSoftResetDisabled = TRUE;
+                }
                 Publish(MP_MENU_CHOOSE, sMultiplayerMenuScreen.rows[sMultiplayerMenuCursor].action, sMultiplayerMenuScreen.screen); sMultiplayerMenuWaiting = TRUE; Render();
             }
         }
@@ -273,10 +307,10 @@ void MultiplayerMenu_Tick(void)
     u32 session, incarnation;
     gMultiplayerMenuMailbox.frame++;
     if (!sMultiplayerMenuActive) { ReadScreen(); return; }
-    if (!Multiplayer_IsConnected() || MultiplayerBattle_IsActive()
+    if (!sBattleAdmissionLatched && (!Multiplayer_IsConnected() || MultiplayerBattle_IsActive()
      || (sTradeMenu ? !MultiplayerSave_GetTradeMenuBinding(&session, &incarnation)
                    : (MultiplayerSave_IsHeld() || !MultiplayerSave_GetIdleBinding(&session, &incarnation)))
-     || session != sSession || incarnation != sIncarnation)
+     || session != sSession || incarnation != sIncarnation))
         Close();
     else
     {
