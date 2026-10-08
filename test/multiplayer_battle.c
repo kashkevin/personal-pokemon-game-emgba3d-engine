@@ -40,6 +40,7 @@ struct ChannelFixture {
     struct ObjectEvent object;
     struct RfuLinkStatus *rfu;
     u32 generation;
+    u32 lastSuccessfulSequence;
     u8 wireless, received;
     bool8 spriteInUse, resetDisabled;
 };
@@ -73,12 +74,18 @@ static u8 Submit(struct ChannelFixture *f)
     f->generation += 2; gMultiplayerBattleMailbox.commandGeneration = f->generation;
     MultiplayerBattle_Tick();
     EXPECT(!(gMultiplayerBattleMailbox.responseGeneration & 1));
+    if (gMultiplayerBattleMailbox.response.status == MP_BATTLE_OK && f->command.opcode != MP_BATTLE_QUERY)
+        f->lastSuccessfulSequence = f->command.commandSeq;
     return gMultiplayerBattleMailbox.response.status;
 }
 
 static void Next(struct ChannelFixture *f, u8 opcode)
 {
-    f->command.commandSeq++; f->command.opcode = opcode;
+    if (f->command.phase == MP_BATTLE_PHASE_SINGLES)
+        f->command.commandSeq = f->lastSuccessfulSequence + 1;
+    else
+        f->command.commandSeq++;
+    f->command.opcode = opcode;
     f->command.blockSeq = 0; f->command.offset = 0; f->command.totalSize = 0;
     f->command.sourceSlot = f->binding.localSlot; f->command.kind = 0;
     f->command.length = 0; memset(f->command.data, 0, 192);
@@ -266,6 +273,26 @@ TEST("Multiplayer native singles: prepare replay freezes originals and explicit 
     EXPECT(!memcmp(original, gParties[B_TRAINER_PLAYER], sizeof(original)));
     EXPECT(!memcmp(&rng, &gRngValue, sizeof(rng))); EXPECT(!memcmp(&rng2, &gRng2Value, sizeof(rng2)));
     EXPECT_EQ(gPartiesCount[B_TRAINER_PLAYER], 1);
+    TearDown(&f);
+}
+
+TEST("Multiplayer native singles: rejected next sequence preserves prior ACK and can be reused successfully")
+{
+    struct ChannelFixture f;
+    struct MultiplayerBattleControl prepared, response;
+    u32 nextSequence;
+    NativeBinding(&f); Preparation(&f); EXPECT_EQ(Submit(&f), MP_BATTLE_OK);
+    prepared = f.command; response = gMultiplayerBattleMailbox.response;
+    nextSequence = prepared.commandSeq + 1;
+    EXPECT_EQ(Send(&f, MP_BATTLE_START_SINGLES), MP_BATTLE_BUSY);
+    EXPECT_EQ(f.command.commandSeq, nextSequence);
+    f.command = prepared;
+    EXPECT_EQ(Submit(&f), MP_BATTLE_OK);
+    EXPECT(!memcmp((const void *)&gMultiplayerBattleMailbox.response, &response, sizeof(response)));
+    EXPECT_EQ(Send(&f, MP_BATTLE_KEEP), MP_BATTLE_OK);
+    EXPECT_EQ(f.command.commandSeq, nextSequence);
+    EXPECT_EQ(Word(gMultiplayerBattleMailbox.response.data + 24), nextSequence);
+    EXPECT_EQ(Send(&f, MP_BATTLE_ABORT_PRE_START), MP_BATTLE_OK);
     TearDown(&f);
 }
 

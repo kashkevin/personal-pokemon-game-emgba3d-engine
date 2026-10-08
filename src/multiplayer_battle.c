@@ -525,7 +525,10 @@ bool32 MultiplayerBattle_TryReturnNative(void)
         MultiplayerBattle_FailNative(); return FALSE;
     }
     sRestored = TRUE; sState = MP_BATTLE_RETURNING;
-    sOutSize = sOutKind = 0;
+    // Result-held queries have no block descriptor. There are no further native
+    // sends before release, so retire the complete descriptor together.
+    sOutSeq = sOutCrc = sReadOffset = sOutSize = sOutKind = 0;
+    sOutPending = FALSE;
     gReceivedRemoteLinkPlayers = FALSE; gWirelessCommType = sSavedWireless; gLinkType = sSavedLinkType;
     memset(gLinkPlayers, 0, sizeof(gLinkPlayers));
     BattleMain_ReturnNetworkBattleToField();
@@ -628,8 +631,9 @@ static void Handle(const struct MultiplayerBattleControl *c)
         }
         Respond(c, status, data, length, FALSE); return;
     }
-    // A byte-identical last control is the only replay. Rejected controls and
-    // read-only QUERY do not destroy a lost successful acknowledgement.
+    // A byte-identical last control is the only replay. Native phase-2 rejected
+    // controls and read-only QUERY preserve a lost successful acknowledgement.
+    // Phase 1 retains its accepted diagnostic failure-sequence behavior.
     if (c->commandSeq == sLastSeq && sLastSeq && !memcmp(c, &sLastCommand, sizeof(*c)))
     {
         Replay(); return;
@@ -817,6 +821,8 @@ static void Handle(const struct MultiplayerBattleControl *c)
     }
     if (status == MP_BATTLE_OK && MultiplayerBattle_IsActive() && sState != MP_BATTLE_EXPIRED && sState != MP_BATTLE_RECOVERY_REQUIRED)
         sDeadline = sFrame + MULTIPLAYER_BATTLE_DEADLINE;
+    if (c->phase == MP_BATTLE_PHASE_SINGLES && status != MP_BATTLE_OK)
+        cache = FALSE;
     Respond(c, status, data, length, cache);
 }
 
