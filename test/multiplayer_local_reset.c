@@ -580,3 +580,60 @@ TEST("Multiplayer static reset: Gen6 new personal shiny rolls preserve the exist
     EXPECT(!memcmp(&owned, &gParties[B_TRAINER_OPPONENT_A][0], sizeof(owned)));
     TearDown(&f);
 }
+
+TEST("Multiplayer static reset: exact disconnected cancellation is neutral and waits for safe field")
+{
+    struct ResetFixture f; SetUpPilot(&f);
+    MultiplayerResetAdmission_Init();
+    rng_value_t rng = gRngValue;
+    MultiplayerResetAdmission_Begin(MP_STATIC_RESET_VOLTORB_1);
+    struct MultiplayerResetReply reply = {.sequence=1, .session=1, .incarnation=1,
+        .encounter=MP_STATIC_RESET_VOLTORB_1, .status=2};
+    gMultiplayerResetMailbox.reply = reply; gMultiplayerResetMailbox.inboundGeneration = 2;
+    MultiplayerResetAdmission_Tick(); EXPECT(MultiplayerResetAdmission_IsWaiting());
+    Connection(1, FALSE);
+    reply.incarnation = 2;
+    gMultiplayerResetMailbox.reply = reply; gMultiplayerResetMailbox.inboundGeneration = 4;
+    MultiplayerResetAdmission_Tick(); EXPECT(MultiplayerResetAdmission_IsWaiting());
+    reply.incarnation = 1;
+    gMultiplayerResetMailbox.reply = reply; gMultiplayerResetMailbox.inboundGeneration = 6;
+    MultiplayerResetAdmission_Tick(); EXPECT(!MultiplayerResetAdmission_IsWaiting());
+    EXPECT_EQ(gSpecialVar_Result, FALSE); EXPECT_EQ(MultiplayerStaticReset_Count(), 0);
+    EXPECT_EQ(gMultiplayerResetMailbox.receipt.state, MP_RESET_CANCELLED);
+    EXPECT_EQ(gMultiplayerResetMailbox.receipt.fieldReady, FALSE);
+    EXPECT(!memcmp(&rng, &gRngValue, sizeof(rng)));
+    EXPECT(!FlagGet(FLAG_DEFEATED_VOLTORB_1_NEW_MAUVILLE));
+    EXPECT(!FlagGet(FLAG_HIDE_NEW_MAUVILLE_VOLTORB_1));
+    // This fixture models completion of the authored release/end commands.
+    ScriptContext_Init(); UnlockPlayerFieldControls();
+    MultiplayerResetAdmission_Tick();
+    EXPECT_EQ(gMultiplayerResetMailbox.receipt.fieldReady, TRUE);
+    gMultiplayerResetMailbox.inboundGeneration = 8;
+    MultiplayerResetAdmission_Tick();
+    EXPECT_EQ(gMultiplayerResetMailbox.receipt.state, MP_RESET_CANCELLED);
+    EXPECT_EQ(MultiplayerStaticReset_Count(), 0);
+    TearDown(&f);
+}
+
+TEST("Multiplayer static reset: cancellation cannot reverse an acknowledged attempt")
+{
+    struct ResetFixture f; SetUpPilot(&f);
+    MultiplayerResetAdmission_Init();
+    MultiplayerResetAdmission_Begin(MP_STATIC_RESET_VOLTORB_1);
+    struct MultiplayerResetReply reply = {.sequence=1, .session=1, .incarnation=1,
+        .encounter=MP_STATIC_RESET_VOLTORB_1, .attempt=1};
+    gMultiplayerResetMailbox.reply = reply; gMultiplayerResetMailbox.inboundGeneration = 2;
+    MultiplayerResetAdmission_Tick();
+    EXPECT_EQ(gMultiplayerResetMailbox.receipt.state, MP_RESET_ADMITTED);
+    EXPECT_EQ(MultiplayerStaticReset_Count(), 1);
+    Connection(1, FALSE);
+    reply.status = 2; reply.attempt = 0;
+    gMultiplayerResetMailbox.reply = reply; gMultiplayerResetMailbox.inboundGeneration = 4;
+    MultiplayerResetAdmission_Tick();
+    EXPECT_EQ(gMultiplayerResetMailbox.receipt.state, MP_RESET_ADMITTED);
+    EXPECT_EQ(gMultiplayerResetMailbox.receipt.attempt, 1);
+    EXPECT_EQ(gMultiplayerResetMailbox.receipt.fieldReady, FALSE);
+    EXPECT_EQ(MultiplayerStaticReset_Count(), 1);
+    MultiplayerLocalReset_Finish();
+    TearDown(&f);
+}
