@@ -538,7 +538,7 @@ static void Handle(const struct MultiplayerSaveControl *command)
         {
             sPending = TRUE; StartReload(MP_SAVE_OK); return;
         }
-        PutU32(data, sCrc); MultiplayerOwnership_Acknowledge(); Release();
+        PutU32(data, sCrc); MultiplayerOwnership_Acknowledge(TRUE); Release();
         PublishResponse(command, MP_SAVE_OK, data, 4, sOffset); return;
     case MP_SAVE_CANCEL:
         if (command->length) { status = MP_SAVE_MALFORMED; break; }
@@ -633,7 +633,7 @@ void MultiplayerSave_Tick(void)
         {
             PutU32(data, sCrc);
             if (sReloadStatus == MP_SAVE_OK && sLastCommand.opcode == MP_SAVE_END)
-                MultiplayerOwnership_Acknowledge();
+                MultiplayerOwnership_Acknowledge(FALSE);
             Release();
             PublishResponse(&sLastCommand, sReloadStatus, sReloadStatus == MP_SAVE_OK ? data : NULL,
                             sReloadStatus == MP_SAVE_OK ? 4 : 0, sOffset);

@@ -18,6 +18,7 @@ _Static_assert(offsetof(struct SaveBlock3, ownership.checksum) == 596, "Ownershi
 const u32 gMultiplayerOwnershipAbi = 1;
 static EWRAM_DATA bool8 sGrantActive = FALSE;
 static EWRAM_DATA bool8 sMetadataTrusted = FALSE;
+static EWRAM_DATA bool8 sRetirementAcknowledged = FALSE;
 static EWRAM_DATA u32 sGrantFlags = 0;
 
 static bool32 Zero(const u8 *data, u32 size)
@@ -92,11 +93,12 @@ bool32 MultiplayerOwnership_ValidateSave(const u8 *data, bool32 allowLegacy)
 void MultiplayerOwnership_InvalidateGrant(void)
 {
     sGrantActive = FALSE;
+    sRetirementAcknowledged = FALSE;
 }
 
 void MultiplayerOwnership_Loaded(void)
 {
-    sGrantActive = FALSE;
+    MultiplayerOwnership_InvalidateGrant();
     sMetadataTrusted = MultiplayerOwnership_ValidateSave((const void *)gSaveBlock3Ptr, TRUE);
 }
 
@@ -265,6 +267,9 @@ u8 MultiplayerOwnership_PrepareExport(void)
     status = InspectRoster(&missing, identities);
     if (status == MP_SAVE_OK && missing > record->end - record->next)
         status = MP_SAVE_OWNERSHIP;
+    // Newly minted IDs cannot be retired until the host durably accepts this export.
+    if (status == MP_SAVE_OK && missing)
+        sRetirementAcknowledged = FALSE;
     // Validate the entire roster and range before the first creature mutation.
     if (status == MP_SAVE_OK)
         for (i = 0; i < MULTIPLAYER_OWNERSHIP_SLOTS; i++)
@@ -297,6 +302,8 @@ bool32 MultiplayerOwnership_Retire(const struct BoxPokemon *mon, u32 reason)
         return FALSE;
     if (!identity)
         return TRUE;
+    if (!sRetirementAcknowledged)
+        return FALSE;
     if ((reason != MP_RETIRE_RELEASE && reason != MP_RETIRE_NPC_EXCHANGE) || record->retirementCount == 128)
         return FALSE;
     for (i = 0; i < record->retirementCount; i++)
@@ -307,10 +314,11 @@ bool32 MultiplayerOwnership_Retire(const struct BoxPokemon *mon, u32 reason)
     return TRUE;
 }
 
-void MultiplayerOwnership_Acknowledge(void)
+void MultiplayerOwnership_Acknowledge(bool32 exported)
 {
     if (Ready() && !MultiplayerOwnership_IsLegacy((const void *)gSaveBlock3Ptr))
     {
+        sRetirementAcknowledged = exported;
         gSaveBlock3Ptr->ownership.retirementCount = 0;
         memset(gSaveBlock3Ptr->ownership.retirements, 0, sizeof(gSaveBlock3Ptr->ownership.retirements));
         MultiplayerOwnership_RefreshChecksum();

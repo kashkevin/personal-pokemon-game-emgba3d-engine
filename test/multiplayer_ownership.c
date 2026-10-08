@@ -4,6 +4,12 @@
 #include "pokemon.h"
 #include "pokemon_storage_system.h"
 #include "random.h"
+#include "load_save.h"
+#include "save.h"
+#include "agb_flash.h"
+#include "gba/flash_internal.h"
+#include "trade.h"
+#include "hall_of_fame.h"
 #include "test/test.h"
 
 static void PutWord(u8 *data, u32 value)
@@ -161,6 +167,7 @@ TEST("Multiplayer ownership: retirement overflow refuses before mutation and ack
     MakeGrant(grant, 1, 257, 1);
     EXPECT_EQ(MultiplayerOwnership_Grant(grant, 1, 1), MP_SAVE_OK);
     CreateMon(&mon, SPECIES_WURMPLE, 3, 0, OTID_STRUCT_PLAYER_ID);
+    MultiplayerOwnership_Acknowledge(TRUE);
     for (i = 1; i <= 128; i++)
     {
         SetMonData(&mon, MON_DATA_MULTIPLAYER_ID, &i);
@@ -171,7 +178,7 @@ TEST("Multiplayer ownership: retirement overflow refuses before mutation and ack
     EXPECT(!MultiplayerOwnership_Retire(&mon.box, MP_RETIRE_RELEASE));
     EXPECT_EQ(memcmp(&before, gSaveBlock3Ptr, 600), 0);
     EXPECT(MultiplayerOwnership_ValidateSave((const void *)gSaveBlock3Ptr, FALSE));
-    MultiplayerOwnership_Acknowledge();
+    MultiplayerOwnership_Acknowledge(TRUE);
     EXPECT_EQ(gSaveBlock3Ptr->ownership.retirementCount, 0);
     EXPECT(MultiplayerOwnership_ValidateSave((const void *)gSaveBlock3Ptr, FALSE));
 }
@@ -189,4 +196,116 @@ TEST("Multiplayer ownership: corrupt metadata cannot be repaired by ordinary che
     MultiplayerOwnership_RefreshChecksum();
     EXPECT_EQ(gSaveBlock3Ptr->ownership.checksum, original);
     EXPECT_EQ(MultiplayerOwnership_PrepareExport(), MP_SAVE_OWNERSHIP);
+}
+
+TEST("Multiplayer ownership: ordinary and formerly partial saves persist all six ownership chunks")
+{
+    u8 grant[60], chunk[116];
+    struct SaveBlock3 expected;
+    u32 saveType, section;
+    ResetOwnership();
+    CheckForFlashMemory();
+    EXPECT(gFlashMemoryPresent);
+    Save_ResetSaveCounters();
+    MakeGrant(grant, 1, 33, 1);
+    EXPECT_EQ(MultiplayerOwnership_Grant(grant, 1, 1), MP_SAVE_OK);
+    expected = *gSaveBlock3Ptr;
+    for (saveType = SAVE_NORMAL; saveType <= SAVE_EREADER; saveType++)
+    {
+        u32 counter = gSaveCounter;
+        EXPECT_NE(HandleSavingData(saveType), SAVE_STATUS_ERROR);
+        EXPECT_EQ(gDamagedSaveSectors, 0);
+        EXPECT_EQ(gSaveCounter, counter + 1);
+        for (section = 0; section < 6; section++)
+        {
+            u32 physical = (section + gLastWrittenSector) % 14 + 14 * (gSaveCounter & 1);
+            u32 size = section < 5 ? 116 : 20;
+            ReadFlash(physical, 3968, chunk, size);
+            EXPECT_EQ(memcmp(chunk, (const u8 *)&expected + section * 116, size), 0);
+        }
+    }
+    EXPECT(!WriteSaveBlock2());
+    EXPECT(WriteSaveBlock1Sector());
+    ReadFlash((5 + gLastWrittenSector) % 14 + 14 * (gSaveCounter & 1), 3968, chunk, 20);
+    EXPECT_EQ(memcmp(chunk, (const u8 *)&expected + 580, 20), 0);
+}
+
+TEST("Multiplayer ownership: temporary Frontier party serialization refuses without Flash mutation")
+{
+    u8 grant[60];
+    u32 counter;
+    ResetOwnership();
+    MakeGrant(grant, 1, 33, 1);
+    EXPECT_EQ(MultiplayerOwnership_Grant(grant, 1, 1), MP_SAVE_OK);
+    counter = gSaveCounter;
+    gSaveBlock2Ptr->frontier.challengeStatus = 1;
+    EXPECT_EQ(HandleSavingData(SAVE_LINK), SAVE_STATUS_ERROR);
+    EXPECT_EQ(gSaveCounter, counter);
+    EXPECT(WriteSaveBlock2());
+    EXPECT_EQ(gSaveCounter, counter);
+    EXPECT(WriteSaveBlock1Sector());
+}
+
+TEST("Multiplayer ownership: native trade admission refuses enrolled inventory")
+{
+    u8 grant[60];
+    struct RfuGameCompatibilityData compatibility = {0};
+    ResetOwnership();
+    compatibility.hasNationalDex = TRUE;
+    EXPECT_EQ(CanRegisterMonForTradingBoard(compatibility, SPECIES_TORCHIC, SPECIES_TORCHIC, FALSE), CAN_REGISTER_MON);
+    MakeGrant(grant, 1, 33, 1);
+    EXPECT_EQ(MultiplayerOwnership_Grant(grant, 1, 1), MP_SAVE_OK);
+    EXPECT_EQ(CanRegisterMonForTradingBoard(compatibility, SPECIES_TORCHIC, SPECIES_TORCHIC, FALSE), CANT_REGISTER_MON);
+    EXPECT_EQ(GetUnionRoomTradeMessageId(compatibility, compatibility, SPECIES_TORCHIC, SPECIES_TORCHIC, TYPE_FIRE, SPECIES_TORCHIC, FALSE), UR_TRADE_MSG_MON_CANT_BE_TRADED);
+    EXPECT_EQ(CanSpinTradeMon(NULL, 0), CANT_TRADE_NATIONAL);
+}
+
+TEST("Multiplayer ownership: Hall of Fame reads invalidate grant without mistrusting live DexNav updates")
+{
+    u8 grant[60], query[80];
+    ResetOwnership();
+    CheckForFlashMemory();
+    EXPECT(gFlashMemoryPresent);
+    MakeGrant(grant, 1, 33, 1);
+    EXPECT_EQ(MultiplayerOwnership_Grant(grant, 1, 1), MP_SAVE_OK);
+    ((u8 *)gSaveBlock3Ptr)[0] ^= 1;
+    LoadGameSave(SAVE_HALL_OF_FAME);
+    EXPECT_EQ(MultiplayerOwnership_Query(query), MP_SAVE_OK);
+    EXPECT_EQ(query[0], 1);
+    EXPECT_EQ(query[8], 0);
+    gSaveBlock3Ptr->ownership.checksum ^= 1;
+    MultiplayerOwnership_Loaded();
+    LoadGameSave(SAVE_HALL_OF_FAME);
+    EXPECT_EQ(MultiplayerOwnership_Query(query), MP_SAVE_VALIDATION);
+}
+
+TEST("Multiplayer ownership: assigned releases require durable acknowledgment of the loaded roster")
+{
+    u8 grant[60];
+    struct Pokemon unassigned;
+    ResetOwnership();
+    MakeGrant(grant, 1, 33, 1);
+    EXPECT_EQ(MultiplayerOwnership_Grant(grant, 1, 1), MP_SAVE_OK);
+    CreateMon(&unassigned, SPECIES_WURMPLE, 3, 0, OTID_STRUCT_PLAYER_ID);
+    EXPECT(MultiplayerOwnership_Retire(&unassigned.box, MP_RETIRE_RELEASE));
+    gParties[B_TRAINER_PLAYER][0] = unassigned;
+    EXPECT_EQ(MultiplayerOwnership_PrepareExport(), MP_SAVE_OK);
+    EXPECT(!MultiplayerOwnership_Retire(&gParties[B_TRAINER_PLAYER][0].box, MP_RETIRE_RELEASE));
+    EXPECT_EQ(gSaveBlock3Ptr->ownership.retirementCount, 0);
+    MultiplayerOwnership_Acknowledge(TRUE);
+    EXPECT(MultiplayerOwnership_Retire(&gParties[B_TRAINER_PLAYER][0].box, MP_RETIRE_RELEASE));
+    MultiplayerOwnership_Acknowledge(TRUE);
+    MultiplayerOwnership_InvalidateGrant();
+    EXPECT(!MultiplayerOwnership_Retire(&gParties[B_TRAINER_PLAYER][0].box, MP_RETIRE_RELEASE));
+    MultiplayerOwnership_Acknowledge(FALSE);
+    EXPECT(!MultiplayerOwnership_Retire(&gParties[B_TRAINER_PLAYER][0].box, MP_RETIRE_RELEASE));
+    grant[32] = 4; PutWord(grant + 48, 33); PutWord(grant + 52, 65); PutWord(grant + 56, 0);
+    EXPECT_EQ(MultiplayerOwnership_Grant(grant, 2, 1), MP_SAVE_OK);
+    MultiplayerOwnership_Acknowledge(TRUE);
+    gParties[B_TRAINER_PLAYER][1] = unassigned;
+    EXPECT_EQ(MultiplayerOwnership_PrepareExport(), MP_SAVE_OK);
+    EXPECT(!MultiplayerOwnership_Retire(&gParties[B_TRAINER_PLAYER][0].box, MP_RETIRE_RELEASE));
+    MultiplayerOwnership_Acknowledge(TRUE);
+    MultiplayerOwnership_Loaded();
+    EXPECT(!MultiplayerOwnership_Retire(&gParties[B_TRAINER_PLAYER][0].box, MP_RETIRE_RELEASE));
 }

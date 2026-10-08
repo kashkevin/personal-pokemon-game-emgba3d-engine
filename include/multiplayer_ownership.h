@@ -20,7 +20,7 @@ u8 MultiplayerOwnership_Grant(const u8 *data, u32 lease, u32 incarnation);
 u8 MultiplayerOwnership_Query(u8 *data);
 u8 MultiplayerOwnership_PrepareExport(void);
 bool32 MultiplayerOwnership_Retire(const struct BoxPokemon *mon, u32 reason);
-void MultiplayerOwnership_Acknowledge(void);
+void MultiplayerOwnership_Acknowledge(bool32 exported);
 bool32 MultiplayerOwnership_ImportMatches(const u8 *data);
 
 #endif

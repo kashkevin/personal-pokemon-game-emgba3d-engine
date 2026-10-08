@@ -930,6 +930,7 @@ u8 LoadGameSave(u8 saveType)
         CopyPartyAndObjectsFromSave();
         gSaveFileStatus = status;
         gGameContinueCallback = NULL;
+        MultiplayerOwnership_Loaded();
         break;
     case SAVE_HALL_OF_FAME:
         if (gHoFSaveBuffer != NULL)
@@ -946,7 +947,6 @@ u8 LoadGameSave(u8 saveType)
         break;
     }
 
-    MultiplayerOwnership_Loaded();
     return status;
 }
 
