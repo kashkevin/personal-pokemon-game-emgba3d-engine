@@ -1693,6 +1693,22 @@ bool8 IsLinkConnectionEstablished(void)
     return EXTRACT_CONN_ESTABLISHED(gLinkStatus);
 }
 
+bool32 IsNativeLinkSessionActive(void)
+{
+    if (sLinkOpen || gReceivedRemoteLinkPlayers || IsOverworldLinkActive()
+     || (gSaveBlock1Ptr != NULL && InUnionRoom()))
+        return TRUE;
+    if (!gWirelessCommType)
+        return FALSE;
+
+    // Pokemon Centers scan for nearby Union Room names without joining a
+    // gameplay session. The mode selector and passive listen task remain set.
+    return gRfu.callback != NULL || gRfu.playerExchangeActive || gRfu.isShuttingDown
+        || gRfu.linkLossRecoveryState == 1
+        || (gRfuLinkStatus != NULL && (gRfuLinkStatus->connCount
+            || gRfuLinkStatus->connSlotFlag || gRfuLinkStatus->linkLossSlotFlag));
+}
+
 void SetSuppressLinkErrorMessage(bool8 flag)
 {
     gSuppressLinkErrorMessage = flag;

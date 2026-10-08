@@ -150,7 +150,7 @@ static bool32 FieldReady(void)
         && gObjectEvents[id].spriteId < MAX_SPRITES && gSprites[gObjectEvents[id].spriteId].inUse
         && !gPaletteFade.active && !ArePlayerFieldControlsLocked() && !ScriptContext_IsEnabled()
         && gPlayerAvatar.tileTransitionState == 0 && gPlayerAvatar.runningState == 0
-        && !gMain.inBattle && !gReceivedRemoteLinkPlayers && !gWirelessCommType
+        && !gMain.inBattle && !IsNativeLinkSessionActive()
         && gTrainerHillVBlankCounter == NULL && !GetCurrentTrainerHillMapId()
         && !InBattlePyramid() && !GetSafariZoneFlag()
         && !gSaveBlock2Ptr->frontier.challengeStatus && !gSaveBlock2Ptr->frontier.challengePaused

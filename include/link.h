@@ -275,6 +275,7 @@ bool8 IsLinkMaster(void);
 void CB2_LinkError(void);
 bool8 GetSioMultiSI(void);
 bool8 IsLinkConnectionEstablished(void);
+bool32 IsNativeLinkSessionActive(void);
 bool8 HasLinkErrorOccurred(void);
 void ResetSerial(void);
 u32 LinkMain1(u8 *shouldAdvanceLinkState, u16 *sendCmd, u16 (*recvCmds)[CMD_LENGTH]);
