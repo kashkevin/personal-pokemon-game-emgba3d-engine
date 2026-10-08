@@ -38,7 +38,8 @@ TEST("Multiplayer menu: strict screen parser rejects malformed actions, native t
     screen.rows[0].label[1] = 31; EXPECT(!MultiplayerMenu_ValidateScreen(&screen)); screen = valid;
     screen.reserved[3] = 1; EXPECT(!MultiplayerMenu_ValidateScreen(&screen)); screen = valid;
     screen.count = 7; EXPECT(!MultiplayerMenu_ValidateScreen(&screen)); screen = valid;
-    screen.flags = 2; EXPECT(!MultiplayerMenu_ValidateScreen(&screen)); screen = valid;
+    screen.flags = 2; EXPECT(MultiplayerMenu_ValidateScreen(&screen));
+    screen.flags = 3; EXPECT(!MultiplayerMenu_ValidateScreen(&screen)); screen = valid;
     screen.ackRequest = 0; EXPECT(!MultiplayerMenu_ValidateScreen(&screen)); screen = valid;
     screen.screen = 0; EXPECT(!MultiplayerMenu_ValidateScreen(&screen));
 }
@@ -138,4 +139,23 @@ TEST("Multiplayer menu: printable ASCII translation cannot produce a native stri
     EXPECT_EQ(MultiplayerMenu_TestGlyph('7'), CHAR_7);
     EXPECT_EQ(MultiplayerMenu_TestGlyph(':'), CHAR_COLON);
     EXPECT_EQ(MultiplayerMenu_TestGlyph('~'), CHAR_QUESTION_MARK);
+}
+
+TEST("Multiplayer menu: unsolicited trade reopen cannot own an idle or disconnected core")
+{
+    u32 session = 123, incarnation = 456;
+    struct MultiplayerMenuScreen screen = Screen(1, 1);
+    MultiplayerMenu_Init();
+    EXPECT(!MultiplayerSave_GetTradeMenuBinding(&session, &incarnation));
+    EXPECT_EQ(session, 123); EXPECT_EQ(incarnation, 456);
+    screen.flags = 2; Deliver(&screen, 2);
+    EXPECT(!MultiplayerMenu_IsActive());
+    EXPECT(MultiplayerMenu_TestBegin());
+    screen.ackRequest = 1; Deliver(&screen, 4);
+    EXPECT_EQ(MultiplayerMenu_TestScreen(), 0);
+    MultiplayerMenu_TestClose();
+    screen.ackRequest = 2; Deliver(&screen, 6);
+    EXPECT(!MultiplayerMenu_IsActive());
+    EXPECT_EQ(gMultiplayerMenuMailbox.request.sequence, 2);
+    MultiplayerMenu_Init();
 }

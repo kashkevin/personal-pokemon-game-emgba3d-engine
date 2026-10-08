@@ -31,7 +31,7 @@ EWRAM_DATA volatile struct MultiplayerMenuMailbox gMultiplayerMenuMailbox = {0};
 static EWRAM_DATA struct MultiplayerMenuScreen sMultiplayerMenuScreen;
 static EWRAM_DATA u32 sSequence, sSeenGeneration, sSession, sIncarnation;
 static EWRAM_DATA u8 sWindow, sMultiplayerMenuCursor;
-static EWRAM_DATA bool8 sMultiplayerMenuActive, sMultiplayerMenuWaiting;
+static EWRAM_DATA bool8 sMultiplayerMenuActive, sMultiplayerMenuWaiting, sTradeMenu;
 static const struct WindowTemplate sWindowTemplate = {
     .bg = 0, .tilemapLeft = 1, .tilemapTop = 1, .width = 28, .height = 18,
     .paletteNum = 15, .baseBlock = 8,
@@ -60,7 +60,7 @@ static bool32 ValidText(const u8 *text, u32 size)
 
 bool32 MultiplayerMenu_ValidateScreen(const struct MultiplayerMenuScreen *screen)
 {
-    if (!screen->ackRequest || !screen->screen || screen->flags > 1 || screen->count > 6
+    if (!screen->ackRequest || !screen->screen || screen->flags > 2 || screen->count > 6
      || (screen->backAction != 0 && screen->backAction != 7)
      || !ValidText(screen->title, sizeof(screen->title)) || !ValidText(screen->status, sizeof(screen->status))
      || !Zero(screen->reserved, sizeof(screen->reserved))) return FALSE;
@@ -163,7 +163,7 @@ static void Close(void)
         RemoveWindow(sWindow); sWindow = WINDOW_NONE;
         ScriptUnfreezeObjectEvents(); UnlockPlayerFieldControls();
     }
-    sMultiplayerMenuActive = sMultiplayerMenuWaiting = FALSE;
+    sMultiplayerMenuActive = sMultiplayerMenuWaiting = sTradeMenu = FALSE;
     memset(&sMultiplayerMenuScreen, 0, sizeof(sMultiplayerMenuScreen));
     // Publish only after window/field ownership has been released. Reserve the
     // final sequence for CLOSE; a ROM incarnation never wraps its requests.
@@ -185,7 +185,7 @@ void MultiplayerMenu_Init(void)
     memset((void *)&gMultiplayerMenuMailbox, 0, sizeof(gMultiplayerMenuMailbox));
     memset(&sMultiplayerMenuScreen, 0, sizeof(sMultiplayerMenuScreen));
     sSequence = sSeenGeneration = sSession = sIncarnation = 0;
-    sWindow = WINDOW_NONE; sMultiplayerMenuCursor = 0; sMultiplayerMenuActive = sMultiplayerMenuWaiting = FALSE;
+    sWindow = WINDOW_NONE; sMultiplayerMenuCursor = 0; sMultiplayerMenuActive = sMultiplayerMenuWaiting = sTradeMenu = FALSE;
     gMultiplayerMenuMailbox.abiVersion = *(const volatile u32 *)&gMultiplayerMenuAbiVersion;
     gMultiplayerMenuMailbox.byteSize = sizeof(gMultiplayerMenuMailbox);
     gMultiplayerMenuMailbox.magic = MP_MENU_MAGIC;
@@ -209,12 +209,29 @@ static void ReadScreen(void)
 {
     struct MultiplayerMenuScreen screen;
     u32 generation = gMultiplayerMenuMailbox.inboundGeneration;
-    if (!sMultiplayerMenuActive || (generation & 1) || generation == sSeenGeneration) return;
+    if ((generation & 1) || generation == sSeenGeneration) return;
     screen = gMultiplayerMenuMailbox.screen;
     if (generation != gMultiplayerMenuMailbox.inboundGeneration) return;
     sSeenGeneration = generation;
     if (!MultiplayerMenu_ValidateScreen(&screen) || screen.ackRequest != sSequence
      || screen.screen < sMultiplayerMenuScreen.screen) return;
+    if (!sMultiplayerMenuActive)
+    {
+        // Reopen only following this exact native CLOSE, while the verified
+        // trade exporter still owns the frozen party. Other field/save/battle
+        // states cannot be made into a menu by an unsolicited screen packet.
+        if (screen.flags != 2 || sSequence >= 0xFFFFFFFEu || gMultiplayerMenuMailbox.request.kind != MP_MENU_CLOSE
+         || !Multiplayer_IsConnected() || MultiplayerBattle_IsActive()
+         || !MultiplayerSave_GetTradeMenuBinding(&sSession, &sIncarnation)) return;
+        sWindow = AddWindow(&sWindowTemplate);
+        if (sWindow == WINDOW_NONE) return;
+        FreezeObjectEvents(); PlayerFreeze(); StopPlayerAvatar(); LockPlayerFieldControls();
+        if (!Begin()) { RemoveWindow(sWindow); sWindow = WINDOW_NONE; return; }
+        sTradeMenu = TRUE;
+        Render();
+        return;
+    }
+    if (screen.flags == 2) return;
     // A host-requested close may retain the last screen revision after an RPC
     // error. Ordinary duplicate revisions never re-enable old selections.
     if (screen.flags) { Close(); return; }
@@ -231,7 +248,7 @@ static void Input(u16 keys)
     {
         if (!sMultiplayerMenuWaiting && sMultiplayerMenuScreen.backAction && sSequence < 0xFFFFFFFEu)
         { Publish(MP_MENU_CHOOSE, 7, sMultiplayerMenuScreen.screen); sMultiplayerMenuWaiting = TRUE; Render(); }
-        else Close();
+        else if (!sTradeMenu) Close();
     }
     else if (!sMultiplayerMenuWaiting)
     {
@@ -255,9 +272,10 @@ void MultiplayerMenu_Tick(void)
 {
     u32 session, incarnation;
     gMultiplayerMenuMailbox.frame++;
-    if (!sMultiplayerMenuActive) return;
-    if (!Multiplayer_IsConnected() || MultiplayerSave_IsHeld() || MultiplayerBattle_IsActive()
-     || !MultiplayerSave_GetIdleBinding(&session, &incarnation)
+    if (!sMultiplayerMenuActive) { ReadScreen(); return; }
+    if (!Multiplayer_IsConnected() || MultiplayerBattle_IsActive()
+     || (sTradeMenu ? !MultiplayerSave_GetTradeMenuBinding(&session, &incarnation)
+                   : (MultiplayerSave_IsHeld() || !MultiplayerSave_GetIdleBinding(&session, &incarnation)))
      || session != sSession || incarnation != sIncarnation)
         Close();
     else

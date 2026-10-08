@@ -2,7 +2,7 @@
 #define GUARD_MULTIPLAYER_MENU_H
 
 #define MP_MENU_MAGIC 0x31554D45u
-#define MP_MENU_ABI 1
+#define MP_MENU_ABI 2
 #define MP_MENU_OPEN 1
 #define MP_MENU_CHOOSE 2
 #define MP_MENU_CLOSE 3

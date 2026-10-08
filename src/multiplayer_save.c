@@ -216,6 +216,18 @@ bool32 MultiplayerSave_HasBinding(void)
     return sState != MP_SAVE_UNBOUND && sSession && sIncarnation;
 }
 
+bool32 MultiplayerSave_GetTradeMenuBinding(u32 *session, u32 *incarnation)
+{
+    // Only an exported, unchanged party can be presented for consent. The
+    // menu never reads a half-imported result or relaxes the save hold.
+    if (sState != MP_SAVE_TRADE_HELD || !sTradeActive || sTradeExpired
+     || sTradeImportStarted || !sSession || !sIncarnation)
+        return FALSE;
+    *session = sSession;
+    *incarnation = sIncarnation;
+    return TRUE;
+}
+
 bool32 MultiplayerSave_GetIdleBinding(u32 *session, u32 *incarnation)
 {
     if (sState != MP_SAVE_BOUND || sTradeActive || !sSession || !sIncarnation)
