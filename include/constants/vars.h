@@ -270,9 +270,9 @@
 #define VAR_UNUSED_0x40F8                                0x40F8 // Unused Var
 #define VAR_UNUSED_0x40F9                                0x40F9 // Unused Var
 #define VAR_UNUSED_0x40FA                                0x40FA // Unused Var
-#define VAR_UNUSED_0x40FB                                0x40FB // Unused Var
-#define VAR_UNUSED_0x40FC                                0x40FC // Unused Var
-#define VAR_UNUSED_0x40FD                                0x40FD // Unused Var
+#define VAR_MP_VOLTORB_1_RESET_VERSION                   0x40FB // Hoenn pilot: zero or MP_STATIC_RESET_VERSION_1
+#define VAR_MP_VOLTORB_1_RESET_COUNT_LO                  0x40FC
+#define VAR_MP_VOLTORB_1_RESET_COUNT_HI                  0x40FD
 #define VAR_UNUSED_0x40FE                                0x40FE // Unused Var
 #define VAR_UNUSED_0x40FF                                0x40FF // Unused Var
 

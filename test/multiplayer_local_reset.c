@@ -1,5 +1,6 @@
 #include "global.h"
 #include "multiplayer_local_reset.h"
+#include "multiplayer_static_reset.h"
 #include "multiplayer_save.h"
 #include "multiplayer_ownership.h"
 #include "multiplayer.h"
@@ -17,6 +18,9 @@
 #include "item.h"
 #include "load_save.h"
 #include "text.h"
+#include "random.h"
+#include "script_pokemon_util.h"
+#include "constants/event_objects.h"
 #include "constants/maps.h"
 #include "constants/map_groups.h"
 #include "constants/vars.h"
@@ -28,8 +32,9 @@ struct ResetFixture {
     MainCallback cb1, cb2;
     struct MapHeader header;
     struct PlayerAvatar avatar;
-    struct ObjectEvent object;
+    struct ObjectEvent object, pilotObject;
     bool8 inBattle, spriteInUse;
+    u8 selectedObject;
     u8 battlerPositions[MAX_BATTLERS_COUNT];
     u32 generation;
 };
@@ -61,6 +66,9 @@ static void SetUp(struct ResetFixture *f)
     memset(f, 0, sizeof(*f));
     f->cb1 = gMain.callback1; f->cb2 = gMain.callback2; f->inBattle = gMain.inBattle;
     f->header = gMapHeader; f->avatar = gPlayerAvatar; f->object = gObjectEvents[0];
+    f->pilotObject = gObjectEvents[1];
+    f->selectedObject = gSelectedObjectEvent;
+    gSelectedObjectEvent = 0;
     f->spriteInUse = gSprites[0].inUse; f->battle = gBattleStruct;
     memcpy(f->battlerPositions, gBattlerPositions, sizeof(f->battlerPositions));
     gBattlerPositions[0] = B_POSITION_PLAYER_LEFT;
@@ -83,6 +91,7 @@ static void SetUp(struct ResetFixture *f)
     memset(&gPlayerAvatar, 0, sizeof(gPlayerAvatar));
     memset(&gObjectEvents[0], 0, sizeof(gObjectEvents[0]));
     gObjectEvents[0].active = TRUE; gObjectEvents[0].isPlayer = TRUE;
+    gObjectEvents[0].localId = LOCALID_PLAYER;
     gSprites[0].inUse = TRUE; gPaletteFade.active = FALSE;
     ScriptContext_Init(); UnlockPlayerFieldControls();
     Multiplayer_Init(); Connection(1, TRUE); EXPECT(Multiplayer_IsConnected());
@@ -105,6 +114,8 @@ static void TearDown(struct ResetFixture *f)
     Free(gBattleStruct); gBattleStruct = f->battle;
     gMain.callback1 = f->cb1; gMain.callback2 = f->cb2; gMain.inBattle = f->inBattle;
     gMapHeader = f->header; gPlayerAvatar = f->avatar; gObjectEvents[0] = f->object;
+    gObjectEvents[1] = f->pilotObject;
+    gSelectedObjectEvent = f->selectedObject;
     gSprites[0].inUse = f->spriteInUse;
     memcpy(gBattlerPositions, f->battlerPositions, sizeof(f->battlerPositions));
     gMain.heldKeysRaw = gMain.newKeys = 0;
@@ -316,5 +327,192 @@ TEST("Multiplayer local reset: Select confirmation rechecks connection and prote
     EXPECT_EQ(MultiplayerLocalReset_HandlePlayerInput(0), MP_LOCAL_RESET_INPUT_PASS);
     EXPECT_EQ(gMain.newKeys, SELECT_BUTTON);
     EXPECT(!MultiplayerLocalReset_WasAccepted());
+    TearDown(&f);
+}
+
+static void SetUpPilot(struct ResetFixture *f)
+{
+    SetUp(f);
+    gSaveBlock1Ptr->location.mapGroup = MAP_GROUP(MAP_NEW_MAUVILLE_INSIDE);
+    gSaveBlock1Ptr->location.mapNum = MAP_NUM(MAP_NEW_MAUVILLE_INSIDE);
+    gSpecialVar_LastTalked = 6;
+    memset(&gObjectEvents[1], 0, sizeof(gObjectEvents[1]));
+    gObjectEvents[1].active = TRUE;
+    gObjectEvents[1].localId = 6;
+    gObjectEvents[1].mapGroup = MAP_GROUP(MAP_NEW_MAUVILLE_INSIDE);
+    gObjectEvents[1].mapNum = MAP_NUM(MAP_NEW_MAUVILLE_INSIDE);
+    gObjectEvents[1].currentCoords.x = 25 + MAP_OFFSET;
+    gObjectEvents[1].currentCoords.y = 18 + MAP_OFFSET;
+    VarSet(VAR_NEW_MAUVILLE_STATE, 1);
+    VarSet(VAR_TEMP_1, 1);
+    VarSet(VAR_TEMP_2, 0);
+}
+
+static void BeginPilot(void)
+{
+    MultiplayerStaticReset_BeginVoltorb1(); EXPECT_EQ(gSpecialVar_Result, TRUE);
+    CreateScriptedWildMon(SPECIES_VOLTORB, 25, ITEM_NONE);
+    gMain.inBattle = TRUE;
+    EXPECT(MultiplayerLocalReset_TestOpenWindow());
+}
+
+TEST("Multiplayer static reset: exact New Mauville object and native availability are required")
+{
+    struct ResetFixture f; SetUpPilot(&f);
+    EXPECT(!MultiplayerLocalReset_TryBegin(MP_STATIC_RESET_VOLTORB_1 + 1));
+    gSaveBlock1Ptr->location.mapNum++;
+    EXPECT(!MultiplayerLocalReset_TryBegin(MP_STATIC_RESET_VOLTORB_1));
+    gSaveBlock1Ptr->location.mapNum--;
+    gSpecialVar_LastTalked = 7; EXPECT(!MultiplayerLocalReset_TryBegin(MP_STATIC_RESET_VOLTORB_1));
+    gSpecialVar_LastTalked = 6;
+    gObjectEvents[1].currentCoords.x++; EXPECT(!MultiplayerLocalReset_TryBegin(MP_STATIC_RESET_VOLTORB_1));
+    gObjectEvents[1].currentCoords.x--;
+    gObjectEvents[1].active = FALSE; EXPECT(!MultiplayerLocalReset_TryBegin(MP_STATIC_RESET_VOLTORB_1));
+    gObjectEvents[1].active = TRUE;
+    FlagSet(FLAG_HIDE_NEW_MAUVILLE_VOLTORB_1); EXPECT(!MultiplayerLocalReset_TryBegin(MP_STATIC_RESET_VOLTORB_1));
+    FlagClear(FLAG_HIDE_NEW_MAUVILLE_VOLTORB_1);
+    FlagSet(FLAG_DEFEATED_VOLTORB_1_NEW_MAUVILLE); EXPECT(!MultiplayerLocalReset_TryBegin(MP_STATIC_RESET_VOLTORB_1));
+    FlagClear(FLAG_DEFEATED_VOLTORB_1_NEW_MAUVILLE);
+    VarSet(VAR_NEW_MAUVILLE_STATE, 0); EXPECT(!MultiplayerLocalReset_TryBegin(MP_STATIC_RESET_VOLTORB_1));
+    VarSet(VAR_NEW_MAUVILLE_STATE, 3); EXPECT(!MultiplayerLocalReset_TryBegin(MP_STATIC_RESET_VOLTORB_1));
+    EXPECT_EQ(MultiplayerStaticReset_Count(), 0);
+    VarSet(VAR_NEW_MAUVILLE_STATE, 2); BeginPilot();
+    EXPECT_EQ(MultiplayerStaticReset_Count(), 1);
+    TearDown(&f);
+}
+
+TEST("Multiplayer static reset: versioned attempts never reinterpret development or unknown save data")
+{
+    struct ResetFixture f; SetUpPilot(&f);
+    VarSet(MP_LOCAL_RESET_COUNTER_MAGIC, MP_LOCAL_RESET_MAGIC);
+    VarSet(MP_LOCAL_RESET_COUNTER_LO, 42); VarSet(MP_LOCAL_RESET_CAPTURED, 1);
+    VarSet(VAR_MP_VOLTORB_1_RESET_VERSION, 1);
+    EXPECT(!MultiplayerLocalReset_TryBegin(MP_STATIC_RESET_VOLTORB_1));
+    EXPECT_EQ(VarGet(VAR_MP_VOLTORB_1_RESET_VERSION), 1);
+    VarSet(VAR_MP_VOLTORB_1_RESET_VERSION, 0); VarSet(VAR_MP_VOLTORB_1_RESET_COUNT_HI, 1);
+    EXPECT(!MultiplayerLocalReset_TryBegin(MP_STATIC_RESET_VOLTORB_1));
+    EXPECT_EQ(MultiplayerStaticReset_Count(), 0x10000);
+    VarSet(VAR_MP_VOLTORB_1_RESET_VERSION, MP_STATIC_RESET_VERSION_1);
+    VarSet(VAR_MP_VOLTORB_1_RESET_COUNT_LO, 0xFFFF); VarSet(VAR_MP_VOLTORB_1_RESET_COUNT_HI, 0xFFFF);
+    EXPECT(!MultiplayerLocalReset_TryBegin(MP_STATIC_RESET_VOLTORB_1));
+    EXPECT_EQ(MultiplayerStaticReset_Count(), 0xFFFFFFFF);
+    VarSet(VAR_MP_VOLTORB_1_RESET_COUNT_LO, 0xFFFF); VarSet(VAR_MP_VOLTORB_1_RESET_COUNT_HI, 0);
+    BeginPilot(); EXPECT_EQ(MultiplayerStaticReset_Count(), 0x10000);
+    EXPECT_EQ(MultiplayerLocalReset_Count(), 42); EXPECT_EQ(VarGet(MP_LOCAL_RESET_CAPTURED), 1);
+    TearDown(&f);
+}
+
+TEST("Multiplayer static reset: actual species level egg and extra opponents must match authored generation")
+{
+    struct ResetFixture f; SetUpPilot(&f);
+    EXPECT(MultiplayerLocalReset_TryBegin(MP_STATIC_RESET_VOLTORB_1));
+    gMain.inBattle = TRUE;
+    CreateScriptedWildMon(SPECIES_ELECTRODE, 25, ITEM_NONE);
+    EXPECT(!MultiplayerLocalReset_TestOpenWindow());
+    CreateScriptedWildMon(SPECIES_VOLTORB, 24, ITEM_NONE);
+    EXPECT(!MultiplayerLocalReset_TestOpenWindow());
+    CreateScriptedWildMon(SPECIES_VOLTORB, 25, ITEM_NONE);
+    gParties[B_TRAINER_OPPONENT_A][0].box.isEgg = TRUE;
+    EXPECT(!MultiplayerLocalReset_TestOpenWindow());
+    gParties[B_TRAINER_OPPONENT_A][0].box.isEgg = FALSE;
+    CreateMon(&gParties[B_TRAINER_OPPONENT_A][1], SPECIES_VOLTORB, 25, 0, OTID_STRUCT_PLAYER_ID);
+    EXPECT(!MultiplayerLocalReset_TestOpenWindow());
+    CreateScriptedWildMon(SPECIES_VOLTORB, 25, ITEM_NONE);
+    EXPECT(MultiplayerLocalReset_TestOpenWindow());
+    gParties[B_TRAINER_OPPONENT_A][0].box.checksum++;
+    struct Pokemon malformed = gParties[B_TRAINER_OPPONENT_A][0];
+    EXPECT(!MultiplayerLocalReset_TestRequest());
+    EXPECT(!memcmp(&malformed, &gParties[B_TRAINER_OPPONENT_A][0], sizeof(malformed)));
+    TearDown(&f);
+}
+
+TEST("Multiplayer static reset: No keeps the roll and Yes does not rewind RNG or character data")
+{
+    struct ResetFixture f; SetUpPilot(&f); BeginPilot();
+    struct Pokemon roll = gParties[B_TRAINER_OPPONENT_A][0];
+    struct Pokemon party[PARTY_SIZE]; memcpy(party, gParties[B_TRAINER_PLAYER], sizeof(party));
+    rng_value_t rng = gRngValue, rng2 = gRng2Value;
+    EXPECT(MultiplayerLocalReset_TestRequest()); EXPECT(!MultiplayerLocalReset_TestConfirm(FALSE));
+    EXPECT(!memcmp(&roll, &gParties[B_TRAINER_OPPONENT_A][0], sizeof(roll)));
+    EXPECT_EQ(MultiplayerStaticReset_Count(), 1);
+    EXPECT(MultiplayerLocalReset_TestRequest()); EXPECT(MultiplayerLocalReset_TestConfirm(TRUE));
+    EXPECT(!memcmp(&rng, &gRngValue, sizeof(rng))); EXPECT(!memcmp(&rng2, &gRng2Value, sizeof(rng2)));
+    EXPECT(!memcmp(party, gParties[B_TRAINER_PLAYER], sizeof(party)));
+    EXPECT(!memcmp(&roll, &gParties[B_TRAINER_OPPONENT_A][0], sizeof(roll)));
+    MultiplayerLocalReset_ConsumeResult(); EXPECT_EQ(gSpecialVar_Result, TRUE);
+    gMain.inBattle = FALSE; BeginPilot(); EXPECT_EQ(MultiplayerStaticReset_Count(), 2);
+    EXPECT(memcmp(&roll, &gParties[B_TRAINER_OPPONENT_A][0], sizeof(roll)) != 0);
+    EXPECT_EQ(MultiplayerLocalReset_Count(), 0);
+    TearDown(&f);
+}
+
+TEST("Multiplayer static reset: changed generator barriers counter and capture state are refused without rollback")
+{
+    struct ResetFixture f; SetUpPilot(&f); BeginPilot();
+    VarSet(VAR_NEW_MAUVILLE_STATE, 2); EXPECT(!MultiplayerLocalReset_TestRequest());
+    EXPECT_EQ(VarGet(VAR_NEW_MAUVILLE_STATE), 2); VarSet(VAR_NEW_MAUVILLE_STATE, 1);
+    VarSet(VAR_TEMP_1, 0); EXPECT(!MultiplayerLocalReset_TestRequest()); VarSet(VAR_TEMP_1, 1);
+    VarSet(VAR_TEMP_2, 1); EXPECT(!MultiplayerLocalReset_TestRequest()); VarSet(VAR_TEMP_2, 0);
+    VarSet(VAR_MP_VOLTORB_1_RESET_COUNT_LO, 2); EXPECT(!MultiplayerLocalReset_TestRequest());
+    EXPECT_EQ(MultiplayerStaticReset_Count(), 2); VarSet(VAR_MP_VOLTORB_1_RESET_COUNT_LO, 1);
+    EXPECT(MultiplayerLocalReset_TestRequest());
+    FlagSet(FLAG_DEFEATED_VOLTORB_1_NEW_MAUVILLE);
+    EXPECT(!MultiplayerLocalReset_TestConfirm(TRUE));
+    EXPECT(FlagGet(FLAG_DEFEATED_VOLTORB_1_NEW_MAUVILLE));
+    EXPECT(!MultiplayerLocalReset_WasAccepted());
+    TearDown(&f);
+}
+
+TEST("Multiplayer static reset: common action ownership party and binding fences still apply")
+{
+    struct ResetFixture f; SetUpPilot(&f); BeginPilot();
+    gSaveBlock1Ptr->money++; EXPECT(!MultiplayerLocalReset_TestRequest()); gSaveBlock1Ptr->money--;
+    gSaveBlock3Ptr->ownership.next++; EXPECT(!MultiplayerLocalReset_TestRequest()); gSaveBlock3Ptr->ownership.next--;
+    MultiplayerLocalReset_CloseAction(); EXPECT(!MultiplayerLocalReset_TestRequest());
+    MultiplayerLocalReset_Finish(); gMain.inBattle = FALSE; BeginPilot();
+    MultiplayerLocalReset_CloseCapture(); EXPECT(!MultiplayerLocalReset_TestRequest());
+    MultiplayerLocalReset_Finish(); gMain.inBattle = FALSE; BeginPilot();
+    gBattleTypeFlags |= BATTLE_TYPE_TRAINER; EXPECT(!MultiplayerLocalReset_TestRequest());
+    gBattleTypeFlags = BATTLE_TYPE_IS_MASTER;
+    Connection(2, TRUE); EXPECT(!MultiplayerLocalReset_TestRequest());
+    EXPECT(!MultiplayerLocalReset_WasAccepted());
+    TearDown(&f);
+}
+
+extern const u8 NewMauville_Inside_EventScript_Voltorb1Return[];
+
+TEST("Multiplayer static reset: actual accepted return script preserves target and generator progression")
+{
+    struct ResetFixture f; SetUpPilot(&f); BeginPilot();
+    EXPECT(MultiplayerLocalReset_TestRequest()); EXPECT(MultiplayerLocalReset_TestConfirm(TRUE));
+    FlagSet(FLAG_SYS_CTRL_OBJ_DELETE);
+    gBattleOutcome = B_OUTCOME_PLAYER_TELEPORTED;
+    gMain.inBattle = FALSE;
+    RunScriptImmediately(NewMauville_Inside_EventScript_Voltorb1Return);
+    EXPECT(!FlagGet(FLAG_SYS_CTRL_OBJ_DELETE));
+    EXPECT(!FlagGet(FLAG_DEFEATED_VOLTORB_1_NEW_MAUVILLE));
+    EXPECT(!FlagGet(FLAG_HIDE_NEW_MAUVILLE_VOLTORB_1));
+    EXPECT(gObjectEvents[1].active);
+    EXPECT_EQ(VarGet(VAR_NEW_MAUVILLE_STATE), 1);
+    EXPECT_EQ(VarGet(VAR_TEMP_1), 1); EXPECT_EQ(VarGet(VAR_TEMP_2), 0);
+    EXPECT_EQ(MultiplayerStaticReset_Count(), 1);
+    EXPECT(!MultiplayerLocalReset_WasAccepted());
+    TearDown(&f);
+}
+
+TEST("Multiplayer static reset: ordinary caught return still records defeat and prevents rearming")
+{
+    struct ResetFixture f; SetUpPilot(&f); BeginPilot();
+    MultiplayerLocalReset_CloseCapture();
+    FlagSet(FLAG_SYS_CTRL_OBJ_DELETE);
+    gBattleOutcome = B_OUTCOME_CAUGHT;
+    gMain.inBattle = FALSE;
+    RunScriptImmediately(NewMauville_Inside_EventScript_Voltorb1Return);
+    EXPECT(!FlagGet(FLAG_SYS_CTRL_OBJ_DELETE));
+    EXPECT(FlagGet(FLAG_DEFEATED_VOLTORB_1_NEW_MAUVILLE));
+    EXPECT(!MultiplayerLocalReset_TryBegin(MP_STATIC_RESET_VOLTORB_1));
+    EXPECT_EQ(MultiplayerStaticReset_Count(), 1);
+    EXPECT_EQ(VarGet(VAR_NEW_MAUVILLE_STATE), 1);
+    EXPECT_EQ(VarGet(VAR_TEMP_1), 1); EXPECT_EQ(VarGet(VAR_TEMP_2), 0);
     TearDown(&f);
 }

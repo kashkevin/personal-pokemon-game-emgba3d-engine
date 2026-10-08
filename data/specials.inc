@@ -641,3 +641,4 @@ gSpecials::
 	def_special MultiplayerLocalReset_BeginDevelopmentHunt
 	def_special MultiplayerLocalReset_ConsumeResult
 	def_special MultiplayerLocalReset_Finish
+	def_special MultiplayerStaticReset_BeginVoltorb1

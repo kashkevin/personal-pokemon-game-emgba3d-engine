@@ -727,6 +727,9 @@ static void CB2_EndScriptedWildBattle(void)
         SetMainCallback2(CB2_ReturnToFieldContinueScriptPlayMapMusic);
         return;
     }
+    // Nonreset exits (including whiteout) must not leave an armed encounter
+    // behind for a later unrelated battle. Accepted results survive to script.
+    MultiplayerLocalReset_Finish();
     CpuFill16(0, (void *)(BG_PLTT), BG_PLTT_SIZE);
     ResetOamRange(0, 128);
 

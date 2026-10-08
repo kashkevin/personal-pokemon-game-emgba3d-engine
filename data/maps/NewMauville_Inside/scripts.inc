@@ -176,6 +176,9 @@ NewMauville_Inside_EventScript_GeneratorOff::
 NewMauville_Inside_EventScript_Voltorb1::
 	lock
 	faceplayer
+#if MP_LOCAL_RESET_NEW_MAUVILLE_PILOT || TESTING
+	special MultiplayerStaticReset_BeginVoltorb1
+#endif
 	setwildbattle SPECIES_VOLTORB, 25
 	waitse
 	playmoncry SPECIES_VOLTORB, CRY_MODE_ENCOUNTER
@@ -183,7 +186,12 @@ NewMauville_Inside_EventScript_Voltorb1::
 	waitmoncry
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	dowildbattle
+NewMauville_Inside_EventScript_Voltorb1Return::
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
+#if MP_LOCAL_RESET_NEW_MAUVILLE_PILOT || TESTING
+	special MultiplayerLocalReset_ConsumeResult
+	goto_if_eq VAR_RESULT, TRUE, NewMauville_Inside_EventScript_Voltorb1ResetReturn
+#endif
 	specialvar VAR_RESULT, GetBattleOutcome
 	goto_if_eq VAR_RESULT, B_OUTCOME_WON, NewMauville_Inside_EventScript_DefeatedVoltorb1
 	goto_if_eq VAR_RESULT, B_OUTCOME_RAN, NewMauville_Inside_EventScript_DefeatedVoltorb1
@@ -191,6 +199,14 @@ NewMauville_Inside_EventScript_Voltorb1::
 	setflag FLAG_DEFEATED_VOLTORB_1_NEW_MAUVILLE
 	release
 	end
+
+#if MP_LOCAL_RESET_NEW_MAUVILLE_PILOT || TESTING
+NewMauville_Inside_EventScript_Voltorb1ResetReturn::
+	@ Dedicated accepted-reset result: no defeat/catch/hide/generator writes.
+	@ The ordinary map resume callback has already reapplied barrier state.
+	release
+	end
+#endif
 
 NewMauville_Inside_EventScript_DefeatedVoltorb1::
 	setflag FLAG_DEFEATED_VOLTORB_1_NEW_MAUVILLE
