@@ -1,6 +1,8 @@
 #include "global.h"
 #include "multiplayer_save.h"
 #include "multiplayer.h"
+#include "multiplayer_ownership.h"
+#include "event_data.h"
 #include "main.h"
 #include "overworld.h"
 #include "load_save.h"
@@ -29,7 +31,9 @@ _Static_assert(offsetof(struct MultiplayerSaveControl, chunkCrc32) == 44, "Save 
 _Static_assert(offsetof(struct MultiplayerSaveControl, data) == 48, "Save payload offset");
 _Static_assert(sizeof(struct SaveBlock1) == 15568, "Pinned SaveBlock1");
 _Static_assert(sizeof(struct SaveBlock2) == 3884, "Pinned SaveBlock2");
-_Static_assert(sizeof(struct SaveBlock3) == 4, "Pinned SaveBlock3");
+_Static_assert(sizeof(struct SaveBlock3) == 600, "Ownership SaveBlock3");
+_Static_assert(offsetof(struct SaveBlock1, daycare) == 0x3030, "Pinned daycare offset");
+_Static_assert(sizeof(struct DaycareMon) == 140, "Pinned daycare size");
 _Static_assert(sizeof(struct PokemonStorage) == 34144, "Pinned storage");
 _Static_assert(sizeof(rng_value_t) == 16, "Pinned SFC32");
 
@@ -59,6 +63,7 @@ static EWRAM_DATA u32 sBankRotations[2] = {0};
 static EWRAM_DATA u16 sBankIds[2] = {0};
 static EWRAM_DATA u8 sBankErased[2] = {0};
 static EWRAM_DATA u8 sPublishId = 0;
+static EWRAM_DATA u32 sImportOwnership[2][150] = {0};
 static EWRAM_DATA bool8 sPending = FALSE;
 static EWRAM_DATA bool8 sSavedResetDisabled = FALSE;
 static EWRAM_DATA bool8 sCommitted = FALSE;
@@ -147,7 +152,9 @@ static bool32 FieldReady(void)
         && gPlayerAvatar.tileTransitionState == 0 && gPlayerAvatar.runningState == 0
         && !gMain.inBattle && !gReceivedRemoteLinkPlayers && !gWirelessCommType
         && gTrainerHillVBlankCounter == NULL && !GetCurrentTrainerHillMapId()
-        && !InBattlePyramid() && !GetSafariZoneFlag();
+        && !InBattlePyramid() && !GetSafariZoneFlag()
+        && !gSaveBlock2Ptr->frontier.challengeStatus && !gSaveBlock2Ptr->frontier.challengePaused
+        && (!B_FLAG_SKY_BATTLE || !FlagGet(B_FLAG_SKY_BATTLE));
 }
 
 static void PublishResponse(const struct MultiplayerSaveControl *command, u8 status, const u8 *data, u16 length, u32 offset)
@@ -319,8 +326,13 @@ static u8 ValidateSector(u32 physical)
         return MP_SAVE_VALIDATION;
     size = sSectionSizes[id];
     if (sector->checksum != Checksum(raw, size) || !AllBytes(raw + size, 3968 - size, 0)
-     || !AllBytes(raw + 3968 + (id == 0 ? 4 : 0), 116 - (id == 0 ? 4 : 0), 0))
+     || !AllBytes(raw + 3968 + (id < 5 ? 116 : id == 5 ? 20 : 0), id < 5 ? 0 : id == 5 ? 96 : 116, 0))
         return MP_SAVE_VALIDATION;
+    if (id < 6)
+    {
+        u32 chunkSize = id < 5 ? 116 : 20;
+        memcpy((u8 *)sImportOwnership[bank] + id * 116, raw + 3968, chunkSize);
+    }
     rotation = ((physical % 14) + 14 - id) % 14;
     if (sector->counter % 2 != bank)
         return MP_SAVE_VALIDATION;
@@ -352,8 +364,19 @@ static bool32 ValidBanks(void)
 {
     u32 selected = sSourceCounter & 1;
     u32 other = selected ^ 1;
-    if (sBankIds[selected] != 0x3FFF || sBankErased[selected])
+    if (sBankIds[selected] != 0x3FFF || sBankErased[selected]
+     || !MultiplayerOwnership_ImportMatches((const u8 *)sImportOwnership[selected]))
         return FALSE;
+    if (!sBankErased[other])
+    {
+        const struct MultiplayerOwnershipRecord *previous = (const void *)((const u8 *)sImportOwnership[other] + 4);
+        const struct MultiplayerOwnershipRecord *current = (const void *)((const u8 *)sImportOwnership[selected] + 4);
+        if (!MultiplayerOwnership_ValidateSave((const u8 *)sImportOwnership[other], TRUE))
+            return FALSE;
+        if (!MultiplayerOwnership_IsLegacy((const u8 *)sImportOwnership[other])
+         && (memcmp(previous->worldId, current->worldId, 16) || memcmp(previous->playerId, current->playerId, 16)))
+            return FALSE;
+    }
     if (sBankErased[other] == 14 && !sBankIds[other])
         return TRUE;
     return sBankIds[other] == 0x3FFF && !sBankErased[other]
@@ -374,14 +397,16 @@ void MultiplayerSave_Init(void)
     memset((void *)&gMultiplayerSaveMailbox, 0, sizeof(gMultiplayerSaveMailbox));
     sState = MP_SAVE_UNBOUND; sFrame = 0; sSeenGeneration = 0;
     sIncarnation = 0; sSession = 0; sLastSeq = 0; sPending = FALSE;
-    gMultiplayerSaveMailbox.abiVersion = 1;
+    MultiplayerOwnership_InvalidateGrant();
+    // Retain the linker-visible ownership marker despite --gc-sections.
+    gMultiplayerSaveMailbox.abiVersion = *(const volatile u32 *)&gMultiplayerOwnershipAbi;
     gMultiplayerSaveMailbox.byteSize = 512;
     gMultiplayerSaveMailbox.magic = MULTIPLAYER_SAVE_MAGIC;
 }
 
 static void Handle(const struct MultiplayerSaveControl *command)
 {
-    u8 data[48];
+    u8 data[80];
     u8 status = MP_SAVE_OK;
     if (command->status || command->length > 192 || !AllBytes(command->data + command->length, 192 - command->length, 0)
      || command->chunkCrc32 != Crc32(0, command->data, command->length)
@@ -416,6 +441,7 @@ static void Handle(const struct MultiplayerSaveControl *command)
         {
             sIncarnation = command->incarnation; sSession = command->sessionEpoch;
             sLastSeq = 1; sState = MP_SAVE_BOUND;
+            MultiplayerOwnership_InvalidateGrant();
             sLastCommand = *command;
         }
         PublishResponse(command, status, NULL, 0, 0); return;
@@ -450,6 +476,8 @@ static void Handle(const struct MultiplayerSaveControl *command)
         if (command->length || command->offset) { status = MP_SAVE_MALFORMED; break; }
         if (!FieldReady() || !gFlashMemoryPresent) { status = MP_SAVE_UNSAFE; break; }
         Hold(MP_SAVE_EXPORTING, command);
+        status = MultiplayerOwnership_PrepareExport();
+        if (status != MP_SAVE_OK) { Release(); break; }
         SaveMapView();
         HandleSavingData(SAVE_NORMAL);
         if (gDamagedSaveSectors) { Release(); status = MP_SAVE_FLASH; break; }
@@ -481,6 +509,8 @@ static void Handle(const struct MultiplayerSaveControl *command)
         sExpectedCrc = ReadU32(command->data); sSourceCounter = ReadU32(command->data + 4);
         sTargetCounter = gSaveCounter + 1; sTargetRotation = (gLastWrittenSector + 1) % 14;
         memset(sBankIds, 0, sizeof(sBankIds)); memset(sBankErased, 0, sizeof(sBankErased));
+        memset(sImportOwnership, 0, sizeof(sImportOwnership));
+        MultiplayerOwnership_InvalidateGrant();
         if (!EraseStaging()) { sState = MP_SAVE_ERROR; status = MP_SAVE_FLASH; break; }
         PutU32(data, sTargetCounter); PutU32(data + 4, sTargetRotation);
         PublishResponse(command, MP_SAVE_OK, data, 8, 0); return;
@@ -505,7 +535,8 @@ static void Handle(const struct MultiplayerSaveControl *command)
         {
             sPending = TRUE; StartReload(MP_SAVE_OK); return;
         }
-        PutU32(data, sCrc); Release(); PublishResponse(command, MP_SAVE_OK, data, 4, sOffset); return;
+        PutU32(data, sCrc); MultiplayerOwnership_Acknowledge(); Release();
+        PublishResponse(command, MP_SAVE_OK, data, 4, sOffset); return;
     case MP_SAVE_CANCEL:
         if (command->length) { status = MP_SAVE_MALFORMED; break; }
         if (sState == MP_SAVE_IMPORTING)
@@ -528,6 +559,22 @@ static void Handle(const struct MultiplayerSaveControl *command)
         else if (sState == MP_SAVE_EXPORTING)
             Release();
         PublishResponse(command, MP_SAVE_CANCELED, NULL, 0, sOffset); return;
+    case MP_SAVE_QUERY_OWNERSHIP:
+        if (sState != MP_SAVE_BOUND) { status = MP_SAVE_BUSY; break; }
+        if (command->length || command->offset) { status = MP_SAVE_MALFORMED; break; }
+        if (!FieldReady()) { status = MP_SAVE_UNSAFE; break; }
+        status = MultiplayerOwnership_Query(data);
+        if (status == MP_SAVE_OK) { PublishResponse(command, status, data, 80, 0); return; }
+        break;
+    case MP_SAVE_GRANT_OWNERSHIP:
+        if (sState != MP_SAVE_BOUND) { status = MP_SAVE_BUSY; break; }
+        if (command->length != 60 || command->offset) { status = MP_SAVE_MALFORMED; break; }
+        if (!FieldReady()) { status = MP_SAVE_UNSAFE; break; }
+        status = MultiplayerOwnership_Grant(command->data, command->sessionEpoch, command->incarnation);
+        if (status == MP_SAVE_OK)
+            status = MultiplayerOwnership_Query(data);
+        if (status == MP_SAVE_OK) { PublishResponse(command, status, data, 80, 0); return; }
+        break;
     case MP_SAVE_QUERY:
         if (command->length) { status = MP_SAVE_MALFORMED; break; }
         PutU32(data, sState); PutU32(data + 4, sOffset); PutU32(data + 8, sCrc); PutU32(data + 12, gSaveCounter);
@@ -582,6 +629,8 @@ void MultiplayerSave_Tick(void)
         if (FieldReady())
         {
             PutU32(data, sCrc);
+            if (sReloadStatus == MP_SAVE_OK && sLastCommand.opcode == MP_SAVE_END)
+                MultiplayerOwnership_Acknowledge();
             Release();
             PublishResponse(&sLastCommand, sReloadStatus, sReloadStatus == MP_SAVE_OK ? data : NULL,
                             sReloadStatus == MP_SAVE_OK ? 4 : 0, sOffset);

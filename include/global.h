@@ -254,6 +254,25 @@ struct NPCFollower
 #include "constants/items.h"
 #define ITEM_FLAGS_COUNT ((ITEMS_COUNT / 8) + ((ITEMS_COUNT % 8) ? 1 : 0))
 
+struct MultiplayerOwnershipRecord
+{
+    u32 magic;
+    u16 version;
+    u16 byteSize;
+    u8 worldId[16];
+    u8 playerId[16];
+    u8 grantId[16];
+    u32 start;
+    u32 end;
+    u32 next;
+    u32 lease;
+    u32 incarnation;
+    u16 retirementCount;
+    u16 reserved;
+    u32 retirements[128];
+    u32 checksum;
+};
+
 struct SaveBlock3
 {
 #if OW_USE_FAKE_RTC
@@ -272,6 +291,7 @@ struct SaveBlock3
 #if APRICORN_TREE_COUNT > 0
     u8 apricornTrees[NUM_APRICORN_TREE_BYTES];
 #endif
+    struct MultiplayerOwnershipRecord ownership;
 }; /* max size 1624 bytes */
 
 extern struct SaveBlock3 *gSaveBlock3Ptr;

@@ -3,6 +3,7 @@
 #include "gba/flash_internal.h"
 #include "fieldmap.h"
 #include "save.h"
+#include "multiplayer_ownership.h"
 #include "task.h"
 #include "decompress.h"
 #include "load_save.h"
@@ -94,6 +95,7 @@ COMMON_DATA MainCallback gGameContinueCallback = NULL;
 COMMON_DATA struct SaveSectorLocation gRamSaveSectorLocations[NUM_SECTORS_PER_SLOT] = {0};
 COMMON_DATA u16 gSaveAttemptStatus = 0;
 
+static EWRAM_DATA bool8 sOwnershipPartialComplete = FALSE;
 EWRAM_DATA struct SaveSector gSaveDataBuffer = {0}; // Buffer used for reading/writing sectors
 
 void ClearSaveData(void)
@@ -715,6 +717,13 @@ u8 HandleSavingData(u8 saveType)
     u8 i;
     u32 *backupVar = gTrainerHillVBlankCounter;
 
+    if (MultiplayerOwnership_IsEnrolled())
+    {
+        if (!MultiplayerOwnership_CanSaveParty())
+            return SAVE_STATUS_ERROR;
+        if (saveType == SAVE_LINK || saveType == SAVE_EREADER)
+            saveType = SAVE_NORMAL;
+    }
     gTrainerHillVBlankCounter = NULL;
     UpdateSaveAddresses();
     switch (saveType)
@@ -778,7 +787,11 @@ u8 TrySavingData(u8 saveType)
         return SAVE_STATUS_ERROR;
     }
 
-    HandleSavingData(saveType);
+    if (HandleSavingData(saveType) == SAVE_STATUS_ERROR)
+    {
+        gSaveAttemptStatus = SAVE_STATUS_ERROR;
+        return SAVE_STATUS_ERROR;
+    }
     if (!gDamagedSaveSectors)
     {
         gSaveAttemptStatus = SAVE_STATUS_OK;
@@ -794,6 +807,8 @@ u8 TrySavingData(u8 saveType)
 
 bool8 LinkFullSave_Init(void)
 {
+    if (MultiplayerOwnership_IsEnrolled() && !MultiplayerOwnership_CanSaveParty())
+        return TRUE;
     if (gFlashMemoryPresent != TRUE)
         return TRUE;
     UpdateSaveAddresses();
@@ -835,6 +850,19 @@ bool8 LinkFullSave_SetLastSectorSignature(void)
 
 bool8 WriteSaveBlock2(void)
 {
+    sOwnershipPartialComplete = FALSE;
+    if (MultiplayerOwnership_IsEnrolled())
+    {
+        // A 600-byte record spans six chunks; the old five-sector write would tear it.
+        sOwnershipPartialComplete = TRUE;
+        if (!MultiplayerOwnership_CanSaveParty() || gFlashMemoryPresent != TRUE)
+        {
+            gSaveAttemptStatus = SAVE_STATUS_ERROR;
+            return TRUE;
+        }
+        gSaveAttemptStatus = TrySavingData(SAVE_NORMAL);
+        return gSaveAttemptStatus != SAVE_STATUS_OK;
+    }
     if (gFlashMemoryPresent != TRUE)
         return TRUE;
 
@@ -854,7 +882,13 @@ bool8 WriteSaveBlock2(void)
 bool8 WriteSaveBlock1Sector(void)
 {
     bool32 finished = FALSE;
-    u16 sectorId = ++gIncrementalSectorId; // Because WriteSaveBlock2 will have been called prior, this will be SECTOR_ID_SAVEBLOCK1_START
+    u16 sectorId;
+    if (sOwnershipPartialComplete || MultiplayerOwnership_IsEnrolled())
+    {
+        sOwnershipPartialComplete = FALSE;
+        return TRUE;
+    }
+    sectorId = ++gIncrementalSectorId; // Because WriteSaveBlock2 will have been called prior, this will be SECTOR_ID_SAVEBLOCK1_START
     if (sectorId <= SECTOR_ID_SAVEBLOCK1_END)
     {
         // Write a single sector of SaveBlock1
@@ -879,6 +913,7 @@ bool8 WriteSaveBlock1Sector(void)
 u8 LoadGameSave(u8 saveType)
 {
     u8 status;
+    MultiplayerOwnership_InvalidateGrant();
 
     if (gFlashMemoryPresent != TRUE)
     {
@@ -911,6 +946,7 @@ u8 LoadGameSave(u8 saveType)
         break;
     }
 
+    MultiplayerOwnership_Loaded();
     return status;
 }
 
@@ -1083,5 +1119,6 @@ static void CopyToSaveBlock3(u32 sectorId, struct SaveSector *sector)
 static void CopyFromSaveBlock3(u32 sectorId, struct SaveSector *sector)
 {
     u32 size = SaveBlock3Size(sectorId);
+    MultiplayerOwnership_RefreshChecksum();
     memcpy(sector->saveBlock3Chunk, (u8 *)&gSaveblock3 + (sectorId * SAVE_BLOCK_3_CHUNK_SIZE), size);
 }

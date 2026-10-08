@@ -2116,6 +2116,14 @@ u32 GetBoxMonData3(struct BoxPokemon *boxMon, s32 field, u8 *data)
         case MON_DATA_SPECIES:
             retVal = IsBadEgg(boxMon) ? SPECIES_EGG : GetSubstruct0(boxMon)->species;
             break;
+        case MON_DATA_MULTIPLAYER_ID:
+            retVal = GetSubstruct0(boxMon)->unused_02
+                | GetSubstruct0(boxMon)->unused_04 << 6
+                | GetSubstruct0(boxMon)->unused_0A << 9
+                | GetSubstruct1(boxMon)->unused_04 << 11
+                | GetSubstruct1(boxMon)->unused_06 << 16
+                | GetSubstruct3(boxMon)->unused_0B << 19;
+            break;
         case MON_DATA_HELD_ITEM:
             retVal = GetSubstruct0(boxMon)->heldItem;
             break;
@@ -2621,6 +2629,20 @@ void SetBoxMonData(struct BoxPokemon *boxMon, s32 field, const void *dataArg)
             }
             break;
         }
+        case MON_DATA_MULTIPLAYER_ID:
+        {
+            u32 identity = data[0] | data[1] << 8 | data[2] << 16 | (u32)data[3] << 24;
+            if (identity <= 0xFFFFF)
+            {
+                GetSubstruct0(boxMon)->unused_02 = identity;
+                GetSubstruct0(boxMon)->unused_04 = identity >> 6;
+                GetSubstruct0(boxMon)->unused_0A = identity >> 9;
+                GetSubstruct1(boxMon)->unused_04 = identity >> 11;
+                GetSubstruct1(boxMon)->unused_06 = identity >> 16;
+                GetSubstruct3(boxMon)->unused_0B = identity >> 19;
+            }
+            break;
+        }
         case MON_DATA_SPECIES:
         {
             struct PokemonSubstruct0 *substruct0 = GetSubstruct0(boxMon);
@@ -2931,6 +2953,23 @@ void SetBoxMonData(struct BoxPokemon *boxMon, s32 field, const void *dataArg)
 
     if (field > MON_DATA_ENCRYPT_SEPARATOR)
         boxMon->checksum = CalculateBoxMonChecksumReencrypt(boxMon);
+}
+
+bool32 InspectBoxMonIdentity(const struct BoxPokemon *boxMon, u32 *identity, bool32 *occupied)
+{
+    // GetBoxMonData marks bad eggs. Admission inspects a copy.
+    struct BoxPokemon copy = *boxMon;
+    enum Species species;
+    DecryptBoxMon(&copy);
+    if (copy.isBadEgg || CalculateBoxMonChecksum(&copy) != copy.checksum)
+        return FALSE;
+    species = GetSubstruct0(&copy)->species;
+    if (species >= NUM_SPECIES || (!!species != !!copy.hasSpecies))
+        return FALSE;
+    EncryptBoxMon(&copy);
+    *identity = GetBoxMonData(&copy, MON_DATA_MULTIPLAYER_ID);
+    *occupied = species != SPECIES_NONE;
+    return *occupied || *identity == 0;
 }
 
 void CopyMon(void *dest, void *src, size_t size)

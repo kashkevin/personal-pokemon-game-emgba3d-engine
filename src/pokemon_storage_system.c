@@ -1,4 +1,5 @@
 #include "global.h"
+#include "multiplayer_ownership.h"
 #include "malloc.h"
 #include "bg.h"
 #include "data.h"
@@ -109,6 +110,7 @@ enum {
     MSG_ITEM_IS_HELD,
     MSG_CHANGED_TO_ITEM,
     MSG_CANT_STORE_MAIL,
+    MSG_OWNERSHIP_RELEASE_REFUSED,
 };
 
 // IDs for how to resolve variables in the above messages
@@ -650,7 +652,7 @@ static void ResetSelectionAfterDeposit(void);
 static void InitReleaseMon(void);
 static bool8 TryHideReleaseMon(void);
 static void InitCanReleaseMonVars(void);
-static void ReleaseMon(void);
+static bool32 ReleaseMon(void);
 static bool32 AtLeastThreeUsableMons(void);
 static s8 RunCanReleaseMon(void);
 static void SaveMovingMon(void);
@@ -1058,6 +1060,7 @@ static const struct StorageMessage sMessages[] =
     [MSG_WAS_DEPOSITED]        = {COMPOUND_STRING("{DYNAMIC 0} was deposited."), MSG_VAR_MON_NAME_1},
     [MSG_BOX_IS_FULL]          = {COMPOUND_STRING("The BOX is full."),           MSG_VAR_NONE},
     [MSG_RELEASE_POKE]         = {COMPOUND_STRING("Release this POKéMON?"),      MSG_VAR_NONE},
+    [MSG_OWNERSHIP_RELEASE_REFUSED] = {COMPOUND_STRING("Save a multiplayer checkpoint\nbefore releasing this POKEMON."), MSG_VAR_NONE},
     [MSG_WAS_RELEASED]         = {COMPOUND_STRING("{DYNAMIC 0} was released."),  MSG_VAR_RELEASE_MON_1},
     [MSG_BYE_BYE]              = {COMPOUND_STRING("Bye-bye, {DYNAMIC 0}!"),      MSG_VAR_RELEASE_MON_3},
     [MSG_MARK_POKE]            = {COMPOUND_STRING("Mark your POKéMON."),         MSG_VAR_NONE},
@@ -2951,7 +2954,13 @@ static void Task_ReleaseMon(u8 taskId)
         }
         break;
     case 3:
-        ReleaseMon();
+        if (!ReleaseMon())
+        {
+            ReshowReleaseMon();
+            sStorage->state = 14;
+            PrintMessage(MSG_OWNERSHIP_RELEASE_REFUSED);
+            break;
+        }
         RefreshDisplayMonData();
         PrintMessage(MSG_WAS_RELEASED);
         sStorage->state++;
@@ -3031,6 +3040,17 @@ static void Task_ReleaseMon(u8 taskId)
         {
             ClearBottomWindow();
             SetPokeStorageTask(Task_PokeStorageMain);
+        }
+        break;
+    case 14:
+        if (!ResetReleaseMonSpritePtr())
+        {
+            TrySetCursorFistAnim();
+            if (JOY_NEW(A_BUTTON | B_BUTTON | DPAD_ANY))
+            {
+                ClearBottomWindow();
+                SetPokeStorageTask(Task_PokeStorageMain);
+            }
         }
         break;
     }
@@ -6549,11 +6569,16 @@ static bool8 TryHideReleaseMon(void)
     }
 }
 
-static void ReleaseMon(void)
+static bool32 ReleaseMon(void)
 {
     u8 boxId;
     enum Item item = ITEM_NONE;
+    struct BoxPokemon *mon = sIsMonBeingMoved ? &sStorage->movingMon.box
+        : sCursorArea == CURSOR_AREA_IN_PARTY ? &gParties[B_TRAINER_PLAYER][sCursorPosition].box
+        : GetBoxedMonPtr(StorageGetCurrentBox(), sCursorPosition);
 
+    if (!MultiplayerOwnership_Retire(mon, MP_RETIRE_RELEASE))
+        return FALSE;
     DestroyReleaseMonIcon();
     if (sIsMonBeingMoved)
     {
@@ -6579,6 +6604,7 @@ static void ReleaseMon(void)
             AddBagItem(item, 1);
     }
     TryRefreshDisplayMon();
+    return TRUE;
 }
 
 static void TrySetCursorFistAnim(void)

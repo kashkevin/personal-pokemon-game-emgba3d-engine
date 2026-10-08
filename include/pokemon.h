@@ -125,6 +125,7 @@ enum MonData {
     MON_DATA_GIGANTAMAX_FACTOR,
     MON_DATA_TERA_TYPE,
     MON_DATA_EVOLUTION_TRACKER,
+    MON_DATA_MULTIPLAYER_ID,
 };
 
 #define BLOCK_AI_DYNAMAX 15 // Used as dynamax level value by the AI to indicate this mon shouldn't dynamax
@@ -960,6 +961,7 @@ void TryToSetBattleFormChangeMoves(struct Pokemon *mon, enum FormChanges method)
 u32 GetMonFriendshipScore(struct Pokemon *pokemon);
 u32 GetMonAffectionHearts(struct Pokemon *pokemon);
 void UpdateMonPersonality(struct BoxPokemon *boxMon, u32 personality);
+bool32 InspectBoxMonIdentity(const struct BoxPokemon *boxMon, u32 *identity, bool32 *occupied);
 u8 CalculatePartyCount(enum BattleTrainer trainer);
 u8 CalculatePartyCountOfSide(enum BattlerId battler);
 enum Species SanitizeSpeciesId(enum Species species);
