@@ -39,6 +39,8 @@ _Static_assert(sizeof(struct PokemonStorage) == 34144, "Pinned storage");
 _Static_assert(sizeof(rng_value_t) == 16, "Pinned SFC32");
 
 const u32 gMultiplayerTradeAbiVersion = 1;
+// Optional read-only 4096-byte export window in the existing sector buffer.
+const u32 gMultiplayerSaveWindowAbiVersion = 1;
 EWRAM_DATA volatile struct MultiplayerSaveMailbox gMultiplayerSaveMailbox = {0};
 static EWRAM_DATA struct MultiplayerSaveControl sLastCommand = {0};
 static EWRAM_DATA struct MultiplayerSaveControl sLastResponse = {0};
@@ -428,6 +430,7 @@ void MultiplayerSave_Init(void)
     memset(sRequestId, 0, sizeof(sRequestId));
     // Read the capability through volatile storage so section GC retains it.
     (void)*(const volatile u32 *)&gMultiplayerTradeAbiVersion;
+    (void)*(const volatile u32 *)&gMultiplayerSaveWindowAbiVersion;
     MultiplayerOwnership_InvalidateGrant();
     // Retain the linker-visible ownership marker despite --gc-sections.
     gMultiplayerSaveMailbox.abiVersion = *(const volatile u32 *)&gMultiplayerOwnershipAbi;
@@ -559,6 +562,13 @@ static void Handle(const struct MultiplayerSaveControl *command)
     }
     if (command->commandSeq == sLastSeq && !memcmp(command, &sLastCommand, sizeof(*command)))
     {
+        // The sector buffer is only immutable while this export is held.
+        // A watchdog/cancel may have released it since a lost reply.
+        if (command->opcode == MP_SAVE_READ_WINDOW
+         && sState != MP_SAVE_EXPORTING && sState != MP_SAVE_COMMITTED)
+        {
+            PublishResponse(command, MP_SAVE_ORDER, NULL, 0, sOffset); return;
+        }
         if (!sPending)
         {
             struct MultiplayerSaveControl cached = sCachedResponse;
@@ -629,6 +639,15 @@ static void Handle(const struct MultiplayerSaveControl *command)
             memcpy(chunk, sLastResponse.data, 128);
             PublishResponse(command, MP_SAVE_OK, chunk, 128, command->offset);
         }
+        return;
+    case MP_SAVE_READ_WINDOW:
+        if (sState != MP_SAVE_EXPORTING && sState != MP_SAVE_COMMITTED) { status = MP_SAVE_ORDER; break; }
+        if (command->length || command->offset != sOffset || sOffset >= 131072 || (sOffset & 4095))
+            { status = MP_SAVE_ORDER; break; }
+        ReadFlashBytes(sOffset, (u8 *)&gSaveDataBuffer, 4096);
+        PutU32(data, Crc32(0, (u8 *)&gSaveDataBuffer, 4096));
+        sCrc = Crc32(sCrc, (u8 *)&gSaveDataBuffer, 4096); sOffset += 4096;
+        PublishResponse(command, MP_SAVE_OK, data, 4, command->offset);
         return;
     case MP_SAVE_BEGIN_IMPORT:
         if (sState != MP_SAVE_BOUND && !(sTradeActive && (sState == MP_SAVE_TRADE_HELD
