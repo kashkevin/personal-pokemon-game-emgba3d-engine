@@ -95,7 +95,11 @@ IslandCave_EventScript_Regice::
 	delay 40
 	waitmoncry
 #if MP_LOCAL_RESET_STATIC || TESTING
+IslandCave_EventScript_RegiceAdmission::
 	special MultiplayerStaticReset_BeginCurrent
+	goto_if_ne VAR_RESULT, MP_LOCAL_RESET_ADMISSION_PENDING, IslandCave_EventScript_RegiceAdmissionReady
+	waitstate
+IslandCave_EventScript_RegiceAdmissionReady::
 	goto_if_eq VAR_RESULT, FALSE, IslandCave_EventScript_RegiceResetReturn
 #endif
 	setwildbattle SPECIES_REGICE, 40

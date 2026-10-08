@@ -153,11 +153,7 @@ bool32 MultiplayerStaticReset_GuardMatches(u32 id)
 
 static void Begin(u32 id)
 {
-#if TESTING
-    gSpecialVar_Result = MultiplayerLocalReset_TryBegin(id);
-#else
     MultiplayerResetAdmission_Begin(id);
-#endif
 }
 
 void MultiplayerStaticReset_BeginVoltorb1(void) { Begin(MP_STATIC_RESET_VOLTORB_1); }

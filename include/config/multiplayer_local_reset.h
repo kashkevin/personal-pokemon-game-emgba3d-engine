@@ -12,5 +12,7 @@
 #ifndef MP_LOCAL_RESET_STATIC
 #define MP_LOCAL_RESET_STATIC 0
 #endif
+// A published admission must yield the authored bytecode before inspecting TRUE/FALSE.
+#define MP_LOCAL_RESET_ADMISSION_PENDING 2
 #define MP_LOCAL_RESET_ENABLED (MP_LOCAL_RESET_DEVELOPMENT || MP_LOCAL_RESET_STATIC || MP_LOCAL_RESET_NEW_MAUVILLE_PILOT || TESTING)
 #endif

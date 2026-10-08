@@ -47,7 +47,11 @@ SkyPillar_Top_EventScript_Rayquaza::
 	delay 40
 	waitmoncry
 #if MP_LOCAL_RESET_STATIC || TESTING
+SkyPillar_Top_EventScript_RayquazaAdmission::
 	special MultiplayerStaticReset_BeginCurrent
+	goto_if_ne VAR_RESULT, MP_LOCAL_RESET_ADMISSION_PENDING, SkyPillar_Top_EventScript_RayquazaAdmissionReady
+	waitstate
+SkyPillar_Top_EventScript_RayquazaAdmissionReady::
 	goto_if_eq VAR_RESULT, FALSE, SkyPillar_Top_EventScript_RayquazaResetReturn
 #endif
 	setwildbattle SPECIES_RAYQUAZA, 70

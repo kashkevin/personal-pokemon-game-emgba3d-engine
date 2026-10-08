@@ -30,7 +30,11 @@ AquaHideout_B1F_EventScript_Electrode1::
 	lock
 	faceplayer
 #if MP_LOCAL_RESET_STATIC || TESTING
+AquaHideout_B1F_EventScript_Electrode1Admission::
 	special MultiplayerStaticReset_BeginCurrent
+	goto_if_ne VAR_RESULT, MP_LOCAL_RESET_ADMISSION_PENDING, AquaHideout_B1F_EventScript_Electrode1AdmissionReady
+	waitstate
+AquaHideout_B1F_EventScript_Electrode1AdmissionReady::
 	goto_if_eq VAR_RESULT, FALSE, AquaHideout_B1F_EventScript_Electrode1ResetReturn
 #endif
 	setwildbattle SPECIES_ELECTRODE, 30
@@ -69,7 +73,11 @@ AquaHideout_B1F_EventScript_Electrode2::
 	lock
 	faceplayer
 #if MP_LOCAL_RESET_STATIC || TESTING
+AquaHideout_B1F_EventScript_Electrode2Admission::
 	special MultiplayerStaticReset_BeginCurrent
+	goto_if_ne VAR_RESULT, MP_LOCAL_RESET_ADMISSION_PENDING, AquaHideout_B1F_EventScript_Electrode2AdmissionReady
+	waitstate
+AquaHideout_B1F_EventScript_Electrode2AdmissionReady::
 	goto_if_eq VAR_RESULT, FALSE, AquaHideout_B1F_EventScript_Electrode2ResetReturn
 #endif
 	setwildbattle SPECIES_ELECTRODE, 30

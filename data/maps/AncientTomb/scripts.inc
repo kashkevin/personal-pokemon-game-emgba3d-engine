@@ -62,7 +62,11 @@ AncientTomb_EventScript_Registeel::
 	delay 40
 	waitmoncry
 #if MP_LOCAL_RESET_STATIC || TESTING
+AncientTomb_EventScript_RegisteelAdmission::
 	special MultiplayerStaticReset_BeginCurrent
+	goto_if_ne VAR_RESULT, MP_LOCAL_RESET_ADMISSION_PENDING, AncientTomb_EventScript_RegisteelAdmissionReady
+	waitstate
+AncientTomb_EventScript_RegisteelAdmissionReady::
 	goto_if_eq VAR_RESULT, FALSE, AncientTomb_EventScript_RegisteelResetReturn
 #endif
 	setwildbattle SPECIES_REGISTEEL, 40

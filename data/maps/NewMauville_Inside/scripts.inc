@@ -177,7 +177,11 @@ NewMauville_Inside_EventScript_Voltorb1::
 	lock
 	faceplayer
 #if MP_LOCAL_RESET_STATIC || MP_LOCAL_RESET_NEW_MAUVILLE_PILOT || TESTING
+NewMauville_Inside_EventScript_Voltorb1Admission::
 	special MultiplayerStaticReset_BeginVoltorb1
+	goto_if_ne VAR_RESULT, MP_LOCAL_RESET_ADMISSION_PENDING, NewMauville_Inside_EventScript_Voltorb1AdmissionReady
+	waitstate
+NewMauville_Inside_EventScript_Voltorb1AdmissionReady::
 	goto_if_eq VAR_RESULT, FALSE, NewMauville_Inside_EventScript_Voltorb1ResetReturn
 #endif
 	setwildbattle SPECIES_VOLTORB, 25
@@ -218,7 +222,11 @@ NewMauville_Inside_EventScript_Voltorb2::
 	lock
 	faceplayer
 #if MP_LOCAL_RESET_STATIC || TESTING
+NewMauville_Inside_EventScript_Voltorb2Admission::
 	special MultiplayerStaticReset_BeginCurrent
+	goto_if_ne VAR_RESULT, MP_LOCAL_RESET_ADMISSION_PENDING, NewMauville_Inside_EventScript_Voltorb2AdmissionReady
+	waitstate
+NewMauville_Inside_EventScript_Voltorb2AdmissionReady::
 	goto_if_eq VAR_RESULT, FALSE, NewMauville_Inside_EventScript_Voltorb2ResetReturn
 #endif
 	setwildbattle SPECIES_VOLTORB, 25
@@ -257,7 +265,11 @@ NewMauville_Inside_EventScript_Voltorb3::
 	lock
 	faceplayer
 #if MP_LOCAL_RESET_STATIC || TESTING
+NewMauville_Inside_EventScript_Voltorb3Admission::
 	special MultiplayerStaticReset_BeginCurrent
+	goto_if_ne VAR_RESULT, MP_LOCAL_RESET_ADMISSION_PENDING, NewMauville_Inside_EventScript_Voltorb3AdmissionReady
+	waitstate
+NewMauville_Inside_EventScript_Voltorb3AdmissionReady::
 	goto_if_eq VAR_RESULT, FALSE, NewMauville_Inside_EventScript_Voltorb3ResetReturn
 #endif
 	setwildbattle SPECIES_VOLTORB, 25
