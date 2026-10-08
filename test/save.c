@@ -6,7 +6,8 @@
 // Please note that this simple check is not 100% foolproof, but should be able to catch most unintended shifts.
 #define T_SAVEBLOCK1_SIZE 15568
 #define T_SAVEBLOCK2_SIZE 3884
-#define T_SAVEBLOCK3_SIZE 4
+// Ownership-v1 deliberately extends the original four-byte prefix.
+#define T_SAVEBLOCK3_SIZE 600
 #define T_POKEMONSTORAGE_SIZE 34144
 
 TEST("SaveBlock1 is backwards compatible")
@@ -19,9 +20,12 @@ TEST("SaveBlock2 is backwards compatible")
     EXPECT_EQ(sizeof(struct SaveBlock2), T_SAVEBLOCK2_SIZE);
 }
 
-TEST("SaveBlock3 is backwards compatible")
+TEST("SaveBlock3 preserves its legacy prefix with the ownership-v1 extension")
 {
     EXPECT_EQ(sizeof(struct SaveBlock3), T_SAVEBLOCK3_SIZE);
+    EXPECT_EQ(offsetof(struct SaveBlock3, dexNavChain), 0);
+    EXPECT_EQ(offsetof(struct SaveBlock3, ownership), 4);
+    EXPECT_EQ(offsetof(struct SaveBlock3, ownership.checksum), 596);
 }
 
 TEST("PokemonStorage is backwards compatible")
