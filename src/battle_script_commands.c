@@ -1,4 +1,5 @@
 #include "global.h"
+#include "multiplayer_local_reset.h"
 #include "battle.h"
 #include "multiplayer_battle.h"
 #include "battle_hold_effects.h"
@@ -8273,6 +8274,7 @@ static void Cmd_handleballthrow(void)
 
 static void Cmd_givecaughtmon(void)
 {
+    MultiplayerLocalReset_CloseCapture();
     CMD_ARGS(const u8 *passInstr);
     enum GiveCaughtMonStates state = gBattleCommunication[MULTIUSE_STATE];
     // Restore players party in order to handle properly the case when a wild mon is caught.

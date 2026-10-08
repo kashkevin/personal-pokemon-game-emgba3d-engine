@@ -1,0 +1,271 @@
+#include "global.h"
+#include "config/battle.h"
+#include "multiplayer_local_reset.h"
+#include "multiplayer_save.h"
+#include "multiplayer_ownership.h"
+#include "multiplayer.h"
+#include "multiplayer_battle.h"
+#include "pokemon.h"
+#include "pokemon_storage_system.h"
+#include "battle.h"
+#include "battle_interface.h"
+#include "battle_message.h"
+#include "battle_script_commands.h"
+#include "main.h"
+#include "event_data.h"
+#include "constants/maps.h"
+#include "constants/map_groups.h"
+#include "constants/vars.h"
+#include "constants/battle.h"
+#include "constants/battle_string_ids.h"
+
+// Compared guards only. Never restore these as a character snapshot.
+struct LocalResetGuard {
+    struct Pokemon party[PARTY_SIZE];
+    struct Bag bag;
+    u32 money, storageHash, daycareHash, ownershipHash;
+    u16 coins;
+    u8 partyCount;
+    u8 dexCaught[NUM_DEX_FLAG_BYTES];
+};
+static EWRAM_DATA struct LocalResetGuard sLocalResetGuard;
+static EWRAM_DATA u32 sLocalResetSession, sLocalResetIncarnation, sLocalResetRosterEpoch;
+static EWRAM_DATA bool8 sLocalResetActive, sLocalResetWindow, sLocalResetRequested, sLocalResetConfirming, sLocalResetAccepted, sLocalResetClosed, sLocalResetChordHeld;
+static EWRAM_DATA u8 sLocalResetCursor;
+static const u8 sLocalResetPrompt[] = _("Reset this encounter?");
+
+static u32 Hash(const void *value, u32 size)
+{
+    const u8 *bytes = value;
+    u32 result = 2166136261u;
+    while (size--) result = (result ^ *bytes++) * 16777619u;
+    return result;
+}
+
+static bool32 BindingReady(void)
+{
+    u32 session, incarnation;
+    return Multiplayer_IsConnected()
+        && MultiplayerSave_GetIdleBinding(&session, &incarnation)
+        && session == sLocalResetSession && incarnation == sLocalResetIncarnation
+        && gMultiplayerMailbox.rosterEpoch == sLocalResetRosterEpoch
+        && !MultiplayerBattle_IsActive();
+}
+
+static bool32 GuardMatches(void)
+{
+    return gSaveBlock1Ptr && gSaveBlock2Ptr && gSaveBlock3Ptr && gPokemonStoragePtr
+        && gPartiesCount[B_TRAINER_PLAYER] == sLocalResetGuard.partyCount
+        && !memcmp(gParties[B_TRAINER_PLAYER], sLocalResetGuard.party, sizeof(sLocalResetGuard.party))
+        && !memcmp(&gSaveBlock1Ptr->bag, &sLocalResetGuard.bag, sizeof(sLocalResetGuard.bag))
+        && gSaveBlock1Ptr->money == sLocalResetGuard.money && gSaveBlock1Ptr->coins == sLocalResetGuard.coins
+        && !memcmp(gSaveBlock1Ptr->dexCaught, sLocalResetGuard.dexCaught, sizeof(sLocalResetGuard.dexCaught))
+        && Hash(gPokemonStoragePtr, sizeof(*gPokemonStoragePtr)) == sLocalResetGuard.storageHash
+        && Hash(&gSaveBlock1Ptr->daycare, sizeof(gSaveBlock1Ptr->daycare)) == sLocalResetGuard.daycareHash
+        && Hash(&gSaveBlock3Ptr->ownership, sizeof(gSaveBlock3Ptr->ownership)) == sLocalResetGuard.ownershipHash
+        && VarGet(MP_LOCAL_RESET_CAPTURED) == 0;
+}
+
+void MultiplayerLocalReset_Init(void)
+{
+    sLocalResetActive = sLocalResetWindow = sLocalResetRequested = sLocalResetConfirming = sLocalResetAccepted = sLocalResetClosed = FALSE;
+    sLocalResetSession = sLocalResetIncarnation = sLocalResetRosterEpoch = 0; sLocalResetChordHeld = FALSE;
+}
+
+u32 MultiplayerLocalReset_Count(void)
+{
+    return VarGet(MP_LOCAL_RESET_COUNTER_LO) | (u32)VarGet(MP_LOCAL_RESET_COUNTER_HI) << 16;
+}
+
+#if MP_LOCAL_RESET_DEVELOPMENT || TESTING
+static bool32 HasUsableParty(void)
+{
+    u32 slot;
+    if (!gPartiesCount[B_TRAINER_PLAYER] || gPartiesCount[B_TRAINER_PLAYER] > PARTY_SIZE)
+        return FALSE;
+    for (slot = 0; slot < gPartiesCount[B_TRAINER_PLAYER]; slot++)
+        if (GetMonData(&gParties[B_TRAINER_PLAYER][slot], MON_DATA_SANITY_HAS_SPECIES)
+         && !GetMonData(&gParties[B_TRAINER_PLAYER][slot], MON_DATA_IS_EGG)
+         && GetMonData(&gParties[B_TRAINER_PLAYER][slot], MON_DATA_HP))
+            return TRUE;
+    return FALSE;
+}
+#endif
+
+bool32 MultiplayerLocalReset_TryBegin(u32 encounterId)
+{
+#if MP_LOCAL_RESET_DEVELOPMENT || TESTING
+    u32 count;
+    if (encounterId != MP_LOCAL_RESET_DEVELOPMENT_ID || sLocalResetActive || gMain.inBattle
+     || !gSaveBlock1Ptr || !gSaveBlock2Ptr || !gSaveBlock3Ptr || !gPokemonStoragePtr
+     || gSaveBlock1Ptr->location.mapGroup != MAP_GROUP(MAP_LITTLEROOT_TOWN)
+     || gSaveBlock1Ptr->location.mapNum != MAP_NUM(MAP_LITTLEROOT_TOWN)
+     || gSpecialVar_LastTalked != 3 || !Multiplayer_IsConnected()
+     || !MultiplayerSave_GetIdleBinding(&sLocalResetSession, &sLocalResetIncarnation)
+     || MultiplayerBattle_IsActive() || !MultiplayerOwnership_IsEnrolled()
+     || !HasUsableParty() || VarGet(MP_LOCAL_RESET_CAPTURED))
+        return FALSE;
+    if (VarGet(MP_LOCAL_RESET_COUNTER_MAGIC) != 0
+     && VarGet(MP_LOCAL_RESET_COUNTER_MAGIC) != MP_LOCAL_RESET_MAGIC)
+        return FALSE;
+    if (!VarGet(MP_LOCAL_RESET_COUNTER_MAGIC)
+     && (VarGet(MP_LOCAL_RESET_COUNTER_LO) || VarGet(MP_LOCAL_RESET_COUNTER_HI)))
+        return FALSE;
+    count = MultiplayerLocalReset_Count();
+    if (count == 0xFFFFFFFFu) return FALSE;
+    count++;
+    VarSet(MP_LOCAL_RESET_COUNTER_MAGIC, MP_LOCAL_RESET_MAGIC);
+    VarSet(MP_LOCAL_RESET_COUNTER_LO, count);
+    VarSet(MP_LOCAL_RESET_COUNTER_HI, count >> 16);
+    memcpy(sLocalResetGuard.party, gParties[B_TRAINER_PLAYER], sizeof(sLocalResetGuard.party));
+    memcpy(&sLocalResetGuard.bag, &gSaveBlock1Ptr->bag, sizeof(sLocalResetGuard.bag));
+    memcpy(sLocalResetGuard.dexCaught, gSaveBlock1Ptr->dexCaught, sizeof(sLocalResetGuard.dexCaught));
+    sLocalResetGuard.partyCount = gPartiesCount[B_TRAINER_PLAYER];
+    sLocalResetGuard.money = gSaveBlock1Ptr->money; sLocalResetGuard.coins = gSaveBlock1Ptr->coins;
+    sLocalResetGuard.storageHash = Hash(gPokemonStoragePtr, sizeof(*gPokemonStoragePtr));
+    sLocalResetGuard.daycareHash = Hash(&gSaveBlock1Ptr->daycare, sizeof(gSaveBlock1Ptr->daycare));
+    sLocalResetGuard.ownershipHash = Hash(&gSaveBlock3Ptr->ownership, sizeof(gSaveBlock3Ptr->ownership));
+    sLocalResetRosterEpoch = gMultiplayerMailbox.rosterEpoch;
+    sLocalResetActive = TRUE; sLocalResetWindow = sLocalResetRequested = sLocalResetConfirming = sLocalResetAccepted = sLocalResetClosed = FALSE;
+    return TRUE;
+#else
+    return FALSE;
+#endif
+}
+
+void MultiplayerLocalReset_BeginDevelopmentHunt(void)
+{
+    gSpecialVar_Result = MultiplayerLocalReset_TryBegin(MP_LOCAL_RESET_DEVELOPMENT_ID);
+}
+
+static bool32 OpenWindow(void)
+{
+    if (!sLocalResetActive || sLocalResetClosed || sLocalResetAccepted || !gMain.inBattle || !gBattleStruct
+     || gBattleResults.battleTurnCounter || gBattleTypeFlags || !BindingReady() || !GuardMatches())
+        return FALSE;
+    sLocalResetWindow = TRUE;
+    return TRUE;
+}
+
+#if MP_LOCAL_RESET_DEVELOPMENT || TESTING
+static bool32 Request(void)
+{
+    if (!sLocalResetWindow || !gMain.inBattle || !gBattleStruct || gBattleResults.battleTurnCounter
+     || gBattleTypeFlags || !BindingReady() || !GuardMatches()) return FALSE;
+    sLocalResetRequested = TRUE;
+    return TRUE;
+}
+#endif
+
+static bool32 Confirm(bool32 yes)
+{
+    if (!sLocalResetRequested && !sLocalResetConfirming) return FALSE;
+    if (!yes)
+    {
+        sLocalResetRequested = sLocalResetConfirming = FALSE;
+        return FALSE;
+    }
+    if (!sLocalResetWindow || !BindingReady() || !GuardMatches()
+     || !gMain.inBattle || !gBattleStruct || gBattleResults.battleTurnCounter || gBattleTypeFlags)
+    {
+        sLocalResetWindow = sLocalResetRequested = sLocalResetConfirming = FALSE;
+        return FALSE;
+    }
+    sLocalResetAccepted = TRUE; sLocalResetWindow = sLocalResetRequested = sLocalResetConfirming = FALSE;
+    return TRUE;
+}
+
+bool32 MultiplayerLocalReset_HandleChord(void)
+{
+#if MP_LOCAL_RESET_DEVELOPMENT || TESTING
+    // Suppress a BIOS reboot for an enrolled game, including unsafe scenes.
+    u32 session, incarnation;
+    const u16 chord = A_BUTTON | B_BUTTON | START_BUTTON | SELECT_BUTTON;
+    if (JOY_HELD_RAW(chord) != chord)
+    {
+        sLocalResetChordHeld = FALSE;
+        return FALSE;
+    }
+    if (!MultiplayerSave_HasBinding()) return FALSE;
+    if (!sLocalResetChordHeld && MultiplayerSave_GetIdleBinding(&session, &incarnation)) Request();
+    sLocalResetChordHeld = TRUE;
+    return TRUE;
+#else
+    return FALSE;
+#endif
+}
+
+u32 MultiplayerLocalReset_HandlePlayerInput(enum BattlerId battler)
+{
+    if (!sLocalResetActive || GetBattlerPosition(battler) != B_POSITION_PLAYER_LEFT) return MP_LOCAL_RESET_INPUT_PASS;
+    if (!sLocalResetWindow && !sLocalResetClosed && !sLocalResetAccepted) OpenWindow();
+    if (sLocalResetRequested && !sLocalResetConfirming)
+    {
+        sLocalResetRequested = FALSE; sLocalResetConfirming = TRUE; sLocalResetCursor = 1;
+        HandleBattleWindow(YESNOBOX_X_Y, 0);
+        BattlePutTextOnWindow(sLocalResetPrompt, B_WIN_MSG);
+        BattlePutTextOnWindow(gText_BattleYesNoChoice, B_WIN_YESNO);
+        BattleCreateYesNoCursorAt(sLocalResetCursor);
+        return MP_LOCAL_RESET_INPUT_HANDLED;
+    }
+    if (sLocalResetConfirming)
+    {
+        if (JOY_NEW(DPAD_UP) && sLocalResetCursor)
+        {
+            BattleDestroyYesNoCursorAt(sLocalResetCursor); sLocalResetCursor = 0; BattleCreateYesNoCursorAt(sLocalResetCursor);
+        }
+        else if (JOY_NEW(DPAD_DOWN) && !sLocalResetCursor)
+        {
+            BattleDestroyYesNoCursorAt(sLocalResetCursor); sLocalResetCursor = 1; BattleCreateYesNoCursorAt(sLocalResetCursor);
+        }
+        if (JOY_NEW(A_BUTTON) || JOY_NEW(B_BUTTON) || !BindingReady())
+        {
+            bool32 accepted = Confirm(JOY_NEW(A_BUTTON) && sLocalResetCursor == 0);
+            BattleDestroyYesNoCursorAt(sLocalResetCursor);
+            HandleBattleWindow(YESNOBOX_X_Y, WINDOW_CLEAR);
+            if (accepted)
+            {
+                BattleMain_QuitPersonalEncounter();
+                return MP_LOCAL_RESET_INPUT_HANDLED;
+            }
+            return MP_LOCAL_RESET_INPUT_CANCELED;
+        }
+        return MP_LOCAL_RESET_INPUT_HANDLED;
+    }
+    if (JOY_NEW(A_BUTTON) || JOY_NEW(B_LAST_USED_BALL_BUTTON)) MultiplayerLocalReset_CloseAction();
+    return MP_LOCAL_RESET_INPUT_PASS;
+}
+
+void MultiplayerLocalReset_CloseAction(void)
+{
+    sLocalResetWindow = sLocalResetRequested = sLocalResetConfirming = FALSE;
+    // Never reopen after an action/submenu was selected, even when canceled.
+    if (sLocalResetActive) sLocalResetClosed = TRUE;
+}
+
+void MultiplayerLocalReset_CloseCapture(void)
+{
+    MultiplayerLocalReset_CloseAction();
+}
+
+bool32 MultiplayerLocalReset_WasAccepted(void)
+{
+    return sLocalResetActive && sLocalResetAccepted && !sLocalResetClosed;
+}
+
+void MultiplayerLocalReset_Finish(void)
+{
+    MultiplayerLocalReset_Init();
+}
+
+void MultiplayerLocalReset_ConsumeResult(void)
+{
+    gSpecialVar_Result = MultiplayerLocalReset_WasAccepted();
+    MultiplayerLocalReset_Finish();
+}
+
+#if TESTING
+bool32 MultiplayerLocalReset_TestOpenWindow(void) { return OpenWindow(); }
+bool32 MultiplayerLocalReset_TestRequest(void) { return Request(); }
+bool32 MultiplayerLocalReset_TestConfirm(bool32 yes) { return Confirm(yes); }
+#endif

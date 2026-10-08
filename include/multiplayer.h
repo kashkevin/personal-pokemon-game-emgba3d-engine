@@ -56,6 +56,7 @@ struct MultiplayerMailbox
 extern volatile struct MultiplayerMailbox gMultiplayerMailbox;
 
 void Multiplayer_Init(void);
+bool32 Multiplayer_IsConnected(void);
 void Multiplayer_Tick(void);
 void Multiplayer_LeaveField(void);
 void Multiplayer_BeginMapTransition(void);

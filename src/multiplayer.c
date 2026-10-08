@@ -377,6 +377,11 @@ static void UpdateRemote(u32 i)
     }
 }
 
+bool32 Multiplayer_IsConnected(void)
+{
+    return sConnected;
+}
+
 void Multiplayer_Tick(void)
 {
     u32 i;

@@ -60,6 +60,8 @@ bool32 MultiplayerSave_SkipCallbacks(void);
 bool32 MultiplayerSave_PauseClocks(void);
 bool32 MultiplayerSave_FieldReady(void);
 bool32 MultiplayerSave_CheckBinding(u32 session, u32 incarnation);
+bool32 MultiplayerSave_HasBinding(void);
+bool32 MultiplayerSave_GetIdleBinding(u32 *session, u32 *incarnation);
 
 #if TESTING
 u32 MultiplayerSave_TestCrc32(u32 crc, const u8 *data, u32 size);
