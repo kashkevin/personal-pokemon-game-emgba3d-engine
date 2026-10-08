@@ -61,10 +61,19 @@ AncientTomb_EventScript_Registeel::
 	playmoncry SPECIES_REGISTEEL, CRY_MODE_ENCOUNTER
 	delay 40
 	waitmoncry
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerStaticReset_BeginCurrent
+	goto_if_eq VAR_RESULT, FALSE, AncientTomb_EventScript_RegisteelResetReturn
+#endif
 	setwildbattle SPECIES_REGISTEEL, 40
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	special StartRegiBattle
+AncientTomb_EventScript_RegisteelPersonalReturn::
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerLocalReset_ConsumeResult
+	goto_if_eq VAR_RESULT, TRUE, AncientTomb_EventScript_RegisteelResetReturn
+#endif
 	specialvar VAR_RESULT, GetBattleOutcome
 	goto_if_eq VAR_RESULT, B_OUTCOME_WON, AncientTomb_EventScript_DefeatedRegisteel
 	goto_if_eq VAR_RESULT, B_OUTCOME_RAN, AncientTomb_EventScript_RanFromRegisteel
@@ -72,6 +81,12 @@ AncientTomb_EventScript_Registeel::
 	setflag FLAG_DEFEATED_REGISTEEL
 	release
 	end
+
+#if MP_LOCAL_RESET_STATIC || TESTING
+AncientTomb_EventScript_RegisteelResetReturn::
+	release
+	end
+#endif
 
 AncientTomb_EventScript_DefeatedRegisteel::
 	setflag FLAG_DEFEATED_REGISTEEL

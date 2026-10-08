@@ -19,6 +19,7 @@
 #include "item.h"
 #include "load_save.h"
 #include "text.h"
+#include "string_util.h"
 #include "random.h"
 #include "script_pokemon_util.h"
 #include "constants/event_objects.h"
@@ -634,6 +635,147 @@ TEST("Multiplayer static reset: cancellation cannot reverse an acknowledged atte
     EXPECT_EQ(gMultiplayerResetMailbox.receipt.attempt, 1);
     EXPECT_EQ(gMultiplayerResetMailbox.receipt.fieldReady, FALSE);
     EXPECT_EQ(MultiplayerStaticReset_Count(), 1);
+    MultiplayerLocalReset_Finish();
+    TearDown(&f);
+}
+
+extern const u8 NewMauville_Inside_EventScript_Voltorb2PersonalReturn[];
+extern const u8 NewMauville_Inside_EventScript_Voltorb3PersonalReturn[];
+extern const u8 AquaHideout_B1F_EventScript_Electrode1PersonalReturn[];
+extern const u8 AquaHideout_B1F_EventScript_Electrode2PersonalReturn[];
+extern const u8 AncientTomb_EventScript_RegisteelPersonalReturn[];
+extern const u8 DesertRuins_EventScript_RegirockPersonalReturn[];
+extern const u8 IslandCave_EventScript_RegicePersonalReturn[];
+extern const u8 SkyPillar_Top_EventScript_RayquazaPersonalReturn[];
+struct CatalogueFixture {
+    u16 id, species, hide, defeated, prerequisite;
+    u8 group, map, local, x, y, level;
+    const u8 *returnScript;
+};
+#define CATALOGUE(id, species, hide, defeated, prerequisite, map, local, x, y, level, script) \
+    {id, species, hide, defeated, prerequisite, MAP_GROUP(map), MAP_NUM(map), local, x, y, level, script}
+static const struct CatalogueFixture sCatalogueFixtures[] = {
+    CATALOGUE(0x1001, SPECIES_VOLTORB, FLAG_HIDE_NEW_MAUVILLE_VOLTORB_1, FLAG_DEFEATED_VOLTORB_1_NEW_MAUVILLE, 0, MAP_NEW_MAUVILLE_INSIDE, 6, 25, 18, 25, NewMauville_Inside_EventScript_Voltorb1Return),
+    CATALOGUE(0x1002, SPECIES_VOLTORB, FLAG_HIDE_NEW_MAUVILLE_VOLTORB_2, FLAG_DEFEATED_VOLTORB_2_NEW_MAUVILLE, 0, MAP_NEW_MAUVILLE_INSIDE, 7, 6, 11, 25, NewMauville_Inside_EventScript_Voltorb2PersonalReturn),
+    CATALOGUE(0x1003, SPECIES_VOLTORB, FLAG_HIDE_NEW_MAUVILLE_VOLTORB_3, FLAG_DEFEATED_VOLTORB_3_NEW_MAUVILLE, 0, MAP_NEW_MAUVILLE_INSIDE, 8, 13, 10, 25, NewMauville_Inside_EventScript_Voltorb3PersonalReturn),
+    CATALOGUE(0x1004, SPECIES_ELECTRODE, FLAG_HIDE_AQUA_HIDEOUT_B1F_ELECTRODE_1, FLAG_DEFEATED_ELECTRODE_1_AQUA_HIDEOUT, 0, MAP_AQUA_HIDEOUT_B1F, 6, 16, 9, 30, AquaHideout_B1F_EventScript_Electrode1PersonalReturn),
+    CATALOGUE(0x1005, SPECIES_ELECTRODE, FLAG_HIDE_AQUA_HIDEOUT_B1F_ELECTRODE_2, FLAG_DEFEATED_ELECTRODE_2_AQUA_HIDEOUT, 0, MAP_AQUA_HIDEOUT_B1F, 8, 16, 10, 30, AquaHideout_B1F_EventScript_Electrode2PersonalReturn),
+    CATALOGUE(0x1006, SPECIES_REGISTEEL, FLAG_HIDE_REGISTEEL, FLAG_DEFEATED_REGISTEEL, FLAG_SYS_REGISTEEL_PUZZLE_COMPLETED, MAP_ANCIENT_TOMB, 1, 8, 7, 40, AncientTomb_EventScript_RegisteelPersonalReturn),
+    CATALOGUE(0x1007, SPECIES_REGIROCK, FLAG_HIDE_REGIROCK, FLAG_DEFEATED_REGIROCK, FLAG_SYS_REGIROCK_PUZZLE_COMPLETED, MAP_DESERT_RUINS, 1, 8, 7, 40, DesertRuins_EventScript_RegirockPersonalReturn),
+    CATALOGUE(0x1008, SPECIES_REGICE, FLAG_HIDE_REGICE, FLAG_DEFEATED_REGICE, FLAG_SYS_BRAILLE_REGICE_COMPLETED, MAP_ISLAND_CAVE, 1, 8, 7, 40, IslandCave_EventScript_RegicePersonalReturn),
+    CATALOGUE(0x1009, SPECIES_RAYQUAZA, FLAG_HIDE_SKY_PILLAR_TOP_RAYQUAZA_STILL, FLAG_DEFEATED_RAYQUAZA, 0, MAP_SKY_PILLAR_TOP, 2, 14, 6, 70, SkyPillar_Top_EventScript_RayquazaPersonalReturn),
+};
+
+static void SetUpCatalogue(struct ResetFixture *f, const struct CatalogueFixture *source)
+{
+    SetUpPilot(f);
+    MultiplayerResetAdmission_Init();
+    gSaveBlock1Ptr->location.mapGroup = source->group;
+    gSaveBlock1Ptr->location.mapNum = source->map;
+    gSpecialVar_LastTalked = source->local;
+    gObjectEvents[1].localId = source->local;
+    gObjectEvents[1].mapGroup = source->group;
+    gObjectEvents[1].mapNum = source->map;
+    gObjectEvents[1].currentCoords.x = source->x + MAP_OFFSET;
+    gObjectEvents[1].currentCoords.y = source->y + MAP_OFFSET;
+    if (source->prerequisite) FlagSet(source->prerequisite);
+    VarSet(VAR_SKY_PILLAR_STATE, 2);
+}
+
+static void BeginCatalogue(const struct CatalogueFixture *source)
+{
+    MultiplayerStaticReset_BeginCurrent(); EXPECT_EQ(gSpecialVar_Result, TRUE);
+    EXPECT(MultiplayerLocalReset_PersonalGeneration());
+    CreateScriptedWildMon(source->species, source->level, ITEM_NONE);
+    gMain.inBattle = TRUE;
+    gBattleTypeFlags = BATTLE_TYPE_IS_MASTER | (source->id >= MP_STATIC_RESET_REGISTEEL ? BATTLE_TYPE_LEGENDARY : 0);
+    EXPECT(MultiplayerLocalReset_TestOpenWindow());
+}
+
+TEST("Multiplayer static catalogue: nine exact sources reject altered object and native prerequisites")
+{
+    for (u32 i = 0; i < ARRAY_COUNT(sCatalogueFixtures); i++)
+    {
+        const struct CatalogueFixture *source = &sCatalogueFixtures[i];
+        struct ResetFixture f; SetUpCatalogue(&f, source);
+        EXPECT(MultiplayerStaticReset_EntryReady(source->id));
+        gObjectEvents[1].currentCoords.x++; EXPECT(!MultiplayerStaticReset_EntryReady(source->id));
+        gObjectEvents[1].currentCoords.x--;
+        gSpecialVar_LastTalked++; EXPECT(!MultiplayerStaticReset_EntryReady(source->id));
+        gSpecialVar_LastTalked--;
+        FlagSet(source->hide); EXPECT(!MultiplayerStaticReset_EntryReady(source->id)); FlagClear(source->hide);
+        FlagSet(source->defeated); EXPECT(!MultiplayerStaticReset_EntryReady(source->id)); FlagClear(source->defeated);
+        if (source->prerequisite)
+        {
+            FlagClear(source->prerequisite); EXPECT(!MultiplayerStaticReset_EntryReady(source->id));
+            FlagSet(source->prerequisite);
+        }
+        if (source->id == MP_STATIC_RESET_RAYQUAZA)
+        {
+            VarSet(VAR_SKY_PILLAR_STATE, 1); EXPECT(!MultiplayerStaticReset_EntryReady(source->id));
+            VarSet(VAR_SKY_PILLAR_STATE, 2);
+        }
+        EXPECT(!MultiplayerStaticReset_EntryReady(0xE001)); // Shared event sources never opt in.
+        BeginCatalogue(source);
+        EXPECT_EQ(MultiplayerStaticReset_GetCount(source->id), 1);
+        gBattleTypeFlags |= BATTLE_TYPE_TRAINER;
+        EXPECT(!MultiplayerLocalReset_TestRequest());
+        gBattleTypeFlags &= ~BATTLE_TYPE_TRAINER;
+        MultiplayerLocalReset_CloseCapture();
+        EXPECT(!MultiplayerLocalReset_TestRequest());
+        MultiplayerLocalReset_Finish();
+        TearDown(&f);
+    }
+}
+
+TEST("Multiplayer static catalogue: accepted returns preserve all sources while catches keep original defeat branches")
+{
+    for (u32 i = 0; i < ARRAY_COUNT(sCatalogueFixtures); i++)
+    for (u32 reset = 0; reset < 2; reset++)
+    {
+        const struct CatalogueFixture *source = &sCatalogueFixtures[i];
+        struct ResetFixture f; SetUpCatalogue(&f, source); BeginCatalogue(source);
+        if (reset)
+        {
+            EXPECT(MultiplayerLocalReset_TestRequest()); EXPECT(MultiplayerLocalReset_TestConfirm(TRUE));
+            gBattleOutcome = B_OUTCOME_PLAYER_TELEPORTED;
+        }
+        else { MultiplayerLocalReset_CloseCapture(); gBattleOutcome = B_OUTCOME_CAUGHT; }
+        FlagSet(FLAG_SYS_CTRL_OBJ_DELETE);
+        gMain.inBattle = FALSE;
+        RunScriptImmediately(source->returnScript);
+        EXPECT_EQ(FlagGet(source->defeated), !reset);
+        EXPECT(!FlagGet(source->hide));
+        EXPECT(!FlagGet(FLAG_SYS_CTRL_OBJ_DELETE));
+        EXPECT_EQ(MultiplayerStaticReset_GetCount(source->id), 1);
+        EXPECT_EQ(VarGet(VAR_NEW_MAUVILLE_STATE), 1);
+        EXPECT_EQ(VarGet(VAR_SKY_PILLAR_STATE), 2);
+        if (source->prerequisite) EXPECT(FlagGet(source->prerequisite));
+        EXPECT(!MultiplayerLocalReset_WasAccepted());
+        TearDown(&f);
+    }
+}
+
+TEST("Multiplayer static catalogue: host count appears unsigned and cannot cross descriptor or action boundaries")
+{
+    const struct CatalogueFixture *source = &sCatalogueFixtures[8];
+    struct ResetFixture f; SetUpCatalogue(&f, source);
+    EXPECT(MultiplayerStaticReset_SetAdmission(source->id, 0xFFFFFFFEu));
+    BeginCatalogue(source);
+    MultiplayerStaticReset_SetAdmission(0, 0);
+    EXPECT_EQ(MultiplayerStaticReset_GetCount(MP_STATIC_RESET_VOLTORB_1), 0);
+    EXPECT_EQ(MultiplayerStaticReset_GetCount(MP_STATIC_RESET_REGISTEEL), 0);
+    const u8 *prompt = MultiplayerLocalReset_GetActionPrompt(0);
+    static const u8 expectedPrompt[] = _("Attempt: 4294967294\nSELECT: Reset");
+    EXPECT(prompt != NULL);
+    EXPECT_EQ(StringCompare(prompt, expectedPrompt), 0);
+    gBattleTypeFlags &= ~BATTLE_TYPE_LEGENDARY;
+    EXPECT(!MultiplayerLocalReset_TestRequest());
+    gBattleTypeFlags |= BATTLE_TYPE_LEGENDARY;
+    EXPECT(MultiplayerLocalReset_TestRequest());
+    EXPECT(!MultiplayerLocalReset_TestConfirm(FALSE));
+    MultiplayerLocalReset_CloseAction();
+    EXPECT(MultiplayerLocalReset_GetActionPrompt(0) == NULL);
     MultiplayerLocalReset_Finish();
     TearDown(&f);
 }

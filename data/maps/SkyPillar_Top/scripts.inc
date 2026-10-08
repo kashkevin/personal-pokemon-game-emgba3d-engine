@@ -46,10 +46,19 @@ SkyPillar_Top_EventScript_Rayquaza::
 	playmoncry SPECIES_RAYQUAZA, CRY_MODE_ENCOUNTER
 	delay 40
 	waitmoncry
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerStaticReset_BeginCurrent
+	goto_if_eq VAR_RESULT, FALSE, SkyPillar_Top_EventScript_RayquazaResetReturn
+#endif
 	setwildbattle SPECIES_RAYQUAZA, 70
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	special BattleSetup_StartLegendaryBattle
+SkyPillar_Top_EventScript_RayquazaPersonalReturn::
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerLocalReset_ConsumeResult
+	goto_if_eq VAR_RESULT, TRUE, SkyPillar_Top_EventScript_RayquazaResetReturn
+#endif
 	specialvar VAR_RESULT, GetBattleOutcome
 	goto_if_eq VAR_RESULT, B_OUTCOME_WON, SkyPillar_Top_EventScript_DefeatedRayquaza
 	goto_if_eq VAR_RESULT, B_OUTCOME_RAN, SkyPillar_Top_EventScript_RanFromRayquaza
@@ -57,6 +66,12 @@ SkyPillar_Top_EventScript_Rayquaza::
 	setflag FLAG_DEFEATED_RAYQUAZA
 	releaseall
 	end
+
+#if MP_LOCAL_RESET_STATIC || TESTING
+SkyPillar_Top_EventScript_RayquazaResetReturn::
+	releaseall
+	end
+#endif
 
 SkyPillar_Top_EventScript_DefeatedRayquaza::
 	setflag FLAG_DEFEATED_RAYQUAZA

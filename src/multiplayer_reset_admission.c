@@ -25,6 +25,7 @@ void MultiplayerResetAdmission_Init(void)
     gMultiplayerResetMailbox.byteSize = sizeof(gMultiplayerResetMailbox);
     sSequence = sGeneration = 0;
     sWaiting = FALSE;
+    MultiplayerStaticReset_InitCache();
 }
 
 bool32 MultiplayerResetAdmission_IsWaiting(void) { return sWaiting; }
@@ -48,14 +49,14 @@ void MultiplayerResetAdmission_Begin(u32 encounter)
     gSpecialVar_Result = FALSE;
     if (sWaiting || sSequence == 0xFFFFFFFFu || !Multiplayer_IsConnected()
      || !MultiplayerSave_GetIdleBinding(&session, &incarnation)
-     || !MultiplayerStaticReset_EntryReady(encounter)) return;
+     || !MultiplayerLocalReset_CanBegin(encounter)) return;
     gMultiplayerResetMailbox.localGeneration++;
     memset((void *)&gMultiplayerResetMailbox.request, 0, sizeof(gMultiplayerResetMailbox.request));
     gMultiplayerResetMailbox.request.sequence = ++sSequence;
     gMultiplayerResetMailbox.request.session = session;
     gMultiplayerResetMailbox.request.incarnation = incarnation;
     gMultiplayerResetMailbox.request.encounter = encounter;
-    gMultiplayerResetMailbox.request.observedCount = MultiplayerStaticReset_Count();
+    gMultiplayerResetMailbox.request.observedCount = MultiplayerStaticReset_GetCount(encounter);
     gMultiplayerResetMailbox.localGeneration++;
     sWaiting = TRUE;
     PublishReceipt(MP_RESET_WAITING, 0);

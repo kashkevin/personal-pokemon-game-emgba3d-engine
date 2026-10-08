@@ -29,6 +29,10 @@ AquaHideout_B1F_EventScript_ShowElectrode2::
 AquaHideout_B1F_EventScript_Electrode1::
 	lock
 	faceplayer
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerStaticReset_BeginCurrent
+	goto_if_eq VAR_RESULT, FALSE, AquaHideout_B1F_EventScript_Electrode1ResetReturn
+#endif
 	setwildbattle SPECIES_ELECTRODE, 30
 	waitse
 	playmoncry SPECIES_ELECTRODE, CRY_MODE_ENCOUNTER
@@ -36,7 +40,12 @@ AquaHideout_B1F_EventScript_Electrode1::
 	waitmoncry
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	dowildbattle
+AquaHideout_B1F_EventScript_Electrode1PersonalReturn::
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerLocalReset_ConsumeResult
+	goto_if_eq VAR_RESULT, TRUE, AquaHideout_B1F_EventScript_Electrode1ResetReturn
+#endif
 	specialvar VAR_RESULT, GetBattleOutcome
 	goto_if_eq VAR_RESULT, B_OUTCOME_WON, AquaHideout_B1F_EventScript_DefeatedElectrode1
 	goto_if_eq VAR_RESULT, B_OUTCOME_RAN, AquaHideout_B1F_EventScript_DefeatedElectrode1
@@ -44,6 +53,12 @@ AquaHideout_B1F_EventScript_Electrode1::
 	setflag FLAG_DEFEATED_ELECTRODE_1_AQUA_HIDEOUT
 	release
 	end
+
+#if MP_LOCAL_RESET_STATIC || TESTING
+AquaHideout_B1F_EventScript_Electrode1ResetReturn::
+	release
+	end
+#endif
 
 AquaHideout_B1F_EventScript_DefeatedElectrode1::
 	setflag FLAG_DEFEATED_ELECTRODE_1_AQUA_HIDEOUT
@@ -53,6 +68,10 @@ AquaHideout_B1F_EventScript_DefeatedElectrode1::
 AquaHideout_B1F_EventScript_Electrode2::
 	lock
 	faceplayer
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerStaticReset_BeginCurrent
+	goto_if_eq VAR_RESULT, FALSE, AquaHideout_B1F_EventScript_Electrode2ResetReturn
+#endif
 	setwildbattle SPECIES_ELECTRODE, 30
 	waitse
 	playmoncry SPECIES_ELECTRODE, CRY_MODE_ENCOUNTER
@@ -60,7 +79,12 @@ AquaHideout_B1F_EventScript_Electrode2::
 	waitmoncry
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	dowildbattle
+AquaHideout_B1F_EventScript_Electrode2PersonalReturn::
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerLocalReset_ConsumeResult
+	goto_if_eq VAR_RESULT, TRUE, AquaHideout_B1F_EventScript_Electrode2ResetReturn
+#endif
 	specialvar VAR_RESULT, GetBattleOutcome
 	goto_if_eq VAR_RESULT, B_OUTCOME_WON, AquaHideout_B1F_EventScript_DefeatedElectrode2
 	goto_if_eq VAR_RESULT, B_OUTCOME_RAN, AquaHideout_B1F_EventScript_DefeatedElectrode2
@@ -68,6 +92,12 @@ AquaHideout_B1F_EventScript_Electrode2::
 	setflag FLAG_DEFEATED_ELECTRODE_2_AQUA_HIDEOUT
 	release
 	end
+
+#if MP_LOCAL_RESET_STATIC || TESTING
+AquaHideout_B1F_EventScript_Electrode2ResetReturn::
+	release
+	end
+#endif
 
 AquaHideout_B1F_EventScript_DefeatedElectrode2::
 	setflag FLAG_DEFEATED_ELECTRODE_2_AQUA_HIDEOUT

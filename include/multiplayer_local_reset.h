@@ -18,6 +18,7 @@ bool32 MultiplayerLocalReset_HandleChord(void);
 const u8 *MultiplayerLocalReset_GetActionPrompt(enum BattlerId battler);
 u32 MultiplayerLocalReset_HandlePlayerInput(enum BattlerId battler);
 bool32 MultiplayerLocalReset_TryBegin(u32 encounterId);
+bool32 MultiplayerLocalReset_CanBegin(u32 encounterId);
 u32 MultiplayerLocalReset_Count(void);
 void MultiplayerLocalReset_BeginDevelopmentHunt(void);
 bool32 MultiplayerLocalReset_PersonalGeneration(void);

@@ -16,6 +16,7 @@
 #include "battle_script_commands.h"
 #include "main.h"
 #include "event_data.h"
+#include "string_util.h"
 #include "constants/maps.h"
 #include "constants/map_groups.h"
 #include "constants/vars.h"
@@ -39,6 +40,9 @@ static EWRAM_DATA u8 sLocalResetCursor;
 static const u8 sLocalResetPrompt[] = _("Reset this encounter?");
 #if MP_LOCAL_RESET_ENABLED
 static const u8 sLocalResetActionPrompt[] = _("Choose an action\nSELECT: Reset");
+static EWRAM_DATA u8 sPersonalActionPrompt[40];
+static const u8 sAttemptLabel[] = _("Attempt: ");
+static const u8 sSelectReset[] = _("\nSELECT: Reset");
 #endif
 
 static u32 Hash(const void *value, u32 size)
@@ -148,17 +152,26 @@ static bool32 HasUsableParty(void)
 }
 #endif
 
+bool32 MultiplayerLocalReset_CanBegin(u32 encounterId)
+{
+#if MP_LOCAL_RESET_ENABLED
+    u32 session, incarnation;
+    return !sLocalResetActive && !gMain.inBattle
+        && gSaveBlock1Ptr && gSaveBlock2Ptr && gSaveBlock3Ptr && gPokemonStoragePtr
+        && SourceReady(encounterId) && Multiplayer_IsConnected()
+        && MultiplayerSave_GetIdleBinding(&session, &incarnation)
+        && !MultiplayerBattle_IsActive() && MultiplayerOwnership_IsEnrolled() && HasUsableParty();
+#else
+    return FALSE;
+#endif
+}
+
 bool32 MultiplayerLocalReset_TryBegin(u32 encounterId)
 {
 #if MP_LOCAL_RESET_ENABLED
     u32 count;
-    if (sLocalResetActive || gMain.inBattle
-     || !gSaveBlock1Ptr || !gSaveBlock2Ptr || !gSaveBlock3Ptr || !gPokemonStoragePtr
-     || !SourceReady(encounterId) || !Multiplayer_IsConnected()
-     || !MultiplayerSave_GetIdleBinding(&sLocalResetSession, &sLocalResetIncarnation)
-     || MultiplayerBattle_IsActive() || !MultiplayerOwnership_IsEnrolled()
-     || !HasUsableParty())
-        return FALSE;
+    if (!MultiplayerLocalReset_CanBegin(encounterId)
+     || !MultiplayerSave_GetIdleBinding(&sLocalResetSession, &sLocalResetIncarnation)) return FALSE;
     if (encounterId != MP_LOCAL_RESET_DEVELOPMENT_ID)
     {
         if (!MultiplayerStaticReset_AdvanceAttempt(encounterId)) return FALSE;
@@ -209,14 +222,20 @@ bool32 MultiplayerLocalReset_PersonalGeneration(void)
     // Only the explicit authored source, during native generation. Owned mons,
     // wild encounters, gifts, presets and future event sources do not opt in.
     return sLocalResetActive && !gMain.inBattle && !sLocalResetClosed
-        && sLocalResetEncounterId == MP_STATIC_RESET_VOLTORB_1
+        && sLocalResetEncounterId >= MP_STATIC_RESET_VOLTORB_1 && sLocalResetEncounterId <= MP_STATIC_RESET_LAST
         && BindingReady() && MultiplayerStaticReset_EntryReady(sLocalResetEncounterId);
+}
+
+static bool32 BattleFlagsReady(void)
+{
+    u32 expected = MultiplayerStaticReset_IsLegendary(sLocalResetEncounterId) ? BATTLE_TYPE_LEGENDARY : 0;
+    return (gBattleTypeFlags & ~BATTLE_TYPE_IS_MASTER) == expected;
 }
 
 static bool32 OpenWindow(void)
 {
     if (!sLocalResetActive || sLocalResetClosed || sLocalResetAccepted || !gMain.inBattle || !gBattleStruct
-     || gBattleResults.battleTurnCounter || (gBattleTypeFlags & ~BATTLE_TYPE_IS_MASTER) || !BindingReady() || !GuardMatches())
+     || gBattleResults.battleTurnCounter || !BattleFlagsReady() || !BindingReady() || !GuardMatches())
         return FALSE;
     sLocalResetWindow = TRUE;
     return TRUE;
@@ -226,7 +245,7 @@ static bool32 OpenWindow(void)
 static bool32 Request(void)
 {
     if (!sLocalResetWindow || !gMain.inBattle || !gBattleStruct || gBattleResults.battleTurnCounter
-     || (gBattleTypeFlags & ~BATTLE_TYPE_IS_MASTER) || !BindingReady() || !GuardMatches()) return FALSE;
+     || !BattleFlagsReady() || !BindingReady() || !GuardMatches()) return FALSE;
     sLocalResetRequested = TRUE;
     return TRUE;
 }
@@ -240,7 +259,13 @@ const u8 *MultiplayerLocalReset_GetActionPrompt(enum BattlerId battler)
     // the native confirmation already owns input.
     if (GetBattlerPosition(battler) == B_POSITION_PLAYER_LEFT
      && !sLocalResetRequested && !sLocalResetConfirming && OpenWindow())
-        return sLocalResetActionPrompt;
+    {
+        if (sLocalResetEncounterId == MP_LOCAL_RESET_DEVELOPMENT_ID) return sLocalResetActionPrompt;
+        u8 *cursor = StringCopy(sPersonalActionPrompt, sAttemptLabel);
+        cursor = ConvertUIntToDecimalStringN(cursor, MultiplayerStaticReset_GetCount(sLocalResetEncounterId), STR_CONV_MODE_LEFT_ALIGN, 10);
+        StringCopy(cursor, sSelectReset);
+        return sPersonalActionPrompt;
+    }
 #endif
     return NULL;
 }
@@ -269,7 +294,7 @@ static bool32 Confirm(bool32 yes)
         return FALSE;
     }
     if (!sLocalResetWindow || !BindingReady() || !GuardMatches()
-     || !gMain.inBattle || !gBattleStruct || gBattleResults.battleTurnCounter || (gBattleTypeFlags & ~BATTLE_TYPE_IS_MASTER))
+     || !gMain.inBattle || !gBattleStruct || gBattleResults.battleTurnCounter || !BattleFlagsReady())
     {
         sLocalResetWindow = sLocalResetRequested = sLocalResetConfirming = FALSE;
         return FALSE;

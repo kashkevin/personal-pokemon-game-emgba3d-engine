@@ -176,7 +176,7 @@ NewMauville_Inside_EventScript_GeneratorOff::
 NewMauville_Inside_EventScript_Voltorb1::
 	lock
 	faceplayer
-#if MP_LOCAL_RESET_NEW_MAUVILLE_PILOT || TESTING
+#if MP_LOCAL_RESET_STATIC || MP_LOCAL_RESET_NEW_MAUVILLE_PILOT || TESTING
 	special MultiplayerStaticReset_BeginVoltorb1
 	goto_if_eq VAR_RESULT, FALSE, NewMauville_Inside_EventScript_Voltorb1ResetReturn
 #endif
@@ -189,7 +189,7 @@ NewMauville_Inside_EventScript_Voltorb1::
 	dowildbattle
 NewMauville_Inside_EventScript_Voltorb1Return::
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
-#if MP_LOCAL_RESET_NEW_MAUVILLE_PILOT || TESTING
+#if MP_LOCAL_RESET_STATIC || MP_LOCAL_RESET_NEW_MAUVILLE_PILOT || TESTING
 	special MultiplayerLocalReset_ConsumeResult
 	goto_if_eq VAR_RESULT, TRUE, NewMauville_Inside_EventScript_Voltorb1ResetReturn
 #endif
@@ -201,7 +201,7 @@ NewMauville_Inside_EventScript_Voltorb1Return::
 	release
 	end
 
-#if MP_LOCAL_RESET_NEW_MAUVILLE_PILOT || TESTING
+#if MP_LOCAL_RESET_STATIC || MP_LOCAL_RESET_NEW_MAUVILLE_PILOT || TESTING
 NewMauville_Inside_EventScript_Voltorb1ResetReturn::
 	@ Dedicated accepted-reset result: no defeat/catch/hide/generator writes.
 	@ The ordinary map resume callback has already reapplied barrier state.
@@ -217,6 +217,10 @@ NewMauville_Inside_EventScript_DefeatedVoltorb1::
 NewMauville_Inside_EventScript_Voltorb2::
 	lock
 	faceplayer
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerStaticReset_BeginCurrent
+	goto_if_eq VAR_RESULT, FALSE, NewMauville_Inside_EventScript_Voltorb2ResetReturn
+#endif
 	setwildbattle SPECIES_VOLTORB, 25
 	waitse
 	playmoncry SPECIES_VOLTORB, CRY_MODE_ENCOUNTER
@@ -224,7 +228,12 @@ NewMauville_Inside_EventScript_Voltorb2::
 	waitmoncry
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	dowildbattle
+NewMauville_Inside_EventScript_Voltorb2PersonalReturn::
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerLocalReset_ConsumeResult
+	goto_if_eq VAR_RESULT, TRUE, NewMauville_Inside_EventScript_Voltorb2ResetReturn
+#endif
 	specialvar VAR_RESULT, GetBattleOutcome
 	goto_if_eq VAR_RESULT, B_OUTCOME_WON, NewMauville_Inside_EventScript_DefeatedVoltorb2
 	goto_if_eq VAR_RESULT, B_OUTCOME_RAN, NewMauville_Inside_EventScript_DefeatedVoltorb2
@@ -232,6 +241,12 @@ NewMauville_Inside_EventScript_Voltorb2::
 	setflag FLAG_DEFEATED_VOLTORB_2_NEW_MAUVILLE
 	release
 	end
+
+#if MP_LOCAL_RESET_STATIC || TESTING
+NewMauville_Inside_EventScript_Voltorb2ResetReturn::
+	release
+	end
+#endif
 
 NewMauville_Inside_EventScript_DefeatedVoltorb2::
 	setflag FLAG_DEFEATED_VOLTORB_2_NEW_MAUVILLE
@@ -241,6 +256,10 @@ NewMauville_Inside_EventScript_DefeatedVoltorb2::
 NewMauville_Inside_EventScript_Voltorb3::
 	lock
 	faceplayer
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerStaticReset_BeginCurrent
+	goto_if_eq VAR_RESULT, FALSE, NewMauville_Inside_EventScript_Voltorb3ResetReturn
+#endif
 	setwildbattle SPECIES_VOLTORB, 25
 	waitse
 	playmoncry SPECIES_VOLTORB, CRY_MODE_ENCOUNTER
@@ -248,7 +267,12 @@ NewMauville_Inside_EventScript_Voltorb3::
 	waitmoncry
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	dowildbattle
+NewMauville_Inside_EventScript_Voltorb3PersonalReturn::
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerLocalReset_ConsumeResult
+	goto_if_eq VAR_RESULT, TRUE, NewMauville_Inside_EventScript_Voltorb3ResetReturn
+#endif
 	specialvar VAR_RESULT, GetBattleOutcome
 	goto_if_eq VAR_RESULT, B_OUTCOME_WON, NewMauville_Inside_EventScript_DefeatedVoltorb3
 	goto_if_eq VAR_RESULT, B_OUTCOME_RAN, NewMauville_Inside_EventScript_DefeatedVoltorb3
@@ -256,6 +280,12 @@ NewMauville_Inside_EventScript_Voltorb3::
 	setflag FLAG_DEFEATED_VOLTORB_3_NEW_MAUVILLE
 	release
 	end
+
+#if MP_LOCAL_RESET_STATIC || TESTING
+NewMauville_Inside_EventScript_Voltorb3ResetReturn::
+	release
+	end
+#endif
 
 NewMauville_Inside_EventScript_DefeatedVoltorb3::
 	setflag FLAG_DEFEATED_VOLTORB_3_NEW_MAUVILLE
