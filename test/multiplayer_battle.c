@@ -219,6 +219,35 @@ static void NativeBinding(struct ChannelFixture *f)
     Bind(f);
 }
 
+TEST("Multiplayer emergency: native battle admission preserves its original hold party and receipt")
+{
+    struct ChannelFixture f;
+    struct MultiplayerSaveControl command = {0};
+    struct MultiplayerBattleControl receipt;
+    struct Pokemon party[PARTY_SIZE];
+    u32 state, counter;
+    NativeBinding(&f);
+    memcpy(party, gParties[B_TRAINER_PLAYER], sizeof(party));
+    receipt = gMultiplayerBattleMailbox.response;
+    state = gMultiplayerBattleMailbox.state; counter = gSaveCounter;
+    command.incarnation = f.command.incarnation; command.sessionEpoch = f.command.sessionEpoch;
+    command.requestId[0] = 9; command.commandSeq = 1;
+    command.totalSize = MULTIPLAYER_SAVE_FLASH_SIZE; command.revision = 1;
+    command.opcode = MP_SAVE_BEGIN_EMERGENCY_EXPORT;
+    gMultiplayerSaveMailbox.command = command;
+    gMultiplayerSaveMailbox.commandGeneration = 2;
+    MultiplayerSave_Tick();
+    EXPECT_EQ(gMultiplayerSaveMailbox.response.status, MP_SAVE_BUSY);
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, state);
+    EXPECT_EQ(memcmp((const void *)&gMultiplayerBattleMailbox.response, &receipt, sizeof(receipt)), 0);
+    EXPECT_EQ(memcmp(party, gParties[B_TRAINER_PLAYER], sizeof(party)), 0);
+    EXPECT_EQ(gSaveCounter, counter);
+    EXPECT(MultiplayerBattle_IsActive()); EXPECT(MultiplayerBattle_PauseClocks());
+    EXPECT(!MultiplayerSave_IsHeld());
+    EXPECT(gSoftResetDisabled);
+    TearDown(&f);
+}
+
 static void Preparation(struct ChannelFixture *f)
 {
     struct MultiplayerBattlePreparation p = {0};

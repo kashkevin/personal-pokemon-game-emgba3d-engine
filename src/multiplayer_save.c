@@ -43,6 +43,8 @@ _Static_assert(sizeof(rng_value_t) == 16, "Pinned SFC32");
 const u32 gMultiplayerTradeAbiVersion = 1;
 // Optional read-only 4096-byte export window in the existing sector buffer.
 const u32 gMultiplayerSaveWindowAbiVersion = 1;
+// Opt-in, immutable local preservation. This does not authorize a host commit.
+const u32 gMultiplayerEmergencySaveAbiVersion = 1;
 EWRAM_DATA volatile struct MultiplayerSaveMailbox gMultiplayerSaveMailbox = {0};
 static EWRAM_DATA struct MultiplayerSaveControl sLastCommand = {0};
 static EWRAM_DATA struct MultiplayerSaveControl sLastResponse = {0};
@@ -78,6 +80,9 @@ static EWRAM_DATA bool8 sTradeActive = FALSE;
 static EWRAM_DATA bool8 sTradeExpired = FALSE;
 static EWRAM_DATA bool8 sTradeImportStarted = FALSE;
 static EWRAM_DATA u32 sTradePreparedRevision = 0;
+static EWRAM_DATA bool8 sEmergencyActive = FALSE;
+static EWRAM_DATA bool8 sEmergencyValid = FALSE;
+static EWRAM_DATA u8 sEmergencyStatus = MP_SAVE_OK;
 static const u16 sSectionSizes[14] = {3884, 3968, 3968, 3968, 3664, 3968, 3968, 3968, 3968, 3968, 3968, 3968, 3968, 2400};
 // Bounds from this pinned build's map_groups.json and layouts.json.
 static const u8 sMapCounts[] = {57,5,5,6,7,8,9,7,7,14,8,17,10,23,13,15,15,2,2,2,3,1,1,1,108,61,89,2,1,13,1,1,3,1,5,123,60,62,4,6,8,10,6,8,20,10,8,2,10,4,2,2,1,1,1,2,2,3,2,3,2,1,1,6,5,5,8,8,5,5,1,1,1,2,1};
@@ -250,6 +255,10 @@ static void PublishResponse(const struct MultiplayerSaveControl *command, u8 sta
 
 static void Release(void)
 {
+    // No ordinary completion, cancellation or watchdog may resume this core.
+    // It must close after durable local preservation, then use closed recovery.
+    if (sEmergencyActive)
+        return;
     gSoftResetDisabled = sSavedResetDisabled;
     sState = MP_SAVE_BOUND;
     sPending = FALSE;
@@ -481,11 +490,13 @@ void MultiplayerSave_Init(void)
     sIncarnation = 0; sSession = 0; sLastSeq = 0; sPending = FALSE;
     sTradeActive = FALSE; sTradeExpired = FALSE; sTradeImportStarted = FALSE;
     sTradePreparedRevision = 0;
+    sEmergencyActive = FALSE; sEmergencyValid = FALSE; sEmergencyStatus = MP_SAVE_OK;
     sRevision = 0; sOffset = 0; sCrc = 0; sDeadline = 0; sCommitted = FALSE;
     memset(sRequestId, 0, sizeof(sRequestId));
     // Read the capability through volatile storage so section GC retains it.
     (void)*(const volatile u32 *)&gMultiplayerTradeAbiVersion;
     (void)*(const volatile u32 *)&gMultiplayerSaveWindowAbiVersion;
+    (void)*(const volatile u32 *)&gMultiplayerEmergencySaveAbiVersion;
     MultiplayerOwnership_InvalidateGrant();
     // Retain the linker-visible ownership marker despite --gc-sections.
     gMultiplayerSaveMailbox.abiVersion = *(const volatile u32 *)&gMultiplayerOwnershipAbi;
@@ -512,13 +523,26 @@ static void QueryTradeData(u8 *data)
     PutU32(data + 44, sTradeActive && !sTradeExpired ? max(0, (s32)(sDeadline - sFrame)) : 0);
 }
 
+static void QueryEmergencyData(u8 *data)
+{
+    memset(data, 0, 48);
+    PutU32(data + 4, sState);
+    if (!sEmergencyActive)
+        return;
+    PutU32(data, 1 | sEmergencyValid << 1 | (sState == MP_SAVE_EMERGENCY_PRESERVED) << 2);
+    memcpy(data + 8, sRequestId, 16);
+    PutU32(data + 24, sSession); PutU32(data + 28, sIncarnation); PutU32(data + 32, sRevision);
+    PutU32(data + 36, sOffset); PutU32(data + 40, sCrc); PutU32(data + 44, sEmergencyStatus);
+}
+
 static void Handle(const struct MultiplayerSaveControl *command)
 {
     u8 data[80];
     u8 status = MP_SAVE_OK;
     // The diagnostic channel owns the field hold. Neither rebinding nor a
     // save cancellation may invalidate its ownership or release that hold.
-    if (MultiplayerBattle_IsActive() && command->opcode != MP_SAVE_QUERY && command->opcode != MP_SAVE_QUERY_TRADE)
+    if (MultiplayerBattle_IsActive() && command->opcode != MP_SAVE_QUERY && command->opcode != MP_SAVE_QUERY_TRADE
+     && command->opcode != MP_SAVE_QUERY_EMERGENCY)
     {
         struct MultiplayerSaveControl cached = sCachedResponse;
         PublishResponse(command, MP_SAVE_BUSY, NULL, 0, sOffset);
@@ -531,6 +555,36 @@ static void Handle(const struct MultiplayerSaveControl *command)
      || !command->commandSeq || AllBytes(command->requestId, 16, 0))
     {
         PublishResponse(command, MP_SAVE_MALFORMED, NULL, 0, sOffset); return;
+    }
+    if (command->opcode == MP_SAVE_QUERY_EMERGENCY)
+    {
+        struct MultiplayerSaveControl cached = sCachedResponse;
+        // Observation cannot rebind, consume sequence or displace a lost ACK.
+        if (sState == MP_SAVE_UNBOUND || command->incarnation != sIncarnation || command->sessionEpoch != sSession
+         || (sEmergencyActive && (memcmp(command->requestId, sRequestId, 16) || command->revision != sRevision)))
+            status = MP_SAVE_SESSION;
+        else if (command->length || command->offset)
+            status = MP_SAVE_MALFORMED;
+        else
+        {
+            QueryEmergencyData(data);
+            PublishResponse(command, MP_SAVE_OK, data, 48, sOffset);
+            sCachedResponse = cached;
+            return;
+        }
+        PublishResponse(command, status, NULL, 0, sOffset);
+        sCachedResponse = cached;
+        return;
+    }
+    if (sEmergencyActive && command->opcode != MP_SAVE_BEGIN_EMERGENCY_EXPORT
+     && command->opcode != MP_SAVE_READ && command->opcode != MP_SAVE_READ_WINDOW
+     && command->opcode != MP_SAVE_PRESERVE_EMERGENCY)
+    {
+        // Preserve the original binding, retirement entries, Flash and replay.
+        struct MultiplayerSaveControl cached = sCachedResponse;
+        PublishResponse(command, MP_SAVE_BUSY, NULL, 0, sOffset);
+        sCachedResponse = cached;
+        return;
     }
     if (command->opcode == MP_SAVE_QUERY_TRADE)
     {
@@ -651,6 +705,42 @@ static void Handle(const struct MultiplayerSaveControl *command)
         sDeadline = sFrame + 600;
     switch (command->opcode)
     {
+    case MP_SAVE_BEGIN_EMERGENCY_EXPORT:
+        if (sState != MP_SAVE_BOUND || sTradeActive) { status = MP_SAVE_BUSY; break; }
+        if (command->length || command->offset || !command->revision || command->revision > 0x7FFFFFFF)
+            { status = MP_SAVE_MALFORMED; break; }
+        // An authenticated same-core request freezes even an unsafe field.
+        // Never serialize battle/menu/transition state or pretend it was saved.
+        status = FieldReady() && gFlashMemoryPresent && MultiplayerOwnership_CanSaveParty() ? MP_SAVE_OK : MP_SAVE_UNSAFE;
+        Hold(MP_SAVE_EMERGENCY_UNSAVED, command);
+        sEmergencyActive = TRUE;
+        sEmergencyValid = FALSE;
+        if (status == MP_SAVE_OK)
+            status = MultiplayerOwnership_PrepareExport();
+        if (status == MP_SAVE_OK)
+        {
+            SaveMapView();
+            if (HandleSavingData(SAVE_NORMAL) == SAVE_STATUS_ERROR || gDamagedSaveSectors)
+                status = MP_SAVE_FLASH;
+        }
+        sEmergencyStatus = status;
+        if (status != MP_SAVE_OK)
+            break;
+        sEmergencyValid = TRUE;
+        sState = MP_SAVE_EXPORTING;
+        PutU32(data, gSaveCounter); PutU32(data + 4, gLastWrittenSector);
+        memcpy(data + 8, &gRngValue, 16); memcpy(data + 24, &gRng2Value, 16);
+        PublishResponse(command, MP_SAVE_OK, data, 40, 0); return;
+    case MP_SAVE_PRESERVE_EMERGENCY:
+        if (!sEmergencyActive || !sEmergencyValid
+         || (sState != MP_SAVE_EXPORTING && sState != MP_SAVE_EMERGENCY_PRESERVED)
+         || command->length || command->offset != 131072 || sOffset != 131072)
+            { status = MP_SAVE_ORDER; break; }
+        // Caller must durably record bytes and intent before this command.
+        // This CRC receipt proves the stream only, never host acceptance.
+        sState = MP_SAVE_EMERGENCY_PRESERVED;
+        PutU32(data, sCrc);
+        PublishResponse(command, MP_SAVE_OK, data, 4, sOffset); return;
     case MP_SAVE_BEGIN_TRADE_EXPORT:
         if (!command->revision || command->revision >= 0x7FFFFFFF) { status = MP_SAVE_ORDER; break; }
         if (sTradeActive && !sTradeImportStarted && (sState == MP_SAVE_EXPORTING || sState == MP_SAVE_TRADE_HELD))
@@ -874,7 +964,7 @@ void MultiplayerSave_Tick(void)
                             sReloadStatus == MP_SAVE_OK ? 4 : 0, sOffset);
         }
     }
-    else if (MultiplayerSave_IsHeld() && sState != MP_SAVE_ERROR && (s32)(sFrame - sDeadline) > 0)
+    else if (MultiplayerSave_IsHeld() && !sEmergencyActive && sState != MP_SAVE_ERROR && (s32)(sFrame - sDeadline) > 0)
     {
         if (sTradeActive)
         {
