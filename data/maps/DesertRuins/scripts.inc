@@ -62,7 +62,11 @@ DesertRuins_EventScript_Regirock::
 	delay 40
 	waitmoncry
 #if MP_LOCAL_RESET_STATIC || TESTING
+DesertRuins_EventScript_RegirockAdmission::
 	special MultiplayerStaticReset_BeginCurrent
+	goto_if_ne VAR_RESULT, MP_LOCAL_RESET_ADMISSION_PENDING, DesertRuins_EventScript_RegirockAdmissionReady
+	waitstate
+DesertRuins_EventScript_RegirockAdmissionReady::
 	goto_if_eq VAR_RESULT, FALSE, DesertRuins_EventScript_RegirockResetReturn
 #endif
 	setwildbattle SPECIES_REGIROCK, 40

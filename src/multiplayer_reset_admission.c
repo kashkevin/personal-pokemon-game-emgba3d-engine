@@ -1,4 +1,5 @@
 #include "global.h"
+#include "config/multiplayer_local_reset.h"
 #include <stddef.h>
 #include "multiplayer_reset_admission.h"
 #include "multiplayer_static_reset.h"
@@ -60,8 +61,11 @@ void MultiplayerResetAdmission_Begin(u32 encounter)
     gMultiplayerResetMailbox.localGeneration++;
     sWaiting = TRUE;
     PublishReceipt(MP_RESET_WAITING, 0);
+    gSpecialVar_Result = MP_LOCAL_RESET_ADMISSION_PENDING;
     // The authored interaction resumes only after this exact durable ACK. No
     // timeout, disconnect, or malformed reply may silently generate a new roll.
+    // Stop alone does not yield the current special-command interpreter loop;
+    // the authored caller must execute waitstate for the pending result above.
     ScriptContext_Stop();
 }
 

@@ -1,4 +1,5 @@
 #include "global.h"
+#include "config/multiplayer_local_reset.h"
 #include "multiplayer_local_reset.h"
 #include "multiplayer_static_reset.h"
 #include "multiplayer_reset_admission.h"
@@ -112,6 +113,7 @@ static void SetUp(struct ResetFixture *f)
 
 static void TearDown(struct ResetFixture *f)
 {
+    ScriptContext_Init(); UnlockPlayerFieldControls();
     MultiplayerSave_Init(); Multiplayer_Init();
     Free(gBattleStruct); gBattleStruct = f->battle;
     gMain.callback1 = f->cb1; gMain.callback2 = f->cb2; gMain.inBattle = f->inBattle;
@@ -352,7 +354,7 @@ static void SetUpPilot(struct ResetFixture *f)
 
 static void BeginPilot(void)
 {
-    MultiplayerStaticReset_BeginVoltorb1(); EXPECT_EQ(gSpecialVar_Result, TRUE);
+    EXPECT(MultiplayerLocalReset_TryBegin(MP_STATIC_RESET_VOLTORB_1));
     CreateScriptedWildMon(SPECIES_VOLTORB, 25, ITEM_NONE);
     gMain.inBattle = TRUE;
     EXPECT(MultiplayerLocalReset_TestOpenWindow());
@@ -647,6 +649,26 @@ extern const u8 AncientTomb_EventScript_RegisteelPersonalReturn[];
 extern const u8 DesertRuins_EventScript_RegirockPersonalReturn[];
 extern const u8 IslandCave_EventScript_RegicePersonalReturn[];
 extern const u8 SkyPillar_Top_EventScript_RayquazaPersonalReturn[];
+extern const u8 NewMauville_Inside_EventScript_Voltorb1Admission[];
+extern const u8 NewMauville_Inside_EventScript_Voltorb2Admission[];
+extern const u8 NewMauville_Inside_EventScript_Voltorb3Admission[];
+extern const u8 AquaHideout_B1F_EventScript_Electrode1Admission[];
+extern const u8 AquaHideout_B1F_EventScript_Electrode2Admission[];
+extern const u8 AncientTomb_EventScript_RegisteelAdmission[];
+extern const u8 DesertRuins_EventScript_RegirockAdmission[];
+extern const u8 IslandCave_EventScript_RegiceAdmission[];
+extern const u8 SkyPillar_Top_EventScript_RayquazaAdmission[];
+static const u8 *const sAdmissionScripts[] = {
+    NewMauville_Inside_EventScript_Voltorb1Admission,
+    NewMauville_Inside_EventScript_Voltorb2Admission,
+    NewMauville_Inside_EventScript_Voltorb3Admission,
+    AquaHideout_B1F_EventScript_Electrode1Admission,
+    AquaHideout_B1F_EventScript_Electrode2Admission,
+    AncientTomb_EventScript_RegisteelAdmission,
+    DesertRuins_EventScript_RegirockAdmission,
+    IslandCave_EventScript_RegiceAdmission,
+    SkyPillar_Top_EventScript_RayquazaAdmission,
+};
 struct CatalogueFixture {
     u16 id, species, hide, defeated, prerequisite;
     u8 group, map, local, x, y, level;
@@ -684,7 +706,7 @@ static void SetUpCatalogue(struct ResetFixture *f, const struct CatalogueFixture
 
 static void BeginCatalogue(const struct CatalogueFixture *source)
 {
-    MultiplayerStaticReset_BeginCurrent(); EXPECT_EQ(gSpecialVar_Result, TRUE);
+    EXPECT(MultiplayerLocalReset_TryBegin(source->id));
     EXPECT(MultiplayerLocalReset_PersonalGeneration());
     CreateScriptedWildMon(source->species, source->level, ITEM_NONE);
     gMain.inBattle = TRUE;
@@ -778,4 +800,98 @@ TEST("Multiplayer static catalogue: host count appears unsigned and cannot cross
     EXPECT(MultiplayerLocalReset_GetActionPrompt(0) == NULL);
     MultiplayerLocalReset_Finish();
     TearDown(&f);
+}
+
+TEST("Multiplayer authored admission: all nine scripts yield before generation then exit neutral on exact denial or cancellation")
+{
+    for (u32 i = 0; i < ARRAY_COUNT(sCatalogueFixtures); i++)
+    for (u32 status = 1; status <= 2; status++)
+    {
+        const struct CatalogueFixture *source = &sCatalogueFixtures[i];
+        struct ResetFixture f; SetUpCatalogue(&f, source);
+        memset(gParties[B_TRAINER_OPPONENT_A], 0, sizeof(gParties[B_TRAINER_OPPONENT_A]));
+        rng_value_t rng = gRngValue;
+        // Enter the actual authored bytecode immediately after its movement/cry
+        // prelude. Both its special and waitstate execute in the real interpreter.
+        ScriptContext_SetupScript(sAdmissionScripts[i]);
+        EXPECT(ScriptContext_RunScript());
+        EXPECT(MultiplayerResetAdmission_IsWaiting());
+        EXPECT_EQ(gSpecialVar_Result, MP_LOCAL_RESET_ADMISSION_PENDING);
+        EXPECT(!ScriptContext_IsEnabled());
+        EXPECT(!ScriptContext_RunScript());
+        EXPECT_EQ(MultiplayerStaticReset_GetCount(source->id), 0);
+        EXPECT_EQ(GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_SPECIES), SPECIES_NONE);
+        EXPECT(!memcmp(&rng, &gRngValue, sizeof(rng)));
+        struct MultiplayerResetReply reply = {.sequence=1, .session=1, .incarnation=1,
+            .encounter=source->id, .status=status};
+        if (status == 2) Connection(1, FALSE);
+        gMultiplayerResetMailbox.reply = reply;
+        gMultiplayerResetMailbox.inboundGeneration = 2;
+        MultiplayerResetAdmission_Tick();
+        EXPECT(!MultiplayerResetAdmission_IsWaiting());
+        EXPECT(ScriptContext_IsEnabled());
+        EXPECT_EQ(gMultiplayerResetMailbox.receipt.fieldReady, FALSE);
+        EXPECT(!ScriptContext_RunScript()); // Actual authored release/end, no fake cleanup.
+        MultiplayerResetAdmission_Tick();
+        EXPECT_EQ(gMultiplayerResetMailbox.receipt.fieldReady, TRUE);
+        EXPECT_EQ(gMultiplayerResetMailbox.receipt.state, status == 1 ? MP_RESET_DENIED : MP_RESET_CANCELLED);
+        EXPECT_EQ(MultiplayerStaticReset_GetCount(source->id), 0);
+        EXPECT_EQ(GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_SPECIES), SPECIES_NONE);
+        EXPECT(!memcmp(&rng, &gRngValue, sizeof(rng)));
+        EXPECT(!FlagGet(source->hide)); EXPECT(!FlagGet(source->defeated));
+        TearDown(&f);
+    }
+}
+
+TEST("Multiplayer authored admission: all nine immediate refusals exit without a wait or roll")
+{
+    for (u32 i = 0; i < ARRAY_COUNT(sCatalogueFixtures); i++)
+    {
+        const struct CatalogueFixture *source = &sCatalogueFixtures[i];
+        struct ResetFixture f; SetUpCatalogue(&f, source);
+        FlagSet(source->hide);
+        rng_value_t rng = gRngValue;
+        ScriptContext_SetupScript(sAdmissionScripts[i]);
+        EXPECT(!ScriptContext_RunScript());
+        EXPECT(!ScriptContext_IsEnabled());
+        EXPECT(!MultiplayerResetAdmission_IsWaiting());
+        EXPECT_EQ(gMultiplayerResetMailbox.request.sequence, 0);
+        EXPECT_EQ(MultiplayerStaticReset_GetCount(source->id), 0);
+        EXPECT(!memcmp(&rng, &gRngValue, sizeof(rng)));
+        EXPECT(FlagGet(source->hide)); EXPECT(!FlagGet(source->defeated));
+        TearDown(&f);
+    }
+}
+
+TEST("Multiplayer authored admission: Voltorb and Electrode generate only after the exact receipt resumes bytecode")
+{
+    for (u32 i = 0; i < 5; i++)
+    {
+        const struct CatalogueFixture *source = &sCatalogueFixtures[i];
+        struct ResetFixture f; SetUpCatalogue(&f, source);
+        memset(gParties[B_TRAINER_OPPONENT_A], 0, sizeof(gParties[B_TRAINER_OPPONENT_A]));
+        ScriptContext_SetupScript(sAdmissionScripts[i]);
+        EXPECT(ScriptContext_RunScript());
+        struct MultiplayerResetReply reply = {.sequence=1, .session=1, .incarnation=2,
+            .encounter=source->id, .attempt=3};
+        gMultiplayerResetMailbox.reply = reply;
+        gMultiplayerResetMailbox.inboundGeneration = 2;
+        MultiplayerResetAdmission_Tick();
+        EXPECT(!ScriptContext_RunScript());
+        EXPECT_EQ(MultiplayerStaticReset_GetCount(source->id), 0);
+        EXPECT_EQ(GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_SPECIES), SPECIES_NONE);
+        reply.incarnation = 1;
+        gMultiplayerResetMailbox.reply = reply;
+        gMultiplayerResetMailbox.inboundGeneration = 4;
+        MultiplayerResetAdmission_Tick();
+        EXPECT_EQ(MultiplayerStaticReset_GetCount(source->id), 3);
+        EXPECT_EQ(GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_SPECIES), SPECIES_NONE);
+        EXPECT(ScriptContext_RunScript()); // Resumes through setwildbattle to its native waitse.
+        EXPECT_EQ(GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_SPECIES), source->species);
+        EXPECT_EQ(GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_LEVEL), source->level);
+        gMain.inBattle = TRUE;
+        EXPECT(MultiplayerLocalReset_TestOpenWindow());
+        MultiplayerLocalReset_Finish();
+        TearDown(&f);
+    }
 }
