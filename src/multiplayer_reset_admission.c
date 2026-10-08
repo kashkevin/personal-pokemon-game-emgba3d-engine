@@ -21,7 +21,7 @@ void MultiplayerResetAdmission_Init(void)
 {
     memset((void *)&gMultiplayerResetMailbox, 0, sizeof(gMultiplayerResetMailbox));
     gMultiplayerResetMailbox.magic = MP_RESET_MAGIC;
-    gMultiplayerResetMailbox.abi = MP_RESET_ABI;
+    gMultiplayerResetMailbox.abi = *(const volatile u32 *)&gMultiplayerResetAbiVersion;
     gMultiplayerResetMailbox.byteSize = sizeof(gMultiplayerResetMailbox);
     sSequence = sGeneration = 0;
     sWaiting = FALSE;
