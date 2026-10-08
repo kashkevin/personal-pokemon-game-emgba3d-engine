@@ -249,7 +249,7 @@ LittlerootTown_EventScript_Boy::
 #if MP_LOCAL_RESET_DEVELOPMENT
 	lock
 	faceplayer
-	specialvar VAR_RESULT, MultiplayerLocalReset_BeginDevelopmentHunt
+	special MultiplayerLocalReset_BeginDevelopmentHunt
 	goto_if_eq VAR_RESULT, TRUE, LittlerootTown_EventScript_LocalResetDevelopmentStart
 	msgbox LittlerootTown_Text_LocalResetDevelopmentUnavailable, MSGBOX_DEFAULT
 	release
@@ -258,7 +258,7 @@ LittlerootTown_EventScript_Boy::
 LittlerootTown_EventScript_LocalResetDevelopmentStart::
 	setwildbattle SPECIES_WURMPLE, 3
 	dowildbattle
-	specialvar VAR_RESULT, MultiplayerLocalReset_ConsumeResult
+	special MultiplayerLocalReset_ConsumeResult
 	goto_if_eq VAR_RESULT, TRUE, LittlerootTown_EventScript_LocalResetDevelopmentReturn
 	specialvar VAR_RESULT, GetBattleOutcome
 	goto_if_ne VAR_RESULT, B_OUTCOME_CAUGHT, LittlerootTown_EventScript_LocalResetDevelopmentDone
