@@ -180,7 +180,7 @@ void MultiplayerLocalReset_BeginDevelopmentHunt(void)
 static bool32 OpenWindow(void)
 {
     if (!sLocalResetActive || sLocalResetClosed || sLocalResetAccepted || !gMain.inBattle || !gBattleStruct
-     || gBattleResults.battleTurnCounter || gBattleTypeFlags || !BindingReady() || !GuardMatches())
+     || gBattleResults.battleTurnCounter || (gBattleTypeFlags & ~BATTLE_TYPE_IS_MASTER) || !BindingReady() || !GuardMatches())
         return FALSE;
     sLocalResetWindow = TRUE;
     return TRUE;
@@ -190,7 +190,7 @@ static bool32 OpenWindow(void)
 static bool32 Request(void)
 {
     if (!sLocalResetWindow || !gMain.inBattle || !gBattleStruct || gBattleResults.battleTurnCounter
-     || gBattleTypeFlags || !BindingReady() || !GuardMatches()) return FALSE;
+     || (gBattleTypeFlags & ~BATTLE_TYPE_IS_MASTER) || !BindingReady() || !GuardMatches()) return FALSE;
     sLocalResetRequested = TRUE;
     return TRUE;
 }
@@ -205,7 +205,7 @@ static bool32 Confirm(bool32 yes)
         return FALSE;
     }
     if (!sLocalResetWindow || !BindingReady() || !GuardMatches()
-     || !gMain.inBattle || !gBattleStruct || gBattleResults.battleTurnCounter || gBattleTypeFlags)
+     || !gMain.inBattle || !gBattleStruct || gBattleResults.battleTurnCounter || (gBattleTypeFlags & ~BATTLE_TYPE_IS_MASTER))
     {
         sLocalResetWindow = sLocalResetRequested = sLocalResetConfirming = FALSE;
         return FALSE;
