@@ -1,6 +1,7 @@
 #include "global.h"
 #include <stddef.h>
 #include "multiplayer.h"
+#include "multiplayer_save.h"
 #include "event_object_movement.h"
 #include "field_player_avatar.h"
 #include "fieldmap.h"
@@ -133,7 +134,7 @@ void Multiplayer_Init(void)
 static bool32 FieldReady(void)
 {
     u32 id = gPlayerAvatar.objectEventId;
-    return gMain.callback2 == CB2_Overworld && gMain.callback1 == CB1_Overworld
+    return !MultiplayerSave_IsHeld() && gMain.callback2 == CB2_Overworld && gMain.callback1 == CB1_Overworld
         && gSaveBlock1Ptr != NULL && gMapHeader.mapLayout != NULL
         && id < OBJECT_EVENTS_COUNT && gObjectEvents[id].active && gObjectEvents[id].isPlayer
         && gObjectEvents[id].spriteId < MAX_SPRITES && gSprites[gObjectEvents[id].spriteId].inUse

@@ -23,6 +23,7 @@
 #include "intro.h"
 #include "main.h"
 #include "multiplayer.h"
+#include "multiplayer_save.h"
 #include "trainer_hill.h"
 #include "test_runner.h"
 #include "constants/rgb.h"
@@ -114,6 +115,7 @@ void AgbMain(void)
     SetDefaultFontsPointer();
     InitHeap(gHeap, HEAP_SIZE);
     Multiplayer_Init();
+    MultiplayerSave_Init();
 
     gSoftResetDisabled = FALSE;
 
@@ -138,6 +140,7 @@ void AgbMainLoop(void)
     for (;;)
     {
         ReadKeys();
+        MultiplayerSave_Tick();
         Multiplayer_Tick();
 
         if (gSoftResetDisabled == FALSE
@@ -149,7 +152,12 @@ void AgbMainLoop(void)
             DoSoftReset();
         }
 
-        if (Overworld_SendKeysToLinkIsRunning() == TRUE)
+        if (MultiplayerSave_SkipCallbacks())
+        {
+            // The dedicated mailbox owns the transaction while ordinary field
+            // callbacks stay paused. Audio and bridge frame publication continue.
+        }
+        else if (Overworld_SendKeysToLinkIsRunning() == TRUE)
         {
             gLinkTransferringData = TRUE;
             UpdateLinkAndCallCallbacks();
@@ -170,7 +178,8 @@ void AgbMainLoop(void)
             }
         }
 
-        PlayTimeCounter_Update();
+        if (!MultiplayerSave_PauseClocks())
+            PlayTimeCounter_Update();
         MapMusicMain();
         WaitForVBlank();
     }
@@ -379,7 +388,7 @@ static void VBlankIntr(void)
     m4aSoundMain();
     TryReceiveLinkBattleData();
 
-    if (!gTestRunnerEnabled && (!gMain.inBattle || !(gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_FRONTIER | BATTLE_TYPE_RECORDED))))
+    if (!MultiplayerSave_PauseClocks() && !gTestRunnerEnabled && (!gMain.inBattle || !(gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_FRONTIER | BATTLE_TYPE_RECORDED))))
         AdvanceRandom();
 
     UpdateWirelessStatusIndicatorSprite();
