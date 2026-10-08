@@ -1,4 +1,5 @@
 #include "global.h"
+#include "multiplayer_local_reset.h"
 #include "battle.h"
 #include "battle_anim.h"
 #include "battle_ai_main.h"
@@ -1756,6 +1757,17 @@ static void FreeRestoreBattleData(void)
     FreeBattleSpritesData();
     FreeBattleResources();
     ResetDynamicAiFunctions();
+}
+
+void BattleMain_QuitPersonalEncounter(void)
+{
+    // Own accepted result is checked by the script return callback. This uses
+    // normal fade/resource cleanup without running turn-end rewards/actions.
+    if (!MultiplayerLocalReset_WasAccepted()) return;
+    gBattleOutcome = B_OUTCOME_PLAYER_TELEPORTED;
+    ResetPaletteFadeControl();
+    BeginNormalPaletteFade(PALETTES_ALL, 0, 0, 16, RGB_BLACK);
+    SetMainCallback2(CB2_QuitRecordedBattle);
 }
 
 void CB2_QuitRecordedBattle(void)

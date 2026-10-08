@@ -1,4 +1,5 @@
 #include "config/general.h"
+#include "config/multiplayer_local_reset.h"
 #include "config/battle.h"
 #include "config/item.h"
 #include "constants/global.h"

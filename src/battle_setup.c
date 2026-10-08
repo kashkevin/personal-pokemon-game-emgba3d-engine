@@ -1,4 +1,5 @@
 #include "global.h"
+#include "multiplayer_local_reset.h"
 #include "data.h"
 #include "main.h"
 #include "battle.h"
@@ -717,6 +718,15 @@ static void CB2_EndWildBattle(void)
 
 static void CB2_EndScriptedWildBattle(void)
 {
+    if (MultiplayerLocalReset_WasAccepted())
+    {
+        // The explicit hunt script consumes its reset result before any
+        // ordinary defeat/hide branch. No toxic downgrade or rewards here.
+        CpuFill16(0, (void *)(BG_PLTT), BG_PLTT_SIZE);
+        ResetOamRange(0, 128);
+        SetMainCallback2(CB2_ReturnToFieldContinueScriptPlayMapMusic);
+        return;
+    }
     CpuFill16(0, (void *)(BG_PLTT), BG_PLTT_SIZE);
     ResetOamRange(0, 128);
 

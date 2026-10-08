@@ -1,4 +1,5 @@
 #include "global.h"
+#include "multiplayer_local_reset.h"
 #include "battle.h"
 #include "battle_anim.h"
 #include "battle_arena.h"
@@ -233,6 +234,13 @@ static enum Item GetNextBall(enum Item ballId)
 
 static void HandleInputChooseAction(enum BattlerId battler)
 {
+    u32 localResetInput = MultiplayerLocalReset_HandlePlayerInput(battler);
+    if (localResetInput != MP_LOCAL_RESET_INPUT_PASS)
+    {
+        if (localResetInput == MP_LOCAL_RESET_INPUT_CANCELED)
+            PlayerHandleChooseAction(battler);
+        return;
+    }
     enum Item itemId = gBattleResources->bufferA[battler][2] | (gBattleResources->bufferA[battler][3] << 8);
 
     DoBounceEffect(battler, BOUNCE_HEALTHBOX, 7, 1);

@@ -246,8 +246,39 @@ LittlerootTown_EventScript_FatMan::
 	end
 
 LittlerootTown_EventScript_Boy::
+#if MP_LOCAL_RESET_DEVELOPMENT
+	lock
+	faceplayer
+	specialvar VAR_RESULT, MultiplayerLocalReset_BeginDevelopmentHunt
+	goto_if_eq VAR_RESULT, TRUE, LittlerootTown_EventScript_LocalResetDevelopmentStart
+	msgbox LittlerootTown_Text_LocalResetDevelopmentUnavailable, MSGBOX_DEFAULT
+	release
+	end
+
+LittlerootTown_EventScript_LocalResetDevelopmentStart::
+	setwildbattle SPECIES_WURMPLE, 3
+	dowildbattle
+	specialvar VAR_RESULT, MultiplayerLocalReset_ConsumeResult
+	goto_if_eq VAR_RESULT, TRUE, LittlerootTown_EventScript_LocalResetDevelopmentReturn
+	specialvar VAR_RESULT, GetBattleOutcome
+	goto_if_ne VAR_RESULT, B_OUTCOME_CAUGHT, LittlerootTown_EventScript_LocalResetDevelopmentDone
+	setvar VAR_UNUSED_0x40FA, 1
+LittlerootTown_EventScript_LocalResetDevelopmentDone::
+	release
+	end
+LittlerootTown_EventScript_LocalResetDevelopmentReturn::
+	msgbox LittlerootTown_Text_LocalResetDevelopmentReturned, MSGBOX_DEFAULT
+	release
+	end
+LittlerootTown_Text_LocalResetDevelopmentReturned:
+	.string "Encounter reset. Talk again for\n"
+	.string "the next personal attempt.$"
+LittlerootTown_Text_LocalResetDevelopmentUnavailable:
+	.string "Personal reset test unavailable.$"
+#else
 	msgbox LittlerootTown_Text_BirchSpendsDaysInLab, MSGBOX_NPC
 	end
+#endif
 
 LittlerootTown_EventScript_Twin::
 	lock

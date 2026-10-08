@@ -3,6 +3,7 @@
 #include "multiplayer.h"
 #include "multiplayer_battle.h"
 #include "multiplayer_ownership.h"
+#include "multiplayer_local_reset.h"
 #include "event_data.h"
 #include "main.h"
 #include "overworld.h"
@@ -207,6 +208,19 @@ static bool32 FieldReady(void)
 bool32 MultiplayerSave_FieldReady(void)
 {
     return !MultiplayerSave_IsHeld() && FieldReady();
+}
+
+bool32 MultiplayerSave_HasBinding(void)
+{
+    return sState != MP_SAVE_UNBOUND && sSession && sIncarnation;
+}
+
+bool32 MultiplayerSave_GetIdleBinding(u32 *session, u32 *incarnation)
+{
+    if (sState != MP_SAVE_BOUND || sTradeActive || !sSession || !sIncarnation)
+        return FALSE;
+    *session = sSession; *incarnation = sIncarnation;
+    return TRUE;
 }
 
 bool32 MultiplayerSave_CheckBinding(u32 session, u32 incarnation)
@@ -460,6 +474,7 @@ static void Error(const struct MultiplayerSaveControl *command, u8 status)
 
 void MultiplayerSave_Init(void)
 {
+    MultiplayerLocalReset_Init();
     memset((void *)&gMultiplayerSaveMailbox, 0, sizeof(gMultiplayerSaveMailbox));
     sState = MP_SAVE_UNBOUND; sFrame = 0; sSeenGeneration = 0;
     sIncarnation = 0; sSession = 0; sLastSeq = 0; sPending = FALSE;

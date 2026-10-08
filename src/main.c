@@ -25,6 +25,7 @@
 #include "multiplayer_battle.h"
 #include "multiplayer.h"
 #include "multiplayer_save.h"
+#include "multiplayer_local_reset.h"
 #include "trainer_hill.h"
 #include "test_runner.h"
 #include "constants/rgb.h"
@@ -146,7 +147,13 @@ void AgbMainLoop(void)
         MultiplayerBattle_Tick();
         Multiplayer_Tick();
 
-        if (gSoftResetDisabled == FALSE
+        if (MultiplayerLocalReset_HandleChord())
+        {
+            const u16 chord = A_BUTTON | B_BUTTON | START_BUTTON | SELECT_BUTTON;
+            gMain.newKeys &= ~chord; gMain.heldKeys &= ~chord;
+            gMain.newKeysRaw &= ~chord; gMain.newAndRepeatedKeys &= ~chord;
+        }
+        else if (gSoftResetDisabled == FALSE
          && JOY_HELD_RAW(A_BUTTON)
          && JOY_HELD_RAW(B_START_SELECT) == B_START_SELECT)
         {

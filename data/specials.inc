@@ -638,3 +638,6 @@ gSpecials::
 	def_special UpdateTrainerCardPhotoIcons
 	def_special StickerManGetBragFlags
 	def_special CheckAddCoins
+	def_special MultiplayerLocalReset_BeginDevelopmentHunt
+	def_special MultiplayerLocalReset_ConsumeResult
+	def_special MultiplayerLocalReset_Finish
