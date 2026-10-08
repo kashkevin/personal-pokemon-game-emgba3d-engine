@@ -5,6 +5,23 @@
 #include "multiplayer.h"
 #include "main.h"
 #include "link.h"
+#include "multiplayer_battle_schema.h"
+#include "battle.h"
+#include "battle_main.h"
+#include "battle_controllers.h"
+#include "battle_setup.h"
+#include "overworld.h"
+#include "load_save.h"
+#include "pokemon.h"
+#include "random.h"
+#include "save.h"
+#include "palette.h"
+#include "script.h"
+#include "sprite.h"
+#include "sound.h"
+#include "constants/songs.h"
+#include "constants/hold_effects.h"
+#include "constants/characters.h"
 
 _Static_assert(sizeof(struct MultiplayerBattleControl) == 240, "Battle control ABI");
 _Static_assert(sizeof(struct MultiplayerBattleMailbox) == 512, "Battle mailbox ABI");
@@ -21,6 +38,9 @@ _Static_assert(offsetof(struct MultiplayerBattleControl, data) == 48, "Battle pa
 _Static_assert(sizeof(struct MultiplayerBattleBinding) == 116, "Battle binding layout");
 _Static_assert(sizeof(struct MultiplayerBattleDiagnostic) == 40, "Typed diagnostic block");
 _Static_assert(sizeof(gBlockRecvBuffer[0]) == MULTIPLAYER_BATTLE_BLOCK_SIZE, "Native block ceiling");
+_Static_assert(sizeof(struct MultiplayerBattlePreparation) == 36, "Native preparation ABI");
+_Static_assert(sizeof(struct LinkPlayer) == 28 && sizeof(struct LinkBattlerHeader) == 32, "Native startup ABI");
+_Static_assert(sizeof(rng_value_t) == 16 && sizeof(struct Pokemon) == 100, "Native party/RNG ABI");
 
 const u32 gMultiplayerBattleAbiVersion = MULTIPLAYER_BATTLE_ABI;
 EWRAM_DATA volatile struct MultiplayerBattleMailbox gMultiplayerBattleMailbox = {0};
@@ -40,9 +60,30 @@ static EWRAM_DATA u32 sOutCrc = 0;
 static EWRAM_DATA u32 sReceiveSeq[4] = {0};
 static EWRAM_DATA u16 sOutSize = 0;
 static EWRAM_DATA u16 sReadOffset = 0;
+static EWRAM_DATA u8 sOutKind = 0;
 static EWRAM_DATA u8 sReceiveFlags = 0;
 static EWRAM_DATA bool8 sOutPending = FALSE;
 static EWRAM_DATA bool8 sSavedResetDisabled = FALSE;
+static EWRAM_DATA struct MultiplayerBattlePreparation sPreparation = {0};
+static EWRAM_DATA rng_value_t sPersonalRng = {0};
+static EWRAM_DATA rng_value_t sPersonalRng2 = {0};
+static EWRAM_DATA MainCallback sSavedCallback = NULL;
+static EWRAM_DATA u32 sSavedBattleFlags = 0;
+static EWRAM_DATA u32 sOutcome = 0;
+static EWRAM_DATA u16 sSavedLinkType = 0;
+static EWRAM_DATA u16 sReceiveOffset[4] = {0};
+static EWRAM_DATA u16 sReceiveSize[4] = {0};
+static EWRAM_DATA u8 sReceiveKind[4] = {0};
+static EWRAM_DATA u8 sNextReceiveKind[4] = {0};
+static EWRAM_DATA u8 sNextSendKind = 0;
+static EWRAM_DATA u8 sSavedWireless = 0;
+static EWRAM_DATA u8 sOriginalCount = 0;
+static EWRAM_DATA bool8 sPrepared = FALSE;
+static EWRAM_DATA bool8 sStarted = FALSE;
+static EWRAM_DATA bool8 sRestored = FALSE;
+static EWRAM_DATA bool8 sSeedInstalled = FALSE;
+static bool32 NativeBlockValid(const void *src, u16 size, u8 kind, u8 source);
+static void NoteNativeController(const u8 *data, u8 source);
 
 static u32 Crc32(const u8 *data, u32 size)
 {
@@ -76,12 +117,20 @@ static bool32 Zero(const u8 *data, u32 length)
 
 bool32 MultiplayerBattle_IsActive(void)
 {
-    return sState == MP_BATTLE_CHANNEL || sState == MP_BATTLE_EXPIRED;
+    return sState >= MP_BATTLE_CHANNEL && sState <= MP_BATTLE_RECOVERY_REQUIRED;
 }
 
 bool32 MultiplayerBattle_PauseClocks(void)
 {
-    return MultiplayerBattle_IsActive();
+    return MultiplayerBattle_IsActive() && sState != MP_BATTLE_RUNNING && sState != MP_BATTLE_RETURNING;
+}
+
+bool32 MultiplayerBattle_SkipCallbacks(void) { return MultiplayerBattle_PauseClocks(); }
+bool32 MultiplayerBattle_IsNative(void) { return MultiplayerBattle_IsActive() && sBinding.mode == MP_BATTLE_PHASE_SINGLES; }
+bool32 MultiplayerBattle_CanReceiveControllers(void) { return MultiplayerBattle_IsNative() && sState == MP_BATTLE_RUNNING; }
+void MultiplayerBattle_FailNative(void)
+{
+    if (MultiplayerBattle_IsNative()) sState = MP_BATTLE_RECOVERY_REQUIRED;
 }
 
 bool32 MultiplayerBattle_CheckBinding(u32 session, u32 incarnation)
@@ -91,7 +140,10 @@ bool32 MultiplayerBattle_CheckBinding(u32 session, u32 incarnation)
 
 u8 MultiplayerBattle_GetPlayerId(void) { return sBinding.localSlot; }
 u8 MultiplayerBattle_GetPlayerCount(void) { return sBinding.playerCount; }
-bool8 MultiplayerBattle_IsSendFinished(void) { return !sOutPending && sState == MP_BATTLE_CHANNEL; }
+bool8 MultiplayerBattle_IsSendFinished(void)
+{
+    return !sOutPending && (sState == MP_BATTLE_CHANNEL || sState == MP_BATTLE_PREPARED || sState == MP_BATTLE_RUNNING);
+}
 u8 MultiplayerBattle_GetReceivedFlags(void) { return sReceiveFlags; }
 
 void MultiplayerBattle_ResetReceivedFlag(u8 slot)
@@ -114,35 +166,56 @@ bool8 MultiplayerBattle_SendBlock(const void *src, u16 size)
 {
     struct MultiplayerBattleDiagnostic block;
     u8 local = sBinding.localSlot;
-    if (sState != MP_BATTLE_CHANNEL || sOutPending || sOutSeq == 0xFFFFFFFF
-     || sReceiveFlags & (1 << local) || size != sizeof(block) || src == NULL)
+    u8 kind = MP_BATTLE_KIND_DIAGNOSTIC;
+    if (!src || sOutPending || sOutSeq == 0xFFFFFFFF || (sReceiveFlags & (1 << local)))
         return FALSE;
-    memcpy(&block, src, sizeof(block));
-    if (!DiagnosticValid(&block, local))
-        return FALSE;
+    if (MultiplayerBattle_IsNative())
+    {
+        if (sState != MP_BATTLE_PREPARED && sState != MP_BATTLE_RUNNING) return FALSE;
+        kind = sNextSendKind;
+        if (!NativeBlockValid(src, size, kind, local))
+        {
+            MultiplayerBattle_FailNative(); return FALSE;
+        }
+    }
+    else
+    {
+        if (sState != MP_BATTLE_CHANNEL || size != sizeof(block)) return FALSE;
+        memcpy(&block, src, sizeof(block));
+        if (!DiagnosticValid(&block, local)) return FALSE;
+    }
     memset(gBlockSendBuffer, 0, MULTIPLAYER_BATTLE_BLOCK_SIZE);
-    memcpy(gBlockSendBuffer, &block, sizeof(block));
+    memcpy(gBlockSendBuffer, src, size);
     // Native block reception includes the sender. No controller consumes this
     // development frame; native battle entry and dispatch remain disabled.
     memset(gBlockRecvBuffer[local], 0, MULTIPLAYER_BATTLE_BLOCK_SIZE);
-    memcpy(gBlockRecvBuffer[local], &block, sizeof(block));
+    memcpy(gBlockRecvBuffer[local], src, size);
     sReceiveFlags |= 1 << local;
     sOutSeq++; sOutSize = size; sReadOffset = 0;
-    sOutCrc = Crc32((const u8 *)&block, size); sOutPending = TRUE;
+    sOutCrc = Crc32(src, size); sOutKind = kind; sOutPending = TRUE;
+    if (MultiplayerBattle_IsNative())
+    {
+        if (kind == MP_BATTLE_KIND_CONTROLLER) NoteNativeController(src, local);
+        else sNextSendKind++;
+    }
     return TRUE;
 }
 
 static void QueryData(u8 *data)
 {
     memset(data, 0, 64);
-    PutWord(data, MultiplayerBattle_IsActive() | (sState == MP_BATTLE_EXPIRED) << 1 | sOutPending << 2);
+    PutWord(data, MultiplayerBattle_IsActive() | ((sState == MP_BATTLE_EXPIRED || sState == MP_BATTLE_RECOVERY_REQUIRED) << 1)
+        | sOutPending << 2 | sPrepared << 3 | sStarted << 4 | sRestored << 5
+        | (sState == MP_BATTLE_RECOVERY_REQUIRED) << 6);
     memcpy(data + 4, sBinding.generation, 16);
     data[20] = sBinding.playerCount; data[21] = sBinding.localSlot; data[22] = sBinding.mode;
     PutWord(data + 24, sLastSeq); PutWord(data + 28, sOutSeq);
-    PutWord(data + 32, sOutSize ? MP_BATTLE_KIND_DIAGNOSTIC : MP_BATTLE_KIND_NONE);
+    PutWord(data + 32, sOutSize ? sOutKind : MP_BATTLE_KIND_NONE);
     PutWord(data + 36, sOutSize); PutWord(data + 40, sOutCrc); PutWord(data + 44, sReadOffset);
     PutWord(data + 48, sReceiveFlags);
-    PutWord(data + 52, sState == MP_BATTLE_CHANNEL ? max(0, (s32)(sDeadline - sFrame)) : 0);
+    PutWord(data + 52, MultiplayerBattle_IsActive() && sState != MP_BATTLE_EXPIRED && sState != MP_BATTLE_RECOVERY_REQUIRED
+        ? max(0, (s32)(sDeadline - sFrame)) : 0);
+    PutWord(data + 56, sPreparation.checkpointRevision); PutWord(data + 60, sOutcome);
 }
 
 static void Respond(const struct MultiplayerBattleControl *command, u8 status, const u8 *data, u16 length, bool32 cache)
@@ -183,7 +256,8 @@ static bool32 BindingValid(const struct MultiplayerBattleBinding *b, const struc
 {
     u32 i, j;
     if ((b->playerCount != 2 && b->playerCount != 4) || b->localSlot >= b->playerCount
-     || b->localSlot != c->sourceSlot || b->mode != MP_BATTLE_PHASE_DIAGNOSTIC || b->reserved
+     || b->localSlot != c->sourceSlot || b->mode != c->phase || b->reserved
+     || (b->mode == MP_BATTLE_PHASE_SINGLES && b->playerCount != 2)
      || Zero(b->generation, 16))
         return FALSE;
     for (i = 0; i < 4; i++)
@@ -208,8 +282,15 @@ static void ClearBlocks(void)
 {
     u32 i;
     sReceiveFlags = 0; sOutPending = FALSE;
-    sOutSeq = 0; sOutSize = 0; sReadOffset = 0; sOutCrc = 0;
+    sOutSeq = 0; sOutSize = 0; sReadOffset = 0; sOutCrc = 0; sOutKind = 0;
     memset(sReceiveSeq, 0, sizeof(sReceiveSeq));
+    memset(sReceiveOffset, 0, sizeof(sReceiveOffset)); memset(sReceiveSize, 0, sizeof(sReceiveSize));
+    memset(sReceiveKind, 0, sizeof(sReceiveKind));
+    memset(sNextReceiveKind, MP_BATTLE_KIND_TRAINER, sizeof(sNextReceiveKind));
+    sNextSendKind = MP_BATTLE_KIND_TRAINER;
+    memset(&sPreparation, 0, sizeof(sPreparation));
+    sPrepared = sStarted = sRestored = sSeedInstalled = FALSE; sOutcome = 0;
+    MultiplayerBattle_ResetControllerValidation();
     memset(gBlockSendBuffer, 0, MULTIPLAYER_BATTLE_BLOCK_SIZE);
     for (i = 0; i < 4; i++)
         memset(gBlockRecvBuffer[i], 0, MULTIPLAYER_BATTLE_BLOCK_SIZE);
@@ -242,6 +323,278 @@ static u8 Bind(const struct MultiplayerBattleControl *c)
     return MP_BATTLE_OK;
 }
 
+static bool32 NameValid(const u8 *p, u32 size)
+{
+    while (size--)
+    {
+        if (*p == EOS) return TRUE;
+        if (*p++ >= 0xFC) return FALSE;
+    }
+    return FALSE;
+}
+
+static bool32 PartyMonValid(const u8 *data)
+{
+    struct Pokemon mon;
+    u32 species, serial, i;
+    memcpy(&mon, data, sizeof(mon));
+    species = GetMonData(&mon, MON_DATA_SPECIES);
+    serial = GetMonData(&mon, MON_DATA_MULTIPLAYER_ID);
+    if (GetMonData(&mon, MON_DATA_SANITY_IS_BAD_EGG) || species >= NUM_SPECIES) return FALSE;
+    if (!species) return !serial;
+    if (!serial || serial >= MULTIPLAYER_OWNERSHIP_SERIAL_LIMIT || !mon.level || mon.level > MAX_LEVEL
+     || mon.hp > mon.maxHP || GetMonData(&mon, MON_DATA_HELD_ITEM) >= ITEMS_COUNT) return FALSE;
+    for (i = 0; i < MAX_MON_MOVES; i++) if (GetMonData(&mon, MON_DATA_MOVE1 + i) >= MOVES_COUNT_ALL) return FALSE;
+    return TRUE;
+}
+
+static bool32 NativeBlockValid(const void *src, u16 size, u8 kind, u8 source)
+{
+    const u8 *data = src;
+    if (source >= 2) return FALSE;
+    switch (kind)
+    {
+    case MP_BATTLE_KIND_TRAINER:
+    {
+        struct LinkPlayer player;
+        if (size != sizeof(player)) return FALSE;
+        memcpy(&player, src, sizeof(player));
+        return player.version == VERSION_EMERALD + 0x4000 && !player.lp_field_2
+            && !player.progressFlags && !player.neverRead && !player.progressFlagsCopy
+            && player.gender <= 1 && player.linkType == LINKTYPE_BATTLE && player.id == source
+            && player.language == gGameLanguage && NameValid(player.name, sizeof(player.name));
+    }
+    case MP_BATTLE_KIND_START_HEADER:
+    {
+        struct LinkBattlerHeader header;
+        if (size != sizeof(header)) return FALSE;
+        memcpy(&header, src, sizeof(header));
+        return header.versionSignatureLo == 0 && header.versionSignatureHi == 3
+            && !(header.vsScreenHealthFlagsHi & 0xF0)
+            && header.battleEnigmaBerry.holdEffect < HOLD_EFFECT_COUNT
+            && NameValid(header.battleEnigmaBerry.name, sizeof(header.battleEnigmaBerry.name)) && !data[31];
+    }
+    case MP_BATTLE_KIND_PARTY_0: case MP_BATTLE_KIND_PARTY_1: case MP_BATTLE_KIND_PARTY_2:
+        return size == 200 && PartyMonValid(data) && PartyMonValid(data + 100);
+    case MP_BATTLE_KIND_RNG:
+        return size == 16 && !memcmp(src, sPreparation.rng, 16);
+    case MP_BATTLE_KIND_CONTROLLER:
+        return MultiplayerBattle_ValidateController(data, size, source);
+    default: return FALSE;
+    }
+}
+
+static void NoteNativeController(const u8 *data, u8 source)
+{
+    MultiplayerBattle_NoteController(data, source);
+    if (data[0] == B_COMM_TO_CONTROLLER && data[8] == CONTROLLER_ENDLINKBATTLE)
+        sOutcome = data[9]; // Master slot0's projection is the fixed-side result.
+}
+
+u16 MultiplayerBattle_PackController(u8 *dest, u8 battler, u8 bufferId, u16 size, const u8 *data)
+{
+    u16 padded = size - size % 4 + 4;
+    if (!MultiplayerBattle_IsNative() || sState != MP_BATTLE_RUNNING) return 0;
+    // Mirrored remote controllers still render and send DONE, but only the
+    // trainer owning a battler may supply engine data/choices.
+    if (bufferId == B_COMM_TO_ENGINE && battler != sBinding.localSlot) return 0;
+    if (battler >= 2 || !data || !size || padded + 8 > MULTIPLAYER_BATTLE_BLOCK_SIZE)
+    {
+        MultiplayerBattle_FailNative(); return 0;
+    }
+    memset(dest, 0, padded + 8);
+    dest[0] = bufferId; dest[1] = battler; dest[2] = gBattlerAttacker; dest[3] = gBattlerTarget;
+    dest[4] = padded; dest[5] = padded >> 8; dest[6] = gAbsentBattlerFlags; dest[7] = gEffectBattler;
+    if (bufferId == B_COMM_CONTROLLER_IS_DONE)
+    {
+        if (size != 4 || *data != sBinding.localSlot)
+        {
+            MultiplayerBattle_FailNative(); return 0;
+        }
+        dest[8] = *data; // Native caller owns only one stack byte, not four.
+    }
+    else memcpy(dest + 8, data, size);
+    if (bufferId != B_COMM_CONTROLLER_IS_DONE && (size < 2
+     || MultiplayerBattle_ControllerRawSize(data[0], data[1]) != size))
+    {
+        MultiplayerBattle_FailNative(); return 0;
+    }
+    // DATA and DONE are queued together. Request/reply ordering is validated
+    // later by SendBlock, after earlier queued replies have been accepted.
+    if (bufferId == B_COMM_TO_CONTROLLER && data[0] == CONTROLLER_SETMONDATA && data[1] == REQUEST_MOVES_PP_BATTLE)
+        memset(dest + 8 + 16, 0, 3);
+    if (bufferId == B_COMM_TO_CONTROLLER && data[0] == CONTROLLER_CHOOSEMOVE)
+    {
+        memset(dest + 8 + 25, 0, 3); dest[8 + 33] = 0;
+        dest[8 + 42] = dest[8 + 43] = 0;
+    }
+    if (bufferId == B_COMM_TO_CONTROLLER && data[0] == CONTROLLER_DRAWPARTYSTATUSSUMMARY)
+    {
+        u32 i; for (i = 0; i < PARTY_SIZE; i++) memset(dest + 8 + 6 + i * 8, 0, 2);
+    }
+    if (bufferId == B_COMM_TO_ENGINE && data[0] == CONTROLLER_CHOSENMONRETURNVALUE && data[1] == PARTY_SIZE)
+        memset(dest + 8 + 2, 0, 3);
+    return padded + 8;
+}
+
+static u8 PrepareSingles(const struct MultiplayerBattleControl *c)
+{
+    struct MultiplayerBattlePreparation preparation;
+    struct LinkPlayer player;
+    u8 ownership[80];
+    u32 i, usable = 0;
+    if (sState != MP_BATTLE_CHANNEL || sPrepared || c->length != sizeof(preparation)
+     || c->blockSeq || c->offset || c->totalSize || c->kind) return MP_BATTLE_ORDER;
+    memcpy(&preparation, c->data, sizeof(preparation));
+    if (!preparation.checkpointRevision || preparation.checkpointRevision > 0x7FFFFFFF || preparation.flags
+     || Zero(preparation.rng, 16)) return MP_BATTLE_MALFORMED;
+    if (preparation.nativeCounter != gSaveCounter || preparation.trainerId != READ_OTID_FROM_SAVE
+     || preparation.partyCrc32 != Crc32((const u8 *)gParties[B_TRAINER_PLAYER], 600)) return MP_BATTLE_ORDER;
+    if (MultiplayerOwnership_Query(ownership) != MP_SAVE_OK || Word(ownership + 4)
+     || !gPartiesCount[B_TRAINER_PLAYER] || gPartiesCount[B_TRAINER_PLAYER] > PARTY_SIZE) return MP_BATTLE_UNSAFE;
+    for (i = 0; i < PARTY_SIZE; i++)
+    {
+        struct Pokemon mon = gParties[B_TRAINER_PLAYER][i];
+        u32 species = GetMonData(&mon, MON_DATA_SPECIES);
+        if (!PartyMonValid((const u8 *)&mon) || (!!species != (i < gPartiesCount[B_TRAINER_PLAYER]))) return MP_BATTLE_UNSAFE;
+        if (species && !GetMonData(&mon, MON_DATA_IS_EGG) && mon.hp) usable++;
+    }
+    if (!usable || gSaveBlock2Ptr->playerGender > 1 || !NameValid(gSaveBlock2Ptr->playerName, PLAYER_NAME_LENGTH + 1)) return MP_BATTLE_UNSAFE;
+    sPreparation = preparation; sOriginalCount = gPartiesCount[B_TRAINER_PLAYER];
+    sPersonalRng = gRngValue; sPersonalRng2 = gRng2Value;
+    sSavedCallback = gMain.savedCallback; sSavedBattleFlags = gBattleTypeFlags;
+    sSavedWireless = gWirelessCommType; sSavedLinkType = gLinkType;
+    SavePlayerParty(); sPrepared = TRUE; sState = MP_BATTLE_PREPARED;
+    memset(&player, 0, sizeof(player));
+    player.version = VERSION_EMERALD + 0x4000; player.trainerId = READ_OTID_FROM_SAVE;
+    memcpy(player.name, gSaveBlock2Ptr->playerName, sizeof(player.name));
+    player.gender = gSaveBlock2Ptr->playerGender; player.language = gGameLanguage;
+    player.linkType = LINKTYPE_BATTLE; player.id = sBinding.localSlot;
+    gLinkPlayers[sBinding.localSlot] = player;
+    if (!SendBlock(BitmaskAllOtherLinkPlayers(), &player, sizeof(player)))
+    {
+        MultiplayerBattle_FailNative(); return MP_BATTLE_INTERNAL;
+    }
+    return MP_BATTLE_OK;
+}
+
+static u8 StartSingles(void)
+{
+    if (sState != MP_BATTLE_PREPARED || !sPrepared || sStarted || sOutPending || sReceiveFlags != 3) return MP_BATTLE_BUSY;
+    if (Crc32((const u8 *)gParties[B_TRAINER_PLAYER], 600) != sPreparation.partyCrc32
+     || gPartiesCount[B_TRAINER_PLAYER] != sOriginalCount || gSaveCounter != sPreparation.nativeCounter) return MP_BATTLE_ORDER;
+    ResetBlockReceivedFlags(); sStarted = TRUE; sState = MP_BATTLE_RUNNING;
+    gWirelessCommType = 0; gReceivedRemoteLinkPlayers = TRUE; gLinkType = LINKTYPE_BATTLE;
+    gBattleTypeFlags = BATTLE_TYPE_LINK | BATTLE_TYPE_TRAINER;
+    TRAINER_BATTLE_PARAM.opponentA = TRAINER_LINK_OPPONENT;
+    CleanupOverworldWindowsAndTilemaps();
+    gMain.savedCallback = CB2_ReturnToField;
+    PlayMapChosenOrBattleBGM(MUS_VS_TRAINER);
+    SetMainCallback2(CB2_InitBattle);
+    return MP_BATTLE_OK;
+}
+
+bool8 MultiplayerBattle_SendPartyPair(u8 index)
+{
+    if (index != 0 && index != 2 && index != 4) return FALSE;
+    return SendBlock(BitmaskAllOtherLinkPlayers(), GetSavedPlayerPartyMon(index), sizeof(struct Pokemon) * 2);
+}
+
+void MultiplayerBattle_InstallNativeRng(void)
+{
+    if (MultiplayerBattle_IsNative() && sState == MP_BATTLE_RUNNING && !sSeedInstalled)
+    {
+        memcpy(&gRngValue, sPreparation.rng, 16); sSeedInstalled = TRUE;
+    }
+}
+
+bool32 MultiplayerBattle_TryReturnNative(void)
+{
+    u32 outcome = gBattleOutcome;
+    if (!MultiplayerBattle_IsNative() || sState != MP_BATTLE_RUNNING || !sOutcome || sOutPending
+     || sReceiveFlags || gBattleControllerExecFlags || BattleControllers_HasPendingLinkBlocks()) return FALSE;
+    if (sBinding.localSlot && outcome != B_OUTCOME_DREW) outcome ^= B_OUTCOME_DREW;
+    if (outcome != sOutcome)
+    {
+        MultiplayerBattle_FailNative(); return FALSE;
+    }
+    RestorePlayerPartyExact();
+    if (gPartiesCount[B_TRAINER_PLAYER] != sOriginalCount
+     || Crc32((const u8 *)gParties[B_TRAINER_PLAYER], 600) != sPreparation.partyCrc32)
+    {
+        MultiplayerBattle_FailNative(); return FALSE;
+    }
+    sRestored = TRUE; sState = MP_BATTLE_RETURNING;
+    sOutSize = sOutKind = 0;
+    gReceivedRemoteLinkPlayers = FALSE; gWirelessCommType = sSavedWireless; gLinkType = sSavedLinkType;
+    memset(gLinkPlayers, 0, sizeof(gLinkPlayers));
+    BattleMain_ReturnNetworkBattleToField();
+    return TRUE;
+}
+
+static bool32 FieldReturned(void)
+{
+    u32 id = gPlayerAvatar.objectEventId;
+    return gMain.callback1 == CB1_Overworld && gMain.callback2 == CB2_Overworld && !gMain.inBattle
+        && !gPaletteFade.active && !ScriptContext_IsEnabled() && !ArePlayerFieldControlsLocked()
+        && id < OBJECT_EVENTS_COUNT && gObjectEvents[id].active && gObjectEvents[id].isPlayer
+        && gObjectEvents[id].spriteId < MAX_SPRITES && gSprites[gObjectEvents[id].spriteId].inUse;
+}
+
+static void FinishNativeReturn(void)
+{
+    if (sState == MP_BATTLE_RETURNING && FieldReturned())
+    {
+        if (gPartiesCount[B_TRAINER_PLAYER] != sOriginalCount
+         || Crc32((const u8 *)gParties[B_TRAINER_PLAYER], 600) != sPreparation.partyCrc32)
+        {
+            MultiplayerBattle_FailNative(); return;
+        }
+        gRngValue = sPersonalRng; gRng2Value = sPersonalRng2;
+        gBattleTypeFlags = sSavedBattleFlags; gMain.savedCallback = sSavedCallback;
+        sState = MP_BATTLE_FIELD_READY_HELD;
+    }
+}
+
+static u8 ReceiveNative(const struct MultiplayerBattleControl *c)
+{
+    u8 source = c->sourceSlot, kind = c->kind;
+    if (source >= 2 || source == sBinding.localSlot) return MP_BATTLE_ROLE;
+    if (kind < MP_BATTLE_KIND_TRAINER || kind > MP_BATTLE_KIND_CONTROLLER) return MP_BATTLE_KIND;
+    if (!c->blockSeq || !c->totalSize || c->totalSize > 256 || c->offset >= c->totalSize
+     || c->length != min(128, c->totalSize - c->offset) || (c->offset % 128)) return MP_BATTLE_MALFORMED;
+    if (c->blockSeq == sReceiveSeq[source])
+    {
+        // Late exact retry stays consumed; it never recreates a native flag.
+        return kind == sReceiveKind[source] && c->totalSize == sReceiveSize[source]
+            && !memcmp((const u8 *)gBlockRecvBuffer[source] + c->offset, c->data, c->length) ? MP_BATTLE_OK : MP_BATTLE_ORDER;
+    }
+    if (kind != sNextReceiveKind[source] || (kind != MP_BATTLE_KIND_TRAINER && sState != MP_BATTLE_RUNNING)) return MP_BATTLE_ORDER;
+    if (sReceiveSeq[source] == 0xFFFFFFFF || c->blockSeq != sReceiveSeq[source] + 1) return MP_BATTLE_ORDER;
+    if (sReceiveFlags & (1 << source)) return MP_BATTLE_BUSY;
+    if (c->offset != sReceiveOffset[source]) return MP_BATTLE_ORDER;
+    if (!c->offset)
+    {
+        memset(gBlockRecvBuffer[source], 0, 256);
+        sReceiveKind[source] = kind; sReceiveSize[source] = c->totalSize;
+    }
+    else if (kind != sReceiveKind[source] || c->totalSize != sReceiveSize[source]) return MP_BATTLE_ORDER;
+    memcpy((u8 *)gBlockRecvBuffer[source] + c->offset, c->data, c->length);
+    sReceiveOffset[source] += c->length;
+    if (sReceiveOffset[source] == c->totalSize)
+    {
+        if (!NativeBlockValid(gBlockRecvBuffer[source], c->totalSize, kind, source))
+        {
+            sReceiveOffset[source] = 0; memset(gBlockRecvBuffer[source], 0, 256); return MP_BATTLE_KIND;
+        }
+        if (kind == MP_BATTLE_KIND_TRAINER) memcpy(&gLinkPlayers[source], gBlockRecvBuffer[source], sizeof(struct LinkPlayer));
+        if (kind == MP_BATTLE_KIND_CONTROLLER) NoteNativeController((const u8 *)gBlockRecvBuffer[source], source);
+        else sNextReceiveKind[source]++;
+        sReceiveSeq[source] = c->blockSeq; sReceiveOffset[source] = 0; sReceiveFlags |= 1 << source;
+    }
+    return MP_BATTLE_OK;
+}
+
 static void Handle(const struct MultiplayerBattleControl *c)
 {
     u8 data[128], status = MP_BATTLE_OK;
@@ -249,10 +602,10 @@ static void Handle(const struct MultiplayerBattleControl *c)
     bool32 cache = TRUE;
     if (c->status || c->reserved || c->length > 192 || !c->incarnation || !c->sessionEpoch
      || c->sessionEpoch > 0x7FFFFFFF || !c->commandSeq || Zero(c->battleId, 16)
-     || c->phase != MP_BATTLE_PHASE_DIAGNOSTIC || c->sourceSlot >= 4
+     || (c->phase != MP_BATTLE_PHASE_DIAGNOSTIC && c->phase != MP_BATTLE_PHASE_SINGLES) || c->sourceSlot >= 4
      || c->totalSize > MULTIPLAYER_BATTLE_BLOCK_SIZE || c->offset > c->totalSize
      || !Zero(c->data + c->length, 192 - c->length)
-     || c->opcode < MP_BATTLE_BIND || c->opcode > MP_BATTLE_KEEP)
+     || c->opcode < MP_BATTLE_BIND || c->opcode > MP_BATTLE_RELEASE_SINGLES)
     {
         Respond(c, MP_BATTLE_MALFORMED, NULL, 0, FALSE); return;
     }
@@ -267,7 +620,7 @@ static void Handle(const struct MultiplayerBattleControl *c)
         if (!Empty(c))
             status = MP_BATTLE_MALFORMED;
         else if (sState != MP_BATTLE_UNBOUND && (c->incarnation != sIncarnation || c->sessionEpoch < sSession
-             || memcmp(c->battleId, sBattleId, 16) || c->sourceSlot != sBinding.localSlot))
+             || memcmp(c->battleId, sBattleId, 16) || c->sourceSlot != sBinding.localSlot || c->phase != sBinding.mode))
             status = MP_BATTLE_SESSION;
         else
         {
@@ -292,7 +645,7 @@ static void Handle(const struct MultiplayerBattleControl *c)
         Respond(c, status, data, length, status == MP_BATTLE_OK); return;
     }
     if (sState == MP_BATTLE_UNBOUND || c->incarnation != sIncarnation || c->sessionEpoch != sSession
-     || memcmp(c->battleId, sBattleId, 16))
+     || memcmp(c->battleId, sBattleId, 16) || c->phase != sBinding.mode)
     {
         Respond(c, MP_BATTLE_SESSION, NULL, 0, FALSE); return;
     }
@@ -304,14 +657,16 @@ static void Handle(const struct MultiplayerBattleControl *c)
         status = MP_BATTLE_ROLE;
     else if (!MultiplayerBattle_IsActive())
         status = MP_BATTLE_ORDER;
-    else if (sState == MP_BATTLE_EXPIRED && c->opcode != MP_BATTLE_CLOSE)
+    else if (sState == MP_BATTLE_RECOVERY_REQUIRED
+          || (sState == MP_BATTLE_EXPIRED && c->opcode != (MultiplayerBattle_IsNative() ? MP_BATTLE_ABORT_PRE_START : MP_BATTLE_CLOSE)))
         status = MP_BATTLE_TIMEOUT;
     else switch (c->opcode)
     {
     case MP_BATTLE_EMIT_DIAGNOSTIC:
     {
         struct MultiplayerBattleDiagnostic block;
-        if (c->blockSeq || c->offset || c->totalSize || c->kind || c->length != 4)
+        if (MultiplayerBattle_IsNative()) status = MP_BATTLE_KIND;
+        else if (c->blockSeq || c->offset || c->totalSize || c->kind || c->length != 4)
             status = MP_BATTLE_MALFORMED;
         else
         {
@@ -329,7 +684,7 @@ static void Handle(const struct MultiplayerBattleControl *c)
         break;
     }
     case MP_BATTLE_READ_OUT:
-        if (c->kind != MP_BATTLE_KIND_DIAGNOSTIC)
+        if (c->kind != sOutKind)
             status = MP_BATTLE_KIND;
         else if (c->length || !sOutPending || c->blockSeq != sOutSeq || c->totalSize != sOutSize
               || c->offset != sReadOffset || c->offset >= sOutSize)
@@ -342,7 +697,7 @@ static void Handle(const struct MultiplayerBattleControl *c)
         }
         break;
     case MP_BATTLE_ACK_OUT:
-        if (c->kind != MP_BATTLE_KIND_DIAGNOSTIC)
+        if (c->kind != sOutKind)
             status = MP_BATTLE_KIND;
         else if (c->length != 8 || !sOutPending || c->blockSeq != sOutSeq || c->totalSize != sOutSize
               || c->offset != sOutSize || sReadOffset != sOutSize)
@@ -358,7 +713,8 @@ static void Handle(const struct MultiplayerBattleControl *c)
     {
         struct MultiplayerBattleDiagnostic block;
         u32 source = c->sourceSlot;
-        if (source >= sBinding.playerCount || source == sBinding.localSlot)
+        if (MultiplayerBattle_IsNative()) status = ReceiveNative(c);
+        else if (source >= sBinding.playerCount || source == sBinding.localSlot)
             status = MP_BATTLE_ROLE;
         else if (c->kind != MP_BATTLE_KIND_DIAGNOSTIC)
             status = MP_BATTLE_KIND;
@@ -389,7 +745,8 @@ static void Handle(const struct MultiplayerBattleControl *c)
         break;
     }
     case MP_BATTLE_CLEAR_RX:
-        if (c->blockSeq || c->offset || c->totalSize || c->kind || c->length != 4 || !Word(c->data))
+        if (MultiplayerBattle_IsNative()) status = MP_BATTLE_KIND;
+        else if (c->blockSeq || c->offset || c->totalSize || c->kind || c->length != 4 || !Word(c->data))
             status = MP_BATTLE_MALFORMED;
         else if (Word(c->data) & ~((1 << sBinding.playerCount) - 1))
             status = MP_BATTLE_ROLE;
@@ -402,7 +759,8 @@ static void Handle(const struct MultiplayerBattleControl *c)
         }
         break;
     case MP_BATTLE_CLOSE:
-        if (!Empty(c))
+        if (MultiplayerBattle_IsNative()) status = MP_BATTLE_UNSAFE;
+        else if (!Empty(c))
             status = MP_BATTLE_MALFORMED;
         else
         {
@@ -419,10 +777,45 @@ static void Handle(const struct MultiplayerBattleControl *c)
             sLastSeq = c->commandSeq; QueryData(data); length = 64;
         }
         break;
+    case MP_BATTLE_PREPARE_SINGLES:
+        if (!MultiplayerBattle_IsNative()) status = MP_BATTLE_KIND;
+        else status = PrepareSingles(c);
+        if (status == MP_BATTLE_OK) { sLastSeq = c->commandSeq; QueryData(data); length = 64; }
+        break;
+    case MP_BATTLE_START_SINGLES:
+        if (!MultiplayerBattle_IsNative()) status = MP_BATTLE_KIND;
+        else if (!Empty(c)) status = MP_BATTLE_MALFORMED;
+        else status = StartSingles();
+        if (status == MP_BATTLE_OK) { sLastSeq = c->commandSeq; QueryData(data); length = 64; }
+        break;
+    case MP_BATTLE_ABORT_PRE_START:
+        if (!MultiplayerBattle_IsNative() || sStarted) status = MP_BATTLE_UNSAFE;
+        else if (!Empty(c)) status = MP_BATTLE_MALFORMED;
+        else
+        {
+            if (sPrepared)
+            {
+                RestorePlayerPartyExact(); gRngValue = sPersonalRng; gRng2Value = sPersonalRng2;
+                gMain.savedCallback = sSavedCallback;
+            }
+            ClearBlocks(); sState = MP_BATTLE_IDLE; gSoftResetDisabled = sSavedResetDisabled;
+        }
+        break;
+    case MP_BATTLE_RELEASE_SINGLES:
+        if (!MultiplayerBattle_IsNative() || sState != MP_BATTLE_FIELD_READY_HELD || !sRestored) status = MP_BATTLE_UNSAFE;
+        else if (c->length != 8 || c->blockSeq || c->offset || c->totalSize || c->kind) status = MP_BATTLE_MALFORMED;
+        else if (Word(c->data) != sPreparation.partyCrc32 || Word(c->data + 4) != sOutcome) status = MP_BATTLE_ORDER;
+        else if (gPartiesCount[B_TRAINER_PLAYER] != sOriginalCount
+              || Crc32((const u8 *)gParties[B_TRAINER_PLAYER], 600) != sPreparation.partyCrc32) status = MP_BATTLE_INTERNAL;
+        else
+        {
+            ClearBlocks(); sState = MP_BATTLE_IDLE; gSoftResetDisabled = sSavedResetDisabled;
+        }
+        break;
     default:
         status = MP_BATTLE_MALFORMED; cache = FALSE;
     }
-    if (status == MP_BATTLE_OK && sState == MP_BATTLE_CHANNEL)
+    if (status == MP_BATTLE_OK && MultiplayerBattle_IsActive() && sState != MP_BATTLE_EXPIRED && sState != MP_BATTLE_RECOVERY_REQUIRED)
         sDeadline = sFrame + MULTIPLAYER_BATTLE_DEADLINE;
     Respond(c, status, data, length, cache);
 }
@@ -447,8 +840,10 @@ void MultiplayerBattle_Tick(void)
     u32 generation;
     struct MultiplayerBattleControl command;
     sFrame++; gMultiplayerBattleMailbox.frame = sFrame;
-    if (sState == MP_BATTLE_CHANNEL && (s32)(sFrame - sDeadline) >= 0)
-        sState = MP_BATTLE_EXPIRED;
+    FinishNativeReturn();
+    if (MultiplayerBattle_IsActive() && sState != MP_BATTLE_EXPIRED && sState != MP_BATTLE_RECOVERY_REQUIRED
+     && (s32)(sFrame - sDeadline) >= 0)
+        sState = sStarted ? MP_BATTLE_RECOVERY_REQUIRED : MP_BATTLE_EXPIRED;
     generation = gMultiplayerBattleMailbox.commandGeneration;
     if (generation != sSeenGeneration && !(generation & 1))
     {

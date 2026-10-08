@@ -65,6 +65,7 @@ enum FirstTurnEventsStates
 };
 
 void CB2_InitBattle(void);
+void BattleMain_ReturnNetworkBattleToField(void);
 void BattleMainCB2(void);
 void CB2_QuitRecordedBattle(void);
 void VBlankCB_Battle(void);

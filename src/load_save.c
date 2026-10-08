@@ -197,6 +197,16 @@ void LoadPlayerParty(void)
     }
 }
 
+void RestorePlayerPartyExact(void)
+{
+    u32 i;
+    // Dedicated network battles protect this backup until return. Preserve
+    // empty-slot HP-loss bits and every other original raw field exactly.
+    gPartiesCount[B_TRAINER_PLAYER] = *GetSavedPlayerPartyCount();
+    for (i = 0; i < PARTY_SIZE; i++)
+        gParties[B_TRAINER_PLAYER][i] = *GetSavedPlayerPartyMon(i);
+}
+
 void SaveObjectEvents(void)
 {
     int i;

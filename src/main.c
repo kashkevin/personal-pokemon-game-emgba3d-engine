@@ -155,7 +155,7 @@ void AgbMainLoop(void)
             DoSoftReset();
         }
 
-        if (MultiplayerSave_SkipCallbacks() || MultiplayerBattle_IsActive())
+        if (MultiplayerSave_SkipCallbacks() || MultiplayerBattle_SkipCallbacks())
         {
             // The dedicated mailbox owns the transaction while ordinary field
             // callbacks stay paused. Audio and bridge frame publication continue.
@@ -370,7 +370,8 @@ static void VBlankIntr(void)
 {
     if (MultiplayerBattle_IsActive())
     {
-        // The virtual channel has no physical cable/RFU or battle controllers.
+        // Virtual sessions exclude hardware serial/RFU work. Native virtual
+        // controller polling still runs below when the channel permits it.
     }
     else if (gWirelessCommType != 0)
         RfuVSync();

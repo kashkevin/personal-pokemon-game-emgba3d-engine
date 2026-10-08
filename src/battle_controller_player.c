@@ -16,6 +16,7 @@
 #include "item_menu.h"
 #include "link.h"
 #include "main.h"
+#include "multiplayer_battle.h"
 #include "m4a.h"
 #include "palette.h"
 #include "party_menu.h"
@@ -1223,6 +1224,12 @@ static void SetLinkBattleEndCallbacks(enum BattlerId battler)
 // Despite handling link battles separately, this is only ever used by link battles
 void SetBattleEndCallbacks(enum BattlerId battler)
 {
+    if (MultiplayerBattle_IsNative())
+    {
+        if (!gPaletteFade.active)
+            MultiplayerBattle_TryReturnNative();
+        return;
+    }
     if (!gPaletteFade.active)
     {
         if (gBattleTypeFlags & BATTLE_TYPE_LINK)
@@ -2324,9 +2331,11 @@ static void PlayerHandleResetActionMoveSelection(enum BattlerId battler)
 
 static void PlayerHandleEndLinkBattle(enum BattlerId battler)
 {
-    RecordedBattle_RecordAllBattlerData(&gBattleResources->bufferA[battler][4]);
+    if (!MultiplayerBattle_IsNative())
+        RecordedBattle_RecordAllBattlerData(&gBattleResources->bufferA[battler][4]);
     gBattleOutcome = gBattleResources->bufferA[battler][1];
-    gSaveBlock2Ptr->frontier.disableRecordBattle = gBattleResources->bufferA[battler][2];
+    if (!MultiplayerBattle_IsNative())
+        gSaveBlock2Ptr->frontier.disableRecordBattle = gBattleResources->bufferA[battler][2];
     FadeOutMapMusic(5);
     BeginFastPaletteFade(3);
     BtlController_Complete(battler);

@@ -131,6 +131,11 @@ void HandleLinkBattleSetup(void)
 {
     if (gBattleTypeFlags & BATTLE_TYPE_LINK)
     {
+        if (MultiplayerBattle_IsNative())
+        {
+            CreateTasksForSendRecvLinkBuffers();
+            return;
+        }
         if (gWirelessCommType)
             SetWirelessCommType1();
         if (!gReceivedRemoteLinkPlayers)
@@ -621,6 +626,32 @@ void PrepareBufferDataTransferLink(enum BattlerId battler, u32 bufferId, u16 siz
     s32 alignedSize;
     s32 i;
 
+    if (MultiplayerBattle_IsNative())
+    {
+        u8 packed[MULTIPLAYER_BATTLE_BLOCK_SIZE];
+        u16 length = MultiplayerBattle_PackController(packed, battler, bufferId, size, data);
+        u16 start = gTasks[sLinkSendTaskId].tCurrentBlock_Start;
+        u16 end = gTasks[sLinkSendTaskId].tCurrentBlock_End;
+        if (!length) return;
+        if (end >= start && end + length + 1 > BATTLE_BUFFER_LINK_SIZE)
+        {
+            if (length + 1 >= start)
+            {
+                MultiplayerBattle_FailNative(); return;
+            }
+            gTasks[sLinkSendTaskId].tCurrentBlock_WrapFrom = end;
+            end = 0;
+        }
+        else if ((end < start && end + length + 1 >= start)
+              || (!start && end + length + 1 >= BATTLE_BUFFER_LINK_SIZE))
+        {
+            MultiplayerBattle_FailNative(); return;
+        }
+        memcpy(gLinkBattleSendBuffer + end, packed, length);
+        gTasks[sLinkSendTaskId].tCurrentBlock_End = end + length;
+        return;
+    }
+
     alignedSize = size - size % 4 + 4;
     if (gTasks[sLinkSendTaskId].tCurrentBlock_End + alignedSize + LINK_BUFF_DATA + 1 > BATTLE_BUFFER_LINK_SIZE)
     {
@@ -677,7 +708,7 @@ static void Task_HandleSendLinkBuffersData(u8 taskId)
             gTasks[taskId].tState++;
         break;
     case SENDTASK_STATE_COUNT_PLAYERS:
-        if (gWirelessCommType)
+        if (MultiplayerBattle_IsNative() || gWirelessCommType)
         {
             gTasks[taskId].tState++;
         }
@@ -714,7 +745,11 @@ static void Task_HandleSendLinkBuffersData(u8 taskId)
                     gTasks[taskId].tCurrentBlock_Start    = 0;
                 }
                 blockSize = (BYTE_TO_SEND(LINK_BUFF_SIZE_LO) | (BYTE_TO_SEND(LINK_BUFF_SIZE_HI) << 8)) + LINK_BUFF_DATA;
-                SendBlock(BitmaskAllOtherLinkPlayers(), &BYTE_TO_SEND(0), blockSize);
+                if (MultiplayerBattle_IsNative())
+                {
+                    if (!SendBlock(BitmaskAllOtherLinkPlayers(), &BYTE_TO_SEND(0), blockSize)) break;
+                }
+                else SendBlock(BitmaskAllOtherLinkPlayers(), &BYTE_TO_SEND(0), blockSize);
                 gTasks[taskId].tState++;
             }
             else
@@ -759,21 +794,34 @@ void TryReceiveLinkBattleData(void)
     s32 j;
     u8 *recvBuffer;
 
-    if (MultiplayerBattle_IsActive())
+    if (MultiplayerBattle_IsActive() && !MultiplayerBattle_CanReceiveControllers())
         return;
 
     if (gReceivedRemoteLinkPlayers && (gBattleTypeFlags & BATTLE_TYPE_LINK_IN_BATTLE))
     {
-        DestroyTask_RfuIdle();
+        if (!MultiplayerBattle_IsNative()) DestroyTask_RfuIdle();
         for (i = 0; i < GetLinkPlayerCount(); i++)
         {
             if (GetBlockReceivedStatus() & (1 << (i)))
             {
-                ResetBlockReceivedFlag(i);
                 recvBuffer = (u8 *)gBlockRecvBuffer[i];
                 {
                     u8 *dest, *src;
                     u16 dataSize = gBlockRecvBuffer[i][2];
+
+                    if (MultiplayerBattle_IsNative())
+                    {
+                        u16 start = gTasks[sLinkReceiveTaskId].tCurrentBlock_Start;
+                        u16 end = gTasks[sLinkReceiveTaskId].tCurrentBlock_End;
+                        if (dataSize + 8 > MULTIPLAYER_BATTLE_BLOCK_SIZE)
+                        {
+                            MultiplayerBattle_FailNative(); return;
+                        }
+                        if ((end < start && end + dataSize + 9 >= start)
+                         || (end >= start && end + dataSize + 9 > BATTLE_BUFFER_LINK_SIZE && dataSize + 9 >= start))
+                            continue;
+                    }
+                    ResetBlockReceivedFlag(i);
 
                     if (gTasks[sLinkReceiveTaskId].tCurrentBlock_End + 9 + dataSize > 0x1000)
                     {
@@ -792,6 +840,12 @@ void TryReceiveLinkBattleData(void)
             }
         }
     }
+}
+
+bool32 BattleControllers_HasPendingLinkBlocks(void)
+{
+    return gTasks[sLinkSendTaskId].tCurrentBlock_Start != gTasks[sLinkSendTaskId].tCurrentBlock_End
+        || gTasks[sLinkReceiveTaskId].tCurrentBlock_Start != gTasks[sLinkReceiveTaskId].tCurrentBlock_End;
 }
 
 static void Task_HandleCopyReceivedLinkBuffersData(u8 taskId)
@@ -1034,6 +1088,8 @@ void BtlController_EmitPrintString(enum BattlerId battler, u32 bufferId, enum St
     gBattleResources->transferBuffer[3] = (stringID & 0xFF00) >> 8;
 
     stringInfo = (struct BattleMsgData *)(&gBattleResources->transferBuffer[4]);
+    if (MultiplayerBattle_IsNative())
+        memset(stringInfo, 0, sizeof(*stringInfo));
     stringInfo->currentMove = gCurrentMove;
     stringInfo->originallyUsedMove = gChosenMove;
     stringInfo->lastItem = gLastUsedItem;
@@ -1052,6 +1108,15 @@ void BtlController_EmitPrintString(enum BattlerId battler, u32 bufferId, enum St
         stringInfo->textBuffs[1][i] = gBattleTextBuff2[i];
         stringInfo->textBuffs[2][i] = gBattleTextBuff3[i];
     }
+    if (MultiplayerBattle_IsNative())
+    {
+        for (i = 0; i < 3; i++)
+        {
+            u32 j;
+            for (j = 0; j < TEXT_BUFF_ARRAY_COUNT && !stringInfo->textBuffs[i][j]; j++);
+            if (j == TEXT_BUFF_ARRAY_COUNT) stringInfo->textBuffs[i][0] = EOS;
+        }
+    }
     PrepareBufferDataTransfer(battler, bufferId, gBattleResources->transferBuffer, sizeof(struct BattleMsgData) + 4);
 }
 
@@ -1066,6 +1131,8 @@ void BtlController_EmitPrintSelectionString(enum BattlerId battler, u32 bufferId
     gBattleResources->transferBuffer[3] = (stringID & 0xFF00) >> 8;
 
     stringInfo = (struct BattleMsgData *)(&gBattleResources->transferBuffer[4]);
+    if (MultiplayerBattle_IsNative())
+        memset(stringInfo, 0, sizeof(*stringInfo));
     stringInfo->currentMove = gCurrentMove;
     stringInfo->originallyUsedMove = gChosenMove;
     stringInfo->lastItem = gLastUsedItem;
@@ -1080,6 +1147,15 @@ void BtlController_EmitPrintSelectionString(enum BattlerId battler, u32 bufferId
         stringInfo->textBuffs[0][i] = gBattleTextBuff1[i];
         stringInfo->textBuffs[1][i] = gBattleTextBuff2[i];
         stringInfo->textBuffs[2][i] = gBattleTextBuff3[i];
+    }
+    if (MultiplayerBattle_IsNative())
+    {
+        for (i = 0; i < 3; i++)
+        {
+            u32 j;
+            for (j = 0; j < TEXT_BUFF_ARRAY_COUNT && !stringInfo->textBuffs[i][j]; j++);
+            if (j == TEXT_BUFF_ARRAY_COUNT) stringInfo->textBuffs[i][0] = EOS;
+        }
     }
     PrepareBufferDataTransfer(battler, bufferId, gBattleResources->transferBuffer, sizeof(struct BattleMsgData) + 4);
 }
@@ -1427,7 +1503,7 @@ void BtlController_EmitLinkStandbyMsg(enum BattlerId battler, u32 bufferId, u8 m
     gBattleResources->transferBuffer[0] = CONTROLLER_LINKSTANDBYMSG;
     gBattleResources->transferBuffer[1] = mode;
 
-    if (record)
+    if (record && !MultiplayerBattle_IsNative())
         gBattleResources->transferBuffer[3] = gBattleResources->transferBuffer[2] = RecordedBattle_BufferNewBattlerData(&gBattleResources->transferBuffer[4]);
     else
         gBattleResources->transferBuffer[3] = gBattleResources->transferBuffer[2] = 0;
@@ -1446,9 +1522,14 @@ void BtlController_EmitEndLinkBattle(enum BattlerId battler, u32 bufferId, u8 ba
 {
     gBattleResources->transferBuffer[0] = CONTROLLER_ENDLINKBATTLE;
     gBattleResources->transferBuffer[1] = battleOutcome;
-    gBattleResources->transferBuffer[2] = gSaveBlock2Ptr->frontier.disableRecordBattle;
-    gBattleResources->transferBuffer[3] = gSaveBlock2Ptr->frontier.disableRecordBattle;
-    gBattleResources->transferBuffer[5] = gBattleResources->transferBuffer[4] = RecordedBattle_BufferNewBattlerData(&gBattleResources->transferBuffer[6]);
+    if (MultiplayerBattle_IsNative())
+        memset(&gBattleResources->transferBuffer[2], 0, 4);
+    else
+    {
+        gBattleResources->transferBuffer[2] = gSaveBlock2Ptr->frontier.disableRecordBattle;
+        gBattleResources->transferBuffer[3] = gSaveBlock2Ptr->frontier.disableRecordBattle;
+        gBattleResources->transferBuffer[5] = gBattleResources->transferBuffer[4] = RecordedBattle_BufferNewBattlerData(&gBattleResources->transferBuffer[6]);
+    }
     PrepareBufferDataTransfer(battler, bufferId, gBattleResources->transferBuffer, gBattleResources->transferBuffer[4] + 6);
 }
 
@@ -1475,6 +1556,12 @@ static u32 GetBattlerMonData(enum BattlerId battler, struct Pokemon *party, u32 
     s16 data16;
     u32 data32;
     s32 size = 0;
+
+    if (MultiplayerBattle_IsNative())
+    {
+        memset(&battleMon, 0, sizeof(battleMon));
+        memset(&moveData, 0, sizeof(moveData));
+    }
 
     switch (gBattleResources->bufferA[battler][1])
     {

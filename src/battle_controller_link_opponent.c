@@ -12,6 +12,7 @@
 #include "frontier_util.h"
 #include "link.h"
 #include "main.h"
+#include "multiplayer_battle.h"
 #include "m4a.h"
 #include "palette.h"
 #include "pokeball.h"
@@ -379,20 +380,23 @@ static void LinkOpponentHandleDrawPartyStatusSummary(enum BattlerId battler)
 
 static void LinkOpponentHandleLinkStandbyMsg(enum BattlerId battler)
 {
-    RecordedBattle_RecordAllBattlerData(&gBattleResources->bufferA[battler][2]);
+    if (!MultiplayerBattle_IsNative())
+        RecordedBattle_RecordAllBattlerData(&gBattleResources->bufferA[battler][2]);
     BtlController_Complete(battler);
 }
 
 static void LinkOpponentHandleEndLinkBattle(enum BattlerId battler)
 {
-    RecordedBattle_RecordAllBattlerData(&gBattleResources->bufferA[battler][4]);
+    if (!MultiplayerBattle_IsNative())
+        RecordedBattle_RecordAllBattlerData(&gBattleResources->bufferA[battler][4]);
 
     if (gBattleResources->bufferA[battler][1] == B_OUTCOME_DREW)
         gBattleOutcome = gBattleResources->bufferA[battler][1];
     else
         gBattleOutcome = gBattleResources->bufferA[battler][1] ^ B_OUTCOME_DREW;
 
-    gSaveBlock2Ptr->frontier.disableRecordBattle = gBattleResources->bufferA[battler][2];
+    if (!MultiplayerBattle_IsNative())
+        gSaveBlock2Ptr->frontier.disableRecordBattle = gBattleResources->bufferA[battler][2];
     FadeOutMapMusic(5);
     BeginFastPaletteFade(3);
     BtlController_Complete(battler);

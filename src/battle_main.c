@@ -36,6 +36,8 @@
 #include "link_rfu.h"
 #include "load_save.h"
 #include "main.h"
+#include "multiplayer_battle.h"
+#include "overworld.h"
 #include "malloc.h"
 #include "m4a.h"
 #include "palette.h"
@@ -562,6 +564,8 @@ static void CB2_InitBattleInternal(void)
 
     if (!DEBUG_OVERWORLD_MENU || (DEBUG_OVERWORLD_MENU && !gIsDebugBattle))
         gBattleEnvironment = BattleSetup_GetEnvironmentId();
+    if (MultiplayerBattle_IsNative())
+        gBattleEnvironment = BATTLE_ENVIRONMENT_BUILDING;
     if (gBattleTypeFlags & BATTLE_TYPE_RECORDED)
         gBattleEnvironment = BATTLE_ENVIRONMENT_BUILDING;
     if (TestRunner_Battle_GetForcedEnvironment())
@@ -587,7 +591,8 @@ static void CB2_InitBattleInternal(void)
         SetMainCallback2(CB2_HandleStartBattle);
 
     gMain.inBattle = TRUE;
-    gSaveBlock2Ptr->frontier.disableRecordBattle = FALSE;
+    if (!MultiplayerBattle_IsNative())
+        gSaveBlock2Ptr->frontier.disableRecordBattle = FALSE;
 
     for (i = 0; i < PARTY_SIZE; i++)
     {
@@ -651,7 +656,8 @@ static void BufferPartyVsScreenHealth_AtStart(void)
     BUFFER_PARTY_VS_SCREEN_STATUS(gParties[B_TRAINER_PLAYER], flags, i);
     gBattleStruct->multiBuffer.linkBattlerHeader.vsScreenHealthFlagsLo = flags;
     *(&gBattleStruct->multiBuffer.linkBattlerHeader.vsScreenHealthFlagsHi) = flags >> 8;
-    gBattleStruct->multiBuffer.linkBattlerHeader.vsScreenHealthFlagsHi |= FlagGet(FLAG_SYS_FRONTIER_PASS) << 7;
+    if (!MultiplayerBattle_IsNative())
+        gBattleStruct->multiBuffer.linkBattlerHeader.vsScreenHealthFlagsHi |= FlagGet(FLAG_SYS_FRONTIER_PASS) << 7;
 }
 
 static void SetPlayerBerryDataInBattleStruct(void)
@@ -944,7 +950,11 @@ static void CB2_HandleStartBattle(void)
         if (IsLinkTaskFinished())
         {
             // Send Pokémon 1-2
-            SendBlock(BitmaskAllOtherLinkPlayers(), gParties[B_TRAINER_PLAYER], sizeof(struct Pokemon) * 2);
+            if (MultiplayerBattle_IsNative())
+            {
+                if (!MultiplayerBattle_SendPartyPair(0)) break;
+            }
+            else SendBlock(BitmaskAllOtherLinkPlayers(), gParties[B_TRAINER_PLAYER], sizeof(struct Pokemon) * 2);
             gBattleCommunication[MULTIUSE_STATE]++;
         }
         break;
@@ -961,7 +971,11 @@ static void CB2_HandleStartBattle(void)
         if (IsLinkTaskFinished())
         {
             // Send Pokémon 3-4
-            SendBlock(BitmaskAllOtherLinkPlayers(), &gParties[B_TRAINER_PLAYER][2], sizeof(struct Pokemon) * 2);
+            if (MultiplayerBattle_IsNative())
+            {
+                if (!MultiplayerBattle_SendPartyPair(2)) break;
+            }
+            else SendBlock(BitmaskAllOtherLinkPlayers(), &gParties[B_TRAINER_PLAYER][2], sizeof(struct Pokemon) * 2);
             gBattleCommunication[MULTIUSE_STATE]++;
         }
         break;
@@ -978,7 +992,11 @@ static void CB2_HandleStartBattle(void)
         if (IsLinkTaskFinished())
         {
             // Send Pokémon 5-6
-            SendBlock(BitmaskAllOtherLinkPlayers(), &gParties[B_TRAINER_PLAYER][4], sizeof(struct Pokemon) * 2);
+            if (MultiplayerBattle_IsNative())
+            {
+                if (!MultiplayerBattle_SendPartyPair(4)) break;
+            }
+            else SendBlock(BitmaskAllOtherLinkPlayers(), &gParties[B_TRAINER_PLAYER][4], sizeof(struct Pokemon) * 2);
             gBattleCommunication[MULTIUSE_STATE]++;
         }
         break;
@@ -988,12 +1006,22 @@ static void CB2_HandleStartBattle(void)
             // Recv Pokémon 5-6
             ResetBlockReceivedFlags();
             memcpy(&gParties[B_TRAINER_OPPONENT_A][4], gBlockRecvBuffer[enemyMultiplayerId], sizeof(struct Pokemon) * 2);
-
+            if (MultiplayerBattle_IsNative())
+            {
+                u32 i;
+                // Canonical originals travelled over the channel; battle forms
+                // exist only in this temporary opponent party.
+                for (i = 0; i < PARTY_SIZE; i++)
+                    TryFormChange(&gParties[B_TRAINER_OPPONENT_A][i], FORM_CHANGE_BEGIN_BATTLE, B_TRAINER_OPPONENT_A);
+                gPartiesCount[B_TRAINER_OPPONENT_A] = CalculatePartyCount(B_TRAINER_OPPONENT_A);
+            }
             gBattleCommunication[MULTIUSE_STATE]++;
         }
         break;
     case 15:
         InitBattleControllers();
+        if (MultiplayerBattle_IsNative())
+            MultiplayerBattle_InstallNativeRng();
         RecordedBattle_SetTrainerInfo();
         gBattleCommunication[SPRITES_INIT_STATE1] = 0;
         gBattleCommunication[SPRITES_INIT_STATE2] = 0;
@@ -1756,6 +1784,22 @@ static void FreeRestoreBattleData(void)
     FreeBattleSpritesData();
     FreeBattleResources();
     ResetDynamicAiFunctions();
+}
+
+static void CB2_ReturnNetworkBattle(void)
+{
+    SetVBlankCallback(NULL);
+    SetHBlankCallback(NULL);
+    FreeRestoreBattleData();
+    FreeAllWindowBuffers();
+    SetMainCallback2(CB2_ReturnToField);
+}
+
+void BattleMain_ReturnNetworkBattleToField(void)
+{
+    // Defer resource destruction until the current controller loop returns.
+    gMain.callback1 = NULL;
+    SetMainCallback2(CB2_ReturnNetworkBattle);
 }
 
 void CB2_QuitRecordedBattle(void)
@@ -5315,6 +5359,12 @@ static void HandleEndTurn_FinishBattle(void)
 
 static void FreeResetData_ReturnToOvOrDoEvolutions(void)
 {
+    if (MultiplayerBattle_IsNative())
+    {
+        if (!gPaletteFade.active)
+            MultiplayerBattle_TryReturnNative();
+        return;
+    }
     if (!gPaletteFade.active)
     {
         memset(&gBattleMons, 0, sizeof(struct BattlePokemon) * MAX_BATTLERS_COUNT);

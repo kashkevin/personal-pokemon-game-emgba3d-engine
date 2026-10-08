@@ -2,6 +2,7 @@
 #include "multiplayer_battle.h"
 #include "multiplayer_save.h"
 #include "multiplayer_ownership.h"
+#include "battle.h"
 #include "pokemon.h"
 #include "pokemon_storage_system.h"
 #include "main.h"
@@ -22,12 +23,18 @@
 #include "constants/maps.h"
 #include "constants/map_groups.h"
 #include "constants/layouts.h"
+#include "constants/characters.h"
 #include "test/test.h"
 
 struct ChannelFixture {
     struct MultiplayerBattleControl command;
     struct MultiplayerBattleBinding binding;
     MainCallback cb1, cb2;
+    MainCallback savedCallback;
+    rng_value_t rng, rng2;
+    u32 battleFlags;
+    u16 linkType;
+    struct LinkPlayer players[4];
     struct MapHeader header;
     struct PlayerAvatar avatar;
     struct ObjectEvent object;
@@ -88,6 +95,9 @@ static void SetUp(struct ChannelFixture *f, u8 count, u8 local)
     u32 serial = 1, i;
     memset(f, 0, sizeof(*f));
     f->cb1 = gMain.callback1; f->cb2 = gMain.callback2;
+    f->savedCallback = gMain.savedCallback; f->rng = gRngValue; f->rng2 = gRng2Value;
+    f->battleFlags = gBattleTypeFlags; f->linkType = gLinkType;
+    memcpy(f->players, gLinkPlayers, sizeof(f->players));
     f->header = gMapHeader; f->avatar = gPlayerAvatar; f->object = gObjectEvents[0];
     f->rfu = gRfuLinkStatus; f->wireless = gWirelessCommType;
     f->received = gReceivedRemoteLinkPlayers; f->spriteInUse = gSprites[0].inUse;
@@ -144,6 +154,9 @@ static void TearDown(struct ChannelFixture *f)
 {
     MultiplayerBattle_Init(); MultiplayerSave_Init();
     gMain.callback1 = f->cb1; gMain.callback2 = f->cb2;
+    gMain.savedCallback = f->savedCallback; gRngValue = f->rng; gRng2Value = f->rng2;
+    gBattleTypeFlags = f->battleFlags; gLinkType = f->linkType; gMain.inBattle = FALSE;
+    memcpy(gLinkPlayers, f->players, sizeof(f->players));
     gMapHeader = f->header; gPlayerAvatar = f->avatar; gObjectEvents[0] = f->object;
     gRfuLinkStatus = f->rfu; gWirelessCommType = f->wireless;
     gReceivedRemoteLinkPlayers = f->received; gSprites[0].inUse = f->spriteInUse;
@@ -167,6 +180,161 @@ static void Receive(struct ChannelFixture *f, u8 source, u32 sequence, u32 token
     block.sourceSlot = source; block.token = token;
     block.lease = f->binding.leases[source]; block.incarnation = f->binding.incarnations[source];
     memcpy(f->command.data, &block, sizeof(block));
+}
+
+static void NativeBinding(struct ChannelFixture *f)
+{
+    SetUp(f, 2, 0);
+    CalculateMonStats(&gParties[B_TRAINER_PLAYER][0]);
+    gSaveBlock2Ptr->playerName[0] = EOS;
+    f->binding.mode = MP_BATTLE_PHASE_SINGLES; f->command.phase = MP_BATTLE_PHASE_SINGLES;
+    memcpy(f->command.data, &f->binding, sizeof(f->binding));
+    Bind(f);
+}
+
+static void Preparation(struct ChannelFixture *f)
+{
+    struct MultiplayerBattlePreparation p = {0};
+    p.checkpointRevision = 1; p.nativeCounter = gSaveCounter;
+    p.trainerId = READ_OTID_FROM_SAVE; p.partyCrc32 = Crc((const u8 *)gParties[B_TRAINER_PLAYER], 600);
+    p.rng[0] = 1; p.rng[4] = 2; p.rng[8] = 3; p.rng[12] = 4;
+    Next(f, MP_BATTLE_PREPARE_SINGLES); f->command.length = sizeof(p);
+    memcpy(f->command.data, &p, sizeof(p));
+}
+
+static void TrainerAndAck(struct ChannelFixture *f)
+{
+    struct LinkPlayer peer = {0};
+    u32 crc = Crc((const u8 *)gBlockSendBuffer, 28);
+    Next(f, MP_BATTLE_READ_OUT); f->command.blockSeq = 1; f->command.totalSize = 28;
+    f->command.kind = MP_BATTLE_KIND_TRAINER;
+    EXPECT_EQ(Submit(f), MP_BATTLE_OK);
+    Next(f, MP_BATTLE_ACK_OUT); f->command.blockSeq = 1; f->command.totalSize = 28;
+    f->command.offset = 28; f->command.kind = MP_BATTLE_KIND_TRAINER; f->command.length = 8;
+    PutWord(f->command.data, crc); PutWord(f->command.data + 4, 2);
+    EXPECT_EQ(Submit(f), MP_BATTLE_OK);
+    peer.version = VERSION_EMERALD + 0x4000; peer.id = 1; peer.linkType = LINKTYPE_BATTLE;
+    peer.language = gGameLanguage; peer.name[0] = EOS;
+    Next(f, MP_BATTLE_RECEIVE); f->command.sourceSlot = 1; f->command.blockSeq = 1;
+    f->command.kind = MP_BATTLE_KIND_TRAINER; f->command.totalSize = sizeof(peer);
+    f->command.length = sizeof(peer); memcpy(f->command.data, &peer, sizeof(peer));
+    EXPECT_EQ(Submit(f), MP_BATTLE_OK);
+}
+
+TEST("Multiplayer native singles: canonical preparation mismatches refuse before party or RNG changes")
+{
+    struct ChannelFixture f;
+    struct Pokemon original[6];
+    rng_value_t rng, rng2;
+    NativeBinding(&f);
+    memcpy(original, gParties[B_TRAINER_PLAYER], sizeof(original)); rng = gRngValue; rng2 = gRng2Value;
+    Preparation(&f); f.command.data[4] ^= 1;
+    EXPECT_EQ(Submit(&f), MP_BATTLE_ORDER);
+    Preparation(&f); f.command.data[8] ^= 1;
+    EXPECT_EQ(Submit(&f), MP_BATTLE_ORDER);
+    Preparation(&f); f.command.data[12] ^= 1;
+    EXPECT_EQ(Submit(&f), MP_BATTLE_ORDER);
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_CHANNEL);
+    EXPECT(!memcmp(original, gParties[B_TRAINER_PLAYER], sizeof(original)));
+    EXPECT(!memcmp(&rng, &gRngValue, sizeof(rng))); EXPECT(!memcmp(&rng2, &gRng2Value, sizeof(rng2)));
+    EXPECT_EQ(Send(&f, MP_BATTLE_CLOSE), MP_BATTLE_UNSAFE);
+    EXPECT_EQ(Send(&f, MP_BATTLE_ABORT_PRE_START), MP_BATTLE_OK);
+    EXPECT(!MultiplayerBattle_IsActive());
+    TearDown(&f);
+}
+
+TEST("Multiplayer native singles: prepare replay freezes originals and explicit abort restores exact empty tails")
+{
+    struct ChannelFixture f;
+    struct Pokemon original[6];
+    struct MultiplayerBattleControl prepared;
+    rng_value_t rng, rng2;
+    NativeBinding(&f);
+    gParties[B_TRAINER_PLAYER][5].box.hpLost = 17;
+    memcpy(original, gParties[B_TRAINER_PLAYER], sizeof(original)); rng = gRngValue; rng2 = gRng2Value;
+    Preparation(&f); EXPECT_EQ(Submit(&f), MP_BATTLE_OK); prepared = f.command;
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_PREPARED);
+    EXPECT_EQ(gMultiplayerBattleMailbox.response.data[32], MP_BATTLE_KIND_TRAINER);
+    EXPECT_EQ(Submit(&f), MP_BATTLE_OK); EXPECT(!memcmp(&prepared, &f.command, sizeof(prepared)));
+    EXPECT(MultiplayerBattle_SkipCallbacks()); EXPECT(MultiplayerBattle_PauseClocks());
+    EXPECT(!MultiplayerOwnership_CanSaveParty());
+    EXPECT_EQ(Send(&f, MP_BATTLE_START_SINGLES), MP_BATTLE_BUSY);
+    EXPECT_EQ(Send(&f, MP_BATTLE_CLEAR_RX), MP_BATTLE_KIND);
+    gParties[B_TRAINER_PLAYER][0].hp = 1; gParties[B_TRAINER_PLAYER][5].box.hpLost = 0;
+    Random(); Random2();
+    EXPECT_EQ(Send(&f, MP_BATTLE_ABORT_PRE_START), MP_BATTLE_OK);
+    EXPECT(!memcmp(original, gParties[B_TRAINER_PLAYER], sizeof(original)));
+    EXPECT(!memcmp(&rng, &gRngValue, sizeof(rng))); EXPECT(!memcmp(&rng2, &gRng2Value, sizeof(rng2)));
+    EXPECT_EQ(gPartiesCount[B_TRAINER_PLAYER], 1);
+    TearDown(&f);
+}
+
+TEST("Multiplayer native singles: startup requires descriptors then installs issued RNG exactly once")
+{
+    struct ChannelFixture f;
+    rng_value_t issued, first, personal;
+    NativeBinding(&f); Preparation(&f); memcpy(&issued, f.command.data + 16, 16); personal = gRngValue;
+    EXPECT_EQ(Submit(&f), MP_BATTLE_OK);
+    TrainerAndAck(&f); EXPECT_EQ(Send(&f, MP_BATTLE_START_SINGLES), MP_BATTLE_OK);
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_RUNNING);
+    EXPECT(!MultiplayerBattle_SkipCallbacks()); EXPECT(!MultiplayerBattle_PauseClocks());
+    EXPECT(!memcmp(&personal, &gRngValue, 16));
+    MultiplayerBattle_InstallNativeRng(); EXPECT(!memcmp(&issued, &gRngValue, 16));
+    Random(); first = gRngValue; MultiplayerBattle_InstallNativeRng();
+    EXPECT(!memcmp(&first, &gRngValue, 16));
+    EXPECT_EQ(Send(&f, MP_BATTLE_ABORT_PRE_START), MP_BATTLE_UNSAFE);
+    EXPECT_EQ(Send(&f, MP_BATTLE_RELEASE_SINGLES), MP_BATTLE_UNSAFE);
+    TearDown(&f);
+}
+
+TEST("Multiplayer native singles: running expiry remains recovery-held and cannot close or rebind")
+{
+    struct ChannelFixture f;
+    u32 i;
+    NativeBinding(&f); Preparation(&f); EXPECT_EQ(Submit(&f), MP_BATTLE_OK);
+    TrainerAndAck(&f); EXPECT_EQ(Send(&f, MP_BATTLE_START_SINGLES), MP_BATTLE_OK);
+    for (i = 0; i < 600; i++) MultiplayerBattle_Tick();
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_RECOVERY_REQUIRED);
+    EXPECT(MultiplayerBattle_IsActive()); EXPECT(MultiplayerBattle_SkipCallbacks()); EXPECT(gSoftResetDisabled);
+    EXPECT_EQ(Send(&f, MP_BATTLE_ABORT_PRE_START), MP_BATTLE_TIMEOUT);
+    EXPECT_EQ(Send(&f, MP_BATTLE_CLOSE), MP_BATTLE_TIMEOUT);
+    EXPECT_EQ(Send(&f, MP_BATTLE_KEEP), MP_BATTLE_TIMEOUT);
+    Next(&f, MP_BATTLE_BIND); f.command.length = sizeof(f.binding);
+    memcpy(f.command.data, &f.binding, sizeof(f.binding)); f.command.battleId[0]++;
+    EXPECT_EQ(Submit(&f), MP_BATTLE_BUSY);
+    EXPECT(!MultiplayerSave_FieldReady());
+    TearDown(&f);
+}
+
+TEST("Multiplayer native singles: party fragments commit only after full validation and consumed retry stays consumed")
+{
+    struct ChannelFixture f;
+    struct LinkBattlerHeader header = {0};
+    struct Pokemon pair[2];
+    NativeBinding(&f); Preparation(&f); EXPECT_EQ(Submit(&f), MP_BATTLE_OK);
+    TrainerAndAck(&f); EXPECT_EQ(Send(&f, MP_BATTLE_START_SINGLES), MP_BATTLE_OK);
+    header.versionSignatureHi = 3; header.battleEnigmaBerry.name[0] = EOS;
+    Next(&f, MP_BATTLE_RECEIVE); f.command.sourceSlot = 1; f.command.blockSeq = 2;
+    f.command.kind = MP_BATTLE_KIND_START_HEADER; f.command.totalSize = sizeof(header);
+    f.command.length = sizeof(header); memcpy(f.command.data, &header, sizeof(header));
+    EXPECT_EQ(Submit(&f), MP_BATTLE_OK); ResetBlockReceivedFlag(1);
+    memcpy(pair, gParties[B_TRAINER_PLAYER], sizeof(pair));
+    Next(&f, MP_BATTLE_RECEIVE); f.command.sourceSlot = 1; f.command.blockSeq = 3;
+    f.command.kind = MP_BATTLE_KIND_PARTY_0; f.command.totalSize = sizeof(pair);
+    f.command.length = 128; memcpy(f.command.data, pair, 128);
+    EXPECT_EQ(Submit(&f), MP_BATTLE_OK); EXPECT_EQ(GetBlockReceivedStatus(), 0);
+    EXPECT_EQ(Submit(&f), MP_BATTLE_OK); EXPECT_EQ(GetBlockReceivedStatus(), 0);
+    Next(&f, MP_BATTLE_RECEIVE); f.command.sourceSlot = 1; f.command.blockSeq = 3;
+    f.command.kind = MP_BATTLE_KIND_PARTY_0; f.command.totalSize = sizeof(pair);
+    f.command.offset = 128; f.command.length = 72;
+    memcpy(f.command.data, (const u8 *)pair + 128, 72);
+    EXPECT_EQ(Submit(&f), MP_BATTLE_OK); EXPECT_EQ(GetBlockReceivedStatus(), 2);
+    EXPECT(!memcmp(gBlockRecvBuffer[1], pair, sizeof(pair)));
+    ResetBlockReceivedFlag(1);
+    EXPECT_EQ(Submit(&f), MP_BATTLE_OK); EXPECT_EQ(GetBlockReceivedStatus(), 0);
+    f.command.commandSeq++; f.command.data[0] ^= 1;
+    EXPECT_EQ(Submit(&f), MP_BATTLE_ORDER); EXPECT_EQ(GetBlockReceivedStatus(), 0);
+    TearDown(&f);
 }
 
 TEST("Multiplayer battle channel: atomic binding refuses unsafe field and stale identities")
@@ -273,7 +441,7 @@ TEST("Multiplayer battle channel: malformed commands cannot replace a cached emi
     f.command = emitted; f.command.data[191] = 1;
     EXPECT_EQ(Submit(&f), MP_BATTLE_MALFORMED);
     f.command = emitted; f.command.phase = 2;
-    EXPECT_EQ(Submit(&f), MP_BATTLE_MALFORMED);
+    EXPECT_EQ(Submit(&f), MP_BATTLE_SESSION); // ABI2 supports phase2, but cannot cross this binding.
     f.command = emitted; f.command.opcode = 255;
     EXPECT_EQ(Submit(&f), MP_BATTLE_MALFORMED);
     f.command = emitted; f.command.chunkCrc32 ^= 1;

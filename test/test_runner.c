@@ -5,6 +5,7 @@
 #include "load_save.h"
 #include "main.h"
 #include "multiplayer_save.h"
+#include "multiplayer_battle.h"
 #include "malloc.h"
 #include "random.h"
 #include "task.h"
@@ -724,6 +725,7 @@ static NAKED void JumpToAgbMainLoop(void)
 static void ReinitCallbacks(void)
 {
     // A failed held-mailbox assertion must not freeze the reporting callback.
+    MultiplayerBattle_Init();
     MultiplayerSave_Init();
     gSoftResetDisabled = FALSE;
     gMain.callback1 = NULL;
