@@ -189,7 +189,9 @@ static bool32 MasterDataValid(const u8 *p)
     case CONTROLLER_RETURNMONTOBALL: return p[1] <= 1;
     case CONTROLLER_MOVEANIMATION: return Half(p + 1) < MOVES_COUNT_ALL && !p[14] && !p[15] && AnimValid(p + 16);
     case CONTROLLER_PRINTSTRING: case CONTROLLER_PRINTSTRINGPLAYERONLY: return MessageValid(p);
-    case CONTROLLER_CHOOSEACTION: return p[1] <= B_ACTION_RUN && Half(p + 2) < ITEMS_COUNT;
+    case CONTROLLER_CHOOSEACTION:
+        return (p[1] <= B_ACTION_RUN || p[1] == B_ACTION_NONE)
+            && (p[1] == B_ACTION_USE_ITEM ? Half(p + 2) < ITEMS_COUNT : !Half(p + 2));
     case CONTROLLER_CHOOSEMOVE: return MoveChoiceValid(p);
     case CONTROLLER_CHOOSEPOKEMON:
         return p[1] <= 4 && p[2] <= PARTY_SIZE && (p[3] | p[7] << 8) < ABILITIES_COUNT

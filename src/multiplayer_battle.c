@@ -421,6 +421,10 @@ u16 MultiplayerBattle_PackController(u8 *dest, u8 battler, u8 bufferId, u16 size
     }
     // DATA and DONE are queued together. Request/reply ordering is validated
     // later by SendBlock, after earlier queued replies have been accepted.
+    // Native action prompts carry NONE on a new turn and reuse bufferB's old
+    // reply bytes for the item argument, which is meaningful only for USE_ITEM.
+    if (bufferId == B_COMM_TO_CONTROLLER && data[0] == CONTROLLER_CHOOSEACTION && data[1] != B_ACTION_USE_ITEM)
+        dest[8 + 2] = dest[8 + 3] = 0;
     if (bufferId == B_COMM_TO_CONTROLLER && data[0] == CONTROLLER_SETMONDATA && data[1] == REQUEST_MOVES_PP_BATTLE)
         memset(dest + 8 + 16, 0, 3);
     if (bufferId == B_COMM_TO_CONTROLLER && data[0] == CONTROLLER_CHOOSEMOVE)

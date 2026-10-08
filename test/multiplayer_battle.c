@@ -24,6 +24,7 @@
 #include "constants/map_groups.h"
 #include "constants/layouts.h"
 #include "constants/characters.h"
+#include "constants/items.h"
 #include "test/test.h"
 
 struct ChannelFixture {
@@ -311,6 +312,35 @@ TEST("Multiplayer native singles: startup requires descriptors then installs iss
     EXPECT(!memcmp(&first, &gRngValue, 16));
     EXPECT_EQ(Send(&f, MP_BATTLE_ABORT_PRE_START), MP_BATTLE_UNSAFE);
     EXPECT_EQ(Send(&f, MP_BATTLE_RELEASE_SINGLES), MP_BATTLE_UNSAFE);
+    TearDown(&f);
+}
+
+TEST("Multiplayer native singles: fresh action sentinel canonicalizes stale item without admitting invalid actions")
+{
+    struct ChannelFixture f;
+    u8 payload[4] = {CONTROLLER_CHOOSEACTION, B_ACTION_NONE, CONTROLLER_DATATRANSFER, 140};
+    u8 wire[256];
+    u16 size;
+    NativeBinding(&f); Preparation(&f); EXPECT_EQ(Submit(&f), MP_BATTLE_OK);
+    TrainerAndAck(&f); EXPECT_EQ(Send(&f, MP_BATTLE_START_SINGLES), MP_BATTLE_OK);
+    size = MultiplayerBattle_PackController(wire, 0, B_COMM_TO_CONTROLLER, sizeof(payload), payload);
+    EXPECT_EQ(size, 16); EXPECT_EQ(wire[9], B_ACTION_NONE);
+    EXPECT_EQ(wire[10], 0); EXPECT_EQ(wire[11], 0);
+    // This boundary check uses canonical metadata independently of battle UI.
+    wire[2] = wire[3] = wire[6] = wire[7] = 0;
+    EXPECT(MultiplayerBattle_ValidateController(wire, size, 0));
+    wire[9] = B_ACTION_RUN + 1;
+    EXPECT(!MultiplayerBattle_ValidateController(wire, size, 0));
+    wire[9] = B_ACTION_NONE; wire[10] = 1;
+    EXPECT(!MultiplayerBattle_ValidateController(wire, size, 0));
+    wire[9] = B_ACTION_USE_ITEM; wire[10] = ITEMS_COUNT & 0xFF; wire[11] = ITEMS_COUNT >> 8;
+    EXPECT(!MultiplayerBattle_ValidateController(wire, size, 0));
+    wire[10] = (ITEMS_COUNT - 1) & 0xFF; wire[11] = (ITEMS_COUNT - 1) >> 8;
+    EXPECT(MultiplayerBattle_ValidateController(wire, size, 0));
+    wire[9] = B_ACTION_NONE; wire[10] = wire[11] = 0;
+    MultiplayerBattle_NoteController(wire, 0);
+    wire[0] = B_COMM_TO_ENGINE; wire[8] = CONTROLLER_TWORETURNVALUES;
+    EXPECT(!MultiplayerBattle_ValidateController(wire, size, 0)); // NONE is never a chosen action reply.
     TearDown(&f);
 }
 
