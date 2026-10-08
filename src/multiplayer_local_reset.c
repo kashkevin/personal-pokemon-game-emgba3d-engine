@@ -7,6 +7,8 @@
 #include "multiplayer_battle.h"
 #include "pokemon.h"
 #include "pokemon_storage_system.h"
+#include "money.h"
+#include "coins.h"
 #include "battle.h"
 #include "battle_interface.h"
 #include "battle_message.h"
@@ -52,13 +54,46 @@ static bool32 BindingReady(void)
         && !MultiplayerBattle_IsActive();
 }
 
+static void CopyPocket(struct ItemSlot *target, const struct ItemSlot *source, u32 count)
+{
+    u16 key = gSaveBlock2Ptr->encryptionKey;
+    while (count--)
+    {
+        *target = *source;
+        target->quantity ^= key;
+        target++; source++;
+    }
+}
+
+static bool32 PocketMatches(const struct ItemSlot *guard, const struct ItemSlot *current, u32 count)
+{
+    u16 key = gSaveBlock2Ptr->encryptionKey;
+    while (count--)
+    {
+        if (guard->itemId != current->itemId || guard->quantity != (u16)(current->quantity ^ key))
+            return FALSE;
+        guard++; current++;
+    }
+    return TRUE;
+}
+
+static bool32 BagMatches(void)
+{
+    const struct Bag *bag = &gSaveBlock1Ptr->bag;
+    return PocketMatches(sLocalResetGuard.bag.items, bag->items, BAG_ITEMS_COUNT)
+        && PocketMatches(sLocalResetGuard.bag.keyItems, bag->keyItems, BAG_KEYITEMS_COUNT)
+        && PocketMatches(sLocalResetGuard.bag.pokeBalls, bag->pokeBalls, BAG_POKEBALLS_COUNT)
+        && PocketMatches(sLocalResetGuard.bag.TMsHMs, bag->TMsHMs, BAG_TMHM_COUNT)
+        && PocketMatches(sLocalResetGuard.bag.berries, bag->berries, BAG_BERRIES_COUNT);
+}
+
 static bool32 GuardMatches(void)
 {
     return gSaveBlock1Ptr && gSaveBlock2Ptr && gSaveBlock3Ptr && gPokemonStoragePtr
         && gPartiesCount[B_TRAINER_PLAYER] == sLocalResetGuard.partyCount
         && !memcmp(gParties[B_TRAINER_PLAYER], sLocalResetGuard.party, sizeof(sLocalResetGuard.party))
-        && !memcmp(&gSaveBlock1Ptr->bag, &sLocalResetGuard.bag, sizeof(sLocalResetGuard.bag))
-        && gSaveBlock1Ptr->money == sLocalResetGuard.money && gSaveBlock1Ptr->coins == sLocalResetGuard.coins
+        && BagMatches()
+        && GetMoney(&gSaveBlock1Ptr->money) == sLocalResetGuard.money && GetCoins() == sLocalResetGuard.coins
         && !memcmp(gSaveBlock1Ptr->dexCaught, sLocalResetGuard.dexCaught, sizeof(sLocalResetGuard.dexCaught))
         && Hash(gPokemonStoragePtr, sizeof(*gPokemonStoragePtr)) == sLocalResetGuard.storageHash
         && Hash(&gSaveBlock1Ptr->daycare, sizeof(gSaveBlock1Ptr->daycare)) == sLocalResetGuard.daycareHash
@@ -118,10 +153,14 @@ bool32 MultiplayerLocalReset_TryBegin(u32 encounterId)
     VarSet(MP_LOCAL_RESET_COUNTER_LO, count);
     VarSet(MP_LOCAL_RESET_COUNTER_HI, count >> 16);
     memcpy(sLocalResetGuard.party, gParties[B_TRAINER_PLAYER], sizeof(sLocalResetGuard.party));
-    memcpy(&sLocalResetGuard.bag, &gSaveBlock1Ptr->bag, sizeof(sLocalResetGuard.bag));
+    CopyPocket(sLocalResetGuard.bag.items, gSaveBlock1Ptr->bag.items, BAG_ITEMS_COUNT);
+    CopyPocket(sLocalResetGuard.bag.keyItems, gSaveBlock1Ptr->bag.keyItems, BAG_KEYITEMS_COUNT);
+    CopyPocket(sLocalResetGuard.bag.pokeBalls, gSaveBlock1Ptr->bag.pokeBalls, BAG_POKEBALLS_COUNT);
+    CopyPocket(sLocalResetGuard.bag.TMsHMs, gSaveBlock1Ptr->bag.TMsHMs, BAG_TMHM_COUNT);
+    CopyPocket(sLocalResetGuard.bag.berries, gSaveBlock1Ptr->bag.berries, BAG_BERRIES_COUNT);
     memcpy(sLocalResetGuard.dexCaught, gSaveBlock1Ptr->dexCaught, sizeof(sLocalResetGuard.dexCaught));
     sLocalResetGuard.partyCount = gPartiesCount[B_TRAINER_PLAYER];
-    sLocalResetGuard.money = gSaveBlock1Ptr->money; sLocalResetGuard.coins = gSaveBlock1Ptr->coins;
+    sLocalResetGuard.money = GetMoney(&gSaveBlock1Ptr->money); sLocalResetGuard.coins = GetCoins();
     sLocalResetGuard.storageHash = Hash(gPokemonStoragePtr, sizeof(*gPokemonStoragePtr));
     sLocalResetGuard.daycareHash = Hash(&gSaveBlock1Ptr->daycare, sizeof(gSaveBlock1Ptr->daycare));
     sLocalResetGuard.ownershipHash = Hash(&gSaveBlock3Ptr->ownership, sizeof(gSaveBlock3Ptr->ownership));

@@ -14,6 +14,8 @@
 #include "palette.h"
 #include "event_data.h"
 #include "malloc.h"
+#include "item.h"
+#include "load_save.h"
 #include "constants/maps.h"
 #include "constants/map_groups.h"
 #include "constants/vars.h"
@@ -62,6 +64,7 @@ static void SetUp(struct ResetFixture *f)
     memset(gSaveBlock2Ptr, 0, sizeof(*gSaveBlock2Ptr));
     memset(gSaveBlock3Ptr, 0, sizeof(*gSaveBlock3Ptr));
     memset(gPokemonStoragePtr, 0, sizeof(*gPokemonStoragePtr));
+    SetBagItemsPointers();
     ZeroPlayerPartyMons();
     gSaveBlock1Ptr->location.mapGroup = MAP_GROUP(MAP_LITTLEROOT_TOWN);
     gSaveBlock1Ptr->location.mapNum = MAP_NUM(MAP_LITTLEROOT_TOWN);
@@ -191,5 +194,19 @@ TEST("Multiplayer local reset: enrolled unsafe chord is consumed without a BIOS 
     EXPECT(MultiplayerLocalReset_HandleChord()); EXPECT_EQ(MultiplayerLocalReset_Count(), 0);
     EXPECT(MultiplayerLocalReset_HandleChord()); EXPECT_EQ(MultiplayerLocalReset_Count(), 0);
     gMain.heldKeysRaw = 0; EXPECT(!MultiplayerLocalReset_HandleChord());
+    TearDown(&f);
+}
+
+TEST("Multiplayer local reset: native encryption key rotation preserves logical bag money and coins guards")
+{
+    struct ResetFixture f; SetUp(&f); Begin();
+    u32 key = 0xD1E2F3A4;
+    ApplyNewEncryptionKeyToBagItems(key);
+    ApplyNewEncryptionKeyToWord(&gSaveBlock1Ptr->money, key);
+    ApplyNewEncryptionKeyToHword(&gSaveBlock1Ptr->coins, key);
+    gSaveBlock2Ptr->encryptionKey = key;
+    EXPECT(MultiplayerLocalReset_TestRequest());
+    EXPECT(MultiplayerLocalReset_TestConfirm(TRUE));
+    EXPECT(MultiplayerLocalReset_WasAccepted());
     TearDown(&f);
 }
