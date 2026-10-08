@@ -84,6 +84,7 @@ static EWRAM_DATA bool8 sPrepared = FALSE;
 static EWRAM_DATA bool8 sStarted = FALSE;
 static EWRAM_DATA bool8 sRestored = FALSE;
 static EWRAM_DATA bool8 sSeedInstalled = FALSE;
+static EWRAM_DATA u8 sSendOutAnimationOwner = 0;
 static bool32 NativeBlockValid(const void *src, u16 size, u8 kind, u8 source);
 static void NoteNativeController(const u8 *data, u8 source);
 
@@ -130,6 +131,27 @@ bool32 MultiplayerBattle_PauseClocks(void)
 bool32 MultiplayerBattle_SkipCallbacks(void) { return MultiplayerBattle_PauseClocks(); }
 bool32 MultiplayerBattle_IsFullMulti(void) { return MultiplayerBattle_IsActive() && sBinding.mode == MP_BATTLE_PHASE_FULL_MULTI; }
 bool32 MultiplayerBattle_IsNative(void) { return MultiplayerBattle_IsActive() && (sBinding.mode == MP_BATTLE_PHASE_SINGLES || sBinding.mode == MP_BATTLE_PHASE_FULL_MULTI); }
+// Four full parties keep more status sprites live than cable Multi. Delayed
+// controller delivery can overlap a later ball with the earlier ball's entire
+// particle burst. Keep every animation, but let its existing completion flags
+// free those sprites before another native trainer starts their send-out.
+bool32 MultiplayerBattle_TrySendOutAnimation(u8 battler)
+{
+    if (!MultiplayerBattle_IsFullMulti())
+        return TRUE;
+    if (battler >= MAX_BATTLERS_COUNT || gBattleSpritesDataPtr == NULL)
+        return FALSE;
+    if (sSendOutAnimationOwner != battler)
+    {
+        if ((sSendOutAnimationOwner < MAX_BATTLERS_COUNT
+          && gBattleSpritesDataPtr->healthBoxesData[sSendOutAnimationOwner].ballAnimActive)
+         || gBattleSpritesDataPtr->animationData->numBallParticles)
+            return FALSE;
+        sSendOutAnimationOwner = battler;
+    }
+    return TRUE;
+}
+
 bool32 MultiplayerBattle_CanReceiveControllers(void) { return MultiplayerBattle_IsNative() && sState == MP_BATTLE_RUNNING; }
 void MultiplayerBattle_FailNative(void)
 {
@@ -292,6 +314,7 @@ static void ClearBlocks(void)
     memset(sReceiveKind, 0, sizeof(sReceiveKind));
     memset(sNextReceiveKind, MP_BATTLE_KIND_TRAINER, sizeof(sNextReceiveKind));
     sNextSendKind = MP_BATTLE_KIND_TRAINER;
+    sSendOutAnimationOwner = MAX_BATTLERS_COUNT;
     memset(&sPreparation, 0, sizeof(sPreparation));
     sPrepared = sStarted = sRestored = sSeedInstalled = FALSE; sOutcome = 0;
     MultiplayerBattle_ResetControllerValidation();

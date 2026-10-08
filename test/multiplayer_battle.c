@@ -5,6 +5,7 @@
 #include "multiplayer_ownership.h"
 #include "battle.h"
 #include "battle_bg.h"
+#include "battle_gfx_sfx_util.h"
 #include "battle_controllers.h"
 #include "battle_util.h"
 #include "battle_util2.h"
@@ -1258,4 +1259,34 @@ TEST("Multiplayer battle channel: ordinary held save rejects diagnostic binding 
     MultiplayerSave_Tick(); EXPECT_EQ(gMultiplayerSaveMailbox.response.status, MP_SAVE_CANCELED);
     EXPECT(!MultiplayerSave_IsHeld()); Bind(&f);
     TearDown(&f);
+}
+
+TEST("Multiplayer full Multi: delayed send-outs wait for the previous ball and particles without starving the next trainer")
+{
+    struct ChannelFixture f;
+    FullMultiBinding(&f, 0);
+    AllocateBattleSpritesData();
+    // Both send-outs may already be queued in the same frame. Waiting on
+    // every battler's active flag would deadlock; only the admitted owner owns
+    // the animation allowance until its ball and particles have completed.
+    gBattleSpritesDataPtr->healthBoxesData[1].ballAnimActive = TRUE;
+    gBattleSpritesDataPtr->healthBoxesData[3].ballAnimActive = TRUE;
+    EXPECT(MultiplayerBattle_TrySendOutAnimation(1));
+    EXPECT(!MultiplayerBattle_TrySendOutAnimation(3));
+    gBattleSpritesDataPtr->healthBoxesData[1].ballAnimActive = FALSE;
+    gBattleSpritesDataPtr->animationData->numBallParticles = 16;
+    EXPECT(!MultiplayerBattle_TrySendOutAnimation(3));
+    gBattleSpritesDataPtr->animationData->numBallParticles = 0;
+    EXPECT(MultiplayerBattle_TrySendOutAnimation(3));
+    EXPECT(!MultiplayerBattle_TrySendOutAnimation(1));
+    FreeBattleSpritesData();
+    TearDown(&f);
+    // A fresh native battle cannot inherit the previous animation owner.
+    FullMultiBinding(&f, 0);
+    AllocateBattleSpritesData();
+    gBattleSpritesDataPtr->healthBoxesData[3].ballAnimActive = TRUE;
+    EXPECT(MultiplayerBattle_TrySendOutAnimation(1));
+    FreeBattleSpritesData();
+    TearDown(&f);
+    EXPECT(MultiplayerBattle_TrySendOutAnimation(0));
 }

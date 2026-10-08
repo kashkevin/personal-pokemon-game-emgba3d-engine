@@ -103,6 +103,7 @@ bool32 MultiplayerBattle_PauseClocks(void);
 bool32 MultiplayerBattle_SkipCallbacks(void);
 bool32 MultiplayerBattle_IsNative(void);
 bool32 MultiplayerBattle_IsFullMulti(void);
+bool32 MultiplayerBattle_TrySendOutAnimation(u8 battler);
 bool32 MultiplayerBattle_CanReceiveControllers(void);
 bool32 MultiplayerBattle_ValidateController(const u8 *data, u16 size, u8 source);
 u16 MultiplayerBattle_PackController(u8 *dest, u8 battler, u8 bufferId, u16 size, const u8 *data);
