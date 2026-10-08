@@ -344,6 +344,7 @@ void BtlController_EmitStatusAnimation(enum BattlerId battler, u32 bufferId, boo
 void BtlController_EmitDataTransfer(enum BattlerId battler, u32 bufferId, u16 size, void *data);
 void BtlController_EmitTwoReturnValues(enum BattlerId battler, u32 bufferId, u8 ret8, u32 ret32);
 void BtlController_EmitChosenMonReturnValue(enum BattlerId battler, u32 bufferId, u8 partyId, u8 *battlePartyOrder);
+void UpdateLinkBattlePartyOrder(enum BattlerId battler);
 void BtlController_EmitOneReturnValue(enum BattlerId battler, u32 bufferId, u16 ret);
 void BtlController_EmitOneReturnValue_Duplicate(enum BattlerId battler, u32 bufferId, u16 ret);
 void BtlController_EmitHitAnimation(enum BattlerId battler, u32 bufferId);

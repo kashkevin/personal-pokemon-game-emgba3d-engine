@@ -1,9 +1,9 @@
 #ifndef GUARD_MULTIPLAYER_BATTLE_H
 #define GUARD_MULTIPLAYER_BATTLE_H
 
-// Opt-in development diagnostic/native-singles channel.
+// Opt-in development diagnostic/native singles/full-party Multi channel.
 #define MULTIPLAYER_BATTLE_MAGIC 0x31424D45
-#define MULTIPLAYER_BATTLE_ABI 2
+#define MULTIPLAYER_BATTLE_ABI 3
 #define MULTIPLAYER_BATTLE_SIZE 512
 #define MULTIPLAYER_BATTLE_BLOCK_SIZE 256
 #define MULTIPLAYER_BATTLE_CHUNK_SIZE 128
@@ -22,7 +22,9 @@ enum MultiplayerBattleState {
     MP_BATTLE_PREPARED, MP_BATTLE_RUNNING, MP_BATTLE_RETURNING,
     MP_BATTLE_FIELD_READY_HELD, MP_BATTLE_RECOVERY_REQUIRED,
 };
-enum MultiplayerBattlePhase { MP_BATTLE_PHASE_DIAGNOSTIC = 1, MP_BATTLE_PHASE_SINGLES };
+enum MultiplayerBattlePhase {
+    MP_BATTLE_PHASE_DIAGNOSTIC = 1, MP_BATTLE_PHASE_SINGLES, MP_BATTLE_PHASE_FULL_MULTI,
+};
 enum MultiplayerBattleKind {
     MP_BATTLE_KIND_NONE, MP_BATTLE_KIND_DIAGNOSTIC, MP_BATTLE_KIND_TRAINER,
     MP_BATTLE_KIND_START_HEADER, MP_BATTLE_KIND_PARTY_0, MP_BATTLE_KIND_PARTY_1,
@@ -100,11 +102,13 @@ bool32 MultiplayerBattle_IsActive(void);
 bool32 MultiplayerBattle_PauseClocks(void);
 bool32 MultiplayerBattle_SkipCallbacks(void);
 bool32 MultiplayerBattle_IsNative(void);
+bool32 MultiplayerBattle_IsFullMulti(void);
 bool32 MultiplayerBattle_CanReceiveControllers(void);
 bool32 MultiplayerBattle_ValidateController(const u8 *data, u16 size, u8 source);
 u16 MultiplayerBattle_PackController(u8 *dest, u8 battler, u8 bufferId, u16 size, const u8 *data);
 void MultiplayerBattle_FailNative(void);
 bool8 MultiplayerBattle_SendPartyPair(u8 index);
+bool8 MultiplayerBattle_CopyFullMultiPartyPair(u8 index);
 void MultiplayerBattle_InstallNativeRng(void);
 bool32 MultiplayerBattle_TryReturnNative(void);
 bool32 MultiplayerBattle_CheckBinding(u32 session, u32 incarnation);

@@ -1,5 +1,6 @@
 #include "global.h"
 #include "battle.h"
+#include "multiplayer_battle.h"
 #include "battle_hold_effects.h"
 #include "battle_message.h"
 #include "battle_anim.h"
@@ -2489,6 +2490,9 @@ static u32 DoesPartyHaveBattleReadyMons(enum BattleTrainer trainer)
 
 static bool32 WillPlayerWhiteOutIfPartnerWinsAlone()
 {
+    // A network side survives while either independently owned party survives.
+    if (MultiplayerBattle_IsFullMulti())
+        return FALSE;
     if (GetConfig(B_MULTI_BATTLE_WHITEOUT) <= GEN_3)
         return TRUE;
     if (AreMultiPartiesFullTeams())
@@ -3625,13 +3629,7 @@ static void Cmd_switchhandleorder(void)
 
         if (gBattleTypeFlags & BATTLE_TYPE_LINK && gBattleTypeFlags & BATTLE_TYPE_MULTI)
         {
-            *(battler * 3 + (u8 *)(gBattleStruct->battlerPartyOrders) + 0) &= 0xF;
-            *(battler * 3 + (u8 *)(gBattleStruct->battlerPartyOrders) + 0) |= (gBattleResources->bufferB[battler][2] & 0xF0);
-            *(battler * 3 + (u8 *)(gBattleStruct->battlerPartyOrders) + 1) = gBattleResources->bufferB[battler][3];
-
-            *((GetPartnerBattler(battler)) * 3 + (u8 *)(gBattleStruct->battlerPartyOrders) + 0) &= (0xF0);
-            *((GetPartnerBattler(battler)) * 3 + (u8 *)(gBattleStruct->battlerPartyOrders) + 0) |= (gBattleResources->bufferB[battler][2] & 0xF0) >> 4;
-            *((GetPartnerBattler(battler)) * 3 + (u8 *)(gBattleStruct->battlerPartyOrders) + 2) = gBattleResources->bufferB[battler][3];
+            UpdateLinkBattlePartyOrder(battler);
         }
         else if (gBattleTypeFlags & BATTLE_TYPE_INGAME_PARTNER)
         {
@@ -4136,7 +4134,9 @@ static void Cmd_incrementgamestat(void)
 {
     CMD_ARGS(u8 stat);
 
-    if (IsOnPlayerSide(gBattlerAttacker))
+    // Native results are settled separately per trainer. Only the master runs
+    // these scripts, so teammate activity must not enter its personal save.
+    if (!MultiplayerBattle_IsNative() && IsOnPlayerSide(gBattlerAttacker))
         IncrementGameStat(cmd->stat);
 
     gBattlescriptCurrInstr = cmd->nextInstr;
@@ -5520,7 +5520,15 @@ static void Cmd_forcerandomswitch(void)
     {
         party = GetBattlerParty(gBattlerTarget);
 
-        if (BATTLE_TWO_VS_ONE_OPPONENT && !IsOnPlayerSide(gBattlerTarget))
+        if (MultiplayerBattle_IsFullMulti())
+        {
+            firstMonId = 0;
+            lastMonId = PARTY_SIZE;
+            battler2PartyId = gBattlerPartyIndexes[gBattlerTarget];
+            battler1PartyId = BattlersShareParty(gBattlerTarget, GetPartnerBattler(gBattlerTarget))
+                ? gBattlerPartyIndexes[GetPartnerBattler(gBattlerTarget)] : PARTY_SIZE;
+        }
+        else if (BATTLE_TWO_VS_ONE_OPPONENT && !IsOnPlayerSide(gBattlerTarget))
         {
             firstMonId = 0;
             lastMonId = 6;
@@ -5623,7 +5631,8 @@ static void Cmd_forcerandomswitch(void)
                 || (gBattleTypeFlags & BATTLE_TYPE_RECORDED_LINK && gBattleTypeFlags & BATTLE_TYPE_MULTI))
             {
                 SwitchPartyOrderLinkMulti(gBattlerTarget, gBattleStruct->monToSwitchIntoId[gBattlerTarget], 0);
-                SwitchPartyOrderLinkMulti(GetPartnerBattler(gBattlerTarget), gBattleStruct->monToSwitchIntoId[gBattlerTarget], 1);
+                if (!MultiplayerBattle_IsFullMulti())
+                    SwitchPartyOrderLinkMulti(GetPartnerBattler(gBattlerTarget), gBattleStruct->monToSwitchIntoId[gBattlerTarget], 1);
             }
 
             if (gBattleTypeFlags & BATTLE_TYPE_INGAME_PARTNER)

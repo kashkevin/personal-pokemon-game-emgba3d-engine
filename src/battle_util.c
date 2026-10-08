@@ -1,5 +1,6 @@
 #include "global.h"
 #include "battle.h"
+#include "multiplayer_battle.h"
 #include "battle_anim.h"
 #include "battle_anim_scripts.h"
 #include "battle_arena.h"
@@ -764,7 +765,8 @@ void HandleAction_Run(void)
         }
 
         gBattleOutcome |= B_OUTCOME_LINK_BATTLE_RAN;
-        gSaveBlock2Ptr->frontier.disableRecordBattle = TRUE;
+        if (!MultiplayerBattle_IsNative())
+            gSaveBlock2Ptr->frontier.disableRecordBattle = TRUE;
     }
     else
     {
@@ -9917,6 +9919,11 @@ bool32 IsSleepClauseEnabled(void)
 
 bool32 AreMultiPartiesFullTeams(void)
 {
+    if (MultiplayerBattle_IsFullMulti())
+    {
+        gSpecialVar_Result = TRUE;
+        return TRUE;
+    }
 #if TESTING
     u8 *partySizes = gBattleTestRunnerState->data.partySizes;
     bool32 fullTeam = FALSE;

@@ -86,6 +86,7 @@ extern const struct WindowTemplate *const gBattleWindowTemplates[];
 
 static void CB2_InitBattleInternal(void);
 static void CB2_PreInitMultiBattle(void);
+static void CB2_HandleStartFullMultiBattle(void);
 static void CB2_PreInitIngamePlayerPartnerBattle(void);
 static void CB2_HandleStartMultiPartnerBattle(void);
 static void CB2_HandleStartMultiBattle(void);
@@ -486,7 +487,7 @@ void CB2_InitBattle(void)
 
     if (gBattleTypeFlags & BATTLE_TYPE_MULTI && gBattleTypeFlags & BATTLE_TYPE_TRAINER)
     {
-        if (gBattleTypeFlags & BATTLE_TYPE_RECORDED)
+        if (gBattleTypeFlags & BATTLE_TYPE_RECORDED || MultiplayerBattle_IsFullMulti())
         {
             CB2_InitBattleInternal();
         }
@@ -582,7 +583,9 @@ static void CB2_InitBattleInternal(void)
     SetVBlankCallback(VBlankCB_Battle);
     SetUpBattleVarsAndBirchZigzagoon();
 
-    if (gBattleTypeFlags & BATTLE_TYPE_MULTI
+    if (MultiplayerBattle_IsFullMulti())
+        SetMainCallback2(CB2_HandleStartFullMultiBattle);
+    else if (gBattleTypeFlags & BATTLE_TYPE_MULTI
      && (TESTING || gBattleTypeFlags & (BATTLE_TYPE_BATTLE_TOWER | BATTLE_TYPE_INGAME_PARTNER)))
         SetMainCallback2(CB2_HandleStartMultiPartnerBattle);
     else if (gBattleTypeFlags & BATTLE_TYPE_MULTI)
@@ -1522,6 +1525,102 @@ static void CB2_PreInitIngamePlayerPartnerBattle(void)
             gMain.savedCallback = *savedCallback;
             SetMainCallback2(CB2_InitBattleInternal);
             FREE_AND_SET_NULL(gMultiPartnerParty);
+        }
+        break;
+    }
+}
+
+// Dedicated virtual Multi startup: no half-party preview or physical link
+// close/reopen. All four separately owned original parties are transmitted.
+static void CB2_HandleStartFullMultiBattle(void)
+{
+    u32 state = gBattleCommunication[MULTIUSE_STATE];
+    u8 local = GetMultiplayerId();
+    gBattleScripting.multiplayerId = local;
+    RunTasks();
+    AnimateSprites();
+    BuildOamBuffer();
+    switch (state)
+    {
+    case 0:
+        if (!IsDma3ManagerBusyWithBgCopy())
+        {
+            ShowBg(0); ShowBg(1); ShowBg(2); ShowBg(3);
+            FillAroundBattleWindows();
+            gBattleCommunication[MULTIUSE_STATE]++;
+        }
+        break;
+    case 1:
+        if (IsLinkTaskFinished())
+        {
+            gBattleStruct->multiBuffer.linkBattlerHeader.versionSignatureLo = 0;
+            gBattleStruct->multiBuffer.linkBattlerHeader.versionSignatureHi = 3;
+            BufferPartyVsScreenHealth_AtStart();
+            SetPlayerBerryDataInBattleStruct();
+            SendBlock(BitmaskAllOtherLinkPlayers(), &gBattleStruct->multiBuffer.linkBattlerHeader, sizeof(struct LinkBattlerHeader));
+            gBattleCommunication[MULTIUSE_STATE]++;
+        }
+        break;
+    case 2:
+        if (GetBlockReceivedStatus() == 15)
+        {
+            u8 task;
+            FindLinkBattleMaster(4, local);
+            SetAllPlayersBerryData();
+            task = CreateTask(InitLinkBattleVsScreen, 0);
+            gTasks[task].data[1] = 0x10E; gTasks[task].data[2] = 0x5A;
+            for (u32 source = 0; source < 4; source++)
+                gTasks[task].data[(source & 1) ? 4 : 3] |= (gBlockRecvBuffer[source][1] & 0x3F) << ((source & BIT_FLANK) ? 6 : 0);
+            ResetBlockReceivedFlags();
+            ZeroEnemyPartyMons();
+            memset(gParties[B_TRAINER_PARTNER], 0, sizeof(gParties[B_TRAINER_PARTNER]));
+            gPartiesCount[B_TRAINER_PARTNER] = 0;
+            gBattleCommunication[MULTIUSE_STATE]++;
+        }
+        break;
+    case 3: case 5: case 7:
+        if (IsLinkTaskFinished() && MultiplayerBattle_SendPartyPair(state - 3))
+            gBattleCommunication[MULTIUSE_STATE]++;
+        break;
+    case 4: case 6: case 8:
+        if (GetBlockReceivedStatus() == 15)
+        {
+            if (!MultiplayerBattle_CopyFullMultiPartyPair(state - 4))
+            {
+                MultiplayerBattle_FailNative();
+                break;
+            }
+            ResetBlockReceivedFlags();
+            if (state == 8)
+            {
+                InitBattleControllers();
+                MultiplayerBattle_InstallNativeRng();
+                RecordedBattle_SetTrainerInfo();
+                gBattleCommunication[SPRITES_INIT_STATE1] = 0;
+                gBattleCommunication[SPRITES_INIT_STATE2] = 0;
+            }
+            gBattleCommunication[MULTIUSE_STATE]++;
+        }
+        break;
+    case 9:
+        if (IsLinkTaskFinished() && SendBlock(BitmaskAllOtherLinkPlayers(), &gRecordedBattleRngSeed, sizeof(gRecordedBattleRngSeed)))
+            gBattleCommunication[MULTIUSE_STATE]++;
+        break;
+    case 10:
+        if (GetBlockReceivedStatus() == 15)
+        {
+            ResetBlockReceivedFlags();
+            gBattleCommunication[MULTIUSE_STATE]++;
+        }
+        break;
+    case 11:
+        if (BattleInitAllSprites(&gBattleCommunication[SPRITES_INIT_STATE1], &gBattleCommunication[SPRITES_INIT_STATE2]))
+        {
+            gPreBattleCallback1 = gMain.callback1;
+            gMain.callback1 = BattleMainCB1;
+            SetMainCallback2(BattleMainCB2);
+            TRAINER_BATTLE_PARAM.opponentA = TRAINER_LINK_OPPONENT;
+            gBattleTypeFlags |= BATTLE_TYPE_LINK_IN_BATTLE;
         }
         break;
     }
@@ -4396,13 +4495,7 @@ static void UpdateBattlerPartyOrdersOnSwitch(enum BattlerId battler)
 
     if (gBattleTypeFlags & BATTLE_TYPE_LINK && gBattleTypeFlags & BATTLE_TYPE_MULTI)
     {
-        *(battler * 3 + (u8 *)(gBattleStruct->battlerPartyOrders) + 0) &= 0xF;
-        *(battler * 3 + (u8 *)(gBattleStruct->battlerPartyOrders) + 0) |= (gBattleResources->bufferB[battler][2] & 0xF0);
-        *(battler * 3 + (u8 *)(gBattleStruct->battlerPartyOrders) + 1) = gBattleResources->bufferB[battler][3];
-
-        *((GetPartnerBattler(battler)) * 3 + (u8 *)(gBattleStruct->battlerPartyOrders) + 0) &= (0xF0);
-        *((GetPartnerBattler(battler)) * 3 + (u8 *)(gBattleStruct->battlerPartyOrders) + 0) |= (gBattleResources->bufferB[battler][2] & 0xF0) >> 4;
-        *((GetPartnerBattler(battler)) * 3 + (u8 *)(gBattleStruct->battlerPartyOrders) + 2) = gBattleResources->bufferB[battler][3];
+        UpdateLinkBattlePartyOrder(battler);
     }
 }
 

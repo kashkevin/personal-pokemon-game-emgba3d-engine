@@ -178,7 +178,9 @@ void InitBattleControllers(void)
     else
         RecordedBattle_Init(B_RECORD_MODE_PLAYBACK);
 
-    if (!(gBattleTypeFlags & BATTLE_TYPE_RECORDED))
+    // Native battles restore their owned party through MultiplayerBattle;
+    // the playback-only snapshot is unused by their return path.
+    if (!(gBattleTypeFlags & BATTLE_TYPE_RECORDED) && !MultiplayerBattle_IsNative())
         RecordedBattle_SaveParties();
 
     InitBtlControllersInternal();
@@ -227,7 +229,7 @@ static void InitBtlControllersInternal(void)
 
     if ((gBattleTypeFlags & BATTLE_TYPE_BATTLE_TOWER)
         || !isMulti
-        || (TESTING && isMulti)
+        || (TESTING && isMulti && !MultiplayerBattle_IsFullMulti())
         || (!isLink && !isRecorded)
         || (isLink && !isDouble))
     {
@@ -496,6 +498,30 @@ bool32 ShouldUpdateTvData(enum BattlerId battler)
 
 static void SetBattlePartyIds(void)
 {
+    if (MultiplayerBattle_IsFullMulti())
+    {
+        // Unlike the original three-mon selection screen, native full Multi
+        // preserves field order. Its first slot may be fainted or an Egg.
+        for (enum BattlerId battler = 0; battler < gBattlersCount; battler++)
+        {
+            struct Pokemon *party = GetBattlerParty(battler);
+            u32 slot;
+            for (slot = 0; slot < PARTY_SIZE; slot++)
+            {
+                if (IsValidForBattle(&party[slot]))
+                {
+                    gBattlerPartyIndexes[battler] = slot;
+                    break;
+                }
+            }
+            if (slot == PARTY_SIZE)
+            {
+                MultiplayerBattle_FailNative();
+                return;
+            }
+        }
+        return;
+    }
     if (!(gBattleTypeFlags & BATTLE_TYPE_MULTI))
     {
         for (enum BattlerId i = 0; i < gBattlersCount; i++)
@@ -1356,6 +1382,27 @@ void BtlController_EmitChosenMonReturnValue(enum BattlerId battler, u32 bufferId
             gBattleResources->transferBuffer[2 + i] = battlePartyOrder[i];
     }
     PrepareBufferDataTransfer(battler, bufferId, gBattleResources->transferBuffer, 5);
+}
+
+void UpdateLinkBattlePartyOrder(enum BattlerId battler)
+{
+    u8 *order = gBattleStruct->battlerPartyOrders[battler];
+    const u8 *receivedOrder = &gBattleResources->bufferB[battler][2];
+
+    if (MultiplayerBattle_IsFullMulti())
+    {
+        // All six slots belong to this trainer; the teammate has a separate
+        // order and must not inherit any part of this trainer's selection.
+        memcpy(order, receivedOrder, sizeof(gBattleStruct->battlerPartyOrders[battler]));
+    }
+    else
+    {
+        u8 *partnerOrder = gBattleStruct->battlerPartyOrders[GetPartnerBattler(battler)];
+        order[0] = (order[0] & 0x0F) | (receivedOrder[0] & 0xF0);
+        order[1] = receivedOrder[1];
+        partnerOrder[0] = (partnerOrder[0] & 0xF0) | (receivedOrder[0] >> 4);
+        partnerOrder[2] = receivedOrder[1];
+    }
 }
 
 void BtlController_EmitOneReturnValue(enum BattlerId battler, u32 bufferId, u16 ret)
