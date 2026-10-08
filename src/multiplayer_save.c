@@ -474,12 +474,15 @@ static void Handle(const struct MultiplayerSaveControl *command)
     case MP_SAVE_BEGIN_EXPORT:
         if (sState != MP_SAVE_BOUND) { status = MP_SAVE_BUSY; break; }
         if (command->length || command->offset) { status = MP_SAVE_MALFORMED; break; }
-        if (!FieldReady() || !gFlashMemoryPresent) { status = MP_SAVE_UNSAFE; break; }
+        if (!FieldReady() || !gFlashMemoryPresent || !MultiplayerOwnership_CanSaveParty()) { status = MP_SAVE_UNSAFE; break; }
         Hold(MP_SAVE_EXPORTING, command);
         status = MultiplayerOwnership_PrepareExport();
         if (status != MP_SAVE_OK) { Release(); break; }
         SaveMapView();
-        HandleSavingData(SAVE_NORMAL);
+        if (HandleSavingData(SAVE_NORMAL) == SAVE_STATUS_ERROR)
+        {
+            Release(); status = MP_SAVE_UNSAFE; break;
+        }
         if (gDamagedSaveSectors) { Release(); status = MP_SAVE_FLASH; break; }
         PutU32(data, gSaveCounter); PutU32(data + 4, gLastWrittenSector);
         memcpy(data + 8, &gRngValue, 16); memcpy(data + 24, &gRng2Value, 16);
