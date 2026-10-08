@@ -88,7 +88,7 @@ static void SetUp(struct ResetFixture *f)
     Submit(f, MP_SAVE_GRANT_OWNERSHIP);
     EXPECT(MultiplayerOwnership_IsEnrolled());
     gBattleStruct = AllocZeroed(sizeof(*gBattleStruct)); EXPECT(gBattleStruct != NULL);
-    gBattleResults.battleTurnCounter = 0; gBattleTypeFlags = 0;
+    gBattleResults.battleTurnCounter = 0; gBattleTypeFlags = BATTLE_TYPE_IS_MASTER;
     gMain.heldKeysRaw = gMain.newKeys = 0;
 }
 
