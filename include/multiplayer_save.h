@@ -10,10 +10,13 @@ enum MultiplayerSaveOpcode {
     MP_SAVE_BIND = 1, MP_SAVE_BEGIN_EXPORT, MP_SAVE_READ, MP_SAVE_END,
     MP_SAVE_BEGIN_IMPORT, MP_SAVE_WRITE, MP_SAVE_COMMIT, MP_SAVE_CANCEL, MP_SAVE_QUERY,
     MP_SAVE_QUERY_OWNERSHIP, MP_SAVE_GRANT_OWNERSHIP,
+    MP_SAVE_BEGIN_TRADE_EXPORT, MP_SAVE_KEEP_TRADE, MP_SAVE_ABORT_TRADE,
+    MP_SAVE_RELEASE_TRADE, MP_SAVE_REBIND_TRADE, MP_SAVE_QUERY_TRADE,
 };
 enum MultiplayerSaveState {
     MP_SAVE_UNBOUND, MP_SAVE_BOUND, MP_SAVE_EXPORTING, MP_SAVE_IMPORTING,
     MP_SAVE_FINALIZING, MP_SAVE_RELOADING, MP_SAVE_COMMITTED, MP_SAVE_ERROR,
+    MP_SAVE_TRADE_HELD,
 };
 enum MultiplayerSaveStatus {
     MP_SAVE_OK, MP_SAVE_BUSY, MP_SAVE_UNSAFE, MP_SAVE_MALFORMED, MP_SAVE_SESSION,
@@ -47,6 +50,7 @@ struct MultiplayerSaveMailbox {
     struct MultiplayerSaveControl response;
 };
 extern volatile struct MultiplayerSaveMailbox gMultiplayerSaveMailbox;
+extern const u32 gMultiplayerTradeAbiVersion;
 void MultiplayerSave_Init(void);
 void MultiplayerSave_Tick(void);
 bool32 MultiplayerSave_IsHeld(void);
