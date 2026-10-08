@@ -178,6 +178,7 @@ NewMauville_Inside_EventScript_Voltorb1::
 	faceplayer
 #if MP_LOCAL_RESET_NEW_MAUVILLE_PILOT || TESTING
 	special MultiplayerStaticReset_BeginVoltorb1
+	goto_if_eq VAR_RESULT, FALSE, NewMauville_Inside_EventScript_Voltorb1ResetReturn
 #endif
 	setwildbattle SPECIES_VOLTORB, 25
 	waitse

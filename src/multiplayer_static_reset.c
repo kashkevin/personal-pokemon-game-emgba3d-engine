@@ -1,6 +1,7 @@
 #include "global.h"
 #include "multiplayer_static_reset.h"
 #include "multiplayer_local_reset.h"
+#include "multiplayer_reset_admission.h"
 #include "multiplayer.h"
 #include "event_data.h"
 #include "event_object_movement.h"
@@ -12,6 +13,7 @@
 #include "constants/vars.h"
 
 static EWRAM_DATA u32 sAttempt;
+static EWRAM_DATA u32 sAdmittedCount;
 static EWRAM_DATA u16 sGeneratorState, sBlueState, sGreenState;
 
 u32 MultiplayerStaticReset_Count(void)
@@ -58,7 +60,7 @@ bool32 MultiplayerStaticReset_AdvanceAttempt(u32 encounterId)
     if ((version != 0 && version != MP_STATIC_RESET_VERSION_1)
      || (!version && count) || count == 0xFFFFFFFFu)
         return FALSE;
-    sAttempt = count + 1;
+    sAttempt = sAdmittedCount ? sAdmittedCount : count + 1;
     VarSet(VAR_MP_VOLTORB_1_RESET_VERSION, MP_STATIC_RESET_VERSION_1);
     VarSet(VAR_MP_VOLTORB_1_RESET_COUNT_LO, sAttempt);
     VarSet(VAR_MP_VOLTORB_1_RESET_COUNT_HI, sAttempt >> 16);
@@ -98,5 +100,18 @@ bool32 MultiplayerStaticReset_GuardMatches(u32 encounterId)
 
 void MultiplayerStaticReset_BeginVoltorb1(void)
 {
+#if TESTING
     gSpecialVar_Result = MultiplayerLocalReset_TryBegin(MP_STATIC_RESET_VOLTORB_1);
+#else
+    MultiplayerResetAdmission_Begin(MP_STATIC_RESET_VOLTORB_1);
+#endif
+}
+
+bool32 MultiplayerStaticReset_SetAdmission(u32 encounterId, u32 count)
+{
+    if (!encounterId && !count) { sAdmittedCount = 0; return TRUE; }
+    if (encounterId != MP_STATIC_RESET_VOLTORB_1 || count <= MultiplayerStaticReset_Count()
+     || !MultiplayerStaticReset_EntryReady(encounterId)) return FALSE;
+    sAdmittedCount = count;
+    return TRUE;
 }

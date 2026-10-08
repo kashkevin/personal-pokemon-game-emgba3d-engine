@@ -20,6 +20,7 @@ u32 MultiplayerLocalReset_HandlePlayerInput(enum BattlerId battler);
 bool32 MultiplayerLocalReset_TryBegin(u32 encounterId);
 u32 MultiplayerLocalReset_Count(void);
 void MultiplayerLocalReset_BeginDevelopmentHunt(void);
+bool32 MultiplayerLocalReset_PersonalGeneration(void);
 void MultiplayerLocalReset_Finish(void);
 void MultiplayerLocalReset_ConsumeResult(void);
 void MultiplayerLocalReset_CloseAction(void);

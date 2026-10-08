@@ -204,6 +204,15 @@ void MultiplayerLocalReset_BeginDevelopmentHunt(void)
     gSpecialVar_Result = MultiplayerLocalReset_TryBegin(MP_LOCAL_RESET_DEVELOPMENT_ID);
 }
 
+bool32 MultiplayerLocalReset_PersonalGeneration(void)
+{
+    // Only the explicit authored source, during native generation. Owned mons,
+    // wild encounters, gifts, presets and future event sources do not opt in.
+    return sLocalResetActive && !gMain.inBattle && !sLocalResetClosed
+        && sLocalResetEncounterId == MP_STATIC_RESET_VOLTORB_1
+        && BindingReady() && MultiplayerStaticReset_EntryReady(sLocalResetEncounterId);
+}
+
 static bool32 OpenWindow(void)
 {
     if (!sLocalResetActive || sLocalResetClosed || sLocalResetAccepted || !gMain.inBattle || !gBattleStruct

@@ -11,5 +11,6 @@ bool32 MultiplayerStaticReset_AdvanceAttempt(u32 encounterId);
 bool32 MultiplayerStaticReset_GuardMatches(u32 encounterId);
 u32 MultiplayerStaticReset_Count(void);
 void MultiplayerStaticReset_BeginVoltorb1(void);
+bool32 MultiplayerStaticReset_SetAdmission(u32 encounterId, u32 count);
 
 #endif
