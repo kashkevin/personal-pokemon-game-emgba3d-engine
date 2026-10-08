@@ -1,6 +1,7 @@
 #include "global.h"
 #include "multiplayer_local_reset.h"
 #include "multiplayer_static_reset.h"
+#include "multiplayer_reset_admission.h"
 #include "multiplayer_save.h"
 #include "multiplayer_ownership.h"
 #include "multiplayer.h"
@@ -514,5 +515,68 @@ TEST("Multiplayer static reset: ordinary caught return still records defeat and 
     EXPECT_EQ(MultiplayerStaticReset_Count(), 1);
     EXPECT_EQ(VarGet(VAR_NEW_MAUVILLE_STATE), 1);
     EXPECT_EQ(VarGet(VAR_TEMP_1), 1); EXPECT_EQ(VarGet(VAR_TEMP_2), 0);
+    TearDown(&f);
+}
+
+TEST("Multiplayer static reset: generation waits for exact durable admission and counts once")
+{
+    struct ResetFixture f; SetUpPilot(&f);
+    MultiplayerResetAdmission_Init();
+    rng_value_t rng = gRngValue;
+    MultiplayerResetAdmission_Begin(MP_STATIC_RESET_VOLTORB_1);
+    EXPECT(MultiplayerResetAdmission_IsWaiting());
+    EXPECT_EQ(MultiplayerStaticReset_Count(), 0);
+    EXPECT(!memcmp(&rng, &gRngValue, sizeof(rng)));
+    struct MultiplayerResetReply reply = {.sequence=1, .session=1, .incarnation=1,
+        .encounter=MP_STATIC_RESET_VOLTORB_1, .attempt=3};
+    reply.incarnation = 2;
+    gMultiplayerResetMailbox.reply = reply; gMultiplayerResetMailbox.inboundGeneration = 2;
+    MultiplayerResetAdmission_Tick(); EXPECT(MultiplayerResetAdmission_IsWaiting());
+    EXPECT_EQ(MultiplayerStaticReset_Count(), 0);
+    reply.incarnation = 1;
+    gMultiplayerResetMailbox.reply = reply; gMultiplayerResetMailbox.inboundGeneration = 4;
+    MultiplayerResetAdmission_Tick(); EXPECT(!MultiplayerResetAdmission_IsWaiting());
+    EXPECT_EQ(gSpecialVar_Result, TRUE); EXPECT_EQ(MultiplayerStaticReset_Count(), 3);
+    gMultiplayerResetMailbox.inboundGeneration = 6;
+    MultiplayerResetAdmission_Tick(); EXPECT_EQ(MultiplayerStaticReset_Count(), 3);
+    CreateScriptedWildMon(SPECIES_VOLTORB, 25, ITEM_NONE);
+    gMain.inBattle = TRUE; EXPECT(MultiplayerLocalReset_TestOpenWindow());
+    TearDown(&f);
+}
+
+TEST("Multiplayer static reset: refusal creates no roll and host loss cannot release pending admission")
+{
+    struct ResetFixture f; SetUpPilot(&f);
+    MultiplayerResetAdmission_Init();
+    MultiplayerResetAdmission_Begin(MP_STATIC_RESET_VOLTORB_1);
+    struct MultiplayerResetReply reply = {.sequence=1, .session=1, .incarnation=1,
+        .encounter=MP_STATIC_RESET_VOLTORB_1, .status=1};
+    Connection(1, FALSE);
+    gMultiplayerResetMailbox.reply = reply; gMultiplayerResetMailbox.inboundGeneration = 2;
+    MultiplayerResetAdmission_Tick(); EXPECT(MultiplayerResetAdmission_IsWaiting());
+    EXPECT_EQ(MultiplayerStaticReset_Count(), 0);
+    Connection(1, TRUE);
+    gMultiplayerResetMailbox.inboundGeneration = 4;
+    MultiplayerResetAdmission_Tick(); EXPECT(!MultiplayerResetAdmission_IsWaiting());
+    EXPECT_EQ(gSpecialVar_Result, FALSE); EXPECT_EQ(MultiplayerStaticReset_Count(), 0);
+    TearDown(&f);
+}
+
+TEST("Multiplayer static reset: Gen6 new personal shiny rolls preserve the existing stored predicate")
+{
+    struct ResetFixture f; SetUpPilot(&f);
+    EXPECT(!MultiplayerLocalReset_PersonalGeneration());
+    EXPECT(!ComputePlayerShinyOdds(8, 0));
+    EXPECT(MultiplayerLocalReset_TryBegin(MP_STATIC_RESET_VOLTORB_1));
+    EXPECT(MultiplayerLocalReset_PersonalGeneration());
+    EXPECT(ComputePlayerShinyOdds(0, 0)); EXPECT(ComputePlayerShinyOdds(15, 0));
+    EXPECT(!ComputePlayerShinyOdds(16, 0));
+    CreateMon(&gParties[B_TRAINER_OPPONENT_A][0], SPECIES_VOLTORB, 25, 8, OTID_STRUCT_PLAYER_ID);
+    EXPECT(GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_IS_SHINY));
+    struct Pokemon owned = gParties[B_TRAINER_OPPONENT_A][0];
+    MultiplayerLocalReset_Finish();
+    EXPECT(!MultiplayerLocalReset_PersonalGeneration()); EXPECT(!ComputePlayerShinyOdds(8, 0));
+    EXPECT(GetMonData(&owned, MON_DATA_IS_SHINY));
+    EXPECT(!memcmp(&owned, &gParties[B_TRAINER_OPPONENT_A][0], sizeof(owned)));
     TearDown(&f);
 }

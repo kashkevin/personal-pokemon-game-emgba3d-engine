@@ -1,4 +1,5 @@
 #include "global.h"
+#include "multiplayer_local_reset.h"
 #include "malloc.h"
 #include "apprentice.h"
 #include "battle.h"
@@ -873,6 +874,13 @@ bool32 ComputePlayerShinyOdds(u32 personality, u32 value)
 
     if (FlagGet(P_FLAG_FORCE_SHINY))
         return TRUE;
+
+    // Gen 6 personal-static generation uses the 16-value shiny xor range.
+    // Keep the stored-mon/display predicate unchanged: CreateBoxMon writes
+    // MON_DATA_IS_SHINY through the existing shinyModifier representation.
+    // No fishing, lure or DexNav state applies to an authored static hunt.
+    if (MultiplayerLocalReset_PersonalGeneration())
+        return GET_SHINY_VALUE(value, personality) < 16;
 
     if (P_ONLY_OBTAINABLE_SHINIES && (CurrentBattlePyramidLocation() != PYRAMID_LOCATION_NONE || (FlagGet(WE_FLAG_NO_CATCHING))))
         return FALSE;

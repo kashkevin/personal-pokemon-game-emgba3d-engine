@@ -25,6 +25,7 @@
 #include "multiplayer_battle.h"
 #include "multiplayer.h"
 #include "multiplayer_menu.h"
+#include "multiplayer_reset_admission.h"
 #include "multiplayer_save.h"
 #include "multiplayer_local_reset.h"
 #include "trainer_hill.h"
@@ -121,6 +122,7 @@ void AgbMain(void)
     MultiplayerSave_Init();
     MultiplayerBattle_Init();
     MultiplayerMenu_Init();
+    MultiplayerResetAdmission_Init();
 
     gSoftResetDisabled = FALSE;
 
@@ -146,6 +148,7 @@ void AgbMainLoop(void)
     {
         ReadKeys();
         MultiplayerMenu_Tick();
+        MultiplayerResetAdmission_Tick();
         MultiplayerSave_Tick();
         MultiplayerBattle_Tick();
         Multiplayer_Tick();
