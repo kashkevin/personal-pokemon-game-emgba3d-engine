@@ -392,7 +392,23 @@ static void Handle(const struct MultiplayerSaveControl *command)
     }
     if (command->opcode == MP_SAVE_BIND)
     {
-        if (MultiplayerSave_IsHeld())
+        // A game process retains its binding fence across bridge reconnects.
+        // Only the original, still-unprogressed BIND can be replayed verbatim.
+        if (command->sessionEpoch < sSession
+         || (command->sessionEpoch == sSession && command->incarnation < sIncarnation))
+            status = MP_SAVE_SESSION;
+        else if (command->sessionEpoch == sSession && command->incarnation == sIncarnation)
+        {
+            if (sLastSeq == 1 && sLastCommand.opcode == MP_SAVE_BIND
+             && !memcmp(command, &sLastCommand, sizeof(*command)))
+            {
+                struct MultiplayerSaveControl cached = sCachedResponse;
+                PublishResponse(&cached, cached.status, cached.data, cached.length, cached.offset);
+                return;
+            }
+            status = MP_SAVE_ORDER;
+        }
+        else if (MultiplayerSave_IsHeld())
             status = MP_SAVE_BUSY;
         else if (command->length || command->commandSeq != 1 || command->revision || command->offset)
             status = MP_SAVE_MALFORMED;
