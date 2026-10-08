@@ -190,20 +190,28 @@ bool32 MultiplayerSave_PauseClocks(void)
     return MultiplayerSave_SkipCallbacks();
 }
 
-static bool32 FieldReady(void)
+static bool32 FieldReadyWithMenu(bool32 admittedMenu)
 {
     u32 id = gPlayerAvatar.objectEventId;
-    return !MultiplayerMenu_IsActive() && !MultiplayerBattle_IsActive() && gMain.callback1 == CB1_Overworld && gMain.callback2 == CB2_Overworld
+    return (admittedMenu || !MultiplayerMenu_IsActive()) && !MultiplayerBattle_IsActive() && gMain.callback1 == CB1_Overworld && gMain.callback2 == CB2_Overworld
         && gSaveBlock1Ptr != NULL && gSaveBlock2Ptr != NULL && gMapHeader.mapLayout != NULL
         && id < OBJECT_EVENTS_COUNT && gObjectEvents[id].active && gObjectEvents[id].isPlayer
         && gObjectEvents[id].spriteId < MAX_SPRITES && gSprites[gObjectEvents[id].spriteId].inUse
-        && !gPaletteFade.active && !ArePlayerFieldControlsLocked() && !ScriptContext_IsEnabled()
+        && !gPaletteFade.active && (admittedMenu || !ArePlayerFieldControlsLocked()) && !ScriptContext_IsEnabled()
         && gPlayerAvatar.tileTransitionState == 0 && gPlayerAvatar.runningState == 0
         && !gMain.inBattle && !IsNativeLinkSessionActive()
         && gTrainerHillVBlankCounter == NULL && !GetCurrentTrainerHillMapId()
         && !InBattlePyramid() && !GetSafariZoneFlag()
         && !gSaveBlock2Ptr->frontier.challengeStatus && !gSaveBlock2Ptr->frontier.challengePaused
         && (!B_FLAG_SKY_BATTLE || !FlagGet(B_FLAG_SKY_BATTLE));
+}
+
+static bool32 FieldReady(void) { return FieldReadyWithMenu(FALSE); }
+
+bool32 MultiplayerSave_FieldReadyForBattleMenu(u32 session, u32 incarnation)
+{
+    return !MultiplayerSave_IsHeld() && MultiplayerMenu_CanAdmitBattle(session, incarnation)
+        && FieldReadyWithMenu(TRUE);
 }
 
 bool32 MultiplayerSave_FieldReady(void)

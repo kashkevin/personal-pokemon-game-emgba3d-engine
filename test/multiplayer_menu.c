@@ -1,6 +1,7 @@
 #include "global.h"
 #include "multiplayer_menu.h"
 #include "multiplayer_save.h"
+#include "multiplayer_battle.h"
 #include "main.h"
 #include "test/test.h"
 #include "constants/characters.h"
@@ -138,4 +139,30 @@ TEST("Multiplayer menu: printable ASCII translation cannot produce a native stri
     EXPECT_EQ(MultiplayerMenu_TestGlyph('7'), CHAR_7);
     EXPECT_EQ(MultiplayerMenu_TestGlyph(':'), CHAR_COLON);
     EXPECT_EQ(MultiplayerMenu_TestGlyph('~'), CHAR_QUESTION_MARK);
+}
+
+TEST("Multiplayer menu: explicit resume Enter selection latches before IPC and ignores B, disconnect and ordinary CLOSE")
+{
+    struct MultiplayerMenuScreen screen = Screen(1, 10);
+    bool8 resetDisabled = gSoftResetDisabled;
+    MultiplayerMenu_Init(); EXPECT(MultiplayerMenu_TestBegin());
+    screen.reserved[0] = 2;
+    EXPECT(MultiplayerMenu_ValidateScreen(&screen));
+    screen.rows[1].action = 0; EXPECT(!MultiplayerMenu_ValidateScreen(&screen)); screen.rows[1].action = 2;
+    screen.reserved[0] = 7; EXPECT(!MultiplayerMenu_ValidateScreen(&screen)); screen.reserved[0] = 2;
+    Deliver(&screen, 2);
+    EXPECT(!MultiplayerMenu_IsBattleAdmissionHeld());
+    MultiplayerMenu_TestInput(DPAD_DOWN); MultiplayerMenu_TestInput(A_BUTTON);
+    EXPECT_EQ(gMultiplayerMenuMailbox.request.action, 2);
+    EXPECT(MultiplayerMenu_IsBattleAdmissionHeld()); EXPECT(MultiplayerBattle_PauseClocks());
+    EXPECT(MultiplayerBattle_SkipCallbacks()); EXPECT(gSoftResetDisabled);
+    MultiplayerMenu_TestInput(B_BUTTON); MultiplayerMenu_Tick();
+    EXPECT(MultiplayerMenu_IsActive()); EXPECT(MultiplayerMenu_IsBattleAdmissionHeld());
+    EXPECT_EQ(gMultiplayerMenuMailbox.request.sequence, 2);
+    screen.ackRequest = 2; screen.flags = 1; screen.reserved[0] = 0;
+    Deliver(&screen, 4); MultiplayerMenu_TestClose();
+    EXPECT(MultiplayerMenu_IsActive()); EXPECT_EQ(gMultiplayerMenuMailbox.request.sequence, 2);
+    EXPECT(!MultiplayerMenu_CanAdmitBattle(7, 11)); // Bare test Begin owns no production field/binding.
+    MultiplayerMenu_Init(); EXPECT(!MultiplayerMenu_IsBattleAdmissionHeld());
+    EXPECT_EQ(gSoftResetDisabled, resetDisabled);
 }

@@ -1,6 +1,7 @@
 #include "global.h"
 #include "multiplayer_battle.h"
 #include "multiplayer_save.h"
+#include "multiplayer_menu.h"
 #include "multiplayer_ownership.h"
 #include "multiplayer.h"
 #include "main.h"
@@ -153,7 +154,7 @@ bool32 MultiplayerBattle_PauseClocks(void)
     // Freeze that exact terminal field on disconnect; reconnect alone cannot
     // thaw it before the original trainers complete a new quorum.
     if (sReleasedResumable && !Multiplayer_IsConnected()) LatchReleasedWait();
-    return sReleasedWaiting || sRetiredWaiting || (MultiplayerBattle_IsActive() && sState != MP_BATTLE_RUNNING && sState != MP_BATTLE_RETURNING);
+    return MultiplayerMenu_IsBattleAdmissionHeld() || sReleasedWaiting || sRetiredWaiting || (MultiplayerBattle_IsActive() && sState != MP_BATTLE_RUNNING && sState != MP_BATTLE_RETURNING);
 }
 
 bool32 MultiplayerBattle_SkipCallbacks(void) { return MultiplayerBattle_PauseClocks(); }
@@ -834,6 +835,7 @@ static u8 HandleResume(const struct MultiplayerBattleControl *c)
 static u8 Admit(const struct MultiplayerBattleControl *c)
 {
     u32 saveSession, saveIncarnation, base;
+    bool32 menuOwned = MultiplayerMenu_CanAdmitBattle(c->sessionEpoch, c->incarnation);
     if (c->phase == MP_BATTLE_PHASE_DIAGNOSTIC || c->sourceSlot >= (c->phase == MP_BATTLE_PHASE_SINGLES ? 2 : 4)
      || c->blockSeq || c->offset || c->totalSize || c->kind || c->length != 48
      || Zero(c->data, 16) || Zero(c->data + 16, 16) || Zero(c->data + 32, 16))
@@ -848,7 +850,8 @@ static u8 Admit(const struct MultiplayerBattleControl *c)
      || saveSession != c->sessionEpoch || saveIncarnation != c->incarnation
      || !MultiplayerBattle_CheckBinding(c->sessionEpoch, c->incarnation))
         return MP_BATTLE_SESSION;
-    if (!MultiplayerSave_FieldReady() || !MultiplayerOwnership_IsEnrolled() || !MultiplayerOwnership_CanSaveParty()
+    if (!(menuOwned ? MultiplayerSave_FieldReadyForBattleMenu(c->sessionEpoch, c->incarnation) : MultiplayerSave_FieldReady())
+     || !MultiplayerOwnership_IsEnrolled() || !MultiplayerOwnership_CanSaveParty()
      || gSaveBlock3Ptr == NULL || memcmp(c->data + 16, gSaveBlock3Ptr->ownership.playerId, 16))
         return MP_BATTLE_UNSAFE;
     base = sSession == c->sessionEpoch && sIncarnation == c->incarnation ? sLastSeq : 0;
@@ -863,8 +866,10 @@ static u8 Admit(const struct MultiplayerBattleControl *c)
     sLastSeq = base; memset(&sLastCommand, 0, sizeof(sLastCommand)); memset(&sCachedResponse, 0, sizeof(sCachedResponse));
     sAdmitPartyCrc = Crc32((const u8 *)gParties[B_TRAINER_PLAYER], 600);
     sAdmitSaveCounter = gSaveCounter; sAdmitPartyCount = gPartiesCount[B_TRAINER_PLAYER];
-    sSavedResetDisabled = gSoftResetDisabled; gSoftResetDisabled = TRUE;
+    sSavedResetDisabled = menuOwned ? MultiplayerMenu_AdmissionResetWasDisabled() : gSoftResetDisabled;
+    gSoftResetDisabled = TRUE;
     sState = MP_BATTLE_ADMITTING; Multiplayer_LeaveField();
+    if (menuOwned) MultiplayerMenu_TransferBattleAdmission(c->sessionEpoch, c->incarnation);
     return MP_BATTLE_OK;
 }
 
