@@ -12,6 +12,7 @@ enum MultiplayerSaveOpcode {
     MP_SAVE_QUERY_OWNERSHIP, MP_SAVE_GRANT_OWNERSHIP,
     MP_SAVE_BEGIN_TRADE_EXPORT, MP_SAVE_KEEP_TRADE, MP_SAVE_ABORT_TRADE,
     MP_SAVE_RELEASE_TRADE, MP_SAVE_REBIND_TRADE, MP_SAVE_QUERY_TRADE,
+    MP_SAVE_READ_WINDOW,
 };
 enum MultiplayerSaveState {
     MP_SAVE_UNBOUND, MP_SAVE_BOUND, MP_SAVE_EXPORTING, MP_SAVE_IMPORTING,
@@ -51,6 +52,7 @@ struct MultiplayerSaveMailbox {
 };
 extern volatile struct MultiplayerSaveMailbox gMultiplayerSaveMailbox;
 extern const u32 gMultiplayerTradeAbiVersion;
+extern const u32 gMultiplayerSaveWindowAbiVersion;
 void MultiplayerSave_Init(void);
 void MultiplayerSave_Tick(void);
 bool32 MultiplayerSave_IsHeld(void);
