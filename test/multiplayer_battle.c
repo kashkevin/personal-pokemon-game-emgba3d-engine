@@ -4,6 +4,7 @@
 #include "multiplayer_save.h"
 #include "multiplayer_ownership.h"
 #include "battle.h"
+#include "battle_bg.h"
 #include "battle_controllers.h"
 #include "battle_util.h"
 #include "battle_util2.h"
@@ -20,6 +21,7 @@
 #include "script.h"
 #include "palette.h"
 #include "sprite.h"
+#include "task.h"
 #include "link.h"
 #include "link_rfu.h"
 #include "librfu.h"
@@ -318,6 +320,110 @@ static void StartFullMulti(struct ChannelFixture *f)
     EXPECT_EQ(Send(f, MP_BATTLE_START_SINGLES), MP_BATTLE_OK);
     EXPECT_EQ(gLinkType, LINKTYPE_MULTI_BATTLE);
     EXPECT_EQ(gBattleTypeFlags & (BATTLE_TYPE_MULTI | BATTLE_TYPE_DOUBLE), BATTLE_TYPE_MULTI | BATTLE_TYPE_DOUBLE);
+}
+
+TEST("Multiplayer full Multi: VS preview retains six independent health icons from every owner's startup header on all four devices")
+{
+    static const u16 flags[4] = {0xE49, 0xB6C, 0xD92, 0x6E5};
+    static const u8 status[4][PARTY_SIZE] = {
+        {1, 2, 0, 1, 2, 3}, {0, 3, 2, 1, 3, 2},
+        {2, 0, 1, 2, 1, 3}, {1, 1, 2, 3, 2, 1},
+    };
+    struct ChannelFixture f;
+    struct LinkBattlerHeader header = {0};
+    u16 tiles[PARTY_SIZE + 1];
+    for (u32 local = 0; local < 4; local++)
+    {
+        FullMultiBinding(&f, local);
+        StartFullMulti(&f);
+        header.versionSignatureHi = 3; header.battleEnigmaBerry.name[0] = EOS;
+        header.vsScreenHealthFlagsLo = flags[local];
+        header.vsScreenHealthFlagsHi = flags[local] >> 8;
+        EXPECT(MultiplayerBattle_SendBlock(&header, sizeof(header)));
+        AckNativeOutput(&f, FALSE);
+        for (u32 source = 0; source < 4; source++)
+        {
+            if (source == local) continue;
+            header.vsScreenHealthFlagsLo = flags[source];
+            header.vsScreenHealthFlagsHi = flags[source] >> 8;
+            ReceiveFullBlock(&f, source, MP_BATTLE_KIND_START_HEADER, 2, &header, sizeof(header));
+        }
+        EXPECT_EQ(GetBlockReceivedStatus(), 15);
+        u8 task = CreateTask(TaskDummy, 0);
+        EXPECT(task < NUM_TASKS);
+        gTasks[task].data[1] = 0x10E; gTasks[task].data[2] = 0x5A;
+        // Poison the old half-party summaries: none may supply a native icon.
+        gTasks[task].data[3] = gTasks[task].data[4] = 0xFFF;
+        BufferNativeMultiBattleVsScreenHealth(task);
+        ResetBlockReceivedFlags();
+        // Later party blocks replace the receive buffers during this animation.
+        memset(gBlockRecvBuffer, 0, sizeof(gBlockRecvBuffer));
+        for (u32 source = 0; source < 4; source++)
+        {
+            for (u32 slot = 0; slot < ARRAY_COUNT(tiles); slot++) tiles[slot] = 0xAAAA;
+            EXPECT_EQ(BattleBg_TestParticipantPokeballTiles(task, source, tiles), PARTY_SIZE);
+            for (u32 slot = 0; slot < PARTY_SIZE; slot++)
+                EXPECT_EQ(tiles[slot], 0x6001 + status[source][slot]);
+            EXPECT_EQ(tiles[PARTY_SIZE], 0xAAAA);
+        }
+        EXPECT_EQ(BattleBg_TestParticipantPokeballTiles(task, 4, tiles), 0);
+        EXPECT_EQ(gTasks[task].data[1], 0x10E); EXPECT_EQ(gTasks[task].data[2], 0x5A);
+        EXPECT_EQ(gTasks[task].data[3], 0xFFF); EXPECT_EQ(gTasks[task].data[4], 0xFFF);
+        DestroyTask(task);
+        TearDown(&f);
+    }
+}
+
+TEST("Multiplayer VS preview: legacy Multi still shows three icons per trainer with its existing end-screen opponent order")
+{
+    static const u8 opening[4][3] = {{1, 2, 0}, {0, 3, 2}, {1, 2, 3}, {1, 3, 2}};
+    static const u8 ending[4][3] = {{1, 2, 0}, {1, 3, 2}, {1, 2, 3}, {0, 3, 2}};
+    struct ChannelFixture f; SetUp(&f, 4, 0);
+    u8 task = CreateTask(TaskDummy, 0);
+    u16 tiles[PARTY_SIZE];
+    gBattleTypeFlags = BATTLE_TYPE_LINK | BATTLE_TYPE_MULTI;
+    gTasks[task].data[3] = 0xE49; gTasks[task].data[4] = 0xB6C;
+    for (u32 slot = 6; slot < 10; slot++) gTasks[task].data[slot] = 0xFFF;
+    BufferNativeMultiBattleVsScreenHealth(task);
+    for (u32 slot = 6; slot < 10; slot++) EXPECT_EQ(gTasks[task].data[slot], 0xFFF);
+    for (u32 end = 0; end < 2; end++)
+    {
+        gTasks[task].data[5] = end;
+        for (u32 source = 0; source < 4; source++)
+        {
+            for (u32 slot = 0; slot < PARTY_SIZE; slot++) tiles[slot] = 0xAAAA;
+            EXPECT_EQ(BattleBg_TestParticipantPokeballTiles(task, source, tiles), 3);
+            for (u32 slot = 0; slot < 3; slot++)
+                EXPECT_EQ(tiles[slot], 0x6001 + (end ? ending[source][slot] : opening[source][slot]));
+            for (u32 slot = 3; slot < PARTY_SIZE; slot++) EXPECT_EQ(tiles[slot], 0xAAAA);
+        }
+    }
+    DestroyTask(task); TearDown(&f);
+}
+
+TEST("Multiplayer VS preview: native singles retain six self and opponent icons without using full Multi task data")
+{
+    static const u8 status[2][PARTY_SIZE] = {{1, 2, 0, 1, 2, 3}, {0, 3, 2, 1, 3, 2}};
+    struct ChannelFixture f; NativeBinding(&f);
+    u8 task = CreateTask(TaskDummy, 0), previousId = gBattleScripting.multiplayerId;
+    u16 tiles[PARTY_SIZE];
+    gBattleTypeFlags = BATTLE_TYPE_LINK;
+    gTasks[task].data[3] = 0xE49; gTasks[task].data[4] = 0xB6C;
+    for (u32 slot = 6; slot < 10; slot++) gTasks[task].data[slot] = 0xFFF;
+    BufferNativeMultiBattleVsScreenHealth(task);
+    for (u32 slot = 6; slot < 10; slot++) EXPECT_EQ(gTasks[task].data[slot], 0xFFF);
+    for (u32 local = 0; local < 2; local++)
+    {
+        gBattleScripting.multiplayerId = local;
+        for (u32 source = 0; source < 2; source++)
+        {
+            EXPECT_EQ(BattleBg_TestParticipantPokeballTiles(task, source, tiles), PARTY_SIZE);
+            for (u32 slot = 0; slot < PARTY_SIZE; slot++)
+                EXPECT_EQ(tiles[slot], 0x6001 + status[source != local][slot]);
+        }
+    }
+    gBattleScripting.multiplayerId = previousId;
+    DestroyTask(task); TearDown(&f);
 }
 
 TEST("Multiplayer full Multi: four fixed owners retain six separate party slots through startup")

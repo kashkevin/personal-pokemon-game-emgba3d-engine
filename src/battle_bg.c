@@ -13,6 +13,7 @@
 #include "graphics.h"
 #include "link.h"
 #include "main.h"
+#include "multiplayer_battle.h"
 #include "menu.h"
 #include "overworld.h"
 #include "palette.h"
@@ -1003,14 +1004,34 @@ void LoadBattleTextboxAndBackground(void)
         DrawMainBattleBackground();
 }
 
-static void DrawLinkBattleParticipantPokeballs(u8 taskId, u8 multiplayerId, u8 bgId, u8 destX, u8 destY)
+// The VS animation owns data[0..5]; native Multi retains one complete six-slot
+// summary per fixed trainer in the remaining task storage. No link ABI change.
+#define NATIVE_MULTI_VS_STATUS_DATA 6
+_Static_assert(NATIVE_MULTI_VS_STATUS_DATA + MAX_LINK_PLAYERS <= NUM_TASK_DATA, "Native Multi VS task summaries must fit");
+
+void BufferNativeMultiBattleVsScreenHealth(u8 taskId)
+{
+    if (!MultiplayerBattle_IsFullMulti())
+        return;
+    for (u32 source = 0; source < MAX_LINK_PLAYERS; source++)
+        gTasks[taskId].data[NATIVE_MULTI_VS_STATUS_DATA + source] = gBlockRecvBuffer[source][1] & 0xFFF;
+}
+
+static u32 BuildLinkBattleParticipantPokeballTiles(u8 taskId, u8 multiplayerId, u16 *tiles)
 {
     s32 i;
     u16 pokeballStatuses = 0;
-    u16 tiles[6];
+    u32 count = PARTY_SIZE;
 
-    if (gBattleTypeFlags & BATTLE_TYPE_MULTI)
+    if (MultiplayerBattle_IsFullMulti() && gTasks[taskId].data[5] == 0)
     {
+        if (multiplayerId >= MAX_LINK_PLAYERS)
+            return 0;
+        pokeballStatuses = gTasks[taskId].data[NATIVE_MULTI_VS_STATUS_DATA + multiplayerId];
+    }
+    else if (gBattleTypeFlags & BATTLE_TYPE_MULTI)
+    {
+        count = 3;
         if (gTasks[taskId].data[5] != 0)
         {
             switch (multiplayerId)
@@ -1047,12 +1068,6 @@ static void DrawLinkBattleParticipantPokeballs(u8 taskId, u8 multiplayerId, u8 b
                 break;
             }
         }
-
-        for (i = 0; i < 3; i++)
-            tiles[i] = ((pokeballStatuses & (3 << (i * 2))) >> (i * 2)) + 0x6001;
-
-        CopyToBgTilemapBufferRect_ChangePalette(bgId, tiles, destX, destY, 3, 1, 0x11);
-        CopyBgTilemapBufferToVram(bgId);
     }
     else
     {
@@ -1060,14 +1075,29 @@ static void DrawLinkBattleParticipantPokeballs(u8 taskId, u8 multiplayerId, u8 b
             pokeballStatuses = gTasks[taskId].data[3];
         else
             pokeballStatuses = gTasks[taskId].data[4];
-
-        for (i = 0; i < 6; i++)
-            tiles[i] = ((pokeballStatuses & (3 << (i * 2))) >> (i * 2)) + 0x6001;
-
-        CopyToBgTilemapBufferRect_ChangePalette(bgId, tiles, destX, destY, 6, 1, 0x11);
-        CopyBgTilemapBufferToVram(bgId);
     }
+
+    for (i = 0; i < count; i++)
+        tiles[i] = ((pokeballStatuses & (3 << (i * 2))) >> (i * 2)) + 0x6001;
+    return count;
 }
+
+static void DrawLinkBattleParticipantPokeballs(u8 taskId, u8 multiplayerId, u8 bgId, u8 destX, u8 destY)
+{
+    u16 tiles[PARTY_SIZE];
+    u32 count = BuildLinkBattleParticipantPokeballTiles(taskId, multiplayerId, tiles);
+    if (count == 0)
+        return;
+    CopyToBgTilemapBufferRect_ChangePalette(bgId, tiles, destX, destY, count, 1, 0x11);
+    CopyBgTilemapBufferToVram(bgId);
+}
+
+#if TESTING
+u32 BattleBg_TestParticipantPokeballTiles(u8 taskId, u8 multiplayerId, u16 *tiles)
+{
+    return BuildLinkBattleParticipantPokeballTiles(taskId, multiplayerId, tiles);
+}
+#endif
 
 static void DrawLinkBattleVsScreenOutcomeText(void)
 {

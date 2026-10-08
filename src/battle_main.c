@@ -1570,8 +1570,7 @@ static void CB2_HandleStartFullMultiBattle(void)
             SetAllPlayersBerryData();
             task = CreateTask(InitLinkBattleVsScreen, 0);
             gTasks[task].data[1] = 0x10E; gTasks[task].data[2] = 0x5A;
-            for (u32 source = 0; source < 4; source++)
-                gTasks[task].data[(source & 1) ? 4 : 3] |= (gBlockRecvBuffer[source][1] & 0x3F) << ((source & BIT_FLANK) ? 6 : 0);
+            BufferNativeMultiBattleVsScreenHealth(task);
             ResetBlockReceivedFlags();
             ZeroEnemyPartyMons();
             memset(gParties[B_TRAINER_PARTNER], 0, sizeof(gParties[B_TRAINER_PARTNER]));
