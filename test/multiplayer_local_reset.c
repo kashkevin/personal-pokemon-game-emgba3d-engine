@@ -16,6 +16,7 @@
 #include "malloc.h"
 #include "item.h"
 #include "load_save.h"
+#include "text.h"
 #include "constants/maps.h"
 #include "constants/map_groups.h"
 #include "constants/vars.h"
@@ -29,6 +30,7 @@ struct ResetFixture {
     struct PlayerAvatar avatar;
     struct ObjectEvent object;
     bool8 inBattle, spriteInUse;
+    u8 battlerPositions[MAX_BATTLERS_COUNT];
     u32 generation;
 };
 
@@ -60,6 +62,11 @@ static void SetUp(struct ResetFixture *f)
     f->cb1 = gMain.callback1; f->cb2 = gMain.callback2; f->inBattle = gMain.inBattle;
     f->header = gMapHeader; f->avatar = gPlayerAvatar; f->object = gObjectEvents[0];
     f->spriteInUse = gSprites[0].inUse; f->battle = gBattleStruct;
+    memcpy(f->battlerPositions, gBattlerPositions, sizeof(f->battlerPositions));
+    gBattlerPositions[0] = B_POSITION_PLAYER_LEFT;
+    gBattlerPositions[1] = B_POSITION_OPPONENT_LEFT;
+    gBattlerPositions[2] = B_POSITION_PLAYER_RIGHT;
+    gBattlerPositions[3] = B_POSITION_OPPONENT_RIGHT;
     memset(gSaveBlock1Ptr, 0, sizeof(*gSaveBlock1Ptr));
     memset(gSaveBlock2Ptr, 0, sizeof(*gSaveBlock2Ptr));
     memset(gSaveBlock3Ptr, 0, sizeof(*gSaveBlock3Ptr));
@@ -99,6 +106,7 @@ static void TearDown(struct ResetFixture *f)
     gMain.callback1 = f->cb1; gMain.callback2 = f->cb2; gMain.inBattle = f->inBattle;
     gMapHeader = f->header; gPlayerAvatar = f->avatar; gObjectEvents[0] = f->object;
     gSprites[0].inUse = f->spriteInUse;
+    memcpy(gBattlerPositions, f->battlerPositions, sizeof(f->battlerPositions));
     gMain.heldKeysRaw = gMain.newKeys = 0;
 }
 
@@ -208,5 +216,105 @@ TEST("Multiplayer local reset: native encryption key rotation preserves logical 
     EXPECT(MultiplayerLocalReset_TestRequest());
     EXPECT(MultiplayerLocalReset_TestConfirm(TRUE));
     EXPECT(MultiplayerLocalReset_WasAccepted());
+    TearDown(&f);
+}
+
+TEST("Multiplayer local reset: visible Select action requests the same guarded confirmation and cancel preserves the encounter")
+{
+    struct ResetFixture f; SetUp(&f);
+    EXPECT(MultiplayerLocalReset_GetActionPrompt(0) == NULL);
+    EXPECT(MultiplayerLocalReset_TryBegin(MP_LOCAL_RESET_DEVELOPMENT_ID));
+    gMain.inBattle = TRUE;
+    const u8 *prompt = MultiplayerLocalReset_GetActionPrompt(0);
+    EXPECT(prompt != NULL);
+    // The ordinary action prompt is 14 tiles wide, with one pixel of padding.
+    EXPECT(GetStringWidth(FONT_NORMAL, prompt, 0) <= 14 * 8 - 1);
+    EXPECT(MultiplayerLocalReset_GetActionPrompt(1) == NULL);
+    EXPECT(MultiplayerLocalReset_GetActionPrompt(2) == NULL);
+    gMain.newKeys = gMain.heldKeysRaw = SELECT_BUTTON;
+    EXPECT(!MultiplayerLocalReset_TestSelect(1));
+    EXPECT(MultiplayerLocalReset_TestSelect(0));
+    EXPECT(MultiplayerLocalReset_GetActionPrompt(0) == NULL);
+    EXPECT(!MultiplayerLocalReset_TestConfirm(FALSE));
+    EXPECT(!MultiplayerLocalReset_WasAccepted());
+    EXPECT_EQ(MultiplayerLocalReset_Count(), 1);
+    EXPECT(MultiplayerLocalReset_GetActionPrompt(0) != NULL);
+    EXPECT(MultiplayerLocalReset_TestSelect(0));
+    EXPECT(MultiplayerLocalReset_TestConfirm(TRUE));
+    EXPECT(MultiplayerLocalReset_WasAccepted());
+    EXPECT(MultiplayerLocalReset_GetActionPrompt(0) == NULL);
+    EXPECT_EQ(MultiplayerLocalReset_Count(), 1);
+    TearDown(&f);
+}
+
+TEST("Multiplayer local reset: Select shortcut does not reinterpret held keys or the filtered reset chord")
+{
+    struct ResetFixture f; SetUp(&f); Begin();
+    gMain.heldKeysRaw = SELECT_BUTTON;
+    EXPECT(!MultiplayerLocalReset_TestSelect(0));
+    gMain.newKeys = SELECT_BUTTON;
+    gMain.heldKeysRaw = SELECT_BUTTON | A_BUTTON;
+    EXPECT(!MultiplayerLocalReset_TestSelect(0));
+    gMain.heldKeysRaw = SELECT_BUTTON | B_BUTTON;
+    EXPECT(!MultiplayerLocalReset_TestSelect(0));
+    gMain.heldKeysRaw = SELECT_BUTTON | START_BUTTON;
+    EXPECT(!MultiplayerLocalReset_TestSelect(0));
+    // The existing Windows filter removes Start from the four-button chord.
+    gMain.newKeys = gMain.heldKeysRaw = SELECT_BUTTON | A_BUTTON | B_BUTTON;
+    EXPECT(!MultiplayerLocalReset_TestSelect(0));
+    EXPECT_EQ(MultiplayerLocalReset_HandlePlayerInput(0), MP_LOCAL_RESET_INPUT_PASS);
+    EXPECT_EQ(gMain.newKeys, SELECT_BUTTON | A_BUTTON | B_BUTTON);
+    EXPECT(MultiplayerLocalReset_GetActionPrompt(0) == NULL);
+    EXPECT(!MultiplayerLocalReset_WasAccepted());
+    TearDown(&f);
+}
+
+TEST("Multiplayer local reset: ineligible Select leaves the existing debug action input untouched")
+{
+    struct ResetFixture f; SetUp(&f);
+    gMain.newKeys = gMain.heldKeysRaw = SELECT_BUTTON;
+    EXPECT(MultiplayerLocalReset_GetActionPrompt(0) == NULL);
+    EXPECT_EQ(MultiplayerLocalReset_HandlePlayerInput(0), MP_LOCAL_RESET_INPUT_PASS);
+    EXPECT_EQ(gMain.newKeys, SELECT_BUTTON);
+    Begin();
+    gSaveBlock1Ptr->money++;
+    EXPECT(MultiplayerLocalReset_GetActionPrompt(0) == NULL);
+    EXPECT_EQ(MultiplayerLocalReset_HandlePlayerInput(0), MP_LOCAL_RESET_INPUT_PASS);
+    EXPECT_EQ(gMain.newKeys, SELECT_BUTTON);
+    EXPECT(!MultiplayerLocalReset_TestConfirm(TRUE));
+    gSaveBlock1Ptr->money--;
+    gBattleResults.battleTurnCounter = 1;
+    EXPECT(MultiplayerLocalReset_GetActionPrompt(0) == NULL);
+    EXPECT_EQ(MultiplayerLocalReset_HandlePlayerInput(0), MP_LOCAL_RESET_INPUT_PASS);
+    gBattleResults.battleTurnCounter = 0;
+    gBattleTypeFlags |= BATTLE_TYPE_TRAINER;
+    EXPECT(MultiplayerLocalReset_GetActionPrompt(0) == NULL);
+    EXPECT_EQ(MultiplayerLocalReset_HandlePlayerInput(0), MP_LOCAL_RESET_INPUT_PASS);
+    gBattleTypeFlags = BATTLE_TYPE_IS_MASTER;
+    MultiplayerLocalReset_CloseAction();
+    EXPECT(MultiplayerLocalReset_GetActionPrompt(0) == NULL);
+    EXPECT_EQ(MultiplayerLocalReset_HandlePlayerInput(0), MP_LOCAL_RESET_INPUT_PASS);
+    EXPECT_EQ(gMain.newKeys, SELECT_BUTTON);
+    EXPECT(!MultiplayerLocalReset_WasAccepted());
+    TearDown(&f);
+}
+
+TEST("Multiplayer local reset: Select confirmation rechecks connection and protected native state")
+{
+    struct ResetFixture f; SetUp(&f); Begin();
+    gMain.newKeys = gMain.heldKeysRaw = SELECT_BUTTON;
+    EXPECT(MultiplayerLocalReset_TestSelect(0));
+    gSaveBlock1Ptr->money++;
+    EXPECT(!MultiplayerLocalReset_TestConfirm(TRUE));
+    EXPECT(!MultiplayerLocalReset_WasAccepted());
+    EXPECT(MultiplayerLocalReset_GetActionPrompt(0) == NULL);
+    EXPECT_EQ(gSaveBlock1Ptr->money, 1);
+    gSaveBlock1Ptr->money--;
+    EXPECT(MultiplayerLocalReset_GetActionPrompt(0) != NULL);
+    Connection(1, FALSE);
+    EXPECT(MultiplayerLocalReset_GetActionPrompt(0) == NULL);
+    EXPECT_EQ(MultiplayerLocalReset_HandlePlayerInput(0), MP_LOCAL_RESET_INPUT_PASS);
+    EXPECT_EQ(gMain.newKeys, SELECT_BUTTON);
+    EXPECT(!MultiplayerLocalReset_WasAccepted());
     TearDown(&f);
 }

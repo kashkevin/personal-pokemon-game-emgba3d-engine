@@ -2033,7 +2033,12 @@ static void PlayerHandleChooseAction(enum BattlerId battler)
     BattleStringExpandPlaceholdersToDisplayedString(gText_WhatWillPkmnDo);
 
     enum BattlerId partner = GetBattlerAtPosition(B_POSITION_PLAYER_RIGHT);
-    if (B_SHOW_PARTNER_TARGET && gBattleTypeFlags & BATTLE_TYPE_INGAME_PARTNER && IsBattlerAlive(partner))
+    const u8 *resetPrompt = MultiplayerLocalReset_GetActionPrompt(battler);
+    if (resetPrompt != NULL)
+    {
+        BattlePutTextOnWindow(resetPrompt, B_WIN_ACTION_PROMPT);
+    }
+    else if (B_SHOW_PARTNER_TARGET && gBattleTypeFlags & BATTLE_TYPE_INGAME_PARTNER && IsBattlerAlive(partner))
     {
         StringCopy(gStringVar1, COMPOUND_STRING("Partner will use:\n"));
         enum Move move = GetBattlerChosenMove(partner);

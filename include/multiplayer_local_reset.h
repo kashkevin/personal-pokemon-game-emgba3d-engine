@@ -15,6 +15,7 @@ enum MultiplayerLocalResetInput {
 };
 void MultiplayerLocalReset_Init(void);
 bool32 MultiplayerLocalReset_HandleChord(void);
+const u8 *MultiplayerLocalReset_GetActionPrompt(enum BattlerId battler);
 u32 MultiplayerLocalReset_HandlePlayerInput(enum BattlerId battler);
 bool32 MultiplayerLocalReset_TryBegin(u32 encounterId);
 u32 MultiplayerLocalReset_Count(void);
@@ -29,5 +30,6 @@ void BattleMain_QuitPersonalEncounter(void);
 bool32 MultiplayerLocalReset_TestOpenWindow(void);
 bool32 MultiplayerLocalReset_TestRequest(void);
 bool32 MultiplayerLocalReset_TestConfirm(bool32 yes);
+bool32 MultiplayerLocalReset_TestSelect(enum BattlerId battler);
 #endif
 #endif

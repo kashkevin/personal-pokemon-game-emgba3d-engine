@@ -35,6 +35,9 @@ static EWRAM_DATA u32 sLocalResetSession, sLocalResetIncarnation, sLocalResetRos
 static EWRAM_DATA bool8 sLocalResetActive, sLocalResetWindow, sLocalResetRequested, sLocalResetConfirming, sLocalResetAccepted, sLocalResetClosed, sLocalResetChordHeld;
 static EWRAM_DATA u8 sLocalResetCursor;
 static const u8 sLocalResetPrompt[] = _("Reset this encounter?");
+#if MP_LOCAL_RESET_DEVELOPMENT || TESTING
+static const u8 sLocalResetActionPrompt[] = _("Choose an action\nSELECT: Reset");
+#endif
 
 static u32 Hash(const void *value, u32 size)
 {
@@ -54,6 +57,7 @@ static bool32 BindingReady(void)
         && !MultiplayerBattle_IsActive();
 }
 
+#if MP_LOCAL_RESET_DEVELOPMENT || TESTING
 static void CopyPocket(struct ItemSlot *target, const struct ItemSlot *source, u32 count)
 {
     u16 key = gSaveBlock2Ptr->encryptionKey;
@@ -64,6 +68,7 @@ static void CopyPocket(struct ItemSlot *target, const struct ItemSlot *source, u
         target++; source++;
     }
 }
+#endif
 
 static bool32 PocketMatches(const struct ItemSlot *guard, const struct ItemSlot *current, u32 count)
 {
@@ -196,6 +201,34 @@ static bool32 Request(void)
 }
 #endif
 
+const u8 *MultiplayerLocalReset_GetActionPrompt(enum BattlerId battler)
+{
+#if MP_LOCAL_RESET_DEVELOPMENT || TESTING
+    // A menu render is also the beginning of the first-action window. Do not
+    // advertise the shortcut after any action, on other controllers, or while
+    // the native confirmation already owns input.
+    if (GetBattlerPosition(battler) == B_POSITION_PLAYER_LEFT
+     && !sLocalResetRequested && !sLocalResetConfirming && OpenWindow())
+        return sLocalResetActionPrompt;
+#endif
+    return NULL;
+}
+
+static bool32 RequestFromSelect(enum BattlerId battler)
+{
+#if MP_LOCAL_RESET_DEVELOPMENT || TESTING
+    // Leave the full reset chord and ordinary A/B/Start input to their existing
+    // handlers. Only an eligible Select request takes priority over the debug
+    // menu; an ineligible request leaves its input untouched.
+    if (GetBattlerPosition(battler) == B_POSITION_PLAYER_LEFT
+     && !sLocalResetRequested && !sLocalResetConfirming
+     && JOY_NEW(SELECT_BUTTON) && !JOY_HELD_RAW(A_BUTTON | B_BUTTON | START_BUTTON)
+     && Request())
+        return TRUE;
+#endif
+    return FALSE;
+}
+
 static bool32 Confirm(bool32 yes)
 {
     if (!sLocalResetRequested && !sLocalResetConfirming) return FALSE;
@@ -238,6 +271,7 @@ u32 MultiplayerLocalReset_HandlePlayerInput(enum BattlerId battler)
 {
     if (!sLocalResetActive || GetBattlerPosition(battler) != B_POSITION_PLAYER_LEFT) return MP_LOCAL_RESET_INPUT_PASS;
     if (!sLocalResetWindow && !sLocalResetClosed && !sLocalResetAccepted) OpenWindow();
+    RequestFromSelect(battler);
     if (sLocalResetRequested && !sLocalResetConfirming)
     {
         sLocalResetRequested = FALSE; sLocalResetConfirming = TRUE; sLocalResetCursor = 1;
@@ -310,4 +344,5 @@ void MultiplayerLocalReset_ConsumeResult(void)
 bool32 MultiplayerLocalReset_TestOpenWindow(void) { return OpenWindow(); }
 bool32 MultiplayerLocalReset_TestRequest(void) { return Request(); }
 bool32 MultiplayerLocalReset_TestConfirm(bool32 yes) { return Confirm(yes); }
+bool32 MultiplayerLocalReset_TestSelect(enum BattlerId battler) { return RequestFromSelect(battler); }
 #endif
