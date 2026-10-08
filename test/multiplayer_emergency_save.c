@@ -376,3 +376,58 @@ TEST("Multiplayer emergency: ordinary export watchdog behavior remains unchanged
     TearDown(&f);
 }
 
+
+TEST("Multiplayer emergency: promotion preserves the ordinary snapshot and rewinds only its read cursor")
+{
+    struct EmergencyFixture f;
+    u32 crc, counter;
+    SetUp(&f);
+    EXPECT_EQ(Send(&f, MP_SAVE_BEGIN_EXPORT, 0), MP_SAVE_OK);
+    counter = gSaveCounter;
+    EXPECT_EQ(Send(&f, MP_SAVE_READ_WINDOW, 0), MP_SAVE_OK);
+    EXPECT_EQ(Send(&f, MP_SAVE_PROMOTE_EMERGENCY_EXPORT, 0), MP_SAVE_OK);
+    EXPECT_EQ(gSaveCounter, counter);
+    EXPECT_EQ(gMultiplayerSaveMailbox.response.offset, 0);
+    WaitPastDeadline();
+    CheckHeld(MP_SAVE_EXPORTING);
+    crc = ReadWindows(&f, 0, 0);
+    EXPECT_EQ(Send(&f, MP_SAVE_PRESERVE_EMERGENCY, 131072), MP_SAVE_OK);
+    EXPECT_EQ(Word(gMultiplayerSaveMailbox.response.data), crc);
+    CheckHeld(MP_SAVE_EMERGENCY_PRESERVED);
+    TearDown(&f);
+}
+
+TEST("Multiplayer emergency: expired ordinary export cannot create different bytes under the same UUID")
+{
+    struct EmergencyFixture f;
+    u32 counter;
+    SetUp(&f);
+    EXPECT_EQ(Send(&f, MP_SAVE_BEGIN_EXPORT, 0), MP_SAVE_OK);
+    counter = gSaveCounter;
+    WaitPastDeadline();
+    EXPECT_EQ(gMultiplayerSaveMailbox.state, MP_SAVE_BOUND);
+    EXPECT_EQ(Send(&f, MP_SAVE_PROMOTE_EMERGENCY_EXPORT, 0), MP_SAVE_ORDER);
+    EXPECT_EQ(gSaveCounter, counter);
+    CheckHeld(MP_SAVE_EMERGENCY_UNSAVED);
+    WaitPastDeadline();
+    CheckHeld(MP_SAVE_EMERGENCY_UNSAVED);
+    EXPECT_EQ(Send(&f, MP_SAVE_READ_WINDOW, 0), MP_SAVE_ORDER);
+    TearDown(&f);
+}
+
+TEST("Multiplayer emergency: promotion cannot steal a foreign ordinary or trade export")
+{
+    struct EmergencyFixture f;
+    SetUp(&f);
+    EXPECT_EQ(Send(&f, MP_SAVE_BEGIN_EXPORT, 0), MP_SAVE_OK);
+    f.command.requestId[0]++;
+    EXPECT_EQ(Send(&f, MP_SAVE_PROMOTE_EMERGENCY_EXPORT, 0), MP_SAVE_SESSION);
+    f.command.requestId[0]--;
+    EXPECT_EQ(Send(&f, MP_SAVE_CANCEL, 0), MP_SAVE_CANCELED);
+    FieldCallbacks();
+    EXPECT_EQ(Send(&f, MP_SAVE_BEGIN_TRADE_EXPORT, 0), MP_SAVE_OK);
+    EXPECT_EQ(Send(&f, MP_SAVE_PROMOTE_EMERGENCY_EXPORT, 0), MP_SAVE_BUSY);
+    EXPECT_EQ(Send(&f, MP_SAVE_QUERY_EMERGENCY, 0), MP_SAVE_OK);
+    EXPECT_EQ(Word(gMultiplayerSaveMailbox.response.data), 0);
+    TearDown(&f);
+}

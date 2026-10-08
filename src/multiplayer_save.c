@@ -44,7 +44,7 @@ const u32 gMultiplayerTradeAbiVersion = 1;
 // Optional read-only 4096-byte export window in the existing sector buffer.
 const u32 gMultiplayerSaveWindowAbiVersion = 1;
 // Opt-in, immutable local preservation. This does not authorize a host commit.
-const u32 gMultiplayerEmergencySaveAbiVersion = 1;
+const u32 gMultiplayerEmergencySaveAbiVersion = 2;
 EWRAM_DATA volatile struct MultiplayerSaveMailbox gMultiplayerSaveMailbox = {0};
 static EWRAM_DATA struct MultiplayerSaveControl sLastCommand = {0};
 static EWRAM_DATA struct MultiplayerSaveControl sLastResponse = {0};
@@ -577,6 +577,7 @@ static void Handle(const struct MultiplayerSaveControl *command)
         return;
     }
     if (sEmergencyActive && command->opcode != MP_SAVE_BEGIN_EMERGENCY_EXPORT
+     && command->opcode != MP_SAVE_PROMOTE_EMERGENCY_EXPORT
      && command->opcode != MP_SAVE_READ && command->opcode != MP_SAVE_READ_WINDOW
      && command->opcode != MP_SAVE_PRESERVE_EMERGENCY)
     {
@@ -705,6 +706,27 @@ static void Handle(const struct MultiplayerSaveControl *command)
         sDeadline = sFrame + 600;
     switch (command->opcode)
     {
+    case MP_SAVE_PROMOTE_EMERGENCY_EXPORT:
+        if (command->length || command->offset || !command->revision || command->revision > 0x7FFFFFFF)
+            { status = MP_SAVE_MALFORMED; break; }
+        if (sTradeActive || (sState != MP_SAVE_EXPORTING && sState != MP_SAVE_BOUND))
+            { status = MP_SAVE_BUSY; break; }
+        if (sState == MP_SAVE_BOUND)
+        {
+            // A lost END or an expired ordinary watchdog cannot authorize a
+            // second snapshot under the old immutable transaction identity.
+            Hold(MP_SAVE_EMERGENCY_UNSAVED, command);
+            sEmergencyActive = TRUE; sEmergencyValid = FALSE;
+            sEmergencyStatus = MP_SAVE_ORDER; status = MP_SAVE_ORDER;
+            break;
+        }
+        // UUID/revision/binding were checked above. Rewind only the reader;
+        // retain this exact frozen Flash, ownership retirements and RNG.
+        sEmergencyActive = TRUE; sEmergencyValid = TRUE;
+        sEmergencyStatus = MP_SAVE_OK; sOffset = 0; sCrc = 0;
+        PutU32(data, gSaveCounter); PutU32(data + 4, gLastWrittenSector);
+        memcpy(data + 8, &gRngValue, 16); memcpy(data + 24, &gRng2Value, 16);
+        PublishResponse(command, MP_SAVE_OK, data, 40, 0); return;
     case MP_SAVE_BEGIN_EMERGENCY_EXPORT:
         if (sState != MP_SAVE_BOUND || sTradeActive) { status = MP_SAVE_BUSY; break; }
         if (command->length || command->offset || !command->revision || command->revision > 0x7FFFFFFF)
