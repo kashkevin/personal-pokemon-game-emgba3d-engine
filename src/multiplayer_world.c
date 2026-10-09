@@ -10,6 +10,7 @@
 #include "field_player_avatar.h"
 #include "fieldmap.h"
 #include "main.h"
+#include "map_name_popup.h"
 #include "malloc.h"
 #include "overworld.h"
 #include "palette.h"
@@ -32,7 +33,7 @@ _Static_assert(sizeof(struct MultiplayerWorldState) == 16, "World state ABI");
 _Static_assert(sizeof(struct MultiplayerWorldPeer) == 20, "World peer ABI");
 _Static_assert(sizeof(struct MultiplayerWorldEvent) == 32, "World event ABI");
 _Static_assert(sizeof(struct MultiplayerWorldAction) == 16, "World action ABI");
-_Static_assert(sizeof(struct MultiplayerWorldNotice) == 52, "World notice ABI");
+_Static_assert(sizeof(struct MultiplayerWorldNotice) == 68, "World notice ABI");
 _Static_assert(sizeof(struct MultiplayerWorldMailbox) == MP_WORLD_MAILBOX_BYTES, "World mailbox ABI");
 _Static_assert(offsetof(struct MultiplayerWorldMailbox, local) == 12, "World local offset");
 _Static_assert(offsetof(struct MultiplayerWorldMailbox, action) == 28, "World action offset");
@@ -49,8 +50,8 @@ _Static_assert(MP_WORLD_LOCAL_ID_EVENT < LOCALID_OW_ENCOUNTER_END - OWE_SPAWNS_M
 #define WORLD_DAY_ORIGIN 1000
 
 #define CLAIM_TIMEOUT_FRAMES 300
-#define NOTICE_FRAMES 240
-#define NOTICE_WINDOW_BASE_BLOCK 0x2A0
+#define NOTICE_FRAMES 360
+#define NOTICE_WINDOW_BASE_BLOCK 0x220
 
 EWRAM_DATA volatile struct MultiplayerWorldMailbox gMultiplayerWorldMailbox = {0};
 const u32 gMultiplayerWorldAbiVersion = MP_WORLD_ABI_VERSION;
@@ -85,8 +86,13 @@ static EWRAM_DATA u32 sClaimEventId = 0;
 static EWRAM_DATA u32 sBattlePersonality = 0;
 static EWRAM_DATA u16 sBattleSpecies = 0;
 static EWRAM_DATA struct MultiplayerWorldState sLocalMount = {0};
+static EWRAM_DATA bool8 sEventBattleActive = FALSE;
+static EWRAM_DATA u8 sEventResult = 0;
+static EWRAM_DATA u32 sPendingResultEventId = 0;
+static EWRAM_DATA u32 sHiddenEventId = 0; // caught here; hidden until the host drops it
 
 static void Task_WorldNotice(u8 taskId);
+static bool32 IsBattleOnlyForm(u16 species);
 
 // ---------------------------------------------------------------------------
 // Mailbox
@@ -107,6 +113,10 @@ void MultiplayerWorld_Init(void)
     sShownNoticeId = 0;
     sNoticeTaskId = TASK_NONE;
     sClaimEventId = 0;
+    sEventBattleActive = FALSE;
+    sEventResult = 0;
+    sPendingResultEventId = 0;
+    sHiddenEventId = 0;
     gMultiplayerWorldMailbox.abiVersion = MP_WORLD_ABI_VERSION;
     gMultiplayerWorldMailbox.byteSize = sizeof(gMultiplayerWorldMailbox);
     if (*(const volatile u32 *)&gMultiplayerWorldAbiVersion == MP_WORLD_ABI_VERSION)
@@ -498,13 +508,24 @@ static void UpdateFollower(u32 i)
 
 static bool32 EventVisibleHere(const struct MultiplayerWorldEvent *event)
 {
-    return event->eventId != 0 && (event->flags & MP_WORLD_EVENT_VISIBLE)
+    return event->eventId != 0 && event->eventId != sHiddenEventId && (event->flags & MP_WORLD_EVENT_VISIBLE)
         && event->species != SPECIES_NONE && event->species < NUM_SPECIES
         && event->mapGroup == gSaveBlock1Ptr->location.mapGroup
         && event->mapNum == gSaveBlock1Ptr->location.mapNum
         && event->x >= 0 && event->y >= 0
         && event->x < gMapHeader.mapLayout->width && event->y < gMapHeader.mapLayout->height
         && OnScreen(event->x + MAP_OFFSET, event->y + MAP_OFFSET);
+}
+
+// Megas added after Gen 6 have no overworld sprite yet: show the base form
+// (the banner, battle and capture still use the Mega).
+static u16 EventGraphicsSpecies(u16 species)
+{
+#if OW_POKEMON_OBJECT_EVENTS
+    if (IsBattleOnlyForm(species) && gSpeciesInfo[species].overworldData.tileTag == 0)
+        return MultiplayerWorld_GetBattleFormBase(species);
+#endif
+    return species;
 }
 
 static void UpdateEventObject(void)
@@ -520,7 +541,7 @@ static void UpdateEventObject(void)
         sEventObjectEventId = 0;
         return;
     }
-    graphicsId = GetGraphicsIdForMon(event->species, event->flags & MP_WORLD_EVENT_SHINY, FALSE);
+    graphicsId = GetGraphicsIdForMon(EventGraphicsSpecies(event->species), event->flags & MP_WORLD_EVENT_SHINY, FALSE);
     if (sEventObjectId < OBJECT_EVENTS_COUNT && MultiplayerWorld_IsEventObject(&gObjectEvents[sEventObjectId])
      && sEventObjectEventId == event->eventId && gObjectEvents[sEventObjectId].graphicsId == graphicsId)
         return;
@@ -531,16 +552,22 @@ static void UpdateEventObject(void)
     sEventObjectEventId = sEventObjectId < OBJECT_EVENTS_COUNT ? event->eventId : 0;
 }
 
-#define tTimer data[0]
+#define tTimer   data[0]
+#define tPosted  data[1]
 
+// Every special that is followed by `waitstate` in the event script must
+// re-enable the script from a task, never synchronously (waitstate stops the
+// script after the special returns).
 static void Task_WaitEventClaim(u8 taskId)
 {
     const struct MultiplayerWorldEvent *event = &sInbound.event;
     bool32 done = FALSE;
 
-    if (!sConnected || event->eventId != sClaimEventId || !(event->flags & MP_WORLD_EVENT_VISIBLE))
+    // VAR_RESULT: 1 granted, 0 another trainer is battling it, 2 unavailable.
+    if (!sConnected || !sHaveInbound || sClaimEventId == 0 || event->eventId != sClaimEventId
+     || !(event->flags & MP_WORLD_EVENT_VISIBLE))
     {
-        gSpecialVar_Result = 0;
+        gSpecialVar_Result = 2;
         done = TRUE;
     }
     else if (event->flags & MP_WORLD_EVENT_MINE)
@@ -548,47 +575,111 @@ static void Task_WaitEventClaim(u8 taskId)
         gSpecialVar_Result = 1;
         done = TRUE;
     }
-    else if ((event->flags & MP_WORLD_EVENT_BUSY) || ++gTasks[taskId].tTimer > CLAIM_TIMEOUT_FRAMES)
+    else if (event->flags & MP_WORLD_EVENT_BUSY)
     {
         gSpecialVar_Result = 0;
         done = TRUE;
     }
+    else if (!gTasks[taskId].tPosted)
+    {
+        // The previous action must be acknowledged before a new one is posted.
+        if (!ActionPending())
+        {
+            PostAction(MP_WORLD_ACTION_CLAIM, 0, event->eventId, event->species);
+            gTasks[taskId].tPosted = TRUE;
+        }
+        else if (++gTasks[taskId].tTimer > CLAIM_TIMEOUT_FRAMES)
+        {
+            gSpecialVar_Result = 2;
+            done = TRUE;
+        }
+    }
+    else if (++gTasks[taskId].tTimer > CLAIM_TIMEOUT_FRAMES)
+    {
+        gSpecialVar_Result = 2;
+        done = TRUE;
+    }
     if (done)
     {
+        if (gSpecialVar_Result != 1)
+            sClaimEventId = 0;
         DestroyTask(taskId);
         ScriptContext_Enable();
     }
 }
 
+static void Task_EnableScript(u8 taskId)
+{
+    DestroyTask(taskId);
+    ScriptContext_Enable();
+}
+
 #undef tTimer
+#undef tPosted
 
 void MultiplayerWorld_TryClaimEvent(void)
 {
     const struct MultiplayerWorldEvent *event = &sInbound.event;
+    u8 taskId;
 
-    gSpecialVar_Result = 0;
+    gSpecialVar_Result = 2;
     sClaimEventId = 0;
-    if (!sConnected || !sHaveInbound || event->eventId == 0 || !(event->flags & MP_WORLD_EVENT_VISIBLE)
-     || (event->flags & MP_WORLD_EVENT_BUSY))
-        return;
-    if (event->flags & MP_WORLD_EVENT_MINE)
-    {
+    if (sConnected && sHaveInbound && event->eventId != 0 && event->eventId != sHiddenEventId
+     && (event->flags & MP_WORLD_EVENT_VISIBLE) && !(event->flags & MP_WORLD_EVENT_BUSY))
         sClaimEventId = event->eventId;
-        gSpecialVar_Result = 1;
-        return;
+    taskId = CreateTask(Task_WaitEventClaim, 80);
+    if (taskId == TASK_NONE)
+    {
+        sClaimEventId = 0;
+        CreateTask(Task_EnableScript, 80);
     }
-    if (ActionPending())
-        return;
-    sClaimEventId = event->eventId;
-    PostAction(MP_WORLD_ACTION_CLAIM, 0, event->eventId, event->species);
-    CreateTask(Task_WaitEventClaim, 80);
-    ScriptContext_Stop();
+    else
+    {
+        gTasks[taskId].data[0] = 0;
+        // Already granted (e.g. after a cancelled message): no new action.
+        gTasks[taskId].data[1] = (event->flags & MP_WORLD_EVENT_MINE) ? TRUE : FALSE;
+    }
 }
 
 static bool32 IsLegendaryEventSpecies(u16 species)
 {
     return gSpeciesInfo[species].isRestrictedLegendary || gSpeciesInfo[species].isSubLegendary
-        || gSpeciesInfo[species].isMythical || gSpeciesInfo[species].isMegaEvolution;
+        || gSpeciesInfo[species].isMythical || gSpeciesInfo[species].isMegaEvolution
+        || gSpeciesInfo[species].isPrimalReversion;
+}
+
+static bool32 IsBattleOnlyForm(u16 species)
+{
+    return species != SPECIES_NONE && species < NUM_SPECIES
+        && (gSpeciesInfo[species].isMegaEvolution || gSpeciesInfo[species].isPrimalReversion);
+}
+
+// The species whose form-change table turns into this Mega/Primal form
+// (Floette-Eternal for Mega Floette, Meowstic-F for Mega Meowstic-F, ...).
+u16 MultiplayerWorld_GetBattleFormBase(u16 species)
+{
+    const u16 *forms;
+    u32 i, j;
+
+    if (!IsBattleOnlyForm(species))
+        return species;
+    forms = gSpeciesInfo[species].formSpeciesIdTable;
+    for (i = 0; forms != NULL && forms[i] != FORM_SPECIES_END; i++)
+    {
+        const struct FormChange *changes;
+        if (forms[i] == species || forms[i] >= NUM_SPECIES)
+            continue;
+        changes = GetSpeciesFormChanges(forms[i]);
+        for (j = 0; changes != NULL && changes[j].method != FORM_CHANGE_TERMINATOR; j++)
+        {
+            if ((changes[j].method == FORM_CHANGE_BATTLE_MEGA_EVOLUTION_ITEM
+              || changes[j].method == FORM_CHANGE_BATTLE_MEGA_EVOLUTION_MOVE
+              || changes[j].method == FORM_CHANGE_BATTLE_PRIMAL_REVERSION)
+             && changes[j].targetSpecies == species)
+                return forms[i];
+        }
+    }
+    return GetFormSpeciesId(species, 0);
 }
 
 void MultiplayerWorld_StartEventBattle(void)
@@ -600,9 +691,13 @@ void MultiplayerWorld_StartEventBattle(void)
     u16 heldItem = event->heldItem;
     u8 ivStat[NUM_STATS];
 
-    if (event->eventId == 0 || event->eventId != sClaimEventId || event->species == SPECIES_NONE)
+    sEventBattleActive = FALSE;
+    if (!sConnected || event->eventId == 0 || event->eventId != sClaimEventId
+     || event->species == SPECIES_NONE || event->species >= NUM_SPECIES)
     {
-        ScriptContext_Enable();
+        sClaimEventId = 0;
+        gSpecialVar_Result = 0;
+        CreateTask(Task_EnableScript, 80);
         return;
     }
     if (level < MIN_LEVEL)
@@ -634,18 +729,40 @@ void MultiplayerWorld_StartEventBattle(void)
     GiveMonInitialMoveset(mon);
     sBattlePersonality = GetMonData(mon, MON_DATA_PERSONALITY);
     sBattleSpecies = event->species;
+    sEventResult = 0;
+    sEventBattleActive = TRUE;
+    gSpecialVar_Result = 1;
     if (IsLegendaryEventSpecies(event->species))
         BattleSetup_StartLegendaryBattle();
     else
         BattleSetup_StartScriptedWildBattle();
 }
 
-static void RevertCaughtMega(void)
+// Called at the end of BattleStartClearSetData: a World Event Mega/Primal
+// battler did not evolve during this battle, so record its original form
+// exactly as the engine does for a Mega Evolution. Catching or fainting it
+// then reverts it through the engine's own END_BATTLE/FAINT form changes.
+void MultiplayerWorld_PrepareEventBattle(void)
+{
+    struct Pokemon *mon = &gParties[B_TRAINER_OPPONENT_A][0];
+    u16 base;
+
+    if (!sEventBattleActive || !IsBattleOnlyForm(sBattleSpecies)
+     || GetMonData(mon, MON_DATA_SPECIES) != sBattleSpecies
+     || GetMonData(mon, MON_DATA_PERSONALITY) != sBattlePersonality)
+        return;
+    base = MultiplayerWorld_GetBattleFormBase(sBattleSpecies);
+    if (base != SPECIES_NONE && base != sBattleSpecies)
+        gBattleStruct->partyState[B_TRAINER_OPPONENT_A][0].changedSpecies = base;
+}
+
+// Safety net: a caught battle-only form is stored as its base form.
+static void RevertCaughtBattleForm(void)
 {
     u32 i, box, pos;
-    u16 base = GetFormSpeciesId(sBattleSpecies, 0);
+    u16 base = MultiplayerWorld_GetBattleFormBase(sBattleSpecies);
 
-    if (!gSpeciesInfo[sBattleSpecies].isMegaEvolution || base == SPECIES_NONE || base == sBattleSpecies)
+    if (!IsBattleOnlyForm(sBattleSpecies) || base == SPECIES_NONE || base == sBattleSpecies)
         return;
     for (i = 0; i < PARTY_SIZE; i++)
     {
@@ -671,15 +788,21 @@ static void RevertCaughtMega(void)
     }
 }
 
-void MultiplayerWorld_ReportEventResult(void)
+// CB2_EndScriptedWildBattle runs for every scripted wild battle, including a
+// whiteout that never returns to the event script.
+void MultiplayerWorld_OnScriptedBattleEnd(void)
 {
     u8 result;
 
+    if (!sEventBattleActive)
+        return;
+    sEventBattleActive = FALSE;
     switch (gBattleOutcome)
     {
     case B_OUTCOME_CAUGHT:
         result = MP_WORLD_RESULT_CAUGHT;
-        RevertCaughtMega();
+        RevertCaughtBattleForm();
+        sHiddenEventId = sClaimEventId;
         break;
     case B_OUTCOME_WON:
         result = MP_WORLD_RESULT_DEFEATED;
@@ -693,10 +816,25 @@ void MultiplayerWorld_ReportEventResult(void)
         result = MP_WORLD_RESULT_RAN;
         break;
     }
+    sEventResult = result;
     if (sClaimEventId != 0)
-        PostAction(MP_WORLD_ACTION_RESULT, result, sClaimEventId, sBattleSpecies);
-    gSpecialVar_Result = result;
+        sPendingResultEventId = sClaimEventId;
     sClaimEventId = 0;
+}
+
+void MultiplayerWorld_ReportEventResult(void)
+{
+    gSpecialVar_Result = sEventResult;
+}
+
+// Results are posted from the field tick so a pending, unacknowledged claim
+// never loses the result (the mailbox has one action slot).
+static void FlushPendingResult(void)
+{
+    if (sPendingResultEventId == 0 || ActionPending())
+        return;
+    PostAction(MP_WORLD_ACTION_RESULT, sEventResult, sPendingResultEventId, sBattleSpecies);
+    sPendingResultEventId = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -714,17 +852,19 @@ static const u8 sAsciiToGame[96] =
     0xCA, 0xCB, 0xCC, 0xCD, 0xCE, 0xCF, 0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0x00, 0x00, 0x00, 0x00, 0xAE,
     // '`' 'a' ... 'o'
     0x00, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA, 0xDB, 0xDC, 0xDD, 0xDE, 0xDF, 0xE0, 0xE1, 0xE2, 0xE3,
-    // 'p' ... '~'
-    0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0xEA, 0xEB, 0xEC, 0xED, 0xEE, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // 'p' ... '~' ('|' is the line break)
+    0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0xEA, 0xEB, 0xEC, 0xED, 0xEE, 0x00, CHAR_NEWLINE, 0x00, 0x00, 0x00,
 };
 
 static void ConvertNotice(u8 *dest, const u8 *ascii)
 {
-    u32 i;
+    u32 i, lines = 1;
     for (i = 0; i < MP_WORLD_NOTICE_CHARS && ascii[i] != 0; i++)
     {
         u8 c = ascii[i];
         dest[i] = (c >= 32 && c < 128) ? sAsciiToGame[c - 32] : 0x00;
+        if (dest[i] == CHAR_NEWLINE && ++lines > 2)
+            dest[i] = 0x00; // at most two lines fit the banner
     }
     dest[i] = EOS;
 }
@@ -747,11 +887,12 @@ static void CloseNotice(u8 taskId)
 
 static void Task_WorldNotice(u8 taskId)
 {
-    if (++gTasks[taskId].tTimer > NOTICE_FRAMES || gMain.callback2 != CB2_Overworld)
+    // The map-name pop-up slides BG0; never share the screen top with it.
+    if (++gTasks[taskId].tTimer > NOTICE_FRAMES || gMain.callback2 != CB2_Overworld || IsMapNamePopupShowing())
         CloseNotice(taskId);
 }
 
-static void ShowNotice(const u8 *ascii)
+static bool32 ShowNotice(const u8 *ascii)
 {
     u8 text[MP_WORLD_NOTICE_CHARS + 1];
     u8 windowId;
@@ -759,22 +900,32 @@ static void ShowNotice(const u8 *ascii)
     if (sNoticeTaskId != TASK_NONE && FuncIsActiveTask(Task_WorldNotice))
         CloseNotice(sNoticeTaskId);
     {
+        // BG0 tiles 0x220-0x297: above the dialogue frame tiles (0x200-0x21C)
+        // and below the end of BG0's character area (0x300).
         struct WindowTemplate template = {
-            .bg = 0, .tilemapLeft = 0, .tilemapTop = 0, .width = 30, .height = 2,
+            .bg = 0, .tilemapLeft = 0, .tilemapTop = 0, .width = 30, .height = 4,
             .paletteNum = 15, .baseBlock = NOTICE_WINDOW_BASE_BLOCK,
         };
         windowId = AddWindow(&template);
     }
     if (windowId == WINDOW_NONE)
-        return;
+        return FALSE;
     ConvertNotice(text, ascii);
     FillWindowPixelBuffer(windowId, PIXEL_FILL(1));
     AddTextPrinterParameterized(windowId, FONT_SMALL, text, 4, 1, TEXT_SKIP_DRAW, NULL);
     PutWindowTilemap(windowId);
     CopyWindowToVram(windowId, COPYWIN_FULL);
     sNoticeTaskId = CreateTask(Task_WorldNotice, 90);
+    if (sNoticeTaskId == TASK_NONE)
+    {
+        ClearWindowTilemap(windowId);
+        CopyWindowToVram(windowId, COPYWIN_MAP);
+        RemoveWindow(windowId);
+        return FALSE;
+    }
     gTasks[sNoticeTaskId].tTimer = 0;
     gTasks[sNoticeTaskId].tWindow = windowId;
+    return TRUE;
 }
 
 #undef tTimer
@@ -785,12 +936,13 @@ static void UpdateNotice(bool32 fieldReady)
     u8 text[MP_WORLD_NOTICE_CHARS + 1];
     if (!sHaveInbound || sInbound.notice.noticeId == 0 || sInbound.notice.noticeId == sShownNoticeId)
         return;
-    if (!fieldReady)
+    // Wait for a calm overworld: no script, no menu and no map-name pop-up.
+    if (!fieldReady || IsMapNamePopupShowing() || ArePlayerFieldControlsLocked())
         return;
     memcpy(text, sInbound.notice.text, MP_WORLD_NOTICE_CHARS);
     text[MP_WORLD_NOTICE_CHARS] = 0;
-    sShownNoticeId = sInbound.notice.noticeId;
-    ShowNotice(text);
+    if (ShowNotice(text))
+        sShownNoticeId = sInbound.notice.noticeId;
 }
 
 // ---------------------------------------------------------------------------
@@ -818,6 +970,10 @@ void MultiplayerWorld_Tick(bool32 fieldReady, bool32 connected)
         memset(&sInbound, 0, sizeof(sInbound));
     }
     PublishLocalState();
+    if (connected)
+        FlushPendingResult();
+    if (sHiddenEventId != 0 && sHaveInbound && sInbound.event.eventId != sHiddenEventId)
+        sHiddenEventId = 0;
     if (!fieldReady || !connected)
     {
         MultiplayerWorld_LeaveField();

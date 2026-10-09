@@ -7,6 +7,7 @@
 #include "battle_pike.h"
 #include "battle_pyramid.h"
 #include "battle_setup.h"
+#include "multiplayer_world.h"
 #include "battle_special.h"
 #include "battle_partner.h"
 #include "battle_tower.h"
@@ -720,6 +721,7 @@ static void CB2_EndWildBattle(void)
 
 static void CB2_EndScriptedWildBattle(void)
 {
+    MultiplayerWorld_OnScriptedBattleEnd();
     if (MultiplayerLocalReset_WasAccepted())
     {
         // The explicit hunt script consumes its reset result before any

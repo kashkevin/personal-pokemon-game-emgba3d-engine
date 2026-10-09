@@ -7,6 +7,7 @@
 
 // Exported ROM declarations
 void HideMapNamePopUpWindow(void);
+bool32 IsMapNamePopupShowing(void);
 void ShowMapNamePopup(void);
 u8 *GetPopUpMapName(u8 *dest, const struct MapHeader *mapHeader);
 

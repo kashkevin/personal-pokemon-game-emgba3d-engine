@@ -19,7 +19,7 @@
 #define MP_WORLD_MAILBOX_BYTES      256
 #define MP_WORLD_MAX_PEERS          3
 #define MP_WORLD_APPEARANCE_BYTES   8
-#define MP_WORLD_NOTICE_CHARS       48
+#define MP_WORLD_NOTICE_CHARS       64 // two lines split by '|'
 
 // Local object IDs. 241-243 are remote avatars (multiplayer.c), 249-252 are
 // generated wild encounters, 254 the local follower and 255 the player.
@@ -99,7 +99,7 @@ struct MultiplayerWorldAction
 struct MultiplayerWorldNotice
 {
     u32 noticeId; // a changed id shows the text once
-    u8 text[MP_WORLD_NOTICE_CHARS]; // printable ASCII, NUL padded
+    u8 text[MP_WORLD_NOTICE_CHARS]; // printable ASCII, NUL padded; '|' breaks the line
 };
 
 struct MultiplayerWorldMailbox
@@ -120,7 +120,7 @@ struct MultiplayerWorldMailbox
     struct MultiplayerWorldPeer peers[MP_WORLD_MAX_PEERS];
     struct MultiplayerWorldEvent event;
     struct MultiplayerWorldNotice notice;
-    u8 reserved[44];
+    u8 reserved[28];
 };
 
 extern volatile struct MultiplayerWorldMailbox gMultiplayerWorldMailbox;
@@ -144,5 +144,12 @@ void MultiplayerWorld_SetLocalMount(u16 species, u8 flags, bool32 riding);
 void MultiplayerWorld_TryClaimEvent(void);
 void MultiplayerWorld_StartEventBattle(void);
 void MultiplayerWorld_ReportEventResult(void);
+
+// Battle hooks: a World Event Mega/Primal starts in its battle form and must
+// revert like a Mega Evolved battler; the result is reported from the one
+// exit every scripted wild battle shares (also on a whiteout).
+void MultiplayerWorld_PrepareEventBattle(void);
+void MultiplayerWorld_OnScriptedBattleEnd(void);
+u16 MultiplayerWorld_GetBattleFormBase(u16 species);
 
 #endif // GUARD_MULTIPLAYER_WORLD_H
