@@ -17,6 +17,8 @@ EventScript_Follower::
 	getfolloweraction
 EventScript_FollowerEnd::
 	waitfieldeffect FLDEFF_EMOTE
+	special MultiplayerRide_CanRideFollower
+	goto_if_eq VAR_RESULT, TRUE, EventScript_FollowerOfferRide
 	release
 	end
 

@@ -9,6 +9,7 @@
 #include "field_effect_helpers.h"
 #include "field_screen_effect.h"
 #include "field_player_avatar.h"
+#include "multiplayer_ride.h"
 #include "fieldmap.h"
 #include "follower_npc.h"
 #include "menu.h"
@@ -892,6 +893,13 @@ static void PlayerNotOnBikeMoving(enum Direction direction, u16 heldKeys)
 
     ResetSpinTimer(); // Everything below will move the player a space, reset the timer.
     gPlayerAvatar.creeping = FALSE;
+    if (MultiplayerRide_IsRiding())
+    {
+        // Every mount keeps the same standard pace: the running speed,
+        // without holding B (owner rule: mounts are a personal choice).
+        PlayerWalkFast(direction);
+        return;
+    }
     if (gPlayerAvatar.flags & PLAYER_AVATAR_FLAG_SURFING)
     {
         if (FlagGet(DN_FLAG_SEARCHING) && (heldKeys & A_BUTTON))
@@ -1242,6 +1250,7 @@ enum CopyMovement PlayerGetCopyableMovement(void)
 static void PlayerForceSetHeldMovement(u8 movementActionId)
 {
     ObjectEventForceSetHeldMovement(&gObjectEvents[gPlayerAvatar.objectEventId], movementActionId);
+    MultiplayerRide_MirrorPlayerMovement(movementActionId);
 }
 
 void PlayerSetAnimId(u8 movementActionId, enum CopyMovement copyableMovement)
@@ -1250,6 +1259,8 @@ void PlayerSetAnimId(u8 movementActionId, enum CopyMovement copyableMovement)
     {
         PlayerSetCopyableMovement(copyableMovement);
         ObjectEventSetHeldMovement(&gObjectEvents[gPlayerAvatar.objectEventId], movementActionId);
+        // A ridden Pokemon takes exactly the same step in the same frame.
+        MultiplayerRide_MirrorPlayerMovement(movementActionId);
     }
 }
 

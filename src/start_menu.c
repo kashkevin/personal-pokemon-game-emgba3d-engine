@@ -38,6 +38,8 @@
 #include "script.h"
 #include "sound.h"
 #include "start_menu.h"
+#include "multiplayer_ride.h"
+#include "multiplayer_appearance.h"
 #include "strings.h"
 #include "string_util.h"
 #include "task.h"
@@ -74,6 +76,9 @@ enum
     MENU_ACTION_TRAINER_CARD,
     MENU_ACTION_PLAYERS,
     MENU_ACTION_PLAYER_BACK,
+    MENU_ACTION_RIDE,
+    MENU_ACTION_GET_OFF,
+    MENU_ACTION_STYLE,
 };
 
 // Save status
@@ -121,6 +126,8 @@ static bool8 StartMenuDexNavCallback(void);
 static bool8 StartMenuPlayerOptionsCallback(void);
 static bool8 StartMenuPlayersCallback(void);
 static bool8 StartMenuPlayerBackCallback(void);
+static bool8 StartMenuRideCallback(void);
+static bool8 StartMenuStyleCallback(void);
 
 // Menu callbacks
 static bool8 SaveStartCallback(void);
@@ -201,6 +208,9 @@ static const u8 sText_MenuDebug[] = _("DEBUG");
 static const u8 sText_TrainerCard[] = _("CARD");
 static const u8 sText_Players[] = _("PLAYERS");
 static const u8 sText_PlayerBack[] = _("BACK");
+static const u8 sText_Ride[] = _("RIDE");
+static const u8 sText_GetOff[] = _("GET OFF");
+static const u8 sText_Style[] = _("STYLE");
 
 static const struct MenuAction sStartMenuItems[] =
 {
@@ -223,6 +233,9 @@ static const struct MenuAction sStartMenuItems[] =
     [MENU_ACTION_TRAINER_CARD]    = {sText_TrainerCard, {.u8_void = StartMenuPlayerNameCallback}},
     [MENU_ACTION_PLAYERS]         = {sText_Players, {.u8_void = StartMenuPlayersCallback}},
     [MENU_ACTION_PLAYER_BACK]     = {sText_PlayerBack, {.u8_void = StartMenuPlayerBackCallback}},
+    [MENU_ACTION_RIDE]            = {sText_Ride, {.u8_void = StartMenuRideCallback}},
+    [MENU_ACTION_GET_OFF]         = {sText_GetOff, {.u8_void = StartMenuRideCallback}},
+    [MENU_ACTION_STYLE]           = {sText_Style, {.u8_void = StartMenuStyleCallback}},
 };
 
 static const struct BgTemplate sBgTemplates_LinkBattleSave[] =
@@ -305,6 +318,11 @@ static void BuildStartMenuActions(void)
     {
         AddStartMenuAction(MENU_ACTION_TRAINER_CARD);
         AddStartMenuAction(MENU_ACTION_PLAYERS);
+        AddStartMenuAction(MENU_ACTION_STYLE);
+        if (MultiplayerRide_IsRiding())
+            AddStartMenuAction(MENU_ACTION_GET_OFF);
+        else if (MultiplayerRide_CanMount())
+            AddStartMenuAction(MENU_ACTION_RIDE);
         AddStartMenuAction(MENU_ACTION_PLAYER_BACK);
         return;
     }
@@ -815,6 +833,22 @@ static bool8 StartMenuPlayersCallback(void)
     // No native tick runs between releasing the Start menu and claiming this
     // overlay. Open refuses unbound/offline/unsafe state without sending input.
     MultiplayerMenu_Open();
+    return TRUE;
+}
+
+static bool8 StartMenuRideCallback(void)
+{
+    sPlayerSubmenu = FALSE; sStartMenuCursorPos = sPlayerReturnCursor;
+    RemoveExtraStartMenuWindows(); HideStartMenu();
+    MultiplayerRide_StartFromMenu();
+    return TRUE;
+}
+
+static bool8 StartMenuStyleCallback(void)
+{
+    sPlayerSubmenu = FALSE; sStartMenuCursorPos = sPlayerReturnCursor;
+    RemoveExtraStartMenuWindows(); HideStartMenu();
+    MultiplayerAppearance_OpenEditor();
     return TRUE;
 }
 

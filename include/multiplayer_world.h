@@ -46,6 +46,7 @@
 #define MP_WORLD_ACTION_CLAIM       1
 #define MP_WORLD_ACTION_RESULT      2
 #define MP_WORLD_ACTION_RELEASE     3
+#define MP_WORLD_ACTION_APPEARANCE  4 // the local state carries a newly saved look
 
 #define MP_WORLD_RESULT_CAUGHT      1
 #define MP_WORLD_RESULT_DEFEATED    2
@@ -136,9 +137,14 @@ const u8 *MultiplayerWorld_GetSelfAppearance(void);
 const u8 *MultiplayerWorld_GetPeerAppearance(u32 playerId);
 void MultiplayerWorld_GetPeerMount(u32 playerId, u16 *species, u8 *flags, u8 *state);
 bool32 MultiplayerWorld_IsEventObject(const struct ObjectEvent *objectEvent);
+bool32 MultiplayerWorld_GetRemoteRider(const struct ObjectEvent *avatar, u8 *lift, struct ObjectEvent **mount);
 
 // Riding (field_player_avatar.c owns the local mount behaviour).
 void MultiplayerWorld_SetLocalMount(u16 species, u8 flags, bool32 riding);
+
+// Appearance editor support (multiplayer_appearance.c).
+bool32 MultiplayerWorld_PostAppearanceSaved(void);
+bool32 MultiplayerWorld_ShowLocalNotice(const char *ascii);
 
 // Script specials for the world event object.
 void MultiplayerWorld_TryClaimEvent(void);

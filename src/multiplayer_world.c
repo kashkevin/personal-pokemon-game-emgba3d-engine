@@ -2,6 +2,8 @@
 #include <stddef.h>
 #include "multiplayer.h"
 #include "multiplayer_world.h"
+#include "multiplayer_ride.h"
+#include "multiplayer_appearance.h"
 #include "battle.h"
 #include "battle_setup.h"
 #include "event_data.h"
@@ -164,8 +166,13 @@ static void PublishLocalState(void)
     state.mountState = sLocalMount.mountState;
     state.mountSpecies = sLocalMount.mountSpecies;
     state.mountFlags = sLocalMount.mountFlags;
-    for (i = 0; i < MP_WORLD_APPEARANCE_BYTES; i++)
-        state.appearance[i] = sInbound.selfAppearance[i];
+    {
+        // The look this player uses: the host's, or a newly saved one the
+        // host has not confirmed yet (MP_WORLD_ACTION_APPEARANCE).
+        const u8 *look = MultiplayerAppearance_GetPublished();
+        for (i = 0; i < MP_WORLD_APPEARANCE_BYTES; i++)
+            state.appearance[i] = look[i];
+    }
 
     gMultiplayerWorldMailbox.localGeneration = generation;
     *(struct MultiplayerWorldState *)&gMultiplayerWorldMailbox.local = state;
@@ -193,6 +200,14 @@ static void PostAction(u8 kind, u8 result, u32 eventId, u16 species)
     gMultiplayerWorldMailbox.localGeneration = generation;
     *(struct MultiplayerWorldAction *)&gMultiplayerWorldMailbox.action = action;
     gMultiplayerWorldMailbox.localGeneration = generation + 1;
+}
+
+bool32 MultiplayerWorld_PostAppearanceSaved(void)
+{
+    if (!sConnected || !sHaveInbound || ActionPending())
+        return FALSE;
+    PostAction(MP_WORLD_ACTION_APPEARANCE, 0, 0, 0);
+    return TRUE;
 }
 
 // ---------------------------------------------------------------------------
@@ -265,6 +280,26 @@ bool32 MultiplayerWorld_IsRemoteFollower(const struct ObjectEvent *objectEvent)
             return TRUE;
     }
     return FALSE;
+}
+
+// A remote avatar that is riding: its lift and the mount object drawn under it.
+bool32 MultiplayerWorld_GetRemoteRider(const struct ObjectEvent *avatar, u8 *lift, struct ObjectEvent **mount)
+{
+    const struct MultiplayerWorldPeer *peer;
+    u32 i, id;
+
+    if (avatar->localId < MULTIPLAYER_LOCAL_ID_BASE || avatar->localId >= MULTIPLAYER_LOCAL_ID_BASE + MP_WORLD_MAX_PEERS
+     || !Multiplayer_IsRemoteObject(avatar))
+        return FALSE;
+    i = avatar->localId - MULTIPLAYER_LOCAL_ID_BASE;
+    peer = FindPeer(Multiplayer_GetRemotePlayerId(i));
+    id = sFollowers[i].objectEventId;
+    if (peer == NULL || peer->state.mountState != MP_WORLD_MOUNT_RIDING || id >= OBJECT_EVENTS_COUNT
+     || !MultiplayerWorld_IsRemoteFollower(&gObjectEvents[id]))
+        return FALSE;
+    *mount = &gObjectEvents[id];
+    *lift = MultiplayerRide_GetLiftForMount(gObjectEvents[id].graphicsId);
+    return TRUE;
 }
 
 bool32 MultiplayerWorld_IsEventObject(const struct ObjectEvent *objectEvent)
@@ -360,9 +395,10 @@ static void StepToward(struct ObjectEvent *objectEvent, s16 x, s16 y, u8 movemen
         return;
     }
     direction = dx > 0 ? DIR_EAST : dx < 0 ? DIR_WEST : dy > 0 ? DIR_SOUTH : DIR_NORTH;
-    if (movementMode == PLAYER_AVATAR_STATE_MACH_BIKE || movementMode == PLAYER_AVATAR_STATE_ACRO_BIKE)
-        ObjectEventSetHeldMovement(objectEvent, GetWalkFasterMovementAction(direction));
-    else if (movementMode == MULTIPLAYER_MOVEMENT_RUN || abs(dx) + abs(dy) > 1)
+    // Pokemon objects use their "faster" animation slots for Poke Ball
+    // effects, so bikes are followed at the fast pace (teleport when far).
+    if (movementMode == PLAYER_AVATAR_STATE_MACH_BIKE || movementMode == PLAYER_AVATAR_STATE_ACRO_BIKE
+     || movementMode == MULTIPLAYER_MOVEMENT_RUN || abs(dx) + abs(dy) > 1)
         ObjectEventSetHeldMovement(objectEvent, GetWalkFastMovementAction(direction));
     else
         ObjectEventSetHeldMovement(objectEvent, GetWalkNormalMovementAction(direction));
@@ -463,19 +499,33 @@ static void UpdateFollower(u32 i)
     }
     follower->currentElevation = avatar->currentElevation;
     follower->previousElevation = avatar->currentElevation;
-    // A mount is drawn beneath its rider, who sits raised on its back.
+    // A mount is drawn beneath its rider, who sits raised on its back; the
+    // lift and draw order are applied by the ride hooks every frame.
     if (mounted)
     {
-        const struct ObjectEventGraphicsInfo *info = GetObjectEventGraphicsInfo(graphicsId);
         follower->fixedPriority = TRUE;
-        gSprites[follower->spriteId].subpriority = gSprites[avatar->spriteId].subpriority + 1;
-        gSprites[avatar->spriteId].y2 = -(info->height >= 64 ? 14 : info->height >= 32 ? 7 : 4);
+        // Move in lockstep: start the rider's current step on the mount in the
+        // same frame, so neither sprite trails the other.
+        if (avatar->heldMovementActive && !avatar->heldMovementFinished)
+        {
+            if (!(follower->heldMovementActive && !follower->heldMovementFinished)
+             || follower->movementActionId != avatar->movementActionId)
+            {
+                ObjectEventForceSetHeldMovement(follower, avatar->movementActionId);
+            }
+            return;
+        }
+        ObjectEventClearHeldMovementIfFinished(follower);
+        if (!(follower->heldMovementActive && !follower->heldMovementFinished))
+        {
+            if (follower->currentCoords.x != avatar->currentCoords.x || follower->currentCoords.y != avatar->currentCoords.y)
+                MoveObjectEventToMapCoords(follower, avatar->currentCoords.x, avatar->currentCoords.y);
+            if (follower->facingDirection != avatar->facingDirection)
+                ObjectEventTurn(follower, avatar->facingDirection);
+        }
+        return;
     }
-    else
-    {
-        follower->fixedPriority = FALSE;
-        gSprites[avatar->spriteId].y2 = 0;
-    }
+    follower->fixedPriority = FALSE;
 
     if (ObjectEventClearHeldMovementIfFinished(follower) == TRUE)
         MoveObjectEventToMapCoords(follower, follower->currentCoords.x, follower->currentCoords.y);
@@ -931,6 +981,15 @@ static bool32 ShowNotice(const u8 *ascii)
 #undef tTimer
 #undef tWindow
 
+// A banner from this ROM itself (hints), shown like a host notice.
+bool32 MultiplayerWorld_ShowLocalNotice(const char *ascii)
+{
+    if (gMain.callback2 != CB2_Overworld || IsMapNamePopupShowing() || ArePlayerFieldControlsLocked()
+     || (sNoticeTaskId != TASK_NONE && FuncIsActiveTask(Task_WorldNotice)))
+        return FALSE;
+    return ShowNotice((const u8 *)ascii);
+}
+
 static void UpdateNotice(bool32 fieldReady)
 {
     u8 text[MP_WORLD_NOTICE_CHARS + 1];
@@ -974,9 +1033,18 @@ void MultiplayerWorld_Tick(bool32 fieldReady, bool32 connected)
         FlushPendingResult();
     if (sHiddenEventId != 0 && sHaveInbound && sInbound.event.eventId != sHiddenEventId)
         sHiddenEventId = 0;
-    if (!fieldReady || !connected)
+    if (!connected || gMain.callback2 != CB2_Overworld)
     {
         MultiplayerWorld_LeaveField();
+        return;
+    }
+    if (!fieldReady)
+    {
+        // A script or menu runs on the overworld: remote avatars are hidden by
+        // the presence layer, so their Pokemon go too, but the World Event
+        // Pokemon the player may be talking to stays where it is.
+        for (i = 0; i < MP_WORLD_MAX_PEERS; i++)
+            RemoveFollower(i);
         return;
     }
     for (i = 0; i < MP_WORLD_MAX_PEERS; i++)

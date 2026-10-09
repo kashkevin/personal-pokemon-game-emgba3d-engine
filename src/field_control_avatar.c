@@ -12,6 +12,7 @@
 #include "event_scripts.h"
 #include "fieldmap.h"
 #include "field_control_avatar.h"
+#include "multiplayer_ride.h"
 #include "field_message_box.h"
 #include "field_move.h"
 #include "field_effect.h"
@@ -238,6 +239,9 @@ int ProcessPlayerFieldInput(struct FieldInput *input)
         return TRUE;
 
     if (input->pressedRButton && TryStartDexNavSearch())
+        return TRUE;
+
+    if (input->pressedRButton && MultiplayerRide_TryToggleFromField())
         return TRUE;
 
     if (input->input_field_1_2 && DEBUG_OVERWORLD_MENU && !DEBUG_OVERWORLD_IN_MENU)

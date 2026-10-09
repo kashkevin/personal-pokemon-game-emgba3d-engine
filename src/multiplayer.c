@@ -2,6 +2,8 @@
 #include <stddef.h>
 #include "multiplayer.h"
 #include "multiplayer_world.h"
+#include "multiplayer_ride.h"
+#include "multiplayer_appearance.h"
 #include "multiplayer_save.h"
 #include "multiplayer_battle.h"
 #include "multiplayer_menu.h"
@@ -358,7 +360,7 @@ static void UpdateRemote(u32 i)
     u32 id = sRemotes[i].objectEventId;
     u16 graphicsId;
     s16 x, y, dx, dy;
-    bool32 completed;
+    bool32 completed, mounted = FALSE;
     enum Direction direction;
     if (sRemotes[i].peer.playerId == 0 || !PeerVisible(pose))
     {
@@ -372,8 +374,10 @@ static void UpdateRemote(u32 i)
         u16 mountSpecies;
         u8 mountFlags, mountState;
         MultiplayerWorld_GetPeerMount(sRemotes[i].peer.playerId, &mountSpecies, &mountFlags, &mountState);
-        if (mountState == MP_WORLD_MOUNT_RIDING && pose->movementMode != PLAYER_AVATAR_STATE_SURFING
-         && pose->movementMode != PLAYER_AVATAR_STATE_UNDERWATER)
+        // A rider sits like a surfer on the mount drawn beneath (multiplayer_world.c).
+        mounted = mountState == MP_WORLD_MOUNT_RIDING && pose->movementMode != PLAYER_AVATAR_STATE_SURFING
+               && pose->movementMode != PLAYER_AVATAR_STATE_UNDERWATER;
+        if (mounted)
             graphicsId = GetPlayerAvatarGraphicsIdByStateIdAndGender(PLAYER_AVATAR_STATE_SURFING, pose->gender);
         else
             graphicsId = GetPlayerAvatarGraphicsIdByStateIdAndGender(
@@ -439,8 +443,10 @@ static void UpdateRemote(u32 i)
     else if (dx != 0 || dy != 0)
     {
         direction = dx > 0 ? DIR_EAST : dx < 0 ? DIR_WEST : dy > 0 ? DIR_SOUTH : DIR_NORTH;
-        sRemotes[i].moving = !ObjectEventSetHeldMovement(objectEvent, pose->movementMode == MULTIPLAYER_MOVEMENT_RUN
-            ? GetPlayerRunMovementAction(direction)
+        // Riders always move at the standard riding pace; the surfing-pose
+        // graphics have no running frames.
+        sRemotes[i].moving = !ObjectEventSetHeldMovement(objectEvent, mounted ? GetWalkFastMovementAction(direction)
+            : pose->movementMode == MULTIPLAYER_MOVEMENT_RUN ? GetPlayerRunMovementAction(direction)
             : abs(dx) + abs(dy) > 1 ? GetWalkFastMovementAction(direction) : GetWalkNormalMovementAction(direction));
     }
     else if (objectEvent->facingDirection != pose->direction || completed)
@@ -460,6 +466,8 @@ void Multiplayer_Tick(void)
     bool32 ready;
     gMultiplayerMailbox.frame = ++sFrame;
     ready = FieldReady();
+    MultiplayerRide_Tick(ready);
+    MultiplayerAppearance_Tick(sConnected);
     PublishLocalPose(ready);
     ReadInbound();
     if (sConnected && sFrame - sLastHeartbeatFrame >= HEARTBEAT_TIMEOUT_FRAMES)

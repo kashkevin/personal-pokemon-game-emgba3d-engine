@@ -25,6 +25,8 @@
 #include "multiplayer_battle.h"
 #include "multiplayer.h"
 #include "multiplayer_world.h"
+#include "multiplayer_ride.h"
+#include "multiplayer_appearance.h"
 #include "multiplayer_menu.h"
 #include "multiplayer_reset_admission.h"
 #include "multiplayer_save.h"
@@ -121,6 +123,8 @@ void AgbMain(void)
     InitHeap(gHeap, HEAP_SIZE);
     Multiplayer_Init();
     MultiplayerWorld_Init();
+    MultiplayerRide_Init();
+    MultiplayerAppearance_Init();
     MultiplayerSave_Init();
     MultiplayerBattle_Init();
     MultiplayerMenu_Init();

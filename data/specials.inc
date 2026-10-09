@@ -650,3 +650,5 @@ gSpecials::
 	def_special MultiplayerWorld_TryClaimEvent
 	def_special MultiplayerWorld_StartEventBattle
 	def_special MultiplayerWorld_ReportEventResult
+	def_special MultiplayerRide_CanRideFollower
+	def_special MultiplayerRide_MountFromScript

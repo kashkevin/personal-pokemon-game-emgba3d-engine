@@ -806,5 +806,7 @@ extern const u8 CableClub_EventScript_ShowBattleRecords_Frlg[];
 extern const u8 EventScript_Indigo_UltimateGoal[];
 extern const u8 EventScript_Indigo_HighestAuthority[];
 extern const u8 EventScript_MultiplayerWorldEvent[];
+extern const u8 EventScript_MultiplayerRideNotHere[];
+extern const u8 EventScript_MultiplayerRideNotAble[];
 
 #endif // GUARD_EVENT_SCRIPTS_H
