@@ -2605,7 +2605,15 @@ static void UpdateSelectedMonSpriteId(void)
     {
         u16 spriteId = sPokedexView->monSpriteIds[i];
 
+#ifdef PORTABLE
+        // Test the id first: gSprites[0xFFFF] is megabytes past the array (the GBA
+        // reads an EWRAM mirror without harm; natively the read faults).
+        if (spriteId != 0xFFFF && gSprites[spriteId].x2 == 0 && gSprites[spriteId].y2 == 0)
+#else
+#line 2608 // gba-line
         if (gSprites[spriteId].x2 == 0 && gSprites[spriteId].y2 == 0 && spriteId != 0xFFFF)
+#endif
+#line 2609 // gba-line
             sPokedexView->selectedMonSpriteId = spriteId;
     }
 }
@@ -4490,6 +4498,14 @@ s8 GetSetPokedexFlag(enum NationalDexOrder nationalDexNo, u8 caseID)
     u32 index, bit, mask;
     s8 retVal = 0;
 
+#ifdef PORTABLE
+    // NATIONAL_DEX_NONE (0) underflows to index 0x1FFFFFFF. CreatePokedexList's
+    // Hoenn loop passes it once (HoennToNationalOrder(HOENN_DEX_COUNT) is 0); the
+    // GBA reads a stray bit far outside the save block, natively that read faults.
+    if (nationalDexNo == NATIONAL_DEX_NONE || nationalDexNo > NATIONAL_DEX_COUNT)
+        return 0;
+#endif
+#line 4493 // gba-line
     nationalDexNo--;
     index = nationalDexNo / 8;
     bit = nationalDexNo % 8;

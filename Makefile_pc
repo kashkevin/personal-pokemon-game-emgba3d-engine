@@ -19,9 +19,13 @@ DEBUG        ?= 0
 # (shifts by 32+, NULL dereferences, out-of-bounds indexes). Development only.
 SANITIZE     ?= 0
 
+# GBA PPU emulation used for the 2D frame. The shipping Windows build uses the
+# "easy draw" renderer; Linux uses it too so tests exercise what ships ("fast
+# draw" has no 256-colour text backgrounds, see KNOWN_ISSUES N4).
+TILE_RENDERER ?= RENDERER_EASY_DRAW
+
 ifeq ($(NATIVE_LINUX),1)
   PREFIX        :=
-  TILE_RENDERER := RENDERER_FAST_DRAW
   ifeq ($(SANITIZE),1)
     TARGET      := pokeemerald-mp-san
     OBJ_DIR     := build/pc-linux-san
@@ -33,7 +37,6 @@ else
   PREFIX        := i686-w64-mingw32-
   TARGET        := pokeemerald-mp.exe
   OBJ_DIR       := build/pc-win32
-  TILE_RENDERER := RENDERER_EASY_DRAW
   # SDL2 for i686-w64-mingw32 (headers in $(SDL_DIR)/include, libs in $(SDL_DIR)/lib)
   SDL_DIR       ?= /usr/i686-w64-mingw32
 endif
@@ -49,6 +52,11 @@ SHELL := bash -o pipefail
 PREPROC    := tools/preproc/preproc
 ASSETS_DIR := build/assets
 ASM_TO_X86 := sed -E -f tools/pc_port/asm_to_x86.sed
+ifneq ($(NATIVE_LINUX),1)
+  # PE/COFF names read-only data .rdata; an input ".rodata" section would be
+  # linked into a writable output section of its own.
+  ASM_TO_X86 += -e 's/^([[:space:]]*)\.section[[:space:]]+\.rodata[[:space:]]*$$/\1.section .rdata,"dr"/'
+endif
 
 # Same game configuration as the GBA build (see Makefile), plus the PC port switches.
 GAME_CPPFLAGS := -iquote include -Wno-trigraphs -DMODERN=1 -DTESTING=0 -DEMERALD -std=gnu17 \
@@ -62,7 +70,7 @@ ifeq ($(NATIVE_LINUX),1)
   CPPFLAGS += -m32 -DNATIVE_LINUX $(shell $(PKG_CONFIG_32) --cflags sdl2)
   LIBS     := $(shell $(PKG_CONFIG_32) --libs sdl2) -lm -lpthread
 else
-  CPPFLAGS += -I$(SDL_DIR)/include
+  CPPFLAGS += -I$(SDL_DIR)/include -isystem tools/pc_port/include-win32
   LIBS     := -L$(SDL_DIR)/lib -lmingw32 -lSDL2main -lSDL2 -lwinmm -lxinput -lws2_32 -static-libgcc
 endif
 
@@ -74,7 +82,9 @@ endif
 
 # -fno-strict-aliasing/-fwrapv: the game relies on type punning and wrapping
 # integer arithmetic that the GBA compiler happened to tolerate.
-CFLAGS := -m32 $(OPT) -std=gnu17 -fno-strict-aliasing -fwrapv \
+# -falign-functions=4: function addresses keep bit 0 free for script tags.
+# -fno-omit-frame-pointer: usable stack traces in crash.log (src/platform/crash_report.c).
+CFLAGS := -m32 $(OPT) -std=gnu17 -fno-strict-aliasing -fwrapv -falign-functions=4 -fno-omit-frame-pointer \
           -Wno-trigraphs -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast -Wno-attribute-alias \
           -Wno-unused-function -Wno-unused-variable -Wno-address-of-packed-member
 ifeq ($(NATIVE_LINUX),1)
@@ -83,19 +93,45 @@ ifeq ($(NATIVE_LINUX),1)
   ifeq ($(SANITIZE),1)
     SAN_FLAGS := -fsanitize=shift-exponent,integer-divide-by-zero,null,bounds,vla-bound,unreachable,return \
                  -fsanitize-recover=all -fno-omit-frame-pointer
+    CPPFLAGS  += -DNATIVE_SANITIZE
     LDFLAGS += -fsanitize=shift-exponent,integer-divide-by-zero,null,bounds,vla-bound,unreachable,return
   endif
 else
+  # Struct layout must match the GBA build (save data, mailboxes, asm-built data):
+  # MinGW defaults to the MSVC layout (bit-fields of different types are not
+  # packed together; 8-byte members are 8-aligned). These flags select the i386
+  # System V layout that tools/pc_port/abi_layout.py verifies. Platform code must
+  # therefore not exchange structs with bit-fields or 64-bit members with Windows
+  # or SDL (none of the SDL events and Win32 structs used today have them).
+  CFLAGS  += -mno-ms-bitfields -mno-align-double
   LDFLAGS := -m32 -mconsole
 endif
+
+# Objects whose globals survive a soft reset (window, audio device, cartridge
+# save image and clock, platform tools). Every other object's .data/.bss is moved
+# into the game sections that src/platform/game_memory.c snapshots and restores.
+PRESERVED_OBJS := $(addprefix $(OBJ_DIR)/src/platform/,sdl2.o agb_flash_pc.o siirtc_pc.o game_memory.o null_trap.o fault_compat.o crash_report.o)
 
 ASFLAGS := --defsym MODERN=1 --defsym EMERALD=1 --defsym PORTABLE=1
 ifeq ($(NATIVE_LINUX),1)
   ASFLAGS += --32
   FIX_UNDERSCORE := true
+  GAME_SECTIONS := --rename-section .data=game_data --rename-section .bss=game_bss
 else
   # 32-bit Windows C symbols carry a leading underscore; asm data symbols do not.
   FIX_UNDERSCORE := $(OBJCOPY) --prefix-symbol _
+  GAME_SECTIONS := --rename-section .data=.data\$$game --rename-section .bss=.bss\$$game
+endif
+MARK_GAME_MEMORY = $(if $(filter $@,$(PRESERVED_OBJS)),true,$(OBJCOPY) $(GAME_SECTIONS) $@)
+# Rebuild every object when the compiler flags or the section layout change
+# (make does not track flags, and objects are marked when they are built).
+# BUILD_CONFIG_ID is completed below, once all flags are known.
+BUILD_CONFIG_STAMP := $(OBJ_DIR)/build_config.stamp
+
+BUILD_CONFIG_ID := $(CC) $(CPPFLAGS) | $(CFLAGS) | $(SAN_FLAGS) | $(ASFLAGS) | $(ASM_TO_X86) | $(GAME_SECTIONS) | $(PRESERVED_OBJS)
+ifneq ($(file <$(BUILD_CONFIG_STAMP)),$(BUILD_CONFIG_ID))
+  $(shell mkdir -p $(OBJ_DIR))
+  $(file >$(BUILD_CONFIG_STAMP),$(BUILD_CONFIG_ID))
 endif
 
 # ---------------------------------------------------------------------------
@@ -118,7 +154,7 @@ OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS)
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
-.PHONY: all clean
+.PHONY: all clean check-native check-abi check-game-sections check-decompress
 .SUFFIXES:
 .SECONDARY:
 .DELETE_ON_ERROR:
@@ -128,29 +164,68 @@ all: $(TARGET)
 clean:
 	rm -rf $(OBJ_DIR) $(TARGET)
 
+# Native unit tests for project-owned platform code (Linux, 32-bit).
+NATIVE_TEST_DIR := build/pc-tests
+NATIVE_TEST_SRCS := tools/pc_port/tests/test_platform.c src/platform/agb_flash_pc.c src/platform/siirtc_pc.c \
+                    src/platform/gba_support.c src/platform/fault_compat.c src/random.c
+check-native:
+	@mkdir -p $(NATIVE_TEST_DIR)
+	@for f in $(NATIVE_TEST_SRCS); do \
+	  o=$(NATIVE_TEST_DIR)/$$(basename $$f .c).o; \
+	  gcc -m32 -E $(GAME_CPPFLAGS) -DPORTABLE -DNONMATCHING -DUBFIX -DNATIVE_LINUX -iquote tools/pc_port/tests $$f \
+	    | $(PREPROC) -i -p $$f charmap.txt | gcc -m32 -O1 -g -fno-pie -fwrapv -x cpp-output -c -o $$o - || exit 1; \
+	done
+	@gcc -m32 -no-pie $(NATIVE_TEST_DIR)/*.o -o $(NATIVE_TEST_DIR)/test_platform
+	@$(NATIVE_TEST_DIR)/test_platform
+
+# GBA vs native byte layout of save data, mailboxes, battle packets and asm-built data.
+check-abi:
+	python3 tools/pc_port/abi_layout.py
+
+# Every compressed graphic decoded natively by the game's own decompressor must
+# equal the uncompressed file the GBA build compressed it from.
+check-decompress: $(TARGET)
+	python3 tools/pc_port/make_decompress_list.py $(ASSETS_DIR) > $(OBJ_DIR)/decompress_list.txt
+	./$(TARGET) --selftest-decompress $(OBJ_DIR)/decompress_list.txt | tail -n 20
+
 # C: preprocess (same flags as the GBA build + PORTABLE), expand INCBIN/charmap
 # strings with preproc, then compile for 32-bit x86.
-$(OBJ_DIR)/src/%.o: src/%.c
+$(OBJ_DIR)/src/%.o: src/%.c $(BUILD_CONFIG_STAMP)
 	@echo "CC $<"
 	@$(CC) -E $(CPPFLAGS) -MMD -MP -MF $(@:.o=.d) -MT $@ $< | $(PREPROC) -i -p -g $(ASSETS_DIR) $< charmap.txt | $(CC) $(CFLAGS) $(if $(findstring src/platform/,$<),,$(SAN_FLAGS)) -x cpp-output -c -o $@ -
+	@$(MARK_GAME_MEMORY)
 
 # Data: identical preprocessing to the GBA build, then ARM -> x86 GNU-as syntax.
-$(OBJ_DIR)/data/%.o: data/%.s
+$(OBJ_DIR)/data/%.o: data/%.s tools/pc_port/asm_to_x86.sed $(BUILD_CONFIG_STAMP)
 	@echo "AS $<"
 	@$(PREPROC) $< charmap.txt | $(DATA_CPP) $(GAME_CPPFLAGS) -I include - | $(PREPROC) -ie $< charmap.txt | $(ASM_TO_X86) | $(AS) $(ASFLAGS) -o $@
 	@$(FIX_UNDERSCORE) $@
+	@$(MARK_GAME_MEMORY)
 
 $(OBJ_DIR)/MPlayDef.s: sound/MPlayDef.s tools/pc_port/asm_to_x86.sed
 	$(ASM_TO_X86) $< > $@
 
 # MIDI-generated songs (sound/songs/midi/*.s are produced by the GBA build).
-$(OBJ_DIR)/sound/songs/midi/%.o: sound/songs/midi/%.s $(OBJ_DIR)/MPlayDef.s
+$(OBJ_DIR)/sound/songs/midi/%.o: sound/songs/midi/%.s $(OBJ_DIR)/MPlayDef.s $(BUILD_CONFIG_STAMP)
 	@echo "AS $<"
 	@sed -e 's|\.include[[:space:]]*"MPlayDef.s"|.include "$(OBJ_DIR)/MPlayDef.s"|' $< | $(ASM_TO_X86) | $(AS) $(ASFLAGS) -I sound -o $@
 	@$(FIX_UNDERSCORE) $@
+	@$(MARK_GAME_MEMORY)
 
 $(TARGET): $(OBJS)
 	$(file >$(OBJ_DIR)/objs.rsp,$(OBJS))
-	$(CC) $(LDFLAGS) @$(OBJ_DIR)/objs.rsp $(LIBS) -o $@
+	$(CC) $(LDFLAGS) -Wl,-Map,$(OBJ_DIR)/$(TARGET).map @$(OBJ_DIR)/objs.rsp $(LIBS) -o $@
+
+# Soft reset restores game memory: check that only PRESERVED_OBJS still have
+# ordinary .data/.bss and that the linked program has both game sections.
+check-game-sections: $(TARGET)
+	python3 tools/pc_port/check_game_sections.py --objdump $(PREFIX)objdump --nm $(PREFIX)nm --target $(TARGET) \
+	  --preserved "$(PRESERVED_OBJS)" --objs-file $(OBJ_DIR)/objs.rsp
 
 -include $(C_OBJS:.o=.d)
+
+# Assembler data includes (.include/.incbin/#include), scanned like the GBA build.
+SCANINC := tools/scaninc/scaninc
+$(OBJ_DIR)/data/%.d: data/%.s
+	@$(SCANINC) -M $@ -g $(ASSETS_DIR) -I include -I "" $<
+-include $(DATA_ASM_OBJS:.o=.d)

@@ -16,8 +16,8 @@ not cover the pret decompilation or any Pokémon game material.
 
 | File | Origin | Notes |
 | --- | --- | --- |
-| `sdl2.c` | voxel project | SDL2 window, timing, input, audio output. Modified here: accessibility (NVDA/footstep) hooks and SDL_image removed; atomic save persistence; `--save`; key register feed; Ctrl+R goes through the game's reset chord; RTC moved to `siirtc_pc.c`; host entropy for RNG seeding. |
-| `gba_easy_draw.c`, `gba_fast_draw.c` | voxel project (NT_x86 renderer, 2024) | GBA PPU emulation from VRAM/OAM/palette/registers. |
+| `sdl2.c` | voxel project | SDL2 window, timing, input, audio output. Modified here: accessibility (NVDA/footstep) hooks and SDL_image removed; atomic save persistence; `--save`; key register feed; Ctrl+R sends the A+B+START+SELECT chord; RTC moved to `siirtc_pc.c`; host entropy for RNG seeding; in-process soft reset; `Platform_SpinWaitForVBlank`. |
+| `gba_easy_draw.c`, `gba_fast_draw.c` | voxel project (NT_x86 renderer, 2024) | GBA PPU emulation from VRAM/OAM/palette/registers. Both targets use "easy draw"; "fast draw" lacks 256-colour text backgrounds. |
 | `dma.c` | voxel project | DMA emulation incl. HBlank DMA. |
 | `bios.c` | voxel project | BIOS calls. **Its header says the implementations are "based on the VBA-M source code" (VBA-M is GPL-2.0-or-later); `ArcTan`, `ArcTan2` and `Sqrt` are "taken from mGBA's source" (MPL-2.0).** See Licensing below. |
 | `cgb_audio.c`, `music_player.c`, `sound_mixer.c`, `m4a_pc.c`, `m4a_tables_pc.c` | voxel project (Kurausukun 2021 C port of the m4a engine) | Replaces `src/m4a.c`, `src/m4a_tables.c` and `src/m4a_1.s` natively. Track arrays moved from `sound/music_player_table.inc` to C. |
@@ -28,6 +28,29 @@ not cover the pret decompilation or any Pokémon game material.
 | `gba_support.c` | project-owned | `Div`, `BitUnPack`, ROM header fields, reset hooks. |
 | `fault_compat.c` | project-owned | Gives integer division by zero the GBA (libgcc) results instead of crashing. |
 | `null_trap.c` | project-owned | Linux development tool that logs NULL-pointer accesses. |
+| `game_memory.c` | project-owned | In-process soft reset: snapshots the game's data/bss sections before the game starts and restores them on `SoftReset`. |
+| `crash_report.c` | project-owned | Writes `crash.log` (fault, game callbacks, stack trace) when the game crashes. |
+| `native_selftest.c` | project-owned | `--selftest-decompress LIST`: decodes every compressed asset with the game's decompressor and compares with the GBA build's uncompressed files. |
+
+## Build notes
+
+* Soft reset: `Makefile_pc` renames the `.data`/`.bss` of every game object to the
+  game sections (`game_data`/`game_bss` on ELF, `.data$game`/`.bss$game` on PE).
+  Objects listed in `PRESERVED_OBJS` keep ordinary sections and survive a reset.
+  `make -f Makefile_pc check-game-sections` verifies the layout.
+* Windows struct layout: MinGW defaults to the MSVC layout (bit-fields of different
+  types are not packed together; 8-byte members are 8-aligned). The Windows build
+  uses `-mno-ms-bitfields -mno-align-double` so game data matches the GBA build;
+  `tools/pc_port/abi_layout.py` checks it. Because SDL2.dll and Windows use the MSVC
+  layout, platform code must not exchange structs with bit-fields or 64-bit
+  members with them (none of those in use today has any).
+* Assembler data: `tools/pc_port/asm_to_x86.sed` converts the GBA build's data
+  sources; script data becomes read-only, and on Windows `.rodata` becomes `.rdata`
+  so it is linked read-only.
+* Busy-wait loops that the GBA's VBlank interrupt would end (for example the
+  synchronous map loader waiting on DMA3 requests) call
+  `Platform_SpinWaitForVBlank`, which lets the frame end once a caller is clearly
+  spinning.
 
 ## Licensing
 

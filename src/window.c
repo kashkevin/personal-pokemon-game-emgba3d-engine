@@ -360,6 +360,14 @@ void CopyWindowRectToVram(u32 windowId, u32 mode, u32 x, u32 y, u32 w, u32 h)
 
 void PutWindowTilemap(u32 windowId)
 {
+#ifdef PORTABLE
+    // Callers pass WINDOW_NONE for windows they never added (e.g. the summary
+    // screen's optional windows). The GBA then reads unrelated memory as a window;
+    // natively that memory differs and could draw garbage. Skip it.
+    if (windowId >= WINDOWS_MAX)
+        return;
+#endif
+#line 363 // gba-line
     struct Window windowLocal = gWindows[windowId];
 
     WriteSequenceToBgTilemapBuffer(
@@ -398,6 +406,11 @@ void PutWindowRectTilemapOverridePalette(u32 windowId, u8 x, u8 y, u8 width, u8 
 // Fills a window with transparent tiles.
 void ClearWindowTilemap(u32 windowId)
 {
+#ifdef PORTABLE
+    if (windowId >= WINDOWS_MAX)
+        return; // see PutWindowTilemap
+#endif
+#line 401 // gba-line
     struct Window windowLocal = gWindows[windowId];
 
     FillBgTilemapBufferRect(

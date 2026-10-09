@@ -8,6 +8,10 @@ void Platform_StoreSaveFile(void);
 void Platform_QueueAudio(float *audioBuffer, s32 samplesPerFrame);
 u16 Platform_GetKeyInput(void);
 u32 Platform_GetEntropy32(void);
+// For game code that polls state the GBA's VBlank interrupt updates. Counts polls
+// within the current frame; once a caller is clearly spinning, waits for the next
+// VBlank (the interrupt handler runs) and returns TRUE so the caller re-checks.
+bool32 Platform_SpinWaitForVBlank(void);
 u8 Platform_GetBorderBackgroundCount(void);
 u8 Platform_GetBorderBackground(void);
 void Platform_SetBorderBackground(u8 selection);

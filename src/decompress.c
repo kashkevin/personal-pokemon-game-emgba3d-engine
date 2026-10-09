@@ -356,6 +356,7 @@ static __attribute__((always_inline)) inline void UnpackFrequencies(const u32 *p
 #define IWRAM_CODE_SECTION __attribute__((section(".iwram.code")))
 #endif
 ARM_FUNC IWRAM_CODE_SECTION __attribute__((noinline)) static void CopyTable(u32 *dst, const u32 *src, u32 size, u32 orrVal)
+#line 354 // gba-line
 {
     for (u32 i = 0; i < size; i++) {
         *dst++ = (*src++) | orrVal;
@@ -410,9 +411,11 @@ static IWRAM_DATA u32 sCurrState = 0;
 #define CopyFuncToIwram(funcBuffer, funcStartAddress, funcEndAdress) ((void)(funcBuffer))
 #define IWRAM_FUNC_PTR(funcBuffer, func) ((void *)(func))
 #else
+#line 401 // gba-line
 // 33 because of FastUnsafeCopy32, we divide by 4 because the buffer is an array of u32
 #define FUNC_BUFFER_SIZE(funcStart, funcEnd)(((u32)(funcEnd) - (u32)(funcStart) + 33) / 4)
 #define IWRAM_FUNC_PTR(funcBuffer, func) ((void *) funcBuffer)
+#line 403 // gba-line
 
 extern void FastUnsafeCopy32(void *, const void *, u32 size);
 
@@ -422,6 +425,7 @@ static inline void CopyFuncToIwram(void *funcBuffer, const void *funcStartAddres
     FastUnsafeCopy32(funcBuffer, funcStartAddress, funcEndAdress - funcStartAddress);
 }
 #endif
+#line 411 // gba-line
 
 // The reason for macros and unrolling the loops stems from the following:
 // currK can be max 6, meaning in the worst case scenario it takes minimum 4 loop iterations, where we don't need to check if bitIndex is >= 32, because it's mathematically impossible for it to be.
@@ -619,6 +623,7 @@ static void DecodeSymtANS(const u32 *data, const u32 *pFreqs, u16 *resultVec, u3
     CopyFuncToIwram(funcBuffer, DecodeLOtANSLoop, SwitchToArmCallLOtANS);
     // The GBA build runs DecodeLOtANSLoop here (identical machine code); do the same.
     SwitchToArmCallDecodeSymtANS(data, sWorkingYkTable, resultVec, &resultVec[count], IWRAM_FUNC_PTR(funcBuffer, DecodeLOtANSLoop));
+#line 607 // gba-line
 }
 
 #define ANS_LOOP_MAIN(nibble)   \
@@ -1409,6 +1414,7 @@ void FastLZ77UnCompWram(const u32 *src, void *dest)
     LZ77UnCompWram(src, dest); // C implementation in src/platform/bios.c
 }
 #else
+#line 1391 // gba-line
 extern const u32 LZ77UnCompWRAMOptimized[];
 extern const u32 LZ77UnCompWRAMOptimized_end[];
 
@@ -1425,3 +1431,4 @@ void FastLZ77UnCompWram(const u32 *src, void *dest)
     SwitchToArmCallFastLZ77(src, dest, (void *) funcBuffer);
 }
 #endif
+#line 1406 // gba-line

@@ -164,6 +164,21 @@ static inline bool32 Script_IsAnalyzingEffects(void)
     return gScriptEffectContext != NULL;
 }
 
+// Script commands, specials and natives that call Script_RequestEffects are
+// tagged in their tables. The GBA points them into ROM mirror 1 (0x0A000000), which
+// still executes the same code. Natively there is no mirror, so the tag is bit 0 of
+// the pointer (functions are at least 2-byte aligned) and must be removed before
+// the call.
+#ifdef PORTABLE
+#define SCRIPT_EFFECTS_TAGGED(ptr) ((((uintptr_t)(ptr)) & 1) != 0)
+#define SCRIPT_EFFECTS_TAG_BITS 1
+#define SCRIPT_FUNC_UNTAG(ptr) ((__typeof__(ptr))(((uintptr_t)(ptr)) & ~(uintptr_t)1))
+#else
+#define SCRIPT_EFFECTS_TAGGED(ptr) ((((uintptr_t)(ptr)) & 0xE000000) == 0xA000000)
+#define SCRIPT_EFFECTS_TAG_BITS 0xA000000
+#define SCRIPT_FUNC_UNTAG(ptr) (ptr)
+#endif
+
 #define RunScriptImmediatelyUntilEffect(effects, ptr, ctx) \
     ({ \
         _Static_assert((effects) & 0x80000000, "RunScriptImmediatelyUntilEffect requires an effects version"); \
@@ -195,21 +210,21 @@ static inline void Script_CheckEffectInstrumentedSpecial(u32 specialId)
     typedef u16 (*SpecialFunc)(void);
     extern const SpecialFunc gSpecials[];
     // In ROM mirror 1.
-    if (Script_IsAnalyzingEffects() && (((uintptr_t)gSpecials[specialId]) & 0xE000000) != 0xA000000)
+    if (Script_IsAnalyzingEffects() && !SCRIPT_EFFECTS_TAGGED(gSpecials[specialId]))
         Script_GotoBreak_Internal();
 }
 
 static inline void Script_CheckEffectInstrumentedGotoNative(bool8 (*func)(void))
 {
     // In ROM mirror 1.
-    if (Script_IsAnalyzingEffects() && (((uintptr_t)func) & 0xE000000) != 0xA000000)
+    if (Script_IsAnalyzingEffects() && !SCRIPT_EFFECTS_TAGGED(func))
         Script_GotoBreak_Internal();
 }
 
 static inline void Script_CheckEffectInstrumentedCallNative(void (*func)(struct ScriptContext *))
 {
     // In ROM mirror 1.
-    if (Script_IsAnalyzingEffects() && (((uintptr_t)func) & 0xE000000) != 0xA000000)
+    if (Script_IsAnalyzingEffects() && !SCRIPT_EFFECTS_TAGGED(func))
         Script_GotoBreak_Internal();
 }
 

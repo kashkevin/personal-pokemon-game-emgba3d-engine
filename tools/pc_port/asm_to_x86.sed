@@ -19,3 +19,8 @@ s/\.word([[:space:]])/.int\1/g
 s/^([[:space:]]*\.section[[:space:]]+[^,]+,[[:space:]]*"[^"]*")[[:space:]]*,[[:space:]]*[%@][a-z_]+.*$/\1/
 /^[[:space:]]*\.type[[:space:]]/d
 /^[[:space:]]*\.size[[:space:]]/d
+# 5. Script data is ROM on the GBA (its "aw" flags only matter to the ARM linker
+#    script). Natively it goes to read-only data, so a stray write faults instead
+#    of silently changing a script (the GBA ignores writes to ROM), and a soft
+#    reset never has to restore it.
+s/^([[:space:]]*)\.section[[:space:]]+script_data[[:space:]]*,[[:space:]]*"aw"[[:space:]]*$/\1.section .rodata/

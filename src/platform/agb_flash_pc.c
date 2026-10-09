@@ -25,6 +25,9 @@ u16 (*EraseFlashChip)();
 u16 (*EraseFlashSector)(u16 sectorNum);
 const u16 *gFlashMaxTime;
 
+// The 128 KiB cartridge flash image. Defined here (not with the other emulated
+// hardware in bios.c) because it must survive a soft reset.
+unsigned char FLASH_BASE[131072] __attribute__((aligned(4)));
 volatile bool8 gPlatformFlashDirty;
 
 static const u16 sPcFlashMaxTime[] =

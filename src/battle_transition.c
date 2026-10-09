@@ -293,6 +293,14 @@ static u8 sTestingTransitionState;
 static struct RectangularSpiralLine sRectangularSpiralLines[4];
 
 EWRAM_DATA static struct TransitionData *sTransitionData = NULL;
+#ifdef PORTABLE
+// A transition's VBlank/HBlank callbacks can run once more after
+// IsBattleTransitionDone frees the data, before the battle replaces them. On the
+// GBA those reads of NULL hit the BIOS harmlessly (the screen is already black);
+// natively they would fault, so they read this zeroed stand-in instead.
+static struct TransitionData sReleasedTransitionData;
+#endif
+#line 296 // gba-line
 
 static const u32 sBigPokeball_Tileset[] = INCGFX_U32("graphics/battle_transitions/big_pokeball.png", ".4bpp");
 static const u32 sPokeballTrail_Tileset[] = INCGFX_U32("graphics/battle_transitions/pokeball_trail.png", ".4bpp");
@@ -1022,7 +1030,16 @@ bool8 IsBattleTransitionDone(void)
     if (gTasks[taskId].tTransitionDone)
     {
         DestroyTask(taskId);
+#ifdef PORTABLE
+        if (sTransitionData != &sReleasedTransitionData)
+            Free(sTransitionData);
+        memset(&sReleasedTransitionData, 0, sizeof(sReleasedTransitionData));
+        sTransitionData = &sReleasedTransitionData;
+#else
+#line 1025 // gba-line
         FREE_AND_SET_NULL(sTransitionData);
+#endif
+#line 1026 // gba-line
         return TRUE;
     }
     else

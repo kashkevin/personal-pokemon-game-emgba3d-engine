@@ -126,7 +126,7 @@ bool8 RunScriptCommand(struct ScriptContext *ctx)
                 return FALSE;
             }
 
-            if ((*func)(ctx) == TRUE)
+            if (SCRIPT_FUNC_UNTAG(*func)(ctx) == TRUE)
                 return TRUE;
         }
     }
@@ -612,7 +612,7 @@ struct ScriptEffectContext *gScriptEffectContext = NULL;
 static bool32 Script_IsEffectInstrumentedCommand(ScrCmdFunc func)
 {
     // In ROM mirror 1.
-    return (((uintptr_t)func) & 0xE000000) == 0xA000000;
+    return SCRIPT_EFFECTS_TAGGED(func);
 }
 
 /* 'setjmp' and 'longjmp' cause link errors, so we use
@@ -644,7 +644,7 @@ static bool32 RunScriptImmediatelyUntilEffect_InternalLoop(struct ScriptContext 
                 return TRUE;
 
             // Command which waits for a frame.
-            if ((*func)(ctx))
+            if (SCRIPT_FUNC_UNTAG(*func)(ctx))
             {
                 gScriptEffectContext->nextCmd = ctx->scriptPtr;
                 return TRUE;
@@ -717,7 +717,7 @@ bool32 Script_MatchesCallNative(const u8 *script, void *funcPtr, bool32 requestE
     u32 callnativeFunc = (((((script[4] << 8) + script[3]) << 8) + script[2]) << 8) + script[1];
     u32 targetFunc = (u32)funcPtr;
     if (requestEffects)
-        targetFunc |= 0xA000000;
+        targetFunc |= SCRIPT_EFFECTS_TAG_BITS;
     if (callnativeFunc == targetFunc)
         return TRUE;
     return FALSE;

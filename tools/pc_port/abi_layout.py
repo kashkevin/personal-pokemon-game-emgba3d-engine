@@ -8,12 +8,16 @@ byte layouts. Save data, companion mailboxes and battle link packets must keep
 the GBA layout, so the types they contain are marked ABI_ALIGN (see
 include/gba/defines.h).
 
-This tool compiles tools/pc_port/abi_probe.c for both targets with DWARF debug
-info, walks every struct/union reachable from the probe's root variables, and
-reports any type whose size or member offsets differ.
+This tool compiles tools/pc_port/abi_probe.c for the GBA and for each native
+target with DWARF debug info, walks every struct/union reachable from the
+probe's root variables, and reports any type whose size or member offsets
+differ. Native targets: "pc" (Linux i386 gcc) and "win" (i686-w64-mingw32 with
+the Windows build's layout flags; its PE object is converted to ELF so the
+DWARF can be read).
 
-    python3 tools/pc_port/abi_layout.py           # report; exit 1 on mismatch
-    python3 tools/pc_port/abi_layout.py --fix     # insert ABI_ALIGN, then re-check
+    python3 tools/pc_port/abi_layout.py              # Linux and Windows; exit 1 on mismatch
+    python3 tools/pc_port/abi_layout.py --target pc  # one native target
+    python3 tools/pc_port/abi_layout.py --fix        # insert ABI_ALIGN, then re-check
 """
 import argparse
 import os
@@ -40,6 +44,13 @@ TARGETS = {
         'cpp': ['gcc', '-m32', '-E'] + GAME_CPPFLAGS + ['-DPORTABLE', '-DNONMATCHING', '-DUBFIX'],
         'cc': ['gcc', '-m32', '-std=gnu17', '-O0', '-gdwarf-4', '-w', '-fno-pie'],
     },
+    # Must use the same layout flags as Makefile_pc's Windows build.
+    'win': {
+        'cpp': ['i686-w64-mingw32-gcc', '-E'] + GAME_CPPFLAGS + ['-DPORTABLE', '-DNONMATCHING', '-DUBFIX'],
+        'cc': ['i686-w64-mingw32-gcc', '-std=gnu17', '-O0', '-gdwarf-4', '-w',
+               '-mno-ms-bitfields', '-mno-align-double'],
+        'to_elf': ['i686-w64-mingw32-objcopy', '-O', 'elf32-i386'],
+    },
 }
 
 
@@ -52,6 +63,10 @@ def build(target):
                          input=cpp.stdout, check=True, capture_output=True)
     subprocess.run(t['cc'] + ['-x', 'cpp-output', '-c', '-o', obj, '-'], cwd=ENGINE,
                    input=pre.stdout, check=True)
+    if 'to_elf' in t:
+        elf = obj[:-2] + '.elf'
+        subprocess.run(t['to_elf'] + [obj, elf], cwd=ENGINE, check=True)
+        return elf
     return obj
 
 
@@ -74,7 +89,7 @@ class Model:
     def __init__(self, path):
         self.f = open(path, 'rb')
         self.elf = ELFFile(self.f)
-        self.dwarf = self.elf.get_dwarf_info()
+        self.dwarf = self.elf.get_dwarf_info(relocate_dwarf_sections=True)
         self.types = {}   # key -> dict(name, kind, size, members)
         self.roots = {}   # root name -> key
         for cu in self.dwarf.iter_CUs():
@@ -225,10 +240,18 @@ def insert_abi_align(path, line, kind):
     return None
 
 
-def run(fix):
+def run(fix, targets):
+    status = 0
+    for target in targets:
+        print('== GBA vs %s' % target)
+        status |= run_target(fix, target)
+    return status
+
+
+def run_target(fix, target):
     for attempt in range(12):
         gba = Model(build('gba'))
-        pc = Model(build('pc'))
+        pc = Model(build(target))
         bad = compare(gba, pc)
         missing = sorted(set(gba.roots) - set(pc.roots))
         for root in sorted(gba.roots):
@@ -264,4 +287,7 @@ def run(fix):
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--fix', action='store_true', help='insert ABI_ALIGN on differing types and re-check')
-    sys.exit(run(ap.parse_args().fix))
+    ap.add_argument('--target', choices=['pc', 'win'], action='append',
+                    help='native target(s) to check (default: both)')
+    args = ap.parse_args()
+    sys.exit(run(args.fix, args.target or ['pc', 'win']))

@@ -1,0 +1,55 @@
+# Native PC port CI (project workflow; the upstream RHH workflows are unchanged).
+# NOTE: this repository is not hosted on GitHub yet, so this workflow has not run.
+# It never uploads build outputs: they contain game assets and must stay private.
+name: native-pc
+
+on:
+  push:
+    branches: ["claude/native-pc", "claude/native-*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchains
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc-multilib binutils-arm-none-eabi gcc-arm-none-eabi \
+            libnewlib-arm-none-eabi libpng-dev python3-pip gcc-mingw-w64-i686 binutils-mingw-w64-i686 \
+            libsdl2-dev:i386 pkg-config
+          python3 -m pip install --break-system-packages pyelftools==0.33
+
+      - name: GBA ROM build (generates assets; must stay buildable as the fallback)
+        run: make -j"$(nproc)" BUILD_NAME=dev
+
+      - name: Native platform unit tests
+        run: make -f Makefile_pc NATIVE_LINUX=1 check-native
+
+      - name: GBA/native ABI layout parity (Linux and Windows layouts)
+        run: make -f Makefile_pc NATIVE_LINUX=1 check-abi
+
+      - name: Native Linux build
+        run: make -f Makefile_pc NATIVE_LINUX=1 -j"$(nproc)"
+
+      - name: Soft-reset memory layout (Linux)
+        run: make -f Makefile_pc NATIVE_LINUX=1 check-game-sections
+
+      - name: Every compressed graphic decodes natively
+        run: make -f Makefile_pc NATIVE_LINUX=1 check-decompress
+
+      - name: SDL2 for Windows cross build (official release, checksum pinned)
+        run: |
+          curl -fsSL -o sdl2.tar.gz https://github.com/libsdl-org/SDL/releases/download/release-2.30.7/SDL2-devel-2.30.7-mingw.tar.gz
+          echo "147c3dc03c9be6b23e625fd877421098e93487f1f55e0e1d4e3ce571e79b91c4  sdl2.tar.gz" | sha256sum -c -
+          tar xzf sdl2.tar.gz
+
+      - name: Native Windows build (cross-compiled)
+        run: make -f Makefile_pc -j"$(nproc)" SDL_DIR="$PWD/SDL2-2.30.7/i686-w64-mingw32"
+
+      - name: Soft-reset memory layout (Windows)
+        run: make -f Makefile_pc SDL_DIR="$PWD/SDL2-2.30.7/i686-w64-mingw32" check-game-sections

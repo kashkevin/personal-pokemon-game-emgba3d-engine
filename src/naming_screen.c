@@ -1024,6 +1024,7 @@ static void SpriteCB_Cursor(struct Sprite *sprite)
 {
     if (!NATIVE_NULL_GUARD(sNamingScreen)) // sprites outlive the freed screen data by a frame
         return;
+#line 1025 // gba-line
     if (sprite->animEnded)
         StartSpriteAnim(sprite, 0);
 
@@ -1090,6 +1091,7 @@ static void SpriteCB_Underscore(struct Sprite *sprite)
 
     if (!NATIVE_NULL_GUARD(sNamingScreen)) // sprites outlive the freed screen data by a frame
         return;
+#line 1089 // gba-line
     pos = GetTextEntryPosition();
     if (pos != (u8)sprite->sId)
     {
@@ -2098,6 +2100,7 @@ static void VBlankCB_NamingScreen(void)
     TransferPlttBuffer();
     if (!NATIVE_NULL_GUARD(sNamingScreen)) // VBlank can run once more after the data is freed
         return;
+#line 2095 // gba-line
     SetGpuReg(REG_OFFSET_BG1VOFS, sNamingScreen->bg1vOffset);
     SetGpuReg(REG_OFFSET_BG2VOFS, sNamingScreen->bg2vOffset);
     SetGpuReg(REG_OFFSET_BG1CNT, GetGpuReg(REG_OFFSET_BG1CNT) & 0xFFFC);

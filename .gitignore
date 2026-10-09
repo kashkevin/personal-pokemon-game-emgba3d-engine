@@ -71,3 +71,5 @@ __pycache__
 /pokeemerald-mp-san
 /pokeemerald-mp.exe
 tools/pc_port/__pycache__/
+/crash.log
+/null_trap.log

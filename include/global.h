@@ -66,8 +66,8 @@
 #define ARM_LSL32(x, n) ((u32)(n) >= 32 ? 0u : (u32)(x) << (n))
 #define ARM_LSR32(x, n) ((u32)(n) >= 32 ? 0u : (u32)(x) >> (n))
 #else
-#define ARM_LSL32(x, n) ((u32)(x) << (n))
-#define ARM_LSR32(x, n) ((u32)(x) >> (n))
+#define ARM_LSL32(x, n) ((x) << (n)) // unchanged expression: keeps the GBA ROM identical
+#define ARM_LSR32(x, n) ((x) >> (n))
 #endif
 
 /// IDE support

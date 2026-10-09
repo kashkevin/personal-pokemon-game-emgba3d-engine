@@ -1,5 +1,6 @@
 #ifdef PLATFORM_SDL2
 #include <assert.h>
+#include <setjmp.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <time.h>
@@ -97,11 +98,18 @@ static void DrawTouchControls(void);
 
 extern void NullTrap_Init(void);
 extern void FaultCompat_Init(void);
+extern void CrashReport_Init(void);
+extern void GameMemory_Snapshot(void);
+extern int NativeSelfTest_Decompress(const char *listPath);
+extern bool32 GameMemory_Reset(void);
+
+static jmp_buf sGameResetPoint; // where the game thread restarts after a soft reset
 
 int main(int argc, char **argv)
 {
     FaultCompat_Init(); // GBA results for integer division by zero
     NullTrap_Init(); // development aid; no-op unless PKMN_NULL_TRAP=1 on Linux
+    CrashReport_Init(); // writes crash.log if the game crashes
 
     // Open an output console on Windows
 #ifdef _WIN32
@@ -304,6 +312,9 @@ int main(int argc, char **argv)
 #ifndef __ANDROID__
     VDraw(sdlTexture);
 #endif
+    // Everything the game can touch is now at its power-on state; remember it so
+    // a soft reset can restore it (src/platform/game_memory.c).
+    GameMemory_Snapshot();
     mainLoopThread = SDL_CreateThread(DoMain, "AgbMain", NULL);
 
     double accumulator = 0.0;
@@ -452,6 +463,8 @@ static void ParseArguments(int argc, char **argv)
     {
         if (strcmp(argv[i], "--save") == 0 && i + 1 < argc)
             SDL_strlcpy(sSavePath, argv[++i], sizeof(sSavePath));
+        else if (strcmp(argv[i], "--selftest-decompress") == 0 && i + 1 < argc)
+            exit(NativeSelfTest_Decompress(argv[++i])); // src/platform/native_selftest.c
     }
 }
 
@@ -1105,11 +1118,12 @@ void ProcessEvents(void)
             HANDLE_KEYDOWN(DPAD_LEFT)
             HANDLE_KEYDOWN(DPAD_RIGHT)
             case SDLK_r:
-                // Ctrl+R: hold A+B+START+SELECT for a few frames so the game's own
-                // soft-reset check runs on the game thread (it honours
-                // gSoftResetDisabled and the multiplayer Local Soft Reset handler).
+                // Ctrl+R: hold A+B+START+SELECT for one frame (the chord is awkward
+                // on a keyboard). The game decides what it means: this multiplayer
+                // build hands the chord to the Local Soft Reset handler
+                // (MultiplayerLocalReset_HandleChord) and never reboots from it.
                 if (event.key.keysym.mod & (KMOD_LCTRL | KMOD_RCTRL))
-                    sSoftResetChordFrames = 3;
+                    sSoftResetChordFrames = 1;
                 break;
             case SDLK_p:
                 if (event.key.keysym.mod & (KMOD_LCTRL | KMOD_RCTRL))
@@ -1273,20 +1287,58 @@ void VDraw(SDL_Texture *texture)
 
 int DoMain(void *data)
 {
+    // A soft reset longjmps back here with game memory restored, like the GBA
+    // jumping to the cartridge entry point after clearing work RAM.
+    setjmp(sGameResetPoint);
     AgbMain();
     return 0;
 }
 
+static u32 sVBlankWaits; // VBlankIntrWait calls; only the game thread touches it
+
 void VBlankIntrWait(void)
 {
+    sVBlankWaits++;
     SDL_AtomicSet(&isFrameAvailable, 1);
     SDL_SemWait(vBlankSemaphore);
 }
 
+// A per-frame state machine polls a few times per frame; a tight loop polls
+// thousands of times. Waiting only past this many polls keeps the first case
+// exactly as on the GBA while unblocking the second.
+#define SPIN_POLLS_BEFORE_VBLANK 64
+
+bool32 Platform_SpinWaitForVBlank(void)
+{
+    static u32 sFrame, sPolls;
+
+    if (sFrame != sVBlankWaits)
+    {
+        sFrame = sVBlankWaits;
+        sPolls = 0;
+    }
+    if (++sPolls < SPIN_POLLS_BEFORE_VBLANK)
+        return FALSE;
+    sPolls = 0;
+    VBlankIntrWait();
+    return TRUE;
+}
+
+// BIOS SWI 0x00/0x01 as used by DoSoftReset. Runs on the game thread while the
+// main thread waits for the next frame, so no other thread touches game memory.
+// Game globals and the emulated hardware return to their power-on values; the
+// window, audio device, save image (the cartridge) and platform state are kept.
 void SoftReset(u32 resetFlags)
 {
-    puts("Soft Reset called. Exiting.");
-    exit(0);
+    (void)resetFlags;
+    if (!GameMemory_Reset())
+    {
+        puts("Soft reset unavailable (no memory snapshot); exiting.");
+        exit(0);
+    }
+    if (sdlAudioDevice != 0)
+        SDL_ClearQueuedAudio(sdlAudioDevice);
+    longjmp(sGameResetPoint, 1);
 }
 
 #endif

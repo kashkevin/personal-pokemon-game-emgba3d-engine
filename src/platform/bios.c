@@ -8,7 +8,8 @@ unsigned char REG_BASE[0x400] __attribute__ ((aligned (4)));
 unsigned char PLTT[PLTT_SIZE] __attribute__ ((aligned (4)));
 unsigned char VRAM_[VRAM_SIZE] __attribute__ ((aligned (4)));
 unsigned char OAM[OAM_SIZE] __attribute__ ((aligned (4)));
-unsigned char FLASH_BASE[131072] __attribute__ ((aligned (4)));
+// FLASH_BASE (the cartridge save image) lives in agb_flash_pc.c so it survives
+// a soft reset together with the rest of the cartridge state.
 struct SoundInfo *SOUND_INFO_PTR;
 
 static uint32_t CPUReadMemory(const void *src)

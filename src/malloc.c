@@ -226,6 +226,8 @@ const char *MemBlockLocation(const struct MemBlock *block)
     // The 25-bit packed location only round-trips for GBA ROM addresses.
     return NULL;
 #else
+#line 225 // gba-line
     return (const char *)(ROM_START | (block->locationHi << 14) | block->locationLo);
 #endif
+#line 226 // gba-line
 }

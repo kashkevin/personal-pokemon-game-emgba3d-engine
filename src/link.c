@@ -228,6 +228,7 @@ bool8 IsWirelessAdapterConnected(void)
 #ifdef PORTABLE
     return FALSE; // no GBA Wireless Adapter on PC
 #endif
+#line 228 // gba-line
     SetWirelessCommType1();
     InitRFUAPI();
     if (rfu_LMAN_REQBN_softReset_and_checkID() == RFU_ID)

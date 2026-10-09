@@ -6,6 +6,10 @@
 #include "malloc.h"
 #include "menu.h"
 #include "decompress.h"
+#ifdef PORTABLE
+#include "platform.h"
+#endif
+#line 9 // gba-line
 
 #define DISPCNT_ALL_BG_AND_MODE_BITS    (DISPCNT_BG_ALL_ON | 0x7)
 
@@ -482,6 +486,10 @@ bool32 IsDma3ManagerBusyWithBgCopy(void)
 {
     int i;
 
+#ifdef PORTABLE
+retry:
+#endif
+#line 485 // gba-line
     for (i = 0; i < 0x80; i++)
     {
         u8 div = i / 0x20;
@@ -492,6 +500,15 @@ bool32 IsDma3ManagerBusyWithBgCopy(void)
             s8 reqSpace = CheckForSpaceForDma3Request(i);
             if (reqSpace == -1)
             {
+#ifdef PORTABLE
+                // Some callers poll this in a tight loop (DoMapLoadLoop) while the
+                // GBA's VBlank interrupt drains the DMA3 queue. Natively interrupts
+                // run only between frames, so a caller that keeps spinning within
+                // one frame lets the frame end, like a lag frame on the GBA.
+                if (Platform_SpinWaitForVBlank())
+                    goto retry;
+#endif
+#line 495 // gba-line
                 return TRUE;
             }
 
@@ -1206,6 +1223,7 @@ bool32 IsTileMapOutsideWram(u32 bg)
     // No IWRAM/EWRAM address ranges natively; only a missing tilemap is invalid.
     return sGpuBgConfigs2[bg].tilemap == NULL;
 #else
+#line 1205 // gba-line
     if (sGpuBgConfigs2[bg].tilemap > (void *)IWRAM_END)
         return TRUE;
     else if (sGpuBgConfigs2[bg].tilemap == NULL)
@@ -1213,4 +1231,5 @@ bool32 IsTileMapOutsideWram(u32 bg)
     else
         return FALSE;
 #endif
+#line 1211 // gba-line
 }

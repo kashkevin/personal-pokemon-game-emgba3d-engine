@@ -503,6 +503,13 @@ static u8 CopySaveSlotData(u16 sectorId, struct SaveSectorLocation *locations)
         id = gReadWriteSector->id;
         if (id == 0)
             gLastWrittenSector = i;
+#ifdef PORTABLE
+        // Erased flash reads id 0xFFFF. The GBA then reads a stray locations[id]
+        // without harm; natively that read can fault. Such a sector is never valid.
+        if (id >= NUM_SECTORS_PER_SLOT)
+            continue;
+#endif
+#line 506 // gba-line
 
         checksum = CalculateChecksum(gReadWriteSector->data, locations[id].size);
 
@@ -537,6 +544,11 @@ static u8 GetSaveValidStatus(const struct SaveSectorLocation *locations)
         if (gReadWriteSector->signature == SECTOR_SIGNATURE)
         {
             signatureValid = TRUE;
+#ifdef PORTABLE
+            if (gReadWriteSector->id >= NUM_SECTORS_PER_SLOT)
+                continue; // corrupt sector id: never valid (out-of-bounds read on the GBA)
+#endif
+#line 540 // gba-line
             checksum = CalculateChecksum(gReadWriteSector->data, locations[gReadWriteSector->id].size);
             if (gReadWriteSector->checksum == checksum)
             {
@@ -569,6 +581,11 @@ static u8 GetSaveValidStatus(const struct SaveSectorLocation *locations)
         if (gReadWriteSector->signature == SECTOR_SIGNATURE)
         {
             signatureValid = TRUE;
+#ifdef PORTABLE
+            if (gReadWriteSector->id >= NUM_SECTORS_PER_SLOT)
+                continue; // corrupt sector id: never valid (out-of-bounds read on the GBA)
+#endif
+#line 572 // gba-line
             checksum = CalculateChecksum(gReadWriteSector->data, locations[gReadWriteSector->id].size);
             if (gReadWriteSector->checksum == checksum)
             {

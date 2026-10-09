@@ -975,12 +975,14 @@ bool8 SetUpCopyrightScreenFrlg(void)
                 if (sGcmb.gcmb_field_2 == 2)
                 {
 #ifndef PORTABLE // GameCube link multiboot needs the GBA memory map
+#line 977 // gba-line
                     if (*(u32 *)(EWRAM_START + 0xAC) == COLOSSEUM_GAME_CODE)
                     {
                         CpuCopy16(gMultiBootProgram_PokemonColosseum_Start, (void *)EWRAM_START, 0x28000);
                         *(u32 *)(EWRAM_START + 0xAC) = COLOSSEUM_GAME_CODE;
                     }
 #endif
+#line 982 // gba-line
                     GameCubeMultiBoot_ExecuteProgram(&sGcmb);
                 }
             }

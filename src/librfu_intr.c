@@ -406,8 +406,10 @@ static void Callback_Dummy_M(int reqCommandId, int error, void (*callbackM)(...)
     if (callbackM != NULL)
         callbackM(reqCommandId, error);
 #else
+#line 405 // gba-line
     asm("bx r2");
 #endif
+#line 406 // gba-line
 }
 
 NAKED
@@ -417,8 +419,10 @@ static void Callback_Dummy_S(u16 reqCommandId, void (*callbackS)(u16))
     if (callbackS != NULL)
         callbackS(reqCommandId);
 #else
+#line 411 // gba-line
     asm("bx r1");
 #endif
+#line 412 // gba-line
 }
 
 NAKED
@@ -428,6 +432,8 @@ static void Callback_Dummy_ID(void (*callbackId)(void))
     if (callbackId != NULL)
         callbackId();
 #else
+#line 417 // gba-line
     asm("bx r0");
 #endif
+#line 418 // gba-line
 }

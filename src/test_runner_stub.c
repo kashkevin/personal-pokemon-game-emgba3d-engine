@@ -1,7 +1,11 @@
 #include "global.h"
 #include "test_runner.h"
 
+#ifndef PORTABLE // PE/COFF (MinGW) does not resolve weak data; the native build has no test runner
+#line 4 // gba-line
 __attribute__((weak))
+#endif
+#line 5 // gba-line
 const bool8 gTestRunnerEnabled = FALSE;
 
 // The Makefile patches gTestRunnerHeadless as part of make test.

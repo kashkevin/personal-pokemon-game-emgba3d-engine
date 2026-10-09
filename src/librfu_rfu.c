@@ -138,6 +138,7 @@ u16 rfu_initializeAPI(u32 *APIBuffer, u16 buffByteSize, IntrFunc *sioIntrTable_p
     // into RAM and executes it, which cannot work natively.
     return ERR_RFU_API_BUFF_ADR;
 #else
+#line 136 // gba-line
     u16 i;
     u16 buffByteSizeMax;
 
@@ -203,6 +204,7 @@ u16 rfu_initializeAPI(u32 *APIBuffer, u16 buffByteSize, IntrFunc *sioIntrTable_p
     gRfuFixed->fastCopyPtr = (void *)gRfuFixed->fastCopyBuffer + 1;
     return 0;
 #endif // PORTABLE
+#line 200 // gba-line
 }
 
 static void rfu_STC_clearAPIVariables(void)

@@ -192,9 +192,11 @@ void SetSpeaker(struct ScriptContext *ctx)
     else if (arg >= 0x10000)
         speaker = (const u8 *)arg;
 #else
+#line 190 // gba-line
     else if (arg >= ROM_START && arg < ROM_END)
         speaker = (const u8 *)arg;
 #endif
+#line 192 // gba-line
 
     gSpeakerName = speaker;
 }

@@ -1117,6 +1117,7 @@ static u8 SetUpCopyrightScreen(void)
             if (gMultibootProgramStruct.gcmb_field_2 == 2)
             {
 #ifndef PORTABLE // GameCube link multiboot needs the GBA memory map
+#line 1119 // gba-line
                 // check the multiboot ROM header game code to see if we already did this
                 if (*(u32 *)(EWRAM_START + 0xAC) == COLOSSEUM_GAME_CODE)
                 {
@@ -1124,6 +1125,7 @@ static u8 SetUpCopyrightScreen(void)
                     *(u32 *)(EWRAM_START + 0xAC) = COLOSSEUM_GAME_CODE;
                 }
 #endif
+#line 1125 // gba-line
                 GameCubeMultiBoot_ExecuteProgram(&gMultibootProgramStruct);
             }
         }

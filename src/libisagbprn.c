@@ -3,6 +3,7 @@
 #ifdef PORTABLE
 #include <stdlib.h>
 #endif
+#line 3 // gba-line
 #include "gba/gba.h"
 #include "config/general.h"
 #include "malloc.h"
@@ -247,6 +248,7 @@ void MgbaPrintf(s32 level, const char *ptr, ...)
     fprintf(stderr, "[game %s] %s\n", level < 5 ? sLevelNames[level] : "LOG", buffer);
 }
 #else
+#line 216 // gba-line
 bool32 MgbaOpen(void)
 {
     *REG_DEBUG_ENABLE = 0xC0DE;
@@ -275,6 +277,7 @@ void MgbaPrintf(s32 level, const char *ptr, ...)
     *REG_DEBUG_FLAGS = level | 0x100;
 }
 #endif
+#line 243 // gba-line
 
 void MgbaAssert(const char *pFile, s32 nLine, const char *pExpression, bool32 nStopProgram)
 {
@@ -284,8 +287,10 @@ void MgbaAssert(const char *pFile, s32 nLine, const char *pExpression, bool32 nS
 #ifdef PORTABLE
         abort();
 #else
+#line 249 // gba-line
         asm(".hword 0xEFFF");
 #endif
+#line 250 // gba-line
     }
     else
     {

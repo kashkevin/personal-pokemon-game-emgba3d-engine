@@ -354,6 +354,7 @@ static void CrashScreen(enum Mode mode, const void *return1, const void *return0
     }
 #endif
 #ifndef PORTABLE
+#line 348 // gba-line
     if (!backup)
     {
         extern char __iwram_end[];
@@ -365,6 +366,7 @@ static void CrashScreen(enum Mode mode, const void *return1, const void *return0
         }
     }
 #endif
+#line 358 // gba-line
 
     if (!backup)
     {

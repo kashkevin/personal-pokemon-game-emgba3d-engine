@@ -6330,6 +6330,14 @@ bool32 SpeciesHasGenderDifferences(enum Species species)
 static struct PartyState *GetBattlerPartyStateByPokemon(struct Pokemon *partyMon, enum BattleTrainer trainer)
 {
     struct Pokemon *party = GetTrainerParty(trainer);
+#ifdef PORTABLE
+    // Outside battle (e.g. the overworld time-of-day form check) gBattleStruct is
+    // NULL. The GBA forms an address in the BIOS and may read it; natively that
+    // read can fault. There is no battle party state, so report none.
+    if (gBattleStruct == NULL)
+        return NULL;
+#endif
+#line 6333 // gba-line
 
     for (int i = 0; i < PARTY_SIZE; i++)
     {

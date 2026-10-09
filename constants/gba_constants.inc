@@ -32,6 +32,15 @@
 	.set ROM,      0x8000000
 	.set ROM_SIZE, 0x2000000
 
+	@ Tag for script commands/specials/natives that call Script_RequestEffects.
+	@ The GBA calls them through ROM mirror 1 (address + ROM_SIZE); the native
+	@ PC build has no mirror and tags bit 0 instead (see SCRIPT_FUNC_UNTAG).
+	.ifdef PORTABLE
+	.set SCRIPT_EFFECTS_TAG, 1
+	.else
+	.set SCRIPT_EFFECTS_TAG, ROM_SIZE
+	.endif
+
 	.set SOUND_INFO_PTR, 0x3007FF0
 	.set INTR_CHECK,     0x3007FF8
 	.set INTR_VECTOR,    0x3007FFC

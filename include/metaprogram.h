@@ -215,6 +215,12 @@ Input must be of the form (upper << lower) where upper can be up to 7, lower up 
  *
  * Because 'cond' must be known at compile-time, this is rarely useful
  * outside macros. */
+#ifdef NATIVE_SANITIZE
+// Native UBSan build only: the sanitizer instruments the never-evaluated NULL
+// load below and reports it; this form has the same meaning without it.
+#define if_comptime(cond) if (__builtin_constant_p(cond) && (cond))
+#else
 #define if_comptime(cond) if (__builtin_constant_p((cond) ? 0 : *(int *)0))
+#endif
 
 #endif
