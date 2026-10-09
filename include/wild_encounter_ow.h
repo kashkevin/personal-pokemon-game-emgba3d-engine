@@ -86,6 +86,7 @@ bool32 DespawnOWEDueToNPCCollision(struct ObjectEvent *obstacle, struct ObjectEv
 void DespawnAllOverworldWildEncounters(enum TypeOWE oweType, u32 flags);
 u32 TryAndDespawnOldestGeneratedOWE_ToFreeObject();
 void DespawnOWEOnBattleStart(void);
+void MPOWE_OnWildBattleEnd(u32 outcome);
 void TryDespawnOWEsCrossingMapConnection(void);
 void RestoreSavedOWEBehaviorState(struct ObjectEvent *owe, struct Sprite *sprite);
 void SetSavedOWEMovementState(struct ObjectEvent *owe);

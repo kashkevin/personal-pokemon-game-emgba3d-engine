@@ -1,6 +1,7 @@
 #include "global.h"
 #include <stddef.h>
 #include "multiplayer.h"
+#include "multiplayer_world.h"
 #include "multiplayer_save.h"
 #include "multiplayer_battle.h"
 #include "multiplayer_menu.h"
@@ -89,7 +90,18 @@ bool32 Multiplayer_IsRemoteObject(const struct ObjectEvent *objectEvent)
          && objectEvent->active && objectEvent->localId == MULTIPLAYER_LOCAL_ID_BASE + i)
             return TRUE;
     }
-    return FALSE;
+    // Other players' followers and mounts are equally non-blocking.
+    return MultiplayerWorld_IsRemoteFollower(objectEvent);
+}
+
+u32 Multiplayer_GetRemotePlayerId(u32 i)
+{
+    return i < MULTIPLAYER_MAX_PEERS ? sRemotes[i].peer.playerId : 0;
+}
+
+u8 Multiplayer_GetRemoteMovementMode(u32 i)
+{
+    return i < MULTIPLAYER_MAX_PEERS ? sRemotes[i].peer.pose.movementMode : 0;
 }
 
 static void RemoveRemote(u32 i)
@@ -116,6 +128,7 @@ static void RemoveRemote(u32 i)
 void Multiplayer_LeaveField(void)
 {
     u32 i;
+    MultiplayerWorld_LeaveField();
     for (i = 0; i < MULTIPLAYER_MAX_PEERS; i++)
         RemoveRemote(i);
 }
@@ -355,9 +368,18 @@ static void UpdateRemote(u32 i)
     // Normal avatar graphics already include dedicated running frames for both
     // trainers. Reuse their native animation table without another sprite,
     // palette, frame cache, decompression, or save field.
-    graphicsId = GetPlayerAvatarGraphicsIdByStateIdAndGender(
-        pose->movementMode == MULTIPLAYER_MOVEMENT_RUN ? PLAYER_AVATAR_STATE_NORMAL : pose->movementMode,
-        pose->gender);
+    {
+        u16 mountSpecies;
+        u8 mountFlags, mountState;
+        MultiplayerWorld_GetPeerMount(sRemotes[i].peer.playerId, &mountSpecies, &mountFlags, &mountState);
+        if (mountState == MP_WORLD_MOUNT_RIDING && pose->movementMode != PLAYER_AVATAR_STATE_SURFING
+         && pose->movementMode != PLAYER_AVATAR_STATE_UNDERWATER)
+            graphicsId = GetPlayerAvatarGraphicsIdByStateIdAndGender(PLAYER_AVATAR_STATE_SURFING, pose->gender);
+        else
+            graphicsId = GetPlayerAvatarGraphicsIdByStateIdAndGender(
+                pose->movementMode == MULTIPLAYER_MOVEMENT_RUN ? PLAYER_AVATAR_STATE_NORMAL : pose->movementMode,
+                pose->gender);
+    }
     if (id >= OBJECT_EVENTS_COUNT || !Multiplayer_IsRemoteObject(&gObjectEvents[id]))
     {
         struct ObjectEventTemplate template = {0};
@@ -445,8 +467,10 @@ void Multiplayer_Tick(void)
     if (!ready || !sConnected)
     {
         Multiplayer_LeaveField();
+        MultiplayerWorld_Tick(FALSE, sConnected);
         return;
     }
     for (i = 0; i < MULTIPLAYER_MAX_PEERS; i++)
         UpdateRemote(i);
+    MultiplayerWorld_Tick(TRUE, sConnected);
 }

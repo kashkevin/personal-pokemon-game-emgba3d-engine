@@ -1,4 +1,5 @@
 #include "global.h"
+#include "multiplayer_world.h"
 #include "battle_pike.h"
 #include "battle_pyramid.h"
 #include "datetime.h"
@@ -316,6 +317,17 @@ void RtcCalcTimeDifference(struct SiiRtcInfo *rtc, struct Time *result, struct T
 
 void RtcCalcLocalTime(void)
 {
+    // Project: while connected, every time-of-day system follows the host's
+    // persistent shared world clock (owner choice: one world day = 2 hours).
+    if (MultiplayerWorld_HasClock())
+    {
+        u32 seconds = MultiplayerWorld_GetSeconds();
+        gLocalTime.days = seconds / 86400;
+        gLocalTime.hours = (seconds / 3600) % 24;
+        gLocalTime.minutes = (seconds / 60) % 60;
+        gLocalTime.seconds = seconds % 60;
+        return;
+    }
     RtcGetInfo(&sRtc);
     RtcCalcTimeDifference(&sRtc, &gLocalTime, &gSaveBlock2Ptr->localTimeOffset);
 }

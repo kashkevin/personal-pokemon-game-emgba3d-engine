@@ -177,6 +177,88 @@ static bool32 CheckValidOWESpecies(enum Species speciesId);
 
 static EWRAM_DATA u8 sOWESpawnCountdown = 0;
 
+// Project rule (owner decision Oct 9, 2026): a wild Pokemon you run away from
+// stays in the world. Its object is removed when the battle starts, so remember
+// its exact overworld identity and put it back once the player has walked a
+// few tiles away (prevents an instant re-battle loop).
+#define OWE_RUN_RETURN_DISTANCE 3
+struct OWERunReturn
+{
+    u8 state; // 0 none, 1 battle in progress, 2 return pending
+    u8 mapGroup;
+    u8 mapNum;
+    u8 localId;
+    u16 graphicsId;
+    s16 x;
+    s16 y;
+    u8 elevation;
+    u8 movementType;
+    u8 level;
+    u8 category;
+};
+static EWRAM_DATA struct OWERunReturn sOWERunReturn = {0};
+
+static void TryReturnRanAwayOWE(void)
+{
+    struct ObjectEvent *player;
+    s32 dx, dy;
+    u32 objectEventId;
+
+    if (sOWERunReturn.state != 2)
+        return;
+    if (sOWERunReturn.mapGroup != gSaveBlock1Ptr->location.mapGroup
+     || sOWERunReturn.mapNum != gSaveBlock1Ptr->location.mapNum)
+    {
+        sOWERunReturn.state = 0;
+        return;
+    }
+    player = &gObjectEvents[gPlayerAvatar.objectEventId];
+    dx = player->currentCoords.x - sOWERunReturn.x;
+    dy = player->currentCoords.y - sOWERunReturn.y;
+    if (dx < 0)
+        dx = -dx;
+    if (dy < 0)
+        dy = -dy;
+    if (dx + dy < OWE_RUN_RETURN_DISTANCE)
+        return;
+    if (GetObjectEventIdByLocalId(sOWERunReturn.localId) < OBJECT_EVENTS_COUNT)
+    {
+        // The slot was reused by a new spawn; the original has wandered off.
+        sOWERunReturn.state = 0;
+        return;
+    }
+    {
+        struct ObjectEventTemplate objectEventTemplate = {
+            .localId = sOWERunReturn.localId,
+            .graphicsId = sOWERunReturn.graphicsId,
+            .x = sOWERunReturn.x - MAP_OFFSET,
+            .y = sOWERunReturn.y - MAP_OFFSET,
+            .elevation = sOWERunReturn.elevation,
+            .movementType = sOWERunReturn.movementType,
+            .trainerType = TRAINER_TYPE_OW_WILD_ENCOUNTER,
+        };
+        objectEventId = SpawnSpecialObjectEvent(&objectEventTemplate);
+    }
+    sOWERunReturn.state = 0;
+    if (objectEventId < OBJECT_EVENTS_COUNT)
+    {
+        struct ObjectEvent *owe = &gObjectEvents[objectEventId];
+        owe->disableCoveringGroundEffects = TRUE;
+        owe->sOverworldEncounterLevel = sOWERunReturn.level;
+        owe->sOverworldEncounterCategory = sOWERunReturn.category;
+    }
+}
+
+void MPOWE_OnWildBattleEnd(u32 outcome)
+{
+    if (sOWERunReturn.state != 1)
+        return;
+    if (outcome == B_OUTCOME_RAN || outcome == B_OUTCOME_PLAYER_TELEPORTED)
+        sOWERunReturn.state = 2;
+    else
+        sOWERunReturn.state = 0;
+}
+
 struct AgeSort
 {
     u8 slot:4;
@@ -231,6 +313,9 @@ const struct FieldEffectInfoOWE gOverworldWildEncounterFieldEffectInfo[] =
 
 void UpdateOverworldWildEncounter(void)
 {
+    if (WE_OW_ENCOUNTERS && !ArePlayerFieldControlsLocked())
+        TryReturnRanAwayOWE();
+
     //Check if possible to spawn.
 
     bool32 shouldSpawnWaterMons = ShouldSpawnWaterOWE();
@@ -1108,6 +1193,23 @@ void DespawnOWEOnBattleStart(void)
 
     if (IsOverworldWildEncounter(owe, OWE_MANUAL))
         FlagSet(GetObjectEventFlagIdByLocalIdAndMap(owe->localId, owe->mapNum, owe->mapGroup));
+
+    sOWERunReturn.state = 0;
+    if (IsOverworldWildEncounter(owe, OWE_GENERATED)
+     && GetOWECategory(owe) >= OWE_CATEGORY_MASS_OUTBREAK && GetOWECategory(owe) < OWE_CATEGORY_UNDEFINED)
+    {
+        sOWERunReturn.state = 1;
+        sOWERunReturn.mapGroup = gSaveBlock1Ptr->location.mapGroup;
+        sOWERunReturn.mapNum = gSaveBlock1Ptr->location.mapNum;
+        sOWERunReturn.localId = owe->localId;
+        sOWERunReturn.graphicsId = owe->graphicsId;
+        sOWERunReturn.x = owe->currentCoords.x;
+        sOWERunReturn.y = owe->currentCoords.y;
+        sOWERunReturn.elevation = owe->currentElevation;
+        sOWERunReturn.movementType = owe->movementType;
+        sOWERunReturn.level = owe->sOverworldEncounterLevel;
+        sOWERunReturn.category = owe->sOverworldEncounterCategory & ~OWE_SAVED_MOVEMENT_STATE_FLAG;
+    }
 
     ClearObjectEvent(owe);
     SetNewOWESpawnCountdown();

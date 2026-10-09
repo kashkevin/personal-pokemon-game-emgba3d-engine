@@ -24,6 +24,7 @@
 #include "main.h"
 #include "multiplayer_battle.h"
 #include "multiplayer.h"
+#include "multiplayer_world.h"
 #include "multiplayer_menu.h"
 #include "multiplayer_reset_admission.h"
 #include "multiplayer_save.h"
@@ -119,6 +120,7 @@ void AgbMain(void)
     SetDefaultFontsPointer();
     InitHeap(gHeap, HEAP_SIZE);
     Multiplayer_Init();
+    MultiplayerWorld_Init();
     MultiplayerSave_Init();
     MultiplayerBattle_Init();
     MultiplayerMenu_Init();

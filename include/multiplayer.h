@@ -64,5 +64,7 @@ void Multiplayer_LeaveField(void);
 void Multiplayer_BeginMapTransition(void);
 void Multiplayer_PrepareSave(void);
 bool32 Multiplayer_IsRemoteObject(const struct ObjectEvent *objectEvent);
+u32 Multiplayer_GetRemotePlayerId(u32 i);
+u8 Multiplayer_GetRemoteMovementMode(u32 i);
 
 #endif

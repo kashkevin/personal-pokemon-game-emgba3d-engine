@@ -318,9 +318,12 @@ bool32 MultiplayerTradeEffects_BeginRecord(const struct Pokemon *received,
     prepared.friendship = resolvedFriendship;
     prepared.candidate = *received;
     partner = *sent;
+    // Owner decision: existing later-generation moves (e.g. Leafage) trade
+    // unchanged. Only identifiers outside the engine's move table are refused;
+    // moves newly learned on evolution still come from the Gen6 learnset.
     for (i = 0; i < MAX_MON_MOVES; i++)
-        if (GetMonData(&prepared.candidate, MON_DATA_MOVE1 + i) >= MOVES_COUNT_GEN6
-         || GetMonData(&partner, MON_DATA_MOVE1 + i) >= MOVES_COUNT_GEN6)
+        if (GetMonData(&prepared.candidate, MON_DATA_MOVE1 + i) >= MOVES_COUNT
+         || GetMonData(&partner, MON_DATA_MOVE1 + i) >= MOVES_COUNT)
             return FALSE;
     SetMonData(&prepared.candidate, MON_DATA_FRIENDSHIP, &prepared.friendship);
     target = GetEvolutionTargetSpecies(&prepared.candidate, EVO_MODE_TRADE,

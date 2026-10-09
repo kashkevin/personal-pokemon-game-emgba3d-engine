@@ -647,3 +647,6 @@ gSpecials::
 	def_special MultiplayerStaticReset_CaptureMew
 	def_special MultiplayerStaticReset_ReturnTicketSource
 	def_special MultiplayerStaticReset_ForgetMew
+	def_special MultiplayerWorld_TryClaimEvent
+	def_special MultiplayerWorld_StartEventBattle
+	def_special MultiplayerWorld_ReportEventResult
