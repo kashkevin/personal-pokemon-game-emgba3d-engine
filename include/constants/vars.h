@@ -248,7 +248,7 @@
 #define VAR_GIFT_UNUSED_5                                0x40E2 // Var is written to, but never read
 #define VAR_GIFT_UNUSED_6                                0x40E3 // Var is written to, but never read
 #define VAR_GIFT_UNUSED_7                                0x40E4 // var is written to, but never read
-#define VAR_UNUSED_0x40E5                                0x40E5 // Unused Var
+#define VAR_MP_WALLET_AMOUNT_HI                          0x40E5 // multiplayer: money that adjustment moved (high)
 #define VAR_DAILY_SLOTS                                  0x40E6
 #define VAR_DAILY_WILDS                                  0x40E7
 #define VAR_DAILY_BLENDER                                0x40E8
@@ -273,8 +273,8 @@
 #define VAR_MP_VOLTORB_1_RESET_VERSION                   0x40FB // Hoenn pilot: zero or MP_STATIC_RESET_VERSION_1
 #define VAR_MP_VOLTORB_1_RESET_COUNT_LO                  0x40FC
 #define VAR_MP_VOLTORB_1_RESET_COUNT_HI                  0x40FD
-#define VAR_UNUSED_0x40FE                                0x40FE // Unused Var
-#define VAR_UNUSED_0x40FF                                0x40FF // Unused Var
+#define VAR_MP_WALLET_SEQ                                0x40FE // multiplayer: last applied wager wallet adjustment
+#define VAR_MP_WALLET_AMOUNT_LO                          0x40FF // multiplayer: money that adjustment moved (low)
 
 #define VARS_END                                         0x40FF
 #define VARS_COUNT                                       (VARS_END - VARS_START + 1)

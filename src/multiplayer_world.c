@@ -14,6 +14,7 @@
 #include "main.h"
 #include "map_name_popup.h"
 #include "malloc.h"
+#include "money.h"
 #include "overworld.h"
 #include "palette.h"
 #include "pokemon.h"
@@ -44,6 +45,7 @@ _Static_assert(offsetof(struct MultiplayerWorldMailbox, flags) == 48, "World fla
 _Static_assert(offsetof(struct MultiplayerWorldMailbox, peers) == 68, "World peers offset");
 _Static_assert(offsetof(struct MultiplayerWorldMailbox, event) == 128, "World event offset");
 _Static_assert(offsetof(struct MultiplayerWorldMailbox, notice) == 160, "World notice offset");
+_Static_assert(offsetof(struct MultiplayerWorldMailbox, walletSeq) == 228, "World wallet offset");
 _Static_assert(MP_WORLD_LOCAL_ID_FOLLOWER_BASE == MULTIPLAYER_LOCAL_ID_BASE + MULTIPLAYER_MAX_PEERS, "Follower IDs follow avatars");
 _Static_assert(MP_WORLD_LOCAL_ID_EVENT < LOCALID_OW_ENCOUNTER_END - OWE_SPAWNS_MAX + 1, "Event ID outside generated encounters");
 
@@ -68,6 +70,8 @@ struct WorldInbound
     struct MultiplayerWorldPeer peers[MP_WORLD_MAX_PEERS];
     struct MultiplayerWorldEvent event;
     struct MultiplayerWorldNotice notice;
+    u32 walletSeq;
+    s32 walletDelta;
 };
 
 struct RemoteFollower
@@ -93,6 +97,9 @@ static EWRAM_DATA bool8 sEventBattleActive = FALSE;
 static EWRAM_DATA u8 sEventResult = 0;
 static EWRAM_DATA u32 sPendingResultEventId = 0;
 static EWRAM_DATA u32 sHiddenEventId = 0; // caught here; hidden until the host drops it
+static EWRAM_DATA bool8 sWalletReceiptSent = FALSE; // the save's last receipt, once per connection
+static EWRAM_DATA bool8 sWalletNoticePending = FALSE;
+static EWRAM_DATA char sWalletNotice[MP_WORLD_NOTICE_CHARS + 1] = {0};
 
 static void Task_WorldNotice(u8 taskId);
 static bool32 IsBattleOnlyForm(u16 species);
@@ -120,6 +127,8 @@ void MultiplayerWorld_Init(void)
     sEventResult = 0;
     sPendingResultEventId = 0;
     sHiddenEventId = 0;
+    sWalletReceiptSent = FALSE;
+    sWalletNoticePending = FALSE;
     gMultiplayerWorldMailbox.abiVersion = MP_WORLD_ABI_VERSION;
     gMultiplayerWorldMailbox.byteSize = sizeof(gMultiplayerWorldMailbox);
     if (*(const volatile u32 *)&gMultiplayerWorldAbiVersion == MP_WORLD_ABI_VERSION)
@@ -143,6 +152,8 @@ static void ReadInbound(void)
         copy.peers[i] = *(const struct MultiplayerWorldPeer *)&gMultiplayerWorldMailbox.peers[i];
     copy.event = *(const struct MultiplayerWorldEvent *)&gMultiplayerWorldMailbox.event;
     copy.notice = *(const struct MultiplayerWorldNotice *)&gMultiplayerWorldMailbox.notice;
+    copy.walletSeq = gMultiplayerWorldMailbox.walletSeq;
+    copy.walletDelta = gMultiplayerWorldMailbox.walletDelta;
     if (generation != gMultiplayerWorldMailbox.inboundGeneration)
         return;
     sSeenInboundGeneration = generation;
@@ -167,6 +178,9 @@ static void PublishLocalState(void)
     state.mountState = sLocalMount.mountState;
     state.mountSpecies = sLocalMount.mountSpecies;
     state.mountFlags = sLocalMount.mountFlags;
+    // The host derives this save's next wallet adjustment from it.
+    if (gMain.callback2 == CB2_Overworld)
+        state.walletSeqLow = VarGet(VAR_MP_WALLET_SEQ) & 0xFF;
     {
         // The look this player uses: the host's, or a newly saved one the
         // host has not confirmed yet (MP_WORLD_ACTION_APPEARANCE).
@@ -186,7 +200,7 @@ static bool32 ActionPending(void)
         && gMultiplayerWorldMailbox.action.seq != sInbound.actionAck;
 }
 
-static void PostAction(u8 kind, u8 result, u32 eventId, u16 species)
+static void PostActionWithAmount(u8 kind, u8 result, u32 eventId, u16 species, u32 amount)
 {
     struct MultiplayerWorldAction action = {0};
     u32 generation = (gMultiplayerWorldMailbox.localGeneration + 1) | 1;
@@ -198,9 +212,15 @@ static void PostAction(u8 kind, u8 result, u32 eventId, u16 species)
     action.result = result;
     action.eventId = eventId;
     action.species = species;
+    action.amount = amount;
     gMultiplayerWorldMailbox.localGeneration = generation;
     *(struct MultiplayerWorldAction *)&gMultiplayerWorldMailbox.action = action;
     gMultiplayerWorldMailbox.localGeneration = generation + 1;
+}
+
+static void PostAction(u8 kind, u8 result, u32 eventId, u16 species)
+{
+    PostActionWithAmount(kind, result, eventId, species, 0);
 }
 
 bool32 MultiplayerWorld_PostAppearanceSaved(void)
@@ -895,8 +915,8 @@ static void FlushPendingResult(void)
 
 static const u8 sAsciiToGame[96] =
 {
-    // ' ' ... '/'
-    0x00, 0xAB, 0xB2, 0x00, 0x00, 0x5B, 0x2D, 0xB4, 0x5C, 0x5D, 0x00, 0x2E, 0xB8, 0xAE, 0xAD, 0xBA,
+    // ' ' ... '/' ('$' is the money sign)
+    0x00, 0xAB, 0xB2, 0x00, CHAR_CURRENCY, 0x5B, 0x2D, 0xB4, 0x5C, 0x5D, 0x00, 0x2E, 0xB8, 0xAE, 0xAD, 0xBA,
     // '0' ... '?'
     0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xF0, 0x00, 0x00, 0x35, 0x00, 0xAC,
     // '@' 'A' ... 'O'
@@ -1008,6 +1028,110 @@ static void UpdateNotice(bool32 fieldReady)
 }
 
 // ---------------------------------------------------------------------------
+// Wager wallet. The host numbers every money movement for each player; the
+// save remembers the last one it applied (VAR_MP_WALLET_SEQ), so each moves
+// money exactly once per save, and an older reloaded save applies it again
+// together with its older money. A debit collects at most the money on hand
+// and the receipt tells the host exactly what moved: winners are credited
+// only what losers actually paid.
+
+static u32 SavedWalletAmount(void)
+{
+    return VarGet(VAR_MP_WALLET_AMOUNT_LO) | ((u32)VarGet(VAR_MP_WALLET_AMOUNT_HI) << 16);
+}
+
+static char *AppendAscii(char *dest, const char *src)
+{
+    while (*src != 0)
+        *dest++ = *src++;
+    return dest;
+}
+
+static char *AppendMoneyAscii(char *dest, u32 amount)
+{
+    char digits[12];
+    u32 count = 0, i;
+
+    *dest++ = '$';
+    do
+    {
+        digits[count++] = '0' + amount % 10;
+        amount /= 10;
+    } while (amount != 0 && count < 9);
+    for (i = count; i > 0; i--)
+    {
+        *dest++ = digits[i - 1];
+        if (i > 1 && (i - 1) % 3 == 0)
+            *dest++ = ',';
+    }
+    return dest;
+}
+
+static void QueueWalletNotice(u8 result, u32 amount)
+{
+    char *end = sWalletNotice;
+    if (amount == 0)
+        return;
+    end = AppendAscii(end, result == MP_WORLD_WALLET_CREDIT ? "WAGER WINNINGS!|" : "WAGER PAID|");
+    end = AppendMoneyAscii(end, amount);
+    end = AppendAscii(end, result == MP_WORLD_WALLET_CREDIT ? " added to your money" : " left your money");
+    *end = 0;
+    sWalletNoticePending = TRUE;
+}
+
+static void UpdateWallet(bool32 fieldReady)
+{
+    u32 applied, seq, money, amount;
+    s32 delta;
+    u8 result;
+
+    // Only a loaded save in a calm field moves money or reports receipts.
+    if (!sHaveInbound || !fieldReady || gMain.callback2 != CB2_Overworld || ActionPending())
+        return;
+    applied = VarGet(VAR_MP_WALLET_SEQ);
+    if (!sWalletReceiptSent)
+    {
+        // Once per connection the host hears this save's last receipt again,
+        // so one lost with a crash or a disconnect still pays the winner.
+        sWalletReceiptSent = TRUE;
+        if (applied != 0)
+        {
+            PostActionWithAmount(MP_WORLD_ACTION_WALLET, MP_WORLD_WALLET_RECEIPT, applied, 0, SavedWalletAmount());
+            return;
+        }
+    }
+    seq = sInbound.walletSeq;
+    delta = sInbound.walletDelta;
+    if (seq == 0 || seq > 0xFFFF || seq != ((applied + 1) & 0xFFFF)
+     || delta == 0 || delta > MAX_MONEY || delta < -MAX_MONEY)
+        return;
+    money = GetMoney(&gSaveBlock1Ptr->money);
+    if (delta > 0)
+    {
+        amount = delta;
+        if (money >= MAX_MONEY)
+            amount = 0;
+        else if (amount > MAX_MONEY - money)
+            amount = MAX_MONEY - money;
+        AddMoney(&gSaveBlock1Ptr->money, amount);
+        result = MP_WORLD_WALLET_CREDIT;
+    }
+    else
+    {
+        amount = -delta;
+        if (amount > money)
+            amount = money;
+        RemoveMoney(&gSaveBlock1Ptr->money, amount);
+        result = MP_WORLD_WALLET_DEBIT;
+    }
+    VarSet(VAR_MP_WALLET_SEQ, seq);
+    VarSet(VAR_MP_WALLET_AMOUNT_LO, amount & 0xFFFF);
+    VarSet(VAR_MP_WALLET_AMOUNT_HI, amount >> 16);
+    PostActionWithAmount(MP_WORLD_ACTION_WALLET, result, seq, 0, amount);
+    QueueWalletNotice(result, amount);
+}
+
+// ---------------------------------------------------------------------------
 
 void MultiplayerWorld_LeaveField(void)
 {
@@ -1029,6 +1153,7 @@ void MultiplayerWorld_Tick(bool32 fieldReady, bool32 connected)
     if (!connected)
     {
         sHaveInbound = FALSE;
+        sWalletReceiptSent = FALSE;
         memset(&sInbound, 0, sizeof(sInbound));
     }
     PublishLocalState();
@@ -1054,4 +1179,7 @@ void MultiplayerWorld_Tick(bool32 fieldReady, bool32 connected)
         UpdateFollower(i);
     UpdateEventObject();
     UpdateNotice(fieldReady);
+    UpdateWallet(fieldReady);
+    if (sWalletNoticePending && MultiplayerWorld_ShowLocalNotice(sWalletNotice))
+        sWalletNoticePending = FALSE;
 }

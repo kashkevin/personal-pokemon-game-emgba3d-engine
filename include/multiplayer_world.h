@@ -12,7 +12,8 @@
 //    RTC for every time-of-day system while connected;
 //  * world events: the host's current event Pokemon, its claim state and the
 //    player's claim/result actions;
-//  * notices: short host messages shown in an overworld pop-up.
+//  * notices: short host messages shown in an overworld pop-up;
+//  * wallet: PvP wager money moves through numbered per-save adjustments.
 
 #define MP_WORLD_MAGIC              0x31574D45u // EMW1
 #define MP_WORLD_ABI_VERSION        1
@@ -47,6 +48,11 @@
 #define MP_WORLD_ACTION_RESULT      2
 #define MP_WORLD_ACTION_RELEASE     3
 #define MP_WORLD_ACTION_APPEARANCE  4 // the local state carries a newly saved look
+#define MP_WORLD_ACTION_WALLET      5 // eventId: wallet sequence applied, amount: money moved
+
+#define MP_WORLD_WALLET_RECEIPT     0 // re-sent receipt of the save's last adjustment
+#define MP_WORLD_WALLET_CREDIT      1
+#define MP_WORLD_WALLET_DEBIT       2
 
 #define MP_WORLD_RESULT_CAUGHT      1
 #define MP_WORLD_RESULT_DEFEATED    2
@@ -61,7 +67,7 @@ struct MultiplayerWorldState
     u8 mountState;
     u16 mountSpecies;
     u8 mountFlags;
-    u8 reserved;
+    u8 walletSeqLow; // local record only: low byte of VAR_MP_WALLET_SEQ (zero for peers)
     u8 appearance[MP_WORLD_APPEARANCE_BYTES];
 };
 
@@ -94,7 +100,7 @@ struct MultiplayerWorldAction
     u8 result;
     u16 species;
     u32 eventId;
-    u32 reserved;
+    u32 amount; // MP_WORLD_ACTION_WALLET only
 };
 
 struct MultiplayerWorldNotice
@@ -121,7 +127,11 @@ struct MultiplayerWorldMailbox
     struct MultiplayerWorldPeer peers[MP_WORLD_MAX_PEERS];
     struct MultiplayerWorldEvent event;
     struct MultiplayerWorldNotice notice;
-    u8 reserved[28];
+    // Wager wallet: the next adjustment for this save (sequence zero = none).
+    // Applied once when walletSeq == VAR_MP_WALLET_SEQ + 1.
+    u32 walletSeq;
+    s32 walletDelta;
+    u8 reserved[20];
 };
 
 extern volatile struct MultiplayerWorldMailbox gMultiplayerWorldMailbox;

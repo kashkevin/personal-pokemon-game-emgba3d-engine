@@ -99,6 +99,7 @@ static u8 Glyph(u8 c)
     case ')': return CHAR_RIGHT_PAREN; case '<': return CHAR_LESS_THAN;
     case '>': return CHAR_GREATER_THAN; case '\'': return CHAR_SGL_QUOTE_RIGHT;
     case '"': return CHAR_DBL_QUOTE_RIGHT; case '*': return CHAR_MULT_SIGN;
+    case '$': return CHAR_CURRENCY;
     default: return CHAR_QUESTION_MARK;
     }
 }
