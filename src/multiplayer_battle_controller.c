@@ -24,7 +24,11 @@ static EWRAM_DATA u8 sPending[MAX_BATTLERS_COUNT] = {0};
 static EWRAM_DATA u8 sDone[MAX_BATTLERS_COUNT] = {0};
 static EWRAM_DATA bool8 sReplied[MAX_BATTLERS_COUNT] = {0};
 
-static u32 ControllerCount(void) { return MultiplayerBattle_IsFullMulti() ? 4 : 2; }
+// Battlers on the field and the cores exchanging controller blocks differ in
+// co-op Gym battles (four battlers, two cores; the master owns both AI foes).
+static u32 BattlerCount(void) { return MultiplayerBattle_GetBattlerCount(); }
+static u32 CoreCount(void) { return MultiplayerBattle_GetPlayerCount(); }
+static u32 Owner(u32 battler) { return MultiplayerBattle_GetBattlerOwner(battler); }
 
 static u16 Half(const u8 *p) { return p[0] | p[1] << 8; }
 static u32 Word(const u8 *p) { return Half(p) | (u32)Half(p + 2) << 16; }
@@ -80,7 +84,7 @@ static bool32 TextBufferValid(const u8 *p)
             output += 64; break;
         case B_BUFF_MON_NICK_WITH_PREFIX: case B_BUFF_MON_NICK_WITH_PREFIX_LOWER: case B_BUFF_MON_NICK:
             n = 3;
-            if (i + n >= TEXT_BUFF_ARRAY_COUNT || p[i + 1] >= ControllerCount() || p[i + 2] >= PARTY_SIZE) return FALSE;
+            if (i + n >= TEXT_BUFF_ARRAY_COUNT || p[i + 1] >= BattlerCount() || p[i + 2] >= PARTY_SIZE) return FALSE;
             output += 32; break;
         case B_BUFF_TYPE: case B_BUFF_STAT: case B_BUFF_NEGATIVE_FLAVOR:
             n = 2;
@@ -105,8 +109,8 @@ static bool32 MessageValid(const u8 *p)
      || (Half(p + 2) >= STRINGID_TABLE_START && !gBattleStringsTable[Half(p + 2)])
      || msg.currentMove >= MOVES_COUNT_ALL || msg.originallyUsedMove >= MOVES_COUNT_ALL
      || msg.lastItem >= ITEMS_COUNT || msg.lastAbility >= ABILITIES_COUNT
-     || msg.scrActive >= ControllerCount() || msg.bakScriptPartyIdx >= PARTY_SIZE
-     || msg.itemEffectBattler >= ControllerCount() || msg.moveType >= NUMBER_OF_MON_TYPES) return FALSE;
+     || msg.scrActive >= BattlerCount() || msg.bakScriptPartyIdx >= PARTY_SIZE
+     || msg.itemEffectBattler >= BattlerCount() || msg.moveType >= NUMBER_OF_MON_TYPES) return FALSE;
     for (i = 0; i < MAX_BATTLERS_COUNT; i++) if (msg.abilities[i] >= ABILITIES_COUNT) return FALSE;
     for (i = 0; i < 3; i++) if (!TextBufferValid(msg.textBuffs[i])) return FALSE;
     return TRUE;
@@ -117,7 +121,7 @@ static bool32 MoveChoiceValid(const u8 *p)
     struct ChooseMoveStruct move;
     u32 i;
     memcpy(&move, p + 4, sizeof(move));
-    if (p[1] != MultiplayerBattle_IsFullMulti() || p[2] > 1 || p[3] || move.species >= NUM_SPECIES || move.zmove.healReplacement > PARTY_SIZE) return FALSE;
+    if (p[1] != MultiplayerBattle_IsNativeDouble() || p[2] > 1 || p[3] || move.species >= NUM_SPECIES || move.zmove.healReplacement > PARTY_SIZE) return FALSE;
     for (i = 0; i < MAX_MON_MOVES; i++)
         if (move.moves[i] >= MOVES_COUNT_ALL || move.currentPP[i] > move.maxPP[i]
          || move.zmove.baseMoves[i] >= MOVES_COUNT_ALL || (move.zmove.possibleZMoves[i] & ~15)) return FALSE;
@@ -197,7 +201,7 @@ static bool32 MasterDataValid(const u8 *p)
     case CONTROLLER_CHOOSEMOVE: return MoveChoiceValid(p);
     case CONTROLLER_CHOOSEPOKEMON:
         return p[1] <= 4 && p[2] <= PARTY_SIZE && (p[3] | p[7] << 8) < ABILITIES_COUNT
-            && p[8] < ControllerCount() && (p[4] & 15) < PARTY_SIZE && (p[4] >> 4) < PARTY_SIZE
+            && p[8] < BattlerCount() && (p[4] & 15) < PARTY_SIZE && (p[4] >> 4) < PARTY_SIZE
             && (p[5] & 15) < PARTY_SIZE && (p[5] >> 4) < PARTY_SIZE
             && (p[6] & 15) < PARTY_SIZE && (p[6] >> 4) < PARTY_SIZE;
     case CONTROLLER_STATUSICONUPDATE: return !(Word(p + 1) & ~(STATUS1_ANY | STATUS1_TOXIC_COUNTER));
@@ -225,15 +229,15 @@ bool32 MultiplayerBattle_ValidateController(const u8 *data, u16 size, u8 source)
     const u8 *p = data + 8;
     u16 raw, padded;
     u8 battler, command;
-    u32 count = ControllerCount();
-    if (size < 12 || size > MULTIPLAYER_BATTLE_BLOCK_SIZE || source >= count) return FALSE;
+    u32 count = BattlerCount();
+    if (size < 12 || size > MULTIPLAYER_BATTLE_BLOCK_SIZE || source >= CoreCount()) return FALSE;
     battler = data[1]; command = p[0]; padded = Half(data + 4);
     if (battler >= count || data[2] >= count || data[3] >= count || data[7] >= count || (data[6] & ~((1 << count) - 1))
      || padded + 8 != size) return FALSE;
     if (data[0] == B_COMM_CONTROLLER_IS_DONE)
         return padded == 8 && p[0] == source && Zero(p + 1, 7)
             && sPending[battler] != 0xFF && !(sDone[battler] & (1 << source))
-            && (source != battler || (sPending[battler] != CONTROLLER_GETMONDATA
+            && (source != Owner(battler) || (sPending[battler] != CONTROLLER_GETMONDATA
                 && sPending[battler] != CONTROLLER_CHOOSEACTION && sPending[battler] != CONTROLLER_CHOOSEMOVE
                 && sPending[battler] != CONTROLLER_CHOOSEPOKEMON) || sReplied[battler]);
     raw = MultiplayerBattle_ControllerRawSize(command, p[1]);
@@ -241,7 +245,7 @@ bool32 MultiplayerBattle_ValidateController(const u8 *data, u16 size, u8 source)
     if (data[0] == B_COMM_TO_CONTROLLER)
         return source == 0 && command != CONTROLLER_DATATRANSFER && command != CONTROLLER_TWORETURNVALUES
             && command != CONTROLLER_CHOSENMONRETURNVALUE && sPending[battler] == 0xFF && MasterDataValid(p);
-    if (data[0] != B_COMM_TO_ENGINE || source != battler || sPending[battler] == 0xFF || sReplied[battler]) return FALSE;
+    if (data[0] != B_COMM_TO_ENGINE || source != Owner(battler) || sPending[battler] == 0xFF || sReplied[battler]) return FALSE;
     if (command == CONTROLLER_DATATRANSFER)
         return sPending[battler] == CONTROLLER_GETMONDATA && MonReplyValid(p);
     if (command == CONTROLLER_CHOSENMONRETURNVALUE)
@@ -256,7 +260,7 @@ bool32 MultiplayerBattle_ValidateController(const u8 *data, u16 size, u8 source)
             return (p[1] <= B_ACTION_RUN || p[1] == B_ACTION_NOTHING_FAINTED || p[1] == B_ACTION_UNK_14) && !choice;
         if (sPending[battler] == CONTROLLER_CHOOSEMOVE)
             return p[1] == B_ACTION_EXEC_SCRIPT && (choice == 0xFFFF
-                || (!(choice & ~(MultiplayerBattle_IsFullMulti() ? 0x3FF : 0x1FF))
+                || (!(choice & ~(MultiplayerBattle_IsNativeDouble() ? 0x3FF : 0x1FF))
                     && (choice & 0x7F) < MAX_MON_MOVES && ((choice >> 8) & 3) < count));
     }
     return FALSE;
@@ -273,7 +277,7 @@ void MultiplayerBattle_NoteController(const u8 *data, u8 source)
     else if (data[0] == B_COMM_CONTROLLER_IS_DONE)
     {
         sDone[battler] |= 1 << source;
-        if (sDone[battler] == (1 << ControllerCount()) - 1) sPending[battler] = 0xFF;
+        if (sDone[battler] == (1 << CoreCount()) - 1) sPending[battler] = 0xFF;
     }
 }
 

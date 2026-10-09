@@ -4,6 +4,7 @@
 #include "battle_ai_record.h"
 #include "battle_controllers.h"
 #include "battle_message.h"
+#include "multiplayer_battle.h"
 #include "battle_setup.h"
 #include "battle_special.h"
 #include "battle_z_move.h"
@@ -183,6 +184,9 @@ static const u8 sText_BerrySuffix[] = _(" BERRY"); //no decapitalize until it is
 const u8 gText_EmptyString3[] = _("");
 
 static const u8 sText_TwoInGameTrainersDefeated[] = _("You defeated {B_TRAINER1_NAME_WITH_CLASS} and {B_TRAINER2_NAME_WITH_CLASS}!\p");
+// Multiplayer co-op Gym battles: two linked trainers against two in-game trainers.
+static const u8 sText_CoopLostToTwoTrainers[] = _("You lost to {B_TRAINER1_NAME_WITH_CLASS} and {B_TRAINER2_NAME_WITH_CLASS}!");
+static const u8 sText_CoopDrawVsTwoTrainers[] = _("You battled to a draw against {B_TRAINER1_NAME_WITH_CLASS} and {B_TRAINER2_NAME_WITH_CLASS}!");
 
 // New battle strings.
 const u8 gText_drastically[] = _(" drastically");
@@ -2559,6 +2563,8 @@ void BufferStringBattle(enum StringID stringID, enum BattlerId battler)
                     stringPtr = sText_LinkTrainerSentOutTwoPkmn;
                 else if (BATTLE_TWO_VS_ONE_OPPONENT)
                     stringPtr = sText_Trainer1SentOutTwoPkmn;
+                else if (MultiplayerBattle_IsCoop())
+                    stringPtr = sText_TwoTrainersSentPkmn;
                 else if ((gBattleTypeFlags & BATTLE_TYPE_RECORDED_LINK && gBattleTypeFlags & BATTLE_TYPE_TWO_OPPONENTS) || (gBattleTypeFlags & BATTLE_TYPE_MULTI && (gBattleTypeFlags & BATTLE_TYPE_RECORDED_LINK || gBattleTypeFlags & BATTLE_TYPE_LINK)))
                     stringPtr = sText_TwoLinkTrainersIntroSendOutPkmn;
                 else if (gBattleTypeFlags & BATTLE_TYPE_TWO_OPPONENTS || gBattleTypeFlags & BATTLE_TYPE_TOWER_LINK_MULTI)
@@ -2567,6 +2573,10 @@ void BufferStringBattle(enum StringID stringID, enum BattlerId battler)
                     stringPtr = sText_LinkTrainerSentOutTwoPkmn;
                 else
                     stringPtr = sText_Trainer1SentOutTwoPkmn;
+            }
+            else if (MultiplayerBattle_IsCoop())
+            {
+                stringPtr = (battler & BIT_FLANK) ? sText_Trainer2SentOutPkmn : sText_Trainer1SentOutPkmn;
             }
             else if (BattlerIsLink(battler) || (BattlerIsRecorded(battler) && BattlerIsOpponent(battler)))
             {
@@ -2758,10 +2768,10 @@ void BufferStringBattle(enum StringID stringID, enum BattlerId battler)
                         stringPtr = sText_TwoLinkTrainersDefeated;
                     break;
                 case B_OUTCOME_LOST:
-                    stringPtr = sText_PlayerLostToTwo;
+                    stringPtr = MultiplayerBattle_IsCoop() ? sText_CoopLostToTwoTrainers : sText_PlayerLostToTwo;
                     break;
                 case B_OUTCOME_DREW:
-                    stringPtr = sText_PlayerBattledToDrawVsTwo;
+                    stringPtr = MultiplayerBattle_IsCoop() ? sText_CoopDrawVsTwoTrainers : sText_PlayerBattledToDrawVsTwo;
                     break;
                 }
             }

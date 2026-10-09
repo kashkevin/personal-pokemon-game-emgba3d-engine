@@ -369,8 +369,12 @@ PetalburgCity_Gym_EventScript_GiveEnigmaBerry::
 	end
 
 PetalburgCity_Gym_EventScript_NormanBattle::
+	setvar VAR_0x8004, MP_COOP_GYM_PETALBURG
+	call EventScript_MultiplayerCoopGymOffer
 	msgbox PetalburgCity_Gym_Text_NormanIntro, MSGBOX_DEFAULT
 	trainerbattle_no_intro TRAINER_NORMAN_1, PetalburgCity_Gym_Text_NormanDefeat
+@ Also the co-op Gym victory continuation (data/scripts/mp_coop_gym.inc).
+PetalburgCity_Gym_EventScript_NormanDefeated::
 	message PetalburgCity_Gym_Text_ReceivedBalanceBadge
 	waitmessage
 	call Common_EventScript_PlayGymBadgeFanfare

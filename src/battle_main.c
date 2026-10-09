@@ -89,6 +89,7 @@ extern const struct WindowTemplate *const gBattleWindowTemplates[];
 static void CB2_InitBattleInternal(void);
 static void CB2_PreInitMultiBattle(void);
 static void CB2_HandleStartFullMultiBattle(void);
+static void CB2_HandleStartCoopBattle(void);
 static void CB2_PreInitIngamePlayerPartnerBattle(void);
 static void CB2_HandleStartMultiPartnerBattle(void);
 static void CB2_HandleStartMultiBattle(void);
@@ -489,7 +490,7 @@ void CB2_InitBattle(void)
 
     if (gBattleTypeFlags & BATTLE_TYPE_MULTI && gBattleTypeFlags & BATTLE_TYPE_TRAINER)
     {
-        if (gBattleTypeFlags & BATTLE_TYPE_RECORDED || MultiplayerBattle_IsFullMulti())
+        if (gBattleTypeFlags & BATTLE_TYPE_RECORDED || MultiplayerBattle_IsNativeDouble())
         {
             CB2_InitBattleInternal();
         }
@@ -587,6 +588,8 @@ static void CB2_InitBattleInternal(void)
 
     if (MultiplayerBattle_IsFullMulti())
         SetMainCallback2(CB2_HandleStartFullMultiBattle);
+    else if (MultiplayerBattle_IsCoop())
+        SetMainCallback2(CB2_HandleStartCoopBattle);
     else if (gBattleTypeFlags & BATTLE_TYPE_MULTI
      && (TESTING || gBattleTypeFlags & (BATTLE_TYPE_BATTLE_TOWER | BATTLE_TYPE_INGAME_PARTNER)))
         SetMainCallback2(CB2_HandleStartMultiPartnerBattle);
@@ -762,7 +765,7 @@ static void SetAllPlayersBerryData(void)
 
         if (gBattleTypeFlags & BATTLE_TYPE_MULTI)
         {
-            if (gBattleTypeFlags & BATTLE_TYPE_BATTLE_TOWER)
+            if (gBattleTypeFlags & BATTLE_TYPE_BATTLE_TOWER || MultiplayerBattle_IsCoop())
                 numPlayers = 2;
             else
                 numPlayers = 4;
@@ -1621,6 +1624,100 @@ static void CB2_HandleStartFullMultiBattle(void)
             gMain.callback1 = BattleMainCB1;
             SetMainCallback2(BattleMainCB2);
             TRAINER_BATTLE_PARAM.opponentA = TRAINER_LINK_OPPONENT;
+            gBattleTypeFlags |= BATTLE_TYPE_LINK_IN_BATTLE;
+        }
+        break;
+    }
+}
+
+// Native co-op Gym battle: two linked trainers on one side, each keeping a full
+// party, against a Gym Leader and its partner whose AI only the master runs.
+// Opponent parties are built identically by both cores from the shared seed.
+static void CB2_HandleStartCoopBattle(void)
+{
+    u32 state = gBattleCommunication[MULTIUSE_STATE];
+    u8 local = GetMultiplayerId();
+    u8 partner = local ^ 1;
+    gBattleScripting.multiplayerId = local;
+    RunTasks();
+    AnimateSprites();
+    BuildOamBuffer();
+    switch (state)
+    {
+    case 0:
+        if (!IsDma3ManagerBusyWithBgCopy())
+        {
+            ShowBg(0); ShowBg(1); ShowBg(2); ShowBg(3);
+            FillAroundBattleWindows();
+            gBattleCommunication[MULTIUSE_STATE]++;
+        }
+        break;
+    case 1:
+        if (IsLinkTaskFinished())
+        {
+            gBattleStruct->multiBuffer.linkBattlerHeader.versionSignatureLo = 0;
+            gBattleStruct->multiBuffer.linkBattlerHeader.versionSignatureHi = 3;
+            BufferPartyVsScreenHealth_AtStart();
+            SetPlayerBerryDataInBattleStruct();
+            SendBlock(BitmaskAllOtherLinkPlayers(), &gBattleStruct->multiBuffer.linkBattlerHeader, sizeof(struct LinkBattlerHeader));
+            gBattleCommunication[MULTIUSE_STATE]++;
+        }
+        break;
+    case 2:
+        if (GetBlockReceivedStatus() == 3)
+        {
+            MultiplayerBattle_SetCoopLinkPlayers();
+            MultiplayerBattle_CreateCoopOpponents();
+            FindLinkBattleMaster(2, local);
+            SetAllPlayersBerryData();
+            ResetBlockReceivedFlags();
+            memset(gParties[B_TRAINER_PARTNER], 0, sizeof(gParties[B_TRAINER_PARTNER]));
+            gPartiesCount[B_TRAINER_PARTNER] = 0;
+            gBattleCommunication[MULTIUSE_STATE]++;
+        }
+        break;
+    case 3: case 5: case 7:
+        if (IsLinkTaskFinished() && MultiplayerBattle_SendPartyPair(state - 3))
+            gBattleCommunication[MULTIUSE_STATE]++;
+        break;
+    case 4: case 6: case 8:
+        if (GetBlockReceivedStatus() == 3)
+        {
+            // The partner's canonical originals travelled over the channel;
+            // battle forms exist only in this temporary copy.
+            memcpy(&gParties[B_TRAINER_PARTNER][state - 4], gBlockRecvBuffer[partner], sizeof(struct Pokemon) * 2);
+            ResetBlockReceivedFlags();
+            if (state == 8)
+            {
+                for (u32 i = 0; i < PARTY_SIZE; i++)
+                    TryFormChange(&gParties[B_TRAINER_PARTNER][i], FORM_CHANGE_BEGIN_BATTLE, B_TRAINER_PARTNER);
+                gPartiesCount[B_TRAINER_PARTNER] = CalculatePartyCount(B_TRAINER_PARTNER);
+                InitBattleControllers();
+                MultiplayerBattle_InstallNativeRng();
+                RecordedBattle_SetTrainerInfo();
+                gBattleCommunication[SPRITES_INIT_STATE1] = 0;
+                gBattleCommunication[SPRITES_INIT_STATE2] = 0;
+            }
+            gBattleCommunication[MULTIUSE_STATE]++;
+        }
+        break;
+    case 9:
+        if (IsLinkTaskFinished() && SendBlock(BitmaskAllOtherLinkPlayers(), &gRecordedBattleRngSeed, sizeof(gRecordedBattleRngSeed)))
+            gBattleCommunication[MULTIUSE_STATE]++;
+        break;
+    case 10:
+        if (GetBlockReceivedStatus() == 3)
+        {
+            ResetBlockReceivedFlags();
+            gBattleCommunication[MULTIUSE_STATE]++;
+        }
+        break;
+    case 11:
+        if (BattleInitAllSprites(&gBattleCommunication[SPRITES_INIT_STATE1], &gBattleCommunication[SPRITES_INIT_STATE2]))
+        {
+            gPreBattleCallback1 = gMain.callback1;
+            gMain.callback1 = BattleMainCB1;
+            SetMainCallback2(BattleMainCB2);
             gBattleTypeFlags |= BATTLE_TYPE_LINK_IN_BATTLE;
         }
         break;

@@ -227,7 +227,10 @@ static void InitBtlControllersInternal(void)
     else
         gBattlersCount = MAX_BATTLERS_COUNT;
 
+    // Native co-op Gym battles use the tower link-Multi layout: AI opponents on
+    // the master, mirrored link opponents on the other core.
     if ((gBattleTypeFlags & BATTLE_TYPE_BATTLE_TOWER)
+        || MultiplayerBattle_IsCoop()
         || !isMulti
         || (TESTING && isMulti && !MultiplayerBattle_IsFullMulti())
         || (!isLink && !isRecorded)
@@ -498,7 +501,7 @@ bool32 ShouldUpdateTvData(enum BattlerId battler)
 
 static void SetBattlePartyIds(void)
 {
-    if (MultiplayerBattle_IsFullMulti())
+    if (MultiplayerBattle_IsNativeDouble())
     {
         // Unlike the original three-mon selection screen, native full Multi
         // preserves field order. Its first slot may be fainted or an Egg.
@@ -1389,7 +1392,7 @@ void UpdateLinkBattlePartyOrder(enum BattlerId battler)
     u8 *order = gBattleStruct->battlerPartyOrders[battler];
     const u8 *receivedOrder = &gBattleResources->bufferB[battler][2];
 
-    if (MultiplayerBattle_IsFullMulti())
+    if (MultiplayerBattle_IsNativeDouble())
     {
         // All six slots belong to this trainer; the teammate has a separate
         // order and must not inherit any part of this trainer's selection.

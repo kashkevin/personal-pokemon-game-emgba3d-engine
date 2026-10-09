@@ -4,6 +4,7 @@
 #include "multiplayer_menu.h"
 #include "multiplayer_ownership.h"
 #include "multiplayer.h"
+#include "multiplayer_coop.h"
 #include "main.h"
 #include "link.h"
 #include "multiplayer_battle_schema.h"
@@ -15,6 +16,7 @@
 #include "overworld.h"
 #include "load_save.h"
 #include "pokemon.h"
+#include "data.h"
 #include "random.h"
 #include "save.h"
 #include "palette.h"
@@ -48,6 +50,7 @@ _Static_assert(sizeof(rng_value_t) == 16 && sizeof(struct Pokemon) == 100, "Nati
 const u32 gMultiplayerBattleAbiVersion = MULTIPLAYER_BATTLE_ABI;
 const u32 gMultiplayerBattleResumeAbiVersion = MULTIPLAYER_BATTLE_RESUME_ABI;
 const u32 gMultiplayerBattleAdmissionCleanupAbiVersion = MULTIPLAYER_BATTLE_ADMISSION_CLEANUP_ABI;
+const u32 gMultiplayerBattleCoopAbiVersion = MULTIPLAYER_BATTLE_COOP_ABI;
 EWRAM_DATA volatile struct MultiplayerBattleMailbox gMultiplayerBattleMailbox = {0};
 // Read-only proof observation; never an authority or command input.
 EWRAM_DATA volatile u32 gMultiplayerBattleHoldFlags = 0;
@@ -192,14 +195,32 @@ bool32 MultiplayerBattle_PauseClocks(void)
 
 bool32 MultiplayerBattle_SkipCallbacks(void) { return MultiplayerBattle_PauseClocks(); }
 bool32 MultiplayerBattle_IsFullMulti(void) { return MultiplayerBattle_IsActive() && sState != MP_BATTLE_ADMITTING && sBinding.mode == MP_BATTLE_PHASE_FULL_MULTI; }
-bool32 MultiplayerBattle_IsNative(void) { return MultiplayerBattle_IsActive() && sState != MP_BATTLE_ADMITTING && (sBinding.mode == MP_BATTLE_PHASE_SINGLES || sBinding.mode == MP_BATTLE_PHASE_FULL_MULTI); }
+bool32 MultiplayerBattle_IsCoop(void) { return MultiplayerBattle_IsActive() && sState != MP_BATTLE_ADMITTING && sBinding.mode == MP_BATTLE_PHASE_COOP; }
+bool32 MultiplayerBattle_IsNative(void) { return MultiplayerBattle_IsActive() && sState != MP_BATTLE_ADMITTING && (sBinding.mode == MP_BATTLE_PHASE_SINGLES || sBinding.mode == MP_BATTLE_PHASE_FULL_MULTI || sBinding.mode == MP_BATTLE_PHASE_COOP); }
+bool32 MultiplayerBattle_IsNativeDouble(void) { return MultiplayerBattle_IsFullMulti() || MultiplayerBattle_IsCoop(); }
+// Battlers on the field: two in singles, four in both double phases.
+u32 MultiplayerBattle_GetBattlerCount(void) { return MultiplayerBattle_IsNativeDouble() ? MAX_BATTLERS_COUNT : 2; }
+// The core that supplies a battler's choices. Co-op: the master (slot 0) owns
+// its own battler and both AI opponents; slot 1 owns the right player battler.
+u32 MultiplayerBattle_GetBattlerOwner(u32 battler)
+{
+    if (MultiplayerBattle_IsCoop())
+        return battler == B_BATTLER_2 ? 1 : 0;
+    return battler;
+}
+u32 MultiplayerBattle_GetCoopGym(void) { return MultiplayerBattle_IsCoop() ? sPreparation.flags : 0; }
+
+static u32 PhasePlayerCount(u32 phase)
+{
+    return phase == MP_BATTLE_PHASE_FULL_MULTI ? 4 : 2;
+}
 // Four full parties keep more status sprites live than cable Multi. Delayed
 // controller delivery can overlap a later ball with the earlier ball's entire
 // particle burst. Keep every animation, but let its existing completion flags
 // free those sprites before another native trainer starts their send-out.
 bool32 MultiplayerBattle_TrySendOutAnimation(u8 battler)
 {
-    if (!MultiplayerBattle_IsFullMulti())
+    if (!MultiplayerBattle_IsNativeDouble())
         return TRUE;
     if (battler >= MAX_BATTLERS_COUNT || gBattleSpritesDataPtr == NULL)
         return FALSE;
@@ -309,7 +330,7 @@ static void QueryData(u8 *data)
     {
         memset(data, 0, 64); PutWord(data, 1025);
         memcpy(data + 4, sAdmissionCleanup.data, 16);
-        data[20] = sAdmissionCleanup.phase == MP_BATTLE_PHASE_SINGLES ? 2 : 4;
+        data[20] = PhasePlayerCount(sAdmissionCleanup.phase);
         data[21] = sAdmissionCleanup.sourceSlot; data[22] = sAdmissionCleanup.phase;
         PutWord(data + 24, sLastSeq);
     }
@@ -356,6 +377,7 @@ static bool32 BindingValid(const struct MultiplayerBattleBinding *b, const struc
      || b->localSlot != c->sourceSlot || b->mode != c->phase || b->reserved > 1 || (b->reserved && b->mode == MP_BATTLE_PHASE_DIAGNOSTIC)
      || (b->mode == MP_BATTLE_PHASE_SINGLES && b->playerCount != 2)
      || (b->mode == MP_BATTLE_PHASE_FULL_MULTI && b->playerCount != 4)
+     || (b->mode == MP_BATTLE_PHASE_COOP && b->playerCount != 2)
      || Zero(b->generation, 16))
         return FALSE;
     if (b->reserved && *(const volatile u32 *)&gMultiplayerBattleResumeAbiVersion != MULTIPLAYER_BATTLE_RESUME_ABI)
@@ -517,8 +539,8 @@ u16 MultiplayerBattle_PackController(u8 *dest, u8 battler, u8 bufferId, u16 size
     if (!MultiplayerBattle_IsNative() || sState != MP_BATTLE_RUNNING) return 0;
     // Mirrored remote controllers still render and send DONE, but only the
     // trainer owning a battler may supply engine data/choices.
-    if (bufferId == B_COMM_TO_ENGINE && battler != sBinding.localSlot) return 0;
-    if (battler >= sBinding.playerCount || !data || !size || padded + 8 > MULTIPLAYER_BATTLE_BLOCK_SIZE)
+    if (bufferId == B_COMM_TO_ENGINE && MultiplayerBattle_GetBattlerOwner(battler) != sBinding.localSlot) return 0;
+    if (battler >= MultiplayerBattle_GetBattlerCount() || !data || !size || padded + 8 > MULTIPLAYER_BATTLE_BLOCK_SIZE)
     {
         MultiplayerBattle_FailNative(); return 0;
     }
@@ -531,7 +553,7 @@ u16 MultiplayerBattle_PackController(u8 *dest, u8 battler, u8 bufferId, u16 size
     // animation metadata must still pass the strict incoming index bounds.
     if (bufferId == B_COMM_TO_ENGINE || bufferId == B_COMM_CONTROLLER_IS_DONE)
         dest[2] = dest[3] = dest[6] = dest[7] = 0;
-    else if (dest[7] >= sBinding.playerCount && (data[0] == CONTROLLER_CHOOSEACTION || data[0] == CONTROLLER_CHOOSEMOVE
+    else if (dest[7] >= MultiplayerBattle_GetBattlerCount() && (data[0] == CONTROLLER_CHOOSEACTION || data[0] == CONTROLLER_CHOOSEMOVE
           || data[0] == CONTROLLER_CHOOSEPOKEMON || ((data[0] == CONTROLLER_PRINTSTRING
           || data[0] == CONTROLLER_PRINTSTRINGPLAYERONLY) && size >= 4
           && (data[2] | data[3] << 8) == STRINGID_EMPTYSTRING3)))
@@ -581,7 +603,8 @@ static u8 PrepareSingles(const struct MultiplayerBattleControl *c)
     if (sState != MP_BATTLE_CHANNEL || sPrepared || c->length != sizeof(preparation)
      || c->blockSeq || c->offset || c->totalSize || c->kind) return MP_BATTLE_ORDER;
     memcpy(&preparation, c->data, sizeof(preparation));
-    if (!preparation.checkpointRevision || preparation.checkpointRevision > 0x7FFFFFFF || preparation.flags
+    if (!preparation.checkpointRevision || preparation.checkpointRevision > 0x7FFFFFFF
+     || (MultiplayerBattle_IsCoop() ? !MultiplayerCoop_IsValidGym(preparation.flags) : preparation.flags != 0)
      || Zero(preparation.rng, 16)) return MP_BATTLE_MALFORMED;
     if (preparation.nativeCounter != gSaveCounter || preparation.trainerId != READ_OTID_FROM_SAVE
      || preparation.partyCrc32 != Crc32((const u8 *)gParties[B_TRAINER_PLAYER], 600)) return MP_BATTLE_ORDER;
@@ -625,9 +648,17 @@ static u8 StartSingles(void)
     if (MultiplayerBattle_IsFullMulti())
         gBattleTypeFlags |= BATTLE_TYPE_DOUBLE | BATTLE_TYPE_MULTI;
     TRAINER_BATTLE_PARAM.opponentA = TRAINER_LINK_OPPONENT;
+    if (MultiplayerBattle_IsCoop())
+    {
+        // Emerald's link Multi against two in-game trainers: the master runs
+        // both opponents' AI and every core builds their parties itself.
+        gBattleTypeFlags |= BATTLE_TYPE_DOUBLE | BATTLE_TYPE_MULTI | BATTLE_TYPE_TWO_OPPONENTS | BATTLE_TYPE_TOWER_LINK_MULTI;
+        TRAINER_BATTLE_PARAM.opponentA = MultiplayerCoop_GetLeader(sPreparation.flags);
+        TRAINER_BATTLE_PARAM.opponentB = MultiplayerCoop_GetTwin(sPreparation.flags);
+    }
     CleanupOverworldWindowsAndTilemaps();
     gMain.savedCallback = CB2_ReturnToField;
-    PlayMapChosenOrBattleBGM(MUS_VS_TRAINER);
+    PlayMapChosenOrBattleBGM(MultiplayerBattle_IsCoop() ? MUS_VS_GYM_LEADER : MUS_VS_TRAINER);
     SetMainCallback2(CB2_InitBattle);
     return MP_BATTLE_OK;
 }
@@ -682,16 +713,55 @@ void MultiplayerBattle_InstallNativeRng(void)
     }
 }
 
+// Co-op Gym: the linked trainers stand at battler positions 0 and 2. The two
+// in-game trainers fill the remaining link records like Emerald's tower link
+// Multi, so every link-name lookup resolves to a real, bounded name.
+void MultiplayerBattle_SetCoopLinkPlayers(void)
+{
+    u32 i, j;
+    if (!MultiplayerBattle_IsCoop() || sState != MP_BATTLE_RUNNING)
+        return;
+    gLinkPlayers[0].id = B_BATTLER_0;
+    gLinkPlayers[1].id = B_BATTLER_2;
+    for (i = 2; i < MAX_LINK_PLAYERS; i++)
+    {
+        u16 trainer = i == 2 ? TRAINER_BATTLE_PARAM.opponentA : TRAINER_BATTLE_PARAM.opponentB;
+        const u8 *name = GetTrainerNameFromId(trainer);
+        memset(&gLinkPlayers[i], 0, sizeof(gLinkPlayers[i]));
+        gLinkPlayers[i].id = i == 2 ? B_BATTLER_1 : B_BATTLER_3;
+        gLinkPlayers[i].version = VERSION_EMERALD;
+        gLinkPlayers[i].language = gGameLanguage;
+        gLinkPlayers[i].gender = GetTrainerStructFromId(trainer)->gender == TRAINER_GENDER_FEMALE ? FEMALE : MALE;
+        for (j = 0; j < PLAYER_NAME_LENGTH && name[j] != EOS; j++)
+            gLinkPlayers[i].name[j] = name[j];
+        gLinkPlayers[i].name[j] = EOS;
+    }
+}
+
+// Co-op Gym: identical in-game opponent parties on every core, generated from
+// the shared preparation seed before the battle installs it for its own rolls.
+void MultiplayerBattle_CreateCoopOpponents(void)
+{
+    rng_value_t saved = gRngValue;
+    if (!MultiplayerBattle_IsCoop() || sState != MP_BATTLE_RUNNING || sSeedInstalled)
+        return;
+    memcpy(&gRngValue, sPreparation.rng, 16);
+    CreateCoopTrainerParties(TRAINER_BATTLE_PARAM.opponentA, TRAINER_BATTLE_PARAM.opponentB);
+    gRngValue = saved;
+}
+
 bool32 MultiplayerBattle_TryReturnNative(void)
 {
     u32 outcome = gBattleOutcome;
     if (!MultiplayerBattle_IsNative() || sState != MP_BATTLE_RUNNING || !sOutcome || sOutPending
      || sReceiveFlags || gBattleControllerExecFlags || BattleControllers_HasPendingLinkBlocks()) return FALSE;
-    if ((sBinding.localSlot & 1) && outcome != B_OUTCOME_DREW) outcome ^= B_OUTCOME_DREW;
+    if (!MultiplayerBattle_IsCoop() && (sBinding.localSlot & 1) && outcome != B_OUTCOME_DREW) outcome ^= B_OUTCOME_DREW;
     if (outcome != sOutcome)
     {
         MultiplayerBattle_FailNative(); return FALSE;
     }
+    if (MultiplayerBattle_IsCoop())
+        MultiplayerCoop_OnNativeResult(sPreparation.flags, outcome);
     RestorePlayerPartyExact();
     if (gPartiesCount[B_TRAINER_PLAYER] != sOriginalCount
      || Crc32((const u8 *)gParties[B_TRAINER_PLAYER], 600) != sPreparation.partyCrc32)
@@ -703,7 +773,7 @@ bool32 MultiplayerBattle_TryReturnNative(void)
     // sends before release, so retire the complete descriptor together.
     sOutSeq = sOutCrc = sReadOffset = sOutSize = sOutKind = 0;
     sOutPending = FALSE;
-    if (MultiplayerBattle_IsFullMulti())
+    if (MultiplayerBattle_IsNativeDouble())
     {
         // The partner is a remote temporary roster, never locally owned state.
         memset(gParties[B_TRAINER_PARTNER], 0, sizeof(gParties[B_TRAINER_PARTNER]));
@@ -879,7 +949,7 @@ static u8 Admit(const struct MultiplayerBattleControl *c)
     u32 saveSession, saveIncarnation, base;
     if (sAdmissionCleanupWaiting || AdmissionCanceled(c->battleId)) return MP_BATTLE_SESSION;
     bool32 menuOwned = MultiplayerMenu_CanAdmitBattle(c->sessionEpoch, c->incarnation);
-    if (c->phase == MP_BATTLE_PHASE_DIAGNOSTIC || c->sourceSlot >= (c->phase == MP_BATTLE_PHASE_SINGLES ? 2 : 4)
+    if (c->phase == MP_BATTLE_PHASE_DIAGNOSTIC || c->sourceSlot >= PhasePlayerCount(c->phase)
      || c->blockSeq || c->offset || c->totalSize || c->kind || c->length != 48
      || Zero(c->data, 16) || Zero(c->data + 16, 16) || Zero(c->data + 32, 16))
         return MP_BATTLE_MALFORMED;
@@ -902,7 +972,7 @@ static u8 Admit(const struct MultiplayerBattleControl *c)
     ClearBlocks(); memset(&sBinding, 0, sizeof(sBinding));
     memcpy(sBinding.generation, c->data, 16); memcpy(sBinding.players[c->sourceSlot], c->data + 16, 16);
     memcpy(sAdmitRuntime, c->data + 32, 16); memcpy(sBattleId, c->battleId, 16);
-    sBinding.playerCount = c->phase == MP_BATTLE_PHASE_SINGLES ? 2 : 4;
+    sBinding.playerCount = PhasePlayerCount(c->phase);
     sBinding.localSlot = c->sourceSlot; sBinding.mode = c->phase; sBinding.reserved = 1;
     sBinding.leases[c->sourceSlot] = sSession = c->sessionEpoch;
     sBinding.incarnations[c->sourceSlot] = sIncarnation = c->incarnation;
@@ -951,7 +1021,7 @@ static u8 AdmissionCancelReady(const struct MultiplayerBattleControl *c)
 {
     u32 originalLease = Word(c->data + 48), saveSession, saveIncarnation;
     if (c->commandSeq != 1 || c->phase == MP_BATTLE_PHASE_DIAGNOSTIC
-     || c->sourceSlot >= (c->phase == MP_BATTLE_PHASE_SINGLES ? 2 : 4)
+     || c->sourceSlot >= PhasePlayerCount(c->phase)
      || c->blockSeq || c->offset || c->totalSize || c->kind || c->length != 52
      || Zero(c->data, 16) || Zero(c->data + 16, 16) || Zero(c->data + 32, 16)
      || !originalLease || originalLease > c->sessionEpoch) return MP_BATTLE_MALFORMED;
@@ -990,7 +1060,7 @@ static u8 CancelAdmission(const struct MultiplayerBattleControl *c)
     u32 originalLease = Word(c->data + 48), saveSession, saveIncarnation;
     bool32 same, menuOwned;
     if (c->commandSeq != 1 || c->phase == MP_BATTLE_PHASE_DIAGNOSTIC
-     || c->sourceSlot >= (c->phase == MP_BATTLE_PHASE_SINGLES ? 2 : 4)
+     || c->sourceSlot >= PhasePlayerCount(c->phase)
      || c->blockSeq || c->offset || c->totalSize || c->kind || c->length != 84
      || Zero(c->data, 16) || Zero(c->data + 16, 16) || Zero(c->data + 32, 16)
      || Zero(c->data + 52, 32) || !originalLease || originalLease > c->sessionEpoch)
@@ -1057,7 +1127,7 @@ static void Handle(const struct MultiplayerBattleControl *c)
     bool32 cache = TRUE;
     if (c->status || c->reserved || c->length > 192 || !c->incarnation || !c->sessionEpoch
      || c->sessionEpoch > 0x7FFFFFFF || !c->commandSeq || Zero(c->battleId, 16)
-     || (c->phase < MP_BATTLE_PHASE_DIAGNOSTIC || c->phase > MP_BATTLE_PHASE_FULL_MULTI) || c->sourceSlot >= 4
+     || (c->phase < MP_BATTLE_PHASE_DIAGNOSTIC || c->phase > MP_BATTLE_PHASE_COOP) || c->sourceSlot >= 4
      || c->totalSize > MULTIPLAYER_BATTLE_BLOCK_SIZE || c->offset > c->totalSize
      || !Zero(c->data + c->length, 192 - c->length)
      || c->opcode < MP_BATTLE_BIND || c->opcode > MP_BATTLE_ADMISSION_CANCEL_READY)

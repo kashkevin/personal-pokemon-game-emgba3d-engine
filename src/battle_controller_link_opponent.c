@@ -287,7 +287,15 @@ static void LinkOpponentHandleDrawTrainerPic(enum BattlerId battler)
         else // first mon
             xPos = 200;
 
-        if (gBattleTypeFlags & BATTLE_TYPE_BATTLE_TOWER)
+        if (MultiplayerBattle_IsCoop())
+        {
+            // Co-op Gym: the mirrored foes are in-game trainers, not link players.
+            if (position == B_POSITION_OPPONENT_LEFT)
+                trainerPicId = GetTrainerPicFromId(TRAINER_BATTLE_PARAM.opponentA);
+            else
+                trainerPicId = GetTrainerPicFromId(TRAINER_BATTLE_PARAM.opponentB);
+        }
+        else if (gBattleTypeFlags & BATTLE_TYPE_BATTLE_TOWER)
         {
             if (position == B_POSITION_OPPONENT_LEFT)
                 trainerPicId = GetFrontierTrainerFrontSpriteId(TRAINER_BATTLE_PARAM.opponentA);
@@ -354,7 +362,10 @@ static void LinkOpponentHandleTrainerSlide(enum BattlerId battler)
 {
     enum TrainerPicID trainerPicId;
 
-    if (GetBattlerPosition(battler) == B_POSITION_OPPONENT_LEFT)
+    if (MultiplayerBattle_IsCoop())
+        trainerPicId = GetTrainerPicFromId(GetBattlerPosition(battler) == B_POSITION_OPPONENT_LEFT
+            ? TRAINER_BATTLE_PARAM.opponentA : TRAINER_BATTLE_PARAM.opponentB);
+    else if (GetBattlerPosition(battler) == B_POSITION_OPPONENT_LEFT)
         trainerPicId = GetFrontierTrainerFrontSpriteId(TRAINER_BATTLE_PARAM.opponentA);
     else
         trainerPicId = GetFrontierTrainerFrontSpriteId(TRAINER_BATTLE_PARAM.opponentB);

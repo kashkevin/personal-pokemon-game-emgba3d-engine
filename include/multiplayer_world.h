@@ -49,6 +49,7 @@
 #define MP_WORLD_ACTION_RELEASE     3
 #define MP_WORLD_ACTION_APPEARANCE  4 // the local state carries a newly saved look
 #define MP_WORLD_ACTION_WALLET      5 // eventId: wallet sequence applied, amount: money moved
+#define MP_WORLD_ACTION_COOP_GYM    6 // eventId: MP_COOP_GYM_* the player asked to challenge with the teammate
 
 #define MP_WORLD_WALLET_RECEIPT     0 // re-sent receipt of the save's last adjustment
 #define MP_WORLD_WALLET_CREDIT      1
@@ -131,7 +132,8 @@ struct MultiplayerWorldMailbox
     // Applied once when walletSeq == VAR_MP_WALLET_SEQ + 1.
     u32 walletSeq;
     s32 walletDelta;
-    u8 reserved[20];
+    u32 teammateToken; // peer playerId of this player's host-formed teammate (0 = none)
+    u8 reserved[16];
 };
 
 extern volatile struct MultiplayerWorldMailbox gMultiplayerWorldMailbox;
@@ -151,6 +153,11 @@ bool32 MultiplayerWorld_GetRemoteRider(const struct ObjectEvent *avatar, u8 *lif
 
 // Riding (field_player_avatar.c owns the local mount behaviour).
 void MultiplayerWorld_SetLocalMount(u16 species, u8 flags, bool32 riding);
+
+// Co-op Gym support (multiplayer_coop.c).
+u32 MultiplayerWorld_GetTeammateToken(void);
+bool32 MultiplayerWorld_IsActionPending(void);
+bool32 MultiplayerWorld_PostCoopRequest(u32 gym);
 
 // Appearance editor support (multiplayer_appearance.c).
 bool32 MultiplayerWorld_PostAppearanceSaved(void);

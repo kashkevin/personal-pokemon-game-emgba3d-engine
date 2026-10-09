@@ -16877,3 +16877,307 @@ Double Battle: No
 Kyogre
 Level: 5
 IVs: 0 HP / 0 Atk / 0 Def / 0 SpA / 0 SpD / 0 Spe
+
+/*
+Multiplayer co-op Gym partners. Two teammates who challenge a Gym together
+face the Leader and this partner in a native double battle (owner brief
+"GYMS AND TWIN GYM LEADERS"). Each partner is a complementary strategy for
+its Leader, not a duplicate: sandstorm, status support, Plus/Minus helpers,
+drought sun, Follow Me support, Tailwind, Trick Room and rain.
+*/
+
+=== TRAINER_MP_TWIN_ROXANNE ===
+Name: SHALE
+Class: Leader
+Pic: Ruin Maniac
+Gender: Male
+Music: Male
+Items: Potion
+Double Battle: No
+AI: Basic Trainer / Powerful Status
+
+Hippopotas
+Level: 13
+Ability: Sand Stream
+IVs: 12 HP / 12 Atk / 12 Def / 12 SpA / 12 SpD / 12 Spe
+- Sand Attack
+- Bite
+- Yawn
+- Tackle
+
+Sandshrew
+Level: 13
+Ability: Sand Veil
+IVs: 12 HP / 12 Atk / 12 Def / 12 SpA / 12 SpD / 12 Spe
+- Rollout
+- Defense Curl
+- Rapid Spin
+- Fury Cutter
+
+Onix @ Oran Berry
+Level: 15
+Ability: Sturdy
+IVs: 20 HP / 20 Atk / 20 Def / 20 SpA / 20 SpD / 20 Spe
+- Rock Tomb
+- Rock Throw
+- Bind
+- Harden
+
+=== TRAINER_MP_TWIN_BRAWLY ===
+Name: KIANA
+Class: Leader
+Pic: Battle Girl
+Gender: Female
+Music: Female
+Items: Super Potion
+Double Battle: No
+AI: Basic Trainer / Powerful Status
+
+Makuhita
+Level: 17
+Ability: Thick Fat
+IVs: 12 HP / 12 Atk / 12 Def / 12 SpA / 12 SpD / 12 Spe
+- Fake Out
+- Arm Thrust
+- Vital Throw
+- Knock Off
+
+Shroomish
+Level: 17
+Ability: Effect Spore
+IVs: 12 HP / 12 Atk / 12 Def / 12 SpA / 12 SpD / 12 Spe
+- Stun Spore
+- Leech Seed
+- Mega Drain
+- Headbutt
+
+Mankey @ Sitrus Berry
+Level: 18
+Ability: Vital Spirit
+IVs: 20 HP / 20 Atk / 20 Def / 20 SpA / 20 SpD / 20 Spe
+- Karate Chop
+- Low Kick
+- Fury Swipes
+- Focus Energy
+
+=== TRAINER_MP_TWIN_WATTSON ===
+Name: VOLTA
+Class: Leader
+Pic: Guitarist
+Gender: Male
+Music: Male
+Items: Super Potion
+Double Battle: No
+AI: Basic Trainer / Powerful Status
+
+Plusle
+Level: 21
+Ability: Plus
+IVs: 24 HP / 24 Atk / 24 Def / 24 SpA / 24 SpD / 24 Spe
+- Helping Hand
+- Spark
+- Thunder Wave
+- Encore
+
+Minun
+Level: 21
+Ability: Minus
+IVs: 24 HP / 24 Atk / 24 Def / 24 SpA / 24 SpD / 24 Spe
+- Helping Hand
+- Spark
+- Charm
+- Quick Attack
+
+Magnemite @ Sitrus Berry
+Level: 22
+Ability: Sturdy
+IVs: 24 HP / 24 Atk / 24 Def / 24 SpA / 24 SpD / 24 Spe
+- Thunder Wave
+- Spark
+- Sonic Boom
+- Supersonic
+
+=== TRAINER_MP_TWIN_FLANNERY ===
+Name: BLAZE
+Class: Leader
+Pic: Kindler
+Gender: Male
+Music: Male
+Items: Hyper Potion
+Double Battle: No
+AI: Basic Trainer / Powerful Status
+
+Ninetales @ Charcoal
+Level: 27
+Ability: Drought
+IVs: 26 HP / 26 Atk / 26 Def / 26 SpA / 26 SpD / 26 Spe
+- Fire Spin
+- Will-O-Wisp
+- Confuse Ray
+- Extrasensory
+
+Exeggcute
+Level: 26
+Ability: Chlorophyll
+IVs: 24 HP / 24 Atk / 24 Def / 24 SpA / 24 SpD / 24 Spe
+- Sleep Powder
+- Bullet Seed
+- Leech Seed
+- Reflect
+
+Growlithe @ Sitrus Berry
+Level: 27
+Ability: Intimidate
+IVs: 24 HP / 24 Atk / 24 Def / 24 SpA / 24 SpD / 24 Spe
+- Flame Wheel
+- Helping Hand
+- Bite
+- Take Down
+
+=== TRAINER_MP_TWIN_NORMAN ===
+Name: CAROLINE
+Class: Pkmn Breeder
+Pic: Pokemon Breeder F
+Gender: Female
+Music: Female
+Items: Hyper Potion
+Double Battle: No
+AI: Basic Trainer / Powerful Status
+
+Clefairy
+Level: 29
+Ability: Friend Guard
+IVs: 24 HP / 24 Atk / 24 Def / 24 SpA / 24 SpD / 24 Spe
+- Follow Me
+- Helping Hand
+- Moonlight
+- Disarming Voice
+
+Kecleon
+Level: 29
+Ability: Protean
+IVs: 24 HP / 24 Atk / 24 Def / 24 SpA / 24 SpD / 24 Spe
+- Shadow Sneak
+- Feint Attack
+- Psybeam
+- Bind
+
+Ursaring @ Sitrus Berry
+Level: 30
+Ability: Guts
+IVs: 28 HP / 28 Atk / 28 Def / 28 SpA / 28 SpD / 28 Spe
+- Facade
+- Slash
+- Scary Face
+- Rest
+
+=== TRAINER_MP_TWIN_WINONA ===
+Name: SORA
+Class: Leader
+Pic: Parasol Lady
+Gender: Female
+Music: Female
+Items: Hyper Potion
+Double Battle: No
+AI: Basic Trainer / Powerful Status
+
+Whimsicott
+Level: 31
+Ability: Prankster
+IVs: 25 HP / 25 Atk / 25 Def / 25 SpA / 25 SpD / 25 Spe
+- Tailwind
+- Encore
+- Leech Seed
+- Giga Drain
+
+Noctowl
+Level: 31
+Ability: Insomnia
+IVs: 25 HP / 25 Atk / 25 Def / 25 SpA / 25 SpD / 25 Spe
+- Hypnosis
+- Reflect
+- Air Slash
+- Extrasensory
+
+Swellow @ Flame Orb
+Level: 32
+Ability: Guts
+IVs: 28 HP / 28 Atk / 28 Def / 28 SpA / 28 SpD / 28 Spe
+- Facade
+- Aerial Ace
+- Quick Attack
+- Endeavor
+
+=== TRAINER_MP_TWIN_TATE_AND_LIZA ===
+Name: STELLA
+Class: Leader
+Pic: Psychic F
+Gender: Female
+Music: Female
+Items: Hyper Potion / Hyper Potion
+Double Battle: No
+AI: Basic Trainer / Powerful Status
+
+Bronzong
+Level: 41
+Ability: Levitate
+IVs: 30 HP / 30 Atk / 30 Def / 30 SpA / 30 SpD / 30 Spe
+- Trick Room
+- Gyro Ball
+- Hypnosis
+- Extrasensory
+
+Dusclops @ Eviolite
+Level: 41
+Ability: Frisk
+IVs: 30 HP / 30 Atk / 30 Def / 30 SpA / 30 SpD / 30 Spe
+- Trick Room
+- Will-O-Wisp
+- Shadow Punch
+- Pain Split
+
+Slowking @ Sitrus Berry
+Level: 42
+Ability: Own Tempo
+IVs: 30 HP / 30 Atk / 30 Def / 30 SpA / 30 SpD / 30 Spe
+- Psychic
+- Surf
+- Slack Off
+- Calm Mind
+
+=== TRAINER_MP_TWIN_JUAN ===
+Name: MARINA
+Class: Leader
+Pic: Beauty
+Gender: Female
+Music: Female
+Items: Hyper Potion / Hyper Potion
+Double Battle: No
+AI: Basic Trainer / Powerful Status
+
+Politoed @ Damp Rock
+Level: 44
+Ability: Drizzle
+IVs: 30 HP / 30 Atk / 30 Def / 30 SpA / 30 SpD / 30 Spe
+- Surf
+- Ice Beam
+- Hypnosis
+- Rain Dance
+
+Ludicolo
+Level: 44
+Ability: Swift Swim
+IVs: 30 HP / 30 Atk / 30 Def / 30 SpA / 30 SpD / 30 Spe
+- Fake Out
+- Giga Drain
+- Hydro Pump
+- Ice Beam
+
+Kabutops @ Sitrus Berry
+Level: 45
+Ability: Swift Swim
+IVs: 30 HP / 30 Atk / 30 Def / 30 SpA / 30 SpD / 30 Spe
+- Waterfall
+- Rock Slide
+- Aqua Jet
+- X-Scissor

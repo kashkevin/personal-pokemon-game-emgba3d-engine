@@ -6,6 +6,10 @@
 #define MULTIPLAYER_BATTLE_ABI 3
 #define MULTIPLAYER_BATTLE_RESUME_ABI 1
 #define MULTIPLAYER_BATTLE_ADMISSION_CLEANUP_ABI 1
+// Optional co-op Gym phase: two trainers on one side against a Gym Leader and
+// its partner, both run by the master core's AI (Emerald's tower link-multi
+// controller layout). Parties are restored exactly afterwards, like PvP.
+#define MULTIPLAYER_BATTLE_COOP_ABI 1
 #define MULTIPLAYER_BATTLE_SIZE 512
 #define MULTIPLAYER_BATTLE_BLOCK_SIZE 256
 #define MULTIPLAYER_BATTLE_CHUNK_SIZE 128
@@ -28,6 +32,7 @@ enum MultiplayerBattleState {
 };
 enum MultiplayerBattlePhase {
     MP_BATTLE_PHASE_DIAGNOSTIC = 1, MP_BATTLE_PHASE_SINGLES, MP_BATTLE_PHASE_FULL_MULTI,
+    MP_BATTLE_PHASE_COOP,
 };
 enum MultiplayerBattleKind {
     MP_BATTLE_KIND_NONE, MP_BATTLE_KIND_DIAGNOSTIC, MP_BATTLE_KIND_TRAINER,
@@ -101,6 +106,7 @@ struct MultiplayerBattlePreparation {
 extern const u32 gMultiplayerBattleAbiVersion;
 extern const u32 gMultiplayerBattleResumeAbiVersion;
 extern const u32 gMultiplayerBattleAdmissionCleanupAbiVersion;
+extern const u32 gMultiplayerBattleCoopAbiVersion;
 extern volatile struct MultiplayerBattleMailbox gMultiplayerBattleMailbox;
 extern volatile u32 gMultiplayerBattleHoldFlags;
 void MultiplayerBattle_Init(void);
@@ -112,6 +118,11 @@ bool32 MultiplayerBattle_PauseClocks(void);
 bool32 MultiplayerBattle_SkipCallbacks(void);
 bool32 MultiplayerBattle_IsNative(void);
 bool32 MultiplayerBattle_IsFullMulti(void);
+bool32 MultiplayerBattle_IsCoop(void);
+bool32 MultiplayerBattle_IsNativeDouble(void);
+u32 MultiplayerBattle_GetBattlerCount(void);
+u32 MultiplayerBattle_GetBattlerOwner(u32 battler);
+u32 MultiplayerBattle_GetCoopGym(void);
 bool32 MultiplayerBattle_TrySendOutAnimation(u8 battler);
 bool32 MultiplayerBattle_CanReceiveControllers(void);
 bool32 MultiplayerBattle_ValidateController(const u8 *data, u16 size, u8 source);
@@ -120,6 +131,8 @@ void MultiplayerBattle_FailNative(void);
 bool8 MultiplayerBattle_SendPartyPair(u8 index);
 bool8 MultiplayerBattle_CopyFullMultiPartyPair(u8 index);
 void MultiplayerBattle_InstallNativeRng(void);
+void MultiplayerBattle_CreateCoopOpponents(void);
+void MultiplayerBattle_SetCoopLinkPlayers(void);
 bool32 MultiplayerBattle_TryReturnNative(void);
 bool32 MultiplayerBattle_CheckBinding(u32 session, u32 incarnation);
 u8 MultiplayerBattle_GetPlayerId(void);

@@ -860,11 +860,23 @@
 #define TRAINER_BRENDAN_PLACEHOLDER         853
 #define TRAINER_MAY_PLACEHOLDER             854
 
-// NOTE: Because each Trainer uses a flag to determine when they are defeated, there is only space for 9 additional trainers before trainer flag space overflows
+// Multiplayer co-op Gym partners ("Twin" trainers). Two teammates who
+// challenge a Gym together face its Leader and this partner in a native
+// double battle. These fill the last free trainer-flag slots (855-862).
+#define TRAINER_MP_TWIN_ROXANNE             855
+#define TRAINER_MP_TWIN_BRAWLY              856
+#define TRAINER_MP_TWIN_WATTSON             857
+#define TRAINER_MP_TWIN_FLANNERY            858
+#define TRAINER_MP_TWIN_NORMAN              859
+#define TRAINER_MP_TWIN_WINONA              860
+#define TRAINER_MP_TWIN_TATE_AND_LIZA       861
+#define TRAINER_MP_TWIN_JUAN                862
+
+// NOTE: Because each Trainer uses a flag to determine when they are defeated, there is only space for 1 additional trainer before trainer flag space overflows
 //       More space can be made by shifting flags around in constants/flags.h or changing how trainer flags are handled
 //       MAX_TRAINERS_COUNT can be increased but will take up additional saveblock space
 
-#define TRAINERS_COUNT_EMERALD     855
+#define TRAINERS_COUNT_EMERALD     863
 #define MAX_TRAINERS_COUNT_EMERALD 864
 
 #if IS_FRLG

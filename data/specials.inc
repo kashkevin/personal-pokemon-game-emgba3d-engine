@@ -652,3 +652,7 @@ gSpecials::
 	def_special MultiplayerWorld_ReportEventResult
 	def_special MultiplayerRide_CanRideFollower
 	def_special MultiplayerRide_MountFromScript
+	def_special MultiplayerCoop_CanOffer
+	def_special MultiplayerCoop_RequestBattle
+	def_special MultiplayerCoop_GivePrizeMoney
+	def_special MultiplayerCoop_BufferPartnerName

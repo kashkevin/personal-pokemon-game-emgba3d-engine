@@ -2492,7 +2492,7 @@ static u32 DoesPartyHaveBattleReadyMons(enum BattleTrainer trainer)
 static bool32 WillPlayerWhiteOutIfPartnerWinsAlone()
 {
     // A network side survives while either independently owned party survives.
-    if (MultiplayerBattle_IsFullMulti())
+    if (MultiplayerBattle_IsNativeDouble())
         return FALSE;
     if (GetConfig(B_MULTI_BATTLE_WHITEOUT) <= GEN_3)
         return TRUE;
@@ -5521,7 +5521,7 @@ static void Cmd_forcerandomswitch(void)
     {
         party = GetBattlerParty(gBattlerTarget);
 
-        if (MultiplayerBattle_IsFullMulti())
+        if (MultiplayerBattle_IsNativeDouble())
         {
             firstMonId = 0;
             lastMonId = PARTY_SIZE;
@@ -5632,7 +5632,7 @@ static void Cmd_forcerandomswitch(void)
                 || (gBattleTypeFlags & BATTLE_TYPE_RECORDED_LINK && gBattleTypeFlags & BATTLE_TYPE_MULTI))
             {
                 SwitchPartyOrderLinkMulti(gBattlerTarget, gBattleStruct->monToSwitchIntoId[gBattlerTarget], 0);
-                if (!MultiplayerBattle_IsFullMulti())
+                if (!MultiplayerBattle_IsNativeDouble())
                     SwitchPartyOrderLinkMulti(GetPartnerBattler(gBattlerTarget), gBattleStruct->monToSwitchIntoId[gBattlerTarget], 1);
             }
 

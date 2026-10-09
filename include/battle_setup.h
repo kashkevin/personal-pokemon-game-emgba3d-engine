@@ -143,5 +143,6 @@ u16 GetRematchTrainerIdFromTable(const struct RematchTrainer *table, u16 firstBa
 u8 GetRivalBattleFlags(void);
 
 void CreateNPCTrainerPartyFromTrainer(struct Pokemon *party, const struct Trainer *trainer);
+void CreateCoopTrainerParties(u16 opponentA, u16 opponentB);
 
 #endif // GUARD_BATTLE_SETUP_H

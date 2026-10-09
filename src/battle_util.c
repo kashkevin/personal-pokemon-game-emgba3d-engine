@@ -9919,7 +9919,7 @@ bool32 IsSleepClauseEnabled(void)
 
 bool32 AreMultiPartiesFullTeams(void)
 {
-    if (MultiplayerBattle_IsFullMulti())
+    if (MultiplayerBattle_IsNativeDouble())
     {
         gSpecialVar_Result = TRUE;
         return TRUE;

@@ -2294,6 +2294,21 @@ static void CreateNPCTrainerParty(struct Pokemon *party, u16 trainerNum)
     CreateNPCTrainerPartyFromTrainer(party, (const struct Trainer *)(&tempTrainer));
 }
 
+// Multiplayer co-op Gym battle: every core builds both in-game opponents'
+// parties itself, from the same shared seed (multiplayer_battle.c).
+void CreateCoopTrainerParties(u16 opponentA, u16 opponentB)
+{
+    ZeroEnemyPartyMons();
+    CreateNPCTrainerParty(&gParties[B_TRAINER_OPPONENT_A][0], opponentA);
+    CreateNPCTrainerParty(&gParties[B_TRAINER_OPPONENT_B][0], opponentB);
+    for (enum BattleTrainer trainer = B_TRAINER_OPPONENT_A; trainer <= B_TRAINER_OPPONENT_B; trainer++)
+    {
+        for (u32 i = 0; i < PARTY_SIZE; i++)
+            TryFormChange(&gParties[trainer][i], FORM_CHANGE_BEGIN_BATTLE, trainer);
+        gPartiesCount[trainer] = CalculatePartyCount(trainer);
+    }
+}
+
 void CreateTrainerPartyForPlayer(void)
 {
     Script_RequestEffects(SCREFF_V1);

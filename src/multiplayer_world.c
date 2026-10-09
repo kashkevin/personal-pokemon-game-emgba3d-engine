@@ -46,6 +46,7 @@ _Static_assert(offsetof(struct MultiplayerWorldMailbox, peers) == 68, "World pee
 _Static_assert(offsetof(struct MultiplayerWorldMailbox, event) == 128, "World event offset");
 _Static_assert(offsetof(struct MultiplayerWorldMailbox, notice) == 160, "World notice offset");
 _Static_assert(offsetof(struct MultiplayerWorldMailbox, walletSeq) == 228, "World wallet offset");
+_Static_assert(offsetof(struct MultiplayerWorldMailbox, teammateToken) == 236, "World teammate offset");
 _Static_assert(MP_WORLD_LOCAL_ID_FOLLOWER_BASE == MULTIPLAYER_LOCAL_ID_BASE + MULTIPLAYER_MAX_PEERS, "Follower IDs follow avatars");
 _Static_assert(MP_WORLD_LOCAL_ID_EVENT < LOCALID_OW_ENCOUNTER_END - OWE_SPAWNS_MAX + 1, "Event ID outside generated encounters");
 
@@ -72,6 +73,7 @@ struct WorldInbound
     struct MultiplayerWorldNotice notice;
     u32 walletSeq;
     s32 walletDelta;
+    u32 teammateToken;
 };
 
 struct RemoteFollower
@@ -154,6 +156,7 @@ static void ReadInbound(void)
     copy.notice = *(const struct MultiplayerWorldNotice *)&gMultiplayerWorldMailbox.notice;
     copy.walletSeq = gMultiplayerWorldMailbox.walletSeq;
     copy.walletDelta = gMultiplayerWorldMailbox.walletDelta;
+    copy.teammateToken = gMultiplayerWorldMailbox.teammateToken;
     if (generation != gMultiplayerWorldMailbox.inboundGeneration)
         return;
     sSeenInboundGeneration = generation;
@@ -221,6 +224,24 @@ static void PostActionWithAmount(u8 kind, u8 result, u32 eventId, u16 species, u
 static void PostAction(u8 kind, u8 result, u32 eventId, u16 species)
 {
     PostActionWithAmount(kind, result, eventId, species, 0);
+}
+
+u32 MultiplayerWorld_GetTeammateToken(void)
+{
+    return sConnected && sHaveInbound ? sInbound.teammateToken : 0;
+}
+
+bool32 MultiplayerWorld_IsActionPending(void)
+{
+    return ActionPending();
+}
+
+bool32 MultiplayerWorld_PostCoopRequest(u32 gym)
+{
+    if (!sConnected || !sHaveInbound || ActionPending() || gym == 0)
+        return FALSE;
+    PostAction(MP_WORLD_ACTION_COOP_GYM, 0, gym, 0);
+    return TRUE;
 }
 
 bool32 MultiplayerWorld_PostAppearanceSaved(void)

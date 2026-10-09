@@ -4,6 +4,7 @@
 #include "multiplayer_world.h"
 #include "multiplayer_ride.h"
 #include "multiplayer_appearance.h"
+#include "multiplayer_coop.h"
 #include "multiplayer_save.h"
 #include "multiplayer_battle.h"
 #include "multiplayer_menu.h"
@@ -99,6 +100,22 @@ bool32 Multiplayer_IsRemoteObject(const struct ObjectEvent *objectEvent)
 u32 Multiplayer_GetRemotePlayerId(u32 i)
 {
     return i < MULTIPLAYER_MAX_PEERS ? sRemotes[i].peer.playerId : 0;
+}
+
+bool32 Multiplayer_IsPeerOnCurrentMap(u32 playerId)
+{
+    u32 i;
+    if (!sConnected || playerId == 0 || gSaveBlock1Ptr == NULL)
+        return FALSE;
+    for (i = 0; i < MULTIPLAYER_MAX_PEERS; i++)
+    {
+        const struct MultiplayerPeer *peer = &sRemotes[i].peer;
+        if (peer->playerId == playerId)
+            return peer->pose.activity != MULTIPLAYER_ACTIVITY_UNAVAILABLE
+                && peer->pose.mapGroup == gSaveBlock1Ptr->location.mapGroup
+                && peer->pose.mapNum == gSaveBlock1Ptr->location.mapNum;
+    }
+    return FALSE;
 }
 
 u8 Multiplayer_GetRemoteMovementMode(u32 i)
@@ -470,6 +487,7 @@ void Multiplayer_Tick(void)
     ready = FieldReady();
     MultiplayerRide_Tick(ready);
     MultiplayerAppearance_Tick(sConnected);
+    MultiplayerCoop_Tick();
     PublishLocalPose(ready);
     ReadInbound();
     if (sConnected && sFrame - sLastHeartbeatFrame >= HEARTBEAT_TIMEOUT_FRAMES)

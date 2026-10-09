@@ -809,4 +809,7 @@ extern const u8 EventScript_MultiplayerWorldEvent[];
 extern const u8 EventScript_MultiplayerRideNotHere[];
 extern const u8 EventScript_MultiplayerRideNotAble[];
 
+extern const u8 EventScript_MultiplayerCoopVictory[];
+extern const u8 EventScript_MultiplayerCoopDefeat[];
+
 #endif // GUARD_EVENT_SCRIPTS_H
