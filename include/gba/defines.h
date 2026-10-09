@@ -6,17 +6,34 @@
 #define TRUE   1
 #define FALSE  0
 
+#ifdef PORTABLE
+// Native PC build: there is no IWRAM/EWRAM split; everything is ordinary memory.
+#define IWRAM_DATA
+#define EWRAM_DATA
+#define IWRAM_INIT
+#define EWRAM_INIT
+#define COMMON_DATA
+#else
 #define IWRAM_DATA __attribute__((section(".bss")))
 #define EWRAM_DATA __attribute__((section(".sbss")))
 #define IWRAM_INIT __attribute__((section(".iwram")))
 #define EWRAM_INIT __attribute__((section(".ewram")))
 #define COMMON_DATA __attribute__((section("common_data")))
+#endif
 #define UNUSED __attribute__((unused))
 #define USED __attribute__((used))
+#ifdef PORTABLE
+#define KEEP_SECTION
+#else
 #define KEEP_SECTION __attribute__((section(".text.consts")))
+#endif
 #define DEPRECATED(msg) __attribute__((deprecated(msg)))
 
+#ifdef PORTABLE
+#define ARM_FUNC
+#else
 #define ARM_FUNC __attribute__((target("arm")))
+#endif
 
 #if MODERN
 #define NOINLINE __attribute__((noinline))
@@ -25,11 +42,29 @@
 #endif
 
 #define ALIGNED(n) __attribute__((aligned(n)))
+
+// The GBA build uses -mabi=apcs-gnu, where every struct and union is at least
+// 4-byte aligned and padded to a multiple of 4 bytes. The native PC build uses
+// natural x86 alignment. ABI_ALIGN marks the types that live in save data,
+// companion mailboxes and battle link packets so the native build reproduces the
+// GBA byte layout exactly (checked by tools/pc_port/abi_layout.py).
+#ifdef PORTABLE
+#define ABI_ALIGN __attribute__((aligned(4)))
+#else
+#define ABI_ALIGN
+#endif
 #define PACKED __attribute__((packed))
 #define TRANSPARENT __attribute__ ((__transparent_union__))
 #define ALWAYS_INLINE inline __attribute__((always_inline))
 #define NONNULL __attribute__((__nonnull__))
 
+#define BG_PLTT_SIZE  0x200
+#define OBJ_PLTT_SIZE 0x200
+#define PLTT_SIZE     (BG_PLTT_SIZE + OBJ_PLTT_SIZE)
+#define VRAM_SIZE 0x18000
+#define OAM_SIZE 0x400
+
+#ifndef PORTABLE
 #define SOUND_INFO_PTR (*(struct SoundInfo **)0x3007FF0)
 #define INTR_CHECK     (*(u16 *)0x3007FF8)
 #define INTR_VECTOR    (*(void **)0x3007FFC)
@@ -43,14 +78,25 @@
 #define IWRAM_END   (IWRAM_START + 0x8000)
 
 #define PLTT          0x5000000
-#define BG_PLTT       PLTT
-#define BG_PLTT_SIZE  0x200
-#define OBJ_PLTT      (PLTT + BG_PLTT_SIZE)
-#define OBJ_PLTT_SIZE 0x200
-#define PLTT_SIZE     (BG_PLTT_SIZE + OBJ_PLTT_SIZE)
-
 #define VRAM      0x6000000
-#define VRAM_SIZE 0x18000
+#define OAM      0x7000000
+#else
+// Native PC build: the GBA memory map does not exist. Palette, VRAM, OAM and the
+// I/O registers are ordinary arrays (src/platform/bios.c) that the PC renderer
+// reads. ROM/EWRAM/IWRAM address ranges are deliberately not defined so that any
+// code depending on them fails to compile and gets a reviewed PORTABLE path.
+struct SoundInfo;
+extern struct SoundInfo *SOUND_INFO_PTR;
+extern unsigned short INTR_CHECK;
+extern void *INTR_VECTOR;
+extern unsigned char PLTT[PLTT_SIZE] __attribute__((aligned(4)));
+extern unsigned char VRAM_[VRAM_SIZE] __attribute__((aligned(4)));
+#define VRAM ((u32)VRAM_)
+extern unsigned char OAM[OAM_SIZE] __attribute__((aligned(4)));
+#endif
+
+#define BG_PLTT       PLTT
+#define OBJ_PLTT      (PLTT + BG_PLTT_SIZE)
 
 #define BG_VRAM           VRAM
 #define BG_VRAM_SIZE      0x10000
@@ -72,8 +118,6 @@
 #define OBJ_VRAM1      (VRAM + 0x14000)
 #define OBJ_VRAM1_SIZE 0x4000
 
-#define OAM      0x7000000
-#define OAM_SIZE 0x400
 
 #define ROM_HEADER_SIZE   0xC0
 

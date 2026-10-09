@@ -29,7 +29,7 @@ typedef union // size = 0x24
 
     // Local shows
     // TVSHOW_FAN_CLUB_LETTER
-    struct {
+    struct ABI_ALIGN {
         /*0x00*/ u8 kind;
         /*0x01*/ bool8 active;
         /*0x02*/ enum Species species;
@@ -40,7 +40,7 @@ typedef union // size = 0x24
     } fanclubLetter;
 
     // TVSHOW_RECENT_HAPPENINGS
-    struct {
+    struct ABI_ALIGN {
         /*0x00*/ u8 kind;
         /*0x01*/ bool8 active;
         /*0x02*/ enum Species species;
@@ -147,7 +147,7 @@ typedef union // size = 0x24
     } contestLiveUpdates;
 
     // TVSHOW_3_CHEERS_FOR_POKEBLOCKS
-    struct {
+    struct ABI_ALIGN {
         /*0x00*/ u8 kind;
         /*0x01*/ bool8 active;
         /*0x02*/ u8 sheen;
@@ -176,7 +176,7 @@ typedef union // size = 0x24
     } battleUpdate;
 
     // TVSHOW_FAN_CLUB_SPECIAL
-    struct {
+    struct ABI_ALIGN {
         /*0x00*/ u8 kind;
         /*0x01*/ bool8 active;
         /*0x02*/ u8 playerName[PLAYER_NAME_LENGTH + 1];
@@ -191,7 +191,7 @@ typedef union // size = 0x24
     } fanClubSpecial;
 
     // TVSHOW_LILYCOVE_CONTEST_LADY
-    struct {
+    struct ABI_ALIGN {
         /*0x00*/ u8 kind;
         /*0x01*/ bool8 active;
         /*0x02*/ u8 playerName[PLAYER_NAME_LENGTH + 1];
@@ -404,7 +404,7 @@ typedef union // size = 0x24
     } trainerFanClub;
 
     // TVSHOW_CUTIES
-    struct {
+    struct ABI_ALIGN {
         /*0x00*/ u8 kind;
         /*0x01*/ bool8 active;
         /*0x02*/ u8 nRibbons;
@@ -460,7 +460,7 @@ typedef union // size = 0x24
     } secretBaseSecrets;
 
     // TVSHOW_SAFARI_FAN_CLUB
-    struct {
+    struct ABI_ALIGN {
         /*0x00*/ u8 kind;
         /*0x01*/ bool8 active;
         /*0x02*/ u8 monsCaught;

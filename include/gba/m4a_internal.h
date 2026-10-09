@@ -1,6 +1,12 @@
 #ifndef GUARD_GBA_M4A_INTERNAL_H
 #define GUARD_GBA_M4A_INTERNAL_H
 
+#ifdef PORTABLE
+// Native PC build: the C sound engine (src/platform/music_player.c,
+// sound_mixer.c, cgb_audio.c) uses its own m4a structures.
+#include "gba/m4a_internal_pc.h"
+#else
+
 #include "gba/gba.h"
 
 // ASCII encoding of 'Smsh' in reverse
@@ -496,4 +502,5 @@ void ply_xswee(struct MusicPlayerInfo *, struct MusicPlayerTrack *);
 void ply_xwait(struct MusicPlayerInfo *, struct MusicPlayerTrack *);
 void ply_xcmd_0D(struct MusicPlayerInfo *, struct MusicPlayerTrack *);
 
+#endif // PORTABLE
 #endif // GUARD_GBA_M4A_INTERNAL_H

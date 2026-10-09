@@ -7,6 +7,7 @@
 	.bss
 	.align 2
 
+.ifndef PORTABLE @ native PC build: defined in src/platform/m4a_pc.c (C struct sizes)
 gMPlayTrack_BGM::
 	.space TRACK_SIZE * NUM_TRACKS_BGM
 	.size gMPlayTrack_BGM, .-gMPlayTrack_BGM
@@ -22,6 +23,7 @@ gMPlayTrack_SE2::
 gMPlayTrack_SE3::
 	.space TRACK_SIZE * NUM_TRACKS_SE3
 	.size gMPlayTrack_SE3, .-gMPlayTrack_SE3
+.endif
 
 	.section .rodata
 

@@ -133,6 +133,11 @@ static const char str_checkMbootLL[] = "RFU-MBOOT";
 
 u16 rfu_initializeAPI(u32 *APIBuffer, u16 buffByteSize, IntrFunc *sioIntrTable_p, bool8 copyInterruptToRam)
 {
+#ifdef PORTABLE
+    // No GBA Wireless Adapter on PC. The rest of this function copies Thumb code
+    // into RAM and executes it, which cannot work natively.
+    return ERR_RFU_API_BUFF_ADR;
+#else
     u16 i;
     u16 buffByteSizeMax;
 
@@ -197,6 +202,7 @@ u16 rfu_initializeAPI(u32 *APIBuffer, u16 buffByteSize, IntrFunc *sioIntrTable_p
 #endif
     gRfuFixed->fastCopyPtr = (void *)gRfuFixed->fastCopyBuffer + 1;
     return 0;
+#endif // PORTABLE
 }
 
 static void rfu_STC_clearAPIVariables(void)

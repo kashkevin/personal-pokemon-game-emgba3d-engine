@@ -187,8 +187,14 @@ void SetSpeaker(struct ScriptContext *ctx)
 
     if (arg < SP_NAME_COUNT)
         speaker = gSpeakerNamesTable[arg];
+#ifdef PORTABLE
+    // Native PC build: a script-supplied string pointer instead of a table index.
+    else if (arg >= 0x10000)
+        speaker = (const u8 *)arg;
+#else
     else if (arg >= ROM_START && arg < ROM_END)
         speaker = (const u8 *)arg;
+#endif
 
     gSpeakerName = speaker;
 }

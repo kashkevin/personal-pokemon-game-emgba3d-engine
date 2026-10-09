@@ -1202,10 +1202,15 @@ static u32 GetBgType(u32 bg)
 
 bool32 IsTileMapOutsideWram(u32 bg)
 {
+#ifdef PORTABLE
+    // No IWRAM/EWRAM address ranges natively; only a missing tilemap is invalid.
+    return sGpuBgConfigs2[bg].tilemap == NULL;
+#else
     if (sGpuBgConfigs2[bg].tilemap > (void *)IWRAM_END)
         return TRUE;
     else if (sGpuBgConfigs2[bg].tilemap == NULL)
         return TRUE;
     else
         return FALSE;
+#endif
 }

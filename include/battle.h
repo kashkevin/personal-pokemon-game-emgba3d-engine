@@ -451,7 +451,7 @@ struct Illusion
     struct Pokemon *mon;
 };
 
-struct ZMoveData
+struct ABI_ALIGN ZMoveData
 {
     u8 viable:1;   // current move can become a z move
     u8 viewing:1;  // if player is viewing the z move name instead of regular moves

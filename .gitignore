@@ -66,3 +66,8 @@ tools/aif2pcm/aif2pcm
 *.smolTM
 __pycache__
 .map_version
+# Native PC build outputs (Makefile_pc)
+/pokeemerald-mp
+/pokeemerald-mp-san
+/pokeemerald-mp.exe
+tools/pc_port/__pycache__/

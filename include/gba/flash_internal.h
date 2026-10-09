@@ -1,7 +1,11 @@
 #ifndef GUARD_GBA_FLASH_INTERNAL_H
 #define GUARD_GBA_FLASH_INTERNAL_H
 
+#ifndef PORTABLE
 #define FLASH_BASE ((u8 *)0xE000000)
+#else
+extern unsigned char FLASH_BASE[131072]; // the 128 KiB save image, mirrored to disk by the platform layer
+#endif
 
 #define FLASH_WRITE(addr, data) ((*(vu8 *)(FLASH_BASE + (addr))) = (data))
 
@@ -56,6 +60,14 @@ extern const struct FlashType *gFlash;
 extern u8 (*PollFlashStatus)(u8 *);
 extern u8 gFlashTimeoutFlag;
 
+#ifdef PORTABLE
+extern const struct FlashSetupInfo DUMMY_SAVE;
+u16 WaitForFlashWrite_DUMMY(u8 phase, u8 *addr, u8 lastData);
+u16 EraseFlashChip_DUMMY(void);
+u16 EraseFlashSector_DUMMY(u16 sectorNum);
+u16 ProgramFlashByte_DUMMY(u16 sectorNum, u32 offset, u8 data);
+u16 ProgramFlashSector_DUMMY(u16 sectorNum, u8 *src);
+#endif
 extern const struct FlashSetupInfo MX29L010;
 extern const struct FlashSetupInfo LE26FV10N1TS;
 extern const struct FlashSetupInfo DefaultFlash;

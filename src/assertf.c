@@ -345,6 +345,15 @@ static void CrashScreen(enum Mode mode, const void *return1, const void *return0
     }
 
     // Allocate on stack if possible.
+#ifdef PORTABLE
+    // The native stack is large; no IWRAM bound to check against.
+    if (!backup)
+    {
+        backup = alloca(sizeof(*backup));
+        backup->onHeap = FALSE;
+    }
+#endif
+#ifndef PORTABLE
     if (!backup)
     {
         extern char __iwram_end[];
@@ -355,6 +364,7 @@ static void CrashScreen(enum Mode mode, const void *return1, const void *return0
             backup->onHeap = FALSE;
         }
     }
+#endif
 
     if (!backup)
     {

@@ -527,7 +527,7 @@ static void Task_HandleMonAnimation(u8 taskId)
         // Task_HandleMonAnimation handles more than just KO animations,
         // but if the counter is non-zero then only KO animations are running.
         // This assumption is not checked.
-        if (gBattleStruct->battlerKOAnimsRunning > 0)
+        if (NATIVE_NULL_GUARD(gBattleStruct) && gBattleStruct->battlerKOAnimsRunning > 0)
             gBattleStruct->battlerKOAnimsRunning--;
         DestroyTask(taskId);
     }

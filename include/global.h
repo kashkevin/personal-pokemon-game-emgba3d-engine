@@ -32,10 +32,42 @@
 
 // to help in decompiling
 #define asm_unified(x) asm(".syntax unified\n" x "\n.syntax divided")
+#ifdef PORTABLE
+#define NAKED // the native PC build has no naked asm functions
+#include <stdio.h>
+// Verbose platform tracing (flash reads, RTC queries). Off unless requested.
+#ifdef PLATFORM_DEBUG_LOG
+#define DBGPRINTF(...) printf(__VA_ARGS__)
+#else
+#define DBGPRINTF(...) ((void)0)
+#endif
+#else
 #define NAKED __attribute__((naked))
+#endif
 
 #if MODERN
 #define asm __asm__
+#endif
+
+// Pointer checks the native PC build needs. On the GBA, reads through NULL return
+// BIOS bytes and writes are ignored, so some code dereferences pointers (such as
+// gBattleStruct outside battle) that are NULL. The PC faults instead. These guards
+// are compiled out of the GBA ROM so its behaviour and bytes are unchanged.
+#ifdef PORTABLE
+#define NATIVE_NULL_GUARD(ptr) ((ptr) != NULL)
+#else
+#define NATIVE_NULL_GUARD(ptr) TRUE
+#endif
+
+// Shifting a 32-bit value by 32 or more is undefined in C. The GBA (ARM) gives 0
+// for both directions; x86 uses the count modulo 32. Some game code relies on the
+// ARM result. These give it on every platform and are plain shifts on the GBA.
+#ifdef PORTABLE
+#define ARM_LSL32(x, n) ((u32)(n) >= 32 ? 0u : (u32)(x) << (n))
+#define ARM_LSR32(x, n) ((u32)(n) >= 32 ? 0u : (u32)(x) >> (n))
+#else
+#define ARM_LSL32(x, n) ((u32)(x) << (n))
+#define ARM_LSR32(x, n) ((u32)(x) >> (n))
 #endif
 
 /// IDE support
@@ -217,7 +249,7 @@ struct UCoords32
     u32 y;
 };
 
-struct Time
+struct ABI_ALIGN Time
 {
     /*0x00*/ s16 days;
     /*0x02*/ s8 hours;
@@ -462,7 +494,7 @@ struct RentalMon
     //u8 padding2[2];
 };
 
-struct BattleDomeTrainer
+struct ABI_ALIGN BattleDomeTrainer
 {
     u16 trainerId:10;
     u16 isEliminated:1;
@@ -473,7 +505,7 @@ struct BattleDomeTrainer
 #define DOME_TOURNAMENT_TRAINERS_COUNT 16
 #define BATTLE_TOWER_RECORD_COUNT 5
 
-struct BattleFrontier
+struct ABI_ALIGN BattleFrontier
 {
     /*0x64C*/ struct EmeraldBattleTowerRecord towerPlayer;
     /*0x738*/ struct EmeraldBattleTowerRecord towerRecords[BATTLE_TOWER_RECORD_COUNT]; // From record mixing.
@@ -605,7 +637,7 @@ struct RankingHall2P
     //u8 padding;
 };
 
-struct SaveBlock2
+struct ABI_ALIGN SaveBlock2
 {
     /*0x00*/ u8 playerName[PLAYER_NAME_LENGTH + 1];
     /*0x08*/ u8 playerGender; // MALE, FEMALE
@@ -699,7 +731,7 @@ struct ItemSlot
     u16 quantity;
 };
 
-struct Pokeblock
+struct ABI_ALIGN Pokeblock
 {
     u8 color;
     u8 spicy;
@@ -729,7 +761,7 @@ struct Roamer
     /*0x16*/ u8 filler[0x6];
 };
 
-struct RamScriptData
+struct ABI_ALIGN RamScriptData
 {
     u8 magic;
     u8 mapGroup;
@@ -756,7 +788,7 @@ struct DewfordTrend
     u16 words[2];
 }; /*size = 0x8*/
 
-struct MauvilleManCommon
+struct ABI_ALIGN MauvilleManCommon
 {
     u8 id;
 };
@@ -786,7 +818,7 @@ struct MauvilleManStoryteller
     u8 language[NUM_STORYTELLER_TALES];
 };
 
-struct MauvilleManGiddy
+struct ABI_ALIGN MauvilleManGiddy
 {
     /*0x00*/ u8 id;
     /*0x01*/ u8 taleCounter;
@@ -798,14 +830,14 @@ struct MauvilleManGiddy
     /*0x21*/ //u8 padding2;
 }; /*size = 0x2C*/
 
-struct MauvilleManHipster
+struct ABI_ALIGN MauvilleManHipster
 {
     u8 id;
     bool8 taughtWord;
     u8 language;
 };
 
-struct MauvilleOldManTrader
+struct ABI_ALIGN MauvilleOldManTrader
 {
     u8 id;
     u8 decorations[NUM_TRADER_ITEMS];
@@ -836,7 +868,7 @@ struct LinkBattleRecord
     u16 draws;
 };
 
-struct LinkBattleRecords
+struct ABI_ALIGN LinkBattleRecords
 {
     struct LinkBattleRecord entries[LINK_B_RECORDS_COUNT];
     u8 languages[LINK_B_RECORDS_COUNT];
@@ -870,7 +902,7 @@ struct ContestWinner
     //u8 padding;
 };
 
-struct Mail
+struct ABI_ALIGN Mail
 {
     /*0x00*/ u16 words[MAIL_WORDS_COUNT];
     /*0x12*/ u8 playerName[PLAYER_NAME_LENGTH + 1];
@@ -879,7 +911,7 @@ struct Mail
     /*0x20*/ enum Item itemId;
 };
 
-struct DaycareMail
+struct ABI_ALIGN DaycareMail
 {
     struct Mail message;
     u8 otName[PLAYER_NAME_LENGTH + 1];
@@ -902,7 +934,7 @@ struct DayCare
     u32 stepCounter;
 };
 
-struct LilycoveLadyQuiz
+struct ABI_ALIGN LilycoveLadyQuiz
 {
     /*0x000*/ u8 id;
     /*0x001*/ u8 state;
@@ -933,7 +965,7 @@ struct LilycoveLadyFavor
     /*0x013*/ //u8 padding2;
 };
 
-struct LilycoveLadyContest
+struct ABI_ALIGN LilycoveLadyContest
 {
     /*0x000*/ u8 id;
     /*0x001*/ bool8 givenPokeblock;
@@ -1000,7 +1032,7 @@ struct TrainerTower
     bool8 validated:1;
 };
 
-struct WonderNewsMetadata
+struct ABI_ALIGN WonderNewsMetadata
 {
     u8 newsType:2;
     u8 sentRewardCounter:3;
@@ -1112,7 +1144,7 @@ struct Bag
     struct ItemSlot berries[BAG_BERRIES_COUNT];
 };
 
-struct SaveBlock1
+struct ABI_ALIGN SaveBlock1
 {
     /*0x00*/ struct Coords16 pos;
     /*0x04*/ struct WarpData location;

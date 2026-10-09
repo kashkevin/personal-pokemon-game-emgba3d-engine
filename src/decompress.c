@@ -350,7 +350,12 @@ static __attribute__((always_inline)) inline void UnpackFrequencies(const u32 *p
 }
 
 // This is a small function, so we can store it in IWRAM for improved performance and don't need to worry about it taking too much precious IWRAM space.
-ARM_FUNC __attribute__((section(".iwram.code"))) __attribute__((noinline)) static void CopyTable(u32 *dst, const u32 *src, u32 size, u32 orrVal)
+#ifdef PORTABLE
+#define IWRAM_CODE_SECTION
+#else
+#define IWRAM_CODE_SECTION __attribute__((section(".iwram.code")))
+#endif
+ARM_FUNC IWRAM_CODE_SECTION __attribute__((noinline)) static void CopyTable(u32 *dst, const u32 *src, u32 size, u32 orrVal)
 {
     for (u32 i = 0; i < size; i++) {
         *dst++ = (*src++) | orrVal;
@@ -398,8 +403,16 @@ static IWRAM_DATA u8 sBitIndex = 0;
 static IWRAM_DATA const u32 *sDataPtr = 0;
 static IWRAM_DATA u32 sCurrState = 0;
 
+#ifdef PORTABLE
+// Native PC build: copying machine code into a stack buffer and executing it only
+// works on the GBA. Call the decoder functions in place instead.
+#define FUNC_BUFFER_SIZE(funcStart, funcEnd) 1
+#define CopyFuncToIwram(funcBuffer, funcStartAddress, funcEndAdress) ((void)(funcBuffer))
+#define IWRAM_FUNC_PTR(funcBuffer, func) ((void *)(func))
+#else
 // 33 because of FastUnsafeCopy32, we divide by 4 because the buffer is an array of u32
 #define FUNC_BUFFER_SIZE(funcStart, funcEnd)(((u32)(funcEnd) - (u32)(funcStart) + 33) / 4)
+#define IWRAM_FUNC_PTR(funcBuffer, func) ((void *) funcBuffer)
 
 extern void FastUnsafeCopy32(void *, const void *, u32 size);
 
@@ -408,6 +421,7 @@ static inline void CopyFuncToIwram(void *funcBuffer, const void *funcStartAddres
 {
     FastUnsafeCopy32(funcBuffer, funcStartAddress, funcEndAdress - funcStartAddress);
 }
+#endif
 
 // The reason for macros and unrolling the loops stems from the following:
 // currK can be max 6, meaning in the worst case scenario it takes minimum 4 loop iterations, where we don't need to check if bitIndex is >= 32, because it's mathematically impossible for it to be.
@@ -527,7 +541,7 @@ static void DecodeLOtANS(const u32 *data, const u32 *pFreqs, u8 *resultVec, u32 
     u32 funcBuffer[FUNC_BUFFER_SIZE(DecodeLOtANSLoop, SwitchToArmCallLOtANS)];
 
     CopyFuncToIwram(funcBuffer, DecodeLOtANSLoop, SwitchToArmCallLOtANS);
-    SwitchToArmCallLOtANS(data, sWorkingYkTable, resultVec, &resultVec[count - remainingCount], (void *) funcBuffer);
+    SwitchToArmCallLOtANS(data, sWorkingYkTable, resultVec, &resultVec[count - remainingCount], IWRAM_FUNC_PTR(funcBuffer, DecodeLOtANSLoop));
 
     if (remainingCount)
     {
@@ -603,7 +617,8 @@ static void DecodeSymtANS(const u32 *data, const u32 *pFreqs, u16 *resultVec, u3
     u32 funcBuffer[FUNC_BUFFER_SIZE(DecodeLOtANSLoop, SwitchToArmCallLOtANS)];
     // CopyFuncToIwram(funcBuffer, DecodeSymtANSLoop, SwitchToArmCallDecodeSymtANS);
     CopyFuncToIwram(funcBuffer, DecodeLOtANSLoop, SwitchToArmCallLOtANS);
-    SwitchToArmCallDecodeSymtANS(data, sWorkingYkTable, resultVec, &resultVec[count], (void *) funcBuffer);
+    // The GBA build runs DecodeLOtANSLoop here (identical machine code); do the same.
+    SwitchToArmCallDecodeSymtANS(data, sWorkingYkTable, resultVec, &resultVec[count], IWRAM_FUNC_PTR(funcBuffer, DecodeLOtANSLoop));
 }
 
 #define ANS_LOOP_MAIN(nibble)   \
@@ -781,7 +796,7 @@ static void DecodeSymDeltatANS(const u32 *data, const u32 *pFreqs, u16 *resultVe
 
     u32 funcBuffer[FUNC_BUFFER_SIZE(DecodeSymDeltatANSLoop, SwitchToArmCallSymDeltaANS)];
     CopyFuncToIwram(funcBuffer, DecodeSymDeltatANSLoop, SwitchToArmCallSymDeltaANS);
-    u32 currSymbol = SwitchToArmCallSymDeltaANS(data, sWorkingYkTable, resultVec, &resultVec[count - remainingCount], (void *) funcBuffer);
+    u32 currSymbol = SwitchToArmCallSymDeltaANS(data, sWorkingYkTable, resultVec, &resultVec[count - remainingCount], IWRAM_FUNC_PTR(funcBuffer, DecodeSymDeltatANSLoop));
 
     if (remainingCount)
     {
@@ -938,7 +953,7 @@ static void DecodeInstructionsIwram(u32 headerLoSize, const u8 *loVec, const u16
     u32 funcBuffer[FUNC_BUFFER_SIZE(DecodeInstructions, SwitchToArmCallDecodeInstructions)];
 
     CopyFuncToIwram(funcBuffer, DecodeInstructions, SwitchToArmCallDecodeInstructions);
-    SwitchToArmCallDecodeInstructions(headerLoSize, loVec, symVec, dest, (void *) funcBuffer);
+    SwitchToArmCallDecodeInstructions(headerLoSize, loVec, symVec, dest, IWRAM_FUNC_PTR(funcBuffer, DecodeInstructions));
 }
 
 //  Entrance point for smol compressed data
@@ -1094,7 +1109,7 @@ static void SmolDecompressTilemap(const struct SmolTilemapHeader *header, const 
     u32 funcBuffer[FUNC_BUFFER_SIZE(DeltaDecodeTileNumbers, SwitchToArmCallDecodeTileNumbers)];
 
     CopyFuncToIwram(funcBuffer, DeltaDecodeTileNumbers, SwitchToArmCallDecodeTileNumbers);
-    SwitchToArmCallDecodeTileNumbers(deltaDest, arraySize, (void *) funcBuffer);
+    SwitchToArmCallDecodeTileNumbers(deltaDest, arraySize, IWRAM_FUNC_PTR(funcBuffer, DeltaDecodeTileNumbers));
 }
 
 //  Helper functions for determining modes
@@ -1388,6 +1403,12 @@ bool8 LoadCompressedSpriteSheetUsingHeap(const struct CompressedSpriteSheet *src
     return FALSE;
 }
 
+#ifdef PORTABLE
+void FastLZ77UnCompWram(const u32 *src, void *dest)
+{
+    LZ77UnCompWram(src, dest); // C implementation in src/platform/bios.c
+}
+#else
 extern const u32 LZ77UnCompWRAMOptimized[];
 extern const u32 LZ77UnCompWRAMOptimized_end[];
 
@@ -1403,3 +1424,4 @@ void FastLZ77UnCompWram(const u32 *src, void *dest)
     CopyFuncToIwram(funcBuffer, LZ77UnCompWRAMOptimized, LZ77UnCompWRAMOptimized_end);
     SwitchToArmCallFastLZ77(src, dest, (void *) funcBuffer);
 }
+#endif

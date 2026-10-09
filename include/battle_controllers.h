@@ -218,14 +218,14 @@ struct HpAndStatus
     u32 status;
 };
 
-struct MovePPInfo
+struct ABI_ALIGN MovePPInfo
 {
     enum Move moves[MAX_MON_MOVES];
     u8 pp[MAX_MON_MOVES];
     u8 ppBonuses;
 };
 
-struct ChooseMoveStruct
+struct ABI_ALIGN ChooseMoveStruct
 {
     enum Move moves[MAX_MON_MOVES];
     u8 currentPP[MAX_MON_MOVES];

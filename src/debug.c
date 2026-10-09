@@ -1919,10 +1919,16 @@ static u8 *ConvertQ22_10ToDecimalString(u8 *string, u32 q22_10, u32 decimalDigit
 
 void CheckROMSize(struct ScriptContext *ctx)
 {
+#ifdef PORTABLE
+    // There is no 32 MiB cartridge ROM in the native PC build.
+    u32 currROMSizeKB = 0;
+    u32 currROMFreeKB = 0;
+#else
     extern u8 __rom_end[];
     u32 currROMSizeB = __rom_end - (const u8 *)ROM_START;
     u32 currROMSizeKB = (currROMSizeB + 1023) / 1024;
     u32 currROMFreeKB = ((const u8 *)ROM_END - __rom_end) / 1024;
+#endif
     ConvertQ22_10ToDecimalString(gStringVar1, currROMSizeKB, 2, ROUND_CEILING);
     ConvertQ22_10ToDecimalString(gStringVar2, currROMFreeKB, 2, ROUND_FLOOR);
 }

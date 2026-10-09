@@ -4,6 +4,8 @@
 
 static u16 MultiBoot_required_data[MULTIBOOT_NCHILD];
 
+#ifndef PORTABLE // GBA link-cable multiboot hardware; stubbed in src/platform/stub.c
+
 static int MultiBootSend(struct MultiBootParam *mp, u16 data);
 static int MultiBootHandShake(struct MultiBootParam *mp);
 static void MultiBootWaitCycles(u32 cycles);
@@ -469,3 +471,4 @@ static void MultiBootWaitSendDone(void)
 
     MultiBootWaitCycles(600);
 }
+#endif // PORTABLE

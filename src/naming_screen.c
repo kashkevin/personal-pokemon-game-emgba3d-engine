@@ -1022,6 +1022,8 @@ static void StartButtonFlash(struct Task *task, u8 button, bool8 keepFlashing)
 
 static void SpriteCB_Cursor(struct Sprite *sprite)
 {
+    if (!NATIVE_NULL_GUARD(sNamingScreen)) // sprites outlive the freed screen data by a frame
+        return;
     if (sprite->animEnded)
         StartSpriteAnim(sprite, 0);
 
@@ -1086,6 +1088,8 @@ static void SpriteCB_Underscore(struct Sprite *sprite)
     const s16 y[] = {2, 3, 2, 1};
     u8 pos;
 
+    if (!NATIVE_NULL_GUARD(sNamingScreen)) // sprites outlive the freed screen data by a frame
+        return;
     pos = GetTextEntryPosition();
     if (pos != (u8)sprite->sId)
     {
@@ -2092,6 +2096,8 @@ static void VBlankCB_NamingScreen(void)
     LoadOam();
     ProcessSpriteCopyRequests();
     TransferPlttBuffer();
+    if (!NATIVE_NULL_GUARD(sNamingScreen)) // VBlank can run once more after the data is freed
+        return;
     SetGpuReg(REG_OFFSET_BG1VOFS, sNamingScreen->bg1vOffset);
     SetGpuReg(REG_OFFSET_BG2VOFS, sNamingScreen->bg2vOffset);
     SetGpuReg(REG_OFFSET_BG1CNT, GetGpuReg(REG_OFFSET_BG1CNT) & 0xFFFC);

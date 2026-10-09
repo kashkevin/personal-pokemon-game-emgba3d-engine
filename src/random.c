@@ -39,6 +39,14 @@ static void SFC32_Seed(struct Sfc32State *state, u32 seed, u8 stream)
     }
 }
 
+#ifdef PORTABLE
+// Native PC build: the same SFC32 step as the Thumb routine below, in C.
+// Produces an identical sequence, so seeded RNG behaviour matches the GBA build.
+u32 Random32(void)
+{
+    return _SFC32_Next_Stream(&gRngValue, STREAM1);
+}
+#else
 /*This ASM implementation uses some shortcuts and is generally faster on the GBA.
 * It's not necessarily faster if inlined, or on other platforms.
 * In addition, it's extremely non-portable. */
@@ -69,6 +77,7 @@ u32 NAKED Random32(void)
     .ltorg"
     );
 }
+#endif // PORTABLE
 
 u32 Random2_32(void)
 {

@@ -1,5 +1,8 @@
 #include <stdarg.h>
 #include <stdio.h>
+#ifdef PORTABLE
+#include <stdlib.h>
+#endif
 #include "gba/gba.h"
 #include "config/general.h"
 #include "malloc.h"
@@ -213,6 +216,37 @@ void NoCashGBAAssert(const char *pFile, s32 nLine, const char *pExpression, bool
 #if (LOG_HANDLER == LOG_HANDLER_MGBA_PRINT)
 #define MGBA_REG_DEBUG_MAX (256)
 
+#ifdef PORTABLE
+// Native PC build: the mGBA debug registers do not exist; log to stderr instead.
+bool32 MgbaOpen(void)
+{
+    return TRUE;
+}
+
+void MgbaClose(void)
+{
+}
+
+void MgbaPrintf(s32 level, const char *ptr, ...)
+{
+    static const char *const sLevelNames[] = {"FATAL", "ERROR", "WARN", "INFO", "DEBUG"};
+    char buffer[MGBA_REG_DEBUG_MAX];
+    va_list args;
+
+    level &= 0x7;
+    va_start(args, ptr);
+    #if (PRETTY_PRINT_HANDLER == PRETTY_PRINT_MINI_PRINTF)
+    mini_vsnprintf(buffer, MGBA_REG_DEBUG_MAX, ptr, args);
+    #elif (PRETTY_PRINT_HANDLER == PRETTY_PRINT_LIBC)
+    vsnprintf(buffer, MGBA_REG_DEBUG_MAX, ptr, args);
+    #else
+    #error "unspecified pretty printing handler."
+    #endif
+    va_end(args);
+    buffer[MGBA_REG_DEBUG_MAX - 1] = '\0';
+    fprintf(stderr, "[game %s] %s\n", level < 5 ? sLevelNames[level] : "LOG", buffer);
+}
+#else
 bool32 MgbaOpen(void)
 {
     *REG_DEBUG_ENABLE = 0xC0DE;
@@ -240,13 +274,18 @@ void MgbaPrintf(s32 level, const char *ptr, ...)
     va_end(args);
     *REG_DEBUG_FLAGS = level | 0x100;
 }
+#endif
 
 void MgbaAssert(const char *pFile, s32 nLine, const char *pExpression, bool32 nStopProgram)
 {
     if (nStopProgram)
     {
         MgbaPrintf(MGBA_LOG_ERROR, "ASSERTION FAILED  FILE=[%s] LINE=[%d]  EXP=[%s]", pFile, nLine, pExpression);
+#ifdef PORTABLE
+        abort();
+#else
         asm(".hword 0xEFFF");
+#endif
     }
     else
     {

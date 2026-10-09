@@ -22,6 +22,9 @@
 #include "text.h"
 #include "intro.h"
 #include "main.h"
+#ifdef PORTABLE
+#include "platform.h"
+#endif
 #include "multiplayer_battle.h"
 #include "multiplayer.h"
 #include "multiplayer_world.h"
@@ -42,8 +45,14 @@ static void VCountIntr(void);
 static void SerialIntr(void);
 static void IntrDummy(void);
 
+#ifdef PORTABLE
+// The GBA linker script defines gInitialMainCB2; natively it is fixed here.
+extern void CB2_InitCopyrightScreenAfterBootup(void);
+#define gInitialMainCB2 CB2_InitCopyrightScreenAfterBootup
+#else
 // Defined in the linker script so that the test build can override it.
 extern void gInitialMainCB2(void);
+#endif
 extern void CB2_FlashNotDetectedScreen(void);
 
 const enum GameVersion gGameVersion = GAME_VERSION;
@@ -110,7 +119,9 @@ void AgbMain(void)
     InitIntrHandlers();
     m4aSoundInit();
     EnableVCountIntrAtLine150();
+#ifndef PORTABLE // no GBA Wireless Adapter natively (its init waits on serial interrupts)
     InitRFU();
+#endif
     RtcInit();
     CheckForFlashMemory();
     InitMainCallbacks();
@@ -257,8 +268,14 @@ void SeedRngAndSetTrainerId(void)
 
     REG_TM1CNT_H = 0;
     REG_TM2CNT_H = 0;
+#ifdef PORTABLE
+    // The GBA hardware timers that count since boot do not run natively; seed
+    // from the host clock so each player gets a distinct Trainer ID and RNG.
+    val = Platform_GetEntropy32();
+#else
     val = ((u32)REG_TM2CNT_L) << 16;
     val |= REG_TM1CNT_L;
+#endif
     SeedRng(val);
     sTrainerId = Random();
 }

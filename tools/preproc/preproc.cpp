@@ -182,9 +182,12 @@ const char* GetFileExtension(const char* filename)
     return extension;
 }
 
+// -p: portable output for the native PC build (no ARM-only assembler tricks).
+bool g_portable = false;
+
 static void UsageAndExit(const char *program)
 {
-    std::fprintf(stderr, "Usage: %s [-i] [-e] [-g PATH] [-s] SRC_FILE CHARMAP_FILE\nwhere -i denotes if input is from stdin\n      -e enables enum handling\n      -g specifies the root for INCGFX\n      -s enables '.size' handling\n", program);
+    std::fprintf(stderr, "Usage: %s [-i] [-e] [-g PATH] [-s] [-p] SRC_FILE CHARMAP_FILE\nwhere -i denotes if input is from stdin\n      -e enables enum handling\n      -g specifies the root for INCGFX\n      -s enables '.size' handling\n      -p emits portable C (native PC build)\n", program);
     std::exit(EXIT_FAILURE);
 }
 
@@ -199,7 +202,7 @@ int main(int argc, char **argv)
     bool doSize = false;
 
     /* preproc [-i] [-e] [-s] SRC_FILE CHARMAP_FILE */
-    while ((opt = getopt(argc, argv, "ieg:s")) != -1)
+    while ((opt = getopt(argc, argv, "ieg:sp")) != -1)
     {
         switch (opt)
         {
@@ -211,6 +214,9 @@ int main(int argc, char **argv)
             break;
         case 's':
             doSize = true;
+            break;
+        case 'p':
+            g_portable = true;
             break;
         case 'g':
             graphicsRoot = optarg;

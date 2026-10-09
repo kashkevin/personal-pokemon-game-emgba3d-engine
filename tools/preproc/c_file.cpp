@@ -33,6 +33,8 @@
 #include "string_parser.h"
 #include "io.h"
 
+extern bool g_portable;
+
 CFile::CFile(const char * filenameCStr, bool isStdin, const char * graphicsRootCStr)
 {
     if (isStdin)
@@ -207,7 +209,10 @@ linemarker_error:
         // would have put after the section name.
         // This will not work with Clang, see
         // https://discourse.llvm.org/t/creating-shf-merge-shf-strings-section/86399
-        std::printf("static const unsigned char __attribute__((section(\".rodata.compound_string.%016" PRIx64 ",\\\"aM\\\",%%progbits,%ld @\"))) sCompoundString_%016" PRIx64 "[] = {", it.second, it.first.size(), it.second);
+        if (g_portable)
+            std::printf("static const unsigned char sCompoundString_%016" PRIx64 "[] = {", it.second);
+        else
+            std::printf("static const unsigned char __attribute__((section(\".rodata.compound_string.%016" PRIx64 ",\\\"aM\\\",%%progbits,%ld @\"))) sCompoundString_%016" PRIx64 "[] = {", it.second, it.first.size(), it.second);
         if (it.first.size() > 0)
         {
             std::printf(" 0x%02X", it.first[0]);

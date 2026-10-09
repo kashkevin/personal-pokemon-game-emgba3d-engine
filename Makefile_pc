@@ -1,0 +1,156 @@
+# Native PC build of this pokeemerald-expansion fork: a standalone executable
+# with no GBA emulator. The GBA ROM build (Makefile) stays the reference/fallback.
+#
+# Adapted from the pokeemerald PC port lineage (Kurausukun/pokeemerald pc_port ->
+# gradenGnostic/pokeemerald-multiplatform -> ZallaxDev/pokeemerald-voxel-project).
+# See src/platform/README.md for provenance and licensing.
+#
+# Prerequisite: the GBA build's generated sources and assets. Run `make` (or at
+# least `make generated` plus the asset rules) once before this makefile.
+#
+#   make -f Makefile_pc                 # Windows 32-bit .exe (i686-w64-mingw32)
+#   make -f Makefile_pc NATIVE_LINUX=1  # Linux i386 binary (development/testing)
+#
+# The game data holds 32-bit pointers, so both targets are 32-bit.
+
+NATIVE_LINUX ?= 0
+DEBUG        ?= 0
+# SANITIZE=1 (Linux only): UBSan on game code to find GBA-only behaviour
+# (shifts by 32+, NULL dereferences, out-of-bounds indexes). Development only.
+SANITIZE     ?= 0
+
+ifeq ($(NATIVE_LINUX),1)
+  PREFIX        :=
+  TILE_RENDERER := RENDERER_FAST_DRAW
+  ifeq ($(SANITIZE),1)
+    TARGET      := pokeemerald-mp-san
+    OBJ_DIR     := build/pc-linux-san
+  else
+    TARGET      := pokeemerald-mp
+    OBJ_DIR     := build/pc-linux
+  endif
+else
+  PREFIX        := i686-w64-mingw32-
+  TARGET        := pokeemerald-mp.exe
+  OBJ_DIR       := build/pc-win32
+  TILE_RENDERER := RENDERER_EASY_DRAW
+  # SDL2 for i686-w64-mingw32 (headers in $(SDL_DIR)/include, libs in $(SDL_DIR)/lib)
+  SDL_DIR       ?= /usr/i686-w64-mingw32
+endif
+
+CC      := $(PREFIX)gcc
+AS      := $(PREFIX)as
+OBJCOPY := $(PREFIX)objcopy
+# Data files only need a C preprocessor; the host one is fine for both targets.
+DATA_CPP := cpp
+
+SHELL := bash -o pipefail
+
+PREPROC    := tools/preproc/preproc
+ASSETS_DIR := build/assets
+ASM_TO_X86 := sed -E -f tools/pc_port/asm_to_x86.sed
+
+# Same game configuration as the GBA build (see Makefile), plus the PC port switches.
+GAME_CPPFLAGS := -iquote include -Wno-trigraphs -DMODERN=1 -DTESTING=0 -DEMERALD -std=gnu17 \
+                 -DMP_LOCAL_RESET_DEVELOPMENT=0 -DMP_LOCAL_RESET_STATIC=1 -DMP_LOCAL_RESET_NEW_MAUVILLE_PILOT=0
+CPPFLAGS := $(GAME_CPPFLAGS) -DPORTABLE -DNONMATCHING -DUBFIX -DPLATFORM_SDL2 -D$(TILE_RENDERER) \
+            -DSDL_DISABLE_IMMINTRIN_H -DSDL_DISABLE_MMINTRIN_H -DSDL_DISABLE_XMMINTRIN_H \
+            -DSDL_DISABLE_EMMINTRIN_H -DSDL_DISABLE_PMMINTRIN_H
+
+ifeq ($(NATIVE_LINUX),1)
+  PKG_CONFIG_32 := PKG_CONFIG_LIBDIR=/usr/lib/i386-linux-gnu/pkgconfig:/usr/share/pkgconfig pkg-config
+  CPPFLAGS += -m32 -DNATIVE_LINUX $(shell $(PKG_CONFIG_32) --cflags sdl2)
+  LIBS     := $(shell $(PKG_CONFIG_32) --libs sdl2) -lm -lpthread
+else
+  CPPFLAGS += -I$(SDL_DIR)/include
+  LIBS     := -L$(SDL_DIR)/lib -lmingw32 -lSDL2main -lSDL2 -lwinmm -lxinput -lws2_32 -static-libgcc
+endif
+
+ifeq ($(DEBUG),1)
+  OPT := -O0 -g
+else
+  OPT := -O2 -g
+endif
+
+# -fno-strict-aliasing/-fwrapv: the game relies on type punning and wrapping
+# integer arithmetic that the GBA compiler happened to tolerate.
+CFLAGS := -m32 $(OPT) -std=gnu17 -fno-strict-aliasing -fwrapv \
+          -Wno-trigraphs -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast -Wno-attribute-alias \
+          -Wno-unused-function -Wno-unused-variable -Wno-address-of-packed-member
+ifeq ($(NATIVE_LINUX),1)
+  CFLAGS += -fno-pie
+  LDFLAGS := -m32 -no-pie -Wl,-z,noexecstack
+  ifeq ($(SANITIZE),1)
+    SAN_FLAGS := -fsanitize=shift-exponent,integer-divide-by-zero,null,bounds,vla-bound,unreachable,return \
+                 -fsanitize-recover=all -fno-omit-frame-pointer
+    LDFLAGS += -fsanitize=shift-exponent,integer-divide-by-zero,null,bounds,vla-bound,unreachable,return
+  endif
+else
+  LDFLAGS := -m32 -mconsole
+endif
+
+ASFLAGS := --defsym MODERN=1 --defsym EMERALD=1 --defsym PORTABLE=1
+ifeq ($(NATIVE_LINUX),1)
+  ASFLAGS += --32
+  FIX_UNDERSCORE := true
+else
+  # 32-bit Windows C symbols carry a leading underscore; asm data symbols do not.
+  FIX_UNDERSCORE := $(OBJCOPY) --prefix-symbol _
+endif
+
+# ---------------------------------------------------------------------------
+# Sources
+# GBA-only C files replaced or made unnecessary by the platform layer.
+PC_EXCLUDED_C := src/m4a.c src/m4a_tables.c src/rom_header_gf.c src/rom_header_rhh.c \
+                 src/agb_flash.c src/agb_flash_1m.c src/agb_flash_mx.c src/agb_flash_le.c \
+                 src/siirtc.c
+C_SRCS_IN := $(wildcard src/*.c src/*/*.c src/*/*/*.c)
+C_SRCS    := $(filter-out $(PC_EXCLUDED_C),$(foreach src,$(C_SRCS_IN),$(if $(findstring .inc.c,$(src)),,$(src))))
+C_OBJS    := $(patsubst src/%.c,$(OBJ_DIR)/src/%.o,$(C_SRCS))
+
+DATA_ASM_SRCS := $(wildcard data/*.s)
+DATA_ASM_OBJS := $(patsubst data/%.s,$(OBJ_DIR)/data/%.o,$(DATA_ASM_SRCS))
+
+MID_SRCS := $(wildcard sound/songs/midi/*.s)
+MID_OBJS := $(patsubst sound/songs/midi/%.s,$(OBJ_DIR)/sound/songs/midi/%.o,$(MID_SRCS))
+
+OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS)
+
+$(shell mkdir -p $(sort $(dir $(OBJS))))
+
+.PHONY: all clean
+.SUFFIXES:
+.SECONDARY:
+.DELETE_ON_ERROR:
+
+all: $(TARGET)
+
+clean:
+	rm -rf $(OBJ_DIR) $(TARGET)
+
+# C: preprocess (same flags as the GBA build + PORTABLE), expand INCBIN/charmap
+# strings with preproc, then compile for 32-bit x86.
+$(OBJ_DIR)/src/%.o: src/%.c
+	@echo "CC $<"
+	@$(CC) -E $(CPPFLAGS) -MMD -MP -MF $(@:.o=.d) -MT $@ $< | $(PREPROC) -i -p -g $(ASSETS_DIR) $< charmap.txt | $(CC) $(CFLAGS) $(if $(findstring src/platform/,$<),,$(SAN_FLAGS)) -x cpp-output -c -o $@ -
+
+# Data: identical preprocessing to the GBA build, then ARM -> x86 GNU-as syntax.
+$(OBJ_DIR)/data/%.o: data/%.s
+	@echo "AS $<"
+	@$(PREPROC) $< charmap.txt | $(DATA_CPP) $(GAME_CPPFLAGS) -I include - | $(PREPROC) -ie $< charmap.txt | $(ASM_TO_X86) | $(AS) $(ASFLAGS) -o $@
+	@$(FIX_UNDERSCORE) $@
+
+$(OBJ_DIR)/MPlayDef.s: sound/MPlayDef.s tools/pc_port/asm_to_x86.sed
+	$(ASM_TO_X86) $< > $@
+
+# MIDI-generated songs (sound/songs/midi/*.s are produced by the GBA build).
+$(OBJ_DIR)/sound/songs/midi/%.o: sound/songs/midi/%.s $(OBJ_DIR)/MPlayDef.s
+	@echo "AS $<"
+	@sed -e 's|\.include[[:space:]]*"MPlayDef.s"|.include "$(OBJ_DIR)/MPlayDef.s"|' $< | $(ASM_TO_X86) | $(AS) $(ASFLAGS) -I sound -o $@
+	@$(FIX_UNDERSCORE) $@
+
+$(TARGET): $(OBJS)
+	$(file >$(OBJ_DIR)/objs.rsp,$(OBJS))
+	$(CC) $(LDFLAGS) @$(OBJ_DIR)/objs.rsp $(LIBS) -o $@
+
+-include $(C_OBJS:.o=.d)

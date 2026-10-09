@@ -5,7 +5,7 @@
 {                                                                                 \
     vu##bit tmp = (vu##bit)(value);                                               \
     CpuSet((void *)&tmp,                                                          \
-           dest,                                                                  \
+           (void *)(uintptr_t)(dest),                                             \
            CPU_SET_##bit##BIT | CPU_SET_SRC_FIXED | ((size)/(bit/8) & 0x1FFFFF)); \
 }
 
@@ -37,6 +37,7 @@
 #define CPU_COPY(src, dest, size, bit) CPU_COPY_UNCHECKED(src, dest, size, bit)
 #endif
 
+#define CpuCopy8(src, dest, size) CPU_COPY(src, dest, size, 8)
 #define CpuCopy16(src, dest, size) CPU_COPY(src, dest, size, 16)
 #define CpuCopy32(src, dest, size) CPU_COPY(src, dest, size, 32)
 
@@ -90,6 +91,10 @@
 
 #define CpuFastCopy(src, dest, size) CpuFastSet(src, dest, ((size)/(32/8) & 0x1FFFFF))
 
+#ifdef PORTABLE
+// Native PC build: DMA is emulated in C (src/platform/dma.c).
+extern void DmaSet(int dmaNum, const void *src, void *dest, u32 control);
+#else
 #define DmaSetUnchecked(dmaNum, src, dest, control) \
 {                                                 \
     vu32 *dmaRegs = (vu32 *)REG_ADDR_DMA##dmaNum; \
@@ -99,7 +104,9 @@
     dmaRegs[2];                                   \
 }
 
-#if MODERN
+#endif // PORTABLE
+
+#if MODERN && !defined(PORTABLE)
 // NOTE: Assumes 16-bit DMAs.
 #define DmaSet(dmaNum, src, dest, control) \
     do \
@@ -108,7 +115,7 @@
         _Static_assert(_Alignof(dest) >= __builtin_choose_expr(__builtin_constant_p(control), ((control) & (DMA_32BIT << 16)) ? 4 : 2, 2), "destination potentially unaligned"); \
         DmaSetUnchecked(dmaNum, src, dest, control); \
     } while (0)
-#else
+#elif !defined(PORTABLE)
 #define DmaSet(dmaNum, src, dest, control) \
     DmaSetUnchecked(dmaNum, src, dest, control)
 #endif
@@ -118,7 +125,7 @@
     vu##bit tmp = (vu##bit)(value);                                                           \
     DmaSet(dmaNum,                                                                            \
            &tmp,                                                                              \
-           dest,                                                                              \
+           (void *)(uintptr_t)(dest),                                                         \
            (DMA_ENABLE | DMA_START_NOW | DMA_##bit##BIT | DMA_SRC_FIXED | DMA_DEST_INC) << 16 \
          | ((size)/(bit/8)));                                                                 \
 }
@@ -134,8 +141,13 @@
 #define DMA_FILL(dmaNum, value, dest, size, bit) DMA_FILL_UNCHECKED(dmaNum, value, dest, size, bit)
 #endif
 
+#ifdef PORTABLE
+#define DmaFill16(dmaNum, value, dest, size) CpuFill16(value, dest, size)
+#define DmaFill32(dmaNum, value, dest, size) CpuFill32(value, dest, size)
+#else
 #define DmaFill16(dmaNum, value, dest, size) DMA_FILL(dmaNum, value, dest, size, 16)
 #define DmaFill32(dmaNum, value, dest, size) DMA_FILL(dmaNum, value, dest, size, 32)
+#endif
 
 // Note that the DMA clear macros cause the DMA control value to be calculated
 // at runtime rather than compile time. The size is divided by the DMA transfer
@@ -144,7 +156,7 @@
 
 #define DMA_CLEAR_UNCHECKED(dmaNum, dest, size, bit) \
 {                                           \
-    vu##bit *_dest = (vu##bit *)(dest);     \
+    vu##bit *_dest = (vu##bit *)(uintptr_t)(dest); \
     u32 _size = size;                       \
     DmaFill##bit(dmaNum, 0, _dest, _size);  \
 }
@@ -166,7 +178,7 @@
 #define DMA_COPY_UNCHECKED(dmaNum, src, dest, size, bit)                                    \
     DmaSet(dmaNum,                                                                          \
            src,                                                                             \
-           dest,                                                                            \
+           (void *)(uintptr_t)(dest),                                                       \
            (DMA_ENABLE | DMA_START_NOW | DMA_##bit##BIT | DMA_SRC_INC | DMA_DEST_INC) << 16 \
          | ((size)/(bit/8)))
 
@@ -182,13 +194,18 @@
 #define DMA_COPY(dmaNum, src, dest, size, bit) DMA_COPY_UNCHECKED(dmaNum, src, dest, size, bit)
 #endif
 
+#ifdef PORTABLE
+#define DmaCopy16(dmaNum, src, dest, size) CpuCopy16(src, dest, size)
+#define DmaCopy32(dmaNum, src, dest, size) CpuCopy32(src, dest, size)
+#else
 #define DmaCopy16(dmaNum, src, dest, size) DMA_COPY(dmaNum, src, dest, size, 16)
 #define DmaCopy32(dmaNum, src, dest, size) DMA_COPY(dmaNum, src, dest, size, 32)
+#endif
 
 #define DmaCopyLarge(dmaNum, src, dest, size, block, bit) \
 {                                                         \
-    const void *_src = src;                               \
-    void *_dest = dest;                                   \
+    const void *_src = (const void *)(uintptr_t)(src);    \
+    void *_dest = (void *)(uintptr_t)(dest);              \
     u32 _size = size;                                     \
     while (1)                                             \
     {                                                     \
@@ -210,7 +227,7 @@
 
 #define DmaFillLarge(dmaNum, value, dest, size, block, bit) \
 {                                                           \
-    void *_dest = dest;                                     \
+    void *_dest = (void *)(uintptr_t)(dest);                \
     u32 _size = size;                                       \
     while (1)                                               \
     {                                                       \
@@ -237,8 +254,8 @@
 
 #define DmaCopyDefvars(dmaNum, src, dest, size, bit) \
 {                                                    \
-    const void *_src = src;                          \
-    void *_dest = dest;                              \
+    const void *_src = (const void *)(uintptr_t)(src); \
+    void *_dest = (void *)(uintptr_t)(dest);           \
     u32 _size = size;                                \
     DmaCopy##bit(dmaNum, _src, _dest, _size);        \
 }
@@ -248,7 +265,7 @@
 
 #define DmaFillDefvars(dmaNum, value, dest, size, bit) \
 {                                                      \
-    void *_dest = dest;                                \
+    void *_dest = (void *)(uintptr_t)(dest);           \
     u32 _size = size;                                  \
     DmaFill##bit(dmaNum, value, _dest, _size);         \
 }
@@ -258,7 +275,7 @@
 
 #define DmaClearDefvars(dmaNum, dest, size, bit) \
 {                                                \
-    void *_dest = dest;                          \
+    void *_dest = (void *)(uintptr_t)(dest);     \
     u32 _size = size;                            \
     DmaClear##bit(dmaNum, _dest, _size);         \
 }
