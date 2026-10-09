@@ -52,6 +52,7 @@ _Static_assert(MP_WORLD_LOCAL_ID_EVENT < LOCALID_OW_ENCOUNTER_END - OWE_SPAWNS_M
 #define WORLD_DAY_ORIGIN 1000
 
 #define CLAIM_TIMEOUT_FRAMES 300
+#define MP_WORLD_SPRITE_RESERVE 12
 #define NOTICE_FRAMES 360
 #define NOTICE_WINDOW_BASE_BLOCK 0x220
 
@@ -313,15 +314,17 @@ bool32 MultiplayerWorld_IsEventObject(const struct ObjectEvent *objectEvent)
 
 static bool32 CanAllocateObject(u16 graphicsId)
 {
-    u32 i;
+    u32 i, free;
     const struct ObjectEventGraphicsInfo *info = GetObjectEventGraphicsInfo(graphicsId);
     if (info == NULL || GetFirstInactiveObjectEventId() == OBJECT_EVENTS_COUNT)
         return FALSE;
     // Never ask the palette allocator to evict a live actor's palette.
     if (IndexOfSpritePaletteTag(info->paletteTag) == 0xFF && IndexOfSpritePaletteTag(TAG_NONE) == 0xFF)
         return FALSE;
-    for (i = 0; i < MAX_SPRITES; i++)
-        if (!gSprites[i].inUse)
+    // Keep a reserve for weather, field effects and wild Pokemon: the engine's
+    // CreateSprite treats an exhausted sprite table as a fatal error.
+    for (i = 0, free = 0; i < MAX_SPRITES; i++)
+        if (!gSprites[i].inUse && ++free >= MP_WORLD_SPRITE_RESERVE)
             return TRUE;
     return FALSE;
 }

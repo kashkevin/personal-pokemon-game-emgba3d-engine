@@ -66,6 +66,7 @@ static EWRAM_DATA struct RideState sRide = {0};
 static EWRAM_DATA struct RiderLift sLift[OBJECT_EVENTS_COUNT] = {0};
 
 static void Task_RideTransition(u8 taskId);
+static bool32 SpritesAvailable(u32 needed);
 
 void MultiplayerRide_Init(void)
 {
@@ -209,7 +210,7 @@ static bool32 SpawnMount(s16 x, s16 y, enum Direction direction)
 
     RemoveMount();
     if (GetObjectEventIdByLocalId(MP_RIDE_LOCAL_ID_MOUNT) < OBJECT_EVENTS_COUNT
-     || GetFirstInactiveObjectEventId() >= OBJECT_EVENTS_COUNT)
+     || GetFirstInactiveObjectEventId() >= OBJECT_EVENTS_COUNT || !SpritesAvailable(4))
         return FALSE;
     template.localId = MP_RIDE_LOCAL_ID_MOUNT;
     template.graphicsId = graphicsId;
@@ -232,6 +233,15 @@ static bool32 SpawnMount(s16 x, s16 y, enum Direction direction)
         gSprites[gObjectEvents[id].spriteId].oam.priority = gSprites[player->spriteId].oam.priority;
     }
     return TRUE;
+}
+
+static bool32 SpritesAvailable(u32 needed)
+{
+    u32 i, free = 0;
+    for (i = 0; i < MAX_SPRITES; i++)
+        if (!gSprites[i].inUse && ++free >= needed)
+            return TRUE;
+    return FALSE;
 }
 
 static void PublishMount(void)

@@ -878,9 +878,19 @@ bool32 ComputePlayerShinyOdds(u32 personality, u32 value)
     // Gen 6 personal-static generation uses the 16-value shiny xor range.
     // Keep the stored-mon/display predicate unchanged: CreateBoxMon writes
     // MON_DATA_IS_SHINY through the existing shinyModifier representation.
-    // No fishing, lure or DexNav state applies to an authored static hunt.
+    // No fishing, lure or DexNav state applies to an authored static hunt,
+    // but the hunter's own Shiny Charm does (owner amendment: the Charm works
+    // with Local Soft Reset; attempts themselves never change the odds).
     if (MultiplayerLocalReset_PersonalGeneration())
-        return GET_SHINY_VALUE(value, personality) < 16;
+    {
+        u32 charmRolls = CheckBagHasItem(ITEM_SHINY_CHARM, 1) ? I_SHINY_CHARM_ADDITIONAL_ROLLS : 0;
+        while (GET_SHINY_VALUE(value, personality) >= MP_GEN6_SHINY_ODDS && charmRolls > 0)
+        {
+            personality = Random32();
+            charmRolls--;
+        }
+        return GET_SHINY_VALUE(value, personality) < MP_GEN6_SHINY_ODDS;
+    }
 
     if (P_ONLY_OBTAINABLE_SHINIES && (CurrentBattlePyramidLocation() != PYRAMID_LOCATION_NONE || (FlagGet(WE_FLAG_NO_CATCHING))))
         return FALSE;
@@ -901,13 +911,16 @@ bool32 ComputePlayerShinyOdds(u32 personality, u32 value)
     if (gDexNavSpecies)
         totalRerolls += CalculateDexNavShinyRolls();
 
-    while (GET_SHINY_VALUE(value, personality) >= SHINY_ODDS && totalRerolls > 0)
+    // Every personal roll uses the Gen 6 rate (1/4096; 3/4096 with the
+    // Charm's two extra rolls). Stored Pokemon keep the SHINY_ODDS predicate
+    // plus shinyModifier, so existing saves never change shininess.
+    while (GET_SHINY_VALUE(value, personality) >= MP_GEN6_SHINY_ODDS && totalRerolls > 0)
     {
         personality = Random32();
         totalRerolls--;
     }
 
-    return GET_SHINY_VALUE(value, personality) < SHINY_ODDS;
+    return GET_SHINY_VALUE(value, personality) < MP_GEN6_SHINY_ODDS;
 }
 
 void SetBoxMonIVs(struct BoxPokemon *mon, u8 fixedIV)

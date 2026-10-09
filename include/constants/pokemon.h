@@ -105,6 +105,9 @@ enum __attribute__((packed)) Stat
 
 // Shiny odds
 #define SHINY_ODDS 8 // Actual probability is SHINY_ODDS/65536
+// Gen 6 generation-time rate for personal rolls (1/4096). Stored Pokemon keep
+// the SHINY_ODDS predicate with their shinyModifier bit (save compatible).
+#define MP_GEN6_SHINY_ODDS 16
 
 // Ribbon IDs used by TV and Pokénav
 #define CHAMPION_RIBBON       0

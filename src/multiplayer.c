@@ -339,7 +339,7 @@ static bool32 PeerVisible(const struct MultiplayerPose *pose)
 
 static bool32 CanAllocateObject(u16 graphicsId)
 {
-    u32 i;
+    u32 i, free;
     u16 paletteTag = GetObjectEventGraphicsInfo(graphicsId)->paletteTag;
     if (GetFirstInactiveObjectEventId() == OBJECT_EVENTS_COUNT)
         return FALSE;
@@ -347,8 +347,10 @@ static bool32 CanAllocateObject(u16 graphicsId)
     // request a new palette without a free slot in this presence adapter.
     if (IndexOfSpritePaletteTag(paletteTag) == 0xFF && IndexOfSpritePaletteTag(TAG_NONE) == 0xFF)
         return FALSE;
-    for (i = 0; i < MAX_SPRITES; i++)
-        if (!gSprites[i].inUse)
+    // Leave sprites for weather and field effects: CreateSprite treats an
+    // exhausted table as fatal. Avatars keep priority over world extras.
+    for (i = 0, free = 0; i < MAX_SPRITES; i++)
+        if (!gSprites[i].inUse && ++free >= 8)
             return TRUE;
     return FALSE;
 }

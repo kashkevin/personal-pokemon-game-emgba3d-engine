@@ -401,7 +401,8 @@ void UpdateOverworldWildEncounter(void)
         RemoveObjectEvent(owe);
     objectEventId = SpawnSpecialObjectEvent(&objectEventTemplate);
 
-    assertf(objectEventId < OBJECT_EVENTS_COUNT, "could not spawn generated overworld encounter. too many object events exist")
+    // Multiplayer actors share the object slots: a full table skips this spawn.
+    if (objectEventId >= OBJECT_EVENTS_COUNT)
     {
         SetMinimumOWESpawnTimer();
         return;
@@ -965,16 +966,13 @@ static u32 GetGraphicsIdForOWE(const struct InfoOWE *info)
 
 static bool32 CheckCanLoadOWE(enum Species speciesId, bool32 isFemale, bool32 isShiny, s32 x, s32 y)
 {
-    assertf(CheckCanLoadOWE_Palette(speciesId, isFemale, isShiny, x, y), "could not load palette for overworld encounter\nspecies: %d\nfemale: %d\nshiny: %d\ncoords: %d %d", speciesId, isFemale, isShiny, x, y)
-    {
+    // Multiplayer: other trainers, their Pokemon, mounts and World Events share
+    // the palette and tile budget, so a full budget is an expected condition
+    // (skip this spawn), not a programmer error worth a crash screen.
+    if (!CheckCanLoadOWE_Palette(speciesId, isFemale, isShiny, x, y))
         return FALSE;
-    }
-
-    assertf(CheckCanLoadOWE_Tiles(speciesId, isFemale, isShiny, x, y), "could not load sprite tiles for overworld encounter\nspecies: %d\nfemale: %d\nshiny: %d\ncoords: %d %d", speciesId, isFemale, isShiny, x, y)
-    {
+    if (!CheckCanLoadOWE_Tiles(speciesId, isFemale, isShiny, x, y))
         return FALSE;
-    }
-
     return TRUE;
 }
 

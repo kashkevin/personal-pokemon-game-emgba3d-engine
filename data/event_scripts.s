@@ -3,6 +3,7 @@
 #include "config/battle.h"
 #include "config/item.h"
 #include "constants/global.h"
+#include "constants/multiplayer_balance.h"
 #include "constants/apprentice.h"
 #include "constants/apricorn_tree.h"
 #include "constants/battle.h"
@@ -1740,3 +1741,5 @@ EventScript_PalletTown_PlayersHouse_2F_TurnOnPC::
 	.include "data/scripts/apricorn_tree.inc"
 	.include "data/scripts/wild_encounter.inc"
 	.include "data/scripts/multiplayer_world.inc"
+	.include "data/scripts/mp_progression.inc"
+	.include "data/scripts/mp_mega_stone_shop.inc"
