@@ -13,6 +13,9 @@ enum MultiplayerLocalResetInput {
     MP_LOCAL_RESET_INPUT_PASS, MP_LOCAL_RESET_INPUT_HANDLED,
     MP_LOCAL_RESET_INPUT_CANCELED,
 };
+#if MP_LOCAL_RESET_ENABLED
+extern const u32 gMultiplayerResetInputAbiVersion;
+#endif
 void MultiplayerLocalReset_Init(void);
 bool32 MultiplayerLocalReset_HandleChord(void);
 const u8 *MultiplayerLocalReset_GetActionPrompt(enum BattlerId battler);

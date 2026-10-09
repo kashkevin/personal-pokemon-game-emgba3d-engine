@@ -5,6 +5,7 @@
 #define MULTIPLAYER_BATTLE_MAGIC 0x31424D45
 #define MULTIPLAYER_BATTLE_ABI 3
 #define MULTIPLAYER_BATTLE_RESUME_ABI 1
+#define MULTIPLAYER_BATTLE_ADMISSION_CLEANUP_ABI 1
 #define MULTIPLAYER_BATTLE_SIZE 512
 #define MULTIPLAYER_BATTLE_BLOCK_SIZE 256
 #define MULTIPLAYER_BATTLE_CHUNK_SIZE 128
@@ -18,6 +19,7 @@ enum MultiplayerBattleOpcode {
     MP_BATTLE_PREPARE_SINGLES, MP_BATTLE_START_SINGLES,
     MP_BATTLE_ABORT_PRE_START, MP_BATTLE_RELEASE_SINGLES,
     MP_BATTLE_ARM_RESUME, MP_BATTLE_SUSPEND, MP_BATTLE_REAUTHORIZE, MP_BATTLE_RESUME, MP_BATTLE_RESUME_QUERY, MP_BATTLE_ADMIT, MP_BATTLE_RETIRE, MP_BATTLE_HANDOFF,
+    MP_BATTLE_ADMISSION_CANCEL_HOLD, MP_BATTLE_ADMISSION_CANCEL_HANDOFF, MP_BATTLE_ADMISSION_CANCEL_READY,
 };
 enum MultiplayerBattleState {
     MP_BATTLE_UNBOUND, MP_BATTLE_IDLE, MP_BATTLE_CHANNEL, MP_BATTLE_EXPIRED,
@@ -98,11 +100,14 @@ struct MultiplayerBattlePreparation {
 
 extern const u32 gMultiplayerBattleAbiVersion;
 extern const u32 gMultiplayerBattleResumeAbiVersion;
+extern const u32 gMultiplayerBattleAdmissionCleanupAbiVersion;
 extern volatile struct MultiplayerBattleMailbox gMultiplayerBattleMailbox;
 extern volatile u32 gMultiplayerBattleHoldFlags;
 void MultiplayerBattle_Init(void);
 void MultiplayerBattle_Tick(void);
 bool32 MultiplayerBattle_IsActive(void);
+bool32 MultiplayerBattle_IsAdmissionCleanupHeld(void);
+bool32 MultiplayerBattle_CanEnterAdmission(void);
 bool32 MultiplayerBattle_PauseClocks(void);
 bool32 MultiplayerBattle_SkipCallbacks(void);
 bool32 MultiplayerBattle_IsNative(void);
@@ -124,5 +129,9 @@ bool8 MultiplayerBattle_IsSendFinished(void);
 u8 MultiplayerBattle_GetReceivedFlags(void);
 void MultiplayerBattle_ResetReceivedFlag(u8 slot);
 void MultiplayerBattle_ResetReceivedFlags(void);
+
+#if TESTING
+void MultiplayerBattle_TestResetAdmissionCleanup(void);
+#endif
 
 #endif

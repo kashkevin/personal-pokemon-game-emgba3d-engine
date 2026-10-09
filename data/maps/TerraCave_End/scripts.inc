@@ -33,10 +33,23 @@ TerraCave_End_EventScript_Groudon::
 	delay 40
 	waitmoncry
 	setvar VAR_LAST_TALKED, LOCALID_TERRA_CAVE_GROUDON
+#if MP_LOCAL_RESET_STATIC || TESTING
+TerraCave_End_EventScript_GroudonAdmission::
+	special MultiplayerStaticReset_BeginCurrent
+	goto_if_ne VAR_RESULT, MP_LOCAL_RESET_ADMISSION_PENDING, TerraCave_End_EventScript_GroudonAdmissionReady
+	waitstate
+TerraCave_End_EventScript_GroudonAdmissionReady::
+	goto_if_eq VAR_RESULT, FALSE, TerraCave_End_EventScript_GroudonResetReturn
+#endif
 	setwildbattle SPECIES_GROUDON, 70
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	special BattleSetup_StartLegendaryBattle
+TerraCave_End_EventScript_GroudonPersonalReturn::
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerLocalReset_ConsumeResult
+	goto_if_eq VAR_RESULT, TRUE, TerraCave_End_EventScript_GroudonResetReturn
+#endif
 	setvar VAR_TEMP_1, 0
 	specialvar VAR_RESULT, GetBattleOutcome
 	goto_if_eq VAR_RESULT, B_OUTCOME_WON, TerraCave_End_EventScript_DefeatedGroudon
@@ -46,6 +59,13 @@ TerraCave_End_EventScript_Groudon::
 	setflag FLAG_DEFEATED_GROUDON
 	releaseall
 	end
+
+#if MP_LOCAL_RESET_STATIC || TESTING
+TerraCave_End_EventScript_GroudonResetReturn::
+	special MultiplayerStaticReset_ReturnWeatherSource
+	releaseall
+	end
+#endif
 
 TerraCave_End_EventScript_DefeatedGroudon::
 	setvar VAR_SHOULD_END_ABNORMAL_WEATHER, 1
@@ -68,4 +88,3 @@ TerraCave_End_Movement_GroudonApproach:
 	delay_16
 	walk_down_affine
 	step_end
-

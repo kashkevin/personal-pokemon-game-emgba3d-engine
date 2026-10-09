@@ -71,7 +71,8 @@
 #define GEN_CHAMPIONS GEN_9 + 1
 #define GEN_COUNT GEN_CHAMPIONS + 1
 // Changing GEN_LATEST's value to a different Generation will change every default setting that uses it at once.
-#define GEN_LATEST GEN_9
+// Project Gen6 defaults. Keep species_enabled.h unchanged to preserve save layout.
+#define GEN_LATEST GEN_6
 
 // General settings
 #define EXPANSION_INTRO              TRUE    // If TRUE, a custom RHH intro will play after the vanilla copyright screen.

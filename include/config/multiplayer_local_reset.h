@@ -8,9 +8,11 @@
 #ifndef MP_LOCAL_RESET_NEW_MAUVILLE_PILOT
 #define MP_LOCAL_RESET_NEW_MAUVILLE_PILOT 0
 #endif
-// Audited authored sources. Off pending ordinary-route release acceptance.
+// Personal authored adapters are enabled for the production multiplayer game.
+// Ordinary source/progression and exact connected admission guards still apply.
+// Explicit LOCAL_RESET_STATIC=0 builds remain available for isolation work.
 #ifndef MP_LOCAL_RESET_STATIC
-#define MP_LOCAL_RESET_STATIC 0
+#define MP_LOCAL_RESET_STATIC 1
 #endif
 // A published admission must yield the authored bytecode before inspecting TRUE/FALSE.
 #define MP_LOCAL_RESET_ADMISSION_PENDING 2

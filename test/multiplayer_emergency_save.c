@@ -468,3 +468,50 @@ TEST("Multiplayer emergency: Enter latch refuses BEGIN without changing save own
     EXPECT(MultiplayerBattle_PauseClocks()); EXPECT_EQ(gMultiplayerBattleHoldFlags, 1);
     MultiplayerMenu_Init(); TearDown(&f);
 }
+
+
+TEST("Multiplayer cleanup: successor emergency preservation supports legacy chunks and windows while ordinary save remains fenced")
+{
+    struct EmergencyFixture f;
+    struct MultiplayerBattleControl battle = {0};
+    u32 crc = 0;
+    SetUp(&f);
+    battle.incarnation = f.command.incarnation; battle.sessionEpoch = f.command.sessionEpoch;
+    battle.battleId[0] = 77; battle.commandSeq = 1; battle.opcode = MP_BATTLE_ADMIT;
+    battle.phase = MP_BATTLE_PHASE_FULL_MULTI; battle.length = 48;
+    battle.data[0] = 99; battle.data[16] = 2; battle.data[32] = 91;
+    battle.chunkCrc32 = TestCrc(0, battle.data, battle.length);
+    gMultiplayerBattleMailbox.command = battle; gMultiplayerBattleMailbox.commandGeneration = 2;
+    MultiplayerBattle_Tick(); EXPECT_EQ(gMultiplayerBattleMailbox.response.status, MP_BATTLE_OK);
+    battle.opcode = MP_BATTLE_ADMISSION_CANCEL_HOLD; battle.length = 84;
+    PutWord(battle.data + 48, battle.sessionEpoch); memset(battle.data + 52, 0xA5, 32);
+    battle.chunkCrc32 = TestCrc(0, battle.data, battle.length);
+    gMultiplayerBattleMailbox.command = battle; gMultiplayerBattleMailbox.commandGeneration = 4;
+    MultiplayerBattle_Tick(); EXPECT_EQ(gMultiplayerBattleMailbox.response.status, MP_BATTLE_OK);
+    EXPECT_EQ(gMultiplayerBattleHoldFlags, 32);
+    EXPECT_EQ(Send(&f, MP_SAVE_BEGIN_EXPORT, 0), MP_SAVE_BUSY);
+    EXPECT_EQ(Send(&f, MP_SAVE_BEGIN_IMPORT, 0), MP_SAVE_BUSY);
+    EXPECT_EQ(Send(&f, MP_SAVE_CANCEL, 0), MP_SAVE_BUSY);
+    EXPECT_EQ(Send(&f, MP_SAVE_READ, 0), MP_SAVE_BUSY);
+    EXPECT_EQ(Send(&f, MP_SAVE_BEGIN_EMERGENCY_EXPORT, 0), MP_SAVE_OK);
+    EXPECT_EQ(gMultiplayerSaveMailbox.response.length, 40);
+    // Optional cleanup ABI does not require window ABI: legacy reads must
+    // complete exactly the same preserved stream, without ordinary export.
+    for (u32 offset = 0; offset < 4096; offset += 128)
+    {
+        EXPECT_EQ(Send(&f, MP_SAVE_READ, offset), MP_SAVE_OK);
+        EXPECT_EQ(gMultiplayerSaveMailbox.response.length, 128);
+        crc = TestCrc(crc, (const u8 *)gMultiplayerSaveMailbox.response.data, 128);
+    }
+    crc = ReadWindows(&f, 4096, crc);
+    EXPECT_EQ(Send(&f, MP_SAVE_PRESERVE_EMERGENCY, 131072), MP_SAVE_OK);
+    EXPECT_EQ(Word(gMultiplayerSaveMailbox.response.data), crc);
+    EXPECT_EQ(Send(&f, MP_SAVE_QUERY_EMERGENCY, 0), MP_SAVE_OK);
+    EXPECT_EQ(Word(gMultiplayerSaveMailbox.response.data), 7);
+    EXPECT_EQ(gMultiplayerBattleHoldFlags, 32); CheckHeld(MP_SAVE_EMERGENCY_PRESERVED);
+    battle.opcode = MP_BATTLE_ADMISSION_CANCEL_HANDOFF;
+    gMultiplayerBattleMailbox.command = battle; gMultiplayerBattleMailbox.commandGeneration = 6;
+    MultiplayerBattle_Tick(); EXPECT_EQ(gMultiplayerBattleMailbox.response.status, MP_BATTLE_SESSION);
+    EXPECT_EQ(gMultiplayerBattleHoldFlags, 32);
+    TearDown(&f);
+}

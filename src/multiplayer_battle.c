@@ -47,6 +47,7 @@ _Static_assert(sizeof(rng_value_t) == 16 && sizeof(struct Pokemon) == 100, "Nati
 
 const u32 gMultiplayerBattleAbiVersion = MULTIPLAYER_BATTLE_ABI;
 const u32 gMultiplayerBattleResumeAbiVersion = MULTIPLAYER_BATTLE_RESUME_ABI;
+const u32 gMultiplayerBattleAdmissionCleanupAbiVersion = MULTIPLAYER_BATTLE_ADMISSION_CLEANUP_ABI;
 EWRAM_DATA volatile struct MultiplayerBattleMailbox gMultiplayerBattleMailbox = {0};
 // Read-only proof observation; never an authority or command input.
 EWRAM_DATA volatile u32 gMultiplayerBattleHoldFlags = 0;
@@ -66,6 +67,14 @@ static EWRAM_DATA bool8 sReleasedResumable = FALSE;
 static EWRAM_DATA bool8 sReleasedWaiting = FALSE;
 static EWRAM_DATA bool8 sRetired = FALSE;
 static EWRAM_DATA bool8 sRetiredWaiting = FALSE;
+// Never forget a canceled identity while this original core survives. Capacity
+// exhaustion refuses BEFORE acquiring/releasing any hold; no eviction or reset.
+#define ADMISSION_CANCELLATIONS 32
+static EWRAM_DATA u8 sCanceledBattleIds[ADMISSION_CANCELLATIONS][16] = {0};
+static EWRAM_DATA u8 sCancellationCount = 0;
+static EWRAM_DATA bool8 sAdmissionCleanupWaiting = FALSE;
+static EWRAM_DATA bool8 sAdmissionCleanupHandedOff = FALSE;
+static EWRAM_DATA struct MultiplayerBattleControl sAdmissionCleanup = {0};
 static EWRAM_DATA bool8 sReleasedSuspended = FALSE;
 static EWRAM_DATA u8 sAdmitRuntime[16] = {0};
 static EWRAM_DATA u32 sAdmitPartyCrc = 0;
@@ -141,6 +150,20 @@ bool32 MultiplayerBattle_IsActive(void)
     return sState >= MP_BATTLE_CHANNEL && sState <= MP_BATTLE_ADMITTING;
 }
 
+bool32 MultiplayerBattle_IsAdmissionCleanupHeld(void) { return sAdmissionCleanupWaiting; }
+bool32 MultiplayerBattle_CanEnterAdmission(void)
+{
+    return !sAdmissionCleanupWaiting && sCancellationCount < ADMISSION_CANCELLATIONS;
+}
+
+static bool32 AdmissionCanceled(const u8 *battleId)
+{
+    u32 i;
+    for (i = 0; i < sCancellationCount; i++)
+        if (!memcmp(battleId, sCanceledBattleIds[i], 16)) return TRUE;
+    return FALSE;
+}
+
 static void LatchReleasedWait(void)
 {
     if (!sReleasedSuspended)
@@ -154,7 +177,7 @@ static void ObserveHoldFlags(void)
 {
     gMultiplayerBattleHoldFlags = (MultiplayerMenu_IsBattleAdmissionHeld() ? 1 : 0)
         | (sState == MP_BATTLE_ADMITTING ? 2 : 0) | (sState == MP_BATTLE_SUSPENDED ? 4 : 0)
-        | (sReleasedWaiting ? 8 : 0) | (sRetiredWaiting ? 16 : 0);
+        | (sReleasedWaiting ? 8 : 0) | (sRetiredWaiting ? 16 : 0) | (sAdmissionCleanupWaiting ? 32 : 0);
 }
 
 bool32 MultiplayerBattle_PauseClocks(void)
@@ -164,7 +187,7 @@ bool32 MultiplayerBattle_PauseClocks(void)
     // thaw it before the original trainers complete a new quorum.
     if (sReleasedResumable && !Multiplayer_IsConnected()) LatchReleasedWait();
     ObserveHoldFlags();
-    return MultiplayerMenu_IsBattleAdmissionHeld() || sReleasedWaiting || sRetiredWaiting || (MultiplayerBattle_IsActive() && sState != MP_BATTLE_RUNNING && sState != MP_BATTLE_RETURNING);
+    return MultiplayerMenu_IsBattleAdmissionHeld() || sReleasedWaiting || sRetiredWaiting || sAdmissionCleanupWaiting || (MultiplayerBattle_IsActive() && sState != MP_BATTLE_RUNNING && sState != MP_BATTLE_RETURNING);
 }
 
 bool32 MultiplayerBattle_SkipCallbacks(void) { return MultiplayerBattle_PauseClocks(); }
@@ -282,6 +305,14 @@ static void QueryData(u8 *data)
         ? max(0, (s32)(sDeadline - sFrame)) : 0);
     PutWord(data + 56, sPreparation.checkpointRevision); PutWord(data + 60, sOutcome);
     if (sReleasedWaiting || sRetiredWaiting) PutWord(data, 1 | (sReleasedWaiting ? 256 : 512));
+    if (sAdmissionCleanupWaiting)
+    {
+        memset(data, 0, 64); PutWord(data, 1025);
+        memcpy(data + 4, sAdmissionCleanup.data, 16);
+        data[20] = sAdmissionCleanup.phase == MP_BATTLE_PHASE_SINGLES ? 2 : 4;
+        data[21] = sAdmissionCleanup.sourceSlot; data[22] = sAdmissionCleanup.phase;
+        PutWord(data + 24, sLastSeq);
+    }
 }
 
 static void Respond(const struct MultiplayerBattleControl *command, u8 status, const u8 *data, u16 length, bool32 cache)
@@ -372,6 +403,7 @@ static u8 Bind(const struct MultiplayerBattleControl *c)
 {
     struct MultiplayerBattleBinding binding;
     bool32 admitted = sState == MP_BATTLE_ADMITTING;
+    if (sAdmissionCleanupWaiting || AdmissionCanceled(c->battleId)) return MP_BATTLE_SESSION;
     bool32 samePair = c->sessionEpoch == sSession && c->incarnation == sIncarnation;
     if (!MultiplayerBattle_CheckBinding(c->sessionEpoch, c->incarnation)
      || !MultiplayerSave_CheckBinding(c->sessionEpoch, c->incarnation))
@@ -845,6 +877,7 @@ static u8 HandleResume(const struct MultiplayerBattleControl *c)
 static u8 Admit(const struct MultiplayerBattleControl *c)
 {
     u32 saveSession, saveIncarnation, base;
+    if (sAdmissionCleanupWaiting || AdmissionCanceled(c->battleId)) return MP_BATTLE_SESSION;
     bool32 menuOwned = MultiplayerMenu_CanAdmitBattle(c->sessionEpoch, c->incarnation);
     if (c->phase == MP_BATTLE_PHASE_DIAGNOSTIC || c->sourceSlot >= (c->phase == MP_BATTLE_PHASE_SINGLES ? 2 : 4)
      || c->blockSeq || c->offset || c->totalSize || c->kind || c->length != 48
@@ -911,6 +944,112 @@ static u8 Retire(const struct MultiplayerBattleControl *c)
     return MP_BATTLE_OK;
 }
 
+// Read-only preflight is required BEFORE the host publishes irrevocable
+// cancellation. The Enter/ADMIT hold excludes another identity from consuming
+// capacity between this response and HOLD. Retry after HOLD works at capacity.
+static u8 AdmissionCancelReady(const struct MultiplayerBattleControl *c)
+{
+    u32 originalLease = Word(c->data + 48), saveSession, saveIncarnation;
+    if (c->commandSeq != 1 || c->phase == MP_BATTLE_PHASE_DIAGNOSTIC
+     || c->sourceSlot >= (c->phase == MP_BATTLE_PHASE_SINGLES ? 2 : 4)
+     || c->blockSeq || c->offset || c->totalSize || c->kind || c->length != 52
+     || Zero(c->data, 16) || Zero(c->data + 16, 16) || Zero(c->data + 32, 16)
+     || !originalLease || originalLease > c->sessionEpoch) return MP_BATTLE_MALFORMED;
+    if (!MultiplayerBattle_CheckBinding(c->sessionEpoch, c->incarnation)) return MP_BATTLE_SESSION;
+    if (!memcmp(c->battleId, sAdmissionCleanup.battleId, 16)
+     && c->incarnation == sAdmissionCleanup.incarnation && c->phase == sAdmissionCleanup.phase
+     && c->sourceSlot == sAdmissionCleanup.sourceSlot && !memcmp(c->data, sAdmissionCleanup.data, 52))
+        return c->sessionEpoch >= sAdmissionCleanup.sessionEpoch ? MP_BATTLE_OK : MP_BATTLE_SESSION;
+    if (AdmissionCanceled(c->battleId) || sAdmissionCleanupWaiting || sCancellationCount == ADMISSION_CANCELLATIONS)
+        return MP_BATTLE_ORDER;
+    if (!MultiplayerSave_GetIdleBinding(&saveSession, &saveIncarnation)
+     || saveSession != originalLease || saveIncarnation != c->incarnation
+     || !MultiplayerOwnership_IsEnrolled() || gSaveBlock3Ptr == NULL
+     || memcmp(c->data + 16, gSaveBlock3Ptr->ownership.playerId, 16)) return MP_BATTLE_SESSION;
+    if (sState == MP_BATTLE_ADMITTING)
+    {
+        if (sSession != originalLease || sIncarnation != c->incarnation
+         || memcmp(c->battleId, sBattleId, 16) || memcmp(c->data, sBinding.generation, 16)
+         || c->sourceSlot != sBinding.localSlot || c->phase != sBinding.mode
+         || memcmp(c->data + 16, sBinding.players[sBinding.localSlot], 16)
+         || memcmp(c->data + 32, sAdmitRuntime, 16)
+         || gSaveCounter != sAdmitSaveCounter || gPartiesCount[B_TRAINER_PLAYER] != sAdmitPartyCount
+         || Crc32((const u8 *)gParties[B_TRAINER_PLAYER], 600) != sAdmitPartyCrc) return MP_BATTLE_SESSION;
+        return MP_BATTLE_OK;
+    }
+    return !MultiplayerBattle_IsActive() && !sReleasedResumable && !sRetiredWaiting
+        && MultiplayerMenu_CanAdmitBattle(originalLease, c->incarnation)
+        && MultiplayerSave_FieldReadyForBattleMenu(originalLease, c->incarnation) ? MP_BATTLE_OK : MP_BATTLE_UNSAFE;
+}
+
+// Optional ABI1 neutral cancellation. The authenticated host has irrevocably
+// tombstoned a never-reserved battle. No ordinary sequence, RNG, party, Flash,
+// result, or previous successful command is changed by either control.
+static u8 CancelAdmission(const struct MultiplayerBattleControl *c)
+{
+    u32 originalLease = Word(c->data + 48), saveSession, saveIncarnation;
+    bool32 same, menuOwned;
+    if (c->commandSeq != 1 || c->phase == MP_BATTLE_PHASE_DIAGNOSTIC
+     || c->sourceSlot >= (c->phase == MP_BATTLE_PHASE_SINGLES ? 2 : 4)
+     || c->blockSeq || c->offset || c->totalSize || c->kind || c->length != 84
+     || Zero(c->data, 16) || Zero(c->data + 16, 16) || Zero(c->data + 32, 16)
+     || Zero(c->data + 52, 32) || !originalLease || originalLease > c->sessionEpoch)
+        return MP_BATTLE_MALFORMED;
+    if (!MultiplayerBattle_CheckBinding(c->sessionEpoch, c->incarnation)) return MP_BATTLE_SESSION;
+    same = !memcmp(c->battleId, sAdmissionCleanup.battleId, 16)
+        && c->incarnation == sAdmissionCleanup.incarnation && c->phase == sAdmissionCleanup.phase
+        && c->sourceSlot == sAdmissionCleanup.sourceSlot && !memcmp(c->data, sAdmissionCleanup.data, 84);
+    if (same)
+    {
+        if (c->sessionEpoch < sAdmissionCleanup.sessionEpoch) return MP_BATTLE_SESSION;
+        if (c->opcode == MP_BATTLE_ADMISSION_CANCEL_HANDOFF)
+        {
+            if (!sAdmissionCleanupWaiting && !sAdmissionCleanupHandedOff) return MP_BATTLE_ORDER;
+            if (!MultiplayerSave_GetIdleBinding(&saveSession, &saveIncarnation)
+             || saveSession != c->sessionEpoch || saveIncarnation != c->incarnation) return MP_BATTLE_SESSION;
+            if (sAdmissionCleanupWaiting)
+            {
+                sAdmissionCleanupWaiting = FALSE; sAdmissionCleanupHandedOff = TRUE;
+                gSoftResetDisabled = sSavedResetDisabled;
+            }
+        }
+        // Replays cannot re-latch an already transferred hold, including after
+        // a later valid battle. A late HANDOFF never restores that battle's reset.
+        sAdmissionCleanup.sessionEpoch = c->sessionEpoch;
+        return MP_BATTLE_OK;
+    }
+    if (c->opcode != MP_BATTLE_ADMISSION_CANCEL_HOLD || AdmissionCanceled(c->battleId)
+     || sAdmissionCleanupWaiting || sCancellationCount == ADMISSION_CANCELLATIONS)
+        return MP_BATTLE_ORDER;
+    if (!MultiplayerSave_GetIdleBinding(&saveSession, &saveIncarnation)
+     || saveSession != originalLease || saveIncarnation != c->incarnation
+     || !MultiplayerOwnership_IsEnrolled() || gSaveBlock3Ptr == NULL
+     || memcmp(c->data + 16, gSaveBlock3Ptr->ownership.playerId, 16)) return MP_BATTLE_SESSION;
+    menuOwned = MultiplayerMenu_CanAdmitBattle(originalLease, c->incarnation);
+    if (sState == MP_BATTLE_ADMITTING)
+    {
+        if (sSession != originalLease || sIncarnation != c->incarnation
+         || memcmp(c->battleId, sBattleId, 16) || memcmp(c->data, sBinding.generation, 16)
+         || c->sourceSlot != sBinding.localSlot || c->phase != sBinding.mode
+         || memcmp(c->data + 16, sBinding.players[sBinding.localSlot], 16)
+         || memcmp(c->data + 32, sAdmitRuntime, 16)
+         || gSaveCounter != sAdmitSaveCounter || gPartiesCount[B_TRAINER_PLAYER] != sAdmitPartyCount
+         || Crc32((const u8 *)gParties[B_TRAINER_PLAYER], 600) != sAdmitPartyCrc) return MP_BATTLE_SESSION;
+    }
+    else
+    {
+        if (MultiplayerBattle_IsActive() || sReleasedResumable || sRetiredWaiting || !menuOwned
+         || !MultiplayerSave_FieldReadyForBattleMenu(originalLease, c->incarnation)) return MP_BATTLE_UNSAFE;
+        sSavedResetDisabled = MultiplayerMenu_AdmissionResetWasDisabled();
+    }
+    memcpy(sCanceledBattleIds[sCancellationCount++], c->battleId, 16);
+    sAdmissionCleanup = *c; sAdmissionCleanupHandedOff = FALSE;
+    sAdmissionCleanupWaiting = TRUE; sState = MP_BATTLE_IDLE; gSoftResetDisabled = TRUE;
+    // Install the terminal callback hold BEFORE the real Enter window closes.
+    if (menuOwned) MultiplayerMenu_TransferBattleAdmission(originalLease, c->incarnation);
+    return MP_BATTLE_OK;
+}
+
 static void Handle(const struct MultiplayerBattleControl *c)
 {
     u8 data[128], status = MP_BATTLE_OK;
@@ -921,13 +1060,25 @@ static void Handle(const struct MultiplayerBattleControl *c)
      || (c->phase < MP_BATTLE_PHASE_DIAGNOSTIC || c->phase > MP_BATTLE_PHASE_FULL_MULTI) || c->sourceSlot >= 4
      || c->totalSize > MULTIPLAYER_BATTLE_BLOCK_SIZE || c->offset > c->totalSize
      || !Zero(c->data + c->length, 192 - c->length)
-     || c->opcode < MP_BATTLE_BIND || c->opcode > MP_BATTLE_HANDOFF)
+     || c->opcode < MP_BATTLE_BIND || c->opcode > MP_BATTLE_ADMISSION_CANCEL_READY)
     {
         Respond(c, MP_BATTLE_MALFORMED, NULL, 0, FALSE); return;
     }
     if (c->chunkCrc32 != Crc32(c->data, c->length))
     {
         Respond(c, MP_BATTLE_CRC, NULL, 0, FALSE); return;
+    }
+    if (c->opcode == MP_BATTLE_ADMISSION_CANCEL_READY)
+    {
+        status = AdmissionCancelReady(c);
+        Respond(c, status, status == MP_BATTLE_OK ? c->data : NULL, status == MP_BATTLE_OK ? 52 : 0, FALSE);
+        return;
+    }
+    if (c->opcode == MP_BATTLE_ADMISSION_CANCEL_HOLD || c->opcode == MP_BATTLE_ADMISSION_CANCEL_HANDOFF)
+    {
+        status = CancelAdmission(c);
+        Respond(c, status, status == MP_BATTLE_OK ? c->data : NULL, status == MP_BATTLE_OK ? 84 : 0, FALSE);
+        return;
     }
     if (c->opcode == MP_BATTLE_ADMIT || c->opcode == MP_BATTLE_RETIRE || c->opcode == MP_BATTLE_HANDOFF)
     {
@@ -953,7 +1104,11 @@ static void Handle(const struct MultiplayerBattleControl *c)
         // A newer authenticated lease can inspect an old held incarnation.
         if (!Empty(c))
             status = MP_BATTLE_MALFORMED;
-        else if (sState != MP_BATTLE_UNBOUND && (c->incarnation != sIncarnation || c->sessionEpoch < sSession
+        else if (sAdmissionCleanupWaiting && (c->incarnation != sAdmissionCleanup.incarnation
+             || c->sessionEpoch < sAdmissionCleanup.sessionEpoch || memcmp(c->battleId, sAdmissionCleanup.battleId, 16)
+             || c->sourceSlot != sAdmissionCleanup.sourceSlot || c->phase != sAdmissionCleanup.phase))
+            status = MP_BATTLE_SESSION;
+        else if (!sAdmissionCleanupWaiting && sState != MP_BATTLE_UNBOUND && (c->incarnation != sIncarnation || c->sessionEpoch < sSession
              || memcmp(c->battleId, sBattleId, 16) || c->sourceSlot != sBinding.localSlot || c->phase != sBinding.mode))
             status = MP_BATTLE_SESSION;
         else
@@ -1167,6 +1322,18 @@ static void Handle(const struct MultiplayerBattleControl *c)
         cache = FALSE;
     Respond(c, status, data, length, cache);
 }
+
+#if TESTING
+// A test case represents a fresh core. Production Init deliberately preserves
+// canceled identities for the lifetime of the original core.
+void MultiplayerBattle_TestResetAdmissionCleanup(void)
+{
+    memset(sCanceledBattleIds, 0, sizeof(sCanceledBattleIds));
+    sCancellationCount = 0;
+    sAdmissionCleanupWaiting = sAdmissionCleanupHandedOff = FALSE;
+    memset(&sAdmissionCleanup, 0, sizeof(sAdmissionCleanup));
+}
+#endif
 
 void MultiplayerBattle_Init(void)
 {

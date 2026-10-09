@@ -162,7 +162,7 @@ static void Publish(u8 kind, u16 action, u32 screen)
 static void Close(void)
 {
     u32 screen = sMultiplayerMenuScreen.screen;
-    if (!sMultiplayerMenuActive || (sBattleAdmissionLatched && !MultiplayerBattle_IsActive())) return;
+    if (!sMultiplayerMenuActive || (sBattleAdmissionLatched && !MultiplayerBattle_IsActive() && !MultiplayerBattle_IsAdmissionCleanupHeld())) return;
     sBattleAdmissionLatched = FALSE;
     if (sWindow != WINDOW_NONE)
     {
@@ -216,7 +216,7 @@ void MultiplayerMenu_TransferBattleAdmission(u32 session, u32 incarnation)
 {
     // The caller acquired the battle callback/clock hold first. Removing the
     // menu lock and publishing CLOSE cannot expose an unheld field frame.
-    if (MultiplayerBattle_IsActive() && MultiplayerMenu_CanAdmitBattle(session, incarnation))
+    if ((MultiplayerBattle_IsActive() || MultiplayerBattle_IsAdmissionCleanupHeld()) && MultiplayerMenu_CanAdmitBattle(session, incarnation))
         Close();
 }
 
@@ -288,6 +288,15 @@ static void Input(u16 keys)
                 if (sMultiplayerMenuScreen.rows[sMultiplayerMenuCursor].action
                  == (sMultiplayerMenuScreen.reserved[0] | sMultiplayerMenuScreen.reserved[1] << 8))
                 {
+                    // Refuse BEFORE consuming Enter or publishing CHOOSE. A
+                    // full tombstone set must not create an uncancellable hold.
+                    // B/Close remains usable so the player can save normally.
+                    if (!MultiplayerBattle_CanEnterAdmission())
+                    {
+                        memset(sMultiplayerMenuScreen.status, 0, sizeof(sMultiplayerMenuScreen.status));
+                        memcpy(sMultiplayerMenuScreen.status, "Entry limit: save and rejoin", 27);
+                        Render(); return;
+                    }
                     sBattleAdmissionLatched = TRUE;
                     sAdmissionResetDisabled = gSoftResetDisabled; gSoftResetDisabled = TRUE;
                 }

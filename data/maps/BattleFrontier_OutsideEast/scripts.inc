@@ -126,10 +126,23 @@ BattleFrontier_OutsideEast_EventScript_WaterSudowoodo::
 	delay 40
 	waitmoncry
 	setvar VAR_LAST_TALKED, LOCALID_FRONTIER_SUDOWOODO
+#if MP_LOCAL_RESET_STATIC || TESTING
+BattleFrontier_OutsideEast_EventScript_SudowoodoAdmission::
+	special MultiplayerStaticReset_BeginCurrent
+	goto_if_ne VAR_RESULT, MP_LOCAL_RESET_ADMISSION_PENDING, BattleFrontier_OutsideEast_EventScript_SudowoodoAdmissionReady
+	waitstate
+BattleFrontier_OutsideEast_EventScript_SudowoodoAdmissionReady::
+	goto_if_eq VAR_RESULT, FALSE, BattleFrontier_OutsideEast_EventScript_SudowoodoResetReturn
+#endif
 	setwildbattle SPECIES_SUDOWOODO, 40
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	dowildbattle
+BattleFrontier_OutsideEast_EventScript_SudowoodoReturn::
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerLocalReset_ConsumeResult
+	goto_if_eq VAR_RESULT, TRUE, BattleFrontier_OutsideEast_EventScript_SudowoodoResetReturn
+#endif
 	specialvar VAR_RESULT, GetBattleOutcome
 	goto_if_eq VAR_RESULT, B_OUTCOME_WON, BattleFrontier_OutsideEast_EventScript_DefeatedSudowoodo
 	goto_if_eq VAR_RESULT, B_OUTCOME_RAN, BattleFrontier_OutsideEast_EventScript_DefeatedSudowoodo
@@ -137,6 +150,14 @@ BattleFrontier_OutsideEast_EventScript_WaterSudowoodo::
 	setflag FLAG_DEFEATED_SUDOWOODO
 	release
 	end
+
+#if MP_LOCAL_RESET_STATIC || TESTING
+BattleFrontier_OutsideEast_EventScript_SudowoodoResetReturn::
+	@ Preserve the watered object's ordinary return and availability. The next
+	@ attempt requires using the pail again; no hide/defeat/catch flag is written.
+	release
+	end
+#endif
 
 BattleFrontier_OutsideEast_EventScript_DefeatedSudowoodo::
 	setflag FLAG_DEFEATED_SUDOWOODO

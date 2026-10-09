@@ -55,11 +55,24 @@ NavelRock_Top_EventScript_HoOh::
 	applymovement LOCALID_NAVEL_ROCK_HO_OH, NavelRock_Top_Movement_HoOhApproach
 	waitmovement 0
 	special RemoveCameraObject
+#if MP_LOCAL_RESET_STATIC || TESTING
+	setvar VAR_LAST_TALKED, LOCALID_NAVEL_ROCK_HO_OH
+NavelRock_Top_EventScript_HoOhAdmission::
+	special MultiplayerStaticReset_BeginCurrent
+	goto_if_ne VAR_RESULT, MP_LOCAL_RESET_ADMISSION_PENDING, NavelRock_Top_EventScript_HoOhAdmissionReady
+	waitstate
+NavelRock_Top_EventScript_HoOhAdmissionReady::
+	goto_if_eq VAR_RESULT, FALSE, NavelRock_Top_EventScript_HoOhResetReturn
+#endif
 	seteventmon SPECIES_HO_OH, 70
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	special BattleSetup_StartLegendaryBattle
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
 	setvar VAR_LAST_TALKED, LOCALID_NAVEL_ROCK_HO_OH
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerLocalReset_ConsumeResult
+	goto_if_eq VAR_RESULT, TRUE, NavelRock_Top_EventScript_HoOhResetReturn
+#endif
 	specialvar VAR_RESULT, GetBattleOutcome
 	goto_if_eq VAR_RESULT, B_OUTCOME_WON, NavelRock_Top_EventScript_DefeatedHoOh
 	goto_if_eq VAR_RESULT, B_OUTCOME_RAN, NavelRock_Top_EventScript_RanFromHoOh
@@ -67,6 +80,17 @@ NavelRock_Top_EventScript_HoOh::
 	setflag FLAG_CAUGHT_HO_OH
 	releaseall
 	end
+
+#if MP_LOCAL_RESET_STATIC || TESTING
+NavelRock_Top_EventScript_HoOhResetReturn::
+	special MultiplayerStaticReset_ReturnTicketSource
+	goto_if_eq VAR_RESULT, FALSE, NavelRock_Top_EventScript_HoOhResetRelease
+	setweather WEATHER_SHADE
+	doweather
+NavelRock_Top_EventScript_HoOhResetRelease::
+	releaseall
+	end
+#endif
 
 NavelRock_Top_EventScript_DefeatedHoOh::
 	setflag FLAG_DEFEATED_HO_OH

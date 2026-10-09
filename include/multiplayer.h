@@ -10,6 +10,8 @@
 #define MULTIPLAYER_CONNECTED (1u << 0)
 #define MULTIPLAYER_ACTIVITY_UNAVAILABLE 0
 #define MULTIPLAYER_ACTIVITY_OVERWORLD 1
+#define MULTIPLAYER_PRESENCE_ANIMATION_ABI 1
+#define MULTIPLAYER_MOVEMENT_RUN 5
 
 struct MultiplayerPose
 {
@@ -22,7 +24,7 @@ struct MultiplayerPose
     u8 direction;
     u8 elevation;
     u8 gender;
-    u8 movementMode; // PLAYER_AVATAR_STATE_NORMAL through UNDERWATER (0..4).
+    u8 movementMode; // Avatar states 0..4; animation capability v1 additionally permits RUN=5.
     u8 activity;
     u8 reserved;
 };

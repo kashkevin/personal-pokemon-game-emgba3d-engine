@@ -51,10 +51,23 @@ NavelRock_Bottom_EventScript_Lugia::
 	playmoncry SPECIES_LUGIA, CRY_MODE_ENCOUNTER
 	waitmoncry
 	delay 20
+#if MP_LOCAL_RESET_STATIC || TESTING
+NavelRock_Bottom_EventScript_LugiaAdmission::
+	special MultiplayerStaticReset_BeginCurrent
+	goto_if_ne VAR_RESULT, MP_LOCAL_RESET_ADMISSION_PENDING, NavelRock_Bottom_EventScript_LugiaAdmissionReady
+	waitstate
+NavelRock_Bottom_EventScript_LugiaAdmissionReady::
+	goto_if_eq VAR_RESULT, FALSE, NavelRock_Bottom_EventScript_LugiaResetReturn
+#endif
 	seteventmon SPECIES_LUGIA, 70
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	special BattleSetup_StartLegendaryBattle
+NavelRock_Bottom_EventScript_LugiaPersonalReturn::
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerLocalReset_ConsumeResult
+	goto_if_eq VAR_RESULT, TRUE, NavelRock_Bottom_EventScript_LugiaResetReturn
+#endif
 	specialvar VAR_RESULT, GetBattleOutcome
 	goto_if_eq VAR_RESULT, B_OUTCOME_WON, NavelRock_Bottom_EventScript_DefeatedLugia
 	goto_if_eq VAR_RESULT, B_OUTCOME_RAN, NavelRock_Bottom_EventScript_RanFromLugia
@@ -62,6 +75,12 @@ NavelRock_Bottom_EventScript_Lugia::
 	setflag FLAG_CAUGHT_LUGIA
 	release
 	end
+
+#if MP_LOCAL_RESET_STATIC || TESTING
+NavelRock_Bottom_EventScript_LugiaResetReturn::
+	release
+	end
+#endif
 
 NavelRock_Bottom_EventScript_DefeatedLugia::
 	setflag FLAG_DEFEATED_LUGIA

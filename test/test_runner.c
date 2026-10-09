@@ -725,6 +725,7 @@ static NAKED void JumpToAgbMainLoop(void)
 static void ReinitCallbacks(void)
 {
     // A failed held-mailbox assertion must not freeze the reporting callback.
+    MultiplayerBattle_TestResetAdmissionCleanup();
     MultiplayerBattle_Init();
     MultiplayerSave_Init();
     gSoftResetDisabled = FALSE;

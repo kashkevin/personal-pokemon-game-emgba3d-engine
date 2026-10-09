@@ -80,10 +80,22 @@ BirthIsland_Exterior_EventScript_Deoxys::
 	delay 40
 	waitmoncry
 	setvar VAR_LAST_TALKED, LOCALID_BIRTH_ISLAND_DEOXYS
+#if MP_LOCAL_RESET_STATIC || TESTING
+BirthIsland_Exterior_EventScript_DeoxysAdmission::
+	special MultiplayerStaticReset_BeginCurrent
+	goto_if_ne VAR_RESULT, MP_LOCAL_RESET_ADMISSION_PENDING, BirthIsland_Exterior_EventScript_DeoxysAdmissionReady
+	waitstate
+BirthIsland_Exterior_EventScript_DeoxysAdmissionReady::
+	goto_if_eq VAR_RESULT, FALSE, BirthIsland_Exterior_EventScript_DeoxysResetReturn
+#endif
 	seteventmon SPECIES_DEOXYS_NORMAL, 30
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	special BattleSetup_StartLegendaryBattle
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerLocalReset_ConsumeResult
+	goto_if_eq VAR_RESULT, TRUE, BirthIsland_Exterior_EventScript_DeoxysResetReturn
+#endif
 	specialvar VAR_RESULT, GetBattleOutcome
 	goto_if_eq VAR_RESULT, B_OUTCOME_WON, BirthIsland_Exterior_EventScript_DefeatedDeoxys
 	goto_if_eq VAR_RESULT, B_OUTCOME_RAN, BirthIsland_Exterior_EventScript_RanFromDeoxys
@@ -91,6 +103,25 @@ BirthIsland_Exterior_EventScript_Deoxys::
 	setflag FLAG_BATTLED_DEOXYS
 	release
 	end
+
+@ Only a still-present, already revealed personal Deoxys can reach admission.
+@ In ordinary builds the original object remains non-interactive.
+BirthIsland_Exterior_EventScript_DeoxysRetry::
+#if MP_LOCAL_RESET_STATIC || TESTING
+	lock
+	faceplayer
+	setvar VAR_LAST_TALKED, LOCALID_BIRTH_ISLAND_DEOXYS
+	goto BirthIsland_Exterior_EventScript_DeoxysAdmission
+#else
+	end
+#endif
+
+#if MP_LOCAL_RESET_STATIC || TESTING
+BirthIsland_Exterior_EventScript_DeoxysResetReturn::
+	special MultiplayerStaticReset_ReturnTicketSource
+	release
+	end
+#endif
 
 BirthIsland_Exterior_EventScript_DefeatedDeoxys::
 	setflag FLAG_DEFEATED_DEOXYS

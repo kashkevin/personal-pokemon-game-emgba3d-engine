@@ -72,11 +72,23 @@ SouthernIsland_Interior_EventScript_Lati::
 	delay 50
 	special RemoveCameraObject
 	setvar VAR_LAST_TALKED, LOCALID_SOUTHERN_ISLAND_LATI
+#if MP_LOCAL_RESET_STATIC || TESTING
+SouthernIsland_Interior_EventScript_LatiAdmission::
+	special MultiplayerStaticReset_BeginCurrent
+	goto_if_ne VAR_RESULT, MP_LOCAL_RESET_ADMISSION_PENDING, SouthernIsland_Interior_EventScript_LatiAdmissionReady
+	waitstate
+SouthernIsland_Interior_EventScript_LatiAdmissionReady::
+	goto_if_eq VAR_RESULT, FALSE, SouthernIsland_Interior_EventScript_LatiResetReturn
+#endif
 	call_if_eq VAR_ROAMER_POKEMON, 0, SouthernIsland_Interior_EventScript_SetLatiosBattleVars
 	call_if_ne VAR_ROAMER_POKEMON, 0, SouthernIsland_Interior_EventScript_SetLatiasBattleVars
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	special BattleSetup_StartLatiBattle
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerLocalReset_ConsumeResult
+	goto_if_eq VAR_RESULT, TRUE, SouthernIsland_Interior_EventScript_LatiResetReturn
+#endif
 	specialvar VAR_RESULT, GetBattleOutcome
 	goto_if_eq VAR_RESULT, B_OUTCOME_WON, SouthernIsland_Interior_EventScript_LatiDefeated
 	goto_if_eq VAR_RESULT, B_OUTCOME_RAN, SouthernIsland_Interior_EventScript_RanFromLati
@@ -84,6 +96,13 @@ SouthernIsland_Interior_EventScript_Lati::
 	setflag FLAG_CAUGHT_LATIAS_OR_LATIOS
 	releaseall
 	end
+
+#if MP_LOCAL_RESET_STATIC || TESTING
+SouthernIsland_Interior_EventScript_LatiResetReturn::
+	special MultiplayerStaticReset_ReturnTicketSource
+	releaseall
+	end
+#endif
 
 SouthernIsland_Interior_EventScript_LatiDefeated::
 	setflag FLAG_DEFEATED_LATIAS_OR_LATIOS

@@ -71,16 +71,42 @@ EventScript_BattleKecleon::
 	playmoncry SPECIES_KECLEON, CRY_MODE_ENCOUNTER
 	delay 40
 	waitmoncry
+#if MP_LOCAL_RESET_STATIC || TESTING
+EventScript_KecleonAdmission::
+	special MultiplayerStaticReset_BeginCurrent
+	goto_if_ne VAR_RESULT, MP_LOCAL_RESET_ADMISSION_PENDING, EventScript_KecleonAdmissionReady
+	waitstate
+EventScript_KecleonAdmissionReady::
+	goto_if_eq VAR_RESULT, FALSE, EventScript_KecleonResetReturn
+#endif
 	setwildbattle SPECIES_KECLEON, 30
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	dowildbattle
+EventScript_KecleonPersonalReturn::
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerLocalReset_ConsumeResult
+	goto_if_eq VAR_RESULT, TRUE, EventScript_KecleonResetReturn
+#endif
 	specialvar VAR_RESULT, GetBattleOutcome
 	goto_if_eq VAR_RESULT, B_OUTCOME_WON, EventScript_RemoveKecleon
 	goto_if_eq VAR_RESULT, B_OUTCOME_RAN, EventScript_RemoveKecleon
 	goto_if_eq VAR_RESULT, B_OUTCOME_PLAYER_TELEPORTED, EventScript_RemoveKecleon
 	release
 	end
+
+#if MP_LOCAL_RESET_STATIC || TESTING
+EventScript_KecleonResetReturn::
+	@ Only visual visibility changes; the object's hide/completion flag is intact.
+	applymovement VAR_LAST_TALKED, Movement_KecleonResetInvisible
+	waitmovement 0
+	release
+	end
+
+Movement_KecleonResetInvisible:
+	set_invisible
+	step_end
+#endif
 
 EventScript_RemoveKecleon::
 	goto Common_EventScript_RemoveStaticPokemon

@@ -24,7 +24,10 @@
 #include "constants/songs.h"
 #include "constants/rgb.h"
 
-#define STARTER_MON_COUNT   3
+#define STARTER_PAGE_SIZE   3
+#define STARTER_PAGE_COUNT  (IS_FRLG ? 1 : 6)
+#define STARTER_MON_COUNT   (STARTER_PAGE_SIZE * STARTER_PAGE_COUNT)
+#define STARTER_SAVE_TAG    0x6100
 
 // Position of the sprite of the selected starter Pokémon
 #define STARTER_PKMN_POS_X (DISPLAY_WIDTH / 2)
@@ -96,14 +99,14 @@ static const struct WindowTemplate sWindowTemplate_StarterLabel =
     .baseBlock = 0x0274
 };
 
-static const u8 sPokeballCoords[STARTER_MON_COUNT][2] =
+static const u8 sPokeballCoords[STARTER_PAGE_SIZE][2] =
 {
     {60, 64},
     {120, 88},
     {180, 64},
 };
 
-static const u8 sStarterLabelCoords[STARTER_MON_COUNT][2] =
+static const u8 sStarterLabelCoords[STARTER_PAGE_SIZE][2] =
 {
     {0, 9},
     {16, 10},
@@ -114,11 +117,27 @@ static const u8 sStarterLabelCoords[STARTER_MON_COUNT][2] =
 #define FIRE_STARTER  (IS_FRLG ? SPECIES_CHARMANDER : SPECIES_TORCHIC)
 #define WATER_STARTER (IS_FRLG ? SPECIES_SQUIRTLE   : SPECIES_MUDKIP )
 
-static const u16 sStarterMon[STARTER_MON_COUNT] =
+// Keep the original Hoenn choices at indices 0-2 for legacy saves.
+static const u16 sStarterMon[] =
 {
-    GRASS_STARTER,
-    FIRE_STARTER,
-    WATER_STARTER,
+    GRASS_STARTER, FIRE_STARTER, WATER_STARTER,
+    SPECIES_BULBASAUR, SPECIES_CHARMANDER, SPECIES_SQUIRTLE,
+    SPECIES_CHIKORITA, SPECIES_CYNDAQUIL, SPECIES_TOTODILE,
+    SPECIES_TURTWIG, SPECIES_CHIMCHAR, SPECIES_PIPLUP,
+    SPECIES_SNIVY, SPECIES_TEPIG, SPECIES_OSHAWOTT,
+    SPECIES_CHESPIN, SPECIES_FENNEKIN, SPECIES_FROAKIE,
+};
+
+static const u8 sText_HoennStarters[] = _("Hoenn: choose your partner.\nUp/Down: region  A: choose");
+static const u8 sText_KantoStarters[] = _("Kanto: choose your partner.\nUp/Down: region  A: choose");
+static const u8 sText_JohtoStarters[] = _("Johto: choose your partner.\nUp/Down: region  A: choose");
+static const u8 sText_SinnohStarters[] = _("Sinnoh: choose your partner.\nUp/Down: region  A: choose");
+static const u8 sText_UnovaStarters[] = _("Unova: choose your partner.\nUp/Down: region  A: choose");
+static const u8 sText_KalosStarters[] = _("Kalos: choose your partner.\nUp/Down: region  A: choose");
+static const u8 *const sStarterPageText[] =
+{
+    sText_HoennStarters, sText_KantoStarters, sText_JohtoStarters,
+    sText_SinnohStarters, sText_UnovaStarters, sText_KalosStarters,
 };
 
 static const struct BgTemplate sBgTemplates[3] =
@@ -349,9 +368,31 @@ static const struct SpriteTemplate sSpriteTemplate_StarterCircle =
 // .text
 u16 GetStarterPokemon(u16 chosenStarterId)
 {
-    if (chosenStarterId > STARTER_MON_COUNT)
+    if (chosenStarterId >= STARTER_MON_COUNT)
         chosenStarterId = 0;
     return sStarterMon[chosenStarterId];
+}
+
+u16 GetPlayerStarterPokemon(void)
+{
+    u16 saved = VarGet(VAR_MULTIPLAYER_STARTER_CHOICE);
+    u16 choice = saved & 0xFF;
+    if (!IS_FRLG && (saved & 0xFF00) == STARTER_SAVE_TAG
+        && choice < STARTER_MON_COUNT
+        && choice % STARTER_PAGE_SIZE == VarGet(VAR_STARTER_MON))
+        return GetStarterPokemon(choice);
+    return GetStarterPokemon(VarGet(VAR_STARTER_MON));
+}
+
+void SavePlayerStarterChoice(u16 choice)
+{
+    if (choice >= STARTER_MON_COUNT)
+        choice = 0;
+    // Existing campaign scripts select rivals and dialogue by Grass/Fire/Water.
+    // Retain those values instead of sending a new page index into old branches.
+    VarSet(VAR_STARTER_MON, choice % STARTER_PAGE_SIZE);
+    if (!IS_FRLG)
+        VarSet(VAR_MULTIPLAYER_STARTER_CHOICE, STARTER_SAVE_TAG | choice);
 }
 
 static void VblankCB_StarterChoose(void)
@@ -474,7 +515,10 @@ static void Task_StarterChoose(u8 taskId)
 {
     CreateStarterPokemonLabel(gTasks[taskId].tStarterSelection);
     DrawStdFrameWithCustomTileAndPalette(0, FALSE, 0x2A8, 0xD);
-    AddTextPrinterParameterized(0, FONT_NORMAL, gText_BirchInTrouble, 0, 1, 0, NULL);
+    FillWindowPixelBuffer(0, PIXEL_FILL(1));
+    AddTextPrinterParameterized(0, FONT_NORMAL,
+        IS_FRLG ? gText_BirchInTrouble : sStarterPageText[gTasks[taskId].tStarterSelection / STARTER_PAGE_SIZE],
+        0, 1, 0, NULL);
     PutWindowTilemap(0);
     ScheduleBgCopyTilemapToVram(0);
     gTasks[taskId].func = Task_HandleStarterChooseInput;
@@ -482,7 +526,7 @@ static void Task_StarterChoose(u8 taskId)
 
 static void Task_HandleStarterChooseInput(u8 taskId)
 {
-    u8 selection = gTasks[taskId].tStarterSelection;
+    u8 selection = gTasks[taskId].tStarterSelection % STARTER_PAGE_SIZE;
 
     if (JOY_NEW(A_BUTTON))
     {
@@ -502,12 +546,24 @@ static void Task_HandleStarterChooseInput(u8 taskId)
         gTasks[taskId].tPkmnSpriteId = spriteId;
         gTasks[taskId].func = Task_WaitForStarterSprite;
     }
+    else if (JOY_NEW(DPAD_UP | L_BUTTON))
+    {
+        gTasks[taskId].tStarterSelection =
+            (gTasks[taskId].tStarterSelection + STARTER_MON_COUNT - STARTER_PAGE_SIZE) % STARTER_MON_COUNT;
+        gTasks[taskId].func = Task_MoveStarterChooseCursor;
+    }
+    else if (JOY_NEW(DPAD_DOWN | R_BUTTON))
+    {
+        gTasks[taskId].tStarterSelection =
+            (gTasks[taskId].tStarterSelection + STARTER_PAGE_SIZE) % STARTER_MON_COUNT;
+        gTasks[taskId].func = Task_MoveStarterChooseCursor;
+    }
     else if (JOY_NEW(DPAD_LEFT) && selection > 0)
     {
         gTasks[taskId].tStarterSelection--;
         gTasks[taskId].func = Task_MoveStarterChooseCursor;
     }
-    else if (JOY_NEW(DPAD_RIGHT) && selection < STARTER_MON_COUNT - 1)
+    else if (JOY_NEW(DPAD_RIGHT) && selection < STARTER_PAGE_SIZE - 1)
     {
         gTasks[taskId].tStarterSelection++;
         gTasks[taskId].func = Task_MoveStarterChooseCursor;
@@ -575,6 +631,7 @@ static void CreateStarterPokemonLabel(u8 selection)
     u8 labelLeft, labelRight, labelTop, labelBottom;
 
     enum Species species = GetStarterPokemon(selection);
+    selection %= STARTER_PAGE_SIZE;
     CopyMonCategoryText(species, categoryText);
     speciesName = GetSpeciesName(species);
 
@@ -621,8 +678,7 @@ static void Task_MoveStarterChooseCursor(u8 taskId)
 
 static void Task_CreateStarterLabel(u8 taskId)
 {
-    CreateStarterPokemonLabel(gTasks[taskId].tStarterSelection);
-    gTasks[taskId].func = Task_HandleStarterChooseInput;
+    Task_StarterChoose(taskId);
 }
 
 static u8 CreatePokemonFrontSprite(enum Species species, u8 x, u8 y)
@@ -637,8 +693,8 @@ static u8 CreatePokemonFrontSprite(enum Species species, u8 x, u8 y)
 static void SpriteCB_SelectionHand(struct Sprite *sprite)
 {
     // Float up and down above selected Poké Ball
-    sprite->x = sCursorCoords[gTasks[sprite->data[0]].tStarterSelection][0];
-    sprite->y = sCursorCoords[gTasks[sprite->data[0]].tStarterSelection][1];
+    sprite->x = sCursorCoords[gTasks[sprite->data[0]].tStarterSelection % STARTER_PAGE_SIZE][0];
+    sprite->y = sCursorCoords[gTasks[sprite->data[0]].tStarterSelection % STARTER_PAGE_SIZE][1];
     sprite->y2 = Sin(sprite->data[1], 8);
     sprite->data[1] = (u8)(sprite->data[1]) + 4;
 }
@@ -646,7 +702,7 @@ static void SpriteCB_SelectionHand(struct Sprite *sprite)
 static void SpriteCB_Pokeball(struct Sprite *sprite)
 {
     // Animate Poké Ball if currently selected
-    if (gTasks[sprite->sTaskId].tStarterSelection == sprite->sBallId)
+    if (gTasks[sprite->sTaskId].tStarterSelection % STARTER_PAGE_SIZE == sprite->sBallId)
         StartSpriteAnimIfDifferent(sprite, 1);
     else
         StartSpriteAnimIfDifferent(sprite, 0);

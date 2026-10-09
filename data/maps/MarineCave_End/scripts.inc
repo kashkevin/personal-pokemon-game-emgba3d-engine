@@ -33,10 +33,23 @@ MarineCave_End_EventScript_Kyogre::
 	delay 40
 	waitmoncry
 	setvar VAR_LAST_TALKED, LOCALID_MARINE_CAVE_KYOGRE
+#if MP_LOCAL_RESET_STATIC || TESTING
+MarineCave_End_EventScript_KyogreAdmission::
+	special MultiplayerStaticReset_BeginCurrent
+	goto_if_ne VAR_RESULT, MP_LOCAL_RESET_ADMISSION_PENDING, MarineCave_End_EventScript_KyogreAdmissionReady
+	waitstate
+MarineCave_End_EventScript_KyogreAdmissionReady::
+	goto_if_eq VAR_RESULT, FALSE, MarineCave_End_EventScript_KyogreResetReturn
+#endif
 	setwildbattle SPECIES_KYOGRE, 70
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	special BattleSetup_StartLegendaryBattle
+MarineCave_End_EventScript_KyogrePersonalReturn::
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerLocalReset_ConsumeResult
+	goto_if_eq VAR_RESULT, TRUE, MarineCave_End_EventScript_KyogreResetReturn
+#endif
 	setvar VAR_TEMP_1, 0
 	specialvar VAR_RESULT, GetBattleOutcome
 	goto_if_eq VAR_RESULT, B_OUTCOME_WON, MarineCave_End_EventScript_DefeatedKyogre
@@ -46,6 +59,13 @@ MarineCave_End_EventScript_Kyogre::
 	setflag FLAG_DEFEATED_KYOGRE
 	releaseall
 	end
+
+#if MP_LOCAL_RESET_STATIC || TESTING
+MarineCave_End_EventScript_KyogreResetReturn::
+	special MultiplayerStaticReset_ReturnWeatherSource
+	releaseall
+	end
+#endif
 
 MarineCave_End_EventScript_DefeatedKyogre::
 	setvar VAR_SHOULD_END_ABNORMAL_WEATHER, 1
@@ -68,4 +88,3 @@ MarineCave_End_Movement_KyogreApproach:
 	delay_16
 	walk_down_affine
 	step_end
-

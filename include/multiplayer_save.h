@@ -14,6 +14,10 @@ enum MultiplayerSaveOpcode {
     MP_SAVE_RELEASE_TRADE, MP_SAVE_REBIND_TRADE, MP_SAVE_QUERY_TRADE,
     MP_SAVE_READ_WINDOW,
     MP_SAVE_BEGIN_EMERGENCY_EXPORT, MP_SAVE_PRESERVE_EMERGENCY, MP_SAVE_QUERY_EMERGENCY, MP_SAVE_PROMOTE_EMERGENCY_EXPORT,
+    MP_SAVE_BEGIN_EFFECT_RECORD, MP_SAVE_CHOOSE_EFFECT_MOVE,
+    MP_SAVE_QUERY_EFFECT_RECORD, MP_SAVE_DISCARD_EFFECT_RECORD,
+    MP_SAVE_BEGIN_EFFECT_SAVE, MP_SAVE_READ_EFFECT_WINDOW,
+    MP_SAVE_QUERY_EFFECT_CHOICE,
 };
 enum MultiplayerSaveState {
     MP_SAVE_UNBOUND, MP_SAVE_BOUND, MP_SAVE_EXPORTING, MP_SAVE_IMPORTING,
@@ -54,6 +58,9 @@ struct MultiplayerSaveMailbox {
 };
 extern volatile struct MultiplayerSaveMailbox gMultiplayerSaveMailbox;
 extern const u32 gMultiplayerTradeAbiVersion;
+extern const u32 gMultiplayerTradeEffectPrepareAbiVersion;
+extern const u32 gMultiplayerTradeEffectSaveAbiVersion;
+extern const u32 gMultiplayerTradeEffectChoiceAbiVersion;
 extern const u32 gMultiplayerSaveWindowAbiVersion;
 extern const u32 gMultiplayerEmergencySaveAbiVersion;
 void MultiplayerSave_Init(void);

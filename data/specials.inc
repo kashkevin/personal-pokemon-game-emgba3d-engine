@@ -643,3 +643,7 @@ gSpecials::
 	def_special MultiplayerLocalReset_Finish
 	def_special MultiplayerStaticReset_BeginVoltorb1
 	def_special MultiplayerStaticReset_BeginCurrent
+	def_special MultiplayerStaticReset_ReturnWeatherSource
+	def_special MultiplayerStaticReset_CaptureMew
+	def_special MultiplayerStaticReset_ReturnTicketSource
+	def_special MultiplayerStaticReset_ForgetMew

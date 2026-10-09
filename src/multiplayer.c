@@ -37,11 +37,36 @@ _Static_assert(MULTIPLAYER_LOCAL_ID_BASE > OBJECT_EVENT_TEMPLATES_COUNT, "Remote
 _Static_assert(MULTIPLAYER_LOCAL_ID_BASE + MULTIPLAYER_MAX_PEERS <= LOCALID_OW_ENCOUNTER_END - OWE_SPAWNS_MAX + 1, "Remote IDs outside generated encounters");
 
 EWRAM_DATA volatile struct MultiplayerMailbox gMultiplayerMailbox = {0};
+const u32 gMultiplayerPresenceAnimationAbiVersion = MULTIPLAYER_PRESENCE_ANIMATION_ABI;
+
+// Compiled settings identify this candidate independently of the retained
+// baseline. Species IDs/save arrays and pre-existing records are not remapped.
+const u32 gMultiplayerGenerationProfile[] =
+{
+    0x36474445, 1,
+    GEN_LATEST, P_LVL_UP_LEARNSETS, P_UPDATED_TYPES, P_UPDATED_STATS,
+    P_UPDATED_ABILITIES, P_UPDATED_FRIENDSHIP, P_EVOLUTION_LEVEL_1_LEARN,
+    P_FRIENDSHIP_EVO_THRESHOLD, B_UPDATED_MOVE_DATA, B_UPDATED_ABILITY_DATA,
+    B_UPDATED_TYPE_MATCHUPS, B_PHYSICAL_SPECIAL_SPLIT, B_CRIT_MULTIPLIER,
+    B_PARALYSIS_SPEED, B_CONFUSION_SELF_DMG_CHANCE, B_BURN_DAMAGE,
+    B_MEGA_EVO_TURN_ORDER, B_ATE_MULTIPLIER,
+};
+_Static_assert(sizeof(gMultiplayerGenerationProfile) == 80, "Generation profile ABI");
+
+// Player packages must prove the compiled developer controls are disabled.
+const u32 gMultiplayerPlayerBuildGuard[] =
+{
+    0x31474250, 1, DEBUG_OVERWORLD_MENU, DEBUG_BATTLE_MENU,
+    DEBUG_POKEMON_SPRITE_VISUALIZER, I_SHOW_NO_ID_TRAINER,
+};
+_Static_assert(sizeof(gMultiplayerPlayerBuildGuard) == 24, "Player build guard ABI");
+
 
 struct RemoteState
 {
     struct MultiplayerPeer peer;
     u8 objectEventId;
+    bool8 moving;
 };
 
 static EWRAM_DATA struct RemoteState sRemotes[MULTIPLAYER_MAX_PEERS] = {0};
@@ -85,6 +110,7 @@ static void RemoveRemote(u32 i)
         }
     }
     sRemotes[i].objectEventId = OBJECT_EVENTS_COUNT;
+    sRemotes[i].moving = FALSE;
 }
 
 void Multiplayer_LeaveField(void)
@@ -130,7 +156,11 @@ void Multiplayer_Init(void)
     gMultiplayerMailbox.byteSize = sizeof(gMultiplayerMailbox);
     gMultiplayerMailbox.local.mapEpoch = sMapEpoch;
     gMultiplayerMailbox.local.direction = DIR_SOUTH;
-    gMultiplayerMailbox.magic = MULTIPLAYER_MAGIC;
+    // Keep the descriptor under linker garbage collection, and publish only
+    // the declared profile. The host verifies every compiled word from ROM.
+    if (((const volatile u32 *)gMultiplayerGenerationProfile)[0] == 0x36474445
+     && ((const volatile u32 *)gMultiplayerPlayerBuildGuard)[0] == 0x31474250)
+        gMultiplayerMailbox.magic = MULTIPLAYER_MAGIC;
 }
 
 static bool32 FieldReady(void)
@@ -154,6 +184,11 @@ static u8 MovementMode(void)
         return PLAYER_AVATAR_STATE_ACRO_BIKE;
     if (gPlayerAvatar.flags & PLAYER_AVATAR_FLAG_MACH_BIKE)
         return PLAYER_AVATAR_STATE_MACH_BIKE;
+    // The actual native run action owns this flag. Do not infer running from
+    // network distance or invent a faster local movement rule.
+    if ((gPlayerAvatar.flags & PLAYER_AVATAR_FLAG_DASH)
+     && *(const volatile u32 *)&gMultiplayerPresenceAnimationAbiVersion == MULTIPLAYER_PRESENCE_ANIMATION_ABI)
+        return MULTIPLAYER_MOVEMENT_RUN;
     return PLAYER_AVATAR_STATE_NORMAL;
 }
 
@@ -204,7 +239,7 @@ static bool32 ValidPose(const struct MultiplayerPose *pose)
     return pose->x >= 0 && pose->y >= 0
         && pose->direction >= DIR_SOUTH && pose->direction <= DIR_EAST
         && pose->elevation <= 15 && pose->gender <= FEMALE
-        && pose->movementMode <= PLAYER_AVATAR_STATE_UNDERWATER;
+        && pose->movementMode <= MULTIPLAYER_MOVEMENT_RUN;
 }
 
 static void ReadInbound(void)
@@ -310,17 +345,24 @@ static void UpdateRemote(u32 i)
     u32 id = sRemotes[i].objectEventId;
     u16 graphicsId;
     s16 x, y, dx, dy;
+    bool32 completed;
     enum Direction direction;
     if (sRemotes[i].peer.playerId == 0 || !PeerVisible(pose))
     {
         RemoveRemote(i);
         return;
     }
-    graphicsId = GetPlayerAvatarGraphicsIdByStateIdAndGender(pose->movementMode, pose->gender);
+    // Normal avatar graphics already include dedicated running frames for both
+    // trainers. Reuse their native animation table without another sprite,
+    // palette, frame cache, decompression, or save field.
+    graphicsId = GetPlayerAvatarGraphicsIdByStateIdAndGender(
+        pose->movementMode == MULTIPLAYER_MOVEMENT_RUN ? PLAYER_AVATAR_STATE_NORMAL : pose->movementMode,
+        pose->gender);
     if (id >= OBJECT_EVENTS_COUNT || !Multiplayer_IsRemoteObject(&gObjectEvents[id]))
     {
         struct ObjectEventTemplate template = {0};
         sRemotes[i].objectEventId = OBJECT_EVENTS_COUNT;
+        sRemotes[i].moving = FALSE;
         if (!CanAllocateObject(graphicsId) || GetObjectEventIdByLocalId(MULTIPLAYER_LOCAL_ID_BASE + i) < OBJECT_EVENTS_COUNT)
             return;
         template.localId = MULTIPLAYER_LOCAL_ID_BASE + i;
@@ -350,11 +392,17 @@ static void UpdateRemote(u32 i)
         if (IndexOfSpritePaletteTag(paletteTag) == 0xFF && IndexOfSpritePaletteTag(TAG_NONE) == 0xFF)
             return;
         ObjectEventClearHeldMovementIfActive(objectEvent);
+        sRemotes[i].moving = FALSE;
         ObjectEventSetGraphicsId(objectEvent, graphicsId);
         MoveObjectEventToMapCoords(objectEvent, x, y);
     }
-    if (ObjectEventClearHeldMovementIfFinished(objectEvent) == TRUE)
+    completed = ObjectEventClearHeldMovementIfFinished(objectEvent) == TRUE;
+    if (completed)
+    {
         MoveObjectEventToMapCoords(objectEvent, objectEvent->currentCoords.x, objectEvent->currentCoords.y);
+        completed = sRemotes[i].moving;
+        sRemotes[i].moving = FALSE;
+    }
     if (ObjectEventIsHeldMovementActive(objectEvent))
         return;
     dx = x - objectEvent->currentCoords.x;
@@ -369,10 +417,11 @@ static void UpdateRemote(u32 i)
     else if (dx != 0 || dy != 0)
     {
         direction = dx > 0 ? DIR_EAST : dx < 0 ? DIR_WEST : dy > 0 ? DIR_SOUTH : DIR_NORTH;
-        ObjectEventSetHeldMovement(objectEvent, abs(dx) + abs(dy) > 1
-            ? GetWalkFastMovementAction(direction) : GetWalkNormalMovementAction(direction));
+        sRemotes[i].moving = !ObjectEventSetHeldMovement(objectEvent, pose->movementMode == MULTIPLAYER_MOVEMENT_RUN
+            ? GetPlayerRunMovementAction(direction)
+            : abs(dx) + abs(dy) > 1 ? GetWalkFastMovementAction(direction) : GetWalkNormalMovementAction(direction));
     }
-    else if (objectEvent->facingDirection != pose->direction)
+    else if (objectEvent->facingDirection != pose->direction || completed)
     {
         ObjectEventSetHeldMovement(objectEvent, GetFaceDirectionMovementAction(pose->direction));
     }

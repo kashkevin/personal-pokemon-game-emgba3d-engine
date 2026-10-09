@@ -2,6 +2,7 @@
 #include "multiplayer_battle.h"
 #include "multiplayer_battle_schema.h"
 #include "multiplayer_save.h"
+#include "multiplayer_menu.h"
 #include "multiplayer_ownership.h"
 #include "battle.h"
 #include "battle_bg.h"
@@ -1514,5 +1515,162 @@ TEST("Multiplayer terminal: RELEASE remains field held until exact retirement an
     EXPECT_EQ(Submit(&f), MP_BATTLE_OK);
     f.command = handoff; EXPECT_EQ(SubmitResume(&f), MP_BATTLE_SESSION);
     EXPECT(MultiplayerBattle_IsActive());
+    TearDown(&f);
+}
+
+
+static void CleanupSaveBind(struct ChannelFixture *f, u32 epoch, u32 generation)
+{
+    struct MultiplayerSaveControl save = {0};
+    save.incarnation = f->command.incarnation; save.sessionEpoch = epoch;
+    save.commandSeq = 1; save.requestId[0] = 5; save.totalSize = 131072; save.opcode = MP_SAVE_BIND;
+    gMultiplayerSaveMailbox.command = save; gMultiplayerSaveMailbox.commandGeneration = generation;
+    MultiplayerSave_Tick(); EXPECT_EQ(gMultiplayerSaveMailbox.response.status, MP_SAVE_OK);
+}
+
+static void CleanupAdmit(struct ChannelFixture *f, u8 id)
+{
+    Next(f, MP_BATTLE_ADMIT); f->command.commandSeq = 1;
+    f->command.battleId[0] = id; f->command.length = 48;
+    memcpy(f->command.data, f->binding.generation, 16);
+    memcpy(f->command.data + 16, f->binding.players[0], 16); f->command.data[32] = 91;
+    EXPECT_EQ(SubmitResume(f), MP_BATTLE_OK);
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_ADMITTING);
+}
+
+static void CleanupControl(struct ChannelFixture *f, u8 opcode)
+{
+    Next(f, opcode); f->command.commandSeq = 1;
+    f->command.length = opcode == MP_BATTLE_ADMISSION_CANCEL_READY ? 52 : 84;
+    memcpy(f->command.data, f->binding.generation, 16);
+    memcpy(f->command.data + 16, f->binding.players[0], 16); f->command.data[32] = 91;
+    PutWord(f->command.data + 48, f->binding.leases[0]);
+    if (f->command.length == 84) memset(f->command.data + 52, 0xA5, 32);
+}
+
+TEST("Multiplayer cleanup: READY is observational and exact HOLD survives renewed lease until fresh saver handoff")
+{
+    struct ChannelFixture f;
+    struct MultiplayerBattleControl ready, hold, handoff;
+    struct Pokemon party[6];
+    rng_value_t rng, rng2;
+    u32 counter;
+    SetUp(&f, 4, 0); f.binding.mode = f.command.phase = MP_BATTLE_PHASE_FULL_MULTI; f.binding.reserved = 1;
+    CleanupSaveBind(&f, f.command.sessionEpoch, 2); CleanupAdmit(&f, 77);
+    memcpy(party, gParties[B_TRAINER_PLAYER], sizeof(party));
+    rng = gRngValue; rng2 = gRng2Value; counter = gSaveCounter;
+    CleanupControl(&f, MP_BATTLE_ADMISSION_CANCEL_READY); ready = f.command;
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK); EXPECT_EQ(gMultiplayerBattleMailbox.response.length, 52);
+    EXPECT(!memcmp((const void *)gMultiplayerBattleMailbox.response.data, ready.data, 52));
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_ADMITTING); EXPECT_EQ(gMultiplayerBattleHoldFlags, 2);
+    EXPECT_EQ(f.lastSuccessfulSequence, 0);
+    f.command.data[32]++; EXPECT_EQ(SubmitResume(&f), MP_BATTLE_SESSION);
+    f.command = ready; f.command.incarnation++; EXPECT_EQ(SubmitResume(&f), MP_BATTLE_SESSION);
+    f.command = ready; f.command.data[48]++; EXPECT_EQ(SubmitResume(&f), MP_BATTLE_MALFORMED);
+    f.command = ready; f.command.phase = MP_BATTLE_PHASE_SINGLES; EXPECT_EQ(SubmitResume(&f), MP_BATTLE_SESSION);
+    f.command = ready;
+    CleanupControl(&f, MP_BATTLE_ADMISSION_CANCEL_HOLD); f.command.sessionEpoch += 1; hold = f.command;
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK); EXPECT_EQ(gMultiplayerBattleMailbox.response.length, 84);
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_IDLE); EXPECT_EQ(gMultiplayerBattleHoldFlags, 32);
+    EXPECT(MultiplayerBattle_SkipCallbacks()); EXPECT(gSoftResetDisabled);
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+    f.command.data[52] ^= 1; EXPECT_EQ(SubmitResume(&f), MP_BATTLE_ORDER);
+    f.command = hold; f.command.sessionEpoch--; EXPECT_EQ(SubmitResume(&f), MP_BATTLE_SESSION);
+    f.command = hold; f.command.battleId[0]++; EXPECT_EQ(SubmitResume(&f), MP_BATTLE_ORDER);
+    Next(&f, MP_BATTLE_QUERY); f.command.battleId[0] = hold.battleId[0];
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK); EXPECT_EQ(Word(gMultiplayerBattleMailbox.response.data), 1025);
+    EXPECT_EQ(Word(gMultiplayerBattleMailbox.response.data + 24), 0);
+    f.command = hold;
+    f.command.opcode = MP_BATTLE_ADMISSION_CANCEL_HANDOFF; EXPECT_EQ(SubmitResume(&f), MP_BATTLE_SESSION);
+    EXPECT_EQ(gMultiplayerBattleHoldFlags, 32); // Old save binding cannot thaw the renewed lease.
+    CleanupSaveBind(&f, f.command.sessionEpoch, 4);
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK); handoff = f.command;
+    EXPECT(!MultiplayerBattle_PauseClocks()); EXPECT(!gSoftResetDisabled);
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+    f.command = hold; EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+    EXPECT(!MultiplayerBattle_PauseClocks()); EXPECT_EQ(f.lastSuccessfulSequence, 0);
+    EXPECT_EQ(memcmp(&gRngValue, &rng, sizeof(rng)), 0); EXPECT_EQ(memcmp(&gRng2Value, &rng2, sizeof(rng2)), 0); EXPECT_EQ(gSaveCounter, counter);
+    EXPECT(!memcmp(party, gParties[B_TRAINER_PLAYER], sizeof(party)));
+    Next(&f, MP_BATTLE_ADMIT); f.command.length = 48; memcpy(f.command.data, ready.data, 48);
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_SESSION); // Canceled identity cannot return even after handoff.
+    Next(&f, MP_BATTLE_BIND); f.command.commandSeq = 1; f.command.length = sizeof(f.binding);
+    f.binding.leases[0] = f.command.sessionEpoch; memcpy(f.command.data, &f.binding, sizeof(f.binding));
+    EXPECT_EQ(Submit(&f), MP_BATTLE_SESSION);
+    f.command.battleId[0]++; f.binding.generation[0]++; memcpy(f.command.data, &f.binding, sizeof(f.binding));
+    EXPECT_EQ(Submit(&f), MP_BATTLE_OK); EXPECT(MultiplayerBattle_IsActive());
+    f.command = hold; EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+    f.command = handoff; EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+    EXPECT(MultiplayerBattle_IsActive()); EXPECT(MultiplayerBattle_PauseClocks()); EXPECT(gSoftResetDisabled);
+    TearDown(&f);
+}
+
+TEST("Multiplayer cleanup: stale party or a full BIND cannot acquire neutral cleanup authority")
+{
+    struct ChannelFixture f;
+    struct MultiplayerBattleControl ready;
+    struct Pokemon party[6];
+    SetUp(&f, 4, 0); f.binding.mode = f.command.phase = MP_BATTLE_PHASE_FULL_MULTI; f.binding.reserved = 1;
+    CleanupSaveBind(&f, f.command.sessionEpoch, 2); CleanupAdmit(&f, 77);
+    memcpy(party, gParties[B_TRAINER_PLAYER], sizeof(party));
+    CleanupControl(&f, MP_BATTLE_ADMISSION_CANCEL_READY); ready = f.command;
+    ((u8 *)gParties[B_TRAINER_PLAYER])[0] ^= 1;
+    EXPECT_EQ(SubmitResume(&f), MP_BATTLE_SESSION);
+    CleanupControl(&f, MP_BATTLE_ADMISSION_CANCEL_HOLD); EXPECT_EQ(SubmitResume(&f), MP_BATTLE_SESSION);
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_ADMITTING); EXPECT_EQ(gMultiplayerBattleHoldFlags, 2);
+    memcpy(gParties[B_TRAINER_PLAYER], party, sizeof(party));
+    Next(&f, MP_BATTLE_BIND); f.command.commandSeq = 1; f.command.length = sizeof(f.binding);
+    memcpy(f.command.data, &f.binding, sizeof(f.binding)); EXPECT_EQ(Submit(&f), MP_BATTLE_OK);
+    f.command = ready; EXPECT_NE(SubmitResume(&f), MP_BATTLE_OK);
+    CleanupControl(&f, MP_BATTLE_ADMISSION_CANCEL_HOLD); EXPECT_NE(SubmitResume(&f), MP_BATTLE_OK);
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_CHANNEL); EXPECT_EQ(f.lastSuccessfulSequence, 1);
+    EXPECT(MultiplayerBattle_IsActive()); EXPECT(gSoftResetDisabled);
+    TearDown(&f);
+}
+
+TEST("Multiplayer cleanup: 32 retained identities refuse a 33rd before Enter and leave an existing admission continuable")
+{
+    struct ChannelFixture f;
+    struct MultiplayerBattleControl first, last;
+    struct MultiplayerMenuScreen screen = {0};
+    struct Pokemon party[6];
+    rng_value_t rng;
+    u32 counter;
+    SetUp(&f, 4, 0); f.binding.mode = f.command.phase = MP_BATTLE_PHASE_FULL_MULTI; f.binding.reserved = 1;
+    CleanupSaveBind(&f, f.command.sessionEpoch, 2);
+    for (u32 i = 0; i < 32; i++)
+    {
+        EXPECT(MultiplayerBattle_CanEnterAdmission()); CleanupAdmit(&f, 77 + i);
+        CleanupControl(&f, MP_BATTLE_ADMISSION_CANCEL_READY); EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+        CleanupControl(&f, MP_BATTLE_ADMISSION_CANCEL_HOLD); EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+        if (!i) first = f.command;
+        last = f.command;
+        CleanupControl(&f, MP_BATTLE_ADMISSION_CANCEL_READY); EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
+        f.command = last; f.command.opcode = MP_BATTLE_ADMISSION_CANCEL_HANDOFF;
+        EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK); EXPECT(!MultiplayerBattle_PauseClocks());
+    }
+    EXPECT(!MultiplayerBattle_CanEnterAdmission());
+    MultiplayerBattle_Init(); // Production mailbox reinitialization cannot evict tombstones.
+    EXPECT(!MultiplayerBattle_CanEnterAdmission());
+    MultiplayerMenu_Init(); EXPECT(MultiplayerMenu_TestBegin());
+    screen.ackRequest = 1; screen.screen = 1; screen.count = 1; screen.rows[0].action = 1;
+    screen.reserved[0] = 1; memcpy(screen.title, "Players", 8); memcpy(screen.rows[0].label, "Enter", 6);
+    gMultiplayerMenuMailbox.screen = screen; gMultiplayerMenuMailbox.inboundGeneration = 2;
+    MultiplayerMenu_TestReadScreen(); MultiplayerMenu_TestInput(A_BUTTON);
+    EXPECT_EQ(gMultiplayerMenuMailbox.request.sequence, 1); EXPECT_EQ(gMultiplayerMenuMailbox.request.kind, MP_MENU_OPEN);
+    EXPECT(!MultiplayerMenu_IsBattleAdmissionHeld()); EXPECT(!MultiplayerBattle_PauseClocks()); EXPECT(!gSoftResetDisabled);
+    MultiplayerMenu_TestInput(B_BUTTON); EXPECT(!MultiplayerMenu_IsActive());
+    EXPECT_EQ(gMultiplayerMenuMailbox.request.kind, MP_MENU_CLOSE); MultiplayerMenu_Init();
+    f.command = first; EXPECT_EQ(SubmitResume(&f), MP_BATTLE_ORDER);
+    f.command = last; EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK); EXPECT(!MultiplayerBattle_PauseClocks());
+    CleanupAdmit(&f, 109); // Native legacy ADMIT can still continue, never be revoked at capacity.
+    memcpy(party, gParties[B_TRAINER_PLAYER], sizeof(party)); rng = gRngValue; counter = gSaveCounter;
+    CleanupControl(&f, MP_BATTLE_ADMISSION_CANCEL_READY); EXPECT_EQ(SubmitResume(&f), MP_BATTLE_ORDER);
+    CleanupControl(&f, MP_BATTLE_ADMISSION_CANCEL_HOLD); EXPECT_EQ(SubmitResume(&f), MP_BATTLE_ORDER);
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_ADMITTING); EXPECT_EQ(gMultiplayerBattleHoldFlags, 2);
+    EXPECT_EQ(memcmp(&gRngValue, &rng, sizeof(rng)), 0); EXPECT_EQ(gSaveCounter, counter); EXPECT_EQ(f.lastSuccessfulSequence, 0);
+    EXPECT(!memcmp(party, gParties[B_TRAINER_PLAYER], sizeof(party)));
+    Next(&f, MP_BATTLE_BIND); f.command.commandSeq = 1; f.command.length = sizeof(f.binding);
+    memcpy(f.command.data, &f.binding, sizeof(f.binding)); EXPECT_EQ(Submit(&f), MP_BATTLE_OK);
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_CHANNEL);
     TearDown(&f);
 }

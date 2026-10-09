@@ -113,6 +113,10 @@ FarawayIsland_Interior_Movement_MewFloatUpEast:
 FarawayIsland_Interior_EventScript_Mew::
 	lock
 	faceplayer
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerStaticReset_CaptureMew
+	goto_if_eq VAR_RESULT, FALSE, FarawayIsland_Interior_EventScript_MewResetRelease
+#endif
 	applymovement LOCALID_FARAWAY_ISLAND_MEW, FarawayIsland_Interior_Movement_MewAppear
 	waitmovement 0
 	setvar VAR_0x8004, 0
@@ -127,10 +131,23 @@ FarawayIsland_Interior_EventScript_Mew::
 	special DestroyMewEmergingGrassSprite
 	delay 40
 	waitmoncry
+#if MP_LOCAL_RESET_STATIC || TESTING
+FarawayIsland_Interior_EventScript_MewAdmission::
+	special MultiplayerStaticReset_BeginCurrent
+	goto_if_ne VAR_RESULT, MP_LOCAL_RESET_ADMISSION_PENDING, FarawayIsland_Interior_EventScript_MewAdmissionReady
+	waitstate
+FarawayIsland_Interior_EventScript_MewAdmissionReady::
+	goto_if_eq VAR_RESULT, FALSE, FarawayIsland_Interior_EventScript_MewResetReturn
+#endif
 	seteventmon SPECIES_MEW, 30
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	special BattleSetup_StartLegendaryBattle
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
+#if MP_LOCAL_RESET_STATIC || TESTING
+	special MultiplayerLocalReset_ConsumeResult
+	goto_if_eq VAR_RESULT, TRUE, FarawayIsland_Interior_EventScript_MewResetReturn
+	special MultiplayerStaticReset_ForgetMew
+#endif
 	specialvar VAR_RESULT, GetBattleOutcome
 	goto_if_eq VAR_RESULT, B_OUTCOME_WON, FarawayIsland_Interior_EventScript_MewDefeated
 	goto_if_eq VAR_RESULT, B_OUTCOME_RAN, FarawayIsland_Interior_EventScript_PlayerOrMewRan
@@ -139,6 +156,15 @@ FarawayIsland_Interior_EventScript_Mew::
 	setflag FLAG_CAUGHT_MEW
 	release
 	end
+
+#if MP_LOCAL_RESET_STATIC || TESTING
+FarawayIsland_Interior_EventScript_MewResetReturn::
+	special MultiplayerStaticReset_ReturnTicketSource
+FarawayIsland_Interior_EventScript_MewResetRelease::
+	closemessage
+	release
+	end
+#endif
 
 FarawayIsland_Interior_EventScript_MewDefeated::
 	setflag FLAG_DEFEATED_MEW
