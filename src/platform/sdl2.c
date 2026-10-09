@@ -134,10 +134,9 @@ static void PerfLog_Presented(Uint64 start, Uint64 end)
     if (end - sPerfWindowStart < 5 * frequency)
         return;
     seconds = (double)(end - sPerfWindowStart) / frequency;
-    printf("perf: %.1f game fps, %.1f presented fps, %.2f ms per present\n",
-           sPerfGameFrames / seconds, sPerfPresents / seconds,
-           (double)sPerfPresentTicks * 1000.0 / frequency / sPerfPresents);
-    fflush(stdout);
+    SDL_Log("perf: %.1f game fps, %.1f presented fps, %.2f ms per present",
+            sPerfGameFrames / seconds, sPerfPresents / seconds,
+            (double)sPerfPresentTicks * 1000.0 / frequency / sPerfPresents);
     sPerfGameFrames = 0;
     sPerfPresents = 0;
     sPerfPresentTicks = 0;

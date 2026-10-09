@@ -238,6 +238,7 @@ static void CaptureSurveyFrame(int width, int height,
 }
 static u8 sUiTransientHoldFrames;
 
+#undef RGB // windows.h (via the GL headers) defines its own
 #define RGB(r, g, b) (0xFF000000u | ((u32)(r) << 16) | ((u32)(g) << 8) | (u32)(b))
 #define RGBA(r, g, b, a) (((u32)(a) << 24) | ((u32)(r) << 16) | ((u32)(g) << 8) | (u32)(b))
 
