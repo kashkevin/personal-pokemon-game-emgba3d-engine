@@ -63,6 +63,12 @@ size_t GameMemory_BssSize(void)
 
 void GameMemory_Snapshot(void)
 {
+#ifdef NATIVE_ASAN
+    // AddressSanitizer build: the sections contain poisoned redzones between
+    // globals, so whole-section copies are not possible; soft reset is disabled
+    // (SoftReset exits instead) in that development build.
+    return;
+#endif
     sGameDataSize = GameMemory_DataSize();
     sGameBssSize = GameMemory_BssSize();
     free(sInitialGameData);

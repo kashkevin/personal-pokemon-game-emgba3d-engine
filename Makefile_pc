@@ -17,6 +17,9 @@ NATIVE_LINUX ?= 0
 DEBUG        ?= 0
 # SANITIZE=1 (Linux only): UBSan on game code to find GBA-only behaviour
 # (shifts by 32+, NULL dereferences, out-of-bounds indexes). Development only.
+# SANITIZE=address (Linux only): AddressSanitizer on game and renderer code to
+# find out-of-range reads and writes the GBA tolerates (global/stack overflows).
+# Soft reset is disabled in that build (it copies whole sections, redzones and all).
 SANITIZE     ?= 0
 
 # GBA PPU emulation used for the 2D frame. The shipping Windows build uses the
@@ -29,6 +32,9 @@ ifeq ($(NATIVE_LINUX),1)
   ifeq ($(SANITIZE),1)
     TARGET      := pokeemerald-mp-san
     OBJ_DIR     := build/pc-linux-san
+  else ifeq ($(SANITIZE),address)
+    TARGET      := pokeemerald-mp-asan
+    OBJ_DIR     := build/pc-linux-asan
   else
     TARGET      := pokeemerald-mp
     OBJ_DIR     := build/pc-linux
@@ -95,6 +101,13 @@ ifeq ($(NATIVE_LINUX),1)
                  -fsanitize-recover=all -fno-omit-frame-pointer
     CPPFLAGS  += -DNATIVE_SANITIZE
     LDFLAGS += -fsanitize=shift-exponent,integer-divide-by-zero,null,bounds,vla-bound,unreachable,return
+  else ifeq ($(SANITIZE),address)
+    SAN_FLAGS := -fsanitize=address -fsanitize-recover=address -fno-omit-frame-pointer
+    CPPFLAGS  += -DNATIVE_ASAN
+    LDFLAGS += -fsanitize=address
+    # Platform code instrumented too (renderer, DMA, BIOS, audio), except the
+    # tools that deliberately touch raw memory or install fault handlers.
+    SAN_SKIP := game_memory.c null_trap.c fault_compat.c crash_report.c
   endif
 else
   # Struct layout must match the GBA build (save data, mailboxes, asm-built data):
@@ -127,6 +140,14 @@ MARK_GAME_MEMORY = $(if $(filter $@,$(PRESERVED_OBJS)),true,$(OBJCOPY) $(GAME_SE
 # (make does not track flags, and objects are marked when they are built).
 # BUILD_CONFIG_ID is completed below, once all flags are known.
 BUILD_CONFIG_STAMP := $(OBJ_DIR)/build_config.stamp
+
+# Sanitizer flags for the object being built: UBSan covers game code only;
+# AddressSanitizer covers game and platform code except SAN_SKIP.
+ifeq ($(SANITIZE),address)
+  SAN_FLAGS_FOR = $(if $(filter $(SAN_SKIP),$(notdir $<)),,$(SAN_FLAGS))
+else
+  SAN_FLAGS_FOR = $(if $(findstring src/platform/,$<),,$(SAN_FLAGS))
+endif
 
 BUILD_CONFIG_ID := $(CC) $(CPPFLAGS) | $(CFLAGS) | $(SAN_FLAGS) | $(ASFLAGS) | $(ASM_TO_X86) | $(GAME_SECTIONS) | $(PRESERVED_OBJS)
 ifneq ($(file <$(BUILD_CONFIG_STAMP)),$(BUILD_CONFIG_ID))
@@ -192,7 +213,7 @@ check-decompress: $(TARGET)
 # strings with preproc, then compile for 32-bit x86.
 $(OBJ_DIR)/src/%.o: src/%.c $(BUILD_CONFIG_STAMP)
 	@echo "CC $<"
-	@$(CC) -E $(CPPFLAGS) -MMD -MP -MF $(@:.o=.d) -MT $@ $< | $(PREPROC) -i -p -g $(ASSETS_DIR) $< charmap.txt | $(CC) $(CFLAGS) $(if $(findstring src/platform/,$<),,$(SAN_FLAGS)) -x cpp-output -c -o $@ -
+	@$(CC) -E $(CPPFLAGS) -MMD -MP -MF $(@:.o=.d) -MT $@ $< | $(PREPROC) -i -p -g $(ASSETS_DIR) $< charmap.txt | $(CC) $(CFLAGS) $(SAN_FLAGS_FOR) -x cpp-output -c -o $@ -
 	@$(MARK_GAME_MEMORY)
 
 # Data: identical preprocessing to the GBA build, then ARM -> x86 GNU-as syntax.

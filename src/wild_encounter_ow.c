@@ -397,7 +397,17 @@ void UpdateOverworldWildEncounter(void)
     };
     u32 objectEventId = GetObjectEventIdByLocalId(infoOWE.localId);
     struct ObjectEvent *owe = &gObjectEvents[objectEventId];
+#ifdef PORTABLE
+    // GetObjectEventIdByLocalId returns OBJECT_EVENTS_COUNT when no object has
+    // this local id; gObjectEvents[OBJECT_EVENTS_COUNT] is the memory after the
+    // array, which RemoveObjectEvent could then overwrite (upstream bug; found by
+    // AddressSanitizer). With no such object there is nothing to replace.
+    if (objectEventId < OBJECT_EVENTS_COUNT && ShouldDespawnGeneratedForNewOWE(owe))
+#else
+#line 400 // gba-line
     if (ShouldDespawnGeneratedForNewOWE(owe))
+#endif
+#line 401 // gba-line
         RemoveObjectEvent(owe);
     objectEventId = SpawnSpecialObjectEvent(&objectEventTemplate);
 
