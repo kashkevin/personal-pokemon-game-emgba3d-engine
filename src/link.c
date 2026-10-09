@@ -2375,6 +2375,13 @@ void ResetRecvBuffer(void)
 
 bool32 ShouldCheckForUnionRoom(void)
 {
+#ifdef PORTABLE
+    // No GBA Wireless Adapter on PC, so the librfu API is never set up
+    // (rfu_initializeAPI fails) and the Pokemon Center Union Room scan would
+    // dereference its NULL state on entry.
+    return FALSE;
+#endif
+#line 2374 // gba-line
     if (OW_UNION_DISABLE_CHECK)
         return FALSE;
 
