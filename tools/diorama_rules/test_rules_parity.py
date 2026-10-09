@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+from compile_rules import ARCHETYPES, CLASS_NAMES, TERRAIN_CLASSES, compile_data
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def assert_generated_parity(testcase: unittest.TestCase, data=None):
+    data = data or compile_data(ROOT)
+    with tempfile.TemporaryDirectory() as directory:
+        driver = Path(directory) / "rules_parity"
+        subprocess.run([
+            "gcc", "-m32", "-std=gnu99", "-Wall", "-Wextra", "-Werror",
+            "-D", "ENABLE_DIORAMA", "-iquote", str(ROOT / "include"),
+            str(ROOT / "tests/diorama/rules_parity_driver.c"),
+            str(ROOT / "src/diorama/rules.c"),
+            str(ROOT / "src/data/diorama/diorama_rules.generated.c"),
+            "-lm", "-o", str(driver),
+        ], check=True, cwd=ROOT)
+        output = subprocess.run([str(driver)], check=True, capture_output=True,
+                                text=True, cwd=ROOT).stdout.splitlines()
+
+    expected = [(layout["id"], record) for layout in data["layouts"]
+                for record in layout["terrainRecords"]]
+    terrain_output = output[:len(expected)]
+    shape_ids = {name: index for index, name in enumerate(
+        ("flat", "extruded", "cliff", "ledge", "stairs", "water", "bridge",
+         "billboard", "cutout", "roof", "building-part", "hidden"))}
+    archetype_ids = {name: index for index, name in enumerate(ARCHETYPES, 1)}
+    terrain_ids = {name: index for index, name in enumerate(TERRAIN_CLASSES, 1)}
+    source_kinds = {"pin:": 1, "behavior:": 3, "pattern:": 7,
+                    "context:": 8, "animation:": 10}
+    for line, (layout_id, record) in zip(terrain_output, expected):
+        fields = line.split("\t")
+        testcase.assertEqual(len(fields), 41)
+        source_kind = next((value for prefix, value in source_kinds.items()
+                            if record["source"].startswith(prefix)), 6)
+        exact = [
+            layout_id, record["cellOffset"], record["expectedMetatile"],
+            record["mapGroup"], record["mapNumber"], record["class"],
+            record["heightQ16"], record["artMode"], record["pool"],
+            int(record["authored"]), record["source"],
+        ]
+        testcase.assertEqual(fields[:11], [str(value) for value in exact])
+        testcase.assertAlmostEqual(float(fields[11]), record["confidence"], places=6)
+        pixel_object = next((obj for obj in data["pixelObjects"]
+                             if obj["layoutId"] == layout_id
+                             and obj["structureId"] == record["structureId"]
+                             and ((obj["mapGroup"], obj["mapNumber"])
+                                  == (record["mapGroup"], record["mapNumber"])
+                                  or (obj["mapGroup"], obj["mapNumber"]) == (255, 255))), None)
+        tail = [
+            record["evidenceFlags"], "|".join(record["evidence"]),
+            record["ambiguityFlags"], "|".join(record["ambiguity"]),
+            ({"replacement": 1, "source-base": 2}[pixel_object["groundMode"]]
+             if pixel_object is not None else int(record["propGroundMode"] == "manual")),
+            (pixel_object["groundMetatile"] if pixel_object is not None
+             else record["propGroundMetatile"]),
+            shape_ids[record["shape"]], archetype_ids[record["archetype"]],
+            terrain_ids[record["terrainClass"]], source_kind,
+            {"x": 0, "z": 1, "cross": 2}[record["axis"]],
+            record["cliffEdgeMask"], record["cliffBaseMask"],
+            record["cliffTransitionMask"], record["cliffCornerMask"],
+            record["claimOwner"], record["regionId"], record["structureId"],
+            record["structureTemplateId"], record["structureX"], record["structureY"],
+            record["structureWidth"], record["structureHeight"],
+            record["structureLocalX"], record["structureLocalY"],
+            {"none": 0, "template": 1, "authored-special": 2,
+             "prop-candidate": 3, "generic-volume": 4, "region": 5}[record["ownerKind"]],
+            int(record["doorFold"]),
+            {"none": 0, "transparent": 1, "black": 2}[record["voidKind"]],
+            record["structurePriority"],
+        ]
+        testcase.assertEqual(fields[12:], [str(value) for value in tail])
+
+    generated = iter(output[len(expected):])
+    pool_ids = {row["id"]: index for index, row in enumerate(data["pools"], 1)}
+    class_ids = {name: index for index, name in enumerate(CLASS_NAMES, 1)}
+    for obj in data["pixelObjects"]:
+        fields = next(generated).split("\t")
+        testcase.assertEqual(fields[:20], [str(value) for value in [
+            "O", obj["id"], obj["structureId"], obj["supportStructureId"],
+            obj["layoutId"], obj["groundMetatile"], obj["spriteDepthBiasMillionths"],
+            obj["mapGroup"], obj["mapNumber"], {"cutout": 1, "relief": 2}[obj["kind"]],
+            pool_ids[obj["pool"]], class_ids[obj["class"]], obj["componentCount"],
+            obj["width"], obj["height"],
+            {"replacement": 1, "source-base": 2}[obj["groundMode"]],
+            obj["supportOffsetQ16"], len(obj["pixels"]),
+            sum(len(previous["maskRows"]) for previous in data["pixelObjects"]
+                if previous["id"] < obj["id"]), len(obj["maskRows"]),
+        ]])
+        testcase.assertEqual(fields[20:], [format(value, "x") for value in obj["maskRows"]])
+        for index, pixel in enumerate(obj["pixels"]):
+            testcase.assertEqual(next(generated).split("\t"), [str(value) for value in [
+                "P", obj["id"], index, pixel["sourceCellOffset"],
+                pixel["expectedMetatile"], pixel["expectedTileEntry"], pixel["sourceTile"],
+                pixel["xQ32"], pixel["yQ32"], pixel["zQ32"], pixel["sizeXQ32"],
+                pixel["sizeYQ32"], pixel["sizeZQ32"], pixel["sourceLayer"],
+                pixel["sourceSubtile"], pixel["sourcePalette"], pixel["sourceColor"],
+                pixel["sourceU"], pixel["sourceV"], pixel["sourceX"], pixel["sourceY"],
+                pixel["component"],
+            ]])
+    testcase.assertEqual(list(generated), [])
+
+
+class GeneratedRulesParityTests(unittest.TestCase):
+    def test_every_compiled_classifier_record_matches_c(self):
+        assert_generated_parity(self)
+
+
+if __name__ == "__main__":
+    unittest.main()

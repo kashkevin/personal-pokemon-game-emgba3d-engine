@@ -18,6 +18,10 @@ extern u16 gTotalCameraPixelOffsetY;
 void DrawWholeMapView(void);
 void CurrentMapDrawMetatileAt(int x, int y);
 void GetCameraOffsetWithPan(s16 *x, s16 *y);
+#ifdef ENABLE_DIORAMA
+void GetCameraPan(s16 *x, s16 *y);
+#endif
+#line 21 // gba-line
 void DrawDoorMetatileAt(int x, int y, u16 *tiles);
 void ResetFieldCamera(void);
 void ResetCameraUpdateInfo(void);

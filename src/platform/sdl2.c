@@ -105,6 +105,45 @@ extern bool32 GameMemory_Reset(void);
 
 static jmp_buf sGameResetPoint; // where the game thread restarts after a soft reset
 
+// Optional frame-rate log (PKMN_PERF_LOG=1): every 5 seconds, game frames and
+// presented frames per second and the average time spent drawing and presenting.
+static bool8 sPerfLog;
+static u32 sPerfGameFrames;
+static u32 sPerfPresents;
+static Uint64 sPerfPresentTicks;
+static Uint64 sPerfWindowStart;
+
+static void PerfLog_Init(void)
+{
+    const char *value = SDL_getenv("PKMN_PERF_LOG");
+
+    sPerfLog = value != NULL && value[0] == '1';
+    sPerfWindowStart = SDL_GetPerformanceCounter();
+}
+
+static void PerfLog_Presented(Uint64 start, Uint64 end)
+{
+    Uint64 frequency;
+    double seconds;
+
+    if (!sPerfLog)
+        return;
+    sPerfPresents++;
+    sPerfPresentTicks += end - start;
+    frequency = SDL_GetPerformanceFrequency();
+    if (end - sPerfWindowStart < 5 * frequency)
+        return;
+    seconds = (double)(end - sPerfWindowStart) / frequency;
+    printf("perf: %.1f game fps, %.1f presented fps, %.2f ms per present\n",
+           sPerfGameFrames / seconds, sPerfPresents / seconds,
+           (double)sPerfPresentTicks * 1000.0 / frequency / sPerfPresents);
+    fflush(stdout);
+    sPerfGameFrames = 0;
+    sPerfPresents = 0;
+    sPerfPresentTicks = 0;
+    sPerfWindowStart = end;
+}
+
 int main(int argc, char **argv)
 {
     FaultCompat_Init(); // GBA results for integer division by zero
@@ -316,6 +355,7 @@ int main(int argc, char **argv)
     // a soft reset can restore it (src/platform/game_memory.c).
     GameMemory_Snapshot();
     mainLoopThread = SDL_CreateThread(DoMain, "AgbMain", NULL);
+    PerfLog_Init();
 
     double accumulator = 0.0;
 
@@ -419,6 +459,7 @@ int main(int argc, char **argv)
                     }
 
                     SDL_SemPost(vBlankSemaphore);
+                    sPerfGameFrames++;
 
                     accumulator -= dt;
                 }
@@ -426,6 +467,7 @@ int main(int argc, char **argv)
         }
 
 #ifndef __ANDROID__
+        Uint64 presentStart = SDL_GetPerformanceCounter();
 #ifdef ENABLE_DIORAMA
         double renderStep = fixedTimestep / timeScale;
         float frameAlpha = renderStep > 0.0 ? accumulator / renderStep : 1.0f;
@@ -439,6 +481,7 @@ int main(int argc, char **argv)
 #else
         SDL_RenderPresent(sdlRenderer);
 #endif
+        PerfLog_Presented(presentStart, SDL_GetPerformanceCounter());
 #endif
     }
 
@@ -505,7 +548,7 @@ static void ReadConfigFile(void)
             sBackgroundOrderVersion = value;
         else if (sscanf(line, "fullscreen=%u", &value) == 1)
             sPlatformSettings[PLATFORM_SETTING_FULLSCREEN] = value != 0;
-        else if (sscanf(line, "windowScale=%u", &value) == 1 && value >= 2 && value <= 5)
+        else if (sscanf(line, "windowScale=%u", &value) == 1 && value >= 2 && value <= 6) // 6 = 1920x1080
             sPlatformSettings[PLATFORM_SETTING_WINDOW_SCALE] = value;
         else if (sscanf(line, "integerScale=%u", &value) == 1)
             sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE] = value != 0;
@@ -1134,6 +1177,11 @@ void ProcessEvents(void)
                         DioramaGL_EndSurvey();
 #endif
                 }
+                break;
+            case SDLK_F11:
+                if (event.key.repeat == 0)
+                    Platform_SetSetting(PLATFORM_SETTING_FULLSCREEN,
+                                        !sPlatformSettings[PLATFORM_SETTING_FULLSCREEN]);
                 break;
             case SDLK_SPACE:
                 if (!speedUp)

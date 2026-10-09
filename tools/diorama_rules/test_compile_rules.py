@@ -1,0 +1,416 @@
+#!/usr/bin/env python3
+
+import copy
+import hashlib
+import json
+import struct
+import tempfile
+import unittest
+from collections import Counter
+from pathlib import Path
+from types import SimpleNamespace
+from compile_rules import (ARCHETYPES, RuleError, _action, _ground_policy, _mask,
+                              _pattern_placements, _patterns, _profiles, _selector,
+                              _validate_logical_ids, _validate_pattern_claim_overlaps,
+                              _validate_pixel_object_catalog,
+                             compile_data, load_json, parse_camera, render_c, render_header)
+from migrate_v1_to_v2 import MigrationError, migrate_document
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+class DioramaRuleCompilerTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.data = compile_data(ROOT)
+
+    def test_repository_ir_is_complete_and_deterministic(self):
+        second = compile_data(ROOT)
+        self.assertEqual(self.data, second)
+        self.assertEqual(render_c(self.data), render_c(second))
+        self.assertEqual(len(self.data["tilesets"]), 75)
+        self.assertEqual([row["id"] for row in self.data["tilesets"]], list(range(1, 76)))
+        self.assertEqual(len(self.data["layouts"]), 441)
+        self.assertEqual(sum(row["width"] * row["height"] for row in self.data["layouts"]),
+                         sum(record["mapGroup"] == 0xFF for row in self.data["layouts"]
+                             for record in row["terrainRecords"]))
+        self.assertEqual([row["id"] for row in self.data["layouts"]], list(range(1, 442)))
+        self.assertEqual(len(self.data["maps"]), 518)
+        self.assertEqual(len(self.data["tilesets"]), 75)
+        self.assertEqual({row["terrainClass"] for row in self.data["tilesets"]},
+                         {"ground"})
+        self.assertEqual(sum(row["supported"] for row in self.data["maps"]), 518)
+        references = {"MAP_FORTREE_CITY", "MAP_SOOTOPOLIS_CITY", "MAP_MT_CHIMNEY",
+                      "MAP_JAGGED_PASS", "MAP_GRANITE_CAVE_B1F", "MAP_MT_PYRE_2F"}
+        self.assertTrue(references <= {row["symbol"] for row in self.data["maps"]
+                                      if row["supported"]})
+        indoor = next(row for row in self.data["maps"]
+                      if row["mapType"] == "MAP_TYPE_INDOOR"
+                      and row["symbol"] not in {"MAP_LITTLEROOT_TOWN_BRENDANS_HOUSE_1F",
+                                                "MAP_LITTLEROOT_TOWN_BRENDANS_HOUSE_2F",
+                                                "MAP_LITTLEROOT_TOWN_MAYS_HOUSE_1F",
+                                                "MAP_LITTLEROOT_TOWN_MAYS_HOUSE_2F",
+                                                "MAP_LITTLEROOT_TOWN_PROFESSOR_BIRCHS_LAB"})
+        self.assertEqual(indoor["camera"]["profile"], "interior")
+        self.assertTrue(all(row["unsupportedReason"] for row in self.data["maps"]
+                            if not row["supported"]))
+
+    def test_repository_layouts_have_compiled_classifier_terrain(self):
+        for layout in self.data["layouts"]:
+            self.assertGreater(layout["width"], 0)
+            self.assertGreater(layout["height"], 0)
+        self.assertGreater(sum(row["terrainRecordCount"] for row in self.data["layouts"]), 0)
+        self.assertTrue(self.data["ambiguities"])
+        self.assertEqual(render_c(self.data), render_c(compile_data(ROOT)))
+
+    def test_repository_has_authoritative_pin_and_r3_r4_patterns(self):
+        self.assertEqual(self.data["profiles"], [])
+        self.assertEqual([(row["behavior"], row["action"]["archetype"],
+                           row["action"]["height"])
+                          for row in self.data["behaviorRules"]],
+                         [("MB_MOUNTAIN_TOP", "cliff", 1.0)])
+        self.assertEqual([row["id"] for row in self.data["contextualRules"]],
+                         ["general-rock-terrace-cell", "general-dense-forest-cell"])
+        placements = {row["id"]: row["placementCount"]
+                      for row in self.data["exactPatterns"]}
+        self.assertTrue(all(placements[name] > 0 for name in (
+            "general-large-tree-canonical", "general-tree-body-canonical",
+            "general-small-tree-canonical")))
+        self.assertEqual({name: placements[name] for name in (
+            "petalburg-lab-shell", "petalburg-house-left-shell",
+            "petalburg-house-right-shell", "pokemon-center-service-counter",
+            "generic-building-potted-plant", "brendan-tv-support", "may-tv-support",
+            "brendan-tv-cutout", "may-tv-cutout", "brendan-tv-base", "may-tv-base",
+            "generic-building-left-stool", "generic-building-right-stool",
+            "generic-building-table-relief", "petalburg-isolated-signpost")}, {
+                "petalburg-lab-shell": 1, "petalburg-house-left-shell": 1,
+                "petalburg-house-right-shell": 1, "pokemon-center-service-counter": 3,
+                "generic-building-potted-plant": 5, "brendan-tv-support": 1,
+                "may-tv-support": 1, "brendan-tv-cutout": 1, "may-tv-cutout": 1,
+                "brendan-tv-base": 1, "may-tv-base": 1,
+                "generic-building-left-stool": 6, "generic-building-right-stool": 10,
+                "generic-building-table-relief": 1, "petalburg-isolated-signpost": 2,
+            })
+        self.assertEqual(len(self.data["tilesetPins"]), 1)
+        pin = self.data["tilesetPins"][0]
+        self.assertEqual((pin["tileset"], pin["metatile"], pin["placementCount"]),
+                         ("gTileset_General", 4, 615))
+        self.assertEqual((pin["action"]["archetype"], pin["action"]["pool"]),
+                         ("flower", "vegetation"))
+        self.assertIn("General_Flower", pin["reason"])
+        self.assertTrue(all(row["contextualRules"] == [] for row in self.data["maps"]))
+        self.assertTrue(all(row["exactPatterns"] == [] for row in self.data["maps"]))
+
+    def test_repository_mountains_are_one_block_art_masked_cliffs(self):
+        mountains = [record for layout in self.data["layouts"]
+                     for record in layout["terrainRecords"]
+                     if record["source"] == "behavior:MB_MOUNTAIN_TOP"]
+        self.assertGreater(len(mountains), 20000)
+        self.assertEqual({record["class"] for record in mountains}, {"cliff"})
+        self.assertEqual({record["heightQ16"] for record in mountains}, {16})
+        self.assertEqual({record["measuredFlags"] for record in mountains}, {32})
+        self.assertEqual({record["artMode"] for record in mountains}, {"top"})
+
+    def test_sha256_is_canonical_and_covers_every_ir_section(self):
+        canonical_keys = ("schemaVersion", "tilesets", "layouts", "pools", "profiles", "default",
+                           "behaviorRules", "tilesetPins", "contextualRules", "exactPatterns",
+                           "maps", "structureCandidates", "pixelObjects",
+                           "evidenceDetails", "ambiguities",
+                           "classifierSources")
+        canonical = {key: self.data[key] for key in canonical_keys}
+        encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":"),
+                             ensure_ascii=True).encode("ascii")
+        self.assertEqual(self.data["sha256"], hashlib.sha256(encoded).hexdigest())
+        self.assertEqual(len(self.data["sha256"]), 64)
+        changed = copy.deepcopy(canonical)
+        changed["tilesets"][0]["terrainClass"] = "rock"
+        changed_hash = hashlib.sha256(json.dumps(changed, sort_keys=True, separators=(",", ":"),
+                                                  ensure_ascii=True).encode("ascii")).hexdigest()
+        self.assertNotEqual(changed_hash, self.data["sha256"])
+
+    def test_all_g3_archetypes_are_closed(self):
+        self.assertEqual(len(ARCHETYPES), len(set(ARCHETYPES)))
+        self.assertIn("ground", ARCHETYPES)
+        self.assertIn("stairs-down-w", ARCHETYPES)
+        self.assertIn("animated-cutout", ARCHETYPES)
+        with self.assertRaisesRegex(RuleError, "unknown archetype"):
+            _action({"archetype": "sphere", "pool": "terrain"}, "test", {"terrain"}, {})
+
+    def test_action_heights_align_to_voxel_grid(self):
+        action = _action({"archetype": "ground", "pool": "terrain",
+                          "groundOffset": -0.125, "height": 0.375},
+                         "test", {"terrain"}, {})
+        self.assertEqual(action["height"], 0.375)
+        with self.assertRaisesRegex(RuleError, "1/16-cell"):
+            _action({"archetype": "ground", "pool": "terrain", "height": 0.1},
+                    "test", {"terrain"}, {})
+
+    def test_action_terrain_class_is_closed(self):
+        action = _action({"archetype": "ground", "pool": "terrain",
+                          "terrainClass": "pavement"}, "test", {"terrain"}, {})
+        self.assertEqual(action["terrainClass"], "pavement")
+        with self.assertRaisesRegex(RuleError, "unknown terrain class"):
+            _action({"archetype": "ground", "pool": "terrain",
+                     "terrainClass": "generic-stuff"}, "test", {"terrain"}, {})
+
+    def test_action_shape_can_override_archetype_geometry(self):
+        action = _action({"shape": "cliff", "archetype": "rock", "pool": "prop",
+                          "terrainClass": "rock", "height": 1},
+                         "test", {"prop"}, {})
+        self.assertEqual(action["shape"], "cliff")
+        self.assertEqual(action["archetype"], "rock")
+        with self.assertRaisesRegex(RuleError, "unknown shape"):
+            _action({"shape": "sphere", "archetype": "rock", "pool": "prop"},
+                    "test", {"prop"}, {})
+
+    def test_action_face_materials_are_closed(self):
+        action = _action({"archetype": "cliff", "pool": "terrain",
+                          "faces": {"top": {"metatile": "self", "layer": "base",
+                                             "rotation": 90, "flipX": True},
+                                    "south": {"metatile": 23, "layer": "full"},
+                                    "north": "none"}},
+                         "test", {"terrain"}, {})
+        self.assertEqual(action["faces"]["south"]["metatile"], 23)
+        self.assertEqual(action["faces"]["north"], "none")
+        self.assertEqual(action["faces"]["top"]["rotation"], 90)
+        self.assertTrue(action["faces"]["top"]["flipX"])
+        with self.assertRaisesRegex(RuleError, "unknown fields"):
+            _action({"archetype": "ground", "pool": "terrain",
+                     "faces": {"bottom": "none"}}, "test", {"terrain"}, {})
+
+    def test_rejects_v1_and_duplicate_json_keys(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "rules.json"
+            path.write_text('{"version":1}', encoding="utf-8")
+            with self.assertRaisesRegex(RuleError, "schemaVersion must be 2"):
+                load_json(path)
+            path.write_text('{"schemaVersion":2,"kind":"global","kind":"map"}', encoding="utf-8")
+            with self.assertRaisesRegex(RuleError, "duplicate key"):
+                load_json(path)
+
+    def test_profile_masks_samples_ranges_and_references(self):
+        tilesets = {"gTileset_Test": SimpleNamespace(metatile_count=2)}
+        values = [{"id": "tree-profile", "archetype": "tree",
+                   "masks": {"occupancy": {"width": 3, "height": 1, "rows": ["7"]}},
+                   "samples": [{"tileset": "gTileset_Test", "metatile": 1, "layer": "full"}]}]
+        profiles, by_id = _profiles(values, "profiles", tilesets)
+        self.assertEqual(profiles[0]["masks"]["occupancy"]["rows"], ["7"])
+        self.assertIn("tree-profile", by_id)
+        bad = copy.deepcopy(values)
+        bad[0]["samples"][0]["metatile"] = 2
+        with self.assertRaisesRegex(RuleError, "0 through 1"):
+            _profiles(bad, "profiles", tilesets)
+        with self.assertRaisesRegex(RuleError, "outside mask width"):
+            _mask({"width": 3, "height": 1, "rows": ["f"]}, "mask")
+
+    def test_context_selector_accepts_every_context_dimension(self):
+        tilesets = {"gTileset_Test": object()}
+        behaviors = {"MB_NORMAL": 0}
+        selector = _selector({
+            "tilesets": ["gTileset_Test"], "metatiles": [4], "behaviors": ["MB_NORMAL"],
+            "layerTypes": ["split"], "elevations": [3], "mapTypes": ["MAP_TYPE_ROUTE"],
+            "neighbors": {"n": {"behavior": "MB_NORMAL", "layerType": "normal",
+                                  "elevation": 2, "metatile": 7}},
+            "event": {"kind": "object", "class": "berry-tree"},
+        }, "selector", tilesets, behaviors)
+        self.assertEqual(set(selector["neighbors"]), {"n"})
+        self.assertEqual(selector["event"]["class"], "berry-tree")
+        with self.assertRaisesRegex(RuleError, "unknown fields"):
+            _selector({"collision": [1]}, "selector", tilesets, behaviors)
+
+    def test_exact_pattern_dimensions_claim_and_placement_scan(self):
+        tilesets = {"P": SimpleNamespace(role="primary", metatile_count=5),
+                    "S": SimpleNamespace(role="secondary", metatile_count=4)}
+        raw = [{"id": "door-pattern", "dimensions": {"width": 2, "height": 2},
+                "tilesets": {"primary": "P", "secondary": "S"},
+                "cells": [[1, 2], [3, 4]], "priority": 10, "claimMask": ["11", "01"],
+                "action": {"archetype": "building", "pool": "structure"}}]
+        pattern = _patterns(raw, "patterns", tilesets, {"structure"}, {})[0]
+        layout = {"id": "L", "primary_tileset": "P", "secondary_tileset": "S",
+                  "width": 3, "height": 2}
+        cells = {"L": tuple({"metatile": value} for value in (1, 2, 9, 3, 4, 9))}
+        self.assertEqual(_pattern_placements(pattern, [layout], cells), 1)
+        bad = copy.deepcopy(raw)
+        bad[0]["claimMask"] = ["00", "00"]
+        with self.assertRaisesRegex(RuleError, "claim at least one"):
+            _patterns(bad, "patterns", tilesets, {"structure"}, {})
+
+    def test_exact_pattern_rejects_cells_outside_declared_tilesets(self):
+        tilesets = {"P": SimpleNamespace(role="primary", metatile_count=2),
+                    "S": SimpleNamespace(role="secondary", metatile_count=1)}
+        base = {"id": "range-pattern", "dimensions": {"width": 1, "height": 1},
+                "tilesets": {"primary": "P", "secondary": "S"}, "priority": 1,
+                "claimMask": ["1"],
+                "action": {"archetype": "building", "pool": "structure"}}
+        for metatile in (2, 0x201):
+            raw = [{**base, "cells": [[metatile]]}]
+            with self.assertRaisesRegex(RuleError, "outside the declared"):
+                _patterns(raw, "patterns", tilesets, {"structure"}, {})
+
+    def test_equal_priority_concrete_pattern_claim_overlap_is_rejected(self):
+        action = {"archetype": "building", "pool": "structure"}
+        patterns = [
+            {"id": name, "dimensions": {"width": 1, "height": 1},
+             "tilesets": {"primary": "P", "secondary": "S"}, "cells": [[1]],
+             "priority": priority, "claimMask": ["1"], "action": action}
+            for name, priority in (("first", 4), ("second", 4))
+        ]
+        layout = {"id": "L", "primary_tileset": "P", "secondary_tileset": "S",
+                  "width": 1, "height": 1}
+        maps = [{"symbol": "MAP_TEST", "layout": "L"}]
+        cells = {"L": ({"metatile": 1},)}
+        with self.assertRaisesRegex(RuleError, "equal-priority pattern claim overlap"):
+            _validate_pattern_claim_overlaps(patterns, maps, {"L": layout}, cells, {})
+        patterns[1]["priority"] = 3
+        _validate_pattern_claim_overlaps(patterns, maps, {"L": layout}, cells, {})
+
+    def test_duplicate_logical_ids_are_global_across_sections_and_scopes(self):
+        with self.assertRaisesRegex(RuleError, "duplicate logical ID 'shared'"):
+            _validate_logical_ids([("shared", "profiles"),
+                                   ("shared", "MAP_TEST.contextualRules")])
+
+    def test_ground_policy_is_closed(self):
+        self.assertEqual(_ground_policy({"mode": "automatic"}, "ground"), {"mode": "automatic"})
+        self.assertEqual(_ground_policy({"mode": "manual", "metatile": 17}, "ground")["metatile"], 17)
+        with self.assertRaisesRegex(RuleError, "unknown fields"):
+            _ground_policy({"mode": "automatic", "metatile": 1}, "ground")
+
+    def test_pixel_object_abi_limits_are_rejected_at_compile_time(self):
+        with self.assertRaisesRegex(RuleError, "dimensions exceed"):
+            _validate_pixel_object_catalog([{
+                "id": 1, "layoutId": 1, "mapGroup": 255, "mapNumber": 255,
+                "width": 256, "height": 1, "supportOffsetQ16": 0,
+                "maskRows": [1], "pixels": [],
+            }])
+
+    def test_camera_ranges(self):
+        profile, pitch, focal = parse_camera(
+            {"profile": "interior", "pitch": 55, "focalLength": 150}, "test")
+        self.assertEqual(profile, "interior")
+        self.assertAlmostEqual(pitch, 0.959931, places=5)
+        self.assertEqual(focal, 150)
+        with self.assertRaises(RuleError):
+            parse_camera({"profile": "interior", "pitch": 90}, "test")
+
+    def test_explicit_migration_never_revives_retired_prototypes(self):
+        migrated = migrate_document({"version": 1, "map": "MAP_X", "layout": "LAYOUT_X",
+                                     "supported": True, "overrides": [], "buildings": []})
+        self.assertEqual(migrated["schemaVersion"], 2)
+        self.assertEqual(migrated["contextualRules"], [])
+        with self.assertRaisesRegex(MigrationError, "retired"):
+            migrate_document({"version": 1, "map": "MAP_X", "layout": "LAYOUT_X",
+                              "supported": True, "overrides": [{"x": 1}], "buildings": []})
+        with self.assertRaisesRegex(MigrationError, "retired"):
+            migrate_document({"version": 1, "templates": {"house": {}}})
+
+    def test_c_contract_contains_full_catalog_base_tables(self):
+        header, source = render_header(), render_c(self.data)
+        self.assertIn("struct DioramaGeneratedTilesetV2", header)
+        self.assertIn("struct DioramaGeneratedLayoutV2", header)
+        self.assertIn("struct DioramaGeneratedTerrainV2", header)
+        self.assertIn("struct DioramaGeneratedStructureV2", header)
+        self.assertIn("struct DioramaGeneratedPixelObjectV2", header)
+        self.assertIn("struct DioramaGeneratedPixelV2", header)
+        self.assertIn("role, terrainClass", header)
+        self.assertIn("struct DioramaGeneratedMapV2", header)
+        self.assertTrue(all(f'"{row["symbol"]}"' in source for row in self.data["tilesets"]))
+        self.assertIn("gDioramaTerrainV2Count", source)
+        self.assertIn("gDioramaAmbiguitiesV2", source)
+        self.assertIn("gDioramaStructuresV2", source)
+        self.assertIn("gDioramaPixelObjectsV2", source)
+        self.assertIn("gDioramaPixelMaskRowsV2", source)
+        self.assertGreater(len(self.data["pixelObjects"]), 0)
+        self.assertTrue(all(pixel["sourceColor"] != 0
+                            for obj in self.data["pixelObjects"] for pixel in obj["pixels"]))
+        supported = [obj for obj in self.data["pixelObjects"] if obj["supportStructureId"]]
+        self.assertEqual(len(supported), 2)
+        self.assertTrue(all(obj["class"] == "console" and obj["supportOffsetQ16"] == 8
+                            and obj["groundMode"] == "replacement"
+                            and obj["groundMetatile"] == 513 for obj in supported))
+        structures = {row["id"]: row for row in self.data["structureCandidates"]}
+        mask_goldens = Counter()
+        for obj in self.data["pixelObjects"]:
+            mask_hash = hashlib.sha256(b"".join(
+                struct.pack("<Q", row) for row in obj["maskRows"])).hexdigest()
+            mask_goldens[(structures[obj["structureId"]]["owner"], obj["groundMode"],
+                          obj["groundMetatile"], bool(obj["supportStructureId"]),
+                          mask_hash)] += 1
+        self.assertEqual(mask_goldens, Counter({
+            ("petalburg-isolated-signpost", "replacement", 1, False,
+             "d48f1e20b24a2549f329db82dfe0399a852945cc3585be861290e5d5e4bfbc3f"): 2,
+            ("event:background-sign", "replacement", 1, False,
+             "d48f1e20b24a2549f329db82dfe0399a852945cc3585be861290e5d5e4bfbc3f"): 3,
+            ("brendan-tv-cutout", "replacement", 513, True,
+             "f19997c0626bbf8e6ae5b3bbc525ffb28e6ded5f3fcea5d4da6b04fec43c9996"): 1,
+            ("may-tv-cutout", "replacement", 513, True,
+             "f19997c0626bbf8e6ae5b3bbc525ffb28e6ded5f3fcea5d4da6b04fec43c9996"): 1,
+            ("brendan-tv-support", "source-base", 0xFFFF, False,
+             "077af72744ba6ac7056fd27e228770687db42b56fa17bbeb0a1bc399d3925a1b"): 1,
+            ("may-tv-support", "source-base", 0xFFFF, False,
+             "077af72744ba6ac7056fd27e228770687db42b56fa17bbeb0a1bc399d3925a1b"): 1,
+            ("brendan-tv-base", "replacement", 558, False,
+             "5ada150e0358d4385fd8b34c576ca78aca64d94aa5dc105cd4c89aff290bb248"): 1,
+            ("may-tv-base", "replacement", 689, False,
+             "5ada150e0358d4385fd8b34c576ca78aca64d94aa5dc105cd4c89aff290bb248"): 1,
+            ("generic-building-potted-plant", "source-base", 0xFFFF, False,
+             "d444d1b17085ac9d0f7adfb5f55e82a229f32e59e3147ab1b098c1739a64e0e9"): 5,
+            ("generic-building-left-stool", "source-base", 0xFFFF, False,
+             "e5760e791385a5e2cdac53907b27ace89dcdcb58207dc558702a30943fa76962"): 6,
+            ("generic-building-right-stool", "source-base", 0xFFFF, False,
+             "56b7e3207c6d8a42fcbeeea10bcbf7960018769b89881ced169fac99493f473e"): 10,
+            ("generic-building-table-relief", "source-base", 0xFFFF, False,
+             "0a219127e3a3ae24590df9a9737fa4e3cc702caa48d947ec7d4d726e1634f88e"): 1,
+        }))
+        self.assertIn(self.data["sha256"], source)
+
+    def test_c_contract_excludes_compiler_only_precedence_tables(self):
+        packed = copy.deepcopy(self.data)
+        packed["profiles"] = [{"id": "flat-cell", "archetype": "ground",
+                               "masks": {"claim": {"width": 16, "height": 1,
+                                                     "rows": ["ffff"]}},
+                               "samples": []}]
+        action = {"archetype": "ground", "pool": "terrain", "profile": "flat-cell",
+                   "axis": "cross", "groundOffset": 0.25, "height": 1.0,
+                  "faces": {"top": {"metatile": "self", "layer": "base"},
+                            "south": {"metatile": 7, "layer": "full"},
+                            "north": "none"},
+                   "groundPolicy": {"mode": "manual", "metatile": 1}}
+        selector = {"tilesets": [packed["tilesets"][0]["symbol"]], "metatiles": [1],
+                    "behaviors": ["MB_NORMAL"], "behaviorIds": [0],
+                    "layerTypes": ["normal"], "elevations": [2],
+                    "mapTypes": ["MAP_TYPE_TOWN"],
+                    "neighbors": {"nw": {"metatile": 1, "behavior": "MB_NORMAL",
+                                             "behaviorId": 0, "layerType": "normal",
+                                             "elevation": 2}},
+                    "event": {"kind": "object", "class": "berry-tree"}}
+        rule = {"id": "packed-rule", "selector": selector, "action": action,
+                "priority": 7, "placementCount": 1, "allowedUnused": None}
+        primary = next(row for row in packed["tilesets"] if row["role"] == "primary")
+        secondary = next(row for row in packed["tilesets"] if row["role"] == "secondary")
+        pattern = {"id": "packed-pattern", "dimensions": {"width": 1, "height": 1},
+                   "tilesets": {"primary": primary["symbol"], "secondary": secondary["symbol"]},
+                   "cells": [[0]], "priority": 8, "claimMask": ["1"], "action": action,
+                   "placementCount": 0, "allowedNoPlacements": {"reason": "fixture"}}
+        packed["contextualRules"] = [rule]
+        packed["exactPatterns"] = [pattern]
+        packed["maps"][0]["contextualRules"] = [{**rule, "id": "local-rule"}]
+        packed["maps"][0]["exactPatterns"] = [{**pattern, "id": "local-pattern"}]
+        header, source = render_header(), render_c(packed)
+        for name in ("Pools", "Profiles", "Masks", "MaskRows", "Samples"):
+            self.assertIn(f"gDiorama{name}V2", header)
+            self.assertIn(f"gDiorama{name}V2", source)
+        for name in ("TilesetPins", "Selectors", "Neighbors", "ContextualRules",
+                     "PatternCells", "PatternClaims", "ExactPatterns"):
+            self.assertNotIn(f"gDiorama{name}V2", header)
+            self.assertNotIn(f"gDiorama{name}V2", source)
+        for content in ("packed-rule", "local-rule", "packed-pattern", "local-pattern",
+                        "berry-tree"):
+            self.assertNotIn(content, source)
+        self.assertNotIn("EventPreset", header)
+        self.assertNotIn("EventPreset", source)
+        self.assertIn("UINT64_C(0xFFFF)", source)
+
+
+if __name__ == "__main__":
+    unittest.main()

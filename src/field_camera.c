@@ -91,6 +91,16 @@ void GetCameraOffsetWithPan(s16 *x, s16 *y)
     *y = sFieldCameraOffset.yPixelOffset + sVerticalCameraPan + 8;
 }
 
+#ifdef ENABLE_DIORAMA
+// The Diorama renderer follows script camera pans (from the voxel project).
+void GetCameraPan(s16 *x, s16 *y)
+{
+    *x = sHorizontalCameraPan;
+    *y = sVerticalCameraPan - 32;
+}
+#endif
+#line 93 // gba-line
+
 void DrawWholeMapView(void)
 {
     DrawWholeMapViewInternal(gSaveBlock1Ptr->pos.x, gSaveBlock1Ptr->pos.y, gMapHeader.mapLayout);

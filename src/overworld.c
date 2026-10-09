@@ -1,4 +1,8 @@
 #include "global.h"
+#ifdef ENABLE_DIORAMA
+#include "diorama/scene_snapshot.h"
+#endif
+#line 2 // gba-line
 #include "overworld.h"
 #include "battle_pyramid.h"
 #include "battle_setup.h"
@@ -1877,6 +1881,10 @@ static void OverworldBasic(void)
         }
     }
     UpdateOverworldWildEncounter();
+#ifdef ENABLE_DIORAMA
+    DioramaScene_PublishOverworld();
+#endif
+#line 1880 // gba-line
 }
 
 // This CB2 is used when starting

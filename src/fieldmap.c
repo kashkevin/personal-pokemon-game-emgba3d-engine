@@ -1,4 +1,8 @@
 #include "global.h"
+#ifdef ENABLE_DIORAMA
+#include "diorama/scene_snapshot.h"
+#endif
+#line 2 // gba-line
 #include "battle_pyramid.h"
 #include "bg.h"
 #include "fieldmap.h"
@@ -137,6 +141,10 @@ void InitMap(void)
     InitMapLayoutData(&gMapHeader);
     SetOccupiedSecretBaseEntranceMetatiles(gMapHeader.events);
     RunOnLoadMapScript();
+#ifdef ENABLE_DIORAMA
+    DioramaScene_MarkMapChanged();
+#endif
+#line 140 // gba-line
 }
 
 void InitMapFromSavedGame(void)
@@ -147,18 +155,30 @@ void InitMapFromSavedGame(void)
     LoadSavedMapView();
     RunOnLoadMapScript();
     UpdateTVScreensOnMap(gBackupMapLayout.width, gBackupMapLayout.height);
+#ifdef ENABLE_DIORAMA
+    DioramaScene_MarkMapChanged();
+#endif
+#line 150 // gba-line
 }
 
 void InitBattlePyramidMap(bool8 setPlayerPosition)
 {
     CpuFastFill16(MAPGRID_UNDEFINED, sBackupMapData, sizeof(sBackupMapData));
     GenerateBattlePyramidFloorLayout(sBackupMapData, setPlayerPosition);
+#ifdef ENABLE_DIORAMA
+    DioramaScene_MarkMapChanged();
+#endif
+#line 156 // gba-line
 }
 
 void InitTrainerHillMap(void)
 {
     CpuFastFill16(MAPGRID_UNDEFINED, sBackupMapData, sizeof(sBackupMapData));
     GenerateTrainerHillFloorLayout(sBackupMapData);
+#ifdef ENABLE_DIORAMA
+    DioramaScene_MarkMapChanged();
+#endif
+#line 162 // gba-line
 }
 
 static void InitMapLayoutData(const struct MapHeader *mapHeader)
