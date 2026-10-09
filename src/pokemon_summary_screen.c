@@ -33,6 +33,7 @@
 #include "pokemon_sprite_visualizer.h"
 #include "pokemon_storage_system.h"
 #include "pokemon_summary_screen.h"
+#include "multiplayer_trade_effects.h"
 #include "pokerus.h"
 #include "region_map.h"
 #include "scanline_effect.h"
@@ -3183,6 +3184,8 @@ static void PrintMonInfo(void)
     ScheduleBgCopyTilemapToVram(0);
 }
 
+static const u8 sText_Lucky[] = _("LUCKY");
+
 static void PrintNotEggInfo(void)
 {
     struct Pokemon *mon = &sMonSummaryScreen->currentMon;
@@ -3195,6 +3198,10 @@ static void PrintNotEggInfo(void)
         StringCopy(gStringVar1, &gText_NumberClear01[0]);
         ConvertIntToDecimalStringN(gStringVar2, dexNum, STR_CONV_MODE_LEADING_ZEROS, digitCount);
         StringAppend(gStringVar1, gStringVar2);
+        // A Lucky Pokemon (multiplayer Lucky Trade) shows LUCKY in place of
+        // its Pokedex number; the species name stays visible beside it.
+        if (MultiplayerLucky_IsLucky(mon))
+            StringCopy(gStringVar1, sText_Lucky);
         if (!IsMonShiny(mon))
         {
             PrintTextOnWindow(PSS_LABEL_WINDOW_PORTRAIT_DEX_NUMBER, gStringVar1, 0, 1, 0, 1);

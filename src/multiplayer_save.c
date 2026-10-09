@@ -1042,7 +1042,8 @@ static void Handle(const struct MultiplayerSaveControl *command)
             for (i = 16; i < 48; i++) pair |= command->data[i];
             for (i = 48; i < 80; i++) source |= command->data[i];
             if (!generation || !pair || !source || slot >= gPlayerPartyCount || slot >= PARTY_SIZE
-             || ReadU32(command->data + 84) > 255 || ReadU32(command->data + 188) != sCrc)
+             || (ReadU32(command->data + 84) & ~(MP_TRADE_RESOLVED_FRIENDSHIP_MASK | MP_TRADE_RESOLVED_LUCKY))
+             || ReadU32(command->data + 188) != sCrc)
                 { status = MP_SAVE_VALIDATION; break; }
             if (sEffectActive)
             {

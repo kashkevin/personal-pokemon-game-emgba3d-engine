@@ -1,4 +1,5 @@
 #include "global.h"
+#include "constants/multiplayer_balance.h"
 #include "multiplayer_trade_effects.h"
 #include "pokemon.h"
 #include "mail.h"
@@ -193,7 +194,8 @@ static u32 MultiplayerTradeReplay_Run(const u8 *input, u32 length, u8 *out, u32 
     count = header[3];
     outSlot = header[4];
     inSlot = header[5];
-    if (header[0] != 1 || friendship > 255 || count > MP_TRADE_RECORD_MAX_CHOICES
+    if (header[0] != 1 || (friendship & ~(MP_TRADE_RESOLVED_FRIENDSHIP_MASK | MP_TRADE_RESOLVED_LUCKY))
+     || count > MP_TRADE_RECORD_MAX_CHOICES
      || outSlot >= PARTY_SIZE || inSlot >= PARTY_SIZE || header[6] || header[7])
         return 0;
     if (operation == 1)
@@ -302,8 +304,10 @@ bool32 MultiplayerTradeEffects_BeginRecord(const struct Pokemon *received,
     u32 i, zero = 0;
     u8 oldLevelUpHP;
     u8 nickname[POKEMON_NAME_BUFFER_SIZE];
+    bool32 lucky = (resolvedFriendship & MP_TRADE_RESOLVED_LUCKY) != 0;
     if (!IsRecordOutput(out, sizeof(*out), received, sent)) return FALSE;
     memset(out, 0, sizeof(*out));
+    resolvedFriendship &= ~MP_TRADE_RESOLVED_LUCKY;
     if (resolvedFriendship > MAX_FRIENDSHIP
      || !MultiplayerTradeEffects_Preview(received, sent, &preview)
      || (preview.flags & (MP_TRADE_EFFECT_EGG | MP_TRADE_EFFECT_MAIL
@@ -326,6 +330,16 @@ bool32 MultiplayerTradeEffects_BeginRecord(const struct Pokemon *received,
          || GetMonData(&partner, MON_DATA_MOVE1 + i) >= MOVES_COUNT)
             return FALSE;
     SetMonData(&prepared.candidate, MON_DATA_FRIENDSHIP, &prepared.friendship);
+    if (lucky)
+    {
+        // Lucky Trade (host decision): before any evolution, so an evolved
+        // result keeps the improved IVs. Stats are recomputed for both paths.
+        prepared.reserved = MP_TRADE_RECORD_FLAG_LUCKY;
+        MultiplayerLucky_Apply(&prepared.candidate);
+        oldLevelUpHP = gBattleScripting.levelUpHP;
+        CalculateMonStats(&prepared.candidate);
+        gBattleScripting.levelUpHP = oldLevelUpHP;
+    }
     target = GetEvolutionTargetSpecies(&prepared.candidate, EVO_MODE_TRADE,
                                        ITEM_NONE, &partner, NULL, CHECK_EVO);
     if (target != SPECIES_NONE)
@@ -650,4 +664,31 @@ bool32 MultiplayerTradeEffects_ReplaySaveBlocks(const struct SaveBlock1 *recipie
          && partner1->giftRibbons[index] < MAX_GIFT_RIBBON)
             out1->giftRibbons[index] = partner1->giftRibbons[index];
     return TRUE;
+}
+
+// ---------------------------------------------------------------------------
+// Lucky Pokemon (owner amendment "PLAYER FRIENDSHIP + LUCKY TRADING").
+// The permanent marker is the Gigantamax-factor bit, which this Gen 6 game never
+// uses (Dynamax battles are disabled and no Max Soup exists in Hoenn).
+
+bool32 MultiplayerLucky_IsLucky(struct Pokemon *mon)
+{
+    return GetMonData(mon, MON_DATA_GIGANTAMAX_FACTOR) ? TRUE : FALSE;
+}
+
+bool32 MultiplayerLucky_IsBoxMonLucky(struct BoxPokemon *mon)
+{
+    return GetBoxMonData(mon, MON_DATA_GIGANTAMAX_FACTOR) ? TRUE : FALSE;
+}
+
+void MultiplayerLucky_Apply(struct Pokemon *mon)
+{
+    u32 i, iv, floor = MP_LUCKY_IV_FLOOR, marker = TRUE;
+    for (i = 0; i < NUM_STATS; i++)
+    {
+        iv = GetMonData(mon, MON_DATA_HP_IV + i);
+        if (iv < floor)
+            SetMonData(mon, MON_DATA_HP_IV + i, &floor);
+    }
+    SetMonData(mon, MON_DATA_GIGANTAMAX_FACTOR, &marker);
 }

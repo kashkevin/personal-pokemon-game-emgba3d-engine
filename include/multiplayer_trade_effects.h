@@ -58,6 +58,18 @@ bool32 MultiplayerTradeEffects_Preview(const struct Pokemon *received,
 #define MP_TRADE_RECORD_MAX_CHOICES 16
 #define MP_TRADE_RECORD_DECLINE 4
 
+// The resolved-friendship word carries the host's Lucky Trade decision in bit 8
+// (bits 0-7: friendship; every other bit must be zero). A Lucky received
+// Pokemon gets every IV raised to MP_LUCKY_IV_FLOOR (never lowered, never above
+// the legal maximum) and the permanent Lucky marker (MultiplayerLucky_*).
+#define MP_TRADE_RESOLVED_FRIENDSHIP_MASK 0xFF
+#define MP_TRADE_RESOLVED_LUCKY           (1 << 8)
+#define MP_TRADE_RECORD_FLAG_LUCKY        (1 << 0) // MultiplayerTradeRecordPreparation.reserved
+
+bool32 MultiplayerLucky_IsLucky(struct Pokemon *mon);
+bool32 MultiplayerLucky_IsBoxMonLucky(struct BoxPokemon *mon);
+void MultiplayerLucky_Apply(struct Pokemon *mon);
+
 enum MultiplayerTradeRecordState
 {
     MP_TRADE_RECORD_REFUSED,
@@ -88,7 +100,7 @@ struct MultiplayerTradeRecordPreparation
     u8 state;
     u8 friendship;
     u8 choiceCount;
-    u8 reserved;
+    u8 reserved; // MP_TRADE_RECORD_FLAG_LUCKY; all other bits zero
     struct Pokemon candidate;
     struct MultiplayerTradeMoveChoice choices[MP_TRADE_RECORD_MAX_CHOICES];
 };

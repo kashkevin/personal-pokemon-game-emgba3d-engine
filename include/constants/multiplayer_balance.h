@@ -13,4 +13,9 @@
 // the Mega Ring (given by Flannery with the 4th badge).
 #define MP_MEGA_STONE_PRICE 60000
 
+// Lucky Pokemon: every IV is raised to at least this floor (0-31 scale); an IV
+// is never lowered and never exceeds 31. The trade chance per friendship level
+// lives on the host (balance.py).
+#define MP_LUCKY_IV_FLOOR 12
+
 #endif // GUARD_CONSTANTS_MULTIPLAYER_BALANCE_H
