@@ -10,6 +10,7 @@
 #include "diorama/gl_light.h"
 #include "diorama/gl_shadow.h"
 #include "diorama/gl_object_renderer.h"
+#include "diorama/terrain_mesh.h"
 #include "diorama/rules.generated.h"
 #include "diorama/rules.h"
 #include "diorama/buildings.h"
@@ -75,6 +76,9 @@ static GLint sCameraLocation;
 static GLint sCameraPitchLocation;
 static GLint sFocalLengthLocation;
 static GLint sAspectCorrectionLocation;
+static GLint sCameraHeightLocation;
+static GLint sCameraDistanceLocation;
+static GLint sScreenOffsetLocation;
 static GLint sImageLocation;
 static GLint sDrawModeLocation;
 static GLint sAnimationTimeLocation;
@@ -121,25 +125,26 @@ static const char sObjectVertexShader[] =
     "uniform float cameraPitch;\n"
     "uniform float focalLength;\n"
     "uniform float aspectCorrection;\n"
+    /* The eye (terrain_mesh.h, DioramaCameraRig). */
+    "uniform float cameraHeight;\n"
+    "uniform float cameraDistance;\n"
+    "uniform float screenOffsetY;\n"
     "uniform float depthBias;\n"
     "out vec2 uv;\n"
     "out vec3 sceneWorldPosition;\n"
     "out float viewDepth;\n"
     "void main() {\n"
     "  sceneWorldPosition = position;\n"
-    "  const float cameraHeight = 16.0;\n"
-    "  const float cameraTargetVertical = -0.458944;\n"
     "  const float nearDepth = 0.1;\n"
     "  const float farDepth = 80.0;\n"
     "  float pitchSin = sin(cameraPitch);\n"
     "  float pitchCos = cos(cameraPitch);\n"
-    "  float cameraDistance = (cameraHeight * pitchCos + cameraTargetVertical) / pitchSin;\n"
     "  float relativeX = position.x - cameraPosition.x;\n"
     "  float relativeZ = position.z - cameraPosition.y;\n"
     "  float depth = (cameraHeight - position.y) * pitchSin + (relativeZ + cameraDistance) * pitchCos;\n"
     "  float vertical = -(cameraHeight - position.y) * pitchCos + (relativeZ + cameraDistance) * pitchSin;\n"
     "  float clipX = relativeX * focalLength * 2.0 / 240.0 * aspectCorrection;\n"
-    "  float clipY = -0.04 * depth + vertical * focalLength * 2.0 / 160.0;\n"
+    "  float clipY = screenOffsetY * depth + vertical * focalLength * 2.0 / 160.0;\n"
     "  float clipZ = ((farDepth + nearDepth) / (farDepth - nearDepth)) * depth"
     "              - (2.0 * farDepth * nearDepth) / (farDepth - nearDepth);\n"
     "  gl_Position = vec4(clipX, clipY, clipZ - depthBias * depth, depth);\n"
@@ -162,6 +167,8 @@ static const char sObjectFragmentShader[] =
     "uniform float shadowAmbient;\n"
     "uniform vec2 cameraPosition;\n"
     "uniform float cameraPitch;\n"
+    "uniform float cameraHeight;\n"
+    "uniform float cameraDistance;\n"
     "uniform float depthBias;\n"
     "uniform float uprightZ;\n"
     "uniform float shade;\n"
@@ -176,13 +183,10 @@ static const char sObjectFragmentShader[] =
      * south of them in front, as the GBA draws them; the picture is the
      * leaning card's. */
     "float UprightDepth() {\n"
-    "  const float cameraHeight = 16.0;\n"
-    "  const float cameraTargetVertical = -0.458944;\n"
     "  const float nearDepth = 0.1;\n"
     "  const float farDepth = 80.0;\n"
     "  float pitchSin = sin(cameraPitch);\n"
     "  float pitchCos = cos(cameraPitch);\n"
-    "  float cameraDistance = (cameraHeight * pitchCos + cameraTargetVertical) / pitchSin;\n"
     "  float cameraZ = cameraPosition.y - cameraDistance;\n"
     "  vec3 p = sceneWorldPosition;\n"
     "  float depth = (cameraHeight - p.y) * pitchSin + (p.z - cameraZ) * pitchCos;\n"
@@ -231,7 +235,7 @@ static const char sObjectFragmentShader[] =
     /* A sprite stands in the light of the ground at its feet (the 3DS port). */
     "    color = vec4(Grade(texel.rgb) * Light(mix(shadowAmbient, 1.0, SunLit()))\n"
     "               * Dapple(lightProbe) * shade, texel.a);\n"
-    "    color.rgb = Haze(color.rgb, viewDepth);\n"
+    "    color.rgb = Haze(color.rgb, viewDepth, sceneWorldPosition);\n"
     "  }\n"
     "}\n";
 
@@ -285,6 +289,9 @@ static bool CreateProgram(void)
     sCameraPitchLocation = dglGetUniformLocation(sProgram, "cameraPitch");
     sFocalLengthLocation = dglGetUniformLocation(sProgram, "focalLength");
     sAspectCorrectionLocation = dglGetUniformLocation(sProgram, "aspectCorrection");
+    sCameraHeightLocation = dglGetUniformLocation(sProgram, "cameraHeight");
+    sCameraDistanceLocation = dglGetUniformLocation(sProgram, "cameraDistance");
+    sScreenOffsetLocation = dglGetUniformLocation(sProgram, "screenOffsetY");
     sImageLocation = dglGetUniformLocation(sProgram, "image");
     sDrawModeLocation = dglGetUniformLocation(sProgram, "drawMode");
     sAnimationTimeLocation = dglGetUniformLocation(sProgram, "animationTime");
@@ -1005,6 +1012,16 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
     dglUniform1f(sCameraPitchLocation, cameraPitch);
     dglUniform1f(sFocalLengthLocation, focalLength);
     dglUniform1f(sAspectCorrectionLocation, aspectCorrection);
+    {
+        float eyeHeight;
+        float eyeDistance;
+        float screenOffsetY;
+
+        DioramaCamera_GetRig(cameraPitch, &eyeHeight, &eyeDistance, &screenOffsetY);
+        dglUniform1f(sCameraHeightLocation, eyeHeight);
+        dglUniform1f(sCameraDistanceLocation, eyeDistance);
+        dglUniform1f(sScreenOffsetLocation, screenOffsetY);
+    }
     dglUniform1i(sImageLocation, 0);
     dglUniform1i(sShadowMapLocation, DIORAMA_SHADOW_TEXTURE_UNIT);
     sunLit = DioramaGLShadow_BindForLighting();

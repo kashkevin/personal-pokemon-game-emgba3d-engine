@@ -6,6 +6,7 @@
 #include <SDL2/SDL.h>
 
 #include "diorama/gl_field_light.h"
+#include "diorama/terrain_mesh.h"
 #include "diorama/gl_loader.h"
 #include "diorama/gl_object_renderer.h"
 
@@ -139,12 +140,21 @@ static bool Project(float x, float y, float z, float cameraX, float cameraZ,
 {
     float pitchSin = sinf(cameraPitch);
     float pitchCos = cosf(cameraPitch);
-    float distance = (16.0f * pitchCos - 0.458944f) / pitchSin;
+    float height;
+    float distance;
+    float screenOffsetY;
     float relativeZ = z - cameraZ;
-    float depth = (16.0f - y) * pitchSin + (relativeZ + distance) * pitchCos;
-    float vertical = -(16.0f - y) * pitchCos + (relativeZ + distance) * pitchSin;
-    float clipX = (x - cameraX) * focalLength * 2.0f / 240.0f * aspectCorrection;
-    float clipY = -0.04f * depth + vertical * focalLength * 2.0f / 160.0f;
+    float depth;
+    float vertical;
+    float clipX;
+    float clipY;
+
+    /* The scene's eye (terrain_mesh.h DioramaCameraRig). */
+    DioramaCamera_GetRig(cameraPitch, &height, &distance, &screenOffsetY);
+    depth = (height - y) * pitchSin + (relativeZ + distance) * pitchCos;
+    vertical = -(height - y) * pitchCos + (relativeZ + distance) * pitchSin;
+    clipX = (x - cameraX) * focalLength * 2.0f / 240.0f * aspectCorrection;
+    clipY = screenOffsetY * depth + vertical * focalLength * 2.0f / 160.0f;
 
     if (depth <= 0.0001f)
         return false;

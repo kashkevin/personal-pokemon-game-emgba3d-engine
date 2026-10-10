@@ -40,6 +40,8 @@ struct DioramaLightUniforms
     GLint dappleMap;
     GLint dapple;
     GLint dappleAnchor;
+    GLint edgeFog;
+    GLint edgeFogColor;
 };
 
 /* Once a frame, before drawing: the light of the snapshot's weather and map
@@ -50,6 +52,13 @@ bool DioramaGLLight_Locate(GLuint program, struct DioramaLightUniforms *uniforms
  * player's distance); neutral (no tint, no haze) for debug and shadow passes. */
 void DioramaGLLight_Apply(const struct DioramaLightUniforms *uniforms, float cameraPitch);
 void DioramaGLLight_ApplyNeutral(const struct DioramaLightUniforms *uniforms);
+/* The fog at the scene's edge (graphics overhaul, phase 1): from `start` to
+ * `end` tiles out from the scene's centre (the larger of the east and north
+ * distances) everything fades into `colour`, the colour the picture is
+ * cleared to past the cells, so no view ends at a board's edge. Set for each
+ * field frame and turned off after it (a 3D battle's frame has none). */
+void DioramaGLLight_SetEdgeFog(bool on, float centreX, float centreZ, float start, float end,
+                               const float colour[3]);
 /* This frame's light in the air, for gl_air.h. */
 struct DioramaAirLight
 {
@@ -96,6 +105,13 @@ void DioramaGLLight_Shutdown(void);
     "}\n" \
     "vec3 Haze(vec3 c, float viewDepth) {\n" \
     "  return mix(c, hazeColor, clamp((viewDepth - haze.x) * haze.y, 0.0, haze.z));\n" \
+    "}\n" \
+    "uniform vec4 edgeFog;\n" /* the scene's centre x, z; start, end (tiles) */ \
+    "uniform vec3 edgeFogColor;\n" \
+    "vec3 Haze(vec3 c, float viewDepth, vec3 p) {\n" \
+    "  vec2 d = abs(p.xz - edgeFog.xy);\n" \
+    "  float edge = smoothstep(edgeFog.z, edgeFog.w, max(d.x, d.y));\n" \
+    "  return mix(Haze(c, viewDepth), edgeFogColor, edge);\n" \
     "}\n"
 
 #endif // GUARD_DIORAMA_GL_LIGHT_H

@@ -9,6 +9,7 @@
 #include "constants/rtc.h"
 #include "constants/weather.h"
 #include "diorama/gl_quality.h"
+#include "diorama/terrain_mesh.h"
 #include "diorama/gl_light.h"
 #include "diorama/gl_terrain_renderer.h"
 
@@ -374,6 +375,43 @@ void DioramaGLLight_Update(const struct DioramaSceneSnapshot *snapshot, bool ena
     sLight = light;
 }
 
+static struct
+{
+    bool on;
+    float centreX;
+    float centreZ;
+    float start;
+    float end;
+    float colour[3];
+} sEdgeFog;
+
+void DioramaGLLight_SetEdgeFog(bool on, float centreX, float centreZ, float start, float end,
+                               const float colour[3])
+{
+    sEdgeFog.on = on;
+    sEdgeFog.centreX = centreX;
+    sEdgeFog.centreZ = centreZ;
+    sEdgeFog.start = start;
+    sEdgeFog.end = end;
+    for (int i = 0; i < 3; i++)
+        sEdgeFog.colour[i] = colour != NULL ? colour[i] : 0.0f;
+}
+
+static void ApplyEdgeFog(const struct DioramaLightUniforms *uniforms, bool on)
+{
+    if (on && sEdgeFog.on)
+    {
+        dglUniform4f(uniforms->edgeFog, sEdgeFog.centreX, sEdgeFog.centreZ, sEdgeFog.start, sEdgeFog.end);
+        dglUniform3f(uniforms->edgeFogColor, sEdgeFog.colour[0], sEdgeFog.colour[1], sEdgeFog.colour[2]);
+    }
+    else
+    {
+        /* Out of reach: no fog. */
+        dglUniform4f(uniforms->edgeFog, 0.0f, 0.0f, 1.0e6f, 2.0e6f);
+        dglUniform3f(uniforms->edgeFogColor, 0.0f, 0.0f, 0.0f);
+    }
+}
+
 bool DioramaGLLight_Locate(GLuint program, struct DioramaLightUniforms *uniforms)
 {
     uniforms->sunTint = dglGetUniformLocation(program, "sunTint");
@@ -383,6 +421,10 @@ bool DioramaGLLight_Locate(GLuint program, struct DioramaLightUniforms *uniforms
     uniforms->dappleMap = dglGetUniformLocation(program, "dappleMap");
     uniforms->dapple = dglGetUniformLocation(program, "dapple");
     uniforms->dappleAnchor = dglGetUniformLocation(program, "dappleAnchor");
+    /* Optional: a program whose shaders never call the three-argument Haze
+     * has none (-1, and setting it does nothing). */
+    uniforms->edgeFog = dglGetUniformLocation(program, "edgeFog");
+    uniforms->edgeFogColor = dglGetUniformLocation(program, "edgeFogColor");
     return uniforms->sunTint >= 0 && uniforms->shadeTint >= 0
         && uniforms->haze >= 0 && uniforms->hazeColor >= 0
         && uniforms->dappleMap >= 0 && uniforms->dapple >= 0 && uniforms->dappleAnchor >= 0;
@@ -403,6 +445,7 @@ void DioramaGLLight_Apply(const struct DioramaLightUniforms *uniforms, float cam
     dglUniform1i(uniforms->dappleMap, DIORAMA_LIGHT_TEXTURE_UNIT);
     dglUniform4f(uniforms->dapple, sLight.dappleLow, sLight.dappleHigh, drift, dapples ? 1.0f : 0.0f);
     dglUniform2f(uniforms->dappleAnchor, sAnchorX, sAnchorZ);
+    ApplyEdgeFog(uniforms, true);
     dglActiveTexture(GL_TEXTURE0 + DIORAMA_LIGHT_TEXTURE_UNIT);
     glBindTexture(GL_TEXTURE_2D, dapples ? sDappleTexture : 0);
     dglActiveTexture(GL_TEXTURE0);
@@ -417,6 +460,7 @@ void DioramaGLLight_ApplyNeutral(const struct DioramaLightUniforms *uniforms)
     dglUniform1i(uniforms->dappleMap, DIORAMA_LIGHT_TEXTURE_UNIT);
     dglUniform4f(uniforms->dapple, 1.0f, 1.0f, 0.0f, 0.0f);
     dglUniform2f(uniforms->dappleAnchor, 0.0f, 0.0f);
+    ApplyEdgeFog(uniforms, false);
 }
 
 void DioramaGLLight_GetAir(struct DioramaAirLight *air)
@@ -443,11 +487,17 @@ void DioramaGLLight_GetAir(struct DioramaAirLight *air)
 
 void DioramaGLLight_GetHaze(float cameraPitch, float haze[3], float colour[3])
 {
+    /* The eye's depth of the point the camera looks at (the player): the
+     * shaders' camera (terrain_mesh.h DioramaCamera_GetRig: the field's, 16
+     * tiles up and aimed 0.458944 tiles below the ground, or the 3D battle's
+     * while it draws). */
     float pitchSin = sinf(cameraPitch);
     float pitchCos = cosf(cameraPitch);
-    float distance = (16.0f * pitchCos - 0.458944f) / pitchSin;
-    float eye = 16.0f * pitchSin + distance * pitchCos;
+    float height, distance, screenOffsetY, eye;
     int i;
+
+    DioramaCamera_GetRig(cameraPitch, &height, &distance, &screenOffsetY);
+    eye = height * pitchSin + distance * pitchCos;
 
     haze[0] = eye * sLight.hazeStart;
     haze[1] = sLight.haze / (eye * sLight.hazeRamp);

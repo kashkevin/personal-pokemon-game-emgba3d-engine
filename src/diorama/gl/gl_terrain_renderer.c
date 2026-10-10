@@ -17,7 +17,7 @@
 #include "diorama/terrain_mesh.h"
 #include "metatile_behavior.h"
 
-#define TERRAIN_CHUNK_CACHE_SIZE 36
+#define TERRAIN_CHUNK_CACHE_SIZE 100 /* the 49 x 49 cells span up to 8 x 8 chunks */
 #define TERRAIN_DEBUG_MAX_VERTICES ((TERRAIN_CHUNK_CACHE_SIZE + DIORAMA_MAX_VISIBLE_CELLS) * 8)
 #define TERRAIN_MAX_VISIBLE_TREE_INSTANCES \
     (TERRAIN_CHUNK_CACHE_SIZE * DIORAMA_TERRAIN_MAX_TREE_INSTANCES)
@@ -53,6 +53,9 @@ static GLint sCameraLocation;
 static GLint sCameraPitchLocation;
 static GLint sFocalLengthLocation;
 static GLint sAspectCorrectionLocation;
+static GLint sCameraHeightLocation;
+static GLint sCameraDistanceLocation;
+static GLint sScreenOffsetLocation;
 static GLint sImageLocation;
 static GLint sBaseImageLocation;
 static GLint sForegroundImageLocation;
@@ -94,6 +97,10 @@ static const char sTerrainVertexShader[] =
     "uniform float cameraPitch;\n"
     "uniform float focalLength;\n"
     "uniform float aspectCorrection;\n"
+    /* The eye (terrain_mesh.h, DioramaCameraRig). */
+    "uniform float cameraHeight;\n"
+    "uniform float cameraDistance;\n"
+    "uniform float screenOffsetY;\n"
     "uniform int shadowPass;\n"
     "uniform mat4 lightViewProjection;\n"
     "out vec2 uv;\n"
@@ -106,19 +113,16 @@ static const char sTerrainVertexShader[] =
     "void main() {\n"
     "  vec3 worldPosition = position + instanceOffset;\n"
     "  sceneWorldPosition = worldPosition;\n"
-    "  const float cameraHeight = 16.0;\n"
-    "  const float cameraTargetVertical = -0.458944;\n"
     "  const float nearDepth = 0.1;\n"
     "  const float farDepth = 80.0;\n"
     "  float pitchSin = sin(cameraPitch);\n"
     "  float pitchCos = cos(cameraPitch);\n"
-    "  float cameraDistance = (cameraHeight * pitchCos + cameraTargetVertical) / pitchSin;\n"
     "  float relativeX = worldPosition.x - cameraPosition.x;\n"
     "  float relativeZ = worldPosition.z - cameraPosition.y;\n"
     "  float depth = (cameraHeight - worldPosition.y) * pitchSin + (relativeZ + cameraDistance) * pitchCos;\n"
     "  float vertical = -(cameraHeight - worldPosition.y) * pitchCos + (relativeZ + cameraDistance) * pitchSin;\n"
     "  float clipX = relativeX * focalLength * 2.0 / 240.0 * aspectCorrection;\n"
-    "  float clipY = -0.04 * depth + vertical * focalLength * 2.0 / 160.0;\n"
+    "  float clipY = screenOffsetY * depth + vertical * focalLength * 2.0 / 160.0;\n"
     "  float clipZ = ((farDepth + nearDepth) / (farDepth - nearDepth)) * depth"
     "              - (2.0 * farDepth * nearDepth) / (farDepth - nearDepth);\n"
     "  gl_Position = vec4(clipX, clipY, clipZ, depth);\n"
@@ -191,7 +195,7 @@ static const char sTerrainFragmentShader[] =
     "  if (textureLayer == 3) texel.rgb = clamp(texel.rgb * pixelScale + pixelOffset, 0.0, 1.0);\n"
     "  color = vec4(Grade(texel.rgb) * Light(shade * mix(shadowAmbient, 1.0, SunLit()))\n"
     "             * Dapple(sceneWorldPosition), texel.a);\n"
-    "  color.rgb = Haze(color.rgb, viewDepth);\n"
+    "  color.rgb = Haze(color.rgb, viewDepth, sceneWorldPosition);\n"
     "}\n";
 
 static GLuint CompileShader(GLenum type, const char *source)
@@ -244,6 +248,9 @@ static bool CreateProgram(void)
     sCameraPitchLocation = dglGetUniformLocation(sProgram, "cameraPitch");
     sFocalLengthLocation = dglGetUniformLocation(sProgram, "focalLength");
     sAspectCorrectionLocation = dglGetUniformLocation(sProgram, "aspectCorrection");
+    sCameraHeightLocation = dglGetUniformLocation(sProgram, "cameraHeight");
+    sCameraDistanceLocation = dglGetUniformLocation(sProgram, "cameraDistance");
+    sScreenOffsetLocation = dglGetUniformLocation(sProgram, "screenOffsetY");
     sImageLocation = dglGetUniformLocation(sProgram, "image");
     sBaseImageLocation = dglGetUniformLocation(sProgram, "baseImage");
     sForegroundImageLocation = dglGetUniformLocation(sProgram, "foregroundImage");
@@ -1298,6 +1305,16 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
     dglUniform1f(sCameraPitchLocation, cameraPitch);
     dglUniform1f(sFocalLengthLocation, focalLength);
     dglUniform1f(sAspectCorrectionLocation, aspectCorrection);
+    {
+        float eyeHeight;
+        float eyeDistance;
+        float screenOffsetY;
+
+        DioramaCamera_GetRig(cameraPitch, &eyeHeight, &eyeDistance, &screenOffsetY);
+        dglUniform1f(sCameraHeightLocation, eyeHeight);
+        dglUniform1f(sCameraDistanceLocation, eyeDistance);
+        dglUniform1f(sScreenOffsetLocation, screenOffsetY);
+    }
     dglUniform1i(sImageLocation, 0);
     dglUniform1i(sBaseImageLocation, 1);
     dglUniform1i(sForegroundImageLocation, 2);

@@ -6,6 +6,7 @@
 #include <SDL2/SDL.h>
 
 #include "diorama/gl_air.h"
+#include "diorama/terrain_mesh.h"
 #include "diorama/gl_light.h"
 #include "diorama/gl_loader.h"
 #include "diorama/gl_object_renderer.h"
@@ -20,10 +21,11 @@
 /*
  * Sunlit dust (ctr_voxel.c, DrawMotes). The 3DS fills 22 x 18 tiles around
  * its close camera's target with 32 specks, so they always enter off screen.
- * This view can see past the scene's 33 x 33 cells into the dark, where dust
- * would read as stars: the box is the scene's own (16 tiles each way of the
- * target), with as many specks to the tile, and a speck fades out over the
- * last tiles before the box's edge instead of popping there.
+ * This view could see past the scene's cells into the dark, where dust would
+ * read as stars: the box is 16 tiles each way of the target (the scene's own
+ * before the graphics overhaul made it 24), with as many specks to the tile,
+ * and a speck fades out over the last tiles before the box's edge instead of
+ * popping there.
  */
 #define MOTES 83
 #define MOTE_VERTICES 12
@@ -52,10 +54,10 @@
 #define FOG_GRID 8      /* cells along each side of a sheet */
 #define FOG_REACH 32.0f /* tiles from the sheet's centre to its side */
 #define FOG_FADE 0.55f  /* ... share of that reach at which it starts to thin */
-/* This camera can see past the scene's 33 x 33 cells, where a bank would hang
- * over the dark: the banks also thin out over the last tiles before the
- * cells' edge (16 each way of the camera target), as the dust does. */
-#define FOG_SCENE_HALF 16.0f
+/* A wide camera can see to the scene's edge, where a bank would hang over the
+ * sky: the banks also thin out over the last tiles before the cells' edge
+ * (DIORAMA_GRID_WIDTH / 2 each way of the camera target), as the dust does. */
+#define FOG_SCENE_HALF ((float)(DIORAMA_GRID_WIDTH / 2)) /* the scene's cells round the camera */
 #define FOG_SCENE_EDGE 3.0f
 #define FOG_SHEET_VERTICES (FOG_GRID * FOG_GRID * 6)
 
@@ -89,6 +91,7 @@ static GLint sMoteCameraLocation;
 static GLint sMotePitchLocation;
 static GLint sMoteFocalLocation;
 static GLint sMoteAspectLocation;
+static GLint sMoteRigLocations[3];
 static GLint sMoteTintLocation;
 static GLint sScreenModeLocation;
 static GLint sScreenImageLocation;
@@ -104,6 +107,7 @@ static GLint sFogCameraLocation;
 static GLint sFogPitchLocation;
 static GLint sFogFocalLocation;
 static GLint sFogAspectLocation;
+static GLint sFogRigLocations[3];
 static GLint sFogCentreLocation;
 static GLint sFogPeriodLocation;
 static GLint sFogColourLocation;
@@ -121,6 +125,27 @@ static int sBloomWidth;
 static int sBloomHeight;
 static bool sBloomReady;
 
+/* The eye of the scene's camera (terrain_mesh.h DioramaCameraRig): the
+ * overworld's or the 3D battle's, so the air meets the scene's depth. */
+static void LocateRig(GLuint program, GLint locations[3])
+{
+    locations[0] = dglGetUniformLocation(program, "cameraHeight");
+    locations[1] = dglGetUniformLocation(program, "cameraDistance");
+    locations[2] = dglGetUniformLocation(program, "screenOffsetY");
+}
+
+static void ApplyRig(const GLint locations[3], float cameraPitch)
+{
+    float eyeHeight;
+    float eyeDistance;
+    float screenOffsetY;
+
+    DioramaCamera_GetRig(cameraPitch, &eyeHeight, &eyeDistance, &screenOffsetY);
+    dglUniform1f(locations[0], eyeHeight);
+    dglUniform1f(locations[1], eyeDistance);
+    dglUniform1f(locations[2], screenOffsetY);
+}
+
 static const char sMoteVertexShader[] =
     "#version 330 core\n"
     "layout(location = 0) in vec4 vertex;\n" /* x, y, z, glint */
@@ -128,23 +153,24 @@ static const char sMoteVertexShader[] =
     "uniform float cameraPitch;\n"
     "uniform float focalLength;\n"
     "uniform float aspectCorrection;\n"
+    /* The eye (terrain_mesh.h, DioramaCameraRig). */
+    "uniform float cameraHeight;\n"
+    "uniform float cameraDistance;\n"
+    "uniform float screenOffsetY;\n"
     "out float glint;\n"
     "void main() {\n"
     /* The scene's projection (gl_object_renderer.c), so the depth test agrees. */
     "  vec3 position = vertex.xyz;\n"
-    "  const float cameraHeight = 16.0;\n"
-    "  const float cameraTargetVertical = -0.458944;\n"
     "  const float nearDepth = 0.1;\n"
     "  const float farDepth = 80.0;\n"
     "  float pitchSin = sin(cameraPitch);\n"
     "  float pitchCos = cos(cameraPitch);\n"
-    "  float cameraDistance = (cameraHeight * pitchCos + cameraTargetVertical) / pitchSin;\n"
     "  float relativeX = position.x - cameraPosition.x;\n"
     "  float relativeZ = position.z - cameraPosition.y;\n"
     "  float depth = (cameraHeight - position.y) * pitchSin + (relativeZ + cameraDistance) * pitchCos;\n"
     "  float vertical = -(cameraHeight - position.y) * pitchCos + (relativeZ + cameraDistance) * pitchSin;\n"
     "  float clipX = relativeX * focalLength * 2.0 / 240.0 * aspectCorrection;\n"
-    "  float clipY = -0.04 * depth + vertical * focalLength * 2.0 / 160.0;\n"
+    "  float clipY = screenOffsetY * depth + vertical * focalLength * 2.0 / 160.0;\n"
     "  float clipZ = ((farDepth + nearDepth) / (farDepth - nearDepth)) * depth"
     "              - (2.0 * farDepth * nearDepth) / (farDepth - nearDepth);\n"
     "  gl_Position = vec4(clipX, clipY, clipZ, depth);\n"
@@ -165,6 +191,10 @@ static const char sFogVertexShader[] =
     "uniform float cameraPitch;\n"
     "uniform float focalLength;\n"
     "uniform float aspectCorrection;\n"
+    /* The eye (terrain_mesh.h, DioramaCameraRig). */
+    "uniform float cameraHeight;\n"
+    "uniform float cameraDistance;\n"
+    "uniform float screenOffsetY;\n"
     "uniform vec3 centre;\n" /* the sheet's centre: x east, height, z south */
     "uniform float period;\n"
     "out vec2 uv;\n"
@@ -174,19 +204,16 @@ static const char sFogVertexShader[] =
     "void main() {\n"
     "  vec3 position = vec3(centre.x + sheet.x, centre.y, -(centre.z + sheet.y));\n"
     "  fromTarget = position.xz - cameraPosition;\n"
-    "  const float cameraHeight = 16.0;\n"
-    "  const float cameraTargetVertical = -0.458944;\n"
     "  const float nearDepth = 0.1;\n"
     "  const float farDepth = 80.0;\n"
     "  float pitchSin = sin(cameraPitch);\n"
     "  float pitchCos = cos(cameraPitch);\n"
-    "  float cameraDistance = (cameraHeight * pitchCos + cameraTargetVertical) / pitchSin;\n"
     "  float relativeX = position.x - cameraPosition.x;\n"
     "  float relativeZ = position.z - cameraPosition.y;\n"
     "  float depth = (cameraHeight - position.y) * pitchSin + (relativeZ + cameraDistance) * pitchCos;\n"
     "  float vertical = -(cameraHeight - position.y) * pitchCos + (relativeZ + cameraDistance) * pitchSin;\n"
     "  float clipX = relativeX * focalLength * 2.0 / 240.0 * aspectCorrection;\n"
-    "  float clipY = -0.04 * depth + vertical * focalLength * 2.0 / 160.0;\n"
+    "  float clipY = screenOffsetY * depth + vertical * focalLength * 2.0 / 160.0;\n"
     "  float clipZ = ((farDepth + nearDepth) / (farDepth - nearDepth)) * depth"
     "              - (2.0 * farDepth * nearDepth) / (farDepth - nearDepth);\n"
     "  gl_Position = vec4(clipX, clipY, clipZ, depth);\n"
@@ -407,6 +434,7 @@ static void Init(void)
     sFogPitchLocation = dglGetUniformLocation(sFogProgram, "cameraPitch");
     sFogFocalLocation = dglGetUniformLocation(sFogProgram, "focalLength");
     sFogAspectLocation = dglGetUniformLocation(sFogProgram, "aspectCorrection");
+    LocateRig(sFogProgram, sFogRigLocations);
     sFogCentreLocation = dglGetUniformLocation(sFogProgram, "centre");
     sFogPeriodLocation = dglGetUniformLocation(sFogProgram, "period");
     sFogColourLocation = dglGetUniformLocation(sFogProgram, "colour");
@@ -428,6 +456,7 @@ static void Init(void)
     sMotePitchLocation = dglGetUniformLocation(sMoteProgram, "cameraPitch");
     sMoteFocalLocation = dglGetUniformLocation(sMoteProgram, "focalLength");
     sMoteAspectLocation = dglGetUniformLocation(sMoteProgram, "aspectCorrection");
+    LocateRig(sMoteProgram, sMoteRigLocations);
     sMoteTintLocation = dglGetUniformLocation(sMoteProgram, "tint");
     sScreenModeLocation = dglGetUniformLocation(sScreenProgram, "mode");
     sScreenImageLocation = dglGetUniformLocation(sScreenProgram, "image");
@@ -562,6 +591,7 @@ static void DrawMotes(const struct DioramaAirLight *air, float cameraX, float ca
     dglUniform1f(sMotePitchLocation, cameraPitch);
     dglUniform1f(sMoteFocalLocation, focalLength);
     dglUniform1f(sMoteAspectLocation, aspectCorrection);
+    ApplyRig(sMoteRigLocations, cameraPitch);
     /* Warm white (0xFFD8F4FF), as the palette's fade and tint have the scene. */
     dglUniform4f(sMoteTintLocation, 1.0f * r, (0xF4 / 255.0f) * g, (0xD8 / 255.0f) * b, air->motes);
     dglBindVertexArray(sMoteArray);
@@ -644,6 +674,7 @@ static void DrawFogBanks(const struct DioramaAirLight *air, float cameraX, float
     dglUniform1f(sFogPitchLocation, cameraPitch);
     dglUniform1f(sFogFocalLocation, focalLength);
     dglUniform1f(sFogAspectLocation, aspectCorrection);
+    ApplyRig(sFogRigLocations, cameraPitch);
     dglUniform3f(sFogHazeLocation, haze[0], haze[1], haze[2]);
     dglUniform3f(sFogHazeColourLocation, hazeColour[0], hazeColour[1], hazeColour[2]);
     dglUniform1i(sFogMapLocation, 0);
@@ -681,11 +712,18 @@ static void DrawGloom(const struct DioramaAirLight *air, float cameraPitch, floa
 {
     float pitchSin = sinf(cameraPitch);
     float pitchCos = cosf(cameraPitch);
-    float distance = (16.0f * pitchCos - 0.458944f) / pitchSin;
+    float height;
+    float distance;
+    float screenOffsetY;
     float y = DioramaGLObjects_GetPlayerGround() + 1.0f;
-    float depth = (16.0f - y) * pitchSin + distance * pitchCos;
-    float vertical = -(16.0f - y) * pitchCos + distance * pitchSin;
-    float clipY = -0.04f * depth + vertical * focalLength * 2.0f / 160.0f;
+    float depth;
+    float vertical;
+    float clipY;
+
+    DioramaCamera_GetRig(cameraPitch, &height, &distance, &screenOffsetY);
+    depth = (height - y) * pitchSin + distance * pitchCos;
+    vertical = -(height - y) * pitchCos + distance * pitchSin;
+    clipY = screenOffsetY * depth + vertical * focalLength * 2.0f / 160.0f;
     float centreY = depth > 0.0001f ? 0.5f + 0.5f * clipY / depth : 0.5f;
 
     dglUseProgram(sScreenProgram);
