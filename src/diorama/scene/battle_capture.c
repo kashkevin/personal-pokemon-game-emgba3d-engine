@@ -229,6 +229,11 @@ void DioramaBattle_Capture(struct DioramaBattleFrame *frame)
     if (!frame->inBattle)
     {
         frame->transition = DioramaBattle_TransitionActive();
+        if (frame->transition && (REG_BG1CNT & BGCNT_MOSAIC))
+        {
+            frame->fieldMosaicH = REG_MOSAIC & 0xF;
+            frame->fieldMosaicV = (REG_MOSAIC >> 4) & 0xF;
+        }
         return;
     }
     frame->battleTypeFlags = gBattleTypeFlags;

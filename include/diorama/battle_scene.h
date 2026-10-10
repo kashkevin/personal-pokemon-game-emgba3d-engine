@@ -82,6 +82,9 @@ struct DioramaBattleFrame
     bool forcedBlank;   /* DISPCNT forced blank */
     bool surfing;
     bool transition;    /* DioramaBattle_TransitionActive(), outside battles */
+    /* During a transition, the mosaic on the field's layers (the Blur
+     * transition's), REG_MOSAIC's BG sizes: 0 none, n blocks of n + 1. */
+    uint8_t fieldMosaicH, fieldMosaicV;
     uint8_t playerFacing; /* DIR_* */
     int16_t playerMapX, playerMapY; /* map coordinates, without MAP_OFFSET */
     /* The same in the Diorama world's cell coordinates: the game's map grid,
