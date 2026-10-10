@@ -157,7 +157,16 @@ static void TestSupportAndFrameKeys(void)
     CHECK(!DioramaSprite_IsSupported(&object));
     object.bpp = 0;
     object.affineMode = 1;
+    CHECK(!DioramaSprite_IsSupported(&object)); /* no matrix: flattened */
+    object.affineMatrix[0] = 0x200; /* half width, as a Poke Ball animation */
+    object.affineMatrix[3] = 0x100;
+    CHECK(DioramaSprite_IsSupported(&object));
+    object.affineMode = 3; /* double size */
+    CHECK(DioramaSprite_IsSupported(&object));
+    object.affineMode = 2; /* erase */
     CHECK(!DioramaSprite_IsSupported(&object));
+    object.affineMatrix[0] = 0;
+    object.affineMatrix[3] = 0;
     object.affineMode = 0;
     object.flags = DIORAMA_OBJECT_SUBSPRITES;
     CHECK(!DioramaSprite_IsSupported(&object));

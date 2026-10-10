@@ -836,6 +836,50 @@ static float DoorDusk(struct DioramaSpritePose pose)
     return DOOR_DARK + (1.0f - DOOR_DARK) * (south - sDoor.wall - DOOR_DEPTH) / DOOR_DUSK;
 }
 
+/*
+ * An affine sprite (a follower shrinking into or growing out of its Poke Ball)
+ * on its card: the GBA's matrix maps screen to texture about the sprite's
+ * centre (texture = M x screen, 8.8), so each corner of the picture lands at
+ * M^-1 x its texture offset from the centre, along the card's right and up.
+ * V1 in KNOWN_ISSUES: these were refused, and the view cut to 2D for them.
+ */
+static void AffineCard(const struct ObjectRenderItem *item, struct DioramaSpritePose pose,
+                       float pitchSin, float pitchCos, struct ObjectVertex vertices[6])
+{
+    static const float sCorners[4][4] = { /* texture offset (halves), uv */
+        {-1.0f, 1.0f, 0, 1}, {1.0f, 1.0f, 1, 1}, {1.0f, -1.0f, 1, 0}, {-1.0f, -1.0f, 0, 0},
+    };
+    const int16_t *m = item->object.affineMatrix;
+    float a = m[0] / 256.0f, b = m[1] / 256.0f, c = m[2] / 256.0f, d = m[3] / 256.0f;
+    float det = a * d - b * c;
+    float height = item->height / 16.0f;
+    float centreY = pose.y + height * 0.5f * pitchCos;
+    float centreZ = pose.z + height * 0.5f * pitchSin;
+    struct ObjectVertex corner[4];
+    int i;
+
+    for (i = 0; i < 4; i++)
+    {
+        float tx = sCorners[i][0] * item->width * 0.5f;
+        float ty = sCorners[i][1] * item->height * 0.5f;
+        float sx = (d * tx - b * ty) / det; /* screen pixels from the centre, y down */
+        float sy = (-c * tx + a * ty) / det;
+        float up = -sy / 16.0f;
+
+        corner[i].x = pose.x + sx / 16.0f;
+        corner[i].y = centreY + up * pitchCos;
+        corner[i].z = centreZ + up * pitchSin;
+        corner[i].u = sCorners[i][2];
+        corner[i].v = sCorners[i][3];
+    }
+    vertices[0] = corner[0];
+    vertices[1] = corner[1];
+    vertices[2] = corner[2];
+    vertices[3] = corner[0];
+    vertices[4] = corner[2];
+    vertices[5] = corner[3];
+}
+
 static void DrawBillboard(const struct ObjectRenderItem *item, struct DioramaSpritePose pose,
                           float pitchSin, float pitchCos)
 {
@@ -843,7 +887,7 @@ static void DrawBillboard(const struct ObjectRenderItem *item, struct DioramaSpr
     float height = item->height / 16.0f;
     float topY = pose.y + height * pitchCos;
     float topZ = pose.z + height * pitchSin;
-    const struct ObjectVertex vertices[6] = {
+    struct ObjectVertex vertices[6] = {
         {pose.x - halfWidth, pose.y, pose.z, 0, 1},
         {pose.x + halfWidth, pose.y, pose.z, 1, 1},
         {pose.x + halfWidth, topY, topZ, 1, 0},
@@ -852,6 +896,8 @@ static void DrawBillboard(const struct ObjectRenderItem *item, struct DioramaSpr
         {pose.x - halfWidth, topY, topZ, 0, 0},
     };
 
+    if (item->object.affineMode != 0)
+        AffineCard(item, pose, pitchSin, pitchCos, vertices);
     glBindTexture(GL_TEXTURE_2D, item->texture);
     dglUniform1f(sDepthBiasLocation, item->depthBias);
     dglUniform1f(sUprightZLocation, pose.z - ModelPush(pose, halfWidth));
@@ -969,7 +1015,8 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
     {
         int index = order[i];
 
-        if (sItems[index].reflectionTexture != 0 && DoorDusk(poses[index]) > 0.0f)
+        if (sItems[index].reflectionTexture != 0 && sItems[index].object.affineMode == 0
+         && DoorDusk(poses[index]) > 0.0f)
         {
             struct DioramaSpritePose reflectionPose = DioramaSprite_ApplyScreenOffset(
                 poses[index], 0, sItems[index].object.reflectionOffsetY, cameraPitch);
@@ -989,7 +1036,7 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
         if ((sItems[index].object.flags & DIORAMA_OBJECT_SHADOW)
          && !sItems[index].attachedToPlayer && DoorDusk(poses[index]) > 0.0f)
         {
-            if (sunStrength > 0.0f)
+            if (sunStrength > 0.0f && sItems[index].object.affineMode == 0)
             {
                 dglUniform1i(sDrawModeLocation, 4);
                 DrawCastShadow(&sItems[index], poses[index]);

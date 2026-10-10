@@ -518,6 +518,8 @@ static bool HasUnsupportedSubsprites(const struct Sprite *sprite,
     const struct Subsprite *subsprite;
     u8 width;
     u8 height;
+    u8 oamWidth;
+    u8 oamHeight;
 
     if (sprite->subspriteTables == NULL || sprite->subspriteMode == SUBSPRITES_OFF)
         return false;
@@ -527,8 +529,12 @@ static bool HasUnsupportedSubsprites(const struct Sprite *sprite,
     if (table->subspriteCount != 1 || graphicsInfo == NULL)
         return true;
     subsprite = &table->subsprites[0];
+    /* One part the size of the sprite's own frame, centred: the frame drawn
+     * whole. Against the sprite's OAM size, not its object's graphics: a
+     * follower shows its 16x32 Poke Ball while its graphics are the mon's. */
     if (!DioramaSprite_GetDimensions(subsprite->shape, subsprite->size, &width, &height)
-     || width != graphicsInfo->width || height != graphicsInfo->height
+     || !DioramaSprite_GetDimensions(sprite->oam.shape, sprite->oam.size, &oamWidth, &oamHeight)
+     || width != oamWidth || height != oamHeight
      || subsprite->tileOffset != 0
      || subsprite->x != -(s8)(width / 2) || subsprite->y != -(s8)(height / 2))
         return true;
@@ -553,6 +559,19 @@ static u8 FindOamOrder(const struct Sprite *sprite, u8 priority)
             return i;
     }
     return 0xFF;
+}
+
+static void CopyAffineMatrix(struct DioramaObjectSnapshot *copy, const struct Sprite *sprite)
+{
+    if (sprite->oam.affineMode == ST_OAM_AFFINE_NORMAL || sprite->oam.affineMode == ST_OAM_AFFINE_DOUBLE)
+    {
+        const struct OamMatrix *matrix = &gOamMatrices[sprite->oam.matrixNum & (OAM_MATRIX_COUNT - 1)];
+
+        copy->affineMatrix[0] = matrix->a;
+        copy->affineMatrix[1] = matrix->b;
+        copy->affineMatrix[2] = matrix->c;
+        copy->affineMatrix[3] = matrix->d;
+    }
 }
 
 static void CopySurfBlob(struct DioramaSceneSnapshot *snapshot)
@@ -583,6 +602,7 @@ static void CopySurfBlob(struct DioramaSceneSnapshot *snapshot)
     copy->screenX = sprite->x + sprite->x2;
     copy->screenY = sprite->y + sprite->y2;
     copy->affineMode = sprite->oam.affineMode;
+    CopyAffineMatrix(copy, sprite);
     copy->objMode = sprite->oam.objMode;
     copy->bpp = sprite->oam.bpp;
     copy->tileNum = sprite->oam.tileNum;
@@ -654,7 +674,8 @@ static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
         copy->facingDirection = object->facingDirection;
         copy->movementDirection = object->movementDirection;
         copy->flags = (object->isPlayer ? DIORAMA_OBJECT_PLAYER : 0)
-                    | ((object->invisible || sprite->invisible) ? DIORAMA_OBJECT_INVISIBLE : 0)
+                    | ((object->invisible || sprite->invisible
+                     || sprite->oam.affineMode == ST_OAM_AFFINE_ERASE) ? DIORAMA_OBJECT_INVISIBLE : 0)
                     | (object->offScreen ? DIORAMA_OBJECT_OFFSCREEN : 0)
                     | (object->hasReflection ? DIORAMA_OBJECT_REFLECTION : 0)
                     // pokeemerald-expansion shows an overworld shadow unless
@@ -682,6 +703,7 @@ static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
         copy->reflectionPaletteNum = gReflectionEffectPaletteMap[sprite->oam.paletteNum];
         copy->reflectionOffsetY = GetReflectionOffsetY(object);
         copy->affineMode = sprite->oam.affineMode;
+        CopyAffineMatrix(copy, sprite);
         copy->objMode = sprite->oam.objMode;
         copy->bpp = sprite->oam.bpp;
         copy->oamAttr0 = sprite->oam.y

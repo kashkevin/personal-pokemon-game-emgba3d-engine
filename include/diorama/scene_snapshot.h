@@ -134,6 +134,10 @@ struct DioramaObjectSnapshot
     uint8_t reflectionPaletteNum;
     int16_t reflectionOffsetY;
     uint8_t affineMode;
+    /* The sprite's affine matrix (gOamMatrices, 8.8: texture = M x screen,
+     * about the sprite's centre) when affineMode is normal or double size:
+     * a follower shrinking into or growing out of its Poke Ball. */
+    int16_t affineMatrix[4];
     uint8_t objMode;
     uint8_t bpp;
     uint16_t frameSize;

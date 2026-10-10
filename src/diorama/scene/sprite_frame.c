@@ -73,7 +73,12 @@ bool DioramaSprite_IsSupported(const struct DioramaObjectSnapshot *object)
 
     return object != NULL
         && object->active
-        && object->affineMode == 0
+        /* Affine (a follower shrinking into its Poke Ball): drawn transformed
+         * by its matrix (gl_object_renderer.c); not if the matrix flattens it. */
+        && (object->affineMode == 0 /* ST_OAM_AFFINE_OFF */
+         || ((object->affineMode == 1 /* NORMAL */ || object->affineMode == 3 /* DOUBLE */)
+          && (int32_t)object->affineMatrix[0] * object->affineMatrix[3]
+           - (int32_t)object->affineMatrix[1] * object->affineMatrix[2] != 0))
         && object->objMode == 0
         && object->bpp == 0
         && !(object->flags & (DIORAMA_OBJECT_SUBSPRITES | DIORAMA_OBJECT_FRAME_INVALID))
