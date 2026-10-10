@@ -30,6 +30,8 @@
 #ifdef ENABLE_DIORAMA
 #include "diorama/gl_compositor.h"
 #include "diorama/scene_snapshot.h"
+#include "multiplayer_menu.h"
+#include "multiplayer_save.h"
 #endif
 
 extern void (*const gIntrTable[])(void);
@@ -143,6 +145,20 @@ static void PerfLog_Presented(Uint64 start, Uint64 end)
     sPerfPresentTicks = 0;
     sPerfWindowStart = end;
 }
+
+#ifdef ENABLE_DIORAMA
+// A live save holds the game for about 34 companion round trips of 2 frames
+// each (a recovery's or a trade's import, about 1024), so its length followed
+// the drawing rate: 26-31 s per save in the 3D view at 2.4 frames a second on
+// a software renderer (app KNOWN_ISSUES M5). While the save holds the game and
+// no menu is open nothing on screen changes (callbacks paused), so its frames
+// run at 60 a second without being drawn, and the view is redrawn once a
+// second (camera keys, a resized window). The save's frame deadlines (600
+// frames between commands) keep their real-time meaning, as in mGBA.
+#define HELD_REDRAW_MS 1000
+static bool sHeldUnchanged; // sampled at the frame boundary, game thread parked
+static Uint32 sLastPresentMs;
+#endif
 
 int main(int argc, char **argv)
 {
@@ -462,6 +478,9 @@ int main(int argc, char **argv)
                         keys = MpBridge_FilterKeys(keys);
                         REG_KEYINPUT = ~keys & KEYS_MASK;
                     }
+#ifdef ENABLE_DIORAMA
+                    sHeldUnchanged = MultiplayerSave_SkipCallbacks() && !MultiplayerMenu_IsActive();
+#endif
 
                     SDL_SemPost(vBlankSemaphore);
                     sPerfGameFrames++;
@@ -472,6 +491,13 @@ int main(int argc, char **argv)
         }
 
 #ifndef __ANDROID__
+#ifdef ENABLE_DIORAMA
+        if (sHeldUnchanged && SDL_GetTicks() - sLastPresentMs < HELD_REDRAW_MS)
+        {
+            SDL_Delay(1); // no vsync wait paces this loop; the accumulator paces the frames
+            continue;
+        }
+#endif
         Uint64 presentStart = SDL_GetPerformanceCounter();
 #ifdef ENABLE_DIORAMA
         double renderStep = fixedTimestep / timeScale;
@@ -483,6 +509,7 @@ int main(int argc, char **argv)
                           sPlatformSettings[PLATFORM_SETTING_BORDER],
                           sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE],
                           frameAlpha);
+        sLastPresentMs = SDL_GetTicks();
 #else
         SDL_RenderPresent(sdlRenderer);
 #endif
