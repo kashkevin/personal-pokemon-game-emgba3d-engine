@@ -233,6 +233,10 @@ check-native:
 	@gcc -m32 -std=gnu99 -Wall -Wextra -Werror -O1 -g -DMP_BRIDGE_UNIT_TEST -iquote include -iquote tools/pc_port/tests \
 	  tools/pc_port/tests/test_mp_bridge.c src/platform/mp_bridge.c -o $(NATIVE_TEST_DIR)/test_mp_bridge
 	@$(NATIVE_TEST_DIR)/test_mp_bridge
+	@gcc -m32 -std=gnu99 -Wall -Wextra -Werror -O1 -g -iquote include -iquote tools/pc_port/tests \
+	  tools/pc_port/tests/test_display_settings.c src/platform/display_settings.c src/platform/pc_menu.c \
+	  src/platform/benchmark.c -o $(NATIVE_TEST_DIR)/test_display_settings
+	@$(NATIVE_TEST_DIR)/test_display_settings
 
 # GBA vs native byte layout of save data, mailboxes, battle packets and asm-built data.
 check-abi:
