@@ -92,7 +92,7 @@ ifeq ($(NATIVE_LINUX),1)
   endif
 else
   CPPFLAGS += -I$(SDL_DIR)/include -isystem tools/pc_port/include-win32
-  LIBS     := -L$(SDL_DIR)/lib -lmingw32 -lSDL2main -lSDL2 -lwinmm -lxinput -lws2_32 -static-libgcc
+  LIBS     := -L$(SDL_DIR)/lib -lmingw32 -lSDL2main -lSDL2 -lwinmm -lws2_32 -static-libgcc
   ifeq ($(DIORAMA),1)
     LIBS   += -lopengl32
   endif

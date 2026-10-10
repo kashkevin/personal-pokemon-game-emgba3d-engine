@@ -1410,12 +1410,41 @@ void ProcessEvents(void)
 
 #ifdef _WIN32
 #define STICK_THRESHOLD 0.5f
+
+// XInput is loaded when it is first needed, newest first: xinput1_4.dll
+// (Windows 8 and later), xinput1_3.dll (the DirectX redistributable),
+// xinput9_1_0.dll (every Windows since Vista). Linked directly, the game
+// imported xinput1_3.dll and would not start on a PC without the DirectX
+// redistributable. With none of them there is simply no controller.
+typedef DWORD (WINAPI *XInputGetStateFunc)(DWORD, XINPUT_STATE *);
+static XInputGetStateFunc sXInputGetState;
+static bool sXInputLoaded;
+
+static DWORD LoadedXInputGetState(DWORD index, XINPUT_STATE *state)
+{
+    if (!sXInputLoaded)
+    {
+        static const char *const names[] = {"xinput1_4.dll", "xinput1_3.dll", "xinput9_1_0.dll"};
+        unsigned int i;
+
+        sXInputLoaded = true;
+        for (i = 0; i < ARRAY_COUNT(names) && sXInputGetState == NULL; i++)
+        {
+            HMODULE module = LoadLibraryA(names[i]);
+
+            if (module != NULL)
+                sXInputGetState = (XInputGetStateFunc)(void *)GetProcAddress(module, "XInputGetState");
+        }
+    }
+    return sXInputGetState != NULL ? sXInputGetState(index, state) : ERROR_DEVICE_NOT_CONNECTED;
+}
+
 u16 GetXInputKeys()
 {
     XINPUT_STATE state;
     ZeroMemory(&state, sizeof(XINPUT_STATE));
 
-    DWORD dwResult = XInputGetState(0, &state);
+    DWORD dwResult = LoadedXInputGetState(0, &state);
     u16 xinputKeys = 0;
 
     if (dwResult == ERROR_SUCCESS)
