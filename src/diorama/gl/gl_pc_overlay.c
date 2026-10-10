@@ -28,7 +28,9 @@
 #define GLYPH_CELL 16
 #define LINE_HEIGHT 16
 
-/* Colours: 0xAABBGGRR, the byte order GL_RGBA reads on a little-endian PC. */
+/* Colours: 0xAABBGGRR, the byte order GL_RGBA reads on a little-endian PC.
+ * (Windows' wingdi.h has an RGB of its own, unused here.) */
+#undef RGB
 #define RGB(hex) (0xFF000000u | (((hex) & 0xFFu) << 16) | ((hex) & 0xFF00u) | (((hex) >> 16) & 0xFFu))
 #define CLEAR_PIXEL 0u
 
