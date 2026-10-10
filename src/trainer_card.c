@@ -332,6 +332,14 @@ static void VblankCb_TrainerCard(void)
     LoadOam();
     ProcessSpriteCopyRequests();
     TransferPlttBuffer();
+#ifdef PORTABLE
+    // Closing the card frees sData a frame before the field replaces this
+    // callback (CloseTrainerCard): a stray read and write near address 0 on
+    // the GBA, a fault natively.
+    if (sData == NULL)
+        return;
+#endif
+#line 335 // gba-line
     BlinkTimeColon();
     if (sData->allowDMACopy)
         DmaCopy16(3, &gScanlineEffectRegBuffers[0], &gScanlineEffectRegBuffers[1], 0x140);
