@@ -37,6 +37,7 @@
 #include "diorama/rules.h"
 #include "diorama/scene_snapshot.h"
 #include "diorama/terrain_mesh.h"
+#include "diorama/tree_model.generated.h"
 #include "gba/defines.h"
 #include "constants/map_types.h"
 
@@ -563,27 +564,54 @@ struct StageContext
     const struct DioramaResolvedCell *resolved;
 };
 
-static bool StageCellAt(void *context, int x, int y, struct DioramaStageCell *cell)
+/*
+ * The Diorama's trees (terrain_mesh.c AppendVoxelTreeInstance): a two-wide
+ * grouped hull is drawn as the voxel tree model, about two tiles tall, on
+ * its body's rows; a one-row hull (the trunk row, the crown flat map art
+ * above it) on the trunk row and the row above. The resolved cells give
+ * only the body's rows, one or two tiles high.
+ */
+#define VOXEL_TREE_HEIGHT ((DIORAMA_TREE_MODEL_MAX_Y - DIORAMA_TREE_MODEL_MIN_Y) \
+                           / (float)DIORAMA_VOXELS_PER_CELL)
+
+static bool IsVoxelTree(const struct DioramaResolvedCell *resolved)
 {
-    const struct StageContext *c = context;
+    return resolved->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL && resolved->structureWidth == 2;
+}
+
+static const struct DioramaResolvedCell *StageResolvedAt(const struct StageContext *c, int x, int y,
+                                                         const struct DioramaCellSnapshot **cell)
+{
     const struct DioramaSceneSnapshot *snapshot = c->snapshot;
     int gx = x - snapshot->gridOriginX, gy = y - snapshot->gridOriginY;
     const struct DioramaCellSnapshot *source;
-    const struct DioramaResolvedCell *resolved;
-    uint16_t ground;
-    uint8_t quarters;
-    float top = 0.0f, modelTop;
     int index;
 
     if (gx < 0 || gy < 0 || gx >= DIORAMA_GRID_WIDTH || gy >= DIORAMA_GRID_HEIGHT)
-        return false;
+        return NULL;
     index = gy * DIORAMA_GRID_WIDTH + gx;
     if (index >= snapshot->visibleCellCount)
-        return false;
+        return NULL;
     source = &snapshot->cells[index];
     if (source->mapX != x || source->mapY != y || !(source->flags & DIORAMA_CELL_SOURCE_VALID))
+        return NULL;
+    if (cell != NULL)
+        *cell = source;
+    return &c->resolved[index];
+}
+
+static bool StageCellAt(void *context, int x, int y, struct DioramaStageCell *cell)
+{
+    const struct StageContext *c = context;
+    const struct DioramaCellSnapshot *source;
+    const struct DioramaResolvedCell *resolved = StageResolvedAt(c, x, y, &source);
+    const struct DioramaResolvedCell *south;
+    uint16_t ground;
+    uint8_t quarters;
+    float top = 0.0f, modelTop;
+
+    if (resolved == NULL)
         return false;
-    resolved = &c->resolved[index];
     memset(cell, 0, sizeof(*cell));
     cell->kind = DioramaBattle_GroundKind(source->behavior);
     if (resolved->shape == DIORAMA_SHAPE_HIDDEN)
@@ -596,8 +624,11 @@ static bool StageCellAt(void *context, int x, int y, struct DioramaStageCell *ce
     if (DioramaBuildings_CellAt(source->sourceLayoutId, source->sourceMapX, source->sourceMapY,
                                 &ground, &quarters, &modelTop) && modelTop > top)
         top = modelTop;
-    if (resolved->archetype == DIORAMA_ARCHETYPE_TREE && top < 2.4f)
-        top = 2.4f;
+    south = StageResolvedAt(c, x, y + 1, NULL);
+    if ((IsVoxelTree(resolved)
+      || (south != NULL && IsVoxelTree(south) && south->structureHeight == 1))
+     && top < VOXEL_TREE_HEIGHT)
+        top = VOXEL_TREE_HEIGHT;
     switch (resolved->shape)
     {
     case DIORAMA_SHAPE_EXTRUDED:
@@ -671,7 +702,7 @@ static void ChooseStage(const struct Layout *layout, const struct DioramaSceneSn
         /* The ground round the player as the search read it: . plain, g grass,
          * s sand, ~ water, space nothing, # something tall, ? not in the
          * scene, P the player. */
-        for (int dy = -5; dy <= 2; ++dy)
+        for (int dy = -5; dy <= 5; ++dy)
         {
             char row[16];
 
