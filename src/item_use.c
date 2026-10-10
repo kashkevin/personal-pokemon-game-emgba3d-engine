@@ -1198,6 +1198,15 @@ bool32 CannotUseItemsInBattle(enum Item itemId, struct Pokemon *mon)
     bool8 cannotUse = FALSE;
     const u8* failStr = NULL;
     u32 i, battlerTarget;
+#ifdef PORTABLE
+    // An item used straight from the bag (a Poke Ball, an X item) comes with
+    // mon NULL (ItemUseInBattle_BagMenu). The GBA reads its BIOS for the HP (in
+    // practice not 0); natively that is a fault: every ball thrown crashed. Its
+    // target is the choosing battler's Pokemon, gPartyMenu.slotId.
+    if (mon == NULL && gPartyMenu.slotId < PARTY_SIZE)
+        mon = &gPlayerParty[gPartyMenu.slotId];
+#endif
+#line 1201 // gba-line
     u16 hp = GetMonData(mon, MON_DATA_HP);
 
     if (gPartyMenu.slotId == 0)
