@@ -19,6 +19,8 @@ void DioramaGLBuildings_Draw(float cameraX, float cameraZ, float cameraPitch,
                              float focalLength, float aspectCorrection);
 /* The sun's depth pass (diorama/gl_shadow.h). */
 void DioramaGLBuildings_DrawShadow(void);
+/* Changes whenever the triangles DrawShadow draws change. */
+uint32_t DioramaGLBuildings_GetGeometryGeneration(void);
 void DioramaGLBuildings_Shutdown(void);
 
 struct DioramaBuildingMetrics

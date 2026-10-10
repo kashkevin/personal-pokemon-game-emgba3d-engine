@@ -34,6 +34,8 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
 void DioramaGLTerrain_DrawShadow(GLuint atlasTexture, GLuint baseAtlasTexture,
                                  GLuint foregroundAtlasTexture);
 const struct DioramaTerrainMetrics *DioramaGLTerrain_GetMetrics(void);
+/* Changes whenever what DrawShadow draws changes. */
+uint32_t DioramaGLTerrain_GetGeometryGeneration(void);
 void DioramaGLTerrain_Shutdown(void);
 
 #endif

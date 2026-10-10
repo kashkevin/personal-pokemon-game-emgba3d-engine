@@ -64,6 +64,11 @@ static uint32_t sMapGeneration;
 static uint32_t sMapEditGeneration;
 static uint32_t sRulesGeneration;
 static uint64_t sLastSyncSequence;
+/* Bumped when what DrawShadow draws changes: a chunk rebuilt, the
+ * chunks on screen changed, a reset. The sun's depth map is kept until
+ * then (gl_shadow.h). */
+static uint32_t sGeometryGeneration;
+static int sLastChunkRange[4];
 static uint32_t sClaimDebugVertexCount;
 
 static const char sTerrainVertexShader[] =
@@ -992,6 +997,12 @@ void DioramaGLTerrain_Reset(void)
         sChunks[i].signature = 0;
     }
     memset(&sMetrics, 0, sizeof(sMetrics));
+    sGeometryGeneration++;
+}
+
+uint32_t DioramaGLTerrain_GetGeometryGeneration(void)
+{
+    return sGeometryGeneration;
 }
 
 bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
@@ -1121,6 +1132,16 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
         }
     }
 
+    if (sMetrics.rebuiltChunks != 0
+     || sLastChunkRange[0] != minChunkX || sLastChunkRange[1] != maxChunkX
+     || sLastChunkRange[2] != minChunkY || sLastChunkRange[3] != maxChunkY)
+    {
+        sLastChunkRange[0] = minChunkX;
+        sLastChunkRange[1] = maxChunkX;
+        sLastChunkRange[2] = minChunkY;
+        sLastChunkRange[3] = maxChunkY;
+        sGeometryGeneration++;
+    }
     sMetrics.residentChunks = 0;
     sMetrics.activeChunks = 0;
     for (i = 0; i < TERRAIN_CHUNK_CACHE_SIZE; i++)

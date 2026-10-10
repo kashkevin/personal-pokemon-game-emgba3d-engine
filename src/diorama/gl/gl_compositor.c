@@ -1258,7 +1258,9 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         glViewport(0, 0, outputWidth, outputHeight);
         // The sun's depth map first (gl_shadow.h), then the lit scene.
         if (DioramaGLShadow_Begin(cameraX, cameraZ,
-                                  sTerrainDebug ? 0.0f : SunStrength(&sRenderedSceneSnapshot)))
+                                  sTerrainDebug ? 0.0f : SunStrength(&sRenderedSceneSnapshot),
+                                  ((uint64_t)DioramaGLBuildings_GetGeometryGeneration() << 32)
+                                  | DioramaGLTerrain_GetGeometryGeneration()))
         {
             DioramaGLTerrain_DrawShadow(sAtlasTexture.id, sBaseAtlasTexture.id,
                                         sForegroundAtlasTexture.id);

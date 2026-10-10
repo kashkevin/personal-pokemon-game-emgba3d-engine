@@ -75,6 +75,10 @@ static unsigned sBatchCount;
 static struct GLBuildingVertex *sVertices;
 static uint32_t sVertexCount;
 static uint32_t sVertexCapacity;
+/* Bumped when the triangles change, not when the same ones are rebuilt:
+ * the sun's depth map is kept until then (gl_shadow.h). */
+static uint32_t sGeometryGeneration;
+static uint32_t sGeometryHash;
 static uint32_t sPaletteGeneration;
 static bool sHasPalette;
 static struct DioramaBuildingMetrics sMetrics;
@@ -314,6 +318,43 @@ static float GroundHeightAt(const struct DioramaSceneSnapshot *snapshot,
     return resolvedCells[index].groundHeight;
 }
 
+/*
+ * Whether any cell of a placement is in the scene as its map's: a model is
+ * drawn with the ground it stands on, not out past the edge of the scene (a
+ * rock of the next route's sea, floating in the dark).
+ */
+static bool PlacementInScene(const struct DioramaSceneSnapshot *snapshot,
+                             const struct Instance *instance,
+                             const struct DioramaBuildingPlacementInfo *info)
+{
+    int x;
+    int y;
+
+    for (y = 0; y < info->height; y++)
+        for (x = 0; x < info->width; x++)
+        {
+            int mapX = instance->originX + info->x + x;
+            int mapY = instance->originY + info->y + y;
+            int gridX = mapX - snapshot->gridOriginX;
+            int gridY = mapY - snapshot->gridOriginY;
+            const struct DioramaCellSnapshot *cell;
+            int index;
+
+            if (gridX < 0 || gridY < 0 || gridX >= DIORAMA_GRID_WIDTH || gridY >= DIORAMA_GRID_HEIGHT)
+                continue;
+            index = gridY * DIORAMA_GRID_WIDTH + gridX;
+            if (index >= snapshot->visibleCellCount)
+                continue;
+            cell = &snapshot->cells[index];
+            if ((cell->flags & DIORAMA_CELL_SOURCE_VALID) && cell->mapX == mapX && cell->mapY == mapY
+             && cell->sourceLayoutId == instance->layout
+             && cell->mapX - cell->sourceMapX == instance->originX
+             && cell->mapY - cell->sourceMapY == instance->originY)
+                return true;
+        }
+    return false;
+}
+
 static bool AppendPlacement(const struct DioramaSceneSnapshot *snapshot,
                             const struct DioramaResolvedCell *resolvedCells,
                             const struct Instance *instance, unsigned placement, uint16_t page)
@@ -325,7 +366,8 @@ static bool AppendPlacement(const struct DioramaSceneSnapshot *snapshot,
     float lift;
     uint32_t i;
 
-    if (!DioramaBuildings_GetPlacement(placement, &info) || info.page != page)
+    if (!DioramaBuildings_GetPlacement(placement, &info) || info.page != page
+     || !PlacementInScene(snapshot, instance, &info))
         return true;
     /* The 3DS models count from the top-left corner of their top-left cell,
      * x east, z south. The Diorama's scene puts cell (x, y) centred on
@@ -473,6 +515,27 @@ full:
     sMetrics.vertices = sVertexCount;
     dglBindBuffer(GL_ARRAY_BUFFER, sVertexBuffer);
     dglBufferData(GL_ARRAY_BUFFER, sVertexCount * sizeof(*sVertices), sVertices, GL_STATIC_DRAW);
+    {
+        /* FNV-1a over the triangles: the grid moving a step rebuilds them
+         * unchanged nearly every time. */
+        const uint8_t *bytes = (const uint8_t *)sVertices;
+        size_t size = (size_t)sVertexCount * sizeof(*sVertices);
+        uint32_t hash = 2166136261u ^ sVertexCount;
+        size_t k;
+
+        for (k = 0; k < size; k++)
+            hash = (hash ^ bytes[k]) * 16777619u;
+        if (hash != sGeometryHash)
+        {
+            sGeometryHash = hash;
+            sGeometryGeneration++;
+        }
+    }
+}
+
+uint32_t DioramaGLBuildings_GetGeometryGeneration(void)
+{
+    return sGeometryGeneration;
 }
 
 void DioramaGLBuildings_Draw(float cameraX, float cameraZ, float cameraPitch,

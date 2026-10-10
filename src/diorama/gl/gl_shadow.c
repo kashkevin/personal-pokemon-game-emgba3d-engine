@@ -3,6 +3,7 @@
  * The sun's depth map (see diorama/gl_shadow.h).
  */
 #include <math.h>
+#include <stdint.h>
 #include <string.h>
 #include <SDL2/SDL.h>
 
@@ -17,6 +18,10 @@
 #define SHADOW_AHEAD 6.0f
 #define SHADOW_EYE_DISTANCE 60.0f
 #define SHADOW_FAR 140.0f
+/* The square follows the camera in steps of this many texels (about two
+ * tiles), and the map is drawn again only when it steps or what casts
+ * changes: the sun does not move, and walkers cast no shadow into it. */
+#define SHADOW_STEP_TEXELS 64
 
 /* Towards the sun, in the scene's axes (x east, y up, z north): the 3DS
  * port's (-VOXEL_SUN_DX, 1, -VOXEL_SUN_DZ) with its z pointing south. */
@@ -31,6 +36,10 @@ static GLuint sFramebuffer;
 static GLuint sDepthTexture;
 static GLfloat sLightMatrix[16];
 static float sAmbient = DIORAMA_SHADOW_AMBIENT;
+static bool sCacheValid;
+static float sCachedX;
+static float sCachedY;
+static uint64_t sCachedGeneration;
 
 static void Normalize(float v[3])
 {
@@ -76,6 +85,7 @@ bool DioramaGLShadow_Init(void)
     GLenum status;
 
     sReady = false;
+    sCacheValid = false;
     sEnabled = setting == NULL || setting[0] != '0';
     if (!sEnabled)
         return true;
@@ -115,7 +125,8 @@ bool DioramaGLShadow_IsEnabled(void)
     return sEnabled && sReady;
 }
 
-bool DioramaGLShadow_Begin(float cameraX, float cameraZ, float strength)
+bool DioramaGLShadow_Begin(float cameraX, float cameraZ, float strength,
+                           uint64_t casterGeneration)
 {
     float sun[3] = {sSunX, sSunY, sSunZ};
     float up[3] = {0.0f, 1.0f, 0.0f};
@@ -125,6 +136,7 @@ bool DioramaGLShadow_Begin(float cameraX, float cameraZ, float strength)
     float center[3] = {cameraX, 0.0f, cameraZ + SHADOW_AHEAD};
     float eye[3];
     float texel = 2.0f * SHADOW_HALF_EXTENT / SHADOW_SIZE;
+    float step = texel * SHADOW_STEP_TEXELS;
     float cx;
     float cy;
     GLfloat view[16];
@@ -144,12 +156,19 @@ bool DioramaGLShadow_Begin(float cameraX, float cameraZ, float strength)
     Normalize(right);
     Cross(right, forward, upward);
     /* Keep the map's texels fixed on the ground as the camera moves: snap
-     * the centre to whole texels across the sun's view, or every shadow edge
-     * crawls as the player walks. */
+     * the centre to whole texels across the sun's view (whole steps of them),
+     * or every shadow edge crawls as the player walks. */
     cx = center[0] * right[0] + center[1] * right[1] + center[2] * right[2];
     cy = center[0] * upward[0] + center[1] * upward[1] + center[2] * upward[2];
-    cx = floorf(cx / texel) * texel;
-    cy = floorf(cy / texel) * texel;
+    cx = floorf(cx / step) * step;
+    cy = floorf(cy / step) * step;
+    if (sCacheValid && cx == sCachedX && cy == sCachedY
+     && casterGeneration == sCachedGeneration)
+    {
+        /* the map drawn last time still holds, and so does its matrix */
+        sActiveThisFrame = true;
+        return false;
+    }
     {
         float along = center[0] * forward[0] + center[1] * forward[1] + center[2] * forward[2];
 
@@ -187,6 +206,10 @@ bool DioramaGLShadow_Begin(float cameraX, float cameraZ, float strength)
     glDisable(GL_CULL_FACE);
     glEnable(GL_POLYGON_OFFSET_FILL);
     glPolygonOffset(2.0f, 4.0f);
+    sCacheValid = true;
+    sCachedX = cx;
+    sCachedY = cy;
+    sCachedGeneration = casterGeneration;
     sActiveThisFrame = true;
     return true;
 }
@@ -233,6 +256,7 @@ void DioramaGLShadow_Shutdown(void)
     sFramebuffer = 0;
     sDepthTexture = 0;
     sReady = false;
+    sCacheValid = false;
     sActiveThisFrame = false;
 }
 #endif // ENABLE_DIORAMA

@@ -2,6 +2,7 @@
 #define GUARD_DIORAMA_GL_SHADOW_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <SDL2/SDL_opengl.h>
 
 /*
@@ -25,9 +26,13 @@ bool DioramaGLShadow_Init(void);
 bool DioramaGLShadow_IsEnabled(void);
 /* Binds the depth map and fits the sun's view around the camera target.
  * `strength` is how strong the sun is this frame, 0 to 1 (indoors and in bad
- * weather 0, at night less: the compositor's call). False (and nothing to
- * draw) when shadows are off or the strength is 0. */
-bool DioramaGLShadow_Begin(float cameraX, float cameraZ, float strength);
+ * weather 0, at night less: the compositor's call). `casterGeneration` changes
+ * whenever what casts changes (the renderers' geometry generations). True when
+ * the casters are to be drawn now (then End); false when shadows are off,
+ * the strength is 0, or the map drawn before still holds (the lit passes use
+ * it all the same). */
+bool DioramaGLShadow_Begin(float cameraX, float cameraZ, float strength,
+                           uint64_t casterGeneration);
 /* Back to the window's framebuffer and viewport. */
 void DioramaGLShadow_End(int outputWidth, int outputHeight);
 /* The light left in a cast shadow this frame, for the lit passes' mix(). */
