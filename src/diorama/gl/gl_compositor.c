@@ -11,6 +11,7 @@
 
 #include "diorama/buildings.h"
 #include "diorama/gl_air.h"
+#include "diorama/gl_field_light.h"
 #include "diorama/gl_building_renderer.h"
 #include "diorama/gl_compositor.h"
 #include "diorama/gl_light.h"
@@ -1336,6 +1337,11 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         // The light in the air over it all (gl_air.h): dust, rays, bloom.
         DioramaGLAir_Draw(cameraX, cameraZ, cameraPitch, cameraFocalLength,
                           aspectCorrection, outputWidth, outputHeight);
+        // A dark cave's circle of light round the player (gl_field_light.h):
+        // everything but the game's text is dark outside it, as on the GBA.
+        DioramaGLFieldLight_Draw(&sRenderedSceneSnapshot, current3D ? frameAlpha : 1.0f,
+                                 cameraX, cameraZ, cameraPitch, cameraFocalLength,
+                                 aspectCorrection, outputWidth, outputHeight);
         glDisable(GL_SCISSOR_TEST);
         glViewport(0, 0, outputWidth, outputHeight);
         dglUseProgram(sProgram);
@@ -1550,6 +1556,7 @@ void DioramaGL_Shutdown(void)
 {
     DioramaGLShadow_Shutdown();
     DioramaGLAir_Shutdown();
+    DioramaGLFieldLight_Shutdown();
     DioramaGLTreeSprites_Shutdown();
     DioramaGLLight_Shutdown();
     DioramaGLBuildings_Shutdown();

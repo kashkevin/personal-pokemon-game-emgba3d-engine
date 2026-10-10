@@ -227,6 +227,19 @@ struct DioramaSceneSnapshot
     int16_t doorMapY;
     uint8_t doorWidth;
     uint8_t doorLevel;
+    /* The dark of a cave that needs Flash, and of the Battle Pyramid: the
+     * circle of light the game opens round the player
+     * (field_screen_effect.c SetFlashScanlineEffectWindowBoundaries), kept
+     * as the 3DS project keeps it (3ds_game_full.c CaptureFieldLight,
+     * 3ds_video.c CtrVideo_SetFieldLight): the game's radius in GBA pixels,
+     * the radius shown (eased towards it, so the circle opens smoothly), the
+     * glow of Flash being used and a frame count for the flame's flicker.
+     * fieldLightOn 0: no dark. */
+    uint8_t fieldLightOn;
+    uint16_t fieldLightRadius;
+    float fieldLightShown;
+    float fieldLightBurst;
+    uint32_t fieldLightTicks;
     uint8_t surfBlobValid;
     int16_t surfBlobOffsetX;
     int16_t surfBlobOffsetY;

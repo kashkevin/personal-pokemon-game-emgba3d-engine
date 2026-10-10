@@ -4,6 +4,7 @@
 #include <SDL2/SDL.h>
 
 #include "global.h"
+#include "battle_pyramid.h"
 #include "diorama/map_connection.h"
 #include "diorama/scene_snapshot.h"
 #include "diorama/sprite_frame.h"
@@ -23,6 +24,7 @@
 #include "metatile_behavior.h"
 #include "overworld.h"
 #include "palette.h"
+#include "scanline_effect.h"
 #include "script.h"
 #include "sprite.h"
 #include "tilesets.h"
@@ -458,6 +460,73 @@ static u64 HashFrame(const u8 *data, u16 size)
 }
 
 // The door standing open (field_door.c); PKMN_DIORAMA_LOG=1 logs each change.
+/*
+ * The dark of a cave that needs Flash, and of the Battle Pyramid (the 3DS
+ * project's 3ds_game_full.c CaptureFieldLight and 3ds_video.c
+ * CtrVideo_SetFieldLight). The field writes a circle of window 0 edges round
+ * the player line by line, with everything outside it hidden but the text
+ * layer; its radius is read back from the line through its centre, where
+ * the game writes exactly centre -/+ radius. Kept here, once a frame on the
+ * game thread: the radius shown eases towards the game's (which grows a
+ * pixel every other frame while Flash is used), and Flash's glow fades.
+ */
+static struct
+{
+    bool8 on;
+    s16 radius;
+    float shown, burst;
+    u32 ticks;
+} sFieldLight = {FALSE, -1, 0.0f, 0.0f, 0};
+
+static bool8 ReadFieldLight(int *radius)
+{
+    const struct ScanlineEffect *effect = &gScanlineEffect;
+    unsigned across;
+    unsigned left;
+
+    if (effect->state == 0 || effect->state == 3 || effect->dmaDest != &REG_WIN0H
+     || ((effect->dmaControl >> 16) & DMA_32BIT)
+     || gSaveBlock1Ptr == NULL || gMapHeader.mapLayout == NULL
+     || (gSaveBlock1Ptr->flashLevel == 0 && !InBattlePyramid()))
+        return FALSE;
+    /* Both buffers hold the same circle once the radius settles; the one the
+     * DMA reads this frame is the one the last VBlank armed. */
+    across = gScanlineEffectRegBuffers[effect->srcBuffer ^ 1][DISPLAY_HEIGHT / 2];
+    left = across >> 8;
+    if ((across & 0xFF) == 0 && left == 0)
+        return FALSE;
+    *radius = left > 0 ? DISPLAY_WIDTH / 2 - (int)left : DISPLAY_WIDTH / 2;
+    return TRUE;
+}
+
+static void CopyFieldLight(struct DioramaSceneSnapshot *snapshot)
+{
+    int radius;
+    bool8 on = ReadFieldLight(&radius);
+
+    if (on && (!sFieldLight.on || sFieldLight.radius < 0))
+        sFieldLight.shown = (float)radius;
+    else if (on && radius > sFieldLight.radius && sFieldLight.shown < radius - 6.0f)
+        sFieldLight.burst = 1.0f;
+    sFieldLight.on = on;
+    if (!on)
+    {
+        sFieldLight.burst = 0.0f;
+        return;
+    }
+    sFieldLight.radius = radius;
+    sFieldLight.ticks++;
+    sFieldLight.shown += ((float)radius - sFieldLight.shown) * 0.25f;
+    if (radius > sFieldLight.shown - 0.5f && radius < sFieldLight.shown + 0.5f)
+        sFieldLight.shown = (float)radius;
+    sFieldLight.burst *= 0.955f;
+    snapshot->fieldLightOn = TRUE;
+    snapshot->fieldLightRadius = (u16)radius;
+    snapshot->fieldLightShown = sFieldLight.shown;
+    snapshot->fieldLightBurst = sFieldLight.burst;
+    snapshot->fieldLightTicks = sFieldLight.ticks;
+}
+
 static void CopyDoor(struct DioramaSceneSnapshot *snapshot)
 {
     static int sLogEnabled = -1;
@@ -943,6 +1012,7 @@ void DioramaScene_PublishOverworld(void)
             sDraft.playerFacingDirection = player->facingDirection;
         }
         CopyDoor(&sDraft);
+        CopyFieldLight(&sDraft);
         CopyUiProfile(&sDraft);
     }
     DioramaSnapshotExchange_Publish(&sDraft);
