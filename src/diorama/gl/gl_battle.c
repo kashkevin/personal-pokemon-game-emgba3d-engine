@@ -385,7 +385,7 @@ static void QuadFlush(const struct Layout *layout, GLuint texture, int mode)
  * on the bottom edge of the window: the text box at the bottom, the scene
  * carried out above and to both sides.
  */
-static void GetLayout(SDL_Window *window, struct Layout *layout)
+static void BattleLayout(SDL_Window *window, struct Layout *layout)
 {
     bool integerScale = DioramaGL_GetIntegerScale();
 
@@ -706,7 +706,7 @@ static void Begin(void)
                     sBattle.frame.mapGroup, sBattle.frame.mapNum);
         return;
     }
-    GetLayout(window, &layout);
+    BattleLayout(window, &layout);
     sBattle.active = true;
     sBattle.chosen = false;
     sBattle.glided = false;
@@ -1124,7 +1124,7 @@ bool DioramaGLBattle_Present(SDL_Window *window)
 
     if (!sBattle.ready || !sBattle.active)
         return false;
-    GetLayout(window, &layout);
+    BattleLayout(window, &layout);
     if (layout.outW <= 0 || layout.outH <= 0)
         return false;
     world = sBattle.sceneLayers != 0;
