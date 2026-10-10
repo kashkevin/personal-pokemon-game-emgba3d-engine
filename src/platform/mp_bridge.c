@@ -26,6 +26,23 @@
 #define MAX_INBOUND_FRAME 256
 #define RX_LIMIT 260
 
+/*
+ * Where this port deliberately differs from mgba.lua: frame rate. mGBA always
+ * runs the game at 60 frames a second, so mgba.lua can bound its work per
+ * emulated frame (1 KiB received, one frame sent) and publish the pose every 6
+ * frames. The native game slows down when drawing is slow (the 3D view on a
+ * slow graphics card: 2-5 frames a second on the cloud computer's software
+ * OpenGL), while the companion keeps sending snapshots by the clock (10 a
+ * second) and judges a pose stale after 0.5 s. At 2.4 frames a second the Lua
+ * budgets let snapshots back up in the socket, every save command waited 6-12 s
+ * behind them and a live checkpoint timed out (2 clients, 3D build), and a pose
+ * every 6 frames (2.5 s) reads as a paused game. So, per game frame:
+ */
+#define RECEIVE_ROUNDS 64   /* 256-byte reads: up to 16 KiB (mgba.lua: 4, 1 KiB) */
+#define FLUSH_FRAMES 8      /* complete frames sent (mgba.lua: 1) */
+#define RECORD_MS 100       /* pose and shared-world record cadence with a clock
+                               (mgba.lua: every 6 frames, 100 ms at 60 frames a second) */
+
 /* ------------------------------------------------------------------------ */
 /* Mailbox access: little endian, as emu:read32/write32 see the GBA's memory. */
 
@@ -1335,7 +1352,7 @@ static void Receive(struct MpBridge *b)
 {
     int round;
 
-    for (round = 0; round < 4; round++)
+    for (round = 0; round < RECEIVE_ROUNDS; round++)
     {
         int got = b->ops.receive(b->ops.context, b->rx + b->rxLength, 256);
 
@@ -1379,8 +1396,9 @@ static void Receive(struct MpBridge *b)
     }
 }
 
-/* flush */
-static void Flush(struct MpBridge *b)
+/* flush: one frame (or the rest of one); true when a frame was completed and
+ * the socket may take another. */
+static bool FlushOne(struct MpBridge *b)
 {
     int sent;
 
@@ -1416,23 +1434,52 @@ static void Flush(struct MpBridge *b)
         b->txSent = 0;
     }
     if (b->txLength == 0)
-        return;
+        return false;
     sent = b->ops.send(b->ops.context, b->tx + b->txSent, b->txLength - b->txSent);
     if (sent == MP_IO_AGAIN)
-        return;
+        return false;
     if (sent == MP_IO_ERROR)
     {
         Stop(b, "send failure", false);
-        return;
+        return false;
     }
     if (sent < 0 || (size_t)sent > b->txLength - b->txSent)
     {
         Stop(b, "invalid send result", true);
-        return;
+        return false;
     }
     b->txSent += (size_t)sent;
-    if (b->txSent == b->txLength)
-        b->txLength = b->txSent = 0;
+    if (b->txSent != b->txLength)
+        return false; /* the socket is full: the rest next frame */
+    b->txLength = b->txSent = 0;
+    return true;
+}
+
+/* mgba.lua's flush sends one frame per emulated frame; see FLUSH_FRAMES. */
+static void Flush(struct MpBridge *b)
+{
+    int frames;
+
+    for (frames = 0; frames < FLUSH_FRAMES && b->connected; frames++)
+        if (!FlushOne(b))
+            return;
+}
+
+/* Whether the pose (or the shared-world record) is due for publication: every
+ * RECORD_MS of real time when the platform has a clock, else every 6 frames
+ * at `phase`, as mgba.lua does. */
+static bool RecordDue(struct MpBridge *b, bool *published, uint32_t *at, int phase)
+{
+    uint32_t now;
+
+    if (b->ops.milliseconds == NULL)
+        return b->tick % 6 == phase;
+    now = b->ops.milliseconds(b->ops.context);
+    if (*published && now - *at < RECORD_MS)
+        return false;
+    *published = true;
+    *at = now;
+    return true;
 }
 
 static void Capability(uint8_t out[8], uint32_t a, uint32_t b2, uint32_t c, uint32_t d)
@@ -1560,7 +1607,7 @@ void MpBridge_Step(struct MpBridge *b)
     if (!b->connected)
         return;
     RouteResetChord(b, b->resetCapabilitySent && ResetHeaderReady(b));
-    if (b->tick % 6 == 3 && WorldHeaderReady(b))
+    if (WorldHeaderReady(b) && RecordDue(b, &b->worldPublished, &b->worldAt, 3))
     {
         uint32_t generation = R32(b, MP_REGION_WORLD, 8);
 
@@ -1576,7 +1623,7 @@ void MpBridge_Step(struct MpBridge *b)
             }
         }
     }
-    if (b->tick % 6 == 0)
+    if (RecordDue(b, &b->posePublished, &b->poseAt, 0))
     {
         uint32_t generation = R32(b, MP_REGION_PRESENCE, 12);
 
@@ -1652,6 +1699,11 @@ void MpBridge_EnableNativeChord(struct MpBridgeInput *input, bool enabled)
 #include <stdlib.h>
 #include <SDL2/SDL.h>
 #ifdef _WIN32
+/* Sockets only: keep windows.h's GDI and min/max macros away from the game's
+ * own TRANSPARENT, min and max (include/gba/defines.h, include/global.h). */
+#define WIN32_LEAN_AND_MEAN
+#define NOGDI
+#define NOMINMAX
 #include <winsock2.h>
 #include <ws2tcpip.h>
 typedef SOCKET MpSocket;
@@ -1786,6 +1838,12 @@ static void GlueClose(void *context)
 {
     (void)context;
     CloseSocket();
+}
+
+static uint32_t GlueMilliseconds(void *context)
+{
+    (void)context;
+    return SDL_GetTicks();
 }
 
 static void GlueLog(void *context, bool error, const char *message)
@@ -1941,6 +1999,7 @@ bool MpBridge_Configure(const char *path)
     ops.close = GlueClose;
     ops.log = GlueLog;
     ops.routeResetChord = GlueRouteResetChord;
+    ops.milliseconds = GlueMilliseconds;
     memset(&sInput, 0, sizeof(sInput));
     MpBridge_Init(&sBridge, &ops, &caps, (uint16_t)port, token);
     memset(token, 0, sizeof(token));

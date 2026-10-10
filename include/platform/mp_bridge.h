@@ -95,6 +95,11 @@ struct MpBridgeOps
     void (*log)(void *context, bool error, const char *message);
     /* mgba.lua's emeraldResetInput: the game may take the reset chord itself. */
     void (*routeResetChord)(void *context, bool enabled);
+    /* Monotonic milliseconds (wrapping), or NULL. With a clock the pose and the
+     * shared-world record are published every 100 ms of real time, so a game
+     * running below 60 frames a second still looks live to the companion;
+     * without one, every 6 frames as mgba.lua does (mp_bridge.c, RECORD_MS). */
+    uint32_t (*milliseconds)(void *context);
 };
 
 #define MP_BRIDGE_MAX_FRAME (4 + 1 + 240 + 4096) /* "F" response with its 4 KiB window */
@@ -136,6 +141,8 @@ struct MpBridge
     bool hasLatestPose;
     uint8_t latestWorld[4 + 1 + 32];
     bool hasLatestWorld, poseSentLast;
+    bool posePublished, worldPublished; /* RecordDue with a clock */
+    uint32_t poseAt, worldAt;
     struct MpBridgeSave save;
     bool hasSaveGeneration;
     uint32_t saveGeneration;
