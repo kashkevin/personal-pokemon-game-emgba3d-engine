@@ -95,6 +95,8 @@ static GLint sCastStrengthLocation;
 static struct DioramaLightUniforms sLightUniforms;
 /* The ground under the player, as last seen (DioramaGLObjects_GetPlayerGround). */
 static float sPlayerGroundY;
+/* Players seen through what hides them (DioramaGLObjects_SetSilhouettes). */
+static bool sSilhouettes = true;
 /* The player's item in sItems, or -1 (DioramaGLObjects_GetPlayerPose). */
 static int sPlayerItem = -1;
 
@@ -182,7 +184,7 @@ static const char sObjectFragmentShader[] =
      * Everything north of the feet is then behind the walker and everything
      * south of them in front, as the GBA draws them; the picture is the
      * leaning card's. */
-    "float UprightDepth() {\n"
+    "float UprightDepth(float margin) {\n"
     "  const float nearDepth = 0.1;\n"
     "  const float farDepth = 80.0;\n"
     "  float pitchSin = sin(cameraPitch);\n"
@@ -192,7 +194,7 @@ static const char sObjectFragmentShader[] =
     "  float depth = (cameraHeight - p.y) * pitchSin + (p.z - cameraZ) * pitchCos;\n"
     "  if (p.z > cameraZ && uprightZ > cameraZ)\n"
     "    depth *= clamp((uprightZ - cameraZ) / (p.z - cameraZ), 0.0, 1.0);\n"
-    "  depth = max(depth, nearDepth);\n"
+    "  depth = max(depth - margin, nearDepth);\n"
     "  float ndc = (farDepth + nearDepth) / (farDepth - nearDepth)\n"
     "            - 2.0 * farDepth * nearDepth / ((farDepth - nearDepth) * depth) - depthBias;\n"
     "  return (gl_DepthRange.diff * ndc + gl_DepthRange.near + gl_DepthRange.far) * 0.5;\n"
@@ -211,8 +213,23 @@ static const char sObjectFragmentShader[] =
     "  return texture(shadowMap, vec3(p.xy, p.z - 0.0015));\n"
     "}\n"
     DIORAMA_GLSL_LIGHT
+    /* drawMode 5, the see-through ghost of a player something stands in
+     * front of (DrawSilhouettes): its depth is taken this far nearer the eye,
+     * so only what stands clearly in front of the walker shows it - a house,
+     * a tree's crown - and not the grass at its feet. */
+    "const float silhouetteMargin = 0.75;\n"
     "void main() {\n"
-    "  gl_FragDepth = drawMode == 0 ? UprightDepth() : gl_FragCoord.z;\n"
+    "  gl_FragDepth = drawMode == 0 ? UprightDepth(0.0)\n"
+    "               : (drawMode == 5 ? UprightDepth(silhouetteMargin) : gl_FragCoord.z);\n"
+    "  if (drawMode == 5) {\n"
+    "    vec4 texel = texture(image, uv);\n"
+    "    if (texel.a < 0.5) discard;\n"
+    /* The sprite's own light and dark in a cool blue, see-through: still
+     * the player at a glance, plainly behind what hides them. */
+    "    float luma = dot(texel.rgb, vec3(0.299, 0.587, 0.114));\n"
+    "    color = vec4(mix(vec3(0.13, 0.25, 0.52), vec3(0.66, 0.84, 1.0), luma), 0.62);\n"
+    "    return;\n"
+    "  }\n"
     "  if (drawMode == 3) {\n"
     "    color = vec4(0.0, 0.0, 0.0, 1.0);\n" /* an open doorway */
     "  } else if (drawMode == 4) {\n"
@@ -950,6 +967,20 @@ static void DrawReflection(const struct ObjectRenderItem *item,
     UploadAndDraw(vertices);
 }
 
+/* Who is shown through what hides them: the player, their follower and the
+ * other players (multiplayer.h's remote objects, local ids 241-243). */
+static bool HasSilhouette(const struct DioramaObjectSnapshot *object)
+{
+    return (object->flags & DIORAMA_OBJECT_PLAYER) != 0
+        || object->localId == 0xFE /* OBJ_EVENT_ID_FOLLOWER */
+        || (object->localId >= 241 && object->localId < 244);
+}
+
+void DioramaGLObjects_SetSilhouettes(bool on)
+{
+    sSilhouettes = on;
+}
+
 void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
                            float cameraPitch, float focalLength,
                            float aspectCorrection)
@@ -1083,6 +1114,23 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
         }
     }
 
+    /* Before the walkers themselves: a player whom the world hides (a house
+     * south of them, a tree's crown) as a see-through ghost, where only the
+     * world - not another walker - stands in front of them. */
+    if (sSilhouettes)
+    {
+        glDepthFunc(GL_GREATER);
+        dglUniform1i(sDrawModeLocation, 5);
+        dglUniform1f(sShadeLocation, 1.0f);
+        for (i = 0; i < sItemCount; i++)
+        {
+            int index = order[i];
+
+            if (HasSilhouette(&sItems[index].object) && DoorDusk(poses[index]) > 0.0f)
+                DrawBillboard(&sItems[index], poses[index], pitchSin, pitchCos);
+        }
+        glDepthFunc(GL_LEQUAL);
+    }
     glDisable(GL_BLEND);
     glDepthMask(GL_TRUE);
     if (sDoor.on)

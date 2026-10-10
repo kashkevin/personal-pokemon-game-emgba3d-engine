@@ -1414,6 +1414,9 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                                   aspectCorrection);
         DioramaGLBuildings_Draw(cameraX, cameraZ, cameraPitch, cameraFocalLength,
                                 aspectCorrection);
+        /* Players hidden by a house or a tree are seen through it, except
+         * in photo mode's pictures. */
+        DioramaGLObjects_SetSilhouettes(DioramaCamera_GetMode() != DIORAMA_CAMERA_PHOTO);
         DioramaGLObjects_Draw(current3D ? frameAlpha : 1.0f,
                                cameraX, cameraZ, cameraPitch,
                                cameraFocalLength, aspectCorrection);

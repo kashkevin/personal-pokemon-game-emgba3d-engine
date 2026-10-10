@@ -24,6 +24,10 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
                            float cameraPitch, float focalLength,
                            float aspectCorrection);
 const struct DioramaObjectMetrics *DioramaGLObjects_GetMetrics(void);
+/* A player, their follower or another player hidden by the world in front
+ * of them is drawn through it as a see-through ghost (on by default; photo
+ * mode turns it off for its pictures). */
+void DioramaGLObjects_SetSilhouettes(bool on);
 /* The height of the ground under the player, as last seen (0 before any). */
 float DioramaGLObjects_GetPlayerGround(void);
 /* Where the player is drawn this frame: the middle of its cell in world
