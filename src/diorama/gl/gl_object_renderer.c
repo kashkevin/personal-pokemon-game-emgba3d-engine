@@ -86,6 +86,7 @@ static GLint sUprightZLocation;
 static GLint sLightProbeLocation;
 static GLint sShadeLocation;
 static GLint sSaturationLocation;
+static GLint sCastStrengthLocation;
 
 /* The door standing open: see FindDoor. */
 #define DOOR_DEPTH 0.03f   /* the opening, in front of its wall */
@@ -155,6 +156,7 @@ static const char sObjectFragmentShader[] =
     "uniform float depthBias;\n"
     "uniform float uprightZ;\n"
     "uniform float shade;\n"
+    "uniform float castStrength;\n"
     DIORAMA_GLSL_GRADE
     /* The card leans back to face the camera, so its top half reaches over
      * whatever stands north of the feet - a counter, a house's front wall -
@@ -200,6 +202,14 @@ static const char sObjectFragmentShader[] =
     "  gl_FragDepth = drawMode == 0 ? UprightDepth() : gl_FragCoord.z;\n"
     "  if (drawMode == 3) {\n"
     "    color = vec4(0.0, 0.0, 0.0, 1.0);\n" /* an open doorway */
+    "  } else if (drawMode == 4) {\n"
+    /* The sprite's own picture laid on the ground along the sun (DrawCastShadow):
+     * its silhouette in the 3DS port's dark blue, as strong as the sun is on
+     * the walker (none in a building's shadow). */
+    "    if (texture(image, uv).a < 0.5) discard;\n"
+    "    float lit = shadowEnabled == 0 ? 0.0\n"
+    "              : (SunLight() - shadowAmbient) / max(1.0 - shadowAmbient, 0.001);\n"
+    "    color = vec4(0.031, 0.078, 0.157, castStrength * clamp(lit, 0.0, 1.0));\n"
     "  } else if (drawMode == 1) {\n"
     "    vec2 point = uv * 2.0 - 1.0;\n"
     "    float distanceSquared = dot(point, point);\n"
@@ -275,6 +285,7 @@ static bool CreateProgram(void)
     sLightProbeLocation = dglGetUniformLocation(sProgram, "lightProbe");
     sShadeLocation = dglGetUniformLocation(sProgram, "shade");
     sSaturationLocation = dglGetUniformLocation(sProgram, "saturation");
+    sCastStrengthLocation = dglGetUniformLocation(sProgram, "castStrength");
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0
         && sFocalLengthLocation >= 0 && sAspectCorrectionLocation >= 0
         && sImageLocation >= 0
@@ -283,7 +294,8 @@ static bool CreateProgram(void)
         && sLightMatrixLocation >= 0 && sShadowMapLocation >= 0
         && sShadowAmbientLocation >= 0
         && sUprightZLocation >= 0 && sLightProbeLocation >= 0
-        && sShadeLocation >= 0 && sSaturationLocation >= 0;
+        && sShadeLocation >= 0 && sSaturationLocation >= 0
+        && sCastStrengthLocation >= 0;
 }
 
 static float ResolveDepthBias(const struct DioramaSceneSnapshot *snapshot,
@@ -644,6 +656,41 @@ static void DrawShadow(const struct ObjectRenderItem *item, struct DioramaSprite
     UploadAndDraw(vertices);
 }
 
+/*
+ * Out in the sun a walker's shadow is its own picture laid on the ground: the
+ * feet stay where they are and every row slides away from the sun by its
+ * height, where the fixed sun puts the shadow of a card standing there. Same
+ * texture as the sprite, so it walks, turns and animates with it. Ported from
+ * the 3DS project's EmitCastShadow (voxel_entities.c, MIT; see
+ * diorama/buildings.h), on flat ground (the 3DS lifts each corner with its
+ * relief). Indoors and in bad weather, with no sun, the round shadow stays.
+ */
+#define CAST_SHADOW_ALPHA 0.36f /* the 3DS port's VOXEL_CAST_SHADOW_ALPHA */
+#define CAST_SHADOW_LIFT 0.03f  /* over decals */
+#define SUN_EAST 0.85f          /* the shadow's way per tile of height (gl_shadow.c) */
+#define SUN_SOUTH 0.55f
+
+static void DrawCastShadow(const struct ObjectRenderItem *item, struct DioramaSpritePose pose)
+{
+    float halfWidth = item->width / 32.0f;
+    float height = item->height / 16.0f;
+    float y = pose.groundY + CAST_SHADOW_LIFT;
+    float east = SUN_EAST * height;
+    float south = SUN_SOUTH * height;
+    const struct ObjectVertex vertices[6] = {
+        {pose.x - halfWidth, y, pose.z, 0, 1},
+        {pose.x + halfWidth, y, pose.z, 1, 1},
+        {pose.x + halfWidth + east, y, pose.z - south, 1, 0},
+        {pose.x - halfWidth, y, pose.z, 0, 1},
+        {pose.x + halfWidth + east, y, pose.z - south, 1, 0},
+        {pose.x - halfWidth + east, y, pose.z - south, 0, 0},
+    };
+
+    glBindTexture(GL_TEXTURE_2D, item->texture);
+    dglUniform3f(sLightProbeLocation, pose.x, pose.groundY + 0.75f, pose.z);
+    UploadAndDraw(vertices);
+}
+
 static const struct DioramaCellSnapshot *FindCell(int mapX, int mapY)
 {
     int i;
@@ -842,6 +889,8 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
     uint8_t order[OBJECT_RENDER_ITEM_CAPACITY];
     float pitchSin = sinf(cameraPitch);
     float pitchCos = cosf(cameraPitch);
+    bool sunLit;
+    float sunStrength;
     int i;
 
     if (!sReady)
@@ -896,7 +945,8 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
     dglUniform1f(sAspectCorrectionLocation, aspectCorrection);
     dglUniform1i(sImageLocation, 0);
     dglUniform1i(sShadowMapLocation, DIORAMA_SHADOW_TEXTURE_UNIT);
-    dglUniform1i(sShadowEnabledLocation, DioramaGLShadow_BindForLighting());
+    sunLit = DioramaGLShadow_BindForLighting();
+    dglUniform1i(sShadowEnabledLocation, sunLit);
     dglUniform1f(sShadowAmbientLocation, DioramaGLShadow_Ambient());
     dglUniformMatrix4fv(sLightMatrixLocation, 1, GL_FALSE, DioramaGLShadow_LightMatrix());
     dglUniform1f(sSaturationLocation, DioramaGLGrade_Saturation());
@@ -931,13 +981,25 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
         }
     }
     glDisable(GL_STENCIL_TEST);
-    dglUniform1i(sDrawModeLocation, 1);
+    sunStrength = sunLit ? (1.0f - DioramaGLShadow_Ambient()) / (1.0f - DIORAMA_SHADOW_AMBIENT) : 0.0f;
+    dglUniform1f(sCastStrengthLocation, CAST_SHADOW_ALPHA * (sunStrength > 1.0f ? 1.0f : sunStrength));
     for (i = 0; i < sItemCount; i++)
     {
         int index = order[i];
         if ((sItems[index].object.flags & DIORAMA_OBJECT_SHADOW)
          && !sItems[index].attachedToPlayer && DoorDusk(poses[index]) > 0.0f)
-            DrawShadow(&sItems[index], poses[index]);
+        {
+            if (sunStrength > 0.0f)
+            {
+                dglUniform1i(sDrawModeLocation, 4);
+                DrawCastShadow(&sItems[index], poses[index]);
+            }
+            else
+            {
+                dglUniform1i(sDrawModeLocation, 1);
+                DrawShadow(&sItems[index], poses[index]);
+            }
+        }
     }
 
     glDisable(GL_BLEND);
