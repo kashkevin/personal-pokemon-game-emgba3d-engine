@@ -19,6 +19,7 @@
 #include "diorama/gl_building_renderer.h"
 #include "diorama/gl_loader.h"
 #include "diorama/gl_grade.h"
+#include "diorama/gl_light.h"
 #include "diorama/gl_shadow.h"
 #include "diorama/rules.h"
 #include "diorama/scene_snapshot.h"
@@ -70,6 +71,7 @@ static GLint sLightMatrixLocation;
 static GLint sShadowMapLocation;
 static GLint sShadowAmbientLocation;
 static GLint sSaturationLocation;
+static struct DioramaLightUniforms sLightUniforms;
 static struct Instance sInstances[MAX_INSTANCES];
 static unsigned sInstanceCount;
 static struct Batch *sBatches;
@@ -99,6 +101,7 @@ static const char sVertexShader[] =
     "out vec2 pagePixel;\n"
     "out float shade;\n"
     "out vec3 sceneWorldPosition;\n"
+    "out float viewDepth;\n"
     "void main() {\n"
     /* The terrain's projection (gl_terrain_renderer.c), so the two meet. */
     "  vec3 worldPosition = position;\n"
@@ -118,6 +121,7 @@ static const char sVertexShader[] =
     "  float clipZ = ((farDepth + nearDepth) / (farDepth - nearDepth)) * depth"
     "              - (2.0 * farDepth * nearDepth) / (farDepth - nearDepth);\n"
     "  gl_Position = vec4(clipX, clipY, clipZ, depth);\n"
+    "  viewDepth = depth;\n"
     "  if (shadowPass == 1) gl_Position = lightViewProjection * vec4(worldPosition, 1.0);\n"
     "  sceneWorldPosition = worldPosition;\n"
     "  pagePixel = texCoord;\n"
@@ -129,6 +133,7 @@ static const char sFragmentShader[] =
     "in vec2 pagePixel;\n"
     "in float shade;\n"
     "in vec3 sceneWorldPosition;\n"
+    "in float viewDepth;\n"
     "out vec4 color;\n"
     "uniform sampler2D page;\n"
     "uniform sampler2D palette;\n"
@@ -138,21 +143,23 @@ static const char sFragmentShader[] =
     "uniform sampler2DShadow shadowMap;\n"
     "uniform float shadowAmbient;\n"
     DIORAMA_GLSL_GRADE
-    "float SunLight() {\n"
+    "float SunLit() {\n" /* 1 in the sun, 0 in a cast shadow */
     "  if (shadowEnabled == 0) return 1.0;\n"
     "  vec4 lightPosition = lightViewProjection * vec4(sceneWorldPosition, 1.0);\n"
     "  vec3 p = lightPosition.xyz / lightPosition.w * 0.5 + 0.5;\n"
     "  if (p.x <= 0.0 || p.x >= 1.0 || p.y <= 0.0 || p.y >= 1.0 || p.z >= 1.0) return 1.0;\n"
-    "  float lit = texture(shadowMap, vec3(p.xy, p.z - 0.0015));\n"
-    "  return mix(shadowAmbient, 1.0, lit);\n"
+    "  return texture(shadowMap, vec3(p.xy, p.z - 0.0015));\n"
     "}\n"
+    DIORAMA_GLSL_LIGHT
     "void main() {\n"
     "  ivec2 size = textureSize(page, 0);\n"
     "  ivec2 texel = clamp(ivec2(floor(pagePixel)), ivec2(0), size - ivec2(1));\n"
     "  int slot = int(texelFetch(page, texel, 0).r * 255.0 + 0.5);\n"
     "  if (slot == 255) discard;\n"
     "  if (shadowPass == 1) { color = vec4(1.0); return; }\n"
-    "  color = vec4(Grade(texelFetch(palette, ivec2(slot, 0), 0).rgb) * shade * SunLight(), 1.0);\n"
+    "  color = vec4(Grade(texelFetch(palette, ivec2(slot, 0), 0).rgb)\n"
+    "             * Light(shade * mix(shadowAmbient, 1.0, SunLit())), 1.0);\n"
+    "  color.rgb = Haze(color.rgb, viewDepth);\n"
     "}\n";
 
 static GLuint CompileShader(GLenum type, const char *source)
@@ -180,6 +187,7 @@ static bool CreateProgram(void)
     GLuint vertexShader = CompileShader(GL_VERTEX_SHADER, sVertexShader);
     GLuint fragmentShader = CompileShader(GL_FRAGMENT_SHADER, sFragmentShader);
     GLint linked;
+    bool lightLocated;
 
     if (vertexShader == 0 || fragmentShader == 0)
     {
@@ -214,11 +222,12 @@ static bool CreateProgram(void)
     sShadowMapLocation = dglGetUniformLocation(sProgram, "shadowMap");
     sShadowAmbientLocation = dglGetUniformLocation(sProgram, "shadowAmbient");
     sSaturationLocation = dglGetUniformLocation(sProgram, "saturation");
+    lightLocated = DioramaGLLight_Locate(sProgram, &sLightUniforms);
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0 && sFocalLengthLocation >= 0
         && sAspectCorrectionLocation >= 0 && sPageLocation >= 0 && sPaletteLocation >= 0
         && sShadowPassLocation >= 0 && sShadowEnabledLocation >= 0
         && sLightMatrixLocation >= 0 && sShadowMapLocation >= 0
-        && sShadowAmbientLocation >= 0 && sSaturationLocation >= 0;
+        && sShadowAmbientLocation >= 0 && sSaturationLocation >= 0 && lightLocated;
 }
 
 bool DioramaGLBuildings_Init(void)
@@ -562,6 +571,7 @@ void DioramaGLBuildings_Draw(float cameraX, float cameraZ, float cameraPitch,
     dglUniform1i(sShadowEnabledLocation, DioramaGLShadow_BindForLighting());
     dglUniform1f(sShadowAmbientLocation, DioramaGLShadow_Ambient());
     dglUniform1f(sSaturationLocation, DioramaGLGrade_Saturation());
+    DioramaGLLight_Apply(&sLightUniforms, cameraPitch);
     dglUniformMatrix4fv(sLightMatrixLocation, 1, GL_FALSE, DioramaGLShadow_LightMatrix());
     dglActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, sPaletteTexture);

@@ -11,6 +11,7 @@
 #include "diorama/buildings.h"
 #include "diorama/gl_building_renderer.h"
 #include "diorama/gl_compositor.h"
+#include "diorama/gl_light.h"
 #include "diorama/gl_loader.h"
 #include "diorama/gl_shadow.h"
 #include "diorama/gl_object_renderer.h"
@@ -1258,7 +1259,9 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glViewport(0, 0, outputWidth, outputHeight);
-        // The sun's depth map first (gl_shadow.h), then the lit scene.
+        // This frame's weather light (gl_light.h), the sun's depth map
+        // (gl_shadow.h), then the lit scene.
+        DioramaGLLight_Update(&sRenderedSceneSnapshot, !sTerrainDebug);
         if (DioramaGLShadow_Begin(cameraX, cameraZ,
                                   sTerrainDebug ? 0.0f : SunStrength(&sRenderedSceneSnapshot),
                                   ((uint64_t)DioramaGLBuildings_GetGeometryGeneration() << 32)

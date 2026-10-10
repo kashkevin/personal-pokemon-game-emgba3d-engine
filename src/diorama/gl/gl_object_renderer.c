@@ -7,6 +7,7 @@
 
 #include "diorama/gl_loader.h"
 #include "diorama/gl_grade.h"
+#include "diorama/gl_light.h"
 #include "diorama/gl_shadow.h"
 #include "diorama/gl_object_renderer.h"
 #include "diorama/rules.generated.h"
@@ -87,6 +88,7 @@ static GLint sLightProbeLocation;
 static GLint sShadeLocation;
 static GLint sSaturationLocation;
 static GLint sCastStrengthLocation;
+static struct DioramaLightUniforms sLightUniforms;
 
 /* The door standing open: see FindDoor. */
 #define DOOR_DEPTH 0.03f   /* the opening, in front of its wall */
@@ -118,6 +120,7 @@ static const char sObjectVertexShader[] =
     "uniform float depthBias;\n"
     "out vec2 uv;\n"
     "out vec3 sceneWorldPosition;\n"
+    "out float viewDepth;\n"
     "void main() {\n"
     "  sceneWorldPosition = position;\n"
     "  const float cameraHeight = 16.0;\n"
@@ -136,6 +139,7 @@ static const char sObjectVertexShader[] =
     "  float clipZ = ((farDepth + nearDepth) / (farDepth - nearDepth)) * depth"
     "              - (2.0 * farDepth * nearDepth) / (farDepth - nearDepth);\n"
     "  gl_Position = vec4(clipX, clipY, clipZ - depthBias * depth, depth);\n"
+    "  viewDepth = depth;\n"
     "  uv = texCoord;\n"
     "}\n";
 
@@ -143,6 +147,7 @@ static const char sObjectFragmentShader[] =
     "#version 330 core\n"
     "in vec2 uv;\n"
     "in vec3 sceneWorldPosition;\n"
+    "in float viewDepth;\n"
     "out vec4 color;\n"
     "uniform sampler2D image;\n"
     "uniform int drawMode;\n"
@@ -190,14 +195,14 @@ static const char sObjectFragmentShader[] =
      * (as the 3DS port lights its cards): the leaning card itself reaches
      * into the wall behind a walker, and would come out half shaded. */
     "uniform vec3 lightProbe;\n"
-    "float SunLight() {\n"
+    "float SunLit() {\n" /* 1 in the sun, 0 in a cast shadow */
     "  if (shadowEnabled == 0) return 1.0;\n"
     "  vec4 lightPosition = lightViewProjection * vec4(lightProbe, 1.0);\n"
     "  vec3 p = lightPosition.xyz / lightPosition.w * 0.5 + 0.5;\n"
     "  if (p.x <= 0.0 || p.x >= 1.0 || p.y <= 0.0 || p.y >= 1.0 || p.z >= 1.0) return 1.0;\n"
-    "  float lit = texture(shadowMap, vec3(p.xy, p.z - 0.0015));\n"
-    "  return mix(shadowAmbient, 1.0, lit);\n"
+    "  return texture(shadowMap, vec3(p.xy, p.z - 0.0015));\n"
     "}\n"
+    DIORAMA_GLSL_LIGHT
     "void main() {\n"
     "  gl_FragDepth = drawMode == 0 ? UprightDepth() : gl_FragCoord.z;\n"
     "  if (drawMode == 3) {\n"
@@ -207,8 +212,7 @@ static const char sObjectFragmentShader[] =
      * its silhouette in the 3DS port's dark blue, as strong as the sun is on
      * the walker (none in a building's shadow). */
     "    if (texture(image, uv).a < 0.5) discard;\n"
-    "    float lit = shadowEnabled == 0 ? 0.0\n"
-    "              : (SunLight() - shadowAmbient) / max(1.0 - shadowAmbient, 0.001);\n"
+    "    float lit = shadowEnabled == 0 ? 0.0 : SunLit();\n"
     "    color = vec4(0.031, 0.078, 0.157, castStrength * clamp(lit, 0.0, 1.0));\n"
     "  } else if (drawMode == 1) {\n"
     "    vec2 point = uv * 2.0 - 1.0;\n"
@@ -220,7 +224,9 @@ static const char sObjectFragmentShader[] =
     "    if (drawMode == 2) sampleUv.x += sin(animationTime * 5.0 + uv.y * 14.0) * 0.012;\n"
     "    vec4 texel = texture(image, sampleUv);\n"
     "    if (texel.a < 0.5) discard;\n"
-    "    color = vec4(Grade(texel.rgb) * SunLight() * shade, texel.a);\n"
+    /* A sprite stands in the light of the ground at its feet (the 3DS port). */
+    "    color = vec4(Grade(texel.rgb) * Light(mix(shadowAmbient, 1.0, SunLit())) * shade, texel.a);\n"
+    "    color.rgb = Haze(color.rgb, viewDepth);\n"
     "  }\n"
     "}\n";
 
@@ -248,6 +254,7 @@ static bool CreateProgram(void)
     GLuint vertexShader = CompileShader(GL_VERTEX_SHADER, sObjectVertexShader);
     GLuint fragmentShader = CompileShader(GL_FRAGMENT_SHADER, sObjectFragmentShader);
     GLint linked;
+    bool lightLocated;
 
     if (vertexShader == 0 || fragmentShader == 0)
     {
@@ -286,6 +293,7 @@ static bool CreateProgram(void)
     sShadeLocation = dglGetUniformLocation(sProgram, "shade");
     sSaturationLocation = dglGetUniformLocation(sProgram, "saturation");
     sCastStrengthLocation = dglGetUniformLocation(sProgram, "castStrength");
+    lightLocated = DioramaGLLight_Locate(sProgram, &sLightUniforms);
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0
         && sFocalLengthLocation >= 0 && sAspectCorrectionLocation >= 0
         && sImageLocation >= 0
@@ -295,7 +303,7 @@ static bool CreateProgram(void)
         && sShadowAmbientLocation >= 0
         && sUprightZLocation >= 0 && sLightProbeLocation >= 0
         && sShadeLocation >= 0 && sSaturationLocation >= 0
-        && sCastStrengthLocation >= 0;
+        && sCastStrengthLocation >= 0 && lightLocated;
 }
 
 static float ResolveDepthBias(const struct DioramaSceneSnapshot *snapshot,
@@ -996,6 +1004,7 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
     dglUniform1f(sShadowAmbientLocation, DioramaGLShadow_Ambient());
     dglUniformMatrix4fv(sLightMatrixLocation, 1, GL_FALSE, DioramaGLShadow_LightMatrix());
     dglUniform1f(sSaturationLocation, DioramaGLGrade_Saturation());
+    DioramaGLLight_Apply(&sLightUniforms, cameraPitch);
     dglUniform1f(sAnimationTimeLocation, (float)fmod(
         (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency(), 120.0));
     dglActiveTexture(GL_TEXTURE0);

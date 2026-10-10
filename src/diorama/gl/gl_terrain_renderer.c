@@ -8,6 +8,7 @@
 #include "global.h"
 #include "diorama/gl_loader.h"
 #include "diorama/gl_grade.h"
+#include "diorama/gl_light.h"
 #include "diorama/gl_shadow.h"
 #include "diorama/gl_terrain_renderer.h"
 #include "diorama/metatile_atlas.h"
@@ -65,6 +66,7 @@ static GLint sShadowAmbientLocation;
 static GLint sPixelScaleLocation;
 static GLint sPixelOffsetLocation;
 static GLint sSaturationLocation;
+static struct DioramaLightUniforms sLightUniforms;
 /* The tree model's colour line this frame (TreeTint): faded = scale * baked + offset. */
 static float sTreeScale[3] = {1.0f, 1.0f, 1.0f};
 static float sTreeOffset[3];
@@ -100,6 +102,7 @@ static const char sTerrainVertexShader[] =
     "out float reflectionMask;\n"
     "out vec4 pixelColor;\n"
     "out vec3 sceneWorldPosition;\n"
+    "out float viewDepth;\n"
     "void main() {\n"
     "  vec3 worldPosition = position + instanceOffset;\n"
     "  sceneWorldPosition = worldPosition;\n"
@@ -119,6 +122,7 @@ static const char sTerrainVertexShader[] =
     "  float clipZ = ((farDepth + nearDepth) / (farDepth - nearDepth)) * depth"
     "              - (2.0 * farDepth * nearDepth) / (farDepth - nearDepth);\n"
     "  gl_Position = vec4(clipX, clipY, clipZ, depth);\n"
+    "  viewDepth = depth;\n"
     "  if (shadowPass == 1) gl_Position = lightViewProjection * vec4(worldPosition, 1.0);\n"
     "  uv = texCoord;\n"
     "  shade = vertexShade;\n"
@@ -135,6 +139,7 @@ static const char sTerrainFragmentShader[] =
     "in float reflectionMask;\n"
     "in vec4 pixelColor;\n"
     "in vec3 sceneWorldPosition;\n"
+    "in float viewDepth;\n"
     "out vec4 color;\n"
     "uniform sampler2D image;\n"
     "uniform sampler2D baseImage;\n"
@@ -151,16 +156,17 @@ static const char sTerrainFragmentShader[] =
     "uniform vec3 pixelScale;\n"
     "uniform vec3 pixelOffset;\n"
     DIORAMA_GLSL_GRADE
-    /* gl_shadow.h: the light a point gets from the sun, 1 lit, the
-     * shadow's ambient in a cast shadow (the 3DS port's 0.70 by day). */
-    "float SunLight() {\n"
+    /* gl_shadow.h: how much sun a point gets, 1 lit, 0 in a cast shadow;
+     * main() darkens a shadow to its ambient (the 3DS port's 0.70 by day)
+     * and tints it cool (gl_light.h). */
+    "float SunLit() {\n"
     "  if (shadowEnabled == 0) return 1.0;\n"
     "  vec4 lightPosition = lightViewProjection * vec4(sceneWorldPosition, 1.0);\n"
     "  vec3 p = lightPosition.xyz / lightPosition.w * 0.5 + 0.5;\n"
     "  if (p.x <= 0.0 || p.x >= 1.0 || p.y <= 0.0 || p.y >= 1.0 || p.z >= 1.0) return 1.0;\n"
-    "  float lit = texture(shadowMap, vec3(p.xy, p.z - 0.0015));\n"
-    "  return mix(shadowAmbient, 1.0, lit);\n"
+    "  return texture(shadowMap, vec3(p.xy, p.z - 0.0015));\n"
     "}\n"
+    DIORAMA_GLSL_LIGHT
     "void main() {\n"
     "  if (shadowPass == 1) {\n"
     "    vec4 caster = textureLayer == 1 ? texture(baseImage, uv)\n"
@@ -183,7 +189,8 @@ static const char sTerrainFragmentShader[] =
     "             : (textureLayer == 3 ? pixelColor : texture(image, uv)));\n"
     "  if (texel.a < 0.5) discard;\n"
     "  if (textureLayer == 3) texel.rgb = clamp(texel.rgb * pixelScale + pixelOffset, 0.0, 1.0);\n"
-    "  color = vec4(Grade(texel.rgb) * shade * SunLight(), texel.a);\n"
+    "  color = vec4(Grade(texel.rgb) * Light(shade * mix(shadowAmbient, 1.0, SunLit())), texel.a);\n"
+    "  color.rgb = Haze(color.rgb, viewDepth);\n"
     "}\n";
 
 static GLuint CompileShader(GLenum type, const char *source)
@@ -210,6 +217,7 @@ static bool CreateProgram(void)
     GLuint vertexShader = CompileShader(GL_VERTEX_SHADER, sTerrainVertexShader);
     GLuint fragmentShader = CompileShader(GL_FRAGMENT_SHADER, sTerrainFragmentShader);
     GLint linked;
+    bool lightLocated;
 
     if (vertexShader == 0 || fragmentShader == 0)
     {
@@ -248,6 +256,7 @@ static bool CreateProgram(void)
     sPixelScaleLocation = dglGetUniformLocation(sProgram, "pixelScale");
     sPixelOffsetLocation = dglGetUniformLocation(sProgram, "pixelOffset");
     sSaturationLocation = dglGetUniformLocation(sProgram, "saturation");
+    lightLocated = DioramaGLLight_Locate(sProgram, &sLightUniforms);
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0
         && sFocalLengthLocation >= 0 && sAspectCorrectionLocation >= 0
         && sImageLocation >= 0
@@ -257,7 +266,7 @@ static bool CreateProgram(void)
         && sLightMatrixLocation >= 0 && sShadowMapLocation >= 0
         && sShadowAmbientLocation >= 0
         && sPixelScaleLocation >= 0 && sPixelOffsetLocation >= 0
-        && sSaturationLocation >= 0;
+        && sSaturationLocation >= 0 && lightLocated;
 }
 
 static void ConfigureVertexArray(GLuint vertexArray, GLuint vertexBuffer)
@@ -518,6 +527,17 @@ static void TreeTint(const struct DioramaSceneSnapshot *snapshot)
             sLogged[0] = sTreeScale[0]; sLogged[1] = sTreeScale[1]; sLogged[2] = sTreeScale[2];
             sLogged[3] = sTreeOffset[0]; sLogged[4] = sTreeOffset[1]; sLogged[5] = sTreeOffset[2];
         }
+    }
+}
+
+void DioramaGLTerrain_GetPaletteLine(float scale[3], float offset[3])
+{
+    int i;
+
+    for (i = 0; i < 3; i++)
+    {
+        scale[i] = sTreeScale[i];
+        offset[i] = sTreeOffset[i];
     }
 }
 
@@ -1288,6 +1308,10 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
     dglUniform1f(sShadowAmbientLocation, DioramaGLShadow_Ambient());
     dglUniformMatrix4fv(sLightMatrixLocation, 1, GL_FALSE, DioramaGLShadow_LightMatrix());
     dglUniform1f(sSaturationLocation, debug ? 1.0f : DioramaGLGrade_Saturation());
+    if (debug)
+        DioramaGLLight_ApplyNeutral(&sLightUniforms);
+    else
+        DioramaGLLight_Apply(&sLightUniforms, cameraPitch);
     dglUniform3f(sPixelScaleLocation, 1.0f, 1.0f, 1.0f);
     dglUniform3f(sPixelOffsetLocation, 0.0f, 0.0f, 0.0f);
     dglActiveTexture(GL_TEXTURE0);
