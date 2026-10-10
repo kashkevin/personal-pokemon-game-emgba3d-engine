@@ -17,6 +17,8 @@ void DioramaGLBuildings_Sync(const struct DioramaSceneSnapshot *snapshot,
                              const struct DioramaResolvedCell *resolvedCells);
 void DioramaGLBuildings_Draw(float cameraX, float cameraZ, float cameraPitch,
                              float focalLength, float aspectCorrection);
+/* The sun's depth pass (diorama/gl_shadow.h). */
+void DioramaGLBuildings_DrawShadow(void);
 void DioramaGLBuildings_Shutdown(void);
 
 struct DioramaBuildingMetrics

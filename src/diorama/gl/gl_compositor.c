@@ -12,6 +12,7 @@
 #include "diorama/gl_building_renderer.h"
 #include "diorama/gl_compositor.h"
 #include "diorama/gl_loader.h"
+#include "diorama/gl_shadow.h"
 #include "diorama/gl_object_renderer.h"
 #include "diorama/gl_terrain_renderer.h"
 #include "diorama/rules.generated.h"
@@ -935,6 +936,8 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
     // own extrusion.
     if (!DioramaGLBuildings_Init())
         SDL_Log("Diorama building models unavailable; houses stay extruded");
+    if (!DioramaGLShadow_Init())
+        SDL_Log("Diorama sun shadows unavailable");
 
     dglGenVertexArrays(1, &sVertexArray);
     dglBindVertexArray(sVertexArray);
@@ -1217,6 +1220,14 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glViewport(0, 0, outputWidth, outputHeight);
+        // The sun's depth map first (gl_shadow.h), then the lit scene.
+        if (!sTerrainDebug && DioramaGLShadow_Begin(cameraX, cameraZ))
+        {
+            DioramaGLTerrain_DrawShadow(sAtlasTexture.id, sBaseAtlasTexture.id,
+                                        sForegroundAtlasTexture.id);
+            DioramaGLBuildings_DrawShadow();
+            DioramaGLShadow_End(outputWidth, outputHeight);
+        }
         DioramaGLTerrain_Draw(sAtlasTexture.id, sBaseAtlasTexture.id,
                                sForegroundAtlasTexture.id, cameraX, cameraZ,
                                cameraPitch, cameraFocalLength,
@@ -1405,6 +1416,7 @@ void DioramaGL_AdjustCameraPitch(int steps)
 
 void DioramaGL_Shutdown(void)
 {
+    DioramaGLShadow_Shutdown();
     DioramaGLBuildings_Shutdown();
     DioramaGLObjects_Shutdown();
     DioramaGLTerrain_Shutdown();

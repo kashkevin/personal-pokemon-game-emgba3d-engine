@@ -30,6 +30,9 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
                            GLuint foregroundAtlasTexture, float cameraX, float cameraZ,
                            float cameraPitch, float focalLength,
                            float aspectCorrection, bool debug);
+/* The sun's depth pass (diorama/gl_shadow.h): every resident chunk and tree. */
+void DioramaGLTerrain_DrawShadow(GLuint atlasTexture, GLuint baseAtlasTexture,
+                                 GLuint foregroundAtlasTexture);
 const struct DioramaTerrainMetrics *DioramaGLTerrain_GetMetrics(void);
 void DioramaGLTerrain_Shutdown(void);
 

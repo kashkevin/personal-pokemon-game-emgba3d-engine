@@ -61,6 +61,16 @@ const struct DioramaBuildingVertex *DioramaBuildings_Vertices(void);
 bool DioramaBuildings_CellAt(uint16_t layout, int x, int y,
                              uint16_t *ground, uint8_t *quarters, float *top);
 
+/*
+ * The face of a model a walker in layout cell (x, y) stands before: the
+ * southernmost upright face looking south, of any model that reaches the cell,
+ * crossing x0..x1 at `height` tiles over the model's base. In tiles of the
+ * layout, cell (x, y) spanning x..x+1 and y..y+1 (z grows south, as y does).
+ * False when there is none. A piece of furniture's front, a building's wall.
+ */
+bool DioramaBuildings_FrontAt(uint16_t layout, int x, int y, float x0, float x1,
+                              float height, float *z);
+
 struct DioramaSceneSnapshot;
 struct DioramaResolvedCell;
 /*

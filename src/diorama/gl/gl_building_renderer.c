@@ -18,6 +18,7 @@
 #include "diorama/buildings.h"
 #include "diorama/gl_building_renderer.h"
 #include "diorama/gl_loader.h"
+#include "diorama/gl_shadow.h"
 #include "diorama/rules.h"
 #include "diorama/scene_snapshot.h"
 
@@ -62,6 +63,10 @@ static GLint sFocalLengthLocation;
 static GLint sAspectCorrectionLocation;
 static GLint sPageLocation;
 static GLint sPaletteLocation;
+static GLint sShadowPassLocation;
+static GLint sShadowEnabledLocation;
+static GLint sLightMatrixLocation;
+static GLint sShadowMapLocation;
 static struct Instance sInstances[MAX_INSTANCES];
 static unsigned sInstanceCount;
 static struct Batch *sBatches;
@@ -82,8 +87,11 @@ static const char sVertexShader[] =
     "uniform float cameraPitch;\n"
     "uniform float focalLength;\n"
     "uniform float aspectCorrection;\n"
+    "uniform int shadowPass;\n"
+    "uniform mat4 lightViewProjection;\n"
     "out vec2 pagePixel;\n"
     "out float shade;\n"
+    "out vec3 sceneWorldPosition;\n"
     "void main() {\n"
     /* The terrain's projection (gl_terrain_renderer.c), so the two meet. */
     "  vec3 worldPosition = position;\n"
@@ -103,6 +111,8 @@ static const char sVertexShader[] =
     "  float clipZ = ((farDepth + nearDepth) / (farDepth - nearDepth)) * depth"
     "              - (2.0 * farDepth * nearDepth) / (farDepth - nearDepth);\n"
     "  gl_Position = vec4(clipX, clipY, clipZ, depth);\n"
+    "  if (shadowPass == 1) gl_Position = lightViewProjection * vec4(worldPosition, 1.0);\n"
+    "  sceneWorldPosition = worldPosition;\n"
     "  pagePixel = texCoord;\n"
     "  shade = vertexShade;\n"
     "}\n";
@@ -111,15 +121,29 @@ static const char sFragmentShader[] =
     "#version 330 core\n"
     "in vec2 pagePixel;\n"
     "in float shade;\n"
+    "in vec3 sceneWorldPosition;\n"
     "out vec4 color;\n"
     "uniform sampler2D page;\n"
     "uniform sampler2D palette;\n"
+    "uniform int shadowPass;\n"
+    "uniform int shadowEnabled;\n"
+    "uniform mat4 lightViewProjection;\n"
+    "uniform sampler2DShadow shadowMap;\n"
+    "float SunLight() {\n"
+    "  if (shadowEnabled == 0) return 1.0;\n"
+    "  vec4 lightPosition = lightViewProjection * vec4(sceneWorldPosition, 1.0);\n"
+    "  vec3 p = lightPosition.xyz / lightPosition.w * 0.5 + 0.5;\n"
+    "  if (p.x <= 0.0 || p.x >= 1.0 || p.y <= 0.0 || p.y >= 1.0 || p.z >= 1.0) return 1.0;\n"
+    "  float lit = texture(shadowMap, vec3(p.xy, p.z - 0.0015));\n"
+    "  return mix(0.70, 1.0, lit);\n"
+    "}\n"
     "void main() {\n"
     "  ivec2 size = textureSize(page, 0);\n"
     "  ivec2 texel = clamp(ivec2(floor(pagePixel)), ivec2(0), size - ivec2(1));\n"
     "  int slot = int(texelFetch(page, texel, 0).r * 255.0 + 0.5);\n"
     "  if (slot == 255) discard;\n"
-    "  color = vec4(texelFetch(palette, ivec2(slot, 0), 0).rgb * shade, 1.0);\n"
+    "  if (shadowPass == 1) { color = vec4(1.0); return; }\n"
+    "  color = vec4(texelFetch(palette, ivec2(slot, 0), 0).rgb * shade * SunLight(), 1.0);\n"
     "}\n";
 
 static GLuint CompileShader(GLenum type, const char *source)
@@ -175,8 +199,14 @@ static bool CreateProgram(void)
     sAspectCorrectionLocation = dglGetUniformLocation(sProgram, "aspectCorrection");
     sPageLocation = dglGetUniformLocation(sProgram, "page");
     sPaletteLocation = dglGetUniformLocation(sProgram, "palette");
+    sShadowPassLocation = dglGetUniformLocation(sProgram, "shadowPass");
+    sShadowEnabledLocation = dglGetUniformLocation(sProgram, "shadowEnabled");
+    sLightMatrixLocation = dglGetUniformLocation(sProgram, "lightViewProjection");
+    sShadowMapLocation = dglGetUniformLocation(sProgram, "shadowMap");
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0 && sFocalLengthLocation >= 0
-        && sAspectCorrectionLocation >= 0 && sPageLocation >= 0 && sPaletteLocation >= 0;
+        && sAspectCorrectionLocation >= 0 && sPageLocation >= 0 && sPaletteLocation >= 0
+        && sShadowPassLocation >= 0 && sShadowEnabledLocation >= 0
+        && sLightMatrixLocation >= 0 && sShadowMapLocation >= 0;
 }
 
 bool DioramaGLBuildings_Init(void)
@@ -456,6 +486,10 @@ void DioramaGLBuildings_Draw(float cameraX, float cameraZ, float cameraPitch,
     dglUniform1f(sAspectCorrectionLocation, aspectCorrection);
     dglUniform1i(sPageLocation, 0);
     dglUniform1i(sPaletteLocation, 1);
+    dglUniform1i(sShadowPassLocation, 0);
+    dglUniform1i(sShadowMapLocation, DIORAMA_SHADOW_TEXTURE_UNIT);
+    dglUniform1i(sShadowEnabledLocation, DioramaGLShadow_BindForLighting());
+    dglUniformMatrix4fv(sLightMatrixLocation, 1, GL_FALSE, DioramaGLShadow_LightMatrix());
     dglActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, sPaletteTexture);
     dglActiveTexture(GL_TEXTURE0);
@@ -476,6 +510,35 @@ void DioramaGLBuildings_Draw(float cameraX, float cameraZ, float cameraPitch,
         sMetrics.drawCalls++;
     }
     glDisable(GL_DEPTH_TEST);
+}
+
+void DioramaGLBuildings_DrawShadow(void)
+{
+    unsigned i;
+
+    if (!sReady || sBatchCount == 0)
+        return;
+    dglUseProgram(sProgram);
+    dglUniform1i(sPageLocation, 0);
+    dglUniform1i(sPaletteLocation, 1);
+    dglUniform1i(sShadowPassLocation, 1);
+    dglUniform1i(sShadowEnabledLocation, 0);
+    dglUniform1i(sShadowMapLocation, DIORAMA_SHADOW_TEXTURE_UNIT);
+    dglUniformMatrix4fv(sLightMatrixLocation, 1, GL_FALSE, DioramaGLShadow_LightMatrix());
+    dglActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, sPaletteTexture);
+    dglActiveTexture(GL_TEXTURE0);
+    dglBindVertexArray(sVertexArray);
+    for (i = 0; i < sBatchCount; i++)
+    {
+        GLuint texture = PageTexture(sBatches[i].page);
+
+        if (texture == 0)
+            continue;
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glDrawArrays(GL_TRIANGLES, (GLint)sBatches[i].first, (GLsizei)sBatches[i].count);
+    }
+    dglUniform1i(sShadowPassLocation, 0);
 }
 
 const struct DioramaBuildingMetrics *DioramaGLBuildings_GetMetrics(void)

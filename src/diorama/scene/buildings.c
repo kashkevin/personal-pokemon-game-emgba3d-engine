@@ -8,8 +8,8 @@
  * VXB7 layout and its checks are that file's. Changed here: the table is read
  * from memory instead of the console's RomFS; page texels are palette slots in
  * plain rows (export_gl.py) instead of RGBA5551 in the PICA200's order; the
- * relief lift, lighting and front-face queries of the 3DS renderer are not
- * ported (yet).
+ * relief lift and baked lighting of the 3DS renderer are not ported (the GL
+ * renderer lights with a shadow map, diorama/gl_shadow.h).
  *
  * Layout (little endian):
  *   "VXB7", u16 pages, models, pageModels, placements, heightBytes, masks,
@@ -81,6 +81,35 @@ static unsigned sVertexCount;
 static int sLastLayout = -1;
 static unsigned sLastFirst, sLastCount;
 
+/* An upright face looking south: its span in x and its z, in tiles of the
+ * layout (DioramaBuildings_FrontAt). */
+struct FrontFace
+{
+    float lo, hi, z;
+};
+
+/*
+ * A walker's card asks for the faces of the cells under it every frame, and a
+ * model is read triangle by triangle - thousands of them for a Pokemon Center
+ * - so a cell's faces are found once and kept. The models never change; a
+ * cell is known by its layout and the height asked about. A cell with more
+ * faces than an entry holds is read again each time.
+ */
+#define FRONT_SETS 64u
+#define FRONT_FACES 16u
+
+struct FrontCell
+{
+    bool valid;
+    uint16_t layout;
+    int x, y;
+    float height;
+    unsigned count;
+    struct FrontFace face[FRONT_FACES];
+};
+
+static struct FrontCell sFrontCells[FRONT_SETS];
+
 static unsigned U16(const uint8_t *p) { return (unsigned)p[0] | ((unsigned)p[1] << 8); }
 static uint32_t U32(const uint8_t *p)
 {
@@ -104,6 +133,7 @@ static void Release(void)
     sPageCount = sModelCount = sPageModelCount = sPlacementCount = 0;
     sHeightBytes = sVertexCount = 0;
     sLastLayout = -1;
+    memset(sFrontCells, 0, sizeof(sFrontCells));
     sReady = false;
 }
 
@@ -314,6 +344,132 @@ bool DioramaBuildings_CellAt(uint16_t layout, int x, int y,
         return true;
     }
     return false;
+}
+
+/*
+ * The upright faces looking south in layout cell (x, y) that cross `height`:
+ * each one's span in x and its z. Every model that reaches the cell, not the
+ * first one whose rectangle holds it: a Pokemon Center's PC stands in a cell
+ * of the counter's rectangle, and the counter has no face there. Returns how
+ * many there are, writing at most `max`.
+ */
+static unsigned CollectFronts(uint16_t layout, int x, int y, float height,
+                              struct FrontFace *out, unsigned max)
+{
+    unsigned first;
+    unsigned count = DioramaBuildings_LayoutPlacements(layout, &first);
+    unsigned found = 0;
+    unsigned i;
+
+    for (i = 0; i < count; i++)
+    {
+        const struct BuildingPlacement *p = &sPlacements[first + i];
+        const struct BuildingModel *m = &sModels[sPageModels[p->pageModel].model];
+        const struct DioramaBuildingVertex *v = &sVertices[m->firstVertex];
+        int lx = x - p->x;
+        int ly = y - p->y;
+        float north = (float)ly;
+        uint32_t k;
+
+        if (lx < 0 || ly < 0 || lx >= m->w || ly >= m->h)
+            continue;
+        for (k = 0; k + 2 < m->vertexCount; k += 3)
+        {
+            const struct DioramaBuildingVertex *a = &v[k];
+            const struct DioramaBuildingVertex *b = &v[k + 1];
+            const struct DioramaBuildingVertex *c = &v[k + 2];
+            float lo = a->x < b->x ? a->x : b->x;
+            float hi = a->x > b->x ? a->x : b->x;
+            float y0 = a->y < b->y ? a->y : b->y;
+            float y1 = a->y > b->y ? a->y : b->y;
+            struct FrontFace face;
+            unsigned j;
+
+            if (c->x < lo) lo = c->x;
+            if (c->x > hi) hi = c->x;
+            if (c->y < y0) y0 = c->y;
+            if (c->y > y1) y1 = c->y;
+            /* upright, in the cell, at the height */
+            if (a->z != b->z || a->z != c->z || a->z < north - 0.01f || a->z > north + 1.01f
+             || y0 > height || y1 < height)
+                continue;
+            /* and looking south: a counter's back is not in front of the
+             * nurse behind it (a face winds outwards) */
+            if ((b->x - a->x) * (c->y - a->y) - (b->y - a->y) * (c->x - a->x) <= 0.0f)
+                continue;
+            face.lo = lo + p->x;
+            face.hi = hi + p->x;
+            face.z = p->y + a->z;
+            /* A face at the same depth that meets one already found is the
+             * same front: one span. */
+            for (j = 0; j < found && j < max; j++)
+                if (out[j].z == face.z && face.lo <= out[j].hi && face.hi >= out[j].lo)
+                {
+                    if (face.lo < out[j].lo) out[j].lo = face.lo;
+                    if (face.hi > out[j].hi) out[j].hi = face.hi;
+                    break;
+                }
+            if (j < found && j < max)
+                continue;
+            if (found < max)
+                out[found] = face;
+            found++;
+        }
+    }
+    return found;
+}
+
+static const struct FrontCell *FrontCellAt(uint16_t layout, int x, int y, float height)
+{
+    uint32_t hash = (uint32_t)x * 73856093u ^ (uint32_t)y * 19349663u
+                  ^ (uint32_t)layout * 83492791u;
+    struct FrontCell *cell = &sFrontCells[(hash ^ (hash >> 16)) & (FRONT_SETS - 1u)];
+
+    if (!cell->valid || cell->layout != layout || cell->x != x || cell->y != y
+     || cell->height != height)
+    {
+        cell->valid = true;
+        cell->layout = layout;
+        cell->x = x;
+        cell->y = y;
+        cell->height = height;
+        cell->count = CollectFronts(layout, x, y, height, cell->face, FRONT_FACES);
+    }
+    return cell;
+}
+
+bool DioramaBuildings_FrontAt(uint16_t layout, int x, int y, float x0, float x1,
+                              float height, float *z)
+{
+    struct FrontFace many[64];
+    const struct FrontCell *cell;
+    const struct FrontFace *face;
+    unsigned count;
+    unsigned i;
+    bool found = false;
+
+    if (!sReady)
+        return false;
+    cell = FrontCellAt(layout, x, y, height);
+    face = cell->face;
+    count = cell->count;
+    if (count > FRONT_FACES)
+    {
+        count = CollectFronts(layout, x, y, height, many, 64);
+        if (count > 64)
+            count = 64;
+        face = many;
+    }
+    for (i = 0; i < count; i++)
+    {
+        /* across the span */
+        if (face[i].lo >= x1 || face[i].hi <= x0)
+            continue;
+        if (!found || face[i].z > *z)
+            *z = face[i].z;
+        found = true;
+    }
+    return found;
 }
 
 void DioramaBuildings_FlattenResolvedCells(const struct DioramaSceneSnapshot *snapshot,

@@ -6,6 +6,7 @@
 
 #include "global.h"
 #include "diorama/gl_loader.h"
+#include "diorama/gl_shadow.h"
 #include "diorama/gl_terrain_renderer.h"
 #include "diorama/metatile_atlas.h"
 #include "diorama/rules.generated.h"
@@ -54,6 +55,10 @@ static GLint sBaseImageLocation;
 static GLint sForegroundImageLocation;
 static GLint sDebugColorLocation;
 static GLint sRenderPassLocation;
+static GLint sShadowPassLocation;
+static GLint sShadowEnabledLocation;
+static GLint sLightMatrixLocation;
+static GLint sShadowMapLocation;
 static uint32_t sMapGeneration;
 static uint32_t sMapEditGeneration;
 static uint32_t sRulesGeneration;
@@ -73,13 +78,17 @@ static const char sTerrainVertexShader[] =
     "uniform float cameraPitch;\n"
     "uniform float focalLength;\n"
     "uniform float aspectCorrection;\n"
+    "uniform int shadowPass;\n"
+    "uniform mat4 lightViewProjection;\n"
     "out vec2 uv;\n"
     "out float shade;\n"
     "flat out int textureLayer;\n"
     "out float reflectionMask;\n"
     "out vec4 pixelColor;\n"
+    "out vec3 sceneWorldPosition;\n"
     "void main() {\n"
     "  vec3 worldPosition = position + instanceOffset;\n"
+    "  sceneWorldPosition = worldPosition;\n"
     "  const float cameraHeight = 16.0;\n"
     "  const float cameraTargetVertical = -0.458944;\n"
     "  const float nearDepth = 0.1;\n"
@@ -96,6 +105,7 @@ static const char sTerrainVertexShader[] =
     "  float clipZ = ((farDepth + nearDepth) / (farDepth - nearDepth)) * depth"
     "              - (2.0 * farDepth * nearDepth) / (farDepth - nearDepth);\n"
     "  gl_Position = vec4(clipX, clipY, clipZ, depth);\n"
+    "  if (shadowPass == 1) gl_Position = lightViewProjection * vec4(worldPosition, 1.0);\n"
     "  uv = texCoord;\n"
     "  shade = vertexShade;\n"
     "  textureLayer = int(vertexTextureLayer);\n"
@@ -110,13 +120,35 @@ static const char sTerrainFragmentShader[] =
     "flat in int textureLayer;\n"
     "in float reflectionMask;\n"
     "in vec4 pixelColor;\n"
+    "in vec3 sceneWorldPosition;\n"
     "out vec4 color;\n"
     "uniform sampler2D image;\n"
     "uniform sampler2D baseImage;\n"
     "uniform sampler2D foregroundImage;\n"
     "uniform vec4 debugColor;\n"
     "uniform int renderPass;\n"
+    "uniform int shadowPass;\n"
+    "uniform int shadowEnabled;\n"
+    "uniform mat4 lightViewProjection;\n"
+    "uniform sampler2DShadow shadowMap;\n"
+    /* gl_shadow.h: the light a point gets from the sun, 1 lit, the
+     * 3DS port's ambient 0.70 in a cast shadow. */
+    "float SunLight() {\n"
+    "  if (shadowEnabled == 0) return 1.0;\n"
+    "  vec4 lightPosition = lightViewProjection * vec4(sceneWorldPosition, 1.0);\n"
+    "  vec3 p = lightPosition.xyz / lightPosition.w * 0.5 + 0.5;\n"
+    "  if (p.x <= 0.0 || p.x >= 1.0 || p.y <= 0.0 || p.y >= 1.0 || p.z >= 1.0) return 1.0;\n"
+    "  float lit = texture(shadowMap, vec3(p.xy, p.z - 0.0015));\n"
+    "  return mix(0.70, 1.0, lit);\n"
+    "}\n"
     "void main() {\n"
+    "  if (shadowPass == 1) {\n"
+    "    vec4 caster = textureLayer == 1 ? texture(baseImage, uv)\n"
+    "                : (textureLayer == 2 ? texture(foregroundImage, uv)\n"
+    "                : (textureLayer == 3 ? pixelColor : texture(image, uv)));\n"
+    "    if (caster.a < 0.5) discard;\n"
+    "    color = vec4(1.0); return;\n"
+    "  }\n"
     "  if (renderPass == 1) {\n"
     "    if (reflectionMask < 0.5 || texture(foregroundImage, uv).a >= 0.5) discard;\n"
     "    color = vec4(1.0); return;\n"
@@ -130,7 +162,7 @@ static const char sTerrainFragmentShader[] =
     "             : (textureLayer == 2 ? texture(foregroundImage, uv)\n"
     "             : (textureLayer == 3 ? pixelColor : texture(image, uv)));\n"
     "  if (texel.a < 0.5) discard;\n"
-    "  color = vec4(texel.rgb * shade, texel.a);\n"
+    "  color = vec4(texel.rgb * shade * SunLight(), texel.a);\n"
     "}\n";
 
 static GLuint CompileShader(GLenum type, const char *source)
@@ -187,11 +219,17 @@ static bool CreateProgram(void)
     sForegroundImageLocation = dglGetUniformLocation(sProgram, "foregroundImage");
     sDebugColorLocation = dglGetUniformLocation(sProgram, "debugColor");
     sRenderPassLocation = dglGetUniformLocation(sProgram, "renderPass");
+    sShadowPassLocation = dglGetUniformLocation(sProgram, "shadowPass");
+    sShadowEnabledLocation = dglGetUniformLocation(sProgram, "shadowEnabled");
+    sLightMatrixLocation = dglGetUniformLocation(sProgram, "lightViewProjection");
+    sShadowMapLocation = dglGetUniformLocation(sProgram, "shadowMap");
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0
         && sFocalLengthLocation >= 0 && sAspectCorrectionLocation >= 0
         && sImageLocation >= 0
         && sBaseImageLocation >= 0 && sForegroundImageLocation >= 0
-        && sDebugColorLocation >= 0 && sRenderPassLocation >= 0;
+        && sDebugColorLocation >= 0 && sRenderPassLocation >= 0
+        && sShadowPassLocation >= 0 && sShadowEnabledLocation >= 0
+        && sLightMatrixLocation >= 0 && sShadowMapLocation >= 0;
 }
 
 static void ConfigureVertexArray(GLuint vertexArray, GLuint vertexBuffer)
@@ -1138,6 +1176,10 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
     dglUniform1i(sForegroundImageLocation, 2);
     dglUniform4f(sDebugColorLocation, 0.0f, 0.0f, 0.0f, -1.0f);
     dglUniform1i(sRenderPassLocation, 0);
+    dglUniform1i(sShadowPassLocation, 0);
+    dglUniform1i(sShadowMapLocation, DIORAMA_SHADOW_TEXTURE_UNIT);
+    dglUniform1i(sShadowEnabledLocation, DioramaGLShadow_BindForLighting() && !debug);
+    dglUniformMatrix4fv(sLightMatrixLocation, 1, GL_FALSE, DioramaGLShadow_LightMatrix());
     dglActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, atlasTexture);
     dglActiveTexture(GL_TEXTURE1);
@@ -1244,6 +1286,55 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
     }
     glDisable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
+}
+
+void DioramaGLTerrain_DrawShadow(GLuint atlasTexture, GLuint baseAtlasTexture,
+                                 GLuint foregroundAtlasTexture)
+{
+    uint32_t treeCount = 0;
+    int i;
+
+    dglUseProgram(sProgram);
+    dglUniform1i(sImageLocation, 0);
+    dglUniform1i(sBaseImageLocation, 1);
+    dglUniform1i(sForegroundImageLocation, 2);
+    dglUniform4f(sDebugColorLocation, 0.0f, 0.0f, 0.0f, -1.0f);
+    dglUniform1i(sRenderPassLocation, 0);
+    dglUniform1i(sShadowPassLocation, 1);
+    dglUniform1i(sShadowEnabledLocation, 0);
+    dglUniform1i(sShadowMapLocation, DIORAMA_SHADOW_TEXTURE_UNIT);
+    dglUniformMatrix4fv(sLightMatrixLocation, 1, GL_FALSE, DioramaGLShadow_LightMatrix());
+    dglActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, atlasTexture);
+    dglActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, baseAtlasTexture);
+    dglActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, foregroundAtlasTexture);
+    dglActiveTexture(GL_TEXTURE0);
+    /* Everything resident casts, on screen or not: a tree just off the edge
+     * still throws its shadow into view. */
+    for (i = 0; i < TERRAIN_CHUNK_CACHE_SIZE; i++)
+    {
+        struct GLTerrainChunk *chunk = &sChunks[i];
+
+        if (!chunk->active)
+            continue;
+        dglBindVertexArray(chunk->vertexArray);
+        glDrawArrays(GL_TRIANGLES, 0, chunk->mesh.vertexCount);
+        for (uint16_t tree = 0; tree < chunk->mesh.treeInstanceCount
+             && treeCount < TERRAIN_MAX_VISIBLE_TREE_INSTANCES; tree++)
+            sVisibleTreeInstances[treeCount++] = chunk->mesh.treeInstances[tree];
+    }
+    if (treeCount != 0)
+    {
+        dglBindVertexArray(sTreeVertexArray);
+        dglBindBuffer(GL_ARRAY_BUFFER, sTreeInstanceBuffer);
+        dglBufferData(GL_ARRAY_BUFFER,
+                      treeCount * sizeof(struct DioramaTerrainTreeInstance),
+                      sVisibleTreeInstances, GL_STREAM_DRAW);
+        dglDrawArraysInstanced(GL_TRIANGLES, 0, sTreeModelVertexCount, treeCount);
+    }
+    dglUniform1i(sShadowPassLocation, 0);
 }
 
 const struct DioramaTerrainMetrics *DioramaGLTerrain_GetMetrics(void)

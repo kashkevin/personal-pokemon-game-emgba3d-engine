@@ -6,9 +6,11 @@
 #include <SDL2/SDL.h>
 
 #include "diorama/gl_loader.h"
+#include "diorama/gl_shadow.h"
 #include "diorama/gl_object_renderer.h"
 #include "diorama/rules.generated.h"
 #include "diorama/rules.h"
+#include "diorama/buildings.h"
 #include "diorama/sprite_frame.h"
 
 #define SPRITE_TEXTURE_CACHE_SIZE 48
@@ -75,6 +77,11 @@ static GLint sImageLocation;
 static GLint sDrawModeLocation;
 static GLint sAnimationTimeLocation;
 static GLint sDepthBiasLocation;
+static GLint sShadowEnabledLocation;
+static GLint sLightMatrixLocation;
+static GLint sShadowMapLocation;
+static GLint sUprightZLocation;
+static GLint sLightProbeLocation;
 
 static const char sObjectVertexShader[] =
     "#version 330 core\n"
@@ -86,7 +93,9 @@ static const char sObjectVertexShader[] =
     "uniform float aspectCorrection;\n"
     "uniform float depthBias;\n"
     "out vec2 uv;\n"
+    "out vec3 sceneWorldPosition;\n"
     "void main() {\n"
+    "  sceneWorldPosition = position;\n"
     "  const float cameraHeight = 16.0;\n"
     "  const float cameraTargetVertical = -0.458944;\n"
     "  const float nearDepth = 0.1;\n"
@@ -109,11 +118,60 @@ static const char sObjectVertexShader[] =
 static const char sObjectFragmentShader[] =
     "#version 330 core\n"
     "in vec2 uv;\n"
+    "in vec3 sceneWorldPosition;\n"
     "out vec4 color;\n"
     "uniform sampler2D image;\n"
     "uniform int drawMode;\n"
     "uniform float animationTime;\n"
+    "uniform int shadowEnabled;\n"
+    "uniform mat4 lightViewProjection;\n"
+    "uniform sampler2DShadow shadowMap;\n"
+    "uniform vec2 cameraPosition;\n"
+    "uniform float cameraPitch;\n"
+    "uniform float depthBias;\n"
+    "uniform float uprightZ;\n"
+    /* The card leans back to face the camera, so its top half reaches over
+     * whatever stands north of the feet - a counter, a house's front wall -
+     * and was cut off by it. For hiding and being hidden it counts as a card
+     * standing upright at uprightZ instead (its feet, or a model's front just
+     * south of them): the point of that card on this pixel's line of sight.
+     * Everything north of the feet is then behind the walker and everything
+     * south of them in front, as the GBA draws them; the picture is the
+     * leaning card's. */
+    "float UprightDepth() {\n"
+    "  const float cameraHeight = 16.0;\n"
+    "  const float cameraTargetVertical = -0.458944;\n"
+    "  const float nearDepth = 0.1;\n"
+    "  const float farDepth = 80.0;\n"
+    "  float pitchSin = sin(cameraPitch);\n"
+    "  float pitchCos = cos(cameraPitch);\n"
+    "  float cameraDistance = (cameraHeight * pitchCos + cameraTargetVertical) / pitchSin;\n"
+    "  float cameraZ = cameraPosition.y - cameraDistance;\n"
+    "  vec3 p = sceneWorldPosition;\n"
+    "  float depth = (cameraHeight - p.y) * pitchSin + (p.z - cameraZ) * pitchCos;\n"
+    "  if (p.z > cameraZ && uprightZ > cameraZ)\n"
+    "    depth *= clamp((uprightZ - cameraZ) / (p.z - cameraZ), 0.0, 1.0);\n"
+    "  depth = max(depth, nearDepth);\n"
+    "  float ndc = (farDepth + nearDepth) / (farDepth - nearDepth)\n"
+    "            - 2.0 * farDepth * nearDepth / ((farDepth - nearDepth) * depth) - depthBias;\n"
+    "  return (gl_DepthRange.diff * ndc + gl_DepthRange.near + gl_DepthRange.far) * 0.5;\n"
+    "}\n"
+    /* gl_shadow.h: a sprite walking into a building's shadow darkens with
+     * the ground there; sprites cast no shadow of their own into the map.
+     * One sample for the whole card, three quarters of a tile over its feet
+     * (as the 3DS port lights its cards): the leaning card itself reaches
+     * into the wall behind a walker, and would come out half shaded. */
+    "uniform vec3 lightProbe;\n"
+    "float SunLight() {\n"
+    "  if (shadowEnabled == 0) return 1.0;\n"
+    "  vec4 lightPosition = lightViewProjection * vec4(lightProbe, 1.0);\n"
+    "  vec3 p = lightPosition.xyz / lightPosition.w * 0.5 + 0.5;\n"
+    "  if (p.x <= 0.0 || p.x >= 1.0 || p.y <= 0.0 || p.y >= 1.0 || p.z >= 1.0) return 1.0;\n"
+    "  float lit = texture(shadowMap, vec3(p.xy, p.z - 0.0015));\n"
+    "  return mix(0.70, 1.0, lit);\n"
+    "}\n"
     "void main() {\n"
+    "  gl_FragDepth = drawMode == 0 ? UprightDepth() : gl_FragCoord.z;\n"
     "  if (drawMode == 1) {\n"
     "    vec2 point = uv * 2.0 - 1.0;\n"
     "    float distanceSquared = dot(point, point);\n"
@@ -124,7 +182,7 @@ static const char sObjectFragmentShader[] =
     "    if (drawMode == 2) sampleUv.x += sin(animationTime * 5.0 + uv.y * 14.0) * 0.012;\n"
     "    vec4 texel = texture(image, sampleUv);\n"
     "    if (texel.a < 0.5) discard;\n"
-    "    color = texel;\n"
+    "    color = vec4(texel.rgb * SunLight(), texel.a);\n"
     "  }\n"
     "}\n";
 
@@ -181,11 +239,18 @@ static bool CreateProgram(void)
     sDrawModeLocation = dglGetUniformLocation(sProgram, "drawMode");
     sAnimationTimeLocation = dglGetUniformLocation(sProgram, "animationTime");
     sDepthBiasLocation = dglGetUniformLocation(sProgram, "depthBias");
+    sShadowEnabledLocation = dglGetUniformLocation(sProgram, "shadowEnabled");
+    sLightMatrixLocation = dglGetUniformLocation(sProgram, "lightViewProjection");
+    sShadowMapLocation = dglGetUniformLocation(sProgram, "shadowMap");
+    sUprightZLocation = dglGetUniformLocation(sProgram, "uprightZ");
+    sLightProbeLocation = dglGetUniformLocation(sProgram, "lightProbe");
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0
         && sFocalLengthLocation >= 0 && sAspectCorrectionLocation >= 0
         && sImageLocation >= 0
         && sDrawModeLocation >= 0 && sAnimationTimeLocation >= 0
-        && sDepthBiasLocation >= 0;
+        && sDepthBiasLocation >= 0 && sShadowEnabledLocation >= 0
+        && sLightMatrixLocation >= 0 && sShadowMapLocation >= 0
+        && sUprightZLocation >= 0 && sLightProbeLocation >= 0;
 }
 
 static float ResolveDepthBias(const struct DioramaSceneSnapshot *snapshot,
@@ -543,6 +608,73 @@ static void DrawShadow(const struct ObjectRenderItem *item, struct DioramaSprite
     UploadAndDraw(vertices);
 }
 
+static const struct DioramaCellSnapshot *FindCell(int mapX, int mapY)
+{
+    int i;
+
+    for (i = 0; i < sPreviousSnapshot.visibleCellCount; i++)
+        if (sPreviousSnapshot.cells[i].mapX == mapX && sPreviousSnapshot.cells[i].mapY == mapY)
+            return &sPreviousSnapshot.cells[i];
+    return NULL;
+}
+
+/*
+ * Furniture against a room's back wall is modelled from its drawing, and the
+ * drawing comes forward of the wall: to the middle of the cell before it,
+ * where a walker's card stands, or further (a Pokemon Center's PC, two pixels
+ * past it). The card's upright stand-in (UprightDepth in the shader) then
+ * moves south to a pixel in front of the model's face there, as on the GBA.
+ * Under either edge of the card, not only its middle: walking along the
+ * furniture, half the card is over a model's cell before its middle is.
+ * Ported from the 3DS project's ModelPush (voxel_entities.c, MIT; see
+ * diorama/buildings.h). Returns how far south of the feet, in tiles.
+ */
+#define CARD_CLEAR (1.0f / 16.0f)
+#define MODEL_PUSH_MAX 0.5f      /* further than that is not furniture's front */
+#define MODEL_PUSH_HEIGHT 0.25f  /* where on the card the face is looked for */
+
+static float ModelPush(struct DioramaSpritePose pose, float halfWidth)
+{
+    float left = pose.x - halfWidth + CARD_CLEAR;
+    float right = pose.x + halfWidth - CARD_CLEAR;
+    float south = -pose.z;
+    int mapY = (int)floorf(south + 0.5f);
+    int lastX = (int)floorf(right + 0.5f);
+    int mapX;
+    float push = 0.0f;
+
+    if (!DioramaBuildings_IsAvailable())
+        return 0.0f;
+    for (mapX = (int)floorf(left + 0.5f); mapX <= lastX; mapX++)
+    {
+        const struct DioramaCellSnapshot *cell = FindCell(mapX, mapY);
+        float originX;
+        float originY;
+        float cardZ;
+        float front;
+        float need = 0.0f;
+
+        if (cell == NULL || !(cell->flags & DIORAMA_CELL_SOURCE_VALID))
+            continue;
+        /* the layout's tiles, cell x spanning x..x+1 */
+        originX = (float)(mapX - cell->sourceMapX) - 0.5f;
+        originY = (float)(mapY - cell->sourceMapY) - 0.5f;
+        cardZ = south - originY;
+        /* A model's face in the cell, whether or not the cell is the model's:
+         * the PC's foot is drawn on the floor the walker uses it from. */
+        if (DioramaBuildings_FrontAt(cell->sourceLayoutId, cell->sourceMapX, cell->sourceMapY,
+                                     left - originX, right - originX, MODEL_PUSH_HEIGHT, &front)
+         && front + CARD_CLEAR > cardZ && front - cardZ + CARD_CLEAR <= MODEL_PUSH_MAX)
+            need = front - cardZ + CARD_CLEAR;
+        else if (DioramaBuildings_CellAt(cell->sourceLayoutId, cell->sourceMapX,
+                                         cell->sourceMapY, NULL, NULL, NULL))
+            need = CARD_CLEAR;
+        if (need > push)
+            push = need;
+    }
+    return push;
+}
+
 static void DrawBillboard(const struct ObjectRenderItem *item, struct DioramaSpritePose pose,
                           float pitchSin, float pitchCos)
 {
@@ -561,6 +693,8 @@ static void DrawBillboard(const struct ObjectRenderItem *item, struct DioramaSpr
 
     glBindTexture(GL_TEXTURE_2D, item->texture);
     dglUniform1f(sDepthBiasLocation, item->depthBias);
+    dglUniform1f(sUprightZLocation, pose.z - ModelPush(pose, halfWidth));
+    dglUniform3f(sLightProbeLocation, pose.x, pose.groundY + 0.75f, pose.z);
     UploadAndDraw(vertices);
 }
 
@@ -646,6 +780,9 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
     dglUniform1f(sFocalLengthLocation, focalLength);
     dglUniform1f(sAspectCorrectionLocation, aspectCorrection);
     dglUniform1i(sImageLocation, 0);
+    dglUniform1i(sShadowMapLocation, DIORAMA_SHADOW_TEXTURE_UNIT);
+    dglUniform1i(sShadowEnabledLocation, DioramaGLShadow_BindForLighting());
+    dglUniformMatrix4fv(sLightMatrixLocation, 1, GL_FALSE, DioramaGLShadow_LightMatrix());
     dglUniform1f(sAnimationTimeLocation, (float)fmod(
         (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency(), 120.0));
     dglActiveTexture(GL_TEXTURE0);
@@ -669,6 +806,9 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
             struct DioramaSpritePose reflectionPose = DioramaSprite_ApplyScreenOffset(
                 poses[index], 0, sItems[index].object.reflectionOffsetY, cameraPitch);
 
+            /* lit as the walker it mirrors */
+            dglUniform3f(sLightProbeLocation, poses[index].x, poses[index].groundY + 0.75f,
+                         poses[index].z);
             DrawReflection(&sItems[index], reflectionPose, pitchSin, pitchCos);
         }
     }
