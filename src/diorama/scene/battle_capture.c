@@ -1,0 +1,209 @@
+#ifdef ENABLE_DIORAMA
+
+/*
+ * The 3D battle's view of the game (include/diorama/battle_scene.h), read at
+ * the frame boundary while the game thread is parked (sdl2.c VDraw). The
+ * stage's ground kinds and the battlers' shadows follow
+ * ZallaxDev/pokeemerald-3Ds-dualscreen's 3ds_port/src/voxel/voxel_battle.c,
+ * the scenery fade its voxel_world.c (VoxelWorld_ScreenFade); MIT, see
+ * src/diorama/README.md. Nothing here writes game memory.
+ */
+
+#include <string.h>
+
+#include "global.h"
+#include "battle.h"
+#include "battle_anim.h"
+#include "battle_main.h"
+#include "bg.h"
+#include "event_object_movement.h"
+#include "field_player_avatar.h"
+#include "fieldmap.h"
+#include "main.h"
+#include "metatile_behavior.h"
+#include "palette.h"
+#include "sprite.h"
+#include "diorama/battle_scene.h"
+
+uint8_t DioramaBattle_GroundKind(uint8_t behavior)
+{
+    if (MetatileBehavior_IsTallGrass(behavior) || MetatileBehavior_IsLongGrass(behavior))
+        return DIORAMA_GROUND_GRASS;
+    if (MetatileBehavior_IsSandOrDeepSand(behavior))
+        return DIORAMA_GROUND_SAND;
+    if (MetatileBehavior_IsSurfableWaterOrUnderwater(behavior)
+     || MetatileBehavior_IsDeepOrOceanWater(behavior))
+        return DIORAMA_GROUND_WATER;
+    return DIORAMA_GROUND_PLAIN;
+}
+
+static float FadeChannel(u16 color, unsigned shift)
+{
+    return (float)((color >> shift) & 31);
+}
+
+/*
+ * The fade that best explains the shown colours from the unfaded ones,
+ * shown = keep * unfaded + (1 - keep) * colour, by least squares over all
+ * of them (the 3DS port's FadeFit).
+ */
+static void FadeFit(const u16 *shown, const u16 *unfaded, unsigned count,
+                    float *amount, float rgb[3])
+{
+    float n = (float)count, cov = 0.0f, var = 0.0f, keep;
+    float su[3] = {0}, sf[3] = {0}, suu[3] = {0}, suf[3] = {0};
+    unsigned i, c;
+
+    for (i = 0; i < count; ++i)
+        for (c = 0; c < 3; ++c)
+        {
+            float u = FadeChannel(unfaded[i], c * 5), f = FadeChannel(shown[i], c * 5);
+
+            su[c] += u;
+            sf[c] += f;
+            suu[c] += u * u;
+            suf[c] += u * f;
+        }
+    for (c = 0; c < 3; ++c)
+    {
+        cov += n * suf[c] - su[c] * sf[c];
+        var += n * suu[c] - su[c] * su[c];
+    }
+    /* Colours all alike tell nothing of the slope: take them as the target. */
+    keep = var > 1.0f ? cov / var : 0.0f;
+    if (keep < 0.0f) keep = 0.0f;
+    if (keep > 1.0f) keep = 1.0f;
+    *amount = 1.0f - keep;
+    for (c = 0; c < 3; ++c)
+    {
+        float offset = (sf[c] - keep * su[c]) / n;
+        float value = *amount > 0.01f ? offset / *amount : 0.0f;
+
+        if (value < 0.0f) value = 0.0f;
+        if (value > 31.0f) value = 31.0f;
+        rgb[c] = value / 31.0f;
+    }
+}
+
+/*
+ * The world stands in for the scenery, and fades as its three palettes do
+ * (BG 2-4, LoadBattleEnvironmentGfx), whatever does it: a palette fade, or a
+ * move blending the background towards a colour without one. The battlers'
+ * palettes fade on their own.
+ */
+static void SceneryFade(struct DioramaBattleFrame *frame)
+{
+    const u16 *shown = (const u16 *)PLTT + BG_PLTT_ID(2);
+    const u16 *unfaded = gPlttBufferUnfaded + BG_PLTT_ID(2);
+
+    frame->fadeAmount = 0.0f;
+    frame->fadeRgb[0] = frame->fadeRgb[1] = frame->fadeRgb[2] = 0.0f;
+    if (memcmp(shown, unfaded, 3 * 16 * sizeof(u16)) == 0)
+        return;
+    FadeFit(shown, unfaded, 3 * 16, &frame->fadeAmount, frame->fadeRgb);
+    /* Below one step of the game's own 16 it is rounding, not a fade. */
+    if (frame->fadeAmount < 1.0f / 32.0f)
+        frame->fadeAmount = 0.0f;
+}
+
+/*
+ * The GBA scenery has a base under each side, which the world has not: a
+ * soft shadow on the ground under each battler that the game gives none of
+ * its own (the opponents' Gen 4 style shadow sprites, B_ENEMY_MON_SHADOW_STYLE,
+ * are drawn by the game over the world as they are).
+ */
+static void Shadows(struct DioramaBattleFrame *frame)
+{
+    unsigned b;
+
+    frame->shadowCount = 0;
+    if (gBattleSpritesDataPtr == NULL || gBattleSpritesDataPtr->healthBoxesData == NULL)
+        return;
+    for (b = 0; b < gBattlersCount && b < MAX_BATTLERS_COUNT
+                && frame->shadowCount < DIORAMA_BATTLE_MAX_SHADOWS; ++b)
+    {
+        unsigned id = gBattlerSpriteIds[b], shadow;
+        const struct Sprite *sprite;
+        bool enemy;
+        struct DioramaBattleShadow *out;
+
+        if ((gAbsentBattlerFlags & (1u << b)) || id >= MAX_SPRITES)
+            continue;
+        sprite = &gSprites[id];
+        if (!sprite->inUse || sprite->invisible)
+            continue;
+        enemy = GetBattlerSide(b) != B_SIDE_PLAYER;
+        shadow = gBattleSpritesDataPtr->healthBoxesData[b].shadowSpriteIdPrimary;
+        if (enemy && shadow < MAX_SPRITES && gSprites[shadow].inUse && !gSprites[shadow].invisible)
+            continue;
+        out = &frame->shadows[frame->shadowCount++];
+        out->x = sprite->x + sprite->x2;
+        out->y = GetBattlerSpriteCoord(b, BATTLER_COORD_Y) + 30.0f;
+        out->rx = enemy ? 24.0f : 30.0f;
+        out->ry = enemy ? 5.0f : 6.0f;
+    }
+}
+
+/* BG3's scroll from rest, GBA pixels, either way round its 256-pixel turn:
+ * the scenery rests at 0 (or 256, the same picture). */
+static float SceneryShift(u16 scroll)
+{
+    return (float)((int)((scroll + 128) & 255) - 128);
+}
+
+extern const struct BgTemplate gBattleBgTemplates[];
+
+/*
+ * The battle's own screen, its BG3 set up as the scenery's (battle_bg.c): not
+ * a screen over the battle - the bag, the party, a summary, the Pokedex page
+ * of a catch - whose BG3, if it has one, is its own (the 3DS port knows the
+ * battle screen by its VBlank callback the same way).
+ */
+static bool IsBattleScreen(void)
+{
+    u16 control = REG_BG3CNT;
+
+    return gMain.callback2 == BattleMainCB2
+        && ((control >> 2) & 3) == gBattleBgTemplates[3].charBaseIndex
+        && ((control >> 8) & 0x1F) == gBattleBgTemplates[3].mapBaseIndex;
+}
+
+void DioramaBattle_Capture(struct DioramaBattleFrame *frame)
+{
+    memset(frame, 0, sizeof(*frame));
+    frame->inBattle = gMain.inBattle;
+    if (gSaveBlock1Ptr != NULL)
+    {
+        frame->mapGroup = gSaveBlock1Ptr->location.mapGroup;
+        frame->mapNum = gSaveBlock1Ptr->location.mapNum;
+    }
+    frame->mapLayoutId = gMapHeader.mapLayoutId;
+    if (gPlayerAvatar.objectEventId < OBJECT_EVENTS_COUNT)
+    {
+        const struct ObjectEvent *player = &gObjectEvents[gPlayerAvatar.objectEventId];
+
+        frame->playerGridX = player->currentCoords.x;
+        frame->playerGridY = player->currentCoords.y;
+        frame->playerMapX = player->currentCoords.x - MAP_OFFSET;
+        frame->playerMapY = player->currentCoords.y - MAP_OFFSET;
+        frame->playerFacing = player->facingDirection;
+    }
+    frame->surfing = (gPlayerAvatar.flags & PLAYER_AVATAR_FLAG_SURFING) != 0;
+    if (!frame->inBattle)
+        return;
+    frame->battleTypeFlags = gBattleTypeFlags;
+    frame->link = (gBattleTypeFlags & BATTLE_TYPE_LINK) != 0;
+    frame->wild = !(gBattleTypeFlags & (BATTLE_TYPE_TRAINER | BATTLE_TYPE_LINK | BATTLE_TYPE_RECORDED_LINK
+                                        | BATTLE_TYPE_FRONTIER | BATTLE_TYPE_EREADER_TRAINER));
+    frame->doubles = (gBattleTypeFlags & BATTLE_TYPE_DOUBLE) != 0;
+    frame->sceneryShown = DioramaBattle_SceneryShown() && IsBattleScreen();
+    frame->introSliding = DioramaBattle_IntroSliding();
+    frame->bg3Enabled = (REG_DISPCNT & DISPCNT_BG3_ON) != 0;
+    frame->forcedBlank = (REG_DISPCNT & DISPCNT_FORCED_BLANK) != 0;
+    frame->sceneryShiftX = SceneryShift(REG_BG3HOFS);
+    frame->sceneryShiftY = SceneryShift(REG_BG3VOFS);
+    SceneryFade(frame);
+    Shadows(frame);
+}
+
+#endif
