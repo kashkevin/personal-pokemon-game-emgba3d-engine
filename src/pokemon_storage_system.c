@@ -3980,6 +3980,17 @@ static void CreateDisplayMonSprite(void)
     struct SpriteSheet sheet = {sStorage->tileBuffer, MON_PIC_SIZE, GFXTAG_DISPLAY_MON};
     struct SpritePalette palette = {sStorage->displayMonPalette, PALTAG_DISPLAY_MON};
     struct SpriteTemplate template = sSpriteTemplate_DisplayMon;
+#ifdef PORTABLE
+    // displayMonPalette is set only once a Pokemon is shown and sStorage is
+    // not zeroed, so here it holds whatever the heap held before. The GBA
+    // loads 32 stray bytes from it (LoadDisplayMonGfx loads the real palette
+    // over them before the sprite shows); natively that address can be
+    // unmapped, and opening the boxes crashed.
+    static const u16 sBlankDisplayMonPal[16] = {0};
+
+    palette.data = sBlankDisplayMonPal;
+#endif
+#line 3983 // gba-line
 
     for (i = 0; i < MON_PIC_SIZE; i++)
         sStorage->tileBuffer[i] = 0;
