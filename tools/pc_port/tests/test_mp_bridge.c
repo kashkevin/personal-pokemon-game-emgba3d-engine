@@ -517,6 +517,122 @@ MT_TEST(world_inbound_validated)
     MT_CHECK(sNet.closed);
 }
 
+// A slow game (2-3 frames a second in the 3D view on software OpenGL) still
+// takes everything the companion sent since the last frame: 20 snapshots
+// (1.8 KiB, more than mgba.lua's 1 KiB per frame) and the save command behind
+// them reach their mailboxes in one frame.
+MT_TEST(slow_frame_drains_the_backlog)
+{
+    struct MpBridgeCaps caps;
+    uint8_t snapshot[88];
+    uint8_t command[240];
+    uint8_t backlog[2400];
+    size_t n = 0;
+    int i;
+    uint8_t *p = sMemory[MP_REGION_PRESENCE];
+    uint8_t *s = sMemory[MP_REGION_SAVE];
+
+    memset(&caps, 0, sizeof(caps));
+    caps.save = 1;
+    Fresh(&caps);
+    sNet.chunk = 0;
+    Ready(0);
+    SaveReady();
+    Step(10);
+    for (i = 0; i < 20; i++)
+    {
+        MakeSnapshot(snapshot, 1, 0, 0);
+        PutU32(snapshot + 4, 2 + i); // heartbeat
+        n += FrameOf(backlog + n, 'S', snapshot, sizeof(snapshot));
+    }
+    MakeSaveControl(command, 1);
+    n += FrameOf(backlog + n, 'C', command, sizeof(command));
+    MT_CHECK(n > 1024);
+    Feed(backlog, n, 256);
+    Step(1);
+    MT_EQ(sNet.receivedCount, 0);
+    MT_EQ(GetU32(p + 44), 21);  // the last snapshot's heartbeat
+    MT_EQ(GetU32(s + 24), 2);   // the save command is in its mailbox
+    MT_CHECK(memcmp(s + 28, command, 240) == 0);
+    MT_EQ(sNet.errors, 0);
+}
+
+static uint32_t sNowMs;
+
+static uint32_t FakeMilliseconds(void *context)
+{
+    (void)context;
+    return sNowMs;
+}
+
+static int CountSent(uint8_t kind)
+{
+    const uint8_t *payload;
+    int n = 0;
+
+    while (SentFrame(kind, n, &payload) >= 0)
+        n++;
+    return n;
+}
+
+// With a clock the pose and the shared-world record follow real time: every
+// 100 ms at 60 frames a second (as every 6 frames), and every frame when the
+// game runs at 2.5 frames a second, so the companion never sees a stale pose.
+// All due frames leave in the same game frame.
+MT_TEST(clock_paces_records_by_real_time)
+{
+    struct MpBridgeCaps caps;
+    uint8_t *w = sMemory[MP_REGION_WORLD];
+    uint32_t start;
+    int i;
+
+    memset(&caps, 0, sizeof(caps));
+    caps.world = 1;
+    Fresh(&caps);
+    sBridge.ops.milliseconds = FakeMilliseconds;
+    sNet.chunk = 0;
+    sNowMs = 0xFFFFFF00u; // wraps during the test
+    Ready(0);
+    PutU32(w, 0x31574D45);
+    PutU16(w + 4, 1);
+    PutU16(w + 6, 256);
+    Step(1);
+    MT_EQ(sNet.connects, 1);
+    MT_EQ(CountSent('H'), 1);
+    MT_EQ(CountSent('P'), 1); // hello, pose and world in the first frame
+    MT_EQ(CountSent('G'), 1);
+    sNet.sentLength = 0;
+    start = sNowMs;
+    for (i = 0; i < 60; i++) // one second at 60 frames a second
+    {
+        sNowMs = start + (uint32_t)((i + 1) * 1000 / 60);
+        Step(1);
+    }
+    MT_EQ(CountSent('P'), 10);
+    MT_EQ(CountSent('G'), 10);
+    sNet.sentLength = 0;
+    for (i = 0; i < 5; i++) // two seconds at 2.5 frames a second
+    {
+        sNowMs += 400;
+        Step(1);
+    }
+    MT_EQ(CountSent('P'), 5);
+    MT_EQ(CountSent('G'), 5);
+    MT_EQ(sNet.errors, 0);
+}
+
+// Without a clock (mgba.lua's cadence) the pose still leaves every 6 frames.
+MT_TEST(no_clock_keeps_the_six_frame_cadence)
+{
+    Fresh(NULL);
+    sNet.chunk = 0;
+    Ready(0);
+    Step(1);
+    sNet.sentLength = 0;
+    Step(60);
+    MT_EQ(CountSent('P'), 10);
+}
+
 MT_TEST(battle_capability_waits_for_its_mailbox)
 {
     struct MpBridgeCaps caps;
@@ -669,6 +785,9 @@ int main(void)
     MT_RUN(save_command_and_response);
     MT_RUN(save_command_with_bad_crc_refused);
     MT_RUN(world_inbound_validated);
+    MT_RUN(slow_frame_drains_the_backlog);
+    MT_RUN(clock_paces_records_by_real_time);
+    MT_RUN(no_clock_keeps_the_six_frame_cadence);
     MT_RUN(battle_capability_waits_for_its_mailbox);
     MT_RUN(reset_chord_guard_masks);
     MT_RUN(reset_chord_guard_orders);
