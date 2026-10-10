@@ -80,6 +80,7 @@ static GLint sDepthBiasLocation;
 static GLint sShadowEnabledLocation;
 static GLint sLightMatrixLocation;
 static GLint sShadowMapLocation;
+static GLint sShadowAmbientLocation;
 static GLint sUprightZLocation;
 static GLint sLightProbeLocation;
 
@@ -126,6 +127,7 @@ static const char sObjectFragmentShader[] =
     "uniform int shadowEnabled;\n"
     "uniform mat4 lightViewProjection;\n"
     "uniform sampler2DShadow shadowMap;\n"
+    "uniform float shadowAmbient;\n"
     "uniform vec2 cameraPosition;\n"
     "uniform float cameraPitch;\n"
     "uniform float depthBias;\n"
@@ -168,7 +170,7 @@ static const char sObjectFragmentShader[] =
     "  vec3 p = lightPosition.xyz / lightPosition.w * 0.5 + 0.5;\n"
     "  if (p.x <= 0.0 || p.x >= 1.0 || p.y <= 0.0 || p.y >= 1.0 || p.z >= 1.0) return 1.0;\n"
     "  float lit = texture(shadowMap, vec3(p.xy, p.z - 0.0015));\n"
-    "  return mix(0.70, 1.0, lit);\n"
+    "  return mix(shadowAmbient, 1.0, lit);\n"
     "}\n"
     "void main() {\n"
     "  gl_FragDepth = drawMode == 0 ? UprightDepth() : gl_FragCoord.z;\n"
@@ -242,6 +244,7 @@ static bool CreateProgram(void)
     sShadowEnabledLocation = dglGetUniformLocation(sProgram, "shadowEnabled");
     sLightMatrixLocation = dglGetUniformLocation(sProgram, "lightViewProjection");
     sShadowMapLocation = dglGetUniformLocation(sProgram, "shadowMap");
+    sShadowAmbientLocation = dglGetUniformLocation(sProgram, "shadowAmbient");
     sUprightZLocation = dglGetUniformLocation(sProgram, "uprightZ");
     sLightProbeLocation = dglGetUniformLocation(sProgram, "lightProbe");
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0
@@ -250,6 +253,7 @@ static bool CreateProgram(void)
         && sDrawModeLocation >= 0 && sAnimationTimeLocation >= 0
         && sDepthBiasLocation >= 0 && sShadowEnabledLocation >= 0
         && sLightMatrixLocation >= 0 && sShadowMapLocation >= 0
+        && sShadowAmbientLocation >= 0
         && sUprightZLocation >= 0 && sLightProbeLocation >= 0;
 }
 
@@ -782,6 +786,7 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
     dglUniform1i(sImageLocation, 0);
     dglUniform1i(sShadowMapLocation, DIORAMA_SHADOW_TEXTURE_UNIT);
     dglUniform1i(sShadowEnabledLocation, DioramaGLShadow_BindForLighting());
+    dglUniform1f(sShadowAmbientLocation, DioramaGLShadow_Ambient());
     dglUniformMatrix4fv(sLightMatrixLocation, 1, GL_FALSE, DioramaGLShadow_LightMatrix());
     dglUniform1f(sAnimationTimeLocation, (float)fmod(
         (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency(), 120.0));

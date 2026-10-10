@@ -740,6 +740,7 @@ void DioramaScene_PublishOverworld(void)
     sDraft.weather = GetCurrentWeather();
     sDraft.nextWeather = gWeatherPtr->nextWeather;
     sDraft.weatherTransitionComplete = gWeatherPtr->weatherChangeComplete;
+    sDraft.timeOfDay = gTimeOfDay;
     sDraft.rainVisibleCount = gWeatherPtr->curRainSpriteIndex;
     sDraft.fogScrollOffset = gWeatherPtr->fogHScrollOffset;
     sDraft.weatherBlendEVA = gWeatherPtr->currBlendEVA;

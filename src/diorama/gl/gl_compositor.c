@@ -22,6 +22,9 @@
 #include "diorama/scene_snapshot.h"
 #include "diorama/weather.h"
 #include "gba/defines.h"
+#include "constants/map_types.h"
+#include "constants/rtc.h"
+#include "constants/weather.h"
 
 #define MAX_BORDER_BACKGROUNDS 15
 #define CAMERA_DEFAULT_PITCH 0.70758444f
@@ -791,6 +794,39 @@ static void EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
     sAtlasAnimationGeneration = snapshot->tilesetAnimationGeneration;
 }
 
+/*
+ * How strong the sun's shadows (gl_shadow.h) are: none indoors - the 3DS
+ * port's rule, "indoors nothing casts" - or under rain, fog, ash, sand or an
+ * overcast sky (the 3DS port's weather light leaves its shadows all but
+ * gone there too); half by night (the game's own clock, OW_ENABLE_DNS: the
+ * moon's are fainter, but without any the night tint leaves the scene
+ * flat); full otherwise.
+ */
+static float SunStrength(const struct DioramaSceneSnapshot *snapshot)
+{
+    switch (snapshot->mapType)
+    {
+    case MAP_TYPE_TOWN:
+    case MAP_TYPE_CITY:
+    case MAP_TYPE_ROUTE:
+    case MAP_TYPE_OCEAN_ROUTE:
+        break;
+    default:
+        return 0.0f;
+    }
+    switch (snapshot->weather)
+    {
+    case WEATHER_NONE:
+    case WEATHER_SUNNY_CLOUDS:
+    case WEATHER_SUNNY:
+    case WEATHER_DROUGHT:
+        break;
+    default:
+        return 0.0f;
+    }
+    return snapshot->timeOfDay == TIME_NIGHT ? 0.5f : 1.0f;
+}
+
 static void GetCameraPosition(const struct DioramaSceneSnapshot *snapshot,
                               const struct DioramaSceneSnapshot *previousSnapshot,
                               bool hasPreviousSnapshot, float frameAlpha,
@@ -1221,7 +1257,8 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glViewport(0, 0, outputWidth, outputHeight);
         // The sun's depth map first (gl_shadow.h), then the lit scene.
-        if (!sTerrainDebug && DioramaGLShadow_Begin(cameraX, cameraZ))
+        if (DioramaGLShadow_Begin(cameraX, cameraZ,
+                                  sTerrainDebug ? 0.0f : SunStrength(&sRenderedSceneSnapshot)))
         {
             DioramaGLTerrain_DrawShadow(sAtlasTexture.id, sBaseAtlasTexture.id,
                                         sForegroundAtlasTexture.id);

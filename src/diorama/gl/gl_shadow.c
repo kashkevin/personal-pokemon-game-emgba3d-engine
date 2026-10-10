@@ -30,6 +30,7 @@ static bool sActiveThisFrame;
 static GLuint sFramebuffer;
 static GLuint sDepthTexture;
 static GLfloat sLightMatrix[16];
+static float sAmbient = DIORAMA_SHADOW_AMBIENT;
 
 static void Normalize(float v[3])
 {
@@ -114,7 +115,7 @@ bool DioramaGLShadow_IsEnabled(void)
     return sEnabled && sReady;
 }
 
-bool DioramaGLShadow_Begin(float cameraX, float cameraZ)
+bool DioramaGLShadow_Begin(float cameraX, float cameraZ, float strength)
 {
     float sun[3] = {sSunX, sSunY, sSunZ};
     float up[3] = {0.0f, 1.0f, 0.0f};
@@ -130,8 +131,11 @@ bool DioramaGLShadow_Begin(float cameraX, float cameraZ)
     GLfloat projection[16];
 
     sActiveThisFrame = false;
-    if (!DioramaGLShadow_IsEnabled())
+    if (!DioramaGLShadow_IsEnabled() || strength <= 0.0f)
         return false;
+    if (strength > 1.0f)
+        strength = 1.0f;
+    sAmbient = 1.0f - strength * (1.0f - DIORAMA_SHADOW_AMBIENT);
     Normalize(sun);
     forward[0] = -sun[0];
     forward[1] = -sun[1];
@@ -198,6 +202,11 @@ void DioramaGLShadow_End(int outputWidth, int outputHeight)
     glEnable(GL_SCISSOR_TEST);
     glScissor(0, 0, outputWidth, outputHeight);
     glDisable(GL_DEPTH_TEST);
+}
+
+float DioramaGLShadow_Ambient(void)
+{
+    return sAmbient;
 }
 
 const GLfloat *DioramaGLShadow_LightMatrix(void)

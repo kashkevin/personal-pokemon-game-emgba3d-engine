@@ -18,16 +18,20 @@
  *
  * PKMN_DIORAMA_SHADOWS=0 turns them off.
  */
-#define DIORAMA_SHADOW_AMBIENT 0.70f
+#define DIORAMA_SHADOW_AMBIENT 0.70f /* at full strength */
 #define DIORAMA_SHADOW_TEXTURE_UNIT 3
 
 bool DioramaGLShadow_Init(void);
 bool DioramaGLShadow_IsEnabled(void);
 /* Binds the depth map and fits the sun's view around the camera target.
- * False (and nothing to draw) when shadows are off. */
-bool DioramaGLShadow_Begin(float cameraX, float cameraZ);
+ * `strength` is how strong the sun is this frame, 0 to 1 (indoors and in bad
+ * weather 0, at night less: the compositor's call). False (and nothing to
+ * draw) when shadows are off or the strength is 0. */
+bool DioramaGLShadow_Begin(float cameraX, float cameraZ, float strength);
 /* Back to the window's framebuffer and viewport. */
 void DioramaGLShadow_End(int outputWidth, int outputHeight);
+/* The light left in a cast shadow this frame, for the lit passes' mix(). */
+float DioramaGLShadow_Ambient(void);
 /* The sun's view-projection, column major (for glUniformMatrix4fv). */
 const GLfloat *DioramaGLShadow_LightMatrix(void);
 /* Binds the depth map to DIORAMA_SHADOW_TEXTURE_UNIT for the lit passes;

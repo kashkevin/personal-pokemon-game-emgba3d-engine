@@ -177,6 +177,7 @@ struct DioramaSceneSnapshot
     uint8_t weather;
     uint8_t nextWeather;
     uint8_t weatherTransitionComplete;
+    uint8_t timeOfDay; /* gTimeOfDay: enum TimeOfDay (constants/rtc.h) */
     uint8_t rainVisibleCount;
     uint16_t fogScrollOffset;
     uint16_t weatherBlendEVA;

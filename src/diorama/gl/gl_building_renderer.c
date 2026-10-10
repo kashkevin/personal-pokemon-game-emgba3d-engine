@@ -67,6 +67,7 @@ static GLint sShadowPassLocation;
 static GLint sShadowEnabledLocation;
 static GLint sLightMatrixLocation;
 static GLint sShadowMapLocation;
+static GLint sShadowAmbientLocation;
 static struct Instance sInstances[MAX_INSTANCES];
 static unsigned sInstanceCount;
 static struct Batch *sBatches;
@@ -129,13 +130,14 @@ static const char sFragmentShader[] =
     "uniform int shadowEnabled;\n"
     "uniform mat4 lightViewProjection;\n"
     "uniform sampler2DShadow shadowMap;\n"
+    "uniform float shadowAmbient;\n"
     "float SunLight() {\n"
     "  if (shadowEnabled == 0) return 1.0;\n"
     "  vec4 lightPosition = lightViewProjection * vec4(sceneWorldPosition, 1.0);\n"
     "  vec3 p = lightPosition.xyz / lightPosition.w * 0.5 + 0.5;\n"
     "  if (p.x <= 0.0 || p.x >= 1.0 || p.y <= 0.0 || p.y >= 1.0 || p.z >= 1.0) return 1.0;\n"
     "  float lit = texture(shadowMap, vec3(p.xy, p.z - 0.0015));\n"
-    "  return mix(0.70, 1.0, lit);\n"
+    "  return mix(shadowAmbient, 1.0, lit);\n"
     "}\n"
     "void main() {\n"
     "  ivec2 size = textureSize(page, 0);\n"
@@ -203,10 +205,12 @@ static bool CreateProgram(void)
     sShadowEnabledLocation = dglGetUniformLocation(sProgram, "shadowEnabled");
     sLightMatrixLocation = dglGetUniformLocation(sProgram, "lightViewProjection");
     sShadowMapLocation = dglGetUniformLocation(sProgram, "shadowMap");
+    sShadowAmbientLocation = dglGetUniformLocation(sProgram, "shadowAmbient");
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0 && sFocalLengthLocation >= 0
         && sAspectCorrectionLocation >= 0 && sPageLocation >= 0 && sPaletteLocation >= 0
         && sShadowPassLocation >= 0 && sShadowEnabledLocation >= 0
-        && sLightMatrixLocation >= 0 && sShadowMapLocation >= 0;
+        && sLightMatrixLocation >= 0 && sShadowMapLocation >= 0
+        && sShadowAmbientLocation >= 0;
 }
 
 bool DioramaGLBuildings_Init(void)
@@ -489,6 +493,7 @@ void DioramaGLBuildings_Draw(float cameraX, float cameraZ, float cameraPitch,
     dglUniform1i(sShadowPassLocation, 0);
     dglUniform1i(sShadowMapLocation, DIORAMA_SHADOW_TEXTURE_UNIT);
     dglUniform1i(sShadowEnabledLocation, DioramaGLShadow_BindForLighting());
+    dglUniform1f(sShadowAmbientLocation, DioramaGLShadow_Ambient());
     dglUniformMatrix4fv(sLightMatrixLocation, 1, GL_FALSE, DioramaGLShadow_LightMatrix());
     dglActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, sPaletteTexture);
