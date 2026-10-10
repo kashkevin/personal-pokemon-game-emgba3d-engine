@@ -1968,6 +1968,17 @@ static void CB2_PokeStorage(void)
     DoScheduledBgTilemapCopiesToVram();
     ScrollBackground();
     UpdateCloseBoxButtonFlash();
+#ifdef PORTABLE
+    // Task_ChangeScreen frees sStorage when it hands over to the summary, the
+    // naming screen, the bag or the field, and this frame's sprite callbacks
+    // then read through it (the cursor's shadow first; vanilla). The GBA reads
+    // its BIOS there; natively it is a fault, so leaving the boxes crashed.
+    // Skipping this last frame's sprite update changes nothing on screen: the
+    // next screen resets the sprites.
+    if (sStorage == NULL)
+        return;
+#endif
+#line 1971 // gba-line
     AnimateSprites();
     BuildOamBuffer();
 }
