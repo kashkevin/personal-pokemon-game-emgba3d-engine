@@ -26,6 +26,7 @@
 #include "gba/flash_internal.h"
 #include "platform/dma.h"
 #include "platform/framedraw.h"
+#include "platform/mp_bridge.h"
 #ifdef ENABLE_DIORAMA
 #include "diorama/gl_compositor.h"
 #include "diorama/scene_snapshot.h"
@@ -406,8 +407,10 @@ int main(int argc, char **argv)
                     REG_DISPSTAT &= ~INTR_FLAG_VBLANK;
 
                     // Frame boundary: the game thread is parked in VBlankIntrWait,
-                    // so the save image and key register are safe to touch.
+                    // so the save image, the multiplayer mailboxes and the key
+                    // register are safe to touch.
                     FlushSaveIfDirty();
+                    MpBridge_Frame();
                     {
                         u16 keys = Platform_GetKeyInput();
                         if (sSoftResetChordFrames > 0)
@@ -415,6 +418,9 @@ int main(int argc, char **argv)
                             keys |= A_BUTTON | B_BUTTON | START_BUTTON | SELECT_BUTTON;
                             sSoftResetChordFrames--;
                         }
+                        // In multiplayer the reset chord reaches the game only when
+                        // its native reset handler has been offered it.
+                        keys = MpBridge_FilterKeys(keys);
                         REG_KEYINPUT = ~keys & KEYS_MASK;
                     }
 
@@ -443,6 +449,7 @@ int main(int argc, char **argv)
     }
 
     FlushSaveIfDirty();
+    MpBridge_Shutdown();
 
 #ifdef ENABLE_DIORAMA
     DioramaGL_Shutdown();
@@ -463,6 +470,13 @@ static void ParseArguments(int argc, char **argv)
     {
         if (strcmp(argv[i], "--save") == 0 && i + 1 < argc)
             SDL_strlcpy(sSavePath, argv[++i], sizeof(sSavePath));
+        else if (strcmp(argv[i], "--bridge") == 0 && i + 1 < argc)
+        {
+            // Multiplayer (src/platform/mp_bridge.c): never start without the
+            // bridge that was asked for.
+            if (!MpBridge_Configure(argv[++i]))
+                exit(1);
+        }
         else if (strcmp(argv[i], "--selftest-decompress") == 0 && i + 1 < argc)
             exit(NativeSelfTest_Decompress(argv[++i])); // src/platform/native_selftest.c
     }

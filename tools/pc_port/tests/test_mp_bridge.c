@@ -1,0 +1,677 @@
+// Unit tests for the native multiplayer bridge core (src/platform/mp_bridge.c),
+// after the app repository's tests/test_mgba_bridge.lua (fake mailboxes, fake
+// transport) and tests/native/windows-input-guard.c (reset-chord guard).
+// Built and run by: make -f Makefile_pc NATIVE_LINUX=1 check-native
+#include <stdlib.h>
+#include <string.h>
+
+#include "platform/mp_bridge.h"
+#include "minitest.h"
+
+static uint8_t sMemory[MP_REGION_COUNT][4096];
+static const uint32_t sSizes[MP_REGION_COUNT] = {128, 512, 512, 512, 128, 256, 4096};
+
+struct FakeTransport
+{
+    bool again;          // the next send says EAGAIN once
+    size_t chunk;        // bytes a send takes at most (0: all of them)
+    bool closed;
+    int connects;
+    int errors;
+    uint8_t sent[16384];
+    size_t sentLength;
+    uint8_t received[64][512];
+    size_t receivedLength[64];
+    int receivedCount;
+    bool chordRouted;
+};
+
+static struct FakeTransport sNet;
+static struct MpBridge sBridge;
+
+static bool FakeConnect(void *context, uint16_t port)
+{
+    (void)context;
+    if (port != 23456)
+        return false;
+    sNet.connects++;
+    sNet.closed = false;
+    return true;
+}
+
+static int FakeSend(void *context, const uint8_t *data, size_t length)
+{
+    size_t n = sNet.chunk != 0 && length > sNet.chunk ? sNet.chunk : length;
+
+    (void)context;
+    if (sNet.again)
+    {
+        sNet.again = false;
+        return MP_IO_AGAIN;
+    }
+    memcpy(sNet.sent + sNet.sentLength, data, n);
+    sNet.sentLength += n;
+    return (int)n;
+}
+
+static int FakeReceive(void *context, uint8_t *data, size_t max)
+{
+    size_t n;
+
+    (void)context;
+    if (sNet.receivedCount == 0)
+        return MP_IO_AGAIN;
+    n = sNet.receivedLength[0];
+    if (n > max)
+        abort();
+    memcpy(data, sNet.received[0], n);
+    sNet.receivedCount--;
+    memmove(sNet.received[0], sNet.received[1], sizeof(sNet.received[0]) * sNet.receivedCount);
+    memmove(sNet.receivedLength, sNet.receivedLength + 1, sizeof(sNet.receivedLength[0]) * sNet.receivedCount);
+    return (int)n;
+}
+
+static void FakeClose(void *context)
+{
+    (void)context;
+    sNet.closed = true;
+}
+
+static void FakeLog(void *context, bool error, const char *message)
+{
+    (void)context;
+    if (error)
+    {
+        sNet.errors++;
+        if (getenv("MP_TEST_VERBOSE") != NULL)
+            fprintf(stderr, "  bridge: %s\n", message);
+    }
+}
+
+static void FakeRoute(void *context, bool enabled)
+{
+    (void)context;
+    sNet.chordRouted = enabled;
+}
+
+static void PutU32(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)v;
+    p[1] = (uint8_t)(v >> 8);
+    p[2] = (uint8_t)(v >> 16);
+    p[3] = (uint8_t)(v >> 24);
+}
+
+static void PutU16(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)v;
+    p[1] = (uint8_t)(v >> 8);
+}
+
+static uint32_t GetU32(const uint8_t *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static uint32_t GetBE32(const uint8_t *p)
+{
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
+}
+
+// epoch 1, frame 10, x 5, y 7, group 0, map 9, direction 1, elevation 3,
+// gender 0, mode, activity 1, reserved 0
+static void MakePose(uint8_t pose[20], uint8_t mode)
+{
+    memset(pose, 0, 20);
+    PutU32(pose, 1);
+    PutU32(pose + 4, mode == 5 ? 11 : 10);
+    PutU16(pose + 8, mode == 5 ? 6 : 5);
+    PutU16(pose + 10, 7);
+    pose[13] = 9;
+    pose[14] = mode == 5 ? 4 : 1;
+    pose[15] = 3;
+    pose[17] = mode;
+    pose[18] = 1;
+}
+
+static void Fresh(const struct MpBridgeCaps *caps)
+{
+    struct MpBridgeOps ops;
+    struct MpBridgeCaps none;
+    uint8_t token[32];
+    int i;
+
+    memset(sMemory, 0, sizeof(sMemory));
+    memset(&sNet, 0, sizeof(sNet));
+    memset(&ops, 0, sizeof(ops));
+    memset(&none, 0, sizeof(none));
+    for (i = 0; i < MP_REGION_COUNT; i++)
+    {
+        ops.region[i] = sMemory[i];
+        ops.regionSize[i] = sSizes[i];
+    }
+    ops.connect = FakeConnect;
+    ops.send = FakeSend;
+    ops.receive = FakeReceive;
+    ops.close = FakeClose;
+    ops.log = FakeLog;
+    ops.routeResetChord = FakeRoute;
+    memset(token, 0xab, sizeof(token));
+    sNet.chunk = 3; // partial sends, as the Lua test's transport
+    MpBridge_Init(&sBridge, &ops, caps != NULL ? caps : &none, 23456, token);
+}
+
+static void Ready(uint8_t mode)
+{
+    uint8_t *p = sMemory[MP_REGION_PRESENCE];
+
+    PutU32(p, 0x31504D45);
+    PutU16(p + 4, 1);
+    PutU16(p + 6, 128);
+    MakePose(p + 16, mode);
+    PutU32(p + 8, GetU32(p + 20));
+}
+
+static void Step(int frames)
+{
+    while (frames-- > 0)
+        MpBridge_Step(&sBridge);
+}
+
+// One frame, delivered `chunk` bytes per receive.
+static void Feed(const uint8_t *bytes, size_t length, size_t chunk)
+{
+    size_t at;
+
+    for (at = 0; at < length; at += chunk)
+    {
+        size_t n = length - at < chunk ? length - at : chunk;
+
+        if (sNet.receivedCount == 64 || n > 512)
+            abort();
+        memcpy(sNet.received[sNet.receivedCount], bytes + at, n);
+        sNet.receivedLength[sNet.receivedCount++] = n;
+    }
+}
+
+static size_t FrameOf(uint8_t *out, uint8_t kind, const uint8_t *payload, size_t length)
+{
+    size_t size = 1 + length;
+
+    out[0] = (uint8_t)(size >> 24);
+    out[1] = (uint8_t)(size >> 16);
+    out[2] = (uint8_t)(size >> 8);
+    out[3] = (uint8_t)size;
+    out[4] = kind;
+    memcpy(out + 5, payload, length);
+    return 4 + size;
+}
+
+// Finds the n-th complete outbound frame of `kind`; its payload length or -1.
+static long SentFrame(uint8_t kind, int nth, const uint8_t **payload)
+{
+    size_t at = 0;
+
+    while (at + 5 <= sNet.sentLength)
+    {
+        uint32_t size = GetBE32(sNet.sent + at);
+
+        if (at + 4 + size > sNet.sentLength)
+            break;
+        if (sNet.sent[at + 4] == kind && nth-- == 0)
+        {
+            *payload = sNet.sent + at + 5;
+            return (long)size - 1;
+        }
+        at += 4 + size;
+    }
+    return -1;
+}
+
+static void MakeSnapshot(uint8_t out[88], uint8_t count, uint32_t secondToken, uint8_t mode)
+{
+    memset(out, 0, 88);
+    PutU32(out, 1);
+    PutU32(out + 4, 2);
+    PutU32(out + 8, 1);
+    out[13] = count;
+    PutU32(out + 16, 2);
+    MakePose(out + 20, mode);
+    if (count > 1)
+    {
+        PutU32(out + 40, secondToken);
+        MakePose(out + 44, mode);
+    }
+}
+
+MT_TEST(rom_startup_does_not_write)
+{
+    static uint8_t before[MP_REGION_COUNT][4096];
+
+    Fresh(NULL);
+    memcpy(before, sMemory, sizeof(before));
+    Step(4);
+    MT_EQ(sNet.connects, 0);
+    MT_CHECK(memcmp(before, sMemory, sizeof(before)) == 0);
+}
+
+MT_TEST(hello_survives_partial_sends_then_pose)
+{
+    const uint8_t *payload;
+    uint8_t hello[37];
+    long length;
+
+    Fresh(NULL);
+    Ready(0);
+    sNet.again = true;
+    Step(40);
+    hello[0] = 0;
+    hello[1] = 0;
+    hello[2] = 0;
+    hello[3] = 33;
+    hello[4] = 'H';
+    memset(hello + 5, 0xab, 32);
+    MT_EQ(sNet.connects, 1);
+    MT_CHECK(sNet.sentLength >= sizeof(hello) && memcmp(sNet.sent, hello, sizeof(hello)) == 0);
+    length = SentFrame('P', 0, &payload);
+    MT_EQ(length, 20);
+    MT_CHECK(length == 20 && memcmp(payload, sMemory[MP_REGION_PRESENCE] + 16, 20) == 0);
+}
+
+MT_TEST(snapshot_commits_after_complete_frame)
+{
+    uint8_t snapshot[88];
+    uint8_t frame[128];
+    size_t n;
+    uint8_t *p = sMemory[MP_REGION_PRESENCE];
+
+    Fresh(NULL);
+    Ready(0);
+    Step(1);
+    MakeSnapshot(snapshot, 1, 0, 0);
+    n = FrameOf(frame, 'S', snapshot, sizeof(snapshot));
+    Feed(frame, n, 7);
+    Step(5);
+    MT_EQ(GetU32(p + 36), 2);   // odd generation, then the even one
+    MT_EQ(GetU32(p + 40), 1);   // flags
+    MT_EQ(GetU32(p + 56), 2);   // the peer's token
+    MT_CHECK(memcmp(p + 40, snapshot, 88) == 0);
+    MT_EQ(sNet.errors, 0);
+}
+
+MT_TEST(malformed_length_stops_and_clears)
+{
+    uint8_t snapshot[88];
+    uint8_t frame[128];
+    uint8_t bad[4] = {0, 0, 1, 1}; // 257
+    size_t n;
+    uint8_t *p = sMemory[MP_REGION_PRESENCE];
+    uint32_t generation;
+    int connects;
+
+    Fresh(NULL);
+    Ready(0);
+    Step(1);
+    MakeSnapshot(snapshot, 1, 0, 0);
+    n = FrameOf(frame, 'S', snapshot, sizeof(snapshot));
+    Feed(frame, n, 100);
+    Step(1);
+    MT_EQ(GetU32(p + 40), 1);
+    Feed(bad, sizeof(bad), 4);
+    Step(1);
+    MT_CHECK(sNet.closed);
+    MT_EQ(sNet.errors, 1);
+    MT_EQ(GetU32(p + 40), 0); // rejection clears old actors
+    generation = GetU32(p + 36);
+    connects = sNet.connects;
+    Step(300);
+    MT_EQ(GetU32(p + 36), generation); // a fatal stop never reconnects
+    MT_EQ(sNet.connects, connects);
+}
+
+MT_TEST(duplicate_peer_tokens_refused)
+{
+    uint8_t snapshot[88];
+    uint8_t frame[128];
+    size_t n;
+
+    Fresh(NULL);
+    Ready(0);
+    Step(1);
+    MakeSnapshot(snapshot, 2, 2, 0);
+    n = FrameOf(frame, 'S', snapshot, sizeof(snapshot));
+    Feed(frame, n, 100);
+    Step(1);
+    MT_CHECK(sNet.closed);
+    MT_EQ(GetU32(sMemory[MP_REGION_PRESENCE] + 40), 0);
+}
+
+MT_TEST(foreign_mailbox_never_written)
+{
+    static uint8_t before[MP_REGION_COUNT][4096];
+
+    Fresh(NULL);
+    PutU32(sMemory[MP_REGION_PRESENCE], 0xDEADBEEF);
+    memcpy(before, sMemory, sizeof(before));
+    Step(1);
+    MT_EQ(sNet.connects, 0);
+    MT_EQ(sNet.errors, 1);
+    MT_CHECK(memcmp(before, sMemory, sizeof(before)) == 0);
+}
+
+MT_TEST(running_needs_the_animation_capability)
+{
+    struct MpBridgeCaps caps;
+    uint8_t snapshot[88];
+    uint8_t frame[128];
+    const uint8_t *payload;
+    size_t n;
+
+    Fresh(NULL);
+    Ready(5);
+    Step(40);
+    MT_EQ(sNet.sentLength, 37); // the hello only: no running pose published
+    memset(&caps, 0, sizeof(caps));
+    caps.presenceAnimation = 1;
+    Fresh(&caps);
+    Ready(5);
+    Step(40);
+    MT_EQ(SentFrame('P', 0, &payload), 20);
+    MakeSnapshot(snapshot, 1, 0, 5);
+    n = FrameOf(frame, 'S', snapshot, sizeof(snapshot));
+    Feed(frame, n, 7);
+    Step(5);
+    MT_CHECK(!sNet.closed);
+    MT_EQ(GetU32(sMemory[MP_REGION_PRESENCE] + 36), 2);
+}
+
+MT_TEST(crc32_matches_zlib)
+{
+    MT_EQ(MpBridge_Crc32((const uint8_t *)"123456789", 9), 0xCBF43926u);
+    MT_EQ(MpBridge_Crc32(NULL, 0), 0);
+}
+
+static void SaveReady(void)
+{
+    uint8_t *s = sMemory[MP_REGION_SAVE];
+
+    PutU32(s, 0x31534D45);
+    PutU16(s + 4, 1);
+    PutU16(s + 6, 512);
+}
+
+static void MakeSaveControl(uint8_t out[240], uint8_t opcode)
+{
+    memset(out, 0, 240);
+    PutU32(out, 7);        // incarnation
+    PutU32(out + 4, 3);    // epoch
+    memset(out + 8, 0x5a, 16); // request
+    PutU32(out + 24, 1);   // sequence
+    out[40] = opcode;
+    PutU32(out + 44, MpBridge_Crc32(NULL, 0));
+}
+
+MT_TEST(save_command_and_response)
+{
+    struct MpBridgeCaps caps;
+    uint8_t command[240];
+    uint8_t frame[260];
+    uint8_t capability[8] = {1, 0, 0, 2, 240, 0, 192, 0};
+    const uint8_t *payload;
+    uint8_t *s = sMemory[MP_REGION_SAVE];
+    size_t n;
+
+    memset(&caps, 0, sizeof(caps));
+    caps.save = 1;
+    Fresh(&caps);
+    sNet.chunk = 0;
+    Ready(0);
+    SaveReady();
+    Step(10);
+    MT_EQ(SentFrame('V', 0, &payload), 8);
+    MT_CHECK(memcmp(payload, capability, 8) == 0);
+    MakeSaveControl(command, 1);
+    n = FrameOf(frame, 'C', command, sizeof(command));
+    Feed(frame, n, 200);
+    Step(2);
+    MT_EQ(GetU32(s + 24), 2);
+    MT_CHECK(memcmp(s + 28, command, 240) == 0);
+    // the game answers: the same correlation, status 0, no data
+    memcpy(s + 272, command, 240);
+    PutU32(s + 268, 2);
+    Step(30);
+    MT_EQ(SentFrame('R', 0, &payload), 240);
+    MT_CHECK(memcmp(payload, command, 240) == 0);
+    MT_EQ(sNet.errors, 0);
+    // after the response a new command is accepted; another one while that
+    // is pending is refused (opcode 2 is not one of the recovery controls)
+    MakeSaveControl(command, 2);
+    command[24] = 2;
+    n = FrameOf(frame, 'C', command, sizeof(command));
+    Feed(frame, n, 200);
+    Step(2);
+    MT_EQ(GetU32(s + 24), 4);
+    MT_CHECK(!sNet.closed);
+    command[24] = 3;
+    n = FrameOf(frame, 'C', command, sizeof(command));
+    Feed(frame, n, 200);
+    Step(2);
+    MT_CHECK(sNet.closed); // multiple outstanding save commands
+}
+
+MT_TEST(save_command_with_bad_crc_refused)
+{
+    struct MpBridgeCaps caps;
+    uint8_t command[240];
+    uint8_t frame[260];
+    size_t n;
+
+    memset(&caps, 0, sizeof(caps));
+    caps.save = 1;
+    Fresh(&caps);
+    sNet.chunk = 0;
+    Ready(0);
+    SaveReady();
+    Step(2);
+    MakeSaveControl(command, 1);
+    PutU32(command + 44, 1);
+    n = FrameOf(frame, 'C', command, sizeof(command));
+    Feed(frame, n, 200);
+    Step(2);
+    MT_CHECK(sNet.closed);
+    MT_EQ(GetU32(sMemory[MP_REGION_SAVE] + 24), 0);
+}
+
+MT_TEST(world_inbound_validated)
+{
+    struct MpBridgeCaps caps;
+    uint8_t record[208];
+    uint8_t frame[230];
+    uint8_t *w = sMemory[MP_REGION_WORLD];
+    const uint8_t *payload;
+    size_t n;
+
+    memset(&caps, 0, sizeof(caps));
+    caps.world = 1;
+    Fresh(&caps);
+    sNet.chunk = 0;
+    Ready(0);
+    PutU32(w, 0x31574D45);
+    PutU16(w + 4, 1);
+    PutU16(w + 6, 256);
+    memset(w + 12, 0x11, 32); // the game's outbound record
+    Step(12);
+    MT_EQ(SentFrame('G', 0, &payload), 32);
+    memset(record, 0, sizeof(record));
+    PutU32(record, 1);
+    memcpy(record + 116, "Hello trainers", 14);
+    n = FrameOf(frame, 'N', record, sizeof(record));
+    Feed(frame, n, 200);
+    Step(2);
+    MT_EQ(GetU32(w + 44), 2);
+    MT_CHECK(memcmp(w + 48, record, 208) == 0);
+    record[116] = 7; // not printable
+    n = FrameOf(frame, 'N', record, sizeof(record));
+    Feed(frame, n, 200);
+    Step(2);
+    MT_CHECK(sNet.closed);
+}
+
+MT_TEST(battle_capability_waits_for_its_mailbox)
+{
+    struct MpBridgeCaps caps;
+
+    memset(&caps, 0, sizeof(caps));
+    caps.save = 1;
+    caps.trade = 1;
+    caps.battle = 3;
+    MT_CHECK(MpBridge_CheckCaps(&caps) == NULL);
+    Fresh(&caps);
+    Ready(0);
+    SaveReady();
+    Step(200);
+    MT_EQ(sNet.connects, 0); // runtimeReady holds until the battle mailbox is up
+    caps.trade = 0;
+    MT_CHECK(MpBridge_CheckCaps(&caps) != NULL);
+}
+
+// tests/native/windows-input-guard.c
+static uint32_t AddKeys(struct MpBridgeInput *s, uint32_t keys)
+{
+    return MpBridge_FilterInput(s, s->keys | keys);
+}
+
+static uint32_t ClearKeys(struct MpBridgeInput *s, uint32_t keys)
+{
+    return MpBridge_FilterInput(s, s->keys & ~keys);
+}
+
+MT_TEST(reset_chord_guard_masks)
+{
+    uint32_t keys;
+
+    for (keys = 0; keys < 1024; keys++)
+    {
+        struct MpBridgeInput state = {0};
+        uint32_t expected = (keys & 15) == 15 ? keys & ~15u : keys;
+
+        MT_EQ(MpBridge_FilterInput(&state, keys), expected);
+        MT_EQ(MpBridge_FilterInput(&state, keys), expected);
+        MT_EQ(ClearKeys(&state, 1023), 0);
+        MT_CHECK(!state.chordHeld);
+    }
+}
+
+MT_TEST(reset_chord_guard_orders)
+{
+    static const uint32_t bits[] = {1, 2, 4, 8};
+    unsigned a, b, c, d, e, f, g, h, i;
+    uint32_t other;
+    int failures = 0;
+
+    for (a = 0; a < 4; a++)
+    for (b = 0; b < 4; b++)
+    for (c = 0; c < 4; c++)
+    for (d = 0; d < 4; d++)
+    {
+        unsigned down[4];
+
+        if (a == b || a == c || a == d || b == c || b == d || c == d)
+            continue;
+        down[0] = a; down[1] = b; down[2] = c; down[3] = d;
+        for (e = 0; e < 4; e++)
+        for (f = 0; f < 4; f++)
+        for (g = 0; g < 4; g++)
+        for (h = 0; h < 4; h++)
+        {
+            unsigned up[4];
+
+            if (e == f || e == g || e == h || f == g || f == h || g == h)
+                continue;
+            up[0] = e; up[1] = f; up[2] = g; up[3] = h;
+            for (other = 0; other < 1024; other += 16)
+            {
+                struct MpBridgeInput state = {0};
+                uint32_t raw = other;
+
+                failures += MpBridge_FilterInput(&state, other) != other;
+                for (i = 0; i < 4; i++)
+                {
+                    raw |= bits[down[i]];
+                    failures += AddKeys(&state, bits[down[i]]) != (i == 3 ? other : raw);
+                }
+                failures += !state.chordHeld;
+                failures += AddKeys(&state, 15) != other;
+                failures += MpBridge_FilterInput(&state, raw) != other;
+                for (i = 0; i < 4; i++)
+                {
+                    raw &= ~bits[up[i]];
+                    failures += ClearKeys(&state, bits[up[i]]) != other;
+                    failures += state.chordHeld != (i != 3);
+                }
+                failures += AddKeys(&state, 1) != (other | 1);
+                failures += ClearKeys(&state, 1) != other;
+            }
+        }
+    }
+    MT_EQ(failures, 0);
+}
+
+MT_TEST(reset_chord_guard_native_capability)
+{
+    struct MpBridgeInput state = {0};
+
+    MT_EQ(MpBridge_FilterInput(&state, 15), 0);
+    MT_EQ(ClearKeys(&state, 1), 0);
+    MT_EQ(AddKeys(&state, 1), 0);
+    MT_EQ(ClearKeys(&state, 7), 0);
+    MT_EQ(AddKeys(&state, 16), 16);
+    MT_EQ(ClearKeys(&state, 8), 16);
+    MT_CHECK(!state.chordHeld);
+    MT_EQ(AddKeys(&state, 8), 24); // ordinary Start
+    MT_EQ(ClearKeys(&state, 8), 16);
+    MT_EQ(MpBridge_FilterInput(&state, 15), 0);
+    MT_EQ(MpBridge_FilterInput(&state, 4), 0); // no synthetic Select
+    MT_EQ(MpBridge_FilterInput(&state, 0), 0);
+    MT_EQ(MpBridge_FilterInput(&state, 4), 4); // fresh Select
+
+    memset(&state, 0, sizeof(state));
+    MpBridge_EnableNativeChord(&state, true);
+    MT_EQ(MpBridge_FilterInput(&state, 31), 31);
+    MT_CHECK(state.chordHeld && state.chordRouted);
+    MT_EQ(ClearKeys(&state, 1), 16);
+    MT_EQ(AddKeys(&state, 1), 16);
+    MT_EQ(ClearKeys(&state, 15), 16);
+    MT_EQ(AddKeys(&state, 15), 31);
+    MpBridge_EnableNativeChord(&state, false);
+    MT_EQ(MpBridge_FilterInput(&state, 31), 16);
+    MpBridge_EnableNativeChord(&state, true);
+    MT_EQ(MpBridge_FilterInput(&state, 31), 16);
+    MT_EQ(ClearKeys(&state, 15), 16);
+    MT_EQ(AddKeys(&state, 15), 31);
+    MT_EQ(ClearKeys(&state, 15), 16);
+    MpBridge_EnableNativeChord(&state, false);
+    MT_EQ(AddKeys(&state, 15), 16);
+    MpBridge_EnableNativeChord(&state, true);
+    MT_EQ(MpBridge_FilterInput(&state, 31), 16);
+}
+
+int main(void)
+{
+    MT_RUN(rom_startup_does_not_write);
+    MT_RUN(hello_survives_partial_sends_then_pose);
+    MT_RUN(snapshot_commits_after_complete_frame);
+    MT_RUN(malformed_length_stops_and_clears);
+    MT_RUN(duplicate_peer_tokens_refused);
+    MT_RUN(foreign_mailbox_never_written);
+    MT_RUN(running_needs_the_animation_capability);
+    MT_RUN(crc32_matches_zlib);
+    MT_RUN(save_command_and_response);
+    MT_RUN(save_command_with_bad_crc_refused);
+    MT_RUN(world_inbound_validated);
+    MT_RUN(battle_capability_waits_for_its_mailbox);
+    MT_RUN(reset_chord_guard_masks);
+    MT_RUN(reset_chord_guard_orders);
+    MT_RUN(reset_chord_guard_native_capability);
+    return MT_REPORT();
+}

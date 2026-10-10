@@ -16,7 +16,7 @@ not cover the pret decompilation or any Pokémon game material.
 
 | File | Origin | Notes |
 | --- | --- | --- |
-| `sdl2.c` | voxel project | SDL2 window, timing, input, audio output. Modified here: accessibility (NVDA/footstep) hooks and SDL_image removed; atomic save persistence; `--save`; key register feed; Ctrl+R sends the A+B+START+SELECT chord; RTC moved to `siirtc_pc.c`; host entropy for RNG seeding; in-process soft reset; `Platform_SpinWaitForVBlank`. |
+| `sdl2.c` | voxel project | SDL2 window, timing, input, audio output. Modified here: accessibility (NVDA/footstep) hooks and SDL_image removed; atomic save persistence; `--save`; key register feed; Ctrl+R sends the A+B+START+SELECT chord; RTC moved to `siirtc_pc.c`; host entropy for RNG seeding; in-process soft reset; `Platform_SpinWaitForVBlank`; `--bridge` and the multiplayer bridge's frame hook and reset-chord guard. |
 | `gba_easy_draw.c`, `gba_fast_draw.c` | voxel project (NT_x86 renderer, 2024) | GBA PPU emulation from VRAM/OAM/palette/registers. Both targets use "easy draw"; "fast draw" lacks 256-colour text backgrounds. |
 | `dma.c` | voxel project | DMA emulation incl. HBlank DMA. |
 | `bios.c` | voxel project | BIOS calls. **Its header says the implementations are "based on the VBA-M source code" (VBA-M is GPL-2.0-or-later); `ArcTan`, `ArcTan2` and `Sqrt` are "taken from mGBA's source" (MPL-2.0).** See Licensing below. |
@@ -30,6 +30,7 @@ not cover the pret decompilation or any Pokémon game material.
 | `null_trap.c` | project-owned | Linux development tool that logs NULL-pointer accesses. |
 | `game_memory.c` | project-owned | In-process soft reset: snapshots the game's data/bss sections before the game starts and restores them on `SoftReset`. |
 | `crash_report.c` | project-owned | Writes `crash.log` (fault, game callbacks, stack trace) when the game crashes. |
+| `mp_bridge.c`, `include/platform/mp_bridge.h` | project-owned | Native multiplayer bridge: a port of the app repository's `bridge/mgba.lua` (and the reset-chord guard of its `native/windows-runtime/sdl-multiplayer.h`) to C, speaking the same loopback protocol to the unchanged companion. Unit tests in `tools/pc_port/tests/test_mp_bridge.c`. |
 | `native_selftest.c` | project-owned | `--selftest-decompress LIST`: decodes every compressed asset with the game's decompressor and compares with the GBA build's uncompressed files. |
 
 ## Build notes
