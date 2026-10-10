@@ -496,19 +496,19 @@ static bool BuildWeatherImage(const struct DioramaSceneSnapshot *snapshot)
         /* Flakes drifting down and swaying, nearer ones bigger and faster. */
         for (i = 0; i < 72; i++)
         {
-            int near = i % 4 == 0;
+            int nearFlake = i % 4 == 0; /* not "near": a macro on Windows */
             int cycleY = DISPLAY_HEIGHT + 8;
-            int y = (int)((i * 53 + phase * (near ? 2 : 1) / 2) % cycleY) - 4;
-            float sway = sinf((phase + i * 37) * 0.035f) * (near ? 5.0f : 3.0f);
+            int y = (int)((i * 53 + phase * (nearFlake ? 2 : 1) / 2) % cycleY) - 4;
+            float sway = sinf((phase + i * 37) * 0.035f) * (nearFlake ? 5.0f : 3.0f);
             int x = (int)((i * 97 + (int)(phase / 6)) % (DISPLAY_WIDTH + 8)) - 4 + (int)sway;
-            int size = near ? 2 : 1;
+            int size = nearFlake ? 2 : 1;
             int px;
             int py;
 
             for (py = y; py < y + size; py++)
                 for (px = x; px < x + size; px++)
                     if (px >= 0 && px < DISPLAY_WIDTH && py >= 0 && py < DISPLAY_HEIGHT)
-                        sWeatherPixels[py * DISPLAY_WIDTH + px] = RGBA(244, 248, 255, near ? 235 : 190);
+                        sWeatherPixels[py * DISPLAY_WIDTH + px] = RGBA(244, 248, 255, nearFlake ? 235 : 190);
         }
     }
     else if (effect == DIORAMA_WEATHER_SAND)
