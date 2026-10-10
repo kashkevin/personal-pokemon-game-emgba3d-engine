@@ -32,6 +32,9 @@ not cover the pret decompilation or any Pokémon game material.
 | `crash_report.c` | project-owned | Writes `crash.log` (fault, game callbacks, stack trace) when the game crashes. |
 | `mp_bridge.c`, `include/platform/mp_bridge.h` | project-owned | Native multiplayer bridge: a port of the app repository's `bridge/mgba.lua` (and the reset-chord guard of its `native/windows-runtime/sdl-multiplayer.h`) to C, speaking the same loopback protocol to the unchanged companion. Unit tests in `tools/pc_port/tests/test_mp_bridge.c`. |
 | `native_selftest.c` | project-owned | `--selftest-decompress LIST`: decodes every compressed asset with the game's decompressor and compares with the GBA build's uncompressed files. |
+| `display_settings.c`, `include/platform/display_settings.h` | project-owned | Display and graphics settings in `pokeemerald.cfg` (resolution, windowed/borderless/fullscreen, quality, anti-aliasing) and the sizing rules: the window fitted to the display, the 3D scene's render size at the window's shape, the 240x160 picture's whole-number scale. Unit tests in `tools/pc_port/tests/test_display_settings.c`. |
+| `pc_menu.c`, `include/platform/pc_menu.h` | project-owned | The PC settings menu's model (F10): rows, values, the 15-second confirmation after a resolution or display mode change. Drawn by `src/diorama/gl/gl_pc_overlay.c`. |
+| `benchmark.c`, `include/platform/benchmark.h` | project-owned | `--benchmark [seconds]`: the 3D view's frame rate at 720p, 1080p, 1440p and 2160p into `benchmark.log`. |
 
 ## Build notes
 

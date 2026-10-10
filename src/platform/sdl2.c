@@ -27,8 +27,14 @@
 #include "platform/dma.h"
 #include "platform/framedraw.h"
 #include "platform/mp_bridge.h"
+#include "platform/benchmark.h"
+#include "platform/display_settings.h"
+#include "platform/pc_menu.h"
 #ifdef ENABLE_DIORAMA
 #include "diorama/gl_compositor.h"
+#include "diorama/gl_pc_overlay.h"
+#include "diorama/gl_quality.h"
+#include "diorama/gl_target.h"
 #include "diorama/scene_snapshot.h"
 #include "diorama/tree_sprites.h"
 #include "multiplayer_menu.h"
@@ -68,6 +74,21 @@ static u8 sBorderBackground;
 static bool sHasBorderBackgroundConfig;
 static u8 sBackgroundOrderVersion;
 static u8 sPlatformSettings[PLATFORM_SETTING_COUNT] = {0, 4, 0, 1, 1, 10, 5};
+// Display and graphics settings (include/platform/display_settings.h): the
+// chosen resolution (1920x1080 unless the player chose another), windowed,
+// borderless or fullscreen, and the 3D view's quality. fullscreen= and
+// windowScale= of older files are read as before and turned into these.
+static struct DisplaySettings sDisplay;
+static int sLegacyFullscreen = -1;
+static int sLegacyWindowScale = -1;
+static struct PcMenuState sPcMenu; // F10: the PC settings menu (3D build)
+static u16 keyboardKeys;           // the GBA buttons held on the keyboard (defined below)
+static bool sShowFrameRate;        // pokeemerald.cfg showFrameRate=1
+static int sBenchmarkSeconds;      // --benchmark [seconds per resolution]
+static Uint64 sLastPresentCounter;
+static u32 sFrameRateFrames;
+static Uint32 sFrameRateWindowMs;
+static float sFrameRateShown;
 #ifdef __ANDROID__
 static SDL_GameController *androidController;
 #endif
@@ -88,11 +109,15 @@ static void ParseArguments(int argc, char **argv);
 static u16 sReaderKeys = 0;
 static void StoreConfigFile(void);
 static void ApplyPlatformSettings(void);
+static void ApplyDisplaySettings(bool recenter);
 static void StoreSaveFile(void);
+static void AfterPresent(void);
 
 #ifdef ENABLE_DIORAMA
 #define DIORAMA_VIDEO_SETTING_EVENT 1
 static void ApplyDioramaVideoSetting(enum PlatformSetting setting, u8 value);
+static void DrawPcOverlay(int outputWidth, int outputHeight);
+static bool HandlePcMenuKey(const SDL_KeyboardEvent *key);
 #endif
 
 #ifdef __ANDROID__
@@ -228,6 +253,12 @@ int main(int argc, char **argv)
     freopen( "CON", "w", stdout ) ;
 #endif
 
+#ifdef _WIN32
+    // Physical pixels: a 1920x1080 window is 1920x1080 pixels at any Windows
+    // display scaling, and Windows never stretches (blurs) the game's picture on
+    // a high-DPI display. Per monitor: moving the window to another display keeps it sharp.
+    SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
+#endif
 #ifdef __ANDROID__
     SDL_setenv("SDL_AUDIODRIVER", "openslES", 1);
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
@@ -276,11 +307,23 @@ int main(int argc, char **argv)
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
 #endif
 #if defined(NATIVE_LINUX) || defined(_WIN32)
-    sdlWindow = SDL_CreateWindow("Pokemon Emerald", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
+    {
+        // The chosen resolution, or the largest window of its shape the
+        // display has room for; ApplyPlatformSettings then sets the display mode.
+        SDL_Rect usable;
+        int windowWidth = sDisplay.width;
+        int windowHeight = sDisplay.height;
+
+        if (SDL_GetDisplayUsableBounds(0, &usable) == 0)
+            DisplaySettings_FitWindow(sDisplay.width, sDisplay.height, usable.w - 16, usable.h - 48,
+                                      &windowWidth, &windowHeight);
+        sdlWindow = SDL_CreateWindow("Pokemon Emerald", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                                     windowWidth, windowHeight, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
 #ifdef ENABLE_DIORAMA
-                                 | SDL_WINDOW_OPENGL
+                                     | SDL_WINDOW_OPENGL
 #endif
-                                 );
+                                     );
+    }
 #else
     sdlWindow = SDL_CreateWindow("pokeemerald", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, DISPLAY_WIDTH * videoScale, DISPLAY_HEIGHT * videoScale, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
 #endif
@@ -348,6 +391,8 @@ int main(int argc, char **argv)
     DioramaSnapshotExchange_Init();
     DioramaScene_Init();
     ApplyDioramaLook(); // before the game thread makes its first snapshot
+    DioramaGLQuality_Set(DisplaySettings_ShadowMapSize(sDisplay.shadows), sDisplay.lighting, sDisplay.effects);
+    DioramaGL_SetOverlay(DrawPcOverlay); // the PC settings menu and the frame rate
 #endif
 #if defined(NATIVE_LINUX) || defined(_WIN32)
 #ifdef ENABLE_DIORAMA
@@ -382,6 +427,18 @@ int main(int argc, char **argv)
     SDL_RenderSetIntegerScale(sdlRenderer, SDL_TRUE);
 #endif
     ApplyPlatformSettings();
+#ifdef ENABLE_DIORAMA
+    if (sBenchmarkSeconds > 0)
+    {
+        Benchmark_Start(SDL_GetTicks(), sBenchmarkSeconds);
+        DioramaGL_SetVSync(false); // the GPU's own rate, not the display's (not saved)
+        SDL_Log("Benchmark: %d s at each resolution once the 3D field is drawn (at most %d s to reach it); "
+                "benchmark.log follows", sBenchmarkSeconds, BENCHMARK_BOOT_MAX_MS / 1000);
+    }
+#else
+    if (sBenchmarkSeconds > 0)
+        SDL_Log("Benchmark: only in the 3D build (pokeemerald-mp-diorama)");
+#endif
 
 #ifndef ENABLE_DIORAMA
     sdlTexture = SDL_CreateTexture(sdlRenderer,
@@ -469,23 +526,12 @@ int main(int argc, char **argv)
                     int outputWidth;
                     int outputHeight;
                     SDL_GetRendererOutputSize(sdlRenderer, &outputWidth, &outputHeight);
-                    int gameHeight;
-                    int gameWidth;
-                    if (sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE])
-                    {
-                        int scale = outputWidth / DISPLAY_WIDTH;
-                        if (outputHeight / DISPLAY_HEIGHT < scale)
-                            scale = outputHeight / DISPLAY_HEIGHT;
-                        if (scale < 1)
-                            scale = 1;
-                        gameWidth = DISPLAY_WIDTH * scale;
-                        gameHeight = DISPLAY_HEIGHT * scale;
-                    }
-                    else
-                    {
-                        gameHeight = outputHeight * 8 / 9;
-                        gameWidth = gameHeight * 3 / 2;
-                    }
+                    // Whole-number steps, so the pixel art stays sharp at every
+                    // window size (display_settings.h).
+                    int scale = DisplaySettings_PixelScale(outputWidth, outputHeight,
+                                                           sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE]);
+                    int gameWidth = DISPLAY_WIDTH * scale;
+                    int gameHeight = DISPLAY_HEIGHT * scale;
                     SDL_Rect gameViewport = {(outputWidth - gameWidth) / 2,
                                              (outputHeight - gameHeight) / 2,
                                              gameWidth, gameHeight};
@@ -536,6 +582,8 @@ int main(int argc, char **argv)
                             keys |= A_BUTTON | B_BUTTON | START_BUTTON | SELECT_BUTTON;
                             sSoftResetChordFrames--;
                         }
+                        if (Benchmark_Active())
+                            keys = Benchmark_FilterKeys(keys, SDL_GetTicks());
                         // In multiplayer the reset chord reaches the game only when
                         // its native reset handler has been offered it.
                         keys = MpBridge_FilterKeys(keys);
@@ -584,6 +632,7 @@ int main(int argc, char **argv)
         SDL_RenderPresent(sdlRenderer);
 #endif
         PerfLog_Presented(presentStart, SDL_GetPerformanceCounter());
+        AfterPresent();
 #endif
     }
 
@@ -624,6 +673,13 @@ static void ParseArguments(int argc, char **argv)
             if (!MpBridge_Configure(argv[++i]))
                 exit(1);
         }
+        // A measurement of the 3D view at each resolution (include/platform/benchmark.h).
+        else if (strcmp(argv[i], "--benchmark") == 0)
+        {
+            sBenchmarkSeconds = BENCHMARK_DEFAULT_SECONDS;
+            if (i + 1 < argc && SDL_atoi(argv[i + 1]) > 0)
+                sBenchmarkSeconds = SDL_atoi(argv[++i]);
+        }
         else if (strcmp(argv[i], "--selftest-decompress") == 0 && i + 1 < argc)
             exit(NativeSelfTest_Decompress(argv[++i])); // src/platform/native_selftest.c
     }
@@ -656,11 +712,16 @@ static void ReadConfigFile(void)
     int steps;
 #endif
 
+    DisplaySettings_Defaults(&sDisplay);
     if (configFile == NULL)
         return;
     while (fgets(line, sizeof(line), configFile) != NULL)
     {
-        if (sscanf(line, "borderBackground=%u", &value) == 1 && value < 16)
+        if (DisplaySettings_ParseLine(&sDisplay, line))
+            continue;
+        if (sscanf(line, "showFrameRate=%u", &value) == 1)
+            sShowFrameRate = value != 0;
+        else if (sscanf(line, "borderBackground=%u", &value) == 1 && value < 16)
         {
             sBorderBackground = value;
             sHasBorderBackgroundConfig = true;
@@ -668,9 +729,15 @@ static void ReadConfigFile(void)
         else if (sscanf(line, "backgroundOrder=%u", &value) == 1)
             sBackgroundOrderVersion = value;
         else if (sscanf(line, "fullscreen=%u", &value) == 1)
+        {
             sPlatformSettings[PLATFORM_SETTING_FULLSCREEN] = value != 0;
+            sLegacyFullscreen = value != 0;
+        }
         else if (sscanf(line, "windowScale=%u", &value) == 1 && value >= 2 && value <= 6) // 6 = 1920x1080
+        {
             sPlatformSettings[PLATFORM_SETTING_WINDOW_SCALE] = value;
+            sLegacyWindowScale = value;
+        }
         else if (sscanf(line, "integerScale=%u", &value) == 1)
             sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE] = value != 0;
         else if (sscanf(line, "vsync=%u", &value) == 1)
@@ -699,6 +766,10 @@ static void ReadConfigFile(void)
 #endif
     }
     fclose(configFile);
+    DisplaySettings_Finish(&sDisplay);
+    // A file written before resolution= and displayMode= existed.
+    DisplaySettings_ApplyLegacy(&sDisplay, sLegacyFullscreen, sLegacyWindowScale);
+    sPlatformSettings[PLATFORM_SETTING_FULLSCREEN] = sDisplay.mode != DISPLAY_MODE_WINDOWED;
 }
 
 static void StoreConfigFile(void)
@@ -709,8 +780,27 @@ static void StoreConfigFile(void)
         return;
     fprintf(configFile, "borderBackground=%u\n", sBorderBackground);
     fprintf(configFile, "backgroundOrder=2\n");
-    fprintf(configFile, "fullscreen=%u\n", sPlatformSettings[PLATFORM_SETTING_FULLSCREEN]);
-    fprintf(configFile, "windowScale=%u\n", sPlatformSettings[PLATFORM_SETTING_WINDOW_SCALE]);
+    // A resolution or display mode waiting for the player's confirmation (the
+    // settings menu) is not written yet: the file keeps the one before it.
+    struct DisplaySettings stored = sDisplay;
+
+    if (sPcMenu.open && sPcMenu.confirming)
+    {
+        stored.width = sPcMenu.previous.width;
+        stored.height = sPcMenu.previous.height;
+        stored.mode = sPcMenu.previous.mode;
+        stored.fullscreenMode = sPcMenu.previous.fullscreenMode;
+        stored.resolutionKept = sPcMenu.previous.resolutionKept;
+        stored.modeKept = sPcMenu.previous.modeKept;
+    }
+    // fullscreen= and windowScale= for builds older than resolution= (the
+    // borderless kind was their fullscreen; windowScale only for the sizes it had).
+    fprintf(configFile, "fullscreen=%u\n", stored.mode != DISPLAY_MODE_WINDOWED);
+    if (stored.resolutionKept && DisplaySettings_LegacyWindowScale(&stored) != 0)
+        fprintf(configFile, "windowScale=%u\n", DisplaySettings_LegacyWindowScale(&stored));
+    DisplaySettings_Write(&stored, configFile);
+    if (sShowFrameRate)
+        fprintf(configFile, "showFrameRate=1\n");
     fprintf(configFile, "integerScale=%u\n", sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE]);
     fprintf(configFile, "vsync=%u\n", sPlatformSettings[PLATFORM_SETTING_VSYNC]);
     fprintf(configFile, "border=%u\n", sPlatformSettings[PLATFORM_SETTING_BORDER]);
@@ -734,15 +824,89 @@ static void ApplyPlatformSettings(void)
 #else
     SDL_RenderSetVSync(sdlRenderer, sPlatformSettings[PLATFORM_SETTING_VSYNC]);
 #endif
+    ApplyDisplaySettings(true);
+}
+
+// The window as the display settings ask. Windowed: the chosen resolution, or
+// the largest window of its shape the display has room for; the 3D scene is
+// drawn at the window's own size (and follows a resized window). Borderless:
+// the window covers the display at the display's own size and the 3D scene is
+// drawn at the chosen resolution (at the display's shape) and scaled to it.
+// Fullscreen: the display switches to the chosen resolution (its closest mode
+// at the desktop's refresh rate); if it has none, borderless instead. The
+// pixel-art picture is always drawn at the window's own resolution in
+// whole-number steps (gl_compositor.c), so it stays sharp in every mode.
+static void ApplyDisplaySettings(bool recenter)
+{
 #if defined(NATIVE_LINUX) || defined(_WIN32)
-    SDL_SetWindowFullscreen(sdlWindow, sPlatformSettings[PLATFORM_SETTING_FULLSCREEN]
-                                      ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
-    if (!sPlatformSettings[PLATFORM_SETTING_FULLSCREEN])
+    int display = SDL_GetWindowDisplayIndex(sdlWindow);
+
+    if (display < 0)
+        display = 0;
+    sPlatformSettings[PLATFORM_SETTING_FULLSCREEN] = sDisplay.mode != DISPLAY_MODE_WINDOWED;
+    if (sDisplay.mode == DISPLAY_MODE_FULLSCREEN)
     {
-        int scale = sPlatformSettings[PLATFORM_SETTING_WINDOW_SCALE];
-        SDL_SetWindowSize(sdlWindow, 320 * scale, 180 * scale);
-        SDL_SetWindowPosition(sdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+        SDL_DisplayMode want = {0};
+        SDL_DisplayMode desktop;
+        SDL_DisplayMode closest;
+
+        want.w = sDisplay.width;
+        want.h = sDisplay.height;
+        if (SDL_GetDesktopDisplayMode(display, &desktop) == 0)
+            want.refresh_rate = desktop.refresh_rate;
+        if (SDL_GetClosestDisplayMode(display, &want, &closest) != NULL
+         && SDL_SetWindowDisplayMode(sdlWindow, &closest) == 0
+         && SDL_SetWindowFullscreen(sdlWindow, SDL_WINDOW_FULLSCREEN) == 0)
+        {
+            SDL_Log("Display: fullscreen %dx%d at %d Hz", closest.w, closest.h, closest.refresh_rate);
+        }
+        else
+        {
+            SDL_Log("Display: no %dx%d mode on this display (%s); borderless instead",
+                    sDisplay.width, sDisplay.height, SDL_GetError());
+            SDL_SetWindowFullscreen(sdlWindow, SDL_WINDOW_FULLSCREEN_DESKTOP);
+        }
     }
+    else if (sDisplay.mode == DISPLAY_MODE_BORDERLESS)
+    {
+        SDL_SetWindowFullscreen(sdlWindow, SDL_WINDOW_FULLSCREEN_DESKTOP);
+    }
+    else
+    {
+        SDL_Rect usable;
+        int top = 0;
+        int left = 0;
+        int bottom = 0;
+        int right = 0;
+        int width;
+        int height;
+
+        SDL_SetWindowFullscreen(sdlWindow, 0);
+        if (SDL_GetDisplayUsableBounds(display, &usable) != 0)
+            usable.w = usable.h = 0;
+        if (SDL_GetWindowBordersSize(sdlWindow, &top, &left, &bottom, &right) != 0)
+            top = left = bottom = right = 0;
+        if (top == 0 && usable.w > 0)
+        {
+            // The frame is not known yet (the window was just made): room for one.
+            top = 40;
+            left = right = bottom = 8;
+        }
+        DisplaySettings_FitWindow(sDisplay.width, sDisplay.height,
+                                  usable.w - left - right, usable.h - top - bottom, &width, &height);
+        SDL_SetWindowSize(sdlWindow, width, height);
+        if (recenter)
+            SDL_SetWindowPosition(sdlWindow, SDL_WINDOWPOS_CENTERED_DISPLAY(display),
+                                  SDL_WINDOWPOS_CENTERED_DISPLAY(display));
+        SDL_Log("Display: windowed %dx%d%s", width, height,
+                width != sDisplay.width || height != sDisplay.height ? " (the chosen size did not fit)" : "");
+    }
+#endif
+#ifdef ENABLE_DIORAMA
+    // The 3D scene: the window's own size when windowed, the chosen resolution
+    // in the fullscreen modes; multisampled if the quality asks.
+    DioramaGLTarget_Configure(sDisplay.mode == DISPLAY_MODE_WINDOWED ? 0 : sDisplay.height,
+                              sDisplay.antialiasing);
 #endif
 }
 
@@ -753,23 +917,310 @@ static void ApplyDioramaVideoSetting(enum PlatformSetting setting, u8 value)
     {
         DioramaGL_SetVSync(value);
     }
-    else if (setting == PLATFORM_SETTING_FULLSCREEN)
+    else if (setting == PLATFORM_SETTING_FULLSCREEN || setting == PLATFORM_SETTING_WINDOW_SCALE)
     {
-        SDL_SetWindowFullscreen(sdlWindow, value ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
-        if (!value)
-        {
-            int scale = sPlatformSettings[PLATFORM_SETTING_WINDOW_SCALE];
-            SDL_SetWindowSize(sdlWindow, 320 * scale, 180 * scale);
-            SDL_SetWindowPosition(sdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-        }
-    }
-    else if (setting == PLATFORM_SETTING_WINDOW_SCALE && !sPlatformSettings[PLATFORM_SETTING_FULLSCREEN])
-    {
-        SDL_SetWindowSize(sdlWindow, 320 * value, 180 * value);
-        SDL_SetWindowPosition(sdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+        ApplyDisplaySettings(true);
     }
 }
 #endif
+
+#ifdef ENABLE_DIORAMA
+// ---------------------------------------------------------------------------
+// The PC settings menu (F10; include/platform/pc_menu.h): what it changed is
+// applied at once; a resolution or display mode is written to pokeemerald.cfg
+// only once the player keeps it.
+static void ApplyPcMenuResult(unsigned int bits)
+{
+    bool store = false;
+
+    if (bits & PC_MENU_CHANGED_DISPLAY)
+    {
+        sDisplay.width = sPcMenu.settings.width;
+        sDisplay.height = sPcMenu.settings.height;
+        sDisplay.mode = sPcMenu.settings.mode;
+        sDisplay.fullscreenMode = sPcMenu.settings.fullscreenMode;
+        sDisplay.resolutionKept = sPcMenu.settings.resolutionKept;
+        sDisplay.modeKept = sPcMenu.settings.modeKept;
+        ApplyDisplaySettings(true);
+    }
+    if (bits & PC_MENU_DISPLAY_KEPT)
+        store = true;
+    if (bits & PC_MENU_CHANGED_QUALITY)
+    {
+        sDisplay.quality = sPcMenu.settings.quality;
+        sDisplay.shadows = sPcMenu.settings.shadows;
+        sDisplay.lighting = sPcMenu.settings.lighting;
+        sDisplay.effects = sPcMenu.settings.effects;
+        sDisplay.antialiasing = sPcMenu.settings.antialiasing;
+        sDisplay.qualityKept = true;
+        DioramaGLQuality_Set(DisplaySettings_ShadowMapSize(sDisplay.shadows), sDisplay.lighting, sDisplay.effects);
+        DioramaGLTarget_Configure(sDisplay.mode == DISPLAY_MODE_WINDOWED ? 0 : sDisplay.height,
+                                  sDisplay.antialiasing);
+        store = true;
+    }
+    if (bits & PC_MENU_CHANGED_VSYNC)
+    {
+        sPlatformSettings[PLATFORM_SETTING_VSYNC] = sPcMenu.vsync;
+        if (!Benchmark_Active())
+            DioramaGL_SetVSync(sPcMenu.vsync);
+        store = true;
+    }
+    if (bits & PC_MENU_CHANGED_PICTURE)
+    {
+        sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE] = sPcMenu.pictureFill;
+        store = true;
+    }
+    if (bits & PC_MENU_CHANGED_FRAME_RATE)
+    {
+        sShowFrameRate = sPcMenu.showFrameRate;
+        store = true;
+    }
+    if (bits & PC_MENU_CHANGED_CAMERA)
+    {
+        // As F7 does.
+        sCameraStyle = sPcMenu.camera3ds ? DIORAMA_CAMERA_3DS : DIORAMA_CAMERA_WIDE;
+        DioramaGL_SetCameraStyle(sCameraStyle);
+        sCameraStyleKept = TRUE;
+        sCameraPitchSteps = sCameraZoomSteps = 0;
+        sCameraStepsDirty = false;
+        store = true;
+    }
+    if (bits & PC_MENU_CHANGED_TREES)
+    {
+        // As F8 does.
+        sTreeStyle3ds = sPcMenu.trees3ds;
+        sTreeStyleKept = TRUE;
+        DioramaTreeSprites_SetEnabled(sTreeStyle3ds);
+        store = true;
+    }
+    if (store)
+        StoreConfigFile();
+}
+
+static bool HandlePcMenuKey(const SDL_KeyboardEvent *key)
+{
+    enum PcMenuInput input;
+
+    if (key->keysym.sym == SDLK_F10)
+    {
+        if (key->repeat != 0)
+            return true;
+        if (sPcMenu.open)
+        {
+            // F10 closes; a display change not kept yet goes back first.
+            if (sPcMenu.confirming)
+                ApplyPcMenuResult(PcMenu_Input(&sPcMenu, PC_MENU_INPUT_BACK, SDL_GetTicks()));
+            ApplyPcMenuResult(PcMenu_Input(&sPcMenu, PC_MENU_INPUT_BACK, SDL_GetTicks()));
+        }
+        else
+        {
+            PcMenu_Open(&sPcMenu, &sDisplay, sPlatformSettings[PLATFORM_SETTING_VSYNC],
+                        sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE], sShowFrameRate, true,
+                        DioramaGL_GetCameraStyle() == DIORAMA_CAMERA_3DS, DioramaTreeSprites_Enabled());
+            keyboardKeys = 0; // no button stays held for the game while the menu is open
+        }
+        return true;
+    }
+    if (!sPcMenu.open)
+        return false;
+    switch (key->keysym.sym)
+    {
+    case SDLK_UP:
+        input = PC_MENU_INPUT_UP;
+        break;
+    case SDLK_DOWN:
+        input = PC_MENU_INPUT_DOWN;
+        break;
+    case SDLK_LEFT:
+        input = PC_MENU_INPUT_LEFT;
+        break;
+    case SDLK_RIGHT:
+        input = PC_MENU_INPUT_RIGHT;
+        break;
+    case SDLK_RETURN:
+    case SDLK_KP_ENTER:
+    case SDLK_z:
+    case SDLK_SPACE:
+        if (key->repeat != 0)
+            return true;
+        input = PC_MENU_INPUT_ACCEPT;
+        break;
+    case SDLK_ESCAPE:
+    case SDLK_x:
+    case SDLK_BACKSPACE:
+        if (key->repeat != 0)
+            return true;
+        input = PC_MENU_INPUT_BACK;
+        break;
+    case SDLK_F11:
+        return false; // fullscreen still switches
+    default:
+        return true; // nothing else reaches the game while the menu is open
+    }
+    ApplyPcMenuResult(PcMenu_Input(&sPcMenu, input, SDL_GetTicks()));
+    return true;
+}
+
+static void DrawPcOverlay(int outputWidth, int outputHeight)
+{
+    struct PcMenuRow rows[PC_MENU_ITEM_COUNT];
+    struct DioramaOverlayRow view[PC_MENU_ITEM_COUNT];
+    struct DioramaOverlayMenu menu;
+    char corner[96];
+    bool showCorner = sShowFrameRate || Benchmark_Active();
+
+    if (sPcMenu.open)
+    {
+        menu.count = PcMenu_Rows(&sPcMenu, rows);
+        for (int i = 0; i < menu.count; i++)
+        {
+            view[i].label = rows[i].label;
+            view[i].value = rows[i].value;
+            view[i].selected = rows[i].selected;
+            view[i].adjustable = rows[i].adjustable;
+        }
+        menu.title = "Display & Graphics";
+        menu.rows = view;
+        menu.confirmSeconds = PcMenu_ConfirmSecondsLeft(&sPcMenu, SDL_GetTicks());
+    }
+    if (showCorner)
+    {
+        int width;
+        int height;
+        int samples;
+
+        DioramaGLTarget_GetLastSize(&width, &height, &samples);
+        SDL_snprintf(corner, sizeof(corner), "%s%.0f fps   3D %dx%d%s", Benchmark_Active() ? "Benchmark   " : "",
+                     sFrameRateShown, width, height, samples > 0 ? " MSAA" : "");
+    }
+    DioramaPCOverlay_Draw(sPcMenu.open ? &menu : NULL, showCorner ? corner : NULL,
+                          outputWidth, outputHeight);
+}
+
+static void CpuName(char *buffer, size_t size)
+{
+    SDL_strlcpy(buffer, "unknown", size);
+#ifdef _WIN32
+    {
+        HKEY key;
+
+        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
+                          0, KEY_READ, &key) == ERROR_SUCCESS)
+        {
+            char name[128];
+            DWORD length = sizeof(name) - 1;
+            DWORD type = 0;
+
+            if (RegQueryValueExA(key, "ProcessorNameString", NULL, &type, (LPBYTE)name, &length) == ERROR_SUCCESS
+             && type == REG_SZ)
+            {
+                name[length < sizeof(name) ? length : sizeof(name) - 1] = '\0';
+                SDL_strlcpy(buffer, name, size);
+            }
+            RegCloseKey(key);
+        }
+    }
+#else
+    {
+        FILE *info = fopen("/proc/cpuinfo", "r");
+        char line[256];
+
+        while (info != NULL && fgets(line, sizeof(line), info) != NULL)
+        {
+            char *colon = strchr(line, ':');
+
+            if (strncmp(line, "model name", 10) == 0 && colon != NULL)
+            {
+                SDL_strlcpy(buffer, colon + 2, size);
+                buffer[strcspn(buffer, "\r\n")] = '\0';
+                break;
+            }
+        }
+        if (info != NULL)
+            fclose(info);
+    }
+#endif
+}
+
+static void WriteBenchmarkLog(void)
+{
+    FILE *log = fopen("benchmark.log", "w");
+    char renderer[256];
+    char cpu[128];
+    SDL_DisplayMode desktop;
+    int windowWidth = 0;
+    int windowHeight = 0;
+    time_t now = time(NULL);
+    char when[64];
+
+    if (log == NULL)
+    {
+        SDL_Log("Benchmark: benchmark.log could not be written");
+        return;
+    }
+    strftime(when, sizeof(when), "%Y-%m-%d %H:%M", localtime(&now));
+    DioramaGL_DescribeRenderer(renderer, sizeof(renderer));
+    CpuName(cpu, sizeof(cpu));
+    SDL_GL_GetDrawableSize(sdlWindow, &windowWidth, &windowHeight);
+    fprintf(log, "Pokemon Emerald native PC - 3D view benchmark (%s)\n\n", when);
+    fprintf(log, "GPU:      %s\n", renderer);
+    fprintf(log, "CPU:      %s (%d logical processors), %d MB RAM\n", cpu, SDL_GetCPUCount(), SDL_GetSystemRAM());
+    if (SDL_GetDesktopDisplayMode(SDL_GetWindowDisplayIndex(sdlWindow), &desktop) == 0)
+        fprintf(log, "Display:  %dx%d at %d Hz\n", desktop.w, desktop.h, desktop.refresh_rate);
+    fprintf(log, "Window:   %dx%d (%s)\n", windowWidth, windowHeight, DisplaySettings_ModeName(sDisplay.mode));
+    fprintf(log, "Quality:  %s (shadows %s, lighting %s, effects %s, anti-aliasing %s)\n",
+            DisplaySettings_QualityName(sDisplay.quality), DisplaySettings_ShadowName(sDisplay.shadows),
+            sDisplay.lighting ? "on" : "off", sDisplay.effects ? "on" : "off",
+            sDisplay.antialiasing == 0 ? "off" : sDisplay.antialiasing == 2 ? "2x" : sDisplay.antialiasing == 4 ? "4x" : "8x");
+    fprintf(log, "Method:   VSync off; at each resolution the 3D scene is drawn at that size (offscreen and\n"
+                 "          scaled into the window when the window is smaller); %d s counted after a %d s\n"
+                 "          warm-up. '3D frames' should equal 'frames' (the save standing outdoors).\n\n",
+            sBenchmarkSeconds, BENCHMARK_WARMUP_MS / 1000);
+    Benchmark_WriteResults(log);
+    fclose(log);
+    SDL_Log("Benchmark: benchmark.log written");
+}
+#endif
+
+// After every frame shown: the frame rate, the benchmark, the settings
+// menu's confirmation countdown.
+static void AfterPresent(void)
+{
+    Uint32 now = SDL_GetTicks();
+    Uint64 counter = SDL_GetPerformanceCounter();
+    double frameMs = sLastPresentCounter != 0
+                   ? (double)(counter - sLastPresentCounter) * 1000.0 / SDL_GetPerformanceFrequency() : 0.0;
+
+    sLastPresentCounter = counter;
+    sFrameRateFrames++;
+    if (now - sFrameRateWindowMs >= 500)
+    {
+        sFrameRateShown = sFrameRateFrames * 1000.0f / (now - sFrameRateWindowMs);
+        sFrameRateFrames = 0;
+        sFrameRateWindowMs = now;
+    }
+#ifdef ENABLE_DIORAMA
+    if (sPcMenu.open)
+        ApplyPcMenuResult(PcMenu_Tick(&sPcMenu, now));
+    if (Benchmark_Active())
+    {
+        int height = Benchmark_RenderHeight(now);
+
+        if (frameMs > 0.0)
+            Benchmark_Frame(now, frameMs, DioramaGL_LastFrameWas3D());
+        DioramaGLTarget_Configure(height > 0 ? height
+                                  : sDisplay.mode == DISPLAY_MODE_WINDOWED ? 0 : sDisplay.height,
+                                  sDisplay.antialiasing);
+        if (Benchmark_Finished(now))
+        {
+            WriteBenchmarkLog();
+            isRunning = false;
+        }
+    }
+#else
+    (void)frameMs;
+#endif
+}
 
 // Writes the whole flash image to a temporary file and renames it over the save,
 // so a crash or power cut never leaves a half-written file behind.
@@ -886,6 +1337,18 @@ u8 Platform_GetSetting(enum PlatformSetting setting)
 void Platform_SetSetting(enum PlatformSetting setting, u8 value)
 {
     sPlatformSettings[setting] = value;
+    // The older two settings in terms of the display settings.
+    if (setting == PLATFORM_SETTING_FULLSCREEN)
+    {
+        sDisplay.mode = value ? sDisplay.fullscreenMode : DISPLAY_MODE_WINDOWED;
+        sDisplay.modeKept = true;
+    }
+    else if (setting == PLATFORM_SETTING_WINDOW_SCALE && value >= 2 && value <= 12)
+    {
+        sDisplay.width = 320 * value;
+        sDisplay.height = 180 * value;
+        sDisplay.resolutionKept = true;
+    }
 #ifdef ENABLE_DIORAMA
     if (setting == PLATFORM_SETTING_VSYNC
      || setting == PLATFORM_SETTING_FULLSCREEN
@@ -902,21 +1365,8 @@ void Platform_SetSetting(enum PlatformSetting setting, u8 value)
     if (setting == PLATFORM_SETTING_VSYNC)
         SDL_RenderSetVSync(sdlRenderer, value);
 #if defined(NATIVE_LINUX) || defined(_WIN32)
-    else if (setting == PLATFORM_SETTING_FULLSCREEN)
-    {
-        SDL_SetWindowFullscreen(sdlWindow, value ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
-        if (!value)
-        {
-            int scale = sPlatformSettings[PLATFORM_SETTING_WINDOW_SCALE];
-            SDL_SetWindowSize(sdlWindow, 320 * scale, 180 * scale);
-            SDL_SetWindowPosition(sdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-        }
-    }
-    else if (setting == PLATFORM_SETTING_WINDOW_SCALE && !sPlatformSettings[PLATFORM_SETTING_FULLSCREEN])
-    {
-        SDL_SetWindowSize(sdlWindow, 320 * value, 180 * value);
-        SDL_SetWindowPosition(sdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-    }
+    else if (setting == PLATFORM_SETTING_FULLSCREEN || setting == PLATFORM_SETTING_WINDOW_SCALE)
+        ApplyDisplaySettings(true);
 #endif
 #endif
     StoreConfigFile();
@@ -1216,6 +1666,15 @@ void ProcessEvents(void)
         case SDL_QUIT:
             isRunning = false;
             break;
+#if defined(NATIVE_LINUX) || defined(_WIN32)
+        case SDL_WINDOWEVENT:
+            // A fullscreen window moved to another display (Win+Shift+arrow, a
+            // display unplugged): fullscreen there, at that display's own size.
+            if (event.window.event == SDL_WINDOWEVENT_DISPLAY_CHANGED
+             && sDisplay.mode != DISPLAY_MODE_WINDOWED)
+                ApplyDisplaySettings(false);
+            break;
+#endif
 #ifdef ENABLE_DIORAMA
         case SDL_USEREVENT:
             if (event.user.code == DIORAMA_VIDEO_SETTING_EVENT)
@@ -1294,6 +1753,11 @@ void ProcessEvents(void)
             }
             break;
         case SDL_KEYDOWN:
+#ifdef ENABLE_DIORAMA
+            // F10 and, while the PC settings menu is open, its keys.
+            if (HandlePcMenuKey(&event.key))
+                break;
+#endif
             switch (event.key.keysym.sym)
             {
             HANDLE_KEYDOWN(A_BUTTON)
@@ -1325,9 +1789,16 @@ void ProcessEvents(void)
                 }
                 break;
             case SDLK_F11:
+                // Windowed, or the fullscreen kind chosen last (borderless
+                // unless the settings menu chose exclusive fullscreen).
                 if (event.key.repeat == 0)
-                    Platform_SetSetting(PLATFORM_SETTING_FULLSCREEN,
-                                        !sPlatformSettings[PLATFORM_SETTING_FULLSCREEN]);
+                {
+                    sDisplay.mode = sDisplay.mode == DISPLAY_MODE_WINDOWED
+                                  ? sDisplay.fullscreenMode : DISPLAY_MODE_WINDOWED;
+                    sDisplay.modeKept = true;
+                    ApplyDisplaySettings(true);
+                    StoreConfigFile();
+                }
                 break;
             case SDLK_SPACE:
                 if (!speedUp)
@@ -1513,6 +1984,8 @@ u16 GetXInputKeys()
 
 u16 Platform_GetKeyInput(void)
 {
+    if (sPcMenu.open)
+        return 0; // the PC settings menu has the keys; the game keeps running
 #ifdef _WIN32
     u16 gamepadKeys = GetXInputKeys();
     return gamepadKeys | keyboardKeys;
