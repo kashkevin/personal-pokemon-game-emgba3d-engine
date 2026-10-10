@@ -17,6 +17,7 @@
 #include "diorama/gl_shadow.h"
 #include "diorama/gl_object_renderer.h"
 #include "diorama/gl_terrain_renderer.h"
+#include "diorama/gl_tree_sprites.h"
 #include "diorama/rules.generated.h"
 #include "diorama/rules.h"
 #include "diorama/metatile_atlas.h"
@@ -979,6 +980,8 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
         SDL_Log("Diorama building models unavailable; houses stay extruded");
     if (!DioramaGLShadow_Init())
         SDL_Log("Diorama sun shadows unavailable");
+    /* The 3DS project's trees, when PKMN_DIORAMA_TREES=3ds (tree_sprites.h). */
+    DioramaGLTreeSprites_Init();
 
     dglGenVertexArrays(1, &sVertexArray);
     dglBindVertexArray(sVertexArray);
@@ -1126,6 +1129,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
             sCurrent3DReady = DioramaGLTerrain_Sync(&sSceneSnapshot, sAtlasResolvedCells)
                            && DioramaGLObjects_Sync(&sSceneSnapshot, sAtlasResolvedCells);
             DioramaGLBuildings_Sync(&sSceneSnapshot, sAtlasResolvedCells);
+            DioramaGLTreeSprites_Sync(&sSceneSnapshot, sAtlasResolvedCells);
         }
         current3D = sCurrent3DReady;
     }
@@ -1267,17 +1271,21 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         if (DioramaGLShadow_Begin(cameraX, cameraZ,
                                   sTerrainDebug ? 0.0f : SunStrength(&sRenderedSceneSnapshot),
                                   ((uint64_t)DioramaGLBuildings_GetGeometryGeneration() << 32)
-                                  | DioramaGLTerrain_GetGeometryGeneration()))
+                                  | (DioramaGLTerrain_GetGeometryGeneration()
+                                   ^ DioramaGLTreeSprites_GetGeometryGeneration() * 2654435761u)))
         {
             DioramaGLTerrain_DrawShadow(sAtlasTexture.id, sBaseAtlasTexture.id,
                                         sForegroundAtlasTexture.id);
             DioramaGLBuildings_DrawShadow();
+            DioramaGLTreeSprites_DrawShadow();
             DioramaGLShadow_End(outputWidth, outputHeight);
         }
         DioramaGLTerrain_Draw(sAtlasTexture.id, sBaseAtlasTexture.id,
                                sForegroundAtlasTexture.id, cameraX, cameraZ,
                                cameraPitch, cameraFocalLength,
                                aspectCorrection, sTerrainDebug);
+        DioramaGLTreeSprites_Draw(cameraX, cameraZ, cameraPitch, cameraFocalLength,
+                                  aspectCorrection);
         DioramaGLBuildings_Draw(cameraX, cameraZ, cameraPitch, cameraFocalLength,
                                 aspectCorrection);
         DioramaGLObjects_Draw(current3D ? frameAlpha : 1.0f,
@@ -1467,6 +1475,7 @@ void DioramaGL_Shutdown(void)
 {
     DioramaGLShadow_Shutdown();
     DioramaGLAir_Shutdown();
+    DioramaGLTreeSprites_Shutdown();
     DioramaGLLight_Shutdown();
     DioramaGLBuildings_Shutdown();
     DioramaGLObjects_Shutdown();

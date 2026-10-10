@@ -7,6 +7,7 @@
 #include "diorama/map_connection.h"
 #include "diorama/scene_snapshot.h"
 #include "diorama/sprite_frame.h"
+#include "diorama/tree_sprites.h"
 #include "diorama/weather.h"
 #include "event_object_movement.h"
 #include "field_camera.h"
@@ -24,7 +25,9 @@
 #include "palette.h"
 #include "script.h"
 #include "sprite.h"
+#include "tilesets.h"
 #include "window.h"
+#include "constants/map_types.h"
 
 #define CELL_RADIUS 16
 
@@ -330,6 +333,51 @@ static bool TryCopyConnectedCell(struct DioramaSceneSnapshot *snapshot,
                           UNPACK_COLLISION(entry), UNPACK_ELEVATION(entry), cell);
 }
 
+/*
+ * The 3DS project's trees (tree_sprites.h): on an outdoor map of the General
+ * tileset a tree's cells are published as ground (its trunk's art covers
+ * them), remembering what part of the tree each was, and the cells its old
+ * canopy covered get their ground back (VoxelWorld_UsesTreeSprites and the
+ * classification of voxel_world.c). Connected maps share the map's tilesets
+ * (TryCopyConnectedCell), the border cells too.
+ */
+static void ApplyTreeSprites(struct DioramaSceneSnapshot *snapshot)
+{
+    const struct MapLayout *layout = gMapHeader.mapLayout;
+    bool dewford;
+    int i;
+
+    if (!DioramaTreeSprites_Enabled() || layout == NULL
+     || layout->primaryTileset != &gTileset_General
+     || gMapHeader.mapType == MAP_TYPE_INDOOR || gMapHeader.mapType == MAP_TYPE_SECRET_BASE)
+        return;
+    dewford = layout->secondaryTileset == &gTileset_Dewford;
+    for (i = 0; i < snapshot->visibleCellCount; i++)
+    {
+        struct DioramaCellSnapshot *cell = &snapshot->cells[i];
+        int part = DioramaTreeSprites_Part(dewford, cell->metatileId);
+        uint16_t ground;
+
+        if (part != DIORAMA_TREE_PART_NONE)
+        {
+            bool secondary = cell->metatileId >= NUM_METATILES_IN_PRIMARY;
+
+            if (!CopyCellVisual(layout, DioramaTreeSprites_TrunkGround(secondary),
+                                cell->collision, cell->elevation, cell))
+                continue;
+            if (part == DIORAMA_TREE_PART_SMALL)
+                cell->treeSprite = secondary ? DIORAMA_TREE_SPRITE_SMALL_DEWFORD
+                                             : DIORAMA_TREE_SPRITE_SMALL;
+            else
+                cell->treeSprite = DIORAMA_TREE_SPRITE_QUARTER + part;
+            continue;
+        }
+        ground = DioramaTreeSprites_GroundMetatile(dewford, cell->metatileId);
+        if (ground != cell->metatileId)
+            CopyCellVisual(layout, ground, cell->collision, cell->elevation, cell);
+    }
+}
+
 static bool CopyCells(struct DioramaSceneSnapshot *snapshot)
 {
     int x;
@@ -349,6 +397,7 @@ static bool CopyCells(struct DioramaSceneSnapshot *snapshot)
             cell->mapX = mapX;
             cell->mapY = mapY;
             cell->flags = 0;
+            cell->treeSprite = DIORAMA_TREE_SPRITE_NONE;
             if (mapX >= MAP_OFFSET && mapY >= MAP_OFFSET
              && mapX < MAP_OFFSET + snapshot->mapWidth
              && mapY < MAP_OFFSET + snapshot->mapHeight)
@@ -376,6 +425,7 @@ static bool CopyCells(struct DioramaSceneSnapshot *snapshot)
         }
     }
     snapshot->visibleCellCount = DIORAMA_MAX_VISIBLE_CELLS;
+    ApplyTreeSprites(snapshot);
     return true;
 }
 

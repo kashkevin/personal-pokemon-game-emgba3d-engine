@@ -39,6 +39,18 @@ $(DIORAMA_RULE_SOURCE) $(DIORAMA_RULE_HEADER) &: $(DIORAMA_RULE_JSON) $(DIORAMA_
 $(DIORAMA_TREE_SOURCE) $(DIORAMA_TREE_HEADER) &: $(DIORAMA_TREE_MODEL) $(DIORAMA_TREE_COMPILER)
 	python3 $(DIORAMA_TREE_COMPILER)
 
+# The 3DS project's tree art (tools/diorama_trees_3ds/README.md), one texture.
+DIORAMA_TREES3DS_SOURCE := src/data/diorama/trees_3ds.generated.c
+DIORAMA_TREES3DS_HEADER := include/diorama/trees_3ds.generated.h
+DIORAMA_TREES3DS_ART := $(sort $(wildcard tools/diorama_trees_3ds/art/*.png))
+
+AUTO_GEN_TARGETS += $(DIORAMA_TREES3DS_SOURCE) $(DIORAMA_TREES3DS_HEADER)
+
+$(DIORAMA_TREES3DS_SOURCE) $(DIORAMA_TREES3DS_HEADER) &: $(DIORAMA_TREES3DS_ART) \
+	 tools/diorama_trees_3ds/pack_trees.py
+	python3 tools/diorama_trees_3ds/pack_trees.py --source $(DIORAMA_TREES3DS_SOURCE) \
+	  --header $(DIORAMA_TREES3DS_HEADER)
+
 # Modelled buildings (ZallaxDev/pokeemerald-3Ds-dualscreen's generator, see
 # tools/diorama_buildings/README.md): every building that reproduces its own
 # drawing pixel for pixel becomes a textured model; export_gl.py compiles them

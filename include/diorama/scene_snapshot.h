@@ -90,6 +90,9 @@ struct DioramaCellSnapshot
     uint8_t sourceMapGroup;
     uint8_t sourceMapNum;
     uint16_t flags;
+    /* With the 3DS project's trees (tree_sprites.h): the part of a tree the
+     * cell was, published as ground; DIORAMA_TREE_SPRITE_NONE (0) otherwise. */
+    uint8_t treeSprite;
     uint16_t tileEntries[DIORAMA_METATILE_ENTRY_COUNT];
 };
 
