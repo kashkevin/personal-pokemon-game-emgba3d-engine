@@ -89,6 +89,8 @@ static GLint sShadeLocation;
 static GLint sSaturationLocation;
 static GLint sCastStrengthLocation;
 static struct DioramaLightUniforms sLightUniforms;
+/* The ground under the player, as last seen (DioramaGLObjects_GetPlayerGround). */
+static float sPlayerGroundY;
 
 /* The door standing open: see FindDoor. */
 #define DOOR_DEPTH 0.03f   /* the opening, in front of its wall */
@@ -225,7 +227,8 @@ static const char sObjectFragmentShader[] =
     "    vec4 texel = texture(image, sampleUv);\n"
     "    if (texel.a < 0.5) discard;\n"
     /* A sprite stands in the light of the ground at its feet (the 3DS port). */
-    "    color = vec4(Grade(texel.rgb) * Light(mix(shadowAmbient, 1.0, SunLit())) * shade, texel.a);\n"
+    "    color = vec4(Grade(texel.rgb) * Light(mix(shadowAmbient, 1.0, SunLit()))\n"
+    "               * Dapple(lightProbe) * shade, texel.a);\n"
     "    color.rgb = Haze(color.rgb, viewDepth);\n"
     "  }\n"
     "}\n";
@@ -623,6 +626,8 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
 
     memcpy(sItems, nextItems, nextItemCount * sizeof(*sItems));
     sItemCount = nextItemCount;
+    if (playerFound)
+        sPlayerGroundY = nextItems[playerItem].currentPose.groundY;
     FindDoor(snapshot, resolvedCells);
     sMetrics.visibleObjects = sItemCount;
     sMetrics.cachedFrames = 0;
@@ -1088,6 +1093,11 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
     glDisable(GL_STENCIL_TEST);
     glDisable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
+}
+
+float DioramaGLObjects_GetPlayerGround(void)
+{
+    return sPlayerGroundY;
 }
 
 const struct DioramaObjectMetrics *DioramaGLObjects_GetMetrics(void)

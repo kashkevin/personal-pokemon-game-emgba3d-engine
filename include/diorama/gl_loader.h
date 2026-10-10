@@ -8,6 +8,7 @@ extern PFNGLACTIVETEXTUREPROC dglActiveTexture;
 extern PFNGLATTACHSHADERPROC dglAttachShader;
 extern PFNGLBINDBUFFERPROC dglBindBuffer;
 extern PFNGLBINDFRAMEBUFFERPROC dglBindFramebuffer;
+extern PFNGLBLITFRAMEBUFFERPROC dglBlitFramebuffer;
 extern PFNGLCHECKFRAMEBUFFERSTATUSPROC dglCheckFramebufferStatus;
 extern PFNGLDELETEFRAMEBUFFERSPROC dglDeleteFramebuffers;
 extern PFNGLFRAMEBUFFERTEXTURE2DPROC dglFramebufferTexture2D;

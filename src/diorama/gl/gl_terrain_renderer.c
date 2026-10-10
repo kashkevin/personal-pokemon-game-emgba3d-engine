@@ -189,7 +189,8 @@ static const char sTerrainFragmentShader[] =
     "             : (textureLayer == 3 ? pixelColor : texture(image, uv)));\n"
     "  if (texel.a < 0.5) discard;\n"
     "  if (textureLayer == 3) texel.rgb = clamp(texel.rgb * pixelScale + pixelOffset, 0.0, 1.0);\n"
-    "  color = vec4(Grade(texel.rgb) * Light(shade * mix(shadowAmbient, 1.0, SunLit())), texel.a);\n"
+    "  color = vec4(Grade(texel.rgb) * Light(shade * mix(shadowAmbient, 1.0, SunLit()))\n"
+    "             * Dapple(sceneWorldPosition), texel.a);\n"
     "  color.rgb = Haze(color.rgb, viewDepth);\n"
     "}\n";
 

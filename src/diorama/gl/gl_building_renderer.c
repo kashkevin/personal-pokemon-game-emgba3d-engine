@@ -158,7 +158,8 @@ static const char sFragmentShader[] =
     "  if (slot == 255) discard;\n"
     "  if (shadowPass == 1) { color = vec4(1.0); return; }\n"
     "  color = vec4(Grade(texelFetch(palette, ivec2(slot, 0), 0).rgb)\n"
-    "             * Light(shade * mix(shadowAmbient, 1.0, SunLit())), 1.0);\n"
+    "             * Light(shade * mix(shadowAmbient, 1.0, SunLit()))\n"
+    "             * Dapple(sceneWorldPosition), 1.0);\n"
     "  color.rgb = Haze(color.rgb, viewDepth);\n"
     "}\n";
 

@@ -24,6 +24,8 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
                            float cameraPitch, float focalLength,
                            float aspectCorrection);
 const struct DioramaObjectMetrics *DioramaGLObjects_GetMetrics(void);
+/* The height of the ground under the player, as last seen (0 before any). */
+float DioramaGLObjects_GetPlayerGround(void);
 void DioramaGLObjects_Shutdown(void);
 
 #endif
