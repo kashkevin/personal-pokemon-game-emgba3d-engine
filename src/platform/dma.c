@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include "global.h"
 #include "platform/dma.h"
 
@@ -14,7 +15,23 @@ struct DMATransfer {
     };
     u32 size;
     u16 control;
+    u32 hblankRuns; // HBlank transfers since the game last armed this channel
 } DMAList[DMA_COUNT];
+
+// A repeating HBlank DMA whose source moves stays inside its buffer only while the
+// game re-arms it every frame, as scanline effects do in their VBlank callback. One
+// left running reads on through memory: harmless on the GBA, a crash natively once
+// it reaches unmapped memory. Such a channel is stopped and reported so the screen
+// that forgot to stop it can be fixed (KNOWN_ISSUES N25).
+#define HBLANK_DMA_MAX_RUNS (3 * DISPLAY_HEIGHT)
+
+static void StopRunawayHBlankDma(int dmaNum, struct DMATransfer *dma)
+{
+    dma->control &= ~DMA_ENABLE;
+    fprintf(stderr, "[compat] HBlank DMA%d ran %d lines without being re-armed (source %p); stopped\n",
+            dmaNum, HBLANK_DMA_MAX_RUNS, dma->src);
+    fflush(stderr);
+}
 
 void RunDMAs(u32 type)
 {
@@ -30,6 +47,13 @@ void RunDMAs(u32 type)
         if ( (dma->control & DMA_ENABLE) &&
            (((dma->control & DMA_START_MASK) >> 12) == type))
         {
+            if (type == DMA_HBLANK && (dma->control & DMA_REPEAT)
+             && (dma->control & DMA_SRC_MASK) != DMA_SRC_FIXED
+             && ++dma->hblankRuns > HBLANK_DMA_MAX_RUNS)
+            {
+                StopRunawayHBlankDma(dmaNum, dma);
+                continue;
+            }
             //printf("DMA%d src=%p, dest=%p, control=%d\n", dmaNum, dma->src, dma->dest, dma->control);
             for (int i = 0; i < (dma->size); i++)
             {
@@ -105,6 +129,7 @@ void DmaSet(int dmaNum, const void *src, void *dest, u32 control)
     dma->dst = dest;
     dma->size = control & 0x1ffff;
     dma->control = control >> 16;
+    dma->hblankRuns = 0;
 
     RunDMAs(DMA_NOW);
 }

@@ -11,6 +11,10 @@
 #include "text_window.h"
 #include "constants/songs.h"
 #include "constants/rgb.h"
+#ifdef PORTABLE
+#include "scanline_effect.h"
+#endif
+#line 14 // gba-line
 
 extern const u8 gText_ClearAllSaveData[];
 extern const u8 gText_ClearingData[];
@@ -129,6 +133,13 @@ static bool8 SetupClearSaveDataScreen(void)
     case 0:
     default:
         SetVBlankCallback(NULL);
+#ifdef PORTABLE
+        // The title screen's wave effect leaves its HBlank DMA running (vanilla):
+        // on the GBA it reads past its buffer harmlessly; natively it walks to the
+        // end of mapped memory and crashes a few seconds later (KNOWN_ISSUES N25).
+        ScanlineEffect_Stop();
+#endif
+#line 132 // gba-line
         SetGpuReg(REG_OFFSET_DISPCNT, DISPCNT_MODE_0);
         SetGpuReg(REG_OFFSET_BG0HOFS, 0);
         SetGpuReg(REG_OFFSET_BG0VOFS, 0);

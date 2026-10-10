@@ -219,7 +219,7 @@ clean:
 # Native unit tests for project-owned platform code (Linux, 32-bit).
 NATIVE_TEST_DIR := build/pc-tests
 NATIVE_TEST_SRCS := tools/pc_port/tests/test_platform.c src/platform/agb_flash_pc.c src/platform/siirtc_pc.c \
-                    src/platform/gba_support.c src/platform/fault_compat.c src/random.c
+                    src/platform/gba_support.c src/platform/fault_compat.c src/platform/dma.c src/random.c
 check-native:
 	@mkdir -p $(NATIVE_TEST_DIR)
 	@for f in $(NATIVE_TEST_SRCS); do \
