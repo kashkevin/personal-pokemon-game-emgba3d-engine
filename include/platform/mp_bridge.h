@@ -34,6 +34,7 @@ bool MpBridge_Configure(const char *path); /* false: refuse to start the game */
 bool MpBridge_IsEnabled(void);
 void MpBridge_Frame(void);                  /* once per game frame, game thread parked */
 uint16_t MpBridge_FilterKeys(uint16_t keys); /* the multiplayer runtime's reset-chord guard */
+bool MpBridge_SaveCommandPending(void);     /* a save command is in the game, its reply not yet read */
 void MpBridge_Shutdown(void);
 
 /*
