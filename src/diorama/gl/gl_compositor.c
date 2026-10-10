@@ -448,17 +448,21 @@ static bool BuildWeatherImage(const struct DioramaSceneSnapshot *snapshot)
     if (effect == DIORAMA_WEATHER_RAIN)
     {
         int dropCount = DioramaWeather_RainDropCount(snapshot->rainVisibleCount);
+        /* A downpour's drops are longer and faster (the GBA's heavy rain). */
+        int dropLength = snapshot->weather == WEATHER_DOWNPOUR ? 11 : 7;
+        int fall = snapshot->weather == WEATHER_DOWNPOUR ? 10 : 7;
+
         for (i = 0; i < dropCount; i++)
         {
             int cycle = DISPLAY_WIDTH + 16;
             int x = (i * 73 - (int)(phase * 3 % cycle)) % cycle;
-            int y = (i * 47 + phase * 7) % (DISPLAY_HEIGHT + 24) - 12;
+            int y = (i * 47 + phase * fall) % (DISPLAY_HEIGHT + 24) - 12;
             int length;
 
             if (x < 0)
                 x += cycle;
             x -= 8;
-            for (length = 0; length < 7; length++)
+            for (length = 0; length < dropLength; length++)
             {
                 int px = x - length / 2;
                 int py = y + length;
@@ -485,6 +489,81 @@ static bool BuildWeatherImage(const struct DioramaSceneSnapshot *snapshot)
                      && py >= 0 && py < DISPLAY_HEIGHT)
                         sWeatherPixels[py * DISPLAY_WIDTH + px]
                             = RGBA(205, 198, 190, 190);
+        }
+    }
+    else if (effect == DIORAMA_WEATHER_SNOW)
+    {
+        /* Flakes drifting down and swaying, nearer ones bigger and faster. */
+        for (i = 0; i < 72; i++)
+        {
+            int near = i % 4 == 0;
+            int cycleY = DISPLAY_HEIGHT + 8;
+            int y = (int)((i * 53 + phase * (near ? 2 : 1) / 2) % cycleY) - 4;
+            float sway = sinf((phase + i * 37) * 0.035f) * (near ? 5.0f : 3.0f);
+            int x = (int)((i * 97 + (int)(phase / 6)) % (DISPLAY_WIDTH + 8)) - 4 + (int)sway;
+            int size = near ? 2 : 1;
+            int px;
+            int py;
+
+            for (py = y; py < y + size; py++)
+                for (px = x; px < x + size; px++)
+                    if (px >= 0 && px < DISPLAY_WIDTH && py >= 0 && py < DISPLAY_HEIGHT)
+                        sWeatherPixels[py * DISPLAY_WIDTH + px] = RGBA(244, 248, 255, near ? 235 : 190);
+        }
+    }
+    else if (effect == DIORAMA_WEATHER_SAND)
+    {
+        /* The air full of sand (the GBA's sandstorm layer) with streaks
+         * driven across it. */
+        int x;
+        int y;
+
+        for (y = 0; y < DISPLAY_HEIGHT; y++)
+        {
+            int swirl = ((y + phase / 2) % 32);
+            int alpha = 54 + (swirl < 16 ? swirl : 32 - swirl);
+
+            for (x = 0; x < DISPLAY_WIDTH; x++)
+                sWeatherPixels[y * DISPLAY_WIDTH + x] = RGBA(214, 178, 112, alpha);
+        }
+        for (i = 0; i < 70; i++)
+        {
+            int cycleX = DISPLAY_WIDTH + 24;
+            int px = (int)((i * 61 + phase * (5 + i % 3)) % cycleX) - 12;
+            int py = (int)((i * 37 + phase / 3) % (DISPLAY_HEIGHT + 4)) - 2;
+            int length = 3 + i % 4;
+            int k;
+
+            for (k = 0; k < length; k++)
+                if (px + k >= 0 && px + k < DISPLAY_WIDTH && py >= 0 && py < DISPLAY_HEIGHT)
+                    sWeatherPixels[py * DISPLAY_WIDTH + px + k] = RGBA(238, 214, 162, 200);
+        }
+    }
+    else if (effect == DIORAMA_WEATHER_BUBBLES)
+    {
+        /* Bubbles rising and wobbling under water: small rings. */
+        for (i = 0; i < 14; i++)
+        {
+            int cycleY = DISPLAY_HEIGHT + 16;
+            int y = DISPLAY_HEIGHT + 8 - (int)((i * 59 + phase * (1 + i % 2)) % cycleY);
+            int x = (i * 83) % DISPLAY_WIDTH + (int)(sinf((phase + i * 29) * 0.06f) * 3.0f);
+            int big = i % 3 == 0;
+            static const int8_t sSmall[][2] = {{0, -1}, {-1, 0}, {1, 0}, {0, 1}};
+            static const int8_t sBig[][2] = {{-1, -2}, {0, -2}, {1, -2}, {-2, -1}, {2, -1}, {-2, 0},
+                                             {2, 0}, {-2, 1}, {2, 1}, {-1, 2}, {0, 2}, {1, 2}};
+            int count = big ? 12 : 4;
+            int k;
+
+            for (k = 0; k < count; k++)
+            {
+                int px = x + (big ? sBig[k][0] : sSmall[k][0]);
+                int py = y + (big ? sBig[k][1] : sSmall[k][1]);
+
+                if (px >= 0 && px < DISPLAY_WIDTH && py >= 0 && py < DISPLAY_HEIGHT)
+                    sWeatherPixels[py * DISPLAY_WIDTH + px] = RGBA(200, 236, 255, 200);
+            }
+            if (big && x - 1 >= 0 && y - 1 >= 0 && x - 1 < DISPLAY_WIDTH && y - 1 < DISPLAY_HEIGHT)
+                sWeatherPixels[(y - 1) * DISPLAY_WIDTH + x - 1] = RGBA(255, 255, 255, 230);
         }
     }
     /* The fog's banks are in the scene already (gl_air.h): no flat pane. */
@@ -1042,10 +1121,39 @@ static void UpdateOpacity(void)
                  + (sFadeTargetOpacity - sFadeStartOpacity) * progress;
 }
 
+/* PKMN_DIORAMA_WEATHER=<number> (constants/weather.h): draw the 3D view as
+ * if that weather were up, to see its rain, snow, sand, bubbles, fog and
+ * light on any map. The game's own weather (and its palettes) is unchanged. */
+static void PreviewWeather(struct DioramaSceneSnapshot *snapshot)
+{
+    static int sPreview = -2;
+
+    if (sPreview == -2)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_WEATHER");
+
+        sPreview = value != NULL && value[0] >= '0' && value[0] <= '9' ? SDL_atoi(value) : -1;
+        if (sPreview >= WEATHER_COUNT)
+            sPreview = -1;
+        if (sPreview >= 0)
+            SDL_Log("3D view: previewing weather %d (the game's own weather is unchanged)", sPreview);
+    }
+    if (sPreview < 0)
+        return;
+    snapshot->weather = snapshot->nextWeather = (uint8_t)sPreview;
+    if (DioramaWeather_Classify(sPreview) == DIORAMA_WEATHER_RAIN && snapshot->rainVisibleCount == 0)
+        snapshot->rainVisibleCount = sPreview == WEATHER_DOWNPOUR ? 24 : 16;
+    if (DioramaWeather_Classify(sPreview) == DIORAMA_WEATHER_FOG)
+        snapshot->weatherBlendEVA = 12;
+    if (DioramaWeather_Classify(sPreview) == DIORAMA_WEATHER_BUBBLES)
+        snapshot->weatherBlendEVA = 4;
+}
+
 static void AdoptLatestSnapshot(void)
 {
     if (!DioramaSnapshotExchange_CopyLatest(&sIncomingSceneSnapshot))
         return;
+    PreviewWeather(&sIncomingSceneSnapshot);
     if (!sHasSceneSnapshot)
     {
         sSceneSnapshot = sIncomingSceneSnapshot;

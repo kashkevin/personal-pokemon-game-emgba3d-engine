@@ -343,6 +343,19 @@ void DioramaGLLight_Update(const struct DioramaSceneSnapshot *snapshot, bool ena
         light.rays = 0.0f;
         light.bloom = 0.12f;
         light.motes = 0.0f;
+        /* The distance in the weather's colour: blowing sand, a snowy white. */
+        if (snapshot->weather == WEATHER_SANDSTORM)
+        {
+            Set3(light.sun, 1.02f, 0.95f, 0.84f);
+            Set3(light.hazeRgb, 0xD8 / 255.0f, 0xBE / 255.0f, 0x8C / 255.0f);
+            light.haze = 0.55f;
+        }
+        else if (snapshot->weather == WEATHER_SNOW)
+        {
+            Set3(light.sun, 0.95f, 0.98f, 1.04f);
+            Set3(light.hazeRgb, 0xEA / 255.0f, 0xF0 / 255.0f, 0xF8 / 255.0f);
+            light.haze = 0.45f;
+        }
         break;
     case WEATHER_SHADE:
     case WEATHER_SUNNY_CLOUDS:
