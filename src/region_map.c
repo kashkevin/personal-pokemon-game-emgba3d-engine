@@ -2404,6 +2404,13 @@ static void TryCreateRedOutlineFlyDestIcons(void)
 // Flickers fly destination icon color (by hiding the fly icon sprite) if the cursor is currently on it
 static void SpriteCB_FlyDestIcon(struct Sprite *sprite)
 {
+#ifdef PORTABLE
+    // The fly map's sprites run once more after its data is freed on leaving
+    // it (B): a stray read on the GBA, a fault natively.
+    if (sFlyMap == NULL)
+        return;
+#endif
+#line 2407 // gba-line
     if (sFlyMap->regionMap.mapSecId == sprite->sIconMapSec)
     {
         if (++sprite->sFlickerTimer > 16)
