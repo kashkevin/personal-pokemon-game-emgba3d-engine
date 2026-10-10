@@ -167,6 +167,214 @@ static void TestIndoorVoid(void)
     printf("  indoor corner: stage moved %+.0f,%+.0f\n", result.offsetX, result.offsetY);
 }
 
+
+/* A row of tall columns (trees, a wall) from (x0, y) to (x1, y). */
+static void TallRow(int x0, int x1, int y, float top)
+{
+    for (int x = x0; x <= x1; ++x)
+    {
+        sWorld.cells[y][x].top = top;
+        sWorld.cells[y][x].blocked = true;
+    }
+}
+
+static void TestTreesInFrontOfTheOpponent(void)
+{
+    struct DioramaStageRequest r;
+    struct DioramaStageResult open, treed;
+    struct DioramaStageView seen;
+    int fx, fy;
+
+    Fill(DIORAMA_GROUND_GRASS);
+    Request(&r, 32, 32);
+    DioramaStage_Choose(&r, &open);
+    assert(open.seen.overlap == 0.0f && open.seen.voidFraction == 0.0f);
+    /* Trees two tiles in front of the opponent's feet at the open spot: at
+     * that spot they stand over its picture. */
+    fx = (int)floorf(open.targetX + open.feetX[1]);
+    fy = (int)floorf(open.targetY + open.feetY[1]) + 2;
+    TallRow(fx - 2, fx + 2, fy, 2.1f);
+    DioramaStage_Measure(&r, open.targetX, open.targetY, &seen);
+    assert(seen.overlap > 0.05f);
+    DioramaStage_Choose(&r, &treed);
+    /* Somewhere else, with nothing over either battler. */
+    assert(treed.offsetX != 0.0f || treed.offsetY != 0.0f);
+    assert(treed.seen.overlap == 0.0f);
+    DioramaStage_Measure(&r, treed.targetX, treed.targetY, &seen);
+    assert(fabsf(seen.overlap - treed.seen.overlap) < 1e-5f
+        && fabsf(seen.voidFraction - treed.seen.voidFraction) < 1e-5f
+        && fabsf(seen.cramped - treed.seen.cramped) < 1e-5f);
+    printf("  trees in front of the opponent: stage moved %+.0f,%+.0f\n", treed.offsetX, treed.offsetY);
+}
+
+/* A crown leaning back (the 3DS trees' cut-outs) reaches past its cell's
+ * north edge: what it covers is measured that far north. */
+static void TestLeaningCrown(void)
+{
+    struct DioramaStageRequest r;
+    struct DioramaStageResult open;
+    struct DioramaStageView upright, leaning;
+    int fx, fy;
+
+    Fill(DIORAMA_GROUND_GRASS);
+    Request(&r, 32, 32);
+    DioramaStage_Choose(&r, &open);
+    fx = (int)floorf(open.targetX + open.feetX[1]);
+    fy = (int)floorf(open.targetY + open.feetY[1]) + 3;
+    TallRow(fx - 2, fx + 2, fy, 1.4f);
+    DioramaStage_Measure(&r, open.targetX, open.targetY, &upright);
+    for (int x = fx - 2; x <= fx + 2; ++x)
+        sWorld.cells[fy][x].north = 0.46f;
+    DioramaStage_Measure(&r, open.targetX, open.targetY, &leaning);
+    assert(leaning.overlap > upright.overlap + 0.01f);
+    printf("  leaning crown: the opponent covered %.0f%% (%.0f%% upright)\n", 100.0f * leaning.overlap,
+           100.0f * upright.overlap);
+}
+
+/* The picture box of a column `top` high on tile (x, y), seen from target
+ * (tx, ty): all eight corners. */
+static bool ColumnBox(const struct DioramaBattleView *v, int x, int y, float top, float tx, float ty, float box[4])
+{
+    box[0] = box[1] = 1e9f;
+    box[2] = box[3] = -1e9f;
+    for (int corner = 0; corner < 8; ++corner)
+    {
+        float gx, gy;
+
+        if (!DioramaStage_Project(v, x + (corner & 1) - tx, (corner & 4) ? top : 0.0f,
+                                  y + ((corner >> 1) & 1) - ty, &gx, &gy))
+            return false;
+        box[0] = fminf(box[0], gx);
+        box[1] = fminf(box[1], gy);
+        box[2] = fmaxf(box[2], gx);
+        box[3] = fmaxf(box[3], gy);
+    }
+    return true;
+}
+
+static void TestDoubles(void)
+{
+    struct DioramaStageRequest r;
+    struct DioramaStageResult singles, doubles;
+    struct DioramaStageView seen;
+    float box[4], fx, fy;
+    int x = 0, y = 0;
+    bool found = false;
+
+    Fill(DIORAMA_GROUND_PLAIN);
+    Request(&r, 32, 32);
+    DioramaStage_Choose(&r, &singles);
+    /* One tree in front of the doubles' left opponent (picture x 168..232,
+     * feet at 200,70) and clear of the singles opponent (x 144..208). */
+    assert(DioramaStage_ScreenToGround(&r.view, 200.0f, 70.0f, &fx, &fy));
+    for (y = 20; y < 44 && !found; ++y)
+        for (x = 20; x < 44 && !found; ++x)
+            if (y + 1.0f - singles.targetY > fy + 0.1f
+             && ColumnBox(&r.view, x, y, 2.1f, singles.targetX, singles.targetY, box)
+             && box[0] > 210.0f && box[0] < 228.0f && box[1] < 70.0f && box[3] > 20.0f)
+                found = true;
+    assert(found);
+    --x;
+    --y;
+    sWorld.cells[y][x].top = 2.1f;
+    sWorld.cells[y][x].blocked = true;
+    DioramaStage_Measure(&r, singles.targetX, singles.targetY, &seen);
+    assert(seen.overlap == 0.0f);
+    r.doubles = true;
+    DioramaStage_Measure(&r, singles.targetX, singles.targetY, &seen);
+    assert(seen.overlap > 0.0f);
+    DioramaStage_Choose(&r, &doubles);
+    assert(doubles.seen.overlap == 0.0f);
+    printf("  doubles: a tree over the left opponent at the singles stage (%.0f%%), stage moved %+.0f,%+.0f\n",
+           100.0f * seen.overlap, doubles.offsetX, doubles.offsetY);
+}
+
+/* A room of plain floor from (x0, y0) to (x1, y1) inside walls `wall` tiles
+ * high; outside them nothing is known (black). */
+static void Room(int x0, int y0, int x1, int y1, float wall)
+{
+    memset(&sWorld, 0, sizeof(sWorld));
+    for (int y = y0 - 1; y <= y1 + 1; ++y)
+        for (int x = x0 - 1; x <= x1 + 1; ++x)
+        {
+            sWorld.known[y][x] = true;
+            sWorld.cells[y][x].kind = DIORAMA_GROUND_PLAIN;
+            if (x < x0 || x > x1 || y < y0 || y > y1)
+            {
+                sWorld.cells[y][x].top = wall;
+                sWorld.cells[y][x].blocked = true;
+            }
+        }
+}
+
+static void TestRoomWallsHideTheBlack(void)
+{
+    struct DioramaStageRequest r;
+    struct DioramaStageResult result;
+    struct DioramaStageView seen;
+
+    /* A 13x10 room inside walls three tiles high: from its middle the camera
+     * sees floor and walls, never the black outside them. */
+    Room(20, 20, 32, 29, 3.0f);
+    Request(&r, 26, 27);
+    r.indoor = true;
+    DioramaStage_Choose(&r, &result);
+    assert(result.seen.voidFraction == 0.0f);
+    /* The 3DS project's count of black cells on the ground behind the walls
+     * would have pushed the stage around for nothing; the walls hide them. */
+    r.legacy = true;
+    {
+        struct DioramaStageResult legacy;
+
+        DioramaStage_Choose(&r, &legacy);
+        DioramaStage_Measure(&r, legacy.targetX, legacy.targetY, &seen);
+        printf("  room with high walls: black seen %.0f%% (legacy stage %.0f%%)\n",
+               100.0f * result.seen.voidFraction, 100.0f * seen.voidFraction);
+    }
+}
+
+static void TestRoomLowWalls(void)
+{
+    struct DioramaStageRequest r;
+    struct DioramaStageResult result;
+    struct DioramaStageView base;
+
+    /* The same room with knee-high walls: some black shows over them; the
+     * stage chosen shows no more of it than the one on the player's tile. */
+    Room(20, 20, 32, 29, 0.5f);
+    Request(&r, 26, 27);
+    r.indoor = true;
+    DioramaStage_Choose(&r, &result);
+    DioramaStage_Measure(&r, 26.5f - result.feetX[0], 27.5f - result.feetY[0], &base);
+    assert(result.seen.voidFraction <= base.voidFraction + 1e-5f);
+    printf("  room with low walls: black seen %.0f%% (%.0f%% from the player's tile)\n",
+           100.0f * result.seen.voidFraction, 100.0f * base.voidFraction);
+}
+
+static void TestWallRightBehind(void)
+{
+    struct DioramaStageRequest r;
+    struct DioramaStageResult open, walled;
+    struct DioramaStageView seen;
+    int fy;
+
+    Fill(DIORAMA_GROUND_PLAIN);
+    Request(&r, 32, 40);
+    DioramaStage_Choose(&r, &open);
+    /* A long wall right behind (north of) the opponent's feet at the open
+     * spot, open floor everywhere south of it. */
+    fy = (int)floorf(open.targetY + open.feetY[1]) - 1;
+    for (int y = 0; y <= fy; ++y)
+        TallRow(0, 63, y, 2.0f);
+    DioramaStage_Measure(&r, open.targetX, open.targetY, &seen);
+    assert(seen.cramped > 0.5f);
+    DioramaStage_Choose(&r, &walled);
+    assert(walled.seen.cramped < seen.cramped);
+    assert(walled.seen.voidFraction == 0.0f && walled.seen.overlap == 0.0f);
+    printf("  wall right behind the opponent: pressed %.2f there, %.2f at the stage chosen (%+.0f,%+.0f)\n",
+           seen.cramped, walled.seen.cramped, walled.offsetX, walled.offsetY);
+}
+
 int main(void)
 {
     TestProjection();
@@ -174,6 +382,12 @@ int main(void)
     TestWallInFront();
     TestSurfing();
     TestIndoorVoid();
+    TestTreesInFrontOfTheOpponent();
+    TestLeaningCrown();
+    TestDoubles();
+    TestRoomWallsHideTheBlack();
+    TestRoomLowWalls();
+    TestWallRightBehind();
     puts("test_battle_stage: all passed");
     return 0;
 }
