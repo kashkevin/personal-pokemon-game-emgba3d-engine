@@ -38,6 +38,22 @@ notice with any distribution of these files.
 | `src/diorama/gl/gl_shadow.c`, `include/diorama/gl_shadow.h` | New: the sun's depth map. The sun's direction and the 0.70 ambient are the 3DS project's (`voxel_lighting.h`); the 3DS bakes its shadows on the CPU, this draws them on the GPU. |
 | `tools/diorama_buildings/**` | The 3DS project's building generator; see its README for the files, licence and changes. |
 
+### 3D battles (ZallaxDev/pokeemerald-3Ds-dualscreen, graphics only)
+
+The battle scene of the 3DS project (commit `4a699e3`) on one PC screen: the
+world the field last drew, seen from a battle camera, behind the battle's own
+GBA picture. The battle engine, controllers, sprites, healthboxes, menus, move
+animations and their timing are unchanged; nothing here writes game memory.
+
+| Path here | Notes |
+| --- | --- |
+| `src/diorama/scene/battle_stage.c`, `include/diorama/battle_stage.h` | Port of `3ds_port/src/voxel/voxel_battle.c`'s stage search (where the battle stands near the player, its scoring unchanged), written in GBA picture terms instead of the 3DS screen's and run at once instead of a slice per frame. |
+| `src/diorama/scene/battle_capture.c`, `include/diorama/battle_scene.h` | Port of `voxel_battle.c`'s ground kinds and battler shadows and of `voxel_world.c`'s scenery fade fit (`VoxelWorld_ScreenFade`); new: the per-frame capture, the battle-screen check. |
+| `src/diorama/gl/gl_battle.c`, `include/diorama/gl_battle.h` | Port of the battle camera and its glide (`3ds_port/src/voxel/ctr_voxel.c`: crane, dolly zoom, landing push and quake) and of `RenderBattleWorld`'s intro effects and contact shadows (`3ds_port/src/3ds_video.c`: speed lines, vignette, cinema bars, landing flash). New: the single-screen layout (picture on the bottom edge, its background carried out to wide windows), the world kept while the camera stands still, the classic-view switch (F4) during a battle, the field's 3D fade back in. |
+| `src/platform/gba_easy_draw.c` (`ENABLE_DIORAMA` parts) | New: the scenery layers drawn see-through with the GBA's own blending carried in a per-pixel cover (premultiplied alpha), and each line's edge colour. The 3DS project does the same on its GPU (`sWorldLayers`). |
+| `src/battle_bg.c`, `src/battle_anim.c`, `src/battle_intro.c` (`ENABLE_DIORAMA` parts) | New hooks: whether BG3 holds the scenery or a move's background (`LoadMoveBg`), and whether the intro is sliding (the 3DS port's `CtrBattleBg_MoveBgShown`, `CtrBattleIntro_Sliding`). |
+| `src/diorama/gl/gl_terrain_renderer.c`, `gl_building_renderer.c`, `src/diorama/terrain/terrain_mesh.c` | The eye's height, distance and screen offset as uniforms (`DioramaCameraRig`); with the rig inactive the overworld's values, so the field is drawn exactly as before. |
+
 Licence of the 3DS project's port code: MIT, "Copyright (c) 2026 ZallaxDev and
 Pokémon Emerald 3Ds Dual Screen contributors" (its `LICENSE-PORT.md`; it does not
 cover Pokémon Emerald or the pret decompilation). Its voxel code credits the MIT

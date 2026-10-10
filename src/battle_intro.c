@@ -591,3 +591,15 @@ static void UNUSED DrawBattlerOnBgDMA(u8 x, u8 y, enum BattlerPosition battlerPo
         }
     }
 }
+
+#ifdef ENABLE_DIORAMA
+// Whether the scenery is still sliding in (include/diorama/battle_scene.h).
+// The 3D battle draws the world in its place and has the camera glide in
+// instead; BG1 and BG2 hold the scenery's entry picture meanwhile.
+u8 DioramaBattle_IntroSliding(void)
+{
+    return FuncIsActiveTask(BattleIntroSlide1) || FuncIsActiveTask(BattleIntroSlide2)
+        || FuncIsActiveTask(BattleIntroSlide3) || FuncIsActiveTask(BattleIntroSlideLink)
+        || FuncIsActiveTask(BattleIntroSlidePartner) || FuncIsActiveTask(BattleIntroNoSlide);
+}
+#endif

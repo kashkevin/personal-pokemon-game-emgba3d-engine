@@ -2052,20 +2052,39 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
     return true;
 }
 
+struct DioramaCameraRig gDioramaCameraRig;
+
+void DioramaCamera_GetRig(float cameraPitch, float *height, float *distance,
+                          float *screenOffsetY)
+{
+    if (gDioramaCameraRig.active)
+    {
+        *height = gDioramaCameraRig.height;
+        *distance = gDioramaCameraRig.distance;
+        *screenOffsetY = gDioramaCameraRig.screenOffsetY;
+        return;
+    }
+    *height = DIORAMA_OVERWORLD_CAMERA_HEIGHT;
+    *distance = (DIORAMA_OVERWORLD_CAMERA_HEIGHT * cosf(cameraPitch)
+                 + DIORAMA_OVERWORLD_TARGET_VERTICAL) / sinf(cameraPitch);
+    *screenOffsetY = DIORAMA_OVERWORLD_SCREEN_OFFSET;
+}
+
 bool DioramaTerrain_IsBoundsVisible(const struct DioramaTerrainBounds *bounds,
                                     float cameraX, float cameraZ,
                                     float cameraPitch, float focalLength)
 {
-    const float cameraHeight = 16.0f;
-    const float cameraTargetVertical = -0.458944f;
+    float cameraHeight;
+    float cameraDistance;
+    float screenOffsetY;
     const float pitchSin = sinf(cameraPitch);
     const float pitchCos = cosf(cameraPitch);
-    const float cameraDistance = (cameraHeight * pitchCos + cameraTargetVertical) / pitchSin;
     const float nearDepth = 0.1f;
     const float farDepth = 80.0f;
     bool outside[6] = {true, true, true, true, true, true};
     int i;
 
+    DioramaCamera_GetRig(cameraPitch, &cameraHeight, &cameraDistance, &screenOffsetY);
     for (i = 0; i < 8; i++)
     {
         float x = (i & 1) ? bounds->maxX : bounds->minX;
@@ -2075,8 +2094,9 @@ bool DioramaTerrain_IsBoundsVisible(const struct DioramaTerrainBounds *bounds,
         float relativeZ = z - cameraZ;
         float depth = (cameraHeight - y) * pitchSin + (relativeZ + cameraDistance) * pitchCos;
         float vertical = -(cameraHeight - y) * pitchCos + (relativeZ + cameraDistance) * pitchSin;
-        float clipX = relativeX * focalLength * 2.0f / 240.0f;
-        float clipY = -0.04f * depth + vertical * focalLength * 2.0f / 160.0f;
+        float clipX = relativeX * focalLength * 2.0f / 240.0f
+                    * (gDioramaCameraRig.active ? gDioramaCameraRig.aspectCorrection : 1.0f);
+        float clipY = screenOffsetY * depth + vertical * focalLength * 2.0f / 160.0f;
 
         if (depth >= nearDepth) outside[0] = false;
         if (depth <= farDepth) outside[1] = false;

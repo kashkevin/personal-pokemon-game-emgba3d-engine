@@ -3051,6 +3051,16 @@ static void Cmd_endselectionscript(void)
 
 static void PlayAnimation(enum BattlerId battler, u8 animId, const u16 *argPtr, const u8 *nextInstr)
 {
+#ifdef PORTABLE
+    // A script's playanimation without an argument (Mega Evolution, form
+    // changes, Tera...) has argPtr NULL. The GBA reads its BIOS there, which
+    // those animations ignore; natively it is a NULL read: pass 0 instead.
+    static const u16 sNoAnimArg = 0;
+
+    if (argPtr == NULL)
+        argPtr = &sNoAnimArg;
+#endif
+#line 3054 // gba-line
     if (B_TERRAIN_BG_CHANGE == FALSE && animId == B_ANIM_RESTORE_BG)
     {
         // workaround for .if not working
