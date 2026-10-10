@@ -139,5 +139,12 @@ extern uint32_t gDioramaSceneSkipObj[4];
 /* Per pixel row of that frame, BG1's scroll less line 0's (x, y): how far a
  * transition moves the field's layers on that line (they move together). */
 extern int16_t gDioramaSceneLineShift[160][2];
+/* With gDioramaSceneArtWanted set before DrawFrame: per pixel of that frame,
+ * what BG3 - the battle's scenery - would show (RGB555 | 0x8000; where it is
+ * see-through, the backdrop colour) in its unfaded colours, its blending left
+ * out. The 3D battle shows it where its world has nothing drawn, and fades it
+ * with the world. */
+extern uint16_t gDioramaSceneArt[160 * 240];
+extern bool gDioramaSceneArtWanted;
 
 #endif // GUARD_DIORAMA_BATTLE_SCENE_H

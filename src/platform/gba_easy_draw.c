@@ -47,7 +47,12 @@ uint8_t gDioramaSceneCover[DISPLAY_HEIGHT * DISPLAY_WIDTH];
 struct DioramaSceneEdge gDioramaSceneEdges[DISPLAY_HEIGHT][2];
 uint32_t gDioramaSceneSkipObj[4];
 int16_t gDioramaSceneLineShift[DISPLAY_HEIGHT][2];
+uint16_t gDioramaSceneArt[DISPLAY_HEIGHT * DISPLAY_WIDTH];
+bool gDioramaSceneArtWanted;
 static bool sSkipObj;            /* gDioramaSceneSkipObj has any bit set */
+static bool sArtWanted;          /* gDioramaSceneArtWanted, latched per frame */
+static const uint16_t *sBgPalette; /* RenderBGScanline's palette; NULL: PLTT */
+extern u16 gPlttBufferUnfaded[];
 static uint16_t sLineZeroScroll[2];
 static uint8_t sSceneMask;      /* gDioramaSceneLayers, latched per frame */
 static uint8_t sTargetCover;    /* cover of the last target B found */
@@ -99,6 +104,10 @@ static void RenderBGScanline(int bgNum, uint16_t control, uint16_t hoffs, uint16
 
     uint8_t *bgtiles = (uint8_t *)BG_CHAR_ADDR(charBaseBlock);
     uint16_t *pal = (uint16_t *)PLTT;
+#ifdef ENABLE_DIORAMA
+    if (sBgPalette != NULL)
+        pal = (uint16_t *)sBgPalette;
+#endif
      
     if (control & BGCNT_MOSAIC)
         lineNum = applyBGVerticalMosaicEffect(lineNum);
@@ -841,6 +850,20 @@ static void DrawScanline(uint16_t *pixels, uint16_t vcount)
 #ifdef ENABLE_DIORAMA
             if (isbgEnabled(bgnum) && (sSceneMask & (1 << bgnum)))
             {
+                // What the scenery itself would show there, kept aside for
+                // where the world has nothing (gDioramaSceneArt).
+                if (bgnum == 3 && sArtWanted)
+                {
+                    uint16_t *art = &gDioramaSceneArt[vcount * DISPLAY_WIDTH];
+
+                    // Its own colours, before any fade: the 3D battle fades
+                    // the world and this together (battle_scene.h).
+                    sBgPalette = gPlttBufferUnfaded;
+                    memsetu16(art, gPlttBufferUnfaded[0] | 0x8000, DISPLAY_WIDTH);
+                    RenderBGScanline(bgnum, scanline.bgcnts[bgnum], *(uint16_t *)(REG_ADDR_BG0HOFS + bgnum * 4),
+                                     *(uint16_t *)(REG_ADDR_BG0VOFS + bgnum * 4), vcount, art);
+                    sBgPalette = NULL;
+                }
                 // The world's: an opaque stand-in, colour 0, across the line.
                 memsetu16(scanline.layers[bgnum], 0x8000, DISPLAY_WIDTH);
                 continue;
@@ -1075,6 +1098,7 @@ void DrawFrame(uint16_t *pixels)
     int j;
 #ifdef ENABLE_DIORAMA
     sSceneMask = gDioramaSceneLayers & 0x0F;
+    sArtWanted = gDioramaSceneArtWanted;
     sSkipObj = (gDioramaSceneSkipObj[0] | gDioramaSceneSkipObj[1]
               | gDioramaSceneSkipObj[2] | gDioramaSceneSkipObj[3]) != 0;
     if (sSceneMask)
