@@ -21,6 +21,22 @@
 #define DIORAMA_OBJ_FRAME_MAX_BYTES 2048
 #define DIORAMA_METATILE_ENTRY_COUNT 8
 #define DIORAMA_MAX_DIRTY_CELLS 64
+/*
+ * Neighbouring maps drawn with their own tiles: a connected map whose
+ * secondary tileset is not the map's own (Slateport seen from Route 110) has
+ * its cells published with atlasPage 1 to DIORAMA_NEIGHBOUR_PAGES instead of
+ * as border tiles. Its page (neighbourPages[atlasPage - 1]) holds that
+ * tileset's 512 secondary tiles, read once on the game thread and kept, and
+ * its palettes 6 to 12 as the game would have them now (unfaded: the night
+ * palette mix of OW_ENABLE_DNS). The primary tileset is shared (only maps
+ * with the same one are paged), so page cells keep the live tiles 0-511, and
+ * palettes 0-5. Page 0 is the map's own tiles.
+ */
+#define DIORAMA_NEIGHBOUR_PAGES 3
+#define DIORAMA_PAGE_FIRST_TILE 512
+#define DIORAMA_PAGE_TILE_BYTES ((DIORAMA_TILE_COUNT - DIORAMA_PAGE_FIRST_TILE) * DIORAMA_TILE_BYTES)
+#define DIORAMA_PAGE_FIRST_PALETTE 6
+#define DIORAMA_PAGE_PALETTE_COUNT 7
 
 enum DioramaCellFlags
 {
@@ -96,7 +112,21 @@ struct DioramaCellSnapshot
     /* With the 3DS project's trees (tree_sprites.h): the part of a tree the
      * cell was, published as ground; DIORAMA_TREE_SPRITE_NONE (0) otherwise. */
     uint8_t treeSprite;
+    /* 0: drawn with the map's own tiles; 1 to DIORAMA_NEIGHBOUR_PAGES: with a
+     * neighbouring map's (its metatileId and tileEntries are that map's). */
+    uint8_t atlasPage;
     uint16_t tileEntries[DIORAMA_METATILE_ENTRY_COUNT];
+};
+
+struct DioramaNeighbourPage
+{
+    /* The secondary tileset the page holds (struct Tileset *), for identity
+     * only; NULL: the page is not in use. */
+    const void *tileset;
+    /* Its tiles 512 to 1023 (DIORAMA_PAGE_TILE_BYTES), never changed or freed. */
+    const uint8_t *tiles;
+    /* Its palettes 6 to 12, unfaded, as the game would load them now. */
+    uint16_t palettes[DIORAMA_PAGE_PALETTE_COUNT * 16];
 };
 
 struct DioramaDirtyCell
@@ -250,6 +280,9 @@ struct DioramaSceneSnapshot
     uint16_t unfadedPalette[DIORAMA_FADED_PALETTE_ENTRIES];
     uint16_t fadedPalette[DIORAMA_FADED_PALETTE_ENTRIES];
     uint8_t tileGraphics[DIORAMA_TILE_GRAPHICS_SIZE];
+    /* Neighbouring maps with other tiles (see DIORAMA_NEIGHBOUR_PAGES): page
+     * p is neighbourPages[p - 1]. */
+    struct DioramaNeighbourPage neighbourPages[DIORAMA_NEIGHBOUR_PAGES];
 };
 
 void DioramaSnapshotExchange_Init(void);

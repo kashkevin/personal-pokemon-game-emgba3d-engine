@@ -1,10 +1,12 @@
 #ifdef ENABLE_DIORAMA
 
+#include <stdlib.h>
 #include <string.h>
 #include <SDL2/SDL.h>
 
 #include "global.h"
 #include "battle_pyramid.h"
+#include "decompress.h"
 #include "diorama/map_connection.h"
 #include "diorama/scene_snapshot.h"
 #include "diorama/sprite_frame.h"
@@ -54,6 +56,148 @@ static bool sDirtyOverflow;
 /* The tree style this frame's snapshot applies (-1 before the first): read
  * once per snapshot, since the main thread may switch it at any time (F8). */
 static s8 sTreeStyle = -1;
+
+/*
+ * Neighbouring maps with other tiles (scene_snapshot.h, atlasPage). The
+ * secondary tiles of each tileset paged so far, decompressed once and kept
+ * for the rest of the game (the render thread reads them through the
+ * snapshots, so they are never changed or freed): 16 KB each, a handful of
+ * tilesets in a play session.
+ */
+#define MAX_PAGED_TILESETS 24
+
+static struct
+{
+    const struct Tileset *tileset;
+    u8 *tiles;
+} sPagedTiles[MAX_PAGED_TILESETS];
+
+/* Which tileset each page holds, kept from one snapshot to the next so that
+ * a page's art in the 3D view's atlas stays put; a layout using it (for the
+ * 3DS trees); whether this snapshot uses it. */
+static const struct Tileset *sPageTilesets[DIORAMA_NEIGHBOUR_PAGES];
+static const struct MapLayout *sPageLayouts[DIORAMA_NEIGHBOUR_PAGES];
+static bool8 sPageUsed[DIORAMA_NEIGHBOUR_PAGES];
+
+static bool LogEnabled(void)
+{
+    static int sEnabled = -1;
+
+    if (sEnabled < 0)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_LOG");
+
+        sEnabled = value != NULL && value[0] == '1';
+    }
+    return sEnabled;
+}
+
+/* PKMN_DIORAMA_NEIGHBOURS=0: neighbouring maps with other tiles are shown as
+ * border tiles, as before. */
+static bool PagesEnabled(void)
+{
+    static int sEnabled = -1;
+
+    if (sEnabled < 0)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_NEIGHBOURS");
+
+        sEnabled = value == NULL || value[0] != '0';
+    }
+    return sEnabled;
+}
+
+static const u8 *PagedTiles(const struct Tileset *tileset)
+{
+    u8 *tiles;
+    u32 size;
+    int i;
+
+    for (i = 0; i < MAX_PAGED_TILESETS && sPagedTiles[i].tileset != NULL; i++)
+        if (sPagedTiles[i].tileset == tileset)
+            return sPagedTiles[i].tiles;
+    /* Only compressed tilesets carry their size; the few uncompressed ones
+     * are secret bases and the Cable Club, never a neighbour. */
+    if (i == MAX_PAGED_TILESETS || tileset->tiles == NULL || !tileset->isCompressed
+     || !IsCompressedData(tileset->tiles))
+        return NULL;
+    size = GetDecompressedDataSize(tileset->tiles);
+    if (size == 0 || size > 64 * 1024)
+        return NULL;
+    tiles = calloc(1, size > DIORAMA_PAGE_TILE_BYTES ? size : DIORAMA_PAGE_TILE_BYTES);
+    if (tiles == NULL)
+        return NULL;
+    DecompressDataWithHeaderWram(tileset->tiles, tiles);
+    sPagedTiles[i].tileset = tileset;
+    sPagedTiles[i].tiles = tiles;
+    return tiles;
+}
+
+/* A neighbour's palettes 6 to 12 as LoadSecondaryTilesetPalette would load
+ * them, with the night palette mix UpdateAltBgPalettes gives the palettes the
+ * tileset swaps (overworld.c), on a map with natural light. */
+static void PagePalettes(const struct Tileset *tileset, u16 *palettes)
+{
+    int i;
+
+    memcpy(palettes, tileset->palettes[DIORAMA_PAGE_FIRST_PALETTE],
+           DIORAMA_PAGE_PALETTE_COUNT * 16 * sizeof(u16));
+    if (!MapHasNaturalLight(gMapHeader.mapType))
+        return;
+    for (i = 0; i < DIORAMA_PAGE_PALETTE_COUNT; i++)
+    {
+        int palette = DIORAMA_PAGE_FIRST_PALETTE + i;
+
+        if (tileset->swapPalettes & (1 << i))
+            AvgPaletteWeighted((u16 *)tileset->palettes[palette],
+                               (u16 *)tileset->palettes[(palette + 9) % 16],
+                               palettes + i * 16, gTimeBlend.altWeight);
+    }
+}
+
+/* The page (1 on) for a connected map's layout with its own secondary
+ * tileset, 0 when none is free: a page keeps its tileset while it is in use,
+ * so the art of its slots stays; one this snapshot has not used yet can be
+ * given to another tileset. */
+static u8 NeighbourPage(struct DioramaSceneSnapshot *snapshot, const struct MapLayout *layout,
+                        u16 layoutId)
+{
+    const struct Tileset *tileset = layout->secondaryTileset;
+    int page;
+
+    for (page = 0; page < DIORAMA_NEIGHBOUR_PAGES; page++)
+        if (sPageTilesets[page] == tileset)
+            break;
+    if (page == DIORAMA_NEIGHBOUR_PAGES)
+    {
+        const u8 *tiles;
+
+        for (page = 0; page < DIORAMA_NEIGHBOUR_PAGES; page++)
+            if (sPageTilesets[page] == NULL)
+                break;
+        if (page == DIORAMA_NEIGHBOUR_PAGES)
+            for (page = 0; page < DIORAMA_NEIGHBOUR_PAGES; page++)
+                if (!sPageUsed[page])
+                    break;
+        if (page == DIORAMA_NEIGHBOUR_PAGES || tileset->palettes == NULL
+         || (tiles = PagedTiles(tileset)) == NULL)
+            return 0;
+        sPageTilesets[page] = tileset;
+        if (LogEnabled())
+            SDL_Log("Diorama: neighbour page %d holds the tiles of layout %u", page + 1, layoutId);
+    }
+    if (!sPageUsed[page])
+    {
+        struct DioramaNeighbourPage *published = &snapshot->neighbourPages[page];
+
+        sPageUsed[page] = TRUE;
+        sPageLayouts[page] = layout;
+        published->tileset = tileset;
+        published->tiles = PagedTiles(tileset);
+        PagePalettes(tileset, published->palettes);
+    }
+    return page + 1;
+}
 
 static bool HasFieldUiWindow(void)
 {
@@ -305,6 +449,7 @@ static bool TryCopyConnectedCell(struct DioramaSceneSnapshot *snapshot,
     int16_t connectedX;
     int16_t connectedY;
     u16 entry;
+    u8 page = 0;
 
     if (connection == NULL)
         return false;
@@ -314,13 +459,23 @@ static bool TryCopyConnectedCell(struct DioramaSceneSnapshot *snapshot,
     connectedLayout = connectedHeader->mapLayout;
     if (connectedLayout->map == NULL
      || connectedLayout->primaryTileset != gMapHeader.mapLayout->primaryTileset
-     || connectedLayout->secondaryTileset != gMapHeader.mapLayout->secondaryTileset
+     || connectedLayout->isFrlg != gMapHeader.mapLayout->isFrlg
      || !DioramaConnection_MapCoordinates(connection->direction, connection->offset,
                                           mapX - MAP_OFFSET, mapY - MAP_OFFSET,
                                           snapshot->mapWidth, snapshot->mapHeight,
                                           connectedLayout->width, connectedLayout->height,
                                           &connectedX, &connectedY))
         return false;
+    /* Another secondary tileset: drawn from a page of the neighbour's own
+     * tiles (scene_snapshot.h), or not at all (border tiles) without one. */
+    if (connectedLayout->secondaryTileset != gMapHeader.mapLayout->secondaryTileset)
+    {
+        if (!PagesEnabled() || connectedLayout->isFrlg || connectedLayout->secondaryTileset == NULL)
+            return false;
+        page = NeighbourPage(snapshot, connectedLayout, connectedHeader->mapLayoutId);
+        if (page == 0)
+            return false;
+    }
 
     if (mapX >= 0 && mapY >= 0
      && mapX < gBackupMapLayout.width && mapY < gBackupMapLayout.height
@@ -334,8 +489,13 @@ static bool TryCopyConnectedCell(struct DioramaSceneSnapshot *snapshot,
     cell->sourceMapNum = connection->mapNum;
     cell->sourceLayoutId = connectedHeader->mapLayoutId;
     cell->flags = DIORAMA_CELL_SOURCE_VALID | DIORAMA_CELL_CONNECTED;
-    return CopyCellVisual(connectedLayout, UNPACK_METATILE(entry),
-                          UNPACK_COLLISION(entry), UNPACK_ELEVATION(entry), cell);
+    cell->atlasPage = page;
+    if (CopyCellVisual(connectedLayout, UNPACK_METATILE(entry),
+                       UNPACK_COLLISION(entry), UNPACK_ELEVATION(entry), cell))
+        return true;
+    cell->atlasPage = 0;
+    cell->flags = 0;
+    return false;
 }
 
 /*
@@ -344,22 +504,26 @@ static bool TryCopyConnectedCell(struct DioramaSceneSnapshot *snapshot,
  * them), remembering what part of the tree each was, and the cells its old
  * canopy covered get their ground back (VoxelWorld_UsesTreeSprites and the
  * classification of voxel_world.c). Connected maps share the map's tilesets
- * (TryCopyConnectedCell), the border cells too.
+ * (TryCopyConnectedCell), the border cells too, but for those on a page: they
+ * share its primary (General) and have their own secondary.
  */
 static void ApplyTreeSprites(struct DioramaSceneSnapshot *snapshot)
 {
-    const struct MapLayout *layout = gMapHeader.mapLayout;
-    bool dewford;
+    const struct MapLayout *mapLayout = gMapHeader.mapLayout;
     int i;
 
-    if (sTreeStyle <= 0 || layout == NULL
-     || layout->primaryTileset != &gTileset_General
+    if (sTreeStyle <= 0 || mapLayout == NULL
+     || mapLayout->primaryTileset != &gTileset_General
      || gMapHeader.mapType == MAP_TYPE_INDOOR || gMapHeader.mapType == MAP_TYPE_SECRET_BASE)
         return;
-    dewford = layout->secondaryTileset == &gTileset_Dewford;
     for (i = 0; i < snapshot->visibleCellCount; i++)
     {
         struct DioramaCellSnapshot *cell = &snapshot->cells[i];
+        /* A neighbour's cell on a page has its own secondary tileset (the
+         * primary, General, is shared). */
+        const struct MapLayout *layout = cell->atlasPage != 0 ? sPageLayouts[cell->atlasPage - 1]
+                                                              : mapLayout;
+        bool dewford = layout->secondaryTileset == &gTileset_Dewford;
         int part = DioramaTreeSprites_Part(dewford, cell->metatileId);
         uint16_t ground;
 
@@ -391,6 +555,8 @@ static bool CopyCells(struct DioramaSceneSnapshot *snapshot)
 
     snapshot->gridOriginX = snapshot->cameraMapX - CELL_RADIUS;
     snapshot->gridOriginY = snapshot->cameraMapY - CELL_RADIUS;
+    memset(sPageUsed, 0, sizeof(sPageUsed));
+    memset(snapshot->neighbourPages, 0, sizeof(snapshot->neighbourPages));
     for (y = 0; y < DIORAMA_GRID_HEIGHT; y++)
     {
         for (x = 0; x < DIORAMA_GRID_WIDTH; x++, index++)
@@ -403,6 +569,7 @@ static bool CopyCells(struct DioramaSceneSnapshot *snapshot)
             cell->mapY = mapY;
             cell->flags = 0;
             cell->treeSprite = DIORAMA_TREE_SPRITE_NONE;
+            cell->atlasPage = 0;
             if (mapX >= MAP_OFFSET && mapY >= MAP_OFFSET
              && mapX < MAP_OFFSET + snapshot->mapWidth
              && mapY < MAP_OFFSET + snapshot->mapHeight)

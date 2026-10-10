@@ -82,8 +82,10 @@ static u32 sAtlasPixels[DIORAMA_ATLAS_PIXEL_COUNT];
 static u32 sBaseAtlasPixels[DIORAMA_ATLAS_PIXEL_COUNT];
 static u32 sForegroundAtlasPixels[DIORAMA_ATLAS_PIXEL_COUNT];
 static struct DioramaResolvedCell sAtlasResolvedCells[DIORAMA_MAX_VISIBLE_CELLS];
-static u16 sCutoutBaseMetatiles[DIORAMA_TILE_COUNT];
-static u16 sPreviousCutoutBaseMetatiles[DIORAMA_TILE_COUNT];
+/* Indexed by atlas slot (metatile_atlas.h): the map's metatiles, then the
+ * neighbour pages'. */
+static u16 sCutoutBaseMetatiles[DIORAMA_ATLAS_SLOT_COUNT];
+static u16 sPreviousCutoutBaseMetatiles[DIORAMA_ATLAS_SLOT_COUNT];
 static u8 sPresentMetatiles[DIORAMA_ATLAS_PRESENT_BYTES];
 static u8 sDirtyAtlasTiles[DIORAMA_ATLAS_DIRTY_TILE_BYTES];
 static u8 sForcedMetatiles[DIORAMA_ATLAS_PRESENT_BYTES];
@@ -93,6 +95,7 @@ static u8 sAtlasTileGraphics[DIORAMA_TILE_GRAPHICS_SIZE];
 static u32 sAtlasMapGeneration;
 static u32 sAtlasPaletteGeneration;
 static u32 sAtlasAnimationGeneration;
+static u32 sAtlasPageSignature;
 static bool sHasAtlasTileGraphics;
 static bool sHasSceneSnapshot;
 static bool sHasPreviousSceneSnapshot;
@@ -784,10 +787,28 @@ static void UploadAtlasSlots(const struct DioramaTexture *texture, const u32 *pi
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 }
 
+/* PKMN_DIORAMA_LOG=1: log the camera's map crossings and the neighbour pages. */
+static bool LogEnabled(void)
+{
+    static int sEnabled = -1;
+
+    if (sEnabled < 0)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_LOG");
+
+        sEnabled = value != NULL && value[0] == '1';
+    }
+    return sEnabled;
+}
+
 static void EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
 {
+    /* The neighbouring maps' pages first (metatile_atlas.h): another tileset
+     * on one redraws the atlas, as another map does. */
+    u32 pageSignature = DioramaAtlas_SetPages(snapshot);
     bool reset = snapshot->mapGeneration != sAtlasMapGeneration
               || snapshot->paletteGeneration != sAtlasPaletteGeneration
+              || pageSignature != sAtlasPageSignature
               || !sHasAtlasTileGraphics;
     bool animationChanged = snapshot->tilesetAnimationGeneration != sAtlasAnimationGeneration;
     bool changed;
@@ -802,6 +823,10 @@ static void EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
         sAtlasMapGeneration = snapshot->mapGeneration;
         sAtlasPaletteGeneration = snapshot->paletteGeneration;
         sAtlasAnimationGeneration = snapshot->tilesetAnimationGeneration;
+        if (pageSignature != sAtlasPageSignature && LogEnabled())
+            SDL_Log("Diorama: neighbour pages changed (the highest in use: %u); atlas redrawn",
+                    DioramaAtlas_HighestPage());
+        sAtlasPageSignature = pageSignature;
     }
     memset(sDirtyAtlasTiles, 0, sizeof(sDirtyAtlasTiles));
     memset(sForcedMetatiles, 0, sizeof(sForcedMetatiles));
@@ -819,7 +844,7 @@ static void EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
         cellCount = DIORAMA_MAX_VISIBLE_CELLS;
     DioramaRules_ResolveGrid(snapshot, sAtlasResolvedCells);
     DioramaBuildings_FlattenResolvedCells(snapshot, sAtlasResolvedCells, cellCount);
-    for (i = 0; i < DIORAMA_TILE_COUNT; i++)
+    for (i = 0; i < DIORAMA_ATLAS_SLOT_COUNT; i++)
     {
         sCutoutBaseMetatiles[i] = 0xFFFF;
         if (reset)
@@ -827,20 +852,22 @@ static void EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
     }
     for (i = 0; i < cellCount; i++)
     {
-        uint16_t metatileId = snapshot->cells[i].metatileId;
-        uint16_t baseMetatileId = sAtlasResolvedCells[i].baseMetatileId;
+        const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
+        uint16_t slot = DioramaAtlas_CellSlot(cell);
+        /* A cell's base is a metatile of its own map's tilesets. */
+        uint16_t baseSlot = DioramaAtlas_Slot(cell->atlasPage, sAtlasResolvedCells[i].baseMetatileId);
 
-        if (metatileId >= DIORAMA_TILE_COUNT)
+        if (slot >= DIORAMA_ATLAS_SLOT_COUNT)
             continue;
-        sVisibleMetatiles[metatileId / 8] |= 1 << (metatileId % 8);
-        if (baseMetatileId >= DIORAMA_TILE_COUNT)
+        sVisibleMetatiles[slot / 8] |= 1 << (slot % 8);
+        if (baseSlot >= DIORAMA_ATLAS_SLOT_COUNT)
             continue;
-        if (sCutoutBaseMetatiles[metatileId] == 0xFFFF)
-            sCutoutBaseMetatiles[metatileId] = baseMetatileId;
-        else if (sCutoutBaseMetatiles[metatileId] != baseMetatileId)
-            sCutoutBaseMetatiles[metatileId] = 0xFFFE;
+        if (sCutoutBaseMetatiles[slot] == 0xFFFF)
+            sCutoutBaseMetatiles[slot] = baseSlot;
+        else if (sCutoutBaseMetatiles[slot] != baseSlot)
+            sCutoutBaseMetatiles[slot] = 0xFFFE;
     }
-    for (i = 0; i < DIORAMA_TILE_COUNT; i++)
+    for (i = 0; i < DIORAMA_ATLAS_SLOT_COUNT; i++)
         if ((sVisibleMetatiles[i / 8] & (1 << (i % 8)))
          && sCutoutBaseMetatiles[i] != sPreviousCutoutBaseMetatiles[i])
             sForcedMetatiles[i / 8] |= 1 << (i % 8);
@@ -852,15 +879,19 @@ static void EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
                                        sUpdatedMetatiles);
     if (reset)
     {
+        /* The map's rows and those of the pages in use: the rest is unused. */
+        int height = (DIORAMA_ATLAS_MAP_ROWS + DioramaAtlas_HighestPage() * DIORAMA_ATLAS_PAGE_ROWS)
+                   * DIORAMA_ATLAS_STRIDE;
+
         glBindTexture(GL_TEXTURE_2D, sAtlasTexture.id);
         glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DIORAMA_ATLAS_WIDTH, DIORAMA_ATLAS_HEIGHT,
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DIORAMA_ATLAS_WIDTH, height,
                         GL_BGRA, GL_UNSIGNED_BYTE, sAtlasPixels);
         glBindTexture(GL_TEXTURE_2D, sBaseAtlasTexture.id);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DIORAMA_ATLAS_WIDTH, DIORAMA_ATLAS_HEIGHT,
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DIORAMA_ATLAS_WIDTH, height,
                         GL_BGRA, GL_UNSIGNED_BYTE, sBaseAtlasPixels);
         glBindTexture(GL_TEXTURE_2D, sForegroundAtlasTexture.id);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DIORAMA_ATLAS_WIDTH, DIORAMA_ATLAS_HEIGHT,
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DIORAMA_ATLAS_WIDTH, height,
                         GL_BGRA, GL_UNSIGNED_BYTE, sForegroundAtlasPixels);
     }
     else if (changed)
@@ -871,7 +902,7 @@ static void EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
                          sUpdatedMetatiles);
     }
     memcpy(sAtlasTileGraphics, snapshot->tileGraphics, sizeof(sAtlasTileGraphics));
-    for (i = 0; i < DIORAMA_TILE_COUNT; i++)
+    for (i = 0; i < DIORAMA_ATLAS_SLOT_COUNT; i++)
         if (sVisibleMetatiles[i / 8] & (1 << (i % 8)))
             sPreviousCutoutBaseMetatiles[i] = sCutoutBaseMetatiles[i];
     sHasAtlasTileGraphics = true;
@@ -1063,6 +1094,10 @@ static void UpdateCamera(const struct DioramaSceneSnapshot *snapshot, float rawX
         input.shift = CameraCrossing(snapshot, &input.shiftX, &input.shiftZ);
         if (!input.shift)
             input.snap = true;
+        if (LogEnabled())
+            SDL_Log("Diorama: camera %s from map %u.%u to %u.%u (shift %.0f, %.0f)",
+                    input.shift ? "carried across" : "cut", sCameraMapGroup, sCameraMapNum,
+                    snapshot->mapGroup, snapshot->mapNum, input.shiftX, input.shiftZ);
     }
     switch (snapshot->playerFacingDirection)
     {

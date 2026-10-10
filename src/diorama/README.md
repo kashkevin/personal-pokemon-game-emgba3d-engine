@@ -107,3 +107,42 @@ tilesets are unchanged.
   UI art direction asks (the engine's bitmap fonts, the Route Caps face, Emerald
   green panels with stepped corners) on a 640x360 canvas shown once at a whole
   scale with nearest sampling (sharp at any resolution and display scaling).
+
+## The graphics overhaul (project-owned, 2026-10-10)
+
+* `scene/camera.c`, `include/diorama/camera.h`: the cameras. Adventure (the
+  default: the 3DS project's framing, about 11 tiles top to bottom, 42 degrees
+  down, gliding after the player and looking ahead), Diorama (F7: higher, about
+  24 tiles) and Photo (F9: the game stands still, the camera moves freely). One
+  rig (`DioramaCameraRig`) feeds every scene shader. F12 writes a picture
+  (`src/platform/png_write.c`).
+* `scene_snapshot.h`: the scene is 49 x 49 cells (33 x 33 before), and outdoors
+  its edge fades into the sky's colour (`gl_light.c`) instead of the dark.
+* `gl/gl_object_renderer.c` (`HasSilhouette`, draw mode 5): a player (local or
+  remote) or follower hidden behind a building or a tree is drawn as a
+  see-through blue outline (depth test reversed, a small depth margin so the
+  ground under its feet does not count). Not in Photo mode.
+* `scene/weather.c`, `gl/gl_compositor.c` (`BuildWeatherImage`),
+  `gl/gl_light.c`: every weather has a 3D look, so none falls back to the flat
+  view any more: rain, a downpour's longer and faster drops, thunder, snow, a
+  sandstorm (sandy air, streaks, a sandy haze in the distance), fog, ash, and
+  bubbles under water. `PKMN_DIORAMA_WEATHER=<n>` (the `WEATHER_*` number)
+  previews a weather in the 3D view only; the game's own weather is unchanged.
+* `scene/tree_sprites.c`: the 3DS trees' lower row next to open ground
+  (metatiles `0x1F2`, `0x1F3`) gets its crown (Petalburg Woods' cut tree tops).
+* Neighbouring maps with other tiles (`scene_snapshot.h` `atlasPage`,
+  `DioramaNeighbourPage`; `scene/metatile_atlas.c` `DioramaAtlas_Slot`,
+  `DioramaAtlas_SetPages`, `DioramaAtlas_MapPalette`): a connected map whose
+  secondary tileset differs from the map's own (Route 110 seen from Slateport,
+  Route 119 from Route 118) used to be drawn as the map's border tiles until
+  the player walked into it. Its cells are now published with a page (up to
+  three at once): its own secondary tiles (decompressed once on the game
+  thread and kept) and palettes 6 to 12 (with the night palette mix the game
+  gives that tileset). The atlas has 512 more slots per page (2560 in all,
+  576 x 1440); a page's palettes are faded as the map's are (each channel's
+  mapping read off the live palettes, so the night tint, a weather's colour
+  map and a screen fade carry over); the terrain, the 3DS trees and the
+  modelled buildings (a palette row per page) draw from the page. Not done: a
+  neighbour's animated tiles stand still, and its light colours (windows at
+  night) are faded like the rest. `PKMN_DIORAMA_NEIGHBOURS=0` shows border
+  tiles as before.

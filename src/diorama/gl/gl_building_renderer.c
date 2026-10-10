@@ -8,7 +8,9 @@
  * VoxelBuildings_EmitSome does (ZallaxDev/pokeemerald-3Ds-dualscreen
  * 3ds_port/src/voxel/voxel_building.c, MIT). Pages hold palette slots; the
  * fragment shader looks them up in the live BG palette, so a fade or the
- * day/night tint changes one 256-colour texture, not the pages.
+ * day/night tint changes one 256-colour texture, not the pages. The texture
+ * has a row for each neighbour page (scene_snapshot.h, atlasPage) after the
+ * map's: a neighbouring map with other tiles has its own palettes 6 to 12.
  */
 #include <stddef.h>
 #include <stdlib.h>
@@ -22,16 +24,19 @@
 #include "diorama/gl_grade.h"
 #include "diorama/gl_light.h"
 #include "diorama/gl_shadow.h"
+#include "diorama/metatile_atlas.h"
 #include "diorama/rules.h"
 #include "diorama/scene_snapshot.h"
 
 #define MAX_INSTANCES 16
+#define PALETTE_ROWS (1 + DIORAMA_NEIGHBOUR_PAGES)
 
 struct GLBuildingVertex
 {
     float x, y, z;
     float u, v;      /* pixels of the page */
     float shade;
+    float paletteRow; /* 0: the map's palettes; 1 on: a neighbour page's */
 };
 
 struct Instance
@@ -39,6 +44,8 @@ struct Instance
     uint16_t layout;
     int16_t originX;
     int16_t originY;
+    uint8_t page;    /* the map's atlasPage (scene_snapshot.h) */
+    uint8_t unused;  /* zero: instances are compared whole */
 };
 
 /* What the vertex buffer was built for: the maps on screen and the grid the
@@ -87,7 +94,7 @@ static uint32_t sVertexCapacity;
  * the sun's depth map is kept until then (gl_shadow.h). */
 static uint32_t sGeometryGeneration;
 static uint32_t sGeometryHash;
-static uint32_t sPaletteGeneration;
+static uint8_t sPaletteRgba[PALETTE_ROWS * 256 * 4];
 static bool sHasPalette;
 static struct DioramaBuildingMetrics sMetrics;
 
@@ -96,6 +103,7 @@ static const char sVertexShader[] =
     "layout(location = 0) in vec3 position;\n"
     "layout(location = 1) in vec2 texCoord;\n"
     "layout(location = 2) in float vertexShade;\n"
+    "layout(location = 3) in float vertexPaletteRow;\n"
     "uniform vec2 cameraPosition;\n"
     "uniform float cameraPitch;\n"
     "uniform float focalLength;\n"
@@ -108,6 +116,7 @@ static const char sVertexShader[] =
     "uniform mat4 lightViewProjection;\n"
     "out vec2 pagePixel;\n"
     "out float shade;\n"
+    "flat out int paletteRow;\n"
     "out vec3 sceneWorldPosition;\n"
     "out float viewDepth;\n"
     "void main() {\n"
@@ -131,12 +140,14 @@ static const char sVertexShader[] =
     "  sceneWorldPosition = worldPosition;\n"
     "  pagePixel = texCoord;\n"
     "  shade = vertexShade;\n"
+    "  paletteRow = int(vertexPaletteRow + 0.5);\n"
     "}\n";
 
 static const char sFragmentShader[] =
     "#version 330 core\n"
     "in vec2 pagePixel;\n"
     "in float shade;\n"
+    "flat in int paletteRow;\n"
     "in vec3 sceneWorldPosition;\n"
     "in float viewDepth;\n"
     "out vec4 color;\n"
@@ -162,7 +173,7 @@ static const char sFragmentShader[] =
     "  int slot = int(texelFetch(page, texel, 0).r * 255.0 + 0.5);\n"
     "  if (slot == 255) discard;\n"
     "  if (shadowPass == 1) { color = vec4(1.0); return; }\n"
-    "  color = vec4(Grade(texelFetch(palette, ivec2(slot, 0), 0).rgb)\n"
+    "  color = vec4(Grade(texelFetch(palette, ivec2(slot, paletteRow), 0).rgb)\n"
     "             * Light(shade * mix(shadowAmbient, 1.0, SunLit()))\n"
     "             * Dapple(sceneWorldPosition), 1.0);\n"
     "  color.rgb = Haze(color.rgb, viewDepth, sceneWorldPosition);\n"
@@ -264,13 +275,16 @@ bool DioramaGLBuildings_Init(void)
     dglEnableVertexAttribArray(2);
     dglVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(struct GLBuildingVertex),
                            (void *)offsetof(struct GLBuildingVertex, shade));
+    dglEnableVertexAttribArray(3);
+    dglVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(struct GLBuildingVertex),
+                           (void *)offsetof(struct GLBuildingVertex, paletteRow));
     glGenTextures(1, &sPaletteTexture);
     glBindTexture(GL_TEXTURE_2D, sPaletteTexture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 256, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 256, PALETTE_ROWS, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
     sInstanceCount = 0;
     sBatchCount = 0;
     sVertexCount = 0;
@@ -413,6 +427,7 @@ static bool AppendPlacement(const struct DioramaSceneSnapshot *snapshot,
         out->u = v->u + info.pageX;
         out->v = v->v + info.pageY;
         out->shade = v->shade;
+        out->paletteRow = instance->page;
     }
     /* The ground patches: what the map paints in the placement's cells
      * besides the building, laid flat over the ground (uv already in page
@@ -428,6 +443,7 @@ static bool AppendPlacement(const struct DioramaSceneSnapshot *snapshot,
         out->u = v->u;
         out->v = v->v;
         out->shade = v->shade;
+        out->paletteRow = instance->page;
     }
     sMetrics.placements++;
     return true;
@@ -451,6 +467,8 @@ static bool CollectInstances(const struct DioramaSceneSnapshot *snapshot,
         instance.layout = cell->sourceLayoutId;
         instance.originX = (int16_t)(cell->mapX - cell->sourceMapX);
         instance.originY = (int16_t)(cell->mapY - cell->sourceMapY);
+        instance.page = cell->atlasPage <= DIORAMA_NEIGHBOUR_PAGES ? cell->atlasPage : 0;
+        instance.unused = 0;
         for (k = 0; k < n; k++)
             if (instances[k].layout == instance.layout && instances[k].originX == instance.originX
              && instances[k].originY == instance.originY)
@@ -475,25 +493,36 @@ void DioramaGLBuildings_Sync(const struct DioramaSceneSnapshot *snapshot,
 
     if (!sReady || snapshot == NULL)
         return;
-    if (!sHasPalette || snapshot->paletteGeneration != sPaletteGeneration)
     {
-        uint8_t rgba[256 * 4];
+        /* The map's faded palettes, then each neighbour page's (the atlas's,
+         * DioramaAtlas_SetPages; the map's for a page not in use). */
+        uint8_t rgba[PALETTE_ROWS * 256 * 4];
+        unsigned row;
 
-        for (i = 0; i < 256; i++)
+        for (row = 0; row < PALETTE_ROWS; row++)
         {
-            uint16_t c = snapshot->fadedPalette[i];
-            uint8_t r = c & 0x1F, g = (c >> 5) & 0x1F, b = (c >> 10) & 0x1F;
+            const uint16_t *palette = DioramaAtlas_PageArt(snapshot, (uint8_t)row).fadedPalette;
 
-            /* the atlas's expansion (metatile_atlas.c), so walls meet the ground */
-            rgba[i * 4 + 0] = (uint8_t)((r << 3) | (r >> 2));
-            rgba[i * 4 + 1] = (uint8_t)((g << 3) | (g >> 2));
-            rgba[i * 4 + 2] = (uint8_t)((b << 3) | (b >> 2));
-            rgba[i * 4 + 3] = 255;
+            for (i = 0; i < 256; i++)
+            {
+                uint16_t c = palette[i];
+                uint8_t r = c & 0x1F, g = (c >> 5) & 0x1F, b = (c >> 10) & 0x1F;
+                uint8_t *out = &rgba[(row * 256 + i) * 4];
+
+                /* the atlas's expansion (metatile_atlas.c), so walls meet the ground */
+                out[0] = (uint8_t)((r << 3) | (r >> 2));
+                out[1] = (uint8_t)((g << 3) | (g >> 2));
+                out[2] = (uint8_t)((b << 3) | (b >> 2));
+                out[3] = 255;
+            }
         }
-        glBindTexture(GL_TEXTURE_2D, sPaletteTexture);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 256, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
-        sPaletteGeneration = snapshot->paletteGeneration;
-        sHasPalette = true;
+        if (!sHasPalette || memcmp(rgba, sPaletteRgba, sizeof(rgba)) != 0)
+        {
+            glBindTexture(GL_TEXTURE_2D, sPaletteTexture);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 256, PALETTE_ROWS, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+            memcpy(sPaletteRgba, rgba, sizeof(rgba));
+            sHasPalette = true;
+        }
     }
     if (!CollectInstances(snapshot, instances, &count))
         count = 0;

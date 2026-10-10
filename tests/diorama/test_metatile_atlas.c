@@ -161,7 +161,7 @@ static void TestCutoutDifference(void)
     static uint32_t atlas[DIORAMA_ATLAS_PIXEL_COUNT];
     static uint32_t baseAtlas[DIORAMA_ATLAS_PIXEL_COUNT];
     static uint32_t foregroundAtlas[DIORAMA_ATLAS_PIXEL_COUNT];
-    uint16_t cutoutBases[DIORAMA_TILE_COUNT];
+    uint16_t cutoutBases[DIORAMA_ATLAS_SLOT_COUNT];
     uint8_t present[DIORAMA_ATLAS_PRESENT_BYTES];
     int originX;
     int originY;
@@ -202,7 +202,7 @@ static void TestDirtyTileUpdates(void)
     static uint32_t atlas[DIORAMA_ATLAS_PIXEL_COUNT];
     static uint32_t baseAtlas[DIORAMA_ATLAS_PIXEL_COUNT];
     static uint32_t foregroundAtlas[DIORAMA_ATLAS_PIXEL_COUNT];
-    uint16_t cutoutBases[DIORAMA_TILE_COUNT];
+    uint16_t cutoutBases[DIORAMA_ATLAS_SLOT_COUNT];
     uint8_t present[DIORAMA_ATLAS_PRESENT_BYTES];
     uint8_t dirty[DIORAMA_ATLAS_DIRTY_TILE_BYTES];
     uint8_t forced[DIORAMA_ATLAS_PRESENT_BYTES];
@@ -255,6 +255,273 @@ static void TestDirtyTileUpdates(void)
     CHECK((updated[33 / 8] & (1 << (33 % 8))) != 0);
 }
 
+
+static void TestSlots(void)
+{
+    struct DioramaCellSnapshot cell;
+
+    CHECK(DIORAMA_ATLAS_SLOT_COUNT == 1024 + DIORAMA_NEIGHBOUR_PAGES * 512);
+    CHECK(DIORAMA_ATLAS_ROWS * DIORAMA_ATLAS_COLUMNS == DIORAMA_ATLAS_SLOT_COUNT);
+    /* The map's own metatiles are their slots; a page shares the primary's. */
+    CHECK(DioramaAtlas_Slot(0, 0) == 0);
+    CHECK(DioramaAtlas_Slot(0, 513) == 513);
+    CHECK(DioramaAtlas_Slot(0, 1023) == 1023);
+    CHECK(DioramaAtlas_Slot(1, 1) == 1);
+    CHECK(DioramaAtlas_Slot(2, 511) == 511);
+    CHECK(DioramaAtlas_Slot(1, 512) == 1024);
+    CHECK(DioramaAtlas_Slot(1, 1023) == 1535);
+    CHECK(DioramaAtlas_Slot(2, 512) == 1536);
+    CHECK(DioramaAtlas_Slot(DIORAMA_NEIGHBOUR_PAGES, 1023) == DIORAMA_ATLAS_SLOT_COUNT - 1);
+    CHECK(DioramaAtlas_Slot(0, 1024) == DIORAMA_ATLAS_NO_SLOT);
+    CHECK(DioramaAtlas_Slot(1, 0xFFFF) == DIORAMA_ATLAS_NO_SLOT);
+    CHECK(DioramaAtlas_Slot(DIORAMA_NEIGHBOUR_PAGES + 1, 600) == DIORAMA_ATLAS_NO_SLOT);
+    memset(&cell, 0, sizeof(cell));
+    cell.metatileId = 600;
+    cell.atlasPage = 2;
+    CHECK(DioramaAtlas_CellSlot(&cell) == 1024 + 512 + 88);
+}
+
+static uint16_t Rgb(int r, int g, int b)
+{
+    return (uint16_t)(r | (g << 5) | (b << 10));
+}
+
+/* Live palettes 0-12 with colours spread over 0-31, faded by `fade`. */
+static void MakeLivePalettes(uint16_t *unfaded, uint16_t *faded, int (*fade)(int channel, int value))
+{
+    int palette;
+    int color;
+
+    memset(unfaded, 0, DIORAMA_FADED_PALETTE_ENTRIES * sizeof(*unfaded));
+    memset(faded, 0, DIORAMA_FADED_PALETTE_ENTRIES * sizeof(*faded));
+    for (palette = 0; palette < 13; palette++)
+        for (color = 1; color < 16; color++)
+        {
+            int r = (palette * 7 + color * 3) % 32;
+            int g = (palette * 5 + color * 11) % 32;
+            int b = (palette * 13 + color * 2) % 32;
+
+            unfaded[palette * 16 + color] = Rgb(r, g, b);
+            faded[palette * 16 + color] = Rgb(fade(0, r), fade(1, g), fade(2, b));
+        }
+}
+
+static int Same(int channel, int value) { (void)channel; return value; }
+static int Black(int channel, int value) { (void)channel; (void)value; return 0; }
+/* A night tint: each channel scaled differently (TimeMixPalettes' tint). */
+static int Night(int channel, int value)
+{
+    static const int scales[3] = {150, 170, 230};
+
+    return value * scales[channel] >> 8;
+}
+/* Half way to white (a fade, BlendPalettes). */
+static int HalfWhite(int channel, int value) { (void)channel; return value + ((31 - value) >> 1); }
+/* A contrast colour map (field_weather.c's): not a line. */
+static int Contrast(int channel, int value)
+{
+    (void)channel;
+    return value < 8 ? 0 : (value > 23 ? 31 : (value - 8) * 31 / 15);
+}
+
+static void CheckMapped(int (*fade)(int channel, int value), int tolerance)
+{
+    static uint16_t unfaded[DIORAMA_FADED_PALETTE_ENTRIES];
+    static uint16_t faded[DIORAMA_FADED_PALETTE_ENTRIES];
+    uint16_t source[32];
+    uint16_t out[32];
+    int i;
+
+    MakeLivePalettes(unfaded, faded, fade);
+    for (i = 0; i < 32; i++)
+        source[i] = Rgb(i, 31 - i, (i * 9) % 32);
+    DioramaAtlas_MapPalette(unfaded, faded, source, out, 32);
+    for (i = 0; i < 32; i++)
+    {
+        int channel;
+
+        for (channel = 0; channel < 3; channel++)
+        {
+            int in = (source[i] >> (channel * 5)) & 31;
+            int got = (out[i] >> (channel * 5)) & 31;
+            int want = fade(channel, in);
+
+            CHECK(got - want <= tolerance && want - got <= tolerance);
+        }
+        CHECK((out[i] & 0x8000) == 0);
+    }
+}
+
+static void TestMapPalette(void)
+{
+    static uint16_t unfaded[DIORAMA_FADED_PALETTE_ENTRIES];
+    static uint16_t faded[DIORAMA_FADED_PALETTE_ENTRIES];
+    uint16_t source[2];
+    uint16_t out[2];
+
+    CheckMapped(Same, 0);
+    CheckMapped(Black, 0);
+    CheckMapped(Night, 0);
+    CheckMapped(HalfWhite, 0);
+    CheckMapped(Contrast, 0);
+    /* A light colour (the high bit) is faded by its own rule: it does not
+     * teach the mapping. */
+    MakeLivePalettes(unfaded, faded, Same);
+    unfaded[3 * 16 + 4] = Rgb(31, 31, 31) | 0x8000;
+    faded[3 * 16 + 4] = Rgb(0, 0, 0);
+    source[0] = Rgb(31, 31, 31);
+    source[1] = Rgb(31, 31, 31) | 0x8000;
+    DioramaAtlas_MapPalette(unfaded, faded, source, out, 2);
+    CHECK(out[0] == Rgb(31, 31, 31));
+    CHECK(out[1] == Rgb(31, 31, 31));
+    /* Values the live palettes do not have are interpolated (here every
+     * odd value, and above 24 extrapolated along the line). */
+    {
+        int palette;
+        int color;
+        int value;
+
+        memset(unfaded, 0, sizeof(unfaded));
+        memset(faded, 0, sizeof(faded));
+        for (palette = 0; palette < 13; palette++)
+            for (color = 1; color < 16; color++)
+            {
+                int v = ((palette + color) % 13) * 2;
+
+                unfaded[palette * 16 + color] = Rgb(v, v, v);
+                faded[palette * 16 + color] = Rgb(Night(0, v), Night(1, v), Night(2, v));
+            }
+        for (value = 0; value < 32; value++)
+        {
+            int channel;
+
+            source[0] = Rgb(value, value, value);
+            DioramaAtlas_MapPalette(unfaded, faded, source, out, 1);
+            for (channel = 0; channel < 3; channel++)
+            {
+                int got = (out[0] >> (channel * 5)) & 31;
+                int want = Night(channel, value);
+
+                CHECK(got - want <= 1 && want - got <= 1);
+            }
+        }
+    }
+    /* No colours to learn from: unchanged. */
+    memset(unfaded, 0, sizeof(unfaded));
+    memset(faded, 0, sizeof(faded));
+    source[0] = Rgb(3, 17, 29);
+    DioramaAtlas_MapPalette(unfaded, faded, source, out, 1);
+    CHECK(out[0] == Rgb(3, 17, 29));
+}
+
+static void TestNeighbourPages(void)
+{
+    static struct DioramaSceneSnapshot snapshot;
+    static uint8_t pageTiles[DIORAMA_PAGE_TILE_BYTES];
+    static uint32_t atlas[DIORAMA_ATLAS_PIXEL_COUNT];
+    static uint32_t baseAtlas[DIORAMA_ATLAS_PIXEL_COUNT];
+    static uint32_t foregroundAtlas[DIORAMA_ATLAS_PIXEL_COUNT];
+    static const int sTileset = 0;
+    uint8_t present[DIORAMA_ATLAS_PRESENT_BYTES];
+    uint8_t dirty[DIORAMA_ATLAS_DIRTY_TILE_BYTES];
+    uint8_t updated[DIORAMA_ATLAS_PRESENT_BYTES];
+    struct DioramaAtlasArt art;
+    uint32_t signature;
+    uint16_t pageSlot = DioramaAtlas_Slot(2, 600);
+    int originX;
+    int originY;
+    int i;
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    memset(pageTiles, 0, sizeof(pageTiles));
+    /* The map's own metatile 600 (its tile 520, palette 6 colour 1: red) and
+     * the neighbour's (page 2: its own tile 520, palette 6 colour 1: blue),
+     * and a primary metatile the page shares (tile 1, palette 1). */
+    snapshot.visibleCellCount = 3;
+    snapshot.cells[0].metatileId = 600;
+    snapshot.cells[1].metatileId = 600;
+    snapshot.cells[1].atlasPage = 2;
+    snapshot.cells[2].metatileId = 5;
+    snapshot.cells[2].atlasPage = 2;
+    for (i = 0; i < 4; i++)
+    {
+        snapshot.cells[0].tileEntries[i] = 520 | (6 << 12);
+        snapshot.cells[1].tileEntries[i] = 520 | (6 << 12);
+        snapshot.cells[2].tileEntries[i] = 1 | (1 << 12);
+    }
+    memset(snapshot.tileGraphics + 520 * DIORAMA_TILE_BYTES, 0x11, DIORAMA_TILE_BYTES);
+    memset(snapshot.tileGraphics + 1 * DIORAMA_TILE_BYTES, 0x11, DIORAMA_TILE_BYTES);
+    memset(pageTiles + (520 - DIORAMA_PAGE_FIRST_TILE) * DIORAMA_TILE_BYTES, 0x11, DIORAMA_TILE_BYTES);
+    MakeLivePalettes(snapshot.unfadedPalette, snapshot.fadedPalette, Night);
+    snapshot.unfadedPalette[6 * 16 + 1] = snapshot.fadedPalette[6 * 16 + 1] = Rgb(31, 0, 0);
+    snapshot.unfadedPalette[1 * 16 + 1] = snapshot.fadedPalette[1 * 16 + 1] = Rgb(0, 31, 0);
+    snapshot.neighbourPages[1].tileset = &sTileset;
+    snapshot.neighbourPages[1].tiles = pageTiles;
+    snapshot.neighbourPages[1].palettes[1] = Rgb(0, 0, 31); /* palette 6, colour 1 */
+
+    signature = DioramaAtlas_SetPages(&snapshot);
+    CHECK(DioramaAtlas_HighestPage() == 2);
+    art = DioramaAtlas_CellArt(&snapshot, &snapshot.cells[0]);
+    CHECK(art.tileGraphics == snapshot.tileGraphics && art.fadedPalette == snapshot.fadedPalette);
+    art = DioramaAtlas_PageArt(&snapshot, 1); /* not in use: the map's own */
+    CHECK(art.tileGraphics == snapshot.tileGraphics);
+    art = DioramaAtlas_CellArt(&snapshot, &snapshot.cells[1]);
+    CHECK(art.tileGraphics != snapshot.tileGraphics);
+    CHECK(memcmp(art.tileGraphics, snapshot.tileGraphics, DIORAMA_PAGE_FIRST_TILE * DIORAMA_TILE_BYTES) == 0);
+    CHECK(memcmp(art.tileGraphics + DIORAMA_PAGE_FIRST_TILE * DIORAMA_TILE_BYTES, pageTiles,
+                 DIORAMA_PAGE_TILE_BYTES) == 0);
+    CHECK(art.unfadedPalette[6 * 16 + 1] == Rgb(0, 0, 31));
+    /* faded as the live palettes are (the night tint of this test) */
+    CHECK(art.fadedPalette[6 * 16 + 1] == Rgb(0, 0, Night(2, 31)));
+    CHECK(art.fadedPalette[1 * 16 + 1] == snapshot.fadedPalette[1 * 16 + 1]);
+    CHECK(art.fadedPalette[13 * 16 + 1] == snapshot.fadedPalette[13 * 16 + 1]);
+    /* the same pages give the same signature; another tileset another */
+    CHECK(DioramaAtlas_SetPages(&snapshot) == signature);
+    snapshot.neighbourPages[1].tileset = &sTileset + 1;
+    CHECK(DioramaAtlas_SetPages(&snapshot) != signature);
+    snapshot.neighbourPages[1].tileset = &sTileset;
+    CHECK(DioramaAtlas_SetPages(&snapshot) == signature);
+
+    DioramaAtlas_Clear(atlas, present);
+    memset(baseAtlas, 0, sizeof(baseAtlas));
+    memset(foregroundAtlas, 0, sizeof(foregroundAtlas));
+    CHECK(DioramaAtlas_Update(&snapshot, NULL, atlas, baseAtlas, foregroundAtlas, present));
+    CHECK((present[600 / 8] & (1 << (600 % 8))) != 0);
+    CHECK((present[pageSlot / 8] & (1 << (pageSlot % 8))) != 0);
+    CHECK((present[5 / 8] & (1 << (5 % 8))) != 0);
+    originX = (600 % DIORAMA_ATLAS_COLUMNS) * DIORAMA_ATLAS_STRIDE + DIORAMA_ATLAS_GUTTER;
+    originY = (600 / DIORAMA_ATLAS_COLUMNS) * DIORAMA_ATLAS_STRIDE + DIORAMA_ATLAS_GUTTER;
+    CHECK(atlas[originY * DIORAMA_ATLAS_WIDTH + originX] == 0xFFFF0000u);
+    originX = (pageSlot % DIORAMA_ATLAS_COLUMNS) * DIORAMA_ATLAS_STRIDE + DIORAMA_ATLAS_GUTTER;
+    originY = (pageSlot / DIORAMA_ATLAS_COLUMNS) * DIORAMA_ATLAS_STRIDE + DIORAMA_ATLAS_GUTTER;
+    CHECK(atlas[originY * DIORAMA_ATLAS_WIDTH + originX]
+          == DioramaMetatile_ConvertColor(Rgb(0, 0, Night(2, 31)), false));
+    CHECK(DioramaAtlas_GetUv(pageSlot).v0 > (float)(originY - 1) / DIORAMA_ATLAS_HEIGHT);
+
+    /* An animated tile of the map's: tile 520 is the page's own there, so
+     * only the map's cell redraws; tile 1 is shared. */
+    memset(dirty, 0, sizeof(dirty));
+    memset(updated, 0, sizeof(updated));
+    dirty[520 / 8] |= 1 << (520 % 8);
+    CHECK(DioramaAtlas_UpdateDirty(&snapshot, NULL, dirty, NULL, atlas, baseAtlas,
+                                   foregroundAtlas, present, updated));
+    CHECK((updated[600 / 8] & (1 << (600 % 8))) != 0);
+    CHECK((updated[pageSlot / 8] & (1 << (pageSlot % 8))) == 0);
+    memset(dirty, 0, sizeof(dirty));
+    memset(updated, 0, sizeof(updated));
+    dirty[1 / 8] |= 1 << (1 % 8);
+    CHECK(DioramaAtlas_UpdateDirty(&snapshot, NULL, dirty, NULL, atlas, baseAtlas,
+                                   foregroundAtlas, present, updated));
+    CHECK((updated[5 / 8] & (1 << (5 % 8))) != 0);
+
+    /* No pages: every cell is drawn with the map's own art again. */
+    memset(snapshot.neighbourPages, 0, sizeof(snapshot.neighbourPages));
+    DioramaAtlas_SetPages(&snapshot);
+    CHECK(DioramaAtlas_HighestPage() == 0);
+    art = DioramaAtlas_CellArt(&snapshot, &snapshot.cells[1]);
+    CHECK(art.tileGraphics == snapshot.tileGraphics);
+}
+
 int main(void)
 {
     TestDecodeAndFlips();
@@ -264,6 +531,9 @@ int main(void)
     TestAtlasGuttersAndUv();
     TestCutoutDifference();
     TestDirtyTileUpdates();
+    TestSlots();
+    TestMapPalette();
+    TestNeighbourPages();
     puts("metatile atlas tests passed");
     return EXIT_SUCCESS;
 }

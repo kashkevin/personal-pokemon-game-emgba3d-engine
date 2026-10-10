@@ -390,12 +390,18 @@ static struct DioramaTerrainCell *FindTerrainInputCell(
     return cell;
 }
 
-static void SetTerrainMaterial(struct DioramaTerrainMaterial *material,
-                               uint16_t metatileId, uint8_t layer)
-{
-    struct DioramaAtlasUv uv = DioramaAtlas_GetUv(metatileId);
+/* The page (scene_snapshot.h, atlasPage) of the cell whose materials are
+ * being set: their metatiles are its map's, drawn in that page's slots. */
+static uint8_t sMaterialPage;
 
-    material->metatileId = metatileId;
+/* A material drawn from an atlas slot (metatile_atlas.h); its metatileId
+ * holds the slot, so a chunk's signature changes with the page. */
+static void SetTerrainMaterialSlot(struct DioramaTerrainMaterial *material,
+                                   uint16_t slot, uint8_t layer)
+{
+    struct DioramaAtlasUv uv = DioramaAtlas_GetUv(slot);
+
+    material->metatileId = slot;
     material->layer = layer;
     material->rotation = 0;
     material->flags = 0;
@@ -403,6 +409,12 @@ static void SetTerrainMaterial(struct DioramaTerrainMaterial *material,
     material->v0 = uv.v0;
     material->u1 = uv.u1;
     material->v1 = uv.v1;
+}
+
+static void SetTerrainMaterial(struct DioramaTerrainMaterial *material,
+                               uint16_t metatileId, uint8_t layer)
+{
+    SetTerrainMaterialSlot(material, DioramaAtlas_Slot(sMaterialPage, metatileId), layer);
 }
 
 static void SetTerrainMaterialTransformed(struct DioramaTerrainMaterial *material,
@@ -415,10 +427,12 @@ static void SetTerrainMaterialTransformed(struct DioramaTerrainMaterial *materia
 }
 
 static uint32_t PixelColor(const struct DioramaSceneSnapshot *snapshot,
+                           const struct DioramaCellSnapshot *sourceCell,
                            const struct DioramaGeneratedPixelV2 *pixel)
 {
+    struct DioramaAtlasArt art = DioramaAtlas_CellArt(snapshot, sourceCell);
     uint8_t colorIndex = DioramaMetatile_DecodePixel(
-        snapshot->tileGraphics, pixel->expectedTileEntry,
+        art.tileGraphics, pixel->expectedTileEntry,
         pixel->sourceX & 7, pixel->sourceY & 7);
     uint8_t palette = pixel->expectedTileEntry >> 12;
     uint32_t argb;
@@ -429,7 +443,7 @@ static uint32_t PixelColor(const struct DioramaSceneSnapshot *snapshot,
     if (colorIndex == 0 || palette >= 16)
         return 0;
     argb = DioramaMetatile_ConvertColor(
-        snapshot->fadedPalette[palette * 16 + colorIndex], false);
+        art.fadedPalette[palette * 16 + colorIndex], false);
     red = (argb >> 16) & 0xFF;
     green = (argb >> 8) & 0xFF;
     blue = argb & 0xFF;
@@ -442,8 +456,9 @@ static uint8_t TreeShade(const struct DioramaSceneSnapshot *snapshot,
     static const uint16_t acceptedColors = (1 << 1) | (1 << 2) | (1 << 3)
                                          | (1 << 4) | (1 << 6) | (1 << 8);
     int subtile = (y / 8) * 2 + x / 8;
+    struct DioramaAtlasArt art = DioramaAtlas_CellArt(snapshot, cell);
     uint16_t entry = cell->tileEntries[4 + subtile];
-    uint8_t color = DioramaMetatile_DecodePixel(snapshot->tileGraphics, entry,
+    uint8_t color = DioramaMetatile_DecodePixel(art.tileGraphics, entry,
                                                 x & 7, y & 7);
     uint8_t palette = entry >> 12;
     uint32_t argb;
@@ -455,13 +470,13 @@ static uint8_t TreeShade(const struct DioramaSceneSnapshot *snapshot,
     if (color == 0)
     {
         entry = cell->tileEntries[subtile];
-        color = DioramaMetatile_DecodePixel(snapshot->tileGraphics, entry,
+        color = DioramaMetatile_DecodePixel(art.tileGraphics, entry,
                                             x & 7, y & 7);
         palette = entry >> 12;
     }
     if (color == 0 || palette != 2 || !(acceptedColors & (1 << color)))
         return DIORAMA_TREE_SHADE_OFF;
-    argb = DioramaMetatile_ConvertColor(snapshot->unfadedPalette[palette * 16 + color], false);
+    argb = DioramaMetatile_ConvertColor(art.unfadedPalette[palette * 16 + color], false);
     red = (argb >> 16) & 0xFF;
     green = (argb >> 8) & 0xFF;
     blue = argb & 0xFF;
@@ -616,7 +631,7 @@ static bool AppendPixelObjects(const struct DioramaSceneSnapshot *snapshot,
             if (sourceCell == NULL || sourceCell->sourceLayoutId != object->layoutId
              || sourceCell->metatileId != sourcePixel->expectedMetatile)
                 continue;
-            color = PixelColor(snapshot, sourcePixel);
+            color = PixelColor(snapshot, sourceCell, sourcePixel);
             if (color == 0)
                 continue;
             if (input->pixelCount >= DIORAMA_TERRAIN_MAX_PIXEL_PRIMITIVES)
@@ -658,9 +673,10 @@ static void BuildMountainArtMask(const struct DioramaSceneSnapshot *snapshot,
     unsigned depth = 0;
     unsigned maxDepth = 0;
     int row;
+    struct DioramaAtlasArt art = DioramaAtlas_CellArt(snapshot, source);
 
-    DioramaMetatile_ComposeLayer(snapshot->tileGraphics, source->tileEntries,
-                                 snapshot->unfadedPalette, 1, pixels);
+    DioramaMetatile_ComposeLayer(art.tileGraphics, source->tileEntries,
+                                 art.unfadedPalette, 1, pixels);
     DioramaMetatile_BuildAlphaMask(pixels, rows);
     for (row = 0; row < DIORAMA_VOXELS_PER_CELL; row++)
         for (uint16_t bits = rows[row]; bits != 0; bits >>= 1)
@@ -675,8 +691,8 @@ static void BuildMountainArtMask(const struct DioramaSceneSnapshot *snapshot,
 
     if (visible == 0 || visible == DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL)
     {
-        DioramaMetatile_Compose(snapshot->tileGraphics, source->tileEntries,
-                                snapshot->unfadedPalette, pixels);
+        DioramaMetatile_Compose(art.tileGraphics, source->tileEntries,
+                                art.unfadedPalette, pixels);
         DioramaMetatile_BuildSilhouetteMask(pixels, rows);
     }
 
@@ -735,6 +751,7 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
     bool hasInterior = false;
 
     memset(input, 0, sizeof(*input));
+    sMaterialPage = 0;
     input->chunkX = chunkX;
     input->chunkY = chunkY;
     input->mapGeneration = snapshot->mapGeneration;
@@ -763,6 +780,7 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
             if (source->mapX != mapX || source->mapY != mapY || source->metatileId >= DIORAMA_TILE_COUNT)
                 continue;
             cell->present = true;
+            sMaterialPage = source->atlasPage;
             cell->mapX = source->mapX;
             cell->mapY = source->mapY;
             cell->metatileId = source->metatileId;
@@ -882,7 +900,7 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
             {
                 bool hasForeground = false;
 
-                DioramaAtlas_GetSilhouetteAlphaMask(source->metatileId,
+                DioramaAtlas_GetSilhouetteAlphaMask(DioramaAtlas_CellSlot(source),
                                                     cell->foregroundAlpha);
                 for (face = 0; face < DIORAMA_VOXELS_PER_CELL; face++)
                     hasForeground |= cell->foregroundAlpha[face] != 0;
@@ -896,7 +914,7 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
                                      cell->mountainHeight);
             if (cell->shape == DIORAMA_SHAPE_LEDGE)
             {
-                DioramaAtlas_GetForegroundAlphaMask(source->metatileId,
+                DioramaAtlas_GetForegroundAlphaMask(DioramaAtlas_CellSlot(source),
                                                     cell->foregroundAlpha);
                 SetTerrainMaterial(&cell->materials[DIORAMA_MATERIAL_FACE_TOP],
                                    source->metatileId, DIORAMA_MATERIAL_BASE);
@@ -925,7 +943,7 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
                 uint16_t alpha[DIORAMA_VOXELS_PER_CELL];
                 bool hasForeground = false;
 
-                DioramaAtlas_GetForegroundAlphaMask(source->metatileId, alpha);
+                DioramaAtlas_GetForegroundAlphaMask(DioramaAtlas_CellSlot(source), alpha);
                 for (face = 0; face < DIORAMA_VOXELS_PER_CELL; face++)
                     hasForeground |= alpha[face] != 0;
                 SetTerrainMaterial(&cell->materials[DIORAMA_MATERIAL_FACE_TOP],
@@ -959,9 +977,11 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
                         break;
                     if (materialId == DIORAMA_MATERIAL_METATILE_SELF)
                         materialId = facadeSource->metatileId;
+                    sMaterialPage = facadeSource->atlasPage;
                     SetTerrainMaterial(&cell->southFacadeMaterials[facadeRow], materialId,
                         resolvedCells[gridIndex].materials[DIORAMA_MATERIAL_FACE_SOUTH].layer);
                 }
+                sMaterialPage = source->atlasPage;
                 if (facadeRow == resolvedCells[gridIndex].structureSouthFacadeRows)
                     cell->southFacadeCount = facadeRow;
             }
@@ -1013,22 +1033,34 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
              && !cell->treeHullReady
              && !(cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL
                && cell->structureWidth == 2))
+            {
+                const struct DioramaCellSnapshot *source = FindSnapshotCell(snapshot, cell->mapX,
+                                                                            cell->mapY);
+
+                sMaterialPage = source != NULL ? source->atlasPage : 0;
                 for (face = 0; face < DIORAMA_MATERIAL_FACE_COUNT; face++)
                     SetTerrainMaterial(&cell->materials[face], cell->metatileId,
                                        DIORAMA_MATERIAL_FULL);
+            }
         }
+    sMaterialPage = 0;
     {
-        uint16_t counts[DIORAMA_TILE_COUNT] = {0};
+        /* The commonest flat ground on screen, by atlas slot. */
+        uint16_t counts[DIORAMA_ATLAS_SLOT_COUNT] = {0};
         uint16_t groundMetatile = 1;
 
         for (int index = 0; index < snapshot->visibleCellCount; index++)
-            if (snapshot->cells[index].metatileId < DIORAMA_TILE_COUNT
+        {
+            uint16_t slot = DioramaAtlas_CellSlot(&snapshot->cells[index]);
+
+            if (slot < DIORAMA_ATLAS_SLOT_COUNT
              && resolvedCells[index].shape == DIORAMA_SHAPE_FLAT
              && resolvedCells[index].archetype == DIORAMA_ARCHETYPE_GROUND)
-                counts[snapshot->cells[index].metatileId]++;
-        for (uint16_t metatile = 0; metatile < DIORAMA_TILE_COUNT; metatile++)
-            if (counts[metatile] > counts[groundMetatile])
-                groundMetatile = metatile;
+                counts[slot]++;
+        }
+        for (uint16_t slot = 0; slot < DIORAMA_ATLAS_SLOT_COUNT; slot++)
+            if (counts[slot] > counts[groundMetatile])
+                groundMetatile = slot;
         for (y = 0; y < DIORAMA_TERRAIN_INPUT_SIZE; y++)
             for (x = 0; x < DIORAMA_TERRAIN_INPUT_SIZE; x++)
             {
@@ -1040,8 +1072,8 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
                   || (cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL
                    && cell->structureWidth == 2)))
                     for (face = 0; face < DIORAMA_MATERIAL_FACE_COUNT; face++)
-                        SetTerrainMaterial(&cell->underlayMaterials[face], groundMetatile,
-                                           DIORAMA_MATERIAL_FULL);
+                        SetTerrainMaterialSlot(&cell->underlayMaterials[face], groundMetatile,
+                                               DIORAMA_MATERIAL_FULL);
             }
     }
     return hasInterior && AppendPixelObjects(snapshot, resolvedCells, chunkX, chunkY, input);
