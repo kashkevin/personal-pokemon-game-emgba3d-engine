@@ -4853,3 +4853,13 @@ static bool8 FrontierSquaresScroll_End(struct Task *task)
 #undef tScrollYDir
 #undef tScrollUpdateFlag
 #undef tSquareNum
+
+#ifdef ENABLE_DIORAMA
+// Whether a battle transition is playing on the field
+// (include/diorama/battle_scene.h): the 3D view composes it over the 3D
+// field, as the 3DS project does (its RenderTransition).
+u8 DioramaBattle_TransitionActive(void)
+{
+    return FuncIsActiveTask(Task_BattleTransition);
+}
+#endif

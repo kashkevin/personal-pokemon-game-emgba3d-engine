@@ -6,6 +6,16 @@
 #include "task.h"
 #include "battle_transition.h"
 #include "fieldmap.h"
+#ifdef ENABLE_DIORAMA
+#include <string.h>
+#include "diorama/battle_scene.h"
+
+// DioramaBattle_AnimateFieldTiles: the copy of BG VRAM's tiles the tile
+// animations go to instead of VRAM while the 3D battle's world animates.
+static u8 *sDioramaTiles;
+static u32 sDioramaTilesSize;
+#endif
+#line 9 // gba-line
 
 static EWRAM_DATA struct {
     const u16 *src;
@@ -552,6 +562,17 @@ static void ResetTilesetAnimBuffer(void)
 
 static void AppendTilesetAnimToBuffer(const u16 *src, u16 *dest, u16 size)
 {
+#ifdef ENABLE_DIORAMA
+    if (sDioramaTiles != NULL)
+    {
+        uintptr_t offset = (uintptr_t)dest - (uintptr_t)BG_VRAM;
+
+        if (offset < sDioramaTilesSize && size <= sDioramaTilesSize - offset)
+            memcpy(sDioramaTiles + offset, src, size);
+        return;
+    }
+#endif
+#line 555 // gba-line
     if (sTilesetDMA3TransferBufferSize < 20)
     {
         sTilesetDMA3TransferBuffer[sTilesetDMA3TransferBufferSize].src = src;
@@ -597,6 +618,26 @@ void UpdateTilesetAnimations(void)
         sSecondaryTilesetAnimCallback(sSecondaryTilesetAnimCounter);
 }
 
+#ifdef ENABLE_DIORAMA
+// The 3D battle's world keeps the field's water and flowers moving
+// (gl_battle.c): the field's tile animations as they would run `frames` frames
+// after the field stopped, their tiles copied into `tiles` (BG VRAM's first
+// `size` bytes, as the scene snapshot holds them) instead of being queued for
+// VRAM, which the battle uses. Nothing else changes: the counters stay as the
+// field left them and the Battle Dome's palette lights are left out.
+void DioramaBattle_AnimateFieldTiles(u8 *tiles, u32 size, u32 frames)
+{
+    sDioramaTiles = tiles;
+    sDioramaTilesSize = size;
+    if (sPrimaryTilesetAnimCallback != NULL && sPrimaryTilesetAnimCounterMax != 0)
+        sPrimaryTilesetAnimCallback((sPrimaryTilesetAnimCounter + frames) % sPrimaryTilesetAnimCounterMax);
+    if (sSecondaryTilesetAnimCallback != NULL && sSecondaryTilesetAnimCounterMax != 0)
+        sSecondaryTilesetAnimCallback((sSecondaryTilesetAnimCounter + frames) % sSecondaryTilesetAnimCounterMax);
+    sDioramaTiles = NULL;
+}
+
+#endif
+#line 600 // gba-line
 static void _InitPrimaryTilesetAnimation(void)
 {
     sPrimaryTilesetAnimCounter = 0;
@@ -1167,6 +1208,11 @@ static void QueueAnimTiles_BattlePyramid_StatueShadow(u16 timer)
 
 static void BlendAnimPalette_BattleDome_FloorLights(u16 timer)
 {
+#ifdef ENABLE_DIORAMA
+    if (sDioramaTiles != NULL)
+        return; // palettes and counters are the field's own
+#endif
+#line 1170 // gba-line
     CpuCopy16(sTilesetAnims_BattleDomeFloorLightPals[timer % ARRAY_COUNT(sTilesetAnims_BattleDomeFloorLightPals)], &gPlttBufferUnfaded[BG_PLTT_ID(8)], PLTT_SIZE_4BPP);
     BlendPalette(BG_PLTT_ID(8), 16, gPaletteFade.y, gPaletteFade.blendColor & 0x7FFF);
     if ((u8)FindTaskIdByFunc(Task_BattleTransition_Intro) != TASK_NONE)
@@ -1178,6 +1224,11 @@ static void BlendAnimPalette_BattleDome_FloorLights(u16 timer)
 
 static void BlendAnimPalette_BattleDome_FloorLightsNoBlend(u16 timer)
 {
+#ifdef ENABLE_DIORAMA
+    if (sDioramaTiles != NULL)
+        return; // palettes and counters are the field's own
+#endif
+#line 1181 // gba-line
     CpuCopy16(sTilesetAnims_BattleDomeFloorLightPals[timer % ARRAY_COUNT(sTilesetAnims_BattleDomeFloorLightPals)], &gPlttBufferUnfaded[BG_PLTT_ID(8)], PLTT_SIZE_4BPP);
     if ((u8)FindTaskIdByFunc(Task_BattleTransition_Intro) == TASK_NONE)
     {

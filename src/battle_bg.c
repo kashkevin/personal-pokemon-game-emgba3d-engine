@@ -30,6 +30,10 @@
 #include "constants/battle_anim.h"
 #include "constants/battle_partner.h"
 #include "data/battle_environment.h"
+#ifdef ENABLE_DIORAMA
+#include "diorama/battle_scene.h"
+#endif
+#line 33 // gba-line
 
 // .rodata
 
@@ -880,6 +884,10 @@ static void LoadBattleEnvironmentGfx(u16 environment)
     DecompressDataWithHeaderVram(gBattleEnvironmentInfo[environment].background.tileset, (void *)(BG_CHAR_ADDR(2)));
     DecompressDataWithHeaderVram(gBattleEnvironmentInfo[environment].background.tilemap, (void *)(BG_SCREEN_ADDR(26)));
     LoadPalette(gBattleEnvironmentInfo[environment].palette, BG_PLTT_ID(2), 3 * PLTT_SIZE_4BPP);
+#ifdef ENABLE_DIORAMA
+    DioramaBattle_SetSceneryShown(TRUE); // the 3D battle's world may stand in for it
+#endif
+#line 883 // gba-line
 }
 
 // Loads the entry associated with the battle environment.
@@ -1372,6 +1380,10 @@ bool8 LoadChosenBattleElement(u8 caseId)
         break;
     case 4:
         DecompressDataWithHeaderVram(gBattleEnvironmentInfo[GetBattleEnvironmentOverride()].background.tilemap, (void *)(BG_SCREEN_ADDR(26)));
+#ifdef ENABLE_DIORAMA
+        DioramaBattle_SetSceneryShown(TRUE);
+#endif
+#line 1375 // gba-line
         break;
     case 5:
         LoadPalette(gBattleEnvironmentInfo[GetBattleEnvironmentOverride()].palette, BG_PLTT_ID(2), 3 * PLTT_SIZE_4BPP);
@@ -1395,3 +1407,41 @@ void DrawTerrainTypeBattleBackground(void)
         DrawMainBattleBackground();
 }
 
+
+#ifdef ENABLE_DIORAMA
+// The 3D battle (include/diorama/battle_scene.h) draws the Diorama world in
+// place of the scenery on BG3. A move's background goes into the same BG3
+// (LoadMoveBg) and is shown as it is, so the renderer asks which BG3 holds.
+static u8 sDioramaSceneryShown;
+
+void DioramaBattle_SetSceneryShown(u8 shown)
+{
+    sDioramaSceneryShown = shown;
+}
+
+u8 DioramaBattle_SceneryShown(void)
+{
+    return sDioramaSceneryShown;
+}
+
+// How much of BG3's tilemap the last move background filled (LoadMoveBg):
+// the 3D battle carries it past the picture within that.
+static u32 sDioramaMoveBgMapSize;
+static u32 sDioramaMoveBgLoads;
+
+void DioramaBattle_NoteMoveBg(u32 tilemapBytes)
+{
+    sDioramaMoveBgMapSize = tilemapBytes;
+    sDioramaMoveBgLoads++;
+}
+
+u32 DioramaBattle_MoveBgMapSize(void)
+{
+    return sDioramaMoveBgMapSize;
+}
+
+u32 DioramaBattle_MoveBgLoads(void)
+{
+    return sDioramaMoveBgLoads;
+}
+#endif

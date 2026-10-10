@@ -2,6 +2,9 @@
 #include "global.h"
 #include <stdbool.h>
 #include "platform/dma.h"
+#ifdef ENABLE_DIORAMA
+#include "diorama/battle_scene.h"
+#endif
 
 #define mosaicBGEffectX (REG_MOSAIC & 0xF)
 #define mosaicBGEffectY ((REG_MOSAIC >> 4) & 0xF)
@@ -28,9 +31,56 @@
 
 extern void (*const gIntrTable[])(void);
 
+#ifdef ENABLE_DIORAMA
+/*
+ * The 3D battle (include/diorama/battle_scene.h): the BGs in
+ * gDioramaSceneLayers are the world's. Such a layer is drawn as an opaque
+ * stand-in of colour 0 everywhere it is shown, so priorities, windows and
+ * blending treat it as the GBA would treat the scenery it replaces, and each
+ * pixel carries how much of the world shows through it (gDioramaSceneCover,
+ * 0..16): the GBA blend A * EVA + B * EVB with B the world, or the world
+ * brightened or darkened, is the colour computed here plus the world times
+ * the cover. With no scene layer the picture is drawn exactly as before.
+ */
+uint8_t gDioramaSceneLayers;
+uint8_t gDioramaSceneCover[DISPLAY_HEIGHT * DISPLAY_WIDTH];
+struct DioramaSceneEdge gDioramaSceneEdges[DISPLAY_HEIGHT][2];
+uint32_t gDioramaSceneSkipObj[4];
+int16_t gDioramaSceneLineShift[DISPLAY_HEIGHT][2];
+uint16_t gDioramaSceneArt[DISPLAY_HEIGHT * DISPLAY_WIDTH];
+bool gDioramaSceneArtWanted;
+bool gDioramaSceneWideWanted;
+uint16_t gDioramaSceneWideLeft;
+uint16_t gDioramaSceneWideRight;
+uint16_t gDioramaSceneWideTop;
+uint16_t gDioramaSceneWide[DIORAMA_WIDE_MAX_H * DIORAMA_WIDE_MAX_W];
+static bool sWideWanted;         /* gDioramaSceneWideWanted, latched per frame */
+static int sWideLeft;            /* its margins, latched and limited */
+static int sWideRight;
+static int sWideTop;
+static int sWideStride;          /* sWideLeft + 240 + sWideRight */
+static bool sSkipObj;            /* gDioramaSceneSkipObj has any bit set */
+static bool sArtWanted;          /* gDioramaSceneArtWanted, latched per frame */
+static const uint16_t *sBgPalette; /* RenderBGScanline's palette; NULL: PLTT */
+extern u16 gPlttBufferUnfaded[];
+static uint16_t sLineZeroScroll[2];
+static uint8_t sSceneMask;      /* gDioramaSceneLayers, latched per frame */
+static uint8_t sTargetCover;    /* cover of the last target B found */
+
+static inline unsigned clampCoeff(unsigned value)
+{
+    return value > 16 ? 16 : value;
+}
+
+uint16_t *memsetu16(uint16_t *dst, uint16_t fill, size_t count);
+#endif
+
 struct scanlineData {
     uint16_t layers[4][DISPLAY_WIDTH];
     uint16_t spriteLayers[4][DISPLAY_WIDTH];
+#ifdef ENABLE_DIORAMA
+    uint8_t spriteCover[4][DISPLAY_WIDTH];
+#endif
     uint16_t bgcnts[4];
     uint16_t winMask[DISPLAY_WIDTH];
     //priority bookkeeping
@@ -64,6 +114,10 @@ static void RenderBGScanline(int bgNum, uint16_t control, uint16_t hoffs, uint16
 
     uint8_t *bgtiles = (uint8_t *)BG_CHAR_ADDR(charBaseBlock);
     uint16_t *pal = (uint16_t *)PLTT;
+#ifdef ENABLE_DIORAMA
+    if (sBgPalette != NULL)
+        pal = (uint16_t *)sBgPalette;
+#endif
      
     if (control & BGCNT_MOSAIC)
         lineNum = applyBGVerticalMosaicEffect(lineNum);
@@ -410,6 +464,9 @@ static bool alphaBlendSelectTargetB(struct scanlineData* scanline, uint16_t* col
         if (spriteBlendEnabled == true && getAlphaBit(scanline->spriteLayers[blndprnum][pixelpos]) == 1)
         {
             *colorOutput = scanline->spriteLayers[blndprnum][pixelpos];
+#ifdef ENABLE_DIORAMA
+            sTargetCover = scanline->spriteCover[blndprnum][pixelpos];
+#endif
             return true;
         }
             
@@ -419,6 +476,9 @@ static bool alphaBlendSelectTargetB(struct scanlineData* scanline, uint16_t* col
             if (getAlphaBit( scanline->layers[currLayer][pixelpos] ) == 1 && REG_BLDCNT & ( 1 << (8 + currLayer)) && isbgEnabled(currLayer))
             {
                 *colorOutput = scanline->layers[currLayer][pixelpos];
+#ifdef ENABLE_DIORAMA
+                sTargetCover = (sSceneMask & (1 << currLayer)) ? 16 : 0;
+#endif
                 return true;
             }
             //if we hit a non target layer we should bail
@@ -433,6 +493,9 @@ static bool alphaBlendSelectTargetB(struct scanlineData* scanline, uint16_t* col
     if (REG_BLDCNT & BLDCNT_TGT2_BD)
     {
         *colorOutput = *(uint16_t*)PLTT;
+#ifdef ENABLE_DIORAMA
+        sTargetCover = 0;
+#endif
         return true;
     }
     else
@@ -449,6 +512,308 @@ static bool winCheckHorizontalBounds(u16 left, u16 right, u16 xpos)
     else
         return (xpos >= left && xpos < right);
 }
+
+#ifdef ENABLE_DIORAMA
+// The backgrounds alone at column x (the composite below without sprites),
+// for carrying the picture out past its edges (gDioramaSceneEdges).
+static void SceneEdge(struct scanlineData *scanline, uint16_t backdrop, int x,
+                      bool windowsEnabled, unsigned blendMode, struct DioramaSceneEdge *out)
+{
+    uint16_t color = backdrop;
+    uint8_t cover = 0;
+    uint8_t layer = 4;
+
+    for (int prnum = 3; prnum >= 0; prnum--)
+    {
+        for (int prsub = scanline->prioritySortedBgsCount[prnum] - 1; prsub >= 0; prsub--)
+        {
+            char bgnum = scanline->prioritySortedBgs[prnum][prsub];
+            uint16_t pixel = scanline->layers[bgnum][x];
+            uint8_t pixelCover = (sSceneMask & (1 << bgnum)) ? 16 : 0;
+            bool winEffectEnable = true;
+            uint16_t targetB = 0;
+
+            if (!isbgEnabled(bgnum) || !getAlphaBit(pixel))
+                continue;
+            if (windowsEnabled)
+            {
+                winEffectEnable = (scanline->winMask[x] & WINMASK_CLR) != 0;
+                if (!(scanline->winMask[x] & (1 << bgnum)))
+                    continue;
+            }
+            if (blendMode != 0 && REG_BLDCNT & (1 << bgnum) && winEffectEnable)
+            {
+                switch (blendMode)
+                {
+                case 1:
+                    if (alphaBlendSelectTargetB(scanline, &targetB, prnum, prsub + 1, x, false))
+                    {
+                        pixel = alphaBlendColor(pixel, targetB);
+                        pixelCover = clampCoeff((pixelCover * clampCoeff(REG_BLDALPHA & 0x1F)
+                                                 + sTargetCover * clampCoeff((REG_BLDALPHA >> 8) & 0x1F)) >> 4);
+                    }
+                    break;
+                case 2:
+                    pixel = alphaBrightnessIncrease(pixel);
+                    pixelCover = (pixelCover * (16 - clampCoeff(REG_BLDY & 0x1F))) >> 4;
+                    break;
+                case 3:
+                    pixel = alphaBrightnessDecrease(pixel);
+                    pixelCover = (pixelCover * (16 - clampCoeff(REG_BLDY & 0x1F))) >> 4;
+                    break;
+                }
+            }
+            color = pixel;
+            cover = pixelCover;
+            layer = bgnum;
+        }
+    }
+    out->color = color & 0x7FFF;
+    out->cover = cover;
+    out->layer = layer;
+}
+
+static inline int FloorMod(int value, int modulus)
+{
+    int r = value % modulus;
+
+    return r < 0 ? r + modulus : r;
+}
+
+// One pixel of a text BG at map pixel (mx, my), 0..511: its colour | 0x8000
+// from `pal`, or 0 where it is see-through (RenderBGScanline's fetch).
+static uint16_t BGPixel(uint16_t control, unsigned int mx, unsigned int my, const uint16_t *pal)
+{
+    unsigned int charBaseBlock = (control >> 2) & 3;
+    unsigned int screenBaseBlock = (control >> 8) & 0x1F;
+    unsigned int bitsPerPixel = ((control >> 7) & 1) ? 8 : 4;
+    unsigned int mapWidthInPixels = bgMapSizes[control >> 14][0] * 8;
+    unsigned int mapHeightInPixels = bgMapSizes[control >> 14][1] * 8;
+    const uint8_t *bgtiles = (const uint8_t *)BG_CHAR_ADDR(charBaseBlock);
+    const uint16_t *bgmap = (const uint16_t *)BG_SCREEN_ADDR(screenBaseBlock);
+    uint16_t entry;
+    unsigned int tileX, tileY, tileLoc;
+    uint8_t pixel;
+
+    mx &= 0x1FF;
+    my &= 0x1FF;
+    if (mx > 255 && mapWidthInPixels > 256)
+        bgmap += 0x400;
+    if (my > 255 && mapHeightInPixels > 256)
+        bgmap += (mapWidthInPixels > 256) ? 0x800 : 0x400;
+    mx &= 0xFF;
+    my &= 0xFF;
+    entry = bgmap[(my / 8) * 32 + mx / 8];
+    tileX = mx % 8;
+    tileY = my % 8;
+    if (entry & (1 << 10))
+        tileX = 7 - tileX;
+    if (entry & (1 << 11))
+        tileY = 7 - tileY;
+    tileLoc = (entry & 0x3FF) * (bitsPerPixel * 8) + tileY * bitsPerPixel;
+    if (bitsPerPixel == 4)
+    {
+        pixel = bgtiles[tileLoc + tileX / 2];
+        pixel = (tileX & 1) ? pixel >> 4 : pixel & 0xF;
+        return pixel != 0 ? (pal[16 * ((entry >> 12) & 0xF) + pixel] | 0x8000) : 0;
+    }
+    pixel = bgtiles[tileLoc + tileX];
+    return pixel != 0 ? (pal[pixel] | 0x8000) : 0;
+}
+
+// x reflected into 0..n-1 at the edges (-1 -> 0, n -> n-1), as often as needed.
+static int MirrorInto(int x, int n)
+{
+    int m = FloorMod(x, 2 * n);
+
+    return m < n ? m : 2 * n - 1 - m;
+}
+
+// How the screen goes on past its edges for a move's background in BG3: the
+// part of the tilemap the move filled (DioramaBattle_MoveBgMapSize - most fill
+// the rows above the text box or the screen's, not the whole map, whose rest
+// holds anything) repeated, where it repeats without a seam; mirrored at the
+// picture's edges where it would show one. Decided once a load, from the
+// background's own colours (the unfaded palette: a fade in progress would
+// hide every seam).
+static struct
+{
+    uint32_t loads;      /* DioramaBattle_MoveBgLoads() decided for */
+    uint16_t control;    /* BG3CNT then */
+    bool decided;
+    int width, height;   /* the filled part, pixels: the repeat */
+    bool mirrorX, mirrorY;
+} sWideMap;
+
+static unsigned int ColorDistance(uint16_t a, uint16_t b)
+{
+    int dr = (int)(a & 0x1F) - (int)(b & 0x1F);
+    int dg = (int)((a >> 5) & 0x1F) - (int)((b >> 5) & 0x1F);
+    int db = (int)((a >> 10) & 0x1F) - (int)((b >> 10) & 0x1F);
+
+    return (unsigned int)(abs(dr) + abs(dg) + abs(db));
+}
+
+static uint16_t WideMapColor(uint16_t control, int mx, int my)
+{
+    uint16_t c = BGPixel(control, (unsigned int)mx, (unsigned int)my, gPlttBufferUnfaded);
+
+    return getAlphaBit(c) ? c & 0x7FFF : gPlttBufferUnfaded[0] & 0x7FFF;
+}
+
+static void DecideWideMap(uint16_t control)
+{
+    unsigned int mapW = bgMapSizes[control >> 14][0], mapH = bgMapSizes[control >> 14][1];
+    unsigned int entries = DioramaBattle_MoveBgMapSize() / 2;
+    int w, h, shownW, shownH;
+    double seamX = 0.0, innerX = 0.0, seamY = 0.0, innerY = 0.0;
+    unsigned int n;
+
+    if (entries == 0 || entries >= mapW * mapH)
+    {
+        w = mapW * 8;
+        h = mapH * 8;
+    }
+    else if (entries <= 32 * 32)
+    {
+        w = 256;   /* the first screen block's rows, in order */
+        h = (int)((entries + 31) / 32) * 8;
+    }
+    else
+    {
+        w = mapW * 8;
+        h = (int)(entries / mapW) * 8;
+    }
+    if (h < 8)
+        h = 8;
+    shownW = w < DISPLAY_WIDTH ? w : DISPLAY_WIDTH;
+    shownH = h < DISPLAY_HEIGHT ? h : DISPLAY_HEIGHT;
+    /* Across the repeat's seam against between neighbours inside it. */
+    n = 0;
+    for (int y = 0; y < shownH; y++, n++)
+    {
+        seamX += ColorDistance(WideMapColor(control, w - 1, y), WideMapColor(control, 0, y));
+        for (int x = 0; x + 1 < shownW; x++)
+            innerX += ColorDistance(WideMapColor(control, x, y), WideMapColor(control, x + 1, y)) / (double)(shownW - 1);
+    }
+    seamX /= n;
+    innerX /= n;
+    n = 0;
+    for (int x = 0; x < shownW; x++, n++)
+    {
+        seamY += ColorDistance(WideMapColor(control, x, h - 1), WideMapColor(control, x, 0));
+        for (int y = 0; y + 1 < shownH; y++)
+            innerY += ColorDistance(WideMapColor(control, x, y), WideMapColor(control, x, y + 1)) / (double)(shownH - 1);
+    }
+    seamY /= n;
+    innerY /= n;
+    sWideMap.width = w;
+    sWideMap.height = h;
+    sWideMap.mirrorX = seamX > innerX * 1.5 + 2.0;
+    sWideMap.mirrorY = seamY > innerY * 1.5 + 2.0;
+    sWideMap.control = control;
+    sWideMap.loads = DioramaBattle_MoveBgLoads();
+    sWideMap.decided = true;
+}
+
+// BG3 at columns x0..x1-1 of row lineNum - either may lie past the screen - as
+// the screen would go on (sWideMap). See-through pixels are 0.
+static void RenderBGRunWide(uint16_t control, uint16_t hoffs, uint16_t voffs, int lineNum,
+                            int x0, int x1, uint16_t *out)
+{
+    const uint16_t *pal = (const uint16_t *)PLTT;
+    bool mosaic = (control & BGCNT_MOSAIC) != 0;
+    int sy = sWideMap.mirrorY ? MirrorInto(lineNum, DISPLAY_HEIGHT) : lineNum;
+    unsigned int my;
+
+    if (mosaic)
+        sy -= FloorMod(sy, mosaicBGEffectY + 1);
+    my = (unsigned int)FloorMod(sy + (int)(voffs & 0x1FF), sWideMap.height);
+    for (int x = x0; x < x1; x++)
+    {
+        int sx = sWideMap.mirrorX ? MirrorInto(x, DISPLAY_WIDTH) : x;
+
+        if (mosaic)
+            sx -= FloorMod(sx, mosaicBGEffectX + 1);
+        out[x - x0] = BGPixel(control, (unsigned int)FloorMod(sx + (int)(hoffs & 0x1FF), sWideMap.width), my, pal);
+    }
+}
+
+// The wide picture's colour from BG3's pixel there (alpha bit clear: none),
+// the window state that applies (WINMASK bits) and this row's backdrop
+// colour (its brightness effect applied, as DrawFrame fills it).
+static uint16_t WideColor(uint16_t bg3, unsigned int mask, uint16_t backdrop)
+{
+    unsigned int blendMode = (REG_BLDCNT >> 6) & 3;
+
+    if (!getAlphaBit(bg3) || !(mask & WINMASK_BG3))
+        return backdrop & 0x7FFF;
+    if (blendMode != 0 && (REG_BLDCNT & BLDCNT_TGT1_BG3) && (mask & WINMASK_CLR))
+    {
+        switch (blendMode)
+        {
+        case 1:
+            // Over the backdrop: nothing else reaches past the picture.
+            if (REG_BLDCNT & BLDCNT_TGT2_BD)
+                bg3 = alphaBlendColor(bg3, *(uint16_t *)PLTT);
+            break;
+        case 2:
+            bg3 = alphaBrightnessIncrease(bg3);
+            break;
+        case 3:
+            bg3 = alphaBrightnessDecrease(bg3);
+            break;
+        }
+    }
+    return bg3 & 0x7FFF;
+}
+
+// Columns x0..x1-1 of row lineNum of the wide picture into out: the window
+// state of maskRow's column for columns inside the picture (maskRow NULL:
+// none), of `mask` for the others.
+static void WideRun(uint16_t *out, int x0, int x1, int lineNum, unsigned int mask,
+                    const uint16_t *maskRow, uint16_t backdrop)
+{
+    static uint16_t bg3[DIORAMA_WIDE_MAX_W];
+    bool shown = (REG_DISPCNT & 3) == 0 && (isbgEnabled(3)) != 0;
+
+    if (x1 <= x0)
+        return;
+    if (shown)
+        RenderBGRunWide(*(uint16_t *)(REG_ADDR_BG0CNT + 3 * 2), *(uint16_t *)(REG_ADDR_BG0HOFS + 3 * 4),
+                        *(uint16_t *)(REG_ADDR_BG0VOFS + 3 * 4), lineNum, x0, x1, bg3);
+    for (int x = x0; x < x1; x++)
+    {
+        unsigned int m = maskRow != NULL && x >= 0 && x < DISPLAY_WIDTH ? maskRow[x] : mask;
+
+        out[x - x0] = WideColor(shown ? bg3[x - x0] : 0, m, backdrop);
+    }
+}
+
+// This row's part of the wide picture (gDioramaSceneWide): BG3 past the
+// picture's left and right edges with the window state of the edge column;
+// with row 0, the rows above the picture too, as row 0 would continue.
+static void WideLine(const uint16_t *winMask, bool windowsEnabled, uint16_t vcount, uint16_t backdrop)
+{
+    unsigned int leftMask = windowsEnabled ? winMask[0] : 0xFF;
+    unsigned int rightMask = windowsEnabled ? winMask[DISPLAY_WIDTH - 1] : 0xFF;
+    uint16_t *row = &gDioramaSceneWide[(sWideTop + vcount) * sWideStride];
+
+    WideRun(row, -sWideLeft, 0, vcount, leftMask, NULL, backdrop);
+    WideRun(row + sWideLeft + DISPLAY_WIDTH, DISPLAY_WIDTH, DISPLAY_WIDTH + sWideRight, vcount,
+            rightMask, NULL, backdrop);
+    if (vcount == 0)
+        for (int y = -sWideTop; y < 0; y++)
+        {
+            uint16_t *above = &gDioramaSceneWide[(sWideTop + y) * sWideStride];
+
+            WideRun(above, -sWideLeft, 0, y, leftMask, NULL, backdrop);
+            WideRun(above + sWideLeft, 0, DISPLAY_WIDTH, y, 0xFF, windowsEnabled ? winMask : NULL, backdrop);
+            WideRun(above + sWideLeft + DISPLAY_WIDTH, DISPLAY_WIDTH, DISPLAY_WIDTH + sWideRight, y,
+                    rightMask, NULL, backdrop);
+        }
+}
+#endif
 
 // Parts of this code heavily borrowed from NanoboyAdvance.
 static void DrawSprites(struct scanlineData* scanline, uint16_t vcount, bool windowsEnabled)
@@ -473,6 +838,11 @@ static void DrawSprites(struct scanlineData* scanline, uint16_t vcount, bool win
         unsigned int width;
         unsigned int height;
         uint16_t *pixels;
+#ifdef ENABLE_DIORAMA
+        /* The map's sprites: the 3D view draws them in its own scene. */
+        if (sSkipObj && (gDioramaSceneSkipObj[i >> 5] >> (i & 31)) & 1)
+            continue;
+#endif
 
         bool isAffine  = oam->affineMode & 1;
         bool doubleSizeOrDisabled = (oam->affineMode >> 1) & 1;
@@ -637,6 +1007,9 @@ static void DrawSprites(struct scanlineData* scanline, uint16_t vcount, bool win
                         //check if its enabled in the window (if window is enabled)
                         winShouldBlendPixel = (windowsEnabled == false || scanline->winMask[global_x] & WINMASK_CLR);
                         
+#ifdef ENABLE_DIORAMA
+                        uint8_t cover = 0;
+#endif
                         //has to be separated from the blend mode switch statement because of OBJ semi transparancy feature
                         if ((blendMode == 1 && REG_BLDCNT & BLDCNT_TGT1_OBJ && winShouldBlendPixel) || isSemiTransparent)
                         {
@@ -645,6 +1018,9 @@ static void DrawSprites(struct scanlineData* scanline, uint16_t vcount, bool win
                             if (alphaBlendSelectTargetB(scanline, &targetB, oam->priority, 0, global_x, false))
                             {
                                 color = alphaBlendColor(targetA, targetB);
+#ifdef ENABLE_DIORAMA
+                                cover = (sTargetCover * clampCoeff((REG_BLDALPHA >> 8) & 0x1F)) >> 4;
+#endif
                             }
                         }
                         else if (REG_BLDCNT & BLDCNT_TGT1_OBJ && winShouldBlendPixel)
@@ -662,6 +1038,9 @@ static void DrawSprites(struct scanlineData* scanline, uint16_t vcount, bool win
                         
                         //write pixel to pixel framebuffer
                         pixels[global_x] = color | (1 << 15);
+#ifdef ENABLE_DIORAMA
+                        scanline->spriteCover[oam->priority][global_x] = cover;
+#endif
                     }
                 }
             }
@@ -684,6 +1063,25 @@ static void DrawScanline(uint16_t *pixels, uint16_t vcount)
     memset(scanline.winMask, 0, sizeof(scanline.winMask));
     memset(scanline.spriteLayers, 0, sizeof(scanline.spriteLayers));
     memset(scanline.prioritySortedBgsCount, 0, sizeof(scanline.prioritySortedBgsCount));
+#ifdef ENABLE_DIORAMA
+    uint8_t *cover = sSceneMask ? &gDioramaSceneCover[vcount * DISPLAY_WIDTH] : NULL;
+
+    memset(scanline.spriteCover, 0, sizeof(scanline.spriteCover));
+    if (sSceneMask)
+    {
+        /* How far this line's field layers are moved from line 0's (a
+         * transition's waves and slices move BG1-3 together). */
+        uint16_t hofs = *(uint16_t *)(REG_ADDR_BG0HOFS + 4), vofs = *(uint16_t *)(REG_ADDR_BG0VOFS + 4);
+
+        if (vcount == 0)
+        {
+            sLineZeroScroll[0] = hofs;
+            sLineZeroScroll[1] = vofs;
+        }
+        gDioramaSceneLineShift[vcount][0] = (int16_t)((((hofs - sLineZeroScroll[0]) & 0x1FF) ^ 0x100) - 0x100);
+        gDioramaSceneLineShift[vcount][1] = (int16_t)((((vofs - sLineZeroScroll[1]) & 0x1FF) ^ 0x100) - 0x100);
+    }
+#endif
 
     for (bgnum = 0; bgnum < numOfBgs; bgnum++)
     {
@@ -703,6 +1101,28 @@ static void DrawScanline(uint16_t *pixels, uint16_t vcount)
         // All backgrounds are text mode
         for (bgnum = 3; bgnum >= 0; bgnum--)
         {
+#ifdef ENABLE_DIORAMA
+            if (isbgEnabled(bgnum) && (sSceneMask & (1 << bgnum)))
+            {
+                // What the scenery itself would show there, kept aside for
+                // where the world has nothing (gDioramaSceneArt).
+                if (bgnum == 3 && sArtWanted)
+                {
+                    uint16_t *art = &gDioramaSceneArt[vcount * DISPLAY_WIDTH];
+
+                    // Its own colours, before any fade: the 3D battle fades
+                    // the world and this together (battle_scene.h).
+                    sBgPalette = gPlttBufferUnfaded;
+                    memsetu16(art, gPlttBufferUnfaded[0] | 0x8000, DISPLAY_WIDTH);
+                    RenderBGScanline(bgnum, scanline.bgcnts[bgnum], *(uint16_t *)(REG_ADDR_BG0HOFS + bgnum * 4),
+                                     *(uint16_t *)(REG_ADDR_BG0VOFS + bgnum * 4), vcount, art);
+                    sBgPalette = NULL;
+                }
+                // The world's: an opaque stand-in, colour 0, across the line.
+                memsetu16(scanline.layers[bgnum], 0x8000, DISPLAY_WIDTH);
+                continue;
+            }
+#endif
             if (isbgEnabled(bgnum))
             {
                 uint16_t bghoffs = *(uint16_t *)(REG_ADDR_BG0HOFS + bgnum * 4);
@@ -716,6 +1136,11 @@ static void DrawScanline(uint16_t *pixels, uint16_t vcount)
     case 1:
         // BG2 is affine
         bgnum = 2;
+#ifdef ENABLE_DIORAMA
+        if (isbgEnabled(bgnum) && (sSceneMask & (1 << bgnum)))
+            memsetu16(scanline.layers[bgnum], 0x8000, DISPLAY_WIDTH);
+        else
+#endif
         if (isbgEnabled(bgnum))
         {
             RenderRotScaleBGScanline(bgnum, scanline.bgcnts[bgnum], REG_BG2X, REG_BG2Y, vcount, scanline.layers[bgnum]);
@@ -804,6 +1229,18 @@ static void DrawScanline(uint16_t *pixels, uint16_t vcount)
         }
     }
 
+#ifdef ENABLE_DIORAMA
+    if (cover != NULL || sWideWanted)
+    {
+        // The window mask without the OBJ window (that is sprites, left out).
+        SceneEdge(&scanline, pixels[0], 0, windowsEnabled, blendMode, &gDioramaSceneEdges[vcount][0]);
+        SceneEdge(&scanline, pixels[DISPLAY_WIDTH - 1], DISPLAY_WIDTH - 1, windowsEnabled, blendMode,
+                  &gDioramaSceneEdges[vcount][1]);
+    }
+    // pixels still holds this row's backdrop colour (DrawFrame).
+    if (sWideWanted)
+        WideLine(scanline.winMask, windowsEnabled, vcount, pixels[0]);
+#endif
     if (REG_DISPCNT & DISPCNT_OBJ_ON)
         DrawSprites(&scanline, vcount, windowsEnabled);
 
@@ -834,6 +1271,12 @@ static void DrawScanline(uint16_t *pixels, uint16_t vcount)
                             continue;
                     }
                     
+#ifdef ENABLE_DIORAMA
+                    // A pixel of the world's layer is all world (cover 16),
+                    // any other starts opaque; blending mixes the covers as
+                    // it mixes the colours.
+                    uint8_t pixelCover = (sSceneMask & (1 << bgnum)) ? 16 : 0;
+#endif
                     //blending code
                     if (blendMode != 0 && REG_BLDCNT & (1 << bgnum) && winEffectEnable)
                     {
@@ -849,18 +1292,32 @@ static void DrawScanline(uint16_t *pixels, uint16_t vcount)
                             if (alphaBlendSelectTargetB(&scanline, &targetB, prnum, prsub+1, xpos, isSpriteBlendingEnabled))
                             {
                                 color = alphaBlendColor(targetA, targetB);
+#ifdef ENABLE_DIORAMA
+                                pixelCover = clampCoeff((pixelCover * clampCoeff(REG_BLDALPHA & 0x1F)
+                                                         + sTargetCover * clampCoeff((REG_BLDALPHA >> 8) & 0x1F)) >> 4);
+#endif
                             }
                             break;
                         case 2:
                             color = alphaBrightnessIncrease(targetA);
+#ifdef ENABLE_DIORAMA
+                            pixelCover = (pixelCover * (16 - clampCoeff(REG_BLDY & 0x1F))) >> 4;
+#endif
                             break;
                         case 3:
                             color = alphaBrightnessDecrease(targetA);
+#ifdef ENABLE_DIORAMA
+                            pixelCover = (pixelCover * (16 - clampCoeff(REG_BLDY & 0x1F))) >> 4;
+#endif
                             break;
                         }
                     }
                     //write the pixel to scanline buffer output
                     pixels[xpos] = color;
+#ifdef ENABLE_DIORAMA
+                    if (cover != NULL)
+                        cover[xpos] = pixelCover;
+#endif
                 }
             }
         }
@@ -875,6 +1332,10 @@ static void DrawScanline(uint16_t *pixels, uint16_t vcount)
                         continue;
                 //draw the pixel
                 pixels[xpos] = src[xpos];
+#ifdef ENABLE_DIORAMA
+                if (cover != NULL)
+                    cover[xpos] = scanline.spriteCover[prnum][xpos];
+#endif
             }
         }
     }
@@ -892,6 +1353,25 @@ void DrawFrame(uint16_t *pixels)
 {
     int i;
     int j;
+#ifdef ENABLE_DIORAMA
+    sSceneMask = gDioramaSceneLayers & 0x0F;
+    sArtWanted = gDioramaSceneArtWanted;
+    sWideWanted = gDioramaSceneWideWanted;
+    if (sWideWanted)
+    {
+        sWideLeft = gDioramaSceneWideLeft < DIORAMA_WIDE_MAX_SIDE ? gDioramaSceneWideLeft : DIORAMA_WIDE_MAX_SIDE;
+        sWideRight = gDioramaSceneWideRight < DIORAMA_WIDE_MAX_SIDE ? gDioramaSceneWideRight : DIORAMA_WIDE_MAX_SIDE;
+        sWideTop = gDioramaSceneWideTop < DIORAMA_WIDE_MAX_TOP ? gDioramaSceneWideTop : DIORAMA_WIDE_MAX_TOP;
+        sWideStride = sWideLeft + DISPLAY_WIDTH + sWideRight;
+        if (!sWideMap.decided || sWideMap.loads != DioramaBattle_MoveBgLoads()
+         || sWideMap.control != *(uint16_t *)(REG_ADDR_BG0CNT + 3 * 2))
+            DecideWideMap(*(uint16_t *)(REG_ADDR_BG0CNT + 3 * 2));
+    }
+    sSkipObj = (gDioramaSceneSkipObj[0] | gDioramaSceneSkipObj[1]
+              | gDioramaSceneSkipObj[2] | gDioramaSceneSkipObj[3]) != 0;
+    if (sSceneMask)
+        memset(gDioramaSceneCover, 0, sizeof(gDioramaSceneCover));
+#endif
     for (i = 0; i < DISPLAY_HEIGHT; i++)
     {
         REG_VCOUNT = i;
