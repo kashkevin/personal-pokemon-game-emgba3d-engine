@@ -26,6 +26,9 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
 const struct DioramaObjectMetrics *DioramaGLObjects_GetMetrics(void);
 /* The height of the ground under the player, as last seen (0 before any). */
 float DioramaGLObjects_GetPlayerGround(void);
+/* Where the player is drawn this frame: the middle of its cell in world
+ * tiles (x east, z north), on the ground under it; false with no player. */
+bool DioramaGLObjects_GetPlayerPose(float frameAlpha, float *x, float *groundY, float *z);
 void DioramaGLObjects_Shutdown(void);
 
 #endif

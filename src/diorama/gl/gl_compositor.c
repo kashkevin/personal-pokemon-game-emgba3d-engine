@@ -1,5 +1,6 @@
 #ifdef ENABLE_DIORAMA
 
+#include <math.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,6 +13,7 @@
 #include "diorama/buildings.h"
 #include "diorama/gl_air.h"
 #include "diorama/gl_battle.h"
+#include "diorama/gl_field_light.h"
 #include "diorama/gl_building_renderer.h"
 #include "diorama/gl_compositor.h"
 #include "diorama/gl_light.h"
@@ -19,6 +21,7 @@
 #include "diorama/gl_shadow.h"
 #include "diorama/gl_object_renderer.h"
 #include "diorama/gl_terrain_renderer.h"
+#include "diorama/gl_tree_sprites.h"
 #include "diorama/rules.generated.h"
 #include "diorama/rules.h"
 #include "diorama/metatile_atlas.h"
@@ -493,7 +496,8 @@ static bool BuildWeatherImage(const struct DioramaSceneSnapshot *snapshot)
                             = RGBA(205, 198, 190, 190);
         }
     }
-    else if (effect == DIORAMA_WEATHER_FOG)
+    /* The fog's banks are in the scene already (gl_air.h): no flat pane. */
+    else if (effect == DIORAMA_WEATHER_FOG && !DioramaGLAir_DrawsFog())
     {
         int baseAlpha = DioramaWeather_FogAlpha(snapshot->weatherBlendEVA);
         int y;
@@ -875,11 +879,50 @@ static void GetCameraPosition(const struct DioramaSceneSnapshot *snapshot,
     }
 }
 
+/*
+ * DIORAMA_CAMERA_3DS: the 3DS project's framing (voxel_camera.c
+ * AdaptDistance, at its default 40 degrees and 100% zoom): 8 tiles back plus
+ * a fifth of the map's longer side (5 at most), seen through a 35 degree
+ * view, so about 10 tiles from top to bottom at the player - the GBA's own
+ * framing - on every map, indoors too. This camera stays where it is (16
+ * tiles up); the focal length gives the same framing, with a slightly
+ * flatter perspective than the 3DS's nearer eye.
+ */
+static int sCameraStyle = DIORAMA_CAMERA_WIDE; /* the main thread's (sdl2.c) */
+
+static bool UsesThreeDsCamera(void)
+{
+    return sCameraStyle == DIORAMA_CAMERA_3DS;
+}
+
+static void ThreeDsFraming(const struct DioramaSceneSnapshot *snapshot,
+                           float *pitch, float *focalLength)
+{
+    const float pitch3ds = 0.6981317f; /* 40 degrees */
+    const float halfView = 0.3152988f; /* tan(17.5 degrees): the 35 degree view */
+    float longer = (float)(snapshot->mapWidth > snapshot->mapHeight
+                           ? snapshot->mapWidth : snapshot->mapHeight);
+    float back = 8.0f + (longer * 0.2f > 5.0f ? 5.0f : longer * 0.2f);
+    float eye3ds = back / cosf(pitch3ds);
+    /* This camera's eye-to-target distance at that pitch (the shaders'). */
+    float distance = (16.0f * cosf(pitch3ds) - 0.458944f) / sinf(pitch3ds);
+    float eye = 16.0f * sinf(pitch3ds) + distance * cosf(pitch3ds);
+
+    *pitch = pitch3ds;
+    /* The same height of the world at the target: eye x 80 / f = eye3ds x halfView. */
+    *focalLength = 80.0f * eye / (eye3ds * halfView);
+}
+
 static void GetCameraBase(const struct DioramaSceneSnapshot *snapshot,
                           float *pitch, float *focalLength)
 {
     struct DioramaMapProfile profile;
 
+    if (UsesThreeDsCamera())
+    {
+        ThreeDsFraming(snapshot, pitch, focalLength);
+        return;
+    }
     *pitch = CAMERA_DEFAULT_PITCH;
     *focalLength = CAMERA_DEFAULT_FOCAL_LENGTH;
     if (DioramaRules_GetMapProfile(snapshot->mapGroup, snapshot->mapNum,
@@ -1016,6 +1059,10 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
         SDL_Log("Diorama building models unavailable; houses stay extruded");
     if (!DioramaGLShadow_Init())
         SDL_Log("Diorama sun shadows unavailable");
+    /* The 3DS project's trees, whenever the tree style asks for them (F8,
+     * tree_sprites.h). */
+    if (!DioramaGLTreeSprites_Init())
+        SDL_Log("Diorama 3DS trees unavailable; the voxel trees stay");
     // The 3D battle (gl_battle.c); without it battles stay 2D.
     if (!DioramaGLBattle_Init())
         SDL_Log("Diorama 3D battles unavailable; battles stay 2D");
@@ -1175,6 +1222,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
             sCurrent3DReady = DioramaGLTerrain_Sync(&sSceneSnapshot, sAtlasResolvedCells)
                            && DioramaGLObjects_Sync(&sSceneSnapshot, sAtlasResolvedCells);
             DioramaGLBuildings_Sync(&sSceneSnapshot, sAtlasResolvedCells);
+            DioramaGLTreeSprites_Sync(&sSceneSnapshot, sAtlasResolvedCells);
         }
         current3D = sCurrent3DReady;
     }
@@ -1316,17 +1364,21 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         if (DioramaGLShadow_Begin(cameraX, cameraZ,
                                   sTerrainDebug ? 0.0f : SunStrength(&sRenderedSceneSnapshot),
                                   ((uint64_t)DioramaGLBuildings_GetGeometryGeneration() << 32)
-                                  | DioramaGLTerrain_GetGeometryGeneration()))
+                                  | (DioramaGLTerrain_GetGeometryGeneration()
+                                   ^ DioramaGLTreeSprites_GetGeometryGeneration() * 2654435761u)))
         {
             DioramaGLTerrain_DrawShadow(sAtlasTexture.id, sBaseAtlasTexture.id,
                                         sForegroundAtlasTexture.id);
             DioramaGLBuildings_DrawShadow();
+            DioramaGLTreeSprites_DrawShadow();
             DioramaGLShadow_End(outputWidth, outputHeight);
         }
         DioramaGLTerrain_Draw(sAtlasTexture.id, sBaseAtlasTexture.id,
                                sForegroundAtlasTexture.id, cameraX, cameraZ,
                                cameraPitch, cameraFocalLength,
                                aspectCorrection, sTerrainDebug);
+        DioramaGLTreeSprites_Draw(cameraX, cameraZ, cameraPitch, cameraFocalLength,
+                                  aspectCorrection);
         DioramaGLBuildings_Draw(cameraX, cameraZ, cameraPitch, cameraFocalLength,
                                 aspectCorrection);
         DioramaGLObjects_Draw(current3D ? frameAlpha : 1.0f,
@@ -1335,6 +1387,11 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         // The light in the air over it all (gl_air.h): dust, rays, bloom.
         DioramaGLAir_Draw(cameraX, cameraZ, cameraPitch, cameraFocalLength,
                           aspectCorrection, outputWidth, outputHeight);
+        // A dark cave's circle of light round the player (gl_field_light.h):
+        // everything but the game's text is dark outside it, as on the GBA.
+        DioramaGLFieldLight_Draw(&sRenderedSceneSnapshot, current3D ? frameAlpha : 1.0f,
+                                 cameraX, cameraZ, cameraPitch, cameraFocalLength,
+                                 aspectCorrection, outputWidth, outputHeight);
         glDisable(GL_SCISSOR_TEST);
         glViewport(0, 0, outputWidth, outputHeight);
         dglUseProgram(sProgram);
@@ -1627,11 +1684,46 @@ void DioramaGL_AdjustCameraPitch(int steps)
     sCameraPitchOffset = adjusted - base;
 }
 
+void DioramaGL_SetCameraStyle(int style)
+{
+    sCameraStyle = style == DIORAMA_CAMERA_3DS ? DIORAMA_CAMERA_3DS : DIORAMA_CAMERA_WIDE;
+    sCameraPitchOffset = 0.0f;
+    sCameraFocalLengthOffset = 0.0f;
+}
+
+int DioramaGL_GetCameraStyle(void)
+{
+    return sCameraStyle;
+}
+
+void DioramaGL_GetCameraSteps(int *pitchSteps, int *zoomSteps)
+{
+    *pitchSteps = (int)lroundf(sCameraPitchOffset / CAMERA_PITCH_STEP);
+    *zoomSteps = (int)lroundf(sCameraFocalLengthOffset / CAMERA_ZOOM_STEP);
+}
+
+/* GetCameraSettings keeps the result inside the limits; the keys step from
+ * there (DioramaGL_AdjustCamera*). */
+void DioramaGL_SetCameraSteps(int pitchSteps, int zoomSteps)
+{
+    const int maxPitchSteps = (int)((CAMERA_MAX_PITCH - CAMERA_MIN_PITCH) / CAMERA_PITCH_STEP) + 1;
+    const int maxZoomSteps = (int)((CAMERA_MAX_FOCAL_LENGTH - CAMERA_MIN_FOCAL_LENGTH) / CAMERA_ZOOM_STEP) + 1;
+
+    if (pitchSteps < -maxPitchSteps) pitchSteps = -maxPitchSteps;
+    if (pitchSteps > maxPitchSteps) pitchSteps = maxPitchSteps;
+    if (zoomSteps < -maxZoomSteps) zoomSteps = -maxZoomSteps;
+    if (zoomSteps > maxZoomSteps) zoomSteps = maxZoomSteps;
+    sCameraPitchOffset = pitchSteps * CAMERA_PITCH_STEP;
+    sCameraFocalLengthOffset = zoomSteps * CAMERA_ZOOM_STEP;
+}
+
 void DioramaGL_Shutdown(void)
 {
     DioramaGLBattle_Shutdown();
     DioramaGLShadow_Shutdown();
     DioramaGLAir_Shutdown();
+    DioramaGLFieldLight_Shutdown();
+    DioramaGLTreeSprites_Shutdown();
     DioramaGLLight_Shutdown();
     DioramaGLBuildings_Shutdown();
     DioramaGLObjects_Shutdown();

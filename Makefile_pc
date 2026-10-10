@@ -26,7 +26,7 @@ SANITIZE     ?= 0
 # are generated from this tree's maps and tilesets by tools/diorama_rules.
 DIORAMA      ?= 0
 DIORAMA_GENERATED_C := src/data/diorama/diorama_rules.generated.c src/data/diorama/tree_model.generated.c \
-                       src/data/diorama/buildings.generated.c
+                       src/data/diorama/buildings.generated.c src/data/diorama/trees_3ds.generated.c
 
 # GBA PPU emulation used for the 2D frame. The shipping Windows build uses the
 # "easy draw" renderer; Linux uses it too so tests exercise what ships ("fast
@@ -283,8 +283,8 @@ check-game-sections: $(TARGET)
 ifeq ($(DIORAMA),1)
 # Diorama rule tables and tree model, generated from this tree's maps/tilesets.
 include diorama_rules.mk
-$(OBJ_DIR)/src/data/diorama/%.o: $(DIORAMA_RULE_HEADER) $(DIORAMA_TREE_HEADER)
-$(C_OBJS): | $(DIORAMA_RULE_HEADER) $(DIORAMA_TREE_HEADER)
+$(OBJ_DIR)/src/data/diorama/%.o: $(DIORAMA_RULE_HEADER) $(DIORAMA_TREE_HEADER) $(DIORAMA_TREES3DS_HEADER)
+$(C_OBJS): | $(DIORAMA_RULE_HEADER) $(DIORAMA_TREE_HEADER) $(DIORAMA_TREES3DS_HEADER)
 
 # The voxel project's renderer unit tests (Linux, 32-bit host gcc; no game code).
 # check-diorama-tools runs the rule compiler's own Python tests (slow: ~1 h).

@@ -32,6 +32,9 @@
 #include "diorama/gl_battle.h"
 #include "diorama/gl_compositor.h"
 #include "diorama/scene_snapshot.h"
+#include "diorama/tree_sprites.h"
+#include "multiplayer_menu.h"
+#include "multiplayer_save.h"
 #endif
 
 extern void (*const gIntrTable[])(void);
@@ -145,6 +148,58 @@ static void PerfLog_Presented(Uint64 start, Uint64 end)
     sPerfPresentTicks = 0;
     sPerfWindowStart = end;
 }
+
+#ifdef ENABLE_DIORAMA
+// A live save holds the game for about 34 companion round trips of 2 frames
+// each (a recovery's or a trade's import, about 1024), so its length followed
+// the drawing rate: 26-31 s per save in the 3D view at 2.4 frames a second on
+// a software renderer (app KNOWN_ISSUES M5). While the save holds the game and
+// no menu is open nothing on screen changes (callbacks paused), so its frames
+// run at 60 a second without being drawn, and the view is redrawn once a
+// second (camera keys, a resized window). The save's frame deadlines (600
+// frames between commands) keep their real-time meaning, as in mGBA.
+#define HELD_REDRAW_MS 1000
+static bool sHeldUnchanged; // sampled at the frame boundary, game thread parked
+static Uint32 sLastPresentMs;
+
+// The 3D view's look as pokeemerald.cfg keeps it: the camera's framing (F7)
+// and the tree style (F8), each the Diorama's own or the 3DS project's, and
+// the pitch and zoom keys' steps. PKMN_DIORAMA_CAMERA and PKMN_DIORAMA_TREES
+// (3ds, or anything else for the Diorama's own) override the file for one run
+// without being written to it, as the test scripts use them.
+static u8 sCameraStyle = DIORAMA_CAMERA_WIDE;
+static bool8 sTreeStyle3ds;
+static int sCameraPitchSteps;
+static int sCameraZoomSteps;
+static bool sCameraStepsDirty;
+static Uint32 sCameraStepsChangedMs;
+
+static int EnvironmentStyle(const char *name, int fallback)
+{
+    const char *value = SDL_getenv(name);
+
+    if (value == NULL || value[0] == '\0')
+        return fallback;
+    return SDL_strcasecmp(value, "3ds") == 0;
+}
+
+static void ApplyDioramaLook(void)
+{
+    DioramaGL_SetCameraStyle(EnvironmentStyle("PKMN_DIORAMA_CAMERA", sCameraStyle)
+                             ? DIORAMA_CAMERA_3DS : DIORAMA_CAMERA_WIDE);
+    DioramaGL_SetCameraSteps(sCameraPitchSteps, sCameraZoomSteps);
+    DioramaTreeSprites_SetEnabled(EnvironmentStyle("PKMN_DIORAMA_TREES", sTreeStyle3ds));
+}
+
+// The pitch and zoom keys and the mouse wheel: written a second after the
+// last change, so a turn of the wheel is one write.
+static void KeepCameraSteps(void)
+{
+    DioramaGL_GetCameraSteps(&sCameraPitchSteps, &sCameraZoomSteps);
+    sCameraStepsDirty = true;
+    sCameraStepsChangedMs = SDL_GetTicks();
+}
+#endif
 
 int main(int argc, char **argv)
 {
@@ -278,6 +333,7 @@ int main(int argc, char **argv)
     }
     DioramaSnapshotExchange_Init();
     DioramaScene_Init();
+    ApplyDioramaLook(); // before the game thread makes its first snapshot
 #endif
 #if defined(NATIVE_LINUX) || defined(_WIN32)
 #ifdef ENABLE_DIORAMA
@@ -364,6 +420,13 @@ int main(int argc, char **argv)
     while (isRunning)
     {
         ProcessEvents();
+#ifdef ENABLE_DIORAMA
+        if (sCameraStepsDirty && SDL_GetTicks() - sCameraStepsChangedMs >= 1000)
+        {
+            sCameraStepsDirty = false;
+            StoreConfigFile();
+        }
+#endif
 
         if (!paused)
         {
@@ -464,6 +527,9 @@ int main(int argc, char **argv)
                         keys = MpBridge_FilterKeys(keys);
                         REG_KEYINPUT = ~keys & KEYS_MASK;
                     }
+#ifdef ENABLE_DIORAMA
+                    sHeldUnchanged = MultiplayerSave_SkipCallbacks() && !MultiplayerMenu_IsActive();
+#endif
 
                     SDL_SemPost(vBlankSemaphore);
                     sPerfGameFrames++;
@@ -474,6 +540,13 @@ int main(int argc, char **argv)
         }
 
 #ifndef __ANDROID__
+#ifdef ENABLE_DIORAMA
+        if (sHeldUnchanged && SDL_GetTicks() - sLastPresentMs < HELD_REDRAW_MS)
+        {
+            SDL_Delay(1); // no vsync wait paces this loop; the accumulator paces the frames
+            continue;
+        }
+#endif
         Uint64 presentStart = SDL_GetPerformanceCounter();
 #ifdef ENABLE_DIORAMA
         double renderStep = fixedTimestep / timeScale;
@@ -485,6 +558,7 @@ int main(int argc, char **argv)
                           sPlatformSettings[PLATFORM_SETTING_BORDER],
                           sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE],
                           frameAlpha);
+        sLastPresentMs = SDL_GetTicks();
 #else
         SDL_RenderPresent(sdlRenderer);
 #endif
@@ -494,6 +568,10 @@ int main(int argc, char **argv)
 
     FlushSaveIfDirty();
     MpBridge_Shutdown();
+#ifdef ENABLE_DIORAMA
+    if (sCameraStepsDirty)
+        StoreConfigFile();
+#endif
 
 #ifdef ENABLE_DIORAMA
     DioramaGL_Shutdown();
@@ -549,6 +627,9 @@ static void ReadConfigFile(void)
     FILE *configFile = fopen(sConfigPath, "r");
     char line[64];
     unsigned int value;
+#ifdef ENABLE_DIORAMA
+    int steps;
+#endif
 
     if (configFile == NULL)
         return;
@@ -575,6 +656,16 @@ static void ReadConfigFile(void)
             sPlatformSettings[PLATFORM_SETTING_VOLUME] = value;
         else if (sscanf(line, "cryVolume=%u", &value) == 1 && value <= 10)
             sPlatformSettings[PLATFORM_SETTING_CRY_VOLUME] = value;
+#ifdef ENABLE_DIORAMA
+        else if (sscanf(line, "cameraStyle=%u", &value) == 1)
+            sCameraStyle = value == DIORAMA_CAMERA_3DS ? DIORAMA_CAMERA_3DS : DIORAMA_CAMERA_WIDE;
+        else if (sscanf(line, "treeStyle=%u", &value) == 1)
+            sTreeStyle3ds = value == 1;
+        else if (sscanf(line, "cameraPitch=%d", &steps) == 1)
+            sCameraPitchSteps = steps;
+        else if (sscanf(line, "cameraZoom=%d", &steps) == 1)
+            sCameraZoomSteps = steps;
+#endif
     }
     fclose(configFile);
 }
@@ -594,6 +685,12 @@ static void StoreConfigFile(void)
     fprintf(configFile, "border=%u\n", sPlatformSettings[PLATFORM_SETTING_BORDER]);
     fprintf(configFile, "volume=%u\n", sPlatformSettings[PLATFORM_SETTING_VOLUME]);
     fprintf(configFile, "cryVolume=%u\n", sPlatformSettings[PLATFORM_SETTING_CRY_VOLUME]);
+#ifdef ENABLE_DIORAMA
+    fprintf(configFile, "cameraStyle=%u\n", sCameraStyle);
+    fprintf(configFile, "treeStyle=%u\n", sTreeStyle3ds ? 1 : 0);
+    fprintf(configFile, "cameraPitch=%d\n", sCameraPitchSteps);
+    fprintf(configFile, "cameraZoom=%d\n", sCameraZoomSteps);
+#endif
     fclose(configFile);
 }
 
@@ -1099,6 +1196,7 @@ void ProcessEvents(void)
             if (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED)
                 steps = -steps;
             DioramaGL_AdjustCameraZoom(steps);
+            KeepCameraSteps();
             break;
         }
 #endif
@@ -1226,20 +1324,47 @@ void ProcessEvents(void)
                 if (event.key.repeat == 0)
                     DioramaGL_RequestSurveyCapture();
                 break;
+            case SDLK_F7:
+                // The camera's framing: the Diorama's wide view or the 3DS project's.
+                if (event.key.repeat == 0)
+                {
+                    sCameraStyle = DioramaGL_GetCameraStyle() == DIORAMA_CAMERA_3DS
+                                 ? DIORAMA_CAMERA_WIDE : DIORAMA_CAMERA_3DS;
+                    DioramaGL_SetCameraStyle(sCameraStyle);
+                    sCameraPitchSteps = sCameraZoomSteps = 0;
+                    sCameraStepsDirty = false;
+                    SDL_Log("3D view: %s camera", sCameraStyle == DIORAMA_CAMERA_3DS ? "3DS" : "wide");
+                    StoreConfigFile();
+                }
+                break;
+            case SDLK_F8:
+                // The trees: the Diorama's voxel trees or the 3DS project's.
+                if (event.key.repeat == 0)
+                {
+                    sTreeStyle3ds = !DioramaTreeSprites_Enabled();
+                    DioramaTreeSprites_SetEnabled(sTreeStyle3ds);
+                    SDL_Log("3D view: %s trees", sTreeStyle3ds ? "3DS" : "voxel");
+                    StoreConfigFile();
+                }
+                break;
             case SDLK_COMMA:
                 DioramaGL_AdjustCameraPitch(-1);
+                KeepCameraSteps();
                 break;
             case SDLK_PERIOD:
                 DioramaGL_AdjustCameraPitch(1);
+                KeepCameraSteps();
                 break;
             // Zoom without a mouse wheel (keyboard players): minus out, equals/plus in.
             case SDLK_MINUS:
             case SDLK_KP_MINUS:
                 DioramaGL_AdjustCameraZoom(-1);
+                KeepCameraSteps();
                 break;
             case SDLK_EQUALS:
             case SDLK_KP_PLUS:
                 DioramaGL_AdjustCameraZoom(1);
+                KeepCameraSteps();
                 break;
 #endif
             // Screen-reader hotkeys. These aren't GBA buttons, so they're

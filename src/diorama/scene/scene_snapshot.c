@@ -4,10 +4,12 @@
 #include <SDL2/SDL.h>
 
 #include "global.h"
+#include "battle_pyramid.h"
 #include "diorama/map_connection.h"
 #include "diorama/scene_snapshot.h"
 #include "diorama/sprite_frame.h"
 #include "diorama/battle_scene.h"
+#include "diorama/tree_sprites.h"
 #include "diorama/weather.h"
 #include "event_object_movement.h"
 #include "field_camera.h"
@@ -23,9 +25,12 @@
 #include "metatile_behavior.h"
 #include "overworld.h"
 #include "palette.h"
+#include "scanline_effect.h"
 #include "script.h"
 #include "sprite.h"
+#include "tilesets.h"
 #include "window.h"
+#include "constants/map_types.h"
 
 #define CELL_RADIUS 16
 
@@ -47,6 +52,9 @@ static u16 sPreviousMapLayoutId;
 static struct DioramaDirtyCell sDirtyCells[DIORAMA_MAX_DIRTY_CELLS];
 static u8 sDirtyCellCount;
 static bool sDirtyOverflow;
+/* The tree style this frame's snapshot applies (-1 before the first): read
+ * once per snapshot, since the main thread may switch it at any time (F8). */
+static s8 sTreeStyle = -1;
 
 static bool HasFieldUiWindow(void)
 {
@@ -331,6 +339,51 @@ static bool TryCopyConnectedCell(struct DioramaSceneSnapshot *snapshot,
                           UNPACK_COLLISION(entry), UNPACK_ELEVATION(entry), cell);
 }
 
+/*
+ * The 3DS project's trees (tree_sprites.h): on an outdoor map of the General
+ * tileset a tree's cells are published as ground (its trunk's art covers
+ * them), remembering what part of the tree each was, and the cells its old
+ * canopy covered get their ground back (VoxelWorld_UsesTreeSprites and the
+ * classification of voxel_world.c). Connected maps share the map's tilesets
+ * (TryCopyConnectedCell), the border cells too.
+ */
+static void ApplyTreeSprites(struct DioramaSceneSnapshot *snapshot)
+{
+    const struct MapLayout *layout = gMapHeader.mapLayout;
+    bool dewford;
+    int i;
+
+    if (sTreeStyle <= 0 || layout == NULL
+     || layout->primaryTileset != &gTileset_General
+     || gMapHeader.mapType == MAP_TYPE_INDOOR || gMapHeader.mapType == MAP_TYPE_SECRET_BASE)
+        return;
+    dewford = layout->secondaryTileset == &gTileset_Dewford;
+    for (i = 0; i < snapshot->visibleCellCount; i++)
+    {
+        struct DioramaCellSnapshot *cell = &snapshot->cells[i];
+        int part = DioramaTreeSprites_Part(dewford, cell->metatileId);
+        uint16_t ground;
+
+        if (part != DIORAMA_TREE_PART_NONE)
+        {
+            bool secondary = cell->metatileId >= NUM_METATILES_IN_PRIMARY;
+
+            if (!CopyCellVisual(layout, DioramaTreeSprites_TrunkGround(secondary),
+                                cell->collision, cell->elevation, cell))
+                continue;
+            if (part == DIORAMA_TREE_PART_SMALL)
+                cell->treeSprite = secondary ? DIORAMA_TREE_SPRITE_SMALL_DEWFORD
+                                             : DIORAMA_TREE_SPRITE_SMALL;
+            else
+                cell->treeSprite = DIORAMA_TREE_SPRITE_QUARTER + part;
+            continue;
+        }
+        ground = DioramaTreeSprites_GroundMetatile(dewford, cell->metatileId);
+        if (ground != cell->metatileId)
+            CopyCellVisual(layout, ground, cell->collision, cell->elevation, cell);
+    }
+}
+
 static bool CopyCells(struct DioramaSceneSnapshot *snapshot)
 {
     int x;
@@ -350,6 +403,7 @@ static bool CopyCells(struct DioramaSceneSnapshot *snapshot)
             cell->mapX = mapX;
             cell->mapY = mapY;
             cell->flags = 0;
+            cell->treeSprite = DIORAMA_TREE_SPRITE_NONE;
             if (mapX >= MAP_OFFSET && mapY >= MAP_OFFSET
              && mapX < MAP_OFFSET + snapshot->mapWidth
              && mapY < MAP_OFFSET + snapshot->mapHeight)
@@ -377,6 +431,7 @@ static bool CopyCells(struct DioramaSceneSnapshot *snapshot)
         }
     }
     snapshot->visibleCellCount = DIORAMA_MAX_VISIBLE_CELLS;
+    ApplyTreeSprites(snapshot);
     return true;
 }
 
@@ -406,6 +461,73 @@ static u64 HashFrame(const u8 *data, u16 size)
 }
 
 // The door standing open (field_door.c); PKMN_DIORAMA_LOG=1 logs each change.
+/*
+ * The dark of a cave that needs Flash, and of the Battle Pyramid (the 3DS
+ * project's 3ds_game_full.c CaptureFieldLight and 3ds_video.c
+ * CtrVideo_SetFieldLight). The field writes a circle of window 0 edges round
+ * the player line by line, with everything outside it hidden but the text
+ * layer; its radius is read back from the line through its centre, where
+ * the game writes exactly centre -/+ radius. Kept here, once a frame on the
+ * game thread: the radius shown eases towards the game's (which grows a
+ * pixel every other frame while Flash is used), and Flash's glow fades.
+ */
+static struct
+{
+    bool8 on;
+    s16 radius;
+    float shown, burst;
+    u32 ticks;
+} sFieldLight = {FALSE, -1, 0.0f, 0.0f, 0};
+
+static bool8 ReadFieldLight(int *radius)
+{
+    const struct ScanlineEffect *effect = &gScanlineEffect;
+    unsigned across;
+    unsigned left;
+
+    if (effect->state == 0 || effect->state == 3 || effect->dmaDest != &REG_WIN0H
+     || ((effect->dmaControl >> 16) & DMA_32BIT)
+     || gSaveBlock1Ptr == NULL || gMapHeader.mapLayout == NULL
+     || (gSaveBlock1Ptr->flashLevel == 0 && !InBattlePyramid()))
+        return FALSE;
+    /* Both buffers hold the same circle once the radius settles; the one the
+     * DMA reads this frame is the one the last VBlank armed. */
+    across = gScanlineEffectRegBuffers[effect->srcBuffer ^ 1][DISPLAY_HEIGHT / 2];
+    left = across >> 8;
+    if ((across & 0xFF) == 0 && left == 0)
+        return FALSE;
+    *radius = left > 0 ? DISPLAY_WIDTH / 2 - (int)left : DISPLAY_WIDTH / 2;
+    return TRUE;
+}
+
+static void CopyFieldLight(struct DioramaSceneSnapshot *snapshot)
+{
+    int radius;
+    bool8 on = ReadFieldLight(&radius);
+
+    if (on && (!sFieldLight.on || sFieldLight.radius < 0))
+        sFieldLight.shown = (float)radius;
+    else if (on && radius > sFieldLight.radius && sFieldLight.shown < radius - 6.0f)
+        sFieldLight.burst = 1.0f;
+    sFieldLight.on = on;
+    if (!on)
+    {
+        sFieldLight.burst = 0.0f;
+        return;
+    }
+    sFieldLight.radius = radius;
+    sFieldLight.ticks++;
+    sFieldLight.shown += ((float)radius - sFieldLight.shown) * 0.25f;
+    if (radius > sFieldLight.shown - 0.5f && radius < sFieldLight.shown + 0.5f)
+        sFieldLight.shown = (float)radius;
+    sFieldLight.burst *= 0.955f;
+    snapshot->fieldLightOn = TRUE;
+    snapshot->fieldLightRadius = (u16)radius;
+    snapshot->fieldLightShown = sFieldLight.shown;
+    snapshot->fieldLightBurst = sFieldLight.burst;
+    snapshot->fieldLightTicks = sFieldLight.ticks;
+}
+
 static void CopyDoor(struct DioramaSceneSnapshot *snapshot)
 {
     static int sLogEnabled = -1;
@@ -830,6 +952,17 @@ void DioramaScene_PublishOverworld(void)
         sPreviousMapNum = mapNum;
         sPreviousMapLayoutId = sDraft.mapLayoutId;
     }
+    {
+        s8 treeStyle = DioramaTreeSprites_Enabled();
+
+        if (sTreeStyle != treeStyle)
+        {
+            /* Every tree cell's drawing changes with the tree style. */
+            if (sTreeStyle >= 0)
+                sDirtyOverflow = true;
+            sTreeStyle = treeStyle;
+        }
+    }
     sDraft.mapGeneration = sMapGeneration;
     sDraft.mapEditGeneration = sMapEditGeneration;
     sDraft.dirtyCellCount = sDirtyCellCount;
@@ -882,6 +1015,7 @@ void DioramaScene_PublishOverworld(void)
             sDraft.playerFacingDirection = player->facingDirection;
         }
         CopyDoor(&sDraft);
+        CopyFieldLight(&sDraft);
         CopyUiProfile(&sDraft);
     }
     DioramaSnapshotExchange_Publish(&sDraft);

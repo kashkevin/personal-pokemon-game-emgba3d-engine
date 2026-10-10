@@ -59,8 +59,15 @@ struct DioramaAirLight
     float fadeScale[3], fadeOffset[3]; /* the palette's fade and night tint, per channel */
     float anchorX, anchorZ;            /* the dapples' world anchor (x east, z south) */
     GLuint pattern;                    /* the dapple texture, 0 when there is none */
+    float fog;                         /* the game's fog, 0-1 (its sprites' blend) */
+    bool cave;                         /* ... and it is a cave's */
 };
 void DioramaGLLight_GetAir(struct DioramaAirLight *air);
+/* This frame's distance haze for a draw seen at `cameraPitch`: where it starts
+ * (view depth), how much per unit of depth after, the most; and its colour. */
+void DioramaGLLight_GetHaze(float cameraPitch, float haze[3], float colour[3]);
+/* The 3DS port's DappleNoise: value noise repeating every `period` cells. */
+float DioramaGLLight_Noise(float u, float v, int period, uint32_t seed);
 /* Frees the dapple pattern (made again on the next Update). */
 void DioramaGLLight_Shutdown(void);
 

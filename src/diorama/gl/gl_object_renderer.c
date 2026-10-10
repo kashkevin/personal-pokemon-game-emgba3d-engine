@@ -91,6 +91,8 @@ static GLint sCastStrengthLocation;
 static struct DioramaLightUniforms sLightUniforms;
 /* The ground under the player, as last seen (DioramaGLObjects_GetPlayerGround). */
 static float sPlayerGroundY;
+/* The player's item in sItems, or -1 (DioramaGLObjects_GetPlayerPose). */
+static int sPlayerItem = -1;
 
 /* The door standing open: see FindDoor. */
 #define DOOR_DEPTH 0.03f   /* the opening, in front of its wall */
@@ -626,6 +628,7 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
 
     memcpy(sItems, nextItems, nextItemCount * sizeof(*sItems));
     sItemCount = nextItemCount;
+    sPlayerItem = playerFound ? playerItem : -1;
     if (playerFound)
         sPlayerGroundY = nextItems[playerItem].currentPose.groundY;
     FindDoor(snapshot, resolvedCells);
@@ -1098,6 +1101,24 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
 float DioramaGLObjects_GetPlayerGround(void)
 {
     return sPlayerGroundY;
+}
+
+bool DioramaGLObjects_GetPlayerPose(float frameAlpha, float *x, float *groundY, float *z)
+{
+    struct DioramaSpritePose pose;
+
+    if (sPlayerItem < 0 || sPlayerItem >= sItemCount)
+        return false;
+    if (frameAlpha < 0.0f) frameAlpha = 0.0f;
+    if (frameAlpha > 1.0f) frameAlpha = 1.0f;
+    pose = sItems[sPlayerItem].interpolate
+         ? DioramaSprite_InterpolatePose(sItems[sPlayerItem].previousPose,
+                                         sItems[sPlayerItem].currentPose, frameAlpha)
+         : sItems[sPlayerItem].currentPose;
+    *x = pose.x;
+    *groundY = pose.groundY;
+    *z = pose.z;
+    return true;
 }
 
 const struct DioramaObjectMetrics *DioramaGLObjects_GetMetrics(void)

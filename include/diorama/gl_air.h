@@ -16,11 +16,15 @@
  *  - Bloom (3ds_video.c, VoxelBloomPrepare and VoxelBloomCompose): the
  *    brightest parts of the picture glow softly - a quarter-size copy keeping
  *    what is brighter than 0.85, stretched back and added.
+ *  - The game's fog as two banks of drifting mist in the scene (MakeFog,
+ *    DrawFogBanks) instead of the flat overlay, and in a cave's fog a dark
+ *    ring closing in round the player (MakeGloom, PlaceGloom).
  *
  * How strong each is comes from the weather light (gl_light.h): rays and dust
  * only in sunshine and fair weather, bloom more in fog; none indoors. The
  * added light follows the palette's fades and night tint. PKMN_DIORAMA_AIR=0
- * turns these three off; PKMN_DIORAMA_LIGHT=0 all of the light.
+ * turns all of these off (the flat fog comes back); PKMN_DIORAMA_LIGHT=0 all of
+ * the light.
  */
 
 /* After the scene (terrain, buildings, sprites), before the weather and the
@@ -28,6 +32,9 @@
 void DioramaGLAir_Draw(float cameraX, float cameraZ, float cameraPitch,
                        float focalLength, float aspectCorrection,
                        int outputWidth, int outputHeight);
+/* Whether the last Draw put the fog in the scene: the flat overlay is then
+ * left out (the 3DS port's CtrVoxel_DrawsFog). */
+bool DioramaGLAir_DrawsFog(void);
 void DioramaGLAir_Shutdown(void);
 
 #endif

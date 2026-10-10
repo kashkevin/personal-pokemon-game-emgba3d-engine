@@ -37,6 +37,44 @@
  * 3DS's, as wide as this one's aspect makes it. */
 #define RAY_HEIGHT 240.0f
 
+/*
+ * The game's fog in the scene instead of over it (MakeFog, DrawFogBanks): two
+ * banks of drifting mist lying over the ground, one about the player's knees
+ * and one at chest height, each a horizontal sheet around the camera textured
+ * with soft tileable noise, blended in depth tested but never written - a
+ * wall or a tree parts them, a walker stands in them - and thinning into the
+ * distance haze like the ground under them. The flat fog overlay is dropped
+ * while they are up (DioramaGLAir_DrawsFog).
+ */
+#define FOG_DIM 128
+#define FOG_GRID 8      /* cells along each side of a sheet */
+#define FOG_REACH 32.0f /* tiles from the sheet's centre to its side */
+#define FOG_FADE 0.55f  /* ... share of that reach at which it starts to thin */
+/* This camera can see past the scene's 33 x 33 cells, where a bank would hang
+ * over the dark: the banks also thin out over the last tiles before the
+ * cells' edge (16 each way of the camera target), as the dust does. */
+#define FOG_SCENE_HALF 16.0f
+#define FOG_SCENE_EDGE 3.0f
+#define FOG_SHEET_VERTICES (FOG_GRID * FOG_GRID * 6)
+
+static const struct
+{
+    float period;         /* tiles the pattern covers before it repeats */
+    float height;         /* tiles above the player's ground */
+    float driftX, driftZ; /* tiles per second (x east, z south) */
+    float strength;       /* the most the bank covers, at full fog */
+} sFogBanks[2] = {
+    {12.0f, 0.30f, -0.55f, 0.00f, 0.58f},
+    {7.0f, 1.10f, -0.85f, -0.25f, 0.34f},
+};
+
+/* The dark of a cave in its fog (MakeGloom, CtrVoxel_Gloom): black rising
+ * from nothing round the player to its most at the ring's rim, 520 pixels
+ * across the 3DS's 240-high view. */
+#define GLOOM_INNER 0.30f
+#define GLOOM_RADIUS 1.0833f /* x the picture's height */
+#define GLOOM_MAX 0.62f
+
 static bool sTried;
 static bool sReady;
 static GLuint sMoteProgram;
@@ -56,6 +94,23 @@ static GLint sScreenViewLocation;
 static GLint sScreenDriftLocation;
 static GLint sScreenTintLocation;
 static GLfloat sMoteVertices[MOTES * MOTE_VERTICES * 4];
+static GLuint sFogProgram;
+static GLuint sFogArray;
+static GLuint sFogBuffer;
+static GLuint sFogTexture;
+static GLint sFogCameraLocation;
+static GLint sFogPitchLocation;
+static GLint sFogFocalLocation;
+static GLint sFogAspectLocation;
+static GLint sFogCentreLocation;
+static GLint sFogPeriodLocation;
+static GLint sFogColourLocation;
+static GLint sFogHazeLocation;
+static GLint sFogHazeColourLocation;
+static GLint sFogMapLocation;
+static GLint sFogSceneBoxLocation;
+static GLint sScreenCentreLocation;
+static bool sDrewFog;
 
 /* Bloom: two quarter-size targets, the copy and what is left over the threshold. */
 static GLuint sBloomTextures[2];
@@ -101,6 +156,64 @@ static const char sMoteFragmentShader[] =
     "uniform vec4 tint;\n" /* colour, strength */
     "void main() { color = vec4(tint.rgb, clamp(glint * tint.a, 0.0, 1.0)); }\n";
 
+static const char sFogVertexShader[] =
+    "#version 330 core\n"
+    "layout(location = 0) in vec3 sheet;\n" /* x east, z south from the centre; the rim fade */
+    "uniform vec2 cameraPosition;\n"
+    "uniform float cameraPitch;\n"
+    "uniform float focalLength;\n"
+    "uniform float aspectCorrection;\n"
+    "uniform vec3 centre;\n" /* the sheet's centre: x east, height, z south */
+    "uniform float period;\n"
+    "out vec2 uv;\n"
+    "out float edge;\n"
+    "out float viewDepth;\n"
+    "out vec2 fromTarget;\n"
+    "void main() {\n"
+    "  vec3 position = vec3(centre.x + sheet.x, centre.y, -(centre.z + sheet.y));\n"
+    "  fromTarget = position.xz - cameraPosition;\n"
+    "  const float cameraHeight = 16.0;\n"
+    "  const float cameraTargetVertical = -0.458944;\n"
+    "  const float nearDepth = 0.1;\n"
+    "  const float farDepth = 80.0;\n"
+    "  float pitchSin = sin(cameraPitch);\n"
+    "  float pitchCos = cos(cameraPitch);\n"
+    "  float cameraDistance = (cameraHeight * pitchCos + cameraTargetVertical) / pitchSin;\n"
+    "  float relativeX = position.x - cameraPosition.x;\n"
+    "  float relativeZ = position.z - cameraPosition.y;\n"
+    "  float depth = (cameraHeight - position.y) * pitchSin + (relativeZ + cameraDistance) * pitchCos;\n"
+    "  float vertical = -(cameraHeight - position.y) * pitchCos + (relativeZ + cameraDistance) * pitchSin;\n"
+    "  float clipX = relativeX * focalLength * 2.0 / 240.0 * aspectCorrection;\n"
+    "  float clipY = -0.04 * depth + vertical * focalLength * 2.0 / 160.0;\n"
+    "  float clipZ = ((farDepth + nearDepth) / (farDepth - nearDepth)) * depth"
+    "              - (2.0 * farDepth * nearDepth) / (farDepth - nearDepth);\n"
+    "  gl_Position = vec4(clipX, clipY, clipZ, depth);\n"
+    "  viewDepth = depth;\n"
+    "  uv = sheet.xy / period;\n"
+    "  edge = sheet.z;\n"
+    "}\n";
+
+static const char sFogFragmentShader[] =
+    "#version 330 core\n"
+    "in vec2 uv;\n"
+    "in float edge;\n"
+    "in float viewDepth;\n"
+    "in vec2 fromTarget;\n"
+    "out vec4 color;\n"
+    "uniform sampler2D fogMap;\n"
+    "uniform vec2 sceneBox;\n" /* half its side, the fade's width (tiles) */
+    "uniform vec4 colour;\n" /* the fog's colour, the bank's strength */
+    "uniform vec3 haze;\n"   /* gl_light.h: start, per unit of depth, most */
+    "uniform vec3 hazeColor;\n"
+    "void main() {\n"
+    "  vec2 inside = clamp((sceneBox.x - abs(fromTarget)) / sceneBox.y, 0.0, 1.0);\n"
+    "  inside = inside * inside * (3.0 - 2.0 * inside);\n"
+    "  float coverage = texture(fogMap, uv).r * edge * colour.a * inside.x * inside.y;\n"
+    "  if (coverage <= 0.002) discard;\n"
+    "  float w = clamp((viewDepth - haze.x) * haze.y, 0.0, haze.z);\n"
+    "  color = vec4(mix(colour.rgb, hazeColor, w), coverage);\n"
+    "}\n";
+
 static const char sScreenVertexShader[] =
     "#version 330 core\n"
     "layout(location = 0) in vec2 corner;\n"
@@ -117,6 +230,7 @@ static const char sScreenFragmentShader[] =
     "uniform vec2 viewSize;\n" /* the picture in the 3DS's pixels */
     "uniform float drift;\n"
     "uniform vec4 tint;\n"
+    "uniform vec3 centre;\n" /* the gloom's: x, y (0-1), radius in pixels */
     "void main() {\n"
     "  if (mode == 0) {\n"
     /* RayStrength: strongest in the top left corner, gone 0.65 of the
@@ -129,6 +243,11 @@ static const char sScreenFragmentShader[] =
     "    const vec2 along = vec2(0.573576, -0.819152);\n"
     "    vec2 uv = vec2(dot(across, px) / 260.0 + drift, dot(along, px) / 4000.0);\n"
     "    color = vec4(tint.rgb, (1.0 - texture(image, uv).r) * s * s * tint.a);\n"
+    "  } else if (mode == 3) {\n"
+    /* The dark of a cave: nothing round the player, its most at the rim. */
+    "    float t = (length((screen - centre.xy) * viewSize) / centre.z - 0.30) / 0.70;\n"
+    "    t = clamp(t, 0.0, 1.0);\n"
+    "    color = vec4(0.0, 0.0, 0.0, t * t * (3.0 - 2.0 * t) * tint.a);\n"
     "  } else if (mode == 1) {\n"
     "    color = vec4(max(texture(image, screen).rgb - 0.85, 0.0) * 4.0, 1.0);\n"
     "  } else {\n"
@@ -190,6 +309,87 @@ static GLuint LinkProgram(const char *vertexSource, const char *fragmentSource)
     return program;
 }
 
+/*
+ * MakeFog: wisps rather than a wash - four octaves of the dapples' noise,
+ * thresholded so that clear gaps open between the banks - and the sheets: a
+ * grid around their own centre, the coverage falling to nothing towards the
+ * rim so a sheet has no edge to see. Not fatal: without them the game's own
+ * flat fog stays.
+ */
+static bool MakeFog(void)
+{
+    static const struct
+    {
+        int period;
+        float weight;
+    } octaves[] = {{4, 1.0f}, {8, 0.55f}, {16, 0.30f}, {32, 0.12f}};
+    static const unsigned corners[6][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 0}, {1, 1}, {0, 1}};
+    static uint8_t texels[FOG_DIM * FOG_DIM];
+    static GLfloat sheet[FOG_SHEET_VERTICES * 3];
+    float cell = 2.0f * FOG_REACH / FOG_GRID;
+    unsigned x;
+    unsigned y;
+    unsigned o;
+    unsigned n = 0;
+
+    for (y = 0; y < FOG_DIM; y++)
+        for (x = 0; x < FOG_DIM; x++)
+        {
+            float noise = 0.0f;
+            float total = 0.0f;
+            float t;
+
+            for (o = 0; o < sizeof(octaves) / sizeof(octaves[0]); o++)
+            {
+                float scale = (float)octaves[o].period / FOG_DIM;
+
+                noise += octaves[o].weight * DioramaGLLight_Noise((float)x * scale, (float)y * scale,
+                                                                  octaves[o].period, o + 11);
+                total += octaves[o].weight;
+            }
+            t = (noise / total - 0.32f) / 0.40f;
+            t = t < 0.0f ? 0.0f : t > 1.0f ? 1.0f : t;
+            texels[y * FOG_DIM + x] = (uint8_t)(t * t * (3.0f - 2.0f * t) * 255.0f + 0.5f);
+        }
+    glGenTextures(1, &sFogTexture);
+    if (sFogTexture == 0)
+        return false;
+    glBindTexture(GL_TEXTURE_2D, sFogTexture);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, FOG_DIM, FOG_DIM, 0, GL_RED, GL_UNSIGNED_BYTE, texels);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    for (y = 0; y < FOG_GRID; y++)
+        for (x = 0; x < FOG_GRID; x++)
+            for (o = 0; o < 6; o++)
+            {
+                float sx = -FOG_REACH + (float)(x + corners[o][0]) * cell;
+                float sz = -FOG_REACH + (float)(y + corners[o][1]) * cell;
+                float r = sqrtf(sx * sx + sz * sz) / FOG_REACH;
+                float edge = (1.0f - r) / (1.0f - FOG_FADE);
+
+                edge = edge < 0.0f ? 0.0f : edge > 1.0f ? 1.0f : edge;
+                sheet[n++] = sx;
+                sheet[n++] = sz;
+                sheet[n++] = edge * edge * (3.0f - 2.0f * edge);
+            }
+    dglGenVertexArrays(1, &sFogArray);
+    dglGenBuffers(1, &sFogBuffer);
+    dglBindVertexArray(sFogArray);
+    dglBindBuffer(GL_ARRAY_BUFFER, sFogBuffer);
+    dglBufferData(GL_ARRAY_BUFFER, sizeof(sheet), sheet, GL_STATIC_DRAW);
+    dglEnableVertexAttribArray(0);
+    dglVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (const void *)0);
+    dglBindVertexArray(0);
+    dglBindBuffer(GL_ARRAY_BUFFER, 0);
+    return true;
+}
+
 /* Not fatal: without it there is no light in the air. */
 static void Init(void)
 {
@@ -198,8 +398,30 @@ static void Init(void)
     sTried = true;
     sMoteProgram = LinkProgram(sMoteVertexShader, sMoteFragmentShader);
     sScreenProgram = LinkProgram(sScreenVertexShader, sScreenFragmentShader);
-    if (sMoteProgram == 0 || sScreenProgram == 0)
+    sFogProgram = LinkProgram(sFogVertexShader, sFogFragmentShader);
+    if (sMoteProgram == 0 || sScreenProgram == 0 || sFogProgram == 0)
         return;
+    sFogCameraLocation = dglGetUniformLocation(sFogProgram, "cameraPosition");
+    sFogPitchLocation = dglGetUniformLocation(sFogProgram, "cameraPitch");
+    sFogFocalLocation = dglGetUniformLocation(sFogProgram, "focalLength");
+    sFogAspectLocation = dglGetUniformLocation(sFogProgram, "aspectCorrection");
+    sFogCentreLocation = dglGetUniformLocation(sFogProgram, "centre");
+    sFogPeriodLocation = dglGetUniformLocation(sFogProgram, "period");
+    sFogColourLocation = dglGetUniformLocation(sFogProgram, "colour");
+    sFogHazeLocation = dglGetUniformLocation(sFogProgram, "haze");
+    sFogHazeColourLocation = dglGetUniformLocation(sFogProgram, "hazeColor");
+    sFogMapLocation = dglGetUniformLocation(sFogProgram, "fogMap");
+    sFogSceneBoxLocation = dglGetUniformLocation(sFogProgram, "sceneBox");
+    sScreenCentreLocation = dglGetUniformLocation(sScreenProgram, "centre");
+    if (sFogCameraLocation < 0 || sFogPitchLocation < 0 || sFogFocalLocation < 0
+     || sFogAspectLocation < 0 || sFogCentreLocation < 0 || sFogPeriodLocation < 0
+     || sFogColourLocation < 0 || sFogHazeLocation < 0 || sFogHazeColourLocation < 0
+     || sFogMapLocation < 0 || sFogSceneBoxLocation < 0 || sScreenCentreLocation < 0
+     || !MakeFog())
+    {
+        SDL_Log("Diorama air: fog banks unavailable");
+        return;
+    }
     sMoteCameraLocation = dglGetUniformLocation(sMoteProgram, "cameraPosition");
     sMotePitchLocation = dglGetUniformLocation(sMoteProgram, "cameraPitch");
     sMoteFocalLocation = dglGetUniformLocation(sMoteProgram, "focalLength");
@@ -386,6 +608,96 @@ static void DrawRays(const struct DioramaAirLight *air, int outputWidth, int out
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
+/*
+ * DrawFogBanks: each sheet centred on the camera target, moved in whole
+ * repeats of its pattern plus the drift, so the mist stays put on the ground
+ * as the player walks and only the wind moves it. Coloured pale (a cave's
+ * fog bluish grey), as the palette's fade and night tint have the scene, and
+ * hazed like the ground under it.
+ */
+static void DrawFogBanks(const struct DioramaAirLight *air, float cameraX, float cameraZ,
+                         float cameraPitch, float focalLength, float aspectCorrection)
+{
+    double seconds = SDL_GetTicks() / 1000.0;
+    float ground = DioramaGLObjects_GetPlayerGround();
+    /* 0xFFF2EBE6 and a cave's 0xFFBFAB9E (0xAABBGGRR). */
+    float base[3] = {0xE6 / 255.0f, 0xEB / 255.0f, 0xF2 / 255.0f};
+    float cave[3] = {0x9E / 255.0f, 0xAB / 255.0f, 0xBF / 255.0f};
+    float haze[3];
+    float hazeColour[3];
+    float colour[3];
+    float targetZ = -cameraZ; /* south */
+    unsigned bank;
+    int i;
+
+    DioramaGLLight_GetHaze(cameraPitch, haze, hazeColour);
+    for (i = 0; i < 3; i++)
+    {
+        float c = (air->cave ? cave[i] : base[i]) * air->fadeScale[i] + air->fadeOffset[i];
+
+        colour[i] = c < 0.0f ? 0.0f : c > 1.0f ? 1.0f : c;
+    }
+    dglUseProgram(sFogProgram);
+    dglUniform2f(sFogCameraLocation, cameraX, cameraZ);
+    dglUniform1f(sFogPitchLocation, cameraPitch);
+    dglUniform1f(sFogFocalLocation, focalLength);
+    dglUniform1f(sFogAspectLocation, aspectCorrection);
+    dglUniform3f(sFogHazeLocation, haze[0], haze[1], haze[2]);
+    dglUniform3f(sFogHazeColourLocation, hazeColour[0], hazeColour[1], hazeColour[2]);
+    dglUniform1i(sFogMapLocation, 0);
+    dglUniform2f(sFogSceneBoxLocation, FOG_SCENE_HALF, FOG_SCENE_EDGE);
+    dglActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, sFogTexture);
+    dglBindVertexArray(sFogArray);
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+    glDepthMask(GL_FALSE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    for (bank = 0; bank < 2; bank++)
+    {
+        float period = sFogBanks[bank].period;
+        float dx = (float)fmod(seconds * sFogBanks[bank].driftX, period);
+        float dz = (float)fmod(seconds * sFogBanks[bank].driftZ, period);
+
+        dglUniform3f(sFogCentreLocation, floorf(cameraX / period) * period + dx,
+                     ground + sFogBanks[bank].height, floorf(targetZ / period) * period + dz);
+        dglUniform1f(sFogPeriodLocation, period);
+        dglUniform4f(sFogColourLocation, colour[0], colour[1], colour[2],
+                     sFogBanks[bank].strength * air->fog);
+        glDrawArrays(GL_TRIANGLES, 0, FOG_SHEET_VERTICES);
+    }
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+/* The dark of a cave, centred where the player stands (PlaceGloom: a tile
+ * above its ground), in black over the scene. */
+static void DrawGloom(const struct DioramaAirLight *air, float cameraPitch, float focalLength,
+                      int outputWidth, int outputHeight)
+{
+    float pitchSin = sinf(cameraPitch);
+    float pitchCos = cosf(cameraPitch);
+    float distance = (16.0f * pitchCos - 0.458944f) / pitchSin;
+    float y = DioramaGLObjects_GetPlayerGround() + 1.0f;
+    float depth = (16.0f - y) * pitchSin + distance * pitchCos;
+    float vertical = -(16.0f - y) * pitchCos + distance * pitchSin;
+    float clipY = -0.04f * depth + vertical * focalLength * 2.0f / 160.0f;
+    float centreY = depth > 0.0001f ? 0.5f + 0.5f * clipY / depth : 0.5f;
+
+    dglUseProgram(sScreenProgram);
+    dglUniform1i(sScreenModeLocation, 3);
+    dglUniform2f(sScreenViewLocation, (float)outputWidth, (float)outputHeight);
+    dglUniform3f(sScreenCentreLocation, 0.5f, centreY, GLOOM_RADIUS * outputHeight);
+    dglUniform4f(sScreenTintLocation, 0.0f, 0.0f, 0.0f, GLOOM_MAX * air->fog);
+    dglBindVertexArray(sQuadArray);
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+}
+
 static void FreeBloom(void)
 {
     if (sBloomFramebuffers[0] != 0)
@@ -505,10 +817,12 @@ void DioramaGLAir_Draw(float cameraX, float cameraZ, float cameraPitch,
     struct DioramaAirLight air;
     GLboolean scissor;
 
+    sDrewFog = false;
     if (!Enabled())
         return;
     DioramaGLLight_GetAir(&air);
-    if (air.motes <= 0.005f && air.rays <= 0.005f && air.bloom <= 0.005f)
+    if (air.motes <= 0.005f && air.rays <= 0.005f && air.bloom <= 0.005f
+     && air.fog <= 0.005f)
         return;
     if (!sTried)
         Init();
@@ -517,14 +831,22 @@ void DioramaGLAir_Draw(float cameraX, float cameraZ, float cameraPitch,
     scissor = glIsEnabled(GL_SCISSOR_TEST);
     glDisable(GL_SCISSOR_TEST);
     glViewport(0, 0, outputWidth, outputHeight);
-    /* The motes in the scene, then the light over it (DrawMotes before
-     * DrawRays), then the bloom from all of it. */
+    /* The fog's banks lie in the scene, so they go before the light in the
+     * air (motes, rays) that is added over everything; then the bloom from
+     * all of it, and a cave's dark over the lot. */
+    if (air.fog > 0.005f)
+    {
+        DrawFogBanks(&air, cameraX, cameraZ, cameraPitch, focalLength, aspectCorrection);
+        sDrewFog = true;
+    }
     if (air.motes > 0.005f)
         DrawMotes(&air, cameraX, cameraZ, cameraPitch, focalLength, aspectCorrection);
     if (air.rays > 0.005f && air.pattern != 0)
         DrawRays(&air, outputWidth, outputHeight);
     if (air.bloom > 0.005f)
         DrawBloom(&air, outputWidth, outputHeight);
+    if (air.cave && air.fog > 0.005f)
+        DrawGloom(&air, cameraPitch, focalLength, outputWidth, outputHeight);
     dglBindVertexArray(0);
     dglUseProgram(0);
     glDisable(GL_BLEND);
@@ -533,9 +855,24 @@ void DioramaGLAir_Draw(float cameraX, float cameraZ, float cameraPitch,
         glEnable(GL_SCISSOR_TEST);
 }
 
+bool DioramaGLAir_DrawsFog(void)
+{
+    return sDrewFog;
+}
+
 void DioramaGLAir_Shutdown(void)
 {
     FreeBloom();
+    if (sFogBuffer != 0)
+        dglDeleteBuffers(1, &sFogBuffer);
+    if (sFogArray != 0)
+        dglDeleteVertexArrays(1, &sFogArray);
+    if (sFogTexture != 0)
+        glDeleteTextures(1, &sFogTexture);
+    if (sFogProgram != 0)
+        dglDeleteProgram(sFogProgram);
+    sFogBuffer = sFogArray = sFogTexture = sFogProgram = 0;
+    sDrewFog = false;
     if (sMoteBuffer != 0)
         dglDeleteBuffers(1, &sMoteBuffer);
     if (sQuadBuffer != 0)
