@@ -106,6 +106,11 @@ void DioramaBattle_Capture(struct DioramaBattleFrame *frame);
 /* Behaviour of a metatile, as the battle sees it (enum DioramaBattleGround,
  * never VOID). */
 uint8_t DioramaBattle_GroundKind(uint8_t behavior);
+/* The field's tile animations (tileset_anims.c: water, flowers...) as they
+ * would run `frames` frames after the field stopped, their tiles copied into
+ * `tiles` (BG VRAM's first `size` bytes, as the scene snapshot holds them)
+ * instead of VRAM. Only at the frame boundary, like DioramaBattle_Capture. */
+void DioramaBattle_AnimateFieldTiles(uint8_t *tiles, uint32_t size, uint32_t frames);
 
 /* ── The GBA renderer (gba_easy_draw.c) ── */
 
