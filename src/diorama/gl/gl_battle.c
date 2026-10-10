@@ -1549,10 +1549,32 @@ static void Begin(void)
         sBattle.frames = INTRO_WAIT;
     }
     if (sBattle.log)
+    {
+        /* Once a run: what draws it, for frame times sent from another computer. */
+        static bool sDescribed;
+
+        if (!sDescribed)
+        {
+            char renderer[256];
+            char antialiasing[32];
+            int windowW = 0, windowH = 0, sceneW = 0, sceneH = 0, samples = 0;
+
+            sDescribed = true;
+            DioramaGL_DescribeRenderer(renderer, sizeof(renderer));
+            SDL_GL_GetDrawableSize(window, &windowW, &windowH);
+            DioramaGLTarget_GetLastSize(&sceneW, &sceneH, &samples);
+            if (samples > 1)
+                SDL_snprintf(antialiasing, sizeof(antialiasing), "%dx MSAA", samples);
+            else
+                SDL_strlcpy(antialiasing, "no MSAA", sizeof(antialiasing));
+            SDL_Log("Diorama battle: drawn by %s; the window %dx%d, the 3D view %dx%d, %s",
+                    renderer, windowW, windowH, sceneW, sceneH, antialiasing);
+        }
         SDL_Log("Diorama battle: 3D on map %u.%u (%s%s), player %d,%d facing %u",
                 sBattle.frame.mapGroup, sBattle.frame.mapNum,
                 sBattle.frame.wild ? "wild" : "trainer", sBattle.frame.doubles ? ", double" : "",
                 sBattle.frame.playerMapX, sBattle.frame.playerMapY, sBattle.frame.playerFacing);
+    }
 }
 
 static void End(void)
