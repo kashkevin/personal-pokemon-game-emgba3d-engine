@@ -1423,4 +1423,25 @@ u8 DioramaBattle_SceneryShown(void)
 {
     return sDioramaSceneryShown;
 }
+
+// How much of BG3's tilemap the last move background filled (LoadMoveBg):
+// the 3D battle carries it past the picture within that.
+static u32 sDioramaMoveBgMapSize;
+static u32 sDioramaMoveBgLoads;
+
+void DioramaBattle_NoteMoveBg(u32 tilemapBytes)
+{
+    sDioramaMoveBgMapSize = tilemapBytes;
+    sDioramaMoveBgLoads++;
+}
+
+u32 DioramaBattle_MoveBgMapSize(void)
+{
+    return sDioramaMoveBgMapSize;
+}
+
+u32 DioramaBattle_MoveBgLoads(void)
+{
+    return sDioramaMoveBgLoads;
+}
 #endif

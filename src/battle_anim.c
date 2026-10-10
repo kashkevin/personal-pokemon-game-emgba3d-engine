@@ -1771,6 +1771,7 @@ void LoadMoveBg(u16 bgId)
 {
 #ifdef ENABLE_DIORAMA
     DioramaBattle_SetSceneryShown(FALSE); // BG3 now holds this move's background
+    DioramaBattle_NoteMoveBg(IsContest() ? 0x800 : GetDecompressedDataSize(gBattleAnimBackgroundTable[bgId].tilemap));
 #endif
 #line 1768 // gba-line
     if (IsContest())

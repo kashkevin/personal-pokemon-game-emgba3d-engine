@@ -31,6 +31,12 @@
  * shown as it is. */
 uint8_t DioramaBattle_SceneryShown(void);
 void DioramaBattle_SetSceneryShown(uint8_t shown);
+/* A move's background loaded into BG3 (LoadMoveBg): how many bytes of BG3's
+ * tilemap it filled (most fill the rows above the text box or the screen's,
+ * not the whole map), and a count of such loads. */
+void DioramaBattle_NoteMoveBg(uint32_t tilemapBytes);
+uint32_t DioramaBattle_MoveBgMapSize(void);
+uint32_t DioramaBattle_MoveBgLoads(void);
 /* Whether the intro is sliding the scenery in (BG1/BG2 hold its entry
  * picture meanwhile; the 3D battle has the camera glide in instead). */
 uint8_t DioramaBattle_IntroSliding(void);
@@ -153,15 +159,17 @@ extern int16_t gDioramaSceneLineShift[160][2];
 extern uint16_t gDioramaSceneArt[160 * 240];
 extern bool gDioramaSceneArtWanted;
 /* With gDioramaSceneWideWanted set before DrawFrame (and the margins, in GBA
- * pixels: left of column 0, right of column 239, above row 0): what the screen
- * would show there if it were that much larger - BG3 (a move's own background,
- * which the GBA tiles past the screen's edges by wrapping its tilemap) over the
- * backdrop, with BG3's scroll on each row, the frame's palette and BG3's and the
- * backdrop's brightness and blending as the GBA applies them, the window state
- * of the nearest column of the picture. The other layers (the text box, the
- * battlers, a move's effects) stay inside the picture. RGB555 rows of
- * left + 240 + right pixels, top + 160 rows; row 0 is GBA row -top, column 0
- * GBA column -left (inside the picture: BG3 alone, unused). */
+ * pixels: left of column 0, right of column 239, above row 0): how the screen
+ * would go on there if it were that much larger - BG3 (a move's own
+ * background) over the backdrop: the part of its tilemap the move filled
+ * (DioramaBattle_MoveBgMapSize) repeated where it repeats without a seam,
+ * mirrored at the picture's edges where it would show one; with BG3's scroll
+ * on each row, the frame's palette and BG3's and the backdrop's brightness and
+ * blending as the GBA applies them, the window state of the nearest column of
+ * the picture. The other layers (the text box, the battlers, a move's effects)
+ * stay inside the picture. RGB555 rows of left + 240 + right pixels, top + 160
+ * rows; row 0 is GBA row -top, column 0 GBA column -left (inside the picture:
+ * unused). */
 #define DIORAMA_WIDE_MAX_SIDE 256
 #define DIORAMA_WIDE_MAX_TOP 96
 #define DIORAMA_WIDE_MAX_W (DIORAMA_WIDE_MAX_SIDE + 240 + DIORAMA_WIDE_MAX_SIDE)

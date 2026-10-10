@@ -580,11 +580,9 @@ static inline int FloorMod(int value, int modulus)
     return r < 0 ? r + modulus : r;
 }
 
-// A text BG at columns x0..x1-1 of row lineNum - either may lie past the
-// screen - as the GBA would fetch them if the screen went on: the tilemap
-// wraps (RenderBGScanline for any columns). See-through pixels are 0.
-static void RenderBGRunWide(uint16_t control, uint16_t hoffs, uint16_t voffs, int lineNum,
-                            int x0, int x1, uint16_t *out)
+// One pixel of a text BG at map pixel (mx, my), 0..511: its colour | 0x8000
+// from `pal`, or 0 where it is see-through (RenderBGScanline's fetch).
+static uint16_t BGPixel(uint16_t control, unsigned int mx, unsigned int my, const uint16_t *pal)
 {
     unsigned int charBaseBlock = (control >> 2) & 3;
     unsigned int screenBaseBlock = (control >> 8) & 0x1F;
@@ -592,48 +590,152 @@ static void RenderBGRunWide(uint16_t control, uint16_t hoffs, uint16_t voffs, in
     unsigned int mapWidthInPixels = bgMapSizes[control >> 14][0] * 8;
     unsigned int mapHeightInPixels = bgMapSizes[control >> 14][1] * 8;
     const uint8_t *bgtiles = (const uint8_t *)BG_CHAR_ADDR(charBaseBlock);
+    const uint16_t *bgmap = (const uint16_t *)BG_SCREEN_ADDR(screenBaseBlock);
+    uint16_t entry;
+    unsigned int tileX, tileY, tileLoc;
+    uint8_t pixel;
+
+    mx &= 0x1FF;
+    my &= 0x1FF;
+    if (mx > 255 && mapWidthInPixels > 256)
+        bgmap += 0x400;
+    if (my > 255 && mapHeightInPixels > 256)
+        bgmap += (mapWidthInPixels > 256) ? 0x800 : 0x400;
+    mx &= 0xFF;
+    my &= 0xFF;
+    entry = bgmap[(my / 8) * 32 + mx / 8];
+    tileX = mx % 8;
+    tileY = my % 8;
+    if (entry & (1 << 10))
+        tileX = 7 - tileX;
+    if (entry & (1 << 11))
+        tileY = 7 - tileY;
+    tileLoc = (entry & 0x3FF) * (bitsPerPixel * 8) + tileY * bitsPerPixel;
+    if (bitsPerPixel == 4)
+    {
+        pixel = bgtiles[tileLoc + tileX / 2];
+        pixel = (tileX & 1) ? pixel >> 4 : pixel & 0xF;
+        return pixel != 0 ? (pal[16 * ((entry >> 12) & 0xF) + pixel] | 0x8000) : 0;
+    }
+    pixel = bgtiles[tileLoc + tileX];
+    return pixel != 0 ? (pal[pixel] | 0x8000) : 0;
+}
+
+// x reflected into 0..n-1 at the edges (-1 -> 0, n -> n-1), as often as needed.
+static int MirrorInto(int x, int n)
+{
+    int m = FloorMod(x, 2 * n);
+
+    return m < n ? m : 2 * n - 1 - m;
+}
+
+// How the screen goes on past its edges for a move's background in BG3: the
+// part of the tilemap the move filled (DioramaBattle_MoveBgMapSize - most fill
+// the rows above the text box or the screen's, not the whole map, whose rest
+// holds anything) repeated, where it repeats without a seam; mirrored at the
+// picture's edges where it would show one. Decided once a load, from the
+// background's own colours (the unfaded palette: a fade in progress would
+// hide every seam).
+static struct
+{
+    uint32_t loads;      /* DioramaBattle_MoveBgLoads() decided for */
+    uint16_t control;    /* BG3CNT then */
+    bool decided;
+    int width, height;   /* the filled part, pixels: the repeat */
+    bool mirrorX, mirrorY;
+} sWideMap;
+
+static unsigned int ColorDistance(uint16_t a, uint16_t b)
+{
+    int dr = (int)(a & 0x1F) - (int)(b & 0x1F);
+    int dg = (int)((a >> 5) & 0x1F) - (int)((b >> 5) & 0x1F);
+    int db = (int)((a >> 10) & 0x1F) - (int)((b >> 10) & 0x1F);
+
+    return (unsigned int)(abs(dr) + abs(dg) + abs(db));
+}
+
+static uint16_t WideMapColor(uint16_t control, int mx, int my)
+{
+    uint16_t c = BGPixel(control, (unsigned int)mx, (unsigned int)my, gPlttBufferUnfaded);
+
+    return getAlphaBit(c) ? c & 0x7FFF : gPlttBufferUnfaded[0] & 0x7FFF;
+}
+
+static void DecideWideMap(uint16_t control)
+{
+    unsigned int mapW = bgMapSizes[control >> 14][0], mapH = bgMapSizes[control >> 14][1];
+    unsigned int entries = DioramaBattle_MoveBgMapSize() / 2;
+    int w, h, shownW, shownH;
+    double seamX = 0.0, innerX = 0.0, seamY = 0.0, innerY = 0.0;
+    unsigned int n;
+
+    if (entries == 0 || entries >= mapW * mapH)
+    {
+        w = mapW * 8;
+        h = mapH * 8;
+    }
+    else if (entries <= 32 * 32)
+    {
+        w = 256;   /* the first screen block's rows, in order */
+        h = (int)((entries + 31) / 32) * 8;
+    }
+    else
+    {
+        w = mapW * 8;
+        h = (int)(entries / mapW) * 8;
+    }
+    if (h < 8)
+        h = 8;
+    shownW = w < DISPLAY_WIDTH ? w : DISPLAY_WIDTH;
+    shownH = h < DISPLAY_HEIGHT ? h : DISPLAY_HEIGHT;
+    /* Across the repeat's seam against between neighbours inside it. */
+    n = 0;
+    for (int y = 0; y < shownH; y++, n++)
+    {
+        seamX += ColorDistance(WideMapColor(control, w - 1, y), WideMapColor(control, 0, y));
+        for (int x = 0; x + 1 < shownW; x++)
+            innerX += ColorDistance(WideMapColor(control, x, y), WideMapColor(control, x + 1, y)) / (double)(shownW - 1);
+    }
+    seamX /= n;
+    innerX /= n;
+    n = 0;
+    for (int x = 0; x < shownW; x++, n++)
+    {
+        seamY += ColorDistance(WideMapColor(control, x, h - 1), WideMapColor(control, x, 0));
+        for (int y = 0; y + 1 < shownH; y++)
+            innerY += ColorDistance(WideMapColor(control, x, y), WideMapColor(control, x, y + 1)) / (double)(shownH - 1);
+    }
+    seamY /= n;
+    innerY /= n;
+    sWideMap.width = w;
+    sWideMap.height = h;
+    sWideMap.mirrorX = seamX > innerX * 1.5 + 2.0;
+    sWideMap.mirrorY = seamY > innerY * 1.5 + 2.0;
+    sWideMap.control = control;
+    sWideMap.loads = DioramaBattle_MoveBgLoads();
+    sWideMap.decided = true;
+}
+
+// BG3 at columns x0..x1-1 of row lineNum - either may lie past the screen - as
+// the screen would go on (sWideMap). See-through pixels are 0.
+static void RenderBGRunWide(uint16_t control, uint16_t hoffs, uint16_t voffs, int lineNum,
+                            int x0, int x1, uint16_t *out)
+{
     const uint16_t *pal = (const uint16_t *)PLTT;
     bool mosaic = (control & BGCNT_MOSAIC) != 0;
-    unsigned int yy;
+    int sy = sWideMap.mirrorY ? MirrorInto(lineNum, DISPLAY_HEIGHT) : lineNum;
+    unsigned int my;
 
     if (mosaic)
-        lineNum -= FloorMod(lineNum, mosaicBGEffectY + 1);
-    yy = (unsigned int)(lineNum + (int)(voffs & 0x1FF)) & 0x1FF;
+        sy -= FloorMod(sy, mosaicBGEffectY + 1);
+    my = (unsigned int)FloorMod(sy + (int)(voffs & 0x1FF), sWideMap.height);
     for (int x = x0; x < x1; x++)
     {
-        const uint16_t *bgmap = (const uint16_t *)BG_SCREEN_ADDR(screenBaseBlock);
-        int sx = mosaic ? x - FloorMod(x, mosaicBGEffectX + 1) : x;
-        unsigned int xx = (unsigned int)(sx + (int)(hoffs & 0x1FF)) & 0x1FF;
-        unsigned int ty = yy;
-        uint16_t entry;
-        unsigned int tileX, tileY, tileLoc;
-        uint8_t pixel;
+        int sx = sWideMap.mirrorX ? MirrorInto(x, DISPLAY_WIDTH) : x;
 
-        if (xx > 255 && mapWidthInPixels > 256)
-            bgmap += 0x400;
-        if (ty > 255 && mapHeightInPixels > 256)
-            bgmap += (mapWidthInPixels > 256) ? 0x800 : 0x400;
-        xx &= 0xFF;
-        ty &= 0xFF;
-        entry = bgmap[(ty / 8) * 32 + xx / 8];
-        tileX = xx % 8;
-        tileY = ty % 8;
-        if (entry & (1 << 10))
-            tileX = 7 - tileX;
-        if (entry & (1 << 11))
-            tileY = 7 - tileY;
-        tileLoc = (entry & 0x3FF) * (bitsPerPixel * 8) + tileY * bitsPerPixel;
-        if (bitsPerPixel == 4)
-        {
-            pixel = bgtiles[tileLoc + tileX / 2];
-            pixel = (tileX & 1) ? pixel >> 4 : pixel & 0xF;
-            out[x - x0] = pixel != 0 ? (pal[16 * ((entry >> 12) & 0xF) + pixel] | 0x8000) : 0;
-        }
-        else
-        {
-            pixel = bgtiles[tileLoc + tileX];
-            out[x - x0] = pixel != 0 ? (pal[pixel] | 0x8000) : 0;
-        }
+        if (mosaic)
+            sx -= FloorMod(sx, mosaicBGEffectX + 1);
+        out[x - x0] = BGPixel(control, (unsigned int)FloorMod(sx + (int)(hoffs & 0x1FF), sWideMap.width), my, pal);
     }
 }
 
@@ -1261,6 +1363,9 @@ void DrawFrame(uint16_t *pixels)
         sWideRight = gDioramaSceneWideRight < DIORAMA_WIDE_MAX_SIDE ? gDioramaSceneWideRight : DIORAMA_WIDE_MAX_SIDE;
         sWideTop = gDioramaSceneWideTop < DIORAMA_WIDE_MAX_TOP ? gDioramaSceneWideTop : DIORAMA_WIDE_MAX_TOP;
         sWideStride = sWideLeft + DISPLAY_WIDTH + sWideRight;
+        if (!sWideMap.decided || sWideMap.loads != DioramaBattle_MoveBgLoads()
+         || sWideMap.control != *(uint16_t *)(REG_ADDR_BG0CNT + 3 * 2))
+            DecideWideMap(*(uint16_t *)(REG_ADDR_BG0CNT + 3 * 2));
     }
     sSkipObj = (gDioramaSceneSkipObj[0] | gDioramaSceneSkipObj[1]
               | gDioramaSceneSkipObj[2] | gDioramaSceneSkipObj[3]) != 0;

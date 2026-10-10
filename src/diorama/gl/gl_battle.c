@@ -177,11 +177,13 @@ static uint32_t sArtPixels[160 * 240];
 /* The 3D field under a battle transition (DioramaGLBattle_ComposeFieldBands). */
 /*
  * A move's own background past the picture's edges (KNOWN_ISSUES V13): while
- * BG3 holds it, the world is not shown, and the GBA renderer draws BG3 as the
- * GBA would if the screen were as large as the window (gDioramaSceneWide: its
- * tilemap wraps, its scroll, palette and brightness as on screen, nothing
- * stretched). That fills the window round the picture; the text box's rows are
- * still carried out from the picture's edges, as with the world.
+ * BG3 holds it, the world is not shown, and the GBA renderer draws how the
+ * screen would go on if it were as large as the window (gDioramaSceneWide: the
+ * background repeated within what the move filled, or mirrored at the
+ * picture's edges where repeating would show a seam; its scroll, palette and
+ * brightness as on screen; nothing stretched). That fills the window round the
+ * picture; the text box's rows are still carried out from the picture's
+ * edges, as with the world.
  */
 static struct
 {
