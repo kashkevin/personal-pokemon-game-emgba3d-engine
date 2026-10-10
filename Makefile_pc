@@ -332,6 +332,9 @@ check-diorama: $(DIORAMA_TEST_GEN)
 	$(DIORAMA_TEST_CC) $(DIORAMA_TEST_FLAGS) tests/diorama/test_rules.c src/diorama/rules.c \
 	  $(DIORAMA_TEST_GEN) -lm -o $(DIORAMA_TEST_DIR)/test_rules
 	$(DIORAMA_TEST_DIR)/test_rules
+	$(DIORAMA_TEST_CC) $(DIORAMA_TEST_FLAGS) tests/diorama/test_battle_stage.c src/diorama/scene/battle_stage.c \
+	  -lm -o $(DIORAMA_TEST_DIR)/test_battle_stage
+	$(DIORAMA_TEST_DIR)/test_battle_stage
 	$(DIORAMA_TEST_CC) $(DIORAMA_TEST_FLAGS) tests/diorama/metatile_golden_driver.c src/diorama/scene/metatile_atlas.c \
 	  -o $(DIORAMA_TEST_DIR)/metatile_golden_driver
 	python3 tools/diorama_rules/test_emerald_compositor.py --driver $(DIORAMA_TEST_DIR)/metatile_golden_driver

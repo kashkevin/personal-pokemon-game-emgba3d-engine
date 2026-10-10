@@ -25,6 +25,10 @@
 #include "test/battle.h"
 #include "constants/battle_anim.h"
 #include "constants/moves.h"
+#ifdef ENABLE_DIORAMA
+#include "diorama/battle_scene.h"
+#endif
+#line 28 // gba-line
 
 /*
     This file handles the commands for the macros defined in
@@ -1765,6 +1769,10 @@ static void Task_FadeToBg(u8 taskId)
 
 void LoadMoveBg(u16 bgId)
 {
+#ifdef ENABLE_DIORAMA
+    DioramaBattle_SetSceneryShown(FALSE); // BG3 now holds this move's background
+#endif
+#line 1768 // gba-line
     if (IsContest())
     {
         void *decompressionBuffer = malloc_and_decompress(gBattleAnimBackgroundTable[bgId].tilemap, NULL);
