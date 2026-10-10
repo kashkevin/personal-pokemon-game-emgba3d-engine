@@ -156,9 +156,19 @@ static void PerfLog_Presented(Uint64 start, Uint64 end)
 // run at 60 a second without being drawn, and the view is redrawn once a
 // second (camera keys, a resized window). The save's frame deadlines (600
 // frames between commands) keep their real-time meaning, as in mGBA.
+// The save's commands before and after the hold still waited for the
+// drawing: 4-6.5 s per save at 2.4 frames a second. When drawing one frame takes longer than SLOW_PRESENT_MS (the
+// renderer cannot keep up), frames also run undrawn while the bridge has a
+// save command in the game and for SAVE_ACTIVE_GRACE_MS after it, which
+// spans the companion's turn between two commands. A renderer that keeps up
+// draws every frame as before, so nothing changes on a graphics card.
 #define HELD_REDRAW_MS 1000
+#define SLOW_PRESENT_MS 25
+#define SAVE_ACTIVE_GRACE_MS 250
 static bool sHeldUnchanged; // sampled at the frame boundary, game thread parked
 static Uint32 sLastPresentMs;
+static Uint32 sLastPresentCostMs;
+static Uint32 sSaveActiveUntilMs;
 
 // The 3D view's look as pokeemerald.cfg keeps it: the camera's framing (F7)
 // and the tree style (F8), each the Diorama's own or the 3DS project's, and
@@ -532,7 +542,12 @@ int main(int argc, char **argv)
                         REG_KEYINPUT = ~keys & KEYS_MASK;
                     }
 #ifdef ENABLE_DIORAMA
-                    sHeldUnchanged = MultiplayerSave_SkipCallbacks() && !MultiplayerMenu_IsActive();
+                    if (MpBridge_SaveCommandPending())
+                        sSaveActiveUntilMs = SDL_GetTicks() + SAVE_ACTIVE_GRACE_MS;
+                    sHeldUnchanged = !MultiplayerMenu_IsActive()
+                                  && (MultiplayerSave_SkipCallbacks()
+                                      || (sLastPresentCostMs > SLOW_PRESENT_MS
+                                          && !SDL_TICKS_PASSED(SDL_GetTicks(), sSaveActiveUntilMs)));
 #endif
 
                     SDL_SemPost(vBlankSemaphore);
@@ -563,6 +578,8 @@ int main(int argc, char **argv)
                           sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE],
                           frameAlpha);
         sLastPresentMs = SDL_GetTicks();
+        sLastPresentCostMs = (Uint32)((SDL_GetPerformanceCounter() - presentStart) * 1000
+                                      / SDL_GetPerformanceFrequency());
 #else
         SDL_RenderPresent(sdlRenderer);
 #endif
