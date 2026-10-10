@@ -9,6 +9,7 @@
 #include "constants/rtc.h"
 #include "constants/weather.h"
 #include "diorama/gl_light.h"
+#include "diorama/terrain_mesh.h"
 #include "diorama/gl_terrain_renderer.h"
 
 /* The 3DS project's values (ctr_voxel.c). */
@@ -381,11 +382,15 @@ bool DioramaGLLight_Locate(GLuint program, struct DioramaLightUniforms *uniforms
 void DioramaGLLight_Apply(const struct DioramaLightUniforms *uniforms, float cameraPitch)
 {
     /* The eye's depth of the point the camera looks at (the player): the
-     * shaders' camera, 16 tiles up, aimed 0.458944 tiles below the ground. */
+     * shaders' camera (terrain_mesh.h DioramaCamera_GetRig: the field's, 16
+     * tiles up and aimed 0.458944 tiles below the ground, or the 3D battle's
+     * while it draws). */
     float pitchSin = sinf(cameraPitch);
     float pitchCos = cosf(cameraPitch);
-    float distance = (16.0f * pitchCos - 0.458944f) / pitchSin;
-    float eye = 16.0f * pitchSin + distance * pitchCos;
+    float height, distance, screenOffsetY, eye;
+
+    DioramaCamera_GetRig(cameraPitch, &height, &distance, &screenOffsetY);
+    eye = height * pitchSin + distance * pitchCos;
     float start = eye * sLight.hazeStart;
     float perDepth = sLight.haze / (eye * sLight.hazeRamp);
     bool dapples = sDappleTexture != 0 && sLight.dappleHigh - sLight.dappleLow > 0.01f;

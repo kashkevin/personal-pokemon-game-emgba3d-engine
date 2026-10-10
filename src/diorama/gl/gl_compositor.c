@@ -119,8 +119,8 @@ static float sTwoDOpacity = 1.0f;
 static float sFadeStartOpacity = 1.0f;
 static float sFadeTargetOpacity = 1.0f;
 static bool sIntegerScale;
-/* The field as last seen with steady palettes, whether or not it was drawn in
- * 3D (a scripted scene is not): a 3D battle can stand on it (gl_battle.c). */
+/* The field as last seen with steady palettes (no fade running), whether or
+ * not it was drawn in 3D: a 3D battle stands on it (gl_battle.c). */
 static struct DioramaSceneSnapshot sLastFieldSnapshot;
 static bool sHasLastFieldSnapshot;
 
@@ -941,48 +941,6 @@ static void UpdateOpacity(void)
                  + (sFadeTargetOpacity - sFadeStartOpacity) * progress;
 }
 
-/*
- * The field fading back in right after a battle drawn in 3D (gl_battle.c):
- * drawn in 3D as well, with the fade over it (below), rather than the flat
- * picture standing in until the fade is over and the 3D view cutting in
- * after it. Only then, and only on the battle's own map; every other fade is
- * drawn as before.
- */
-static bool IsBattleReturnFade(const struct DioramaSceneSnapshot *snapshot)
-{
-    return snapshot->sceneKind == DIORAMA_SCENE_TRANSITION
-        && snapshot->fallbackReasons == DIORAMA_FALLBACK_PALETTE_FADE
-        && snapshot->valid && snapshot->tilesetResourcesValid
-        && snapshot->visibleCellCount == DIORAMA_MAX_VISIBLE_CELLS
-        && snapshot->objectCount <= DIORAMA_MAX_OBJECTS
-        && DioramaGLBattle_IsReturning(snapshot->mapGroup, snapshot->mapNum, snapshot->mapLayoutId);
-}
-
-/*
- * Such a frame is drawn from the steady palettes and the fade laid over the
- * whole of it (gl_battle.c), as the 3D battle fades its world: not every part
- * of the world takes its colours from the faded palettes (the voxel trees do
- * not), and the atlases need not be remade for every step of the fade.
- */
-static u16 sReturnFadedPalette[DIORAMA_FADED_PALETTE_ENTRIES];
-static uint32_t sReturnPaletteGeneration;
-static uint32_t sReturnObjPaletteGeneration;
-static bool sReturnFading;
-
-static void PrepareBattleReturnFade(struct DioramaSceneSnapshot *snapshot)
-{
-    if (!sReturnFading)
-    {
-        sReturnPaletteGeneration = snapshot->paletteGeneration;
-        sReturnObjPaletteGeneration = snapshot->objPaletteGeneration;
-        sReturnFading = true;
-    }
-    memcpy(sReturnFadedPalette, snapshot->fadedPalette, sizeof(sReturnFadedPalette));
-    memcpy(snapshot->fadedPalette, snapshot->unfadedPalette, sizeof(snapshot->fadedPalette));
-    snapshot->paletteGeneration = sReturnPaletteGeneration;
-    snapshot->objPaletteGeneration = sReturnObjPaletteGeneration;
-}
-
 static void AdoptLatestSnapshot(void)
 {
     if (!DioramaSnapshotExchange_CopyLatest(&sIncomingSceneSnapshot))
@@ -1009,6 +967,7 @@ static void AdoptLatestSnapshot(void)
      && sSceneSnapshot.fallbackReasons == DIORAMA_FALLBACK_NONE
      && sSceneSnapshot.visibleCellCount == DIORAMA_MAX_VISIBLE_CELLS
      && sSceneSnapshot.objectCount <= DIORAMA_MAX_OBJECTS
+     && !sSceneSnapshot.paletteFading
      && (!sHasLastFieldSnapshot || sLastFieldSnapshot.sequence != sSceneSnapshot.sequence))
     {
         sLastFieldSnapshot = sSceneSnapshot;
@@ -1169,7 +1128,6 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     bool current3D = false;
     bool softFallback = false;
     bool newSequence = sHasSceneSnapshot && sSceneSnapshot.sequence != sProcessedSequence;
-    bool battleReturn;
     enum DioramaPresentationDecision presentationDecision;
     float cameraX;
     float cameraZ;
@@ -1184,11 +1142,6 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         SDL_GL_SwapWindow(sWindow);
         return;
     }
-    battleReturn = sHasSceneSnapshot && IsBattleReturnFade(&sSceneSnapshot);
-    if (battleReturn && newSequence)
-        PrepareBattleReturnFade(&sSceneSnapshot);
-    else if (!battleReturn)
-        sReturnFading = false;
 
     if (sRenderMode == DIORAMA_RENDER_AUTO
      && sTerrainAvailable
@@ -1196,7 +1149,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
      && sHasSceneSnapshot
      && DioramaRules_IsMapSupported(sSceneSnapshot.mapGroup, sSceneSnapshot.mapNum,
                                     sSceneSnapshot.mapLayoutId)
-     && (DioramaSnapshot_CanRenderFlatMap(&sSceneSnapshot) || battleReturn))
+     && DioramaSnapshot_CanRenderFlatMap(&sSceneSnapshot))
     {
         if (!sCurrent3DReady)
         {
@@ -1237,16 +1190,10 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         }
         if (newSequence)
         {
-            // Back from a 3D battle the field is 3D from its first frame:
-            // no flat picture to fade out of.
-            if (battleReturn)
-                SnapOpacity(0.0f);
-            else if (mapDiscontinuity)
+            if (mapDiscontinuity)
                 SnapOpacity(1.0f);
             SetOpacityTarget(0.0f);
         }
-        if (!battleReturn)
-            DioramaGLBattle_FieldDrawn();
         drawTerrain = true;
     }
     else if (presentationDecision == DIORAMA_PRESENT_HOLD_3D
@@ -1378,13 +1325,6 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
             DrawTexture(&sWeatherTexture, outputWidth, outputHeight,
                         0, 0, outputWidth, outputHeight,
                         0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, 1.0f);
-        if (battleReturn)
-        {
-            DioramaGLBattle_DrawFieldFade(sReturnFadedPalette, sSceneSnapshot.unfadedPalette,
-                                          DIORAMA_FADED_PALETTE_ENTRIES, outputWidth, outputHeight);
-            dglUseProgram(sProgram);
-            dglBindVertexArray(sVertexArray);
-        }
         if (sTerrainDebug)
         {
             BuildDebugImage(&sRenderedSceneSnapshot);
@@ -1461,15 +1401,15 @@ bool DioramaGL_GetBattleWorld(u8 mapGroup, u8 mapNum, u16 mapLayoutId,
     if (sRenderMode != DIORAMA_RENDER_AUTO || sSurveyView >= 0
      || !sTerrainAvailable || !sObjectsAvailable)
         return false;
-    // The field as the 3D view last drew it, if it is this map and nothing of
-    // it has changed since (a scripted scene holds the last 3D frame).
+    // The field as last seen with its palettes steady: as the 3D view drew it
+    // if that was the frame, otherwise built now, behind the battle's first
+    // black frames (the 3D view also draws fades and scripted scenes, so its
+    // last frame may be part way through a fade).
     if (!sHasRenderedSceneSnapshot
-     || !IsSnapshotOfMap(&sRenderedSceneSnapshot, mapGroup, mapNum, mapLayoutId)
-     || (sHasLastFieldSnapshot && sLastFieldSnapshot.mapGeneration != sRenderedSceneSnapshot.mapGeneration))
+     || !sHasLastFieldSnapshot
+     || sRenderedSceneSnapshot.sequence != sLastFieldSnapshot.sequence
+     || !IsSnapshotOfMap(&sRenderedSceneSnapshot, mapGroup, mapNum, mapLayoutId))
     {
-        // Otherwise the field as last seen (a battle straight out of a
-        // scripted scene that was never drawn in 3D): built now, behind the
-        // battle's first black frames.
         if (!sHasLastFieldSnapshot
          || !IsSnapshotOfMap(&sLastFieldSnapshot, mapGroup, mapNum, mapLayoutId)
          || !DioramaRules_IsMapSupported(mapGroup, mapNum, mapLayoutId))
@@ -1510,7 +1450,9 @@ void DioramaGL_DrawBattleWorld(float cameraX, float cameraZ, float pitch, float 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glViewport(0, 0, outputWidth, outputHeight);
-    // The sun's depth map round the stage (gl_shadow.h), then the lit scene.
+    // The field's weather light (gl_light.h), the sun's depth map round the
+    // stage (gl_shadow.h), then the lit scene.
+    DioramaGLLight_Update(&sRenderedSceneSnapshot, true);
     if (DioramaGLShadow_Begin(cameraX, cameraZ, SunStrength(&sRenderedSceneSnapshot),
                               ((uint64_t)DioramaGLBuildings_GetGeometryGeneration() << 32)
                               | DioramaGLTerrain_GetGeometryGeneration()))

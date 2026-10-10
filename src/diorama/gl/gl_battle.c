@@ -68,8 +68,6 @@
 #define BARS_IN 18.0f
 /* An intro that never starts (a battle resumed without one): glide anyway. */
 #define INTRO_WAIT 150u
-/* The longest the field may take to fade back in after a battle. */
-#define RETURN_FRAMES 300u
 
 /* The intro's effects (3ds_video.c), in the 3DS screen's 240 lines. */
 #define INTRO_BAR (22.0f / 240.0f)
@@ -111,8 +109,6 @@ static struct
     bool refused;    /* this battle is drawn in 2D (no world for it) */
     bool suspended;  /* in 3D until the classic view was chosen (F4) */
     uint32_t battleFrames; /* game frames since the battle began, 3D or not */
-    bool returning;  /* a 3D battle just ended; the field not yet back in 3D */
-    uint32_t returnFrames;
     bool chosen;
     bool glided;
     uint32_t frames, glide;
@@ -739,8 +735,6 @@ static void End(void)
 {
     if (sBattle.active)
     {
-        sBattle.returning = true;
-        sBattle.returnFrames = 0;
         if (sBattle.log)
             SDL_Log("Diorama battle over after %u frames: the field's camera back "
                     "(world drawn %u times, kept %u)", sBattle.frames, sWorldCache.drawn, sWorldCache.kept);
@@ -763,7 +757,6 @@ uint8_t DioramaGLBattle_BeginFrame(void)
     DioramaBattle_Capture(&sBattle.frame);
     if (sBattle.frame.inBattle)
     {
-        sBattle.returning = false;
         if (!DioramaGL_IsAutoMode())
         {
             /* The classic view (F4): the battle as ever, until 3D is back. */
@@ -790,10 +783,6 @@ uint8_t DioramaGLBattle_BeginFrame(void)
     }
     else if (sBattle.active || sBattle.refused || sBattle.suspended)
         End();
-    /* The return lasts the field's fade in; past a few seconds, or in the
-     * classic view, whatever comes next is not part of it. */
-    else if (sBattle.returning && (++sBattle.returnFrames > RETURN_FRAMES || !DioramaGL_IsAutoMode()))
-        sBattle.returning = false;
 
     if (sBattle.active)
     {
@@ -836,78 +825,6 @@ void DioramaGLBattle_UploadFrame(const uint32_t *rgba)
 bool DioramaGLBattle_IsActive(void)
 {
     return sBattle.active;
-}
-
-bool DioramaGLBattle_IsReturning(uint8_t mapGroup, uint8_t mapNum, uint16_t mapLayoutId)
-{
-    return sBattle.returning && mapGroup == sBattle.mapGroup && mapNum == sBattle.mapNum
-        && mapLayoutId == sBattle.mapLayoutId;
-}
-
-void DioramaGLBattle_FieldDrawn(void)
-{
-    if (sBattle.returning && sBattle.log)
-        SDL_Log("Diorama battle: the field back in 3D after %u frames", sBattle.returnFrames);
-    sBattle.returning = false;
-}
-
-/*
- * The fade that best explains the shown colours from the steady ones, shown =
- * keep * steady + (1 - keep) * colour, by least squares over all of them (the
- * 3DS port's FadeFit, as battle_capture.c uses it for the battle's scenery).
- */
-static void FitFade(const uint16_t *shown, const uint16_t *steady, unsigned count,
-                    float *amount, float rgb[3])
-{
-    float n = (float)count, cov = 0.0f, var = 0.0f, keep;
-    float su[3] = {0}, sf[3] = {0}, suu[3] = {0}, suf[3] = {0};
-
-    for (unsigned i = 0; i < count; ++i)
-        for (unsigned c = 0; c < 3; ++c)
-        {
-            float u = (float)((steady[i] >> (c * 5)) & 31), f = (float)((shown[i] >> (c * 5)) & 31);
-
-            su[c] += u;
-            sf[c] += f;
-            suu[c] += u * u;
-            suf[c] += u * f;
-        }
-    for (unsigned c = 0; c < 3; ++c)
-    {
-        cov += n * suf[c] - su[c] * sf[c];
-        var += n * suu[c] - su[c] * su[c];
-    }
-    keep = var > 1.0f ? Clamp(cov / var, 0.0f, 1.0f) : 0.0f;
-    *amount = 1.0f - keep;
-    for (unsigned c = 0; c < 3; ++c)
-    {
-        float offset = (sf[c] - keep * su[c]) / n;
-
-        rgb[c] = *amount > 0.01f ? Clamp(offset / *amount, 0.0f, 31.0f) / 31.0f : 0.0f;
-    }
-}
-
-void DioramaGLBattle_DrawFieldFade(const uint16_t *faded, const uint16_t *unfaded, unsigned count,
-                                   int outW, int outH)
-{
-    struct Layout layout = {outW, outH, 0.0f, 0.0f, (float)outW, (float)outH, 1.0f};
-    float amount, rgb[3], c[4];
-
-    if (!sBattle.ready || outW <= 0 || outH <= 0 || memcmp(faded, unfaded, count * sizeof(*faded)) == 0)
-        return;
-    FitFade(faded, unfaded, count, &amount, rgb);
-    /* Below one step of the game's own 16 it is rounding, not a fade. */
-    if (amount < 1.0f / 32.0f)
-        return;
-    c[0] = rgb[0] * amount;
-    c[1] = rgb[1] * amount;
-    c[2] = rgb[2] * amount;
-    c[3] = amount;
-    glViewport(0, 0, outW, outH);
-    QuadBegin();
-    PushRect(0.0f, 0.0f, (float)outW, (float)outH, c);
-    QuadFlush(&layout, sWhiteTexture, 0);
-    glDisable(GL_BLEND);
 }
 
 /* ── Drawing ───────────────────────────────────────────────────────────── */

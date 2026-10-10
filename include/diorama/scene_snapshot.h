@@ -224,6 +224,10 @@ struct DioramaSceneSnapshot
     int16_t doorMapY;
     uint8_t doorWidth;
     uint8_t doorLevel;
+    /* A palette fade is running (gPaletteFade.active): the faded palettes are
+     * part way to their fade colour. The 3D battle stands on the field as last
+     * seen with them steady (gl_compositor.c, gl_battle.c). */
+    bool paletteFading;
     uint8_t surfBlobValid;
     int16_t surfBlobOffsetX;
     int16_t surfBlobOffsetY;

@@ -793,6 +793,7 @@ void DioramaScene_PublishOverworld(void)
 
     memset(&sDraft, 0, sizeof(sDraft));
     sDraft.sceneKind = GetOverworldSceneKind(&sDraft.fallbackReasons);
+    sDraft.paletteFading = gPaletteFade.active != 0;
     sDraft.valid = gMapHeader.mapLayout != NULL;
     if (!sDraft.valid)
         sDraft.fallbackReasons |= DIORAMA_FALLBACK_MAP_UNAVAILABLE;
