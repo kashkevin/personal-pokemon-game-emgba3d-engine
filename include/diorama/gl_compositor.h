@@ -58,7 +58,15 @@ void DioramaGL_GetFieldCamera(float *cameraX, float *cameraZ, float *pitch, floa
  * from the camera given, with the eye in gDioramaCameraRig. */
 void DioramaGL_DrawBattleWorld(float cameraX, float cameraZ, float pitch, float focalLength,
                                float aspectCorrection, int outputWidth, int outputHeight);
+/* That world with these tiles (the field's BG tiles, animated by
+ * DioramaBattle_AnimateFieldTiles): its atlases updated where the tiles
+ * changed; true when what it shows changed. */
+bool DioramaGL_SetBattleTiles(const uint8_t *tileGraphics);
 /* The texture holding the GBA picture last uploaded (DioramaGL_UploadFrame). */
 unsigned DioramaGL_GetFrameTexture(void);
+/* The field's scene as the 3D view last drew it, its snapshot and resolved
+ * cells (for the battle's stage survey, a test tool); false if there is none. */
+bool DioramaGL_GetFieldScene(const struct DioramaSceneSnapshot **snapshot,
+                             const struct DioramaResolvedCell **resolved);
 
 #endif

@@ -714,7 +714,8 @@ static void UploadAtlasSlots(const struct DioramaTexture *texture, const u32 *pi
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 }
 
-static void EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
+/* Returns true when the atlases changed (rebuilt, or slots updated). */
+static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
 {
     bool reset = snapshot->mapGeneration != sAtlasMapGeneration
               || snapshot->paletteGeneration != sAtlasPaletteGeneration
@@ -806,6 +807,7 @@ static void EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
             sPreviousCutoutBaseMetatiles[i] = sCutoutBaseMetatiles[i];
     sHasAtlasTileGraphics = true;
     sAtlasAnimationGeneration = snapshot->tilesetAnimationGeneration;
+    return reset || changed;
 }
 
 /*
@@ -1297,6 +1299,11 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     UpdateOpacity();
     if (softFallback && sTwoDOpacity < 1.0f)
         drawTerrain = true;
+    // A battle transition composed over the 3D field (gl_battle.c) made the
+    // field's layers see-through in this frame's picture: it needs a field
+    // under it, the last one drawn if this frame's is refused.
+    if (!drawTerrain && sSurveyView < 0 && sHasRenderedSceneSnapshot && DioramaGLBattle_WantsField())
+        drawTerrain = true;
 
     SDL_GL_GetDrawableSize(sWindow, &outputWidth, &outputHeight);
     if (outputWidth <= 0 || outputHeight <= 0)
@@ -1345,6 +1352,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     {
         float cameraPitch;
         float cameraFocalLength;
+        bool composing;
         float aspectCorrection = (float)DISPLAY_WIDTH * outputHeight
                                / ((float)DISPLAY_HEIGHT * outputWidth);
 
@@ -1381,6 +1389,13 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                                   aspectCorrection);
         DioramaGLBuildings_Draw(cameraX, cameraZ, cameraPitch, cameraFocalLength,
                                 aspectCorrection);
+        // A battle transition composed over the 3D field (gl_battle.c): the
+        // ground and models laid again band by band as the transition moves
+        // the GBA's map layers; the people, the weather and a dark cave's
+        // light - sprites and windows on the GBA - stay where they are.
+        composing = sSurveyView < 0 && !sTerrainDebug
+                 && DioramaGLBattle_ComposeFieldBands(outputWidth, outputHeight, gameX, gameY,
+                                                      gameWidth, gameHeight);
         DioramaGLObjects_Draw(current3D ? frameAlpha : 1.0f,
                                cameraX, cameraZ, cameraPitch,
                                cameraFocalLength, aspectCorrection);
@@ -1407,11 +1422,12 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                         gameX, gameY, gameWidth, gameHeight,
                         0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, 1.0f);
         }
-        // A battle transition composed over the 3D field (gl_battle.c) is
-        // the frame's whole 2D picture.
-        if (sSurveyView < 0 && !sTerrainDebug
-         && DioramaGLBattle_ComposeField(outputWidth, outputHeight, gameX, gameY, gameWidth, gameHeight))
+        // A battle transition composed over the 3D field (gl_battle.c): its
+        // picture is the frame's whole 2D picture.
+        if (composing)
         {
+            DioramaGLBattle_ComposeFieldPicture(outputWidth, outputHeight, gameX, gameY,
+                                                gameWidth, gameHeight);
             dglUseProgram(sProgram);
             dglBindVertexArray(sVertexArray);
         }
@@ -1565,6 +1581,30 @@ void DioramaGL_DrawBattleWorld(float cameraX, float cameraZ, float pitch, float 
 unsigned DioramaGL_GetFrameTexture(void)
 {
     return sFrameTexture.id;
+}
+
+bool DioramaGL_SetBattleTiles(const uint8_t *tileGraphics)
+{
+    static uint32_t sBattleTileGeneration;
+
+    if (!sHasRenderedSceneSnapshot
+     || memcmp(sRenderedSceneSnapshot.tileGraphics, tileGraphics, DIORAMA_TILE_GRAPHICS_SIZE) == 0)
+        return false;
+    memcpy(sRenderedSceneSnapshot.tileGraphics, tileGraphics, DIORAMA_TILE_GRAPHICS_SIZE);
+    // A generation of its own (high bit set) that no field snapshot has, so
+    // the field's next one is told apart and brings its own tiles back.
+    sRenderedSceneSnapshot.tilesetAnimationGeneration = 0x80000000u | ++sBattleTileGeneration;
+    return EnsureAtlas(&sRenderedSceneSnapshot);
+}
+
+bool DioramaGL_GetFieldScene(const struct DioramaSceneSnapshot **snapshot,
+                             const struct DioramaResolvedCell **resolved)
+{
+    if (!sHasRenderedSceneSnapshot || !sDrewField3D)
+        return false;
+    *snapshot = &sRenderedSceneSnapshot;
+    *resolved = sRenderedResolvedCells;
+    return true;
 }
 
 void DioramaGL_SetVSync(bool enabled)
