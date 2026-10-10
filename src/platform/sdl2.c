@@ -470,6 +470,10 @@ static void ParseArguments(int argc, char **argv)
     {
         if (strcmp(argv[i], "--save") == 0 && i + 1 < argc)
             SDL_strlcpy(sSavePath, argv[++i], sizeof(sSavePath));
+        // The settings file (window, sound, the 3D view's look). The launcher
+        // starts every game in a new folder, so it names one that stays.
+        else if (strcmp(argv[i], "--config") == 0 && i + 1 < argc)
+            SDL_strlcpy(sConfigPath, argv[++i], sizeof(sConfigPath));
         else if (strcmp(argv[i], "--bridge") == 0 && i + 1 < argc)
         {
             // Multiplayer (src/platform/mp_bridge.c): never start without the
