@@ -40,6 +40,10 @@ struct Light
 };
 
 static struct Light sLight;
+/* The game's fog this frame (VoxelWorld_FogDensity), 0-1, and whether it is
+ * a cave's; for the fog's banks and the dark of a cave (gl_air.c). */
+static float sFogDensity;
+static bool sFogCave;
 static GLuint sDappleTexture;
 static bool sDappleTried;
 /* Where the current map's origin lies in the world the dapples are laid on
@@ -126,7 +130,7 @@ static float Quintic(float t)
     return t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
 }
 
-static float DappleNoise(float u, float v, int period, uint32_t seed)
+float DioramaGLLight_Noise(float u, float v, int period, uint32_t seed)
 {
     int x = (int)u;
     int y = (int)v;
@@ -167,8 +171,8 @@ static void MakeDapple(void)
             {
                 float scale = (float)octaves[o].period / DAPPLE_DIM;
 
-                n += octaves[o].weight * DappleNoise((float)x * scale, (float)y * scale,
-                                                     octaves[o].period, o + 1);
+                n += octaves[o].weight * DioramaGLLight_Noise((float)x * scale, (float)y * scale,
+                                                              octaves[o].period, o + 1);
                 total += octaves[o].weight;
             }
             t = (n / total - 0.40f) / 0.20f;
@@ -265,6 +269,8 @@ void DioramaGLLight_Update(const struct DioramaSceneSnapshot *snapshot, bool ena
     float offset[3];
     int i;
 
+    sFogDensity = 0.0f;
+    sFogCave = false;
     if (snapshot != NULL)
         UpdateAnchor(snapshot);
     /* The 3DS port's rule: indoors (a building, a secret base) is unlit;
@@ -318,8 +324,10 @@ void DioramaGLLight_Update(const struct DioramaSceneSnapshot *snapshot, bool ena
     case WEATHER_UNDERWATER:
     case WEATHER_UNDERWATER_BUBBLES:
         /* The fog sprites' blend: EVA 12 when the fog is in (4 under water). */
-        light = FogLight(&light, snapshot->mapType == MAP_TYPE_UNDERGROUND,
-                         snapshot->weatherBlendEVA / 12.0f);
+        sFogDensity = snapshot->weatherBlendEVA / 12.0f;
+        sFogDensity = sFogDensity < 0.0f ? 0.0f : sFogDensity > 1.0f ? 1.0f : sFogDensity;
+        sFogCave = sFogDensity > 0.0f && snapshot->mapType == MAP_TYPE_UNDERGROUND;
+        light = FogLight(&light, sFogCave, sFogDensity);
         break;
     case WEATHER_SNOW:
     case WEATHER_VOLCANIC_ASH:
@@ -380,21 +388,16 @@ bool DioramaGLLight_Locate(GLuint program, struct DioramaLightUniforms *uniforms
 
 void DioramaGLLight_Apply(const struct DioramaLightUniforms *uniforms, float cameraPitch)
 {
-    /* The eye's depth of the point the camera looks at (the player): the
-     * shaders' camera, 16 tiles up, aimed 0.458944 tiles below the ground. */
-    float pitchSin = sinf(cameraPitch);
-    float pitchCos = cosf(cameraPitch);
-    float distance = (16.0f * pitchCos - 0.458944f) / pitchSin;
-    float eye = 16.0f * pitchSin + distance * pitchCos;
-    float start = eye * sLight.hazeStart;
-    float perDepth = sLight.haze / (eye * sLight.hazeRamp);
+    float haze[3];
+    float hazeColour[3];
     bool dapples = sDappleTexture != 0 && sLight.dappleHigh - sLight.dappleLow > 0.01f;
     float drift = (float)fmod(SDL_GetTicks() / 1000.0 * DAPPLE_DRIFT, DAPPLE_PERIOD);
 
     dglUniform3f(uniforms->sunTint, sLight.sun[0], sLight.sun[1], sLight.sun[2]);
     dglUniform3f(uniforms->shadeTint, sLight.shade[0], sLight.shade[1], sLight.shade[2]);
-    dglUniform3f(uniforms->haze, start, perDepth, sLight.haze);
-    dglUniform3f(uniforms->hazeColor, sLight.hazeRgb[0], sLight.hazeRgb[1], sLight.hazeRgb[2]);
+    DioramaGLLight_GetHaze(cameraPitch, haze, hazeColour);
+    dglUniform3f(uniforms->haze, haze[0], haze[1], haze[2]);
+    dglUniform3f(uniforms->hazeColor, hazeColour[0], hazeColour[1], hazeColour[2]);
     dglUniform1i(uniforms->dappleMap, DIORAMA_LIGHT_TEXTURE_UNIT);
     dglUniform4f(uniforms->dapple, sLight.dappleLow, sLight.dappleHigh, drift, dapples ? 1.0f : 0.0f);
     dglUniform2f(uniforms->dappleAnchor, sAnchorX, sAnchorZ);
@@ -432,6 +435,23 @@ void DioramaGLLight_GetAir(struct DioramaAirLight *air)
     air->anchorX = sAnchorX;
     air->anchorZ = sAnchorZ;
     air->pattern = sDappleTexture;
+    air->fog = sFogDensity;
+    air->cave = sFogCave;
+}
+
+void DioramaGLLight_GetHaze(float cameraPitch, float haze[3], float colour[3])
+{
+    float pitchSin = sinf(cameraPitch);
+    float pitchCos = cosf(cameraPitch);
+    float distance = (16.0f * pitchCos - 0.458944f) / pitchSin;
+    float eye = 16.0f * pitchSin + distance * pitchCos;
+    int i;
+
+    haze[0] = eye * sLight.hazeStart;
+    haze[1] = sLight.haze / (eye * sLight.hazeRamp);
+    haze[2] = sLight.haze;
+    for (i = 0; i < 3; i++)
+        colour[i] = sLight.hazeRgb[i];
 }
 
 void DioramaGLLight_Shutdown(void)

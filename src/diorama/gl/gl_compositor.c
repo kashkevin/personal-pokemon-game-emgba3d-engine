@@ -485,7 +485,8 @@ static bool BuildWeatherImage(const struct DioramaSceneSnapshot *snapshot)
                             = RGBA(205, 198, 190, 190);
         }
     }
-    else if (effect == DIORAMA_WEATHER_FOG)
+    /* The fog's banks are in the scene already (gl_air.h): no flat pane. */
+    else if (effect == DIORAMA_WEATHER_FOG && !DioramaGLAir_DrawsFog())
     {
         int baseAlpha = DioramaWeather_FogAlpha(snapshot->weatherBlendEVA);
         int y;
