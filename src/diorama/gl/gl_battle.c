@@ -218,35 +218,58 @@ static struct
  * The world's water and flowers: the field's tile animations
  * (DioramaBattle_AnimateFieldTiles) carried on in the battle's world, its
  * atlases updated (DioramaGL_SetBattleTiles) and the world redrawn when they
- * change - as long as redrawing it stays cheap. The first redraws of each
- * battle (its glide redraws every frame anyway) are timed to completion
- * (glFinish), and the water moves only while the world takes under
- * TILE_WORLD_MS_MAX to draw, at most TILE_TIME_SHARE of the time. On slow
- * (software) graphics it stands still, as before. PKMN_DIORAMA_BATTLE_TILES=0
- * keeps it still, =1 moves it whatever the cost.
+ * change - as often as the measured frame times allow. Every battle frame is
+ * timed, start to start (sFrameTime). The glide redraws the world every frame,
+ * so its frames are the first measure of what a redraw frame costs: within the
+ * budget (a 60 Hz game frame, or the frames' own pace if that is slower, as on
+ * a 50 Hz display) the tiles may make the world redraw at every change; up to
+ * twice it, every 4 game frames; up to four times, every 16; beyond that the
+ * water stands still, as on software graphics. After the glide each frame with
+ * a redraw is measured again: when such frames run over by a quarter, redraws
+ * are spaced twice as far apart (the changes in between gathered into one),
+ * stopped past every TILE_STEP_MAX game frames; after TILE_GOOD_REDRAWS quick
+ * ones, twice as close again, down to every change. PKMN_DIORAMA_BATTLE_TILES=0
+ * keeps it still, =1 moves it at every change whatever the cost;
+ * PKMN_DIORAMA_BATTLE_FRAME_BUDGET (ms) sets the budget (a test switch).
  */
-#define TILE_WORLD_MS_MAX 12.0f
-#define TILE_TIME_SHARE 0.15f
-#define WORLD_TIMED_DRAWS 8
+#define TILE_FRAME_BUDGET_MS (1000.0f / 60.0f)
+#define TILE_STEP_MAX 32u
+#define TILE_GOOD_REDRAWS 8u
 
 static struct
 {
-    int mode;              /* -1 by cost, 0 off, 1 on */
+    int mode;              /* -1 by frame time, 0 off, 1 on */
     bool ready;            /* tiles taken from the battle's world */
-    bool logged;           /* the cost decision logged, this battle */
-    uint32_t frames;       /* game frames since then */
-    Uint64 lastRedraw;     /* when the tiles last made the world redraw */
+    bool decided;          /* the glide measured, the first step chosen */
+    unsigned step;         /* game frames between redraws: 1 at every change, 0 none */
+    unsigned stepMin, stepMax; /* the range it took this battle, for the log */
+    unsigned goodRedraws;  /* redraw frames in a row within the budget */
+    uint32_t frames;       /* game frames animated */
+    uint32_t sinceRedraw;  /* game frames since the tiles last made the world redraw */
     uint32_t updates;      /* redraws they made, for the log */
     uint8_t tiles[DIORAMA_TILE_GRAPHICS_SIZE];
 } sTileAnim;
 
-/* What a redraw of the world costs: its first redraws in a battle, timed. */
+/* A battle frame's time, from its start to the next frame's (present to
+ * present: the CPU's work, the GPU's, the wait for the display), by kind. */
+struct FrameTimes
+{
+    uint32_t count;
+    double sum;
+    float max;
+};
+
 static struct
 {
-    unsigned samples;
-    float worldMs;         /* the slowest of them, ms */
-    Uint64 start;
-} sWorldTimer;
+    float budget;          /* ms (TILE_FRAME_BUDGET_MS or the test switch) */
+    Uint64 last;           /* the last battle frame's start */
+    bool lastDrew;         /* it drew the world (not the kept copy) */
+    bool lastGlide;        /* during the glide */
+    bool drew;             /* this frame drew the world */
+    float keptPace;        /* recent frames that kept the world, ms (moving average) */
+    float redrawPace;      /* recent frames that redrew it after the glide, ms */
+    struct FrameTimes kept, redraw, glide;
+} sFrameTime;
 
 /* The stage survey, a test tool (PKMN_DIORAMA_STAGE_SURVEY=1, SurveyStages). */
 static struct
@@ -360,67 +383,187 @@ static float EnvFloat(const char *name, float fallback)
 /* ── The world's water and flowers ──────────────────────────────────── */
 
 /* Around the battle's first redraws of the world: their time to completion. */
-static void WorldTimerBegin(void)
+static void AddFrameTime(struct FrameTimes *times, float ms)
 {
-    if (sWorldTimer.samples >= WORLD_TIMED_DRAWS)
-        return;
-    glFinish();
-    sWorldTimer.start = SDL_GetPerformanceCounter();
+    ++times->count;
+    times->sum += ms;
+    if (ms > times->max)
+        times->max = ms;
 }
 
-static void WorldTimerEnd(void)
+static float AverageFrameTime(const struct FrameTimes *times)
 {
-    float ms;
-
-    if (sWorldTimer.samples >= WORLD_TIMED_DRAWS)
-        return;
-    glFinish();
-    ms = (float)((double)(SDL_GetPerformanceCounter() - sWorldTimer.start) * 1000.0
-                 / (double)SDL_GetPerformanceFrequency());
-    /* The slowest of them, the first left out (caches cold, shaders new). */
-    if (sWorldTimer.samples > 0 && ms > sWorldTimer.worldMs)
-        sWorldTimer.worldMs = ms;
-    ++sWorldTimer.samples;
+    return times->count != 0 ? (float)(times->sum / times->count) : 0.0f;
 }
 
-/* May the tiles make the world redraw now? */
-static bool TileRedrawAllowed(Uint64 now)
+/* What a frame may take: the budget, or the frames' own pace if that is slower
+ * (a display refreshing below 60 Hz paces every frame, redraw or not). */
+static float FrameAllowance(void)
 {
-    double since = (double)(now - sTileAnim.lastRedraw) * 1000.0 / (double)SDL_GetPerformanceFrequency();
+    return sFrameTime.keptPace > sFrameTime.budget ? sFrameTime.keptPace : sFrameTime.budget;
+}
 
+static void SetTileStep(unsigned step)
+{
+    sTileAnim.step = step;
+    if (step != 0 && (sTileAnim.stepMin == 0 || step < sTileAnim.stepMin))
+        sTileAnim.stepMin = step;
+    if (step > sTileAnim.stepMax)
+        sTileAnim.stepMax = step;
+}
+
+static const char *TileStepWords(unsigned step, char *buffer, size_t size)
+{
+    if (step == 0)
+        return "stand still (frames too slow to redraw the world)";
+    if (step == 1)
+        return "move at every change";
+    SDL_snprintf(buffer, size, "move every %u game frames", step);
+    return buffer;
+}
+
+/* The glide is over: its frames, each a redraw of the world, choose the first
+ * step. */
+static void DecideTileStep(void)
+{
+    float glide = AverageFrameTime(&sFrameTime.glide);
+    float allowance = FrameAllowance();
+    char words[48];
+
+    sTileAnim.decided = true;
     if (sTileAnim.mode == 1)
-        return true;
-    /* Not timed yet (3D chosen mid-battle, no glide): now and then, to time it. */
-    if (sWorldTimer.samples < WORLD_TIMED_DRAWS)
-        return since >= 500.0;
-    if (sWorldTimer.worldMs > TILE_WORLD_MS_MAX)
-        return false;
-    return since >= sWorldTimer.worldMs / TILE_TIME_SHARE;
+        SetTileStep(1);
+    else if (sTileAnim.mode == 0)
+        SetTileStep(0);
+    else if (sFrameTime.glide.count == 0)
+        SetTileStep(16);   /* no glide (3D chosen mid-battle): try now and then */
+    else if (glide <= allowance * 1.1f)
+        SetTileStep(1);
+    else if (glide <= allowance * 2.0f)
+        SetTileStep(4);
+    else if (glide <= allowance * 4.0f)
+        SetTileStep(16);
+    else
+        SetTileStep(0);
+    if (sBattle.log)
+        SDL_Log("Diorama battle: the glide's frames took %.2f ms on average (%u frames, at most "
+                "%.2f; the budget %.2f ms): water and flowers %s%s", glide, sFrameTime.glide.count,
+                sFrameTime.glide.max, allowance, TileStepWords(sTileAnim.step, words, sizeof(words)),
+                sTileAnim.mode == 1 ? " (PKMN_DIORAMA_BATTLE_TILES=1)"
+                : sTileAnim.mode == 0 ? " (PKMN_DIORAMA_BATTLE_TILES=0)" : "");
+}
+
+/* A frame that redrew the world for the tiles took `ms`: further apart when
+ * such frames run over, closer when they keep within. */
+static void AdjustTileStep(float ms)
+{
+    float allowance;
+    char words[48];
+    unsigned before = sTileAnim.step;
+
+    sFrameTime.redrawPace = sFrameTime.redrawPace > 0.0f ? sFrameTime.redrawPace * 0.7f + ms * 0.3f : ms;
+    if (sTileAnim.mode != -1 || sTileAnim.step == 0)
+        return;
+    allowance = FrameAllowance();
+    if (sFrameTime.redrawPace > allowance * 1.25f)
+    {
+        SetTileStep(sTileAnim.step * 2 > TILE_STEP_MAX ? 0 : sTileAnim.step * 2);
+        sTileAnim.goodRedraws = 0;
+    }
+    else if (sFrameTime.redrawPace <= allowance * 1.05f)
+    {
+        if (++sTileAnim.goodRedraws >= TILE_GOOD_REDRAWS && sTileAnim.step > 1)
+        {
+            SetTileStep(sTileAnim.step / 2);
+            sTileAnim.goodRedraws = 0;
+        }
+    }
+    else
+        sTileAnim.goodRedraws = 0;
+    if (sBattle.log && sTileAnim.step != before)
+        SDL_Log("Diorama battle: frames redrawing the world take %.2f ms (the budget %.2f): "
+                "water and flowers %s", sFrameTime.redrawPace, allowance,
+                TileStepWords(sTileAnim.step, words, sizeof(words)));
+}
+
+/* At the start of each battle frame: the last one's time, by kind. */
+static void MeasureFrame(void)
+{
+    Uint64 now = SDL_GetPerformanceCounter();
+
+    if (sFrameTime.last != 0)
+    {
+        float ms = (float)((double)(now - sFrameTime.last) * 1000.0 / (double)SDL_GetPerformanceFrequency());
+
+        /* Not a pause (the window dragged, the game stopped). */
+        if (ms < 1000.0f)
+        {
+            if (sFrameTime.lastGlide)
+                AddFrameTime(&sFrameTime.glide, ms);
+            else if (sFrameTime.lastDrew)
+            {
+                AddFrameTime(&sFrameTime.redraw, ms);
+                if (sTileAnim.decided)
+                    AdjustTileStep(ms);
+            }
+            else
+            {
+                AddFrameTime(&sFrameTime.kept, ms);
+                sFrameTime.keptPace = sFrameTime.keptPace > 0.0f ? sFrameTime.keptPace * 0.9f + ms * 0.1f : ms;
+            }
+        }
+    }
+    sFrameTime.last = now;
+    sFrameTime.drew = false;
+}
+
+/* The camera is flying from the field to the stage (it redraws the world
+ * every frame). */
+static bool Gliding(void)
+{
+    return sBattle.chosen && sBattle.glided && sBattle.glide > 0 && sBattle.glide < GLIDE_FRAMES;
+}
+
+/* At the end of each battle frame. */
+static void EndFrameMeasure(void)
+{
+    sFrameTime.lastDrew = sFrameTime.drew;
+    sFrameTime.lastGlide = Gliding();
+}
+
+static void ResetFrameTimes(void)
+{
+    float budget = sFrameTime.budget;
+
+    memset(&sFrameTime, 0, sizeof(sFrameTime));
+    sFrameTime.budget = budget;
 }
 
 /* Once a game frame while the battle shows its world. */
 static void AnimateTiles(void)
 {
-    Uint64 now;
-
-    if (sTileAnim.mode == 0 || !sTileAnim.ready)
+    if (!sTileAnim.ready)
         return;
-    if (sBattle.log && !sTileAnim.logged && sWorldTimer.samples >= WORLD_TIMED_DRAWS)
-    {
-        sTileAnim.logged = true;
-        SDL_Log("Diorama battle: the world takes %.2f ms to draw (%u draws timed): "
-                "water and flowers %s", sWorldTimer.worldMs, sWorldTimer.samples,
-                sTileAnim.mode == 1 ? "move (PKMN_DIORAMA_BATTLE_TILES=1)"
-                : sWorldTimer.worldMs > TILE_WORLD_MS_MAX ? "stand still (too slow to redraw)" : "move");
-    }
+    if (!sTileAnim.decided && sBattle.glided && sBattle.glide >= GLIDE_FRAMES)
+        DecideTileStep();
+    if (sTileAnim.mode == 0)
+        return;
     DioramaBattle_AnimateFieldTiles(sTileAnim.tiles, sizeof(sTileAnim.tiles), ++sTileAnim.frames);
-    now = SDL_GetPerformanceCounter();
-    if (!TileRedrawAllowed(now))
+    ++sTileAnim.sinceRedraw;
+    if (!sTileAnim.decided)
+    {
+        /* The glide redraws the world every frame anyway; before it, the
+         * world waits as it is. */
+        if (Gliding() && DioramaGL_SetBattleTiles(sTileAnim.tiles))
+            sWorldCache.valid = false;
+        return;
+    }
+    if (sTileAnim.step == 0 || sTileAnim.sinceRedraw < sTileAnim.step)
         return;
     if (DioramaGL_SetBattleTiles(sTileAnim.tiles))
     {
         sWorldCache.valid = false;
-        sTileAnim.lastRedraw = now;
+        sTileAnim.sinceRedraw = 0;
         ++sTileAnim.updates;
     }
 }
@@ -666,13 +809,16 @@ bool DioramaGLBattle_Init(void)
     sSurvey.on = setting != NULL && setting[0] == '1';
     setting = SDL_getenv("PKMN_DIORAMA_BATTLE_TILES");
     sTileAnim.mode = setting == NULL ? -1 : setting[0] == '0' ? 0 : 1;
+    sFrameTime.budget = EnvFloat("PKMN_DIORAMA_BATTLE_FRAME_BUDGET", TILE_FRAME_BUDGET_MS);
+    if (sFrameTime.budget <= 0.0f)
+        sFrameTime.budget = TILE_FRAME_BUDGET_MS;
     sBattle.ready = true;
     return true;
 }
 
 void DioramaGLBattle_Shutdown(void)
 {
-    memset(&sWorldTimer, 0, sizeof(sWorldTimer));
+    ResetFrameTimes();
     if (sFieldTexture != 0) glDeleteTextures(1, &sFieldTexture);
     sFieldTexture = 0;
     sFieldWidth = sFieldHeight = 0;
@@ -1380,12 +1526,14 @@ static void Begin(void)
     sArtValid = false;
     memcpy(sTileAnim.tiles, snapshot->tileGraphics, sizeof(sTileAnim.tiles));
     sTileAnim.ready = true;
-    sTileAnim.logged = false;
-    sWorldTimer.samples = 0;
-    sWorldTimer.worldMs = 0.0f;
+    sTileAnim.decided = false;
+    sTileAnim.step = 0;
+    sTileAnim.stepMin = sTileAnim.stepMax = 0;
+    sTileAnim.goodRedraws = 0;
     sTileAnim.frames = 0;
+    sTileAnim.sinceRedraw = 0;
     sTileAnim.updates = 0;
-    sTileAnim.lastRedraw = 0;
+    ResetFrameTimes();
     DioramaGL_GetFieldCamera(&cameraX, &cameraZ, &pitch, &focal);
     FieldView(&sBattle.field, &layout, cameraX, cameraZ, pitch, focal);
     sBattle.view = sBattle.field;
@@ -1409,12 +1557,19 @@ static void End(void)
     if (sBattle.active)
     {
         if (sBattle.log)
+        {
             SDL_Log("Diorama battle over after %u frames: the field's camera back "
-                    "(world drawn %u times, kept %u; animated tiles redrew it %u times%s; "
-                    "a redraw %.2f ms over %u timed)", sBattle.frames, sWorldCache.drawn,
+                    "(world drawn %u times, kept %u; animated tiles redrew it %u times%s, "
+                    "every %u to %u game frames)", sBattle.frames, sWorldCache.drawn,
                     sWorldCache.kept, sTileAnim.updates,
                     sTileAnim.mode == 0 ? ", off" : sTileAnim.mode == 1 ? ", forced on" : "",
-                    sWorldTimer.worldMs, sWorldTimer.samples);
+                    sTileAnim.stepMin, sTileAnim.stepMax);
+            SDL_Log("Diorama battle frame times: kept world %.2f ms on average (at most %.2f, %u frames); "
+                    "world redrawn %.2f ms (at most %.2f, %u frames); glide %.2f ms (at most %.2f, %u frames)",
+                    AverageFrameTime(&sFrameTime.kept), sFrameTime.kept.max, sFrameTime.kept.count,
+                    AverageFrameTime(&sFrameTime.redraw), sFrameTime.redraw.max, sFrameTime.redraw.count,
+                    AverageFrameTime(&sFrameTime.glide), sFrameTime.glide.max, sFrameTime.glide.count);
+        }
     }
     sTileAnim.ready = false;
     sWorldCache.valid = false;
@@ -1887,7 +2042,7 @@ static void DrawWorld(const struct Layout *layout)
         return;
     }
     ApplyView(&sBattle.view, layout, &focal, &aspect);
-    WorldTimerBegin();
+    sFrameTime.drew = true;
     DioramaGL_DrawBattleWorld(sBattle.view.x, sBattle.view.z, sBattle.view.pitch, focal, aspect,
                               layout->outW, layout->outH);
     DrawCurtain(layout, focal, aspect);
@@ -1896,7 +2051,6 @@ static void DrawWorld(const struct Layout *layout)
     DrawBackdrop(layout);
     if (!sWorldCache.off)
         KeepWorld(&sBattle.view, layout);
-    WorldTimerEnd();
     ++sWorldCache.drawn;
 }
 
@@ -2058,6 +2212,7 @@ bool DioramaGLBattle_Present(SDL_Window *window)
     BattleLayout(window, &layout);
     if (layout.outW <= 0 || layout.outH <= 0)
         return false;
+    MeasureFrame();
     world = sBattle.sceneLayers != 0;
     glViewport(0, 0, layout.outW, layout.outH);
     glDisable(GL_SCISSOR_TEST);
@@ -2081,6 +2236,7 @@ bool DioramaGLBattle_Present(SDL_Window *window)
     if (world)
         DrawIntroBars(&layout);
     glDisable(GL_BLEND);
+    EndFrameMeasure();
     return true;
 }
 
