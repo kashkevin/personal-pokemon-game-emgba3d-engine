@@ -175,6 +175,24 @@ static uint32_t sArtGeneration; /* the art changed: the kept world is stale */
 static uint16_t sArtLast[160 * 240];
 static uint32_t sArtPixels[160 * 240];
 /* The 3D field under a battle transition (DioramaGLBattle_ComposeFieldBands). */
+/*
+ * A move's own background past the picture's edges (KNOWN_ISSUES V13): while
+ * BG3 holds it, the world is not shown, and the GBA renderer draws BG3 as the
+ * GBA would if the screen were as large as the window (gDioramaSceneWide: its
+ * tilemap wraps, its scroll, palette and brightness as on screen, nothing
+ * stretched). That fills the window round the picture; the text box's rows are
+ * still carried out from the picture's edges, as with the world.
+ */
+static struct
+{
+    GLuint texture;
+    int width, height;      /* the texture's: left + 240 + right, top + 160 */
+    int left, right, top;   /* the margins it holds, GBA pixels */
+    bool valid;             /* drawn this frame */
+    uint32_t pixels[DIORAMA_WIDE_MAX_W * DIORAMA_WIDE_MAX_H];
+    uint32_t frames;        /* battle frames shown with it, for the log */
+} sWide;
+
 static GLuint sFieldTexture;
 static int sFieldWidth, sFieldHeight;
 
@@ -664,6 +682,10 @@ void DioramaGLBattle_Shutdown(void)
     if (sArtTexture != 0) glDeleteTextures(1, &sArtTexture);
     sArtTexture = 0;
     sArtValid = false;
+    if (sWide.texture != 0) glDeleteTextures(1, &sWide.texture);
+    sWide.texture = 0;
+    sWide.width = sWide.height = 0;
+    sWide.valid = false;
     if (sCurtainBuffer != 0) dglDeleteBuffers(1, &sCurtainBuffer);
     if (sCurtainVertexArray != 0) dglDeleteVertexArrays(1, &sCurtainVertexArray);
     if (sCurtainProgram != 0) dglDeleteProgram(sCurtainProgram);
@@ -1396,12 +1418,39 @@ static void End(void)
     }
     sTileAnim.ready = false;
     sWorldCache.valid = false;
+    sWide.valid = false;
+    sWide.frames = 0;
     sBattle.active = false;
     sBattle.refused = false;
     sBattle.suspended = false;
     sBattle.chosen = false;
     sBattle.battleFrames = 0;
     gDioramaCameraRig.active = false;
+}
+
+/* While no world is shown (a move's own background on BG3, or BG3 off): ask
+ * the GBA renderer for the screen past the picture, as wide as the window
+ * shows round it (gDioramaSceneWide). */
+static void RequestWide(void)
+{
+    struct Layout layout;
+    SDL_Window *window = DioramaGL_GetWindow();
+    int left, right, top;
+
+    if (window == NULL)
+        return;
+    BattleLayout(window, &layout);
+    if (layout.outW <= 0 || layout.outH <= 0 || layout.scale <= 0.0f)
+        return;
+    left = (int)ceilf(layout.gameX / layout.scale);
+    right = (int)ceilf((layout.outW - layout.gameX - layout.gameW) / layout.scale);
+    top = (int)ceilf(layout.gameY / layout.scale);
+    if (left <= 0 && right <= 0 && top <= 0)
+        return;
+    gDioramaSceneWideLeft = (uint16_t)(left < 0 ? 0 : left > DIORAMA_WIDE_MAX_SIDE ? DIORAMA_WIDE_MAX_SIDE : left);
+    gDioramaSceneWideRight = (uint16_t)(right < 0 ? 0 : right > DIORAMA_WIDE_MAX_SIDE ? DIORAMA_WIDE_MAX_SIDE : right);
+    gDioramaSceneWideTop = (uint16_t)(top < 0 ? 0 : top > DIORAMA_WIDE_MAX_TOP ? DIORAMA_WIDE_MAX_TOP : top);
+    gDioramaSceneWideWanted = true;
 }
 
 uint8_t DioramaGLBattle_BeginFrame(void)
@@ -1456,6 +1505,7 @@ uint8_t DioramaGLBattle_BeginFrame(void)
     sBattle.fieldCompose = false;
     memset(gDioramaSceneSkipObj, 0, sizeof(gDioramaSceneSkipObj));
     gDioramaSceneArtWanted = false;
+    gDioramaSceneWideWanted = false;
     if (sBattle.active)
     {
         StepCamera();
@@ -1473,6 +1523,8 @@ uint8_t DioramaGLBattle_BeginFrame(void)
             gDioramaSceneArtWanted = !sBattle.frame.introSliding && sBattle.frame.sceneryShiftX == 0.0f
                                   && sBattle.frame.sceneryShiftY == 0.0f;
         }
+        else if (!sBattle.frame.forcedBlank)
+            RequestWide();
     }
     else if (!sBattle.frame.inBattle && sBattle.frame.transition && !sBattle.fieldOff
           && DioramaGL_IsAutoMode() && DioramaGL_DrewField3D())
@@ -1501,11 +1553,11 @@ uint8_t DioramaGLBattle_BeginFrame(void)
     return layers;
 }
 
-void DioramaGLBattle_UploadFrame(const uint32_t *rgba)
+/* The picture's edge colours to carry out (DrawCarriedOut); with a move's
+ * background shown (moveBackground), only the text box's rows - the rest is
+ * the wide picture's - and fully opaque, there being no world. */
+static void UploadEdges(bool moveBackground)
 {
-    (void)rgba;
-    if (!sBattle.ready || sBattle.sceneLayers == 0)
-        return;
     for (int y = 0; y < 160; ++y)
         for (int side = 0; side < 2; ++side)
         {
@@ -1515,11 +1567,69 @@ void DioramaGLBattle_UploadFrame(const uint32_t *rgba)
             uint32_t b = ((edge->color >> 10) & 0x1F) * 255 / 31;
             uint32_t a = (16u - edge->cover) * 255u / 16u;
 
-            sEdgePixels[y * 2 + side] = (a << 24) | (r << 16) | (g << 8) | b;
+            if (moveBackground)
+                sEdgePixels[y * 2 + side] = edge->layer == 0 ? 0xFF000000u | (r << 16) | (g << 8) | b : 0;
+            else
+                sEdgePixels[y * 2 + side] = (a << 24) | (r << 16) | (g << 8) | b;
         }
     glBindTexture(GL_TEXTURE_2D, sEdgeTexture);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 2, 160, GL_BGRA, GL_UNSIGNED_BYTE, sEdgePixels);
+}
+
+/* The wide picture the GBA renderer drew this frame into its texture. */
+static void UploadWide(void)
+{
+    int width = gDioramaSceneWideLeft + 240 + gDioramaSceneWideRight;
+    int height = gDioramaSceneWideTop + 160;
+
+    for (int i = 0; i < width * height; ++i)
+    {
+        uint16_t c = gDioramaSceneWide[i];
+        uint32_t r = (c & 0x1F) * 255 / 31, g = ((c >> 5) & 0x1F) * 255 / 31, b = ((c >> 10) & 0x1F) * 255 / 31;
+
+        sWide.pixels[i] = 0xFF000000u | (r << 16) | (g << 8) | b;
+    }
+    if (sWide.texture == 0)
+        MakeTexture(&sWide.texture, width, height, sWide.pixels);
+    else if (sWide.width != width || sWide.height != height)
+    {
+        glBindTexture(GL_TEXTURE_2D, sWide.texture);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_BGRA, GL_UNSIGNED_BYTE, sWide.pixels);
+    }
+    else
+    {
+        glBindTexture(GL_TEXTURE_2D, sWide.texture);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_BGRA, GL_UNSIGNED_BYTE, sWide.pixels);
+    }
+    sWide.width = width;
+    sWide.height = height;
+    sWide.left = gDioramaSceneWideLeft;
+    sWide.right = gDioramaSceneWideRight;
+    sWide.top = gDioramaSceneWideTop;
+    sWide.valid = true;
+}
+
+void DioramaGLBattle_UploadFrame(const uint32_t *rgba)
+{
+    (void)rgba;
+    if (!sBattle.ready)
+        return;
+    sWide.valid = false;
+    if (gDioramaSceneWideWanted)
+    {
+        UploadWide();
+        UploadEdges(true);
+        if (sBattle.log && sWide.frames++ == 0)
+            SDL_Log("Diorama battle: a move's own background, carried past the picture "
+                    "(%d, %d and %d pixels left, right and above)", sWide.left, sWide.right, sWide.top);
+        return;
+    }
+    if (sBattle.sceneLayers == 0)
+        return;
+    UploadEdges(false);
     if (gDioramaSceneArtWanted && (!sArtValid || memcmp(sArtLast, gDioramaSceneArt, sizeof(sArtLast)) != 0))
     {
         memcpy(sArtLast, gDioramaSceneArt, sizeof(sArtLast));
@@ -1651,6 +1761,21 @@ static void DrawIntroBars(const struct Layout *layout)
 
 /* The picture's background carried out past its edges: each line's edge
  * colour and cover to the sides, its first line's above, its last below. */
+/* The wide picture round the battle's own (a move's background, V13): GBA
+ * pixel for GBA pixel at the picture's scale, so nothing is stretched. */
+static void DrawWide(const struct Layout *layout)
+{
+    static const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    float x0 = layout->gameX - sWide.left * layout->scale;
+    float y0 = layout->gameY - sWide.top * layout->scale;
+    float x1 = layout->gameX + (240 + sWide.right) * layout->scale;
+    float y1 = layout->gameY + 160.0f * layout->scale;
+
+    QuadBegin();
+    PushQuad(x0, y0, x1, y1, 0.0f, 0.0f, 1.0f, 1.0f, white, white, white, white);
+    QuadFlush(layout, sWide.texture, 2);
+}
+
 static void DrawCarriedOut(const struct Layout *layout)
 {
     static const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -1945,6 +2070,11 @@ bool DioramaGLBattle_Present(SDL_Window *window)
         DrawFade(&layout);
         DrawShadows(&layout);
         DrawIntroAtmosphere(&layout);
+        DrawCarriedOut(&layout);
+    }
+    else if (sWide.valid)
+    {
+        DrawWide(&layout);
         DrawCarriedOut(&layout);
     }
     DrawPicture(&layout);

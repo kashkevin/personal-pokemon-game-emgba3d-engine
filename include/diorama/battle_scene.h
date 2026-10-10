@@ -128,11 +128,14 @@ extern uint8_t gDioramaSceneCover[160 * 240];
 /* Per pixel row of that frame, the backgrounds' colour (RGB555,
  * premultiplied) and cover at the picture's left and right edges - window
  * state and blending included, sprites left out - to carry the picture out
- * to the sides of a window wider than 3:2. */
+ * to the sides of a window wider than 3:2; and which layer that colour is
+ * (0-3 BGn, 4 the backdrop). Recorded when gDioramaSceneLayers or
+ * gDioramaSceneWideWanted is set. */
 struct DioramaSceneEdge
 {
     uint16_t color;
     uint8_t cover;
+    uint8_t layer;
 };
 extern struct DioramaSceneEdge gDioramaSceneEdges[160][2];
 /* OAM entries left out of the frame being drawn (bit n: entry n): the map's
@@ -149,5 +152,24 @@ extern int16_t gDioramaSceneLineShift[160][2];
  * with the world. */
 extern uint16_t gDioramaSceneArt[160 * 240];
 extern bool gDioramaSceneArtWanted;
+/* With gDioramaSceneWideWanted set before DrawFrame (and the margins, in GBA
+ * pixels: left of column 0, right of column 239, above row 0): what the screen
+ * would show there if it were that much larger - BG3 (a move's own background,
+ * which the GBA tiles past the screen's edges by wrapping its tilemap) over the
+ * backdrop, with BG3's scroll on each row, the frame's palette and BG3's and the
+ * backdrop's brightness and blending as the GBA applies them, the window state
+ * of the nearest column of the picture. The other layers (the text box, the
+ * battlers, a move's effects) stay inside the picture. RGB555 rows of
+ * left + 240 + right pixels, top + 160 rows; row 0 is GBA row -top, column 0
+ * GBA column -left (inside the picture: BG3 alone, unused). */
+#define DIORAMA_WIDE_MAX_SIDE 256
+#define DIORAMA_WIDE_MAX_TOP 96
+#define DIORAMA_WIDE_MAX_W (DIORAMA_WIDE_MAX_SIDE + 240 + DIORAMA_WIDE_MAX_SIDE)
+#define DIORAMA_WIDE_MAX_H (DIORAMA_WIDE_MAX_TOP + 160)
+extern bool gDioramaSceneWideWanted;
+extern uint16_t gDioramaSceneWideLeft;
+extern uint16_t gDioramaSceneWideRight;
+extern uint16_t gDioramaSceneWideTop;
+extern uint16_t gDioramaSceneWide[DIORAMA_WIDE_MAX_H * DIORAMA_WIDE_MAX_W];
 
 #endif // GUARD_DIORAMA_BATTLE_SCENE_H

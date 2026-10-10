@@ -49,6 +49,16 @@ uint32_t gDioramaSceneSkipObj[4];
 int16_t gDioramaSceneLineShift[DISPLAY_HEIGHT][2];
 uint16_t gDioramaSceneArt[DISPLAY_HEIGHT * DISPLAY_WIDTH];
 bool gDioramaSceneArtWanted;
+bool gDioramaSceneWideWanted;
+uint16_t gDioramaSceneWideLeft;
+uint16_t gDioramaSceneWideRight;
+uint16_t gDioramaSceneWideTop;
+uint16_t gDioramaSceneWide[DIORAMA_WIDE_MAX_H * DIORAMA_WIDE_MAX_W];
+static bool sWideWanted;         /* gDioramaSceneWideWanted, latched per frame */
+static int sWideLeft;            /* its margins, latched and limited */
+static int sWideRight;
+static int sWideTop;
+static int sWideStride;          /* sWideLeft + 240 + sWideRight */
 static bool sSkipObj;            /* gDioramaSceneSkipObj has any bit set */
 static bool sArtWanted;          /* gDioramaSceneArtWanted, latched per frame */
 static const uint16_t *sBgPalette; /* RenderBGScanline's palette; NULL: PLTT */
@@ -511,6 +521,7 @@ static void SceneEdge(struct scanlineData *scanline, uint16_t backdrop, int x,
 {
     uint16_t color = backdrop;
     uint8_t cover = 0;
+    uint8_t layer = 4;
 
     for (int prnum = 3; prnum >= 0; prnum--)
     {
@@ -554,10 +565,151 @@ static void SceneEdge(struct scanlineData *scanline, uint16_t backdrop, int x,
             }
             color = pixel;
             cover = pixelCover;
+            layer = bgnum;
         }
     }
     out->color = color & 0x7FFF;
     out->cover = cover;
+    out->layer = layer;
+}
+
+static inline int FloorMod(int value, int modulus)
+{
+    int r = value % modulus;
+
+    return r < 0 ? r + modulus : r;
+}
+
+// A text BG at columns x0..x1-1 of row lineNum - either may lie past the
+// screen - as the GBA would fetch them if the screen went on: the tilemap
+// wraps (RenderBGScanline for any columns). See-through pixels are 0.
+static void RenderBGRunWide(uint16_t control, uint16_t hoffs, uint16_t voffs, int lineNum,
+                            int x0, int x1, uint16_t *out)
+{
+    unsigned int charBaseBlock = (control >> 2) & 3;
+    unsigned int screenBaseBlock = (control >> 8) & 0x1F;
+    unsigned int bitsPerPixel = ((control >> 7) & 1) ? 8 : 4;
+    unsigned int mapWidthInPixels = bgMapSizes[control >> 14][0] * 8;
+    unsigned int mapHeightInPixels = bgMapSizes[control >> 14][1] * 8;
+    const uint8_t *bgtiles = (const uint8_t *)BG_CHAR_ADDR(charBaseBlock);
+    const uint16_t *pal = (const uint16_t *)PLTT;
+    bool mosaic = (control & BGCNT_MOSAIC) != 0;
+    unsigned int yy;
+
+    if (mosaic)
+        lineNum -= FloorMod(lineNum, mosaicBGEffectY + 1);
+    yy = (unsigned int)(lineNum + (int)(voffs & 0x1FF)) & 0x1FF;
+    for (int x = x0; x < x1; x++)
+    {
+        const uint16_t *bgmap = (const uint16_t *)BG_SCREEN_ADDR(screenBaseBlock);
+        int sx = mosaic ? x - FloorMod(x, mosaicBGEffectX + 1) : x;
+        unsigned int xx = (unsigned int)(sx + (int)(hoffs & 0x1FF)) & 0x1FF;
+        unsigned int ty = yy;
+        uint16_t entry;
+        unsigned int tileX, tileY, tileLoc;
+        uint8_t pixel;
+
+        if (xx > 255 && mapWidthInPixels > 256)
+            bgmap += 0x400;
+        if (ty > 255 && mapHeightInPixels > 256)
+            bgmap += (mapWidthInPixels > 256) ? 0x800 : 0x400;
+        xx &= 0xFF;
+        ty &= 0xFF;
+        entry = bgmap[(ty / 8) * 32 + xx / 8];
+        tileX = xx % 8;
+        tileY = ty % 8;
+        if (entry & (1 << 10))
+            tileX = 7 - tileX;
+        if (entry & (1 << 11))
+            tileY = 7 - tileY;
+        tileLoc = (entry & 0x3FF) * (bitsPerPixel * 8) + tileY * bitsPerPixel;
+        if (bitsPerPixel == 4)
+        {
+            pixel = bgtiles[tileLoc + tileX / 2];
+            pixel = (tileX & 1) ? pixel >> 4 : pixel & 0xF;
+            out[x - x0] = pixel != 0 ? (pal[16 * ((entry >> 12) & 0xF) + pixel] | 0x8000) : 0;
+        }
+        else
+        {
+            pixel = bgtiles[tileLoc + tileX];
+            out[x - x0] = pixel != 0 ? (pal[pixel] | 0x8000) : 0;
+        }
+    }
+}
+
+// The wide picture's colour from BG3's pixel there (alpha bit clear: none),
+// the window state that applies (WINMASK bits) and this row's backdrop
+// colour (its brightness effect applied, as DrawFrame fills it).
+static uint16_t WideColor(uint16_t bg3, unsigned int mask, uint16_t backdrop)
+{
+    unsigned int blendMode = (REG_BLDCNT >> 6) & 3;
+
+    if (!getAlphaBit(bg3) || !(mask & WINMASK_BG3))
+        return backdrop & 0x7FFF;
+    if (blendMode != 0 && (REG_BLDCNT & BLDCNT_TGT1_BG3) && (mask & WINMASK_CLR))
+    {
+        switch (blendMode)
+        {
+        case 1:
+            // Over the backdrop: nothing else reaches past the picture.
+            if (REG_BLDCNT & BLDCNT_TGT2_BD)
+                bg3 = alphaBlendColor(bg3, *(uint16_t *)PLTT);
+            break;
+        case 2:
+            bg3 = alphaBrightnessIncrease(bg3);
+            break;
+        case 3:
+            bg3 = alphaBrightnessDecrease(bg3);
+            break;
+        }
+    }
+    return bg3 & 0x7FFF;
+}
+
+// Columns x0..x1-1 of row lineNum of the wide picture into out: the window
+// state of maskRow's column for columns inside the picture (maskRow NULL:
+// none), of `mask` for the others.
+static void WideRun(uint16_t *out, int x0, int x1, int lineNum, unsigned int mask,
+                    const uint16_t *maskRow, uint16_t backdrop)
+{
+    static uint16_t bg3[DIORAMA_WIDE_MAX_W];
+    bool shown = (REG_DISPCNT & 3) == 0 && (isbgEnabled(3)) != 0;
+
+    if (x1 <= x0)
+        return;
+    if (shown)
+        RenderBGRunWide(*(uint16_t *)(REG_ADDR_BG0CNT + 3 * 2), *(uint16_t *)(REG_ADDR_BG0HOFS + 3 * 4),
+                        *(uint16_t *)(REG_ADDR_BG0VOFS + 3 * 4), lineNum, x0, x1, bg3);
+    for (int x = x0; x < x1; x++)
+    {
+        unsigned int m = maskRow != NULL && x >= 0 && x < DISPLAY_WIDTH ? maskRow[x] : mask;
+
+        out[x - x0] = WideColor(shown ? bg3[x - x0] : 0, m, backdrop);
+    }
+}
+
+// This row's part of the wide picture (gDioramaSceneWide): BG3 past the
+// picture's left and right edges with the window state of the edge column;
+// with row 0, the rows above the picture too, as row 0 would continue.
+static void WideLine(const uint16_t *winMask, bool windowsEnabled, uint16_t vcount, uint16_t backdrop)
+{
+    unsigned int leftMask = windowsEnabled ? winMask[0] : 0xFF;
+    unsigned int rightMask = windowsEnabled ? winMask[DISPLAY_WIDTH - 1] : 0xFF;
+    uint16_t *row = &gDioramaSceneWide[(sWideTop + vcount) * sWideStride];
+
+    WideRun(row, -sWideLeft, 0, vcount, leftMask, NULL, backdrop);
+    WideRun(row + sWideLeft + DISPLAY_WIDTH, DISPLAY_WIDTH, DISPLAY_WIDTH + sWideRight, vcount,
+            rightMask, NULL, backdrop);
+    if (vcount == 0)
+        for (int y = -sWideTop; y < 0; y++)
+        {
+            uint16_t *above = &gDioramaSceneWide[(sWideTop + y) * sWideStride];
+
+            WideRun(above, -sWideLeft, 0, y, leftMask, NULL, backdrop);
+            WideRun(above + sWideLeft, 0, DISPLAY_WIDTH, y, 0xFF, windowsEnabled ? winMask : NULL, backdrop);
+            WideRun(above + sWideLeft + DISPLAY_WIDTH, DISPLAY_WIDTH, DISPLAY_WIDTH + sWideRight, y,
+                    rightMask, NULL, backdrop);
+        }
 }
 #endif
 
@@ -976,13 +1128,16 @@ static void DrawScanline(uint16_t *pixels, uint16_t vcount)
     }
 
 #ifdef ENABLE_DIORAMA
-    if (cover != NULL)
+    if (cover != NULL || sWideWanted)
     {
         // The window mask without the OBJ window (that is sprites, left out).
         SceneEdge(&scanline, pixels[0], 0, windowsEnabled, blendMode, &gDioramaSceneEdges[vcount][0]);
         SceneEdge(&scanline, pixels[DISPLAY_WIDTH - 1], DISPLAY_WIDTH - 1, windowsEnabled, blendMode,
                   &gDioramaSceneEdges[vcount][1]);
     }
+    // pixels still holds this row's backdrop colour (DrawFrame).
+    if (sWideWanted)
+        WideLine(scanline.winMask, windowsEnabled, vcount, pixels[0]);
 #endif
     if (REG_DISPCNT & DISPCNT_OBJ_ON)
         DrawSprites(&scanline, vcount, windowsEnabled);
@@ -1099,6 +1254,14 @@ void DrawFrame(uint16_t *pixels)
 #ifdef ENABLE_DIORAMA
     sSceneMask = gDioramaSceneLayers & 0x0F;
     sArtWanted = gDioramaSceneArtWanted;
+    sWideWanted = gDioramaSceneWideWanted;
+    if (sWideWanted)
+    {
+        sWideLeft = gDioramaSceneWideLeft < DIORAMA_WIDE_MAX_SIDE ? gDioramaSceneWideLeft : DIORAMA_WIDE_MAX_SIDE;
+        sWideRight = gDioramaSceneWideRight < DIORAMA_WIDE_MAX_SIDE ? gDioramaSceneWideRight : DIORAMA_WIDE_MAX_SIDE;
+        sWideTop = gDioramaSceneWideTop < DIORAMA_WIDE_MAX_TOP ? gDioramaSceneWideTop : DIORAMA_WIDE_MAX_TOP;
+        sWideStride = sWideLeft + DISPLAY_WIDTH + sWideRight;
+    }
     sSkipObj = (gDioramaSceneSkipObj[0] | gDioramaSceneSkipObj[1]
               | gDioramaSceneSkipObj[2] | gDioramaSceneSkipObj[3]) != 0;
     if (sSceneMask)
