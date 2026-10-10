@@ -336,6 +336,9 @@ check-diorama: $(DIORAMA_TEST_GEN)
 	$(DIORAMA_TEST_CC) $(DIORAMA_TEST_FLAGS) tests/diorama/test_camera.c src/diorama/scene/camera.c \
 	  -lm -o $(DIORAMA_TEST_DIR)/test_camera
 	$(DIORAMA_TEST_DIR)/test_camera
+	$(DIORAMA_TEST_CC) $(DIORAMA_TEST_FLAGS) $$($(DIORAMA_TEST_SDL) --cflags sdl2) tests/diorama/test_tree_sprites.c \
+	  src/diorama/scene/tree_sprites.c $$($(DIORAMA_TEST_SDL) --libs sdl2) -o $(DIORAMA_TEST_DIR)/test_tree_sprites
+	$(DIORAMA_TEST_DIR)/test_tree_sprites
 	$(DIORAMA_TEST_CC) $(DIORAMA_TEST_FLAGS) tests/diorama/test_ui_overlay.c src/diorama/scene/ui_overlay.c \
 	  -o $(DIORAMA_TEST_DIR)/test_ui_overlay
 	$(DIORAMA_TEST_DIR)/test_ui_overlay

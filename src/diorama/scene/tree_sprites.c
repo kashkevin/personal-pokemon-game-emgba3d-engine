@@ -38,6 +38,12 @@ int DioramaTreeSprites_Part(bool dewford, uint16_t metatileId)
     case 0x1D5: case 0x1D7: return 1;
     case 0x1DC: case 0x1DE: case 0x1E4: case 0x1E6: return 2;
     case 0x1DD: case 0x1DF: case 0x1E5: case 0x1E7: return 3;
+    /* The lower row again, beside open ground (Petalburg Woods, Rustboro,
+     * Route 116, the Safari Zone: about 200 cells). Not in the 3DS project's
+     * list, so those trees lost their crowns' lower half and showed a band of
+     * flat trunk art instead (KNOWN_ISSUES V23). */
+    case 0x1F2: return 2;
+    case 0x1F3: return 3;
     /* A large tree's lower row under a small tree's canopy top. */
     case 0x1EC: return 2;
     case 0x1ED: return 3;
