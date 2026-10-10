@@ -34,10 +34,12 @@
 #include "diorama/gl_compositor.h"
 #include "diorama/gl_loader.h"
 #include "diorama/gl_terrain_renderer.h"
+#include "diorama/gl_tree_sprites.h"
 #include "diorama/rules.h"
 #include "diorama/scene_snapshot.h"
 #include "diorama/terrain_mesh.h"
 #include "diorama/tree_model.generated.h"
+#include "diorama/tree_sprites.h"
 #include "gba/defines.h"
 #include "constants/map_types.h"
 
@@ -152,7 +154,7 @@ static struct
     bool off; /* PKMN_DIORAMA_BATTLE_KEEP=0: the world drawn every frame */
     struct View view;
     struct Layout layout;
-    uint32_t terrainGeneration, buildingGeneration;
+    uint32_t terrainGeneration, buildingGeneration, treeGeneration;
     uint32_t drawn, kept; /* frames drawn and frames reused, for the log */
 } sWorldCache;
 
@@ -574,6 +576,35 @@ struct StageContext
 #define VOXEL_TREE_HEIGHT ((DIORAMA_TREE_MODEL_MAX_Y - DIORAMA_TREE_MODEL_MIN_Y) \
                            / (float)DIORAMA_VOXELS_PER_CELL)
 
+/*
+ * The 3DS project's trees (F8; gl_tree_sprites.c LargeCrown, SmallCrown):
+ * the tree's cells are published as ground with the crown, a cut-out
+ * leaning back 50 degrees, standing on them. A large tree's crown tops out
+ * 1.62 tiles up over its upper row and comes down to the ground across its
+ * lower row; a small tree's tops out 1.43 up over its one cell.
+ */
+#define TREE_3DS_LARGE_TOP (-0.10f + 1.7236f)
+#define TREE_3DS_LARGE_MIDDLE (-0.10f + 0.5f * 1.7236f)
+#define TREE_3DS_SMALL_TOP (-0.10f + 1.532089f)
+
+static float Tree3dsTop(uint8_t treeSprite)
+{
+    switch (treeSprite)
+    {
+    case DIORAMA_TREE_SPRITE_QUARTER + 0:
+    case DIORAMA_TREE_SPRITE_QUARTER + 1:
+        return TREE_3DS_LARGE_TOP;
+    case DIORAMA_TREE_SPRITE_QUARTER + 2:
+    case DIORAMA_TREE_SPRITE_QUARTER + 3:
+        return TREE_3DS_LARGE_MIDDLE;
+    case DIORAMA_TREE_SPRITE_SMALL:
+    case DIORAMA_TREE_SPRITE_SMALL_DEWFORD:
+        return TREE_3DS_SMALL_TOP;
+    default:
+        return 0.0f;
+    }
+}
+
 static bool IsVoxelTree(const struct DioramaResolvedCell *resolved)
 {
     return resolved->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL && resolved->structureWidth == 2;
@@ -629,6 +660,8 @@ static bool StageCellAt(void *context, int x, int y, struct DioramaStageCell *ce
       || (south != NULL && IsVoxelTree(south) && south->structureHeight == 1))
      && top < VOXEL_TREE_HEIGHT)
         top = VOXEL_TREE_HEIGHT;
+    if (Tree3dsTop(source->treeSprite) > top)
+        top = Tree3dsTop(source->treeSprite);
     switch (resolved->shape)
     {
     case DIORAMA_SHAPE_EXTRUDED:
@@ -1021,7 +1054,8 @@ static bool IsWorldKept(const struct View *view, const struct Layout *layout)
         && memcmp(&sWorldCache.view, view, sizeof(*view)) == 0
         && memcmp(&sWorldCache.layout, layout, sizeof(*layout)) == 0
         && sWorldCache.terrainGeneration == DioramaGLTerrain_GetGeometryGeneration()
-        && sWorldCache.buildingGeneration == DioramaGLBuildings_GetGeometryGeneration();
+        && sWorldCache.buildingGeneration == DioramaGLBuildings_GetGeometryGeneration()
+        && sWorldCache.treeGeneration == DioramaGLTreeSprites_GetGeometryGeneration();
 }
 
 /* Right after the world is drawn, before anything over it: copy it out. */
@@ -1047,6 +1081,7 @@ static void KeepWorld(const struct View *view, const struct Layout *layout)
     sWorldCache.layout = *layout;
     sWorldCache.terrainGeneration = DioramaGLTerrain_GetGeometryGeneration();
     sWorldCache.buildingGeneration = DioramaGLBuildings_GetGeometryGeneration();
+    sWorldCache.treeGeneration = DioramaGLTreeSprites_GetGeometryGeneration();
     sWorldCache.valid = true;
 }
 

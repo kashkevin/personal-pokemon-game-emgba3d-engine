@@ -1508,6 +1508,7 @@ bool DioramaGL_GetBattleWorld(u8 mapGroup, u8 mapNum, u16 mapLayoutId,
          || !DioramaGLObjects_Sync(&sLastFieldSnapshot, sAtlasResolvedCells))
             return false;
         DioramaGLBuildings_Sync(&sLastFieldSnapshot, sAtlasResolvedCells);
+        DioramaGLTreeSprites_Sync(&sLastFieldSnapshot, sAtlasResolvedCells);
         if (sHasRenderedSceneSnapshot)
         {
             sPreviousRenderedSceneSnapshot = sRenderedSceneSnapshot;
@@ -1544,15 +1545,19 @@ void DioramaGL_DrawBattleWorld(float cameraX, float cameraZ, float pitch, float 
     DioramaGLLight_Update(&sRenderedSceneSnapshot, true);
     if (DioramaGLShadow_Begin(cameraX, cameraZ, SunStrength(&sRenderedSceneSnapshot),
                               ((uint64_t)DioramaGLBuildings_GetGeometryGeneration() << 32)
-                              | DioramaGLTerrain_GetGeometryGeneration()))
+                              | (DioramaGLTerrain_GetGeometryGeneration()
+                               ^ DioramaGLTreeSprites_GetGeometryGeneration() * 2654435761u)))
     {
         DioramaGLTerrain_DrawShadow(sAtlasTexture.id, sBaseAtlasTexture.id,
                                     sForegroundAtlasTexture.id);
         DioramaGLBuildings_DrawShadow();
+        DioramaGLTreeSprites_DrawShadow();
         DioramaGLShadow_End(outputWidth, outputHeight);
     }
     DioramaGLTerrain_Draw(sAtlasTexture.id, sBaseAtlasTexture.id, sForegroundAtlasTexture.id,
                           cameraX, cameraZ, pitch, focalLength, aspectCorrection, false);
+    // The 3DS project's trees when the tree style asks for them (F8).
+    DioramaGLTreeSprites_Draw(cameraX, cameraZ, pitch, focalLength, aspectCorrection);
     DioramaGLBuildings_Draw(cameraX, cameraZ, pitch, focalLength, aspectCorrection);
     glDisable(GL_SCISSOR_TEST);
 }

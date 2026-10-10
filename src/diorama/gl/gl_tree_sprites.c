@@ -9,6 +9,7 @@
 #include "diorama/gl_loader.h"
 #include "diorama/gl_shadow.h"
 #include "diorama/gl_terrain_renderer.h"
+#include "diorama/terrain_mesh.h"
 #include "diorama/gl_tree_sprites.h"
 #include "diorama/rules.h"
 #include "diorama/tree_sprites.h"
@@ -36,6 +37,9 @@ static GLint sCameraLocation;
 static GLint sCameraPitchLocation;
 static GLint sFocalLengthLocation;
 static GLint sAspectCorrectionLocation;
+static GLint sCameraHeightLocation;
+static GLint sCameraDistanceLocation;
+static GLint sScreenOffsetLocation;
 static GLint sImageLocation;
 static GLint sShadowPassLocation;
 static GLint sShadowEnabledLocation;
@@ -62,6 +66,10 @@ static const char sVertexShader[] =
     "uniform float cameraPitch;\n"
     "uniform float focalLength;\n"
     "uniform float aspectCorrection;\n"
+    /* The eye (terrain_mesh.h, DioramaCameraRig). */
+    "uniform float cameraHeight;\n"
+    "uniform float cameraDistance;\n"
+    "uniform float screenOffsetY;\n"
     "uniform int shadowPass;\n"
     "uniform mat4 lightViewProjection;\n"
     "out vec2 uv;\n"
@@ -69,19 +77,16 @@ static const char sVertexShader[] =
     "out float viewDepth;\n"
     "void main() {\n"
     /* The terrain's projection (gl_terrain_renderer.c), so the two meet. */
-    "  const float cameraHeight = 16.0;\n"
-    "  const float cameraTargetVertical = -0.458944;\n"
     "  const float nearDepth = 0.1;\n"
     "  const float farDepth = 80.0;\n"
     "  float pitchSin = sin(cameraPitch);\n"
     "  float pitchCos = cos(cameraPitch);\n"
-    "  float cameraDistance = (cameraHeight * pitchCos + cameraTargetVertical) / pitchSin;\n"
     "  float relativeX = position.x - cameraPosition.x;\n"
     "  float relativeZ = position.z - cameraPosition.y;\n"
     "  float depth = (cameraHeight - position.y) * pitchSin + (relativeZ + cameraDistance) * pitchCos;\n"
     "  float vertical = -(cameraHeight - position.y) * pitchCos + (relativeZ + cameraDistance) * pitchSin;\n"
     "  float clipX = relativeX * focalLength * 2.0 / 240.0 * aspectCorrection;\n"
-    "  float clipY = -0.04 * depth + vertical * focalLength * 2.0 / 160.0;\n"
+    "  float clipY = screenOffsetY * depth + vertical * focalLength * 2.0 / 160.0;\n"
     "  float clipZ = ((farDepth + nearDepth) / (farDepth - nearDepth)) * depth"
     "              - (2.0 * farDepth * nearDepth) / (farDepth - nearDepth);\n"
     "  gl_Position = vec4(clipX, clipY, clipZ, depth);\n"
@@ -180,6 +185,9 @@ static bool CreateProgram(void)
     sCameraPitchLocation = dglGetUniformLocation(sProgram, "cameraPitch");
     sFocalLengthLocation = dglGetUniformLocation(sProgram, "focalLength");
     sAspectCorrectionLocation = dglGetUniformLocation(sProgram, "aspectCorrection");
+    sCameraHeightLocation = dglGetUniformLocation(sProgram, "cameraHeight");
+    sCameraDistanceLocation = dglGetUniformLocation(sProgram, "cameraDistance");
+    sScreenOffsetLocation = dglGetUniformLocation(sProgram, "screenOffsetY");
     sImageLocation = dglGetUniformLocation(sProgram, "image");
     sShadowPassLocation = dglGetUniformLocation(sProgram, "shadowPass");
     sShadowEnabledLocation = dglGetUniformLocation(sProgram, "shadowEnabled");
@@ -413,6 +421,16 @@ void DioramaGLTreeSprites_Draw(float cameraX, float cameraZ, float cameraPitch,
     dglUniform1f(sCameraPitchLocation, cameraPitch);
     dglUniform1f(sFocalLengthLocation, focalLength);
     dglUniform1f(sAspectCorrectionLocation, aspectCorrection);
+    {
+        float eyeHeight;
+        float eyeDistance;
+        float screenOffsetY;
+
+        DioramaCamera_GetRig(cameraPitch, &eyeHeight, &eyeDistance, &screenOffsetY);
+        dglUniform1f(sCameraHeightLocation, eyeHeight);
+        dglUniform1f(sCameraDistanceLocation, eyeDistance);
+        dglUniform1f(sScreenOffsetLocation, screenOffsetY);
+    }
     dglUniform1i(sImageLocation, 0);
     dglUniform1i(sShadowPassLocation, 0);
     dglUniform1i(sShadowMapLocation, DIORAMA_SHADOW_TEXTURE_UNIT);
