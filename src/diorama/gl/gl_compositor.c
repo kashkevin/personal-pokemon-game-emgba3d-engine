@@ -1,5 +1,6 @@
 #ifdef ENABLE_DIORAMA
 
+#include <math.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -869,11 +870,56 @@ static void GetCameraPosition(const struct DioramaSceneSnapshot *snapshot,
     }
 }
 
+/*
+ * PKMN_DIORAMA_CAMERA=3ds: the 3DS project's framing (voxel_camera.c
+ * AdaptDistance, at its default 40 degrees and 100% zoom): 8 tiles back plus
+ * a fifth of the map's longer side (5 at most), seen through a 35 degree
+ * view, so about 10 tiles from top to bottom at the player - the GBA's own
+ * framing - on every map, indoors too. This camera stays where it is (16
+ * tiles up); the focal length gives the same framing, with a slightly
+ * flatter perspective than the 3DS's nearer eye.
+ */
+static bool UsesThreeDsCamera(void)
+{
+    static int sEnabled = -1;
+
+    if (sEnabled < 0)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_CAMERA");
+
+        sEnabled = value != NULL && SDL_strcasecmp(value, "3ds") == 0;
+    }
+    return sEnabled;
+}
+
+static void ThreeDsFraming(const struct DioramaSceneSnapshot *snapshot,
+                           float *pitch, float *focalLength)
+{
+    const float pitch3ds = 0.6981317f; /* 40 degrees */
+    const float halfView = 0.3152988f; /* tan(17.5 degrees): the 35 degree view */
+    float longer = (float)(snapshot->mapWidth > snapshot->mapHeight
+                           ? snapshot->mapWidth : snapshot->mapHeight);
+    float back = 8.0f + (longer * 0.2f > 5.0f ? 5.0f : longer * 0.2f);
+    float eye3ds = back / cosf(pitch3ds);
+    /* This camera's eye-to-target distance at that pitch (the shaders'). */
+    float distance = (16.0f * cosf(pitch3ds) - 0.458944f) / sinf(pitch3ds);
+    float eye = 16.0f * sinf(pitch3ds) + distance * cosf(pitch3ds);
+
+    *pitch = pitch3ds;
+    /* The same height of the world at the target: eye x 80 / f = eye3ds x halfView. */
+    *focalLength = 80.0f * eye / (eye3ds * halfView);
+}
+
 static void GetCameraBase(const struct DioramaSceneSnapshot *snapshot,
                           float *pitch, float *focalLength)
 {
     struct DioramaMapProfile profile;
 
+    if (UsesThreeDsCamera())
+    {
+        ThreeDsFraming(snapshot, pitch, focalLength);
+        return;
+    }
     *pitch = CAMERA_DEFAULT_PITCH;
     *focalLength = CAMERA_DEFAULT_FOCAL_LENGTH;
     if (DioramaRules_GetMapProfile(snapshot->mapGroup, snapshot->mapNum,
