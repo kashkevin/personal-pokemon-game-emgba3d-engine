@@ -247,8 +247,12 @@ static const struct CapsGlyph sCaps[] = {
     {'8', {".###.", "#...#", "#...#", ".###.", "#...#", "#...#", ".###."}},
     {'9', {".###.", "#...#", "#...#", ".####", "....#", "....#", ".###."}},
     {'/', {"....#", "...#.", "...#.", "..#..", ".#...", ".#...", "#...."}},
-    {'.', {".", ".", ".", ".", ".", ".", "#"}},
+    {'.', {"..", "..", "..", "..", "..", "##", "##"}},
     {'-', {"...", "...", "...", "###", "...", "...", "..."}},
+    {'=', {"...", "...", "###", "...", "###", "...", "..."}},
+    {',', {"..", "..", "..", "..", "##", "##", "#."}},
+    {'<', {"...#", "..#.", ".#..", "#...", ".#..", "..#.", "...#"}},
+    {'>', {"#...", ".#..", "..#.", "...#", "..#.", ".#..", "#..."}},
     {'+', {".....", "..#..", "..#..", "#####", "..#..", "..#..", "....."}},
     {':', {".", ".", "#", ".", ".", "#", "."}},
     {'%', {"##..#", "##.#.", "...#.", "..#..", ".#...", ".#.##", "#..##"}},
@@ -833,10 +837,12 @@ static void DrawCorner(const char *text)
 /* What the canvas shows, to draw it again only when that changes (the cursor's
  * nudge changes it four times a second, a frame rate readout twice). */
 static void UiSignature(char *out, size_t size, const struct DioramaOverlayMenu *menu, const char *corner,
-                      const struct CanvasView *view)
+                        const struct DioramaOverlayExtras *extras, const struct CanvasView *view)
 {
-    size_t used = (size_t)SDL_snprintf(out, size, "%dx%d %s|", view->width, view->height,
-                                       corner != NULL ? corner : "");
+    size_t used = (size_t)SDL_snprintf(out, size, "%dx%d %s|%s|%d|", view->width, view->height,
+                                       corner != NULL ? corner : "",
+                                       extras != NULL && extras->notice != NULL ? extras->notice : "",
+                                       extras != NULL && extras->photoHints);
 
     if (menu == NULL || used >= size)
         return;
@@ -848,21 +854,74 @@ static void UiSignature(char *out, size_t size, const struct DioramaOverlayMenu 
                                      menu->rows[i].adjustable ? '+' : ' ');
 }
 
+/* Photo mode (F9): its keys along the bottom of the picture. */
+static void DrawPhotoHints(void)
+{
+    static const char *const sMoveKeys[] = {"{", "^", "_", "}"};
+    static const char *const sZoomKeys[] = {"-", "="};
+    static const char *const sTiltKeys[] = {",", "."};
+    static const char *const sSaveKeys[] = {"F12"};
+    static const char *const sBackKeys[] = {"ESC"};
+    struct Shape plate = {0};
+    int width = UiHintWidth(sMoveKeys, 4, "Move") + 8 + UiHintWidth(sZoomKeys, 2, "Zoom") + 8
+              + UiHintWidth(sTiltKeys, 2, "Tilt") + 8 + UiHintWidth(sSaveKeys, 1, "Picture") + 8
+              + UiHintWidth(sBackKeys, 1, "Back");
+    int x;
+    int y = sHeight - 27;
+    int penX;
+
+    plate.width = width + 12;
+    plate.height = 19;
+    UiShapeCorners(&plate, sCorner2, 2);
+    x = (sWidth - plate.width) / 2;
+    UiPaint(&plate, x, y, PAPER, FIELD_INK, 0, PAPER_LO, 1);
+    UiTitleTab(x + 6, y - 14, "PHOTO");
+    penX = UiHint(x + 6, y + 4, sMoveKeys, 4, "Move") + 8;
+    penX = UiHint(penX, y + 4, sZoomKeys, 2, "Zoom") + 8;
+    penX = UiHint(penX, y + 4, sTiltKeys, 2, "Tilt") + 8;
+    penX = UiHint(penX, y + 4, sSaveKeys, 1, "Picture") + 8;
+    UiHint(penX, y + 4, sBackKeys, 1, "Back");
+}
+
+/* A line in a message box at the bottom (a picture saved). */
+static void DrawNotice(const char *text, bool aboveHints)
+{
+    int inner[4];
+    int width = UiTextWidth(FONT_NORMAL, text) + 28;
+    int height = 34;
+    int x;
+    int y = sHeight - height - (aboveHints ? 46 : 8);
+
+    if (width > sWidth - 16)
+        width = sWidth - 16;
+    x = (sWidth - width) / 2;
+    UiFieldFrame(x, y, width, height, PAPER, PAPER_LO, inner);
+    UiText(FONT_NORMAL, inner[0] + 9, inner[1] + 4, text, TEXT, TEXT_SH);
+}
+
 void DioramaPCOverlay_Draw(const struct DioramaOverlayMenu *menu, const char *corner,
+                           const struct DioramaOverlayExtras *extras,
                            int outputWidth, int outputHeight)
 {
     static char sShown[2048];
     char signature[2048];
     struct CanvasView view;
 
-    if (menu == NULL && corner == NULL)
+    bool hints = extras != NULL && extras->photoHints;
+    const char *notice = extras != NULL ? extras->notice : NULL;
+
+    if (menu == NULL && corner == NULL && !hints && notice == NULL)
         return;
     if (!BeginCanvas(outputWidth, outputHeight, &view))
         return;
-    UiSignature(signature, sizeof(signature), menu, corner, &view);
+    UiSignature(signature, sizeof(signature), menu, corner, extras, &view);
     if (strcmp(signature, sShown) != 0 || sTexture == 0)
     {
         memset(sPixels, 0, (size_t)sWidth * sHeight * sizeof(*sPixels));
+        if (hints)
+            DrawPhotoHints();
+        if (notice != NULL)
+            DrawNotice(notice, hints);
         if (menu != NULL)
             DrawSettingsSheet(menu->title, menu->rows, menu->count, menu->confirmSeconds);
         if (corner != NULL)

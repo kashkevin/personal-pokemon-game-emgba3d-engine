@@ -7,8 +7,11 @@
 #include "diorama/ui_overlay.h"
 
 #define DIORAMA_SNAPSHOT_COUNT 3
-#define DIORAMA_GRID_WIDTH 33
-#define DIORAMA_GRID_HEIGHT 33
+/* The cells round the camera the 3D view holds: 49 x 49 since the graphics
+ * overhaul (33 x 33 before), so the wider cameras and the edge fog
+ * (gl_light.h) never show the scene's end. */
+#define DIORAMA_GRID_WIDTH 49
+#define DIORAMA_GRID_HEIGHT 49
 #define DIORAMA_MAX_VISIBLE_CELLS (DIORAMA_GRID_WIDTH * DIORAMA_GRID_HEIGHT)
 #define DIORAMA_MAX_OBJECTS 16
 #define DIORAMA_FADED_PALETTE_ENTRIES 512

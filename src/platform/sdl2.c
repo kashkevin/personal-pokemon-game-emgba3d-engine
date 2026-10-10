@@ -3,7 +3,13 @@
 #include <setjmp.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
+#ifdef _WIN32
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#endif
 
 #ifdef _WIN32
 #include <windows.h>
@@ -30,8 +36,11 @@
 #include "platform/benchmark.h"
 #include "platform/display_settings.h"
 #include "platform/pc_menu.h"
+#include "platform/png_write.h"
 #ifdef ENABLE_DIORAMA
+#include "diorama/camera.h"
 #include "diorama/gl_compositor.h"
+#include "diorama/gl_loader.h"
 #include "diorama/gl_pc_overlay.h"
 #include "diorama/gl_quality.h"
 #include "diorama/gl_target.h"
@@ -118,6 +127,7 @@ static void AfterPresent(void);
 static void ApplyDioramaVideoSetting(enum PlatformSetting setting, u8 value);
 static void DrawPcOverlay(int outputWidth, int outputHeight);
 static bool HandlePcMenuKey(const SDL_KeyboardEvent *key);
+static bool HandlePhotoKey(const SDL_KeyboardEvent *key);
 #endif
 
 #ifdef __ANDROID__
@@ -195,23 +205,30 @@ static Uint32 sLastPresentMs;
 static Uint32 sLastPresentCostMs;
 static Uint32 sSaveActiveUntilMs;
 
-// The 3D view's look as pokeemerald.cfg keeps it: the camera's framing (F7)
-// and the tree style (F8), each the Diorama's own or the 3DS project's, and
-// the pitch and zoom keys' steps. PKMN_DIORAMA_CAMERA and PKMN_DIORAMA_TREES
-// (3ds, or anything else for the Diorama's own) override the file for one run
+// The 3D view's look as pokeemerald.cfg keeps it: the camera mode (F7: the
+// Adventure camera or the Diorama camera, diorama/camera.h), each mode's zoom
+// and tilt steps, and the tree style (F8: the Diorama's voxel trees or the 3DS
+// project's). PKMN_DIORAMA_CAMERA (adventure or diorama) and PKMN_DIORAMA_TREES
+// (3ds, or anything else for the voxel trees) override the file for one run
 // without being written to it, as the test scripts use them.
-// The owner's defaults (2026-10-10): the 3DS camera and the 3DS trees. A style
-// is written to the file only once it is the player's (read from the file or
-// switched with F7/F8), so a saved choice always stays and a file that never
-// held one follows the defaults.
-static u8 sCameraStyle = DIORAMA_CAMERA_3DS;
+// The graphics overhaul (2026-10-10) replaced the camera styles of earlier
+// builds (cameraStyle, cameraPitch, cameraZoom): those lines are not read, so
+// every player starts in the Adventure camera (the 3DS framing the owner chose,
+// eased and following the ground); the old wide view was the floating board.
+// A mode or tree style is written only once it is the player's.
+static u8 sCameraMode = DIORAMA_CAMERA_ADVENTURE;
 static bool8 sTreeStyle3ds = TRUE;
-static bool8 sCameraStyleKept;
+static bool8 sCameraModeKept;
 static bool8 sTreeStyleKept;
-static int sCameraPitchSteps;
-static int sCameraZoomSteps;
+static int sCameraZoomSteps[2];  /* Adventure, Diorama */
+static int sCameraTiltSteps[2];
 static bool sCameraStepsDirty;
 static Uint32 sCameraStepsChangedMs;
+// Photo mode (F9): the game stands still, the camera moves, F12 saves the picture.
+static bool sPhotoMode;
+static bool sScreenshotRequested;
+static char sScreenshotNotice[160];
+static Uint32 sScreenshotNoticeMs;
 
 static int EnvironmentStyle(const char *name, int fallback)
 {
@@ -222,21 +239,45 @@ static int EnvironmentStyle(const char *name, int fallback)
     return SDL_strcasecmp(value, "3ds") == 0;
 }
 
+static int EnvironmentCameraMode(int fallback)
+{
+    const char *value = SDL_getenv("PKMN_DIORAMA_CAMERA");
+
+    if (value == NULL || value[0] == '\0')
+        return fallback;
+    return SDL_strcasecmp(value, "diorama") == 0 ? DIORAMA_CAMERA_DIORAMA : DIORAMA_CAMERA_ADVENTURE;
+}
+
 static void ApplyDioramaLook(void)
 {
-    DioramaGL_SetCameraStyle(EnvironmentStyle("PKMN_DIORAMA_CAMERA", sCameraStyle)
-                             ? DIORAMA_CAMERA_3DS : DIORAMA_CAMERA_WIDE);
-    DioramaGL_SetCameraSteps(sCameraPitchSteps, sCameraZoomSteps);
+    for (int mode = 0; mode < 2; mode++)
+        DioramaGL_SetCameraSteps(mode, sCameraZoomSteps[mode], sCameraTiltSteps[mode]);
+    DioramaGL_SetCameraMode(EnvironmentCameraMode(sCameraMode));
     DioramaTreeSprites_SetEnabled(EnvironmentStyle("PKMN_DIORAMA_TREES", sTreeStyle3ds));
 }
 
-// The pitch and zoom keys and the mouse wheel: written a second after the
-// last change, so a turn of the wheel is one write.
+// The zoom and tilt keys and the mouse wheel: written a second after the
+// last change, so a turn of the wheel is one write. Photo mode's are its own.
 static void KeepCameraSteps(void)
 {
-    DioramaGL_GetCameraSteps(&sCameraPitchSteps, &sCameraZoomSteps);
+    int mode = DioramaGL_GetCameraMode();
+
+    if (mode != DIORAMA_CAMERA_ADVENTURE && mode != DIORAMA_CAMERA_DIORAMA)
+        return;
+    DioramaGL_GetCameraSteps(mode, &sCameraZoomSteps[mode], &sCameraTiltSteps[mode]);
     sCameraStepsDirty = true;
     sCameraStepsChangedMs = SDL_GetTicks();
+}
+
+static void SetPhotoMode(bool on)
+{
+    if (on == sPhotoMode)
+        return;
+    sPhotoMode = on;
+    paused = on;
+    keyboardKeys = 0;
+    DioramaGL_SetCameraMode(on ? DIORAMA_CAMERA_PHOTO : sCameraMode);
+    SDL_Log("3D view: photo mode %s", on ? "on" : "off");
 }
 #endif
 
@@ -749,20 +790,25 @@ static void ReadConfigFile(void)
         else if (sscanf(line, "cryVolume=%u", &value) == 1 && value <= 10)
             sPlatformSettings[PLATFORM_SETTING_CRY_VOLUME] = value;
 #ifdef ENABLE_DIORAMA
-        else if (sscanf(line, "cameraStyle=%u", &value) == 1)
+        else if (strncmp(line, "cameraMode=", 11) == 0)
         {
-            sCameraStyle = value == DIORAMA_CAMERA_3DS ? DIORAMA_CAMERA_3DS : DIORAMA_CAMERA_WIDE;
-            sCameraStyleKept = TRUE;
+            sCameraMode = strncmp(line + 11, "diorama", 7) == 0 ? DIORAMA_CAMERA_DIORAMA
+                                                                : DIORAMA_CAMERA_ADVENTURE;
+            sCameraModeKept = TRUE;
         }
         else if (sscanf(line, "treeStyle=%u", &value) == 1)
         {
             sTreeStyle3ds = value == 1;
             sTreeStyleKept = TRUE;
         }
-        else if (sscanf(line, "cameraPitch=%d", &steps) == 1)
-            sCameraPitchSteps = steps;
-        else if (sscanf(line, "cameraZoom=%d", &steps) == 1)
-            sCameraZoomSteps = steps;
+        else if (sscanf(line, "adventureZoom=%d", &steps) == 1)
+            sCameraZoomSteps[DIORAMA_CAMERA_ADVENTURE] = steps;
+        else if (sscanf(line, "adventureTilt=%d", &steps) == 1)
+            sCameraTiltSteps[DIORAMA_CAMERA_ADVENTURE] = steps;
+        else if (sscanf(line, "dioramaZoom=%d", &steps) == 1)
+            sCameraZoomSteps[DIORAMA_CAMERA_DIORAMA] = steps;
+        else if (sscanf(line, "dioramaTilt=%d", &steps) == 1)
+            sCameraTiltSteps[DIORAMA_CAMERA_DIORAMA] = steps;
 #endif
     }
     fclose(configFile);
@@ -807,12 +853,14 @@ static void StoreConfigFile(void)
     fprintf(configFile, "volume=%u\n", sPlatformSettings[PLATFORM_SETTING_VOLUME]);
     fprintf(configFile, "cryVolume=%u\n", sPlatformSettings[PLATFORM_SETTING_CRY_VOLUME]);
 #ifdef ENABLE_DIORAMA
-    if (sCameraStyleKept)
-        fprintf(configFile, "cameraStyle=%u\n", sCameraStyle);
+    if (sCameraModeKept)
+        fprintf(configFile, "cameraMode=%s\n", sCameraMode == DIORAMA_CAMERA_DIORAMA ? "diorama" : "adventure");
     if (sTreeStyleKept)
         fprintf(configFile, "treeStyle=%u\n", sTreeStyle3ds ? 1 : 0);
-    fprintf(configFile, "cameraPitch=%d\n", sCameraPitchSteps);
-    fprintf(configFile, "cameraZoom=%d\n", sCameraZoomSteps);
+    fprintf(configFile, "adventureZoom=%d\n", sCameraZoomSteps[DIORAMA_CAMERA_ADVENTURE]);
+    fprintf(configFile, "adventureTilt=%d\n", sCameraTiltSteps[DIORAMA_CAMERA_ADVENTURE]);
+    fprintf(configFile, "dioramaZoom=%d\n", sCameraZoomSteps[DIORAMA_CAMERA_DIORAMA]);
+    fprintf(configFile, "dioramaTilt=%d\n", sCameraTiltSteps[DIORAMA_CAMERA_DIORAMA]);
 #endif
     fclose(configFile);
 }
@@ -978,11 +1026,9 @@ static void ApplyPcMenuResult(unsigned int bits)
     if (bits & PC_MENU_CHANGED_CAMERA)
     {
         // As F7 does.
-        sCameraStyle = sPcMenu.camera3ds ? DIORAMA_CAMERA_3DS : DIORAMA_CAMERA_WIDE;
-        DioramaGL_SetCameraStyle(sCameraStyle);
-        sCameraStyleKept = TRUE;
-        sCameraPitchSteps = sCameraZoomSteps = 0;
-        sCameraStepsDirty = false;
+        sCameraMode = sPcMenu.cameraDiorama ? DIORAMA_CAMERA_DIORAMA : DIORAMA_CAMERA_ADVENTURE;
+        DioramaGL_SetCameraMode(sCameraMode);
+        sCameraModeKept = TRUE;
         store = true;
     }
     if (bits & PC_MENU_CHANGED_TREES)
@@ -995,6 +1041,45 @@ static void ApplyPcMenuResult(unsigned int bits)
     }
     if (store)
         StoreConfigFile();
+}
+
+static bool HandlePhotoKey(const SDL_KeyboardEvent *key)
+{
+    if (!sPhotoMode)
+        return false;
+    switch (key->keysym.sym)
+    {
+    case SDLK_UP:
+        DioramaGL_PhotoPan(0, 1);
+        return true;
+    case SDLK_DOWN:
+        DioramaGL_PhotoPan(0, -1);
+        return true;
+    case SDLK_LEFT:
+        DioramaGL_PhotoPan(-1, 0);
+        return true;
+    case SDLK_RIGHT:
+        DioramaGL_PhotoPan(1, 0);
+        return true;
+    case SDLK_ESCAPE:
+    case SDLK_x:
+    case SDLK_BACKSPACE:
+        if (key->repeat == 0)
+            SetPhotoMode(false);
+        return true;
+    case SDLK_COMMA:
+    case SDLK_PERIOD:
+    case SDLK_MINUS:
+    case SDLK_KP_MINUS:
+    case SDLK_EQUALS:
+    case SDLK_KP_PLUS:
+    case SDLK_F9:
+    case SDLK_F12:
+    case SDLK_F11:
+        return false; // the camera's own keys, below
+    default:
+        return true; // nothing reaches the game while it stands still
+    }
 }
 
 static bool HandlePcMenuKey(const SDL_KeyboardEvent *key)
@@ -1016,7 +1101,7 @@ static bool HandlePcMenuKey(const SDL_KeyboardEvent *key)
         {
             PcMenu_Open(&sPcMenu, &sDisplay, sPlatformSettings[PLATFORM_SETTING_VSYNC],
                         sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE], sShowFrameRate, true,
-                        DioramaGL_GetCameraStyle() == DIORAMA_CAMERA_3DS, DioramaTreeSprites_Enabled());
+                        sCameraMode == DIORAMA_CAMERA_DIORAMA, DioramaTreeSprites_Enabled());
             keyboardKeys = 0; // no button stays held for the game while the menu is open
         }
         return true;
@@ -1061,6 +1146,63 @@ static bool HandlePcMenuKey(const SDL_KeyboardEvent *key)
     return true;
 }
 
+// F12: the window's picture as a PNG in the screenshots folder beside the
+// game (created when needed), named by the date and time.
+static void SaveScreenshot(int width, int height)
+{
+    char path[96];
+    time_t now = time(NULL);
+    struct tm *local = localtime(&now);
+    uint8_t *pixels;
+
+    if (width <= 0 || height <= 0)
+        return;
+    pixels = malloc((size_t)width * height * 4);
+    if (pixels == NULL)
+        return;
+#ifdef _WIN32
+    _mkdir("screenshots");
+#else
+    mkdir("screenshots", 0755);
+#endif
+    if (local != NULL)
+        strftime(path, sizeof(path), "screenshots/emerald-%Y%m%d-%H%M%S", local);
+    else
+        SDL_snprintf(path, sizeof(path), "screenshots/emerald-%u", (unsigned)SDL_GetTicks());
+    {
+        /* Several in one second: -2, -3, ... rather than over the last one. */
+        size_t stem = strlen(path);
+
+        for (int copy = 1; copy < 100; copy++)
+        {
+            SDL_RWops *existing;
+
+            if (copy == 1)
+                SDL_snprintf(path + stem, sizeof(path) - stem, ".png");
+            else
+                SDL_snprintf(path + stem, sizeof(path) - stem, "-%d.png", copy);
+            existing = SDL_RWFromFile(path, "rb");
+            if (existing == NULL)
+                break;
+            SDL_RWclose(existing);
+        }
+    }
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    if (PngWrite_RGBA(path, pixels, width, height, true))
+    {
+        SDL_snprintf(sScreenshotNotice, sizeof(sScreenshotNotice), "Picture saved: %s", path);
+        SDL_Log("Screenshot: %s (%dx%d)", path, width, height);
+    }
+    else
+    {
+        SDL_snprintf(sScreenshotNotice, sizeof(sScreenshotNotice), "The picture could not be saved.");
+        SDL_Log("Screenshot: could not write %s", path);
+    }
+    sScreenshotNoticeMs = SDL_GetTicks();
+    free(pixels);
+}
+
 static void DrawPcOverlay(int outputWidth, int outputHeight)
 {
     struct PcMenuRow rows[PC_MENU_ITEM_COUNT];
@@ -1093,8 +1235,21 @@ static void DrawPcOverlay(int outputWidth, int outputHeight)
         SDL_snprintf(corner, sizeof(corner), "%s%.0f fps   3D %dx%d%s", Benchmark_Active() ? "Benchmark   " : "",
                      sFrameRateShown, width, height, samples > 0 ? " MSAA" : "");
     }
-    DioramaPCOverlay_Draw(sPcMenu.open ? &menu : NULL, showCorner ? corner : NULL,
-                          outputWidth, outputHeight);
+    // F12: the picture as drawn, before the PC's own interface goes over it.
+    if (sScreenshotRequested)
+    {
+        sScreenshotRequested = false;
+        SaveScreenshot(outputWidth, outputHeight);
+    }
+    {
+        struct DioramaOverlayExtras extras;
+
+        extras.photoHints = sPhotoMode;
+        extras.notice = sScreenshotNotice[0] != '\0' && SDL_GetTicks() - sScreenshotNoticeMs < 4000
+                      ? sScreenshotNotice : NULL;
+        DioramaPCOverlay_Draw(sPcMenu.open ? &menu : NULL, showCorner ? corner : NULL, &extras,
+                              outputWidth, outputHeight);
+    }
 }
 
 static void CpuName(char *buffer, size_t size)
@@ -1757,6 +1912,9 @@ void ProcessEvents(void)
             // F10 and, while the PC settings menu is open, its keys.
             if (HandlePcMenuKey(&event.key))
                 break;
+            // Photo mode: the arrows move the camera, Esc leaves.
+            if (HandlePhotoKey(&event.key))
+                break;
 #endif
             switch (event.key.keysym.sym)
             {
@@ -1829,18 +1987,25 @@ void ProcessEvents(void)
                     DioramaGL_RequestSurveyCapture();
                 break;
             case SDLK_F7:
-                // The camera's framing: the Diorama's wide view or the 3DS project's.
-                if (event.key.repeat == 0)
+                // The camera: Adventure (the default) or Diorama (diorama/camera.h).
+                if (event.key.repeat == 0 && !sPhotoMode)
                 {
-                    sCameraStyle = DioramaGL_GetCameraStyle() == DIORAMA_CAMERA_3DS
-                                 ? DIORAMA_CAMERA_WIDE : DIORAMA_CAMERA_3DS;
-                    DioramaGL_SetCameraStyle(sCameraStyle);
-                    sCameraStyleKept = TRUE;
-                    sCameraPitchSteps = sCameraZoomSteps = 0;
-                    sCameraStepsDirty = false;
-                    SDL_Log("3D view: %s camera", sCameraStyle == DIORAMA_CAMERA_3DS ? "3DS" : "wide");
+                    sCameraMode = sCameraMode == DIORAMA_CAMERA_DIORAMA ? DIORAMA_CAMERA_ADVENTURE
+                                                                        : DIORAMA_CAMERA_DIORAMA;
+                    DioramaGL_SetCameraMode(sCameraMode);
+                    sCameraModeKept = TRUE;
+                    SDL_Log("3D view: %s camera", sCameraMode == DIORAMA_CAMERA_DIORAMA ? "diorama" : "adventure");
                     StoreConfigFile();
                 }
+                break;
+            case SDLK_F9:
+                // Photo mode: the game stands still and the camera moves freely.
+                if (event.key.repeat == 0 && DioramaGL_LastFrameWas3D())
+                    SetPhotoMode(!sPhotoMode);
+                break;
+            case SDLK_F12:
+                if (event.key.repeat == 0)
+                    sScreenshotRequested = true;
                 break;
             case SDLK_F8:
                 // The trees: the Diorama's voxel trees or the 3DS project's.

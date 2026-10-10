@@ -29,9 +29,17 @@ struct DioramaOverlayMenu
     int confirmSeconds; /* seconds left to keep a new display setting; -1: none waiting */
 };
 
-/* Draws the PC interface over the finished frame: the menu (NULL: closed) and
- * a short readout in the top left corner (NULL: none). */
+struct DioramaOverlayExtras
+{
+    const char *notice; /* one line in a message box at the bottom (NULL: none) */
+    bool photoHints;    /* photo mode's keys along the bottom */
+};
+
+/* Draws the PC interface over the finished frame: the menu (NULL: closed), a
+ * short readout in the top left corner (NULL: none) and the extras (NULL:
+ * none). */
 void DioramaPCOverlay_Draw(const struct DioramaOverlayMenu *menu, const char *corner,
+                           const struct DioramaOverlayExtras *extras,
                            int outputWidth, int outputHeight);
 void DioramaPCOverlay_Shutdown(void);
 

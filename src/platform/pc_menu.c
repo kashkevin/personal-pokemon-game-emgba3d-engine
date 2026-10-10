@@ -29,7 +29,7 @@ static bool Visible(const struct PcMenuState *menu, int item)
 }
 
 void PcMenu_Open(struct PcMenuState *menu, const struct DisplaySettings *settings, bool vsync,
-                 bool pictureFill, bool showFrameRate, bool hasCamera, bool camera3ds, bool trees3ds)
+                 bool pictureFill, bool showFrameRate, bool hasCamera, bool cameraDiorama, bool trees3ds)
 {
     memset(menu, 0, sizeof(*menu));
     menu->open = true;
@@ -38,7 +38,7 @@ void PcMenu_Open(struct PcMenuState *menu, const struct DisplaySettings *setting
     menu->pictureFill = pictureFill;
     menu->showFrameRate = showFrameRate;
     menu->hasCamera = hasCamera;
-    menu->camera3ds = camera3ds;
+    menu->cameraDiorama = cameraDiorama;
     menu->trees3ds = trees3ds;
 }
 
@@ -137,7 +137,7 @@ static unsigned int Change(struct PcMenuState *menu, int item, int direction, un
         menu->showFrameRate = !menu->showFrameRate;
         return PC_MENU_CHANGED_FRAME_RATE;
     case PC_MENU_CAMERA:
-        menu->camera3ds = !menu->camera3ds;
+        menu->cameraDiorama = !menu->cameraDiorama;
         return PC_MENU_CHANGED_CAMERA;
     case PC_MENU_TREES:
         menu->trees3ds = !menu->trees3ds;
@@ -295,7 +295,7 @@ int PcMenu_Rows(const struct PcMenuState *menu, struct PcMenuRow *rows)
             snprintf(row->value, sizeof(row->value), "%s", menu->showFrameRate ? "On" : "Off");
             break;
         case PC_MENU_CAMERA:
-            snprintf(row->value, sizeof(row->value), "%s", menu->camera3ds ? "3DS close" : "Wide");
+            snprintf(row->value, sizeof(row->value), "%s", menu->cameraDiorama ? "Diorama" : "Adventure");
             break;
         case PC_MENU_TREES:
             snprintf(row->value, sizeof(row->value), "%s", menu->trees3ds ? "3DS" : "Voxel");

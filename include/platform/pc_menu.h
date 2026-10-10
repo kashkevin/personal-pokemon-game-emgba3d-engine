@@ -66,7 +66,7 @@ struct PcMenuState
     bool vsync;
     bool pictureFill;   /* the 240x160 picture as large as fits (otherwise 8/9 of the height) */
     bool showFrameRate; /* frames a second in a corner of the screen */
-    bool camera3ds;
+    bool cameraDiorama;
     bool trees3ds;
     bool hasCamera;     /* the 3D build: camera and trees rows */
     bool confirming;
@@ -83,7 +83,7 @@ struct PcMenuRow
 };
 
 void PcMenu_Open(struct PcMenuState *menu, const struct DisplaySettings *settings, bool vsync,
-                 bool pictureFill, bool showFrameRate, bool hasCamera, bool camera3ds, bool trees3ds);
+                 bool pictureFill, bool showFrameRate, bool hasCamera, bool cameraDiorama, bool trees3ds);
 unsigned int PcMenu_Input(struct PcMenuState *menu, enum PcMenuInput input, unsigned int nowMs);
 /* The confirmation's countdown; returns PC_MENU_DISPLAY_REVERTED when it ran out. */
 unsigned int PcMenu_Tick(struct PcMenuState *menu, unsigned int nowMs);

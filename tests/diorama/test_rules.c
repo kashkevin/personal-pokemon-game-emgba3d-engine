@@ -296,13 +296,14 @@ static void TestGroupedTreeClaimsAndDirtyFallback(void)
 static void TestRepeatedBorderTreeClaim(void)
 {
     struct DioramaSceneSnapshot snapshot;
-    struct DioramaResolvedCell resolved[35];
+    struct DioramaResolvedCell resolved[DIORAMA_GRID_WIDTH + 2];
     static const uint16_t metatiles[4] = {468, 469, 476, 477};
-    static const uint8_t indices[4] = {0, 1, 33, 34};
+    /* A 2 x 2 tree at the grid's corner: two cells of its first row, two of its second. */
+    static const uint16_t indices[4] = {0, 1, DIORAMA_GRID_WIDTH, DIORAMA_GRID_WIDTH + 1};
 
     memset(&snapshot, 0, sizeof(snapshot));
     snapshot.mapLayoutId = 10;
-    snapshot.visibleCellCount = 35;
+    snapshot.visibleCellCount = DIORAMA_GRID_WIDTH + 2;
     snapshot.gridOriginX = -1;
     snapshot.gridOriginY = -1;
     for (int index = 0; index < snapshot.visibleCellCount; index++)
@@ -330,11 +331,11 @@ static void TestRepeatedBorderTreeClaim(void)
         assert(cell->structureId == resolved[0].structureId);
     }
 
-    snapshot.cells[34].flags = 0;
+    snapshot.cells[DIORAMA_GRID_WIDTH + 1].flags = 0;
     DioramaRules_ResolveGrid(&snapshot, resolved);
     assert(resolved[0].archetype == DIORAMA_ARCHETYPE_GROUND);
     assert(resolved[1].archetype == DIORAMA_ARCHETYPE_GROUND);
-    assert(resolved[33].archetype == DIORAMA_ARCHETYPE_GROUND);
+    assert(resolved[DIORAMA_GRID_WIDTH].archetype == DIORAMA_ARCHETYPE_GROUND);
 }
 
 static void TestPixelObjectStaysInvalidAfterDirtyPublication(void)

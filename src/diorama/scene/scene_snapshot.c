@@ -31,7 +31,7 @@
 #include "window.h"
 #include "constants/map_types.h"
 
-#define CELL_RADIUS 16
+#define CELL_RADIUS (DIORAMA_GRID_WIDTH / 2)
 
 static struct DioramaSceneSnapshot sDraft;
 static u16 sPreviousPalette[DIORAMA_FADED_PALETTE_ENTRIES];

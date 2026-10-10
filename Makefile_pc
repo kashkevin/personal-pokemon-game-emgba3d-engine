@@ -333,6 +333,9 @@ check-diorama: $(DIORAMA_TEST_GEN)
 	$(DIORAMA_TEST_CC) $(DIORAMA_TEST_FLAGS) tests/diorama/test_weather.c src/diorama/scene/weather.c \
 	  -o $(DIORAMA_TEST_DIR)/test_weather
 	$(DIORAMA_TEST_DIR)/test_weather
+	$(DIORAMA_TEST_CC) $(DIORAMA_TEST_FLAGS) tests/diorama/test_camera.c src/diorama/scene/camera.c \
+	  -lm -o $(DIORAMA_TEST_DIR)/test_camera
+	$(DIORAMA_TEST_DIR)/test_camera
 	$(DIORAMA_TEST_CC) $(DIORAMA_TEST_FLAGS) tests/diorama/test_ui_overlay.c src/diorama/scene/ui_overlay.c \
 	  -o $(DIORAMA_TEST_DIR)/test_ui_overlay
 	$(DIORAMA_TEST_DIR)/test_ui_overlay

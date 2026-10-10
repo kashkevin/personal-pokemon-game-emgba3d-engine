@@ -10,6 +10,7 @@
 #endif
 
 #include "diorama/buildings.h"
+#include "diorama/camera.h"
 #include "diorama/gl_air.h"
 #include "diorama/gl_field_light.h"
 #include "diorama/gl_building_renderer.h"
@@ -27,22 +28,16 @@
 #include "diorama/metatile_atlas.h"
 #include "diorama/presentation_transition.h"
 #include "diorama/scene_snapshot.h"
+#include "diorama/terrain_mesh.h"
 #include "diorama/weather.h"
 #include "gba/defines.h"
 #include "platform/display_settings.h"
+#include "constants/global.h"
 #include "constants/map_types.h"
 #include "constants/rtc.h"
 #include "constants/weather.h"
 
 #define MAX_BORDER_BACKGROUNDS 15
-#define CAMERA_DEFAULT_PITCH 0.70758444f
-#define CAMERA_MIN_PITCH 0.26179939f
-#define CAMERA_MAX_PITCH 1.30899694f
-#define CAMERA_PITCH_STEP 0.08726646f
-#define CAMERA_DEFAULT_FOCAL_LENGTH 130.0f
-#define CAMERA_MIN_FOCAL_LENGTH 80.0f
-#define CAMERA_MAX_FOCAL_LENGTH 600.0f
-#define CAMERA_ZOOM_STEP 10.0f
 #define SOURCE_FADE_SECONDS 0.12
 #define CAMERA_TELEPORT_LIMIT 2.0f
 #define UI_TRANSIENT_HOLD_FRAMES 3
@@ -107,8 +102,6 @@ static bool sCurrent3DReady;
 static bool sTerrainAvailable;
 static bool sObjectsAvailable;
 static bool sTerrainDebug;
-static float sCameraPitchOffset;
-static float sCameraFocalLengthOffset;
 static int sSurveyView = -1;
 static bool sSurveyCaptureRequested;
 static bool sSurveySavedFullscreen;
@@ -118,7 +111,6 @@ static int sSurveySavedWindowHeight;
 static int sSurveySavedWindowX;
 static int sSurveySavedWindowY;
 static unsigned sSurveyRun;
-static float sSurveySavedFocalLengthOffset;
 static enum DioramaRenderMode sSurveySavedRenderMode;
 static enum DioramaRenderMode sRenderMode = DIORAMA_RENDER_AUTO;
 static uint64_t sProcessedSequence;
@@ -879,78 +871,144 @@ static void GetCameraPosition(const struct DioramaSceneSnapshot *snapshot,
 }
 
 /*
- * DIORAMA_CAMERA_3DS: the 3DS project's framing (voxel_camera.c
- * AdaptDistance, at its default 40 degrees and 100% zoom): 8 tiles back plus
- * a fifth of the map's longer side (5 at most), seen through a 35 degree
- * view, so about 10 tiles from top to bottom at the player - the GBA's own
- * framing - on every map, indoors too. This camera stays where it is (16
- * tiles up); the focal length gives the same framing, with a slightly
- * flatter perspective than the 3DS's nearer eye.
+ * The camera (diorama/camera.h): the graphics overhaul's Adventure, Diorama
+ * and Photo cameras, eased in real time from the game camera's focus; the eye
+ * each field frame is drawn from goes to the shaders through terrain_mesh.h's
+ * DioramaCameraRig and is put back to the overworld's default afterwards, so a
+ * frame drawn by anyone else (a 3D battle's camera) is unchanged. The survey
+ * views (F5, a development aid) keep their fixed pitches.
  */
-static int sCameraStyle = DIORAMA_CAMERA_WIDE; /* the main thread's (sdl2.c) */
+static struct DioramaCameraView sCameraView;
+static Uint64 sCameraClock;
+static Uint64 sCameraLastDrawn;
+static bool sCameraKnown;
+static uint8_t sCameraMapGroup;
+static uint8_t sCameraMapNum;
 
-static bool UsesThreeDsCamera(void)
+static enum DioramaCameraPlace CameraPlace(uint8_t mapType)
 {
-    return sCameraStyle == DIORAMA_CAMERA_3DS;
-}
-
-static void ThreeDsFraming(const struct DioramaSceneSnapshot *snapshot,
-                           float *pitch, float *focalLength)
-{
-    const float pitch3ds = 0.6981317f; /* 40 degrees */
-    const float halfView = 0.3152988f; /* tan(17.5 degrees): the 35 degree view */
-    float longer = (float)(snapshot->mapWidth > snapshot->mapHeight
-                           ? snapshot->mapWidth : snapshot->mapHeight);
-    float back = 8.0f + (longer * 0.2f > 5.0f ? 5.0f : longer * 0.2f);
-    float eye3ds = back / cosf(pitch3ds);
-    /* This camera's eye-to-target distance at that pitch (the shaders'). */
-    float distance = (16.0f * cosf(pitch3ds) - 0.458944f) / sinf(pitch3ds);
-    float eye = 16.0f * sinf(pitch3ds) + distance * cosf(pitch3ds);
-
-    *pitch = pitch3ds;
-    /* The same height of the world at the target: eye x 80 / f = eye3ds x halfView. */
-    *focalLength = 80.0f * eye / (eye3ds * halfView);
-}
-
-static void GetCameraBase(const struct DioramaSceneSnapshot *snapshot,
-                          float *pitch, float *focalLength)
-{
-    struct DioramaMapProfile profile;
-
-    if (UsesThreeDsCamera())
+    switch (mapType)
     {
-        ThreeDsFraming(snapshot, pitch, focalLength);
-        return;
-    }
-    *pitch = CAMERA_DEFAULT_PITCH;
-    *focalLength = CAMERA_DEFAULT_FOCAL_LENGTH;
-    if (DioramaRules_GetMapProfile(snapshot->mapGroup, snapshot->mapNum,
-                                   snapshot->mapLayoutId, &profile))
-    {
-        *pitch = profile.cameraPitch;
-        *focalLength = profile.cameraFocalLength;
+    case MAP_TYPE_INDOOR:
+    case MAP_TYPE_SECRET_BASE:
+        return DIORAMA_CAMERA_INDOORS;
+    case MAP_TYPE_UNDERGROUND:
+        return DIORAMA_CAMERA_CAVE;
+    default:
+        return DIORAMA_CAMERA_OUTDOORS;
     }
 }
 
-static void GetCameraSettings(const struct DioramaSceneSnapshot *snapshot,
-                              float *pitch, float *focalLength)
+/* A map crossing: the cells the new map shows of the one just left say how
+ * far its coordinates moved (as the dapples' anchor in gl_light.c). A warp
+ * has none: the view jumps. */
+static bool CameraCrossing(const struct DioramaSceneSnapshot *snapshot, float *shiftX, float *shiftZ)
 {
-    GetCameraBase(snapshot, pitch, focalLength);
+    unsigned i;
+
+    for (i = 0; i < snapshot->visibleCellCount && i < DIORAMA_MAX_VISIBLE_CELLS; i++)
+    {
+        const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
+
+        if ((cell->flags & DIORAMA_CELL_CONNECTED)
+         && cell->sourceMapGroup == sCameraMapGroup
+         && cell->sourceMapNum == sCameraMapNum)
+        {
+            /* The old map's (sourceMapX + MAP_OFFSET) is the new map's mapX. */
+            *shiftX = (float)(cell->mapX - (cell->sourceMapX + snapshot->mapCoordinateOffset));
+            *shiftZ = -(float)(cell->mapY - (cell->sourceMapY + snapshot->mapCoordinateOffset));
+            return true;
+        }
+    }
+    return false;
+}
+
+/*
+ * The colour past the scene's cells and of the fog at their edge (graphics
+ * overhaul, phase 1): outdoors a clear sky's pale haze, turned towards the
+ * weather's haze when it has one, through the palette's fade and time-of-day
+ * tint (gl_light.h's air light), so a warp's fade and the night reach it as
+ * they reach the map. Indoors and in caves the dark stays (false).
+ */
+static bool SkyColour(const struct DioramaSceneSnapshot *snapshot, float rgb[3])
+{
+    static const float sClearSky[3] = {0.66f, 0.80f, 0.88f};
+    struct DioramaAirLight air;
+    float haze[3];
+    float hazeColour[3];
+
+    if (snapshot->mapType == MAP_TYPE_INDOOR || snapshot->mapType == MAP_TYPE_SECRET_BASE
+     || snapshot->mapType == MAP_TYPE_UNDERGROUND || snapshot->mapType == MAP_TYPE_UNDERWATER)
+        return false;
+    DioramaGLLight_GetAir(&air);
+    DioramaGLLight_GetHaze(0.7f, haze, hazeColour);
+    for (int i = 0; i < 3; i++)
+    {
+        float value = sClearSky[i] * air.fadeScale[i] + air.fadeOffset[i];
+
+        if (haze[2] > 0.0f)
+            value += (hazeColour[i] - value) * (haze[2] < 0.85f ? haze[2] : 0.85f);
+        rgb[i] = value < 0.0f ? 0.0f : (value > 1.0f ? 1.0f : value);
+    }
+    return true;
+}
+
+static void UpdateCamera(const struct DioramaSceneSnapshot *snapshot, float rawX, float rawZ)
+{
+    static const float sSurveyPitches[] = {
+        0.0f, 0.26179939f, 0.61086524f, 0.87266463f, 1.30899694f,
+    };
+    struct DioramaCameraInput input;
+    Uint64 now = SDL_GetPerformanceCounter();
+    double frequency = (double)SDL_GetPerformanceFrequency();
+
     if (sSurveyView > 0)
     {
-        static const float sSurveyPitches[] = {
-            0.0f, 0.26179939f, 0.61086524f, 0.87266463f, 1.30899694f,
-        };
-
-        *pitch = sSurveyPitches[sSurveyView];
+        DioramaCamera_Frame(sSurveyPitches[sSurveyView], 33.0f, 34.0f, 0.0f, &sCameraView);
+        sCameraView.x = rawX;
+        sCameraView.z = rawZ;
+        sCameraClock = now;
+        return;
     }
-    else
-        *pitch += sCameraPitchOffset;
-    *focalLength += sCameraFocalLengthOffset;
-    if (*pitch < CAMERA_MIN_PITCH) *pitch = CAMERA_MIN_PITCH;
-    if (*pitch > CAMERA_MAX_PITCH) *pitch = CAMERA_MAX_PITCH;
-    if (*focalLength < CAMERA_MIN_FOCAL_LENGTH) *focalLength = CAMERA_MIN_FOCAL_LENGTH;
-    if (*focalLength > CAMERA_MAX_FOCAL_LENGTH) *focalLength = CAMERA_MAX_FOCAL_LENGTH;
+    memset(&input, 0, sizeof(input));
+    input.targetX = rawX;
+    input.targetZ = rawZ;
+    input.groundY = DioramaGLObjects_GetPlayerGround();
+    input.place = CameraPlace(snapshot->mapType);
+    input.seconds = sCameraClock != 0 ? (float)((double)(now - sCameraClock) / frequency) : 0.0f;
+    /* Back to the field after a while away (a battle, a menu drawn flat). */
+    input.snap = sCameraLastDrawn == 0 || (double)(now - sCameraLastDrawn) / frequency > 0.5;
+    if (sCameraKnown
+     && (snapshot->mapGroup != sCameraMapGroup || snapshot->mapNum != sCameraMapNum))
+    {
+        input.shift = CameraCrossing(snapshot, &input.shiftX, &input.shiftZ);
+        if (!input.shift)
+            input.snap = true;
+    }
+    switch (snapshot->playerFacingDirection)
+    {
+    case DIR_SOUTH: input.facingZ = -1.0f; break;
+    case DIR_NORTH: input.facingZ = 1.0f; break;
+    case DIR_WEST: input.facingX = -1.0f; break;
+    case DIR_EAST: input.facingX = 1.0f; break;
+    default: break;
+    }
+    DioramaCamera_Update(&input, &sCameraView);
+    sCameraMapGroup = snapshot->mapGroup;
+    sCameraMapNum = snapshot->mapNum;
+    sCameraKnown = true;
+    sCameraClock = now;
+    sCameraLastDrawn = now;
+}
+
+/* The field frame's eye for the shaders (terrain_mesh.h). */
+static void ApplyCameraRig(float aspectCorrection)
+{
+    gDioramaCameraRig.active = true;
+    gDioramaCameraRig.height = sCameraView.height;
+    gDioramaCameraRig.distance = sCameraView.distance;
+    gDioramaCameraRig.screenOffsetY = DIORAMA_OVERWORLD_SCREEN_OFFSET;
+    gDioramaCameraRig.aspectCorrection = aspectCorrection;
 }
 
 static void SnapOpacity(float opacity)
@@ -1105,8 +1163,9 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
     sUiTransientHoldFrames = 0;
     SnapOpacity(1.0f);
     sTerrainDebug = false;
-    sCameraPitchOffset = 0.0f;
-    sCameraFocalLengthOffset = 0.0f;
+    DioramaCamera_Reset();
+    sCameraKnown = false;
+    sCameraClock = sCameraLastDrawn = 0;
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     return true;
 }
@@ -1308,16 +1367,33 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         GetCameraPosition(&sRenderedSceneSnapshot, &sPreviousRenderedSceneSnapshot,
                           sHasPreviousRenderedSceneSnapshot,
                           current3D ? frameAlpha : 1.0f, &cameraX, &cameraZ);
-        GetCameraSettings(&sRenderedSceneSnapshot, &cameraPitch, &cameraFocalLength);
-        glEnable(GL_SCISSOR_TEST);
-        glScissor(0, 0, sceneWidth, sceneHeight);
-        glClearColor(0.035f, 0.055f, 0.07f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glViewport(0, 0, sceneWidth, sceneHeight);
-        // This frame's weather light (gl_light.h), the sun's depth map
-        // (gl_shadow.h), then the lit scene.
+        UpdateCamera(&sRenderedSceneSnapshot, cameraX, cameraZ);
+        cameraX = sCameraView.x;
+        cameraZ = sCameraView.z;
+        cameraPitch = sCameraView.pitch;
+        cameraFocalLength = sCameraView.focalLength;
+        ApplyCameraRig(aspectCorrection);
+        // This frame's weather light (gl_light.h), the sky and the fog at the
+        // scene's edge, the sun's depth map (gl_shadow.h), then the lit scene.
         DioramaGLLight_Update(&sRenderedSceneSnapshot, !sTerrainDebug);
+        {
+            float sky[3] = {0.035f, 0.055f, 0.07f}; /* indoors and caves: the dark */
+            bool outdoors = SkyColour(&sRenderedSceneSnapshot, sky);
+
+            /* Outdoors the cells fade into the sky's haze before they end, and
+             * the picture past them is that colour: no board's edge. */
+            DioramaGLLight_SetEdgeFog(outdoors && sSurveyView < 0,
+                                      /* cell (x, y)'s centre is (x, -y) in the scene */
+                                      (float)(sRenderedSceneSnapshot.gridOriginX + DIORAMA_GRID_WIDTH / 2),
+                                      -(float)(sRenderedSceneSnapshot.gridOriginY + DIORAMA_GRID_HEIGHT / 2),
+                                      DIORAMA_GRID_WIDTH / 2 - 5.5f, DIORAMA_GRID_WIDTH / 2 - 1.0f, sky);
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(0, 0, sceneWidth, sceneHeight);
+            glClearColor(sky[0], sky[1], sky[2], 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            glViewport(0, 0, sceneWidth, sceneHeight);
+        }
         if (DioramaGLShadow_Begin(cameraX, cameraZ,
                                   sTerrainDebug ? 0.0f : SunStrength(&sRenderedSceneSnapshot),
                                   ((uint64_t)DioramaGLBuildings_GetGeometryGeneration() << 32)
@@ -1350,6 +1426,8 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                                  cameraX, cameraZ, cameraPitch, cameraFocalLength,
                                  aspectCorrection, sceneWidth, sceneHeight);
         glDisable(GL_SCISSOR_TEST);
+        gDioramaCameraRig.active = false;
+        DioramaGLLight_SetEdgeFog(false, 0.0f, 0.0f, 0.0f, 0.0f, NULL);
         DioramaGLTarget_End(outputWidth, outputHeight);
         glViewport(0, 0, outputWidth, outputHeight);
         dglUseProgram(sProgram);
@@ -1379,11 +1457,13 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                         gameX, gameY, gameWidth, gameHeight,
                         0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, 1.0f);
         }
-        if (sTwoDOpacity > 0.0f)
+        /* Photo mode shows the world alone (no text boxes, no map name). */
+        if (sTwoDOpacity > 0.0f && DioramaCamera_GetMode() != DIORAMA_CAMERA_PHOTO)
             DrawTexture(&sFrameTexture, outputWidth, outputHeight,
                         gameX, gameY, gameWidth, gameHeight,
                         0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, sTwoDOpacity);
-        if (current3D && sSceneSnapshot.uiRectCount > 0)
+        if (current3D && sSceneSnapshot.uiRectCount > 0
+         && DioramaCamera_GetMode() != DIORAMA_CAMERA_PHOTO)
             DrawTexture(&sUiTexture, outputWidth, outputHeight,
                         gameX, gameY, gameWidth, gameHeight,
                         0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, 1.0f);
@@ -1477,7 +1557,6 @@ void DioramaGL_CycleSurveyView(void)
         Uint32 flags = SDL_GetWindowFlags(sWindow);
 
         sSurveySavedRenderMode = sRenderMode;
-        sSurveySavedFocalLengthOffset = sCameraFocalLengthOffset;
         sSurveySavedTerrainDebug = sTerrainDebug;
         sSurveySavedFullscreen = (flags & (SDL_WINDOW_FULLSCREEN
                                          | SDL_WINDOW_FULLSCREEN_DESKTOP)) != 0;
@@ -1489,7 +1568,6 @@ void DioramaGL_CycleSurveyView(void)
     }
     sSurveyView = (sSurveyView + 1) % 5;
     sRenderMode = sSurveyView == 0 ? DIORAMA_RENDER_CLASSIC_2D : DIORAMA_RENDER_AUTO;
-    sCameraFocalLengthOffset = 0.0f;
     sTerrainDebug = false;
     SDL_SetWindowFullscreen(sWindow, 0);
     SDL_SetWindowSize(sWindow, 960, 640);
@@ -1503,7 +1581,6 @@ void DioramaGL_EndSurvey(void)
     sSurveyView = -1;
     sSurveyCaptureRequested = false;
     sRenderMode = sSurveySavedRenderMode;
-    sCameraFocalLengthOffset = sSurveySavedFocalLengthOffset;
     sTerrainDebug = sSurveySavedTerrainDebug;
     SDL_SetWindowSize(sWindow, sSurveySavedWindowWidth, sSurveySavedWindowHeight);
     SDL_SetWindowPosition(sWindow, sSurveySavedWindowX, sSurveySavedWindowY);
@@ -1519,85 +1596,41 @@ void DioramaGL_RequestSurveyCapture(void)
 
 void DioramaGL_AdjustCameraZoom(int steps)
 {
-    float pitch;
-    float base;
-    float current;
-    float adjusted;
-
     if (sSurveyView >= 0)
         return;
-    if (sHasRenderedSceneSnapshot)
-    {
-        GetCameraSettings(&sRenderedSceneSnapshot, &pitch, &current);
-        GetCameraBase(&sRenderedSceneSnapshot, &pitch, &base);
-    }
-    else
-    {
-        current = CAMERA_DEFAULT_FOCAL_LENGTH + sCameraFocalLengthOffset;
-        base = CAMERA_DEFAULT_FOCAL_LENGTH;
-    }
-    adjusted = current + steps * CAMERA_ZOOM_STEP;
-    if (adjusted < CAMERA_MIN_FOCAL_LENGTH) adjusted = CAMERA_MIN_FOCAL_LENGTH;
-    if (adjusted > CAMERA_MAX_FOCAL_LENGTH) adjusted = CAMERA_MAX_FOCAL_LENGTH;
-    sCameraFocalLengthOffset = adjusted - base;
+    DioramaCamera_Zoom(steps);
 }
 
 void DioramaGL_AdjustCameraPitch(int steps)
 {
-    float current;
-    float base;
-    float focalLength;
-    float adjusted;
-
     if (sSurveyView >= 0)
         DioramaGL_EndSurvey();
-    if (sHasRenderedSceneSnapshot)
-    {
-        GetCameraSettings(&sRenderedSceneSnapshot, &current, &focalLength);
-        GetCameraBase(&sRenderedSceneSnapshot, &base, &focalLength);
-    }
-    else
-    {
-        current = CAMERA_DEFAULT_PITCH + sCameraPitchOffset;
-        base = CAMERA_DEFAULT_PITCH;
-    }
-    adjusted = current + steps * CAMERA_PITCH_STEP;
-    if (adjusted < CAMERA_MIN_PITCH) adjusted = CAMERA_MIN_PITCH;
-    if (adjusted > CAMERA_MAX_PITCH) adjusted = CAMERA_MAX_PITCH;
-    sCameraPitchOffset = adjusted - base;
+    DioramaCamera_Tilt(steps);
 }
 
-void DioramaGL_SetCameraStyle(int style)
+void DioramaGL_SetCameraMode(int mode)
 {
-    sCameraStyle = style == DIORAMA_CAMERA_3DS ? DIORAMA_CAMERA_3DS : DIORAMA_CAMERA_WIDE;
-    sCameraPitchOffset = 0.0f;
-    sCameraFocalLengthOffset = 0.0f;
+    DioramaCamera_SetMode((enum DioramaCameraMode)mode);
 }
 
-int DioramaGL_GetCameraStyle(void)
+int DioramaGL_GetCameraMode(void)
 {
-    return sCameraStyle;
+    return (int)DioramaCamera_GetMode();
 }
 
-void DioramaGL_GetCameraSteps(int *pitchSteps, int *zoomSteps)
+void DioramaGL_GetCameraSteps(int mode, int *zoomSteps, int *tiltSteps)
 {
-    *pitchSteps = (int)lroundf(sCameraPitchOffset / CAMERA_PITCH_STEP);
-    *zoomSteps = (int)lroundf(sCameraFocalLengthOffset / CAMERA_ZOOM_STEP);
+    DioramaCamera_GetSteps((enum DioramaCameraMode)mode, zoomSteps, tiltSteps);
 }
 
-/* GetCameraSettings keeps the result inside the limits; the keys step from
- * there (DioramaGL_AdjustCamera*). */
-void DioramaGL_SetCameraSteps(int pitchSteps, int zoomSteps)
+void DioramaGL_SetCameraSteps(int mode, int zoomSteps, int tiltSteps)
 {
-    const int maxPitchSteps = (int)((CAMERA_MAX_PITCH - CAMERA_MIN_PITCH) / CAMERA_PITCH_STEP) + 1;
-    const int maxZoomSteps = (int)((CAMERA_MAX_FOCAL_LENGTH - CAMERA_MIN_FOCAL_LENGTH) / CAMERA_ZOOM_STEP) + 1;
+    DioramaCamera_SetSteps((enum DioramaCameraMode)mode, zoomSteps, tiltSteps);
+}
 
-    if (pitchSteps < -maxPitchSteps) pitchSteps = -maxPitchSteps;
-    if (pitchSteps > maxPitchSteps) pitchSteps = maxPitchSteps;
-    if (zoomSteps < -maxZoomSteps) zoomSteps = -maxZoomSteps;
-    if (zoomSteps > maxZoomSteps) zoomSteps = maxZoomSteps;
-    sCameraPitchOffset = pitchSteps * CAMERA_PITCH_STEP;
-    sCameraFocalLengthOffset = zoomSteps * CAMERA_ZOOM_STEP;
+void DioramaGL_PhotoPan(int dx, int dz)
+{
+    DioramaCamera_PhotoPan(dx, dz);
 }
 
 void DioramaGL_Shutdown(void)
