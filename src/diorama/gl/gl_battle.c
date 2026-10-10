@@ -2029,10 +2029,32 @@ static void DrawKeptWorld(const struct Layout *layout)
     QuadFlush(layout, sWorldCache.texture, 2);
 }
 
+/* The layout in the scene's pixels when the world is drawn at the scene's own
+ * size (gl_target.h): the same picture, scaled with the window's shape. */
+static void SceneLayout(const struct Layout *layout, int sceneW, int sceneH, struct Layout *scene)
+{
+    float kx = (float)sceneW / (float)layout->outW, ky = (float)sceneH / (float)layout->outH;
+
+    *scene = *layout;
+    scene->outW = sceneW;
+    scene->outH = sceneH;
+    scene->gameX = layout->gameX * kx;
+    scene->gameY = layout->gameY * ky;
+    scene->gameW = layout->gameW * kx;
+    scene->gameH = layout->gameH * ky;
+    scene->scale = layout->scale * ky;
+}
+
 /* The world from this frame's view: drawn, or the copy of it if the camera
- * has not moved since. */
+ * has not moved since. It is drawn as the field's scene is, at the chosen
+ * render size and with the chosen antialiasing (gl_target.h: offscreen and
+ * then scaled into the window, or straight into it), so a battle looks like
+ * the field it stands on and costs what the field costs; the battle's own
+ * picture and everything 2D over it stay at the window's resolution. */
 static void DrawWorld(const struct Layout *layout)
 {
+    struct Layout scene;
+    int sceneW, sceneH;
     float focal, aspect;
 
     if (IsWorldKept(&sBattle.view, layout))
@@ -2041,14 +2063,18 @@ static void DrawWorld(const struct Layout *layout)
         ++sWorldCache.kept;
         return;
     }
-    ApplyView(&sBattle.view, layout, &focal, &aspect);
+    DioramaGLTarget_Begin(layout->outW, layout->outH, &sceneW, &sceneH);
+    SceneLayout(layout, sceneW, sceneH, &scene);
+    ApplyView(&sBattle.view, &scene, &focal, &aspect);
     sFrameTime.drew = true;
     DioramaGL_DrawBattleWorld(sBattle.view.x, sBattle.view.z, sBattle.view.pitch, focal, aspect,
-                              layout->outW, layout->outH);
-    DrawCurtain(layout, focal, aspect);
+                              scene.outW, scene.outH);
+    DrawCurtain(&scene, focal, aspect);
     gDioramaCameraRig.active = false;
+    glViewport(0, 0, scene.outW, scene.outH);
+    DrawBackdrop(&scene);
+    DioramaGLTarget_End(layout->outW, layout->outH);
     glViewport(0, 0, layout->outW, layout->outH);
-    DrawBackdrop(layout);
     if (!sWorldCache.off)
         KeepWorld(&sBattle.view, layout);
     ++sWorldCache.drawn;
