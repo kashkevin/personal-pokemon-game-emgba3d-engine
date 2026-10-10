@@ -228,6 +228,10 @@ struct DioramaSceneSnapshot
      * part way to their fade colour. The 3D battle stands on the field as last
      * seen with them steady (gl_compositor.c, gl_battle.c). */
     bool paletteFading;
+    /* A battle transition is playing on the field (CB2_OverworldBasic): the
+     * scene is TRANSITION, yet the 3D view can compose the transition over
+     * the 3D field (gl_battle.c DioramaGLBattle_ComposeField). */
+    bool battleTransition;
     uint8_t surfBlobValid;
     int16_t surfBlobOffsetX;
     int16_t surfBlobOffsetY;

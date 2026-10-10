@@ -30,6 +30,9 @@ SDL_Window *DioramaGL_GetWindow(void);
 bool DioramaGL_GetIntegerScale(void);
 /* The automatic 3D view is chosen (not the classic view, F4). */
 bool DioramaGL_IsAutoMode(void);
+/* The last frame presented drew the field in 3D (gl_battle.c composes a
+ * battle transition over it only then). */
+bool DioramaGL_DrewField3D(void);
 /* The field of that map as last drawn in 3D - or, if it never was (a battle
  * straight out of a scripted scene), as last seen, built now - its snapshot
  * and resolved cells, whose terrain, atlases and models are on the GPU; false

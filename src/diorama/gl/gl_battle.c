@@ -122,6 +122,8 @@ static struct
     uint8_t mapGroup, mapNum;
     uint16_t mapLayoutId;
     bool log;
+    bool fieldCompose; /* this frame's picture is a transition over the 3D field */
+    bool fieldOff;     /* PKMN_DIORAMA_TRANSITION_2D=1: transitions in 2D as before */
 } sBattle;
 
 static GLuint sProgram;
@@ -131,6 +133,9 @@ static GLint sModeLocation;
 static GLuint sEdgeTexture;
 static GLuint sWhiteTexture;
 static uint32_t sEdgePixels[160 * 2];
+/* The 3D field under a battle transition (DioramaGLBattle_ComposeField). */
+static GLuint sFieldTexture;
+static int sFieldWidth, sFieldHeight;
 
 /*
  * The world as last drawn, kept while the battle camera stands still - all of
@@ -287,12 +292,17 @@ bool DioramaGLBattle_Init(void)
     MakeTexture(&sWhiteTexture, 1, 1, &white);
     setting = SDL_getenv("PKMN_DIORAMA_BATTLE_KEEP");
     sWorldCache.off = setting != NULL && setting[0] == '0';
+    setting = SDL_getenv("PKMN_DIORAMA_TRANSITION_2D");
+    sBattle.fieldOff = setting != NULL && setting[0] == '1';
     sBattle.ready = true;
     return true;
 }
 
 void DioramaGLBattle_Shutdown(void)
 {
+    if (sFieldTexture != 0) glDeleteTextures(1, &sFieldTexture);
+    sFieldTexture = 0;
+    sFieldWidth = sFieldHeight = 0;
     if (sWorldCache.texture != 0) glDeleteTextures(1, &sWorldCache.texture);
     memset(&sWorldCache, 0, sizeof(sWorldCache));
     if (sEdgeTexture != 0) glDeleteTextures(1, &sEdgeTexture);
@@ -784,6 +794,8 @@ uint8_t DioramaGLBattle_BeginFrame(void)
     else if (sBattle.active || sBattle.refused || sBattle.suspended)
         End();
 
+    sBattle.fieldCompose = false;
+    memset(gDioramaSceneSkipObj, 0, sizeof(gDioramaSceneSkipObj));
     if (sBattle.active)
     {
         StepCamera();
@@ -796,6 +808,17 @@ uint8_t DioramaGLBattle_BeginFrame(void)
             if (sBattle.frame.introSliding && !sBattle.frame.link)
                 layers |= (1u << 1) | (1u << 2);
         }
+    }
+    else if (!sBattle.frame.inBattle && sBattle.frame.transition && !sBattle.fieldOff
+          && DioramaGL_IsAutoMode() && DioramaGL_DrewField3D())
+    {
+        /* A battle transition on the field, the field drawn in 3D: its three
+         * map layers see-through and its map sprites left out, the 3D field
+         * standing in for them (DioramaGLBattle_ComposeField), as the 3DS
+         * project's RenderTransition composes it over its voxel world. */
+        layers = (1u << 1) | (1u << 2) | (1u << 3);
+        memcpy(gDioramaSceneSkipObj, gDioramaMapOam, sizeof(gDioramaSceneSkipObj));
+        sBattle.fieldCompose = true;
     }
     sBattle.sceneLayers = layers;
     return layers;
@@ -931,13 +954,13 @@ static void DrawIntroBars(const struct Layout *layout)
 }
 
 /* The picture's background carried out past its edges: each line's edge
- * colour and cover to the sides, its first line's above. */
+ * colour and cover to the sides, its first line's above, its last below. */
 static void DrawCarriedOut(const struct Layout *layout)
 {
     static const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     float x0 = layout->gameX, x1 = layout->gameX + layout->gameW;
     float y0 = layout->gameY, y1 = layout->gameY + layout->gameH;
-    float w = (float)layout->outW;
+    float w = (float)layout->outW, h = (float)layout->outH, middle = x0 + layout->gameW * 0.5f;
 
     QuadBegin();
     if (x0 > 0.0f)
@@ -948,8 +971,15 @@ static void DrawCarriedOut(const struct Layout *layout)
     {
         float v = 0.5f / 160.0f;
 
-        PushQuad(0.0f, 0.0f, x0 + layout->gameW * 0.5f, y0, 0.25f, v, 0.25f, v, white, white, white, white);
-        PushQuad(x0 + layout->gameW * 0.5f, 0.0f, w, y0, 0.75f, v, 0.75f, v, white, white, white, white);
+        PushQuad(0.0f, 0.0f, middle, y0, 0.25f, v, 0.25f, v, white, white, white, white);
+        PushQuad(middle, 0.0f, w, y0, 0.75f, v, 0.75f, v, white, white, white, white);
+    }
+    if (y1 < h)
+    {
+        float v = 159.5f / 160.0f;
+
+        PushQuad(0.0f, y1, middle, h, 0.25f, v, 0.25f, v, white, white, white, white);
+        PushQuad(middle, y1, w, h, 0.75f, v, 0.75f, v, white, white, white, white);
     }
     QuadFlush(layout, sEdgeTexture, 0);
 }
@@ -1032,6 +1062,99 @@ static void DrawPicture(const struct Layout *layout)
     PushQuad(layout->gameX, layout->gameY, layout->gameX + layout->gameW, layout->gameY + layout->gameH,
              0.0f, 0.0f, 1.0f, 1.0f, white, white, white, white);
     QuadFlush(layout, DioramaGL_GetFrameTexture(), 0);
+}
+
+/* ── A battle transition over the 3D field ──────────────────────────── */
+
+/*
+ * The 3DS project's RenderTransition/TransitionField on one PC screen: the 3D
+ * field the compositor has just drawn is copied out and laid back band by
+ * band of the picture's lines, each moved as the transition moves the
+ * field's layers on those lines (gDioramaSceneLineShift; what moves past the
+ * copy's edge leaves black, the backdrop), and the transition's own picture
+ * - the field's layers see-through, its windows, BG0, its sprites and the
+ * blending, brightness included - goes over it, carried out to the window's
+ * edges.
+ */
+bool DioramaGLBattle_CanComposeField(void)
+{
+    return sBattle.ready && !sBattle.fieldOff && DioramaGL_IsAutoMode();
+}
+
+bool DioramaGLBattle_ComposeField(int outW, int outH, int gameX, int gameY, int gameW, int gameH)
+{
+    static const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    struct Layout layout;
+    float scale;
+    int y0, y1;
+
+    if (!sBattle.ready || !sBattle.fieldCompose || outW <= 0 || outH <= 0 || gameH <= 0)
+        return false;
+    layout.outW = outW;
+    layout.outH = outH;
+    layout.gameX = (float)gameX;
+    layout.gameY = (float)gameY;
+    layout.gameW = (float)gameW;
+    layout.gameH = (float)gameH;
+    layout.scale = scale = (float)gameH / GBA_H;
+
+    if (sFieldTexture == 0 || sFieldWidth != outW || sFieldHeight != outH)
+    {
+        if (sFieldTexture == 0)
+            MakeTexture(&sFieldTexture, outW, outH, NULL);
+        else
+        {
+            glBindTexture(GL_TEXTURE_2D, sFieldTexture);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, outW, outH, 0, GL_BGRA, GL_UNSIGNED_BYTE, NULL);
+        }
+        sFieldWidth = outW;
+        sFieldHeight = outH;
+    }
+    glViewport(0, 0, outW, outH);
+    glDisable(GL_SCISSOR_TEST);
+    glBindTexture(GL_TEXTURE_2D, sFieldTexture);
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, outW, outH);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    /* The field, band by band: rows of equal shift, the first band reaching
+     * up to the window's top and the last down to its bottom. */
+    QuadBegin();
+    for (y0 = 0; y0 < 160; y0 = y1)
+    {
+        float dx = gDioramaSceneLineShift[y0][0] * scale, dy = gDioramaSceneLineShift[y0][1] * scale;
+        float top, bottom, left, right;
+
+        for (y1 = y0 + 1; y1 < 160; ++y1)
+            if (gDioramaSceneLineShift[y1][0] != gDioramaSceneLineShift[y0][0]
+             || gDioramaSceneLineShift[y1][1] != gDioramaSceneLineShift[y0][1])
+                break;
+        top = y0 == 0 ? 0.0f : layout.gameY + y0 * scale;
+        bottom = y1 == 160 ? (float)outH : layout.gameY + y1 * scale;
+        /* Only what the copy holds. */
+        left = dx < 0.0f ? -dx : 0.0f;
+        right = dx > 0.0f ? outW - dx : (float)outW;
+        if (top + dy < 0.0f)
+            top = -dy;
+        if (bottom + dy > outH)
+            bottom = outH - dy;
+        if (left >= right || top >= bottom)
+            continue;
+        /* The copy's rows run bottom up. */
+        PushQuad(left, top, right, bottom,
+                 (left + dx) / outW, 1.0f - (top + dy) / outH, (right + dx) / outW, 1.0f - (bottom + dy) / outH,
+                 white, white, white, white);
+    }
+    QuadFlush(&layout, sFieldTexture, 2);
+
+    /* The transition's own picture over it. */
+    DrawCarriedOut(&layout);
+    QuadBegin();
+    PushQuad(layout.gameX, layout.gameY, layout.gameX + layout.gameW, layout.gameY + layout.gameH,
+             0.0f, 0.0f, 1.0f, 1.0f, white, white, white, white);
+    QuadFlush(&layout, DioramaGL_GetFrameTexture(), 0);
+    glDisable(GL_BLEND);
+    return true;
 }
 
 bool DioramaGLBattle_Present(SDL_Window *window)

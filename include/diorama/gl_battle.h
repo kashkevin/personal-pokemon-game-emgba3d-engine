@@ -36,4 +36,14 @@ bool DioramaGLBattle_Present(SDL_Window *window);
  * resources as they were. */
 bool DioramaGLBattle_IsActive(void);
 
+/*
+ * A battle transition on the field (the 3DS project's RenderTransition): the
+ * compositor draws the field in 3D under it if this says it can be composed,
+ * and after drawing the 3D field calls ComposeField, which moves the field as
+ * the transition moves its layers and lays the transition's picture over it
+ * (true if it did: the compositor then draws no 2D picture of its own).
+ */
+bool DioramaGLBattle_CanComposeField(void);
+bool DioramaGLBattle_ComposeField(int outW, int outH, int gameX, int gameY, int gameW, int gameH);
+
 #endif // GUARD_DIORAMA_GL_BATTLE_H

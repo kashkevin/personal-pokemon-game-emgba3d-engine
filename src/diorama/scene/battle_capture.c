@@ -17,6 +17,7 @@
 #include "battle_main.h"
 #include "bg.h"
 #include "event_object_movement.h"
+#include "field_weather.h"
 #include "field_player_avatar.h"
 #include "fieldmap.h"
 #include "main.h"
@@ -168,6 +169,42 @@ static bool IsBattleScreen(void)
         && ((control >> 8) & 0x1F) == gBattleBgTemplates[3].mapBaseIndex;
 }
 
+/* ── The map's sprites in OAM (sprite.c BuildOamBuffer and LoadOam) ── */
+
+static uint32_t sMapOamPending[4];
+uint32_t gDioramaMapOam[4];
+
+/* Placed on the map, or the weather (the 3D view draws its own): the 3DS
+ * port's split of the field's sprites from a transition's (its sScreenOam,
+ * IsVoxelWeatherSprite), by the weather's sprite sheets here. */
+static bool IsMapSprite(const struct Sprite *sprite)
+{
+    if (sprite->coordOffsetEnabled)
+        return TRUE;
+    return sprite->template != NULL
+        && sprite->template->tileTag >= GFXTAG_CLOUD && sprite->template->tileTag <= GFXTAG_RAIN;
+}
+
+void DioramaSprites_BeginOam(void)
+{
+    memset(sMapOamPending, 0, sizeof(sMapOamPending));
+}
+
+void DioramaSprites_MarkOam(const struct Sprite *sprite, uint8_t first, uint8_t end)
+{
+    unsigned i;
+
+    if (!IsMapSprite(sprite))
+        return;
+    for (i = first; i < end && i < 128; ++i)
+        sMapOamPending[i >> 5] |= 1u << (i & 31);
+}
+
+void DioramaSprites_LatchOam(void)
+{
+    memcpy(gDioramaMapOam, sMapOamPending, sizeof(gDioramaMapOam));
+}
+
 void DioramaBattle_Capture(struct DioramaBattleFrame *frame)
 {
     memset(frame, 0, sizeof(*frame));
@@ -190,7 +227,10 @@ void DioramaBattle_Capture(struct DioramaBattleFrame *frame)
     }
     frame->surfing = (gPlayerAvatar.flags & PLAYER_AVATAR_FLAG_SURFING) != 0;
     if (!frame->inBattle)
+    {
+        frame->transition = DioramaBattle_TransitionActive();
         return;
+    }
     frame->battleTypeFlags = gBattleTypeFlags;
     frame->link = (gBattleTypeFlags & BATTLE_TYPE_LINK) != 0;
     frame->wild = !(gBattleTypeFlags & (BATTLE_TYPE_TRAINER | BATTLE_TYPE_LINK | BATTLE_TYPE_RECORDED_LINK

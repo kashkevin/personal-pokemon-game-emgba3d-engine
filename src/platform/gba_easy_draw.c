@@ -45,6 +45,10 @@ extern void (*const gIntrTable[])(void);
 uint8_t gDioramaSceneLayers;
 uint8_t gDioramaSceneCover[DISPLAY_HEIGHT * DISPLAY_WIDTH];
 struct DioramaSceneEdge gDioramaSceneEdges[DISPLAY_HEIGHT][2];
+uint32_t gDioramaSceneSkipObj[4];
+int16_t gDioramaSceneLineShift[DISPLAY_HEIGHT][2];
+static bool sSkipObj;            /* gDioramaSceneSkipObj has any bit set */
+static uint16_t sLineZeroScroll[2];
 static uint8_t sSceneMask;      /* gDioramaSceneLayers, latched per frame */
 static uint8_t sTargetCover;    /* cover of the last target B found */
 
@@ -571,6 +575,11 @@ static void DrawSprites(struct scanlineData* scanline, uint16_t vcount, bool win
         unsigned int width;
         unsigned int height;
         uint16_t *pixels;
+#ifdef ENABLE_DIORAMA
+        /* The map's sprites: the 3D view draws them in its own scene. */
+        if (sSkipObj && (gDioramaSceneSkipObj[i >> 5] >> (i & 31)) & 1)
+            continue;
+#endif
 
         bool isAffine  = oam->affineMode & 1;
         bool doubleSizeOrDisabled = (oam->affineMode >> 1) & 1;
@@ -795,6 +804,20 @@ static void DrawScanline(uint16_t *pixels, uint16_t vcount)
     uint8_t *cover = sSceneMask ? &gDioramaSceneCover[vcount * DISPLAY_WIDTH] : NULL;
 
     memset(scanline.spriteCover, 0, sizeof(scanline.spriteCover));
+    if (sSceneMask)
+    {
+        /* How far this line's field layers are moved from line 0's (a
+         * transition's waves and slices move BG1-3 together). */
+        uint16_t hofs = *(uint16_t *)(REG_ADDR_BG0HOFS + 4), vofs = *(uint16_t *)(REG_ADDR_BG0VOFS + 4);
+
+        if (vcount == 0)
+        {
+            sLineZeroScroll[0] = hofs;
+            sLineZeroScroll[1] = vofs;
+        }
+        gDioramaSceneLineShift[vcount][0] = (int16_t)((((hofs - sLineZeroScroll[0]) & 0x1FF) ^ 0x100) - 0x100);
+        gDioramaSceneLineShift[vcount][1] = (int16_t)((((vofs - sLineZeroScroll[1]) & 0x1FF) ^ 0x100) - 0x100);
+    }
 #endif
 
     for (bgnum = 0; bgnum < numOfBgs; bgnum++)
@@ -1052,6 +1075,8 @@ void DrawFrame(uint16_t *pixels)
     int j;
 #ifdef ENABLE_DIORAMA
     sSceneMask = gDioramaSceneLayers & 0x0F;
+    sSkipObj = (gDioramaSceneSkipObj[0] | gDioramaSceneSkipObj[1]
+              | gDioramaSceneSkipObj[2] | gDioramaSceneSkipObj[3]) != 0;
     if (sSceneMask)
         memset(gDioramaSceneCover, 0, sizeof(gDioramaSceneCover));
 #endif

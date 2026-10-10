@@ -34,6 +34,21 @@ void DioramaBattle_SetSceneryShown(uint8_t shown);
 /* Whether the intro is sliding the scenery in (BG1/BG2 hold its entry
  * picture meanwhile; the 3D battle has the camera glide in instead). */
 uint8_t DioramaBattle_IntroSliding(void);
+/* Whether a battle transition is playing on the field (battle_transition.c):
+ * the 3D view composes it over the 3D field (gl_battle.c). */
+uint8_t DioramaBattle_TransitionActive(void);
+
+/*
+ * The map's sprites in OAM (sprite.c, battle_capture.c): those placed on the
+ * map (coordOffsetEnabled) and the weather's, which the 3D view draws itself;
+ * not the ones placed on the screen, such as a battle transition's. Marked
+ * as the OAM buffer is built, latched as it is loaded into OAM.
+ */
+struct Sprite;
+void DioramaSprites_BeginOam(void);
+void DioramaSprites_MarkOam(const struct Sprite *sprite, uint8_t first, uint8_t end);
+void DioramaSprites_LatchOam(void);
+extern uint32_t gDioramaMapOam[4]; /* bit n: OAM entry n, as OAM holds it now */
 
 /* ── Captured once per frame at the frame boundary (battle_capture.c) ── */
 
@@ -66,6 +81,7 @@ struct DioramaBattleFrame
     bool bg3Enabled;    /* DISPCNT BG3 on */
     bool forcedBlank;   /* DISPCNT forced blank */
     bool surfing;
+    bool transition;    /* DioramaBattle_TransitionActive(), outside battles */
     uint8_t playerFacing; /* DIR_* */
     int16_t playerMapX, playerMapY; /* map coordinates, without MAP_OFFSET */
     /* The same in the Diorama world's cell coordinates: the game's map grid,
@@ -111,5 +127,12 @@ struct DioramaSceneEdge
     uint8_t cover;
 };
 extern struct DioramaSceneEdge gDioramaSceneEdges[160][2];
+/* OAM entries left out of the frame being drawn (bit n: entry n): the map's
+ * sprites, while a battle transition is composed over the 3D field. Set
+ * before DrawFrame, with gDioramaSceneLayers. */
+extern uint32_t gDioramaSceneSkipObj[4];
+/* Per pixel row of that frame, BG1's scroll less line 0's (x, y): how far a
+ * transition moves the field's layers on that line (they move together). */
+extern int16_t gDioramaSceneLineShift[160][2];
 
 #endif // GUARD_DIORAMA_BATTLE_SCENE_H

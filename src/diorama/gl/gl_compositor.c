@@ -119,6 +119,7 @@ static float sTwoDOpacity = 1.0f;
 static float sFadeStartOpacity = 1.0f;
 static float sFadeTargetOpacity = 1.0f;
 static bool sIntegerScale;
+static bool sDrewField3D; /* the last frame presented drew the field in 3D */
 /* The field as last seen with steady palettes (no fade running), whether or
  * not it was drawn in 3D: a 3D battle stands on it (gl_battle.c). */
 static struct DioramaSceneSnapshot sLastFieldSnapshot;
@@ -941,6 +942,22 @@ static void UpdateOpacity(void)
                  + (sFadeTargetOpacity - sFadeStartOpacity) * progress;
 }
 
+/*
+ * A battle transition playing on the field: the scene is a TRANSITION (the
+ * field runs CB2_OverworldBasic) with nothing else against drawing it, and
+ * gl_battle.c can compose the transition over the 3D field.
+ */
+static bool IsComposableTransition(const struct DioramaSceneSnapshot *snapshot)
+{
+    return snapshot->battleTransition
+        && snapshot->sceneKind == DIORAMA_SCENE_TRANSITION
+        && snapshot->fallbackReasons == DIORAMA_FALLBACK_UNSUPPORTED_SCENE
+        && snapshot->valid && snapshot->tilesetResourcesValid
+        && snapshot->visibleCellCount == DIORAMA_MAX_VISIBLE_CELLS
+        && snapshot->objectCount <= DIORAMA_MAX_OBJECTS
+        && DioramaGLBattle_CanComposeField();
+}
+
 static void AdoptLatestSnapshot(void)
 {
     if (!DioramaSnapshotExchange_CopyLatest(&sIncomingSceneSnapshot))
@@ -1139,6 +1156,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     // models stay as they were for it (gl_battle.c).
     if (sSurveyView < 0 && DioramaGLBattle_Present(sWindow))
     {
+        sDrewField3D = false;
         SDL_GL_SwapWindow(sWindow);
         return;
     }
@@ -1149,7 +1167,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
      && sHasSceneSnapshot
      && DioramaRules_IsMapSupported(sSceneSnapshot.mapGroup, sSceneSnapshot.mapNum,
                                     sSceneSnapshot.mapLayoutId)
-     && DioramaSnapshot_CanRenderFlatMap(&sSceneSnapshot))
+     && (DioramaSnapshot_CanRenderFlatMap(&sSceneSnapshot) || IsComposableTransition(&sSceneSnapshot)))
     {
         if (!sCurrent3DReady)
         {
@@ -1332,7 +1350,15 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                         gameX, gameY, gameWidth, gameHeight,
                         0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, 1.0f);
         }
-        if (sTwoDOpacity > 0.0f)
+        // A battle transition composed over the 3D field (gl_battle.c) is
+        // the frame's whole 2D picture.
+        if (sSurveyView < 0 && !sTerrainDebug
+         && DioramaGLBattle_ComposeField(outputWidth, outputHeight, gameX, gameY, gameWidth, gameHeight))
+        {
+            dglUseProgram(sProgram);
+            dglBindVertexArray(sVertexArray);
+        }
+        else if (sTwoDOpacity > 0.0f)
             DrawTexture(&sFrameTexture, outputWidth, outputHeight,
                         gameX, gameY, gameWidth, gameHeight,
                         0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, sTwoDOpacity);
@@ -1346,6 +1372,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                     gameX, gameY, gameWidth, gameHeight,
                     0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, false, 1.0f);
 
+    sDrewField3D = drawTerrain && sSurveyView < 0;
     if (sSurveyView < 0 && !drawTerrain && border && sBorderTexture.id != 0)
     {
         int innerWidth = gameWidth - 2;
@@ -1380,6 +1407,11 @@ SDL_Window *DioramaGL_GetWindow(void)
 bool DioramaGL_GetIntegerScale(void)
 {
     return sIntegerScale;
+}
+
+bool DioramaGL_DrewField3D(void)
+{
+    return sDrewField3D;
 }
 
 bool DioramaGL_IsAutoMode(void)
