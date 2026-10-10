@@ -9,6 +9,9 @@ enum DioramaWeatherEffect DioramaWeather_Classify(uint8_t weather)
     {
     case WEATHER_NONE:
     case WEATHER_SUNNY:
+    /* The woods' shade only darkens the palettes, which the 3D view reads
+     * from the live palette RAM like the GBA's picture: nothing else to draw. */
+    case WEATHER_SHADE:
         return DIORAMA_WEATHER_CLEAR;
     case WEATHER_RAIN:
         return DIORAMA_WEATHER_RAIN;

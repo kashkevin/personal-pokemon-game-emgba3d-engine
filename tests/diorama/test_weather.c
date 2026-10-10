@@ -19,6 +19,8 @@ int main(void)
 {
     CHECK(DioramaWeather_Classify(WEATHER_NONE) == DIORAMA_WEATHER_CLEAR);
     CHECK(DioramaWeather_Classify(WEATHER_SUNNY) == DIORAMA_WEATHER_CLEAR);
+    CHECK(DioramaWeather_Classify(WEATHER_SHADE) == DIORAMA_WEATHER_CLEAR);
+    CHECK(DioramaWeather_CanRender(WEATHER_SHADE, WEATHER_SHADE));
     CHECK(DioramaWeather_Classify(WEATHER_RAIN) == DIORAMA_WEATHER_RAIN);
     CHECK(DioramaWeather_Classify(WEATHER_FOG_HORIZONTAL) == DIORAMA_WEATHER_FOG);
     CHECK(DioramaWeather_Classify(WEATHER_VOLCANIC_ASH) == DIORAMA_WEATHER_ASH);
