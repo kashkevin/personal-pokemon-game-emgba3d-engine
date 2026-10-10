@@ -31,4 +31,42 @@ void DioramaGL_GetCameraSteps(int *pitchSteps, int *zoomSteps);
 void DioramaGL_SetCameraSteps(int pitchSteps, int zoomSteps);
 void DioramaGL_Shutdown(void);
 
+/*
+ * For the 3D battle (gl_battle.c), which looks at the field's world from a
+ * camera of its own while the compositor keeps it as it was.
+ */
+struct DioramaSceneSnapshot;
+struct DioramaResolvedCell;
+SDL_Window *DioramaGL_GetWindow(void);
+bool DioramaGL_GetIntegerScale(void);
+/* The automatic 3D view is chosen (not the classic view, F4). */
+bool DioramaGL_IsAutoMode(void);
+/* The last frame presented drew the field in 3D (gl_battle.c composes a
+ * battle transition over it only then). */
+bool DioramaGL_DrewField3D(void);
+/* The field of that map as last drawn in 3D - or, if it never was (a battle
+ * straight out of a scripted scene), as last seen, built now - its snapshot
+ * and resolved cells, whose terrain, atlases and models are on the GPU; false
+ * if there is none. */
+bool DioramaGL_GetBattleWorld(u8 mapGroup, u8 mapNum, u16 mapLayoutId,
+                              const struct DioramaSceneSnapshot **snapshot,
+                              const struct DioramaResolvedCell **resolved);
+/* The field's camera of that frame (no interpolation): position, pitch and
+ * focal length as DioramaGLTerrain_Draw takes them. */
+void DioramaGL_GetFieldCamera(float *cameraX, float *cameraZ, float *pitch, float *focalLength);
+/* Draws that world - sun shadows, terrain, trees and models, nobody in it -
+ * from the camera given, with the eye in gDioramaCameraRig. */
+void DioramaGL_DrawBattleWorld(float cameraX, float cameraZ, float pitch, float focalLength,
+                               float aspectCorrection, int outputWidth, int outputHeight);
+/* That world with these tiles (the field's BG tiles, animated by
+ * DioramaBattle_AnimateFieldTiles): its atlases updated where the tiles
+ * changed; true when what it shows changed. */
+bool DioramaGL_SetBattleTiles(const uint8_t *tileGraphics);
+/* The texture holding the GBA picture last uploaded (DioramaGL_UploadFrame). */
+unsigned DioramaGL_GetFrameTexture(void);
+/* The field's scene as the 3D view last drew it, its snapshot and resolved
+ * cells (for the battle's stage survey, a test tool); false if there is none. */
+bool DioramaGL_GetFieldScene(const struct DioramaSceneSnapshot **snapshot,
+                             const struct DioramaResolvedCell **resolved);
+
 #endif

@@ -258,4 +258,32 @@ bool DioramaTerrain_IsBoundsVisible(const struct DioramaTerrainBounds *bounds,
                                      float cameraX, float cameraZ,
                                      float cameraPitch, float focalLength);
 
+/*
+ * Where the eye stands for the terrain and building passes (and the terrain's
+ * culling above). The overworld camera is fixed 16 tiles over the ground with
+ * the target a little below the middle of the screen; another camera (the 3D
+ * battle's, gl_battle.c) sets its own eye for the frames it draws: its
+ * height over y = 0, how far south of the target it stands, and a shift of
+ * the whole picture in clip units. Inactive, every value is the overworld's,
+ * so the overworld is drawn exactly as before.
+ */
+struct DioramaCameraRig
+{
+    bool active;
+    float height;
+    float distance;
+    float screenOffsetY;
+    /* The window's aspect correction, for the culling (the overworld's
+     * culling keeps its 240-wide frustum). */
+    float aspectCorrection;
+};
+extern struct DioramaCameraRig gDioramaCameraRig;
+
+#define DIORAMA_OVERWORLD_CAMERA_HEIGHT 16.0f
+#define DIORAMA_OVERWORLD_TARGET_VERTICAL -0.458944f
+#define DIORAMA_OVERWORLD_SCREEN_OFFSET -0.04f
+
+void DioramaCamera_GetRig(float cameraPitch, float *height, float *distance,
+                          float *screenOffsetY);
+
 #endif
