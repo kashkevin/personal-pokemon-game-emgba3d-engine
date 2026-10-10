@@ -191,8 +191,9 @@ static struct
     int width, height;      /* the texture's: left + 240 + right, top + 160 */
     int left, right, top;   /* the margins it holds, GBA pixels */
     bool valid;             /* drawn this frame */
+    bool moveBackground;    /* asked for a move's background (not BG3 off) */
     uint32_t pixels[DIORAMA_WIDE_MAX_W * DIORAMA_WIDE_MAX_H];
-    uint32_t frames;        /* battle frames shown with it, for the log */
+    uint32_t frames;        /* battle frames shown with a move's background, for the log */
 } sWide;
 
 static GLuint sFieldTexture;
@@ -1588,7 +1589,7 @@ static void End(void)
 /* While no world is shown (a move's own background on BG3, or BG3 off): ask
  * the GBA renderer for the screen past the picture, as wide as the window
  * shows round it (gDioramaSceneWide). */
-static void RequestWide(void)
+static void RequestWide(bool moveBackground)
 {
     struct Layout layout;
     SDL_Window *window = DioramaGL_GetWindow();
@@ -1608,6 +1609,7 @@ static void RequestWide(void)
     gDioramaSceneWideRight = (uint16_t)(right < 0 ? 0 : right > DIORAMA_WIDE_MAX_SIDE ? DIORAMA_WIDE_MAX_SIDE : right);
     gDioramaSceneWideTop = (uint16_t)(top < 0 ? 0 : top > DIORAMA_WIDE_MAX_TOP ? DIORAMA_WIDE_MAX_TOP : top);
     gDioramaSceneWideWanted = true;
+    sWide.moveBackground = moveBackground;
 }
 
 uint8_t DioramaGLBattle_BeginFrame(void)
@@ -1681,7 +1683,7 @@ uint8_t DioramaGLBattle_BeginFrame(void)
                                   && sBattle.frame.sceneryShiftY == 0.0f;
         }
         else if (!sBattle.frame.forcedBlank)
-            RequestWide();
+            RequestWide(sBattle.frame.bg3Enabled && !sBattle.frame.sceneryShown);
     }
     else if (!sBattle.frame.inBattle && sBattle.frame.transition && !sBattle.fieldOff
           && DioramaGL_IsAutoMode() && DioramaGL_DrewField3D())
@@ -1779,7 +1781,7 @@ void DioramaGLBattle_UploadFrame(const uint32_t *rgba)
     {
         UploadWide();
         UploadEdges(true);
-        if (sBattle.log && sWide.frames++ == 0)
+        if (sBattle.log && sWide.moveBackground && sWide.frames++ == 0)
             SDL_Log("Diorama battle: a move's own background, carried past the picture "
                     "(%d, %d and %d pixels left, right and above)", sWide.left, sWide.right, sWide.top);
         return;
