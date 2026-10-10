@@ -23,10 +23,23 @@ pokeemerald-multiplatform contributors"; full text in that repository's `LICENSE
 It does not cover the pret decompilation or any Pokémon game material. Keep this
 notice with any distribution of these files.
 
+### Modelled buildings (ZallaxDev/pokeemerald-3Ds-dualscreen)
+
+| Path here | Notes |
+| --- | --- |
+| `src/diorama/scene/buildings.c`, `include/diorama/buildings.h` | Port of the 3DS project's `3ds_port/src/voxel/voxel_building.c` (commit `4a699e3`): the VXB7 building table reader, read from memory instead of RomFS. |
+| `src/diorama/gl/gl_building_renderer.c`, `include/diorama/gl_building_renderer.h` | New: draws the placed models with OpenGL, coloured from the live BG palette (the placement logic follows the 3DS project's `VoxelBuildings_EmitSome`). |
+| `tools/diorama_buildings/**` | The 3DS project's building generator; see its README for the files, licence and changes. |
+
+Licence of the 3DS project's port code: MIT, "Copyright (c) 2026 ZallaxDev and
+Pokémon Emerald 3Ds Dual Screen contributors" (its `LICENSE-PORT.md`; it does not
+cover Pokémon Emerald or the pret decompilation). Keep that notice with these files.
+
 ## Generated files (not in Git)
 
 `src/data/diorama/diorama_rules.generated.c`, `include/diorama/rules.generated.h`,
 `src/data/diorama/tree_model.generated.c`, `include/diorama/tree_model.generated.h`
+and `src/data/diorama/buildings.generated.c` (via `build/diorama/buildings.bin`)
 are produced from this tree's maps and tilesets by `diorama_rules.mk` during a
 `DIORAMA=1` build. For this fork they come out byte-identical to the voxel
 project's tables (rules SHA-256 `9ef5c6e8...`), because the Emerald maps and

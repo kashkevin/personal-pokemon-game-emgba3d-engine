@@ -8,6 +8,8 @@
 #ifdef NATIVE_LINUX
 #endif
 
+#include "diorama/buildings.h"
+#include "diorama/gl_building_renderer.h"
 #include "diorama/gl_compositor.h"
 #include "diorama/gl_loader.h"
 #include "diorama/gl_object_renderer.h"
@@ -728,6 +730,7 @@ static void EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
     if (cellCount > DIORAMA_MAX_VISIBLE_CELLS)
         cellCount = DIORAMA_MAX_VISIBLE_CELLS;
     DioramaRules_ResolveGrid(snapshot, sAtlasResolvedCells);
+    DioramaBuildings_FlattenResolvedCells(snapshot, sAtlasResolvedCells, cellCount);
     for (i = 0; i < DIORAMA_TILE_COUNT; i++)
     {
         sCutoutBaseMetatiles[i] = 0xFFFF;
@@ -928,6 +931,10 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
     sObjectsAvailable = DioramaGLObjects_Init();
     if (!sObjectsAvailable)
         SDL_Log("Diorama object renderer unavailable; retaining the 2D OpenGL fallback");
+    // Modelled buildings (3DS port); without them houses keep the Diorama's
+    // own extrusion.
+    if (!DioramaGLBuildings_Init())
+        SDL_Log("Diorama building models unavailable; houses stay extruded");
 
     dglGenVertexArrays(1, &sVertexArray);
     dglBindVertexArray(sVertexArray);
@@ -1074,6 +1081,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
             EnsureAtlas(&sSceneSnapshot);
             sCurrent3DReady = DioramaGLTerrain_Sync(&sSceneSnapshot, sAtlasResolvedCells)
                            && DioramaGLObjects_Sync(&sSceneSnapshot, sAtlasResolvedCells);
+            DioramaGLBuildings_Sync(&sSceneSnapshot, sAtlasResolvedCells);
         }
         current3D = sCurrent3DReady;
     }
@@ -1213,6 +1221,8 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                                sForegroundAtlasTexture.id, cameraX, cameraZ,
                                cameraPitch, cameraFocalLength,
                                aspectCorrection, sTerrainDebug);
+        DioramaGLBuildings_Draw(cameraX, cameraZ, cameraPitch, cameraFocalLength,
+                                aspectCorrection);
         DioramaGLObjects_Draw(current3D ? frameAlpha : 1.0f,
                                cameraX, cameraZ, cameraPitch,
                                cameraFocalLength, aspectCorrection);
@@ -1395,6 +1405,7 @@ void DioramaGL_AdjustCameraPitch(int steps)
 
 void DioramaGL_Shutdown(void)
 {
+    DioramaGLBuildings_Shutdown();
     DioramaGLObjects_Shutdown();
     DioramaGLTerrain_Shutdown();
     for (int i = 0; i < sBackgroundCount; i++)

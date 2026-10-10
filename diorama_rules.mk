@@ -38,3 +38,23 @@ $(DIORAMA_RULE_SOURCE) $(DIORAMA_RULE_HEADER) &: $(DIORAMA_RULE_JSON) $(DIORAMA_
 
 $(DIORAMA_TREE_SOURCE) $(DIORAMA_TREE_HEADER) &: $(DIORAMA_TREE_MODEL) $(DIORAMA_TREE_COMPILER)
 	python3 $(DIORAMA_TREE_COMPILER)
+
+# Modelled buildings (ZallaxDev/pokeemerald-3Ds-dualscreen's generator, see
+# tools/diorama_buildings/README.md): every building that reproduces its own
+# drawing pixel for pixel becomes a textured model; export_gl.py compiles them
+# with palette-slot pages for the renderer.
+DIORAMA_BUILDINGS_TOOLS := $(sort $(wildcard tools/diorama_buildings/*.py)) \
+	tools/diorama_buildings/relief_fixes.json tools/diorama_rules/emerald_compositor.py
+DIORAMA_BUILDINGS_BIN := build/diorama/buildings.bin
+DIORAMA_BUILDINGS_SOURCE := src/data/diorama/buildings.generated.c
+
+AUTO_GEN_TARGETS += $(DIORAMA_BUILDINGS_SOURCE)
+
+$(DIORAMA_BUILDINGS_BIN): $(DIORAMA_BUILDINGS_TOOLS) $(DIORAMA_RULE_CATALOGS) \
+	 data/layouts/layouts.json src/data/tilesets/headers.h src/data/tilesets/metatiles.h \
+	 src/data/tilesets/graphics.h
+	@mkdir -p $(@D)
+	python3 tools/diorama_buildings/gen_voxel_buildings.py --output $@ > $(@D)/buildings.log
+
+$(DIORAMA_BUILDINGS_SOURCE): $(DIORAMA_BUILDINGS_BIN) tools/diorama_buildings/export_gl.py
+	python3 tools/diorama_buildings/export_gl.py $< $@

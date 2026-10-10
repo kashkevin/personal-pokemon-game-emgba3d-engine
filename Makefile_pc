@@ -25,7 +25,8 @@ SANITIZE     ?= 0
 # ZallaxDev/pokeemerald-voxel-project, see src/diorama/README.md). Its rule tables
 # are generated from this tree's maps and tilesets by tools/diorama_rules.
 DIORAMA      ?= 0
-DIORAMA_GENERATED_C := src/data/diorama/diorama_rules.generated.c src/data/diorama/tree_model.generated.c
+DIORAMA_GENERATED_C := src/data/diorama/diorama_rules.generated.c src/data/diorama/tree_model.generated.c \
+                       src/data/diorama/buildings.generated.c
 
 # GBA PPU emulation used for the 2D frame. The shipping Windows build uses the
 # "easy draw" renderer; Linux uses it too so tests exercise what ships ("fast
