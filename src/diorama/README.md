@@ -27,13 +27,17 @@ notice with any distribution of these files.
 
 | Path here | Notes |
 | --- | --- |
-| `src/diorama/scene/buildings.c`, `include/diorama/buildings.h` | Port of the 3DS project's `3ds_port/src/voxel/voxel_building.c` (commit `4a699e3`): the VXB7 building table reader, read from memory instead of RomFS. |
+| `src/diorama/scene/buildings.c`, `include/diorama/buildings.h` | Port of the 3DS project's `3ds_port/src/voxel/voxel_building.c` (commit `4a699e3`): the VXB7 building table reader, read from memory instead of RomFS, and its front-face query (`CollectFronts`, `FrontCellAt`, `VoxelBuildings_FrontAt` as `DioramaBuildings_FrontAt`). |
 | `src/diorama/gl/gl_building_renderer.c`, `include/diorama/gl_building_renderer.h` | New: draws the placed models with OpenGL, coloured from the live BG palette (the placement logic follows the 3DS project's `VoxelBuildings_EmitSome`). |
+| `src/diorama/gl/gl_object_renderer.c` (`ModelPush`) | Port of the 3DS project's `ModelPush` (`3ds_port/src/voxel/voxel_entities.c`): a walker's card comes a pixel in front of the furniture it stands before. The upright-card depth (`UprightDepth` in the sprite shader) is new. |
+| `src/diorama/gl/gl_shadow.c`, `include/diorama/gl_shadow.h` | New: the sun's depth map. The sun's direction and the 0.70 ambient are the 3DS project's (`voxel_lighting.h`); the 3DS bakes its shadows on the CPU, this draws them on the GPU. |
 | `tools/diorama_buildings/**` | The 3DS project's building generator; see its README for the files, licence and changes. |
 
 Licence of the 3DS project's port code: MIT, "Copyright (c) 2026 ZallaxDev and
 Pokémon Emerald 3Ds Dual Screen contributors" (its `LICENSE-PORT.md`; it does not
-cover Pokémon Emerald or the pret decompilation). Keep that notice with these files.
+cover Pokémon Emerald or the pret decompilation). Its voxel code credits the MIT
+pokeemerald-multiplatform port for the logic it reuses (its `3ds_port/src/voxel/
+NOTICE.md`), the notice above. Keep both notices with these files.
 
 ## Generated files (not in Git)
 
