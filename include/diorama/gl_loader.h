@@ -42,6 +42,14 @@ extern PFNGLUNIFORM4FPROC dglUniform4f;
 extern PFNGLUSEPROGRAMPROC dglUseProgram;
 extern PFNGLVERTEXATTRIBPOINTERPROC dglVertexAttribPointer;
 extern PFNGLVERTEXATTRIBDIVISORPROC dglVertexAttribDivisor;
+/* Renderbuffers: the 3D scene's own render resolution and multisampling
+ * (gl_target.h). */
+extern PFNGLGENRENDERBUFFERSPROC dglGenRenderbuffers;
+extern PFNGLBINDRENDERBUFFERPROC dglBindRenderbuffer;
+extern PFNGLRENDERBUFFERSTORAGEPROC dglRenderbufferStorage;
+extern PFNGLRENDERBUFFERSTORAGEMULTISAMPLEPROC dglRenderbufferStorageMultisample;
+extern PFNGLFRAMEBUFFERRENDERBUFFERPROC dglFramebufferRenderbuffer;
+extern PFNGLDELETERENDERBUFFERSPROC dglDeleteRenderbuffers;
 
 bool DioramaGL_LoadFunctions(void);
 

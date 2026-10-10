@@ -8,6 +8,7 @@
 #include "constants/map_types.h"
 #include "constants/rtc.h"
 #include "constants/weather.h"
+#include "diorama/gl_quality.h"
 #include "diorama/gl_light.h"
 #include "diorama/gl_terrain_renderer.h"
 
@@ -65,7 +66,8 @@ static bool Enabled(void)
 
         sEnabled = value == NULL || value[0] != '0';
     }
-    return sEnabled;
+    /* The player's lighting setting (gl_quality.h) as well. */
+    return sEnabled && DioramaGLQuality_Lighting();
 }
 
 static void Set3(float out[3], float r, float g, float b)

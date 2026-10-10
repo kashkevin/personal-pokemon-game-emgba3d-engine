@@ -29,6 +29,13 @@ int DioramaGL_GetCameraStyle(void);
  * kept between runs (pokeemerald.cfg cameraPitch, cameraZoom). */
 void DioramaGL_GetCameraSteps(int *pitchSteps, int *zoomSteps);
 void DioramaGL_SetCameraSteps(int pitchSteps, int zoomSteps);
+/* The PC's own interface (src/platform/sdl2.c): called last in every frame
+ * presented, at the window's resolution with its framebuffer bound. */
+void DioramaGL_SetOverlay(void (*overlay)(int outputWidth, int outputHeight));
+/* The last frame presented drew the 3D scene (the benchmark counts them). */
+bool DioramaGL_LastFrameWas3D(void);
+/* The OpenGL renderer, its vendor and version, for the benchmark's log. */
+void DioramaGL_DescribeRenderer(char *buffer, size_t size);
 void DioramaGL_Shutdown(void);
 
 #endif

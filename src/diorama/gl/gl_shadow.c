@@ -8,9 +8,13 @@
 #include <SDL2/SDL.h>
 
 #include "diorama/gl_loader.h"
+#include "diorama/gl_quality.h"
 #include "diorama/gl_shadow.h"
+#include "diorama/gl_target.h"
 
-#define SHADOW_SIZE 2048
+/* The map's side follows the player's shadow quality (gl_quality.h: 1024,
+ * 2048 as before, or 4096); the texture is made again when it changes. */
+static int sShadowSize = 2048;
 /* Half the side of the square of ground the map covers, in tiles: the
  * camera sees about 15 tiles to each side and 20 ahead. */
 #define SHADOW_HALF_EXTENT 30.0f
@@ -91,7 +95,9 @@ bool DioramaGLShadow_Init(void)
         return true;
     glGenTextures(1, &sDepthTexture);
     glBindTexture(GL_TEXTURE_2D, sDepthTexture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, SHADOW_SIZE, SHADOW_SIZE, 0,
+    if (DioramaGLQuality_ShadowMapSize() > 0)
+        sShadowSize = DioramaGLQuality_ShadowMapSize();
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, sShadowSize, sShadowSize, 0,
                  GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -135,16 +141,29 @@ bool DioramaGLShadow_Begin(float cameraX, float cameraZ, float strength,
     float upward[3];
     float center[3] = {cameraX, 0.0f, cameraZ + SHADOW_AHEAD};
     float eye[3];
-    float texel = 2.0f * SHADOW_HALF_EXTENT / SHADOW_SIZE;
-    float step = texel * SHADOW_STEP_TEXELS;
+    int size = DioramaGLQuality_ShadowMapSize();
+    float texel;
+    float step;
     float cx;
     float cy;
     GLfloat view[16];
     GLfloat projection[16];
 
     sActiveThisFrame = false;
-    if (!DioramaGLShadow_IsEnabled() || strength <= 0.0f)
+    if (!DioramaGLShadow_IsEnabled() || strength <= 0.0f || size <= 0)
         return false;
+    if (size != sShadowSize)
+    {
+        /* The player chose another shadow quality: a map of the new size. */
+        sShadowSize = size;
+        glBindTexture(GL_TEXTURE_2D, sDepthTexture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, sShadowSize, sShadowSize, 0,
+                     GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, NULL);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        sCacheValid = false;
+    }
+    texel = 2.0f * SHADOW_HALF_EXTENT / sShadowSize;
+    step = texel * SHADOW_STEP_TEXELS;
     if (strength > 1.0f)
         strength = 1.0f;
     sAmbient = 1.0f - strength * (1.0f - DIORAMA_SHADOW_AMBIENT);
@@ -196,7 +215,7 @@ bool DioramaGLShadow_Begin(float cameraX, float cameraZ, float strength,
     Multiply(projection, view, sLightMatrix);
 
     dglBindFramebuffer(GL_FRAMEBUFFER, sFramebuffer);
-    glViewport(0, 0, SHADOW_SIZE, SHADOW_SIZE);
+    glViewport(0, 0, sShadowSize, sShadowSize);
     glDisable(GL_SCISSOR_TEST);
     glDepthMask(GL_TRUE);
     glClear(GL_DEPTH_BUFFER_BIT);
@@ -220,7 +239,9 @@ void DioramaGLShadow_End(int outputWidth, int outputHeight)
         return;
     glDisable(GL_POLYGON_OFFSET_FILL);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    dglBindFramebuffer(GL_FRAMEBUFFER, 0);
+    /* Back to the scene's framebuffer: the window's, or its own offscreen one
+     * at the chosen resolution (gl_target.h). */
+    dglBindFramebuffer(GL_FRAMEBUFFER, DioramaGLTarget_Framebuffer());
     glViewport(0, 0, outputWidth, outputHeight);
     glEnable(GL_SCISSOR_TEST);
     glScissor(0, 0, outputWidth, outputHeight);

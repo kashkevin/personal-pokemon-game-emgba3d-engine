@@ -9,6 +9,8 @@
 #include "diorama/gl_light.h"
 #include "diorama/gl_loader.h"
 #include "diorama/gl_object_renderer.h"
+#include "diorama/gl_quality.h"
+#include "diorama/gl_target.h"
 
 /* The 3DS project's sun (voxel_lighting.h): in the northwest, towards it
  * (-DX, 1, -DZ) with z pointing south; the wind blows the way shadows fall. */
@@ -769,8 +771,9 @@ static void DrawBloom(const struct DioramaAirLight *air, int outputWidth, int ou
     }
     glDisable(GL_BLEND);
     glDisable(GL_DEPTH_TEST);
-    /* The copy: each quarter pixel a bilinear sample of the picture. */
-    dglBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)drawFramebuffer);
+    /* The copy: each quarter pixel a bilinear sample of the picture (resolved
+     * first when the scene is multisampled, gl_target.h). */
+    dglBindFramebuffer(GL_READ_FRAMEBUFFER, DioramaGLTarget_ReadableFramebuffer((GLuint)drawFramebuffer));
     dglBindFramebuffer(GL_DRAW_FRAMEBUFFER, sBloomFramebuffers[0]);
     dglBlitFramebuffer(0, 0, outputWidth, outputHeight, 0, 0, width, height,
                        GL_COLOR_BUFFER_BIT, GL_LINEAR);
@@ -807,7 +810,8 @@ static bool Enabled(void)
 
         sEnabled = value == NULL || value[0] != '0';
     }
-    return sEnabled;
+    /* The player's effects setting (gl_quality.h) as well. */
+    return sEnabled && DioramaGLQuality_Effects();
 }
 
 void DioramaGLAir_Draw(float cameraX, float cameraZ, float cameraPitch,

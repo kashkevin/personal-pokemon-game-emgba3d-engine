@@ -16,8 +16,10 @@
 #include "diorama/gl_compositor.h"
 #include "diorama/gl_light.h"
 #include "diorama/gl_loader.h"
+#include "diorama/gl_pc_overlay.h"
 #include "diorama/gl_shadow.h"
 #include "diorama/gl_object_renderer.h"
+#include "diorama/gl_target.h"
 #include "diorama/gl_terrain_renderer.h"
 #include "diorama/gl_tree_sprites.h"
 #include "diorama/rules.generated.h"
@@ -27,6 +29,7 @@
 #include "diorama/scene_snapshot.h"
 #include "diorama/weather.h"
 #include "gba/defines.h"
+#include "platform/display_settings.h"
 #include "constants/map_types.h"
 #include "constants/rtc.h"
 #include "constants/weather.h"
@@ -53,6 +56,10 @@ struct DioramaTexture
 
 static SDL_Window *sWindow;
 static SDL_GLContext sContext;
+/* The PC's own interface (settings menu, frame rate; src/platform/sdl2.c),
+ * drawn last at the window's resolution before the frame is shown. */
+static void (*sOverlay)(int outputWidth, int outputHeight);
+static bool sLastFrame3D;
 static GLuint sProgram;
 static GLuint sVertexArray;
 static GLuint sVertexBuffer;
@@ -1264,20 +1271,15 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                      0, 0, sBackgroundTextures[background].width,
                      sBackgroundTextures[background].height, true, 1.0f);
 
-    if (integerScale)
     {
-        int scale = outputWidth / DISPLAY_WIDTH;
-        if (outputHeight / DISPLAY_HEIGHT < scale)
-            scale = outputHeight / DISPLAY_HEIGHT;
-        if (scale < 1)
-            scale = 1;
+        /* The 240x160 picture (text boxes, menus, 2D scenes) in whole-number
+         * steps at the window's own resolution, so pixel art stays sharp at
+         * every size: 'integerScale' as large as fits, otherwise within 8/9 of
+         * the height (6x at 1080p, 8x at 1440p, 12x at 2160p, as before). */
+        int scale = DisplaySettings_PixelScale(outputWidth, outputHeight, integerScale);
+
         gameWidth = DISPLAY_WIDTH * scale;
         gameHeight = DISPLAY_HEIGHT * scale;
-    }
-    else
-    {
-        gameHeight = outputHeight * 8 / 9;
-        gameWidth = gameHeight * 3 / 2;
     }
     if (sSurveyView >= 0)
     {
@@ -1295,19 +1297,24 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     {
         float cameraPitch;
         float cameraFocalLength;
-        float aspectCorrection = (float)DISPLAY_WIDTH * outputHeight
-                               / ((float)DISPLAY_HEIGHT * outputWidth);
+        float aspectCorrection;
+        int sceneWidth;
+        int sceneHeight;
 
+        /* The scene at the chosen resolution: the window itself, or an
+         * offscreen target scaled into it afterwards (gl_target.h). */
+        DioramaGLTarget_Begin(outputWidth, outputHeight, &sceneWidth, &sceneHeight);
+        aspectCorrection = (float)DISPLAY_WIDTH * sceneHeight / ((float)DISPLAY_HEIGHT * sceneWidth);
         GetCameraPosition(&sRenderedSceneSnapshot, &sPreviousRenderedSceneSnapshot,
                           sHasPreviousRenderedSceneSnapshot,
                           current3D ? frameAlpha : 1.0f, &cameraX, &cameraZ);
         GetCameraSettings(&sRenderedSceneSnapshot, &cameraPitch, &cameraFocalLength);
         glEnable(GL_SCISSOR_TEST);
-        glScissor(0, 0, outputWidth, outputHeight);
+        glScissor(0, 0, sceneWidth, sceneHeight);
         glClearColor(0.035f, 0.055f, 0.07f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glViewport(0, 0, outputWidth, outputHeight);
+        glViewport(0, 0, sceneWidth, sceneHeight);
         // This frame's weather light (gl_light.h), the sun's depth map
         // (gl_shadow.h), then the lit scene.
         DioramaGLLight_Update(&sRenderedSceneSnapshot, !sTerrainDebug);
@@ -1321,7 +1328,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                                         sForegroundAtlasTexture.id);
             DioramaGLBuildings_DrawShadow();
             DioramaGLTreeSprites_DrawShadow();
-            DioramaGLShadow_End(outputWidth, outputHeight);
+            DioramaGLShadow_End(sceneWidth, sceneHeight);
         }
         DioramaGLTerrain_Draw(sAtlasTexture.id, sBaseAtlasTexture.id,
                                sForegroundAtlasTexture.id, cameraX, cameraZ,
@@ -1336,20 +1343,35 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                                cameraFocalLength, aspectCorrection);
         // The light in the air over it all (gl_air.h): dust, rays, bloom.
         DioramaGLAir_Draw(cameraX, cameraZ, cameraPitch, cameraFocalLength,
-                          aspectCorrection, outputWidth, outputHeight);
+                          aspectCorrection, sceneWidth, sceneHeight);
         // A dark cave's circle of light round the player (gl_field_light.h):
         // everything but the game's text is dark outside it, as on the GBA.
         DioramaGLFieldLight_Draw(&sRenderedSceneSnapshot, current3D ? frameAlpha : 1.0f,
                                  cameraX, cameraZ, cameraPitch, cameraFocalLength,
-                                 aspectCorrection, outputWidth, outputHeight);
+                                 aspectCorrection, sceneWidth, sceneHeight);
         glDisable(GL_SCISSOR_TEST);
+        DioramaGLTarget_End(outputWidth, outputHeight);
         glViewport(0, 0, outputWidth, outputHeight);
         dglUseProgram(sProgram);
         dglBindVertexArray(sVertexArray);
         if (sSurveyView < 0 && BuildWeatherImage(&sRenderedSceneSnapshot))
+        {
+            /* Rain, snow and the like over the whole window at one whole-number
+             * scale (not stretched to the window's shape), centred, the
+             * overhang cut off. */
+            int coverScale = (outputWidth + DISPLAY_WIDTH - 1) / DISPLAY_WIDTH;
+            int coverWidth;
+            int coverHeight;
+
+            if ((outputHeight + DISPLAY_HEIGHT - 1) / DISPLAY_HEIGHT > coverScale)
+                coverScale = (outputHeight + DISPLAY_HEIGHT - 1) / DISPLAY_HEIGHT;
+            coverWidth = DISPLAY_WIDTH * coverScale;
+            coverHeight = DISPLAY_HEIGHT * coverScale;
             DrawTexture(&sWeatherTexture, outputWidth, outputHeight,
-                        0, 0, outputWidth, outputHeight,
+                        (outputWidth - coverWidth) / 2, (outputHeight - coverHeight) / 2,
+                        coverWidth, coverHeight,
                         0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, 1.0f);
+        }
         if (sTerrainDebug)
         {
             BuildDebugImage(&sRenderedSceneSnapshot);
@@ -1394,7 +1416,33 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
 
         CaptureSurveyFrame(outputWidth, outputHeight, captureSnapshot, stateMatchesPixels);
     }
+    sLastFrame3D = drawTerrain;
+    if (sOverlay != NULL && sSurveyView < 0)
+    {
+        glViewport(0, 0, outputWidth, outputHeight);
+        sOverlay(outputWidth, outputHeight);
+    }
     SDL_GL_SwapWindow(sWindow);
+}
+
+void DioramaGL_SetOverlay(void (*overlay)(int outputWidth, int outputHeight))
+{
+    sOverlay = overlay;
+}
+
+bool DioramaGL_LastFrameWas3D(void)
+{
+    return sLastFrame3D;
+}
+
+void DioramaGL_DescribeRenderer(char *buffer, size_t size)
+{
+    const char *vendor = (const char *)glGetString(GL_VENDOR);
+    const char *renderer = (const char *)glGetString(GL_RENDERER);
+    const char *version = (const char *)glGetString(GL_VERSION);
+
+    SDL_snprintf(buffer, size, "%s, %s (OpenGL %s)", renderer != NULL ? renderer : "?",
+                 vendor != NULL ? vendor : "?", version != NULL ? version : "?");
 }
 
 void DioramaGL_SetVSync(bool enabled)
@@ -1554,6 +1602,8 @@ void DioramaGL_SetCameraSteps(int pitchSteps, int zoomSteps)
 
 void DioramaGL_Shutdown(void)
 {
+    DioramaPCOverlay_Shutdown();
+    DioramaGLTarget_Shutdown();
     DioramaGLShadow_Shutdown();
     DioramaGLAir_Shutdown();
     DioramaGLFieldLight_Shutdown();

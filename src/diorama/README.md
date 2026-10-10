@@ -84,3 +84,26 @@ tilesets are unchanged.
 * The voxel tree model's baked colours follow the palette's fade and night tint:
   a per-channel line fitted from the trees' BG palette each frame
   (`gl_terrain_renderer.c`, `TreeTint`); by day it is the identity.
+
+## Resolution, quality and the PC's own interface (project-owned, 2026-10-10)
+
+* `gl/gl_target.c`: the scene's render target. Drawn straight into the window when
+  its size is the window's and there is no multisampling (windowed mode, or a
+  fullscreen mode at the chosen resolution: the path before these settings);
+  otherwise into an offscreen framebuffer at the chosen resolution's height and
+  the window's shape (multisampled if the quality asks), then scaled into the
+  window. The sun's depth map and the bloom return to that framebuffer
+  (`DioramaGLTarget_Framebuffer`, `DioramaGLTarget_ReadableFramebuffer`).
+* `gl/gl_compositor.c`: the 240x160 picture (text boxes, menus, 2D scenes) in
+  whole-number steps at the window's own resolution (the same size as before at
+  16:9, sharp at any other); the weather layer at one whole-number scale covering
+  the window instead of stretched to its shape; `DioramaGL_SetOverlay` for the
+  PC's interface, drawn last.
+* `gl/gl_quality.c`: the player's quality: the sun depth map's side (off, 1024,
+  2048 as before, 4096; `gl_shadow.c` makes the map again when it changes), the
+  weather light, dapples and colour grade, the light in the air. The
+  `PKMN_DIORAMA_*` switches still turn features off.
+* `gl/gl_pc_overlay.c`: the PC settings menu (F10) and the frame rate, drawn as the
+  UI art direction asks (the engine's bitmap fonts, the Route Caps face, Emerald
+  green panels with stepped corners) on a 640x360 canvas shown once at a whole
+  scale with nearest sampling (sharp at any resolution and display scaling).

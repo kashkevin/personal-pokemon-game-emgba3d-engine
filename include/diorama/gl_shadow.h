@@ -17,6 +17,7 @@
  * VOXEL_AMBIENT. The 3DS bakes the shadows into the meshes on the CPU; here the
  * GPU's depth map does it for everything on screen, every frame.
  *
+ * The map's side follows the player's shadow quality (gl_quality.h).
  * PKMN_DIORAMA_SHADOWS=0 turns them off.
  */
 #define DIORAMA_SHADOW_AMBIENT 0.70f /* at full strength */
@@ -33,7 +34,7 @@ bool DioramaGLShadow_IsEnabled(void);
  * it all the same). */
 bool DioramaGLShadow_Begin(float cameraX, float cameraZ, float strength,
                            uint64_t casterGeneration);
-/* Back to the window's framebuffer and viewport. */
+/* Back to the scene's framebuffer (gl_target.h) and a viewport of this size. */
 void DioramaGLShadow_End(int outputWidth, int outputHeight);
 /* The light left in a cast shadow this frame, for the lit passes' mix(). */
 float DioramaGLShadow_Ambient(void);
