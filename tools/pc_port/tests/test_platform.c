@@ -138,6 +138,36 @@ MT_TEST(random_matches_gba_sequence)
         MT_EQ(Random32(), RefSfc32(ref));
 }
 
+// dma.c reads the emulated DMA registers; in the game bios.c owns this array.
+unsigned char REG_BASE[0x400] __attribute__((aligned(4)));
+#include "platform/dma.h"
+
+MT_TEST(hblank_dma_runaway_is_stopped)
+{
+    static u16 lines[DISPLAY_HEIGHT * 4];
+    static u16 reg;
+    const u32 control = ((DMA_ENABLE | DMA_START_HBLANK | DMA_REPEAT | DMA_SRC_INC
+                          | DMA_DEST_RELOAD | DMA_16BIT) << 16) | 1;
+    int frame, i;
+
+    for (i = 0; i < (int)ARRAY_COUNT(lines); i++)
+        lines[i] = i;
+    // Re-armed every frame, as a scanline effect does in its VBlank callback.
+    for (frame = 0; frame < 5; frame++)
+    {
+        DmaSet(0, lines, &reg, control);
+        for (i = 0; i < DISPLAY_HEIGHT; i++)
+            RunDMAs(DMA_HBLANK);
+        MT_EQ(reg, DISPLAY_HEIGHT - 1);
+    }
+    // Left running: stopped after three frames' worth of lines, before reading
+    // further past the buffer.
+    DmaSet(0, lines, &reg, control);
+    for (i = 0; i < DISPLAY_HEIGHT * 4; i++)
+        RunDMAs(DMA_HBLANK);
+    MT_EQ(reg, 3 * DISPLAY_HEIGHT - 1);
+}
+
 int main(void)
 {
     MT_RUN(arm_shift_semantics);
@@ -146,6 +176,7 @@ int main(void)
     MT_RUN(bios_helpers);
     MT_RUN(division_matches_gba);
     MT_RUN(random_matches_gba_sequence);
+    MT_RUN(hblank_dma_runaway_is_stopped);
     return MT_REPORT();
 }
 
