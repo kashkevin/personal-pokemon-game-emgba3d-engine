@@ -219,6 +219,7 @@ clean:
 
 # Native unit tests for project-owned platform code (Linux, 32-bit).
 NATIVE_TEST_DIR := build/pc-tests
+NATIVE_TEST_SDL := PKG_CONFIG_LIBDIR=/usr/lib/i386-linux-gnu/pkgconfig:/usr/share/pkgconfig pkg-config
 NATIVE_TEST_SRCS := tools/pc_port/tests/test_platform.c src/platform/agb_flash_pc.c src/platform/siirtc_pc.c \
                     src/platform/gba_support.c src/platform/fault_compat.c src/platform/dma.c src/random.c
 check-native:
@@ -237,6 +238,12 @@ check-native:
 	  tools/pc_port/tests/test_display_settings.c src/platform/display_settings.c src/platform/pc_menu.c \
 	  src/platform/benchmark.c -o $(NATIVE_TEST_DIR)/test_display_settings
 	@$(NATIVE_TEST_DIR)/test_display_settings
+	@gcc -m32 -std=gnu99 -Wall -Wextra -Werror -O1 -g -iquote include -iquote tools/pc_port/tests \
+	  $$($(NATIVE_TEST_SDL) --cflags sdl2) tools/pc_port/tests/test_png_write.c src/platform/png_write.c \
+	  $$($(NATIVE_TEST_SDL) --libs sdl2) -o $(NATIVE_TEST_DIR)/test_png_write
+	@rm -f $(NATIVE_TEST_DIR)/png-*.png
+	@$(NATIVE_TEST_DIR)/test_png_write $(NATIVE_TEST_DIR)
+	@python3 tools/pc_port/tests/check_png.py $(NATIVE_TEST_DIR)
 
 # GBA vs native byte layout of save data, mailboxes, battle packets and asm-built data.
 check-abi:
