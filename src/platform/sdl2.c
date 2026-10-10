@@ -165,8 +165,14 @@ static Uint32 sLastPresentMs;
 // the pitch and zoom keys' steps. PKMN_DIORAMA_CAMERA and PKMN_DIORAMA_TREES
 // (3ds, or anything else for the Diorama's own) override the file for one run
 // without being written to it, as the test scripts use them.
-static u8 sCameraStyle = DIORAMA_CAMERA_WIDE;
-static bool8 sTreeStyle3ds;
+// The owner's defaults (2026-10-10): the 3DS camera and the 3DS trees. A style
+// is written to the file only once it is the player's (read from the file or
+// switched with F7/F8), so a saved choice always stays and a file that never
+// held one follows the defaults.
+static u8 sCameraStyle = DIORAMA_CAMERA_3DS;
+static bool8 sTreeStyle3ds = TRUE;
+static bool8 sCameraStyleKept;
+static bool8 sTreeStyleKept;
 static int sCameraPitchSteps;
 static int sCameraZoomSteps;
 static bool sCameraStepsDirty;
@@ -660,9 +666,15 @@ static void ReadConfigFile(void)
             sPlatformSettings[PLATFORM_SETTING_CRY_VOLUME] = value;
 #ifdef ENABLE_DIORAMA
         else if (sscanf(line, "cameraStyle=%u", &value) == 1)
+        {
             sCameraStyle = value == DIORAMA_CAMERA_3DS ? DIORAMA_CAMERA_3DS : DIORAMA_CAMERA_WIDE;
+            sCameraStyleKept = TRUE;
+        }
         else if (sscanf(line, "treeStyle=%u", &value) == 1)
+        {
             sTreeStyle3ds = value == 1;
+            sTreeStyleKept = TRUE;
+        }
         else if (sscanf(line, "cameraPitch=%d", &steps) == 1)
             sCameraPitchSteps = steps;
         else if (sscanf(line, "cameraZoom=%d", &steps) == 1)
@@ -688,8 +700,10 @@ static void StoreConfigFile(void)
     fprintf(configFile, "volume=%u\n", sPlatformSettings[PLATFORM_SETTING_VOLUME]);
     fprintf(configFile, "cryVolume=%u\n", sPlatformSettings[PLATFORM_SETTING_CRY_VOLUME]);
 #ifdef ENABLE_DIORAMA
-    fprintf(configFile, "cameraStyle=%u\n", sCameraStyle);
-    fprintf(configFile, "treeStyle=%u\n", sTreeStyle3ds ? 1 : 0);
+    if (sCameraStyleKept)
+        fprintf(configFile, "cameraStyle=%u\n", sCameraStyle);
+    if (sTreeStyleKept)
+        fprintf(configFile, "treeStyle=%u\n", sTreeStyle3ds ? 1 : 0);
     fprintf(configFile, "cameraPitch=%d\n", sCameraPitchSteps);
     fprintf(configFile, "cameraZoom=%d\n", sCameraZoomSteps);
 #endif
@@ -1333,6 +1347,7 @@ void ProcessEvents(void)
                     sCameraStyle = DioramaGL_GetCameraStyle() == DIORAMA_CAMERA_3DS
                                  ? DIORAMA_CAMERA_WIDE : DIORAMA_CAMERA_3DS;
                     DioramaGL_SetCameraStyle(sCameraStyle);
+                    sCameraStyleKept = TRUE;
                     sCameraPitchSteps = sCameraZoomSteps = 0;
                     sCameraStepsDirty = false;
                     SDL_Log("3D view: %s camera", sCameraStyle == DIORAMA_CAMERA_3DS ? "3DS" : "wide");
@@ -1344,6 +1359,7 @@ void ProcessEvents(void)
                 if (event.key.repeat == 0)
                 {
                     sTreeStyle3ds = !DioramaTreeSprites_Enabled();
+                    sTreeStyleKept = TRUE;
                     DioramaTreeSprites_SetEnabled(sTreeStyle3ds);
                     SDL_Log("3D view: %s trees", sTreeStyle3ds ? "3DS" : "voxel");
                     StoreConfigFile();
