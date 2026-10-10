@@ -5146,6 +5146,14 @@ static bool8 ResetReleaseMonSpritePtr(void)
 
 static void SetMovingMonPriority(u8 priority)
 {
+#ifdef PORTABLE
+    // Called on every cursor move to the party or the buttons, holding a
+    // Pokemon or not (vanilla). With none held there is no sprite: the GBA
+    // write to address 5 is ignored, natively it is a fault.
+    if (sStorage->movingMonSprite == NULL)
+        return;
+#endif
+#line 5149 // gba-line
     sStorage->movingMonSprite->oam.priority = priority;
 }
 
