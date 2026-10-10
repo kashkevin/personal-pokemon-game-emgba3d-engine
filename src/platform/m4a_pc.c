@@ -1781,7 +1781,14 @@ void SetPokemonCryProgress(u32 val)
 
 bool32 IsPokemonCryPlaying(struct MusicPlayerInfo *mplayInfo)
 {
-    struct MusicPlayerTrack *track = mplayInfo->tracks;
+    struct MusicPlayerTrack *track;
+
+    // No cry played since boot: gMPlay_PokemonCry is still NULL (IsCryPlaying,
+    // e.g. a key pressed in the expansion intro before its cry). The GBA reads
+    // its BIOS there and answers "not playing"; natively it is a fault.
+    if (mplayInfo == NULL)
+        return FALSE;
+    track = mplayInfo->tracks;
 
     if (track->chan && track->chan->track == track)
         return TRUE;
