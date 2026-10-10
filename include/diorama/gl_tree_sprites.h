@@ -15,7 +15,8 @@ struct DioramaResolvedCell;
  * of the crown, a cut-out tilted 50 degrees with its high end to the north,
  * fixed in the world. Lit like the terrain (grade, weather light, dapples,
  * shadow map, haze), casting shadows, following the palette's fades and night
- * tint as the voxel trees do. Nothing to draw unless PKMN_DIORAMA_TREES=3ds.
+ * tint as the voxel trees do. Nothing to draw unless the snapshot has them
+ * (DioramaTreeSprites_Enabled).
  */
 bool DioramaGLTreeSprites_Init(void);
 /* The trees of a snapshot, on the ground its resolved cells give them. */

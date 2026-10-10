@@ -871,7 +871,7 @@ static void GetCameraPosition(const struct DioramaSceneSnapshot *snapshot,
 }
 
 /*
- * PKMN_DIORAMA_CAMERA=3ds: the 3DS project's framing (voxel_camera.c
+ * DIORAMA_CAMERA_3DS: the 3DS project's framing (voxel_camera.c
  * AdaptDistance, at its default 40 degrees and 100% zoom): 8 tiles back plus
  * a fifth of the map's longer side (5 at most), seen through a 35 degree
  * view, so about 10 tiles from top to bottom at the player - the GBA's own
@@ -879,17 +879,11 @@ static void GetCameraPosition(const struct DioramaSceneSnapshot *snapshot,
  * tiles up); the focal length gives the same framing, with a slightly
  * flatter perspective than the 3DS's nearer eye.
  */
+static int sCameraStyle = DIORAMA_CAMERA_WIDE; /* the main thread's (sdl2.c) */
+
 static bool UsesThreeDsCamera(void)
 {
-    static int sEnabled = -1;
-
-    if (sEnabled < 0)
-    {
-        const char *value = SDL_getenv("PKMN_DIORAMA_CAMERA");
-
-        sEnabled = value != NULL && SDL_strcasecmp(value, "3ds") == 0;
-    }
-    return sEnabled;
+    return sCameraStyle == DIORAMA_CAMERA_3DS;
 }
 
 static void ThreeDsFraming(const struct DioramaSceneSnapshot *snapshot,
@@ -1026,8 +1020,10 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
         SDL_Log("Diorama building models unavailable; houses stay extruded");
     if (!DioramaGLShadow_Init())
         SDL_Log("Diorama sun shadows unavailable");
-    /* The 3DS project's trees, when PKMN_DIORAMA_TREES=3ds (tree_sprites.h). */
-    DioramaGLTreeSprites_Init();
+    /* The 3DS project's trees, whenever the tree style asks for them (F8,
+     * tree_sprites.h). */
+    if (!DioramaGLTreeSprites_Init())
+        SDL_Log("Diorama 3DS trees unavailable; the voxel trees stay");
 
     dglGenVertexArrays(1, &sVertexArray);
     dglBindVertexArray(sVertexArray);
@@ -1515,6 +1511,39 @@ void DioramaGL_AdjustCameraPitch(int steps)
     if (adjusted < CAMERA_MIN_PITCH) adjusted = CAMERA_MIN_PITCH;
     if (adjusted > CAMERA_MAX_PITCH) adjusted = CAMERA_MAX_PITCH;
     sCameraPitchOffset = adjusted - base;
+}
+
+void DioramaGL_SetCameraStyle(int style)
+{
+    sCameraStyle = style == DIORAMA_CAMERA_3DS ? DIORAMA_CAMERA_3DS : DIORAMA_CAMERA_WIDE;
+    sCameraPitchOffset = 0.0f;
+    sCameraFocalLengthOffset = 0.0f;
+}
+
+int DioramaGL_GetCameraStyle(void)
+{
+    return sCameraStyle;
+}
+
+void DioramaGL_GetCameraSteps(int *pitchSteps, int *zoomSteps)
+{
+    *pitchSteps = (int)lroundf(sCameraPitchOffset / CAMERA_PITCH_STEP);
+    *zoomSteps = (int)lroundf(sCameraFocalLengthOffset / CAMERA_ZOOM_STEP);
+}
+
+/* GetCameraSettings keeps the result inside the limits; the keys step from
+ * there (DioramaGL_AdjustCamera*). */
+void DioramaGL_SetCameraSteps(int pitchSteps, int zoomSteps)
+{
+    const int maxPitchSteps = (int)((CAMERA_MAX_PITCH - CAMERA_MIN_PITCH) / CAMERA_PITCH_STEP) + 1;
+    const int maxZoomSteps = (int)((CAMERA_MAX_FOCAL_LENGTH - CAMERA_MIN_FOCAL_LENGTH) / CAMERA_ZOOM_STEP) + 1;
+
+    if (pitchSteps < -maxPitchSteps) pitchSteps = -maxPitchSteps;
+    if (pitchSteps > maxPitchSteps) pitchSteps = maxPitchSteps;
+    if (zoomSteps < -maxZoomSteps) zoomSteps = -maxZoomSteps;
+    if (zoomSteps > maxZoomSteps) zoomSteps = maxZoomSteps;
+    sCameraPitchOffset = pitchSteps * CAMERA_PITCH_STEP;
+    sCameraFocalLengthOffset = zoomSteps * CAMERA_ZOOM_STEP;
 }
 
 void DioramaGL_Shutdown(void)

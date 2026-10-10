@@ -8,17 +8,18 @@
  * different drawing on every map. */
 #define SECONDARY_ID 0x200
 
+/* Set by the main thread (sdl2.c: F8, pokeemerald.cfg, PKMN_DIORAMA_TREES),
+ * read by the game thread's snapshot and the renderer. */
+static SDL_atomic_t sEnabled;
+
 bool DioramaTreeSprites_Enabled(void)
 {
-    static int sEnabled = -1;
+    return SDL_AtomicGet(&sEnabled) != 0;
+}
 
-    if (sEnabled < 0)
-    {
-        const char *value = SDL_getenv("PKMN_DIORAMA_TREES");
-
-        sEnabled = value != NULL && SDL_strcasecmp(value, "3ds") == 0;
-    }
-    return sEnabled;
+void DioramaTreeSprites_SetEnabled(bool enabled)
+{
+    SDL_AtomicSet(&sEnabled, enabled ? 1 : 0);
 }
 
 int DioramaTreeSprites_Part(bool dewford, uint16_t metatileId)

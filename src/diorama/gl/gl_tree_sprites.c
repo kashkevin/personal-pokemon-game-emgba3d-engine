@@ -202,8 +202,7 @@ bool DioramaGLTreeSprites_Init(void)
 {
     if (sReady)
         return true;
-    if (!DioramaTreeSprites_Enabled())
-        return false;
+    /* Made whatever the tree style: it can be switched while the game runs. */
     if (!CreateProgram())
         return false;
     glGenTextures(1, &sTexture);

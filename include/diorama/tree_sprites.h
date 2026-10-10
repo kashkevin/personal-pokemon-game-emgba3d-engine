@@ -7,7 +7,7 @@
 /*
  * The 3DS project's trees (pokeemerald-3Ds-dualscreen voxel_tree.c, MIT; see
  * tools/diorama_trees_3ds/README.md), an alternative to the Diorama's voxel
- * trees turned on with PKMN_DIORAMA_TREES=3ds: on outdoor maps of the General
+ * trees (F8, pokeemerald.cfg treeStyle=1, PKMN_DIORAMA_TREES=3ds): on outdoor maps of the General
  * tileset each tree cell is ground with the tree's trunk laid on it and a
  * cut-out crown standing on the trunk, and the cells its old canopy covered
  * get their ground back.
@@ -29,6 +29,8 @@
 #define DIORAMA_TREE_PART_SMALL 4
 
 bool DioramaTreeSprites_Enabled(void);
+/* Takes effect from the next snapshot, which then redraws every cell. */
+void DioramaTreeSprites_SetEnabled(bool enabled);
 /* VoxelTree_Part: a large tree's quarter (0-3, row * 2 + column),
  * DIORAMA_TREE_PART_SMALL or DIORAMA_TREE_PART_NONE; `dewford` when the map's
  * secondary tileset is Dewford's (ids from 0x200 are the secondary tileset's). */

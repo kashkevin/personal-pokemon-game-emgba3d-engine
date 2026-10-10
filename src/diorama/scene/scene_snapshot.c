@@ -49,6 +49,9 @@ static u16 sPreviousMapLayoutId;
 static struct DioramaDirtyCell sDirtyCells[DIORAMA_MAX_DIRTY_CELLS];
 static u8 sDirtyCellCount;
 static bool sDirtyOverflow;
+/* The tree style this frame's snapshot applies (-1 before the first): read
+ * once per snapshot, since the main thread may switch it at any time (F8). */
+static s8 sTreeStyle = -1;
 
 static bool HasFieldUiWindow(void)
 {
@@ -347,7 +350,7 @@ static void ApplyTreeSprites(struct DioramaSceneSnapshot *snapshot)
     bool dewford;
     int i;
 
-    if (!DioramaTreeSprites_Enabled() || layout == NULL
+    if (sTreeStyle <= 0 || layout == NULL
      || layout->primaryTileset != &gTileset_General
      || gMapHeader.mapType == MAP_TYPE_INDOOR || gMapHeader.mapType == MAP_TYPE_SECRET_BASE)
         return;
@@ -876,6 +879,17 @@ void DioramaScene_PublishOverworld(void)
         sPreviousMapGroup = mapGroup;
         sPreviousMapNum = mapNum;
         sPreviousMapLayoutId = sDraft.mapLayoutId;
+    }
+    {
+        s8 treeStyle = DioramaTreeSprites_Enabled();
+
+        if (sTreeStyle != treeStyle)
+        {
+            /* Every tree cell's drawing changes with the tree style. */
+            if (sTreeStyle >= 0)
+                sDirtyOverflow = true;
+            sTreeStyle = treeStyle;
+        }
     }
     sDraft.mapGeneration = sMapGeneration;
     sDraft.mapEditGeneration = sMapEditGeneration;
