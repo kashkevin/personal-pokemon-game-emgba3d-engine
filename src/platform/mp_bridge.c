@@ -2025,6 +2025,11 @@ void MpBridge_Frame(void)
         MpBridge_Step(&sBridge);
 }
 
+bool MpBridge_SaveCommandPending(void)
+{
+    return sEnabled && sBridge.save.pending;
+}
+
 uint16_t MpBridge_FilterKeys(uint16_t keys)
 {
     if (!sEnabled)
