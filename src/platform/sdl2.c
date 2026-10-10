@@ -1230,6 +1230,15 @@ void ProcessEvents(void)
             case SDLK_PERIOD:
                 DioramaGL_AdjustCameraPitch(1);
                 break;
+            // Zoom without a mouse wheel (keyboard players): minus out, equals/plus in.
+            case SDLK_MINUS:
+            case SDLK_KP_MINUS:
+                DioramaGL_AdjustCameraZoom(-1);
+                break;
+            case SDLK_EQUALS:
+            case SDLK_KP_PLUS:
+                DioramaGL_AdjustCameraZoom(1);
+                break;
 #endif
             // Screen-reader hotkeys. These aren't GBA buttons, so they're
             // latched here and drained by whichever screen is listening.
