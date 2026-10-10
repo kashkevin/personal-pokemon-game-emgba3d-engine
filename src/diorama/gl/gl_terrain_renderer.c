@@ -7,6 +7,7 @@
 
 #include "global.h"
 #include "diorama/gl_loader.h"
+#include "diorama/gl_grade.h"
 #include "diorama/gl_shadow.h"
 #include "diorama/gl_terrain_renderer.h"
 #include "diorama/metatile_atlas.h"
@@ -63,6 +64,7 @@ static GLint sShadowMapLocation;
 static GLint sShadowAmbientLocation;
 static GLint sPixelScaleLocation;
 static GLint sPixelOffsetLocation;
+static GLint sSaturationLocation;
 /* The tree model's colour line this frame (TreeTint): faded = scale * baked + offset. */
 static float sTreeScale[3] = {1.0f, 1.0f, 1.0f};
 static float sTreeOffset[3];
@@ -148,6 +150,7 @@ static const char sTerrainFragmentShader[] =
      * palette's fade and night tint through this per-channel line. */
     "uniform vec3 pixelScale;\n"
     "uniform vec3 pixelOffset;\n"
+    DIORAMA_GLSL_GRADE
     /* gl_shadow.h: the light a point gets from the sun, 1 lit, the
      * shadow's ambient in a cast shadow (the 3DS port's 0.70 by day). */
     "float SunLight() {\n"
@@ -180,7 +183,7 @@ static const char sTerrainFragmentShader[] =
     "             : (textureLayer == 3 ? pixelColor : texture(image, uv)));\n"
     "  if (texel.a < 0.5) discard;\n"
     "  if (textureLayer == 3) texel.rgb = clamp(texel.rgb * pixelScale + pixelOffset, 0.0, 1.0);\n"
-    "  color = vec4(texel.rgb * shade * SunLight(), texel.a);\n"
+    "  color = vec4(Grade(texel.rgb) * shade * SunLight(), texel.a);\n"
     "}\n";
 
 static GLuint CompileShader(GLenum type, const char *source)
@@ -244,6 +247,7 @@ static bool CreateProgram(void)
     sShadowAmbientLocation = dglGetUniformLocation(sProgram, "shadowAmbient");
     sPixelScaleLocation = dglGetUniformLocation(sProgram, "pixelScale");
     sPixelOffsetLocation = dglGetUniformLocation(sProgram, "pixelOffset");
+    sSaturationLocation = dglGetUniformLocation(sProgram, "saturation");
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0
         && sFocalLengthLocation >= 0 && sAspectCorrectionLocation >= 0
         && sImageLocation >= 0
@@ -252,7 +256,8 @@ static bool CreateProgram(void)
         && sShadowPassLocation >= 0 && sShadowEnabledLocation >= 0
         && sLightMatrixLocation >= 0 && sShadowMapLocation >= 0
         && sShadowAmbientLocation >= 0
-        && sPixelScaleLocation >= 0 && sPixelOffsetLocation >= 0;
+        && sPixelScaleLocation >= 0 && sPixelOffsetLocation >= 0
+        && sSaturationLocation >= 0;
 }
 
 static void ConfigureVertexArray(GLuint vertexArray, GLuint vertexBuffer)
@@ -1282,6 +1287,7 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
     dglUniform1i(sShadowEnabledLocation, DioramaGLShadow_BindForLighting() && !debug);
     dglUniform1f(sShadowAmbientLocation, DioramaGLShadow_Ambient());
     dglUniformMatrix4fv(sLightMatrixLocation, 1, GL_FALSE, DioramaGLShadow_LightMatrix());
+    dglUniform1f(sSaturationLocation, debug ? 1.0f : DioramaGLGrade_Saturation());
     dglUniform3f(sPixelScaleLocation, 1.0f, 1.0f, 1.0f);
     dglUniform3f(sPixelOffsetLocation, 0.0f, 0.0f, 0.0f);
     dglActiveTexture(GL_TEXTURE0);

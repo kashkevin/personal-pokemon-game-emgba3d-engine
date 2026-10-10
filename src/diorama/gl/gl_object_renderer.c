@@ -6,6 +6,7 @@
 #include <SDL2/SDL.h>
 
 #include "diorama/gl_loader.h"
+#include "diorama/gl_grade.h"
 #include "diorama/gl_shadow.h"
 #include "diorama/gl_object_renderer.h"
 #include "diorama/rules.generated.h"
@@ -84,6 +85,7 @@ static GLint sShadowAmbientLocation;
 static GLint sUprightZLocation;
 static GLint sLightProbeLocation;
 static GLint sShadeLocation;
+static GLint sSaturationLocation;
 
 /* The door standing open: see FindDoor. */
 #define DOOR_DEPTH 0.03f   /* the opening, in front of its wall */
@@ -153,6 +155,7 @@ static const char sObjectFragmentShader[] =
     "uniform float depthBias;\n"
     "uniform float uprightZ;\n"
     "uniform float shade;\n"
+    DIORAMA_GLSL_GRADE
     /* The card leans back to face the camera, so its top half reaches over
      * whatever stands north of the feet - a counter, a house's front wall -
      * and was cut off by it. For hiding and being hidden it counts as a card
@@ -207,7 +210,7 @@ static const char sObjectFragmentShader[] =
     "    if (drawMode == 2) sampleUv.x += sin(animationTime * 5.0 + uv.y * 14.0) * 0.012;\n"
     "    vec4 texel = texture(image, sampleUv);\n"
     "    if (texel.a < 0.5) discard;\n"
-    "    color = vec4(texel.rgb * SunLight() * shade, texel.a);\n"
+    "    color = vec4(Grade(texel.rgb) * SunLight() * shade, texel.a);\n"
     "  }\n"
     "}\n";
 
@@ -271,6 +274,7 @@ static bool CreateProgram(void)
     sUprightZLocation = dglGetUniformLocation(sProgram, "uprightZ");
     sLightProbeLocation = dglGetUniformLocation(sProgram, "lightProbe");
     sShadeLocation = dglGetUniformLocation(sProgram, "shade");
+    sSaturationLocation = dglGetUniformLocation(sProgram, "saturation");
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0
         && sFocalLengthLocation >= 0 && sAspectCorrectionLocation >= 0
         && sImageLocation >= 0
@@ -279,7 +283,7 @@ static bool CreateProgram(void)
         && sLightMatrixLocation >= 0 && sShadowMapLocation >= 0
         && sShadowAmbientLocation >= 0
         && sUprightZLocation >= 0 && sLightProbeLocation >= 0
-        && sShadeLocation >= 0;
+        && sShadeLocation >= 0 && sSaturationLocation >= 0;
 }
 
 static float ResolveDepthBias(const struct DioramaSceneSnapshot *snapshot,
@@ -895,6 +899,7 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
     dglUniform1i(sShadowEnabledLocation, DioramaGLShadow_BindForLighting());
     dglUniform1f(sShadowAmbientLocation, DioramaGLShadow_Ambient());
     dglUniformMatrix4fv(sLightMatrixLocation, 1, GL_FALSE, DioramaGLShadow_LightMatrix());
+    dglUniform1f(sSaturationLocation, DioramaGLGrade_Saturation());
     dglUniform1f(sAnimationTimeLocation, (float)fmod(
         (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency(), 120.0));
     dglActiveTexture(GL_TEXTURE0);
