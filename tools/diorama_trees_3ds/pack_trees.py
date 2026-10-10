@@ -5,8 +5,10 @@ Port of ZallaxDev/pokeemerald-3Ds-dualscreen `3ds_port/scripts/gen_voxel_trees.p
 (commit 4a699e3, MIT; see README.md here): the same 128x128 layout - large crown at
 0,0, large trunk at 32,0, small crown at 32,32, small trunk at 48,32, Dewford's small
 crown at 64,0 and its trunk at 80,0 - with the same one-bit alpha (opaque from 128),
-but as RGBA8 rows from the top, the way OpenGL takes them, written as C source for
-`src/diorama/gl/gl_tree_sprites.c`.
+the same 5 bits a channel (RGBA5551), and the crowns 1.12 times as bright, as
+`3ds_port/src/voxel/ctr_voxel.c` BrightenCrowns makes them when the texture loads
+("dense woods read as dark masses in 3D"), but as RGBA8 rows from the top, the way
+OpenGL takes them, written as C source for `src/diorama/gl/gl_tree_sprites.c`.
 """
 
 import argparse
@@ -21,6 +23,25 @@ SOURCES = (("tree_crown.png", (32, 36), (0, 0)),
            ("tree_small_trunk.png", (16, 16), (48, 32)),
            ("tree_2_small_crown.png", (16, 32), (64, 0)),
            ("tree_2_small_trunk.png", (16, 16), (80, 0)))
+# ctr_voxel.c: VOXEL_TREE_BRIGHTNESS and BrightenCrowns' rectangles (x, y, w, h),
+# the crowns only: the trunks' ground is the tileset's own and must match the grass.
+CROWN_BRIGHTNESS = 1.12
+CROWNS = ((0, 0, 32, 36), (32, 32, 16, 32), (64, 0, 16, 32))
+
+
+def channel(value):
+    """voxel_grade.c Channel: a 5-bit channel, rounded and clamped."""
+    c = int(value + 0.5)
+    return 0 if c < 0 else 31 if c > 31 else c
+
+
+def expand(c5):
+    """A 5-bit channel as the GPU shows it in 8 bits."""
+    return (c5 << 3) | (c5 >> 2)
+
+
+def in_crown(x, y):
+    return any(cx <= x < cx + w and cy <= y < cy + h for cx, cy, w, h in CROWNS)
 
 
 def pack(art):
@@ -33,6 +54,9 @@ def pack(art):
     pixels = bytearray(atlas.tobytes())
     for i in range(0, len(pixels), 4):
         if pixels[i + 3] >= 128:
+            factor = CROWN_BRIGHTNESS if in_crown((i // 4) % DIM, (i // 4) // DIM) else 1.0
+            for c in range(3):
+                pixels[i + c] = expand(channel((pixels[i + c] >> 3) * factor))
             pixels[i + 3] = 255
         else:
             pixels[i:i + 4] = b"\0\0\0\0"

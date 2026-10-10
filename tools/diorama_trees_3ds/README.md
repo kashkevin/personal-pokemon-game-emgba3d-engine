@@ -4,7 +4,8 @@ An alternative to the Diorama's voxel trees: the General tileset's trees (and
 Dewford Town's small one) drawn as the 3DS project draws them in its voxel
 overworld - the trunk and its ground laid flat on the cells, and the crown a cut-out
 standing on it, tilted 50 degrees with its high end to the north - from that
-project's own tree art. Turned on with `PKMN_DIORAMA_TREES=3ds` (see
+project's own tree art. Turned on with F8 in the game (kept in `pokeemerald.cfg`) or
+`PKMN_DIORAMA_TREES=3ds` for one run (see
 `src/diorama/gl/gl_tree_sprites.c` and `src/diorama/scene/tree_sprites.c`).
 
 During a `DIORAMA=1` build `diorama_rules.mk` runs
@@ -34,5 +35,8 @@ generated from a ROM). Keep this notice with these files.
 ## Changes
 
 * RGBA8 rows from the top for OpenGL instead of PICA200-ordered RGBA5551; the same
-  one-bit alpha.
+  one-bit alpha, and the same 5 bits a channel (expanded to 8 as the GPU shows them).
+* The crowns brightened 1.12 times when packed, as `ctr_voxel.c` `BrightenCrowns`
+  brightens them when the texture loads (the trunks are not: their ground must match
+  the grass).
 * C source generated at build time instead of a RomFS file.
