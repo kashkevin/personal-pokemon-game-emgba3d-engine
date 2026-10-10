@@ -121,7 +121,7 @@ static bool sGlyphsDecoded;
  * the first pixel in a row's top bits - as text.c's DecompressGlyphTile reads
  * them through its half-row table.
  */
-static void DecodeFont(int font, const u16 *glyphs)
+static void UiDecodeFont(int font, const u16 *glyphs)
 {
     for (int code = 0; code < 256; code++)
     {
@@ -143,14 +143,14 @@ static void DecodeFont(int font, const u16 *glyphs)
     }
 }
 
-static const u8 *FontWidths(int font)
+static const u8 *UiFontWidths(int font)
 {
     return font == FONT_SMALL ? gFontSmallLatinGlyphWidths : gFontNormalLatinGlyphWidths;
 }
 
 /* The engine's code for an ASCII character (charmap.txt), 0 (space) when it
  * has none. An 'x' between digits is the multiplication sign (1920x1080). */
-static unsigned EngineCode(const char *text, int i)
+static unsigned UiEngineCode(const char *text, int i)
 {
     unsigned char c = (unsigned char)text[i];
 
@@ -188,13 +188,13 @@ static unsigned EngineCode(const char *text, int i)
     }
 }
 
-static int TextWidth(int font, const char *text)
+static int UiTextWidth(int font, const char *text)
 {
-    const u8 *widths = FontWidths(font);
+    const u8 *widths = UiFontWidths(font);
     int width = 0;
 
     for (int i = 0; text[i] != '\0'; i++)
-        width += widths[EngineCode(text, i)];
+        width += widths[UiEngineCode(text, i)];
     return width;
 }
 
@@ -263,7 +263,7 @@ static const struct CapsGlyph sCaps[] = {
     {' ', {"...", "...", "...", "...", "...", "...", "..."}},
 };
 
-static const struct CapsGlyph *CapsGlyphFor(char c)
+static const struct CapsGlyph *UiCapsGlyphFor(char c)
 {
     for (size_t i = 0; i < SDL_arraysize(sCaps); i++)
         if (sCaps[i].ch == c)
@@ -271,28 +271,28 @@ static const struct CapsGlyph *CapsGlyphFor(char c)
     return &sCaps[SDL_arraysize(sCaps) - 1];
 }
 
-static int CapsWidth(const char *text)
+static int UiCapsWidth(const char *text)
 {
     int width = 0;
 
     for (; *text != '\0'; text++)
-        width += (int)strlen(CapsGlyphFor(*text)->rows[0]) + 1;
+        width += (int)strlen(UiCapsGlyphFor(*text)->rows[0]) + 1;
     return width > 0 ? width - 1 : 0;
 }
 
 /* ---------------------------------------------------------------- canvas */
 
-static void Plot(int x, int y, uint32_t color)
+static void UiPlot(int x, int y, uint32_t color)
 {
     if (x >= 0 && y >= 0 && x < sWidth && y < sHeight)
         sPixels[y * sWidth + x] = color;
 }
 
-static void FillRect(int x, int y, int width, int height, uint32_t color)
+static void UiFillRect(int x, int y, int width, int height, uint32_t color)
 {
     for (int yy = y; yy < y + height; yy++)
         for (int xx = x; xx < x + width; xx++)
-            Plot(xx, yy, color);
+            UiPlot(xx, yy, color);
 }
 
 /*
@@ -313,7 +313,7 @@ static const int8_t sCorner2[] = {2, 1};
 static const int8_t sCorner3[] = {3, 1, 1};
 static const int8_t sChamfer6[] = {6, 5, 4, 3, 2, 1};
 
-static void ShapeCorners(struct Shape *shape, const int8_t *profile, int rows)
+static void UiShapeCorners(struct Shape *shape, const int8_t *profile, int rows)
 {
     for (int i = 0; i < 4; i++)
     {
@@ -322,7 +322,7 @@ static void ShapeCorners(struct Shape *shape, const int8_t *profile, int rows)
     }
 }
 
-static bool InShape(const struct Shape *shape, int x, int y)
+static bool UiInShape(const struct Shape *shape, int x, int y)
 {
     if (x < 0 || y < 0 || x >= shape->width || y >= shape->height)
         return false;
@@ -340,16 +340,16 @@ static bool InShape(const struct Shape *shape, int x, int y)
     return true;
 }
 
-static bool InInner(const struct Shape *shape, int x, int y)
+static bool UiInInner(const struct Shape *shape, int x, int y)
 {
-    return InShape(shape, x, y) && InShape(shape, x - 1, y) && InShape(shape, x + 1, y)
-        && InShape(shape, x, y - 1) && InShape(shape, x, y + 1);
+    return UiInShape(shape, x, y) && UiInShape(shape, x - 1, y) && UiInShape(shape, x + 1, y)
+        && UiInShape(shape, x, y - 1) && UiInShape(shape, x, y + 1);
 }
 
 /* The guide's paint(): a 1 px outline in the ink, then the body with a
  * highlight on its top and left inner edges and a shade on its bottom and
  * right ones (loWidth rows of shade). A colour of 0 is left out. */
-static void Paint(const struct Shape *shape, int x, int y, uint32_t body, uint32_t ink,
+static void UiPaint(const struct Shape *shape, int x, int y, uint32_t body, uint32_t ink,
                   uint32_t hi, uint32_t lo, int loWidth)
 {
     for (int yy = 0; yy < shape->height; yy++)
@@ -357,13 +357,13 @@ static void Paint(const struct Shape *shape, int x, int y, uint32_t body, uint32
         {
             uint32_t color;
 
-            if (!InShape(shape, xx, yy))
+            if (!UiInShape(shape, xx, yy))
                 continue;
-            if (ink != 0 && !InInner(shape, xx, yy))
+            if (ink != 0 && !UiInInner(shape, xx, yy))
                 color = ink;
             else
             {
-                bool (*inner)(const struct Shape *, int, int) = ink != 0 ? InInner : InShape;
+                bool (*inner)(const struct Shape *, int, int) = ink != 0 ? UiInInner : UiInShape;
 
                 color = body;
                 if (hi != 0 && (!inner(shape, xx, yy - 1) || !inner(shape, xx - 1, yy)))
@@ -372,18 +372,18 @@ static void Paint(const struct Shape *shape, int x, int y, uint32_t body, uint32
                     if (!inner(shape, xx, yy + k) || !inner(shape, xx + k, yy))
                         color = lo;
             }
-            Plot(x + xx, y + yy, color);
+            UiPlot(x + xx, y + yy, color);
         }
 }
 
 /* Engine text with its own shadow (0: none). Returns the right edge. */
-static int Text(int font, int x, int y, const char *text, uint32_t ink, uint32_t shadow)
+static int UiText(int font, int x, int y, const char *text, uint32_t ink, uint32_t shadow)
 {
-    const u8 *widths = FontWidths(font);
+    const u8 *widths = UiFontWidths(font);
 
     for (int i = 0; text[i] != '\0'; i++)
     {
-        unsigned code = EngineCode(text, i);
+        unsigned code = UiEngineCode(text, i);
 
         for (int yy = 0; yy < GLYPH_CELL; yy++)
             for (int xx = 0; xx < GLYPH_CELL; xx++)
@@ -391,22 +391,22 @@ static int Text(int font, int x, int y, const char *text, uint32_t ink, uint32_t
                 uint8_t value = sGlyphs[font][code][yy][xx];
 
                 if (value == 1)
-                    Plot(x + xx, y + yy, ink);
+                    UiPlot(x + xx, y + yy, ink);
                 else if (value == 2 && shadow != 0)
-                    Plot(x + xx, y + yy, shadow);
+                    UiPlot(x + xx, y + yy, shadow);
             }
         x += widths[code];
     }
     return x;
 }
 
-static void TextRight(int font, int right, int y, const char *text, uint32_t ink, uint32_t shadow)
+static void UiTextRight(int font, int right, int y, const char *text, uint32_t ink, uint32_t shadow)
 {
-    Text(font, right - TextWidth(font, text), y, text, ink, shadow);
+    UiText(font, right - UiTextWidth(font, text), y, text, ink, shadow);
 }
 
 /* One engine glyph by its code (the cursor arrow). */
-static void Glyph(int font, int x, int y, unsigned code, uint32_t ink, uint32_t shadow)
+static void UiGlyph(int font, int x, int y, unsigned code, uint32_t ink, uint32_t shadow)
 {
     for (int yy = 0; yy < GLYPH_CELL; yy++)
         for (int xx = 0; xx < GLYPH_CELL; xx++)
@@ -414,14 +414,14 @@ static void Glyph(int font, int x, int y, unsigned code, uint32_t ink, uint32_t 
             uint8_t value = sGlyphs[font][code][yy][xx];
 
             if (value == 1)
-                Plot(x + xx, y + yy, ink);
+                UiPlot(x + xx, y + yy, ink);
             else if (value == 2 && shadow != 0)
-                Plot(x + xx, y + yy, shadow);
+                UiPlot(x + xx, y + yy, shadow);
         }
 }
 
 /* Route Caps, plain or with a 1 px outline all round (outline != 0). */
-static int Caps(int x, int y, const char *text, uint32_t color, uint32_t outline)
+static int UiCaps(int x, int y, const char *text, uint32_t color, uint32_t outline)
 {
     for (int pass = outline != 0 ? 0 : 1; pass < 2; pass++)
     {
@@ -429,7 +429,7 @@ static int Caps(int x, int y, const char *text, uint32_t color, uint32_t outline
 
         for (const char *p = text; *p != '\0'; p++)
         {
-            const struct CapsGlyph *glyph = CapsGlyphFor(*p);
+            const struct CapsGlyph *glyph = UiCapsGlyphFor(*p);
             int width = (int)strlen(glyph->rows[0]);
 
             for (int yy = 0; yy < 7; yy++)
@@ -441,10 +441,10 @@ static int Caps(int x, int y, const char *text, uint32_t color, uint32_t outline
                     {
                         for (int dy = -1; dy <= 1; dy++)
                             for (int dx = -1; dx <= 1; dx++)
-                                Plot(penX + xx + dx, y + yy + dy, outline);
+                                UiPlot(penX + xx + dx, y + yy + dy, outline);
                     }
                     else
-                        Plot(penX + xx, y + yy, color);
+                        UiPlot(penX + xx, y + yy, color);
                 }
             penX += width + 1;
         }
@@ -455,60 +455,60 @@ static int Caps(int x, int y, const char *text, uint32_t color, uint32_t outline
 }
 
 /* A key cap (the guide's keycap): returns its right edge. */
-static int KeyCap(int x, int y, const char *label)
+static int UiKeyCap(int x, int y, const char *label)
 {
     struct Shape shape = {0};
-    int width = CapsWidth(label) + 6;
+    int width = UiCapsWidth(label) + 6;
 
     if (width < 11)
         width = 11;
     shape.width = width;
     shape.height = 11;
-    ShapeCorners(&shape, sCorner1, 1);
-    Paint(&shape, x, y, KEY_BASE, KEY_INK, KEY_HI, KEY_LO, 2);
-    Caps(x + (width - CapsWidth(label)) / 2, y + 2, label, KEY_INK, 0);
+    UiShapeCorners(&shape, sCorner1, 1);
+    UiPaint(&shape, x, y, KEY_BASE, KEY_INK, KEY_HI, KEY_LO, 2);
+    UiCaps(x + (width - UiCapsWidth(label)) / 2, y + 2, label, KEY_INK, 0);
     return x + width;
 }
 
 /* [key][key] Label (the guide's hint): returns the right edge. */
-static int Hint(int x, int y, const char *const keys[], int keyCount, const char *label)
+static int UiHint(int x, int y, const char *const keys[], int keyCount, const char *label)
 {
     for (int i = 0; i < keyCount; i++)
-        x = KeyCap(x, y, keys[i]) + 2;
-    return Text(FONT_NORMAL, x + 1, y - 3, label, TEXT, TEXT_SH);
+        x = UiKeyCap(x, y, keys[i]) + 2;
+    return UiText(FONT_NORMAL, x + 1, y - 3, label, TEXT, TEXT_SH);
 }
 
-static int HintWidth(const char *const keys[], int keyCount, const char *label)
+static int UiHintWidth(const char *const keys[], int keyCount, const char *label)
 {
     int width = 0;
 
     for (int i = 0; i < keyCount; i++)
     {
-        int cap = CapsWidth(keys[i]) + 6;
+        int cap = UiCapsWidth(keys[i]) + 6;
 
         width += (cap < 11 ? 11 : cap) + 2;
     }
-    return width + 1 + TextWidth(FONT_NORMAL, label);
+    return width + 1 + UiTextWidth(FONT_NORMAL, label);
 }
 
 /* The Emerald message frame (the guide's dialog_box): an ink rim, a three-row
  * green band with its two notches, an inner ink line and the body. Returns
  * the body's inner rectangle. */
-static void FieldFrame(int x, int y, int width, int height, uint32_t body, uint32_t bodyLo, int inner[4])
+static void UiFieldFrame(int x, int y, int width, int height, uint32_t body, uint32_t bodyLo, int inner[4])
 {
     struct Shape outer = {0};
     struct Shape core = {0};
 
     outer.width = width;
     outer.height = height;
-    ShapeCorners(&outer, sCorner3, 3);
-    Paint(&outer, x, y, FIELD_BASE, FIELD_INK, FIELD_HI, FIELD_LO, 1);
+    UiShapeCorners(&outer, sCorner3, 3);
+    UiPaint(&outer, x, y, FIELD_BASE, FIELD_INK, FIELD_HI, FIELD_LO, 1);
     core.width = width - 8;
     core.height = height - 8;
-    ShapeCorners(&core, sCorner2, 2);
-    Paint(&core, x + 4, y + 4, body, FIELD_INK, 0, bodyLo, 1);
-    FillRect(x + width / 2 - 6, y + 1, 2, 2, FIELD_HI);
-    FillRect(x + width / 2 + 4, y + 1, 2, 2, FIELD_HI);
+    UiShapeCorners(&core, sCorner2, 2);
+    UiPaint(&core, x + 4, y + 4, body, FIELD_INK, 0, bodyLo, 1);
+    UiFillRect(x + width / 2 - 6, y + 1, 2, 2, FIELD_HI);
+    UiFillRect(x + width / 2 + 4, y + 1, 2, 2, FIELD_HI);
     inner[0] = x + 5;
     inner[1] = y + 5;
     inner[2] = width - 10;
@@ -516,11 +516,11 @@ static void FieldFrame(int x, int y, int width, int height, uint32_t body, uint3
 }
 
 /* The title plate: flat left, chamfered right, white caps with an ink outline. */
-static void TitleTab(int x, int y, const char *label)
+static void UiTitleTab(int x, int y, const char *label)
 {
     struct Shape shape = {0};
 
-    shape.width = CapsWidth(label) + 22;
+    shape.width = UiCapsWidth(label) + 22;
     shape.height = 17;
     shape.corner[0] = sCorner1;
     shape.cornerRows[0] = 1;
@@ -530,8 +530,8 @@ static void TitleTab(int x, int y, const char *label)
     shape.cornerRows[1] = 6;
     shape.corner[3] = sChamfer6;
     shape.cornerRows[3] = 6;
-    Paint(&shape, x, y, FIELD_BASE, FIELD_INK, FIELD_HI, FIELD_LO, 1);
-    Caps(x + 7, y + 5, label, TEXT_W, FIELD_INK);
+    UiPaint(&shape, x, y, FIELD_BASE, FIELD_INK, FIELD_HI, FIELD_LO, 1);
+    UiCaps(x + 7, y + 5, label, TEXT_W, FIELD_INK);
 }
 
 /* ---------------------------------------------------------------- GL */
@@ -565,8 +565,8 @@ static void Init(void)
     sTried = true;
     if (!sGlyphsDecoded)
     {
-        DecodeFont(FONT_NORMAL, gFontNormalLatinGlyphs);
-        DecodeFont(FONT_SMALL, gFontSmallLatinGlyphs);
+        UiDecodeFont(FONT_NORMAL, gFontNormalLatinGlyphs);
+        UiDecodeFont(FONT_SMALL, gFontSmallLatinGlyphs);
         sGlyphsDecoded = true;
     }
     sPixels = malloc((size_t)CANVAS_MAX_WIDTH * CANVAS_MAX_HEIGHT * sizeof(*sPixels));
@@ -685,7 +685,7 @@ static unsigned FrameCount(void)
 }
 
 /* The upper-case copy of a title for Route Caps. */
-static void Upper(char *out, size_t size, const char *text)
+static void UiUpper(char *out, size_t size, const char *text)
 {
     size_t i = 0;
 
@@ -715,8 +715,8 @@ static void DrawSettingsSheet(const char *title, const struct DioramaOverlayRow 
 
     for (int i = 0; i < count; i++)
     {
-        int label = TextWidth(FONT_NORMAL, rows[i].label);
-        int value = TextWidth(FONT_NORMAL, rows[i].value);
+        int label = UiTextWidth(FONT_NORMAL, rows[i].label);
+        int value = UiTextWidth(FONT_NORMAL, rows[i].value);
 
         if (label > labelWidth)
             labelWidth = label;
@@ -735,9 +735,9 @@ static void DrawSettingsSheet(const char *title, const struct DioramaOverlayRow 
     if (y < 14)
         y = 14;
 
-    FieldFrame(x, y, width, height, CREAM, CREAM_LO, body);
-    Upper(caps, sizeof(caps), title);
-    TitleTab(x + 8, y - 9, caps);
+    UiFieldFrame(x, y, width, height, CREAM, CREAM_LO, body);
+    UiUpper(caps, sizeof(caps), title);
+    UiTitleTab(x + 8, y - 9, caps);
 
     rowY = body[1] + 6;
     for (int i = 0; i < count; i++, rowY += LINE_HEIGHT)
@@ -746,25 +746,25 @@ static void DrawSettingsSheet(const char *title, const struct DioramaOverlayRow 
         int right = body[0] + body[2] - 8;
 
         if (row->selected)
-            FillRect(body[0] + 1, rowY, body[2] - 2, LINE_HEIGHT, CREAM_HI);
+            UiFillRect(body[0] + 1, rowY, body[2] - 2, LINE_HEIGHT, CREAM_HI);
         else if (i % 2 == 1)
-            FillRect(body[0] + 1, rowY, body[2] - 2, LINE_HEIGHT, CREAM_STRIPE);
+            UiFillRect(body[0] + 1, rowY, body[2] - 2, LINE_HEIGHT, CREAM_STRIPE);
         if (row->selected)
-            Glyph(FONT_NORMAL, body[0] + 3 + (nudge ? 1 : 0), rowY, 0xEF, CURSOR, CURSOR_SH);
-        Text(FONT_NORMAL, body[0] + 14, rowY, row->label, TEXT, TEXT_SH);
+            UiGlyph(FONT_NORMAL, body[0] + 3 + (nudge ? 1 : 0), rowY, 0xEF, CURSOR, CURSOR_SH);
+        UiText(FONT_NORMAL, body[0] + 14, rowY, row->label, TEXT, TEXT_SH);
         if (row->value[0] == '\0')
             continue;
         if (row->selected && row->adjustable)
         {
             int valueRight = right - 8;
-            int valueLeft = valueRight - TextWidth(FONT_NORMAL, row->value);
+            int valueLeft = valueRight - UiTextWidth(FONT_NORMAL, row->value);
 
-            Caps(right - 4, rowY + 4, "}", SEL, 0);
-            TextRight(FONT_NORMAL, valueRight, rowY, row->value, TEXT, TEXT_SH);
-            Caps(valueLeft - 7, rowY + 4, "{", SEL, 0);
+            UiCaps(right - 4, rowY + 4, "}", SEL, 0);
+            UiTextRight(FONT_NORMAL, valueRight, rowY, row->value, TEXT, TEXT_SH);
+            UiCaps(valueLeft - 7, rowY + 4, "{", SEL, 0);
         }
         else
-            TextRight(FONT_NORMAL, right - 8, rowY, row->value, TEXT, TEXT_SH);
+            UiTextRight(FONT_NORMAL, right - 8, rowY, row->value, TEXT, TEXT_SH);
     }
 
     /* A display change waiting to be kept: the question in a message box
@@ -784,33 +784,33 @@ static void DrawSettingsSheet(const char *title, const struct DioramaOverlayRow 
         boxX = (sWidth - boxWidth) / 2;
         if (boxY + boxHeight > sHeight - 4)
             boxY = sHeight - 4 - boxHeight;
-        FieldFrame(boxX, boxY, boxWidth, boxHeight, PAPER, PAPER_LO, inner);
-        Text(FONT_NORMAL, inner[0] + 6, inner[1] + 2, "Keep this display setting?", TEXT, TEXT_SH);
+        UiFieldFrame(boxX, boxY, boxWidth, boxHeight, PAPER, PAPER_LO, inner);
+        UiText(FONT_NORMAL, inner[0] + 6, inner[1] + 2, "Keep this display setting?", TEXT, TEXT_SH);
         SDL_snprintf(line, sizeof(line), "It changes back in %d s.", confirmSeconds);
-        Text(FONT_NORMAL, inner[0] + 6, inner[1] + 2 + LINE_HEIGHT, line, TEXT_MUTED, TEXT_SH);
-        penX = inner[0] + inner[2] - 6 - HintWidth(sKeepKeys, 1, "Keep") - 8 - HintWidth(sUndoKeys, 1, "Undo");
-        penX = Hint(penX, inner[1] + 2 + LINE_HEIGHT + 3, sKeepKeys, 1, "Keep") + 8;
-        Hint(penX, inner[1] + 2 + LINE_HEIGHT + 3, sUndoKeys, 1, "Undo");
+        UiText(FONT_NORMAL, inner[0] + 6, inner[1] + 2 + LINE_HEIGHT, line, TEXT_MUTED, TEXT_SH);
+        penX = inner[0] + inner[2] - 6 - UiHintWidth(sKeepKeys, 1, "Keep") - 8 - UiHintWidth(sUndoKeys, 1, "Undo");
+        penX = UiHint(penX, inner[1] + 2 + LINE_HEIGHT + 3, sKeepKeys, 1, "Keep") + 8;
+        UiHint(penX, inner[1] + 2 + LINE_HEIGHT + 3, sUndoKeys, 1, "Undo");
         return;
     }
 
     /* The prompts in their own plate under the sheet, right-aligned. */
     {
         struct Shape plate = {0};
-        int hints = HintWidth(sChooseKeys, 2, "Choose") + 8 + HintWidth(sChangeKeys, 2, "Change")
-                  + 8 + HintWidth(sBackKeys, 1, "Close");
+        int hints = UiHintWidth(sChooseKeys, 2, "Choose") + 8 + UiHintWidth(sChangeKeys, 2, "Change")
+                  + 8 + UiHintWidth(sBackKeys, 1, "Close");
         int plateX;
         int plateY = y + height + 4;
         int penX;
 
         plate.width = hints + 12;
         plate.height = 19;
-        ShapeCorners(&plate, sCorner2, 2);
+        UiShapeCorners(&plate, sCorner2, 2);
         plateX = x + width - plate.width;
-        Paint(&plate, plateX, plateY, PAPER, FIELD_INK, 0, PAPER_LO, 1);
-        penX = Hint(plateX + 6, plateY + 4, sChooseKeys, 2, "Choose") + 8;
-        penX = Hint(penX, plateY + 4, sChangeKeys, 2, "Change") + 8;
-        Hint(penX, plateY + 4, sBackKeys, 1, "Close");
+        UiPaint(&plate, plateX, plateY, PAPER, FIELD_INK, 0, PAPER_LO, 1);
+        penX = UiHint(plateX + 6, plateY + 4, sChooseKeys, 2, "Choose") + 8;
+        penX = UiHint(penX, plateY + 4, sChangeKeys, 2, "Change") + 8;
+        UiHint(penX, plateY + 4, sBackKeys, 1, "Close");
     }
 }
 
@@ -819,20 +819,20 @@ static void DrawCorner(const char *text)
     struct Shape plate = {0};
     char caps[96];
 
-    Upper(caps, sizeof(caps), text);
+    UiUpper(caps, sizeof(caps), text);
     for (char *p = caps; *p != '\0'; p++)
         if (*p == 'X' && p > caps && p[-1] >= '0' && p[-1] <= '9' && p[1] >= '0' && p[1] <= '9')
             *p = '*';
-    plate.width = CapsWidth(caps) + 10;
+    plate.width = UiCapsWidth(caps) + 10;
     plate.height = 13;
-    ShapeCorners(&plate, sCorner1, 1);
-    Paint(&plate, 6, 6, KEY_BASE, KEY_INK, KEY_HI, KEY_LO, 1);
-    Caps(11, 9, caps, KEY_INK, 0);
+    UiShapeCorners(&plate, sCorner1, 1);
+    UiPaint(&plate, 6, 6, KEY_BASE, KEY_INK, KEY_HI, KEY_LO, 1);
+    UiCaps(11, 9, caps, KEY_INK, 0);
 }
 
 /* What the canvas shows, to draw it again only when that changes (the cursor's
  * nudge changes it four times a second, a frame rate readout twice). */
-static void Signature(char *out, size_t size, const struct DioramaOverlayMenu *menu, const char *corner,
+static void UiSignature(char *out, size_t size, const struct DioramaOverlayMenu *menu, const char *corner,
                       const struct CanvasView *view)
 {
     size_t used = (size_t)SDL_snprintf(out, size, "%dx%d %s|", view->width, view->height,
@@ -859,7 +859,7 @@ void DioramaPCOverlay_Draw(const struct DioramaOverlayMenu *menu, const char *co
         return;
     if (!BeginCanvas(outputWidth, outputHeight, &view))
         return;
-    Signature(signature, sizeof(signature), menu, corner, &view);
+    UiSignature(signature, sizeof(signature), menu, corner, &view);
     if (strcmp(signature, sShown) != 0 || sTexture == 0)
     {
         memset(sPixels, 0, (size_t)sWidth * sHeight * sizeof(*sPixels));
