@@ -213,6 +213,13 @@ struct DioramaSceneSnapshot
     int16_t playerMapX;
     int16_t playerMapY;
     uint8_t playerFacingDirection;
+    /* A door standing open (field_door.c, DioramaDoor_Get): its leftmost cell
+     * in map grid coordinates (as cells[].mapX), its width in cells and how
+     * far open, 1 to 3; doorLevel 0 when no door is open. */
+    int16_t doorMapX;
+    int16_t doorMapY;
+    uint8_t doorWidth;
+    uint8_t doorLevel;
     uint8_t surfBlobValid;
     int16_t surfBlobOffsetX;
     int16_t surfBlobOffsetY;

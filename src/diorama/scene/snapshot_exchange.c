@@ -104,7 +104,11 @@ bool DioramaSnapshot_CanRenderGrid(const struct DioramaSceneSnapshot *snapshot)
         && snapshot->visibleCellCount == DIORAMA_MAX_VISIBLE_CELLS
         && snapshot->objectCount <= DIORAMA_MAX_OBJECTS
         && snapshot->fallbackReasons == DIORAMA_FALLBACK_NONE
+        /* Scripted scenes too (a door warp, an NPC walking up to talk): the
+         * 3DS project's view stays 3D through them, and only it shows the
+         * door opening. A frame it cannot draw still falls back to 2D. */
         && (snapshot->sceneKind == DIORAMA_SCENE_OVERWORLD_FREE
+         || snapshot->sceneKind == DIORAMA_SCENE_OVERWORLD_SCRIPTED
          || snapshot->sceneKind == DIORAMA_SCENE_DIALOGUE
          || snapshot->sceneKind == DIORAMA_SCENE_MENU);
 }

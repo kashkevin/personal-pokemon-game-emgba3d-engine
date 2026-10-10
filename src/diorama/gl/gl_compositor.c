@@ -842,8 +842,10 @@ static void GetCameraPosition(const struct DioramaSceneSnapshot *snapshot,
     if (hasPreviousSnapshot
      && snapshot->sequence == previousSnapshot->sequence + 1
      && snapshot->mapGeneration == previousSnapshot->mapGeneration
-     && snapshot->sceneKind == DIORAMA_SCENE_OVERWORLD_FREE
-     && previousSnapshot->sceneKind == DIORAMA_SCENE_OVERWORLD_FREE)
+     && (snapshot->sceneKind == DIORAMA_SCENE_OVERWORLD_FREE
+      || snapshot->sceneKind == DIORAMA_SCENE_OVERWORLD_SCRIPTED)
+     && (previousSnapshot->sceneKind == DIORAMA_SCENE_OVERWORLD_FREE
+      || previousSnapshot->sceneKind == DIORAMA_SCENE_OVERWORLD_SCRIPTED))
     {
         float previousX = previousSnapshot->cameraMapX
                         + (previousSnapshot->cameraSubpixelX

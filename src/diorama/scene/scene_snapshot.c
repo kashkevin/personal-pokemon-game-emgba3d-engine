@@ -10,6 +10,7 @@
 #include "diorama/weather.h"
 #include "event_object_movement.h"
 #include "field_camera.h"
+#include "field_door.h"
 #include "field_effect_helpers.h"
 #include "field_message_box.h"
 #include "field_player_avatar.h"
@@ -57,6 +58,18 @@ static bool HasFieldUiWindow(void)
     return false;
 }
 
+static bool FadesIn2D(void)
+{
+    static int sFades2D = -1;
+
+    if (sFades2D < 0)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_FADE_2D");
+        sFades2D = value != NULL && value[0] == '1';
+    }
+    return sFades2D;
+}
+
 static enum DioramaSceneKind GetOverworldSceneKind(u32 *fallbackReasons)
 {
     if (gMain.callback2 != CB2_Overworld)
@@ -64,7 +77,11 @@ static enum DioramaSceneKind GetOverworldSceneKind(u32 *fallbackReasons)
         *fallbackReasons |= DIORAMA_FALLBACK_UNSUPPORTED_SCENE;
         return DIORAMA_SCENE_TRANSITION;
     }
-    if (gPaletteFade.active)
+    /* A screen fade on the field (a warp's fade out and in) stays in 3D: the
+     * scene is coloured from the faded palettes, so it fades as the 2D view
+     * does, instead of cutting to the 2D view for the fade. Set
+     * PKMN_DIORAMA_FADE_2D=1 for the earlier behaviour. */
+    if (gPaletteFade.active && FadesIn2D())
     {
         *fallbackReasons |= DIORAMA_FALLBACK_PALETTE_FADE;
         return DIORAMA_SCENE_TRANSITION;
@@ -385,6 +402,32 @@ static u64 HashFrame(const u8 *data, u16 size)
     for (i = 0; i < size; i++)
         hash = (hash ^ data[i]) * UINT64_C(1099511628211);
     return hash;
+}
+
+// The door standing open (field_door.c); PKMN_DIORAMA_LOG=1 logs each change.
+static void CopyDoor(struct DioramaSceneSnapshot *snapshot)
+{
+    static int sLogEnabled = -1;
+    static uint8_t sLastLevel;
+    s16 doorX, doorY;
+    u8 doorWidth, doorLevel;
+
+    if (DioramaDoor_Get(&doorX, &doorY, &doorWidth, &doorLevel))
+    {
+        snapshot->doorMapX = doorX;
+        snapshot->doorMapY = doorY;
+        snapshot->doorWidth = doorWidth;
+        snapshot->doorLevel = doorLevel;
+    }
+    if (sLogEnabled < 0)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_LOG");
+        sLogEnabled = value != NULL && value[0] == '1';
+    }
+    if (sLogEnabled && snapshot->doorLevel != sLastLevel)
+        SDL_Log("Diorama: door at %d,%d width %u open %u (frame %u)", snapshot->doorMapX,
+                snapshot->doorMapY, snapshot->doorWidth, snapshot->doorLevel, gMain.vblankCounter1);
+    sLastLevel = snapshot->doorLevel;
 }
 
 // PKMN_DIORAMA_LOG=1: report why a sprite frame could not be captured.
@@ -813,6 +856,7 @@ void DioramaScene_PublishOverworld(void)
             sDraft.playerMapY = player->currentCoords.y - MAP_OFFSET;
             sDraft.playerFacingDirection = player->facingDirection;
         }
+        CopyDoor(&sDraft);
         CopyUiProfile(&sDraft);
     }
     DioramaSnapshotExchange_Publish(&sDraft);

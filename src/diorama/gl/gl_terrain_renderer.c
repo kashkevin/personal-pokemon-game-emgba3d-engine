@@ -1,5 +1,6 @@
 #ifdef ENABLE_DIORAMA
 
+#include <math.h>
 #include <stddef.h>
 #include <string.h>
 #include <SDL2/SDL.h>
@@ -60,6 +61,11 @@ static GLint sShadowEnabledLocation;
 static GLint sLightMatrixLocation;
 static GLint sShadowMapLocation;
 static GLint sShadowAmbientLocation;
+static GLint sPixelScaleLocation;
+static GLint sPixelOffsetLocation;
+/* The tree model's colour line this frame (TreeTint): faded = scale * baked + offset. */
+static float sTreeScale[3] = {1.0f, 1.0f, 1.0f};
+static float sTreeOffset[3];
 static uint32_t sMapGeneration;
 static uint32_t sMapEditGeneration;
 static uint32_t sRulesGeneration;
@@ -138,6 +144,10 @@ static const char sTerrainFragmentShader[] =
     "uniform mat4 lightViewProjection;\n"
     "uniform sampler2DShadow shadowMap;\n"
     "uniform float shadowAmbient;\n"
+    /* The voxel tree model's own colours are baked: they follow the
+     * palette's fade and night tint through this per-channel line. */
+    "uniform vec3 pixelScale;\n"
+    "uniform vec3 pixelOffset;\n"
     /* gl_shadow.h: the light a point gets from the sun, 1 lit, the
      * shadow's ambient in a cast shadow (the 3DS port's 0.70 by day). */
     "float SunLight() {\n"
@@ -169,6 +179,7 @@ static const char sTerrainFragmentShader[] =
     "             : (textureLayer == 2 ? texture(foregroundImage, uv)\n"
     "             : (textureLayer == 3 ? pixelColor : texture(image, uv)));\n"
     "  if (texel.a < 0.5) discard;\n"
+    "  if (textureLayer == 3) texel.rgb = clamp(texel.rgb * pixelScale + pixelOffset, 0.0, 1.0);\n"
     "  color = vec4(texel.rgb * shade * SunLight(), texel.a);\n"
     "}\n";
 
@@ -231,6 +242,8 @@ static bool CreateProgram(void)
     sLightMatrixLocation = dglGetUniformLocation(sProgram, "lightViewProjection");
     sShadowMapLocation = dglGetUniformLocation(sProgram, "shadowMap");
     sShadowAmbientLocation = dglGetUniformLocation(sProgram, "shadowAmbient");
+    sPixelScaleLocation = dglGetUniformLocation(sProgram, "pixelScale");
+    sPixelOffsetLocation = dglGetUniformLocation(sProgram, "pixelOffset");
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0
         && sFocalLengthLocation >= 0 && sAspectCorrectionLocation >= 0
         && sImageLocation >= 0
@@ -238,7 +251,8 @@ static bool CreateProgram(void)
         && sDebugColorLocation >= 0 && sRenderPassLocation >= 0
         && sShadowPassLocation >= 0 && sShadowEnabledLocation >= 0
         && sLightMatrixLocation >= 0 && sShadowMapLocation >= 0
-        && sShadowAmbientLocation >= 0;
+        && sShadowAmbientLocation >= 0
+        && sPixelScaleLocation >= 0 && sPixelOffsetLocation >= 0;
 }
 
 static void ConfigureVertexArray(GLuint vertexArray, GLuint vertexBuffer)
@@ -439,6 +453,67 @@ static uint8_t TreeShade(const struct DioramaSceneSnapshot *snapshot,
     if (darkest <= 217)
         return DIORAMA_TREE_SHADE_LIGHT;
     return DIORAMA_TREE_SHADE_WHITE;
+}
+
+/*
+ * The voxel tree model (tree_model.generated.c) has its colours baked, so the
+ * palette's fade and the night tint passed it by: green trees on a black
+ * screen, bright trees at night (KNOWN_ISSUES V5). Both act on every colour
+ * of a palette alike (a blend towards a colour, a scale), so the trees' own
+ * palette (BG palette 2, TreeShade's) gives the line each channel's faded
+ * value follows from its unfaded one; the tree's colours go the same way.
+ */
+static void TreeTint(const struct DioramaSceneSnapshot *snapshot)
+{
+    for (int channel = 0; channel < 3; channel++)
+    {
+        float unfaded[15];
+        float faded[15];
+        float meanU = 0.0f;
+        float meanF = 0.0f;
+        float covariance = 0.0f;
+        float variance = 0.0f;
+        int shift = 16 - channel * 8; /* ConvertColor's 0xAARRGGBB: red, green, blue */
+
+        for (int i = 0; i < 15; i++)
+        {
+            uint32_t u = DioramaMetatile_ConvertColor(snapshot->unfadedPalette[2 * 16 + 1 + i], false);
+            uint32_t f = DioramaMetatile_ConvertColor(snapshot->fadedPalette[2 * 16 + 1 + i], false);
+
+            unfaded[i] = ((u >> shift) & 0xFF) / 255.0f;
+            faded[i] = ((f >> shift) & 0xFF) / 255.0f;
+            meanU += unfaded[i] / 15.0f;
+            meanF += faded[i] / 15.0f;
+        }
+        for (int i = 0; i < 15; i++)
+        {
+            covariance += (unfaded[i] - meanU) * (faded[i] - meanF);
+            variance += (unfaded[i] - meanU) * (unfaded[i] - meanU);
+        }
+        sTreeScale[channel] = variance > 1e-4f ? covariance / variance : 1.0f;
+        if (sTreeScale[channel] < 0.0f)
+            sTreeScale[channel] = 0.0f;
+        sTreeOffset[channel] = meanF - sTreeScale[channel] * meanU;
+    }
+    {
+        static int sLogEnabled = -1;
+        static float sLogged[6] = {-1.0f};
+
+        if (sLogEnabled < 0)
+        {
+            const char *value = SDL_getenv("PKMN_DIORAMA_LOG");
+            sLogEnabled = value != NULL && value[0] == '1';
+        }
+        if (sLogEnabled && (fabsf(sLogged[0] - sTreeScale[0]) > 0.02f || fabsf(sLogged[1] - sTreeScale[1]) > 0.02f
+                         || fabsf(sLogged[2] - sTreeScale[2]) > 0.02f || fabsf(sLogged[3] - sTreeOffset[0]) > 0.02f
+                         || fabsf(sLogged[4] - sTreeOffset[1]) > 0.02f || fabsf(sLogged[5] - sTreeOffset[2]) > 0.02f))
+        {
+            SDL_Log("Diorama: tree colours x(%.2f %.2f %.2f) + (%.2f %.2f %.2f)", sTreeScale[0], sTreeScale[1],
+                    sTreeScale[2], sTreeOffset[0], sTreeOffset[1], sTreeOffset[2]);
+            sLogged[0] = sTreeScale[0]; sLogged[1] = sTreeScale[1]; sLogged[2] = sTreeScale[2];
+            sLogged[3] = sTreeOffset[0]; sLogged[4] = sTreeOffset[1]; sLogged[5] = sTreeOffset[2];
+        }
+    }
 }
 
 static bool AppendPixelObjects(const struct DioramaSceneSnapshot *snapshot,
@@ -1078,6 +1153,7 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
         }
     }
 
+    TreeTint(snapshot);
     sMetrics.rebuiltChunks = 0;
     if (snapshot->mapGeneration != sMapGeneration || rulesGeneration != sRulesGeneration)
     {
@@ -1206,6 +1282,8 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
     dglUniform1i(sShadowEnabledLocation, DioramaGLShadow_BindForLighting() && !debug);
     dglUniform1f(sShadowAmbientLocation, DioramaGLShadow_Ambient());
     dglUniformMatrix4fv(sLightMatrixLocation, 1, GL_FALSE, DioramaGLShadow_LightMatrix());
+    dglUniform3f(sPixelScaleLocation, 1.0f, 1.0f, 1.0f);
+    dglUniform3f(sPixelOffsetLocation, 0.0f, 0.0f, 0.0f);
     dglActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, atlasTexture);
     dglActiveTexture(GL_TEXTURE1);
@@ -1250,7 +1328,14 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
         dglBufferData(GL_ARRAY_BUFFER,
                       visibleTreeCount * sizeof(struct DioramaTerrainTreeInstance),
                       sVisibleTreeInstances, GL_STREAM_DRAW);
+        if (!debug)
+        {
+            dglUniform3f(sPixelScaleLocation, sTreeScale[0], sTreeScale[1], sTreeScale[2]);
+            dglUniform3f(sPixelOffsetLocation, sTreeOffset[0], sTreeOffset[1], sTreeOffset[2]);
+        }
         dglDrawArraysInstanced(GL_TRIANGLES, 0, sTreeModelVertexCount, visibleTreeCount);
+        dglUniform3f(sPixelScaleLocation, 1.0f, 1.0f, 1.0f);
+        dglUniform3f(sPixelOffsetLocation, 0.0f, 0.0f, 0.0f);
         sMetrics.vertices += sTreeModelVertexCount * visibleTreeCount;
         sMetrics.triangles += sTreeModelVertexCount * visibleTreeCount / 3;
         sMetrics.drawCalls++;

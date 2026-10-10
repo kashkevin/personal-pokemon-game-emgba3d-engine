@@ -209,6 +209,8 @@ static void TestGridEligibility(void)
     FillSnapshot(&snapshot, 41);
     CHECK(DioramaSnapshot_CanRenderGrid(&snapshot));
     snapshot.sceneKind = DIORAMA_SCENE_OVERWORLD_SCRIPTED;
+    CHECK(DioramaSnapshot_CanRenderGrid(&snapshot));
+    snapshot.sceneKind = DIORAMA_SCENE_TRANSITION;
     CHECK(!DioramaSnapshot_CanRenderGrid(&snapshot));
     snapshot.sceneKind = DIORAMA_SCENE_MENU;
     CHECK(DioramaSnapshot_CanRenderGrid(&snapshot));

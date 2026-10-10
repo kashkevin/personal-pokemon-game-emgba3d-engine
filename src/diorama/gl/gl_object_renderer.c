@@ -83,6 +83,26 @@ static GLint sShadowMapLocation;
 static GLint sShadowAmbientLocation;
 static GLint sUprightZLocation;
 static GLint sLightProbeLocation;
+static GLint sShadeLocation;
+
+/* The door standing open: see FindDoor. */
+#define DOOR_DEPTH 0.03f   /* the opening, in front of its wall */
+#define DOOR_HEIGHT 1.25f  /* the door's own metatile and the 4 pixels drawn over it */
+#define DOOR_DUSK 0.5f     /* tiles before it over which a walker darkens */
+#define DOOR_DARK 0.35f
+
+static struct
+{
+    bool on;
+    float west, east;  /* the doorway's columns, world x */
+    float north;       /* the north edge of the door's cell, tiles south */
+    float wall;        /* the wall's face, tiles south */
+    float ground;
+    float open;        /* 0-1 */
+} sDoor;
+
+static void FindDoor(const struct DioramaSceneSnapshot *snapshot,
+                     const struct DioramaResolvedCell *resolvedCells);
 
 static const char sObjectVertexShader[] =
     "#version 330 core\n"
@@ -132,6 +152,7 @@ static const char sObjectFragmentShader[] =
     "uniform float cameraPitch;\n"
     "uniform float depthBias;\n"
     "uniform float uprightZ;\n"
+    "uniform float shade;\n"
     /* The card leans back to face the camera, so its top half reaches over
      * whatever stands north of the feet - a counter, a house's front wall -
      * and was cut off by it. For hiding and being hidden it counts as a card
@@ -174,7 +195,9 @@ static const char sObjectFragmentShader[] =
     "}\n"
     "void main() {\n"
     "  gl_FragDepth = drawMode == 0 ? UprightDepth() : gl_FragCoord.z;\n"
-    "  if (drawMode == 1) {\n"
+    "  if (drawMode == 3) {\n"
+    "    color = vec4(0.0, 0.0, 0.0, 1.0);\n" /* an open doorway */
+    "  } else if (drawMode == 1) {\n"
     "    vec2 point = uv * 2.0 - 1.0;\n"
     "    float distanceSquared = dot(point, point);\n"
     "    if (distanceSquared >= 1.0) discard;\n"
@@ -184,7 +207,7 @@ static const char sObjectFragmentShader[] =
     "    if (drawMode == 2) sampleUv.x += sin(animationTime * 5.0 + uv.y * 14.0) * 0.012;\n"
     "    vec4 texel = texture(image, sampleUv);\n"
     "    if (texel.a < 0.5) discard;\n"
-    "    color = vec4(texel.rgb * SunLight(), texel.a);\n"
+    "    color = vec4(texel.rgb * SunLight() * shade, texel.a);\n"
     "  }\n"
     "}\n";
 
@@ -247,6 +270,7 @@ static bool CreateProgram(void)
     sShadowAmbientLocation = dglGetUniformLocation(sProgram, "shadowAmbient");
     sUprightZLocation = dglGetUniformLocation(sProgram, "uprightZ");
     sLightProbeLocation = dglGetUniformLocation(sProgram, "lightProbe");
+    sShadeLocation = dglGetUniformLocation(sProgram, "shade");
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0
         && sFocalLengthLocation >= 0 && sAspectCorrectionLocation >= 0
         && sImageLocation >= 0
@@ -254,7 +278,8 @@ static bool CreateProgram(void)
         && sDepthBiasLocation >= 0 && sShadowEnabledLocation >= 0
         && sLightMatrixLocation >= 0 && sShadowMapLocation >= 0
         && sShadowAmbientLocation >= 0
-        && sUprightZLocation >= 0 && sLightProbeLocation >= 0;
+        && sUprightZLocation >= 0 && sLightProbeLocation >= 0
+        && sShadeLocation >= 0;
 }
 
 static float ResolveDepthBias(const struct DioramaSceneSnapshot *snapshot,
@@ -422,6 +447,7 @@ void DioramaGLObjects_Reset(void)
     sItemCount = 0;
     sHasPreviousSnapshot = false;
     sReady = false;
+    sDoor.on = false;
 }
 
 // PKMN_DIORAMA_LOG=1: log why a frame cannot use the 3D view (once per change).
@@ -532,9 +558,10 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
             playerItem = nextItemCount - 1;
         }
     }
-    if (!playerFound)
-        return false;
-    if (snapshot->surfBlobValid
+    /* The player hidden (gone through a door, a cutscene): the scene is still
+     * drawn, only without the player and the surf blob it would carry. */
+    if (playerFound
+     && snapshot->surfBlobValid
      && !(snapshot->surfBlob.flags & DIORAMA_OBJECT_INVISIBLE)
      && nextItemCount < OBJECT_RENDER_ITEM_CAPACITY)
     {
@@ -572,6 +599,7 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
 
     memcpy(sItems, nextItems, nextItemCount * sizeof(*sItems));
     sItemCount = nextItemCount;
+    FindDoor(snapshot, resolvedCells);
     sMetrics.visibleObjects = sItemCount;
     sMetrics.cachedFrames = 0;
     for (i = 0; i < SPRITE_TEXTURE_CACHE_SIZE; i++)
@@ -679,6 +707,84 @@ static float ModelPush(struct DioramaSpritePose pose, float halfWidth)
     return push;
 }
 
+/*
+ * A door standing open (the snapshot's door, from field_door.c). The game
+ * animates its doors on the tilemap, which this view does not show, so a
+ * walker went into a door that stayed shut. Here the doorway is a black
+ * opening on the wall the door is drawn on, widening as the door opens, and
+ * a walker going through it darkens and is gone into the dark, as on the GBA
+ * it goes behind the wall. Ported from the 3DS project's EmitDoor and
+ * DoorLight (voxel_entities.c, MIT; see diorama/buildings.h). Only on
+ * modelled buildings: the 3DS also lays it flat on an unmodelled building's
+ * door cell, whose drawing lies flat there; ours stand upright.
+ */
+
+static void FindDoor(const struct DioramaSceneSnapshot *snapshot,
+                     const struct DioramaResolvedCell *resolvedCells)
+{
+    const struct DioramaCellSnapshot *cell = NULL;
+    int gridX = snapshot->doorMapX - snapshot->gridOriginX;
+    int gridY = snapshot->doorMapY - snapshot->gridOriginY;
+    int index = gridY * DIORAMA_GRID_WIDTH + gridX;
+    float front;
+
+    sDoor.on = false;
+    if (snapshot->doorLevel == 0 || snapshot->doorWidth == 0 || !DioramaBuildings_IsAvailable()
+     || gridX < 0 || gridY < 0 || gridX >= DIORAMA_GRID_WIDTH || gridY >= DIORAMA_GRID_HEIGHT
+     || index >= snapshot->visibleCellCount)
+        return;
+    cell = &snapshot->cells[index];
+    if (cell->mapX != snapshot->doorMapX || cell->mapY != snapshot->doorMapY
+     || !(cell->flags & DIORAMA_CELL_SOURCE_VALID)
+     || !DioramaBuildings_CellAt(cell->sourceLayoutId, cell->sourceMapX, cell->sourceMapY,
+                                 NULL, NULL, NULL))
+        return;
+    /* the 3DS's VoxelBuildings_DoorWall: across the middle of the cell, half a tile up */
+    if (!DioramaBuildings_FrontAt(cell->sourceLayoutId, cell->sourceMapX, cell->sourceMapY,
+                                  cell->sourceMapX + 0.49f, cell->sourceMapX + 0.51f, 0.5f, &front))
+        return;
+    sDoor.on = true;
+    sDoor.west = snapshot->doorMapX - 0.5f;
+    sDoor.east = sDoor.west + snapshot->doorWidth;
+    sDoor.north = snapshot->doorMapY - 0.5f;
+    /* the layout's tiles to the scene's: as ModelPush, cell y spanning y..y+1 */
+    sDoor.wall = front + (float)(cell->mapY - cell->sourceMapY) - 0.5f;
+    sDoor.ground = resolvedCells[index].groundHeight;
+    sDoor.open = snapshot->doorLevel >= 3 ? 1.0f : snapshot->doorLevel / 3.0f;
+}
+
+static void DrawDoorOpening(void)
+{
+    float middle = (sDoor.west + sDoor.east) * 0.5f;
+    float half = (sDoor.east - sDoor.west) * 0.5f * sDoor.open;
+    float z = -(sDoor.wall + DOOR_DEPTH);
+    float top = sDoor.ground + DOOR_HEIGHT;
+    const struct ObjectVertex vertices[6] = {
+        {middle - half, sDoor.ground, z, 0, 0},
+        {middle + half, sDoor.ground, z, 1, 0},
+        {middle + half, top, z, 1, 1},
+        {middle - half, sDoor.ground, z, 0, 0},
+        {middle + half, top, z, 1, 1},
+        {middle - half, top, z, 0, 1},
+    };
+
+    UploadAndDraw(vertices);
+}
+
+/* How lit a walker is: 1 away from the doorway, darker as it comes up to it,
+ * 0 through it (not drawn, nor its shadow or reflection). */
+static float DoorDusk(struct DioramaSpritePose pose)
+{
+    float south = -pose.z;
+
+    if (!sDoor.on || pose.x < sDoor.west || pose.x >= sDoor.east
+     || south < sDoor.north || south >= sDoor.wall + DOOR_DEPTH + DOOR_DUSK)
+        return 1.0f;
+    if (south <= sDoor.wall + DOOR_DEPTH)
+        return 0.0f;
+    return DOOR_DARK + (1.0f - DOOR_DARK) * (south - sDoor.wall - DOOR_DEPTH) / DOOR_DUSK;
+}
+
 static void DrawBillboard(const struct ObjectRenderItem *item, struct DioramaSpritePose pose,
                           float pitchSin, float pitchCos)
 {
@@ -699,6 +805,7 @@ static void DrawBillboard(const struct ObjectRenderItem *item, struct DioramaSpr
     dglUniform1f(sDepthBiasLocation, item->depthBias);
     dglUniform1f(sUprightZLocation, pose.z - ModelPush(pose, halfWidth));
     dglUniform3f(sLightProbeLocation, pose.x, pose.groundY + 0.75f, pose.z);
+    dglUniform1f(sShadeLocation, DoorDusk(pose));
     UploadAndDraw(vertices);
 }
 
@@ -797,6 +904,7 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
     glDepthMask(GL_FALSE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    dglUniform1f(sShadeLocation, 1.0f);
     dglUniform1i(sDrawModeLocation, 2);
     glEnable(GL_STENCIL_TEST);
     glStencilMask(0x00);
@@ -806,7 +914,7 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
     {
         int index = order[i];
 
-        if (sItems[index].reflectionTexture != 0)
+        if (sItems[index].reflectionTexture != 0 && DoorDusk(poses[index]) > 0.0f)
         {
             struct DioramaSpritePose reflectionPose = DioramaSprite_ApplyScreenOffset(
                 poses[index], 0, sItems[index].object.reflectionOffsetY, cameraPitch);
@@ -823,17 +931,24 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
     {
         int index = order[i];
         if ((sItems[index].object.flags & DIORAMA_OBJECT_SHADOW)
-         && !sItems[index].attachedToPlayer)
+         && !sItems[index].attachedToPlayer && DoorDusk(poses[index]) > 0.0f)
             DrawShadow(&sItems[index], poses[index]);
     }
 
     glDisable(GL_BLEND);
     glDepthMask(GL_TRUE);
+    if (sDoor.on)
+    {
+        dglUniform1i(sDrawModeLocation, 3);
+        DrawDoorOpening();
+    }
     dglUniform1i(sDrawModeLocation, 0);
     for (i = 0; i < sItemCount; i++)
     {
         int index = order[i];
-        DrawBillboard(&sItems[index], poses[index], pitchSin, pitchCos);
+
+        if (DoorDusk(poses[index]) > 0.0f)
+            DrawBillboard(&sItems[index], poses[index], pitchSin, pitchCos);
     }
     glEnable(GL_STENCIL_TEST);
     glStencilMask(0x00);
@@ -844,7 +959,7 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
     {
         int index = order[i];
 
-        if (sItems[index].drawOverPixelObjects)
+        if (sItems[index].drawOverPixelObjects && DoorDusk(poses[index]) > 0.0f)
             DrawBillboard(&sItems[index], poses[index], pitchSin, pitchCos);
     }
     glDisable(GL_STENCIL_TEST);

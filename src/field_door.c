@@ -1146,8 +1146,57 @@ static void DrawClosedDoorTiles(const struct DoorGraphics *gfx, u32 x, u32 y)
     }
 }
 
+#ifdef ENABLE_DIORAMA
+// The door standing open, for the Diorama 3D view (src/diorama): the frames
+// below are drawn on the tilemap, which that view does not show. After the
+// 3DS project's PortDoor (pokeemerald-3Ds-dualscreen src/field_door.c, MIT;
+// see src/diorama/README.md); unlike there, swinging doors count too.
+static struct
+{
+    s16 x, y;
+    u8 width, level;
+    s8 mapGroup, mapNum;
+} sDioramaDoor;
+
+bool8 DioramaDoor_Get(s16 *x, s16 *y, u8 *width, u8 *level)
+{
+    if (sDioramaDoor.level == 0
+     || sDioramaDoor.mapGroup != gSaveBlock1Ptr->location.mapGroup
+     || sDioramaDoor.mapNum != gSaveBlock1Ptr->location.mapNum)
+        return FALSE;
+    *x = sDioramaDoor.x;
+    *y = sDioramaDoor.y;
+    *width = sDioramaDoor.width;
+    *level = sDioramaDoor.level;
+    return TRUE;
+}
+
+static void DioramaDoor_Set(const struct DoorGraphics *gfx, const struct DoorAnimFrame *frame, u32 x, u32 y)
+{
+    // Bytes between two frames of each size's animation (sDoorAnimFrames_*).
+    static const u16 sFrameStep[DOOR_SIZE_COUNT] = {
+        [DOOR_SIZE_1x1] = 4 * TILE_SIZE_4BPP,
+        [DOOR_SIZE_1x2] = 8 * TILE_SIZE_4BPP,
+        [DOOR_SIZE_2x2_LEFT] = 16 * TILE_SIZE_4BPP,
+        [DOOR_SIZE_2x2_RIGHT] = 16 * TILE_SIZE_4BPP,
+    };
+    bool32 wide = gfx->size == DOOR_SIZE_2x2_LEFT || gfx->size == DOOR_SIZE_2x2_RIGHT;
+
+    sDioramaDoor.x = gfx->size == DOOR_SIZE_2x2_RIGHT ? x - 1 : x;
+    sDioramaDoor.y = y;
+    sDioramaDoor.width = wide ? 2 : 1;
+    sDioramaDoor.level = frame->offset == 0xFFFF || gfx->size >= DOOR_SIZE_COUNT ? 0
+                       : min(frame->offset / sFrameStep[gfx->size] + 1, 3);
+    sDioramaDoor.mapGroup = gSaveBlock1Ptr->location.mapGroup;
+    sDioramaDoor.mapNum = gSaveBlock1Ptr->location.mapNum;
+}
+#endif
+
 static void DrawDoor(const struct DoorGraphics *gfx, const struct DoorAnimFrame *frame, u32 x, u32 y)
 {
+#ifdef ENABLE_DIORAMA
+    DioramaDoor_Set(gfx, frame, x, y);
+#endif
     if (frame->offset == 0xFFFF)
     {
         DrawClosedDoorTiles(gfx, x, y);

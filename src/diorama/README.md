@@ -30,6 +30,7 @@ notice with any distribution of these files.
 | `src/diorama/scene/buildings.c`, `include/diorama/buildings.h` | Port of the 3DS project's `3ds_port/src/voxel/voxel_building.c` (commit `4a699e3`): the VXB7 building table reader, read from memory instead of RomFS, and its front-face query (`CollectFronts`, `FrontCellAt`, `VoxelBuildings_FrontAt` as `DioramaBuildings_FrontAt`). |
 | `src/diorama/gl/gl_building_renderer.c`, `include/diorama/gl_building_renderer.h` | New: draws the placed models with OpenGL, coloured from the live BG palette (the placement logic follows the 3DS project's `VoxelBuildings_EmitSome`). |
 | `src/diorama/gl/gl_object_renderer.c` (`ModelPush`) | Port of the 3DS project's `ModelPush` (`3ds_port/src/voxel/voxel_entities.c`): a walker's card comes a pixel in front of the furniture it stands before. The upright-card depth (`UprightDepth` in the sprite shader) is new. |
+| `src/field_door.c` (`DioramaDoor_Get`), `gl_object_renderer.c` (`FindDoor`, `DrawDoorOpening`, `DoorDusk`) | Port of the 3DS project's open door (`PortDoor_Get` in its `src/field_door.c`; `EmitDoor`, `DoorLight` and `VoxelBuildings_DoorWall` in `3ds_port/src/voxel/`): a black opening on a modelled building's wall widens as the door opens, and a walker going through darkens and is gone. Changes: swinging doors open too, not only sliding ones; the expansion's door sizes (1x1, 1x2, 2x2 left and right); no opening on an unmodelled building. |
 | `src/diorama/gl/gl_shadow.c`, `include/diorama/gl_shadow.h` | New: the sun's depth map. The sun's direction and the 0.70 ambient are the 3DS project's (`voxel_lighting.h`); the 3DS bakes its shadows on the CPU, this draws them on the GPU. |
 | `tools/diorama_buildings/**` | The 3DS project's building generator; see its README for the files, licence and changes. |
 
@@ -60,4 +61,20 @@ tilesets are unchanged.
   generated under `build/assets`; only animation callbacks of the Emerald tilesets.
 * Game hooks (all `#ifdef ENABLE_DIORAMA`, GBA line numbers kept): `src/main.c`
   (frame begin/end), `src/overworld.c` (publish the overworld snapshot after
-  visible-spawn updates), `src/fieldmap.c` (map changed).
+  visible-spawn updates), `src/fieldmap.c` (map changed), `src/field_door.c`
+  (the open door).
+
+## Changes to the voxel project's behaviour
+
+* Scripted scenes (controls locked: a door warp, a cutscene, the nurse healing)
+  stay in 3D, as in the 3DS project; the voxel project drew them in 2D. A frame
+  the 3D view cannot draw still falls back (`snapshot_exchange.c`,
+  `presentation_transition.c`). The camera interpolates in them as in free play.
+* Screen fades on the field (a warp's fade out and in) stay in 3D: the scene is
+  coloured from the faded palettes. `PKMN_DIORAMA_FADE_2D=1` restores the cut to
+  the 2D view for the fade (`scene_snapshot.c`).
+* The 3D view is drawn while the player is hidden (gone through a door); the voxel
+  project required a visible player (`gl_object_renderer.c`).
+* The voxel tree model's baked colours follow the palette's fade and night tint:
+  a per-channel line fitted from the trees' BG palette each frame
+  (`gl_terrain_renderer.c`, `TreeTint`); by day it is the identity.
