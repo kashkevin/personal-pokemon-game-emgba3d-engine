@@ -466,10 +466,22 @@ void AddSpriteTextPrinterParameterized6(u8 spriteId, u8 fontId, u8 left, u8 top,
     AddTextPrinter(&printer, speed, NULL);
 }
 
+#ifdef ENABLE_NATIVE_UI
+// The native PC UI (src/native_ui) shows some windows' text itself: where each
+// window's last string starts (TextPrinter_NativeUiWindow). The #line keeps the
+// file's line numbers (errorf) as they were: the GBA ROM stays byte-identical.
+static const u8 *sNativeUiPrinterStart[WINDOWS_MAX];
+#endif
+#line 469
 bool32 AddTextPrinter(struct TextPrinterTemplate *printerTemplate, u8 speed, void (*callback)(struct TextPrinterTemplate *, u16))
 {
     if (!gFonts)
         return FALSE;
+#ifdef ENABLE_NATIVE_UI
+    if (printerTemplate->type == WINDOW_TEXT_PRINTER && printerTemplate->windowId < WINDOWS_MAX)
+        sNativeUiPrinterStart[printerTemplate->windowId] = printerTemplate->currentChar;
+#endif
+#line 473
 
     struct TextPrinter sTempTextPrinter = {0};
 
@@ -2872,3 +2884,29 @@ void DeactivateSingleTextPrinter(u32 id, enum TextPrinterType type)
     if (foundPrinter)
         FreeFinishedTextPrinters();
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+bool32 TextPrinter_NativeUiWindow(u8 windowId, const u8 **start, const u8 **current, bool8 *active)
+{
+    struct TextPrinter *printer;
+
+    if (windowId >= WINDOWS_MAX || sNativeUiPrinterStart[windowId] == NULL)
+        return FALSE;
+    *start = sNativeUiPrinterStart[windowId];
+    *current = NULL;
+    *active = FALSE;
+    for (printer = sFirstTextPrinter; printer != NULL; printer = printer->nextPrinter)
+    {
+        if (printer->active && printer->printerTemplate.type == WINDOW_TEXT_PRINTER
+         && printer->printerTemplate.windowId == windowId)
+        {
+            *current = printer->printerTemplate.currentChar;
+            *active = TRUE;
+            break;
+        }
+    }
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

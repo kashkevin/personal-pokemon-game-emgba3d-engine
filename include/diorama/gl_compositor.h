@@ -33,6 +33,11 @@ void DioramaGL_PhotoPan(int dx, int dz);
 /* The PC's own interface (src/platform/sdl2.c): called last in every frame
  * presented, at the window's resolution with its framebuffer bound. */
 void DioramaGL_SetOverlay(void (*overlay)(int outputWidth, int outputHeight));
+/* The native UI (src/native_ui): asked once a presented frame which parts of
+ * the game's own picture it draws itself (its own interface replaces them). */
+#define DIORAMA_PICTURE_HIDE_ALL (1 << 0) /* the 240x160 picture, its background and border */
+#define DIORAMA_PICTURE_HIDE_UI  (1 << 1) /* the field windows over the 3D view */
+void DioramaGL_SetPictureFilter(int (*filter)(void));
 /* The last frame presented drew the 3D scene (the benchmark counts them). */
 bool DioramaGL_LastFrameWas3D(void);
 /* The OpenGL renderer, its vendor and version, for the benchmark's log. */

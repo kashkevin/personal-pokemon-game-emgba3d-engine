@@ -307,8 +307,9 @@ endif
 
 # Collect sources
 C_SRCS_IN := $(wildcard $(C_SUBDIR)/*.c $(C_SUBDIR)/*/*.c $(C_SUBDIR)/*/*/*.c)
-# src/platform/ holds the native PC platform layer (Makefile_pc only).
-C_SRCS := $(filter-out $(C_SUBDIR)/platform/% $(C_SUBDIR)/diorama/% $(C_SUBDIR)/data/diorama/%,$(foreach src,$(C_SRCS_IN),$(if $(findstring .inc.c,$(src)),,$(src))))
+# src/platform/ holds the native PC platform layer, src/native_ui/ the native PC UI
+# (Makefile_pc only).
+C_SRCS := $(filter-out $(C_SUBDIR)/platform/% $(C_SUBDIR)/diorama/% $(C_SUBDIR)/data/diorama/% $(C_SUBDIR)/native_ui/%,$(foreach src,$(C_SRCS_IN),$(if $(findstring .inc.c,$(src)),,$(src))))
 C_OBJS := $(patsubst $(C_SUBDIR)/%.c,$(C_BUILDDIR)/%.o,$(C_SRCS))
 
 TEST_SRCS_IN := $(wildcard $(TEST_SUBDIR)/*.c $(TEST_SUBDIR)/*/*.c $(TEST_SUBDIR)/*/*/*.c)

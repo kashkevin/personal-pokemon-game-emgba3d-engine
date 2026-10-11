@@ -1730,3 +1730,14 @@ bool32 IsDirectionalStairWarpMetatileBehavior(u16 metatileBehavior, enum Directi
     }
     return FALSE;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI's start menu (src/native_ui/screens/ui_pause.c): the menu
+// reopens after a screen and waits for the field to fade in.
+bool32 FieldScreenEffect_NativeUiStartMenuFadingIn(void)
+{
+    return FuncIsActiveTask(Task_WaitForFadeShowStartMenu);
+}
+#endif // ENABLE_NATIVE_UI

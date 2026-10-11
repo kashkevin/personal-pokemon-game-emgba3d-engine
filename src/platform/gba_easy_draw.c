@@ -16,7 +16,10 @@
 #define getRedChannel(x) ((x >>  0) & 0x1F)
 #define getGreenChannel(x) ((x >>  5) & 0x1F)
 #define getBlueChannel(x) ((x >>  10) & 0x1F)
-#define isbgEnabled(x) ((REG_DISPCNT >> 8) & 0xF) & (1 << x)
+/* Native UI (src/native_ui): background layers the native interface draws
+ * itself are left out of the picture (bit n: BG n). 0 outside it. */
+uint8_t gPlatformPictureHideBgMask;
+#define isbgEnabled(x) ((((REG_DISPCNT >> 8) & 0xF) & ~gPlatformPictureHideBgMask) & (1 << x))
 
 #define WINMASK_BG0    (1 << 0)
 #define WINMASK_BG1    (1 << 1)

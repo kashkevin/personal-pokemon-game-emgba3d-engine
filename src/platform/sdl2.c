@@ -47,6 +47,9 @@
 #include "diorama/props.h"
 #include "diorama/scene_snapshot.h"
 #include "diorama/tree_sprites.h"
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/native_ui.h"
+#endif
 #include "multiplayer_menu.h"
 #include "multiplayer_save.h"
 #endif
@@ -127,6 +130,9 @@ static void AfterPresent(void);
 #define DIORAMA_VIDEO_SETTING_EVENT 1
 static void ApplyDioramaVideoSetting(enum PlatformSetting setting, u8 value);
 static void DrawPcOverlay(int outputWidth, int outputHeight);
+#ifdef ENABLE_NATIVE_UI
+static void DrawOverlays(int outputWidth, int outputHeight);
+#endif
 static bool HandlePcMenuKey(const SDL_KeyboardEvent *key);
 static bool HandlePhotoKey(const SDL_KeyboardEvent *key);
 #endif
@@ -444,7 +450,15 @@ int main(int argc, char **argv)
     ApplyDioramaLook(); // before the game thread makes its first snapshot
     DioramaGLQuality_Set(DisplaySettings_ShadowMapSize(sDisplay.shadows), sDisplay.lighting, sDisplay.effects);
     ApplyDioramaDetails();
+#ifdef ENABLE_NATIVE_UI
+    // The native PC interface (src/native_ui) over the game, then the PC
+    // settings menu and the frame rate over everything.
+    NativeUi_Init(sdlWindow);
+    DioramaGL_SetPictureFilter(NativeUi_PictureFlags);
+    DioramaGL_SetOverlay(DrawOverlays);
+#else
     DioramaGL_SetOverlay(DrawPcOverlay); // the PC settings menu and the frame rate
+#endif
 #endif
 #if defined(NATIVE_LINUX) || defined(_WIN32)
 #ifdef ENABLE_DIORAMA
@@ -567,6 +581,11 @@ int main(int argc, char **argv)
             {
                 if (SDL_AtomicGet(&isFrameAvailable))
                 {
+#ifdef ENABLE_NATIVE_UI
+                    // The game is parked: the native UI reads its state and
+                    // decides what of the GBA picture it replaces.
+                    NativeUi_CaptureFrame();
+#endif
                     VDraw(sdlTexture);
 #ifndef ENABLE_DIORAMA
                     SDL_RenderClear(sdlRenderer);
@@ -636,6 +655,10 @@ int main(int argc, char **argv)
                         }
                         if (Benchmark_Active())
                             keys = Benchmark_FilterKeys(keys, SDL_GetTicks());
+#ifdef ENABLE_NATIVE_UI
+                        // mouse intents become the game's own button presses
+                        keys = NativeUi_FilterKeys(keys);
+#endif
                         // In multiplayer the reset chord reaches the game only when
                         // its native reset handler has been offered it.
                         keys = MpBridge_FilterKeys(keys);
@@ -696,6 +719,9 @@ int main(int argc, char **argv)
 #endif
 
 #ifdef ENABLE_DIORAMA
+#ifdef ENABLE_NATIVE_UI
+    NativeUi_Shutdown();
+#endif
     DioramaGL_Shutdown();
     DioramaSnapshotExchange_Shutdown();
 #elif defined(NATIVE_LINUX) || defined(_WIN32)
@@ -1265,6 +1291,14 @@ static void DrawPcOverlay(int outputWidth, int outputHeight)
     }
 }
 
+#ifdef ENABLE_NATIVE_UI
+static void DrawOverlays(int outputWidth, int outputHeight)
+{
+    NativeUi_Draw(outputWidth, outputHeight);
+    DrawPcOverlay(outputWidth, outputHeight);
+}
+#endif
+
 static void CpuName(char *buffer, size_t size)
 {
     SDL_strlcpy(buffer, "unknown", size);
@@ -1392,7 +1426,7 @@ static void AfterPresent(void)
 
 // Writes the whole flash image to a temporary file and renames it over the save,
 // so a crash or power cut never leaves a half-written file behind.
-static void StoreSaveFile(void)
+static bool WriteSaveImage(void)
 {
     char tempPath[sizeof(sSavePath) + 8];
     FILE *saveFile;
@@ -1403,23 +1437,50 @@ static void StoreSaveFile(void)
     if (saveFile == NULL)
     {
         SDL_Log("Unable to write save file %s", tempPath);
-        return;
+        return false;
     }
     written = fwrite(FLASH_BASE, 1, sizeof(FLASH_BASE), saveFile);
     if (fflush(saveFile) != 0 || written != sizeof(FLASH_BASE))
     {
         fclose(saveFile);
         SDL_Log("Short write to %s", tempPath);
-        return;
+        return false;
     }
     fclose(saveFile);
 #ifdef _WIN32
     if (!MoveFileExA(tempPath, sSavePath, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    {
         SDL_Log("Unable to replace save file %s", sSavePath);
+        return false;
+    }
 #else
     if (rename(tempPath, sSavePath) != 0)
+    {
         SDL_Log("Unable to replace save file %s", sSavePath);
+        return false;
+    }
 #endif
+    return true;
+}
+
+#ifdef ENABLE_NATIVE_UI
+// Save file writes, for the native UI's save screen: it reports the game as
+// saved only once the file is written (Platform_NativeUiSaveWrites).
+static u32 sSaveWritesDone;
+static u32 sSaveWritesFailed;
+#endif
+
+static void StoreSaveFile(void)
+{
+    bool ok = WriteSaveImage();
+
+#ifdef ENABLE_NATIVE_UI
+    if (ok)
+        sSaveWritesDone++;
+    else
+        sSaveWritesFailed++;
+#endif
+    (void)ok;
 }
 
 static void FlushSaveIfDirty(void)
@@ -1829,6 +1890,12 @@ void ProcessEvents(void)
 
     while (SDL_PollEvent(&event))
     {
+#ifdef ENABLE_NATIVE_UI
+        // the native UI's mouse regions first (a wheel over a list scrolls it
+        // instead of zooming the 3D camera)
+        if (NativeUi_HandleEvent(&event))
+            continue;
+#endif
         switch (event.type)
         {
         case SDL_QUIT:
@@ -2166,6 +2233,9 @@ u16 Platform_GetKeyInput(void)
         return 0; // the PC settings menu has the keys; the game keeps running
 #ifdef _WIN32
     u16 gamepadKeys = GetXInputKeys();
+#ifdef ENABLE_NATIVE_UI
+    NativeUi_NotePadKeys(gamepadKeys); // the prompts show the pad's buttons
+#endif
     return gamepadKeys | keyboardKeys;
 #elif defined(__ANDROID__)
     return keyboardKeys | controllerKeys | controllerAxisKeys;
@@ -2253,4 +2323,18 @@ void SoftReset(u32 resetFlags)
     longjmp(sGameResetPoint, 1);
 }
 
+#endif
+
+#ifdef ENABLE_NATIVE_UI
+bool8 Platform_NativeUiPcMenuOpen(void)
+{
+    return sPcMenu.open;
+}
+
+void Platform_NativeUiSaveWrites(u32 *written, u32 *failed, bool8 *pending)
+{
+    *written = sSaveWritesDone;
+    *failed = sSaveWritesFailed;
+    *pending = gPlatformFlashDirty;
+}
 #endif
