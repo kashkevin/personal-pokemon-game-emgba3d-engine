@@ -375,15 +375,30 @@ def auto_specs(taken, only_map=None):
             (x0, y0, w, h), owned, _, img = building_art(map_, cells, ground)
             over = OVERRIDES.get((data["name"], x, y), {})
             height = over.get("facade") or facade_height(img, (x - x0) * 16)
+            relief = {"height": height, "back": (body_top - y0) * 16, "auto": True}
+            band = roof_band(h * 16 - height)
+            if band is not None:
+                relief["fill"] = band
             specs.append({
                 "name": "auto_%s_%d_%d" % (data["name"].lower(), x, y),
                 "layout": data["layout"],
                 "rect": (x0, y0, w, h),
                 "ground": ground,
                 "owned": owned,
-                "relief": {"height": height, "back": (body_top - y0) * 16, "auto": True},
+                "relief": relief,
             })
     return specs
+
+
+def roof_band(roof_rows):
+    """The drawing's rows (v0, v1) a roof's hidden depth is laid with: the
+    middle of the roof, between the outline at its back and the eave at its
+    front, so the depth the drawing does not show repeats roof tiles rather
+    than the eave (which, repeated, read as a second roof from above). None
+    for a roof too shallow to have a middle."""
+    if roof_rows < 12:
+        return None
+    return (int(roof_rows * 0.3), max(int(roof_rows * 0.3) + 4, int(roof_rows * 0.65)))
 
 
 def modelled_cells(path):

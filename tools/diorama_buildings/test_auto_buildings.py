@@ -63,6 +63,35 @@ class SkipTests(unittest.TestCase):
         self.assertFalse(ax & bx)
 
 
+class RoofBandTests(unittest.TestCase):
+    def test_a_shallow_roof_has_no_middle(self):
+        self.assertIsNone(auto_buildings.roof_band(8))
+
+    def test_the_band_is_the_middle_of_the_roof(self):
+        self.assertEqual(auto_buildings.roof_band(56), (16, 36))
+        a, b = auto_buildings.roof_band(20)
+        self.assertTrue(0 < a < b <= 20)
+
+    def test_the_hidden_depth_repeats_the_band_not_the_eave(self):
+        from PIL import Image
+        import voxel_building as vb
+
+        # 32 rows of roof over a 16-row front, standing on 3 cells: the top
+        # drawn from Z = 16, laid back to Z = 0 with what the depth repeats
+        art = Image.new("RGBA", (16, 48), (200, 80, 80, 255))
+
+        def depth_rows(fill):
+            mesh = vb.Mesh()
+            vb.Relief("r", art, 16, vb.Tile(0, 32, 8, 48), back=0, fill=fill).emit(mesh)
+            rows = [p[4] for (tri, _, tag) in mesh.tris if tag.endswith(".top~depth")
+                    for p in tri]
+            return [v for v in rows if v > 1.0]   # the back edge's outline row aside
+
+        self.assertGreater(max(depth_rows(None)), 30)   # the course ends at the eave
+        rows = depth_rows((10, 20))
+        self.assertTrue(rows and min(rows) >= 10 and max(rows) <= 20)
+
+
 class FacadeTests(unittest.TestCase):
     def test_the_eave_is_the_first_long_edge_above_the_door(self):
         from PIL import Image

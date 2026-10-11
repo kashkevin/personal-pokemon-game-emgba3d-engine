@@ -974,7 +974,7 @@ def make_model(spec, layouts, models):
                                hull=relief.get("hull", 0), bridge=relief.get("bridge", 0),
                                seam=(h * 16, open_s, open_n), flank_tile=flank,
                                seam_x=(spec.get("west", ()), spec.get("east", ())),
-                               back=relief.get("back"))]
+                               back=relief.get("back"), fill=relief.get("fill"))]
             spec["exact"] = [(0, 0, w * 16, h * 16)]
         else:
             parts = spec["parts"]()

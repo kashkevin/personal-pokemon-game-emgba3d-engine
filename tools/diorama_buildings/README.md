@@ -49,7 +49,10 @@ gradenGnostic/pokeemerald-multiplatform (MIT) for the logic it reuses.
   (tall buildings, a cliff behind a house, doors that are no building);
   `python3 auto_buildings.py --sheet DIR --modelled build/diorama/buildings.bin` draws
   what it finds to look over (game art: not committed). Sootopolis's houses, cut into
-  the crater, stay as they are drawn.
+  the crater, stay as they are drawn. The depth of a roof the drawing does not show
+  (behind it, seen from above) is laid with the middle of its own roof (`roof_band`):
+  `voxel_building.py`'s `Relief` takes `fill`, the drawing's rows to repeat there, where
+  it repeated the roof's last rows - its eave, which read as a second roof.
 * `window_glow.py` (new, project-owned; tests in `test_window_glow.py`): the windows of
   the buildings of outdoor maps, found on their pages (glass-coloured panes in a darker
   frame, on faces that stand upright, never a wall's own colour), which glow in the
