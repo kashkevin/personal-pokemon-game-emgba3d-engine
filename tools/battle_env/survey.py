@@ -307,6 +307,8 @@ def main():
     ap.add_argument('--cfg-extra', default='')
     ap.add_argument('--env', action='append', default=[])
     ap.add_argument('--skip-done', action='store_true')
+    ap.add_argument('--at', default='', help='X,Y: stand there instead of the map\'s test position '
+                    '(with --maps; where two trainers see the test position)')
     args = ap.parse_args()
     args.exe = os.path.abspath(args.exe)
     args.save = os.path.abspath(args.save)
@@ -324,6 +326,9 @@ def main():
         if cats and rec['category'] not in cats:
             continue
         for label, spec, p in choose(rec, species, trainers, args.kind):
+            if args.at:
+                x, y = (int(v) for v in args.at.split(','))
+                p = {'x': x, 'y': y, 'behaviour': '(--at)', 'environment': p.get('environment')}
             if args.skip_done and os.path.exists(os.path.join(args.out, '%s-%s' % (rec['map'][4:], label), 'cap.png')):
                 continue
             results = [r for r in results if not (r['map'] == rec['map'] and r['label'] == label)]

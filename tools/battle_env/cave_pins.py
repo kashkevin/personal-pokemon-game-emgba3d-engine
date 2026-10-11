@@ -16,6 +16,9 @@ edge, which leaves out a lone boulder or an object drawn on the floor. Each beco
 height 1}: the rules compiler stands the cell up one cell high as the cliffs of a route are,
 with the rock's own drawing on its faces.
 
+--sea-floor leaves out the water test: under the sea (gTileset_Underwater) the sea's blue is
+the floor every metatile is drawn over, so the test would pass over all of the rock's faces.
+
 --write writes data/diorama/tilesets/<name>.json (<name> from the tileset: gTileset_MeteorFalls
 -> meteor_falls.json); an existing file is left alone unless it is one this tool wrote (its
 pins' reasons say so). --compare prints how the selection differs from the file there now.
@@ -200,8 +203,11 @@ def main():
     ap.add_argument('--write', action='store_true')
     ap.add_argument('--compare', action='store_true')
     ap.add_argument('--sheet')
+    ap.add_argument('--sea-floor', action='store_true')
     args = ap.parse_args()
     stats, behaviour, void, sample = survey(args.tileset)
+    if args.sea_floor:
+        void = {k: (None if why == 'water' else why) for k, why in void.items()}
     if not stats:
         sys.exit('no layout uses %s as its secondary tileset' % args.tileset)
     rock, passed = choose(stats, behaviour, void)

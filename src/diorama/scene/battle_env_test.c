@@ -17,6 +17,7 @@
 #include "battle.h"
 #include "battle_setup.h"
 #include "data.h"
+#include "event_object_movement.h"
 #include "main.h"
 #include "overworld.h"
 #include "palette.h"
@@ -77,6 +78,11 @@ static void Init(void)
 
 static void StartTrainer(int a, int b, bool doubles)
 {
+    /* As a trainer's script does (lockall): the field stands still through the transition,
+     * so a visible wild Pokemon neither walks into the player nor, spawning, empties the
+     * party just made (KNOWN_ISSUES N33). The wild battles below lock it themselves. */
+    LockPlayerFieldControls();
+    FreezeObjectEvents();
     gBattleTypeFlags = BATTLE_TYPE_TRAINER;
     TRAINER_BATTLE_PARAM.opponentA = a;
     TRAINER_BATTLE_PARAM.opponentB = 0xFFFF;
