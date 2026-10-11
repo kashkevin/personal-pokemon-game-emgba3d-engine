@@ -172,10 +172,13 @@ tilesets are unchanged.
   * cards: the art's halves as two thin upright cards swaying in the wind
     (tall grass, long grass, flowers);
   * a mound: the art seen from above, each opaque pixel a column, the taller
-    the further it is from the art's edge (rocks in caves, on sand and in the
-    sea; round bushes);
-  * a block: the art on top of a block (for hedges and planters; not used
-    yet).
+    the further it is from the art's edge (rocks in caves and lava fields,
+    flower baskets, round bushes);
+  * a relief: the same column mesh standing up, its back on the cell's north
+    edge and bulging south (a rock or boulder drawn from the front: on sand,
+    in the sea, Fallarbor's ash boulders);
+  * a block: the art on top of a block (Slateport's market goods; Petalburg's
+    hedges when the modelled hedges are missing).
   A prop's art is its metatile's layer with a key colour (the grass between
   blades) and its painted shadow left out (the sun's shadow map draws a real
   one); the cell's ground is drawn without the flat picture: its lower layer,
@@ -186,9 +189,29 @@ tilesets are unchanged.
   art's transparency (so any art becomes little blocks with no geometry of its
   own), the cards with another, and each mound with a mesh made from its art.
   Lit like the terrain (grade, weather light, dapples, shadow map, haze); slabs
-  and mounds cast shadows. Cells the rules already stand up as pixel objects
-  (Littleroot's signs) are left to them. Collision and everything the game
-  does with the cells are unchanged. `PKMN_DIORAMA_PROPS=0` draws them flat.
+  and mounds cast shadows. The swaying ones sway harder in rain, a storm or a
+  sandstorm and less in fog (`DioramaProps_Wind`), and the grass someone
+  stands in or steps out of shivers. Cells the rules already stand up as pixel
+  objects (Littleroot's signs) and cells a modelled building stands on
+  (`DioramaProps_SetCellTaken`: the generator's own hedges, railings and sea
+  rocks) are left to them. Collision and everything the game does with the
+  cells are unchanged. The player's World details setting (F10, the quality
+  presets: off in Low) or `PKMN_DIORAMA_PROPS=0` draws them flat.
+* Every building in 3D (phase 3; `tools/diorama_buildings/auto_buildings.py`):
+  the buildings no hand-made spec models (about seventy: Slateport, Mauville,
+  Lilycove, Fortree, Mossdeep, Pacifidlog, Dewford, Fallarbor, Verdanturf,
+  the route houses, the Battle Frontier) are found from their doors and
+  modelled by the same generator as a relief read off their own drawing (a
+  front as tall as the facade, the roof laid back over their cells), verified
+  pixel for pixel in the GBA projection and drawn by the building renderer
+  like the others (doors open on them). Sootopolis's houses, cut into the
+  crater, stay as drawn.
+* Lit windows (phase 4; `tools/diorama_buildings/window_glow.py`,
+  `DioramaBuildings_PageWindows`): the windows of the modelled buildings of
+  outdoor maps, found on their texture pages (glass-coloured panes in a darker
+  frame on upright faces), are a second channel of the page texture and glow
+  warm in the evening and at night (`DioramaGLLamps_Night`), each window its
+  own brightness.
 * Lamp light (phase 4; `gl/gl_lamps.c`, `include/diorama/gl_lamps.h`): in the
   evening and at night (the game's clock) the street lamps among the detail
   objects light the ground, walls, trees, props and characters round them with
@@ -196,4 +219,6 @@ tilesets are unchanged.
   camera of the scene's lamps) with a smooth falloff and no shadows of their
   own, added in the terrain, building, tree, prop and sprite shaders
   (`DIORAMA_GLSL_LAMPS`); only in the field pass (a 3D battle's frame has
-  none). `PKMN_DIORAMA_LOG=1` logs how many are lit.
+  none) and only on maps the game tints for the time of day
+  (`DioramaGLLamps_NightFor`); off with the player's Lighting setting.
+  `PKMN_DIORAMA_LOG=1` logs how many are lit.
