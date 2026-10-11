@@ -265,6 +265,40 @@ static void TestBuild(void)
     count = DioramaProps_Build(&sSnapshot, sResolved, sInstances, 16, &complete);
     CHECK(count == 3);
     sResolved[CellIndex(58, 60)].pixelObjectId = 0;
+    /* A storm bends them further; fog leaves them stiller. */
+    {
+        float calm = sInstances[sizeof(sInstances) > 0 ? 1 : 0].sway;
+
+        sSnapshot.weather = 5; /* WEATHER_RAIN_THUNDERSTORM */
+        count = DioramaProps_Build(&sSnapshot, sResolved, sInstances, 16, &complete);
+        CHECK(sInstances[count - 1].sway > calm * 2.0f);
+        sSnapshot.weather = 0;
+        CHECK(DioramaProps_Wind(0) == 1.0f && DioramaProps_Wind(14) <= 1.0f);
+    }
+    /* Someone walking through the flowers: they rustle, the others do not. */
+    sSnapshot.objectCount = 1;
+    sSnapshot.objects[0].active = 1;
+    sSnapshot.objects[0].currentMapX = 60;
+    sSnapshot.objects[0].currentMapY = 61;
+    sSnapshot.objects[0].previousMapX = 60;
+    sSnapshot.objects[0].previousMapY = 60;
+    count = DioramaProps_Build(&sSnapshot, sResolved, sInstances, 16, &complete);
+    {
+        unsigned i;
+        unsigned rustling = 0;
+
+        for (i = 0; i < count; i++)
+        {
+            if (sInstances[i].rustle > 0.0f)
+                rustling++;
+            CHECK(sInstances[i].rustle == 0.0f || sInstances[i].cellIndex == CellIndex(60, 61));
+        }
+        CHECK(rustling == 2);
+    }
+    sSnapshot.objects[0].flags = DIORAMA_OBJECT_INVISIBLE;
+    count = DioramaProps_Build(&sSnapshot, sResolved, sInstances, 16, &complete);
+    CHECK(sInstances[count - 1].rustle == 0.0f);
+    sSnapshot.objectCount = 0;
     /* Switched off: nothing. */
     DioramaProps_SetEnabled(false);
     CHECK(DioramaProps_Build(&sSnapshot, sResolved, sInstances, 16, &complete) == 0);

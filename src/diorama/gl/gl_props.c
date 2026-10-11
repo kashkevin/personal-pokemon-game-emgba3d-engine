@@ -66,7 +66,7 @@ struct GLInstance
     float x, y, z, yaw;
     float width, height, depth, lie; /* lie: a block, the art its top */
     float u, v, rowTop, rowBottom;   /* the art piece's corner in the texture; the rows shown (0 to 1) */
-    float sway, phase, light, unused;
+    float sway, phase, light, rustle;
 };
 
 /* 2 faces, then for each of the 17 column and 17 row boundaries the sides of
@@ -133,7 +133,7 @@ static const char sVertexShader[] =
     "layout(location = 3) in vec4 instancePlace;\n"   /* x, y, z, yaw */
     "layout(location = 4) in vec4 instanceSize;\n"    /* width, height, depth, lying */
     "layout(location = 5) in vec4 instanceArt;\n"     /* u, v, first row, end row */
-    "layout(location = 6) in vec4 instanceMotion;\n"  /* sway, phase, light */
+    "layout(location = 6) in vec4 instanceMotion;\n"  /* sway, phase, light, rustle */
     "uniform vec2 cameraPosition;\n"
     "uniform float cameraPitch;\n"
     "uniform float focalLength;\n"
@@ -169,6 +169,9 @@ static const char sVertexShader[] =
     "  if (shadowPass == 0 && instanceMotion.x > 0.0) {\n"
     "    float wind = sin(time * 1.9 + instanceMotion.y) + 0.35 * sin(time * 3.7 + instanceMotion.y * 2.0);\n"
     "    turned.x += instanceMotion.x * wind * up * up;\n"
+    /* Walked through: a quick shiver, the blades pushed apart. */
+    "    turned.x += instanceMotion.w * 0.06 * sin(time * 17.0 + instanceMotion.y * 3.0) * up;\n"
+    "    turned.z += instanceMotion.w * 0.04 * sin(time * 13.0 + instanceMotion.y) * up;\n"
     "  }\n"
     "  vec3 worldPosition = instancePlace.xyz + turned;\n"
     /* The terrain's projection (gl_terrain_renderer.c), so the two meet. */
@@ -920,7 +923,7 @@ void DioramaGLProps_Sync(const struct DioramaSceneSnapshot *snapshot,
         instance->lie = prop->prop->form == DIORAMA_PROP_BLOCK || prop->prop->form == DIORAMA_PROP_MOUND
                       ? 1.0f : 0.0f;
         instance->light = (prop->flags & DIORAMA_PROP_LIGHT) ? lampStrength : 0.0f;
-        instance->unused = 0.0f;
+        instance->rustle = prop->rustle;
         if (entry == NO_ENTRY)
         {
             /* No art for it: nothing shown (rows empty). */

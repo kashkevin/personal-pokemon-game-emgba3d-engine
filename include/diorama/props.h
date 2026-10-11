@@ -121,6 +121,7 @@ struct DioramaPropInstance
     float depth;            /* tiles thick (a block: north to south) */
     float sway;             /* how far its top moves in the wind, tiles */
     float phase;            /* where in the wind's cycle it is */
+    float rustle;           /* someone is walking through it (grass, flowers): 1, else 0 */
     uint16_t cellIndex;     /* the snapshot cell it stands for */
     uint16_t artSlot;       /* the atlas slot of the art (metatile_atlas.h) */
     uint8_t artTop;         /* rows shown */
@@ -185,6 +186,9 @@ bool DioramaProps_ArtEntries(const struct DioramaCellSnapshot *cell, const struc
                              uint16_t entries[DIORAMA_METATILE_ENTRY_COUNT]);
 
 const char *DioramaProps_KindName(uint8_t kind);
+/* How hard swaying props move in a weather (1 in calm air, more in rain, a
+ * storm or a sandstorm, less in fog). */
+float DioramaProps_Wind(uint8_t weather);
 /* A prop's last row standing plus one (artBottom, 0 meaning 16). */
 uint8_t DioramaProps_ArtBottom(const struct DioramaProp *prop);
 

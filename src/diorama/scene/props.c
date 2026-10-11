@@ -11,6 +11,7 @@
 #include <string.h>
 #include <SDL2/SDL.h>
 
+#include "constants/weather.h"
 #include "diorama/metatile_atlas.h"
 #include "diorama/props.h"
 #include "diorama/rules.h"
@@ -490,6 +491,30 @@ uint8_t DioramaProps_ArtBottom(const struct DioramaProp *prop)
     return prop->artBottom != 0 ? prop->artBottom : 16;
 }
 
+/* How hard the grass and flowers sway in a weather: a storm bends them, fog
+ * leaves them still. */
+static float Wind(uint8_t weather)
+{
+    switch (weather)
+    {
+    case WEATHER_RAIN: return 1.7f;
+    case WEATHER_RAIN_THUNDERSTORM:
+    case WEATHER_DOWNPOUR: return 2.4f;
+    case WEATHER_SANDSTORM: return 2.6f;
+    case WEATHER_SNOW: return 1.3f;
+    case WEATHER_VOLCANIC_ASH: return 1.2f;
+    case WEATHER_FOG_HORIZONTAL:
+    case WEATHER_FOG_DIAGONAL:
+    case WEATHER_FOG: return 0.6f;
+    default: return 1.0f;
+    }
+}
+
+float DioramaProps_Wind(uint8_t weather)
+{
+    return Wind(weather);
+}
+
 static float Phase(int x, int y)
 {
     uint32_t h = (uint32_t)x * 73856093u ^ (uint32_t)y * 19349663u;
@@ -507,10 +532,29 @@ unsigned DioramaProps_Build(const struct DioramaSceneSnapshot *snapshot,
 {
     unsigned count = 0;
     int i;
+    /* The cells someone stands in or is stepping out of: their grass rustles. */
+    int16_t occupied[DIORAMA_MAX_OBJECTS * 2][2];
+    unsigned occupiedCount = 0;
 
     *complete = true;
     if (snapshot == NULL || resolvedCells == NULL || !DioramaProps_Enabled())
         return 0;
+    for (i = 0; i < snapshot->objectCount && i < DIORAMA_MAX_OBJECTS; i++)
+    {
+        const struct DioramaObjectSnapshot *object = &snapshot->objects[i];
+
+        if (!object->active || (object->flags & DIORAMA_OBJECT_INVISIBLE))
+            continue;
+        occupied[occupiedCount][0] = object->currentMapX;
+        occupied[occupiedCount][1] = object->currentMapY;
+        occupiedCount++;
+        if (object->previousMapX != object->currentMapX || object->previousMapY != object->currentMapY)
+        {
+            occupied[occupiedCount][0] = object->previousMapX;
+            occupied[occupiedCount][1] = object->previousMapY;
+            occupiedCount++;
+        }
+    }
     for (i = 0; i < snapshot->visibleCellCount; i++)
     {
         const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
@@ -549,8 +593,16 @@ unsigned DioramaProps_Build(const struct DioramaSceneSnapshot *snapshot,
         if (prop->form == DIORAMA_PROP_RELIEF)
             /* Its back on the cell's north edge, bulging south. */
             base.z += 0.5f - base.depth * 0.5f;
-        base.sway = (prop->flags & DIORAMA_PROP_SWAY) ? 0.05f : 0.0f;
+        base.sway = (prop->flags & DIORAMA_PROP_SWAY) ? 0.05f * Wind(snapshot->weather) : 0.0f;
         base.phase = Phase(cell->mapX, cell->mapY);
+        if (prop->form == DIORAMA_PROP_CARDS)
+        {
+            unsigned o;
+
+            for (o = 0; o < occupiedCount; o++)
+                if (occupied[o][0] == cell->mapX && occupied[o][1] == cell->mapY)
+                    base.rustle = 1.0f;
+        }
         base.cellIndex = (uint16_t)i;
         base.artSlot = ArtSlot(cell, prop);
         base.artTop = prop->artTop;
