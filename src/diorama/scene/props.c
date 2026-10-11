@@ -41,12 +41,8 @@ static const struct DioramaProp sGeneral[] = {
       .flags = DIORAMA_PROP_SWAY },
     /* The wooden sign: its painted shadow at the foot of the post left out. */
     { PROP(0x01B, SIGN, SLAB, 1, LOWER), .shadowIndex = 5, .shadowFromRow = 13, .depth = 2 },
-    /* Grey rocks standing in ponds: heaps over the water. */
-    { PROP(0x0BD, ROCK, MOUND, 1, LOWER), .height16 = 10 },
-    { PROP(0x0C5, ROCK, MOUND, 1, LOWER), .height16 = 10 },
-    { PROP(0x0CD, ROCK, MOUND, 1, LOWER), .height16 = 10 },
     /* A rock on sand (Dewford, the beaches): its shadow ring left out. */
-    { PROP(0x0E2, ROCK, MOUND, 1, LOWER), .shadowIndex = 5, .shadowFromRow = 12, .height16 = 12 },
+    { PROP(0x0E2, ROCK, RELIEF, 1, LOWER), .shadowIndex = 5, .shadowFromRow = 12, .depth = 12 },
     /* The grey stone fence (Petalburg Woods' gates, routes): posts and a bar,
      * the shadow painted under it left out. */
     { PROP(0x148, FENCE, SLAB, 1, LOWER), .artBottom = 13, .shadowIndex = 7, .shadowFromRow = 12,
@@ -73,11 +69,6 @@ static const struct DioramaProp sGeneral[] = {
      * own stand is 0x2D4), the shadow round the stand left out. */
     { PROP(0x130, SIGN, SLAB, 1, LOWER), .depth = 2, .standOn = 1 },
     { PROP(0x131, SIGN, SLAB, 1, LOWER), .shadowIndex = 6, .shadowFromRow = 11, .depth = 2 },
-    /* Small brown rocks. */
-    { PROP(0x1F8, ROCK, MOUND, 1, LOWER), .artBottom = 11, .shadowIndex = 5, .shadowFromRow = 8,
-      .height16 = 7 },
-    { PROP(0x1F9, ROCK, MOUND, 1, LOWER), .artBottom = 11, .shadowIndex = 5, .shadowFromRow = 8,
-      .height16 = 7 },
 };
 
 /* An iron fence running north-south (a line in the art): the east-west
@@ -155,6 +146,30 @@ static const struct DioramaProp sLilycove[] = {
       .offsetX = 4, .artMetatile = 0x251 },
 };
 
+/* Lavaridge, Mt. Chimney, Jagged Pass and Route 112: ash-grey boulders and
+ * rock piles that block the way (the pebbles one walks over stay flat). */
+static const struct DioramaProp sLavaridge[] = {
+    { PROP(0x2C5, ROCK, MOUND, 1, LOWER), .height16 = 11 },
+    { PROP(0x2C6, ROCK, MOUND, 1, LOWER), .height16 = 11 },
+    { PROP(0x2C7, ROCK, MOUND, 1, LOWER), .height16 = 11 },
+    { PROP(0x2CE, ROCK, MOUND, 1, LOWER), .height16 = 12, .flags = DIORAMA_PROP_JOINED },
+    { PROP(0x2CF, ROCK, MOUND, 1, LOWER), .height16 = 12, .flags = DIORAMA_PROP_JOINED },
+    { PROP(0x30D, ROCK, RELIEF, 1, LOWER), .shadowIndex = 5, .shadowFromRow = 12, .depth = 12 },
+    { PROP(0x315, ROCK, MOUND, 1, LOWER), .height16 = 11 },
+};
+
+/* Mossdeep and the seas round it: tall rocks standing in the water, each two
+ * cells wide (a relief joined across the two). */
+#define SEA_ROCK(id) { PROP(id, ROCK, RELIEF, 1, LOWER), .depth = 14, .flags = DIORAMA_PROP_JOINED }
+static const struct DioramaProp sMossdeep[] = {
+    SEA_ROCK(0x202),
+    SEA_ROCK(0x203),
+    SEA_ROCK(0x338),
+    SEA_ROCK(0x33A),
+    SEA_ROCK(0x33B),
+    SEA_ROCK(0x33D),
+};
+
 /* Caves: heaps of rocks on the floor. */
 static const struct DioramaProp sCave[] = {
     { PROP(0x202, ROCK, MOUND, 1, LOWER), .height16 = 10 },
@@ -173,6 +188,8 @@ static const struct DioramaPropTileset sTilesets[] = {
     TILESET("gTileset_Slateport", sSlateport),
     TILESET("gTileset_Mauville", sMauville),
     TILESET("gTileset_Lilycove", sLilycove),
+    TILESET("gTileset_Lavaridge", sLavaridge),
+    TILESET("gTileset_Mossdeep", sMossdeep),
 };
 
 #define TILESET_COUNT (sizeof(sTilesets) / sizeof(sTilesets[0]))
@@ -493,6 +510,9 @@ unsigned DioramaProps_Build(const struct DioramaSceneSnapshot *snapshot,
         base.height = (prop->height16 != 0 ? prop->height16 : 16) / 16.0f;
         base.depth = prop->form == DIORAMA_PROP_BLOCK || prop->form == DIORAMA_PROP_MOUND
                    ? 1.0f : (prop->depth != 0 ? prop->depth : 1) / 16.0f;
+        if (prop->form == DIORAMA_PROP_RELIEF)
+            /* Its back on the cell's north edge, bulging south. */
+            base.z += 0.5f - base.depth * 0.5f;
         base.sway = (prop->flags & DIORAMA_PROP_SWAY) ? 0.05f : 0.0f;
         base.phase = Phase(cell->mapX, cell->mapY);
         base.cellIndex = (uint16_t)i;

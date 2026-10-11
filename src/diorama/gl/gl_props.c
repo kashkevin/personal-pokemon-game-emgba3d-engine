@@ -699,7 +699,10 @@ static void MoundHeights(unsigned entry, uint8_t heights[16 * 16])
 static uint32_t BuildMound(unsigned entry, struct MeshVertex *out)
 {
     static const int8_t sSides[4][2] = {{0, -1}, {0, 1}, {1, 0}, {-1, 0}}; /* north, south, east, west */
+    /* Lying (a mound) the rows run north-south; standing (a relief) the
+     * row above faces up and the row below down. */
     static const float sShades[4] = {SHADE_FLAT_NORTH, SHADE_FLAT_SOUTH, SHADE_EAST, SHADE_WEST};
+    static const float sStandingShades[4] = {SHADE_TOP, SHADE_BOTTOM, SHADE_EAST, SHADE_WEST};
     uint8_t heights[16 * 16];
     struct MeshVertex *start = out;
     int i;
@@ -724,7 +727,7 @@ static uint32_t BuildMound(unsigned entry, struct MeshVertex *out)
                 {x1, south, 0.5f - h, x1, (y + 1) / 16.0f}, {x0, south, 0.5f - h, x0, (y + 1) / 16.0f},
             };
 
-            out = Quad(out, top, SHADE_FLAT_TOP, SHADE_FLAT_TOP);
+            out = Quad(out, top, SHADE_FRONT, SHADE_FLAT_TOP);
         }
         for (side = 0; side < 4; side++)
         {
@@ -753,7 +756,7 @@ static uint32_t BuildMound(unsigned entry, struct MeshVertex *out)
                     {b[0], b[1], 0.5f - h, s, t}, {a[0], a[1], 0.5f - h, s, t},
                 };
 
-                out = Quad(out, wall, sShades[side], sShades[side]);
+                out = Quad(out, wall, sStandingShades[side], sShades[side]);
             }
         }
     }
@@ -847,11 +850,12 @@ void DioramaGLProps_Sync(const struct DioramaSceneSnapshot *snapshot,
     count = DioramaProps_Build(snapshot, resolvedCells, sBuilt, MAX_INSTANCES, &complete);
     /* Slabs first, then mounds, then cards. */
     for (i = 0; i < count; i++)
-        if (sBuilt[i].prop->form != DIORAMA_PROP_CARDS && sBuilt[i].prop->form != DIORAMA_PROP_MOUND)
+        if (sBuilt[i].prop->form != DIORAMA_PROP_CARDS && sBuilt[i].prop->form != DIORAMA_PROP_MOUND
+         && sBuilt[i].prop->form != DIORAMA_PROP_RELIEF)
             sProps[out++] = sBuilt[i];
     sSlabCount = out;
     for (i = 0; i < count; i++)
-        if (sBuilt[i].prop->form == DIORAMA_PROP_MOUND)
+        if (sBuilt[i].prop->form == DIORAMA_PROP_MOUND || sBuilt[i].prop->form == DIORAMA_PROP_RELIEF)
             sProps[out++] = sBuilt[i];
     sMoundCount = out - sSlabCount;
     for (i = 0; i < count; i++)

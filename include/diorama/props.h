@@ -41,6 +41,11 @@ enum DioramaPropForm
      * further it is from the art's edge, `height16` sixteenths at the most: a
      * rounded heap (rocks, boulders). */
     DIORAMA_PROP_MOUND,
+    /* The same rounding standing up: the art upright, each opaque pixel
+     * bulging towards the camera the further it is from the art's edge,
+     * `depth` pixels at the most, flat at the back (a rock drawn from the
+     * front). */
+    DIORAMA_PROP_RELIEF,
 };
 
 enum DioramaPropGround

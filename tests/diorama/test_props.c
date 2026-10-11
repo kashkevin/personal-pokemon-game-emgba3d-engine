@@ -74,7 +74,7 @@ static void TestCatalogue(void)
 
             CHECK(prop->metatileId < DIORAMA_TILE_COUNT);
             CHECK(prop->kind > DIORAMA_PROP_KIND_NONE && prop->kind < DIORAMA_PROP_KIND_COUNT);
-            CHECK(prop->form <= DIORAMA_PROP_MOUND);
+            CHECK(prop->form <= DIORAMA_PROP_RELIEF);
             CHECK(prop->layer <= 1);
             CHECK(prop->ground <= DIORAMA_PROP_GROUND_NEIGHBOUR);
             CHECK(prop->artTop < DioramaProps_ArtBottom(prop) && DioramaProps_ArtBottom(prop) <= 16);
@@ -249,13 +249,14 @@ static void TestBuild(void)
     CHECK(sInstances[0].prop->metatileId == WOODEN_SIGN && Near(sInstances[0].x, 58.0f)
        && Near(sInstances[0].z, -60.0f) && Near(sInstances[0].yaw, 0.0f)
        && Near(sInstances[0].depth, sInstances[0].prop->depth / 16.0f) && sInstances[0].sway == 0.0f);
-    /* A rock: one mound, the cell's whole width and length, as tall as listed. */
+    /* A rock: one relief, its back on the cell's north edge, bulging south as
+     * far as listed. */
     Put(62, 60, ROCK);
     count = DioramaProps_Build(&sSnapshot, sResolved, sInstances, 16, &complete);
     CHECK(count == 4);
-    CHECK(sInstances[1].prop->metatileId == ROCK && sInstances[1].prop->form == DIORAMA_PROP_MOUND);
-    CHECK(Near(sInstances[1].x, 62.0f) && Near(sInstances[1].z, -60.0f) && Near(sInstances[1].depth, 1.0f)
-       && Near(sInstances[1].width, 1.0f) && Near(sInstances[1].height, sInstances[1].prop->height16 / 16.0f));
+    CHECK(sInstances[1].prop->metatileId == ROCK && sInstances[1].prop->form == DIORAMA_PROP_RELIEF);
+    CHECK(Near(sInstances[1].x, 62.0f) && Near(sInstances[1].depth, sInstances[1].prop->depth / 16.0f)
+       && Near(sInstances[1].z + sInstances[1].depth * 0.5f, -60.0f + 0.5f) && Near(sInstances[1].width, 1.0f));
     /* Too many: the build says so. */
     count = DioramaProps_Build(&sSnapshot, sResolved, sInstances, 3, &complete);
     CHECK(count == 2 && !complete);
