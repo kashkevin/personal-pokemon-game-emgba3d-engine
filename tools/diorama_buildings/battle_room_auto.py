@@ -121,9 +121,10 @@ def _cell_pixels(layout, m, cache):
     return cache[m]
 
 
-def analyse(layout_id, taken=()):
+def analyse(layout_id, taken=(), drop=()):
     """(ground metatiles, pieces, notes) for a layout; `taken`: cells the pieces of rooms
-    modelled before it already stand in (left to them)."""
+    modelled before it already stand in (left to them); `drop`: pieces left out by name (a
+    piece the proof found not to reproduce its drawing, battle_room_specs.AUTO_DROP)."""
     own_shell, piece = _helpers()
     L = vb.LayoutArt(layout_id)
     taken = set(taken)
@@ -242,9 +243,39 @@ def analyse(layout_id, taken=()):
                     start = prev = c
         return out
 
+    def one_foot(comp):
+        """A component as pieces that each stand on one foot: as it is when its cells fill its
+        rectangle (a statue, a machine); else its columns' runs of cells, neighbouring columns
+        with the same run one piece - a piece stands on its lowest row and lays the rest of its
+        drawing back as its top, which over a maze's or a ring's floor would be a slab."""
+        cells = set(comp)
+        xs = [x for x, _ in comp]
+        ys = [y for _, y in comp]
+        if len(cells) == (max(xs) - min(xs) + 1) * (max(ys) - min(ys) + 1):
+            return [comp]
+        runs = []          # (ya, yb, x)
+        for x in sorted(set(xs)):
+            col = sorted(y for cx, y in comp if cx == x)
+            start = prev = col[0]
+            for y in col[1:] + [None]:
+                if y is not None and y == prev + 1:
+                    prev = y
+                    continue
+                runs.append((start, prev + 1, x))
+                if y is not None:
+                    start = prev = y
+        out, cur = [], None
+        for ya, yb, x in sorted(runs):
+            if cur is not None and cur[0] == (ya, yb) and cur[1][-1] == x - 1:
+                cur[1].append(x)
+            else:
+                cur = ((ya, yb), [x])
+                out.append(cur)
+        return [[(x, y) for x in cols for y in range(ya, yb)] for (ya, yb), cols in out]
+
     def thing_pieces():
         out = []
-        for k, comp in enumerate(things):
+        for k, comp in enumerate(part for whole in things for part in one_foot(whole)):
             if not runs_to_floor(comp):
                 notes.append("left flat: %d cells at %s (no front on the floor)" % (len(comp), comp[0]))
                 continue
@@ -287,19 +318,43 @@ def analyse(layout_id, taken=()):
             rows = [y for y in range(back_foot, H) if floor[y][edge_x]]
             if not rows:
                 continue
-            front = (max(rows) + 1) * 16
+            # The wall's cells are drawn with the room's floor (ground[0]): it runs along the
+            # longest stretch with no other floor in its column (a shaded variant, a mat), which
+            # would lose its own drawing under it.
+            stretches, start = [], back_foot
+            for y in range(back_foot, max(rows) + 2):
+                other = y <= max(rows) and floor[y][edge_x] and not level[y][edge_x] \
+                    and meta(edge_x, y) != ground[0]
+                if other or y == max(rows) + 1:
+                    if y > start:
+                        stretches.append((start, y))
+                    start = y + 1
+            if not stretches:
+                continue
+            first, end = max(stretches, key=lambda s: (s[1] - s[0], -s[0]))
+            if (first, end) != (back_foot, max(rows) + 1):
+                notes.append("%s runs rows %d-%d (other floor in its column)" % (name, first, end - 1))
+            front = end * 16
             xpx = 0 if edge_x == 0 else W * 16
-            seg = ((xpx, front), (xpx, back_foot * 16)) if edge_x == 0 else ((xpx, back_foot * 16), (xpx, front))
+            seg = ((xpx, front), (xpx, first * 16)) if edge_x == 0 else ((xpx, first * 16), (xpx, front))
             pieces.append(piece(name, [], wall_h, side=sample, walls=[seg]))
+    for name in drop:
+        if any(pc["name"] == name for pc in pieces):
+            notes.append("left out: %s" % name)
+    pieces = [pc for pc in pieces if pc["name"] not in drop]
     return ground, own_shell(pieces), notes
 
 
-def auto_room_spec(name, layout_id):
+def auto_room_spec(name, layout_id, drop=(), reuse_in=None):
     """A room spec whose pieces are read when the room is built, around the furniture of the
-    rooms built before it (gen_voxel_buildings.interior_specs calls them)."""
-    ground, pieces, notes = analyse(layout_id)
+    rooms built before it (gen_voxel_buildings.interior_specs calls them). `reuse_in`: the
+    rooms its pieces may stand in besides its own (the rooms proved with it); every room that
+    repeats one of their tiles when None."""
+    drop = tuple(drop)
+    ground, pieces, notes = analyse(layout_id, drop=drop)
     if not pieces:
         return None
     return {"name": name, "auto": True, "notes": notes,
             "interior": {"layout": layout_id, "ground": ground,
-                         "pieces": lambda layout, taken: analyse(layout_id, taken)[1]}}
+                         "reuse_in": None if reuse_in is None else frozenset(reuse_in),
+                         "pieces": lambda layout, taken: analyse(layout_id, taken, drop)[1]}}

@@ -107,9 +107,12 @@ def champion_room():
 # Center and the Weather Institute, the link rooms. Only the rooms whose models were proved
 # against their drawing (gen_voxel_buildings.py --verify: every model exact, the room composed
 # with every model standing in it the drawing again) are listed; the generated floors (Trainer
-# Hill, the Battle Pyramid), the secret bases (their decorations change them) and the rooms
-# that are not proved yet (Lavaridge Gym B1F, Space Center 2F, Mt. Pyre 1F-4F, Trick House 1)
-# are not. tools/battle_env/README.md says how the list is checked.
+# Hill, the Battle Pyramid), the secret bases (their decorations change them), the places that
+# are outdoors in all but name (Southern Island, Faraway Island, Birth Island: the field's trees
+# and props are theirs), Team Magma's hideout (a volcano's rock, not a room's walls) and the
+# rooms that are not proved (Lavaridge Gym B1F, Trick House 8: cells no piece claims differ)
+# are not. tools/battle_env/README.md says how
+# the list is checked (tools/battle_env/auto_rooms.py).
 
 AUTO_ROOMS = [
     "LAYOUT_AQUA_HIDEOUT_1F",
@@ -144,7 +147,6 @@ AUTO_ROOMS = [
     "LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE4",
     "LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE6",
     "LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE7",
-    "LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE8",
     "LAYOUT_ROUTE119_WEATHER_INSTITUTE_1F",
     "LAYOUT_ROUTE119_WEATHER_INSTITUTE_2F",
     "LAYOUT_SKY_PILLAR_1F",
@@ -157,6 +159,23 @@ AUTO_ROOMS = [
     "LAYOUT_SS_TIDAL_LOWER_DECK",
     "LAYOUT_SS_TIDAL_ROOMS",
     "LAYOUT_UNION_ROOM",
+    # proved after the side walls learnt to stop short of another floor and with the pieces
+    # AUTO_DROP leaves out; after the rooms above, whose pieces they reuse (Mt. Pyre's lower
+    # floors stand the graves modelled on 5F): the order is the proof's
+    "LAYOUT_MT_PYRE_1F",
+    "LAYOUT_MT_PYRE_2F",
+    "LAYOUT_MT_PYRE_3F",
+    "LAYOUT_MT_PYRE_4F",
+    "LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE1",
+    "LAYOUT_NEW_MAUVILLE_ENTRANCE",
+    "LAYOUT_NEW_MAUVILLE_INSIDE",
+    "LAYOUT_ABANDONED_SHIP_CORRIDORS_1F",
+    "LAYOUT_ABANDONED_SHIP_ROOMS_1F",
+    "LAYOUT_ABANDONED_SHIP_CORRIDORS_B1F",
+    "LAYOUT_ABANDONED_SHIP_ROOMS_B1F",
+    "LAYOUT_ABANDONED_SHIP_ROOMS2_1F",
+    "LAYOUT_ABANDONED_SHIP_HIDDEN_FLOOR_CORRIDORS",
+    "LAYOUT_MOSSDEEP_CITY_SPACE_CENTER_2F",
 ]
 
 
@@ -192,7 +211,24 @@ def battle_room_specs():
                            for layout in AUTO_ROOMS) if spec is not None]
 
 
+# Pieces of an auto room left out because the proof found they do not give back their
+# drawing (a few pixels of another floor under them, an edge whose top the room's black cuts):
+# the rest of the room stands. tools/battle_env/README.md says how they are found.
+AUTO_DROP = {
+    "LAYOUT_ABANDONED_SHIP_CORRIDORS_1F": ["side_w", "thing_0_8", "thing_17_9", "side_e", "thing_0_4"],
+    "LAYOUT_ABANDONED_SHIP_CORRIDORS_B1F": ["thing_12_6", "side_w"],
+    "LAYOUT_ABANDONED_SHIP_HIDDEN_FLOOR_CORRIDORS": ["thing_0_3", "thing_0_5", "thing_12_4", "side_e"],
+    "LAYOUT_MOSSDEEP_CITY_SPACE_CENTER_2F": ["thing_1_4", "side_w"],
+    "LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE1": [
+        "thing_10_10", "thing_11_13", "thing_11_17", "thing_11_9", "thing_12_14", "thing_12_18",
+        "thing_12_6", "thing_14_18", "thing_14_6", "thing_1_6", "thing_1_8", "thing_2_10",
+        "thing_2_13", "thing_2_5", "thing_4_14", "thing_4_6", "thing_4_9", "thing_5_10",
+        "thing_6_14", "thing_6_5", "thing_7_9", "thing_8_11", "thing_8_5", "thing_9_18"],
+}
+
+
 def _auto(name, layout):
     import battle_room_auto
-    return battle_room_auto.auto_room_spec(name, layout)
+    return battle_room_auto.auto_room_spec(name, layout, AUTO_DROP.get(layout, ()),
+                                           reuse_in=AUTO_ROOMS)
 

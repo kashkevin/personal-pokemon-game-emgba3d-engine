@@ -445,24 +445,6 @@
       }
     },
     {
-      "metatile": 106,
-      "reason": "Cave rock (blocked, MB_NORMAL, part of a rock mass): stands as cave wall (battle-environment overhaul).",
-      "action": {
-        "archetype": "cliff",
-        "pool": "terrain",
-        "height": 1
-      }
-    },
-    {
-      "metatile": 108,
-      "reason": "Cave rock (blocked, MB_NORMAL, part of a rock mass): stands as cave wall (battle-environment overhaul).",
-      "action": {
-        "archetype": "cliff",
-        "pool": "terrain",
-        "height": 1
-      }
-    },
-    {
       "metatile": 109,
       "reason": "Cave rock (blocked, MB_NORMAL, part of a rock mass): stands as cave wall (battle-environment overhaul).",
       "action": {
@@ -653,15 +635,6 @@
     },
     {
       "metatile": 180,
-      "reason": "Cave rock (blocked, MB_NORMAL, part of a rock mass): stands as cave wall (battle-environment overhaul).",
-      "action": {
-        "archetype": "cliff",
-        "pool": "terrain",
-        "height": 1
-      }
-    },
-    {
-      "metatile": 181,
       "reason": "Cave rock (blocked, MB_NORMAL, part of a rock mass): stands as cave wall (battle-environment overhaul).",
       "action": {
         "archetype": "cliff",
@@ -1363,42 +1336,6 @@
       }
     },
     {
-      "metatile": 340,
-      "reason": "Cave rock (blocked, MB_NORMAL, part of a rock mass): stands as cave wall (battle-environment overhaul).",
-      "action": {
-        "archetype": "cliff",
-        "pool": "terrain",
-        "height": 1
-      }
-    },
-    {
-      "metatile": 342,
-      "reason": "Cave rock (blocked, MB_NORMAL, part of a rock mass): stands as cave wall (battle-environment overhaul).",
-      "action": {
-        "archetype": "cliff",
-        "pool": "terrain",
-        "height": 1
-      }
-    },
-    {
-      "metatile": 350,
-      "reason": "Cave rock (blocked, MB_NORMAL, part of a rock mass): stands as cave wall (battle-environment overhaul).",
-      "action": {
-        "archetype": "cliff",
-        "pool": "terrain",
-        "height": 1
-      }
-    },
-    {
-      "metatile": 351,
-      "reason": "Cave rock (blocked, MB_NORMAL, part of a rock mass): stands as cave wall (battle-environment overhaul).",
-      "action": {
-        "archetype": "cliff",
-        "pool": "terrain",
-        "height": 1
-      }
-    },
-    {
       "metatile": 352,
       "reason": "Cave rock (blocked, MB_NORMAL, part of a rock mass): stands as cave wall (battle-environment overhaul).",
       "action": {
@@ -1472,15 +1409,6 @@
     },
     {
       "metatile": 375,
-      "reason": "Cave rock (blocked, MB_NORMAL, part of a rock mass): stands as cave wall (battle-environment overhaul).",
-      "action": {
-        "archetype": "cliff",
-        "pool": "terrain",
-        "height": 1
-      }
-    },
-    {
-      "metatile": 376,
       "reason": "Cave rock (blocked, MB_NORMAL, part of a rock mass): stands as cave wall (battle-environment overhaul).",
       "action": {
         "archetype": "cliff",
@@ -1580,24 +1508,6 @@
     },
     {
       "metatile": 402,
-      "reason": "Cave rock (blocked, MB_NORMAL, part of a rock mass): stands as cave wall (battle-environment overhaul).",
-      "action": {
-        "archetype": "cliff",
-        "pool": "terrain",
-        "height": 1
-      }
-    },
-    {
-      "metatile": 408,
-      "reason": "Cave rock (blocked, MB_NORMAL, part of a rock mass): stands as cave wall (battle-environment overhaul).",
-      "action": {
-        "archetype": "cliff",
-        "pool": "terrain",
-        "height": 1
-      }
-    },
-    {
-      "metatile": 409,
       "reason": "Cave rock (blocked, MB_NORMAL, part of a rock mass): stands as cave wall (battle-environment overhaul).",
       "action": {
         "archetype": "cliff",

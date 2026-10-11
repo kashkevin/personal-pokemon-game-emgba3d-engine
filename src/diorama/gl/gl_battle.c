@@ -116,6 +116,10 @@ struct Layout
  * for by an effect, and the passes drawn in the world. */
 static struct Layout sEnvLayout;
 static bool sEnvLayoutValid, sEnvWorld;
+/* The light round the stage (DrawStageLight): off with PKMN_DIORAMA_BATTLE_LIGHT=0, its
+ * strength scaled by PKMN_DIORAMA_BATTLE_LIGHT_SCALE (1 when not set). */
+static float sStageLightScale = 1.0f;
+static float Clamp(float t, float lo, float hi);
 static struct
 {
     float shake, push;
@@ -835,6 +839,9 @@ bool DioramaGLBattle_Init(void)
     setting = SDL_getenv("PKMN_DIORAMA_BATTLE_TILES");
     sTileAnim.mode = setting == NULL ? -1 : setting[0] == '0' ? 0 : 1;
     sFrameTime.budget = EnvFloat("PKMN_DIORAMA_BATTLE_FRAME_BUDGET", TILE_FRAME_BUDGET_MS);
+    setting = SDL_getenv("PKMN_DIORAMA_BATTLE_LIGHT");
+    sStageLightScale = setting != NULL && setting[0] == '0' ? 0.0f
+                     : Clamp(EnvFloat("PKMN_DIORAMA_BATTLE_LIGHT_SCALE", 1.0f), 0.0f, 2.0f);
     if (sFrameTime.budget <= 0.0f)
         sFrameTime.budget = TILE_FRAME_BUDGET_MS;
     sBattle.ready = true;
@@ -2107,6 +2114,87 @@ static void SceneLayout(const struct Layout *layout, int sceneW, int sceneH, str
     scene->scale = layout->scale * ky;
 }
 
+/* ── The battle camera's projection, for battle_environment.h and the test capture ── */
+
+struct EnvProjection
+{
+    float camX, camZ, H, D, s, c, focal, aspect, offY;
+    int outW, outH;
+};
+
+static void EnvProjectionFor(const struct View *view, const struct Layout *layout, struct EnvProjection *p)
+{
+    float k = layout->scale * GBA_H / layout->outH;
+
+    p->camX = view->x;
+    p->camZ = view->z;
+    p->s = sinf(view->pitch);
+    p->c = cosf(view->pitch);
+    p->H = view->ground + view->distance * p->s;
+    p->D = view->distance * p->c;
+    p->focal = view->focal * k;
+    p->aspect = (GBA_W * layout->outH) / (GBA_H * layout->outW);
+    p->offY = 1.0f - 2.0f * (layout->gameY + view->row * layout->scale) / layout->outH;
+    p->outW = layout->outW;
+    p->outH = layout->outH;
+}
+
+/* The scene shaders' projection (gl_terrain_renderer.c) as a column-major matrix. */
+static void EnvMatrix(const struct EnvProjection *p, float m[16])
+{
+    const float n = 0.1f, f = DIORAMA_FAR_DEPTH;
+    float fx = p->focal * 2.0f / GBA_W * p->aspect, fy = p->focal * 2.0f / GBA_H;
+    float A = (f + n) / (f - n), B = -2.0f * f * n / (f - n);
+    /* depth = -s Y + c Z + (H s + (D - camZ) c); vertical = c Y + s Z + (-H c + (D - camZ) s) */
+    float d[4] = {0.0f, -p->s, p->c, p->H * p->s + (p->D - p->camZ) * p->c};
+    float v[4] = {0.0f, p->c, p->s, -p->H * p->c + (p->D - p->camZ) * p->s};
+
+    for (int col = 0; col < 4; col++)
+    {
+        float x = col == 0 ? fx : col == 3 ? -fx * p->camX : 0.0f;
+
+        m[col * 4 + 0] = x;
+        m[col * 4 + 1] = p->offY * d[col] + fy * v[col];
+        m[col * 4 + 2] = A * d[col] + (col == 3 ? B : 0.0f);
+        m[col * 4 + 3] = d[col];
+    }
+}
+
+static bool EnvToWindow(const struct EnvProjection *p, const float w[3], float out[2], float *depth)
+{
+    float a = p->H - w[1], b = w[2] - p->camZ + p->D;
+    float dep = a * p->s + b * p->c, vert = -a * p->c + b * p->s;
+    float ndcX, ndcY;
+
+    if (dep <= 0.01f)
+        return false;
+    ndcX = (w[0] - p->camX) * p->focal * 2.0f / GBA_W * p->aspect / dep;
+    ndcY = p->offY + vert * p->focal * 2.0f / GBA_H / dep;
+    out[0] = (ndcX + 1.0f) * 0.5f * p->outW;
+    out[1] = (1.0f - ndcY) * 0.5f * p->outH;
+    if (depth != NULL)
+        *depth = dep;
+    return true;
+}
+
+static bool EnvToGround(const struct EnvProjection *p, float wx, float wy, float y, float out[3])
+{
+    float ndcX = 2.0f * wx / p->outW - 1.0f, ndcY = 1.0f - 2.0f * wy / p->outH;
+    float k = (ndcY - p->offY) * GBA_H / (2.0f * p->focal);
+    float den = p->s - p->c * k, d, b;
+
+    if (den <= 1e-4f)
+        return false;   /* at or above the horizon */
+    d = (p->H - y) / den;
+    if (d <= 0.0f)
+        return false;
+    b = p->c * d + p->s * k * d;
+    out[0] = p->camX + ndcX * d * GBA_W / (2.0f * p->focal * p->aspect);
+    out[1] = y;
+    out[2] = p->camZ + b - p->D;
+    return true;
+}
+
 #ifdef DIORAMA_BATTLE_ENV_TEST
 /*
  * The battle-environment test capture (TEST BUILDS ONLY, battle_env_test.h):
@@ -2127,6 +2215,16 @@ static struct
     unsigned long top, topVoid, topFloor, topUpright, topSlope, topEdge, topRaised, topNear;
     unsigned long hist[TEST_DEPTH_BINS];
     float ground, minY, maxY;
+    /* each battler's staging: the world's surface under its feet, and how much of the world
+     * stands in front of where it stands (drawn under its sprite, it would look stood in it) */
+    struct
+    {
+        bool measured;
+        float footY;        /* the world's height at its standing point's pixel */
+        float footNearer;   /* how much nearer the camera that surface is than its ground */
+        float bodyBlocked;  /* the share of its picture's column the world stands in front of */
+        float bodyMost;     /* the most that is in front there, tiles */
+    } battlers[DIORAMA_BATTLE_MAX_BATTLERS];
 } sTest;
 
 static void TestPoint(const float *depth, int w, int px, int py, float focal, float aspect,
@@ -2249,6 +2347,57 @@ static void TestMeasureWorld(const struct Layout *scene, float focal, float aspe
                 ++sTest.topEdge;
         }
     }
+    /* the battlers' staging (battle_environment.h's ground points, in this scene's pixels) */
+    {
+        struct EnvProjection p;
+
+        EnvProjectionFor(&sBattle.view, scene, &p);
+        for (unsigned b = 0; b < DIORAMA_BATTLE_MAX_BATTLERS; b++)
+        {
+            const struct DioramaBattleBattlerSprite *bs = &sBattle.frame.battlers[b];
+            float g[3], win[2], dep, wp[3], lin;
+            int fx, fy, blocked = 0, samples = 0;
+            float most = 0.0f;
+
+            if (!bs->present)
+                continue;
+            fx = (int)(scene->gameX + bs->footX * scene->scale);
+            fy = (int)(scene->gameY + bs->footY * scene->scale);
+            if (fx < 0 || fx >= w || fy < 0 || fy >= h
+             || !EnvToGround(&p, (float)fx + 0.5f, (float)fy + 0.5f, sBattle.view.ground, g)
+             || !EnvToWindow(&p, g, win, &dep))
+                continue;
+            sTest.battlers[b].measured = true;
+            if (depth[(h - 1 - fy) * w + fx] < 0.99999f)
+            {
+                TestPoint(depth, w, fx, h - 1 - fy, focal, aspect, sinP, cosP, wp, &lin);
+                sTest.battlers[b].footY = wp[1];
+                sTest.battlers[b].footNearer = dep - lin;
+            }
+            /* up the middle of its picture, from its feet to its top: the world nearer than
+             * its ground by more than half a tile is in front of it */
+            for (float y = scene->gameY + bs->footY * scene->scale; y > scene->gameY + bs->y0 * scene->scale;
+                 y -= 2.0f * scene->scale)
+            {
+                int iy = (int)y;
+
+                if (iy < 0 || iy >= h)
+                    continue;
+                samples++;
+                if (depth[(h - 1 - iy) * w + fx] >= 0.99999f)
+                    continue;
+                TestPoint(depth, w, fx, h - 1 - iy, focal, aspect, sinP, cosP, wp, &lin);
+                if (lin < dep - 0.5f)
+                {
+                    blocked++;
+                    if (dep - lin > most)
+                        most = dep - lin;
+                }
+            }
+            sTest.battlers[b].bodyBlocked = samples ? (float)blocked / samples : 0.0f;
+            sTest.battlers[b].bodyMost = most;
+        }
+    }
     free(depth);
     sTest.measured = true;
 }
@@ -2335,8 +2484,26 @@ static void TestWriteEnvironment(FILE *f)
         first = false;
     }
     DioramaBattleEnv_GetSafeAreas(&safe);
-    fprintf(f, "], \"ui_rects\": %u, \"safe\": [%.1f, %.1f, %.1f, %.1f]}\n",
+    fprintf(f, "], \"ui_rects\": %u, \"safe\": [%.1f, %.1f, %.1f, %.1f]},\n",
             safe.count, safe.safe[0], safe.safe[1], safe.safe[2], safe.safe[3]);
+    /* what the world's last draw cost (this capture's: drawn afresh) and the battle's frames so far */
+    {
+        const struct DioramaTerrainMetrics *t = DioramaGLTerrain_GetMetrics();
+        const struct DioramaBuildingMetrics *bm = DioramaGLBuildings_GetMetrics();
+
+        fprintf(f, " \"perf\": {\"terrain_draws\": %u, \"terrain_triangles\": %u, "
+                   "\"terrain_chunks_visible\": %u, \"terrain_chunks_culled\": %u, "
+                   "\"building_draws\": %u, \"building_vertices\": %u, \"building_instances\": %u, "
+                   "\"kept_ms\": %.2f, \"kept_frames\": %u, \"redraw_ms\": %.2f, \"redraw_max_ms\": %.2f, "
+                   "\"redraw_frames\": %u, \"glide_ms\": %.2f, \"glide_frames\": %u}\n",
+                t != NULL ? t->drawCalls : 0, t != NULL ? t->triangles : 0,
+                t != NULL ? t->visibleChunks : 0, t != NULL ? t->culledChunks : 0,
+                bm != NULL ? bm->drawCalls : 0, bm != NULL ? bm->vertices : 0,
+                bm != NULL ? bm->instances : 0,
+                AverageFrameTime(&sFrameTime.kept), sFrameTime.kept.count,
+                AverageFrameTime(&sFrameTime.redraw), sFrameTime.redraw.max, sFrameTime.redraw.count,
+                AverageFrameTime(&sFrameTime.glide), sFrameTime.glide.count);
+    }
 }
 
 static void TestWriteCapture(const struct Layout *layout)
@@ -2376,6 +2543,17 @@ static void TestWriteCapture(const struct Layout *layout)
                 Share(sTest.topEdge, sTest.top), Share(sTest.topRaised, sTest.top),
                 Share(sTest.topNear, sTest.top), TestPercentile(0.5f), TestPercentile(0.9f));
         fprintf(f, " \"world_y\": [%.3f, %.3f],\n", sTest.minY, sTest.maxY);
+        fprintf(f, " \"staging\": [");
+        for (unsigned b = 0, first = 1; b < DIORAMA_BATTLE_MAX_BATTLERS; b++)
+            if (sTest.battlers[b].measured)
+            {
+                fprintf(f, "%s{\"battler\": %u, \"foot_y\": %.3f, \"foot_nearer\": %.3f, "
+                           "\"body_blocked\": %.3f, \"body_most\": %.3f}", first ? "" : ", ", b,
+                        sTest.battlers[b].footY - sTest.ground, sTest.battlers[b].footNearer,
+                        sTest.battlers[b].bodyBlocked, sTest.battlers[b].bodyMost);
+                first = 0;
+            }
+        fprintf(f, "],\n");
         TestWriteEnvironment(f);
         fprintf(f, "}\n");
         fclose(f);
@@ -2386,85 +2564,6 @@ static void TestWriteCapture(const struct Layout *layout)
 #endif
 
 /* ── The battle's environment for other systems (battle_environment.h) ─── */
-
-struct EnvProjection
-{
-    float camX, camZ, H, D, s, c, focal, aspect, offY;
-    int outW, outH;
-};
-
-static void EnvProjectionFor(const struct View *view, const struct Layout *layout, struct EnvProjection *p)
-{
-    float k = layout->scale * GBA_H / layout->outH;
-
-    p->camX = view->x;
-    p->camZ = view->z;
-    p->s = sinf(view->pitch);
-    p->c = cosf(view->pitch);
-    p->H = view->ground + view->distance * p->s;
-    p->D = view->distance * p->c;
-    p->focal = view->focal * k;
-    p->aspect = (GBA_W * layout->outH) / (GBA_H * layout->outW);
-    p->offY = 1.0f - 2.0f * (layout->gameY + view->row * layout->scale) / layout->outH;
-    p->outW = layout->outW;
-    p->outH = layout->outH;
-}
-
-/* The scene shaders' projection (gl_terrain_renderer.c) as a column-major matrix. */
-static void EnvMatrix(const struct EnvProjection *p, float m[16])
-{
-    const float n = 0.1f, f = DIORAMA_FAR_DEPTH;
-    float fx = p->focal * 2.0f / GBA_W * p->aspect, fy = p->focal * 2.0f / GBA_H;
-    float A = (f + n) / (f - n), B = -2.0f * f * n / (f - n);
-    /* depth = -s Y + c Z + (H s + (D - camZ) c); vertical = c Y + s Z + (-H c + (D - camZ) s) */
-    float d[4] = {0.0f, -p->s, p->c, p->H * p->s + (p->D - p->camZ) * p->c};
-    float v[4] = {0.0f, p->c, p->s, -p->H * p->c + (p->D - p->camZ) * p->s};
-
-    for (int col = 0; col < 4; col++)
-    {
-        float x = col == 0 ? fx : col == 3 ? -fx * p->camX : 0.0f;
-
-        m[col * 4 + 0] = x;
-        m[col * 4 + 1] = p->offY * d[col] + fy * v[col];
-        m[col * 4 + 2] = A * d[col] + (col == 3 ? B : 0.0f);
-        m[col * 4 + 3] = d[col];
-    }
-}
-
-static bool EnvToWindow(const struct EnvProjection *p, const float w[3], float out[2], float *depth)
-{
-    float a = p->H - w[1], b = w[2] - p->camZ + p->D;
-    float dep = a * p->s + b * p->c, vert = -a * p->c + b * p->s;
-    float ndcX, ndcY;
-
-    if (dep <= 0.01f)
-        return false;
-    ndcX = (w[0] - p->camX) * p->focal * 2.0f / GBA_W * p->aspect / dep;
-    ndcY = p->offY + vert * p->focal * 2.0f / GBA_H / dep;
-    out[0] = (ndcX + 1.0f) * 0.5f * p->outW;
-    out[1] = (1.0f - ndcY) * 0.5f * p->outH;
-    if (depth != NULL)
-        *depth = dep;
-    return true;
-}
-
-static bool EnvToGround(const struct EnvProjection *p, float wx, float wy, float y, float out[3])
-{
-    float ndcX = 2.0f * wx / p->outW - 1.0f, ndcY = 1.0f - 2.0f * wy / p->outH;
-    float k = (ndcY - p->offY) * GBA_H / (2.0f * p->focal);
-    float den = p->s - p->c * k, d, b;
-
-    if (den <= 1e-4f)
-        return false;   /* at or above the horizon */
-    d = (p->H - y) / den;
-    if (d <= 0.0f)
-        return false;
-    b = p->c * d + p->s * k * d;
-    out[0] = p->camX + ndcX * d * GBA_W / (2.0f * p->focal * p->aspect);
-    out[1] = y;
-    out[2] = p->camZ + b - p->D;
-    return true;
-}
 
 bool DioramaBattleEnv_IsActive(void)
 {
@@ -2612,7 +2711,7 @@ void DioramaBattleEnv_GetLight(struct DioramaBattleLight *out)
 
 enum DioramaBattleKind DioramaBattleEnv_GetKind(void)
 {
-    uint8_t env = sBattle.frame.battleEnvironment;
+    uint8_t env = sBattle.frame.backdropEnvironment;
 
     if (env == BATTLE_ENVIRONMENT_GYM || env == BATTLE_ENVIRONMENT_LEADER)
         return DIORAMA_BATTLE_KIND_GYM;
@@ -2620,13 +2719,14 @@ enum DioramaBattleKind DioramaBattleEnv_GetKind(void)
         return DIORAMA_BATTLE_KIND_LEAGUE;
     if (env == BATTLE_ENVIRONMENT_FRONTIER)
         return DIORAMA_BATTLE_KIND_FRONTIER;
-    if (sBattle.frame.mapType == MAP_TYPE_UNDERWATER || env == BATTLE_ENVIRONMENT_UNDERWATER)
+    if (sBattle.frame.mapType == MAP_TYPE_UNDERWATER || sBattle.frame.battleEnvironment == BATTLE_ENVIRONMENT_UNDERWATER)
         return DIORAMA_BATTLE_KIND_UNDERWATER;
-    if (sBattle.frame.mapType == MAP_TYPE_UNDERGROUND || env == BATTLE_ENVIRONMENT_CAVE)
+    if (sBattle.frame.mapType == MAP_TYPE_UNDERGROUND || sBattle.frame.battleEnvironment == BATTLE_ENVIRONMENT_CAVE)
         return DIORAMA_BATTLE_KIND_CAVE;
     if (IsIndoor(sBattle.frame.mapType))
         return DIORAMA_BATTLE_KIND_INDOOR;
-    if (env == BATTLE_ENVIRONMENT_WATER || env == BATTLE_ENVIRONMENT_POND || sBattle.frame.surfing)
+    if (sBattle.frame.battleEnvironment == BATTLE_ENVIRONMENT_WATER
+     || sBattle.frame.battleEnvironment == BATTLE_ENVIRONMENT_POND || sBattle.frame.surfing)
         return DIORAMA_BATTLE_KIND_WATER;
     return DIORAMA_BATTLE_KIND_OUTDOOR;
 }
@@ -2742,6 +2842,162 @@ static void DrawWorldPasses(const struct Layout *scene)
     camera.picture[3] = scene->gameY + scene->gameH;
     for (unsigned i = 0; i < sWorldPassCount; i++)
         sWorldPasses[i].pass(&camera, sWorldPasses[i].user);
+}
+
+/*
+ * The light round the stage: the battle's world darkens away from where the battlers stand,
+ * a pool of light on the ground under them - an arena's lights in a Gym, a spotlight in the
+ * Elite Four's rooms and the Champion's (each tinted as its member's type), the gloom of a
+ * cave or the sea floor, the night outdoors. It is worked out on the ground: each corner of a
+ * grid over the window takes the darkness of the ground point it sees, so the pool lies flat
+ * on the floor in the battle camera's perspective and the room's far walls go into shadow.
+ * Only the world is darkened: the battle's own picture (the Pokemon, the healthboxes, the
+ * text) is drawn over it as it is. None on a day outdoors or on the water; the strength is
+ * scaled by PKMN_DIORAMA_BATTLE_LIGHT_SCALE, off with PKMN_DIORAMA_BATTLE_LIGHT=0.
+ */
+struct StageLight
+{
+    float strength;          /* the darkness at its deepest, 0-1 */
+    float radiusX, radiusZ;  /* the pool, tiles east-west and north-south */
+    float edge;              /* where it is fully dark, in pool radii */
+    float dark[3];           /* the darkness's colour */
+};
+
+static bool StageLightFor(struct StageLight *light)
+{
+    enum DioramaBattleKind kind = DioramaBattleEnv_GetKind();
+    struct DioramaBattleLight air;
+    static const struct { uint8_t environment; float dark[3]; } sMembers[] = {
+        {BATTLE_ENVIRONMENT_SIDNEY,   {0.12f, 0.02f, 0.05f}},  /* Dark: crimson black */
+        {BATTLE_ENVIRONMENT_PHOEBE,   {0.09f, 0.03f, 0.16f}},  /* Ghost: violet */
+        {BATTLE_ENVIRONMENT_GLACIA,   {0.02f, 0.07f, 0.16f}},  /* Ice: deep blue */
+        {BATTLE_ENVIRONMENT_DRAKE,    {0.14f, 0.05f, 0.02f}},  /* Dragon: ember */
+        {BATTLE_ENVIRONMENT_CHAMPION, {0.02f, 0.08f, 0.14f}},  /* Water: deep teal */
+    };
+
+    memset(light, 0, sizeof(*light));
+    light->edge = 2.4f;
+    switch (kind)
+    {
+    case DIORAMA_BATTLE_KIND_LEAGUE:
+        light->strength = 0.40f;
+        light->radiusX = 4.0f;
+        light->radiusZ = 2.6f;
+        light->dark[0] = 0.03f; light->dark[1] = 0.03f; light->dark[2] = 0.06f;
+        for (unsigned i = 0; i < sizeof(sMembers) / sizeof(sMembers[0]); i++)
+            if (sMembers[i].environment == sBattle.frame.backdropEnvironment)
+                memcpy(light->dark, sMembers[i].dark, sizeof(light->dark));
+        break;
+    case DIORAMA_BATTLE_KIND_GYM:
+    case DIORAMA_BATTLE_KIND_FRONTIER:
+        light->strength = 0.30f;
+        light->radiusX = 5.0f;
+        light->radiusZ = 3.2f;
+        light->dark[0] = 0.03f; light->dark[1] = 0.03f; light->dark[2] = 0.06f;
+        break;
+    case DIORAMA_BATTLE_KIND_CAVE:
+        light->strength = 0.46f;
+        light->radiusX = 4.5f;
+        light->radiusZ = 3.0f;
+        light->dark[0] = 0.03f; light->dark[1] = 0.02f; light->dark[2] = 0.02f;
+        break;
+    case DIORAMA_BATTLE_KIND_UNDERWATER:
+        light->strength = 0.34f;
+        light->radiusX = 5.0f;
+        light->radiusZ = 3.5f;
+        light->dark[0] = 0.01f; light->dark[1] = 0.07f; light->dark[2] = 0.15f;
+        break;
+    case DIORAMA_BATTLE_KIND_INDOOR:
+        light->strength = 0.16f;
+        light->radiusX = 6.0f;
+        light->radiusZ = 4.0f;
+        light->dark[0] = 0.04f; light->dark[1] = 0.03f; light->dark[2] = 0.03f;
+        break;
+    default:
+        DioramaBattleEnv_GetLight(&air);
+        if (!air.night)
+            return false;
+        light->strength = 0.28f;
+        light->radiusX = 5.5f;
+        light->radiusZ = 3.5f;
+        light->dark[0] = 0.01f; light->dark[1] = 0.02f; light->dark[2] = 0.08f;
+        break;
+    }
+    light->strength *= sStageLightScale;
+    return light->strength > 0.005f;
+}
+
+#define STAGE_LIGHT_COLUMNS 32
+#define STAGE_LIGHT_ROWS 20
+
+static void DrawStageLight(const struct Layout *layout)
+{
+    struct StageLight light;
+    struct EnvProjection p;
+    float cx = sBattle.view.x, cz = sBattle.view.z, sumX = 0.0f, sumZ = 0.0f;
+    float alpha[STAGE_LIGHT_ROWS + 1][STAGE_LIGHT_COLUMNS + 1];
+    unsigned stood = 0;
+
+    if (!StageLightFor(&light))
+        return;
+    EnvProjectionFor(&sBattle.view, layout, &p);
+    /* the pool's middle: between the battlers, else the camera's target */
+    for (unsigned b = 0; b < DIORAMA_BATTLE_MAX_BATTLERS; b++)
+    {
+        float g[3];
+
+        if (BattlerGround(&p, layout, &sBattle.frame.battlers[b], g))
+        {
+            sumX += g[0];
+            sumZ += g[2];
+            stood++;
+        }
+    }
+    if (stood != 0)
+    {
+        cx = sumX / stood;
+        cz = sumZ / stood;
+    }
+    for (int j = 0; j <= STAGE_LIGHT_ROWS; j++)
+        for (int i = 0; i <= STAGE_LIGHT_COLUMNS; i++)
+        {
+            float wx = (float)layout->outW * i / STAGE_LIGHT_COLUMNS;
+            float wy = (float)layout->outH * j / STAGE_LIGHT_ROWS;
+            float g[3], d = light.edge, t;
+
+            if (EnvToGround(&p, wx, wy, sBattle.view.ground, g))
+            {
+                float dx = (g[0] - cx) / light.radiusX, dz = (g[2] - cz) / light.radiusZ;
+
+                d = sqrtf(dx * dx + dz * dz);
+            }
+            /* full light in the pool, darkening to its edge (smoothstep) */
+            t = Clamp((d - 1.0f) / (light.edge - 1.0f), 0.0f, 1.0f);
+            alpha[j][i] = light.strength * t * t * (3.0f - 2.0f * t);
+        }
+    QuadBegin();
+    for (int j = 0; j < STAGE_LIGHT_ROWS; j++)
+        for (int i = 0; i < STAGE_LIGHT_COLUMNS; i++)
+        {
+            float x0 = (float)layout->outW * i / STAGE_LIGHT_COLUMNS;
+            float x1 = (float)layout->outW * (i + 1) / STAGE_LIGHT_COLUMNS;
+            float y0 = (float)layout->outH * j / STAGE_LIGHT_ROWS;
+            float y1 = (float)layout->outH * (j + 1) / STAGE_LIGHT_ROWS;
+            float c[4][4];
+            const float *a[4] = {&alpha[j][i], &alpha[j][i + 1], &alpha[j + 1][i], &alpha[j + 1][i + 1]};
+
+            if (*a[0] < 0.002f && *a[1] < 0.002f && *a[2] < 0.002f && *a[3] < 0.002f)
+                continue;
+            for (int k = 0; k < 4; k++)
+            {
+                c[k][0] = light.dark[0] * *a[k];
+                c[k][1] = light.dark[1] * *a[k];
+                c[k][2] = light.dark[2] * *a[k];
+                c[k][3] = *a[k];
+            }
+            PushQuad(x0, y0, x1, y1, 0.0f, 0.0f, 1.0f, 1.0f, c[0], c[1], c[2], c[3]);
+        }
+    QuadFlush(layout, sWhiteTexture, 0);
 }
 
 /* The world from this frame's view: drawn, or the copy of it if the camera
@@ -2961,6 +3217,7 @@ bool DioramaGLBattle_Present(SDL_Window *window)
     if (world)
     {
         DrawWorld(&layout);
+        DrawStageLight(&layout);
         DrawFade(&layout);
         DrawShadows(&layout);
         DrawIntroAtmosphere(&layout);

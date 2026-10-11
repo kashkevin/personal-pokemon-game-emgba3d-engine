@@ -15,6 +15,8 @@
 #include "battle.h"
 #include "battle_anim.h"
 #include "battle_main.h"
+#include "battle_setup.h"
+#include "data.h"
 #include "bg.h"
 #include "event_object_movement.h"
 #include "field_weather.h"
@@ -22,6 +24,7 @@
 #include "fieldmap.h"
 #include "main.h"
 #include "metatile_behavior.h"
+#include "overworld.h"
 #include "palette.h"
 #include "sprite.h"
 #include "diorama/battle_scene.h"
@@ -196,6 +199,42 @@ static void Battlers(struct DioramaBattleFrame *frame)
     }
 }
 
+/*
+ * The backdrop the battle chose (battle_bg.c GetBattleEnvironmentOverride, without its test
+ * runner case): the Frontier's for a Frontier battle, a Gym Leader's or the Champion's by the
+ * trainer's class, else the map's battle scene (a Gym, an Elite Four room, a hideout), else the
+ * environment under the player. A link battle keeps the map's own: in this game it is fought
+ * where the players stand, not in the Frontier's hall.
+ */
+static uint8_t BackdropEnvironment(void)
+{
+    enum MapBattleScene scene = GetCurrentMapBattleScene();
+
+    if (gBattleTypeFlags & BATTLE_TYPE_FRONTIER)
+        return BATTLE_ENVIRONMENT_FRONTIER;
+    if (gBattleTypeFlags & BATTLE_TYPE_TRAINER)
+    {
+        u32 trainerClass = GetTrainerClassFromId(TRAINER_BATTLE_PARAM.opponentA);
+
+        if (trainerClass == TRAINER_CLASS_LEADER)
+            return BATTLE_ENVIRONMENT_LEADER;
+        if (trainerClass == TRAINER_CLASS_CHAMPION)
+            return BATTLE_ENVIRONMENT_CHAMPION;
+    }
+    switch (scene)
+    {
+    case MAP_BATTLE_SCENE_GYM:      return BATTLE_ENVIRONMENT_GYM;
+    case MAP_BATTLE_SCENE_MAGMA:    return BATTLE_ENVIRONMENT_MAGMA;
+    case MAP_BATTLE_SCENE_AQUA:     return BATTLE_ENVIRONMENT_AQUA;
+    case MAP_BATTLE_SCENE_SIDNEY:   return BATTLE_ENVIRONMENT_SIDNEY;
+    case MAP_BATTLE_SCENE_PHOEBE:   return BATTLE_ENVIRONMENT_PHOEBE;
+    case MAP_BATTLE_SCENE_GLACIA:   return BATTLE_ENVIRONMENT_GLACIA;
+    case MAP_BATTLE_SCENE_DRAKE:    return BATTLE_ENVIRONMENT_DRAKE;
+    case MAP_BATTLE_SCENE_FRONTIER: return BATTLE_ENVIRONMENT_FRONTIER;
+    default:                        return gBattleEnvironment;
+    }
+}
+
 /* BG3's scroll from rest, GBA pixels, either way round its 256-pixel turn:
  * the scenery rests at 0 (or 256, the same picture). */
 static float SceneryShift(u16 scroll)
@@ -302,6 +341,7 @@ void DioramaBattle_Capture(struct DioramaBattleFrame *frame)
     Shadows(frame);
     Battlers(frame);
     frame->battleEnvironment = gBattleEnvironment;
+    frame->backdropEnvironment = BackdropEnvironment();
     frame->mapType = gMapHeader.mapType;
 }
 

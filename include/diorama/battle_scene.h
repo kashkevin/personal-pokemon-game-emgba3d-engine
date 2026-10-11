@@ -124,6 +124,7 @@ struct DioramaBattleFrame
     struct DioramaBattleShadow shadows[DIORAMA_BATTLE_MAX_SHADOWS];
     struct DioramaBattleBattlerSprite battlers[DIORAMA_BATTLE_MAX_BATTLERS];
     uint8_t battleEnvironment; /* gBattleEnvironment (BATTLE_ENVIRONMENT_*) */
+    uint8_t backdropEnvironment; /* the backdrop the battle chose: a Gym's, an Elite Four room's */
     uint8_t mapType;           /* gMapHeader.mapType */
 };
 

@@ -440,6 +440,10 @@ def reuse_pieces(layout):
         src = p["layout"]
         if src == layout.id:
             continue
+        # a room read off its cells (battle_room_auto.py) lends its pieces only to the rooms
+        # proved with it, not to every room that repeats a tile of them
+        if p["spec"].get("reuse_in") is not None and layout.id not in p["spec"]["reuse_in"]:
+            continue
         if src not in rooms:
             rooms[src] = same_room(vb.LayoutArt(src), layout)
         if not rooms[src]:      # the same room: its own pieces stand in it already
@@ -904,7 +908,8 @@ def interior_specs(spec):
         out.append({"name": "%s_%s" % (spec["name"], pc["name"]), "layout": room["layout"],
                     "rect": (x0, y0, w, h), "ground": room["ground"], "art": art,
                     "parts": (lambda ps: (lambda: ps))(parts),
-                    "exact": [(0, 0, w * 16, h * 16)], "interior": spec["name"]})
+                    "exact": [(0, 0, w * 16, h * 16)], "interior": spec["name"],
+                    "reuse_in": room.get("reuse_in")})
         # `alone`: a room's own shell - its walls, a doorway's recess - which
         # another room does not repeat by having the same floor along an edge
         if not pc.get("alone"):
