@@ -26,6 +26,9 @@
 #include "diorama/rules.generated.h"
 #include "diorama/rules.h"
 #include "diorama/metatile_atlas.h"
+#include "diorama/gl_lamps.h"
+#include "diorama/gl_props.h"
+#include "diorama/props.h"
 #include "diorama/presentation_transition.h"
 #include "diorama/scene_snapshot.h"
 #include "diorama/terrain_mesh.h"
@@ -1233,6 +1236,12 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
      * tree_sprites.h). */
     if (!DioramaGLTreeSprites_Init())
         SDL_Log("Diorama 3DS trees unavailable; the voxel trees stay");
+    /* World detail objects (props.h); without their pass they stay flat. */
+    if (!DioramaGLProps_Init())
+    {
+        SDL_Log("Diorama detail objects unavailable; they stay flat");
+        DioramaProps_SetEnabled(false);
+    }
 
     dglGenVertexArrays(1, &sVertexArray);
     dglBindVertexArray(sVertexArray);
@@ -1382,6 +1391,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                            && DioramaGLObjects_Sync(&sSceneSnapshot, sAtlasResolvedCells);
             DioramaGLBuildings_Sync(&sSceneSnapshot, sAtlasResolvedCells);
             DioramaGLTreeSprites_Sync(&sSceneSnapshot, sAtlasResolvedCells);
+            DioramaGLProps_Sync(&sSceneSnapshot, sAtlasResolvedCells);
         }
         current3D = sCurrent3DReady;
     }
@@ -1519,6 +1529,9 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         // This frame's weather light (gl_light.h), the sky and the fog at the
         // scene's edge, the sun's depth map (gl_shadow.h), then the lit scene.
         DioramaGLLight_Update(&sRenderedSceneSnapshot, !sTerrainDebug);
+        /* The street lamps' light round the camera (gl_lamps.h), this pass only. */
+        DioramaGLLamps_SetFocus(cameraX, cameraZ);
+        DioramaGLLamps_SetActive(!sTerrainDebug);
         {
             float sky[3] = {0.035f, 0.055f, 0.07f}; /* indoors and caves: the dark */
             bool outdoors = SkyColour(&sRenderedSceneSnapshot, sky);
@@ -1546,12 +1559,14 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                                   sTerrainDebug ? 0.0f : SunStrength(&sRenderedSceneSnapshot),
                                   ((uint64_t)DioramaGLBuildings_GetGeometryGeneration() << 32)
                                   | (DioramaGLTerrain_GetGeometryGeneration()
-                                   ^ DioramaGLTreeSprites_GetGeometryGeneration() * 2654435761u)))
+                                   ^ DioramaGLTreeSprites_GetGeometryGeneration() * 2654435761u
+                                   ^ DioramaGLProps_GetGeometryGeneration() * 40503u)))
         {
             DioramaGLTerrain_DrawShadow(sAtlasTexture.id, sBaseAtlasTexture.id,
                                         sForegroundAtlasTexture.id);
             DioramaGLBuildings_DrawShadow();
             DioramaGLTreeSprites_DrawShadow();
+            DioramaGLProps_DrawShadow();
             DioramaGLShadow_End(sceneWidth, sceneHeight);
         }
         DioramaGLTerrain_Draw(sAtlasTexture.id, sBaseAtlasTexture.id,
@@ -1560,6 +1575,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                                aspectCorrection, sTerrainDebug);
         DioramaGLTreeSprites_Draw(cameraX, cameraZ, cameraPitch, cameraFocalLength,
                                   aspectCorrection);
+        DioramaGLProps_Draw(cameraX, cameraZ, cameraPitch, cameraFocalLength, aspectCorrection);
         DioramaGLBuildings_Draw(cameraX, cameraZ, cameraPitch, cameraFocalLength,
                                 aspectCorrection);
         /* Players hidden by a house or a tree are seen through it, except
@@ -1579,6 +1595,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         glDisable(GL_SCISSOR_TEST);
         gDioramaCameraRig.active = false;
         DioramaGLLight_SetEdgeFog(false, 0.0f, 0.0f, 0.0f, 0.0f, NULL);
+        DioramaGLLamps_SetActive(false);
         DioramaGLTarget_End(outputWidth, outputHeight);
         glViewport(0, 0, outputWidth, outputHeight);
         dglUseProgram(sProgram);
@@ -1792,6 +1809,7 @@ void DioramaGL_Shutdown(void)
     DioramaGLAir_Shutdown();
     DioramaGLFieldLight_Shutdown();
     DioramaGLTreeSprites_Shutdown();
+    DioramaGLProps_Shutdown();
     DioramaGLLight_Shutdown();
     DioramaGLBuildings_Shutdown();
     DioramaGLObjects_Shutdown();

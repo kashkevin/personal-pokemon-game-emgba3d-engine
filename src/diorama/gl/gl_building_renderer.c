@@ -22,6 +22,7 @@
 #include "diorama/terrain_mesh.h"
 #include "diorama/gl_loader.h"
 #include "diorama/gl_grade.h"
+#include "diorama/gl_lamps.h"
 #include "diorama/gl_light.h"
 #include "diorama/gl_shadow.h"
 #include "diorama/metatile_atlas.h"
@@ -83,6 +84,7 @@ static GLint sShadowMapLocation;
 static GLint sShadowAmbientLocation;
 static GLint sSaturationLocation;
 static struct DioramaLightUniforms sLightUniforms;
+static struct DioramaLampUniforms sLampUniforms;
 static struct Instance sInstances[MAX_INSTANCES];
 static unsigned sInstanceCount;
 static struct Batch *sBatches;
@@ -167,6 +169,7 @@ static const char sFragmentShader[] =
     "  return texture(shadowMap, vec3(p.xy, p.z - 0.0015));\n"
     "}\n"
     DIORAMA_GLSL_LIGHT
+    DIORAMA_GLSL_LAMPS
     "void main() {\n"
     "  ivec2 size = textureSize(page, 0);\n"
     "  ivec2 texel = clamp(ivec2(floor(pagePixel)), ivec2(0), size - ivec2(1));\n"
@@ -176,6 +179,7 @@ static const char sFragmentShader[] =
     "  color = vec4(Grade(texelFetch(palette, ivec2(slot, paletteRow), 0).rgb)\n"
     "             * Light(shade * mix(shadowAmbient, 1.0, SunLit()))\n"
     "             * Dapple(sceneWorldPosition), 1.0);\n"
+    "  color.rgb += Grade(texelFetch(palette, ivec2(slot, paletteRow), 0).rgb) * Lamps(sceneWorldPosition);\n"
     "  color.rgb = Haze(color.rgb, viewDepth, sceneWorldPosition);\n"
     "}\n";
 
@@ -243,6 +247,7 @@ static bool CreateProgram(void)
     sShadowAmbientLocation = dglGetUniformLocation(sProgram, "shadowAmbient");
     sSaturationLocation = dglGetUniformLocation(sProgram, "saturation");
     lightLocated = DioramaGLLight_Locate(sProgram, &sLightUniforms);
+    DioramaGLLamps_Locate(sProgram, &sLampUniforms);
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0 && sFocalLengthLocation >= 0
         && sAspectCorrectionLocation >= 0 && sPageLocation >= 0 && sPaletteLocation >= 0
         && sShadowPassLocation >= 0 && sShadowEnabledLocation >= 0
@@ -620,6 +625,7 @@ void DioramaGLBuildings_Draw(float cameraX, float cameraZ, float cameraPitch,
     dglUniform1f(sShadowAmbientLocation, DioramaGLShadow_Ambient());
     dglUniform1f(sSaturationLocation, DioramaGLGrade_Saturation());
     DioramaGLLight_Apply(&sLightUniforms, cameraPitch);
+    DioramaGLLamps_Apply(&sLampUniforms);
     dglUniformMatrix4fv(sLightMatrixLocation, 1, GL_FALSE, DioramaGLShadow_LightMatrix());
     dglActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, sPaletteTexture);

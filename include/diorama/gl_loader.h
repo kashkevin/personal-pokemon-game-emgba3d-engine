@@ -50,6 +50,8 @@ extern PFNGLRENDERBUFFERSTORAGEPROC dglRenderbufferStorage;
 extern PFNGLRENDERBUFFERSTORAGEMULTISAMPLEPROC dglRenderbufferStorageMultisample;
 extern PFNGLFRAMEBUFFERRENDERBUFFERPROC dglFramebufferRenderbuffer;
 extern PFNGLDELETERENDERBUFFERSPROC dglDeleteRenderbuffers;
+/* Arrays of uniforms (the lamps, gl_lamps.h). */
+extern PFNGLUNIFORM4FVPROC dglUniform4fv;
 
 bool DioramaGL_LoadFunctions(void);
 

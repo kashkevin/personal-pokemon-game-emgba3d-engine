@@ -159,3 +159,41 @@ tilesets are unchanged.
   in from 30 to 47 tiles instead of 18.5-23. One vertex buffer, rebuilt when the
   camera's cell changes. Off with the effects quality off or
   `PKMN_DIORAMA_FAR=0`.
+* World detail objects (phase 2; `include/diorama/props.h`, `scene/props.c`,
+  `gl/gl_props.c`, `include/diorama/gl_props.h`; tools in `tools/diorama_objects`):
+  the small things the map art paints flat stand up in 3D from their own
+  metatile art. A catalogue per tileset (`props.c`; made by looking at the
+  tilesets and at where the maps use them: `metatile_sheet.py`, `map_sheet.py`,
+  `prop_candidates.py`) names a metatile's object and how it stands:
+  * a slab: the art upright, a few pixels thick (signs, Rustboro's street
+    lamps - the head a cell north of the post stands on the post's cell -,
+    stone and iron fences; a fence running north-south turns the east-west
+    fence's art to face east along its line);
+  * cards: the art's halves as two thin upright cards swaying in the wind
+    (tall grass, long grass, flowers);
+  * a mound: the art seen from above, each opaque pixel a column, the taller
+    the further it is from the art's edge (rocks in caves, on sand and in the
+    sea; round bushes);
+  * a block: the art on top of a block (for hedges and planters; not used
+    yet).
+  A prop's art is its metatile's layer with a key colour (the grass between
+  blades) and its painted shadow left out (the sun's shadow map draws a real
+  one); the cell's ground is drawn without the flat picture: its lower layer,
+  or for art that fills its cell (the metal sign) the ground most of its
+  neighbours have. The renderer keeps each prop's art in a small texture of
+  its own (recomposed when the palettes fade or the tiles animate), draws
+  every slab with one instanced mesh whose sides are cut per pixel by the
+  art's transparency (so any art becomes little blocks with no geometry of its
+  own), the cards with another, and each mound with a mesh made from its art.
+  Lit like the terrain (grade, weather light, dapples, shadow map, haze); slabs
+  and mounds cast shadows. Cells the rules already stand up as pixel objects
+  (Littleroot's signs) are left to them. Collision and everything the game
+  does with the cells are unchanged. `PKMN_DIORAMA_PROPS=0` draws them flat.
+* Lamp light (phase 4; `gl/gl_lamps.c`, `include/diorama/gl_lamps.h`): in the
+  evening and at night (the game's clock) the street lamps among the detail
+  objects light the ground, walls, trees, props and characters round them with
+  a warm pool, and their glass glows. A few point lights (the 16 nearest the
+  camera of the scene's lamps) with a smooth falloff and no shadows of their
+  own, added in the terrain, building, tree, prop and sprite shaders
+  (`DIORAMA_GLSL_LAMPS`); only in the field pass (a 3D battle's frame has
+  none). `PKMN_DIORAMA_LOG=1` logs how many are lit.

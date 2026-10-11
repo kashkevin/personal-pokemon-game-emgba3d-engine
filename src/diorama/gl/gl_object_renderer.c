@@ -7,6 +7,7 @@
 
 #include "diorama/gl_loader.h"
 #include "diorama/gl_grade.h"
+#include "diorama/gl_lamps.h"
 #include "diorama/gl_light.h"
 #include "diorama/gl_shadow.h"
 #include "diorama/gl_object_renderer.h"
@@ -93,6 +94,7 @@ static GLint sShadeLocation;
 static GLint sSaturationLocation;
 static GLint sCastStrengthLocation;
 static struct DioramaLightUniforms sLightUniforms;
+static struct DioramaLampUniforms sLampUniforms;
 /* The ground under the player, as last seen (DioramaGLObjects_GetPlayerGround). */
 static float sPlayerGroundY;
 /* Players seen through what hides them (DioramaGLObjects_SetSilhouettes). */
@@ -213,6 +215,7 @@ static const char sObjectFragmentShader[] =
     "  return texture(shadowMap, vec3(p.xy, p.z - 0.0015));\n"
     "}\n"
     DIORAMA_GLSL_LIGHT
+    DIORAMA_GLSL_LAMPS
     /* drawMode 5, the see-through ghost of a player something stands in
      * front of (DrawSilhouettes): its depth is taken this far nearer the eye,
      * so only what stands clearly in front of the walker shows it - a house,
@@ -252,6 +255,7 @@ static const char sObjectFragmentShader[] =
     /* A sprite stands in the light of the ground at its feet (the 3DS port). */
     "    color = vec4(Grade(texel.rgb) * Light(mix(shadowAmbient, 1.0, SunLit()))\n"
     "               * Dapple(lightProbe) * shade, texel.a);\n"
+    "    color.rgb += Grade(texel.rgb) * Lamps(lightProbe) * shade;\n"
     "    color.rgb = Haze(color.rgb, viewDepth, sceneWorldPosition);\n"
     "  }\n"
     "}\n";
@@ -323,6 +327,7 @@ static bool CreateProgram(void)
     sSaturationLocation = dglGetUniformLocation(sProgram, "saturation");
     sCastStrengthLocation = dglGetUniformLocation(sProgram, "castStrength");
     lightLocated = DioramaGLLight_Locate(sProgram, &sLightUniforms);
+    DioramaGLLamps_Locate(sProgram, &sLampUniforms);
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0
         && sFocalLengthLocation >= 0 && sAspectCorrectionLocation >= 0
         && sImageLocation >= 0
@@ -1061,6 +1066,7 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
     dglUniformMatrix4fv(sLightMatrixLocation, 1, GL_FALSE, DioramaGLShadow_LightMatrix());
     dglUniform1f(sSaturationLocation, DioramaGLGrade_Saturation());
     DioramaGLLight_Apply(&sLightUniforms, cameraPitch);
+    DioramaGLLamps_Apply(&sLampUniforms);
     dglUniform1f(sAnimationTimeLocation, (float)fmod(
         (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency(), 120.0));
     dglActiveTexture(GL_TEXTURE0);
