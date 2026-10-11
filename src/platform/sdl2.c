@@ -37,6 +37,9 @@
 #include "platform/display_settings.h"
 #include "platform/pc_menu.h"
 #include "platform/png_write.h"
+#include "platform/memory_info.h"
+#include "platform/frame_limiter.h"
+#include "malloc.h"
 #ifdef ENABLE_DIORAMA
 #include "diorama/camera.h"
 #include "diorama/gl_compositor.h"
@@ -44,6 +47,7 @@
 #include "diorama/gl_pc_overlay.h"
 #include "diorama/gl_quality.h"
 #include "diorama/gl_target.h"
+#include "diorama/gl_terrain_renderer.h"
 #include "diorama/props.h"
 #include "diorama/scene_snapshot.h"
 #include "diorama/tree_sprites.h"
@@ -95,6 +99,24 @@ static struct PcMenuState sPcMenu; // F10: the PC settings menu (3D build)
 static u16 keyboardKeys;           // the GBA buttons held on the keyboard (defined below)
 static bool sShowFrameRate;        // pokeemerald.cfg showFrameRate=1
 static int sBenchmarkSeconds;      // --benchmark [seconds per resolution]
+// --bench-name, --bench-log, --bench-csv, --bench-heights (include/platform/benchmark.h)
+static char sBenchName[64] = "";
+static char sBenchLogPath[1024] = "benchmark.log";
+static char sBenchCsvPath[1024] = "";
+#ifdef ENABLE_DIORAMA
+// Each measured resolution's renderer counts and memory (performance work 2026-10-11).
+struct BenchPhaseExtra
+{
+    bool taken;
+    struct DioramaProfileStats stats;
+    struct DioramaGpuMemory gpu;
+    struct MemoryInfo memory;
+    int renderWidth;
+    int renderHeight;
+};
+static struct BenchPhaseExtra sBenchExtra[BENCHMARK_MAX_PHASES];
+static int sBenchPhase = -1;
+#endif
 static Uint64 sLastPresentCounter;
 static u32 sFrameRateFrames;
 static Uint32 sFrameRateWindowMs;
@@ -120,6 +142,9 @@ static u16 sReaderKeys = 0;
 static void StoreConfigFile(void);
 static void ApplyPlatformSettings(void);
 static void ApplyDisplaySettings(bool recenter);
+#ifdef ENABLE_DIORAMA
+static void ApplyMemoryBudget(void);
+#endif
 static void StoreSaveFile(void);
 static void AfterPresent(void);
 
@@ -291,8 +316,42 @@ static void SetPhotoMode(bool on)
 }
 #endif
 
+// The game's own heap (src/malloc.c: the GBA's size, HEAP_SIZE): how much of it
+// the game uses, sampled at frame boundaries while the game thread is parked,
+// for the memory diagnostics - does the GBA's heap still hold (performance work
+// 2026-10-11)? Read only; a list that does not look right is left alone.
+static u32 sGameHeapNow;
+static u32 sGameHeapPeak;
+
+static void SampleGameHeap(void)
+{
+    const struct MemBlock *head = (const struct MemBlock *)gHeap;
+    const struct MemBlock *block = head;
+    u32 used = 0;
+    unsigned guard = 0;
+
+    if (head->magic != MALLOC_SYSTEM_ID)
+        return;
+    do
+    {
+        if ((const u8 *)block < gHeap || (const u8 *)block >= gHeap + HEAP_SIZE
+         || block->magic != MALLOC_SYSTEM_ID)
+            return;
+        if (block->allocated)
+            used += block->size + sizeof(struct MemBlock);
+        block = block->next;
+    } while (block != head && ++guard < 65536);
+    sGameHeapNow = used;
+    if (used > sGameHeapPeak)
+        sGameHeapPeak = used;
+}
+
 int main(int argc, char **argv)
 {
+    // PKMN_HIGH_ADDRESS_TEST=1 (Windows): everything after this lies above 2 GB
+    // (platform/memory_info.h); first, so SDL and the driver are tested too.
+    uint64_t highAddressReserved = MemoryInfo_HighAddressTest();
+
     FaultCompat_Init(); // GBA results for integer division by zero
     NullTrap_Init(); // development aid; no-op unless PKMN_NULL_TRAP=1 on Linux
     CrashReport_Init(); // writes crash.log if the game crashes
@@ -343,6 +402,17 @@ int main(int argc, char **argv)
     }
 #endif
     ParseArguments(argc, argv);
+    if (highAddressReserved != 0)
+        SDL_Log("High address test: %.0f MB below 2 GB reserved; the rest of this run lies above it",
+                highAddressReserved / 1048576.0);
+    {
+        struct MemoryInfo memory;
+        char line[320];
+
+        MemoryInfo_Get(&memory);
+        MemoryInfo_Format(&memory, line, sizeof(line));
+        SDL_Log("Memory: %s", line);
+    }
     ReadSaveFile(sSavePath);
     ReadConfigFile();
 
@@ -484,6 +554,7 @@ int main(int argc, char **argv)
     {
         Benchmark_Start(SDL_GetTicks(), sBenchmarkSeconds);
         DioramaGL_SetVSync(false); // the GPU's own rate, not the display's (not saved)
+        DioramaGLTarget_SetScale(100); // native: every pixel of each resolution drawn
         SDL_Log("Benchmark: %d s at each resolution once the 3D field is drawn (at most %d s to reach it); "
                 "benchmark.log follows", sBenchmarkSeconds, BENCHMARK_BOOT_MAX_MS / 1000);
     }
@@ -539,9 +610,24 @@ int main(int argc, char **argv)
     PerfLog_Init();
 
     double accumulator = 0.0;
+    struct FrameLimiter frameLimiter;
 
+    FrameLimiter_Reset(&frameLimiter);
     while (isRunning)
     {
+#ifndef __ANDROID__
+        // The frame rate limit (display_settings.h): frames start on an even
+        // beat. Only the drawing waits; the game's frames below follow their
+        // own clock (the accumulator) at any limit. The benchmark is unlimited.
+        {
+            unsigned int fpsCap = Benchmark_Active() ? 0 : sDisplay.fpsCap;
+            uint64_t period = fpsCap > 0 ? SDL_GetPerformanceFrequency() / fpsCap : 0;
+            uint64_t until = FrameLimiter_Next(&frameLimiter, SDL_GetPerformanceCounter(), period);
+
+            if (until != 0)
+                FrameLimiter_WaitUntil(until);
+        }
+#endif
         ProcessEvents();
 #ifdef ENABLE_DIORAMA
         if (sCameraStepsDirty && SDL_GetTicks() - sCameraStepsChangedMs >= 1000)
@@ -567,6 +653,9 @@ int main(int argc, char **argv)
             {
                 if (SDL_AtomicGet(&isFrameAvailable))
                 {
+#ifdef ENABLE_DIORAMA
+                    DioramaProfile_Begin(DIORAMA_PROF_TICK);
+#endif
                     VDraw(sdlTexture);
 #ifndef ENABLE_DIORAMA
                     SDL_RenderClear(sdlRenderer);
@@ -650,8 +739,13 @@ int main(int argc, char **argv)
                                           && !SDL_TICKS_PASSED(SDL_GetTicks(), sSaveActiveUntilMs)));
 #endif
 
+                    if (sPerfGameFrames % 30 == 0)
+                        SampleGameHeap();
                     SDL_SemPost(vBlankSemaphore);
                     sPerfGameFrames++;
+#ifdef ENABLE_DIORAMA
+                    DioramaProfile_End(DIORAMA_PROF_TICK);
+#endif
 
                     accumulator -= dt;
                 }
@@ -731,6 +825,30 @@ static void ParseArguments(int argc, char **argv)
             sBenchmarkSeconds = BENCHMARK_DEFAULT_SECONDS;
             if (i + 1 < argc && SDL_atoi(argv[i + 1]) > 0)
                 sBenchmarkSeconds = SDL_atoi(argv[++i]);
+        }
+        // The benchmark suite (tools/benchmark): a scene's name for the log, where the
+        // log and a CSV row per resolution go, and which resolutions (heights, 16:9).
+        else if (strcmp(argv[i], "--bench-name") == 0 && i + 1 < argc)
+            SDL_strlcpy(sBenchName, argv[++i], sizeof(sBenchName));
+        else if (strcmp(argv[i], "--bench-log") == 0 && i + 1 < argc)
+            SDL_strlcpy(sBenchLogPath, argv[++i], sizeof(sBenchLogPath));
+        else if (strcmp(argv[i], "--bench-csv") == 0 && i + 1 < argc)
+            SDL_strlcpy(sBenchCsvPath, argv[++i], sizeof(sBenchCsvPath));
+        else if (strcmp(argv[i], "--bench-heights") == 0 && i + 1 < argc)
+        {
+            int heights[BENCHMARK_MAX_PHASES];
+            int count = 0;
+            const char *cursor = argv[++i];
+
+            while (*cursor != '\0' && count < BENCHMARK_MAX_PHASES)
+            {
+                heights[count++] = SDL_atoi(cursor);
+                while (*cursor != '\0' && *cursor != ',')
+                    cursor++;
+                if (*cursor == ',')
+                    cursor++;
+            }
+            Benchmark_SetHeights(heights, count);
         }
         else if (strcmp(argv[i], "--selftest-decompress") == 0 && i + 1 < argc)
             exit(NativeSelfTest_Decompress(argv[++i])); // src/platform/native_selftest.c
@@ -966,6 +1084,9 @@ static void ApplyDisplaySettings(bool recenter)
     // in the fullscreen modes; multisampled if the quality asks.
     DioramaGLTarget_Configure(sDisplay.mode == DISPLAY_MODE_WINDOWED ? 0 : sDisplay.height,
                               sDisplay.antialiasing);
+    // ... at the render scale (100: native); the benchmark measures native.
+    DioramaGLTarget_SetScale(Benchmark_Active() ? 100 : sDisplay.renderScale);
+    ApplyMemoryBudget();
 #endif
 }
 
@@ -988,6 +1109,41 @@ static void ApplyDioramaVideoSetting(enum PlatformSetting setting, u8 value)
 // The PC settings menu (F10; include/platform/pc_menu.h): what it changed is
 // applied at once; a resolution or display mode is written to pokeemerald.cfg
 // only once the player keeps it.
+// The memory budget (display_settings.h): the caches it sizes - today the 3D
+// terrain's chunk cache. The address space free once the game, SDL and the
+// graphics driver are loaded is measured once, the first time.
+static unsigned int sMemoryEffectiveMB;
+
+static void ApplyMemoryBudget(void)
+{
+    static unsigned int sAddressFreeMB;
+    static unsigned int sPhysicalMB;
+    struct MemoryInfo memory;
+
+    if (sPhysicalMB == 0 && MemoryInfo_Get(&memory))
+    {
+        sPhysicalMB = (unsigned int)(memory.physicalTotal / 1048576);
+        sAddressFreeMB = (unsigned int)(memory.addressSpaceAvailable / 1048576);
+    }
+    sMemoryEffectiveMB = DisplaySettings_EffectiveMemoryBudget(sDisplay.memoryBudget, sPhysicalMB,
+                                                               sAddressFreeMB);
+    DioramaGLTerrain_SetCacheChunks(DisplaySettings_TerrainCacheChunks(sMemoryEffectiveMB));
+}
+
+// The F10 menu's memory row: the budget in effect and the game's memory now.
+static void UpdateMenuMemory(bool now)
+{
+    static Uint32 sLastMs;
+    struct MemoryInfo memory;
+
+    if (!now && SDL_GetTicks() - sLastMs < 500)
+        return;
+    sLastMs = SDL_GetTicks();
+    sPcMenu.memoryEffectiveMB = sPcMenu.settings.memoryBudget == sDisplay.memoryBudget ? sMemoryEffectiveMB : 0;
+    if (MemoryInfo_Get(&memory))
+        sPcMenu.memoryInUseMB = (unsigned int)(memory.processResident / 1048576);
+}
+
 static void ApplyPcMenuResult(unsigned int bits)
 {
     bool store = false;
@@ -1024,6 +1180,29 @@ static void ApplyPcMenuResult(unsigned int bits)
         sPlatformSettings[PLATFORM_SETTING_VSYNC] = sPcMenu.vsync;
         if (!Benchmark_Active())
             DioramaGL_SetVSync(sPcMenu.vsync);
+        store = true;
+    }
+    if (bits & PC_MENU_CHANGED_FPS_CAP)
+    {
+        sDisplay.fpsCap = sPcMenu.settings.fpsCap;
+        sDisplay.fpsCapKept = true;
+        SDL_Log("Display: frame rate limit %s", sDisplay.fpsCap == 0 ? "off" : "on");
+        store = true;
+    }
+    if (bits & PC_MENU_CHANGED_MEMORY_BUDGET)
+    {
+        sDisplay.memoryBudget = sPcMenu.settings.memoryBudget;
+        sDisplay.memoryBudgetKept = true;
+        ApplyMemoryBudget();
+        UpdateMenuMemory(true);
+        store = true;
+    }
+    if (bits & PC_MENU_CHANGED_RENDER_SCALE)
+    {
+        sDisplay.renderScale = sPcMenu.settings.renderScale;
+        sDisplay.renderScaleKept = true;
+        if (!Benchmark_Active())
+            DioramaGLTarget_SetScale(sDisplay.renderScale);
         store = true;
     }
     if (bits & PC_MENU_CHANGED_PICTURE)
@@ -1115,6 +1294,7 @@ static bool HandlePcMenuKey(const SDL_KeyboardEvent *key)
             PcMenu_Open(&sPcMenu, &sDisplay, sPlatformSettings[PLATFORM_SETTING_VSYNC],
                         sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE], sShowFrameRate, true,
                         sCameraMode == DIORAMA_CAMERA_DIORAMA, DioramaTreeSprites_Enabled());
+            UpdateMenuMemory(true);
             keyboardKeys = 0; // no button stays held for the game while the menu is open
         }
         return true;
@@ -1310,9 +1490,69 @@ static void CpuName(char *buffer, size_t size)
 #endif
 }
 
+static const char *AntialiasingName(unsigned char samples)
+{
+    return samples == 0 ? "off" : samples == 2 ? "2x" : samples == 4 ? "4x" : "8x";
+}
+
+// One row per measured resolution, appended to --bench-csv (the header when the
+// file is new): what the benchmark suite's summary reads.
+static void WriteBenchmarkCsv(const char *renderer, const char *cpu)
+{
+    struct BenchmarkResult results[BENCHMARK_MAX_PHASES];
+    int count = Benchmark_Results(results, BENCHMARK_MAX_PHASES);
+    FILE *csv;
+    bool fresh;
+
+    if (sBenchCsvPath[0] == '\0')
+        return;
+    csv = fopen(sBenchCsvPath, "r");
+    fresh = csv == NULL;
+    if (csv != NULL)
+        fclose(csv);
+    csv = fopen(sBenchCsvPath, "a");
+    if (csv == NULL)
+    {
+        SDL_Log("Benchmark: %s could not be written", sBenchCsvPath);
+        return;
+    }
+    if (fresh)
+        fprintf(csv, "scene,width,height,render_width,render_height,quality,shadows,lighting,effects,details,antialiasing,"
+                     "frames,frames_3d,seconds,avg_fps,low1_fps,low01_fps,median_ms,p90_ms,p95_ms,p99_ms,p999_ms,"
+                     "worst_ms,stutters,cpu_frame_ms,cpu_sync_ms,cpu_tick_ms,cpu_swap_ms,gpu_frame_ms,gpu_terrain_ms,"
+                     "gpu_shadow_ms,gpu_air_ms,draws,triangles_k,instances,upload_kb,ram_mb,ram_peak_mb,"
+                     "address_space_free_mb,vram_game_mb,vram_driver_available_mb,gpu,cpu\n");
+    for (int i = 0; i < count; i++)
+    {
+        const struct BenchmarkResult *r = &results[i];
+        const struct BenchPhaseExtra *x = &sBenchExtra[i];
+        const struct DioramaProfileStats *st = &x->stats;
+
+        fprintf(csv, "%s,%d,%d,%d,%d,%s,%s,%d,%d,%d,%s,%d,%d,%.2f,%.1f,%.1f,%.1f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,",
+                sBenchName[0] != '\0' ? sBenchName : "scene", r->width, r->height, x->renderWidth, x->renderHeight,
+                DisplaySettings_QualityName(sDisplay.quality), DisplaySettings_ShadowName(sDisplay.shadows),
+                sDisplay.lighting, sDisplay.effects, sDisplay.details, AntialiasingName(sDisplay.antialiasing),
+                r->frames, r->frames3d, r->seconds, r->averageFps, r->lowFps, r->low01Fps, r->medianMs,
+                r->p90Ms, r->p95Ms, r->p99Ms, r->p999Ms, r->worstMs, r->stutters);
+        fprintf(csv, "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.0f,%.1f,%.0f,%.1f,%.0f,%.0f,%.0f,%.1f,%d,",
+                st->cpuMs[DIORAMA_PROF_FRAME], st->cpuMs[DIORAMA_PROF_SYNC], st->cpuMs[DIORAMA_PROF_TICK],
+                st->cpuMs[DIORAMA_PROF_SWAP], st->gpuMs[DIORAMA_PROF_FRAME], st->gpuMs[DIORAMA_PROF_TERRAIN],
+                st->gpuMs[DIORAMA_PROF_SHADOW], st->gpuMs[DIORAMA_PROF_AIR], st->drawsPerFrame,
+                st->verticesPerFrame / 3000.0, st->instancesPerFrame,
+                st->textureUploadKBPerFrame + st->bufferUploadKBPerFrame,
+                x->memory.processResident / 1048576.0, x->memory.processPeakResident / 1048576.0,
+                x->memory.addressSpaceAvailable / 1048576.0,
+                (x->gpu.textureBytes + x->gpu.bufferBytes + x->gpu.renderbufferBytes) / 1048576.0,
+                x->gpu.driverAvailableMB);
+        // The GPU and CPU names may hold commas: quoted.
+        fprintf(csv, "\"%s\",\"%s\"\n", renderer, cpu);
+    }
+    fclose(csv);
+}
+
 static void WriteBenchmarkLog(void)
 {
-    FILE *log = fopen("benchmark.log", "w");
+    FILE *log = fopen(sBenchLogPath, "w");
     char renderer[256];
     char cpu[128];
     SDL_DisplayMode desktop;
@@ -1331,6 +1571,8 @@ static void WriteBenchmarkLog(void)
     CpuName(cpu, sizeof(cpu));
     SDL_GL_GetDrawableSize(sdlWindow, &windowWidth, &windowHeight);
     fprintf(log, "Pokemon Emerald native PC - 3D view benchmark (%s)\n\n", when);
+    if (sBenchName[0] != '\0')
+        fprintf(log, "Scene:    %s\n", sBenchName);
     fprintf(log, "GPU:      %s\n", renderer);
     fprintf(log, "CPU:      %s (%d logical processors), %d MB RAM\n", cpu, SDL_GetCPUCount(), SDL_GetSystemRAM());
     if (SDL_GetDesktopDisplayMode(SDL_GetWindowDisplayIndex(sdlWindow), &desktop) == 0)
@@ -1340,13 +1582,83 @@ static void WriteBenchmarkLog(void)
             DisplaySettings_QualityName(sDisplay.quality), DisplaySettings_ShadowName(sDisplay.shadows),
             sDisplay.lighting ? "on" : "off", sDisplay.effects ? "on" : "off", sDisplay.details ? "on" : "off",
             sDisplay.antialiasing == 0 ? "off" : sDisplay.antialiasing == 2 ? "2x" : sDisplay.antialiasing == 4 ? "4x" : "8x");
-    fprintf(log, "Method:   VSync off; at each resolution the 3D scene is drawn at that size (offscreen and\n"
-                 "          scaled into the window when the window is smaller); %d s counted after a %d s\n"
-                 "          warm-up. '3D frames' should equal 'frames' (the save standing outdoors).\n\n",
+    fprintf(log, "Method:   VSync off, no frame rate limit, render scale 100%% (native); at each resolution the\n"
+                 "          3D scene is drawn at that size (offscreen and scaled into the window when the window\n"
+                 "          is smaller); %d s counted after a %d s warm-up. '3D frames' should equal 'frames'\n"
+                 "          (the save standing outdoors). A stutter is a frame over twice the median and at\n"
+                 "          least 8 ms over it. CPU and GPU times are per frame, measured by the game itself\n"
+                 "          (GPU: timer queries, where the driver has them).\n\n",
             sBenchmarkSeconds, BENCHMARK_WARMUP_MS / 1000);
     Benchmark_WriteResults(log);
+    {
+        struct BenchmarkResult results[BENCHMARK_MAX_PHASES];
+        int count = Benchmark_Results(results, BENCHMARK_MAX_PHASES);
+
+        fprintf(log, "\nrenderer      3D drawn at  cpu frame ms  cpu sync ms  gpu frame ms  draws  triangles  uploads KB"
+                     "  RAM MB  VRAM MB (game)\n");
+        for (int i = 0; i < count; i++)
+        {
+            const struct BenchPhaseExtra *x = &sBenchExtra[i];
+            char gpuMs[16];
+
+            if (x->stats.gpuMs[DIORAMA_PROF_FRAME] >= 0.0)
+                SDL_snprintf(gpuMs, sizeof(gpuMs), "%.2f", x->stats.gpuMs[DIORAMA_PROF_FRAME]);
+            else
+                SDL_strlcpy(gpuMs, "n/a", sizeof(gpuMs));
+            fprintf(log, "%4dx%-4d     %4dx%-4d  %12.2f  %11.2f  %12s  %5.0f  %8.0fk  %10.1f  %6.0f  %14.1f\n",
+                    results[i].width, results[i].height, x->renderWidth, x->renderHeight,
+                    x->stats.cpuMs[DIORAMA_PROF_FRAME], x->stats.cpuMs[DIORAMA_PROF_SYNC], gpuMs,
+                    x->stats.drawsPerFrame, x->stats.verticesPerFrame / 3000.0,
+                    x->stats.textureUploadKBPerFrame + x->stats.bufferUploadKBPerFrame,
+                    x->memory.processResident / 1048576.0,
+                    (x->gpu.textureBytes + x->gpu.bufferBytes + x->gpu.renderbufferBytes) / 1048576.0);
+        }
+        if (count > 0)
+        {
+            char line[1536];
+
+            DioramaProfile_FormatStats(&sBenchExtra[count - 1].stats, line, sizeof(line));
+            fprintf(log, "\nLast resolution, each part of a frame: %s\n", line);
+            DioramaProfile_FormatGpuMemory(&sBenchExtra[count - 1].gpu, line, sizeof(line));
+            fprintf(log, "%s\n", line);
+            MemoryInfo_Format(&sBenchExtra[count - 1].memory, line, sizeof(line));
+            fprintf(log, "Memory: %s\n", line);
+            fprintf(log, "Game heap (the GBA's size): peak %.1f KB of %.1f KB\n",
+                    sGameHeapPeak / 1024.0, HEAP_SIZE / 1024.0);
+        }
+    }
     fclose(log);
-    SDL_Log("Benchmark: benchmark.log written");
+    WriteBenchmarkCsv(renderer, cpu);
+    SDL_Log("Benchmark: %s written", sBenchLogPath);
+}
+
+// The benchmark's measured stretches: the renderer's counts and the memory of
+// each, kept for the log (the frame times are the benchmark module's).
+static void TrackBenchmarkPhase(Uint32 now)
+{
+    int phase = Benchmark_MeasuringPhase(now);
+
+    if (phase == sBenchPhase)
+        return;
+    if (sBenchPhase >= 0 && sBenchPhase < BENCHMARK_MAX_PHASES)
+    {
+        struct BenchPhaseExtra *x = &sBenchExtra[sBenchPhase];
+        int samples;
+
+        DioramaProfile_TakeStats(&x->stats);
+        DioramaProfile_GpuMemory(&x->gpu);
+        MemoryInfo_Get(&x->memory);
+        DioramaGLTarget_GetLastSize(&x->renderWidth, &x->renderHeight, &samples);
+        x->taken = true;
+    }
+    if (phase >= 0)
+    {
+        struct DioramaProfileStats discard;
+
+        DioramaProfile_SetTiming(true);
+        DioramaProfile_TakeStats(&discard); // from here on
+    }
+    sBenchPhase = phase;
 }
 #endif
 
@@ -1368,19 +1680,51 @@ static void AfterPresent(void)
         sFrameRateWindowMs = now;
     }
 #ifdef ENABLE_DIORAMA
+    // PKMN_DIORAMA_PROFILE=1: where the frame's time goes, and the memory, every 2 s.
+    if (DioramaProfile_LogRequested() && !Benchmark_Active())
+    {
+        static Uint32 sProfileLogMs;
+
+        if (sProfileLogMs == 0)
+            sProfileLogMs = now;
+        else if (now - sProfileLogMs >= 2000)
+        {
+            struct DioramaProfileStats stats;
+            struct DioramaGpuMemory gpu;
+            struct MemoryInfo memory;
+            char line[1536];
+
+            sProfileLogMs = now;
+            DioramaProfile_TakeStats(&stats);
+            DioramaProfile_FormatStats(&stats, line, sizeof(line));
+            SDL_Log("profile: %s", line);
+            DioramaProfile_GpuMemory(&gpu);
+            DioramaProfile_FormatGpuMemory(&gpu, line, sizeof(line));
+            SDL_Log("profile: %s", line);
+            MemoryInfo_Get(&memory);
+            MemoryInfo_Format(&memory, line, sizeof(line));
+            SDL_Log("profile: %s; game heap %.1f KB in use (peak %.1f KB of %.1f KB)", line,
+                    sGameHeapNow / 1024.0, sGameHeapPeak / 1024.0, HEAP_SIZE / 1024.0);
+        }
+    }
     if (sPcMenu.open)
+    {
         ApplyPcMenuResult(PcMenu_Tick(&sPcMenu, now));
+        UpdateMenuMemory(false);
+    }
     if (Benchmark_Active())
     {
         int height = Benchmark_RenderHeight(now);
 
         if (frameMs > 0.0)
             Benchmark_Frame(now, frameMs, DioramaGL_LastFrameWas3D());
+        TrackBenchmarkPhase(now);
         DioramaGLTarget_Configure(height > 0 ? height
                                   : sDisplay.mode == DISPLAY_MODE_WINDOWED ? 0 : sDisplay.height,
                                   sDisplay.antialiasing);
         if (Benchmark_Finished(now))
         {
+            TrackBenchmarkPhase(now + 0x40000000u); // the last stretch's counts
             WriteBenchmarkLog();
             isRunning = false;
         }

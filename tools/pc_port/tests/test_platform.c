@@ -12,6 +12,9 @@
 #include <stdlib.h>
 
 extern volatile bool8 gPlatformFlashDirty;
+// siirtc_pc.c reads the save's clock offset for PKMN_CLOCK_HOUR.
+static struct SaveBlock2 sTestSaveBlock2;
+struct SaveBlock2 *gSaveBlock2Ptr = &sTestSaveBlock2;
 s32 Div(s32 num, s32 denom);
 struct BitUnPackArgs { u16 compressedSize; u8 compressedBits; u8 decompressedBits; u32 dataOffset:31; u32 offsetZeros:1; };
 void BitUnPack(const void *src, void *dest, const struct BitUnPackArgs *args);
