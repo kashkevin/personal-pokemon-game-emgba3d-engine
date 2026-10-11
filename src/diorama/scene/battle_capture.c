@@ -145,6 +145,57 @@ static void Shadows(struct DioramaBattleFrame *frame)
     }
 }
 
+/*
+ * Each battler's sprite and healthbox as drawn this frame (battle_environment.h): the box
+ * its 64 x 64 picture covers, offsets and animation included, the point it stands on (the
+ * contact shadows' centre), and its healthbox's box.
+ */
+static void Battlers(struct DioramaBattleFrame *frame)
+{
+    unsigned b;
+
+    if (gBattleSpritesDataPtr == NULL)
+        return;
+    for (b = 0; b < gBattlersCount && b < MAX_BATTLERS_COUNT && b < DIORAMA_BATTLE_MAX_BATTLERS; ++b)
+    {
+        struct DioramaBattleBattlerSprite *out = &frame->battlers[b];
+        unsigned id = gBattlerSpriteIds[b], box = gHealthboxSpriteIds[b];
+        const struct Sprite *sprite;
+        float x, y;
+
+        out->battler = b;
+        out->position = GetBattlerPosition(b);
+        out->opponent = GetBattlerSide(b) != B_SIDE_PLAYER;
+        if ((gAbsentBattlerFlags & (1u << b)) == 0 && id < MAX_SPRITES)
+        {
+            sprite = &gSprites[id];
+            if (sprite->inUse && !sprite->invisible)
+            {
+                x = sprite->x + sprite->x2 + sprite->centerToCornerVecX;
+                y = sprite->y + sprite->y2 + sprite->centerToCornerVecY;
+                out->present = true;
+                out->x0 = x;
+                out->y0 = y;
+                out->x1 = x + 64.0f;
+                out->y1 = y + 64.0f;
+                out->footX = sprite->x + sprite->x2;
+                out->footY = GetBattlerSpriteCoord(b, BATTLER_COORD_Y) + 30.0f;
+            }
+        }
+        if (box < MAX_SPRITES && gSprites[box].inUse && !gSprites[box].invisible)
+        {
+            const struct Sprite *h = &gSprites[box];
+
+            out->healthbox = true;
+            out->hx0 = h->x + h->x2 + h->centerToCornerVecX;
+            out->hy0 = h->y + h->y2 + h->centerToCornerVecY;
+            /* the healthbox is a 64 x 32 sprite and a second half beside it */
+            out->hx1 = out->hx0 + 128.0f;
+            out->hy1 = out->hy0 + 32.0f;
+        }
+    }
+}
+
 /* BG3's scroll from rest, GBA pixels, either way round its 256-pixel turn:
  * the scenery rests at 0 (or 256, the same picture). */
 static float SceneryShift(u16 scroll)
@@ -249,6 +300,9 @@ void DioramaBattle_Capture(struct DioramaBattleFrame *frame)
     frame->sceneryShiftY = SceneryShift(REG_BG3VOFS);
     SceneryFade(frame);
     Shadows(frame);
+    Battlers(frame);
+    frame->battleEnvironment = gBattleEnvironment;
+    frame->mapType = gMapHeader.mapType;
 }
 
 #endif

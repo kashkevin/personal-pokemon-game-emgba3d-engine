@@ -76,6 +76,21 @@ struct DioramaBattleShadow
     float x, y, rx, ry;
 };
 
+/* A battler's sprite and its healthbox as the game draws them this frame, in GBA picture
+ * coordinates (battle_environment.h turns them into the world's terms). */
+#define DIORAMA_BATTLE_MAX_BATTLERS 4
+struct DioramaBattleBattlerSprite
+{
+    bool present;            /* in the battle and its sprite drawn */
+    bool opponent;
+    uint8_t battler;         /* B_BATTLER index */
+    uint8_t position;        /* B_POSITION_* */
+    float x0, y0, x1, y1;    /* the sprite's 64 x 64 box, offsets and animation included */
+    float footX, footY;      /* where it stands: the point its contact shadow is centred on */
+    bool healthbox;          /* its healthbox drawn */
+    float hx0, hy0, hx1, hy1;
+};
+
 struct DioramaBattleFrame
 {
     bool inBattle;
@@ -107,6 +122,9 @@ struct DioramaBattleFrame
     float fadeRgb[3];
     uint8_t shadowCount;
     struct DioramaBattleShadow shadows[DIORAMA_BATTLE_MAX_SHADOWS];
+    struct DioramaBattleBattlerSprite battlers[DIORAMA_BATTLE_MAX_BATTLERS];
+    uint8_t battleEnvironment; /* gBattleEnvironment (BATTLE_ENVIRONMENT_*) */
+    uint8_t mapType;           /* gMapHeader.mapType */
 };
 
 /* Reads the game: only at the frame boundary, while the game thread is

@@ -26,12 +26,14 @@
 #include <string.h>
 #include <SDL2/SDL.h>
 
+#include "diorama/battle_environment.h"
 #include "diorama/battle_scene.h"
 #include "diorama/battle_stage.h"
 #include "diorama/buildings.h"
 #include "diorama/gl_battle.h"
 #include "diorama/gl_building_renderer.h"
 #include "diorama/gl_compositor.h"
+#include "diorama/gl_light.h"
 #include "diorama/gl_loader.h"
 #include "diorama/gl_target.h"
 #include "diorama/gl_terrain_renderer.h"
@@ -43,6 +45,7 @@
 #include "diorama/tree_sprites.h"
 #include "gba/defines.h"
 #include "platform/display_settings.h"
+#include "constants/battle.h"
 #include "constants/map_types.h"
 #ifdef DIORAMA_BATTLE_ENV_TEST
 #include "diorama/battle_env_test.h"
@@ -108,6 +111,23 @@ struct Layout
     int outW, outH;
     float gameX, gameY, gameW, gameH, scale;
 };
+
+/* battle_environment.h: the window layout of the frame last drawn, a camera impulse asked
+ * for by an effect, and the passes drawn in the world. */
+static struct Layout sEnvLayout;
+static bool sEnvLayoutValid, sEnvWorld;
+static struct
+{
+    float shake, push;
+    unsigned frames, left;
+} sImpulse;
+static struct
+{
+    DioramaBattleWorldPass pass;
+    void *user;
+    int order;
+} sWorldPasses[DIORAMA_BATTLE_MAX_WORLD_PASSES];
+static unsigned sWorldPassCount;
 
 static struct
 {
@@ -1096,6 +1116,17 @@ static void StepCamera(void)
     v->distance *= 1.0f - GLIDE_PUNCH * punch;
     v->x += quake * sinf((float)sBattle.glide * 2.7f);
     v->z += quake * cosf((float)sBattle.glide * 3.9f);
+    /* An effect's impulse (battle_environment.h): a shake and a push in, dying away. */
+    if (sImpulse.left > 0 && sImpulse.frames > 0)
+    {
+        float f = (float)sImpulse.left / (float)sImpulse.frames;
+
+        f *= f;
+        v->x += sImpulse.shake * f * sinf((float)sImpulse.left * 2.3f);
+        v->z += sImpulse.shake * f * cosf((float)sImpulse.left * 3.1f);
+        v->distance *= 1.0f - sImpulse.push * f;
+        --sImpulse.left;
+    }
 
     /* What the effects over the world need of it. */
     intro->flight = arc;
@@ -2017,7 +2048,8 @@ static bool IsWorldKept(const struct View *view, const struct Layout *layout)
         && sWorldCache.terrainGeneration == DioramaGLTerrain_GetGeometryGeneration()
         && sWorldCache.buildingGeneration == DioramaGLBuildings_GetGeometryGeneration()
         && sWorldCache.treeGeneration == DioramaGLTreeSprites_GetGeometryGeneration()
-        && sWorldCache.artGeneration == sArtGeneration;
+        && sWorldCache.artGeneration == sArtGeneration
+        && sWorldPassCount == 0;   /* passes in the world (battle_environment.h) may move */
 }
 
 /* Right after the world is drawn, before anything over it: copy it out. */
@@ -2243,6 +2275,70 @@ static double Share(unsigned long part, unsigned long whole)
     return whole ? (double)part / (double)whole : 0.0;
 }
 
+/* The environment interface's view of this frame (battle_environment.h), checked: each
+ * battler's ground taken back to the window must land on the point the game stands it on. */
+static void TestWriteEnvironment(FILE *f)
+{
+    struct DioramaBattleCamera cam = {0};
+    struct DioramaBattleLight light;
+    struct DioramaBattleSafeAreas safe;
+    bool first = true;
+
+    fprintf(f, " \"env\": {\"active\": %s, \"kind\": %d",
+            DioramaBattleEnv_IsActive() ? "true" : "false", (int)DioramaBattleEnv_GetKind());
+    if (DioramaBattleEnv_GetCamera(&cam))
+        fprintf(f, ", \"camera\": {\"eye\": [%.3f, %.3f, %.3f], \"target\": [%.3f, %.3f, %.3f], "
+                   "\"pitch_deg\": %.2f, \"picture\": [%.1f, %.1f, %.1f, %.1f]}",
+                cam.eye[0], cam.eye[1], cam.eye[2], cam.target[0], cam.target[1], cam.target[2],
+                cam.pitch / DEG, cam.picture[0], cam.picture[1], cam.picture[2], cam.picture[3]);
+    DioramaBattleEnv_GetLight(&light);
+    fprintf(f, ", \"light\": {\"indoor\": %s, \"cave\": %s, \"night\": %s, \"fog\": %.2f}",
+            light.indoor ? "true" : "false", light.cave ? "true" : "false",
+            light.night ? "true" : "false", light.fog);
+    fprintf(f, ", \"battlers\": [");
+    for (unsigned b = 0; b < DIORAMA_BATTLE_MAX_BATTLERS; b++)
+    {
+        struct DioramaBattleBattler info;
+        const struct DioramaBattleBattlerSprite *s = &sBattle.frame.battlers[b];
+        float back[2] = {0.0f, 0.0f}, viaMatrix[2] = {0.0f, 0.0f}, depth = 0.0f, err = -1.0f, merr = -1.0f;
+
+        if (!DioramaBattleEnv_GetBattler(b, &info))
+            continue;
+        if (DioramaBattleEnv_WorldToWindow(info.ground, back, &depth))
+        {
+            float fx = sEnvLayout.gameX + s->footX * sEnvLayout.scale;
+            float fy = sEnvLayout.gameY + s->footY * sEnvLayout.scale;
+            const float *m = cam.viewProjection;
+            const float *g = info.ground;
+            float cx = m[0] * g[0] + m[4] * g[1] + m[8] * g[2] + m[12];
+            float cy = m[1] * g[0] + m[5] * g[1] + m[9] * g[2] + m[13];
+            float cw = m[3] * g[0] + m[7] * g[1] + m[11] * g[2] + m[15];
+
+            err = hypotf(back[0] - fx, back[1] - fy);
+            if (cw > 0.0f)
+            {
+                viaMatrix[0] = (cx / cw + 1.0f) * 0.5f * cam.windowW;
+                viaMatrix[1] = (1.0f - cy / cw) * 0.5f * cam.windowH;
+                merr = hypotf(viaMatrix[0] - fx, viaMatrix[1] - fy);
+            }
+        }
+        fprintf(f, "%s{\"battler\": %u, \"opponent\": %s, \"window\": [%.1f, %.1f, %.1f, %.1f], "
+                   "\"ground\": [%.3f, %.3f, %.3f], \"depth\": %.3f, \"pixels_per_tile\": %.2f, "
+                   "\"height_tiles\": %.3f, \"front\": [%.3f, %.3f, %.3f], \"foot_error_px\": %.3f, "
+                   "\"matrix_error_px\": %.3f}",
+                first ? "" : ", ", b, info.opponent ? "true" : "false",
+                info.window[0], info.window[1], info.window[2], info.window[3],
+                info.ground[0], info.ground[1], info.ground[2], info.depth, info.pixelsPerTile,
+                info.height, info.attach[DIORAMA_BATTLE_ATTACH_FRONT][0],
+                info.attach[DIORAMA_BATTLE_ATTACH_FRONT][1], info.attach[DIORAMA_BATTLE_ATTACH_FRONT][2],
+                err, merr);
+        first = false;
+    }
+    DioramaBattleEnv_GetSafeAreas(&safe);
+    fprintf(f, "], \"ui_rects\": %u, \"safe\": [%.1f, %.1f, %.1f, %.1f]}\n",
+            safe.count, safe.safe[0], safe.safe[1], safe.safe[2], safe.safe[3]);
+}
+
 static void TestWriteCapture(const struct Layout *layout)
 {
     char path[600];
@@ -2279,13 +2375,374 @@ static void TestWriteCapture(const struct Layout *layout)
                 Share(sTest.topUpright, sTest.top), Share(sTest.topSlope, sTest.top),
                 Share(sTest.topEdge, sTest.top), Share(sTest.topRaised, sTest.top),
                 Share(sTest.topNear, sTest.top), TestPercentile(0.5f), TestPercentile(0.9f));
-        fprintf(f, " \"world_y\": [%.3f, %.3f]\n}\n", sTest.minY, sTest.maxY);
+        fprintf(f, " \"world_y\": [%.3f, %.3f],\n", sTest.minY, sTest.maxY);
+        TestWriteEnvironment(f);
+        fprintf(f, "}\n");
         fclose(f);
     }
     sTest.stem = NULL;
     DioramaBattleEnvTest_CaptureWritten();
 }
 #endif
+
+/* ── The battle's environment for other systems (battle_environment.h) ─── */
+
+struct EnvProjection
+{
+    float camX, camZ, H, D, s, c, focal, aspect, offY;
+    int outW, outH;
+};
+
+static void EnvProjectionFor(const struct View *view, const struct Layout *layout, struct EnvProjection *p)
+{
+    float k = layout->scale * GBA_H / layout->outH;
+
+    p->camX = view->x;
+    p->camZ = view->z;
+    p->s = sinf(view->pitch);
+    p->c = cosf(view->pitch);
+    p->H = view->ground + view->distance * p->s;
+    p->D = view->distance * p->c;
+    p->focal = view->focal * k;
+    p->aspect = (GBA_W * layout->outH) / (GBA_H * layout->outW);
+    p->offY = 1.0f - 2.0f * (layout->gameY + view->row * layout->scale) / layout->outH;
+    p->outW = layout->outW;
+    p->outH = layout->outH;
+}
+
+/* The scene shaders' projection (gl_terrain_renderer.c) as a column-major matrix. */
+static void EnvMatrix(const struct EnvProjection *p, float m[16])
+{
+    const float n = 0.1f, f = DIORAMA_FAR_DEPTH;
+    float fx = p->focal * 2.0f / GBA_W * p->aspect, fy = p->focal * 2.0f / GBA_H;
+    float A = (f + n) / (f - n), B = -2.0f * f * n / (f - n);
+    /* depth = -s Y + c Z + (H s + (D - camZ) c); vertical = c Y + s Z + (-H c + (D - camZ) s) */
+    float d[4] = {0.0f, -p->s, p->c, p->H * p->s + (p->D - p->camZ) * p->c};
+    float v[4] = {0.0f, p->c, p->s, -p->H * p->c + (p->D - p->camZ) * p->s};
+
+    for (int col = 0; col < 4; col++)
+    {
+        float x = col == 0 ? fx : col == 3 ? -fx * p->camX : 0.0f;
+
+        m[col * 4 + 0] = x;
+        m[col * 4 + 1] = p->offY * d[col] + fy * v[col];
+        m[col * 4 + 2] = A * d[col] + (col == 3 ? B : 0.0f);
+        m[col * 4 + 3] = d[col];
+    }
+}
+
+static bool EnvToWindow(const struct EnvProjection *p, const float w[3], float out[2], float *depth)
+{
+    float a = p->H - w[1], b = w[2] - p->camZ + p->D;
+    float dep = a * p->s + b * p->c, vert = -a * p->c + b * p->s;
+    float ndcX, ndcY;
+
+    if (dep <= 0.01f)
+        return false;
+    ndcX = (w[0] - p->camX) * p->focal * 2.0f / GBA_W * p->aspect / dep;
+    ndcY = p->offY + vert * p->focal * 2.0f / GBA_H / dep;
+    out[0] = (ndcX + 1.0f) * 0.5f * p->outW;
+    out[1] = (1.0f - ndcY) * 0.5f * p->outH;
+    if (depth != NULL)
+        *depth = dep;
+    return true;
+}
+
+static bool EnvToGround(const struct EnvProjection *p, float wx, float wy, float y, float out[3])
+{
+    float ndcX = 2.0f * wx / p->outW - 1.0f, ndcY = 1.0f - 2.0f * wy / p->outH;
+    float k = (ndcY - p->offY) * GBA_H / (2.0f * p->focal);
+    float den = p->s - p->c * k, d, b;
+
+    if (den <= 1e-4f)
+        return false;   /* at or above the horizon */
+    d = (p->H - y) / den;
+    if (d <= 0.0f)
+        return false;
+    b = p->c * d + p->s * k * d;
+    out[0] = p->camX + ndcX * d * GBA_W / (2.0f * p->focal * p->aspect);
+    out[1] = y;
+    out[2] = p->camZ + b - p->D;
+    return true;
+}
+
+bool DioramaBattleEnv_IsActive(void)
+{
+    return sBattle.ready && sBattle.active && sEnvLayoutValid && sEnvWorld;
+}
+
+bool DioramaBattleEnv_GetCamera(struct DioramaBattleCamera *out)
+{
+    struct EnvProjection p;
+
+    if (!DioramaBattleEnv_IsActive())
+        return false;
+    EnvProjectionFor(&sBattle.view, &sEnvLayout, &p);
+    out->target[0] = sBattle.view.x;
+    out->target[1] = sBattle.view.ground;
+    out->target[2] = sBattle.view.z;
+    out->eye[0] = p.camX;
+    out->eye[1] = p.H;
+    out->eye[2] = p.camZ - p.D;   /* south of the target: z runs north */
+    out->pitch = sBattle.view.pitch;
+    out->focal = p.focal;
+    out->aspect = p.aspect;
+    out->screenOffsetY = p.offY;
+    EnvMatrix(&p, out->viewProjection);
+    out->windowW = sEnvLayout.outW;
+    out->windowH = sEnvLayout.outH;
+    out->picture[0] = sEnvLayout.gameX;
+    out->picture[1] = sEnvLayout.gameY;
+    out->picture[2] = sEnvLayout.gameX + sEnvLayout.gameW;
+    out->picture[3] = sEnvLayout.gameY + sEnvLayout.gameH;
+    return true;
+}
+
+bool DioramaBattleEnv_WorldToWindow(const float world[3], float window[2], float *depth)
+{
+    struct EnvProjection p;
+
+    if (!DioramaBattleEnv_IsActive())
+        return false;
+    EnvProjectionFor(&sBattle.view, &sEnvLayout, &p);
+    return EnvToWindow(&p, world, window, depth);
+}
+
+bool DioramaBattleEnv_WindowToGround(float wx, float wy, float y, float world[3])
+{
+    struct EnvProjection p;
+
+    if (!DioramaBattleEnv_IsActive())
+        return false;
+    EnvProjectionFor(&sBattle.view, &sEnvLayout, &p);
+    return EnvToGround(&p, wx, wy, y, world);
+}
+
+/* Where a battler's sprite stands: the ground under the point the game stands it on. */
+static bool BattlerGround(const struct EnvProjection *p, const struct Layout *l,
+                          const struct DioramaBattleBattlerSprite *b, float ground[3])
+{
+    return b->present
+        && EnvToGround(p, l->gameX + b->footX * l->scale, l->gameY + b->footY * l->scale,
+                       sBattle.view.ground, ground);
+}
+
+bool DioramaBattleEnv_GetBattler(unsigned battler, struct DioramaBattleBattler *out)
+{
+    const struct DioramaBattleBattlerSprite *b;
+    const struct Layout *l = &sEnvLayout;
+    struct EnvProjection p;
+    float east[3], ew[2], fw[2], foe[3] = {0.0f, 0.0f, 0.0f}, dx, dz, len;
+    unsigned foes = 0;
+
+    memset(out, 0, sizeof(*out));
+    if (!DioramaBattleEnv_IsActive() || battler >= DIORAMA_BATTLE_MAX_BATTLERS)
+        return false;
+    b = &sBattle.frame.battlers[battler];
+    out->battler = b->battler;
+    out->position = b->position;
+    out->opponent = b->opponent;
+    if (!b->present)
+        return false;
+    out->window[0] = l->gameX + b->x0 * l->scale;
+    out->window[1] = l->gameY + b->y0 * l->scale;
+    out->window[2] = l->gameX + b->x1 * l->scale;
+    out->window[3] = l->gameY + b->y1 * l->scale;
+    EnvProjectionFor(&sBattle.view, l, &p);
+    if (!BattlerGround(&p, l, b, out->ground) || !EnvToWindow(&p, out->ground, fw, &out->depth))
+        return false;
+    east[0] = out->ground[0] + 1.0f;
+    east[1] = out->ground[1];
+    east[2] = out->ground[2];
+    if (!EnvToWindow(&p, east, ew, NULL))
+        return false;
+    out->pixelsPerTile = fabsf(ew[0] - fw[0]);
+    out->height = out->pixelsPerTile > 0.0f ? (out->window[3] - out->window[1]) / out->pixelsPerTile : 0.0f;
+    for (int a = 0; a < DIORAMA_BATTLE_ATTACH_COUNT; a++)
+        memcpy(out->attach[a], out->ground, sizeof(out->ground));
+    out->attach[DIORAMA_BATTLE_ATTACH_CENTRE][1] += out->height * 0.5f;
+    out->attach[DIORAMA_BATTLE_ATTACH_TOP][1] += out->height;
+    /* FRONT: the centre, half a tile along the ground towards the other side's battlers (the
+     * opponents stand north of the player's, z runs north) */
+    for (unsigned o = 0; o < DIORAMA_BATTLE_MAX_BATTLERS; o++)
+    {
+        float g[3];
+
+        if (sBattle.frame.battlers[o].opponent != b->opponent
+         && BattlerGround(&p, l, &sBattle.frame.battlers[o], g))
+        {
+            foe[0] += g[0];
+            foe[2] += g[2];
+            foes++;
+        }
+    }
+    dx = foes ? foe[0] / foes - out->ground[0] : 0.0f;
+    dz = foes ? foe[2] / foes - out->ground[2] : (b->opponent ? -1.0f : 1.0f);
+    len = sqrtf(dx * dx + dz * dz);
+    if (len < 1e-3f)
+    {
+        dx = 0.0f;
+        dz = b->opponent ? -1.0f : 1.0f;
+        len = 1.0f;
+    }
+    memcpy(out->attach[DIORAMA_BATTLE_ATTACH_FRONT], out->attach[DIORAMA_BATTLE_ATTACH_CENTRE],
+           sizeof(out->ground));
+    out->attach[DIORAMA_BATTLE_ATTACH_FRONT][0] += 0.5f * dx / len;
+    out->attach[DIORAMA_BATTLE_ATTACH_FRONT][2] += 0.5f * dz / len;
+    out->present = true;
+    return true;
+}
+
+void DioramaBattleEnv_GetLight(struct DioramaBattleLight *out)
+{
+    struct DioramaAirLight air;
+    float mean;
+
+    memset(out, 0, sizeof(*out));
+    DioramaGLLight_GetAir(&air);
+    memcpy(out->fadeScale, air.fadeScale, sizeof(out->fadeScale));
+    memcpy(out->fadeOffset, air.fadeOffset, sizeof(out->fadeOffset));
+    out->fog = air.fog;
+    out->cave = air.cave || sBattle.frame.mapType == MAP_TYPE_UNDERGROUND;
+    out->indoor = IsIndoor(sBattle.frame.mapType);
+    DioramaGLLight_GetHaze(sBattle.view.pitch, out->haze, out->hazeColour);
+    mean = (air.fadeScale[0] + air.fadeScale[1] + air.fadeScale[2]) / 3.0f;
+    out->night = !out->indoor && mean < 0.85f && air.fadeScale[2] > air.fadeScale[0];
+}
+
+enum DioramaBattleKind DioramaBattleEnv_GetKind(void)
+{
+    uint8_t env = sBattle.frame.battleEnvironment;
+
+    if (env == BATTLE_ENVIRONMENT_GYM || env == BATTLE_ENVIRONMENT_LEADER)
+        return DIORAMA_BATTLE_KIND_GYM;
+    if (env >= BATTLE_ENVIRONMENT_SIDNEY && env <= BATTLE_ENVIRONMENT_CHAMPION)
+        return DIORAMA_BATTLE_KIND_LEAGUE;
+    if (env == BATTLE_ENVIRONMENT_FRONTIER)
+        return DIORAMA_BATTLE_KIND_FRONTIER;
+    if (sBattle.frame.mapType == MAP_TYPE_UNDERWATER || env == BATTLE_ENVIRONMENT_UNDERWATER)
+        return DIORAMA_BATTLE_KIND_UNDERWATER;
+    if (sBattle.frame.mapType == MAP_TYPE_UNDERGROUND || env == BATTLE_ENVIRONMENT_CAVE)
+        return DIORAMA_BATTLE_KIND_CAVE;
+    if (IsIndoor(sBattle.frame.mapType))
+        return DIORAMA_BATTLE_KIND_INDOOR;
+    if (env == BATTLE_ENVIRONMENT_WATER || env == BATTLE_ENVIRONMENT_POND || sBattle.frame.surfing)
+        return DIORAMA_BATTLE_KIND_WATER;
+    return DIORAMA_BATTLE_KIND_OUTDOOR;
+}
+
+void DioramaBattleEnv_GetSafeAreas(struct DioramaBattleSafeAreas *out)
+{
+    const struct Layout *l = &sEnvLayout;
+    float inset;
+
+    memset(out, 0, sizeof(*out));
+    if (!DioramaBattleEnv_IsActive())
+        return;
+    for (unsigned b = 0; b < DIORAMA_BATTLE_MAX_BATTLERS; b++)
+    {
+        const struct DioramaBattleBattlerSprite *s = &sBattle.frame.battlers[b];
+
+        if (s->healthbox && out->count < DIORAMA_BATTLE_MAX_UI_RECTS)
+        {
+            float *r = out->ui[out->count++];
+
+            r[0] = l->gameX + s->hx0 * l->scale;
+            r[1] = l->gameY + s->hy0 * l->scale;
+            r[2] = l->gameX + s->hx1 * l->scale;
+            r[3] = l->gameY + s->hy1 * l->scale;
+        }
+        if (s->present && out->battlerCount < 4)
+        {
+            float *r = out->battlers[out->battlerCount++];
+
+            r[0] = l->gameX + s->x0 * l->scale;
+            r[1] = l->gameY + s->y0 * l->scale;
+            r[2] = l->gameX + s->x1 * l->scale;
+            r[3] = l->gameY + s->y1 * l->scale;
+        }
+    }
+    /* the text and menu band: the picture's rows 112-160, carried to the window's sides */
+    if (out->count < DIORAMA_BATTLE_MAX_UI_RECTS)
+    {
+        float *r = out->ui[out->count++];
+
+        r[0] = 0.0f;
+        r[1] = l->gameY + 112.0f * l->scale;
+        r[2] = (float)l->outW;
+        r[3] = l->gameY + 160.0f * l->scale;
+    }
+    inset = 0.04f * (float)l->outH;
+    out->safe[0] = inset;
+    out->safe[1] = inset;
+    out->safe[2] = (float)l->outW - inset;
+    out->safe[3] = l->gameY + 112.0f * l->scale - inset;
+}
+
+void DioramaBattleEnv_CameraImpulse(float shake, float push, unsigned frames)
+{
+    sImpulse.shake = Clamp(shake, 0.0f, 1.0f);
+    sImpulse.push = Clamp(push, -0.3f, 0.3f);
+    sImpulse.frames = frames;
+    sImpulse.left = frames;
+}
+
+bool DioramaBattleEnv_AddWorldPass(DioramaBattleWorldPass pass, void *user, int order)
+{
+    unsigned i;
+
+    if (pass == NULL || sWorldPassCount >= DIORAMA_BATTLE_MAX_WORLD_PASSES)
+        return false;
+    for (i = sWorldPassCount; i > 0 && sWorldPasses[i - 1].order > order; i--)
+        sWorldPasses[i] = sWorldPasses[i - 1];
+    sWorldPasses[i].pass = pass;
+    sWorldPasses[i].user = user;
+    sWorldPasses[i].order = order;
+    sWorldPassCount++;
+    return true;
+}
+
+void DioramaBattleEnv_RemoveWorldPass(DioramaBattleWorldPass pass, void *user)
+{
+    for (unsigned i = 0; i < sWorldPassCount; i++)
+        if (sWorldPasses[i].pass == pass && sWorldPasses[i].user == user)
+        {
+            memmove(&sWorldPasses[i], &sWorldPasses[i + 1], (sWorldPassCount - i - 1) * sizeof(sWorldPasses[0]));
+            sWorldPassCount--;
+            return;
+        }
+}
+
+/* The registered passes, in the scene being drawn (its size and target). */
+static void DrawWorldPasses(const struct Layout *scene)
+{
+    struct DioramaBattleCamera camera;
+    struct EnvProjection p;
+
+    if (sWorldPassCount == 0)
+        return;
+    EnvProjectionFor(&sBattle.view, scene, &p);
+    memset(&camera, 0, sizeof(camera));
+    camera.target[0] = sBattle.view.x;
+    camera.target[1] = sBattle.view.ground;
+    camera.target[2] = sBattle.view.z;
+    camera.eye[0] = p.camX;
+    camera.eye[1] = p.H;
+    camera.eye[2] = p.camZ - p.D;
+    camera.pitch = sBattle.view.pitch;
+    camera.focal = p.focal;
+    camera.aspect = p.aspect;
+    camera.screenOffsetY = p.offY;
+    EnvMatrix(&p, camera.viewProjection);
+    camera.windowW = scene->outW;
+    camera.windowH = scene->outH;
+    camera.picture[0] = scene->gameX;
+    camera.picture[1] = scene->gameY;
+    camera.picture[2] = scene->gameX + scene->gameW;
+    camera.picture[3] = scene->gameY + scene->gameH;
+    for (unsigned i = 0; i < sWorldPassCount; i++)
+        sWorldPasses[i].pass(&camera, sWorldPasses[i].user);
+}
 
 /* The world from this frame's view: drawn, or the copy of it if the camera
  * has not moved since. It is drawn as the field's scene is, at the chosen
@@ -2312,6 +2769,7 @@ static void DrawWorld(const struct Layout *layout)
     DioramaGL_DrawBattleWorld(sBattle.view.x, sBattle.view.z, sBattle.view.pitch, focal, aspect,
                               scene.outW, scene.outH);
     DrawCurtain(&scene, focal, aspect);
+    DrawWorldPasses(&scene);
 #ifdef DIORAMA_BATTLE_ENV_TEST
     if (sTest.stem != NULL)
         TestMeasureWorld(&scene, focal, aspect);
@@ -2484,8 +2942,11 @@ bool DioramaGLBattle_Present(SDL_Window *window)
     BattleLayout(window, &layout);
     if (layout.outW <= 0 || layout.outH <= 0)
         return false;
+    sEnvLayout = layout;
+    sEnvLayoutValid = true;
     MeasureFrame();
     world = sBattle.sceneLayers != 0;
+    sEnvWorld = world;
 #ifdef DIORAMA_BATTLE_ENV_TEST
     sTest.stem = DioramaBattleEnvTest_CaptureStem();
     sTest.measured = false;
