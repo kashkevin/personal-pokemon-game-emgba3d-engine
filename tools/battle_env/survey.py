@@ -151,6 +151,12 @@ class Run:
         time.sleep(after)
 
     def pixel(self, fx, fy):
+        # where the window is now: a resolution that does not fit the screen moves and resizes
+        # it after it opens (perf.py's sizes), and the first geometry no longer holds
+        g = self.x('getwindowgeometry', '--shell', self.wid)
+        if 'WIDTH=' in g:
+            g = dict(l.split('=') for l in g.split())
+            self.geo = int(g['X']), int(g['Y']), int(g['WIDTH']), int(g['HEIGHT'])
         X, Y, W, H = self.geo
         out = subprocess.run(['import', '-window', 'root', '-crop', '1x1+%d+%d' % (X + int(fx * W), Y + int(fy * H)),
                               '+repage', '-depth', '8', 'txt:-'], env=self.env, capture_output=True, text=True).stdout
@@ -224,12 +230,22 @@ def run_map(args, rec, label, spec, p, results):
     for kv in args.env:
         k, v = kv.split('=', 1)
         env[k] = v
+    if args.autopilot:
+        env['PKMN_TEST_AUTOPILOT'] = '1'
+        env['PKMN_TEST_TIMEOUT'] = str(max(30, int(args.timeout) - 10))
     t0 = time.time()
     run = Run(args.exe, rundir, args.display, env)
     status = 'timeout'
     try:
         if not run.find_window():
             status = 'no window'
+        elif args.autopilot:
+            while time.time() - t0 < args.timeout and run.proc.poll() is None:
+                time.sleep(1.0)
+            if os.path.exists(os.path.join(rundir, 'cap.json')):
+                status = 'captured'
+            elif run.proc.poll() is not None:
+                status = 'exited without capture'
         else:
             time.sleep(1.5)
             menu = False
@@ -312,6 +328,9 @@ def main():
     ap.add_argument('--cfg-extra', default='')
     ap.add_argument('--env', action='append', default=[])
     ap.add_argument('--skip-done', action='store_true')
+    ap.add_argument('--autopilot', action='store_true',
+                    help='the game presses its own keys (PKMN_TEST_AUTOPILOT, held for frames, not '
+                         'milliseconds): for sizes where it runs at a frame or two a second')
     ap.add_argument('--at', default='', help='X,Y: stand there instead of the map\'s test position '
                     '(with --maps; where two trainers see the test position)')
     args = ap.parse_args()

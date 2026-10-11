@@ -47,7 +47,16 @@ static struct
     SDL_atomic_t battleSeen;
     unsigned int startMs;
     int timeoutSeconds;       /* PKMN_TEST_TIMEOUT: give up (and exit) after this long */
+    /* the autopilot's press in progress: held for some frames, then released for as many */
+    unsigned short pressButton;
+    int pressLeft, gapLeft;
+    bool startPressed, fieldPhase;
+    unsigned int nextMs;
 } s;
+
+/* Frames a press is held, and released after it: a game running at a frame or two a second
+ * (4K on software OpenGL) misses no press, as it would one timed in milliseconds. */
+#define AUTOPILOT_HOLD 3
 
 static int EnvInt(const char *name, int fallback)
 {
@@ -199,16 +208,52 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
     }
     if (!s.autopilot || SDL_AtomicGet(&s.menuSeen) != 0)
         return keys;
+    if (s.pressLeft > 0)
+    {
+        s.pressLeft--;
+        return keys | s.pressButton;
+    }
+    if (s.gapLeft > 0)
+    {
+        s.gapLeft--;
+        return keys;
+    }
+    /* Start at 8 s (the title), then A every 3 s from 12 s (the title, Continue, a
+     * scene's text) until the field is up; then B every 1.5 s (the battle's opening text)
+     * until the action menu. */
+    s.pressButton = 0;
     if (SDL_AtomicGet(&s.fieldSeen) == 0)
     {
-        if (t >= 8000 && t < 8150)
-            keys |= START_BUTTON;
-        if (t >= 12000 && (t - 12000) % 3000 < 150)
-            keys |= A_BUTTON;
+        if (!s.startPressed && t >= 8000)
+        {
+            s.startPressed = true;
+            s.pressButton = START_BUTTON;
+            s.nextMs = 12000;
+        }
+        else if (s.startPressed && t >= s.nextMs)
+        {
+            s.pressButton = A_BUTTON;
+            s.nextMs = t + 3000;
+        }
     }
-    else if (t % 1500 < 150)
-        keys |= B_BUTTON;
-    return keys;
+    else
+    {
+        if (!s.fieldPhase)
+        {
+            s.fieldPhase = true;
+            s.nextMs = t + 1500;
+        }
+        if (t >= s.nextMs)
+        {
+            s.pressButton = B_BUTTON;
+            s.nextMs = t + 1500;
+        }
+    }
+    if (s.pressButton == 0)
+        return keys;
+    s.pressLeft = AUTOPILOT_HOLD - 1;
+    s.gapLeft = AUTOPILOT_HOLD;
+    return keys | s.pressButton;
 }
 
 const char *DioramaBattleEnvTest_CaptureStem(void)

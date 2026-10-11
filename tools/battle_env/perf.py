@@ -51,7 +51,7 @@ def main():
             cmd = [sys.executable, os.path.join(HERE, 'survey.py'), '--exe', args.exe,
                    '--save', args.save, '--out', out, '--display', ':' + display,
                    '--maps', args.maps, '--delay', '100', '--capture-delay', str(args.hold),
-                   '--timeout', str(args.timeout), '--skip-done',
+                   '--timeout', str(args.timeout), '--skip-done', '--autopilot',
                    '--cfg-extra', 'resolution=%s\\n' % res]
             if mode == 'on':
                 cmd += ['--env', 'PKMN_DIORAMA_BATTLE_KEEP=0']
