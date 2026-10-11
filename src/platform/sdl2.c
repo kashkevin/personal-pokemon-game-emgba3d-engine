@@ -38,6 +38,7 @@
 #include "platform/pc_menu.h"
 #include "platform/png_write.h"
 #ifdef ENABLE_DIORAMA
+#include "diorama/battle_env_test.h"
 #include "diorama/battle_scene.h"
 #include "diorama/camera.h"
 #include "diorama/gl_battle.h"
@@ -627,6 +628,9 @@ int main(int argc, char **argv)
                         }
                         if (Benchmark_Active())
                             keys = Benchmark_FilterKeys(keys, SDL_GetTicks());
+#if defined(ENABLE_DIORAMA) && defined(DIORAMA_BATTLE_ENV_TEST)
+                        keys = DioramaBattleEnvTest_FilterKeys(keys, SDL_GetTicks());
+#endif
                         // In multiplayer the reset chord reaches the game only when
                         // its native reset handler has been offered it.
                         keys = MpBridge_FilterKeys(keys);

@@ -40,6 +40,11 @@ static struct
     SDL_atomic_t menuSeen;
     SDL_atomic_t menuFrames;
     SDL_atomic_t captured;
+    /* PKMN_TEST_AUTOPILOT=1: the keys a person would press (FilterKeys) */
+    bool autopilot;
+    SDL_atomic_t fieldSeen;
+    SDL_atomic_t battleSeen;
+    unsigned int startMs;
 } s;
 
 static int EnvInt(const char *name, int fallback)
@@ -62,6 +67,7 @@ static void Init(void)
     s.delay = EnvInt("PKMN_TEST_BATTLE_DELAY", 150);
     s.captureDelay = EnvInt("PKMN_TEST_CAPTURE_DELAY", 40);
     s.exitAfter = EnvInt("PKMN_TEST_EXIT", 0) != 0;
+    s.autopilot = EnvInt("PKMN_TEST_AUTOPILOT", 0) != 0;
     if (s.spec[0] != '\0' || s.stem[0] != '\0')
         SDL_Log("Battle env test: battle '%s' after %d field frames, capture '%s'%s",
                 s.spec, s.delay, s.stem, s.exitAfter ? ", then exit" : "");
@@ -128,6 +134,9 @@ void DioramaBattleEnvTest_FieldTick(void)
 {
     if (!s.init)
         Init();
+    SDL_AtomicSet(&s.fieldSeen, 1);
+    if (gMain.inBattle)
+        SDL_AtomicSet(&s.battleSeen, 1);
     if (s.spec[0] == '\0' || s.started)
         return;
     if (ArePlayerFieldControlsLocked() || gPaletteFade.active || ScriptContext_IsEnabled())
@@ -147,6 +156,36 @@ void DioramaBattleEnvTest_OnActionMenu(void)
         Init();
     if (s.stem[0] != '\0')
         SDL_AtomicSet(&s.menuSeen, 1);
+}
+
+/*
+ * The keys a person would press, for a run with nobody at the keyboard (the owner's
+ * graphics-card measurements): Start past the intro, then A every three seconds (the title
+ * screen, Continue) until the field is up; then B every second and a half - a scripted scene
+ * on entering the map, the battle's opening lines - until the action menu is up; nothing
+ * after that. As --benchmark's (platform/benchmark.c) and the survey's (survey.py) presses.
+ */
+unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int nowMs)
+{
+    unsigned int t;
+
+    if (!s.init)
+        Init();
+    if (!s.autopilot || SDL_AtomicGet(&s.menuSeen) != 0)
+        return keys;
+    if (s.startMs == 0)
+        s.startMs = nowMs == 0 ? 1 : nowMs;
+    t = nowMs - s.startMs;
+    if (SDL_AtomicGet(&s.fieldSeen) == 0)
+    {
+        if (t >= 8000 && t < 8150)
+            keys |= START_BUTTON;
+        if (t >= 12000 && (t - 12000) % 3000 < 150)
+            keys |= A_BUTTON;
+    }
+    else if (t % 1500 < 150)
+        keys |= B_BUTTON;
+    return keys;
 }
 
 const char *DioramaBattleEnvTest_CaptureStem(void)

@@ -18,6 +18,8 @@
  *                            the action menu has been up for
  *   PKMN_TEST_CAPTURE_DELAY  battle frames (default 40)
  *   PKMN_TEST_EXIT=1         end the process after the capture
+ *   PKMN_TEST_AUTOPILOT=1    press the keys a person would: Start and A to Continue,
+ *                            B through a map's scene and the battle's opening lines
  *
  * Nothing here changes a battle: it starts one the way the debug menu's
  * "Try battle" does and reads the picture.
@@ -34,6 +36,8 @@ void DioramaBattleEnvTest_OnActionMenu(void);
 /* gl_battle.c (render thread): the stem to capture this frame, or NULL */
 const char *DioramaBattleEnvTest_CaptureStem(void);
 void DioramaBattleEnvTest_CaptureWritten(void);
+/* platform/sdl2.c, the keys read each frame (PKMN_TEST_AUTOPILOT) */
+unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int nowMs);
 
 #endif
 
