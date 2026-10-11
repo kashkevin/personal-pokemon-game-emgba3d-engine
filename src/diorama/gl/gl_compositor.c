@@ -1799,6 +1799,12 @@ bool DioramaGL_LastFrameWas3D(void)
     return sLastFrame3D;
 }
 
+unsigned DioramaGL_GetFrameTexture(void)
+{
+    EnsureFrameTexture();
+    return sFrameTexture.id;
+}
+
 void DioramaGL_DescribeRenderer(char *buffer, size_t size)
 {
     const char *vendor = (const char *)glGetString(GL_VENDOR);

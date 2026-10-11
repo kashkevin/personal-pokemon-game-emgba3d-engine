@@ -49,10 +49,13 @@ static uint64_t sCachedGeneration;
  * walks, mostly far off): the map is drawn again at most every
  * SHADOW_REFRESH_MS (performance work 2026-10-11), not for each chunk the
  * terrain builds - the casters are the static world, and a far chunk's
- * shadow a few frames late shows nowhere. A move of the map's place redraws
- * at once, as before.
+ * shadow a step late shows nowhere. About one walking step (16 game frames):
+ * the terrain spreads a step's far chunks over several frames, and redrawing
+ * the map for each of them cost more than the single redraw of a step before
+ * (measured walking through Rustboro and Slateport). A move of the map's place
+ * redraws at once, as before.
  */
-#define SHADOW_REFRESH_MS 120
+#define SHADOW_REFRESH_MS 250
 static Uint32 sCachedMs;
 
 static void Normalize(float v[3])
