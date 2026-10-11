@@ -299,6 +299,12 @@ AUTO_DROP = {
     "LAYOUT_ABANDONED_SHIP_CORRIDORS_B1F": ["thing_12_6", "side_w"],
     "LAYOUT_ABANDONED_SHIP_HIDDEN_FLOOR_CORRIDORS": ["thing_0_3", "thing_0_5", "thing_12_4", "side_e"],
     "LAYOUT_MOSSDEEP_CITY_SPACE_CENTER_2F": ["thing_1_4", "side_w"],
+    # The Battle Palace's arena is impassable (the player watches from its edge), so its carpet
+    # read as things and its two middle pillars as walls down to the arena's foot: from the
+    # battle camera the carpet stood up as a block (the survey's picture). The arena stays the
+    # floor it is; the pillars at its back go with it.
+    "LAYOUT_BATTLE_FRONTIER_BATTLE_PALACE_BATTLE_ROOM": ["thing_4_4", "thing_6_3", "thing_9_3",
+                                                         "wall_5_0", "wall_8_0"],
     "LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE1": [
         "thing_10_10", "thing_11_13", "thing_11_17", "thing_11_9", "thing_12_14", "thing_12_18",
         "thing_12_6", "thing_14_18", "thing_14_6", "thing_1_6", "thing_1_8", "thing_2_10",
