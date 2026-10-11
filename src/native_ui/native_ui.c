@@ -30,6 +30,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_Pause,
     &gUiScreen_Party,
     &gUiScreen_Summary,
+    &gUiScreen_Bag,
 };
 
 static bool sInitialized;
@@ -347,7 +348,23 @@ bool NativeUi_HandleEvent(const SDL_Event *event)
                     hit != NULL ? hit->id : 0, hit != NULL ? hit->index : 0);
         if (hit == NULL || sActive == NULL || sActive->click == NULL)
             return false;
-        return sActive->click(hit, event->button.button);
+        if (sActive->click(hit, event->button.button))
+            return true;
+        /* a click on a prompt presses its button (the design's prompts are buttons) */
+        if (hit->id == UI_HIT_HINT && event->button.button == 1 && !NativeUi_PressesPending())
+        {
+            static const uint16_t sHintKeys[UI_ACT_COUNT] = {
+                [UI_ACT_CONFIRM] = A_BUTTON, [UI_ACT_CANCEL] = B_BUTTON, [UI_ACT_START] = START_BUTTON,
+                [UI_ACT_SELECT] = SELECT_BUTTON, [UI_ACT_L] = L_BUTTON, [UI_ACT_R] = R_BUTTON,
+            };
+
+            if (hit->index >= 0 && hit->index < UI_ACT_COUNT && sHintKeys[hit->index] != 0)
+            {
+                NativeUi_QueuePress(sHintKeys[hit->index]);
+                return true;
+            }
+        }
+        return false;
     }
     case SDL_MOUSEWHEEL:
         if (sActive != NULL && sActive->wheel != NULL)

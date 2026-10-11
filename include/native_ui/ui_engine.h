@@ -246,6 +246,54 @@ struct NativeSummary
 };
 bool32 Summary_NativeUiState(struct NativeSummary *out);
 
+/* ---------------------------------------------------------------- bag (item_menu.c) */
+
+enum NativeBagPhase
+{
+    NATIVE_BAG_NONE,
+    NATIVE_BAG_LOADING,
+    NATIVE_BAG_BROWSE,          /* the list: up/down items, left/right pockets */
+    NATIVE_BAG_SWITCHING,       /* a pocket is sliding in */
+    NATIVE_BAG_SWAPPING,        /* moving an item (swapFrom) to the cursor */
+    NATIVE_BAG_MENU,            /* the item's (or the sort) menu: menuLabels, a 2-column grid when menuGrid */
+    NATIVE_BAG_QUANTITY,        /* how many (toss, sell, deposit) */
+    NATIVE_BAG_YES_NO,
+    NATIVE_BAG_MESSAGE,
+    NATIVE_BAG_TUTORIAL,        /* Wally's catching tutorial drives the bag */
+    NATIVE_BAG_CLOSING,
+};
+#define NATIVE_BAG_MAX_ITEMS 100
+struct NativeBag
+{
+    u8 phase;
+    u8 location;                /* ITEMMENULOCATION_* (field, battle, shop, berry tree...) */
+    u8 pocket;                  /* POCKET_* */
+    bool8 pocketSwitchDisabled;
+    bool8 victoryCatch;         /* the Poké Balls pocket is skipped */
+    bool8 closeRow;             /* the list ends with the game's CLOSE BAG row */
+    u16 count;                  /* items in the pocket */
+    u16 cursor;                 /* the list position (count: CLOSE BAG) */
+    u16 swapFrom;               /* SWAPPING: the item being moved (0xFFFF: none) */
+    u16 items[NATIVE_BAG_MAX_ITEMS];
+    u16 quantities[NATIVE_BAG_MAX_ITEMS];
+    u16 registeredItem;
+    u8 menuCount;
+    bool8 menuGrid;
+    u8 menuActions[6];
+    const u8 *menuLabels[6];    /* NULL: an empty grid cell */
+    u8 menuCursor;              /* MENU (grid position), YES_NO */
+    u16 quantity;
+    u16 maxQuantity;
+    bool8 selling;
+    u8 msgWindow;               /* the message box's window when shown (WINDOW_NONE: none) */
+    u8 descWindow;              /* the description line's window */
+    bool8 ready;
+};
+bool32 Bag_NativeUiState(struct NativeBag *out);
+/* menu_helpers.c: the shared YES/NO, and the shared message (its window) */
+bool32 MenuHelpers_NativeUiYesNo(void);
+bool32 MenuHelpers_NativeUiMessage(u8 *windowId);
+
 /* ---------------------------------------------------------------- options (option_menu.c) */
 
 enum NativeOptionPhase

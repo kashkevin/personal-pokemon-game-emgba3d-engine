@@ -447,3 +447,21 @@ void UpdateSwapLineSpritesPos(u8 *spriteIds, u8 count, s16 x, u16 y)
         gSprites[spriteIds[i]].y = 1 + y;
     }
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui): the shared message and YES/NO helpers.
+bool32 MenuHelpers_NativeUiYesNo(void)
+{
+    return FuncIsActiveTask(Task_CallYesOrNoCallback);
+}
+
+bool32 MenuHelpers_NativeUiMessage(u8 *windowId)
+{
+    if (!FuncIsActiveTask(Task_ContinueTaskAfterMessagePrints))
+        return FALSE;
+    *windowId = sMessageWindowId;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI
