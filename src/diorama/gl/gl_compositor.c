@@ -1525,11 +1525,16 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
 
             /* Outdoors the cells fade into the sky's haze before they end, and
              * the picture past them is that colour: no board's edge. */
+            /* With distant scenery (far_field.h) the haze closes in at its
+             * end instead of the scene's. */
+            float fogEnd = DioramaGLTerrain_FarShown() ? DIORAMA_FAR_RADIUS - 1.0f
+                                                       : DIORAMA_GRID_WIDTH / 2 - 1.0f;
+
             DioramaGLLight_SetEdgeFog(outdoors && sSurveyView < 0,
                                       /* cell (x, y)'s centre is (x, -y) in the scene */
                                       (float)(sRenderedSceneSnapshot.gridOriginX + DIORAMA_GRID_WIDTH / 2),
                                       -(float)(sRenderedSceneSnapshot.gridOriginY + DIORAMA_GRID_HEIGHT / 2),
-                                      DIORAMA_GRID_WIDTH / 2 - 5.5f, DIORAMA_GRID_WIDTH / 2 - 1.0f, sky);
+                                      fogEnd - (DioramaGLTerrain_FarShown() ? 17.0f : 4.5f), fogEnd, sky);
             glEnable(GL_SCISSOR_TEST);
             glScissor(0, 0, sceneWidth, sceneHeight);
             glClearColor(sky[0], sky[1], sky[2], 1.0f);

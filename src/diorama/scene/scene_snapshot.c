@@ -117,12 +117,13 @@ static const u8 *PagedTiles(const struct Tileset *tileset)
         if (sPagedTiles[i].tileset == tileset)
             return sPagedTiles[i].tiles;
     /* Only compressed tilesets carry their size; the few uncompressed ones
-     * are secret bases and the Cable Club, never a neighbour. */
-    if (i == MAX_PAGED_TILESETS || tileset->tiles == NULL || !tileset->isCompressed
-     || !IsCompressedData(tileset->tiles))
+     * are secret bases and the Cable Club, never a neighbour. (Not
+     * IsCompressedData: it refuses 16 KB exactly, a full 512-tile set such as
+     * the General tileset's.) */
+    if (i == MAX_PAGED_TILESETS || tileset->tiles == NULL || !tileset->isCompressed)
         return NULL;
     size = GetDecompressedDataSize(tileset->tiles);
-    if (size == 0 || size > 64 * 1024)
+    if (size == 0 || size % DIORAMA_TILE_BYTES != 0 || size > 64 * 1024)
         return NULL;
     tiles = calloc(1, size > DIORAMA_PAGE_TILE_BYTES ? size : DIORAMA_PAGE_TILE_BYTES);
     if (tiles == NULL)
@@ -1022,6 +1023,353 @@ static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
     CopySurfBlob(snapshot);
 }
 
+/*
+ * Distant scenery (scene_snapshot.h, DIORAMA_FAR_RADIUS), computed when the
+ * camera's cell or the map changes and kept in between.
+ */
+#define MAX_COLOUR_TILESETS 24
+
+static struct DioramaFarBlock sFar[DIORAMA_FAR_BLOCKS * DIORAMA_FAR_BLOCKS];
+static u32 sFarGeneration;
+static u32 sFarMapGeneration;
+static s16 sFarCameraX;
+static s16 sFarCameraY;
+static bool8 sFarComputed;
+
+/* The average colour of each metatile (BGR555) of the General tileset and a
+ * secondary one, from their own tiles and palettes. */
+static struct
+{
+    const struct Tileset *secondary;
+    u16 *colours;
+} sColourCache[MAX_COLOUR_TILESETS];
+
+static u16 AverageMetatileColour(const struct Tileset *primary, const u8 *primaryTiles,
+                                 const struct Tileset *secondary, const u8 *secondaryTiles,
+                                 u16 metatileId)
+{
+    const struct Tileset *owner = metatileId < NUM_METATILES_IN_PRIMARY ? primary : secondary;
+    const u16 *entries = owner->metatiles
+                       + (metatileId % NUM_METATILES_IN_PRIMARY) * DIORAMA_METATILE_ENTRY_COUNT;
+    u32 sums[3] = {0, 0, 0};
+    u32 count = 0;
+    int x;
+    int y;
+
+    for (y = 0; y < 16; y++)
+        for (x = 0; x < 16; x++)
+        {
+            int tile = (y / 8) * 2 + x / 8;
+            int layer;
+
+            for (layer = 1; layer >= 0; layer--)
+            {
+                u16 entry = entries[layer * 4 + tile];
+                u16 tileId = entry & 0x3FF;
+                u8 palette = entry >> 12;
+                int px = entry & (1 << 10) ? 7 - (x & 7) : x & 7;
+                int py = entry & (1 << 11) ? 7 - (y & 7) : y & 7;
+                const u8 *tiles = tileId < DIORAMA_PAGE_FIRST_TILE ? primaryTiles : secondaryTiles;
+                u8 packed;
+                u8 colour;
+                u16 bgr;
+
+                if (tiles == NULL)
+                    continue;
+                packed = tiles[(tileId % DIORAMA_PAGE_FIRST_TILE) * DIORAMA_TILE_BYTES + py * 4 + px / 2];
+                colour = px & 1 ? packed >> 4 : packed & 0x0F;
+                if (colour == 0)
+                    continue;
+                bgr = palette < DIORAMA_PAGE_FIRST_PALETTE ? primary->palettes[palette][colour]
+                    : (palette < DIORAMA_PAGE_FIRST_PALETTE + DIORAMA_PAGE_PALETTE_COUNT
+                       ? secondary->palettes[palette][colour] : 0);
+                sums[0] += bgr & 31;
+                sums[1] += (bgr >> 5) & 31;
+                sums[2] += (bgr >> 10) & 31;
+                count++;
+                break;
+            }
+        }
+    if (count == 0)
+        return 0;
+    return (u16)(((sums[0] + count / 2) / count)
+               | (((sums[1] + count / 2) / count) << 5)
+               | (((sums[2] + count / 2) / count) << 10));
+}
+
+/* The metatiles' average colours for a layout's tilesets (the General
+ * primary and its secondary), NULL for another primary. */
+static const u16 *LayoutColours(const struct MapLayout *layout)
+{
+    const u8 *primaryTiles;
+    const u8 *secondaryTiles;
+    u16 *colours;
+    int i;
+
+    if (layout == NULL || layout->primaryTileset != &gTileset_General || layout->isFrlg
+     || layout->secondaryTileset == NULL || layout->secondaryTileset->metatiles == NULL
+     || layout->secondaryTileset->palettes == NULL)
+        return NULL;
+    for (i = 0; i < MAX_COLOUR_TILESETS && sColourCache[i].secondary != NULL; i++)
+        if (sColourCache[i].secondary == layout->secondaryTileset)
+            return sColourCache[i].colours;
+    if (i == MAX_COLOUR_TILESETS)
+        return NULL;
+    primaryTiles = PagedTiles(&gTileset_General);
+    secondaryTiles = PagedTiles(layout->secondaryTileset);
+    colours = malloc(NUM_METATILES_TOTAL * sizeof(*colours));
+    if (colours == NULL || primaryTiles == NULL || secondaryTiles == NULL)
+    {
+        free(colours);
+        return NULL;
+    }
+    for (u16 metatile = 0; metatile < NUM_METATILES_TOTAL; metatile++)
+        colours[metatile] = AverageMetatileColour(&gTileset_General, primaryTiles,
+                                                  layout->secondaryTileset, secondaryTiles, metatile);
+    sColourCache[i].secondary = layout->secondaryTileset;
+    sColourCache[i].colours = colours;
+    return colours;
+}
+
+/* Where a connection's map lies from the map it leaves, whatever the
+ * distance: the position (x, y) of the map left in the connected map's own
+ * coordinates. */
+static void ToConnectedMap(const struct MapConnection *connection, const struct MapLayout *from,
+                           const struct MapLayout *to, s32 x, s32 y, s32 *toX, s32 *toY)
+{
+    switch (connection->direction)
+    {
+    case CONNECTION_NORTH: *toX = x - connection->offset; *toY = y + to->height; break;
+    case CONNECTION_SOUTH: *toX = x - connection->offset; *toY = y - from->height; break;
+    case CONNECTION_WEST: *toX = x + to->width; *toY = y - connection->offset; break;
+    case CONNECTION_EAST: *toX = x - from->width; *toY = y - connection->offset; break;
+    default: *toX = -100000; *toY = -100000; break;
+    }
+}
+
+struct FarCell
+{
+    const struct MapLayout *layout; /* NULL: the map's border block */
+    u16 layoutId;
+    s16 x;
+    s16 y;
+    u8 mapGroup;
+    u8 mapNum;
+    u16 entry;
+};
+
+/* The cell at map coordinates (mapX, mapY) as far as the static maps go:
+ * the map (its own grid, with any changes), a connected map or one connected
+ * to that, else the map's border block. */
+static void FindFarCell(int mapX, int mapY, struct FarCell *cell)
+{
+    const struct MapLayout *layout = gMapHeader.mapLayout;
+    const struct MapConnection *connection;
+    s32 x = mapX - MAP_OFFSET;
+    s32 y = mapY - MAP_OFFSET;
+    int i;
+
+    memset(cell, 0, sizeof(*cell));
+    if (x >= 0 && y >= 0 && x < layout->width && y < layout->height)
+    {
+        cell->layout = layout;
+        cell->layoutId = gMapHeader.mapLayoutId;
+        cell->x = x;
+        cell->y = y;
+        cell->mapGroup = gSaveBlock1Ptr->location.mapGroup;
+        cell->mapNum = gSaveBlock1Ptr->location.mapNum;
+        cell->entry = (u16)MapGridGetMetatileIdAt(mapX, mapY)
+                    | (u16)(MapGridGetCollisionAt(mapX, mapY) << 10)
+                    | (u16)(MapGridGetElevationAt(mapX, mapY) << 12);
+        return;
+    }
+    connection = GetMapConnectionAtPos(mapX, mapY);
+    if (connection != NULL)
+    {
+        const struct MapHeader *header = GetMapHeaderFromConnection(connection);
+        s32 cx;
+        s32 cy;
+
+        if (header != NULL && header->mapLayout != NULL && header->mapLayout->map != NULL)
+        {
+            ToConnectedMap(connection, layout, header->mapLayout, x, y, &cx, &cy);
+            if (cx >= 0 && cy >= 0 && cx < header->mapLayout->width && cy < header->mapLayout->height)
+            {
+                cell->layout = header->mapLayout;
+                cell->layoutId = header->mapLayoutId;
+                cell->x = cx;
+                cell->y = cy;
+                cell->mapGroup = connection->mapGroup;
+                cell->mapNum = connection->mapNum;
+                cell->entry = header->mapLayout->map[cy * header->mapLayout->width + cx];
+                return;
+            }
+        }
+    }
+    /* A map connected to one of the map's connections. */
+    if (gMapHeader.connections != NULL)
+        for (i = 0; i < gMapHeader.connections->count; i++)
+        {
+            const struct MapConnection *first = &gMapHeader.connections->connections[i];
+            const struct MapHeader *header;
+            s32 x1;
+            s32 y1;
+            int k;
+
+            if (first->direction == CONNECTION_DIVE || first->direction == CONNECTION_EMERGE)
+                continue;
+            header = GetMapHeaderFromConnection(first);
+            if (header == NULL || header->mapLayout == NULL || header->connections == NULL)
+                continue;
+            ToConnectedMap(first, layout, header->mapLayout, x, y, &x1, &y1);
+            for (k = 0; k < header->connections->count; k++)
+            {
+                const struct MapConnection *second = &header->connections->connections[k];
+                const struct MapHeader *farHeader; /* not "far": a macro on Windows */
+                s32 x2;
+                s32 y2;
+
+                if (second->direction == CONNECTION_DIVE || second->direction == CONNECTION_EMERGE
+                 || (second->mapGroup == gSaveBlock1Ptr->location.mapGroup
+                  && second->mapNum == gSaveBlock1Ptr->location.mapNum))
+                    continue;
+                farHeader = GetMapHeaderFromConnection(second);
+                if (farHeader == NULL || farHeader->mapLayout == NULL || farHeader->mapLayout->map == NULL)
+                    continue;
+                ToConnectedMap(second, header->mapLayout, farHeader->mapLayout, x1, y1, &x2, &y2);
+                /* on the connection's side of the map (as GetMapConnectionAtPos) */
+                if ((second->direction == CONNECTION_NORTH && y1 >= 0)
+                 || (second->direction == CONNECTION_SOUTH && y1 < header->mapLayout->height)
+                 || (second->direction == CONNECTION_WEST && x1 >= 0)
+                 || (second->direction == CONNECTION_EAST && x1 < header->mapLayout->width))
+                    continue;
+                if (x2 < 0 || y2 < 0 || x2 >= farHeader->mapLayout->width || y2 >= farHeader->mapLayout->height)
+                    continue;
+                cell->layout = farHeader->mapLayout;
+                cell->layoutId = farHeader->mapLayoutId;
+                cell->x = x2;
+                cell->y = y2;
+                cell->mapGroup = second->mapGroup;
+                cell->mapNum = second->mapNum;
+                cell->entry = farHeader->mapLayout->map[y2 * farHeader->mapLayout->width + x2];
+                return;
+            }
+        }
+    cell->entry = (u16)MapGridGetMetatileIdAt(mapX, mapY)
+                | (u16)(MapGridGetCollisionAt(mapX, mapY) << 10);
+}
+
+static bool8 FarEnabled(void)
+{
+    static int sEnabled = -1;
+
+    if (sEnabled < 0)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_FAR");
+
+        sEnabled = value == NULL || value[0] != '0';
+    }
+    return sEnabled;
+}
+
+static int FloorEven(int value)
+{
+    return value >= 0 ? value & ~1 : -((-value + 1) & ~1);
+}
+
+static void ComputeFar(s16 cameraX, s16 cameraY)
+{
+    int originX = FloorEven(cameraX - DIORAMA_FAR_RADIUS);
+    int originY = FloorEven(cameraY - DIORAMA_FAR_RADIUS);
+    int innerLeft = cameraX - DIORAMA_GRID_WIDTH / 2;
+    int innerTop = cameraY - DIORAMA_GRID_HEIGHT / 2;
+    int i;
+    int j;
+
+    for (j = 0; j < DIORAMA_FAR_BLOCKS; j++)
+        for (i = 0; i < DIORAMA_FAR_BLOCKS; i++)
+        {
+            struct DioramaFarBlock *block = &sFar[j * DIORAMA_FAR_BLOCKS + i];
+            int left = originX + i * DIORAMA_FAR_BLOCK_CELLS;
+            int top = originY + j * DIORAMA_FAR_BLOCK_CELLS;
+            struct FarCell chosen;
+            const u16 *colours;
+            int k;
+
+            memset(block, 0, sizeof(*block));
+            /* the scene's own cells draw themselves */
+            if (left >= innerLeft && top >= innerTop
+             && left + DIORAMA_FAR_BLOCK_CELLS <= innerLeft + DIORAMA_GRID_WIDTH
+             && top + DIORAMA_FAR_BLOCK_CELLS <= innerTop + DIORAMA_GRID_HEIGHT)
+                continue;
+            /* an obstacle stands for the block (a tree, a building), else its
+             * top-left cell */
+            FindFarCell(left, top, &chosen);
+            for (k = 1; k < 4 && UNPACK_COLLISION(chosen.entry) == 0; k++)
+            {
+                struct FarCell other;
+
+                FindFarCell(left + (k & 1), top + (k >> 1), &other);
+                if (UNPACK_COLLISION(other.entry) != 0)
+                    chosen = other;
+            }
+            colours = LayoutColours(chosen.layout != NULL ? chosen.layout : gMapHeader.mapLayout);
+            if (colours == NULL || UNPACK_METATILE(chosen.entry) >= NUM_METATILES_TOTAL)
+                continue;
+            block->metatileId = UNPACK_METATILE(chosen.entry);
+            block->color = colours[block->metatileId];
+            block->flags = DIORAMA_FAR_VALID;
+            if (chosen.layout != NULL)
+            {
+                block->flags |= DIORAMA_FAR_SOURCE;
+                block->layoutId = chosen.layoutId;
+                block->sourceX = chosen.x;
+                block->sourceY = chosen.y;
+                block->mapGroup = chosen.mapGroup;
+                block->mapNum = chosen.mapNum;
+            }
+        }
+}
+
+/* The distant scenery into a snapshot: outdoors only, worked out again when
+ * the camera's cell or the map changed. */
+static void CopyFar(struct DioramaSceneSnapshot *snapshot)
+{
+    u8 mapType = gMapHeader.mapType;
+
+    if (!FarEnabled() || gMapHeader.mapLayout == NULL
+     || (mapType != MAP_TYPE_TOWN && mapType != MAP_TYPE_CITY && mapType != MAP_TYPE_ROUTE
+      && mapType != MAP_TYPE_OCEAN_ROUTE))
+        return;
+    if (!sFarComputed || sFarMapGeneration != sMapGeneration
+     || sFarCameraX != snapshot->cameraMapX || sFarCameraY != snapshot->cameraMapY)
+    {
+        ComputeFar(snapshot->cameraMapX, snapshot->cameraMapY);
+        if (LogEnabled() && (!sFarComputed || sFarMapGeneration != sMapGeneration))
+        {
+            int valid = 0;
+            int sourced = 0;
+
+            for (int i = 0; i < DIORAMA_FAR_BLOCKS * DIORAMA_FAR_BLOCKS; i++)
+            {
+                valid += (sFar[i].flags & DIORAMA_FAR_VALID) != 0;
+                sourced += (sFar[i].flags & DIORAMA_FAR_SOURCE) != 0;
+            }
+            SDL_Log("Diorama: distant scenery: %d blocks (%d from maps, the rest border)", valid, sourced);
+        }
+        sFarComputed = TRUE;
+        sFarMapGeneration = sMapGeneration;
+        sFarCameraX = snapshot->cameraMapX;
+        sFarCameraY = snapshot->cameraMapY;
+        sFarGeneration++;
+    }
+    snapshot->farOn = TRUE;
+    snapshot->farGeneration = sFarGeneration;
+    snapshot->farOriginX = (s16)FloorEven(sFarCameraX - DIORAMA_FAR_RADIUS);
+    snapshot->farOriginY = (s16)FloorEven(sFarCameraY - DIORAMA_FAR_RADIUS);
+    memcpy(snapshot->farBlocks, sFar, sizeof(sFar));
+}
+
 void DioramaScene_Init(void)
 {
     memset(&sDraft, 0, sizeof(sDraft));
@@ -1168,6 +1516,7 @@ void DioramaScene_PublishOverworld(void)
         sDraft.tilesetResourcesValid = CopyCells(&sDraft);
         if (!sDraft.tilesetResourcesValid)
             sDraft.fallbackReasons |= DIORAMA_FALLBACK_TILESET_UNAVAILABLE;
+        CopyFar(&sDraft);
         CopyObjects(&sDraft);
         if (gPlayerAvatar.objectEventId < OBJECT_EVENTS_COUNT
          && gObjectEvents[gPlayerAvatar.objectEventId].active)

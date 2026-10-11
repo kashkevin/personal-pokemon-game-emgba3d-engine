@@ -810,6 +810,45 @@ bool DioramaRules_GetMapProfile(uint8_t mapGroup, uint8_t mapNum, uint16_t layou
     return true;
 }
 
+bool DioramaRules_StaticHeights(uint16_t layoutId, uint8_t mapGroup, uint8_t mapNum,
+                                int16_t sourceX, int16_t sourceY, uint16_t metatileId,
+                                float *groundHeight, float *topHeight, uint8_t *archetype)
+{
+    const struct DioramaGeneratedLayoutV2 *layout = FindLayout(layoutId);
+    const struct DioramaGeneratedTerrainV2 *record;
+    float ground;
+    float top;
+
+    if (layout == NULL || sourceX < 0 || sourceY < 0
+     || sourceX >= layout->width || sourceY >= layout->height)
+        return false;
+    record = FindStaticTerrain(layout, (uint32_t)sourceY * layout->width + sourceX, mapGroup, mapNum);
+    if (record == NULL || record->expectedMetatile != metatileId)
+        return false;
+    /* ApplyStaticTerrain's heights */
+    if (record->measuredFlags & DIORAMA_MEASURED_TERRACE_TOPOLOGY)
+    {
+        ground = record->groundQ16 / 16.0f;
+        top = record->topQ16 / 16.0f;
+    }
+    else
+    {
+        float feature = record->heightQ16 > 0 ? record->heightQ16 / 16.0f : 0.0f;
+
+        ground = record->heightQ16 < 0 ? record->heightQ16 / 16.0f : 0.0f;
+        if (record->shape == DIORAMA_SHAPE_LEDGE)
+            ground = feature;
+        top = record->shape == DIORAMA_SHAPE_LEDGE ? ground : ground + feature;
+    }
+    if (record->measuredBodyQ16 + record->measuredRoofQ16 > 0
+     && ground + (record->measuredBodyQ16 + record->measuredRoofQ16) / 16.0f > top)
+        top = ground + (record->measuredBodyQ16 + record->measuredRoofQ16) / 16.0f;
+    *groundHeight = ground;
+    *topHeight = top;
+    *archetype = record->archetype;
+    return true;
+}
+
 bool DioramaRules_ResolveCell(const struct DioramaSceneSnapshot *snapshot,
                               const struct DioramaCellSnapshot *cell,
                               struct DioramaResolvedCell *resolved)

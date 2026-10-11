@@ -138,7 +138,7 @@ static const char sObjectVertexShader[] =
     "void main() {\n"
     "  sceneWorldPosition = position;\n"
     "  const float nearDepth = 0.1;\n"
-    "  const float farDepth = 80.0;\n"
+    "  const float farDepth = " DIORAMA_FAR_DEPTH_GLSL ";\n"
     "  float pitchSin = sin(cameraPitch);\n"
     "  float pitchCos = cos(cameraPitch);\n"
     "  float relativeX = position.x - cameraPosition.x;\n"
@@ -186,7 +186,7 @@ static const char sObjectFragmentShader[] =
      * leaning card's. */
     "float UprightDepth(float margin) {\n"
     "  const float nearDepth = 0.1;\n"
-    "  const float farDepth = 80.0;\n"
+    "  const float farDepth = " DIORAMA_FAR_DEPTH_GLSL ";\n"
     "  float pitchSin = sin(cameraPitch);\n"
     "  float pitchCos = cos(cameraPitch);\n"
     "  float cameraZ = cameraPosition.y - cameraDistance;\n"

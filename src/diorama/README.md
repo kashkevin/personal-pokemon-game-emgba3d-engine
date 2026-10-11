@@ -146,3 +146,16 @@ tilesets are unchanged.
   neighbour's animated tiles stand still, and its light colours (windows at
   night) are faded like the rest. `PKMN_DIORAMA_NEIGHBOURS=0` shows border
   tiles as before.
+* Distant scenery (`scene_snapshot.h` `DioramaFarBlock`, `scene_snapshot.c`
+  `CopyFar`; `terrain/far_field.c`, `include/diorama/far_field.h`;
+  `rules.c` `DioramaRules_StaticHeights`): past the 49 x 49 cells, the world
+  out to 48 tiles in blocks of 2 x 2 cells on even map coordinates - the map,
+  its connected maps and the maps connected to those, the border block
+  beyond - each block a column as high as the rules make one of its cells (an
+  obstacle's if it has one; a tree at least a canopy's height, a little
+  uneven), coloured with the average of that metatile's art (worked out once
+  per tileset on the game thread) and faded along the palette line like the
+  voxel trees. Outdoors only (towns, cities, routes); the edge fog then closes
+  in from 30 to 47 tiles instead of 18.5-23. One vertex buffer, rebuilt when the
+  camera's cell changes. Off with the effects quality off or
+  `PKMN_DIORAMA_FAR=0`.

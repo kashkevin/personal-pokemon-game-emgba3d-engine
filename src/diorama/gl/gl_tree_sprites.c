@@ -78,7 +78,7 @@ static const char sVertexShader[] =
     "void main() {\n"
     /* The terrain's projection (gl_terrain_renderer.c), so the two meet. */
     "  const float nearDepth = 0.1;\n"
-    "  const float farDepth = 80.0;\n"
+    "  const float farDepth = " DIORAMA_FAR_DEPTH_GLSL ";\n"
     "  float pitchSin = sin(cameraPitch);\n"
     "  float pitchCos = cos(cameraPitch);\n"
     "  float relativeX = position.x - cameraPosition.x;\n"

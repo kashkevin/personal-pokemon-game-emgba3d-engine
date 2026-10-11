@@ -37,6 +37,25 @@
 #define DIORAMA_PAGE_TILE_BYTES ((DIORAMA_TILE_COUNT - DIORAMA_PAGE_FIRST_TILE) * DIORAMA_TILE_BYTES)
 #define DIORAMA_PAGE_FIRST_PALETTE 6
 #define DIORAMA_PAGE_PALETTE_COUNT 7
+/*
+ * Distant scenery (graphics overhaul): past the scene's cells, the world out
+ * to about DIORAMA_FAR_RADIUS tiles from the camera in blocks of 2 x 2 cells
+ * on even map coordinates (so a step does not regroup them): the map, its
+ * connected maps and theirs, the map's border block beyond. A block is one of
+ * its cells (an obstacle if it has one: a tree, a building, a rock), with
+ * where that cell comes from (for the rules' heights) and the average colour
+ * of its metatile's art, unfaded. Published outdoors only (towns, cities,
+ * routes); farGeneration changes when the blocks do.
+ */
+#define DIORAMA_FAR_BLOCK_CELLS 2
+#define DIORAMA_FAR_RADIUS 48
+#define DIORAMA_FAR_BLOCKS (DIORAMA_FAR_RADIUS + 1)
+
+enum DioramaFarBlockFlags
+{
+    DIORAMA_FAR_VALID = 1 << 0,  /* the block has a metatile and a colour */
+    DIORAMA_FAR_SOURCE = 1 << 1, /* ... and a map cell (layoutId, sourceX/Y, map) */
+};
 
 enum DioramaCellFlags
 {
@@ -116,6 +135,19 @@ struct DioramaCellSnapshot
      * neighbouring map's (its metatileId and tileEntries are that map's). */
     uint8_t atlasPage;
     uint16_t tileEntries[DIORAMA_METATILE_ENTRY_COUNT];
+};
+
+struct DioramaFarBlock
+{
+    uint16_t metatileId;
+    uint16_t layoutId;
+    int16_t sourceX;
+    int16_t sourceY;
+    uint8_t mapGroup;
+    uint8_t mapNum;
+    uint8_t flags;
+    uint8_t unused;
+    uint16_t color; /* BGR555, unfaded */
 };
 
 struct DioramaNeighbourPage
@@ -283,6 +315,14 @@ struct DioramaSceneSnapshot
     /* Neighbouring maps with other tiles (see DIORAMA_NEIGHBOUR_PAGES): page
      * p is neighbourPages[p - 1]. */
     struct DioramaNeighbourPage neighbourPages[DIORAMA_NEIGHBOUR_PAGES];
+    /* Distant scenery (see DIORAMA_FAR_RADIUS): block (i, j) is
+     * farBlocks[j * DIORAMA_FAR_BLOCKS + i], its top-left cell at map coordinates
+     * (farOriginX + 2i, farOriginY + 2j) (as cells[].mapX); farOn 0: none. */
+    uint8_t farOn;
+    uint32_t farGeneration;
+    int16_t farOriginX;
+    int16_t farOriginY;
+    struct DioramaFarBlock farBlocks[DIORAMA_FAR_BLOCKS * DIORAMA_FAR_BLOCKS];
 };
 
 void DioramaSnapshotExchange_Init(void);

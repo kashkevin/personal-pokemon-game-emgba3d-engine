@@ -6,9 +6,12 @@
 #include <SDL2/SDL.h>
 
 #include "global.h"
+#include "diorama/buildings.h"
+#include "diorama/far_field.h"
 #include "diorama/gl_loader.h"
 #include "diorama/gl_grade.h"
 #include "diorama/gl_light.h"
+#include "diorama/gl_quality.h"
 #include "diorama/gl_shadow.h"
 #include "diorama/gl_terrain_renderer.h"
 #include "diorama/metatile_atlas.h"
@@ -83,6 +86,20 @@ static uint64_t sLastSyncSequence;
 static uint32_t sGeometryGeneration;
 static int sLastChunkRange[4];
 static uint32_t sClaimDebugVertexCount;
+/* Distant scenery (diorama/far_field.h): one buffer, rebuilt when the far
+ * blocks or the scene's grid move. */
+static struct DioramaTerrainVertex sFarVertices[DIORAMA_FAR_MAX_VERTICES];
+static struct DioramaFarSector sFarSectors[DIORAMA_FAR_SECTORS];
+static GLuint sFarVertexArray;
+static GLuint sFarVertexBuffer;
+static uint32_t sFarVertexCount;
+static uint32_t sFarGeneration;
+static int16_t sFarGridX;
+static int16_t sFarGridY;
+static bool sFarBuilt;
+static bool sFarShown;
+static bool sFarLogged;
+static bool FarBuildingHeight(uint16_t layoutId, int x, int y, float *top);
 
 static const char sTerrainVertexShader[] =
     "#version 330 core\n"
@@ -114,7 +131,7 @@ static const char sTerrainVertexShader[] =
     "  vec3 worldPosition = position + instanceOffset;\n"
     "  sceneWorldPosition = worldPosition;\n"
     "  const float nearDepth = 0.1;\n"
-    "  const float farDepth = 80.0;\n"
+    "  const float farDepth = " DIORAMA_FAR_DEPTH_GLSL ";\n"
     "  float pitchSin = sin(cameraPitch);\n"
     "  float pitchCos = cos(cameraPitch);\n"
     "  float relativeX = worldPosition.x - cameraPosition.x;\n"
@@ -1123,7 +1140,66 @@ bool DioramaGLTerrain_Init(void)
     dglGenVertexArrays(1, &sDebugVertexArray);
     dglGenBuffers(1, &sDebugVertexBuffer);
     ConfigureVertexArray(sDebugVertexArray, sDebugVertexBuffer);
+    dglGenVertexArrays(1, &sFarVertexArray);
+    dglGenBuffers(1, &sFarVertexBuffer);
+    ConfigureVertexArray(sFarVertexArray, sFarVertexBuffer);
+    DioramaFar_SetBuildingHeight(FarBuildingHeight);
+    sFarBuilt = false;
+    sFarShown = false;
     return true;
+}
+
+static bool FarBuildingHeight(uint16_t layoutId, int x, int y, float *top)
+{
+    uint16_t ground;
+    uint8_t quarters;
+
+    return DioramaBuildings_CellAt(layoutId, x, y, &ground, &quarters, top);
+}
+
+/* The distant scenery for a snapshot: drawn with the effects quality on
+ * (gl_quality.h), outdoors (the snapshot has far blocks only there). */
+static void SyncFar(const struct DioramaSceneSnapshot *snapshot)
+{
+    bool complete;
+
+    sFarShown = snapshot->farOn && DioramaGLQuality_Effects();
+    if (!sFarShown)
+        return;
+    if (sFarBuilt && snapshot->farGeneration == sFarGeneration
+     && snapshot->gridOriginX == sFarGridX && snapshot->gridOriginY == sFarGridY)
+        return;
+    sFarVertexCount = DioramaFar_BuildMesh(snapshot, sFarVertices, DIORAMA_FAR_MAX_VERTICES,
+                                           sFarSectors, &complete);
+    dglBindBuffer(GL_ARRAY_BUFFER, sFarVertexBuffer);
+    dglBufferData(GL_ARRAY_BUFFER, sFarVertexCount * sizeof(*sFarVertices), sFarVertices,
+                  GL_STATIC_DRAW);
+    sFarGeneration = snapshot->farGeneration;
+    sFarGridX = snapshot->gridOriginX;
+    sFarGridY = snapshot->gridOriginY;
+    sFarBuilt = true;
+    if (!complete)
+        SDL_Log("Diorama: distant scenery cut short at %u vertices", sFarVertexCount);
+    {
+        static int sLog = -1;
+
+        if (sLog < 0)
+        {
+            const char *value = SDL_getenv("PKMN_DIORAMA_LOG");
+
+            sLog = value != NULL && value[0] == '1';
+        }
+        if (sLog && sFarVertexCount != 0 && !sFarLogged)
+        {
+            SDL_Log("Diorama: distant scenery drawn: %u vertices", sFarVertexCount);
+            sFarLogged = true;
+        }
+    }
+}
+
+bool DioramaGLTerrain_FarShown(void)
+{
+    return sFarShown && sFarVertexCount != 0;
 }
 
 void DioramaGLTerrain_Reset(void)
@@ -1219,6 +1295,7 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
     }
 
     TreeTint(snapshot);
+    SyncFar(snapshot);
     sMetrics.rebuiltChunks = 0;
     if (snapshot->mapGeneration != sMapGeneration || rulesGeneration != sRulesGeneration)
     {
@@ -1377,6 +1454,28 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
     if (debug)
         glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
+    /* The distant scenery: its colours are unfaded, so they follow the
+     * palette's fade and night tint along the trees' line. */
+    if (DioramaGLTerrain_FarShown() && !debug)
+    {
+        dglUniform3f(sPixelScaleLocation, sTreeScale[0], sTreeScale[1], sTreeScale[2]);
+        dglUniform3f(sPixelOffsetLocation, sTreeOffset[0], sTreeOffset[1], sTreeOffset[2]);
+        dglBindVertexArray(sFarVertexArray);
+        for (i = 0; i < DIORAMA_FAR_SECTORS; i++)
+        {
+            const struct DioramaFarSector *sector = &sFarSectors[i];
+
+            if (sector->count == 0
+             || !DioramaTerrain_IsBoundsVisible(&sector->bounds, cameraX, cameraZ, cameraPitch, focalLength))
+                continue;
+            glDrawArrays(GL_TRIANGLES, (GLint)sector->first, (GLsizei)sector->count);
+            sMetrics.vertices += sector->count;
+            sMetrics.triangles += sector->count / 3;
+            sMetrics.drawCalls++;
+        }
+        dglUniform3f(sPixelScaleLocation, 1.0f, 1.0f, 1.0f);
+        dglUniform3f(sPixelOffsetLocation, 0.0f, 0.0f, 0.0f);
+    }
     for (i = 0; i < TERRAIN_CHUNK_CACHE_SIZE; i++)
     {
         struct GLTerrainChunk *chunk = &sChunks[i];
@@ -1548,6 +1647,15 @@ void DioramaGLTerrain_Shutdown(void)
         dglDeleteBuffers(1, &sDebugVertexBuffer);
     if (sDebugVertexArray != 0)
         dglDeleteVertexArrays(1, &sDebugVertexArray);
+    if (sFarVertexBuffer != 0)
+        dglDeleteBuffers(1, &sFarVertexBuffer);
+    if (sFarVertexArray != 0)
+        dglDeleteVertexArrays(1, &sFarVertexArray);
+    sFarVertexBuffer = 0;
+    sFarVertexArray = 0;
+    sFarVertexCount = 0;
+    sFarBuilt = false;
+    sFarShown = false;
     if (sTreeInstanceBuffer != 0)
         dglDeleteBuffers(1, &sTreeInstanceBuffer);
     if (sTreeVertexBuffer != 0)

@@ -162,7 +162,7 @@ static const char sMoteVertexShader[] =
     /* The scene's projection (gl_object_renderer.c), so the depth test agrees. */
     "  vec3 position = vertex.xyz;\n"
     "  const float nearDepth = 0.1;\n"
-    "  const float farDepth = 80.0;\n"
+    "  const float farDepth = " DIORAMA_FAR_DEPTH_GLSL ";\n"
     "  float pitchSin = sin(cameraPitch);\n"
     "  float pitchCos = cos(cameraPitch);\n"
     "  float relativeX = position.x - cameraPosition.x;\n"
@@ -205,7 +205,7 @@ static const char sFogVertexShader[] =
     "  vec3 position = vec3(centre.x + sheet.x, centre.y, -(centre.z + sheet.y));\n"
     "  fromTarget = position.xz - cameraPosition;\n"
     "  const float nearDepth = 0.1;\n"
-    "  const float farDepth = 80.0;\n"
+    "  const float farDepth = " DIORAMA_FAR_DEPTH_GLSL ";\n"
     "  float pitchSin = sin(cameraPitch);\n"
     "  float pitchCos = cos(cameraPitch);\n"
     "  float relativeX = position.x - cameraPosition.x;\n"

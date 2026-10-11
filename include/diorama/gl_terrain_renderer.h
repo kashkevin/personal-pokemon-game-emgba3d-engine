@@ -39,6 +39,9 @@ uint32_t DioramaGLTerrain_GetGeometryGeneration(void);
 /* How the palette's night tint and fades move a colour this frame, per channel
  * (faded = scale x unfaded + offset), fitted from the trees' palette. */
 void DioramaGLTerrain_GetPaletteLine(float scale[3], float offset[3]);
+/* Whether this frame draws distant scenery (diorama/far_field.h) past the
+ * scene's cells. */
+bool DioramaGLTerrain_FarShown(void);
 void DioramaGLTerrain_Shutdown(void);
 
 #endif

@@ -2080,7 +2080,7 @@ bool DioramaTerrain_IsBoundsVisible(const struct DioramaTerrainBounds *bounds,
     const float pitchSin = sinf(cameraPitch);
     const float pitchCos = cosf(cameraPitch);
     const float nearDepth = 0.1f;
-    const float farDepth = 80.0f;
+    const float farDepth = DIORAMA_FAR_DEPTH;
     bool outside[6] = {true, true, true, true, true, true};
     int i;
 

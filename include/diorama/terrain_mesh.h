@@ -279,6 +279,13 @@ struct DioramaCameraRig
 };
 extern struct DioramaCameraRig gDioramaCameraRig;
 
+/* The scene shaders' and the culling's far plane, in tiles of view depth:
+ * far enough for the Diorama camera and photo mode zoomed out (their long
+ * lens puts the eye over 100 tiles away) and the distant scenery behind
+ * (far_field.h); 80 before the graphics overhaul. The GLSL spelling too. */
+#define DIORAMA_FAR_DEPTH 400.0f
+#define DIORAMA_FAR_DEPTH_GLSL "400.0"
+
 #define DIORAMA_OVERWORLD_CAMERA_HEIGHT 16.0f
 #define DIORAMA_OVERWORLD_TARGET_VERTICAL -0.458944f
 #define DIORAMA_OVERWORLD_SCREEN_OFFSET -0.04f

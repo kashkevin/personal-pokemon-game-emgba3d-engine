@@ -446,6 +446,17 @@ const struct DioramaGeneratedPixelV2 *DioramaRules_GetPixelObjectPixels(
 const char *DioramaRules_StructureKindName(uint8_t kind);
 const struct DioramaGeneratedBuildingTemplate *DioramaRules_GetBuildingTemplate(uint16_t id);
 bool DioramaRules_IsMapSupported(uint8_t mapGroup, uint8_t mapNum, uint16_t layoutId);
+/*
+ * The rules' heights for one cell of a layout without a scene around it (the
+ * distant scenery, graphics overhaul): its static terrain record's ground and
+ * top heights (in tiles) and archetype, as DioramaRules_ResolveCell starts
+ * from, with a building's measured body and roof on top; false when the cell
+ * has no record (flat ground) or its metatile is not the one the record
+ * expects.
+ */
+bool DioramaRules_StaticHeights(uint16_t layoutId, uint8_t mapGroup, uint8_t mapNum,
+                                int16_t sourceX, int16_t sourceY, uint16_t metatileId,
+                                float *groundHeight, float *topHeight, uint8_t *archetype);
 const char *DioramaRules_GetUnsupportedReason(uint8_t mapGroup, uint8_t mapNum,
                                               uint16_t layoutId);
 bool DioramaRules_GetMapProfile(uint8_t mapGroup, uint8_t mapNum, uint16_t layoutId,
