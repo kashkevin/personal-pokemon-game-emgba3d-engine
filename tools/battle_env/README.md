@@ -11,6 +11,9 @@ shipped; the survey needs a TEST build of the game.
 | `sheets.py` | Contact sheets of a survey per category, for reviewing the pictures by eye; `--compare` puts another survey's picture beside each (before / after). |
 | `cave_pins.py` | A cave tileset's rock stood up as cave wall: picks the metatiles that are impassable, have no behaviour, are not void, water or sky, are not named by the game's scripts and lie in rock masses, and writes the rules compiler's pins (`data/diorama/tilesets/<tileset>.json`). `--sheet` draws the chosen and the passed-over metatiles. |
 | `auto_rooms.py` | Reads rooms off their cells (`tools/diorama_buildings/battle_room_auto.py`), builds them with the shared model library's generator and proves them: every model against its drawing, and each room composed with every model standing in it against its drawing, pixel for pixel. `--repair N` leaves out the pieces that claim the cells that differ and proves the room again. |
+| `perf.py` | The survey's battles at 1080p, 1440p and 4K (each size on its own X display), the world redrawn every frame or kept; the game's own autopilot presses the keys (`survey.py --autopilot`). Writes `perf.json` and `perf.md`. Software OpenGL here: the times compare sizes and places, not graphics cards. |
+| `report.py` | The per-map report from the inventory, a before and an after survey and `review.json` (the classes given by looking at the pictures): `report.md`, `report.json` and `page/index.html` (`report_page.py`: coverage, the classes, every map's pictures, filters). A map is reviewed (classed), tested (photographed, not classed), untested (no picture) or excluded (`"after": "n/a"`: the Battle Pyramid's squares). |
+| `review.json` | The review: per map, the class before and after (A complete 3D, B needs polish, C partially 3D, D broken or mostly flat) and what the picture shows. Written by people (or Claude) looking at the survey's pictures, never by a script from the numbers. |
 
 ## The test build
 
@@ -26,7 +29,12 @@ A player build has none of it.
 The driver reads `PKMN_TEST_BATTLE` (`wild:SPECIES:LEVEL`, `wild2:S:L:S:L`,
 `legendary:SPECIES:LEVEL`, `trainer:ID`, `double:ID`, `two:ID:ID`), `PKMN_TEST_BATTLE_DELAY`
 (field frames before it starts), `PKMN_TEST_CAPTURE` (the stem of the files to write),
-`PKMN_TEST_CAPTURE_DELAY` (frames at the action menu before the picture) and `PKMN_TEST_EXIT`.
+`PKMN_TEST_CAPTURE_DELAY` (frames at the action menu before the picture), `PKMN_TEST_EXIT`,
+`PKMN_TEST_AUTOPILOT=1` (the game presses its own keys: Start, then A until the field, then B
+until the action menu, each press held for three frames so a slow run misses none) and
+`PKMN_TEST_TIMEOUT` (seconds: no picture by then, say so and exit with code 3). A trainer
+battle locks the field and freezes its objects first, as a trainer's script does (a visible
+wild Pokemon would otherwise walk into the player, or empty the party, during the transition).
 
 ## A survey, start to end
 
@@ -41,6 +49,12 @@ The driver reads `PKMN_TEST_BATTLE` (`wild:SPECIES:LEVEL`, `wild2:S:L:S:L`,
 Any save with a party of two or more will do (`town.sav`; no save is written back). The game
 runs on the host's clock: `--hour` sets the time zone so the battles are in daylight (or at
 night). One game at a time: two at once on two cores make both too slow for the timeouts.
+`--kind trainer|wild_land|wild_water|legendary|wild` picks the battle (Routes 119 and 120 on
+their water: in the long grass the field is 2D), `--at X,Y` another cell to stand on (where two
+trainers see the test position the battle would be the two-opponent crash, KNOWN_ISSUES N37),
+`--cfg-extra 'cameraMode=diorama\n'` the Diorama camera, `--env PKMN_TEST_BATTLE=wild2:...` a
+double battle. A run whose game resumed on another map than the one asked for (a secret base
+comes back in Littleroot Town) is recorded as `wrong map`, not as a picture of that map.
 
 `cap.json` holds, besides the camera:
 
@@ -72,7 +86,9 @@ piece lays its drawn top back over the floor between its arms as a slab.
 What the proof cannot see: it compares the picture the GBA's camera sees. A piece that gives
 back its drawing exactly can still be wrong from the battle camera's angle - the survey's
 pictures are what show that (Lavaridge Gym 1F's sand ridges were one slab over the room before
-the one-foot rule; the stage search found nowhere to stand and the battle looked into a wall).
+the one-foot rule; the stage search found nowhere to stand and the battle looked into a wall;
+the Battle Palace's arena is impassable, so its carpet stood up as a block behind the battlers
+until its pieces went into `AUTO_DROP`).
 
     python3 tools/battle_env/auto_rooms.py build/battle_env/rooms LAYOUT_MT_PYRE_1F --repair 2 --previews
 
@@ -82,3 +98,16 @@ Caves are not modelled: their tilesets' rock is pinned as cliffs for the rules c
 battles alike.
 
     python3 tools/battle_env/cave_pins.py gTileset_MeteorFalls --sheet /tmp/mf.png --write
+
+Under the sea (`gTileset_Underwater`) the water's blue is the floor every metatile is drawn over,
+so the water test would pass over all of the rock: `--sea-floor` leaves it out
+(`data/diorama/tilesets/underwater.json`).
+
+## The report
+
+    python3 tools/battle_env/report.py --before build/battle_env/before --after build/battle_env/after \
+        --out build/battle_env/report --extra night=build/battle_env/night \
+        --meta "branch, commit, date" --appendix notes.html
+
+`page/index.html` is a page with no `<html>` of its own (a browser shows it as it is); with
+`img/` beside it, it is the whole report.
