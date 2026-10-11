@@ -10,11 +10,13 @@
 #include "diorama/far_field.h"
 #include "diorama/gl_loader.h"
 #include "diorama/gl_grade.h"
+#include "diorama/gl_lamps.h"
 #include "diorama/gl_light.h"
 #include "diorama/gl_quality.h"
 #include "diorama/gl_shadow.h"
 #include "diorama/gl_terrain_renderer.h"
 #include "diorama/metatile_atlas.h"
+#include "diorama/props.h"
 #include "diorama/rules.generated.h"
 #include "diorama/rules.h"
 #include "diorama/terrain_mesh.h"
@@ -73,6 +75,7 @@ static GLint sPixelScaleLocation;
 static GLint sPixelOffsetLocation;
 static GLint sSaturationLocation;
 static struct DioramaLightUniforms sLightUniforms;
+static struct DioramaLampUniforms sLampUniforms;
 /* The tree model's colour line this frame (TreeTint): faded = scale * baked + offset. */
 static float sTreeScale[3] = {1.0f, 1.0f, 1.0f};
 static float sTreeOffset[3];
@@ -188,6 +191,7 @@ static const char sTerrainFragmentShader[] =
     "  return texture(shadowMap, vec3(p.xy, p.z - 0.0015));\n"
     "}\n"
     DIORAMA_GLSL_LIGHT
+    DIORAMA_GLSL_LAMPS
     "void main() {\n"
     "  if (shadowPass == 1) {\n"
     "    vec4 caster = textureLayer == 1 ? texture(baseImage, uv)\n"
@@ -212,6 +216,7 @@ static const char sTerrainFragmentShader[] =
     "  if (textureLayer == 3) texel.rgb = clamp(texel.rgb * pixelScale + pixelOffset, 0.0, 1.0);\n"
     "  color = vec4(Grade(texel.rgb) * Light(shade * mix(shadowAmbient, 1.0, SunLit()))\n"
     "             * Dapple(sceneWorldPosition), texel.a);\n"
+    "  color.rgb += Grade(texel.rgb) * Lamps(sceneWorldPosition);\n"
     "  color.rgb = Haze(color.rgb, viewDepth, sceneWorldPosition);\n"
     "}\n";
 
@@ -282,6 +287,7 @@ static bool CreateProgram(void)
     sPixelOffsetLocation = dglGetUniformLocation(sProgram, "pixelOffset");
     sSaturationLocation = dglGetUniformLocation(sProgram, "saturation");
     lightLocated = DioramaGLLight_Locate(sProgram, &sLightUniforms);
+    DioramaGLLamps_Locate(sProgram, &sLampUniforms);
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0
         && sFocalLengthLocation >= 0 && sAspectCorrectionLocation >= 0
         && sImageLocation >= 0
@@ -884,6 +890,17 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
                 SetTerrainMaterial(&cell->underlayMaterials[face], source->metatileId,
                                    DIORAMA_MATERIAL_BASE);
             }
+            {
+                /* A detail object stands here (props.h, gl_props.c): the
+                 * ground without the flat picture of it. */
+                uint16_t propGround;
+                uint8_t propLayer;
+
+                if (resolvedCells[gridIndex].pixelObjectId == 0
+                 && DioramaProps_GroundMaterial(snapshot, gridIndex, &propGround, &propLayer))
+                    SetTerrainMaterial(&cell->materials[DIORAMA_MATERIAL_FACE_TOP], propGround,
+                                       propLayer);
+            }
             for (face = 0; face < cell->measuredBandCount; face++)
             {
                 float middle;
@@ -1436,9 +1453,15 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
     dglUniformMatrix4fv(sLightMatrixLocation, 1, GL_FALSE, DioramaGLShadow_LightMatrix());
     dglUniform1f(sSaturationLocation, debug ? 1.0f : DioramaGLGrade_Saturation());
     if (debug)
+    {
         DioramaGLLight_ApplyNeutral(&sLightUniforms);
+        DioramaGLLamps_ApplyNone(&sLampUniforms);
+    }
     else
+    {
         DioramaGLLight_Apply(&sLightUniforms, cameraPitch);
+        DioramaGLLamps_Apply(&sLampUniforms);
+    }
     dglUniform3f(sPixelScaleLocation, 1.0f, 1.0f, 1.0f);
     dglUniform3f(sPixelOffsetLocation, 0.0f, 0.0f, 0.0f);
     dglActiveTexture(GL_TEXTURE0);

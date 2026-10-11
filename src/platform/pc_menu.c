@@ -15,6 +15,7 @@ static const char *const sLabels[PC_MENU_ITEM_COUNT] = {
     [PC_MENU_SHADOWS]      = "Shadows",
     [PC_MENU_LIGHTING]     = "Lighting",
     [PC_MENU_EFFECTS]      = "Effects",
+    [PC_MENU_DETAILS]      = "World details",
     [PC_MENU_ANTIALIASING] = "Anti-aliasing",
     [PC_MENU_PICTURE_SIZE] = "Game picture",
     [PC_MENU_FRAME_RATE]   = "Show frame rate",
@@ -25,7 +26,8 @@ static const char *const sLabels[PC_MENU_ITEM_COUNT] = {
 
 static bool Visible(const struct PcMenuState *menu, int item)
 {
-    return menu->hasCamera || (item != PC_MENU_CAMERA && item != PC_MENU_TREES);
+    return menu->hasCamera
+        || (item != PC_MENU_CAMERA && item != PC_MENU_TREES && item != PC_MENU_DETAILS);
 }
 
 void PcMenu_Open(struct PcMenuState *menu, const struct DisplaySettings *settings, bool vsync,
@@ -118,6 +120,10 @@ static unsigned int Change(struct PcMenuState *menu, int item, int direction, un
         return PC_MENU_CHANGED_QUALITY;
     case PC_MENU_EFFECTS:
         settings->effects = !settings->effects;
+        QualityValueChanged(settings);
+        return PC_MENU_CHANGED_QUALITY;
+    case PC_MENU_DETAILS:
+        settings->details = !settings->details;
         QualityValueChanged(settings);
         return PC_MENU_CHANGED_QUALITY;
     case PC_MENU_ANTIALIASING:
@@ -281,6 +287,9 @@ int PcMenu_Rows(const struct PcMenuState *menu, struct PcMenuRow *rows)
             break;
         case PC_MENU_EFFECTS:
             snprintf(row->value, sizeof(row->value), "%s", settings->effects ? "On" : "Off");
+            break;
+        case PC_MENU_DETAILS:
+            snprintf(row->value, sizeof(row->value), "%s", settings->details ? "On" : "Off");
             break;
         case PC_MENU_ANTIALIASING:
             if (settings->antialiasing == 0)

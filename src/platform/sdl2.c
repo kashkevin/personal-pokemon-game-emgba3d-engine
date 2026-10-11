@@ -47,6 +47,7 @@
 #include "diorama/gl_pc_overlay.h"
 #include "diorama/gl_quality.h"
 #include "diorama/gl_target.h"
+#include "diorama/props.h"
 #include "diorama/scene_snapshot.h"
 #include "diorama/tree_sprites.h"
 #include "multiplayer_menu.h"
@@ -251,6 +252,15 @@ static int EnvironmentCameraMode(int fallback)
     return SDL_strcasecmp(value, "diorama") == 0 ? DIORAMA_CAMERA_DIORAMA : DIORAMA_CAMERA_ADVENTURE;
 }
 
+// The world detail objects (diorama/props.h): the player's setting, unless
+// PKMN_DIORAMA_PROPS=0 turns them off for this run.
+static void ApplyDioramaDetails(void)
+{
+    const char *value = SDL_getenv("PKMN_DIORAMA_PROPS");
+
+    DioramaProps_SetEnabled(sDisplay.details && !(value != NULL && value[0] == '0'));
+}
+
 static void ApplyDioramaLook(void)
 {
     for (int mode = 0; mode < 2; mode++)
@@ -436,6 +446,7 @@ int main(int argc, char **argv)
     DioramaScene_Init();
     ApplyDioramaLook(); // before the game thread makes its first snapshot
     DioramaGLQuality_Set(DisplaySettings_ShadowMapSize(sDisplay.shadows), sDisplay.lighting, sDisplay.effects);
+    ApplyDioramaDetails();
     DioramaGL_SetOverlay(DrawPcOverlay); // the PC settings menu and the frame rate
 #endif
 #if defined(NATIVE_LINUX) || defined(_WIN32)
@@ -1005,9 +1016,11 @@ static void ApplyPcMenuResult(unsigned int bits)
         sDisplay.shadows = sPcMenu.settings.shadows;
         sDisplay.lighting = sPcMenu.settings.lighting;
         sDisplay.effects = sPcMenu.settings.effects;
+        sDisplay.details = sPcMenu.settings.details;
         sDisplay.antialiasing = sPcMenu.settings.antialiasing;
         sDisplay.qualityKept = true;
         DioramaGLQuality_Set(DisplaySettings_ShadowMapSize(sDisplay.shadows), sDisplay.lighting, sDisplay.effects);
+        ApplyDioramaDetails();
         DioramaGLTarget_Configure(sDisplay.mode == DISPLAY_MODE_WINDOWED ? 0 : sDisplay.height,
                                   sDisplay.antialiasing);
         store = true;
@@ -1329,9 +1342,9 @@ static void WriteBenchmarkLog(void)
     if (SDL_GetDesktopDisplayMode(SDL_GetWindowDisplayIndex(sdlWindow), &desktop) == 0)
         fprintf(log, "Display:  %dx%d at %d Hz\n", desktop.w, desktop.h, desktop.refresh_rate);
     fprintf(log, "Window:   %dx%d (%s)\n", windowWidth, windowHeight, DisplaySettings_ModeName(sDisplay.mode));
-    fprintf(log, "Quality:  %s (shadows %s, lighting %s, effects %s, anti-aliasing %s)\n",
+    fprintf(log, "Quality:  %s (shadows %s, lighting %s, effects %s, world details %s, anti-aliasing %s)\n",
             DisplaySettings_QualityName(sDisplay.quality), DisplaySettings_ShadowName(sDisplay.shadows),
-            sDisplay.lighting ? "on" : "off", sDisplay.effects ? "on" : "off",
+            sDisplay.lighting ? "on" : "off", sDisplay.effects ? "on" : "off", sDisplay.details ? "on" : "off",
             sDisplay.antialiasing == 0 ? "off" : sDisplay.antialiasing == 2 ? "2x" : sDisplay.antialiasing == 4 ? "4x" : "8x");
     fprintf(log, "Method:   VSync off; at each resolution the 3D scene is drawn at that size (offscreen and\n"
                  "          scaled into the window when the window is smaller); %d s counted after a %d s\n"

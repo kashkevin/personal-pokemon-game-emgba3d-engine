@@ -5,6 +5,7 @@
 #include <SDL2/SDL.h>
 
 #include "diorama/gl_grade.h"
+#include "diorama/gl_lamps.h"
 #include "diorama/gl_light.h"
 #include "diorama/gl_loader.h"
 #include "diorama/gl_shadow.h"
@@ -50,6 +51,7 @@ static GLint sSaturationLocation;
 static GLint sPixelScaleLocation;
 static GLint sPixelOffsetLocation;
 static struct DioramaLightUniforms sLightUniforms;
+static struct DioramaLampUniforms sLampUniforms;
 /* The crowns first (the shadow pass draws only them), then the trunks. */
 static struct TreeVertex sVertices[MAX_VERTICES];
 static unsigned sCrownVertexCount;
@@ -121,6 +123,7 @@ static const char sFragmentShader[] =
     "  return texture(shadowMap, vec3(p.xy, p.z - 0.0015));\n"
     "}\n"
     DIORAMA_GLSL_LIGHT
+    DIORAMA_GLSL_LAMPS
     "void main() {\n"
     "  vec4 texel = texture(image, uv);\n"
     "  if (texel.a < 0.5) discard;\n" /* alpha test: no colour, no depth */
@@ -128,6 +131,7 @@ static const char sFragmentShader[] =
     "  vec3 c = clamp(texel.rgb * pixelScale + pixelOffset, 0.0, 1.0);\n"
     "  color = vec4(Grade(c) * Light(mix(shadowAmbient, 1.0, SunLit()))\n"
     "             * Dapple(sceneWorldPosition), 1.0);\n"
+    "  color.rgb += Grade(c) * Lamps(sceneWorldPosition);\n"
     "  color.rgb = Haze(color.rgb, viewDepth, sceneWorldPosition);\n"
     "}\n";
 
@@ -198,6 +202,7 @@ static bool CreateProgram(void)
     sPixelScaleLocation = dglGetUniformLocation(sProgram, "pixelScale");
     sPixelOffsetLocation = dglGetUniformLocation(sProgram, "pixelOffset");
     lightLocated = DioramaGLLight_Locate(sProgram, &sLightUniforms);
+    DioramaGLLamps_Locate(sProgram, &sLampUniforms);
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0 && sFocalLengthLocation >= 0
         && sAspectCorrectionLocation >= 0 && sImageLocation >= 0
         && sShadowPassLocation >= 0 && sShadowEnabledLocation >= 0
@@ -441,6 +446,7 @@ void DioramaGLTreeSprites_Draw(float cameraX, float cameraZ, float cameraPitch,
     dglUniform3f(sPixelScaleLocation, scale[0], scale[1], scale[2]);
     dglUniform3f(sPixelOffsetLocation, offset[0], offset[1], offset[2]);
     DioramaGLLight_Apply(&sLightUniforms, cameraPitch);
+    DioramaGLLamps_Apply(&sLampUniforms);
     dglActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, sTexture);
     glEnable(GL_DEPTH_TEST);

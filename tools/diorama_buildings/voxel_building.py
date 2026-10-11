@@ -890,7 +890,7 @@ class Relief:
 
     def __init__(self, name, art, height, side, hull=0, bridge=0, foot=None, solid=False,
                  back=None, top_tile=None, against=False, seam=None, flank_tile=None,
-                 seam_x=((), ())):
+                 seam_x=((), ()), fill=None):
         self.name, self.art, self.height, self.side = name, art, height, side
         # A block of a longer run (a railing cut into blocks): `seam` is
         # (rows, open_s, open_n). The art's rows from `rows` on are the run
@@ -928,6 +928,10 @@ class Relief:
         # rows repeated, or, with `top_tile`, a stretch of drawing that is a
         # top in full - a glass case's, where the front one is two rows deep.
         self.top_tile = top_tile
+        # `fill` (v0, v1): the drawing's rows the depth is laid with instead
+        # (project-owned, for auto_buildings.py): a band from the middle of a
+        # roof, so the courses repeat its tiles, not its front eave.
+        self.fill = fill
         # `against`: the back is a wall. A top drawn deeper than the room in
         # front of it stops there and stands the rest of its rows up the wall.
         self.against = against
@@ -1045,6 +1049,12 @@ class Relief:
                     rows = z1 - zd
                     first = va + 1.0 if rows >= 2 else float(va)
                     course = max(1.0, rows - (first - va))
+                    if self.fill is not None:
+                        # the band, where this column's own top has it
+                        lo = max(first, float(self.fill[0]))
+                        hi = min(float(va + rows), float(self.fill[1]))
+                        if hi - lo >= 1.0:
+                            first, course = lo, hi - lo
                     edge = 1.0 if rows >= 2 and zd - z0 > 1 else 0.0
                     far = zd
                     while far > z0 + edge + 1e-6:

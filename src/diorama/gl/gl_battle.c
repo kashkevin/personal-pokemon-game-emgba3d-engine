@@ -34,6 +34,7 @@
 #include "diorama/gl_building_renderer.h"
 #include "diorama/gl_compositor.h"
 #include "diorama/gl_light.h"
+#include "diorama/props.h"
 #include "diorama/gl_loader.h"
 #include "diorama/gl_target.h"
 #include "diorama/gl_terrain_renderer.h"
@@ -1251,6 +1252,17 @@ static const struct DioramaResolvedCell *StageResolvedAt(const struct StageConte
     return &c->resolved[index];
 }
 
+/* How tall a detail object stands (props.h), tiles: its art's standing rows at its scale, a
+ * block's or a heap's own height. */
+static float PropTop(const struct DioramaProp *prop)
+{
+    float scale = (float)(prop->height16 != 0 ? prop->height16 : 16) / 16.0f;
+
+    if (prop->form == DIORAMA_PROP_BLOCK || prop->form == DIORAMA_PROP_MOUND)
+        return scale;
+    return scale * (float)(DioramaProps_ArtBottom(prop) - prop->artTop) / 16.0f;
+}
+
 static bool StageCellAt(void *context, int x, int y, struct DioramaStageCell *cell)
 {
     const struct StageContext *c = context;
@@ -1285,6 +1297,18 @@ static bool StageCellAt(void *context, int x, int y, struct DioramaStageCell *ce
         top = Tree3dsTop(source->treeSprite);
         if (!c->legacy)
             cell->north = Tree3dsNorth(source->treeSprite);
+    }
+    /* The overworld's detail objects (props.h): a sign, a fence, a lamp, a rock, a bush stands
+     * as tall as its art, so no battler is stood in one. Grass and flowers do not count: a
+     * wild Pokemon comes out of them, and the battlers' pictures are drawn over them. */
+    if (!c->legacy)
+    {
+        const struct DioramaProp *prop = DioramaProps_ForCell(c->snapshot, source);
+
+        if (prop != NULL && prop->kind != DIORAMA_PROP_KIND_GRASS
+         && prop->kind != DIORAMA_PROP_KIND_LONG_GRASS && prop->kind != DIORAMA_PROP_KIND_FLOWERS
+         && PropTop(prop) > top)
+            top = PropTop(prop);
     }
     switch (resolved->shape)
     {
