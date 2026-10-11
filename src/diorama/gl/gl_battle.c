@@ -1275,6 +1275,25 @@ static bool StageCellAt(void *context, int x, int y, struct DioramaStageCell *ce
     if (DioramaBuildings_CellAt(source->sourceLayoutId, source->sourceMapX, source->sourceMapY,
                                 &ground, &quarters, &modelTop) && modelTop > top)
         top = modelTop;
+    /* A room's wall standing in the cell: a model's heights are its surfaces seen from above,
+     * and a wall that is all face (a cabin's back wall in the middle of a ship's deck) has
+     * none, so ask for its upright face instead - at the height it reaches, in this cell
+     * (not the face of the cell to the north, which a battler may stand right before). */
+    if (!c->legacy && top < 1.0f)
+    {
+        static const float heights[3] = {0.75f, 1.25f, 1.75f};
+        float x0 = (float)source->sourceMapX, faceZ;
+
+        for (unsigned h = 0; h < 3; ++h)
+        {
+            if (!DioramaBuildings_FrontAt(source->sourceLayoutId, source->sourceMapX,
+                                          source->sourceMapY, x0, x0 + 1.0f, heights[h], &faceZ)
+             || faceZ <= (float)source->sourceMapY + 0.01f)
+                break;
+            if (heights[h] + 0.25f > top)
+                top = heights[h] + 0.25f;
+        }
+    }
     south = StageResolvedAt(c, x, y + 1, NULL);
     if ((IsVoxelTree(resolved)
       || (south != NULL && IsVoxelTree(south) && south->structureHeight == 1))
