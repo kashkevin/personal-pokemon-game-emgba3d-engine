@@ -215,14 +215,17 @@ def seam_art(layout, spec, art, height, ground, ground_px):
         out.paste(art, (0, 0))
         opx = out.load()
         for (i, j) in south:
-            cell = layout.building_art(x + i, y + j + 1, 1, 1, ground, ground_px=ground_px,
+            # as many cells south as `height` rows take (one, but for a relief taller than a
+            # cell: the caves' rock, battle_room_specs.py), as far as the map goes
+            rows = min((height + 15) // 16, layout.h - (y + j + 1))
+            cell = layout.building_art(x + i, y + j + 1, 1, rows, ground, ground_px=ground_px,
                                        upper=spec["relief"].get("upper", False))
             cpx = cell.load()
             for k in range(16):
                 u = i * 16 + k
                 if px[u, h * 16 - 1][3] < 128 or cpx[k, 0][3] < 128:
                     continue
-                for v in range(height):
+                for v in range(min(height, rows * 16)):
                     opx[u, h * 16 + v] = cpx[k, v]
                 if carries(cell, k, height + 1):
                     open_s.add(u)
@@ -598,7 +601,16 @@ def interior_specs(spec):
             full.paste(layout.cell_image(layout.metatile(x, y)), (x * 16, y * 16))
     fpx = full.load()
     floors = [layout.cell_image(m).load() for m in room["ground"]]
-    pieces = voxel_relief_fixes.furniture_pieces(spec["name"], room["pieces"])
+    raw = room["pieces"]
+    if callable(raw):
+        # a room read off its cells (battle_room_auto.py), around the pieces of the rooms
+        # modelled before it that stand in it (placed below, as in any room)
+        taken = set()
+        for p, rx, ry, _, _ in reuse_pieces(layout):
+            pw, ph = p["size"]
+            taken |= {(rx + i, ry + j) for j in range(ph) for i in range(pw)}
+        raw = raw(layout, taken)
+    pieces = voxel_relief_fixes.furniture_pieces(spec["name"], raw)
     # Floor is a pixel the floor metatile has there too - and, inside a
     # piece's shape, one that the open floor reaches through such pixels: a
     # counter top can be painted in the floor's own cream, but its outline
@@ -1259,14 +1271,15 @@ def pack_atlas(images):
     tall, narrow drawing - a room's side wall - empty, and a small room took
     a page of half a megabyte. Returns ((width, height), {key: (ox, oy)})."""
     order = sorted(images, key=lambda kv: (-kv[1].size[1], -kv[1].size[0]))
-    sizes = sorted(((w, h) for w in (64, 128, 256, 512, 1024)
-                    for h in (64, 128, 256, 512, 1024) if w <= 8 * h and h <= 8 * w),
+    sizes = sorted(((w, h) for w in (64, 128, 256, 512, 1024, 2048)
+                    for h in (64, 128, 256, 512, 1024, 2048) if w <= 8 * h and h <= 8 * w
+                    and w * h <= MAX_TEXTURE[0] * MAX_TEXTURE[1]),
                    key=lambda s: (s[0] * s[1], s[1]))
     for tw, th in sizes:
         spots = _skyline(order, tw, th)
         if spots is not None:
             return (tw, th), spots
-    raise SystemExit("building art does not fit a 1024x1024 texture")
+    raise SystemExit("building art does not fit a %dx%d texture" % MAX_TEXTURE)
 
 
 def _skyline(order, tw, th):
@@ -1290,7 +1303,10 @@ def _skyline(order, tw, th):
     return spots
 
 
-MAX_TEXTURE = (512, 512)   # one page in VRAM; ctr_voxel.c caches four
+# One page in the 3DS's VRAM was 512 x 512 (ctr_voxel.c caches four). The PC renderer's pages
+# are GL textures (export_gl.py, gl_building_renderer.c): the battle rooms' Gyms and halls
+# (battle_room_specs.py) take up to four megatexels (a byte each on the PC: palette slots).
+MAX_TEXTURE = (2048, 2048)
 
 
 def texel_offset(x, y, width):
@@ -1419,7 +1435,7 @@ def export(models, path):
         images += [(("p", key), img) for key, img in patches.items()]
         (tw, th), spots = pack_atlas(images)
         if tw * th > MAX_TEXTURE[0] * MAX_TEXTURE[1]:
-            raise SystemExit("%s: building page %dx%d exceeds the console's %dx%d"
+            raise SystemExit("%s: building page %dx%d exceeds %dx%d"
                              % (recs[0][6], tw, th, MAX_TEXTURE[0], MAX_TEXTURE[1]))
         page = len(pages)
         tex = bytearray(tw * th * 2)

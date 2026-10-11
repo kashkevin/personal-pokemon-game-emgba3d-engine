@@ -44,6 +44,10 @@
 #include "gba/defines.h"
 #include "platform/display_settings.h"
 #include "constants/map_types.h"
+#ifdef DIORAMA_BATTLE_ENV_TEST
+#include "diorama/battle_env_test.h"
+#include "platform/png_write.h"
+#endif
 
 #define DEG (3.14159265358979323846f / 180.0f)
 #define GBA_W 240.0f
@@ -2071,6 +2075,218 @@ static void SceneLayout(const struct Layout *layout, int sceneW, int sceneH, str
     scene->scale = layout->scale * ky;
 }
 
+#ifdef DIORAMA_BATTLE_ENV_TEST
+/*
+ * The battle-environment test capture (TEST BUILDS ONLY, battle_env_test.h):
+ * on the frame asked for, the world is drawn afresh and its depth read back
+ * to say what the battle camera sees - how much of the picture shows nothing
+ * (the backdrop art), floor, upright surfaces (walls, fronts, trunks, cards)
+ * and slopes, how much stands above the battlers' ground, and how far away
+ * the scenery behind the opponent is - then the window is written as a PNG
+ * and the numbers as JSON beside it.
+ */
+#define TEST_DEPTH_BINS 800
+static struct
+{
+    const char *stem;
+    bool measured;
+    int w, h, band;
+    unsigned long all, allVoid, allFloor, allUpright, allSlope, allEdge;
+    unsigned long top, topVoid, topFloor, topUpright, topSlope, topEdge, topRaised, topNear;
+    unsigned long hist[TEST_DEPTH_BINS];
+    float ground, minY, maxY;
+} sTest;
+
+static void TestPoint(const float *depth, int w, int px, int py, float focal, float aspect,
+                      float sinP, float cosP, float *out, float *linear)
+{
+    const float nearD = 0.1f, farD = DIORAMA_FAR_DEPTH;
+    float d = depth[py * w + px], ndc = 2.0f * d - 1.0f;
+    float lin = 2.0f * farD * nearD / (farD + nearD - ndc * (farD - nearD));
+    float ndcX = (px + 0.5f) / (float)w * 2.0f - 1.0f;
+    float ndcY = (py + 0.5f) / (float)sTest.h * 2.0f - 1.0f;
+    float relX = ndcX * lin * GBA_W / (2.0f * focal * aspect);
+    float vertical = (ndcY - gDioramaCameraRig.screenOffsetY) * lin * GBA_H / (2.0f * focal);
+    float a = sinP * lin - cosP * vertical, b = cosP * lin + sinP * vertical;
+
+    out[0] = sBattle.view.x + relX;
+    out[1] = gDioramaCameraRig.height - a;
+    out[2] = sBattle.view.z + b - gDioramaCameraRig.distance;
+    *linear = lin;
+}
+
+static void TestMeasureWorld(const struct Layout *scene, float focal, float aspect)
+{
+    int w = scene->outW, h = scene->outH, tw, th, msaa;
+    float sinP = sinf(sBattle.view.pitch), cosP = cosf(sBattle.view.pitch);
+    float *depth;
+
+    DioramaGLTarget_GetLastSize(&tw, &th, &msaa);
+    memset(&sTest.all, 0, sizeof(sTest) - offsetof(__typeof__(sTest), all));
+    sTest.w = w;
+    sTest.h = h;
+    sTest.ground = sBattle.view.ground;
+    sTest.minY = 1e9f;
+    sTest.maxY = -1e9f;
+    /* the band above the opponent's feet (picture row 80 of 160) */
+    sTest.band = (int)(scene->gameY + 80.0f * scene->scale);
+    if (msaa > 0)
+    {
+        SDL_Log("Battle env test: multisampled scene, depth not measured");
+        return;
+    }
+    depth = malloc((size_t)w * h * sizeof(float));
+    if (depth == NULL)
+        return;
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    glReadPixels(0, 0, w, h, GL_DEPTH_COMPONENT, GL_FLOAT, depth);
+    for (int py = 0; py + 1 < h; py += 2)
+    {
+        int rowFromTop = h - 1 - py;
+        bool top = rowFromTop < sTest.band;
+
+        for (int px = 0; px + 1 < w; px += 2)
+        {
+            float p[3], px1[3], py1[3], lin, lin1, lin2, n[3], len, ny;
+            bool isVoid = depth[py * w + px] >= 0.99999f;
+
+            ++sTest.all;
+            if (top)
+                ++sTest.top;
+            if (isVoid)
+            {
+                ++sTest.allVoid;
+                if (top)
+                    ++sTest.topVoid;
+                continue;
+            }
+            TestPoint(depth, w, px, py, focal, aspect, sinP, cosP, p, &lin);
+            if (p[1] < sTest.minY)
+                sTest.minY = p[1];
+            if (p[1] > sTest.maxY)
+                sTest.maxY = p[1];
+            if (top)
+            {
+                int bin = (int)(lin * 2.0f);
+                sTest.hist[bin < 0 ? 0 : bin >= TEST_DEPTH_BINS ? TEST_DEPTH_BINS - 1 : bin]++;
+                if (p[1] > sTest.ground + 0.75f)
+                    ++sTest.topRaised;
+                if (lin < 6.0f)
+                    ++sTest.topNear;
+            }
+            if (depth[py * w + px + 1] >= 0.99999f || depth[(py + 1) * w + px] >= 0.99999f)
+                goto edge;
+            TestPoint(depth, w, px + 1, py, focal, aspect, sinP, cosP, px1, &lin1);
+            TestPoint(depth, w, px, py + 1, focal, aspect, sinP, cosP, py1, &lin2);
+            if (fabsf(lin1 - lin) > 0.03f * lin || fabsf(lin2 - lin) > 0.03f * lin)
+                goto edge;
+            {
+                float ax = px1[0] - p[0], ay = px1[1] - p[1], az = px1[2] - p[2];
+                float bx = py1[0] - p[0], by = py1[1] - p[1], bz = py1[2] - p[2];
+
+                n[0] = ay * bz - az * by;
+                n[1] = az * bx - ax * bz;
+                n[2] = ax * by - ay * bx;
+            }
+            len = sqrtf(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+            if (len <= 1e-9f)
+                goto edge;
+            ny = fabsf(n[1]) / len;
+            if (ny > 0.85f)
+            {
+                ++sTest.allFloor;
+                if (top)
+                    ++sTest.topFloor;
+            }
+            else if (ny < 0.40f)
+            {
+                ++sTest.allUpright;
+                if (top)
+                    ++sTest.topUpright;
+            }
+            else
+            {
+                ++sTest.allSlope;
+                if (top)
+                    ++sTest.topSlope;
+            }
+            continue;
+        edge:
+            ++sTest.allEdge;
+            if (top)
+                ++sTest.topEdge;
+        }
+    }
+    free(depth);
+    sTest.measured = true;
+}
+
+static float TestPercentile(float q)
+{
+    unsigned long total = 0, run = 0;
+
+    for (int i = 0; i < TEST_DEPTH_BINS; i++)
+        total += sTest.hist[i];
+    if (total == 0)
+        return -1.0f;
+    for (int i = 0; i < TEST_DEPTH_BINS; i++)
+    {
+        run += sTest.hist[i];
+        if (run >= q * total)
+            return (i + 0.5f) * 0.5f;
+    }
+    return TEST_DEPTH_BINS * 0.5f;
+}
+
+static double Share(unsigned long part, unsigned long whole)
+{
+    return whole ? (double)part / (double)whole : 0.0;
+}
+
+static void TestWriteCapture(const struct Layout *layout)
+{
+    char path[600];
+    uint8_t *pixels = malloc((size_t)layout->outW * layout->outH * 4);
+    FILE *f;
+
+    if (pixels != NULL)
+    {
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadPixels(0, 0, layout->outW, layout->outH, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+        SDL_snprintf(path, sizeof(path), "%s.png", sTest.stem);
+        PngWrite_RGBA(path, pixels, layout->outW, layout->outH, true);
+        free(pixels);
+    }
+    SDL_snprintf(path, sizeof(path), "%s.json", sTest.stem);
+    f = fopen(path, "w");
+    if (f != NULL)
+    {
+        fprintf(f, "{\n \"window\": [%d, %d], \"scene\": [%d, %d], \"measured\": %s,\n",
+                layout->outW, layout->outH, sTest.w, sTest.h, sTest.measured ? "true" : "false");
+        fprintf(f, " \"view\": {\"x\": %.3f, \"z\": %.3f, \"ground\": %.3f, \"pitch_deg\": %.2f, "
+                   "\"distance\": %.3f, \"focal\": %.2f, \"row\": %.2f},\n",
+                sBattle.view.x, sBattle.view.z, sBattle.view.ground, sBattle.view.pitch / DEG,
+                sBattle.view.distance, sBattle.view.focal, sBattle.view.row);
+        fprintf(f, " \"all\": {\"void\": %.4f, \"floor\": %.4f, \"upright\": %.4f, \"slope\": %.4f, "
+                   "\"edge\": %.4f},\n",
+                Share(sTest.allVoid, sTest.all), Share(sTest.allFloor, sTest.all),
+                Share(sTest.allUpright, sTest.all), Share(sTest.allSlope, sTest.all),
+                Share(sTest.allEdge, sTest.all));
+        fprintf(f, " \"band\": {\"rows\": %d, \"void\": %.4f, \"floor\": %.4f, \"upright\": %.4f, "
+                   "\"slope\": %.4f, \"edge\": %.4f, \"raised\": %.4f, \"near6\": %.4f, "
+                   "\"depth_median\": %.2f, \"depth_p90\": %.2f},\n",
+                sTest.band, Share(sTest.topVoid, sTest.top), Share(sTest.topFloor, sTest.top),
+                Share(sTest.topUpright, sTest.top), Share(sTest.topSlope, sTest.top),
+                Share(sTest.topEdge, sTest.top), Share(sTest.topRaised, sTest.top),
+                Share(sTest.topNear, sTest.top), TestPercentile(0.5f), TestPercentile(0.9f));
+        fprintf(f, " \"world_y\": [%.3f, %.3f]\n}\n", sTest.minY, sTest.maxY);
+        fclose(f);
+    }
+    sTest.stem = NULL;
+    DioramaBattleEnvTest_CaptureWritten();
+}
+#endif
+
 /* The world from this frame's view: drawn, or the copy of it if the camera
  * has not moved since. It is drawn as the field's scene is, at the chosen
  * render size and with the chosen antialiasing (gl_target.h: offscreen and
@@ -2096,6 +2312,10 @@ static void DrawWorld(const struct Layout *layout)
     DioramaGL_DrawBattleWorld(sBattle.view.x, sBattle.view.z, sBattle.view.pitch, focal, aspect,
                               scene.outW, scene.outH);
     DrawCurtain(&scene, focal, aspect);
+#ifdef DIORAMA_BATTLE_ENV_TEST
+    if (sTest.stem != NULL)
+        TestMeasureWorld(&scene, focal, aspect);
+#endif
     gDioramaCameraRig.active = false;
     glViewport(0, 0, scene.outW, scene.outH);
     DrawBackdrop(&scene);
@@ -2266,6 +2486,12 @@ bool DioramaGLBattle_Present(SDL_Window *window)
         return false;
     MeasureFrame();
     world = sBattle.sceneLayers != 0;
+#ifdef DIORAMA_BATTLE_ENV_TEST
+    sTest.stem = DioramaBattleEnvTest_CaptureStem();
+    sTest.measured = false;
+    if (sTest.stem != NULL)
+        sWorldCache.valid = false; /* drawn afresh, so its depth can be read */
+#endif
     glViewport(0, 0, layout.outW, layout.outH);
     glDisable(GL_SCISSOR_TEST);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -2288,6 +2514,10 @@ bool DioramaGLBattle_Present(SDL_Window *window)
     if (world)
         DrawIntroBars(&layout);
     glDisable(GL_BLEND);
+#ifdef DIORAMA_BATTLE_ENV_TEST
+    if (sTest.stem != NULL)
+        TestWriteCapture(&layout);
+#endif
     EndFrameMeasure();
     return true;
 }

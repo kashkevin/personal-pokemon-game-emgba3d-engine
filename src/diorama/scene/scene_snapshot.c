@@ -441,6 +441,20 @@ static bool CopyCellVisual(const struct MapLayout *layout, u16 metatileId,
     return true;
 }
 
+/* Whether the live map's cell (x, y) is no longer what the layout itself draws there
+ * (DIORAMA_CELL_CHANGED): compared with the layout's own data, not with
+ * gMapHeader.mapLayout, which a generated floor (Trainer Hill) may stand in for. */
+static bool CellChanged(const struct DioramaSceneSnapshot *snapshot, int x, int y, int mapX, int mapY)
+{
+    const struct MapLayout *layout = GetMapLayout(snapshot->mapLayoutId);
+
+    if (layout == NULL || layout->map == NULL || x < 0 || y < 0
+     || x >= layout->width || y >= layout->height)
+        return false;
+    return (layout->map[y * layout->width + x] & MAPGRID_METATILE_ID_MASK)
+        != MapGridGetMetatileIdAt(mapX, mapY);
+}
+
 static bool TryCopyConnectedCell(struct DioramaSceneSnapshot *snapshot,
                                  int mapX, int mapY,
                                  struct DioramaCellSnapshot *cell)
@@ -582,6 +596,8 @@ static bool CopyCells(struct DioramaSceneSnapshot *snapshot)
                 cell->sourceMapNum = snapshot->mapNum;
                 cell->sourceLayoutId = snapshot->mapLayoutId;
                 cell->flags = DIORAMA_CELL_SOURCE_VALID;
+                if (CellChanged(snapshot, cell->sourceMapX, cell->sourceMapY, mapX, mapY))
+                    cell->flags |= DIORAMA_CELL_CHANGED;
             }
             else if (TryCopyConnectedCell(snapshot, mapX, mapY, cell))
                 continue;

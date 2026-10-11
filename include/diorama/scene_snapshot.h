@@ -62,6 +62,10 @@ enum DioramaCellFlags
     DIORAMA_CELL_SOURCE_VALID = 1 << 0,
     DIORAMA_CELL_CONNECTED = 1 << 1,
     DIORAMA_CELL_BORDER = 1 << 2,
+    /* The map's own cell whose metatile is no longer its layout's (a script or the game
+     * changed it: a door opened, a light went out, a barrier switched, a floor generated):
+     * a modelled building drawn from the layout does not stand on it (buildings.c). */
+    DIORAMA_CELL_CHANGED = 1 << 3,
 };
 
 enum DioramaObjectFlags
