@@ -241,6 +241,9 @@ AUTO_ROOMS = [
     "LAYOUT_ABANDONED_SHIP_ROOMS2_1F",
     "LAYOUT_ABANDONED_SHIP_HIDDEN_FLOOR_CORRIDORS",
     "LAYOUT_MOSSDEEP_CITY_SPACE_CENTER_2F",
+    # proved with its sand ridges' cross pieces left out (AUTO_DROP): the back wall and the
+    # long ridges running from it stand
+    "LAYOUT_LAVARIDGE_TOWN_GYM_B1F",
 ]
 
 
@@ -299,6 +302,11 @@ AUTO_DROP = {
     "LAYOUT_ABANDONED_SHIP_CORRIDORS_B1F": ["thing_12_6", "side_w"],
     "LAYOUT_ABANDONED_SHIP_HIDDEN_FLOOR_CORRIDORS": ["thing_0_3", "thing_0_5", "thing_12_4", "side_e"],
     "LAYOUT_MOSSDEEP_CITY_SPACE_CENTER_2F": ["thing_1_4", "side_w"],
+    # Lavaridge Gym B1F: the floor's shading under these pieces differs from what they would
+    # stand on (auto_rooms.py --repair 3); the back wall and the long ridges stand without them.
+    "LAYOUT_LAVARIDGE_TOWN_GYM_B1F": ["side_w", "thing_0_12", "thing_0_4", "thing_10_10", "thing_10_15",
+                                      "thing_10_4", "thing_14_10", "thing_14_4", "thing_4_4",
+                                      "thing_5_11", "thing_5_4", "thing_8_4", "side_e"],
     # The Battle Palace's arena is impassable (the player watches from its edge), so its carpet
     # read as things and its two middle pillars as walls down to the arena's foot: from the
     # battle camera the carpet stood up as a block (the survey's picture). The arena stays the
