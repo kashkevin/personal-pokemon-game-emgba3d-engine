@@ -2,6 +2,7 @@
 #define GUARD_DIORAMA_GL_LAMPS_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "diorama/gl_loader.h"
 
@@ -33,6 +34,16 @@ void DioramaGLLamps_SetFocus(float x, float z);
  * battle's frame or a debug view has none. */
 void DioramaGLLamps_SetActive(bool active);
 float DioramaGLLamps_Strength(void);
+
+/* How dark it is for lights to show: 1 at night, 0.55 in the evening, 0 by
+ * day and wherever the sky does not reach (indoors, caves, under the sea).
+ * mapType: gMapHeader.mapType; timeOfDay: gTimeOfDay. */
+float DioramaGLLamps_NightFor(uint8_t mapType, uint8_t timeOfDay);
+/* This frame's night (the compositor, from the scene): the buildings' windows
+ * glow with it. */
+void DioramaGLLamps_SetNight(float night);
+/* The night for the pass being drawn: 0 outside the field pass. */
+float DioramaGLLamps_Night(void);
 bool DioramaGLLamps_Locate(GLuint program, struct DioramaLampUniforms *uniforms);
 /* This frame's lamps into a program in use (none in a shadow or debug pass:
  * call DioramaGLLamps_ApplyNone). */

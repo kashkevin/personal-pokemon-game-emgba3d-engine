@@ -6,6 +6,9 @@
 #include <string.h>
 #include <SDL2/SDL.h>
 
+#include "global.h"
+#include "constants/map_types.h"
+#include "constants/rtc.h"
 #include "diorama/gl_lamps.h"
 
 /* The shaders' spelling of DIORAMA_MAX_LAMPS. */
@@ -22,6 +25,7 @@ static float sPlaces[MAX_SCENE_LAMPS][4];
 static unsigned sCount;
 static float sStrength;
 static bool sActive;
+static float sNight;
 static float sFocusX;
 static float sFocusZ;
 /* The nearest DIORAMA_MAX_LAMPS, worked out when the lamps or the focus move. */
@@ -56,6 +60,25 @@ void DioramaGLLamps_SetActive(bool active)
 float DioramaGLLamps_Strength(void)
 {
     return sActive && sCount != 0 ? sStrength : 0.0f;
+}
+
+float DioramaGLLamps_NightFor(uint8_t mapType, uint8_t timeOfDay)
+{
+    /* The maps the game tints for the time of day (MapHasNaturalLight). */
+    if (mapType != MAP_TYPE_TOWN && mapType != MAP_TYPE_CITY && mapType != MAP_TYPE_ROUTE
+     && mapType != MAP_TYPE_OCEAN_ROUTE)
+        return 0.0f;
+    return timeOfDay == TIME_NIGHT ? 1.0f : timeOfDay == TIME_EVENING ? 0.55f : 0.0f;
+}
+
+void DioramaGLLamps_SetNight(float night)
+{
+    sNight = night < 0.0f ? 0.0f : night > 1.0f ? 1.0f : night;
+}
+
+float DioramaGLLamps_Night(void)
+{
+    return sActive ? sNight : 0.0f;
 }
 
 static void FindNearest(void)

@@ -208,6 +208,8 @@ static void MakeSnapshot(uint16_t layoutId, float ground)
         cell->mapY = (int16_t)(sSnapshot.gridOriginY + i / DIORAMA_GRID_WIDTH);
         cell->metatileId = GRASS;
         cell->sourceLayoutId = layoutId;
+        cell->sourceMapX = cell->mapX;
+        cell->sourceMapY = cell->mapY;
         cell->flags = DIORAMA_CELL_SOURCE_VALID;
         sResolved[i].groundHeight = ground;
         sResolved[i].topHeight = ground;
@@ -222,6 +224,12 @@ static int CellIndex(int mapX, int mapY)
 static void Put(int mapX, int mapY, uint16_t metatileId)
 {
     sSnapshot.cells[CellIndex(mapX, mapY)].metatileId = metatileId;
+}
+
+/* A modelled building standing in the sign's cell (buildings.h). */
+static bool TakeSignCell(uint16_t layout, int x, int y)
+{
+    return layout == LAYOUT_LITTLEROOT_TOWN && x == 58 && y == 60;
 }
 
 static void TestBuild(void)
@@ -265,6 +273,12 @@ static void TestBuild(void)
     count = DioramaProps_Build(&sSnapshot, sResolved, sInstances, 16, &complete);
     CHECK(count == 3);
     sResolved[CellIndex(58, 60)].pixelObjectId = 0;
+    /* So is a cell a modelled building stands in. */
+    DioramaProps_SetCellTaken(TakeSignCell);
+    count = DioramaProps_Build(&sSnapshot, sResolved, sInstances, 16, &complete);
+    CHECK(count == 3);
+    DioramaProps_SetCellTaken(NULL);
+    CHECK(DioramaProps_Build(&sSnapshot, sResolved, sInstances, 16, &complete) == 4);
     /* A storm bends them further; fog leaves them stiller. */
     {
         float calm = sInstances[sizeof(sInstances) > 0 ? 1 : 0].sway;

@@ -55,7 +55,11 @@ $(DIORAMA_TREES3DS_SOURCE) $(DIORAMA_TREES3DS_HEADER) &: $(DIORAMA_TREES3DS_ART)
 # tools/diorama_buildings/README.md): every building that reproduces its own
 # drawing pixel for pixel becomes a textured model; export_gl.py compiles them
 # with palette-slot pages for the renderer.
-DIORAMA_BUILDINGS_TOOLS := $(sort $(wildcard tools/diorama_buildings/*.py)) \
+# (export_gl.py and window_glow.py read the generator's output, not its input:
+# a change to them compiles the table again without modelling every building again.)
+DIORAMA_BUILDINGS_EXPORT := tools/diorama_buildings/export_gl.py tools/diorama_buildings/window_glow.py
+DIORAMA_BUILDINGS_TOOLS := $(filter-out $(DIORAMA_BUILDINGS_EXPORT) tools/diorama_buildings/test_%.py, \
+	$(sort $(wildcard tools/diorama_buildings/*.py))) \
 	tools/diorama_buildings/relief_fixes.json tools/diorama_rules/emerald_compositor.py
 DIORAMA_BUILDINGS_BIN := build/diorama/buildings.bin
 DIORAMA_BUILDINGS_SOURCE := src/data/diorama/buildings.generated.c
@@ -68,5 +72,5 @@ $(DIORAMA_BUILDINGS_BIN): $(DIORAMA_BUILDINGS_TOOLS) $(DIORAMA_RULE_CATALOGS) \
 	@mkdir -p $(@D)
 	python3 tools/diorama_buildings/gen_voxel_buildings.py --output $@ > $(@D)/buildings.log
 
-$(DIORAMA_BUILDINGS_SOURCE): $(DIORAMA_BUILDINGS_BIN) tools/diorama_buildings/export_gl.py
+$(DIORAMA_BUILDINGS_SOURCE): $(DIORAMA_BUILDINGS_BIN) $(DIORAMA_BUILDINGS_EXPORT)
 	python3 tools/diorama_buildings/export_gl.py $< $@

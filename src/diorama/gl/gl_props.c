@@ -11,7 +11,7 @@
 
 #include "global.h"
 #include "fieldmap.h"
-#include "constants/rtc.h"
+#include "diorama/buildings.h"
 #include "diorama/gl_grade.h"
 #include "diorama/gl_lamps.h"
 #include "diorama/gl_light.h"
@@ -464,6 +464,12 @@ static bool MetatileEntries(uint16_t layoutId, uint16_t metatileId,
     return true;
 }
 
+/* A modelled building's cell shows the model (its own hedge or rock). */
+static bool CellTaken(uint16_t layout, int x, int y)
+{
+    return DioramaBuildings_CellAt(layout, x, y, NULL, NULL, NULL);
+}
+
 bool DioramaGLProps_Init(void)
 {
     static struct MeshVertex sSlab[SLAB_QUADS * 6];
@@ -477,6 +483,7 @@ bool DioramaGLProps_Init(void)
     if (!CreateProgram())
         return false;
     DioramaProps_SetMetatileSource(MetatileEntries);
+    DioramaProps_SetCellTaken(CellTaken);
     sSlabVertexCount = BuildSlab(sSlab);
     sCardVertexCount = (uint32_t)(Faces(card) - card);
     dglGenBuffers(1, &sSlabBuffer);
@@ -894,8 +901,7 @@ void DioramaGLProps_Sync(const struct DioramaSceneSnapshot *snapshot,
         static float sLampPlaces[128][4];
         unsigned lamps = 0;
 
-        lampStrength = snapshot->timeOfDay == TIME_NIGHT ? 1.0f
-                     : snapshot->timeOfDay == TIME_EVENING ? 0.55f : 0.0f;
+        lampStrength = DioramaGLLamps_NightFor(snapshot->mapType, snapshot->timeOfDay);
         for (i = 0; i < out && lamps < 128; i++)
             if (sProps[i].flags & DIORAMA_PROP_LIGHT)
             {

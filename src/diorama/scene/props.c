@@ -244,6 +244,7 @@ static const struct DioramaPropTileset *sByRulesTileset[MAX_RULES_TILESETS];
 static uint8_t sEntryIndex[TILESET_COUNT][DIORAMA_TILE_COUNT];
 static uint16_t sRulesLayout[MAX_LAYOUT_ID];
 static DioramaPropMetatileEntries sMetatileSource;
+static DioramaPropCellTaken sCellTaken;
 
 bool DioramaProps_Enabled(void)
 {
@@ -253,6 +254,11 @@ bool DioramaProps_Enabled(void)
 void DioramaProps_SetEnabled(bool enabled)
 {
     SDL_AtomicSet(&sDisabled, enabled ? 0 : 1);
+}
+
+void DioramaProps_SetCellTaken(DioramaPropCellTaken taken)
+{
+    sCellTaken = taken;
 }
 
 const struct DioramaPropTileset *DioramaProps_Tilesets(unsigned *count)
@@ -565,6 +571,9 @@ unsigned DioramaProps_Build(const struct DioramaSceneSnapshot *snapshot,
         unsigned p;
 
         if (prop == NULL || resolvedCells[i].pixelObjectId != 0)
+            continue;
+        if (sCellTaken != NULL && (cell->flags & DIORAMA_CELL_SOURCE_VALID)
+         && sCellTaken(cell->sourceLayoutId, cell->sourceMapX, cell->sourceMapY))
             continue;
         if (prop->standOn != 0)
         {

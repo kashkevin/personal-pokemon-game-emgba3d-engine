@@ -83,6 +83,7 @@ static GLint sLightMatrixLocation;
 static GLint sShadowMapLocation;
 static GLint sShadowAmbientLocation;
 static GLint sSaturationLocation;
+static GLint sWindowLightLocation;
 static struct DioramaLightUniforms sLightUniforms;
 static struct DioramaLampUniforms sLampUniforms;
 static struct Instance sInstances[MAX_INSTANCES];
@@ -170,16 +171,27 @@ static const char sFragmentShader[] =
     "}\n"
     DIORAMA_GLSL_LIGHT
     DIORAMA_GLSL_LAMPS
+    "uniform float windowLight;\n"
     "void main() {\n"
     "  ivec2 size = textureSize(page, 0);\n"
     "  ivec2 texel = clamp(ivec2(floor(pagePixel)), ivec2(0), size - ivec2(1));\n"
-    "  int slot = int(texelFetch(page, texel, 0).r * 255.0 + 0.5);\n"
+    /* r: the palette slot; g: a window's brightness (window_glow.py) */
+    "  vec2 pageTexel = texelFetch(page, texel, 0).rg;\n"
+    "  int slot = int(pageTexel.r * 255.0 + 0.5);\n"
     "  if (slot == 255) discard;\n"
     "  if (shadowPass == 1) { color = vec4(1.0); return; }\n"
-    "  color = vec4(Grade(texelFetch(palette, ivec2(slot, paletteRow), 0).rgb)\n"
+    "  vec3 texelColour = Grade(texelFetch(palette, ivec2(slot, paletteRow), 0).rgb);\n"
+    "  color = vec4(texelColour\n"
     "             * Light(shade * mix(shadowAmbient, 1.0, SunLit()))\n"
     "             * Dapple(sceneWorldPosition), 1.0);\n"
-    "  color.rgb += Grade(texelFetch(palette, ivec2(slot, paletteRow), 0).rgb) * Lamps(sceneWorldPosition);\n"
+    "  color.rgb += texelColour * Lamps(sceneWorldPosition);\n"
+    /* After dark the windows are lit from inside: a warm light through the
+     * glass, its panes and glare still drawn, each window its own brightness. */
+    "  if (pageTexel.g > 0.0 && windowLight > 0.0) {\n"
+    "    float detail = dot(texelColour, vec3(0.30, 0.50, 0.20));\n"
+    "    vec3 lit = vec3(1.00, 0.76, 0.40) * (0.80 + 0.55 * detail) * (0.62 + 0.38 * pageTexel.g);\n"
+    "    color.rgb = mix(color.rgb, lit, windowLight * 0.92);\n"
+    "  }\n"
     "  color.rgb = Haze(color.rgb, viewDepth, sceneWorldPosition);\n"
     "}\n";
 
@@ -246,6 +258,7 @@ static bool CreateProgram(void)
     sShadowMapLocation = dglGetUniformLocation(sProgram, "shadowMap");
     sShadowAmbientLocation = dglGetUniformLocation(sProgram, "shadowAmbient");
     sSaturationLocation = dglGetUniformLocation(sProgram, "saturation");
+    sWindowLightLocation = dglGetUniformLocation(sProgram, "windowLight");
     lightLocated = DioramaGLLight_Locate(sProgram, &sLightUniforms);
     DioramaGLLamps_Locate(sProgram, &sLampUniforms);
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0 && sFocalLengthLocation >= 0
@@ -317,7 +330,32 @@ static GLuint PageTexture(unsigned page)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height, 0, GL_RED, GL_UNSIGNED_BYTE, slots);
+    {
+        /* Two channels: the palette slot and the windows' glow. */
+        size_t count = (size_t)width * height;
+        uint8_t *texels = malloc(count * 2);
+        uint8_t *glow = calloc(count, 1);
+
+        if (texels != NULL && glow != NULL)
+        {
+            size_t i;
+
+            DioramaBuildings_PageWindows(page, glow);
+            for (i = 0; i < count; i++)
+            {
+                texels[i * 2] = slots[i];
+                texels[i * 2 + 1] = glow[i];
+            }
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, width, height, 0, GL_RG, GL_UNSIGNED_BYTE, texels);
+        }
+        else
+        {
+            /* no room for the windows: the slots alone (g reads 0) */
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height, 0, GL_RED, GL_UNSIGNED_BYTE, slots);
+        }
+        free(texels);
+        free(glow);
+    }
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     return sPageTextures[page];
 }
@@ -626,6 +664,8 @@ void DioramaGLBuildings_Draw(float cameraX, float cameraZ, float cameraPitch,
     dglUniform1f(sSaturationLocation, DioramaGLGrade_Saturation());
     DioramaGLLight_Apply(&sLightUniforms, cameraPitch);
     DioramaGLLamps_Apply(&sLampUniforms);
+    if (sWindowLightLocation >= 0)
+        dglUniform1f(sWindowLightLocation, DioramaGLLamps_Night());
     dglUniformMatrix4fv(sLightMatrixLocation, 1, GL_FALSE, DioramaGLShadow_LightMatrix());
     dglActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, sPaletteTexture);

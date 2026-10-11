@@ -88,5 +88,13 @@ unsigned DioramaBuildings_PageCount(void);
  * colour) or DIORAMA_BUILDING_TRANSPARENT. */
 bool DioramaBuildings_Page(unsigned page, unsigned *width, unsigned *height,
                            const uint8_t **slots);
+/*
+ * The windows of a page (graphics overhaul, building details; found by
+ * tools/diorama_buildings/window_glow.py on the buildings of outdoor maps):
+ * each texel of a pane gets its window's brightness, 1 to 255, in `glow`
+ * (width * height bytes, row by row, which the caller has zeroed). False
+ * when the page has no windows.
+ */
+bool DioramaBuildings_PageWindows(unsigned page, uint8_t *glow);
 
 #endif // GUARD_DIORAMA_BUILDINGS_H

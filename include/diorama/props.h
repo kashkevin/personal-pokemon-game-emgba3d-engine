@@ -135,6 +135,11 @@ struct DioramaPropInstance
  * quality settings): their cells are drawn flat again. */
 bool DioramaProps_Enabled(void);
 void DioramaProps_SetEnabled(bool enabled);
+/* A cell a modelled building stands in (buildings.h: its hedge, its rock)
+ * shows the model, not a prop: the renderer passes the test (layout cell
+ * x, y of the cell's own map). NULL: none. */
+typedef bool (*DioramaPropCellTaken)(uint16_t layout, int x, int y);
+void DioramaProps_SetCellTaken(DioramaPropCellTaken taken);
 
 /* The catalogue (props.c), and an entry's tileset by its symbol. */
 const struct DioramaPropTileset *DioramaProps_Tilesets(unsigned *count);

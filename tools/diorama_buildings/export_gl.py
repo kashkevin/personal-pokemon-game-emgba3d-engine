@@ -17,6 +17,9 @@ metatiles draw it with most often wins, then the first slot of the pair.
 The rest of the file (header, models, placements, masks, vertices) is kept
 byte for byte, up to the first page's texels, and read by
 src/diorama/scene/buildings.c the way the 3DS port's voxel_building.c reads it.
+
+The windows of the buildings of outdoor maps (window_glow.py) follow as runs
+of page texels: page, row, first column, length << 8 | brightness.
 """
 
 import os
@@ -28,6 +31,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import expansion_assets  # noqa: E402
 import voxel_building as vb  # noqa: E402
+import window_glow  # noqa: E402
 
 MAGIC = b"VXB7"
 TRANSPARENT = 255
@@ -108,10 +112,12 @@ def main():
     layouts = expansion_assets.emerald_layouts(vb.ROOT)
     texels_start = page_table[0][2] if pages else len(blob)
     out_pages = []
+    window_runs = []
     misses = 0
     near = 0
     for page, (w, h, offset) in enumerate(page_table):
-        finder = SlotFinder(layouts[page_layout[page] - 1]["id"])
+        layout = layouts[page_layout[page] - 1]
+        finder = SlotFinder(layout["id"])
         texels = struct.unpack_from("<%dH" % (w * h), blob, offset)
         rows = bytearray(w * h)
         for y in range(h):
@@ -128,6 +134,18 @@ def main():
                     near += 1
                 rows[y * w + x] = slot
         out_pages.append((w, h, bytes(rows)))
+        # Windows glow only outdoors (a town's or a route's buildings).
+        if layout.get("primary_tileset") == "gTileset_General":
+            def colour(x, y, texels=texels, w=w):
+                value = texels[texel_offset(x, y, w)]
+                if not value & 1:
+                    return None
+                return (((value >> 11) & 31) * 8, ((value >> 6) & 31) * 8, ((value >> 1) & 31) * 8)
+
+            wall = window_glow.wall_mask(w, h, window_glow.page_triangles(blob, page))
+            pieces = window_glow.find_windows(w, h, colour, wall)
+            for (y, x, length, level) in window_glow.runs(page, pieces):
+                window_runs.append((page, y, x, length << 8 | level))
 
     table = blob[:texels_start]
     offsets, data = [], bytearray()
@@ -152,9 +170,17 @@ def main():
         f.write("const unsigned int gDioramaBuildingsPageOffsets[%d] = {%s};\n"
                 % (max(1, len(offsets)), ", ".join(str(o) for o in offsets) or "0"))
         f.write(literal("gDioramaBuildingsPageSlots", bytes(data) or b"\0", 4))
+        f.write("const unsigned int gDioramaBuildingsWindowRunCount = %d;\n" % len(window_runs))
+        f.write("const unsigned short gDioramaBuildingsWindowRuns[%d][4] = {\n" % max(1, len(window_runs)))
+        for run in window_runs:
+            f.write("    {%d, %d, %d, %d},\n" % run)
+        if not window_runs:
+            f.write("    {0, 0, 0, 0},\n")
+        f.write("};\n")
         f.write("#endif\n")
     print("diorama buildings: %d pages, %d texels, %d by the tileset pair's palettes, "
-          "%d by the nearest colour -> %s" % (len(out_pages), len(data), near, misses, sys.argv[2]))
+          "%d by the nearest colour, %d window runs -> %s"
+          % (len(out_pages), len(data), near, misses, len(window_runs), sys.argv[2]))
 
 
 if __name__ == "__main__":

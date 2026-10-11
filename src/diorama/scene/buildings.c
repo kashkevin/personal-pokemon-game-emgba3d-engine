@@ -37,6 +37,9 @@ extern const unsigned char gDioramaBuildingsTable[];
 extern const unsigned int gDioramaBuildingsPageCount;
 extern const unsigned int gDioramaBuildingsPageOffsets[];
 extern const unsigned char gDioramaBuildingsPageSlots[];
+/* page, row, first column, length << 8 | brightness (export_gl.py) */
+extern const unsigned int gDioramaBuildingsWindowRunCount;
+extern const unsigned short gDioramaBuildingsWindowRuns[][4];
 
 struct BuildingPage
 {
@@ -569,5 +572,31 @@ bool DioramaBuildings_Page(unsigned page, unsigned *width, unsigned *height,
     *height = sPages[page].h;
     *slots = gDioramaBuildingsPageSlots + gDioramaBuildingsPageOffsets[page];
     return true;
+}
+
+bool DioramaBuildings_PageWindows(unsigned page, uint8_t *glow)
+{
+    unsigned w;
+    unsigned h;
+    unsigned i;
+    bool any = false;
+
+    if (!sReady || page >= sPageCount || glow == NULL)
+        return false;
+    w = sPages[page].w;
+    h = sPages[page].h;
+    for (i = 0; i < gDioramaBuildingsWindowRunCount; i++)
+    {
+        const unsigned short *run = gDioramaBuildingsWindowRuns[i];
+        unsigned length = run[3] >> 8;
+        unsigned level = run[3] & 0xFF;
+
+        /* a run off its page is a stale table's: left out */
+        if (run[0] != page || run[1] >= h || run[2] >= w || length == 0 || run[2] + length > w)
+            continue;
+        memset(glow + (size_t)run[1] * w + run[2], (int)level, length);
+        any = true;
+    }
+    return any;
 }
 #endif // ENABLE_DIORAMA

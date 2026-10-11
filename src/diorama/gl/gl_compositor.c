@@ -1532,6 +1532,8 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         /* The street lamps' light round the camera (gl_lamps.h), this pass only. */
         DioramaGLLamps_SetFocus(cameraX, cameraZ);
         DioramaGLLamps_SetActive(!sTerrainDebug);
+        DioramaGLLamps_SetNight(DioramaGLLamps_NightFor(sRenderedSceneSnapshot.mapType,
+                                                        sRenderedSceneSnapshot.timeOfDay));
         {
             float sky[3] = {0.035f, 0.055f, 0.07f}; /* indoors and caves: the dark */
             bool outdoors = SkyColour(&sRenderedSceneSnapshot, sky);

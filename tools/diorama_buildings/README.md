@@ -36,7 +36,14 @@ gradenGnostic/pokeemerald-multiplatform (MIT) for the logic it reuses.
 * `export_gl.py` (new): the 3DS port stores page texels as RGBA5551 in the PICA200's
   tiled order; the PC renderer needs palette slots in plain rows so the game's live
   palettes (fades, day/night tint) colour the buildings exactly as they colour the
-  terrain. The rest of `buildings.bin` is kept byte for byte.
+  terrain. The rest of `buildings.bin` is kept byte for byte. It also writes the
+  windows `window_glow.py` finds.
+* `window_glow.py` (new, project-owned; tests in `test_window_glow.py`): the windows of
+  the buildings of outdoor maps, found on their pages (glass-coloured panes in a darker
+  frame, on faces that stand upright, never a wall's own colour), which glow in the
+  evening and at night. `python3 window_glow.py buildings.bin OUT_DIR PAGE...` draws
+  pages with what it found marked, to look over (game art: not committed). A change to
+  it or to `export_gl.py` compiles the table again without remodelling the buildings.
 
 The runtime side is `src/diorama/scene/buildings.c` (a port of the 3DS project's
 `3ds_port/src/voxel/voxel_building.c`) and `src/diorama/gl/gl_building_renderer.c`.
