@@ -61,6 +61,7 @@ enum DioramaPropKind
     DIORAMA_PROP_KIND_FENCE,
     DIORAMA_PROP_KIND_ROCK,
     DIORAMA_PROP_KIND_BUSH,
+    DIORAMA_PROP_KIND_DECOR, /* pots, baskets, crates, bollards */
     DIORAMA_PROP_KIND_COUNT
 };
 

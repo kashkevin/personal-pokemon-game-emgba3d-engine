@@ -105,9 +105,54 @@ static const struct DioramaProp sRustboro[] = {
     IRON_FENCE_NS(0x31D, 4),
 };
 
-/* Slateport: the round bushes by the contest hall and the museum. */
+/* Slateport: the market's baskets, pots and crates, the round bushes by the
+ * contest hall and the museum, the bollards on the pier. */
+#define BASKET(id) { PROP(id, DECOR, MOUND, 1, LOWER), .shadowIndex = 4, .shadowFromRow = 9, \
+                     .height16 = 8 }
 static const struct DioramaProp sSlateport[] = {
+    BASKET(0x20C),
+    { PROP(0x213, FLOWERS, CROSS, 1, LOWER), .depth = 6 },
+    { PROP(0x214, FLOWERS, CROSS, 1, LOWER), .depth = 6 },
+    BASKET(0x21B),
+    BASKET(0x21C),
+    BASKET(0x223),
+    BASKET(0x22B),
     { PROP(0x243, BUSH, MOUND, 1, LOWER), .height16 = 11 },
+    { PROP(0x32D, DECOR, MOUND, 1, LOWER), .shadowIndex = 4, .shadowFromRow = 11, .height16 = 9 },
+    { PROP(0x32E, DECOR, BLOCK, 1, LOWER), .shadowIndex = 4, .shadowFromRow = 4, .height16 = 9 },
+    { PROP(0x32F, DECOR, BLOCK, 1, LOWER), .shadowIndex = 4, .shadowFromRow = 4, .height16 = 9 },
+    { PROP(0x33E, DECOR, BLOCK, 1, LOWER), .shadowIndex = 4, .shadowFromRow = 4, .height16 = 9 },
+    { PROP(0x33F, DECOR, BLOCK, 1, LOWER), .shadowIndex = 4, .shadowFromRow = 4, .height16 = 9 },
+    { PROP(0x344, FLOWERS, CROSS, 1, LOWER), .depth = 6 },
+};
+
+/* Mauville (and Verdanturf, Routes 110, 111, 117, 118): rows of wooden posts.
+ * A row running north-south is the east-west row turned to face east. */
+#define WOOD_POSTS_EW(id) { PROP(id, FENCE, SLAB, 1, LOWER), .shadowIndex = 0xF, .shadowFromRow = 12, \
+                            .depth = 4 }
+#define WOOD_POSTS_NS(id, x) { PROP(id, FENCE, SLAB, 1, LOWER), .shadowIndex = 0xF, .shadowFromRow = 12, \
+                               .depth = 4, .facing = 1, .offsetX = (x), .artMetatile = 0x291 }
+static const struct DioramaProp sMauville[] = {
+    WOOD_POSTS_EW(0x273),
+    WOOD_POSTS_NS(0x288, -4),
+    WOOD_POSTS_NS(0x28A, 4),
+    WOOD_POSTS_EW(0x282),
+    WOOD_POSTS_EW(0x290),
+    WOOD_POSTS_EW(0x291),
+    WOOD_POSTS_EW(0x292),
+    WOOD_POSTS_NS(0x2B1, 4),
+};
+
+/* Lilycove: the blue railing along the harbour (Rustboro's iron fence's
+ * kind: shadow colour 6 under it). */
+static const struct DioramaProp sLilycove[] = {
+    { PROP(0x250, FENCE, SLAB, 1, LOWER), .shadowIndex = 6, .shadowFromRow = 14, .depth = 2 },
+    { PROP(0x251, FENCE, SLAB, 1, LOWER), .shadowIndex = 6, .shadowFromRow = 14, .depth = 2 },
+    { PROP(0x252, FENCE, SLAB, 1, LOWER), .shadowIndex = 6, .shadowFromRow = 14, .depth = 2 },
+    { PROP(0x258, FENCE, SLAB, 1, LOWER), .shadowIndex = 6, .shadowFromRow = 14, .depth = 2, .facing = 1,
+      .offsetX = -5, .artMetatile = 0x251 },
+    { PROP(0x25A, FENCE, SLAB, 1, LOWER), .shadowIndex = 6, .shadowFromRow = 14, .depth = 2, .facing = 1,
+      .offsetX = 4, .artMetatile = 0x251 },
 };
 
 /* Caves: heaps of rocks on the floor. */
@@ -126,6 +171,8 @@ static const struct DioramaPropTileset sTilesets[] = {
     TILESET("gTileset_Rustboro", sRustboro),
     TILESET("gTileset_Cave", sCave),
     TILESET("gTileset_Slateport", sSlateport),
+    TILESET("gTileset_Mauville", sMauville),
+    TILESET("gTileset_Lilycove", sLilycove),
 };
 
 #define TILESET_COUNT (sizeof(sTilesets) / sizeof(sTilesets[0]))
@@ -164,7 +211,7 @@ const struct DioramaPropTileset *DioramaProps_Tilesets(unsigned *count)
 const char *DioramaProps_KindName(uint8_t kind)
 {
     static const char *const sNames[DIORAMA_PROP_KIND_COUNT] = {
-        "none", "grass", "long grass", "flowers", "sign", "lamp", "fence", "rock", "bush",
+        "none", "grass", "long grass", "flowers", "sign", "lamp", "fence", "rock", "bush", "decor",
     };
 
     return kind < DIORAMA_PROP_KIND_COUNT ? sNames[kind] : "?";
