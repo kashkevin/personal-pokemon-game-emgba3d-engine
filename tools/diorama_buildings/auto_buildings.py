@@ -89,6 +89,8 @@ OVERRIDES = {
     ("FallarborTown", 1, 6): {"top": 3},
     ("FallarborTown", 14, 7): {"top": 3},
     ("Route113", 33, 5): {"cols": (32, 35), "facade": 24},   # the glass workshop
+    # Slateport's museum: the sea wall along its back is not its roof.
+    ("SlateportCity", 30, 26): {"top": 23},
     # Not buildings: a door in a cliff under Trainer Hill, Sky Pillar's top.
     ("Route111", 31, 113): {"skip": True},
     ("SkyPillar_Top", 16, 14): {"skip": True},
