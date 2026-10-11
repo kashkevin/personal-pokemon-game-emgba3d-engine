@@ -98,6 +98,71 @@ def champion_room():
 
 
 
+# ── The Battle Frontier's battle halls ────────────────────────────────────
+#
+# The Battle Dome's hall (20 x 10 cells) and the Battle Factory's (13 x 12) are drawn as one
+# picture each and have no collision (the player never walks in them), so their cells say
+# nothing about walls: modelled by hand, as the Champion's room.
+#
+# The Dome, from the top of the drawing:
+#     rows  0- 40  the audience's seats, an aisle every 64 columns
+#     rows 40- 48  the rail in front of them
+#     rows 48- 64  the BATTLE FRONTIER banner
+#     rows 64-160  the arena floor and the two trainers' stands - left as the floor
+# The banner and the rail stand 24 rows on row 64; the seats are their top, laid back at 45
+# degrees - the stand rising away from the arena; side walls of the banner close the hall.
+#
+# The Factory, from the top:
+#     rows  0- 40  the back wall: white pillars, yellow windows, the dark door in the middle,
+#                  the red and navy bands along its foot
+#     corners      the wall turns 45 degrees at both back corners (x 0-16 and 192-208), its
+#                  foot from (16, 40) down to (0, 56), its bands drawn along it
+#     rows 40-192  the hexagon floor and the arena - left as the floor
+# The wall stands its whole 40 rows, the corners as chamfered walls of the same height, the
+# sides on from them to the front.
+
+DOME_W, DOME_H = 20 * 16, 10 * 16
+DOME_SIDE = (0, 40, 16, 64)        # the rail and the banner's end
+FACTORY_W, FACTORY_H = 13 * 16, 12 * 16
+FACTORY_SIDE = (16, 0, 32, 40)     # a pillar
+
+
+# Verdanturf's Battle Tent hall (13 x 9 cells, no collision either): the tent's back wall
+# across rows 0-32 - its canvas between red trims, the doorway at its east end - on the grass.
+# It stands its 32 rows; side walls of its canvas close the hall.
+VERD_W, VERD_H = 13 * 16, 9 * 16
+VERD_SIDE = (16, 0, 32, 32)        # a stretch of the canvas
+
+
+def verdanturf_tent_hall():
+    facet, own_shell, piece = _helpers()
+    return own_shell([
+        piece("wall", [(0, 0, VERD_W, 32)], 32, fill=16, foot=32, side=VERD_SIDE),
+        piece("side_w", [], 32, side=VERD_SIDE, walls=[((0, VERD_H), (0, 32))]),
+        piece("side_e", [], 32, side=VERD_SIDE, walls=[((VERD_W, 32), (VERD_W, VERD_H))]),
+    ])
+
+
+def dome_hall():
+    facet, own_shell, piece = _helpers()
+    return own_shell([
+        piece("wall", [(0, 0, DOME_W, 64)], 24, fill=16, foot=64, side=DOME_SIDE),
+        piece("side_w", [], 24, side=DOME_SIDE, walls=[((0, DOME_H), (0, 64))]),
+        piece("side_e", [], 24, side=DOME_SIDE, walls=[((DOME_W, 64), (DOME_W, DOME_H))]),
+    ])
+
+
+def factory_hall():
+    facet, own_shell, piece = _helpers()
+    return own_shell([
+        facet("corner_w", (0, 16, 56), (16, 0, 40), 40,
+              walls=[((0, FACTORY_H), (0, 56))], side=FACTORY_SIDE, cells=[(0, 11)]),
+        facet("corner_e", (192, 0, 40), (208, 16, 56), 40,
+              walls=[((FACTORY_W, 56), (FACTORY_W, FACTORY_H))], side=FACTORY_SIDE, cells=[(12, 11)]),
+        piece("wall", [(16, 0, 192, 40)], 40, fill=16, foot=40, side=FACTORY_SIDE),
+    ])
+
+
 # ── The other rooms battles take place in, read off their cells ───────────
 #
 # battle_room_auto.py's first reading (walls, edges, furniture), for every room a battle can
@@ -206,6 +271,21 @@ def battle_room_specs():
             "name": "champion",
             "interior": {"layout": "LAYOUT_EVER_GRANDE_CITY_CHAMPIONS_ROOM", "ground": [0x313],
                          "pieces": champion_room()},
+        },
+        {
+            "name": "frontier_dome_hall",
+            "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_BATTLE_DOME_BATTLE_ROOM",
+                         "ground": [0x309], "pieces": dome_hall()},
+        },
+        {
+            "name": "tent_verdanturf_hall",
+            "interior": {"layout": "LAYOUT_VERDANTURF_TOWN_BATTLE_TENT_BATTLE_ROOM",
+                         "ground": [0x1], "pieces": verdanturf_tent_hall()},
+        },
+        {
+            "name": "frontier_factory_hall",
+            "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_BATTLE_FACTORY_BATTLE_ROOM",
+                         "ground": [0x2a2], "pieces": factory_hall()},
         },
     ] + [spec for spec in (_auto("auto_" + layout[len("LAYOUT_"):].lower(), layout)
                            for layout in AUTO_ROOMS) if spec is not None]
