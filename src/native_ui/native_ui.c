@@ -29,6 +29,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_Options,
     &gUiScreen_Pause,
     &gUiScreen_Party,
+    &gUiScreen_Summary,
 };
 
 static bool sInitialized;

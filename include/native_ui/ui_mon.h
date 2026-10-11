@@ -7,6 +7,8 @@
  * Names point at the game's own read-only strings. Only what the game has:
  * an Egg carries no level, HP, ability, item or moves.
  */
+#include <stdbool.h>
+
 #include "global.h"
 #include "native_ui/ui_kit.h"
 
@@ -51,5 +53,18 @@ int UiMon_Type(int engineType);
 const char *UiMon_StatusLabel(const struct UiMon *m, UiRGBA *colour);
 /* "{LV}12" in engine bytes */
 void UiMon_LevelText(u8 *dst, int size, int level);
+
+/* ---- the Pokémon group's shared pieces (PK.pokemon in the design's summary.js) */
+
+/* the pkui bevelled plate for small labels (H.tag); returns the right edge */
+int UiMon_Tag(int x, int y, const char *label, UiRGBA colour);
+/* the shiny star, 9x9 */
+void UiMon_Star(int x, int y);
+/* a sparkle centred at x, y (big: 7x7, else 5x5); NULL palette: the blue one */
+void UiMon_Sparkle(int x, int y, bool big, const UiRGBA *pal3);
+/* the four markings (bit i set: mark i on); returns the right edge */
+int UiMon_Markings(int x, int y, u8 marks, UiRGBA on, UiRGBA off);
+/* a photo-studio stage tinted by two types (enum UiTypeId); fills where the feet go */
+void UiMon_Stage(int x, int y, int w, int h, int type0, int type1, int floor, int shadow, int *feetY, int *cx);
 
 #endif // GUARD_NATIVE_UI_MON_H

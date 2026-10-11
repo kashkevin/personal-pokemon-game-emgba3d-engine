@@ -3,6 +3,7 @@
  * One Pokémon as the native UI's screens show it (see native_ui/ui_mon.h).
  * Called from screens' capture only (the game is parked). Project-owned.
  */
+#include <stdio.h>
 #include <string.h>
 
 #include "global.h"
@@ -15,8 +16,10 @@
 #include "constants/moves.h"
 #include "constants/party_menu.h"
 #include "constants/species.h"
+#include "native_ui/ui_draw.h"
 #include "native_ui/ui_mon.h"
 #include "native_ui/ui_text.h"
+#include "native_ui/ui_widgets.h"
 
 int UiMon_Type(int engineType)
 {
@@ -129,5 +132,75 @@ void UiMon_LevelText(u8 *dst, int size, int level)
     dst[0] = EOS;
     UiText_Append(dst, size, sLv);
     UiText_AppendNumber(dst, size, level, 1, false);
+}
+/* ---------------------------------------------------------------- the Pokémon group's pieces */
+
+int UiMon_Tag(int x, int y, const char *label, UiRGBA colour)
+{
+    struct UiRamp r = UiRampOf(colour, 0.4, 0.25, 0.6);
+    int w = UiCaps_Width(label) + 10;
+
+    UiG_Paint(UiM_Capsule(w, 11, true, true), x, y, r.base, &(struct UiPaint){r.ink, r.hi, r.lo, 0, 0, NULL, 0});
+    UiCaps_Draw(x + (w >> 1), y + 2, label, UI_P_TEXT_W, r.ink, UI_CAPS_SHADOW, UI_ALIGN_CENTER, UI_NONE);
+    return x + w;
+}
+
+void UiMon_Star(int x, int y)
+{
+    static const char *const sRows[] = {"....a....", "...aba...", "aaabcbaaa", "abbbcbbba", ".abbbbba.",
+                                        "..abbba..", ".abbabba.", ".aba.aba.", ".aa...aa."};
+    static const struct UiPixPal sPal[] = {{'a', UI_HEX(0xC04010)}, {'b', UI_HEX(0xF8C830)}, {'c', UI_HEX(0xFFF8D0)}};
+
+    UiW_Pix("pkstar", sRows, 9, sPal, 3, x, y, false);
+}
+
+void UiMon_Sparkle(int x, int y, bool big, const UiRGBA *pal3)
+{
+    static const char *const sSmall[] = {"..a..", "..b..", "abcba", "..b..", "..a.."};
+    static const char *const sLarge[] = {"...a...", "...b...", "..aba..", "abbcbba", "..aba..", "...b...", "...a..."};
+    UiRGBA a = pal3 != NULL ? pal3[0] : UI_HEX(0xA8C8F8), b = pal3 != NULL ? pal3[1] : UI_HEX(0xE0F0FF),
+           c = pal3 != NULL ? pal3[2] : UI_HEX(0xFFFFFF);
+    struct UiPixPal pal[3] = {{'a', a}, {'b', b}, {'c', c}};
+    char name[48];
+    int half = big ? 3 : 2;
+
+    snprintf(name, sizeof(name), "%s%08x%08x%08x", big ? "pkspl" : "pksps", (unsigned)a, (unsigned)b, (unsigned)c);
+    UiW_Pix(name, big ? sLarge : sSmall, big ? 7 : 5, pal, 3, x - half, y - half, false);
+}
+
+int UiMon_Markings(int x, int y, u8 marks, UiRGBA on, UiRGBA off)
+{
+    static const char *const sMarks[4][7] = {
+        {"..###..", ".#####.", "#######", "#######", "#######", ".#####.", "..###.."},
+        {"...#...", "..###..", "..###..", ".#####.", ".#####.", "#######", "#######"},
+        {".......", "#######", "#######", "#######", "#######", "#######", "......."},
+        {".##.##.", "#######", "#######", "#######", ".#####.", "..###..", "...#..."},
+    };
+
+    for (int i = 0; i < 4; i++)
+        UiG_Mask(UiM_Rows(sMarks[i], 7, NULL), x + i * 10, y, (marks >> i) & 1 ? on : off);
+    return x + 38;
+}
+
+void UiMon_Stage(int x, int y, int w, int h, int type0, int type1, int floor, int shadow, int *feetY, int *cx)
+{
+    const struct UiRamp *t0 = &gUiTypeRamps[type0 >= 0 ? type0 : UI_TYPE_NORMAL];
+    const struct UiRamp *t1 = &gUiTypeRamps[type1 >= 0 ? type1 : (type0 >= 0 ? type0 : UI_TYPE_NORMAL)];
+    int floorY = h - (floor > 0 ? floor : 34);
+    UiRGBA sky = UiMix(t0->hi, UI_P_PAPER, 0.62), wall = UiMix(t0->hi, UI_P_PAPER, 0.45);
+    UiRGBA fl = UiMix(t1->base, UI_P_PAPER, 0.42), fl2 = UiMix(t1->base, UI_P_PAPER, 0.3);
+    struct UiPattern dots = UiPat_Dots(8, 2, 0, 0, true);
+    int sw = shadow > 0 ? shadow : 64;
+
+    UiG_Rect(x, y, w, floorY, sky);
+    UiG_Mask(UiM_Pattern(UiM_Rect(w, floorY), &dots), x, y, wall);
+    UiG_Rect(x, y + floorY, w, h - floorY, fl);
+    for (int yy = y + floorY + 3; yy < y + h; yy += 3)
+        UiG_HLine(x, yy, w, fl2);
+    UiG_HLine(x, y + floorY, w, UiMix(t1->lo, UI_P_PAPER, 0.3));
+    UiG_HLine(x, y + floorY + 1, w, UiMix(t1->hi, UI_P_PAPER, 0.5));
+    UiG_Mask(UiM_Ellipse(sw, 10), x + ((w - sw) >> 1), y + floorY + ((h - floorY) >> 1) - 5, UiMix(t1->lo, UI_P_INK, 0.25));
+    *feetY = y + floorY + ((h - floorY) >> 1) + 1;
+    *cx = x + (w >> 1);
 }
 #endif // ENABLE_NATIVE_UI

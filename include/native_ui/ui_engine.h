@@ -185,6 +185,67 @@ struct NativePartyMenu
 };
 bool32 PartyMenu_NativeUiState(struct NativePartyMenu *out);
 
+/* ---------------------------------------------------------------- summary (pokemon_summary_screen.c) */
+
+enum NativeSummaryPhase
+{
+    NATIVE_SUMMARY_NONE,
+    NATIVE_SUMMARY_LOADING,
+    NATIVE_SUMMARY_BROWSE,      /* up/down: Pokémon, left/right: pages */
+    NATIVE_SUMMARY_TURNING,     /* a page or a Pokémon is changing */
+    NATIVE_SUMMARY_MOVE_SELECT, /* a move page's cursor (moveCursor; 4: CANCEL) */
+    NATIVE_SUMMARY_MOVE_SWITCH, /* moving moveCursor to moveCursor2 */
+    NATIVE_SUMMARY_REPLACE,     /* learning newMove: the move to forget (4: the new move itself) */
+    NATIVE_SUMMARY_CANT_FORGET, /* "HM moves can't be forgotten now." */
+    NATIVE_SUMMARY_CLOSING,
+};
+#define NATIVE_SUMMARY_LIST_MAX 30
+struct NativeSummaryEntry
+{
+    u8 index;                   /* in the engine's list */
+    u16 species;
+    u32 personality;
+    bool8 isEgg;
+    bool8 fainted;
+};
+struct NativeSummary
+{
+    u8 phase;
+    u8 mode;                    /* SUMMARY_MODE_* */
+    u8 page;                    /* PSS_PAGE_* */
+    u8 minPage;
+    u8 maxPage;
+    bool8 isBoxMon;
+    bool8 isEgg;
+    u8 monIndex;
+    u8 moveCursor;
+    u8 moveCursor2;
+    u16 newMove;
+    bool8 lockMons;
+    bool8 lockMoves;
+    bool8 canRename;            /* A on the info page renames (the game's rule) */
+    bool8 canRelearn;           /* START on a move page opens the move relearner */
+    bool8 ivEvShown;            /* the game shows IVs and EVs (its setting) */
+    bool8 isLucky;              /* a Lucky Pokémon (multiplayer trades) */
+    bool8 hideOT;               /* rental Pokémon: no Trainer shown */
+    struct Pokemon mon;         /* the Pokémon shown (a box Pokémon with its stats) */
+    u8 otName[PLAYER_NAME_LENGTH + 1];
+    u8 otGender;
+    u32 otId;
+    u8 nature;                  /* the memo's nature */
+    u8 statNature;              /* the nature its stats follow (a mint's) */
+    u8 ribbonCount;
+    u8 markings;
+    u16 ballItem;
+    u8 memo[200];               /* the Trainer Memo as the game writes it (colour codes kept) */
+    const u8 *eggState;
+    u8 listCount;
+    u8 listPos;                 /* the shown Pokémon's place in list[] */
+    struct NativeSummaryEntry list[NATIVE_SUMMARY_LIST_MAX];
+    bool8 ready;
+};
+bool32 Summary_NativeUiState(struct NativeSummary *out);
+
 /* ---------------------------------------------------------------- options (option_menu.c) */
 
 enum NativeOptionPhase

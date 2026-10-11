@@ -36,13 +36,14 @@ engine's own button presses. It never decides anything the engine decides.
 | `screens/ui_pause.c` | 4 pause menu (the engine's entries, the player submenu, Safari balls) and 10 save (the journal; "saved" only once the engine reports success **and** the save file is written) |
 | `screens/ui_options.c` | 11 options: the engine's six options; the second tab opens the PC's F10 menu |
 | `screens/ui_party.c` | 1 party: the engine's party menu in every mode the single and double layouts use (field, items, TMs, giving, battle, choosing for a challenge); the grid's directions and clicks become the engine's cursor presses; SELECT moves a Pokémon; the multi battles' layouts keep the game's screen |
+| `screens/ui_summary.c` | 5 summary: the clipboard over the engine's summary in all its modes (party, box, learning a move, the move order); the game's four pages (CONTEST MOVES takes the planned RIBBONS tab); the memo as the game writes it; Mega readiness from the game's forms, stones and Key Stone; IVs and EVs only where the game's setting shows them; Lucky from the multiplayer trades |
 | `screens/ui_mon.c` | one Pokémon as the screens show it (`ui_mon.h`): names, types, status, moves and PP, EXP |
 | `screens/ui_testcard.c` | the kit's test card (fidelity checks) |
 | `data/*` | generated: palette, label faces, icons (`tools/native_ui/gen_ui_data.js`), title layers (`gen_title_assets.py`) — in the UI art-direction workspace |
 
 Engine-side read-only accessors (all `#ifdef ENABLE_NATIVE_UI`, at the end of their files):
 `title_screen.c`, `main_menu.c`, `start_menu.c`, `field_screen_effect.c`, `option_menu.c`,
-`party_menu.c`, `text.c` (each window's last string, a copy of it as printed, whether its printer waits
+`party_menu.c`, `pokemon_summary_screen.c`, `text.c` (each window's last string, a copy of it as printed, whether its printer waits
 for a button), `window.c` (whether a window is on screen), `pokemon_icon.c`, `multiplayer.c`,
 `platform/sdl2.c` (save file writes, the F10 menu).
 

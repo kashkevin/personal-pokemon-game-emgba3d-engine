@@ -823,7 +823,15 @@ static const union AnimCmd sSpriteAnim_CategoryIcon2[] =
 
 static const union AnimCmd *const sSpriteAnimTable_CategoryIcons[] =
 {
+#ifdef PORTABLE
+    // CreateSprite reads the first sequence before ShowCategoryIcon starts the
+    // category's own (the summary's move details, the battle's move info). On
+    // the GBA that NULL reads the BIOS harmlessly; natively it faulted.
+    sSpriteAnim_CategoryIcon0,
+#else
     NULL,
+#endif
+#line 827 // gba-line
     sSpriteAnim_CategoryIcon0,
     sSpriteAnim_CategoryIcon1,
     sSpriteAnim_CategoryIcon2,
@@ -4869,3 +4877,245 @@ static void CB2_PssChangePokemonNickname(void)
 {
     ChangePokemonNicknameWithCallback(CB2_ReturnToSummaryScreenFromNamingScreen);
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "pokeball.h"
+#include "multiplayer_trade_effects.h"
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_summary.c) draws this screen in
+// place of its windows and sprites and follows this state; the input stays
+// here. Nothing below writes the game's state (no shared string buffers).
+
+// DoesMonOTMatchOwner without its gStringVar1 copy
+static bool32 NativeUiOTMatchesOwner(void)
+{
+    struct PokeSummary *sum = &sMonSummaryScreen->summary;
+    const u8 *name;
+    u32 trainerId;
+    u8 gender;
+
+    if (sMonSummaryScreen->monList.mons == gParties[B_TRAINER_OPPONENT_A])
+    {
+        u8 multiID = GetMultiplayerId() ^ 1;
+
+        trainerId = gLinkPlayers[multiID].trainerId & 0xFFFF;
+        gender = gLinkPlayers[multiID].gender;
+        name = gLinkPlayers[multiID].name;
+    }
+    else
+    {
+        trainerId = GetPlayerIDAsU32() & 0xFFFF;
+        gender = gSaveBlock2Ptr->playerGender;
+        name = gSaveBlock2Ptr->playerName;
+    }
+    return gender == sum->OTGender && trainerId == (sum->OTID & 0xFFFF)
+        && !StringCompareWithoutExtCtrlCodes(name, sum->OTName);
+}
+
+// the memo template's {DYNAMIC n} parts, as BufferMonTrainerMemo sets them
+static void NativeUiExpandMemo(u8 *dst, u32 size, const u8 *src, const u8 *const parts[6])
+{
+    u32 n = 0;
+
+    for (; *src != EOS && n + 1 < size; src++)
+    {
+        if (*src == CHAR_DYNAMIC && src[1] < 6)
+        {
+            const u8 *part = parts[*++src];
+
+            while (part != NULL && *part != EOS && n + 1 < size)
+                dst[n++] = *part++;
+            continue;
+        }
+        dst[n++] = *src;
+    }
+    dst[n] = EOS;
+}
+
+static void NativeUiTrainerMemo(u8 *dst, u32 size)
+{
+    struct PokeSummary *sum = &sMonSummaryScreen->summary;
+    const u8 *parts[6] = {sMemoNatureTextColor, sMemoMiscTextColor, gNaturesInfo[sum->nature].name, NULL, NULL,
+                          gText_EmptyString5};
+    u8 level[8];
+    u8 location[32];
+    const u8 *text;
+
+    if (sum->isEgg)
+    {
+        if (sum->sanity == 1)
+            text = gText_OddEggFoundByCouple;
+        else if (sum->metLocation == METLOC_FATEFUL_ENCOUNTER)
+            text = gText_PeculiarEggNicePlace;
+        else if (DidMonComeFromGBAGames() == FALSE || NativeUiOTMatchesOwner() == FALSE)
+            text = gText_PeculiarEggTrade;
+        else if (sum->metLocation == METLOC_SPECIAL_EGG)
+            text = (DidMonComeFromRSE() == TRUE) ? gText_EggFromHotSprings : gText_EggFromTraveler;
+        else
+            text = gText_OddEggFoundByCouple;
+        NativeUiExpandMemo(dst, size, text, parts);
+        return;
+    }
+    if (InBattleFactory() == TRUE || InSlateportBattleTent() == TRUE || IsInGamePartnerMon() == TRUE)
+    {
+        NativeUiExpandMemo(dst, size, gText_XNature, parts);
+        return;
+    }
+    ConvertIntToDecimalStringN(level, sum->metLevel == 0 ? EGG_HATCH_LEVEL : sum->metLevel, STR_CONV_MODE_LEFT_ALIGN, 3);
+    parts[3] = level;
+    if (sum->metLocation < MAPSEC_NONE)
+    {
+        GetMapNameHandleAquaHideout(location, sum->metLocation);
+        parts[4] = location;
+    }
+    if (NativeUiOTMatchesOwner() == TRUE)
+    {
+        if (sum->metLevel == 0)
+            text = (sum->metLocation >= MAPSEC_NONE) ? gText_XNatureHatchedSomewhereAt : gText_XNatureHatchedAtYZ;
+        else
+            text = (sum->metLocation >= MAPSEC_NONE) ? gText_XNatureMetSomewhereAt : gText_XNatureMetAtYZ;
+    }
+    else if (sum->metLocation == METLOC_FATEFUL_ENCOUNTER)
+    {
+        text = gText_XNatureFatefulEncounter;
+    }
+    else if (sum->metLocation != METLOC_IN_GAME_TRADE && DidMonComeFromGBAGames())
+    {
+        text = (sum->metLocation >= MAPSEC_NONE) ? gText_XNatureObtainedInTrade : gText_XNatureProbablyMetAt;
+    }
+    else
+    {
+        text = gText_XNatureObtainedInTrade;
+    }
+    NativeUiExpandMemo(dst, size, text, parts);
+}
+
+bool32 Summary_NativeUiState(struct NativeSummary *out)
+{
+    struct PokeSummary *sum;
+    u32 i;
+
+    memset(out, 0, sizeof(*out));
+    if (sMonSummaryScreen == NULL)
+        return FALSE;
+    if (gMain.callback2 == CB2_InitSummaryScreen)
+        out->phase = NATIVE_SUMMARY_LOADING;
+    else if (gMain.callback2 == MainCB2)
+        out->phase = NATIVE_SUMMARY_TURNING;
+    else
+        return FALSE;
+    sum = &sMonSummaryScreen->summary;
+    out->mode = sMonSummaryScreen->mode;
+    out->page = sMonSummaryScreen->currPageIndex;
+    out->minPage = sMonSummaryScreen->minPageIndex;
+    out->maxPage = sMonSummaryScreen->maxPageIndex;
+    out->isBoxMon = sMonSummaryScreen->isBoxMon;
+    out->monIndex = sMonSummaryScreen->curMonIndex;
+    out->moveCursor = sMonSummaryScreen->firstMoveIndex;
+    out->moveCursor2 = sMonSummaryScreen->secondMoveIndex;
+    out->newMove = sMonSummaryScreen->newMove;
+    out->lockMons = sMonSummaryScreen->lockMonFlag;
+    out->lockMoves = sMonSummaryScreen->lockMovesFlag;
+    out->isEgg = sum->isEgg;
+    if (out->phase == NATIVE_SUMMARY_LOADING && gMain.state < 11)
+        return TRUE; // LoadGraphics has not read the Pokémon yet
+    out->canRename = ShouldShowRename();
+    out->canRelearn = ShouldShowMoveRelearner();
+    out->ivEvShown = ShouldShowIvEvPrompt();
+    out->mon = sMonSummaryScreen->currentMon;
+    out->isLucky = MultiplayerLucky_IsLucky(&sMonSummaryScreen->currentMon);
+    StringCopyN(out->otName, sum->OTName, sizeof(out->otName) - 1);
+    out->otName[sizeof(out->otName) - 1] = EOS;
+    out->otGender = sum->OTGender;
+    out->otId = sum->OTID;
+    out->nature = sum->nature;
+    out->statNature = sum->mintNature;
+    out->ribbonCount = sum->ribbonCount;
+    out->markings = GetMonData(&sMonSummaryScreen->currentMon, MON_DATA_MARKINGS);
+    {
+        enum PokeBall ball = GetMonData(&sMonSummaryScreen->currentMon, MON_DATA_POKEBALL);
+
+        out->ballItem = ball < POKEBALL_COUNT ? gPokeBalls[ball].itemId : ITEM_NONE;
+    }
+    out->hideOT = InBattleFactory() == TRUE || InSlateportBattleTent() == TRUE;
+    NativeUiTrainerMemo(out->memo, sizeof(out->memo));
+    if (sum->isEgg)
+    {
+        if (sum->sanity == TRUE)
+            out->eggState = gText_EggWillTakeALongTime;
+        else if (sum->friendship <= 5)
+            out->eggState = gText_EggAboutToHatch;
+        else if (sum->friendship <= 10)
+            out->eggState = gText_EggWillHatchSoon;
+        else if (sum->friendship <= 40)
+            out->eggState = gText_EggWillTakeSomeTime;
+        else
+            out->eggState = gText_EggWillTakeALongTime;
+    }
+    // the list the summary walks through (the party, or a box)
+    for (i = 0; i <= sMonSummaryScreen->maxMonIndex && out->listCount < NATIVE_SUMMARY_LIST_MAX; i++)
+    {
+        struct NativeSummaryEntry *e = &out->list[out->listCount];
+
+        if (sMonSummaryScreen->isBoxMon)
+        {
+            struct BoxPokemon *boxMon = &sMonSummaryScreen->monList.boxMons[i];
+
+            e->species = GetBoxMonData(boxMon, MON_DATA_SPECIES);
+            e->personality = GetBoxMonData(boxMon, MON_DATA_PERSONALITY);
+            e->isEgg = GetBoxMonData(boxMon, MON_DATA_IS_EGG);
+            e->fainted = FALSE;
+        }
+        else
+        {
+            struct Pokemon *mon = &sMonSummaryScreen->monList.mons[i];
+
+            e->species = GetMonData(mon, MON_DATA_SPECIES);
+            e->personality = GetMonData(mon, MON_DATA_PERSONALITY);
+            e->isEgg = GetMonData(mon, MON_DATA_IS_EGG);
+            e->fainted = !e->isEgg && GetMonData(mon, MON_DATA_HP) == 0;
+        }
+        if (e->species == SPECIES_NONE)
+            continue;
+        e->index = i;
+        if (i == sMonSummaryScreen->curMonIndex)
+            out->listPos = out->listCount;
+        out->listCount++;
+    }
+
+    if (out->phase == NATIVE_SUMMARY_LOADING)
+        return TRUE;
+    if (FuncIsActiveTask(Task_HandleInput))
+    {
+        out->phase = NATIVE_SUMMARY_BROWSE;
+        out->ready = MenuHelpers_ShouldWaitForLinkRecv() != TRUE && !gPaletteFade.active;
+    }
+    else if (FuncIsActiveTask(Task_HandleInput_MoveSelect))
+    {
+        out->phase = NATIVE_SUMMARY_MOVE_SELECT;
+        out->ready = MenuHelpers_ShouldWaitForLinkRecv() != TRUE;
+    }
+    else if (FuncIsActiveTask(Task_HandleInput_MovePositionSwitch))
+    {
+        out->phase = NATIVE_SUMMARY_MOVE_SWITCH;
+        out->ready = MenuHelpers_ShouldWaitForLinkRecv() != TRUE;
+    }
+    else if (FuncIsActiveTask(Task_HandleReplaceMoveInput) || FuncIsActiveTask(Task_SetHandleReplaceMoveInput))
+    {
+        out->phase = NATIVE_SUMMARY_REPLACE;
+        out->ready = FuncIsActiveTask(Task_HandleReplaceMoveInput) && MenuHelpers_ShouldWaitForLinkRecv() != TRUE
+                  && !gPaletteFade.active;
+    }
+    else if (FuncIsActiveTask(Task_HandleInputCantForgetHMsMoves))
+    {
+        out->phase = NATIVE_SUMMARY_CANT_FORGET;
+        out->ready = !FuncIsActiveTask(Task_SlidePowerAccWindow);
+    }
+    else if (FuncIsActiveTask(CloseSummaryScreen))
+    {
+        out->phase = NATIVE_SUMMARY_CLOSING;
+    }
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

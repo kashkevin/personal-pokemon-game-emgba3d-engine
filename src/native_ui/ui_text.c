@@ -165,10 +165,40 @@ int UiText_Width(int font, const uint8_t *s, int spacing)
     return count > 0 ? width - spacing : 0;
 }
 
+/* The engine's colour codes in a string: red and blue (the summary's memo,
+ * the nature colours) become the design's red and blue, any other colour the
+ * caller's own. Returns how many bytes the codes at s take (0: none). */
+static int ColourCodes(const uint8_t *s, UiRGBA fg0, UiRGBA sh0, UiRGBA *fg, UiRGBA *sh)
+{
+    int n = 0;
+
+    while (s[n] == EXT_CTRL_CODE_BEGIN && (s[n + 1] == 0x01 || s[n + 1] == 0x04) && s[n + 2] != EOS)
+    {
+        switch (s[n + 2])
+        {
+        case 0x4: case 0x5: /* TEXT_COLOR_RED, LIGHT_RED */
+            *fg = UI_P_TEXT_RED;
+            *sh = UI_P_TEXT_RED_SH;
+            break;
+        case 0x8: case 0x9: /* TEXT_COLOR_BLUE, LIGHT_BLUE */
+            *fg = UI_P_MALE;
+            *sh = UI_P_MALE_SH;
+            break;
+        default:
+            *fg = fg0;
+            *sh = sh0;
+            break;
+        }
+        n += 1 + (GetExtCtrlCodeLength(s[n + 1]) > 0 ? GetExtCtrlCodeLength(s[n + 1]) : 1);
+    }
+    return n;
+}
+
 int UiText_DrawN(int font, int x, int y, const uint8_t *s, int count, UiRGBA fg, UiRGBA sh,
                  enum UiAlign align, int spacing)
 {
     int code;
+    UiRGBA fg0 = fg, sh0 = sh;
 
     if (s == NULL)
         return x;
@@ -178,9 +208,14 @@ int UiText_DrawN(int font, int x, int y, const uint8_t *s, int count, UiRGBA fg,
 
         x = align == UI_ALIGN_RIGHT ? x - w : x - w / 2;
     }
-    while (count != 0 && (code = NextGlyph(&s)) >= 0)
+    while (count != 0)
     {
-        int advance = UiText_Advance(font, code);
+        int advance;
+
+        s += ColourCodes(s, fg0, sh0, &fg, &sh);
+        if ((code = NextGlyph(&s)) < 0)
+            break;
+        advance = UiText_Advance(font, code);
         /* the engine copies only the glyph's width (CopyGlyphToWindow) */
         int cell = advance < CELL ? advance : CELL;
 
