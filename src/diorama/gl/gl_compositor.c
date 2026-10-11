@@ -1844,6 +1844,10 @@ bool DioramaGL_GetBattleWorld(u8 mapGroup, u8 mapNum, u16 mapLayoutId,
             return false;
         DioramaGLBuildings_Sync(&sLastFieldSnapshot, sAtlasResolvedCells);
         DioramaGLTreeSprites_Sync(&sLastFieldSnapshot, sAtlasResolvedCells);
+        // The detail objects too: their art is composed with the palette of the
+        // frame they were last synced on, and the field's last frames before a
+        // battle are its fade (black or white objects otherwise).
+        DioramaGLProps_Sync(&sLastFieldSnapshot, sAtlasResolvedCells);
         if (sHasRenderedSceneSnapshot)
         {
             sPreviousRenderedSceneSnapshot = sRenderedSceneSnapshot;
