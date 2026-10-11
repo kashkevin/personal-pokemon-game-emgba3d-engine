@@ -1220,6 +1220,7 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
     }
     if (!DioramaGL_LoadFunctions() || !CreateProgram())
         return false;
+    DioramaProfile_Init();
     sTerrainAvailable = DioramaGLTerrain_Init();
     if (!sTerrainAvailable)
         SDL_Log("Diorama terrain renderer unavailable; retaining the 2D OpenGL fallback");
@@ -1376,6 +1377,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     if (sSurveyView >= 0)
         frameAlpha = 1.0f;
 
+    DioramaProfile_Begin(DIORAMA_PROF_FRAME);
     if (sRenderMode == DIORAMA_RENDER_AUTO
      && sTerrainAvailable
      && sObjectsAvailable
@@ -1386,12 +1388,27 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     {
         if (!sCurrent3DReady)
         {
+            DioramaProfile_Begin(DIORAMA_PROF_SYNC);
+            DioramaProfile_Begin(DIORAMA_PROF_SYNC_ATLAS);
             EnsureAtlas(&sSceneSnapshot);
-            sCurrent3DReady = DioramaGLTerrain_Sync(&sSceneSnapshot, sAtlasResolvedCells)
+            DioramaProfile_End(DIORAMA_PROF_SYNC_ATLAS);
+            DioramaProfile_Begin(DIORAMA_PROF_SYNC_TERRAIN);
+            sCurrent3DReady = DioramaGLTerrain_Sync(&sSceneSnapshot, sAtlasResolvedCells);
+            DioramaProfile_End(DIORAMA_PROF_SYNC_TERRAIN);
+            DioramaProfile_Begin(DIORAMA_PROF_SYNC_OBJECTS);
+            sCurrent3DReady = sCurrent3DReady
                            && DioramaGLObjects_Sync(&sSceneSnapshot, sAtlasResolvedCells);
+            DioramaProfile_End(DIORAMA_PROF_SYNC_OBJECTS);
+            DioramaProfile_Begin(DIORAMA_PROF_SYNC_BUILDINGS);
             DioramaGLBuildings_Sync(&sSceneSnapshot, sAtlasResolvedCells);
+            DioramaProfile_End(DIORAMA_PROF_SYNC_BUILDINGS);
+            DioramaProfile_Begin(DIORAMA_PROF_SYNC_TREES);
             DioramaGLTreeSprites_Sync(&sSceneSnapshot, sAtlasResolvedCells);
+            DioramaProfile_End(DIORAMA_PROF_SYNC_TREES);
+            DioramaProfile_Begin(DIORAMA_PROF_SYNC_PROPS);
             DioramaGLProps_Sync(&sSceneSnapshot, sAtlasResolvedCells);
+            DioramaProfile_End(DIORAMA_PROF_SYNC_PROPS);
+            DioramaProfile_End(DIORAMA_PROF_SYNC);
         }
         current3D = sCurrent3DReady;
     }
@@ -1557,6 +1574,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
             glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
             glViewport(0, 0, sceneWidth, sceneHeight);
         }
+        DioramaProfile_Begin(DIORAMA_PROF_SHADOW);
         if (DioramaGLShadow_Begin(cameraX, cameraZ,
                                   sTerrainDebug ? 0.0f : SunStrength(&sRenderedSceneSnapshot),
                                   ((uint64_t)DioramaGLBuildings_GetGeometryGeneration() << 32)
@@ -1571,35 +1589,53 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
             DioramaGLProps_DrawShadow();
             DioramaGLShadow_End(sceneWidth, sceneHeight);
         }
+        DioramaProfile_End(DIORAMA_PROF_SHADOW);
+        DioramaProfile_Begin(DIORAMA_PROF_TERRAIN);
         DioramaGLTerrain_Draw(sAtlasTexture.id, sBaseAtlasTexture.id,
                                sForegroundAtlasTexture.id, cameraX, cameraZ,
                                cameraPitch, cameraFocalLength,
                                aspectCorrection, sTerrainDebug);
+        DioramaProfile_End(DIORAMA_PROF_TERRAIN);
+        DioramaProfile_Begin(DIORAMA_PROF_TREES);
         DioramaGLTreeSprites_Draw(cameraX, cameraZ, cameraPitch, cameraFocalLength,
                                   aspectCorrection);
+        DioramaProfile_End(DIORAMA_PROF_TREES);
+        DioramaProfile_Begin(DIORAMA_PROF_PROPS);
         DioramaGLProps_Draw(cameraX, cameraZ, cameraPitch, cameraFocalLength, aspectCorrection);
+        DioramaProfile_End(DIORAMA_PROF_PROPS);
+        DioramaProfile_Begin(DIORAMA_PROF_BUILDINGS);
         DioramaGLBuildings_Draw(cameraX, cameraZ, cameraPitch, cameraFocalLength,
                                 aspectCorrection);
+        DioramaProfile_End(DIORAMA_PROF_BUILDINGS);
         /* Players hidden by a house or a tree are seen through it, except
          * in photo mode's pictures. */
         DioramaGLObjects_SetSilhouettes(DioramaCamera_GetMode() != DIORAMA_CAMERA_PHOTO);
+        DioramaProfile_Begin(DIORAMA_PROF_OBJECTS);
         DioramaGLObjects_Draw(current3D ? frameAlpha : 1.0f,
                                cameraX, cameraZ, cameraPitch,
                                cameraFocalLength, aspectCorrection);
+        DioramaProfile_End(DIORAMA_PROF_OBJECTS);
         // The light in the air over it all (gl_air.h): dust, rays, bloom.
+        DioramaProfile_Begin(DIORAMA_PROF_AIR);
         DioramaGLAir_Draw(cameraX, cameraZ, cameraPitch, cameraFocalLength,
                           aspectCorrection, sceneWidth, sceneHeight);
+        DioramaProfile_End(DIORAMA_PROF_AIR);
         // A dark cave's circle of light round the player (gl_field_light.h):
         // everything but the game's text is dark outside it, as on the GBA.
+        DioramaProfile_Begin(DIORAMA_PROF_FIELD_LIGHT);
         DioramaGLFieldLight_Draw(&sRenderedSceneSnapshot, current3D ? frameAlpha : 1.0f,
                                  cameraX, cameraZ, cameraPitch, cameraFocalLength,
                                  aspectCorrection, sceneWidth, sceneHeight);
+        DioramaProfile_End(DIORAMA_PROF_FIELD_LIGHT);
         glDisable(GL_SCISSOR_TEST);
         gDioramaCameraRig.active = false;
         DioramaGLLight_SetEdgeFog(false, 0.0f, 0.0f, 0.0f, 0.0f, NULL);
         DioramaGLLamps_SetActive(false);
+        DioramaProfile_Begin(DIORAMA_PROF_RESOLVE);
         DioramaGLTarget_End(outputWidth, outputHeight);
+        DioramaProfile_End(DIORAMA_PROF_RESOLVE);
         glViewport(0, 0, outputWidth, outputHeight);
+        DioramaProfile_Begin(DIORAMA_PROF_2D);
         dglUseProgram(sProgram);
         dglBindVertexArray(sVertexArray);
         if (sSurveyView < 0 && BuildWeatherImage(&sRenderedSceneSnapshot))
@@ -1667,12 +1703,18 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         CaptureSurveyFrame(outputWidth, outputHeight, captureSnapshot, stateMatchesPixels);
     }
     sLastFrame3D = drawTerrain;
+    DioramaProfile_Begin(DIORAMA_PROF_2D); /* when no 3D was drawn: all of it is 2D */
     if (sOverlay != NULL && sSurveyView < 0)
     {
         glViewport(0, 0, outputWidth, outputHeight);
         sOverlay(outputWidth, outputHeight);
     }
+    DioramaProfile_End(DIORAMA_PROF_2D);
+    DioramaProfile_End(DIORAMA_PROF_FRAME);
+    DioramaProfile_Begin(DIORAMA_PROF_SWAP);
     SDL_GL_SwapWindow(sWindow);
+    DioramaProfile_End(DIORAMA_PROF_SWAP);
+    DioramaProfile_FrameDone();
 }
 
 void DioramaGL_SetOverlay(void (*overlay)(int outputWidth, int outputHeight))
