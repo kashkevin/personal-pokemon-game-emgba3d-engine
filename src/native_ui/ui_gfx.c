@@ -21,6 +21,11 @@
 #include "native_ui/ui_draw.h"
 #include "native_ui/ui_engine.h"
 #include "native_ui/ui_gfx.h"
+#include "decompress.h"
+#include "item_icon.h"
+#include "pokemon.h"
+#include "constants/items.h"
+#include "constants/species.h"
 
 static uint8_t *sIcons;
 static int sIconsW;
@@ -40,10 +45,13 @@ bool UiGfx_Init(void)
     return sIcons != NULL;
 }
 
+static void UiGfx_ArtShutdown(void);
+
 void UiGfx_Shutdown(void)
 {
     stbi_image_free(sIcons);
     sIcons = NULL;
+    UiGfx_ArtShutdown();
 }
 
 static const struct UiIconRect *FindIcon(const char *name)
@@ -161,6 +169,245 @@ bool UiGfx_MonIcon(uint16_t species, uint32_t personality, bool isEgg, int frame
     snprintf(key, sizeof(key), "mon:%p:%p:%d%s", (const void *)c.tiles, (const void *)c.palette, c.frame, fkey);
     UiG_Blit(UiG_Cached(key, 32, 32, BuildMonIcon, &c), x, y);
     return true;
+}
+
+/* ---------------------------------------------------------------- the game's compressed art */
+
+/* Pokémon pictures and item icons are compressed in the game's data; the
+ * decompressors share the game's state, so they run only at the frame
+ * boundary (a screen's capture prepares what its draw shows). The decoded
+ * pictures stay here (RGBA) and reach the atlas on their first draw. */
+#define ART_SLOTS 64
+#define ART_MAX_ANIM 24
+enum
+{
+    ART_MON_PIC = 1,
+    ART_ITEM_ICON,
+};
+struct ArtEntry
+{
+    uint32_t kind;
+    uint32_t a;
+    uint32_t b;
+    int w;
+    int h;            /* all frames, stacked */
+    int frames;
+    int footY;        /* the lowest painted row of any frame */
+    int animCount;    /* the species' front animation (frame, duration) */
+    uint8_t animFrame[ART_MAX_ANIM];
+    uint8_t animDuration[ART_MAX_ANIM];
+    uint8_t *rgba;
+    uint32_t lastUse;
+};
+static struct ArtEntry sArt[ART_SLOTS];
+static uint32_t sArtClock;
+static uint8_t *sArtScratch;
+
+static struct ArtEntry *ArtFind(uint32_t kind, uint32_t a, uint32_t b)
+{
+    for (int i = 0; i < ART_SLOTS; i++)
+        if (sArt[i].rgba != NULL && sArt[i].kind == kind && sArt[i].a == a && sArt[i].b == b)
+        {
+            sArt[i].lastUse = ++sArtClock;
+            return &sArt[i];
+        }
+    return NULL;
+}
+
+static struct ArtEntry *ArtNew(uint32_t kind, uint32_t a, uint32_t b, int w, int h)
+{
+    struct ArtEntry *e = &sArt[0];
+
+    for (int i = 0; i < ART_SLOTS; i++)
+    {
+        if (sArt[i].rgba == NULL)
+        {
+            e = &sArt[i];
+            break;
+        }
+        if (sArt[i].lastUse < e->lastUse)
+            e = &sArt[i];
+    }
+    free(e->rgba);
+    memset(e, 0, sizeof(*e));
+    e->kind = kind;
+    e->a = a;
+    e->b = b;
+    e->w = w;
+    e->h = h;
+    e->rgba = calloc((size_t)w * h, 4);
+    e->lastUse = ++sArtClock;
+    return e->rgba != NULL ? e : NULL;
+}
+
+static bool ArtScratch(void)
+{
+    if (sArtScratch == NULL)
+        sArtScratch = malloc(MAX_DECOMPRESSION_BUFFER_SIZE);
+    if (sArtScratch != NULL)
+        memset(sArtScratch, 0, MAX_DECOMPRESSION_BUFFER_SIZE);
+    return sArtScratch != NULL;
+}
+
+static uint32_t MonPicKeyB(bool shiny, bool isEgg)
+{
+    return (shiny ? 1u : 0u) | (isEgg ? 2u : 0u);
+}
+
+bool UiGfx_PrepareMonPic(uint16_t species, uint32_t personality, bool shiny, bool isEgg)
+{
+    struct ArtEntry *e;
+    const uint16_t *palette;
+    const union AnimCmd *anim;
+    int lowest = -1;
+
+    if (species == SPECIES_NONE || species >= NUM_SPECIES)
+        return false;
+    if (ArtFind(ART_MON_PIC, ((uint32_t)species << 16) ^ personality, MonPicKeyB(shiny, isEgg) | ((uint32_t)species << 8)) != NULL)
+        return true;
+    if (!ArtScratch())
+        return false;
+    LoadSpecialPokePicIsEgg(sArtScratch, species, personality, TRUE, isEgg);
+    palette = GetMonSpritePalFromSpeciesAndPersonalityIsEgg(species, shiny, personality, isEgg);
+    e = ArtNew(ART_MON_PIC, ((uint32_t)species << 16) ^ personality, MonPicKeyB(shiny, isEgg) | ((uint32_t)species << 8),
+               MON_PIC_WIDTH, MON_PIC_HEIGHT * MAX_MON_PIC_FRAMES);
+    if (e == NULL || palette == NULL)
+        return false;
+    UiGfx_Decode4bpp(e->rgba, e->w, sArtScratch, palette, e->w, e->h);
+    /* a picture of one frame leaves the second empty */
+    e->frames = 1;
+    for (int i = MON_PIC_WIDTH * MON_PIC_HEIGHT; i < e->w * e->h; i++)
+        if (e->rgba[i * 4 + 3] != 0)
+        {
+            e->frames = 2;
+            break;
+        }
+    for (int y = 0; y < e->h; y++)
+        for (int x = 0; x < e->w; x++)
+            if (e->rgba[(y * e->w + x) * 4 + 3] != 0)
+                lowest = (y % MON_PIC_HEIGHT) > lowest ? (y % MON_PIC_HEIGHT) : lowest;
+    e->footY = lowest < 0 ? MON_PIC_HEIGHT - 1 : lowest;
+    /* the species' own front animation (its second sequence; the first is still),
+     * where the game animates it */
+    if (isEgg || !HasTwoFramesAnimation(species))
+        e->frames = 1;
+    anim = !isEgg && e->frames > 1 && gSpeciesInfo[species].frontAnimFrames != NULL
+         ? gSpeciesInfo[species].frontAnimFrames[1] : NULL;
+    for (int i = 0; anim != NULL && anim[i].type >= 0 && e->animCount < ART_MAX_ANIM; i++)
+    {
+        e->animFrame[e->animCount] = (uint8_t)(anim[i].frame.imageValue < (u32)e->frames ? anim[i].frame.imageValue : 0);
+        e->animDuration[e->animCount] = (uint8_t)anim[i].frame.duration;
+        e->animCount++;
+    }
+    return true;
+}
+
+struct ArtCtx
+{
+    const struct ArtEntry *e;
+    int y;
+    int h;
+    const struct UiFilter *filter;
+};
+
+static void BuildArt(struct UiBitmap *bm, const void *ctx)
+{
+    const struct ArtCtx *c = ctx;
+
+    memcpy(bm->d, &c->e->rgba[(size_t)c->y * c->e->w * 4], (size_t)c->e->w * c->h * 4);
+    UiFilter_Apply(bm->d, c->e->w * c->h, c->filter);
+}
+
+int UiGfx_MonPicFrameAt(uint16_t species, uint32_t personality, bool shiny, bool isEgg, int t)
+{
+    const struct ArtEntry *e = ArtFind(ART_MON_PIC, ((uint32_t)species << 16) ^ personality,
+                                       MonPicKeyB(shiny, isEgg) | ((uint32_t)species << 8));
+
+    if (e == NULL || t < 0)
+        return 0;
+    for (int i = 0; i < e->animCount; i++)
+    {
+        int d = e->animDuration[i] > 0 ? e->animDuration[i] : 1;
+
+        if (t < d)
+            return e->animFrame[i];
+        t -= d;
+    }
+    return 0;
+}
+
+bool UiGfx_MonPic(uint16_t species, uint32_t personality, bool shiny, bool isEgg, int frame, int footX, int footY,
+                  const struct UiFilter *filter)
+{
+    const struct ArtEntry *e = ArtFind(ART_MON_PIC, ((uint32_t)species << 16) ^ personality,
+                                       MonPicKeyB(shiny, isEgg) | ((uint32_t)species << 8));
+    struct ArtCtx c;
+    char key[128];
+    char fkey[48];
+
+    if (e == NULL)
+        return false;
+    frame = frame >= 0 && frame < e->frames ? frame : 0;
+    c.e = e;
+    c.y = frame * MON_PIC_HEIGHT;
+    c.h = MON_PIC_HEIGHT;
+    c.filter = filter;
+    UiFilter_Key(fkey, sizeof(fkey), filter);
+    snprintf(key, sizeof(key), "mpic:%u:%08x:%u:%d%s", (unsigned)species, (unsigned)personality,
+             (unsigned)MonPicKeyB(shiny, isEgg), frame, fkey);
+    UiG_Blit(UiG_Cached(key, MON_PIC_WIDTH, MON_PIC_HEIGHT, BuildArt, &c), footX - MON_PIC_WIDTH / 2, footY - e->footY);
+    return true;
+}
+
+bool UiGfx_PrepareItemIcon(uint16_t item)
+{
+    struct ArtEntry *e;
+    const uint16_t *palette;
+
+    if (item == ITEM_NONE)
+        return false;
+    if (ArtFind(ART_ITEM_ICON, item, 0) != NULL)
+        return true;
+    if (!ArtScratch())
+        return false;
+    DecompressDataWithHeaderWram(GetItemIconPic(item), sArtScratch);
+    palette = GetItemIconPalette(item);
+    e = ArtNew(ART_ITEM_ICON, item, 0, 24, 24);
+    if (e == NULL || palette == NULL)
+        return false;
+    UiGfx_Decode4bpp(e->rgba, 24, sArtScratch, palette, 24, 24);
+    e->frames = 1;
+    return true;
+}
+
+bool UiGfx_ItemIcon(uint16_t item, int x, int y, const struct UiFilter *filter)
+{
+    const struct ArtEntry *e = ArtFind(ART_ITEM_ICON, item, 0);
+    struct ArtCtx c;
+    char key[96];
+    char fkey[48];
+
+    if (e == NULL)
+        return false;
+    c.e = e;
+    c.y = 0;
+    c.h = 24;
+    c.filter = filter;
+    UiFilter_Key(fkey, sizeof(fkey), filter);
+    snprintf(key, sizeof(key), "item:%u%s", (unsigned)item, fkey);
+    UiG_Blit(UiG_Cached(key, 24, 24, BuildArt, &c), x, y);
+    return true;
+}
+
+static void UiGfx_ArtShutdown(void)
+{
+    for (int i = 0; i < ART_SLOTS; i++)
+    {
+        free(sArt[i].rgba);
+        sArt[i].rgba = NULL;
+    }
+    free(sArtScratch);
+    sArtScratch = NULL;
 }
 
 /* ---------------------------------------------------------------- filters (CSS Filter Effects 1) */

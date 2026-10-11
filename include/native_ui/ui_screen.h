@@ -63,5 +63,6 @@ extern const struct UiScreen gUiScreen_Title;
 extern const struct UiScreen gUiScreen_MainMenu;
 extern const struct UiScreen gUiScreen_Pause;
 extern const struct UiScreen gUiScreen_Options;
+extern const struct UiScreen gUiScreen_Party;
 
 #endif // GUARD_NATIVE_UI_SCREEN_H

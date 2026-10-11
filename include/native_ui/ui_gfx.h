@@ -51,6 +51,20 @@ void UiGfx_Decode4bpp(uint8_t *rgba, int stride, const uint8_t *tiles, const uin
 bool UiGfx_MonIcon(uint16_t species, uint32_t personality, bool isEgg, int frame, int x, int y,
                    const struct UiFilter *filter);
 
+/* The game's compressed art (Pokémon front pictures, item icons). The game's
+ * decompressors share its state: a screen's capture (frame boundary, game
+ * parked) prepares a picture, its draw shows it. Draw returns false for a
+ * picture that was not prepared. */
+bool UiGfx_PrepareMonPic(uint16_t species, uint32_t personality, bool shiny, bool isEgg);
+/* the picture with the lowest painted row's middle at footX, footY; frame 0 or 1 */
+bool UiGfx_MonPic(uint16_t species, uint32_t personality, bool shiny, bool isEgg, int frame, int footX, int footY,
+                  const struct UiFilter *filter);
+/* the frame of the species' own front animation t frames after it started (0 once it ended) */
+int UiGfx_MonPicFrameAt(uint16_t species, uint32_t personality, bool shiny, bool isEgg, int t);
+bool UiGfx_PrepareItemIcon(uint16_t item);
+/* W.item: the 24x24 icon at x, y */
+bool UiGfx_ItemIcon(uint16_t item, int x, int y, const struct UiFilter *filter);
+
 /* applies a filter to RGBA pixels in place */
 void UiFilter_Apply(uint8_t *rgba, int count, const struct UiFilter *f);
 /* appends the filter's key ("" when none) */

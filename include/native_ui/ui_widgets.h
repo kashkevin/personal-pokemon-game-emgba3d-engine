@@ -138,5 +138,10 @@ struct UiPixPal
 int UiW_Pix(const char *name, const char *const *rows, int rowCount, const struct UiPixPal *pal,
             int palCount, int x, int y, bool flip);
 void UiW_Missing(int x, int y, int w, int h);
+/* An engine message as its window shows it: the page the printer is on, up to
+ * the printed byte count (< 0: all), word-wrapped, the last maxLines lines;
+ * a page break just reached keeps the previous page up (the game waits for a
+ * button there). */
+void UiW_MessagePage(const uint8_t *text, int printed, int x, int y, int width, int maxLines);
 
 #endif // GUARD_NATIVE_UI_WIDGETS_H

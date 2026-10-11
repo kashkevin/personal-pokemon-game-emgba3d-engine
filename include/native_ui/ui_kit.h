@@ -93,6 +93,9 @@ const struct UiMask *UiM_Window(const struct UiMask *a, int x0, int y0, int x1, 
 const struct UiMask *UiM_Outline(const struct UiMask *a);
 /* cuts: count triples (row, fromRight, count); row < 0 counts from the bottom */
 const struct UiMask *UiM_Carve(const struct UiMask *a, const int *cuts, int count, const char *tag);
+/* M.fn: a w x h mask set where fn says so; the tag must name everything fn depends on */
+typedef bool (*UiMaskFn)(int x, int y, const void *ctx);
+const struct UiMask *UiM_Fn(int w, int h, const char *tag, UiMaskFn fn, const void *ctx);
 
 /* ------------------------------------------------------------------ patterns */
 

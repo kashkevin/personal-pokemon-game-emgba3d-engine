@@ -467,10 +467,14 @@ void AddSpriteTextPrinterParameterized6(u8 spriteId, u8 fontId, u8 left, u8 top,
 }
 
 #ifdef ENABLE_NATIVE_UI
-// The native PC UI (src/native_ui) shows some windows' text itself: where each
-// window's last string starts (TextPrinter_NativeUiWindow). The #line keeps the
-// file's line numbers (errorf) as they were: the GBA ROM stays byte-identical.
+// The native PC UI (src/native_ui) shows some windows' text itself: each
+// window's last string (where it starts and a copy of it as printed; see
+// TextPrinter_NativeUiWindow). The #line keeps the file's line numbers (errorf)
+// as they were: the GBA ROM stays byte-identical.
+#define NATIVE_UI_TEXT_COPY 256
 static const u8 *sNativeUiPrinterStart[WINDOWS_MAX];
+static u8 sNativeUiPrinterText[WINDOWS_MAX][NATIVE_UI_TEXT_COPY];
+static void NativeUiNotePrinter(u8 windowId, const u8 *str);
 #endif
 #line 469
 bool32 AddTextPrinter(struct TextPrinterTemplate *printerTemplate, u8 speed, void (*callback)(struct TextPrinterTemplate *, u16))
@@ -479,7 +483,7 @@ bool32 AddTextPrinter(struct TextPrinterTemplate *printerTemplate, u8 speed, voi
         return FALSE;
 #ifdef ENABLE_NATIVE_UI
     if (printerTemplate->type == WINDOW_TEXT_PRINTER && printerTemplate->windowId < WINDOWS_MAX)
-        sNativeUiPrinterStart[printerTemplate->windowId] = printerTemplate->currentChar;
+        NativeUiNotePrinter(printerTemplate->windowId, printerTemplate->currentChar);
 #endif
 #line 473
 
@@ -2888,6 +2892,17 @@ void DeactivateSingleTextPrinter(u32 id, enum TextPrinterType type)
 #ifdef ENABLE_NATIVE_UI
 #include "native_ui/ui_engine.h"
 
+static void NativeUiNotePrinter(u8 windowId, const u8 *str)
+{
+    u32 i = 0;
+
+    sNativeUiPrinterStart[windowId] = str;
+    if (str != NULL)
+        for (; i < NATIVE_UI_TEXT_COPY - 1 && str[i] != EOS; i++)
+            sNativeUiPrinterText[windowId][i] = str[i];
+    sNativeUiPrinterText[windowId][i] = EOS;
+}
+
 bool32 TextPrinter_NativeUiWindow(u8 windowId, const u8 **start, const u8 **current, bool8 *active)
 {
     struct TextPrinter *printer;
@@ -2907,6 +2922,34 @@ bool32 TextPrinter_NativeUiWindow(u8 windowId, const u8 **start, const u8 **curr
             break;
         }
     }
+    return TRUE;
+}
+
+bool32 TextPrinter_NativeUiWindowWaiting(u8 windowId)
+{
+    struct TextPrinter *printer;
+
+    for (printer = sFirstTextPrinter; printer != NULL; printer = printer->nextPrinter)
+        if (printer->active && printer->printerTemplate.type == WINDOW_TEXT_PRINTER
+         && printer->printerTemplate.windowId == windowId)
+            return printer->state == RENDER_STATE_WAIT || printer->state == RENDER_STATE_CLEAR
+                || printer->state == RENDER_STATE_SCROLL_START;
+    return FALSE;
+}
+
+bool32 TextPrinter_NativeUiWindowText(u8 windowId, u8 *dst, u32 size, u32 *printed, bool8 *active)
+{
+    const u8 *start, *current;
+    u32 i;
+
+    if (size == 0 || !TextPrinter_NativeUiWindow(windowId, &start, &current, active))
+        return FALSE;
+    for (i = 0; i < size - 1 && sNativeUiPrinterText[windowId][i] != EOS; i++)
+        dst[i] = sNativeUiPrinterText[windowId][i];
+    dst[i] = EOS;
+    *printed = i;
+    if (*active && current >= start && (u32)(current - start) < i)
+        *printed = (u32)(current - start);
     return TRUE;
 }
 #endif // ENABLE_NATIVE_UI

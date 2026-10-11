@@ -777,3 +777,27 @@ u32 WindowTemplateWidthPx(const struct WindowTemplate *template)
 {
     return template->width * TILE_WIDTH;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui) asks whether a window is on screen: its
+// tiles are on its background now (put there and not cleared since).
+bool32 Window_NativeUiShown(u8 windowId)
+{
+    u32 bg;
+    u16 *tilemap;
+    u32 index;
+
+    if (windowId >= WINDOWS_MAX || gWindows[windowId].window.bg == 0xFF)
+        return FALSE;
+    bg = gWindows[windowId].window.bg;
+    tilemap = GetBgTilemapBuffer(bg);
+    if (tilemap == NULL || IsTileMapOutsideWram(bg) || GetBgAttribute(bg, BG_ATTR_TYPE) != BG_TYPE_NORMAL)
+        return FALSE;
+    index = GetTileMapIndexFromCoords(gWindows[windowId].window.tilemapLeft, gWindows[windowId].window.tilemapTop,
+                                      GetBgAttribute(bg, BG_ATTR_SCREENSIZE), GetBgMetricTextMode(bg, 1) * 0x20,
+                                      GetBgMetricTextMode(bg, 2) * 0x20);
+    return (tilemap[index] & 0x3FF) != 0;
+}
+#endif // ENABLE_NATIVE_UI

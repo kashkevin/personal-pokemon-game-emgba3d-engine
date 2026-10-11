@@ -28,20 +28,23 @@ engine's own button presses. It never decides anything the engine decides.
 | `ui_draw.c` | the drawing context: 640×360 logical canvas at the largest whole-number scale (×2 720p, ×3 1080p, ×4 1440p, ×6 4K; Small one lower, never below ×2), growing on the long axis for other shapes; quads on the logical grid, one buffer and a few draw calls a frame, shapes rasterised once into an atlas (2D array texture, LRU layers), engine fonts in an index texture, patterns in the shader |
 | `ui_text.c` | the engine's own fonts drawing engine strings (no conversion), Route Caps 5×7 and Micro 3×5 labels |
 | `ui_widgets.c` | the design's shared widgets (port of `preview/js/widgets.js`); prompts show the game's real keys and XInput buttons |
-| `ui_gfx.c` | the design's menu icons (embedded) and the game's own art (party icons from the engine's data), CSS-style filters |
+| `ui_gfx.c` | the design's menu icons (embedded) and the game's own art: party icons, front pictures (with the species' own front animation) and item icons, the compressed ones decoded at the frame boundary (`UiGfx_Prepare*` in a screen's capture); CSS-style filters |
 | `ui_title_bg.c` | the Emerald title remaster (versions A/B/C; the game shows C: the intro, then B's loop), one shader pass at the logical size |
 | `native_ui.c` | the controller: screen registry, capture, picture policy, press queue, mouse, fades, switches, timing log |
 | `screens/ui_title.c` | 21 title: remaster background, EMERALD wordmark, PRESS START |
 | `screens/ui_main_menu.c` | 21 main menu: the engine's rows, CONTINUE with the save's summary and party, QUIT GAME (the PC's own row: asks, then closes the window), how the window was opened |
 | `screens/ui_pause.c` | 4 pause menu (the engine's entries, the player submenu, Safari balls) and 10 save (the journal; "saved" only once the engine reports success **and** the save file is written) |
 | `screens/ui_options.c` | 11 options: the engine's six options; the second tab opens the PC's F10 menu |
+| `screens/ui_party.c` | 1 party: the engine's party menu in every mode the single and double layouts use (field, items, TMs, giving, battle, choosing for a challenge); the grid's directions and clicks become the engine's cursor presses; SELECT moves a Pokémon; the multi battles' layouts keep the game's screen |
+| `screens/ui_mon.c` | one Pokémon as the screens show it (`ui_mon.h`): names, types, status, moves and PP, EXP |
 | `screens/ui_testcard.c` | the kit's test card (fidelity checks) |
 | `data/*` | generated: palette, label faces, icons (`tools/native_ui/gen_ui_data.js`), title layers (`gen_title_assets.py`) — in the UI art-direction workspace |
 
 Engine-side read-only accessors (all `#ifdef ENABLE_NATIVE_UI`, at the end of their files):
-`title_screen.c`, `main_menu.c`, `start_menu.c`, `field_screen_effect.c`, `option_menu.c`, `text.c`
-(where each window's string starts), `pokemon_icon.c`, `multiplayer.c`, `platform/sdl2.c` (save file
-writes, the F10 menu).
+`title_screen.c`, `main_menu.c`, `start_menu.c`, `field_screen_effect.c`, `option_menu.c`,
+`party_menu.c`, `text.c` (each window's last string, a copy of it as printed, whether its printer waits
+for a button), `window.c` (whether a window is on screen), `pokemon_icon.c`, `multiplayer.c`,
+`platform/sdl2.c` (save file writes, the F10 menu).
 
 ## Development switches
 
@@ -59,7 +62,10 @@ Read once at start-up; not for players, not in the launcher or `pokeemerald.cfg`
 ## Adding a screen
 
 1. A read-only accessor next to the engine state (`include/native_ui/ui_engine.h`), guarded by
-   `ENABLE_NATIVE_UI`. Use `gMain.callback2` and task functions, never freed heap pointers.
+   `ENABLE_NATIVE_UI`. Use `gMain.callback2` and task functions, never freed heap pointers. Put it at
+   the end of the file; a hook in the middle of a file is followed by `#line <its original next line>`
+   (`Alloc` and `errorf` put file:line strings in the ROM): the GBA ROM must stay byte-identical
+   (`tools/pc_port/compare_gba_rom.py` names what moved).
 2. `screens/ui_<name>.c`: `detect`, `capture` (copy everything `draw` needs), `draw` (a line-by-line
    port of the preview's screen with the real data), `click` (queue the engine's presses), `ready`
    (the engine reads buttons now), `picture` (`UI_PICTURE_HIDE_ALL` for full screens, `HIDE_BG0` for
@@ -68,6 +74,10 @@ Read once at start-up; not for players, not in the launcher or `pokeemerald.cfg`
    confuses `tools/preproc`); `native_ui.c` offers what they need.
 4. Real data only: a field the game does not have is left out or shown as unavailable; a feature it
    does not have is marked PLANNED and never pretends to work.
+5. A cursor the design moves differently from the engine (a grid over the engine's list) stays the
+   engine's: the screen's `filterKeys` takes the directions, moves its own cursor and queues the
+   engine's presses that take the engine's cursor to the same place (`ui_party.c`), so every rule
+   stays the engine's.
 
 ## Testing (tools in the UI art-direction workspace, `tools/native_ui/`)
 

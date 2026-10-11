@@ -140,6 +140,51 @@ bool32 StartMenu_NativeUiState(struct NativeStartMenu *out);
 /* field_screen_effect.c: the start menu reopens after a screen (fading in) */
 bool32 FieldScreenEffect_NativeUiStartMenuFadingIn(void);
 
+/* ---------------------------------------------------------------- party (party_menu.c) */
+
+enum NativePartyPhase
+{
+    NATIVE_PARTY_NONE,
+    NATIVE_PARTY_LOADING,
+    NATIVE_PARTY_BROWSE,        /* choosing a Pokémon (or CONFIRM / CANCEL) */
+    NATIVE_PARTY_MENU,          /* the selection menu is open (actions[]) */
+    NATIVE_PARTY_MOVES,         /* choosing one of a Pokémon's moves (PP items) */
+    NATIVE_PARTY_YES_NO,        /* a YES / NO question */
+    NATIVE_PARTY_LEVEL_UP,      /* the level-up stats window (levelUpPage) */
+    NATIVE_PARTY_SWAPPING,      /* two slots trade places */
+    NATIVE_PARTY_MESSAGE,       /* a message (A continues once it is printed) */
+    NATIVE_PARTY_CLOSING,
+};
+struct NativePartyMenu
+{
+    u8 phase;
+    u8 menuType;                /* enum PartyMenuType */
+    u8 layout;                  /* enum PartyMenuLayout */
+    u8 action;                  /* PARTY_ACTION_* */
+    u8 cursor;                  /* the slot the buttons move: 0-5 Pokémon, 6 CONFIRM, 7 CANCEL */
+    u8 slotId;                  /* the chosen Pokémon */
+    s8 carried;                 /* switching: the Pokémon being moved (-1 none) */
+    s8 swapWith;                /* SWAPPING: the other slot */
+    bool8 chooseHalf;           /* the screen has a CONFIRM button */
+    u16 item;                   /* the item being used or given (ITEM_NONE: none) */
+    u8 numActions;
+    u8 actions[8];              /* MENU_* (party_menu.c) */
+    const u8 *actionLabels[8];
+    bool8 actionIsFieldMove[8];
+    s8 switchRow;               /* MENU: the row of SWITCH (-1 none) */
+    s8 summaryRow;              /* MENU: the row of SUMMARY (-1 none) */
+    u8 menuCursor;              /* MENU, MOVES, YES_NO */
+    s16 promptId;               /* the prompt line shown (PARTY_MSG_*), -1 none */
+    u8 promptWindow;            /* its window (WINDOW_NONE: none) */
+    u8 msgWindow;               /* the message box's window when shown (WINDOW_NONE: not shown) */
+    u8 slotDesc[PARTY_SIZE];    /* PARTYBOX_DESC_* + 1 shown in a slot instead of its HP, 0 none */
+    u8 levelUpPage;             /* 1: the gains, 2: the new stats */
+    u16 levelUpOld[6];          /* HP, Attack, Defense, Sp. Atk, Sp. Def, Speed */
+    u16 levelUpNew[6];
+    bool8 ready;                /* the engine reads buttons now */
+};
+bool32 PartyMenu_NativeUiState(struct NativePartyMenu *out);
+
 /* ---------------------------------------------------------------- options (option_menu.c) */
 
 enum NativeOptionPhase
@@ -183,9 +228,18 @@ void PokemonIcon_NativeUiArt(u16 species, u32 personality, bool32 isEgg, const u
 
 /* ---------------------------------------------------------------- text printers (text.c) */
 
-/* The printer on a window: the start of its string, how far it has printed,
- * whether it is still printing. FALSE when the window has no printer. */
+/* The last string printed on a window: the engine's pointer to it (to tell
+ * which string it was; its buffer may have changed since), how far the printer
+ * is, whether it is still printing. FALSE when nothing was printed there. */
 bool32 TextPrinter_NativeUiWindow(u8 windowId, const u8 **start, const u8 **current, bool8 *active);
+/* ... a copy of that string as it was printed (up to 255 bytes) and how many
+ * of its bytes are on screen so far */
+bool32 TextPrinter_NativeUiWindowText(u8 windowId, u8 *dst, u32 size, u32 *printed, bool8 *active);
+/* the window's printer waits for a button (a page break or a pause) */
+bool32 TextPrinter_NativeUiWindowWaiting(u8 windowId);
+
+/* window.c: the window's tiles are on its background now (shown, not cleared) */
+bool32 Window_NativeUiShown(u8 windowId);
 
 /* ---------------------------------------------------------------- platform (src/platform/sdl2.c) */
 

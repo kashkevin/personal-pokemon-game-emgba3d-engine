@@ -146,9 +146,11 @@ static bool sSafari;
 static u8 sSafariBalls;
 
 /* the save dialog */
-static const u8 *sMsgStart;
-static const u8 *sMsgAt;
+static u8 sMsgText[256];        /* the engine's message as printed */
+static bool sHasMsg;
+static u32 sMsgPrinted;         /* its bytes on screen so far */
 static bool sMsgPrinting;
+static bool sMsgWaiting;         /* the printer waits for a button (a page break) */
 static u8 sYesNoCursor;
 static int sSaveT;               /* frames in the saving step */
 static u32 sWritesAtSave;        /* save file writes when the save began */
@@ -210,7 +212,6 @@ static void CaptureSave(void)
 {
     u32 written, failed;
     bool8 pending;
-    const u8 *start, *at;
     bool8 active;
 
     Platform_NativeUiSaveWrites(&written, &failed, &pending);
@@ -242,14 +243,9 @@ static void CaptureSave(void)
         sSaveResult = 2;
     if (sStampT > 0 && sStampT < 9)
         sStampT++;
-    sMsgStart = sMsgAt = NULL;
-    sMsgPrinting = false;
-    if (TextPrinter_NativeUiWindow(0, &start, &at, &active))
-    {
-        sMsgStart = start;
-        sMsgAt = active ? at : NULL;
-        sMsgPrinting = active;
-    }
+    sHasMsg = TextPrinter_NativeUiWindowText(0, sMsgText, sizeof(sMsgText), &sMsgPrinted, &active);
+    sMsgPrinting = sHasMsg && active;
+    sMsgWaiting = sMsgPrinting && TextPrinter_NativeUiWindowWaiting(0);
     sYesNoCursor = Menu_GetCursorPos();
     sHours = gSaveBlock2Ptr->playTimeHours;
     sMinutes = gSaveBlock2Ptr->playTimeMinutes;
@@ -376,7 +372,7 @@ static const char *EntryIcon(const struct Entry *e, bool *hasSel)
     case NATIVE_START_RIDE: case NATIVE_START_GET_OFF: return "shoe";
     case 0xFF: return "flag";
     case NATIVE_START_DEXNAV: *hasSel = false; return "search";
-    case NATIVE_START_STYLE: *hasSel = false; return "gem";
+    case NATIVE_START_STYLE: *hasSel = false; return "head_green";
     default: *hasSel = false; return "return";
     }
 }
@@ -654,31 +650,6 @@ static void Journal(int jx, int jy)
     }
 }
 
-/* the engine's message, page by page, up to its printer */
-static void Lines(const u8 *text, const u8 *upTo, int x, int y, int width, int maxLines)
-{
-    const u8 *starts[8];
-    int lengths[8];
-    u8 page[256];
-    int len = 0, n;
-    const u8 *p = text, *pageStart = text;
-
-    for (; *p != EOS && (upTo == NULL || p < upTo); p++)
-        if (*p == 0xFA || *p == 0xFB)
-            pageStart = p + 1;
-    for (p = pageStart; *p != EOS && (upTo == NULL || p < upTo) && *p != 0xFA && *p != 0xFB && len < 254; p++)
-        page[len++] = *p;
-    page[len] = EOS;
-    n = UiText_Wrap(page, width, UI_FONT_NORMAL, starts, lengths, 8);
-    for (int i = n > maxLines ? n - maxLines : 0, row = 0; i < n; i++, row++)
-    {
-        u8 line[128];
-
-        UiText_CopyN(line, sizeof(line), starts[i], lengths[i]);
-        UiG_Text(x, y + row * 16, line);
-    }
-}
-
 static void SaveDialog(int t, int L, int T, int R, int B)
 {
     struct UiRamp cover = UiRampOf(COVER_BASE, 0.42, 0.28, 0.62);
@@ -698,14 +669,14 @@ static void SaveDialog(int t, int L, int T, int R, int B)
     }
     else if (sSaveResult == 3)
     {
-        Lines(sText_FileFailed, NULL, b[0] + 2, b[1] - 1, b[2] - 4, 3);
+        UiW_MessagePage(sText_FileFailed, -1, b[0] + 2, b[1] - 1, b[2] - 4, 3);
     }
-    else if (sMsgStart != NULL)
+    else if (sHasMsg)
     {
-        Lines(sMsgStart, sMsgAt, b[0] + 2, b[1] - 1, b[2] - 4, 3);
+        UiW_MessagePage(sMsgText, sMsgPrinting ? (int)sMsgPrinted : -1, b[0] + 2, b[1] - 1, b[2] - 4, 3);
     }
-    waiting = !writing && !yesNo && !sMsgPrinting
-           && (sMenu.saveStep == NATIVE_SAVE_SAVED || sMenu.saveStep == NATIVE_SAVE_FAILED);
+    waiting = !writing && !yesNo && (sMsgWaiting || (!sMsgPrinting
+           && (sMenu.saveStep == NATIVE_SAVE_SAVED || sMenu.saveStep == NATIVE_SAVE_FAILED)));
     if (waiting)
         UiW_DownArrow(b[0] + b[2] - 10, b[1] + 42 + ((t / 16) % 2), UI_P_CURSOR, false);
     UiG_Hit(HIT_MESSAGE, 0, L + 8, B - 70, 456, 62);

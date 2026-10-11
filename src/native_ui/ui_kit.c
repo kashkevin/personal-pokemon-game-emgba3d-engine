@@ -833,6 +833,21 @@ void UiPat_TileSize(const struct UiPattern *p, int *w, int *h)
     }
 }
 
+const struct UiMask *UiM_Fn(int w, int h, const char *tag, UiMaskFn fn, const void *ctx)
+{
+    struct KeyBuf k = {0};
+    bool isNew;
+    struct UiMask *m;
+
+    KeyAdd(&k, "F%dx%d:%s", w, h, tag);
+    m = MaskGet(&k, w, h, &isNew);
+    if (isNew)
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                m->d[y * w + x] = fn(x, y, ctx) ? 1 : 0;
+    return m;
+}
+
 const struct UiMask *UiM_Pattern(const struct UiMask *a, const struct UiPattern *p)
 {
     struct KeyBuf k = {0};

@@ -764,4 +764,30 @@ void UiW_Missing(int x, int y, int w, int h)
     UiG_Rect(x + w - 1, y, 1, h, c);
     UiMicro_Draw(x + (w >> 1) - 1, y + (h >> 1) - 2, "P", c);
 }
+void UiW_MessagePage(const uint8_t *text, int printed, int x, int y, int width, int maxLines)
+{
+    const uint8_t *starts[8];
+    int lengths[8];
+    uint8_t page[256];
+    int len = 0, n, total = 0, pageStart = 0;
+
+    while (text[total] != 0xFF && (printed < 0 || total < printed))
+        total++;
+    for (int i = 0; i < total; i++)
+        if ((text[i] == 0xFA || text[i] == 0xFB) && i + 1 < total)
+            pageStart = i + 1;
+    for (int i = pageStart; i < total && text[i] != 0xFA && text[i] != 0xFB && len < 254; i++)
+        page[len++] = text[i];
+    page[len] = 0xFF;
+    if (maxLines > 8)
+        maxLines = 8;
+    n = UiText_Wrap(page, width, UI_FONT_NORMAL, starts, lengths, 8);
+    for (int i = n > maxLines ? n - maxLines : 0, row = 0; i < n; i++, row++)
+    {
+        uint8_t line[128];
+
+        UiText_CopyN(line, sizeof(line), starts[i], lengths[i]);
+        UiG_Text(x, y + row * 16, line);
+    }
+}
 #endif // ENABLE_NATIVE_UI
