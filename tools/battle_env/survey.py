@@ -274,6 +274,11 @@ def run_map(args, rec, label, spec, p, results):
         m = re.search(pat, log)
         if m:
             res[key] = m.group(0)
+    # the game may resume somewhere else than the warp asked (a secret base: the field
+    # comes back in Littleroot Town); a picture of another map is no picture of this one
+    m = re.search(r'on map (\d+)\.(\d+) at', res.get('started') or '')
+    if m and (int(m.group(1)), int(m.group(2))) != (rec['group'], rec['num']):
+        res['status'] = status = 'wrong map %s.%s' % (m.group(1), m.group(2))
     if os.path.exists(os.path.join(rundir, 'cap.json')):
         try:
             res['capture'] = json.load(open(os.path.join(rundir, 'cap.json')))

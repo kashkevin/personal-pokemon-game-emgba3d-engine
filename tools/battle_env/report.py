@@ -31,14 +31,17 @@ import html
 import io
 import json
 import os
+import re
 
 from PIL import Image
+
+from report_page import write_page
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 CLASSES = ('A', 'B', 'C', 'D')
 
 
-def survey(path):
+def survey(path, inv=None):
     out = {}
     if not path:
         return out
@@ -47,6 +50,12 @@ def survey(path):
     except (OSError, ValueError):
         return out
     for r in results:
+        # a picture taken on another map than the one asked for (the game resumed elsewhere:
+        # a secret base comes back in Littleroot Town) is no picture of this map
+        m = re.search(r'on map (\d+)\.(\d+) at', r.get('started') or '')
+        rec = (inv or {}).get(r['map'])
+        if m and rec and (int(m.group(1)), int(m.group(2))) != (rec['group'], rec['num']):
+            r = dict(r, status='wrong map %s.%s' % (m.group(1), m.group(2)))
         cap = None
         try:
             cap = json.load(open(os.path.join(r['dir'], 'cap.json')))
@@ -79,11 +88,15 @@ def main():
     ap.add_argument('--review', default=os.path.join(ROOT, 'tools/battle_env/review.json'))
     ap.add_argument('--out', required=True)
     ap.add_argument('--no-html', action='store_true')
+    ap.add_argument('--title', default='Hoenn Battle Environments')
+    ap.add_argument('--meta', default='', help='a line under the title (branch, commit, date)')
+    ap.add_argument('--appendix', help='an HTML fragment put after the maps (known issues, method)')
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     inv = json.load(open(args.inventory))['maps']
-    before, after = survey(args.before), survey(args.after)
-    extras = [(label, survey(path)) for label, path in (e.split('=', 1) for e in args.extra)]
+    by_map = {r['map']: r for r in inv}
+    before, after = survey(args.before, by_map), survey(args.after, by_map)
+    extras = [(label, survey(path, by_map)) for label, path in (e.split('=', 1) for e in args.extra)]
     try:
         review = json.load(open(args.review))
     except (OSError, ValueError):
@@ -94,7 +107,9 @@ def main():
         rv = review.get(m, {})
         b, a = before.get(m), after.get(m)
         captured = a is not None and a['status'] == 'captured'
-        if rv.get('after') in CLASSES:
+        if rv.get('after') == 'n/a':
+            state = 'excluded'   # no battle is fought on this map as it stands (a template)
+        elif rv.get('after') in CLASSES:
             state = 'reviewed'
         elif captured:
             state = 'tested'
@@ -109,7 +124,8 @@ def main():
                                   + (['wild'] if rec.get('wild') else []))),
             'before_status': b['status'] if b else 'not surveyed',
             'after_status': a['status'] if a else 'not surveyed',
-            'before_class': rv.get('before'), 'after_class': rv.get('after'),
+            'before_class': rv.get('before') if rv.get('before') in CLASSES else None,
+            'after_class': rv.get('after') if rv.get('after') in CLASSES else None,
             'state': state, 'notes': rv.get('notes', ''), 'problems': rv.get('problems', []),
             'before_png': b['png'] if b and b['status'] == 'captured' else None,
             'after_png': a['png'] if a and a['status'] == 'captured' else None,
@@ -125,7 +141,7 @@ def main():
     with open(os.path.join(args.out, 'report.md'), 'w') as f:
         f.write('# Battle environments: every battle map\n\n')
         f.write('%d maps: %s.\n\n' % (len(rows), ', '.join('%d %s' % (counts[k], k) for k in
-                                                          ('reviewed', 'tested', 'untested'))))
+                                                          ('reviewed', 'tested', 'untested', 'excluded'))))
         f.write('Classes after: %s. Before (where reviewed): %s.\n\n' % (
             ', '.join('%s %d' % (c, cls_after[c]) for c in CLASSES),
             ', '.join('%s %d' % (c, cls_before[c]) for c in CLASSES)))
@@ -140,31 +156,7 @@ def main():
                     else '%s (%s)' % (r['state'], r['after_status']), r['notes'].replace('|', '/')))
     if args.no_html:
         return
-    parts = ['<h1>Battle environments</h1><p>%d maps: %s. Classes after: %s.</p>' % (
-        len(rows), ', '.join('%d %s' % (counts[k], k) for k in ('reviewed', 'tested', 'untested')),
-        ', '.join('%s %d' % (c, cls_after[c]) for c in CLASSES))]
-    for cat in sorted({r['category'] for r in rows}):
-        parts.append('<h2>%s</h2>' % html.escape(cat))
-        for r in rows:
-            if r['category'] != cat:
-                continue
-            imgs = ''
-            for label, png in (('before', r['before_png']), ('after', r['after_png'])) + tuple(
-                    sorted(r['extras'].items())):
-                src = thumb(png) if png else None
-                imgs += '<figure><figcaption>%s</figcaption>%s</figure>' % (
-                    html.escape(label), '<img src="%s">' % src if src else '<div class="none">no picture</div>')
-            parts.append('<section class="map"><h3>%s <span class="cls c%s">%s</span> <small>%s</small></h3>'
-                         '<p>%s</p><div class="pics">%s</div></section>' % (
-                             html.escape(r['map'][4:]), r['after_class'] or 'x', r['after_class'] or '?',
-                             html.escape('%s; before %s' % (r['state'], r['before_class'] or '-')),
-                             html.escape(r['notes']), imgs))
-    page = ('<title>Battle environments</title><style>body{font:14px system-ui;margin:16px;background:#fafafa;'
-            'color:#222}.pics{display:flex;flex-wrap:wrap;gap:8px}figure{margin:0}img{width:320px;display:block}'
-            '.none{width:320px;height:180px;background:#ddd}.cls{padding:0 6px;border-radius:4px;color:#fff}'
-            '.cA{background:#2a7}.cB{background:#59c}.cC{background:#d93}.cD{background:#c33}.cx{background:#888}'
-            '</style>' + ''.join(parts))
-    open(os.path.join(args.out, 'report.html'), 'w').write(page)
+    write_page(rows, os.path.join(args.out, 'page'), by_map, args)
 
 
 if __name__ == '__main__':

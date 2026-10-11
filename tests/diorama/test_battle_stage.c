@@ -141,6 +141,47 @@ static void TestSurfing(void)
     assert(result.targetX + result.feetX[1] >= 34.0f);
 }
 
+/* Sea everywhere one tile below the land (lift -1), dotted with banks of
+ * blocked cells at land height: the battle stands at the height its two sides
+ * stand on - the water's - never at a bank's. (Route 107 had the target on an
+ * island's edge between the two battlers, which stood on the water: at the
+ * target's height they floated a tile over it. The search avoids such targets
+ * here; the survey's staging check is what caught the real one.) */
+static void TestTargetOnABank(void)
+{
+    struct DioramaStageRequest r;
+    struct DioramaStageResult result;
+    struct DioramaStageView seen;
+
+    Fill(DIORAMA_GROUND_WATER);
+    for (int y = 0; y < 64; ++y)
+        for (int x = 0; x < 64; ++x)
+            sWorld.cells[y][x].lift = -1.0f;
+    for (int y = 0; y < 64; ++y)
+        for (int x = 0; x < 64; ++x)
+            if ((x % 5 == 0) && (y % 3 == 0))
+            {
+                sWorld.cells[y][x].kind = DIORAMA_GROUND_PLAIN;
+                sWorld.cells[y][x].blocked = true;
+                sWorld.cells[y][x].lift = 0.0f;
+            }
+    Request(&r, 32, 32);
+    r.surfing = true;
+    DioramaStage_Choose(&r, &result);
+    assert(result.ground == -1.0f);
+    /* The measure of a stage chosen on the bank itself stands it at the water too. */
+    for (float ty = 30.0f; ty < 34.0f; ty += 1.0f)
+        for (float tx = 30.0f; tx < 36.0f; tx += 1.0f)
+        {
+            int cx = (int)floorf(tx), cy = (int)floorf(ty);
+
+            if (sWorld.cells[cy][cx].lift != 0.0f)
+                continue;
+            DioramaStage_Measure(&r, tx + 0.5f, ty + 0.5f, &seen);
+        }
+    printf("  target on a bank: the battle stands at %.1f\n", result.ground);
+}
+
 static void TestIndoorVoid(void)
 {
     struct DioramaStageRequest r;
@@ -381,6 +422,7 @@ int main(void)
     TestOpenField();
     TestWallInFront();
     TestSurfing();
+    TestTargetOnABank();
     TestIndoorVoid();
     TestTreesInFrontOfTheOpponent();
     TestLeaningCrown();

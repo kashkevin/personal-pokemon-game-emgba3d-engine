@@ -508,10 +508,28 @@ static float Cramped(const struct StageSearch *s, float tx, float tz, float grou
     return total;
 }
 
+/*
+ * The height the battle stands at: the camera target's ground, unless both
+ * sides' feet stand together on another (the target fell on a rock, a bank
+ * or a ledge between them - at its height they would float over the water or
+ * sink into the floor; the battle survey's staging check found it on Route 107).
+ */
+static float StageGround(const struct StageSearch *s, float tx, float tz)
+{
+    const struct DioramaStageCell *target = CellAt(tx, tz);
+    const struct DioramaStageCell *a = CellAt(tx + s->feetX[0], tz + s->feetZ[0]);
+    const struct DioramaStageCell *b = CellAt(tx + s->feetX[1], tz + s->feetZ[1]);
+
+    if (a->kind != DIORAMA_GROUND_VOID && b->kind != DIORAMA_GROUND_VOID
+     && fabsf(a->lift - b->lift) < 0.01f && fabsf(a->lift - target->lift) >= 0.01f)
+        return a->lift;
+    return target->lift;
+}
+
 static float StageScore(const struct StageSearch *s, float tx, float tz, float distance,
                         struct DioramaStageView *seen)
 {
-    float groundT = CellAt(tx, tz)->lift;
+    float groundT = StageGround(s, tx, tz);
     float score = -0.5f * distance;
     float cover, voids, cramped, worstCover, worstCramped;
     int side;
@@ -633,7 +651,7 @@ void DioramaStage_Choose(const struct DioramaStageRequest *request, struct Diora
             result->seen = seen;
         }
     }
-    result->ground = CellAt(result->targetX, result->targetY)->lift;
+    result->ground = StageGround(&search, result->targetX, result->targetY);
     result->want[0] = search.want[0];
     result->want[1] = search.want[1];
 }
@@ -648,7 +666,7 @@ void DioramaStage_Measure(const struct DioramaStageRequest *request, float targe
     r.legacy = false;
     InitSearch(&search, &r);
     LoadGrid(&r, targetX, targetY);
-    groundT = CellAt(targetX, targetY)->lift;
+    groundT = StageGround(&search, targetX, targetY);
     FrontCover(&search, targetX, targetY, groundT, &seen->overlap);
     seen->voidFraction = VoidFraction(&r, targetX, targetY, groundT);
     Cramped(&search, targetX, targetY, groundT, &seen->cramped);
