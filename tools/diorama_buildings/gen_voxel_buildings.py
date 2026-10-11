@@ -34,6 +34,7 @@ import voxel_building as vb  # noqa: E402
 import voxel_building_specs as specs  # noqa: E402
 import voxel_props  # noqa: E402
 import voxel_relief_fixes  # noqa: E402
+import auto_buildings  # noqa: E402  (project-owned: the buildings no spec models)
 
 PORT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 # A placement whose cells keep their own metatile under the model: the
@@ -921,6 +922,34 @@ def build_models(only=None):
     for spec in expanded:
         if only and not spec["name"].startswith(only):
             continue
+        make_model(spec, layouts, models)
+    # The buildings no spec models (auto_buildings.py), each read off its own
+    # drawing: every door of an outdoor map whose building none of the models
+    # above stands on.
+    if not only or only.startswith("auto"):
+        layouts_json = expansion_assets.emerald_layouts(vb.ROOT)
+        taken = {}
+        regular = models
+        if only:
+            # the spec models, only to know where they stand
+            regular = []
+            for spec in expanded:
+                make_model(spec, layouts, regular)
+        for m in regular:
+            m._placements = find_placements(m, layouts_json)
+            for (lid, px, py, ground, name, odd) in m._placements:
+                cells = taken.setdefault(name, set())
+                cells.update((px + i, py + j) for (i, j) in m.owned)
+        for spec in auto_buildings.auto_specs(taken):
+            if only and not spec["name"].startswith(only):
+                continue
+            make_model(spec, layouts, models)
+    return models
+
+
+def make_model(spec, layouts, models):
+    """The model of one expanded spec (and its bare twin), into `models`."""
+    if True:
         lid = spec["layout"]
         if lid not in layouts:
             layouts[lid] = vb.LayoutArt(lid)
@@ -944,7 +973,8 @@ def build_models(only=None):
             parts = [vb.Relief("relief", art, height, side,
                                hull=relief.get("hull", 0), bridge=relief.get("bridge", 0),
                                seam=(h * 16, open_s, open_n), flank_tile=flank,
-                               seam_x=(spec.get("west", ()), spec.get("east", ())))]
+                               seam_x=(spec.get("west", ()), spec.get("east", ())),
+                               back=relief.get("back"))]
             spec["exact"] = [(0, 0, w * 16, h * 16)]
         else:
             parts = spec["parts"]()
@@ -974,7 +1004,6 @@ def build_models(only=None):
             twin.owned, twin.spec, twin.layout = model.owned, bare, layout
             twin.own = set(spec["own"])
             models.append(twin)
-    return models
 
 
 CAMERAS = [
@@ -1368,7 +1397,10 @@ def export(models, path):
     layouts = {}
     found = []
     for index, m in enumerate(models):
-        for lid, px, py, ground, name, odd in find_placements(m, layouts_json):
+        placed = getattr(m, "_placements", None)
+        if placed is None:
+            placed = find_placements(m, layouts_json)
+        for lid, px, py, ground, name, odd in placed:
             cells = placement_patches(m, name, layouts, px, py, odd)
             found.append((lid, index, px, py, ground, cells, name))
             if odd:

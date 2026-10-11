@@ -38,6 +38,18 @@ gradenGnostic/pokeemerald-multiplatform (MIT) for the logic it reuses.
   palettes (fades, day/night tint) colour the buildings exactly as they colour the
   terrain. The rest of `buildings.bin` is kept byte for byte. It also writes the
   windows `window_glow.py` finds.
+* `auto_buildings.py` (new, project-owned; tests in `test_auto_buildings.py`): every
+  building of an outdoor map that no spec models (about seventy in Hoenn: Slateport,
+  Mauville, Lilycove, Fortree, Mossdeep, Pacifidlog, Dewford, Fallarbor, Verdanturf, the
+  route houses, the Battle Frontier), found from its door and its blocked cells and
+  modelled as a `Relief` read off its own drawing: its front the bottom rows of every
+  column as tall as its facade (the first long edge over the door, or an override), its
+  top the rest, laid back to the north edge of its cells. Each is proved in the GBA
+  projection like every other model. `OVERRIDES` there holds what the search cannot see
+  (tall buildings, a cliff behind a house, doors that are no building);
+  `python3 auto_buildings.py --sheet DIR --modelled build/diorama/buildings.bin` draws
+  what it finds to look over (game art: not committed). Sootopolis's houses, cut into
+  the crater, stay as they are drawn.
 * `window_glow.py` (new, project-owned; tests in `test_window_glow.py`): the windows of
   the buildings of outdoor maps, found on their pages (glass-coloured panes in a darker
   frame, on faces that stand upright, never a wall's own colour), which glow in the
