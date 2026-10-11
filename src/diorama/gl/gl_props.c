@@ -17,6 +17,7 @@
 #include "diorama/gl_light.h"
 #include "diorama/gl_loader.h"
 #include "diorama/gl_props.h"
+#include "diorama/gl_quality.h"
 #include "diorama/gl_shadow.h"
 #include "diorama/metatile_atlas.h"
 #include "diorama/props.h"
@@ -901,7 +902,8 @@ void DioramaGLProps_Sync(const struct DioramaSceneSnapshot *snapshot,
         static float sLampPlaces[128][4];
         unsigned lamps = 0;
 
-        lampStrength = DioramaGLLamps_NightFor(snapshot->mapType, snapshot->timeOfDay);
+        lampStrength = DioramaGLQuality_Lighting()
+                     ? DioramaGLLamps_NightFor(snapshot->mapType, snapshot->timeOfDay) : 0.0f;
         for (i = 0; i < out && lamps < 128; i++)
             if (sProps[i].flags & DIORAMA_PROP_LIGHT)
             {

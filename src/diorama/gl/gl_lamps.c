@@ -10,6 +10,7 @@
 #include "constants/map_types.h"
 #include "constants/rtc.h"
 #include "diorama/gl_lamps.h"
+#include "diorama/gl_quality.h"
 
 /* The shaders' spelling of DIORAMA_MAX_LAMPS. */
 typedef char LampCountCheck[DIORAMA_MAX_LAMPS == 16 ? 1 : -1];
@@ -57,9 +58,10 @@ void DioramaGLLamps_SetActive(bool active)
     sActive = active;
 }
 
+/* Lamps and lit windows are light: off with the player's Lighting setting. */
 float DioramaGLLamps_Strength(void)
 {
-    return sActive && sCount != 0 ? sStrength : 0.0f;
+    return sActive && sCount != 0 && DioramaGLQuality_Lighting() ? sStrength : 0.0f;
 }
 
 float DioramaGLLamps_NightFor(uint8_t mapType, uint8_t timeOfDay)
@@ -78,7 +80,7 @@ void DioramaGLLamps_SetNight(float night)
 
 float DioramaGLLamps_Night(void)
 {
-    return sActive ? sNight : 0.0f;
+    return sActive && DioramaGLQuality_Lighting() ? sNight : 0.0f;
 }
 
 static void FindNearest(void)

@@ -22,14 +22,15 @@ struct QualityValues
     unsigned char shadows;
     bool lighting;
     bool effects;
+    bool details;
     unsigned char antialiasing;
 };
 
 static const struct QualityValues sPresets[QUALITY_CUSTOM] = {
-    [QUALITY_LOW]    = {SHADOWS_OFF, false, false, 0},
-    [QUALITY_MEDIUM] = {SHADOWS_LOW, true, false, 0},
-    [QUALITY_HIGH]   = {SHADOWS_MEDIUM, true, true, 0},
-    [QUALITY_ULTRA]  = {SHADOWS_HIGH, true, true, 4},
+    [QUALITY_LOW]    = {SHADOWS_OFF, false, false, false, 0},
+    [QUALITY_MEDIUM] = {SHADOWS_LOW, true, false, true, 0},
+    [QUALITY_HIGH]   = {SHADOWS_MEDIUM, true, true, true, 0},
+    [QUALITY_ULTRA]  = {SHADOWS_HIGH, true, true, true, 4},
 };
 
 void DisplaySettings_Defaults(struct DisplaySettings *settings)
@@ -135,6 +136,11 @@ bool DisplaySettings_ParseLine(struct DisplaySettings *settings, const char *lin
         settings->effects = value != 0;
         return QualityValueRead(settings);
     }
+    if (sscanf(line, "details=%u", &value) == 1)
+    {
+        settings->details = value != 0;
+        return QualityValueRead(settings);
+    }
     if (sscanf(line, "antialiasing=%u", &value) == 1)
     {
         if (value == 0 || value == 2 || value == 4 || value == 8)
@@ -193,6 +199,7 @@ void DisplaySettings_Write(const struct DisplaySettings *settings, FILE *file)
         fprintf(file, "shadows=%s\n", sShadowNames[settings->shadows]);
         fprintf(file, "lighting=%u\n", settings->lighting ? 1 : 0);
         fprintf(file, "effects=%u\n", settings->effects ? 1 : 0);
+        fprintf(file, "details=%u\n", settings->details ? 1 : 0);
         fprintf(file, "antialiasing=%u\n", settings->antialiasing);
     }
 }
@@ -208,6 +215,7 @@ void DisplaySettings_SetQuality(struct DisplaySettings *settings, unsigned char 
     settings->shadows = sPresets[preset].shadows;
     settings->lighting = sPresets[preset].lighting;
     settings->effects = sPresets[preset].effects;
+    settings->details = sPresets[preset].details;
     settings->antialiasing = sPresets[preset].antialiasing;
 }
 
@@ -218,6 +226,7 @@ unsigned char DisplaySettings_MatchQuality(const struct DisplaySettings *setting
         if (sPresets[preset].shadows == settings->shadows
          && sPresets[preset].lighting == settings->lighting
          && sPresets[preset].effects == settings->effects
+         && sPresets[preset].details == settings->details
          && sPresets[preset].antialiasing == settings->antialiasing)
             return preset;
     }

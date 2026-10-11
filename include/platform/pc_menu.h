@@ -23,6 +23,7 @@ enum PcMenuItem
     PC_MENU_SHADOWS,
     PC_MENU_LIGHTING,
     PC_MENU_EFFECTS,
+    PC_MENU_DETAILS,
     PC_MENU_ANTIALIASING,
     PC_MENU_PICTURE_SIZE,
     PC_MENU_FRAME_RATE,
@@ -68,7 +69,7 @@ struct PcMenuState
     bool showFrameRate; /* frames a second in a corner of the screen */
     bool cameraDiorama;
     bool trees3ds;
-    bool hasCamera;     /* the 3D build: camera and trees rows */
+    bool hasCamera;     /* the 3D build: world details, camera and trees rows */
     bool confirming;
     unsigned int confirmStartMs;
     struct DisplaySettings previous;

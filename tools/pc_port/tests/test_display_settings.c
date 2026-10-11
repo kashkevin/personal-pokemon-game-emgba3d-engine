@@ -29,7 +29,7 @@ MT_TEST(defaults_are_1080p_windowed_high)
     MT_EQ(s.fullscreenMode, DISPLAY_MODE_BORDERLESS);
     MT_EQ(s.quality, QUALITY_HIGH);
     MT_EQ(s.shadows, SHADOWS_MEDIUM);
-    MT_CHECK(s.lighting && s.effects);
+    MT_CHECK(s.lighting && s.effects && s.details);
     MT_EQ(s.antialiasing, 0);
     MT_CHECK(!s.resolutionKept && !s.modeKept && !s.qualityKept);
     MT_EQ(DisplaySettings_ShadowMapSize(s.shadows), 2048); // the look before these settings
@@ -39,9 +39,9 @@ MT_TEST(file_round_trip)
 {
     static const char *const lines[] = {
         "resolution=2560x1440\n", "displayMode=fullscreen\n", "quality=custom\n",
-        "shadows=high\n", "lighting=0\n", "effects=1\n", "antialiasing=4\n",
+        "shadows=high\n", "lighting=0\n", "effects=1\n", "antialiasing=4\n", "details=0\n",
     };
-    struct DisplaySettings s = Parse(lines, 7);
+    struct DisplaySettings s = Parse(lines, 8);
     struct DisplaySettings again;
     char buffer[512];
     FILE *file = fmemopen(buffer, sizeof(buffer), "w");
@@ -53,7 +53,7 @@ MT_TEST(file_round_trip)
     MT_EQ(s.fullscreenMode, DISPLAY_MODE_FULLSCREEN);
     MT_EQ(s.quality, QUALITY_CUSTOM);
     MT_EQ(s.shadows, SHADOWS_HIGH);
-    MT_CHECK(!s.lighting && s.effects);
+    MT_CHECK(!s.lighting && s.effects && !s.details);
     MT_EQ(s.antialiasing, 4);
     DisplaySettings_Write(&s, file);
     fclose(file);
@@ -65,7 +65,7 @@ MT_TEST(file_round_trip)
     MT_EQ(again.mode, DISPLAY_MODE_FULLSCREEN);
     MT_EQ(again.quality, QUALITY_CUSTOM);
     MT_EQ(again.shadows, SHADOWS_HIGH);
-    MT_CHECK(!again.lighting && again.effects);
+    MT_CHECK(!again.lighting && again.effects && !again.details);
     MT_EQ(again.antialiasing, 4);
 }
 
@@ -88,12 +88,17 @@ MT_TEST(a_preset_decides_its_values)
 
     MT_EQ(s.quality, QUALITY_LOW);
     MT_EQ(s.shadows, SHADOWS_OFF);
-    MT_CHECK(!s.lighting && !s.effects);
+    MT_CHECK(!s.lighting && !s.effects && !s.details);
     DisplaySettings_SetQuality(&s, QUALITY_ULTRA);
     MT_EQ(s.shadows, SHADOWS_HIGH);
     MT_EQ(s.antialiasing, 4);
+    MT_CHECK(s.details);
     MT_EQ(DisplaySettings_MatchQuality(&s), QUALITY_ULTRA);
     s.effects = false;
+    MT_EQ(DisplaySettings_MatchQuality(&s), QUALITY_CUSTOM);
+    DisplaySettings_SetQuality(&s, QUALITY_MEDIUM);
+    MT_CHECK(s.details);
+    s.details = false;
     MT_EQ(DisplaySettings_MatchQuality(&s), QUALITY_CUSTOM);
 }
 
@@ -273,10 +278,35 @@ MT_TEST(menu_without_camera_rows)
 
     DisplaySettings_Defaults(&s);
     PcMenu_Open(&menu, &s, true, false, false, false, false, false);
-    MT_EQ(PcMenu_Rows(&menu, rows), PC_MENU_ITEM_COUNT - 2);
+    MT_EQ(PcMenu_Rows(&menu, rows), PC_MENU_ITEM_COUNT - 3); // no camera, trees or world details
+    menu.cursor = PC_MENU_EFFECTS;
+    PcMenu_Input(&menu, PC_MENU_INPUT_DOWN, 0);
+    MT_EQ(menu.cursor, PC_MENU_ANTIALIASING);
     menu.cursor = PC_MENU_FRAME_RATE;
     PcMenu_Input(&menu, PC_MENU_INPUT_DOWN, 0);
     MT_EQ(menu.cursor, PC_MENU_CLOSE);
+}
+
+MT_TEST(menu_world_details)
+{
+    struct PcMenuState menu;
+    struct PcMenuRow rows[PC_MENU_ITEM_COUNT];
+    struct DisplaySettings s;
+
+    DisplaySettings_Defaults(&s);
+    PcMenu_Open(&menu, &s, true, false, false, true, true, true);
+    menu.cursor = PC_MENU_EFFECTS;
+    PcMenu_Input(&menu, PC_MENU_INPUT_DOWN, 0);
+    MT_EQ(menu.cursor, PC_MENU_DETAILS);
+    PcMenu_Rows(&menu, rows);
+    MT_CHECK(strcmp(rows[PC_MENU_DETAILS].label, "World details") == 0);
+    MT_CHECK(strcmp(rows[PC_MENU_DETAILS].value, "On") == 0);
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_ACCEPT, 0), PC_MENU_CHANGED_QUALITY);
+    MT_CHECK(!menu.settings.details);
+    MT_EQ(menu.settings.quality, QUALITY_CUSTOM);
+    MT_CHECK(menu.settings.qualityKept);
+    PcMenu_Rows(&menu, rows);
+    MT_CHECK(strcmp(rows[PC_MENU_DETAILS].value, "Off") == 0);
 }
 
 MT_TEST(menu_from_a_resolution_not_listed)
@@ -383,6 +413,7 @@ int main(void)
     MT_RUN(pixel_art_in_whole_steps);
     MT_RUN(menu_changes_and_confirmation);
     MT_RUN(menu_without_camera_rows);
+    MT_RUN(menu_world_details);
     MT_RUN(menu_from_a_resolution_not_listed);
     MT_RUN(benchmark_statistics);
     MT_RUN(benchmark_timeline);

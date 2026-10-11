@@ -69,6 +69,8 @@ struct DisplaySettings
     unsigned char shadows;        /* enum ShadowQuality */
     bool lighting;                /* weather light, sun dapples, colour grade */
     bool effects;                 /* dust, sun rays, bloom, mist banks */
+    bool details;                 /* the 3D view's world detail objects: grass, flowers,
+                                     signs, fences, lamps, rocks standing up */
     unsigned char antialiasing;   /* multisamples: 0, 2, 4 or 8 */
     bool resolutionKept;
     bool modeKept;
@@ -90,7 +92,7 @@ void DisplaySettings_Write(const struct DisplaySettings *settings, FILE *file);
 /* The legacy windowScale value for this resolution, or 0 if it has none. */
 int DisplaySettings_LegacyWindowScale(const struct DisplaySettings *settings);
 
-/* A preset's shadows, lighting, effects and antialiasing. */
+/* A preset's shadows, lighting, effects, world details and antialiasing. */
 void DisplaySettings_SetQuality(struct DisplaySettings *settings, unsigned char preset);
 /* The preset these values are, or QUALITY_CUSTOM. */
 unsigned char DisplaySettings_MatchQuality(const struct DisplaySettings *settings);
