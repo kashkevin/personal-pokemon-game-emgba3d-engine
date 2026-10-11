@@ -2309,6 +2309,7 @@ static void Task_NewGameBirchSpeech_ReturnFromNamingScreenShowTextbox(u8 taskId)
 #undef tTimer
 
 #ifdef ENABLE_NATIVE_UI
+#include "load_save.h"
 #include "region_map.h"
 #include "native_ui/ui_engine.h"
 
@@ -2394,6 +2395,7 @@ bool32 MainMenu_NativeUiState(struct NativeMainMenu *out)
 void MainMenu_NativeUiSaveSummary(struct NativeSaveSummary *out)
 {
     const struct MapHeader *header;
+    const struct WarpData *warp;
     u32 i;
 
     memset(out, 0, sizeof(*out));
@@ -2408,7 +2410,9 @@ void MainMenu_NativeUiSaveSummary(struct NativeSaveSummary *out)
     for (i = FLAG_BADGE01_GET; i < FLAG_BADGE01_GET + NUM_BADGES; i++)
         if (FlagGet(i))
             out->badges++;
-    header = Overworld_GetMapHeaderByGroupAndId(gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum);
+    // where CONTINUE puts the player (CB2_ContinueSavedGame): the continue warp when the save set one
+    warp = UseContinueGameWarp() ? &gSaveBlock1Ptr->continueGameWarp : &gSaveBlock1Ptr->location;
+    header = Overworld_GetMapHeaderByGroupAndId(warp->mapGroup, warp->mapNum);
     if (header != NULL)
         GetMapName(out->location, header->regionMapSectionId, 0);
     else
