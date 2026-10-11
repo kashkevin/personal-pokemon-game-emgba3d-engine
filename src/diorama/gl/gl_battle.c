@@ -827,6 +827,11 @@ bool DioramaGLBattle_Init(void)
                            (void *)offsetof(struct QuadVertex, r));
     MakeTexture(&sEdgeTexture, 2, 160, NULL);
     MakeTexture(&sArtTexture, 240, 160, NULL);
+    /* Past the picture's edges the scenery is mirrored, not its edge pixels stretched into
+     * streaks: where the world has nothing (the backdrop) and on an indoor map's curtains. */
+    glBindTexture(GL_TEXTURE_2D, sArtTexture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_MIRRORED_REPEAT);
     if (!InitCurtain())
         SDL_Log("Diorama battle: no curtain where indoor maps end (its shader failed)");
     MakeTexture(&sWhiteTexture, 1, 1, &white);
@@ -2030,7 +2035,7 @@ static void DrawCarriedOut(const struct Layout *layout)
 
 /* Right after the world is drawn, before it is kept: where it has nothing
  * (the depth still the far plane's), the scenery as the GBA would show it
- * (sArtTexture, its edges carried out to the window's). */
+ * (sArtTexture, mirrored past its edges out to the window's). */
 static void DrawBackdrop(const struct Layout *layout)
 {
     static const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
