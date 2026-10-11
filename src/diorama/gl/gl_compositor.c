@@ -81,6 +81,13 @@ static struct DioramaResolvedCell sRenderedResolvedCells[DIORAMA_MAX_VISIBLE_CEL
 static u32 sDebugPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
 static u32 sWeatherPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
 static u32 sUiPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+/*
+ * The game's latest 240x160 picture until it is drawn (performance work
+ * 2026-10-11): in the 3D view it is hidden nearly always, so it is uploaded
+ * only when a frame draws it, not on each of the game's 60 frames a second.
+ * VDraw's buffer (sdl2.c), rewritten only by the next VDraw on this thread.
+ */
+static const u32 *sPendingFrame;
 static u32 sAtlasPixels[DIORAMA_ATLAS_PIXEL_COUNT];
 static u32 sBaseAtlasPixels[DIORAMA_ATLAS_PIXEL_COUNT];
 static u32 sForegroundAtlasPixels[DIORAMA_ATLAS_PIXEL_COUNT];
@@ -1380,13 +1387,25 @@ void DioramaGL_LoadArtwork(void)
     sBorderTexture = LoadTexture("Border.bmp");
 }
 
-void DioramaGL_UploadFrame(const u32 *argb8888)
+static void EnsureFrameTexture(void)
 {
-    AdoptLatestSnapshot();
+    if (sPendingFrame == NULL)
+        return;
     glBindTexture(GL_TEXTURE_2D, sFrameTexture.id);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT,
-                    GL_BGRA, GL_UNSIGNED_BYTE, argb8888);
+                    GL_BGRA, GL_UNSIGNED_BYTE, sPendingFrame);
+    sPendingFrame = NULL;
+}
+
+void DioramaGL_UploadFrame(const u32 *argb8888)
+{
+    AdoptLatestSnapshot();
+    sPendingFrame = argb8888;
+    /* The text boxes over the 3D view are drawn only while the game shows
+     * some (DioramaGL_Present); without any there is nothing to make. */
+    if (!sHasSceneSnapshot || sSceneSnapshot.uiRectCount == 0)
+        return;
     DioramaUI_RenderBgOverlay(
         DISPLAY_WIDTH, DISPLAY_HEIGHT,
         sHasSceneSnapshot ? sSceneSnapshot.uiRects : NULL,
@@ -1711,9 +1730,12 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         }
         /* Photo mode shows the world alone (no text boxes, no map name). */
         if (sTwoDOpacity > 0.0f && DioramaCamera_GetMode() != DIORAMA_CAMERA_PHOTO)
+        {
+            EnsureFrameTexture();
             DrawTexture(&sFrameTexture, outputWidth, outputHeight,
                         gameX, gameY, gameWidth, gameHeight,
                         0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, sTwoDOpacity);
+        }
         if (current3D && sSceneSnapshot.uiRectCount > 0
          && DioramaCamera_GetMode() != DIORAMA_CAMERA_PHOTO)
             DrawTexture(&sUiTexture, outputWidth, outputHeight,
@@ -1721,9 +1743,13 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                         0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, 1.0f);
     }
     else
+    {
+        if (gameTexture == &sFrameTexture)
+            EnsureFrameTexture();
         DrawTexture(gameTexture, outputWidth, outputHeight,
                     gameX, gameY, gameWidth, gameHeight,
                     0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, false, 1.0f);
+    }
 
     if (sSurveyView < 0 && !drawTerrain && border && sBorderTexture.id != 0)
     {

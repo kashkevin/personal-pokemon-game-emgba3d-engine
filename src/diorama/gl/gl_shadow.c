@@ -44,6 +44,16 @@ static bool sCacheValid;
 static float sCachedX;
 static float sCachedY;
 static uint64_t sCachedGeneration;
+/*
+ * The casters changed but the map's place did not (chunks built as the player
+ * walks, mostly far off): the map is drawn again at most every
+ * SHADOW_REFRESH_MS (performance work 2026-10-11), not for each chunk the
+ * terrain builds - the casters are the static world, and a far chunk's
+ * shadow a few frames late shows nowhere. A move of the map's place redraws
+ * at once, as before.
+ */
+#define SHADOW_REFRESH_MS 120
+static Uint32 sCachedMs;
 
 static void Normalize(float v[3])
 {
@@ -182,7 +192,7 @@ bool DioramaGLShadow_Begin(float cameraX, float cameraZ, float strength,
     cx = floorf(cx / step) * step;
     cy = floorf(cy / step) * step;
     if (sCacheValid && cx == sCachedX && cy == sCachedY
-     && casterGeneration == sCachedGeneration)
+     && (casterGeneration == sCachedGeneration || SDL_GetTicks() - sCachedMs < SHADOW_REFRESH_MS))
     {
         /* the map drawn last time still holds, and so does its matrix */
         sActiveThisFrame = true;
@@ -229,6 +239,7 @@ bool DioramaGLShadow_Begin(float cameraX, float cameraZ, float strength,
     sCachedX = cx;
     sCachedY = cy;
     sCachedGeneration = casterGeneration;
+    sCachedMs = SDL_GetTicks();
     sActiveThisFrame = true;
     return true;
 }

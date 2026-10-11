@@ -415,8 +415,10 @@ void DioramaProfile_FormatStats(const struct DioramaProfileStats *stats, char *b
             used += (size_t)SDL_snprintf(buffer + used, size - used, " %s %.2f", sSectionNames[section],
                                          stats->cpuMs[section]);
     if (used < size && stats->syncs > 0)
-        used += (size_t)SDL_snprintf(buffer + used, size - used, " (sync max %.2f, %u syncs, %u ticks)",
+        used += (size_t)SDL_snprintf(buffer + used, size - used, " (sync max %.2f, %u syncs, %u game frames)",
                                      stats->cpuMsMax[DIORAMA_PROF_SYNC], stats->syncs, stats->ticks);
+    else if (used < size)
+        used += (size_t)SDL_snprintf(buffer + used, size - used, " (%u game frames)", stats->ticks);
     if (used < size && stats->gpuFrames > 0)
     {
         used += (size_t)SDL_snprintf(buffer + used, size - used, "; gpu ms");

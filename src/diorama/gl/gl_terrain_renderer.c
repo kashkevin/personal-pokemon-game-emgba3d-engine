@@ -23,10 +23,21 @@
 #include "diorama/terrain_mesh.h"
 #include "metatile_behavior.h"
 
-#define TERRAIN_CHUNK_CACHE_SIZE 100 /* the 49 x 49 cells span up to 8 x 8 chunks */
-#define TERRAIN_DEBUG_MAX_VERTICES ((TERRAIN_CHUNK_CACHE_SIZE + DIORAMA_MAX_VISIBLE_CELLS) * 8)
+#define TERRAIN_GRID_CHUNKS 100 /* the 49 x 49 cells span up to 8 x 8 chunks */
+/*
+ * The chunk cache (performance work 2026-10-11): the chunks in view, and
+ * those of places seen before - other maps included - kept until the slots
+ * are needed again (the least recently seen first). A chunk comes back from
+ * the cache when its input's signature is the same, so walking back over a
+ * map's edge or out of a house builds nothing it built before. Its size is
+ * the memory budget's (DioramaGLTerrain_SetCacheChunks): at least the grid's
+ * 100, at most TERRAIN_CHUNK_POOL_MAX.
+ */
+#define TERRAIN_CHUNK_POOL_MAX 1024
+#define TERRAIN_CHUNK_POOL_DEFAULT 160
+#define TERRAIN_DEBUG_MAX_VERTICES ((TERRAIN_GRID_CHUNKS + DIORAMA_MAX_VISIBLE_CELLS) * 8)
 #define TERRAIN_MAX_VISIBLE_TREE_INSTANCES \
-    (TERRAIN_CHUNK_CACHE_SIZE * DIORAMA_TERRAIN_MAX_TREE_INSTANCES)
+    (TERRAIN_GRID_CHUNKS * DIORAMA_TERRAIN_MAX_TREE_INSTANCES)
 
 struct GLTerrainChunk
 {
@@ -34,6 +45,8 @@ struct GLTerrainChunk
     bool active;
     int16_t chunkX;
     int16_t chunkY;
+    uint32_t mapKey;           /* the map whose coordinates chunkX and chunkY are in */
+    bool stale;                /* its build is waiting (sPending): the old mesh stands meanwhile */
     uint32_t mapGeneration;
     uint32_t rulesGeneration;
     uint64_t signature;
@@ -49,7 +62,12 @@ struct GLTerrainChunk
     struct DioramaTerrainMesh mesh;
 };
 
-static struct GLTerrainChunk sChunks[TERRAIN_CHUNK_CACHE_SIZE];
+static struct GLTerrainChunk sChunks[TERRAIN_CHUNK_POOL_MAX];
+static unsigned sChunkLimit = TERRAIN_CHUNK_POOL_DEFAULT;
+static uint32_t sSyncMapKey; /* the map of the chunks being synced */
+static uint32_t sCacheHits;  /* chunks a map change found in the cache (PKMN_DIORAMA_LOG) */
+static bool sMapJustChanged;
+static uint32_t sHitsAtChange;
 
 /*
  * What every chunk's BuildInput shares, worked out once per sync (it was per
@@ -422,12 +440,18 @@ static bool CreateTreeBuffers(void)
     return true;
 }
 
+static uint32_t MapKey(const struct DioramaSceneSnapshot *snapshot)
+{
+    return ((uint32_t)snapshot->mapGroup << 24) | ((uint32_t)snapshot->mapNum << 16) | snapshot->mapLayoutId;
+}
+
 static struct GLTerrainChunk *FindChunk(int chunkX, int chunkY)
 {
-    int i;
+    unsigned i;
 
-    for (i = 0; i < TERRAIN_CHUNK_CACHE_SIZE; i++)
-        if (sChunks[i].occupied && sChunks[i].chunkX == chunkX && sChunks[i].chunkY == chunkY)
+    for (i = 0; i < sChunkLimit; i++)
+        if (sChunks[i].occupied && sChunks[i].mapKey == sSyncMapKey
+         && sChunks[i].chunkX == chunkX && sChunks[i].chunkY == chunkY)
             return &sChunks[i];
     return NULL;
 }
@@ -435,9 +459,9 @@ static struct GLTerrainChunk *FindChunk(int chunkX, int chunkY)
 static struct GLTerrainChunk *AllocateChunk(void)
 {
     struct GLTerrainChunk *oldest = NULL;
-    int i;
+    unsigned i;
 
-    for (i = 0; i < TERRAIN_CHUNK_CACHE_SIZE; i++)
+    for (i = 0; i < sChunkLimit; i++)
     {
         if (!sChunks[i].occupied)
             return &sChunks[i];
@@ -1210,8 +1234,10 @@ static bool UploadChunk(struct GLTerrainChunk *chunk,
                   mesh.vertexCount * sizeof(struct DioramaTerrainVertex),
                   sScratchVertices, GL_DYNAMIC_DRAW);
     chunk->occupied = true;
+    chunk->stale = false;
     chunk->chunkX = input->chunkX;
     chunk->chunkY = input->chunkY;
+    chunk->mapKey = sSyncMapKey;
     chunk->mapGeneration = input->mapGeneration;
     chunk->rulesGeneration = input->rulesGeneration;
     chunk->signature = signature;
@@ -1298,9 +1324,9 @@ bool DioramaGLTerrain_FarShown(void)
 
 void DioramaGLTerrain_Reset(void)
 {
-    int i;
+    unsigned i;
 
-    for (i = 0; i < TERRAIN_CHUNK_CACHE_SIZE; i++)
+    for (i = 0; i < TERRAIN_CHUNK_POOL_MAX; i++)
     {
         sChunks[i].occupied = false;
         sChunks[i].active = false;
@@ -1310,6 +1336,53 @@ void DioramaGLTerrain_Reset(void)
     sGeometryGeneration++;
     sSyncKeyValid = false;
     sPendingCount = 0;
+}
+
+/* Another map: none of the chunks is in view any more, all stay cached. */
+static void LeaveMap(void)
+{
+    unsigned i;
+
+    for (i = 0; i < TERRAIN_CHUNK_POOL_MAX; i++)
+        sChunks[i].active = false;
+    sGeometryGeneration++;
+    sSyncKeyValid = false;
+    sPendingCount = 0;
+    sMapJustChanged = true;
+    sHitsAtChange = sCacheHits;
+}
+
+static void ReleaseChunk(struct GLTerrainChunk *chunk)
+{
+    if (chunk->vertexBuffer != 0)
+        dglDeleteBuffers(1, &chunk->vertexBuffer);
+    if (chunk->vertexArray != 0)
+        dglDeleteVertexArrays(1, &chunk->vertexArray);
+    memset(chunk, 0, sizeof(*chunk));
+}
+
+void DioramaGLTerrain_SetCacheChunks(unsigned chunks)
+{
+    unsigned i;
+
+    if (chunks < TERRAIN_GRID_CHUNKS)
+        chunks = TERRAIN_GRID_CHUNKS;
+    if (chunks > TERRAIN_CHUNK_POOL_MAX)
+        chunks = TERRAIN_CHUNK_POOL_MAX;
+    if (chunks == sChunkLimit)
+        return;
+    /* A smaller cache gives its last slots' memory back; whatever was in view
+     * there is built again at the next sync. */
+    for (i = chunks; i < sChunkLimit; i++)
+        ReleaseChunk(&sChunks[i]);
+    sChunkLimit = chunks;
+    sSyncKeyValid = false;
+    SDL_Log("Diorama: terrain cache %u chunks", chunks);
+}
+
+unsigned DioramaGLTerrain_CacheChunks(void)
+{
+    return sChunkLimit;
 }
 
 uint32_t DioramaGLTerrain_GetGeometryGeneration(void)
@@ -1462,7 +1535,7 @@ static bool SyncAnimatedTiles(const struct DioramaSceneSnapshot *snapshot,
         if (memcmp(snapshot->tileGraphics + tile * DIORAMA_TILE_BYTES, sSyncTiles + tile * DIORAMA_TILE_BYTES,
                    DIORAMA_TILE_BYTES) != 0)
             sSyncDirtyTiles[tile / 8] |= 1 << (tile % 8);
-    for (i = 0; i < TERRAIN_CHUNK_CACHE_SIZE; i++)
+    for (i = 0; i < (int)sChunkLimit; i++)
     {
         struct GLTerrainChunk *chunk = &sChunks[i];
         uint64_t signature;
@@ -1625,7 +1698,15 @@ static bool SyncChunk(const struct DioramaSceneSnapshot *snapshot,
             snapshot->dirtyCells[dirtyIndex].mapY,
             chunkX, chunkY);
     chunk = FindChunk(chunkX, chunkY);
-    if (newIdentity || chunk == NULL || !chunk->occupied || chunk->mapGeneration != snapshot->mapGeneration
+    if (chunk != NULL && chunk->occupied && !chunk->active && chunk->mapGeneration != snapshot->mapGeneration
+     && chunk->rulesGeneration == rulesGeneration && chunk->signature == signature && !forceDirty)
+    {
+        /* Seen before this map change, the same as then: from the cache. */
+        chunk->mapGeneration = snapshot->mapGeneration;
+        chunk->stale = false;
+        sCacheHits++;
+    }
+    if (newIdentity || chunk == NULL || !chunk->occupied
      || chunk->rulesGeneration != rulesGeneration
      || chunk->signature != signature || forceDirty)
     {
@@ -1636,9 +1717,9 @@ static bool SyncChunk(const struct DioramaSceneSnapshot *snapshot,
             {
                 AddPending(chunkX, chunkY);
                 sDeferredBuilds++;
-                if (chunk != NULL && chunk->occupied && chunk->mapGeneration == snapshot->mapGeneration
-                 && chunk->rulesGeneration == rulesGeneration)
+                if (chunk != NULL && chunk->occupied && chunk->rulesGeneration == rulesGeneration)
                 {
+                    chunk->stale = true;
                     chunk->active = true;
                     chunk->lastSeenSequence = snapshot->sequence;
                 }
@@ -1723,7 +1804,7 @@ static void CheckSkippedSync(const struct DioramaSceneSnapshot *snapshot,
         return;
     TreeTint(snapshot);
     PrepareSync(snapshot, resolvedCells);
-    for (i = 0; i < TERRAIN_CHUNK_CACHE_SIZE; i++)
+    for (i = 0; i < (int)sChunkLimit; i++)
     {
         struct GLTerrainChunk *chunk = &sChunks[i];
 
@@ -1828,12 +1909,17 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
 
     SyncFar(snapshot);
     sMetrics.rebuiltChunks = 0;
-    if (snapshot->mapGeneration != sMapGeneration || rulesGeneration != sRulesGeneration)
+    if (rulesGeneration != sRulesGeneration)
     {
-        DioramaGLTerrain_Reset();
-        sMapGeneration = snapshot->mapGeneration;
+        DioramaGLTerrain_Reset(); /* other rules: nothing cached holds */
         sRulesGeneration = rulesGeneration;
     }
+    if (snapshot->mapGeneration != sMapGeneration)
+    {
+        LeaveMap(); /* chunks of maps seen before come back by their signatures */
+        sMapGeneration = snapshot->mapGeneration;
+    }
+    sSyncMapKey = MapKey(snapshot);
     {
         struct TerrainSyncKey key;
         unsigned cellCount = snapshot->visibleCellCount < DIORAMA_MAX_VISIBLE_CELLS
@@ -1866,7 +1952,7 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
             {
                 /* Nothing the chunks are built from changed: they stand as they are. */
                 sSyncSkipped++;
-                for (i = 0; i < TERRAIN_CHUNK_CACHE_SIZE; i++)
+                for (i = 0; i < (int)sChunkLimit; i++)
                     if (sChunks[i].active)
                         sChunks[i].lastSeenSequence = snapshot->sequence;
                 sMapEditGeneration = snapshot->mapEditGeneration;
@@ -1891,8 +1977,10 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
         sSyncRun++;
         if ((sSyncRun & 127) == 0 && LogEnabledTerrain())
             SDL_Log("Diorama: terrain syncs: %u ran the chunk loop, %u only animated tiles, "
-                    "%u had nothing to do; %u chunks stood as the grid moved, %u builds waited",
-                    sSyncRun, sSyncAnimated, sSyncSkipped, sInteriorSkips, sDeferredBuilds);
+                    "%u had nothing to do; %u chunks stood as the grid moved, %u builds waited, "
+                    "%u came back from the cache (%u chunks)",
+                    sSyncRun, sSyncAnimated, sSyncSkipped, sInteriorSkips, sDeferredBuilds,
+                    sCacheHits, sChunkLimit);
         {
             struct TerrainSyncKey moved = key;
 
@@ -1915,7 +2003,7 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
     if (sSyncGroundSlot != sPrevGroundSlot)
         gridMovedOnly = false;
     sPrevGroundSlot = sSyncGroundSlot;
-    for (i = 0; i < TERRAIN_CHUNK_CACHE_SIZE; i++)
+    for (i = 0; i < (int)sChunkLimit; i++)
         sChunks[i].active = false;
     sPendingCount = 0;
     minChunkX = DioramaTerrain_FloorDiv(snapshot->gridOriginX, DIORAMA_TERRAIN_CHUNK_SIZE);
@@ -1926,8 +2014,8 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
                                        DIORAMA_TERRAIN_CHUNK_SIZE);
     {
         /* Nearest the player first: the allowance for far chunks goes to the nearest. */
-        int16_t order[TERRAIN_CHUNK_CACHE_SIZE][2];
-        int distance[TERRAIN_CHUNK_CACHE_SIZE];
+        int16_t order[TERRAIN_GRID_CHUNKS][2];
+        int distance[TERRAIN_GRID_CHUNKS];
         unsigned count = 0;
         unsigned offscreen = 0;
         unsigned n;
@@ -1935,7 +2023,7 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
         int centreY = snapshot->gridOriginY + DIORAMA_GRID_HEIGHT / 2;
 
         for (chunkY = minChunkY; chunkY <= maxChunkY; chunkY++)
-            for (chunkX = minChunkX; chunkX <= maxChunkX && count < TERRAIN_CHUNK_CACHE_SIZE; chunkX++)
+            for (chunkX = minChunkX; chunkX <= maxChunkX && count < TERRAIN_GRID_CHUNKS; chunkX++)
             {
                 int dx = chunkX * DIORAMA_TERRAIN_CHUNK_SIZE + DIORAMA_TERRAIN_CHUNK_SIZE / 2 - centreX;
                 int dy = chunkY * DIORAMA_TERRAIN_CHUNK_SIZE + DIORAMA_TERRAIN_CHUNK_SIZE / 2 - centreY;
@@ -1961,7 +2049,7 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
             chunkX = order[n][0];
             chunkY = order[n][1];
             chunk = FindChunk(chunkX, chunkY);
-            if (gridMovedOnly && chunk != NULL && chunk->occupied && !chunk->hasPixelObjects
+            if (gridMovedOnly && chunk != NULL && chunk->occupied && !chunk->hasPixelObjects && !chunk->stale
              && chunk->mapGeneration == snapshot->mapGeneration && chunk->rulesGeneration == rulesGeneration
              && RegionUnchanged(snapshot, resolvedCells, &previousKey, chunkX, chunkY))
             {
@@ -1996,7 +2084,7 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
     }
     sMetrics.residentChunks = 0;
     sMetrics.activeChunks = 0;
-    for (i = 0; i < TERRAIN_CHUNK_CACHE_SIZE; i++)
+    for (i = 0; i < (int)sChunkLimit; i++)
     {
         if (sChunks[i].occupied) sMetrics.residentChunks++;
         if (sChunks[i].active) sMetrics.activeChunks++;
@@ -2004,6 +2092,14 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
     sMapEditGeneration = snapshot->mapEditGeneration;
     sLastSyncSequence = snapshot->sequence;
     sSyncKeyValid = true;
+    if (sMapJustChanged)
+    {
+        sMapJustChanged = false;
+        if (LogEnabledTerrain())
+            SDL_Log("Diorama: map %u.%u: %u chunks from the cache, %u built, %u waiting",
+                    snapshot->mapGroup, snapshot->mapNum, sCacheHits - sHitsAtChange,
+                    sMetrics.rebuiltChunks, sPendingCount);
+    }
     if (gridMovedOnly)
         CheckSkippedSync(snapshot, resolvedCells);
     return sMetrics.activeChunks != 0;
@@ -2125,7 +2221,7 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
         dglUniform3f(sPixelScaleLocation, 1.0f, 1.0f, 1.0f);
         dglUniform3f(sPixelOffsetLocation, 0.0f, 0.0f, 0.0f);
     }
-    for (i = 0; i < TERRAIN_CHUNK_CACHE_SIZE; i++)
+    for (i = 0; i < (int)sChunkLimit; i++)
     {
         struct GLTerrainChunk *chunk = &sChunks[i];
 
@@ -2179,7 +2275,7 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
     glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
     glDepthMask(GL_FALSE);
     dglUniform1i(sRenderPassLocation, 1);
-    for (i = 0; i < TERRAIN_CHUNK_CACHE_SIZE; i++)
+    for (i = 0; i < (int)sChunkLimit; i++)
     {
         struct GLTerrainChunk *chunk = &sChunks[i];
 
@@ -2194,7 +2290,7 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
     glStencilMask(0x02);
     glStencilFunc(GL_ALWAYS, 2, 0x02);
     dglUniform1i(sRenderPassLocation, 2);
-    for (i = 0; i < TERRAIN_CHUNK_CACHE_SIZE; i++)
+    for (i = 0; i < (int)sChunkLimit; i++)
     {
         struct GLTerrainChunk *chunk = &sChunks[i];
 
@@ -2252,7 +2348,7 @@ void DioramaGLTerrain_DrawShadow(GLuint atlasTexture, GLuint baseAtlasTexture,
     dglActiveTexture(GL_TEXTURE0);
     /* Everything resident casts, on screen or not: a tree just off the edge
      * still throws its shadow into view. */
-    for (i = 0; i < TERRAIN_CHUNK_CACHE_SIZE; i++)
+    for (i = 0; i < (int)sChunkLimit; i++)
     {
         struct GLTerrainChunk *chunk = &sChunks[i];
 
@@ -2285,7 +2381,7 @@ void DioramaGLTerrain_Shutdown(void)
 {
     int i;
 
-    for (i = 0; i < TERRAIN_CHUNK_CACHE_SIZE; i++)
+    for (i = 0; i < (int)sChunkLimit; i++)
     {
         if (sChunks[i].vertexBuffer != 0)
             dglDeleteBuffers(1, &sChunks[i].vertexBuffer);

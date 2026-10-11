@@ -24,6 +24,11 @@ struct DioramaTerrainMetrics
 
 bool DioramaGLTerrain_Init(void);
 void DioramaGLTerrain_Reset(void);
+/* The chunk cache's size (the memory budget's; at least the 100 chunks the grid
+ * spans, at most 1024). Each chunk is one vertex buffer, about 100 to 250 KB of
+ * graphics memory. */
+void DioramaGLTerrain_SetCacheChunks(unsigned chunks);
+unsigned DioramaGLTerrain_CacheChunks(void);
 bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
                            const struct DioramaResolvedCell *resolvedCells);
 void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
