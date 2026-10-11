@@ -20,6 +20,8 @@
  *   PKMN_TEST_EXIT=1         end the process after the capture
  *   PKMN_TEST_AUTOPILOT=1    press the keys a person would: Start and A to Continue,
  *                            B through a map's scene and the battle's opening lines
+ *   PKMN_TEST_TIMEOUT        seconds: no picture by then (a battle drawn in 2D has none),
+ *                            say so and - with PKMN_TEST_EXIT - end the process (code 3)
  *
  * Nothing here changes a battle: it starts one the way the debug menu's
  * "Try battle" does and reads the picture.

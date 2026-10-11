@@ -45,6 +45,7 @@ static struct
     SDL_atomic_t fieldSeen;
     SDL_atomic_t battleSeen;
     unsigned int startMs;
+    int timeoutSeconds;       /* PKMN_TEST_TIMEOUT: give up (and exit) after this long */
 } s;
 
 static int EnvInt(const char *name, int fallback)
@@ -68,6 +69,7 @@ static void Init(void)
     s.captureDelay = EnvInt("PKMN_TEST_CAPTURE_DELAY", 40);
     s.exitAfter = EnvInt("PKMN_TEST_EXIT", 0) != 0;
     s.autopilot = EnvInt("PKMN_TEST_AUTOPILOT", 0) != 0;
+    s.timeoutSeconds = EnvInt("PKMN_TEST_TIMEOUT", 0);
     if (s.spec[0] != '\0' || s.stem[0] != '\0')
         SDL_Log("Battle env test: battle '%s' after %d field frames, capture '%s'%s",
                 s.spec, s.delay, s.stem, s.exitAfter ? ", then exit" : "");
@@ -171,11 +173,26 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
 
     if (!s.init)
         Init();
-    if (!s.autopilot || SDL_AtomicGet(&s.menuSeen) != 0)
-        return keys;
     if (s.startMs == 0)
         s.startMs = nowMs == 0 ? 1 : nowMs;
     t = nowMs - s.startMs;
+    /* no picture in time (a battle drawn in 2D has none to take): say so and stop */
+    if (s.timeoutSeconds > 0 && t > (unsigned int)s.timeoutSeconds * 1000u
+     && SDL_AtomicGet(&s.captured) == 0)
+    {
+        SDL_Log("Battle env test: no picture after %d seconds (the battle %s); giving up",
+                s.timeoutSeconds, SDL_AtomicGet(&s.menuSeen) ? "reached its menu but was not "
+                "drawn in 3D" : "did not reach its menu");
+        if (s.exitAfter)
+        {
+            fflush(stdout);
+            fflush(stderr);
+            _exit(3);
+        }
+        s.timeoutSeconds = 0;
+    }
+    if (!s.autopilot || SDL_AtomicGet(&s.menuSeen) != 0)
+        return keys;
     if (SDL_AtomicGet(&s.fieldSeen) == 0)
     {
         if (t >= 8000 && t < 8150)
