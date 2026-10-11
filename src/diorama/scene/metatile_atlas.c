@@ -18,6 +18,7 @@ static uint16_t sPageFaded[DIORAMA_NEIGHBOUR_PAGES][DIORAMA_FADED_PALETTE_ENTRIE
 static uint16_t sPageUnfaded[DIORAMA_NEIGHBOUR_PAGES][DIORAMA_FADED_PALETTE_ENTRIES];
 static bool sPageSet[DIORAMA_NEIGHBOUR_PAGES];
 static uint8_t sHighestPage;
+static uint32_t sLastPageSignature;
 
 uint8_t DioramaMetatile_DecodePixel(const uint8_t *tileGraphics, uint16_t tileEntry,
                                     uint8_t x, uint8_t y)
@@ -344,7 +345,13 @@ uint32_t DioramaAtlas_SetPages(const struct DioramaSceneSnapshot *snapshot)
         DioramaAtlas_MapPalette(snapshot->unfadedPalette, snapshot->fadedPalette,
                                 source->palettes, sPageFaded[page] + first, count);
     }
+    sLastPageSignature = signature;
     return signature;
+}
+
+uint32_t DioramaAtlas_LastPageSignature(void)
+{
+    return sLastPageSignature;
 }
 
 struct DioramaAtlasArt DioramaAtlas_PageArt(const struct DioramaSceneSnapshot *snapshot,

@@ -99,6 +99,29 @@ static u32 sAtlasMapGeneration;
 static u32 sAtlasPaletteGeneration;
 static u32 sAtlasAnimationGeneration;
 static u32 sAtlasPageSignature;
+/*
+ * The last grid resolution's inputs (performance work 2026-10-11): the rules
+ * resolve a grid from its cells, the map, the rules' generation and the cells
+ * the game marked dirty; the same cells of the same map resolve the same, so
+ * a snapshot that changes none of them (most of the game's frames) keeps the
+ * resolved cells instead of resolving all 2401 again.
+ */
+struct ResolveKey
+{
+    s16 gridOriginX;
+    s16 gridOriginY;
+    u16 visibleCellCount;
+    u16 mapLayoutId;
+    u8 mapGroup;
+    u8 mapNum;
+    u8 pad[2];
+    s32 mapCoordinateOffset;
+    u32 mapGeneration;
+    u32 rulesGeneration;
+};
+static struct ResolveKey sResolveKey;
+static bool sResolveValid;
+static struct DioramaCellSnapshot sResolveCells[DIORAMA_MAX_VISIBLE_CELLS];
 static bool sHasAtlasTileGraphics;
 static bool sHasSceneSnapshot;
 static bool sHasPreviousSceneSnapshot;
@@ -845,8 +868,31 @@ static void EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
     }
     if (cellCount > DIORAMA_MAX_VISIBLE_CELLS)
         cellCount = DIORAMA_MAX_VISIBLE_CELLS;
-    DioramaRules_ResolveGrid(snapshot, sAtlasResolvedCells);
-    DioramaBuildings_FlattenResolvedCells(snapshot, sAtlasResolvedCells, cellCount);
+    {
+        struct ResolveKey key;
+
+        memset(&key, 0, sizeof(key));
+        key.gridOriginX = snapshot->gridOriginX;
+        key.gridOriginY = snapshot->gridOriginY;
+        key.visibleCellCount = (u16)cellCount;
+        key.mapLayoutId = snapshot->mapLayoutId;
+        key.mapGroup = snapshot->mapGroup;
+        key.mapNum = snapshot->mapNum;
+        key.mapCoordinateOffset = snapshot->mapCoordinateOffset;
+        key.mapGeneration = snapshot->mapGeneration;
+        key.rulesGeneration = DioramaRules_GetGeneration();
+        if (!sResolveValid || snapshot->dirtyCellCount != 0 || snapshot->dirtyOverflow
+         || memcmp(&key, &sResolveKey, sizeof(key)) != 0
+         || memcmp(sResolveCells, snapshot->cells, cellCount * sizeof(sResolveCells[0])) != 0)
+        {
+            DioramaRules_ResolveGrid(snapshot, sAtlasResolvedCells);
+            DioramaBuildings_FlattenResolvedCells(snapshot, sAtlasResolvedCells, cellCount);
+            /* Kept for the next snapshot only when no dirty cell shaped it. */
+            sResolveValid = snapshot->dirtyCellCount == 0 && !snapshot->dirtyOverflow;
+            sResolveKey = key;
+            memcpy(sResolveCells, snapshot->cells, cellCount * sizeof(sResolveCells[0]));
+        }
+    }
     for (i = 0; i < DIORAMA_ATLAS_SLOT_COUNT; i++)
     {
         sCutoutBaseMetatiles[i] = 0xFFFF;

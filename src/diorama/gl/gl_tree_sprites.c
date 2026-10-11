@@ -57,8 +57,25 @@ static struct TreeVertex sVertices[MAX_VERTICES];
 static unsigned sCrownVertexCount;
 static unsigned sVertexCount;
 static uint64_t sSequence;
-static uint32_t sGeometryHash;
 static uint32_t sGeometryGeneration;
+/*
+ * What the geometry is made of: each tree cell's place, part and ground, in the
+ * snapshot's order (performance work 2026-10-11). A snapshot whose trees are
+ * the last one's - nearly all of them: people walk, water moves, the trees
+ * stand - builds and uploads nothing.
+ */
+struct TreeKey
+{
+    int16_t mapX;
+    int16_t mapY;
+    uint8_t sprite;
+    uint8_t pad[3];
+    float ground;
+};
+static struct TreeKey sKeys[DIORAMA_MAX_VISIBLE_CELLS];
+static struct TreeKey sNewKeys[DIORAMA_MAX_VISIBLE_CELLS];
+static unsigned sKeyCount;
+static bool sKeysValid;
 
 static const char sVertexShader[] =
     "#version 330 core\n"
@@ -338,74 +355,73 @@ static struct TreeVertex *SmallCrown(struct TreeVertex *out, int mapX, int mapY,
                 (cx + 16) * TEXEL, (cy + 32) * TEXEL);
 }
 
-static uint32_t HashVertices(const struct TreeVertex *vertices, unsigned count)
-{
-    const uint8_t *bytes = (const uint8_t *)vertices;
-    size_t length = count * sizeof(*vertices);
-    uint32_t hash = 2166136261u;
-    size_t i;
-
-    for (i = 0; i < length; i++)
-        hash = (hash ^ bytes[i]) * 16777619u;
-    return hash ^ count;
-}
-
 void DioramaGLTreeSprites_Sync(const struct DioramaSceneSnapshot *snapshot,
                                const struct DioramaResolvedCell *resolvedCells)
 {
     struct TreeVertex *crowns = sVertices;
     struct TreeVertex *trunks;
     unsigned crownCount = 0;
+    unsigned count = 0;
     unsigned i;
-    uint32_t hash;
 
     if (!sReady || snapshot == NULL || snapshot->sequence == sSequence)
         return;
     sSequence = snapshot->sequence;
-    /* The crowns from the front of the buffer, the trunks after them. */
     for (i = 0; i < snapshot->visibleCellCount; i++)
     {
         const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
+        struct TreeKey *key;
 
         if (cell->treeSprite == DIORAMA_TREE_SPRITE_NONE)
             continue;
-        if (cell->treeSprite == DIORAMA_TREE_SPRITE_SMALL
-         || cell->treeSprite == DIORAMA_TREE_SPRITE_SMALL_DEWFORD)
-            crowns = SmallCrown(crowns, cell->mapX, cell->mapY, resolvedCells[i].topHeight,
-                                cell->treeSprite == DIORAMA_TREE_SPRITE_SMALL_DEWFORD);
+        key = &sNewKeys[count++];
+        memset(key, 0, sizeof(*key));
+        key->mapX = cell->mapX;
+        key->mapY = cell->mapY;
+        key->sprite = cell->treeSprite;
+        key->ground = resolvedCells[i].topHeight;
+    }
+    if (sKeysValid && count == sKeyCount
+     && memcmp(sNewKeys, sKeys, count * sizeof(struct TreeKey)) == 0)
+        return;
+    memcpy(sKeys, sNewKeys, count * sizeof(struct TreeKey));
+    sKeyCount = count;
+    sKeysValid = true;
+    /* The crowns from the front of the buffer, the trunks after them. */
+    for (i = 0; i < count; i++)
+    {
+        const struct TreeKey *key = &sKeys[i];
+
+        if (key->sprite == DIORAMA_TREE_SPRITE_SMALL
+         || key->sprite == DIORAMA_TREE_SPRITE_SMALL_DEWFORD)
+            crowns = SmallCrown(crowns, key->mapX, key->mapY, key->ground,
+                                key->sprite == DIORAMA_TREE_SPRITE_SMALL_DEWFORD);
         else
-            crowns = LargeCrown(crowns, cell->mapX, cell->mapY, resolvedCells[i].topHeight,
-                                cell->treeSprite - DIORAMA_TREE_SPRITE_QUARTER);
+            crowns = LargeCrown(crowns, key->mapX, key->mapY, key->ground,
+                                key->sprite - DIORAMA_TREE_SPRITE_QUARTER);
         crownCount += VERTICES_PER_QUAD;
     }
     trunks = crowns;
-    for (i = 0; i < snapshot->visibleCellCount; i++)
+    for (i = 0; i < count; i++)
     {
-        const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
-        float ground = resolvedCells[i].topHeight;
+        const struct TreeKey *key = &sKeys[i];
 
-        if (cell->treeSprite == DIORAMA_TREE_SPRITE_NONE)
-            continue;
-        if (cell->treeSprite == DIORAMA_TREE_SPRITE_SMALL)
-            trunks = Trunk(trunks, cell->mapX, cell->mapY, ground, 48, 32);
-        else if (cell->treeSprite == DIORAMA_TREE_SPRITE_SMALL_DEWFORD)
-            trunks = Trunk(trunks, cell->mapX, cell->mapY, ground, 80, 0);
+        if (key->sprite == DIORAMA_TREE_SPRITE_SMALL)
+            trunks = Trunk(trunks, key->mapX, key->mapY, key->ground, 48, 32);
+        else if (key->sprite == DIORAMA_TREE_SPRITE_SMALL_DEWFORD)
+            trunks = Trunk(trunks, key->mapX, key->mapY, key->ground, 80, 0);
         else
         {
-            int part = cell->treeSprite - DIORAMA_TREE_SPRITE_QUARTER;
+            int part = key->sprite - DIORAMA_TREE_SPRITE_QUARTER;
 
-            trunks = Trunk(trunks, cell->mapX, cell->mapY, ground,
+            trunks = Trunk(trunks, key->mapX, key->mapY, key->ground,
                            32 + (part & 1) * 16, (part >> 1) * 16);
         }
     }
     sCrownVertexCount = crownCount;
     sVertexCount = (unsigned)(trunks - sVertices);
-    hash = HashVertices(sVertices, sCrownVertexCount);
-    if (hash != sGeometryHash)
-    {
-        sGeometryHash = hash;
-        sGeometryGeneration++;
-    }
+    /* Other trees, so other crowns: the sun's depth map is drawn again. */
+    sGeometryGeneration++;
     dglBindBuffer(GL_ARRAY_BUFFER, sVertexBuffer);
     dglBufferData(GL_ARRAY_BUFFER, sVertexCount * sizeof(struct TreeVertex),
                   sVertexCount != 0 ? sVertices : NULL, GL_DYNAMIC_DRAW);
@@ -499,6 +515,8 @@ void DioramaGLTreeSprites_Shutdown(void)
     sReady = false;
     sVertexCount = sCrownVertexCount = 0;
     sSequence = 0;
+    sKeysValid = false;
+    sKeyCount = 0;
 }
 
 #endif // ENABLE_DIORAMA

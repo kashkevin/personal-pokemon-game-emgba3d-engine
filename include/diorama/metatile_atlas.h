@@ -87,6 +87,8 @@ void DioramaMetatile_BuildSilhouetteMask(const uint32_t *pixels,
  * art changed.
  */
 uint32_t DioramaAtlas_SetPages(const struct DioramaSceneSnapshot *snapshot);
+/* What the last DioramaAtlas_SetPages returned (the renderers' change checks). */
+uint32_t DioramaAtlas_LastPageSignature(void);
 /* The art of a page (0, or one not set: the snapshot's own), and a cell's. */
 struct DioramaAtlasArt DioramaAtlas_PageArt(const struct DioramaSceneSnapshot *snapshot,
                                             uint8_t page);
