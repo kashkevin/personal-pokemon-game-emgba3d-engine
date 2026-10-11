@@ -134,6 +134,25 @@ static const struct DioramaProp sMauville[] = {
     WOOD_POSTS_NS(0x2B1, 4),
 };
 
+/* Petalburg City's hedges: the cells that block the way stand as blocks with
+ * the hedge on top (the walkable row drawn north of them stays flat). */
+#define HEDGE(id) { PROP(id, BUSH, BLOCK, 1, LOWER), .height16 = 12 }
+static const struct DioramaProp sPetalburg[] = {
+    HEDGE(0x23F),
+    HEDGE(0x244),
+    HEDGE(0x245),
+    HEDGE(0x246),
+    HEDGE(0x24C),
+    HEDGE(0x24D),
+    HEDGE(0x24E),
+    HEDGE(0x254),
+    HEDGE(0x255),
+    HEDGE(0x256),
+    HEDGE(0x264),
+    HEDGE(0x265),
+    HEDGE(0x266),
+};
+
 /* Lilycove: the blue railing along the harbour (Rustboro's iron fence's
  * kind: shadow colour 6 under it). */
 static const struct DioramaProp sLilycove[] = {
@@ -206,6 +225,7 @@ static const struct DioramaPropTileset sTilesets[] = {
     TILESET("gTileset_Lavaridge", sLavaridge),
     TILESET("gTileset_Mossdeep", sMossdeep),
     TILESET("gTileset_Fallarbor", sFallarbor),
+    TILESET("gTileset_Petalburg", sPetalburg),
 };
 
 #define TILESET_COUNT (sizeof(sTilesets) / sizeof(sTilesets[0]))
