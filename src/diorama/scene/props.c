@@ -170,6 +170,21 @@ static const struct DioramaProp sMossdeep[] = {
     SEA_ROCK(0x33D),
 };
 
+/* Fallarbor and the ashen routes (113, 114): round boulders under the ash,
+ * their painted shadow (colour 8) left out, and the big two-cell rocks. */
+#define ASH_BOULDER(id) { PROP(id, ROCK, RELIEF, 1, LOWER), .shadowIndex = 8, .shadowFromRow = 11, \
+                          .depth = 12 }
+static const struct DioramaProp sFallarbor[] = {
+    ASH_BOULDER(0x219),
+    ASH_BOULDER(0x21A),
+    ASH_BOULDER(0x223),
+    { PROP(0x254, ROCK, RELIEF, 1, LOWER), .depth = 14, .flags = DIORAMA_PROP_JOINED },
+    { PROP(0x255, ROCK, RELIEF, 1, LOWER), .depth = 14, .flags = DIORAMA_PROP_JOINED },
+    ASH_BOULDER(0x26F),
+    ASH_BOULDER(0x2AF),
+    ASH_BOULDER(0x2BF),
+};
+
 /* Caves: heaps of rocks on the floor. */
 static const struct DioramaProp sCave[] = {
     { PROP(0x202, ROCK, MOUND, 1, LOWER), .height16 = 10 },
@@ -190,6 +205,7 @@ static const struct DioramaPropTileset sTilesets[] = {
     TILESET("gTileset_Lilycove", sLilycove),
     TILESET("gTileset_Lavaridge", sLavaridge),
     TILESET("gTileset_Mossdeep", sMossdeep),
+    TILESET("gTileset_Fallarbor", sFallarbor),
 };
 
 #define TILESET_COUNT (sizeof(sTilesets) / sizeof(sTilesets[0]))
