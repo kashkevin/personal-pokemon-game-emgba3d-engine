@@ -11,6 +11,7 @@
 #include "diorama/gl_quality.h"
 #include "diorama/terrain_mesh.h"
 #include "diorama/gl_light.h"
+#include "diorama/terrain_mesh.h"
 #include "diorama/gl_terrain_renderer.h"
 
 /* The 3DS project's values (ctr_voxel.c). */
