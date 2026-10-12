@@ -228,14 +228,15 @@ static const struct DioramaProp sFacility[] = {
 /* Sky Pillar (the Pacifidlog tileset's tower floors): its boulders and rubble
  * heaps, all blocking the way. Where a floor is a modelled room its own pieces
  * stand instead (DioramaProps_SetCellTaken); its top is not modelled, so there
- * Rayquaza's battle stood among flat rubble. Added by the battle environments'
- * work (docs/battle-environments.md). */
+ * Rayquaza's battle stood among flat rubble. Low heaps of broken stone, not
+ * spires: three quarters of a tile stood the top as a field of spikes hiding
+ * the sky. Added by the battle environments' work (docs/battle-environments.md). */
 static const struct DioramaProp sPacifidlog[] = {
-    { PROP(0x207, ROCK, MOUND, 1, LOWER), .height16 = 12 },
-    { PROP(0x20F, ROCK, MOUND, 1, LOWER), .height16 = 12 },
-    { PROP(0x217, ROCK, MOUND, 1, LOWER), .height16 = 8 },
-    { PROP(0x21F, ROCK, MOUND, 1, LOWER), .height16 = 8 },
-    { PROP(0x2AD, ROCK, MOUND, 1, LOWER), .height16 = 12 },
+    { PROP(0x207, ROCK, MOUND, 1, LOWER), .height16 = 7 },
+    { PROP(0x20F, ROCK, MOUND, 1, LOWER), .height16 = 7 },
+    { PROP(0x217, ROCK, MOUND, 1, LOWER), .height16 = 5 },
+    { PROP(0x21F, ROCK, MOUND, 1, LOWER), .height16 = 5 },
+    { PROP(0x2AD, ROCK, MOUND, 1, LOWER), .height16 = 7 },
 };
 
 /* The Trick House's eighth puzzle: its boulders (on the grass and on the floor),
@@ -244,6 +245,20 @@ static const struct DioramaProp sTrickHousePuzzle[] = {
     { PROP(0x214, ROCK, MOUND, 1, LOWER), .height16 = 12 },
     { PROP(0x215, ROCK, MOUND, 1, LOWER), .height16 = 12 },
     { PROP(0x26C, ROCK, MOUND, 1, LOWER), .height16 = 12 },
+};
+
+/* The Trainer Hill's floors (laid out at run time from the challenge's data, from
+ * these metatiles): the white blocks and the blue posts in the way, drawn on the
+ * floor as seen from above, now stand as rounded blocks. Added by the battle
+ * environments' work. */
+#define HILL_BLOCK(id) { PROP(id, DECOR, MOUND, 1, LOWER), .height16 = 12 }
+static const struct DioramaProp sTrainerHill[] = {
+    HILL_BLOCK(0x223), HILL_BLOCK(0x224), HILL_BLOCK(0x22B), HILL_BLOCK(0x22C),
+    HILL_BLOCK(0x233), HILL_BLOCK(0x234), HILL_BLOCK(0x263), HILL_BLOCK(0x264),
+    HILL_BLOCK(0x26C), HILL_BLOCK(0x284), HILL_BLOCK(0x28B), HILL_BLOCK(0x28C),
+    HILL_BLOCK(0x294), HILL_BLOCK(0x297), HILL_BLOCK(0x2C3), HILL_BLOCK(0x2C4),
+    HILL_BLOCK(0x2CB), HILL_BLOCK(0x2CC), HILL_BLOCK(0x2D4), HILL_BLOCK(0x2D7),
+    HILL_BLOCK(0x2EB), HILL_BLOCK(0x2EC), HILL_BLOCK(0x2F4),
 };
 
 /* Caves: heaps of rocks on the floor. */
@@ -271,6 +286,7 @@ static const struct DioramaPropTileset sTilesets[] = {
     TILESET("gTileset_Pacifidlog", sPacifidlog),
     TILESET("gTileset_TrickHousePuzzle", sTrickHousePuzzle),
     TILESET("gTileset_Facility", sFacility),
+    TILESET("gTileset_TrainerHill", sTrainerHill),
 };
 
 #define TILESET_COUNT (sizeof(sTilesets) / sizeof(sTilesets[0]))
