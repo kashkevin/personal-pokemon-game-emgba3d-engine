@@ -258,8 +258,23 @@ static void ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
         return;
     cellOffset = (uint32_t)cell->sourceMapY * layout->width + cell->sourceMapX;
     record = FindStaticTerrain(layout, cellOffset, cell->sourceMapGroup, cell->sourceMapNum);
-    if (record == NULL || record->expectedMetatile != cell->metatileId)
+    if (record == NULL)
         return;
+    if (record->expectedMetatile != cell->metatileId)
+    {
+        /* A cell a script redrew (Route 113's ash brushed off the grass the player
+         * walks through, a barrier gone): the new picture is not the one this record
+         * was made for, but the cell stays at its place's level - the terrace solver's
+         * in a lowered region - instead of the flat ground's, which stood it a whole
+         * level over its neighbours (a block at the player's feet, in the field and in
+         * battles). Added by the battle environments' work. */
+        if (record->measuredFlags & DIORAMA_MEASURED_TERRACE_TOPOLOGY)
+        {
+            resolved->groundHeight = record->groundQ16 / 16.0f;
+            resolved->topHeight = resolved->groundHeight;
+        }
+        return;
+    }
     if (record->measuredBandCount > DIORAMA_MAX_MEASURED_BANDS
      || record->measuredBandOffset > gDioramaMeasuredBandV2Count
      || record->measuredBandCount > gDioramaMeasuredBandV2Count - record->measuredBandOffset)
