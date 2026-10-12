@@ -249,9 +249,9 @@ static const struct DioramaProp sTrickHousePuzzle[] = {
 
 /* The Trainer Hill's floors (laid out at run time from the challenge's data, from
  * these metatiles): the white blocks and the blue posts in the way, drawn on the
- * floor as seen from above, now stand as rounded blocks. Added by the battle
- * environments' work. */
-#define HILL_BLOCK(id) { PROP(id, DECOR, MOUND, 1, LOWER), .height16 = 12 }
+ * floor as seen from above, now stand as blocks (their art on top, as the
+ * hedges). Added by the battle environments' work. */
+#define HILL_BLOCK(id) { PROP(id, DECOR, BLOCK, 1, LOWER), .height16 = 9 }
 static const struct DioramaProp sTrainerHill[] = {
     HILL_BLOCK(0x223), HILL_BLOCK(0x224), HILL_BLOCK(0x22B), HILL_BLOCK(0x22C),
     HILL_BLOCK(0x233), HILL_BLOCK(0x234), HILL_BLOCK(0x263), HILL_BLOCK(0x264),
