@@ -754,8 +754,22 @@ static const struct WaterLevels *WaterLevelsFor(uint16_t layoutId, bool outdoor)
                 queue[tail++] = n;
             }
         }
-        /* whole tiles (the solver's levels are) */
-        lowest = lowest >= 0 ? 0 : -((-lowest + 15) / 16);
+        /* Whole tiles, as the solver's levels are; water over a whole tile (the
+         * water's own nominal depth, -2/16) lies a tile down. A level a few
+         * sixteenths under a whole tile is that tile: the rules lift the sea's
+         * water round its rocks onto the sea's level with that water's own depth
+         * (graphics-wip-20261012-1, compile_rules.py _lift_record: -16 - 1), and
+         * rounded a tile further down it took the whole sea with it, a level
+         * under the rest of the sea outside that body, and stood the rest as
+         * walls of water (Route 132). */
+        if (lowest < 0)
+        {
+            int tiles = (-lowest + 11) / 16;
+
+            lowest = (int16_t)-(tiles > 0 ? tiles : 1);
+        }
+        else
+            lowest = 0;
         if (outdoor && sea && lowest > -1)
             lowest = -1;
         if (lowest < INT8_MIN + 1)
