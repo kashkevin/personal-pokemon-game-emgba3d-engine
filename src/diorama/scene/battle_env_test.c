@@ -19,6 +19,7 @@
 #include "battle_setup.h"
 #include "data.h"
 #include "event_object_movement.h"
+#include "field_screen_effect.h"
 #include "load_save.h"
 #include "main.h"
 #include "overworld.h"
@@ -63,6 +64,11 @@ static struct
     bool fightOver;
     /* PKMN_TEST_STRONG=1: the party at level 100 and healed, once, when the field is up */
     bool strong, strengthened;
+    /* PKMN_TEST_WARP=GROUP:NUM:WARP[:X:Y]: first warp there, as the debug menu's "Warp to map
+     * warp" does (a map the game does not resume on: a secret base comes back in Littleroot
+     * Town), then the battle. In memory only: the survey never writes a save. */
+    int warpGroup, warpNum, warpId, warpX, warpY;
+    bool warp, warped;
 } s;
 
 /* Frames a press is held, and released after it: a game running at a frame or two a second
@@ -93,6 +99,11 @@ static void Init(void)
     s.timeoutSeconds = EnvInt("PKMN_TEST_TIMEOUT", 0);
     s.fightSeconds = EnvInt("PKMN_TEST_FIGHT", 0);
     s.strong = EnvInt("PKMN_TEST_STRONG", 0) != 0;
+    value = SDL_getenv("PKMN_TEST_WARP");
+    s.warpX = s.warpY = -1;
+    if (value != NULL && sscanf(value, "%d:%d:%d:%d:%d", &s.warpGroup, &s.warpNum, &s.warpId,
+                                &s.warpX, &s.warpY) >= 3)
+        s.warp = true;
     if (s.spec[0] != '\0' || s.stem[0] != '\0')
         SDL_Log("Battle env test: battle '%s' after %d field frames, capture '%s'%s",
                 s.spec, s.delay, s.stem, s.exitAfter ? ", then exit" : "");
@@ -254,6 +265,24 @@ void DioramaBattleEnvTest_FieldTick(void)
     if (ArePlayerFieldControlsLocked() || gPaletteFade.active || ScriptContext_IsEnabled())
     {
         s.fieldFrames = 0;
+        return;
+    }
+    if (s.warp && !s.warped)
+    {
+        /* the field settled first, as one would open the debug menu */
+        if (++s.fieldFrames < 30)
+            return;
+        s.warped = true;
+        s.fieldFrames = 0;
+        SDL_Log("Battle env test: warping from map %d.%d to map %d.%d warp %d (%d,%d)",
+                gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum,
+                s.warpGroup, s.warpNum, s.warpId, s.warpX, s.warpY);
+        if (s.warpX >= 0 && s.warpY >= 0)
+            SetWarpDestination(s.warpGroup, s.warpNum, WARP_ID_NONE, s.warpX, s.warpY);
+        else
+            SetWarpDestinationToMapWarp(s.warpGroup, s.warpNum, s.warpId);
+        DoWarp();
+        ResetInitialPlayerAvatarState();
         return;
     }
     if (++s.fieldFrames < s.delay)

@@ -227,6 +227,12 @@ def run_map(args, rec, label, spec, p, results):
     env = {'PKMN_TEST_BATTLE': spec, 'PKMN_TEST_CAPTURE': os.path.join(rundir, 'cap'), 'PKMN_TEST_EXIT': '1',
            'PKMN_TEST_BATTLE_DELAY': str(args.delay), 'PKMN_TEST_CAPTURE_DELAY': str(args.capture_delay),
            'PKMN_DIORAMA_LOG': '1', 'TZ': tz_for_hour(args.hour)}
+    if args.warp_in:
+        # the game does not resume on this map (a secret base comes back in Littleroot Town):
+        # the TEST driver warps to it in game first, as the debug menu's "Warp to map warp"
+        # does (to the map's warp 0, or to --at's cell), in memory only
+        env['PKMN_TEST_WARP'] = ('%d:%d:0:%d:%d' % (rec['group'], rec['num'], p['x'], p['y'])
+                                 if args.at else '%d:%d:0' % (rec['group'], rec['num']))
     for kv in args.env:
         k, v = kv.split('=', 1)
         env[k] = v
@@ -348,6 +354,9 @@ def main():
     ap.add_argument('--label', default='', help='the run\'s name with --spec (default: the spec\'s kind)')
     ap.add_argument('--fight', type=int, default=0, help='seconds: after the picture, press A '
                     'through the battle and record how it ended (PKMN_TEST_FIGHT)')
+    ap.add_argument('--warp-in', action='store_true', help='a map the game does not resume on '
+                    '(a secret base): warp to it in game once the field is up (PKMN_TEST_WARP: its '
+                    'warp 0, or --at\'s cell), then the battle')
     args = ap.parse_args()
     args.exe = os.path.abspath(args.exe)
     args.save = os.path.abspath(args.save)
