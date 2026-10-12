@@ -817,40 +817,50 @@ static bool CopyObjectFrame(struct DioramaObjectSnapshot *copy, const struct Spr
     return true;
 }
 
+#define MAX_FRAME_PARTS 8
+
+/* *orderShape and *orderSize: the OAM entry the sprite's top left part goes to
+ * (its own shape and size, or its first part's), to find its place among the
+ * GBA's OAM entries. */
 static bool HasUnsupportedSubsprites(const struct Sprite *sprite,
                                      const struct ObjectEventGraphicsInfo *graphicsInfo,
-                                     u8 *resolvedPriority)
+                                     u8 *resolvedPriority, u8 *orderShape, u8 *orderSize)
 {
     const struct SubspriteTable *table;
-    const struct Subsprite *subsprite;
-    u8 width;
-    u8 height;
-    u8 oamWidth;
-    u8 oamHeight;
+    struct DioramaSpritePart parts[MAX_FRAME_PARTS];
+    u8 i;
 
     if (sprite->subspriteTables == NULL || sprite->subspriteMode == SUBSPRITES_OFF)
         return false;
     table = &sprite->subspriteTables[sprite->subspriteTableNum];
     if (table->subspriteCount == 0 || table->subsprites == NULL)
         return false;
-    if (table->subspriteCount != 1 || graphicsInfo == NULL)
+    if (table->subspriteCount > MAX_FRAME_PARTS || graphicsInfo == NULL)
         return true;
-    subsprite = &table->subsprites[0];
-    /* One part the size of the sprite's own frame, centred: the frame drawn
-     * whole. Against the sprite's OAM size, not its object's graphics: a
-     * follower shows its 16x32 Poke Ball while its graphics are the mon's. */
-    if (!DioramaSprite_GetDimensions(subsprite->shape, subsprite->size, &width, &height)
-     || !DioramaSprite_GetDimensions(sprite->oam.shape, sprite->oam.size, &oamWidth, &oamHeight)
-     || width != oamWidth || height != oamHeight
-     || subsprite->tileOffset != 0
-     || subsprite->x != -(s8)(width / 2) || subsprite->y != -(s8)(height / 2))
+    for (i = 0; i < table->subspriteCount; i++)
+    {
+        parts[i].x = table->subsprites[i].x;
+        parts[i].y = table->subsprites[i].y;
+        parts[i].shape = table->subsprites[i].shape;
+        parts[i].size = table->subsprites[i].size;
+        parts[i].tileOffset = table->subsprites[i].tileOffset;
+    }
+    /* The frame drawn whole when the parts put it together: one part the size
+     * of the sprite's own frame, centred, or its rows top to bottom (a walker
+     * in long grass, Routes 119 and 120: on the GBA its lower rows are drawn
+     * behind the grass; in the 3D view the grass stands in front of them). Against
+     * the sprite's OAM size, not its object's graphics: a follower shows its
+     * 16x32 Poke Ball while its graphics are the mon's. */
+    if (!DioramaSprite_PartsMakeFrame(parts, table->subspriteCount, sprite->oam.shape, sprite->oam.size))
         return true;
+    *orderShape = parts[0].shape;
+    *orderSize = parts[0].size;
     if (sprite->subspriteMode != SUBSPRITES_IGNORE_PRIORITY)
-        *resolvedPriority = subsprite->priority;
+        *resolvedPriority = table->subsprites[0].priority;
     return false;
 }
 
-static u8 FindOamOrder(const struct Sprite *sprite, u8 priority)
+static u8 FindOamOrder(const struct Sprite *sprite, u8 priority, u8 shape, u8 size)
 {
     u8 i;
 
@@ -861,7 +871,7 @@ static u8 FindOamOrder(const struct Sprite *sprite, u8 priority)
         if (oam->x == sprite->oam.x && oam->y == sprite->oam.y
          && oam->tileNum == sprite->oam.tileNum
          && oam->paletteNum == sprite->oam.paletteNum
-         && oam->shape == sprite->oam.shape && oam->size == sprite->oam.size
+         && oam->shape == shape && oam->size == size
          && oam->priority == priority)
             return i;
     }
@@ -922,7 +932,7 @@ static void CopySurfBlob(struct DioramaSceneSnapshot *snapshot)
                && (sprite->oam.matrixNum & ST_OAM_VFLIP) != 0;
     copy->priority = sprite->oam.priority;
     copy->subpriority = sprite->subpriority;
-    copy->oamOrder = FindOamOrder(sprite, sprite->oam.priority);
+    copy->oamOrder = FindOamOrder(sprite, sprite->oam.priority, sprite->oam.shape, sprite->oam.size);
     copy->animNum = sprite->animNum;
     copy->animCmdIndex = sprite->animCmdIndex;
     if (!CopyObjectFrame(copy, sprite))
@@ -958,6 +968,8 @@ static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
         const struct Sprite *sprite;
         const struct ObjectEventGraphicsInfo *graphicsInfo;
         u8 resolvedPriority;
+        u8 orderShape;
+        u8 orderSize;
         s16 baseX;
         s16 baseY;
 
@@ -968,6 +980,8 @@ static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
             continue;
         graphicsInfo = GetObjectEventGraphicsInfo(object->graphicsId);
         resolvedPriority = sprite->oam.priority;
+        orderShape = sprite->oam.shape;
+        orderSize = sprite->oam.size;
 
         copy = &snapshot->objects[snapshot->objectCount++];
         copy->active = TRUE;
@@ -988,7 +1002,8 @@ static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
                     // pokeemerald-expansion shows an overworld shadow unless
                     // noShadow suppresses it (pret's hasShadow meant "jumping").
                     | (!object->noShadow ? DIORAMA_OBJECT_SHADOW : 0)
-                    | (HasUnsupportedSubsprites(sprite, graphicsInfo, &resolvedPriority)
+                    | (HasUnsupportedSubsprites(sprite, graphicsInfo, &resolvedPriority,
+                                                &orderShape, &orderSize)
                         ? DIORAMA_OBJECT_SUBSPRITES : 0);
         copy->currentMapX = object->currentCoords.x;
         copy->currentMapY = object->currentCoords.y;
@@ -1031,7 +1046,7 @@ static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
                    && (sprite->oam.matrixNum & ST_OAM_VFLIP) != 0;
         copy->priority = resolvedPriority;
         copy->subpriority = sprite->subpriority;
-        copy->oamOrder = FindOamOrder(sprite, resolvedPriority);
+        copy->oamOrder = FindOamOrder(sprite, resolvedPriority, orderShape, orderSize);
         copy->animNum = sprite->animNum;
         copy->animCmdIndex = sprite->animCmdIndex;
         if (!CopyObjectFrame(copy, sprite))

@@ -172,6 +172,40 @@ static void TestSupportAndFrameKeys(void)
     CHECK(!DioramaSprite_IsSupported(&object));
 }
 
+/* Subsprite tables (object_event_subsprites.h): shapes 0 square, 1 wide, 2 tall. */
+static void TestFrameParts(void)
+{
+    /* A 16x32 walker whole (sOamTable_16x32_0) and in long grass: its lower
+     * rows parts of their own (sOamTable_16x32_2, _4), drawn behind the grass
+     * on the GBA. */
+    static const struct DioramaSpritePart whole[] = {{-8, -16, 2, 2, 0}};
+    static const struct DioramaSpritePart longGrass[] = {
+        {-8, -16, 0, 1, 0}, {-8, 0, 1, 0, 4}, {-8, 8, 1, 0, 6}};
+    static const struct DioramaSpritePart halves[] = {{-8, -16, 0, 1, 0}, {-8, 0, 0, 1, 4}};
+    /* A 32x32 walker in long grass (sOamTable_32x32_2). */
+    static const struct DioramaSpritePart wide[] = {
+        {-16, -16, 1, 2, 0}, {-16, 0, 1, 1, 8}, {-16, 8, 1, 1, 12}};
+    /* Not the frame whole: its top half alone, a half out of place, the second
+     * half reading the first's tiles, two columns. */
+    static const struct DioramaSpritePart topHalf[] = {{-8, -16, 0, 1, 0}};
+    static const struct DioramaSpritePart lowered[] = {{-8, -16, 0, 1, 0}, {-8, 2, 0, 1, 4}};
+    static const struct DioramaSpritePart sameTiles[] = {{-8, -16, 0, 1, 0}, {-8, 0, 0, 1, 0}};
+    static const struct DioramaSpritePart columns[] = {{-8, -16, 2, 1, 0}, {0, -16, 2, 1, 4}};
+
+    CHECK(DioramaSprite_PartsMakeFrame(whole, 1, 2, 2));
+    CHECK(DioramaSprite_PartsMakeFrame(longGrass, 3, 2, 2));
+    CHECK(DioramaSprite_PartsMakeFrame(halves, 2, 2, 2));
+    CHECK(DioramaSprite_PartsMakeFrame(wide, 3, 0, 2));
+    /* Against the sprite's own frame: the 16x32 parts are not a 32x32 frame. */
+    CHECK(!DioramaSprite_PartsMakeFrame(longGrass, 3, 0, 2));
+    CHECK(!DioramaSprite_PartsMakeFrame(topHalf, 1, 2, 2));
+    CHECK(!DioramaSprite_PartsMakeFrame(lowered, 2, 2, 2));
+    CHECK(!DioramaSprite_PartsMakeFrame(sameTiles, 2, 2, 2));
+    CHECK(!DioramaSprite_PartsMakeFrame(columns, 2, 2, 2));
+    CHECK(!DioramaSprite_PartsMakeFrame(longGrass, 0, 2, 2));
+    CHECK(!DioramaSprite_PartsMakeFrame(NULL, 1, 2, 2));
+}
+
 static void TestPoseAndInterpolation(void)
 {
     struct DioramaSceneSnapshot previousSnapshot = sSnapshot;
@@ -346,6 +380,7 @@ int main(void)
     TestDimensions();
     TestDecodeAndFlips();
     TestSupportAndFrameKeys();
+    TestFrameParts();
     TestPoseAndInterpolation();
     TestJumpLift();
     TestResolvedPlateauPose();
