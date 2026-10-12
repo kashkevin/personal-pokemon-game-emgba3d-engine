@@ -7655,6 +7655,13 @@ static void BufferBattlePartyOrder(u8 *partyBattleOrder, u8 flankId)
         {
             if (i != partyIds[0] && i != partyIds[1])
             {
+#ifdef PORTABLE
+                // As in BufferBattlePartyOrderBySide (KNOWN_ISSUES N37): two equal
+                // party indexes leave seven for six places; keep the six.
+                if (j >= PARTY_SIZE)
+                    break;
+#endif
+#line 7658 // gba-line
                 partyIds[j] = i;
                 j++;
             }
@@ -7732,6 +7739,16 @@ static void BufferBattlePartyOrderBySide(u8 *partyBattleOrder, u8 flankId, enum 
         {
             if (i != partyIndexes[0] && i != partyIndexes[1])
             {
+#ifdef PORTABLE
+                // KNOWN_ISSUES N37: two opponent trainers have a party each, so both
+                // opponents can be party index 0, and this loop then has seven indexes
+                // for six places. The GBA writes the seventh one byte past partyIndexes
+                // (into its stack frame); natively the battle aborted as it started.
+                // The six indexes the GBA keeps are the order, unchanged.
+                if (j >= PARTY_SIZE)
+                    break;
+#endif
+#line 7735 // gba-line
                 partyIndexes[j] = i;
                 j++;
             }

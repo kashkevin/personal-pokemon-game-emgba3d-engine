@@ -144,6 +144,7 @@ extern void FaultCompat_Init(void);
 extern void CrashReport_Init(void);
 extern void GameMemory_Snapshot(void);
 extern int NativeSelfTest_Decompress(const char *listPath);
+extern int NativeSelfTest_PartyOrder(void);
 extern bool32 GameMemory_Reset(void);
 
 static jmp_buf sGameResetPoint; // where the game thread restarts after a soft reset
@@ -740,6 +741,8 @@ static void ParseArguments(int argc, char **argv)
         }
         else if (strcmp(argv[i], "--selftest-decompress") == 0 && i + 1 < argc)
             exit(NativeSelfTest_Decompress(argv[++i])); // src/platform/native_selftest.c
+        else if (strcmp(argv[i], "--selftest-party-order") == 0)
+            exit(NativeSelfTest_PartyOrder()); // src/platform/native_selftest.c (KNOWN_ISSUES N37)
     }
 }
 
