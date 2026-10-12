@@ -411,12 +411,15 @@ struct NativeStorage
     s8 cursorPos;
     bool8 partyShown;           /* the game's party panel is out (its cursor can go there) */
     bool8 quickMode;            /* SELECT's auto action: A acts without the menu */
+    bool8 lrBoxes;              /* L and R turn the boxes (the LR button mode) */
+    bool8 bPutsBack;            /* B puts a held Pokémon back (OW_PC_PRESS_B) */
     bool8 holdingMon;
     struct Pokemon heldMon;
     u16 heldItem;               /* MOVE ITEMS: the item in the hand (ITEM_NONE: none) */
     u8 menuCount;
     u8 menuCursor;
     const u8 *menuLabels[7];
+    s8 menuWallpaper[7];        /* a wallpaper menu's rows: their wallpaper (enum NativeWallpaper; -1: other rows) */
     u8 chooseBox;
     u8 markCursor;
     bool8 marks[4];
@@ -437,6 +440,8 @@ struct NativeStorageBox
     u16 heldItem[IN_BOX_COUNT];
 };
 void Storage_NativeUiBox(u32 box, struct NativeStorageBox *out);
+/* a box's name, wallpaper and how many Pokémon it holds (cheap: no Pokémon decoded) */
+void Storage_NativeUiBoxInfo(u32 box, u8 *name, u8 *wallpaper, u8 *count);
 /* the Pokémon at a box position as a party Pokémon (FALSE: empty) */
 bool32 Storage_NativeUiBoxMon(u32 box, u32 pos, struct Pokemon *out);
 

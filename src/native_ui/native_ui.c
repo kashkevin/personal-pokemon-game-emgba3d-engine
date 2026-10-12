@@ -32,6 +32,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_Summary,
     &gUiScreen_Bag,
     &gUiScreen_Pokedex,
+    &gUiScreen_Storage,
 };
 
 static bool sInitialized;

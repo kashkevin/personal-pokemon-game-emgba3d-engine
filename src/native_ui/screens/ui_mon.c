@@ -168,17 +168,23 @@ void UiMon_Sparkle(int x, int y, bool big, const UiRGBA *pal3)
     UiW_Pix(name, big ? sLarge : sSmall, big ? 7 : 5, pal, 3, x - half, y - half, false);
 }
 
+static const char *const sMarks[4][7] = {
+    {"..###..", ".#####.", "#######", "#######", "#######", ".#####.", "..###.."},
+    {"...#...", "..###..", "..###..", ".#####.", ".#####.", "#######", "#######"},
+    {".......", "#######", "#######", "#######", "#######", "#######", "......."},
+    {".##.##.", "#######", "#######", "#######", ".#####.", "..###..", "...#..."},
+};
+
+void UiMon_MarkGlyph(int i, int x, int y, UiRGBA colour)
+{
+    if (i >= 0 && i < 4)
+        UiG_Mask(UiM_Rows(sMarks[i], 7, NULL), x, y, colour);
+}
+
 int UiMon_Markings(int x, int y, u8 marks, UiRGBA on, UiRGBA off)
 {
-    static const char *const sMarks[4][7] = {
-        {"..###..", ".#####.", "#######", "#######", "#######", ".#####.", "..###.."},
-        {"...#...", "..###..", "..###..", ".#####.", ".#####.", "#######", "#######"},
-        {".......", "#######", "#######", "#######", "#######", "#######", "......."},
-        {".##.##.", "#######", "#######", "#######", ".#####.", "..###..", "...#..."},
-    };
-
     for (int i = 0; i < 4; i++)
-        UiG_Mask(UiM_Rows(sMarks[i], 7, NULL), x + i * 10, y, (marks >> i) & 1 ? on : off);
+        UiMon_MarkGlyph(i, x + i * 10, y, (marks >> i) & 1 ? on : off);
     return x + 38;
 }
 
