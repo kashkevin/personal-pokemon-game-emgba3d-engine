@@ -48,6 +48,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_Starters,
     &gUiScreen_Evolution,
     &gUiScreen_GameCorner,
+    &gUiScreen_FieldText, /* the field's messages the screens above do not draw */
     &gUiScreen_Notice,    /* last: only over the calm field */
 };
 

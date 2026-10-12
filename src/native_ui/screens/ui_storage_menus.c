@@ -27,6 +27,7 @@
 #include "constants/script_menu.h"
 #include "native_ui/ui_draw.h"
 #include "native_ui/ui_engine.h"
+#include "native_ui/ui_field.h"
 #include "native_ui/ui_screen.h"
 #include "native_ui/ui_text.h"
 #include "native_ui/ui_widgets.h"
@@ -184,33 +185,27 @@ static bool MenuUp(void)
 static void Bottom(int t, int L, int R, int B)
 {
     struct UiRamp r = PcRamp();
-    int b[4], hx;
+    struct UiHintItem h[2];
+    int n = 0;
 
-    UiW_DialogBox(L + 8, B - 54, 456, 46, NULL, UI_NONE, b);
-    if (sKind == KIND_MENU && sM.message != NULL)
-    {
-        /* the option's description, or why it was refused (the engine's lines) */
-        UiW_MessagePage(sM.message, -1, b[0] + 2, b[1] - 1, b[2] - 4, 2);
-        if (sM.state == NATIVE_PC_MENU_REFUSED)
-            UiW_DownArrow(b[0] + b[2] - 10, b[1] + 20 + ((t / 16) % 2), UI_P_CURSOR, false);
-    }
-    else if (sHasMsg)
-    {
-        UiW_MessagePage(sMsg, sMsgPrinting ? (int)sMsgPrinted : -1, b[0] + 2, b[1] - 1, b[2] - 4, 2);
-        if (sWaiting)
-            UiW_DownArrow(b[0] + b[2] - 10, b[1] + 20 + ((t / 16) % 2), UI_P_CURSOR, false);
-    }
-    UiG_Hit(HIT_MESSAGE, 0, L + 8, B - 54, 456, 46);
-    UiG_Paint(UiM_Rounded4(160, 46, 3, 0, 3, 0), R - 160, B - 54, UI_P_CREAM,
-              &(struct UiPaint){r.ink, UI_P_CREAM_HI, UI_P_CREAM_LO, 0, 0, NULL, UI_NONE});
     if (MenuUp() && sM.state == NATIVE_PC_MENU_INPUT)
     {
-        hx = UiW_Hint(R - 152, B - 46, UI_ACT_CONFIRM, sText_OK, false) + 8;
-        UiW_Hint(hx, B - 46, UI_ACT_CANCEL, sKind == KIND_CHOOSE ? sText_LogOff : sText_Back, false);
+        h[n++] = (struct UiHintItem){UI_ACT_CONFIRM, sText_OK};
+        h[n++] = (struct UiHintItem){UI_ACT_CANCEL, sKind == KIND_CHOOSE ? sText_LogOff : sText_Back};
     }
     else if ((sKind == KIND_MENU && sM.state == NATIVE_PC_MENU_REFUSED) || sWaiting)
     {
-        UiW_Hint(R - 152, B - 46, UI_ACT_CONFIRM, sText_Next, false);
+        h[n++] = (struct UiHintItem){UI_ACT_CONFIRM, sText_Next};
+    }
+    if (sKind == KIND_MENU && sM.message != NULL)
+    {
+        /* the option's description, or why it was refused (the engine's lines) */
+        UiField_MessageBox(t, L, R, B, sM.message, -1, sM.state == NATIVE_PC_MENU_REFUSED, NULL, h, n, r.ink, HIT_MESSAGE);
+    }
+    else
+    {
+        UiField_MessageBox(t, L, R, B, sHasMsg ? sMsg : NULL, sMsgPrinting ? (int)sMsgPrinted : -1, sWaiting, NULL, h, n,
+                           r.ink, HIT_MESSAGE);
     }
 }
 
@@ -235,7 +230,7 @@ static void Draw(int t)
         o.t = t;
         o.minW = 112;
         o.band = &r;
-        UiW_MenuBox(R - 8, B - 62, items, sM.count, sM.cursor, &o, NULL);
+        UiW_MenuBox(R - 8, B - UI_FIELD_MENU_GAP, items, sM.count, sM.cursor, &o, NULL);
     }
     Bottom(t, L, R, B);
     UiG_Veil(NativeUi_ScreenFade());
