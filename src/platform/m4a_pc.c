@@ -699,6 +699,12 @@ void m4aMPlayStop(struct MusicPlayerInfo *mplayInfo)
     s32 i;
     struct MusicPlayerTrack *track;
 
+    // No cry played since boot: gMPlay_PokemonCry is still NULL (StopCryAndClearCrySongs
+    // as a double battle sends its first two Pokemon out right after a save is
+    // continued, KNOWN_ISSUES N39). The GBA reads its BIOS there, finds no player and
+    // does nothing; natively it is a fault. As IsPokemonCryPlaying below.
+    if (mplayInfo == NULL)
+        return;
     if (mplayInfo->ident != ID_NUMBER)
         return;
 

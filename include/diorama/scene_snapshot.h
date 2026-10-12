@@ -62,6 +62,10 @@ enum DioramaCellFlags
     DIORAMA_CELL_SOURCE_VALID = 1 << 0,
     DIORAMA_CELL_CONNECTED = 1 << 1,
     DIORAMA_CELL_BORDER = 1 << 2,
+    /* The map's own cell whose metatile is no longer its layout's (a script or the game
+     * changed it: a door opened, a light went out, a barrier switched, a floor generated):
+     * a modelled building drawn from the layout does not stand on it (buildings.c). */
+    DIORAMA_CELL_CHANGED = 1 << 3,
 };
 
 enum DioramaObjectFlags
@@ -292,6 +296,14 @@ struct DioramaSceneSnapshot
     int16_t doorMapY;
     uint8_t doorWidth;
     uint8_t doorLevel;
+    /* A palette fade is running (gPaletteFade.active): the faded palettes are
+     * part way to their fade colour. The 3D battle stands on the field as last
+     * seen with them steady (gl_compositor.c, gl_battle.c). */
+    bool paletteFading;
+    /* A battle transition is playing on the field (CB2_OverworldBasic): the
+     * scene is TRANSITION, yet the 3D view can compose the transition over
+     * the 3D field (gl_battle.c DioramaGLBattle_ComposeField). */
+    bool battleTransition;
     /* The dark of a cave that needs Flash, and of the Battle Pyramid: the
      * circle of light the game opens round the player
      * (field_screen_effect.c SetFlashScanlineEffectWindowBoundaries), kept

@@ -476,5 +476,24 @@ float DioramaRules_ObjectGroundHeight(const struct DioramaResolvedCell *resolved
                                        uint8_t cellElevation, uint8_t objectElevation,
                                        uint8_t behavior,
                                        uint8_t pixelX, uint8_t pixelY);
+/* A cell drawn over the water: its lower layer is mostly the sea's own tiles
+ * (General's animated water, tiles 432 to 461) - a deck, a log walkway, a
+ * pier, a rock in the shallows. Outdoors only (mapType: gMapHeader.mapType),
+ * where the primary tileset is General's. Added by the battle environments'
+ * work (the sea at one level: buildings.c, gl_terrain_renderer.c). */
+bool DioramaRules_CellOverWater(const struct DioramaCellSnapshot *cell, uint8_t mapType);
+/* The terrace solver's ground (sixteenths of a tile) of a layout's cell, from
+ * its static terrain record (any map's using the layout): 0 for a cell with
+ * none. The cell's offset is y * the layout's width + x. */
+int16_t DioramaRules_StaticGroundQ16(uint16_t layoutId, uint32_t cellOffset);
+/* Whether the layout's secondary tileset is `symbol` (gTileset_Lavaridge), by
+ * the rules' tables. */
+bool DioramaRules_LayoutUsesSecondary(uint16_t layoutId, const char *symbol);
+/* Lava under a cell of layout `layoutId` (the cell's own map's), when that
+ * layout's secondary tileset is gTileset_Lavaridge (its tiles 608 and 672 to
+ * 675: Mt Chimney's lake, the Magma Hideout's pools): 2, the cell is lava with
+ * nothing over it; 1, something is drawn over the lava's edge (the rock
+ * rimming the lake); 0, no lava. */
+uint8_t DioramaRules_CellLava(const struct DioramaCellSnapshot *cell, uint16_t layoutId);
 
 #endif

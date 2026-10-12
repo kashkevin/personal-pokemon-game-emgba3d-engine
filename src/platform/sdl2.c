@@ -41,7 +41,10 @@
 #include "platform/frame_limiter.h"
 #include "malloc.h"
 #ifdef ENABLE_DIORAMA
+#include "diorama/battle_env_test.h"
+#include "diorama/battle_scene.h"
 #include "diorama/camera.h"
+#include "diorama/gl_battle.h"
 #include "diorama/gl_compositor.h"
 #include "diorama/gl_loader.h"
 #include "diorama/gl_pc_overlay.h"
@@ -166,6 +169,10 @@ extern void FaultCompat_Init(void);
 extern void CrashReport_Init(void);
 extern void GameMemory_Snapshot(void);
 extern int NativeSelfTest_Decompress(const char *listPath);
+extern int NativeSelfTest_PartyOrder(void);
+extern int NativeSelfTest_BattleNames(void);
+extern int NativeSelfTest_CryStop(void);
+extern int NativeSelfTest_ShakeAnim(void);
 extern bool32 GameMemory_Reset(void);
 
 static jmp_buf sGameResetPoint; // where the game thread restarts after a soft reset
@@ -725,6 +732,9 @@ int main(int argc, char **argv)
                         }
                         if (Benchmark_Active())
                             keys = Benchmark_FilterKeys(keys, SDL_GetTicks());
+#if defined(ENABLE_DIORAMA) && defined(DIORAMA_BATTLE_ENV_TEST)
+                        keys = DioramaBattleEnvTest_FilterKeys(keys, SDL_GetTicks());
+#endif
                         // In multiplayer the reset chord reaches the game only when
                         // its native reset handler has been offered it.
                         keys = MpBridge_FilterKeys(keys);
@@ -852,6 +862,14 @@ static void ParseArguments(int argc, char **argv)
         }
         else if (strcmp(argv[i], "--selftest-decompress") == 0 && i + 1 < argc)
             exit(NativeSelfTest_Decompress(argv[++i])); // src/platform/native_selftest.c
+        else if (strcmp(argv[i], "--selftest-party-order") == 0)
+            exit(NativeSelfTest_PartyOrder()); // src/platform/native_selftest.c (KNOWN_ISSUES N37)
+        else if (strcmp(argv[i], "--selftest-battle-names") == 0)
+            exit(NativeSelfTest_BattleNames()); // src/platform/native_selftest.c (KNOWN_ISSUES N38)
+        else if (strcmp(argv[i], "--selftest-cry-stop") == 0)
+            exit(NativeSelfTest_CryStop()); // src/platform/native_selftest.c (KNOWN_ISSUES N39)
+        else if (strcmp(argv[i], "--selftest-shake-anim") == 0)
+            exit(NativeSelfTest_ShakeAnim()); // src/platform/native_selftest.c (KNOWN_ISSUES N40)
     }
 }
 
@@ -2524,6 +2542,11 @@ void VDraw(SDL_Texture *texture)
     static uint32_t image[DISPLAY_WIDTH * DISPLAY_HEIGHT];
 
     memset(gbaImage, 0, sizeof(gbaImage));
+#ifdef ENABLE_DIORAMA
+    // Frame boundary (the game thread is parked): the 3D battle reads the game
+    // and says which layers its world stands in for in this picture.
+    gDioramaSceneLayers = DioramaGLBattle_BeginFrame();
+#endif
     DrawFrame(gbaImage);
     for (int i = 0; i < DISPLAY_WIDTH * DISPLAY_HEIGHT; i++)
     {
@@ -2532,9 +2555,15 @@ void VDraw(SDL_Texture *texture)
         uint32_t g = ((color >> 5) & 0x1F) * 255 / 31;
         uint32_t b = ((color >> 10) & 0x1F) * 255 / 31;
         image[i] = 0xFF000000 | (r << 16) | (g << 8) | b;
+#ifdef ENABLE_DIORAMA
+        // Where the world shows through: premultiplied alpha (gba_easy_draw.c).
+        if (gDioramaSceneLayers)
+            image[i] = ((16u - gDioramaSceneCover[i]) * 255u / 16u) << 24 | (r << 16) | (g << 8) | b;
+#endif
     }
 #ifdef ENABLE_DIORAMA
     DioramaGL_UploadFrame(image);
+    DioramaGLBattle_UploadFrame(image);
 #else
     SDL_UpdateTexture(texture, NULL, image, DISPLAY_WIDTH * sizeof(Uint32));
 #endif

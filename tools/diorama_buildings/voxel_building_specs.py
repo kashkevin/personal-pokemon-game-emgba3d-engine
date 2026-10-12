@@ -1689,3 +1689,8 @@ SPECS = [
                      "pieces": own_shell(petalburg_gym())},
     },
 ]
+
+# The rooms the 3D battles take place in (battle_room_specs.py): the same library, at its end
+# so that they stand the pieces of every room modelled before them (reuse_pieces).
+from battle_room_specs import battle_room_specs  # noqa: E402
+SPECS = SPECS + battle_room_specs()

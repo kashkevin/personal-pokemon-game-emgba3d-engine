@@ -97,6 +97,7 @@ static uint32_t sVertexCapacity;
  * the sun's depth map is kept until then (gl_shadow.h). */
 static uint32_t sGeometryGeneration;
 static uint32_t sGeometryHash;
+static uint32_t sChangedHash; /* the placements left out (DioramaBuildings_Validate) */
 static uint8_t sPaletteRgba[PALETTE_ROWS * 256 * 4];
 static bool sHasPalette;
 static struct DioramaBuildingMetrics sMetrics;
@@ -446,7 +447,8 @@ static bool AppendPlacement(const struct DioramaSceneSnapshot *snapshot,
     uint32_t i;
 
     if (!DioramaBuildings_GetPlacement(placement, &info) || info.page != page
-     || !PlacementInScene(snapshot, instance, &info))
+     || !PlacementInScene(snapshot, instance, &info)
+     || !DioramaBuildings_PlacementStands(placement))
         return true;
     /* The 3DS models count from the top-left corner of their top-left cell,
      * x east, z south. The Diorama's scene puts cell (x, y) centred on
@@ -533,6 +535,7 @@ void DioramaGLBuildings_Sync(const struct DioramaSceneSnapshot *snapshot,
     unsigned count = 0;
     unsigned page;
     unsigned i;
+    uint32_t changed;
 
     if (!sReady || snapshot == NULL)
         return;
@@ -569,10 +572,12 @@ void DioramaGLBuildings_Sync(const struct DioramaSceneSnapshot *snapshot,
     }
     if (!CollectInstances(snapshot, instances, &count))
         count = 0;
+    changed = DioramaBuildings_Validate(snapshot);
     if (count == sInstanceCount && memcmp(instances, sInstances, count * sizeof(*instances)) == 0
      && snapshot->gridOriginX == sGridOriginX && snapshot->gridOriginY == sGridOriginY
-     && sVertexCount != 0)
+     && changed == sChangedHash && sVertexCount != 0)
         return;
+    sChangedHash = changed;
     memcpy(sInstances, instances, count * sizeof(*instances));
     sGridOriginX = (int16_t)snapshot->gridOriginX;
     sGridOriginY = (int16_t)snapshot->gridOriginY;

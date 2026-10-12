@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "constants/map_types.h"
 #include "constants/metatile_behaviors.h"
 #include "diorama/rules.generated.h"
 #include "diorama/rules.h"
@@ -258,8 +259,23 @@ static void ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
         return;
     cellOffset = (uint32_t)cell->sourceMapY * layout->width + cell->sourceMapX;
     record = FindStaticTerrain(layout, cellOffset, cell->sourceMapGroup, cell->sourceMapNum);
-    if (record == NULL || record->expectedMetatile != cell->metatileId)
+    if (record == NULL)
         return;
+    if (record->expectedMetatile != cell->metatileId)
+    {
+        /* A cell a script redrew (Route 113's ash brushed off the grass the player
+         * walks through, a barrier gone): the new picture is not the one this record
+         * was made for, but the cell stays at its place's level - the terrace solver's
+         * in a lowered region - instead of the flat ground's, which stood it a whole
+         * level over its neighbours (a block at the player's feet, in the field and in
+         * battles). Added by the battle environments' work. */
+        if (record->measuredFlags & DIORAMA_MEASURED_TERRACE_TOPOLOGY)
+        {
+            resolved->groundHeight = record->groundQ16 / 16.0f;
+            resolved->topHeight = resolved->groundHeight;
+        }
+        return;
+    }
     if (record->measuredBandCount > DIORAMA_MAX_MEASURED_BANDS
      || record->measuredBandOffset > gDioramaMeasuredBandV2Count
      || record->measuredBandCount > gDioramaMeasuredBandV2Count - record->measuredBandOffset)
@@ -1007,6 +1023,101 @@ float DioramaRules_ProfileHeight(uint8_t archetype, uint8_t behavior,
         featureHeight = 1.0f;
     return groundHeight + (descending ? -1.0f : 1.0f)
          * featureHeight * step / DIORAMA_BUILDING_PIXELS_PER_CELL;
+}
+
+bool DioramaRules_CellOverWater(const struct DioramaCellSnapshot *cell, uint8_t mapType)
+{
+    int water = 0;
+    int i;
+
+    if (cell == NULL || mapType == MAP_TYPE_NONE || mapType == MAP_TYPE_INDOOR
+     || mapType == MAP_TYPE_UNDERGROUND || mapType == MAP_TYPE_SECRET_BASE
+     || mapType == MAP_TYPE_UNDERWATER)
+        return false;
+    for (i = 0; i < DIORAMA_METATILE_ENTRY_COUNT / 2; i++)
+    {
+        uint16_t tile = cell->tileEntries[i] & 0x3FF;
+
+        if (tile >= 432 && tile < 462)
+            water++;
+    }
+    return water >= 2;
+}
+
+int16_t DioramaRules_StaticGroundQ16(uint16_t layoutId, uint32_t cellOffset)
+{
+    const struct DioramaGeneratedLayoutV2 *layout = FindLayout(layoutId);
+    uint32_t low = 0;
+    uint32_t high;
+
+    if (layout == NULL || layout->terrainRecordOffset > gDioramaTerrainV2Count
+     || layout->terrainRecordCount > gDioramaTerrainV2Count - layout->terrainRecordOffset)
+        return 0;
+    high = layout->terrainRecordCount;
+    while (low < high)
+    {
+        uint32_t middle = low + (high - low) / 2;
+
+        if (gDioramaTerrainV2[layout->terrainRecordOffset + middle].cellOffset < cellOffset)
+            low = middle + 1;
+        else
+            high = middle;
+    }
+    if (low < layout->terrainRecordCount
+     && gDioramaTerrainV2[layout->terrainRecordOffset + low].cellOffset == cellOffset)
+        return gDioramaTerrainV2[layout->terrainRecordOffset + low].groundQ16;
+    return 0;
+}
+
+bool DioramaRules_LayoutUsesSecondary(uint16_t layoutId, const char *symbol)
+{
+    size_t i;
+
+    if (symbol == NULL)
+        return false;
+    for (i = 0; i < gDioramaLayoutV2Count; i++)
+    {
+        uint8_t tileset;
+        size_t t;
+
+        if (gDioramaLayoutsV2[i].id != layoutId)
+            continue;
+        tileset = gDioramaLayoutsV2[i].secondaryTilesetId;
+        for (t = 0; t < gDioramaTilesetV2Count; t++)
+            if (gDioramaTilesetsV2[t].id == tileset)
+                return gDioramaTilesetsV2[t].symbol != NULL
+                    && strcmp(gDioramaTilesetsV2[t].symbol, symbol) == 0;
+        return false;
+    }
+    return false;
+}
+
+uint8_t DioramaRules_CellLava(const struct DioramaCellSnapshot *cell, uint16_t layoutId)
+{
+    /* per layout id: 0 not looked up, 1 no lava tileset, 2 gTileset_Lavaridge */
+    static uint8_t sLavaLayout[2048];
+    int i;
+
+    /* the secondary tileset's metatiles (NUM_METATILES_IN_PRIMARY up) */
+    if (cell == NULL || cell->metatileId < 512 || layoutId == 0
+     || layoutId >= sizeof(sLavaLayout))
+        return 0;
+    if (sLavaLayout[layoutId] == 0)
+        sLavaLayout[layoutId] = DioramaRules_LayoutUsesSecondary(layoutId, "gTileset_Lavaridge")
+                              ? 2 : 1;
+    if (sLavaLayout[layoutId] != 2)
+        return 0;
+    for (i = 0; i < DIORAMA_METATILE_ENTRY_COUNT / 2; i++)
+    {
+        uint16_t tile = cell->tileEntries[i] & 0x3FF;
+
+        if (tile != 608 && (tile < 672 || tile > 675))
+            return 0;
+    }
+    for (i = DIORAMA_METATILE_ENTRY_COUNT / 2; i < DIORAMA_METATILE_ENTRY_COUNT; i++)
+        if ((cell->tileEntries[i] & 0x3FF) != 0)
+            return 1;
+    return 2;
 }
 
 float DioramaRules_ObjectGroundHeight(const struct DioramaResolvedCell *resolved,

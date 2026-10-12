@@ -44,7 +44,20 @@ bool DioramaOccupancy_Canonicalize(struct DioramaOccupancySpan *spans,
     qsort(spans, *spanCount, sizeof(*spans), CompareSpans);
     for (read = 0; read < *spanCount; read++)
     {
+        /* Spans of one column that only touch keep their own materials (a cell's
+         * side over the riser below it, terrain_mesh.c): the shell finds no face
+         * between them. Spans that overlap must be one and the same. */
         if (write != 0
+         && spans[write - 1].x == spans[read].x
+         && spans[write - 1].z == spans[read].z
+         && spans[read].yMin == spans[write - 1].yMax
+         && !SameProvenance(&spans[write - 1], &spans[read]))
+        {
+            if (write != read)
+                spans[write] = spans[read];
+            write++;
+        }
+        else if (write != 0
          && spans[write - 1].x == spans[read].x
          && spans[write - 1].z == spans[read].z
          && spans[read].yMin <= spans[write - 1].yMax)

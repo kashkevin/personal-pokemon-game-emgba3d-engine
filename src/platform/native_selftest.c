@@ -135,3 +135,498 @@ int NativeSelfTest_Decompress(const char *listPath)
     printf("selftest-decompress: %d assets, %d failed, %d skipped\n", tested, failed, skipped);
     return failed ? 1 : 0;
 }
+
+// ---------------------------------------------------------------------------
+//   pokeemerald-mp --selftest-party-order
+//
+// The battle's party order (party_menu.c): which party slot each of a side's
+// six battle slots shows, two 4-bit party indexes a byte. InitBattleControllers
+// builds it for every battler of a battle that is not a Multi
+// (BufferBattlePartyCurrentOrderBySide), and coming back from the bag or the
+// party menu builds the player's again (BufferBattlePartyCurrentOrder).
+//
+// KNOWN_ISSUES N37: against two opponent trainers each trainer has a party of
+// its own (gParties[B_TRAINER_OPPONENT_A] and _B), so both opponents are party
+// index 0 and the double-battle branch wrote a seventh index one byte past its
+// six-entry array - natively "stack smashing detected" as the battle started.
+// Every single, double, two-opponent and Multi layout is run here, with every
+// pair of party indexes: each call must return, and give the order the game has
+// always given (Reference: the six indexes the GBA keeps in bounds), so the fix
+// changes no battle. Runs before the game starts and exits with the result.
+#include "battle.h"
+#include "battle_util.h"
+#include "main.h"
+#include "party_menu.h"
+#include "constants/battle.h"
+
+static int sOrderChecks, sOrderFailures;
+
+// The order as the game computes it, in a buffer with room for the seventh
+// index the double-battle branch can write; the game keeps the first six.
+static void ReferenceOrder(u8 out[PARTY_SIZE / 2], u32 typeFlags, u8 left, u8 right, u8 flankId,
+                           bool32 fullTeams)
+{
+    u8 ids[PARTY_SIZE + 1];
+    int i, j;
+
+    if ((typeFlags & BATTLE_TYPE_MULTI) && (typeFlags & BATTLE_TYPE_MORE_THAN_TWO_BATTLERS))
+    {
+        static const u8 sFull[3] = {(0 << 4) | 1, (2 << 4) | 3, (4 << 4) | 5};
+        static const u8 sRight[3] = {0 | (3 << 4), 5 | (4 << 4), 2 | (1 << 4)};
+        static const u8 sLeft[3] = {3 | (0 << 4), 2 | (1 << 4), 5 | (4 << 4)};
+
+        memcpy(out, fullTeams ? sFull : (flankId != 0 ? sRight : sLeft), 3);
+        return;
+    }
+    if (!(typeFlags & BATTLE_TYPE_MORE_THAN_TWO_BATTLERS))
+    {
+        j = 1;
+        ids[0] = left;
+        for (i = 0; i < PARTY_SIZE; i++)
+            if (i != ids[0])
+                ids[j++] = i;
+    }
+    else
+    {
+        j = 2;
+        ids[0] = left;
+        ids[1] = right;
+        for (i = 0; i < PARTY_SIZE && j <= PARTY_SIZE; i++)
+            if (i != ids[0] && i != ids[1])
+                ids[j++] = i;
+    }
+    for (i = 0; i < 3; i++)
+        out[i] = (ids[i * 2] << 4) | ids[i * 2 + 1];
+}
+
+static void SetOrderBattle(u32 typeFlags)
+{
+    gBattleTypeFlags = typeFlags;
+    gBattlersCount = (typeFlags & BATTLE_TYPE_MORE_THAN_TWO_BATTLERS) ? MAX_BATTLERS_COUNT : 2;
+    gBattlerPositions[0] = B_POSITION_PLAYER_LEFT;
+    gBattlerPositions[1] = B_POSITION_OPPONENT_LEFT;
+    gBattlerPositions[2] = B_POSITION_PLAYER_RIGHT;
+    gBattlerPositions[3] = B_POSITION_OPPONENT_RIGHT;
+    gMain.inBattle = TRUE;
+}
+
+static void ExpectOrder(const char *what, const u8 *got, const u8 *want)
+{
+    sOrderChecks++;
+    if (memcmp(got, want, PARTY_SIZE / 2) == 0)
+        return;
+    sOrderFailures++;
+    printf("FAIL %s: order %02x %02x %02x, want %02x %02x %02x\n", what,
+           got[0], got[1], got[2], want[0], want[1], want[2]);
+}
+
+// One battler's side, as InitBattleControllers builds it.
+static void CheckSideOrder(const char *layout, u32 typeFlags, enum BattlerId battler, u8 flankId)
+{
+    enum BattlerId left = (battler & BIT_SIDE) ? 1 : 0;
+    u8 want[PARTY_SIZE / 2];
+    u8 *got = gBattleStruct->battlerPartyOrders[battler];
+    bool32 fullTeams = FALSE;
+    char what[160];
+
+    if ((typeFlags & BATTLE_TYPE_MULTI) && (typeFlags & BATTLE_TYPE_MORE_THAN_TWO_BATTLERS))
+        fullTeams = AreMultiPartiesFullTeams();
+    ReferenceOrder(want, typeFlags, gBattlerPartyIndexes[left], gBattlerPartyIndexes[left + 2], flankId,
+                   fullTeams);
+    snprintf(what, sizeof(what), "%s, battler %d (party indexes %d and %d), flank %d", layout, battler,
+             gBattlerPartyIndexes[left], gBattlerPartyIndexes[left + 2], flankId);
+    // a crash here is the bug itself: name the case first
+    printf("  %s\n", what);
+    fflush(stdout);
+    memset(got, 0xEE, PARTY_SIZE / 2);
+    BufferBattlePartyCurrentOrderBySide(battler, flankId);
+    ExpectOrder(what, got, want);
+}
+
+// The player's side, as coming back from the bag or the party menu builds it.
+static void CheckPlayerOrder(const char *layout, u32 typeFlags)
+{
+    u8 want[PARTY_SIZE / 2];
+    char what[160];
+
+    ReferenceOrder(want, typeFlags, gBattlerPartyIndexes[0], gBattlerPartyIndexes[2], GetPlayerFlankId(),
+                   (typeFlags & BATTLE_TYPE_MULTI) && (typeFlags & BATTLE_TYPE_MORE_THAN_TWO_BATTLERS)
+                   ? AreMultiPartiesFullTeams() : FALSE);
+    snprintf(what, sizeof(what), "%s, the player's order (party indexes %d and %d)", layout,
+             gBattlerPartyIndexes[0], gBattlerPartyIndexes[2]);
+    printf("  %s\n", what);
+    fflush(stdout);
+    memset(gBattlePartyCurrentOrder, 0xEE, sizeof(gBattlePartyCurrentOrder));
+    BufferBattlePartyCurrentOrder();
+    ExpectOrder(what, gBattlePartyCurrentOrder, want);
+}
+
+int NativeSelfTest_PartyOrder(void)
+{
+    static const struct { const char *name; u32 flags; } sLayouts[] =
+    {
+        {"single, wild", 0},
+        {"single, trainer", BATTLE_TYPE_TRAINER},
+        {"double, wild", BATTLE_TYPE_DOUBLE},
+        {"double, one trainer", BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE},
+        {"double, two opponent trainers", BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_TWO_OPPONENTS},
+        {"multi, in-game partner, wild", BATTLE_TYPE_DOUBLE | BATTLE_TYPE_MULTI | BATTLE_TYPE_INGAME_PARTNER},
+        {"multi, in-game partner, two trainers", BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_TWO_OPPONENTS
+                                                 | BATTLE_TYPE_MULTI | BATTLE_TYPE_INGAME_PARTNER},
+        {"multi, link (half teams)", BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_MULTI
+                                     | BATTLE_TYPE_TOWER_LINK_MULTI},
+    };
+    // The N37 battle itself, spelt out: both opponents party index 0 of their own party.
+    static const u8 sTwoOpponents[PARTY_SIZE / 2] = {(0 << 4) | 0, (1 << 4) | 2, (3 << 4) | 4};
+    // and the player's own two, party indexes 0 and 1
+    static const u8 sPlayerFirstTwo[PARTY_SIZE / 2] = {(0 << 4) | 1, (2 << 4) | 3, (4 << 4) | 5};
+
+    gBattleStruct = calloc(1, sizeof(*gBattleStruct));
+    if (gBattleStruct == NULL)
+        return 2;
+
+    // The battle N37 was found in (Sootopolis Gym B1F, two trainers see the
+    // player together), first: both opponents party index 0 of their own party.
+    printf("two opponent trainers, both party index 0 (N37)\n");
+    fflush(stdout);
+    SetOrderBattle(BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_TWO_OPPONENTS);
+    gBattlerPartyIndexes[0] = 0;
+    gBattlerPartyIndexes[2] = 1;
+    gBattlerPartyIndexes[1] = 0;
+    gBattlerPartyIndexes[3] = 0;
+    for (enum BattlerId battler = 0; battler < MAX_BATTLERS_COUNT; battler++)
+    {
+        memset(gBattleStruct->battlerPartyOrders[battler], 0xEE, PARTY_SIZE / 2);
+        BufferBattlePartyCurrentOrderBySide(battler, 0);
+    }
+    ExpectOrder("two opponent trainers (N37), opponent A", gBattleStruct->battlerPartyOrders[1], sTwoOpponents);
+    ExpectOrder("two opponent trainers (N37), opponent B", gBattleStruct->battlerPartyOrders[3], sTwoOpponents);
+    ExpectOrder("two opponent trainers (N37), the player", gBattleStruct->battlerPartyOrders[0], sPlayerFirstTwo);
+
+    for (u32 l = 0; l < ARRAY_COUNT(sLayouts); l++)
+    {
+        u32 flags = sLayouts[l].flags;
+        bool32 doubles = (flags & BATTLE_TYPE_MORE_THAN_TWO_BATTLERS) != 0;
+
+        printf("%s\n", sLayouts[l].name);
+        SetOrderBattle(flags);
+        for (u32 a = 0; a < PARTY_SIZE; a++)
+        {
+            for (u32 b = 0; b < PARTY_SIZE; b++)
+            {
+                // left battlers a, right battlers b (in a single only the left ones fight)
+                gBattlerPartyIndexes[0] = a;
+                gBattlerPartyIndexes[1] = a;
+                gBattlerPartyIndexes[2] = b;
+                gBattlerPartyIndexes[3] = b;
+                for (enum BattlerId battler = 0; battler < gBattlersCount; battler++)
+                    CheckSideOrder(sLayouts[l].name, flags, battler, battler >= 2);
+                CheckPlayerOrder(sLayouts[l].name, flags);
+                if (!doubles)
+                    break;
+            }
+        }
+    }
+
+    free(gBattleStruct);
+    gBattleStruct = NULL;
+    gMain.inBattle = FALSE;
+    printf("selftest-party-order: %d checks, %d failed\n", sOrderChecks, sOrderFailures);
+    return sOrderFailures ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
+//   pokeemerald-mp --selftest-battle-names
+//
+// A battle message naming trainers with their classes (battle_message.c,
+// BattleStringExpandPlaceholders). KNOWN_ISSUES N38: the text of each
+// {B_TRAINERn_NAME_WITH_CLASS} was put together in a 32-byte buffer from where the
+// one before it ended, so a message naming two trainers - "You are challenged by
+// MAGMA LEADER MAXIE and MAGMA ADMIN TABITHA!", Mossdeep's Space Center Multi
+// battle - wrote past it: natively "stack smashing detected" as the battle began.
+// Here the two-opponent intro's placeholders are expanded for every pair of
+// opponents a two-trainer battle of the game has (and that pair with the longest
+// names of all trainers): each must return, and give each trainer's class and
+// name as the game always has (each placeholder expanded alone, which never
+// overflowed, is the reference). Runs before the game starts and exits with the
+// result.
+#include "battle_message.h"
+#include "battle_setup.h"
+#include "data.h"
+#include "string_util.h"
+#include "constants/characters.h"
+#include "constants/opponents.h"
+#include "constants/trainers.h"
+
+static int sNameChecks, sNameFailures;
+
+// A copy of the message without its line breaks and kinds of space (the
+// message box breaks lines by width), to compare words only.
+static void Words(const u8 *src, u8 *dst, size_t size)
+{
+    size_t n = 0;
+
+    for (; *src != EOS && n + 1 < size; src++)
+        dst[n++] = (*src == CHAR_NBSP || *src == CHAR_NEWLINE || *src == CHAR_PROMPT_SCROLL
+                    || *src == CHAR_PROMPT_CLEAR) ? CHAR_SPACE : *src;
+    dst[n] = EOS;
+}
+
+static void Expand(const u8 *placeholders, u8 *out, size_t size)
+{
+    u8 dst[256];
+
+    memset(dst, EOS, sizeof(dst));
+    BattleStringExpandPlaceholders(placeholders, dst, sizeof(dst));
+    Words(dst, out, size);
+}
+
+static void CheckTwoTrainerNames(u16 opponentA, u16 opponentB)
+{
+    static const u8 sBoth[] = {PLACEHOLDER_BEGIN, B_TXT_TRAINER1_NAME_WITH_CLASS, CHAR_SPACE,
+                               PLACEHOLDER_BEGIN, B_TXT_TRAINER2_NAME_WITH_CLASS, EOS};
+    static const u8 sFirst[] = {PLACEHOLDER_BEGIN, B_TXT_TRAINER1_NAME_WITH_CLASS, EOS};
+    static const u8 sSecond[] = {PLACEHOLDER_BEGIN, B_TXT_TRAINER2_NAME_WITH_CLASS, EOS};
+    u8 both[256], first[128], second[128], want[256];
+    size_t n;
+
+    TRAINER_BATTLE_PARAM.opponentA = opponentA;
+    TRAINER_BATTLE_PARAM.opponentB = opponentB;
+    printf("  trainers %d and %d\n", opponentA, opponentB);
+    fflush(stdout);
+    // a crash here is the bug itself: the case is named first
+    Expand(sBoth, both, sizeof(both));
+    Expand(sFirst, first, sizeof(first));
+    Expand(sSecond, second, sizeof(second));
+    n = StringLength(first);
+    memcpy(want, first, n);
+    want[n] = CHAR_SPACE;
+    memcpy(want + n + 1, second, StringLength(second) + 1);
+    sNameChecks++;
+    if (StringCompare(both, want) != 0)
+    {
+        sNameFailures++;
+        printf("FAIL trainers %d and %d: the two names differ from each alone\n", opponentA, opponentB);
+    }
+}
+
+// The trainer of the game with the longest class and name together.
+static u16 LongestNamedTrainer(void)
+{
+    u16 best = TRAINER_NONE + 1;
+    u32 bestLength = 0;
+
+    for (u16 id = TRAINER_NONE + 1; id < TRAINERS_COUNT; id++)
+    {
+        u32 length;
+
+        if (id == TRAINER_FRONTIER_BRAIN)
+            continue;
+        length = StringLength(GetTrainerNameFromId(id))
+               + StringLength(gTrainerClasses[GetTrainerClassFromId(id)].name);
+
+        if (length > bestLength)
+        {
+            bestLength = length;
+            best = id;
+        }
+    }
+    return best;
+}
+
+int NativeSelfTest_BattleNames(void)
+{
+    // The two-trainer battles of the game (data/maps/*/scripts.inc: the Space
+    // Center's multi_2_vs_2, the two-trainer intros of trainer pairs) are
+    // covered by their longest case, and the Space Center's first.
+    u16 longest = LongestNamedTrainer();
+
+    InitHeap(gHeap, HEAP_SIZE); // the message box's line breaking allocates from the game heap
+    gBattleTypeFlags = BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_TWO_OPPONENTS
+                     | BATTLE_TYPE_MULTI | BATTLE_TYPE_INGAME_PARTNER;
+    printf("Mossdeep's Space Center: MAXIE and TABITHA (N38)\n");
+    CheckTwoTrainerNames(TRAINER_MAXIE_MOSSDEEP, TRAINER_TABITHA_MOSSDEEP);
+    printf("the longest class and name, twice\n");
+    CheckTwoTrainerNames(longest, longest);
+    gBattleTypeFlags = BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_TWO_OPPONENTS;
+    printf("every trainer against the longest\n");
+    for (u16 id = TRAINER_NONE + 1; id < TRAINERS_COUNT; id++)
+    {
+        // the Battle Frontier's ids share their numbers with the game's trainers, and
+        // this one is read as the Frontier Brain (its class from the Frontier's save
+        // data, which a selftest does not have)
+        if (id == TRAINER_FRONTIER_BRAIN)
+            continue;
+        CheckTwoTrainerNames(longest, id);
+        CheckTwoTrainerNames(id, longest);
+    }
+    gBattleTypeFlags = 0;
+    printf("selftest-battle-names: %d checks, %d failed\n", sNameChecks, sNameFailures);
+    return sNameFailures ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
+//   pokeemerald-mp --selftest-cry-stop
+//
+// The Pokemon cry functions before any cry has played since the game started
+// (sound.c: gMPlay_PokemonCry stays NULL until the first one). KNOWN_ISSUES N39:
+// as a double battle sends its first two Pokemon out
+// (Task_PlayCryWhenReleasedFromBall) it stops the cry playing before the doubles'
+// cries (StopCryAndClearCrySongs), and with none played yet m4aMPlayStop read
+// through that NULL - natively a segmentation fault as a two-trainer battle began
+// right after a save was continued; the GBA reads its BIOS there and does nothing.
+// Each function must return with no cry playing and no cry player set.
+// ---------------------------------------------------------------------------
+
+#include "sound.h"
+
+extern struct MusicPlayerInfo *gMPlay_PokemonCry;
+
+static int sCryChecks, sCryFailures;
+
+static void ExpectCry(const char *what, bool32 ok)
+{
+    sCryChecks++;
+    if (!ok)
+    {
+        sCryFailures++;
+        printf("FAIL %s\n", what);
+    }
+}
+
+int NativeSelfTest_CryStop(void)
+{
+    gMPlay_PokemonCry = NULL;
+    printf("a double battle's send-out stopping the cry before any cry has played\n");
+    fflush(stdout);
+    StopCryAndClearCrySongs();
+    ExpectCry("StopCryAndClearCrySongs returned", TRUE);
+    StopCry();
+    ExpectCry("StopCry returned", TRUE);
+    ExpectCry("IsCryPlaying: none", !IsCryPlaying());
+    ExpectCry("IsCryPlayingOrClearCrySongs: none", !IsCryPlayingOrClearCrySongs());
+    ExpectCry("still no cry player", gMPlay_PokemonCry == NULL);
+    printf("selftest-cry-stop: %d checks, %d failed\n", sCryChecks, sCryFailures);
+    return sCryFailures ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
+//   pokeemerald-mp --selftest-shake-anim
+//
+// A move animation shaking a battler or the battle's background
+// (battle_anim_normal.c, AnimShakeMonOrBattlePlatforms: Rock Throw, Rock Slide,
+// Metal Claw, Dragon Claw, Ancient Power, Superpower, Snore, Avalanche...). It keeps
+// the address of what it shakes (gBattle_BG3_X or _Y, gSpriteCoordOffsetX or _Y) in
+// two s16 fields and puts it back together as lo | hi << 16. KNOWN_ISSUES N40: on
+// the GBA those variables are in IWRAM, whose addresses never have bit 15 set;
+// natively they can, the s16 low half is then negative and sign-extends over the
+// high half, and the animation reads and writes through 0xFFFFxxxx - a segmentation
+// fault in the move's animation (the 3D build's layout has all four so; Mossdeep's
+// Space Center Multi battle crashed so). Here the animation shakes each of the four,
+// and once more a value at an address with bit 15 set in any layout (the address
+// put in the sprite's fields after the animation began, as it keeps it); each must
+// shake and come back to its value.
+// ---------------------------------------------------------------------------
+
+#include "battle_anim.h"
+#include "sprite.h"
+#include "constants/battle_anim.h"
+
+extern const struct SpriteTemplate gShakeMonOrPlatformSpriteTemplate;
+
+static int sShakeChecks, sShakeFailures;
+// u16s across 64 KiB and a little more (allocated by the selftest only): some of them have
+// addresses with bit 15 set
+#define SHAKE_SPACE (0x8000 + 16)
+
+static void ExpectShake(const char *what, bool32 ok)
+{
+    sShakeChecks++;
+    if (!ok)
+    {
+        sShakeFailures++;
+        printf("FAIL %s\n", what);
+    }
+}
+
+// Starts the animation on target type `type` (the game's createsprite call), then
+// optionally points its fields at `inject`; runs it to its end. Returns whether the
+// value shook (changed while it ran).
+static bool32 RunShake(u8 type, u16 *watched, u16 *inject)
+{
+    bool32 shook = FALSE;
+    u16 start = *watched;
+    u8 spriteId;
+    int steps;
+
+    gBattleAnimArgs[0] = 2;    // velocity
+    gBattleAnimArgs[1] = 1;    // shake timer
+    gBattleAnimArgs[2] = 8;    // shake duration
+    gBattleAnimArgs[3] = type;
+    gBattleAnimArgs[4] = 0;    // battler selector: the attacker
+    spriteId = CreateSpriteAndAnimate(&gShakeMonOrPlatformSpriteTemplate, 0, 0, 0);
+    if (spriteId == MAX_SPRITES)
+        return FALSE;
+    if (inject != NULL)
+    {
+        gSprites[spriteId].data[4] = *inject;                  // the value to come back to
+        gSprites[spriteId].data[6] = (u32)inject & 0xFFFF;     // as StoreSpriteCallbackInData6
+        gSprites[spriteId].data[7] = (u32)inject >> 16;
+    }
+    for (steps = 0; steps < 64 && gSprites[spriteId].inUse; steps++)
+    {
+        gSprites[spriteId].callback(&gSprites[spriteId]);
+        if (*watched != start)
+            shook = TRUE;
+    }
+    return shook && !gSprites[spriteId].inUse;
+}
+
+int NativeSelfTest_ShakeAnim(void)
+{
+    static const char *const names[4] = {"gBattle_BG3_X", "gBattle_BG3_Y", "gSpriteCoordOffsetX",
+                                         "gSpriteCoordOffsetY"};
+    u16 *targets[4] = {&gBattle_BG3_X, &gBattle_BG3_Y, (u16 *)&gSpriteCoordOffsetX,
+                       (u16 *)&gSpriteCoordOffsetY};
+    u16 *space = calloc(SHAKE_SPACE, sizeof(u16));
+    u16 *high = NULL;
+    char what[96];
+    u32 i;
+    u8 type;
+
+    ResetSpriteData();
+    gBattlersCount = 2;
+    for (type = SHAKE_BG_X; type <= SHAKE_MON_Y; type++)
+    {
+        printf("shaking %s at %p (address bit 15 %s)\n", names[type], (void *)targets[type],
+               ((u32)targets[type] & 0x8000) ? "set: sign-extends" : "clear");
+        fflush(stdout);
+        *targets[type] = 100;
+        snprintf(what, sizeof(what), "%s shook and the animation ended", names[type]);
+        ExpectShake(what, RunShake(type, targets[type], NULL));
+        snprintf(what, sizeof(what), "%s back to its value", names[type]);
+        ExpectShake(what, *targets[type] == 100);
+    }
+    for (i = 0; space != NULL && i < SHAKE_SPACE; i++)
+        if (((u32)&space[i] & 0x8000) != 0)
+        {
+            high = &space[i];
+            break;
+        }
+    if (high == NULL)
+    {
+        printf("FAIL no memory for the test\n");
+        return 1;
+    }
+    printf("shaking a value at %p (address bit 15 set)\n", (void *)high);
+    fflush(stdout);
+    *high = 200;
+    gBattle_BG3_Y = 100;
+    ExpectShake("a value at an address with bit 15 set shook", RunShake(SHAKE_BG_Y, high, high));
+    ExpectShake("... back to its value", *high == 200);
+    ExpectShake("... and the background's value left alone", gBattle_BG3_Y == 100);
+    free(space);
+    ResetSpriteData();
+    printf("selftest-shake-anim: %d checks, %d failed\n", sShakeChecks, sShakeFailures);
+    return sShakeFailures ? 1 : 0;
+}
