@@ -107,9 +107,10 @@ def main():
         rv = review.get(m, {})
         b, a = before.get(m), after.get(m)
         captured = a is not None and a['status'] == 'captured'
-        # the class now: this round's (claude/battle-environments-2, 'now') where it was looked
-        # at again, else with the overworld's objects ('props'), else the first rounds' ('after')
-        current = next((rv.get(k) for k in ('now', 'props', 'after') if rv.get(k) in CLASSES), None)
+        # the class now: round 4's (claude/battle-environments-3, 'r4'), else round 3's
+        # (claude/battle-environments-2, 'now') where it was looked at again, else with the
+        # overworld's objects ('props'), else the first rounds' ('after')
+        current = next((rv.get(k) for k in ('r4', 'now', 'props', 'after') if rv.get(k) in CLASSES), None)
         if rv.get('after') == 'n/a' and current is None:
             state = 'excluded'   # no battle is fought on this map as it stands (a template)
         elif current is not None:
@@ -133,9 +134,11 @@ def main():
             # merged with graphics-wip-20261010-8), where that was looked at
             'props_class': rv.get('props') if rv.get('props') in CLASSES else None,
             'props_notes': rv.get('props_notes', ''),
-            # this round's class (claude/battle-environments-2) and the class now
+            # round 3's class (claude/battle-environments-2) and round 4's (claude/battle-environments-3)
             'now_class': rv.get('now') if rv.get('now') in CLASSES else None,
             'now_notes': rv.get('now_notes', ''),
+            'r4_class': rv.get('r4') if rv.get('r4') in CLASSES else None,
+            'r4_notes': rv.get('r4_notes', ''),
             'current_class': current,
             'state': state, 'notes': rv.get('notes', ''), 'problems': rv.get('problems', []),
             'before_png': b['png'] if b and b['status'] == 'captured' else None,
@@ -170,7 +173,8 @@ def main():
                     r['state'] if r['after_status'] in ('captured', 'not surveyed')
                     else '%s (%s)' % (r['state'], r['after_status']),
                     (r['notes'] + (' With objects: ' + r['props_notes'] if r['props_notes'] else '')
-                     + (' Now: ' + r['now_notes'] if r['now_notes'] else '')).replace('|', '/')))
+                     + (' Round 3: ' + r['now_notes'] if r['now_notes'] else '')
+                     + (' Round 4: ' + r['r4_notes'] if r['r4_notes'] else '')).replace('|', '/')))
     if args.no_html:
         return
     write_page(rows, os.path.join(args.out, 'page'), by_map, args)
