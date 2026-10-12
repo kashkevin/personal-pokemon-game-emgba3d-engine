@@ -2657,3 +2657,67 @@ static const struct SpritePalette sSpritePalettes[] =
     {gNamingScreenMenu_Pal[4], PALTAG_OK_BUTTON},
     {}
 };
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_naming.c) draws the naming screen
+// in place of its pictures and follows this state; every button stays here.
+bool32 NamingScreen_NativeUiState(struct NativeNaming *out)
+{
+    // the keyboards in the order SELECT cycles them, from the UPPER page
+    static const u8 keyboards[NATIVE_NAMING_PAGES] = {KEYBOARD_LETTERS_UPPER, KEYBOARD_LETTERS_LOWER, KEYBOARD_SYMBOLS};
+    u8 inputTask;
+    u32 i;
+
+    memset(out, 0, sizeof(*out));
+    if (sNamingScreen == NULL || gMain.callback2 != CB2_NamingScreen || !FuncIsActiveTask(Task_NamingScreen))
+        return FALSE;
+    switch (sNamingScreen->state)
+    {
+    case STATE_HANDLE_INPUT:
+    case STATE_MOVE_TO_OK_BUTTON:
+        out->phase = NATIVE_NAMING_INPUT;
+        break;
+    case STATE_START_PAGE_SWAP:
+    case STATE_WAIT_PAGE_SWAP:
+        out->phase = NATIVE_NAMING_SWAP;
+        break;
+    case STATE_PRESSED_OK:
+    case STATE_WAIT_SENT_TO_PC_MESSAGE:
+    case STATE_FADE_OUT:
+    case STATE_EXIT:
+        out->phase = NATIVE_NAMING_DONE;
+        break;
+    default:
+        out->phase = NATIVE_NAMING_LOADING;
+        break;
+    }
+    inputTask = FindTaskIdByFunc(Task_HandleInput);
+    out->ready = sNamingScreen->state == STATE_HANDLE_INPUT && inputTask != TASK_NONE
+              && gTasks[inputTask].data[0] == INPUT_STATE_ENABLED && !gPaletteFade.active;
+    out->kind = sNamingScreen->templateNum;
+    out->maxChars = sNamingScreen->template->maxChars;
+    // KBPAGE_* to the cycle from UPPER: SYMBOLS 2, UPPER 0, LOWER 1; a swap shows the page coming
+    out->page = (sNamingScreen->currentPage + 2) % NATIVE_NAMING_PAGES;
+    if (out->phase == NATIVE_NAMING_SWAP)
+        out->page = (out->page + 1) % NATIVE_NAMING_PAGES;
+    for (i = 0; i < NATIVE_NAMING_PAGES; i++)
+    {
+        out->columns[i] = sPageColumnCounts[keyboards[i]];
+        memcpy(out->keys[i], sKeyboardChars[keyboards[i]], sizeof(out->keys[i]));
+    }
+    out->cursorX = gSprites[sNamingScreen->cursorSpriteId].data[0]; // sX
+    out->cursorY = gSprites[sNamingScreen->cursorSpriteId].data[1]; // sY
+    out->cursorShown = out->phase == NATIVE_NAMING_INPUT && !(gSprites[sNamingScreen->cursorSpriteId].data[4] & 0xFF);
+    out->genderIcon = sNamingScreen->template->addGenderIcon;
+    out->gender = sNamingScreen->monGender;
+    out->playerGender = sNamingScreen->templateNum == NAMING_SCREEN_PLAYER ? sNamingScreen->monSpecies : 0;
+    out->species = sNamingScreen->templateNum == NAMING_SCREEN_PLAYER ? SPECIES_NONE : sNamingScreen->monSpecies;
+    out->personality = sNamingScreen->monPersonality;
+    out->titleWindow = sNamingScreen->windows[WIN_TEXT_ENTRY_BOX];
+    memcpy(out->text, sNamingScreen->textBuffer, sizeof(sNamingScreen->textBuffer));
+    out->text[sizeof(out->text) - 1] = EOS;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

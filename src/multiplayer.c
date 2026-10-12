@@ -502,3 +502,24 @@ void Multiplayer_Tick(void)
         UpdateRemote(i);
     MultiplayerWorld_Tick(TRUE, sConnected);
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI's link panel (src/native_ui/screens/ui_pause.c): the other
+// players of the session as the bridge reports them. FALSE: no player there.
+bool32 Multiplayer_NativeUiPeer(u32 i, u32 *playerId, u8 *mapGroup, u8 *mapNum, u8 *gender, u8 *activity)
+{
+    const struct MultiplayerPeer *peer;
+
+    if (!sConnected || i >= MULTIPLAYER_MAX_PEERS || sRemotes[i].peer.playerId == 0)
+        return FALSE;
+    peer = &sRemotes[i].peer;
+    *playerId = peer->playerId;
+    *mapGroup = peer->pose.mapGroup;
+    *mapNum = peer->pose.mapNum;
+    *gender = peer->pose.gender;
+    *activity = peer->pose.activity;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

@@ -2202,3 +2202,20 @@ u32 CountFreePaletteSlots(void)
 
     return count;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// Native PC UI: the OBJ tiles a sheet tag holds (src/native_ui: the battle HUD
+// leaves the battle interface's sprites out of the GBA picture). Read-only.
+bool32 Sprite_NativeUiTagTiles(u16 tag, u16 *start, u16 *count)
+{
+    u8 index = IndexOfSpriteTileTag(tag);
+
+    if (tag == TAG_NONE || index == 0xFF)
+        return FALSE;
+    *start = sSpriteTileRanges[index][0];
+    *count = sSpriteTileRanges[index][1];
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

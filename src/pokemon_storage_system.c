@@ -1968,6 +1968,17 @@ static void CB2_PokeStorage(void)
     DoScheduledBgTilemapCopiesToVram();
     ScrollBackground();
     UpdateCloseBoxButtonFlash();
+#ifdef PORTABLE
+    // Task_ChangeScreen frees sStorage when it hands over to the summary, the
+    // naming screen, the bag or the field, and this frame's sprite callbacks
+    // then read through it (the cursor's shadow first; vanilla). The GBA reads
+    // its BIOS there; natively it is a fault, so leaving the boxes crashed.
+    // Skipping this last frame's sprite update changes nothing on screen: the
+    // next screen resets the sprites.
+    if (sStorage == NULL)
+        return;
+#endif
+#line 1971 // gba-line
     AnimateSprites();
     BuildOamBuffer();
 }
@@ -3980,6 +3991,17 @@ static void CreateDisplayMonSprite(void)
     struct SpriteSheet sheet = {sStorage->tileBuffer, MON_PIC_SIZE, GFXTAG_DISPLAY_MON};
     struct SpritePalette palette = {sStorage->displayMonPalette, PALTAG_DISPLAY_MON};
     struct SpriteTemplate template = sSpriteTemplate_DisplayMon;
+#ifdef PORTABLE
+    // displayMonPalette is set only once a Pokemon is shown and sStorage is
+    // not zeroed, so here it holds whatever the heap held before. The GBA
+    // loads 32 stray bytes from it (LoadDisplayMonGfx loads the real palette
+    // over them before the sprite shows); natively that address can be
+    // unmapped, and opening the boxes crashed.
+    static const u16 sBlankDisplayMonPal[16] = {0};
+
+    palette.data = sBlankDisplayMonPal;
+#endif
+#line 3983 // gba-line
 
     for (i = 0; i < MON_PIC_SIZE; i++)
         sStorage->tileBuffer[i] = 0;
@@ -10124,3 +10146,214 @@ void RemoveSelectedPcMon(struct Pokemon *mon)
     BoxMonToMon(boxmon, mon);
     ZeroBoxMonData(boxmon);
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_storage.c) draws the storage in
+// place of its backgrounds, windows and sprites and follows this state; the
+// input, the cursor and every rule stay here.
+STATIC_ASSERT(NATIVE_WALLPAPER_FRIENDS == WALLPAPER_FRIENDS && NATIVE_WALLPAPER_COUNT == WALLPAPER_COUNT, NativeUiWallpapers);
+STATIC_ASSERT(NATIVE_STORAGE_IN_BOX == CURSOR_AREA_IN_BOX && NATIVE_STORAGE_BUTTONS == CURSOR_AREA_BUTTONS, NativeUiStorageAreas);
+
+// What each task does in each state: 0 busy, else the phase that reads buttons there
+struct NativeUiStorageWait
+{
+    TaskFunc func;
+    u8 state;
+    u8 phase;
+};
+
+static const struct NativeUiStorageWait sNativeUiStorageWaits[] =
+{
+    {Task_PokeStorageMain, MSTATE_HANDLE_INPUT, NATIVE_STORAGE_MAIN},
+    {Task_PokeStorageMain, MSTATE_WAIT_MSG, NATIVE_STORAGE_MESSAGE},
+    {Task_PokeStorageMain, MSTATE_WAIT_ERROR_MSG, NATIVE_STORAGE_MESSAGE},
+    {Task_OnSelectedMon, 2, NATIVE_STORAGE_MENU},
+    {Task_OnSelectedMon, 6, NATIVE_STORAGE_MESSAGE},
+    {Task_HandleBoxOptions, 2, NATIVE_STORAGE_MENU},
+    {Task_HandleWallpapers, 2, NATIVE_STORAGE_MENU},
+    {Task_HandleWallpapers, 4, NATIVE_STORAGE_MENU},
+    {Task_JumpBox, 1, NATIVE_STORAGE_CHOOSE_BOX},
+    {Task_DepositMenu, 1, NATIVE_STORAGE_CHOOSE_BOX},
+    {Task_DepositMenu, 4, NATIVE_STORAGE_MESSAGE},
+    {Task_ReleaseMon, 1, NATIVE_STORAGE_YES_NO},
+    {Task_ReleaseMon, 4, NATIVE_STORAGE_MESSAGE},
+    {Task_ReleaseMon, 5, NATIVE_STORAGE_MESSAGE},
+    {Task_ReleaseMon, 9, NATIVE_STORAGE_MESSAGE},
+    {Task_ReleaseMon, 10, NATIVE_STORAGE_MESSAGE},
+    {Task_ReleaseMon, 12, NATIVE_STORAGE_MESSAGE},
+    {Task_ReleaseMon, 13, NATIVE_STORAGE_MESSAGE},
+    {Task_ReleaseMon, 14, NATIVE_STORAGE_MESSAGE},
+    {Task_ShowMarkMenu, 1, NATIVE_STORAGE_MARKS},
+    {Task_WithdrawMon, 1, NATIVE_STORAGE_MESSAGE},
+    {Task_GiveMovingItemToMon, 3, NATIVE_STORAGE_MESSAGE},
+    {Task_ItemToBag, 2, NATIVE_STORAGE_MESSAGE},
+    {Task_ItemToBag, 3, NATIVE_STORAGE_MESSAGE},
+    {Task_SwitchSelectedItem, 3, NATIVE_STORAGE_MESSAGE},
+    {Task_ShowItemInfo, 4, NATIVE_STORAGE_ITEM_INFO},
+    {Task_CloseBoxWhileHoldingItem, 1, NATIVE_STORAGE_YES_NO},
+    {Task_CloseBoxWhileHoldingItem, 2, NATIVE_STORAGE_MESSAGE},
+    {Task_PrintCantStoreMail, 2, NATIVE_STORAGE_MESSAGE},
+    {Task_OnCloseBoxPressed, 1, NATIVE_STORAGE_MESSAGE},
+    {Task_OnCloseBoxPressed, 2, NATIVE_STORAGE_YES_NO},
+    {Task_OnBPressed, 1, NATIVE_STORAGE_MESSAGE},
+    {Task_OnBPressed, 2, NATIVE_STORAGE_YES_NO},
+    {Task_ReshowPokeStorage, 2, NATIVE_STORAGE_MESSAGE},
+};
+
+static u8 NativeUiStorageMode(u8 boxOption)
+{
+    switch (boxOption)
+    {
+    case OPTION_WITHDRAW: return NATIVE_STORAGE_WITHDRAW;
+    case OPTION_DEPOSIT: return NATIVE_STORAGE_DEPOSIT;
+    case OPTION_MOVE_MONS: return NATIVE_STORAGE_MOVE_MONS;
+    case OPTION_MOVE_ITEMS: return NATIVE_STORAGE_MOVE_ITEMS;
+    default: return NATIVE_STORAGE_SELECT_MON;
+    }
+}
+
+bool32 Storage_NativeUiState(struct NativeStorage *out)
+{
+    TaskFunc f;
+    u32 i;
+
+    memset(out, 0, sizeof(*out));
+    out->scrollTo = -1;
+    if (gMain.callback2 != CB2_PokeStorage || sStorage == NULL || sStorage->taskId >= NUM_TASKS
+     || !gTasks[sStorage->taskId].isActive)
+        return FALSE;
+    f = gTasks[sStorage->taskId].func;
+    out->mode = NativeUiStorageMode(sStorage->boxOption);
+    out->box = StorageGetCurrentBox();
+    out->boxCount = TOTAL_BOXES_COUNT;
+    out->cursorArea = sCursorArea;
+    out->cursorPos = sCursorPosition;
+    out->partyShown = sInPartyMenu;
+    out->quickMode = sAutoActionOn;
+    out->lrBoxes = gSaveBlock2Ptr->optionsButtonMode == OPTIONS_BUTTON_MODE_LR;
+    out->bPutsBack = OW_PC_PRESS_B >= GEN_4;
+    out->waldaColors[0] = gSaveBlock1Ptr->waldaPhrase.colors[0];
+    out->waldaColors[1] = gSaveBlock1Ptr->waldaPhrase.colors[1];
+    if (f == Task_InitPokeStorage || f == Task_ShowPokeStorage || f == Task_ReshowPokeStorage)
+        out->phase = NATIVE_STORAGE_LOADING;
+    else if (f == Task_ChangeScreen || f == Task_ShowMonSummary || f == Task_NameBox || f == Task_GiveItemFromBag
+          || ((f == Task_OnCloseBoxPressed || f == Task_OnBPressed) && sStorage->state >= 3))
+        out->phase = NATIVE_STORAGE_CLOSING;
+    else if (sStorage->inBoxMovingMode != MOVE_MODE_NORMAL
+          || (f == Task_PokeStorageMain && sStorage->state >= MSTATE_MULTIMOVE_RUN && sStorage->state <= MSTATE_MULTIMOVE_RUN_MOVED))
+        out->phase = NATIVE_STORAGE_MULTI;
+    else
+        out->phase = NATIVE_STORAGE_BUSY;
+    for (i = 0; i < ARRAY_COUNT(sNativeUiStorageWaits); i++)
+    {
+        if (sNativeUiStorageWaits[i].func == f && sNativeUiStorageWaits[i].state == sStorage->state
+         && out->phase == NATIVE_STORAGE_BUSY)
+        {
+            out->phase = sNativeUiStorageWaits[i].phase;
+            out->ready = !gPaletteFade.active;
+            break;
+        }
+    }
+    // the box the game scrolls to (the box changes when the scroll ends)
+    if (f == Task_PokeStorageMain && (sStorage->state == MSTATE_SCROLL_BOX || sStorage->state == MSTATE_SCROLL_BOX_ITEM))
+    {
+        out->scrollTo = sStorage->newCurrBoxId;
+        out->scrollDir = sStorage->newCurrBoxId == (StorageGetCurrentBox() + 1) % TOTAL_BOXES_COUNT ? 1 : -1;
+    }
+    else if (f == Task_JumpBox && sStorage->state >= 2)
+    {
+        out->scrollTo = sStorage->newCurrBoxId;
+        out->scrollDir = sStorage->scrollDirection > 0 ? 1 : -1;
+    }
+    // (while the screen sets itself up again, the moving Pokémon is restored only at its fifth step)
+    out->holdingMon = sIsMonBeingMoved && sStorage->inBoxMovingMode == MOVE_MODE_NORMAL
+                   && !(f == Task_InitPokeStorage && sStorage->state <= 4);
+    if (out->holdingMon)
+        out->heldMon = sStorage->movingMon;
+    if (sStorage->boxOption == OPTION_MOVE_ITEMS && IsMovingItem())
+        out->heldItem = GetMovingItemId();
+    if (out->phase == NATIVE_STORAGE_MENU)
+    {
+        out->menuCount = min(sStorage->menuItemsCount, ARRAY_COUNT(out->menuLabels));
+        for (i = 0; i < out->menuCount; i++)
+        {
+            int id = sStorage->menuItems[i].textId;
+
+            out->menuLabels[i] = sStorage->menuItems[i].text;
+            out->menuWallpaper[i] = (id >= MENU_WALLPAPERS_START && id <= MENU_SIMPLE) ? id - MENU_WALLPAPERS_START : -1;
+        }
+        out->menuCursor = Menu_GetCursorPos();
+    }
+    else if (out->phase == NATIVE_STORAGE_YES_NO)
+    {
+        out->menuCursor = Menu_GetCursorPos();
+    }
+    else if (out->phase == NATIVE_STORAGE_CHOOSE_BOX && sChooseBoxMenu != NULL)
+    {
+        out->chooseBox = sChooseBoxMenu->curBox;
+    }
+    else if (out->phase == NATIVE_STORAGE_MARKS)
+    {
+        out->markCursor = sStorage->markMenu.cursorPos;
+        for (i = 0; i < NUM_MON_MARKINGS && i < ARRAY_COUNT(out->marks); i++)
+            out->marks[i] = sStorage->markMenu.markingsArray[i];
+    }
+    out->messageShown = Window_NativeUiShown(WIN_MESSAGE);
+    if (out->messageShown)
+        StringCopyN(out->message, sStorage->messageText, min(sizeof(out->message), sizeof(sStorage->messageText)));
+    return TRUE;
+}
+
+void Storage_NativeUiBox(u32 box, struct NativeStorageBox *out)
+{
+    u32 i;
+
+    memset(out, 0, sizeof(*out));
+    if (box >= TOTAL_BOXES_COUNT)
+        return;
+    StringCopyN(out->name, GetBoxNamePtr(box), BOX_NAME_LENGTH);
+    out->name[BOX_NAME_LENGTH] = EOS;
+    out->wallpaper = GetBoxWallpaper(box);
+    for (i = 0; i < IN_BOX_COUNT; i++)
+    {
+        struct BoxPokemon *mon = GetBoxedMonPtr(box, i);
+
+        if (!GetBoxMonData(mon, MON_DATA_SANITY_HAS_SPECIES))
+            continue;
+        out->species[i] = GetBoxMonData(mon, MON_DATA_SPECIES);
+        out->personality[i] = GetBoxMonData(mon, MON_DATA_PERSONALITY);
+        out->isEgg[i] = GetBoxMonData(mon, MON_DATA_IS_EGG);
+        out->heldItem[i] = GetBoxMonData(mon, MON_DATA_HELD_ITEM);
+        out->count++;
+    }
+}
+
+void Storage_NativeUiBoxInfo(u32 box, u8 *name, u8 *wallpaper, u8 *count)
+{
+    u32 i;
+
+    name[0] = EOS;
+    *wallpaper = 0;
+    *count = 0;
+    if (box >= TOTAL_BOXES_COUNT)
+        return;
+    StringCopyN(name, GetBoxNamePtr(box), BOX_NAME_LENGTH);
+    name[BOX_NAME_LENGTH] = EOS;
+    *wallpaper = GetBoxWallpaper(box);
+    for (i = 0; i < IN_BOX_COUNT; i++)
+        if (GetBoxMonData(GetBoxedMonPtr(box, i), MON_DATA_SANITY_HAS_SPECIES))
+            (*count)++;
+}
+
+bool32 Storage_NativeUiBoxMon(u32 box, u32 pos, struct Pokemon *out)
+{
+    struct BoxPokemon *mon = GetBoxedMonPtr(box, pos);
+
+    if (mon == NULL || !GetBoxMonData(mon, MON_DATA_SANITY_HAS_SPECIES))
+        return FALSE;
+    BoxMonToMon(mon, out);
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

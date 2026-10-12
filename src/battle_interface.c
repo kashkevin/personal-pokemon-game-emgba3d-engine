@@ -34,6 +34,15 @@
 #include "constants/songs.h"
 #include "constants/items.h"
 #include "caps.h"
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+// What each healthbox shows, as it is drawn (the native battle HUD draws
+// the same values; accessors at the end of the file).
+static void NativeUiNoteBar(enum BattlerId battler, u8 whichBar);
+static void NativeUiNoteStatus(enum BattlerId battler, u32 status);
+static void NativeUiNoteLevel(enum BattlerId battler, u8 level);
+#endif
+#line 37 // gba-line
 
 #define HEALTHBOX_BG_INDEX 2
 
@@ -876,6 +885,10 @@ static void UpdateLvlInHealthbox(u8 healthboxSpriteId, u8 lvl)
     u8 text[16];
     enum BattlerId battler = gSprites[healthboxSpriteId].hMain_Battler;
     u32 spriteId = gSprites[healthboxSpriteId].oam.affineParam;
+#ifdef ENABLE_NATIVE_UI
+    NativeUiNoteLevel(battler, lvl);
+#endif
+#line 879 // gba-line
 
     // Don't print Lv char if mon has a gimmick with an indicator active.
     if (GetIndicatorPalTag(battler) != TAG_NONE)
@@ -1874,6 +1887,10 @@ static void UpdateStatusIconInHealthbox(u8 healthboxSpriteId)
     battler = gSprites[healthboxSpriteId].hMain_Battler;
     healthBarSpriteId = gSprites[healthboxSpriteId].hMain_HealthBarSpriteId;
     status = GetMonData(GetBattlerMon(battler), MON_DATA_STATUS);
+#ifdef ENABLE_NATIVE_UI
+    NativeUiNoteStatus(battler, status);
+#endif
+#line 1877 // gba-line
     if (IsOnPlayerSide(battler))
     {
         switch (GetBattlerCoordsIndex(battler))
@@ -2176,6 +2193,10 @@ s32 MoveBattleBar(enum BattlerId battler, u8 healthboxSpriteId, u8 whichBar, u8 
     if (whichBar == EXP_BAR || (whichBar == HEALTH_BAR && ShouldShowHealthbar(battler)))
         MoveBattleBarGraphically(battler, whichBar);
 
+#ifdef ENABLE_NATIVE_UI
+    NativeUiNoteBar(battler, whichBar); // what the bar shows (src/native_ui: the battle HUD)
+#endif
+#line 2179 // gba-line
     if (currentBarValue == -1)
         gBattleSpritesDataPtr->battleBars[battler].currValue = 0;
 
@@ -3327,3 +3348,144 @@ void CategoryIcons_LoadSpritesGfx(void)
     LoadCompressedSpriteSheet(&gSpriteSheet_CategoryIcons);
     LoadSpritePalette(&gSpritePal_CategoryIcons);
 }
+
+#ifdef ENABLE_NATIVE_UI
+// Native PC UI (src/native_ui/screens/ui_battle.c): what each healthbox shows,
+// noted as the game draws it (NativeUiNote*), and the battle interface's
+// sprite tiles, which the native HUD leaves out of the GBA picture. Read-only
+// for the UI: the notes change nothing the game reads.
+struct NativeUiBoxNotes
+{
+    bool8 hpShown, expShown, statusShown;
+    u8 level;
+    s32 hp, hpNum, hpDen;
+    s32 expNum, expDen;
+    u32 status;
+};
+static struct NativeUiBoxNotes sNativeUiBoxNotes[MAX_BATTLERS_COUNT];
+
+static void NativeUiNoteBar(enum BattlerId battler, u8 whichBar)
+{
+    struct NativeUiBoxNotes *n;
+    const struct BattleBarInfo *bar;
+    u32 scale = whichBar == HEALTH_BAR ? B_HEALTHBAR_PIXELS : B_EXPBAR_PIXELS;
+    s32 curr;
+
+    if (battler >= MAX_BATTLERS_COUNT || gBattleSpritesDataPtr == NULL)
+        return;
+    n = &sNativeUiBoxNotes[battler];
+    bar = &gBattleSpritesDataPtr->battleBars[battler];
+    curr = bar->currValue;
+    if (whichBar == HEALTH_BAR)
+    {
+        n->hpShown = TRUE;
+        if (bar->maxValue < (s32)scale)
+        {
+            // the value in 1/256 steps (CalcNewBarValue); the text rounds up
+            n->hp = Q_24_8_TO_INT(curr) + ((curr & 0xFF) != 0);
+            n->hpNum = curr;
+            n->hpDen = Q_24_8(bar->maxValue);
+        }
+        else
+        {
+            n->hp = curr;
+            n->hpNum = curr;
+            n->hpDen = bar->maxValue;
+        }
+    }
+    else
+    {
+        n->expShown = TRUE;
+        n->expNum = bar->maxValue < (s32)scale ? curr : Q_24_8(curr);
+        n->expDen = Q_24_8(bar->maxValue);
+    }
+}
+
+static void NativeUiNoteStatus(enum BattlerId battler, u32 status)
+{
+    if (battler < MAX_BATTLERS_COUNT)
+    {
+        sNativeUiBoxNotes[battler].statusShown = TRUE;
+        sNativeUiBoxNotes[battler].status = status;
+    }
+}
+
+static void NativeUiNoteLevel(enum BattlerId battler, u8 level)
+{
+    if (battler < MAX_BATTLERS_COUNT)
+        sNativeUiBoxNotes[battler].level = level;
+}
+
+bool32 Battle_NativeUiBox(u32 battler, struct NativeBattleBox *out)
+{
+    const struct NativeUiBoxNotes *n;
+    const struct Sprite *box;
+    u8 id;
+
+    memset(out, 0, sizeof(*out));
+    if (battler >= MAX_BATTLERS_COUNT || battler >= gBattlersCount || gBattleSpritesDataPtr == NULL)
+        return FALSE;
+    id = gHealthboxSpriteIds[battler];
+    if (id >= MAX_SPRITES || !gSprites[id].inUse)
+        return FALSE;
+    box = &gSprites[id];
+    n = &sNativeUiBoxNotes[battler];
+    out->exists = TRUE;
+    out->visible = !box->invisible;
+    out->x2 = box->x2;
+    out->y2 = box->y2;
+    out->hpShown = n->hpShown;
+    out->hp = n->hp;
+    out->hpNum = n->hpNum;
+    out->hpDen = n->hpDen;
+    out->expShown = n->expShown;
+    out->expNum = n->expNum;
+    out->expDen = n->expDen;
+    out->level = n->level;
+    out->statusShown = n->statusShown;
+    out->status = n->status;
+    return TRUE;
+}
+
+// The party tray's balls (the GBA's status summary): 0 full, 1 empty, 2 fainted,
+// 3 statused, 4 caught (the wild Pokémon's species was caught before).
+const u8 *Battle_NativeUiBallTile(u32 kind)
+{
+    return gHealthboxElementsGfxTable[HEALTHBOX_GFX_STATUS_BALL + (kind <= 4 ? kind : 0)];
+}
+
+#define NATIVE_UI_LAST_BALL_ICON_TAG 102 // TryAddLastUsedBallItemSprites
+#define NATIVE_UI_CATEGORY_ICONS_TAG 30004 // pokemon_summary_screen.c TAG_CATEGORY_ICONS
+#define NATIVE_UI_INDICATOR_TAG 0xDEDE // src/data/graphics/gimmicks.h BATTLER_INDICATOR_TAG
+
+static void NativeUiMarkTag(u32 mask[32], u16 tag)
+{
+    u16 start, count;
+
+    if (!Sprite_NativeUiTagTiles(tag, &start, &count))
+        return;
+    for (u32 t = start; t < (u32)start + count && t < 1024; t++)
+        mask[t / 32] |= 1u << (t % 32);
+}
+
+void Battle_NativeUiHudTiles(u32 mask[32])
+{
+    static const u16 sTags[] = {
+        TAG_HEALTHBOX_PLAYER1_TILE, TAG_HEALTHBOX_PLAYER2_TILE, TAG_HEALTHBOX_OPPONENT1_TILE,
+        TAG_HEALTHBOX_OPPONENT2_TILE, TAG_HEALTHBOX_SAFARI_TILE,
+        TAG_HEALTHBAR_PLAYER1_TILE, TAG_HEALTHBAR_OPPONENT1_TILE, TAG_HEALTHBAR_PLAYER2_TILE,
+        TAG_HEALTHBAR_OPPONENT2_TILE,
+        TAG_STATUS_SUMMARY_BAR_TILE, TAG_STATUS_SUMMARY_BALLS_TILE,
+        TAG_GIMMICK_TRIGGER_TILE,
+        TAG_LAST_BALL_WINDOW, NATIVE_UI_LAST_BALL_ICON_TAG, MOVE_INFO_WINDOW_TAG,
+        NATIVE_UI_CATEGORY_ICONS_TAG,
+    };
+
+    memset(mask, 0, 32 * sizeof(u32));
+    for (u32 i = 0; i < ARRAY_COUNT(sTags); i++)
+        NativeUiMarkTag(mask, sTags[i]);
+    // the gimmick indicators (Mega, Alpha / Omega...) on the healthboxes
+    for (u32 i = 0; i < MAX_BATTLERS_COUNT; i++)
+        NativeUiMarkTag(mask, NATIVE_UI_INDICATOR_TAG + i);
+}
+#endif // ENABLE_NATIVE_UI

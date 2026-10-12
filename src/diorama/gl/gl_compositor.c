@@ -57,6 +57,9 @@ static SDL_GLContext sContext;
 /* The PC's own interface (settings menu, frame rate; src/platform/sdl2.c),
  * drawn last at the window's resolution before the frame is shown. */
 static void (*sOverlay)(int outputWidth, int outputHeight);
+/* The native UI (src/native_ui): which parts of the game's own picture it
+ * replaces this frame (DIORAMA_PICTURE_*). */
+static int (*sPictureFilter)(void);
 static bool sLastFrame3D;
 static GLuint sProgram;
 static GLuint sVertexArray;
@@ -1483,6 +1486,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     enum DioramaPresentationDecision presentationDecision;
     float cameraX;
     float cameraZ;
+    int pictureFlags = 0;
 
     if (sSurveyView >= 0)
         frameAlpha = 1.0f;
@@ -1597,6 +1601,8 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     SDL_GL_GetDrawableSize(sWindow, &outputWidth, &outputHeight);
     if (outputWidth <= 0 || outputHeight <= 0)
         return;
+    if (sPictureFilter != NULL && sSurveyView < 0)
+        pictureFlags = sPictureFilter();
     glViewport(0, 0, outputWidth, outputHeight);
     glStencilMask(0xFF);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
@@ -1604,7 +1610,8 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     dglBindVertexArray(sVertexArray);
 
     if (sSurveyView < 0 && background < sBackgroundCount
-     && sBackgroundTextures[background].id != 0)
+     && sBackgroundTextures[background].id != 0
+     && !(pictureFlags & DIORAMA_PICTURE_HIDE_ALL))
         DrawTexture(&sBackgroundTextures[background], outputWidth, outputHeight,
                     0, 0, outputWidth, outputHeight,
                      0, 0, sBackgroundTextures[background].width,
@@ -1774,7 +1781,8 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                         0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, 1.0f);
         }
         /* Photo mode shows the world alone (no text boxes, no map name). */
-        if (sTwoDOpacity > 0.0f && DioramaCamera_GetMode() != DIORAMA_CAMERA_PHOTO)
+        if (sTwoDOpacity > 0.0f && DioramaCamera_GetMode() != DIORAMA_CAMERA_PHOTO
+         && !(pictureFlags & DIORAMA_PICTURE_HIDE_ALL))
         {
             EnsureFrameTexture();
             DrawTexture(&sFrameTexture, outputWidth, outputHeight,
@@ -1782,12 +1790,13 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                         0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, sTwoDOpacity);
         }
         if (current3D && sSceneSnapshot.uiRectCount > 0
-         && DioramaCamera_GetMode() != DIORAMA_CAMERA_PHOTO)
+         && DioramaCamera_GetMode() != DIORAMA_CAMERA_PHOTO
+         && !(pictureFlags & (DIORAMA_PICTURE_HIDE_ALL | DIORAMA_PICTURE_HIDE_UI)))
             DrawTexture(&sUiTexture, outputWidth, outputHeight,
                         gameX, gameY, gameWidth, gameHeight,
                         0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, 1.0f);
     }
-    else
+    else if (!(pictureFlags & DIORAMA_PICTURE_HIDE_ALL))
     {
         if (gameTexture == &sFrameTexture)
             EnsureFrameTexture();
@@ -1796,7 +1805,8 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                     0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, false, 1.0f);
     }
 
-    if (sSurveyView < 0 && !drawTerrain && border && sBorderTexture.id != 0)
+    if (sSurveyView < 0 && !drawTerrain && border && sBorderTexture.id != 0
+     && !(pictureFlags & DIORAMA_PICTURE_HIDE_ALL))
     {
         int innerWidth = gameWidth - 2;
         int innerHeight = gameHeight - 2;
@@ -1837,6 +1847,11 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
 void DioramaGL_SetOverlay(void (*overlay)(int outputWidth, int outputHeight))
 {
     sOverlay = overlay;
+}
+
+void DioramaGL_SetPictureFilter(int (*filter)(void))
+{
+    sPictureFilter = filter;
 }
 
 bool DioramaGL_LastFrameWas3D(void)

@@ -746,3 +746,16 @@ void SetWalkingIntoSignVars(void)
     // gWalkAwayFromSignInhibitTimer = 6;
     // sMsgBoxIsCancelable = TRUE;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI asks what the field's script is waiting on: the native
+// function it runs now (waitbuttonpress, waitmessage...), NULL otherwise.
+u8 (*ScriptContext_NativeUiWaitFunc(void))(void)
+{
+    if (sGlobalScriptContextStatus == CONTEXT_SHUTDOWN || sGlobalScriptContext.mode != SCRIPT_MODE_NATIVE)
+        return NULL;
+    return sGlobalScriptContext.nativePtr;
+}
+#endif // ENABLE_NATIVE_UI

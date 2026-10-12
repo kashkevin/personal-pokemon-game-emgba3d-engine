@@ -25,6 +25,10 @@ SANITIZE     ?= 0
 # ZallaxDev/pokeemerald-voxel-project, see src/diorama/README.md). Its rule tables
 # are generated from this tree's maps and tilesets by tools/diorama_rules.
 DIORAMA      ?= 0
+# NATIVE_UI=1 (with DIORAMA=1): the native PC interface (src/native_ui/README.md)
+# draws the approved UI design at the window's resolution in place of the GBA
+# menus. NATIVE_UI=0 builds the 3D game without it (the GBA menus as before).
+NATIVE_UI    ?= 1
 DIORAMA_GENERATED_C := src/data/diorama/diorama_rules.generated.c src/data/diorama/tree_model.generated.c \
                        src/data/diorama/buildings.generated.c src/data/diorama/trees_3ds.generated.c
 
@@ -99,6 +103,9 @@ else
 endif
 ifeq ($(DIORAMA),1)
   CPPFLAGS += -DENABLE_DIORAMA
+  ifeq ($(NATIVE_UI),1)
+    CPPFLAGS += -DENABLE_NATIVE_UI
+  endif
 endif
 
 ifeq ($(DEBUG),1)
@@ -156,6 +163,10 @@ ifeq ($(DIORAMA),1)
   # The renderer (GL objects, snapshot exchange, caches) is platform state: it
   # keeps its memory across a soft reset like the window does.
   PRESERVED_OBJS += $(patsubst src/%.c,$(OBJ_DIR)/src/%.o,$(wildcard src/diorama/*.c src/diorama/*/*.c) $(DIORAMA_GENERATED_C))
+  ifeq ($(NATIVE_UI),1)
+    # The native UI (atlas, caches, GL objects) is platform state too.
+    PRESERVED_OBJS += $(patsubst src/%.c,$(OBJ_DIR)/src/%.o,$(wildcard src/native_ui/*.c src/native_ui/*/*.c))
+  endif
 endif
 
 ASFLAGS := --defsym MODERN=1 --defsym EMERALD=1 --defsym PORTABLE=1
@@ -200,6 +211,10 @@ ifeq ($(DIORAMA),1)
   C_SRCS_IN := $(sort $(C_SRCS_IN) $(DIORAMA_GENERATED_C))
 else
   PC_EXCLUDED_C += $(filter src/diorama/% src/data/diorama/%,$(C_SRCS_IN))
+endif
+# The native UI only in DIORAMA=1 NATIVE_UI=1 builds.
+ifneq ($(DIORAMA)$(NATIVE_UI),11)
+  PC_EXCLUDED_C += $(filter src/native_ui/%,$(C_SRCS_IN))
 endif
 C_SRCS    := $(filter-out $(PC_EXCLUDED_C),$(foreach src,$(C_SRCS_IN),$(if $(findstring .inc.c,$(src)),,$(src))))
 C_OBJS    := $(patsubst src/%.c,$(OBJ_DIR)/src/%.o,$(C_SRCS))

@@ -703,7 +703,7 @@ static bool8 HandleStartMenuInput(void)
             && gMenuCallback != StartMenuBattlePyramidRetireCallback)
         {
            if (gMenuCallback != StartMenuPlayerOptionsCallback && gMenuCallback != StartMenuPlayersCallback
-            && gMenuCallback != StartMenuPlayerBackCallback)
+            && gMenuCallback != StartMenuPlayerBackCallback && gMenuCallback != StartMenuStyleCallback && gMenuCallback != StartMenuRideCallback)
                FadeScreen(FADE_TO_BLACK, 0);
         }
 
@@ -1607,3 +1607,80 @@ void Script_ForceSaveGame(struct ScriptContext *ctx)
     gMenuCallback = SaveCallback;
     sSaveDialogCallback = SaveSavingMessageCallback;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+STATIC_ASSERT(NATIVE_START_STYLE == MENU_ACTION_STYLE, NativeUiStartMenuActionsMatch);
+
+// The native PC UI (src/native_ui/screens/ui_pause.c) draws the start menu and
+// its save dialog in place of these windows and follows this state; the input
+// stays here.
+bool32 StartMenu_NativeUiState(struct NativeStartMenu *out)
+{
+    bool32 open = FuncIsActiveTask(Task_ShowStartMenu);
+    bool32 saveTask = FuncIsActiveTask(SaveGameTask);
+    u32 i;
+
+    memset(out, 0, sizeof(*out));
+    if (FuncIsActiveTask(StartMenuTask) || FieldScreenEffect_NativeUiStartMenuFadingIn()
+     || gFieldCallback2 == FieldCB_ReturnToFieldStartMenu)
+        out->mode = NATIVE_START_MENU_OPENING;
+    else if ((open && (gMenuCallback == SaveStartCallback || gMenuCallback == SaveCallback)) || saveTask)
+        out->mode = NATIVE_START_MENU_SAVE;
+    else if (open && gMenuCallback == HandleStartMenuInput)
+        out->mode = NATIVE_START_MENU_BROWSE;
+    else if (open && (gMenuCallback == BattlePyramidRetireStartCallback || gMenuCallback == BattlePyramidRetireCallback
+                   || gMenuCallback == BattlePyramidRetireReturnCallback))
+        out->mode = NATIVE_START_MENU_OTHER;
+    else if (open)
+        out->mode = NATIVE_START_MENU_CHOSEN;
+    else
+        return FALSE;
+
+    out->count = sNumStartMenuActions <= ARRAY_COUNT(sCurrentStartMenuActions) ? sNumStartMenuActions : 0;
+    for (i = 0; i < out->count; i++)
+    {
+        u8 action = sCurrentStartMenuActions[i];
+
+        out->actions[i] = action <= MENU_ACTION_STYLE ? action : NATIVE_START_UNKNOWN;
+        out->labels[i] = action < ARRAY_COUNT(sStartMenuItems) ? sStartMenuItems[action].text : NULL;
+    }
+    out->cursor = sStartMenuCursorPos;
+    out->playerSubmenu = sPlayerSubmenu;
+    out->safariOrPyramid = GetSafariZoneFlag() || CurrentBattlePyramidLocation() != PYRAMID_LOCATION_NONE;
+    if (out->mode == NATIVE_START_MENU_BROWSE)
+    {
+        struct Task *task = &gTasks[FindTaskIdByFunc(Task_ShowStartMenu)];
+
+        out->ready = task->data[0] == 1 && !gPaletteFade.active;
+    }
+    else if (out->mode == NATIVE_START_MENU_SAVE)
+    {
+        u8 (*step)(void) = sSaveDialogCallback;
+
+        if (gMenuCallback == SaveStartCallback && !saveTask)
+            out->saveStep = NATIVE_SAVE_ASK;
+        else if (step == SaveConfirmSaveCallback || step == SaveYesNoCallback)
+            out->saveStep = NATIVE_SAVE_ASK;
+        else if (step == SaveConfirmInputCallback)
+            out->saveStep = NATIVE_SAVE_ASK_YES_NO;
+        else if (step == SaveFileExistsCallback || step == SaveConfirmOverwriteCallback
+              || step == SaveConfirmOverwriteDefaultNoCallback)
+            out->saveStep = NATIVE_SAVE_OVERWRITE;
+        else if (step == SaveOverwriteInputCallback)
+            out->saveStep = NATIVE_SAVE_OVERWRITE_YES_NO;
+        else if (step == SaveSavingMessageCallback || step == SaveDoSaveCallback)
+            out->saveStep = NATIVE_SAVE_SAVING;
+        else if (step == SaveSuccessCallback || step == SaveReturnSuccessCallback)
+            out->saveStep = NATIVE_SAVE_SAVED;
+        else if (step == SaveErrorCallback || step == SaveReturnErrorCallback)
+            out->saveStep = NATIVE_SAVE_FAILED;
+        else
+            out->mode = NATIVE_START_MENU_OTHER;
+        out->saveDefaultNo = step == SaveConfirmOverwriteDefaultNoCallback || gDifferentSaveFile == TRUE;
+        out->ready = !IsTextPrinterActiveOnWindow(0);
+    }
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

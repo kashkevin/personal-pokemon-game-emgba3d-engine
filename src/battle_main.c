@@ -6111,3 +6111,14 @@ void BattleDebug_WonBattle(void)
     gBattleOutcome |= B_OUTCOME_WON;
     gBattleMainFunc = sEndTurnFuncsTable[gBattleOutcome & 0x7F];
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI notes the money and the party's Exp. while a battle's
+// intro runs (before anything can change them), for the results after it.
+bool32 Battle_NativeUiInIntro(void)
+{
+    return gBattleMainFunc == DoBattleIntro || gBattleMainFunc == TryDoEventsBeforeFirstTurn;
+}
+#endif // ENABLE_NATIVE_UI

@@ -871,3 +871,28 @@ static void UpdateLegendaryMarkingColor(u8 frameNum)
         LoadPalette(&color, BG_PLTT_ID(14) + 15, sizeof(color));
    }
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_title.c) draws the title in place
+// of this screen's picture and follows this state; the input stays here.
+u32 TitleScreen_NativeUiPhase(void)
+{
+    if (gMain.callback2 == CB2_InitTitleScreen)
+        return NATIVE_TITLE_LOADING;
+    if (gMain.callback2 == MainCB2)
+    {
+        if (FuncIsActiveTask(Task_TitleScreenPhase3))
+            return NATIVE_TITLE_PRESS_START;
+        if (FuncIsActiveTask(Task_TitleScreenPhase2))
+            return NATIVE_TITLE_BANNER;
+        return NATIVE_TITLE_LOGO;
+    }
+    if (gMain.callback2 == CB2_GoToMainMenu)
+        return NATIVE_TITLE_TO_MAIN_MENU;
+    if (gMain.callback2 == CB2_GoToCopyrightScreen)
+        return NATIVE_TITLE_TO_INTRO;
+    return NATIVE_TITLE_NONE;
+}
+#endif // ENABLE_NATIVE_UI
