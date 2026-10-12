@@ -92,8 +92,22 @@ class DioramaRuleCompilerTests(unittest.TestCase):
                 "generic-building-left-stool": 6, "generic-building-right-stool": 10,
                 "generic-building-table-relief": 1, "petalburg-isolated-signpost": 2,
             })
-        self.assertEqual(len(self.data["tilesetPins"]), 1)
-        pin = self.data["tilesetPins"][0]
+        # The battle environments' pins (tools/battle_env/cave_pins.py: the caves' and the sea
+        # floor's rock; the secret bases' walls) stand rock and walls up as cliffs one tile high;
+        # every other pin is the authoritative one below.
+        battle_env = [pin for pin in self.data["tilesetPins"]
+                      if "battle-environment overhaul" in pin["reason"]]
+        self.assertTrue(battle_env)
+        self.assertEqual({(pin["action"]["archetype"], pin["action"]["pool"], pin["action"]["height"])
+                          for pin in battle_env}, {("cliff", "terrain", 1.0)})
+        self.assertEqual({pin["tileset"] for pin in battle_env}, {
+            "gTileset_Cave", "gTileset_MeteorFalls", "gTileset_RusturfTunnel", "gTileset_NavelRock",
+            "gTileset_Underwater", "gTileset_SecretBaseRedCave", "gTileset_SecretBaseBrownCave",
+            "gTileset_SecretBaseBlueCave", "gTileset_SecretBaseYellowCave", "gTileset_SecretBaseTree",
+            "gTileset_SecretBaseShrub"})
+        pins = [pin for pin in self.data["tilesetPins"] if pin not in battle_env]
+        self.assertEqual(len(pins), 1)
+        pin = pins[0]
         self.assertEqual((pin["tileset"], pin["metatile"], pin["placementCount"]),
                          ("gTileset_General", 4, 615))
         self.assertEqual((pin["action"]["archetype"], pin["action"]["pool"]),
