@@ -220,6 +220,110 @@ static void TestRaisedCellAndCapacity(void)
     assert(!DioramaTerrain_BuildChunk(&input, sVertices, mesh.vertexCount - 1, &mesh));
 }
 
+/* Side quads reaching down to `low` or lower and up to `high` or higher. */
+static int CountSideQuads(const struct DioramaTerrainMesh *mesh, float low, float high)
+{
+    uint32_t i;
+    int count = 0;
+
+    for (i = 0; i + 6 <= mesh->vertexCount; i += 6)
+    {
+        float minY = sVertices[i].y;
+        float maxY = sVertices[i].y;
+        int v;
+
+        if (sVertices[i].shade >= 1.0f)
+            continue;
+        for (v = 1; v < 6; v++)
+        {
+            minY = sVertices[i + v].y < minY ? sVertices[i + v].y : minY;
+            maxY = sVertices[i + v].y > maxY ? sVertices[i + v].y : maxY;
+        }
+        count += minY <= low && maxY >= high;
+    }
+    return count;
+}
+
+/* A cell a level below its neighbours (the sea solved a terrace below a
+ * rock's cell, a walk below a row of trees): the higher cells' sides reach
+ * down to its top, where they stopped a voxel under their own top and the
+ * sky showed through. */
+static void TestStepDownClosesTheGap(void)
+{
+    struct DioramaTerrainChunkInput input;
+    struct DioramaTerrainMesh mesh;
+    struct DioramaTerrainCell *low;
+
+    InitInput(&input, 3, MB_NORMAL);
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(CountSideQuads(&mesh, -1.0f, -1.0f / 16.0f) == 0);
+    low = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    low->shape = DIORAMA_SHAPE_WATER;
+    low->groundHeight = -1.0f;
+    low->visualHeight = -1.0f;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.usedCompressedOccupancy);
+    assert(mesh.topFaceCount == 64);
+    /* the four neighbours' sides, each from the low cell's top up to theirs */
+    assert(CountSideQuads(&mesh, -1.0f, -1.0f / 16.0f) == 4);
+
+    /* The same through the voxel spans (a roof elsewhere in the chunk). */
+    input.cells[1 * DIORAMA_TERRAIN_INPUT_SIZE + 1].shape = DIORAMA_SHAPE_ROOF;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(!mesh.usedCompressedOccupancy);
+    assert(CountSideQuads(&mesh, -1.0f, -1.0f / 16.0f) == 4);
+
+    /* A ledge or a cliff above it hangs one too; stairs draw their own way
+     * down: no skirt from them. */
+    input.cells[1 * DIORAMA_TERRAIN_INPUT_SIZE + 1].shape = DIORAMA_SHAPE_FLAT;
+    input.cells[3 * DIORAMA_TERRAIN_INPUT_SIZE + 4].shape = DIORAMA_SHAPE_LEDGE;
+    input.cells[3 * DIORAMA_TERRAIN_INPUT_SIZE + 4].behavior = MB_JUMP_SOUTH;
+    input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 5].shape = DIORAMA_SHAPE_CLIFF;
+    input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 5].visualHeight = 1.0f;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(CountSideQuads(&mesh, -1.0f, -1.0f / 16.0f) == 4);
+    input.cells[5 * DIORAMA_TERRAIN_INPUT_SIZE + 4].shape = DIORAMA_SHAPE_STAIRS;
+    input.cells[5 * DIORAMA_TERRAIN_INPUT_SIZE + 4].archetype = DIORAMA_ARCHETYPE_STAIRS_N;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(CountSideQuads(&mesh, -1.0f, -1.0f / 16.0f) == 3);
+
+    /* A ledge on a lower level (the terrace's level and its lip above it):
+     * a column there through the voxel spans too, not none. */
+    InitInput(&input, 3, MB_NORMAL);
+    for (int i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
+    {
+        input.cells[i].groundHeight = -1.0f;
+        input.cells[i].visualHeight = -1.0f;
+    }
+    low = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    low->shape = DIORAMA_SHAPE_LEDGE;
+    low->behavior = MB_JUMP_SOUTH;
+    low->groundHeight = -0.625f;
+    low->visualHeight = -0.625f;
+    input.cells[1 * DIORAMA_TERRAIN_INPUT_SIZE + 1].shape = DIORAMA_SHAPE_ROOF;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(!mesh.usedCompressedOccupancy);
+    assert(mesh.bounds.maxY == -0.625f);
+    /* every face, the ledge's sides too, reads its own drawing (u 0.1-0.3,
+     * v 0.2-0.4 here): a ground ledge's lip mapping read rows past it */
+    for (uint32_t i = 0; i < mesh.vertexCount; i++)
+        assert(sVertices[i].u > 0.09f && sVertices[i].u < 0.31f
+            && sVertices[i].v > 0.19f && sVertices[i].v < 0.41f);
+
+    /* The ground round such a ledge, a level up, hangs a skirt down to its top. */
+    InitInput(&input, 3, MB_NORMAL);
+    low = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    low->shape = DIORAMA_SHAPE_LEDGE;
+    low->behavior = MB_JUMP_SOUTH;
+    low->groundHeight = -0.625f;
+    low->visualHeight = -0.625f;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.usedCompressedOccupancy);
+    assert(CountSideQuads(&mesh, -0.625f, -1.0f / 16.0f) == 4);
+    /* and its own side above that, its footing to its top: closed to the ground */
+    assert(CountSideQuads(&mesh, -1.0f / 16.0f, 0.0f) == 4);
+}
+
 static void TestPartialChunk(void)
 {
     struct DioramaTerrainChunkInput input;
@@ -1178,6 +1282,7 @@ int main(void)
     TestReflectionMask();
     TestGameplayElevationDoesNotCreateVisualHeight();
     TestRaisedCellAndCapacity();
+    TestStepDownClosesTheGap();
     TestPartialChunk();
     TestLedge();
     TestLedgeUsesForegroundRuns();

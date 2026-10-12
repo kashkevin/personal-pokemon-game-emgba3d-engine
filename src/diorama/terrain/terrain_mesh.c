@@ -589,8 +589,11 @@ static bool BuildOccupancy(const struct DioramaTerrainChunkInput *input,
                     {
                         int16_t ledgeTop = HeightToVoxel(cell->groundHeight);
 
+                        /* a ledge on a level below the ground (a terrace's
+                         * lower level) is a voxel thick there, as the ground is:
+                         * from -1 it was no column at all */
                         if (!AppendSpan(&count, cell, cellIndex, pixelX, pixelY,
-                                        0, -1, ledgeTop))
+                                        0, ledgeTop > 0 ? -1 : ledgeTop - 1, ledgeTop))
                             return false;
                     }
                     else if (cell->shape == DIORAMA_SHAPE_STAIRS)
@@ -660,8 +663,11 @@ static bool AppendCompressedSide(uint32_t *faceCount, uint32_t *rawFaceCount,
         return AppendCompressedFace(faceCount, rawFaceCount, cell, cellIndex,
                                     occupancyFace, materialFace, plane, uMin, uMax,
                                     bottom, top, axis, sign, DIORAMA_VOXELS_PER_CELL);
+    /* a ledge on the ground is ground there (its lip has faces of its own);
+     * one a terrace raised or lowered is as high as its ground */
     neighborTop = neighbor->shape == DIORAMA_SHAPE_LEDGE
-                ? 0 : HeightToVoxel(neighbor->visualHeight);
+                ? (neighbor->groundHeight == 0.0f ? 0 : HeightToVoxel(neighbor->groundHeight))
+                : HeightToVoxel(neighbor->visualHeight);
     neighborBottom = neighborTop > 0 ? -1 : neighborTop - 1;
     if (neighborTop <= bottom || neighborBottom >= top)
         return AppendCompressedFace(faceCount, rawFaceCount, cell, cellIndex,
@@ -864,6 +870,132 @@ static bool BuildCompressedOccupancyShell(const struct DioramaTerrainChunkInput 
     *spanCount = spans;
     *faceCount = faces;
     *rawFaceCount = rawFaces;
+    return true;
+}
+
+static bool IsTreeHullColumn(const struct DioramaTerrainCell *cell)
+{
+    return ((cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL
+          || cell->archetype == DIORAMA_ARCHETYPE_ROUND_HULL)
+         && cell->treeHullReady)
+        || (cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL && cell->structureWidth == 2);
+}
+
+/* A cell drawn as one column per pixel up to one top: ground, water, a
+ * raised block, a building's cell, the ground under a tree (not a roof,
+ * stairs, a bridge, a ledge, a cliff, a cut-out or mountain art, which draw
+ * their own sides). */
+static bool StandsWhole(const struct DioramaTerrainCell *cell)
+{
+    if (!cell->present || cell->shape == DIORAMA_SHAPE_HIDDEN)
+        return false;
+    if (IsTreeHullColumn(cell))
+        return true;
+    if (cell->surfaceCount > 1
+     || (cell->measuredFlags & (DIORAMA_MEASURED_SILHOUETTE | DIORAMA_MEASURED_MOUNTAIN_ART))
+     || !DioramaRules_ProfileIsFullCell(cell->semanticProfile))
+        return false;
+    return cell->shape == DIORAMA_SHAPE_FLAT || cell->shape == DIORAMA_SHAPE_WATER
+        || cell->shape == DIORAMA_SHAPE_EXTRUDED || cell->shape == DIORAMA_SHAPE_BUILDING_PART;
+}
+
+/* A whole cell's top (under a tree: its ground). */
+static int16_t WholeTop(const struct DioramaTerrainCell *cell)
+{
+    return HeightToVoxel(IsTreeHullColumn(cell) ? cell->groundHeight : cell->visualHeight);
+}
+
+/* How far down a cell's own sides reach, for a cell a skirt may hang from:
+ * a whole cell, or one standing on its whole cell with sides of its own (a
+ * cliff, a ledge, a roof, mountain art) - a slab under anything at or above
+ * the ground (under a tree or mountain art: under its ground), a voxel under
+ * a cell below it. Anything else (stairs, a bridge, a part of a cell): no
+ * skirt (INT16_MIN). */
+static int16_t SkirtFooting(const struct DioramaTerrainCell *cell)
+{
+    int16_t top;
+
+    if (!cell->present || cell->shape == DIORAMA_SHAPE_HIDDEN)
+        return INT16_MIN;
+    if (IsTreeHullColumn(cell))
+        return HeightToVoxel(cell->groundHeight) - 1;
+    if (cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART)
+        return HeightToVoxel(cell->groundHeight) - 1;
+    if (!StandsWhole(cell)
+     && !((cell->shape == DIORAMA_SHAPE_CLIFF || cell->shape == DIORAMA_SHAPE_LEDGE
+        || cell->shape == DIORAMA_SHAPE_ROOF)
+       && cell->surfaceCount <= 1
+       && !(cell->measuredFlags & DIORAMA_MEASURED_SILHOUETTE)
+       && DioramaRules_ProfileIsFullCell(cell->semanticProfile)))
+        return INT16_MIN;
+    top = cell->shape == DIORAMA_SHAPE_LEDGE ? HeightToVoxel(cell->groundHeight)
+                                             : HeightToVoxel(cell->visualHeight);
+    return top > 0 ? -1 : top - 1;
+}
+
+/*
+ * Skirts: a cell beside a lower whole cell gets a side from that cell's
+ * top up to its own footing (SkirtFooting), closing the step between them. The
+ * rules can leave neighbours a level apart with nothing else drawn there -
+ * the sea solved a terrace below a sandbar or a rock's cell, a row of trees
+ * left on the level above the walk beside it - and the gap under the higher
+ * cell's footing showed the sky (graphics overhaul, 2026-10-12). The side is
+ * the higher cell's ground (the lower layer of its drawing).
+ */
+static bool AppendSkirtFaces(const struct DioramaTerrainChunkInput *input,
+                             uint32_t *faceCount, uint32_t *rawFaceCount)
+{
+    static const int8_t offsets[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+    int y;
+    int x;
+
+    for (y = DIORAMA_TERRAIN_HALO;
+         y < DIORAMA_TERRAIN_HALO + DIORAMA_TERRAIN_CHUNK_SIZE; y++)
+        for (x = DIORAMA_TERRAIN_HALO;
+             x < DIORAMA_TERRAIN_HALO + DIORAMA_TERRAIN_CHUNK_SIZE; x++)
+        {
+            const struct DioramaTerrainCell *cell = GetCell(input, x, y);
+            int cellIndex = y * DIORAMA_TERRAIN_INPUT_SIZE + x;
+            int16_t footing;
+            int side;
+
+            footing = SkirtFooting(cell);
+            if (footing == INT16_MIN)
+                continue;
+            for (side = 0; side < 4; side++)
+            {
+                const struct DioramaTerrainCell *neighbor =
+                    GetCell(input, x + offsets[side][0], y + offsets[side][1]);
+                uint8_t axis = side == 1 || side == 3 ? 0 : 2;
+                int8_t sign = side == 0 || side == 3 ? -1 : 1;
+                int32_t pixelX = cell->mapX * DIORAMA_VOXELS_PER_CELL;
+                int32_t pixelZ = cell->mapY * DIORAMA_VOXELS_PER_CELL;
+                int32_t plane = axis == 0 ? pixelX + (sign > 0) * DIORAMA_VOXELS_PER_CELL
+                                          : pixelZ + (sign > 0) * DIORAMA_VOXELS_PER_CELL;
+                int32_t uMin = axis == 0 ? pixelZ : pixelX;
+                int16_t neighborTop;
+
+                /* down to a whole cell's top, or a ledge's (on a lower level) */
+                if (StandsWhole(neighbor))
+                    neighborTop = WholeTop(neighbor);
+                else if (neighbor->present && neighbor->shape == DIORAMA_SHAPE_LEDGE
+                      && neighbor->surfaceCount <= 1)
+                    neighborTop = HeightToVoxel(neighbor->groundHeight);
+                else
+                    continue;
+                if (neighborTop >= footing)
+                    continue;
+                if (!AppendCompressedFace(faceCount, rawFaceCount, cell, cellIndex,
+                                          DIORAMA_OCCUPANCY_FACE_NORTH + side, side + 1,
+                                          plane, uMin, uMin + DIORAMA_VOXELS_PER_CELL,
+                                          neighborTop, footing, axis, sign,
+                                          DIORAMA_VOXELS_PER_CELL))
+                    return false;
+                /* the cell's ground under it all (its drawing's lower layer):
+                 * a ledge's sides, its lip on the upper layer, are see-through */
+                sShellFaces[*faceCount - 1].material = MaterialId(cellIndex, 1, side + 1);
+            }
+        }
     return true;
 }
 
@@ -1898,6 +2030,8 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
         if (!AppendFallbackLedgeFaces(input, &shellFaceCount, &rawShellFaceCount))
             return false;
     }
+    if (!AppendSkirtFaces(input, &shellFaceCount, &rawShellFaceCount))
+        return false;
     mesh->occupancySpanCount = spanCount;
     mesh->shellFaceCount = rawShellFaceCount;
     shellFaceCount = DioramaOccupancy_MergeFaces(sShellFaces, shellFaceCount);
@@ -1953,7 +2087,12 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
             }
             FacePositions(&band, positions);
             FaceMaterial(cell, surface, sourceMaterial, &band, &material);
-            if (cell->shape == DIORAMA_SHAPE_LEDGE && face->axis != 1)
+            /* A ledge on the ground: its lip's faces stand on the cell's own
+             * drawing (the lip's rows from the bottom up). One a terrace
+             * raised or lowered has plain sides, mapped as any cell's: this
+             * mapping read rows past its drawing there (graphics overhaul,
+             * 2026-10-12). */
+            if (cell->shape == DIORAMA_SHAPE_LEDGE && cell->groundHeight == 0.0f && face->axis != 1)
             {
                 float sourceU0 = sourceMaterial->u0;
                 float sourceV0 = sourceMaterial->v0;

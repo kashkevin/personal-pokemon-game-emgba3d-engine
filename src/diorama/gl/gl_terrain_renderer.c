@@ -1066,10 +1066,16 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
                                                     cell->foregroundAlpha);
                 SetTerrainMaterial(&cell->materials[DIORAMA_MATERIAL_FACE_TOP],
                                    source->metatileId, DIORAMA_MATERIAL_BASE);
+                /* A ledge on the ground draws its lip as faces of its own
+                 * (terrain_mesh.c); its sides are the lip alone. One a terrace
+                 * raised or lowered is a block whose sides are the whole
+                 * drawing, ground and lip: the lip alone left them see-through
+                 * (graphics overhaul, 2026-10-12). */
                 for (face = DIORAMA_MATERIAL_FACE_NORTH;
                      face <= DIORAMA_MATERIAL_FACE_WEST; face++)
                     SetTerrainMaterial(&cell->materials[face], source->metatileId,
-                                        DIORAMA_MATERIAL_FOREGROUND);
+                                        cell->groundHeight == 0.0f ? DIORAMA_MATERIAL_FOREGROUND
+                                                                   : DIORAMA_MATERIAL_FULL);
             }
             if (cell->archetype == DIORAMA_ARCHETYPE_ROUND_HULL
              || cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL)
