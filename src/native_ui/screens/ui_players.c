@@ -48,7 +48,6 @@ enum
 #define SHH 258
 #define ROW_H 32
 #define MAX_ROWS 6
-#define FIELD_FRAMES 18
 #define POLL_FRAMES 120   /* the LIVE lamp: the host's status is read every 2 s */
 
 static const uint32_t sSlotHex[4] = {0x58B048, 0x4C88E0, 0xE85848, 0xE0B028};
@@ -79,8 +78,8 @@ static u8 sWhere[24];
 static u16 sTrainerIdPublic;
 static u8 sBadges;
 static bool8 sIsMay;
-static const void *sFrames;
-static u16 sLcdPalette[16];
+static struct NativeFieldSprite sSprite; /* the player's own (the chosen character's), in the LCD's tones */
+static u16 sPortrait;
 static struct Peer sPeers[MULTIPLAYER_MAX_PEERS];
 static int sPeerCount;
 static bool sConnected;
@@ -122,13 +121,13 @@ static void LcdPalette(const u16 *pal)
 {
     static const uint32_t tones[3] = {0x2C4A2A, 0x9CC47C, 0xC8E4A0};
 
-    sLcdPalette[0] = 0;
+    sSprite.palette[0] = 0;
     for (int i = 1; i < 16; i++)
     {
         UiRGBA c = Rgb555(pal[i]);
         double lum = 0.299 * UI_R(c) + 0.587 * UI_G(c) + 0.114 * UI_B(c);
 
-        sLcdPalette[i] = To555(UI_HEX(tones[lum < 100 ? 0 : lum < 190 ? 1 : 2]));
+        sSprite.palette[i] = To555(UI_HEX(tones[lum < 100 ? 0 : lum < 190 ? 1 : 2]));
     }
 }
 
@@ -151,8 +150,10 @@ static void Capture(void)
         if (FlagGet(f))
             sBadges++;
     sIsMay = gSaveBlock2Ptr->playerGender != MALE;
-    UiGfx_PrepareTrainerPic(sIsMay ? TRAINER_PIC_MAY : TRAINER_PIC_BRENDAN);
-    MultiplayerAppearance_NativeUiPlayerSprite(&sFrames, pal);
+    sPortrait = MultiplayerAppearance_NativeUiLocalPortrait();
+    UiGfx_PrepareTrainerPic(sPortrait);
+    MultiplayerAppearance_NativeUiLocalSprite(&sSprite);
+    memcpy(pal, sSprite.palette, sizeof(pal));
     LcdPalette(pal);
     sConnected = Multiplayer_IsConnected();
     sPeerCount = 0;
@@ -294,11 +295,7 @@ static void Device(int t)
     UiCaps_Draw(lx + lw - 6, ly + 5, "THIS IS YOU", LCD_DARK, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_RIGHT, UI_NONE);
     UiG_HLine(lx + 4, ly + 14, lw - 8, LCD_MID);
     /* you, in the LCD's tones, walking */
-    {
-        static const u8 walk[4] = {0, 3, 0, 4};
-
-        UiGfx_FieldSprite(sFrames, FIELD_FRAMES, sLcdPalette, walk[(t / 10) % 4], lx + 9, ly + 19, 1, false);
-    }
+    UiGfx_NativeFieldSprite(&sSprite, 0, 0, (t / 10) % 4, lx + 9, ly + 19, 1);
     UiText_Draw(UI_FONT_NORMAL, lx + 32, ly + 16, sName, LCD_DARK, LCD_MID, UI_ALIGN_LEFT, 0);
     UiText_Draw(UI_FONT_SMALL, lx + 32, ly + 33, sWhere, LCD_DARK, UI_NONE, UI_ALIGN_LEFT, 0);
     UiText_Draw(UI_FONT_SMALL, lx + 32, ly + 45, sText_InAMenu, LCD_DARK, UI_NONE, UI_ALIGN_LEFT, 0);
@@ -323,7 +320,7 @@ static void Device(int t)
         UiG_Paint(UiM_Rounded4(70, 70, 2, 2, 2, 2), cx + 5, cy + 5, tint,
                   &(struct UiPaint){UiMix(UI_HEX(sSlotHex[0]), UI_P_INK, 0.45), UI_NONE, UI_NONE, 0, 0, &diag,
                                     UiMix(UI_HEX(sSlotHex[0]), UI_HEX(0xFFFFFF), 0.56)});
-        UiGfx_TrainerPic(sIsMay ? TRAINER_PIC_MAY : TRAINER_PIC_BRENDAN, cx + 8, cy + 8, NULL);
+        UiGfx_TrainerPic(sPortrait, cx + 8, cy + 8, NULL);
     }
     UiG_Text(cx + 82, cy + 3, sName);
     UiCaps_Draw(cx + 82, cy + 25, "ID NO.", UI_P_TEXT_MUTED, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);

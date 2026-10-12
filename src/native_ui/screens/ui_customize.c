@@ -13,9 +13,14 @@
  * The engine's STYLE editor (multiplayer_appearance.c, START > PLAYER > STYLE)
  * keeps running under it: its rows and cursor, what each button does, the live
  * recolour of the field sprite, and saving (the host stores the look). The
- * design's other categories (presets, body, styles of hair, headwear, tops,
- * bottoms, shoes, bags and accessories) need layered art the game does not
- * have yet: they are shown as PLANNED and do nothing. Project-owned.
+ * PRESET tag is the character selection (include/character_customization.h):
+ * DEFAULT and the approved catalogue (32 presets, kit 1's builds and its three
+ * class looks), each standing in the sheet; the mirror and the portrait show
+ * the character chosen, and a character keeps its own colours (the colour tags
+ * work for DEFAULT only). The design's other categories (body, styles of hair,
+ * headwear, tops, bottoms, shoes, bags and accessories) need layered art the
+ * game does not have yet: they are shown as PLANNED and do nothing.
+ * Project-owned.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,6 +45,7 @@ enum
     HIT_MIRROR,
     HIT_SAVE,
     HIT_CANCEL,
+    HIT_CHARACTER,  /* index: the catalogue's id (0 = DEFAULT) */
 };
 
 enum
@@ -84,21 +90,23 @@ enum
 #define BTN_X (SX + HELP_W + 6)
 #define BTN_W (SW - HELP_W - 6)
 #define SWATCH_COLUMNS 9
-#define FIELD_FRAMES 18      /* walking 0-8, running 9-17 */
 #define MAX_CHOICES 16
+#define MAX_CHARACTERS 64    /* the catalogue with DEFAULT (character_customization.h: 38) */
+#define CARD_COLUMNS 9
+#define CARD_W 44
+#define CARD_H 38
 
 static const char *const sTabLabels[TAB_COUNT] = {"PRESET", "BODY", "HAIR", "HAT", "TOP", "BOTTOM", "SHOES", "BAG", "EXTRA"};
 /* the editor's row behind each tag (-1: planned) and the tag of each row */
-static const s8 sTabRow[TAB_COUNT] = {-1, NATIVE_LOOK_SKIN, NATIVE_LOOK_HAIR, NATIVE_LOOK_HAT, NATIVE_LOOK_OUTFIT, -1, -1, -1, -1};
-static const s8 sRowTab[NATIVE_LOOK_ROW_COUNT] = {TAB_BODY, TAB_HAIR, TAB_TOP, TAB_HAT, -1, -1};
+static const s8 sTabRow[TAB_COUNT] = {NATIVE_LOOK_CHARACTER, NATIVE_LOOK_SKIN, NATIVE_LOOK_HAIR, NATIVE_LOOK_HAT,
+                                      NATIVE_LOOK_OUTFIT, -1, -1, -1, -1};
+static const s8 sRowTab[NATIVE_LOOK_ROW_COUNT] = {TAB_BODY, TAB_HAIR, TAB_TOP, TAB_HAT, -1, -1, TAB_PRESET};
 /* the tags in the order L and R walk them (the engine's rows) */
-static const u8 sEnabledTabs[] = {TAB_BODY, TAB_HAIR, TAB_HAT, TAB_TOP};
+static const u8 sEnabledTabs[] = {TAB_PRESET, TAB_BODY, TAB_HAIR, TAB_HAT, TAB_TOP};
 
 static const char *const sTick[] = {"......##", ".....##.", "#...##..", "##.##...", ".###....", "..#....."};
 static const char *const sModeNames[MODE_COUNT] = {"AUTO", "WALK", "RUN", "TURN"};
 static const char *const sDirNames[4] = {"DOWN", "LEFT", "UP", "RIGHT"};
-/* walking frames of a direction's cycle (step 0..3); running adds 9; right is left mirrored */
-static const u8 sWalkFrames[4][4] = {{0, 3, 0, 4}, {2, 7, 2, 8}, {1, 5, 1, 6}, {2, 7, 2, 8}};
 
 /* the colour row of each value tag: its label and the planned style rows above it */
 static const char *const sColourLabels[NATIVE_LOOK_SAVE] = {"SKIN TONE", "HAIR COLOUR", "OUTFIT COLOUR", "HAT & BAG COLOUR"};
@@ -106,7 +114,7 @@ static const char *const sStyleLabels[TAB_COUNT] = {"PRESETS", "BODY", "HAIR STY
                                                     "BOTTOMS", "SHOES", "BACKPACK", "ACCESSORY"};
 
 static const u8 sNote_Style[] = _("Styles need layered art for every pose; this build recolours the body's own sprite.");
-static const u8 sNote_Preset[] = _("Ready-made looks (other Trainers, team uniforms, Trainer classes) need their own art for every pose.");
+static const u8 sNote_OwnColours[] = _("A character keeps its own colours. Choose DEFAULT on the PRESET tag to recolour BRENDAN or MAY.");
 static const u8 sNote_Bottom[] = _("No palette slot of its own on this body yet: the look keeps a byte for it.");
 static const u8 sNote_Shoes[] = _("Shoes take the OUTFIT COLOUR (the TOP tag) on this body.");
 static const u8 sNote_Bag[] = _("The bag takes the HAT & BAG COLOUR (the HAT tag) on this body.");
@@ -118,7 +126,10 @@ static const u8 sHelp_Base[] = _("Base colours");
 static const u8 sHelp_Save[] = _("Save this look: the host keeps it and the other players see it.");
 static const u8 sHelp_SaveOffline[] = _("Save this look. Offline it is kept until you quit and goes to the host when you connect.");
 static const u8 sHelp_Cancel[] = _("Leave the dressing room without saving.");
-static const u8 sHelp_Planned[] = _("Planned: nothing to change here yet. BODY, HAIR, HAT and TOP change colours.");
+static const u8 sHelp_Planned[] = _("Planned: nothing to change here yet. PRESET picks a character; BODY, HAIR, HAT and TOP recolour DEFAULT.");
+static const u8 sHelp_OwnColours[] = _("This character keeps its own colours: DEFAULT (on PRESET) can be recoloured.");
+static const u8 sHelp_Character[] = _(": LEFT and RIGHT, or a click, pick another.");
+static const u8 sHelp_Sep[] = _(" - ");
 static const u8 sAsk_Ok[] = _("Is this OK?");
 static const u8 sAsk_OkNote[] = _("Other players see it once the host has it.");
 static const u8 sAsk_Discard[] = _("Discard your changes?");
@@ -127,10 +138,11 @@ static const u8 sText_Save[] = _("SAVE");
 static const u8 sText_Cancel[] = _("CANCEL");
 static const u8 sHint_Category[] = _("Category");
 static const u8 sHint_Colour[] = _("Colour");
+static const u8 sHint_Character[] = _("Character");
 static const u8 sHint_Save[] = _("Save");
 static const u8 sHint_Pose[] = _("Pose");
 static const u8 sHint_Back[] = _("Back");
-static const u8 sFoot_Portraits[] = _("Portraits keep base art.");
+static const u8 sFoot_Portraits[] = _("Each character has its own portrait.");
 static const u8 sFoot_Planned[] = _("Styles and unlocks: planned.");
 
 /* one colour row of the editor, from the engine's tables */
@@ -147,6 +159,8 @@ struct LookRow
 
 static struct NativeAppearance sLook;
 static struct LookRow sRows[NATIVE_LOOK_SAVE];
+static struct NativeCharacterCard sCards[MAX_CHARACTERS];
+static int sCardCount;
 static u8 sName[PLAYER_NAME_LENGTH + 1];
 static bool sReady;
 static bool sFresh = true;
@@ -189,12 +203,26 @@ static void CaptureRows(void)
     }
 }
 
+/* the tag of an editor row (-1 for SAVE and CANCEL) */
+static int RowTab(int row)
+{
+    return row >= 0 && row < NATIVE_LOOK_ROW_COUNT ? sRowTab[row] : -1;
+}
+
+/* the catalogue (DEFAULT and the characters), standing in the PRESET sheet */
+static void CaptureCards(void)
+{
+    sCardCount = 0;
+    while (sCardCount < MAX_CHARACTERS && MultiplayerAppearance_NativeUiCharacter(sCardCount, &sCards[sCardCount]))
+        sCardCount++;
+}
+
 static int ShownTab(void)
 {
     if (sViewTab >= 0)
         return sViewTab;
-    if (sLook.cursor < NATIVE_LOOK_SAVE)
-        return sRowTab[sLook.cursor];
+    if (RowTab(sLook.cursor) >= 0)
+        return RowTab(sLook.cursor);
     return sLastTab;
 }
 
@@ -210,17 +238,18 @@ static void Capture(void)
         sAsk = ASK_NONE;
         sViewTab = -1;
         sMode = MODE_AUTO;
-        sLastTab = TAB_BODY;
+        sLastTab = TAB_PRESET;
         sPrevTab = -1;
         CaptureRows();
         StringCopyN(sName, gSaveBlock2Ptr->playerName, PLAYER_NAME_LENGTH);
         sName[PLAYER_NAME_LENGTH] = EOS;
     }
-    UiGfx_PrepareTrainerPic(sLook.isMay ? TRAINER_PIC_MAY : TRAINER_PIC_BRENDAN);
+    CaptureCards(); /* DEFAULT's card follows the colours chosen */
+    UiGfx_PrepareTrainerPic(sLook.portraitPic);
     if (sViewTab >= 0 && sLook.cursor != sViewCursor)
         sViewTab = -1;
-    if (sLook.cursor < NATIVE_LOOK_SAVE)
-        sLastTab = sRowTab[sLook.cursor];
+    if (RowTab(sLook.cursor) >= 0)
+        sLastTab = RowTab(sLook.cursor);
     tab = ShownTab();
     if (tab != sPrevTab)
     {
@@ -305,7 +334,7 @@ static void Mirror(int t, const struct UiRamp *rose, const struct UiRamp *brass)
     const UiRGBA glassHi = UI_HEX(0xF4F4FA), glassBase = UI_HEX(0xDCE2F0), glassLo = UI_HEX(0xB8C2DC);
     int gw = MW - 14, gh = MH - 16, gx = MX + 7, gy = MY + 7, fy = gy + gh - 40;
     struct UiPattern diag = UiPat_Diag(48, 3, 0, -1), below = UiPat_Below(-1);
-    int dir, step, frame, stepEvery = 8, pw, nw, phx = MX + 12, phy = MY + 92;
+    int dir, step, stepEvery = 8, pw, nw, phx = MX + 12, phy = MY + 92;
     bool run = false, moving = true;
     char plate[40];
 
@@ -324,7 +353,7 @@ static void Mirror(int t, const struct UiRamp *rose, const struct UiRamp *brass)
     UiG_Restore();
     UiG_HLine(gx + 1, fy, gw - 2, UiMix(rose->base, rose->lo, 0.5));
 
-    /* the Trainer at 3x, the edited look on the body's own field frames */
+    /* the Trainer at 3x: the character shown, or the edited look on the body's own field frames */
     switch (sMode)
     {
     case MODE_AUTO:
@@ -357,18 +386,17 @@ static void Mirror(int t, const struct UiRamp *rose, const struct UiRamp *brass)
         break;
     }
     step = moving ? (t / stepEvery) % 4 : 0;
-    frame = sWalkFrames[dir][step] + (run ? 9 : 0);
     UiG_Save();
     UiG_Clip(gx + 1, gy + 1, gw - 2, gh - 2);
     UiG_Mask(UiM_Ellipse(30, 8), gx + 132 - 15, fy + 30 - 5, UiWithAlpha(UI_HEX(0x502038), 60));
-    UiGfx_FieldSprite(sLook.frames, FIELD_FRAMES, sLook.palette, frame, gx + 132 - 24, fy + 30 - 96, 3, dir == 3);
+    UiGfx_NativeFieldSprite(&sLook.sprite, run ? 1 : 0, dir, step, gx + 132 - 24, fy + 30 - 96, 3);
     UiG_Restore();
 
-    /* the pinned photo: the front picture, not recoloured (portraits need their own art) */
+    /* the pinned photo: the character's front picture (DEFAULT's is not recoloured) */
     UiG_Paint(UiM_Rounded4(72, 86, 1, 1, 1, 1), phx, phy, UI_HEX(0xF8F8F0),
               &(struct UiPaint){UiMix(brass->ink, glassLo, 0.3), UI_NONE, UI_HEX(0xD8D8D0), 0, 0, NULL, UI_NONE});
     UiG_Rect(phx + 4, phy + 4, 64, 64, UiMix(glassBase, rose->hi, 0.25));
-    UiGfx_TrainerPic(sLook.isMay ? TRAINER_PIC_MAY : TRAINER_PIC_BRENDAN, phx + 4, phy + 4, NULL);
+    UiGfx_TrainerPic(sLook.portraitPic, phx + 4, phy + 4, NULL);
     UiCaps_Draw(phx + 36, phy + 73, "PORTRAIT", UI_HEX(0x8890A0), UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_CENTER, UI_NONE);
     UiG_Rect(phx + 33, phy - 3, 6, 6, rose->base);
     UiG_Put(phx + 34, phy - 2, rose->hi);
@@ -394,10 +422,19 @@ static void Mirror(int t, const struct UiRamp *rose, const struct UiRamp *brass)
 /* the look's eight bytes as the host receives them, the shown tag's byte marked */
 static void SyncTag(int tab, const struct UiRamp *rose)
 {
-    int tx = 8, ty = 262, tw = 216, th = 54, hl = sTabRow[tab] >= 0 ? sRows[sTabRow[tab]].byte : -1;
+    int tx = 8, ty = 262, tw = 216, th = 54, hl = -1, hl2 = -1;
     const char *status;
     char hex[4];
 
+    if (tab == TAB_PRESET)
+    {
+        hl = 4; /* the character's number: bytes 4 and 6 */
+        hl2 = 6;
+    }
+    else if (sTabRow[tab] >= 0 && sTabRow[tab] < NATIVE_LOOK_SAVE)
+    {
+        hl = sRows[sTabRow[tab]].byte;
+    }
     UiG_Paint(UiM_Rounded(tw, th, UiCornerChamfer(8), UiCornerR(3), UiCornerChamfer(8), UiCornerR(3)), tx, ty,
               UI_HEX(0xF8F0E0), &(struct UiPaint){rose->ink, UI_HEX(0xFFFFFF), UI_HEX(0xE0D0B8), 0, 0, NULL, UI_NONE});
     UiG_Paint(UiM_Circle(7), tx + 6, ty + 23, UiMix(rose->lo, rose->base, 0.4),
@@ -407,7 +444,7 @@ static void SyncTag(int tab, const struct UiRamp *rose)
     for (int i = 0; i < NATIVE_LOOK_BYTES; i++)
     {
         int bx = tx + 18 + i * 21, by = ty + 20;
-        bool on = i == hl;
+        bool on = i == hl || i == hl2;
 
         if (on)
             UiG_Paint(UiM_Rounded4(17, 11, 1, 1, 1, 1), bx - 3, by - 2, UiMix(rose->hi, UI_HEX(0xFFFFFF), 0.3),
@@ -520,15 +557,57 @@ static void ColourRow(int y, int row, const struct UiRamp *rose)
 
 static void PlannedSheet(int tab, const struct UiRamp *rose)
 {
-    const u8 *note = tab == TAB_PRESET ? sNote_Preset : tab == TAB_BOTTOM ? sNote_Bottom : tab == TAB_SHOES ? sNote_Shoes
-                   : tab == TAB_BAG ? sNote_Bag : sNote_Extra;
+    const u8 *note = tab == TAB_BOTTOM ? sNote_Bottom : tab == TAB_SHOES ? sNote_Shoes : tab == TAB_BAG ? sNote_Bag
+                   : sNote_Extra;
     int y = SY + 6;
 
     UiCaps_Draw(SX + 10, y + 1, sStyleLabels[tab], UI_HEX(0xA8A098), UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
-    UiW_Planned(SX + 14 + UiCaps_Width(sStyleLabels[tab]), y - 1, tab == TAB_PRESET ? "PLANNED: NEEDS THEIR OWN ART"
-                                                                                  : "PLANNED: NEEDS LAYERED ART");
+    UiW_Planned(SX + 14 + UiCaps_Width(sStyleLabels[tab]), y - 1, "PLANNED: NEEDS LAYERED ART");
     NoteLines(SX + 10, y + 16, SW - 20, note, UI_P_TEXT_MUTED);
     (void)rose;
+}
+
+/* the PRESET sheet: DEFAULT and every character of the catalogue standing, the
+ * one shown framed (pressed in while the editor's cursor is on CHARACTER), the
+ * one the editor started from ticked */
+static void PresetSheet(const struct UiRamp *rose)
+{
+    int y = SY + 6, gy = SY + 40;
+    bool focused = sLook.cursor == NATIVE_LOOK_CHARACTER;
+    const struct NativeCharacterCard *shown = sLook.character < sCardCount ? &sCards[sLook.character] : NULL;
+    char caps[24];
+
+    UiCaps_Draw(SX + 10, y + 1, "CHARACTER", rose->lo, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
+    if (sLook.character != 0)
+        snprintf(caps, sizeof(caps), "%d / %d", sLook.character, sCardCount - 1);
+    else
+        snprintf(caps, sizeof(caps), "%d CHARACTERS", sCardCount - 1);
+    UiCaps_Draw(SX + SW - 10, y + 1, caps, UI_HEX(0xA09080), UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_RIGHT, UI_NONE);
+    if (shown != NULL)
+    {
+        int nw = UiText_Width(UI_FONT_NORMAL, shown->name, 0);
+
+        UiText_Draw(UI_FONT_NORMAL, SX + 10, y + 11, shown->name, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+        UiText_Draw(UI_FONT_SMALL, SX + 18 + nw, y + 14, shown->variant, UI_P_TEXT_MUTED, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+    }
+    for (int i = 0; i < sCardCount; i++)
+    {
+        int x = SX + 2 + (i % CARD_COLUMNS) * CARD_W, cy = gy + (i / CARD_COLUMNS) * CARD_H;
+        const struct UiMask *cm = UiM_Rounded4(CARD_W - 4, CARD_H - 3, 3, 3, 3, 3);
+        bool on = i == sLook.character;
+
+        if (on && focused)
+            UiW_SelectFrame(cm, x + 2, cy + 1, UI_NONE, UI_NONE, 2);
+        else if (on)
+            UiW_SelectFrame(cm, x + 2, cy + 1, UiMix(rose->base, UI_HEX(0xFFFFFF), 0.3),
+                            UiMix(rose->hi, UI_HEX(0xFFFFFF), 0.5), 1);
+        UiG_Paint(cm, x + 2, cy + 1, on ? UiMix(rose->hi, UI_HEX(0xFFFFFF), 0.55) : UiMix(UI_P_CREAM, UI_P_PAPER, 0.5),
+                  &(struct UiPaint){UiMix(UI_P_CREAM_LO, rose->lo, on ? 0.6 : 0.2), UI_NONE, UI_NONE, 0, 0, NULL, UI_NONE});
+        UiGfx_NativeFieldSprite(&sCards[i].sprite, 0, 0, 0, x + 14, cy + 2, 1);
+        if (i == sLook.startCharacter)
+            UiW_Pix("cz_tickc", sTick, 6, (const struct UiPixPal[]){{'#', rose->lo}}, 1, x + CARD_W - 12, cy + 4, false);
+        UiG_Hit(HIT_CHARACTER, i, x, cy, CARD_W, CARD_H);
+    }
 }
 
 static void Unlocks(const struct UiRamp *rose)
@@ -556,6 +635,11 @@ static void Sheet(int tab, const struct UiRamp *rose)
 {
     UiG_Paint(UiM_Rounded4(SW, SH, 3, 3, 3, 3), SX, SY, UI_P_CREAM,
               &(struct UiPaint){rose->ink, UI_P_CREAM_HI, UI_P_CREAM_LO, 0, 0, NULL, UI_NONE});
+    if (tab == TAB_PRESET)
+    {
+        PresetSheet(rose); /* the whole sheet: no unlocks strip */
+        return;
+    }
     if (sTabRow[tab] < 0)
     {
         PlannedSheet(tab, rose);
@@ -564,7 +648,10 @@ static void Sheet(int tab, const struct UiRamp *rose)
     {
         int y = StyleRow(SY + 6, sStyleLabels[tab], rose);
 
-        ColourRow(y, sTabRow[tab], rose);
+        if (sLook.coloursEnabled)
+            ColourRow(y, sTabRow[tab], rose);
+        else
+            NoteLines(SX + 10, y, SW - 20, sNote_OwnColours, UI_P_TEXT_MUTED);
     }
     Unlocks(rose);
 }
@@ -581,6 +668,15 @@ static void Help(int tab)
     text[0] = EOS;
     if (sTabRow[tab] < 0 && sViewTab >= 0)
         UiText_Append(text, sizeof(text), sHelp_Planned); /* the tag's own note is on the sheet */
+    else if (sViewTab >= 0 && tab != TAB_PRESET && !sLook.coloursEnabled)
+        UiText_Append(text, sizeof(text), sHelp_OwnColours);
+    else if (sLook.cursor == NATIVE_LOOK_CHARACTER && sLook.character < sCardCount)
+    {
+        UiText_Append(text, sizeof(text), sCards[sLook.character].name);
+        UiText_Append(text, sizeof(text), sHelp_Sep);
+        UiText_Append(text, sizeof(text), sCards[sLook.character].variant);
+        UiText_Append(text, sizeof(text), sHelp_Character);
+    }
     else if (sLook.cursor == NATIVE_LOOK_SAVE)
         UiText_Append(text, sizeof(text), sLook.connected ? sHelp_Save : sHelp_SaveOffline);
     else if (sLook.cursor == NATIVE_LOOK_CANCEL)
@@ -654,7 +750,7 @@ static void Draw(int t)
     Help(tab);
     Buttons(t);
     {
-        struct UiHintItem hints[5] = {{UI_ACT_TABS, sHint_Category}, {UI_ACT_MOVE, sHint_Colour},
+        struct UiHintItem hints[5] = {{UI_ACT_TABS, sHint_Category}, {UI_ACT_MOVE, tab == TAB_PRESET ? sHint_Character : sHint_Colour},
                                       {UI_ACT_START, sHint_Save}, {UI_ACT_DETAILS, sHint_Pose},
                                       {UI_ACT_CANCEL, sHint_Back}};
 
@@ -668,17 +764,14 @@ static void Draw(int t)
 
 /* ---------------------------------------------------------------- input: the engine's own buttons */
 
-/* presses that move the editor's cursor to a row (it wraps: the shorter way) */
-static void MoveTo(int row)
+/* the editor's cursor to a row (the editor skips the colour rows while a
+ * character is shown: FALSE then) */
+static bool MoveTo(int row)
 {
-    int n = NATIVE_LOOK_ROW_COUNT, moves = row - sLook.cursor;
-
-    if (moves > n / 2)
-        moves -= n;
-    else if (moves < -(n / 2))
-        moves += n;
-    if (moves != 0)
-        NativeUi_QueuePresses(moves > 0 ? DPAD_DOWN : DPAD_UP, abs(moves));
+    if (!MultiplayerAppearance_NativeUiSetCursor(row))
+        return false;
+    sLook.cursor = row; /* the presses queued next act on it */
+    return true;
 }
 
 /* presses that set a colour row to a choice (the choices wrap: the shorter way) */
@@ -687,9 +780,8 @@ static void Choose(int row, int choice)
     const struct LookRow *r = &sRows[row];
     int n = r->count, d;
 
-    if (n <= 0 || choice >= n)
+    if (n <= 0 || choice >= n || !MoveTo(row))
         return;
-    MoveTo(row);
     d = (choice - sLook.look[r->byte] + n) % n;
     if (d <= n / 2)
         NativeUi_QueuePresses(DPAD_RIGHT, d);
@@ -697,7 +789,7 @@ static void Choose(int row, int choice)
         NativeUi_QueuePresses(DPAD_LEFT, n - d);
 }
 
-/* L and R: the next tag with a colour row, in the tags' order */
+/* L and R: the next tag the editor takes (PRESET, and the colour tags for DEFAULT), in the tags' order */
 static void StepTab(int dir)
 {
     int count = (int)sizeof(sEnabledTabs), at = 0, tab = sViewTab >= 0 ? sViewTab : ShownTab();
@@ -707,9 +799,13 @@ static void StepTab(int dir)
             at = i;
     if (sTabRow[tab] < 0)
         at = dir > 0 ? count - 1 : 0; /* from a planned tag: the first or the last */
-    at = (at + dir + count) % count;
     sViewTab = -1;
-    MoveTo(sTabRow[sEnabledTabs[at]]);
+    for (int tries = 0; tries < count; tries++)
+    {
+        at = (at + dir + count) % count;
+        if (MoveTo(sTabRow[sEnabledTabs[at]]))
+            break;
+    }
 }
 
 static void Ask(int kind)
@@ -808,17 +904,23 @@ static bool Click(const struct UiHit *hit, int button)
     case HIT_TAG:
         if (hit->index >= 0 && hit->index < TAB_COUNT)
         {
-            if (sTabRow[hit->index] >= 0)
+            if (sTabRow[hit->index] >= 0 && MoveTo(sTabRow[hit->index]))
             {
                 sViewTab = -1;
-                MoveTo(sTabRow[hit->index]);
             }
             else
             {
-                sViewTab = hit->index; /* a planned tag: its note, until the cursor moves */
+                /* a planned tag, or a colour tag while a character keeps its own
+                 * colours: its note, until the cursor moves */
+                sViewTab = hit->index;
                 sViewCursor = sLook.cursor;
             }
         }
+        return true;
+    case HIT_CHARACTER:
+        sViewTab = -1;
+        if (MultiplayerAppearance_NativeUiSelectCharacter(hit->index))
+            sLook.cursor = NATIVE_LOOK_CHARACTER;
         return true;
     case HIT_SWATCH:
         sViewTab = -1;

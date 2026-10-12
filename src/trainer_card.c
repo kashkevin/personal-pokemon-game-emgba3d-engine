@@ -35,6 +35,7 @@
 #include "constants/union_room.h"
 #ifdef PORTABLE
 #include "character_customization.h"
+#include "data.h"
 #endif
 #line 36 // gba-line
 
@@ -1976,6 +1977,8 @@ bool32 TrainerCard_NativeUiState(struct NativeTrainerCard *out)
     // as CreateTrainerCardTrainerPic
     if (InUnionRoom() == TRUE && gReceivedRemoteLinkPlayers)
         out->picId = FacilityClassToPicIndex(card->unionRoomClass);
+    else if (!sData->isLink)
+        out->picId = LOCAL_PLAYER_FRONT_PIC(card->gender); // the chosen character's (character_customization.c)
     else
         out->picId = FacilityClassToPicIndex(sTrainerPicFacilityClass[sData->cardType][card->gender]);
     out->caught = card->caughtMonsCount;

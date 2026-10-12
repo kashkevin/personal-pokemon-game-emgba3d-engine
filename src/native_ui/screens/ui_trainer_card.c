@@ -52,7 +52,6 @@ enum
 #define CW 404
 #define CH 252
 #define FLIP_STEPS 10        /* the squash of each flip frame; the other face from step 5 */
-#define FIELD_FRAMES 18      /* walking 0-8, running 9-17 */
 #define MSG_FRAMES 300       /* a tab's note stays 5 s */
 #define TAB_COUNT 6
 #define RECORD_ROWS 6
@@ -70,7 +69,6 @@ static const char *const sLockRows[7] = {".###.", "#...#", "#...#", "#####", "##
 /* the back's pages: the engine's records here, the host's in PLAYERS, friendship planned */
 static const char *const sTabLabels[TAB_COUNT] = {"RECORDS", "LINK", "CHAMP", "TRADES", "HUNTS", "FRIENDS"};
 /* walking frames of a direction's cycle (step 0..3); right is left mirrored */
-static const u8 sWalkFrames[4][4] = {{0, 3, 0, 4}, {2, 7, 2, 8}, {1, 5, 1, 6}, {2, 7, 2, 8}};
 
 static const u8 sText_IdNo[] = _("IDNo. ");
 static const u8 sText_Seen[] = _("seen ");
@@ -120,8 +118,8 @@ static uint32_t sLastCapture;
 static uint32_t sFlipStart;
 static bool sFlipping;
 static bool sFlipToBack;
-static const void *sFrames;
-static u16 sPalette[16];
+static struct NativeFieldSprite sSprite; /* the player's own field sprite (the chosen character's) */
+static bool sHaveSprite;
 static bool sConnected;
 static struct Peer sPeers[MULTIPLAYER_MAX_PEERS];
 static int sPeerCount;
@@ -227,9 +225,9 @@ static void Capture(void)
         sMsgTab = 0;
     }
     UiGfx_PrepareTrainerPic(sCard.picId);
-    sFrames = NULL;
-    if (!sCard.isLink)
-        MultiplayerAppearance_NativeUiPlayerSprite(&sFrames, sPalette);
+    sHaveSprite = !sCard.isLink;
+    if (sHaveSprite)
+        MultiplayerAppearance_NativeUiLocalSprite(&sSprite);
     BuildRecords();
     sConnected = Multiplayer_IsConnected();
     sPeerCount = 0;
@@ -411,12 +409,12 @@ static void Front(int x, int y, int t, bool live, const struct UiRamp *r)
     for (int k = 0; k < ww - 2; k += 8)
         UiG_Rect(wx + 1 + k, fy + 1 + ((k / 8) % 2) * 14, ww - 2 - k < 8 ? ww - 2 - k : 8, 14, UiMix(r->lo, white, 0.5));
     UiG_HLine(wx + 1, fy, ww - 2, r->lo);
-    if (sFrames != NULL)
+    if (sHaveSprite)
     {
-        /* a step every 8 frames, a turn every 96: down, left, up, right (left mirrored) */
+        /* a step every 8 frames, a turn every 96: down, left, up, right */
         int step = (t / 8) % 4, di = (t / 96) % 4;
 
-        UiGfx_FieldSprite(sFrames, FIELD_FRAMES, sPalette, sWalkFrames[di][step], wx + (ww >> 1) - 8, fy - 5, 1, di == 3);
+        UiGfx_NativeFieldSprite(&sSprite, 0, di, step, wx + (ww >> 1) - 8, fy - 5, 1);
     }
 
     /* name row */
