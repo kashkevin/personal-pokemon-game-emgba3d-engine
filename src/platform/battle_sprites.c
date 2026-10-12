@@ -618,7 +618,10 @@ static void Trace(void)
                         "\"female\": %d, \"tiles\": %d, \"gba_box\": [%d, %d, %d, %d]",
                 first ? "" : ", ", b, look->species, SpeciesName(look->species), look->back, look->shiny,
                 look->female, sLatched.tileNum[b], look->gx0, look->gy0, look->gx1, look->gy1);
-        if (sActive[b].usable)
+        if (sActive[b].usable && !sBaseUsable[b])
+            fprintf(sTrace, ", \"facing\": %d, \"source\": \"%s\", \"no_sprite\": 1", sActive[b].facing,
+                    sActive[b].info->source);
+        else if (sActive[b].usable)
             fprintf(sTrace, ", \"facing\": %d, \"source\": \"%s\", \"frame_index\": %u, \"phase\": %u, "
                             "\"left\": %d, \"top\": %d, \"size\": [%d, %d], \"clip\": %d, \"palette_refusals\": %u",
                     sActive[b].facing, sActive[b].info->source, sBaseFrame[b], sActive[b].phase, sBase[b].left,
