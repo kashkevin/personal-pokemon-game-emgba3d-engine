@@ -2008,13 +2008,33 @@ static bool IsEffectTag(u16 tag)
         || (tag >= BALL_PARTICLE_TAGS_FIRST && tag <= BALL_PARTICLE_TAGS_LAST);
 }
 
+/* Each sprite slot: the template its sprite was made with and that template's tile tag then (game thread). A
+ * sprite whose template is not the one it was made with (a copy of another sprite put in the slot) has none. */
+static struct
+{
+    const struct SpriteTemplate *template;
+    u16 tag;
+} sSpriteMade[MAX_SPRITES + 1];
+
+void BattleFx_OnSpriteMade(uint32_t index, const struct SpriteTemplate *template)
+{
+    if (index <= MAX_SPRITES && template != NULL)
+    {
+        sSpriteMade[index].template = template;
+        sSpriteMade[index].tag = template->tileTag;
+    }
+}
+
 uint16_t BattleFx_SpriteGfxTag(const struct Sprite *sprite)
 {
-    /* sprite.c CreateSpriteAt: a sprite of a sheet keeps its first tile (sheetTileStart); the sheets
-     * loaded keep their tags (GetSpriteTileTagByTileStart). A sprite without one owns its tiles. */
-    if (sprite == NULL || !sprite->usingSheet)
+    ptrdiff_t index;
+
+    if (sprite == NULL)
         return TAG_NONE;
-    return GetSpriteTileTagByTileStart(sprite->sheetTileStart);
+    index = sprite - gSprites;
+    if (index < 0 || index > MAX_SPRITES || sSpriteMade[index].template != sprite->template)
+        return TAG_NONE;
+    return sSpriteMade[index].tag;
 }
 
 bool BattleFx_IsEffectSprite(const struct Sprite *sprite)

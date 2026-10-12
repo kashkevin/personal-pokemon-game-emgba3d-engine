@@ -195,6 +195,8 @@ static int EnvInt(const char *name, int fallback)
     return v && *v ? atoi(v) : fallback;
 }
 
+extern u32 gOamMatrixAllocBitmap; /* sprite.c */
+
 static int CompareFloats(const void *a, const void *b)
 {
     float x = *(const float *)a, y = *(const float *)b;
@@ -864,7 +866,12 @@ bool BattleFxTest_OnActionMenu(void)
         {
             t.endAt = SDL_GetPerformanceCounter();
             t.stuck = gAnimScriptActive;
-            SetBattlerSpriteAffineMode(ST_OAM_AFFINE_NORMAL);
+            /* as Controller_DoMoveAnimation does after a move's animation (it set them OFF before, Launch too); a
+             * battle animation never touches them (NORMAL without OFF gives each battler sprite the matrix the
+             * last OFF kept, or matrix 0, shared with an effect sprite: its affine animation then runs twice as
+             * fast - Mega Evolution's stone) */
+            if (t.type == 0)
+                SetBattlerSpriteAffineMode(ST_OAM_AFFINE_NORMAL);
             t.state = TEST_SETTLE;
             t.wait = SETTLE_FRAMES;
         }
@@ -994,13 +1001,24 @@ void BattleFxTest_AfterStep(struct BfxHost *host, uint32_t serial, int coreFrame
         int tasks = 0, sprites = 0;
         for (int i = 0; i < NUM_TASKS; i++)
             tasks += gTasks[i].isActive;
+        char matrices[256];
+        int ml = 0;
         for (int i = 0; i < MAX_SPRITES; i++)
             sprites += gSprites[i].inUse;
-        fprintf(t.traceFile, "core frame %d%s: Random2 calls game %u core %u; game: visual %d sound %d tasks %d fade %d y %d sprites %d; "
-                             "core: %s\n  game [%s]\n  core [%s]\n", coreFrame,
+        /* the game's OAM matrices: how many are taken, and which one each affine effect sprite uses (the affine
+         * animation state is the matrix's, not the sprite's: sprites that share one share it) */
+        matrices[0] = '\0';
+        for (int i = 0; i < MAX_SPRITES && ml < (int)sizeof(matrices) - 16; i++)
+            if (gSprites[i].inUse && (gSprites[i].oam.affineMode & ST_OAM_AFFINE_ON_MASK))
+                ml += snprintf(matrices + ml, sizeof(matrices) - ml, " %s%u:m%u", BattleFx_IsEffectSprite(&gSprites[i]) ? "" : "#",
+                               BattleFx_IsEffectSprite(&gSprites[i]) ? BattleFx_SpriteGfxTag(&gSprites[i]) : (unsigned)i,
+                               gSprites[i].oam.matrixNum);
+        fprintf(t.traceFile, "core frame %d%s: Random2 calls game %u core %u; game: visual %d sound %d tasks %d fade %d y %d sprites %d "
+                             "matrices %d%s; core: %s\n  game [%s]\n  core [%s]\n", coreFrame,
                 strcmp(core, game) ? " DIFF" : "", (unsigned)(gRng2Value.ctr - t.traceCtr0) / 29u,
                 (coreCtr - (unsigned)t.traceCtr0) / 29u, gAnimVisualTaskCount, gAnimSoundTaskCount, tasks,
-                gPaletteFade.active, gPaletteFade.y, sprites, state ? state : "", game, core);
+                gPaletteFade.active, gPaletteFade.y, sprites, __builtin_popcount(gOamMatrixAllocBitmap), matrices,
+                state ? state : "", game, core);
         free(state);
     }
     if (game[0])

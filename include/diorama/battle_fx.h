@@ -73,11 +73,17 @@ struct Sprite;
 void BattleFx_BeginOam(void);
 void BattleFx_MarkOam(const struct Sprite *sprite, uint8_t first, uint8_t end);
 void BattleFx_LatchOam(void);
-/* The graphics tag of what a sprite shows: the tag of its tile sheet (TAG_NONE
- * without one). Not sprite->template->tileTag: a template made on the heap
- * (AddItemIconSprite: the last used Poke Ball's icon on a wild battle's action
- * menu, Bestow's item) is freed once its sprite is made, and that memory then
- * holds whatever is allocated there next. */
+/* sprite.c CreateSpriteAt: a sprite made (its slot and template). */
+struct SpriteTemplate;
+void BattleFx_OnSpriteMade(uint32_t index, const struct SpriteTemplate *template);
+/* The graphics tag a sprite was made with (its template's tile tag then;
+ * TAG_NONE for a sprite not made by CreateSpriteAt - a battler's copy made by
+ * copying the battler's sprite). Read neither through sprite->template later
+ * (a template made on the heap - AddItemIconSprite: the last used Poke Ball's
+ * icon on a wild battle's action menu, an item an animation shows - is freed
+ * once its sprite is made, and the memory holds whatever comes next) nor from
+ * the tile sheet (an animation may free a sheet its sprite still shows: Thief's
+ * and Knock Off's item). */
 uint16_t BattleFx_SpriteGfxTag(const struct Sprite *sprite);
 /* Whether a sprite is an effect sprite the HD layer stands in for (graphics
  * ANIM_TAG_*, the Poke Balls and their particles). */

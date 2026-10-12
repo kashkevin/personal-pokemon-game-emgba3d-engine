@@ -529,6 +529,10 @@ u32 CreateSpriteAt(u32 index, const struct SpriteTemplate *template, s16 x, s16 
     sprite->anims = template->anims ? template->anims : gDummySpriteAnimTable;
     sprite->affineAnims = template->affineAnims ? template->affineAnims : gDummySpriteAffineAnimTable;
     sprite->template = template;
+#ifdef ENABLE_DIORAMA
+    BattleFx_OnSpriteMade(index, template); // diorama/battle_fx.h: the graphics it is made with
+#endif
+#line 506 // gba-line
     sprite->callback = template->callback ? template->callback : SpriteCallbackDummy;
     sprite->x = x;
     sprite->y = y;
