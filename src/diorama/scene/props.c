@@ -403,6 +403,30 @@ static const struct DioramaProp sBattlePyramid[] = {
     PYRAMID_WALL(0x271), PYRAMID_WALL(0x272), PYRAMID_WALL(0x273), PYRAMID_WALL(0x274),
 };
 
+/* Birth Island's three round trees (gTileset_Dewford; no other map draws these
+ * cells: Route 105's 0x341 and 0x342 and Navel Rock's bridge are other art).
+ * Each crown cell a heap of leaves lifted on the trunk - three cells wide, two
+ * rows deep, the top of the third row its hem; the few leaves at the sides lower
+ * - and the trunk's cells standing up a row north, under the crown, with the
+ * crown's hem over the trunk; the shadow the drawing paints on the grass
+ * (colours 14 and 15) left out for the real one; under it all the cells' own
+ * grass. Added by the battle environments' work (docs/battle-environments.md):
+ * the trees lay flat in the meadow where Deoxys is met (class C). */
+#define BIRTH_CROWN(id) { PROP(id, BUSH, MOUND, 1, LOWER), .height16 = 10, .lift16 = 12 }
+#define BIRTH_CROWN_SIDE(id) { PROP(id, BUSH, MOUND, 1, LOWER), .height16 = 5, .lift16 = 12 }
+#define BIRTH_CROWN_HEM(id) { PROP(id, BUSH, MOUND, 1, LOWER), .artBottom = 5, .height16 = 6, .lift16 = 12 }
+#define BIRTH_TRUNK(id) { PROP(id, BUSH, SLAB, 1, LOWER), .artBottom = 11, .keyIndex = 0xE, \
+                          .shadowIndex = 0xF, .depth = 3, .height16 = 21, .offsetZ = -16 }
+static const struct DioramaProp sDewford[] = {
+    BIRTH_CROWN(0x328), BIRTH_CROWN(0x329), BIRTH_CROWN(0x32A), BIRTH_CROWN_SIDE(0x32B),
+    BIRTH_CROWN(0x32C), BIRTH_CROWN(0x32D), BIRTH_CROWN_SIDE(0x32E), BIRTH_CROWN_SIDE(0x32F),
+    BIRTH_CROWN(0x330), BIRTH_CROWN(0x331), BIRTH_CROWN(0x332), BIRTH_CROWN(0x333),
+    BIRTH_CROWN(0x334), BIRTH_CROWN(0x335), BIRTH_CROWN(0x336), BIRTH_CROWN(0x337),
+    BIRTH_CROWN_HEM(0x338), BIRTH_TRUNK(0x339), BIRTH_CROWN_HEM(0x33A),
+    BIRTH_TRUNK(0x33C), BIRTH_TRUNK(0x33D),
+    BIRTH_CROWN_SIDE(0x340), BIRTH_CROWN(0x348),
+};
+
 /* Caves: heaps of rocks on the floor. */
 static const struct DioramaProp sCave[] = {
     { PROP(0x202, ROCK, MOUND, 1, LOWER), .height16 = 10 },
@@ -431,6 +455,7 @@ static const struct DioramaPropTileset sTilesets[] = {
     TILESET("gTileset_TrainerHill", sTrainerHill),
     TILESET("gTileset_BattleFrontierOutsideEast", sBattleFrontierOutsideEast),
     TILESET("gTileset_BattlePyramid", sBattlePyramid),
+    TILESET("gTileset_Dewford", sDewford),
 };
 
 #define TILESET_COUNT (sizeof(sTilesets) / sizeof(sTilesets[0]))
