@@ -1914,7 +1914,7 @@ static void CreateTrainerCardTrainerPic(void)
                                                        sTrainerPicOffset[sData->isHoenn][sData->trainerCard.gender][1]))
         return;
 #endif
-#line 1906 // gba-line
+#line 1898 // gba-line
     if (InUnionRoom() == TRUE && gReceivedRemoteLinkPlayers)
     {
         CreateTrainerCardTrainerPicSprite(FacilityClassToPicIndex(sData->trainerCard.unionRoomClass),
