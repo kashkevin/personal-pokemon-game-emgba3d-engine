@@ -43,6 +43,7 @@ def summarise(folder):
     out = {"folder": str(folder), "played": len(rows), "real": len(real), "crashed": [c["id"] for c in crashes]}
     exact, diff, failed, tails, longer, shorter, stuck = [], [], [], [], [], [], []
     begin, step, worst, gpu, cpu = [], [], [], [], []
+    gamefps, presfps, presp99 = [], [], []
     for r in rows:
         p = r.get("parity", {})
         key = r["id"] + ("/t%d" % r["turn"] if r.get("turn") else "")
@@ -66,6 +67,12 @@ def summarise(folder):
         begin.append(r.get("beginMs", 0.0))
         step.append(r.get("stepMs", 0.0))
         worst.append(r.get("stepMsWorst", 0.0))
+        if r.get("gameFps"):
+            gamefps.append(r["gameFps"])
+        pr = r.get("presents") or {}
+        if pr.get("count", 0) > 0:
+            presfps.append(pr["fps"])
+            presp99.append(pr["p99Ms"])
         rs = r.get("render")
         if rs and rs.get("layers"):
             gpu.append(rs.get("gpuMs", 0.0))
@@ -81,6 +88,9 @@ def summarise(folder):
         "renderGpuMsPerLayer": {"median": statistics.median(gpu) if gpu else 0, "p95": pct(gpu, 0.95)},
         "renderCpuMsPerLayer": {"median": statistics.median(cpu) if cpu else 0, "p95": pct(cpu, 0.95)},
         "realExact": len(real_exact), "realDifferent": real_diff, "realIds": [x["id"] for x in real],
+        "gameFps": {"median": statistics.median(gamefps) if gamefps else 0, "lowest": min(gamefps or [0])},
+        "presentFps": {"median": statistics.median(presfps) if presfps else 0, "lowest": min(presfps or [0])},
+        "presentP99Ms": {"median": statistics.median(presp99) if presp99 else 0, "worst": max(presp99 or [0])},
     })
     return out
 
@@ -102,6 +112,9 @@ def markdown(s):
     lines.append("| core step, ms (median / p95 of the averages / worst) | %.2f / %.2f / %.1f |" % (s["stepMs"]["median"], s["stepMs"]["p95"], s["stepMs"]["worst"]))
     lines.append("| renderer GPU ms a layer (median / p95) | %.2f / %.2f |" % (s["renderGpuMsPerLayer"]["median"], s["renderGpuMsPerLayer"]["p95"]))
     lines.append("| renderer CPU ms a layer (median / p95) | %.2f / %.2f |" % (s["renderCpuMsPerLayer"]["median"], s["renderCpuMsPerLayer"]["p95"]))
+    lines.append("| game frames a second during an animation (median / lowest) | %.1f / %.1f |" % (s["gameFps"]["median"], s["gameFps"]["lowest"]))
+    lines.append("| presents a second during an animation (median / lowest) | %.1f / %.1f |" % (s["presentFps"]["median"], s["presentFps"]["lowest"]))
+    lines.append("| 99th percentile present interval, ms (median / worst) | %.1f / %.1f |" % (s["presentP99Ms"]["median"], s["presentP99Ms"]["worst"]))
     if s["real"]:
         lines.append("| fought battle: animations | %d, exact %d: %s |" % (s["real"], s["realExact"], " ".join(s["realIds"])))
         if s["realDifferent"]:

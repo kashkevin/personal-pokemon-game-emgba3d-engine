@@ -104,6 +104,13 @@ static struct
     int compared, equal, firstBad, sprites;
     char badGame[512], badCore[512];
     struct BfxHost *host; /* the core (seen in AfterStep; the game thread's) */
+    /* the animation's time: the game thread's (launch to the game's end), and the presents drawn meanwhile
+     * (main thread: the intervals between them, under presentLock) */
+    Uint64 launchAt, endAt;
+    SDL_SpinLock presentLock;
+    Uint64 lastPresent;
+    int presentCount;
+    float presentMs[4096];
     /* captures wanted (main thread reads): the animation's serial and core frames */
     SDL_atomic_t wantSerial;
     int want[MAX_SHOTS], wantCount;
@@ -183,6 +190,12 @@ static int EnvInt(const char *name, int fallback)
 {
     const char *v = SDL_getenv(name);
     return v && *v ? atoi(v) : fallback;
+}
+
+static int CompareFloats(const void *a, const void *b)
+{
+    float x = *(const float *)a, y = *(const float *)b;
+    return x < y ? -1 : x > y ? 1 : 0;
 }
 
 static int CompareStrings(const void *a, const void *b)
@@ -519,10 +532,29 @@ static void WriteResult(void)
         snprintf(path, sizeof(path), "%s/report.jsonl", t.out);
         t.report = fopen(path, "a"); /* appended: a run resumed after a crash (PKMN_BFX_TEST_FROM) adds to it */
     }
+    double wallMs = 0, presentFps = 0, p50 = 0, p99 = 0, worst = 0;
+    int presents;
+
     if (info.failed)
         t.failedCount++;
     if (t.compared > 0 && t.equal != t.compared)
         t.parityFailures++;
+    if (t.endAt > t.launchAt)
+        wallMs = (t.endAt - t.launchAt) * 1000.0 / SDL_GetPerformanceFrequency();
+    SDL_AtomicLock(&t.presentLock);
+    presents = t.presentCount;
+    if (presents > 0)
+    {
+        double total = 0;
+        qsort(t.presentMs, (size_t)presents, sizeof(t.presentMs[0]), CompareFloats);
+        for (int i = 0; i < presents; i++)
+            total += t.presentMs[i];
+        presentFps = total > 0 ? presents * 1000.0 / total : 0;
+        p50 = t.presentMs[presents / 2];
+        p99 = t.presentMs[(presents * 99) / 100 < presents ? (presents * 99) / 100 : presents - 1];
+        worst = t.presentMs[presents - 1];
+    }
+    SDL_AtomicUnlock(&t.presentLock);
     if (t.report)
     {
         fprintf(t.report,
@@ -530,12 +562,14 @@ static void WriteResult(void)
                 "\"failed\":%s,\"parity\":{\"compared\":%d,\"equal\":%d,\"firstBad\":%d,\"sprites\":%d,"
                 "\"game\":\"%s\",\"core\":\"%s\"},\"tail\":{\"frames\":%d,\"withSprites\":%d,\"first\":\"%s\"},"
                 "\"scriptFrames\":%d,\"gameDoneAt\":%d,\"stuck\":%s,\"gcSteps\":%d,\"gcInBegin\":%s,\"stepMsWorstPlain\":%.3f,"
-                "\"beginMs\":%.2f,\"stepMs\":%.3f,\"stepMsWorst\":%.3f,\"shots\":[",
+                "\"beginMs\":%.2f,\"stepMs\":%.3f,\"stepMsWorst\":%.3f,\"wallMs\":%.1f,\"gameFps\":%.2f,"
+                "\"presents\":{\"count\":%d,\"fps\":%.2f,\"p50Ms\":%.2f,\"p99Ms\":%.2f,\"worstMs\":%.2f},\"shots\":[",
                 t.move, t.curTurn, t.name, info.serial == t.serial ? info.id : "",
                 t.frames, info.serial == t.serial ? info.coreFrames : 0, info.serial == t.serial ? info.plannedFrames : 0,
                 info.failed ? "true" : "false", t.compared, t.equal, t.firstBad, t.sprites, t.badGame, t.badCore,
                 t.tailFrames, t.tailSprites, t.tailFirst, info.serial == t.serial ? info.scriptFrames : 0, t.gameDoneAt,
-                t.stuck ? "true" : "false", info.gcSteps, info.gcInBegin ? "true" : "false", info.stepMsWorstPlain, info.beginMs, info.coreFrames ? info.stepMsTotal / info.coreFrames : 0.0, info.stepMsWorst);
+                t.stuck ? "true" : "false", info.gcSteps, info.gcInBegin ? "true" : "false", info.stepMsWorstPlain, info.beginMs, info.coreFrames ? info.stepMsTotal / info.coreFrames : 0.0, info.stepMsWorst,
+                wallMs, wallMs > 0 ? t.frames * 1000.0 / wallMs : 0.0, presents, presentFps, p50, p99, worst);
         for (int i = 0; i < t.wantCount; i++)
             fprintf(t.report, "%s{\"frame\":%d,\"file\":\"%s\"}", i ? "," : "", t.want[i],
                     t.written[i] ? t.shotNames[i] : "");
@@ -724,6 +758,12 @@ bool BattleFxTest_OnActionMenu(void)
             }
         }
         SDL_Log("Battle FX test: playing %s (turn %d)", t.name, t.curTurn); /* the runner resumes after it on a crash */
+        SDL_AtomicLock(&t.presentLock);
+        t.presentCount = 0;
+        t.lastPresent = 0;
+        SDL_AtomicUnlock(&t.presentLock);
+        t.launchAt = SDL_GetPerformanceCounter();
+        t.endAt = 0;
         t.frames = 0;
         t.compared = t.equal = t.sprites = 0;
         t.firstBad = -1;
@@ -789,6 +829,7 @@ bool BattleFxTest_OnActionMenu(void)
                 t.gameDoneAt = t.frames;
             if ((gameDone && !(info.serial == t.serial && info.active)) || t.frames > MAX_ANIM_FRAMES)
             {
+                t.endAt = SDL_GetPerformanceCounter();
                 t.stuck = !gameDone;
                 t.state = TEST_SETTLE;
                 t.wait = SETTLE_FRAMES;
@@ -818,6 +859,7 @@ bool BattleFxTest_OnActionMenu(void)
         }
         if (!gAnimScriptActive || t.frames > MAX_ANIM_FRAMES)
         {
+            t.endAt = SDL_GetPerformanceCounter();
             t.stuck = gAnimScriptActive;
             SetBattlerSpriteAffineMode(ST_OAM_AFFINE_NORMAL);
             t.state = TEST_SETTLE;
@@ -1010,6 +1052,16 @@ void BattleFxTest_AfterDraw(uint32_t serial, int frame, bool showing, int outW, 
                 Capture(name, outW, outH);
                 t.realWritten[i] = true;
             }
+    }
+    if ((int)serial == SDL_AtomicGet(&t.wantSerial) && t.state == TEST_RUN)
+    {
+        /* the animation's presents (with or without an HD frame): their intervals */
+        Uint64 now = SDL_GetPerformanceCounter();
+        SDL_AtomicLock(&t.presentLock);
+        if (t.lastPresent != 0 && t.presentCount < (int)(sizeof(t.presentMs) / sizeof(t.presentMs[0])))
+            t.presentMs[t.presentCount++] = (float)((now - t.lastPresent) * 1000.0 / SDL_GetPerformanceFrequency());
+        t.lastPresent = now;
+        SDL_AtomicUnlock(&t.presentLock);
     }
     if (!showing || (int)serial != SDL_AtomicGet(&t.wantSerial))
         return;
