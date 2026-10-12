@@ -43,9 +43,11 @@ static void OverrideHour(struct tm *local, time_t now)
 
     if (sFirst == 0)
         sFirst = now;
-    // The game's time is the clock's less the save's offset (rtc.c).
-    minuteOfDay = ClockHourOverride() * 60L + (long)(now - sFirst) / 60
-                + gSaveBlock2Ptr->localTimeOffset.hours * 60L + gSaveBlock2Ptr->localTimeOffset.minutes;
+    minuteOfDay = ClockHourOverride() * 60L + (long)(now - sFirst) / 60;
+    // The game's time is the clock's less the save's offset (rtc.c). The clock is
+    // first read at boot (RtcInit), before the save blocks exist: no offset then.
+    if (gSaveBlock2Ptr != NULL)
+        minuteOfDay += gSaveBlock2Ptr->localTimeOffset.hours * 60L + gSaveBlock2Ptr->localTimeOffset.minutes;
     minuteOfDay = ((minuteOfDay % 1440) + 1440) % 1440;
     local->tm_hour = (int)(minuteOfDay / 60);
     local->tm_min = (int)(minuteOfDay % 60);
