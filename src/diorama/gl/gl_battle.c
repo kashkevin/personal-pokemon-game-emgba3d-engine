@@ -1675,8 +1675,8 @@ static void Begin(void)
             SDL_Log("Diorama battle: drawn by %s; the window %dx%d, the 3D view %dx%d, %s",
                     renderer, windowW, windowH, sceneW, sceneH, antialiasing);
         }
-        SDL_Log("Diorama battle: 3D on map %u.%u (%s%s), player %d,%d facing %u",
-                sBattle.frame.mapGroup, sBattle.frame.mapNum,
+        SDL_Log("Diorama battle: 3D on map %u.%u layout %u (%s%s), player %d,%d facing %u",
+                sBattle.frame.mapGroup, sBattle.frame.mapNum, sBattle.frame.mapLayoutId,
                 sBattle.frame.wild ? "wild" : "trainer", sBattle.frame.doubles ? ", double" : "",
                 sBattle.frame.playerMapX, sBattle.frame.playerMapY, sBattle.frame.playerFacing);
     }
