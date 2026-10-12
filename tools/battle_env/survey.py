@@ -233,6 +233,9 @@ def run_map(args, rec, label, spec, p, results):
     if args.autopilot:
         env['PKMN_TEST_AUTOPILOT'] = '1'
         env['PKMN_TEST_TIMEOUT'] = str(max(30, int(args.timeout) - 10))
+    if args.fight:
+        # A through the battle after the picture; the game reports the outcome and ends
+        env['PKMN_TEST_FIGHT'] = str(args.fight)
     t0 = time.time()
     run = Run(args.exe, rundir, args.display, env)
     status = 'timeout'
@@ -240,7 +243,8 @@ def run_map(args, rec, label, spec, p, results):
         if not run.find_window():
             status = 'no window'
         elif args.autopilot:
-            while time.time() - t0 < args.timeout and run.proc.poll() is None:
+            limit = args.timeout + (args.fight or 0)
+            while time.time() - t0 < limit and run.proc.poll() is None:
                 time.sleep(1.0)
             if os.path.exists(os.path.join(rundir, 'cap.json')):
                 status = 'captured'
@@ -284,6 +288,11 @@ def run_map(args, rec, label, spec, p, results):
     log = run.log_text()
     res = {'map': rec['map'], 'label': label, 'spec': spec, 'position': p, 'category': rec['category'],
            'status': status, 'seconds': round(time.time() - t0, 1), 'dir': rundir}
+    if args.fight:
+        m = re.search(r'Battle env test: battle over, outcome \d+ \((\w+)\)', log)
+        res['fight'] = m.group(1) if m else ('crashed' if re.search(r'stack smashing|crashed|Aborted', log)
+                                              else 'not over')
+        status = res['status'] = '%s, %s' % (status, 'fought: ' + res['fight'])
     for pat, key in ((r'Diorama battle: 3D on (.*)', 'battle_3d'), (r'Diorama battle: (2D|refused|no world)(.*)', 'battle_2d'),
                      (r'Diorama battle: stage: (.*)', 'stage'), (r'Battle env test: starting (.*)', 'started'),
                      (r'Diorama battle: drawn by (.*)', 'renderer')):
@@ -333,6 +342,12 @@ def main():
                          'milliseconds): for sizes where it runs at a frame or two a second')
     ap.add_argument('--at', default='', help='X,Y: stand there instead of the map\'s test position '
                     '(with --maps; where two trainers see the test position)')
+    ap.add_argument('--spec', default='', help='the battle to start instead of the map\'s own (a '
+                    'PKMN_TEST_BATTLE spec; "none": start nothing, the map starts its own - two '
+                    'trainers who see the player)')
+    ap.add_argument('--label', default='', help='the run\'s name with --spec (default: the spec\'s kind)')
+    ap.add_argument('--fight', type=int, default=0, help='seconds: after the picture, press A '
+                    'through the battle and record how it ended (PKMN_TEST_FIGHT)')
     args = ap.parse_args()
     args.exe = os.path.abspath(args.exe)
     args.save = os.path.abspath(args.save)
@@ -349,7 +364,12 @@ def main():
             continue
         if cats and rec['category'] not in cats:
             continue
-        for label, spec, p in choose(rec, species, trainers, args.kind):
+        options = choose(rec, species, trainers, args.kind)
+        if args.spec and options:
+            # the map's test position, another battle
+            options = [(args.label or args.spec.split(':')[0], '' if args.spec == 'none' else args.spec,
+                        options[0][2])]
+        for label, spec, p in options:
             if args.at:
                 x, y = (int(v) for v in args.at.split(','))
                 p = {'x': x, 'y': y, 'behaviour': '(--at)', 'environment': p.get('environment')}

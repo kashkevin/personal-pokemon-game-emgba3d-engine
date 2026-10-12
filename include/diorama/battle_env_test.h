@@ -12,6 +12,7 @@
  *                            wild2:<species>:<level>:<species>:<level>  (double)
  *                            legendary:<species>:<level>
  *                            trainer:<id>   double:<id>   two:<id>:<id>
+ *                            partner:<id>:<id or 0>:<partner>  (Multi, in-game partner)
  *   PKMN_TEST_BATTLE_DELAY   field frames to wait first (default 150)
  *   PKMN_TEST_CAPTURE        file stem: <stem>.png (the window) and
  *                            <stem>.json (what the battle camera sees) once
@@ -22,6 +23,12 @@
  *                            B through a map's scene and the battle's opening lines
  *   PKMN_TEST_TIMEOUT        seconds: no picture by then (a battle drawn in 2D has none),
  *                            say so and - with PKMN_TEST_EXIT - end the process (code 3)
+ *   PKMN_TEST_FIGHT          seconds: after the picture, press A through the battle (the
+ *                            first move, every line) and report its outcome once the field
+ *                            is back; with PKMN_TEST_EXIT end there (0 won, 4 otherwise,
+ *                            5 not over in time)
+ *   PKMN_TEST_STRONG=1       the party at level 100 and healed when the field is up (in
+ *                            memory only), so a fought battle is won
  *
  * Nothing here changes a battle: it starts one the way the debug menu's
  * "Try battle" does and reads the picture.
