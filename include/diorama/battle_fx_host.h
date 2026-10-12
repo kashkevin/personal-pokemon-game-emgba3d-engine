@@ -125,6 +125,8 @@ bool BfxHost_Eval(struct BfxHost *host, const char *source, size_t size, const c
 char *BfxHost_CallGlobal(struct BfxHost *host, const char *fn, const char *jsonArg);
 /* A global function of no arguments returning a number; `fallback` on an error. */
 int BfxHost_CallGlobalInt(struct BfxHost *host, const char *fn, int fallback);
+/* ... of one number argument. */
+int BfxHost_CallGlobalIntArg(struct BfxHost *host, const char *fn, int arg, int fallback);
 /* The move / battle animation ids the data holds, by number: "MOVE_FLAMETHROWER"
  * for move 53; a battle animation by kind ("status", "general", "special",
  * "controller") and number. NULL when absent. */

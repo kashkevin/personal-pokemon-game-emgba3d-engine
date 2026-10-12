@@ -234,6 +234,7 @@ static void UpdateLinkAndCallCallbacks(void)
 {
 #ifdef ENABLE_DIORAMA
     DioramaScene_BeginFrame();
+    BattleFx_OnFrameBegin(); // diorama/battle_fx.h: the sound state this frame's tasks see
 #endif
 #line 214 // gba-line
     if (!HandleLinkConnection())

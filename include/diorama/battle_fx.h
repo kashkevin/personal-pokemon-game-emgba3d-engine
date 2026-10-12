@@ -42,6 +42,9 @@ void BattleFx_OnLaunch(uint32_t animType, uint32_t animId, const void *script);
 /* RunAnimScriptCommand / WaitAnimFrameCount: the game's animation advanced a
  * frame (gAnimScriptCallback was called). */
 void BattleFx_OnAnimTick(void);
+/* The start of a game frame (main.c, before the callbacks): the sound state
+ * the frame's tasks will see (sound advances only in the vblank). */
+void BattleFx_OnFrameBegin(void);
 /* The end of a game frame (main.c, after the callbacks). */
 void BattleFx_OnFrameEnd(void);
 
@@ -65,6 +68,15 @@ struct Sprite;
 void BattleFx_BeginOam(void);
 void BattleFx_MarkOam(const struct Sprite *sprite, uint8_t first, uint8_t end);
 void BattleFx_LatchOam(void);
+/* The graphics tag of what a sprite shows: the tag of its tile sheet (TAG_NONE
+ * without one). Not sprite->template->tileTag: a template made on the heap
+ * (AddItemIconSprite: the last used Poke Ball's icon on a wild battle's action
+ * menu, Bestow's item) is freed once its sprite is made, and that memory then
+ * holds whatever is allocated there next. */
+uint16_t BattleFx_SpriteGfxTag(const struct Sprite *sprite);
+/* Whether a sprite is an effect sprite the HD layer stands in for (graphics
+ * ANIM_TAG_*, the Poke Balls and their particles). */
+bool BattleFx_IsEffectSprite(const struct Sprite *sprite);
 
 /* ── Frame boundary (main thread, the game thread parked; sdl2.c VDraw) ── */
 

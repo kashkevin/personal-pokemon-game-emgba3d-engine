@@ -797,6 +797,33 @@ int BfxHost_CallGlobalInt(struct BfxHost *host, const char *fn, int fallback)
     return v;
 }
 
+int BfxHost_CallGlobalIntArg(struct BfxHost *host, const char *fn, int arg, int fallback)
+{
+    JSContext *ctx;
+    JSValue g, f, a, r;
+    int32_t v = fallback;
+
+    if (host == NULL || host->ctx == NULL)
+        return fallback;
+    ctx = host->ctx;
+    Enter(host);
+    g = JS_GetGlobalObject(ctx);
+    f = JS_GetPropertyStr(ctx, g, fn);
+    JS_FreeValue(ctx, g);
+    a = JS_NewInt32(ctx, arg);
+    r = JS_Call(ctx, f, JS_UNDEFINED, 1, &a);
+    JS_FreeValue(ctx, f);
+    if (JS_IsException(r))
+    {
+        SetExceptionError(host, fn);
+        return fallback;
+    }
+    if (JS_ToInt32(ctx, &v, r) != 0)
+        v = fallback;
+    JS_FreeValue(ctx, r);
+    return v;
+}
+
 const char *BfxHost_MoveId(const struct BfxHost *host, int number)
 {
     if (host == NULL || number < 0 || number >= host->moveIdCount)

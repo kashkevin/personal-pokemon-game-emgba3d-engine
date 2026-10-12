@@ -23,8 +23,11 @@ The package's bfx_moves.json is converted from pokeemerald-expansion with the ex
 (Leech Life's absorb: `.if B_UPDATED_MOVE_DATA >= GEN_7`) and some moves' power / category / target, so the
 data the game ships is converted from the game's own tree, with the package's converter:
 
-  python3 <battlefx_kit>/prototype/build_preview_data.py --expansion <this repository> --out game_moves.json
+  python3 tools/battlefx/convert_data.py <battlefx_kit> --expansion <this repository> --out game_moves.json
   python3 tools/battlefx/pack_data.py --package <battlefx_kit>/native --data game_moves.json [--se-frames se_frames.json]
+
+(convert_data.py runs <battlefx_kit>/prototype/build_preview_data.py, keeping the panse commands' pan step
+and delay it leaves out: the game's pan sound task, which the scripts' waitsound and end wait for.)
 
 se_frames.json comes from the Battle FX test build (it plays every sound effect at a battle's action menu):
 
@@ -130,7 +133,8 @@ def main():
              "The textures and meshes are procedural (no game or Nintendo art); the animation data is converted from",
              "pokeemerald-expansion's own battle_anim_scripts.s and C sources (commit in bfx_moves.json meta.commit: "
              + str(data_meta.get("commit", "?")) + (", this game's tree" if a.data else ", the package's expansion")
-             + ").",
+             + ")" + ("; by tools/battlefx/convert_data.py (the package's converter, keeping the panse commands'"
+                      " pan step and delay)." if '"pan_step"' in (out / "bfx_moves.json").read_text() else "."),
              ""]
     lines += [f"{sha256(out / f)}  {f}" for f in sorted(files)]
     (out / "MANIFEST.txt").write_text("\n".join(lines) + "\n")

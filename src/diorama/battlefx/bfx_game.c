@@ -30,11 +30,13 @@
 #include "battle_gfx_sfx_util.h"
 #include "battle_util.h"
 #include "item.h"
+#include "m4a.h"
 #include "main.h"
 #include "move.h"
 #include "pokeball.h"
 #include "pokemon.h"
 #include "random.h"
+#include "sound.h"
 #include "sprite.h"
 #include "constants/battle_anim.h"
 #include "constants/battle_script_commands.h"
@@ -342,35 +344,119 @@ static const char kGameHelperJs[] =
     "  A.beginNormalPaletteFade = function () { const r = begin.apply(this, arguments); const w = RT.world();\n"
     "    if (r && w && w.fade && w.fade.mode === 'normal') w.fade.delta &= 15; return r; };\n"
     "})();\n"
-    /* IsSEPlaying (sound.c) as the game's: the core's runtime has no audio, and its scripts' waitsound
-     * and end wait for the game's sound effects to finish. With the game's own lengths (battlefx/
-     * se_frames.json, measured in the game: frames IsSEPlaying() stays true after PlaySE, and the music
-     * player each plays on), a sound effect is playing while the last one started on SE1 or SE2 has not
-     * run its length; waitsound waits for it (sound tasks too, as before) and the script's end for up to
-     * 90 frames, as battle_anim.c's do. Without the file the core keeps its own timing. */
+    /* The game's sound, which the scripts wait for, as the game has it: the core's runtime has no audio (its
+     * stand-ins: any cry 40 frames, any sound effect 30). Replaying the game's animation, BFX_GAME_SOUND gives the
+     * state at the start of the game frame the core's next step replays (bfx_game.c FeedSound: IsCryPlaying(), the
+     * SE1 / SE2 music players' pause and track bits); the step's own starts (MPlayStart: the player's status 0 until
+     * the vblank plays the song) and stops (m4aMPlayStop: paused), in their order, change it as m4a does, and
+     * IsSEPlaying / IsCryPlaying (sound.c) read it. So waitsound (sound tasks, then sound effects for up to 90
+     * frames, then stopped: Cmd_waitsound), the script's end (Cmd_end: its tasks, then up to 90 frames of sound
+     * effects; not leftover sprites) and the cry waits are the game's, frame for frame. While the core plans an
+     * animation at begin, and in the Lab, it estimates from battlefx/se_frames.json (each sound effect's length and
+     * music player, measured in the game: see bfx_test.c). A sound effect a script names by number (Mystical
+     * Fire's `playse 177`) is that number's; stopsound (Cmd_stopsound), which the runtime has no case for, stops
+     * SE1 and SE2. */
     "(function () {\n"
-    "  const RT = globalThis.BFX_RT; if (!RT || !RT.Player || !RT.API) return;\n"
-    "  const P = RT.Player.prototype, A = RT.API, syncReady = P.syncReady, done = P.done, stop = A.m4aMPlayStop, isPlaying = A.isSEPlaying;\n"
-    "  let SE = null;\n"
+    "  const RT = globalThis.BFX_RT, B = globalThis.BFX_BRIDGE; if (!RT || !RT.Player || !RT.API || !B) return;\n"
+    "  const P = RT.Player.prototype, A = RT.API, syncReady = P.syncReady, done = P.done, fire = P.fireSound, begin = B.begin;\n"
+    "  const ownSE = A.isSEPlaying, ownCry = A.isCryPlaying, stop = A.m4aMPlayStop;\n"
+    "  let SE = null, game = null, planning = false;\n"
     "  globalThis.BFX_GAME_SET_SE = function (table) { SE = table && typeof table === 'object' ? table : null; return SE ? 1 : 0; };\n"
-    "  function playing(w) {\n"
-    "    if (!w || !w.sfx) return false; let s1 = null, s2 = null; const from = w.seStoppedAt != null ? w.seStoppedAt : -1;\n"
-    "    for (const x of w.sfx) { if (x.f < from) continue; const t = SE[x.se]; if (!t) continue; if (t[1] === 1) s1 = [x.f, t[0]]; else if (t[1] === 2) s2 = [x.f, t[0]]; }\n"
-    "    return !!((s1 && w.frame - s1[0] < s1[1]) || (s2 && w.frame - s2[0] < s2[1]));\n"
+    "  globalThis.BFX_GAME_SOUND = function (v) { game = v | 0; return 1; };\n"
+    "  B.begin = function (req) { planning = true; try { return begin.call(this, req); } finally { planning = false; } };\n"
+    "  const live = () => !planning && game != null;\n"
+    "  function byNumber(se) { const D = RT.data; return typeof se === 'string' && /^[0-9]+$/.test(se) && D && D.seNames ? D.seNames[se] : null; }\n"
+    "  function entry(se) { return SE ? (SE[se] || SE[byNumber(se)] || null) : null; }\n"
+    "  function stopAll(w) { if (!w || !w.sfx) return; w.seStoppedAt = w.frame + 1; (w.seStops || (w.seStops = [])).push({ f: w.frame, at: w.sfx.length }); }\n"
+    "  function estimate(w, f) {\n"
+    "    if (!w || !w.sfx || !SE) return false; let s1 = null, s2 = null; const from = w.seStoppedAt != null ? w.seStoppedAt : -1;\n"
+    "    for (const x of w.sfx) { if (x.f < from || x.f > f) continue; const t = entry(x.se); if (!t) continue; if (t[1] === 1) s1 = [x.f, t[0]]; else if (t[1] === 2) s2 = [x.f, t[0]]; }\n"
+    "    return !!((s1 && f > s1[0] && f - s1[0] <= s1[1]) || (s2 && f > s2[0] && f - s2[0] <= s2[1]));\n"
     "  }\n"
-    "  P.syncReady = function (op) { const r = syncReady.call(this, op); if (!r || op !== 'waitsound' || !SE) return r;\n"
-    "    const w = RT.world(); if (!playing(w)) { this.seWait = 0; return true; }\n"
-    "    this.seWait = (this.seWait | 0) + 1; if (this.seWait > 90) { w.seStoppedAt = w.frame + 1; this.seWait = 0; } return false; };\n"
-    "  P.done = function () { const d = done.call(this); if (!d || !SE) return d; const w = this.w;\n"
-    "    if (playing(w) && (this.seEndWait = (this.seEndWait | 0) + 1) <= 90) return false; return true; };\n"
-    "  A.isSEPlaying = function () { return SE ? playing(RT.world()) : isPlaying(); };\n"
-    "  A.m4aMPlayStop = function () { const w = RT.world(); if (w) w.seStoppedAt = w.frame + 1; return stop.apply(this, arguments); };\n"
+    "  function gamePlaying(w, f) {\n"
+    "    let s = game >> 1; let i = w.sfx.length; while (i > 0 && w.sfx[i - 1].f >= f) i--;\n"
+    "    const stops = w.seStops || []; let k = 0; while (k < stops.length && stops[k].f < f) k++;\n"
+    "    for (let j = i; ; j++) {\n"
+    "      while (k < stops.length && stops[k].f === f && stops[k].at <= j) { s |= 5; k++; }\n"
+    "      if (j >= w.sfx.length) break;\n"
+    "      if (w.sfx[j].f !== f) continue;\n"
+    "      const t = entry(w.sfx[j].se); if (!t) continue;\n"
+    "      if (t[1] === 1) s &= ~3; else if (t[1] === 2) s &= ~12;\n"
+    "    }\n"
+    "    if ((s & 1) && (s & 4)) return false;\n"
+    "    return (s & 2) !== 0 || (s & 8) !== 0;\n"
+    "  }\n"
+    "  function playing(w, f) { return live() ? gamePlaying(w, f) : estimate(w, f); }\n"
+    "  P.syncReady = function (op) {\n"
+    "    if (op !== 'waitsound' || (!SE && !live())) return syncReady.call(this, op);\n"
+    "    const w = this.w; if (w.soundCount > 0) { this.seWait = 0; return false; }\n"
+    "    if (!playing(w, this.frame)) { this.seWait = 0; return true; }\n"
+    "    if ((this.seWait = (this.seWait | 0) + 1) > 90) { stopAll(w); this.seWait = 0; return true; }\n"
+    "    return false;\n"
+    "  };\n"
+    "  P.done = function () {\n"
+    "    const w = this.w;\n"
+    "    if (!live()) { const d = done.call(this); if (!d || !SE) return d; return !(estimate(w, this.frame) && (this.seEndWait = (this.seEndWait | 0) + 1) <= 90); }\n"
+    "    if (!this.ended) return false;\n"
+    "    if (w.visualCount > 0 || w.soundCount > 0 || w.bg.monbgTask[0] !== 0xFF || w.bg.monbgTask[1] !== 0xFF) { this.seEndWait = 0; return false; }\n"
+    "    return !(playing(w, this.frame) && (this.seEndWait = (this.seEndWait | 0) + 1) <= 90);\n"
+    "  };\n"
+    "  A.isSEPlaying = function () { const w = RT.world(); return (SE || live()) && w && w.sfx ? playing(w, w.frame) : ownSE.apply(this, arguments); };\n"
+    "  A.m4aMPlayStop = function () { stopAll(RT.world()); return stop.apply(this, arguments); };\n"
+    "  P.fireSound = function (e) { if (e && e[2] === 'stopsound') stopAll(this.w); return fire.apply(this, arguments); };\n"
+    "  A.isCryPlaying = function () { const w = RT.world(); if (!live() || !w) return ownCry.apply(this, arguments); return w.cryTouched === w.frame ? false : (game & 1) === 1; };\n"
+    "  for (const k of ['playCry', 'playCry_ByMode', 'playCry_DuckNoRestore', 'stopCryAndClearCrySongs']) {\n"
+    "    const f = A[k]; if (typeof f !== 'function') continue;\n"
+    "    A[k] = function () { const r = f.apply(this, arguments); const w = RT.world(); if (w) w.cryTouched = w.frame; return r; };\n"
+    "  }\n"
     "})();\n"
     /* Whether the core's world has a Poke Ball sprite (a send-out's ball made). */
     "globalThis.BFX_GAME_HAS_BALL = function () {\n"
     "  for (const r of globalThis.BFX_RT.snapshot()) { const g = r.tag | 0; if (g >= 55000 && g <= 55027) return 1; }\n"
     "  return 0;\n"
     "};\n"
+    /* panse, panse_adjustnone, panse_adjustall (battle_anim.c) run a sound task that steps the pan to its target,
+     * counted in gAnimSoundTaskCount: waitsound and the script's end wait for it (Bestow's end, 64 frames after its
+     * panse). The runtime records only the sound; with the data's pan step and delay (tools/battlefx/convert_data.py)
+     * the core runs the task as Task_PanFromInitialToTarget does. */
+    "(function () {\n"
+    "  const RT = globalThis.BFX_RT; if (!RT || !RT.Player || !RT.API) return; const P = RT.Player.prototype, A = RT.API, fire = P.fireSound;\n"
+    "  if (!fire || !A.createTask || !A.destroyAnimSoundTask) return;\n"
+    "  const s8 = (v) => (v << 24) >> 24;\n"
+    "  function tok(v) { if (typeof v === 'number') return v | 0; const t = String(v == null ? '' : v).trim();\n"
+    "    if (/^[-+]?[0-9]+$/.test(t)) return parseInt(t, 10); if (t === 'SOUND_PAN_ATTACKER') return -64; if (t === 'SOUND_PAN_TARGET') return 63; return 0; }\n"
+    "  function pan(id) { const w = RT.world(), d = w.tasks[id].data;\n"
+    "    if (d[8]++ >= d[3]) { d[8] = 0; d[4] = d[4] + d[2]; const p = d[4];\n"
+    "      if (d[2] === 0 || (d[0] < d[1] ? p >= d[1] : p <= d[1])) A.destroyAnimSoundTask(id); } }\n"
+    "  P.fireSound = function (e) {\n"
+    "    const r = fire.apply(this, arguments); const op = e[2], x = e[5];\n"
+    "    if (!x || x.pan_step == null || (op !== 'panse' && op !== 'panse_adjustnone' && op !== 'panse_adjustall')) return r;\n"
+    "    let from = s8(tok(x.pan_from)), to = s8(tok(x.pan_to)), inc = s8(tok(x.pan_step)); const wait = tok(x.pan_delay) & 0xFF;\n"
+    "    if (op === 'panse') { from = s8(A.battleAnimAdjustPanning(from)); to = s8(A.battleAnimAdjustPanning(to)); inc = A.calculatePanIncrement(from, to, inc); }\n"
+    "    else if (op === 'panse_adjustall') { from = s8(A.battleAnimAdjustPanning2(from)); to = s8(A.battleAnimAdjustPanning2(to)); inc = s8(A.battleAnimAdjustPanning2(inc)); }\n"
+    "    const w = RT.world(); const id = A.createTask(pan, 1); if (id == null || id === 0xFF || !w.tasks[id]) return r;\n"
+    "    const t = w.tasks[id]; t.name = 'Task_PanFromInitialToTarget'; t.sound = true;\n"
+    "    t.data[0] = from; t.data[1] = to; t.data[2] = inc; t.data[3] = wait; t.data[4] = from; w.soundCount++;\n"
+    "    return r; };\n"
+    "})();\n"
+    /* The game's sprite slots: the battle's own sprites besides effect sprites (the request's spritesInUse) take
+     * slots of the 64, so an animation that fills the rest (Fairy Lock's bolts) has an effect sprite not made in the
+     * game. The core's world keeps as many slots taken (inert, never drawn, not counted as the animation's), from
+     * the top: its battlers stay at 0-3. */
+    "(function () {\n"
+    "  const RT = globalThis.BFX_RT, B = globalThis.BFX_BRIDGE; if (!RT || !RT.Player || !B) return;\n"
+    "  const P = RT.Player.prototype, reset = P.reset, active = P.activeSprites, begin = B.begin; let taken = null;\n"
+    "  B.begin = function (req) { taken = req && req.spritesInUse != null ? req.spritesInUse | 0 : null; return begin.call(this, req); };\n"
+    "  function effect(g) { const D = RT.data; let top = 10000; if (D && D.tagIds) for (const k in D.tagIds) { const v = D.tagIds[k] | 0; if (v < 20000 && v > top) top = v; }\n"
+    "    return (g >= 10000 && g <= top) || (g >= 55000 && g <= 55027) || (g >= 65030 && g <= 65057); }\n"
+    "  P.reset = function () { reset.apply(this, arguments); const w = this.w; if (!w || taken == null || !w.sprites[0]) return;\n"
+    "    const Sprite = w.sprites[0].constructor; let n = 0;\n"
+    "    for (let i = 0; i < 64; i++) { const s = w.sprites[i]; if (s && s.inUse && !effect(s.tag | 0)) n++; }\n"
+    "    for (let i = 63, k = taken - n; i >= 0 && k > 0; i--) { if (w.sprites[i] && w.sprites[i].inUse) continue;\n"
+    "      const s = new Sprite(); s.id = i; s.uid = -1 - i; s.kind = 'reserved'; s.invisible = true; w.sprites[i] = s; k--; } };\n"
+    "  P.activeSprites = function () { let n = active.apply(this, arguments); const w = this.w;\n"
+    "    if (w) for (let i = 0; i < 64; i++) { const s = w.sprites[i]; if (s && s.inUse && s.kind === 'reserved') n--; } return n; };\n"
+    "})();\n"
     /* A move's script branches in the core's data, in its order: "kind|task|arg|value;..." */
     "globalThis.BFX_GAME_VARIANTS = function (id) {\n"
     "  const D = globalThis.BFX_RT && globalThis.BFX_RT.data; if (!D) return '';\n"
@@ -573,6 +659,16 @@ static int AppendSetup(char *buf, int len, int size, u32 attacker, u32 target)
                  (unsigned)gRng2Value.a, (unsigned)gRng2Value.b, (unsigned)gRng2Value.c, (unsigned)gRng2Value.ctr,
                  (unsigned)gRngValue.a, (unsigned)gRngValue.b, (unsigned)gRngValue.c, (unsigned)gRngValue.ctr,
                  (unsigned)Rng1PerFrame());
+    /* the sprites the battle has besides effect sprites (battlers, healthboxes, the last used ball's icon,
+     * ...): an animation gets only the rest of the 64, and an effect sprite that finds none free is not
+     * made (Fairy Lock's bolts fill them) - the core keeps as many taken */
+    {
+        int others = 0;
+        for (int i = 0; i < MAX_SPRITES; i++)
+            if (gSprites[i].inUse && !BattleFx_IsEffectSprite(&gSprites[i]))
+                others++;
+        len = Append(buf, len, size, ",\"spritesInUse\":%d", others);
+    }
     return len;
 }
 
@@ -873,6 +969,36 @@ static void FailAnimation(const char *what)
     EndAnimation("failed");
 }
 
+/* The sound state this frame's tasks see until one of them starts or stops a sound: sound advances only in
+ * the vblank (main.c VBlankIntr, m4aSoundMain), after the frame's callbacks. The core's runtime has no audio;
+ * its waits read the game's instead (kGameHelperJs, BFX_GAME_SOUND): IsCryPlaying() (the double cries of
+ * Chatter, Hyper Voice, Roar, Uproar; a send-out's cry) and the SE1 / SE2 music players' status, which
+ * IsSEPlaying() reads (waitsound, the script's end). Bit 0: a cry plays; 1: SE1 paused, 2: SE1 has tracks;
+ * 3: SE2 paused, 4: SE2 has tracks. */
+static u32 sSoundAtFrameBegin;
+static int sSoundSent = -1;
+
+void BattleFx_OnFrameBegin(void)
+{
+    u32 se1, se2;
+
+    if (!gMain.inBattle)
+        return;
+    se1 = gMPlayInfo_SE1.status;
+    se2 = gMPlayInfo_SE2.status;
+    sSoundAtFrameBegin = (IsCryPlaying() ? 1u : 0u)
+                       | ((se1 & MUSICPLAYER_STATUS_PAUSE) ? 2u : 0u) | ((se1 & MUSICPLAYER_STATUS_TRACK) ? 4u : 0u)
+                       | ((se2 & MUSICPLAYER_STATUS_PAUSE) ? 8u : 0u) | ((se2 & MUSICPLAYER_STATUS_TRACK) ? 16u : 0u);
+}
+
+static void FeedSound(struct BfxHost *host)
+{
+    if ((int)sSoundAtFrameBegin == sSoundSent)
+        return;
+    BfxHost_CallGlobalIntArg(host, "BFX_GAME_SOUND", (int)sSoundAtFrameBegin, 0);
+    sSoundSent = (int)sSoundAtFrameBegin;
+}
+
 #define BFX_REQUEST_MAX 4096
 static bool BeginRequest(struct BfxHost *host, const char *id, const char *request, int len, uint32_t animType,
                          uint32_t animId, uint8_t controller);
@@ -972,6 +1098,7 @@ static bool BeginRequest(struct BfxHost *host, const char *id, const char *reque
     sAnim.gameFrames = 0;
     sAnim.hdFrames = 0;
     sAnim.serial++;
+    sSoundSent = -1; /* the core's next step gets the sound state again */
     if (sCore.log)
         SDL_Log("Battle FX: %s (battler %d -> %d%s) begins: %d frames planned, begin %.1f ms", id,
                 sAnim.begun.attacker, sAnim.begun.target, IsDoubleBattle() ? ", double battle" : "",
@@ -1025,10 +1152,15 @@ void BattleFx_OnAnimTick(void)
  * (game thread). false: the animation failed (its GBA effects show). */
 static bool StepCore(struct BfxHost *host)
 {
-    Uint64 t0 = SDL_GetPerformanceCounter(), t1 = 0, t2 = 0;
-    unsigned gc0 = BfxHost_GcCount(host);
-    int r = BfxHost_Step(host);
+    Uint64 t0, t1 = 0, t2 = 0;
+    unsigned gc0;
+    int r;
     double ms;
+
+    FeedSound(host);
+    t0 = SDL_GetPerformanceCounter();
+    gc0 = BfxHost_GcCount(host);
+    r = BfxHost_Step(host);
 
     t1 = SDL_GetPerformanceCounter();
 
@@ -1237,6 +1369,20 @@ static bool IsEffectTag(u16 tag)
         || (tag >= BALL_PARTICLE_TAGS_FIRST && tag <= BALL_PARTICLE_TAGS_LAST);
 }
 
+uint16_t BattleFx_SpriteGfxTag(const struct Sprite *sprite)
+{
+    /* sprite.c CreateSpriteAt: a sprite of a sheet keeps its first tile (sheetTileStart); the sheets
+     * loaded keep their tags (GetSpriteTileTagByTileStart). A sprite without one owns its tiles. */
+    if (sprite == NULL || !sprite->usingSheet)
+        return TAG_NONE;
+    return GetSpriteTileTagByTileStart(sprite->sheetTileStart);
+}
+
+bool BattleFx_IsEffectSprite(const struct Sprite *sprite)
+{
+    return IsEffectTag(BattleFx_SpriteGfxTag(sprite));
+}
+
 void BattleFx_MarkOam(const struct Sprite *sprite, uint8_t first, uint8_t end)
 {
     if (!gMain.inBattle)
@@ -1245,7 +1391,7 @@ void BattleFx_MarkOam(const struct Sprite *sprite, uint8_t first, uint8_t end)
         for (u32 b = 0; b < gBattlersCount && b < MAX_BATTLERS_COUNT; b++)
             if (sprite == &gSprites[gBattlerSpriteIds[b]])
                 sBattlerOamPending[b] = first;
-    if (sprite->template == NULL || !IsEffectTag(sprite->template->tileTag))
+    if (!BattleFx_IsEffectSprite(sprite))
         return;
     for (unsigned i = first; i < end && i < 128; ++i)
         sEffectOamPending[i >> 5] |= 1u << (i & 31);

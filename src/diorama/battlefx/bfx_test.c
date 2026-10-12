@@ -58,8 +58,11 @@ enum State
     TEST_DONE,
 };
 
-/* PKMN_BFX_TEST_SE_TABLE=<file>: how long each sound effect keeps IsSEPlaying() true (the frames the
- * animation scripts' waitsound and end wait), measured by playing each alone at the action menu. */
+/* PKMN_BFX_TEST_SE_TABLE=<file>: each sound effect's length and music player (gSongTable ms), measured by
+ * playing each alone at the action menu: the frames after the one PlaySE is called in during which its player
+ * has tracks playing (m4a sets them at the next vblank, MPlayStart leaves the status 0 until then). The core
+ * estimates the scripts' waitsound and end from it while it plans an animation; replaying one, it reads the
+ * game's own music players (bfx_game.c FeedSound). */
 static struct
 {
     bool on, done;
@@ -135,7 +138,8 @@ static struct
 static const char kSpritesJs[] =
     "globalThis.BFX_TEST_RNG_CTR = function () { const w = BFX_RT.world(); return w && w.gameRng2 ? (w.gameRng2[3] >>> 0) : 0; };\n"
     "globalThis.BFX_TEST_STATE = function () { const w = BFX_RT.world(); if (!w) return ''; let t = 0; for (const k of w.tasks) if (k && k.isActive) t++;\n"
-    "  return 'visual ' + w.visualCount + ' sound ' + w.soundCount + ' tasks ' + t + ' fade ' + (w.fade.active ? 1 : 0) + ' y ' + w.fade.y; };\n"
+    "  let n = 0; for (let i = 0; i < 64; i++) if (w.sprites[i] && w.sprites[i].inUse) n++;\n"
+    "  return 'visual ' + w.visualCount + ' sound ' + w.soundCount + ' tasks ' + t + ' fade ' + (w.fade.active ? 1 : 0) + ' y ' + w.fade.y + ' sprites ' + n; };\n"
     /* the core's sprites as the game's are listed (GameSprites): x + x2 (+ the coordinate offset), no subsprite
      * set offset (the core's snapshot adds one for its renderer) */
     "globalThis.BFX_TEST_SPRITES = function () {\n"
@@ -180,12 +184,6 @@ static int EnvInt(const char *name, int fallback)
     return v && *v ? atoi(v) : fallback;
 }
 
-static bool IsEffectTag(u16 tag)
-{
-    return (tag >= ANIM_SPRITES_START && tag < ANIM_SPRITES_START + ANIM_TAG_COUNT) || (tag >= 55000 && tag <= 55027)
-        || (tag >= 65030 && tag <= 65057);
-}
-
 static int CompareStrings(const void *a, const void *b)
 {
     return strcmp(*(const char *const *)a, *(const char *const *)b);
@@ -204,11 +202,12 @@ static void GameSprites(char *out, size_t size)
         const struct Sprite *sp = &gSprites[i];
         int x, y;
 
-        if (!sp->inUse || sp->invisible || sp->template == NULL || !IsEffectTag(sp->template->tileTag))
+        /* the graphics shown (the sheet's tag), as the 3D view decides what to leave out (bfx_game.c) */
+        if (!sp->inUse || sp->invisible || !BattleFx_IsEffectSprite(sp))
             continue;
         x = sp->x + sp->x2 + (sp->coordOffsetEnabled ? gSpriteCoordOffsetX : 0);
         y = sp->y + sp->y2 + (sp->coordOffsetEnabled ? gSpriteCoordOffsetY : 0);
-        snprintf(items[n], sizeof(items[n]), "%u:%d:%d%s", sp->template->tileTag, x, y, sp->subspriteTables ? "s" : "");
+        snprintf(items[n], sizeof(items[n]), "%u:%d:%d%s", BattleFx_SpriteGfxTag(sp), x, y, sp->subspriteTables ? "s" : "");
         ptr[n] = items[n];
         n++;
     }
@@ -628,8 +627,8 @@ static bool MeasureSoundEffects(void)
     {
         if (sSe.next >= sSe.count)
         {
-            fprintf(sSe.f, "  \"_measured\": \"frames IsSEPlaying() stays true after PlaySE (checked once a frame, at the battle "
-                           "controller), the music player (gSongTable ms)\"\n}\n");
+            fprintf(sSe.f, "  \"_measured\": \"[frames after the one PlaySE is called in during which its music player has "
+                           "tracks (checked once a frame, at the battle controller), the music player (gSongTable ms)]\"\n}\n");
             fclose(sSe.f);
             sSe.done = true;
             SDL_Log("Battle FX test: %d sound effects measured into %s", sSe.count, sSe.path);
@@ -641,18 +640,19 @@ static bool MeasureSoundEffects(void)
         PlaySE(sSe.songs[sSe.next]);
         sSe.frames = 0;
         sSe.playing = true;
-        if (!IsSEPlaying())
-        {
-            fprintf(sSe.f, "  \"%s\": [0, %u],\n", sSe.names[sSe.next], (unsigned)gSongTable[sSe.songs[sSe.next]].ms);
-            sSe.next++;
-            sSe.playing = false;
-        }
         return true;
     }
-    sSe.frames++;
-    if (!IsSEPlaying() || sSe.frames >= 900)
     {
-        fprintf(sSe.f, "  \"%s\": [%d, %u],\n", sSe.names[sSe.next], sSe.frames, (unsigned)gSongTable[sSe.songs[sSe.next]].ms);
+        u32 ms = gSongTable[sSe.songs[sSe.next]].ms;
+        const struct MusicPlayerInfo *player = gMPlayTable[ms].info;
+        bool tracks = player && (player->status & MUSICPLAYER_STATUS_TRACK) && !(player->status & MUSICPLAYER_STATUS_PAUSE);
+
+        if (tracks && sSe.frames < 900)
+        {
+            sSe.frames++;
+            return true;
+        }
+        fprintf(sSe.f, "  \"%s\": [%d, %u],\n", sSe.names[sSe.next], sSe.frames, (unsigned)ms);
         StopSoundEffects();
         sSe.next++;
         sSe.playing = false;
@@ -930,14 +930,16 @@ void BattleFxTest_AfterStep(struct BfxHost *host, uint32_t serial, int coreFrame
         /* Random2 calls so far (SFC32's counter advances 29 a call): the game's, the core's */
         unsigned coreCtr = (unsigned)BfxHost_CallGlobalInt(host, "BFX_TEST_RNG_CTR", 0);
         char *state = BfxHost_CallGlobal(host, "BFX_TEST_STATE", NULL);
-        int tasks = 0;
+        int tasks = 0, sprites = 0;
         for (int i = 0; i < NUM_TASKS; i++)
             tasks += gTasks[i].isActive;
-        fprintf(t.traceFile, "core frame %d%s: Random2 calls game %u core %u; game: visual %d sound %d tasks %d fade %d y %d; core: %s\n"
-                             "  game [%s]\n  core [%s]\n", coreFrame,
+        for (int i = 0; i < MAX_SPRITES; i++)
+            sprites += gSprites[i].inUse;
+        fprintf(t.traceFile, "core frame %d%s: Random2 calls game %u core %u; game: visual %d sound %d tasks %d fade %d y %d sprites %d; "
+                             "core: %s\n  game [%s]\n  core [%s]\n", coreFrame,
                 strcmp(core, game) ? " DIFF" : "", (unsigned)(gRng2Value.ctr - t.traceCtr0) / 29u,
                 (coreCtr - (unsigned)t.traceCtr0) / 29u, gAnimVisualTaskCount, gAnimSoundTaskCount, tasks,
-                gPaletteFade.active, gPaletteFade.y, state ? state : "", game, core);
+                gPaletteFade.active, gPaletteFade.y, sprites, state ? state : "", game, core);
         free(state);
     }
     if (game[0])
