@@ -49,12 +49,18 @@ wild Pokemon would otherwise walk into the player, or empty the party, during th
 Any save with a party of two or more will do (`town.sav`; no save is written back). The game
 runs on the host's clock: `--hour` sets the time zone so the battles are in daylight (or at
 night). One game at a time: two at once on two cores make both too slow for the timeouts.
-`--kind trainer|wild_land|wild_water|legendary|wild` picks the battle (Routes 119 and 120 on
-their water: in the long grass the field is 2D), `--at X,Y` another cell to stand on (where two
-trainers see the test position the battle would be the two-opponent crash, KNOWN_ISSUES N37),
-`--cfg-extra 'cameraMode=diorama\n'` the Diorama camera, `--env PKMN_TEST_BATTLE=wild2:...` a
-double battle. A run whose game resumed on another map than the one asked for (a secret base
-comes back in Littleroot Town) is recorded as `wrong map`, not as a picture of that map.
+`--kind trainer|wild_land|wild_water|legendary|wild` picks the battle, `--spec` another battle
+(`trainer:ID`, `double:ID`, `partner:...`, `wild2:...`, `legendary:SPECIES:LEVEL`, `none`: the
+map's own trainers see the player) with `--label` its run's name, `--at X,Y` another cell to
+stand on, `--cfg-extra 'cameraMode=diorama\n'` the Diorama camera. `--warp-in` is for a map the
+game does not resume on (a secret base comes back in Littleroot Town): the TEST driver warps
+there in game first (`PKMN_TEST_WARP`, as the debug menu's warp does; in memory only, no save
+written), to the map's warp 0 or `--at`'s cell. `--autopilot` lets the game press its own keys
+(no xdotool), `--fight SECONDS` fights the battle through after the picture (A on the first move;
+`--env PKMN_TEST_STRONG=1` a party at level 100 that knows Flamethrower) and records how it ended
+(won, lost, crashed). A run whose game resumed on another map than the one asked for is recorded
+as `wrong map`, not as a picture of that map. Under water the survey presses no B in the field
+before the battle (B is the game's "surface?" there).
 
 `cap.json` holds, besides the camera:
 
