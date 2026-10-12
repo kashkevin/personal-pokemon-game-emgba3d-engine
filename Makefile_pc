@@ -207,7 +207,7 @@ OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS)
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
-.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order
+.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names
 .SUFFIXES:
 .SECONDARY:
 .DELETE_ON_ERROR:
@@ -261,6 +261,14 @@ check-decompress: $(TARGET)
 check-party-order: $(TARGET)
 	@./$(TARGET) --selftest-party-order > $(OBJ_DIR)/selftest-party-order.log 2>&1; status=$$?; \
 	  tail -n 3 $(OBJ_DIR)/selftest-party-order.log; exit $$status
+
+# Battle messages naming two trainers with their classes (KNOWN_ISSUES N38: the
+# names went on past a 32-byte buffer as Mossdeep's Space Center Multi battle
+# began), for every trainer against the longest-named one. Each must return and
+# read as each name alone does.
+check-battle-names: $(TARGET)
+	@./$(TARGET) --selftest-battle-names > $(OBJ_DIR)/selftest-battle-names.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-battle-names.log; exit $$status
 
 # C: preprocess (same flags as the GBA build + PORTABLE), expand INCBIN/charmap
 # strings with preproc, then compile for 32-bit x86.

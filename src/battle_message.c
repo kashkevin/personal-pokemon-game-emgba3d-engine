@@ -3113,6 +3113,17 @@ u32 BattleStringExpandPlaceholders(const u8 *src, u8 *dst, u32 dstSize)
         if (*src == PLACEHOLDER_BEGIN)
         {
             src++;
+#ifdef PORTABLE
+            // KNOWN_ISSUES N38: each placeholder's name is put together in text from
+            // its start. A message naming two trainers with their classes ("You are
+            // challenged by {B_TRAINER1_NAME_WITH_CLASS} and {B_TRAINER2_NAME_WITH_CLASS}!")
+            // went on from where the first name ended and wrote past text's 32 bytes;
+            // natively "stack smashing detected" as Mossdeep's Space Center Multi
+            // battle began. Each placeholder's text is copied out before the next, so
+            // the message is the same.
+            textStart = text;
+#endif
+#line 3116 // gba-line
             u32 classLength = 0;
             u32 nameLength = 0;
             const u8 *classString;
