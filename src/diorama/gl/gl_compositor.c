@@ -479,12 +479,44 @@ static void BuildDebugImage(const struct DioramaSceneSnapshot *snapshot)
                     GL_BGRA, GL_UNSIGNED_BYTE, sDebugPixels);
 }
 
+/* What the weather layer was last made from (BuildWeatherImage): its picture
+ * moves on 60 times a second, so at higher frame rates most frames would make
+ * and upload the same picture again (performance directive, 2026-10-12). */
+struct WeatherImageKey
+{
+    uint32_t phase;
+    uint16_t fogScrollOffset;
+    uint16_t weatherBlendEVA;
+    uint8_t effect;
+    uint8_t weather;
+    uint8_t rainVisibleCount;
+    uint8_t airDrawsFog;
+};
+static struct WeatherImageKey sWeatherKey;
+static bool sWeatherKeyValid;
+static bool sWeatherImageDrawn;
+
 static bool BuildWeatherImage(const struct DioramaSceneSnapshot *snapshot)
 {
     enum DioramaWeatherEffect effect = DioramaWeather_Classify(snapshot->weather);
     uint32_t phase = (uint32_t)(SDL_GetPerformanceCounter() * 60
                              / SDL_GetPerformanceFrequency());
+    struct WeatherImageKey key;
     int i;
+
+    memset(&key, 0, sizeof(key));
+    key.phase = phase;
+    key.fogScrollOffset = snapshot->fogScrollOffset;
+    key.weatherBlendEVA = snapshot->weatherBlendEVA;
+    key.effect = (uint8_t)effect;
+    key.weather = snapshot->weather;
+    key.rainVisibleCount = snapshot->rainVisibleCount;
+    key.airDrawsFog = effect == DIORAMA_WEATHER_FOG && DioramaGLAir_DrawsFog();
+    if (sWeatherKeyValid && memcmp(&key, &sWeatherKey, sizeof(key)) == 0)
+        return sWeatherImageDrawn; /* the picture in the texture is this one */
+    sWeatherKey = key;
+    sWeatherKeyValid = true;
+    sWeatherImageDrawn = false;
 
     memset(sWeatherPixels, 0, sizeof(sWeatherPixels));
     if (effect == DIORAMA_WEATHER_RAIN)
@@ -634,6 +666,7 @@ static bool BuildWeatherImage(const struct DioramaSceneSnapshot *snapshot)
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT,
                     GL_BGRA, GL_UNSIGNED_BYTE, sWeatherPixels);
+    sWeatherImageDrawn = true;
     return true;
 }
 
@@ -1336,6 +1369,7 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, DISPLAY_WIDTH, DISPLAY_HEIGHT, 0,
                  GL_BGRA, GL_UNSIGNED_BYTE, NULL);
     sUiUploaded = false;
+    sWeatherKeyValid = false;
     glGenTextures(1, &sWeatherTexture.id);
     sWeatherTexture.width = DISPLAY_WIDTH;
     sWeatherTexture.height = DISPLAY_HEIGHT;
@@ -1959,6 +1993,7 @@ void DioramaGL_Shutdown(void)
     if (sUiTexture.id != 0)
         glDeleteTextures(1, &sUiTexture.id);
     sUiUploaded = false;
+    sWeatherKeyValid = false;
     if (sWeatherTexture.id != 0)
         glDeleteTextures(1, &sWeatherTexture.id);
     if (sAtlasTexture.id != 0)
