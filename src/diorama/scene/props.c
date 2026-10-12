@@ -124,7 +124,18 @@ static const struct DioramaProp sSlateport[] = {
                             .depth = 4 }
 #define WOOD_POSTS_NS(id, x) { PROP(id, FENCE, SLAB, 1, LOWER), .shadowIndex = 0xF, .shadowFromRow = 12, \
                                .depth = 4, .facing = 1, .offsetX = (x), .artMetatile = 0x291 }
+/* Route 117's and Verdanturf's flowers (pink and white 0x208-0x20F, yellow and
+ * blue 0x210-0x217: the same flower, its frames out of step): painted with
+ * their grass on the lower layer, so the cards leave the grass out (colour 13)
+ * and the cell's ground is its neighbours' plain grass. Added by the battle
+ * environments' work (docs/battle-environments.md): flat in Route 117's battles. */
+#define MAUVILLE_FLOWERS(id) { PROP(id, FLOWERS, CARDS, 0, NEIGHBOUR), .keyIndex = 0xD, .depth = 1, \
+                               .flags = DIORAMA_PROP_SWAY }
 static const struct DioramaProp sMauville[] = {
+    MAUVILLE_FLOWERS(0x208), MAUVILLE_FLOWERS(0x209), MAUVILLE_FLOWERS(0x20A), MAUVILLE_FLOWERS(0x20B),
+    MAUVILLE_FLOWERS(0x20C), MAUVILLE_FLOWERS(0x20D), MAUVILLE_FLOWERS(0x20E), MAUVILLE_FLOWERS(0x20F),
+    MAUVILLE_FLOWERS(0x210), MAUVILLE_FLOWERS(0x211), MAUVILLE_FLOWERS(0x212), MAUVILLE_FLOWERS(0x213),
+    MAUVILLE_FLOWERS(0x214), MAUVILLE_FLOWERS(0x215), MAUVILLE_FLOWERS(0x216), MAUVILLE_FLOWERS(0x217),
     WOOD_POSTS_EW(0x273),
     WOOD_POSTS_NS(0x288, -4),
     WOOD_POSTS_NS(0x28A, 4),
@@ -205,6 +216,36 @@ static const struct DioramaProp sFallarbor[] = {
     ASH_BOULDER(0x2BF),
 };
 
+/* Mt. Pyre's graves outdoors (the exterior and the summit): the stones, drawn
+ * from the front, stand as reliefs on their ground; inside, the floors' graves
+ * are the modelled rooms' own. Added by the battle environments' work
+ * (docs/battle-environments.md): flat in the exterior's battles. */
+static const struct DioramaProp sFacility[] = {
+    { PROP(0x324, DECOR, RELIEF, 1, LOWER), .depth = 8 },
+    { PROP(0x325, DECOR, RELIEF, 1, LOWER), .depth = 8 },
+};
+
+/* Sky Pillar (the Pacifidlog tileset's tower floors): its boulders and rubble
+ * heaps, all blocking the way. Where a floor is a modelled room its own pieces
+ * stand instead (DioramaProps_SetCellTaken); its top is not modelled, so there
+ * Rayquaza's battle stood among flat rubble. Added by the battle environments'
+ * work (docs/battle-environments.md). */
+static const struct DioramaProp sPacifidlog[] = {
+    { PROP(0x207, ROCK, MOUND, 1, LOWER), .height16 = 12 },
+    { PROP(0x20F, ROCK, MOUND, 1, LOWER), .height16 = 12 },
+    { PROP(0x217, ROCK, MOUND, 1, LOWER), .height16 = 8 },
+    { PROP(0x21F, ROCK, MOUND, 1, LOWER), .height16 = 8 },
+    { PROP(0x2AD, ROCK, MOUND, 1, LOWER), .height16 = 12 },
+};
+
+/* The Trick House's eighth puzzle: its boulders (on the grass and on the floor),
+ * blocking the way; the room is not modelled (it does not pass the proof). */
+static const struct DioramaProp sTrickHousePuzzle[] = {
+    { PROP(0x214, ROCK, MOUND, 1, LOWER), .height16 = 12 },
+    { PROP(0x215, ROCK, MOUND, 1, LOWER), .height16 = 12 },
+    { PROP(0x26C, ROCK, MOUND, 1, LOWER), .height16 = 12 },
+};
+
 /* Caves: heaps of rocks on the floor. */
 static const struct DioramaProp sCave[] = {
     { PROP(0x202, ROCK, MOUND, 1, LOWER), .height16 = 10 },
@@ -227,6 +268,9 @@ static const struct DioramaPropTileset sTilesets[] = {
     TILESET("gTileset_Mossdeep", sMossdeep),
     TILESET("gTileset_Fallarbor", sFallarbor),
     TILESET("gTileset_Petalburg", sPetalburg),
+    TILESET("gTileset_Pacifidlog", sPacifidlog),
+    TILESET("gTileset_TrickHousePuzzle", sTrickHousePuzzle),
+    TILESET("gTileset_Facility", sFacility),
 };
 
 #define TILESET_COUNT (sizeof(sTilesets) / sizeof(sTilesets[0]))
