@@ -1044,6 +1044,31 @@ bool DioramaRules_CellOverWater(const struct DioramaCellSnapshot *cell, uint8_t 
     return water >= 2;
 }
 
+int16_t DioramaRules_StaticGroundQ16(uint16_t layoutId, uint32_t cellOffset)
+{
+    const struct DioramaGeneratedLayoutV2 *layout = FindLayout(layoutId);
+    uint32_t low = 0;
+    uint32_t high;
+
+    if (layout == NULL || layout->terrainRecordOffset > gDioramaTerrainV2Count
+     || layout->terrainRecordCount > gDioramaTerrainV2Count - layout->terrainRecordOffset)
+        return 0;
+    high = layout->terrainRecordCount;
+    while (low < high)
+    {
+        uint32_t middle = low + (high - low) / 2;
+
+        if (gDioramaTerrainV2[layout->terrainRecordOffset + middle].cellOffset < cellOffset)
+            low = middle + 1;
+        else
+            high = middle;
+    }
+    if (low < layout->terrainRecordCount
+     && gDioramaTerrainV2[layout->terrainRecordOffset + low].cellOffset == cellOffset)
+        return gDioramaTerrainV2[layout->terrainRecordOffset + low].groundQ16;
+    return 0;
+}
+
 bool DioramaRules_LayoutUsesSecondary(uint16_t layoutId, const char *symbol)
 {
     size_t i;

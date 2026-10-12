@@ -482,6 +482,10 @@ float DioramaRules_ObjectGroundHeight(const struct DioramaResolvedCell *resolved
  * where the primary tileset is General's. Added by the battle environments'
  * work (the sea at one level: buildings.c, gl_terrain_renderer.c). */
 bool DioramaRules_CellOverWater(const struct DioramaCellSnapshot *cell, uint8_t mapType);
+/* The terrace solver's ground (sixteenths of a tile) of a layout's cell, from
+ * its static terrain record (any map's using the layout): 0 for a cell with
+ * none. The cell's offset is y * the layout's width + x. */
+int16_t DioramaRules_StaticGroundQ16(uint16_t layoutId, uint32_t cellOffset);
 /* Whether the layout's secondary tileset is `symbol` (gTileset_Lavaridge), by
  * the rules' tables. */
 bool DioramaRules_LayoutUsesSecondary(uint16_t layoutId, const char *symbol);

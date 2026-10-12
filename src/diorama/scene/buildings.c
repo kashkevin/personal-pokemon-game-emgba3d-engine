@@ -28,9 +28,13 @@
 #include <string.h>
 #include <SDL2/SDL.h>
 
+#include "global.h"
+#include "fieldmap.h"
 #include "diorama/buildings.h"
+#include "diorama/props.h"
 #include "diorama/rules.h"
 #include "diorama/scene_snapshot.h"
+#include "constants/map_types.h"
 #include "constants/metatile_behaviors.h"
 
 extern const unsigned int gDioramaBuildingsTableSize;
@@ -547,101 +551,6 @@ static bool IsWaterCell(const struct DioramaSceneSnapshot *snapshot,
          || resolved[i].terrainClass == DIORAMA_TERRAIN_CLASS_WATER);
 }
 
-/*
- * The sea at one level (KNOWN_ISSUES E1). The terrace solver gives the open sea
- * the level it finds for it - a whole level below the land where it meets a
- * terraced islet (Routes 127 and 132-134) - and water it finds penned in (round
- * a rock or a stack found by its tiles over the water, whose cells the rules
- * read as ground at the land's level) the water's nominal level. Between them
- * were steps with no faces, and the sky showed through them, in the field and
- * in battles; with the terrain's risers (terrain_mesh.c ColumnBottom) they
- * would be walls of water. So one body of water - its water cells and the
- * cells of the models standing in it (every neighbour that is not the model's
- * is water), 4-connected, waterfalls apart - lies at the level of its lowest
- * water: nothing is raised, and a model's cells take the level too, so the
- * model (its lift is its cell's ground) stands in it. A body all at one level
- * is left as it is. Shallow water is part of the body it runs into: the
- * solver leaves the shoals round the islets (and a town's sea, past the seam
- * with a route's) at the land's level, a whole level over the sea they belong
- * to, which stood as walls of water round the islets' feet and the harbours.
- * So the shoals lie at the sea's level, and what is walked through them (a
- * swimmer standing in them, the player wading) stands in that water.
- */
-static void LevelWaterBodies(const struct DioramaSceneSnapshot *snapshot,
-                             struct DioramaResolvedCell *resolved, unsigned count,
-                             const uint8_t *inWater)
-{
-    static int16_t stack[DIORAMA_MAX_VISIBLE_CELLS];
-    static uint8_t seen[DIORAMA_MAX_VISIBLE_CELLS];
-    static int16_t body[DIORAMA_MAX_VISIBLE_CELLS];
-    static const int step[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
-    unsigned start;
-
-    memset(seen, 0, count);
-    for (start = 0; start < count; start++)
-    {
-        int top = 0, size = 0, b;
-        float level = 1.0e9f;
-        bool water = false;
-
-        if (seen[start] || !inWater[start])
-            continue;
-        seen[start] = 1;
-        stack[top++] = (int16_t)start;
-        while (top > 0)
-        {
-            int i = stack[--top];
-            int gx = i % DIORAMA_GRID_WIDTH, gy = i / DIORAMA_GRID_WIDTH;
-
-            body[size++] = (int16_t)i;
-            if (inWater[i] == 1 && resolved[i].groundHeight < level)
-            {
-                level = resolved[i].groundHeight;
-                water = true;
-            }
-            for (int d = 0; d < 4; d++)
-            {
-                int nx = gx + step[d][0], ny = gy + step[d][1], n;
-
-                if (nx < 0 || ny < 0 || nx >= DIORAMA_GRID_WIDTH || ny >= DIORAMA_GRID_HEIGHT)
-                    continue;
-                n = ny * DIORAMA_GRID_WIDTH + nx;
-                if ((unsigned)n >= count || seen[n] || !inWater[n])
-                    continue;
-                /* water joins water of its own elevation only, and shallow water the
-                 * water it runs into (the shoals round an islet, a harbour's: walked
-                 * through at the land's elevation, but the sea's own surface - left
-                 * at the land's level it stood a step of water over the sea); a
-                 * model joins any */
-                if (inWater[i] == 1 && inWater[n] == 1
-                 && snapshot->cells[i].elevation != snapshot->cells[n].elevation
-                 && snapshot->cells[i].behavior != MB_SHALLOW_WATER
-                 && snapshot->cells[n].behavior != MB_SHALLOW_WATER)
-                    continue;
-                seen[n] = 1;
-                stack[top++] = (int16_t)n;
-            }
-        }
-        if (!water)
-            continue;
-        for (b = 0; b < size; b++)
-        {
-            struct DioramaResolvedCell *r = &resolved[body[b]];
-            float drop = r->groundHeight - level;
-
-            if (drop <= 0.001f)
-                continue;
-            r->groundHeight -= drop;
-            r->topHeight -= drop;
-            for (unsigned k = 0; k < r->surfaceCount && k < DIORAMA_MAX_VISUAL_SURFACES; k++)
-            {
-                r->surfaces[k].topHeight -= drop;
-                r->surfaces[k].bottomHeight -= drop;
-            }
-        }
-    }
-}
-
 /* The layout whose tilesets drew a cell: a connected map's own, otherwise the
  * map's (props.c CellLayout). */
 static uint16_t CellLayoutId(const struct DioramaSceneSnapshot *snapshot,
@@ -650,6 +559,296 @@ static uint16_t CellLayoutId(const struct DioramaSceneSnapshot *snapshot,
     if ((cell->flags & DIORAMA_CELL_CONNECTED) && cell->sourceLayoutId != 0)
         return cell->sourceLayoutId;
     return snapshot->mapLayoutId;
+}
+
+/*
+ * The sea at one level (KNOWN_ISSUES E1). The terrace solver gives the open sea
+ * the level it finds for it - a whole level below the land where it meets a
+ * terraced islet (Routes 127 and 132-134) - and water it finds penned in, or
+ * that touches no terrace, the water's nominal level. Between them were steps
+ * with no faces, and the sky showed through them, in the field and in
+ * battles; with the terrain's risers (terrain_mesh.c ColumnBottom) they would
+ * be walls of water.
+ *
+ * So each body of water lies at one level, worked out once per layout from the
+ * whole layout (never from the cells in view, which would move the sea as the
+ * player walked): its water cells, 4-connected (water joins water of its own
+ * elevation, and shallow water the water it runs into: the shoals round an
+ * islet, a harbour's, walked through at the land's elevation but the sea's own
+ * surface), waterfalls apart, lie at the lowest level the solver gave any of
+ * them. Outdoors the sea (ocean water, currents, seaweed, deep water) lies a
+ * level below the land at the most, whatever the solver found: a town's sea or
+ * a route's open sea away from any terrace met the routes' lowered sea at the
+ * maps' seams. Nothing is raised. The cells of a model or a rock standing in
+ * water take the level of the water round them, so it stands in it (its lift
+ * is its cell's ground).
+ */
+extern const struct MapLayout *const gMapLayouts[];
+
+#define WATER_LEVEL_NONE INT8_MIN
+#define WATER_LEVEL_CACHE 8
+
+struct WaterLevels
+{
+    uint16_t layoutId;
+    bool outdoor;
+    int width;
+    int height;
+    uint32_t used;
+    int8_t *level; /* per layout cell: its body's level in tiles, or WATER_LEVEL_NONE */
+};
+
+static struct WaterLevels sWaterLevels[WATER_LEVEL_CACHE];
+static uint32_t sWaterLevelClock;
+
+static bool IsWaterBehavior(uint8_t behavior)
+{
+    switch (behavior)
+    {
+    case MB_POND_WATER:
+    case MB_INTERIOR_DEEP_WATER:
+    case MB_DEEP_WATER:
+    case MB_SOOTOPOLIS_DEEP_WATER:
+    case MB_OCEAN_WATER:
+    case MB_SHALLOW_WATER:
+    case MB_NO_SURFACING:
+    case MB_SEAWEED:
+    case MB_SEAWEED_NO_SURFACING:
+    case MB_EASTWARD_CURRENT:
+    case MB_WESTWARD_CURRENT:
+    case MB_NORTHWARD_CURRENT:
+    case MB_SOUTHWARD_CURRENT:
+    case MB_HOT_SPRINGS:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool IsSeaBehavior(uint8_t behavior)
+{
+    switch (behavior)
+    {
+    case MB_OCEAN_WATER:
+    case MB_DEEP_WATER:
+    case MB_NO_SURFACING:
+    case MB_SEAWEED:
+    case MB_SEAWEED_NO_SURFACING:
+    case MB_EASTWARD_CURRENT:
+    case MB_WESTWARD_CURRENT:
+    case MB_NORTHWARD_CURRENT:
+    case MB_SOUTHWARD_CURRENT:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool IsOutdoorMapType(uint8_t mapType)
+{
+    return mapType != MAP_TYPE_NONE && mapType != MAP_TYPE_INDOOR && mapType != MAP_TYPE_UNDERGROUND
+        && mapType != MAP_TYPE_SECRET_BASE && mapType != MAP_TYPE_UNDERWATER;
+}
+
+static uint8_t LayoutBehavior(const struct MapLayout *layout, int offset, uint8_t *elevation)
+{
+    uint16_t block = layout->map[offset];
+    uint16_t metatile = block & MAPGRID_METATILE_ID_MASK;
+    uint16_t primaryCount = layout->isFrlg ? NUM_METATILES_IN_PRIMARY_FRLG : NUM_METATILES_IN_PRIMARY;
+    const struct Tileset *tileset = metatile < primaryCount ? layout->primaryTileset
+                                                            : layout->secondaryTileset;
+
+    *elevation = UNPACK_ELEVATION(block);
+    if (tileset == NULL || tileset->metatileAttributes == NULL)
+        return 0;
+    return UNPACK_BEHAVIOR(tileset->metatileAttributes[metatile < primaryCount ? metatile
+                                                                              : metatile - primaryCount]);
+}
+
+/* The bodies of water of one layout and their levels (see above), made once. */
+static const struct WaterLevels *WaterLevelsFor(uint16_t layoutId, bool outdoor)
+{
+    static const int step[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+    struct WaterLevels *entry = NULL;
+    const struct MapLayout *layout;
+    uint8_t *behavior;
+    uint8_t *elevation;
+    int32_t *queue;
+    int count;
+    int i;
+
+    for (i = 0; i < WATER_LEVEL_CACHE; i++)
+        if (sWaterLevels[i].level != NULL && sWaterLevels[i].layoutId == layoutId
+         && sWaterLevels[i].outdoor == outdoor)
+        {
+            sWaterLevels[i].used = ++sWaterLevelClock;
+            return &sWaterLevels[i];
+        }
+    if (layoutId == 0 || !DioramaProps_KnownLayout(layoutId))
+        return NULL;
+    layout = gMapLayouts[layoutId - 1];
+    if (layout == NULL || layout->map == NULL || layout->width <= 0 || layout->height <= 0)
+        return NULL;
+    for (i = 0; i < WATER_LEVEL_CACHE; i++)
+        if (entry == NULL || sWaterLevels[i].used < entry->used)
+            entry = &sWaterLevels[i];
+    free(entry->level);
+    memset(entry, 0, sizeof(*entry));
+    count = layout->width * layout->height;
+    entry->level = malloc(count);
+    behavior = malloc(count);
+    elevation = malloc(count);
+    queue = malloc(count * sizeof(*queue));
+    if (entry->level == NULL || behavior == NULL || elevation == NULL || queue == NULL)
+    {
+        free(entry->level);
+        entry->level = NULL;
+        free(behavior);
+        free(elevation);
+        free(queue);
+        return NULL;
+    }
+    entry->layoutId = layoutId;
+    entry->outdoor = outdoor;
+    entry->width = layout->width;
+    entry->height = layout->height;
+    entry->used = ++sWaterLevelClock;
+    for (i = 0; i < count; i++)
+        behavior[i] = LayoutBehavior(layout, i, &elevation[i]);
+    memset(entry->level, 0, count);
+    for (i = 0; i < count; i++)
+        entry->level[i] = WATER_LEVEL_NONE;
+    for (i = 0; i < count; i++)
+    {
+        int head = 0, tail = 0, b;
+        int16_t lowest = 0;
+        bool sea = false;
+
+        if (entry->level[i] != WATER_LEVEL_NONE || !IsWaterBehavior(behavior[i]))
+            continue;
+        /* mark the body (0 for now), then give it its level */
+        entry->level[i] = 0;
+        queue[tail++] = i;
+        while (head < tail)
+        {
+            int cell = queue[head++];
+            int x = cell % layout->width, y = cell / layout->width;
+            int16_t ground = DioramaRules_StaticGroundQ16(layoutId, (uint32_t)cell);
+
+            if (ground < lowest)
+                lowest = ground;
+            sea |= IsSeaBehavior(behavior[cell]);
+            for (int d = 0; d < 4; d++)
+            {
+                int nx = x + step[d][0], ny = y + step[d][1], n;
+
+                if (nx < 0 || ny < 0 || nx >= layout->width || ny >= layout->height)
+                    continue;
+                n = ny * layout->width + nx;
+                if (entry->level[n] != WATER_LEVEL_NONE || !IsWaterBehavior(behavior[n]))
+                    continue;
+                if (elevation[n] != elevation[cell] && behavior[n] != MB_SHALLOW_WATER
+                 && behavior[cell] != MB_SHALLOW_WATER)
+                    continue;
+                entry->level[n] = 0;
+                queue[tail++] = n;
+            }
+        }
+        /* whole tiles (the solver's levels are) */
+        lowest = lowest >= 0 ? 0 : -((-lowest + 15) / 16);
+        if (outdoor && sea && lowest > -1)
+            lowest = -1;
+        if (lowest < INT8_MIN + 1)
+            lowest = INT8_MIN + 1;
+        for (b = 0; b < tail; b++)
+            entry->level[queue[b]] = (int8_t)lowest;
+    }
+    free(behavior);
+    free(elevation);
+    free(queue);
+    return entry;
+}
+
+/* A water cell's level: its body's in its own layout (WaterLevelsFor); past the
+ * map's edge the border block's sea lies at the sea's. false: none to keep. */
+static bool StaticWaterLevel(const struct DioramaSceneSnapshot *snapshot,
+                             const struct DioramaCellSnapshot *cell, float *level)
+{
+    bool outdoor = IsOutdoorMapType(snapshot->mapType);
+    const struct WaterLevels *levels;
+    int offset;
+
+    if (!(cell->flags & DIORAMA_CELL_SOURCE_VALID))
+    {
+        if (!(cell->flags & DIORAMA_CELL_BORDER) || !outdoor || !IsSeaBehavior(cell->behavior))
+            return false;
+        *level = -1.0f;
+        return true;
+    }
+    levels = WaterLevelsFor(CellLayoutId(snapshot, cell), outdoor);
+    if (levels == NULL || cell->sourceMapX < 0 || cell->sourceMapY < 0
+     || cell->sourceMapX >= levels->width || cell->sourceMapY >= levels->height)
+        return false;
+    offset = cell->sourceMapY * levels->width + cell->sourceMapX;
+    if (levels->level[offset] == WATER_LEVEL_NONE)
+        return false;
+    *level = (float)levels->level[offset];
+    return true;
+}
+
+static void LowerCellTo(struct DioramaResolvedCell *r, float level)
+{
+    float drop = r->groundHeight - level;
+
+    if (drop <= 0.001f)
+        return;
+    r->groundHeight -= drop;
+    r->topHeight -= drop;
+    for (unsigned k = 0; k < r->surfaceCount && k < DIORAMA_MAX_VISUAL_SURFACES; k++)
+    {
+        r->surfaces[k].topHeight -= drop;
+        r->surfaces[k].bottomHeight -= drop;
+    }
+}
+
+static void LevelWaterBodies(const struct DioramaSceneSnapshot *snapshot,
+                             struct DioramaResolvedCell *resolved, unsigned count,
+                             const uint8_t *inWater)
+{
+    static const int step[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+    unsigned i;
+    int pass;
+
+    for (i = 0; i < count; i++)
+    {
+        float level;
+
+        if (inWater[i] == 1 && StaticWaterLevel(snapshot, &snapshot->cells[i], &level))
+            LowerCellTo(&resolved[i], level);
+    }
+    /* a model's or a rock's cells in the water: the level of the water round
+     * them, passed on through the model's own cells */
+    for (pass = 0; pass < 3; pass++)
+        for (i = 0; i < count; i++)
+        {
+            int gx = (int)i % DIORAMA_GRID_WIDTH, gy = (int)i / DIORAMA_GRID_WIDTH;
+            float level = 1.0e9f;
+
+            if (inWater[i] != 2)
+                continue;
+            for (int d = 0; d < 4; d++)
+            {
+                int nx = gx + step[d][0], ny = gy + step[d][1], n;
+
+                if (nx < 0 || ny < 0 || nx >= DIORAMA_GRID_WIDTH || ny >= DIORAMA_GRID_HEIGHT)
+                    continue;
+                n = ny * DIORAMA_GRID_WIDTH + nx;
+                if ((unsigned)n < count && inWater[n] != 0 && resolved[n].groundHeight < level)
+                    level = resolved[n].groundHeight;
+            }
+            if (level < 1.0e8f)
+                LowerCellTo(&resolved[i], level);
+        }
 }
 
 /*
