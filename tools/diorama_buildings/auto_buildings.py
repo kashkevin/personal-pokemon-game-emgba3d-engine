@@ -170,7 +170,7 @@ ROOFS = {
     "Route121": {(37, 5): "flat"},          # the Safari Zone's gate
     "SafariZone_South": {(32, 33): "flat"},
     "PacifidlogTown": {"default": {"type": "cone", "rise": 0.9}},
-    "Route111": {(19, 58): {"type": "dome", "rise": 0.8}},     # the old couple's hut
+    "Route111": {(19, 58): {"type": "dome", "rise": 0.8}},     # the Mirage Tower (a domed hut)
     "MauvilleCity": {(35, 5): "pitched",
                      (8, 13): "flat",          # the Game Corner
                      # the bike shop and its neighbour, drawn as one
