@@ -128,6 +128,11 @@ const struct StepAnimTable *CharCustom_GetStepAnimTable(const union AnimCmd *con
 u16 CharCustom_RemoteGraphicsId(const u8 *look, u16 vanillaGraphicsId);
 
 // Battles and the Trainer Card (data.h macros, trainer_card.c, battle_controllers.c)
+u32 CharCustom_LinkPlayerCharacter(u32 linkPlayer); // a link battle's player (their look from the companion)
+// The looks of a bound battle's players by binding slot (platform/mp_bridge.c,
+// frame 'B': 16-byte generation, then MAX_LINK_PLAYERS looks of 8 bytes)
+void CharCustom_SetBattleLooks(const u8 *generation, const u8 *looks);
+bool32 MultiplayerBattle_GetBindingGeneration(u8 *generation); // multiplayer_battle.c: the bound battle's
 bool32 CharCustom_DrawTrainerCardPic(u8 windowId, u8 paletteSlot, u8 x, u8 y);
 void CharCustom_SetupTrainerBackSprite(u8 spriteId, u16 trainerPicId);
 

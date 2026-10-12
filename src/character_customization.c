@@ -378,17 +378,54 @@ enum TrainerPicID CharCustom_LocalFrontTrainerPic(enum Gender gender)
     return ch != NULL ? ch->frontPic : PlayerGenderToFrontTrainerPicId(gender);
 }
 
-// Link battles: the local player's own trainer is the chosen character. The
-// other players' choices do not travel with the battle (the host checks each
-// trainer record against the save byte for byte), so they keep the engine's
-// trainer of their gender.
+// Link battles: the other players' characters come from their looks, the ones
+// the host's roster already carries for the overworld. The companion sends them
+// for each battle the game binds (platform/mp_bridge.c, frame 'B': the battle's
+// generation and a look per binding slot, which is the link player's index).
+// The battle's trainer records stay exactly the GBA game's, so a battle with an
+// emulator game, an older game or an older host is unchanged: without looks for
+// the bound battle, or with a look this game does not know, a player shows the
+// engine's trainer of their gender.
+static struct
+{
+    bool8 valid;
+    u8 generation[16];
+    u8 looks[MAX_LINK_PLAYERS][MP_APPEARANCE_BYTES];
+} sBattleLooks;
+
+void CharCustom_SetBattleLooks(const u8 *generation, const u8 *looks)
+{
+    memcpy(sBattleLooks.generation, generation, sizeof(sBattleLooks.generation));
+    memcpy(sBattleLooks.looks, looks, sizeof(sBattleLooks.looks));
+    sBattleLooks.valid = TRUE;
+}
+
+u32 CharCustom_LinkPlayerCharacter(u32 linkPlayer)
+{
+    u8 generation[16];
+
+    if (linkPlayer >= MAX_LINK_PLAYERS)
+        return CC_CHARACTER_NONE;
+    if (linkPlayer == GetMultiplayerId())
+        return CharCustom_LocalCharacter();
+    if (!sBattleLooks.valid || !MultiplayerBattle_GetBindingGeneration(generation)
+     || memcmp(generation, sBattleLooks.generation, sizeof(generation)) != 0)
+        return CC_CHARACTER_NONE;
+    return CharCustom_FromLook(sBattleLooks.looks[linkPlayer]);
+}
+
 enum TrainerPicID CharCustom_LinkBackTrainerPic(u32 linkPlayer)
 {
-    const struct CharCustomCharacter *ch = NULL;
-
-    if (linkPlayer < MAX_LINK_PLAYERS && linkPlayer == GetMultiplayerId())
-        ch = LocalCharacter();
+    const struct CharCustomCharacter *ch = CharCustom_Get(CharCustom_LinkPlayerCharacter(linkPlayer));
     return ch != NULL ? ch->backPic : TRAINER_PIC_NONE;
+}
+
+enum TrainerPicID CharCustom_LinkFrontTrainerPic(u32 linkPlayer)
+{
+    const struct CharCustomCharacter *ch = CharCustom_Get(CharCustom_LinkPlayerCharacter(linkPlayer));
+    if (ch != NULL)
+        return ch->frontPic;
+    return PlayerGenderToFrontTrainerPicId(gLinkPlayers[linkPlayer].gender);
 }
 
 // The Trainer Card's picture window is 72 x 80: a front bigger than the

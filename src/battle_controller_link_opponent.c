@@ -322,7 +322,7 @@ static void LinkOpponentHandleDrawTrainerPic(enum BattlerId battler)
             }
             else
             {
-                trainerPicId = PlayerGenderToFrontTrainerPicId(gLinkPlayers[GetBattlerMultiplayerId(battler)].gender);
+                trainerPicId = LINK_PLAYER_FRONT_PIC(GetBattlerMultiplayerId(battler));
             }
         }
     }
@@ -351,7 +351,7 @@ static void LinkOpponentHandleDrawTrainerPic(enum BattlerId battler)
         }
         else
         {
-            trainerPicId = PlayerGenderToFrontTrainerPicId(gLinkPlayers[GetMultiplayerId() ^ BIT_SIDE].gender);
+            trainerPicId = LINK_PLAYER_FRONT_PIC(GetMultiplayerId() ^ BIT_SIDE);
         }
     }
 

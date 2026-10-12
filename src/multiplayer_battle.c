@@ -1446,3 +1446,17 @@ void MultiplayerBattle_Tick(void)
     gMultiplayerBattleMailbox.state = sState;
     ObserveHoldFlags();
 }
+
+#ifdef PORTABLE
+#include "character_customization.h"
+
+// The native PC game's character selection (character_customization.c): the
+// bound battle's generation, which names the looks the companion sent for it.
+bool32 MultiplayerBattle_GetBindingGeneration(u8 *generation)
+{
+    if (!MultiplayerBattle_IsNative())
+        return FALSE;
+    memcpy(generation, sBinding.generation, sizeof(sBinding.generation));
+    return TRUE;
+}
+#endif // PORTABLE

@@ -424,21 +424,24 @@ static inline const u16 *GetTrainerBackPicPalette(enum TrainerPicID trainerPic)
     return gTrainerPicInfo[SanitizeBackTrainerPic(trainerPic)].backPic->paletteData;
 }
 
-// The local player's trainer pictures. The native PC build shows the chosen
-// character's (character_customization.c); the GBA build expands these to the
-// engine's original calls.
+// The local player's and the link players' trainer pictures. The native PC
+// build shows the chosen characters' (character_customization.c); the GBA
+// build expands these to the engine's original calls.
 #ifdef PORTABLE
 enum TrainerPicID CharCustom_LocalBackTrainerPic(enum Gender gender, enum GameVersion version);
 enum TrainerPicID CharCustom_LocalFrontTrainerPic(enum Gender gender);
 enum TrainerPicID CharCustom_LinkBackTrainerPic(u32 linkPlayer);
+enum TrainerPicID CharCustom_LinkFrontTrainerPic(u32 linkPlayer);
 void CharCustom_SetupTrainerBackSprite(u8 spriteId, u16 trainerPicId);
 #define LOCAL_PLAYER_BACK_PIC(gender, version) CharCustom_LocalBackTrainerPic(gender, version)
 #define LOCAL_PLAYER_FRONT_PIC(gender) CharCustom_LocalFrontTrainerPic(gender)
 #define LOCAL_PLAYER_HOF_PIC(gender) CharCustom_LocalFrontTrainerPic(gender)
+#define LINK_PLAYER_FRONT_PIC(linkPlayer) CharCustom_LinkFrontTrainerPic(linkPlayer)
 #else
 #define LOCAL_PLAYER_BACK_PIC(gender, version) GetPlayerTrainerPic(gender, version)
 #define LOCAL_PLAYER_FRONT_PIC(gender) PlayerGenderToFrontTrainerPicId(gender)
 #define LOCAL_PLAYER_HOF_PIC(gender) PlayerGenderToFrontTrainerPicId_Debug(gender, TRUE)
+#define LINK_PLAYER_FRONT_PIC(linkPlayer) PlayerGenderToFrontTrainerPicId(gLinkPlayers[linkPlayer].gender)
 #endif
 
 #endif // GUARD_DATA_H

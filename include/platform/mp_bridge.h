@@ -19,6 +19,15 @@
  * VBlankIntrWait whenever the bridge runs (sdl2.c, frame boundary), as the
  * emulator is paused during the Lua frame callback.
  *
+ * One extension mgba.lua does not have, for the native game's character
+ * selection: after its battle capability the bridge announces 'A' (version 1,
+ * MP_BRIDGE_BATTLE_LOOKS slots), and the companion then sends 'B' for each
+ * battle the game binds: the battle's generation and one 8-byte look per
+ * binding slot (the looks the host's roster already carries for the overworld).
+ * The game draws the other players' characters from them; the battle's own
+ * records stay exactly the ROM's. A companion that does not know 'A' never
+ * meets it: the launcher pairs this game with its own companion.
+ *
  * Started with `--bridge FILE`; FILE holds `port=N` (1-65535) and `token=` 64
  * lowercase hex digits, and the manifest's explicit opt-ins it has, each on
  * its own line: `trade_effect_prepare=1`, `trade_effect_save=1`,
@@ -81,6 +90,8 @@ enum
     MP_IO_ERROR = -1,
 };
 
+#define MP_BRIDGE_BATTLE_LOOKS 4 /* binding slots in a 'B' frame, 8 bytes each */
+
 struct MpBridgeOps
 {
     void *context;
@@ -101,6 +112,10 @@ struct MpBridgeOps
      * running below 60 frames a second still looks live to the companion;
      * without one, every 6 frames as mgba.lua does (mp_bridge.c, RECORD_MS). */
     uint32_t (*milliseconds)(void *context);
+    /* The looks of a bound battle's players (frame 'B'): its 16-byte generation
+     * and MP_BRIDGE_BATTLE_LOOKS looks of 8 bytes, by binding slot. NULL: the
+     * game shows no characters, and the bridge never announces 'A'. */
+    void (*battleLooks)(void *context, const uint8_t *generation, const uint8_t *looks);
 };
 
 #define MP_BRIDGE_MAX_FRAME (4 + 1 + 240 + 4096) /* "F" response with its 4 KiB window */
@@ -152,7 +167,7 @@ struct MpBridge
     struct MpBridgeBattle battle;
     bool hasBattleGeneration;
     uint32_t battleGeneration;
-    bool battleCapabilitySent;
+    bool battleCapabilitySent, battleLooksCapabilitySent;
     bool menuCapabilitySent, hasMenuSequence;
     uint32_t menuSequence;
     bool resetCapabilitySent, hasResetSequence, hasResetReceipt;

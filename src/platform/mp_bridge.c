@@ -788,6 +788,7 @@ static void ForgetConnection(struct MpBridge *b)
     b->battle.pending = false;
     b->hasBattleGeneration = false;
     b->battleCapabilitySent = false;
+    b->battleLooksCapabilitySent = false;
     b->menuCapabilitySent = false;
     b->hasMenuSequence = false;
     b->resetCapabilitySent = false;
@@ -1339,6 +1340,17 @@ static bool Dispatch(struct MpBridge *b, const uint8_t *payload, size_t size)
             return false;
         }
     }
+    else if (payload[0] == 'B')
+    {
+        /* The extension (mp_bridge.h): a bound battle's generation and a look
+         * per binding slot, only after the 'A' announcement. */
+        if (!b->battleLooksCapabilitySent || restLength != 16 + MP_BRIDGE_BATTLE_LOOKS * 8)
+        {
+            Stop(b, "invalid battle looks", true);
+            return false;
+        }
+        b->ops.battleLooks(b->ops.context, rest, rest + 16);
+    }
     else
     {
         Stop(b, "invalid bridge packet", true);
@@ -1584,6 +1596,17 @@ void MpBridge_Step(struct MpBridge *b)
             return;
         b->tradeEffectSaveCapabilitySent = true;
     }
+    /* The extension (mp_bridge.h): the battle looks the native game draws the
+     * other players' characters from. Optional, after the battle capability. */
+    if (b->ops.battleLooks != NULL && b->battleCapabilitySent && !b->battleLooksCapabilitySent
+     && b->controlCount < MP_BRIDGE_CONTROL_LIMIT)
+    {
+        PutU16(cap, 1);
+        PutU16(cap + 2, MP_BRIDGE_BATTLE_LOOKS);
+        if (!Reliable(b, 'A', cap, 4, NULL, 0))
+            return;
+        b->battleLooksCapabilitySent = true;
+    }
     Receive(b);
     if (!b->connected)
         return;
@@ -1728,6 +1751,7 @@ typedef int MpSocket;
 #include "multiplayer_save.h"
 #include "multiplayer_world.h"
 #include "save.h"
+#include "character_customization.h"
 
 extern const u32 gMultiplayerPresenceAnimationAbiVersion; /* multiplayer.c */
 extern const u32 gMultiplayerOwnershipAbi;                /* multiplayer_ownership.c */
@@ -1853,6 +1877,13 @@ static void GlueLog(void *context, bool error, const char *message)
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", message);
     else
         SDL_Log("%s", message);
+}
+
+/* The battle looks extension (mp_bridge.h): to the character selection. */
+static void GlueBattleLooks(void *context, const uint8_t *generation, const uint8_t *looks)
+{
+    (void)context;
+    CharCustom_SetBattleLooks(generation, looks);
 }
 
 static void GlueRouteResetChord(void *context, bool enabled)
@@ -2000,6 +2031,7 @@ bool MpBridge_Configure(const char *path)
     ops.log = GlueLog;
     ops.routeResetChord = GlueRouteResetChord;
     ops.milliseconds = GlueMilliseconds;
+    ops.battleLooks = GlueBattleLooks;
     memset(&sInput, 0, sizeof(sInput));
     MpBridge_Init(&sBridge, &ops, &caps, (uint16_t)port, token);
     memset(token, 0, sizeof(token));

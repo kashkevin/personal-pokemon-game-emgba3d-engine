@@ -651,6 +651,102 @@ MT_TEST(battle_capability_waits_for_its_mailbox)
     MT_CHECK(MpBridge_CheckCaps(&caps) != NULL);
 }
 
+// The battle looks extension (mp_bridge.h): 'A' after the battle capability
+// when the game takes looks, 'B' only after it and only whole.
+static struct
+{
+    int calls;
+    uint8_t generation[16];
+    uint8_t looks[MP_BRIDGE_BATTLE_LOOKS * 8];
+} sLooks;
+
+static void FakeBattleLooks(void *context, const uint8_t *generation, const uint8_t *looks)
+{
+    (void)context;
+    sLooks.calls++;
+    memcpy(sLooks.generation, generation, sizeof(sLooks.generation));
+    memcpy(sLooks.looks, looks, sizeof(sLooks.looks));
+}
+
+static void BattleReady(void)
+{
+    uint8_t *m = sMemory[MP_REGION_BATTLE];
+
+    PutU32(m, 0x31424D45);
+    PutU16(m + 4, 3);
+    PutU16(m + 6, 512);
+}
+
+static void LooksBridge(bool withLooks)
+{
+    struct MpBridgeCaps caps;
+
+    memset(&caps, 0, sizeof(caps));
+    caps.save = 1;
+    caps.trade = 1;
+    caps.battle = 3;
+    Fresh(&caps);
+    if (withLooks)
+        sBridge.ops.battleLooks = FakeBattleLooks;
+    memset(&sLooks, 0, sizeof(sLooks));
+    sNet.chunk = 0;
+    Ready(0);
+    SaveReady();
+    BattleReady();
+    Step(20);
+}
+
+MT_TEST(battle_looks_follow_their_announcement)
+{
+    uint8_t body[16 + MP_BRIDGE_BATTLE_LOOKS * 8];
+    uint8_t frame[80];
+    const uint8_t *payload;
+    size_t n;
+    int i;
+
+    LooksBridge(true);
+    MT_EQ(SentFrame('W', 0, &payload), 8);
+    MT_EQ(SentFrame('A', 0, &payload), 4);
+    MT_EQ(payload[0], 1);
+    MT_EQ(payload[1], 0);
+    MT_EQ(payload[2], MP_BRIDGE_BATTLE_LOOKS);
+    MT_EQ(payload[3], 0);
+    for (i = 0; i < (int)sizeof(body); i++)
+        body[i] = (uint8_t)(i * 7 + 1);
+    n = FrameOf(frame, 'B', body, sizeof(body));
+    Feed(frame, n, 30);
+    Step(2);
+    MT_EQ(sLooks.calls, 1);
+    MT_CHECK(memcmp(sLooks.generation, body, 16) == 0);
+    MT_CHECK(memcmp(sLooks.looks, body + 16, sizeof(sLooks.looks)) == 0);
+    MT_CHECK(!sNet.closed);
+    MT_EQ(sNet.errors, 0);
+    // a short frame stops the bridge and reaches no game
+    n = FrameOf(frame, 'B', body, sizeof(body) - 1);
+    Feed(frame, n, 200);
+    Step(2);
+    MT_EQ(sLooks.calls, 1);
+    MT_CHECK(sNet.closed);
+}
+
+MT_TEST(battle_looks_need_the_game)
+{
+    uint8_t body[16 + MP_BRIDGE_BATTLE_LOOKS * 8];
+    uint8_t frame[80];
+    const uint8_t *payload;
+    size_t n;
+
+    LooksBridge(false); // a game without characters: mgba.lua's frames only
+    MT_EQ(SentFrame('W', 0, &payload), 8);
+    MT_EQ(SentFrame('A', 0, &payload), -1);
+    memset(body, 0, sizeof(body));
+    n = FrameOf(frame, 'B', body, sizeof(body));
+    Feed(frame, n, 200);
+    Step(2);
+    MT_EQ(sLooks.calls, 0);
+    MT_CHECK(sNet.closed);
+}
+
 // tests/native/windows-input-guard.c
 static uint32_t AddKeys(struct MpBridgeInput *s, uint32_t keys)
 {
@@ -789,6 +885,8 @@ int main(void)
     MT_RUN(clock_paces_records_by_real_time);
     MT_RUN(no_clock_keeps_the_six_frame_cadence);
     MT_RUN(battle_capability_waits_for_its_mailbox);
+    MT_RUN(battle_looks_follow_their_announcement);
+    MT_RUN(battle_looks_need_the_game);
     MT_RUN(reset_chord_guard_masks);
     MT_RUN(reset_chord_guard_orders);
     MT_RUN(reset_chord_guard_native_capability);
