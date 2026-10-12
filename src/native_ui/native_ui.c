@@ -39,6 +39,8 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_Storage,
     &gUiScreen_Battle,
     &gUiScreen_Customize,
+    &gUiScreen_Players,
+    &gUiScreen_Notice,    /* last: only over the calm field */
 };
 
 static bool sInitialized;

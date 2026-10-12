@@ -628,3 +628,17 @@ u32 MultiplayerAppearance_NativeUiSwatch(u32 row, u32 index, bool32 isMay, u16 *
     }
 }
 #endif // ENABLE_NATIVE_UI
+
+#ifdef ENABLE_NATIVE_UI
+// The player's own field sprite as the others see it: the body's walking and
+// running frames and its palette with the player's saved look.
+void MultiplayerAppearance_NativeUiPlayerSprite(const void **frames, u16 *palette)
+{
+    bool32 isMay = gSaveBlock2Ptr->playerGender != MALE;
+    const struct ObjectEventGraphicsInfo *info = GetObjectEventGraphicsInfo(isMay ? OBJ_EVENT_GFX_MAY_NORMAL : OBJ_EVENT_GFX_BRENDAN_NORMAL);
+
+    *frames = info != NULL && info->images != NULL ? info->images[0].data : NULL;
+    MultiplayerAppearance_BuildPalette(isMay ? gObjectEventPal_May : gObjectEventPal_Brendan, isMay,
+                                       ValidLook(sLocal) ? sLocal : NULL, palette);
+}
+#endif // ENABLE_NATIVE_UI

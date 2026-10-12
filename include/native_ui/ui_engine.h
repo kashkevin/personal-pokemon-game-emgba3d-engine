@@ -481,6 +481,31 @@ bool32 OptionMenu_NativeUiState(struct NativeOptionMenu *out);
 /* the session's other players (i < MULTIPLAYER_MAX_PEERS); FALSE: none there or offline */
 bool32 Multiplayer_NativeUiPeer(u32 i, u32 *playerId, u8 *mapGroup, u8 *mapNum, u8 *gender, u8 *activity);
 
+/* ---------------------------------------------------------------- the Players menu (multiplayer_menu.c) */
+
+/* The host-driven Players menu as the game holds it: the host's title, status
+ * and up to six rows (printable ASCII, NUL-padded); rows without an action are
+ * information. waiting: a request is out (the game shows "Waiting for server"). */
+struct NativeMpMenu
+{
+    bool8 waiting;
+    bool8 tradeMenu;       /* reopened by the host for a trade (B cannot close it) */
+    bool8 admissionHeld;   /* a battle entry was chosen: the menu waits for the battle */
+    bool8 back;            /* B chooses the host's Back (else B closes the menu) */
+    u8 cursor;
+    u8 count;
+    u32 revision;          /* the host's screen revision (0: none received yet) */
+    u8 title[25];
+    u8 status[33];
+    u8 rows[6][27];
+    bool8 enabled[6];
+    bool8 admission[6];    /* the battle-entry row */
+};
+bool32 MultiplayerMenu_NativeUiState(struct NativeMpMenu *out);
+/* multiplayer_world.c: the notice banner up now (host notices, wallet, hints): its
+ * window (its text through TextPrinter_NativeUiWindowText), frames shown, frames in all */
+bool32 MultiplayerWorld_NativeUiNotice(u8 *windowId, u16 *shownFrames, u16 *totalFrames);
+
 /* ---------------------------------------------------------------- the STYLE editor (multiplayer_appearance.c) */
 
 /* The editor's rows (its cursor): four colour rows, then SAVE and CANCEL. */
@@ -518,6 +543,8 @@ u32 MultiplayerAppearance_NativeUiLookByte(u32 row);
 u32 MultiplayerAppearance_NativeUiSlots(u32 row, bool32 isMay, u8 *slots);
 /* a choice's colours, light to dark (up to 4; DEFAULT: the body's own); returns how many */
 u32 MultiplayerAppearance_NativeUiSwatch(u32 row, u32 index, bool32 isMay, u16 *colors);
+/* the player's field frames (walking 0-8, running 9-17) and palette with the saved look */
+void MultiplayerAppearance_NativeUiPlayerSprite(const void **frames, u16 *palette);
 
 /* ---------------------------------------------------------------- game art */
 
