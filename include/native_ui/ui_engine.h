@@ -542,6 +542,37 @@ struct NativeEvolution
 };
 bool32 Evolution_NativeUiState(struct NativeEvolution *out);
 
+/* ---------------------------------------------------------------- script menus (script_menu.c), coins (coins.c) */
+
+#define NATIVE_SCRIPT_MENU_MAX 12
+enum
+{
+    NATIVE_SCRIPT_MENU_NONE,
+    NATIVE_SCRIPT_MENU_MULTICHOICE,  /* a script's multichoice (MULTI_*) */
+    NATIVE_SCRIPT_MENU_YES_NO,       /* a script's YES / NO (yesnobox, MSGBOX_YESNO) */
+};
+struct NativeScriptMenu
+{
+    u8 kind;
+    bool8 ready;                     /* it reads buttons now */
+    u8 multichoiceId;
+    u8 count;
+    u8 cursor;                       /* YES / NO: 0 YES */
+    bool8 ignoreB;
+    const u8 *labels[NATIVE_SCRIPT_MENU_MAX]; /* the rows as the engine prints them */
+};
+bool32 ScriptMenu_NativeUiState(struct NativeScriptMenu *out);
+/* the rows of any multichoice list as the engine prints them; returns how many */
+u32 ScriptMenu_NativeUiList(u32 multichoiceId, const u8 **labels, u32 max);
+/* the coin box (showcoinsbox) is up */
+bool32 Coins_NativeUiBoxShown(void);
+/* script.c: the native function the field's script runs now (NULL: none) */
+u8 (*ScriptContext_NativeUiWaitFunc(void))(void);
+/* scrcmd.c: the field's script waits for A or B (a finished msgbox) */
+bool32 Script_NativeUiWaitsForButton(void);
+/* event_object_movement.c: a field sprite palette by its tag (NULL: none) */
+const u16 *ObjectEvent_NativeUiPalette(u16 tag);
+
 /* ---------------------------------------------------------------- the naming screen (naming_screen.c) */
 
 enum

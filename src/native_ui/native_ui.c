@@ -45,6 +45,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_Naming,
     &gUiScreen_Starters,
     &gUiScreen_Evolution,
+    &gUiScreen_GameCorner,
     &gUiScreen_Notice,    /* last: only over the calm field */
 };
 

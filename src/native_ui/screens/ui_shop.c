@@ -31,6 +31,7 @@
 #include "native_ui/ui_draw.h"
 #include "native_ui/ui_engine.h"
 #include "native_ui/ui_gfx.h"
+#include "native_ui/ui_items.h"
 #include "native_ui/ui_screen.h"
 #include "native_ui/ui_text.h"
 #include "native_ui/ui_widgets.h"
@@ -199,30 +200,12 @@ static struct UiRamp Mart(void)
     return UiRampOf(MART_BASE, 0.42, 0.25, 0.62);
 }
 
-/* an item's name as the bag lists it: a TM or HM with its move */
-static void ItemName(u8 *dst, int size, u16 item)
-{
-    dst[0] = EOS;
-    UiText_Append(dst, size, GetItemName(item));
-    if (GetItemPocket(item) == POCKET_TM_HM)
-    {
-        UiText_AppendAscii(dst, size, " ");
-        UiText_Append(dst, size, GetMoveName(GetItemTMHMMoveId(item)));
-    }
-}
-
-static void Money(u8 *dst, int size, u32 amount)
-{
-    UiText_FromAscii(dst, size, "$");
-    UiText_AppendNumber(dst, size, (long)amount, 1, true);
-}
-
 /* the price an item row shows: the engine's price, or SOLD OUT */
 static const u8 *PriceText(int i, u8 *buf, int size)
 {
     if (sS.soldOut[i])
         return gText_SoldOut;
-    Money(buf, size, sS.prices[i]);
+    UiItems_Money(buf, size, sS.prices[i]);
     return buf;
 }
 
@@ -280,69 +263,6 @@ static void Background(const struct UiRamp *m)
     UiG_Rect(x0, y0, w, 2, m->ink);
 }
 
-/* Route Caps at a whole scale with an ink ring (the counter's sign) */
-struct BigCapsCtx
-{
-    const struct UiMask *m;
-    UiRGBA fg;
-    UiRGBA ink;
-};
-
-static void BuildBigCaps(struct UiBitmap *bm, const void *ctx)
-{
-    const struct BigCapsCtx *c = ctx;
-    const struct UiMask *big = UiM_Pad(c->m, 1, 1, 1, 1);
-
-    UiBitmap_FillMask(bm, UiM_Sub(UiM_Dilate8(big), big), 0, 0, c->ink);
-    UiBitmap_FillMask(bm, c->m, 1, 1, c->fg);
-}
-
-static void BigCaps(int x, int y, const char *text, int s, UiRGBA fg, UiRGBA ink)
-{
-    struct BigCapsCtx c = {UiCaps_Mask(text, false), fg, ink};
-    int w = c.m->w + 2, h = c.m->h + 2, tw = (w + 1) * s;
-    char key[96];
-
-    snprintf(key, sizeof(key), "bigcaps:%08x:%d:%08x:%08x", (unsigned)c.m->hash, (int)c.m->w, (unsigned)fg, (unsigned)ink);
-    UiG_BlitPart(UiG_Cached(key, w + 1, h + 1, BuildBigCaps, &c), 0, 0, w + 1, h + 1, x - tw / 2, y, s, false, 1.0);
-}
-
-/* a luggage-style price tag pointing left with a punched hole */
-static int PriceTag(int x, int y, int w, const u8 *text, UiRGBA ink, bool dim)
-{
-    int h = 15, c = (h - 1) >> 1;
-    UiRGBA body = dim ? UiMix(UI_P_PAPER, UI_P_PAPER_LO, 0.7) : UI_P_PAPER;
-
-    UiG_Paint(UiM_Rounded(w, h, UiCornerChamfer(c), UiCornerR(2), UiCornerChamfer(c), UiCornerR(2)), x, y, body,
-              &(struct UiPaint){ink, dim ? UI_NONE : UI_HEX(0xFFFFFF), UiMix(body, UI_P_PAPER_LO, 0.8), 0, 0, NULL, UI_NONE});
-    UiG_Rect(x + 8, y + 6, 3, 3, UiMix(ink, body, 0.35));
-    UiG_Put(x + 9, y + 7, UiMix(ink, body, 0.65));
-    UiG_HLine(x + 8, y + 9, 3, UI_HEX(0xFFFFFF));
-    UiText_Draw(UI_FONT_NORMAL, x + w - 5, y - 2, text, dim ? UI_HEX(0x909090) : UI_P_TEXT, dim ? UI_NONE : UI_P_TEXT_SH,
-                UI_ALIGN_RIGHT, 0);
-    return x + w;
-}
-
-/* a string from a point to the tag's hole */
-static void TagString(int x0, int y0, int x1, int y1, UiRGBA c)
-{
-    int n = abs(x1 - x0) > abs(y1 - y0) ? abs(x1 - x0) : abs(y1 - y0);
-
-    if (n < 1)
-        n = 1;
-    for (int s = 0; s <= n; s++)
-        UiG_Put(x0 + (int)((x1 - x0) * (double)s / n + (x1 >= x0 ? 0.5 : -0.5)),
-                y0 + (int)((y1 - y0) * (double)s / n + (y1 >= y0 ? 0.5 : -0.5)), c);
-}
-
-/* the Gen 3 money window: a caps label, the amount right-aligned */
-static void MoneyBox(int x, int y, int w, const char *label, const u8 *value, UiRGBA ink)
-{
-    UiG_Paint(UiM_Rounded4(w, 22, 2, 2, 2, 2), x, y, UI_P_PAPER, &(struct UiPaint){ink, UI_HEX(0xFFFFFF), UI_P_PAPER_LO, 0, 0, NULL, UI_NONE});
-    UiCaps_Draw(x + 7, y + 8, label, UI_P_TEXT_MUTED, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
-    UiG_TextEx(x + w - 7, y + 2, value, UI_FONT_NORMAL, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_RIGHT);
-}
-
 /* the counter scene: pegboard wall, two stocked shelves, the counter and its
  * sign, the item in question on the counter with its tag on a string */
 static void CounterScene(int x, int y, int w, int h, const struct UiRamp *m, u16 cur, const u8 *tag, bool dim)
@@ -379,7 +299,7 @@ static void CounterScene(int x, int y, int w, int h, const struct UiRamp *m, u16
     sy2 = cy + 13;
     UiG_Paint(UiM_Rounded4(sw, 26, 2, 2, 2, 2), sx, sy2, m->lo,
               &(struct UiPaint){m->ink, UiMix(m->lo, m->hi, 0.5), UiMix(m->lo, m->ink, 0.4), 0, 0, NULL, UI_NONE});
-    BigCaps(sx + (sw >> 1), sy2 + 5, "POK" UI_CAPS_E_ACUTE " MART", 2, UI_P_TEXT_W, m->ink);
+    UiItems_BigCaps(sx + (sw >> 1), sy2 + 5, "POK" UI_CAPS_E_ACUTE " MART", 2, UI_P_TEXT_W, m->ink, UI_ALIGN_CENTER);
     {
         struct UiPixPal pal[7] = {
             {'a', m->ink}, {'b', UI_P_PAPER}, {'c', UiMix(UI_P_HP_GREEN_0, UI_P_PAPER, 0.3)}, {'d', m->hi},
@@ -398,8 +318,8 @@ static void CounterScene(int x, int y, int w, int h, const struct UiRamp *m, u16
         {
             int tx = ix + 62, ty = cy - 32;
 
-            TagString(ix + 40, iy + 14, tx + 9, ty + 7, m->ink);
-            PriceTag(tx, ty, 78, tag, m->ink, dim);
+            UiItems_TagString(ix + 40, iy + 14, tx + 9, ty + 7, m->ink);
+            UiItems_PriceTag(tx, ty, 78, tag, m->ink, dim);
         }
     }
 }
@@ -455,9 +375,9 @@ static void Board(int t, const struct UiRamp *m)
             const u8 *pt = PriceText(idx, price, sizeof(price));
 
             UiGfx_ItemIcon(item, sx + 10, ry, NULL);
-            ItemName(name, sizeof(name), item);
+            UiItems_ItemName(name, sizeof(name), item);
             UiG_Text(sx + 38, ry + 4, name);
-            PriceTag(sx + sw - 16 - 74, ry + 5, 74, pt, m->lo, sS.soldOut[idx] || sS.prices[idx] > sS.money);
+            UiItems_PriceTag(sx + sw - 16 - 74, ry + 5, 74, pt, m->lo, sS.soldOut[idx] || sS.prices[idx] > sS.money);
         }
         if (sel && list)
             UiW_Cursor(sx + 1, ry + 7, UiW_Nudge(t), UI_NONE);
@@ -562,8 +482,8 @@ static void Windows(int t, const struct UiRamp *m)
         q[1] = EOS;
         UiText_AppendNumber(q, sizeof(q), sS.quantity, 2, false);
         UiG_Text(qx + 9, qy + 12, q);
-        Money(total, sizeof(total), sS.totalCost);
-        PriceTag(qx + qw - 92, qy + 15, 84, total, m->lo, false);
+        UiItems_Money(total, sizeof(total), sS.totalCost);
+        UiItems_PriceTag(qx + qw - 92, qy + 15, 84, total, m->lo, false);
         UiG_Hit(HIT_QTY_UP, 0, qx + 4, qy + 1, 30, 14);
         UiG_Hit(HIT_QTY_DOWN, 0, qx + 4, qy + 30, 30, 14);
         UiG_Hit(HIT_QTY_OK, 0, qx + 40, qy, qw - 40, qh);
@@ -588,8 +508,8 @@ static void Draw(int t)
     Background(&m);
     UiW_TitleTab(0, 8, "POK" UI_CAPS_E_ACUTE " MART", &m, 0, NULL);
     /* left column: money, how many in the Bag, the counter, the description */
-    Money(money, sizeof(money), sS.money);
-    MoneyBox(8, 34, 148, "MONEY", money, m.ink);
+    UiItems_Money(money, sizeof(money), sS.money);
+    UiItems_MoneyBox(8, 34, 148, "MONEY", money, m.ink);
     if (item != ITEM_NONE)
     {
         inBag[0] = CHAR_MULT_SIGN;
@@ -600,7 +520,7 @@ static void Draw(int t)
     {
         UiText_FromAscii(inBag, sizeof(inBag), "---");
     }
-    MoneyBox(160, 34, 140, "IN BAG", inBag, m.ink);
+    UiItems_MoneyBox(160, 34, 140, "IN BAG", inBag, m.ink);
     if (item != ITEM_NONE)
     {
         for (int i = 0; i < sS.count; i++)

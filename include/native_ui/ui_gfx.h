@@ -79,6 +79,9 @@ bool UiGfx_TrainerPic(uint16_t picId, int x, int y, const struct UiFilter *filte
  * palette (a recoloured trainer), enlarged by a whole factor, mirrored for flip */
 bool UiGfx_FieldSprite(const void *tiles, int frameCount, const uint16_t *palette, int frame, int x, int y, int scale,
                        bool flip);
+/* ... frames of w x h (multiples of 8) */
+bool UiGfx_FieldSpriteSized(const void *tiles, int frameCount, const uint16_t *palette, int frame, int w, int h, int x,
+                            int y, int scale, bool flip);
 
 /* applies a filter to RGBA pixels in place */
 void UiFilter_Apply(uint8_t *rgba, int count, const struct UiFilter *f);

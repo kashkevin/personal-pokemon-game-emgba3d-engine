@@ -489,6 +489,8 @@ struct FieldSheetCtx
     const uint8_t *tiles;
     const uint16_t *palette;
     int frames;
+    int w;
+    int h;
 };
 
 static void BuildFieldSheet(struct UiBitmap *bm, const void *ctx)
@@ -496,27 +498,34 @@ static void BuildFieldSheet(struct UiBitmap *bm, const void *ctx)
     const struct FieldSheetCtx *c = ctx;
 
     for (int f = 0; f < c->frames; f++)
-        UiGfx_Decode4bpp(&bm->d[(size_t)f * 16 * 32 * 4], 16, c->tiles + f * 16 * 32 / 2, c->palette, 16, 32);
+        UiGfx_Decode4bpp(&bm->d[(size_t)f * c->w * c->h * 4], c->w, c->tiles + f * c->w * c->h / 2, c->palette, c->w, c->h);
+}
+
+bool UiGfx_FieldSpriteSized(const void *tiles, int frameCount, const uint16_t *palette, int frame, int w, int h, int x,
+                            int y, int scale, bool flip)
+{
+    struct FieldSheetCtx c;
+    uint32_t hash = 2166136261u;
+    char key[96];
+
+    if (tiles == NULL || palette == NULL || frame < 0 || frame >= frameCount || w <= 0 || h <= 0 || w % 8 || h % 8)
+        return false;
+    for (int i = 0; i < 16; i++)
+        hash = (hash ^ palette[i]) * 16777619u;
+    c.tiles = tiles;
+    c.palette = palette;
+    c.frames = frameCount;
+    c.w = w;
+    c.h = h;
+    snprintf(key, sizeof(key), "ow:%p:%d:%dx%d:%08x", tiles, frameCount, w, h, (unsigned)hash);
+    UiG_BlitPart(UiG_Cached(key, w, h * frameCount, BuildFieldSheet, &c), 0, frame * h, w, h, x, y, scale, flip, 1.0);
+    return true;
 }
 
 bool UiGfx_FieldSprite(const void *tiles, int frameCount, const uint16_t *palette, int frame, int x, int y, int scale,
                        bool flip)
 {
-    struct FieldSheetCtx c;
-    uint32_t h = 2166136261u;
-    char key[96];
-
-    if (tiles == NULL || palette == NULL || frame < 0 || frame >= frameCount)
-        return false;
-    for (int i = 0; i < 16; i++)
-        h = (h ^ palette[i]) * 16777619u;
-    c.tiles = tiles;
-    c.palette = palette;
-    c.frames = frameCount;
-    snprintf(key, sizeof(key), "ow:%p:%d:%08x", tiles, frameCount, (unsigned)h);
-    UiG_BlitPart(UiG_Cached(key, 16, 32 * frameCount, BuildFieldSheet, &c), 0, frame * 32, 16, 32, x, y, scale, flip,
-                 1.0);
-    return true;
+    return UiGfx_FieldSpriteSized(tiles, frameCount, palette, frame, 16, 32, x, y, scale, flip);
 }
 
 static void UiGfx_ArtShutdown(void)

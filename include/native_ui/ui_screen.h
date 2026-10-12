@@ -97,6 +97,7 @@ extern const struct UiScreen gUiScreen_Shop;
 extern const struct UiScreen gUiScreen_Naming;
 extern const struct UiScreen gUiScreen_Starters;
 extern const struct UiScreen gUiScreen_Evolution;
+extern const struct UiScreen gUiScreen_GameCorner;
 extern const struct UiScreen gUiScreen_Notice;
 
 #endif // GUARD_NATIVE_UI_SCREEN_H
