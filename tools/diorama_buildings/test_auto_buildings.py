@@ -104,6 +104,31 @@ class RoofBandTests(unittest.TestCase):
         self.assertTrue(rows and min(rows) >= 10 and max(rows) <= 20)
 
 
+class LayoutVariantTests(unittest.TestCase):
+    """A map whose scripts switch its layout (setmaplayoutindex) keeps its
+    buildings in the other layout where their cells are the same."""
+
+    def test_the_variants_come_from_the_maps_scripts(self):
+        import gen_voxel_buildings as gen
+        variants = gen.layout_variants()
+        self.assertEqual(variants["LAYOUT_ROUTE111"], {"LAYOUT_ROUTE111_NO_MIRAGE_TOWER"})
+        self.assertEqual(variants["LAYOUT_SOOTOPOLIS_CITY"],
+                         {"LAYOUT_SOOTOPOLIS_CITY_LEGENDS_BATTLE"})
+
+    def test_trainer_hill_stands_without_the_mirage_tower_and_the_tower_does_not(self):
+        import expansion_assets
+        import gen_voxel_buildings as gen
+        import voxel_building as vb
+        models = {m.name: m for m in gen.build_models(only="auto_route111")}
+        layouts = expansion_assets.emerald_layouts(vb.ROOT)
+        where = {name: {p[4] for p in gen.find_placements(m, layouts)}
+                 for name, m in models.items()}
+        self.assertEqual(where["auto_route111_landmark_29_106"],
+                         {"LAYOUT_ROUTE111", "LAYOUT_ROUTE111_NO_MIRAGE_TOWER"})
+        # the tower's cells are sand in the layout the game shows when it is hidden
+        self.assertEqual(where["auto_route111_19_58"], {"LAYOUT_ROUTE111"})
+
+
 class FacadeTests(unittest.TestCase):
     def test_the_eave_is_the_first_long_edge_above_the_door(self):
         from PIL import Image

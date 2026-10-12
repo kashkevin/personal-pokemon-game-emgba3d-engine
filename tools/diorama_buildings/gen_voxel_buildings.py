@@ -1173,6 +1173,31 @@ def _area_xz(poly):
 
 
 _EXISTS = {}    # blockdata path -> on disk: asked for every model
+_VARIANTS = None
+
+
+def layout_variants():
+    """The layouts a map's own scripts switch it to (setmaplayoutindex), by
+    the map's layout id: Route 111 without its Mirage Tower (every visit the
+    tower is hidden, and for good after its event), Sootopolis during the
+    legends' battle, Route 130 with Mirage Island. A building found on the
+    map stands in them too, where its cells are the same (the Mirage Tower
+    itself, whose cells are sand there, does not)."""
+    global _VARIANTS
+    if _VARIANTS is None:
+        import glob
+        import re
+        _VARIANTS = {}
+        for path in sorted(glob.glob(os.path.join(vb.ROOT, "data", "maps", "*", "map.json"))):
+            scripts = os.path.join(os.path.dirname(path), "scripts.inc")
+            if not os.path.exists(scripts):
+                continue
+            own = json.load(open(path, encoding="utf-8"))["layout"]
+            for name in re.findall(r"setmaplayoutindex\s+(LAYOUT_\w+)",
+                                   open(scripts, encoding="utf-8").read()):
+                if name != own:
+                    _VARIANTS.setdefault(own, set()).add(name)
+    return _VARIANTS
 
 
 def find_placements(model, layouts_json):
@@ -1213,9 +1238,12 @@ def find_placements(model, layouts_json):
         if entry.get("primary_tileset") != ref.primary:
             continue
         # An object of free shape (a hedge run) stands only where it was
-        # found: a short run also repeats inside every longer one. A block of
-        # one stands wherever the generator found the same block.
-        if "owned" in model.spec and entry["id"] != ref.id:
+        # found: a short run also repeats inside every longer one - and in
+        # the layouts its map's scripts switch to (layout_variants), there if
+        # its cells are the same. A block of one stands wherever the
+        # generator found the same block.
+        if ("owned" in model.spec and entry["id"] != ref.id
+                and entry["id"] not in layout_variants().get(ref.id, ())):
             continue
         if not primary_only and entry.get("secondary_tileset") != ref.secondary:
             continue
