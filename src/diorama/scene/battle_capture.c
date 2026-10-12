@@ -212,7 +212,13 @@ static uint8_t BackdropEnvironment(void)
 
     if (gBattleTypeFlags & BATTLE_TYPE_FRONTIER)
         return BATTLE_ENVIRONMENT_FRONTIER;
-    if (gBattleTypeFlags & BATTLE_TYPE_TRAINER)
+    /* Only one of the game's own trainers has a class to read: a link battle's
+     * opponent is another player (TRAINER_LINK_OPPONENT), as is a secret
+     * base's, and reading a class for those ids stops the game at the engine's
+     * assertion (data.h SanitizeTrainerId) on this drawing thread, so every
+     * native multiplayer battle froze as it began. A co-op Gym battle's
+     * opponent is the real Leader and keeps the Leader's backdrop. */
+    if ((gBattleTypeFlags & BATTLE_TYPE_TRAINER) && TRAINER_BATTLE_PARAM.opponentA < TRAINERS_COUNT)
     {
         u32 trainerClass = GetTrainerClassFromId(TRAINER_BATTLE_PARAM.opponentA);
 
