@@ -509,3 +509,116 @@ int NativeSelfTest_CryStop(void)
     printf("selftest-cry-stop: %d checks, %d failed\n", sCryChecks, sCryFailures);
     return sCryFailures ? 1 : 0;
 }
+
+// ---------------------------------------------------------------------------
+//   pokeemerald-mp --selftest-shake-anim
+//
+// A move animation shaking a battler or the battle's background
+// (battle_anim_normal.c, AnimShakeMonOrBattlePlatforms: Rock Throw, Rock Slide,
+// Metal Claw, Dragon Claw, Ancient Power, Superpower, Snore, Avalanche...). It keeps
+// the address of what it shakes (gBattle_BG3_X or _Y, gSpriteCoordOffsetX or _Y) in
+// two s16 fields and puts it back together as lo | hi << 16. KNOWN_ISSUES N40: on
+// the GBA those variables are in IWRAM, whose addresses never have bit 15 set;
+// natively they can, the s16 low half is then negative and sign-extends over the
+// high half, and the animation reads and writes through 0xFFFFxxxx - a segmentation
+// fault in the move's animation (the 3D build's layout has all four so; Mossdeep's
+// Space Center Multi battle crashed so). Here the animation shakes each of the four,
+// and once more a value at an address with bit 15 set in any layout (the address
+// put in the sprite's fields after the animation began, as it keeps it); each must
+// shake and come back to its value.
+// ---------------------------------------------------------------------------
+
+#include "battle_anim.h"
+#include "sprite.h"
+#include "constants/battle_anim.h"
+
+extern const struct SpriteTemplate gShakeMonOrPlatformSpriteTemplate;
+
+static int sShakeChecks, sShakeFailures;
+// 64 KiB and a little more: some of these u16s have addresses with bit 15 set
+static u16 sShakeSpace[0x8000 + 16];
+
+static void ExpectShake(const char *what, bool32 ok)
+{
+    sShakeChecks++;
+    if (!ok)
+    {
+        sShakeFailures++;
+        printf("FAIL %s\n", what);
+    }
+}
+
+// Starts the animation on target type `type` (the game's createsprite call), then
+// optionally points its fields at `inject`; runs it to its end. Returns whether the
+// value shook (changed while it ran).
+static bool32 RunShake(u8 type, u16 *watched, u16 *inject)
+{
+    bool32 shook = FALSE;
+    u16 start = *watched;
+    u8 spriteId;
+    int steps;
+
+    gBattleAnimArgs[0] = 2;    // velocity
+    gBattleAnimArgs[1] = 1;    // shake timer
+    gBattleAnimArgs[2] = 8;    // shake duration
+    gBattleAnimArgs[3] = type;
+    gBattleAnimArgs[4] = 0;    // battler selector: the attacker
+    spriteId = CreateSpriteAndAnimate(&gShakeMonOrPlatformSpriteTemplate, 0, 0, 0);
+    if (spriteId == MAX_SPRITES)
+        return FALSE;
+    if (inject != NULL)
+    {
+        gSprites[spriteId].data[4] = *inject;                  // the value to come back to
+        gSprites[spriteId].data[6] = (u32)inject & 0xFFFF;     // as StoreSpriteCallbackInData6
+        gSprites[spriteId].data[7] = (u32)inject >> 16;
+    }
+    for (steps = 0; steps < 64 && gSprites[spriteId].inUse; steps++)
+    {
+        gSprites[spriteId].callback(&gSprites[spriteId]);
+        if (*watched != start)
+            shook = TRUE;
+    }
+    return shook && !gSprites[spriteId].inUse;
+}
+
+int NativeSelfTest_ShakeAnim(void)
+{
+    static const char *const names[4] = {"gBattle_BG3_X", "gBattle_BG3_Y", "gSpriteCoordOffsetX",
+                                         "gSpriteCoordOffsetY"};
+    u16 *targets[4] = {&gBattle_BG3_X, &gBattle_BG3_Y, (u16 *)&gSpriteCoordOffsetX,
+                       (u16 *)&gSpriteCoordOffsetY};
+    u16 *high = NULL;
+    char what[96];
+    u32 i;
+    u8 type;
+
+    ResetSpriteData();
+    gBattlersCount = 2;
+    for (type = SHAKE_BG_X; type <= SHAKE_MON_Y; type++)
+    {
+        printf("shaking %s at %p (address bit 15 %s)\n", names[type], (void *)targets[type],
+               ((u32)targets[type] & 0x8000) ? "set: sign-extends" : "clear");
+        fflush(stdout);
+        *targets[type] = 100;
+        snprintf(what, sizeof(what), "%s shook and the animation ended", names[type]);
+        ExpectShake(what, RunShake(type, targets[type], NULL));
+        snprintf(what, sizeof(what), "%s back to its value", names[type]);
+        ExpectShake(what, *targets[type] == 100);
+    }
+    for (i = 0; i < ARRAY_COUNT(sShakeSpace); i++)
+        if (((u32)&sShakeSpace[i] & 0x8000) != 0)
+        {
+            high = &sShakeSpace[i];
+            break;
+        }
+    printf("shaking a value at %p (address bit 15 set)\n", (void *)high);
+    fflush(stdout);
+    *high = 200;
+    gBattle_BG3_Y = 100;
+    ExpectShake("a value at an address with bit 15 set shook", RunShake(SHAKE_BG_Y, high, high));
+    ExpectShake("... back to its value", *high == 200);
+    ExpectShake("... and the background's value left alone", gBattle_BG3_Y == 100);
+    ResetSpriteData();
+    printf("selftest-shake-anim: %d checks, %d failed\n", sShakeChecks, sShakeFailures);
+    return sShakeFailures ? 1 : 0;
+}
