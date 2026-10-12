@@ -137,9 +137,12 @@ class Run:
             if ids:
                 self.wid = ids[-1]
                 self.x('windowfocus', self.wid)
-                g = dict(l.split('=') for l in self.x('getwindowgeometry', '--shell', self.wid).split())
-                self.geo = int(g['X']), int(g['Y']), int(g['WIDTH']), int(g['HEIGHT'])
-                return True
+                g = dict(l.split('=', 1) for l in self.x('getwindowgeometry', '--shell', self.wid).split()
+                         if '=' in l)
+                # the window may be gone again already (the game exited at once): look again
+                if all(k in g for k in ('X', 'Y', 'WIDTH', 'HEIGHT')):
+                    self.geo = int(g['X']), int(g['Y']), int(g['WIDTH']), int(g['HEIGHT'])
+                    return True
             time.sleep(0.3)
         return False
 
