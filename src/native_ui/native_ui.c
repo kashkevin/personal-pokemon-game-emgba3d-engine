@@ -9,10 +9,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_opengl.h>
 
 #include "global.h"
 #include "palette.h"
 #include "native_ui/native_ui.h"
+#include "native_ui/ui_bench.h"
 #include "native_ui/ui_engine.h"
 #include "native_ui/ui_draw.h"
 #include "native_ui/ui_gfx.h"
@@ -105,6 +107,7 @@ bool NativeUi_Init(SDL_Window *window)
     env = SDL_getenv("PKMN_NATIVE_UI_PROMPTS");
     if (env != NULL && (strcmp(env, "pad") == 0 || strcmp(env, "keyboard") == 0))
         UiW_ForcePromptDevice(strcmp(env, "pad") == 0 ? UI_DEVICE_PAD : UI_DEVICE_KEYBOARD);
+    UiBench_Init(sEnabled);
     if (!sEnabled)
     {
         SDL_Log("Native UI: off (PKMN_NATIVE_UI=0): the GBA presentation is shown");
@@ -276,9 +279,11 @@ bool NativeUi_PressesPending(void)
 
 uint16_t NativeUi_FilterKeys(uint16_t keys)
 {
-    uint16_t real = keys;
-    uint16_t newKeys = keys & ~sPrevKeys;
+    uint16_t real, newKeys;
 
+    keys = UiBench_Keys(keys); /* PKMN_NATIVE_UI_BENCH: its script presses buttons, UI on or off */
+    real = keys;
+    newKeys = keys & ~sPrevKeys;
     if (!NativeUi_Enabled())
         return keys;
     sPrevKeys = real;
@@ -433,12 +438,83 @@ bool NativeUi_HandleEvent(const SDL_Event *event)
 
 void UiTestCard_Draw(int t);
 
+/* GL timer queries for the UI pass's GPU time (benchmark and log): a small ring, read when ready */
+typedef void (APIENTRY *PfnGenQueries)(GLsizei, GLuint *);
+typedef void (APIENTRY *PfnBeginQuery)(GLenum, GLuint);
+typedef void (APIENTRY *PfnEndQuery)(GLenum);
+typedef void (APIENTRY *PfnGetQueryObjectiv)(GLuint, GLenum, GLint *);
+typedef void (APIENTRY *PfnGetQueryObjectui64v)(GLuint, GLenum, GLuint64 *);
+#define GPU_QUERIES 4
+static struct
+{
+    bool tried, ok;
+    PfnGenQueries gen;
+    PfnBeginQuery begin;
+    PfnEndQuery end;
+    PfnGetQueryObjectiv getiv;
+    PfnGetQueryObjectui64v getui64;
+    GLuint ids[GPU_QUERIES];
+    bool pending[GPU_QUERIES];
+    int next;
+} sGpu;
+static double sGpuMsSum;
+static int sGpuSamples;
+
+static bool GpuTimerReady(void)
+{
+    if (!sGpu.tried)
+    {
+        sGpu.tried = true;
+        sGpu.gen = (PfnGenQueries)SDL_GL_GetProcAddress("glGenQueries");
+        sGpu.begin = (PfnBeginQuery)SDL_GL_GetProcAddress("glBeginQuery");
+        sGpu.end = (PfnEndQuery)SDL_GL_GetProcAddress("glEndQuery");
+        sGpu.getiv = (PfnGetQueryObjectiv)SDL_GL_GetProcAddress("glGetQueryObjectiv");
+        sGpu.getui64 = (PfnGetQueryObjectui64v)SDL_GL_GetProcAddress("glGetQueryObjectui64v");
+        sGpu.ok = sGpu.gen != NULL && sGpu.begin != NULL && sGpu.end != NULL && sGpu.getiv != NULL && sGpu.getui64 != NULL;
+        if (sGpu.ok)
+            sGpu.gen(GPU_QUERIES, sGpu.ids);
+    }
+    return sGpu.ok;
+}
+
+/* collects finished queries (never waits for one) */
+static void GpuTimerCollect(void)
+{
+    for (int i = 0; i < GPU_QUERIES; i++)
+    {
+        GLint available = 0;
+        GLuint64 ns = 0;
+
+        if (!sGpu.pending[i])
+            continue;
+        sGpu.getiv(sGpu.ids[i], GL_QUERY_RESULT_AVAILABLE, &available);
+        if (!available)
+            continue;
+        sGpu.getui64(sGpu.ids[i], GL_QUERY_RESULT, &ns);
+        sGpu.pending[i] = false;
+        sGpuMsSum += ns / 1.0e6;
+        sGpuSamples++;
+        UiBench_Gpu((float)(ns / 1.0e6));
+    }
+}
+
 void NativeUi_Draw(int outputWidth, int outputHeight)
 {
     Uint64 start;
+    bool timed;
 
+    UiBench_Frame(sLastDrawMs);
+    sLastDrawMs = 0;
     if (!NativeUi_Enabled() || (sActive == NULL && !sTestCard))
         return;
+    timed = (sLog || UiBench_Active()) && GpuTimerReady();
+    if (timed)
+    {
+        GpuTimerCollect();
+        timed = !sGpu.pending[sGpu.next];
+        if (timed)
+            sGpu.begin(GL_TIME_ELAPSED, sGpu.ids[sGpu.next]);
+    }
     start = SDL_GetPerformanceCounter();
     UiDraw_Begin(outputWidth, outputHeight, sSize);
     if (sActive != NULL && sActive->draw != NULL)
@@ -446,6 +522,12 @@ void NativeUi_Draw(int outputWidth, int outputHeight)
     if (sTestCard)
         UiTestCard_Draw((int)sFrame);
     UiDraw_End();
+    if (timed)
+    {
+        sGpu.end(GL_TIME_ELAPSED);
+        sGpu.pending[sGpu.next] = true;
+        sGpu.next = (sGpu.next + 1) % GPU_QUERIES;
+    }
     sLastDrawMs = (float)((SDL_GetPerformanceCounter() - start) * 1000.0 / SDL_GetPerformanceFrequency());
     sDrawMsSum += sLastDrawMs;
     sDrawSamples++;
@@ -454,11 +536,14 @@ void NativeUi_Draw(int outputWidth, int outputHeight)
         int quads, calls, uploads;
 
         UiDraw_Stats(&quads, &calls, &uploads);
-        SDL_Log("Native UI: %s, UI pass %.3f ms CPU (mean of %d), %d quads, %d draw calls, scale %d, canvas %dx%d",
-                sActive != NULL ? sActive->name : "test card", sDrawMsSum / sDrawSamples, sDrawSamples, quads, calls,
+        SDL_Log("Native UI: %s, UI pass %.3f ms CPU (mean of %d), %.3f ms GPU (%d), %d quads, %d draw calls, scale %d, canvas %dx%d",
+                sActive != NULL ? sActive->name : "test card", sDrawMsSum / sDrawSamples, sDrawSamples,
+                sGpuSamples > 0 ? sGpuMsSum / sGpuSamples : -1.0, sGpuSamples, quads, calls,
                 UiDraw_View()->scale, UiDraw_View()->canvasWidth, UiDraw_View()->canvasHeight);
         sDrawMsSum = 0;
         sDrawSamples = 0;
+        sGpuMsSum = 0;
+        sGpuSamples = 0;
         sLastLogMs = SDL_GetTicks();
     }
 }

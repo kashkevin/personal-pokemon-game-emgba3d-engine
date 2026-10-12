@@ -30,6 +30,7 @@ engine's own button presses. It never decides anything the engine decides.
 | `ui_widgets.c` | the design's shared widgets (port of `preview/js/widgets.js`); prompts show the game's real keys and XInput buttons |
 | `ui_gfx.c` | the design's menu icons (embedded) and the game's own art: party icons, front pictures (with the species' own front animation) and item icons, the compressed ones decoded at the frame boundary (`UiGfx_Prepare*` in a screen's capture); CSS-style filters |
 | `ui_title_bg.c` | the Emerald title remaster (versions A/B/C; the game shows C: the intro, then B's loop), one shader pass at the logical size |
+| `ui_bench.c` | `PKMN_NATIVE_UI_BENCH`: the frame-time benchmark (UI on against off) |
 | `native_ui.c` | the controller: screen registry, capture, picture policy, press queue, mouse, PC keys that are not game buttons (Tab and the pad's Y: a screen's `pcKey`), fades, switches, timing log |
 | `screens/ui_title.c` | 21 title: remaster background, EMERALD wordmark, PRESS START |
 | `screens/ui_main_menu.c` | 21 main menu: the engine's rows, CONTINUE with the save's summary and party, QUIT GAME (the PC's own row: asks, then closes the window), how the window was opened |
@@ -66,7 +67,8 @@ Read once at start-up; not for players, not in the launcher or `pokeemerald.cfg`
 | `PKMN_NATIVE_UI_TESTCARD=1` | the kit's test card over the game |
 | `PKMN_NATIVE_UI_SIZE=small` | UI size Small |
 | `PKMN_NATIVE_UI_PROMPTS=pad` | the controller's prompts always (or `keyboard`) |
-| `PKMN_NATIVE_UI_LOG=1` | screen changes, clicks and the UI pass's timing in the log |
+| `PKMN_NATIVE_UI_LOG=1` | screen changes, clicks, queued presses, the battle HUD's phases and the UI pass's timing (CPU, and GPU by timer query) in the log |
+| `PKMN_NATIVE_UI_BENCH=<file.csv>` | the UI's frame-time benchmark (`ui_bench.c`): boots to the field, then the field, the pause menu, the bag and the party for 8 s each, pressing the game's own buttons; appends per-phase frame times (mean, median, 99th percentile, 1 % low FPS) and the UI pass's CPU and GPU time to the file, then quits. Run it with the UI on and with `PKMN_NATIVE_UI=0` to compare |
 
 ## Adding a screen
 
