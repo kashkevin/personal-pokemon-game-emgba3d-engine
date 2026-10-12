@@ -87,6 +87,7 @@ extern const struct UiScreen gUiScreen_Battle;
 extern const struct UiScreen gUiScreen_Customize;
 extern const struct UiScreen gUiScreen_Players;
 extern const struct UiScreen gUiScreen_TrainerCard;
+extern const struct UiScreen gUiScreen_Shop;
 extern const struct UiScreen gUiScreen_Notice;
 
 #endif // GUARD_NATIVE_UI_SCREEN_H

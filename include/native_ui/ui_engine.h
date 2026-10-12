@@ -294,6 +294,11 @@ bool32 Bag_NativeUiState(struct NativeBag *out);
 /* menu_helpers.c: the shared YES/NO, and the shared message (its window) */
 bool32 MenuHelpers_NativeUiYesNo(void);
 bool32 MenuHelpers_NativeUiMessage(u8 *windowId);
+/* whose they are: whether a task runs one of the two helpers now, the
+ * message's next step and the YES/NO's YES (NULL: not up) */
+bool32 MenuHelpers_NativeUiRunsHelper(u8 taskId);
+void (*MenuHelpers_NativeUiMessageNext(void))(u8);
+void (*MenuHelpers_NativeUiYesFunc(void))(u8);
 
 /* ---------------------------------------------------------------- Pokédex (pokedex.c, the classic one) */
 
@@ -480,6 +485,45 @@ bool32 OptionMenu_NativeUiState(struct NativeOptionMenu *out);
 
 /* the session's other players (i < MULTIPLAYER_MAX_PEERS); FALSE: none there or offline */
 bool32 Multiplayer_NativeUiPeer(u32 i, u32 *playerId, u8 *mapGroup, u8 *mapNum, u8 *gender, u8 *activity);
+
+/* ---------------------------------------------------------------- the Poké Mart (shop.c) */
+
+#define NATIVE_SHOP_MAX_ITEMS 64
+enum
+{
+    NATIVE_SHOP_NONE,
+    NATIVE_SHOP_MENU,        /* the field's BUY / SELL / QUIT (a decoration shop: BUY / QUIT) */
+    NATIVE_SHOP_FIELD,       /* the field around it: "anything else?", or fading to BUY or SELL */
+    NATIVE_SHOP_LIST,        /* the buy screen's list */
+    NATIVE_SHOP_QUANTITY,    /* how many, and its price */
+    NATIVE_SHOP_MESSAGE,     /* a clerk's line on the buy screen (printing, or waiting for A or B) */
+    NATIVE_SHOP_CONFIRM,     /* YES / NO to the price */
+    NATIVE_SHOP_LEAVING,     /* fading back to the field */
+};
+struct NativeShop
+{
+    u8 phase;
+    bool8 ready;              /* the engine reads buttons now */
+    bool8 decorations;        /* a decoration shop: its list holds decorations */
+    bool8 sale;               /* Slateport's POKéNEWS sale halves the prices */
+    u8 menuCount;             /* the field menu's rows */
+    u8 menuCursor;            /* the field menu's row; the YES / NO's (0: YES) */
+    u8 msgWindow;             /* the clerk's line (WINDOW_NONE: none) */
+    const u8 *menuLabels[3];
+    u16 count;                /* items for sale (the list adds CANCEL after them) */
+    u16 cursor;               /* the list's row (count: CANCEL) */
+    u16 scroll;               /* the first row shown */
+    u16 chosen;               /* the item being bought (ITEM_NONE: none) */
+    u16 quantity;
+    u16 maxQuantity;
+    u16 inBag;                /* of the chosen item, else of the row's */
+    u32 totalCost;
+    u32 money;
+    u16 items[NATIVE_SHOP_MAX_ITEMS];
+    u32 prices[NATIVE_SHOP_MAX_ITEMS];
+    bool8 soldOut[NATIVE_SHOP_MAX_ITEMS];  /* a key item already owned */
+};
+bool32 Shop_NativeUiState(struct NativeShop *out);
 
 /* ---------------------------------------------------------------- the Trainer Card (trainer_card.c) */
 
