@@ -135,3 +135,202 @@ int NativeSelfTest_Decompress(const char *listPath)
     printf("selftest-decompress: %d assets, %d failed, %d skipped\n", tested, failed, skipped);
     return failed ? 1 : 0;
 }
+
+// ---------------------------------------------------------------------------
+//   pokeemerald-mp --selftest-party-order
+//
+// The battle's party order (party_menu.c): which party slot each of a side's
+// six battle slots shows, two 4-bit party indexes a byte. InitBattleControllers
+// builds it for every battler of a battle that is not a Multi
+// (BufferBattlePartyCurrentOrderBySide), and coming back from the bag or the
+// party menu builds the player's again (BufferBattlePartyCurrentOrder).
+//
+// KNOWN_ISSUES N37: against two opponent trainers each trainer has a party of
+// its own (gParties[B_TRAINER_OPPONENT_A] and _B), so both opponents are party
+// index 0 and the double-battle branch wrote a seventh index one byte past its
+// six-entry array - natively "stack smashing detected" as the battle started.
+// Every single, double, two-opponent and Multi layout is run here, with every
+// pair of party indexes: each call must return, and give the order the game has
+// always given (Reference: the six indexes the GBA keeps in bounds), so the fix
+// changes no battle. Runs before the game starts and exits with the result.
+#include "battle.h"
+#include "battle_util.h"
+#include "main.h"
+#include "party_menu.h"
+#include "constants/battle.h"
+
+static int sOrderChecks, sOrderFailures;
+
+// The order as the game computes it, in a buffer with room for the seventh
+// index the double-battle branch can write; the game keeps the first six.
+static void ReferenceOrder(u8 out[PARTY_SIZE / 2], u32 typeFlags, u8 left, u8 right, u8 flankId,
+                           bool32 fullTeams)
+{
+    u8 ids[PARTY_SIZE + 1];
+    int i, j;
+
+    if ((typeFlags & BATTLE_TYPE_MULTI) && (typeFlags & BATTLE_TYPE_MORE_THAN_TWO_BATTLERS))
+    {
+        static const u8 sFull[3] = {(0 << 4) | 1, (2 << 4) | 3, (4 << 4) | 5};
+        static const u8 sRight[3] = {0 | (3 << 4), 5 | (4 << 4), 2 | (1 << 4)};
+        static const u8 sLeft[3] = {3 | (0 << 4), 2 | (1 << 4), 5 | (4 << 4)};
+
+        memcpy(out, fullTeams ? sFull : (flankId != 0 ? sRight : sLeft), 3);
+        return;
+    }
+    if (!(typeFlags & BATTLE_TYPE_MORE_THAN_TWO_BATTLERS))
+    {
+        j = 1;
+        ids[0] = left;
+        for (i = 0; i < PARTY_SIZE; i++)
+            if (i != ids[0])
+                ids[j++] = i;
+    }
+    else
+    {
+        j = 2;
+        ids[0] = left;
+        ids[1] = right;
+        for (i = 0; i < PARTY_SIZE && j <= PARTY_SIZE; i++)
+            if (i != ids[0] && i != ids[1])
+                ids[j++] = i;
+    }
+    for (i = 0; i < 3; i++)
+        out[i] = (ids[i * 2] << 4) | ids[i * 2 + 1];
+}
+
+static void SetOrderBattle(u32 typeFlags)
+{
+    gBattleTypeFlags = typeFlags;
+    gBattlersCount = (typeFlags & BATTLE_TYPE_MORE_THAN_TWO_BATTLERS) ? MAX_BATTLERS_COUNT : 2;
+    gBattlerPositions[0] = B_POSITION_PLAYER_LEFT;
+    gBattlerPositions[1] = B_POSITION_OPPONENT_LEFT;
+    gBattlerPositions[2] = B_POSITION_PLAYER_RIGHT;
+    gBattlerPositions[3] = B_POSITION_OPPONENT_RIGHT;
+    gMain.inBattle = TRUE;
+}
+
+static void ExpectOrder(const char *what, const u8 *got, const u8 *want)
+{
+    sOrderChecks++;
+    if (memcmp(got, want, PARTY_SIZE / 2) == 0)
+        return;
+    sOrderFailures++;
+    printf("FAIL %s: order %02x %02x %02x, want %02x %02x %02x\n", what,
+           got[0], got[1], got[2], want[0], want[1], want[2]);
+}
+
+// One battler's side, as InitBattleControllers builds it.
+static void CheckSideOrder(const char *layout, u32 typeFlags, enum BattlerId battler, u8 flankId)
+{
+    enum BattlerId left = (battler & BIT_SIDE) ? 1 : 0;
+    u8 want[PARTY_SIZE / 2];
+    u8 *got = gBattleStruct->battlerPartyOrders[battler];
+    bool32 fullTeams = FALSE;
+    char what[160];
+
+    if ((typeFlags & BATTLE_TYPE_MULTI) && (typeFlags & BATTLE_TYPE_MORE_THAN_TWO_BATTLERS))
+        fullTeams = AreMultiPartiesFullTeams();
+    ReferenceOrder(want, typeFlags, gBattlerPartyIndexes[left], gBattlerPartyIndexes[left + 2], flankId,
+                   fullTeams);
+    snprintf(what, sizeof(what), "%s, battler %d (party indexes %d and %d), flank %d", layout, battler,
+             gBattlerPartyIndexes[left], gBattlerPartyIndexes[left + 2], flankId);
+    // a crash here is the bug itself: name the case first
+    printf("  %s\n", what);
+    fflush(stdout);
+    memset(got, 0xEE, PARTY_SIZE / 2);
+    BufferBattlePartyCurrentOrderBySide(battler, flankId);
+    ExpectOrder(what, got, want);
+}
+
+// The player's side, as coming back from the bag or the party menu builds it.
+static void CheckPlayerOrder(const char *layout, u32 typeFlags)
+{
+    u8 want[PARTY_SIZE / 2];
+    char what[160];
+
+    ReferenceOrder(want, typeFlags, gBattlerPartyIndexes[0], gBattlerPartyIndexes[2], GetPlayerFlankId(),
+                   (typeFlags & BATTLE_TYPE_MULTI) && (typeFlags & BATTLE_TYPE_MORE_THAN_TWO_BATTLERS)
+                   ? AreMultiPartiesFullTeams() : FALSE);
+    snprintf(what, sizeof(what), "%s, the player's order (party indexes %d and %d)", layout,
+             gBattlerPartyIndexes[0], gBattlerPartyIndexes[2]);
+    printf("  %s\n", what);
+    fflush(stdout);
+    memset(gBattlePartyCurrentOrder, 0xEE, sizeof(gBattlePartyCurrentOrder));
+    BufferBattlePartyCurrentOrder();
+    ExpectOrder(what, gBattlePartyCurrentOrder, want);
+}
+
+int NativeSelfTest_PartyOrder(void)
+{
+    static const struct { const char *name; u32 flags; } sLayouts[] =
+    {
+        {"single, wild", 0},
+        {"single, trainer", BATTLE_TYPE_TRAINER},
+        {"double, wild", BATTLE_TYPE_DOUBLE},
+        {"double, one trainer", BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE},
+        {"double, two opponent trainers", BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_TWO_OPPONENTS},
+        {"multi, in-game partner, wild", BATTLE_TYPE_DOUBLE | BATTLE_TYPE_MULTI | BATTLE_TYPE_INGAME_PARTNER},
+        {"multi, in-game partner, two trainers", BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_TWO_OPPONENTS
+                                                 | BATTLE_TYPE_MULTI | BATTLE_TYPE_INGAME_PARTNER},
+        {"multi, link (half teams)", BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_MULTI
+                                     | BATTLE_TYPE_TOWER_LINK_MULTI},
+    };
+    // The N37 battle itself, spelt out: both opponents party index 0 of their own party.
+    static const u8 sTwoOpponents[PARTY_SIZE / 2] = {(0 << 4) | 0, (1 << 4) | 2, (3 << 4) | 4};
+    // and the player's own two, party indexes 0 and 1
+    static const u8 sPlayerFirstTwo[PARTY_SIZE / 2] = {(0 << 4) | 1, (2 << 4) | 3, (4 << 4) | 5};
+
+    gBattleStruct = calloc(1, sizeof(*gBattleStruct));
+    if (gBattleStruct == NULL)
+        return 2;
+
+    // The battle N37 was found in (Sootopolis Gym B1F, two trainers see the
+    // player together), first: both opponents party index 0 of their own party.
+    printf("two opponent trainers, both party index 0 (N37)\n");
+    fflush(stdout);
+    SetOrderBattle(BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_TWO_OPPONENTS);
+    gBattlerPartyIndexes[0] = 0;
+    gBattlerPartyIndexes[2] = 1;
+    gBattlerPartyIndexes[1] = 0;
+    gBattlerPartyIndexes[3] = 0;
+    for (enum BattlerId battler = 0; battler < MAX_BATTLERS_COUNT; battler++)
+    {
+        memset(gBattleStruct->battlerPartyOrders[battler], 0xEE, PARTY_SIZE / 2);
+        BufferBattlePartyCurrentOrderBySide(battler, 0);
+    }
+    ExpectOrder("two opponent trainers (N37), opponent A", gBattleStruct->battlerPartyOrders[1], sTwoOpponents);
+    ExpectOrder("two opponent trainers (N37), opponent B", gBattleStruct->battlerPartyOrders[3], sTwoOpponents);
+    ExpectOrder("two opponent trainers (N37), the player", gBattleStruct->battlerPartyOrders[0], sPlayerFirstTwo);
+
+    for (u32 l = 0; l < ARRAY_COUNT(sLayouts); l++)
+    {
+        u32 flags = sLayouts[l].flags;
+        bool32 doubles = (flags & BATTLE_TYPE_MORE_THAN_TWO_BATTLERS) != 0;
+
+        printf("%s\n", sLayouts[l].name);
+        SetOrderBattle(flags);
+        for (u32 a = 0; a < PARTY_SIZE; a++)
+        {
+            for (u32 b = 0; b < PARTY_SIZE; b++)
+            {
+                // left battlers a, right battlers b (in a single only the left ones fight)
+                gBattlerPartyIndexes[0] = a;
+                gBattlerPartyIndexes[1] = a;
+                gBattlerPartyIndexes[2] = b;
+                gBattlerPartyIndexes[3] = b;
+                for (enum BattlerId battler = 0; battler < gBattlersCount; battler++)
+                    CheckSideOrder(sLayouts[l].name, flags, battler, battler >= 2);
+                CheckPlayerOrder(sLayouts[l].name, flags);
+                if (!doubles)
+                    break;
+            }
+        }
+    }
+
+    free(gBattleStruct);
+    gBattleStruct = NULL;
+    gMain.inBattle = FALSE;
+    printf("selftest-party-order: %d checks, %d failed\n", sOrderChecks, sOrderFailures);
+    return sOrderFailures ? 1 : 0;
+}

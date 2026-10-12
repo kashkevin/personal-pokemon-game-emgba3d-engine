@@ -175,7 +175,7 @@ OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS)
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
-.PHONY: all clean check-native check-abi check-game-sections check-decompress
+.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order
 .SUFFIXES:
 .SECONDARY:
 .DELETE_ON_ERROR:
@@ -211,6 +211,13 @@ check-abi:
 check-decompress: $(TARGET)
 	python3 tools/pc_port/make_decompress_list.py $(ASSETS_DIR) > $(OBJ_DIR)/decompress_list.txt
 	./$(TARGET) --selftest-decompress $(OBJ_DIR)/decompress_list.txt | tail -n 20
+
+# The battle's party order for single, double, two-opponent and Multi battles,
+# run in the game itself (KNOWN_ISSUES N37: two opponent trainers wrote past an
+# array as the battle started). Every case must return and keep the game's order.
+check-party-order: $(TARGET)
+	@./$(TARGET) --selftest-party-order > $(OBJ_DIR)/selftest-party-order.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-party-order.log; exit $$status
 
 # C: preprocess (same flags as the GBA build + PORTABLE), expand INCBIN/charmap
 # strings with preproc, then compile for 32-bit x86.
