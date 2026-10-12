@@ -20,7 +20,7 @@ from mountain_art import MountainArtError, validate_layout as validate_mountain_
 from profiles import NOMINAL_HEIGHTS, TileShape, shape_from_action
 from pixel_objects import UPRIGHT_CLASSES as UPRIGHT_PIXEL_CLASSES, extract_layout
 from structures import analyze_layout
-from terrace_topology import solve_layout as solve_terrace_topology
+from terrace_topology import lift_blocked_cells, solve_layout as solve_terrace_topology
 from tile_shape import ClassificationError, TileShapeClassifier
 
 
@@ -990,7 +990,8 @@ def _terrain_record(cell_offset: int, cell: dict, shape: TileShape,
     prop = shape.prop_ground.as_dict()
     terrace_course = terrace is not None and terrace["solid"]
     terrace_topology = terrace is not None
-    mountain_art = terrace_course or (terrace is None and (
+    lifted = terrace is not None and bool(terrace.get("lift"))
+    mountain_art = terrace_course or ((terrace is None or lifted) and (
         (shape.class_name == "cliff" and (
             cell.get("behavior") == "MB_MOUNTAIN_TOP"
             or shape.source == "heuristic:mountain-art-family"))
@@ -1013,6 +1014,10 @@ def _terrain_record(cell_offset: int, cell: dict, shape: TileShape,
         "cliffTransitionMask": 0, "cliffCornerMask": 0,
         **structure,
     }
+    if lifted:
+        # A blocked cell on lower land (terrace_topology._blocked_on_lower_land):
+        # its own heights, standing on that level.
+        _lift_record(record, terrace["groundQ16"])
     if measurement is None:
         record.update({"measuredHeightQ16": 0, "measuredBodyQ16": 0,
                        "measuredRoofQ16": 0, "measuredAxis": "x",
@@ -1056,7 +1061,31 @@ def _terrain_record(cell_offset: int, cell: dict, shape: TileShape,
         "measuredConfidence": measurement["confidence"],
         "measuredBands": measurement["sourceBands"],
     })
+    if lifted:
+        _lift_record(record, terrace["groundQ16"])
     return record
+
+
+# The layouts whose blocked cells on a lower terrace level stand on it
+# (terrace_topology.lift_blocked_cells). Opt-in, map by map, each looked at:
+# Mossdeep's town lies a level under its cliffs' tops and its houses and its
+# own trees stood a tile up on plinths. Elsewhere blocked cells by a lower
+# level are as often a wall the art draws between two levels (Ever Grande's
+# garden wall, mountain foot rocks), which the top level happens to suit.
+LIFT_BLOCKED_LAYOUTS = frozenset({"LAYOUT_MOSSDEEP_CITY"})
+
+
+def _lift_record(record: dict, level_q16: int) -> None:
+    """A record's ground and top as the runtime's untouched heights would make
+    them (rules.c ApplyStaticTerrain without the terrace flag), on `level`."""
+    height = record["heightQ16"]
+    if record["shape"] == "ledge":
+        ground = top = level_q16 + max(height, 0)
+    else:
+        ground = level_q16 + min(height, 0)
+        top = ground + max(height, 0)
+    record["groundQ16"] = ground
+    record["topQ16"] = top
 
 
 def _measurement_semantic(measurement: dict | None) -> str:
@@ -1323,6 +1352,15 @@ def compile_data(root: Path) -> dict:
                 layout_cells, layout["width"], layout["height"])
             wildcard = tuple(_with_animation_provenance(shape, cell)
                              for shape, cell in zip(wildcard, layout_cells))
+            if terrace_topology[layout["id"]] and layout["id"] in LIFT_BLOCKED_LAYOUTS:
+                # Houses, trees and rocks on a lower level stand on it (natural
+                # cliffs, the walls between levels, keep their own heights).
+                terrace_topology[layout["id"]] = {
+                    **terrace_topology[layout["id"]],
+                    **lift_blocked_cells(layout_cells, layout["width"], layout["height"],
+                                         terrace_topology[layout["id"]],
+                                         liftable=lambda offset, shapes=wildcard:
+                                         shapes[offset].class_name not in ("cliff", "mound"))}
             wildcard = tuple(_with_mountain_art(
                 shape, cell, offset in mountain_art_cells[layout["id"]])
                 for offset, (shape, cell) in enumerate(zip(wildcard, layout_cells)))
