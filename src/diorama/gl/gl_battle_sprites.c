@@ -45,6 +45,9 @@ static struct
     bool tried, ready;
     GLuint program, vao, vbo, textures[BATTLE_SPRITE_OVERFLOW_MAX];
     GLint outLocation, texLocation, alphaLocation;
+    /* per texture, the picture whose frame it holds: drawn more often than the game's 60 pictures
+     * a second (the frame-rate limit), a frame is uploaded once */
+    uint32_t uploaded[BATTLE_SPRITE_OVERFLOW_MAX];
 } sGL;
 
 static uint32_t sRgba[MAX_FRAME_PIXELS];
@@ -181,6 +184,10 @@ void DioramaGLBattleSprites_Draw(int outW, int outH, float gameX, float gameY, f
     GLint blendSrc, blendDst, program, vao, texture, activeTexture;
     unsigned i;
 
+    uint64_t t0 = SDL_GetPerformanceCounter();
+    static uint64_t sSum, sMax;
+    static uint32_t sDraws;
+
     if (gBattleSpriteOverflowCount == 0 || gameY <= 0.0f || scale <= 0.0f)
         return;
     if (!sGL.tried)
@@ -248,10 +255,15 @@ void DioramaGLBattleSprites_Draw(int outW, int outH, float gameX, float gameY, f
             continue;
         glScissor(sx0, outH - sy1, sx1 - sx0, sy1 - sy0);
 
-        Expand(o);
         glBindTexture(GL_TEXTURE_2D, sGL.textures[i]);
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, view->width, view->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, sRgba);
+        if (sGL.uploaded[i] != gBattleSpriteOverflowSerial)
+        {
+            sGL.uploaded[i] = gBattleSpriteOverflowSerial;
+            Expand(o);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, view->width, view->height, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                         sRgba);
+        }
 
         /* corners: top-left, top-right, bottom-right, bottom-left of the frame */
         ToScreen(o, view->left, view->top, &corners[0][0], &corners[0][1]);
@@ -282,6 +294,25 @@ void DioramaGLBattleSprites_Draw(int outW, int outH, float gameX, float gameY, f
     if (stencil) glEnable(GL_STENCIL_TEST);
     if (cull) glEnable(GL_CULL_FACE);
     if (!scissor) glDisable(GL_SCISSOR_TEST);
+
+    /* its cost on the CPU side (PKMN_BATTLE_SPRITES_LOG), every 600 draws */
+    {
+        uint64_t dt = SDL_GetPerformanceCounter() - t0;
+        double ms = 1000.0 / (double)SDL_GetPerformanceFrequency();
+        const char *log = SDL_getenv("PKMN_BATTLE_SPRITES_LOG");
+
+        sSum += dt;
+        if (dt > sMax)
+            sMax = dt;
+        if (++sDraws >= 600)
+        {
+            if (log != NULL && log[0] == '1')
+                SDL_Log("Battle sprites: above the picture %.3f ms a draw (at most %.3f)", sSum * ms / sDraws,
+                        sMax * ms);
+            sSum = sMax = 0;
+            sDraws = 0;
+        }
+    }
 }
 
 #endif

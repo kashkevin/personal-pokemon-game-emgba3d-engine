@@ -107,5 +107,6 @@ struct BattleSpriteOverflow
 };
 extern struct BattleSpriteOverflow gBattleSpriteOverflow[BATTLE_SPRITE_OVERFLOW_MAX];
 extern unsigned gBattleSpriteOverflowCount; /* back to front */
+extern uint32_t gBattleSpriteOverflowSerial; /* new with every picture: their frames may have changed */
 
 #endif // GUARD_PLATFORM_BATTLE_SPRITES_H
