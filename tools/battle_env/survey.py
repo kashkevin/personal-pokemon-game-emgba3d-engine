@@ -275,12 +275,16 @@ def run_map(args, rec, label, spec, p, results):
             # before it: a map's own scene on arrival (the Champion walking in, a rival's
             # words) waits for a button too; B moves its text on and does nothing else in the
             # field
+            # - but under water B is the game's "surface?" (DIVE): where the sea above is open
+            # it starts that script and locks the field, and the battle never starts
+            # (Underwater Route 126), so no B there before the battle
+            field_b = rec['map_type'] != 'MAP_TYPE_UNDERWATER'
             idle = 0
             while time.time() - t0 < args.timeout and run.proc.poll() is None:
                 text = run.log_text()
                 if 'Diorama battle: 3D on' in text or 'Diorama battle: 2D' in text:
                     run.key('B', 0.08, 0.9)
-                elif 'Battle env test: starting' not in text and idle >= 3:
+                elif 'Battle env test: starting' not in text and idle >= 3 and field_b:
                     run.key('B', 0.08, 0.5)
                     idle = 0
                 else:
