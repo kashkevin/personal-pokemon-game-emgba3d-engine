@@ -31,6 +31,7 @@
 #include "diorama/buildings.h"
 #include "diorama/rules.h"
 #include "diorama/scene_snapshot.h"
+#include "constants/metatile_behaviors.h"
 
 extern const unsigned int gDioramaBuildingsTableSize;
 extern const unsigned char gDioramaBuildingsTable[];
@@ -532,16 +533,120 @@ bool DioramaBuildings_PlacementStands(unsigned index)
     return sReady && index < sPlacementCount && (sChanged == NULL || !sChanged[index]);
 }
 
+static bool IsWaterCell(const struct DioramaSceneSnapshot *snapshot,
+                        const struct DioramaResolvedCell *resolved, unsigned count, int i)
+{
+    const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
+
+    /* past the map's edge the border block's water (an ocean route without a
+     * neighbour that way) lies with the sea it borders */
+    return i >= 0 && (unsigned)i < count
+        && (cell->flags & (DIORAMA_CELL_SOURCE_VALID | DIORAMA_CELL_BORDER))
+        && cell->behavior != MB_WATERFALL
+        && (resolved[i].shape == DIORAMA_SHAPE_WATER
+         || resolved[i].terrainClass == DIORAMA_TERRAIN_CLASS_WATER);
+}
+
+/*
+ * The sea at one level (KNOWN_ISSUES E1). The terrace solver gives the open sea
+ * the level it finds for it - a whole level below the land where it meets a
+ * terraced islet (Routes 127 and 132-134) - and water it finds penned in (round
+ * a rock or a stack found by its tiles over the water, whose cells the rules
+ * read as ground at the land's level) the water's nominal level. Between them
+ * were steps with no faces, and the sky showed through them, in the field and
+ * in battles; with the terrain's risers (terrain_mesh.c ColumnBottom) they
+ * would be walls of water. So one body of water - its water cells and the
+ * cells of the models standing in it (every neighbour that is not the model's
+ * is water), 4-connected, waterfalls apart - lies at the level of its lowest
+ * water: nothing is raised, and a model's cells take the level too, so the
+ * model (its lift is its cell's ground) stands in it. A body all at one level
+ * is left as it is.
+ */
+static void LevelWaterBodies(const struct DioramaSceneSnapshot *snapshot,
+                             struct DioramaResolvedCell *resolved, unsigned count,
+                             const uint8_t *inWater)
+{
+    static int16_t stack[DIORAMA_MAX_VISIBLE_CELLS];
+    static uint8_t seen[DIORAMA_MAX_VISIBLE_CELLS];
+    static int16_t body[DIORAMA_MAX_VISIBLE_CELLS];
+    static const int step[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+    unsigned start;
+
+    memset(seen, 0, count);
+    for (start = 0; start < count; start++)
+    {
+        int top = 0, size = 0, b;
+        float level = 1.0e9f;
+        bool water = false;
+
+        if (seen[start] || !inWater[start])
+            continue;
+        seen[start] = 1;
+        stack[top++] = (int16_t)start;
+        while (top > 0)
+        {
+            int i = stack[--top];
+            int gx = i % DIORAMA_GRID_WIDTH, gy = i / DIORAMA_GRID_WIDTH;
+
+            body[size++] = (int16_t)i;
+            if (inWater[i] == 1 && resolved[i].groundHeight < level)
+            {
+                level = resolved[i].groundHeight;
+                water = true;
+            }
+            for (int d = 0; d < 4; d++)
+            {
+                int nx = gx + step[d][0], ny = gy + step[d][1], n;
+
+                if (nx < 0 || ny < 0 || nx >= DIORAMA_GRID_WIDTH || ny >= DIORAMA_GRID_HEIGHT)
+                    continue;
+                n = ny * DIORAMA_GRID_WIDTH + nx;
+                if ((unsigned)n >= count || seen[n] || !inWater[n])
+                    continue;
+                /* water joins water of its own elevation only; a model joins any */
+                if (inWater[i] == 1 && inWater[n] == 1
+                 && snapshot->cells[i].elevation != snapshot->cells[n].elevation)
+                    continue;
+                seen[n] = 1;
+                stack[top++] = (int16_t)n;
+            }
+        }
+        if (!water)
+            continue;
+        for (b = 0; b < size; b++)
+        {
+            struct DioramaResolvedCell *r = &resolved[body[b]];
+            float drop = r->groundHeight - level;
+
+            if (drop <= 0.001f)
+                continue;
+            r->groundHeight -= drop;
+            r->topHeight -= drop;
+            for (unsigned k = 0; k < r->surfaceCount && k < DIORAMA_MAX_VISUAL_SURFACES; k++)
+            {
+                r->surfaces[k].topHeight -= drop;
+                r->surfaces[k].bottomHeight -= drop;
+            }
+        }
+    }
+}
+
 void DioramaBuildings_FlattenResolvedCells(const struct DioramaSceneSnapshot *snapshot,
                                            struct DioramaResolvedCell *resolved,
                                            unsigned count)
 {
+    /* 1: a water cell; 2: a cell of a model standing in water (LevelWaterBodies) */
+    static uint8_t inWater[DIORAMA_MAX_VISIBLE_CELLS];
     unsigned i;
     int face;
 
     if (!sReady)
         return;
     DioramaBuildings_Validate(snapshot);
+    if (count > DIORAMA_MAX_VISIBLE_CELLS)
+        count = DIORAMA_MAX_VISIBLE_CELLS;
+    for (i = 0; i < count; i++)
+        inWater[i] = IsWaterCell(snapshot, resolved, count, (int)i) ? 1 : 0;
     for (i = 0; i < count; i++)
     {
         const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
@@ -554,6 +659,38 @@ void DioramaBuildings_FlattenResolvedCells(const struct DioramaSceneSnapshot *sn
          || !DioramaBuildings_CellAt(cell->sourceLayoutId, cell->sourceMapX, cell->sourceMapY,
                                      &ground, &quarters, NULL))
             continue;
+        /* found by its tiles over its cells' own drawing (a rock in the sea): standing in
+         * water if every neighbour that is not its own is water */
+        if (ground == DIORAMA_BUILDING_OWN_GROUND && quarters != 0)
+        {
+            static const int step[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+            int gx = (int)i % DIORAMA_GRID_WIDTH, gy = (int)i / DIORAMA_GRID_WIDTH;
+            int waterSides = 0, otherSides = 0;
+
+            for (int d = 0; d < 4; d++)
+            {
+                int nx = gx + step[d][0], ny = gy + step[d][1], n;
+                const struct DioramaCellSnapshot *next;
+
+                if (nx < 0 || ny < 0 || nx >= DIORAMA_GRID_WIDTH || ny >= DIORAMA_GRID_HEIGHT)
+                    continue;
+                n = ny * DIORAMA_GRID_WIDTH + nx;
+                if ((unsigned)n >= count)
+                    continue;
+                next = &snapshot->cells[n];
+                if (!(next->flags & DIORAMA_CELL_SOURCE_VALID))
+                    continue; /* past the map's edge: says nothing */
+                if (DioramaBuildings_CellAt(next->sourceLayoutId, next->sourceMapX, next->sourceMapY,
+                                            NULL, NULL, NULL))
+                    continue; /* the model's own (or another model's) cell */
+                if (inWater[n] == 1)
+                    waterSides++;
+                else
+                    otherSides++;
+            }
+            if (waterSides > 0 && otherSides == 0)
+                inWater[i] = 2;
+        }
         groundHeight = r->groundHeight;
         r->shape = DIORAMA_SHAPE_FLAT;
         r->profile = DIORAMA_ROOF_NONE;
@@ -614,6 +751,7 @@ void DioramaBuildings_FlattenResolvedCells(const struct DioramaSceneSnapshot *sn
             r->materials[face].flags = 0;
         }
     }
+    LevelWaterBodies(snapshot, resolved, count, inWater);
 }
 
 unsigned DioramaBuildings_PageCount(void)
