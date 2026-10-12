@@ -307,7 +307,7 @@ def run_map(args, rec, label, spec, p, results):
         res['fight'] = m.group(1) if m else ('crashed' if re.search(r'stack smashing|crashed|Aborted', log)
                                               else 'not over')
         status = res['status'] = '%s, %s' % (status, 'fought: ' + res['fight'])
-    for pat, key in ((r'Diorama battle: 3D on (.*)', 'battle_3d'), (r'Diorama battle: (2D|refused|no world)(.*)', 'battle_2d'),
+    for pat, key in ((r'Diorama battle: 3D on (.*)', 'battle_3d'), (r'Diorama battle: (drawn in 2D|2D|refused|no world)(.*)', 'battle_2d'),
                      (r'Diorama battle: stage: (.*)', 'stage'), (r'Battle env test: starting (.*)', 'started'),
                      (r'Diorama battle: drawn by (.*)', 'renderer')):
         m = re.search(pat, log)
