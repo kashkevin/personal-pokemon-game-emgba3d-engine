@@ -289,6 +289,8 @@ def write_page(rows, out, by_map, args):
     cls_after = collections.Counter(r['after_class'] for r in rows if r['after_class'])
     cls_before = collections.Counter(r['before_class'] for r in rows if r['before_class'] and r['after_class'])
     both = sum(1 for r in rows if r['before_class'] and r['after_class'])
+    # the class now (report.py current_class: this round's, else with the objects, else after)
+    cls_now = collections.Counter(r.get('current_class') for r in rows if r.get('current_class'))
     total = len(rows)
 
     cards = []
@@ -318,16 +320,20 @@ def write_page(rows, out, by_map, args):
             '<div class="head"><div class="title"><h3>%s</h3><span class="trans">%s<span class="arrow">→</span>%s%s</span></div>'
             '<div class="id">%s</div><div class="tags">%s</div></div>%s'
             '<div class="body"><div class="state">%s</div>%s</div></article>' % (
-                r['after_class'] or 'none', r['state'], html.escape(group_of(r['category'])),
+                r.get('current_class') or 'none', r['state'], html.escape(group_of(r['category'])),
                 html.escape((name + ' ' + r['map'] + ' ' + r['category'] + ' ' + r['notes']).lower()),
                 html.escape(name), _chip(r['before_class'], 'before '), _chip(r['after_class'], 'after '),
-                ('<span class="arrow" title="with the overworld\'s detail objects">+</span>%s' % _chip(
-                    r['props_class'], 'with the overworld\'s objects ')) if r.get('props_class') else '',
+                (('<span class="arrow" title="with the overworld\'s detail objects">+</span>%s' % _chip(
+                    r['props_class'], 'with the overworld\'s objects ')) if r.get('props_class') else '')
+                + (('<span class="arrow" title="now (claude/battle-environments-2)">→</span>%s' % _chip(
+                    r['now_class'], 'now ')) if r.get('now_class') else ''),
                 html.escape(r['map']), ''.join('<span>%s</span>' % t for t in tags), shot,
                 html.escape(status),
                 ('<p style="margin:0">%s</p>' % html.escape(r['notes']) if r['notes'] else '')
                 + ('<p style="margin:0"><strong>With the overworld\'s objects:</strong> %s</p>' % html.escape(
-                    r['props_notes']) if r.get('props_notes') else '')))
+                    r['props_notes']) if r.get('props_notes') else '')
+                + ('<p style="margin:0"><strong>Now:</strong> %s</p>' % html.escape(
+                    r['now_notes']) if r.get('now_notes') else '')))
 
     # the category table
     by_group = collections.OrderedDict((g, []) for g, _ in GROUPS)
@@ -337,7 +343,7 @@ def write_page(rows, out, by_map, args):
     for g, rs in by_group.items():
         if not rs:
             continue
-        c = collections.Counter(r['after_class'] for r in rs if r['after_class'])
+        c = collections.Counter(r.get('current_class') for r in rs if r.get('current_class'))
         s = collections.Counter(r['state'] for r in rs)
         trs.append('<tr><td><a href="#maps" data-jump="%s">%s</a></td><td class="n">%d</td>%s'
                    '<td class="n">%s</td><td class="n">%s</td><td class="n">%s</td></tr>' % (
@@ -384,7 +390,7 @@ def write_page(rows, out, by_map, args):
         '<div><h3>Coverage, %d maps</h3>%s<div class="legend"><span>reviewed: %s</span><span>tested: %s</span>'
         '<span>untested: %s</span><span>excluded: %s</span></div></div>'
         '<div><h3>Before, the %d maps classed both times</h3>%s</div>'
-        '<div><h3>After, all %d classed maps</h3>%s<div class="legend">%s</div></div>'
+        '<div><h3>Now, all %d classed maps</h3>%s<div class="legend">%s</div></div>'
         '%s</section>'
         '<section class="panel"><h2>By kind of place</h2>%s'
         '<p class="note">A: complete 3D. B: dimensional, with flat details or a small fault. C: some of it '
@@ -405,10 +411,10 @@ def write_page(rows, out, by_map, args):
             total, _bar(counts, ('reviewed', 'tested', 'untested', 'excluded'), total, 'seg'),
             counts['reviewed'], counts['tested'], counts['untested'], counts['excluded'],
             both, _bar(cls_before, CLASSES, both, 'seg'),
-            sum(cls_after.values()), _bar(cls_after, CLASSES, sum(cls_after.values()), 'seg'),
+            sum(cls_now.values()), _bar(cls_now, CLASSES, sum(cls_now.values()), 'seg'),
             ''.join('<span>%s %s</span>' % (k, CLASS_TEXT[k]) for k in CLASSES),
             props_summary, table, cls_btns, st_btns, groups_opts, ''.join(cards), appendix, SCRIPT))
     with open(os.path.join(out, 'index.html'), 'w') as f:
         f.write(page)
-    json.dump({'maps': total, 'states': counts, 'after': cls_after, 'before': cls_before},
+    json.dump({'maps': total, 'states': counts, 'now': cls_now, 'after': cls_after, 'before': cls_before},
               open(os.path.join(out, 'summary.json'), 'w'), indent=1)
