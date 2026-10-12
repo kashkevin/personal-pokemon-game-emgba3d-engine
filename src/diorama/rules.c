@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "constants/map_types.h"
 #include "constants/metatile_behaviors.h"
 #include "diorama/rules.generated.h"
 #include "diorama/rules.h"
@@ -1022,6 +1023,25 @@ float DioramaRules_ProfileHeight(uint8_t archetype, uint8_t behavior,
         featureHeight = 1.0f;
     return groundHeight + (descending ? -1.0f : 1.0f)
          * featureHeight * step / DIORAMA_BUILDING_PIXELS_PER_CELL;
+}
+
+bool DioramaRules_CellOverWater(const struct DioramaCellSnapshot *cell, uint8_t mapType)
+{
+    int water = 0;
+    int i;
+
+    if (cell == NULL || mapType == MAP_TYPE_NONE || mapType == MAP_TYPE_INDOOR
+     || mapType == MAP_TYPE_UNDERGROUND || mapType == MAP_TYPE_SECRET_BASE
+     || mapType == MAP_TYPE_UNDERWATER)
+        return false;
+    for (i = 0; i < DIORAMA_METATILE_ENTRY_COUNT / 2; i++)
+    {
+        uint16_t tile = cell->tileEntries[i] & 0x3FF;
+
+        if (tile >= 432 && tile < 462)
+            water++;
+    }
+    return water >= 2;
 }
 
 float DioramaRules_ObjectGroundHeight(const struct DioramaResolvedCell *resolved,

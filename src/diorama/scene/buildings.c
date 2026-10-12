@@ -560,7 +560,12 @@ static bool IsWaterCell(const struct DioramaSceneSnapshot *snapshot,
  * is water), 4-connected, waterfalls apart - lies at the level of its lowest
  * water: nothing is raised, and a model's cells take the level too, so the
  * model (its lift is its cell's ground) stands in it. A body all at one level
- * is left as it is.
+ * is left as it is. Shallow water is part of the body it runs into: the
+ * solver leaves the shoals round the islets (and a town's sea, past the seam
+ * with a route's) at the land's level, a whole level over the sea they belong
+ * to, which stood as walls of water round the islets' feet and the harbours.
+ * So the shoals lie at the sea's level, and what is walked through them (a
+ * swimmer standing in them, the player wading) stands in that water.
  */
 static void LevelWaterBodies(const struct DioramaSceneSnapshot *snapshot,
                              struct DioramaResolvedCell *resolved, unsigned count,
@@ -603,9 +608,15 @@ static void LevelWaterBodies(const struct DioramaSceneSnapshot *snapshot,
                 n = ny * DIORAMA_GRID_WIDTH + nx;
                 if ((unsigned)n >= count || seen[n] || !inWater[n])
                     continue;
-                /* water joins water of its own elevation only; a model joins any */
+                /* water joins water of its own elevation only, and shallow water the
+                 * water it runs into (the shoals round an islet, a harbour's: walked
+                 * through at the land's elevation, but the sea's own surface - left
+                 * at the land's level it stood a step of water over the sea); a
+                 * model joins any */
                 if (inWater[i] == 1 && inWater[n] == 1
-                 && snapshot->cells[i].elevation != snapshot->cells[n].elevation)
+                 && snapshot->cells[i].elevation != snapshot->cells[n].elevation
+                 && snapshot->cells[i].behavior != MB_SHALLOW_WATER
+                 && snapshot->cells[n].behavior != MB_SHALLOW_WATER)
                     continue;
                 seen[n] = 1;
                 stack[top++] = (int16_t)n;
@@ -628,6 +639,59 @@ static void LevelWaterBodies(const struct DioramaSceneSnapshot *snapshot,
                 r->surfaces[k].bottomHeight -= drop;
             }
         }
+    }
+}
+
+/*
+ * A rock standing in the shallows or the sea, drawn on the water: a cell that is
+ * no water, is not walked on, is flat ground under its detail object (a rock's
+ * mound, props.c) and whose lower layer is the sea's tiles
+ * (DioramaRules_CellOverWater), with water beside it and no ground walked on
+ * (a cliff or another rock may be). It stands in the water like a model's cells
+ * (inWater 2), at the water's level: at the land's level it stood a block out of
+ * the sea lowered past it (Lilycove's harbour). Added by the battle
+ * environments' work.
+ */
+static void MarkRocksInWater(const struct DioramaSceneSnapshot *snapshot,
+                             const struct DioramaResolvedCell *resolved, unsigned count,
+                             uint8_t *inWater)
+{
+    static const int step[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+    static uint8_t rock[DIORAMA_MAX_VISIBLE_CELLS];
+    unsigned i;
+
+    for (i = 0; i < count; i++)
+    {
+        const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
+
+        rock[i] = inWater[i] == 0 && cell->collision != 0
+               && (cell->flags & DIORAMA_CELL_SOURCE_VALID)
+               && resolved[i].shape == DIORAMA_SHAPE_FLAT
+               && DioramaRules_CellOverWater(cell, snapshot->mapType);
+    }
+    for (i = 0; i < count; i++)
+    {
+        int gx = (int)i % DIORAMA_GRID_WIDTH, gy = (int)i / DIORAMA_GRID_WIDTH;
+        int waterSides = 0, otherSides = 0;
+
+        if (!rock[i])
+            continue;
+        for (int d = 0; d < 4; d++)
+        {
+            int nx = gx + step[d][0], ny = gy + step[d][1], n;
+
+            if (nx < 0 || ny < 0 || nx >= DIORAMA_GRID_WIDTH || ny >= DIORAMA_GRID_HEIGHT)
+                continue;
+            n = ny * DIORAMA_GRID_WIDTH + nx;
+            if ((unsigned)n >= count || !(snapshot->cells[n].flags & DIORAMA_CELL_SOURCE_VALID))
+                continue; /* past the map's edge: says nothing */
+            if (inWater[n] != 0)
+                waterSides++;
+            else if (!rock[n] && snapshot->cells[n].collision == 0)
+                otherSides++; /* ground walked on: a deck's barrel, not a rock in the sea */
+        }
+        if (waterSides > 0 && otherSides == 0)
+            inWater[i] = 2;
     }
 }
 
@@ -751,6 +815,7 @@ void DioramaBuildings_FlattenResolvedCells(const struct DioramaSceneSnapshot *sn
             r->materials[face].flags = 0;
         }
     }
+    MarkRocksInWater(snapshot, resolved, count, inWater);
     LevelWaterBodies(snapshot, resolved, count, inWater);
 }
 

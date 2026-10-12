@@ -449,6 +449,21 @@ static void SetTerrainMaterialTransformed(struct DioramaTerrainMaterial *materia
     material->flags = flags;
 }
 
+/*
+ * A cell drawn over the water (DioramaRules_CellOverWater: a deck, a log
+ * walkway, a pier): its side (the riser standing it down to the sea lowered
+ * past it, terrain_mesh.c ColumnBottom) shows the whole cell, the deck's wood,
+ * not its lower layer - that stood Pacifidlog's decks and walkways on blocks of
+ * water. A bridge's lower layer is the water under it, and water is water.
+ * Added by the battle environments' work.
+ */
+static bool RiserShowsWholeCell(const struct DioramaSceneSnapshot *snapshot,
+                                const struct DioramaCellSnapshot *source, uint8_t shape)
+{
+    return shape != DIORAMA_SHAPE_BRIDGE && shape != DIORAMA_SHAPE_WATER
+        && DioramaRules_CellOverWater(source, snapshot->mapType);
+}
+
 static uint32_t PixelColor(const struct DioramaSceneSnapshot *snapshot,
                            const struct DioramaCellSnapshot *sourceCell,
                            const struct DioramaGeneratedPixelV2 *pixel)
@@ -888,7 +903,8 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
                     resolvedCells[gridIndex].materials[face].rotation,
                     resolvedCells[gridIndex].materials[face].flags);
                 SetTerrainMaterial(&cell->underlayMaterials[face], source->metatileId,
-                                   DIORAMA_MATERIAL_BASE);
+                                   RiserShowsWholeCell(snapshot, source, cell->shape)
+                                   ? DIORAMA_MATERIAL_FULL : DIORAMA_MATERIAL_BASE);
             }
             {
                 /* A detail object stands here (props.h, gl_props.c): the

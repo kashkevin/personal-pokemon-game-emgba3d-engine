@@ -476,5 +476,11 @@ float DioramaRules_ObjectGroundHeight(const struct DioramaResolvedCell *resolved
                                        uint8_t cellElevation, uint8_t objectElevation,
                                        uint8_t behavior,
                                        uint8_t pixelX, uint8_t pixelY);
+/* A cell drawn over the water: its lower layer is mostly the sea's own tiles
+ * (General's animated water, tiles 432 to 461) - a deck, a log walkway, a
+ * pier, a rock in the shallows. Outdoors only (mapType: gMapHeader.mapType),
+ * where the primary tileset is General's. Added by the battle environments'
+ * work (the sea at one level: buildings.c, gl_terrain_renderer.c). */
+bool DioramaRules_CellOverWater(const struct DioramaCellSnapshot *cell, uint8_t mapType);
 
 #endif
