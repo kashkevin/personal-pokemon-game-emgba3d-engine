@@ -1974,6 +1974,52 @@ static void FaceMaterial(const struct DioramaTerrainCell *cell, uint8_t surface,
     output->v1 = source->v0 + (source->v1 - source->v0) * (vMax - inset);
 }
 
+/*
+ * The undersides of a cell's columns where they stand on its floor - the
+ * bottom of every pixel column, a bottom face each - face the ground they
+ * stand in and are never seen from the overworld's camera, which is always
+ * above the terrain. Only the lowest undersides of each cell go: a bridge's
+ * deck over its ground keeps its own. Mt. Chimney's rocks built a face under
+ * every one of their pixels (V37: about a tenth of a chunk's faces there).
+ * (The compressed shell of a plain chunk has one a cell: left as it is.)
+ */
+static uint32_t DropBaseUndersides(const struct DioramaTerrainChunkInput *input,
+                                   uint32_t faceCount)
+{
+    static int16_t sLowest[DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE];
+    uint32_t read;
+    uint32_t write = 0;
+    unsigned i;
+
+    for (i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
+        sLowest[i] = INT16_MAX;
+    for (read = 0; read < faceCount; read++)
+    {
+        const struct DioramaShellFace *face = &sShellFaces[read];
+        const struct DioramaTerrainCell *cell;
+
+        if (face->axis != 1 || face->sign >= 0)
+            continue;
+        cell = FaceSourceCell(input, face);
+        if (cell != NULL && face->plane < sLowest[cell - input->cells])
+            sLowest[cell - input->cells] = (int16_t)face->plane;
+    }
+    for (read = 0; read < faceCount; read++)
+    {
+        const struct DioramaShellFace *face = &sShellFaces[read];
+
+        if (face->axis == 1 && face->sign < 0)
+        {
+            const struct DioramaTerrainCell *cell = FaceSourceCell(input, face);
+
+            if (cell != NULL && face->plane <= sLowest[cell - input->cells])
+                continue;
+        }
+        sShellFaces[write++] = *face;
+    }
+    return write;
+}
+
 bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
                                struct DioramaTerrainVertex *vertices,
                                uint32_t vertexCapacity,
@@ -2034,6 +2080,8 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
         return false;
     mesh->occupancySpanCount = spanCount;
     mesh->shellFaceCount = rawShellFaceCount;
+    if (!mesh->usedCompressedOccupancy)
+        shellFaceCount = DropBaseUndersides(input, shellFaceCount);
     shellFaceCount = DioramaOccupancy_MergeFaces(sShellFaces, shellFaceCount);
     for (faceIndex = 0; faceIndex < shellFaceCount; faceIndex++)
     {
@@ -2207,6 +2255,45 @@ void DioramaCamera_GetRig(float cameraPitch, float *height, float *distance,
     *distance = (DIORAMA_OVERWORLD_CAMERA_HEIGHT * cosf(cameraPitch)
                  + DIORAMA_OVERWORLD_TARGET_VERTICAL) / sinf(cameraPitch);
     *screenOffsetY = DIORAMA_OVERWORLD_SCREEN_OFFSET;
+}
+
+uint32_t DioramaTerrain_FoldQuads(struct DioramaTerrainVertex *vertices, uint32_t vertexCount,
+                                  uint32_t *indices, uint32_t *indexCount)
+{
+    uint32_t read = 0;
+    uint32_t write = 0;
+    uint32_t out = 0;
+
+    while (read + 3 <= vertexCount)
+    {
+        /* AppendQuad's six: corners 0 1 2, then 0 2 3 */
+        bool quad = read + 6 <= vertexCount
+                 && memcmp(&vertices[read + 3], &vertices[read], sizeof(*vertices)) == 0
+                 && memcmp(&vertices[read + 4], &vertices[read + 2], sizeof(*vertices)) == 0;
+
+        /* write <= read: the vertices only ever move down */
+        memmove(&vertices[write], &vertices[read], 3 * sizeof(*vertices));
+        indices[out++] = write;
+        indices[out++] = write + 1;
+        indices[out++] = write + 2;
+        if (quad)
+        {
+            vertices[write + 3] = vertices[read + 5];
+            indices[out++] = write;
+            indices[out++] = write + 2;
+            indices[out++] = write + 3;
+            write += 4;
+            read += 6;
+        }
+        else
+        {
+            write += 3;
+            read += 3;
+        }
+    }
+    /* a last vertex or two that make no triangle drew nothing before either */
+    *indexCount = out;
+    return write;
 }
 
 bool DioramaTerrain_IsBoundsVisible(const struct DioramaTerrainBounds *bounds,

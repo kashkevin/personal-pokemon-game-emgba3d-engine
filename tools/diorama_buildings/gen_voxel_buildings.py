@@ -35,6 +35,7 @@ import voxel_building_specs as specs  # noqa: E402
 import voxel_props  # noqa: E402
 import voxel_relief_fixes  # noqa: E402
 import auto_buildings  # noqa: E402  (project-owned: the buildings no spec models)
+import dimensional  # noqa: E402  (project-owned: real roofs, the owner's option B)
 
 PORT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 # A placement whose cells keep their own metatile under the model: the
@@ -961,6 +962,28 @@ def build_models(only=None):
             if only and not spec["name"].startswith(only):
                 continue
             make_model(spec, layouts, models)
+    # Recessed windows and framed doors on every building outdoors
+    # (dimensional.py, the owner's option B).
+    outdoor = None
+    for m in models:
+        spec = m.spec
+        if "interior" in spec or "at" in spec or spec.get("bare"):
+            continue
+        if outdoor is None:
+            import voxel_cells
+            outdoor = voxel_cells.MapEvents().outdoor
+        if spec["layout"] not in outdoor:
+            continue
+        dimensional.detail_model(m)
+    roofs = {}
+    for m in models:
+        kind = m.spec.get("relief", {}).get("roof", {}).get("type")
+        if kind:
+            roofs[kind] = roofs.get(kind, 0) + 1
+    details = [d for m in models for d in getattr(m, "details", ())]
+    print("dimensional: roofs %s; %d windows and doors set back in %d models"
+          % (", ".join("%d %s" % (n, k) for k, n in sorted(roofs.items())) or "none",
+             len(details), sum(1 for m in models if getattr(m, "details", ()))))
     return models
 
 
@@ -987,12 +1010,29 @@ def make_model(spec, layouts, models):
                                            layout.ground_tiles(spec["ground"]),
                                            layout.ground_pixels(spec["ground"]))
             art, flank = flank_band(layout, art, relief, height)
-            parts = [vb.Relief("relief", art, height, side,
+            # A real roof (dimensional.py, the owner's option B): the walls
+            # are the Relief's, the roof is laid from a swatch of the drawn
+            # one appended to the art, and only the facade is held to the
+            # drawing.
+            drawing, lid, roof_parts, exact = art, None, [], [(0, 0, w * 16, h * 16)]
+            if relief.get("roof"):
+                done = dimensional.build_roof(spec["name"], art, art, height, relief.get("back"),
+                                              relief["roof"])
+                if done is not None:
+                    art, roof_parts, lids, exact, (kept, back, height) = done
+                    lid = lids or None
+                    if kept is not None:
+                        # a tent: the dome is all but its entrance
+                        drawing = kept
+                        relief = dict(relief, back=back)
+                        side = pick_side(drawing, height)
+            parts = [vb.Relief("relief", drawing, height, side,
                                hull=relief.get("hull", 0), bridge=relief.get("bridge", 0),
                                seam=(h * 16, open_s, open_n), flank_tile=flank,
                                seam_x=(spec.get("west", ()), spec.get("east", ())),
-                               back=relief.get("back"), fill=relief.get("fill"))]
-            spec["exact"] = [(0, 0, w * 16, h * 16)]
+                               back=relief.get("back"), fill=relief.get("fill"),
+                               lid=lid)] + roof_parts
+            spec["exact"] = exact
         else:
             parts = spec["parts"]()
         model = vb.Model(spec["name"], art, parts, (w, h), spec["ground"][0])
@@ -1150,6 +1190,31 @@ def _area_xz(poly):
 
 
 _EXISTS = {}    # blockdata path -> on disk: asked for every model
+_VARIANTS = None
+
+
+def layout_variants():
+    """The layouts a map's own scripts switch it to (setmaplayoutindex), by
+    the map's layout id: Route 111 without its Mirage Tower (every visit the
+    tower is hidden, and for good after its event), Sootopolis during the
+    legends' battle, Route 130 with Mirage Island. A building found on the
+    map stands in them too, where its cells are the same (the Mirage Tower
+    itself, whose cells are sand there, does not)."""
+    global _VARIANTS
+    if _VARIANTS is None:
+        import glob
+        import re
+        _VARIANTS = {}
+        for path in sorted(glob.glob(os.path.join(vb.ROOT, "data", "maps", "*", "map.json"))):
+            scripts = os.path.join(os.path.dirname(path), "scripts.inc")
+            if not os.path.exists(scripts):
+                continue
+            own = json.load(open(path, encoding="utf-8"))["layout"]
+            for name in re.findall(r"setmaplayoutindex\s+(LAYOUT_\w+)",
+                                   open(scripts, encoding="utf-8").read()):
+                if name != own:
+                    _VARIANTS.setdefault(own, set()).add(name)
+    return _VARIANTS
 
 
 def find_placements(model, layouts_json):
@@ -1190,9 +1255,12 @@ def find_placements(model, layouts_json):
         if entry.get("primary_tileset") != ref.primary:
             continue
         # An object of free shape (a hedge run) stands only where it was
-        # found: a short run also repeats inside every longer one. A block of
-        # one stands wherever the generator found the same block.
-        if "owned" in model.spec and entry["id"] != ref.id:
+        # found: a short run also repeats inside every longer one - and in
+        # the layouts its map's scripts switch to (layout_variants), there if
+        # its cells are the same. A block of one stands wherever the
+        # generator found the same block.
+        if ("owned" in model.spec and entry["id"] != ref.id
+                and entry["id"] not in layout_variants().get(ref.id, ())):
             continue
         if not primary_only and entry.get("secondary_tileset") != ref.secondary:
             continue
@@ -1708,7 +1776,8 @@ def verify(models, out):
             judged = types.SimpleNamespace(art=art, mesh=model.mesh, name=model.name)
         wrong, missing, extra = vb.ortho_check(judged, os.path.join(out, model.name + "_ortho.png"),
                                                exact=model.spec.get("exact"),
-                                               reference=model.spec.get("drawing"))
+                                               reference=model.spec.get("drawing"),
+                                               ignore=getattr(model, "details", ()))
         bad = vb.density_check(model)
         print("%-22s %4d tris  exact: wrong=%d missing=%d extra=%d  texel density: %d bad"
               % (model.name, model.triangle_count(), wrong, missing, extra, len(bad)))

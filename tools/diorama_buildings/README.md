@@ -63,5 +63,26 @@ gradenGnostic/pokeemerald-multiplatform (MIT) for the logic it reuses.
   pages with what it found marked, to look over (game art: not committed). A change to
   it or to `export_gl.py` compiles the table again without remodelling the buildings.
 
+* `dimensional.py` (new, project-owned; tests in `test_dimensional.py`): the owner's
+  choice of 2026-10-12 ("option B": genuinely dimensional, even where the normal
+  camera then differs a little from the drawing). A building `auto_buildings.py`
+  finds is given a real roof (`ROOFS` there, by map and door): `pitched` - a hipped
+  roof with a ridge, laid course by course (the 3DS port's `HipRoof` and `Strip`)
+  from a clean swatch of its own drawn roof, appended below its drawing; `flat` -
+  its drawing laid flat as before with a parapet round it, still the drawing at 45
+  degrees; `dome`, `cone`, `pyramid4`, `pyramid8` - a shell over its plan, its
+  drawn roof spread over it; `tent` - a Battle Tent's dome to the ground with its
+  entrance standing out; `split` - two buildings drawn as one. The facade stays
+  the Relief's and is still proved pixel for pixel; the roof is tagged `~behind`.
+  Every building outdoors (spec-modelled ones too) then has its windows - the
+  panes `window_glow.py` finds, grown to their frame - and its doors - where the
+  door's own opening animation draws (`field_door.c`, `graphics/door_anims`) - set
+  back into the wall with reveals and a sill; the proof leaves those rectangles
+  out. `voxel_building.py` changes for it: `Relief` takes `lid` (the columns whose
+  top the roof replaces) and `ortho_check` takes `ignore` (the detail rectangles).
+  `LANDMARKS` in `auto_buildings.py` holds buildings with no door on their own
+  cells (Trainer Hill), and `OVERRIDES` bounds the landmarks the door search runs
+  on from (the Battle Pyramid, the cable car stations, the Trick House).
+
 The runtime side is `src/diorama/scene/buildings.c` (a port of the 3DS project's
 `3ds_port/src/voxel/voxel_building.c`) and `src/diorama/gl/gl_building_renderer.c`.

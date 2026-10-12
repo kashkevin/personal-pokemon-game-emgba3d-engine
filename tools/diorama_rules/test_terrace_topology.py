@@ -6,7 +6,8 @@ from pathlib import Path
 
 from catalog import load_tilesets, load_world
 from compile_rules import _load_cells, parse_behaviors
-from terrace_topology import TERRACE_ROLES, join_water, lift_blocked_cells, role_for_cell, solve_layout
+from terrace_topology import (CAVE_RISE_Q16, TERRACE_ROLES, cave_levels, join_water,
+                              lift_blocked_cells, role_for_cell, solve_layout)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -131,6 +132,37 @@ class TerraceTopologyTests(unittest.TestCase):
         self.assertEqual(solved[target - layout["width"]]["groundQ16"], 0)
         self.assertEqual(solved[target + layout["width"]]["groundQ16"], -16)
 
+
+    def test_a_caves_floors_stand_at_their_elevation(self):
+        # a floor of elevation 3 with a platform of 4 and a ledge of 5 on it,
+        # a wall, a pool (1), a bridge (15) and stairs (0): the lowest floor
+        # stays, the highest a tile up, the one between half way; the rest as
+        # they are
+        def floor(elevation, collision=0, behavior="MB_NORMAL"):
+            return {"elevation": elevation, "collision": collision, "behavior": behavior,
+                    "tileset": "gTileset_Cave", "metatile": 0}
+        cells = ([floor(3)] * 6 + [floor(4)] * 3 + [floor(5)] + [floor(3, collision=1)]
+                 + [floor(1, behavior="MB_POND_WATER"), floor(15), floor(0)])
+        levels = cave_levels(tuple(cells), len(cells), 1)
+        self.assertEqual(set(levels), {6, 7, 8, 9})
+        self.assertEqual(levels[6]["groundQ16"], CAVE_RISE_Q16 // 2)
+        self.assertEqual(levels[9]["groundQ16"], CAVE_RISE_Q16)
+        self.assertEqual(levels[9]["topQ16"], levels[9]["groundQ16"])
+        self.assertFalse(levels[6]["solid"])
+        # one floor: nothing; a cell another solver placed: left to it
+        self.assertEqual(cave_levels(tuple([floor(3)] * 4), 4, 1), {})
+        self.assertNotIn(6, cave_levels(tuple(cells), len(cells), 1, {6: {"groundQ16": 0}}))
+
+    def test_a_caves_bridge_stands_at_the_floor_it_joins(self):
+        # 3 3 15 15 4 4: the bridge reaches the upper floor
+        def floor(elevation):
+            return {"elevation": elevation, "collision": 0, "behavior": "MB_NORMAL"}
+        cells = tuple(floor(e) for e in (3, 3, 15, 15, 4, 4))
+        levels = cave_levels(cells, 6, 1)
+        self.assertEqual(levels[2]["groundQ16"], CAVE_RISE_Q16)
+        self.assertEqual(levels[3]["groundQ16"], CAVE_RISE_Q16)
+        self.assertTrue(levels[2]["deck"])          # a deck, not a block
+        self.assertNotIn(0, levels)
 
 if __name__ == "__main__":
     unittest.main()

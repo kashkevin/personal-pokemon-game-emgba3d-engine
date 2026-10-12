@@ -1,12 +1,12 @@
 @echo off
 rem Pokemon Emerald native PC - benchmark suite (tools/benchmark/README.md).
 rem
-rem Measures the 3D view in ten scenes at 1920x1080, 2560x1440 and 3840x2160 (VSync
+rem Measures the 3D view in eleven scenes at 1920x1080, 2560x1440 and 3840x2160 (VSync
 rem off, no frame rate limit, native render scale), three of them again with World
-rem details off, and - when the previous checkpoint is next to this one - the same
-rem three scenes with the previous build, for a before/after comparison.
+rem details off, and - when the previous checkpoint is next to this one - four of
+rem the scenes with the previous build, for a before/after comparison.
 rem
-rem   run-benchmark.bat          the full suite (about 17 minutes)
+rem   run-benchmark.bat          the full suite (about 19 minutes)
 rem   run-benchmark.bat quick    four scenes at 1080p and 4K (about 4 minutes)
 rem
 rem Do not press keys while it runs: game windows open and close by themselves. Each
@@ -18,7 +18,7 @@ cd /d "%~dp0"
 
 set "GAMEDIR=%~dp0..\test-run"
 set "EXE=%GAMEDIR%\pokeemerald-mp-diorama.exe"
-set "OLDDIR=%~dp0..\..\native-wip-20261010-8\test-run"
+set "OLDDIR=%~dp0..\..\native-wip-20261012-1\test-run"
 set "OLDEXE=%OLDDIR%\pokeemerald-mp-diorama.exe"
 if not exist "%EXE%" (
     echo The game is missing: %EXE%
@@ -63,6 +63,7 @@ call :scene mauville mauville 1
 call :scene granite-cave granite 1
 call :scene dewford-coast dewford 1
 call :scene dense-objects route110 1
+call :scene jagged-pass jagged 1
 call :scene night-town mauville 1 PKMN_CLOCK_HOUR 22
 call :scene heavy-rain route104 1 PKMN_DIORAMA_WEATHER 13
 call :scene route101-details-off route101 0
@@ -72,6 +73,7 @@ if exist "%OLDEXE%" (
     call :before route101 route101
     call :before petalburg-woods woods
     call :before rustboro rustboro
+    call :before jagged-pass jagged
 ) else (
     echo The previous checkpoint's game was not found next to this one; no before/after run.
 )

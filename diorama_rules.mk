@@ -58,10 +58,14 @@ $(DIORAMA_TREES3DS_SOURCE) $(DIORAMA_TREES3DS_HEADER) &: $(DIORAMA_TREES3DS_ART)
 # with palette-slot pages for the renderer.
 # (export_gl.py and window_glow.py read the generator's output, not its input:
 # a change to them compiles the table again without modelling every building again.)
+# (window_glow.py is the generator's too: dimensional.py sets the windows it
+# finds back into their walls. dimensional.py also reads the doors' opening
+# animations, field_door.c and graphics/door_anims.)
 DIORAMA_BUILDINGS_EXPORT := tools/diorama_buildings/export_gl.py tools/diorama_buildings/window_glow.py
-DIORAMA_BUILDINGS_TOOLS := $(filter-out $(DIORAMA_BUILDINGS_EXPORT) tools/diorama_buildings/test_%.py, \
+DIORAMA_BUILDINGS_TOOLS := $(filter-out tools/diorama_buildings/export_gl.py tools/diorama_buildings/test_%.py, \
 	$(sort $(wildcard tools/diorama_buildings/*.py))) \
-	tools/diorama_buildings/relief_fixes.json tools/diorama_rules/emerald_compositor.py
+	tools/diorama_buildings/relief_fixes.json tools/diorama_rules/emerald_compositor.py \
+	src/field_door.c include/constants/metatile_labels.h $(wildcard graphics/door_anims/*.png)
 DIORAMA_BUILDINGS_BIN := build/diorama/buildings.bin
 DIORAMA_BUILDINGS_SOURCE := src/data/diorama/buildings.generated.c
 

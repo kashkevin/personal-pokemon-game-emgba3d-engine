@@ -200,6 +200,15 @@ void AgbMainLoop(void)
         {
             // The dedicated mailbox owns the transaction while ordinary field
             // callbacks stay paused. Audio and bridge frame publication continue.
+#ifdef ENABLE_DIORAMA
+            // The Players menu draws its window over the paused field. The 3D
+            // view takes its text boxes from the field's snapshot, which only
+            // the field callback publishes: publish it here, or the menu is
+            // never seen in 3D (U11).
+            if (MultiplayerMenu_IsActive() && gMain.callback2 == CB2_Overworld)
+                DioramaScene_PublishOverworld();
+#endif
+#line 183 // gba-line
         }
         else if (Overworld_SendKeysToLinkIsRunning() == TRUE)
         {

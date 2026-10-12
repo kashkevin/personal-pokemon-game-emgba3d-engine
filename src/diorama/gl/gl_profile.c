@@ -623,6 +623,14 @@ void DioramaProfile_DrawArrays(GLenum mode, GLint first, GLsizei count)
     glDrawArrays(mode, first, count);
 }
 
+void DioramaProfile_DrawElements(GLenum mode, GLsizei count, GLenum type, const void *indices)
+{
+    sDraws++;
+    sVertices += (uint64_t)(count > 0 ? count : 0);
+    sInstances++;
+    glDrawElements(mode, count, type, indices);
+}
+
 void DioramaProfile_DrawArraysInstanced(GLenum mode, GLint first, GLsizei count, GLsizei instances)
 {
     sDraws++;

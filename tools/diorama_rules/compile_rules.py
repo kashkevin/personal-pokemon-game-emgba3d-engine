@@ -20,7 +20,7 @@ from mountain_art import MountainArtError, validate_layout as validate_mountain_
 from profiles import NOMINAL_HEIGHTS, TileShape, shape_from_action
 from pixel_objects import UPRIGHT_CLASSES as UPRIGHT_PIXEL_CLASSES, extract_layout
 from structures import analyze_layout
-from terrace_topology import (WATER_BEHAVIORS, join_water, lift_blocked_cells,
+from terrace_topology import (WATER_BEHAVIORS, cave_levels, join_water, lift_blocked_cells,
                               solve_layout as solve_terrace_topology)
 from tile_shape import ClassificationError, TileShapeClassifier
 
@@ -1024,6 +1024,10 @@ def _terrain_record(cell_offset: int, cell: dict, shape: TileShape,
         # A blocked cell on lower land (terrace_topology._blocked_on_lower_land):
         # its own heights, standing on that level.
         _lift_record(record, terrace["groundQ16"])
+    if terrace is not None and terrace.get("deck"):
+        # A cave's bridge between its raised floors (terrace_topology.cave_levels):
+        # a deck at their level over the floor under it.
+        record.update({"shape": "bridge", "archetype": "bridge", "terrainClass": "wood"})
     if measurement is None:
         record.update({"measuredHeightQ16": 0, "measuredBodyQ16": 0,
                        "measuredRoofQ16": 0, "measuredAxis": "x",
@@ -1175,6 +1179,24 @@ def _structure_fields(analysis: dict, mapping: dict[int, int], offset: int,
     }
 
 
+def _script_layouts(root: Path) -> dict[str, str]:
+    """The layouts a map's own scripts switch it to (setmaplayoutindex), each
+    with the map's own layout: Route 111 without its Mirage Tower, Sky
+    Pillar's clean floors. (Shoal Cave's high-tide rooms are maps of their
+    own as well.)"""
+    out = {}
+    for path in sorted((root / "data" / "maps").glob("*/map.json")):
+        scripts = path.parent / "scripts.inc"
+        if not scripts.exists():
+            continue
+        own = json.loads(path.read_text(encoding="utf-8"))["layout"]
+        for name in re.findall(r"setmaplayoutindex\s+(LAYOUT_\w+)",
+                               scripts.read_text(encoding="utf-8")):
+            if name != own:
+                out.setdefault(name, own)
+    return out
+
+
 def compile_data(root: Path) -> dict:
     root = Path(root)
     rules_root = root / "data/diorama"
@@ -1193,6 +1215,7 @@ def compile_data(root: Path) -> dict:
     maps_by_layout = defaultdict(list)
     for row in maps:
         maps_by_layout[row["layout"]].append(row)
+    script_layouts = _script_layouts(root)
     cells, behavior_counts, pin_counts = _load_cells(root, layouts, tilesets, behavior_names)
     event_cells = _events(root, maps, cells, layouts_by_id)
     pixel_summaries = _pixel_summaries(root, layouts, cells, tilesets)
@@ -1210,6 +1233,14 @@ def compile_data(root: Path) -> dict:
             # The sea's shallows on the sea's level (terrace_topology.join_water).
             solved = {**solved, **join_water(cells[layout["id"]], layout["width"],
                                              layout["height"], solved)}
+        # (a layout only a map's scripts switch to - Sky Pillar's clean floors -
+        # is that map's: _script_layouts)
+        rows = (maps_by_layout.get(layout["id"], ())
+                or maps_by_layout.get(script_layouts.get(layout["id"]), ()))
+        if rows and all(row["mapType"] == "MAP_TYPE_UNDERGROUND" for row in rows):
+            # A cave's floors at their own elevation (terrace_topology.cave_levels).
+            solved = {**solved, **cave_levels(cells[layout["id"]], layout["width"],
+                                              layout["height"], solved)}
         terrace_topology[layout["id"]] = solved
 
     source = load_json(rules_root / "defaults.json")

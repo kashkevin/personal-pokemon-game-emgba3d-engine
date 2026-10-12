@@ -256,3 +256,29 @@ tilesets are unchanged.
   and 5, the lower strip behind the grass) is drawn whole; the 3D grass stands
   in front of it (`scene_snapshot.c` `HasUnsupportedSubsprites`). Routes 119
   and 120 fell back to the 2D view while the player stood in it.
+* Real roofs, recessed windows, framed doors (the owner's option B,
+  2026-10-12; `tools/diorama_buildings/dimensional.py`, project-owned): the
+  buildings read off their drawing get a roof of their own instead of the
+  drawing laid flat - pitched hipped roofs with a ridge tiled from a swatch of
+  their own drawn roof, parapets round flat roofs, domes, cones and pyramids
+  (huts, towers, the Battle Pyramid), the Battle Tents as domes with their
+  entrance standing out - and on every building outdoors the windows and
+  doors are set back with reveals, the windows with a sill. The facades are
+  still proved against their drawing; the roofs and details are left out of
+  the proof, so the normal camera sees a roof a little unlike its art.
+* Layouts a map's scripts switch to (`setmaplayoutindex`: Route 111 without
+  its Mirage Tower, Shoal Cave at high tide, Sootopolis during the legends'
+  battle): the snapshot names the layout the game draws (`scene_snapshot.c`
+  `CurrentLayoutId`; `gMapHeader.mapLayoutId` keeps the map's own), the
+  buildings read off the map stand in those layouts too where their cells
+  are the same (`gen_voxel_buildings.py` `layout_variants`), and a cave's
+  switched layouts get its levels.
+* Cave levels (V38): in caves the walkable floors stand at their GBA
+  elevation's level - the lowest where it was, the highest a tile over it -
+  and bridges (elevation 15) are decks at the floor they meet
+  (`terrace_topology.py` `cave_levels`).
+* Terrain cost (V37): a cell's columns have no underside where they stand on
+  its floor (`DropBaseUndersides`), and each chunk is drawn from indices, a
+  quad's four corners shaded once (`DioramaTerrain_FoldQuads`; the same
+  triangles in the same order). `PKMN_DIORAMA_CHUNK_LOG=1` logs each chunk's
+  cost.

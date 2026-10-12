@@ -50,6 +50,7 @@ else
     scene granite-cave granite 1
     scene dewford-coast dewford 1
     scene dense-objects route110 1
+    scene jagged-pass jagged 1
     scene night-town mauville 1 PKMN_CLOCK_HOUR=22
     scene heavy-rain route104 1 PKMN_DIORAMA_WEATHER=13
     scene route101-details-off route101 0

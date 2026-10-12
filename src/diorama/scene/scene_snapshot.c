@@ -1218,6 +1218,17 @@ struct FarCell
     u16 entry;
 };
 
+/* The layout the map is drawn from now. A map's scripts can switch it
+ * (setmaplayoutindex: Route 111 without its Mirage Tower, Sootopolis during
+ * the legends' battle, Shoal Cave at high tide): SetCurrentMapLayout sets
+ * the save's id and gMapHeader.mapLayout, while gMapHeader.mapLayoutId keeps
+ * the map's own - the rules and the building models would have read the
+ * cells of a layout the game is not showing. */
+static u16 CurrentLayoutId(void)
+{
+    return gSaveBlock1Ptr != NULL ? gSaveBlock1Ptr->mapLayoutId : gMapHeader.mapLayoutId;
+}
+
 /* The cell at map coordinates (mapX, mapY) as far as the static maps go:
  * the map (its own grid, with any changes), a connected map or one connected
  * to that, else the map's border block. */
@@ -1233,7 +1244,7 @@ static void FindFarCell(int mapX, int mapY, struct FarCell *cell)
     if (x >= 0 && y >= 0 && x < layout->width && y < layout->height)
     {
         cell->layout = layout;
-        cell->layoutId = gMapHeader.mapLayoutId;
+        cell->layoutId = CurrentLayoutId();
         cell->x = x;
         cell->y = y;
         cell->mapGroup = gSaveBlock1Ptr->location.mapGroup;
@@ -1498,7 +1509,7 @@ void DioramaScene_PublishOverworld(void)
 
     sDraft.mapGroup = mapGroup;
     sDraft.mapNum = mapNum;
-    sDraft.mapLayoutId = gMapHeader.mapLayoutId;
+    sDraft.mapLayoutId = CurrentLayoutId();
     sDraft.mapCoordinateOffset = MAP_OFFSET;
     sDraft.mapType = gMapHeader.mapType;
     sDraft.weather = GetCurrentWeather();

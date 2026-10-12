@@ -412,5 +412,19 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertIn("UINT64_C(0xFFFF)", source)
 
 
+class ScriptLayoutTests(unittest.TestCase):
+    """The layouts a map's own scripts switch it to are that map's (no
+    compile needed)."""
+
+    def test_switched_layouts_belong_to_their_map(self):
+        from compile_rules import _script_layouts
+        switched = _script_layouts(ROOT)
+        self.assertEqual(switched["LAYOUT_SHOAL_CAVE_HIGH_TIDE_INNER_ROOM"],
+                         "LAYOUT_SHOAL_CAVE_LOW_TIDE_INNER_ROOM")
+        self.assertEqual(switched["LAYOUT_ROUTE111_NO_MIRAGE_TOWER"], "LAYOUT_ROUTE111")
+        # switching back to its own layout is not another one
+        self.assertNotIn("LAYOUT_SHOAL_CAVE_LOW_TIDE_INNER_ROOM", switched)
+
+
 if __name__ == "__main__":
     unittest.main()
