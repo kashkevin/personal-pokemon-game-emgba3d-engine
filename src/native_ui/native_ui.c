@@ -31,6 +31,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_Party,
     &gUiScreen_Summary,
     &gUiScreen_Bag,
+    &gUiScreen_Pokedex,
 };
 
 static bool sInitialized;
@@ -346,8 +347,17 @@ bool NativeUi_HandleEvent(const SDL_Event *event)
             SDL_Log("Native UI: click %d at window (%d,%d) canvas (%d,%d): %s %d/%d", event->button.button,
                     event->button.x, event->button.y, sMouseX, sMouseY, hit != NULL ? "region" : "no region",
                     hit != NULL ? hit->id : 0, hit != NULL ? hit->index : 0);
-        if (hit == NULL || sActive == NULL || sActive->click == NULL)
+        if (sActive == NULL || sActive->click == NULL)
             return false;
+        if (hit == NULL)
+        {
+            /* a right click anywhere is the screen's "back" (its B) */
+            static const struct UiHit sNoHit = {UI_HIT_NONE, 0, 0, 0, 0, 0};
+
+            if (event->button.button != 3)
+                return false;
+            hit = &sNoHit;
+        }
         if (sActive->click(hit, event->button.button))
             return true;
         /* a click on a prompt presses its button (the design's prompts are buttons) */

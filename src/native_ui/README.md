@@ -38,13 +38,14 @@ engine's own button presses. It never decides anything the engine decides.
 | `screens/ui_party.c` | 1 party: the engine's party menu in every mode the single and double layouts use (field, items, TMs, giving, battle, choosing for a challenge); the grid's directions and clicks become the engine's cursor presses; SELECT moves a Pokémon; the multi battles' layouts keep the game's screen |
 | `screens/ui_bag.c` | 2 bag: the engine's bag in every place it opens (field, battle, giving, selling, depositing, berries): pockets, the list with the game's CLOSE BAG row, descriptions and TM move data, the item menu as the game lays it out, quantities, YES/NO, messages, moving (SELECT) and the game's own sort (START); FIND is marked planned, favourites are left out (not in the game) |
 | `screens/ui_summary.c` | 5 summary: the clipboard over the engine's summary in all its modes (party, box, learning a move, the move order); the game's four pages (CONTEST MOVES takes the planned RIBBONS tab); the memo as the game writes it; Mega readiness from the game's forms, stones and Key Stone; IVs and EVs only where the game's setting shows them; Lucky from the multiplayer trades |
+| `screens/ui_pokedex.c` | 6 Pokédex: the red device over the engine's (classic) Pokédex: the Hoenn and National lists in the game's order, search results, the entry pane (caught: picture, category, types, both units, forms count, entry; seen: silhouette; unseen: ?), the START menu, the entry page's AREA, CRY, SIZE, CANCEL (the game's own AREA, CRY and SIZE pages and its search keep the game's picture); FIND marked planned, the forms catalogue marked pending; mouse goals hold the game's direction (its own scrolling) |
 | `screens/ui_mon.c` | one Pokémon as the screens show it (`ui_mon.h`): names, types, status, moves and PP, EXP |
 | `screens/ui_testcard.c` | the kit's test card (fidelity checks) |
 | `data/*` | generated: palette, label faces, icons (`tools/native_ui/gen_ui_data.js`), title layers (`gen_title_assets.py`) — in the UI art-direction workspace |
 
 Engine-side read-only accessors (all `#ifdef ENABLE_NATIVE_UI`, at the end of their files):
 `title_screen.c`, `main_menu.c`, `start_menu.c`, `field_screen_effect.c`, `option_menu.c`,
-`party_menu.c`, `pokemon_summary_screen.c`, `item_menu.c`, `menu_helpers.c` (the shared YES/NO and message), `text.c` (each window's last string, a copy of it as printed, whether its printer waits
+`party_menu.c`, `pokemon_summary_screen.c`, `item_menu.c`, `pokedex.c`, `menu_helpers.c` (the shared YES/NO and message), `text.c` (each window's last string, a copy of it as printed, whether its printer waits
 for a button), `window.c` (whether a window is on screen), `pokemon_icon.c`, `multiplayer.c`,
 `platform/sdl2.c` (save file writes, the F10 menu).
 

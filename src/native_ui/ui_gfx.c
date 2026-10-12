@@ -421,6 +421,16 @@ void UiFilter_Apply(uint8_t *rgba, int count, const struct UiFilter *f)
 {
     if (f == NULL)
         return;
+    if (f->silhouette != UI_NONE)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            rgba[i * 4] = (uint8_t)(f->silhouette & 0xFF);
+            rgba[i * 4 + 1] = (uint8_t)((f->silhouette >> 8) & 0xFF);
+            rgba[i * 4 + 2] = (uint8_t)((f->silhouette >> 16) & 0xFF);
+        }
+        return;
+    }
     for (int i = 0; i < count; i++)
     {
         float r = rgba[i * 4] / 255.0f, g = rgba[i * 4 + 1] / 255.0f, b = rgba[i * 4 + 2] / 255.0f;
@@ -468,12 +478,15 @@ void UiFilter_Apply(uint8_t *rgba, int count, const struct UiFilter *f)
 void UiFilter_Key(char *buf, int size, const struct UiFilter *f)
 {
     if (f == NULL || (f->grayscale <= 0 && f->sepia <= 0 && (f->saturate <= 0 || f->saturate == 1)
-                      && (f->brightness <= 0 || f->brightness == 1)))
+                      && (f->brightness <= 0 || f->brightness == 1) && f->silhouette == UI_NONE))
     {
         if (size > 0)
             buf[0] = '\0';
         return;
     }
-    snprintf(buf, (size_t)size, "f%.3f,%.3f,%.3f,%.3f", f->grayscale, f->sepia, f->saturate, f->brightness);
+    if (f->silhouette != UI_NONE)
+        snprintf(buf, (size_t)size, "s%08x", (unsigned)f->silhouette);
+    else
+        snprintf(buf, (size_t)size, "f%.3f,%.3f,%.3f,%.3f", f->grayscale, f->sepia, f->saturate, f->brightness);
 }
 #endif // ENABLE_NATIVE_UI

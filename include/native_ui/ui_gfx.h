@@ -27,13 +27,15 @@ extern const struct UiIconRect gUiIconRects[];
 extern const int gUiIconRectCount;
 
 /* CSS-style filters, applied in this order: grayscale, sepia, saturate,
- * brightness (each only when set). */
+ * brightness (each only when set). A silhouette (the design's silhouette
+ * option) paints every visible pixel one colour instead. */
 struct UiFilter
 {
     float grayscale;   /* 0..1 */
     float sepia;       /* 0..1 */
     float saturate;    /* 0: unset, 1: unchanged */
     float brightness;  /* 0: unset, 1: unchanged */
+    UiRGBA silhouette; /* UI_NONE: none */
 };
 
 bool UiGfx_Init(void);

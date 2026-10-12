@@ -11,6 +11,7 @@
  * never drives a menu through them; it presses the engine's own buttons.
  */
 #include "global.h"
+#include "pokemon_storage_system.h"
 
 /* ---------------------------------------------------------------- title screen (title_screen.c) */
 
@@ -293,6 +294,151 @@ bool32 Bag_NativeUiState(struct NativeBag *out);
 /* menu_helpers.c: the shared YES/NO, and the shared message (its window) */
 bool32 MenuHelpers_NativeUiYesNo(void);
 bool32 MenuHelpers_NativeUiMessage(u8 *windowId);
+
+/* ---------------------------------------------------------------- Pokédex (pokedex.c, the classic one) */
+
+enum NativePokedexPhase
+{
+    NATIVE_DEX_NONE,
+    NATIVE_DEX_LOADING,         /* opening, or a list page loading and fading in */
+    NATIVE_DEX_LIST,            /* the list reads buttons */
+    NATIVE_DEX_SCROLLING,       /* the list moves a row */
+    NATIVE_DEX_MENU,            /* the START menu: menuCursor of menuCount */
+    NATIVE_DEX_OPENING,         /* the picture moves over to the entry page */
+    NATIVE_DEX_INFO,            /* the entry page reads buttons: selectedScreen */
+    NATIVE_DEX_INFO_LOADING,    /* the entry page loads, moves to another Pokémon, or closes */
+    NATIVE_DEX_LEAVING,         /* fading out to one of the game's own pages */
+    NATIVE_DEX_PAGE,            /* AREA, CRY, SIZE, the search: the game's own pages */
+    NATIVE_DEX_CLOSING,         /* fading out (closing, or leaving search results) */
+};
+struct NativePokedexRow
+{
+    u16 dexNum;                 /* the national number (0xFFFF: an empty row) */
+    u16 shownNum;               /* the number the game shows (the regional one in the Hoenn mode) */
+    u16 species;
+    u32 personality;            /* the picture's (the save's Unown and Spinda; else none) */
+    bool8 seen;
+    bool8 owned;
+};
+struct NativePokedex
+{
+    u8 phase;
+    u8 dexMode;                 /* DEX_MODE_* */
+    u8 dexOrder;                /* ORDER_* (pokedex_common.h) */
+    bool8 nationalEnabled;
+    bool8 searchResults;        /* the list is a search's results */
+    u8 digits;                  /* the numbers' digits (3; 4 in a National mode over 999) */
+    u16 seenCount;              /* the game's totals: the National Dex's once it is enabled, else Hoenn's */
+    u16 ownCount;
+    u16 regionalSeen;           /* Hoenn's (shown beside the National ones once enabled) */
+    u16 regionalOwn;
+    u16 listCount;
+    u16 selected;               /* the list position */
+    u8 menuCursor;
+    u8 menuCount;               /* the START menu's rows (4; 5 in search results) */
+    u8 selectedScreen;          /* the entry page's AREA, CRY, SIZE, CANCEL (pokedex_common.h) */
+    struct NativePokedexRow entry;   /* the selected one */
+    bool8 ready;
+};
+bool32 Pokedex_NativeUiState(struct NativePokedex *out);
+/* the list's rows from first; returns how many there are */
+u32 Pokedex_NativeUiRows(u32 first, u32 count, struct NativePokedexRow *rows);
+
+/* ---------------------------------------------------------------- PC storage (pokemon_storage_system.c) */
+
+enum NativeStoragePhase
+{
+    NATIVE_STORAGE_NONE,
+    NATIVE_STORAGE_LOADING,     /* opening, or coming back from the summary, naming or the bag */
+    NATIVE_STORAGE_MAIN,        /* the cursor reads buttons */
+    NATIVE_STORAGE_BUSY,        /* the cursor or a Pokémon moves, the party slides, a box scrolls... */
+    NATIVE_STORAGE_MENU,        /* menuLabels (menuCount), menuCursor */
+    NATIVE_STORAGE_YES_NO,      /* menuCursor */
+    NATIVE_STORAGE_CHOOSE_BOX,  /* which box (deposit, jump): chooseBox */
+    NATIVE_STORAGE_MARKS,       /* markCursor (0-3 the marks, 4 OK, 5 CANCEL), marks */
+    NATIVE_STORAGE_MESSAGE,     /* a message waits for a button */
+    NATIVE_STORAGE_ITEM_INFO,   /* MOVE ITEMS: an item's description waits for a button */
+    NATIVE_STORAGE_MULTI,       /* several Pokémon selected or moved at once (the game's own picture) */
+    NATIVE_STORAGE_CLOSING,     /* the screen closes, or another screen opens */
+};
+enum NativeStorageMode
+{
+    NATIVE_STORAGE_WITHDRAW,
+    NATIVE_STORAGE_DEPOSIT,
+    NATIVE_STORAGE_MOVE_MONS,
+    NATIVE_STORAGE_MOVE_ITEMS,
+    NATIVE_STORAGE_SELECT_MON,  /* a script asks for a Pokémon */
+};
+/* the cursor's places, as the game numbers them (CURSOR_AREA_*) */
+enum NativeStorageArea
+{
+    NATIVE_STORAGE_IN_BOX,      /* 0-29 */
+    NATIVE_STORAGE_IN_PARTY,    /* 0-5, 6 the party panel's button */
+    NATIVE_STORAGE_BOX_TITLE,
+    NATIVE_STORAGE_BUTTONS,     /* 0 PARTY POKéMON, 1 CLOSE BOX */
+};
+/* the game's wallpapers (data/wallpapers.h order) */
+enum NativeWallpaper
+{
+    NATIVE_WALLPAPER_FOREST,
+    NATIVE_WALLPAPER_CITY,
+    NATIVE_WALLPAPER_DESERT,
+    NATIVE_WALLPAPER_SAVANNA,
+    NATIVE_WALLPAPER_CRAG,
+    NATIVE_WALLPAPER_VOLCANO,
+    NATIVE_WALLPAPER_SNOW,
+    NATIVE_WALLPAPER_CAVE,
+    NATIVE_WALLPAPER_BEACH,
+    NATIVE_WALLPAPER_SEAFLOOR,
+    NATIVE_WALLPAPER_RIVER,
+    NATIVE_WALLPAPER_SKY,
+    NATIVE_WALLPAPER_POLKADOT,
+    NATIVE_WALLPAPER_POKECENTER,
+    NATIVE_WALLPAPER_MACHINE,
+    NATIVE_WALLPAPER_PLAIN,
+    NATIVE_WALLPAPER_FRIENDS,   /* Walda's: her two colours */
+    NATIVE_WALLPAPER_COUNT,
+};
+struct NativeStorage
+{
+    u8 phase;
+    u8 mode;                    /* enum NativeStorageMode */
+    u8 box;                     /* the current box */
+    u8 boxCount;
+    s8 scrollTo;                /* the box the game is scrolling to (-1: none) */
+    s8 scrollDir;               /* 1: to the right */
+    u8 cursorArea;              /* enum NativeStorageArea */
+    s8 cursorPos;
+    bool8 partyShown;           /* the game's party panel is out (its cursor can go there) */
+    bool8 quickMode;            /* SELECT's auto action: A acts without the menu */
+    bool8 holdingMon;
+    struct Pokemon heldMon;
+    u16 heldItem;               /* MOVE ITEMS: the item in the hand (ITEM_NONE: none) */
+    u8 menuCount;
+    u8 menuCursor;
+    const u8 *menuLabels[7];
+    u8 chooseBox;
+    u8 markCursor;
+    bool8 marks[4];
+    bool8 messageShown;
+    u8 message[64];
+    u16 waldaColors[2];         /* Walda's wallpaper's background and foreground (BGR555) */
+    bool8 ready;
+};
+bool32 Storage_NativeUiState(struct NativeStorage *out);
+struct NativeStorageBox
+{
+    u8 name[BOX_NAME_LENGTH + 1];
+    u8 wallpaper;               /* enum NativeWallpaper */
+    u8 count;
+    u16 species[IN_BOX_COUNT];  /* SPECIES_NONE: empty */
+    u32 personality[IN_BOX_COUNT];
+    bool8 isEgg[IN_BOX_COUNT];
+    u16 heldItem[IN_BOX_COUNT];
+};
+void Storage_NativeUiBox(u32 box, struct NativeStorageBox *out);
+/* the Pokémon at a box position as a party Pokémon (FALSE: empty) */
+bool32 Storage_NativeUiBoxMon(u32 box, u32 pos, struct Pokemon *out);
 
 /* ---------------------------------------------------------------- options (option_menu.c) */
 
