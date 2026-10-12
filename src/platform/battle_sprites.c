@@ -78,7 +78,8 @@ static struct
     bool battleScreen;
     struct Look looks[BS_BATTLERS];
     int16_t tileNum[BS_BATTLERS]; /* the battler sprite's OAM tiles; -1: no usable sprite */
-    int16_t restTop[BS_BATTLERS]; /* its 64x64 box's top on the screen at rest (no x2/y2) */
+    int16_t restTop[BS_BATTLERS]; /* its 64x64 box's top-left on the screen at rest (no x2/y2) */
+    int16_t restLeft[BS_BATTLERS];
     struct MonBg monBg[4];
     int32_t sink[BS_BATTLERS];
 } sLatched;
@@ -272,6 +273,7 @@ void BattleSprites_LatchOam(void)
             continue;
         sLatched.tileNum[b] = (int16_t)sprite->oam.tileNum;
         sLatched.restTop[b] = (int16_t)(sprite->y + sprite->centerToCornerVecY);
+        sLatched.restLeft[b] = (int16_t)(sprite->x + sprite->centerToCornerVecX);
     }
 }
 
@@ -679,14 +681,21 @@ static unsigned ViewBattler(const struct BattleSpriteView *view)
     return BS_BATTLERS;
 }
 
-/* The highest screen row a battler's frame reaches at rest: the picture's top is exceeded by a
- * Pokemon taller than the room above its feet. */
-static int RestTop(unsigned b)
+/* The screen box a battler's frames cover at rest (x1, y1 exclusive); false when it lies inside
+ * the picture (nothing to draw around it). */
+static bool RestBox(unsigned b, int box[4])
 {
-    return sLatched.restTop[b] + sBase[b].top + sActive[b].strip->by0;
+    const struct Strip *strip = sActive[b].strip;
+
+    box[0] = sLatched.restLeft[b] + sBase[b].left + strip->bx0;
+    box[1] = sLatched.restTop[b] + sBase[b].top + strip->by0;
+    box[2] = sLatched.restLeft[b] + sBase[b].left + strip->bx1;
+    box[3] = sLatched.restTop[b] + sBase[b].top + strip->by1;
+    return box[1] < 0 || box[0] < 0 || box[2] > DISPLAY_WIDTH;
 }
 
-static void AddOverflow(const struct BattleSpriteView *view, int x, int y, const struct OamData *oam, int restTop)
+static void AddOverflow(const struct BattleSpriteView *view, int x, int y, const struct OamData *oam,
+                        const int box[4])
 {
     struct BattleSpriteOverflow *o;
     unsigned blendMode = (REG_BLDCNT >> 6) & 3;
@@ -698,7 +707,10 @@ static void AddOverflow(const struct BattleSpriteView *view, int x, int y, const
     o->view = view;
     o->x = (int16_t)x;
     o->y = (int16_t)y;
-    o->restTop = (int16_t)restTop;
+    o->restLeft = (int16_t)box[0];
+    o->restTop = (int16_t)box[1];
+    o->restRight = (int16_t)box[2];
+    o->restBottom = (int16_t)box[3];
     o->alpha = 16;
     if (oam != NULL)
     {
@@ -735,8 +747,8 @@ static void AddOverflow(const struct BattleSpriteView *view, int x, int y, const
     }
 }
 
-/* The library sprites whose frames reach above the picture this frame, back to front (the GBA's
- * order: higher priority numbers first, then higher OAM indexes). */
+/* The library sprites whose frames reach outside the picture this frame, back to front (the
+ * GBA's order: higher priority numbers first, then higher OAM indexes). */
 static void Overflow(void)
 {
     const struct OamData *oam = (const struct OamData *)OAM;
@@ -749,7 +761,7 @@ static void Overflow(void)
             const struct BattleSpriteBgCopy *copy = &gBattleSpriteBgCopies[i];
             uint16_t control, hoffs, voffs;
             unsigned b;
-            int restTop, x, y;
+            int box[4], x, y;
 
             if (i == 3 || copy->view == NULL)
                 continue;
@@ -757,7 +769,7 @@ static void Overflow(void)
             if ((int)(control & 3) != prio)
                 continue;
             b = ViewBattler(copy->view);
-            if (b >= BS_BATTLERS || (restTop = RestTop(b)) >= 0)
+            if (b >= BS_BATTLERS || !RestBox(b, box))
                 continue;
             /* the copy's block at the map's origin, on the screen through the layer's scroll */
             hoffs = *(uint16_t *)(REG_ADDR_BG0HOFS + i * 4);
@@ -766,19 +778,18 @@ static void Overflow(void)
             y = -(int)(voffs & 0xFF);
             if (x < -256) x += 512;
             if (y < -128) y += 256;
-            if (y + copy->view->top < 0)
-                AddOverflow(copy->view, x, y, NULL, restTop);
+            AddOverflow(copy->view, x, y, NULL, box);
         }
         for (i = 127; i >= 0; i--)
         {
             const struct BattleSpriteView *view = gBattleSpriteObjViews[i];
             unsigned b;
-            int restTop, x, y;
+            int box[4], x, y;
 
             if (view == NULL || oam[i].priority != prio || oam[i].objMode == 2)
                 continue;
             b = ViewBattler(view);
-            if (b >= BS_BATTLERS || (restTop = RestTop(b)) >= 0)
+            if (b >= BS_BATTLERS || !RestBox(b, box))
                 continue;
             x = oam[i].x;
             y = oam[i].y;
@@ -786,9 +797,7 @@ static void Overflow(void)
                 x -= 512;
             if (y >= DISPLAY_HEIGHT)
                 y -= 256;
-            /* reaching above the picture: an affine frame anywhere near the top, else its top row */
-            if ((oam[i].affineMode & 1) ? y < 64 : y + view->top < 0)
-                AddOverflow(view, x, y, &oam[i], restTop);
+            AddOverflow(view, x, y, &oam[i], box);
         }
     }
 }
