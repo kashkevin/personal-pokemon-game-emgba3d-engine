@@ -27,6 +27,10 @@ SANITIZE     ?= 0
 DIORAMA      ?= 0
 DIORAMA_GENERATED_C := src/data/diorama/diorama_rules.generated.c src/data/diorama/tree_model.generated.c \
                        src/data/diorama/buildings.generated.c src/data/diorama/trees_3ds.generated.c
+# BATTLE_SPRITES=1 (default): the Pokemon in battles are drawn from the animated sprite pack
+# (battle-sprites.ebsp beside the program; include/platform/battle_sprites.h). Without the pack,
+# with PKMN_BATTLE_SPRITES=0 or with BATTLE_SPRITES=0, the GBA sprites are drawn as ever.
+BATTLE_SPRITES ?= 1
 
 # GBA PPU emulation used for the 2D frame. The shipping Windows build uses the
 # "easy draw" renderer; Linux uses it too so tests exercise what ships ("fast
@@ -100,6 +104,9 @@ endif
 ifeq ($(DIORAMA),1)
   CPPFLAGS += -DENABLE_DIORAMA
 endif
+ifeq ($(BATTLE_SPRITES),1)
+  CPPFLAGS += -DENABLE_BATTLE_SPRITES
+endif
 
 ifeq ($(DEBUG),1)
   OPT := -O0 -g
@@ -150,6 +157,10 @@ ifeq ($(DIORAMA),1)
   # keeps its memory across a soft reset like the window does.
   PRESERVED_OBJS += $(patsubst src/%.c,$(OBJ_DIR)/src/%.o,$(wildcard src/diorama/*.c src/diorama/*/*.c) $(DIORAMA_GENERATED_C))
 endif
+ifeq ($(BATTLE_SPRITES),1)
+  # The loaded sprite pack and its decoded frames are platform state, kept across a soft reset.
+  PRESERVED_OBJS += $(addprefix $(OBJ_DIR)/src/platform/,battle_sprites.o battle_sprite_library.o)
+endif
 
 ASFLAGS := --defsym MODERN=1 --defsym EMERALD=1 --defsym PORTABLE=1
 ifeq ($(NATIVE_LINUX),1)
@@ -187,6 +198,9 @@ endif
 PC_EXCLUDED_C := src/m4a.c src/m4a_tables.c src/rom_header_gf.c src/rom_header_rhh.c \
                  src/agb_flash.c src/agb_flash_1m.c src/agb_flash_mx.c src/agb_flash_le.c \
                  src/siirtc.c
+ifneq ($(BATTLE_SPRITES),1)
+  PC_EXCLUDED_C += src/platform/battle_sprites.c src/platform/battle_sprite_library.c
+endif
 C_SRCS_IN := $(wildcard src/*.c src/*/*.c src/*/*/*.c)
 # The Diorama renderer and its generated tables only in DIORAMA=1 builds.
 ifeq ($(DIORAMA),1)
