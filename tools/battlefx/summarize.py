@@ -41,13 +41,15 @@ def summarise(folder):
     real = load(folder / "real_report.jsonl")
     crashes = load(folder / "crashes.jsonl")
     out = {"folder": str(folder), "played": len(rows), "real": len(real), "crashed": [c["id"] for c in crashes]}
-    exact, diff, failed, tails, longer, shorter = [], [], [], [], [], []
+    exact, diff, failed, tails, longer, shorter, stuck = [], [], [], [], [], [], []
     begin, step, worst, gpu, cpu = [], [], [], [], []
     for r in rows:
         p = r.get("parity", {})
         key = r["id"] + ("/t%d" % r["turn"] if r.get("turn") else "")
         if r.get("failed"):
             failed.append(key)
+        if r.get("stuck"):
+            stuck.append(key)
         if p.get("compared", 0) > 0 and p.get("equal") == p.get("compared"):
             exact.append(key)
         elif p.get("compared", 0) > 0:
@@ -71,7 +73,7 @@ def summarise(folder):
     real_exact = [x["id"] for x in real if x["compared"] > 0 and x["equal"] == x["compared"]]
     real_diff = [x for x in real if x["compared"] > 0 and x["equal"] != x["compared"]]
     out.update({
-        "exact": len(exact), "different": diff, "failed": failed, "tailSprites": tails,
+        "exact": len(exact), "different": diff, "failed": failed, "stuck": stuck, "tailSprites": tails,
         "gameLongerThanCore": {"count": len(longer), "medianFrames": statistics.median(longer) if longer else 0},
         "coreLongerThanGame": shorter,
         "beginMs": {"median": statistics.median(begin) if begin else 0, "p95": pct(begin, 0.95), "max": max(begin or [0])},
@@ -92,6 +94,7 @@ def markdown(s):
     lines.append("| different | %d %s |" % (len(s["different"]), " ".join(d["id"] for d in s["different"])))
     lines.append("| failed (GBA shown) | %d %s |" % (len(s["failed"]), " ".join(s["failed"])))
     lines.append("| crashed the game | %d %s |" % (len(s["crashed"]), " ".join(s["crashed"])))
+    lines.append("| the game's own animation did not end here (stuck) | %d %s |" % (len(s["stuck"]), " ".join(s["stuck"])))
     lines.append("| GBA effect sprites after the core's end | %d %s |" % (len(s["tailSprites"]), " ".join(t["id"] for t in s["tailSprites"])))
     lines.append("| core longer than the game | %d %s |" % (len(s["coreLongerThanGame"]), " ".join(s["coreLongerThanGame"])))
     lines.append("| game longer than the core (its end waits) | %d (median %s frames) |" % (s["gameLongerThanCore"]["count"], s["gameLongerThanCore"]["medianFrames"]))

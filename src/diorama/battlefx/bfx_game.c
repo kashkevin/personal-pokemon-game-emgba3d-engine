@@ -70,6 +70,7 @@ static struct
     bool settingsRead;
     bool enabled;
     bool log;
+    bool sync;          /* the game thread waits for the core every frame (tests) */
     char dir[1024];
     SDL_atomic_t state; /* enum CoreState */
     SDL_Thread *loader;
@@ -77,35 +78,37 @@ static struct
     double loadMs;
 } sCore;
 
+/* The core's animation, as the core's thread has it (sRun) and as the game thread
+ * last read it (sQ.status, sAnim.status): "The core's thread" below. */
+struct CoreStatus
+{
+    uint32_t serial;
+    bool begun, refused, failed, ended, over;
+    int frames;  /* frames made */
+    int lastSeq; /* the last step done */
+    struct BfxBeginResult info;
+    double beginMs, stepMs, worstStepMs, worstPlainStepMs;
+    int gcSteps;
+    bool gcInBegin;
+    char id[48];
+    char error[200];
+};
+
 /* The animation in progress (game thread). */
 static struct
 {
     bool active;
     bool hdEnded;       /* the core's animation ended (the game's may go on) */
     bool ticked;        /* the game's animation advanced this frame */
-    bool packetValid;   /* `packet` holds the core's latest frame */
-    bool failed;        /* the last animation failed */
+    bool failed;        /* its GBA effects show (failed, refused, the core too far behind) */
     uint32_t animType, animId;
-    uint8_t controller;     /* BATTLEFX_CONTROLLER_*: stepped every frame, ends with the core */
-    bool aligning;          /* stepping a controller animation's core up to the game's frame */
+    uint8_t controller; /* BATTLEFX_CONTROLLER_*: stepped every frame, ends with the core */
     char id[48];
-    struct BfxBeginResult begun;
-    double beginMs, stepMs, worstStepMs;
-    double worstPlainStepMs;   /* ... of the steps without a QuickJS garbage collection */
-    int gcSteps;               /* steps during which QuickJS collected garbage */
-    bool gcInBegin;
-    int gameFrames, hdFrames;
-    struct BfxPacket packet;
+    int gameFrames;
+    int seq;            /* the core's frames asked for */
     uint32_t serial;
+    struct CoreStatus status; /* the core's, as last read */
 } sAnim;
-
-/* What the game thread published for the frame boundary: the core's frame for
- * the game frame that just ended, if any. */
-static struct
-{
-    bool valid;
-    struct BfxPacket packet;
-} sPublished;
 
 /* Effect sprites in OAM: marked while the OAM buffer is built (game thread),
  * latched as it is loaded into OAM (VBlank, main thread). */
@@ -177,6 +180,8 @@ static void ReadSettingsFile(void)
             sCore.enabled = value != 0;
         else if (strcmp(line, "log") == 0)
             sCore.log = value != 0;
+        else if (strcmp(line, "sync") == 0)
+            sCore.sync = value != 0;
     }
     fclose(f);
 }
@@ -191,6 +196,11 @@ static void ReadSettings(void)
     sCore.settingsRead = true;
     sCore.enabled = true;
     sCore.log = false;
+#ifdef BATTLEFX_TEST
+    sCore.sync = true; /* the test driver compares the core's frames with the game's, frame for frame */
+#else
+    sCore.sync = false;
+#endif
     if (dir != NULL && dir[0] != '\0')
         snprintf(sCore.dir, sizeof(sCore.dir), "%s", dir);
     else
@@ -213,6 +223,7 @@ static void ReadSettings(void)
     /* The environment overrides the file. */
     sCore.enabled = EnvFlag("PKMN_BATTLEFX", sCore.enabled);
     sCore.log = EnvFlag("PKMN_BATTLEFX_LOG", sCore.log);
+    sCore.sync = EnvFlag("PKMN_BATTLEFX_SYNC", sCore.sync);
     if (!sCore.enabled)
         SDL_Log("Battle FX: off (the original GBA animations play)");
 }
@@ -446,10 +457,15 @@ static const char kGameHelperJs[] =
     "(function () {\n"
     "  const RT = globalThis.BFX_RT, B = globalThis.BFX_BRIDGE; if (!RT || !RT.Player || !B) return;\n"
     "  const P = RT.Player.prototype, reset = P.reset, active = P.activeSprites, begin = B.begin; let taken = null;\n"
-    "  B.begin = function (req) { taken = req && req.spritesInUse != null ? req.spritesInUse | 0 : null; return begin.call(this, req); };\n"
+    "  let placed = null;\n"
+    "  B.begin = function (req) { taken = req && req.spritesInUse != null ? req.spritesInUse | 0 : null;\n"
+    "    placed = req && Array.isArray(req.battlerSprites) ? req.battlerSprites : null; return begin.call(this, req); };\n"
     "  function effect(g) { const D = RT.data; let top = 10000; if (D && D.tagIds) for (const k in D.tagIds) { const v = D.tagIds[k] | 0; if (v < 20000 && v > top) top = v; }\n"
     "    return (g >= 10000 && g <= top) || (g >= 55000 && g <= 55027) || (g >= 65030 && g <= 65057); }\n"
-    "  P.reset = function () { reset.apply(this, arguments); const w = this.w; if (!w || taken == null || !w.sprites[0]) return;\n"
+    "  P.reset = function () { reset.apply(this, arguments); const w = this.w; if (!w || !w.sprites[0]) return;\n"
+    "    if (placed) for (let b = 0; b < 4; b++) { const g = placed[b], s = w.sprites[b]; if (!Array.isArray(g) || !s || s.kind !== 'battler') continue;\n"
+    "      s.x = g[0] | 0; s.y = g[1] | 0; s.x2 = g[2] | 0; s.y2 = g[3] | 0; s.invisible = !!g[4]; }\n"
+    "    if (taken == null) return;\n"
     "    const Sprite = w.sprites[0].constructor; let n = 0;\n"
     "    for (let i = 0; i < 64; i++) { const s = w.sprites[i]; if (s && s.inUse && !effect(s.tag | 0)) n++; }\n"
     "    for (let i = 63, k = taken - n; i >= 0 && k > 0; i--) { if (w.sprites[i] && w.sprites[i].inUse) continue;\n"
@@ -463,6 +479,10 @@ static const char kGameHelperJs[] =
     "  const m = (D.moves || []).find((x) => x.id === id); if (!m || !m.var) return '';\n"
     "  return m.var.map((v) => [v.kind, v.task || '', v.arg == null ? -1 : v.arg, v.value == null ? 0 : v.value].join('|')).join(';');\n"
     "};\n";
+
+static void LoadVariants(struct BfxHost *host);
+static bool CoreInit(void);
+static void CoreLoop(struct BfxHost *host);
 
 static int LoadCore(void *unused)
 {
@@ -515,11 +535,14 @@ static int LoadCore(void *unused)
             free(se);
         }
     }
+    LoadVariants(host);
     sCore.host = host;
     sCore.loadMs = (SDL_GetPerformanceCounter() - t0) * 1000.0 / SDL_GetPerformanceFrequency();
-    SDL_Log("Battle FX: core ready in %.0f ms (%s, %u + %u bytes)", sCore.loadMs, sCore.dir,
-            (unsigned)coreSize, (unsigned)dataSize);
+    SDL_Log("Battle FX: core ready in %.0f ms (%s, %u + %u bytes%s)", sCore.loadMs, sCore.dir,
+            (unsigned)coreSize, (unsigned)dataSize, sCore.sync ? "; the game waits for it every frame" : "");
+    SDL_MemoryBarrierRelease();
     SDL_AtomicSet(&sCore.state, CORE_READY);
+    CoreLoop(host); /* this thread runs the core from now on */
     return 0;
 }
 
@@ -528,8 +551,14 @@ static void StartLoading(void)
     ReadSettings();
     if (!sCore.enabled || SDL_AtomicGet(&sCore.state) != CORE_IDLE)
         return;
+    if (!CoreInit())
+    {
+        SDL_Log("Battle FX: no lock for the core's thread (%s); the original GBA animations play", SDL_GetError());
+        SDL_AtomicSet(&sCore.state, CORE_FAILED);
+        return;
+    }
     SDL_AtomicSet(&sCore.state, CORE_LOADING);
-    sCore.loader = SDL_CreateThreadWithStackSize(LoadCore, "BattleFxLoad", LOADER_STACK_BYTES, NULL);
+    sCore.loader = SDL_CreateThreadWithStackSize(LoadCore, "BattleFxCore", LOADER_STACK_BYTES, NULL);
     if (sCore.loader == NULL)
     {
         SDL_Log("Battle FX: no thread to load the core on (%s); the original GBA animations play", SDL_GetError());
@@ -544,6 +573,7 @@ static struct BfxHost *ReadyHost(void)
 {
     if (SDL_AtomicGet(&sCore.state) != CORE_READY)
         return NULL;
+    SDL_MemoryBarrierAcquire();
     return sCore.host;
 }
 
@@ -669,6 +699,20 @@ static int AppendSetup(char *buf, int len, int size, u32 attacker, u32 target)
                 others++;
         len = Append(buf, len, size, ",\"spritesInUse\":%d", others);
     }
+    /* the battlers' sprites where the game has them (an animation reads their x / y: Eruption's rocks leave
+     * from the attacker's), which is not always their home (a battler a move has moved and not yet brought
+     * back, a semi-invulnerable one) */
+    len = Append(buf, len, size, ",\"battlerSprites\":[");
+    for (u32 b = 0; b < MAX_BATTLERS_COUNT; b++)
+    {
+        const struct Sprite *sp = b < gBattlersCount && gBattlerSpriteIds[b] < MAX_SPRITES ? &gSprites[gBattlerSpriteIds[b]] : NULL;
+
+        if (sp == NULL || !sp->inUse)
+            len = Append(buf, len, size, "%snull", b ? "," : "");
+        else
+            len = Append(buf, len, size, "%s[%d,%d,%d,%d,%d]", b ? "," : "", sp->x, sp->y, sp->x2, sp->y2, sp->invisible ? 1 : 0);
+    }
+    len = Append(buf, len, size, "]");
     return len;
 }
 
@@ -859,28 +903,41 @@ static bool BranchValue(const char *move, const char *task, int arg, int *value)
  * (gAnimMoveTurn) or its task's value; -1 (the core's default branch) when none
  * does or a condition is unknown here. Fury Cutter has two conditions and the data
  * one variant per condition: its second use in a row (left slice, one dimming
- * instead of three) is the one case no variant matches exactly. */
+ * instead of three) is the one case no variant matches exactly. The variant lists
+ * are read from the core once it has loaded (LoadVariants, on its thread), by the
+ * core's move number. */
 #define MAX_VARIANT_MOVES 1024
 static char *sVariants[MAX_VARIANT_MOVES];
 
-static int GameVariant(struct BfxHost *host, u32 move, const char *id)
+static void LoadVariants(struct BfxHost *host)
 {
-    char arg[64], *list, *entry, *save = NULL;
+    char arg[64];
+
+    for (int m = 0; m < MAX_VARIANT_MOVES; m++)
+    {
+        const char *id = BfxHost_MoveId(host, m);
+
+        if (id == NULL)
+            continue;
+        snprintf(arg, sizeof(arg), "\"%s\"", id);
+        sVariants[m] = BfxHost_CallGlobal(host, "BFX_GAME_VARIANTS", arg);
+    }
+}
+
+static int GameVariant(struct BfxHost *host, const char *id)
+{
+    char *list, *entry, *save = NULL;
+    const char *variants = NULL;
     int index = 0, chosen = -1;
     bool unknown = false;
 
-    if (move >= MAX_VARIANT_MOVES)
+    /* the core's ids are its own strings: the move whose id this is */
+    for (int m = 0; m < MAX_VARIANT_MOVES && variants == NULL; m++)
+        if (BfxHost_MoveId(host, m) == id)
+            variants = sVariants[m];
+    if (variants == NULL || variants[0] == '\0')
         return -1;
-    if (sVariants[move] == NULL)
-    {
-        snprintf(arg, sizeof(arg), "\"%s\"", id);
-        sVariants[move] = BfxHost_CallGlobal(host, "BFX_GAME_VARIANTS", arg);
-        if (sVariants[move] == NULL)
-            sVariants[move] = SDL_strdup("");
-    }
-    if (sVariants[move] == NULL || sVariants[move][0] == '\0')
-        return -1;
-    list = SDL_strdup(sVariants[move]);
+    list = SDL_strdup(variants);
     if (list == NULL)
         return -1;
     for (entry = SDL_strtokr(list, ";", &save); entry != NULL && chosen < 0; entry = SDL_strtokr(NULL, ";", &save), index++)
@@ -939,32 +996,557 @@ static const char *AnimKind(u32 animType)
     }
 }
 
+/* ── The core's thread ───────────────────────────────────────────────────
+ *
+ * The core (QuickJS) runs on a thread of its own - the one that loaded it. The
+ * game thread hands it each animation's begin and one step a frame and goes on
+ * without waiting, so the core's cost (a begin's plan: tens of milliseconds for
+ * a long animation; a heavy frame; a garbage collection) never holds a game
+ * frame up. Each frame the core makes is copied out of its arrays into a slot
+ * of its own (the particle rings into one mirror, with the ranges that changed
+ * since the boundary last took them). The frame boundary shows the frame made
+ * for the game frame whose OAM the picture shows - the picture drawn after game
+ * frame N shows frame N - 1's sprites (the GBA loads OAM at the VBlank), so the
+ * core's frame for N - 1 goes with it, as before. When the core runs behind,
+ * the newest frame it has made of the animation is shown (up to CORE_MAX_LAG
+ * frames old), and a frame that is done later in the picture's time replaces it
+ * (BattleFx_LateFrame); an animation shows nothing HD until the core has caught
+ * up with it (its GBA effects show), and one the core falls further behind on
+ * plays its GBA effects from there on. With sync (the test builds,
+ * PKMN_BATTLEFX_SYNC=1 / sync=1) the game thread waits for every command: the
+ * core's frames pair with the game's frame for frame, as the parity tests need,
+ * and the test driver may use the core between frames. */
+
+#define CORE_QUEUE 256
+#define CORE_SLOTS 4
+#define CORE_MAX_LAG 6
+#define CORE_START_WAIT 4 /* pictures an animation's effect sprites wait for the core's first frame of it */
+#define CORE_FIRST_WAIT_MS 60
+#define CORE_CATCHUP_WAIT_MS 8
+#define CONTROLLER_ALIGN_MAX 8
+
+enum
+{
+    CORE_CMD_BEGIN = 1,
+    CORE_CMD_STEP,
+    CORE_CMD_END,
+};
+
+struct CoreCommand
+{
+    uint8_t kind;
+    uint8_t controller; /* BEGIN: BATTLEFX_CONTROLLER_*, stepped up to the game's frame (seq 0) */
+    bool doubles;       /* BEGIN: for the log */
+    uint32_t serial;
+    int seq;            /* STEP: 1, 2, ... (the frame's number in the animation) */
+    uint32_t sound;     /* BEGIN, STEP: the game's sound state at the frame's start (FeedSound) */
+    int gameFrames;     /* END: the game's frames, for the log */
+    char id[48];
+    char why[64];       /* END */
+    char *request;      /* BEGIN: malloc'd, freed by the core's thread */
+};
+
+
+/* A frame of the core, copied out of its arrays (rings: sQ.rings). */
+struct CoreSlot
+{
+    bool valid;
+    uint32_t serial;
+    int seq;
+    struct BfxPacket packet; /* pointers into the arrays below */
+    float view[16], camera[16];
+    float *quad[4][4];
+    int quadCap[4];
+    float *rib[2][4];
+    uint16_t *ribIdx[2];
+    int ribCap[2], ribIdxCap[2];
+    float *mesh[BFX_MAX_MESH_KINDS];
+    int meshCap[BFX_MAX_MESH_KINDS];
+    float *lights;
+    int lightCap;
+};
+
+/* A particle ring, whole (the core writes emission records into it in place). */
+struct CoreRing
+{
+    int cap, head, count;
+    bool add;
+    float *a[6];
+    int lo, hi;   /* changed since the boundary took it; -1: nothing */
+    bool cleared; /* ... all of it */
+};
+
+static struct
+{
+    SDL_mutex *lock;
+    SDL_cond *wake; /* the core's thread: a command came */
+    SDL_cond *done; /* the game thread: a command was done */
+    struct CoreCommand q[CORE_QUEUE];
+    unsigned head, tail;
+    bool busy;
+    struct CoreStatus status;
+    struct CoreSlot slotStore[CORE_SLOTS + 1];
+    struct CoreSlot *slots[CORE_SLOTS]; /* the frames the boundary can show */
+    struct CoreSlot *spare;             /* the core's thread fills it */
+    struct CoreRing rings[2];           /* partsAdd, partsAlpha */
+} sQ;
+
+static struct CoreStatus sRun;   /* the core's thread's */
+static int sRunSound = -1;       /* the core's thread's: the sound state the core was given last */
+static SDL_atomic_t sTooSlow;    /* serial of the animation the boundary found the core too far behind on */
+static unsigned sTooSlowCount;
+
+static bool CoreInit(void)
+{
+    sQ.lock = SDL_CreateMutex();
+    sQ.wake = SDL_CreateCond();
+    sQ.done = SDL_CreateCond();
+    if (sQ.lock == NULL || sQ.wake == NULL || sQ.done == NULL)
+        return false;
+    for (int i = 0; i < CORE_SLOTS; i++)
+        sQ.slots[i] = &sQ.slotStore[i];
+    sQ.spare = &sQ.slotStore[CORE_SLOTS];
+    sQ.rings[0].lo = sQ.rings[0].hi = sQ.rings[1].lo = sQ.rings[1].hi = -1;
+    return true;
+}
+
+/* Game thread: until the core has done every command. */
+static void CoreWaitIdle(void)
+{
+    if (sQ.lock == NULL)
+        return;
+    SDL_LockMutex(sQ.lock);
+    while (sQ.head != sQ.tail || sQ.busy)
+        SDL_CondWait(sQ.done, sQ.lock);
+    SDL_UnlockMutex(sQ.lock);
+}
+
+/* Game thread: hands the core a command (with sync, waits until it is done). */
+static void CorePost(const struct CoreCommand *c)
+{
+    SDL_LockMutex(sQ.lock);
+    while (sQ.head - sQ.tail >= CORE_QUEUE) /* the core far behind: a full queue waits */
+        SDL_CondWait(sQ.done, sQ.lock);
+    sQ.q[sQ.head % CORE_QUEUE] = *c;
+    sQ.head++;
+    SDL_CondSignal(sQ.wake);
+    SDL_UnlockMutex(sQ.lock);
+    if (sCore.sync)
+        CoreWaitIdle();
+}
+
+/* Game thread: the core's status of animation `serial` (false: none yet). */
+static bool CoreStatusOf(uint32_t serial, struct CoreStatus *out)
+{
+    bool same;
+
+    SDL_LockMutex(sQ.lock);
+    same = sQ.status.serial == serial;
+    if (same)
+        *out = sQ.status;
+    SDL_UnlockMutex(sQ.lock);
+    return same;
+}
+
+static bool GrowFloats(float **p, int *cap, int need)
+{
+    float *n;
+
+    if (need <= *cap)
+        return true;
+    n = realloc(*p, (size_t)need * sizeof(float));
+    if (n == NULL)
+        return false;
+    *p = n;
+    *cap = need;
+    return true;
+}
+
+/* Core's thread: `frame` copied into `s` (its own arrays). */
+static bool OwnFrame(struct CoreSlot *s, const struct BfxPacket *frame)
+{
+    struct BfxQuads *quads[4];
+    struct BfxRibbons *ribbons[2];
+
+    s->packet = *frame;
+    quads[0] = &s->packet.cards;
+    quads[1] = &s->packet.cardsBack;
+    quads[2] = &s->packet.decals;
+    quads[3] = &s->packet.dist;
+    for (int k = 0; k < 4; k++)
+    {
+        struct BfxQuads *q = quads[k];
+        const float *src[4] = {q->P, q->S, q->C, q->X};
+        int n = q->n;
+
+        if (n <= 0 || src[0] == NULL || src[1] == NULL || src[2] == NULL || src[3] == NULL)
+        {
+            q->n = 0;
+            continue;
+        }
+        for (int i = 0; i < 4; i++)
+        {
+            int cap = s->quadCap[k];
+            if (!GrowFloats(&s->quad[k][i], &cap, n * 4))
+                return false;
+            memcpy(s->quad[k][i], src[i], (size_t)n * 16);
+        }
+        s->quadCap[k] = n * 4 > s->quadCap[k] ? n * 4 : s->quadCap[k];
+        q->P = s->quad[k][0];
+        q->S = s->quad[k][1];
+        q->C = s->quad[k][2];
+        q->X = s->quad[k][3];
+    }
+    ribbons[0] = &s->packet.ribbons;
+    ribbons[1] = &s->packet.ribbonsBack;
+    for (int k = 0; k < 2; k++)
+    {
+        struct BfxRibbons *r = ribbons[k];
+        static const int kFloats[4] = {3, 2, 4, 2};
+        const float *src[4] = {r->pos, r->uv, r->col, r->row};
+        int nv = r->nv, ni = r->ni;
+
+        if (nv <= 0 || ni <= 0 || r->idx == NULL || src[0] == NULL || src[1] == NULL || src[2] == NULL || src[3] == NULL)
+        {
+            r->nv = r->ni = 0;
+            continue;
+        }
+        for (int i = 0; i < 4; i++)
+        {
+            int cap = s->ribCap[k] * kFloats[i];
+            if (!GrowFloats(&s->rib[k][i], &cap, nv * kFloats[i]))
+                return false;
+            memcpy(s->rib[k][i], src[i], (size_t)nv * kFloats[i] * sizeof(float));
+        }
+        if (nv > s->ribCap[k])
+            s->ribCap[k] = nv;
+        if (ni > s->ribIdxCap[k])
+        {
+            uint16_t *n = realloc(s->ribIdx[k], (size_t)ni * sizeof(uint16_t));
+            if (n == NULL)
+                return false;
+            s->ribIdx[k] = n;
+            s->ribIdxCap[k] = ni;
+        }
+        memcpy(s->ribIdx[k], r->idx, (size_t)ni * sizeof(uint16_t));
+        r->pos = s->rib[k][0];
+        r->uv = s->rib[k][1];
+        r->col = s->rib[k][2];
+        r->row = s->rib[k][3];
+        r->idx = s->ribIdx[k];
+    }
+    for (int k = 0; k < s->packet.meshKinds && k < BFX_MAX_MESH_KINDS; k++)
+    {
+        struct BfxMeshes *m = &s->packet.meshes[k];
+
+        if (m->n <= 0 || m->data == NULL)
+        {
+            m->n = 0;
+            continue;
+        }
+        if (!GrowFloats(&s->mesh[k], &s->meshCap[k], m->n * 19))
+            return false;
+        memcpy(s->mesh[k], m->data, (size_t)m->n * 19 * sizeof(float));
+        m->data = s->mesh[k];
+    }
+    if (s->packet.lightCount > 0 && s->packet.lights != NULL)
+    {
+        if (!GrowFloats(&s->lights, &s->lightCap, s->packet.lightCount * 8))
+            return false;
+        memcpy(s->lights, s->packet.lights, (size_t)s->packet.lightCount * 8 * sizeof(float));
+        s->packet.lights = s->lights;
+    }
+    else
+        s->packet.lightCount = 0;
+    if (frame->view != NULL)
+        memcpy(s->view, frame->view, sizeof(s->view));
+    if (frame->camera != NULL)
+        memcpy(s->camera, frame->camera, sizeof(s->camera));
+    s->packet.view = frame->view != NULL ? s->view : NULL;
+    s->packet.camera = frame->camera != NULL ? s->camera : NULL;
+    s->packet.sprites = NULL; /* the renderer does not read them */
+    s->packet.spriteCount = 0;
+    /* the rings are the mirror's (sQ.rings), given at the boundary */
+    s->packet.partsAdd.a = s->packet.partsAlpha.a = NULL;
+    return true;
+}
+
+/* Core's thread, under sQ.lock: the core's ring `r` into the mirror `m` (its changed records; all of it
+ * when it was cleared or changed size). */
+static void MirrorRing(struct CoreRing *m, const struct BfxRing *r)
+{
+    const float *src[6] = {r->a, r->b, r->c, r->d, r->e, r->f};
+    int lo = r->lo, hi = r->hi;
+    bool all = r->cleared;
+
+    if (r->a == NULL || r->cap <= 0)
+        return;
+    if (m->cap != r->cap)
+    {
+        for (int i = 0; i < 6; i++)
+        {
+            float *n = realloc(m->a[i], (size_t)r->cap * 16);
+            if (n == NULL)
+            {
+                m->cap = 0;
+                return;
+            }
+            m->a[i] = n;
+        }
+        m->cap = r->cap;
+        all = true;
+    }
+    if (!all && (lo < 0 || hi < 0 || lo > hi || hi >= m->cap))
+    {
+        if (lo < 0 || hi < 0)
+            lo = hi = -1; /* nothing new */
+        else
+            all = true;
+    }
+    if (all)
+    {
+        lo = 0;
+        hi = m->cap - 1;
+        m->cleared = true;
+    }
+    if (lo >= 0)
+    {
+        for (int i = 0; i < 6; i++)
+            if (src[i] != NULL)
+                memcpy(m->a[i] + (size_t)lo * 4, src[i] + (size_t)lo * 4, (size_t)(hi - lo + 1) * 16);
+        if (m->lo < 0 || lo < m->lo)
+            m->lo = lo;
+        if (hi > m->hi)
+            m->hi = hi;
+    }
+    m->head = r->head;
+    m->count = r->count;
+    m->add = r->add;
+}
+
+/* Core's thread: the frame the core just made (its arrays) published as (serial, seq). */
+static void Publish(const struct BfxPacket *frame, uint32_t serial, int seq)
+{
+    struct CoreSlot *s = sQ.spare, *victim = NULL;
+    int at = -1;
+
+    if (!OwnFrame(s, frame))
+        return;
+    s->serial = serial;
+    s->seq = seq;
+    s->valid = true;
+    SDL_LockMutex(sQ.lock);
+    MirrorRing(&sQ.rings[0], &frame->partsAdd);
+    MirrorRing(&sQ.rings[1], &frame->partsAlpha);
+    /* the slot it takes: the same frame's, a free one, another animation's, else this one's oldest */
+    for (int i = 0; i < CORE_SLOTS && at < 0; i++)
+        if (sQ.slots[i]->valid && sQ.slots[i]->serial == serial && sQ.slots[i]->seq == seq)
+            at = i;
+    for (int i = 0; i < CORE_SLOTS && at < 0; i++)
+        if (!sQ.slots[i]->valid)
+            at = i;
+    for (int i = 0; i < CORE_SLOTS && at < 0; i++)
+        if (sQ.slots[i]->serial != serial)
+            at = i;
+    if (at < 0)
+    {
+        at = 0;
+        for (int i = 1; i < CORE_SLOTS; i++)
+            if (sQ.slots[i]->seq < sQ.slots[at]->seq)
+                at = i;
+    }
+    victim = sQ.slots[at];
+    sQ.slots[at] = s;
+    sQ.spare = victim;
+    sQ.spare->valid = false;
+    SDL_UnlockMutex(sQ.lock);
+}
+
+/* Core's thread: the game's sound state for the core's next step (kGameHelperJs BFX_GAME_SOUND). */
+static void FeedSound(struct BfxHost *host, uint32_t sound)
+{
+    if ((int)sound == sRunSound)
+        return;
+    BfxHost_CallGlobalIntArg(host, "BFX_GAME_SOUND", (int)sound, 0);
+    sRunSound = (int)sound;
+}
+
+/* Core's thread: one step of the core and its frame, published as `seq`. false: the animation failed. */
+static bool CoreStepOnce(struct BfxHost *host, uint32_t sound, int seq)
+{
+    struct BfxPacket frame;
+    Uint64 t0, t1, t2 = 0;
+    unsigned gc0;
+    int r;
+    double ms;
+
+    FeedSound(host, sound);
+    t0 = SDL_GetPerformanceCounter();
+    gc0 = BfxHost_GcCount(host);
+    r = BfxHost_Step(host);
+    t1 = SDL_GetPerformanceCounter();
+    if (r < 0)
+    {
+        sRun.failed = true;
+        snprintf(sRun.error, sizeof(sRun.error), "step: %s", BfxHost_LastError(host));
+        return false;
+    }
+    if (r == 0)
+    {
+        sRun.ended = true;
+        return true;
+    }
+    memset(&frame, 0, sizeof(frame));
+    if (!BfxHost_Frame(host, -1, &frame))
+    {
+        sRun.failed = true;
+        snprintf(sRun.error, sizeof(sRun.error), "frame: %s", BfxHost_LastError(host));
+        return false;
+    }
+    t2 = SDL_GetPerformanceCounter();
+    frame.serial = sRun.serial;
+    frame.hideBg = (uint8_t)(BfxHost_CallGlobalInt(host, "BFX_GAME_HIDDEN_BGS", 0) & 0x06);
+    Publish(&frame, sRun.serial, seq);
+    BfxHost_DrainSounds(host);
+    sRun.frames++;
+    ms = (SDL_GetPerformanceCounter() - t0) * 1000.0 / SDL_GetPerformanceFrequency();
+    sRun.stepMs += ms;
+    if (ms > sRun.worstStepMs)
+        sRun.worstStepMs = ms;
+    if (sCore.log && ms > 20.0)
+    {
+        double f = 1000.0 / SDL_GetPerformanceFrequency();
+        SDL_Log("Battle FX: %s frame %d took %.1f ms (step %.1f, frame packet %.1f%s)", sRun.id, sRun.frames, ms,
+                (t1 - t0) * f, (t2 - t1) * f, BfxHost_GcCount(host) != gc0 ? ", with a garbage collection" : "");
+    }
+    if (BfxHost_GcCount(host) != gc0)
+        sRun.gcSteps++;
+    else if (ms > sRun.worstPlainStepMs)
+        sRun.worstPlainStepMs = ms;
+    return true;
+}
+
+static void CoreBegin(struct BfxHost *host, const struct CoreCommand *c)
+{
+    Uint64 t0 = SDL_GetPerformanceCounter();
+    unsigned gc0 = BfxHost_GcCount(host);
+
+    memset(&sRun, 0, sizeof(sRun));
+    sRun.serial = c->serial;
+    snprintf(sRun.id, sizeof(sRun.id), "%s", c->id);
+    if (!BfxHost_Begin(host, c->request, &sRun.info))
+    {
+        sRun.refused = true;
+        sRun.over = true;
+        snprintf(sRun.error, sizeof(sRun.error), "%s", BfxHost_LastError(host));
+        return;
+    }
+    sRun.begun = true;
+    sRun.gcInBegin = BfxHost_GcCount(host) != gc0;
+    sRun.beginMs = (SDL_GetPerformanceCounter() - t0) * 1000.0 / SDL_GetPerformanceFrequency();
+    sRunSound = -1; /* the core's next step gets the sound state again */
+    if (sCore.log)
+        SDL_Log("Battle FX: %s (battler %d -> %d%s) begins: %d frames planned, begin %.1f ms%s", c->id,
+                sRun.info.attacker, sRun.info.target, c->doubles ? ", double battle" : "", sRun.info.totalFrames,
+                sRun.beginMs, sRun.gcInBegin ? " (with a garbage collection)" : "");
+    if (c->controller)
+    {
+        /* in step with the game: the core's frames up to the game's (the send-out: until its ball exists),
+         * the last one published as seq 0 */
+        for (int i = 0; i < CONTROLLER_ALIGN_MAX && !sRun.ended; i++)
+        {
+            if (!CoreStepOnce(host, c->sound, 0))
+                return;
+            if (c->controller != BATTLEFX_CONTROLLER_SEND_OUT || BfxHost_CallGlobalInt(host, "BFX_GAME_HAS_BALL", 0))
+                break;
+        }
+    }
+}
+
+static void CoreStep(struct BfxHost *host, const struct CoreCommand *c)
+{
+    if (c->serial != sRun.serial || !sRun.begun || sRun.ended || sRun.failed || sRun.over)
+        return;
+    CoreStepOnce(host, c->sound, c->seq);
+    sRun.lastSeq = c->seq;
+}
+
+static void CoreEnd(const struct CoreCommand *c)
+{
+    if (c->serial != sRun.serial || sRun.over)
+        return;
+    sRun.over = true;
+    if (sCore.log && sRun.begun)
+        SDL_Log("Battle FX: %s ended (%s): the game's animation %d frames, the core's %d of %d%s; begin %.1f ms%s, "
+                "a frame %.2f ms on average, %.2f ms at worst (%.2f without a garbage collection; %d with one)",
+                sRun.id, c->why, c->gameFrames, sRun.frames, sRun.info.totalFrames, sRun.ended ? " (it had ended)" : "",
+                sRun.beginMs, sRun.gcInBegin ? " (with a garbage collection)" : "",
+                sRun.frames ? sRun.stepMs / sRun.frames : 0.0, sRun.worstStepMs, sRun.worstPlainStepMs, sRun.gcSteps);
+}
+
+/* The core's thread from the moment the core is ready: one command at a time, in order. */
+static void CoreLoop(struct BfxHost *host)
+{
+    for (;;)
+    {
+        struct CoreCommand c;
+
+        SDL_LockMutex(sQ.lock);
+        while (sQ.head == sQ.tail)
+        {
+            sQ.busy = false;
+            SDL_CondBroadcast(sQ.done);
+            SDL_CondWait(sQ.wake, sQ.lock);
+        }
+        c = sQ.q[sQ.tail % CORE_QUEUE];
+        sQ.tail++;
+        sQ.busy = true;
+        SDL_UnlockMutex(sQ.lock);
+        switch (c.kind)
+        {
+        case CORE_CMD_BEGIN:
+            CoreBegin(host, &c);
+            free(c.request);
+            break;
+        case CORE_CMD_STEP:
+            CoreStep(host, &c);
+            break;
+        case CORE_CMD_END:
+            CoreEnd(&c);
+            break;
+        }
+        SDL_LockMutex(sQ.lock);
+        sQ.status = sRun;
+        SDL_CondBroadcast(sQ.done);
+        SDL_UnlockMutex(sQ.lock);
+    }
+}
+
+/* ── The animation in progress (game thread) ──────────────────────────── */
+
 static void EndAnimation(const char *why)
 {
+    struct CoreCommand c;
+
     if (!sAnim.active)
         return;
     sAnim.active = false;
 #ifdef BATTLEFX_TEST
     BattleFxTest_OnAnimEnd(sAnim.serial);
 #endif
-    if (sCore.log)
-        SDL_Log("Battle FX: %s ended (%s): the game's animation %d frames, the core's %d of %d%s; begin %.1f ms%s, "
-                "a frame %.2f ms on average, %.2f ms at worst (%.2f without a garbage collection; %d with one)",
-                sAnim.id, why, sAnim.gameFrames, sAnim.hdFrames, sAnim.begun.totalFrames,
-                sAnim.hdEnded ? " (it had ended)" : "", sAnim.beginMs, sAnim.gcInBegin ? " (with a garbage collection)" : "",
-                sAnim.hdFrames ? sAnim.stepMs / sAnim.hdFrames : 0.0, sAnim.worstStepMs, sAnim.worstPlainStepMs,
-                sAnim.gcSteps);
+    memset(&c, 0, sizeof(c));
+    c.kind = CORE_CMD_END;
+    c.serial = sAnim.serial;
+    c.gameFrames = sAnim.gameFrames;
+    snprintf(c.why, sizeof(c.why), "%s", why);
+    CorePost(&c);
 }
 
 static void FailAnimation(const char *what)
 {
-    struct BfxHost *host = ReadyHost();
-
     sFailures++;
-    SDL_Log("Battle FX: %s failed at frame %d (%s: %s); the rest of it plays as on the GBA", sAnim.id,
-            sAnim.hdFrames, what, host ? BfxHost_LastError(host) : "no core");
-    sAnim.hdEnded = true;
-    sAnim.packetValid = false;
+    SDL_Log("Battle FX: %s failed at frame %d (%s); the rest of it plays as on the GBA", sAnim.id,
+            sAnim.status.frames, what);
     sAnim.failed = true;
     EndAnimation("failed");
 }
@@ -976,7 +1558,6 @@ static void FailAnimation(const char *what)
  * IsSEPlaying() reads (waitsound, the script's end). Bit 0: a cry plays; 1: SE1 paused, 2: SE1 has tracks;
  * 3: SE2 paused, 4: SE2 has tracks. */
 static u32 sSoundAtFrameBegin;
-static int sSoundSent = -1;
 
 void BattleFx_OnFrameBegin(void)
 {
@@ -991,17 +1572,9 @@ void BattleFx_OnFrameBegin(void)
                        | ((se2 & MUSICPLAYER_STATUS_PAUSE) ? 8u : 0u) | ((se2 & MUSICPLAYER_STATUS_TRACK) ? 16u : 0u);
 }
 
-static void FeedSound(struct BfxHost *host)
-{
-    if ((int)sSoundAtFrameBegin == sSoundSent)
-        return;
-    BfxHost_CallGlobalIntArg(host, "BFX_GAME_SOUND", (int)sSoundAtFrameBegin, 0);
-    sSoundSent = (int)sSoundAtFrameBegin;
-}
-
 #define BFX_REQUEST_MAX 4096
-static bool BeginRequest(struct BfxHost *host, const char *id, const char *request, int len, uint32_t animType,
-                         uint32_t animId, uint8_t controller);
+static bool BeginRequest(const char *id, const char *request, int len, uint32_t animType, uint32_t animId,
+                         uint8_t controller);
 
 void BattleFx_OnLaunch(uint32_t animType, uint32_t animId, const void *script)
 {
@@ -1011,7 +1584,6 @@ void BattleFx_OnLaunch(uint32_t animType, uint32_t animId, const void *script)
     const char *id;
 
     EndAnimation("another animation started");
-    sAnim.packetValid = false;
     if (!gMain.inBattle || IsContest() || (host = ReadyHost()) == NULL)
         return;
     if (animType == ANIM_TYPE_MOVE)
@@ -1034,7 +1606,7 @@ void BattleFx_OnLaunch(uint32_t animType, uint32_t animId, const void *script)
         if (CalledByMirrorMove(animId))
             len = Append(request, len, sizeof(request), ",\"calledBy\":\"MOVE_MIRROR_MOVE\"");
         {
-            int variant = GameVariant(host, animId, id);
+            int variant = GameVariant(host, id);
             if (variant >= 0)
                 len = Append(request, len, sizeof(request), ",\"variant\":%d", variant);
         }
@@ -1055,16 +1627,15 @@ void BattleFx_OnLaunch(uint32_t animType, uint32_t animId, const void *script)
     }
     len = AppendSetup(request, len, sizeof(request), gBattleAnimAttacker, gBattleAnimTarget);
     len = Append(request, len, sizeof(request), "}");
-    BeginRequest(host, id, request, len, animType, animId, 0);
+    BeginRequest(id, request, len, animType, animId, 0);
 }
 
-/* Begins the core's replay of `id` (the request built): the animation in
- * progress from now on. */
-static bool BeginRequest(struct BfxHost *host, const char *id, const char *request, int len, uint32_t animType,
-                         uint32_t animId, uint8_t controller)
+/* Hands the core `id`'s begin (the request built): the animation in progress
+ * from now on. Its result comes back with the frames (OnFrameEnd). */
+static bool BeginRequest(const char *id, const char *request, int len, uint32_t animType, uint32_t animId,
+                         uint8_t controller)
 {
-    Uint64 t0;
-    unsigned gc0;
+    struct CoreCommand c;
 
     if (len >= BFX_REQUEST_MAX - 1)
     {
@@ -1073,15 +1644,13 @@ static bool BeginRequest(struct BfxHost *host, const char *id, const char *reque
     }
     if (Refused(id))
         return false;
-    t0 = SDL_GetPerformanceCounter();
-    gc0 = BfxHost_GcCount(host);
-    if (!BfxHost_Begin(host, request, &sAnim.begun))
-    {
-        NoteRefused(id, BfxHost_LastError(host));
+    memset(&c, 0, sizeof(c));
+    c.request = malloc((size_t)len + 1);
+    if (c.request == NULL)
         return false;
-    }
-    sAnim.gcInBegin = BfxHost_GcCount(host) != gc0;
-    memset(&sAnim.packet, 0, sizeof(sAnim.packet));
+    memcpy(c.request, request, (size_t)len);
+    c.request[len] = '\0';
+    memset(&sAnim.status, 0, sizeof(sAnim.status));
     sAnim.active = true;
     sAnim.failed = false;
     sAnim.hdEnded = false;
@@ -1090,39 +1659,42 @@ static bool BeginRequest(struct BfxHost *host, const char *id, const char *reque
     sAnim.animId = animId;
     sAnim.controller = controller;
     snprintf(sAnim.id, sizeof(sAnim.id), "%s", id);
-    sAnim.beginMs = (SDL_GetPerformanceCounter() - t0) * 1000.0 / SDL_GetPerformanceFrequency();
-    sAnim.stepMs = 0;
-    sAnim.worstStepMs = 0;
-    sAnim.worstPlainStepMs = 0;
-    sAnim.gcSteps = 0;
     sAnim.gameFrames = 0;
-    sAnim.hdFrames = 0;
+    sAnim.seq = 0;
     sAnim.serial++;
-    sSoundSent = -1; /* the core's next step gets the sound state again */
-    if (sCore.log)
-        SDL_Log("Battle FX: %s (battler %d -> %d%s) begins: %d frames planned, begin %.1f ms", id,
-                sAnim.begun.attacker, sAnim.begun.target, IsDoubleBattle() ? ", double battle" : "",
-                sAnim.begun.totalFrames, sAnim.beginMs);
+    c.kind = CORE_CMD_BEGIN;
+    c.controller = controller;
+    c.doubles = IsDoubleBattle();
+    c.serial = sAnim.serial;
+    c.sound = sSoundAtFrameBegin;
+    snprintf(c.id, sizeof(c.id), "%s", id);
+    CorePost(&c);
     return true;
 }
 
 void BattleFx_AnimInfo(struct BattleFxAnimInfo *info)
 {
+    struct CoreStatus now;
+    const struct CoreStatus *st = &sAnim.status;
+
+    if (sAnim.serial != 0 && sQ.lock != NULL && CoreStatusOf(sAnim.serial, &now))
+        st = &now; /* the core's latest (its thread may be ahead of the frame end's) */
+
     memset(info, 0, sizeof(*info));
     info->serial = sAnim.serial;
     info->active = sAnim.active;
     info->failed = sAnim.failed;
     snprintf(info->id, sizeof(info->id), "%s", sAnim.id);
-    info->plannedFrames = sAnim.begun.totalFrames;
-    info->scriptFrames = sAnim.begun.frames;
+    info->plannedFrames = st->info.totalFrames;
+    info->scriptFrames = st->info.frames;
     info->gameFrames = sAnim.gameFrames;
-    info->coreFrames = sAnim.hdFrames;
-    info->beginMs = sAnim.beginMs;
-    info->stepMsTotal = sAnim.stepMs;
-    info->stepMsWorst = sAnim.worstStepMs;
-    info->stepMsWorstPlain = sAnim.worstPlainStepMs;
-    info->gcSteps = sAnim.gcSteps;
-    info->gcInBegin = sAnim.gcInBegin;
+    info->coreFrames = st->frames;
+    info->beginMs = st->beginMs;
+    info->stepMsTotal = st->stepMs;
+    info->stepMsWorst = st->worstStepMs;
+    info->stepMsWorstPlain = st->worstPlainStepMs;
+    info->gcSteps = st->gcSteps;
+    info->gcInBegin = st->gcInBegin;
 }
 
 unsigned BattleFx_Failures(void)
@@ -1133,6 +1705,7 @@ unsigned BattleFx_Failures(void)
 #ifdef BATTLEFX_TEST
 struct BfxHost *BattleFx_TestHost(void)
 {
+    CoreWaitIdle(); /* the core's thread waits for a command: the host is the caller's until it posts one */
     return ReadyHost();
 }
 #endif
@@ -1148,71 +1721,60 @@ void BattleFx_OnAnimTick(void)
     sAnim.ticked = true;
 }
 
-/* One step of the core and its frame, for the game frame that just ended
- * (game thread). false: the animation failed (its GBA effects show). */
-static bool StepCore(struct BfxHost *host)
+/* The core's news of the animation in progress (game thread). false: it is over for the HD layer
+ * (refused, failed, or the core fell too far behind): its GBA effects show. */
+static bool TakeCoreStatus(void)
 {
-    Uint64 t0, t1 = 0, t2 = 0;
-    unsigned gc0;
-    int r;
-    double ms;
+    struct CoreStatus st;
 
-    FeedSound(host);
-    t0 = SDL_GetPerformanceCounter();
-    gc0 = BfxHost_GcCount(host);
-    r = BfxHost_Step(host);
-
-    t1 = SDL_GetPerformanceCounter();
-
-    if (r < 0)
-    {
-        FailAnimation("step");
+    if (!sAnim.active || sAnim.failed)
         return false;
-    }
-    if (r == 0)
+    if (CoreStatusOf(sAnim.serial, &st))
     {
-        sAnim.hdEnded = true;
-        sAnim.packetValid = false;
-    }
-    else
-    {
-        sAnim.packet.serial = sAnim.serial;
-        if (!BfxHost_Frame(host, -1, &sAnim.packet))
+        sAnim.status = st;
+        if (st.refused)
         {
-            FailAnimation("frame");
+            NoteRefused(sAnim.id, st.error);
+            sAnim.failed = true;
+            EndAnimation("refused");
             return false;
         }
-        t2 = SDL_GetPerformanceCounter();
-        sAnim.packet.hideBg = (uint8_t)(BfxHost_CallGlobalInt(host, "BFX_GAME_HIDDEN_BGS", 0) & 0x06);
-        sAnim.hdFrames++;
-        sAnim.packetValid = true;
-        BfxHost_DrainSounds(host);
-#ifdef BATTLEFX_TEST
-        if (!sAnim.aligning)
-            BattleFxTest_AfterStep(host, sAnim.serial, sAnim.hdFrames);
-#endif
+        if (st.failed)
+        {
+            FailAnimation(st.error);
+            return false;
+        }
+        sAnim.hdEnded = st.ended;
     }
-    ms = (SDL_GetPerformanceCounter() - t0) * 1000.0 / SDL_GetPerformanceFrequency();
-    sAnim.stepMs += ms;
-    if (ms > sAnim.worstStepMs)
-        sAnim.worstStepMs = ms;
-    if (sCore.log && ms > 20.0)
+    if ((uint32_t)SDL_AtomicGet(&sTooSlow) == sAnim.serial)
     {
-        double f = 1000.0 / SDL_GetPerformanceFrequency();
-        SDL_Log("Battle FX: %s frame %d took %.1f ms (step %.1f, frame packet %.1f%s)", sAnim.id, sAnim.hdFrames, ms,
-                (t1 - t0) * f, t2 ? (t2 - t1) * f : 0.0, BfxHost_GcCount(host) != gc0 ? ", with a garbage collection" : "");
+        sTooSlowCount++;
+        SDL_Log("Battle FX: %s: the core fell more than %d frames behind the game (frame %d of the game's, %d of "
+                "the core's); the rest of it plays as on the GBA", sAnim.id, CORE_MAX_LAG, sAnim.gameFrames,
+                sAnim.status.frames);
+        sAnim.failed = true;
+        EndAnimation("the core fell behind");
+        return false;
     }
-    if (BfxHost_GcCount(host) != gc0)
-        sAnim.gcSteps++;
-    else if (ms > sAnim.worstPlainStepMs)
-        sAnim.worstPlainStepMs = ms;
     return true;
+}
+
+/* Game thread: the core's next frame for this game frame. */
+static void PostStep(void)
+{
+    struct CoreCommand c;
+
+    memset(&c, 0, sizeof(c));
+    c.kind = CORE_CMD_STEP;
+    c.serial = sAnim.serial;
+    c.seq = ++sAnim.seq;
+    c.sound = sSoundAtFrameBegin;
+    CorePost(&c);
 }
 
 /* ── The controllers' own animations ─────────────────────────────────── */
 
 #define CONTROLLER_MAX_FRAMES 600
-#define CONTROLLER_ALIGN_MAX 8
 
 void BattleFx_OnControllerAnim(uint32_t kind, uint32_t battler, uint32_t arg)
 {
@@ -1248,7 +1810,7 @@ static bool TakeControllerRequests(void)
     {
         if (sCore.log)
             SDL_Log("Battle FX: another controller animation began: %s stops; the rest plays as on the GBA", sAnim.id);
-        sAnim.packetValid = false;
+        sAnim.failed = true;
         EndAnimation("another controller animation began");
         return false;
     }
@@ -1266,65 +1828,73 @@ static bool TakeControllerRequests(void)
                  (unsigned)sControllerPending[0].ball, sControllerPending[0].intro ? "true" : "false");
     len = AppendSetup(request, len, sizeof(request), (u32)b, (u32)b);
     len = Append(request, len, sizeof(request), "}");
-    if (!BeginRequest(host, id, request, len, 0, sControllerPending[0].kind, sControllerPending[0].kind))
+    if (!BeginRequest(id, request, len, 0, sControllerPending[0].kind, sControllerPending[0].kind))
         return false;
-    /* in step: the core's frames up to this one */
-    sAnim.aligning = true;
-    for (int i = 0; i < CONTROLLER_ALIGN_MAX && !sAnim.hdEnded; i++)
-    {
-        if (!StepCore(host))
-        {
-            sAnim.aligning = false;
-            return false;
-        }
-        if (sAnim.controller != BATTLEFX_CONTROLLER_SEND_OUT || BfxHost_CallGlobalInt(host, "BFX_GAME_HAS_BALL", 0))
-            break;
-    }
-    sAnim.aligning = false;
 #ifdef BATTLEFX_TEST
-    if (sAnim.packetValid)
-        BattleFxTest_AfterStep(host, sAnim.serial, sAnim.hdFrames);
+    if (sCore.sync && TakeCoreStatus() && sAnim.status.frames > 0)
+        BattleFxTest_AfterStep(host, sAnim.serial, sAnim.status.frames);
 #endif
     return true;
 }
 
+/* The frame the picture drawn at a frame boundary goes with: the game frame's record (the animation and
+ * its frame number), kept for the boundary after the next one (records[1]: the picture shows the frame
+ * before). Game thread writes, the boundary reads (the game thread parked). */
+struct ShowRecord
+{
+    uint32_t serial; /* 0: none */
+    int seq;
+};
+static struct ShowRecord sRecords[2];
+
 void BattleFx_OnFrameEnd(void)
 {
     struct BfxHost *host;
-    bool begunNow = false;
+    bool begunNow = false, live;
 
     NoteRng1();
+    sRecords[1] = sRecords[0];
+    sRecords[0].serial = 0;
+    sRecords[0].seq = 0;
     if (SDL_AtomicGet(&sCore.state) == CORE_IDLE)
         StartLoading();
     if (sControllerPendingCount > 0)
         begunNow = TakeControllerRequests();
     if (!sAnim.active)
-    {
-        sPublished.valid = false;
         return;
-    }
     host = ReadyHost();
     if (!gMain.inBattle || host == NULL)
     {
         EndAnimation("the battle ended");
-        sPublished.valid = false;
         return;
     }
+    live = TakeCoreStatus();
     if (sAnim.controller && !begunNow)
         sAnim.ticked = true; /* the controllers' animations advance every frame */
     if (sAnim.ticked)
     {
         sAnim.ticked = false;
         sAnim.gameFrames++;
-        if (!sAnim.hdEnded && !StepCore(host))
+        if (live && !sAnim.hdEnded)
         {
-            sPublished.valid = false;
-            return;
+            PostStep();
+#ifdef BATTLEFX_TEST
+            if (sCore.sync)
+            {
+                live = TakeCoreStatus();
+                if (live && sAnim.status.lastSeq == sAnim.seq && !sAnim.hdEnded)
+                    BattleFxTest_AfterStep(host, sAnim.serial, sAnim.status.frames);
+            }
+#endif
         }
     }
-    sPublished.valid = sAnim.packetValid;
-    if (sAnim.packetValid)
-        sPublished.packet = sAnim.packet;
+    if (live)
+    {
+        sRecords[0].serial = sAnim.serial;
+        sRecords[0].seq = sAnim.seq;
+    }
+    if (!sAnim.active)
+        return;
     if (sAnim.controller)
     {
         /* Nothing in the game waits for these: they end with the core's (or at a
@@ -1335,7 +1905,7 @@ void BattleFx_OnFrameEnd(void)
             EndAnimation("too long");
     }
     /* The game's animation has ended: so has the core's (its last frame is
-     * still published, for the picture of this frame). */
+     * still shown with the next picture, the one of this frame). */
     else if (!gAnimScriptActive)
         EndAnimation(sAnim.hdEnded ? "both ended" : "the game's animation ended first");
 }
@@ -1475,15 +2045,231 @@ static void DecodeBattler(struct BattleFxGameBattler *out, int index)
 
 /* ── Frame boundary ───────────────────────────────────────────────────── */
 
+/* ── The frame boundary (main thread, the game thread parked) ───────── */
+
+/* What the HD layer shows (main thread). */
+static struct
+{
+    struct ShowRecord want; /* the frame for the picture being drawn */
+    uint32_t shownSerial;   /* 0: none shown */
+    int shownSeq;
+    uint32_t startedSerial; /* the animation the HD layer has begun showing */
+    uint32_t slowSerial;    /* ... and one the core fell too far behind on */
+    /* the pictures of animation `statsSerial`: with the core's frame for them, with an older one (the core
+     * behind; the most frames behind), with none (its GBA effects) */
+    uint32_t statsSerial;
+    int pictures, exact, older, maxLag, none, late;
+    int waited; /* pictures the animation's effect sprites waited for the core's first frame */
+    bool firstWaitDone;
+    Uint32 waitedMs; /* the boundary waited for the core */
+} sShow;
+
+/* Main thread: how the pictures of the animation that just left the screen went (the log). */
+static void ShowStats(uint32_t next)
+{
+    if (sShow.statsSerial != 0 && sShow.statsSerial != next && sCore.log && sShow.pictures > 0)
+        SDL_Log("Battle FX: animation %u on screen: %d pictures, %d with the core's frame for them, %d with an older "
+                "one (up to %d frames older; %d replaced later in the picture's time), %d without (%d of them waiting "
+                "for its first); the pictures waited %u ms for the core in all", (unsigned)sShow.statsSerial,
+                sShow.pictures, sShow.exact, sShow.older, sShow.maxLag, sShow.late, sShow.none, sShow.waited,
+                (unsigned)sShow.waitedMs);
+    if (sShow.statsSerial != next)
+    {
+        sShow.statsSerial = next;
+        sShow.pictures = sShow.exact = sShow.older = sShow.maxLag = sShow.none = sShow.late = 0;
+        sShow.waited = 0;
+        sShow.firstWaitDone = false;
+        sShow.waitedMs = 0;
+    }
+}
+
+static void ShowNone(void)
+{
+    if (sShow.shownSerial != 0 || BattleFxGL_Showing())
+        BattleFxGL_ShowPacket(NULL, true);
+    sShow.shownSerial = 0;
+    sShow.shownSeq = 0;
+}
+
+/* A ring of a slot's frame as the mirror has it, with what changed since the boundary last took it. */
+static void RingView(struct BfxRing *r, const struct CoreRing *m)
+{
+    r->cap = m->cap;
+    r->head = m->head;
+    r->lo = m->lo;
+    r->hi = m->hi;
+    r->cleared = m->cleared;
+    r->add = m->add;
+    r->a = m->a[0];
+    r->b = m->a[1];
+    r->c = m->a[2];
+    r->d = m->a[3];
+    r->e = m->a[4];
+    r->f = m->a[5];
+}
+
+/* Main thread, under sQ.lock: the newest frame the core has made of the wanted animation, not after the
+ * wanted one. */
+static struct CoreSlot *NewestFrame(void)
+{
+    struct CoreSlot *best = NULL;
+
+    for (int i = 0; i < CORE_SLOTS; i++)
+    {
+        struct CoreSlot *slot = sQ.slots[i];
+
+        if (slot->valid && slot->serial == sShow.want.serial && slot->seq <= sShow.want.seq
+         && (best == NULL || slot->seq > best->seq))
+            best = slot;
+    }
+    return best;
+}
+
+/* Main thread, under sQ.lock: waits (the lock let go meanwhile) until the core has made a frame of the
+ * wanted animation at most `within` frames before the wanted one, or `ms` have passed. */
+static struct CoreSlot *WaitForFrame(int within, Uint32 ms)
+{
+    Uint32 start = SDL_GetTicks();
+    struct CoreSlot *best;
+
+    while ((best = NewestFrame()) == NULL || sShow.want.seq - best->seq > within)
+    {
+        Uint32 spent = SDL_GetTicks() - start;
+
+        if (spent >= ms || SDL_CondWaitTimeout(sQ.done, sQ.lock, ms - spent) < 0)
+            break;
+    }
+    sShow.waitedMs += SDL_GetTicks() - start;
+    return best;
+}
+
+/* Shows the core's frame for the picture being drawn (at the boundary) or, later in the picture's time, one for
+ * it that the core has finished since (not at the boundary: only in place of an older frame of the same
+ * animation already shown). */
+static void ShowWanted(bool boundary)
+{
+    struct CoreSlot *best = NULL;
+
+    if (sQ.lock == NULL)
+        return;
+    if (sShow.want.serial == 0 || sShow.want.serial == sShow.slowSerial)
+    {
+        if (boundary)
+            ShowNone();
+        return;
+    }
+    if (!boundary && sShow.shownSerial != sShow.want.serial)
+        return;
+    SDL_LockMutex(sQ.lock);
+    best = NewestFrame();
+    if (boundary && sShow.slowSerial != sShow.want.serial)
+    {
+        /* The core behind: the picture waits a little for it (the game thread is parked anyway). Its first
+         * frame of the animation once, for up to CORE_FIRST_WAIT_MS (its begin plans the whole animation); once
+         * shown, CORE_CATCHUP_WAIT_MS when it is 3 or more frames behind. */
+        if (sShow.startedSerial != sShow.want.serial && !sShow.firstWaitDone
+         && (best == NULL || sShow.want.seq - best->seq > 1))
+        {
+            sShow.firstWaitDone = true;
+            best = WaitForFrame(1, CORE_FIRST_WAIT_MS);
+        }
+        else if (sShow.startedSerial == sShow.want.serial && best != NULL && sShow.want.seq - best->seq >= 3)
+            best = WaitForFrame(1, CORE_CATCHUP_WAIT_MS);
+    }
+    if (best != NULL)
+    {
+        int lag = sShow.want.seq - best->seq;
+
+        if (sShow.startedSerial != sShow.want.serial && lag > 1)
+            best = NULL; /* not shown yet: once the core has caught up */
+        else if (lag > CORE_MAX_LAG)
+        {
+            sShow.slowSerial = sShow.want.serial; /* the game thread ends it (TakeCoreStatus) */
+            SDL_AtomicSet(&sTooSlow, (int)sShow.want.serial);
+            best = NULL;
+        }
+    }
+    if (boundary && best == NULL && sShow.startedSerial != sShow.want.serial && sShow.slowSerial != sShow.want.serial
+     && ++sShow.waited > CORE_START_WAIT)
+    {
+        /* the core's first frame of it is not done after a few pictures: its GBA effects from now on */
+        sShow.slowSerial = sShow.want.serial;
+        SDL_AtomicSet(&sTooSlow, (int)sShow.want.serial);
+    }
+    if (boundary)
+    {
+        sShow.pictures++;
+        if (best == NULL)
+            sShow.none++;
+        else if (best->seq == sShow.want.seq)
+            sShow.exact++;
+        else
+        {
+            sShow.older++;
+            if (sShow.want.seq - best->seq > sShow.maxLag)
+                sShow.maxLag = sShow.want.seq - best->seq;
+        }
+    }
+    else if (best != NULL && best->seq == sShow.want.seq && sShow.shownSeq != best->seq)
+        sShow.late++;
+    if (best == NULL)
+    {
+        if (boundary)
+            ShowNone();
+    }
+    else if (best->serial != sShow.shownSerial || best->seq != sShow.shownSeq)
+    {
+        struct BfxPacket p = best->packet;
+
+        RingView(&p.partsAdd, &sQ.rings[0]);
+        RingView(&p.partsAlpha, &sQ.rings[1]);
+        p.partsAdd.count = best->packet.partsAdd.count;
+        p.partsAlpha.count = best->packet.partsAlpha.count;
+        BattleFxGL_ShowPacket(&p, true);
+        for (int i = 0; i < 2; i++)
+        {
+            sQ.rings[i].lo = sQ.rings[i].hi = -1;
+            sQ.rings[i].cleared = false;
+        }
+        sShow.shownSerial = best->serial;
+        sShow.shownSeq = best->seq;
+        sShow.startedSerial = best->serial;
+    }
+    SDL_UnlockMutex(sQ.lock);
+}
+
+void BattleFx_LateFrame(void)
+{
+    if (sShow.shownSerial != 0 && sShow.shownSerial == sShow.want.serial && sShow.shownSeq < sShow.want.seq)
+        ShowWanted(false);
+}
+
 void BattleFx_FrameBoundary(bool view3d, uint32_t skipObj[4], uint8_t *hideBg)
 {
-    BattleFxGL_TakePacket(sPublished.valid ? &sPublished.packet : NULL);
-    if (!view3d || !BattleFxGL_Showing())
+    /* the picture drawn now is the game's previous frame (OAM reaches the screen at the VBlank after the
+     * frame that built it): the core's frame for that game frame goes with it */
+    bool waiting;
+
+    sShow.want = sRecords[1];
+    ShowStats(sShow.want.serial);
+    ShowWanted(true);
+    waiting = sShow.want.serial != 0 && sShow.want.serial != sShow.slowSerial && sShow.startedSerial != sShow.want.serial;
+    if (!view3d)
         return;
 #ifdef BATTLEFX_TEST
     if (!BattleFxTest_ViewHd())
         return;
 #endif
+    if (!BattleFxGL_Showing())
+    {
+        /* the core's first frame of the animation is not done yet (its begin plans the whole animation): the
+         * effect sprites wait for it - a few pictures at most, then the animation plays its GBA effects
+         * (ShowWanted) - rather than show as GBA pixel art and then turn HD */
+        if (waiting)
+            for (int i = 0; i < 4; i++)
+                skipObj[i] |= sEffectOam[i];
+        return;
+    }
     *hideBg |= BattleFxGL_ShowingHiddenBgs();
     for (u32 b = 0; b < MAX_BATTLERS_COUNT; b++)
         if (sBattlerOam[b] < 128)

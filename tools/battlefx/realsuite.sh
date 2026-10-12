@@ -1,0 +1,39 @@
+#!/bin/sh
+# Battle FX in battles fought to their end (test build): the battle environment test driver's autopilot
+# (PKMN_TEST_FIGHT presses A: the first move on the first target; PKMN_TEST_STRONG=1 gives the party level
+# 100 and Flamethrower) fights each battle, and the Battle FX driver records the parity of every animation
+# the battle itself plays (real_report.jsonl: the game's effect sprites against the core's, every frame)
+# and captures of each (a quarter, half and three quarters through). Each battle is a gallery.sh run.
+#
+#   tools/battlefx/realsuite.sh OUT SAVE [VAR=VALUE ...]
+#
+#   OUT   a new folder: OUT/<battle>/ per battle, OUT/realsuite.txt (each battle's exit and outcome)
+#   SAVE  a save to start from (copied; never written)
+#   environment: EXE (default ./pokeemerald-mp-diorama-bfxtest), DISPLAY, SCALE, TIMEOUT (per battle)
+#
+# The battles (this game's trainer ids): a wild Zigzagoon, a route trainer, Roxanne (gym), Sidney (Elite
+# Four), Tate & Liza (a gym double battle), a wild double battle, two trainers at once, and Wallace with the
+# save's own party (STRONG=0: a battle lost, exit 4). Mega Evolution and catching need the bag and a Mega
+# Ring (the autopilot only fights): their animations are played by the gallery (B_ANIM_MEGA_EVOLUTION,
+# B_ANIM_BALL_THROW, ...).
+set -u
+OUT=$1; SAVE=$2; shift 2
+HERE=$(cd "$(dirname "$0")" && pwd)
+mkdir -p "$OUT" || exit 1
+OUT=$(cd "$OUT" && pwd)
+: > "$OUT/realsuite.txt"
+run() { # name battle strong
+  name=$1; battle=$2; strong=$3; shift 3
+  TIMEOUT=${TIMEOUT:-1500} sh "$HERE/gallery.sh" "$OUT/$name" "$SAVE" "$battle" "" PKMN_TEST_FIGHT=1200 \
+    PKMN_TEST_STRONG="$strong" PKMN_TEST_EXIT=1 PKMN_BFX_TEST_REAL_PARITY=1 PKMN_BFX_TEST_REAL_SHOTS=1 "$@"
+  echo "$name $battle strong=$strong exit $(cat "$OUT/$name/exit") $(grep -o 'battle over, outcome [0-9] ([a-z]*)' "$OUT/$name/game.log" | head -1)" >> "$OUT/realsuite.txt"
+}
+run wild_single  "wild:263:30" 1 "$@"
+run trainer      "trainer:318" 1 "$@"
+run gym_roxanne  "trainer:265" 1 "$@"
+run e4_sidney    "trainer:261" 1 "$@"
+run gym_double   "double:271" 1 "$@"
+run wild_double  "wild2:263:30:261:30" 1 "$@"
+run two_trainers "two:318:319" 1 "$@"
+run defeat       "trainer:335" 0 "$@"
+echo done >> "$OUT/realsuite.txt"

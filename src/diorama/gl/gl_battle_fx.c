@@ -356,15 +356,15 @@ void BattleFxGL_TakeBattlers(const struct BattleFxGameBattler battlers[4])
     memcpy(s.game, battlers, sizeof(s.game));
 }
 
-void BattleFxGL_TakePacket(const struct BfxPacket *packet)
+void BattleFxGL_ShowPacket(const struct BfxPacket *packet, bool restartTime)
 {
-    /* The next frame becomes the one shown with the picture being drawn now. */
-    s.show ^= 1;
-    s.frames[s.show ^ 1].valid = false;
-    s.boundaryAt = SDL_GetPerformanceCounter();
+    s.show = 0;
+    if (restartTime)
+        s.boundaryAt = SDL_GetPerformanceCounter();
+    s.frames[0].valid = false;
     if (packet == NULL || s.failed)
         return;
-    CopyFrame(&s.frames[s.show ^ 1], packet);
+    CopyFrame(&s.frames[0], packet);
     RingTake(&s.ringAdd, &packet->partsAdd);
     RingTake(&s.ringAlpha, &packet->partsAlpha);
 }
@@ -1554,6 +1554,7 @@ static void DrawLayer(const struct BattleFxLayout *L, enum Layer which)
 
 void BattleFxGL_DrawBack(const struct BattleFxLayout *layout)
 {
+    BattleFx_LateFrame();
     DrawLayer(layout, LAYER_BACK);
 }
 

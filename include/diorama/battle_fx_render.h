@@ -12,12 +12,17 @@
 
 struct BfxPacket;
 
-/* The frame the game thread finished (NULL: none). The renderer copies it and
- * shows it with the next picture the GBA renderer draws: the picture drawn at
- * a frame boundary is the game's previous frame (OAM, scroll and palettes
- * reach the screen at the VBlank after the frame that set them), so the frame
- * taken here is shown one boundary later, with its own picture. */
-void BattleFxGL_TakePacket(const struct BfxPacket *packet);
+/* The core's frame to show with the picture being drawn now (NULL: none - the
+ * picture's own effect sprites show), copied: the game side picks the frame
+ * made for the game frame the picture shows (the picture drawn at a frame
+ * boundary is the game's previous frame: OAM, scroll and palettes reach the
+ * screen at the VBlank after the frame that set them). `restartTime`: the
+ * particles' time runs on from this frame's from now. */
+void BattleFxGL_ShowPacket(const struct BfxPacket *packet, bool restartTime);
+/* bfx_game.c, before the renderer draws a present: a frame the core finished
+ * since the boundary, for the picture being drawn, replaces an older one shown
+ * in its place (the core ran behind). */
+void BattleFx_LateFrame(void);
 /* The frame shown with the picture being drawn: whether there is one, and how
  * many effect sprites in it the core still draws as GBA pixel art (none in
  * the v3.3 data: every graphics tag has an HD kit). */

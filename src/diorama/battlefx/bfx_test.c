@@ -132,6 +132,7 @@ static struct
     bool realWritten[3];
     /* results */
     int played, failedCount, parityFailures;
+    bool stuck; /* the game's animation did not end within MAX_ANIM_FRAMES (this battle lacks what it waits for) */
     FILE *report;
 } t;
 
@@ -528,13 +529,13 @@ static void WriteResult(void)
                 "{\"move\":%u,\"turn\":%d,\"id\":\"%s\",\"core\":\"%s\",\"gameFrames\":%d,\"coreFrames\":%d,\"planned\":%d,"
                 "\"failed\":%s,\"parity\":{\"compared\":%d,\"equal\":%d,\"firstBad\":%d,\"sprites\":%d,"
                 "\"game\":\"%s\",\"core\":\"%s\"},\"tail\":{\"frames\":%d,\"withSprites\":%d,\"first\":\"%s\"},"
-                "\"scriptFrames\":%d,\"gameDoneAt\":%d,\"gcSteps\":%d,\"gcInBegin\":%s,\"stepMsWorstPlain\":%.3f,"
+                "\"scriptFrames\":%d,\"gameDoneAt\":%d,\"stuck\":%s,\"gcSteps\":%d,\"gcInBegin\":%s,\"stepMsWorstPlain\":%.3f,"
                 "\"beginMs\":%.2f,\"stepMs\":%.3f,\"stepMsWorst\":%.3f,\"shots\":[",
                 t.move, t.curTurn, t.name, info.serial == t.serial ? info.id : "",
                 t.frames, info.serial == t.serial ? info.coreFrames : 0, info.serial == t.serial ? info.plannedFrames : 0,
                 info.failed ? "true" : "false", t.compared, t.equal, t.firstBad, t.sprites, t.badGame, t.badCore,
                 t.tailFrames, t.tailSprites, t.tailFirst, info.serial == t.serial ? info.scriptFrames : 0, t.gameDoneAt,
-                info.gcSteps, info.gcInBegin ? "true" : "false", info.stepMsWorstPlain, info.beginMs, info.coreFrames ? info.stepMsTotal / info.coreFrames : 0.0, info.stepMsWorst);
+                t.stuck ? "true" : "false", info.gcSteps, info.gcInBegin ? "true" : "false", info.stepMsWorstPlain, info.beginMs, info.coreFrames ? info.stepMsTotal / info.coreFrames : 0.0, info.stepMsWorst);
         for (int i = 0; i < t.wantCount; i++)
             fprintf(t.report, "%s{\"frame\":%d,\"file\":\"%s\"}", i ? "," : "", t.want[i],
                     t.written[i] ? t.shotNames[i] : "");
@@ -729,6 +730,7 @@ bool BattleFxTest_OnActionMenu(void)
         t.badGame[0] = t.badCore[0] = '\0';
         t.tailFrames = t.tailSprites = 0;
         t.gameDoneAt = -1;
+        t.stuck = false;
         t.tailFirst[0] = '\0';
         if (t.trace)
         {
@@ -745,6 +747,7 @@ bool BattleFxTest_OnActionMenu(void)
             LaunchController((u8)(t.type - TYPE_CONTROLLER));
         else
             LaunchAnim((u8)(t.type - 1), t.move);
+        BattleFx_TestHost(); /* the core's begin done (it runs on its own thread): its plan's length */
         BattleFx_AnimInfo(&info);
         /* a controller animation's replay begins at the end of this frame (bfx_game.c) */
         t.serial = t.type >= TYPE_CONTROLLER ? info.serial + 1 : info.serial;
@@ -786,6 +789,7 @@ bool BattleFxTest_OnActionMenu(void)
                 t.gameDoneAt = t.frames;
             if ((gameDone && !(info.serial == t.serial && info.active)) || t.frames > MAX_ANIM_FRAMES)
             {
+                t.stuck = !gameDone;
                 t.state = TEST_SETTLE;
                 t.wait = SETTLE_FRAMES;
             }
@@ -814,6 +818,7 @@ bool BattleFxTest_OnActionMenu(void)
         }
         if (!gAnimScriptActive || t.frames > MAX_ANIM_FRAMES)
         {
+            t.stuck = gAnimScriptActive;
             SetBattlerSpriteAffineMode(ST_OAM_AFFINE_NORMAL);
             t.state = TEST_SETTLE;
             t.wait = SETTLE_FRAMES;
@@ -828,6 +833,17 @@ bool BattleFxTest_OnActionMenu(void)
             t.traceFile = NULL;
         }
         WriteResult();
+        if (t.stuck && t.exitAfter)
+        {
+            /* what it left running (its tasks, sprites, mon BG) would hold every animation after it: the runner
+             * goes on after it in a new game (tools/battlefx/gallery.sh: exit 3) */
+            SDL_Log("Battle FX test: %s did not end in %d frames (this battle lacks what it waits for); exiting for a "
+                    "fresh start after it", t.name, MAX_ANIM_FRAMES);
+            if (t.report)
+                fclose(t.report);
+            t.report = NULL;
+            exit(3);
+        }
         if (t.curTurn >= t.maxTurn)
             ResetBattlers();
         t.state = TEST_LAUNCH;
@@ -998,7 +1014,7 @@ void BattleFxTest_AfterDraw(uint32_t serial, int frame, bool showing, int outW, 
     if (!showing || (int)serial != SDL_AtomicGet(&t.wantSerial))
         return;
     for (int i = 0; i < t.wantCount; i++)
-        if (!t.written[i] && t.want[i] == frame)
+        if (!t.written[i] && frame >= t.want[i]) /* the first drawn at or after it: a slow present may skip it */
         {
             Capture(t.shotNames[i], outW, outH);
             t.written[i] = true;
