@@ -52,8 +52,20 @@ class SkipTests(unittest.TestCase):
         self.assertFalse([n for n in specs_of("Route104") if n in
                           ("auto_route104_10_38", "auto_route104_32_42")])
 
-    def test_sootopolis_is_left_to_its_rock(self):
-        self.assertEqual(specs_of("SootopolisCity"), {})
+    def test_sootopolis_houses_are_found_by_their_roofs(self):
+        # The door search leaves the crater's rock alone; its houses are found
+        # by their roofs (CRATER_HOUSES): towers and boxes, 3 cells wide, each
+        # once, the tower with its roof's tip a cell over its middle.
+        specs = specs_of("SootopolisCity")
+        self.assertEqual(len(specs), 22)
+        self.assertTrue(all("_tower_" in n or "_box_" in n for n in specs))
+        tower = specs["auto_sootopoliscity_tower_8_3"]   # house 1, its door at (9, 6)
+        self.assertEqual(tower["rect"], (8, 2, 3, 5))
+        self.assertIn((1, 0), tower["owned"])
+        box = specs["auto_sootopoliscity_box_44_3"]      # house 2, its door at (45, 6)
+        self.assertEqual(box["rect"], (44, 3, 3, 4))
+        cells = [(s["rect"][0] + i, s["rect"][1] + j) for s in specs.values() for (i, j) in s["owned"]]
+        self.assertEqual(len(cells), len(set(cells)))
 
     def test_houses_side_by_side_are_two_buildings(self):
         specs = specs_of("VerdanturfTown")
