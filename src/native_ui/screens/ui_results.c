@@ -9,11 +9,13 @@
  * engine's stats before and now. The engine's box and banner (BG1, BG2) are
  * left out of the picture meanwhile.
  *
- * The rewards ledger: when a trainer battle is won ("REWARDS": the prize money
- * the engine pays, the money before and after, each party Pokémon's level and
- * Exp. bar with the Exp. it gained in this battle, UP for levels gained, NO EXP.
- * when fainted, TRADED for the boosted ones) or lost with money paid ("OUT OF
- * POKéMON": the money paid), with the defeated trainer's plate. The money and
+ * The rewards ledger, with the defeated trainer's plate: when a trainer battle
+ * is won, from the engine's prize message on (the trainer's last words stay in
+ * view before it) - "REWARDS": the prize money the engine pays, the money
+ * before and after, each party Pokémon's level and Exp. bar with the Exp. it
+ * gained in this battle, UP for levels gained, NO EXP. when fainted, TRADED
+ * for the boosted ones; or when one is lost with money paid - "OUT OF
+ * POKéMON": the money paid. The money and
  * Exp. before the battle are noted while its intro runs. The engine's messages
  * stay in the HUD's message plate. Link and multiplayer battles show no ledger
  * (their records are the host's: PLAYERS); co-op prizes are planned.
@@ -166,7 +168,12 @@ void UiResults_Capture(void)
     if (!PrizeBattle() || !(outcome == B_OUTCOME_WON || outcome == B_OUTCOME_LOST))
         return;
     if (outcome == B_OUTCOME_WON)
+    {
         sPrize = Battle_NativeUiPrizeMoney();
+        /* from the prize message on: the defeated trainer says their last words in view first */
+        if (sSnapValid && sPrize > 0 && sMoneyNow <= sSnapMoney)
+            return;
+    }
     else if (sSnapValid && sSnapMoney > sMoneyNow)
         sPrize = sSnapMoney - sMoneyNow;
     else
