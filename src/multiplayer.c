@@ -17,6 +17,10 @@
 #include "script.h"
 #include "sprite.h"
 #include "constants/event_objects.h"
+#ifdef PORTABLE
+#include "character_customization.h"
+#endif
+#line 20 // gba-line
 
 #define HEARTBEAT_TIMEOUT_FRAMES 180
 #define MAX_ANIMATED_CATCHUP_TILES 4
@@ -403,6 +407,11 @@ static void UpdateRemote(u32 i)
                 pose->movementMode == MULTIPLAYER_MOVEMENT_RUN ? PLAYER_AVATAR_STATE_NORMAL : pose->movementMode,
                 pose->gender);
     }
+#ifdef PORTABLE
+    // Every other player shows their own character (character_customization.c).
+    graphicsId = CharCustom_RemoteGraphicsId(MultiplayerWorld_GetPeerAppearance(sRemotes[i].peer.playerId), graphicsId);
+#endif
+#line 406 // gba-line
     if (id >= OBJECT_EVENTS_COUNT || !Multiplayer_IsRemoteObject(&gObjectEvents[id]))
     {
         struct ObjectEventTemplate template = {0};
