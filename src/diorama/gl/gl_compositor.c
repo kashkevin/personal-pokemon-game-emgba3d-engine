@@ -1928,8 +1928,21 @@ void DioramaGL_DrawBattleWorld(float cameraX, float cameraZ, float pitch, float 
 
     // The field's weather light (gl_light.h) first: the sky's colour follows
     // it. Then the sun's depth map round the stage (gl_shadow.h), then the lit
-    // scene.
-    DioramaGLLight_Update(&sRenderedSceneSnapshot, true);
+    // scene. A room's fog (the Lavaridge Gym's steam) is left out: the battle's
+    // low camera sees the whole room through it, a white veil over every wall,
+    // where the field's high one sees the floor at the player's feet; the GBA's
+    // battles show no fog there (battle_capture.c BattleWorldWeather).
+    if (sRenderedSceneSnapshot.mapType == MAP_TYPE_INDOOR
+     && DioramaWeather_Classify(sRenderedSceneSnapshot.weather) == DIORAMA_WEATHER_FOG)
+    {
+        uint8_t weather = sRenderedSceneSnapshot.weather;
+
+        sRenderedSceneSnapshot.weather = WEATHER_NONE;
+        DioramaGLLight_Update(&sRenderedSceneSnapshot, true);
+        sRenderedSceneSnapshot.weather = weather;
+    }
+    else
+        DioramaGLLight_Update(&sRenderedSceneSnapshot, true);
     /* Outdoors the battle's world ends as the field's does (DioramaGL_Present):
      * its cells fade into the sky's haze before they end, and what is past them
      * - the horizon a battle's low camera looks out to - is that haze, through

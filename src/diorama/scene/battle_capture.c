@@ -28,6 +28,7 @@
 #include "palette.h"
 #include "sprite.h"
 #include "diorama/battle_scene.h"
+#include "constants/map_types.h"
 
 uint8_t DioramaBattle_GroundKind(uint8_t behavior)
 {
@@ -314,6 +315,13 @@ static uint8_t BattleWorldWeather(void)
         return WEATHER_SNOW;
     if (gBattleWeather & B_WEATHER_FOG)
         return WEATHER_FOG_HORIZONTAL;
+    /* A room's fog (the Lavaridge Gym's steam) stays out of its battles: the
+     * battle's low camera sees the whole room through it, a white veil over every
+     * wall, and the GBA's battles show none there (gl_compositor.c
+     * DioramaGL_DrawBattleWorld leaves its light out too). */
+    if (gMapHeader.mapType == MAP_TYPE_INDOOR
+     && (place == WEATHER_FOG_HORIZONTAL || place == WEATHER_FOG_DIAGONAL))
+        return WEATHER_NONE;
     switch (place)
     {
     /* Until the battle takes the place's weather (its opening lines), the
