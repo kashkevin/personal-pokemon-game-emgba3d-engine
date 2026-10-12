@@ -1167,6 +1167,114 @@ static void TestDenseAuthoredTreesStayWithinCapacity(void)
         assert(sVertices[vertex].textureLayer != DIORAMA_TERRAIN_TEXTURE_VERTEX_COLOR);
 }
 
+/* Quads (6 vertices each) standing from `bottom` to `top` that show `layer`
+ * (DIORAMA_MATERIAL_FULL, _BASE...). */
+static int CountQuads(const struct DioramaTerrainMesh *mesh, float bottom, float top, int layer)
+{
+    int count = 0;
+
+    for (uint32_t quad = 0; quad + 6 <= mesh->vertexCount; quad += 6)
+    {
+        float low = sVertices[quad].y;
+        float high = sVertices[quad].y;
+
+        for (uint32_t vertex = quad + 1; vertex < quad + 6; vertex++)
+        {
+            if (sVertices[vertex].y < low)
+                low = sVertices[vertex].y;
+            if (sVertices[vertex].y > high)
+                high = sVertices[vertex].y;
+        }
+        if (low == bottom && high == top && sVertices[quad].textureLayer == (float)layer)
+            count++;
+    }
+    return count;
+}
+
+/* Flat ground beside lower ground (the sea lowered a tile beside an islet or a
+ * rock) stands its face down to it, showing its lower layer: before, the ground
+ * was a slab one voxel thick and the sky showed through the step (E1). In the
+ * compressed shell and in the voxel path alike, with no face left under the
+ * neighbours' ground in the compressed shell. */
+static void TestStepDownToLowerGroundStandsItsFace(void)
+{
+    struct DioramaTerrainChunkInput input;
+    struct DioramaTerrainMesh mesh;
+    struct DioramaTerrainCell *water;
+    struct DioramaTerrainCell *roof;
+    const float slab = -1.0f / 16.0f;
+
+    InitInput(&input, 3, MB_NORMAL);
+    water = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    water->groundHeight = -1.0f;
+    water->visualHeight = -1.0f;
+    water->reflective = 1;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.usedCompressedOccupancy);
+    /* Each of the four risers: its lower layer down to the water, the slab's
+     * own edge over it; nothing more (the water's edge is under the risers). */
+    assert(mesh.sideFaceCount == 8);
+    assert(CountQuads(&mesh, -1.0f, slab, DIORAMA_MATERIAL_BASE) == 4);
+    assert(CountQuads(&mesh, slab, 0.0f, DIORAMA_MATERIAL_FULL) == 4);
+    assert(mesh.bounds.minY == -1.0f - 1.0f / 16.0f);
+
+    /* The same in a chunk the voxel path builds (a roof elsewhere in it): the
+     * riser a span of its own under the slab's (with a face, out of sight, under
+     * each neighbour's slab too). */
+    roof = &input.cells[8 * DIORAMA_TERRAIN_INPUT_SIZE + 8];
+    roof->shape = DIORAMA_SHAPE_ROOF;
+    roof->structureId = 1;
+    roof->structureX = roof->mapX;
+    roof->structureWidth = 1;
+    roof->profile = DIORAMA_ROOF_GABLE_X;
+    roof->structureBodyHeight = 0.5f;
+    roof->structureRoofHeight = 0.5f;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(!mesh.usedCompressedOccupancy);
+    assert(CountQuads(&mesh, -1.0f, slab, DIORAMA_MATERIAL_BASE) >= 4);
+    assert(CountQuads(&mesh, slab, 0.0f, DIORAMA_MATERIAL_FULL) == 4);
+
+    /* A raised cell beside it goes on down as its own side (a cliff's). */
+    InitInput(&input, 3, MB_NORMAL);
+    water = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    water->groundHeight = -1.0f;
+    water->visualHeight = -1.0f;
+    input.cells[3 * DIORAMA_TERRAIN_INPUT_SIZE + 4].shape = DIORAMA_SHAPE_EXTRUDED;
+    input.cells[3 * DIORAMA_TERRAIN_INPUT_SIZE + 4].visualHeight = 0.5f;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(CountQuads(&mesh, -1.0f, slab, DIORAMA_MATERIAL_BASE) == 3);
+    assert(CountQuads(&mesh, -1.0f, 0.0f, DIORAMA_MATERIAL_FULL) == 1);
+
+    /* A ledge on a terrace beside it (Route 113's): its side's rows stay within
+     * its art all the way down (they read past it, and the sky showed through). */
+    InitInput(&input, 3, MB_NORMAL);
+    water = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    water->groundHeight = -1.0f;
+    water->visualHeight = -1.0f;
+    {
+        struct DioramaTerrainCell *ledge = &input.cells[3 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+
+        ledge->shape = DIORAMA_SHAPE_LEDGE;
+        ledge->archetype = DIORAMA_ARCHETYPE_LEDGE;
+        ledge->groundHeight = 0.375f;
+        ledge->visualHeight = 0.375f;
+        ledge->featureHeight = 0.375f;
+        ledge->behavior = MB_JUMP_SOUTH;
+    }
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    /* its earth under the lip: the lower layer */
+    assert(CountQuads(&mesh, -1.0f, slab, DIORAMA_MATERIAL_BASE) == 4);
+    for (uint32_t vertex = 0; vertex < mesh.vertexCount; vertex++)
+        assert(sVertices[vertex].v >= 0.2f - 1e-4f && sVertices[vertex].v <= 0.4f + 1e-4f);
+
+    /* Ground at the same height all round keeps its one-voxel slab. */
+    InitInput(&input, 3, MB_NORMAL);
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(CountQuads(&mesh, -1.0f, slab, DIORAMA_MATERIAL_BASE) == 0);
+    assert(mesh.sideFaceCount == 0);
+    assert(mesh.bounds.minY == -1.0f / 16.0f);
+}
+
 int main(void)
 {
     TestFloorDiv();
@@ -1179,6 +1287,7 @@ int main(void)
     TestGameplayElevationDoesNotCreateVisualHeight();
     TestRaisedCellAndCapacity();
     TestPartialChunk();
+    TestStepDownToLowerGroundStandsItsFace();
     TestLedge();
     TestLedgeUsesForegroundRuns();
     TestDiagonalLedgeAndOcclusion();
