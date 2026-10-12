@@ -75,6 +75,12 @@ bool UiGfx_ItemIconScaled(uint16_t item, int x, int y, int scale);
 /* a trainer's front picture (64x64; decompressed at the frame boundary like the above) */
 bool UiGfx_PrepareTrainerPic(uint16_t picId);
 bool UiGfx_TrainerPic(uint16_t picId, int x, int y, const struct UiFilter *filter);
+/* the pictures as the GBA's affine sprites show them: scaled about the 64x64 box's
+ * centre by 256 / affine (an OAM matrix value), clipped to the box, every GBA pixel
+ * zoom x zoom logical pixels; the box's centre at cx, cy (prepared as above) */
+bool UiGfx_MonPicAffine(uint16_t species, uint32_t personality, bool shiny, int frame, int cx, int cy, int affine, int zoom,
+                        const struct UiFilter *filter);
+bool UiGfx_TrainerPicAffine(uint16_t picId, int cx, int cy, int affine, int zoom, const struct UiFilter *filter);
 /* a field (overworld) sprite frame, 16x32 4bpp frames in a row, with any 16-colour
  * palette (a recoloured trainer), enlarged by a whole factor, mirrored for flip */
 bool UiGfx_FieldSprite(const void *tiles, int frameCount, const uint16_t *palette, int frame, int x, int y, int scale,

@@ -37,6 +37,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_Bag,
     &gUiScreen_Pokedex,
     &gUiScreen_Storage,
+    &gUiScreen_DexNewEntry,   /* before the battle: a catch's new entry page runs inside it */
     &gUiScreen_Battle,
     &gUiScreen_Customize,
     &gUiScreen_Players,

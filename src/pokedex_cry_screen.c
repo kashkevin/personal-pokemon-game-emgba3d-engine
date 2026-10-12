@@ -575,3 +575,29 @@ static void SetCryMeterNeedleTarget(s8 offset)
     sCryMeterNeedle->targetRotation = rotation;
     sCryMeterNeedle->moveIncrement = NEEDLE_MOVE_INCREMENT;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI's CRY page (src/native_ui/screens/ui_dex_pages.c) draws the
+// waveform and the meter from this state; the cry, its sampling and the needle's
+// motion stay here. Read after the frame: UpdateCryWaveformWindow drew the
+// samples cryWaveformBuffer[2 * (cryState - 2)] and [+ 1] and moved on.
+bool32 PokedexCry_NativeUiState(struct NativeDexCry *out)
+{
+    memset(out, 0, sizeof(*out));
+    if (sDexCryScreen == NULL || sCryMeterNeedle == NULL)
+        return FALSE;
+    out->active = TRUE;
+    if (sDexCryScreen->cryState >= 2 && sDexCryScreen->cryState <= 9)
+    {
+        u32 i = 2 * (sDexCryScreen->cryState - 2);
+
+        out->playing = TRUE;
+        out->amplitude[0] = (s8)sDexCryScreen->cryWaveformBuffer[i];
+        out->amplitude[1] = (s8)sDexCryScreen->cryWaveformBuffer[i + 1];
+    }
+    out->needle = sCryMeterNeedle->rotation;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI
