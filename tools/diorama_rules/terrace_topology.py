@@ -190,19 +190,68 @@ def solve_layout(cells: tuple[dict, ...], width: int, height: int,
     return solved
 
 
+def join_water(cells: tuple[dict, ...], width: int, height: int,
+               solved: dict[int, dict]) -> dict[int, dict]:
+    """Water the solver left unsolved (shallows at another elevation, water no
+    terrace reaches) that joins solved water takes its level: a sea and its
+    shallows lie level (graphics overhaul, 2026-10-12: where the sea was solved
+    a terrace below its rocks, its shallows and sandbars stood a level above
+    it). Each body of unsolved walkable water, joined cell to cell (not through
+    a waterfall), that touches solved water at one level only takes that
+    level. Returns the joined cells' entries."""
+    def water(offset: int) -> bool:
+        cell = cells[offset]
+        return (cell.get("behavior") in WATER_BEHAVIORS and cell.get("behavior") != "MB_WATERFALL"
+                and cell.get("collision", 0) == 0 and role_for_cell(cell) is None)
+
+    def neighbours(offset: int):
+        x, y = offset % width, offset // width
+        for nx, ny in ((x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y)):
+            if 0 <= nx < width and 0 <= ny < height:
+                yield ny * width + nx
+
+    seen: set[int] = set()
+    joined: dict[int, dict] = {}
+    for start in range(len(cells)):
+        if start in seen or start in solved or not water(start):
+            continue
+        body = []
+        levels = set()
+        pending = deque((start,))
+        seen.add(start)
+        while pending:
+            offset = pending.popleft()
+            body.append(offset)
+            for n in neighbours(offset):
+                if n in solved:
+                    if water(n):
+                        levels.add(solved[n]["groundQ16"])
+                elif n not in seen and water(n):
+                    seen.add(n)
+                    pending.append(n)
+        if len(levels) == 1:
+            level = next(iter(levels))
+            for offset in body:
+                joined[offset] = {"groundQ16": level, "topQ16": level,
+                                  "profile": "none", "solid": False}
+    return joined
+
+
 def lift_blocked_cells(cells: tuple[dict, ...], width: int, height: int,
                        solved: dict[int, dict], liftable=None) -> dict[int, dict]:
     """Blocked cells that are no terrace course (a house, a tree, a rock) stand
-    on the land nearest them. solve_layout gives levels to walkable regions
+    on the ground nearest them. solve_layout gives levels to walkable regions
     only, so on a level below the highest (Mossdeep's town under its cliffs'
-    tops, Sootopolis's lower terraces) houses and trees stayed at the top
-    level, a tile up on plinths. Each blocked cell `liftable(offset)` allows
-    (all, when None; the compiler leaves natural cliffs out) takes the level of
-    the walkable ground nearest it, counted through such cells: when that is
-    solved dry land at one level below the top, that level is its ground
-    ("lift": its own height stands on it). Nearest to water (a rock in the
-    sea), to two levels at once, or to unsolved ground, it is left as it was.
-    Returns the lifted cells' entries (graphics overhaul phase 4, 2026-10-12)."""
+    tops, Sootopolis's lower terraces, the sea a level below the rocks in it)
+    houses, trees and rocks stayed at the top level, a tile up on plinths.
+    Each blocked cell `liftable(offset)` allows (all, when None; the compiler
+    leaves natural cliffs out) takes the level of the walkable ground nearest
+    it, counted through such cells: when that is a solved level below the top
+    (dry land, or the sea solved with it), that level is its ground ("lift":
+    its own height stands on it). Nearest to unsolved water (the sea at its
+    own height), to two levels at once, or to unsolved ground, it is left as
+    it was. Returns the lifted cells' entries (graphics overhaul phase 4,
+    2026-10-12)."""
     def blocked(offset: int) -> bool:
         return (cells[offset].get("collision", 0) != 0 and offset not in solved
                 and role_for_cell(cells[offset]) is None
@@ -215,13 +264,13 @@ def lift_blocked_cells(cells: tuple[dict, ...], width: int, height: int,
                 yield ny * width + nx
 
     def label(offset: int):
-        """What a walkable cell next to blocked ones offers them: its level,
-        or "water", or "unsolved"."""
+        """What a walkable cell next to blocked ones offers them: its level
+        (water too, solved with the land), or "water", or "unsolved"."""
+        if offset in solved:
+            return solved[offset]["groundQ16"]
         if cells[offset].get("behavior") in WATER_BEHAVIORS:
             return "water"
-        if offset not in solved:
-            return "unsolved"
-        return solved[offset]["groundQ16"]
+        return "unsolved"
 
     labels: dict[int, set] = {}
     frontier: list[int] = []
@@ -230,8 +279,6 @@ def lift_blocked_cells(cells: tuple[dict, ...], width: int, height: int,
             continue
         offered = {label(n) for n in neighbours(offset)
                    if cells[n].get("collision", 0) == 0 and role_for_cell(cells[n]) is None}
-        if cells[offset].get("behavior") in WATER_BEHAVIORS:
-            offered.add("water")
         if offered:
             labels[offset] = offered
             frontier.append(offset)
