@@ -37,6 +37,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_Bag,
     &gUiScreen_Pokedex,
     &gUiScreen_Storage,
+    &gUiScreen_StorageMenus,  /* the PC's first menus, over the field */
     &gUiScreen_DexNewEntry,   /* before the battle: a catch's new entry page runs inside it */
     &gUiScreen_Battle,
     &gUiScreen_Customize,
@@ -387,6 +388,20 @@ static void WindowToCanvas(int wx, int wy, int *cx, int *cy)
     UiDraw_WindowToCanvas(wx, wy, cx, cy);
 }
 
+bool NativeUi_MouseHeld(void)
+{
+    if (!NativeUi_Enabled() || Platform_NativeUiPcMenuOpen() || !sMouseInside)
+        return false;
+    return (SDL_GetMouseState(NULL, NULL) & SDL_BUTTON_LMASK) != 0;
+}
+
+const struct UiHit *NativeUi_MouseHover(void)
+{
+    if (!sMouseInside || sMouseX < 0)
+        return NULL;
+    return UiDraw_HitAt(sMouseX, sMouseY);
+}
+
 bool NativeUi_HandleEvent(const SDL_Event *event)
 {
     if (!NativeUi_Enabled())
@@ -453,6 +468,7 @@ bool NativeUi_HandleEvent(const SDL_Event *event)
         const struct UiHit *hit;
 
         WindowToCanvas(event->button.x, event->button.y, &sMouseX, &sMouseY);
+        sMouseInside = true;
         hit = UiDraw_HitAt(sMouseX, sMouseY);
         if (sLog)
             SDL_Log("Native UI: click %d at window (%d,%d) canvas (%d,%d): %s %d/%d", event->button.button,

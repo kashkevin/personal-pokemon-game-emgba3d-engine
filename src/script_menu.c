@@ -1368,6 +1368,27 @@ bool32 ScriptMenu_NativeUiState(struct NativeScriptMenu *out)
     return FALSE;
 }
 
+// The PC's own multichoice (MULTI_PC), as ScriptMenu_CreatePCMultichoice prints
+// it: whose PC the storage is, the player's, the Hall of Fame once the game is
+// clear, LOG OFF.
+u32 ScriptMenu_NativeUiPcRows(const u8 **labels, u32 max, u8 *playersPc)
+{
+    u32 n = 0;
+
+    if (max < 4)
+        return 0;
+    if (FlagGet(FLAG_SYS_PC_LANETTE))
+        labels[n++] = IS_FRLG ? gText_BillsPc : gText_LanettesPC;
+    else
+        labels[n++] = gText_SomeonesPC;
+    StringExpandPlaceholders(playersPc, gText_PlayersPC);
+    labels[n++] = playersPc;
+    if (FlagGet(FLAG_SYS_GAME_CLEAR))
+        labels[n++] = gText_HallOfFame;
+    labels[n++] = gText_LogOff;
+    return n;
+}
+
 // The rows of any multichoice list, as the engine prints them (up or not).
 u32 ScriptMenu_NativeUiList(u32 multichoiceId, const u8 **labels, u32 max)
 {

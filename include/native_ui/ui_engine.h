@@ -471,8 +471,15 @@ enum NativeStoragePhase
     NATIVE_STORAGE_MARKS,       /* markCursor (0-3 the marks, 4 OK, 5 CANCEL), marks */
     NATIVE_STORAGE_MESSAGE,     /* a message waits for a button */
     NATIVE_STORAGE_ITEM_INFO,   /* MOVE ITEMS: an item's description waits for a button */
-    NATIVE_STORAGE_MULTI,       /* several Pokémon selected or moved at once (the game's own picture) */
     NATIVE_STORAGE_CLOSING,     /* the screen closes, or another screen opens */
+};
+/* several Pokémon at once (MOVE POKéMON, the quick hand: A held over a Pokémon) */
+enum NativeStorageMulti
+{
+    NATIVE_STORAGE_MULTI_NONE,
+    NATIVE_STORAGE_MULTI_SELECTING, /* A held: multiFrom to multiTo (box positions) */
+    NATIVE_STORAGE_MULTI_MOVING,    /* the hand carries the group (Storage_NativeUiGroup) */
+    NATIVE_STORAGE_MULTI_PLACING,   /* the group is put down (already in the box) */
 };
 enum NativeStorageMode
 {
@@ -539,6 +546,16 @@ struct NativeStorage
     bool8 messageShown;
     u8 message[64];
     u16 waldaColors[2];         /* Walda's wallpaper's background and foreground (BGR555) */
+    u8 multi;                   /* enum NativeStorageMulti */
+    u8 multiFrom;               /* SELECTING: where it began */
+    u8 multiTo;                 /* ... and the other corner (the cursor) */
+    u8 groupPos;                /* MOVING, PLACING: the group's top left */
+    u8 groupCols;
+    u8 groupRows;
+    s8 groupLift;               /* GBA pixels the group is lifted (0-8) */
+    s8 groupSlideX;             /* MOVING: sixths of a cell the group is still to go */
+    s8 groupSlideY;
+    bool8 canPlace;             /* MOVING: nothing is in the way of putting it down here */
     bool8 ready;
 };
 bool32 Storage_NativeUiState(struct NativeStorage *out);
@@ -557,6 +574,44 @@ void Storage_NativeUiBox(u32 box, struct NativeStorageBox *out);
 void Storage_NativeUiBoxInfo(u32 box, u8 *name, u8 *wallpaper, u8 *count);
 /* the Pokémon at a box position as a party Pokémon (FALSE: empty) */
 bool32 Storage_NativeUiBoxMon(u32 box, u32 pos, struct Pokemon *out);
+/* the group the hand carries, row by row (groupCols a row; empty places too) */
+void Storage_NativeUiGroup(struct NativeStorageBox *out);
+bool32 Storage_NativeUiGroupMon(u32 index, struct Pokemon *out);
+
+/* ---------------------------------------------------------------- the PC's first menus (field) */
+
+#define NATIVE_PC_MENU_MAX 5
+enum NativePcMenuKind
+{
+    NATIVE_PC_MENU_NONE,
+    NATIVE_PC_MENU_STORAGE,      /* the Pokémon Storage System's (pokemon_storage_system.c) */
+    NATIVE_PC_MENU_PLAYER,       /* the player's PC: ITEM STORAGE, MAILBOX... (player_pc.c) */
+    NATIVE_PC_MENU_ITEMS,        /* its ITEM STORAGE: WITHDRAW ITEM... */
+    NATIVE_PC_MENU_PLAYER_LINE,  /* one of its lines (the menu comes back after it) */
+};
+enum NativePcMenuState
+{
+    NATIVE_PC_MENU_OPENING,      /* the menu is put up (or the field fades in) */
+    NATIVE_PC_MENU_INPUT,        /* it reads buttons */
+    NATIVE_PC_MENU_REFUSED,      /* a choice was refused: message waits for a button */
+    NATIVE_PC_MENU_ENTERING,     /* a choice was taken: the screen fades to it */
+};
+struct NativePcMenu
+{
+    u8 menu;                     /* enum NativePcMenuKind */
+    u8 state;                    /* enum NativePcMenuState */
+    bool8 ready;
+    u8 count;
+    u8 cursor;
+    const u8 *labels[NATIVE_PC_MENU_MAX];
+    const u8 *message;           /* the line under it: the option's description, why it was refused
+                                  * (NULL: the field's message box has its own line) */
+};
+bool32 Storage_NativeUiMainMenu(struct NativePcMenu *out);
+bool32 PlayerPC_NativeUiState(struct NativePcMenu *out);
+/* script_menu.c: the PC's own multichoice (MULTI_PC) as the engine prints it;
+ * {PLAYER}'s PC is expanded into playersPc (32 bytes); returns how many rows */
+u32 ScriptMenu_NativeUiPcRows(const u8 **labels, u32 max, u8 *playersPc);
 
 /* ---------------------------------------------------------------- options (option_menu.c) */
 

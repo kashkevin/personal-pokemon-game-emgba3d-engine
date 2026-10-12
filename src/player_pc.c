@@ -1471,3 +1471,57 @@ static void ItemStorage_ReturnToListInput(u8 taskId)
     ItemStorage_AddScrollIndicator();
     gTasks[taskId].func = ItemStorage_ProcessInput;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_storage_menus.c) draws the
+// player's PC's two menus (ITEM STORAGE, MAILBOX...; WITHDRAW ITEM...) and
+// their lines; every button and rule stays here. The item lists, the mailbox
+// and the decorations keep the game's picture.
+STATIC_ASSERT(ARRAY_COUNT(sItemStorage_MenuActions) <= NATIVE_PC_MENU_MAX, NativeUiItemStorageRows);
+
+bool32 PlayerPC_NativeUiState(struct NativePcMenu *out)
+{
+    u8 taskId;
+    void (*next)(u8);
+    u32 i;
+
+    memset(out, 0, sizeof(*out));
+    if ((taskId = FindTaskIdByFunc(PlayerPCProcessMenuInput)) != TASK_NONE)
+    {
+        out->menu = NATIVE_PC_MENU_PLAYER;
+        out->state = NATIVE_PC_MENU_INPUT;
+        out->ready = TRUE;
+        out->count = min(sTopMenuNumOptions, NATIVE_PC_MENU_MAX);
+        for (i = 0; i < out->count; i++)
+            out->labels[i] = sPlayerPCMenuActions[sTopMenuOptionOrder[i]].text;
+        out->cursor = Menu_GetCursorPos();
+        return TRUE;
+    }
+    if ((taskId = FindTaskIdByFunc(ItemStorageMenuProcessInput)) != TASK_NONE
+     || (taskId = FindTaskIdByFunc(ItemStorage_HandleReturnToProcessInput)) != TASK_NONE)
+    {
+        out->menu = NATIVE_PC_MENU_ITEMS;
+        out->state = gTasks[taskId].func == ItemStorageMenuProcessInput ? NATIVE_PC_MENU_INPUT : NATIVE_PC_MENU_OPENING;
+        out->ready = out->state == NATIVE_PC_MENU_INPUT && !gPaletteFade.active;
+        out->count = ARRAY_COUNT(sItemStorage_MenuActions);
+        for (i = 0; i < out->count; i++)
+            out->labels[i] = sItemStorage_MenuActions[i].text;
+        out->cursor = Menu_GetCursorPos();
+        if (out->cursor >= out->count)
+            out->cursor = 0;
+        out->message = sItemStorage_OptionDescriptions[out->cursor];
+        return TRUE;
+    }
+    // a line before the menu comes (back): "What would you like to do?", "There are no items."...
+    next = MenuHelpers_NativeUiMessageNext();
+    if (next == InitPlayerPCMenu || next == ReshowPlayerPC || next == PlayerPC_ItemStorage)
+    {
+        out->menu = NATIVE_PC_MENU_PLAYER_LINE;
+        out->state = NATIVE_PC_MENU_OPENING;
+        return TRUE;
+    }
+    return FALSE;
+}
+#endif // ENABLE_NATIVE_UI
