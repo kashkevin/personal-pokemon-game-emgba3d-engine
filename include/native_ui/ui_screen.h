@@ -84,5 +84,6 @@ extern const struct UiScreen gUiScreen_Bag;
 extern const struct UiScreen gUiScreen_Pokedex;
 extern const struct UiScreen gUiScreen_Storage;
 extern const struct UiScreen gUiScreen_Battle;
+extern const struct UiScreen gUiScreen_Customize;
 
 #endif // GUARD_NATIVE_UI_SCREEN_H

@@ -21,6 +21,7 @@
 #include "native_ui/ui_draw.h"
 #include "native_ui/ui_engine.h"
 #include "native_ui/ui_gfx.h"
+#include "data.h"
 #include "decompress.h"
 #include "item_icon.h"
 #include "pokemon.h"
@@ -183,6 +184,7 @@ enum
 {
     ART_MON_PIC = 1,
     ART_ITEM_ICON,
+    ART_TRAINER_PIC,
 };
 struct ArtEntry
 {
@@ -413,6 +415,81 @@ bool UiGfx_ItemIconScaled(uint16_t item, int x, int y, int scale)
     c.filter = NULL;
     snprintf(key, sizeof(key), "item:%u", (unsigned)item);
     UiG_BlitPart(UiG_Cached(key, 24, 24, BuildArt, &c), 0, 0, 24, 24, x, y, scale < 1 ? 1 : scale, false, 1.0);
+    return true;
+}
+
+bool UiGfx_PrepareTrainerPic(uint16_t picId)
+{
+    struct ArtEntry *e;
+    const uint16_t *palette;
+
+    if (ArtFind(ART_TRAINER_PIC, picId, 0) != NULL)
+        return true;
+    if (!ArtScratch())
+        return false;
+    DecompressDataWithHeaderWram(GetTrainerFrontPicData(picId), sArtScratch);
+    palette = GetTrainerFrontPicPalette(picId);
+    e = ArtNew(ART_TRAINER_PIC, picId, 0, 64, 64);
+    if (e == NULL || palette == NULL)
+        return false;
+    UiGfx_Decode4bpp(e->rgba, 64, sArtScratch, palette, 64, 64);
+    e->frames = 1;
+    return true;
+}
+
+bool UiGfx_TrainerPic(uint16_t picId, int x, int y, const struct UiFilter *filter)
+{
+    const struct ArtEntry *e = ArtFind(ART_TRAINER_PIC, picId, 0);
+    struct ArtCtx c;
+    char key[96];
+    char fkey[48];
+
+    if (e == NULL)
+        return false;
+    c.e = e;
+    c.y = 0;
+    c.h = 64;
+    c.filter = filter;
+    UiFilter_Key(fkey, sizeof(fkey), filter);
+    snprintf(key, sizeof(key), "tpic:%u%s", (unsigned)picId, fkey);
+    UiG_Blit(UiG_Cached(key, 64, 64, BuildArt, &c), x, y);
+    return true;
+}
+
+/* ---------------------------------------------------------------- field sprites */
+
+struct FieldSheetCtx
+{
+    const uint8_t *tiles;
+    const uint16_t *palette;
+    int frames;
+};
+
+static void BuildFieldSheet(struct UiBitmap *bm, const void *ctx)
+{
+    const struct FieldSheetCtx *c = ctx;
+
+    for (int f = 0; f < c->frames; f++)
+        UiGfx_Decode4bpp(&bm->d[(size_t)f * 16 * 32 * 4], 16, c->tiles + f * 16 * 32 / 2, c->palette, 16, 32);
+}
+
+bool UiGfx_FieldSprite(const void *tiles, int frameCount, const uint16_t *palette, int frame, int x, int y, int scale,
+                       bool flip)
+{
+    struct FieldSheetCtx c;
+    uint32_t h = 2166136261u;
+    char key[96];
+
+    if (tiles == NULL || palette == NULL || frame < 0 || frame >= frameCount)
+        return false;
+    for (int i = 0; i < 16; i++)
+        h = (h ^ palette[i]) * 16777619u;
+    c.tiles = tiles;
+    c.palette = palette;
+    c.frames = frameCount;
+    snprintf(key, sizeof(key), "ow:%p:%d:%08x", tiles, frameCount, (unsigned)h);
+    UiG_BlitPart(UiG_Cached(key, 16, 32 * frameCount, BuildFieldSheet, &c), 0, frame * 32, 16, 32, x, y, scale, flip,
+                 1.0);
     return true;
 }
 

@@ -69,6 +69,14 @@ bool UiGfx_ItemIcon(uint16_t item, int x, int y, const struct UiFilter *filter);
 /* the icon enlarged by a whole factor (its pixels kept square), top left at x, y */
 bool UiGfx_ItemIconScaled(uint16_t item, int x, int y, int scale);
 
+/* a trainer's front picture (64x64; decompressed at the frame boundary like the above) */
+bool UiGfx_PrepareTrainerPic(uint16_t picId);
+bool UiGfx_TrainerPic(uint16_t picId, int x, int y, const struct UiFilter *filter);
+/* a field (overworld) sprite frame, 16x32 4bpp frames in a row, with any 16-colour
+ * palette (a recoloured trainer), enlarged by a whole factor, mirrored for flip */
+bool UiGfx_FieldSprite(const void *tiles, int frameCount, const uint16_t *palette, int frame, int x, int y, int scale,
+                       bool flip);
+
 /* applies a filter to RGBA pixels in place */
 void UiFilter_Apply(uint8_t *rgba, int count, const struct UiFilter *f);
 /* appends the filter's key ("" when none) */

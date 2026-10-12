@@ -481,6 +481,44 @@ bool32 OptionMenu_NativeUiState(struct NativeOptionMenu *out);
 /* the session's other players (i < MULTIPLAYER_MAX_PEERS); FALSE: none there or offline */
 bool32 Multiplayer_NativeUiPeer(u32 i, u32 *playerId, u8 *mapGroup, u8 *mapNum, u8 *gender, u8 *activity);
 
+/* ---------------------------------------------------------------- the STYLE editor (multiplayer_appearance.c) */
+
+/* The editor's rows (its cursor): four colour rows, then SAVE and CANCEL. */
+enum NativeAppearanceRow
+{
+    NATIVE_LOOK_SKIN,
+    NATIVE_LOOK_HAIR,
+    NATIVE_LOOK_OUTFIT,
+    NATIVE_LOOK_HAT,     /* the hat (or bandana) and the bag */
+    NATIVE_LOOK_SAVE,
+    NATIVE_LOOK_CANCEL,
+    NATIVE_LOOK_ROW_COUNT,
+};
+#define NATIVE_LOOK_BYTES 8
+struct NativeAppearance
+{
+    u8 look[NATIVE_LOOK_BYTES];    /* the look being edited (the field sprite shows it live) */
+    u8 start[NATIVE_LOOK_BYTES];   /* the player's look the editor started from */
+    u8 cursor;                     /* enum NativeAppearanceRow */
+    bool8 isMay;
+    bool8 pendingSave;             /* a saved look not yet confirmed by the host */
+    bool8 connected;               /* the multiplayer host is there */
+    bool8 hostHasLook;             /* the host keeps the player's current look */
+    u16 basePalette[16];           /* the body's own field palette */
+    u16 palette[16];               /* the same with the edited look (MultiplayerAppearance_BuildPalette) */
+    const void *frames;            /* the body's field frames: walking 0-8, running 9-17, 16x32 4bpp */
+};
+bool32 MultiplayerAppearance_NativeUiState(struct NativeAppearance *out);
+/* a colour row's choices; DEFAULT (0) keeps the body's own colours */
+u32 MultiplayerAppearance_NativeUiOptionCount(u32 row);
+const u8 *MultiplayerAppearance_NativeUiOptionName(u32 row, u32 index);
+/* the look byte a row edits (1 skin, 2 hair, 3 outfit, 5 hat and bag) */
+u32 MultiplayerAppearance_NativeUiLookByte(u32 row);
+/* the body's palette slots a row recolours (up to 4); returns how many */
+u32 MultiplayerAppearance_NativeUiSlots(u32 row, bool32 isMay, u8 *slots);
+/* a choice's colours, light to dark (up to 4; DEFAULT: the body's own); returns how many */
+u32 MultiplayerAppearance_NativeUiSwatch(u32 row, u32 index, bool32 isMay, u16 *colors);
+
 /* ---------------------------------------------------------------- game art */
 
 /* pokemon_icon.c: a party / box icon's 4bpp tiles (two 32x32 frames) and palette */
