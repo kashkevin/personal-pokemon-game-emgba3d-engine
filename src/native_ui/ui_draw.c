@@ -804,6 +804,25 @@ void UiG_Rect(int x, int y, int w, int h, UiRGBA c)
     SetAll(v, MODE_SOLID, 0, WithGlobalAlpha(c), 0);
 }
 
+int UiG_Mark(void)
+{
+    return sQuadCount;
+}
+
+void UiG_SquashX(int mark, int cx, double k)
+{
+    if (sVertices == NULL || mark < 0)
+        return;
+    cx += sState.tx;
+    for (int q = mark; q < sQuadCount; q++)
+        for (int i = 0; i < 4; i++)
+        {
+            struct UiVertex *v = &sVertices[q * 4 + i];
+
+            v->x = (int16_t)(cx + (int)floor((v->x - cx) * k + 0.5));
+        }
+}
+
 void UiG_Put(int x, int y, UiRGBA c) { UiG_Rect(x, y, 1, 1, c); }
 void UiG_HLine(int x, int y, int w, UiRGBA c) { UiG_Rect(x, y, w, 1, c); }
 void UiG_VLine(int x, int y, int h, UiRGBA c) { UiG_Rect(x, y, 1, h, c); }

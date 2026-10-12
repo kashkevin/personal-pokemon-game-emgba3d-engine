@@ -489,3 +489,156 @@ void MultiplayerAppearance_OpenEditor(void)
     DrawStdWindowFrame(sEditorWindowId, FALSE);
     RenderEditor();
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_customize.c) draws the STYLE
+// editor in place of its window and follows this state; the input, the live
+// field preview and saving stay here.
+bool32 MultiplayerAppearance_NativeUiState(struct NativeAppearance *out)
+{
+    const struct ObjectEventGraphicsInfo *info;
+    const u8 *host;
+    bool32 isMay;
+
+    memset(out, 0, sizeof(*out));
+    if (!sEditorActive || !FuncIsActiveTask(Task_StyleEditor) || sEditorWindowId == WINDOW_NONE)
+        return FALSE;
+    isMay = gSaveBlock2Ptr->playerGender != MALE;
+    memcpy(out->look, sEditor, MP_APPEARANCE_BYTES);
+    if (ValidLook(sLocal))
+        memcpy(out->start, sLocal, MP_APPEARANCE_BYTES); // what OpenEditor started from
+    out->cursor = sEditorCursor;
+    out->isMay = isMay;
+    out->pendingSave = sPendingSave;
+    out->connected = Multiplayer_IsConnected();
+    host = out->connected ? MultiplayerWorld_GetSelfAppearance() : NULL;
+    out->hostHasLook = host != NULL && ValidLook(sLocal) && memcmp(host, sLocal, MP_APPEARANCE_BYTES) == 0;
+    memcpy(out->basePalette, isMay ? gObjectEventPal_May : gObjectEventPal_Brendan, sizeof(out->basePalette));
+    MultiplayerAppearance_BuildPalette(out->basePalette, isMay, sEditor, out->palette);
+    info = GetObjectEventGraphicsInfo(isMay ? OBJ_EVENT_GFX_MAY_NORMAL : OBJ_EVENT_GFX_BRENDAN_NORMAL);
+    if (info != NULL && info->images != NULL)
+        out->frames = info->images[0].data; // walking then running, 16x32 each (relative frames)
+    return TRUE;
+}
+
+// The editor's value rows: how many choices, their names, the colours of a
+// choice (the body's own for DEFAULT) and the palette slots a row recolours.
+static u32 NativeUiRowCount(u32 row)
+{
+    switch (row)
+    {
+    case ROW_SKIN:   return SKIN_COUNT;
+    case ROW_HAIR:   return HAIR_COUNT;
+    case ROW_OUTFIT:
+    case ROW_HAT:    return CLOTH_COUNT;
+    default:         return 0;
+    }
+}
+
+u32 MultiplayerAppearance_NativeUiOptionCount(u32 row)
+{
+    return NativeUiRowCount(row);
+}
+
+const u8 *MultiplayerAppearance_NativeUiOptionName(u32 row, u32 index)
+{
+    if (index >= NativeUiRowCount(row))
+        return NULL;
+    switch (row)
+    {
+    case ROW_SKIN: return sSkinNames[index];
+    case ROW_HAIR: return sHairNames[index];
+    default:       return sClothNames[index];
+    }
+}
+
+u32 MultiplayerAppearance_NativeUiLookByte(u32 row)
+{
+    switch (row)
+    {
+    case ROW_SKIN:   return 1;
+    case ROW_HAIR:   return 2;
+    case ROW_OUTFIT: return 3;
+    case ROW_HAT:    return 5;
+    default:         return 0;
+    }
+}
+
+u32 MultiplayerAppearance_NativeUiSlots(u32 row, bool32 isMay, u8 *slots)
+{
+    const struct BaseSlots *s = isMay ? &sMaySlots : &sBrendanSlots;
+    u32 n = 0, i;
+
+    switch (row)
+    {
+    case ROW_SKIN:
+        for (i = 0; i < 4; i++)
+            slots[n++] = s->skin[i];
+        break;
+    case ROW_HAIR:
+        slots[n++] = s->hairMain;
+        slots[n++] = s->hairShade[0];
+        if (s->hairShade[1] != s->hairShade[0])
+            slots[n++] = s->hairShade[1];
+        break;
+    case ROW_OUTFIT:
+        slots[n++] = s->outfit[0];
+        slots[n++] = s->outfit[1];
+        break;
+    case ROW_HAT:
+        slots[n++] = s->hat[0];
+        slots[n++] = s->hat[1];
+        break;
+    }
+    return n;
+}
+
+// light to dark; DEFAULT is the body's own colours in those slots
+u32 MultiplayerAppearance_NativeUiSwatch(u32 row, u32 index, bool32 isMay, u16 *colors)
+{
+    const u16 *base = isMay ? gObjectEventPal_May : gObjectEventPal_Brendan;
+    u8 slots[4];
+    u32 n, i;
+
+    if (index >= NativeUiRowCount(row))
+        return 0;
+    if (index == 0)
+    {
+        n = MultiplayerAppearance_NativeUiSlots(row, isMay, slots);
+        for (i = 0; i < n; i++)
+            colors[i] = base[slots[i]];
+        return n;
+    }
+    switch (row)
+    {
+    case ROW_SKIN:
+        for (i = 0; i < 4; i++)
+            colors[i] = sSkinColors[index][i];
+        return 4;
+    case ROW_HAIR:
+        colors[0] = sHairColors[index][0];
+        colors[1] = sHairColors[index][1];
+        return 2;
+    default:
+        colors[0] = sClothColors[index][0];
+        colors[1] = sClothColors[index][1];
+        return 2;
+    }
+}
+#endif // ENABLE_NATIVE_UI
+
+#ifdef ENABLE_NATIVE_UI
+// The player's own field sprite as the others see it: the body's walking and
+// running frames and its palette with the player's saved look.
+void MultiplayerAppearance_NativeUiPlayerSprite(const void **frames, u16 *palette)
+{
+    bool32 isMay = gSaveBlock2Ptr->playerGender != MALE;
+    const struct ObjectEventGraphicsInfo *info = GetObjectEventGraphicsInfo(isMay ? OBJ_EVENT_GFX_MAY_NORMAL : OBJ_EVENT_GFX_BRENDAN_NORMAL);
+
+    *frames = info != NULL && info->images != NULL ? info->images[0].data : NULL;
+    MultiplayerAppearance_BuildPalette(isMay ? gObjectEventPal_May : gObjectEventPal_Brendan, isMay,
+                                       ValidLook(sLocal) ? sLocal : NULL, palette);
+}
+#endif // ENABLE_NATIVE_UI

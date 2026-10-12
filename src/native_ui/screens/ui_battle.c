@@ -12,7 +12,8 @@
  * interface sprites (healthboxes, bars, trays, triggers) are left out.
  *
  * Kept as the game's picture: the Safari Zone, the catching tutorial, the
- * Battle Arena (their menus differ), the level-up stat box, ability pop-ups.
+ * Battle Arena (their menus differ), ability pop-ups. The level-up box and a
+ * trainer battle's rewards are screen 26's (ui_results.c).
  * Project-owned.
  */
 #include <stdio.h>
@@ -44,6 +45,7 @@
 #include "native_ui/ui_engine.h"
 #include "native_ui/ui_gfx.h"
 #include "native_ui/ui_mon.h"
+#include "native_ui/ui_results.h"
 #include "native_ui/ui_screen.h"
 #include "native_ui/ui_text.h"
 #include "native_ui/ui_widgets.h"
@@ -416,7 +418,8 @@ static void Capture(void)
 
         sB.hasPrompt = TextPrinter_NativeUiWindowText(B_WIN_ACTION_PROMPT, sB.prompt, sizeof(sB.prompt), &printed, &active);
     }
-    sB.ready = sB.msgWaiting || sB.yesNo
+    UiResults_Capture();
+    sB.ready = sB.msgWaiting || sB.yesNo || UiResults_LevelUpWaiting()
             || (sB.chooser >= 0 && sB.input != NATIVE_BATTLE_INPUT_ACTION_WAIT && sB.input != NATIVE_BATTLE_INPUT_MOVE_WAIT
                 && sB.input != NATIVE_BATTLE_INPUT_PARTY && sB.input != NATIVE_BATTLE_INPUT_BAG);
     if (NativeUi_LogEnabled())
@@ -965,7 +968,10 @@ static void Draw(int t)
     R = x0 + w;
     T = y0;
     dyB = y0 + h - UI_LOGICAL_HEIGHT;
-    DrawBoxes(L, R, T, dyB);
+    /* a trainer battle's end: the rewards ledger and the trainer's plate in the databoxes' place */
+    if (!UiResults_LedgerShown())
+        DrawBoxes(L, R, T, dyB);
+    UiResults_Draw(L, R, T, t);
     if (sB.chooser >= 0 && (sB.input == NATIVE_BATTLE_INPUT_TARGET || sB.input == NATIVE_BATTLE_INPUT_TARGETS_SHOWN))
         DrawTargetPage(L, R, dyB, t);
     else if (sB.page == PAGE_MOVES)
@@ -1040,6 +1046,12 @@ static bool Click(const struct UiHit *hit, int button)
     }
     if (button != 1)
         return false;
+    /* the level-up box: any button turns its page or closes it */
+    if (UiResults_LevelUpWaiting())
+    {
+        NativeUi_QueuePress(A_BUTTON);
+        return true;
+    }
     switch (hit->id)
     {
     case HIT_CMD:
@@ -1144,7 +1156,7 @@ static bool Ready(void)
 
 static enum UiPicture Picture(void)
 {
-    return UI_PICTURE_HIDE_BG0;
+    return UiResults_LevelUpActive() ? UI_PICTURE_HIDE_BG012 : UI_PICTURE_HIDE_BG0;
 }
 
 const struct UiScreen gUiScreen_Battle = {

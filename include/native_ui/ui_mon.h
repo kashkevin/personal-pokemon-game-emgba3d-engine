@@ -62,6 +62,8 @@ int UiMon_Tag(int x, int y, const char *label, UiRGBA colour);
 void UiMon_Star(int x, int y);
 /* a sparkle centred at x, y (big: 7x7, else 5x5); NULL palette: the blue one */
 void UiMon_Sparkle(int x, int y, bool big, const UiRGBA *pal3);
+/* ... each pixel a scale x scale square */
+void UiMon_SparkleScaled(int x, int y, bool big, const UiRGBA *pal3, int scale);
 /* one marking's 7x7 glyph (0 circle, 1 triangle, 2 square, 3 heart) at its top left */
 void UiMon_MarkGlyph(int i, int x, int y, UiRGBA colour);
 /* the four markings (bit i set: mark i on); returns the right edge */

@@ -294,6 +294,11 @@ bool32 Bag_NativeUiState(struct NativeBag *out);
 /* menu_helpers.c: the shared YES/NO, and the shared message (its window) */
 bool32 MenuHelpers_NativeUiYesNo(void);
 bool32 MenuHelpers_NativeUiMessage(u8 *windowId);
+/* whose they are: whether a task runs one of the two helpers now, the
+ * message's next step and the YES/NO's YES (NULL: not up) */
+bool32 MenuHelpers_NativeUiRunsHelper(u8 taskId);
+void (*MenuHelpers_NativeUiMessageNext(void))(u8);
+void (*MenuHelpers_NativeUiYesFunc(void))(u8);
 
 /* ---------------------------------------------------------------- Pokédex (pokedex.c, the classic one) */
 
@@ -481,6 +486,286 @@ bool32 OptionMenu_NativeUiState(struct NativeOptionMenu *out);
 /* the session's other players (i < MULTIPLAYER_MAX_PEERS); FALSE: none there or offline */
 bool32 Multiplayer_NativeUiPeer(u32 i, u32 *playerId, u8 *mapGroup, u8 *mapNum, u8 *gender, u8 *activity);
 
+/* ---------------------------------------------------------------- the starter choice (starter_choose.c) */
+
+#define NATIVE_STARTER_MAX 18
+enum
+{
+    NATIVE_STARTER_MOVING,    /* between two balls or pages (the label is redrawn) */
+    NATIVE_STARTER_BROWSE,    /* Left / Right: the ball, Up / Down, L / R: the page, A: this one */
+    NATIVE_STARTER_OPENING,   /* the Pokémon comes out of its ball */
+    NATIVE_STARTER_CONFIRM,   /* "Do you choose this POKéMON?" YES / NO */
+};
+struct NativeStarters
+{
+    u8 phase;
+    bool8 ready;
+    u8 selection;             /* page * pageSize + ball */
+    u8 pageSize;              /* balls a page (Grass, Fire, Water) */
+    u8 pageCount;
+    u8 yesNoCursor;           /* 0: YES */
+    u16 species[NATIVE_STARTER_MAX];
+};
+bool32 StarterChoose_NativeUiState(struct NativeStarters *out);
+
+/* ---------------------------------------------------------------- evolution (evolution_scene.c) */
+
+enum
+{
+    NATIVE_EVO_LOADING,      /* the screen before fades to black (BeginEvolutionScene) */
+    NATIVE_EVO_INTRO,        /* "What? X is evolving!": the Pokémon as it is */
+    NATIVE_EVO_CHARGING,     /* the music starts, sparkles spiral up and arc down */
+    NATIVE_EVO_CYCLING,      /* the old form and the new one alternate (B held stops it, when allowed) */
+    NATIVE_EVO_FLASH,        /* the new form, white: sparkles circle in, spray, and its colours return */
+    NATIVE_EVO_EVOLVED,      /* the new form: "Congratulations!", then any new move (messages, YES / NO) */
+    NATIVE_EVO_STOPPED,      /* the old form: "Huh? X stopped evolving!" */
+    NATIVE_EVO_ENDING,       /* fading out to what comes next */
+};
+struct NativeEvolution
+{
+    u8 phase;
+    bool8 ready;             /* the engine reads buttons now: a waiting message, YES / NO, stopping */
+    bool8 canStop;           /* B held stops it (not for an evolution stone, say) */
+    bool8 cycleActive;       /* the alternation runs (stopping is possible now) */
+    bool8 showNew;           /* the new form is the one in front (the alternation: the larger one) */
+    bool8 monAnim;           /* the Pokémon in front plays its animation and cry now */
+    bool8 msgValid;          /* window 0 holds this scene's message (not one from before) */
+    bool8 learning;          /* a new move's messages have begun (wants to learn, forget one, learned) */
+    bool8 yesNo;             /* the engine's YES / NO is up */
+    u8 yesNoCursor;          /* 0: YES */
+    u8 white;                /* how white the Pokémon in front is (0..16: the flash, the stop) */
+    bool8 shiny;
+    u8 partyId;
+    u16 preSpecies;
+    u16 postSpecies;
+    u32 personality;
+};
+bool32 Evolution_NativeUiState(struct NativeEvolution *out);
+
+/* ---------------------------------------------------------------- script menus (script_menu.c), coins (coins.c) */
+
+#define NATIVE_SCRIPT_MENU_MAX 12
+enum
+{
+    NATIVE_SCRIPT_MENU_NONE,
+    NATIVE_SCRIPT_MENU_MULTICHOICE,  /* a script's multichoice (MULTI_*) */
+    NATIVE_SCRIPT_MENU_YES_NO,       /* a script's YES / NO (yesnobox, MSGBOX_YESNO) */
+};
+struct NativeScriptMenu
+{
+    u8 kind;
+    bool8 ready;                     /* it reads buttons now */
+    u8 multichoiceId;
+    u8 count;
+    u8 cursor;                       /* YES / NO: 0 YES */
+    bool8 ignoreB;
+    const u8 *labels[NATIVE_SCRIPT_MENU_MAX]; /* the rows as the engine prints them */
+};
+bool32 ScriptMenu_NativeUiState(struct NativeScriptMenu *out);
+/* the rows of any multichoice list as the engine prints them; returns how many */
+u32 ScriptMenu_NativeUiList(u32 multichoiceId, const u8 **labels, u32 max);
+/* the coin box (showcoinsbox) is up */
+bool32 Coins_NativeUiBoxShown(void);
+/* script.c: the native function the field's script runs now (NULL: none) */
+u8 (*ScriptContext_NativeUiWaitFunc(void))(void);
+/* scrcmd.c: the field's script waits for A or B (a finished msgbox) */
+bool32 Script_NativeUiWaitsForButton(void);
+/* event_object_movement.c: a field sprite palette by its tag (NULL: none) */
+const u16 *ObjectEvent_NativeUiPalette(u16 tag);
+
+/* ---------------------------------------------------------------- the naming screen (naming_screen.c) */
+
+enum
+{
+    NATIVE_NAMING_LOADING,
+    NATIVE_NAMING_INPUT,     /* reading buttons (or about to: the cursor flies to OK) */
+    NATIVE_NAMING_SWAP,      /* the keyboard page is changing */
+    NATIVE_NAMING_DONE,      /* OK pressed: saving the name, fading out */
+};
+/* keyboard pages in the order SELECT cycles them: UPPER, lower, OTHERS */
+#define NATIVE_NAMING_PAGES 3
+#define NATIVE_NAMING_ROWS 4
+#define NATIVE_NAMING_COLS 8
+struct NativeNaming
+{
+    u8 phase;
+    bool8 ready;
+    u8 kind;                 /* NAMING_SCREEN_* */
+    u8 maxChars;
+    u8 page;                 /* the page in front (during a swap: the one coming) */
+    u8 columns[NATIVE_NAMING_PAGES]; /* keys a row on each page; x == columns: PAGE, BACK, OK */
+    s8 cursorX;
+    s8 cursorY;
+    bool8 cursorShown;
+    bool8 genderIcon;        /* the template shows the Pokémon's gender */
+    u8 gender;               /* MON_MALE, MON_FEMALE, MON_GENDERLESS */
+    u8 playerGender;         /* the player template: whose sprite */
+    u16 species;
+    u32 personality;
+    u8 titleWindow;          /* the title as the engine printed it */
+    u8 text[17];             /* the name so far */
+    u8 keys[NATIVE_NAMING_PAGES][NATIVE_NAMING_ROWS][NATIVE_NAMING_COLS];
+};
+bool32 NamingScreen_NativeUiState(struct NativeNaming *out);
+
+/* ---------------------------------------------------------------- the Poké Mart (shop.c) */
+
+#define NATIVE_SHOP_MAX_ITEMS 64
+enum
+{
+    NATIVE_SHOP_NONE,
+    NATIVE_SHOP_MENU,        /* the field's BUY / SELL / QUIT (a decoration shop: BUY / QUIT) */
+    NATIVE_SHOP_FIELD,       /* the field around it: "anything else?", or fading to BUY or SELL */
+    NATIVE_SHOP_LIST,        /* the buy screen's list */
+    NATIVE_SHOP_QUANTITY,    /* how many, and its price */
+    NATIVE_SHOP_MESSAGE,     /* a clerk's line on the buy screen (printing, or waiting for A or B) */
+    NATIVE_SHOP_CONFIRM,     /* YES / NO to the price */
+    NATIVE_SHOP_LEAVING,     /* fading back to the field */
+};
+struct NativeShop
+{
+    u8 phase;
+    bool8 ready;              /* the engine reads buttons now */
+    bool8 decorations;        /* a decoration shop: its list holds decorations */
+    bool8 sale;               /* Slateport's POKéNEWS sale halves the prices */
+    u8 menuCount;             /* the field menu's rows */
+    u8 menuCursor;            /* the field menu's row; the YES / NO's (0: YES) */
+    u8 msgWindow;             /* the clerk's line (WINDOW_NONE: none) */
+    const u8 *menuLabels[3];
+    u16 count;                /* items for sale (the list adds CANCEL after them) */
+    u16 cursor;               /* the list's row (count: CANCEL) */
+    u16 scroll;               /* the first row shown */
+    u16 chosen;               /* the item being bought (ITEM_NONE: none) */
+    u16 quantity;
+    u16 maxQuantity;
+    u16 inBag;                /* of the chosen item, else of the row's */
+    u32 totalCost;
+    u32 money;
+    u16 items[NATIVE_SHOP_MAX_ITEMS];
+    u32 prices[NATIVE_SHOP_MAX_ITEMS];
+    bool8 soldOut[NATIVE_SHOP_MAX_ITEMS];  /* a key item already owned */
+};
+bool32 Shop_NativeUiState(struct NativeShop *out);
+
+/* ---------------------------------------------------------------- the Trainer Card (trainer_card.c) */
+
+/* The card as the engine shows it: its face, what A and B do now, and the facts
+ * it prints. The own card's play time is the save's live clock (as the engine
+ * prints it); a card from a link is its owner's snapshot. */
+enum
+{
+    NATIVE_CARD_LOADING,
+    NATIVE_CARD_FRONT,      /* A flips, B closes */
+    NATIVE_CARD_BACK,       /* A closes, B flips back (closes while linked) */
+    NATIVE_CARD_TO_BACK,    /* the engine's flip */
+    NATIVE_CARD_TO_FRONT,
+    NATIVE_CARD_CLOSING,
+};
+struct NativeTrainerCard
+{
+    u8 phase;
+    bool8 ready;          /* reading A and B */
+    bool8 onBack;
+    bool8 isLink;         /* another player's card in a link room */
+    bool8 linked;         /* a link is up: B on the back closes */
+    bool8 isHoenn;
+    u8 cardType;
+    bool8 hasPokedex;
+    bool8 hasHofResult;
+    bool8 hasLinkResults;
+    bool8 hasTrades;
+    bool8 colonHidden;    /* the play time's blinking colon */
+    /* the engine's four star rules (the own card only; a link card has its count) */
+    bool8 caughtAllRegional;
+    bool8 hasAllPaintings;
+    bool8 hasAllFrontierSymbols;
+    u8 gender;
+    u8 stars;
+    u16 picId;            /* the trainer picture the engine shows */
+    u16 caught;
+    u16 seen;             /* the own card only (the engine prints caught) */
+    u16 trainerId;
+    u16 playHours, playMinutes;
+    u32 money;
+    u16 hofHours, hofMinutes, hofSeconds;
+    u16 linkWins, linkLosses;
+    u16 trades;
+    u16 pokeblocksWithFriends;
+    u16 contestsWithFriends;
+    u16 frontierBP;
+    u8 name[8];
+    u8 profile[4][13];    /* the four easy chat words */
+    bool8 badges[8];
+    u8 badgeTiles[8 * 128]; /* the badges' own art: a 128x16 strip, 16x16 each */
+    const u16 *badgePalette;
+};
+bool32 TrainerCard_NativeUiState(struct NativeTrainerCard *out);
+
+/* ---------------------------------------------------------------- the Players menu (multiplayer_menu.c) */
+
+/* The host-driven Players menu as the game holds it: the host's title, status
+ * and up to six rows (printable ASCII, NUL-padded); rows without an action are
+ * information. waiting: a request is out (the game shows "Waiting for server"). */
+struct NativeMpMenu
+{
+    bool8 waiting;
+    bool8 tradeMenu;       /* reopened by the host for a trade (B cannot close it) */
+    bool8 admissionHeld;   /* a battle entry was chosen: the menu waits for the battle */
+    bool8 back;            /* B chooses the host's Back (else B closes the menu) */
+    u8 cursor;
+    u8 count;
+    u32 revision;          /* the host's screen revision (0: none received yet) */
+    u8 title[25];
+    u8 status[33];
+    u8 rows[6][27];
+    bool8 enabled[6];
+    bool8 admission[6];    /* the battle-entry row */
+};
+bool32 MultiplayerMenu_NativeUiState(struct NativeMpMenu *out);
+/* multiplayer_world.c: the notice banner up now (host notices, wallet, hints): its
+ * window (its text through TextPrinter_NativeUiWindowText), frames shown, frames in all */
+bool32 MultiplayerWorld_NativeUiNotice(u8 *windowId, u16 *shownFrames, u16 *totalFrames);
+
+/* ---------------------------------------------------------------- the STYLE editor (multiplayer_appearance.c) */
+
+/* The editor's rows (its cursor): four colour rows, then SAVE and CANCEL. */
+enum NativeAppearanceRow
+{
+    NATIVE_LOOK_SKIN,
+    NATIVE_LOOK_HAIR,
+    NATIVE_LOOK_OUTFIT,
+    NATIVE_LOOK_HAT,     /* the hat (or bandana) and the bag */
+    NATIVE_LOOK_SAVE,
+    NATIVE_LOOK_CANCEL,
+    NATIVE_LOOK_ROW_COUNT,
+};
+#define NATIVE_LOOK_BYTES 8
+struct NativeAppearance
+{
+    u8 look[NATIVE_LOOK_BYTES];    /* the look being edited (the field sprite shows it live) */
+    u8 start[NATIVE_LOOK_BYTES];   /* the player's look the editor started from */
+    u8 cursor;                     /* enum NativeAppearanceRow */
+    bool8 isMay;
+    bool8 pendingSave;             /* a saved look not yet confirmed by the host */
+    bool8 connected;               /* the multiplayer host is there */
+    bool8 hostHasLook;             /* the host keeps the player's current look */
+    u16 basePalette[16];           /* the body's own field palette */
+    u16 palette[16];               /* the same with the edited look (MultiplayerAppearance_BuildPalette) */
+    const void *frames;            /* the body's field frames: walking 0-8, running 9-17, 16x32 4bpp */
+};
+bool32 MultiplayerAppearance_NativeUiState(struct NativeAppearance *out);
+/* a colour row's choices; DEFAULT (0) keeps the body's own colours */
+u32 MultiplayerAppearance_NativeUiOptionCount(u32 row);
+const u8 *MultiplayerAppearance_NativeUiOptionName(u32 row, u32 index);
+/* the look byte a row edits (1 skin, 2 hair, 3 outfit, 5 hat and bag) */
+u32 MultiplayerAppearance_NativeUiLookByte(u32 row);
+/* the body's palette slots a row recolours (up to 4); returns how many */
+u32 MultiplayerAppearance_NativeUiSlots(u32 row, bool32 isMay, u8 *slots);
+/* a choice's colours, light to dark (up to 4; DEFAULT: the body's own); returns how many */
+u32 MultiplayerAppearance_NativeUiSwatch(u32 row, u32 index, bool32 isMay, u16 *colors);
+/* the player's field frames (walking 0-8, running 9-17) and palette with the saved look */
+void MultiplayerAppearance_NativeUiPlayerSprite(const void **frames, u16 *palette);
+
 /* ---------------------------------------------------------------- game art */
 
 /* pokemon_icon.c: a party / box icon's 4bpp tiles (two 32x32 frames) and palette */
@@ -527,6 +812,22 @@ enum NativeBattleInput
     NATIVE_BATTLE_INPUT_PARTY,          /* the party menu opens */
     NATIVE_BATTLE_INPUT_BAG,            /* the bag opens */
 };
+/* battle_script_commands.c: the level-up box (Cmd_drawlvlupbox) */
+struct NativeLevelUpBox
+{
+    bool8 shown;          /* the box itself is up (else the banner of a Pokémon not in battle) */
+    u8 page;              /* 1 the gains, 2 the totals */
+    bool8 waiting;        /* it waits for a button */
+    u8 partyId;
+    u8 level;
+    u16 before[NUM_STATS]; /* STAT_* order */
+    u16 after[NUM_STATS];
+};
+bool32 Battle_NativeUiLevelUpBox(struct NativeLevelUpBox *out);
+/* the prize money a won trainer battle pays (0 outside trainer battles) */
+u32 Battle_NativeUiPrizeMoney(void);
+/* battle_main.c: the battle's intro runs (money and Exp. as before the battle) */
+bool32 Battle_NativeUiInIntro(void);
 /* battle_controller_player.c: what the player controller waits for from this battler */
 u32 Battle_NativeUiPlayerInput(u32 battler);
 /* sprite.c: the OBJ tiles a sheet tag holds */

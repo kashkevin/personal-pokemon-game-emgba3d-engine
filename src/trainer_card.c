@@ -1922,3 +1922,86 @@ static void CreateTrainerCardTrainerPic(void)
                     WIN_TRAINER_PIC);
     }
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_trainer_card.c) draws the card in
+// place of its pictures and follows this state; A, B and the flip stay here.
+bool32 TrainerCard_NativeUiState(struct NativeTrainerCard *out)
+{
+    const struct TrainerCard *card;
+    u32 i;
+
+    memset(out, 0, sizeof(*out));
+    if (sData == NULL || gMain.callback2 != CB2_TrainerCard || !FuncIsActiveTask(Task_TrainerCard))
+        return FALSE;
+    card = &sData->trainerCard;
+    switch (sData->mainState)
+    {
+    case STATE_HANDLE_INPUT_FRONT:  out->phase = NATIVE_CARD_FRONT; break;
+    case STATE_HANDLE_INPUT_BACK:   out->phase = NATIVE_CARD_BACK; break;
+    case STATE_WAIT_FLIP_TO_BACK:   out->phase = NATIVE_CARD_TO_BACK; break;
+    case STATE_WAIT_FLIP_TO_FRONT:  out->phase = NATIVE_CARD_TO_FRONT; break;
+    case STATE_WAIT_LINK_PARTNER:
+    case STATE_CLOSE_CARD_LINK:
+    case STATE_CLOSE_CARD:          out->phase = NATIVE_CARD_CLOSING; break;
+    default:                        out->phase = NATIVE_CARD_LOADING; break;
+    }
+    out->ready = sData->mainState == STATE_HANDLE_INPUT_FRONT || sData->mainState == STATE_HANDLE_INPUT_BACK;
+    out->onBack = sData->onBack;
+    out->isLink = sData->isLink;
+    out->linked = gReceivedRemoteLinkPlayers != 0;
+    out->isHoenn = sData->isHoenn;
+    out->cardType = sData->cardType;
+    out->hasPokedex = sData->hasPokedex;
+    out->hasHofResult = sData->hasHofResult;
+    out->hasLinkResults = sData->hasLinkResults;
+    out->hasTrades = sData->hasTrades;
+    out->colonHidden = sData->timeColonInvisible;
+    out->gender = card->gender;
+    out->stars = card->stars;
+    // as CreateTrainerCardTrainerPic
+    if (InUnionRoom() == TRUE && gReceivedRemoteLinkPlayers)
+        out->picId = FacilityClassToPicIndex(card->unionRoomClass);
+    else
+        out->picId = FacilityClassToPicIndex(sTrainerPicFacilityClass[sData->cardType][card->gender]);
+    out->caught = card->caughtMonsCount;
+    out->trainerId = card->trainerId;
+    // as PrintTimeOnCard: the own card shows the save's clock
+    out->playHours = sData->isLink ? card->playTimeHours : gSaveBlock2Ptr->playTimeHours;
+    out->playMinutes = sData->isLink ? card->playTimeMinutes : gSaveBlock2Ptr->playTimeMinutes;
+    if (out->playHours > 999)
+        out->playHours = 999;
+    if (out->playMinutes > 59)
+        out->playMinutes = 59;
+    out->money = card->money;
+    out->hofHours = card->hofDebutHours;
+    out->hofMinutes = card->hofDebutMinutes;
+    out->hofSeconds = card->hofDebutSeconds;
+    out->linkWins = card->linkBattleWins;
+    out->linkLosses = card->linkBattleLosses;
+    out->trades = card->pokemonTrades;
+    out->pokeblocksWithFriends = card->pokeblocksWithFriends;
+    out->contestsWithFriends = card->contestsWithFriends;
+    out->frontierBP = sData->cardType == CARD_TYPE_EMERALD ? card->frontierBP : 0;
+    if (!sData->isLink)
+    {
+        // the star rules of CountPlayerTrainerStars (Hoenn) and the seen count beside caught
+        out->caughtAllRegional = card->caughtAllHoenn;
+        out->hasAllPaintings = card->hasAllPaintings;
+        out->hasAllFrontierSymbols = card->hasAllFrontierSymbols;
+        out->seen = IsNationalPokedexEnabled() ? GetNationalPokedexCount(FLAG_GET_SEEN)
+                                               : GetRegionalPokedexCount(FLAG_GET_SEEN);
+    }
+    memcpy(out->name, card->playerName, sizeof(card->playerName));
+    for (i = 0; i < TRAINER_CARD_PROFILE_LENGTH && i < 4; i++)
+        memcpy(out->profile[i], sData->easyChatProfile[i], sizeof(sData->easyChatProfile[i]));
+    for (i = 0; i < NUM_BADGES && i < 8; i++)
+        out->badges[i] = sData->badgeCount[i] != 0;
+    // the badges' own art (decompressed by the card) and its palette
+    memcpy(out->badgeTiles, sData->badgeTiles, sizeof(out->badgeTiles));
+    out->badgePalette = sData->isHoenn ? sHoennTrainerCardBadges_Pal : sKantoTrainerCardBadges_Pal;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

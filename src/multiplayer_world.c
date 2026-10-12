@@ -1204,3 +1204,20 @@ void MultiplayerWorld_Tick(bool32 fieldReady, bool32 connected)
     if (sWalletNoticePending && MultiplayerWorld_ShowLocalNotice(sWalletNotice))
         sWalletNoticePending = FALSE;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI's banner (src/native_ui/screens/ui_notice.c) draws the
+// notice the game shows now, from its window's text; the notice's timing and
+// its window stay here.
+bool32 MultiplayerWorld_NativeUiNotice(u8 *windowId, u16 *shownFrames, u16 *totalFrames)
+{
+    if (sNoticeTaskId == TASK_NONE || !FuncIsActiveTask(Task_WorldNotice))
+        return FALSE;
+    *windowId = gTasks[sNoticeTaskId].data[1];
+    *shownFrames = gTasks[sNoticeTaskId].data[0];
+    *totalFrames = NOTICE_FRAMES;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

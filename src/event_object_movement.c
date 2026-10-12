@@ -12132,3 +12132,16 @@ bool8 MovementType_OverworldWildEncounter_Despawn_Step11(struct ObjectEvent *obj
 }
 
 #undef sDespawnTimer
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI draws field sprites itself (a doll on the Game Corner's
+// prize board): the 16-colour palette under a palette tag, NULL if none.
+const u16 *ObjectEvent_NativeUiPalette(u16 tag)
+{
+    u8 i = FindObjectEventPaletteIndexByTag(tag);
+
+    return i != 0xFF ? sObjectEventSpritePalettes[i].data : NULL;
+}
+#endif // ENABLE_NATIVE_UI

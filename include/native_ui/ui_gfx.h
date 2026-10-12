@@ -61,6 +61,9 @@ bool UiGfx_PrepareMonPic(uint16_t species, uint32_t personality, bool shiny, boo
 /* the picture with the lowest painted row's middle at footX, footY; frame 0 or 1 */
 bool UiGfx_MonPic(uint16_t species, uint32_t personality, bool shiny, bool isEgg, int frame, int footX, int footY,
                   const struct UiFilter *filter);
+/* ... enlarged by a whole factor (its pixels kept square), faded by alpha (0..1) */
+bool UiGfx_MonPicEx(uint16_t species, uint32_t personality, bool shiny, bool isEgg, int frame, int footX, int footY,
+                    int scale, double alpha, const struct UiFilter *filter);
 /* the frame of the species' own front animation t frames after it started (0 once it ended) */
 int UiGfx_MonPicFrameAt(uint16_t species, uint32_t personality, bool shiny, bool isEgg, int t);
 bool UiGfx_PrepareItemIcon(uint16_t item);
@@ -68,6 +71,17 @@ bool UiGfx_PrepareItemIcon(uint16_t item);
 bool UiGfx_ItemIcon(uint16_t item, int x, int y, const struct UiFilter *filter);
 /* the icon enlarged by a whole factor (its pixels kept square), top left at x, y */
 bool UiGfx_ItemIconScaled(uint16_t item, int x, int y, int scale);
+
+/* a trainer's front picture (64x64; decompressed at the frame boundary like the above) */
+bool UiGfx_PrepareTrainerPic(uint16_t picId);
+bool UiGfx_TrainerPic(uint16_t picId, int x, int y, const struct UiFilter *filter);
+/* a field (overworld) sprite frame, 16x32 4bpp frames in a row, with any 16-colour
+ * palette (a recoloured trainer), enlarged by a whole factor, mirrored for flip */
+bool UiGfx_FieldSprite(const void *tiles, int frameCount, const uint16_t *palette, int frame, int x, int y, int scale,
+                       bool flip);
+/* ... frames of w x h (multiples of 8) */
+bool UiGfx_FieldSpriteSized(const void *tiles, int frameCount, const uint16_t *palette, int frame, int w, int h, int x,
+                            int y, int scale, bool flip);
 
 /* applies a filter to RGBA pixels in place */
 void UiFilter_Apply(uint8_t *rgba, int count, const struct UiFilter *f);
