@@ -86,30 +86,102 @@ static const struct DioramaProp sRustboro[] = {
     { PROP(0x21A, LAMP, SLAB, 1, LOWER), .shadowIndex = 5, .shadowFromRow = 11, .depth = 3 },
     IRON_FENCE_EW(0x2A7),
     IRON_FENCE_EW(0x2B7),
+    /* The fence's ends and corners (phase 4): a run's last post (2BE), the
+     * post where it turns north-south (2BF, 352), a run with a bush at its
+     * foot (33F) - the east-west railing with its posts, as drawn. */
+    IRON_FENCE_EW(0x2BE),
+    IRON_FENCE_EW(0x2BF),
     IRON_FENCE_NS(0x2C6, -5),
     /* The gym sign's stand (its top is General's 0x130). */
     { PROP(0x2D4, SIGN, SLAB, 1, LOWER), .shadowIndex = 6, .shadowFromRow = 11, .depth = 2 },
     IRON_FENCE_NS(0x2DE, -5),
+    IRON_FENCE_NS(0x2DF, 4),
+    IRON_FENCE_NS(0x2EC, 4),
     IRON_FENCE_EW(0x2FC),
     IRON_FENCE_NS(0x315, -5),
     IRON_FENCE_NS(0x318, 3),
     IRON_FENCE_NS(0x319, -4),
+    /* A north-south run's corner, the east-west stubs drawn beside it. */
+    IRON_FENCE_NS(0x31A, -4),
+    IRON_FENCE_NS(0x31B, 4),
     IRON_FENCE_NS(0x31D, 4),
+    IRON_FENCE_EW(0x33F),
+    IRON_FENCE_EW(0x352),
 };
 
 /* Slateport: the market's baskets, pots and crates, the round bushes by the
  * contest hall and the museum, the bollards on the pier. */
 #define BASKET(id) { PROP(id, DECOR, MOUND, 1, LOWER), .shadowIndex = 4, .shadowFromRow = 9, \
                      .height16 = 8 }
+/* The market's stalls (phase 4): the drawing's canopy row lies on a roof two
+ * rows deep over the stall's floor (a row and a half south of its cells),
+ * higher at the back; the row under it, the canopy's front, hangs from the
+ * roof's edge high enough to show the stallholder under it; the posts stand
+ * at the front corners, as tall as the front's top. The cells show their
+ * floor (the lower layer). */
+#define STALL_ROOF(id) { PROP(id, CANOPY, BLOCK, 1, LOWER), .lift16 = 44, .height16 = 1, .depth = 32, \
+                         .offsetZ = 24, .rise16 = 10 }
+#define STALL_FRONT(id) { PROP(id, CANOPY, SLAB, 1, LOWER), .depth = 1, .lift16 = 30, .height16 = 14, \
+                          .offsetZ = 23 }
+#define STALL_POST(id) { PROP(id, CANOPY, SLAB, 1, LOWER), .depth = 2, .height16 = 44, .offsetZ = 6 }
+/* The orange awnings (the market's north stall, a house by the gate): both
+ * rows of the drawing are its top, each lying over the cell south of it,
+ * on two legs. */
+#define AWNING_BACK(id) { PROP(id, CANOPY, BLOCK, 1, LOWER), .lift16 = 42, .height16 = 1, \
+                          .offsetZ = 16, .rise16 = 4 }
+#define AWNING_FRONT(id) { PROP(id, CANOPY, BLOCK, 1, LOWER), .lift16 = 38, .height16 = 1, \
+                           .offsetZ = 16, .rise16 = 4 }
+#define AWNING_LEG(id) { PROP(id, CANOPY, SLAB, 1, LOWER), .depth = 2, .height16 = 38, .offsetZ = 6 }
+/* The rope along the beach's kerb: posts and a sagging rope (the art's lower
+ * half). Running north-south, the rope turned to face east along its line,
+ * the south end's post where the run ends. */
+#define ROPE_EW(id) { PROP(id, FENCE, SLAB, 1, LOWER), .artTop = 8, .depth = 2 }
+#define ROPE_NS(id, x, art) { PROP(id, FENCE, SLAB, 1, LOWER), .artTop = 8, .depth = 2, .facing = 1, \
+                              .offsetX = (x), .artMetatile = (art) }
 static const struct DioramaProp sSlateport[] = {
+    STALL_ROOF(0x205),
+    STALL_ROOF(0x207),
     BASKET(0x20C),
+    STALL_ROOF(0x20D),
+    STALL_ROOF(0x20E),
+    STALL_ROOF(0x20F),
     { PROP(0x213, FLOWERS, CROSS, 1, LOWER), .depth = 6 },
     { PROP(0x214, FLOWERS, CROSS, 1, LOWER), .depth = 6 },
+    AWNING_BACK(0x216),
     BASKET(0x21B),
     BASKET(0x21C),
+    AWNING_FRONT(0x21E),
     BASKET(0x223),
+    STALL_ROOF(0x225),
+    STALL_ROOF(0x227),
     BASKET(0x22B),
+    STALL_FRONT(0x22D),
+    STALL_FRONT(0x22F),
+    STALL_FRONT(0x235),
+    STALL_FRONT(0x237),
+    STALL_POST(0x23D),
+    STALL_POST(0x23F),
     { PROP(0x243, BUSH, MOUND, 1, LOWER), .height16 = 11 },
+    AWNING_LEG(0x263),
+    AWNING_LEG(0x264),
+    STALL_POST(0x26B),
+    STALL_POST(0x26C),
+    AWNING_BACK(0x270),
+    AWNING_BACK(0x271),
+    AWNING_BACK(0x272),
+    ROPE_NS(0x275, 6, 0x2B8),
+    ROPE_NS(0x276, -6, 0x2B8),
+    AWNING_FRONT(0x278),
+    AWNING_FRONT(0x279),
+    AWNING_FRONT(0x27A),
+    ROPE_EW(0x2B8),
+    ROPE_EW(0x2B9),
+    ROPE_EW(0x2BA),
+    ROPE_NS(0x2BC, 6, 0x2B9),
+    ROPE_NS(0x2C4, -6, 0x2B9),
+    STALL_FRONT(0x2F8),
+    STALL_FRONT(0x2F9),
+    STALL_FRONT(0x2FA),
     { PROP(0x32D, DECOR, MOUND, 1, LOWER), .shadowIndex = 4, .shadowFromRow = 11, .height16 = 9 },
     { PROP(0x32E, DECOR, BLOCK, 1, LOWER), .shadowIndex = 4, .shadowFromRow = 4, .height16 = 9 },
     { PROP(0x32F, DECOR, BLOCK, 1, LOWER), .shadowIndex = 4, .shadowFromRow = 4, .height16 = 9 },
@@ -271,7 +343,7 @@ const struct DioramaPropTileset *DioramaProps_Tilesets(unsigned *count)
 const char *DioramaProps_KindName(uint8_t kind)
 {
     static const char *const sNames[DIORAMA_PROP_KIND_COUNT] = {
-        "none", "grass", "long grass", "flowers", "sign", "lamp", "fence", "rock", "bush", "decor",
+        "none", "grass", "long grass", "flowers", "sign", "lamp", "fence", "rock", "bush", "decor", "canopy",
     };
 
     return kind < DIORAMA_PROP_KIND_COUNT ? sNames[kind] : "?";
@@ -593,12 +665,17 @@ unsigned DioramaProps_Build(const struct DioramaSceneSnapshot *snapshot,
         memset(&base, 0, sizeof(base));
         base.x = (float)cell->mapX + prop->offsetX / 16.0f;
         base.z = -((float)cell->mapY + prop->standOn + prop->offsetZ / 16.0f);
-        base.y = ground->topHeight + (float)prop->standOn;
+        base.y = ground->topHeight + (float)prop->standOn + prop->lift16 / 16.0f;
         base.yaw = prop->facing ? 1.5707963f : 0.0f;
         base.width = 1.0f;
         base.height = (prop->height16 != 0 ? prop->height16 : 16) / 16.0f;
-        base.depth = prop->form == DIORAMA_PROP_BLOCK || prop->form == DIORAMA_PROP_MOUND
-                   ? 1.0f : (prop->depth != 0 ? prop->depth : 1) / 16.0f;
+        if (prop->form == DIORAMA_PROP_BLOCK || prop->form == DIORAMA_PROP_MOUND)
+        {
+            base.depth = (prop->depth != 0 ? prop->depth : 16) / 16.0f;
+            base.rise = prop->rise16 / 16.0f;
+        }
+        else
+            base.depth = (prop->depth != 0 ? prop->depth : 1) / 16.0f;
         if (prop->form == DIORAMA_PROP_RELIEF)
             /* Its back on the cell's north edge, bulging south. */
             base.z += 0.5f - base.depth * 0.5f;

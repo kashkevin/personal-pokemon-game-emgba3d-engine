@@ -65,7 +65,7 @@ struct MeshVertex
 struct GLInstance
 {
     float x, y, z, yaw;
-    float width, height, depth, lie; /* lie: a block, the art its top */
+    float width, height, depth, lie; /* lie: a block, the art its top (1 + its north edge's rise) */
     float u, v, rowTop, rowBottom;   /* the art piece's corner in the texture; the rows shown (0 to 1) */
     float sway, phase, light, rustle;
 };
@@ -114,6 +114,9 @@ static uint32_t sMoundCapacity;
 static uint32_t sMoundGeneration;
 static uint64_t sSequence;
 static uint32_t sGeometryHash, sGeometryGeneration;
+/* What the instance buffer holds (DioramaGLProps_Sync uploads only a change). */
+static uint32_t sUploadedHash;
+static unsigned sUploadedCount = 0xFFFFFFFFu;
 
 /* The art pieces: which atlas slot each holds (the prop's processing comes
  * with the slot: a slot is always the same metatile of the same tileset), and
@@ -132,7 +135,7 @@ static const char sVertexShader[] =
     "layout(location = 1) in vec2 art;\n"
     "layout(location = 2) in vec2 vertexShade;\n"     /* standing, lying */
     "layout(location = 3) in vec4 instancePlace;\n"   /* x, y, z, yaw */
-    "layout(location = 4) in vec4 instanceSize;\n"    /* width, height, depth, lying */
+    "layout(location = 4) in vec4 instanceSize;\n"    /* width, height, depth, lying (1 + rise) */
     "layout(location = 5) in vec4 instanceArt;\n"     /* u, v, first row, end row */
     "layout(location = 6) in vec4 instanceMotion;\n"  /* sway, phase, light, rustle */
     "uniform vec2 cameraPosition;\n"
@@ -157,7 +160,8 @@ static const char sVertexShader[] =
      * on top, its first row to the north. */
     "  float drop = (1.0 - instanceArt.w) * instanceSize.y;\n"
     "  vec3 local = instanceSize.w > 0.5\n"
-    "      ? vec3((position.x - 0.5) * instanceSize.x, (0.5 - position.z) * instanceSize.y,\n"
+    "      ? vec3((position.x - 0.5) * instanceSize.x,\n"
+    "             (0.5 - position.z) * instanceSize.y + position.y * (instanceSize.w - 1.0),\n"
     "             (position.y - 0.5) * instanceSize.z)\n"
     "      : vec3((position.x - 0.5) * instanceSize.x, position.y * instanceSize.y - drop,\n"
     "             position.z * instanceSize.z);\n"
@@ -525,10 +529,13 @@ bool DioramaGLProps_Init(void)
 }
 
 /* A piece's 18 x 18 pixels: the art, its edge repeated round it. */
-static void StorePiece(unsigned entry, const uint32_t art[16 * 16])
+/* Stores a piece's art (with its border); true when it differs from what the
+ * texture holds. */
+static bool StorePiece(unsigned entry, const uint32_t art[16 * 16])
 {
     unsigned originX = (entry % ENTRY_COLUMNS) * ENTRY_STRIDE;
     unsigned originY = (entry / ENTRY_COLUMNS) * ENTRY_STRIDE;
+    bool changed = false;
     int y;
     int x;
 
@@ -537,9 +544,15 @@ static void StorePiece(unsigned entry, const uint32_t art[16 * 16])
         {
             int sx = x < 0 ? 0 : x > 15 ? 15 : x;
             int sy = y < 0 ? 0 : y > 15 ? 15 : y;
+            uint32_t *texel = &sArtPixels[(originY + 1 + y) * ART_WIDTH + originX + 1 + x];
 
-            sArtPixels[(originY + 1 + y) * ART_WIDTH + originX + 1 + x] = art[sy * 16 + sx];
+            if (*texel != art[sy * 16 + sx])
+            {
+                *texel = art[sy * 16 + sx];
+                changed = true;
+            }
         }
+    return changed;
 }
 
 static void UploadPiece(unsigned entry)
@@ -553,7 +566,8 @@ static void UploadPiece(unsigned entry)
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 }
 
-static void ComposePiece(const struct DioramaSceneSnapshot *snapshot, unsigned entry,
+/* Composes a piece from a cell using it; true when its art changed. */
+static bool ComposePiece(const struct DioramaSceneSnapshot *snapshot, unsigned entry,
                          const struct DioramaPropInstance *prop)
 {
     const struct DioramaCellSnapshot *cell = &snapshot->cells[prop->cellIndex];
@@ -565,8 +579,8 @@ static void ComposePiece(const struct DioramaSceneSnapshot *snapshot, unsigned e
     /* The piece holds every row the prop has; an instance shows some. */
     DioramaProps_ArtEntries(cell, prop->prop, entries);
     DioramaProps_ComposeArt(&whole, art.tileGraphics, art.fadedPalette, entries, pixels);
-    StorePiece(entry, pixels);
     sEntryProp[entry] = prop->prop;
+    return StorePiece(entry, pixels);
 }
 
 static void SyncArt(const struct DioramaSceneSnapshot *snapshot, uint32_t pageSignature)
@@ -590,8 +604,14 @@ static void SyncArt(const struct DioramaSceneSnapshot *snapshot, uint32_t pageSi
     if (recompose)
     {
         /* Every piece again from the cells using it now; a piece no cell
-         * uses any more keeps its old art until the map changes. */
+         * uses any more keeps its old art until the map changes. Only the
+         * pieces whose art changed are uploaded (a palette's night tint, an
+         * animated tile, touch some of them or none: performance work
+         * 2026-10-12), the whole texture when most did. */
         static bool sDone[MAX_ENTRIES];
+        static uint8_t sChanged[MAX_ENTRIES];
+        unsigned changedCount = 0;
+        unsigned c;
 
         memset(sDone, 0, sizeof(sDone));
         for (i = 0; i < sSlabCount + sMoundCount + sCardCount; i++)
@@ -600,15 +620,20 @@ static void SyncArt(const struct DioramaSceneSnapshot *snapshot, uint32_t pageSi
 
             if (entry != NO_ENTRY && !sDone[entry])
             {
-                ComposePiece(snapshot, entry, &sProps[i]);
+                if (ComposePiece(snapshot, entry, &sProps[i]))
+                    sChanged[changedCount++] = entry;
                 sDone[entry] = true;
             }
         }
         sArtPaletteGeneration = snapshot->paletteGeneration;
         sArtAnimationGeneration = snapshot->tilesetAnimationGeneration;
         sArtPageSignature = pageSignature;
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, ART_WIDTH, ART_HEIGHT, GL_BGRA, GL_UNSIGNED_BYTE,
-                        sArtPixels);
+        if (changedCount > MAX_ENTRIES / 4)
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, ART_WIDTH, ART_HEIGHT, GL_BGRA, GL_UNSIGNED_BYTE,
+                            sArtPixels);
+        else
+            for (c = 0; c < changedCount; c++)
+                UploadPiece(sChanged[c]);
     }
     /* New slots get a piece. */
     for (i = 0; i < sSlabCount + sMoundCount + sCardCount; i++)
@@ -928,8 +953,9 @@ void DioramaGLProps_Sync(const struct DioramaSceneSnapshot *snapshot,
         instance->width = prop->width;
         instance->height = prop->height;
         instance->depth = prop->depth;
+        /* Lying: 1 and the rise of its north edge (a canopy's slope). */
         instance->lie = prop->prop->form == DIORAMA_PROP_BLOCK || prop->prop->form == DIORAMA_PROP_MOUND
-                      ? 1.0f : 0.0f;
+                      ? 1.0f + prop->rise : 0.0f;
         instance->light = (prop->flags & DIORAMA_PROP_LIGHT) ? lampStrength : 0.0f;
         instance->rustle = prop->rustle;
         if (entry == NO_ENTRY)
@@ -954,10 +980,21 @@ void DioramaGLProps_Sync(const struct DioramaSceneSnapshot *snapshot,
         sGeometryHash = hash;
         sGeometryGeneration++;
     }
-    dglBindBuffer(GL_ARRAY_BUFFER, sInstanceBuffer);
-    dglBufferData(GL_ARRAY_BUFFER, out * sizeof(struct GLInstance), out != 0 ? sInstances : NULL,
-                  GL_DYNAMIC_DRAW);
-    dglBindBuffer(GL_ARRAY_BUFFER, 0);
+    /* Uploaded again only when an instance changed (most game frames none
+     * does: performance work 2026-10-12). */
+    {
+        uint32_t allHash = HashInstances(sInstances, out);
+
+        if (allHash != sUploadedHash || out != sUploadedCount)
+        {
+            dglBindBuffer(GL_ARRAY_BUFFER, sInstanceBuffer);
+            dglBufferData(GL_ARRAY_BUFFER, out * sizeof(struct GLInstance), out != 0 ? sInstances : NULL,
+                          GL_DYNAMIC_DRAW);
+            dglBindBuffer(GL_ARRAY_BUFFER, 0);
+            sUploadedHash = allHash;
+            sUploadedCount = out;
+        }
+    }
     {
         static int sLogEnabled = -1;
         static unsigned sLogged = 0xFFFFFFFFu;
@@ -1130,6 +1167,7 @@ void DioramaGLProps_Shutdown(void)
     sMoundGroupCount = 0;
     sSequence = 0;
     sEntryCount = 0;
+    sUploadedCount = 0xFFFFFFFFu;
 }
 
 #endif // ENABLE_DIORAMA

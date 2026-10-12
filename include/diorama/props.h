@@ -67,6 +67,7 @@ enum DioramaPropKind
     DIORAMA_PROP_KIND_ROCK,
     DIORAMA_PROP_KIND_BUSH,
     DIORAMA_PROP_KIND_DECOR, /* pots, baskets, crates, bollards */
+    DIORAMA_PROP_KIND_CANOPY, /* market stalls' and awnings' roofs, fronts and posts */
     DIORAMA_PROP_KIND_COUNT
 };
 
@@ -93,14 +94,20 @@ struct DioramaProp
     uint8_t keyIndex;      /* a colour index left out (0: none): the grass between blades */
     uint8_t shadowIndex;   /* the painted shadow's colour index (0: none), left out ... */
     uint8_t shadowFromRow; /* ... from this row down: the real shadow replaces it */
-    uint8_t depth;         /* pixels thick (a slab) */
+    uint8_t depth;         /* pixels thick (a slab); a block's or a mound's sixteenths of a tile
+                            * north to south (0: 16), its art stretched over them */
     uint8_t facing;        /* 0: faces south; 1: faces east (a fence running north-south) */
     int8_t offsetX;        /* pixels east of the cell's centre */
     int8_t offsetZ;        /* pixels south of it */
     uint8_t standOn;       /* stands on the cell this many south, this many tiles up (a lamp's head) */
-    uint8_t height16;      /* the art's 16 rows stand this many sixteenths of a tile tall (0: 16) */
+    uint8_t height16;      /* the art's 16 rows stand this many sixteenths of a tile tall (0: 16);
+                            * a block's or a mound's height */
     uint8_t flags;         /* DioramaPropFlags */
     uint16_t artMetatile;  /* another metatile's art (DIORAMA_PROP_OWN_ART: its own) */
+    uint8_t lift16;        /* sixteenths of a tile over its ground (a canopy, its front): the
+                            * object floats there, nothing under it */
+    uint8_t rise16;        /* a block's north edge this many sixteenths higher than its south
+                            * edge (a canopy's slope); 0: level */
 };
 
 /* The props a tileset's metatiles hold (props.c). */
@@ -119,6 +126,7 @@ struct DioramaPropInstance
     float width;            /* tiles across (1: the art's 16 pixels) */
     float height;           /* tiles the art's 16 rows stand (a block: tall) */
     float depth;            /* tiles thick (a block: north to south) */
+    float rise;             /* a block's north edge over its south edge, tiles */
     float sway;             /* how far its top moves in the wind, tiles */
     float phase;            /* where in the wind's cycle it is */
     float rustle;           /* someone is walking through it (grass, flowers): 1, else 0 */

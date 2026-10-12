@@ -81,6 +81,12 @@ static struct DioramaResolvedCell sRenderedResolvedCells[DIORAMA_MAX_VISIBLE_CEL
 static u32 sDebugPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
 static u32 sWeatherPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
 static u32 sUiPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+/* The text boxes made this game frame, uploaded only when they differ from
+ * sUiPixels (what the texture holds; sUiUploaded false: nothing yet). A map's
+ * name shown for two seconds is then one upload, not 120 (performance work
+ * 2026-10-12). */
+static u32 sUiScratch[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+static bool sUiUploaded;
 /*
  * The game's latest 240x160 picture until it is drawn (performance work
  * 2026-10-11): in the 3D view it is hidden nearly always, so it is uploaded
@@ -1329,6 +1335,7 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
     ConfigureTexture(sUiTexture.id);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, DISPLAY_WIDTH, DISPLAY_HEIGHT, 0,
                  GL_BGRA, GL_UNSIGNED_BYTE, NULL);
+    sUiUploaded = false;
     glGenTextures(1, &sWeatherTexture.id);
     sWeatherTexture.width = DISPLAY_WIDTH;
     sWeatherTexture.height = DISPLAY_HEIGHT;
@@ -1416,10 +1423,14 @@ void DioramaGL_UploadFrame(const u32 *argb8888)
         sHasSceneSnapshot ? sSceneSnapshot.uiBgTileGraphics : NULL,
         sHasSceneSnapshot ? sSceneSnapshot.uiBgTilemap : NULL,
         sHasSceneSnapshot ? sSceneSnapshot.fadedPalette : NULL,
-        sUiPixels);
+        sUiScratch);
+    if (sUiUploaded && memcmp(sUiScratch, sUiPixels, sizeof(sUiPixels)) == 0)
+        return;
+    memcpy(sUiPixels, sUiScratch, sizeof(sUiPixels));
     glBindTexture(GL_TEXTURE_2D, sUiTexture.id);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT,
                     GL_BGRA, GL_UNSIGNED_BYTE, sUiPixels);
+    sUiUploaded = true;
 }
 
 void DioramaGL_Present(u8 background, bool border, bool integerScale, float frameAlpha)
@@ -1947,6 +1958,7 @@ void DioramaGL_Shutdown(void)
         glDeleteTextures(1, &sDebugTexture.id);
     if (sUiTexture.id != 0)
         glDeleteTextures(1, &sUiTexture.id);
+    sUiUploaded = false;
     if (sWeatherTexture.id != 0)
         glDeleteTextures(1, &sWeatherTexture.id);
     if (sAtlasTexture.id != 0)
