@@ -482,5 +482,14 @@ float DioramaRules_ObjectGroundHeight(const struct DioramaResolvedCell *resolved
  * where the primary tileset is General's. Added by the battle environments'
  * work (the sea at one level: buildings.c, gl_terrain_renderer.c). */
 bool DioramaRules_CellOverWater(const struct DioramaCellSnapshot *cell, uint8_t mapType);
+/* Whether the layout's secondary tileset is `symbol` (gTileset_Lavaridge), by
+ * the rules' tables. */
+bool DioramaRules_LayoutUsesSecondary(uint16_t layoutId, const char *symbol);
+/* Lava under a cell of layout `layoutId` (the cell's own map's), when that
+ * layout's secondary tileset is gTileset_Lavaridge (its tiles 608 and 672 to
+ * 675: Mt Chimney's lake, the Magma Hideout's pools): 2, the cell is lava with
+ * nothing over it; 1, something is drawn over the lava's edge (the rock
+ * rimming the lake); 0, no lava. */
+uint8_t DioramaRules_CellLava(const struct DioramaCellSnapshot *cell, uint16_t layoutId);
 
 #endif

@@ -451,17 +451,23 @@ static void SetTerrainMaterialTransformed(struct DioramaTerrainMaterial *materia
 
 /*
  * A cell drawn over the water (DioramaRules_CellOverWater: a deck, a log
- * walkway, a pier): its side (the riser standing it down to the sea lowered
- * past it, terrain_mesh.c ColumnBottom) shows the whole cell, the deck's wood,
- * not its lower layer - that stood Pacifidlog's decks and walkways on blocks of
+ * walkway, a pier) or over lava's edge (DioramaRules_CellLava 1: the rock
+ * rimming Mt Chimney's lake): its side (the riser standing it down to the sea
+ * lowered past it, or to the lava sunk in its crater, terrain_mesh.c
+ * ColumnBottom) shows the whole cell, the deck's wood or the rim's rock, not
+ * its lower layer - that stood Pacifidlog's decks and walkways on blocks of
  * water. A bridge's lower layer is the water under it, and water is water.
  * Added by the battle environments' work.
  */
 static bool RiserShowsWholeCell(const struct DioramaSceneSnapshot *snapshot,
                                 const struct DioramaCellSnapshot *source, uint8_t shape)
 {
+    uint16_t layoutId = (source->flags & DIORAMA_CELL_CONNECTED) && source->sourceLayoutId != 0
+                      ? source->sourceLayoutId : snapshot->mapLayoutId;
+
     return shape != DIORAMA_SHAPE_BRIDGE && shape != DIORAMA_SHAPE_WATER
-        && DioramaRules_CellOverWater(source, snapshot->mapType);
+        && (DioramaRules_CellOverWater(source, snapshot->mapType)
+         || DioramaRules_CellLava(source, layoutId) == 1);
 }
 
 static uint32_t PixelColor(const struct DioramaSceneSnapshot *snapshot,

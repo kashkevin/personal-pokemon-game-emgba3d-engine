@@ -642,6 +642,48 @@ static void LevelWaterBodies(const struct DioramaSceneSnapshot *snapshot,
     }
 }
 
+/* The layout whose tilesets drew a cell: a connected map's own, otherwise the
+ * map's (props.c CellLayout). */
+static uint16_t CellLayoutId(const struct DioramaSceneSnapshot *snapshot,
+                             const struct DioramaCellSnapshot *cell)
+{
+    if ((cell->flags & DIORAMA_CELL_CONNECTED) && cell->sourceLayoutId != 0)
+        return cell->sourceLayoutId;
+    return snapshot->mapLayoutId;
+}
+
+/*
+ * Mt Chimney's crater: its lava lake, which the GBA draws flat at the summit's
+ * level, lies LAVA_DEPTH down (and the Magma Hideout's lava pools with it), the
+ * rock drawn over its edge rimming it (that rim's side shows the rock,
+ * gl_terrain_renderer.c). DioramaRules_CellLava says which cells are lava.
+ * Added by the battle environments' work.
+ */
+#define LAVA_DEPTH 1.0f
+
+static void SinkLava(const struct DioramaSceneSnapshot *snapshot,
+                     struct DioramaResolvedCell *resolved, unsigned count)
+{
+    unsigned i;
+
+    for (i = 0; i < count; i++)
+    {
+        const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
+        struct DioramaResolvedCell *r = &resolved[i];
+
+        if (!(cell->flags & DIORAMA_CELL_SOURCE_VALID) || r->shape != DIORAMA_SHAPE_FLAT
+         || DioramaRules_CellLava(cell, CellLayoutId(snapshot, cell)) != 2)
+            continue;
+        r->groundHeight -= LAVA_DEPTH;
+        r->topHeight -= LAVA_DEPTH;
+        for (unsigned k = 0; k < r->surfaceCount && k < DIORAMA_MAX_VISUAL_SURFACES; k++)
+        {
+            r->surfaces[k].topHeight -= LAVA_DEPTH;
+            r->surfaces[k].bottomHeight -= LAVA_DEPTH;
+        }
+    }
+}
+
 /*
  * Route 111's desert: its deep sand (MB_DEEP_SAND, the rippled patches the GBA
  * draws with a darker rim) stands as dunes, each patch rising in steps of
@@ -893,6 +935,7 @@ void DioramaBuildings_FlattenResolvedCells(const struct DioramaSceneSnapshot *sn
     MarkRocksInWater(snapshot, resolved, count, inWater);
     LevelWaterBodies(snapshot, resolved, count, inWater);
     RaiseDunes(snapshot, resolved, count);
+    SinkLava(snapshot, resolved, count);
 }
 
 unsigned DioramaBuildings_PageCount(void)

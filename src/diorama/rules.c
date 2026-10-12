@@ -1044,6 +1044,57 @@ bool DioramaRules_CellOverWater(const struct DioramaCellSnapshot *cell, uint8_t 
     return water >= 2;
 }
 
+bool DioramaRules_LayoutUsesSecondary(uint16_t layoutId, const char *symbol)
+{
+    size_t i;
+
+    if (symbol == NULL)
+        return false;
+    for (i = 0; i < gDioramaLayoutV2Count; i++)
+    {
+        uint8_t tileset;
+        size_t t;
+
+        if (gDioramaLayoutsV2[i].id != layoutId)
+            continue;
+        tileset = gDioramaLayoutsV2[i].secondaryTilesetId;
+        for (t = 0; t < gDioramaTilesetV2Count; t++)
+            if (gDioramaTilesetsV2[t].id == tileset)
+                return gDioramaTilesetsV2[t].symbol != NULL
+                    && strcmp(gDioramaTilesetsV2[t].symbol, symbol) == 0;
+        return false;
+    }
+    return false;
+}
+
+uint8_t DioramaRules_CellLava(const struct DioramaCellSnapshot *cell, uint16_t layoutId)
+{
+    /* per layout id: 0 not looked up, 1 no lava tileset, 2 gTileset_Lavaridge */
+    static uint8_t sLavaLayout[2048];
+    int i;
+
+    /* the secondary tileset's metatiles (NUM_METATILES_IN_PRIMARY up) */
+    if (cell == NULL || cell->metatileId < 512 || layoutId == 0
+     || layoutId >= sizeof(sLavaLayout))
+        return 0;
+    if (sLavaLayout[layoutId] == 0)
+        sLavaLayout[layoutId] = DioramaRules_LayoutUsesSecondary(layoutId, "gTileset_Lavaridge")
+                              ? 2 : 1;
+    if (sLavaLayout[layoutId] != 2)
+        return 0;
+    for (i = 0; i < DIORAMA_METATILE_ENTRY_COUNT / 2; i++)
+    {
+        uint16_t tile = cell->tileEntries[i] & 0x3FF;
+
+        if (tile != 608 && (tile < 672 || tile > 675))
+            return 0;
+    }
+    for (i = DIORAMA_METATILE_ENTRY_COUNT / 2; i < DIORAMA_METATILE_ENTRY_COUNT; i++)
+        if ((cell->tileEntries[i] & 0x3FF) != 0)
+            return 1;
+    return 2;
+}
+
 float DioramaRules_ObjectGroundHeight(const struct DioramaResolvedCell *resolved,
                                        uint8_t cellElevation, uint8_t objectElevation,
                                        uint8_t behavior,
