@@ -237,6 +237,77 @@ def join_water(cells: tuple[dict, ...], width: int, height: int,
     return joined
 
 
+# A cave's highest floor stands this much over its lowest (Q16: a tile, the
+# height the cave's walls are pinned to and its ledges drawn).
+CAVE_RISE_Q16 = 16
+
+
+def cave_levels(cells: tuple[dict, ...], width: int, height: int,
+                solved: dict[int, dict] | None = None) -> dict[int, dict]:
+    """A cave's floors at their own elevation (graphics overhaul, the owner's
+    option B; V38): the walkable cells of each GBA elevation a level of their
+    own, the lowest floor where it was and the highest a tile over it (a
+    floor between them half way: Shoal Cave's and Meteor Falls's three). Its
+    bridges (15) are decks at the highest floor they meet; its walls - cliffs,
+    pinned a tile high - stand as they are, and so do its water (1), the
+    cells of any elevation (0: stairs, slopes between floors) and the cells
+    another solver already placed. A floor sunk deeper than the cave's walls
+    would hide whoever walks in it from the camera. Returns nothing for a
+    cave of one floor."""
+    solved = solved or {}
+
+    def walkable(offset):
+        cell = cells[offset]
+        return (not cell.get("collision") and cell.get("behavior") not in WATER_BEHAVIORS
+                and offset not in solved)
+
+    floors = [offset for offset in range(len(cells))
+              if walkable(offset) and cells[offset].get("elevation") not in (0, 1, 15)]
+    elevations = sorted({cells[offset]["elevation"] for offset in floors})
+    if len(elevations) < 2:
+        return {}
+    step = {elevation: rank * CAVE_RISE_Q16 // (len(elevations) - 1)
+            for rank, elevation in enumerate(elevations)}
+    out = {}
+    for offset in floors:
+        level = step[cells[offset]["elevation"]]
+        if level:
+            out[offset] = {"groundQ16": level, "topQ16": level, "profile": "none",
+                           "solid": False}
+    # a bridge at the highest floor at either end of it
+    seen = set()
+    for start in range(len(cells)):
+        if start in seen or not walkable(start) or cells[start].get("elevation") != 15:
+            continue
+        span, touching = [], []
+        queue = deque([start])
+        seen.add(start)
+        while queue:
+            offset = queue.popleft()
+            span.append(offset)
+            x, y = offset % width, offset // width
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, ny = x + dx, y + dy
+                if not (0 <= nx < width and 0 <= ny < height):
+                    continue
+                neighbor = ny * width + nx
+                if neighbor in seen or not walkable(neighbor):
+                    continue
+                elevation = cells[neighbor].get("elevation")
+                if elevation == 15:
+                    seen.add(neighbor)
+                    queue.append(neighbor)
+                elif elevation in step:
+                    touching.append(step[elevation])
+        level = max(touching, default=0)
+        if level:
+            for offset in span:
+                # a deck over the floor under it, not a block of planks
+                out[offset] = {"groundQ16": level, "topQ16": level, "profile": "none",
+                               "solid": False, "deck": True}
+    return out
+
+
 def lift_blocked_cells(cells: tuple[dict, ...], width: int, height: int,
                        solved: dict[int, dict], liftable=None) -> dict[int, dict]:
     """Blocked cells that are no terrace course (a house, a tree, a rock) stand
