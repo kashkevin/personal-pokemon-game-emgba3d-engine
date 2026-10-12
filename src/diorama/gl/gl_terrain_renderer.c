@@ -2205,9 +2205,9 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
     {
         sMapJustChanged = false;
         if (LogEnabledTerrain())
-            SDL_Log("Diorama: map %u.%u: %u chunks from the cache, %u built, %u waiting",
-                    snapshot->mapGroup, snapshot->mapNum, sCacheHits - sHitsAtChange,
-                    sMetrics.rebuiltChunks, sPendingCount);
+            SDL_Log("Diorama: map %u.%u (layout %u): %u chunks from the cache, %u built, %u waiting",
+                    snapshot->mapGroup, snapshot->mapNum, snapshot->mapLayoutId,
+                    sCacheHits - sHitsAtChange, sMetrics.rebuiltChunks, sPendingCount);
     }
     if (gridMovedOnly)
         CheckSkippedSync(snapshot, resolvedCells);
