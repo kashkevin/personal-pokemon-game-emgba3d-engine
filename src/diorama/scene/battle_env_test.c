@@ -29,6 +29,7 @@
 #include "script_pokemon_util.h"
 #include "constants/battle.h"
 #include "constants/items.h"
+#include "constants/moves.h"
 #include "constants/opponents.h"
 #include "diorama/battle_env_test.h"
 
@@ -193,8 +194,10 @@ static void StartBattle(void)
 }
 
 /* The test save's party at level 100, healed (PKMN_TEST_STRONG): a battle fought through
- * with A (PKMN_TEST_FIGHT) is won and so runs through every opponent's Pokemon. In memory
- * only: the survey never writes a save. */
+ * with A (PKMN_TEST_FIGHT) is won and so runs through every opponent's Pokemon. A presses
+ * the first move, so that is one every type takes damage from (Flamethrower: no type is
+ * immune to Fire); the test save's own first move was a status move, used until its PP ran
+ * out. In memory only: the survey never writes a save. */
 static void StrengthenParty(void)
 {
     for (u32 i = 0; i < PARTY_SIZE; i++)
@@ -208,7 +211,12 @@ static void StrengthenParty(void)
         exp = gExperienceTables[gSpeciesInfo[species].growthRate][MAX_LEVEL];
         SetMonData(mon, MON_DATA_EXP, &exp);
         CalculateMonStats(mon);
+        SetMonMoveSlot(mon, MOVE_FLAMETHROWER, 0);
     }
+    /* The Set battle style: in a single battle the Shift style asks whether to switch when
+     * the opponent sends its next Pokemon, and A's "Yes" opens the party on the battler
+     * already out ("already in battle!"), over and over. */
+    gSaveBlock2Ptr->optionsBattleStyle = OPTIONS_BATTLE_STYLE_SET;
     HealPlayerParty();
     SDL_Log("Battle env test: the party at level %d, healed", MAX_LEVEL);
 }

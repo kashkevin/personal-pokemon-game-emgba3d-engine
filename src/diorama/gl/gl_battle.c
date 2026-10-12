@@ -1507,12 +1507,12 @@ static void DumpStageCells(const struct DioramaSceneSnapshot *snapshot, const st
             if (!StageCellAt((void *)now, x, y, &cell) || !StageCellAt((void *)before, x, y, &old))
                 continue;
             fprintf(file, "%d %d %u %d %d %.3f %.3f %.3f %.3f  shape %u arch %u ground %.2f top %.2f feature %.2f "
-                    "body %.2f roof %.2f facade %u x %.2f pixobj %u struct %u %ux%u\n", x, y, cell.kind,
+                    "body %.2f roof %.2f facade %u x %.2f pixobj %u struct %u %ux%u prof %u\n", x, y, cell.kind,
                     cell.blocked, cell.slope, cell.top, old.top, cell.lift, cell.north, r->shape, r->archetype,
                     r->groundHeight,
                     r->topHeight, r->featureHeight, r->structureBodyHeight, r->structureRoofHeight,
                     r->structureSouthFacadeRows, r->structureSouthFacadeUnitHeight, r->pixelObjectId, r->structureId,
-                    r->structureWidth, r->structureHeight);
+                    r->structureWidth, r->structureHeight, r->semanticProfile);
         }
     fclose(file);
 }
