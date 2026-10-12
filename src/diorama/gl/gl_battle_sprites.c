@@ -4,8 +4,8 @@
  * The animated battle sprites above the 3D battle's picture: include/diorama/gl_battle_sprites.h.
  * Project-owned. Each frame listed by the sprite integration (gBattleSpriteOverflow) is drawn as
  * a textured quad at the picture's scale - its position, flips or affine matrix as the GBA
- * picture draws it, its colours as faded there - cut to the rows its battler covers at rest above
- * the picture and to the picture's columns.
+ * picture draws it, its colours as faded there - cut to the box its battler covers at rest,
+ * outside the picture: above it, and beside it above the text box's rows.
  */
 
 #include <string.h>
@@ -160,6 +160,14 @@ static void Expand(const struct BattleSpriteOverflow *o)
     }
 }
 
+static void Rect(int *rect, int x0, int y0, int x1, int y1)
+{
+    rect[0] = x0;
+    rect[1] = y0;
+    rect[2] = x1;
+    rect[3] = y1;
+}
+
 /* A point of the frame (texture-space units of the GBA box) on the screen, in GBA pixels. */
 static void ToScreen(const struct BattleSpriteOverflow *o, float tx, float ty, float *sx, float *sy)
 {
@@ -188,7 +196,8 @@ void DioramaGLBattleSprites_Draw(int outW, int outH, float gameX, float gameY, f
     static uint64_t sSum, sMax;
     static uint32_t sDraws;
 
-    if (gBattleSpriteOverflowCount == 0 || gameY <= 0.0f || scale <= 0.0f)
+    if (gBattleSpriteOverflowCount == 0 || scale <= 0.0f
+     || (gameY <= 0.0f && gameX <= 0.0f && gameX + 240.0f * scale >= outW))
         return;
     if (!sGL.tried)
     {
@@ -230,30 +239,24 @@ void DioramaGLBattleSprites_Draw(int outW, int outH, float gameX, float gameY, f
         const struct BattleSpriteOverflow *o = &gBattleSpriteOverflow[i];
         const struct BattleSpriteView *view = o->view;
         float corners[4][2], quad[16];
-        float top, bottom;
-        int k, sx0, sy0, sx1, sy1;
+        int k, r, rects[3][4], count = 0;
 
         if (view == NULL || view->width <= 0 || view->height <= 0
          || (size_t)view->width * view->height > MAX_FRAME_PIXELS)
             continue;
         if (o->affine && (float)o->pa * o->pd - (float)o->pb * o->pc == 0.0f)
             continue;
-        /* rows from where its battler reaches at rest to the picture's top; the picture's columns */
-        top = gameY + o->restTop * scale;
-        bottom = gameY;
-        if (top < 0.0f)
-            top = 0.0f;
-        if (bottom <= top)
+        /* Where it may be drawn, in GBA pixels: its battler's box at rest, outside the picture -
+         * above it, and beside it above the text box's rows (112 on; the text box is carried
+         * out to the sides and stays in front). */
+        if (o->restTop < 0)
+            Rect(rects[count++], o->restLeft, o->restTop, o->restRight, 0);
+        if (o->restLeft < 0)
+            Rect(rects[count++], o->restLeft, 0, 0, o->restBottom < 112 ? o->restBottom : 112);
+        if (o->restRight > 240)
+            Rect(rects[count++], 240, 0, o->restRight, o->restBottom < 112 ? o->restBottom : 112);
+        if (count == 0)
             continue;
-        sx0 = (int)(gameX + 0.5f);
-        sx1 = (int)(gameX + 240.0f * scale + 0.5f);
-        sy0 = (int)(top + 0.5f);
-        sy1 = (int)(bottom + 0.5f);
-        if (sx0 < 0) sx0 = 0;
-        if (sx1 > outW) sx1 = outW;
-        if (sx1 <= sx0 || sy1 <= sy0)
-            continue;
-        glScissor(sx0, outH - sy1, sx1 - sx0, sy1 - sy0);
 
         glBindTexture(GL_TEXTURE_2D, sGL.textures[i]);
         if (sGL.uploaded[i] != gBattleSpriteOverflowSerial)
@@ -281,7 +284,21 @@ void DioramaGLBattleSprites_Draw(int outW, int outH, float gameX, float gameY, f
         }
         dglBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_DYNAMIC_DRAW);
         dglUniform1f(sGL.alphaLocation, o->alpha / 16.0f);
-        glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+        for (r = 0; r < count; r++)
+        {
+            /* GBA pixels -> window pixels, cut to the window; GL's rows run bottom up */
+            int x0 = (int)(gameX + rects[r][0] * scale + 0.5f), y0 = (int)(gameY + rects[r][1] * scale + 0.5f);
+            int x1 = (int)(gameX + rects[r][2] * scale + 0.5f), y1 = (int)(gameY + rects[r][3] * scale + 0.5f);
+
+            if (x0 < 0) x0 = 0;
+            if (y0 < 0) y0 = 0;
+            if (x1 > outW) x1 = outW;
+            if (y1 > outH) y1 = outH;
+            if (x1 <= x0 || y1 <= y0)
+                continue;
+            glScissor(x0, outH - y1, x1 - x0, y1 - y0);
+            glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+        }
     }
 
     dglBindVertexArray((GLuint)vao);

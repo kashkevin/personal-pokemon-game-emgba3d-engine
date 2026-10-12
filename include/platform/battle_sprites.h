@@ -88,11 +88,12 @@ struct BattleSpriteBgCopy
 extern struct BattleSpriteBgCopy gBattleSpriteBgCopies[4];
 
 /*
- * What of the library sprites lies above the picture's top edge, for the 3D battle to draw where
- * its window shows the world above the 240x160 picture (gl_battle_sprites.c): a Pokemon taller
- * than the GBA's 64 pixels keeps its head there. Each is drawn only in the rows its battler
- * covers at rest (from restTop to the picture's top), within the picture's columns: a sprite
- * moving off the screen (a slide-in, Fly) leaves it as the GBA picture shows it leave.
+ * What of the library sprites lies outside the 240x160 picture, for the 3D battle to draw where
+ * its window shows the world around the picture (gl_battle_sprites.c): a Pokemon taller or wider
+ * than the room the GBA's 64 pixels left keeps its head and wings there. Each is drawn only
+ * inside the box its battler covers at rest (rest*), above the picture and beside it above the
+ * text box's rows: a sprite moving off the screen (a slide-in, Fly) leaves it as the GBA picture
+ * shows it leave.
  */
 #define BATTLE_SPRITE_OVERFLOW_MAX 8
 struct BattleSpriteOverflow
@@ -101,7 +102,10 @@ struct BattleSpriteOverflow
     bool affine, flipX, flipY;
     int16_t x, y;            /* non-affine: the 64x64 box's top-left on the screen; affine: its centre */
     int16_t pa, pb, pc, pd;  /* the texture matrix (8.8), affine only */
-    int16_t restTop;         /* the topmost screen row it may be drawn on (< 0: above the picture) */
+    int16_t restTop;         /* the box its battler's frames cover at rest, screen pixels (x1, y1 */
+    int16_t restLeft;        /* exclusive): drawn only in it, outside the picture */
+    int16_t restRight;
+    int16_t restBottom;
     uint8_t alpha;           /* 0..16: a semi-transparent entry's EVA */
     int8_t brightness;       /* the frame's brightness change of sprites: +n/16 whiter, -n/16 darker */
 };
