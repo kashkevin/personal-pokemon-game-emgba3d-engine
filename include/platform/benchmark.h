@@ -27,6 +27,9 @@
 #define BENCHMARK_DEFAULT_SECONDS 15
 #define BENCHMARK_MAX_FRAMES 20000
 
+/* At most this many resolutions in one run (--bench-heights). */
+#define BENCHMARK_MAX_PHASES 8
+
 struct BenchmarkResult
 {
     int width;
@@ -39,9 +42,22 @@ struct BenchmarkResult
     double medianMs;
     double p99Ms;
     double worstMs;
+    /* The frame times' spread (performance work 2026-10-11). */
+    double p90Ms;
+    double p95Ms;
+    double p999Ms;
+    double low01Fps;     /* 0.1% low: the frame rate at the 99.9th percentile */
+    int stutters;        /* frames over twice the median and at least 8 ms over it */
 };
 
 void Benchmark_Start(unsigned int nowMs, int secondsPerResolution);
+/* The resolutions measured, by height, each at 16:9 (by default the display
+ * settings' four: 720, 1080, 1440, 2160). Before Benchmark_Start. */
+void Benchmark_SetHeights(const int *heights, int count);
+/* The resolution being measured now (its index in the results), or -1 while
+ * booting, warming up or after the end. */
+int Benchmark_MeasuringPhase(unsigned int nowMs);
+int Benchmark_PhaseCount(void);
 bool Benchmark_Active(void);
 /* The buttons the benchmark presses while the game boots, added to the player's. */
 unsigned short Benchmark_FilterKeys(unsigned short keys, unsigned int nowMs);

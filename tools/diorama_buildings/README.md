@@ -48,15 +48,18 @@ gradenGnostic/pokeemerald-multiplatform (MIT) for the logic it reuses.
   projection like every other model. `OVERRIDES` there holds what the search cannot see
   (tall buildings, a cliff behind a house, doors that are no building);
   `python3 auto_buildings.py --sheet DIR --modelled build/diorama/buildings.bin` draws
-  what it finds to look over (game art: not committed). Sootopolis's houses, cut into
-  the crater, stay as they are drawn. The depth of a roof the drawing does not show
+  what it finds to look over (game art: not committed). Sootopolis's houses stand in the
+  crater's rock, where the door search runs on into the rock: they are found by their
+  roofs instead (`CRATER_HOUSES`: its towers and boxes, with or without a door, 3 x 4
+  cells and a tower's tip) and modelled the same way. The depth of a roof the drawing does not show
   (behind it, seen from above) is laid with the middle of its own roof (`roof_band`):
   `voxel_building.py`'s `Relief` takes `fill`, the drawing's rows to repeat there, where
   it repeated the roof's last rows - its eave, which read as a second roof.
 * `window_glow.py` (new, project-owned; tests in `test_window_glow.py`): the windows of
   the buildings of outdoor maps, found on their pages (glass-coloured panes in a darker
-  frame, on faces that stand upright, never a wall's own colour), which glow in the
-  evening and at night. `python3 window_glow.py buildings.bin OUT_DIR PAGE...` draws
+  frame, on faces that stand upright, never a wall's own colour; and dark blue panes
+  solid in a much lighter frame, as Mossdeep's houses and Devon's slits draw them), which
+  glow in the evening and at night. `python3 window_glow.py buildings.bin OUT_DIR PAGE...` draws
   pages with what it found marked, to look over (game art: not committed). A change to
   it or to `export_gl.py` compiles the table again without remodelling the buildings.
 

@@ -138,13 +138,20 @@ else
   # therefore not exchange structs with bit-fields or 64-bit members with Windows
   # or SDL (none of the SDL events and Win32 structs used today have them).
   CFLAGS  += -mno-ms-bitfields -mno-align-double
-  LDFLAGS := -m32 -mconsole
+  # Large address aware: on 64-bit Windows the 32-bit exe may address 4 GB, not 2
+  # (the renderer's caches and the graphics driver's mappings live there; the
+  # game's own memory is static and low). Tested under Wine with
+  # PKMN_HIGH_ADDRESS_TEST=1 (platform/memory_info.h), which reserves the free
+  # address space below 2 GB so everything a run allocates afterwards lies above
+  # it: boot, Continue, the 3D field and the benchmark ran (2026-10-11). The
+  # 32-bit Linux build has run with addresses above 2 GB all along.
+  LDFLAGS := -m32 -mconsole -Wl,--large-address-aware
 endif
 
 # Objects whose globals survive a soft reset (window, audio device, cartridge
 # save image and clock, platform tools). Every other object's .data/.bss is moved
 # into the game sections that src/platform/game_memory.c snapshots and restores.
-PRESERVED_OBJS := $(addprefix $(OBJ_DIR)/src/platform/,sdl2.o agb_flash_pc.o siirtc_pc.o game_memory.o null_trap.o fault_compat.o crash_report.o mp_bridge.o)
+PRESERVED_OBJS := $(addprefix $(OBJ_DIR)/src/platform/,sdl2.o agb_flash_pc.o siirtc_pc.o game_memory.o null_trap.o fault_compat.o crash_report.o mp_bridge.o frame_limiter.o memory_info.o)
 ifeq ($(DIORAMA),1)
   # The renderer (GL objects, snapshot exchange, caches) is platform state: it
   # keeps its memory across a soft reset like the window does.
@@ -235,8 +242,9 @@ check-native:
 	  tools/pc_port/tests/test_mp_bridge.c src/platform/mp_bridge.c -o $(NATIVE_TEST_DIR)/test_mp_bridge
 	@$(NATIVE_TEST_DIR)/test_mp_bridge
 	@gcc -m32 -std=gnu99 -Wall -Wextra -Werror -O1 -g -iquote include -iquote tools/pc_port/tests \
-	  tools/pc_port/tests/test_display_settings.c src/platform/display_settings.c src/platform/pc_menu.c \
-	  src/platform/benchmark.c -o $(NATIVE_TEST_DIR)/test_display_settings
+	  -DFRAME_LIMITER_UNIT_TEST tools/pc_port/tests/test_display_settings.c src/platform/display_settings.c \
+	  src/platform/pc_menu.c src/platform/benchmark.c src/platform/frame_limiter.c \
+	  -o $(NATIVE_TEST_DIR)/test_display_settings
 	@$(NATIVE_TEST_DIR)/test_display_settings
 	@gcc -m32 -std=gnu99 -Wall -Wextra -Werror -O1 -g -iquote include -iquote tools/pc_port/tests \
 	  $$($(NATIVE_TEST_SDL) --cflags sdl2) tools/pc_port/tests/test_png_write.c src/platform/png_write.c \

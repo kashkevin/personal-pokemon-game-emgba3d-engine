@@ -12,6 +12,9 @@
 #include <stdlib.h>
 
 extern volatile bool8 gPlatformFlashDirty;
+// siirtc_pc.c reads the save's clock offset for PKMN_CLOCK_HOUR.
+static struct SaveBlock2 sTestSaveBlock2;
+struct SaveBlock2 *gSaveBlock2Ptr = &sTestSaveBlock2;
 s32 Div(s32 num, s32 denom);
 struct BitUnPackArgs { u16 compressedSize; u8 compressedBits; u8 decompressedBits; u32 dataOffset:31; u32 offsetZeros:1; };
 void BitUnPack(const void *src, void *dest, const struct BitUnPackArgs *args);
@@ -64,6 +67,27 @@ MT_TEST(flash_driver)
 static bool32 IsBcd(u8 v, u8 max)
 {
     return (v & 0xF) <= 9 && (v >> 4) <= 9 && ((v >> 4) * 10 + (v & 0xF)) <= max;
+}
+
+// PKMN_CLOCK_HOUR: read at boot before the save blocks exist (RtcInit; this
+// crashed the game), then with the save's clock offset accounted for.
+MT_TEST(clock_hour_override)
+{
+    struct SaveBlock2 *saved = gSaveBlock2Ptr;
+    struct SiiRtcInfo rtc;
+
+    memset(&rtc, 0, sizeof(rtc));
+    setenv("PKMN_CLOCK_HOUR", "22", 1);
+    gSaveBlock2Ptr = NULL;
+    MT_CHECK(SiiRtcGetTime(&rtc));
+    MT_EQ(rtc.hour, 0x22);
+    gSaveBlock2Ptr = saved;
+    gSaveBlock2Ptr->localTimeOffset.hours = 3;
+    gSaveBlock2Ptr->localTimeOffset.minutes = 0;
+    MT_CHECK(SiiRtcGetTime(&rtc));
+    MT_EQ(rtc.hour, 0x01); // 22:00 game time = 01:00 on a clock 3 hours ahead
+    gSaveBlock2Ptr->localTimeOffset.hours = 0;
+    unsetenv("PKMN_CLOCK_HOUR"); // read once; host_rtc below checks the format only
 }
 
 MT_TEST(host_rtc)
@@ -172,6 +196,7 @@ int main(void)
 {
     MT_RUN(arm_shift_semantics);
     MT_RUN(flash_driver);
+    MT_RUN(clock_hour_override); // before any other clock read: the setting is read once
     MT_RUN(host_rtc);
     MT_RUN(bios_helpers);
     MT_RUN(division_matches_gba);

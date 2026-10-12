@@ -117,6 +117,34 @@ class FindWindowsTests(unittest.TestCase):
         self.assertIn(9, rows)
 
 
+DARK_PANE = (64, 72, 104)
+LIGHT_FRAME = (192, 192, 200)
+
+
+class DarkPaneTests(unittest.TestCase):
+    def test_a_dark_pane_in_a_light_frame_is_a_window(self):
+        page = Page(32, 20)
+        page.rect(4, 4, 12, 8, LIGHT_FRAME)
+        page.rect(5, 5, 10, 6, DARK_PANE)
+        wall, found = windows(page, upright(32, 20))
+        self.assertEqual(len(found), 1)
+        self.assertEqual(set(found[0]["pixels"]), {(x, y) for x in range(5, 15) for y in range(5, 11)})
+
+    def test_a_dark_outline_or_band_is_not(self):
+        page = Page(40, 20)
+        page.rect(2, 2, 30, 1, DARK_PANE)    # an outline
+        page.rect(2, 8, 30, 4, DARK_PANE)    # a shadow band across the wall
+        wall, found = windows(page, upright(40, 20))
+        self.assertEqual(found, [])
+
+    def test_a_dark_pane_on_a_dark_wall_is_not(self):
+        page = Page(32, 20)
+        page.rect(0, 0, 32, 20, (90, 90, 110))
+        page.rect(5, 5, 10, 6, DARK_PANE)
+        wall, found = windows(page, upright(32, 20))
+        self.assertEqual(found, [])
+
+
 class RunTests(unittest.TestCase):
     def test_runs_cover_the_pane_with_one_brightness(self):
         page = Page(24, 16)

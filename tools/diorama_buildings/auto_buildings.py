@@ -96,8 +96,18 @@ OVERRIDES = {
     ("SkyPillar_Top", 16, 14): {"skip": True},
 }
 # Maps whose doors are cut into the rock round them (Sootopolis's crater):
-# no building stands there to model.
+# the door search runs on into the rock. Their houses are found by their
+# roofs instead (CRATER_HOUSES).
 SKIP_MAPS = {"SootopolisCity"}
+# Sootopolis's two kinds of house, found by the top-left cell of the roof
+# (graphics overhaul phase 4): a tower - an octagon under a pyramid roof, 3 x
+# 4 cells, the roof's tip a cell over the middle - and a box - a flat roof
+# with skylights over its front, 3 x 4. Each is modelled like any other house
+# (a Relief read off its drawing), whether it has a door or not.
+CRATER_HOUSES = {
+    "SootopolisCity": {"tops": {0x201: "tower", 0x208: "tower", 0x24B: "box", 0x205: "box"},
+                       "tips": {0x238, 0x239}, "size": (3, 4)},
+}
 
 
 def behaviours():
@@ -332,9 +342,14 @@ def auto_specs(taken, only_map=None):
     specs, done = [], set()
     for path in sorted(glob.glob(os.path.join(ROOT, "data", "maps", "*", "map.json"))):
         data = json.load(open(path, encoding="utf-8"))
-        if data.get("map_type") not in OUTDOOR or "Frlg" in data["name"] or data["name"] in SKIP_MAPS:
+        if data.get("map_type") not in OUTDOOR or "Frlg" in data["name"]:
             continue
         if only_map and data["name"] != only_map:
+            continue
+        if data["name"] in CRATER_HOUSES:
+            specs += crater_specs(Map(data, index_of[data["layout"]]), data,
+                                  taken.get(data["layout"], set()), done)
+        if data["name"] in SKIP_MAPS:
             continue
         map_ = None
         found_here = []
@@ -385,6 +400,44 @@ def auto_specs(taken, only_map=None):
                 "name": "auto_%s_%d_%d" % (data["name"].lower(), x, y),
                 "layout": data["layout"],
                 "rect": (x0, y0, w, h),
+                "ground": ground,
+                "owned": owned,
+                "relief": relief,
+            })
+    return specs
+
+
+def crater_specs(map_, data, taken, done):
+    """Specs for the houses of a CRATER_HOUSES map: each kind's rectangle
+    from its roof's top-left cell (and the tip over a tower), read off its
+    own drawing like the houses auto_specs finds by their doors."""
+    kinds = CRATER_HOUSES[data["name"]]
+    art = map_.art
+    w, h = kinds["size"]
+    specs = []
+    for y in range(art.h):
+        for x in range(art.w):
+            kind = kinds["tops"].get(art.metatile(x, y))
+            if kind is None or x + w > art.w or y + h > art.h:
+                continue
+            cells = {(x + i, y + j) for j in range(h) for i in range(w)}
+            if y > 0 and art.metatile(x + 1, y - 1) in kinds["tips"]:
+                cells.add((x + 1, y - 1))
+            if any(c in taken or (data["layout"], c[0], c[1]) in done for c in cells):
+                continue
+            for c in cells:
+                done.add((data["layout"], c[0], c[1]))
+            ground = ground_of(map_, cells)
+            (x0, y0, bw, bh), owned, _, img = building_art(map_, cells, ground)
+            height = facade_height(img, (x + 1 - x0) * 16)
+            relief = {"height": height, "back": (y - y0) * 16, "auto": True}
+            band = roof_band(bh * 16 - height)
+            if band is not None:
+                relief["fill"] = band
+            specs.append({
+                "name": "auto_%s_%s_%d_%d" % (data["name"].lower(), kind, x, y),
+                "layout": data["layout"],
+                "rect": (x0, y0, bw, bh),
                 "ground": ground,
                 "owned": owned,
                 "relief": relief,

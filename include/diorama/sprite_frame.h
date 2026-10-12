@@ -30,26 +30,8 @@ struct DioramaSpritePose
     float groundY;
 };
 
-/* One part of a sprite's subsprite table (the GBA's struct Subsprite): where it
- * is from the sprite's centre, its OAM shape and size, its first tile. */
-struct DioramaSpritePart
-{
-    int8_t x;
-    int8_t y;
-    uint8_t shape;
-    uint8_t size;
-    uint16_t tileOffset;
-};
-
 bool DioramaSprite_GetDimensions(uint8_t shape, uint8_t size,
                                  uint8_t *width, uint8_t *height);
-/* Whether a subsprite table's parts put the sprite's frame (its OAM shape and
- * size) together whole: one part the frame's size, centred, or full-width rows
- * of it from top to bottom, each part's tiles following the last's (a walker in
- * long grass: its lower rows are parts of their own, drawn behind the grass on
- * the GBA). The 3D view then draws the frame whole. */
-bool DioramaSprite_PartsMakeFrame(const struct DioramaSpritePart *parts, unsigned count,
-                                  uint8_t oamShape, uint8_t oamSize);
 bool DioramaSprite_IsSupported(const struct DioramaObjectSnapshot *object);
 void DioramaSprite_MakeFrameKey(const struct DioramaSceneSnapshot *snapshot,
                                 const struct DioramaObjectSnapshot *object,

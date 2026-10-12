@@ -35,6 +35,11 @@ void DioramaGL_PhotoPan(int dx, int dz);
 void DioramaGL_SetOverlay(void (*overlay)(int outputWidth, int outputHeight));
 /* The last frame presented drew the 3D scene (the benchmark counts them). */
 bool DioramaGL_LastFrameWas3D(void);
+/* The texture holding the GBA picture last uploaded (DioramaGL_UploadFrame),
+ * brought up to date first: the picture is uploaded only when something draws
+ * it (performance work 2026-10-11), so any code drawing with this texture -
+ * the 3D battle's layout - gets it through here. */
+unsigned DioramaGL_GetFrameTexture(void);
 /* The OpenGL renderer, its vendor and version, for the benchmark's log. */
 void DioramaGL_DescribeRenderer(char *buffer, size_t size);
 void DioramaGL_Shutdown(void);
@@ -79,8 +84,6 @@ bool DioramaGL_DrawBattleWeather(uint8_t weather, int outputWidth, int outputHei
  * DioramaBattle_AnimateFieldTiles): its atlases updated where the tiles
  * changed; true when what it shows changed. */
 bool DioramaGL_SetBattleTiles(const uint8_t *tileGraphics);
-/* The texture holding the GBA picture last uploaded (DioramaGL_UploadFrame). */
-unsigned DioramaGL_GetFrameTexture(void);
 /* The field's scene as the 3D view last drew it, its snapshot and resolved
  * cells (for the battle's stage survey, a test tool); false if there is none. */
 bool DioramaGL_GetFieldScene(const struct DioramaSceneSnapshot **snapshot,

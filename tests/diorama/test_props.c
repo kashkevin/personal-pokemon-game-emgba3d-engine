@@ -26,6 +26,7 @@ static void Check(bool condition, const char *expression, int line)
 
 /* Layout ids (include/constants/layouts.h): General + Rustboro, General +
  * Petalburg. */
+#define LAYOUT_SLATEPORT_CITY 2
 #define LAYOUT_RUSTBORO_CITY 4
 #define LAYOUT_LITTLEROOT_TOWN 10
 
@@ -78,7 +79,14 @@ static void TestCatalogue(void)
             CHECK(prop->layer <= 1);
             CHECK(prop->ground <= DIORAMA_PROP_GROUND_NEIGHBOUR);
             CHECK(prop->artTop < DioramaProps_ArtBottom(prop) && DioramaProps_ArtBottom(prop) <= 16);
-            CHECK(prop->depth <= 16);
+            /* A slab is at most a tile thick; a block or a mound at most
+             * three deep (a stall's roof). */
+            CHECK(prop->depth <= (prop->form == DIORAMA_PROP_BLOCK || prop->form == DIORAMA_PROP_MOUND
+                                  ? 48 : 16));
+            /* Lifted at most four tiles; only a block or a mound slopes. */
+            CHECK(prop->lift16 <= 64);
+            CHECK(prop->rise16 == 0 || prop->form == DIORAMA_PROP_BLOCK || prop->form == DIORAMA_PROP_MOUND);
+            CHECK(prop->rise16 <= 32);
             CHECK(prop->facing <= 1);
             CHECK(prop->standOn <= 2);
             CHECK(prop->keyIndex < 16 && prop->shadowIndex < 16 && prop->shadowFromRow <= 16);
@@ -360,6 +368,64 @@ static void TestLampAndFences(void)
     CHECK(sInstances[0].artSlot == IRON_FENCE);
 }
 
+/* A market stall in Slateport (phase 4): the canopy's drawing lies on a roof
+ * lifted over the stall's floor, sloping up to the back; its front hangs from
+ * the roof's edge; the posts reach the roof. */
+#define STALL_ROOF_MIDDLE 0x20E
+#define STALL_FRONT_MIDDLE 0x2F9
+#define STALL_POST_LEFT 0x23D
+
+static void TestStall(void)
+{
+    bool complete;
+    unsigned count;
+    unsigned i;
+    bool roof = false;
+    bool front = false;
+    bool post = false;
+
+    MakeSnapshot(LAYOUT_SLATEPORT_CITY, 0.25f);
+    Put(60, 60, STALL_ROOF_MIDDLE);
+    Put(60, 61, STALL_FRONT_MIDDLE);
+    Put(60, 62, STALL_POST_LEFT);
+    count = DioramaProps_Build(&sSnapshot, sResolved, sInstances, 16, &complete);
+    CHECK(count == 3 && complete);
+    for (i = 0; i < count; i++)
+    {
+        const struct DioramaPropInstance *instance = &sInstances[i];
+        const struct DioramaProp *prop = instance->prop;
+
+        CHECK(prop->kind == DIORAMA_PROP_KIND_CANOPY && prop->ground == DIORAMA_PROP_GROUND_LOWER);
+        if (prop->metatileId == STALL_ROOF_MIDDLE)
+        {
+            /* Two rows deep, its middle a row and a half south: over the
+             * front and the posts' row; high over the ground, its back higher. */
+            roof = true;
+            CHECK(prop->form == DIORAMA_PROP_BLOCK);
+            CHECK(Near(instance->depth, 2.0f) && Near(instance->z, -61.5f));
+            CHECK(Near(instance->y, 0.25f + prop->lift16 / 16.0f) && instance->y > 2.5f);
+            CHECK(instance->rise > 0.0f && Near(instance->rise, prop->rise16 / 16.0f));
+        }
+        else if (prop->metatileId == STALL_FRONT_MIDDLE)
+        {
+            /* Standing at the roof's south edge, its top at the roof. */
+            front = true;
+            CHECK(prop->form == DIORAMA_PROP_SLAB && instance->rise == 0.0f);
+            CHECK(instance->z < -62.4f && instance->z > -62.5f);
+            CHECK(Near(instance->y + instance->height, 0.25f + 44 / 16.0f));
+        }
+        else
+        {
+            /* On the ground, as tall as the roof's front edge. */
+            post = true;
+            CHECK(prop->metatileId == STALL_POST_LEFT);
+            CHECK(Near(instance->y, 0.25f) && Near(instance->height, 44 / 16.0f));
+            CHECK(instance->z < -62.0f && instance->z > -62.5f);
+        }
+    }
+    CHECK(roof && front && post);
+}
+
 static void TestGround(void)
 {
     uint16_t metatile;
@@ -398,6 +464,7 @@ int main(void)
     TestComposeArt();
     TestBuild();
     TestLampAndFences();
+    TestStall();
     TestGround();
     printf("test_props: %d checks passed\n", sChecks);
     return 0;

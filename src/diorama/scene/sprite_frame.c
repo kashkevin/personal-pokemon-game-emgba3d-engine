@@ -66,35 +66,6 @@ bool DioramaSprite_GetDimensions(uint8_t shape, uint8_t size,
     return true;
 }
 
-bool DioramaSprite_PartsMakeFrame(const struct DioramaSpritePart *parts, unsigned count,
-                                  uint8_t oamShape, uint8_t oamSize)
-{
-    uint8_t width;
-    uint8_t height;
-    int y;
-    unsigned tiles = 0;
-    unsigned i;
-
-    if (parts == NULL || count == 0 || !DioramaSprite_GetDimensions(oamShape, oamSize, &width, &height))
-        return false;
-    y = -(height / 2);
-    for (i = 0; i < count; i++)
-    {
-        uint8_t partWidth;
-        uint8_t partHeight;
-
-        /* Object sprites map their tiles in one dimension: a part as wide as
-         * the frame takes the frame's next rows of tiles. */
-        if (!DioramaSprite_GetDimensions(parts[i].shape, parts[i].size, &partWidth, &partHeight)
-         || partWidth != width || parts[i].x != -(width / 2) || parts[i].y != y
-         || parts[i].tileOffset != tiles)
-            return false;
-        y += partHeight;
-        tiles += (unsigned)(partWidth / 8) * (partHeight / 8);
-    }
-    return y == height / 2;
-}
-
 bool DioramaSprite_IsSupported(const struct DioramaObjectSnapshot *object)
 {
     uint8_t width;
