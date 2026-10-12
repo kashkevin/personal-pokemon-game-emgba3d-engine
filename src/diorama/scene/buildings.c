@@ -852,6 +852,46 @@ static void LevelWaterBodies(const struct DioramaSceneSnapshot *snapshot,
 }
 
 /*
+ * A cave's water lies CAVE_POOL_DEPTH below its floor: the GBA draws a cave's
+ * pools, channels and tidal shallows at the floor's level, and nothing lowers
+ * them (the terrace solver reads General's terraces, which caves have none
+ * of), so the pool a battle was fought on lay flat with the sand round it
+ * (the Seafloor Cavern's entrance, the Shoal Cave). Every body of water in the
+ * cave, what stands in it and the waterfalls between them sink alike after
+ * the bodies are levelled; the banks, the rock round it stand. Underground
+ * maps only. Added by the battle environments' work.
+ */
+#define CAVE_POOL_DEPTH (6.0f / 16.0f)
+
+static void SinkCavePools(const struct DioramaSceneSnapshot *snapshot,
+                          struct DioramaResolvedCell *resolved, unsigned count,
+                          const uint8_t *inWater)
+{
+    unsigned i;
+
+    if (snapshot->mapType != MAP_TYPE_UNDERGROUND)
+        return;
+    for (i = 0; i < count; i++)
+    {
+        struct DioramaResolvedCell *r = &resolved[i];
+
+        /* the water, what stands in it, and a waterfall between two pools */
+        if (inWater[i] == 0
+         && !(snapshot->cells[i].behavior == MB_WATERFALL
+           && (r->shape == DIORAMA_SHAPE_WATER || r->terrainClass == DIORAMA_TERRAIN_CLASS_WATER)))
+            continue;
+        r->groundHeight -= CAVE_POOL_DEPTH;
+        r->topHeight -= CAVE_POOL_DEPTH;
+        for (unsigned k = 0; k < r->surfaceCount && k < DIORAMA_MAX_VISUAL_SURFACES; k++)
+        {
+            r->surfaces[k].topHeight -= CAVE_POOL_DEPTH;
+            r->surfaces[k].bottomHeight -= CAVE_POOL_DEPTH;
+        }
+    }
+}
+
+
+/*
  * Mt Chimney's crater: its lava lake, which the GBA draws flat at the summit's
  * level, lies LAVA_DEPTH down (and the Magma Hideout's lava pools with it), the
  * rock drawn over its edge rimming it (that rim's side shows the rock,
@@ -1133,6 +1173,7 @@ void DioramaBuildings_FlattenResolvedCells(const struct DioramaSceneSnapshot *sn
     }
     MarkRocksInWater(snapshot, resolved, count, inWater);
     LevelWaterBodies(snapshot, resolved, count, inWater);
+    SinkCavePools(snapshot, resolved, count, inWater);
     RaiseDunes(snapshot, resolved, count);
     SinkLava(snapshot, resolved, count);
 }
