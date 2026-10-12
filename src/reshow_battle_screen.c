@@ -285,7 +285,7 @@ static bool8 LoadBattlerSpriteGfx(enum BattlerId battler)
         }
         else if (gBattleTypeFlags & BATTLE_TYPE_SAFARI && position == B_POSITION_PLAYER_LEFT)
         {
-            enum TrainerPicID trainerPicId = GetPlayerTrainerPic(gSaveBlock2Ptr->playerGender, GAME_VERSION);
+            enum TrainerPicID trainerPicId = LOCAL_PLAYER_BACK_PIC(gSaveBlock2Ptr->playerGender, GAME_VERSION);
             LoadSpritePaletteWithTag(GetTrainerBackPicPalette(trainerPicId), GetTrainerPicTag(trainerPicId, FALSE));
         }
         else if (gBattleTypeFlags & BATTLE_TYPE_CATCH_TUTORIAL && position == B_POSITION_PLAYER_LEFT)
@@ -338,11 +338,15 @@ void CreateBattlerSprite(enum BattlerId battler)
         }
         else if (gBattleTypeFlags & BATTLE_TYPE_SAFARI && position == B_POSITION_PLAYER_LEFT)
         {
-            enum TrainerPicID trainerPicId = GetPlayerTrainerPic(gSaveBlock2Ptr->playerGender, GAME_VERSION);
+            enum TrainerPicID trainerPicId = LOCAL_PLAYER_BACK_PIC(gSaveBlock2Ptr->playerGender, GAME_VERSION);
             SetMultiuseSpriteTemplateToTrainerBack(trainerPicId, position);
             gBattlerSpriteIds[battler] = CreateSprite(&gMultiuseSpriteTemplate, 0x50,
                                                 (8 - GetTrainerBackPicCoords(trainerPicId)->size) * 4 + 80,
                                                  GetBattlerSpriteSubpriority(0));
+#ifdef PORTABLE
+            CharCustom_SetupTrainerBackSprite(gBattlerSpriteIds[battler], trainerPicId);
+#endif
+#line 346 // gba-line
             gSprites[gBattlerSpriteIds[battler]].oam.paletteNum = IndexOfSpritePaletteTag(GetTrainerPicTag(trainerPicId, FALSE));
             gSprites[gBattlerSpriteIds[battler]].callback = SpriteCallbackDummy;
             gSprites[gBattlerSpriteIds[battler]].data[0] = battler;

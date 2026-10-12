@@ -548,4 +548,13 @@ enum TrainerClassID
 #define TRAINER_MON_FEMALE        2
 #define TRAINER_MON_RANDOM_GENDER 3
 
+// gTrainerPicInfo's size: the native PC build appends the character
+// selection's trainer pictures after the engine's own (character_customization.h).
+#ifdef PORTABLE
+#include "constants/character_customization.h"
+#define TRAINER_PIC_TABLE_COUNT (TRAINER_PIC_COUNT + CHARCUSTOM_TRAINER_PIC_COUNT)
+#else
+#define TRAINER_PIC_TABLE_COUNT TRAINER_PIC_COUNT
+#endif
+
 #endif  // GUARD_TRAINERS_H

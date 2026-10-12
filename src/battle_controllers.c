@@ -2636,6 +2636,10 @@ void BtlController_HandleDrawTrainerPic(enum BattlerId battler, enum TrainerPicI
                                                              xPos,
                                                              yPos,
                                                              subpriority);
+#ifdef PORTABLE
+            CharCustom_SetupTrainerBackSprite(gBattleStruct->trainerSlideSpriteIds[battler], trainerPicId); // DS throws: 80 x 80
+#endif
+#line 2639 // gba-line
             if ((gBattleTypeFlags & BATTLE_TYPE_SAFARI) && GetBattlerPosition(battler) == B_POSITION_PLAYER_LEFT)
                 gBattlerSpriteIds[battler] = gBattleStruct->trainerSlideSpriteIds[battler];
 
@@ -2664,6 +2668,10 @@ void BtlController_HandleTrainerSlide(enum BattlerId battler, enum TrainerPicID 
                                                          80,
                                                          (8 - GetTrainerBackPicCoords(trainerPicId)->size) * 4 + 80,
                                                          30);
+#ifdef PORTABLE
+        CharCustom_SetupTrainerBackSprite(gBattleStruct->trainerSlideSpriteIds[battler], trainerPicId);
+#endif
+#line 2667 // gba-line
         if ((gBattleTypeFlags & BATTLE_TYPE_SAFARI) && GetBattlerPosition(battler) == B_POSITION_PLAYER_LEFT)
             gBattlerSpriteIds[battler] = gBattleStruct->trainerSlideSpriteIds[battler];
         // Sets sprite priority to 1 so mons don't remain in foreground

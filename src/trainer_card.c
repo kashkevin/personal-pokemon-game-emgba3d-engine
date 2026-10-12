@@ -33,6 +33,10 @@
 #include "constants/rgb.h"
 #include "constants/trainers.h"
 #include "constants/union_room.h"
+#ifdef PORTABLE
+#include "character_customization.h"
+#endif
+#line 36 // gba-line
 
 enum {
     WIN_MSG,
@@ -1903,6 +1907,14 @@ static u8 VersionToCardType(enum GameVersion version)
 
 static void CreateTrainerCardTrainerPic(void)
 {
+#ifdef PORTABLE
+    // The chosen character's picture on the player's own card (character_customization.c)
+    if (!sData->isLink && CharCustom_DrawTrainerCardPic(WIN_TRAINER_PIC, 8,
+                                                       sTrainerPicOffset[sData->isHoenn][sData->trainerCard.gender][0],
+                                                       sTrainerPicOffset[sData->isHoenn][sData->trainerCard.gender][1]))
+        return;
+#endif
+#line 1906 // gba-line
     if (InUnionRoom() == TRUE && gReceivedRemoteLinkPlayers)
     {
         CreateTrainerCardTrainerPicSprite(FacilityClassToPicIndex(sData->trainerCard.unionRoomClass),
