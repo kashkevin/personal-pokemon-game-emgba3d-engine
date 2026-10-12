@@ -95,6 +95,12 @@ static const struct DioramaProp sRustboro[] = {
     IRON_FENCE_NS(0x318, 3),
     IRON_FENCE_NS(0x319, -4),
     IRON_FENCE_NS(0x31D, 4),
+    /* Southern Island's mossy stone (the only cell drawn with it), where the
+     * player meets Latias or Latios: painted with its grass on the lower layer,
+     * so the grass (colour 15) is left out and the cell's ground is its
+     * neighbours'. Added by the battle environments' work
+     * (docs/battle-environments.md): flat in that battle. */
+    { PROP(0x2C1, ROCK, RELIEF, 0, NEIGHBOUR), .keyIndex = 0xF, .depth = 12 },
 };
 
 /* Slateport: the market's baskets, pots and crates, the round bushes by the
@@ -261,6 +267,15 @@ static const struct DioramaProp sTrainerHill[] = {
     HILL_BLOCK(0x2EB), HILL_BLOCK(0x2EC), HILL_BLOCK(0x2F4),
 };
 
+/* The Battle Frontier's east side: the round bushes round the Battle Tower and
+ * along its terraces, all blocking the way, the same bush as Slateport's
+ * (0x243). Added by the battle environments' work (docs/battle-environments.md):
+ * flat on the terrace behind the battles by the Pokemon Center. */
+static const struct DioramaProp sBattleFrontierOutsideEast[] = {
+    { PROP(0x202, BUSH, MOUND, 1, LOWER), .height16 = 11 },
+    { PROP(0x203, BUSH, MOUND, 1, LOWER), .height16 = 11 },
+};
+
 /* Caves: heaps of rocks on the floor. */
 static const struct DioramaProp sCave[] = {
     { PROP(0x202, ROCK, MOUND, 1, LOWER), .height16 = 10 },
@@ -287,6 +302,7 @@ static const struct DioramaPropTileset sTilesets[] = {
     TILESET("gTileset_TrickHousePuzzle", sTrickHousePuzzle),
     TILESET("gTileset_Facility", sFacility),
     TILESET("gTileset_TrainerHill", sTrainerHill),
+    TILESET("gTileset_BattleFrontierOutsideEast", sBattleFrontierOutsideEast),
 };
 
 #define TILESET_COUNT (sizeof(sTilesets) / sizeof(sTilesets[0]))
