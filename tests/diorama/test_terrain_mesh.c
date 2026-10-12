@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "constants/metatile_behaviors.h"
@@ -1046,6 +1047,90 @@ static void TestRoundHullUsesArtworkChords(void)
             assert(sVertices[vertex].textureLayer == DIORAMA_TERRAIN_TEXTURE_FULL);
 }
 
+/* Indexed chunks (performance, 2026-10-12): the folded vertices drawn through
+ * their indices are the mesh's own vertices, in the same order. */
+static void CheckFoldDrawsTheSame(uint32_t vertexCount, bool allQuads)
+{
+    struct DioramaTerrainVertex *original = malloc(vertexCount * sizeof(*original));
+    uint32_t *indices = malloc(vertexCount * sizeof(*indices));
+    uint32_t indexCount = 0;
+    uint32_t folded;
+
+    assert(original != NULL && indices != NULL);
+    memcpy(original, sVertices, vertexCount * sizeof(*original));
+    folded = DioramaTerrain_FoldQuads(sVertices, vertexCount, indices, &indexCount);
+    assert(indexCount == vertexCount - vertexCount % 3);
+    assert(folded <= vertexCount);
+    if (allQuads)
+        assert(folded * 3 == vertexCount * 2);
+    for (uint32_t i = 0; i < indexCount; i++)
+    {
+        assert(indices[i] < folded);
+        assert(memcmp(&sVertices[indices[i]], &original[i], sizeof(*original)) == 0);
+    }
+    free(original);
+    free(indices);
+}
+
+static void TestFoldedQuadsDrawTheSameTriangles(void)
+{
+    struct DioramaTerrainChunkInput input;
+    struct DioramaTerrainMesh mesh;
+    struct DioramaTerrainCell *center;
+    static const uint8_t left[11] = {7, 5, 4, 3, 3, 3, 3, 4, 5, 7, 7};
+    static const uint8_t right[11] = {8, 10, 11, 12, 12, 12, 12, 11, 10, 8, 8};
+    uint32_t indices[9];
+    uint32_t indexCount;
+
+    /* Jagged Pass's kind of relief: every face a quad */
+    InitInput(&input, 7, MB_NORMAL);
+    center = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    center->behavior = MB_MOUNTAIN_TOP;
+    center->shape = DIORAMA_SHAPE_CLIFF;
+    center->archetype = DIORAMA_ARCHETYPE_CLIFF;
+    center->featureHeight = 1.0f;
+    center->visualHeight = 1.0f;
+    center->measuredFlags = DIORAMA_MEASURED_MOUNTAIN_ART;
+    for (int row = 0; row < DIORAMA_VOXELS_PER_CELL; row++)
+    {
+        center->foregroundAlpha[row] = 0x3FFC;
+        for (int x = 0; x < DIORAMA_VOXELS_PER_CELL; x++)
+            center->mountainHeight[row * DIORAMA_VOXELS_PER_CELL + x] = (uint8_t)(4 + (x * 7 + row * 3) % 13);
+    }
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.vertexCount > 3000 && mesh.vertexCount % 6 == 0);
+    CheckFoldDrawsTheSame(mesh.vertexCount, true);
+
+    /* a round tree's hull */
+    InitInput(&input, 3, MB_NORMAL);
+    center = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    center->shape = DIORAMA_SHAPE_EXTRUDED;
+    center->visualHeight = 1.0f;
+    center->featureHeight = 1.0f;
+    center->archetype = DIORAMA_ARCHETYPE_ROUND_HULL;
+    SetTreeMaterial(center, 0.1f, 0.2f, 0.3f, 0.4f);
+    for (int row = 0; row < 11; row++)
+        for (int x = left[row]; x <= right[row]; x++)
+            SetTreeShade(center, x, row + 2,
+                         (x + row) & 1 ? DIORAMA_TREE_SHADE_BLACK
+                                       : DIORAMA_TREE_SHADE_DARK);
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    CheckFoldDrawsTheSame(mesh.vertexCount, false);
+
+    /* a lone triangle, then a quad, then two stray vertices */
+    memset(sVertices, 0, 11 * sizeof(sVertices[0]));
+    for (int i = 0; i < 11; i++)
+        sVertices[i].x = (float)i;
+    sVertices[6] = sVertices[3];        /* the quad's corner 0 again */
+    sVertices[7] = sVertices[5];        /* ... and its corner 2 */
+    assert(DioramaTerrain_FoldQuads(sVertices, 11, indices, &indexCount) == 7);
+    assert(indexCount == 9);
+    assert(indices[0] == 0 && indices[1] == 1 && indices[2] == 2);
+    assert(indices[3] == 3 && indices[4] == 4 && indices[5] == 5);
+    assert(indices[6] == 3 && indices[7] == 5 && indices[8] == 6);
+    assert(sVertices[6].x == 8.0f);
+}
+
 static void TestTreeFloodRemovesGrassAndDrawnShadow(void)
 {
     struct DioramaTerrainChunkInput input;
@@ -1311,6 +1396,7 @@ int main(void)
     TestPixelPrismProvenanceAndSupport();
     TestMeasuredVolumeBandsAndRoof();
     TestRoundHullUsesArtworkChords();
+    TestFoldedQuadsDrawTheSameTriangles();
     TestTreeFloodRemovesGrassAndDrawnShadow();
     TestAuthoredTreeModelBuildsOnceInLocalSpace();
     TestLargeGroupedTreeUsesAuthoredVoxelModel();

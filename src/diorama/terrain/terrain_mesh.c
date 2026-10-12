@@ -2257,6 +2257,45 @@ void DioramaCamera_GetRig(float cameraPitch, float *height, float *distance,
     *screenOffsetY = DIORAMA_OVERWORLD_SCREEN_OFFSET;
 }
 
+uint32_t DioramaTerrain_FoldQuads(struct DioramaTerrainVertex *vertices, uint32_t vertexCount,
+                                  uint32_t *indices, uint32_t *indexCount)
+{
+    uint32_t read = 0;
+    uint32_t write = 0;
+    uint32_t out = 0;
+
+    while (read + 3 <= vertexCount)
+    {
+        /* AppendQuad's six: corners 0 1 2, then 0 2 3 */
+        bool quad = read + 6 <= vertexCount
+                 && memcmp(&vertices[read + 3], &vertices[read], sizeof(*vertices)) == 0
+                 && memcmp(&vertices[read + 4], &vertices[read + 2], sizeof(*vertices)) == 0;
+
+        /* write <= read: the vertices only ever move down */
+        memmove(&vertices[write], &vertices[read], 3 * sizeof(*vertices));
+        indices[out++] = write;
+        indices[out++] = write + 1;
+        indices[out++] = write + 2;
+        if (quad)
+        {
+            vertices[write + 3] = vertices[read + 5];
+            indices[out++] = write;
+            indices[out++] = write + 2;
+            indices[out++] = write + 3;
+            write += 4;
+            read += 6;
+        }
+        else
+        {
+            write += 3;
+            read += 3;
+        }
+    }
+    /* a last vertex or two that make no triangle drew nothing before either */
+    *indexCount = out;
+    return write;
+}
+
 bool DioramaTerrain_IsBoundsVisible(const struct DioramaTerrainBounds *bounds,
                                     float cameraX, float cameraZ,
                                     float cameraPitch, float focalLength)

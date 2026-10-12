@@ -59,6 +59,13 @@ struct GLTerrainChunk
     bool hasPixelObjects;
     GLuint vertexArray;
     GLuint vertexBuffer;
+    /* Its quads drawn from four corners each (DioramaTerrain_FoldQuads):
+     * indexCount indices of indexType into drawVertices vertices; no index
+     * buffer, the mesh's own vertices drawn as they are. */
+    GLuint indexBuffer;
+    GLenum indexType;
+    uint32_t indexCount;
+    uint32_t drawVertices;
     struct DioramaTerrainMesh mesh;
 };
 
@@ -1220,6 +1227,20 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
     return hasInterior && AppendPixelObjects(snapshot, resolvedCells, chunkX, chunkY, input);
 }
 
+/* PKMN_DIORAMA_CHUNK_LOG=1: what each chunk built costs (development). */
+static bool ChunkLog(void)
+{
+    static int sChunkLog = -1;
+
+    if (sChunkLog < 0)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_CHUNK_LOG");
+
+        sChunkLog = value != NULL && value[0] == '1';
+    }
+    return sChunkLog != 0;
+}
+
 static bool UploadChunk(struct GLTerrainChunk *chunk,
                         const struct DioramaTerrainChunkInput *input,
                         uint64_t signature)
@@ -1230,16 +1251,7 @@ static bool UploadChunk(struct GLTerrainChunk *chunk,
                                    DIORAMA_TERRAIN_MAX_VERTICES, &mesh))
         return false;
     {
-        /* PKMN_DIORAMA_CHUNK_LOG=1: what each chunk built costs (development). */
-        static int sChunkLog = -1;
-
-        if (sChunkLog < 0)
-        {
-            const char *value = SDL_getenv("PKMN_DIORAMA_CHUNK_LOG");
-
-            sChunkLog = value != NULL && value[0] == '1';
-        }
-        if (sChunkLog)
+        if (ChunkLog())
         {
             unsigned mountain = 0, terrace = 0, cells = 0, i;
 
@@ -1269,9 +1281,51 @@ static bool UploadChunk(struct GLTerrainChunk *chunk,
         dglGenBuffers(1, &chunk->vertexBuffer);
         ConfigureVertexArray(chunk->vertexArray, chunk->vertexBuffer);
     }
+    /* Its quads drawn from their four corners (performance, 2026-10-12: two
+     * of a quad's six vertices repeat; every terrain pass shades a third
+     * fewer and the buffers are a quarter smaller). The indices are written
+     * into the scratch's unused tail - no memory of their own; a chunk too
+     * big to leave room for them is drawn as before. */
+    chunk->indexCount = 0;
+    chunk->drawVertices = mesh.vertexCount;
+    if ((uint64_t)(DIORAMA_TERRAIN_MAX_VERTICES - mesh.vertexCount) * sizeof(struct DioramaTerrainVertex)
+        >= (uint64_t)mesh.vertexCount * sizeof(uint32_t))
+    {
+        uint32_t *indices = (uint32_t *)(void *)(sScratchVertices + mesh.vertexCount);
+        uint32_t indexCount;
+        uint32_t vertices = DioramaTerrain_FoldQuads(sScratchVertices, mesh.vertexCount,
+                                                     indices, &indexCount);
+        size_t indexSize = sizeof(uint32_t);
+
+        chunk->indexType = GL_UNSIGNED_INT;
+        if (vertices <= 0x10000)
+        {
+            /* in place: the uint16_t at i ends before the uint32_t at i+1 begins */
+            uint16_t *shortIndices = (uint16_t *)(void *)indices;
+            uint32_t i;
+
+            for (i = 0; i < indexCount; i++)
+                shortIndices[i] = (uint16_t)indices[i];
+            chunk->indexType = GL_UNSIGNED_SHORT;
+            indexSize = sizeof(uint16_t);
+        }
+        if (chunk->indexBuffer == 0)
+            dglGenBuffers(1, &chunk->indexBuffer);
+        /* the element buffer is the vertex array's: bind that first */
+        dglBindVertexArray(chunk->vertexArray);
+        dglBindBuffer(GL_ELEMENT_ARRAY_BUFFER, chunk->indexBuffer);
+        dglBufferData(GL_ELEMENT_ARRAY_BUFFER, indexCount * indexSize, indices, GL_DYNAMIC_DRAW);
+        chunk->indexCount = indexCount;
+        chunk->drawVertices = vertices;
+    }
+    if (ChunkLog())
+        SDL_Log("Diorama: chunk %d,%d: drawn from %u vertices, %u indices (%s)",
+                input->chunkX, input->chunkY, chunk->drawVertices, chunk->indexCount,
+                chunk->indexCount == 0 ? "none"
+                : chunk->indexType == GL_UNSIGNED_SHORT ? "16-bit" : "32-bit");
     dglBindBuffer(GL_ARRAY_BUFFER, chunk->vertexBuffer);
     dglBufferData(GL_ARRAY_BUFFER,
-                  mesh.vertexCount * sizeof(struct DioramaTerrainVertex),
+                  chunk->drawVertices * sizeof(struct DioramaTerrainVertex),
                   sScratchVertices, GL_DYNAMIC_DRAW);
     chunk->occupied = true;
     chunk->stale = false;
@@ -1392,8 +1446,19 @@ static void LeaveMap(void)
     sHitsAtChange = sCacheHits;
 }
 
+/* A chunk's triangles, from its indices when UploadChunk folded its quads. */
+static void DrawChunk(const struct GLTerrainChunk *chunk)
+{
+    if (chunk->indexCount != 0)
+        glDrawElements(GL_TRIANGLES, (GLsizei)chunk->indexCount, chunk->indexType, NULL);
+    else
+        glDrawArrays(GL_TRIANGLES, 0, (GLsizei)chunk->drawVertices);
+}
+
 static void ReleaseChunk(struct GLTerrainChunk *chunk)
 {
+    if (chunk->indexBuffer != 0)
+        dglDeleteBuffers(1, &chunk->indexBuffer);
     if (chunk->vertexBuffer != 0)
         dglDeleteBuffers(1, &chunk->vertexBuffer);
     if (chunk->vertexArray != 0)
@@ -2278,11 +2343,11 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
             continue;
         }
         sMetrics.visibleChunks++;
-        sMetrics.vertices += chunk->mesh.vertexCount;
+        sMetrics.vertices += chunk->drawVertices;
         sMetrics.triangles += chunk->mesh.vertexCount / 3;
         sMetrics.drawCalls++;
         dglBindVertexArray(chunk->vertexArray);
-        glDrawArrays(GL_TRIANGLES, 0, chunk->mesh.vertexCount);
+        DrawChunk(chunk);
         for (uint16_t tree = 0; tree < chunk->mesh.treeInstanceCount
              && visibleTreeCount < TERRAIN_MAX_VISIBLE_TREE_INSTANCES; tree++)
             sVisibleTreeInstances[visibleTreeCount++] = chunk->mesh.treeInstances[tree];
@@ -2328,7 +2393,7 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
                                              cameraPitch, focalLength))
             continue;
         dglBindVertexArray(chunk->vertexArray);
-        glDrawArrays(GL_TRIANGLES, 0, chunk->mesh.vertexCount);
+        DrawChunk(chunk);
         sMetrics.drawCalls++;
     }
     glStencilMask(0x02);
@@ -2343,7 +2408,7 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
                                              cameraPitch, focalLength))
             continue;
         dglBindVertexArray(chunk->vertexArray);
-        glDrawArrays(GL_TRIANGLES, 0, chunk->mesh.vertexCount);
+        DrawChunk(chunk);
         sMetrics.drawCalls++;
     }
     dglUniform1i(sRenderPassLocation, 0);
@@ -2399,7 +2464,7 @@ void DioramaGLTerrain_DrawShadow(GLuint atlasTexture, GLuint baseAtlasTexture,
         if (!chunk->active)
             continue;
         dglBindVertexArray(chunk->vertexArray);
-        glDrawArrays(GL_TRIANGLES, 0, chunk->mesh.vertexCount);
+        DrawChunk(chunk);
         for (uint16_t tree = 0; tree < chunk->mesh.treeInstanceCount
              && treeCount < TERRAIN_MAX_VISIBLE_TREE_INSTANCES; tree++)
             sVisibleTreeInstances[treeCount++] = chunk->mesh.treeInstances[tree];
@@ -2427,6 +2492,8 @@ void DioramaGLTerrain_Shutdown(void)
 
     for (i = 0; i < (int)sChunkLimit; i++)
     {
+        if (sChunks[i].indexBuffer != 0)
+            dglDeleteBuffers(1, &sChunks[i].indexBuffer);
         if (sChunks[i].vertexBuffer != 0)
             dglDeleteBuffers(1, &sChunks[i].vertexBuffer);
         if (sChunks[i].vertexArray != 0)

@@ -257,6 +257,17 @@ bool DioramaTerrain_BuildTreeModel(struct DioramaTerrainVertex *vertices,
 bool DioramaTerrain_IsBoundsVisible(const struct DioramaTerrainBounds *bounds,
                                      float cameraX, float cameraZ,
                                      float cameraPitch, float focalLength);
+/*
+ * A chunk's mesh drawn from indices (performance, 2026-10-12): a quad is two
+ * triangles, six vertices of which two repeat its corners 0 and 2. Folds the
+ * vertices in place to four per quad (a triangle that shares no corners that
+ * way with the next - a tree's - keeps its three) and writes, for each of the
+ * vertices it was given, the index of its copy, *indexCount of them: drawing
+ * the indices draws the same triangles in the same order. indices must not
+ * overlap the vertices. Returns how many vertices are left.
+ */
+uint32_t DioramaTerrain_FoldQuads(struct DioramaTerrainVertex *vertices, uint32_t vertexCount,
+                                  uint32_t *indices, uint32_t *indexCount);
 
 /*
  * Where the eye stands for the terrain and building passes (and the terrain's
