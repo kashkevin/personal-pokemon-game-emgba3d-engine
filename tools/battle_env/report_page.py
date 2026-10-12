@@ -75,11 +75,11 @@ def _panel(path, label, why=None):
 def composite(row, out_path):
     panels = [('BEFORE', row['before_png'], None if row['before_png'] else row['before_status']),
               ('AFTER', row['after_png'], None if row['after_png'] else row['after_status'])]
-    for label, png in sorted(row['extras'].items()):
+    for label, png in row['extras'].items():     # in the order the surveys were given
         panels.append((label.upper(), png, None))
     if not row['before_png'] and not row['after_png'] and not row['extras']:
         return None
-    cols = 2
+    cols = 2 if len(panels) <= 4 else 3
     rows = (len(panels) + cols - 1) // cols
     sheet = Image.new('RGB', (PANEL[0] * cols + 6 * (cols - 1), PANEL[1] * rows + 6 * (rows - 1)),
                       (16, 24, 20))
@@ -159,6 +159,7 @@ h2 { font: 700 19px/1.3 var(--body); margin: 0 0 10px; text-wrap: balance; }
 .tablewrap { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; }
 th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th.n { text-align: right; }
 th { font-weight: 700; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
 td.n { text-align: right; font-family: var(--mono); }
 .filters { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; position: sticky;
@@ -172,7 +173,8 @@ td.n { text-align: right; font-family: var(--mono); }
 input[type=search], select { font: 14px var(--body); padding: 7px 10px; border-radius: 8px;
   border: 1px solid var(--line); background: var(--surface); color: var(--ink); max-width: 100%; }
 .count { font: 13px var(--mono); color: var(--muted); }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 480px), 1fr)); gap: 16px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 480px), 1fr)); gap: 16px;
+  align-items: start; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
   display: grid; grid-template-rows: auto auto 1fr; min-width: 0; }
 .card .head { padding: 12px 14px 8px; display: grid; gap: 4px; }
@@ -180,9 +182,9 @@ input[type=search], select { font: 14px var(--body); padding: 7px 10px; border-r
 .card h3 { font: 700 16px/1.3 var(--body); margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .card .id { font: 12px/1.4 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
 .card .tags { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12.5px; color: var(--muted); }
-.card .shot { background: var(--shot); aspect-ratio: 32 / 9; }
-.card .shot.tall { aspect-ratio: 32 / 18; }
-.card .shot img { display: block; width: 100%; height: 100%; object-fit: contain; cursor: zoom-in; }
+.card .shot { background: var(--shot); }
+.card .shot img { display: block; width: 100%; height: auto; cursor: zoom-in; }
+.card .shot .none { aspect-ratio: 32 / 9; }
 dialog.zoom { padding: 0; border: 0; background: var(--shot); max-width: 96vw; max-height: 96vh; }
 dialog.zoom::backdrop { background: rgba(5, 10, 7, .78); }
 dialog.zoom img { display: block; max-width: 96vw; max-height: 90vh; width: auto; height: auto; }
@@ -296,10 +298,9 @@ def write_page(rows, out, by_map, args):
         stem = r['map'][4:]
         size = composite(r, os.path.join(out, 'img', stem + '.jpg'))
         if size:
-            shot = '<div class="shot%s"><img src="img/%s.jpg" alt="%s: a battle there, before and after" ' \
+            shot = '<div class="shot"><img src="img/%s.jpg" alt="%s: a battle there, before and after" ' \
                    'width="%d" height="%d" loading="lazy" decoding="async"></div>' % (
-                       ' tall' if size[1] > PANEL[1] + 10 else '', html.escape(stem), html.escape(name),
-                       size[0], size[1])
+                       html.escape(stem), html.escape(name), size[0], size[1])
         else:
             shot = '<div class="shot"><div class="none">no picture (%s)</div></div>' % html.escape(
                 r['after_status'])
@@ -314,14 +315,19 @@ def write_page(rows, out, by_map, args):
             status += '; not surveyed'
         cards.append(
             '<article class="card" data-cls="%s" data-state="%s" data-group="%s" data-search="%s">'
-            '<div class="head"><div class="title"><h3>%s</h3><span class="trans">%s<span class="arrow">→</span>%s</span></div>'
+            '<div class="head"><div class="title"><h3>%s</h3><span class="trans">%s<span class="arrow">→</span>%s%s</span></div>'
             '<div class="id">%s</div><div class="tags">%s</div></div>%s'
             '<div class="body"><div class="state">%s</div>%s</div></article>' % (
                 r['after_class'] or 'none', r['state'], html.escape(group_of(r['category'])),
                 html.escape((name + ' ' + r['map'] + ' ' + r['category'] + ' ' + r['notes']).lower()),
                 html.escape(name), _chip(r['before_class'], 'before '), _chip(r['after_class'], 'after '),
+                ('<span class="arrow" title="with the overworld\'s detail objects">+</span>%s' % _chip(
+                    r['props_class'], 'with the overworld\'s objects ')) if r.get('props_class') else '',
                 html.escape(r['map']), ''.join('<span>%s</span>' % t for t in tags), shot,
-                html.escape(status), '<p style="margin:0">%s</p>' % html.escape(r['notes']) if r['notes'] else ''))
+                html.escape(status),
+                ('<p style="margin:0">%s</p>' % html.escape(r['notes']) if r['notes'] else '')
+                + ('<p style="margin:0"><strong>With the overworld\'s objects:</strong> %s</p>' % html.escape(
+                    r['props_notes']) if r.get('props_notes') else '')))
 
     # the category table
     by_group = collections.OrderedDict((g, []) for g, _ in GROUPS)
@@ -334,12 +340,13 @@ def write_page(rows, out, by_map, args):
         c = collections.Counter(r['after_class'] for r in rs if r['after_class'])
         s = collections.Counter(r['state'] for r in rs)
         trs.append('<tr><td><a href="#maps" data-jump="%s">%s</a></td><td class="n">%d</td>%s'
-                   '<td class="n">%d</td><td class="n">%d</td></tr>' % (
+                   '<td class="n">%s</td><td class="n">%s</td><td class="n">%s</td></tr>' % (
                        html.escape(g), html.escape(g), len(rs),
                        ''.join('<td class="n">%s</td>' % (c[k] or '·') for k in CLASSES),
-                       s['tested'], s['untested']))
-    table = ('<div class="tablewrap"><table><thead><tr><th>Places</th><th>Maps</th><th>A</th><th>B</th>'
-             '<th>C</th><th>D</th><th>Photographed only</th><th>No picture</th></tr></thead><tbody>%s'
+                       s['tested'] or '·', s['untested'] or '·', s['excluded'] or '·'))
+    table = ('<div class="tablewrap"><table><thead><tr><th>Places</th><th class="n">Maps</th><th class="n">A</th>'
+             '<th class="n">B</th><th class="n">C</th><th class="n">D</th><th class="n">Photographed only</th>'
+             '<th class="n">No picture</th><th class="n">Excluded</th></tr></thead><tbody>%s'
              '</tbody></table></div>' % ''.join(trs))
 
     groups_opts = ''.join('<option value="%s">%s</option>' % (html.escape(g), html.escape(g))
@@ -350,6 +357,15 @@ def write_page(rows, out, by_map, args):
                  'aria-pressed="false">not classed</button>')
     st_btns = ''.join('<button type="button" class="chipbtn" data-filter="st" data-value="%s" '
                       'aria-pressed="false">%s</button>' % (k, k) for k in ('reviewed', 'tested', 'untested', 'excluded') if counts[k])
+    props_rows = [r for r in rows if r.get('props_class')]
+    props_summary = ''
+    if props_rows:
+        cp = collections.Counter(r['props_class'] for r in props_rows)
+        ca = collections.Counter(r['after_class'] for r in props_rows if r['after_class'])
+        props_summary = ('<div><h3>With the overworld\'s detail objects, %d maps</h3>%s'
+                         '<div class="legend"><span>the same maps without them: %s</span></div></div>' % (
+                             len(props_rows), _bar(cp, CLASSES, len(props_rows), 'seg'),
+                             ', '.join('%s %d' % (k, ca[k]) for k in CLASSES)))
     appendix = ''
     if args.appendix and os.path.exists(args.appendix):
         appendix = '<section class="appendix panel">%s</section>' % open(args.appendix).read()
@@ -369,7 +385,7 @@ def write_page(rows, out, by_map, args):
         '<span>untested: %s</span><span>excluded: %s</span></div></div>'
         '<div><h3>Before, the %d maps classed both times</h3>%s</div>'
         '<div><h3>After, all %d classed maps</h3>%s<div class="legend">%s</div></div>'
-        '</section>'
+        '%s</section>'
         '<section class="panel"><h2>By kind of place</h2>%s'
         '<p class="note">A: complete 3D. B: dimensional, with flat details or a small fault. C: some of it '
         'stands, much that should have depth is flat. D: flat tile art, a void, or no 3D battle.</p></section>'
@@ -391,7 +407,7 @@ def write_page(rows, out, by_map, args):
             both, _bar(cls_before, CLASSES, both, 'seg'),
             sum(cls_after.values()), _bar(cls_after, CLASSES, sum(cls_after.values()), 'seg'),
             ''.join('<span>%s %s</span>' % (k, CLASS_TEXT[k]) for k in CLASSES),
-            table, cls_btns, st_btns, groups_opts, ''.join(cards), appendix, SCRIPT))
+            props_summary, table, cls_btns, st_btns, groups_opts, ''.join(cards), appendix, SCRIPT))
     with open(os.path.join(out, 'index.html'), 'w') as f:
         f.write(page)
     json.dump({'maps': total, 'states': counts, 'after': cls_after, 'before': cls_before},

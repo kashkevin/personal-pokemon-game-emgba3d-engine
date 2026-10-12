@@ -126,6 +126,10 @@ def main():
             'after_status': a['status'] if a else 'not surveyed',
             'before_class': rv.get('before') if rv.get('before') in CLASSES else None,
             'after_class': rv.get('after') if rv.get('after') in CLASSES else None,
+            # the class with the overworld's detail objects drawn in the battle too (the branch
+            # merged with graphics-wip-20261010-8), where that was looked at
+            'props_class': rv.get('props') if rv.get('props') in CLASSES else None,
+            'props_notes': rv.get('props_notes', ''),
             'state': state, 'notes': rv.get('notes', ''), 'problems': rv.get('problems', []),
             'before_png': b['png'] if b and b['status'] == 'captured' else None,
             'after_png': a['png'] if a and a['status'] == 'captured' else None,
@@ -152,8 +156,11 @@ def main():
                     continue
                 f.write('| %s | %s | %s | %s | %s | %s |\n' % (
                     r['map'][4:], ', '.join(r['battles']), r['before_class'] or '-',
-                    r['after_class'] or '-', r['state'] if r['after_status'] in ('captured', 'not surveyed')
-                    else '%s (%s)' % (r['state'], r['after_status']), r['notes'].replace('|', '/')))
+                    r['after_class'] + (' (%s with objects)' % r['props_class'] if r['props_class'] else '')
+                    if r['after_class'] else '-',
+                    r['state'] if r['after_status'] in ('captured', 'not surveyed')
+                    else '%s (%s)' % (r['state'], r['after_status']),
+                    (r['notes'] + (' With objects: ' + r['props_notes'] if r['props_notes'] else '')).replace('|', '/')))
     if args.no_html:
         return
     write_page(rows, os.path.join(args.out, 'page'), by_map, args)
