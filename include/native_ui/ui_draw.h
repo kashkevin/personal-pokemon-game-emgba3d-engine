@@ -111,6 +111,12 @@ void UiG_FillPattern(const struct UiPattern *p, int x, int y, int w, int h, UiRG
 void UiG_GlyphQuad(int x, int y, int font, int code, int w, int h, UiRGBA fg, UiRGBA sh);
 /* a full-canvas colour veil (screen fades) */
 void UiG_Veil(UiRGBA c);
+/* The quads drawn since a mark (UiG_Mark) squeezed horizontally towards x = cx
+ * (current coordinates) by k (0 < k <= 1), each edge on a whole logical pixel:
+ * pictures and glyphs lose columns as when a canvas is drawn narrower (the
+ * design's card flip). Mouse regions and clips are not moved. */
+int UiG_Mark(void);
+void UiG_SquashX(int mark, int cx, double k);
 
 /* ------------------------------------------------------------ mouse regions */
 struct UiHit

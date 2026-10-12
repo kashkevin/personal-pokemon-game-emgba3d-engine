@@ -481,6 +481,60 @@ bool32 OptionMenu_NativeUiState(struct NativeOptionMenu *out);
 /* the session's other players (i < MULTIPLAYER_MAX_PEERS); FALSE: none there or offline */
 bool32 Multiplayer_NativeUiPeer(u32 i, u32 *playerId, u8 *mapGroup, u8 *mapNum, u8 *gender, u8 *activity);
 
+/* ---------------------------------------------------------------- the Trainer Card (trainer_card.c) */
+
+/* The card as the engine shows it: its face, what A and B do now, and the facts
+ * it prints. The own card's play time is the save's live clock (as the engine
+ * prints it); a card from a link is its owner's snapshot. */
+enum
+{
+    NATIVE_CARD_LOADING,
+    NATIVE_CARD_FRONT,      /* A flips, B closes */
+    NATIVE_CARD_BACK,       /* A closes, B flips back (closes while linked) */
+    NATIVE_CARD_TO_BACK,    /* the engine's flip */
+    NATIVE_CARD_TO_FRONT,
+    NATIVE_CARD_CLOSING,
+};
+struct NativeTrainerCard
+{
+    u8 phase;
+    bool8 ready;          /* reading A and B */
+    bool8 onBack;
+    bool8 isLink;         /* another player's card in a link room */
+    bool8 linked;         /* a link is up: B on the back closes */
+    bool8 isHoenn;
+    u8 cardType;
+    bool8 hasPokedex;
+    bool8 hasHofResult;
+    bool8 hasLinkResults;
+    bool8 hasTrades;
+    bool8 colonHidden;    /* the play time's blinking colon */
+    /* the engine's four star rules (the own card only; a link card has its count) */
+    bool8 caughtAllRegional;
+    bool8 hasAllPaintings;
+    bool8 hasAllFrontierSymbols;
+    u8 gender;
+    u8 stars;
+    u16 picId;            /* the trainer picture the engine shows */
+    u16 caught;
+    u16 seen;             /* the own card only (the engine prints caught) */
+    u16 trainerId;
+    u16 playHours, playMinutes;
+    u32 money;
+    u16 hofHours, hofMinutes, hofSeconds;
+    u16 linkWins, linkLosses;
+    u16 trades;
+    u16 pokeblocksWithFriends;
+    u16 contestsWithFriends;
+    u16 frontierBP;
+    u8 name[8];
+    u8 profile[4][13];    /* the four easy chat words */
+    bool8 badges[8];
+    u8 badgeTiles[8 * 128]; /* the badges' own art: a 128x16 strip, 16x16 each */
+    const u16 *badgePalette;
+};
+bool32 TrainerCard_NativeUiState(struct NativeTrainerCard *out);
+
 /* ---------------------------------------------------------------- the Players menu (multiplayer_menu.c) */
 
 /* The host-driven Players menu as the game holds it: the host's title, status
