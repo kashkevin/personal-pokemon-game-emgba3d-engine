@@ -31,6 +31,9 @@
 #include "diorama/battle_stage.h"
 #include "diorama/buildings.h"
 #include "diorama/gl_battle.h"
+#ifdef ENABLE_BATTLE_SPRITES
+#include "diorama/gl_battle_sprites.h"
+#endif
 #include "diorama/gl_building_renderer.h"
 #include "diorama/gl_compositor.h"
 #include "diorama/gl_light.h"
@@ -3277,6 +3280,11 @@ bool DioramaGLBattle_Present(SDL_Window *window)
         DrawCarriedOut(&layout);
     }
     DrawPicture(&layout);
+#ifdef ENABLE_BATTLE_SPRITES
+    /* The animated battle sprites' heads above the picture, where the window shows the world
+     * (gl_battle_sprites.h). */
+    DioramaGLBattleSprites_Draw(layout.outW, layout.outH, layout.gameX, layout.gameY, layout.scale);
+#endif
     if (world)
         DrawIntroBars(&layout);
     glDisable(GL_BLEND);
