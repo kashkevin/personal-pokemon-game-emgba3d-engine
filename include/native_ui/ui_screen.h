@@ -43,6 +43,12 @@ struct UiScreen
     /* the GBA picture's OAM entries the screen draws itself (bit n of mask[n / 32]:
      * entry n), at the frame boundary after capture; NULL: none */
     void (*hideObjects)(uint32_t mask[4]);
+    /* typing on the PC keyboard: while textMode() is true the keys that type
+     * reach text() (UTF-8) instead of the game's buttons; Enter is A,
+     * Backspace and Esc are B, Page Down is SELECT, Page Up SELECT twice;
+     * the arrows and the controller stay the game's (NULL: no typing) */
+    bool (*textMode)(void);
+    void (*text)(const char *utf8);
 };
 
 enum UiPcKey
@@ -88,6 +94,7 @@ extern const struct UiScreen gUiScreen_Customize;
 extern const struct UiScreen gUiScreen_Players;
 extern const struct UiScreen gUiScreen_TrainerCard;
 extern const struct UiScreen gUiScreen_Shop;
+extern const struct UiScreen gUiScreen_Naming;
 extern const struct UiScreen gUiScreen_Notice;
 
 #endif // GUARD_NATIVE_UI_SCREEN_H

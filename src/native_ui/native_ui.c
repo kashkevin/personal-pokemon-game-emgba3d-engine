@@ -42,6 +42,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_Players,
     &gUiScreen_TrainerCard,
     &gUiScreen_Shop,
+    &gUiScreen_Naming,
     &gUiScreen_Notice,    /* last: only over the calm field */
 };
 
@@ -386,6 +387,47 @@ bool NativeUi_HandleEvent(const SDL_Event *event)
     if (Platform_NativeUiPcMenuOpen()
      && (event->type == SDL_MOUSEBUTTONDOWN || event->type == SDL_MOUSEWHEEL))
         return false;
+    /* a screen that takes typing: letters type instead of pressing buttons */
+    if (sActive != NULL && sActive->textMode != NULL && !Platform_NativeUiPcMenuOpen() && sActive->textMode())
+    {
+        if (event->type == SDL_TEXTINPUT)
+        {
+            if (sActive->text != NULL)
+                sActive->text(event->text.text);
+            return true;
+        }
+        if (event->type == SDL_KEYDOWN && (event->key.keysym.mod & (KMOD_CTRL | KMOD_ALT | KMOD_GUI)) == 0)
+        {
+            SDL_Keycode sym = event->key.keysym.sym;
+
+            UiW_SetPromptDevice(UI_DEVICE_KEYBOARD);
+            switch (sym)
+            {
+            case SDLK_RETURN:
+            case SDLK_KP_ENTER:
+                if (!event->key.repeat)
+                    NativeUi_QueuePress(A_BUTTON);
+                return true;
+            case SDLK_BACKSPACE:
+            case SDLK_ESCAPE:
+                NativeUi_QueuePress(B_BUTTON);
+                return true;
+            case SDLK_PAGEDOWN:
+                if (!event->key.repeat)
+                    NativeUi_QueuePress(SELECT_BUTTON);
+                return true;
+            case SDLK_PAGEUP:
+                if (!event->key.repeat)
+                    NativeUi_QueuePresses(SELECT_BUTTON, 2);
+                return true;
+            default:
+                /* a key that types: its character comes as SDL_TEXTINPUT */
+                if (sym >= SDLK_SPACE && sym < SDLK_DELETE)
+                    return true;
+                break;
+            }
+        }
+    }
     switch (event->type)
     {
     case SDL_KEYDOWN:

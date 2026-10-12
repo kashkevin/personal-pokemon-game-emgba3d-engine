@@ -486,6 +486,41 @@ bool32 OptionMenu_NativeUiState(struct NativeOptionMenu *out);
 /* the session's other players (i < MULTIPLAYER_MAX_PEERS); FALSE: none there or offline */
 bool32 Multiplayer_NativeUiPeer(u32 i, u32 *playerId, u8 *mapGroup, u8 *mapNum, u8 *gender, u8 *activity);
 
+/* ---------------------------------------------------------------- the naming screen (naming_screen.c) */
+
+enum
+{
+    NATIVE_NAMING_LOADING,
+    NATIVE_NAMING_INPUT,     /* reading buttons (or about to: the cursor flies to OK) */
+    NATIVE_NAMING_SWAP,      /* the keyboard page is changing */
+    NATIVE_NAMING_DONE,      /* OK pressed: saving the name, fading out */
+};
+/* keyboard pages in the order SELECT cycles them: UPPER, lower, OTHERS */
+#define NATIVE_NAMING_PAGES 3
+#define NATIVE_NAMING_ROWS 4
+#define NATIVE_NAMING_COLS 8
+struct NativeNaming
+{
+    u8 phase;
+    bool8 ready;
+    u8 kind;                 /* NAMING_SCREEN_* */
+    u8 maxChars;
+    u8 page;                 /* the page in front (during a swap: the one coming) */
+    u8 columns[NATIVE_NAMING_PAGES]; /* keys a row on each page; x == columns: PAGE, BACK, OK */
+    s8 cursorX;
+    s8 cursorY;
+    bool8 cursorShown;
+    bool8 genderIcon;        /* the template shows the Pokémon's gender */
+    u8 gender;               /* MON_MALE, MON_FEMALE, MON_GENDERLESS */
+    u8 playerGender;         /* the player template: whose sprite */
+    u16 species;
+    u32 personality;
+    u8 titleWindow;          /* the title as the engine printed it */
+    u8 text[17];             /* the name so far */
+    u8 keys[NATIVE_NAMING_PAGES][NATIVE_NAMING_ROWS][NATIVE_NAMING_COLS];
+};
+bool32 NamingScreen_NativeUiState(struct NativeNaming *out);
+
 /* ---------------------------------------------------------------- the Poké Mart (shop.c) */
 
 #define NATIVE_SHOP_MAX_ITEMS 64
