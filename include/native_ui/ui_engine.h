@@ -486,6 +486,28 @@ bool32 OptionMenu_NativeUiState(struct NativeOptionMenu *out);
 /* the session's other players (i < MULTIPLAYER_MAX_PEERS); FALSE: none there or offline */
 bool32 Multiplayer_NativeUiPeer(u32 i, u32 *playerId, u8 *mapGroup, u8 *mapNum, u8 *gender, u8 *activity);
 
+/* ---------------------------------------------------------------- the starter choice (starter_choose.c) */
+
+#define NATIVE_STARTER_MAX 18
+enum
+{
+    NATIVE_STARTER_MOVING,    /* between two balls or pages (the label is redrawn) */
+    NATIVE_STARTER_BROWSE,    /* Left / Right: the ball, Up / Down, L / R: the page, A: this one */
+    NATIVE_STARTER_OPENING,   /* the Pokémon comes out of its ball */
+    NATIVE_STARTER_CONFIRM,   /* "Do you choose this POKéMON?" YES / NO */
+};
+struct NativeStarters
+{
+    u8 phase;
+    bool8 ready;
+    u8 selection;             /* page * pageSize + ball */
+    u8 pageSize;              /* balls a page (Grass, Fire, Water) */
+    u8 pageCount;
+    u8 yesNoCursor;           /* 0: YES */
+    u16 species[NATIVE_STARTER_MAX];
+};
+bool32 StarterChoose_NativeUiState(struct NativeStarters *out);
+
 /* ---------------------------------------------------------------- the naming screen (naming_screen.c) */
 
 enum
