@@ -36,6 +36,10 @@ extern const struct MapLayout *const gMapLayouts[];
 #define ART_HEIGHT (ENTRY_ROWS * ENTRY_STRIDE)
 #define ART_SIZE_GLSL "288.0"
 #define NO_ENTRY 0xFF
+/* A lamp's glass pixels (bright as drawn) carry this alpha: they glow at
+ * night whatever the tint has made of their colour. */
+#define GLASS_ALPHA 200
+#define GLASS_BRIGHTNESS 0xA6
 #define MAX_INSTANCES (DIORAMA_MAX_VISIBLE_CELLS * 2)
 /* The shaders' spelling of the texture's size. */
 typedef char ArtSizeCheck[(ART_WIDTH == 288 && ART_HEIGHT == 288) ? 1 : -1];
@@ -239,7 +243,7 @@ static const char sFragmentShader[] =
     "  color.rgb += Grade(texel.rgb) * Lamps(sceneWorldPosition);\n"
     /* A lamp's glass glows at night: its light pixels warm and bright. */
     "  if (glow > 0.0) {\n"
-    "    float lit = smoothstep(0.30, 0.65, max(texel.r, max(texel.g, texel.b)));\n"
+    "    float lit = texel.a < 0.95 ? 1.0 : smoothstep(0.30, 0.65, max(texel.r, max(texel.g, texel.b)));\n"
     "    color.rgb = mix(color.rgb, vec3(1.0, 0.86, 0.55) * (0.75 + 0.35 * lit), glow * lit);\n"
     "  }\n"
     "  color.rgb = Haze(color.rgb, viewDepth, sceneWorldPosition);\n"
@@ -579,6 +583,28 @@ static bool ComposePiece(const struct DioramaSceneSnapshot *snapshot, unsigned e
     /* The piece holds every row the prop has; an instance shows some. */
     DioramaProps_ArtEntries(cell, prop->prop, entries);
     DioramaProps_ComposeArt(&whole, art.tileGraphics, art.fadedPalette, entries, pixels);
+    if ((prop->prop->flags & DIORAMA_PROP_LIGHT) && art.unfadedPalette != NULL)
+    {
+        /* A lamp's glass: its light pixels as drawn, before the night tint
+         * darkens them (which left the glass too dark to glow), marked in the
+         * alpha the shader reads (GLASS_ALPHA). */
+        uint32_t unfaded[16 * 16];
+        unsigned i;
+
+        DioramaProps_ComposeArt(&whole, art.tileGraphics, art.unfadedPalette, entries, unfaded);
+        for (i = 0; i < 16 * 16; i++)
+        {
+            uint32_t c = unfaded[i];
+            uint32_t brightest = (c >> 16) & 0xFF;
+
+            if (((c >> 8) & 0xFF) > brightest)
+                brightest = (c >> 8) & 0xFF;
+            if ((c & 0xFF) > brightest)
+                brightest = c & 0xFF;
+            if ((pixels[i] >> 24) != 0 && brightest >= GLASS_BRIGHTNESS)
+                pixels[i] = (pixels[i] & 0x00FFFFFFu) | ((uint32_t)GLASS_ALPHA << 24);
+        }
+    }
     sEntryProp[entry] = prop->prop;
     return StorePiece(entry, pixels);
 }

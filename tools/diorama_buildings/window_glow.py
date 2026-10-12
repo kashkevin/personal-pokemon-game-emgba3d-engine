@@ -48,6 +48,24 @@ def glassy(c):
     return b - r >= 40 and g - r >= 24 and g >= 112
 
 
+# Dark glass (graphics overhaul phase 4): a window drawn as a dark blue pane
+# in a light frame (Mossdeep's houses, Devon's slits in Rustboro), unlit by
+# day, lit at night like the others. Stricter than light glass: a solid pane,
+# framed nearly all round by something much lighter (the art's dark blue
+# outlines and shadow bands are thin or unframed).
+DARK_MIN_PIXELS = 12
+DARK_MIN_FILL = 0.7
+DARK_MIN_FRAMED = 0.6
+FRAME_LIGHTER = 180
+
+
+def dark_glassy(c):
+    if c is None:
+        return False
+    r, g, b = c
+    return b - r >= 30 and b - g >= 15 and 150 <= r + g + b <= 330
+
+
 def near_white(c):
     return c is not None and min(c) >= 184
 
@@ -171,6 +189,7 @@ def find_windows(w, h, colour, wall):
 
     for f in pieces:
         f["window"] = pane(f)
+    pieces += dark_panes(w, h, at, {q for f in pieces for q in f["pixels"]})
     # A sliver of glass (the top row of a pane over a glazing bar) beside a
     # window is part of it.
     for f in pieces:
@@ -208,6 +227,42 @@ def find_windows(w, h, colour, wall):
         if not leak:
             f["pixels"] = sorted(region - taken)
         taken.update(f["pixels"])
+    return pieces
+
+
+def dark_panes(w, h, at, taken):
+    """The dark panes of a page (dark_glassy, framed by much lighter pixels):
+    windows as they are, not grown. `taken`: pixels light glass claimed."""
+    pieces = []
+    done = set(taken)
+    for y in range(h):
+        for x in range(w):
+            if (x, y) in done or not dark_glassy(at(x, y)):
+                continue
+            c = at(x, y)
+            piece = _component((x, y), lambda q, c=c: q not in done and at(*q) == c)
+            done.update(piece)
+            inside = set(piece)
+            xs = [q[0] for q in piece]
+            ys = [q[1] for q in piece]
+            bw, bh = max(xs) - min(xs) + 1, max(ys) - min(ys) + 1
+            if (len(piece) > WALL_PIXELS or bw >= WALL_WIDTH or bh >= WALL_HEIGHT
+                    or len(piece) < DARK_MIN_PIXELS or bw < 3 or bh < 3
+                    or bw > MAX_ASPECT * bh or bh > MAX_ASPECT * bw):
+                continue
+            fill = len(piece) / float(bw * bh)
+            ring = set()
+            for px, py in piece:
+                for dx, dy in STEPS:
+                    if (px + dx, py + dy) not in inside:
+                        ring.add((px + dx, py + dy))
+            lum = sum(c)
+            framed = sum(1 for q in ring if at(*q) is not None and sum(at(*q)) >= lum + FRAME_LIGHTER)
+            framed /= float(max(1, len(ring)))
+            if fill < DARK_MIN_FILL or framed < DARK_MIN_FRAMED:
+                continue
+            pieces.append({"pixels": sorted(piece), "lum": lum, "shape": (min(xs), min(ys), bw, bh),
+                           "fill": fill, "framed": framed, "window": True, "dark": True})
     return pieces
 
 
