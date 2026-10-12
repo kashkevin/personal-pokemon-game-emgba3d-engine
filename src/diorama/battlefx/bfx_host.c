@@ -531,12 +531,17 @@ bool BfxHost_Frame(struct BfxHost *host, double t, struct BfxPacket *p)
 
     if (host == NULL || !host->ready)
         return false;
+    size_t gcBefore;
+
     ctx = host->ctx;
     Enter(host);
+    gcBefore = JS_GetGCThreshold(host->rt);
     f = JS_GetPropertyStr(ctx, host->bridge, "frame");
     arg = t >= 0 ? JS_NewFloat64(ctx, t) : JS_UNDEFINED;
     pk = JS_Call(ctx, f, host->bridge, 1, &arg);
     JS_FreeValue(ctx, f);
+    if (JS_GetGCThreshold(host->rt) != gcBefore)
+        host->gcCount++;
     if (JS_IsException(pk))
     {
         SetExceptionError(host, "frame");
