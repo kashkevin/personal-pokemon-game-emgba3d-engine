@@ -130,7 +130,8 @@ class Run:
     def x(self, *args):
         return subprocess.run(['xdotool'] + list(args), env=self.env, capture_output=True, text=True).stdout
 
-    def find_window(self, timeout=30):
+    def find_window(self, timeout=90):
+        # (a busy computer: two games at once and a build took the window past half a minute)
         t0 = time.time()
         while time.time() - t0 < timeout and self.proc.poll() is None:
             ids = self.x('search', '--name', 'Pokemon Emerald').split()
