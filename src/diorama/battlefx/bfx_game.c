@@ -89,6 +89,9 @@ static struct
     char id[48];
     struct BfxBeginResult begun;
     double beginMs, stepMs, worstStepMs;
+    double worstPlainStepMs;   /* ... of the steps without a QuickJS garbage collection */
+    int gcSteps;               /* steps during which QuickJS collected garbage */
+    bool gcInBegin;
     int gameFrames, hdFrames;
     struct BfxPacket packet;
     uint32_t serial;
@@ -849,11 +852,12 @@ static void EndAnimation(const char *why)
     BattleFxTest_OnAnimEnd(sAnim.serial);
 #endif
     if (sCore.log)
-        SDL_Log("Battle FX: %s ended (%s): the game's animation %d frames, the core's %d of %d%s; begin %.1f ms, "
-                "a frame %.2f ms on average, %.2f ms at worst",
+        SDL_Log("Battle FX: %s ended (%s): the game's animation %d frames, the core's %d of %d%s; begin %.1f ms%s, "
+                "a frame %.2f ms on average, %.2f ms at worst (%.2f without a garbage collection; %d with one)",
                 sAnim.id, why, sAnim.gameFrames, sAnim.hdFrames, sAnim.begun.totalFrames,
-                sAnim.hdEnded ? " (it had ended)" : "", sAnim.beginMs,
-                sAnim.hdFrames ? sAnim.stepMs / sAnim.hdFrames : 0.0, sAnim.worstStepMs);
+                sAnim.hdEnded ? " (it had ended)" : "", sAnim.beginMs, sAnim.gcInBegin ? " (with a garbage collection)" : "",
+                sAnim.hdFrames ? sAnim.stepMs / sAnim.hdFrames : 0.0, sAnim.worstStepMs, sAnim.worstPlainStepMs,
+                sAnim.gcSteps);
 }
 
 static void FailAnimation(const char *what)
@@ -934,6 +938,7 @@ static bool BeginRequest(struct BfxHost *host, const char *id, const char *reque
                          uint32_t animId, uint8_t controller)
 {
     Uint64 t0;
+    unsigned gc0;
 
     if (len >= BFX_REQUEST_MAX - 1)
     {
@@ -943,11 +948,13 @@ static bool BeginRequest(struct BfxHost *host, const char *id, const char *reque
     if (Refused(id))
         return false;
     t0 = SDL_GetPerformanceCounter();
+    gc0 = BfxHost_GcCount(host);
     if (!BfxHost_Begin(host, request, &sAnim.begun))
     {
         NoteRefused(id, BfxHost_LastError(host));
         return false;
     }
+    sAnim.gcInBegin = BfxHost_GcCount(host) != gc0;
     memset(&sAnim.packet, 0, sizeof(sAnim.packet));
     sAnim.active = true;
     sAnim.failed = false;
@@ -960,6 +967,8 @@ static bool BeginRequest(struct BfxHost *host, const char *id, const char *reque
     sAnim.beginMs = (SDL_GetPerformanceCounter() - t0) * 1000.0 / SDL_GetPerformanceFrequency();
     sAnim.stepMs = 0;
     sAnim.worstStepMs = 0;
+    sAnim.worstPlainStepMs = 0;
+    sAnim.gcSteps = 0;
     sAnim.gameFrames = 0;
     sAnim.hdFrames = 0;
     sAnim.serial++;
@@ -984,6 +993,9 @@ void BattleFx_AnimInfo(struct BattleFxAnimInfo *info)
     info->beginMs = sAnim.beginMs;
     info->stepMsTotal = sAnim.stepMs;
     info->stepMsWorst = sAnim.worstStepMs;
+    info->stepMsWorstPlain = sAnim.worstPlainStepMs;
+    info->gcSteps = sAnim.gcSteps;
+    info->gcInBegin = sAnim.gcInBegin;
 }
 
 unsigned BattleFx_Failures(void)
@@ -1013,9 +1025,12 @@ void BattleFx_OnAnimTick(void)
  * (game thread). false: the animation failed (its GBA effects show). */
 static bool StepCore(struct BfxHost *host)
 {
-    Uint64 t0 = SDL_GetPerformanceCounter();
+    Uint64 t0 = SDL_GetPerformanceCounter(), t1 = 0, t2 = 0;
+    unsigned gc0 = BfxHost_GcCount(host);
     int r = BfxHost_Step(host);
     double ms;
+
+    t1 = SDL_GetPerformanceCounter();
 
     if (r < 0)
     {
@@ -1035,6 +1050,7 @@ static bool StepCore(struct BfxHost *host)
             FailAnimation("frame");
             return false;
         }
+        t2 = SDL_GetPerformanceCounter();
         sAnim.packet.hideBg = (uint8_t)(BfxHost_CallGlobalInt(host, "BFX_GAME_HIDDEN_BGS", 0) & 0x06);
         sAnim.hdFrames++;
         sAnim.packetValid = true;
@@ -1048,6 +1064,16 @@ static bool StepCore(struct BfxHost *host)
     sAnim.stepMs += ms;
     if (ms > sAnim.worstStepMs)
         sAnim.worstStepMs = ms;
+    if (sCore.log && ms > 20.0)
+    {
+        double f = 1000.0 / SDL_GetPerformanceFrequency();
+        SDL_Log("Battle FX: %s frame %d took %.1f ms (step %.1f, frame packet %.1f%s)", sAnim.id, sAnim.hdFrames, ms,
+                (t1 - t0) * f, t2 ? (t2 - t1) * f : 0.0, BfxHost_GcCount(host) != gc0 ? ", with a garbage collection" : "");
+    }
+    if (BfxHost_GcCount(host) != gc0)
+        sAnim.gcSteps++;
+    else if (ms > sAnim.worstPlainStepMs)
+        sAnim.worstPlainStepMs = ms;
     return true;
 }
 

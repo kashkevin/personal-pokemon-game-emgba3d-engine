@@ -33,6 +33,7 @@ struct BfxHost
     int animIdCount;
     char error[1024];
     double lastCallMs;
+    unsigned gcCount;     /* QuickJS's automatic collections seen (its threshold moves after one) */
 };
 
 static double NowMs(void)
@@ -176,6 +177,7 @@ static bool Call(struct BfxHost *host, const char *fn, const char *arg, bool par
     JSContext *ctx = host->ctx;
     JSValue f, a = JS_UNDEFINED, r;
     int argc = 0;
+    size_t gcBefore;
 
     if (out)
         *out = JS_UNDEFINED;
@@ -186,6 +188,7 @@ static bool Call(struct BfxHost *host, const char *fn, const char *arg, bool par
         return false;
     }
     Enter(host);
+    gcBefore = JS_GetGCThreshold(host->rt);
     f = JS_GetPropertyStr(ctx, host->bridge, fn);
     if (arg != NULL)
     {
@@ -201,6 +204,8 @@ static bool Call(struct BfxHost *host, const char *fn, const char *arg, bool par
     r = JS_Call(ctx, f, host->bridge, argc, &a);
     JS_FreeValue(ctx, f);
     JS_FreeValue(ctx, a);
+    if (JS_GetGCThreshold(host->rt) != gcBefore)
+        host->gcCount++;
     if (JS_IsException(r))
     {
         SetExceptionError(host, fn);
@@ -821,6 +826,22 @@ bool BfxHost_AnimKindNumber(const struct BfxHost *host, const char *id, const ch
             return true;
         }
     return false;
+}
+
+unsigned BfxHost_GcCount(const struct BfxHost *host)
+{
+    return host ? host->gcCount : 0;
+}
+
+double BfxHost_CollectGarbage(struct BfxHost *host)
+{
+    double t0 = NowMs();
+
+    if (host == NULL || host->rt == NULL)
+        return 0.0;
+    Enter(host);
+    JS_RunGC(host->rt);
+    return NowMs() - t0;
 }
 
 const char *BfxHost_LastError(const struct BfxHost *host)

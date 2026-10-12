@@ -107,6 +107,9 @@ struct BattleFxAnimInfo
     int gameFrames;       /* frames the game's animation has advanced */
     int coreFrames;       /* frames the core has stepped */
     double beginMs, stepMsTotal, stepMsWorst;
+    double stepMsWorstPlain; /* the worst step without a QuickJS garbage collection in it */
+    int gcSteps;             /* steps with one */
+    bool gcInBegin;
 };
 void BattleFx_AnimInfo(struct BattleFxAnimInfo *info);
 unsigned BattleFx_Failures(void);

@@ -529,13 +529,13 @@ static void WriteResult(void)
                 "{\"move\":%u,\"turn\":%d,\"id\":\"%s\",\"core\":\"%s\",\"gameFrames\":%d,\"coreFrames\":%d,\"planned\":%d,"
                 "\"failed\":%s,\"parity\":{\"compared\":%d,\"equal\":%d,\"firstBad\":%d,\"sprites\":%d,"
                 "\"game\":\"%s\",\"core\":\"%s\"},\"tail\":{\"frames\":%d,\"withSprites\":%d,\"first\":\"%s\"},"
-                "\"scriptFrames\":%d,\"gameDoneAt\":%d,"
+                "\"scriptFrames\":%d,\"gameDoneAt\":%d,\"gcSteps\":%d,\"gcInBegin\":%s,\"stepMsWorstPlain\":%.3f,"
                 "\"beginMs\":%.2f,\"stepMs\":%.3f,\"stepMsWorst\":%.3f,\"shots\":[",
                 t.move, t.curTurn, t.name, info.serial == t.serial ? info.id : "",
                 t.frames, info.serial == t.serial ? info.coreFrames : 0, info.serial == t.serial ? info.plannedFrames : 0,
                 info.failed ? "true" : "false", t.compared, t.equal, t.firstBad, t.sprites, t.badGame, t.badCore,
                 t.tailFrames, t.tailSprites, t.tailFirst, info.serial == t.serial ? info.scriptFrames : 0, t.gameDoneAt,
-                info.beginMs, info.coreFrames ? info.stepMsTotal / info.coreFrames : 0.0, info.stepMsWorst);
+                info.gcSteps, info.gcInBegin ? "true" : "false", info.stepMsWorstPlain, info.beginMs, info.coreFrames ? info.stepMsTotal / info.coreFrames : 0.0, info.stepMsWorst);
         for (int i = 0; i < t.wantCount; i++)
             fprintf(t.report, "%s{\"frame\":%d,\"file\":\"%s\"}", i ? "," : "", t.want[i],
                     t.written[i] ? t.shotNames[i] : "");
