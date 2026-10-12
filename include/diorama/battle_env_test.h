@@ -30,6 +30,21 @@
  *   PKMN_TEST_STRONG=1       the party at level 100 and healed when the field is up (in
  *                            memory only), so a fought battle is won
  *
+ * For the battle sprite tests (platform/battle_sprites.h):
+ *   PKMN_TEST_PARTY          the player's party instead: species:level[:flags],...
+ *                            (flags: s shiny, f female, m male, i<item id> held item,
+ *                            v<move id> first move)
+ *   PKMN_TEST_FOE            flags for the foes wild/wild2/legendary make: flags,flags
+ *   PKMN_TEST_BAG            items added to the bag: item:count,... (a Mega Ring...)
+ *   PKMN_TEST_KEYS           keys pressed once the action menu is up: frame:KEY,...
+ *                            (A B START SELECT UP DOWN LEFT RIGHT L R, three frames each)
+ *   PKMN_TEST_CAPTURE_EVERY  with _COUNT: a series of captures <stem>-NN, one every that
+ *   PKMN_TEST_CAPTURE_COUNT  many drawn frames from PKMN_TEST_CAPTURE_DELAY after the
+ *   PKMN_TEST_CAPTURE_FROM   action menu came up (or after the battle was first drawn: battle)
+ *   PKMN_TEST_PARADE         first:last - at the action menu, both sides show each species
+ *   PKMN_TEST_PARADE_FRAMES  in turn for that many frames (default 12); _FLAGS s shiny,
+ *   PKMN_TEST_PARADE_FLAGS   f female, m male; then (PKMN_TEST_EXIT) the process ends
+ *
  * Nothing here changes a battle: it starts one the way the debug menu's
  * "Try battle" does and reads the picture.
  */
