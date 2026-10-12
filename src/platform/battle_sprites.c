@@ -111,6 +111,13 @@ static struct Active sActive[BS_BATTLERS];
 static uint32_t sFrames, sBattleFrames, sStripClock;
 static bool sLog;
 static FILE *sTrace;
+/* Costs (PKMN_BATTLE_SPRITES_LOG): the whole software picture of a battle frame, the frame setup
+ * here, and decoding facings, logged every 600 battle frames. */
+static struct
+{
+    uint64_t begin, pictureSum, pictureMax, setupSum, decodeSum, decodeMax;
+    uint32_t frames, decodes;
+} sCost;
 static char sDumpStem[512];
 static uint32_t sDumpFrom, sDumpEvery = 1, sDumpCount;
 static int sDumpAfterLook;          /* dump this many frames after any battler's look changed */
@@ -131,6 +138,7 @@ const struct BattleSpriteView *gBattleSpriteObjViews[128];
 struct BattleSpriteBgCopy gBattleSpriteBgCopies[4];
 struct BattleSpriteOverflow gBattleSpriteOverflow[BATTLE_SPRITE_OVERFLOW_MAX];
 unsigned gBattleSpriteOverflowCount;
+uint32_t gBattleSpriteOverflowSerial;
 
 static int EnvInt(const char *name, int fallback)
 {
@@ -347,8 +355,18 @@ static struct Strip *GetStrip(int facing)
             sStrips[i].lastUse = ++sStripClock;
             return &sStrips[i];
         }
-    if (info == NULL || bsl_decode_indices(sPack, facing, &pixels, &size) != 0)
-        return NULL;
+    {
+        uint64_t t0 = SDL_GetPerformanceCounter(), dt;
+        int failed = info == NULL || bsl_decode_indices(sPack, facing, &pixels, &size) != 0;
+
+        dt = SDL_GetPerformanceCounter() - t0;
+        sCost.decodeSum += dt;
+        if (dt > sCost.decodeMax)
+            sCost.decodeMax = dt;
+        sCost.decodes++;
+        if (failed)
+            return NULL;
+    }
     for (i = 0; i < BS_STRIPS; i++)
     {
         bool busy = false;
@@ -778,9 +796,11 @@ void BattleSprites_BeginFrame(void)
     uint32_t nowMs;
     unsigned b, i;
 
+    sCost.begin = SDL_GetPerformanceCounter();
     memset(gBattleSpriteObjViews, 0, sizeof(gBattleSpriteObjViews));
     memset(gBattleSpriteBgCopies, 0, sizeof(gBattleSpriteBgCopies));
     gBattleSpriteOverflowCount = 0;
+    gBattleSpriteOverflowSerial++;
     if (!sInit)
         Init();
     sFrames++;
@@ -868,8 +888,28 @@ void BattleSprites_BeginFrame(void)
         gBattleSpriteBgCopies[i].paletteId = copy->paletteId;
     }
     Overflow();
+    sCost.setupSum += SDL_GetPerformanceCounter() - sCost.begin;
     if (sTrace != NULL)
         Trace();
+}
+
+static void CostFrame(void)
+{
+    uint64_t picture = SDL_GetPerformanceCounter() - sCost.begin;
+    double ms = 1000.0 / (double)SDL_GetPerformanceFrequency();
+
+    sCost.pictureSum += picture;
+    if (picture > sCost.pictureMax)
+        sCost.pictureMax = picture;
+    if (++sCost.frames < 600)
+        return;
+    if (sLog)
+        SDL_Log("Battle sprites: %s; the battle picture %.3f ms a frame (at most %.3f), of which the sprites' "
+                "setup %.3f ms; %u facings decoded, %.2f ms each (at most %.2f)",
+                sOff ? "off" : "on", sCost.pictureSum * ms / sCost.frames, sCost.pictureMax * ms,
+                sCost.setupSum * ms / sCost.frames, sCost.decodes,
+                sCost.decodes ? sCost.decodeSum * ms / sCost.decodes : 0.0, sCost.decodeMax * ms);
+    memset(&sCost, 0, sizeof(sCost));
 }
 
 void BattleSprites_EndFrame(const uint16_t *pixels)
@@ -877,6 +917,9 @@ void BattleSprites_EndFrame(const uint16_t *pixels)
     static uint8_t rgba[DISPLAY_WIDTH * DISPLAY_HEIGHT * 4];
     char path[600];
     uint32_t n;
+
+    if (sBattleFrames > 0)
+        CostFrame();
 
     if (sDumpStem[0] == '\0' || sBattleFrames == 0)
         return;
