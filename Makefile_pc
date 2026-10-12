@@ -228,7 +228,7 @@ OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS)
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
-.PHONY: all clean check-native check-abi check-game-sections check-decompress
+.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim
 .SUFFIXES:
 .SECONDARY:
 .DELETE_ON_ERROR:
@@ -276,6 +276,35 @@ check-abi:
 check-decompress: $(TARGET)
 	python3 tools/pc_port/make_decompress_list.py $(ASSETS_DIR) > $(OBJ_DIR)/decompress_list.txt
 	./$(TARGET) --selftest-decompress $(OBJ_DIR)/decompress_list.txt | tail -n 20
+
+# The battle's party order for single, double, two-opponent and Multi battles,
+# run in the game itself (KNOWN_ISSUES N37: two opponent trainers wrote past an
+# array as the battle started). Every case must return and keep the game's order.
+check-party-order: $(TARGET)
+	@./$(TARGET) --selftest-party-order > $(OBJ_DIR)/selftest-party-order.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-party-order.log; exit $$status
+
+# Battle messages naming two trainers with their classes (KNOWN_ISSUES N38: the
+# names went on past a 32-byte buffer as Mossdeep's Space Center Multi battle
+# began), for every trainer against the longest-named one. Each must return and
+# read as each name alone does.
+check-battle-names: $(TARGET)
+	@./$(TARGET) --selftest-battle-names > $(OBJ_DIR)/selftest-battle-names.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-battle-names.log; exit $$status
+
+# The Pokemon cry functions before any cry has played (KNOWN_ISSUES N39: a double
+# battle's send-out right after a save was continued stopped a cry that was not
+# there, natively a segmentation fault). Each must return.
+check-cry-stop: $(TARGET)
+	@./$(TARGET) --selftest-cry-stop > $(OBJ_DIR)/selftest-cry-stop.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-cry-stop.log; exit $$status
+
+# A move animation shaking a battler or the background (KNOWN_ISSUES N40: natively
+# the address of what it shakes sign-extended where its bit 15 is set, a fault in
+# Rock Slide's, Metal Claw's... animation). Each shake must end and restore its value.
+check-shake-anim: $(TARGET)
+	@./$(TARGET) --selftest-shake-anim > $(OBJ_DIR)/selftest-shake-anim.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-shake-anim.log; exit $$status
 
 # C: preprocess (same flags as the GBA build + PORTABLE), expand INCBIN/charmap
 # strings with preproc, then compile for 32-bit x86.

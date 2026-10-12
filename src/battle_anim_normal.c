@@ -963,7 +963,16 @@ static void AnimShakeMonOrBattlePlatforms(struct Sprite *sprite)
         break;
     }
 
+#ifdef PORTABLE
+    // KNOWN_ISSUES N40: the shaken value's address is kept in two s16 fields; on the
+    // GBA it is in IWRAM (bit 15 never set), natively bit 15 can be set and the low
+    // half sign-extends over the high one (a fault in Rock Slide's, Metal Claw's...
+    // animation). Its low half read unsigned, as SetCallbackToStoredInData6 does.
+    sprite->sOriginalValue = *(u16 *)((u16)sprite->sShakePtrLo | (sprite->sShakePtrHi << 16));
+#else
     sprite->sOriginalValue = *(u16 *)(sprite->sShakePtrLo | (sprite->sShakePtrHi << 16));
+#endif
+#line 967 // gba-line
     sprite->sType = cmd->type;
     if (sprite->sType == SHAKE_MON_X || sprite->sType == SHAKE_MON_Y)
         AnimShakeMonOrBattlePlatforms_UpdateCoordOffsetEnabled();
@@ -983,13 +992,25 @@ static void AnimShakeMonOrBattlePlatforms_Step(struct Sprite *sprite)
         else
         {
             sprite->sShakeTimer = sprite->sShakeDuration;
+#ifdef PORTABLE
+            // KNOWN_ISSUES N40 (above).
+            *(u16 *)((u16)sprite->sShakePtrLo | (sprite->sShakePtrHi << 16)) += sprite->sShakeVelocity;
+#else
             *(u16 *)(sprite->sShakePtrLo | (sprite->sShakePtrHi << 16)) += sprite->sShakeVelocity;
+#endif
+#line 987 // gba-line
             sprite->sShakeVelocity = -sprite->sShakeVelocity;
         }
     }
     else
     {
+#ifdef PORTABLE
+        // KNOWN_ISSUES N40 (above).
+        *(u16 *)((u16)sprite->sShakePtrLo | (sprite->sShakePtrHi << 16)) = sprite->sOriginalValue;
+#else
         *(u16 *)(sprite->sShakePtrLo | (sprite->sShakePtrHi << 16)) = sprite->sOriginalValue;
+#endif
+#line 993 // gba-line
         if (sprite->sType == SHAKE_MON_X || sprite->sType == SHAKE_MON_Y)
         {
             for (enum BattlerId i = 0; i < gBattlersCount; i++)
