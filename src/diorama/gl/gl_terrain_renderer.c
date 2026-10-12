@@ -1907,6 +1907,10 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
         }
     }
 
+    /* Every sync, whether or not a chunk is rebuilt: the palette's fade and the
+     * night tint change without the cells changing (the voxel trees and the
+     * tree sprites read it every frame). */
+    TreeTint(snapshot);
     SyncFar(snapshot);
     sMetrics.rebuiltChunks = 0;
     if (rulesGeneration != sRulesGeneration)
