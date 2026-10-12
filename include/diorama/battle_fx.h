@@ -20,13 +20,18 @@
  * the battle, so damage, accuracy, turn order, saves and multiplayer are
  * untouched; a failure only shows the GBA effects again.
  *
+ * The core runs on a thread of its own; the game never waits for it (the
+ * frame boundary pairs its frames with the pictures: src/diorama/battlefx/
+ * README.md).
+ *
  * Settings (development): PKMN_BATTLEFX=0 plays the original GBA animations;
  * PKMN_BATTLEFX_DIR=<folder> reads the core from there (default: the
  * "battlefx" folder beside the executable, then in the working folder);
  * PKMN_BATTLEFX_LOG=1 logs every animation (the game's and the core's frame
- * counts, the core's cost). The same keys can be put in battlefx/settings.cfg
- * (key=value lines: enabled, log). Failures are always logged and the GBA
- * animation is shown.
+ * counts, the core's cost, how its pictures went); PKMN_BATTLEFX_SYNC=1 makes
+ * the game wait for the core every frame (the default in test builds). The
+ * same keys can be put in battlefx/settings.cfg (key=value lines: enabled,
+ * log, sync). Failures are always logged and the GBA animation is shown.
  *
  * Built only with DIORAMA=1 (ENABLE_DIORAMA).
  */

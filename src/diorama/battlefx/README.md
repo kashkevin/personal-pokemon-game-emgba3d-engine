@@ -13,31 +13,59 @@ the battle waits for it as ever. Beside it the Battle FX core - the package's an
 and HD director (`battlefx/bfx_core.js`, run by QuickJS-ng) - replays the same script from the
 same request, one step for every frame the game's animation advances. Its output only reaches
 the screen: while it draws, the 3D view leaves the game's effect sprites (graphics tags
-`ANIM_TAG_*`, the Poke Balls and their particles) and the effect BG layers it redraws out of
-the GBA picture, and draws the HD effects over the picture and the world instead. Nothing in
-Battle FX writes game memory (the one getter pair that notes a battler for item messages,
-`GetBattlerHoldEffect` / `GetBattlerAbility`, is read with `gPotentialItemEffectBattler` put
-back) or decides anything about the battle: damage, accuracy, turn order, abilities, saves
-and multiplayer are untouched. A failure only shows the GBA effects again.
+`ANIM_TAG_*`, the Poke Balls and their particles, told by the tile sheet each sprite shows) and
+the effect BG layers it redraws out of the GBA picture, and draws the HD effects over the
+picture and the world instead. Nothing in Battle FX writes game memory (the one getter pair
+that notes a battler for item messages, `GetBattlerHoldEffect` / `GetBattlerAbility`, is read
+with `gPotentialItemEffectBattler` put back) or decides anything about the battle: damage,
+accuracy, turn order, abilities, saves and multiplayer are untouched. A failure only shows the
+GBA effects again.
 
 ## Files
 
 | File | |
 | --- | --- |
 | `include/diorama/battle_fx.h` | The hooks and settings. |
-| `src/diorama/battlefx/bfx_game.c` | Game side: requests, stepping, the controllers' animations, OAM marks, frame boundary. |
+| `src/diorama/battlefx/bfx_game.c` | Game side: requests, the core's thread, the controllers' animations, OAM marks, the frame boundary. |
 | `src/diorama/battlefx/bfx_host.c`, `include/diorama/battle_fx_host.h` | The QuickJS-ng host for the core: begin / step / frame packets. |
 | `src/diorama/gl/gl_battle_fx.c`, `include/diorama/battle_fx_render.h` | The renderer (OpenGL 3.3, the game's context and frame): particles, cards, ribbons, meshes, lights, distortion, bloom, the game's own battlers lit / flashed / glowing. |
 | `src/diorama/battlefx/bfx_test.c`, `include/diorama/battle_fx_test.h` | The test driver (test builds only, `-DBATTLEFX_TEST`). |
 | `battlefx/` | The data the game reads beside the executable (`tools/battlefx/pack_data.py`; `MANIFEST.txt` lists every file's SHA-256). |
 | `third_party/quickjs-ng`, `third_party/stb` | QuickJS-ng v0.10.1 (MIT), stb_image 2.30 (public domain); `VENDORED.txt` in each. |
-| `tools/battlefx/` | `pack_data.py` (the data folder), `bfx_check.c` / `build_check.sh` (the core's numbers under the game's 32-bit builds against the package's). |
+| `tools/battlefx/` | `convert_data.py` / `pack_data.py` (the data folder), `gallery.sh` / `realsuite.sh` / `summarize.py` (tests), `bfx_check.c` / `build_check.sh` (the core's numbers under the game's 32-bit builds against the package's). |
 
 Hooks in game code (each under `ENABLE_DIORAMA`, GBA line numbers kept with `#line`, the GBA
 ROM byte-identical): `battle_anim.c` (launch, the script advancing), `sprite.c` (OAM marks),
-`main.c` (frame end), `pokeball.c` (a send-out's ball made), `battle_anim_throw.c` (a shiny
-Pokemon's stars), `gl_battle.c` (drawing), `gba_easy_draw.c` (BG layers left out),
-`battle_controller_player.c` (test builds only).
+`main.c` (frame start and end), `pokeball.c` (a send-out's ball made), `battle_anim_throw.c` (a
+shiny Pokemon's stars), `gl_battle.c` (drawing), `gba_easy_draw.c` (BG layers left out),
+`battle_controller_player.c` (test builds only). Fixes found by the galleries, native builds
+only (`PORTABLE`): `battle_anim_effects_1.c` (Mimic without a target partner),
+`battle_anim_mon_movement.c` (Struggle Bug's partner shake without a partner),
+`platform/m4a_pc.c` (a song number past the song table: Shadow Force / Phantom Force).
+
+## The core's thread
+
+The core runs on a thread of its own (the one that loads it). The game thread hands it each
+animation's begin and one step a frame and does not wait: the core's cost (a begin plans the
+whole animation; a heavy frame; a QuickJS garbage collection) never holds a game frame up. Each
+frame the core makes is copied out of its arrays into a slot of its own (the particle rings into
+one mirror, with the ranges changed since they were last taken).
+
+The frame boundary (`BattleFx_FrameBoundary`, main thread, the game thread parked) shows the
+frame made for the game frame whose OAM the picture shows: the picture drawn after game frame N
+is frame N - 1's (OAM reaches the screen at the VBlank after the frame that built it), and the
+core's frame for N - 1 goes with it. When the core is behind, the picture waits a little for it
+(up to 60 ms once for an animation's first frame, 8 ms when 3 or more frames behind), then shows
+the newest frame made (up to 6 frames old); a frame finished later in the picture's time
+replaces it before a present (`BattleFx_LateFrame`). An animation's effect sprites wait up to 4
+pictures for its first frame rather than show as GBA pixel art first; an animation the core
+falls further behind on plays its GBA effects from there on. With `PKMN_BATTLEFX_LOG=1` the log
+says, per animation, how its pictures went (with the core's frame for them, an older one, none,
+and how long the pictures waited).
+
+`sync=1` (`PKMN_BATTLEFX_SYNC=1`; the default in test builds) makes the game thread wait for
+every command: the frames pair with the game's frame for frame (the parity tests), and the test
+driver may use the core between frames.
 
 ## The replay follows the game frame for frame
 
@@ -47,7 +75,8 @@ and position) with the core's. To make the replay the game's own:
 - **Data from this game's tree.** The package's data is converted with pokeemerald-expansion's
   default config (`GEN_LATEST` = Gen 9); this game sets Gen 6, which changes Leech Life's
   absorb branch and some moves' power, category and target. `battlefx/bfx_moves.json` is
-  converted from this repository with the package's own converter (see Data below).
+  converted from this repository by the package's own converter (see Data below), keeping the
+  `panse` commands' pan step and delay.
 - **The branch the game takes.** Script branches on a task's result (Seismic Toss's damage
   level, Weather Ball's weather, Ice Ball's and Rollout's counter, Fury Cutter, Spit Up,
   Present, Magnitude, Return, Frustration, Techno Blast's Drive, side and double checks) are
@@ -56,10 +85,19 @@ and position) with the core's. To make the replay the game's own:
   `gRng2Value` when the animation begins); `SpriteCB_RandomCentredHits`, the one animation
   callback drawing from `Random`, gets stream 1 from `gRngValue`, advanced each frame as the
   vblank handlers do (the count measured from the game, `Rng1PerFrame`).
-- **The game's sound lengths.** `waitsound` and the script's end wait for the game's sound
-  effects; the runtime has no audio, so `battlefx/se_frames.json` gives every sound effect's
-  length (measured in the game, see Tests) and the core waits as the game does (90 frames at
-  most, then stops them, as `battle_anim.c` does).
+- **The game's sound.** The runtime has no audio. Replaying the game's animation, the core gets
+  the game's sound state at the start of each frame (`BattleFx_OnFrameBegin`: `IsCryPlaying()`,
+  the SE1 / SE2 music players' pause and track bits); the step's own starts and stops change it
+  as m4a does, so cry waits (Chatter's double cries), `waitsound` and the script's end (its
+  tasks, then up to 90 frames of sound effects) are the game's. `panse` runs the game's pan sound
+  task (`Task_PanFromInitialToTarget`, which `waitsound` and the end wait for); `stopsound`
+  stops SE1 / SE2; a sound effect named by number (Mystical Fire's `playse 177`) is that
+  number's. While the core plans an animation at its begin it estimates the sounds from
+  `battlefx/se_frames.json` (each sound effect's length and music player, measured in the game).
+- **The game's sprites.** The battle's own sprites besides effect sprites take slots of the 64
+  (`spritesInUse`): the core keeps as many taken, so an effect sprite the game cannot make
+  (Fairy Lock's last bolt) is not made in the core either. The battlers' sprites start where the
+  game has them (`battlerSprites`), not always their home.
 - **GBA arithmetic where the port differed.** `x % 0` in Spark's blinking sparks is the GBA's
   (0 only for x = 0), the palette fade's delta is the 4-bit field it is in `palette.c`, and
   `gAnimDisableStructPtr->rolloutTimer` is the game's.
@@ -81,19 +119,20 @@ mixes the two.
 
 ## Settings
 
-`battlefx/settings.cfg` (`enabled=1`, `log=0`) or the environment (which overrides the file):
-`PKMN_BATTLEFX=0` plays the original GBA animations (the development fallback),
-`PKMN_BATTLEFX_LOG=1` logs every animation (the game's and the core's frame counts, the
-core's cost; the renderer's GPU / CPU time), `PKMN_BATTLEFX_DIR=<folder>` reads the data from
-there (default: `battlefx` beside the executable, then in the working folder). An animation
-the core refuses or fails is logged and plays as on the GBA; the failure count is kept
+`battlefx/settings.cfg` (`enabled=1`, `log=0`; `sync=1` optional) or the environment (which overrides
+the file): `PKMN_BATTLEFX=0` plays the original GBA animations (the development fallback),
+`PKMN_BATTLEFX_LOG=1` logs every animation (the game's and the core's frame counts, the core's
+cost, how its pictures went; the renderer's GPU / CPU time), `PKMN_BATTLEFX_SYNC=1` makes the
+game wait for the core every frame, `PKMN_BATTLEFX_DIR=<folder>` reads the data from there
+(default: `battlefx` beside the executable, then in the working folder). An animation the core
+refuses or fails is logged and plays as on the GBA; the failure count is kept
 (`BattleFx_Failures`).
 
 ## Data
 
 ```sh
 # the animation data, converted from THIS game's tree (read only) by the package's converter
-python3 <battlefx_kit>/prototype/build_preview_data.py --expansion <this repository> --out game_moves.json
+python3 tools/battlefx/convert_data.py <battlefx_kit> --expansion <this repository> --out game_moves.json
 # the sound effect lengths, measured by the test build (it plays each at a battle's action menu)
 PKMN_TEST_BATTLE=wild:263:30 PKMN_TEST_AUTOPILOT=1 PKMN_BFX_TEST_SE_TABLE=se_frames.json PKMN_BFX_TEST_EXIT=1 \
   ./pokeemerald-mp-diorama-bfxtest --save <a save>
@@ -117,11 +156,13 @@ menu the Battle FX driver (`include/diorama/battle_fx_test.h`) plays:
   controllers' own (started as the controller starts them), each through the game's own code;
 - per animation (`report.jsonl`): the game's and the core's frame counts, the parity of the
   effect sprites, frames after the core ended in which the game still showed effect sprites,
-  the core's and the renderer's cost; captures (`PKMN_BFX_TEST_SHOTS`), traces
-  (`PKMN_BFX_TEST_TRACE=1`: every frame's sprite lists, the game's and the core's task, fade
-  and random-number state);
+  whether the game's own animation ended at all here ("stuck": the Safari Zone's Pokeblock throw
+  at a wild battle's menu waits for what only the Safari Zone gives it), the core's and the
+  renderer's cost; captures (`PKMN_BFX_TEST_SHOTS`), traces (`PKMN_BFX_TEST_TRACE=1`: every
+  frame's sprite lists, the game's and the core's task, fade, sprite and random-number state);
 - a battle fought (`PKMN_TEST_FIGHT`) with `PKMN_BFX_TEST_REAL_PARITY=1`: the parity of every
   animation the battle itself plays (`real_report.jsonl`).
 
-A run that crashes the game resumes after the animation that crashed
-(`PKMN_BFX_TEST_FROM=ID+`, used by the runner script in the integration checkpoint).
+`tools/battlefx/gallery.sh` runs one (a run that crashes the game resumes after the animation
+that crashed; a stuck one goes on in a new game), `tools/battlefx/realsuite.sh` the battles of
+the real-battle suite, and `tools/battlefx/summarize.py` sums the results up.
