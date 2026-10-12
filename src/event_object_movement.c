@@ -60,6 +60,10 @@
 #include "constants/trainer_types.h"
 #include "constants/union_room.h"
 #include "constants/weather.h"
+#ifdef PORTABLE
+#include "character_customization.h"
+#endif
+#line 63 // gba-line
 
 #define SPECIAL_LOCALIDS_START (min(LOCALID_CAMERA, \
                                 min(LOCALID_PLAYER, \
@@ -3093,6 +3097,14 @@ static u8 UpdateSpritePalette(const struct SpritePalette *spritePalette, struct 
 // Find and update based on template's paletteTag
 u8 UpdateSpritePaletteByTemplate(const struct SpriteTemplate *template, struct Sprite *sprite)
 {
+#ifdef PORTABLE
+    {
+        struct SpritePalette characterPalette;
+        if (CharCustom_GetSpritePalette(template->paletteTag, &characterPalette))
+            return UpdateSpritePalette(&characterPalette, sprite);
+    }
+#endif
+#line 3096 // gba-line
     u8 i = FindObjectEventPaletteIndexByTag(template->paletteTag);
     if (i == 0xFF)
         return i;
@@ -3106,6 +3118,15 @@ static void ObjectEventSetGraphics(struct ObjectEvent *objectEvent, const struct
     u32 i = FindObjectEventPaletteIndexByTag(graphicsInfo->paletteTag);
     if (i != 0xFF)
         UpdateSpritePalette(&sObjectEventSpritePalettes[i], sprite);
+#ifdef PORTABLE
+    else
+    {
+        struct SpritePalette characterPalette;
+        if (CharCustom_GetSpritePalette(graphicsInfo->paletteTag, &characterPalette))
+            UpdateSpritePalette(&characterPalette, sprite);
+    }
+#endif
+#line 3109 // gba-line
 
     // If frame size changes, we need to reallocate tiles.
     if (OW_LARGE_OW_SUPPORT && !OW_GFX_COMPRESS && graphicsInfo->images->size != sprite->images->size)
@@ -3201,6 +3222,16 @@ static void SetBerryTreeGraphics(struct ObjectEvent *objectEvent, struct Sprite 
 
 const struct ObjectEventGraphicsInfo *GetObjectEventGraphicsInfo(u16 graphicsId)
 {
+#ifdef PORTABLE
+    {
+        // The character selection (character_customization.c): the local player's
+        // avatar ids show the chosen character; other players' ids name theirs.
+        const struct ObjectEventGraphicsInfo *character = CharCustom_ResolveGraphics(&graphicsId);
+        if (character != NULL)
+            return character;
+    }
+#endif
+#line 3204 // gba-line
     if (graphicsId >= OBJ_EVENT_GFX_VARS && graphicsId <= OBJ_EVENT_GFX_VAR_F)
         graphicsId = VarGetObjectEventGraphicsId(graphicsId - OBJ_EVENT_GFX_VARS);
 
@@ -3299,6 +3330,14 @@ void FreeAndReserveObjectSpritePalettes(void)
 
 u8 LoadObjectEventPalette(u16 paletteTag)
 {
+#ifdef PORTABLE
+    {
+        struct SpritePalette characterPalette;
+        if (CharCustom_GetSpritePalette(paletteTag, &characterPalette))
+            return LoadSpritePaletteIfTagExists(&characterPalette);
+    }
+#endif
+#line 3302 // gba-line
     u16 i = FindObjectEventPaletteIndexByTag(paletteTag);
     if (i == 0xFF)
         return i;
@@ -6202,6 +6241,10 @@ static const struct StepAnimTable *GetStepAnimTable(const union AnimCmd *const *
         if (stepTable->anims == anims)
             return stepTable;
     }
+#ifdef PORTABLE
+    return CharCustom_GetStepAnimTable(anims); // the character selection's copies of these tables
+#endif
+#line 6205 // gba-line
     return NULL;
 }
 
@@ -12145,3 +12188,14 @@ const u16 *ObjectEvent_NativeUiPalette(u16 tag)
     return i != 0xFF ? sObjectEventSpritePalettes[i].data : NULL;
 }
 #endif // ENABLE_NATIVE_UI
+
+#ifdef PORTABLE
+// The engine's own graphics of an id, whatever character the player chose
+// (character_customization.c builds its sets from them).
+const struct ObjectEventGraphicsInfo *GetVanillaObjectEventGraphicsInfo(u16 graphicsId)
+{
+    if (graphicsId >= NUM_OBJ_EVENT_GFX)
+        graphicsId = OBJ_EVENT_GFX_NINJA_BOY;
+    return gObjectEventGraphicsInfoPointers[graphicsId];
+}
+#endif
