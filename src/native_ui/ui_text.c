@@ -31,6 +31,7 @@
 #define CHAR_EXTRA_SYMBOL 0xF9
 #define CHAR_KEYPAD_ICON 0xF8
 #define CHAR_DYNAMIC 0xF7
+#define CHAR_CURRENCY 0xB7 /* the game's money sign */
 
 static const u16 *sGlyphData[UI_FONT_COUNT];
 static const u8 *sWidthData[UI_FONT_COUNT];
@@ -355,6 +356,7 @@ static uint8_t AsciiToEngine(char c)
     case ',': return 0xB8;
     case '/': return 0xBA;
     case ':': return 0xF0;
+    case '$': return CHAR_CURRENCY;
     case '\n': return CHAR_NEWLINE;
     default: return 0xAC;
     }
@@ -392,6 +394,7 @@ void UiText_ToAscii(char *dst, int size, const uint8_t *s)
         else if (c == 0xB4) out = '\'';
         else if (c == 0xB8) out = ',';
         else if (c == 0xBA) out = '/';
+        else if (c == CHAR_CURRENCY) out = '$';
         else if (c == 0xF0) out = ':';
         else if (c == 0x1B) out = 'e';
         else if (c == CHAR_NEWLINE) out = ' ';

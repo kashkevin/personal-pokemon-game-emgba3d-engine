@@ -2172,6 +2172,10 @@ static DWORD LoadedXInputGetState(DWORD index, XINPUT_STATE *state)
     return sXInputGetState != NULL ? sXInputGetState(index, state) : ERROR_DEVICE_NOT_CONNECTED;
 }
 
+#ifdef ENABLE_NATIVE_UI
+static bool sXInputDetails; // the pad's Y: no game button; the native UI's details view
+#endif
+
 u16 GetXInputKeys()
 {
     XINPUT_STATE state;
@@ -2179,6 +2183,9 @@ u16 GetXInputKeys()
 
     DWORD dwResult = LoadedXInputGetState(0, &state);
     u16 xinputKeys = 0;
+#ifdef ENABLE_NATIVE_UI
+    sXInputDetails = false;
+#endif
 
     if (dwResult == ERROR_SUCCESS)
     {
@@ -2192,6 +2199,9 @@ u16 GetXInputKeys()
         /* Down */   xinputKeys |= (state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN) << 6;
         /* Left */   xinputKeys |= (state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT) << 3;
         /* Right */  xinputKeys |= (state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT) << 1;
+#ifdef ENABLE_NATIVE_UI
+        sXInputDetails = (state.Gamepad.wButtons & XINPUT_GAMEPAD_Y) != 0;
+#endif
 
 
         /* Control Stick */
@@ -2235,6 +2245,7 @@ u16 Platform_GetKeyInput(void)
     u16 gamepadKeys = GetXInputKeys();
 #ifdef ENABLE_NATIVE_UI
     NativeUi_NotePadKeys(gamepadKeys); // the prompts show the pad's buttons
+    NativeUi_NotePadDetails(sXInputDetails);
 #endif
     return gamepadKeys | keyboardKeys;
 #elif defined(__ANDROID__)

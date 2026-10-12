@@ -399,6 +399,23 @@ bool UiGfx_ItemIcon(uint16_t item, int x, int y, const struct UiFilter *filter)
     return true;
 }
 
+bool UiGfx_ItemIconScaled(uint16_t item, int x, int y, int scale)
+{
+    const struct ArtEntry *e = ArtFind(ART_ITEM_ICON, item, 0);
+    struct ArtCtx c;
+    char key[96];
+
+    if (e == NULL)
+        return false;
+    c.e = e;
+    c.y = 0;
+    c.h = 24;
+    c.filter = NULL;
+    snprintf(key, sizeof(key), "item:%u", (unsigned)item);
+    UiG_BlitPart(UiG_Cached(key, 24, 24, BuildArt, &c), 0, 0, 24, 24, x, y, scale < 1 ? 1 : scale, false, 1.0);
+    return true;
+}
+
 static void UiGfx_ArtShutdown(void)
 {
     for (int i = 0; i < ART_SLOTS; i++)

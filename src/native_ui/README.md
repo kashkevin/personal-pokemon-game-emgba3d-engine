@@ -30,13 +30,14 @@ engine's own button presses. It never decides anything the engine decides.
 | `ui_widgets.c` | the design's shared widgets (port of `preview/js/widgets.js`); prompts show the game's real keys and XInput buttons |
 | `ui_gfx.c` | the design's menu icons (embedded) and the game's own art: party icons, front pictures (with the species' own front animation) and item icons, the compressed ones decoded at the frame boundary (`UiGfx_Prepare*` in a screen's capture); CSS-style filters |
 | `ui_title_bg.c` | the Emerald title remaster (versions A/B/C; the game shows C: the intro, then B's loop), one shader pass at the logical size |
-| `native_ui.c` | the controller: screen registry, capture, picture policy, press queue, mouse, fades, switches, timing log |
+| `native_ui.c` | the controller: screen registry, capture, picture policy, press queue, mouse, PC keys that are not game buttons (Tab and the pad's Y: a screen's `pcKey`), fades, switches, timing log |
 | `screens/ui_title.c` | 21 title: remaster background, EMERALD wordmark, PRESS START |
 | `screens/ui_main_menu.c` | 21 main menu: the engine's rows, CONTINUE with the save's summary and party, QUIT GAME (the PC's own row: asks, then closes the window), how the window was opened |
 | `screens/ui_pause.c` | 4 pause menu (the engine's entries, the player submenu, Safari balls) and 10 save (the journal; "saved" only once the engine reports success **and** the save file is written) |
 | `screens/ui_options.c` | 11 options: the engine's six options; the second tab opens the PC's F10 menu |
 | `screens/ui_party.c` | 1 party: the engine's party menu in every mode the single and double layouts use (field, items, TMs, giving, battle, choosing for a challenge); the grid's directions and clicks become the engine's cursor presses; SELECT moves a Pokémon; the multi battles' layouts keep the game's screen |
-| `screens/ui_bag.c` | 2 bag: the engine's bag in every place it opens (field, battle, giving, selling, depositing, berries): pockets, the list with the game's CLOSE BAG row, descriptions and TM move data, the item menu as the game lays it out, quantities, YES/NO, messages, moving (SELECT) and the game's own sort (START); FIND is marked planned, favourites are left out (not in the game) |
+| `screens/ui_bag.c` | 2 bag: the engine's bag in every place it opens (field, battle, giving, selling, depositing, berries): pockets, the list with the game's CLOSE BAG row, descriptions and TM move data, the item menu as the game lays it out, quantities, YES/NO, messages, moving (SELECT) and the game's own sort (START); FIND is marked planned, favourites are left out (not in the game); Tab, the pad's Y or the Details prompt opens the item details |
+| `screens/ui_item_detail.c` | 16 item details: the display case and index card for the bag's item (the UI's own view; the game has no such screen and gets no buttons while it is up): the game's prices, description, what the item does (from its field, battle and hold data), who holds it and the party's HP, TM moves with the party's real compatibility, a Mega Stone's Mega form from the game's form changes and the Mega Ring; browsing the pocket (arrows, L/R, wheel, the strip); back on the bag at the item shown last (the game's own presses) |
 | `screens/ui_summary.c` | 5 summary: the clipboard over the engine's summary in all its modes (party, box, learning a move, the move order); the game's four pages (CONTEST MOVES takes the planned RIBBONS tab); the memo as the game writes it; Mega readiness from the game's forms, stones and Key Stone; IVs and EVs only where the game's setting shows them; Lucky from the multiplayer trades |
 | `screens/ui_pokedex.c` | 6 Pokédex: the red device over the engine's (classic) Pokédex: the Hoenn and National lists in the game's order, search results, the entry pane (caught: picture, category, types, both units, forms count, entry; seen: silhouette; unseen: ?), the START menu, the entry page's AREA, CRY, SIZE, CANCEL (the game's own AREA, CRY and SIZE pages and its search keep the game's picture); FIND marked planned, the forms catalogue marked pending; mouse goals hold the game's direction (its own scrolling) |
 | `screens/ui_storage.c` | 14 PC storage: the storage terminal over the engine's Pokémon Storage System in all its modes (withdraw, deposit, move Pokémon, move items, a script's choice): the box on pixel wallpapers with the design's slide, the party column, the monitor and printout of the Pokémon under the hand, the hand carrying a Pokémon or an item, the game's menus, YES/NO, messages, the box list for JUMP and deposits, markings, item info; mouse goals walk the game's own cursor (it moves, slides the party out and back itself); several Pokémon moved at once keep the game's picture |
@@ -49,7 +50,7 @@ Engine-side read-only accessors (all `#ifdef ENABLE_NATIVE_UI`, at the end of th
 `title_screen.c`, `main_menu.c`, `start_menu.c`, `field_screen_effect.c`, `option_menu.c`,
 `party_menu.c`, `pokemon_summary_screen.c`, `item_menu.c`, `pokedex.c`, `pokemon_storage_system.c`, `menu_helpers.c` (the shared YES/NO and message), `text.c` (each window's last string, a copy of it as printed, whether its printer waits
 for a button), `window.c` (whether a window is on screen), `pokemon_icon.c`, `multiplayer.c`,
-`platform/sdl2.c` (save file writes, the F10 menu).
+`platform/sdl2.c` (save file writes, the F10 menu, the XInput pad's Y, which the game does not use).
 
 ## Development switches
 
@@ -83,6 +84,9 @@ Read once at start-up; not for players, not in the launcher or `pokeemerald.cfg`
    engine's: the screen's `filterKeys` takes the directions, moves its own cursor and queues the
    engine's presses that take the engine's cursor to the same place (`ui_party.c`), so every rule
    stays the engine's.
+6. A view the game does not have (the item details) is the UI's own: it reads the screen's capture,
+   its `filterKeys` keeps every button from the game while it is up, and it never queues a press
+   except to put the engine's cursor where the view left off.
 
 ## Testing (tools in the UI art-direction workspace, `tools/native_ui/`)
 

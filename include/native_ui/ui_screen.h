@@ -38,6 +38,13 @@ struct UiScreen
     bool (*ready)(void);
     /* how much of the GBA picture to hide while up */
     enum UiPicture (*picture)(void);
+    /* a PC key that is not one of the game's buttons (enum UiPcKey); true: taken */
+    bool (*pcKey)(int key);
+};
+
+enum UiPcKey
+{
+    UI_PCKEY_DETAILS,      /* Tab */
 };
 
 /* Mouse intents become engine button presses: queued, one edge a frame

@@ -39,6 +39,7 @@ enum UiAction
     UI_ACT_SCROLL,   /* up / down */
     UI_ACT_PC_MENU,  /* F10 */
     UI_ACT_ESC,      /* the PC's Esc */
+    UI_ACT_DETAILS,  /* the PC's Tab: a screen's own details view (the bag's item details) */
     UI_ACT_COUNT,
 };
 

@@ -207,7 +207,7 @@ static void CaptureDisplay(void)
     }
     else if (sS.cursorArea == NATIVE_STORAGE_IN_PARTY && sS.cursorPos >= 0 && sS.cursorPos < PARTY_SIZE)
     {
-        mon = gPlayerParty[sS.cursorPos];
+        mon = gParties[B_TRAINER_PLAYER][sS.cursorPos];
         has = GetMonData(&mon, MON_DATA_SPECIES) != SPECIES_NONE;
     }
     if (!has)
@@ -410,7 +410,7 @@ static void Capture(void)
     sPartyCount = 0;
     for (int i = 0; i < PARTY_SIZE; i++)
     {
-        UiMon_FromPokemon(&sParty[i], &gPlayerParty[i]);
+        UiMon_FromPokemon(&sParty[i], &gParties[B_TRAINER_PLAYER][i]);
         if (sParty[i].species != SPECIES_NONE)
             sPartyCount++;
     }
@@ -432,7 +432,7 @@ static void Capture(void)
         if (sS.cursorArea == NATIVE_STORAGE_IN_BOX && sS.scrollTo < 0)
             has = Storage_NativeUiBoxMon(sS.box, sS.cursorPos, &under);
         else if (sS.cursorArea == NATIVE_STORAGE_IN_PARTY && sS.cursorPos < PARTY_SIZE)
-            has = (under = gPlayerParty[sS.cursorPos], GetMonData(&under, MON_DATA_SPECIES) != SPECIES_NONE);
+            has = (under = gParties[B_TRAINER_PLAYER][sS.cursorPos], GetMonData(&under, MON_DATA_SPECIES) != SPECIES_NONE);
         if (has)
         {
             GetMonData(&under, MON_DATA_NICKNAME, sSwapName);

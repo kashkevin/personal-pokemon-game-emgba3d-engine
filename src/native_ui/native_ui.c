@@ -305,6 +305,19 @@ void NativeUi_NotePadKeys(uint16_t padKeys)
     sPrevPad = padKeys;
 }
 
+void NativeUi_NotePadDetails(bool down)
+{
+    static bool sPrevDown;
+
+    if (down && !sPrevDown && NativeUi_Enabled() && !Platform_NativeUiPcMenuOpen())
+    {
+        UiW_SetPromptDevice(UI_DEVICE_PAD);
+        if (sActive != NULL && sActive->pcKey != NULL)
+            sActive->pcKey(UI_PCKEY_DETAILS);
+    }
+    sPrevDown = down;
+}
+
 /* ---------------------------------------------------------------- input */
 
 static void WindowToCanvas(int wx, int wy, int *cx, int *cy)
@@ -333,6 +346,9 @@ bool NativeUi_HandleEvent(const SDL_Event *event)
     {
     case SDL_KEYDOWN:
         UiW_SetPromptDevice(UI_DEVICE_KEYBOARD);
+        /* Tab: the screen's details view, where it has one */
+        if (event->key.keysym.sym == SDLK_TAB && !event->key.repeat && sActive != NULL && sActive->pcKey != NULL)
+            return sActive->pcKey(UI_PCKEY_DETAILS);
         return false;
     case SDL_MOUSEMOTION:
         WindowToCanvas(event->motion.x, event->motion.y, &sMouseX, &sMouseY);

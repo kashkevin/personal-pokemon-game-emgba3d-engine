@@ -41,6 +41,8 @@ void NativeUi_CaptureFrame(void);
 uint16_t NativeUi_FilterKeys(uint16_t keys);
 /* The gamepad buttons this frame (for the prompts' device). */
 void NativeUi_NotePadKeys(uint16_t padKeys);
+/* The pad's Y this frame: not one of the game's buttons; the UI's details view (as Tab). */
+void NativeUi_NotePadDetails(bool down);
 
 /* SDL events (main thread): returns true when the UI used the event (the
  * caller then skips its own handling, e.g. the 3D camera's mouse-wheel zoom). */

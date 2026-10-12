@@ -66,6 +66,8 @@ int UiGfx_MonPicFrameAt(uint16_t species, uint32_t personality, bool shiny, bool
 bool UiGfx_PrepareItemIcon(uint16_t item);
 /* W.item: the 24x24 icon at x, y */
 bool UiGfx_ItemIcon(uint16_t item, int x, int y, const struct UiFilter *filter);
+/* the icon enlarged by a whole factor (its pixels kept square), top left at x, y */
+bool UiGfx_ItemIconScaled(uint16_t item, int x, int y, int scale);
 
 /* applies a filter to RGBA pixels in place */
 void UiFilter_Apply(uint8_t *rgba, int count, const struct UiFilter *f);

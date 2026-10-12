@@ -398,7 +398,8 @@ static int PadButtonWidth(const char *label)
 }
 
 /* The game's keys (src/platform/sdl2.c) and its XInput mapping (A = A, the
- * pad's X = B, Back = Select, LB / RB = L / R). */
+ * pad's X = B, Back = Select, LB / RB = L / R); Tab / the pad's Y (not game
+ * buttons) open a screen's details view. */
 static int Glyphs(enum UiAction action, const char *out[2])
 {
     bool pad = sPromptDevice == UI_DEVICE_PAD;
@@ -416,6 +417,7 @@ static int Glyphs(enum UiAction action, const char *out[2])
     case UI_ACT_SCROLL: out[0] = UI_CAPS_UP; out[1] = UI_CAPS_DOWN; return 2;
     case UI_ACT_PC_MENU: out[0] = "F10"; return 1;
     case UI_ACT_ESC: out[0] = "ESC"; return 1;
+    case UI_ACT_DETAILS: out[0] = pad ? "Y" : "TAB"; return 1;
     default: out[0] = "?"; return 1;
     }
 }

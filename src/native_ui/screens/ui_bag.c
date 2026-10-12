@@ -6,7 +6,8 @@
  * offers (use, give, toss, register, check tag...), the quantities, moving an
  * item (SELECT), sorting (START), selling and depositing, the battle bag. The
  * design's FIND box and favourites are not in the game: FIND is marked
- * PLANNED, favourites are left out. Project-owned.
+ * PLANNED, favourites are left out. Tab (the pad's Y, or the Details prompt)
+ * opens the item details (ui_item_detail.c) over the list. Project-owned.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,6 +25,7 @@
 #include "native_ui/ui_draw.h"
 #include "native_ui/ui_engine.h"
 #include "native_ui/ui_gfx.h"
+#include "native_ui/ui_item_detail.h"
 #include "native_ui/ui_mon.h"
 #include "native_ui/ui_screen.h"
 #include "native_ui/ui_text.h"
@@ -62,6 +64,7 @@ static const u8 *const sPocketNames[POCKETS_COUNT] = {sText_Items, sText_Balls, 
 static const u8 sText_Empty[] = _("This pocket is empty.");
 static const u8 sText_CloseBagHelp[] = _("Close the Bag.");
 static const u8 sText_Select[] = _("Select");
+static const u8 sText_Details[] = _("Details");
 static const u8 sText_Pocket[] = _("Pocket");
 static const u8 sText_Move[] = _("Move");
 static const u8 sText_Sort[] = _("Sort");
@@ -91,6 +94,7 @@ static bool sHasDesc;
 static int sGoal = -1;
 static bool sGoalThenA;
 static int sGoalSteps;
+static bool sDetailsWereOpen;
 
 static bool Detect(void)
 {
@@ -133,6 +137,8 @@ static void Capture(void)
     u32 printed;
 
     Bag_NativeUiState(&sB);
+    if (sB.phase != NATIVE_BAG_BROWSE)
+        UiItemDetail_Close();
     if (sB.phase == NATIVE_BAG_LOADING)
         return;
     if (sB.pocket != prevPocket)
@@ -155,6 +161,20 @@ static void Capture(void)
     sMsgPrinting = sHasMsg && active;
     sMsgWaiting = sMsgPrinting && TextPrinter_NativeUiWindowWaiting(sB.msgWindow);
     sHasDesc = TextPrinter_NativeUiWindowText(sB.descWindow, sDesc, sizeof(sDesc), &printed, &active);
+    if (UiItemDetail_IsOpen())
+    {
+        UiItemDetail_Capture(&sB);
+        sDetailsWereOpen = true;
+        return;
+    }
+    if (sDetailsWereOpen && sB.phase == NATIVE_BAG_BROWSE && UiItemDetail_Index() < sB.count && UiItemDetail_Index() != sB.cursor)
+    {
+        /* back on the list at the item the details showed: the game's own presses */
+        sGoal = UiItemDetail_Index();
+        sGoalThenA = false;
+        sGoalSteps = 0;
+    }
+    sDetailsWereOpen = false;
     GoalStep();
 }
 
@@ -346,9 +366,9 @@ static void InfoPane(int t, const struct UiRamp *pr, UiRGBA pc)
             UiW_MessagePage(GetItemDescription(item), -1, ix + 16, yy, iw - 32, 4);
         }
         {
-            struct UiHintItem h[1] = {{UI_ACT_CONFIRM, sText_Select}};
+            struct UiHintItem h[2] = {{UI_ACT_CONFIRM, sText_Select}, {UI_ACT_DETAILS, sText_Details}};
 
-            UiW_Hints(ix + 16, iy + 268, h, 1, false, 12);
+            UiW_Hints(ix + 16, iy + 268, h, sB.phase == NATIVE_BAG_BROWSE ? 2 : 1, false, 12);
         }
     }
     else if (sB.count == 0)
@@ -572,13 +592,13 @@ static void QuantityBox(void)
         u8 price[24];
 
         price[0] = EOS;
-        UiText_AppendNumber(price, sizeof(price), (long)GetItemSellPrice(sB.items[sB.cursor < sB.count ? sB.cursor : 0]) * sB.quantity, 1, true);
         UiText_AppendAscii(price, sizeof(price), "$");
+        UiText_AppendNumber(price, sizeof(price), (long)GetItemSellPrice(sB.items[sB.cursor < sB.count ? sB.cursor : 0]) * sB.quantity, 1, true);
         UiText_Draw(UI_FONT_SMALL, x + 26, y + 9, price, UI_P_TEXT_MUTED, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
     }
 }
 
-static void Draw(int t)
+static void DrawBag(int t)
 {
     int x0, y0, w, h;
     UiRGBA pc = sPocketColours[sB.pocket < POCKETS_COUNT ? sB.pocket : 0];
@@ -632,6 +652,13 @@ static void Draw(int t)
     else if (sB.phase == NATIVE_BAG_QUANTITY)
         QuantityBox();
     UiG_Veil(NativeUi_ScreenFade());
+}
+
+static void Draw(int t)
+{
+    /* the item details over the bag once they have their item */
+    if (!UiItemDetail_IsOpen() || !UiItemDetail_Draw(t))
+        DrawBag(t);
 }
 
 /* ---------------------------------------------------------------- input */
@@ -695,8 +722,32 @@ static void QueuePocket(int to)
         NativeUi_QueuePresses(DPAD_LEFT, n - fwd);
 }
 
+/* the item details (Tab, the pad's Y, the Details prompt): browsing the list only */
+static bool OpenDetails(void)
+{
+    if (sB.phase != NATIVE_BAG_BROWSE || sB.cursor >= sB.count || NativeUi_PressesPending())
+        return false;
+    sGoal = -1;
+    UiItemDetail_Open(&sB, sB.cursor);
+    return true;
+}
+
+static bool PcKey(int key)
+{
+    if (key != UI_PCKEY_DETAILS)
+        return false;
+    if (UiItemDetail_IsOpen())
+    {
+        UiItemDetail_Close();
+        return true;
+    }
+    return OpenDetails();
+}
+
 static bool Click(const struct UiHit *hit, int button)
 {
+    if (UiItemDetail_IsOpen())
+        return UiItemDetail_Click(hit, button);
     if (button == 3)
     {
         NativeUi_QueuePress(B_BUTTON);
@@ -715,6 +766,8 @@ static bool Click(const struct UiHit *hit, int button)
             NativeUi_QueuePress(hit->id == HIT_ARROW_L ? DPAD_LEFT : DPAD_RIGHT);
         else if (hit->id == HIT_SORT)
             NativeUi_QueuePress(START_BUTTON);
+        else if (hit->id == UI_HIT_HINT && hit->index == UI_ACT_DETAILS)
+            OpenDetails();
         else if (hit->id == HIT_ROW)
         {
             sGoal = hit->index;
@@ -775,6 +828,8 @@ static bool Click(const struct UiHit *hit, int button)
 
 static bool Wheel(int dy)
 {
+    if (UiItemDetail_IsOpen())
+        return UiItemDetail_Wheel(dy);
     if (NativeUi_PressesPending())
         return true;
     if (sB.phase == NATIVE_BAG_BROWSE || sB.phase == NATIVE_BAG_SWAPPING)
@@ -782,6 +837,13 @@ static bool Wheel(int dy)
     else if (sB.phase == NATIVE_BAG_QUANTITY)
         NativeUi_QueuePress(dy > 0 ? DPAD_UP : DPAD_DOWN);
     return true;
+}
+
+static uint16_t FilterKeys(uint16_t keys, uint16_t newKeys)
+{
+    if (UiItemDetail_IsOpen())
+        return UiItemDetail_FilterKeys(keys, newKeys);
+    return keys;
 }
 
 static bool Ready(void)
@@ -801,7 +863,9 @@ const struct UiScreen gUiScreen_Bag = {
     .draw = Draw,
     .click = Click,
     .wheel = Wheel,
+    .filterKeys = FilterKeys,
     .ready = Ready,
     .picture = Picture,
+    .pcKey = PcKey,
 };
 #endif // ENABLE_NATIVE_UI
