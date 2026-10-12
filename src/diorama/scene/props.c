@@ -276,6 +276,19 @@ static const struct DioramaProp sBattleFrontierOutsideEast[] = {
     { PROP(0x203, BUSH, MOUND, 1, LOWER), .height16 = 11 },
 };
 
+/* The Battle Pyramid's maze walls (MB_SECRET_BASE_WALL in this tileset): each
+ * floor is put together from its squares at run time, so the walls are found by
+ * their metatile, not by the floor's layout; they stand as blocks with their top
+ * drawn on, as the hedges. Added by the battle environments' work
+ * (docs/battle-environments.md): drawn flat round the Pyramid's battles. */
+#define PYRAMID_WALL(id) { PROP(id, DECOR, BLOCK, 1, LOWER), .height16 = 12 }
+static const struct DioramaProp sBattlePyramid[] = {
+    PYRAMID_WALL(0x260), PYRAMID_WALL(0x261), PYRAMID_WALL(0x262), PYRAMID_WALL(0x263),
+    PYRAMID_WALL(0x264), PYRAMID_WALL(0x265), PYRAMID_WALL(0x268), PYRAMID_WALL(0x269),
+    PYRAMID_WALL(0x26A), PYRAMID_WALL(0x26B), PYRAMID_WALL(0x26C), PYRAMID_WALL(0x270),
+    PYRAMID_WALL(0x271), PYRAMID_WALL(0x272), PYRAMID_WALL(0x273), PYRAMID_WALL(0x274),
+};
+
 /* Caves: heaps of rocks on the floor. */
 static const struct DioramaProp sCave[] = {
     { PROP(0x202, ROCK, MOUND, 1, LOWER), .height16 = 10 },
@@ -303,6 +316,7 @@ static const struct DioramaPropTileset sTilesets[] = {
     TILESET("gTileset_Facility", sFacility),
     TILESET("gTileset_TrainerHill", sTrainerHill),
     TILESET("gTileset_BattleFrontierOutsideEast", sBattleFrontierOutsideEast),
+    TILESET("gTileset_BattlePyramid", sBattlePyramid),
 };
 
 #define TILESET_COUNT (sizeof(sTilesets) / sizeof(sTilesets[0]))
