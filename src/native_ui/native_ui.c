@@ -251,6 +251,19 @@ void NativeUi_CaptureFrame(void)
         sActive->hideObjects(gPlatformPictureHideObj);
 }
 
+const char *NativeUi_ScreenNow(void)
+{
+    if (NativeUi_Enabled())
+        return sActive != NULL ? sActive->name : NULL;
+    /* the UI is off (the benchmark's other run): what it would show, by its detection alone */
+    for (size_t i = 0; i < SDL_arraysize(sScreens); i++)
+    {
+        if (sScreens[i] != NULL && sScreens[i]->detect())
+            return sScreens[i]->name;
+    }
+    return NULL;
+}
+
 int NativeUi_PictureFlags(void)
 {
     return NativeUi_Enabled() ? sPictureFlags : 0;

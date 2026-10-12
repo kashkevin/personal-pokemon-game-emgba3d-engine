@@ -68,6 +68,9 @@ void NativeUi_Logf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
  * saved), open the PC settings menu (as F10) */
 void NativeUi_QuitGame(void);
 void NativeUi_OpenPcMenu(void);
+/* frame boundary: the screen the UI shows now - or, with the UI off, the one it
+ * would show (its detection only) - by name; NULL: the game's own picture */
+const char *NativeUi_ScreenNow(void);
 /* Screen files use the engine's _("...") strings: they must not include SDL's
  * headers (its '\\' key literal confuses tools/preproc's string scanner). */
 /* screens */
