@@ -10,6 +10,9 @@
 #ifdef ENABLE_DIORAMA
 #include "diorama/battle_scene.h"
 #endif
+#ifdef ENABLE_BATTLE_SPRITES
+#include "platform/battle_sprites.h"
+#endif
 #line 10 // gba-line
 
 #define MAX_SPRITE_COPY_REQUESTS 64
@@ -617,6 +620,10 @@ void LoadOam(void)
 #ifdef ENABLE_DIORAMA
     if (!gMain.oamLoadDisabled)
         DioramaSprites_LatchOam(); // the map's entries of the OAM just loaded
+#endif
+#ifdef ENABLE_BATTLE_SPRITES
+    if (!gMain.oamLoadDisabled)
+        BattleSprites_LatchOam(); // the battlers' pictures, as the OAM just loaded shows them
 #endif
 #line 594 // gba-line
 }

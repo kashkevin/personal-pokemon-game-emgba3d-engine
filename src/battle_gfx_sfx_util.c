@@ -30,6 +30,10 @@
 #include "constants/battle_palace.h"
 #include "constants/battle_move_effects.h"
 #include "constants/event_objects.h" // only for SHADOW_SIZE constants
+#ifdef ENABLE_BATTLE_SPRITES
+#include "platform/battle_sprites.h"
+#endif
+#line 33 // gba-line
 
 // this file's functions
 static u8 GetBattlePalaceMoveGroup(enum BattlerId battler, enum Move move);
@@ -691,6 +695,11 @@ void BattleLoadMonSpriteGfx(struct Pokemon *mon, enum BattlerId battler)
         BlendPalette(paletteOffset, 16, 8, GetTeraTypeRGB(GetBattlerTeraType(battler)));
         CpuCopy32(gPlttBufferFaded + paletteOffset, gPlttBufferUnfaded + paletteOffset, PLTT_SIZEOF(16));
     }
+#ifdef ENABLE_BATTLE_SPRITES
+    // What this battler's picture shows (platform/battle_sprites.h): its animated library sprite.
+    BattleSprites_NoteMon(battler, species, personalityValue, isShiny, paletteData, gMonSpritesGfxPtr->spritesGfx[position]);
+#endif
+#line 694 // gba-line
 }
 
 void BattleGfxSfxDummy2(enum Species species)
@@ -983,6 +992,11 @@ void HandleSpeciesGfxDataChange(enum BattlerId battlerAtk, enum BattlerId battle
 
     gSprites[gBattlerSpriteIds[battlerAtk]].y = GetBattlerSpriteDefault_Y(battlerAtk);
     StartSpriteAnim(&gSprites[gBattlerSpriteIds[battlerAtk]], 0);
+#ifdef ENABLE_BATTLE_SPRITES
+    if (!IsContest())
+        BattleSprites_NoteMon(battlerAtk, targetSpecies, personalityValue, isShiny, paletteData, src);
+#endif
+#line 986 // gba-line
 }
 
 void BattleLoadSubstituteOrMonSpriteGfx(enum BattlerId battler, bool8 loadMonSprite)
@@ -1011,6 +1025,11 @@ void BattleLoadSubstituteOrMonSpriteGfx(enum BattlerId battler, bool8 loadMonSpr
 
         palOffset = OBJ_PLTT_ID(battler);
         LoadPalette(gBattleAnimSpritePal_Substitute, palOffset, PLTT_SIZE_4BPP);
+#ifdef ENABLE_BATTLE_SPRITES
+        if (!IsContest())
+            BattleSprites_NoteSubstitute(battler);
+#endif
+#line 1014 // gba-line
     }
     else
     {

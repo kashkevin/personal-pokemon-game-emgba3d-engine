@@ -5,6 +5,9 @@
 #ifdef ENABLE_DIORAMA
 #include "diorama/battle_scene.h"
 #endif
+#ifdef ENABLE_BATTLE_SPRITES
+#include "platform/battle_sprites.h"
+#endif
 
 #define mosaicBGEffectX (REG_MOSAIC & 0xF)
 #define mosaicBGEffectY ((REG_MOSAIC >> 4) & 0xF)
@@ -816,6 +819,205 @@ static void WideLine(const uint16_t *winMask, bool windowsEnabled, uint16_t vcou
 #endif
 
 // Parts of this code heavily borrowed from NanoboyAdvance.
+#ifdef ENABLE_BATTLE_SPRITES
+/*
+ * A battler's picture drawn from the battle sprite library (platform/battle_sprites.h) in place of
+ * an OAM entry's tiles: the entry's 64x64 box holds the library frame at (view->left, view->top) in
+ * its texture space, as large as the frame is (not cut to the box), seen through the entry's affine
+ * matrix or flips and its mosaic; each pixel is written as DrawSprites writes the entry's own
+ * (keep the two in step).
+ */
+static void LibraryObjPixel(struct scanlineData *scanline, const struct OamData *oam, unsigned int x,
+                            uint16_t color, bool windowsEnabled, unsigned int blendMode)
+{
+    uint16_t *pixels = scanline->spriteLayers[oam->priority];
+    bool winShouldBlendPixel;
+#ifdef ENABLE_DIORAMA
+    uint8_t cover = 0;
+#endif
+
+    if (oam->objMode == 2)
+    {
+        if (scanline->winMask[x] & WINMASK_WINOUT)
+            scanline->winMask[x] = (REG_WINOUT >> 8) & 0x3F;
+        return;
+    }
+    winShouldBlendPixel = (windowsEnabled == false || scanline->winMask[x] & WINMASK_CLR);
+    if ((blendMode == 1 && REG_BLDCNT & BLDCNT_TGT1_OBJ && winShouldBlendPixel) || oam->objMode == 1)
+    {
+        uint16_t targetB = 0;
+
+        if (alphaBlendSelectTargetB(scanline, &targetB, oam->priority, 0, x, false))
+        {
+            color = alphaBlendColor(color, targetB);
+#ifdef ENABLE_DIORAMA
+            cover = (sTargetCover * clampCoeff((REG_BLDALPHA >> 8) & 0x1F)) >> 4;
+#endif
+        }
+    }
+    else if (REG_BLDCNT & BLDCNT_TGT1_OBJ && winShouldBlendPixel)
+    {
+        switch (blendMode)
+        {
+        case 2:
+            color = alphaBrightnessIncrease(color);
+            break;
+        case 3:
+            color = alphaBrightnessDecrease(color);
+            break;
+        }
+    }
+    pixels[x] = color | (1 << 15);
+#ifdef ENABLE_DIORAMA
+    scanline->spriteCover[oam->priority][x] = cover;
+#endif
+}
+
+static void DrawLibraryObjLine(struct scanlineData *scanline, uint16_t vcount, bool windowsEnabled,
+                               const struct OamData *oam, const struct BattleSpriteView *view)
+{
+    unsigned int blendMode = (REG_BLDCNT >> 6) & 3;
+    int32_t ox = oam->x, oy = oam->y;
+    int x, xFrom, xTo;
+
+    if (ox >= DISPLAY_WIDTH)
+        ox -= 512;
+    if (oy >= DISPLAY_HEIGHT)
+        oy -= 256;
+    if ((int)vcount >= view->clipBottom)
+        return;
+    if (!(oam->affineMode & 1))
+    {
+        bool flipX = (oam->matrixNum >> 3) & 1, flipY = (oam->matrixNum >> 4) & 1;
+        int ty = (oam->mosaic ? applySpriteVerticalMosaicEffect(vcount) : vcount) - oy;
+        int py;
+        const uint8_t *row;
+
+        if (flipY)
+            ty = 63 - ty;
+        py = ty - view->top;
+        if (py < 0 || py >= view->height)
+            return;
+        row = view->pixels + (size_t)py * view->stride;
+        /* the screen columns the frame covers on this row */
+        if (flipX)
+        {
+            xFrom = ox + 63 - (view->left + view->width - 1);
+            xTo = ox + 63 - view->left;
+        }
+        else
+        {
+            xFrom = ox + view->left;
+            xTo = ox + view->left + view->width - 1;
+        }
+        if (xFrom < 0)
+            xFrom = 0;
+        if (xTo > DISPLAY_WIDTH - 1)
+            xTo = DISPLAY_WIDTH - 1;
+        for (x = xFrom; x <= xTo; x++)
+        {
+            int tx = (oam->mosaic ? (int)applySpriteHorizontalMosaicEffect(x) : x) - ox;
+            int px;
+            uint8_t index;
+
+            if (flipX)
+                tx = 63 - tx;
+            px = tx - view->left;
+            if (px < 0 || px >= view->width)
+                continue;
+            index = row[px];
+            if (index != 0)
+                LibraryObjPixel(scanline, oam, (unsigned int)x, view->colors[index], windowsEnabled, blendMode);
+        }
+    }
+    else
+    {
+        const struct OamData *base = &((const struct OamData *)OAM)[oam->matrixNum * 4];
+        int32_t pa = (int16_t)base[0].affineParam, pb = (int16_t)base[1].affineParam;
+        int32_t pc = (int16_t)base[2].affineParam, pd = (int16_t)base[3].affineParam;
+        int32_t half = (oam->affineMode & 2) ? 64 : 32; /* double size: the centre is 64 from the corner */
+        int32_t cx = ox + half, cy = oy + half;
+        int64_t det = (int64_t)pa * pd - (int64_t)pb * pc;
+        int ly = (oam->mosaic ? applySpriteVerticalMosaicEffect(vcount) : vcount) - cy;
+        float minX = 1e9f, maxX = -1e9f;
+        int corner;
+
+        if (det == 0)
+            return;
+        /* The frame's corners on the screen (the inverse of the texture matrix), for the
+         * columns to look at. */
+        for (corner = 0; corner < 4; corner++)
+        {
+            float tx = (float)(view->left + ((corner & 1) ? view->width : 0) - 32);
+            float ty = (float)(view->top + ((corner & 2) ? view->height : 0) - 32);
+            float sx = ((float)pd * tx - (float)pb * ty) * 256.0f / (float)det;
+
+            if (sx < minX) minX = sx;
+            if (sx > maxX) maxX = sx;
+        }
+        xFrom = cx + (int)minX - 2;
+        xTo = cx + (int)maxX + 2;
+        if (xFrom < 0)
+            xFrom = 0;
+        if (xTo > DISPLAY_WIDTH - 1)
+            xTo = DISPLAY_WIDTH - 1;
+        for (x = xFrom; x <= xTo; x++)
+        {
+            int lx = (oam->mosaic ? (int)applySpriteHorizontalMosaicEffect(x) : x) - cx;
+            int tx = ((pa * lx + pb * ly) >> 8) + 32;
+            int ty = ((pc * lx + pd * ly) >> 8) + 32;
+            int px = tx - view->left, py = ty - view->top;
+            uint8_t index;
+
+            if (px < 0 || px >= view->width || py < 0 || py >= view->height)
+                continue;
+            index = view->pixels[(size_t)py * view->stride + px];
+            if (index != 0)
+                LibraryObjPixel(scanline, oam, (unsigned int)x, view->colors[index], windowsEnabled, blendMode);
+        }
+    }
+}
+
+/*
+ * A move's copy of a battler on BG1 or BG2 (MoveBattlerSpriteToBG: the picture's 8x8 tiles at the
+ * layer's map origin): where the line shows the copy's tiles, the library frame instead (placed in
+ * the copy's 64x64 block as in the sprite's box); around the block, the frame where the layer
+ * shows nothing; anything else the move drew on the layer stays.
+ */
+static void LibraryBgCopyLine(uint16_t control, uint16_t hoffs, uint16_t voffs, int lineNum, uint16_t *line,
+                              const struct BattleSpriteBgCopy *copy)
+{
+    const struct BattleSpriteView *view = copy->view;
+    unsigned int mapW = bgMapSizes[control >> 14][0] * 8, mapH = bgMapSizes[control >> 14][1] * 8;
+    const uint16_t *screen = (const uint16_t *)BG_SCREEN_ADDR((control >> 8) & 0x1F);
+    unsigned int yy = (lineNum + voffs) & (mapH - 1);
+    int v = (int)yy >= (int)(mapH / 2) ? (int)yy - (int)mapH : (int)yy;
+    int py = v - view->top;
+    const uint8_t *row = (py >= 0 && py < view->height) ? view->pixels + (size_t)py * view->stride : NULL;
+    unsigned int x;
+
+    for (x = 0; x < DISPLAY_WIDTH; x++)
+    {
+        unsigned int xx = (x + hoffs) & (mapW - 1);
+        int u = (int)xx >= (int)(mapW / 2) ? (int)xx - (int)mapW : (int)xx;
+        int px = u - view->left;
+        uint8_t index = (row != NULL && px >= 0 && px < view->width) ? row[px] : 0;
+
+        if (u >= 0 && u < 64 && v >= 0 && v < 64)
+        {
+            const uint16_t *map = screen + ((xx > 255) ? 0x400 : 0) + ((yy > 255) ? ((mapW > 256) ? 0x800 : 0x400) : 0);
+            uint16_t entry = map[((yy & 0xFF) / 8) * 32 + (xx & 0xFF) / 8];
+
+            if ((unsigned int)((entry & 0x3FF) - copy->firstTile) >= 64u)
+                continue; /* something else drawn over the copy's block */
+            line[x] = index != 0 ? (view->colors[index] | 0x8000) : 0;
+        }
+        else if (index != 0 && !(line[x] & 0x8000))
+            line[x] = view->colors[index] | 0x8000;
+    }
+}
+#endif
+
 static void DrawSprites(struct scanlineData* scanline, uint16_t vcount, bool windowsEnabled)
 {
     int i;
@@ -853,6 +1055,14 @@ static void DrawSprites(struct scanlineData* scanline, uint16_t vcount, bool win
         {
             continue;
         }
+#ifdef ENABLE_BATTLE_SPRITES
+        /* A battler's picture: its animated library sprite instead (platform/battle_sprites.h). */
+        if (gBattleSpriteObjViews[i] != NULL)
+        {
+            DrawLibraryObjLine(scanline, vcount, windowsEnabled, oam, gBattleSpriteObjViews[i]);
+            continue;
+        }
+#endif
 
         if (oam->shape == 0)
         {
@@ -1129,6 +1339,12 @@ static void DrawScanline(uint16_t *pixels, uint16_t vcount)
                 uint16_t bgvoffs = *(uint16_t *)(REG_ADDR_BG0VOFS + bgnum * 4);
                 
                 RenderBGScanline(bgnum, scanline.bgcnts[bgnum], bghoffs, bgvoffs, vcount, scanline.layers[bgnum]);
+#ifdef ENABLE_BATTLE_SPRITES
+                // A move's copy of a battler on this layer: its library sprite instead.
+                if (gBattleSpriteBgCopies[bgnum].view != NULL)
+                    LibraryBgCopyLine(scanline.bgcnts[bgnum], bghoffs, bgvoffs, vcount, scanline.layers[bgnum],
+                                      &gBattleSpriteBgCopies[bgnum]);
+#endif
             }
         }
         
@@ -1353,6 +1569,9 @@ void DrawFrame(uint16_t *pixels)
 {
     int i;
     int j;
+#ifdef ENABLE_BATTLE_SPRITES
+    BattleSprites_BeginFrame(); // which battler pictures come from the library this frame
+#endif
 #ifdef ENABLE_DIORAMA
     sSceneMask = gDioramaSceneLayers & 0x0F;
     sArtWanted = gDioramaSceneArtWanted;
@@ -1416,5 +1635,8 @@ void DrawFrame(uint16_t *pixels)
         REG_DISPSTAT &= ~INTR_FLAG_HBLANK;
         REG_DISPSTAT &= ~INTR_FLAG_VCOUNT;
     }
+#ifdef ENABLE_BATTLE_SPRITES
+    BattleSprites_EndFrame(pixels);
+#endif
 }
 #endif
