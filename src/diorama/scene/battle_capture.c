@@ -358,7 +358,13 @@ void DioramaBattle_Capture(struct DioramaBattleFrame *frame)
         frame->mapGroup = gSaveBlock1Ptr->location.mapGroup;
         frame->mapNum = gSaveBlock1Ptr->location.mapNum;
     }
-    frame->mapLayoutId = gMapHeader.mapLayoutId;
+    /* The layout the game draws, as the 3D view's snapshot takes it
+     * (scene_snapshot.c CurrentLayoutId): after setmaplayoutindex (Route
+     * 111 without the Mirage Tower, Shoal Cave at high tide, Sootopolis
+     * during the legends' battle, Route 130 with Mirage Island) it is the
+     * save's id, not gMapHeader.mapLayoutId, and DioramaGL_GetBattleWorld
+     * compares the two - a mismatch left the battle without its world. */
+    frame->mapLayoutId = gSaveBlock1Ptr != NULL ? gSaveBlock1Ptr->mapLayoutId : gMapHeader.mapLayoutId;
     if (gPlayerAvatar.objectEventId < OBJECT_EVENTS_COUNT)
     {
         const struct ObjectEvent *player = &gObjectEvents[gPlayerAvatar.objectEventId];
