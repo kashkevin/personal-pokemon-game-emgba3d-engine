@@ -9,13 +9,15 @@
  * timer query).
  *
  * The script presses the game's own buttons, like a player, one press at a time
- * (held a few game frames, then let go), and waits for each screen to be up
- * before it measures it, so a slow start or a hitch never puts it out of step;
- * a screen that does not come up ends the visit (its phase and the ones after
- * are written as "not reached"). Every measured phase also says how much of it
- * the expected screen was really up (screen_ok_pct). Nothing is saved (the save
- * file is a copy the launcher made). A development tool: not in the launcher or
- * the settings. Project-owned.
+ * (held a few game frames, then let go), and waits for each screen to be up and
+ * its fade to be over before it presses on or measures, counting game frames,
+ * not seconds: when drawing is slow the game itself slows down (sdl2.c runs at
+ * most one game frame for a long frame), and the script slows with it. So a slow
+ * start or a hitch never puts it out of step; a screen that does not come up ends
+ * the visit (its phase and the ones after are written as "not reached"). Every
+ * measured phase also says how much of it the expected screen was really up
+ * (screen_ok_pct). Nothing is saved (the save file is a copy the launcher made).
+ * A development tool: not in the launcher or the settings. Project-owned.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,6 +28,7 @@
 #include "global.h"
 #include "main.h"
 #include "overworld.h"
+#include "palette.h"
 #include "native_ui/native_ui.h"
 #include "native_ui/ui_bench.h"
 #include "native_ui/ui_screen.h"
@@ -47,9 +50,10 @@ static const char *const sPhaseNames[BENCH_PHASES] = {"title", "main_menu", "fie
 /* the native screen each phase measures (the field: none, the overworld's own) */
 static const char *const sPhaseScreens[BENCH_PHASES] = {"title", "main_menu", NULL, "pause", "bag", "party"};
 
+/* durations in game time: ms of the game's 60 frames a second */
 enum StepKind
 {
-    STEP_WAIT,         /* ms */
+    STEP_WAIT,         /* ms, and until no palette fade runs */
     STEP_PRESS,        /* one press of keys */
     STEP_PRESS_UNTIL,  /* keys every ms until the phase's screen is up (the intro) */
     STEP_SCREEN,       /* until the phase's screen is up; ms: the most it may take */
@@ -64,6 +68,8 @@ struct BenchStep
     uint16_t keys;
     unsigned int ms;
 };
+
+#define MS_FRAMES(ms) ((ms) * 60u / 1000u)
 
 static const struct BenchStep sSteps[] = {
     /* start-up: Start through the intro, then the title screen and the main menu (CONTINUE) */
@@ -110,16 +116,18 @@ static const struct BenchStep sSteps[] = {
 
 #define BENCH_HOLD_FRAMES 4    /* game frames a scripted button stays down */
 #define BENCH_GAP_FRAMES 4     /* and up, before the next one */
-#define BENCH_START_MS 3000    /* the window is up and the first frames are drawn */
-#define BENCH_MAX_MS 240000    /* the whole visit, at most */
+#define BENCH_START_FRAMES 180 /* the window is up and the first frames are drawn */
+#define BENCH_INTRO_MAX_MS 90000
+#define BENCH_MAX_MS 900000    /* the whole visit, at most, in real time (a game that stopped) */
 
 static bool sActive;
 static bool sUiOn;
 static char sOut[512];
 static unsigned int sStartMs;
 static int sStep;
-static unsigned int sStepMs;       /* when the current step began */
-static unsigned int sLastPressMs;  /* STEP_PRESS_UNTIL */
+static unsigned int sFrames;       /* game frames since the start */
+static unsigned int sStepFrame;    /* when the current step began */
+static unsigned int sLastPressFrame; /* STEP_PRESS_UNTIL; 0: none yet */
 static bool sDone;
 static int sFailedStep = -1;
 static uint16_t sPressKey;         /* the button being pressed (0: none) */
@@ -248,23 +256,30 @@ static void Finish(void)
     NativeUi_QuitGame();
 }
 
-static void NextStep(unsigned int now)
+static void NextStep(void)
 {
     sStep++;
-    sStepMs = now;
-    sLastPressMs = 0;
+    sStepFrame = sFrames;
+    sLastPressFrame = 0;
 }
 
-/* frame boundary (game parked): the script's buttons */
+/* frame boundary (game parked), once a game frame: the script's buttons */
 uint16_t UiBench_Keys(uint16_t keys)
 {
-    unsigned int now;
     const struct BenchStep *step;
+    unsigned int inStep;
     uint16_t press = 0;
 
     if (!sActive || sDone)
         return keys;
-    now = SDL_GetTicks();
+    sFrames++;
+    if (SDL_GetTicks() - sStartMs > BENCH_MAX_MS)
+    {
+        SDL_Log("Native UI benchmark: the visit took too long (step %d)", sStep);
+        sFailedStep = sStep;
+        Finish();
+        return keys;
+    }
     /* the press under way: held, then let go, before anything else happens */
     if (sPressKey != 0)
     {
@@ -274,50 +289,44 @@ uint16_t UiBench_Keys(uint16_t keys)
             sPressKey = 0;
         return keys | press;
     }
-    if (now - sStartMs < BENCH_START_MS)
+    if (sFrames < BENCH_START_FRAMES)
         return keys;
-    if (sStepMs == 0)
-        sStepMs = now;
-    if (now - sStartMs > BENCH_MAX_MS && sFailedStep < 0)
-    {
-        SDL_Log("Native UI benchmark: the visit took too long (step %d)", sStep);
-        sFailedStep = sStep;
-        Finish();
-        return keys;
-    }
+    if (sStepFrame == 0)
+        sStepFrame = sFrames;
+    inStep = sFrames - sStepFrame;
     step = &sSteps[sStep];
     sMeasuring = -1;
     switch (step->kind)
     {
     case STEP_WAIT:
-        if (now - sStepMs >= step->ms)
-            NextStep(now);
+        if (inStep >= MS_FRAMES(step->ms) && !gPaletteFade.active)
+            NextStep();
         break;
     case STEP_PRESS:
         sPressKey = step->keys;
         sPressFrame = 0;
-        NextStep(now);
+        NextStep();
         break;
     case STEP_PRESS_UNTIL:
         if (PhaseScreenUp(step->phase))
-            NextStep(now);
-        else if (sLastPressMs == 0 || now - sLastPressMs >= step->ms)
-        {
-            sPressKey = step->keys;
-            sPressFrame = 0;
-            sLastPressMs = now;
-        }
-        else if (now - sStepMs > 90000)
+            NextStep();
+        else if (inStep > MS_FRAMES(BENCH_INTRO_MAX_MS))
         {
             SDL_Log("Native UI benchmark: the %s did not come up", sPhaseNames[step->phase]);
             sFailedStep = sStep;
             Finish();
         }
+        else if (sLastPressFrame == 0 || sFrames - sLastPressFrame >= MS_FRAMES(step->ms))
+        {
+            sPressKey = step->keys;
+            sPressFrame = 0;
+            sLastPressFrame = sFrames;
+        }
         break;
     case STEP_SCREEN:
         if (PhaseScreenUp(step->phase))
-            NextStep(now);
-        else if (now - sStepMs > step->ms)
+            NextStep();
+        else if (inStep > MS_FRAMES(step->ms))
         {
             SDL_Log("Native UI benchmark: the %s did not come up (step %d)", sPhaseNames[step->phase], sStep);
             sFailedStep = sStep;
@@ -329,10 +338,10 @@ uint16_t UiBench_Keys(uint16_t keys)
         sCheckFrames[step->phase]++;
         if (PhaseScreenUp(step->phase))
             sCheckOk[step->phase]++;
-        if (now - sStepMs >= step->ms)
+        if (inStep >= MS_FRAMES(step->ms))
         {
             sMeasuring = -1;
-            NextStep(now);
+            NextStep();
         }
         break;
     default:
