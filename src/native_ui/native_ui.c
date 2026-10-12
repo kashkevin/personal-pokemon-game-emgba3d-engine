@@ -250,6 +250,10 @@ void NativeUi_CaptureFrame(void)
         sPictureFlags = NATIVE_UI_HIDE_UI_LAYER;
         gPlatformPictureHideBgMask = 1 << 0;
         break;
+    case UI_PICTURE_HIDE_BG012:
+        sPictureFlags = NATIVE_UI_HIDE_UI_LAYER;
+        gPlatformPictureHideBgMask = (1 << 0) | (1 << 1) | (1 << 2);
+        break;
     default:
         sPictureFlags = 0;
         gPlatformPictureHideBgMask = 0;

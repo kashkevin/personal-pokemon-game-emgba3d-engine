@@ -12442,3 +12442,49 @@ void BS_TryDoMoveEffectsBeforeMoves(void)
 
     gBattlescriptCurrInstr = cmd->nextInstr;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_results.c) draws the level-up box
+// itself: whether the engine's box is up (states 4-8 of Cmd_drawlvlupbox; the
+// banner of a Pokémon not in battle before and after), its page (1: the gains,
+// 2: the totals), whether it waits for a button, whose it is and its stats
+// before and now (STAT_* order). FALSE when no level-up box runs.
+bool32 Battle_NativeUiLevelUpBox(struct NativeLevelUpBox *out)
+{
+    u32 state;
+    struct Pokemon *mon;
+
+    memset(out, 0, sizeof(*out));
+    if (gBattlescriptCurrInstr == NULL || gBattleResources == NULL || gBattleResources->beforeLvlUp == NULL
+     || gBattleStruct == NULL || gBattleScriptingCommandsTable[gBattlescriptCurrInstr[0]] != Cmd_drawlvlupbox)
+        return FALSE;
+    state = gBattleScripting.drawlvlupboxState;
+    if (state == 0 || state >= 10 || gBattleStruct->expGetterMonId >= PARTY_SIZE)
+        return FALSE;
+    mon = &gParties[B_TRAINER_PLAYER][gBattleStruct->expGetterMonId];
+    out->shown = state >= 3 && state <= 8;
+    out->page = state >= 7 ? 2 : 1;
+    out->waiting = state == 6 || state == 8;
+    out->partyId = gBattleStruct->expGetterMonId;
+    out->level = GetMonData(mon, MON_DATA_LEVEL);
+    memcpy(out->before, gBattleResources->beforeLvlUp->stats, sizeof(out->before));
+    GetMonLevelUpWindowStats(mon, out->after);
+    return TRUE;
+}
+
+// The prize money a won trainer battle pays (Cmd_getmoneyreward's own sum:
+// both opponents, the Amulet Coin's multiplier); 0 outside trainer battles.
+u32 Battle_NativeUiPrizeMoney(void)
+{
+    u32 money;
+
+    if (!(gBattleTypeFlags & BATTLE_TYPE_TRAINER) || gBattleStruct == NULL || gBattleResources == NULL)
+        return 0;
+    money = GetTrainerMoneyToGive(TRAINER_BATTLE_PARAM.opponentA);
+    if (gBattleTypeFlags & BATTLE_TYPE_TWO_OPPONENTS)
+        money += GetTrainerMoneyToGive(TRAINER_BATTLE_PARAM.opponentB);
+    return money;
+}
+#endif // ENABLE_NATIVE_UI

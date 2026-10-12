@@ -17,6 +17,7 @@ enum UiPicture
     UI_PICTURE_KEEP,       /* the GBA picture stays (overlay only) */
     UI_PICTURE_HIDE_BG0,   /* the GBA window layer is hidden (field menus) */
     UI_PICTURE_HIDE_ALL,   /* the whole GBA picture is hidden (full screens) */
+    UI_PICTURE_HIDE_BG012, /* BG0 to BG2 hidden: the battle's level-up box and banner too */
 };
 
 struct UiScreen

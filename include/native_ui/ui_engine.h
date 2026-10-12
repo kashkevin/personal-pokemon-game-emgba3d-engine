@@ -812,6 +812,22 @@ enum NativeBattleInput
     NATIVE_BATTLE_INPUT_PARTY,          /* the party menu opens */
     NATIVE_BATTLE_INPUT_BAG,            /* the bag opens */
 };
+/* battle_script_commands.c: the level-up box (Cmd_drawlvlupbox) */
+struct NativeLevelUpBox
+{
+    bool8 shown;          /* the box itself is up (else the banner of a Pokémon not in battle) */
+    u8 page;              /* 1 the gains, 2 the totals */
+    bool8 waiting;        /* it waits for a button */
+    u8 partyId;
+    u8 level;
+    u16 before[NUM_STATS]; /* STAT_* order */
+    u16 after[NUM_STATS];
+};
+bool32 Battle_NativeUiLevelUpBox(struct NativeLevelUpBox *out);
+/* the prize money a won trainer battle pays (0 outside trainer battles) */
+u32 Battle_NativeUiPrizeMoney(void);
+/* battle_main.c: the battle's intro runs (money and Exp. as before the battle) */
+bool32 Battle_NativeUiInIntro(void);
 /* battle_controller_player.c: what the player controller waits for from this battler */
 u32 Battle_NativeUiPlayerInput(u32 battler);
 /* sprite.c: the OBJ tiles a sheet tag holds */
