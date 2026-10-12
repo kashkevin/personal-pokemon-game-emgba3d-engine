@@ -482,6 +482,86 @@ bool UiGfx_TrainerPic(uint16_t picId, int x, int y, const struct UiFilter *filte
     return true;
 }
 
+/* ---------------------------------------------------------------- affine pictures */
+
+/* the GBA's affine sprites: the 64x64 box scaled about its centre by 256 / affine
+ * (the OAM matrix's value), clipped to the box; each GBA pixel zoom x zoom */
+struct AffineCtx
+{
+    const struct ArtEntry *e;
+    int y0;
+    int affine;
+    int zoom;
+    const struct UiFilter *filter;
+};
+
+static int FloorDiv256(int n)
+{
+    return n >= 0 ? n / 256 : -((-n + 255) / 256);
+}
+
+static void BuildAffine(struct UiBitmap *bm, const void *ctx)
+{
+    const struct AffineCtx *c = ctx;
+    int size = 64 * c->zoom;
+
+    for (int ty = 0; ty < size; ty++)
+    {
+        int v = FloorDiv256(((ty / c->zoom) - 32) * c->affine) + 32;
+
+        for (int tx = 0; tx < size; tx++)
+        {
+            int u = FloorDiv256(((tx / c->zoom) - 32) * c->affine) + 32;
+            uint8_t *d = &bm->d[((size_t)ty * size + tx) * 4];
+
+            if (u < 0 || u >= 64 || v < 0 || v >= 64 || u >= c->e->w)
+                continue;
+            memcpy(d, &c->e->rgba[((size_t)(c->y0 + v) * c->e->w + u) * 4], 4);
+        }
+    }
+    UiFilter_Apply(bm->d, size * size, c->filter);
+}
+
+static bool BlitAffine(const struct ArtEntry *e, const char *kind, int frame, int y0, int cx, int cy, int affine,
+                       int zoom, const struct UiFilter *filter)
+{
+    struct AffineCtx c;
+    char key[160];
+    char fkey[48];
+
+    if (e == NULL || affine <= 0)
+        return false;
+    if (zoom < 1)
+        zoom = 1;
+    c.e = e;
+    c.y0 = y0;
+    c.affine = affine;
+    c.zoom = zoom;
+    c.filter = filter;
+    UiFilter_Key(fkey, sizeof(fkey), filter);
+    snprintf(key, sizeof(key), "aff:%s:%u:%08x:%u:%d:%d:%d%s", kind, (unsigned)e->a, (unsigned)e->b, (unsigned)e->kind, frame,
+             affine, zoom, fkey);
+    UiG_Blit(UiG_Cached(key, 64 * zoom, 64 * zoom, BuildAffine, &c), cx - 32 * zoom, cy - 32 * zoom);
+    return true;
+}
+
+bool UiGfx_MonPicAffine(uint16_t species, uint32_t personality, bool shiny, int frame, int cx, int cy, int affine, int zoom,
+                        const struct UiFilter *filter)
+{
+    const struct ArtEntry *e = ArtFind(ART_MON_PIC, ((uint32_t)species << 16) ^ personality,
+                                       MonPicKeyB(shiny, false) | ((uint32_t)species << 8));
+
+    if (e == NULL)
+        return false;
+    frame = frame >= 0 && frame < e->frames ? frame : 0;
+    return BlitAffine(e, "mon", frame, frame * MON_PIC_HEIGHT, cx, cy, affine, zoom, filter);
+}
+
+bool UiGfx_TrainerPicAffine(uint16_t picId, int cx, int cy, int affine, int zoom, const struct UiFilter *filter)
+{
+    return BlitAffine(ArtFind(ART_TRAINER_PIC, picId, 0), "tpic", 0, 0, cx, cy, affine, zoom, filter);
+}
+
 /* ---------------------------------------------------------------- field sprites */
 
 struct FieldSheetCtx

@@ -5,11 +5,13 @@
  * over the engine's Pokédex (pokedex.c), which keeps every rule: the Hoenn
  * and National lists, their order, what seen and caught Pokémon show, the
  * START menu, the search (SELECT) and the entry page's AREA, CRY and SIZE
- * pages (the game's own pictures). The design's generation tabs become the
- * game's two lists (HOENN, NATIONAL); its FIND box is not in the game (marked
- * PLANNED); its FORM and SHINY buttons give their places to the game's SIZE
- * and CANCEL (the game's entry page has AREA, CRY, SIZE, CANCEL); the forms
- * count stays, marked PENDING as in the design. Project-owned.
+ * pages (drawn by ui_dex_pages.c in the left screen; the search form over
+ * both). The design's generation tabs become the game's two lists (HOENN,
+ * NATIONAL); its FIND box is not in the game (marked PLANNED); its FORM and
+ * SHINY buttons give their places to the game's SIZE and CANCEL (the game's
+ * entry page has AREA, CRY, SIZE, CANCEL); the forms count stays, marked
+ * PENDING as in the design. A catch's new entry page (in battle) borrows the
+ * device: gUiScreen_DexNewEntry, at the end. Project-owned.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,12 +19,14 @@
 
 #include "global.h"
 #include "main.h"
+#include "palette.h"
 #include "pokedex.h"
 #include "pokedex_common.h"
 #include "pokemon.h"
 #include "constants/characters.h"
 #include "constants/pokedex.h"
 #include "constants/species.h"
+#include "native_ui/ui_dex.h"
 #include "native_ui/ui_draw.h"
 #include "native_ui/ui_engine.h"
 #include "native_ui/ui_gfx.h"
@@ -30,16 +34,6 @@
 #include "native_ui/ui_screen.h"
 #include "native_ui/ui_text.h"
 #include "native_ui/ui_widgets.h"
-
-enum
-{
-    HIT_ROW = UI_HIT_SCREEN,
-    HIT_ENTRY,
-    HIT_BUTTON,
-    HIT_ORDER,
-    HIT_RAIL,
-    HIT_BACKDROP,
-};
 
 #define ROW_H 22
 #define VIS 10
@@ -102,6 +96,11 @@ static const u8 sText_Button[] = _("Button");
 static const u8 sText_PrevNext[] = _("Prev/next");
 static const u8 sText_Press[] = _("Press");
 static const u8 sText_List[] = _("List");
+static const u8 sText_Play[] = _("Play");
+static const u8 sText_Row[] = _("Row");
+static const u8 sText_Tab[] = _("Tab");
+static const u8 sText_Open[] = _("Open");
+static const u8 sText_NewEntryLine[] = _("is now in your Pokédex");
 static const u8 sText_Metres[] = _(" m");
 static const u8 sText_Kilograms[] = _(" kg");
 static const u8 sText_Pounds[] = _(" lbs.");
@@ -110,22 +109,6 @@ static const u8 sText_Inches[] = _("”");
 
 /* ---------------------------------------------------------------- captured state */
 
-struct Entry
-{
-    u16 species;
-    u32 personality;
-    bool8 seen;
-    bool8 owned;
-    u16 shownNum;
-    const u8 *name;
-    u8 category[48];
-    s8 types[2];
-    u16 height;          /* decimetres */
-    u16 weight;          /* hectograms */
-    const u8 *description;
-    u16 forms;
-};
-
 static struct NativePokedex sP;
 static struct NativePokedexRow sRows[VIS];
 static int sRowCount;
@@ -133,7 +116,7 @@ static int sFirst;
 static u16 sFirstDexNum;         /* the list's first national number (the rail's generation ticks) */
 static u16 sFirstShown;          /* the numbers shown on the list's first and last rows */
 static u16 sLastShown;
-static struct Entry sE;
+static struct UiDexEntry sE;
 static u16 sEntryDexNum = 0xFFFF;
 static int sEntryT;              /* frames since this entry came up (its front animation) */
 static int sLed;                 /* the activity light: frames left */
@@ -147,6 +130,15 @@ static bool sGoalThenA;
 static int sGoalFrames;
 static int sButtonGoal = -1;
 static int sButtonFrames;
+/* the entry's pages: a page to get to (AREA_SCREEN .. SIZE_SCREEN; PAGE_GOAL_ENTRY: back) */
+#define PAGE_GOAL_ENTRY 0xFE
+static int sPageGoal = -1;
+static int sPageFrames;
+/* the game's fade between the entry's pages (0..16), shown on the left screen */
+static int sPageFade;
+static bool sFromSubPage;
+/* the new entry's page after a catch (gUiScreen_DexNewEntry) borrows the device */
+static bool sNewEntryView;
 
 static bool Detect(void)
 {
@@ -160,12 +152,13 @@ static bool Detect(void)
         sGoal = sButtonGoal = -1;
         return false;
     }
-    if (p.phase == NATIVE_DEX_NONE || p.phase == NATIVE_DEX_PAGE)
+    if (p.phase == NATIVE_DEX_NONE)
     {
-        /* the game's own pages (AREA, CRY, SIZE, the search) */
         sSettled = false;
         return false;
     }
+    /* NATIVE_DEX_PAGE: the search form (SELECT), drawn once its task has set it up;
+     * the device stays up around its loading and closing */
     return true;
 }
 
@@ -247,6 +240,32 @@ static void GoalStep(void)
             }
         }
     }
+    if (sPageGoal >= 0)
+    {
+        bool waiting = sP.phase == NATIVE_DEX_LEAVING || sP.phase == NATIVE_DEX_INFO_LOADING;
+
+        if (++sPageFrames > 600 || (sP.phase != NATIVE_DEX_SUBPAGE && !waiting))
+        {
+            sPageGoal = -1;
+        }
+        else if (sP.phase == NATIVE_DEX_SUBPAGE && sP.ready && !NativeUi_PressesPending())
+        {
+            if (sPageGoal == PAGE_GOAL_ENTRY)
+            {
+                NativeUi_QueuePress(B_BUTTON);
+                sPageGoal = -1;
+            }
+            else if (sPageGoal == sP.subPage)
+            {
+                sPageGoal = -1;
+            }
+            else
+            {
+                /* the game's order: AREA, CRY, SIZE (left from AREA is the entry page) */
+                NativeUi_QueuePress(sPageGoal > sP.subPage ? DPAD_RIGHT : DPAD_LEFT);
+            }
+        }
+    }
     if (sButtonGoal >= 0)
     {
         bool waiting = sP.phase == NATIVE_DEX_LIST || sP.phase == NATIVE_DEX_OPENING || sP.phase == NATIVE_DEX_INFO_LOADING;
@@ -274,6 +293,7 @@ static void GoalStep(void)
 
 static void Capture(void)
 {
+    sNewEntryView = false;
     Pokedex_NativeUiState(&sP);
     switch (sP.phase)
     {
@@ -281,6 +301,7 @@ static void Capture(void)
     case NATIVE_DEX_SCROLLING:
     case NATIVE_DEX_MENU:
     case NATIVE_DEX_INFO:
+    case NATIVE_DEX_SUBPAGE:
         sSettled = true;
         break;
     case NATIVE_DEX_LEAVING:
@@ -326,19 +347,22 @@ static void Capture(void)
     CaptureEntry();
     if (sE.seen)
         UiGfx_PrepareMonPic(sE.species, sE.personality, false, false);
+    UiDexPages_Capture(&sP, &sE);
+    /* the entry's pages fade the left screen only (the game spares the frame's palettes) */
+    if (sP.phase == NATIVE_DEX_SUBPAGE)
+        sFromSubPage = true;
+    else if (sP.phase != NATIVE_DEX_INFO_LOADING && !(sP.phase == NATIVE_DEX_LEAVING && sP.subPage != NATIVE_DEX_NO_SUBPAGE))
+        sFromSubPage = false;
+    sPageFade = 0;
+    if (sP.phase == NATIVE_DEX_SUBPAGE || (sP.phase == NATIVE_DEX_LEAVING && sP.subPage != NATIVE_DEX_NO_SUBPAGE)
+     || (sP.phase == NATIVE_DEX_INFO_LOADING && sFromSubPage))
+        sPageFade = gPaletteFade.y > 16 ? 16 : gPaletteFade.y;
     GoalStep();
 }
 
 /* ---------------------------------------------------------------- the design's palette */
 
-struct DexPal
-{
-    struct UiRamp dev;
-    UiRGBA bg, bg2, bezel, bezelHi, rowSel, rowSelHi, rowSelLo, stripe, rule, muted;
-    struct UiRamp lens;
-};
-
-static struct DexPal Pal(void)
+struct DexPal UiDex_Pal(void)
 {
     struct DexPal c;
 
@@ -360,7 +384,7 @@ static struct DexPal Pal(void)
 /* ---------------------------------------------------------------- small pieces */
 
 /* the design's markers (original pixel art): caught = a check stamp, seen = an eye */
-static void CaughtMark(int x, int y)
+void UiDex_CaughtMark(int x, int y)
 {
     static const char *const sRows[] = {".#######.", "#ggggggg#", "#gggggwg#", "#ggggwwg#", "#gwgwwgg#",
                                         "#gwwwggg#", "#ggwgggg#", "#ggggggg#", ".#######."};
@@ -369,7 +393,7 @@ static void CaughtMark(int x, int y)
     UiW_Pix("dexcaught", sRows, 9, sPal, 3, x, y, false);
 }
 
-static void SeenMark(int x, int y)
+void UiDex_SeenMark(int x, int y)
 {
     static const char *const sRows[] = {"...#####...", ".##wwwww##.", "#wwww#wwww#", "#www###www#", "#wwww#wwww#",
                                         ".##wwwww##.", "...#####..."};
@@ -395,12 +419,23 @@ static bool GridAt(int x, int y, const void *ctx)
 }
 
 /* a rounded panel with the design's 8 px grid inside its outline */
-static void GridPanel(int x, int y, int w, int h, UiRGBA body, UiRGBA ink, UiRGBA grid)
+void UiDex_GridPanel(int x, int y, int w, int h, UiRGBA body, UiRGBA ink, UiRGBA grid)
 {
     const struct UiMask *m = UiM_Rounded4(w, h, 2, 2, 2, 2);
 
     UiG_Paint(m, x, y, body, &(struct UiPaint){ink, UI_NONE, UI_NONE, 0, 0, NULL, 0});
     UiG_Mask(UiM_And(UiM_Erode4(m), UiM_Fn(w, h, "dexgrid8", GridAt, NULL)), x, y, grid);
+}
+
+void UiDex_StageColours(const struct UiDexEntry *e, UiRGBA *body, UiRGBA *ink, UiRGBA *grid, UiRGBA *shadow)
+{
+    static const struct UiRamp sGrey = {UI_HEX(0xD8D8E0), UI_HEX(0xB8B8C8), UI_HEX(0x9090A0), UI_P_INK};
+    const struct UiRamp *tr = e->owned && e->types[0] >= 0 ? &gUiTypeRamps[e->types[0]] : &sGrey;
+
+    *body = UiMix(tr->hi, UI_HEX(0xFFFFFF), 0.6);
+    *ink = UiMix(tr->lo, UI_P_INK, 0.35);
+    *grid = UiMix(tr->hi, UI_HEX(0xFFFFFF), 0.3);
+    *shadow = UiMix(*body, tr->lo, 0.45);
 }
 
 /* "{NO}025": the number as the game shows it */
@@ -418,7 +453,7 @@ static void DexNumberAscii(char *dst, int size, int num)
 }
 
 /* Gen 3's conversions (pokedex.c ConvertMonHeightToImperialString, ...WeightTo...) */
-static void HeightText(u8 *dst, int size, u32 dm, bool imperial)
+void UiDex_HeightText(u8 *dst, int size, u32 dm, bool imperial)
 {
     dst[0] = EOS;
     if (imperial)
@@ -443,7 +478,7 @@ static void HeightText(u8 *dst, int size, u32 dm, bool imperial)
     }
 }
 
-static void WeightText(u8 *dst, int size, u32 hg, bool imperial)
+void UiDex_WeightText(u8 *dst, int size, u32 hg, bool imperial)
 {
     dst[0] = EOS;
     if (imperial)
@@ -493,19 +528,19 @@ static void DrawDevice(const struct DexPal *c, int t)
                   &(struct UiPaint){dv->ink, on[i] ? UiMix(col, UI_HEX(0xFFFFFF), 0.5) : UI_NONE, UI_NONE, 0, 0, NULL, 0});
     }
     UiCaps_Draw(46, 25, "POK" UI_CAPS_E_ACUTE "DEX", UI_P_TEXT_W, dv->ink, UI_CAPS_OUTLINE, UI_ALIGN_LEFT, UI_NONE);
-    UiCaps_Draw(98, 25, sP.searchResults ? "SEARCH RESULTS" : hoenn ? "HOENN MODE" : "NATIONAL MODE", dv->hi, UI_NONE,
-                UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
+    UiCaps_Draw(98, 25, sNewEntryView ? "NEW ENTRY" : sP.searchResults ? "SEARCH RESULTS" : hoenn ? "HOENN MODE" : "NATIONAL MODE",
+                dv->hi, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
     /* the totals the game counts (the list's mode) */
     UiG_Paint(UiM_Rounded4(190, 26, 3, 3, 3, 3), lx - 2, 10, c->bezel, &(struct UiPaint){dv->ink, UI_NONE, c->bezelHi, 0, 0, NULL, 0});
     UiG_Paint(UiM_Rounded4(186, 22, 2, 2, 2, 2), lx, 12, UI_P_CREAM,
               &(struct UiPaint){UI_NONE, UI_P_CREAM_HI, UI_P_CREAM_LO, 0, 0, &stripes, UiMix(UI_P_CREAM, UI_P_CREAM_LO, 0.25)});
     UiCaps_Draw(lx + 6, 20, hoenn ? "HOENN" : "NATL", dv->lo, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
-    SeenMark(lx + 44, 19);
+    UiDex_SeenMark(lx + 44, 19);
     UiCaps_Draw(lx + 58, 20, "SEEN", UI_P_TEXT_MUTED, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
     snprintf(num, sizeof(num), "%u", (unsigned)(hoenn ? sP.regionalSeen : sP.seenCount));
     UiText_FromAscii(b, sizeof(b), num);
     UiText_Draw(UI_FONT_NORMAL, lx + 112, 15, b, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_RIGHT, 0);
-    CaughtMark(lx + 120, 18);
+    UiDex_CaughtMark(lx + 120, 18);
     UiCaps_Draw(lx + 133, 20, "OWN", UI_P_TEXT_MUTED, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
     snprintf(num, sizeof(num), "%u", (unsigned)(hoenn ? sP.regionalOwn : sP.ownCount));
     UiText_FromAscii(b, sizeof(b), num);
@@ -541,28 +576,38 @@ static void DrawDevice(const struct DexPal *c, int t)
 static void EntryButtons(const struct DexPal *c, int x, int y, int h, int t)
 {
     const struct UiRamp *dv = &c->dev;
-    bool focus = sP.phase == NATIVE_DEX_INFO || sP.phase == NATIVE_DEX_INFO_LOADING || sP.phase == NATIVE_DEX_OPENING;
+    bool sub = sP.phase == NATIVE_DEX_SUBPAGE && sP.subPage != NATIVE_DEX_NO_SUBPAGE;
+
+    if (sNewEntryView)
+        return;
+    bool focus = sub || sP.phase == NATIVE_DEX_INFO || sP.phase == NATIVE_DEX_INFO_LOADING || sP.phase == NATIVE_DEX_OPENING;
     int by = y + h - 50, bw = 64;
+    u8 cur = sub ? sP.subPage : sP.selectedScreen;
     const u8 *msg = NULL;
 
     (void)t;
     for (int i = 0; i < BUTTONS; i++)
     {
         int bx = x + 8 + i * (bw + 4);
-        bool avail = sE.seen && (i != SIZE_SCREEN || sE.owned);
-        bool sel = focus && sP.selectedScreen == i;
+        /* the game's rules: SIZE for caught ones; from AREA, CRY only for caught ones */
+        bool avail = sE.seen && (i != SIZE_SCREEN || sE.owned) && !(sub && cur == AREA_SCREEN && i == CRY_SCREEN && !sE.owned);
+        bool sel = focus && cur == i, down = sub && cur == i;
         UiRGBA col = !avail ? UI_HEX(0xA8A0A0) : i == CANCEL_SCREEN ? UiMix(dv->base, UI_P_INK, 0.3) : dv->base;
         struct UiRamp r = UiRampOf(col, 0.42, 0.25, 0.62);
         const struct UiMask *m = UiM_Rounded4(bw, 22, 3, 3, 3, 3);
+        int yy = by + (down ? 1 : 0);
 
         if (sel)
-            UiW_SelectFrame(m, bx, by, UI_NONE, UI_NONE, 0);
-        UiG_Paint(m, bx, by, r.base, &(struct UiPaint){r.ink, r.hi, r.lo, 0, 2, NULL, 0});
-        UiCaps_Draw(bx + (bw >> 1), by + 7, sButtonLabels[i], UI_P_TEXT_W, r.ink, UI_CAPS_OUTLINE, UI_ALIGN_CENTER, UI_NONE);
+            UiW_SelectFrame(m, bx, yy, UI_NONE, UI_NONE, 0);
+        /* the page that is up: the button held down */
+        UiG_Paint(m, bx, yy, down ? r.lo : r.base, &(struct UiPaint){r.ink, down ? r.lo : r.hi, down ? r.base : r.lo, 0, 2, NULL, 0});
+        UiCaps_Draw(bx + (bw >> 1), yy + 7, sButtonLabels[i], UI_P_TEXT_W, r.ink, UI_CAPS_OUTLINE, UI_ALIGN_CENTER, UI_NONE);
         if (sE.seen)
-            UiG_Hit(HIT_BUTTON, i, bx, by, bw, 22);
+            UiG_Hit(DEX_HIT_BUTTON, i, bx, by, bw, 22);
     }
-    if (focus && sE.seen && sP.selectedScreen < BUTTONS)
+    if (sub)
+        msg = UiDexPages_PageHelp(cur, &sE);
+    else if (focus && sE.seen && sP.selectedScreen < BUTTONS)
         msg = sP.selectedScreen == SIZE_SCREEN && !sE.owned ? sText_SizeLocked : sButtonHelp[sP.selectedScreen];
     if (msg != NULL)
     {
@@ -576,20 +621,18 @@ static void DrawEntry(const struct DexPal *c, int t)
     const struct UiRamp *dv = &c->dev;
     int x = 18, y = 43, w = 280, h = 284;
     int sx = x + 6, sy = y + 25, sw = 128, sh = 112, gy = sy + sh - 14, ix0 = sx + sw + 8, iy = sy, dy = sy + sh + 6;
-    struct UiRamp grey = {UI_HEX(0xD8D8E0), UI_HEX(0xB8B8C8), UI_HEX(0x9090A0), UI_P_INK};
-    const struct UiRamp *tr;
     UiRGBA stageBody;
     u8 b[64];
 
     UiG_Paint(UiM_Rounded4(w, h, 2, 2, 2, 2), x, y, UI_P_PAPER, &(struct UiPaint){UI_NONE, UI_HEX(0xFFFFFF), UI_P_PAPER_LO, 0, 0, NULL, 0});
-    UiG_Hit(HIT_ENTRY, 0, x, y, w, h);
+    UiG_Hit(DEX_HIT_ENTRY, 0, x, y, w, h);
     UiG_Paint(UiM_Rounded(w - 4, 19, UiCornerR(1), UiCornerChamfer(6), UiCornerR(0), UiCornerR(0)), x + 2, y + 2, dv->base,
               &(struct UiPaint){UI_NONE, dv->hi, dv->lo, 0, 0, NULL, 0});
     if (sE.species == SPECIES_NONE)
     {
         /* nothing listed: the entry's layout with every field empty */
         UiText_Draw(UI_FONT_NORMAL, x + 8, y + 3, sText_NoEntry, UI_P_TEXT_W, dv->ink, UI_ALIGN_LEFT, 0);
-        GridPanel(x + 6, y + 25, 128, 112, UI_HEX(0xF0F0F4), UI_HEX(0xA8A8B8), UI_HEX(0xE0E0E8));
+        UiDex_GridPanel(x + 6, y + 25, 128, 112, UI_HEX(0xF0F0F4), UI_HEX(0xA8A8B8), UI_HEX(0xE0E0E8));
         QuestionMark(x + 64, y + 59);
         UiG_Text(x + 142, y + 24, sText_NothingToList);
         EntryButtons(c, x, y, h, t);
@@ -605,20 +648,30 @@ static void DrawEntry(const struct DexPal *c, int t)
         UiText_Draw(UI_FONT_NORMAL, hx, y + 3, sE.seen ? sE.name : sText_Dashes, UI_P_TEXT_W, dv->ink, UI_ALIGN_LEFT, 0);
         if (sE.owned)
         {
-            CaughtMark(x + 214, y + 7);
+            UiDex_CaughtMark(x + 214, y + 7);
             UiCaps_Draw(x + 226, y + 8, "CAUGHT", UI_P_TEXT_W, dv->ink, UI_CAPS_OUTLINE, UI_ALIGN_LEFT, UI_NONE);
         }
         else if (sE.seen)
         {
-            SeenMark(x + 220, y + 8);
+            UiDex_SeenMark(x + 220, y + 8);
             UiCaps_Draw(x + 234, y + 8, "SEEN", UI_P_TEXT_W, dv->ink, UI_CAPS_OUTLINE, UI_ALIGN_LEFT, UI_NONE);
         }
     }
+    /* the entry's AREA, CRY and SIZE pages take the screen below the header */
+    if (sP.phase == NATIVE_DEX_SUBPAGE && sP.subPage != NATIVE_DEX_NO_SUBPAGE)
+    {
+        UiDexPages_DrawPage(c, sP.subPage, &sE, x + 6, y + 25, w - 12, t);
+        EntryButtons(c, x, y, h, t);
+        return;
+    }
     /* the picture stage: caught in colour, seen as a silhouette, else a question mark */
-    tr = sE.owned && sE.types[0] >= 0 ? &gUiTypeRamps[sE.types[0]] : &grey;
-    stageBody = UiMix(tr->hi, UI_HEX(0xFFFFFF), 0.6);
-    GridPanel(sx, sy, sw, sh, stageBody, UiMix(tr->lo, UI_P_INK, 0.35), UiMix(tr->hi, UI_HEX(0xFFFFFF), 0.3));
-    UiG_Mask(UiM_Ellipse(76, 12), sx + (sw >> 1) - 38, gy - 5, UiMix(stageBody, tr->lo, 0.45));
+    {
+        UiRGBA stageInk, stageGrid, stageShadow;
+
+        UiDex_StageColours(&sE, &stageBody, &stageInk, &stageGrid, &stageShadow);
+        UiDex_GridPanel(sx, sy, sw, sh, stageBody, stageInk, stageGrid);
+        UiG_Mask(UiM_Ellipse(76, 12), sx + (sw >> 1) - 38, gy - 5, stageShadow);
+    }
     UiG_Save();
     UiG_Clip(sx + 1, sy + 1, sw - 2, sh - 2);
     if (sE.owned)
@@ -654,14 +707,14 @@ static void DrawEntry(const struct DexPal *c, int t)
                 bx = UiW_TypeBadge(bx, iy + 18, sE.types[k], 0) + 3;
         /* the game's units first (its UNITS setting), the other ones beside */
         UiCaps_Draw(ix0, iy + 41, "HT", UI_P_TEXT_MUTED, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
-        HeightText(v, sizeof(v), sE.height, UNITS == UNITS_IMPERIAL);
+        UiDex_HeightText(v, sizeof(v), sE.height, UNITS == UNITS_IMPERIAL);
         UiG_Text(ix0 + 16, iy + 36, v);
-        HeightText(v, sizeof(v), sE.height, UNITS != UNITS_IMPERIAL);
+        UiDex_HeightText(v, sizeof(v), sE.height, UNITS != UNITS_IMPERIAL);
         UiText_Draw(UI_FONT_SMALL, ix0 + 72, iy + 38, v, UI_P_TEXT_MUTED, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
         UiCaps_Draw(ix0, iy + 59, "WT", UI_P_TEXT_MUTED, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
-        WeightText(v, sizeof(v), sE.weight, UNITS == UNITS_IMPERIAL);
+        UiDex_WeightText(v, sizeof(v), sE.weight, UNITS == UNITS_IMPERIAL);
         UiG_Text(ix0 + 16, iy + 54, v);
-        WeightText(v, sizeof(v), sE.weight, UNITS != UNITS_IMPERIAL);
+        UiDex_WeightText(v, sizeof(v), sE.weight, UNITS != UNITS_IMPERIAL);
         UiText_Draw(UI_FONT_SMALL, ix0 + 72, iy + 56, v, UI_P_TEXT_MUTED, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
         /* the forms count (the in-game form catalogue is pending, as in the design) */
         UiG_HLine(ix0, iy + 76, w - (ix0 - x) - 8, UI_P_PAPER_LO);
@@ -761,11 +814,11 @@ static void DrawList(const struct DexPal *c, int t)
         UiG_Paint(UiM_Rounded4(76, 19, 2, 2, 2, 2), ox, cy, UiMix(dv->lo, dv->ink, 0.25), &(struct UiPaint){dv->ink, dv->lo, UI_NONE, 0, 0, NULL, 0});
         UiCaps_Draw(ox + 5, cy + 6, UI_CAPS_UP UI_CAPS_DOWN, dv->hi, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
         UiText_Draw(UI_FONT_SMALL, ox + 22, cy + 3, sOrderNames[sP.dexOrder < 6 ? sP.dexOrder : 0], UI_P_TEXT_W, dv->ink, UI_ALIGN_LEFT, 0);
-        UiG_Hit(HIT_ORDER, 0, ox, cy, 76, 19);
+        UiG_Hit(DEX_HIT_ORDER, 0, ox, cy, 76, 19);
         UiG_Paint(UiM_Rounded4(66, 19, 2, 2, 2, 2), tx2, cy, UiMix(dv->lo, dv->ink, 0.25), &(struct UiPaint){dv->ink, dv->lo, UI_NONE, 0, 0, NULL, 0});
         UiText_Draw(UI_FONT_SMALL, tx2 + 33, cy + 3, sP.searchResults ? sText_Results : sText_AllTypes, UI_P_TEXT_W, dv->ink,
                     UI_ALIGN_CENTER, 0);
-        UiG_Hit(HIT_ORDER, 1, tx2, cy, 66, 19);
+        UiG_Hit(DEX_HIT_ORDER, 1, tx2, cy, 66, 19);
     }
     /* the rows on one paper sheet; the selected row is a red-chipped bar */
     UiG_Paint(UiM_Rounded4(lbw, VIS * ROW_H + 4, 1, 1, 1, 1), lbx, ly - 2, UI_P_PAPER,
@@ -822,16 +875,16 @@ static void DrawList(const struct DexPal *c, int t)
                     bool weight = sP.dexOrder == ORDER_HEAVIEST || sP.dexOrder == ORDER_LIGHTEST;
 
                     if (weight)
-                        WeightText(b, sizeof(b), GetSpeciesWeight(row->species), UNITS == UNITS_IMPERIAL);
+                        UiDex_WeightText(b, sizeof(b), GetSpeciesWeight(row->species), UNITS == UNITS_IMPERIAL);
                     else
-                        HeightText(b, sizeof(b), GetSpeciesHeight(row->species), UNITS == UNITS_IMPERIAL);
+                        UiDex_HeightText(b, sizeof(b), GetSpeciesHeight(row->species), UNITS == UNITS_IMPERIAL);
                     UiG_TextEx(lx + lw - 20, ry + 3, b, UI_FONT_NORMAL, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_RIGHT);
                 }
-                CaughtMark(lx + lw - 14, ry + 6);
+                UiDex_CaughtMark(lx + lw - 14, ry + 6);
             }
             else
             {
-                SeenMark(lx + lw - 15, ry + 7);
+                UiDex_SeenMark(lx + lw - 15, ry + 7);
             }
         }
         else
@@ -840,7 +893,7 @@ static void DrawList(const struct DexPal *c, int t)
         }
         if (sel && cursor)
             UiW_Cursor(lbx + 1, ry + 6, UiW_Nudge(t), UI_NONE);
-        UiG_Hit(HIT_ROW, idx, lbx, ry, lbw, ROW_H);
+        UiG_Hit(DEX_HIT_ROW, idx, lbx, ry, lbw, ROW_H);
     }
     /* the scroll rail, with the generations' ticks on the National list */
     UiG_Paint(UiM_Rounded4(7, rh, 2, 2, 2, 2), rx, ly - 2, UiMix(dv->lo, dv->ink, 0.3), &(struct UiPaint){dv->ink, UI_NONE, UI_NONE, 0, 0, NULL, 0});
@@ -865,7 +918,7 @@ static void DrawList(const struct DexPal *c, int t)
         tyy = ly - 2 + (rh - th) * sFirst / (n - VIS);
         UiG_Paint(UiM_Rounded4(7, th, 2, 2, 2, 2), rx, tyy, UI_P_CREAM, &(struct UiPaint){dv->ink, UI_NONE, UI_P_CREAM_LO, 0, 0, NULL, 0});
         for (int k = 0; k < rh; k += 4)
-            UiG_Hit(HIT_RAIL, k * (n - 1) / (rh - 1), rx - 2, ly - 2 + k, 11, 4);
+            UiG_Hit(DEX_HIT_RAIL, k * (n - 1) / (rh - 1), rx - 2, ly - 2 + k, 11, 4);
     }
     else
     {
@@ -934,6 +987,42 @@ static void DrawHints(void)
         h[n++] = (struct UiHintItem){UI_ACT_CONFIRM, sText_Press};
         h[n++] = (struct UiHintItem){UI_ACT_CANCEL, sText_List};
         break;
+    case NATIVE_DEX_SUBPAGE:
+        if (sP.subPage == CRY_SCREEN)
+            h[n++] = (struct UiHintItem){UI_ACT_CONFIRM, sText_Play};
+        h[n++] = (struct UiHintItem){UI_ACT_MOVE, sText_Page};
+        h[n++] = (struct UiHintItem){UI_ACT_CANCEL, sText_Entry};
+        break;
+    case NATIVE_DEX_PAGE:
+        if (UiDexPages_SearchUp())
+        {
+            const struct NativeDexSearch *se = UiDexPages_Search();
+
+            switch (se->state)
+            {
+            case NATIVE_DEX_SEARCH_TOPBAR:
+                h[n++] = (struct UiHintItem){UI_ACT_MOVE, sText_Tab};
+                h[n++] = (struct UiHintItem){UI_ACT_CONFIRM, sText_OK};
+                h[n++] = (struct UiHintItem){UI_ACT_CANCEL, sText_Close};
+                break;
+            case NATIVE_DEX_SEARCH_MENU:
+                h[n++] = (struct UiHintItem){UI_ACT_SCROLL, sText_Row};
+                h[n++] = (struct UiHintItem){UI_ACT_CONFIRM, sText_Open};
+                h[n++] = (struct UiHintItem){UI_ACT_CANCEL, sText_Back};
+                break;
+            case NATIVE_DEX_SEARCH_OPTIONS:
+                h[n++] = (struct UiHintItem){UI_ACT_SCROLL, sText_Choose};
+                h[n++] = (struct UiHintItem){UI_ACT_CONFIRM, sText_OK};
+                h[n++] = (struct UiHintItem){UI_ACT_CANCEL, sText_Back};
+                break;
+            case NATIVE_DEX_SEARCH_DONE:
+                h[n++] = (struct UiHintItem){UI_ACT_CONFIRM, sText_OK};
+                break;
+            default:
+                break;
+            }
+        }
+        break;
     default:
         break;
     }
@@ -948,7 +1037,7 @@ static void DrawMenu(int t)
     int n = 0, bx, by, bw, bh;
 
     UiG_Bleed(&bx, &by, &bw, &bh);
-    UiG_Hit(HIT_BACKDROP, 0, bx, by, bw, bh);
+    UiG_Hit(DEX_HIT_BACKDROP, 0, bx, by, bw, bh);
     items[n++] = (struct UiMenuItem){sText_MenuBackToList, false};
     items[n++] = (struct UiMenuItem){sText_MenuListTop, false};
     items[n++] = (struct UiMenuItem){sText_MenuListBottom, false};
@@ -963,7 +1052,7 @@ static void DrawMenu(int t)
 
 static void Draw(int t)
 {
-    struct DexPal c = Pal();
+    struct DexPal c = UiDex_Pal();
     int x0, y0, w, h;
     struct UiPattern dots = UiPat_Dots(8, 2, 0, 0, true);
     bool veil;
@@ -972,17 +1061,31 @@ static void Draw(int t)
     UiG_Rect(x0, y0, w, h, c.bg);
     UiG_FillPattern(&dots, x0, y0, w, h, c.bg2, t / 5, t / 5);
     DrawDevice(&c, t);
-    if (!(sP.listCount == 0 && sP.phase == NATIVE_DEX_LOADING))
+    if (UiDexPages_SearchUp())
+    {
+        UiDexPages_DrawSearch(&c, t);
+        DrawHints();
+    }
+    else if (!(sP.listCount == 0 && sP.phase == NATIVE_DEX_LOADING))
     {
         DrawEntry(&c, t);
+        if (sPageFade > 0)
+        {
+            /* the left screen dims as the game fades between the entry's pages */
+            UiG_Save();
+            UiG_Alpha(sPageFade >= 16 ? 1.0 : sPageFade / 16.0);
+            UiG_Rect(DEX_PANE_X, DEX_PANE_Y, DEX_PANE_W, DEX_PANE_H, UI_HEX(0x000000));
+            UiG_Restore();
+        }
         DrawList(&c, t);
         DrawHints();
         if (sP.phase == NATIVE_DEX_MENU)
             DrawMenu(t);
     }
-    /* the game's fades: from and to its own pages and the field; within the
-     * device (list <-> entry page) the device stays up */
-    veil = sP.phase == NATIVE_DEX_LEAVING || sP.phase == NATIVE_DEX_CLOSING
+    /* the game's fades: from and to the field, the search form; within the
+     * device (list <-> entry page <-> its pages) the device stays up */
+    veil = (sP.phase == NATIVE_DEX_LEAVING && sP.subPage == NATIVE_DEX_NO_SUBPAGE) || sP.phase == NATIVE_DEX_CLOSING
+        || sP.phase == NATIVE_DEX_PAGE
         || (!sSettled && (sP.phase == NATIVE_DEX_LOADING || sP.phase == NATIVE_DEX_OPENING || sP.phase == NATIVE_DEX_INFO_LOADING));
     if (veil)
         UiG_Veil(NativeUi_ScreenFade());
@@ -999,6 +1102,8 @@ static void SetGoal(int position, bool thenA)
 
 static bool Click(const struct UiHit *hit, int button)
 {
+    if (UiDexPages_SearchUp())
+        return UiDexPages_SearchClick(hit, button);
     if (button == 3)
     {
         NativeUi_QueuePress(B_BUTTON);
@@ -1006,24 +1111,36 @@ static bool Click(const struct UiHit *hit, int button)
     }
     if (button != 1)
         return false;
-    if (NativeUi_PressesPending() || sGoal >= 0 || sButtonGoal >= 0)
+    if (NativeUi_PressesPending() || sGoal >= 0 || sButtonGoal >= 0 || sPageGoal >= 0)
         return true;
     switch (sP.phase)
     {
+    case NATIVE_DEX_SUBPAGE:
+        if (hit->id == DEX_HIT_BUTTON)
+        {
+            /* the page's buttons: another page (the game's LEFT / RIGHT), CANCEL back to the entry */
+            sPageGoal = hit->index == CANCEL_SCREEN ? PAGE_GOAL_ENTRY : hit->index;
+            sPageFrames = 0;
+        }
+        else if (hit->id == DEX_HIT_PLAY && sP.subPage == CRY_SCREEN)
+        {
+            NativeUi_QueuePress(A_BUTTON);
+        }
+        return true;
     case NATIVE_DEX_LIST:
     case NATIVE_DEX_SCROLLING:
         switch (hit->id)
         {
-        case HIT_ROW:
-        case HIT_RAIL:
+        case DEX_HIT_ROW:
+        case DEX_HIT_RAIL:
             /* the row, then its entry page (A: the game opens seen ones) */
-            SetGoal(hit->index, hit->id == HIT_ROW);
+            SetGoal(hit->index, hit->id == DEX_HIT_ROW);
             return true;
-        case HIT_ENTRY:
+        case DEX_HIT_ENTRY:
             if (sE.seen)
                 NativeUi_QueuePress(A_BUTTON);
             return true;
-        case HIT_BUTTON:
+        case DEX_HIT_BUTTON:
             if (sE.seen && hit->index != CANCEL_SCREEN)
             {
                 NativeUi_QueuePress(A_BUTTON);
@@ -1031,7 +1148,7 @@ static bool Click(const struct UiHit *hit, int button)
                 sButtonFrames = 0;
             }
             return true;
-        case HIT_ORDER:
+        case DEX_HIT_ORDER:
             NativeUi_QueuePress(SELECT_BUTTON);
             return true;
         default:
@@ -1054,11 +1171,11 @@ static bool Click(const struct UiHit *hit, int button)
     case NATIVE_DEX_INFO:
         switch (hit->id)
         {
-        case HIT_BUTTON:
+        case DEX_HIT_BUTTON:
             sButtonGoal = hit->index;
             sButtonFrames = 0;
             return true;
-        case HIT_ROW:
+        case DEX_HIT_ROW:
             if (hit->index != sP.selected)
             {
                 /* back to the list, to that row, and its entry page */
@@ -1076,6 +1193,8 @@ static bool Click(const struct UiHit *hit, int button)
 
 static bool Wheel(int dy)
 {
+    if (UiDexPages_SearchUp())
+        return UiDexPages_SearchWheel(dy);
     if (NativeUi_PressesPending() || sGoal >= 0)
         return true;
     if (ListPhase() || sP.phase == NATIVE_DEX_MENU || sP.phase == NATIVE_DEX_INFO)
@@ -1090,6 +1209,8 @@ static uint16_t FilterKeys(uint16_t keys, uint16_t newKeys)
     {
         sGoal = -1;
         sButtonGoal = -1;
+        sPageGoal = -1;
+        UiDexPages_SearchCancelGoals();
     }
     /* nearby rows: hold the direction (the game scrolls while it is held) until the list gets there */
     if (sGoal >= 0 && ListPhase() && !NativeUi_PressesPending())
@@ -1104,6 +1225,8 @@ static uint16_t FilterKeys(uint16_t keys, uint16_t newKeys)
 
 static bool Ready(void)
 {
+    if (UiDexPages_SearchUp())
+        return UiDexPages_Search()->ready;
     return sP.ready;
 }
 
@@ -1111,6 +1234,158 @@ static enum UiPicture Picture(void)
 {
     return UI_PICTURE_HIDE_ALL;
 }
+
+/* ---------------------------------------------------------------- the new entry's page (after a catch) */
+
+/*
+ * In battle, a Pokémon caught for the first time gets its entry page
+ * (pokedex.c DisplayCaughtMonDexPage): the device shows it as its entry pane,
+ * with a REGISTERED card and the species' footprint (the game's page shows it
+ * too) on the right screen. A or B goes on, as in the game.
+ */
+static struct NativeDexNewEntry sN;
+static u16 sNewSpecies = 0xFFFF;
+static int sNewT;
+static int sNewFade;
+
+static bool DetectNewEntry(void)
+{
+    return Pokedex_NativeUiNewEntry(&sN);
+}
+
+static void CaptureNewEntry(void)
+{
+    Pokedex_NativeUiNewEntry(&sN);
+    if (sN.species != sNewSpecies)
+    {
+        sNewSpecies = sN.species;
+        sNewT = 0;
+    }
+    else
+    {
+        sNewT++;
+    }
+    memset(&sP, 0, sizeof(sP));
+    sP.phase = NATIVE_DEX_INFO;
+    sP.dexMode = sN.national ? DEX_MODE_NATIONAL : DEX_MODE_HOENN;
+    sP.nationalEnabled = sN.national;
+    sP.digits = (NATIONAL_DEX_COUNT > 999 && sN.national) ? 4 : 3;
+    sP.seenCount = sN.national ? sN.seen : sN.regionalSeen;
+    sP.ownCount = sN.national ? sN.own : sN.regionalOwn;
+    sP.regionalSeen = sN.regionalSeen;
+    sP.regionalOwn = sN.regionalOwn;
+    sP.selectedScreen = 0xFF;
+    sP.subPage = NATIVE_DEX_NO_SUBPAGE;
+    sP.entry.dexNum = sN.dexNum;
+    sP.entry.shownNum = sN.shownNum;
+    sP.entry.species = sN.species;
+    sP.entry.personality = sN.personality;
+    sP.entry.seen = TRUE;
+    sP.entry.owned = TRUE;
+    sPageFade = 0;
+    CaptureEntry();
+    UiGfx_PrepareMonPic(sE.species, sE.personality, false, false);
+    /* the game fades its page in (all palettes) and out (the backgrounds, as the
+     * Pokémon slides back): the device follows */
+    sNewFade = gPaletteFade.y > 16 ? 16 : gPaletteFade.y;
+    if (sN.state == NATIVE_DEX_NEW_UP && !gPaletteFade.active)
+        sNewFade = 0;
+    sFresh = true;
+    sSettled = false;
+    sNewEntryView = true;
+}
+
+static void Footprint(int x, int y, int scale, UiRGBA ink)
+{
+    const u8 *fp = sE.species < NUM_SPECIES ? gSpeciesInfo[sE.species].footprint : NULL;
+
+    if (fp == NULL)
+        return;
+    /* 1bpp, four 8x8 tiles (top left, top right, bottom left, bottom right), a byte a row */
+    for (int tile = 0; tile < 4; tile++)
+        for (int row = 0; row < 8; row++)
+        {
+            u8 bits = fp[tile * 8 + row];
+
+            for (int col = 0; col < 8; col++)
+                if (bits & (1 << col))
+                    UiG_Rect(x + ((tile & 1) * 8 + col) * scale, y + ((tile >> 1) * 8 + row) * scale, scale, scale, ink);
+        }
+}
+
+static void DrawNewEntryCard(const struct DexPal *c, int t)
+{
+    const struct UiRamp *dv = &c->dev;
+    int x = DEX_LIST_X, y = DEX_PANE_Y, w = DEX_LIST_W, h = DEX_PANE_H;
+    bool blink = (t & 16) != 0;   /* the game's page flickers its colours every 16 frames */
+    static const char *const sStamp[] = {".#######.", "#ggggggg#", "#gggggwg#", "#ggggwwg#", "#gwgwwgg#",
+                                         "#gwwwggg#", "#ggwgggg#", "#ggggggg#", ".#######."};
+    struct UiPixPal pal[3] = {{'#', UI_HEX(0x2A5A30)}, {'g', UI_HEX(0x58B048)}, {'w', UI_HEX(0xF8F8F8)}};
+    u8 b[64];
+
+    UiG_Paint(UiM_Rounded4(w, h, 2, 2, 2, 2), x, y, UI_P_CREAM, &(struct UiPaint){UI_NONE, UI_P_CREAM_HI, UI_P_CREAM_LO, 0, 0, NULL, 0});
+    UiG_Paint(UiM_Rounded4(w - 4, 22, 2, 2, 0, 0), x + 2, y + 2, blink ? dv->hi : dv->base,
+              &(struct UiPaint){UI_NONE, blink ? UiMix(dv->hi, UI_HEX(0xFFFFFF), 0.4) : dv->hi, dv->lo, 0, 0, NULL, 0});
+    UiCaps_Draw(x + w / 2, y + 9, "REGISTERED", UI_P_TEXT_W, dv->ink, UI_CAPS_OUTLINE, UI_ALIGN_CENTER, UI_NONE);
+    /* the caught stamp, large */
+    UiW_PixScaled("dexcaughtbig", sStamp, 9, pal, 3, x + w / 2 - 27, y + 40, 6);
+    b[0] = EOS;
+    UiText_Append(b, sizeof(b), sE.name);
+    UiG_TextEx(x + w / 2, y + 102, b, UI_FONT_NORMAL, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_CENTER);
+    UiText_Draw(UI_FONT_SMALL, x + w / 2, y + 122, sText_NewEntryLine, UI_P_TEXT_MUTED, UI_P_TEXT_SH, UI_ALIGN_CENTER, 0);
+    /* its footprint, as the game's page prints it */
+    {
+        int fx = x + w / 2 - 50, fy = y + 150;
+
+        UiG_Paint(UiM_Rounded4(100, 92, 3, 3, 3, 3), fx, fy, UI_P_PAPER,
+                  &(struct UiPaint){UiMix(UI_P_PAPER_LO, dv->lo, 0.4), UI_HEX(0xFFFFFF), UI_P_PAPER_LO, 0, 0, NULL, 0});
+        UiCaps_Draw(fx + 50, fy + 6, "FOOTPRINT", UI_P_TEXT_MUTED, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_CENTER, UI_NONE);
+        Footprint(fx + 50 - 32, fy + 20, 4, UiMix(UI_P_INK, dv->ink, 0.35));
+    }
+}
+
+static void DrawNewEntry(int t)
+{
+    struct DexPal c = UiDex_Pal();
+    int x0, y0, w, h;
+    struct UiPattern dots = UiPat_Dots(8, 2, 0, 0, true);
+    struct UiHintItem hint = {UI_ACT_CONFIRM, sText_OK};
+
+    UiG_Bleed(&x0, &y0, &w, &h);
+    UiG_Rect(x0, y0, w, h, c.bg);
+    UiG_FillPattern(&dots, x0, y0, w, h, c.bg2, t / 5, t / 5);
+    UiG_Hit(DEX_HIT_BACKDROP, 0, x0, y0, w, h);
+    DrawDevice(&c, t);
+    DrawEntry(&c, t);
+    DrawNewEntryCard(&c, t);
+    if (sN.state == NATIVE_DEX_NEW_UP)
+        UiW_Hints(20, 337, &hint, 1, true, 8);
+    if (sNewFade > 0)
+        UiG_Veil(UI_RGBA(0, 0, 0, sNewFade >= 16 ? 255 : sNewFade * 255 / 16));
+}
+
+static bool ClickNewEntry(const struct UiHit *hit, int button)
+{
+    (void)hit;
+    if (sN.state == NATIVE_DEX_NEW_UP && !NativeUi_PressesPending() && (button == 1 || button == 3))
+        NativeUi_QueuePress(button == 1 ? A_BUTTON : B_BUTTON);
+    return true;
+}
+
+static bool ReadyNewEntry(void)
+{
+    return sN.state == NATIVE_DEX_NEW_UP;
+}
+
+const struct UiScreen gUiScreen_DexNewEntry = {
+    .name = "pokedex",
+    .detect = DetectNewEntry,
+    .capture = CaptureNewEntry,
+    .draw = DrawNewEntry,
+    .click = ClickNewEntry,
+    .ready = ReadyNewEntry,
+    .picture = Picture,
+};
 
 const struct UiScreen gUiScreen_Pokedex = {
     .name = "pokedex",

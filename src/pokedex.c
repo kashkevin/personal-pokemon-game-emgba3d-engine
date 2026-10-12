@@ -6017,6 +6017,8 @@ bool32 Pokedex_NativeUiState(struct NativePokedex *out)
     out->menuCursor = sPokedexView->menuCursorPos;
     out->menuCount = sPokedexView->isSearchResults ? 5 : 4;
     out->selectedScreen = sPokedexView->selectedScreen;
+    out->subPage = NATIVE_DEX_NO_SUBPAGE;
+    out->subPageNext = NATIVE_DEX_NO_SUBPAGE;
     if (out->selected < NATIONAL_DEX_COUNT)
         NativeUiDexRow(out->selected, &out->entry);
     switch (kind)
@@ -6029,18 +6031,78 @@ bool32 Pokedex_NativeUiState(struct NativePokedex *out)
         break;
     case NATIVE_DEX_INFO:
     {
-        // the entry page's own task (tLoadScreenTaskId)
+        // the entry page's own task (tLoadScreenTaskId), which also runs its AREA, CRY and SIZE pages
         u8 info = gTasks[main].data[0];
         TaskFunc f = info < NUM_TASKS && gTasks[info].isActive ? gTasks[info].func : NULL;
+        u8 sw = sPokedexView->screenSwitchState;
 
         if (f == Task_HandleInfoScreenInput)
+        {
             out->ready = !gTasks[info].data[0] && !gPaletteFade.active;   // tScrolling
+        }
         else if (f == Task_LoadInfoScreen || f == Task_LoadInfoScreenWaitForFade || f == Task_ExitInfoScreen || f == NULL)
+        {
             out->phase = NATIVE_DEX_INFO_LOADING;
+        }
         else if (f == Task_SwitchScreensFromInfoScreen)
+        {
+            // 1 AREA, 2 CRY, 3 SIZE
             out->phase = NATIVE_DEX_LEAVING;
+            out->subPage = sw >= 1 && sw <= 3 ? sw - 1 : AREA_SCREEN;
+        }
+        else if (f == Task_LoadAreaScreen || f == Task_ReloadAreaScreen || f == Task_WaitForAreaScreenInput
+              || f == Task_SwitchScreensFromAreaScreen)
+        {
+            struct NativeDexArea area;
+
+            out->phase = NATIVE_DEX_SUBPAGE;
+            out->subPage = AREA_SCREEN;
+            if (f == Task_SwitchScreensFromAreaScreen)
+            {
+                // 1 the entry page, 2 CRY, 3 AREA again
+                out->subPageLeaving = TRUE;
+                out->subPageNext = sw == 2 ? CRY_SCREEN : sw == 3 ? AREA_SCREEN : NATIVE_DEX_NO_SUBPAGE;
+            }
+            else if (f == Task_WaitForAreaScreenInput && PokedexArea_NativeUiState(&area))
+            {
+                out->ready = area.ready;
+                if (area.leaving)
+                {
+                    out->subPageLeaving = TRUE;
+                    out->subPageNext = area.next == 2 ? CRY_SCREEN : area.next == 3 ? AREA_SCREEN : NATIVE_DEX_NO_SUBPAGE;
+                }
+            }
+        }
+        else if (f == Task_LoadCryScreen || f == Task_HandleCryScreenInput || f == Task_SwitchScreensFromCryScreen)
+        {
+            out->phase = NATIVE_DEX_SUBPAGE;
+            out->subPage = CRY_SCREEN;
+            if (f == Task_HandleCryScreenInput)
+                out->ready = !gPaletteFade.active;
+            if (f == Task_SwitchScreensFromCryScreen)
+            {
+                // 1 the entry page, 2 AREA, 3 SIZE
+                out->subPageLeaving = TRUE;
+                out->subPageNext = sw == 2 ? AREA_SCREEN : sw == 3 ? SIZE_SCREEN : NATIVE_DEX_NO_SUBPAGE;
+            }
+        }
+        else if (f == Task_LoadSizeScreen || f == Task_HandleSizeScreenInput || f == Task_SwitchScreensFromSizeScreen)
+        {
+            out->phase = NATIVE_DEX_SUBPAGE;
+            out->subPage = SIZE_SCREEN;
+            if (f == Task_HandleSizeScreenInput)
+                out->ready = !gPaletteFade.active;
+            if (f == Task_SwitchScreensFromSizeScreen)
+            {
+                // 1 the entry page, 2 CRY
+                out->subPageLeaving = TRUE;
+                out->subPageNext = sw == 2 ? CRY_SCREEN : NATIVE_DEX_NO_SUBPAGE;
+            }
+        }
         else
-            out->phase = NATIVE_DEX_PAGE;   // AREA, CRY, SIZE
+        {
+            out->phase = NATIVE_DEX_PAGE;
+        }
         break;
     }
     case NATIVE_DEX_PAGE:
@@ -6065,5 +6127,129 @@ u32 Pokedex_NativeUiRows(u32 first, u32 count, struct NativePokedexRow *rows)
     for (i = 0; i < count && first + i < sPokedexView->pokemonListCount && first + i < NATIONAL_DEX_COUNT; i++)
         NativeUiDexRow(first + i, &rows[i]);
     return i;
+}
+
+// The new entry's page after a catch (in battle): its task's species and step.
+bool32 Pokedex_NativeUiNewEntry(struct NativeDexNewEntry *out)
+{
+    static const TaskFunc sFuncs[] = {Task_DisplayCaughtMonDexPage, Task_HandleCaughtMonPageInput, Task_ExitCaughtMonPage};
+    static const u8 sStates[] = {NATIVE_DEX_NEW_LOADING, NATIVE_DEX_NEW_UP, NATIVE_DEX_NEW_LEAVING};
+    u8 taskId = TASK_NONE;
+    u32 k;
+
+    memset(out, 0, sizeof(*out));
+    for (k = 0; k < ARRAY_COUNT(sFuncs) && taskId == TASK_NONE; k++)
+    {
+        taskId = FindTaskIdByFunc(sFuncs[k]);
+        if (taskId != TASK_NONE)
+            out->state = sStates[k];
+    }
+    if (taskId == TASK_NONE)
+        return FALSE;
+    // data[0] step, [1] species, [13] shiny, [14] and [15] the personality's halves
+    if (out->state == NATIVE_DEX_NEW_UP && gPaletteFade.active)
+        out->state = NATIVE_DEX_NEW_LOADING;
+    out->species = (u16)gTasks[taskId].data[1];
+    out->personality = (u16)gTasks[taskId].data[14] | ((u32)(u16)gTasks[taskId].data[15] << 16);
+    out->dexNum = SpeciesToNationalPokedexNum(out->species);
+    out->national = IsNationalPokedexEnabled();
+    out->shownNum = out->national ? out->dexNum : NationalToRegionalOrder(out->dexNum);
+    out->seen = GetNationalPokedexCount(FLAG_GET_SEEN);
+    out->own = GetNationalPokedexCount(FLAG_GET_CAUGHT);
+    out->regionalSeen = GetRegionalPokedexCount(FLAG_GET_SEEN);
+    out->regionalOwn = GetRegionalPokedexCount(FLAG_GET_CAUGHT);
+    return TRUE;
+}
+
+// The search form (SELECT): its task and what its text box says. The native UI
+// draws the form and the option lists; the search and its rules stay here.
+u32 Pokedex_NativeUiSearchOptions(u32 row, const u8 **titles, u32 max)
+{
+    u32 i;
+
+    if (row >= SEARCH_OK)
+        return 0;
+    for (i = 0; i < sSearchOptions[row].numOptions && i < max && sSearchOptions[row].texts[i].title != NULL; i++)
+        titles[i] = sSearchOptions[row].texts[i].title;
+    return i;
+}
+
+bool32 Pokedex_NativeUiSearch(struct NativeDexSearch *out)
+{
+    static const TaskFunc sFuncs[] = {
+        Task_LoadSearchMenu, Task_SwitchToSearchMenuTopBar, Task_HandleSearchTopBarInput, Task_SwitchToSearchMenu,
+        Task_HandleSearchMenuInput, Task_StartPokedexSearch, Task_WaitAndCompleteSearch, Task_SearchCompleteWaitForInput,
+        Task_SelectSearchMenuItem, Task_HandleSearchParameterInput, Task_ExitSearch, Task_ExitSearchWaitForFade,
+    };
+    static const u8 sStates[] = {
+        NATIVE_DEX_SEARCH_LOADING, NATIVE_DEX_SEARCH_TOPBAR, NATIVE_DEX_SEARCH_TOPBAR, NATIVE_DEX_SEARCH_MENU,
+        NATIVE_DEX_SEARCH_MENU, NATIVE_DEX_SEARCH_SEARCHING, NATIVE_DEX_SEARCH_SEARCHING, NATIVE_DEX_SEARCH_DONE,
+        NATIVE_DEX_SEARCH_OPTIONS, NATIVE_DEX_SEARCH_OPTIONS, NATIVE_DEX_SEARCH_EXITING, NATIVE_DEX_SEARCH_EXITING,
+    };
+    u8 taskId = TASK_NONE;
+    u32 i, k;
+    const s16 *data;
+
+    memset(out, 0, sizeof(*out));
+    if (sPokedexView == NULL || (gMain.callback2 != CB2_Pokedex))
+        return FALSE;
+    for (k = 0; k < ARRAY_COUNT(sFuncs) && taskId == TASK_NONE; k++)
+    {
+        taskId = FindTaskIdByFunc(sFuncs[k]);
+        if (taskId != TASK_NONE)
+            out->state = sStates[k];
+    }
+    if (taskId == TASK_NONE)
+        return FALSE;
+    data = gTasks[taskId].data;
+    out->national = IsNationalPokedexEnabled();
+    if (out->state == NATIVE_DEX_SEARCH_LOADING && gMain.state < 2)
+        return TRUE;   // the task data is set up in its second step
+    out->topBar = data[0];     // tTopBarItem
+    out->menuItem = data[1];   // tMenuItem
+    for (i = 0; i < SEARCH_OK; i++)
+    {
+        u32 id = data[sSearchOptions[i].taskDataCursorPos] + data[sSearchOptions[i].taskDataScrollOffset];
+
+        if (id >= sSearchOptions[i].numOptions)
+            id = 0;
+        out->chosen[i] = id;
+        out->values[i] = sSearchOptions[i].texts[id].title;
+    }
+    switch (out->state)
+    {
+    case NATIVE_DEX_SEARCH_TOPBAR:
+        out->ready = gTasks[taskId].func == Task_HandleSearchTopBarInput && !gPaletteFade.active;
+        out->message = sSearchMenuTopBarItems[out->topBar < SEARCH_TOPBAR_COUNT ? out->topBar : 0].description;
+        break;
+    case NATIVE_DEX_SEARCH_MENU:
+        out->ready = gTasks[taskId].func == Task_HandleSearchMenuInput;
+        out->message = sSearchMenuItems[out->menuItem < SEARCH_COUNT ? out->menuItem : 0].description;
+        break;
+    case NATIVE_DEX_SEARCH_OPTIONS:
+        if (out->menuItem < SEARCH_OK)
+        {
+            const struct SearchOption *o = &sSearchOptions[out->menuItem];
+
+            out->ready = gTasks[taskId].func == Task_HandleSearchParameterInput;
+            out->optionCursor = data[o->taskDataCursorPos];
+            out->optionScroll = data[o->taskDataScrollOffset];
+            out->optionCount = Pokedex_NativeUiSearchOptions(out->menuItem, out->options, NATIVE_DEX_SEARCH_OPTIONS_MAX);
+            if (out->optionCursor + out->optionScroll < out->optionCount)
+                out->message = o->texts[out->optionCursor + out->optionScroll].description;
+        }
+        break;
+    case NATIVE_DEX_SEARCH_SEARCHING:
+        out->message = sText_SearchingPleaseWait;
+        break;
+    case NATIVE_DEX_SEARCH_DONE:
+        out->ready = TRUE;
+        out->results = sPokedexView->pokemonListCount;
+        out->message = out->results != 0 ? sText_SearchCompleted : sText_NoMatchingPkmnWereFound;
+        break;
+    default:
+        break;
+    }
+    return TRUE;
 }
 #endif // ENABLE_NATIVE_UI

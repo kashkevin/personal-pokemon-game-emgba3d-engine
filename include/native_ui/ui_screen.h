@@ -62,6 +62,10 @@ enum UiPcKey
 void NativeUi_QueuePress(uint16_t key);
 void NativeUi_QueuePresses(uint16_t key, int count);
 bool NativeUi_PressesPending(void);
+/* the left mouse button is held down over the game window (a drag), and the
+ * screen region under the mouse (NULL: none) */
+bool NativeUi_MouseHeld(void);
+const struct UiHit *NativeUi_MouseHover(void);
 /* the game frame counter of the UI (60 a second, stops while the game is paused) */
 uint32_t NativeUi_Frame(void);
 /* the time since the last 60 Hz step, 0..1 (smooth animation at any refresh rate) */
@@ -89,7 +93,9 @@ extern const struct UiScreen gUiScreen_Party;
 extern const struct UiScreen gUiScreen_Summary;
 extern const struct UiScreen gUiScreen_Bag;
 extern const struct UiScreen gUiScreen_Pokedex;
+extern const struct UiScreen gUiScreen_DexNewEntry;
 extern const struct UiScreen gUiScreen_Storage;
+extern const struct UiScreen gUiScreen_StorageMenus;
 extern const struct UiScreen gUiScreen_Battle;
 extern const struct UiScreen gUiScreen_Customize;
 extern const struct UiScreen gUiScreen_Players;
@@ -99,6 +105,7 @@ extern const struct UiScreen gUiScreen_Naming;
 extern const struct UiScreen gUiScreen_Starters;
 extern const struct UiScreen gUiScreen_Evolution;
 extern const struct UiScreen gUiScreen_GameCorner;
+extern const struct UiScreen gUiScreen_FieldText;
 extern const struct UiScreen gUiScreen_Notice;
 
 #endif // GUARD_NATIVE_UI_SCREEN_H

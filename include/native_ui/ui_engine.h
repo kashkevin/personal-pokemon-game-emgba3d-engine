@@ -313,9 +313,12 @@ enum NativePokedexPhase
     NATIVE_DEX_INFO,            /* the entry page reads buttons: selectedScreen */
     NATIVE_DEX_INFO_LOADING,    /* the entry page loads, moves to another Pokémon, or closes */
     NATIVE_DEX_LEAVING,         /* fading out to one of the game's own pages */
-    NATIVE_DEX_PAGE,            /* AREA, CRY, SIZE, the search: the game's own pages */
+    NATIVE_DEX_PAGE,            /* the search (Pokedex_NativeUiSearch) */
     NATIVE_DEX_CLOSING,         /* fading out (closing, or leaving search results) */
+    NATIVE_DEX_SUBPAGE,         /* the entry's AREA, CRY or SIZE page (subPage): loading, up, or leaving */
 };
+/* the entry's pages: subPage (pokedex_common.h's AREA_SCREEN, CRY_SCREEN, SIZE_SCREEN) */
+#define NATIVE_DEX_NO_SUBPAGE 0xFF
 struct NativePokedexRow
 {
     u16 dexNum;                 /* the national number (0xFFFF: an empty row) */
@@ -342,12 +345,117 @@ struct NativePokedex
     u8 menuCursor;
     u8 menuCount;               /* the START menu's rows (4; 5 in search results) */
     u8 selectedScreen;          /* the entry page's AREA, CRY, SIZE, CANCEL (pokedex_common.h) */
+    u8 subPage;                 /* NATIVE_DEX_SUBPAGE: AREA_SCREEN, CRY_SCREEN, SIZE_SCREEN; the page a
+                                   LEAVING entry page goes to; else NATIVE_DEX_NO_SUBPAGE */
+    bool8 subPageLeaving;       /* NATIVE_DEX_SUBPAGE: fading out (to subPageNext) */
+    u8 subPageNext;             /* ... to this page (NATIVE_DEX_NO_SUBPAGE: the entry page) */
     struct NativePokedexRow entry;   /* the selected one */
-    bool8 ready;
+    bool8 ready;                /* the list, START menu, entry page or sub page reads buttons */
 };
 bool32 Pokedex_NativeUiState(struct NativePokedex *out);
 /* the list's rows from first; returns how many there are */
 u32 Pokedex_NativeUiRows(u32 first, u32 count, struct NativePokedexRow *rows);
+
+/* the AREA page (pokedex_area_screen.c): where the species lives on the region map */
+#define NATIVE_DEX_AREA_MAX 64
+#define NATIVE_DEX_AREA_MARKERS 32
+struct NativeDexArea
+{
+    bool8 ready;                /* the page reads buttons */
+    bool8 leaving;              /* fading out, to next: 1 the entry page, 2 CRY, 3 this page again */
+    u8 next;
+    bool8 found;                /* the areas have been worked out */
+    u16 species;
+    u8 regionMapType;           /* gRegionMapInfos' index */
+    u16 overworldCount;
+    u16 overworldSections[NATIVE_DEX_AREA_MAX];   /* map sections that glow */
+    u16 specialCount;
+    u16 specialSections[NATIVE_DEX_AREA_MARKERS]; /* caves and special places: markers */
+    s16 markerX[NATIVE_DEX_AREA_MARKERS];          /* the markers' centres (screen pixels) */
+    s16 markerY[NATIVE_DEX_AREA_MARKERS];
+    bool8 markersShown;         /* the markers are in their visible half of the blink */
+    bool8 showingMarkers;       /* the glow rests while markers blink */
+    u8 glowEva;                 /* the glow's blend weights (0..16) */
+    u8 glowEvb;
+    const u16 *glowTilemap;     /* 32 x 20 BG entries of the glow tiles (NULL: none yet) */
+    const u32 *glowGfx;         /* the glow tiles (compressed 4bpp) and palette */
+    const u16 *glowPalette;
+    const u8 *markerGfx;        /* the marker (16x16 4bpp) and palette */
+    const u16 *markerPalette;
+    bool8 playerShown;          /* the player's icon on the map, at these screen pixels (centre) */
+    s16 playerX;
+    s16 playerY;
+    bool8 female;
+    s16 mapScrollY;             /* the map's vertical offset on screen */
+};
+bool32 PokedexArea_NativeUiState(struct NativeDexArea *out);
+/* the region map's player icon (16x16 4bpp) and its palette (region_map.c) */
+const u8 *RegionMap_NativeUiPlayerIcon(bool32 female, const u16 **palette);
+
+/* the CRY page (pokedex_cry_screen.c): the waveform and the meter */
+struct NativeDexCry
+{
+    bool8 active;               /* the cry screen is set up */
+    bool8 playing;              /* the waveform is drawing a cry this frame */
+    s8 amplitude[2];            /* the two samples drawn this frame (0 while flat) */
+    s8 needle;                  /* the meter needle's rotation (32 quiet .. -32 loud; 256 a turn) */
+};
+bool32 PokedexCry_NativeUiState(struct NativeDexCry *out);
+
+/* the search form (pokedex.c): SELECT on the list */
+enum
+{
+    NATIVE_DEX_SEARCH_LOADING,
+    NATIVE_DEX_SEARCH_TOPBAR,   /* SEARCH, SHIFT, CANCEL */
+    NATIVE_DEX_SEARCH_MENU,     /* the form's rows */
+    NATIVE_DEX_SEARCH_OPTIONS,  /* a row's option list */
+    NATIVE_DEX_SEARCH_SEARCHING,
+    NATIVE_DEX_SEARCH_DONE,     /* "Search completed." / no match: A goes on */
+    NATIVE_DEX_SEARCH_EXITING,
+};
+#define NATIVE_DEX_SEARCH_ROWS 7     /* pokedex_common.h's SEARCH_NAME .. SEARCH_OK */
+#define NATIVE_DEX_SEARCH_OPTIONS_MAX 24
+struct NativeDexSearch
+{
+    u8 state;
+    bool8 ready;                /* reads buttons */
+    bool8 national;             /* the MODE row is there */
+    u8 topBar;                  /* SEARCH_TOPBAR_* */
+    u8 menuItem;                /* SEARCH_* */
+    const u8 *values[NATIVE_DEX_SEARCH_ROWS];   /* each row's chosen option (NULL for OK) */
+    u8 chosen[NATIVE_DEX_SEARCH_ROWS];          /* ... its index in the row's options */
+    u8 optionCount;             /* NATIVE_DEX_SEARCH_OPTIONS: the open row's options */
+    u8 optionCursor;            /* the cursor on screen (0..5) */
+    u8 optionScroll;            /* the first option shown */
+    const u8 *options[NATIVE_DEX_SEARCH_OPTIONS_MAX];
+    const u8 *message;          /* what the game's text box says */
+    u16 results;                /* NATIVE_DEX_SEARCH_DONE: the Pokémon found */
+};
+bool32 Pokedex_NativeUiSearch(struct NativeDexSearch *out);
+
+/* the new entry's page after a catch (pokedex.c DisplayCaughtMonDexPage, in battle) */
+enum
+{
+    NATIVE_DEX_NEW_LOADING,
+    NATIVE_DEX_NEW_UP,          /* reads A or B */
+    NATIVE_DEX_NEW_LEAVING,     /* the page fades, the Pokémon slides back */
+};
+struct NativeDexNewEntry
+{
+    u8 state;
+    u16 species;
+    u32 personality;
+    u16 dexNum;                 /* national */
+    u16 shownNum;               /* the number the page shows (regional without the National Dex) */
+    bool8 national;             /* the National Dex is on */
+    u16 seen;                   /* the totals the device shows */
+    u16 own;
+    u16 regionalSeen;
+    u16 regionalOwn;
+};
+bool32 Pokedex_NativeUiNewEntry(struct NativeDexNewEntry *out);
+/* a search row's options, as the game lists them; returns how many */
+u32 Pokedex_NativeUiSearchOptions(u32 row, const u8 **titles, u32 max);
 
 /* ---------------------------------------------------------------- PC storage (pokemon_storage_system.c) */
 
@@ -363,8 +471,15 @@ enum NativeStoragePhase
     NATIVE_STORAGE_MARKS,       /* markCursor (0-3 the marks, 4 OK, 5 CANCEL), marks */
     NATIVE_STORAGE_MESSAGE,     /* a message waits for a button */
     NATIVE_STORAGE_ITEM_INFO,   /* MOVE ITEMS: an item's description waits for a button */
-    NATIVE_STORAGE_MULTI,       /* several Pokémon selected or moved at once (the game's own picture) */
     NATIVE_STORAGE_CLOSING,     /* the screen closes, or another screen opens */
+};
+/* several Pokémon at once (MOVE POKéMON, the quick hand: A held over a Pokémon) */
+enum NativeStorageMulti
+{
+    NATIVE_STORAGE_MULTI_NONE,
+    NATIVE_STORAGE_MULTI_SELECTING, /* A held: multiFrom to multiTo (box positions) */
+    NATIVE_STORAGE_MULTI_MOVING,    /* the hand carries the group (Storage_NativeUiGroup) */
+    NATIVE_STORAGE_MULTI_PLACING,   /* the group is put down (already in the box) */
 };
 enum NativeStorageMode
 {
@@ -431,6 +546,16 @@ struct NativeStorage
     bool8 messageShown;
     u8 message[64];
     u16 waldaColors[2];         /* Walda's wallpaper's background and foreground (BGR555) */
+    u8 multi;                   /* enum NativeStorageMulti */
+    u8 multiFrom;               /* SELECTING: where it began */
+    u8 multiTo;                 /* ... and the other corner (the cursor) */
+    u8 groupPos;                /* MOVING, PLACING: the group's top left */
+    u8 groupCols;
+    u8 groupRows;
+    s8 groupLift;               /* GBA pixels the group is lifted (0-8) */
+    s8 groupSlideX;             /* MOVING: sixths of a cell the group is still to go */
+    s8 groupSlideY;
+    bool8 canPlace;             /* MOVING: nothing is in the way of putting it down here */
     bool8 ready;
 };
 bool32 Storage_NativeUiState(struct NativeStorage *out);
@@ -449,6 +574,44 @@ void Storage_NativeUiBox(u32 box, struct NativeStorageBox *out);
 void Storage_NativeUiBoxInfo(u32 box, u8 *name, u8 *wallpaper, u8 *count);
 /* the Pokémon at a box position as a party Pokémon (FALSE: empty) */
 bool32 Storage_NativeUiBoxMon(u32 box, u32 pos, struct Pokemon *out);
+/* the group the hand carries, row by row (groupCols a row; empty places too) */
+void Storage_NativeUiGroup(struct NativeStorageBox *out);
+bool32 Storage_NativeUiGroupMon(u32 index, struct Pokemon *out);
+
+/* ---------------------------------------------------------------- the PC's first menus (field) */
+
+#define NATIVE_PC_MENU_MAX 5
+enum NativePcMenuKind
+{
+    NATIVE_PC_MENU_NONE,
+    NATIVE_PC_MENU_STORAGE,      /* the Pokémon Storage System's (pokemon_storage_system.c) */
+    NATIVE_PC_MENU_PLAYER,       /* the player's PC: ITEM STORAGE, MAILBOX... (player_pc.c) */
+    NATIVE_PC_MENU_ITEMS,        /* its ITEM STORAGE: WITHDRAW ITEM... */
+    NATIVE_PC_MENU_PLAYER_LINE,  /* one of its lines (the menu comes back after it) */
+};
+enum NativePcMenuState
+{
+    NATIVE_PC_MENU_OPENING,      /* the menu is put up (or the field fades in) */
+    NATIVE_PC_MENU_INPUT,        /* it reads buttons */
+    NATIVE_PC_MENU_REFUSED,      /* a choice was refused: message waits for a button */
+    NATIVE_PC_MENU_ENTERING,     /* a choice was taken: the screen fades to it */
+};
+struct NativePcMenu
+{
+    u8 menu;                     /* enum NativePcMenuKind */
+    u8 state;                    /* enum NativePcMenuState */
+    bool8 ready;
+    u8 count;
+    u8 cursor;
+    const u8 *labels[NATIVE_PC_MENU_MAX];
+    const u8 *message;           /* the line under it: the option's description, why it was refused
+                                  * (NULL: the field's message box has its own line) */
+};
+bool32 Storage_NativeUiMainMenu(struct NativePcMenu *out);
+bool32 PlayerPC_NativeUiState(struct NativePcMenu *out);
+/* script_menu.c: the PC's own multichoice (MULTI_PC) as the engine prints it;
+ * {PLAYER}'s PC is expanded into playersPc (32 bytes); returns how many rows */
+u32 ScriptMenu_NativeUiPcRows(const u8 **labels, u32 max, u8 *playersPc);
 
 /* ---------------------------------------------------------------- options (option_menu.c) */
 
