@@ -1580,7 +1580,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     sIntegerScale = integerScale;
     // A battle in 3D draws its whole frame; the field's scene, atlases and
     // models stay as they were for it (gl_battle.c).
-    if (sSurveyView < 0 && DioramaGLBattle_Present(sWindow))
+    if (sSurveyView < 0 && DioramaGLBattle_Present(sWindow, frameAlpha))
     {
         sDrewField3D = false;
         sLastFrame3D = true;

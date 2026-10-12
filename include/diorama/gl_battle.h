@@ -28,9 +28,11 @@ void DioramaGLBattle_UploadFrame(const uint32_t *rgba);
 
 /*
  * Draws the whole frame when the 3D battle is up, true if it did; the
- * compositor draws as ever otherwise.
+ * compositor draws as ever otherwise. frameAlpha (0..1): how far this frame is
+ * from the game frame before to this one (the compositor's, for frames drawn
+ * between game frames above 60 a second): the camera's glide is drawn there.
  */
-bool DioramaGLBattle_Present(SDL_Window *window);
+bool DioramaGLBattle_Present(SDL_Window *window, float frameAlpha);
 
 /* The battle is shown in 3D: the compositor keeps its overworld scene and
  * resources as they were. */
