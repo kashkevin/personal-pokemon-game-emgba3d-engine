@@ -23,6 +23,11 @@
 #include "constants/event_objects.h"
 #include "constants/rgb.h"
 #include "constants/songs.h"
+#ifdef PORTABLE
+#include "character_customization.h"
+static void CharCustomEditor_Open(void);
+#endif
+#line 26 // gba-line
 
 // Palette tags outside the object-event (0x11xx) and Pokemon (0x4000-0x7FFF)
 // ranges: one for the local trainer, one per remote trainer.
@@ -313,6 +318,16 @@ static void ApplyAll(void)
 void MultiplayerAppearance_Tick(bool32 connected)
 {
     const u8 *host = connected ? MultiplayerWorld_GetSelfAppearance() : NULL;
+#ifdef PORTABLE
+    // The save keeps the look (character_customization.c): a new game, Continue
+    // and a soft reset all start from what the save holds.
+    if (!sEditorActive && !CharCustom_ReadSavedLook(sLocal, &sPendingSave))
+    {
+        memset(sLocal, 0, MP_APPEARANCE_BYTES);
+        sPendingSave = FALSE;
+    }
+#endif
+#line 316 // gba-line
 
     if (!sEditorActive)
     {
@@ -334,9 +349,18 @@ void MultiplayerAppearance_Tick(bool32 connected)
             memcpy(sLocal, host, MP_APPEARANCE_BYTES);
         }
     }
+#ifdef PORTABLE
+    if (!sEditorActive)
+        CharCustom_WriteSavedLook(sLocal, sPendingSave);
+#endif
+#line 337 // gba-line
     if (gMain.callback2 != CB2_Overworld || gPaletteFade.active)
         return;
     ApplyAll();
+#ifdef PORTABLE
+    CharCustom_RefreshLocalAvatar(); // a changed character shows at once
+#endif
+#line 340 // gba-line
 
     // A one-time hint for players who have not chosen a look yet.
     if (!sHintShown && host != NULL && !IsCustomized(host) && !sPendingSave && !sEditorActive
@@ -465,6 +489,11 @@ static void Task_StyleEditor(u8 taskId)
 
 void MultiplayerAppearance_OpenEditor(void)
 {
+#ifdef PORTABLE
+    CharCustomEditor_Open(); // the editor with the character selection (below)
+    return;
+#endif
+#line 468 // gba-line
     if (sEditorActive || FuncIsActiveTask(Task_StyleEditor))
         return;
     sEditorWindowId = AddWindow(&sEditorWindow);
@@ -642,3 +671,314 @@ void MultiplayerAppearance_NativeUiPlayerSprite(const void **frames, u16 *palett
                                        ValidLook(sLocal) ? sLocal : NULL, palette);
 }
 #endif // ENABLE_NATIVE_UI
+
+#ifdef PORTABLE
+// ---------------------------------------------------------------------------
+// Native PC build: the style editor with the character selection
+// (include/character_customization.h). CHARACTER picks a trainer from the
+// approved roster; SKIN, HAIR, OUTFIT and HAT/BAG recolour the default trainer
+// (a character keeps its own colours). The field sprite and the 3D view show
+// every choice at once; SAVE keeps it in the save and offers it to the host
+// like any other look.
+
+static const struct WindowTemplate sCharacterEditorWindow =
+{
+    // Right of the player: 96 x 144 px. Tiles 0x008-0x0DF, which the closed
+    // Start menu's info windows use (the multiplayer menu takes the same block).
+    .bg = 0, .tilemapLeft = 17, .tilemapTop = 1, .width = 12, .height = 18,
+    .paletteNum = 15, .baseBlock = 0x008,
+};
+
+static const u8 sText_Character[] = _("CHARACTER");
+static const u8 sText_DefaultTrainer[] = _("DEFAULT");
+static const u8 sText_RecolourBrendan[] = _("Recolour: BRENDAN");
+static const u8 sText_RecolourMay[] = _("Recolour: MAY");
+static const u8 sText_OwnColours[] = _("-");
+static const u8 sText_Slash[] = _("/");
+static const u8 sText_EditorHelp[] = _("{DPAD_LEFTRIGHT}CHANGE {A_BUTTON}OK");
+static const u8 sCharacterEditorGrey[] = {TEXT_COLOR_WHITE, TEXT_COLOR_LIGHT_GRAY, TEXT_COLOR_WHITE};
+static const u8 sCharacterEditorRowOld[] = {
+    [CC_EDITOR_ROW_SKIN] = ROW_SKIN, [CC_EDITOR_ROW_HAIR] = ROW_HAIR,
+    [CC_EDITOR_ROW_OUTFIT] = ROW_OUTFIT, [CC_EDITOR_ROW_HAT] = ROW_HAT,
+};
+static const u8 *const sCharacterEditorRowLabels[CC_EDITOR_ROW_COUNT] =
+{
+    [CC_EDITOR_ROW_CHARACTER] = sText_Character,
+    [CC_EDITOR_ROW_SKIN] = COMPOUND_STRING("SKIN"),
+    [CC_EDITOR_ROW_HAIR] = COMPOUND_STRING("HAIR"),
+    [CC_EDITOR_ROW_OUTFIT] = COMPOUND_STRING("OUTFIT"),
+    [CC_EDITOR_ROW_HAT] = COMPOUND_STRING("HAT/BAG"),
+    [CC_EDITOR_ROW_SAVE] = COMPOUND_STRING("SAVE"),
+    [CC_EDITOR_ROW_CANCEL] = COMPOUND_STRING("CANCEL"),
+};
+
+static EWRAM_DATA u8 sEditorColours[4] = {0}; // the default trainer's colours while a character is shown
+static EWRAM_DATA u8 sEditorFacing = 0;
+
+const u8 *MultiplayerAppearance_GetLocalLook(void)
+{
+    static u8 sSaved[MP_APPEARANCE_BYTES];
+
+    if (sEditorActive)
+        return sEditor;
+    if (CharCustom_ReadSavedLook(sSaved, NULL))
+        return sSaved;
+    return sLocal;
+}
+
+static bool32 CharacterEditor_RowEnabled(u32 row)
+{
+    return row < CC_EDITOR_ROW_SKIN || row > CC_EDITOR_ROW_HAT || CharCustom_FromLook(sEditor) == CC_CHARACTER_NONE;
+}
+
+static void CharacterEditor_Render(void)
+{
+    u32 character = CharCustom_FromLook(sEditor), row, y;
+    const u8 *name, *variant;
+    s32 width;
+
+    if (sEditorWindowId == WINDOW_NONE)
+        return;
+    FillWindowPixelBuffer(sEditorWindowId, PIXEL_FILL(1));
+    AddTextPrinterParameterized(sEditorWindowId, FONT_NORMAL, sText_Title, 4, 1, TEXT_SKIP_DRAW, NULL);
+
+    // CHARACTER: label and number, then the name and the game or artist
+    if (sEditorCursor == CC_EDITOR_ROW_CHARACTER)
+        AddTextPrinterParameterized(sEditorWindowId, FONT_SMALL, sText_Cursor, 1, 17, TEXT_SKIP_DRAW, NULL);
+    AddTextPrinterParameterized(sEditorWindowId, FONT_SMALL, sText_Character, 7, 17, TEXT_SKIP_DRAW, NULL);
+    if (character != CC_CHARACTER_NONE)
+    {
+        ConvertIntToDecimalStringN(gStringVar1, character, STR_CONV_MODE_LEFT_ALIGN, 3);
+        StringAppend(gStringVar1, sText_Slash);
+        ConvertIntToDecimalStringN(gStringVar2, CharCustom_Count() - 1, STR_CONV_MODE_LEFT_ALIGN, 3);
+        StringAppend(gStringVar1, gStringVar2);
+        width = GetStringWidth(FONT_SMALL, gStringVar1, 0);
+        AddTextPrinterParameterized3(sEditorWindowId, FONT_SMALL, 94 - width, 17, sCharacterEditorGrey, TEXT_SKIP_DRAW, gStringVar1);
+        name = CharCustom_GetName(character);
+        variant = CharCustom_GetVariant(character);
+    }
+    else
+    {
+        name = sText_DefaultTrainer;
+        variant = gSaveBlock2Ptr->playerGender == FEMALE ? sText_RecolourMay : sText_RecolourBrendan;
+    }
+    AddTextPrinterParameterized(sEditorWindowId, FONT_NORMAL, sText_Left, 2, 29, TEXT_SKIP_DRAW, NULL);
+    AddTextPrinterParameterized(sEditorWindowId, FONT_NORMAL, sText_Right, 89, 29, TEXT_SKIP_DRAW, NULL);
+    width = GetStringWidth(FONT_NORMAL, name, 0);
+    AddTextPrinterParameterized(sEditorWindowId, FONT_NORMAL, name, width < 78 ? 9 + (78 - width) / 2 : 9, 29, TEXT_SKIP_DRAW, NULL);
+    // the game or artist, in a narrower font when it would not fit the window
+    width = GetStringWidth(FONT_SMALL_NARROW, variant, 0);
+    AddTextPrinterParameterized3(sEditorWindowId, width <= 92 ? FONT_SMALL_NARROW : FONT_SMALL_NARROWER, 4, 43,
+                                 sCharacterEditorGrey, TEXT_SKIP_DRAW, variant);
+
+    // Colours of the default trainer, then SAVE and CANCEL
+    for (row = CC_EDITOR_ROW_SKIN; row < CC_EDITOR_ROW_COUNT; row++)
+    {
+        y = 57 + (row - CC_EDITOR_ROW_SKIN) * 12;
+        if (row == sEditorCursor)
+            AddTextPrinterParameterized(sEditorWindowId, FONT_SMALL, sText_Cursor, 1, y, TEXT_SKIP_DRAW, NULL);
+        if (CharacterEditor_RowEnabled(row))
+            AddTextPrinterParameterized(sEditorWindowId, FONT_SMALL, sCharacterEditorRowLabels[row], 7, y, TEXT_SKIP_DRAW, NULL);
+        else
+            AddTextPrinterParameterized3(sEditorWindowId, FONT_SMALL, 7, y, sCharacterEditorGrey, TEXT_SKIP_DRAW, sCharacterEditorRowLabels[row]);
+        if (row > CC_EDITOR_ROW_HAT)
+            continue;
+        if (!CharacterEditor_RowEnabled(row))
+        {
+            AddTextPrinterParameterized3(sEditorWindowId, FONT_SMALL, 68, y, sCharacterEditorGrey, TEXT_SKIP_DRAW, sText_OwnColours);
+            continue;
+        }
+        AddTextPrinterParameterized(sEditorWindowId, FONT_SMALL, sText_Left, 47, y, TEXT_SKIP_DRAW, NULL);
+        AddTextPrinterParameterized(sEditorWindowId, FONT_SMALL_NARROW, RowValueName(sCharacterEditorRowOld[row]), 53, y, TEXT_SKIP_DRAW, NULL);
+        AddTextPrinterParameterized(sEditorWindowId, FONT_SMALL, sText_Right, 91, y, TEXT_SKIP_DRAW, NULL);
+    }
+    AddTextPrinterParameterized(sEditorWindowId, FONT_SMALL, sText_EditorHelp, 2, 131, TEXT_SKIP_DRAW, NULL);
+    CopyWindowToVram(sEditorWindowId, COPYWIN_FULL);
+}
+
+static void CharacterEditor_SetCharacter(u32 character)
+{
+    if (CharCustom_FromLook(sEditor) == CC_CHARACTER_NONE)
+    {
+        sEditorColours[0] = sEditor[1];
+        sEditorColours[1] = sEditor[2];
+        sEditorColours[2] = sEditor[3];
+        sEditorColours[3] = sEditor[5];
+    }
+    if (character != CC_CHARACTER_NONE)
+    {
+        CharCustom_SetInLook(sEditor, character);
+        return;
+    }
+    // Back to the default trainer, with the colours chosen before.
+    memset(sEditor, 0, MP_APPEARANCE_BYTES);
+    sEditor[1] = sEditorColours[0];
+    sEditor[2] = sEditorColours[1];
+    sEditor[3] = sEditorColours[2];
+    sEditor[5] = sEditorColours[3];
+    sEditor[0] = (sEditor[1] || sEditor[2] || sEditor[3] || sEditor[5]) ? 1 : 0;
+}
+
+static void CharacterEditor_ChangeCharacter(s32 delta)
+{
+    u32 count = CharCustom_Count(), character = CharCustom_FromLook(sEditor), tries;
+
+    for (tries = 0; tries < count; tries++)
+    {
+        character = (character + count + delta) % count;
+        if (character == CC_CHARACTER_NONE || CharCustom_IsValid(character))
+            break;
+    }
+    CharacterEditor_SetCharacter(character);
+}
+
+static void CharacterEditor_MoveCursor(s32 delta)
+{
+    u32 i;
+
+    for (i = 0; i < CC_EDITOR_ROW_COUNT; i++)
+    {
+        sEditorCursor = (sEditorCursor + CC_EDITOR_ROW_COUNT + delta) % CC_EDITOR_ROW_COUNT;
+        if (CharacterEditor_RowEnabled(sEditorCursor))
+            break;
+    }
+}
+
+static void CharacterEditor_Close(u8 taskId, bool32 save)
+{
+    if (save)
+    {
+        memcpy(sLocal, sEditor, MP_APPEARANCE_BYTES);
+        sPendingSave = TRUE;
+        sRetryTimer = 0;
+        sHintShown = TRUE;
+        CharCustom_WriteSavedLook(sLocal, TRUE);
+        PlaySE(SE_SAVE);
+    }
+    else
+    {
+        PlaySE(SE_SELECT);
+    }
+    sEditorActive = FALSE;
+    if (sEditorWindowId != WINDOW_NONE)
+    {
+        ClearStdWindowAndFrameToTransparent(sEditorWindowId, TRUE);
+        RemoveWindow(sEditorWindowId);
+        sEditorWindowId = WINDOW_NONE;
+    }
+    DestroyTask(taskId);
+    ScriptUnfreezeObjectEvents();
+    UnlockPlayerFieldControls();
+    if (gPlayerAvatar.objectEventId < OBJECT_EVENTS_COUNT)
+        ObjectEventTurn(&gObjectEvents[gPlayerAvatar.objectEventId], sEditorFacing);
+}
+
+static void Task_CharacterEditor(u8 taskId)
+{
+    if (JOY_NEW(B_BUTTON))
+    {
+        CharacterEditor_Close(taskId, FALSE);
+    }
+    else if (JOY_NEW(A_BUTTON))
+    {
+        if (sEditorCursor == CC_EDITOR_ROW_SAVE)
+            CharacterEditor_Close(taskId, TRUE);
+        else if (sEditorCursor == CC_EDITOR_ROW_CANCEL)
+            CharacterEditor_Close(taskId, FALSE);
+        else
+        {
+            CharacterEditor_MoveCursor(1);
+            PlaySE(SE_SELECT);
+            CharacterEditor_Render();
+        }
+    }
+    else if (JOY_REPEAT(DPAD_UP | DPAD_DOWN))
+    {
+        CharacterEditor_MoveCursor(JOY_REPEAT(DPAD_UP) ? -1 : 1);
+        PlaySE(SE_SELECT);
+        CharacterEditor_Render();
+    }
+    else if (JOY_REPEAT(DPAD_LEFT | DPAD_RIGHT) && sEditorCursor < CC_EDITOR_ROW_SAVE)
+    {
+        s32 delta = JOY_REPEAT(DPAD_LEFT) ? -1 : 1;
+
+        if (sEditorCursor == CC_EDITOR_ROW_CHARACTER)
+            CharacterEditor_ChangeCharacter(delta);
+        else
+            ChangeRow(sCharacterEditorRowOld[sEditorCursor], delta);
+        PlaySE(SE_SELECT);
+        CharacterEditor_Render(); // the field sprite updates on the next tick
+    }
+}
+
+static void CharCustomEditor_Open(void)
+{
+    if (sEditorActive || FuncIsActiveTask(Task_CharacterEditor))
+        return;
+    sEditorWindowId = AddWindow(&sCharacterEditorWindow);
+    if (sEditorWindowId == WINDOW_NONE)
+        return;
+    if (CreateTask(Task_CharacterEditor, 80) == TASK_NONE)
+    {
+        RemoveWindow(sEditorWindowId);
+        sEditorWindowId = WINDOW_NONE;
+        return;
+    }
+    memcpy(sEditor, MultiplayerAppearance_GetLocalLook(), MP_APPEARANCE_BYTES);
+    if (!ValidLook(sEditor))
+        memset(sEditor, 0, MP_APPEARANCE_BYTES);
+    sEditorColours[0] = sEditor[1];
+    sEditorColours[1] = sEditor[2];
+    sEditorColours[2] = sEditor[3];
+    sEditorColours[3] = sEditor[5];
+    sEditorCursor = CC_EDITOR_ROW_CHARACTER;
+    sEditorActive = TRUE;
+    // The player faces the camera while choosing (turned back on closing).
+    sEditorFacing = DIR_SOUTH;
+    if (gPlayerAvatar.objectEventId < OBJECT_EVENTS_COUNT)
+    {
+        sEditorFacing = gObjectEvents[gPlayerAvatar.objectEventId].facingDirection;
+        ObjectEventTurn(&gObjectEvents[gPlayerAvatar.objectEventId], DIR_SOUTH);
+    }
+    FreezeObjectEvents();
+    PlayerFreeze();
+    StopPlayerAvatar();
+    LockPlayerFieldControls();
+    DrawStdWindowFrame(sEditorWindowId, FALSE);
+    CharacterEditor_Render();
+}
+
+// The native PC UI (screen 9): picks a character in the open editor, as LEFT
+// and RIGHT on CHARACTER would (the field sprite follows on the next frame).
+bool32 CharCustom_EditorSelect(u32 character)
+{
+    if (!sEditorActive || !FuncIsActiveTask(Task_CharacterEditor)
+     || (character != CC_CHARACTER_NONE && !CharCustom_IsValid(character)))
+        return FALSE;
+    if (character != CharCustom_FromLook(sEditor))
+    {
+        CharacterEditor_SetCharacter(character);
+        if (!CharacterEditor_RowEnabled(sEditorCursor))
+            sEditorCursor = CC_EDITOR_ROW_CHARACTER;
+        CharacterEditor_Render();
+    }
+    return TRUE;
+}
+
+// The native PC UI (screen 9) reads the editor from here; its input stays the editor's.
+void CharCustom_GetEditorState(struct CharCustomEditorState *out)
+{
+    const u8 *look = sEditorActive ? sEditor : MultiplayerAppearance_GetLocalLook();
+
+    memset(out, 0, sizeof(*out));
+    out->active = sEditorActive;
+    out->cursor = sEditorCursor;
+    out->character = CharCustom_FromLook(look);
+    out->count = CharCustom_Count();
+    out->colours[0] = look[1];
+    out->colours[1] = look[2];
+    out->colours[2] = look[3];
+    out->colours[3] = look[5];
+    out->coloursEnabled = out->character == CC_CHARACTER_NONE;
+}
+#endif // PORTABLE
