@@ -703,7 +703,7 @@ static bool8 HandleStartMenuInput(void)
             && gMenuCallback != StartMenuBattlePyramidRetireCallback)
         {
            if (gMenuCallback != StartMenuPlayerOptionsCallback && gMenuCallback != StartMenuPlayersCallback
-            && gMenuCallback != StartMenuPlayerBackCallback)
+            && gMenuCallback != StartMenuPlayerBackCallback && gMenuCallback != StartMenuStyleCallback && gMenuCallback != StartMenuRideCallback)
                FadeScreen(FADE_TO_BLACK, 0);
         }
 
