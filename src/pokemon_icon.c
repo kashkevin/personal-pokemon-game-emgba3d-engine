@@ -481,3 +481,34 @@ void SetPartyHPBarSprite(struct Sprite *sprite, u8 animNum)
     sprite->animDelayCounter = 0;
     sprite->animCmdIndex = 0;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/ui_gfx.c) draws party and box icons from the
+// same data as these sprites: the 4bpp tiles (two 32x32 frames) and palette.
+void PokemonIcon_NativeUiArt(u16 species, u32 personality, bool32 isEgg, const u8 **tiles, const u16 **palette)
+{
+    u32 palIndex;
+
+    species = SanitizeSpeciesId(species);
+    *tiles = GetMonIconPtrIsEgg(species, personality, isEgg);
+    palIndex = gSpeciesInfo[species].iconPalIndex;
+    if (isEgg)
+    {
+        if (gSpeciesInfo[species].eggId != EGG_ID_NONE)
+            palIndex = gEggDatas[gSpeciesInfo[species].eggId].eggIconPalIndex;
+        else
+            palIndex = gSpeciesInfo[SPECIES_EGG].iconPalIndex;
+    }
+#if P_GENDER_DIFFERENCES
+    else if (gSpeciesInfo[species].iconSpriteFemale != NULL && IsPersonalityFemale(species, personality))
+    {
+        palIndex = gSpeciesInfo[species].iconPalIndexFemale;
+    }
+#endif
+    if (palIndex >= ARRAY_COUNT(gMonIconPaletteTable))
+        palIndex = 0;
+    *palette = gMonIconPaletteTable[palIndex].data;
+}
+#endif // ENABLE_NATIVE_UI

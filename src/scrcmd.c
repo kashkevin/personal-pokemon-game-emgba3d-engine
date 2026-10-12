@@ -3394,3 +3394,14 @@ bool8 ScrCmd_normalmsg(struct ScriptContext *ctx)
     gMsgIsSignPost = FALSE;
     return FALSE;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI asks whether the field's script waits for A or B
+// (waitbuttonpress: a msgbox that has finished printing).
+bool32 Script_NativeUiWaitsForButton(void)
+{
+    return ScriptContext_NativeUiWaitFunc() == WaitForAorBPress;
+}
+#endif // ENABLE_NATIVE_UI

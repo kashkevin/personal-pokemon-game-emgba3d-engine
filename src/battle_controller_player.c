@@ -2501,3 +2501,39 @@ static void MoveSelectionDisplayMoveEffectiveness(u32 foeEffectiveness, enum Bat
 
     BattlePutTextOnWindow(gDisplayedStringBattle, B_WIN_PP);
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// Native PC UI (src/native_ui/screens/ui_battle.c): which of the player
+// controller's choices waits for this battler. Read-only.
+u32 Battle_NativeUiPlayerInput(u32 battler)
+{
+    void (*f)(enum BattlerId);
+
+    if (battler >= MAX_BATTLERS_COUNT || battler >= gBattlersCount)
+        return NATIVE_BATTLE_INPUT_NONE;
+    f = gBattlerControllerFuncs[battler];
+    if (f == HandleChooseActionAfterDma3)
+        return NATIVE_BATTLE_INPUT_ACTION_WAIT;
+    if (f == HandleInputChooseAction)
+        return NATIVE_BATTLE_INPUT_ACTION;
+    if (f == HandleChooseMoveAfterDma3)
+        return NATIVE_BATTLE_INPUT_MOVE_WAIT;
+    if (f == HandleInputChooseMove)
+        return NATIVE_BATTLE_INPUT_MOVE;
+    if (f == HandleMoveSwitching)
+        return NATIVE_BATTLE_INPUT_MOVE_SWITCH;
+    if (f == HandleInputChooseTarget)
+        return NATIVE_BATTLE_INPUT_TARGET;
+    if (f == HandleInputShowTargets || f == HandleInputShowEntireFieldTargets)
+        return NATIVE_BATTLE_INPUT_TARGETS_SHOWN;
+    if (f == PlayerHandleYesNoInput)
+        return NATIVE_BATTLE_INPUT_YES_NO;
+    if (f == OpenPartyMenuToChooseMon || f == WaitForMonSelection)
+        return NATIVE_BATTLE_INPUT_PARTY;
+    if (f == OpenBagAndChooseItem || f == CompleteWhenChoseItem)
+        return NATIVE_BATTLE_INPUT_BAG;
+    return NATIVE_BATTLE_INPUT_NONE;
+}
+#endif // ENABLE_NATIVE_UI

@@ -1326,3 +1326,57 @@ u16 GetSelectedSeagallopDestination(void)
     }
     return SEAGALLOP_VERMILION_CITY;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_game_corner.c) reads a script's
+// multichoice and YES / NO: which list, its rows, the cursor, whether it reads
+// buttons yet. Every button stays here. Task_HandleMultichoiceInput's data:
+// 4 B ignored, 7 the list (MULTI_*); Task_HandleYesNoInput's 2: its delay.
+bool32 ScriptMenu_NativeUiState(struct NativeScriptMenu *out)
+{
+    u8 taskId;
+
+    memset(out, 0, sizeof(*out));
+    if ((taskId = FindTaskIdByFunc(Task_HandleMultichoiceInput)) != TASK_NONE)
+    {
+        u32 id = (u16)gTasks[taskId].data[7];
+        u32 i;
+
+        out->kind = NATIVE_SCRIPT_MENU_MULTICHOICE;
+        out->multichoiceId = id;
+        out->ready = !gPaletteFade.active && sProcessInputDelay == 0;
+        out->cursor = Menu_GetCursorPos();
+        out->ignoreB = gTasks[taskId].data[4] != 0;
+        if (id < ARRAY_COUNT(sMultichoiceLists) && sMultichoiceLists[id].list != NULL)
+        {
+            for (i = 0; i < sMultichoiceLists[id].count && i < NATIVE_SCRIPT_MENU_MAX; i++)
+                out->labels[i] = sMultichoiceLists[id].list[i].text;
+            out->count = i;
+        }
+        return TRUE;
+    }
+    if ((taskId = FindTaskIdByFunc(Task_HandleYesNoInput)) != TASK_NONE)
+    {
+        out->kind = NATIVE_SCRIPT_MENU_YES_NO;
+        out->ready = gTasks[taskId].data[2] >= 5;
+        out->cursor = Menu_GetCursorPos();
+        out->count = 2;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+// The rows of any multichoice list, as the engine prints them (up or not).
+u32 ScriptMenu_NativeUiList(u32 multichoiceId, const u8 **labels, u32 max)
+{
+    u32 i;
+
+    if (multichoiceId >= ARRAY_COUNT(sMultichoiceLists) || sMultichoiceLists[multichoiceId].list == NULL)
+        return 0;
+    for (i = 0; i < sMultichoiceLists[multichoiceId].count && i < max; i++)
+        labels[i] = sMultichoiceLists[multichoiceId].list[i].text;
+    return i;
+}
+#endif // ENABLE_NATIVE_UI

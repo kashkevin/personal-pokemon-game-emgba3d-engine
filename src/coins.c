@@ -80,3 +80,20 @@ bool8 RemoveCoins(u16 toSub)
     }
     return FALSE;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_game_corner.c) asks whether the
+// coin box (ShowCoinsWindow) is up: its window still has the box's template
+// and is on screen.
+bool32 Coins_NativeUiBoxShown(void)
+{
+    const struct WindowTemplate *w;
+
+    if (sCoinsWindowId >= WINDOWS_MAX)
+        return FALSE;
+    w = &gWindows[sCoinsWindowId].window;
+    return w->bg != 0xFF && w->width == 8 && w->height == 2 && w->baseBlock == 0x141 && Window_NativeUiShown(sCoinsWindowId);
+}
+#endif // ENABLE_NATIVE_UI

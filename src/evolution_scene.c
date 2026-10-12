@@ -1732,3 +1732,112 @@ static bool32 EvoScene_IsMonAnimFinished(u8 monSpriteId)
 
     return FALSE;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_evolution.c) draws its night
+// stage in place of this scene's pictures and follows this state; every rule,
+// message, sound and button stays here. Task_EvolutionScene's data: 0 state,
+// 1 / 2 the species before and after, 3 bits (bit 0: B may stop it), 6 the
+// new move's state, 9 stopped, 10 the party slot. The alternation task
+// (evolution_graphics.c, CycleEvolutionMonSprite): 3 / 4 the sizes of the old
+// and the new form (16..256).
+bool32 Evolution_NativeUiState(struct NativeEvolution *out)
+{
+    struct Task *task;
+    struct Pokemon *mon;
+    u32 state;
+
+    memset(out, 0, sizeof(*out));
+    // fading out of the screen before, or back from the summary's move choice (one frame)
+    if (gMain.callback2 == CB2_BeginEvolutionScene || gMain.callback2 == CB2_EvolutionSceneLoadGraphics)
+    {
+        out->phase = NATIVE_EVO_LOADING;
+        return TRUE;
+    }
+    if (gMain.callback2 != CB2_EvolutionSceneUpdate || sEvoStructPtr == NULL)
+        return FALSE;
+    task = &gTasks[sEvoStructPtr->evoTaskId];
+    if (!task->isActive || task->func != Task_EvolutionScene || task->data[10] >= PARTY_SIZE)
+        return FALSE;
+    state = task->data[0];
+    mon = &gParties[B_TRAINER_PLAYER][task->data[10]];
+    out->preSpecies = task->data[1];
+    out->postSpecies = task->data[2];
+    out->partyId = task->data[10];
+    out->personality = GetMonData(mon, MON_DATA_PERSONALITY);
+    out->shiny = GetMonData(mon, MON_DATA_IS_SHINY);
+    out->canStop = (task->data[3] & TASK_BIT_CAN_STOP) != 0;
+    out->msgValid = state > EVOSTATE_INTRO_MSG;
+    switch (state)
+    {
+    case EVOSTATE_FADE_IN:
+    case EVOSTATE_INTRO_MSG:
+    case EVOSTATE_INTRO_MON_ANIM:
+    case EVOSTATE_INTRO_SOUND:
+    case EVOSTATE_START_MUSIC:
+        out->phase = NATIVE_EVO_INTRO;
+        out->monAnim = state == EVOSTATE_INTRO_SOUND;
+        break;
+    case EVOSTATE_START_BG_AND_SPARKLE_SPIRAL:
+    case EVOSTATE_SPARKLE_ARC:
+    case EVOSTATE_CYCLE_MON_SPRITE:
+        out->phase = NATIVE_EVO_CHARGING;
+        break;
+    case EVOSTATE_WAIT_CYCLE_MON_SPRITE:
+        out->phase = NATIVE_EVO_CYCLING;
+        out->cycleActive = gTasks[sEvoGraphicsTaskId].isActive;
+        // the larger form is the one in front; the alternation ends on the new one
+        out->showNew = out->cycleActive ? gTasks[sEvoGraphicsTaskId].data[4] > gTasks[sEvoGraphicsTaskId].data[3] : TRUE;
+        out->ready = out->cycleActive && out->canStop;
+        break;
+    case EVOSTATE_SPARKLE_CIRCLE:
+    case EVOSTATE_SPARKLE_SPRAY:
+    case EVOSTATE_EVO_SOUND:
+        // sparkles circle in (SPARKLE_SPRAY waits for them), then spray (EVO_SOUND waits for that)
+        out->phase = NATIVE_EVO_FLASH;
+        out->showNew = TRUE;
+        // white until the spray's fade back from white returns its colours
+        out->white = state == EVOSTATE_EVO_SOUND && gPaletteFade.yDec && gPaletteFade.blendColor == RGB_WHITE
+                   ? gPaletteFade.y : 16;
+        break;
+    case EVOSTATE_CANCEL:
+    case EVOSTATE_CANCEL_MON_ANIM:
+    case EVOSTATE_CANCEL_MSG:
+        out->phase = NATIVE_EVO_STOPPED;
+        // the old form returns from white
+        out->white = state != EVOSTATE_CANCEL_MSG && gPaletteFade.blendColor == RGB_WHITE ? gPaletteFade.y : 0;
+        if (state == EVOSTATE_CANCEL && gTasks[sEvoGraphicsTaskId].isActive)
+            out->white = 16;
+        out->monAnim = state == EVOSTATE_CANCEL_MSG;
+        break;
+    case EVOSTATE_END:
+        out->phase = NATIVE_EVO_ENDING;
+        out->showNew = !task->data[9];
+        break;
+    default:
+        // RESTORE_SCREEN .. TRY_LEARN_MOVE, LEARNED_MOVE .. REPLACE_MOVE
+        out->phase = task->data[9] ? NATIVE_EVO_STOPPED : NATIVE_EVO_EVOLVED;
+        out->showNew = !task->data[9];
+        out->monAnim = state == EVOSTATE_SET_MON_EVOLVED;
+        out->learning = (task->data[3] & TASK_BIT_LEARN_MOVE) != 0;
+        if (state == EVOSTATE_REPLACE_MOVE)
+        {
+            // back from the summary's move choice: no message of this scene's yet
+            if (task->data[6] == MVSTATE_HANDLE_MOVE_SELECT || task->data[6] == MVSTATE_SHOW_MOVE_SELECT)
+                out->msgValid = task->data[6] == MVSTATE_SHOW_MOVE_SELECT;
+            if (task->data[6] == MVSTATE_HANDLE_YES_NO)
+            {
+                out->yesNo = TRUE;
+                out->yesNoCursor = sEvoCursorPos != 0;
+                out->ready = TRUE;
+            }
+        }
+        break;
+    }
+    if (!out->ready && out->msgValid && TextPrinter_NativeUiWindowWaiting(0) && !gPaletteFade.active)
+        out->ready = TRUE;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

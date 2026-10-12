@@ -720,3 +720,50 @@ static void SpriteCB_StarterPokemon(struct Sprite *sprite)
     if (sprite->y < STARTER_PKMN_POS_Y)
         sprite->y += 2;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_starters.c) draws Birch's bag in
+// place of its pictures and follows this state; every button stays here.
+bool32 StarterChoose_NativeUiState(struct NativeStarters *out)
+{
+    static const TaskFunc moving[] = {Task_StarterChoose, Task_MoveStarterChooseCursor, Task_CreateStarterLabel, Task_DeclineStarter};
+    u8 taskId = TASK_NONE;
+    u32 i;
+
+    memset(out, 0, sizeof(*out));
+    if (gMain.callback2 != CB2_StarterChoose)
+        return FALSE;
+    if ((taskId = FindTaskIdByFunc(Task_HandleStarterChooseInput)) != TASK_NONE)
+    {
+        out->phase = NATIVE_STARTER_BROWSE;
+        out->ready = !gPaletteFade.active;
+    }
+    else if ((taskId = FindTaskIdByFunc(Task_HandleConfirmStarterInput)) != TASK_NONE)
+    {
+        out->phase = NATIVE_STARTER_CONFIRM;
+        out->ready = TRUE;
+        out->yesNoCursor = Menu_GetCursorPos();
+    }
+    else if ((taskId = FindTaskIdByFunc(Task_WaitForStarterSprite)) != TASK_NONE
+          || (taskId = FindTaskIdByFunc(Task_AskConfirmStarter)) != TASK_NONE)
+    {
+        out->phase = NATIVE_STARTER_OPENING;
+    }
+    else
+    {
+        for (i = 0; i < ARRAY_COUNT(moving) && taskId == TASK_NONE; i++)
+            taskId = FindTaskIdByFunc(moving[i]);
+        if (taskId == TASK_NONE)
+            return FALSE;
+        out->phase = NATIVE_STARTER_MOVING;
+    }
+    out->selection = gTasks[taskId].tStarterSelection;
+    out->pageSize = STARTER_PAGE_SIZE;
+    out->pageCount = STARTER_PAGE_COUNT;
+    for (i = 0; i < STARTER_MON_COUNT && i < NATIVE_STARTER_MAX; i++)
+        out->species[i] = GetStarterPokemon(i);
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

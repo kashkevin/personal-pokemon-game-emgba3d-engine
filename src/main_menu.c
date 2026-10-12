@@ -2307,3 +2307,125 @@ static void Task_NewGameBirchSpeech_ReturnFromNamingScreenShowTextbox(u8 taskId)
 }
 
 #undef tTimer
+
+#ifdef ENABLE_NATIVE_UI
+#include "load_save.h"
+#include "region_map.h"
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_main_menu.c) draws the main menu
+// in place of these windows and follows this state; the input stays here.
+bool32 MainMenu_NativeUiState(struct NativeMainMenu *out)
+{
+    static const u8 sRows[][5] = {
+        [HAS_NO_SAVED_GAME]  = {NATIVE_MAIN_MENU_NEW_GAME, NATIVE_MAIN_MENU_OPTION},
+        [HAS_SAVED_GAME]     = {NATIVE_MAIN_MENU_CONTINUE, NATIVE_MAIN_MENU_NEW_GAME, NATIVE_MAIN_MENU_OPTION},
+        [HAS_MYSTERY_GIFT]   = {NATIVE_MAIN_MENU_CONTINUE, NATIVE_MAIN_MENU_NEW_GAME, NATIVE_MAIN_MENU_MYSTERY_GIFT,
+                                NATIVE_MAIN_MENU_OPTION},
+        [HAS_MYSTERY_EVENTS] = {NATIVE_MAIN_MENU_CONTINUE, NATIVE_MAIN_MENU_NEW_GAME, NATIVE_MAIN_MENU_MYSTERY_GIFT,
+                                NATIVE_MAIN_MENU_MYSTERY_EVENTS, NATIVE_MAIN_MENU_OPTION},
+    };
+    static const TaskFunc sMenuTasks[] = {
+        Task_MainMenuCheckSaveFile, Task_MainMenuCheckBattery, Task_DisplayMainMenu,
+        Task_WaitForSaveFileErrorWindow, Task_WaitForBatteryDryErrorWindow, Task_DisplayMainMenuInvalidActionError,
+        Task_HighlightSelectedMainMenuItem, Task_HandleMainMenuInput, Task_HandleMainMenuAPressed,
+        Task_HandleMainMenuBPressed,
+    };
+    TaskFunc func = NULL;
+    s16 *data;
+    u32 i;
+    u8 taskId = TASK_NONE;
+
+    memset(out, 0, sizeof(*out));
+    if (gMain.callback2 != CB2_MainMenu)
+        return FALSE;
+    for (i = 0; i < ARRAY_COUNT(sMenuTasks) && taskId == TASK_NONE; i++)
+    {
+        taskId = FindTaskIdByFunc(sMenuTasks[i]);
+        func = sMenuTasks[i];
+    }
+    if (taskId == TASK_NONE)
+        return FALSE; // the new game speech, or nothing yet
+    data = gTasks[taskId].data;
+    if (data[0] >= 0 && data[0] <= HAS_MYSTERY_EVENTS)
+    {
+        out->rowCount = data[0] + 2;
+        memcpy(out->rows, sRows[data[0]], sizeof(out->rows));
+    }
+    out->cursor = data[1];
+    if (func == Task_MainMenuCheckSaveFile || func == Task_MainMenuCheckBattery || func == Task_DisplayMainMenu)
+    {
+        out->phase = NATIVE_MAIN_MENU_LOADING;
+        if (func == Task_MainMenuCheckSaveFile)
+            out->rowCount = 0; // not known before the save is checked
+    }
+    else if (func == Task_WaitForSaveFileErrorWindow || func == Task_WaitForBatteryDryErrorWindow
+          || func == Task_DisplayMainMenuInvalidActionError)
+    {
+        out->phase = NATIVE_MAIN_MENU_MESSAGE;
+        if (func == Task_DisplayMainMenuInvalidActionError)
+            out->message = data[0] == 0 ? gText_WirelessNotConnected
+                         : data[0] == 1 ? gText_MysteryGiftCantUse : gText_MysteryEventsCantUse;
+        else if (func == Task_WaitForBatteryDryErrorWindow)
+            out->message = gText_BatteryRunDry;
+        else if (func == Task_WaitForSaveFileErrorWindow)
+            out->message = gSaveFileStatus == SAVE_STATUS_CORRUPT ? gText_SaveFileErased
+                         : gSaveFileStatus == SAVE_STATUS_ERROR ? gText_SaveFileCorrupted
+                                                                : gJPText_No1MSubCircuit;
+        out->ready = func != Task_DisplayMainMenuInvalidActionError && !IsTextPrinterActiveOnWindow(7);
+    }
+    else if (func == Task_HandleMainMenuAPressed)
+    {
+        out->phase = NATIVE_MAIN_MENU_CHOSEN;
+    }
+    else if (func == Task_HandleMainMenuBPressed)
+    {
+        out->phase = NATIVE_MAIN_MENU_BACK;
+    }
+    else
+    {
+        out->phase = NATIVE_MAIN_MENU_INPUT;
+        out->ready = func == Task_HandleMainMenuInput && !gPaletteFade.active;
+    }
+    return TRUE;
+}
+
+// The saved game behind CONTINUE: what the engine's continue window shows
+// (player, time, Pokédex, badges), plus the party icons and the map's name.
+void MainMenu_NativeUiSaveSummary(struct NativeSaveSummary *out)
+{
+    const struct MapHeader *header;
+    const struct WarpData *warp;
+    u32 i;
+
+    memset(out, 0, sizeof(*out));
+    StringCopy_PlayerName(out->playerName, gSaveBlock2Ptr->playerName);
+    out->gender = gSaveBlock2Ptr->playerGender;
+    out->hours = gSaveBlock2Ptr->playTimeHours;
+    out->minutes = gSaveBlock2Ptr->playTimeMinutes;
+    out->hasPokedex = FlagGet(FLAG_SYS_POKEDEX_GET) == TRUE;
+    if (out->hasPokedex)
+        out->dexCaught = IsNationalPokedexEnabled() ? GetNationalPokedexCount(FLAG_GET_CAUGHT)
+                                                    : GetRegionalPokedexCount(FLAG_GET_CAUGHT);
+    for (i = FLAG_BADGE01_GET; i < FLAG_BADGE01_GET + NUM_BADGES; i++)
+        if (FlagGet(i))
+            out->badges++;
+    // where CONTINUE puts the player (CB2_ContinueSavedGame): the continue warp when the save set one
+    warp = UseContinueGameWarp() ? &gSaveBlock1Ptr->continueGameWarp : &gSaveBlock1Ptr->location;
+    header = Overworld_GetMapHeaderByGroupAndId(warp->mapGroup, warp->mapNum);
+    if (header != NULL)
+        GetMapName(out->location, header->regionMapSectionId, 0);
+    else
+        out->location[0] = EOS;
+    out->partyCount = gSaveBlock1Ptr->playerPartyCount <= PARTY_SIZE ? gSaveBlock1Ptr->playerPartyCount : 0;
+    for (i = 0; i < out->partyCount; i++)
+    {
+        struct Pokemon *mon = &gSaveBlock1Ptr->playerParty[i];
+
+        out->species[i] = GetMonData(mon, MON_DATA_SPECIES);
+        out->personality[i] = GetMonData(mon, MON_DATA_PERSONALITY);
+        out->isEgg[i] = GetMonData(mon, MON_DATA_IS_EGG);
+        out->fainted[i] = !out->isEgg[i] && GetMonData(mon, MON_DATA_HP) == 0;
+    }
+}
+#endif // ENABLE_NATIVE_UI

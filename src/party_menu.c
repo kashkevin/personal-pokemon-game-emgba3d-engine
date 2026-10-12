@@ -213,6 +213,13 @@ static EWRAM_DATA struct PartyMenuBox *sPartyMenuBoxes = NULL;
 static EWRAM_DATA u8 *sPartyBgGfxTilemap = NULL;
 static EWRAM_DATA u8 *sPartyBgTilemapBuffer = NULL;
 EWRAM_DATA bool8 gPartyMenuUseExitCallback = 0;
+#ifdef ENABLE_NATIVE_UI
+// the prompt line shown (PartyMenu_NativeUiState), +1. The #line directives
+// after these insertions keep the file's line numbers (in Alloc's file:line
+// strings) as they were: the GBA ROM stays byte-identical.
+static EWRAM_DATA u16 sNativeUiStdMessage = 0;
+#endif
+#line 216
 EWRAM_DATA u8 gSelectedMonPartyId = 0;
 EWRAM_DATA MainCallback gPostMenuFieldCallback = NULL;
 static EWRAM_DATA u16 *sSlot1TilemapBuffer = 0; // for switching party slots
@@ -2783,6 +2790,10 @@ void DisplayPartyMenuStdMessage(u32 stringId)
 
     if (*windowPtr != WINDOW_NONE)
         PartyMenuRemoveWindow(windowPtr);
+#ifdef ENABLE_NATIVE_UI
+    sNativeUiStdMessage = 0;
+#endif
+#line 2786
 
     if (stringId != PARTY_MSG_NONE)
     {
@@ -2822,6 +2833,10 @@ void DisplayPartyMenuStdMessage(u32 stringId)
             if (gPartiesCount[B_TRAINER_PLAYER] == 0)
                 stringId = PARTY_MSG_NO_POKEMON;
         }
+#ifdef ENABLE_NATIVE_UI
+        sNativeUiStdMessage = stringId + 1;
+#endif
+#line 2825
         DrawStdFrameWithCustomTileAndPalette(*windowPtr, FALSE, 0x4F, 13);
         StringExpandPlaceholders(gStringVar4, sActionStringTable[stringId]);
         AddTextPrinterParameterized(*windowPtr, FONT_NORMAL, gStringVar4, 0, 1, 0, 0);
@@ -8641,3 +8656,169 @@ s8 Test_UpdatePartySelectionSingleLayout(s8 slotId, s8 movementDir, bool8 choose
     return slotId;
 }
 #endif
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_party.c) draws this screen in
+// place of its windows and follows this state; the input stays here.
+static bool32 NativeUiTaskStateIs(TaskFunc func, s16 state)
+{
+    u8 taskId = FindTaskIdByFunc(func);
+
+    return taskId != TASK_NONE && gTasks[taskId].data[0] == state;
+}
+
+bool32 PartyMenu_NativeUiState(struct NativePartyMenu *out)
+{
+    static const TaskFunc sYesNoTasks[] = {
+        Task_HandleCancelChooseMonYesNoInput, Task_HandleCancelParticipationYesNoInput,
+        Task_HandleFieldMoveExitAreaYesNoInput, Task_HandleLoseMailMessageYesNoInput,
+        Task_HandleReplaceMoveYesNoInput, Task_HandleSendMailToPCYesNoInput, Task_HandleSpinTradeYesNoInput,
+        Task_HandleStopLearningMoveYesNoInput, Task_HandleSwitchItemsFromBagYesNoInput,
+        Task_HandleSwitchItemsYesNoInput, Task_HandleTossHeldItemYesNoInput,
+    };
+    // their YES / NO is their state 2 (data[0])
+    static const TaskFunc sYesNoStateTasks[] = {Task_AbilityCapsule, Task_AbilityPatch, Task_Mint};
+    static const TaskFunc sClosingTasks[] = {
+        Task_ClosePartyMenu, Task_ClosePartyMenuAndSetCB2, Task_PartyMenuWaitForFade, Task_ExitPartyMenu,
+        Task_FieldMoveWaitForFade,
+    };
+    // HP, Attack, Defense, Sp. Atk, Sp. Def, Speed (the level-up window's order)
+    static const u8 sStatOrder[NUM_STATS] = {STAT_HP, STAT_ATK, STAT_DEF, STAT_SPATK, STAT_SPDEF, STAT_SPEED};
+    u32 i;
+
+    memset(out, 0, sizeof(*out));
+    out->carried = out->swapWith = -1;
+    out->switchRow = out->summaryRow = -1;
+    out->promptId = -1;
+    out->promptWindow = out->msgWindow = WINDOW_NONE;
+    if (gMain.callback2 == CB2_InitPartyMenu)
+    {
+        out->phase = NATIVE_PARTY_LOADING;
+        out->menuType = gPartyMenu.menuType;
+        out->layout = gPartyMenu.layout;
+        return TRUE;
+    }
+    if (gMain.callback2 != CB2_UpdatePartyMenu || sPartyMenuInternal == NULL || sPartyMenuBoxes == NULL)
+        return FALSE;
+    out->menuType = gPartyMenu.menuType;
+    out->layout = gPartyMenu.layout;
+    out->action = gPartyMenu.action;
+    out->slotId = gPartyMenu.slotId;
+    out->cursor = *GetCurrentPartySlotPtr();
+    if (gPartyMenu.action == PARTY_ACTION_SWITCH)
+        out->carried = gPartyMenu.slotId;
+    out->chooseHalf = sPartyMenuInternal->chooseHalf;
+    if (gPartyMenu.action == PARTY_ACTION_USE_ITEM)
+        out->item = gSpecialVar_ItemId;
+    else if (gPartyMenu.action == PARTY_ACTION_GIVE_ITEM || gPartyMenu.action == PARTY_ACTION_GIVE_PC_ITEM
+          || gPartyMenu.action == PARTY_ACTION_GIVE_MAILBOX_MAIL)
+        out->item = gPartyMenu.bagItem;
+    if (sPartyMenuInternal->windowId[1] != WINDOW_NONE && sNativeUiStdMessage != 0)
+    {
+        out->promptId = sNativeUiStdMessage - 1;
+        out->promptWindow = sPartyMenuInternal->windowId[1];
+    }
+    if (Window_NativeUiShown(WIN_MSG))
+        out->msgWindow = WIN_MSG;
+    for (i = 0; i < PARTY_SIZE; i++)
+    {
+        const u8 *start, *at;
+        bool8 active;
+        u32 d;
+
+        if (!TextPrinter_NativeUiWindow(sPartyMenuBoxes[i].windowId, &start, &at, &active))
+            continue;
+        for (d = 0; d < ARRAY_COUNT(sDescriptionStringTable); d++)
+            if (start == sDescriptionStringTable[d])
+                out->slotDesc[i] = d + 1;
+    }
+
+    if (FuncIsActiveTask(Task_HandleSelectionMenuInput) || FuncIsActiveTask(Task_TryCreateSelectionWindow))
+    {
+        out->phase = NATIVE_PARTY_MENU;
+        out->numActions = sPartyMenuInternal->numActions <= 8 ? sPartyMenuInternal->numActions : 8;
+        for (i = 0; i < out->numActions; i++)
+        {
+            u8 action = sPartyMenuInternal->actions[i];
+
+            out->actions[i] = action;
+            if (action == MENU_SWITCH)
+                out->switchRow = i;
+            else if (action == MENU_SUMMARY)
+                out->summaryRow = i;
+            out->actionIsFieldMove[i] = action >= MENU_FIELD_MOVES;
+            out->actionLabels[i] = action >= MENU_FIELD_MOVES
+                                 ? GetMoveName(FieldMove_GetMoveId(action - MENU_FIELD_MOVES))
+                                 : sCursorOptions[action].text;
+        }
+        out->menuCursor = Menu_GetCursorPos();
+        out->ready = FuncIsActiveTask(Task_HandleSelectionMenuInput) && !gPaletteFade.active;
+        return TRUE;
+    }
+    if (FuncIsActiveTask(Task_HandleWhichMoveInput))
+    {
+        out->phase = NATIVE_PARTY_MOVES;
+        out->menuCursor = Menu_GetCursorPos();
+        out->ready = TRUE;
+        return TRUE;
+    }
+    for (i = 0; i < ARRAY_COUNT(sYesNoTasks); i++)
+    {
+        if (FuncIsActiveTask(sYesNoTasks[i]))
+        {
+            out->phase = NATIVE_PARTY_YES_NO;
+            out->menuCursor = Menu_GetCursorPos();
+            out->ready = TRUE;
+            return TRUE;
+        }
+    }
+    for (i = 0; i < ARRAY_COUNT(sYesNoStateTasks); i++)
+    {
+        if (NativeUiTaskStateIs(sYesNoStateTasks[i], 2))
+        {
+            out->phase = NATIVE_PARTY_YES_NO;
+            out->menuCursor = Menu_GetCursorPos();
+            out->ready = TRUE;
+            return TRUE;
+        }
+    }
+    if (FuncIsActiveTask(Task_DisplayLevelUpStatsPg2) || FuncIsActiveTask(Task_TryLearnNewMoves))
+    {
+        out->phase = NATIVE_PARTY_LEVEL_UP;
+        out->levelUpPage = FuncIsActiveTask(Task_DisplayLevelUpStatsPg2) ? 1 : 2;
+        for (i = 0; i < NUM_STATS; i++)
+        {
+            out->levelUpOld[i] = (u16)sPartyMenuInternal->data[sStatOrder[i]];
+            out->levelUpNew[i] = (u16)sPartyMenuInternal->data[NUM_STATS + sStatOrder[i]];
+        }
+        out->ready = TRUE;
+        return TRUE;
+    }
+    if (FuncIsActiveTask(Task_SlideSelectedSlotsOffscreen) || FuncIsActiveTask(Task_SlideSelectedSlotsOnscreen))
+    {
+        out->phase = NATIVE_PARTY_SWAPPING;
+        out->carried = gPartyMenu.slotId;
+        out->swapWith = gPartyMenu.slotId2;
+        return TRUE;
+    }
+    for (i = 0; i < ARRAY_COUNT(sClosingTasks); i++)
+    {
+        if (FuncIsActiveTask(sClosingTasks[i]))
+        {
+            out->phase = NATIVE_PARTY_CLOSING;
+            return TRUE;
+        }
+    }
+    if (FuncIsActiveTask(Task_HandleChooseMonInput))
+    {
+        out->phase = NATIVE_PARTY_BROWSE;
+        out->ready = !gPaletteFade.active && MenuHelpers_ShouldWaitForLinkRecv() != TRUE;
+        return TRUE;
+    }
+    out->phase = NATIVE_PARTY_MESSAGE;
+    out->ready = !IsTextPrinterActiveOnWindow(WIN_MSG);
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

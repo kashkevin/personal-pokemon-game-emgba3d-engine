@@ -339,3 +339,36 @@ void MultiplayerMenu_TestClose(void) { Close(); }
 u32 MultiplayerMenu_TestScreen(void) { return sMultiplayerMenuScreen.screen; }
 u8 MultiplayerMenu_TestGlyph(u8 ascii) { return Glyph(ascii); }
 #endif
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_players.c) draws this menu in
+// place of its window and follows this state; the input, the requests to the
+// host and every rule stay here. Text is the host's bounded printable ASCII.
+bool32 MultiplayerMenu_NativeUiState(struct NativeMpMenu *out)
+{
+    u32 admission;
+
+    memset(out, 0, sizeof(*out));
+    if (!sMultiplayerMenuActive || sWindow == WINDOW_NONE)
+        return FALSE;
+    out->waiting = sMultiplayerMenuWaiting;
+    out->tradeMenu = sTradeMenu;
+    out->admissionHeld = sBattleAdmissionLatched;
+    out->cursor = sMultiplayerMenuCursor;
+    out->revision = sMultiplayerMenuScreen.screen;
+    out->count = sMultiplayerMenuScreen.count <= 6 ? sMultiplayerMenuScreen.count : 6;
+    out->back = sMultiplayerMenuScreen.backAction != 0;
+    memcpy(out->title, sMultiplayerMenuScreen.title, sizeof(sMultiplayerMenuScreen.title));
+    memcpy(out->status, sMultiplayerMenuScreen.status, sizeof(sMultiplayerMenuScreen.status));
+    admission = sMultiplayerMenuScreen.reserved[0] | sMultiplayerMenuScreen.reserved[1] << 8;
+    for (u32 row = 0; row < out->count; row++)
+    {
+        memcpy(out->rows[row], sMultiplayerMenuScreen.rows[row].label, sizeof(sMultiplayerMenuScreen.rows[row].label));
+        out->enabled[row] = sMultiplayerMenuScreen.rows[row].action != 0;
+        out->admission[row] = admission != 0 && sMultiplayerMenuScreen.rows[row].action == admission;
+    }
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

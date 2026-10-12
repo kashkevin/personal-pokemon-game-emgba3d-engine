@@ -1332,3 +1332,157 @@ void CreateDecorationShop2Menu(const u16 *itemsForSale)
     SetShopItemsForSale(itemsForSale);
     SetShopMenuCallback(ScriptContext_Enable);
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_shop.c) draws the mart in place of
+// its pictures and follows this state; every rule and every button stays here.
+static bool32 NativeUi_IsBuyTaskFunc(TaskFunc func)
+{
+    return func == Task_BuyMenu || func == Task_BuyHowManyDialogueInit || func == Task_BuyHowManyDialogueHandleInput
+        || func == Task_ReturnToItemListAfterItemPurchase || func == Task_ReturnToItemListAfterDecorationPurchase
+        || func == Task_ExitBuyMenu;
+}
+
+// the buy screen's task: the one whose list menu shows this shop's items
+static s32 NativeUi_BuyTask(void)
+{
+    u32 i;
+
+    if (sShopData == NULL || sListMenuItems == NULL)
+        return -1;
+    for (i = 0; i < NUM_TASKS; i++)
+    {
+        s32 list = gTasks[i].data[7];
+
+        if (!gTasks[i].isActive || !(NativeUi_IsBuyTaskFunc(gTasks[i].func) || MenuHelpers_NativeUiRunsHelper(i)))
+            continue;
+        if (list >= 0 && list < NUM_TASKS && (u32)list != i && gTasks[list].isActive
+         && ((struct ListMenu *)gTasks[list].data)->template.items == sListMenuItems)
+            return i;
+    }
+    return -1;
+}
+
+static void NativeUi_ShopStock(struct NativeShop *out, bool32 filter)
+{
+    u32 i;
+
+    for (i = 0; i < sMartInfo.itemCount && out->count < NATIVE_SHOP_MAX_ITEMS; i++)
+    {
+        u16 item = sMartInfo.itemList[i];
+        u32 n = out->count;
+
+        // the field's list is the script's: the buy screen keeps only what the criteria allow
+        if (filter && !IsItemShopCriteriaFulfilled(item))
+            continue;
+        out->items[n] = item;
+        if (sMartInfo.martType == MART_TYPE_NORMAL)
+        {
+            out->prices[n] = GetItemPrice(item) >> IsPokeNewsActive(POKENEWS_SLATEPORT);
+            out->soldOut[n] = GetItemImportance(item) && (CheckBagHasItem(item, 1) || CheckPCHasItem(item, 1));
+        }
+        else
+        {
+            out->prices[n] = gDecorations[item].price;
+        }
+        out->count++;
+    }
+}
+
+bool32 Shop_NativeUiState(struct NativeShop *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->msgWindow = WINDOW_NONE;
+    out->chosen = ITEM_NONE;
+    if (gMain.callback2 == CB2_Overworld)
+    {
+        u32 i;
+
+        if (FuncIsActiveTask(Task_ShopMenu))
+            out->phase = NATIVE_SHOP_MENU;
+        else if (FuncIsActiveTask(Task_GoToBuyOrSellMenu) || FuncIsActiveTask(Task_ReturnToShopMenu)
+              || MenuHelpers_NativeUiMessageNext() == ShowShopMenuAfterExitingBuyOrSellMenu)
+            out->phase = NATIVE_SHOP_FIELD;
+        else
+            return FALSE;
+        out->menuCount = sMartInfo.martType == MART_TYPE_NORMAL ? ARRAY_COUNT(sShopMenuActions_BuySellQuit)
+                                                                : ARRAY_COUNT(sShopMenuActions_BuyQuit);
+        for (i = 0; i < out->menuCount && i < ARRAY_COUNT(out->menuLabels); i++)
+            out->menuLabels[i] = sMartInfo.menuActions != NULL ? sMartInfo.menuActions[i].text : NULL;
+        if (out->phase == NATIVE_SHOP_MENU)
+            out->menuCursor = Menu_GetCursorPos();
+        out->msgWindow = 0; // the field's message box
+        out->ready = out->phase == NATIVE_SHOP_MENU && !gPaletteFade.active;
+        NativeUi_ShopStock(out, sMartInfo.martType == MART_TYPE_NORMAL);
+    }
+    else if (gMain.callback2 == CB2_BuyMenu)
+    {
+        s32 task = NativeUi_BuyTask();
+        const s16 *data;
+        u8 window;
+
+        if (task < 0)
+            return FALSE;
+        data = gTasks[task].data;
+        if (gTasks[task].func == Task_BuyMenu)
+            out->phase = NATIVE_SHOP_LIST;
+        else if (gTasks[task].func == Task_BuyHowManyDialogueInit || gTasks[task].func == Task_BuyHowManyDialogueHandleInput)
+            out->phase = NATIVE_SHOP_QUANTITY;
+        else if (gTasks[task].func == Task_ExitBuyMenu)
+            out->phase = NATIVE_SHOP_LEAVING;
+        else if (MenuHelpers_NativeUiYesNo())
+            out->phase = NATIVE_SHOP_CONFIRM;
+        else
+            out->phase = NATIVE_SHOP_MESSAGE;
+        NativeUi_ShopStock(out, FALSE);
+        out->cursor = sShopData->scrollOffset + sShopData->selectedRow;
+        out->scroll = sShopData->scrollOffset;
+        if (out->phase != NATIVE_SHOP_LIST && out->phase != NATIVE_SHOP_LEAVING)
+        {
+            out->chosen = data[5];    // tItemId
+            out->quantity = data[1];  // tItemCount
+            out->msgWindow = WIN_MESSAGE;
+        }
+        out->maxQuantity = sShopData->maxQuantity;
+        out->totalCost = sShopData->totalCost;
+        switch (out->phase)
+        {
+        case NATIVE_SHOP_LIST:
+            out->ready = !gPaletteFade.active;
+            break;
+        case NATIVE_SHOP_QUANTITY:
+            out->ready = gTasks[task].func == Task_BuyHowManyDialogueHandleInput;
+            break;
+        case NATIVE_SHOP_CONFIRM:
+            out->menuCursor = Menu_GetCursorPos(); // 0: YES
+            out->ready = TRUE;
+            break;
+        case NATIVE_SHOP_MESSAGE:
+            // after a purchase the line waits for A or B; a {PAUSE_UNTIL_PRESS} too
+            out->ready = gTasks[task].func == Task_ReturnToItemListAfterItemPurchase
+                      || gTasks[task].func == Task_ReturnToItemListAfterDecorationPurchase
+                      || (MenuHelpers_NativeUiMessage(&window) && TextPrinter_NativeUiWindowWaiting(window));
+            break;
+        }
+    }
+    else
+    {
+        return FALSE;
+    }
+    out->decorations = sMartInfo.martType != MART_TYPE_NORMAL;
+    out->sale = sMartInfo.martType == MART_TYPE_NORMAL && IsPokeNewsActive(POKENEWS_SLATEPORT);
+    out->money = GetMoney(&gSaveBlock1Ptr->money);
+    if (!out->decorations)
+    {
+        u16 item = out->chosen != ITEM_NONE ? out->chosen
+                 : out->cursor < out->count && out->phase != NATIVE_SHOP_MENU && out->phase != NATIVE_SHOP_FIELD
+                 ? out->items[out->cursor] : ITEM_NONE;
+
+        if (item != ITEM_NONE)
+            out->inBag = CountTotalItemQuantityInBag(item);
+    }
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

@@ -3041,3 +3041,138 @@ static s32 CompareItemsByIndex(enum Pocket pocketId, struct ItemSlot item1, stru
 
     return 0; // Cannot have multiple stacks of indexed items
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_bag.c) draws the bag in place of
+// its windows and sprites and follows this state; the input stays here.
+static u8 NativeUiBagTask(void)
+{
+    static const TaskFunc sTasks[] = {
+        Task_BagMenu_HandleInput, Task_SwitchBagPocket, Task_HandleSwappingItemsInput, Task_ItemContext_SingleRow,
+        Task_ItemContext_MultipleRows, Task_ChooseHowManyToToss, Task_ChooseHowManyToSell, Task_ChooseHowManyToDeposit,
+        Task_FadeAndCloseBagMenu, Task_CloseBagMenu, Task_WallyTutorialBagMenu,
+    };
+    u32 i;
+
+    for (i = 0; i < ARRAY_COUNT(sTasks); i++)
+    {
+        u8 taskId = FindTaskIdByFunc(sTasks[i]);
+
+        if (taskId != TASK_NONE)
+            return taskId;
+    }
+    return TASK_NONE;
+}
+
+bool32 Bag_NativeUiState(struct NativeBag *out)
+{
+    u32 i;
+    u8 msgWindow;
+    u8 taskId;
+
+    memset(out, 0, sizeof(*out));
+    out->msgWindow = WINDOW_NONE;
+    out->swapFrom = 0xFFFF;
+    if (gMain.callback2 == CB2_Bag)
+    {
+        out->phase = NATIVE_BAG_LOADING;
+        return TRUE;
+    }
+    if (gMain.callback2 != CB2_BagMenuRun || gBagMenu == NULL || gBagPosition.pocket >= POCKETS_COUNT)
+        return FALSE;
+    out->location = gBagPosition.location;
+    out->pocket = gBagPosition.pocket;
+    out->pocketSwitchDisabled = gBagMenu->pocketSwitchDisabled;
+    out->closeRow = !gBagMenu->hideCloseBagText;
+    out->count = gBagMenu->numItemStacks[gBagPosition.pocket] - (out->closeRow ? 1 : 0);
+    if (out->count > NATIVE_BAG_MAX_ITEMS)
+        out->count = NATIVE_BAG_MAX_ITEMS;
+    for (i = 0; i < out->count; i++)
+    {
+        struct ItemSlot slot = GetBagItemIdAndQuantity(gBagPosition.pocket, i);
+
+        out->items[i] = slot.itemId;
+        out->quantities[i] = slot.quantity;
+    }
+    out->cursor = GetItemListPosition(gBagPosition.pocket);
+    out->registeredItem = gSaveBlock1Ptr->registeredItem;
+    out->victoryCatch = IsVictoryCatch();
+    if (gBagMenu->toSwapPos != NOT_SWAPPING)
+        out->swapFrom = gBagMenu->toSwapPos;
+    // the message box and the description line as the bag printed them
+    if (gBagMenu->windowIds[ITEMWIN_MESSAGE] != WINDOW_NONE && Window_NativeUiShown(gBagMenu->windowIds[ITEMWIN_MESSAGE]))
+        out->msgWindow = gBagMenu->windowIds[ITEMWIN_MESSAGE];
+    out->descWindow = WIN_DESCRIPTION;
+
+    taskId = NativeUiBagTask();
+    if (MenuHelpers_NativeUiYesNo())
+    {
+        out->phase = NATIVE_BAG_YES_NO;
+        out->menuCursor = Menu_GetCursorPos();
+        out->ready = TRUE;
+        return TRUE;
+    }
+    if (MenuHelpers_NativeUiMessage(&msgWindow))
+    {
+        out->phase = NATIVE_BAG_MESSAGE;
+        out->msgWindow = msgWindow;
+        out->ready = TRUE;
+        return TRUE;
+    }
+    if (taskId == TASK_NONE)
+    {
+        out->phase = NATIVE_BAG_MESSAGE; // a message's own task (waiting for A)
+        out->ready = TRUE;
+        return TRUE;
+    }
+    if (gTasks[taskId].func == Task_BagMenu_HandleInput)
+    {
+        out->phase = NATIVE_BAG_BROWSE;
+        out->ready = MenuHelpers_ShouldWaitForLinkRecv() != TRUE && !gPaletteFade.active;
+    }
+    else if (gTasks[taskId].func == Task_SwitchBagPocket)
+    {
+        out->phase = NATIVE_BAG_SWITCHING;
+    }
+    else if (gTasks[taskId].func == Task_HandleSwappingItemsInput)
+    {
+        out->phase = NATIVE_BAG_SWAPPING;
+        out->ready = MenuHelpers_ShouldWaitForLinkRecv() != TRUE;
+    }
+    else if (gTasks[taskId].func == Task_ItemContext_SingleRow || gTasks[taskId].func == Task_ItemContext_MultipleRows)
+    {
+        out->phase = NATIVE_BAG_MENU;
+        out->menuGrid = gTasks[taskId].func == Task_ItemContext_MultipleRows;
+        out->menuCount = gBagMenu->contextMenuNumItems <= 6 ? gBagMenu->contextMenuNumItems : 6;
+        for (i = 0; i < out->menuCount; i++)
+        {
+            u8 action = gBagMenu->contextMenuItemsPtr[i];
+
+            out->menuActions[i] = action;
+            out->menuLabels[i] = action == ACTION_DUMMY ? NULL : sItemMenuActions[action].text;
+        }
+        out->menuCursor = Menu_GetCursorPos();
+        out->ready = MenuHelpers_ShouldWaitForLinkRecv() != TRUE;
+    }
+    else if (gTasks[taskId].func == Task_ChooseHowManyToToss || gTasks[taskId].func == Task_ChooseHowManyToSell
+          || gTasks[taskId].func == Task_ChooseHowManyToDeposit)
+    {
+        out->phase = NATIVE_BAG_QUANTITY;
+        out->quantity = gTasks[taskId].tItemCount;
+        out->maxQuantity = gTasks[taskId].tQuantity;
+        out->selling = gTasks[taskId].func == Task_ChooseHowManyToSell;
+        out->ready = TRUE;
+    }
+    else if (gTasks[taskId].func == Task_WallyTutorialBagMenu)
+    {
+        out->phase = NATIVE_BAG_TUTORIAL;
+    }
+    else
+    {
+        out->phase = NATIVE_BAG_CLOSING;
+    }
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

@@ -447,3 +447,38 @@ void UpdateSwapLineSpritesPos(u8 *spriteIds, u8 count, s16 x, u16 y)
         gSprites[spriteIds[i]].y = 1 + y;
     }
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui): the shared message and YES/NO helpers.
+bool32 MenuHelpers_NativeUiYesNo(void)
+{
+    return FuncIsActiveTask(Task_CallYesOrNoCallback);
+}
+
+bool32 MenuHelpers_NativeUiMessage(u8 *windowId)
+{
+    if (!FuncIsActiveTask(Task_ContinueTaskAfterMessagePrints))
+        return FALSE;
+    *windowId = sMessageWindowId;
+    return TRUE;
+}
+
+// whose they are: the task a helper runs now, the message's next step, the YES/NO's choices
+bool32 MenuHelpers_NativeUiRunsHelper(u8 taskId)
+{
+    return gTasks[taskId].isActive
+        && (gTasks[taskId].func == Task_ContinueTaskAfterMessagePrints || gTasks[taskId].func == Task_CallYesOrNoCallback);
+}
+
+void (*MenuHelpers_NativeUiMessageNext(void))(u8)
+{
+    return FuncIsActiveTask(Task_ContinueTaskAfterMessagePrints) ? sMessageNextTask : NULL;
+}
+
+void (*MenuHelpers_NativeUiYesFunc(void))(u8)
+{
+    return FuncIsActiveTask(Task_CallYesOrNoCallback) ? sYesNo.yesFunc : NULL;
+}
+#endif // ENABLE_NATIVE_UI
