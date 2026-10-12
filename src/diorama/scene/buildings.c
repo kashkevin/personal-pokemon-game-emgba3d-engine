@@ -643,6 +643,81 @@ static void LevelWaterBodies(const struct DioramaSceneSnapshot *snapshot,
 }
 
 /*
+ * Route 111's desert: its deep sand (MB_DEEP_SAND, the rippled patches the GBA
+ * draws with a darker rim) stands as dunes, each patch rising in steps of
+ * DUNE_STEP from its rim to its middle, DUNE_STEPS of them at the most, instead
+ * of a floor flat to the horizon (a battle's low camera saw nothing raised
+ * there). A cell's step is its ring in the patch: its distance (8-way) to the
+ * nearest cell that is no deep sand. Past the scene's cells the patch is taken
+ * to go on, so a cell's height can change only within DUNE_STEPS of the
+ * scene's edge, far out of sight. How it looks only: the sand's behaviour is
+ * untouched, and the player, a trainer or a battler stands on the dune (its
+ * cells' ground). Added by the battle environments' work.
+ */
+#define DUNE_STEPS 3
+#define DUNE_STEP (3.0f / 16.0f)
+
+static void RaiseDunes(const struct DioramaSceneSnapshot *snapshot,
+                       struct DioramaResolvedCell *resolved, unsigned count)
+{
+    static uint8_t ring[DIORAMA_MAX_VISIBLE_CELLS];
+    bool any = false;
+    unsigned i;
+    int pass;
+
+    for (i = 0; i < count; i++)
+    {
+        const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
+
+        ring[i] = (cell->flags & DIORAMA_CELL_SOURCE_VALID)
+               && cell->behavior == MB_DEEP_SAND
+               && resolved[i].shape == DIORAMA_SHAPE_FLAT ? DUNE_STEPS : 0;
+        any |= ring[i] != 0;
+    }
+    if (!any)
+        return;
+    for (pass = 0; pass < DUNE_STEPS; pass++)
+        for (i = 0; i < count; i++)
+        {
+            int gx = (int)i % DIORAMA_GRID_WIDTH, gy = (int)i / DIORAMA_GRID_WIDTH;
+            int dx, dy;
+
+            if (ring[i] <= 1)
+                continue;
+            for (dy = -1; dy <= 1; dy++)
+                for (dx = -1; dx <= 1; dx++)
+                {
+                    int nx = gx + dx, ny = gy + dy;
+                    unsigned n;
+
+                    if ((dx == 0 && dy == 0) || nx < 0 || ny < 0
+                     || nx >= DIORAMA_GRID_WIDTH || ny >= DIORAMA_GRID_HEIGHT)
+                        continue;
+                    n = (unsigned)(ny * DIORAMA_GRID_WIDTH + nx);
+                    if (n >= count || !(snapshot->cells[n].flags & DIORAMA_CELL_SOURCE_VALID))
+                        continue; /* past the map's edge: the patch goes on */
+                    if (ring[n] + 1 < ring[i])
+                        ring[i] = ring[n] + 1;
+                }
+        }
+    for (i = 0; i < count; i++)
+    {
+        struct DioramaResolvedCell *r = &resolved[i];
+        float raise = ring[i] * DUNE_STEP;
+
+        if (ring[i] == 0)
+            continue;
+        r->groundHeight += raise;
+        r->topHeight += raise;
+        for (unsigned k = 0; k < r->surfaceCount && k < DIORAMA_MAX_VISUAL_SURFACES; k++)
+        {
+            r->surfaces[k].topHeight += raise;
+            r->surfaces[k].bottomHeight += raise;
+        }
+    }
+}
+
+/*
  * A rock standing in the shallows or the sea, drawn on the water: a cell that is
  * no water, is not walked on, is flat ground under its detail object (a rock's
  * mound, props.c) and whose lower layer is the sea's tiles
@@ -817,6 +892,7 @@ void DioramaBuildings_FlattenResolvedCells(const struct DioramaSceneSnapshot *sn
     }
     MarkRocksInWater(snapshot, resolved, count, inWater);
     LevelWaterBodies(snapshot, resolved, count, inWater);
+    RaiseDunes(snapshot, resolved, count);
 }
 
 unsigned DioramaBuildings_PageCount(void)
