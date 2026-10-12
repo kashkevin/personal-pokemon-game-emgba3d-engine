@@ -1181,8 +1181,9 @@ def _structure_fields(analysis: dict, mapping: dict[int, int], offset: int,
 
 def _script_layouts(root: Path) -> dict[str, str]:
     """The layouts a map's own scripts switch it to (setmaplayoutindex), each
-    with the map's own layout: Route 111 without its Mirage Tower, Shoal
-    Cave's rooms at high tide, Sky Pillar's clean floors."""
+    with the map's own layout: Route 111 without its Mirage Tower, Sky
+    Pillar's clean floors. (Shoal Cave's high-tide rooms are maps of their
+    own as well.)"""
     out = {}
     for path in sorted((root / "data" / "maps").glob("*/map.json")):
         scripts = path.parent / "scripts.inc"
@@ -1232,8 +1233,8 @@ def compile_data(root: Path) -> dict:
             # The sea's shallows on the sea's level (terrace_topology.join_water).
             solved = {**solved, **join_water(cells[layout["id"]], layout["width"],
                                              layout["height"], solved)}
-        # (a layout a map's scripts switch it to - Shoal Cave at high tide - is
-        # that map's: _script_layouts)
+        # (a layout only a map's scripts switch to - Sky Pillar's clean floors -
+        # is that map's: _script_layouts)
         rows = (maps_by_layout.get(layout["id"], ())
                 or maps_by_layout.get(script_layouts.get(layout["id"]), ()))
         if rows and all(row["mapType"] == "MAP_TYPE_UNDERGROUND" for row in rows):
