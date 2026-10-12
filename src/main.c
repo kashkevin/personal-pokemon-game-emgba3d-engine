@@ -1,6 +1,7 @@
 #include "global.h"
 #ifdef ENABLE_DIORAMA
 #include "diorama/scene_snapshot.h"
+#include "diorama/battle_fx.h"
 #endif
 #line 2 // gba-line
 #include "crt0.h"
@@ -239,6 +240,7 @@ static void UpdateLinkAndCallCallbacks(void)
         CallCallbacks();
 #ifdef ENABLE_DIORAMA
     DioramaScene_EndFrame(gMain.inBattle);
+    BattleFx_OnFrameEnd(); // diorama/battle_fx.h: the HD layer steps with the game's animation
 #endif
 #line 216 // gba-line
 }

@@ -19,7 +19,15 @@
 #define getRedChannel(x) ((x >>  0) & 0x1F)
 #define getGreenChannel(x) ((x >>  5) & 0x1F)
 #define getBlueChannel(x) ((x >>  10) & 0x1F)
+#ifdef ENABLE_DIORAMA
+/* gDioramaSceneHideBg (diorama/battle_fx.h): BG layers left out of this frame
+ * as if DISPCNT had them off - an animation's effect picture that Battle FX
+ * redraws in HD. 0 outside its animations. */
+extern uint8_t gDioramaSceneHideBg;
+#define isbgEnabled(x) (((REG_DISPCNT >> 8) & 0xF & ~gDioramaSceneHideBg) & (1 << x))
+#else
 #define isbgEnabled(x) ((REG_DISPCNT >> 8) & 0xF) & (1 << x)
+#endif
 
 #define WINMASK_BG0    (1 << 0)
 #define WINMASK_BG1    (1 << 1)
@@ -46,6 +54,7 @@ uint8_t gDioramaSceneLayers;
 uint8_t gDioramaSceneCover[DISPLAY_HEIGHT * DISPLAY_WIDTH];
 struct DioramaSceneEdge gDioramaSceneEdges[DISPLAY_HEIGHT][2];
 uint32_t gDioramaSceneSkipObj[4];
+uint8_t gDioramaSceneHideBg;
 int16_t gDioramaSceneLineShift[DISPLAY_HEIGHT][2];
 uint16_t gDioramaSceneArt[DISPLAY_HEIGHT * DISPLAY_WIDTH];
 bool gDioramaSceneArtWanted;

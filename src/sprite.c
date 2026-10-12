@@ -9,6 +9,7 @@
 #include "test/test.h"
 #ifdef ENABLE_DIORAMA
 #include "diorama/battle_scene.h"
+#include "diorama/battle_fx.h"
 #endif
 #line 10 // gba-line
 
@@ -392,6 +393,7 @@ void BuildOamBuffer(void)
     // view draws those sprites in its scene and leaves them out of a battle
     // transition it composes over it (latched as OAM is loaded, LoadOam).
     DioramaSprites_BeginOam();
+    BattleFx_BeginOam(); // and the battle effects' (diorama/battle_fx.h)
     for (i = 0, oamIndex = 0; i < toSort; i++)
     {
         struct Sprite *sprite = &gSprites[spritePriorities[i] & 0xFF];
@@ -399,6 +401,7 @@ void BuildOamBuffer(void)
         bool8 full = AddSpriteToOamBuffer(sprite, &oamIndex);
 
         DioramaSprites_MarkOam(sprite, first, oamIndex);
+        BattleFx_MarkOam(sprite, first, oamIndex);
         if (full)
             break;
     }
@@ -617,6 +620,8 @@ void LoadOam(void)
 #ifdef ENABLE_DIORAMA
     if (!gMain.oamLoadDisabled)
         DioramaSprites_LatchOam(); // the map's entries of the OAM just loaded
+    if (!gMain.oamLoadDisabled)
+        BattleFx_LatchOam(); // the battle effects' entries (diorama/battle_fx.h)
 #endif
 #line 594 // gba-line
 }

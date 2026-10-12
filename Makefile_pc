@@ -149,6 +149,24 @@ ifeq ($(DIORAMA),1)
   # The renderer (GL objects, snapshot exchange, caches) is platform state: it
   # keeps its memory across a soft reset like the window does.
   PRESERVED_OBJS += $(patsubst src/%.c,$(OBJ_DIR)/src/%.o,$(wildcard src/diorama/*.c src/diorama/*/*.c) $(DIORAMA_GENERATED_C))
+  # Battle FX (include/diorama/battle_fx.h): the HD move and battle animations
+  # over the 3D battle. Its JavaScript engine, QuickJS-ng (third_party/quickjs-ng,
+  # MIT), is platform state like the renderer and is built with flags of its own:
+  # no game preprocessing, and SSE2 doubles, so these 32-bit builds compute the
+  # animation core's numbers exactly as the 64-bit builds it was verified with
+  # (x87's extended precision would not; tools/battlefx/build_check.sh).
+  # stb_image (third_party/stb, public domain) reads its PNG textures, built the same way.
+  BFX_QJS_DIR    := third_party/quickjs-ng
+  BFX_QJS_OBJS   := $(patsubst %,$(OBJ_DIR)/$(BFX_QJS_DIR)/%.o,cutils libregexp libunicode quickjs xsum) \
+                    $(OBJ_DIR)/third_party/stb/bfx_stb_image.o
+  PRESERVED_OBJS += $(BFX_QJS_OBJS)
+  CPPFLAGS       += -I$(BFX_QJS_DIR) -Ithird_party/stb
+  BFX_QJS_CFLAGS  = -m32 $(OPT) -msse2 -mfpmath=sse -w -D_GNU_SOURCE
+  ifeq ($(NATIVE_LINUX),1)
+    BFX_QJS_CFLAGS += -fno-pie
+  else
+    BFX_QJS_CFLAGS += -mno-ms-bitfields -mno-align-double -DWIN32_LEAN_AND_MEAN -D_WIN32_WINNT=0x0601
+  endif
 endif
 
 ASFLAGS := --defsym MODERN=1 --defsym EMERALD=1 --defsym PORTABLE=1
@@ -175,7 +193,7 @@ else
   SAN_FLAGS_FOR = $(if $(findstring src/platform/,$<),,$(SAN_FLAGS))
 endif
 
-BUILD_CONFIG_ID := $(CC) $(CPPFLAGS) | $(CFLAGS) | $(SAN_FLAGS) | $(ASFLAGS) | $(ASM_TO_X86) | $(GAME_SECTIONS) | $(PRESERVED_OBJS)
+BUILD_CONFIG_ID := $(CC) $(CPPFLAGS) | $(CFLAGS) | $(SAN_FLAGS) | $(ASFLAGS) | $(ASM_TO_X86) | $(GAME_SECTIONS) | $(PRESERVED_OBJS) | $(BFX_QJS_CFLAGS)
 ifneq ($(file <$(BUILD_CONFIG_STAMP)),$(BUILD_CONFIG_ID))
   $(shell mkdir -p $(OBJ_DIR))
   $(file >$(BUILD_CONFIG_STAMP),$(BUILD_CONFIG_ID))
@@ -203,7 +221,7 @@ DATA_ASM_OBJS := $(patsubst data/%.s,$(OBJ_DIR)/data/%.o,$(DATA_ASM_SRCS))
 MID_SRCS := $(wildcard sound/songs/midi/*.s)
 MID_OBJS := $(patsubst sound/songs/midi/%.s,$(OBJ_DIR)/sound/songs/midi/%.o,$(MID_SRCS))
 
-OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS)
+OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS) $(BFX_QJS_OBJS)
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
@@ -297,6 +315,14 @@ $(OBJ_DIR)/data/%.o: data/%.s tools/pc_port/asm_to_x86.sed $(BUILD_CONFIG_STAMP)
 	@$(PREPROC) $< charmap.txt | $(DATA_CPP) $(GAME_CPPFLAGS) -I include - | $(PREPROC) -ie $< charmap.txt | $(ASM_TO_X86) | $(AS) $(ASFLAGS) -o $@
 	@$(FIX_UNDERSCORE) $@
 	@$(MARK_GAME_MEMORY)
+
+ifeq ($(DIORAMA),1)
+# Battle FX's JavaScript engine and PNG reader (see BFX_QJS_CFLAGS): plain C, none of the game's preprocessing.
+$(OBJ_DIR)/third_party/%.o: third_party/%.c $(BUILD_CONFIG_STAMP)
+	@echo "CC $<"
+	@mkdir -p $(@D)
+	@$(CC) $(BFX_QJS_CFLAGS) -I$(BFX_QJS_DIR) -Ithird_party/stb -c $< -o $@
+endif
 
 $(OBJ_DIR)/MPlayDef.s: sound/MPlayDef.s tools/pc_port/asm_to_x86.sed
 	$(ASM_TO_X86) $< > $@

@@ -28,6 +28,7 @@
 
 #include "diorama/battle_environment.h"
 #include "diorama/battle_scene.h"
+#include "diorama/battle_fx.h"
 #include "diorama/battle_stage.h"
 #include "diorama/buildings.h"
 #include "diorama/gl_battle.h"
@@ -1776,6 +1777,7 @@ uint8_t DioramaGLBattle_BeginFrame(void)
 
     sBattle.fieldCompose = false;
     memset(gDioramaSceneSkipObj, 0, sizeof(gDioramaSceneSkipObj));
+    gDioramaSceneHideBg = 0;
     gDioramaSceneArtWanted = false;
     gDioramaSceneWideWanted = false;
     if (sBattle.active)
@@ -1822,6 +1824,9 @@ uint8_t DioramaGLBattle_BeginFrame(void)
         sBattle.mosaicLogged = false;
     sBattle.composedLastFrame = sBattle.fieldCompose;
     sBattle.sceneLayers = layers;
+    /* Battle FX (battle_fx.h): the HD effects of the frame this picture shows;
+     * the GBA effect sprites they stand in for are left out of the picture. */
+    BattleFx_FrameBoundary(sBattle.active && sBattle.frame.inBattle, gDioramaSceneSkipObj, &gDioramaSceneHideBg);
     return layers;
 }
 
@@ -3259,6 +3264,7 @@ void DioramaGLBattle_ComposeFieldPicture(int outW, int outH, int gameX, int game
 bool DioramaGLBattle_Present(SDL_Window *window)
 {
     struct Layout layout;
+    struct BattleFxLayout fxLayout;
     bool world;
 
     if (!sBattle.ready || !sBattle.active)
@@ -3297,7 +3303,16 @@ bool DioramaGLBattle_Present(SDL_Window *window)
         DrawWide(&layout);
         DrawCarriedOut(&layout);
     }
+    fxLayout.outW = layout.outW;
+    fxLayout.outH = layout.outH;
+    fxLayout.gameX = layout.gameX;
+    fxLayout.gameY = layout.gameY;
+    fxLayout.gameW = layout.gameW;
+    fxLayout.gameH = layout.gameH;
+    fxLayout.scale = layout.scale;
+    BattleFxGL_DrawBack(&fxLayout);  /* Battle FX: the effects behind the battlers */
     DrawPicture(&layout);
+    BattleFxGL_DrawFront(&fxLayout); /* and in front of them */
     if (world)
         DrawIntroBars(&layout);
     glDisable(GL_BLEND);

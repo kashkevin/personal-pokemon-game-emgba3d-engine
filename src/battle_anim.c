@@ -27,6 +27,7 @@
 #include "constants/moves.h"
 #ifdef ENABLE_DIORAMA
 #include "diorama/battle_scene.h"
+#include "diorama/battle_fx.h"
 #endif
 #line 28 // gba-line
 
@@ -479,6 +480,11 @@ void LaunchBattleAnimation(u32 animType, u32 animId)
     gBattle_WIN0V = 0;
     gBattle_WIN1H = 0;
     gBattle_WIN1V = 0;
+#ifdef ENABLE_DIORAMA
+    // Battle FX (diorama/battle_fx.h): the HD layer replays this animation beside it.
+    BattleFx_OnLaunch(animType, animId, sBattleAnimScriptPtr);
+#endif
+#line 478 // gba-line
 }
 
 void DestroyAnimSprite(struct Sprite *sprite)
@@ -607,6 +613,10 @@ bool32 TryLoadSpriteAssets(const struct SpriteTemplate *template)
 
 static void WaitAnimFrameCount(void)
 {
+#ifdef ENABLE_DIORAMA
+    BattleFx_OnAnimTick();
+#endif
+#line 606 // gba-line
     if (sAnimFramesToWait <= 0)
     {
         gAnimScriptCallback = RunAnimScriptCommand;
@@ -620,6 +630,10 @@ static void WaitAnimFrameCount(void)
 
 static void RunAnimScriptCommand(void)
 {
+#ifdef ENABLE_DIORAMA
+    BattleFx_OnAnimTick();
+#endif
+#line 619 // gba-line
     do
     {
         sScriptCmdTable[sBattleAnimScriptPtr[0]]();
