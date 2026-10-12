@@ -205,7 +205,7 @@ tilesets are unchanged.
   front as tall as the facade, the roof laid back over their cells), verified
   pixel for pixel in the GBA projection and drawn by the building renderer
   like the others (doors open on them). Sootopolis's houses, cut into the
-  crater, stay as drawn.
+  crater, are found by their roofs (`crater_specs`) and modelled the same way.
 * Lit windows (phase 4; `tools/diorama_buildings/window_glow.py`,
   `DioramaBuildings_PageWindows`): the windows of the modelled buildings of
   outdoor maps, found on their texture pages (glass-coloured panes in a darker
@@ -222,3 +222,18 @@ tilesets are unchanged.
   none) and only on maps the game tints for the time of day
   (`DioramaGLLamps_NightFor`); off with the player's Lighting setting.
   `PKMN_DIORAMA_LOG=1` logs how many are lit.
+* Levels and steps (performance directive phase 4, 2026-10-12): where the
+  terrace solver (`tools/diorama_rules/terrace_topology.py`) leaves cells a
+  level below their neighbours, the higher cell's side reaches down to the
+  lower one's top (`terrain_mesh.c` `AppendSkirtFaces`, drawn with the higher
+  cell's ground) - the sky showed through those steps before (the sea solved a
+  level below its rocks and sandbars, a row of trees above the walk beside
+  it). The rules put the sea's shallows on the sea's level (`join_water`), the
+  sea's grey rocks and brown stacks on the water they stand in (lifted with the
+  terraces, or at the sea's own height: `compile_rules.py` `_sea_rock_cells`,
+  the generator's own finder) and ledges on a lower level on that level; such a
+  ledge is a block whose sides are its whole drawing.
+* Long grass: a walker the game splits into strips there (subsprite tables 4
+  and 5, the lower strip behind the grass) is drawn whole; the 3D grass stands
+  in front of it (`scene_snapshot.c` `HasUnsupportedSubsprites`). Routes 119
+  and 120 fell back to the 2D view while the player stood in it.
