@@ -530,24 +530,26 @@ static bool BuildWeatherImageFor(uint8_t weather, const struct DioramaSceneSnaps
     else if (effect == DIORAMA_WEATHER_SAND)
     {
         /* The air full of sand (the GBA's sandstorm layer) with streaks
-         * driven across it. */
+         * driven across it. As thick as the GBA's own, which hides much of
+         * the scene: thinner, the 3D view's sand haze and the battles' showed
+         * hardly any (the battle environments' work). */
         int x;
         int y;
 
         for (y = 0; y < DISPLAY_HEIGHT; y++)
         {
             int swirl = ((y + phase / 2) % 32);
-            int alpha = 54 + (swirl < 16 ? swirl : 32 - swirl);
+            int alpha = 66 + (swirl < 16 ? swirl : 32 - swirl);
 
             for (x = 0; x < DISPLAY_WIDTH; x++)
                 sWeatherPixels[y * DISPLAY_WIDTH + x] = RGBA(214, 178, 112, alpha);
         }
-        for (i = 0; i < 70; i++)
+        for (i = 0; i < 130; i++)
         {
             int cycleX = DISPLAY_WIDTH + 24;
             int px = (int)((i * 61 + phase * (5 + i % 3)) % cycleX) - 12;
             int py = (int)((i * 37 + phase / 3) % (DISPLAY_HEIGHT + 4)) - 2;
-            int length = 3 + i % 4;
+            int length = 4 + i % 5;
             int k;
 
             for (k = 0; k < length; k++)
