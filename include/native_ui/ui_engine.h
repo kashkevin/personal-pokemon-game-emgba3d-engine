@@ -486,6 +486,52 @@ bool32 Multiplayer_NativeUiPeer(u32 i, u32 *playerId, u8 *mapGroup, u8 *mapNum, 
 /* pokemon_icon.c: a party / box icon's 4bpp tiles (two 32x32 frames) and palette */
 void PokemonIcon_NativeUiArt(u16 species, u32 personality, bool32 isEgg, const u8 **tiles, const u16 **palette);
 
+/* ---------------------------------------------------------------- battle (battle_interface.c, battle_controller_player.c) */
+
+/* One battler's healthbox as the game shows it (its values noted as the game
+ * draws them, so a bar that is still moving shows where it is). */
+struct NativeBattleBox
+{
+    bool8 exists;       /* its healthbox sprites exist */
+    bool8 visible;      /* shown (the game hides them for a move's animation) */
+    s16 x2, y2;         /* the healthbox's offset from its place: sliding, bouncing */
+    bool8 hpShown;      /* its HP bar was drawn */
+    s32 hp;             /* the HP the bar (and the player's HP text) shows */
+    s32 hpNum, hpDen;   /* the bar's fill: hpNum / hpDen */
+    bool8 expShown;
+    s32 expNum, expDen; /* the EXP bar's fill within the level */
+    u8 level;           /* the level it shows (0: not drawn yet) */
+    bool8 statusShown;
+    u32 status;         /* the status it shows (STATUS1_*) */
+};
+bool32 Battle_NativeUiBox(u32 battler, struct NativeBattleBox *out);
+/* The OBJ tiles of the game's battle interface sprites (healthboxes, bars, the
+ * party trays, the gimmick trigger and indicators, the last used Ball window,
+ * the move info window, the category icon): bit n of mask[n / 32]. */
+void Battle_NativeUiHudTiles(u32 mask[32]);
+/* the party tray's 8x8 ball tile (4bpp; gBattleInterface_BallDisplayPal):
+ * 0 full, 1 empty, 2 fainted, 3 statused, 4 caught */
+const u8 *Battle_NativeUiBallTile(u32 kind);
+
+enum NativeBattleInput
+{
+    NATIVE_BATTLE_INPUT_NONE,
+    NATIVE_BATTLE_INPUT_ACTION_WAIT,    /* the action menu is being put up */
+    NATIVE_BATTLE_INPUT_ACTION,         /* FIGHT / BAG / POKéMON / RUN */
+    NATIVE_BATTLE_INPUT_MOVE_WAIT,
+    NATIVE_BATTLE_INPUT_MOVE,           /* the four moves (START: the gimmick, L: the description) */
+    NATIVE_BATTLE_INPUT_MOVE_SWITCH,    /* SELECT: reordering the moves */
+    NATIVE_BATTLE_INPUT_TARGET,         /* one target (doubles) */
+    NATIVE_BATTLE_INPUT_TARGETS_SHOWN,  /* a spread move's targets: A confirms */
+    NATIVE_BATTLE_INPUT_YES_NO,         /* the controller's YES / NO (switch after a faint) */
+    NATIVE_BATTLE_INPUT_PARTY,          /* the party menu opens */
+    NATIVE_BATTLE_INPUT_BAG,            /* the bag opens */
+};
+/* battle_controller_player.c: what the player controller waits for from this battler */
+u32 Battle_NativeUiPlayerInput(u32 battler);
+/* sprite.c: the OBJ tiles a sheet tag holds */
+bool32 Sprite_NativeUiTagTiles(u16 tag, u16 *start, u16 *count);
+
 /* ---------------------------------------------------------------- text printers (text.c) */
 
 /* The last string printed on a window: the engine's pointer to it (to tell

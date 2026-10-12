@@ -4,6 +4,7 @@
  * registry, the frame-boundary capture, the picture policy, mouse input and
  * the button-press queue, the development switches. Project-owned.
  */
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,8 +20,9 @@
 #include "native_ui/ui_text.h"
 #include "native_ui/ui_widgets.h"
 
-/* src/platform/gba_easy_draw.c: GBA background layers left out of the picture */
+/* src/platform/gba_easy_draw.c: GBA background layers and OAM entries left out of the picture */
 extern uint8_t gPlatformPictureHideBgMask;
+extern uint32_t gPlatformPictureHideObj[4];
 
 /* The screens in detection order (the first that detects wins). */
 static const struct UiScreen *const sScreens[] = {
@@ -33,6 +35,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_Bag,
     &gUiScreen_Pokedex,
     &gUiScreen_Storage,
+    &gUiScreen_Battle,
 };
 
 static bool sInitialized;
@@ -139,6 +142,19 @@ bool NativeUi_LogEnabled(void)
     return sLog;
 }
 
+void NativeUi_Logf(const char *fmt, ...)
+{
+    char line[256];
+    va_list ap;
+
+    if (!sLog)
+        return;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof(line), fmt, ap);
+    va_end(ap);
+    SDL_Log("Native UI: %s", line);
+}
+
 uint32_t NativeUi_Frame(void)
 {
     return sFrame;
@@ -227,6 +243,9 @@ void NativeUi_CaptureFrame(void)
         gPlatformPictureHideBgMask = 0;
         break;
     }
+    memset(gPlatformPictureHideObj, 0, 4 * sizeof(uint32_t));
+    if (sActive != NULL && sActive->hideObjects != NULL && picture != UI_PICTURE_HIDE_ALL)
+        sActive->hideObjects(gPlatformPictureHideObj);
 }
 
 int NativeUi_PictureFlags(void)
@@ -241,6 +260,8 @@ void NativeUi_QueuePress(uint16_t key)
 
 void NativeUi_QueuePresses(uint16_t key, int count)
 {
+    if (sLog && count > 0)
+        SDL_Log("Native UI: press %04x x%d queued", key, count);
     for (int i = 0; i < count && sPressCount + 2 <= MAX_PRESS_STEPS; i++)
     {
         sPressSteps[(sPressHead + sPressCount++) % MAX_PRESS_STEPS] = key;

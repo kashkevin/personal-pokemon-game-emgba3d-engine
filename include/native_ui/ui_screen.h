@@ -40,6 +40,9 @@ struct UiScreen
     enum UiPicture (*picture)(void);
     /* a PC key that is not one of the game's buttons (enum UiPcKey); true: taken */
     bool (*pcKey)(int key);
+    /* the GBA picture's OAM entries the screen draws itself (bit n of mask[n / 32]:
+     * entry n), at the frame boundary after capture; NULL: none */
+    void (*hideObjects)(uint32_t mask[4]);
 };
 
 enum UiPcKey
@@ -59,6 +62,8 @@ double NativeUi_FrameAlpha(void);
 /* the engine's full-screen palette fade as a veil (colour and opacity; UI_NONE: none) */
 UiRGBA NativeUi_ScreenFade(void);
 bool NativeUi_LogEnabled(void);
+/* a line in the game log ("Native UI: ..."), with PKMN_NATIVE_UI_LOG=1 only */
+void NativeUi_Logf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 /* the PC's own actions: close the game window (as its close button: nothing is
  * saved), open the PC settings menu (as F10) */
 void NativeUi_QuitGame(void);
@@ -75,5 +80,6 @@ extern const struct UiScreen gUiScreen_Summary;
 extern const struct UiScreen gUiScreen_Bag;
 extern const struct UiScreen gUiScreen_Pokedex;
 extern const struct UiScreen gUiScreen_Storage;
+extern const struct UiScreen gUiScreen_Battle;
 
 #endif // GUARD_NATIVE_UI_SCREEN_H
