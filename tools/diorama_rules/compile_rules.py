@@ -1179,6 +1179,23 @@ def _structure_fields(analysis: dict, mapping: dict[int, int], offset: int,
     }
 
 
+def _script_layouts(root: Path) -> dict[str, str]:
+    """The layouts a map's own scripts switch it to (setmaplayoutindex), each
+    with the map's own layout: Route 111 without its Mirage Tower, Shoal
+    Cave's rooms at high tide, Sky Pillar's clean floors."""
+    out = {}
+    for path in sorted((root / "data" / "maps").glob("*/map.json")):
+        scripts = path.parent / "scripts.inc"
+        if not scripts.exists():
+            continue
+        own = json.loads(path.read_text(encoding="utf-8"))["layout"]
+        for name in re.findall(r"setmaplayoutindex\s+(LAYOUT_\w+)",
+                               scripts.read_text(encoding="utf-8")):
+            if name != own:
+                out.setdefault(name, own)
+    return out
+
+
 def compile_data(root: Path) -> dict:
     root = Path(root)
     rules_root = root / "data/diorama"
@@ -1197,6 +1214,7 @@ def compile_data(root: Path) -> dict:
     maps_by_layout = defaultdict(list)
     for row in maps:
         maps_by_layout[row["layout"]].append(row)
+    script_layouts = _script_layouts(root)
     cells, behavior_counts, pin_counts = _load_cells(root, layouts, tilesets, behavior_names)
     event_cells = _events(root, maps, cells, layouts_by_id)
     pixel_summaries = _pixel_summaries(root, layouts, cells, tilesets)
@@ -1214,7 +1232,10 @@ def compile_data(root: Path) -> dict:
             # The sea's shallows on the sea's level (terrace_topology.join_water).
             solved = {**solved, **join_water(cells[layout["id"]], layout["width"],
                                              layout["height"], solved)}
-        rows = maps_by_layout.get(layout["id"], ())
+        # (a layout a map's scripts switch it to - Shoal Cave at high tide - is
+        # that map's: _script_layouts)
+        rows = (maps_by_layout.get(layout["id"], ())
+                or maps_by_layout.get(script_layouts.get(layout["id"]), ()))
         if rows and all(row["mapType"] == "MAP_TYPE_UNDERGROUND" for row in rows):
             # A cave's floors at their own elevation (terrace_topology.cave_levels).
             solved = {**solved, **cave_levels(cells[layout["id"]], layout["width"],
