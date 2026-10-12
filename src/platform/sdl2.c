@@ -147,6 +147,7 @@ extern int NativeSelfTest_Decompress(const char *listPath);
 extern int NativeSelfTest_PartyOrder(void);
 extern int NativeSelfTest_BattleNames(void);
 extern int NativeSelfTest_CryStop(void);
+extern int NativeSelfTest_ShakeAnim(void);
 extern bool32 GameMemory_Reset(void);
 
 static jmp_buf sGameResetPoint; // where the game thread restarts after a soft reset
@@ -749,6 +750,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_BattleNames()); // src/platform/native_selftest.c (KNOWN_ISSUES N38)
         else if (strcmp(argv[i], "--selftest-cry-stop") == 0)
             exit(NativeSelfTest_CryStop()); // src/platform/native_selftest.c (KNOWN_ISSUES N39)
+        else if (strcmp(argv[i], "--selftest-shake-anim") == 0)
+            exit(NativeSelfTest_ShakeAnim()); // src/platform/native_selftest.c (KNOWN_ISSUES N40)
     }
 }
 
