@@ -334,3 +334,133 @@ int NativeSelfTest_PartyOrder(void)
     printf("selftest-party-order: %d checks, %d failed\n", sOrderChecks, sOrderFailures);
     return sOrderFailures ? 1 : 0;
 }
+
+// ---------------------------------------------------------------------------
+//   pokeemerald-mp --selftest-battle-names
+//
+// A battle message naming trainers with their classes (battle_message.c,
+// BattleStringExpandPlaceholders). KNOWN_ISSUES N38: the text of each
+// {B_TRAINERn_NAME_WITH_CLASS} was put together in a 32-byte buffer from where the
+// one before it ended, so a message naming two trainers - "You are challenged by
+// MAGMA LEADER MAXIE and MAGMA ADMIN TABITHA!", Mossdeep's Space Center Multi
+// battle - wrote past it: natively "stack smashing detected" as the battle began.
+// Here the two-opponent intro's placeholders are expanded for every pair of
+// opponents a two-trainer battle of the game has (and that pair with the longest
+// names of all trainers): each must return, and give each trainer's class and
+// name as the game always has (each placeholder expanded alone, which never
+// overflowed, is the reference). Runs before the game starts and exits with the
+// result.
+#include "battle_message.h"
+#include "battle_setup.h"
+#include "data.h"
+#include "string_util.h"
+#include "constants/characters.h"
+#include "constants/opponents.h"
+#include "constants/trainers.h"
+
+static int sNameChecks, sNameFailures;
+
+// A copy of the message without its line breaks and kinds of space (the
+// message box breaks lines by width), to compare words only.
+static void Words(const u8 *src, u8 *dst, size_t size)
+{
+    size_t n = 0;
+
+    for (; *src != EOS && n + 1 < size; src++)
+        dst[n++] = (*src == CHAR_NBSP || *src == CHAR_NEWLINE || *src == CHAR_PROMPT_SCROLL
+                    || *src == CHAR_PROMPT_CLEAR) ? CHAR_SPACE : *src;
+    dst[n] = EOS;
+}
+
+static void Expand(const u8 *placeholders, u8 *out, size_t size)
+{
+    u8 dst[256];
+
+    memset(dst, EOS, sizeof(dst));
+    BattleStringExpandPlaceholders(placeholders, dst, sizeof(dst));
+    Words(dst, out, size);
+}
+
+static void CheckTwoTrainerNames(u16 opponentA, u16 opponentB)
+{
+    static const u8 sBoth[] = {PLACEHOLDER_BEGIN, B_TXT_TRAINER1_NAME_WITH_CLASS, CHAR_SPACE,
+                               PLACEHOLDER_BEGIN, B_TXT_TRAINER2_NAME_WITH_CLASS, EOS};
+    static const u8 sFirst[] = {PLACEHOLDER_BEGIN, B_TXT_TRAINER1_NAME_WITH_CLASS, EOS};
+    static const u8 sSecond[] = {PLACEHOLDER_BEGIN, B_TXT_TRAINER2_NAME_WITH_CLASS, EOS};
+    u8 both[256], first[128], second[128], want[256];
+    size_t n;
+
+    TRAINER_BATTLE_PARAM.opponentA = opponentA;
+    TRAINER_BATTLE_PARAM.opponentB = opponentB;
+    printf("  trainers %d and %d\n", opponentA, opponentB);
+    fflush(stdout);
+    // a crash here is the bug itself: the case is named first
+    Expand(sBoth, both, sizeof(both));
+    Expand(sFirst, first, sizeof(first));
+    Expand(sSecond, second, sizeof(second));
+    n = StringLength(first);
+    memcpy(want, first, n);
+    want[n] = CHAR_SPACE;
+    memcpy(want + n + 1, second, StringLength(second) + 1);
+    sNameChecks++;
+    if (StringCompare(both, want) != 0)
+    {
+        sNameFailures++;
+        printf("FAIL trainers %d and %d: the two names differ from each alone\n", opponentA, opponentB);
+    }
+}
+
+// The trainer of the game with the longest class and name together.
+static u16 LongestNamedTrainer(void)
+{
+    u16 best = TRAINER_NONE + 1;
+    u32 bestLength = 0;
+
+    for (u16 id = TRAINER_NONE + 1; id < TRAINERS_COUNT; id++)
+    {
+        u32 length;
+
+        if (id == TRAINER_FRONTIER_BRAIN)
+            continue;
+        length = StringLength(GetTrainerNameFromId(id))
+               + StringLength(gTrainerClasses[GetTrainerClassFromId(id)].name);
+
+        if (length > bestLength)
+        {
+            bestLength = length;
+            best = id;
+        }
+    }
+    return best;
+}
+
+int NativeSelfTest_BattleNames(void)
+{
+    // The two-trainer battles of the game (data/maps/*/scripts.inc: the Space
+    // Center's multi_2_vs_2, the two-trainer intros of trainer pairs) are
+    // covered by their longest case, and the Space Center's first.
+    u16 longest = LongestNamedTrainer();
+
+    InitHeap(gHeap, HEAP_SIZE); // the message box's line breaking allocates from the game heap
+    gBattleTypeFlags = BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_TWO_OPPONENTS
+                     | BATTLE_TYPE_MULTI | BATTLE_TYPE_INGAME_PARTNER;
+    printf("Mossdeep's Space Center: MAXIE and TABITHA (N38)\n");
+    CheckTwoTrainerNames(TRAINER_MAXIE_MOSSDEEP, TRAINER_TABITHA_MOSSDEEP);
+    printf("the longest class and name, twice\n");
+    CheckTwoTrainerNames(longest, longest);
+    gBattleTypeFlags = BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_TWO_OPPONENTS;
+    printf("every trainer against the longest\n");
+    for (u16 id = TRAINER_NONE + 1; id < TRAINERS_COUNT; id++)
+    {
+        // the Battle Frontier's ids share their numbers with the game's trainers, and
+        // this one is read as the Frontier Brain (its class from the Frontier's save
+        // data, which a selftest does not have)
+        if (id == TRAINER_FRONTIER_BRAIN)
+            continue;
+        CheckTwoTrainerNames(longest, id);
+        CheckTwoTrainerNames(id, longest);
+    }
+    gBattleTypeFlags = 0;
+    printf("selftest-battle-names: %d checks, %d failed\n", sNameChecks, sNameFailures);
+    return sNameFailures ? 1 : 0;
+}
