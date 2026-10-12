@@ -38,7 +38,9 @@
 #include "platform/pc_menu.h"
 #include "platform/png_write.h"
 #ifdef ENABLE_DIORAMA
+#include "diorama/battle_scene.h"
 #include "diorama/camera.h"
+#include "diorama/gl_battle.h"
 #include "diorama/gl_compositor.h"
 #include "diorama/gl_loader.h"
 #include "diorama/gl_pc_overlay.h"
@@ -2261,6 +2263,11 @@ void VDraw(SDL_Texture *texture)
     static uint32_t image[DISPLAY_WIDTH * DISPLAY_HEIGHT];
 
     memset(gbaImage, 0, sizeof(gbaImage));
+#ifdef ENABLE_DIORAMA
+    // Frame boundary (the game thread is parked): the 3D battle reads the game
+    // and says which layers its world stands in for in this picture.
+    gDioramaSceneLayers = DioramaGLBattle_BeginFrame();
+#endif
     DrawFrame(gbaImage);
     for (int i = 0; i < DISPLAY_WIDTH * DISPLAY_HEIGHT; i++)
     {
@@ -2269,9 +2276,15 @@ void VDraw(SDL_Texture *texture)
         uint32_t g = ((color >> 5) & 0x1F) * 255 / 31;
         uint32_t b = ((color >> 10) & 0x1F) * 255 / 31;
         image[i] = 0xFF000000 | (r << 16) | (g << 8) | b;
+#ifdef ENABLE_DIORAMA
+        // Where the world shows through: premultiplied alpha (gba_easy_draw.c).
+        if (gDioramaSceneLayers)
+            image[i] = ((16u - gDioramaSceneCover[i]) * 255u / 16u) << 24 | (r << 16) | (g << 8) | b;
+#endif
     }
 #ifdef ENABLE_DIORAMA
     DioramaGL_UploadFrame(image);
+    DioramaGLBattle_UploadFrame(image);
 #else
     SDL_UpdateTexture(texture, NULL, image, DISPLAY_WIDTH * sizeof(Uint32));
 #endif
