@@ -464,15 +464,19 @@ static void SetParadeLook(enum BattlerId battler, u32 species)
     u32 personality = GetMonData(mon, MON_DATA_PERSONALITY), i;
     bool32 shiny = s.paradeShiny;
 
-    SetMonData(mon, MON_DATA_SPECIES, &species);
     if (s.paradeGender != 0)
     {
+        /* a personality of that gender: the Pokemon made again with it (its data is encrypted
+         * with the personality, which cannot just be overwritten) */
         u8 want = s.paradeGender == 'f' ? MON_FEMALE : MON_MALE;
+        u32 level = GetMonData(mon, MON_DATA_LEVEL);
 
         for (i = 0; i < 4096 && GetGenderFromSpeciesAndPersonality(species, personality) != want; i++)
             personality += 0x9E3779B1;
-        SetMonData(mon, MON_DATA_PERSONALITY, &personality);
+        CreateMonWithIVs(mon, species, level, personality, OTID_STRUCT_PLAYER_ID, MAX_PER_STAT_IVS);
     }
+    else
+        SetMonData(mon, MON_DATA_SPECIES, &species);
     SetMonData(mon, MON_DATA_IS_SHINY, &shiny);
     HandleSpeciesGfxDataChange(battler, battler, SPECIES_GFX_CHANGE_FORM_CHANGE);
 }
