@@ -68,7 +68,7 @@ Read once at start-up; not for players, not in the launcher or `pokeemerald.cfg`
 | `PKMN_NATIVE_UI_SIZE=small` | UI size Small |
 | `PKMN_NATIVE_UI_PROMPTS=pad` | the controller's prompts always (or `keyboard`) |
 | `PKMN_NATIVE_UI_LOG=1` | screen changes, clicks, queued presses, the battle HUD's phases and the UI pass's timing (CPU, and GPU by timer query) in the log |
-| `PKMN_NATIVE_UI_BENCH=<file.csv>` | the UI's frame-time benchmark (`ui_bench.c`): boots to the field, then the field, the pause menu, the bag and the party for 8 s each, pressing the game's own buttons; appends per-phase frame times (mean, median, 99th percentile, 1 % low FPS) and the UI pass's CPU and GPU time to the file, then quits. Run it with the UI on and with `PKMN_NATIVE_UI=0` to compare |
+| `PKMN_NATIVE_UI_BENCH=<file.csv>` | the UI's frame-time benchmark (`ui_bench.c`): measures the title screen and the main menu (5 s each), then CONTINUEs and measures the field, the pause menu, the bag and the party (8 s each), pressing the game's own buttons one at a time and waiting for each screen to be up (by the screens' own detection, which also runs with the UI off) before measuring it; appends per-phase frame times (mean, median, 99th percentile, 1 % low FPS), the UI pass's CPU and GPU time and how much of the phase the expected screen was up (`screen_ok_pct`) to the file, then quits. A screen that does not come up ends the visit (`not reached`). Run it with the UI on and with `PKMN_NATIVE_UI=0` to compare (the save should CONTINUE outdoors) |
 
 ## Adding a screen
 
