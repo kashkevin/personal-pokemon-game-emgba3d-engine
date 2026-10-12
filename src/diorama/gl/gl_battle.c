@@ -48,6 +48,7 @@
 #include "platform/display_settings.h"
 #include "constants/battle.h"
 #include "constants/map_types.h"
+#include "constants/weather.h"
 #ifdef DIORAMA_BATTLE_ENV_TEST
 #include "diorama/battle_env_test.h"
 #include "platform/png_write.h"
@@ -1946,6 +1947,21 @@ static void DrawShadows(const struct Layout *layout)
     QuadFlush(layout, sWhiteTexture, 1);
 }
 
+/* The weather in the battle's world (DioramaBattleFrame.weather) over it as
+ * over the field, under the battlers and the text; faded with the world.
+ * PKMN_DIORAMA_BATTLE_WEATHER=0 leaves it out. */
+static void DrawWeather(const struct Layout *layout)
+{
+    static int sEnabled = -1;
+    float opacity = 1.0f - sBattle.frame.fadeAmount;
+
+    if (sEnabled < 0)
+        sEnabled = EnvFloat("PKMN_DIORAMA_BATTLE_WEATHER", 1.0f) != 0.0f;
+    if (!sEnabled || sBattle.frame.weather == WEATHER_NONE || opacity <= 0.0f)
+        return;
+    DioramaGL_DrawBattleWeather(sBattle.frame.weather, layout->outW, layout->outH, opacity);
+}
+
 /* The world's fade: towards the colour the scenery's palettes fade to. */
 static void DrawFade(const struct Layout *layout)
 {
@@ -3080,7 +3096,11 @@ static void DrawWorld(const struct Layout *layout)
 #endif
     gDioramaCameraRig.active = false;
     glViewport(0, 0, scene.outW, scene.outH);
-    DrawBackdrop(&scene);
+    /* Indoors, in caves and under the sea the GBA's battle background shows
+     * where the world has nothing; outdoors the sky's haze already does, as
+     * in the field (DioramaGL_DrawBattleWorld). */
+    if (IsIndoor(sBattle.frame.mapType))
+        DrawBackdrop(&scene);
     DioramaGLTarget_End(layout->outW, layout->outH);
     glViewport(0, 0, layout->outW, layout->outH);
     if (!sWorldCache.off)
@@ -3268,6 +3288,7 @@ bool DioramaGLBattle_Present(SDL_Window *window)
         DrawStageLight(&layout);
         DrawFade(&layout);
         DrawShadows(&layout);
+        DrawWeather(&layout);
         DrawIntroAtmosphere(&layout);
         DrawCarriedOut(&layout);
     }

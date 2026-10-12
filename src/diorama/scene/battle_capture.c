@@ -295,6 +295,46 @@ void DioramaSprites_LatchOam(void)
     memcpy(gDioramaMapOam, sMapOamPending, sizeof(gDioramaMapOam));
 }
 
+/* Set once this battle has a weather of its own (gBattleWeather): from then on
+ * its world shows that, and none when it ends. */
+static bool sBattleWeatherSeen;
+
+/* DioramaBattleFrame.weather (read only: the battle's weather is the game's). */
+static uint8_t BattleWorldWeather(void)
+{
+    uint8_t place = GetCurrentWeather();
+
+    if (gBattleWeather != B_WEATHER_NONE)
+        sBattleWeatherSeen = true;
+    if (gBattleWeather & B_WEATHER_RAIN)
+        return (gBattleWeather & B_WEATHER_RAIN_PRIMAL) ? WEATHER_DOWNPOUR : WEATHER_RAIN;
+    if (gBattleWeather & B_WEATHER_SANDSTORM)
+        return WEATHER_SANDSTORM;
+    if (gBattleWeather & B_WEATHER_ICY_ANY)
+        return WEATHER_SNOW;
+    if (gBattleWeather & B_WEATHER_FOG)
+        return WEATHER_FOG_HORIZONTAL;
+    switch (place)
+    {
+    /* Until the battle takes the place's weather (its opening lines), the
+     * place's own; a fog the battle does not take (B_OVERWORLD_FOG) stays. */
+    case WEATHER_RAIN:
+    case WEATHER_RAIN_THUNDERSTORM:
+    case WEATHER_DOWNPOUR:
+    case WEATHER_SANDSTORM:
+    case WEATHER_SNOW:
+        return sBattleWeatherSeen ? WEATHER_NONE : place;
+    case WEATHER_FOG_HORIZONTAL:
+    case WEATHER_FOG_DIAGONAL:
+    case WEATHER_VOLCANIC_ASH:
+    case WEATHER_UNDERWATER:
+    case WEATHER_UNDERWATER_BUBBLES:
+        return place;
+    default:
+        return WEATHER_NONE;
+    }
+}
+
 void DioramaBattle_Capture(struct DioramaBattleFrame *frame)
 {
     memset(frame, 0, sizeof(*frame));
@@ -318,6 +358,7 @@ void DioramaBattle_Capture(struct DioramaBattleFrame *frame)
     frame->surfing = (gPlayerAvatar.flags & PLAYER_AVATAR_FLAG_SURFING) != 0;
     if (!frame->inBattle)
     {
+        sBattleWeatherSeen = false;
         frame->transition = DioramaBattle_TransitionActive();
         if (frame->transition && (REG_BG1CNT & BGCNT_MOSAIC))
         {
@@ -343,6 +384,7 @@ void DioramaBattle_Capture(struct DioramaBattleFrame *frame)
     frame->battleEnvironment = gBattleEnvironment;
     frame->backdropEnvironment = BackdropEnvironment();
     frame->mapType = gMapHeader.mapType;
+    frame->weather = BattleWorldWeather();
 }
 
 #endif
