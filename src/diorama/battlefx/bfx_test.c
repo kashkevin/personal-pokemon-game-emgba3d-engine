@@ -15,6 +15,9 @@
 #include <sys/stat.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_opengl.h>
+#ifdef TRANSPARENT
+#undef TRANSPARENT /* wingdi.h's (Windows, through SDL_opengl.h); gba/defines.h has its own */
+#endif
 
 #include "global.h"
 #include "battle.h"
