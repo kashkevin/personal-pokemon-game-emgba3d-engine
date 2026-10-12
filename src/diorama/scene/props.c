@@ -138,6 +138,16 @@ static const struct DioramaProp sRustboro[] = {
 #define ROPE_EW(id) { PROP(id, FENCE, SLAB, 1, LOWER), .artTop = 8, .depth = 2 }
 #define ROPE_NS(id, x, art) { PROP(id, FENCE, SLAB, 1, LOWER), .artTop = 8, .depth = 2, .facing = 1, \
                               .offsetX = (x), .artMetatile = (art) }
+/* Route 109's beach (the Slateport tileset): parasols - the canopy's two rows
+ * a dome lifted on the pole and centred over it (a row and a half south), the
+ * shadow the sand painted under it left to the real one - and deck chairs,
+ * low and walked over, the head's backrest raised. */
+#define PARASOL_TOP(id) { PROP(id, CANOPY, MOUND, 1, LOWER), .lift16 = 26, .height16 = 8, .offsetZ = 24, \
+                          .flags = DIORAMA_PROP_JOINED }
+#define PARASOL_RIM(id) { PROP(id, CANOPY, MOUND, 1, NEIGHBOUR), .lift16 = 26, .height16 = 8, .offsetZ = 24, \
+                          .flags = DIORAMA_PROP_JOINED }
+#define PARASOL_POLE(id) { PROP(id, CANOPY, SLAB, 1, NEIGHBOUR), .artBottom = 8, .depth = 2, .height16 = 52 }
+#define DECK_CHAIR(id, rise) { PROP(id, DECOR, BLOCK, 1, LOWER), .height16 = 3, .rise16 = (rise) }
 static const struct DioramaProp sSlateport[] = {
     STALL_ROOF(0x205),
     STALL_ROOF(0x207),
@@ -179,6 +189,27 @@ static const struct DioramaProp sSlateport[] = {
     ROPE_EW(0x2BA),
     ROPE_NS(0x2BC, 6, 0x2B9),
     ROPE_NS(0x2C4, -6, 0x2B9),
+    DECK_CHAIR(0x2E1, 10),
+    PARASOL_TOP(0x2E2),
+    PARASOL_TOP(0x2E3),
+    PARASOL_TOP(0x2E4),
+    PARASOL_TOP(0x2E5),
+    PARASOL_TOP(0x2E6),
+    PARASOL_TOP(0x2E7),
+    DECK_CHAIR(0x2E9, 0),
+    PARASOL_RIM(0x2EA),
+    PARASOL_RIM(0x2EB),
+    PARASOL_RIM(0x2EC),
+    PARASOL_RIM(0x2ED),
+    PARASOL_RIM(0x2EE),
+    PARASOL_RIM(0x2EF),
+    DECK_CHAIR(0x2F1, 0),
+    PARASOL_POLE(0x2F2),
+    PARASOL_POLE(0x2F3),
+    PARASOL_POLE(0x2F4),
+    PARASOL_POLE(0x2F5),
+    PARASOL_POLE(0x2F6),
+    PARASOL_POLE(0x2F7),
     STALL_FRONT(0x2F8),
     STALL_FRONT(0x2F9),
     STALL_FRONT(0x2FA),
