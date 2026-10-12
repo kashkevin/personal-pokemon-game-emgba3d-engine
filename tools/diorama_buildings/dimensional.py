@@ -1,30 +1,46 @@
 #!/usr/bin/env python3
-"""Real roofs for the buildings read off their drawing (project-owned).
+"""Real roofs, recessed windows and framed doors for the modelled buildings
+(project-owned).
 
 The owner's choice of 2026-10-12 ("option B"): the world should look genuinely
 dimensional - real slopes, ridges, recessed windows, framed doors and trim -
 even where the normal camera then shows a building a little differently from
 its drawing; its colours, its silhouette and its architecture stay Emerald's.
 
-Until then every building auto_buildings.py finds was a `Relief`: its facade
-standing up and the rest of its drawing - the roof, as the GBA's 45 degrees
-see it - laid flat on top. Here a building whose roof is a pitched one gets a
-roof of its own instead: the walls stay the Relief's (the facade is still its
-drawing, pixel for pixel), and a hipped roof with a ridge is laid over the
-cells it stands on, tiled from its own drawn roof the way the 3DS port tiles
-the roofs it models by hand (voxel_building.HipRoof, Strip): the eave the
-drawing shows at the eave, then as many courses of its tiles as the slope
-takes, never stretched, and the drawing's ridge on a ridge.
+Roofs. Until then every building auto_buildings.py finds was a `Relief`: its
+facade standing up and the rest of its drawing - the roof, as the GBA's 45
+degrees see it - laid flat on top. Now its walls stay the Relief's (the facade
+is still its drawing, pixel for pixel) and its roof is one of (build_roof,
+BUILDERS; which building gets which is auto_buildings.ROOFS):
 
-The drawing's roof is read row by row (`analyse`): the courses are the rows
-that repeat, every so many pixels down and across; above them is the ridge
-the artist drew, below them the eave. Because a drawn roof's edges are not
-its tiles (a verge, a gutter's end, a tree leaning over), the slopes are not
-laid from the drawing itself but from a clean swatch of it (`material`): its
-ridge, one course and its eave, as wide as a whole number of tiles, cut from
-the middle of the roof and appended below the drawing on the model's page.
+  pitched   a hipped roof with a ridge over the cells it stands on, tiled from
+            its own drawn roof the way the 3DS port tiles the roofs it models
+            by hand (voxel_building.HipRoof, Strip): the eave the drawing shows
+            at the eave, then as many courses of its tiles as the slope takes,
+            never stretched, and the drawing's ridge on a ridge. The roof is
+            read row by row (`analyse`): the courses are the rows that repeat,
+            every so many pixels down and across; above them is the ridge the
+            artist drew, below them the eave. A drawn roof's edges are not its
+            tiles (a verge, a hip, a tree leaning over), so the slopes are laid
+            from a clean swatch of it (`material`) appended below the drawing.
+  flat      the drawing laid flat as before, with a parapet round it
+            (`Parapet`): still exactly the drawing from 45 degrees.
+  dome, cone, pyramid4, pyramid8
+            a shell over the plan (`Shell`) - a hut's thatch, a tower's roof,
+            the Battle Pyramid - its drawn roof spread over it as the GBA's
+            45 degrees see it, front half and back.
+  tent      a Battle Tent: its dome down to the ground, its entrance standing
+            out in front of it as the Relief's walls.
+  split     two buildings drawn as one, each part its own roof.
 
-Which buildings get which roof is auto_buildings.py's (ROOFS there).
+Facades (`facade_details`, `detail_model`): on every building outdoors - the
+hand-made models too - the windows (window_glow.py's panes grown to their
+frame) and the doors (where the door's own opening animation draws) are set
+back into the wall with reveals, the windows with a sill under them.
+
+Nothing here is judged pixel for pixel: roofs are tagged "~behind" and the
+details' rectangles are left out of the 45-degree proof (gen_voxel_buildings
+verify); the facades round them still are.
 """
 
 import math
