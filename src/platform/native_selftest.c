@@ -464,3 +464,48 @@ int NativeSelfTest_BattleNames(void)
     printf("selftest-battle-names: %d checks, %d failed\n", sNameChecks, sNameFailures);
     return sNameFailures ? 1 : 0;
 }
+
+// ---------------------------------------------------------------------------
+//   pokeemerald-mp --selftest-cry-stop
+//
+// The Pokemon cry functions before any cry has played since the game started
+// (sound.c: gMPlay_PokemonCry stays NULL until the first one). KNOWN_ISSUES N39:
+// as a double battle sends its first two Pokemon out
+// (Task_PlayCryWhenReleasedFromBall) it stops the cry playing before the doubles'
+// cries (StopCryAndClearCrySongs), and with none played yet m4aMPlayStop read
+// through that NULL - natively a segmentation fault as a two-trainer battle began
+// right after a save was continued; the GBA reads its BIOS there and does nothing.
+// Each function must return with no cry playing and no cry player set.
+// ---------------------------------------------------------------------------
+
+#include "sound.h"
+
+extern struct MusicPlayerInfo *gMPlay_PokemonCry;
+
+static int sCryChecks, sCryFailures;
+
+static void ExpectCry(const char *what, bool32 ok)
+{
+    sCryChecks++;
+    if (!ok)
+    {
+        sCryFailures++;
+        printf("FAIL %s\n", what);
+    }
+}
+
+int NativeSelfTest_CryStop(void)
+{
+    gMPlay_PokemonCry = NULL;
+    printf("a double battle's send-out stopping the cry before any cry has played\n");
+    fflush(stdout);
+    StopCryAndClearCrySongs();
+    ExpectCry("StopCryAndClearCrySongs returned", TRUE);
+    StopCry();
+    ExpectCry("StopCry returned", TRUE);
+    ExpectCry("IsCryPlaying: none", !IsCryPlaying());
+    ExpectCry("IsCryPlayingOrClearCrySongs: none", !IsCryPlayingOrClearCrySongs());
+    ExpectCry("still no cry player", gMPlay_PokemonCry == NULL);
+    printf("selftest-cry-stop: %d checks, %d failed\n", sCryChecks, sCryFailures);
+    return sCryFailures ? 1 : 0;
+}

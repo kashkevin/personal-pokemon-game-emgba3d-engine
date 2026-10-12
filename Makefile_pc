@@ -175,7 +175,7 @@ OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS)
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
-.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names
+.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop
 .SUFFIXES:
 .SECONDARY:
 .DELETE_ON_ERROR:
@@ -226,6 +226,13 @@ check-party-order: $(TARGET)
 check-battle-names: $(TARGET)
 	@./$(TARGET) --selftest-battle-names > $(OBJ_DIR)/selftest-battle-names.log 2>&1; status=$$?; \
 	  tail -n 3 $(OBJ_DIR)/selftest-battle-names.log; exit $$status
+
+# The Pokemon cry functions before any cry has played (KNOWN_ISSUES N39: a double
+# battle's send-out right after a save was continued stopped a cry that was not
+# there, natively a segmentation fault). Each must return.
+check-cry-stop: $(TARGET)
+	@./$(TARGET) --selftest-cry-stop > $(OBJ_DIR)/selftest-cry-stop.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-cry-stop.log; exit $$status
 
 # C: preprocess (same flags as the GBA build + PORTABLE), expand INCBIN/charmap
 # strings with preproc, then compile for 32-bit x86.
