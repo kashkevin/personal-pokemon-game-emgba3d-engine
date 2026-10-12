@@ -148,6 +148,9 @@ static const struct DioramaProp sRustboro[] = {
                           .flags = DIORAMA_PROP_JOINED }
 #define PARASOL_POLE(id) { PROP(id, CANOPY, SLAB, 1, NEIGHBOUR), .artBottom = 8, .depth = 2, .height16 = 52 }
 #define DECK_CHAIR(id, rise) { PROP(id, DECOR, BLOCK, 1, LOWER), .height16 = 3, .rise16 = (rise) }
+/* An air mattress lying on the sand, three cells long, a little thicker than
+ * drawn. */
+#define AIR_MATTRESS(id) { PROP(id, DECOR, BLOCK, 1, LOWER), .height16 = 2 }
 static const struct DioramaProp sSlateport[] = {
     STALL_ROOF(0x205),
     STALL_ROOF(0x207),
@@ -189,6 +192,7 @@ static const struct DioramaProp sSlateport[] = {
     ROPE_EW(0x2BA),
     ROPE_NS(0x2BC, 6, 0x2B9),
     ROPE_NS(0x2C4, -6, 0x2B9),
+    AIR_MATTRESS(0x2E0),
     DECK_CHAIR(0x2E1, 10),
     PARASOL_TOP(0x2E2),
     PARASOL_TOP(0x2E3),
@@ -196,6 +200,7 @@ static const struct DioramaProp sSlateport[] = {
     PARASOL_TOP(0x2E5),
     PARASOL_TOP(0x2E6),
     PARASOL_TOP(0x2E7),
+    AIR_MATTRESS(0x2E8),
     DECK_CHAIR(0x2E9, 0),
     PARASOL_RIM(0x2EA),
     PARASOL_RIM(0x2EB),
@@ -203,6 +208,7 @@ static const struct DioramaProp sSlateport[] = {
     PARASOL_RIM(0x2ED),
     PARASOL_RIM(0x2EE),
     PARASOL_RIM(0x2EF),
+    AIR_MATTRESS(0x2F0),
     DECK_CHAIR(0x2F1, 0),
     PARASOL_POLE(0x2F2),
     PARASOL_POLE(0x2F3),
@@ -298,6 +304,11 @@ static const struct DioramaProp sMossdeep[] = {
 #define ASH_BOULDER(id) { PROP(id, ROCK, RELIEF, 1, LOWER), .shadowIndex = 8, .shadowFromRow = 11, \
                           .depth = 12 }
 static const struct DioramaProp sFallarbor[] = {
+    /* Route 113's ash-covered grass: its blades as tall grass's cards, the
+     * mid grey between them (colour 11) left out. Walked through, the game
+     * redraws the cell as plain grass and the cards go with the ash. */
+    { PROP(0x20A, GRASS, CARDS, 0, KEEP), .keyIndex = 0xB, .depth = 1, .height16 = 20,
+      .flags = DIORAMA_PROP_SWAY },
     ASH_BOULDER(0x219),
     ASH_BOULDER(0x21A),
     ASH_BOULDER(0x223),
