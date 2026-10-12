@@ -508,6 +508,40 @@ struct NativeStarters
 };
 bool32 StarterChoose_NativeUiState(struct NativeStarters *out);
 
+/* ---------------------------------------------------------------- evolution (evolution_scene.c) */
+
+enum
+{
+    NATIVE_EVO_LOADING,      /* the screen before fades to black (BeginEvolutionScene) */
+    NATIVE_EVO_INTRO,        /* "What? X is evolving!": the Pokémon as it is */
+    NATIVE_EVO_CHARGING,     /* the music starts, sparkles spiral up and arc down */
+    NATIVE_EVO_CYCLING,      /* the old form and the new one alternate (B held stops it, when allowed) */
+    NATIVE_EVO_FLASH,        /* the new form, white: sparkles circle in, spray, and its colours return */
+    NATIVE_EVO_EVOLVED,      /* the new form: "Congratulations!", then any new move (messages, YES / NO) */
+    NATIVE_EVO_STOPPED,      /* the old form: "Huh? X stopped evolving!" */
+    NATIVE_EVO_ENDING,       /* fading out to what comes next */
+};
+struct NativeEvolution
+{
+    u8 phase;
+    bool8 ready;             /* the engine reads buttons now: a waiting message, YES / NO, stopping */
+    bool8 canStop;           /* B held stops it (not for an evolution stone, say) */
+    bool8 cycleActive;       /* the alternation runs (stopping is possible now) */
+    bool8 showNew;           /* the new form is the one in front (the alternation: the larger one) */
+    bool8 monAnim;           /* the Pokémon in front plays its animation and cry now */
+    bool8 msgValid;          /* window 0 holds this scene's message (not one from before) */
+    bool8 learning;          /* a new move's messages have begun (wants to learn, forget one, learned) */
+    bool8 yesNo;             /* the engine's YES / NO is up */
+    u8 yesNoCursor;          /* 0: YES */
+    u8 white;                /* how white the Pokémon in front is (0..16: the flash, the stop) */
+    bool8 shiny;
+    u8 partyId;
+    u16 preSpecies;
+    u16 postSpecies;
+    u32 personality;
+};
+bool32 Evolution_NativeUiState(struct NativeEvolution *out);
+
 /* ---------------------------------------------------------------- the naming screen (naming_screen.c) */
 
 enum

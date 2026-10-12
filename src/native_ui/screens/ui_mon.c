@@ -156,16 +156,21 @@ void UiMon_Star(int x, int y)
 
 void UiMon_Sparkle(int x, int y, bool big, const UiRGBA *pal3)
 {
+    UiMon_SparkleScaled(x, y, big, pal3, 1);
+}
+
+void UiMon_SparkleScaled(int x, int y, bool big, const UiRGBA *pal3, int scale)
+{
     static const char *const sSmall[] = {"..a..", "..b..", "abcba", "..b..", "..a.."};
     static const char *const sLarge[] = {"...a...", "...b...", "..aba..", "abbcbba", "..aba..", "...b...", "...a..."};
     UiRGBA a = pal3 != NULL ? pal3[0] : UI_HEX(0xA8C8F8), b = pal3 != NULL ? pal3[1] : UI_HEX(0xE0F0FF),
            c = pal3 != NULL ? pal3[2] : UI_HEX(0xFFFFFF);
     struct UiPixPal pal[3] = {{'a', a}, {'b', b}, {'c', c}};
     char name[48];
-    int half = big ? 3 : 2;
+    int half = (big ? 3 : 2) * (scale < 1 ? 1 : scale);
 
     snprintf(name, sizeof(name), "%s%08x%08x%08x", big ? "pkspl" : "pksps", (unsigned)a, (unsigned)b, (unsigned)c);
-    UiW_Pix(name, big ? sLarge : sSmall, big ? 7 : 5, pal, 3, x - half, y - half, false);
+    UiW_PixScaled(name, big ? sLarge : sSmall, big ? 7 : 5, pal, 3, x - half, y - half, scale);
 }
 
 static const char *const sMarks[4][7] = {

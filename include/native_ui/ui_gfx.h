@@ -61,6 +61,9 @@ bool UiGfx_PrepareMonPic(uint16_t species, uint32_t personality, bool shiny, boo
 /* the picture with the lowest painted row's middle at footX, footY; frame 0 or 1 */
 bool UiGfx_MonPic(uint16_t species, uint32_t personality, bool shiny, bool isEgg, int frame, int footX, int footY,
                   const struct UiFilter *filter);
+/* ... enlarged by a whole factor (its pixels kept square), faded by alpha (0..1) */
+bool UiGfx_MonPicEx(uint16_t species, uint32_t personality, bool shiny, bool isEgg, int frame, int footX, int footY,
+                    int scale, double alpha, const struct UiFilter *filter);
 /* the frame of the species' own front animation t frames after it started (0 once it ended) */
 int UiGfx_MonPicFrameAt(uint16_t species, uint32_t personality, bool shiny, bool isEgg, int t);
 bool UiGfx_PrepareItemIcon(uint16_t item);

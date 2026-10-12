@@ -361,6 +361,32 @@ bool UiGfx_MonPic(uint16_t species, uint32_t personality, bool shiny, bool isEgg
     return true;
 }
 
+bool UiGfx_MonPicEx(uint16_t species, uint32_t personality, bool shiny, bool isEgg, int frame, int footX, int footY,
+                    int scale, double alpha, const struct UiFilter *filter)
+{
+    const struct ArtEntry *e = ArtFind(ART_MON_PIC, ((uint32_t)species << 16) ^ personality,
+                                       MonPicKeyB(shiny, isEgg) | ((uint32_t)species << 8));
+    struct ArtCtx c;
+    char key[128];
+    char fkey[48];
+
+    if (e == NULL)
+        return false;
+    if (scale < 1)
+        scale = 1;
+    frame = frame >= 0 && frame < e->frames ? frame : 0;
+    c.e = e;
+    c.y = frame * MON_PIC_HEIGHT;
+    c.h = MON_PIC_HEIGHT;
+    c.filter = filter;
+    UiFilter_Key(fkey, sizeof(fkey), filter);
+    snprintf(key, sizeof(key), "mpic:%u:%08x:%u:%d%s", (unsigned)species, (unsigned)personality,
+             (unsigned)MonPicKeyB(shiny, isEgg), frame, fkey);
+    UiG_BlitPart(UiG_Cached(key, MON_PIC_WIDTH, MON_PIC_HEIGHT, BuildArt, &c), 0, 0, MON_PIC_WIDTH, MON_PIC_HEIGHT,
+                 footX - (MON_PIC_WIDTH / 2) * scale, footY - e->footY * scale, scale, false, alpha);
+    return true;
+}
+
 bool UiGfx_PrepareItemIcon(uint16_t item)
 {
     struct ArtEntry *e;

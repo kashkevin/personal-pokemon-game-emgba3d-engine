@@ -731,8 +731,8 @@ static void BuildPix(struct UiBitmap *bm, const void *ctx)
                 }
 }
 
-int UiW_Pix(const char *name, const char *const *rows, int rowCount, const struct UiPixPal *pal,
-            int palCount, int x, int y, bool flip)
+static int PixDraw(const char *name, const char *const *rows, int rowCount, const struct UiPixPal *pal,
+                   int palCount, int x, int y, int scale, bool flip)
 {
     struct PixBuild b = {rows, rowCount, pal, palCount};
     const struct UiPiece *piece;
@@ -752,8 +752,20 @@ int UiW_Pix(const char *name, const char *const *rows, int rowCount, const struc
         n += snprintf(key + n, sizeof(key) - (size_t)n, "%c%08x", pal[k].letter, pal[k].colour);
     piece = UiG_Cached(key, w, rowCount, BuildPix, &b);
     if (piece != NULL)
-        UiG_BlitPart(piece, 0, 0, piece->w, piece->h, x, y, 1, flip, 1.0);
-    return x + w;
+        UiG_BlitPart(piece, 0, 0, piece->w, piece->h, x, y, scale, flip, 1.0);
+    return x + w * scale;
+}
+
+int UiW_Pix(const char *name, const char *const *rows, int rowCount, const struct UiPixPal *pal,
+            int palCount, int x, int y, bool flip)
+{
+    return PixDraw(name, rows, rowCount, pal, palCount, x, y, 1, flip);
+}
+
+int UiW_PixScaled(const char *name, const char *const *rows, int rowCount, const struct UiPixPal *pal,
+                  int palCount, int x, int y, int scale)
+{
+    return PixDraw(name, rows, rowCount, pal, palCount, x, y, scale < 1 ? 1 : scale, false);
 }
 
 void UiW_Missing(int x, int y, int w, int h)
@@ -767,6 +779,11 @@ void UiW_Missing(int x, int y, int w, int h)
     UiMicro_Draw(x + (w >> 1) - 1, y + (h >> 1) - 2, "P", c);
 }
 void UiW_MessagePage(const uint8_t *text, int printed, int x, int y, int width, int maxLines)
+{
+    UiW_MessagePageEx(text, printed, x, y, width, maxLines, 16);
+}
+
+void UiW_MessagePageEx(const uint8_t *text, int printed, int x, int y, int width, int maxLines, int lineH)
 {
     const uint8_t *starts[8];
     int lengths[8];
@@ -789,7 +806,7 @@ void UiW_MessagePage(const uint8_t *text, int printed, int x, int y, int width, 
         uint8_t line[128];
 
         UiText_CopyN(line, sizeof(line), starts[i], lengths[i]);
-        UiG_Text(x, y + row * 16, line);
+        UiG_Text(x, y + row * lineH, line);
     }
 }
 #endif // ENABLE_NATIVE_UI
