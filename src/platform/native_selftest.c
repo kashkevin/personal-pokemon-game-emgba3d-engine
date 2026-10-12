@@ -535,8 +535,9 @@ int NativeSelfTest_CryStop(void)
 extern const struct SpriteTemplate gShakeMonOrPlatformSpriteTemplate;
 
 static int sShakeChecks, sShakeFailures;
-// 64 KiB and a little more: some of these u16s have addresses with bit 15 set
-static u16 sShakeSpace[0x8000 + 16];
+// u16s across 64 KiB and a little more (allocated by the selftest only): some of them have
+// addresses with bit 15 set
+#define SHAKE_SPACE (0x8000 + 16)
 
 static void ExpectShake(const char *what, bool32 ok)
 {
@@ -587,6 +588,7 @@ int NativeSelfTest_ShakeAnim(void)
                                          "gSpriteCoordOffsetY"};
     u16 *targets[4] = {&gBattle_BG3_X, &gBattle_BG3_Y, (u16 *)&gSpriteCoordOffsetX,
                        (u16 *)&gSpriteCoordOffsetY};
+    u16 *space = calloc(SHAKE_SPACE, sizeof(u16));
     u16 *high = NULL;
     char what[96];
     u32 i;
@@ -605,12 +607,17 @@ int NativeSelfTest_ShakeAnim(void)
         snprintf(what, sizeof(what), "%s back to its value", names[type]);
         ExpectShake(what, *targets[type] == 100);
     }
-    for (i = 0; i < ARRAY_COUNT(sShakeSpace); i++)
-        if (((u32)&sShakeSpace[i] & 0x8000) != 0)
+    for (i = 0; space != NULL && i < SHAKE_SPACE; i++)
+        if (((u32)&space[i] & 0x8000) != 0)
         {
-            high = &sShakeSpace[i];
+            high = &space[i];
             break;
         }
+    if (high == NULL)
+    {
+        printf("FAIL no memory for the test\n");
+        return 1;
+    }
     printf("shaking a value at %p (address bit 15 set)\n", (void *)high);
     fflush(stdout);
     *high = 200;
@@ -618,6 +625,7 @@ int NativeSelfTest_ShakeAnim(void)
     ExpectShake("a value at an address with bit 15 set shook", RunShake(SHAKE_BG_Y, high, high));
     ExpectShake("... back to its value", *high == 200);
     ExpectShake("... and the background's value left alone", gBattle_BG3_Y == 100);
+    free(space);
     ResetSpriteData();
     printf("selftest-shake-anim: %d checks, %d failed\n", sShakeChecks, sShakeFailures);
     return sShakeFailures ? 1 : 0;
