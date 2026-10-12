@@ -1005,7 +1005,8 @@ static void RaiseDunes(const struct DioramaSceneSnapshot *snapshot,
  * (DioramaRules_CellOverWater), with water beside it and no ground walked on
  * (a cliff or another rock may be). It stands in the water like a model's cells
  * (inWater 2), at the water's level: at the land's level it stood a block out of
- * the sea lowered past it (Lilycove's harbour). Added by the battle
+ * the sea lowered past it (Lilycove's harbour). A sandbar, one cell of sand with
+ * water all round, lies at the water's level the same way. Added by the battle
  * environments' work.
  */
 static void MarkRocksInWater(const struct DioramaSceneSnapshot *snapshot,
@@ -1024,6 +1025,30 @@ static void MarkRocksInWater(const struct DioramaSceneSnapshot *snapshot,
                && (cell->flags & DIORAMA_CELL_SOURCE_VALID)
                && resolved[i].shape == DIORAMA_SHAPE_FLAT
                && DioramaRules_CellOverWater(cell, snapshot->mapType);
+    }
+    /* a sandbar: one cell of sand with water on all four sides (Lilycove's harbour, Route
+     * 125), flush with the water as the GBA draws it, not a block of the land's height */
+    for (i = 0; i < count; i++)
+    {
+        int gx = (int)i % DIORAMA_GRID_WIDTH, gy = (int)i / DIORAMA_GRID_WIDTH;
+        int waterSides = 0;
+
+        if (inWater[i] != 0 || snapshot->cells[i].behavior != MB_SAND
+         || !(snapshot->cells[i].flags & DIORAMA_CELL_SOURCE_VALID)
+         || resolved[i].shape != DIORAMA_SHAPE_FLAT)
+            continue;
+        for (int d = 0; d < 4; d++)
+        {
+            int nx = gx + step[d][0], ny = gy + step[d][1], n;
+
+            if (nx < 0 || ny < 0 || nx >= DIORAMA_GRID_WIDTH || ny >= DIORAMA_GRID_HEIGHT)
+                continue;
+            n = ny * DIORAMA_GRID_WIDTH + nx;
+            if ((unsigned)n < count && inWater[n] == 1)
+                waterSides++;
+        }
+        if (waterSides == 4)
+            rock[i] = 1;
     }
     for (i = 0; i < count; i++)
     {
