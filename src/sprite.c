@@ -7,6 +7,13 @@
 #include "text.h"
 #include "battle_anim.h"
 #include "test/test.h"
+#ifdef ENABLE_DIORAMA
+#include "diorama/battle_scene.h"
+#endif
+#ifdef ENABLE_BATTLE_SPRITES
+#include "platform/battle_sprites.h"
+#endif
+#line 10 // gba-line
 
 #define MAX_SPRITE_COPY_REQUESTS 64
 
@@ -383,11 +390,30 @@ void BuildOamBuffer(void)
     oamLoadDisabled = gMain.oamLoadDisabled;
     gMain.oamLoadDisabled = TRUE;
 
+#ifdef ENABLE_DIORAMA
+    // Which entries belong to the map (include/diorama/battle_scene.h): the 3D
+    // view draws those sprites in its scene and leaves them out of a battle
+    // transition it composes over it (latched as OAM is loaded, LoadOam).
+    DioramaSprites_BeginOam();
+    for (i = 0, oamIndex = 0; i < toSort; i++)
+    {
+        struct Sprite *sprite = &gSprites[spritePriorities[i] & 0xFF];
+        u8 first = oamIndex;
+        bool8 full = AddSpriteToOamBuffer(sprite, &oamIndex);
+
+        DioramaSprites_MarkOam(sprite, first, oamIndex);
+        if (full)
+            break;
+    }
+#else
+#line 386 // gba-line
     for (i = 0, oamIndex = 0; i < toSort; i++)
     {
         if (AddSpriteToOamBuffer(&gSprites[spritePriorities[i] & 0xFF], &oamIndex))
             break;
     }
+#endif
+#line 391 // gba-line
 
     for (i = oamIndex; i < sOamDummyIndex; i++)
         gMain.oamBuffer[i] = gDummyOamData;
@@ -591,6 +617,15 @@ void LoadOam(void)
 {
     if (!gMain.oamLoadDisabled)
         CpuCopy32(gMain.oamBuffer, (void *)OAM, sizeof(gMain.oamBuffer));
+#ifdef ENABLE_DIORAMA
+    if (!gMain.oamLoadDisabled)
+        DioramaSprites_LatchOam(); // the map's entries of the OAM just loaded
+#endif
+#ifdef ENABLE_BATTLE_SPRITES
+    if (!gMain.oamLoadDisabled)
+        BattleSprites_LatchOam(); // the battlers' pictures, as the OAM just loaded shows them
+#endif
+#line 594 // gba-line
 }
 
 void ClearSpriteCopyRequests(void)

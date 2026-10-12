@@ -1,6 +1,7 @@
 #include "global.h"
 #ifdef ENABLE_DIORAMA
 #include "diorama/scene_snapshot.h"
+#include "diorama/battle_env_test.h"
 #endif
 #line 2 // gba-line
 #include "overworld.h"
@@ -1685,6 +1686,11 @@ static void DoCB1_Overworld(u16 newKeys, u16 heldKeys)
 
 void CB1_Overworld(void)
 {
+#if defined(ENABLE_DIORAMA) && defined(DIORAMA_BATTLE_ENV_TEST)
+    if (gMain.callback2 == CB2_Overworld)
+        DioramaBattleEnvTest_FieldTick(); // test builds only: tools/battle_env/survey.py
+#endif
+#line 1684 // gba-line
     if (gMain.callback2 == CB2_Overworld)
         DoCB1_Overworld(gMain.newKeys, gMain.heldKeys);
 }

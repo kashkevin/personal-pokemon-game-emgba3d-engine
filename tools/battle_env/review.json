@@ -1,0 +1,1562 @@
+{
+ "MAP_ABANDONED_SHIP_CORRIDORS_1F": {
+  "after": "B",
+  "before": "D",
+  "notes": "The cabins' walls stand down both sides (auto room); the backdrop shows white where the corridor ends behind.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ABANDONED_SHIP_CORRIDORS_B1F": {
+  "after": "B",
+  "before": "D",
+  "notes": "Cabin walls stand both sides.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ABANDONED_SHIP_HIDDEN_FLOOR_CORRIDORS": {
+  "after": "B",
+  "before": "D",
+  "notes": "Cabin walls stand down both sides of the corridor; pale backdrop past the corridor at the right.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ABANDONED_SHIP_ROOMS2_1F": {
+  "after": "B",
+  "before": "C",
+  "notes": "The cabin's beds stand as blocks, the cupboards along the back wall stand; the backdrop shows white past the cabin at the top corners.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ABANDONED_SHIP_ROOMS_1F": {
+  "after": "B",
+  "before": "C",
+  "notes": "The cabin's back wall with its door, a bed and a cupboard stand round the battle (auto room). The first picture here had the stage across the lower cabins' back wall with both battlers inside it (found by the staging check); fixed in f96f41833: the stage search sees walls that are all face. Photographed at 13,5 (--at): two trainers see the test position (N37).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ABANDONED_SHIP_ROOMS_B1F": {
+  "after": "B",
+  "before": "C",
+  "notes": "The cabin's back wall with its door and a crate stand; the backdrop shows white past the cabin at the right.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ALTERING_CAVE": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. Boulders joined to the rock stand as cubes with the boulder drawn on them.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ANCIENT_TOMB": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. (Registeel.)",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_AQUA_HIDEOUT_1F": {
+  "after": "B",
+  "before": "D",
+  "notes": "The hideout's walls, railings and machines stand (auto room).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_AQUA_HIDEOUT_B1F": {
+  "after": "B",
+  "before": "D",
+  "notes": "Walls and machines stand; the warp pads flat.",
+  "props": "B",
+  "props_notes": "The same picture (rooms and caves are unchanged on this branch).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_AQUA_HIDEOUT_B2F": {
+  "after": "B",
+  "before": "D",
+  "notes": "Machines and walls stand.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ARTISAN_CAVE_1F": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ARTISAN_CAVE_B1F": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_COLOSSEUM_2P": {
+  "after": "B",
+  "before": "C",
+  "notes": "The back wall with the scoreboard and the side walls stand (auto room); the arena floor flat as drawn. Link battles.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_COLOSSEUM_4P": {
+  "after": "B",
+  "before": "C",
+  "notes": "As the 2-player colosseum.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_FRONTIER_BATTLE_ARENA_BATTLE_ROOM": {
+  "after": "B",
+  "before": "C",
+  "notes": "The hall's beams and back wall stand (auto room); the battle stands at the mat's west side and the GBA backdrop shows as streaks past the room's edge at the left (E7).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_FRONTIER_BATTLE_DOME_BATTLE_ROOM": {
+  "after": "B",
+  "before": "C",
+  "notes": "The hall's back wall with the BATTLE FRONTIER banner stands (modelled by hand), the stands' edge at the left; the court flat as drawn.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_FRONTIER_BATTLE_DOME_PRE_BATTLE_ROOM": {
+  "after": "n/a",
+  "before": null,
+  "notes": "The Battle Dome's waiting room: its script starts the Dome's battles, but they are fought in the Dome's battle room (surveyed, B). The inventory listed it from the script. As a TEST run the room's own script never let the field start a battle (timeout).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_FRONTIER_BATTLE_FACTORY_BATTLE_ROOM": {
+  "after": "B",
+  "before": "C",
+  "notes": "The hall's back wall with its doors and the corner pillars stand (modelled by hand); the floor flat as drawn.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_FRONTIER_BATTLE_FACTORY_PRE_BATTLE_ROOM": {
+  "after": "n/a",
+  "before": null,
+  "notes": "The Battle Factory's rental room: the battles are fought in the Factory's battle room (surveyed, B). The inventory listed it from its script.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_FRONTIER_BATTLE_PALACE_BATTLE_ROOM": {
+  "after": "B",
+  "before": "C",
+  "notes": "The hall's back wall and its pillars stand (auto room); the arena's carpet is the floor it is. The first r2 picture had the carpet stood up as a block behind the battlers (the arena is impassable, so it was read as furniture): fixed in cd36c10fd (AUTO_DROP).",
+  "props": "B",
+  "props_notes": "The same picture (rooms and caves are unchanged on this branch).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_FINAL": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume in the Pike's rooms (with no challenge running it comes back in the Pike's lobby, map 26.34; the earlier picture under this name was the lobby, found by the wrong-map check). The Pike Queen's battle place.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_NORMAL": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: outside a challenge the Battle Pike's rooms do not let the field start a battle (their scripts take over; the TEST run timed out). The Pike's battles: a trainer or wild Pokemon in one of its rooms.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS": {
+  "after": "B",
+  "before": "C",
+  "notes": "The battle at the room's back: the red stage and its curtains stand behind, the gold pedestals at the sides (auto room).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_FRONTIER_BATTLE_PYRAMID_FLOOR": {
+  "after": "C",
+  "before": null,
+  "notes": "As photographed (the floor's own 8x8 cells; in play it is put together from the squares at run time): the maze walls low, the floor flat, the backdrop past the floor at the top right.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_FRONTIER_BATTLE_PYRAMID_TOP": {
+  "after": "C",
+  "before": null,
+  "notes": "The pyramid's top: brick floor flat, the sunset sky behind (the GBA backdrop). Fitting, but nothing stands.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_FRONTIER_BATTLE_TOWER_BATTLE_ROOM": {
+  "after": "B",
+  "before": "C",
+  "notes": "The back wall with its doors and the corner lamps stand right behind the battle (auto room); the court flat as drawn.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_FRONTIER_BATTLE_TOWER_LOBBY": {
+  "after": "B",
+  "before": "C",
+  "notes": "The counters and the machines along the back stand (auto room). (A lobby: the Tower's battles are fought in its battle rooms, surveyed; listed from its script. Photographed with a test battle all the same.)",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_FRONTIER_BATTLE_TOWER_MULTI_BATTLE_ROOM": {
+  "after": "B",
+  "before": "C",
+  "notes": "As the Battle Tower's battle room.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_FRONTIER_OUTSIDE_EAST": {
+  "after": "C",
+  "before": null,
+  "notes": "The building's wall stands behind; the paving flat; pale backdrop at the top left (13%). Unchanged by this work (outdoor: the overworld's rules and trees).",
+  "props": "C",
+  "props_notes": "No object in view (the same picture).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_PYRAMID_SQUARE01": {
+  "after": "n/a",
+  "before": null,
+  "notes": "A piece of the Battle Pyramid's floor: the floor is put together from 16 of these at run time, so no battle is fought on this map as it stands. Photographed alone it shows the floor's tiles flat with low walls.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_PYRAMID_SQUARE02": {
+  "after": "n/a",
+  "before": null,
+  "notes": "A piece of the Battle Pyramid's floor: the floor is put together from 16 of these at run time, so no battle is fought on this map as it stands. Photographed alone it shows the floor's tiles flat with low walls.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_PYRAMID_SQUARE03": {
+  "after": "n/a",
+  "before": null,
+  "notes": "A piece of the Battle Pyramid's floor: the floor is put together from 16 of these at run time, so no battle is fought on this map as it stands. Photographed alone it shows the floor's tiles flat with low walls.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_PYRAMID_SQUARE04": {
+  "after": "n/a",
+  "before": null,
+  "notes": "A piece of the Battle Pyramid's floor: the floor is put together from 16 of these at run time, so no battle is fought on this map as it stands. Photographed alone it shows the floor's tiles flat with low walls.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_PYRAMID_SQUARE05": {
+  "after": "n/a",
+  "before": null,
+  "notes": "A piece of the Battle Pyramid's floor: the floor is put together from 16 of these at run time, so no battle is fought on this map as it stands. Photographed alone it shows the floor's tiles flat with low walls.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_PYRAMID_SQUARE06": {
+  "after": "n/a",
+  "before": null,
+  "notes": "A piece of the Battle Pyramid's floor: the floor is put together from 16 of these at run time, so no battle is fought on this map as it stands. Photographed alone it shows the floor's tiles flat with low walls.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_PYRAMID_SQUARE07": {
+  "after": "n/a",
+  "before": null,
+  "notes": "A piece of the Battle Pyramid's floor: the floor is put together from 16 of these at run time, so no battle is fought on this map as it stands. Photographed alone it shows the floor's tiles flat with low walls.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_PYRAMID_SQUARE08": {
+  "after": "n/a",
+  "before": null,
+  "notes": "A piece of the Battle Pyramid's floor: the floor is put together from 16 of these at run time, so no battle is fought on this map as it stands. Photographed alone it shows the floor's tiles flat with low walls.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_PYRAMID_SQUARE09": {
+  "after": "n/a",
+  "before": null,
+  "notes": "A piece of the Battle Pyramid's floor: the floor is put together from 16 of these at run time, so no battle is fought on this map as it stands. Photographed alone it shows the floor's tiles flat with low walls.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_PYRAMID_SQUARE10": {
+  "after": "n/a",
+  "before": null,
+  "notes": "A piece of the Battle Pyramid's floor: the floor is put together from 16 of these at run time, so no battle is fought on this map as it stands. Photographed alone it shows the floor's tiles flat with low walls.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_PYRAMID_SQUARE11": {
+  "after": "n/a",
+  "before": null,
+  "notes": "A piece of the Battle Pyramid's floor: the floor is put together from 16 of these at run time, so no battle is fought on this map as it stands. Photographed alone it shows the floor's tiles flat with low walls.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_PYRAMID_SQUARE12": {
+  "after": "n/a",
+  "before": null,
+  "notes": "A piece of the Battle Pyramid's floor: the floor is put together from 16 of these at run time, so no battle is fought on this map as it stands. Photographed alone it shows the floor's tiles flat with low walls.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_PYRAMID_SQUARE13": {
+  "after": "n/a",
+  "before": null,
+  "notes": "A piece of the Battle Pyramid's floor: the floor is put together from 16 of these at run time, so no battle is fought on this map as it stands. Photographed alone it shows the floor's tiles flat with low walls.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_PYRAMID_SQUARE14": {
+  "after": "n/a",
+  "before": null,
+  "notes": "A piece of the Battle Pyramid's floor: the floor is put together from 16 of these at run time, so no battle is fought on this map as it stands. Photographed alone it shows the floor's tiles flat with low walls.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_PYRAMID_SQUARE15": {
+  "after": "n/a",
+  "before": null,
+  "notes": "A piece of the Battle Pyramid's floor: the floor is put together from 16 of these at run time, so no battle is fought on this map as it stands. Photographed alone it shows the floor's tiles flat with low walls.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BATTLE_PYRAMID_SQUARE16": {
+  "after": "n/a",
+  "before": null,
+  "notes": "A piece of the Battle Pyramid's floor: the floor is put together from 16 of these at run time, so no battle is fought on this map as it stands. Photographed alone it shows the floor's tiles flat with low walls.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_BIRTH_ISLAND_EXTERIOR": {
+  "after": "C",
+  "before": null,
+  "notes": "The island's top: grass flat, the triangle stone flat, its cliffs and the sea round it. Deoxys' battle place. Unchanged by this work (outdoor: the overworld's rules).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_CAVE_OF_ORIGIN_1F": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_CAVE_OF_ORIGIN_ENTRANCE": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. The dark doorway behind.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_CAVE_OF_ORIGIN_UNUSED_RUBY_SAPPHIRE_MAP1": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. (Unused map, not reachable in play.)",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_CAVE_OF_ORIGIN_UNUSED_RUBY_SAPPHIRE_MAP2": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. (Unused map.)",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_CAVE_OF_ORIGIN_UNUSED_RUBY_SAPPHIRE_MAP3": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. (Unused map.)",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_DESERT_RUINS": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. Before: the rock lay flat. Regirock's chamber.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_DESERT_UNDERPASS": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_DEWFORD_TOWN": {
+  "after": "C",
+  "before": "C",
+  "notes": "Surfing beside the pier: the pier deck and the beach flat, the cliff and its trees behind stand. The player's Pokemon is drawn over the pier's edge in front of it (the pier a tile above the water). Unchanged by this work (outdoor).",
+  "props": "B",
+  "props_notes": "The town's houses stand now (the overworld's new buildings) beside the pier; the beach flat.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_DEWFORD_TOWN_GYM": {
+  "after": "B",
+  "before": "B",
+  "notes": "Library model (walls stand); unchanged apart from the arena light.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_EVER_GRANDE_CITY": {
+  "after": "C",
+  "before": "C",
+  "notes": "A pool below the cliffs; backdrop where the map ends at the left (26% of the band). Unchanged by this work (outdoor, by day)",
+  "props": "C",
+  "props_notes": "The pool below the cliffs; no detail object in view.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_EVER_GRANDE_CITY_CHAMPIONS_ROOM": {
+  "after": "A",
+  "before": "D",
+  "notes": "Glass wall with chamfered corners, the steps up to the Hall of Fame door, side walls; teal spotlight.",
+  "props": "A",
+  "props_notes": "The same picture (rooms and caves are unchanged on this branch).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_EVER_GRANDE_CITY_DRAKES_ROOM": {
+  "after": "A",
+  "before": "D",
+  "notes": "As Sidney's room in Drake's colours; ember spotlight.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_EVER_GRANDE_CITY_GLACIAS_ROOM": {
+  "after": "A",
+  "before": "D",
+  "notes": "As Sidney's room in Glacia's colours; deep-blue spotlight.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_EVER_GRANDE_CITY_PHOEBES_ROOM": {
+  "after": "A",
+  "before": "D",
+  "notes": "As Sidney's room in Phoebe's colours; violet spotlight.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_EVER_GRANDE_CITY_SIDNEYS_ROOM": {
+  "after": "A",
+  "before": "D",
+  "notes": "Back wall with its lamps and door stands; the tiered-seat cases stand at the sides; side walls close the room; crimson-tinted spotlight. Before: the room lay flat behind the battle.",
+  "props": "A",
+  "props_notes": "The same picture: rooms are unchanged on this branch.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_FALLARBOR_TOWN_BATTLE_TENT_BATTLE_ROOM": {
+  "after": "B",
+  "before": "C",
+  "notes": "The back wall with the counter stands (auto room); pale backdrop at the top corners.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_FARAWAY_ISLAND_INTERIOR": {
+  "after": "C",
+  "before": null,
+  "notes": "The island's trees and grass: the trees stand (rules), the grass flat; the pond. Mew's battle place. Unchanged by this work (outdoor: the overworld's rules and trees).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_FIERY_PATH": {
+  "after": "B",
+  "before": null,
+  "notes": "The tunnel's rock stands as terraces (the Lavaridge tileset's relief); the floor flat; cave gloom. Unchanged by this work (outdoor: the overworld's rules).",
+  "props": "B",
+  "props_notes": "The same picture (rooms and caves are unchanged on this branch).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_FORTREE_CITY_GYM": {
+  "after": "B",
+  "before": "D",
+  "notes": "Hedges and pillars stand (auto room); turnstiles flat; arena light.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_GRANITE_CAVE_1F": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. Before: the rock lay flat.",
+  "props": "B",
+  "props_notes": "A boulder by the wall stands as an object now; the rest the same.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_GRANITE_CAVE_B1F": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. Before: the rock lay flat.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_GRANITE_CAVE_B2F": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. Before: the rock lay flat. The stage is in a wide part: fewer walls in view.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_GRANITE_CAVE_STEVENS_ROOM": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. Before: the rock lay flat.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ISLAND_CAVE": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. (Regice.)",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_JAGGED_PASS": {
+  "after": "B",
+  "before": null,
+  "notes": "The stepped mountain stands all round, the foe on a raised ledge; the grass flat. Unchanged by this work (outdoor: the overworld's rules).",
+  "props": "B",
+  "props_notes": "The same picture: the stepped mountain; the grass patch is not one of the objects.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_LAVARIDGE_TOWN_GYM_1F": {
+  "after": "B",
+  "before": "D",
+  "notes": "The sand ridges stand as low walls (read as runs: no slab); hot-spring pits flat; arena light.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_LAVARIDGE_TOWN_GYM_B1F": {
+  "after": "B",
+  "before": "D",
+  "notes": "The back wall and the long sand ridges stand (auto room, proved with 13 of its pieces left out); the hot-spring pits flat. Was the last Gym floor drawn flat.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_LILYCOVE_CITY": {
+  "after": "C",
+  "before": "C",
+  "notes": "Sea and rocks, a roof behind. Unchanged by this work (outdoor, by day)",
+  "props": "C",
+  "props_notes": "No detail objects in view (open sea); the same picture. Night: the same as without the objects.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_LITTLEROOT_TOWN": {
+  "after": "B",
+  "before": "B",
+  "notes": "Houses and signs stand; flowers flat. Unchanged by this work (outdoor, by day)",
+  "props": "B",
+  "props_notes": "The signs and the flower bed stand.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MAGMA_HIDEOUT_1F": {
+  "after": "B",
+  "before": null,
+  "notes": "The hideout's rock stands as stepped terraces behind the stage; the floor flat. The Lavaridge tileset's relief is the overworld's rules (not pinned here, E3); unchanged by this work. Photographed with a 450 s timeout (slow on software OpenGL, E8).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MAGMA_HIDEOUT_2F_1R": {
+  "after": "B",
+  "before": null,
+  "notes": "The drill machine stands beside the stage, the terraced rock behind. The Lavaridge tileset's relief is the overworld's rules (not pinned here, E3); unchanged by this work. Photographed with a 450 s timeout (slow on software OpenGL, E8).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MAGMA_HIDEOUT_2F_2R": {
+  "after": "B",
+  "before": null,
+  "notes": "The lava flat and bright, the rock terraces and a machine stand behind. The Lavaridge tileset's relief is the overworld's rules (not pinned here, E3); unchanged by this work. Photographed with a 450 s timeout (slow on software OpenGL, E8).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MAGMA_HIDEOUT_2F_3R": {
+  "after": "B",
+  "before": null,
+  "notes": "Terraces behind, the conveyor's steps; floor flat. The Lavaridge tileset's relief is the overworld's rules (not pinned here, E3); unchanged by this work. Photographed with a 450 s timeout (slow on software OpenGL, E8).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MAGMA_HIDEOUT_3F_1R": {
+  "after": "B",
+  "before": null,
+  "notes": "Stepped rock cones and terraces stand round the lava (flat). The Lavaridge tileset's relief is the overworld's rules (not pinned here, E3); unchanged by this work. Photographed with a 450 s timeout (slow on software OpenGL, E8).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MAGMA_HIDEOUT_3F_2R": {
+  "after": "B",
+  "before": null,
+  "notes": "The machine platform stands low beside the stage, the rock terraces behind. The Lavaridge tileset's relief is the overworld's rules (not pinned here, E3); unchanged by this work. Photographed with a 450 s timeout (slow on software OpenGL, E8).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MAGMA_HIDEOUT_3F_3R": {
+  "after": "B",
+  "before": null,
+  "notes": "Lava flat, stepped cones round it; a red pillar at the left edge. The Lavaridge tileset's relief is the overworld's rules (not pinned here, E3); unchanged by this work. Photographed with a 450 s timeout (slow on software OpenGL, E8).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MAGMA_HIDEOUT_4F": {
+  "after": "B",
+  "before": null,
+  "notes": "The machine platform stands behind the foe, stepped cones round the room. The Lavaridge tileset's relief is the overworld's rules (not pinned here, E3); unchanged by this work. Photographed with a 450 s timeout (slow on software OpenGL, E8).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MARINE_CAVE_END": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. (Kyogre.) Water behind.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MAUVILLE_CITY": {
+  "after": "B",
+  "before": "B",
+  "notes": "Buildings stand around; paths and flowers flat. Unchanged by this work (outdoor, by day)",
+  "props": "B",
+  "props_notes": "The flower fences and the sign stand round the street; paths flat. Night: the flower fences and the sign stand in the night tint.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MAUVILLE_CITY_GYM": {
+  "after": "B",
+  "before": "C",
+  "notes": "Walls and the white barrier poles stand; the electric barriers lie on the floor as drawn; arena light.",
+  "props": "B",
+  "props_notes": "The same picture (rooms and caves are unchanged on this branch).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_METEOR_FALLS_1F_1R": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. The pool behind with a ledge standing.",
+  "props": "B",
+  "props_notes": "The same picture (rooms and caves are unchanged on this branch).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_METEOR_FALLS_1F_2R": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. Water at the left, rock walls behind and at the right.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_METEOR_FALLS_B1F_1R": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. Walls both sides, stairs behind.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_METEOR_FALLS_B1F_2R": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. A river channel between two rock walls.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_METEOR_FALLS_STEVENS_CAVE": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. Loose rocks beside the walls stand as cubes.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MIRAGE_TOWER_1F": {
+  "after": "B",
+  "before": "C",
+  "notes": "The sand walls stand (auto room); past the room's edge at the right the GBA backdrop shows as dark streaks (E7).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MIRAGE_TOWER_2F": {
+  "after": "B",
+  "before": "C",
+  "notes": "The sand walls stand (auto room), the floor grate stands as a block.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MIRAGE_TOWER_3F": {
+  "after": "B",
+  "before": "C",
+  "notes": "The sand walls stand; past the room at the right the backdrop is drawn as streaks (the GBA art carried past the room's edge).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MIRAGE_TOWER_4F": {
+  "after": "B",
+  "before": "C",
+  "notes": "Walls and the stairs' wall stand; the fossil platform flat; pale backdrop past the top right.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MOSSDEEP_CITY": {
+  "after": "C",
+  "before": "C",
+  "notes": "Sea; white gaps where the map ends (16% of the band). Unchanged by this work (outdoor, by day)",
+  "props": "C",
+  "props_notes": "No detail objects in view (open sea); the same picture.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MOSSDEEP_CITY_GYM": {
+  "after": "B",
+  "before": "D",
+  "notes": "The red maze walls and machines stand; a pale backdrop past the room at the left (15% of the band).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MOSSDEEP_CITY_SPACE_CENTER_1F": {
+  "after": "B",
+  "before": "D",
+  "notes": "The back wall with its windows, the computers and machines stand; the battle in front of them.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MOSSDEEP_CITY_SPACE_CENTER_2F": {
+  "after": "B",
+  "before": "D",
+  "notes": "The back wall with its windows and the tables stand (the stage now sees the wall: no more streaky backdrop in view).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MT_CHIMNEY": {
+  "after": "C",
+  "before": null,
+  "notes": "The lava lake flat (bright red), the stepped rock cones at its edges stand (the Lavaridge tileset's relief). Unchanged by this work (outdoor: the overworld's rules). Photographed with a 450 s timeout (slow on software OpenGL, E8).",
+  "props": "C",
+  "props_notes": "The same picture: the lava lake and the stepped cones (no detail object in view).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MT_PYRE_1F": {
+  "after": "B",
+  "before": "D",
+  "notes": "The graves stand in rows (read on 5F, reused here), the back wall stands; gloom-free indoor light.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MT_PYRE_2F": {
+  "after": "B",
+  "before": "D",
+  "notes": "Graves stand in rows (read on 5F, reused here); the back wall with its doorways; pale backdrop past the room at the top right. (The baseline pictures of 2F, 3F and 6F show the old TEST driver's Lv0 slot, N33: their trainers' parties were emptied; the driver locks the field since 4f308a4c7.)",
+  "props": "B",
+  "props_notes": "The same picture (rooms and caves are unchanged on this branch).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MT_PYRE_3F": {
+  "after": "B",
+  "before": "D",
+  "notes": "Graves and the back walls stand. (The baseline pictures of 2F, 3F and 6F show the old TEST driver's Lv0 slot, N33: their trainers' parties were emptied; the driver locks the field since 4f308a4c7.)",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MT_PYRE_4F": {
+  "after": "B",
+  "before": "D",
+  "notes": "Graves stand in rows; the walls and the stairs behind.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MT_PYRE_5F": {
+  "after": "B",
+  "before": "D",
+  "notes": "A narrow aisle between tall walls and graves; a black opening in the back wall.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MT_PYRE_6F": {
+  "after": "B",
+  "before": "D",
+  "notes": "Graves, the stairs and walls stand; a hole in the floor at the left (black, as drawn). (The baseline pictures of 2F, 3F and 6F show the old TEST driver's Lv0 slot, N33: their trainers' parties were emptied; the driver locks the field since 4f308a4c7.)",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MT_PYRE_EXTERIOR": {
+  "after": "C",
+  "before": null,
+  "notes": "Fog; graves and cliffs outdoors (the overworld's rules); not changed by this work.",
+  "props": "C",
+  "props_notes": "No object in view; the graves flat (the same picture).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_MT_PYRE_SUMMIT": {
+  "after": "C",
+  "before": null,
+  "notes": "Fog; the summit's cliffs; flat grass. Not changed by this work.",
+  "props": "B",
+  "props_notes": "Tall grass stands; the cliffs behind; the graves flat.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_NAVEL_ROCK_BOTTOM": {
+  "after": "B",
+  "before": null,
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. (Lugia.)",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_NAVEL_ROCK_TOP": {
+  "after": "B",
+  "before": null,
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. (Ho-Oh.)",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_NEW_MAUVILLE_ENTRANCE": {
+  "after": "B",
+  "before": "B",
+  "notes": "Rock walls at the sides and the door machine behind stood before (rules); the auto room adds little here.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_NEW_MAUVILLE_INSIDE": {
+  "after": "B",
+  "before": "D",
+  "notes": "Machines, generators and walls stand (auto room); black past the room at the top right.",
+  "props": "B",
+  "props_notes": "The same picture (rooms and caves are unchanged on this branch).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_PACIFIDLOG_TOWN": {
+  "after": "C",
+  "before": "C",
+  "notes": "The Pokemon Center stands; the floating decks and bridges flat. Unchanged by this work (outdoor, by day)",
+  "props": "B",
+  "props_notes": "The second house stands (a new building); the floating decks flat.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_PETALBURG_CITY": {
+  "after": "B",
+  "before": "B",
+  "notes": "The pond with the houses and trees standing behind. Unchanged by this work (outdoor, by day)",
+  "props": "B",
+  "props_notes": "The same view: the pond, the houses and trees behind; no detail object in view. Night: the night tint; no lamp in view.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_PETALBURG_CITY_GYM": {
+  "after": "B",
+  "before": "B",
+  "notes": "Library model: the back wall with the Gym's sign stands right behind the battle; the mats flat; arena light.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_PETALBURG_WOODS": {
+  "after": "C",
+  "before": "C",
+  "notes": "Trees stand all round; tall grass flat. Unchanged by this work.",
+  "props": "B",
+  "props_notes": "Tall grass stands round both battlers between the trees.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE101": {
+  "after": "C",
+  "before": "C",
+  "notes": "Trees stand in 3D; tall grass, flowers and the path are flat (props: the overworld session). Unchanged by this work (outdoor, by day)",
+  "props": "B",
+  "props_notes": "The tall grass stands round both battlers, the trees behind. Night: the tall grass stands in the night tint.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE102": {
+  "after": "C",
+  "before": "C",
+  "notes": "Trees 3D; tall grass, flowers, pond edge flat. Unchanged by this work (outdoor, by day)",
+  "props": "B",
+  "props_notes": "Tall grass and flowers stand; the pond behind.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE103": {
+  "after": "C",
+  "before": "C",
+  "notes": "Trees and a sign stand; grass and fences flat. Unchanged by this work (outdoor, by day)",
+  "props": "B",
+  "props_notes": "Tall grass and the sign stand.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE104": {
+  "after": "C",
+  "before": "C",
+  "notes": "The flower shop and trees stand; grass and ledges flat. Unchanged by this work (outdoor, by day)",
+  "props": "B",
+  "props_notes": "Tall grass stands; the flower shop behind.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE105": {
+  "after": "C",
+  "before": "C",
+  "notes": "Open sea (flat by nature, animated) with rocks standing as domes. Unchanged by this work (outdoor, by day)",
+  "props": "C",
+  "props_notes": "No detail objects in view (open sea); the same picture.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE106": {
+  "after": "C",
+  "before": "C",
+  "notes": "Sea, rocks standing, the shore. Unchanged by this work (outdoor, by day)",
+  "props": "C",
+  "props_notes": "No detail objects in view (open sea); the same picture.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE107": {
+  "after": "C",
+  "before": "C",
+  "notes": "On the water, the islands' rock domes behind. The first r2 picture had both battlers a tile over the sea (the stage at an island's height between them): fixed in 4002eac1f, both on the water now. White gaps round the sea rocks (27% of the band, E1: the overworld's props).",
+  "props": "C",
+  "props_notes": "No detail objects in view (open sea); the same picture.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE108": {
+  "after": "C",
+  "before": "C",
+  "notes": "Sea and rocks. Unchanged by this work (outdoor, by day)",
+  "props": "C",
+  "props_notes": "No detail objects in view (open sea); the same picture.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE109": {
+  "after": "B",
+  "before": "B",
+  "notes": "Surfing off the beach: the parasols stand on their poles with their shadows, the deck chairs and the sign stand (the overworld's models and rules); the same before and after. Unchanged by this work (outdoor).",
+  "props": "B",
+  "props_notes": "The same picture.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE109_SEASHORE_HOUSE": {
+  "after": "B",
+  "before": "C",
+  "notes": "The tables and the counters stand (auto room).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE110": {
+  "after": "C",
+  "before": "C",
+  "notes": "Grass, a sign, the sea behind; mostly flat. Unchanged by this work (outdoor, by day)",
+  "props": "B",
+  "props_notes": "Tall grass and the sign stand; the sea behind.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE110_TRICK_HOUSE_PUZZLE1": {
+  "after": "B",
+  "before": "C",
+  "notes": "The maze walls stand (auto room); the walls the proof left out lie flat among them.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE110_TRICK_HOUSE_PUZZLE2": {
+  "after": "B",
+  "before": "C",
+  "notes": "The maze walls stand.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE110_TRICK_HOUSE_PUZZLE3": {
+  "after": "B",
+  "before": "C",
+  "notes": "The maze walls and the doors' frames stand.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE110_TRICK_HOUSE_PUZZLE4": {
+  "after": "B",
+  "before": "C",
+  "notes": "The maze walls stand; a dark doorway behind.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE110_TRICK_HOUSE_PUZZLE6": {
+  "after": "B",
+  "before": "C",
+  "notes": "The maze walls stand; the side wall at the right is dark (the room's edge).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE110_TRICK_HOUSE_PUZZLE7": {
+  "after": "B",
+  "before": "C",
+  "notes": "The maze walls stand (auto room); pale backdrop past the room at the right. Photographed at 11,14 (--at): two trainers see the test position (N37).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE110_TRICK_HOUSE_PUZZLE8": {
+  "after": "C",
+  "before": "C",
+  "notes": "Not modelled (the room does not pass the proof): the floor and its rocks drawn flat, as before.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE111": {
+  "after": "D",
+  "before": "D",
+  "notes": "Desert sand; nothing raised in view. Unchanged by this work (outdoor, by day)",
+  "props": "D",
+  "props_notes": "Desert sand: nothing in view stands (the same picture).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE112": {
+  "after": "C",
+  "before": "C",
+  "notes": "Mountain cliffs stepped in 3D, trees, a rock; grass flat. Unchanged by this work (outdoor, by day)",
+  "props": "B",
+  "props_notes": "Tall grass stands; the stepped cliff, trees and a rock behind.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE113": {
+  "after": "C",
+  "before": "C",
+  "notes": "Ash grass flat; stepped cliffs behind. Unchanged by this work (outdoor, by day)",
+  "props": "C",
+  "props_notes": "The ash grass is not among the objects: flat as before.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE114": {
+  "after": "B",
+  "before": "B",
+  "notes": "House and the stepped mountain stand in 3D; grass flat. Unchanged by this work (outdoor, by day)",
+  "props": "B",
+  "props_notes": "Tall grass stands by the house.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE115": {
+  "after": "C",
+  "before": "C",
+  "notes": "Trees all round; tall grass flat. Unchanged by this work (outdoor, by day)",
+  "props": "B",
+  "props_notes": "Tall grass stands among the trees.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE116": {
+  "after": "C",
+  "before": "C",
+  "notes": "Trees and ledges; a pale backdrop past the map edge (top left, 23% of the band); grass flat. Unchanged by this work (outdoor, by day)",
+  "props": "B",
+  "props_notes": "Tall grass stands; ledges flat.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE117": {
+  "after": "D",
+  "before": "D",
+  "notes": "The stage lands on open sand and grass: nothing raised in view (flowers, fence, sign flat). Unchanged by this work (outdoor, by day)",
+  "props": "C",
+  "props_notes": "Tall grass stands in front; the sand beyond flat.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE118": {
+  "after": "C",
+  "before": "C",
+  "notes": "Grass; the mountain slope behind; a pale band past it. Unchanged by this work (outdoor, by day)",
+  "props": "B",
+  "props_notes": "Tall grass stands; the slope behind.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE119": {
+  "after": "C",
+  "before": null,
+  "notes": "On the river (its long grass is 2D in the field, E2): water, a sandbank, a white band where the map's view ends at the top (23% of the band). Unchanged by this work (outdoor: the overworld's rules).",
+  "props": "C",
+  "props_notes": "On the river: the same picture (no object in view).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE119_WEATHER_INSTITUTE_1F": {
+  "after": "B",
+  "before": "C",
+  "notes": "The lab's machines and the partition stand (auto room); plants at the front; streaks past the room's edge at the top right (E7).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE119_WEATHER_INSTITUTE_2F": {
+  "after": "B",
+  "before": "C",
+  "notes": "The machines and the yellow tables stand (auto room); past the room's edge at the right the GBA backdrop shows as streaks (E7).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE120": {
+  "after": "B",
+  "before": null,
+  "notes": "The pond with the wooden bridge standing across it and trees behind; pale backdrop at the top left. Unchanged by this work (outdoor: the overworld's rules).",
+  "props": "B",
+  "props_notes": "The pond and bridge: the same picture.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE121": {
+  "after": "C",
+  "before": "C",
+  "notes": "Trees far behind; the fence and grass flat; mostly flat in view. Unchanged by this work (outdoor, by day)",
+  "props": "B",
+  "props_notes": "Tall grass and the blue fence stand; the stage moved off the fence (the stage search sees standing objects), trees behind.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE122": {
+  "after": "C",
+  "before": "C",
+  "notes": "Sea and the foot of Mt. Pyre; mostly flat. Unchanged by this work (outdoor, by day)",
+  "props": "C",
+  "props_notes": "No detail objects in view (open sea); the same picture.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE123": {
+  "after": "C",
+  "before": "C",
+  "notes": "Trees and a fence; grass flat. Unchanged by this work (outdoor, by day)",
+  "props": "B",
+  "props_notes": "Tall grass stands among the trees.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE124": {
+  "after": "C",
+  "before": "C",
+  "notes": "Sea and rocks; white gaps far behind (13% of the band). Unchanged by this work (outdoor, by day)",
+  "props": "C",
+  "props_notes": "No detail objects in view (open sea); the same picture.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE125": {
+  "after": "C",
+  "before": "C",
+  "notes": "Sea and a few rocks. Unchanged by this work (outdoor, by day)",
+  "props": "C",
+  "props_notes": "No detail objects in view (open sea); the same picture.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE126": {
+  "after": "C",
+  "before": "C",
+  "notes": "Sea; white gaps far behind (13%). Unchanged by this work (outdoor, by day)",
+  "props": "C",
+  "props_notes": "No detail objects in view (open sea); the same picture.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE127": {
+  "after": "C",
+  "before": "C",
+  "notes": "Sea; a white band where the map ends (20% of the band). Unchanged by this work (outdoor, by day)",
+  "props": "C",
+  "props_notes": "No detail objects in view (open sea); the same picture.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE128": {
+  "after": "C",
+  "before": "C",
+  "notes": "Open sea to the horizon (flat by nature, animated); pale gaps at the top right. Unchanged by this work (outdoor, by day)",
+  "props": "C",
+  "props_notes": "No detail objects in view (open sea); the same picture.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE129": {
+  "after": "C",
+  "before": "C",
+  "notes": "Open sea. Unchanged by this work (outdoor, by day)",
+  "props": "C",
+  "props_notes": "No detail objects in view (open sea); the same picture.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE130": {
+  "after": "C",
+  "before": "C",
+  "notes": "Open sea. Unchanged by this work (outdoor, by day)",
+  "props": "C",
+  "props_notes": "No detail objects in view (open sea); the same picture.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE131": {
+  "after": "C",
+  "before": "C",
+  "notes": "Sea; the rocks and sandbanks by Pacifidlog stand behind. Unchanged by this work (outdoor, by day)",
+  "props": "C",
+  "props_notes": "The rock pillars by Pacifidlog stand a little more (boulders as objects); the sea flat.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE132": {
+  "after": "C",
+  "before": "C",
+  "notes": "Sea; a white band across the view (21% of the band): cells round the sea rocks are left undrawn by the shared world (in the field too), the battle backdrop shows through. Overworld session. Unchanged by this work (outdoor, by day)",
+  "props": "C",
+  "props_notes": "No detail objects in view (open sea); the same picture.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE133": {
+  "after": "C",
+  "before": "C",
+  "notes": "Sea; white gaps round the sea rocks (23% of the band) as Route 132. Unchanged by this work (outdoor, by day)",
+  "props": "C",
+  "props_notes": "No detail objects in view (open sea); the same picture. White band (E1).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_ROUTE134": {
+  "after": "C",
+  "before": "C",
+  "notes": "Sea; pale gaps far behind (16% of the band). Unchanged by this work (outdoor, by day)",
+  "props": "C",
+  "props_notes": "No detail objects in view (open sea); the same picture.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_RUSTBORO_CITY": {
+  "after": "B",
+  "before": "B",
+  "notes": "The Mart and city buildings stand; paving flat. Unchanged by this work (outdoor, by day)",
+  "props": "B",
+  "props_notes": "Rustboro's street lamp stands by the Mart. Night: the street lamp's head is lit and the Mart's window glows warm in the battle.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_RUSTBORO_CITY_GYM": {
+  "after": "B",
+  "before": "B",
+  "notes": "Library model (maze walls stand); thin vertical streaks where the room ends at the top right (before too).",
+  "props": "B",
+  "props_notes": "The same picture (rooms and caves are unchanged on this branch).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_RUSTURF_TUNNEL": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. Before: the rock lay flat. (Rusturf Tunnel's tileset, new in round two.)",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SAFARI_ZONE_NORTH": {
+  "after": "C",
+  "before": null,
+  "notes": "Tall grass flat, a raised plateau far behind; the backdrop shows over 43% of the upper band (past the zone's edge). Unchanged by this work (outdoor: the overworld's rules and trees).",
+  "props": "B",
+  "props_notes": "Tall grass stands round the battle; the plateau far behind; pale backdrop past the zone's edge at the top.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SAFARI_ZONE_NORTHEAST": {
+  "after": "B",
+  "before": null,
+  "notes": "The brown rock pillars and the trees stand; tall grass flat. Unchanged by this work (outdoor: the overworld's rules and trees).",
+  "props": "B",
+  "props_notes": "Tall grass stands among the rock pillars and trees.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SAFARI_ZONE_NORTHWEST": {
+  "after": "C",
+  "before": null,
+  "notes": "Tall grass and a ledge flat; the rest of the zone far off; pale backdrop at the top left (12% of the band). Unchanged by this work (outdoor: the overworld's rules and trees).",
+  "props": "B",
+  "props_notes": "Tall grass stands round the battle.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SAFARI_ZONE_SOUTH": {
+  "after": "C",
+  "before": null,
+  "notes": "Trees in the distance; tall grass flat. Unchanged by this work (outdoor: the overworld's rules and trees).",
+  "props": "B",
+  "props_notes": "Tall grass stands.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SAFARI_ZONE_SOUTHEAST": {
+  "after": "C",
+  "before": null,
+  "notes": "Trees at the left; tall grass flat. Unchanged by this work (outdoor: the overworld's rules and trees).",
+  "props": "B",
+  "props_notes": "Tall grass stands; trees behind.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SAFARI_ZONE_SOUTHWEST": {
+  "after": "C",
+  "before": null,
+  "notes": "The 3DS trees stand all round; tall grass flat. Unchanged by this work (outdoor: the overworld's rules and trees).",
+  "props": "B",
+  "props_notes": "Tall grass stands between the trees.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SEAFLOOR_CAVERN_ENTRANCE": {
+  "after": "C",
+  "before": "C",
+  "notes": "A pool with sand banks; no rock in view, so unchanged; cave gloom.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SEAFLOOR_CAVERN_ROOM1": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SEAFLOOR_CAVERN_ROOM2": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. Before: the rock lay flat.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SEAFLOOR_CAVERN_ROOM3": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. Before: the rock lay flat.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SEAFLOOR_CAVERN_ROOM4": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. A dark passage in the wall at the left.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SEAFLOOR_CAVERN_ROOM5": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SEAFLOOR_CAVERN_ROOM6": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. Mostly water; the rock at the right stands.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SEAFLOOR_CAVERN_ROOM7": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. Water behind a sand ledge.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SEAFLOOR_CAVERN_ROOM8": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. Walls stand both sides of the passage.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SEAFLOOR_CAVERN_ROOM9": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. Walls behind (the Aqua trainer battle).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_BLUE_CAVE1": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_BLUE_CAVE2": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_BLUE_CAVE3": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_BLUE_CAVE4": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_BROWN_CAVE1": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_BROWN_CAVE2": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_BROWN_CAVE3": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_BROWN_CAVE4": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_RED_CAVE1": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_RED_CAVE2": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_RED_CAVE3": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_RED_CAVE4": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_SHRUB1": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_SHRUB2": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_SHRUB3": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_SHRUB4": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_TREE1": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_TREE2": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_TREE3": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_TREE4": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_YELLOW_CAVE1": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_YELLOW_CAVE2": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_YELLOW_CAVE3": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SECRET_BASE_YELLOW_CAVE4": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: the game does not resume inside a secret base (the survey's warp came back in Littleroot Town). A base is the player's own decorated room; its decorations are objects, not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SHOAL_CAVE_LOW_TIDE_ENTRANCE_ROOM": {
+  "after": "C",
+  "before": "C",
+  "notes": "Water and the pale tidal floor; no rock in view, unchanged.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SHOAL_CAVE_LOW_TIDE_ICE_ROOM": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. The ice blocks stand round the room.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SHOAL_CAVE_LOW_TIDE_INNER_ROOM": {
+  "after": "C",
+  "before": "C",
+  "notes": "Flat sand floor; the back wall is the backdrop curtain (GBA rock art), not modelled.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SHOAL_CAVE_LOW_TIDE_LOWER_ROOM": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SHOAL_CAVE_LOW_TIDE_STAIRS_ROOM": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. Stairs and walls behind.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SKY_PILLAR_1F": {
+  "after": "B",
+  "before": "C",
+  "notes": "The floor's edge stands as a wall face over the dark outside (auto room); the stairs' circle flat.",
+  "props": "B",
+  "props_notes": "The same picture (rooms and caves are unchanged on this branch).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SKY_PILLAR_3F": {
+  "after": "B",
+  "before": "C",
+  "notes": "As 1F: the floor's edge stands; rubble at the back.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SKY_PILLAR_5F": {
+  "after": "B",
+  "before": "C",
+  "notes": "As 1F.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SKY_PILLAR_TOP": {
+  "after": "C",
+  "before": null,
+  "notes": "Rayquaza's summit: the floor and its rubble drawn flat (read as rooms the rubble pieces do not give back their drawing, so nothing was added), the sky behind. Left for the props work.",
+  "props": "C",
+  "props_notes": "The rubble is not among the objects: flat (the same picture).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SLATEPORT_CITY": {
+  "after": "C",
+  "before": "C",
+  "notes": "Sea, the market buildings behind; fences flat. Unchanged by this work (outdoor, by day)",
+  "props": "B",
+  "props_notes": "The white fence posts by the harbour stand. Night: the fence posts stand in the night tint.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SLATEPORT_CITY_BATTLE_TENT_BATTLE_ROOM": {
+  "after": "B",
+  "before": "C",
+  "notes": "The same room as Fallarbor's (one layout).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SLATEPORT_CITY_OCEANIC_MUSEUM_2F": {
+  "after": "B",
+  "before": "D",
+  "notes": "The exhibits' cases and machines stand.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SOOTOPOLIS_CITY": {
+  "after": "C",
+  "before": "C",
+  "notes": "The crater lake; a pale backdrop band above the water. Unchanged by this work (outdoor, by day)",
+  "props": "C",
+  "props_notes": "The crater lake; no detail object in view.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SOOTOPOLIS_CITY_GYM_1F": {
+  "after": "B",
+  "before": "D",
+  "notes": "The ice pillars stand as blocks, the back wall with the statue; the ice floor flat.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SOOTOPOLIS_CITY_GYM_B1F": {
+  "after": "B",
+  "before": "D",
+  "notes": "The ice blocks stand round the cracked-ice floor (auto room), the stairs behind. Photographed standing at 8,22 (--at): at the test position two trainers see the player and the battle is the two-opponent crash (N37).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SOOTOPOLIS_CITY_MYSTERY_EVENTS_HOUSE_B1F": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: its battle is a link battle (the game exits in the TEST run).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SOUTHERN_ISLAND_INTERIOR": {
+  "after": "C",
+  "before": null,
+  "notes": "The island's trees stand round the pond; the ground flat. Latios/Latias battle place. Unchanged by this work (outdoor: the overworld's rules and trees).",
+  "props": "C",
+  "props_notes": "The pond and the trees; little of the objects in view (the same picture, nearly).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SS_TIDAL_LOWER_DECK": {
+  "after": "B",
+  "before": "C",
+  "notes": "The cargo crates stand as blocks (auto room).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_SS_TIDAL_ROOMS": {
+  "after": "B",
+  "before": "C",
+  "notes": "The cabin's walls, bed and the life buoys on the wall stand; the backdrop shows pale past the cabin at the right.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_TERRA_CAVE_END": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. (Groudon.)",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_TRAINER_HILL_1F": {
+  "after": "C",
+  "before": null,
+  "notes": "As photographed: the layout's own floor (in play each floor is laid out at run time from the challenge's data); blue barriers and the white blocks drawn flat.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_TRAINER_HILL_2F": {
+  "after": "C",
+  "before": null,
+  "notes": "As photographed (orange floor, white blocks, arrow pads): all drawn flat; floors are laid out at run time in play.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_TRAINER_HILL_3F": {
+  "after": "C",
+  "before": null,
+  "notes": "As photographed (pink arrow tiles in rows): flat.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_TRAINER_HILL_4F": {
+  "after": "C",
+  "before": null,
+  "notes": "As photographed (grey slopes and white blocks): flat.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_TRAINER_HILL_ROOF": {
+  "after": "C",
+  "before": null,
+  "notes": "The roof's glass pyramid stands behind; the floor flat.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_UNDERWATER_ROUTE124": {
+  "after": "B",
+  "before": "D",
+  "notes": "The sea floor's rock now stands round the seaweed beds as walls one tile high (underwater.json); the seaweed flat; blue stage light.",
+  "props": "B",
+  "props_notes": "The same picture (no objects under the sea).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_UNDERWATER_ROUTE126": {
+  "after": "B",
+  "before": "C",
+  "notes": "The rock walls at the back and the right stand (underwater.json); seaweed flat; blue stage light.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_UNION_ROOM": {
+  "after": null,
+  "before": null,
+  "notes": "Not photographed: a battle here needs a link partner (the TEST driver cannot start one; the game exits).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_VERDANTURF_TOWN_BATTLE_TENT_BATTLE_ROOM": {
+  "after": "B",
+  "before": "C",
+  "notes": "The hall's back wall with the counter and its side walls stand (modelled by hand); the court flat as drawn.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_VICTORY_ROAD_1F": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. A wooden bridge flat in front. Photographed at 31,18 (--at): at both test positions two trainers see the player (N37).",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_VICTORY_ROAD_B1F": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ },
+ "MAP_VICTORY_ROAD_B2F": {
+  "after": "B",
+  "before": "C",
+  "notes": "Cave rock stands one tile high as blocks with its own drawing (on a face cell the face drawing lies on top); the cave gloom round the stage. Water behind a ledge.",
+  "reviewer": "Claude (screenshots of the r2 survey, 2026-10-11)"
+ }
+}

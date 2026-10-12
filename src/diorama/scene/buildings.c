@@ -83,6 +83,11 @@ static unsigned sVertexCount;
  * touches, nearly always of the layout it asked about last. */
 static int sLastLayout = -1;
 static unsigned sLastFirst, sLastCount;
+/* Per placement: 1 while a cell it owns is not the drawing it was made from
+ * (DIORAMA_CELL_CHANGED: a door opened, a light went out, a floor was generated);
+ * such a placement does not stand (DioramaBuildings_Validate). */
+static uint8_t *sChanged;
+static uint32_t sChangedHash;
 
 /* An upright face looking south: its span in x and its z, in tiles of the
  * layout (DioramaBuildings_FrontAt). */
@@ -127,6 +132,9 @@ static void Release(void)
     free(sPageModels);
     free(sPlacements);
     free(sVertices);
+    free(sChanged);
+    sChanged = NULL;
+    sChangedHash = 0;
     sPages = NULL;
     sModels = NULL;
     sPageModels = NULL;
@@ -166,6 +174,7 @@ bool DioramaBuildings_Init(void)
     sModels = calloc(sModelCount + 1, sizeof(*sModels));
     sPageModels = calloc(sPageModelCount + 1, sizeof(*sPageModels));
     sPlacements = calloc(sPlacementCount + 1, sizeof(*sPlacements));
+    sChanged = calloc(sPlacementCount + 1, 1);
     sVertices = calloc(sVertexCount + 1, sizeof(*sVertices));
     if (!sPages || !sModels || !sPageModels || !sPlacements || !sVertices)
         goto bad;
@@ -332,7 +341,7 @@ bool DioramaBuildings_CellAt(uint16_t layout, int x, int y,
         int cy = y - p->y;
         unsigned k;
 
-        if (cx < 0 || cy < 0 || cx >= m->w || cy >= m->h)
+        if (cx < 0 || cy < 0 || cx >= m->w || cy >= m->h || (sChanged != NULL && sChanged[first + i]))
             continue;
         /* A hedge's rectangle holds the house it runs round. */
         k = m->heights + (unsigned)cy * m->w + (unsigned)cx;
@@ -374,7 +383,7 @@ static unsigned CollectFronts(uint16_t layout, int x, int y, float height,
         float north = (float)ly;
         uint32_t k;
 
-        if (lx < 0 || ly < 0 || lx >= m->w || ly >= m->h)
+        if (lx < 0 || ly < 0 || lx >= m->w || ly >= m->h || (sChanged != NULL && sChanged[first + i]))
             continue;
         for (k = 0; k + 2 < m->vertexCount; k += 3)
         {
@@ -475,6 +484,54 @@ bool DioramaBuildings_FrontAt(uint16_t layout, int x, int y, float x0, float x1,
     return found;
 }
 
+uint32_t DioramaBuildings_Validate(const struct DioramaSceneSnapshot *snapshot)
+{
+    uint32_t hash = 2166136261u;
+    unsigned i;
+
+    if (!sReady || sChanged == NULL || snapshot == NULL)
+        return 0;
+    memset(sChanged, 0, sPlacementCount);
+    for (i = 0; i < snapshot->visibleCellCount && i < DIORAMA_MAX_VISIBLE_CELLS; i++)
+    {
+        const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
+        unsigned first;
+        unsigned count;
+        unsigned j;
+
+        if ((cell->flags & (DIORAMA_CELL_SOURCE_VALID | DIORAMA_CELL_CHANGED))
+            != (DIORAMA_CELL_SOURCE_VALID | DIORAMA_CELL_CHANGED))
+            continue;
+        count = DioramaBuildings_LayoutPlacements(cell->sourceLayoutId, &first);
+        for (j = 0; j < count; j++)
+        {
+            const struct BuildingPlacement *p = &sPlacements[first + j];
+            const struct BuildingModel *m = &sModels[sPageModels[p->pageModel].model];
+            int cx = cell->sourceMapX - p->x;
+            int cy = cell->sourceMapY - p->y;
+
+            if (cx < 0 || cy < 0 || cx >= m->w || cy >= m->h
+             || sHeights[m->heights + (unsigned)cy * m->w + (unsigned)cx] == 0xFF)
+                continue;
+            if (!sChanged[first + j])
+                hash = (hash ^ (first + j)) * 16777619u;
+            sChanged[first + j] = 1;
+        }
+    }
+    if (hash != sChangedHash)
+    {
+        /* the fronts walkers are pushed in front of change with what stands */
+        memset(sFrontCells, 0, sizeof(sFrontCells));
+        sChangedHash = hash;
+    }
+    return hash;
+}
+
+bool DioramaBuildings_PlacementStands(unsigned index)
+{
+    return sReady && index < sPlacementCount && (sChanged == NULL || !sChanged[index]);
+}
+
 void DioramaBuildings_FlattenResolvedCells(const struct DioramaSceneSnapshot *snapshot,
                                            struct DioramaResolvedCell *resolved,
                                            unsigned count)
@@ -484,6 +541,7 @@ void DioramaBuildings_FlattenResolvedCells(const struct DioramaSceneSnapshot *sn
 
     if (!sReady)
         return;
+    DioramaBuildings_Validate(snapshot);
     for (i = 0; i < count; i++)
     {
         const struct DioramaCellSnapshot *cell = &snapshot->cells[i];

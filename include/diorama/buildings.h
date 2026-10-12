@@ -50,6 +50,18 @@ bool DioramaBuildings_IsAvailable(void);
 /* The placements of a layout: *first is the index of the first. */
 unsigned DioramaBuildings_LayoutPlacements(uint16_t layout, unsigned *first);
 bool DioramaBuildings_GetPlacement(unsigned index, struct DioramaBuildingPlacementInfo *info);
+
+struct DioramaSceneSnapshot;
+
+/*
+ * Which placements stand: one whose cells a script or the game has changed since the
+ * layout's drawing (DIORAMA_CELL_CHANGED in the snapshot: a door opened, a light went out,
+ * a barrier switched, a floor was generated) does not - the terrain draws those cells as
+ * they are now. Validate recomputes it from a snapshot (FlattenResolvedCells does too) and
+ * returns a hash of the placements left out; CellAt and FrontAt skip them.
+ */
+uint32_t DioramaBuildings_Validate(const struct DioramaSceneSnapshot *snapshot);
+bool DioramaBuildings_PlacementStands(unsigned index);
 const struct DioramaBuildingVertex *DioramaBuildings_Vertices(void);
 
 /*

@@ -1968,6 +1968,17 @@ static void CB2_PokeStorage(void)
     DoScheduledBgTilemapCopiesToVram();
     ScrollBackground();
     UpdateCloseBoxButtonFlash();
+#ifdef PORTABLE
+    // Task_ChangeScreen frees sStorage when it hands over to the summary, the
+    // naming screen, the bag or the field, and this frame's sprite callbacks
+    // then read through it (the cursor's shadow first; vanilla). The GBA reads
+    // its BIOS there; natively it is a fault, so leaving the boxes crashed.
+    // Skipping this last frame's sprite update changes nothing on screen: the
+    // next screen resets the sprites.
+    if (sStorage == NULL)
+        return;
+#endif
+#line 1971 // gba-line
     AnimateSprites();
     BuildOamBuffer();
 }
@@ -3980,6 +3991,17 @@ static void CreateDisplayMonSprite(void)
     struct SpriteSheet sheet = {sStorage->tileBuffer, MON_PIC_SIZE, GFXTAG_DISPLAY_MON};
     struct SpritePalette palette = {sStorage->displayMonPalette, PALTAG_DISPLAY_MON};
     struct SpriteTemplate template = sSpriteTemplate_DisplayMon;
+#ifdef PORTABLE
+    // displayMonPalette is set only once a Pokemon is shown and sStorage is
+    // not zeroed, so here it holds whatever the heap held before. The GBA
+    // loads 32 stray bytes from it (LoadDisplayMonGfx loads the real palette
+    // over them before the sprite shows); natively that address can be
+    // unmapped, and opening the boxes crashed.
+    static const u16 sBlankDisplayMonPal[16] = {0};
+
+    palette.data = sBlankDisplayMonPal;
+#endif
+#line 3983 // gba-line
 
     for (i = 0; i < MON_PIC_SIZE; i++)
         sStorage->tileBuffer[i] = 0;

@@ -10,6 +10,10 @@
 #include "battle_hold_effects.h"
 #include "battle_interface.h"
 #include "battle_main.h"
+#ifdef ENABLE_BATTLE_SPRITES
+#include "platform/battle_sprites.h"
+#endif
+#line 13 // gba-line
 #include "multiplayer_world.h"
 #include "battle_message.h"
 #include "battle_pyramid.h"
@@ -2702,6 +2706,11 @@ void SpriteCB_FaintOpponentMon(struct Sprite *sprite)
     sprite->data[3] = 8 - yOffset / 8;
     sprite->data[4] = 1;
     sprite->callback = SpriteCB_AnimFaintOpponent;
+#ifdef ENABLE_BATTLE_SPRITES
+    // It sinks into the ground: its picture's rows from here down are erased as it moves.
+    BattleSprites_NoteSink(battler, sprite->y + sprite->y2 + sprite->centerToCornerVecY + 8 * sprite->data[3]);
+#endif
+#line 2705 // gba-line
 }
 
 static void SpriteCB_AnimFaintOpponent(struct Sprite *sprite)

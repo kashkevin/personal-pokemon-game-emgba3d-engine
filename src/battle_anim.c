@@ -25,6 +25,13 @@
 #include "test/battle.h"
 #include "constants/battle_anim.h"
 #include "constants/moves.h"
+#ifdef ENABLE_DIORAMA
+#include "diorama/battle_scene.h"
+#endif
+#ifdef ENABLE_BATTLE_SPRITES
+#include "platform/battle_sprites.h"
+#endif
+#line 28 // gba-line
 
 /*
     This file handles the commands for the macros defined in
@@ -1292,6 +1299,11 @@ void MoveBattlerSpriteToBG(enum BattlerId battler, bool8 toBG_2, bool8 setSprite
             battlerPosition = GetBattlerPosition(battler);
 
         DrawBattlerOnBg(1, 0, 0, battlerPosition, animBg.paletteId, animBg.bgTiles, animBg.bgTilemap, animBg.tilesOffset);
+#ifdef ENABLE_BATTLE_SPRITES
+        if (!IsContest())
+            BattleSprites_NoteMonBg(battler, 1, animBg.tilesOffset, animBg.paletteId);
+#endif
+#line 1295 // gba-line
 
         if (IsContest())
             FlipBattlerBgTiles();
@@ -1322,6 +1334,10 @@ void MoveBattlerSpriteToBG(enum BattlerId battler, bool8 toBG_2, bool8 setSprite
         CpuCopy32(&gPlttBufferUnfaded[OBJ_PLTT_ID(battler)], (void *)(BG_PLTT + PLTT_OFFSET_4BPP(9)), PLTT_SIZE_4BPP);
 
         DrawBattlerOnBg(2, 0, 0, GetBattlerPosition(battler), animBg.paletteId, animBg.bgTiles + 0x1000, animBg.bgTilemap + 0x400, animBg.tilesOffset);
+#ifdef ENABLE_BATTLE_SPRITES
+        BattleSprites_NoteMonBg(battler, 2, animBg.tilesOffset, animBg.paletteId);
+#endif
+#line 1325 // gba-line
     }
 }
 
@@ -1378,12 +1394,20 @@ void ResetBattleAnimBg(bool8 toBG2)
         ClearBattleAnimBg(1);
         gBattle_BG1_X = 0;
         gBattle_BG1_Y = 0;
+#ifdef ENABLE_BATTLE_SPRITES
+        BattleSprites_NoteMonBgCleared(1);
+#endif
+#line 1381 // gba-line
     }
     else
     {
         ClearBattleAnimBg(2);
         gBattle_BG2_X = 0;
         gBattle_BG2_Y = 0;
+#ifdef ENABLE_BATTLE_SPRITES
+        BattleSprites_NoteMonBgCleared(2);
+#endif
+#line 1387 // gba-line
     }
 }
 
@@ -1765,6 +1789,11 @@ static void Task_FadeToBg(u8 taskId)
 
 void LoadMoveBg(u16 bgId)
 {
+#ifdef ENABLE_DIORAMA
+    DioramaBattle_SetSceneryShown(FALSE); // BG3 now holds this move's background
+    DioramaBattle_NoteMoveBg(IsContest() ? 0x800 : GetDecompressedDataSize(gBattleAnimBackgroundTable[bgId].tilemap));
+#endif
+#line 1768 // gba-line
     if (IsContest())
     {
         void *decompressionBuffer = malloc_and_decompress(gBattleAnimBackgroundTable[bgId].tilemap, NULL);
