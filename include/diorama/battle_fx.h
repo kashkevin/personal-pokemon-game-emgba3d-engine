@@ -45,6 +45,20 @@ void BattleFx_OnAnimTick(void);
 /* The end of a game frame (main.c, after the callbacks). */
 void BattleFx_OnFrameEnd(void);
 
+/* The two animations the battle controllers play themselves, outside
+ * battle_anim.c (the package's CONTROLLER_SEND_OUT and CONTROLLER_SHINY):
+ * pokeball.c Task_DoPokeballSendOutAnim once it has made the ball sprite of a
+ * send-out (`arg`: the ball, enum PokeBall), battle_anim_throw.c
+ * TryShinyAnimation once it has started a shiny Pokemon's stars. The core
+ * replays one at a time and only when it is alone: two that begin in the same
+ * frame (a double battle's opening) or one while another plays stay GBA. */
+enum
+{
+    BATTLEFX_CONTROLLER_SEND_OUT = 1,
+    BATTLEFX_CONTROLLER_SHINY = 2,
+};
+void BattleFx_OnControllerAnim(uint32_t kind, uint32_t battler, uint32_t arg);
+
 /* The effect sprites in OAM (sprite.c BuildOamBuffer / LoadOam, as the map's
  * sprites are marked for the 3D view, battle_scene.h). */
 struct Sprite;
@@ -87,8 +101,9 @@ struct BattleFxAnimInfo
     uint32_t serial;      /* counts animations begun */
     bool active;          /* the core replays the game's animation now */
     bool failed;          /* the last one failed (its GBA effects were shown) */
-    char id[48];          /* MOVE_* / B_ANIM_* the core plays */
-    int plannedFrames;    /* the core's length for it */
+    char id[48];          /* MOVE_* / B_ANIM_* / CONTROLLER_* the core plays */
+    int plannedFrames;    /* the core's length for it (script and its own tail) */
+    int scriptFrames;     /* ... of which the game's script (the rest: the core's presentation tail) */
     int gameFrames;       /* frames the game's animation has advanced */
     int coreFrames;       /* frames the core has stepped */
     double beginMs, stepMsTotal, stepMsWorst;

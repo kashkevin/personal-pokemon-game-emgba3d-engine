@@ -10,10 +10,26 @@ The game's Battle FX (include/diorama/battle_fx.h) reads, beside the executable:
                                 the effect textures (procedural: no game or Nintendo art)
   battlefx/assets/meshes.bin    the effect meshes (assets/meshes.json in a form C reads directly)
   battlefx/assets/info.txt      atlas grid, ramp rows, mesh kinds (from assets/info.json)
+  battlefx/se_frames.json       the game's sound effect lengths (frames IsSEPlaying() stays true), measured by the
+                                test build: the core's waitsound / end wait as the game's scripts do (optional)
   battlefx/MANIFEST.txt         where it all came from, and each file's SHA-256
   battlefx/settings.cfg         development settings (enabled=1, log=0)
 
 Usage: pack_data.py --package <battlefx_kit/native> [--out battlefx] [--source "<what the package is>"]
+                    [--data <bfx_moves.json converted from THIS game's tree>]
+
+The package's bfx_moves.json is converted from pokeemerald-expansion with the expansion's default config
+(GEN_LATEST = GEN_9). This game sets GEN_LATEST to GEN_6, which changes one animation script branch
+(Leech Life's absorb: `.if B_UPDATED_MOVE_DATA >= GEN_7`) and some moves' power / category / target, so the
+data the game ships is converted from the game's own tree, with the package's converter:
+
+  python3 <battlefx_kit>/prototype/build_preview_data.py --expansion <this repository> --out game_moves.json
+  python3 tools/battlefx/pack_data.py --package <battlefx_kit>/native --data game_moves.json [--se-frames se_frames.json]
+
+se_frames.json comes from the Battle FX test build (it plays every sound effect at a battle's action menu):
+
+  PKMN_TEST_BATTLE=wild:263:30 PKMN_TEST_AUTOPILOT=1 PKMN_BFX_TEST_SE_TABLE=se_frames.json PKMN_BFX_TEST_EXIT=1 \
+    ./pokeemerald-mp-diorama-bfxtest --save <a save>
 
 Only reads the package. Every file but meshes.bin / info.txt / MANIFEST.txt / settings.cfg is copied byte for byte.
 """
@@ -70,14 +86,23 @@ def main():
     ap.add_argument("--package", required=True, help="the Battle FX package's native/ folder")
     ap.add_argument("--out", default="battlefx")
     ap.add_argument("--source", default="", help="what the package is (tag, commit), for MANIFEST.txt")
+    ap.add_argument("--data", default="", help="bfx_moves.json converted from this game's tree (default: the package's)")
+    ap.add_argument("--se-frames", default="", help="se_frames.json: the game's sound effect lengths, measured by the "
+                    "Battle FX test build (PKMN_BFX_TEST_SE_TABLE); kept from the folder when not given")
     a = ap.parse_args()
     pkg, out = Path(a.package), Path(a.out)
     (out / "shaders").mkdir(parents=True, exist_ok=True)
     (out / "assets").mkdir(parents=True, exist_ok=True)
     files = []
     for name, dst in (("js/bfx_core.js", "bfx_core.js"), ("data/bfx_moves.json", "bfx_moves.json")):
-        shutil.copyfile(pkg / name, out / dst)
+        src = Path(a.data) if dst == "bfx_moves.json" and a.data else pkg / name
+        shutil.copyfile(src, out / dst)
         files.append(dst)
+    data_meta = json.loads((out / "bfx_moves.json").read_text()).get("meta", {})
+    if a.se_frames:
+        shutil.copyfile(a.se_frames, out / "se_frames.json")
+    if (out / "se_frames.json").exists():
+        files.append("se_frames.json")
     for s in SHADERS:
         shutil.copyfile(pkg / "shaders" / s, out / "shaders" / s)
         files.append("shaders/" + s)
@@ -103,7 +128,9 @@ def main():
              "Packed by tools/battlefx/pack_data.py from the Battle FX integration package's native/ folder"
              + (f" ({a.source})" if a.source else "") + ".",
              "The textures and meshes are procedural (no game or Nintendo art); the animation data is converted from",
-             "pokeemerald-expansion's own battle_anim_scripts.s (commit in bfx_moves.json meta.commit).",
+             "pokeemerald-expansion's own battle_anim_scripts.s and C sources (commit in bfx_moves.json meta.commit: "
+             + str(data_meta.get("commit", "?")) + (", this game's tree" if a.data else ", the package's expansion")
+             + ").",
              ""]
     lines += [f"{sha256(out / f)}  {f}" for f in sorted(files)]
     (out / "MANIFEST.txt").write_text("\n".join(lines) + "\n")

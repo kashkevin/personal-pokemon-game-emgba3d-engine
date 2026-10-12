@@ -90,7 +90,12 @@
     X(PFNGLUNIFORMMATRIX4FVPROC, UniformMatrix4fv)                         \
     X(PFNGLUSEPROGRAMPROC, UseProgram)                                     \
     X(PFNGLVERTEXATTRIBDIVISORPROC, VertexAttribDivisor)                   \
-    X(PFNGLVERTEXATTRIBPOINTERPROC, VertexAttribPointer)
+    X(PFNGLVERTEXATTRIBPOINTERPROC, VertexAttribPointer)                   \
+    X(PFNGLGENQUERIESPROC, GenQueries)                                     \
+    X(PFNGLBEGINQUERYPROC, BeginQuery)                                     \
+    X(PFNGLENDQUERYPROC, EndQuery)                                         \
+    X(PFNGLGETQUERYOBJECTIVPROC, GetQueryObjectiv)                         \
+    X(PFNGLGETQUERYOBJECTUI64VPROC, GetQueryObjectui64v)
 
 #define BFX_GL_DECLARE(type, name) static type bgl##name;
 BFX_GL_FUNCS(BFX_GL_DECLARE)
@@ -194,9 +199,18 @@ static struct
     int meshKinds;
     /* render targets (sized to the layer's region) */
     struct Target { GLuint fbo, tex, depth; int w, h; } layer, dist, bloom[5], dst;
-    /* statistics for the log */
+    /* the game's battler sprites in the picture being drawn (BattleFxGL_TakeBattlers) */
+    struct BattleFxGameBattler game[4];
+    GLuint battlerTex[4];
+    GLuint progBattler;
+    /* statistics for the log and the tests: per animation (serial), GPU time from timer queries
+     * (read back a few frames later, never waited for), CPU time to submit the layers */
     unsigned layersDrawn, framesShown;
-    double gpuSubmitMs;
+    GLuint queries[8];
+    uint32_t querySerial[8];
+    int queryHead, queryPending;
+    uint32_t statSerial;
+    struct BattleFxRenderStats stats;
 } s;
 
 /* The copies are allocated at their full capacity the first time they are used. */
@@ -335,6 +349,11 @@ static void CopyFrame(struct Frame *f, const struct BfxPacket *p)
     memcpy(f->fog, p->fog, sizeof(f->fog));
     f->fogDensity = p->fogDensity;
     f->valid = true;
+}
+
+void BattleFxGL_TakeBattlers(const struct BattleFxGameBattler battlers[4])
+{
+    memcpy(s.game, battlers, sizeof(s.game));
 }
 
 void BattleFxGL_TakePacket(const struct BfxPacket *packet)
@@ -526,6 +545,38 @@ static const char kCompositeFs[] =
     "  c = mix(c, c * uGrade.rgb * 1.25, uGrade.a);\n"
     "  c += uFlashCol * uFlash;\n"
     "  fragColor = vec4(toSRGB(roll(c)), 1.0);\n"
+    "}\n";
+
+/* The game's own battler sprite, drawn over the GBA picture in GBA screen space with the GBA's
+ * OBJ rules (gba_easy_draw.c: integer pixel, 8.8 matrix, size / 2 centre), for the HD battler
+ * state Battle FX adds to it (the package's game_sprite shader's maths):
+ *   mode 0: glow - an additive silhouette in the glow colour, scaled by uScale (behind the battler)
+ *   mode 1: light and flash - the battler's own colours lit by the effects and flashed
+ *   mode 2: depth only - at the battler's depth, so effect meshes behind it are hidden */
+static const char kBattlerVs[] =
+    "#version 330 core\n"
+    "in vec2 corner; uniform vec2 uCenter; uniform vec2 uBox; uniform vec4 uMap; out vec2 vG;\n"
+    "void main() { vec2 g = uCenter + corner * uBox; vG = g; gl_Position = vec4(g * uMap.xy + uMap.zw, 0.0, 1.0); }\n";
+static const char kBattlerFs[] =
+    "#version 330 core\n"
+    "out vec4 fragColor; in vec2 vG;\n"
+    "uniform sampler2D uTex; uniform vec2 uCenter; uniform vec2 uSize; uniform vec4 uM; uniform vec2 uFlip; uniform int uMode;\n"
+    "uniform float uScale; uniform vec4 uGlow; uniform vec4 uFlash; uniform vec3 uLight; uniform vec3 uLightAdd; uniform float uDepth;\n"
+    "vec3 toLin(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }\n"
+    "void main() {\n"
+    "  vec2 l = uMode == 0 ? (vG - uCenter) / uScale : floor(vG) - uCenter;\n"
+    "  vec2 t = vec2(uM.x * l.x + uM.y * l.y, uM.z * l.x + uM.w * l.y) / 256.0;\n"
+    "  vec2 tp = (uMode == 0 ? t : floor(t)) + uSize * 0.5;\n"
+    "  if (tp.x < 0.0 || tp.y < 0.0 || tp.x >= uSize.x || tp.y >= uSize.y) discard;\n"
+    "  if (uFlip.x > 0.5) tp.x = uSize.x - floor(tp.x) - 1.0;\n"
+    "  if (uFlip.y > 0.5) tp.y = uSize.y - floor(tp.y) - 1.0;\n"
+    "  vec4 c = texture(uTex, (floor(tp) + 0.5) / 64.0);\n"
+    "  if (c.a < 0.5) discard;\n"
+    "  if (uMode == 0) { fragColor = vec4(uGlow.rgb * uGlow.a, 0.0); return; }\n"
+    "  gl_FragDepth = uDepth;\n"
+    "  vec3 lin = mix(toLin(c.rgb), uFlash.rgb, uFlash.a);\n"
+    "  lin = min(lin * uLight + uLightAdd, vec3(1.0));\n"
+    "  fragColor = vec4(lin, 1.0);\n"
     "}\n";
 
 static GLuint LoadTexture(const char *file, bool flipY, bool mips, GLenum wrapS, int *heightOut)
@@ -736,9 +787,21 @@ static bool InitGL(void)
     s.progDown = LoadProgram("fsq.vert", "down.frag");
     s.progUp = LoadProgram("fsq.vert", "up.frag");
     s.progComp = LinkSources(kCompositeVs, kCompositeFs, "battle_fx composite");
+    s.progBattler = LinkSources(kBattlerVs, kBattlerFs, "battle_fx battler");
     if (!s.progCard || !s.progDist || !s.progPart || !s.progRib || !s.progMesh || !s.progBright || !s.progDown
-     || !s.progUp || !s.progComp)
+     || !s.progUp || !s.progComp || !s.progBattler)
         return false;
+    bglGenQueries(8, s.queries);
+    glGenTextures(4, s.battlerTex);
+    for (int b = 0; b < 4; b++)
+    {
+        glBindTexture(GL_TEXTURE_2D, s.battlerTex[b]);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, BFX_GAME_SPRITE_MAX, BFX_GAME_SPRITE_MAX, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
     /* atlas / strips as three.js uploaded them, with flipY (image row 0 at v = 1); ramps without */
     s.texAtlas = LoadTexture("atlas.png", true, true, GL_CLAMP_TO_EDGE, NULL);
     s.texRamps = LoadTexture("ramps.png", false, false, GL_CLAMP_TO_EDGE, &s.rampsH);
@@ -1119,16 +1182,174 @@ enum Layer
     LAYER_FRONT,
 };
 
+static bool BattlerLit(const struct BfxBattler *B)
+{
+    return B->flash[3] > 0.004f || fabsf(B->light[0] - 1.0f) > 0.004f || fabsf(B->light[1] - 1.0f) > 0.004f
+        || fabsf(B->light[2] - 1.0f) > 0.004f || B->lightAdd[0] > 0.002f || B->lightAdd[1] > 0.002f
+        || B->lightAdd[2] > 0.002f;
+}
+
+/* The game's battlers with the frame's HD battler state: glows (back layer), or depth and the
+ * effects' light and flash (front layer). GBA pixel g lands at window (gameX + g scale, gameY + g scale);
+ * the layer covers the window's rows 0 .. regionH. */
+static void DrawBattlers(const struct Frame *f, const struct BattleFxLayout *L, int regionH, const struct Camera *cam,
+                         enum Layer which)
+{
+    float map[4] = {2.0f * L->scale / L->outW, -2.0f * L->scale / regionH, 2.0f * L->gameX / L->outW - 1.0f,
+                    1.0f - 2.0f * L->gameY / regionH};
+    bool uploaded[4] = {false, false, false, false};
+
+    bglUseProgram(s.progBattler);
+    bglUniform4f(bglGetUniformLocation(s.progBattler, "uMap"), map[0], map[1], map[2], map[3]);
+    bglUniform1i(bglGetUniformLocation(s.progBattler, "uTex"), 0);
+    bglActiveTexture(GL_TEXTURE0);
+    for (int b = 0; b < 4; b++)
+    {
+        const struct BattleFxGameBattler *g = &s.game[b];
+        const struct BfxBattler *B = &f->battlers[b];
+        float half[2], center[2];
+        int passes = 0;
+
+        if (!g->shown || !B->present)
+            continue;
+        if (which == LAYER_BACK && B->glow[3] <= 0.01f)
+            continue;
+        if (!uploaded[b])
+        {
+            glBindTexture(GL_TEXTURE_2D, s.battlerTex[b]);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, BFX_GAME_SPRITE_MAX, BFX_GAME_SPRITE_MAX, GL_RGBA, GL_UNSIGNED_BYTE,
+                            g->rgba);
+            uploaded[b] = true;
+        }
+        glBindTexture(GL_TEXTURE_2D, s.battlerTex[b]);
+        half[0] = (g->doubleSize ? g->w : g->w / 2.0f);
+        half[1] = (g->doubleSize ? g->h : g->h / 2.0f);
+        center[0] = g->x + half[0];
+        center[1] = g->y + half[1];
+        bglUniform2f(bglGetUniformLocation(s.progBattler, "uCenter"), center[0], center[1]);
+        bglUniform2f(bglGetUniformLocation(s.progBattler, "uSize"), (float)g->w, (float)g->h);
+        bglUniform4f(bglGetUniformLocation(s.progBattler, "uM"), (float)g->m[0], (float)g->m[1], (float)g->m[2],
+                     (float)g->m[3]);
+        bglUniform2f(bglGetUniformLocation(s.progBattler, "uFlip"), g->hflip ? 1.0f : 0.0f, g->vflip ? 1.0f : 0.0f);
+        bglBindVertexArray(s.qCards.vao); /* any vertex array with the corner attribute */
+        if (which == LAYER_BACK)
+        {
+            /* two additive silhouettes, scaled 1.07 and 1.16 with a slight pulse (the package's glow copies) */
+            float t = (float)f->t;
+            BlendAdd();
+            Depth(false, false);
+            for (int k = 0; k < 2; k++)
+            {
+                float sc = k == 0 ? 1.07f + 0.02f * sinf(t * 9.0f) : 1.16f + 0.03f * sinf(t * 7.0f + 1.0f);
+                bglUniform1i(bglGetUniformLocation(s.progBattler, "uMode"), 0);
+                bglUniform1f(bglGetUniformLocation(s.progBattler, "uScale"), sc);
+                bglUniform2f(bglGetUniformLocation(s.progBattler, "uBox"), half[0] * 2.0f * sc, half[1] * 2.0f * sc);
+                bglUniform4f(bglGetUniformLocation(s.progBattler, "uGlow"), B->glow[0], B->glow[1], B->glow[2],
+                             B->glow[3] * (k == 0 ? 1.1f : 0.55f) * (B->fade > 0.0f ? B->fade : 0.0f));
+                glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+                passes++;
+            }
+            continue;
+        }
+        /* front: depth for the meshes (an opaque battler only), and its light and flash */
+        {
+            float clip[4], v[4], depth;
+            const float *w = B->world;
+            bool lit = BattlerLit(B) && g->objMode == 0 /* ST_OAM_OBJ_NORMAL */;
+            for (int r = 0; r < 4; r++)
+                v[r] = cam->view[r] * w[0] + cam->view[4 + r] * w[1] + cam->view[8 + r] * w[2] + cam->view[12 + r];
+            for (int r = 0; r < 4; r++)
+                clip[r] = cam->proj[r] * v[0] + cam->proj[4 + r] * v[1] + cam->proj[8 + r] * v[2] + cam->proj[12 + r] * v[3];
+            depth = clip[3] != 0.0f ? clip[2] / clip[3] * 0.5f + 0.5f : 0.5f;
+            if (depth < 0.0f)
+                depth = 0.0f;
+            if (depth > 1.0f)
+                depth = 1.0f;
+            if (g->objMode != 0 /* ST_OAM_OBJ_NORMAL */ || B->fade < 0.6f)
+                continue;
+            bglUniform1i(bglGetUniformLocation(s.progBattler, "uMode"), 1);
+            bglUniform1f(bglGetUniformLocation(s.progBattler, "uDepth"), depth);
+            bglUniform2f(bglGetUniformLocation(s.progBattler, "uBox"), half[0] * 2.0f, half[1] * 2.0f);
+            bglUniform4f(bglGetUniformLocation(s.progBattler, "uFlash"), B->flash[0], B->flash[1], B->flash[2], B->flash[3]);
+            bglUniform3f(bglGetUniformLocation(s.progBattler, "uLight"), B->light[0], B->light[1], B->light[2]);
+            bglUniform3f(bglGetUniformLocation(s.progBattler, "uLightAdd"), B->lightAdd[0], B->lightAdd[1], B->lightAdd[2]);
+            glEnable(GL_DEPTH_TEST);
+            glDepthFunc(GL_ALWAYS);
+            glDepthMask(GL_TRUE);
+            glDisable(GL_BLEND);
+            if (!lit)
+                glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+            glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+            glDepthFunc(GL_LEQUAL);
+            passes++;
+        }
+        (void)passes;
+    }
+}
+
 static bool HasContent(const struct Frame *f, enum Layer which)
 {
     if (which == LAYER_BACK)
-        return f->decals.n > 0 || f->cardsBack.n > 0 || f->ribbonsBack.ni > 0;
+    {
+        if (f->decals.n > 0 || f->cardsBack.n > 0 || f->ribbonsBack.ni > 0)
+            return true;
+        for (int b = 0; b < 4; b++)
+            if (s.game[b].shown && f->battlers[b].present && f->battlers[b].glow[3] > 0.01f)
+                return true;
+        return false;
+    }
     if (f->cards.n > 0 || f->ribbons.ni > 0 || f->partsAddCount > 0 || f->partsAlphaCount > 0 || f->dist.n > 0)
         return true;
     for (int k = 0; k < f->meshKinds; k++)
         if (f->meshN[k] > 0)
             return true;
     return f->post.flash > 0.001f || f->post.grade[3] > 0.001f || fabsf(f->post.sat / 1.05f - 1.0f) > 0.002f;
+}
+
+/* Timer query results that have arrived (never waited for). */
+static void PollQueries(void)
+{
+    while (s.queryPending > 0)
+    {
+        int tail = (s.queryHead - s.queryPending + 8) % 8;
+        GLint ready = 0;
+        GLuint64 ns = 0;
+
+        bglGetQueryObjectiv(s.queries[tail], GL_QUERY_RESULT_AVAILABLE, &ready);
+        if (!ready)
+            break;
+        bglGetQueryObjectui64v(s.queries[tail], GL_QUERY_RESULT, &ns);
+        s.queryPending--;
+        if (s.querySerial[tail] == s.stats.serial)
+        {
+            double ms = ns / 1.0e6;
+            s.stats.gpuSamples++;
+            s.stats.gpuMsTotal += ms;
+            if (ms > s.stats.gpuMsWorst)
+                s.stats.gpuMsWorst = ms;
+        }
+    }
+}
+
+static void StatsFor(uint32_t serial)
+{
+    if (serial == s.stats.serial)
+        return;
+    if (BattleFx_Logging() && s.stats.frames > 0)
+        SDL_Log("Battle FX: drawn %u frames (%u layers); GPU %.3f ms a layer on average, %.3f at worst (%u samples); "
+                "CPU %.3f ms a layer on average, %.3f at worst",
+                s.stats.frames, s.stats.layers, s.stats.gpuSamples ? s.stats.gpuMsTotal / s.stats.gpuSamples : 0.0,
+                s.stats.gpuMsWorst, s.stats.gpuSamples, s.stats.layers ? s.stats.cpuMsTotal / s.stats.layers : 0.0,
+                s.stats.cpuMsWorst);
+    memset(&s.stats, 0, sizeof(s.stats));
+    s.stats.serial = serial;
+}
+
+void BattleFxGL_Stats(struct BattleFxRenderStats *stats)
+{
+    *stats = s.stats;
 }
 
 static void DrawLayer(const struct BattleFxLayout *L, enum Layer which)
@@ -1138,7 +1359,8 @@ static void DrawLayer(const struct BattleFxLayout *L, enum Layer which)
     GLint drawFb = 0, readFb = 0, viewport[4];
     int regionH, regionY;
     float alpha, time, sat;
-    bool whole;
+    bool whole, timed;
+    Uint64 cpu0;
 
     if (!f->valid || !BattleFx_Enabled() || !Ready() || !HasContent(f, which))
         return;
@@ -1156,6 +1378,15 @@ static void DrawLayer(const struct BattleFxLayout *L, enum Layer which)
         return;
     regionY = L->outH - regionH; /* GL rows from the bottom */
 
+    StatsFor(f->serial);
+    PollQueries();
+    cpu0 = SDL_GetPerformanceCounter();
+    timed = s.queryPending < 8;
+    if (timed)
+    {
+        s.querySerial[s.queryHead] = f->serial;
+        bglBeginQuery(GL_TIME_ELAPSED, s.queries[s.queryHead]);
+    }
     glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawFb);
     glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &readFb);
     glGetIntegerv(GL_VIEWPORT, viewport);
@@ -1220,10 +1451,13 @@ static void DrawLayer(const struct BattleFxLayout *L, enum Layer which)
             DrawQuads(&s.qCardsBack, &f->cardsBack);
         }
         DrawRibbonLayer(&s.rRibbonsBack, &f->ribbonsBack, &cam);
+        DrawBattlers(f, L, regionH, &cam, LAYER_BACK); /* glows: just behind the battlers */
     }
     else
     {
-        /* 9100 meshes, 9200 alpha particles, 9300 additive particles, 9400 ribbons, 9500 cards */
+        /* the battlers (100 + ...): their depth and light; then 9100 meshes, 9200 alpha particles,
+         * 9300 additive particles, 9400 ribbons, 9500 cards */
+        DrawBattlers(f, L, regionH, &cam, LAYER_FRONT);
         DrawMeshes(f, &cam);
         if (f->partsAlphaCount > 0)
         {
@@ -1302,6 +1536,19 @@ static void DrawLayer(const struct BattleFxLayout *L, enum Layer which)
     glDisable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
     glDisable(GL_CULL_FACE);
+    if (timed)
+    {
+        bglEndQuery(GL_TIME_ELAPSED);
+        s.queryHead = (s.queryHead + 1) % 8;
+        s.queryPending++;
+    }
+    {
+        double ms = (SDL_GetPerformanceCounter() - cpu0) * 1000.0 / SDL_GetPerformanceFrequency();
+        s.stats.layers++;
+        s.stats.cpuMsTotal += ms;
+        if (ms > s.stats.cpuMsWorst)
+            s.stats.cpuMsWorst = ms;
+    }
     s.layersDrawn++;
 }
 
@@ -1313,6 +1560,8 @@ void BattleFxGL_DrawBack(const struct BattleFxLayout *layout)
 void BattleFxGL_DrawFront(const struct BattleFxLayout *layout)
 {
     DrawLayer(layout, LAYER_FRONT);
+    if (s.frames[s.show].valid && s.ready && s.frames[s.show].serial == s.stats.serial)
+        s.stats.frames++;
 #ifdef BATTLEFX_TEST
     BattleFxTest_AfterDraw(s.frames[s.show].serial, s.frames[s.show].frame, s.frames[s.show].valid, layout->outW,
                            layout->outH);

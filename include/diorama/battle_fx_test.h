@@ -16,7 +16,17 @@
  *   - the core's cost (begin, a frame).
  *
  *   PKMN_BFX_TEST_MOVES     MOVE_A,MOVE_B,... or "all" (every move in the core's data)
- *   PKMN_BFX_TEST_OUT       folder for report.jsonl, summary.json and the captures (default bfx_test)
+ *   PKMN_BFX_TEST_ANIMS     B_ANIM_A,B_ANIM_B,... or "all": battle animations (general, status, special;
+ *                           not the controller ones), each with the package's first preset situation
+ *   PKMN_BFX_TEST_FROM      the list starts at this move / animation; "ID+" just after it (a run
+ *                           resumed after ID crashed the game)
+ *   PKMN_BFX_TEST_OUT       folder for report.jsonl (appended to), summary.json and the captures
+ *                           (default bfx_test)
+ *   PKMN_BFX_TEST_REAL_SHOTS=1  captures of every animation the battle itself plays (a quarter, half
+ *                           and three quarters through), for battles fought rather than galleries
+ *   PKMN_BFX_TEST_REAL_PARITY=1 the parity of every animation the battle itself plays, a line each in
+ *                           real_report.jsonl (no gallery: PKMN_BFX_TEST_MOVES / ANIMS unset)
+ *   PKMN_BFX_TEST_TRACE=1   every frame's sprite lists (game and core) in trace_<id>_t<turn>.txt
  *   PKMN_BFX_TEST_SHOTS     frames of the core's animation to capture: n,n,... or "auto" (a quarter,
  *                           half and three quarters through) or "none" (default auto)
  *   PKMN_BFX_TEST_VIEW      hd (default) or gba: the core still runs (parity, frame numbers), but the
@@ -42,10 +52,14 @@ struct BfxHost;
 bool BattleFxTest_OnActionMenu(void);
 /* bfx_game.c, the end of a game frame in which the core stepped (game thread). */
 void BattleFxTest_AfterStep(struct BfxHost *host, uint32_t serial, int coreFrame);
+/* bfx_game.c, the core's replay of animation `serial` ended (game thread). */
+void BattleFxTest_OnAnimEnd(uint32_t serial);
 /* gl_battle_fx.c, after the front layer (main thread): the frame shown. */
 void BattleFxTest_AfterDraw(uint32_t serial, int frame, bool showing, int outW, int outH);
 /* Whether the HD layer is shown (PKMN_BFX_TEST_VIEW). */
 bool BattleFxTest_ViewHd(void);
+/* bfx_game.c: the core once it is ready (game thread), NULL before. */
+struct BfxHost *BattleFx_TestHost(void);
 
 #endif
 

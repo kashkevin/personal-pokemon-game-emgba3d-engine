@@ -29,11 +29,18 @@
 #include "battle_anim.h"
 #include "battle_gfx_sfx_util.h"
 #include "battle_util.h"
+#include "item.h"
 #include "main.h"
 #include "move.h"
+#include "pokeball.h"
 #include "pokemon.h"
+#include "random.h"
 #include "sprite.h"
 #include "constants/battle_anim.h"
+#include "constants/battle_script_commands.h"
+#include "constants/battle_string_ids.h"
+#include "constants/hold_effects.h"
+#include "constants/items.h"
 #include "constants/moves.h"
 #include "diorama/battle_fx.h"
 #include "diorama/battle_fx_host.h"
@@ -77,6 +84,8 @@ static struct
     bool packetValid;   /* `packet` holds the core's latest frame */
     bool failed;        /* the last animation failed */
     uint32_t animType, animId;
+    uint8_t controller;     /* BATTLEFX_CONTROLLER_*: stepped every frame, ends with the core */
+    bool aligning;          /* stepping a controller animation's core up to the game's frame */
     char id[48];
     struct BfxBeginResult begun;
     double beginMs, stepMs, worstStepMs;
@@ -97,6 +106,21 @@ static struct
  * latched as it is loaded into OAM (VBlank, main thread). */
 static uint32_t sEffectOamPending[4];
 static uint32_t sEffectOam[4];
+/* ... and the battlers' sprites: OAM entry of battler b, 0xFF when not in OAM. */
+static uint8_t sBattlerOamPending[MAX_BATTLERS_COUNT];
+static uint8_t sBattlerOam[MAX_BATTLERS_COUNT];
+static struct BattleFxGameBattler sGameBattlers[MAX_BATTLERS_COUNT];
+
+/* The controllers' own animations that began this frame (BattleFx_OnControllerAnim),
+ * begun or not at its end: one alone is replayed, more at once stay GBA. */
+#define MAX_CONTROLLER_REQUESTS 4
+static struct
+{
+    uint8_t kind, battler;
+    uint16_t ball;
+    bool intro;
+} sControllerPending[MAX_CONTROLLER_REQUESTS];
+static int sControllerPendingCount;
 
 /* Ids whose request the core refused, logged once each. */
 #define MAX_REFUSED 64
@@ -256,6 +280,99 @@ static const char kGameHelperJs[] =
     "    if (lc && lc.replace) mask |= 1 << id;\n"
     "  }\n"
     "  return mask;\n"
+    "};\n"
+    /* The GBA runtime's Random2 as the game's (random.c: SFC32, stream 29), from the game's own
+     * gRng2Value when the animation began (the request's rng2): the effect sprites the core replays
+     * land where the game's land. Each run of the animation (the plan, the playback) starts from the
+     * same state. A request without rng2 keeps the core's own generator. */
+    "(function () {\n"
+    "  const RT = globalThis.BFX_RT, B = globalThis.BFX_BRIDGE; if (!RT || !RT.API || !RT.Player || !RT.CB || !B) return;\n"
+    "  const A = RT.API, legacy = A.random, P = RT.Player.prototype, reset = P.reset, step = P.step, begin = B.begin;\n"
+    "  let s2 = null, s1 = null, perFrame = 0, rollout = null;\n"
+    "  B.begin = function (req) {\n"
+    "    const ok = (a) => Array.isArray(a) && a.length === 4;\n"
+    "    s2 = req && ok(req.rng2) ? req.rng2.map((v) => v >>> 0) : null; s1 = req && ok(req.rng1) ? req.rng1.map((v) => v >>> 0) : null;\n"
+    "    perFrame = req ? (req.rng1PerFrame | 0) : 0; rollout = req && req.rolloutTimer != null ? req.rolloutTimer | 0 : null;\n"
+    "    return begin.call(this, req); };\n"
+    "  P.reset = function () { reset.call(this); if (this.w) { this.w.gameRng2 = s2 ? Uint32Array.from(s2) : null;\n"
+    "    this.w.gameRng1 = s1 ? Uint32Array.from(s1) : null; this.w.gameRng1PerFrame = perFrame; this.w.gameRollout = rollout; } };\n"
+    /* gAnimDisableStructPtr->rolloutTimer (Rollout's, Ice Ball's counters) as the game's, not the runtime's stand-in */
+    "  const dis = Object.getOwnPropertyDescriptor(A, 'gAnimDisableStructPtr');\n"
+    "  if (dis && dis.get && dis.configurable) Object.defineProperty(A, 'gAnimDisableStructPtr', { configurable: true, enumerable: dis.enumerable,\n"
+    "    get() { const w = RT.world(); const v = dis.get.call(A); if (w && w.gameRollout != null) v.rolloutTimer = w.gameRollout; return v; } });\n"
+    "  function sfc(s, stream) {\n"
+    "    const r = (s[0] + s[1] + s[3]) >>> 0;\n"
+    "    s[3] = (s[3] + stream) >>> 0; s[0] = (s[1] ^ (s[1] >>> 9)) >>> 0; s[1] = Math.imul(s[2], 9) >>> 0;\n"
+    "    s[2] = (r + ((s[2] << 21) | (s[2] >>> 11))) >>> 0;\n"
+    "    return r;\n"
+    "  }\n"
+    /* Random2 (stream 29): only the animations draw from it in a battle */
+    "  function random2() { const w = RT.world(), s = w && w.gameRng2; return s ? sfc(s, 29) >>> 16 : legacy(); }\n"
+    /* Random (stream 1, the battle's): the vblank handlers advance it every frame too (main.c, battle_main.c
+     * AdvanceRandom: the game's count a frame, measured, in rng1PerFrame); each step is a new frame */
+    "  function random1() { const w = RT.world(), s = w && w.gameRng1; return s ? sfc(s, 1) >>> 16 : legacy(); }\n"
+    "  P.step = function () { const s = this.w && this.w.gameRng1; if (s) for (let i = 0; i < this.w.gameRng1PerFrame; i++) sfc(s, 1);\n"
+    "    return step.apply(this, arguments); };\n"
+    "  A.random = random2; A.Random2 = random2; A.Random = random1;\n"
+    /* the one animation callback that draws from Random (battle_anim_new.c SpriteCB_RandomCentredHits;
+     * the runtime's port calls its generic random()) */
+    "  const hits = RT.CB.SpriteCB_RandomCentredHits;\n"
+    "  if (hits) RT.CB.SpriteCB_RandomCentredHits = function (sprite) { A.random = random1; try { return hits.call(this, sprite); } finally { A.random = random2; } };\n"
+    "})();\n"
+    /* battle_anim_electric.c AnimSparkElectricityFlashing: the blink test `angle % period == 0` with a period of
+     * 0 (Spark's circling sparks) is the GBA's x % 0 (libgcc: 0 only for x = 0; the native build gives the same,
+     * platform/fault_compat.c): such a spark blinks off when its angle comes round to 0. The runtime's port
+     * never blinks it; the rest is the port's own. */
+    "(function () {\n"
+    "  const RT = globalThis.BFX_RT; if (!RT || !RT.CB || !RT.API) return; const A = RT.API, spark = RT.CB.AnimSparkElectricityFlashing;\n"
+    "  if (!spark) return;\n"
+    "  RT.CB.AnimSparkElectricityFlashing = function (s) {\n"
+    "    spark.call(this, s); if (s.data[4] !== 0 || !s.inUse) return; const step = s.callback;\n"
+    "    if ((s.data[7] & 0xFF) === 0) s.invisible = !s.invisible;   /* the first step, run by the port's init */\n"
+    "    s.callback = function (sp) { const before = sp.invisible; step(sp); if (sp.inUse && (sp.data[7] & 0xFF) === 0) sp.invisible = !before; };\n"
+    "  };\n"
+    "})();\n"
+    /* palette.c BeginNormalPaletteFade: a negative delay speeds the fade up (deltaY += -delay), and deltaY is a
+     * 4-bit field (struct PaletteFadeControl): delay -31 gives (2 + 31) & 15 = 1 a step (Spark's flashes), not 33 */
+    "(function () {\n"
+    "  const RT = globalThis.BFX_RT; if (!RT || !RT.API) return; const A = RT.API, begin = A.beginNormalPaletteFade; if (!begin) return;\n"
+    "  A.beginNormalPaletteFade = function () { const r = begin.apply(this, arguments); const w = RT.world();\n"
+    "    if (r && w && w.fade && w.fade.mode === 'normal') w.fade.delta &= 15; return r; };\n"
+    "})();\n"
+    /* IsSEPlaying (sound.c) as the game's: the core's runtime has no audio, and its scripts' waitsound
+     * and end wait for the game's sound effects to finish. With the game's own lengths (battlefx/
+     * se_frames.json, measured in the game: frames IsSEPlaying() stays true after PlaySE, and the music
+     * player each plays on), a sound effect is playing while the last one started on SE1 or SE2 has not
+     * run its length; waitsound waits for it (sound tasks too, as before) and the script's end for up to
+     * 90 frames, as battle_anim.c's do. Without the file the core keeps its own timing. */
+    "(function () {\n"
+    "  const RT = globalThis.BFX_RT; if (!RT || !RT.Player || !RT.API) return;\n"
+    "  const P = RT.Player.prototype, A = RT.API, syncReady = P.syncReady, done = P.done, stop = A.m4aMPlayStop, isPlaying = A.isSEPlaying;\n"
+    "  let SE = null;\n"
+    "  globalThis.BFX_GAME_SET_SE = function (table) { SE = table && typeof table === 'object' ? table : null; return SE ? 1 : 0; };\n"
+    "  function playing(w) {\n"
+    "    if (!w || !w.sfx) return false; let s1 = null, s2 = null; const from = w.seStoppedAt != null ? w.seStoppedAt : -1;\n"
+    "    for (const x of w.sfx) { if (x.f < from) continue; const t = SE[x.se]; if (!t) continue; if (t[1] === 1) s1 = [x.f, t[0]]; else if (t[1] === 2) s2 = [x.f, t[0]]; }\n"
+    "    return !!((s1 && w.frame - s1[0] < s1[1]) || (s2 && w.frame - s2[0] < s2[1]));\n"
+    "  }\n"
+    "  P.syncReady = function (op) { const r = syncReady.call(this, op); if (!r || op !== 'waitsound' || !SE) return r;\n"
+    "    const w = RT.world(); if (!playing(w)) { this.seWait = 0; return true; }\n"
+    "    this.seWait = (this.seWait | 0) + 1; if (this.seWait > 90) { w.seStoppedAt = w.frame + 1; this.seWait = 0; } return false; };\n"
+    "  P.done = function () { const d = done.call(this); if (!d || !SE) return d; const w = this.w;\n"
+    "    if (playing(w) && (this.seEndWait = (this.seEndWait | 0) + 1) <= 90) return false; return true; };\n"
+    "  A.isSEPlaying = function () { return SE ? playing(RT.world()) : isPlaying(); };\n"
+    "  A.m4aMPlayStop = function () { const w = RT.world(); if (w) w.seStoppedAt = w.frame + 1; return stop.apply(this, arguments); };\n"
+    "})();\n"
+    /* Whether the core's world has a Poke Ball sprite (a send-out's ball made). */
+    "globalThis.BFX_GAME_HAS_BALL = function () {\n"
+    "  for (const r of globalThis.BFX_RT.snapshot()) { const g = r.tag | 0; if (g >= 55000 && g <= 55027) return 1; }\n"
+    "  return 0;\n"
+    "};\n"
+    /* A move's script branches in the core's data, in its order: "kind|task|arg|value;..." */
+    "globalThis.BFX_GAME_VARIANTS = function (id) {\n"
+    "  const D = globalThis.BFX_RT && globalThis.BFX_RT.data; if (!D) return '';\n"
+    "  const m = (D.moves || []).find((x) => x.id === id); if (!m || !m.var) return '';\n"
+    "  return m.var.map((v) => [v.kind, v.task || '', v.arg == null ? -1 : v.arg, v.value == null ? 0 : v.value].join('|')).join(';');\n"
     "};\n";
 
 static int LoadCore(void *unused)
@@ -295,6 +412,20 @@ static int LoadCore(void *unused)
     }
     free(core);
     free(data);
+    /* the game's sound effect lengths (optional) */
+    snprintf(path, sizeof(path), "%s/se_frames.json", sCore.dir);
+    {
+        size_t seSize = 0;
+        char *se = ReadWholeFile(path, &seSize);
+        if (se != NULL)
+        {
+            char *r = BfxHost_CallGlobal(host, "BFX_GAME_SET_SE", se);
+            if (r == NULL || strcmp(r, "1") != 0)
+                SDL_Log("Battle FX: %s could not be read; the core keeps its own sound timing", path);
+            free(r);
+            free(se);
+        }
+    }
     sCore.host = host;
     sCore.loadMs = (SDL_GetPerformanceCounter() - t0) * 1000.0 / SDL_GetPerformanceFrequency();
     SDL_Log("Battle FX: core ready in %.0f ms (%s, %u + %u bytes)", sCore.loadMs, sCore.dir,
@@ -373,15 +504,38 @@ static int Append(char *buf, int len, int size, const char *fmt, ...)
     return n < 0 ? len : len + n;
 }
 
+/* Random's numbers taken a frame, outside the animations (the vblank handlers' AdvanceRandom): the
+ * counter of gRngValue at each frame's end, read only. */
+#define RNG1_WINDOW 8
+static u32 sRng1LastCtr;
+static u8 sRng1Deltas[RNG1_WINDOW];
+static unsigned sRng1Frames;
+
+static void NoteRng1(void)
+{
+    u32 d = gRngValue.ctr - sRng1LastCtr;
+    sRng1LastCtr = gRngValue.ctr;
+    sRng1Deltas[sRng1Frames++ % RNG1_WINDOW] = (u8)(d > 255 ? 255 : d);
+}
+
+static u32 Rng1PerFrame(void)
+{
+    u32 n = sRng1Frames < RNG1_WINDOW ? sRng1Frames : RNG1_WINDOW, least = 2;
+    for (u32 i = 0; i < n; i++)
+        if (i == 0 || sRng1Deltas[i] < least)
+            least = sRng1Deltas[i];
+    return n ? least : 2;
+}
+
 /* The request the core needs to replay the game's own animation: the battlers
  * as the scripts see them (who is present, each sprite's picture metrics) and
  * what the battle engine handed the animation. */
-static int AppendSetup(char *buf, int len, int size)
+static int AppendSetup(char *buf, int len, int size, u32 attacker, u32 target)
 {
     bool doubles = IsDoubleBattle();
 
     len = Append(buf, len, size, ",\"attacker\":%u,\"target\":%u,\"double\":%s,\"present\":[",
-                 (unsigned)gBattleAnimAttacker, (unsigned)gBattleAnimTarget, doubles ? "true" : "false");
+                 (unsigned)attacker, (unsigned)target, doubles ? "true" : "false");
     for (u32 b = 0; b < MAX_BATTLERS_COUNT; b++)
         len = Append(buf, len, size, "%s%s", b ? "," : "",
                      b < gBattlersCount && IsBattlerSpritePresent(b) ? "true" : "false");
@@ -408,8 +562,255 @@ static int AppendSetup(char *buf, int len, int size)
     /* The same on every client of a battle: presentation only (particle variety). */
     len = Append(buf, len, size, ",\"seed\":%u",
                  (unsigned)((gBattleResults.battleTurnCounter * 2654435761u) ^ (gAnimMoveIndex << 8)
-                            ^ (gBattleAnimAttacker << 4) ^ gBattleAnimTarget));
+                            ^ (attacker << 4) ^ target));
+    /* the states the game's Random2 and Random start this animation from (read only), and how many
+     * numbers the vblank handlers take from Random a frame (the fewest of the last frames: the battle
+     * engine draws some of its own in a frame now and then) */
+    len = Append(buf, len, size, ",\"rng2\":[%u,%u,%u,%u],\"rng1\":[%u,%u,%u,%u],\"rng1PerFrame\":%u",
+                 (unsigned)gRng2Value.a, (unsigned)gRng2Value.b, (unsigned)gRng2Value.c, (unsigned)gRng2Value.ctr,
+                 (unsigned)gRngValue.a, (unsigned)gRngValue.b, (unsigned)gRngValue.c, (unsigned)gRngValue.ctr,
+                 (unsigned)Rng1PerFrame());
     return len;
+}
+
+/* What the battle engine hands a battle animation, read where the game's own
+ * scripts and tasks read it (battle_anim_throw.c, battle_anim_new.c,
+ * battle_anim_utility_funcs.c), as the core's inputs (docs: the package's
+ * INTEGRATION_GUIDE.md section 3b). */
+static int AppendInputs(char *buf, int len, int size, struct BfxHost *host, const char *id)
+{
+    const struct BattleAnimationInfo *ad = gBattleSpritesDataPtr ? gBattleSpritesDataPtr->animationData : NULL;
+    u32 attacker = gBattleAnimAttacker, ball, weather = 0;
+    u16 item = attacker < gBattlersCount ? gBattleMons[attacker].item : ITEM_NONE;
+
+    if (strncmp(id, "B_ANIM_SWITCH_OUT", 17) == 0)
+        ball = attacker < gBattlersCount ? GetMonData(GetBattlerMon(attacker), MON_DATA_POKEBALL) : BALL_POKE;
+    else
+        ball = ItemIdToBallId(gLastUsedItem);
+    if (ball >= POKEBALL_COUNT)
+        ball = BALL_POKE;
+    if (MoveHasAdditionalEffect(gCurrentMove, MOVE_EFFECT_SUN))
+        weather = ANIM_WEATHER_SUN;
+    else if (MoveHasAdditionalEffect(gCurrentMove, MOVE_EFFECT_RAIN))
+        weather = ANIM_WEATHER_RAIN;
+    else if (MoveHasAdditionalEffect(gCurrentMove, MOVE_EFFECT_SANDSTORM))
+        weather = ANIM_WEATHER_SANDSTORM;
+    else if (MoveHasAdditionalEffect(gCurrentMove, MOVE_EFFECT_HAIL))
+        weather = ANIM_WEATHER_HAIL;
+    len = Append(buf, len, size, "\"ball\":%u,\"weatherToSet\":%u", (unsigned)ball, (unsigned)weather);
+    if (ad != NULL)
+    {
+        const char *trap = BfxHost_MoveId(host, (int)ad->animArg);
+        len = Append(buf, len, size, ",\"animArg\":%u,\"ballThrowCase\":%u,\"criticalCapture\":%s,"
+                     "\"criticalCaptureSuccess\":%s",
+                     (unsigned)ad->animArg, (unsigned)ad->ballThrowCaseId, ad->isCriticalCapture ? "true" : "false",
+                     ad->criticalCaptureSuccess ? "true" : "false");
+        if (strcmp(id, "B_ANIM_TURN_TRAP") == 0 && trap != NULL)
+            len = Append(buf, len, size, ",\"trapMove\":\"%s\"", trap);
+    }
+    len = Append(buf, len, size, ",\"substitute\":[");
+    for (u32 b = 0; b < MAX_BATTLERS_COUNT; b++)
+        len = Append(buf, len, size, "%s%s", b ? "," : "",
+                     gBattleSpritesDataPtr && b < gBattlersCount && gBattleSpritesDataPtr->battlerData[b].behindSubstitute
+                         ? "true" : "false");
+    len = Append(buf, len, size, "],\"effectAttacker\":%u,\"effectBattler\":%u,\"effectTarget\":%u",
+                 (unsigned)gBattlerAttacker, (unsigned)gEffectBattler, (unsigned)gBattlerTarget);
+    if (item == ITEM_RED_ORB || item == ITEM_BLUE_ORB)
+        len = Append(buf, len, size, ",\"item\":\"%s\"", item == ITEM_RED_ORB ? "ITEM_RED_ORB" : "ITEM_BLUE_ORB");
+    if (gBattleAnimTarget < gBattlersCount)
+        len = Append(buf, len, size, ",\"affection\":%u", (unsigned)GetBattlerAffectionHearts(gBattleAnimTarget));
+    if (gAnimDisableStructPtr != NULL)
+        len = Append(buf, len, size, ",\"syrupShiny\":%s", gAnimDisableStructPtr->syrupBombIsShiny ? "true" : "false");
+    len = Append(buf, len, size, ",\"safari\":%s,\"safariReaction\":%u",
+                 (gBattleTypeFlags & BATTLE_TYPE_SAFARI) ? "true" : "false",
+                 gBattleCommunication[MULTISTRING_CHOOSER] < NUM_SAFARI_REACTIONS
+                     ? (unsigned)gBattleCommunication[MULTISTRING_CHOOSER] : 0u);
+    return len;
+}
+
+/* How the core presents the hit (its impact and reaction strength; presentation only): what the
+ * battle engine has already worked out for the move's target before its animation plays (critcalc,
+ * typecalc come before attackanimation). */
+static const char *HitPresentation(u32 move)
+{
+    u32 target = gBattleAnimTarget;
+    u32 flags;
+
+    if (move >= MOVES_COUNT || GetMoveCategory(move) == DAMAGE_CATEGORY_STATUS || target >= MAX_BATTLERS_COUNT
+     || gBattleStruct == NULL)
+        return "none";
+    flags = gBattleStruct->moveResultFlags[target];
+    if (gSpecialStatuses[target].criticalHit)
+        return "crit";
+    if (flags & MOVE_RESULT_SUPER_EFFECTIVE)
+        return "super";
+    if (flags & MOVE_RESULT_NOT_VERY_EFFECTIVE)
+        return "weak";
+    return "normal";
+}
+
+/* Mirror Move playing the move it copied: the core's optional mirror cue (off unless its
+ * mirrorCue setting is on). */
+static bool CalledByMirrorMove(u32 move)
+{
+    return move != MOVE_MIRROR_MOVE && gBattlerAttacker < MAX_BATTLERS_COUNT
+        && gChosenMoveByBattler[gBattlerAttacker] == MOVE_MIRROR_MOVE;
+}
+
+/* ── Script branches ──────────────────────────────────────────────────── */
+
+/* The value a deciding task of the game's animation script gives the jump after
+ * it, computed from what the game's task reads, the way it reads it (the tasks
+ * are in battle_anim_*.c). The core's data has each script branch as a timeline
+ * variant; this picks the one the game's script takes. false: a task not known
+ * here (the core then chooses, from the battle setup it was given). */
+static bool BranchValue(const char *move, const char *task, int arg, int *value)
+{
+    u32 atk = gBattleAnimAttacker, tgt = gBattleAnimTarget;
+    const struct LinkBattleAnim *d = gAnimDisableStructPtr;
+
+    if (task[0] == '\0')
+    {
+        /* a jump on a script argument a task set: Techno Blast's Drive (AnimTask_TechnoBlast) */
+        if (strcmp(move, "MOVE_TECHNO_BLAST") == 0 && arg == 0 && atk < gBattlersCount)
+        {
+            u16 item = gBattleMons[atk].item;
+            *value = GetItemHoldEffect(item) == HOLD_EFFECT_DRIVE ? (int)GetItemSecondaryId(item) : 0;
+            return true;
+        }
+        return false;
+    }
+    if (strcmp(task, "AnimTask_IsTargetPlayerSide") == 0)
+        *value = IsOnPlayerSide(tgt) ? TRUE : FALSE;
+    else if (strcmp(task, "AnimTask_IsAttackerPlayerSide") == 0)
+        *value = IsOnPlayerSide(atk) ? 1 : 0;
+    else if (strcmp(task, "AnimTask_GetAttackerSide") == 0)
+        *value = GetBattlerSide(atk);
+    else if (strcmp(task, "AnimTask_GetTargetSide") == 0)
+        *value = GetBattlerSide(tgt);
+    else if (strcmp(task, "AnimTask_IsDoubleBattle") == 0)
+        *value = IsDoubleBattle() && !IsContest();
+    else if (strcmp(task, "AnimTask_IsContest") == 0)
+        *value = IsContest() ? TRUE : FALSE;
+    else if (strcmp(task, "AnimTask_IsTargetSameSide") == 0)
+        *value = IsBattlerAlly(atk, tgt) ? TRUE : FALSE;
+    else if (strcmp(task, "AnimTask_GetTargetIsAttackerPartner") == 0)
+        *value = GetPartnerBattler(atk) == tgt;
+    else if (strcmp(task, "AnimTask_IsHealingMove") == 0)
+        *value = gAnimMoveDmg > 0 ? FALSE : TRUE;
+    else if (strcmp(task, "AnimTask_IsPowerOver99") == 0)
+        *value = gAnimMovePower > 99;
+    else if (strcmp(task, "AnimTask_GetReturnPowerLevel") == 0)
+    {
+        *value = 0;
+        if (gAnimFriendship > 60 && gAnimFriendship < 92)
+            *value = 1;
+        if (gAnimFriendship > 91 && gAnimFriendship < 201)
+            *value = 2;
+        if (gAnimFriendship > 200)
+            *value = 3;
+    }
+    else if (strcmp(task, "AnimTask_GetFrustrationPowerLevel") == 0)
+        *value = gAnimFriendship <= 30 ? 0 : gAnimFriendship <= 100 ? 1 : gAnimFriendship <= 200 ? 2 : 3;
+    else if (strcmp(task, "AnimTask_GetSeismicTossDamageLevel") == 0)
+    {
+        *value = 0;
+        if ((u32)gAnimMoveDmg - 33 < 33)
+            *value = 1;
+        if (gAnimMoveDmg > 65)
+            *value = 2;
+    }
+    else if (strcmp(task, "AnimTask_GetIceBallCounter") == 0 && d != NULL)
+        *value = d->rolloutTimer + 1;
+    else if (strcmp(task, "AnimTask_GetFuryCutterHitCount") == 0 && d != NULL)
+        *value = d->furyCutterCounter;
+    else if (strcmp(task, "AnimTask_IsFuryCutterHitRight") == 0 && d != NULL)
+        *value = d->furyCutterCounter & 1;
+    else if (strcmp(task, "AnimTask_GetStockpileCounter") == 0 && d != NULL)
+        *value = d->stockpileCounter;
+    else if (strcmp(task, "AnimTask_GetWeather") == 0 && atk < gBattlersCount)
+    {
+        /* GetBattlerHoldEffect and GetBattlerAbility note the battler whose item may be named in a
+         * message (gPotentialItemEffectBattler): put back, so nothing in the game changes */
+        enum BattlerId potential = gPotentialItemEffectBattler;
+        u32 weather = GetAttackerWeather(GetBattlerHoldEffect(atk), GetBattlerAbility(atk), gWeatherMoveAnim);
+
+        gPotentialItemEffectBattler = potential;
+        *value = ANIM_WEATHER_NONE;
+        if (weather & B_WEATHER_SUN)
+            *value = ANIM_WEATHER_SUN;
+        else if (weather & B_WEATHER_RAIN)
+            *value = ANIM_WEATHER_RAIN;
+        else if (weather & B_WEATHER_SANDSTORM)
+            *value = ANIM_WEATHER_SANDSTORM;
+        else if (weather & B_WEATHER_HAIL)
+            *value = ANIM_WEATHER_HAIL;
+        else if (weather & B_WEATHER_SNOW)
+            *value = ANIM_WEATHER_SNOW;
+        else if (weather & B_WEATHER_FOG)
+            *value = ANIM_WEATHER_FOG;
+    }
+    else
+        return false;
+    return true;
+}
+
+/* The core's variant for the branch the game's own script takes: the first of the
+ * move's variants (they are in script order) whose condition holds - its turn
+ * (gAnimMoveTurn) or its task's value; -1 (the core's default branch) when none
+ * does or a condition is unknown here. Fury Cutter has two conditions and the data
+ * one variant per condition: its second use in a row (left slice, one dimming
+ * instead of three) is the one case no variant matches exactly. */
+#define MAX_VARIANT_MOVES 1024
+static char *sVariants[MAX_VARIANT_MOVES];
+
+static int GameVariant(struct BfxHost *host, u32 move, const char *id)
+{
+    char arg[64], *list, *entry, *save = NULL;
+    int index = 0, chosen = -1;
+    bool unknown = false;
+
+    if (move >= MAX_VARIANT_MOVES)
+        return -1;
+    if (sVariants[move] == NULL)
+    {
+        snprintf(arg, sizeof(arg), "\"%s\"", id);
+        sVariants[move] = BfxHost_CallGlobal(host, "BFX_GAME_VARIANTS", arg);
+        if (sVariants[move] == NULL)
+            sVariants[move] = SDL_strdup("");
+    }
+    if (sVariants[move] == NULL || sVariants[move][0] == '\0')
+        return -1;
+    list = SDL_strdup(sVariants[move]);
+    if (list == NULL)
+        return -1;
+    for (entry = SDL_strtokr(list, ";", &save); entry != NULL && chosen < 0; entry = SDL_strtokr(NULL, ";", &save), index++)
+    {
+        char kind[8] = "", task[64] = "";
+        int a = -1, want = 0, have = 0;
+        char *f1 = strchr(entry, '|'), *f2 = f1 ? strchr(f1 + 1, '|') : NULL;
+
+        if (f1 == NULL || f2 == NULL)
+            continue;
+        snprintf(kind, sizeof(kind), "%.*s", (int)(f1 - entry), entry);
+        snprintf(task, sizeof(task), "%.*s", (int)(f2 - f1 - 1), f1 + 1);
+        if (sscanf(f2 + 1, "%d|%d", &a, &want) != 2)
+            continue;
+        if (strcmp(kind, "turn") == 0)
+        {
+            if (want == gAnimMoveTurn)
+                chosen = index;
+        }
+        else if (BranchValue(id, task, a, &have))
+        {
+            if (have == want)
+                chosen = index;
+        }
+        else
+            unknown = true;
+    }
+    SDL_free(list);
+    return unknown && chosen < 0 ? -1 : chosen;
 }
 
 /* The move whose animation script `script` is: the requested move when it is
@@ -444,6 +845,9 @@ static void EndAnimation(const char *why)
     if (!sAnim.active)
         return;
     sAnim.active = false;
+#ifdef BATTLEFX_TEST
+    BattleFxTest_OnAnimEnd(sAnim.serial);
+#endif
     if (sCore.log)
         SDL_Log("Battle FX: %s ended (%s): the game's animation %d frames, the core's %d of %d%s; begin %.1f ms, "
                 "a frame %.2f ms on average, %.2f ms at worst",
@@ -465,13 +869,16 @@ static void FailAnimation(const char *what)
     EndAnimation("failed");
 }
 
+#define BFX_REQUEST_MAX 4096
+static bool BeginRequest(struct BfxHost *host, const char *id, const char *request, int len, uint32_t animType,
+                         uint32_t animId, uint8_t controller);
+
 void BattleFx_OnLaunch(uint32_t animType, uint32_t animId, const void *script)
 {
     struct BfxHost *host;
-    char request[4096];
+    char request[BFX_REQUEST_MAX];
     int len = 0;
     const char *id;
-    Uint64 t0;
 
     EndAnimation("another animation started");
     sAnim.packetValid = false;
@@ -489,9 +896,18 @@ void BattleFx_OnLaunch(uint32_t animType, uint32_t animId, const void *script)
         }
         len = Append(request, len, sizeof(request), "{\"move\":\"%s\"", id);
         len = Append(request, len, sizeof(request),
-                     ",\"turn\":%u,\"movePower\":%u,\"damage\":%d,\"friendship\":%u,\"weather\":%u",
+                     ",\"turn\":%u,\"movePower\":%u,\"damage\":%d,\"friendship\":%u,\"weather\":%u,\"hit\":\"%s\"",
                      (unsigned)gAnimMoveTurn, (unsigned)gAnimMovePower, (int)gAnimMoveDmg,
-                     (unsigned)gAnimFriendship, (unsigned)gWeatherMoveAnim);
+                     (unsigned)gAnimFriendship, (unsigned)gWeatherMoveAnim, HitPresentation(animId));
+        if (gAnimDisableStructPtr != NULL)
+            len = Append(request, len, sizeof(request), ",\"rolloutTimer\":%u", (unsigned)gAnimDisableStructPtr->rolloutTimer);
+        if (CalledByMirrorMove(animId))
+            len = Append(request, len, sizeof(request), ",\"calledBy\":\"MOVE_MIRROR_MOVE\"");
+        {
+            int variant = GameVariant(host, animId, id);
+            if (variant >= 0)
+                len = Append(request, len, sizeof(request), ",\"variant\":%d", variant);
+        }
     }
     else
     {
@@ -504,25 +920,33 @@ void BattleFx_OnLaunch(uint32_t animType, uint32_t animId, const void *script)
             return;
         }
         len = Append(request, len, sizeof(request), "{\"anim\":\"%s\",\"inputs\":{", id);
-        if (gBattleSpritesDataPtr != NULL && gBattleSpritesDataPtr->animationData != NULL)
-            len = Append(request, len, sizeof(request), "\"animArg\":%u",
-                         (unsigned)gBattleSpritesDataPtr->animationData->animArg);
+        len = AppendInputs(request, len, sizeof(request), host, id);
         len = Append(request, len, sizeof(request), "}");
     }
-    len = AppendSetup(request, len, sizeof(request));
+    len = AppendSetup(request, len, sizeof(request), gBattleAnimAttacker, gBattleAnimTarget);
     len = Append(request, len, sizeof(request), "}");
-    if (len >= (int)sizeof(request) - 1)
+    BeginRequest(host, id, request, len, animType, animId, 0);
+}
+
+/* Begins the core's replay of `id` (the request built): the animation in
+ * progress from now on. */
+static bool BeginRequest(struct BfxHost *host, const char *id, const char *request, int len, uint32_t animType,
+                         uint32_t animId, uint8_t controller)
+{
+    Uint64 t0;
+
+    if (len >= BFX_REQUEST_MAX - 1)
     {
         NoteRefused(id, "request too long");
-        return;
+        return false;
     }
     if (Refused(id))
-        return;
+        return false;
     t0 = SDL_GetPerformanceCounter();
     if (!BfxHost_Begin(host, request, &sAnim.begun))
     {
         NoteRefused(id, BfxHost_LastError(host));
-        return;
+        return false;
     }
     memset(&sAnim.packet, 0, sizeof(sAnim.packet));
     sAnim.active = true;
@@ -531,6 +955,7 @@ void BattleFx_OnLaunch(uint32_t animType, uint32_t animId, const void *script)
     sAnim.ticked = false;
     sAnim.animType = animType;
     sAnim.animId = animId;
+    sAnim.controller = controller;
     snprintf(sAnim.id, sizeof(sAnim.id), "%s", id);
     sAnim.beginMs = (SDL_GetPerformanceCounter() - t0) * 1000.0 / SDL_GetPerformanceFrequency();
     sAnim.stepMs = 0;
@@ -539,9 +964,10 @@ void BattleFx_OnLaunch(uint32_t animType, uint32_t animId, const void *script)
     sAnim.hdFrames = 0;
     sAnim.serial++;
     if (sCore.log)
-        SDL_Log("Battle FX: %s (battler %u -> %u%s) begins: %d frames planned, begin %.1f ms", id,
-                (unsigned)gBattleAnimAttacker, (unsigned)gBattleAnimTarget, IsDoubleBattle() ? ", double battle" : "",
+        SDL_Log("Battle FX: %s (battler %d -> %d%s) begins: %d frames planned, begin %.1f ms", id,
+                sAnim.begun.attacker, sAnim.begun.target, IsDoubleBattle() ? ", double battle" : "",
                 sAnim.begun.totalFrames, sAnim.beginMs);
+    return true;
 }
 
 void BattleFx_AnimInfo(struct BattleFxAnimInfo *info)
@@ -552,6 +978,7 @@ void BattleFx_AnimInfo(struct BattleFxAnimInfo *info)
     info->failed = sAnim.failed;
     snprintf(info->id, sizeof(info->id), "%s", sAnim.id);
     info->plannedFrames = sAnim.begun.totalFrames;
+    info->scriptFrames = sAnim.begun.frames;
     info->gameFrames = sAnim.gameFrames;
     info->coreFrames = sAnim.hdFrames;
     info->beginMs = sAnim.beginMs;
@@ -564,6 +991,13 @@ unsigned BattleFx_Failures(void)
     return sFailures;
 }
 
+#ifdef BATTLEFX_TEST
+struct BfxHost *BattleFx_TestHost(void)
+{
+    return ReadyHost();
+}
+#endif
+
 const char *BattleFx_CoreMoveId(uint32_t move)
 {
     struct BfxHost *host = ReadyHost();
@@ -575,12 +1009,137 @@ void BattleFx_OnAnimTick(void)
     sAnim.ticked = true;
 }
 
+/* One step of the core and its frame, for the game frame that just ended
+ * (game thread). false: the animation failed (its GBA effects show). */
+static bool StepCore(struct BfxHost *host)
+{
+    Uint64 t0 = SDL_GetPerformanceCounter();
+    int r = BfxHost_Step(host);
+    double ms;
+
+    if (r < 0)
+    {
+        FailAnimation("step");
+        return false;
+    }
+    if (r == 0)
+    {
+        sAnim.hdEnded = true;
+        sAnim.packetValid = false;
+    }
+    else
+    {
+        sAnim.packet.serial = sAnim.serial;
+        if (!BfxHost_Frame(host, -1, &sAnim.packet))
+        {
+            FailAnimation("frame");
+            return false;
+        }
+        sAnim.packet.hideBg = (uint8_t)(BfxHost_CallGlobalInt(host, "BFX_GAME_HIDDEN_BGS", 0) & 0x06);
+        sAnim.hdFrames++;
+        sAnim.packetValid = true;
+        BfxHost_DrainSounds(host);
+#ifdef BATTLEFX_TEST
+        if (!sAnim.aligning)
+            BattleFxTest_AfterStep(host, sAnim.serial, sAnim.hdFrames);
+#endif
+    }
+    ms = (SDL_GetPerformanceCounter() - t0) * 1000.0 / SDL_GetPerformanceFrequency();
+    sAnim.stepMs += ms;
+    if (ms > sAnim.worstStepMs)
+        sAnim.worstStepMs = ms;
+    return true;
+}
+
+/* ── The controllers' own animations ─────────────────────────────────── */
+
+#define CONTROLLER_MAX_FRAMES 600
+#define CONTROLLER_ALIGN_MAX 8
+
+void BattleFx_OnControllerAnim(uint32_t kind, uint32_t battler, uint32_t arg)
+{
+    if (!gMain.inBattle || battler >= MAX_BATTLERS_COUNT || !BattleFx_Enabled())
+        return;
+    if (sControllerPendingCount < MAX_CONTROLLER_REQUESTS)
+    {
+        sControllerPending[sControllerPendingCount].kind = (uint8_t)kind;
+        sControllerPending[sControllerPendingCount].battler = (uint8_t)battler;
+        sControllerPending[sControllerPendingCount].ball = (uint16_t)arg;
+        sControllerPending[sControllerPendingCount].intro = gBattleSpritesDataPtr != NULL
+            && gBattleSpritesDataPtr->animationData != NULL && gBattleSpritesDataPtr->animationData->introAnimActive;
+    }
+    sControllerPendingCount++;
+}
+
+/* The end of the frame in which the game began controller animations (the ball made / the stars'
+ * tasks started): one alone is replayed from here, in step with the game's - the core is stepped
+ * until its world is where the game's is at the end of this frame (the send-out: until its ball
+ * exists too); more at once, or one while another plays, stay GBA. true: one began. */
+static bool TakeControllerRequests(void)
+{
+    struct BfxHost *host = ReadyHost();
+    int count = sControllerPendingCount;
+    char request[BFX_REQUEST_MAX];
+    const char *id;
+    int len = 0, b;
+
+    sControllerPendingCount = 0;
+    if (host == NULL || IsContest())
+        return false;
+    if (sAnim.active && sAnim.controller)
+    {
+        if (sCore.log)
+            SDL_Log("Battle FX: another controller animation began: %s stops; the rest plays as on the GBA", sAnim.id);
+        sAnim.packetValid = false;
+        EndAnimation("another controller animation began");
+        return false;
+    }
+    if (sAnim.active)
+        return false; /* a battle animation plays: these stay GBA */
+    if (count > 1)
+    {
+        if (sCore.log)
+            SDL_Log("Battle FX: %d controller animations began together; they play as on the GBA", count);
+        return false;
+    }
+    b = sControllerPending[0].battler;
+    id = sControllerPending[0].kind == BATTLEFX_CONTROLLER_SEND_OUT ? "CONTROLLER_SEND_OUT" : "CONTROLLER_SHINY";
+    len = Append(request, len, sizeof(request), "{\"anim\":\"%s\",\"inputs\":{\"ball\":%u,\"intro\":%s}", id,
+                 (unsigned)sControllerPending[0].ball, sControllerPending[0].intro ? "true" : "false");
+    len = AppendSetup(request, len, sizeof(request), (u32)b, (u32)b);
+    len = Append(request, len, sizeof(request), "}");
+    if (!BeginRequest(host, id, request, len, 0, sControllerPending[0].kind, sControllerPending[0].kind))
+        return false;
+    /* in step: the core's frames up to this one */
+    sAnim.aligning = true;
+    for (int i = 0; i < CONTROLLER_ALIGN_MAX && !sAnim.hdEnded; i++)
+    {
+        if (!StepCore(host))
+        {
+            sAnim.aligning = false;
+            return false;
+        }
+        if (sAnim.controller != BATTLEFX_CONTROLLER_SEND_OUT || BfxHost_CallGlobalInt(host, "BFX_GAME_HAS_BALL", 0))
+            break;
+    }
+    sAnim.aligning = false;
+#ifdef BATTLEFX_TEST
+    if (sAnim.packetValid)
+        BattleFxTest_AfterStep(host, sAnim.serial, sAnim.hdFrames);
+#endif
+    return true;
+}
+
 void BattleFx_OnFrameEnd(void)
 {
     struct BfxHost *host;
+    bool begunNow = false;
 
+    NoteRng1();
     if (SDL_AtomicGet(&sCore.state) == CORE_IDLE)
         StartLoading();
+    if (sControllerPendingCount > 0)
+        begunNow = TakeControllerRequests();
     if (!sAnim.active)
     {
         sPublished.valid = false;
@@ -593,56 +1152,33 @@ void BattleFx_OnFrameEnd(void)
         sPublished.valid = false;
         return;
     }
+    if (sAnim.controller && !begunNow)
+        sAnim.ticked = true; /* the controllers' animations advance every frame */
     if (sAnim.ticked)
     {
         sAnim.ticked = false;
         sAnim.gameFrames++;
-        if (!sAnim.hdEnded)
+        if (!sAnim.hdEnded && !StepCore(host))
         {
-            Uint64 t0 = SDL_GetPerformanceCounter();
-            int r = BfxHost_Step(host);
-            double ms;
-
-            if (r < 0)
-            {
-                FailAnimation("step");
-                sPublished.valid = false;
-                return;
-            }
-            if (r == 0)
-            {
-                sAnim.hdEnded = true;
-                sAnim.packetValid = false;
-            }
-            else
-            {
-                sAnim.packet.serial = sAnim.serial;
-                if (!BfxHost_Frame(host, -1, &sAnim.packet))
-                {
-                    FailAnimation("frame");
-                    sPublished.valid = false;
-                    return;
-                }
-                sAnim.packet.hideBg = (uint8_t)(BfxHost_CallGlobalInt(host, "BFX_GAME_HIDDEN_BGS", 0) & 0x06);
-                sAnim.hdFrames++;
-                sAnim.packetValid = true;
-                BfxHost_DrainSounds(host);
-#ifdef BATTLEFX_TEST
-                BattleFxTest_AfterStep(host, sAnim.serial, sAnim.hdFrames);
-#endif
-            }
-            ms = (SDL_GetPerformanceCounter() - t0) * 1000.0 / SDL_GetPerformanceFrequency();
-            sAnim.stepMs += ms;
-            if (ms > sAnim.worstStepMs)
-                sAnim.worstStepMs = ms;
+            sPublished.valid = false;
+            return;
         }
     }
     sPublished.valid = sAnim.packetValid;
     if (sAnim.packetValid)
         sPublished.packet = sAnim.packet;
+    if (sAnim.controller)
+    {
+        /* Nothing in the game waits for these: they end with the core's (or at a
+         * limit, should the game's send-out stall). */
+        if (sAnim.hdEnded)
+            EndAnimation("the core's animation ended");
+        else if (sAnim.gameFrames > CONTROLLER_MAX_FRAMES)
+            EndAnimation("too long");
+    }
     /* The game's animation has ended: so has the core's (its last frame is
      * still published, for the picture of this frame). */
-    if (!gAnimScriptActive)
+    else if (!gAnimScriptActive)
         EndAnimation(sAnim.hdEnded ? "both ended" : "the game's animation ended first");
 }
 
@@ -651,6 +1187,7 @@ void BattleFx_OnFrameEnd(void)
 void BattleFx_BeginOam(void)
 {
     memset(sEffectOamPending, 0, sizeof(sEffectOamPending));
+    memset(sBattlerOamPending, 0xFF, sizeof(sBattlerOamPending));
 }
 
 /* The graphics an animation's effect sprites use, all drawn by Battle FX's
@@ -676,7 +1213,13 @@ static bool IsEffectTag(u16 tag)
 
 void BattleFx_MarkOam(const struct Sprite *sprite, uint8_t first, uint8_t end)
 {
-    if (!gMain.inBattle || sprite->template == NULL || !IsEffectTag(sprite->template->tileTag))
+    if (!gMain.inBattle)
+        return;
+    if (end == first + 1)
+        for (u32 b = 0; b < gBattlersCount && b < MAX_BATTLERS_COUNT; b++)
+            if (sprite == &gSprites[gBattlerSpriteIds[b]])
+                sBattlerOamPending[b] = first;
+    if (sprite->template == NULL || !IsEffectTag(sprite->template->tileTag))
         return;
     for (unsigned i = first; i < end && i < 128; ++i)
         sEffectOamPending[i >> 5] |= 1u << (i & 31);
@@ -685,6 +1228,77 @@ void BattleFx_MarkOam(const struct Sprite *sprite, uint8_t first, uint8_t end)
 void BattleFx_LatchOam(void)
 {
     memcpy(sEffectOam, sEffectOamPending, sizeof(sEffectOam));
+    memcpy(sBattlerOam, sBattlerOamPending, sizeof(sBattlerOam));
+}
+
+/* A battler's sprite as the GBA renderer draws it from OAM entry `index`
+ * (gba_easy_draw.c DrawSprites: the same size, matrix and tile rules). */
+static void DecodeBattler(struct BattleFxGameBattler *out, int index)
+{
+    const struct OamData *oam = &((const struct OamData *)OAM)[index];
+    static const uint8_t sizes[3][4][2] = {
+        {{8, 8}, {16, 16}, {32, 32}, {64, 64}},
+        {{16, 8}, {32, 8}, {32, 16}, {64, 32}},
+        {{8, 16}, {8, 32}, {16, 32}, {32, 64}},
+    };
+    const uint8_t *tiles = (const uint8_t *)VRAM_ + 0x10000;
+    const uint16_t *pal;
+    int w, h;
+
+    out->shown = false;
+    if (oam->shape > 2 || oam->objMode == ST_OAM_OBJ_WINDOW || oam->bpp
+     || (!(oam->affineMode & 1) && (oam->affineMode & 2)) || !(REG_DISPCNT & DISPCNT_OBJ_ON)
+     || !(REG_DISPCNT & DISPCNT_OBJ_1D_MAP))
+        return;
+    w = sizes[oam->shape][oam->size][0];
+    h = sizes[oam->shape][oam->size][1];
+    if (w > BFX_GAME_SPRITE_MAX || h > BFX_GAME_SPRITE_MAX)
+        return;
+    out->w = w;
+    out->h = h;
+    out->x = oam->x >= DISPLAY_WIDTH ? (int)oam->x - 512 : (int)oam->x;
+    out->y = oam->y >= DISPLAY_HEIGHT ? (int)oam->y - 256 : (int)oam->y;
+    out->affine = oam->affineMode & 1;
+    out->doubleSize = out->affine && (oam->affineMode & 2);
+    out->hflip = !out->affine && ((oam->matrixNum >> 3) & 1);
+    out->vflip = !out->affine && ((oam->matrixNum >> 4) & 1);
+    if (out->affine)
+    {
+        const struct OamData *mat = (const struct OamData *)OAM + oam->matrixNum * 4;
+        out->m[0] = (int16_t)mat[0].affineParam;
+        out->m[1] = (int16_t)mat[1].affineParam;
+        out->m[2] = (int16_t)mat[2].affineParam;
+        out->m[3] = (int16_t)mat[3].affineParam;
+    }
+    else
+    {
+        out->m[0] = 0x100;
+        out->m[1] = 0;
+        out->m[2] = 0;
+        out->m[3] = 0x100;
+    }
+    out->objMode = oam->objMode;
+    out->priority = oam->priority;
+    pal = (const uint16_t *)(PLTT + 0x200) + oam->paletteNum * 16;
+    for (int ty = 0; ty < h; ty++)
+        for (int tx = 0; tx < w; tx++)
+        {
+            int block = (ty / 8) * (w / 8) + tx / 8;
+            uint8_t byte = tiles[((block + oam->tileNum) * 32 + (ty % 8) * 4 + (tx % 8) / 2) & 0x7FFF];
+            int idx = (tx & 1) ? byte >> 4 : byte & 0xF;
+            uint8_t *px = &out->rgba[(ty * BFX_GAME_SPRITE_MAX + tx) * 4];
+
+            if (idx == 0)
+            {
+                px[0] = px[1] = px[2] = px[3] = 0;
+                continue;
+            }
+            px[0] = (uint8_t)((pal[idx] & 0x1F) * 255 / 31);
+            px[1] = (uint8_t)(((pal[idx] >> 5) & 0x1F) * 255 / 31);
+            px[2] = (uint8_t)(((pal[idx] >> 10) & 0x1F) * 255 / 31);
+            px[3] = 255;
+        }
+    out->shown = true;
 }
 
 /* ── Frame boundary ───────────────────────────────────────────────────── */
@@ -699,6 +1313,12 @@ void BattleFx_FrameBoundary(bool view3d, uint32_t skipObj[4], uint8_t *hideBg)
         return;
 #endif
     *hideBg |= BattleFxGL_ShowingHiddenBgs();
+    for (u32 b = 0; b < MAX_BATTLERS_COUNT; b++)
+        if (sBattlerOam[b] < 128)
+            DecodeBattler(&sGameBattlers[b], sBattlerOam[b]);
+        else
+            sGameBattlers[b].shown = false;
+    BattleFxGL_TakeBattlers(sGameBattlers);
     if (BattleFxGL_ShowingPixelEffects() > 0)
         return; /* the core still draws some effect sprite as GBA pixel art: the game's stay */
     for (int i = 0; i < 4; i++)

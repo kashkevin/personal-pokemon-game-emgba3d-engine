@@ -130,6 +130,8 @@ int BfxHost_CallGlobalInt(struct BfxHost *host, const char *fn, int fallback);
  * "controller") and number. NULL when absent. */
 const char *BfxHost_MoveId(const struct BfxHost *host, int number);
 const char *BfxHost_AnimId(const struct BfxHost *host, const char *kind, int number);
+/* The other way round: a battle animation id's kind and number; false when absent. */
+bool BfxHost_AnimKindNumber(const struct BfxHost *host, const char *id, const char **kind, int *number);
 const char *BfxHost_LastError(const struct BfxHost *host);
 double BfxHost_LastCallMs(const struct BfxHost *host);
 

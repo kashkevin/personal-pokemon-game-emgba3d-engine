@@ -809,6 +809,20 @@ const char *BfxHost_AnimId(const struct BfxHost *host, const char *kind, int num
     return NULL;
 }
 
+bool BfxHost_AnimKindNumber(const struct BfxHost *host, const char *id, const char **kind, int *number)
+{
+    if (host == NULL)
+        return false;
+    for (int i = 0; i < host->animIdCount; i++)
+        if (strcmp(host->animIds[i].id, id) == 0)
+        {
+            *kind = host->animIds[i].kind;
+            *number = host->animIds[i].num;
+            return true;
+        }
+    return false;
+}
+
 const char *BfxHost_LastError(const struct BfxHost *host)
 {
     return host ? host->error : "no host";

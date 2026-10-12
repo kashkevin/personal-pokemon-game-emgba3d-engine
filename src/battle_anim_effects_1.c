@@ -4067,8 +4067,24 @@ void AnimTask_ShrinkTargetCopy(u8 taskId)
         gTasks[taskId].data[14] = gSprites[spriteId].oam.priority;
         gSprites[spriteId].oam.priority = GetBattlerSpriteBGPriority(gBattleAnimTarget);
         spriteId = GetAnimBattlerSpriteId(ANIM_DEF_PARTNER);
+#ifdef PORTABLE
+        // Mimic's animation, with no target partner (any single battle): spriteId is
+        // SPRITE_NONE (255) and gSprites has 65 entries. On the GBA the two lines below
+        // read and write 2 bits 13 KiB past the sprite table in EWRAM; natively that is
+        // past the end of the game's memory - a segmentation fault (Linux build) or 2
+        // bits of the import table (Windows build). There is no partner sprite to
+        // raise, so nothing to do.
+        if (spriteId != SPRITE_NONE)
+        {
+            gTasks[taskId].data[15] = gSprites[spriteId].oam.priority;
+            gSprites[spriteId].oam.priority = GetBattlerSpriteBGPriority(GetPartnerBattler(gBattleAnimTarget));
+        }
+#else
+#line 4070 // gba-line
         gTasks[taskId].data[15] = gSprites[spriteId].oam.priority;
         gSprites[spriteId].oam.priority = GetBattlerSpriteBGPriority(GetPartnerBattler(gBattleAnimTarget));
+#endif
+#line 4072 // gba-line
         gTasks[taskId].data[0] = cmd->unk0;
         gTasks[taskId].data[1] = cmd->unk1;
         gTasks[taskId].data[11] = 0x100;
@@ -4107,7 +4123,14 @@ static void AnimTask_DuplicateAndShrinkToPos_Step2(u8 taskId)
             gSprites[spriteId].y2 = 0;
             gSprites[spriteId].oam.priority = gTasks[taskId].data[14];
             spriteId = GetAnimBattlerSpriteId(ANIM_DEF_PARTNER);
+#ifdef PORTABLE
+            if (spriteId != SPRITE_NONE) // no partner: AnimTask_ShrinkTargetCopy (above)
+                gSprites[spriteId].oam.priority = gTasks[taskId].data[15];
+#else
+#line 4110 // gba-line
             gSprites[spriteId].oam.priority = gTasks[taskId].data[15];
+#endif
+#line 4111 // gba-line
             gTasks[taskId].data[0]++;
             return;
         }
