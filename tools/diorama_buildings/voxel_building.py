@@ -890,8 +890,12 @@ class Relief:
 
     def __init__(self, name, art, height, side, hull=0, bridge=0, foot=None, solid=False,
                  back=None, top_tile=None, against=False, seam=None, flank_tile=None,
-                 seam_x=((), ()), fill=None):
+                 seam_x=((), ()), fill=None, lid=None):
         self.name, self.art, self.height, self.side = name, art, height, side
+        # `lid` [(x0, x1)], project-owned (dimensional.py): the columns a real
+        # roof covers. Their walls stand as before; their top - the drawn roof
+        # laid flat - is left to the roof.
+        self.lid = lid or ()
         # A block of a longer run (a railing cut into blocks): `seam` is
         # (rows, open_s, open_n). The art's rows from `rows` on are the run
         # going on south, which this block's top covers; the columns in
@@ -1022,10 +1026,13 @@ class Relief:
             for (z0, z1, top), (zd, _, _, va) in zip(solid(cols[u]), drawn(cols[u])):
                 x0, x1 = float(u), float(u1)
                 zt = max(zd, z0)
-                if z1 > zt:
+                roofed = top == H and any(a <= u and u1 <= b for (a, b) in self.lid)
+                if roofed:
+                    pass    # the roof (dimensional.py) is its top
+                elif z1 > zt:
                     quad = [(x0, top, zt), (x1, top, zt), (x1, top, z1), (x0, top, z1)]
                     mesh.poly([(x, y, z, x, z - y) for (x, y, z) in quad], SHADE_ART, n + ".top")
-                if z0 > zd:
+                if z0 > zd and not roofed:
                     # A desk against the wall drawn with more top than there is
                     # floor in front of the wall: the rows behind the wall's
                     # face stand up against it, along their own lines of
@@ -1037,7 +1044,9 @@ class Relief:
                     quad = [(x0, top, zr), (x1, top, zr), (x1, rise, zr), (x0, rise, zr)]
                     mesh.poly([(x, y, z, x, z - y) for (x, y, z) in quad], SHADE_ART,
                               n + ".riser")
-                if zd > z0 and self.top_tile is not None:
+                if roofed:
+                    pass
+                elif zd > z0 and self.top_tile is not None:
                     face = [(x0, 0.0), (x1, 0.0), (x1, zd - z0), (x0, zd - z0)]
                     for piece in tile_pieces(face, self.top_tile, None, None):
                         mesh.poly([(s, top, zd - t, uu, vv) for (s, t, uu, vv) in piece],
@@ -1604,7 +1613,7 @@ class Raster:
         return img
 
 
-def ortho_check(model, out_png=None, exact=None, margin=32, reference=None):
+def ortho_check(model, out_png=None, exact=None, margin=32, reference=None, ignore=()):
     """Render the model in the GBA projection and compare it with the art.
 
     `exact` lists art rectangles (x0, y0, x1, y1[, behind]) the model must
@@ -1641,11 +1650,21 @@ def ortho_check(model, out_png=None, exact=None, margin=32, reference=None):
         for x in range(W + 2 * M):
             c = dpx[x, y]
             dpx[x, y] = (c[0] // 3, c[1] // 3, c[2] // 3)
+    # `ignore` (project-owned, dimensional.py): art rectangles a facade
+    # detail changed on purpose - a window set back, a door's frame - and
+    # the pixels round them its reveals and sill take
+    skip = set()
+    for (ix0, iy0, ix1, iy1) in ignore:
+        for y in range(max(0, int(iy0) - 4), min(H, int(math.ceil(iy1)) + 4)):
+            for x in range(max(0, int(ix0) - 3), min(W, int(math.ceil(ix1)) + 3)):
+                skip.add((x, y))
     for region in regions:
         rx0, ry0, rx1, ry1 = region[:4]
         behind = len(region) > 4 and region[4]
         for y in range(ry0, ry1):
             for x in range(rx0, rx1):
+                if (x, y) in skip:
+                    continue
                 r, g, b, a = apx[x, y]
                 idx = (y + M) * ras.w + x + M
                 got = ras.owner[idx]

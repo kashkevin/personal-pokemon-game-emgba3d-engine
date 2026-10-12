@@ -91,9 +91,26 @@ OVERRIDES = {
     ("Route113", 33, 5): {"cols": (32, 35), "facade": 24},   # the glass workshop
     # Slateport's museum: the sea wall along its back is not its roof.
     ("SlateportCity", 30, 26): {"top": 23},
-    # Not buildings: a door in a cliff under Trainer Hill, Sky Pillar's top.
-    ("Route111", 31, 113): {"skip": True},
+    # Not buildings: Sky Pillar's top.
     ("SkyPillar_Top", 16, 14): {"skip": True},
+    # Landmarks the search runs on from into the walls, cliffs and roads
+    # round them (graphics overhaul, the owner's option B): bounded by hand.
+    ("BattleFrontier_OutsideEast", 58, 14): {"top": 6, "cols": (51, 65), "facade": 16},  # the Pyramid
+    ("BattleFrontier_OutsideEast", 5, 8): {"top": 6, "cols": (4, 6)},     # Lounge 6
+    ("Route112", 28, 27): {"top": 23, "cols": (27, 32)},    # the cable car station
+    ("MtChimney", 17, 36): {"top": 32, "cols": (14, 19)},   # the cable car station
+    ("Route110", 11, 66): {"top": 61, "cols": (9, 13)},     # the Trick House
+    # Not a building: Trainer Hill's door is cut into the cliff under it
+    # (the tower: LANDMARKS).
+    ("Route111", 31, 113): {"skip": True},
+    # Mossdeep's houses: an upper storey behind its veranda, a flat roof
+    # with a railing (ROOFS).
+    ("MossdeepCity", 28, 9): {"facade": 40},
+    ("MossdeepCity", 67, 25): {"facade": 40},
+    ("MossdeepCity", 49, 6): {"facade": 40},
+    ("MossdeepCity", 19, 10): {"facade": 40},
+    ("MossdeepCity", 18, 16): {"facade": 40},
+    ("MossdeepCity", 36, 24): {"facade": 56},
 }
 # Maps whose doors are cut into the rock round them (Sootopolis's crater):
 # the door search runs on into the rock. Their houses are found by their
@@ -106,8 +123,73 @@ SKIP_MAPS = {"SootopolisCity"}
 # (a Relief read off its drawing), whether it has a door or not.
 CRATER_HOUSES = {
     "SootopolisCity": {"tops": {0x201: "tower", 0x208: "tower", 0x24B: "box", 0x205: "box"},
-                       "tips": {0x238, 0x239}, "size": (3, 4)},
+                       "tips": {0x238, 0x239}, "size": (3, 4),
+                       # an octagonal pyramid over the tower (dimensional.py)
+                       "roofs": {"tower": {"type": "pyramid8", "rise": 1.1, "cut": 0.3},
+                                 "box": {"type": "flat"}}},
 }
+
+
+# Real roofs (dimensional.py, the owner's option B of 2026-10-12), by map and
+# by door: "pitched" lays a hipped roof with a ridge from the drawn roof's
+# courses over the building's cells. A map's "default" covers its other
+# doors; a building not listed keeps its drawing laid flat on top.
+# A Battle Tent: its dome down to the ground, its entrance standing out.
+# `dx`: where its 80 pixels start in the drawing; `top`: rows over it that
+# are not it (Fallarbor's ledge).
+def tent(dx=0, top=0):
+    return {"type": "tent", "cols": (dx, dx + 80), "top": top, "porch": (dx + 24, dx + 56),
+            "porch_depth": 16, "porch_height": 28, "rim": 6, "rise": 1.25, "power": 0.6,
+            "dome_end": 60}
+
+
+TENT = tent()
+# Landmarks with no door on their own cells: (map, x, y, w, h, facade,
+# roof). Trainer Hill stands on the rock over its door (Route 111, 31, 113),
+# which is cut into the cliff below it.
+LANDMARKS = [
+    ("Route111", 29, 106, 5, 5, 30, {"type": "pyramid8", "rise": 0.5, "cut": 0.3}),
+]
+ROOFS = {
+    "DewfordTown": {"default": "pitched"},
+    "LilycoveCity": {"default": "pitched",
+                     (27, 6): "flat",   # the department store
+                     (11, 5): "flat",   # the museum
+                     (37, 24): None},   # the Cove Lily Motel
+    "SlateportCity": {"default": "pitched",
+                      (10, 12): TENT,
+                      (30, 26): "flat"},  # the museum
+    "VerdanturfTown": {"default": "pitched", (3, 7): TENT},
+    "FallarborTown": {"default": "pitched", (8, 7): tent(16, 6)},
+    "FortreeCity": {"default": {"type": "dome", "rise": 0.7, "power": 0.8}},   # the canopies
+    "Route110": {(11, 66): "pitched"},      # the Trick House
+    "Route112": {(28, 27): "pitched"},      # the cable car station
+    "MtChimney": {(17, 36): "pitched"},
+    "MossdeepCity": {"default": {"type": "flat", "rise": 6}, (64, 15): "flat"},
+    "EverGrandeCity": {(18, 5): "flat"},    # the Pokemon League
+    "Route121": {(37, 5): "flat"},          # the Safari Zone's gate
+    "SafariZone_South": {(32, 33): "flat"},
+    "PacifidlogTown": {"default": {"type": "cone", "rise": 0.9}},
+    "Route111": {(19, 58): {"type": "dome", "rise": 0.8}},     # the old couple's hut
+    "MauvilleCity": {(35, 5): "pitched",
+                     (8, 13): "flat",          # the Game Corner
+                     # the bike shop and its neighbour, drawn as one
+                     (32, 14): {"type": "split", "parts": [((0, 80), "pitched"),
+                                                           ((80, 160), "flat")]}},
+    "Route109": {"default": "pitched"},
+    "BattleFrontier_OutsideEast": {(39, 29): "pitched",      # the Battle Arena
+                                   (58, 14): {"type": "pyramid4", "rise": 0.9},  # the Pyramid
+                                   (5, 8): "flat"},
+}
+
+
+def roof_of(map_name, door):
+    """The roof (a dict for dimensional.py) a building gets, or None."""
+    table = ROOFS.get(map_name, {})
+    kind = table.get(tuple(door), table.get("default"))
+    if isinstance(kind, dict):
+        return dict(kind)
+    return {"type": kind} if kind else None
 
 
 def behaviours():
@@ -349,6 +431,10 @@ def auto_specs(taken, only_map=None):
         if data["name"] in CRATER_HOUSES:
             specs += crater_specs(Map(data, index_of[data["layout"]]), data,
                                   taken.get(data["layout"], set()), done)
+        for (lm_map, lx, ly, lw, lh, facade, roof) in LANDMARKS:
+            if lm_map == data["name"]:
+                specs += landmark_spec(Map(data, index_of[data["layout"]]), data, lx, ly, lw, lh,
+                                       facade, roof, done)
         if data["name"] in SKIP_MAPS:
             continue
         map_ = None
@@ -396,6 +482,9 @@ def auto_specs(taken, only_map=None):
             band = roof_band(h * 16 - height)
             if band is not None:
                 relief["fill"] = band
+            roof = roof_of(data["name"], (x, y))
+            if roof is not None:
+                relief["roof"] = roof
             specs.append({
                 "name": "auto_%s_%d_%d" % (data["name"].lower(), x, y),
                 "layout": data["layout"],
@@ -405,6 +494,25 @@ def auto_specs(taken, only_map=None):
                 "relief": relief,
             })
     return specs
+
+
+def landmark_spec(map_, data, x, y, w, h, facade, roof, done):
+    """The spec of a LANDMARKS building: its rectangle's cells, read off its
+    own drawing like any other house."""
+    cells = {(x + i, y + j) for j in range(h) for i in range(w)}
+    for c in cells:
+        done.add((data["layout"], c[0], c[1]))
+    ground = ground_of(map_, cells)
+    (x0, y0, bw, bh), owned, _, img = building_art(map_, cells, ground)
+    relief = {"height": facade, "back": 0, "auto": True, "roof": dict(roof)}
+    return [{
+        "name": "auto_%s_landmark_%d_%d" % (data["name"].lower(), x, y),
+        "layout": data["layout"],
+        "rect": (x0, y0, bw, bh),
+        "ground": ground,
+        "owned": owned,
+        "relief": relief,
+    }]
 
 
 def crater_specs(map_, data, taken, done):
@@ -434,6 +542,8 @@ def crater_specs(map_, data, taken, done):
             band = roof_band(bh * 16 - height)
             if band is not None:
                 relief["fill"] = band
+            if kind in kinds.get("roofs", {}):
+                relief["roof"] = dict(kinds["roofs"][kind])
             specs.append({
                 "name": "auto_%s_%s_%d_%d" % (data["name"].lower(), kind, x, y),
                 "layout": data["layout"],
