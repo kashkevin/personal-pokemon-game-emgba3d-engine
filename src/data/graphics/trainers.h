@@ -583,7 +583,11 @@ const union AnimCmd *const sBackAnims_OldManPokedude[] = {
         .animation = anim,                                                                   \
     }}
 
-const struct TrainerPicInfo gTrainerPicInfo[TRAINER_PIC_COUNT] =
+#ifdef PORTABLE
+#include "../character_customization/trainer_pics.h"
+#endif
+#line 586 // gba-line
+const struct TrainerPicInfo gTrainerPicInfo[TRAINER_PIC_TABLE_COUNT] =
 {
     [TRAINER_PIC_NONE] =
     {
@@ -1226,4 +1230,8 @@ const struct TrainerPicInfo gTrainerPicInfo[TRAINER_PIC_COUNT] =
     {
         .frontPic = TRAINER_FRONT_PIC(gTrainerFrontPic_PainterFrlg, gTrainerPalette_PainterFrlg),
     },
+#ifdef PORTABLE
+    CHARCUSTOM_TRAINER_PIC_INFOS // the character selection (character_customization.h)
+#endif
+#line 1229 // gba-line
 };

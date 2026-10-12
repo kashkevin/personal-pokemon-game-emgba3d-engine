@@ -215,7 +215,7 @@ extern const union AnimCmd sAnim_GeneralFrame0[];
 extern const union AnimCmd sAnim_GeneralFrame3[];
 extern const union AnimCmd *const gAnims_MonPic[];
 extern const union AnimCmd *const gAnims_Trainer[];
-extern const struct TrainerPicInfo gTrainerPicInfo[TRAINER_PIC_COUNT];
+extern const struct TrainerPicInfo gTrainerPicInfo[TRAINER_PIC_TABLE_COUNT];
 
 extern const struct Trainer gTrainers[DIFFICULTY_COUNT][TRAINERS_COUNT];
 extern const struct Trainer gBattlePartners[DIFFICULTY_COUNT][PARTNER_COUNT];
@@ -357,7 +357,7 @@ static inline const u64 GetTrainerAIFlagsFromId(u16 trainerId)
 
 static inline enum TrainerPicID SanitizeTrainerPic(enum TrainerPicID trainerPicId)
 {
-    assertf(trainerPicId < TRAINER_PIC_COUNT, "trainerPicId %d out of range", trainerPicId)
+    assertf(trainerPicId < TRAINER_PIC_TABLE_COUNT, "trainerPicId %d out of range", trainerPicId)
     {
         return TRAINER_PIC_NONE;
     };
@@ -423,5 +423,22 @@ static inline const u16 *GetTrainerBackPicPalette(enum TrainerPicID trainerPic)
 {
     return gTrainerPicInfo[SanitizeBackTrainerPic(trainerPic)].backPic->paletteData;
 }
+
+// The local player's trainer pictures. The native PC build shows the chosen
+// character's (character_customization.c); the GBA build expands these to the
+// engine's original calls.
+#ifdef PORTABLE
+enum TrainerPicID CharCustom_LocalBackTrainerPic(enum Gender gender, enum GameVersion version);
+enum TrainerPicID CharCustom_LocalFrontTrainerPic(enum Gender gender);
+enum TrainerPicID CharCustom_LinkBackTrainerPic(u32 linkPlayer);
+void CharCustom_SetupTrainerBackSprite(u8 spriteId, u16 trainerPicId);
+#define LOCAL_PLAYER_BACK_PIC(gender, version) CharCustom_LocalBackTrainerPic(gender, version)
+#define LOCAL_PLAYER_FRONT_PIC(gender) CharCustom_LocalFrontTrainerPic(gender)
+#define LOCAL_PLAYER_HOF_PIC(gender) CharCustom_LocalFrontTrainerPic(gender)
+#else
+#define LOCAL_PLAYER_BACK_PIC(gender, version) GetPlayerTrainerPic(gender, version)
+#define LOCAL_PLAYER_FRONT_PIC(gender) PlayerGenderToFrontTrainerPicId(gender)
+#define LOCAL_PLAYER_HOF_PIC(gender) PlayerGenderToFrontTrainerPicId_Debug(gender, TRUE)
+#endif
 
 #endif // GUARD_DATA_H

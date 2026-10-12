@@ -24,4 +24,10 @@ void MultiplayerAppearance_OpenEditor(void);
 bool32 MultiplayerAppearance_IsEditorActive(void);
 void MultiplayerAppearance_BuildPalette(const u16 *base, bool32 isMay, const u8 *look, u16 *out);
 
+#ifdef PORTABLE
+// The look the local player shows: the one being edited while the style editor
+// is open, else the saved one (src/character_customization.c keeps it in the save).
+const u8 *MultiplayerAppearance_GetLocalLook(void);
+#endif
+
 #endif // GUARD_MULTIPLAYER_APPEARANCE_H

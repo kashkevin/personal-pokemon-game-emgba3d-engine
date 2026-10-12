@@ -2646,7 +2646,7 @@ static void Mugshots_CreateTrainerPics(struct Task *task)
         SetOamMatrixRotationScaling(partnerSprite->oam.matrixNum, -512, 512, 0);
     }
 
-    task->tPlayerSpriteId = CreateTrainerSprite(PlayerGenderToFrontTrainerPicId(gSaveBlock2Ptr->playerGender),
+    task->tPlayerSpriteId = CreateTrainerSprite(LOCAL_PLAYER_FRONT_PIC(gSaveBlock2Ptr->playerGender),
                                                 DISPLAY_WIDTH + 32,
                                                 106,
                                                 0, NULL);
