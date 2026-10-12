@@ -1229,6 +1229,40 @@ static bool UploadChunk(struct GLTerrainChunk *chunk,
     if (!DioramaTerrain_BuildChunk(input, sScratchVertices,
                                    DIORAMA_TERRAIN_MAX_VERTICES, &mesh))
         return false;
+    {
+        /* PKMN_DIORAMA_CHUNK_LOG=1: what each chunk built costs (development). */
+        static int sChunkLog = -1;
+
+        if (sChunkLog < 0)
+        {
+            const char *value = SDL_getenv("PKMN_DIORAMA_CHUNK_LOG");
+
+            sChunkLog = value != NULL && value[0] == '1';
+        }
+        if (sChunkLog)
+        {
+            unsigned mountain = 0, terrace = 0, cells = 0, i;
+
+            for (i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
+            {
+                const struct DioramaTerrainCell *cell = &input->cells[i];
+
+                if (!cell->present)
+                    continue;
+                cells++;
+                if (cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART)
+                {
+                    mountain++;
+                    terrace += cell->terraceProfile != DIORAMA_TERRACE_NONE;
+                }
+            }
+            SDL_Log("Diorama: chunk %d,%d: %u vertices, faces top %u bottom %u side %u, "
+                    "spans %u, compressed %u, cells %u (mountain art %u, terraced %u)",
+                    input->chunkX, input->chunkY, mesh.vertexCount, mesh.topFaceCount,
+                    mesh.bottomFaceCount, mesh.sideFaceCount, mesh.occupancySpanCount,
+                    mesh.usedCompressedOccupancy, cells, mountain, terrace);
+        }
+    }
     if (chunk->vertexArray == 0)
     {
         dglGenVertexArrays(1, &chunk->vertexArray);
