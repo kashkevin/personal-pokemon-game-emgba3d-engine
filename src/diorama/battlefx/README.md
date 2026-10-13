@@ -126,13 +126,17 @@ copy of the window and the composite stay at its resolution.
 `quality=auto` (the player builds' default) draws them in full and decides on this PC's own
 measurements, at the frame boundaries (`bfx_game.c` `PaceCheck`), never on a fixed number of
 milliseconds: per half second (30 game frames with HD layers, after an animation's first 6
-pictures) the renderer counts the game frames whose pictures were never presented and times its
-layers on the GPU (timer queries; the CPU's time where a driver has none) - `BattleFxGL_Pace`.
+pictures) the renderer counts the game frames whose pictures were never presented, times the
+presents against the clock and times its layers on the GPU (timer queries; the CPU's time where a
+driver has none) - `BattleFxGL_Pace`.
 
-- The game's pace kept (at most one frame unseen in 30): nothing changes, however much the HD
-  layers cost. A PC that keeps up - every graphics card with room for them - is never lowered.
-- Frames unseen, and the HD layers could close much of the gap (their cost at least half the
-  pictures' lateness, or a quarter of each picture): the next tier down, from this picture on.
+- The game's pace kept (at most one frame unseen in 30, and at least three quarters of the game's
+  60 frames shown a second of the clock - below about 12 pictures a second the game slows rather
+  than leaving frames unseen): nothing changes, however much the HD layers cost. A PC that keeps
+  up - every graphics card with room for them - is never lowered.
+- Frames unseen (or a slide show), and the HD layers could close much of the gap (their cost at
+  least half the pictures' lateness, or a quarter of each picture): the next tier down, from this
+  picture on.
 - Frames unseen and the HD layers a smaller but real part (a tenth of a game frame, 1.7 ms, or
   more): the next tier down on trial (with VSync a picture a little too slow waits for the next
   refresh, so the time between pictures says less than the work does); if the next half second

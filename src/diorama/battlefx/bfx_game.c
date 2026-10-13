@@ -2616,8 +2616,9 @@ static struct CoreSlot *WaitForFrame(int within, Uint32 ms)
 /* ── Quality (BattleFx_Quality; src/diorama/battlefx/README.md, "Quality") ──
  *
  * auto: the HD effects are drawn in full, and only when the game's own pictures fall behind while they draw - game
- * frames the window never shows (BattleFxGL_Pace: a game frame drawn over by the next before any present showed it)
- * - and the HD layers are a part of why (their cost measured on this PC: GPU timer queries), the next tier down is
+ * frames the window never shows (BattleFxGL_Pace: a game frame drawn over by the next before any present showed it),
+ * or fewer game frames shown a second than the game's rate (a slide show: the game slowed instead) - and the HD
+ * layers are a part of why (their cost measured on this PC: GPU timer queries), the next tier down is
  * drawn: at once when their cost could close much of the gap, on trial (undone when it does not help) when it is
  * smaller but not negligible. Below the lowest tier the animation plays its GBA effects, and after DRAW_SLOW_MAX
  * of those the battle does (sHdOff). A PC that keeps the game's pace - every powerful graphics card - is never
@@ -2626,6 +2627,10 @@ static struct CoreSlot *WaitForFrame(int within, Uint32 ms)
 #define GAME_FRAME_MS (1000.0 / 59.7275)
 #define PACE_FRAMES 30   /* game frames with HD layers a decision looks at (half a second) */
 #define PACE_SKIPS_OK 1  /* ... of them unseen and still keeping the pace (a stray hitch) */
+#define PACE_RATE_KEPT 0.75 /* ... and the game frames shown a second of the clock at least this share of the game's
+                             * rate: below about 12 presents a second the game slows instead of leaving frames
+                             * unseen (sdl2.c runs one game frame a present then), so unseen frames alone would call
+                             * a slide show the game's pace */
 #define PACE_RAISE_FRAMES 300
 static struct
 {
@@ -2717,7 +2722,14 @@ static void PaceCheck(void)
     BattleFxGL_Pace(&p);
     if (p.serial != sShow.want.serial || p.tier != sQuality.tier || p.gameFrames < PACE_FRAMES)
         return;
-    if (p.skipped <= PACE_SKIPS_OK)
+    if (p.presents == 0 || p.presentMs <= 0.0)
+    {
+        BattleFxGL_PaceReset(); /* no picture of this window timed (each over a second after the last: a pause) */
+        return;
+    }
+    /* the game frames shown a second of the clock (the presents' time spans the window's game frames) */
+    shown = 1000.0 * (double)(p.gameFrames - p.skipped) / p.presentMs;
+    if (p.skipped <= PACE_SKIPS_OK && shown >= PACE_RATE_KEPT * 59.7275)
     {
         /* the game's pace kept */
         if (sQuality.trialFrom >= 0)
@@ -2735,8 +2747,9 @@ static void PaceCheck(void)
     if (p.hdMs < 0.0 && p.gameFrames < 4 * PACE_FRAMES)
         return; /* the HD layers' cost not measured yet (timer query results come a few pictures late) */
     sQuality.badFrames += p.gameFrames;
-    interval = p.presents > 0 ? p.presentMs / p.presents : 4.0 * GAME_FRAME_MS;
-    shown = 59.7275 * (double)(p.gameFrames - p.skipped) / (double)p.gameFrames;
+    interval = p.presentMs / p.presents;
+    if (shown > 59.7275)
+        shown = 59.7275; /* (a window's ends: a present's time can start before its first game frame) */
     deficit = interval - GAME_FRAME_MS;
     if (p.hdMs < 0.0)
         p.hdMs = p.plainMs > 0.0 && interval > p.plainMs ? interval - p.plainMs : 0.0;
