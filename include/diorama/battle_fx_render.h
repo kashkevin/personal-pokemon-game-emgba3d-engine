@@ -82,10 +82,11 @@ int BattleFxGL_Tier(void);
 const char *BattleFxGL_TierName(int tier);
 
 /* How the pictures with the HD layers keep the game's pace (main thread): measured from the frame boundaries
- * and the presents since BattleFxGL_PaceReset, for the animation shown (serial) at the tier drawn. */
+ * and the presents since BattleFxGL_PaceReset (or the tier last changed), across animations, each one's first
+ * pictures left out. */
 struct BattleFxPace
 {
-    uint32_t serial;
+    uint32_t serial;     /* the animation shown last */
     int tier;
     unsigned gameFrames; /* game frames whose picture had the HD layers (after the animation's first pictures) */
     unsigned skipped;    /* ... of them never presented: the game ran on without them being seen */

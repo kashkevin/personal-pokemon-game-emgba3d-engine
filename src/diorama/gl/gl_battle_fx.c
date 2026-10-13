@@ -208,6 +208,7 @@ struct Attach
     /* the shown body's box (texture space), a running mean over the frames of one look: the look's frames
      * (an idle animation) move a little and the effects should not shake with them */
     uint32_t look;
+    int gbaBox[4];                  /* the GBA picture's box when the look began */
     unsigned n;
     float box[4];
     /* the opaque box of the last frame scanned (frame space) */
@@ -282,6 +283,7 @@ static struct
     GLuint queries[8];
     uint32_t querySerial[8];
     int queryTier[8];
+    bool queryCounted[8]; /* in the pace's window (after its animation's first pictures) */
     int queryHead, queryPending;
     uint32_t statSerial;
     struct BattleFxRenderStats stats;
@@ -1396,16 +1398,18 @@ static void MeasureLook(int b)
     BoxToScreen(g, a->view.left + (a->fb[0] + a->fb[2]) * 0.5f, a->view.top + (a->fb[1] + a->fb[3]) * 0.5f, a->pivot);
     if (!GbaBox(g, gb))
         return;
-    /* one look: the same GBA picture's box and the same canvas (a new Pokemon, form or facing starts anew) */
-    look = Fnv(look, gb, sizeof(gb));
+    /* one look: the same canvas (each facing of a Pokemon has its own) and about the same GBA picture (a new
+     * Pokemon, form or facing starts anew; the GBA picture's own second frame, a pixel or two off, does not) */
     look = Fnv(look, &a->view.width, sizeof(a->view.width));
     look = Fnv(look, &a->view.height, sizeof(a->view.height));
     look = Fnv(look, &a->view.left, sizeof(a->view.left));
     look = Fnv(look, &a->view.top, sizeof(a->view.top));
-    if (look != a->look || a->n == 0)
+    if (look != a->look || a->n == 0 || abs(gb[0] - a->gbaBox[0]) > 4 || abs(gb[1] - a->gbaBox[1]) > 4
+     || abs(gb[2] - a->gbaBox[2]) > 4 || abs(gb[3] - a->gbaBox[3]) > 4)
     {
         a->look = look;
         a->n = 0;
+        memcpy(a->gbaBox, gb, sizeof(a->gbaBox));
     }
     cur[0] = (float)(a->view.left + a->fb[0]);
     cur[1] = (float)(a->view.top + a->fb[1]);
@@ -2085,8 +2089,7 @@ static void PollQueries(void)
             if (ms > s.stats.gpuMsWorst)
                 s.stats.gpuMsWorst = ms;
         }
-        if (s.querySerial[tail] == s.pace.serial && s.queryTier[tail] == s.pace.tier
-         && s.pace.seen > PACE_WARMUP_PICTURES)
+        if (s.queryCounted[tail] && s.queryTier[tail] == s.pace.tier)
         {
             s.pace.gpuSamples++;
             s.pace.gpuMs += ns / 1.0e6;
@@ -2169,6 +2172,7 @@ static void DrawLayer(const struct BattleFxLayout *L, enum Layer which)
     {
         s.querySerial[s.queryHead] = f->serial;
         s.queryTier[s.queryHead] = s.tier;
+        s.queryCounted[s.queryHead] = f->serial == s.pace.serial && s.pace.seen > PACE_WARMUP_PICTURES;
         bglBeginQuery(GL_TIME_ELAPSED, s.queries[s.queryHead]);
     }
     glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawFb);
@@ -2354,7 +2358,7 @@ static void DrawLayer(const struct BattleFxLayout *L, enum Layer which)
             s.stats.cpuMsWorst = ms;
         if (f->serial == s.pace.serial && s.tier == s.pace.tier && s.pace.seen > PACE_WARMUP_PICTURES)
         {
-            s.pace.layers++;
+            s.pace.layers++; /* (the window's presents and layers over the same pictures) */
             s.pace.cpuMs += ms;
         }
     }
@@ -2375,25 +2379,32 @@ static bool PictureHd(void)
     return true;
 }
 
-/* A new measuring window: animation `serial` at the tier drawn (its pictures counted on). */
-static void PaceWindow(uint32_t serial)
+/* A new measuring window at the tier drawn (BattleFxGL_PaceReset, a tier changed). */
+static void PaceWindow(void)
 {
-    if (serial != s.pace.serial)
-        s.pace.seen = 0;
-    s.pace.serial = serial;
     s.pace.tier = s.tier;
     s.pace.gameFrames = s.pace.skipped = s.pace.presents = s.pace.layers = s.pace.gpuSamples = 0;
     s.pace.presentMs = s.pace.gpuMs = s.pace.cpuMs = 0.0;
+}
+
+/* The picture shows animation `serial`: a new one's first pictures are not counted (its textures uploaded, its
+ * programs' first use); the window goes on across animations (a short animation counts too). */
+static void PaceAnimation(uint32_t serial)
+{
+    if (serial != s.pace.serial)
+    {
+        s.pace.serial = serial;
+        s.pace.seen = 0;
+    }
+    if (s.tier != s.pace.tier)
+        PaceWindow();
 }
 
 void BattleFxGL_PaceBoundary(bool view3d)
 {
     if (view3d && PictureHd())
     {
-        const struct Frame *f = &s.frames[s.show];
-
-        if (f->serial != s.pace.serial || s.tier != s.pace.tier)
-            PaceWindow(f->serial);
+        PaceAnimation(s.frames[s.show].serial);
         if (s.pace.seen > PACE_WARMUP_PICTURES)
         {
             s.pace.gameFrames++;
@@ -2416,10 +2427,7 @@ static void PacePresent(void)
         return; /* the battle's first present, or one after a pause (the window moved, the game held) */
     if (PictureHd())
     {
-        const struct Frame *f = &s.frames[s.show];
-
-        if (f->serial != s.pace.serial || s.tier != s.pace.tier)
-            PaceWindow(f->serial);
+        PaceAnimation(s.frames[s.show].serial);
         s.pace.seen++;
         if (s.pace.seen > PACE_WARMUP_PICTURES)
         {
@@ -2456,7 +2464,7 @@ void BattleFxGL_Pace(struct BattleFxPace *pace)
 
 void BattleFxGL_PaceReset(void)
 {
-    PaceWindow(s.pace.serial);
+    PaceWindow();
 }
 
 void BattleFxGL_DrawBack(const struct BattleFxLayout *layout)
