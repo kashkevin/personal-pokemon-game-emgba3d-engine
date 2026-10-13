@@ -208,6 +208,7 @@ struct Attach
     /* the shown body's box (texture space), a running mean over the frames of one look: the look's frames
      * (an idle animation) move a little and the effects should not shake with them */
     uint32_t look;
+    int gbaBox[4];                  /* the GBA picture's box when the look began */
     unsigned n;
     float box[4];
     /* the opaque box of the last frame scanned (frame space) */
@@ -1397,16 +1398,18 @@ static void MeasureLook(int b)
     BoxToScreen(g, a->view.left + (a->fb[0] + a->fb[2]) * 0.5f, a->view.top + (a->fb[1] + a->fb[3]) * 0.5f, a->pivot);
     if (!GbaBox(g, gb))
         return;
-    /* one look: the same GBA picture's box and the same canvas (a new Pokemon, form or facing starts anew) */
-    look = Fnv(look, gb, sizeof(gb));
+    /* one look: the same canvas (each facing of a Pokemon has its own) and about the same GBA picture (a new
+     * Pokemon, form or facing starts anew; the GBA picture's own second frame, a pixel or two off, does not) */
     look = Fnv(look, &a->view.width, sizeof(a->view.width));
     look = Fnv(look, &a->view.height, sizeof(a->view.height));
     look = Fnv(look, &a->view.left, sizeof(a->view.left));
     look = Fnv(look, &a->view.top, sizeof(a->view.top));
-    if (look != a->look || a->n == 0)
+    if (look != a->look || a->n == 0 || abs(gb[0] - a->gbaBox[0]) > 4 || abs(gb[1] - a->gbaBox[1]) > 4
+     || abs(gb[2] - a->gbaBox[2]) > 4 || abs(gb[3] - a->gbaBox[3]) > 4)
     {
         a->look = look;
         a->n = 0;
+        memcpy(a->gbaBox, gb, sizeof(a->gbaBox));
     }
     cur[0] = (float)(a->view.left + a->fb[0]);
     cur[1] = (float)(a->view.top + a->fb[1]);
