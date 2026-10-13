@@ -2903,6 +2903,22 @@ static void NativeUiNotePrinter(u8 windowId, const u8 *str)
     sNativeUiPrinterText[windowId][i] = EOS;
 }
 
+// window.c: a window removed (RemoveWindow), or all of them (InitWindows:
+// WINDOWS_MAX): their last strings go with them (a new window with the same id
+// shows nothing until something is printed on it).
+void TextPrinter_NativeUiForgetWindow(u32 windowId)
+{
+    u32 i;
+
+    for (i = 0; i < WINDOWS_MAX; i++)
+    {
+        if (windowId < WINDOWS_MAX && i != windowId)
+            continue;
+        sNativeUiPrinterStart[i] = NULL;
+        sNativeUiPrinterText[i][0] = EOS;
+    }
+}
+
 bool32 TextPrinter_NativeUiWindow(u8 windowId, const u8 **start, const u8 **current, bool8 *active)
 {
     struct TextPrinter *printer;

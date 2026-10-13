@@ -391,7 +391,18 @@ void UiText_ToAscii(char *dst, int size, const uint8_t *s)
         else if (c == 0xAB) out = '!';
         else if (c == 0xAD) out = '.';
         else if (c == 0xAE) out = '-';
-        else if (c == 0xB4) out = '\'';
+        else if (c == 0xB3 || c == 0xB4) out = '\'';
+        else if (c == 0xB1 || c == 0xB2) out = '"';
+        /* the rest of AsciiToEngine's punctuation, back ("GINA & MIA") */
+        else if (c == 0x2D) out = '&';
+        else if (c == 0x2E) out = '+';
+        else if (c == 0x35) out = '=';
+        else if (c == 0x36) out = ';';
+        else if (c == 0x5B) out = '%';
+        else if (c == 0x5C) out = '(';
+        else if (c == 0x5D) out = ')';
+        else if (c == 0x85) out = '<';
+        else if (c == 0x86) out = '>';
         else if (c == 0xB8) out = ',';
         else if (c == 0xBA) out = '/';
         else if (c == CHAR_CURRENCY) out = '$';

@@ -96,6 +96,7 @@ extern const struct UiScreen gUiScreen_Pokedex;
 extern const struct UiScreen gUiScreen_DexNewEntry;
 extern const struct UiScreen gUiScreen_Storage;
 extern const struct UiScreen gUiScreen_StorageMenus;
+extern const struct UiScreen gUiScreen_PcItems;
 extern const struct UiScreen gUiScreen_Battle;
 extern const struct UiScreen gUiScreen_Customize;
 extern const struct UiScreen gUiScreen_Players;

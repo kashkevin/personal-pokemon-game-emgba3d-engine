@@ -3168,6 +3168,19 @@ bool32 Bag_NativeUiState(struct NativeBag *out)
     else if (gTasks[taskId].func == Task_WallyTutorialBagMenu)
     {
         out->phase = NATIVE_BAG_TUTORIAL;
+        // the POKé BALL's menu, from Wally's OpenContextMenu until he closes the bag
+        if (gTasks[taskId].data[8] > WALLY_BAG_DELAY * 2 && gBagMenu->contextMenuItemsPtr != NULL)
+        {
+            out->menuCount = gBagMenu->contextMenuNumItems <= 6 ? gBagMenu->contextMenuNumItems : 6;
+            for (i = 0; i < out->menuCount; i++)
+            {
+                u8 action = gBagMenu->contextMenuItemsPtr[i];
+
+                out->menuActions[i] = action;
+                out->menuLabels[i] = action == ACTION_DUMMY ? NULL : sItemMenuActions[action].text;
+            }
+            out->menuCursor = Menu_GetCursorPos();
+        }
     }
     else
     {

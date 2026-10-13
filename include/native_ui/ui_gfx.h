@@ -72,6 +72,13 @@ bool UiGfx_ItemIcon(uint16_t item, int x, int y, const struct UiFilter *filter);
 /* the icon enlarged by a whole factor (its pixels kept square), top left at x, y */
 bool UiGfx_ItemIconScaled(uint16_t item, int x, int y, int scale);
 
+/* a decoration's picture as the game's shops show it (prepared at the frame
+ * boundary like the above), centred in a box x box square at x, y */
+bool UiGfx_PrepareDecor(uint16_t decor);
+bool UiGfx_Decor(uint16_t decor, int x, int y, int box, int scale);
+/* its size in GBA pixels (prepared) */
+bool UiGfx_DecorSize(uint16_t decor, int *w, int *h);
+
 /* a trainer's front picture (64x64; decompressed at the frame boundary like the above) */
 bool UiGfx_PrepareTrainerPic(uint16_t picId);
 bool UiGfx_TrainerPic(uint16_t picId, int x, int y, const struct UiFilter *filter);
