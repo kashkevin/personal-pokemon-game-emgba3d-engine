@@ -101,6 +101,7 @@ struct Box
     u8 battler;
     u8 position;       /* B_POSITION_* */
     bool foe;
+    bool mine;         /* the player's own (not a partner's: Steven's, another link player's) */
     struct UiMon mon;  /* who it shows (an Illusion shows its disguise) */
     u8 level;
     s32 hp;
@@ -225,6 +226,7 @@ static void CaptureBox(u32 battler)
     }
     b->position = GetBattlerPosition(battler);
     b->foe = !IsOnPlayerSide(battler);
+    b->mine = !b->foe && GetBattlerTrainer(battler) == B_TRAINER_PLAYER;
     UiMon_FromPokemon(&b->mon, shown);
     b->level = nb.level != 0 ? nb.level : b->mon.level;
     b->maxHp = GetMonData(mon, MON_DATA_MAX_HP);
@@ -941,16 +943,32 @@ static void DrawBoxes(int L, int R, int T, int dyB)
     {
         const struct Box *fa = BoxAt(B_POSITION_OPPONENT_LEFT), *fb = BoxAt(B_POSITION_OPPONENT_RIGHT);
         const struct Box *pa = BoxAt(B_POSITION_PLAYER_LEFT), *pb = BoxAt(B_POSITION_PLAYER_RIGHT);
-        bool partnerIsMine = sB.partnerIsMine;
 
         if (fa != NULL)
             Databox2(L + fa->slide * 2, T + 22 + fa->bob, fa, false);
         if (fb != NULL)
             Databox2(L + fb->slide * 2, T + 74 + fb->bob, fb, false);
-        if (pb != NULL)
-            Databox2(R - (partnerIsMine ? 176 : 156) + pb->slide * 2, 178 + dyB + pb->bob, pb, partnerIsMine);
-        if (pa != NULL)
-            Databox2(R - 176 + pa->slide * 2, 228 + dyB + pa->bob, pa, true);
+        if (sB.partnerIsMine)
+        {
+            if (pb != NULL)
+                Databox2(R - 176 + pb->slide * 2, 178 + dyB + pb->bob, pb, true);
+            if (pa != NULL)
+                Databox2(R - 176 + pa->slide * 2, 228 + dyB + pa->bob, pa, true);
+        }
+        else
+        {
+            /* a partner's Pokémon (Steven's, another player's) in the design's short
+             * ally box above, the player's own below, whichever side each stands on:
+             * in a link multi battle a team's second player stands on the right */
+            const struct Box *ally = pb, *own = pa;
+
+            if ((pa != NULL && !pa->mine) || (pb != NULL && pb->mine))
+                ally = pa, own = pb;
+            if (ally != NULL)
+                Databox2(R - 156 + ally->slide * 2, 178 + dyB + ally->bob, ally, false);
+            if (own != NULL)
+                Databox2(R - 176 + own->slide * 2, 228 + dyB + own->bob, own, true);
+        }
     }
 }
 
