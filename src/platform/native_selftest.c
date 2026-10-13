@@ -630,3 +630,102 @@ int NativeSelfTest_ShakeAnim(void)
     printf("selftest-shake-anim: %d checks, %d failed\n", sShakeChecks, sShakeFailures);
     return sShakeFailures ? 1 : 0;
 }
+
+// ---------------------------------------------------------------------------
+//   pokeemerald-mp --selftest-line-break
+//
+// KNOWN_ISSUES U13: BattleStringExpandPlaceholders turns every space of a
+// trainer's defeat line into a no-break space, so a sentence a little wider
+// than the battle message box became one word; BreakSubStringAutomatic's first
+// count then allocated a line its layout left empty, and BuildNewString wrote a
+// line break over the end mark and read that line through an unset pointer:
+// natively a fault right after Psychic Edward's battle on Route 110. The eight
+// texts the native UI session's scan found (every trainerbattle text in data/
+// and the secret base texts; U13-ROUTE110-CRASH.txt), copied here from data/,
+// as trainer A's and trainer B's defeat line through the real
+// BattleStringExpandPlaceholders, and one line that fits as a control. Each must
+// come back whole: the same words, the pause code, then the end mark.
+// ---------------------------------------------------------------------------
+
+#include "line_break.h"
+
+extern const u8 SecretBase_Text_Trainer4Defeated[];
+
+static int sBreakChecks, sBreakFailures;
+
+static void ExpectBreak(const char *what, bool32 ok)
+{
+    sBreakChecks++;
+    if (!ok)
+    {
+        sBreakFailures++;
+        printf("FAIL %s\n", what);
+    }
+}
+
+static void CheckLoseText(const char *label, const u8 *text, bool32 trainerB)
+{
+    static const u8 sLoseA[] = {PLACEHOLDER_BEGIN, B_TXT_TRAINER1_LOSE_TEXT, EOS};
+    static const u8 sLoseB[] = {PLACEHOLDER_BEGIN, B_TXT_TRAINER2_LOSE_TEXT, EOS};
+    u8 dst[300], got[300], want[300];
+    char what[160];
+    u32 end, n;
+
+    if (trainerB)
+        TRAINER_BATTLE_PARAM.defeatTextB = (u8 *)text;
+    else
+        TRAINER_BATTLE_PARAM.defeatTextA = (u8 *)text;
+    printf("  %s, trainer %c\n", label, trainerB ? 'B' : 'A');
+    fflush(stdout); // a crash here is the bug itself: the case is named first
+    memset(dst, 0xEE, sizeof(dst)); // no end mark anywhere but where the game writes one
+    BattleStringExpandPlaceholders(trainerB ? sLoseB : sLoseA, dst, sizeof(dst));
+    for (end = 0; end < sizeof(dst) && dst[end] != EOS; end++)
+        ;
+    snprintf(what, sizeof(what), "%s (trainer %c): an end mark", label, trainerB ? 'B' : 'A');
+    ExpectBreak(what, end < sizeof(dst));
+    if (end >= sizeof(dst))
+        return;
+    snprintf(what, sizeof(what), "%s (trainer %c): the pause code right before the end mark", label,
+             trainerB ? 'B' : 'A');
+    ExpectBreak(what, end >= 2 && dst[end - 2] == EXT_CTRL_CODE_BEGIN && dst[end - 1] == EXT_CTRL_CODE_PAUSE_UNTIL_PRESS);
+    // The same words as the text (line breaks and kinds of space aside).
+    Words(dst, got, sizeof(got));
+    Words(text, want, sizeof(want));
+    n = StringLength(want);
+    want[n] = EXT_CTRL_CODE_BEGIN;
+    want[n + 1] = EXT_CTRL_CODE_PAUSE_UNTIL_PRESS;
+    want[n + 2] = EOS;
+    snprintf(what, sizeof(what), "%s (trainer %c): every word, nothing after it", label, trainerB ? 'B' : 'A');
+    ExpectBreak(what, StringCompare(got, want) == 0);
+}
+
+int NativeSelfTest_LineBreak(void)
+{
+    static const struct { const char *label; const u8 *text; } sTexts[] = {
+        {"Route110_Text_EdwardDefeated", COMPOUND_STRING("I failed to prophesize my own demise!")},
+        {"MossdeepCity_Gym_Text_MauraDefeat", COMPOUND_STRING("You've traveled a path of greatness!")},
+        {"MtChimney_Text_MelissaDefeat", COMPOUND_STRING("Ooh, that was a scorching-hot match!")},
+        {"Route123_Text_AlbertoDefeat", COMPOUND_STRING("Even in defeat, BIRD POKéMON are cool!")},
+        {"Route124_Text_LilaRematchDefeat", COMPOUND_STRING("LILA: ROY!\nIt's your fault we lost again!\p"
+                                                            "We're having a training session later!")},
+        {"Route130_Text_SantiagoDefeat", COMPOUND_STRING("I needed to be a little less peaceful!")},
+        {"VictoryRoad_B1F_Text_MitchellDefeat", COMPOUND_STRING("I've never met anyone like you before.")},
+        {"SecretBase_Text_Trainer4Defeated", SecretBase_Text_Trainer4Defeated},
+        {"a line that fits (control)", COMPOUND_STRING("Oops! I ended up losing!")},
+    };
+    u32 i;
+
+    InitHeap(gHeap, HEAP_SIZE); // the message box's line breaking allocates from the game heap
+    gBattleTypeFlags = BATTLE_TYPE_TRAINER;
+    TRAINER_BATTLE_PARAM.opponentA = TRAINER_EDWARD; // not the secret base trainer: its text is read as given
+    TRAINER_BATTLE_PARAM.opponentB = TRAINER_EDWARD;
+    printf("trainer defeat lines a little wider than the message box (U13)\n");
+    for (i = 0; i < ARRAY_COUNT(sTexts); i++)
+    {
+        CheckLoseText(sTexts[i].label, sTexts[i].text, FALSE);
+        CheckLoseText(sTexts[i].label, sTexts[i].text, TRUE);
+    }
+    gBattleTypeFlags = 0;
+    printf("selftest-line-break: %d checks, %d failed\n", sBreakChecks, sBreakFailures);
+    return sBreakFailures ? 1 : 0;
+}
