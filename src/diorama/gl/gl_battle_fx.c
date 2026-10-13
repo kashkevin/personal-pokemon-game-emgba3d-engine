@@ -196,14 +196,15 @@ struct Ring
 struct Attach
 {
     bool frame;                     /* drawn from its shown frame (glow, light, flash, depth) */
+    bool measured;                  /* its look measured in the picture just drawn (MeasureLook) */
     bool on;                        /* the effects near it are placed for the shown body */
     struct BattleFxShownFrame view;
     float c[2], d[2], r[2], sc;     /* the GBA picture's body centre, the shift to the shown body's centre, the
                                      * region placed (half size), the scale (shown body / GBA picture's) */
     float feet[3], groundR;         /* world: its feet and the ground region's radius (decals) */
     float pivot[2];                 /* the shown body's centre now (the glow grows about it) */
-    float crel[2];                  /* c from where the core has the battler (its gba position): for a battler a
-                                     * script moved to a BG layer ("monbg"), no longer in OAM */
+    float crel[2];                  /* c from the entry's centre - where the core has the battler (gba) - for a
+                                     * battler a script moved to a BG layer ("monbg"), no longer in OAM */
     /* the shown body's box (texture space), a running mean over the frames of one look: the look's frames
      * (an idle animation) move a little and the effects should not shake with them */
     uint32_t look;
@@ -268,7 +269,7 @@ static struct
     struct Attach attach[4];
     GLuint shownTex[4];
     uint8_t *shownRgba; /* SHOWN_TEX x SHOWN_TEX x 4, for the uploads */
-    unsigned pictureSeq, attachSeq;
+    unsigned pictureSeq, attachSeq, lookSeq;
     bool attachOn;      /* some battler's effects placed for its shown body this picture */
     bool attachInjected; /* the effect shaders took the placing code (else they draw as before) */
     float attachCam[16]; /* the GBA camera for the shaders: pos + tan(fov / 2), right, up, forward */
@@ -1367,49 +1368,33 @@ static bool GbaBox(const struct BattleFxGameBattler *g, int box[4])
     return true;
 }
 
-/* Battler b this picture: drawn from a shown frame or not, and the placing for it (ComputeAttach). */
-static void AttachOne(const struct Frame *f, int b, float T)
+/* Battler b in the picture just drawn (every battle picture, BattleFxGL_DrawBack): drawn from a shown frame or
+ * not, and that look measured - the GBA picture's body and the shown body (a running mean over the look's
+ * frames), the shift between their centres, the scale, the region placed - in GBA screen pixels; c is also kept
+ * relative to the entry's centre (crel), where the core has the battler, for when a script moves it to a BG
+ * layer. Needs no frame of the core's. */
+static void MeasureLook(int b)
 {
     struct Attach *a = &s.attach[b];
     const struct BattleFxGameBattler *g = &s.game[b];
-    const struct BfxBattler *B = &f->battlers[b];
     int gb[4];
-    float cur[4], cg[2], hg[2], cs[2], hs[2], rt[2], shown[2], depth;
+    float cur[4], cg[2], hg[2], cs[2], hs[2], rt[2], shown[2], centre[2];
     uint32_t look = 2166136261u;
 
-    a->frame = a->on = false;
+    a->frame = a->measured = false;
     if (!g->shown)
+        return; /* not in OAM (a BG copy, or not on screen): the look measured last stays */
+    if (!BattleFx_ShownFrame(g->oam, &a->view) || a->view.width > SHOWN_TEX || a->view.height > SHOWN_TEX)
     {
-        /* not in OAM: a script moved it to BG1 or BG2 ("monbg": a copy of its picture the layer's scroll moves),
-         * which the animated sprites draw from their frame as well. The core follows the copy (B->gba); the
-         * placing measured while it was a sprite goes with it. */
-        if (BattleFx_Attach() && s.attachInjected && a->n > 0 && B->present && B->drawn
-         && (B->onBgLayer == 1 || B->onBgLayer == 2) && BattleFx_ShownBgCopy(B->onBgLayer))
-        {
-            a->c[0] = B->gba[0] + a->crel[0];
-            a->c[1] = B->gba[1] + a->crel[1];
-            memcpy(a->feet, B->feet, sizeof(a->feet));
-            a->on = true;
-        }
+        a->n = 0; /* drawn from its GBA picture (a form the pack has not): no look of a shown frame */
         return;
     }
-    if (!BattleFx_ShownFrame(g->oam, &a->view))
-    {
-        a->n = 0; /* drawn from its GBA picture now (a form the pack has not): the look measured is not this one */
-        return;
-    }
-    if (a->view.width > SHOWN_TEX || a->view.height > SHOWN_TEX)
-        return; /* never in the pack (its largest frame is 155 x 121): the GBA picture's shape stays */
     a->frame = true;
     ScanFrame(a);
-    if (!a->fbEmpty)
-    {
-        float pv[2];
-        BoxToScreen(g, a->view.left + (a->fb[0] + a->fb[2]) * 0.5f, a->view.top + (a->fb[1] + a->fb[3]) * 0.5f, pv);
-        a->pivot[0] = pv[0];
-        a->pivot[1] = pv[1];
-    }
-    if (!BattleFx_Attach() || !s.attachInjected || a->fbEmpty || !B->present || !GbaBox(g, gb))
+    if (a->fbEmpty)
+        return;
+    BoxToScreen(g, a->view.left + (a->fb[0] + a->fb[2]) * 0.5f, a->view.top + (a->fb[1] + a->fb[3]) * 0.5f, a->pivot);
+    if (!GbaBox(g, gb))
         return;
     /* one look: the same GBA picture's box and the same canvas (a new Pokemon, form or facing starts anew) */
     look = Fnv(look, gb, sizeof(gb));
@@ -1453,13 +1438,10 @@ static void AttachOne(const struct Frame *f, int b, float T)
     a->d[0] = shown[0] - a->c[0];
     a->d[1] = shown[1] - a->c[1];
     ExtentToScreen(g, rt[0], rt[1], a->r);
-    a->crel[0] = a->c[0] - B->gba[0];
-    a->crel[1] = a->c[1] - B->gba[1];
-    memcpy(a->feet, B->feet, sizeof(a->feet));
-    depth = (a->feet[0] - s.attachCam[0]) * s.attachCam[12] + (a->feet[1] - s.attachCam[1]) * s.attachCam[13]
-          + (a->feet[2] - s.attachCam[2]) * s.attachCam[14];
-    a->groundR = a->r[0] * T * (depth > 1.0f ? depth : 1.0f) / 80.0f;
-    a->on = true;
+    BoxToScreen(g, g->w * 0.5f, g->h * 0.5f, centre);
+    a->crel[0] = a->c[0] - centre[0];
+    a->crel[1] = a->c[1] - centre[1];
+    a->measured = true;
     if (BattleFx_Logging() && a->loggedLook != a->look && a->n >= ATTACH_MEAN_FRAMES / 2)
     {
         a->loggedLook = a->look;
@@ -1469,13 +1451,28 @@ static void AttachOne(const struct Frame *f, int b, float T)
     }
 }
 
-/* Once a picture, after it was drawn (the animated battle sprites decide their frames as the picture is drawn):
- * which battlers are shown by another frame than their GBA picture, and the placing for each. */
+/* Every battle picture, once (BattleFxGL_DrawBack): the battlers' looks, also between animations (a battler a
+ * script moves to a BG layer before any HD frame was drawn keeps the look it had). */
+static void MeasureLooks(void)
+{
+    if (s.lookSeq == s.pictureSeq || !BattleFx_Enabled())
+        return;
+    s.lookSeq = s.pictureSeq;
+    for (int b = 0; b < 4; b++)
+        MeasureLook(b);
+}
+
+/* Once a picture with an HD frame (DrawLayer): the placing for each battler shown otherwise than its GBA picture
+ * - in OAM, as measured; moved to BG1 / BG2 by a script ("monbg": a copy of its picture the layer's scroll moves,
+ * drawn from the animated sprites' frame as well), the look measured while it was a sprite, about where the core
+ * has the copy (B->gba). */
 static void ComputeAttach(const struct Frame *f)
 {
     const float fov = f->camera[12] > 1.0f ? f->camera[12] : 22.0f;
     const float T = tanf(fov * 3.14159265f / 360.0f);
+    const bool placing = BattleFx_Attach() && s.attachInjected;
 
+    MeasureLooks();
     if (s.attachSeq == s.pictureSeq)
         return;
     s.attachSeq = s.pictureSeq;
@@ -1492,21 +1489,36 @@ static void ComputeAttach(const struct Frame *f)
     s.attachCam[7] = s.attachCam[11] = s.attachCam[15] = 0.0f;
     for (int b = 0; b < 4; b++)
     {
-        AttachOne(f, b, T);
-        s.attachOn |= s.attach[b].on;
+        struct Attach *a = &s.attach[b];
+        const struct BfxBattler *B = &f->battlers[b];
+        float depth;
+
+        a->on = false;
+        if (placing && B->present && s.game[b].shown && a->measured)
+            a->on = true;
+        else if (placing && B->present && !s.game[b].shown && a->n > 0 && B->drawn
+              && (B->onBgLayer == 1 || B->onBgLayer == 2) && BattleFx_ShownBgCopy(B->onBgLayer))
+        {
+            a->c[0] = B->gba[0] + a->crel[0];
+            a->c[1] = B->gba[1] + a->crel[1];
+            a->on = true;
+        }
+        if (a->on)
+        {
+            memcpy(a->feet, B->feet, sizeof(a->feet));
+            depth = (a->feet[0] - s.attachCam[0]) * s.attachCam[12] + (a->feet[1] - s.attachCam[1]) * s.attachCam[13]
+                  + (a->feet[2] - s.attachCam[2]) * s.attachCam[14];
+            a->groundR = a->r[0] * T * (depth > 1.0f ? depth : 1.0f) / 80.0f;
+            s.attachOn = true;
+        }
 #ifdef BATTLEFX_TEST
         if (BattleFxTest_AttachTrace())
-        {
-            const struct Attach *a = &s.attach[b];
-            const struct BattleFxGameBattler *g = &s.game[b];
-
-            SDL_Log("Battle FX attach: anim %u frame %d battler %d: shown %d oam %d present %d frame %d (%dx%d at %d,%d) "
-                    "on %d c %.1f,%.1f d %.1f,%.1f r %.1f,%.1f sc %.2f box %.1f,%.1f..%.1f,%.1f n %u",
-                    (unsigned)f->serial, f->frame, b, g->shown, g->oam, f->battlers[b].present, a->frame,
-                    a->frame ? a->view.width : 0, a->frame ? a->view.height : 0, a->frame ? a->view.left : 0,
-                    a->frame ? a->view.top : 0, a->on, a->c[0], a->c[1], a->d[0], a->d[1], a->r[0], a->r[1], a->sc,
-                    a->box[0], a->box[1], a->box[2], a->box[3], a->n);
-        }
+            SDL_Log("Battle FX attach: anim %u frame %d battler %d: shown %d oam %d present %d drawn %d bg %d frame %d "
+                    "(%dx%d at %d,%d) on %d c %.1f,%.1f d %.1f,%.1f r %.1f,%.1f sc %.2f box %.1f,%.1f..%.1f,%.1f n %u",
+                    (unsigned)f->serial, f->frame, b, s.game[b].shown, s.game[b].oam, B->present, B->drawn,
+                    B->onBgLayer, a->frame, a->frame ? a->view.width : 0, a->frame ? a->view.height : 0,
+                    a->frame ? a->view.left : 0, a->frame ? a->view.top : 0, a->on, a->c[0], a->c[1], a->d[0], a->d[1],
+                    a->r[0], a->r[1], a->sc, a->box[0], a->box[1], a->box[2], a->box[3], a->n);
 #endif
     }
 }
@@ -2450,6 +2462,7 @@ void BattleFxGL_PaceReset(void)
 void BattleFxGL_DrawBack(const struct BattleFxLayout *layout)
 {
     BattleFx_LateFrame();
+    MeasureLooks(); /* every battle picture: how the battlers are shown */
     DrawLayer(layout, LAYER_BACK);
 }
 

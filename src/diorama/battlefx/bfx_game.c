@@ -2923,6 +2923,14 @@ void BattleFx_FrameBoundary(bool view3d, uint32_t skipObj[4], uint8_t *hideBg)
     if (!BattleFxTest_ViewHd())
         return;
 #endif
+    /* the battlers' sprites, every picture of the battle: the HD battler state is drawn on them, and the renderer
+     * measures how the animated battle sprites show them (also between animations) */
+    for (u32 b = 0; b < MAX_BATTLERS_COUNT; b++)
+        if (sBattlerOam[b] < 128)
+            DecodeBattler(&sGameBattlers[b], sBattlerOam[b]);
+        else
+            sGameBattlers[b].shown = false;
+    BattleFxGL_TakeBattlers(sGameBattlers);
     if (!BattleFxGL_Showing())
     {
         /* the core's first frame of the animation is not done yet (its begin plans the whole animation): the
@@ -2934,12 +2942,6 @@ void BattleFx_FrameBoundary(bool view3d, uint32_t skipObj[4], uint8_t *hideBg)
         return;
     }
     *hideBg |= BattleFxGL_ShowingHiddenBgs();
-    for (u32 b = 0; b < MAX_BATTLERS_COUNT; b++)
-        if (sBattlerOam[b] < 128)
-            DecodeBattler(&sGameBattlers[b], sBattlerOam[b]);
-        else
-            sGameBattlers[b].shown = false;
-    BattleFxGL_TakeBattlers(sGameBattlers);
     if (BattleFxGL_ShowingPixelEffects() > 0)
         return; /* the core still draws some effect sprite as GBA pixel art: the game's stay */
     for (int i = 0; i < 4; i++)
