@@ -261,7 +261,7 @@ OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS) $(BFX_QJS_OBJS)
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
-.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim
+.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-clock check-mp-objects check-spawn-claims
 .SUFFIXES:
 .SECONDARY:
 .DELETE_ON_ERROR:
@@ -338,6 +338,29 @@ check-cry-stop: $(TARGET)
 check-shake-anim: $(TARGET)
 	@./$(TARGET) --selftest-shake-anim > $(OBJ_DIR)/selftest-shake-anim.log 2>&1; status=$$?; \
 	  tail -n 3 $(OBJ_DIR)/selftest-shake-anim.log; exit $$status
+
+# Trainer defeat lines a little wider than the battle message box (KNOWN_ISSUES
+# U13: natively a fault after Psychic Edward's battle on Route 110). The eight
+# texts found, through the real BattleStringExpandPlaceholders, must come back whole.
+check-line-break: $(TARGET)
+	@./$(TARGET) --selftest-line-break > $(OBJ_DIR)/selftest-line-break.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-line-break.log; exit $$status
+
+check-wild-weather: $(TARGET)
+	@./$(TARGET) --selftest-wild-weather > $(OBJ_DIR)/selftest-wild-weather.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-wild-weather.log; exit $$status
+
+check-clock: $(TARGET)
+	@./$(TARGET) --selftest-clock > $(OBJ_DIR)/selftest-clock.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-clock.log; exit $$status
+
+check-mp-objects: $(TARGET)
+	@./$(TARGET) --selftest-mp-objects > $(OBJ_DIR)/selftest-mp-objects.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-mp-objects.log; exit $$status
+
+check-spawn-claims: $(TARGET)
+	@./$(TARGET) --selftest-spawn-claims > $(OBJ_DIR)/selftest-spawn-claims.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-spawn-claims.log; exit $$status
 
 # C: preprocess (same flags as the GBA build + PORTABLE), expand INCBIN/charmap
 # strings with preproc, then compile for 32-bit x86.

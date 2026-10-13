@@ -26,6 +26,9 @@
 // generated wild encounters, 254 the local follower and 255 the player.
 #define MP_WORLD_LOCAL_ID_FOLLOWER_BASE 244 // 244-246
 #define MP_WORLD_LOCAL_ID_EVENT         247
+// The world clock's day 0 is the game's RTC day 1000 (multiplayer_world.c), so
+// day-based values a connected game wrote from it are 1000 or more.
+#define MP_WORLD_DAY_ORIGIN             1000
 
 #define MP_WORLD_FOLLOWER_SHINY     (1 << 0)
 #define MP_WORLD_FOLLOWER_FEMALE    (1 << 1)

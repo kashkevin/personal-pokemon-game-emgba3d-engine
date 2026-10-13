@@ -32,6 +32,10 @@
 #include "constants/songs.h"
 #include "constants/vars.h"
 #include "constants/wild_encounter.h"
+#ifdef PORTABLE
+#include "multiplayer_spawns.h"
+#endif
+#line 35 // gba-line
 
 
 #define sOverworldEncounterLevel        trainerRange_berryTreeId
@@ -313,6 +317,18 @@ const struct FieldEffectInfoOWE gOverworldWildEncounterFieldEffectInfo[] =
 
 void UpdateOverworldWildEncounter(void)
 {
+#ifdef PORTABLE
+    // EmeraldTogether shared spawns (multiplayer_spawns.c): while connected to
+    // a world, the host's visible land Pokemon replace the ones generated here.
+    // Surfing still meets its own, and offline nothing changes.
+    if (MultiplayerSpawns_IsActive() && !ShouldSpawnWaterOWE())
+    {
+        if (GetNumberOfActiveOWEs(OWE_GENERATED) != 0)
+            DespawnAllOverworldWildEncounters(OWE_GENERATED, 0);
+        return;
+    }
+#endif
+#line 316 // gba-line
     if (WE_OW_ENCOUNTERS && !ArePlayerFieldControlsLocked())
         TryReturnRanAwayOWE();
 

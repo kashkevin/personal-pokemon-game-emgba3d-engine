@@ -21,6 +21,10 @@
 #define MP_MENU_MAGIC     0x31554D45u /* EMU1 */
 #define MP_RESET_MAGIC    0x31524D45u /* EMR1 */
 #define MP_WORLD_MAGIC    0x31574D45u /* EMW1 */
+#define MP_SPAWN_MAGIC    0x31564D45u /* EMV1: shared wild Pokemon (native extension) */
+#define MP_SPAWN_BYTES    384
+#define MP_SPAWN_LOCAL    116
+#define MP_SPAWN_INBOUND  252
 
 #define RECONNECT_FRAMES 120
 #define MAX_INBOUND_FRAME 256
@@ -163,6 +167,8 @@ const char *MpBridge_CheckCaps(const struct MpBridgeCaps *c)
         return "invalid native reset input capability";
     if (c->world > 1)
         return "invalid shared-world capability";
+    if (c->spawns && (!c->world || c->spawns != 1))
+        return "invalid shared spawn capability";
     return NULL;
 }
 
@@ -312,6 +318,50 @@ static bool CommitWorld(struct MpBridge *b, const uint8_t *p, size_t length)
     for (offset = 0; offset <= 204; offset += 4)
         W32(b, MP_REGION_WORLD, 48 + offset, U32(p + offset));
     W32(b, MP_REGION_WORLD, 44, odd + 1);
+    return true;
+}
+
+/* The shared-spawn mailbox (native extension, no mgba.lua counterpart). */
+static bool SpawnHeaderReady(const struct MpBridge *b)
+{
+    return Enabled(b->caps.spawns) && b->ops.region[MP_REGION_SPAWN] != NULL
+        && b->ops.regionSize[MP_REGION_SPAWN] == MP_SPAWN_BYTES
+        && R32(b, MP_REGION_SPAWN, 0) == MP_SPAWN_MAGIC
+        && R16(b, MP_REGION_SPAWN, 4) == b->caps.spawns && R16(b, MP_REGION_SPAWN, 6) == MP_SPAWN_BYTES;
+}
+
+/* Slots: count at most 12, every listed slot with a spawn id, the unused ones
+ * zero; the flags word only carries "enabled", and slots need it. */
+static bool ValidSpawnInbound(const uint8_t *p, size_t length)
+{
+    uint32_t count, i;
+
+    if (length != MP_SPAWN_INBOUND || (U32(p) & ~1u) != 0 || p[11] != 0)
+        return false;
+    count = p[10];
+    if (count > 12 || (count != 0 && !(U32(p) & 1u)))
+        return false;
+    for (i = 0; i < 12; i++)
+    {
+        const uint8_t *slot = p + 12 + i * 20;
+        if (i < count ? U32(slot) == 0 : !AllZero(slot, 20))
+            return false;
+    }
+    return true;
+}
+
+static bool CommitSpawn(struct MpBridge *b, const uint8_t *p, size_t length)
+{
+    uint32_t odd;
+    uint32_t offset;
+
+    if (!SpawnHeaderReady(b) || length != MP_SPAWN_INBOUND)
+        return false;
+    odd = Odd(R32(b, MP_REGION_SPAWN, 128));
+    W32(b, MP_REGION_SPAWN, 128, odd);
+    for (offset = 0; offset < MP_SPAWN_INBOUND; offset += 4)
+        W32(b, MP_REGION_SPAWN, 132 + offset, U32(p + offset));
+    W32(b, MP_REGION_SPAWN, 128, odd + 1);
     return true;
 }
 
@@ -776,6 +826,8 @@ static void ForgetConnection(struct MpBridge *b)
     b->txLength = b->txSent = 0;
     b->hasLatestPose = false;
     b->hasLatestWorld = b->poseSentLast = false;
+    b->hasLatestSpawn = b->spawnTurn = false;
+    b->spawnCapabilitySent = false;
     b->controlCount = b->controlBurst = 0;
     b->save.pending = false;
     b->hasSaveGeneration = false;
@@ -1340,6 +1392,17 @@ static bool Dispatch(struct MpBridge *b, const uint8_t *payload, size_t size)
             return false;
         }
     }
+    else if (payload[0] == 'n')
+    {
+        /* The extension (mp_bridge.h): the host's shared wild Pokemon, only
+         * after the 'w' announcement. */
+        if (!b->spawnCapabilitySent || !ValidSpawnInbound(rest, restLength)
+         || !CommitSpawn(b, rest, restLength))
+        {
+            Stop(b, "invalid shared spawn update", true);
+            return false;
+        }
+    }
     else if (payload[0] == 'B')
     {
         /* The extension (mp_bridge.h): a bound battle's generation and a look
@@ -1408,6 +1471,17 @@ static void Receive(struct MpBridge *b)
     }
 }
 
+/* Whether a reliable frame of `kind` still waits in the control queue. */
+static bool ControlQueued(const struct MpBridge *b, uint8_t kind)
+{
+    unsigned i;
+
+    for (i = 0; i < b->controlCount; i++)
+        if (b->controls[i][4] == kind)
+            return true;
+    return false;
+}
+
 /* flush: one frame (or the rest of one); true when a frame was completed and
  * the socket may take another. */
 static bool FlushOne(struct MpBridge *b)
@@ -1425,6 +1499,19 @@ static bool FlushOne(struct MpBridge *b)
             memmove(b->controlLength, b->controlLength + 1, b->controlCount * sizeof(b->controlLength[0]));
             b->controlBurst++;
         }
+        else if (b->hasLatestSpawn && !ControlQueued(b, 'w')
+              && (b->spawnTurn || !(b->hasLatestPose || b->hasLatestWorld)))
+        {
+            /* The spawn record goes right after a pose or world record, so it
+             * is never starved by them (claims and results ride on it), but
+             * never before its 'w' announcement has left: records may pass
+             * queued controls, and the companion refuses a 'g' before 'w'. */
+            memcpy(b->tx, b->latestSpawn, sizeof(b->latestSpawn));
+            b->txLength = sizeof(b->latestSpawn);
+            b->hasLatestSpawn = false;
+            b->spawnTurn = false;
+            b->controlBurst = 0;
+        }
         else if (b->hasLatestPose && !(b->hasLatestWorld && b->poseSentLast))
         {
             memcpy(b->tx, b->latestPose, sizeof(b->latestPose));
@@ -1432,6 +1519,7 @@ static bool FlushOne(struct MpBridge *b)
             b->hasLatestPose = false;
             b->controlBurst = 0;
             b->poseSentLast = true;
+            b->spawnTurn = true;
         }
         else if (b->hasLatestWorld)
         {
@@ -1442,6 +1530,7 @@ static bool FlushOne(struct MpBridge *b)
             b->hasLatestWorld = false;
             b->controlBurst = 0;
             b->poseSentLast = false;
+            b->spawnTurn = true;
         }
         b->txSent = 0;
     }
@@ -1607,6 +1696,15 @@ void MpBridge_Step(struct MpBridge *b)
             return;
         b->battleLooksCapabilitySent = true;
     }
+    /* The second extension: shared wild Pokemon, once the world mailbox is up. */
+    if (WorldHeaderReady(b) && SpawnHeaderReady(b) && !b->spawnCapabilitySent
+     && b->controlCount < MP_BRIDGE_CONTROL_LIMIT)
+    {
+        Capability(cap, c->spawns, 12, MP_SPAWN_BYTES, 20);
+        if (!Reliable(b, 'w', cap, 8, NULL, 0))
+            return;
+        b->spawnCapabilitySent = true;
+    }
     Receive(b);
     if (!b->connected)
         return;
@@ -1643,6 +1741,22 @@ void MpBridge_Step(struct MpBridge *b)
             {
                 Frame(b->latestWorld, 'G', record, sizeof(record), NULL, 0);
                 b->hasLatestWorld = true;
+            }
+        }
+    }
+    if (b->spawnCapabilitySent && SpawnHeaderReady(b) && RecordDue(b, &b->spawnPublished, &b->spawnAt, 1))
+    {
+        uint32_t generation = R32(b, MP_REGION_SPAWN, 8);
+
+        if (generation % 2 == 0)
+        {
+            uint8_t record[MP_SPAWN_LOCAL];
+
+            ReadRange(b, MP_REGION_SPAWN, 12, record, sizeof(record));
+            if (generation == R32(b, MP_REGION_SPAWN, 8))
+            {
+                Frame(b->latestSpawn, 'g', record, sizeof(record), NULL, 0);
+                b->hasLatestSpawn = true;
             }
         }
     }
@@ -1749,6 +1863,7 @@ typedef int MpSocket;
 #include "multiplayer_menu.h"
 #include "multiplayer_reset_admission.h"
 #include "multiplayer_save.h"
+#include "multiplayer_spawns.h"
 #include "multiplayer_world.h"
 #include "save.h"
 #include "character_customization.h"
@@ -1994,6 +2109,7 @@ bool MpBridge_Configure(const char *path)
     caps.reset = *(const volatile u32 *)&gMultiplayerResetAbiVersion;
     caps.resetInput = *(const volatile u32 *)&gMultiplayerResetInputAbiVersion;
     caps.world = *(const volatile u32 *)&gMultiplayerWorldAbiVersion;
+    caps.spawns = caps.world ? *(const volatile u32 *)&gMultiplayerSpawnAbiVersion : 0;
     problem = MpBridge_CheckCaps(&caps);
     if (problem != NULL)
     {
@@ -2016,10 +2132,12 @@ bool MpBridge_Configure(const char *path)
     ops.regionSize[MP_REGION_WORLD] = sizeof(gMultiplayerWorldMailbox);
     ops.region[MP_REGION_WINDOW] = (volatile uint8_t *)&gSaveDataBuffer;
     ops.regionSize[MP_REGION_WINDOW] = sizeof(gSaveDataBuffer);
+    ops.region[MP_REGION_SPAWN] = (volatile uint8_t *)&gMultiplayerSpawnMailbox;
+    ops.regionSize[MP_REGION_SPAWN] = sizeof(gMultiplayerSpawnMailbox);
     if (ops.regionSize[MP_REGION_PRESENCE] != 128 || ops.regionSize[MP_REGION_SAVE] != 512
      || ops.regionSize[MP_REGION_BATTLE] != 512 || ops.regionSize[MP_REGION_MENU] != 512
      || ops.regionSize[MP_REGION_RESET] != 128 || ops.regionSize[MP_REGION_WORLD] != 256
-     || ops.regionSize[MP_REGION_WINDOW] != 4096)
+     || ops.regionSize[MP_REGION_WINDOW] != 4096 || ops.regionSize[MP_REGION_SPAWN] != 384)
     {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Multiplayer bridge: mailbox sizes differ from the ABI");
         return false;
@@ -2037,12 +2155,13 @@ bool MpBridge_Configure(const char *path)
     memset(token, 0, sizeof(token));
     sEnabled = true;
     SDL_Log("Multiplayer bridge: companion at 127.0.0.1:%ld; save %u trade %u emergency %u battle %u/%u/%u "
-            "window %u menu %u effects %u/%u/%u reset %u/%u world %u running %u",
+            "window %u menu %u effects %u/%u/%u reset %u/%u world %u spawns %u running %u",
             port, (unsigned)caps.save, (unsigned)caps.trade, (unsigned)caps.emergencySave,
             (unsigned)caps.battle, (unsigned)caps.battleResume, (unsigned)caps.battleAdmissionCleanup,
             (unsigned)caps.saveWindow, (unsigned)caps.menu, (unsigned)caps.tradeEffectPrepare,
             (unsigned)caps.tradeEffectSave, (unsigned)caps.tradeEffectChoice, (unsigned)caps.reset,
-            (unsigned)caps.resetInput, (unsigned)caps.world, (unsigned)caps.presenceAnimation);
+            (unsigned)caps.resetInput, (unsigned)caps.world, (unsigned)caps.spawns,
+            (unsigned)caps.presenceAnimation);
     return true;
 }
 

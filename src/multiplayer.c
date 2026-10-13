@@ -532,3 +532,14 @@ bool32 Multiplayer_NativeUiPeer(u32 i, u32 *playerId, u8 *mapGroup, u8 *mapNum, 
     return TRUE;
 }
 #endif // ENABLE_NATIVE_UI
+
+#ifdef PORTABLE
+#include "multiplayer_spawns.h"
+
+bool32 Multiplayer_IsRuntimeLocalId(u32 localId)
+{
+    if (localId >= MP_SPAWN_LOCAL_ID_BASE && localId < MP_SPAWN_LOCAL_ID_BASE + MP_SPAWN_MAX_SLOTS)
+        return TRUE; // shared wild Pokemon 224-235
+    return localId >= MULTIPLAYER_LOCAL_ID_BASE && localId <= MP_WORLD_LOCAL_ID_EVENT; // 241-247
+}
+#endif // PORTABLE

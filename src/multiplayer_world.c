@@ -4,6 +4,10 @@
 #include "multiplayer_world.h"
 #include "multiplayer_ride.h"
 #include "multiplayer_appearance.h"
+#ifdef PORTABLE
+#include "multiplayer_spawns.h"
+#endif
+#line 7 // gba-line
 #include "battle.h"
 #include "battle_setup.h"
 #include "event_data.h"
@@ -52,7 +56,7 @@ _Static_assert(MP_WORLD_LOCAL_ID_EVENT < LOCALID_OW_ENCOUNTER_END - OWE_SPAWNS_M
 
 // Morning of world day 1000: a large day origin keeps day-based timers in old
 // saves (berry trees, daily events) moving forward instead of stalling.
-#define WORLD_DAY_ORIGIN 1000
+#define WORLD_DAY_ORIGIN MP_WORLD_DAY_ORIGIN
 
 #define CLAIM_TIMEOUT_FRAMES 300
 #define MP_WORLD_SPRITE_RESERVE 12
@@ -135,6 +139,10 @@ void MultiplayerWorld_Init(void)
     gMultiplayerWorldMailbox.byteSize = sizeof(gMultiplayerWorldMailbox);
     if (*(const volatile u32 *)&gMultiplayerWorldAbiVersion == MP_WORLD_ABI_VERSION)
         gMultiplayerWorldMailbox.magic = MP_WORLD_MAGIC;
+#ifdef PORTABLE
+    MultiplayerSpawns_Init(); // shared wild Pokemon (native PC only)
+#endif
+#line 138 // gba-line
 }
 
 static void ReadInbound(void)
@@ -413,8 +421,18 @@ static u8 SpawnOwnedObject(u32 localId, u16 graphicsId, s16 mapX, s16 mapY, u8 e
 
 static bool32 OnScreen(s32 mapX, s32 mapY)
 {
+#ifdef PORTABLE
+    // The engine's object window (TrySpawnObjectEvents): gSaveBlock1Ptr->pos
+    // already is the camera's corner in MAP_OFFSET coordinates. The GBA build
+    // keeps its window, shifted by MAP_OFFSET, so its ROM stays byte-identical.
+    return mapX >= gSaveBlock1Ptr->pos.x - 2 && mapX <= gSaveBlock1Ptr->pos.x + 17
+        && mapY >= gSaveBlock1Ptr->pos.y && mapY <= gSaveBlock1Ptr->pos.y + 16;
+#else
+#line 416 // gba-line
     return mapX >= gSaveBlock1Ptr->pos.x - 2 + MAP_OFFSET && mapX <= gSaveBlock1Ptr->pos.x + 17 + MAP_OFFSET
         && mapY >= gSaveBlock1Ptr->pos.y + MAP_OFFSET && mapY <= gSaveBlock1Ptr->pos.y + 16 + MAP_OFFSET;
+#endif
+#line 418 // gba-line
 }
 
 // ---------------------------------------------------------------------------
@@ -716,6 +734,12 @@ void MultiplayerWorld_TryClaimEvent(void)
     const struct MultiplayerWorldEvent *event = &sInbound.event;
     u8 taskId;
 
+#ifdef PORTABLE
+    // A shared wild Pokemon uses the same script and messages.
+    if (MultiplayerSpawns_TryClaimTalked())
+        return;
+#endif
+#line 719 // gba-line
     gSpecialVar_Result = 2;
     sClaimEventId = 0;
     if (sConnected && sHaveInbound && event->eventId != 0 && event->eventId != sHiddenEventId
@@ -778,6 +802,14 @@ u16 MultiplayerWorld_GetBattleFormBase(u16 species)
 
 void MultiplayerWorld_StartEventBattle(void)
 {
+#ifdef PORTABLE
+    if (MultiplayerSpawns_InInteraction())
+    {
+        MultiplayerSpawns_StartBattle();
+        return;
+    }
+#endif
+#line 781 // gba-line
     const struct MultiplayerWorldEvent *event = &sInbound.event;
     struct Pokemon *mon = &gParties[B_TRAINER_OPPONENT_A][0];
     bool32 shiny = (event->flags & MP_WORLD_EVENT_SHINY) ? TRUE : FALSE;
@@ -888,6 +920,14 @@ void MultiplayerWorld_OnScriptedBattleEnd(void)
 {
     u8 result;
 
+#ifdef PORTABLE
+    if (MultiplayerSpawns_OnScriptedBattleEnd())
+    {
+        sEventResult = MultiplayerSpawns_TakeResult();
+        return;
+    }
+#endif
+#line 891 // gba-line
     if (!sEventBattleActive)
         return;
     sEventBattleActive = FALSE;
@@ -1161,6 +1201,13 @@ void MultiplayerWorld_LeaveField(void)
         RemoveFollower(i);
     RemoveOwnedObject(&sEventObjectId, MP_WORLD_LOCAL_ID_EVENT);
     sEventObjectEventId = 0;
+#ifdef PORTABLE
+    // Shared wild Pokemon are not removed here: this runs whenever a script
+    // locks the field, including the one talking to a spawn. Their module
+    // removes them itself when the game leaves the overworld or disconnects,
+    // and a save never holds them (load_save.c, KNOWN_ISSUES M15).
+#endif
+#line 1164 // gba-line
 }
 
 void MultiplayerWorld_Tick(bool32 fieldReady, bool32 connected)
@@ -1169,6 +1216,10 @@ void MultiplayerWorld_Tick(bool32 fieldReady, bool32 connected)
 
     if (gMultiplayerWorldMailbox.magic != MP_WORLD_MAGIC)
         return;
+#ifdef PORTABLE
+    MultiplayerSpawns_Tick(fieldReady, connected);
+#endif
+#line 1172 // gba-line
     sConnected = connected;
     ReadInbound();
     if (!connected)

@@ -5,6 +5,11 @@
 #include "constants/layouts.h"
 #include "constants/map_types.h"
 #include "constants/region_map_sections.h"
+#if defined(PLATFORM_SDL2)
+#include "field_weather.h"
+#include "constants/weather.h"
+#endif
+#line 8 // gba-line
 
 #include "data/mp_wild_pool.h"
 
@@ -87,6 +92,88 @@ static u32 GetFamilyWeight(const struct MPWildFamily *family, u32 habitat, bool3
     return weight;
 }
 
+#if defined(PLATFORM_SDL2)
+// Weather (PC builds; the GBA ROM keeps its pinned weights). Owner's table:
+// rain -> Water, heavy rain -> Water plus the rarer families, snow -> Ice,
+// sun -> Fire and some Grass, sandstorm -> Ground and Rock, fog -> Ghost and some
+// Psychic, thunder -> Electric. Clear weather changes nothing. The multipliers
+// are configurable: set MP_WILD_WEATHER_ENABLED to 0 to turn the table off.
+// "Sun" is the harsh sunlight of WEATHER_DROUGHT: WEATHER_SUNNY is Emerald's
+// ordinary clear sky (most routes, towns and the sea), so it is clear weather
+// here (KNOWN_ISSUES G12).
+#ifndef MP_WILD_WEATHER_ENABLED
+#define MP_WILD_WEATHER_ENABLED 1
+#endif
+#ifndef MP_WILD_WEATHER_PRIMARY_BOOST
+#define MP_WILD_WEATHER_PRIMARY_BOOST 3      // x weight for the weather's main type
+#endif
+#ifndef MP_WILD_WEATHER_SECONDARY_BOOST
+#define MP_WILD_WEATHER_SECONDARY_BOOST 2    // x weight for its secondary type
+#endif
+#ifndef MP_WILD_WEATHER_HEAVY_RARE_BOOST
+#define MP_WILD_WEATHER_HEAVY_RARE_BOOST 2   // x weight for rare families in heavy rain
+#endif
+
+static u32 GetWeatherWeight(const struct MPWildFamily *family, u32 weight, u8 weather)
+{
+    u32 primary = 0, secondary = 0, familyTypes = TYPE_BIT(family->type1) | TYPE_BIT(family->type2);
+    bool32 heavy = FALSE;
+
+#if MP_WILD_WEATHER_ENABLED
+    switch (weather)
+    {
+    case WEATHER_RAIN:
+        primary = TYPE_BIT(TYPE_WATER);
+        break;
+    case WEATHER_DOWNPOUR:
+        primary = TYPE_BIT(TYPE_WATER);
+        heavy = TRUE;
+        break;
+    case WEATHER_RAIN_THUNDERSTORM:
+        primary = TYPE_BIT(TYPE_ELECTRIC);
+        secondary = TYPE_BIT(TYPE_WATER);
+        break;
+    case WEATHER_SNOW:
+        primary = TYPE_BIT(TYPE_ICE);
+        break;
+    case WEATHER_DROUGHT:
+        primary = TYPE_BIT(TYPE_FIRE);
+        secondary = TYPE_BIT(TYPE_GRASS);
+        break;
+    case WEATHER_SANDSTORM:
+        primary = TYPE_BIT(TYPE_GROUND);
+        secondary = TYPE_BIT(TYPE_ROCK);
+        break;
+    case WEATHER_FOG:
+    case WEATHER_FOG_HORIZONTAL:
+    case WEATHER_FOG_DIAGONAL:
+        primary = TYPE_BIT(TYPE_GHOST);
+        secondary = TYPE_BIT(TYPE_PSYCHIC);
+        break;
+    default:
+        break;
+    }
+#endif
+
+    if (primary & familyTypes)
+        weight *= MP_WILD_WEATHER_PRIMARY_BOOST;
+    if (secondary & familyTypes)
+        weight *= MP_WILD_WEATHER_SECONDARY_BOOST;
+    if (heavy && family->tier >= MP_WILD_TIER_RARE)
+        weight *= MP_WILD_WEATHER_HEAVY_RARE_BOOST;
+    return weight;
+}
+#endif
+
+#if defined(PLATFORM_SDL2)
+#define FAMILY_WEIGHT(family, habitat, night, typeBoost) \
+    GetWeatherWeight(family, GetFamilyWeight(family, habitat, night, typeBoost), weather)
+#else
+#define FAMILY_WEIGHT(family, habitat, night, typeBoost) \
+    GetFamilyWeight(family, habitat, night, typeBoost)
+#endif
+#line 89 // gba-line
+
 static u16 ChooseMember(const struct MPWildFamily *family, u8 level)
 {
     const struct MPWildMember *members = &sMPWildMembers[family->firstMember];
@@ -127,6 +214,10 @@ u16 MPWild_RandomizeSpecies(u16 vanillaSpecies, u8 level, enum WildPokemonArea a
     u32 habitat, typeBoost, total = 0, roll, i;
     bool32 night;
     enum TimeOfDay timeOfDay;
+#if defined(PLATFORM_SDL2)
+    u8 weather;
+#endif
+#line 130 // gba-line
 
     // Battle Frontier facilities keep their curated tables.
     if (gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS
@@ -152,16 +243,21 @@ u16 MPWild_RandomizeSpecies(u16 vanillaSpecies, u8 level, enum WildPokemonArea a
     timeOfDay = GetTimeOfDay();
     night = (timeOfDay == TIME_EVENING || timeOfDay == TIME_NIGHT);
     typeBoost = GetAreaTypeBoost();
+#if defined(PLATFORM_SDL2)
+    // Underground maps keep their tables: no weather there.
+    weather = (gMapHeader.mapType == MAP_TYPE_UNDERGROUND) ? WEATHER_NONE : GetCurrentWeather();
+#endif
+#line 155 // gba-line
 
     for (i = 0; i < MP_WILD_FAMILY_COUNT; i++)
-        total += GetFamilyWeight(&sMPWildFamilies[i], habitat, night, typeBoost);
+        total += FAMILY_WEIGHT(&sMPWildFamilies[i], habitat, night, typeBoost);
     if (total == 0)
         return vanillaSpecies;
 
     roll = Random32() % total;
     for (i = 0; i < MP_WILD_FAMILY_COUNT; i++)
     {
-        u32 weight = GetFamilyWeight(&sMPWildFamilies[i], habitat, night, typeBoost);
+        u32 weight = FAMILY_WEIGHT(&sMPWildFamilies[i], habitat, night, typeBoost);
         if (roll < weight)
             return ChooseMember(&sMPWildFamilies[i], level);
         roll -= weight;
@@ -184,3 +280,39 @@ u8 MPWild_GetSpeciesTier(u16 species)
     }
     return MP_WILD_TIER_COUNT;
 }
+
+#if defined(PLATFORM_SDL2)
+// Test hooks (PC builds only, never called by the game): the native self-test
+// --selftest-wild-weather and the weight dump --dump-wild-weights, which the
+// app's scripts/multiplayer/check_engine_spawn_weights.py compares with the
+// host's shared spawn director. MPWild_TestFamilyWeight is the weight
+// MPWild_RandomizeSpecies gives a family on the current map (gMapHeader) for a
+// habitat, time of day and weather, by the same steps (no weather underground);
+// the self-test checks it against the game's own rolls.
+u32 MPWild_TestFamilyCount(void)
+{
+    return MP_WILD_FAMILY_COUNT;
+}
+
+const struct MPWildFamily *MPWild_TestFamily(u32 index)
+{
+    return index < MP_WILD_FAMILY_COUNT ? &sMPWildFamilies[index] : NULL;
+}
+
+const struct MPWildMember *MPWild_TestMembers(void)
+{
+    return sMPWildMembers;
+}
+
+u32 MPWild_TestFamilyWeight(u32 index, u32 habitat, bool32 night, u8 weather)
+{
+    const struct MPWildFamily *family;
+
+    if (index >= MP_WILD_FAMILY_COUNT)
+        return 0;
+    family = &sMPWildFamilies[index];
+    if (gMapHeader.mapType == MAP_TYPE_UNDERGROUND)
+        weather = WEATHER_NONE;
+    return GetWeatherWeight(family, GetFamilyWeight(family, habitat, night, GetAreaTypeBoost()), weather);
+}
+#endif

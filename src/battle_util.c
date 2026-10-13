@@ -9633,10 +9633,22 @@ bool32 MoveEffectIsGuaranteed(enum BattlerId battler, enum Ability battlerAbilit
 
 bool32 IsGen6ExpShareEnabled(void)
 {
+#ifdef PORTABLE
+    // EmeraldTogether expansion Phase 1 (native PC game): the permanent Gen 9
+    // Exp. Share. Every Pokemon in the party that can battle gains experience
+    // (those sent out the full share, the others half: B_SPLIT_EXP), with no key
+    // item and no switch. Battles that award none still award none: getexp checks
+    // BattleTypeAllowsExp first (link battles - PvP and co-op Gyms - the Frontier,
+    // Safari, Battle Tower, Trainer Hill, e-Reader). The GBA ROM keeps its config.
+    return TRUE;
+#else
+#line 9636 // gba-line
     if (I_EXP_SHARE_FLAG <= TEMP_FLAGS_END)
         return FALSE;
 
     return FlagGet(I_EXP_SHARE_FLAG);
+#endif
+#line 9640 // gba-line
 }
 
 

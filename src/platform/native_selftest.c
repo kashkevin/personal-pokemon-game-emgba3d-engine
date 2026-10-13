@@ -630,3 +630,1071 @@ int NativeSelfTest_ShakeAnim(void)
     printf("selftest-shake-anim: %d checks, %d failed\n", sShakeChecks, sShakeFailures);
     return sShakeFailures ? 1 : 0;
 }
+
+// ---------------------------------------------------------------------------
+//   pokeemerald-mp --selftest-line-break
+//
+// KNOWN_ISSUES U13: BattleStringExpandPlaceholders turns every space of a
+// trainer's defeat line into a no-break space, so a sentence a little wider
+// than the battle message box became one word; BreakSubStringAutomatic's first
+// count then allocated a line its layout left empty, and BuildNewString wrote a
+// line break over the end mark and read that line through an unset pointer:
+// natively a fault right after Psychic Edward's battle on Route 110. The eight
+// texts the native UI session's scan found (every trainerbattle text in data/
+// and the secret base texts; U13-ROUTE110-CRASH.txt), copied here from data/,
+// as trainer A's and trainer B's defeat line through the real
+// BattleStringExpandPlaceholders, and one line that fits as a control. Each must
+// come back whole: the same words, the pause code, then the end mark.
+// ---------------------------------------------------------------------------
+
+#include "line_break.h"
+
+extern const u8 SecretBase_Text_Trainer4Defeated[];
+
+static int sBreakChecks, sBreakFailures;
+
+static void ExpectBreak(const char *what, bool32 ok)
+{
+    sBreakChecks++;
+    if (!ok)
+    {
+        sBreakFailures++;
+        printf("FAIL %s\n", what);
+    }
+}
+
+static void CheckLoseText(const char *label, const u8 *text, bool32 trainerB)
+{
+    static const u8 sLoseA[] = {PLACEHOLDER_BEGIN, B_TXT_TRAINER1_LOSE_TEXT, EOS};
+    static const u8 sLoseB[] = {PLACEHOLDER_BEGIN, B_TXT_TRAINER2_LOSE_TEXT, EOS};
+    u8 dst[300], got[300], want[300];
+    char what[160];
+    u32 end, n;
+
+    if (trainerB)
+        TRAINER_BATTLE_PARAM.defeatTextB = (u8 *)text;
+    else
+        TRAINER_BATTLE_PARAM.defeatTextA = (u8 *)text;
+    printf("  %s, trainer %c\n", label, trainerB ? 'B' : 'A');
+    fflush(stdout); // a crash here is the bug itself: the case is named first
+    memset(dst, 0xEE, sizeof(dst)); // no end mark anywhere but where the game writes one
+    BattleStringExpandPlaceholders(trainerB ? sLoseB : sLoseA, dst, sizeof(dst));
+    for (end = 0; end < sizeof(dst) && dst[end] != EOS; end++)
+        ;
+    snprintf(what, sizeof(what), "%s (trainer %c): an end mark", label, trainerB ? 'B' : 'A');
+    ExpectBreak(what, end < sizeof(dst));
+    if (end >= sizeof(dst))
+        return;
+    snprintf(what, sizeof(what), "%s (trainer %c): the pause code right before the end mark", label,
+             trainerB ? 'B' : 'A');
+    ExpectBreak(what, end >= 2 && dst[end - 2] == EXT_CTRL_CODE_BEGIN && dst[end - 1] == EXT_CTRL_CODE_PAUSE_UNTIL_PRESS);
+    // The same words as the text (line breaks and kinds of space aside).
+    Words(dst, got, sizeof(got));
+    Words(text, want, sizeof(want));
+    n = StringLength(want);
+    want[n] = EXT_CTRL_CODE_BEGIN;
+    want[n + 1] = EXT_CTRL_CODE_PAUSE_UNTIL_PRESS;
+    want[n + 2] = EOS;
+    snprintf(what, sizeof(what), "%s (trainer %c): every word, nothing after it", label, trainerB ? 'B' : 'A');
+    ExpectBreak(what, StringCompare(got, want) == 0);
+}
+
+int NativeSelfTest_LineBreak(void)
+{
+    static const struct { const char *label; const u8 *text; } sTexts[] = {
+        {"Route110_Text_EdwardDefeated", COMPOUND_STRING("I failed to prophesize my own demise!")},
+        {"MossdeepCity_Gym_Text_MauraDefeat", COMPOUND_STRING("You've traveled a path of greatness!")},
+        {"MtChimney_Text_MelissaDefeat", COMPOUND_STRING("Ooh, that was a scorching-hot match!")},
+        {"Route123_Text_AlbertoDefeat", COMPOUND_STRING("Even in defeat, BIRD POKéMON are cool!")},
+        {"Route124_Text_LilaRematchDefeat", COMPOUND_STRING("LILA: ROY!\nIt's your fault we lost again!\p"
+                                                            "We're having a training session later!")},
+        {"Route130_Text_SantiagoDefeat", COMPOUND_STRING("I needed to be a little less peaceful!")},
+        {"VictoryRoad_B1F_Text_MitchellDefeat", COMPOUND_STRING("I've never met anyone like you before.")},
+        {"SecretBase_Text_Trainer4Defeated", SecretBase_Text_Trainer4Defeated},
+        {"a line that fits (control)", COMPOUND_STRING("Oops! I ended up losing!")},
+    };
+    u32 i;
+
+    InitHeap(gHeap, HEAP_SIZE); // the message box's line breaking allocates from the game heap
+    gBattleTypeFlags = BATTLE_TYPE_TRAINER;
+    TRAINER_BATTLE_PARAM.opponentA = TRAINER_EDWARD; // not the secret base trainer: its text is read as given
+    TRAINER_BATTLE_PARAM.opponentB = TRAINER_EDWARD;
+    printf("trainer defeat lines a little wider than the message box (U13)\n");
+    for (i = 0; i < ARRAY_COUNT(sTexts); i++)
+    {
+        CheckLoseText(sTexts[i].label, sTexts[i].text, FALSE);
+        CheckLoseText(sTexts[i].label, sTexts[i].text, TRUE);
+    }
+    gBattleTypeFlags = 0;
+    printf("selftest-line-break: %d checks, %d failed\n", sBreakChecks, sBreakFailures);
+    return sBreakFailures ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
+// --selftest-wild-weather (EmeraldTogether expansion Phase 2): the weather table
+// of the randomized wild Pokemon (src/mp_wild_random.c, PC builds), checked
+// through the game's own code on real map headers:
+//   1. clear weather leaves the Phase 0 weights (rarity tier 10:5:2:1 x3, time
+//      of day x3 or /3, the map's area types x3, at least 1);
+//   2. the owner's table, written out again here: rain Water x3; heavy rain
+//      Water x3 and the rare families x2; thunder Electric x3 (Water x2); snow
+//      Ice x3; sun and drought Fire x3 (Grass x2); sandstorm Ground x3 (Rock
+//      x2); fog Ghost x3 (Psychic x2); every other weather changes nothing - for
+//      every family, habitat and time of day. "Sun" is the drought weather:
+//      WEATHER_SUNNY is Emerald's ordinary clear sky, the map weather of most
+//      routes, and changes nothing (KNOWN_ISSUES G12);
+//   3. underground maps ignore the weather (the same weights and the same
+//      Pokemon in every weather);
+//   4. the game's own roll (MPWild_RandomizeSpecies, weather read from the
+//      weather engine, time of day from the clock) picks exactly the family
+//      these weights pick, for land, surfing, fishing and Rock Smash;
+//   5. the Battle Frontier's Pike and Pyramid keep their own Pokemon.
+// --dump-wild-weights KEYS OUT writes the land weights of the maps listed in
+// KEYS ("group.number" per line) for both times of day and every weather, the
+// family table and the clock's time of day per hour, for the app's
+// scripts/multiplayer/check_engine_spawn_weights.py (the host must match).
+// ---------------------------------------------------------------------------
+
+#include "field_weather.h"
+#include "load_save.h"
+#include "mp_wild_random.h"
+#include "overworld.h"
+#include "random.h"
+#include "rtc.h"
+#include "constants/layouts.h"
+#include "constants/map_types.h"
+#include "constants/maps.h"
+#include "constants/weather.h"
+
+extern const struct MapHeader *const *const gMapGroups[];
+extern u32 MPWild_TestFamilyCount(void);
+extern const struct MPWildFamily *MPWild_TestFamily(u32 index);
+extern const struct MPWildMember *MPWild_TestMembers(void);
+extern u32 MPWild_TestFamilyWeight(u32 index, u32 habitat, bool32 night, u8 weather);
+
+#define NO_TYPE 0xFF
+
+static const struct { u8 weather; u8 primary; u8 secondary; bool8 heavy; const char *name; } sOwnerWeather[] = {
+    {WEATHER_RAIN,              TYPE_WATER,    NO_TYPE,      FALSE, "rain"},
+    {WEATHER_DOWNPOUR,          TYPE_WATER,    NO_TYPE,      TRUE,  "heavy rain"},
+    {WEATHER_RAIN_THUNDERSTORM, TYPE_ELECTRIC, TYPE_WATER,   FALSE, "thunderstorm"},
+    {WEATHER_SNOW,              TYPE_ICE,      NO_TYPE,      FALSE, "snow"},
+    {WEATHER_DROUGHT,           TYPE_FIRE,     TYPE_GRASS,   FALSE, "sun (drought)"},
+    {WEATHER_SANDSTORM,         TYPE_GROUND,   TYPE_ROCK,    FALSE, "sandstorm"},
+    {WEATHER_FOG,               TYPE_GHOST,    TYPE_PSYCHIC, FALSE, "fog"},
+    {WEATHER_FOG_HORIZONTAL,    TYPE_GHOST,    TYPE_PSYCHIC, FALSE, "fog (horizontal)"},
+    {WEATHER_FOG_DIAGONAL,      TYPE_GHOST,    TYPE_PSYCHIC, FALSE, "fog (diagonal)"},
+};
+
+static const u32 sHabitats[] = {MP_WILD_HABITAT_LAND, MP_WILD_HABITAT_SURF, MP_WILD_HABITAT_FISH, MP_WILD_HABITAT_ROCK};
+static const char *const sHabitatNames[] = {"land", "surfing", "fishing", "Rock Smash"};
+
+static int sWeatherChecks, sWeatherFailures;
+
+static void ExpectWeather(const char *what, bool32 ok)
+{
+    sWeatherChecks++;
+    if (!ok)
+        sWeatherFailures++;
+    printf("%s %s\n", ok ? "ok  " : "FAIL", what);
+}
+
+static void UseMap(u16 map)
+{
+    gMapHeader = *Overworld_GetMapHeaderByGroupAndId(MAP_GROUP(map), MAP_NUM(map));
+}
+
+static bool32 HasType(const struct MPWildFamily *family, u8 type)
+{
+    return type != NO_TYPE && (family->type1 == type || family->type2 == type);
+}
+
+// The weather's multiplier for a family by the owner's table (1 when neutral).
+static u32 OwnerFactor(const struct MPWildFamily *family, u8 weather)
+{
+    u32 i, factor = 1;
+
+    for (i = 0; i < ARRAY_COUNT(sOwnerWeather); i++)
+    {
+        if (sOwnerWeather[i].weather != weather)
+            continue;
+        if (HasType(family, sOwnerWeather[i].primary))
+            factor *= 3;
+        if (HasType(family, sOwnerWeather[i].secondary))
+            factor *= 2;
+        if (sOwnerWeather[i].heavy && family->tier >= MP_WILD_TIER_RARE)
+            factor *= 2;
+    }
+    return factor;
+}
+
+static const char *WeatherName(u8 weather)
+{
+    static const char *const sOther[WEATHER_COUNT] = {
+        [WEATHER_NONE] = "clear", [WEATHER_SUNNY] = "clear sky (WEATHER_SUNNY)",
+        [WEATHER_SUNNY_CLOUDS] = "sunny clouds", [WEATHER_VOLCANIC_ASH] = "volcanic ash",
+        [WEATHER_UNDERWATER] = "underwater", [WEATHER_SHADE] = "shade", [WEATHER_UNDERWATER_BUBBLES] = "bubbles",
+        [WEATHER_ABNORMAL] = "abnormal", [WEATHER_ROUTE119_CYCLE] = "Route 119 cycle",
+        [WEATHER_ROUTE123_CYCLE] = "Route 123 cycle", [WEATHER_DYNAMIC] = "dynamic",
+    };
+    u32 i;
+
+    for (i = 0; i < ARRAY_COUNT(sOwnerWeather); i++)
+    {
+        if (sOwnerWeather[i].weather == weather)
+            return sOwnerWeather[i].name;
+    }
+    return weather < WEATHER_COUNT && sOther[weather] ? sOther[weather] : "?";
+}
+
+// 1. Clear weather: the Phase 0 weights (area types as the map's own boost).
+static void CheckClearWeights(const char *mapName, u32 areaTypes)
+{
+    static const u32 sTier[MP_WILD_TIER_COUNT] = {30, 15, 6, 3};
+    u32 i, h, night, bad = 0, n = MPWild_TestFamilyCount();
+    char what[160];
+
+    for (h = 0; h < ARRAY_COUNT(sHabitats); h++)
+    {
+        for (night = 0; night < 2; night++)
+        {
+            for (i = 0; i < n; i++)
+            {
+                const struct MPWildFamily *family = MPWild_TestFamily(i);
+                u32 want = 0, got = MPWild_TestFamilyWeight(i, sHabitats[h], night, WEATHER_NONE);
+
+                if (family->habitat & sHabitats[h])
+                {
+                    want = sTier[family->tier];
+                    if (family->time == MP_WILD_TIME_NOCTURNAL)
+                        want = night ? want * 3 : want / 3;
+                    else if (family->time == MP_WILD_TIME_DIURNAL)
+                        want = night ? want / 3 : want * 3;
+                    if (areaTypes & ((1u << family->type1) | (1u << family->type2)))
+                        want *= 3;
+                    if (want == 0)
+                        want = 1;
+                }
+                if (got != want && bad++ == 0)
+                    printf("  %s, %s, %s: family %u weighs %u, want %u\n", mapName, sHabitatNames[h],
+                           night ? "night" : "day", i, got, want);
+            }
+        }
+    }
+    snprintf(what, sizeof(what), "%s, clear weather: the Phase 0 weights (%u families, 4 habitats, day and night)",
+             mapName, n);
+    ExpectWeather(what, bad == 0);
+}
+
+// 2. and 3. Every weather against clear weather, for every family, habitat and
+// time of day: the owner's factor, or none at all underground.
+static void CheckWeatherTable(const char *mapName, bool32 underground)
+{
+    u32 w, i, h, night, n = MPWild_TestFamilyCount();
+    char what[200];
+
+    for (w = 0; w < WEATHER_COUNT; w++)
+    {
+        u32 bad = 0, boosted = 0;
+
+        for (h = 0; h < ARRAY_COUNT(sHabitats); h++)
+        {
+            for (night = 0; night < 2; night++)
+            {
+                for (i = 0; i < n; i++)
+                {
+                    const struct MPWildFamily *family = MPWild_TestFamily(i);
+                    u32 clear = MPWild_TestFamilyWeight(i, sHabitats[h], night, WEATHER_NONE);
+                    u32 got = MPWild_TestFamilyWeight(i, sHabitats[h], night, w);
+                    u32 want = underground ? clear : clear * OwnerFactor(family, w);
+
+                    if (got != clear)
+                        boosted++;
+                    if (got != want && bad++ == 0)
+                        printf("  %s, %s, %s, %s: family %u weighs %u, want %u\n", mapName, WeatherName(w),
+                               sHabitatNames[h], night ? "night" : "day", i, got, want);
+                }
+            }
+        }
+        if (underground)
+            snprintf(what, sizeof(what), "%s (underground), %s: the clear-weather weights", mapName, WeatherName(w));
+        else
+            snprintf(what, sizeof(what), "%s, %s: the owner's table (%u family weights changed)", mapName,
+                     WeatherName(w), boosted);
+        ExpectWeather(what, bad == 0);
+    }
+}
+
+static s32 FamilyOfSpecies(u16 species)
+{
+    const struct MPWildMember *members = MPWild_TestMembers();
+    u32 i, j, n = MPWild_TestFamilyCount();
+
+    for (i = 0; i < n; i++)
+    {
+        const struct MPWildFamily *family = MPWild_TestFamily(i);
+        for (j = 0; j < family->memberCount; j++)
+        {
+            if (members[family->firstMember + j].species == species)
+                return i;
+        }
+    }
+    return -1;
+}
+
+// 4. The game's own roll against these weights: the same random state, the
+// family the weights pick against the family of the Pokemon the game made.
+static void CheckGameRoll(const char *mapName, u8 weather, u16 hour, enum WildPokemonArea area, u32 habitat,
+                          const char *areaName, u32 draws)
+{
+    u32 i, k, total, roll, mismatches = 0, n = MPWild_TestFamilyCount();
+    bool32 night;
+    char what[200];
+
+    SetTimeOfDay(hour);
+    night = (GetTimeOfDay() == TIME_EVENING || GetTimeOfDay() == TIME_NIGHT);
+    gWeatherPtr->currWeather = weather;
+    for (i = 0; i < draws; i++)
+    {
+        rng_value_t saved = gRngValue;
+        s32 want = -1, got;
+
+        total = 0;
+        for (k = 0; k < n; k++)
+            total += MPWild_TestFamilyWeight(k, habitat, night, weather);
+        roll = Random32() % total;
+        for (k = 0; k < n; k++)
+        {
+            u32 weight = MPWild_TestFamilyWeight(k, habitat, night, weather);
+            if (roll < weight)
+            {
+                want = k;
+                break;
+            }
+            roll -= weight;
+        }
+        gRngValue = saved;
+        got = FamilyOfSpecies(MPWild_RandomizeSpecies(SPECIES_ZIGZAGOON, 30, area));
+        if (got != want && mismatches++ == 0)
+            printf("  %s, %s, %s, hour %u, draw %u: the game made family %d, the weights pick %d\n", mapName,
+                   WeatherName(weather), areaName, hour, i, got, want);
+    }
+    snprintf(what, sizeof(what), "%s, %s, %s, %s (hour %u): the game's roll follows these weights (%u draws)",
+             mapName, WeatherName(weather), areaName, night ? "night" : "day", hour, draws);
+    ExpectWeather(what, mismatches == 0);
+}
+
+static void RunSpecies(u16 *out, u32 count, u8 weather, u32 seed)
+{
+    u32 i;
+
+    SeedRng(seed);
+    gWeatherPtr->currWeather = weather;
+    for (i = 0; i < count; i++)
+        out[i] = MPWild_RandomizeSpecies(SPECIES_ZIGZAGOON, 30, WILD_AREA_LAND);
+}
+
+// The share of the weight (land, day) held by families of a type, per mille.
+static u32 TypeShare(u8 type, u8 weather, bool32 rareTiers)
+{
+    u32 i, all = 0, part = 0, n = MPWild_TestFamilyCount();
+
+    for (i = 0; i < n; i++)
+    {
+        const struct MPWildFamily *family = MPWild_TestFamily(i);
+        u32 weight = MPWild_TestFamilyWeight(i, MP_WILD_HABITAT_LAND, FALSE, weather);
+        all += weight;
+        if (rareTiers ? family->tier >= MP_WILD_TIER_RARE : HasType(family, type))
+            part += weight;
+    }
+    return all ? part * 1000 / all : 0;
+}
+
+int NativeSelfTest_WildWeather(void)
+{
+    static u16 sRain[400], sClear[400];
+    static const struct { u16 map; const char *name; u32 areaTypes; } sRoutes[] = {
+        {MAP_ROUTE101, "Route 101", 0},
+        {MAP_ROUTE119, "Route 119", (1u << TYPE_GRASS) | (1u << TYPE_BUG) | (1u << TYPE_WATER)},
+        {MAP_ROUTE111, "Route 111", (1u << TYPE_GROUND) | (1u << TYPE_ROCK)},
+    };
+    static const struct { u8 weather; u16 hour; } sRolls[] = {
+        {WEATHER_NONE, 12}, {WEATHER_RAIN, 12}, {WEATHER_DOWNPOUR, 22}, {WEATHER_RAIN_THUNDERSTORM, 19},
+        {WEATHER_SUNNY, 9}, {WEATHER_SANDSTORM, 15}, {WEATHER_FOG_HORIZONTAL, 2}, {WEATHER_SHADE, 12},
+    };
+    static const struct { enum WildPokemonArea area; u32 habitat; const char *name; } sAreas[] = {
+        {WILD_AREA_LAND, MP_WILD_HABITAT_LAND, "land"},
+        {WILD_AREA_WATER, MP_WILD_HABITAT_SURF, "surfing"},
+        {WILD_AREA_FISHING, MP_WILD_HABITAT_FISH, "fishing"},
+        {WILD_AREA_ROCKS, MP_WILD_HABITAT_ROCK, "Rock Smash"},
+    };
+    const u32 caveTypes = (1u << TYPE_ROCK) | (1u << TYPE_GROUND) | (1u << TYPE_DARK) | (1u << TYPE_GHOST)
+                        | (1u << TYPE_POISON) | (1u << TYPE_STEEL);
+    u32 i, a, differ;
+    char what[160];
+
+    SetSaveBlocksPointers(0); // the clock reads the save's time offset when not connected
+    printf("wild Pokemon and the weather (Phase 2), %u families\n", MPWild_TestFamilyCount());
+
+    for (i = 0; i < ARRAY_COUNT(sRoutes); i++)
+    {
+        u32 k, same = TRUE;
+
+        UseMap(sRoutes[i].map);
+        ExpectWeather("a route is not underground", gMapHeader.mapType != MAP_TYPE_UNDERGROUND);
+        // The route's own everyday weather is clear weather (G12).
+        for (k = 0; k < MPWild_TestFamilyCount(); k++)
+            same &= MPWild_TestFamilyWeight(k, MP_WILD_HABITAT_LAND, FALSE, gMapHeader.weather)
+                 == MPWild_TestFamilyWeight(k, MP_WILD_HABITAT_LAND, FALSE, WEATHER_NONE);
+        snprintf(what, sizeof(what), "%s's own weather (%s) changes nothing", sRoutes[i].name, WeatherName(gMapHeader.weather));
+        ExpectWeather(what, same);
+        CheckClearWeights(sRoutes[i].name, sRoutes[i].areaTypes);
+        CheckWeatherTable(sRoutes[i].name, FALSE);
+    }
+    UseMap(MAP_GRANITE_CAVE_1F);
+    ExpectWeather("Granite Cave 1F is underground", gMapHeader.mapType == MAP_TYPE_UNDERGROUND);
+    CheckClearWeights("Granite Cave 1F", caveTypes);
+    CheckWeatherTable("Granite Cave 1F", TRUE);
+
+    // 4. The game's roll, on a route with area types and in the cave.
+    for (i = 0; i < ARRAY_COUNT(sRolls); i++)
+    {
+        UseMap(MAP_ROUTE119);
+        SeedRng(0x5EED0000 + i);
+        for (a = 0; a < ARRAY_COUNT(sAreas); a++)
+            CheckGameRoll("Route 119", sRolls[i].weather, sRolls[i].hour, sAreas[a].area, sAreas[a].habitat,
+                          sAreas[a].name, 300);
+    }
+    UseMap(MAP_GRANITE_CAVE_1F);
+    SeedRng(0xCA5E);
+    CheckGameRoll("Granite Cave 1F", WEATHER_RAIN, 12, WILD_AREA_LAND, MP_WILD_HABITAT_LAND, "land", 300);
+    CheckGameRoll("Granite Cave 1F", WEATHER_SANDSTORM, 22, WILD_AREA_ROCKS, MP_WILD_HABITAT_ROCK, "Rock Smash", 300);
+
+    // 3. Underground: the same Pokemon, one by one, in rain as in clear weather;
+    // on a route the rain does change them (the weather engine is really read).
+    SetTimeOfDay(12);
+    UseMap(MAP_GRANITE_CAVE_1F);
+    RunSpecies(sRain, ARRAY_COUNT(sRain), WEATHER_RAIN, 0xB0B);
+    RunSpecies(sClear, ARRAY_COUNT(sClear), WEATHER_NONE, 0xB0B);
+    ExpectWeather("Granite Cave 1F: the same 400 Pokemon in rain as in clear weather",
+                  memcmp(sRain, sClear, sizeof(sRain)) == 0);
+    UseMap(MAP_ROUTE119);
+    RunSpecies(sRain, ARRAY_COUNT(sRain), WEATHER_RAIN, 0xB0B);
+    RunSpecies(sClear, ARRAY_COUNT(sClear), WEATHER_NONE, 0xB0B);
+    for (i = 0, differ = 0; i < ARRAY_COUNT(sRain); i++)
+        differ += sRain[i] != sClear[i];
+    snprintf(what, sizeof(what), "Route 119: rain changes some of 400 Pokemon (%u differ)", differ);
+    ExpectWeather(what, differ > 0);
+
+    // 5. The Battle Frontier keeps its own Pokemon in any weather.
+    gMapHeader.mapLayoutId = LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS;
+    gWeatherPtr->currWeather = WEATHER_RAIN;
+    ExpectWeather("Battle Pike: its own Pokemon", MPWild_RandomizeSpecies(SPECIES_SEVIPER, 60, WILD_AREA_LAND) == SPECIES_SEVIPER);
+    gMapHeader.mapLayoutId = LAYOUT_BATTLE_FRONTIER_BATTLE_PYRAMID_FLOOR;
+    gWeatherPtr->currWeather = WEATHER_SANDSTORM;
+    ExpectWeather("Battle Pyramid: its own Pokemon", MPWild_RandomizeSpecies(SPECIES_SANDSLASH, 60, WILD_AREA_LAND) == SPECIES_SANDSLASH);
+
+    // What a player sees on Route 101 by day (land): the share of each table's
+    // types, clear weather -> that weather.
+    UseMap(MAP_ROUTE101);
+    printf("  Route 101, land, day: share of the weight, clear -> weather\n");
+    for (i = 0; i < ARRAY_COUNT(sOwnerWeather); i++)
+    {
+        u32 before = TypeShare(sOwnerWeather[i].primary, WEATHER_NONE, FALSE);
+        u32 after = TypeShare(sOwnerWeather[i].primary, sOwnerWeather[i].weather, FALSE);
+        u32 rareBefore = TypeShare(0, WEATHER_NONE, TRUE), rareAfter = TypeShare(0, sOwnerWeather[i].weather, TRUE);
+
+        printf("    %-16s type %2u: %3u.%u%% -> %3u.%u%%", sOwnerWeather[i].name, sOwnerWeather[i].primary,
+               before / 10, before % 10, after / 10, after % 10);
+        if (sOwnerWeather[i].heavy)
+            printf("; rare and very rare: %u.%u%% -> %u.%u%%", rareBefore / 10, rareBefore % 10, rareAfter / 10,
+                   rareAfter % 10);
+        printf("\n");
+        if (sOwnerWeather[i].heavy)
+            ExpectWeather("heavy rain: more rare families", rareAfter > rareBefore);
+        snprintf(what, sizeof(what), "%s: the main type's share at least doubles", sOwnerWeather[i].name);
+        ExpectWeather(what, after >= 2 * before && before > 0);
+    }
+
+    SetTimeOfDay(0);
+    gWeatherPtr->currWeather = WEATHER_NONE;
+    printf("selftest-wild-weather: %d checks, %d failed\n", sWeatherChecks, sWeatherFailures);
+    return sWeatherFailures ? 1 : 0;
+}
+
+int NativeSelfTest_DumpWildWeights(const char *keysPath, const char *outPath)
+{
+    static const char *const sTimes[] = {"morning", "day", "evening", "night"};
+    FILE *keys = fopen(keysPath, "r"), *out = fopen(outPath, "w");
+    char line[64];
+    u32 i, n = MPWild_TestFamilyCount(), maps = 0;
+    u16 hour;
+
+    if (keys == NULL || out == NULL)
+    {
+        fprintf(stderr, "dump-wild-weights: cannot open %s or %s\n", keysPath, outPath);
+        return 2;
+    }
+    SetSaveBlocksPointers(0);
+    fprintf(out, "format 1\nfamilies %u\n", n);
+    for (i = 0; i < n; i++)
+    {
+        const struct MPWildFamily *f = MPWild_TestFamily(i);
+        u32 j;
+
+        fprintf(out, "family %u %u %u %u %u %u %u %u\n", i, f->firstMember, f->memberCount, f->tier, f->habitat,
+                f->time, f->type1, f->type2);
+        for (j = 0; j < f->memberCount; j++)
+        {
+            const struct MPWildMember *m = &MPWild_TestMembers()[f->firstMember + j];
+            fprintf(out, "member %u %u %u %u\n", f->firstMember + j, m->species, m->minLevel, m->depth);
+        }
+    }
+    // The clock's time of day for each hour (hour 0 cannot be forced: 0 means
+    // "no override"; it lies inside the night, NIGHT_HOUR_BEGIN..END).
+    fprintf(out, "hours %d %d %d %d %d %d %d %d\n", MORNING_HOUR_BEGIN, MORNING_HOUR_END, DAY_HOUR_BEGIN,
+            DAY_HOUR_END, EVENING_HOUR_BEGIN, EVENING_HOUR_END, NIGHT_HOUR_BEGIN, NIGHT_HOUR_END);
+    for (hour = 1; hour < 24; hour++)
+    {
+        SetTimeOfDay(hour);
+        fprintf(out, "hour %u %s\n", hour, sTimes[GetTimeOfDay()]);
+    }
+    SetTimeOfDay(0);
+    while (fgets(line, sizeof(line), keys))
+    {
+        unsigned group, number;
+        u32 night, w;
+
+        if (sscanf(line, "%u.%u", &group, &number) != 2)
+            continue;
+        if (group >= MAP_GROUPS_COUNT || gMapGroups[group] == NULL)
+        {
+            // Groups this game does not build (the Kanto groups of an Emerald build).
+            fprintf(out, "nomap %u.%u\n", group, number);
+            continue;
+        }
+        gMapHeader = *Overworld_GetMapHeaderByGroupAndId(group, number);
+        fprintf(out, "map %u.%u %u %u %u\n", group, number, gMapHeader.regionMapSectionId, gMapHeader.mapType,
+                gMapHeader.mapLayoutId);
+        for (night = 0; night < 2; night++)
+        {
+            for (w = 0; w < WEATHER_COUNT; w++)
+            {
+                fprintf(out, "w %u.%u %u %u", group, number, night, w);
+                for (i = 0; i < n; i++)
+                    fprintf(out, " %u", MPWild_TestFamilyWeight(i, MP_WILD_HABITAT_LAND, night, w));
+                fputc('\n', out);
+            }
+        }
+        maps++;
+    }
+    fclose(keys);
+    fclose(out);
+    printf("dump-wild-weights: %u maps, %u families, %u weathers\n", maps, n, WEATHER_COUNT);
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// --selftest-clock (EmeraldTogether expansion Phase 11): while connected the
+// game's clock is the host's world clock, which runs 12x (one world day in two
+// real hours); the daily reset (VAR_DAYS, DoDailyEvents) and berry growth must
+// still follow the player's real clock (src/clock.c, RtcCalcRealTime), offline
+// and online alike, with no reset twice and none lost across connecting,
+// disconnecting and reconnecting. Driven through the game's own
+// InitTimeBasedEvents/DoTimeBasedEvents and the world mailbox as the companion
+// fills it; real time is moved on through the save's clock offset (as the
+// game's own clock setting does). Minute checks allow the one minute the wall
+// clock may turn during a step.
+// ---------------------------------------------------------------------------
+
+#include "berry.h"
+#include "clock.h"
+#include "dewford_trend.h"
+#include "event_data.h"
+#include "multiplayer_world.h"
+#include "constants/berry.h"
+#include "constants/flags.h"
+#include "constants/vars.h"
+
+#define CLOCK_DAILY_FLAG  FLAG_DAILY_CONTEST_LOBBY_RECEIVED_BERRY
+#define CLOCK_TREE        BERRY_TREE_ROUTE_103_CHERI_1
+#define CLOCK_TREE_START  10000
+
+static int sClockChecks, sClockFailures;
+static u32 sWorldGeneration;
+
+static void ExpectClock(const char *what, bool32 ok)
+{
+    sClockChecks++;
+    if (!ok)
+        sClockFailures++;
+    printf("%s %s\n", ok ? "ok  " : "FAIL", what);
+}
+
+// The player's real clock: the wall clock less the save's clock offset.
+static void WallTime(struct Time *out)
+{
+    struct SiiRtcInfo rtc;
+
+    RtcGetInfo(&rtc);
+    RtcCalcTimeDifference(&rtc, out, &gSaveBlock2Ptr->localTimeOffset);
+}
+
+static s32 MinutesOf(const struct Time *t)
+{
+    return t->days * 1440 + t->hours * 60 + t->minutes;
+}
+
+// Real time passes: the offset shrinks (kept normalised, as the game keeps it).
+static void PassRealTime(s32 seconds)
+{
+    struct Time *o = &gSaveBlock2Ptr->localTimeOffset;
+    s32 total = o->days * 86400 + o->hours * 3600 + o->minutes * 60 + o->seconds - seconds;
+    s32 days = total >= 0 ? total / 86400 : -((-total + 86399) / 86400);
+    s32 rest = total - days * 86400;
+
+    o->days = days;
+    o->hours = rest / 3600;
+    o->minutes = (rest / 60) % 60;
+    o->seconds = rest % 60;
+}
+
+// The companion's world record (MP_WORLD_FLAG_CLOCK_VALID and the seconds), then
+// one world tick as the game makes each frame.
+static void WorldConnect(bool32 connected, u32 worldSeconds)
+{
+    if (connected)
+    {
+        sWorldGeneration += 2;
+        gMultiplayerWorldMailbox.inboundGeneration = sWorldGeneration - 1;
+        gMultiplayerWorldMailbox.flags = MP_WORLD_FLAG_CLOCK_VALID;
+        gMultiplayerWorldMailbox.worldSeconds = worldSeconds;
+        gMultiplayerWorldMailbox.inboundGeneration = sWorldGeneration;
+    }
+    MultiplayerWorld_Tick(FALSE, connected);
+}
+
+static u16 TreeMinutes(void)
+{
+    return gSaveBlock1Ptr->berryTrees[CLOCK_TREE].minutesUntilNextStage;
+}
+
+// One DoTimeBasedEvents step: the daily flag is set before it, so the step
+// clears it exactly when a daily reset ran. Checks VAR_DAYS against the real
+// day, the berry minutes against the real minutes passed and the reset against
+// a change of real day.
+static void ClockStep(const char *label, s32 realMinutes)
+{
+    struct Time before, after;
+    u16 daysBefore = VarGet(VAR_DAYS), treeBefore = TreeMinutes();
+    s32 applied;
+    bool32 reset, dayChanged;
+    char what[200];
+
+    WallTime(&before);
+    FlagSet(CLOCK_DAILY_FLAG);
+    DoTimeBasedEvents();
+    WallTime(&after);
+    applied = treeBefore - TreeMinutes();
+    reset = !FlagGet(CLOCK_DAILY_FLAG);
+    dayChanged = VarGet(VAR_DAYS) != daysBefore;
+
+    snprintf(what, sizeof(what), "%s: VAR_DAYS is the real day (%u)", label, VarGet(VAR_DAYS));
+    ExpectClock(what, VarGet(VAR_DAYS) == before.days || VarGet(VAR_DAYS) == after.days);
+    snprintf(what, sizeof(what), "%s: a daily reset exactly when the real day changed (%s)", label,
+             reset ? "reset" : "no reset");
+    ExpectClock(what, reset == dayChanged);
+    snprintf(what, sizeof(what), "%s: the berry tree grew by the real minutes (%d, want %d)", label, applied,
+             realMinutes);
+    ExpectClock(what, applied >= realMinutes && applied <= realMinutes + 1);
+    snprintf(what, sizeof(what), "%s: the berry clock is the real time", label);
+    ExpectClock(what, MinutesOf(&gSaveBlock2Ptr->lastBerryTreeUpdate) >= MinutesOf(&before) - 1
+                   && MinutesOf(&gSaveBlock2Ptr->lastBerryTreeUpdate) <= MinutesOf(&after));
+}
+
+int NativeSelfTest_Clock(void)
+{
+    struct Time wall;
+    struct BerryTree *tree;
+    u16 day0;
+    u32 world = 7 * 86400 + 13 * 3600; // world day 7, 13:00
+    char what[160];
+
+    SetSaveBlocksPointers(0);
+    InitDewfordTrend(); // as a new game does (the daily reset divides by its limits)
+    MultiplayerWorld_Init();
+    gSaveBlock1Ptr->location.mapGroup = MAP_GROUP(MAP_ROUTE101); // not a Pokemon Center
+    gSaveBlock1Ptr->location.mapNum = MAP_NUM(MAP_ROUTE101);
+    tree = &gSaveBlock1Ptr->berryTrees[CLOCK_TREE];
+    tree->berry = 1; // Cheri
+    tree->stage = BERRY_STAGE_PLANTED;
+    tree->minutesUntilNextStage = CLOCK_TREE_START;
+    printf("real-time daily reset and berries with the world clock (Phase 11)\n");
+
+    // Offline: the clock is set; one real day later, one daily reset.
+    InitTimeBasedEvents();
+    WallTime(&wall);
+    day0 = VarGet(VAR_DAYS);
+    snprintf(what, sizeof(what), "offline, clock set: VAR_DAYS is the real day (%u)", day0);
+    ExpectClock(what, day0 == wall.days);
+    ExpectClock("offline, clock set: the game's time is the real time",
+                gLocalTime.days == wall.days && gLocalTime.hours == wall.hours);
+    PassRealTime(86400);
+    ClockStep("offline, a real day later", 1440);
+    ExpectClock("offline: VAR_DAYS moved on by one", VarGet(VAR_DAYS) == day0 + 1);
+
+    // Connected: the game's time jumps to the world's; nothing real happened.
+    WorldConnect(TRUE, world);
+    ExpectClock("connected: the world clock is in use", MultiplayerWorld_HasClock());
+    ClockStep("connected, the world clock days ahead", 0);
+    snprintf(what, sizeof(what), "connected: the game's time is the world's (day %u, %02u:00)", gLocalTime.days,
+             gLocalTime.hours);
+    ExpectClock(what, gLocalTime.days == 1000 + 7 && gLocalTime.hours == 13);
+    ExpectClock("connected: VAR_DAYS kept (no daily reset from the world clock)", VarGet(VAR_DAYS) == day0 + 1);
+
+    // Connected: a world day passes in two real hours.
+    world += 86400;
+    PassRealTime(2 * 3600);
+    WorldConnect(TRUE, world);
+    ClockStep("connected, a world day = two real hours", 120);
+    ExpectClock("connected: the game's time moved on a world day", gLocalTime.days == 1000 + 8);
+
+    // Connected: a real day passes (twelve world days).
+    world += 12 * 86400;
+    PassRealTime(86400);
+    WorldConnect(TRUE, world);
+    ClockStep("connected, a real day later", 1440);
+    ExpectClock("connected: VAR_DAYS moved on by one real day", VarGet(VAR_DAYS) == day0 + 2);
+    ClockStep("connected, the same real day again", 0);
+
+    // Disconnected: the game's time is the real time again; no second reset.
+    WorldConnect(FALSE, 0);
+    ExpectClock("disconnected: the world clock is not in use", !MultiplayerWorld_HasClock());
+    ClockStep("disconnected", 0);
+    WallTime(&wall);
+    ExpectClock("disconnected: the game's time is the real time", gLocalTime.days == wall.days);
+    ExpectClock("disconnected: VAR_DAYS kept", VarGet(VAR_DAYS) == day0 + 2);
+
+    // Reconnected to a world clock that is behind (another world, a restored
+    // host): nothing goes back, nothing resets.
+    WorldConnect(TRUE, 86400 + 3600);
+    ClockStep("reconnected, the world clock behind", 0);
+    ExpectClock("reconnected: VAR_DAYS kept", VarGet(VAR_DAYS) == day0 + 2);
+    PassRealTime(3 * 3600);
+    ClockStep("reconnected, three real hours later", 180);
+
+    // A save played while connected before Phase 11 (KNOWN_ISSUES G11): VAR_DAYS
+    // and the berry clock hold world days (MP_WORLD_DAY_ORIGIN and later); real
+    // time is the days since the game's clock was set, here 30.
+    {
+        struct Time real;
+        u16 treeBefore;
+
+        WorldConnect(FALSE, 0);
+        WallTime(&wall);
+        PassRealTime(-(s32)(wall.days - 30) * 86400);
+        WallTime(&real);
+        VarSet(VAR_DAYS, MP_WORLD_DAY_ORIGIN + 7);
+        gSaveBlock2Ptr->lastBerryTreeUpdate.days = MP_WORLD_DAY_ORIGIN + 7;
+        gSaveBlock2Ptr->lastBerryTreeUpdate.hours = 13;
+        treeBefore = TreeMinutes();
+        FlagSet(CLOCK_DAILY_FLAG);
+        DoTimeBasedEvents();
+        snprintf(what, sizeof(what), "an older save (VAR_DAYS %u, real day %d): VAR_DAYS back on the real day (%u)",
+                 MP_WORLD_DAY_ORIGIN + 7, real.days, VarGet(VAR_DAYS));
+        ExpectClock(what, VarGet(VAR_DAYS) == real.days);
+        ExpectClock("an older save: the berry clock back on real time",
+                    gSaveBlock2Ptr->lastBerryTreeUpdate.days == real.days);
+        ExpectClock("an older save: no daily reset and no berry growth for the gap",
+                    FlagGet(CLOCK_DAILY_FLAG) && TreeMinutes() == treeBefore);
+        PassRealTime(86400);
+        ClockStep("an older save, a real day later", 1440);
+        ExpectClock("an older save: VAR_DAYS moved on by one", VarGet(VAR_DAYS) == real.days + 1);
+        WorldConnect(TRUE, world + 86400);
+        PassRealTime(86400);
+        ClockStep("an older save connected, another real day", 1440);
+        ExpectClock("an older save connected: VAR_DAYS moved on by one again", VarGet(VAR_DAYS) == real.days + 2);
+    }
+
+    WorldConnect(FALSE, 0);
+    snprintf(what, sizeof(what), "the tree is still growing (%u minutes to its next stage)", TreeMinutes());
+    ExpectClock(what, tree->berry == 1 && tree->stage != BERRY_STAGE_NO_BERRY);
+    printf("selftest-clock: %d checks, %d failed\n", sClockChecks, sClockFailures);
+    return sClockFailures ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
+// --selftest-mp-objects (KNOWN_ISSUES M15): the objects the multiplayer layer
+// makes at run time (shared wild Pokemon 224-235, other players 241-243, their
+// followers 244-246, the World Event Pokemon 247) have no map template. A save
+// must never hold them (they came back as ghosts that crashed when talked to),
+// a save that already holds them must drop them on load, and an object without
+// a template must give no script instead of reading through NULL.
+// ---------------------------------------------------------------------------
+
+#include "event_object_movement.h"
+#include "multiplayer.h"
+#include "multiplayer_spawns.h"
+#include "constants/event_objects.h"
+
+static int sObjChecks, sObjFailures;
+
+static void ExpectObj(const char *what, bool32 ok)
+{
+    sObjChecks++;
+    if (!ok)
+        sObjFailures++;
+    printf("%s %s\n", ok ? "ok  " : "FAIL", what);
+}
+
+static void PlaceObject(u32 index, u8 localId, u16 graphicsId)
+{
+    struct ObjectEvent *objectEvent = &gObjectEvents[index];
+
+    memset(objectEvent, 0, sizeof(*objectEvent));
+    objectEvent->active = TRUE;
+    objectEvent->localId = localId;
+    objectEvent->graphicsId = graphicsId;
+    objectEvent->mapGroup = MAP_GROUP(MAP_ROUTE101);
+    objectEvent->mapNum = MAP_NUM(MAP_ROUTE101);
+    objectEvent->spriteId = MAX_SPRITES; // no sprite
+}
+
+int NativeSelfTest_MpObjects(void)
+{
+    static const struct { u8 localId; const char *name; } sRuntime[] = {
+        {MP_SPAWN_LOCAL_ID_BASE,                          "a shared wild Pokemon (224)"},
+        {MP_SPAWN_LOCAL_ID_BASE + MP_SPAWN_MAX_SLOTS - 1, "the last shared wild Pokemon (235)"},
+        {MULTIPLAYER_LOCAL_ID_BASE,                       "another player (241)"},
+        {MP_WORLD_LOCAL_ID_FOLLOWER_BASE,                 "another player's follower (244)"},
+        {MP_WORLD_LOCAL_ID_EVENT,                         "the World Event Pokemon (247)"},
+    };
+    const u16 monGraphics = OBJ_EVENT_MON | SPECIES_ZIGZAGOON;
+    u8 npcLocalId;
+    u32 i;
+    char what[160];
+
+    SetSaveBlocksPointers(0);
+    MultiplayerWorld_Init();
+    UseMap(MAP_ROUTE101);
+    gSaveBlock1Ptr->location.mapGroup = MAP_GROUP(MAP_ROUTE101);
+    gSaveBlock1Ptr->location.mapNum = MAP_NUM(MAP_ROUTE101);
+    npcLocalId = gMapHeader.events->objectEvents[0].localId;
+    // The current map's templates live in the save, as the game copies them on load.
+    memcpy(gSaveBlock1Ptr->objectEventTemplates, gMapHeader.events->objectEvents,
+           gMapHeader.events->objectEventCount * sizeof(struct ObjectEventTemplate));
+    printf("multiplayer objects in saves (M15); Route 101's first person is local id %u\n", npcLocalId);
+    memset(gObjectEvents, 0, sizeof(gObjectEvents));
+    for (i = 0; i < ARRAY_COUNT(sRuntime); i++)
+        PlaceObject(1 + i, sRuntime[i].localId, monGraphics);
+    PlaceObject(10, npcLocalId, OBJ_EVENT_GFX_BOY_1);
+    PlaceObject(11, OBJ_EVENT_ID_PLAYER, OBJ_EVENT_GFX_BRENDAN_NORMAL);
+
+    // 1. Saving: none of them in the save; the map's person and the player are.
+    SaveObjectEvents();
+    for (i = 0; i < ARRAY_COUNT(sRuntime); i++)
+    {
+        snprintf(what, sizeof(what), "save: %s is not saved", sRuntime[i].name);
+        ExpectObj(what, !gSaveBlock1Ptr->objectEvents[1 + i].active);
+        snprintf(what, sizeof(what), "save: %s stays on the field until its own module removes it", sRuntime[i].name);
+        ExpectObj(what, gObjectEvents[1 + i].active);
+    }
+    ExpectObj("save: the map's own person is saved", gSaveBlock1Ptr->objectEvents[10].active
+              && gSaveBlock1Ptr->objectEvents[10].localId == npcLocalId);
+    ExpectObj("save: the player is saved", gSaveBlock1Ptr->objectEvents[11].active);
+
+    // 2. Loading a save written before the fix (expansion previews 1 and 2): the
+    // shared wild Pokemon in it are dropped, the rest comes back.
+    for (i = 0; i < ARRAY_COUNT(sRuntime); i++)
+        gSaveBlock1Ptr->objectEvents[1 + i].active = TRUE;
+    memset(gObjectEvents, 0, sizeof(gObjectEvents));
+    LoadObjectEvents();
+    for (i = 0; i < ARRAY_COUNT(sRuntime); i++)
+    {
+        snprintf(what, sizeof(what), "load: %s from an older save is dropped", sRuntime[i].name);
+        ExpectObj(what, !gObjectEvents[1 + i].active);
+    }
+    ExpectObj("load: the map's own person comes back", gObjectEvents[10].active && gObjectEvents[10].localId == npcLocalId);
+    ExpectObj("load: the player comes back", gObjectEvents[11].active);
+
+    // 3. Talking to an object without a template: no script, no NULL read.
+    PlaceObject(12, MP_SPAWN_LOCAL_ID_BASE + 3, monGraphics);
+    printf("  the script of an object without a template\n");
+    fflush(stdout); // a crash here is the bug itself
+    ExpectObj("an object without a map template has no script (no NULL read)",
+              GetObjectEventScriptPointerByObjectEventId(12) == NULL);
+    PlaceObject(13, npcLocalId, OBJ_EVENT_GFX_BOY_1);
+    ExpectObj("a map object keeps its script", GetObjectEventScriptPointerByObjectEventId(13) != NULL);
+
+    printf("selftest-mp-objects: %d checks, %d failed\n", sObjChecks, sObjFailures);
+    return sObjFailures ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
+// --selftest-spawn-claims: the game's side of a shared wild Pokemon claim
+// (src/multiplayer_spawns.c) against inbound records as the companion writes
+// them, with the claim task run as the game runs it:
+//   1. a Pokemon another player is battling answers "busy" (KNOWN_ISSUES M18);
+//   2. after running from one, the stale "ours" in the inbound is no grant: the
+//      game waits for the host to drop it, then asks again (M17);
+//   3. a Pokemon caught here that the host still lists as ours is reported again,
+//      never released to the others (M16);
+//   4. the first action after a reset does not reuse number 1 (M19).
+// ---------------------------------------------------------------------------
+
+#include "task.h"
+
+extern void MultiplayerSpawns_TestShowObject(u32 index, u32 spawnId);
+extern void MultiplayerSpawns_TestBeginBattle(u32 spawnId, u16 species);
+
+static int sClaimChecks, sClaimFailures;
+static u32 sSpawnGeneration;
+
+static void ExpectClaim(const char *what, bool32 ok)
+{
+    sClaimChecks++;
+    if (!ok)
+        sClaimFailures++;
+    printf("%s %s\n", ok ? "ok  " : "FAIL", what);
+}
+
+static struct MultiplayerSpawnSlot SpawnSlot(u32 spawnId, u8 flags)
+{
+    struct MultiplayerSpawnSlot slot = {0};
+
+    slot.spawnId = spawnId;
+    slot.personality = 0x12345678 + spawnId;
+    slot.species = SPECIES_ZIGZAGOON;
+    slot.level = 3;
+    slot.flags = flags;
+    slot.x = 5 + spawnId % 4;
+    slot.y = 6;
+    slot.facing = DIR_SOUTH;
+    return slot;
+}
+
+// The companion's inbound record (odd generation while writing), then one tick
+// of the module as the game makes it on the overworld.
+static void SpawnInbound(u32 ack, u32 count, const struct MultiplayerSpawnSlot *slots)
+{
+    u32 i;
+
+    sSpawnGeneration += 2;
+    gMultiplayerSpawnMailbox.inboundGeneration = sSpawnGeneration - 1;
+    gMultiplayerSpawnMailbox.flags = MP_SPAWN_FLAG_ENABLED;
+    gMultiplayerSpawnMailbox.actionAck = ack;
+    gMultiplayerSpawnMailbox.mapGroup = MAP_GROUP(MAP_ROUTE101);
+    gMultiplayerSpawnMailbox.mapNum = MAP_NUM(MAP_ROUTE101);
+    gMultiplayerSpawnMailbox.count = count;
+    for (i = 0; i < MP_SPAWN_MAX_SLOTS; i++)
+    {
+        struct MultiplayerSpawnSlot slot = {0};
+        if (i < count)
+            slot = slots[i];
+        memcpy((void *)&gMultiplayerSpawnMailbox.slots[i], &slot, sizeof(slot));
+    }
+    gMultiplayerSpawnMailbox.inboundGeneration = sSpawnGeneration;
+    MultiplayerSpawns_Tick(FALSE, TRUE);
+}
+
+static void ResetSpawnTest(void)
+{
+    SetSaveBlocksPointers(0);
+    MultiplayerWorld_Init(); // and the spawn module
+    UseMap(MAP_ROUTE101);
+    if (gMapHeader.mapLayout == NULL)
+        gMapHeader.mapLayout = GetMapLayout(gMapHeader.mapLayoutId);
+    gSaveBlock1Ptr->location.mapGroup = MAP_GROUP(MAP_ROUTE101);
+    gSaveBlock1Ptr->location.mapNum = MAP_NUM(MAP_ROUTE101);
+    gMain.callback2 = CB2_Overworld;
+    ResetTasks();
+    sSpawnGeneration = 0;
+}
+
+static u32 ActionSeq(void)
+{
+    return gMultiplayerSpawnMailbox.local.action.seq;
+}
+
+int NativeSelfTest_SpawnClaims(void)
+{
+    struct MultiplayerSpawnSlot slots[2];
+    u32 seq, firstSeq;
+    char what[160];
+
+    printf("shared wild Pokemon claims in the game (multiplayer_spawns.c)\n");
+
+    // 1. Busy.
+    ResetSpawnTest();
+    slots[0] = SpawnSlot(101, MP_SPAWN_SLOT_BUSY);
+    SpawnInbound(0, 1, slots);
+    ExpectClaim("the inbound record turned shared spawns on", MultiplayerSpawns_IsActive());
+    MultiplayerSpawns_TestShowObject(0, 101);
+    gSpecialVar_LastTalked = MP_SPAWN_LOCAL_ID_BASE;
+    ExpectClaim("talking to a shared wild Pokemon starts a claim", MultiplayerSpawns_TryClaimTalked());
+    RunTasks();
+    snprintf(what, sizeof(what), "one another player is battling: the busy message (VAR_RESULT %u, want 0)", gSpecialVar_Result);
+    ExpectClaim(what, gSpecialVar_Result == 0);
+    ExpectClaim("and no claim was sent for it", ActionSeq() == 0);
+
+    // 2. Ran from it: the stale "ours" is no grant.
+    ResetSpawnTest();
+    slots[0] = SpawnSlot(102, MP_SPAWN_SLOT_MINE);
+    MultiplayerSpawns_TestShowObject(1, 102);
+    MultiplayerSpawns_TestBeginBattle(102, SPECIES_ZIGZAGOON); // granted, battling
+    SpawnInbound(0, 1, slots);
+    ExpectClaim("nothing is sent during the battle", ActionSeq() == 0);
+    gBattleOutcome = B_OUTCOME_RAN;
+    ExpectClaim("the battle's end is the shared Pokemon's", MultiplayerSpawns_OnScriptedBattleEnd());
+    SpawnInbound(0, 1, slots); // the host has not seen the result yet: still ours
+    firstSeq = seq = ActionSeq();
+    ExpectClaim("the result \"ran\" is sent", gMultiplayerSpawnMailbox.local.action.kind == MP_SPAWN_ACTION_RESULT
+                && gMultiplayerSpawnMailbox.local.action.result == MP_WORLD_RESULT_RAN && seq != 0);
+    snprintf(what, sizeof(what), "the first action after a reset is not number 1 (it is %u; M19)", seq);
+    ExpectClaim(what, seq != 1);
+    gSpecialVar_LastTalked = MP_SPAWN_LOCAL_ID_BASE + 1;
+    gSpecialVar_Result = 2;
+    MultiplayerSpawns_TryClaimTalked();
+    RunTasks();
+    ExpectClaim("talked to again at once: the stale \"ours\" is no grant", gSpecialVar_Result != 1);
+    ExpectClaim("and no new action while the result is unanswered", ActionSeq() == seq);
+    slots[0] = SpawnSlot(102, 0);
+    SpawnInbound(seq, 1, slots); // the host has the result: free again
+    RunTasks();
+    ExpectClaim("once the host lets it go, the game asks for it again",
+                gMultiplayerSpawnMailbox.local.action.kind == MP_SPAWN_ACTION_CLAIM && ActionSeq() == seq + 1
+                && gSpecialVar_Result != 1);
+    seq = ActionSeq();
+    slots[0] = SpawnSlot(102, MP_SPAWN_SLOT_MINE);
+    SpawnInbound(seq, 1, slots); // granted
+    RunTasks();
+    ExpectClaim("and the host's new grant starts the battle", gSpecialVar_Result == 1);
+
+    // 3. Caught here, the host still lists it as ours: report again, never release.
+    ResetSpawnTest();
+    slots[0] = SpawnSlot(103, MP_SPAWN_SLOT_MINE);
+    MultiplayerSpawns_TestShowObject(2, 103);
+    MultiplayerSpawns_TestBeginBattle(103, SPECIES_ZIGZAGOON);
+    SpawnInbound(0, 1, slots);
+    gBattleOutcome = B_OUTCOME_CAUGHT;
+    MultiplayerSpawns_OnScriptedBattleEnd();
+    SpawnInbound(0, 1, slots);
+    seq = ActionSeq();
+    ExpectClaim("the result \"caught\" is sent", gMultiplayerSpawnMailbox.local.action.kind == MP_SPAWN_ACTION_RESULT
+                && gMultiplayerSpawnMailbox.local.action.result == MP_WORLD_RESULT_CAUGHT);
+    snprintf(what, sizeof(what), "again not number 1 after the next reset (%u; from the frame counter, %u in the first run)",
+             seq, firstSeq);
+    ExpectClaim(what, seq != 1);
+    SpawnInbound(seq, 1, slots); // answered, but the host still says ours
+    ExpectClaim("still ours on the host: \"caught\" is sent again, never a release",
+                ActionSeq() == seq + 1 && gMultiplayerSpawnMailbox.local.action.kind == MP_SPAWN_ACTION_RESULT
+                && gMultiplayerSpawnMailbox.local.action.result == MP_WORLD_RESULT_CAUGHT);
+    seq = ActionSeq();
+    SpawnInbound(seq, 0, slots); // the host removed it
+    ExpectClaim("once the host removed it, nothing more is sent", ActionSeq() == seq);
+
+    ResetTasks();
+    gMain.callback2 = NULL;
+    printf("selftest-spawn-claims: %d checks, %d failed\n", sClaimChecks, sClaimFailures);
+    return sClaimFailures ? 1 : 0;
+}

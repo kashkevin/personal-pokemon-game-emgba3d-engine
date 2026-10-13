@@ -3695,7 +3695,16 @@ void SetObjectEventDirection(struct ObjectEvent *objectEvent, enum Direction dir
 
 static const u8 *GetObjectEventScriptPointerByLocalIdAndMap(u8 localId, u8 mapNum, u8 mapGroup)
 {
+#ifdef PORTABLE
+    // An object without a template on its map (one the multiplayer layer made,
+    // KNOWN_ISSUES M10/M15) has no script: the GBA read through NULL here.
+    const struct ObjectEventTemplate *template = GetObjectEventTemplateByLocalIdAndMap(localId, mapNum, mapGroup);
+    return template != NULL ? template->script : NULL;
+#else
+#line 3659 // gba-line
     return GetObjectEventTemplateByLocalIdAndMap(localId, mapNum, mapGroup)->script;
+#endif
+#line 3660 // gba-line
 }
 
 const u8 *GetObjectEventScriptPointerByObjectEventId(u8 objectEventId)

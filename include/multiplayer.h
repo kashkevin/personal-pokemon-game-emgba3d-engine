@@ -67,5 +67,12 @@ bool32 Multiplayer_IsRemoteObject(const struct ObjectEvent *objectEvent);
 u32 Multiplayer_GetRemotePlayerId(u32 i);
 u8 Multiplayer_GetRemoteMovementMode(u32 i);
 bool32 Multiplayer_IsPeerOnCurrentMap(u32 playerId);
+#ifdef PORTABLE
+// Local ids of the objects the multiplayer layer makes at run time: shared wild
+// Pokemon (multiplayer_spawns.h), other players, their followers and the World
+// Event Pokemon (multiplayer_world.h). They have no map template and are never
+// part of a save.
+bool32 Multiplayer_IsRuntimeLocalId(u32 localId);
+#endif
 
 #endif

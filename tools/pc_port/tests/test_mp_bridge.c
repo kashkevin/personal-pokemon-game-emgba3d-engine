@@ -9,13 +9,14 @@
 #include "minitest.h"
 
 static uint8_t sMemory[MP_REGION_COUNT][4096];
-static const uint32_t sSizes[MP_REGION_COUNT] = {128, 512, 512, 512, 128, 256, 4096};
+static const uint32_t sSizes[MP_REGION_COUNT] = {128, 512, 512, 512, 128, 256, 4096, 384};
 
 struct FakeTransport
 {
     bool again;          // the next send says EAGAIN once
     size_t chunk;        // bytes a send takes at most (0: all of them)
     bool closed;
+    bool hangup;         // the next receive sees the companion close (0 bytes)
     int connects;
     int errors;
     uint8_t sent[16384];
@@ -59,6 +60,11 @@ static int FakeReceive(void *context, uint8_t *data, size_t max)
     size_t n;
 
     (void)context;
+    if (sNet.hangup)
+    {
+        sNet.hangup = false;
+        return 0;
+    }
     if (sNet.receivedCount == 0)
         return MP_IO_AGAIN;
     n = sNet.receivedLength[0];
@@ -747,6 +753,246 @@ MT_TEST(battle_looks_need_the_game)
     MT_CHECK(sNet.closed);
 }
 
+// Shared wild Pokemon (the second native extension, mp_bridge.h).
+static void SpawnBridge(bool spawnMailbox)
+{
+    struct MpBridgeCaps caps;
+    uint8_t *w = sMemory[MP_REGION_WORLD];
+    uint8_t *v = sMemory[MP_REGION_SPAWN];
+
+    memset(&caps, 0, sizeof(caps));
+    caps.world = 1;
+    caps.spawns = 1;
+    Fresh(&caps);
+    sNet.chunk = 0;
+    Ready(0);
+    PutU32(w, 0x31574D45);
+    PutU16(w + 4, 1);
+    PutU16(w + 6, 256);
+    if (spawnMailbox)
+    {
+        PutU32(v, 0x31564D45);
+        PutU16(v + 4, 1);
+        PutU16(v + 6, 384);
+    }
+}
+
+static void MakeSpawnInbound(uint8_t record[252], uint8_t count)
+{
+    uint8_t i;
+
+    memset(record, 0, 252);
+    PutU32(record, count != 0 ? 1 : 0);
+    PutU32(record + 4, 7);   // action ack
+    record[8] = 0;           // map group
+    record[9] = 16;          // map number
+    record[10] = count;
+    for (i = 0; i < count; i++)
+    {
+        uint8_t *slot = record + 12 + i * 20;
+        PutU32(slot, 100 + i);          // spawn id
+        PutU32(slot + 4, 0xDEADBEEF);   // personality
+        PutU16(slot + 8, 263);          // species
+        slot[10] = 3;                   // level
+        slot[11] = i == 0 ? 1 : 0;      // the first one is shiny
+        PutU16(slot + 12, 10 + i);
+        PutU16(slot + 14, 7);
+        slot[16] = 1;
+    }
+}
+
+MT_TEST(spawn_capability_waits_for_its_mailbox)
+{
+    const uint8_t *payload;
+
+    MT_CHECK(MpBridge_CheckCaps(&(struct MpBridgeCaps){.spawns = 1}) != NULL); // needs the world mailbox
+    SpawnBridge(false);
+    Step(12);
+    MT_EQ(SentFrame('w', 0, &payload), -1);
+    PutU32(sMemory[MP_REGION_SPAWN], 0x31564D45);
+    PutU16(sMemory[MP_REGION_SPAWN] + 4, 1);
+    PutU16(sMemory[MP_REGION_SPAWN] + 6, 384);
+    Step(2);
+    MT_EQ(SentFrame('w', 0, &payload), 8);
+    MT_EQ(payload[0], 1);
+    MT_EQ(payload[2], 12);
+    MT_EQ(payload[4] | (payload[5] << 8), 384);
+    MT_EQ(payload[6], 20);
+    MT_EQ(SentFrame('w', 1, &payload), -1); // announced once
+}
+
+MT_TEST(spawn_record_and_inbound_round_trip)
+{
+    uint8_t record[252];
+    uint8_t frame[260];
+    uint8_t *v = sMemory[MP_REGION_SPAWN];
+    const uint8_t *payload;
+    size_t n;
+
+    SpawnBridge(true);
+    memset(v + 12, 0x22, 116); // the game's spawn record (claims ride on it)
+    Step(12);
+    MT_EQ(SentFrame('w', 0, &payload), 8);
+    MT_EQ(SentFrame('g', 0, &payload), 116);
+    MT_EQ(payload[0], 0x22);
+    MT_EQ(payload[115], 0x22);
+    MakeSpawnInbound(record, 3);
+    n = FrameOf(frame, 'n', record, sizeof(record));
+    Feed(frame, n, 100);
+    Step(2);
+    MT_CHECK(!sNet.closed);
+    MT_EQ(GetU32(v + 128), 2);                  // odd while writing, even after
+    MT_CHECK(memcmp(v + 132, record, 252) == 0);
+    MT_EQ(GetU32(v + 144), 100);                // the first slot's spawn id
+    MakeSpawnInbound(record, 0);                // disconnected: off, no slots
+    n = FrameOf(frame, 'n', record, sizeof(record));
+    Feed(frame, n, 100);
+    Step(2);
+    MT_EQ(GetU32(v + 128), 4);
+    MT_EQ(GetU32(v + 132), 0);
+    MT_CHECK(!sNet.closed);
+}
+
+MT_TEST(spawn_inbound_is_validated)
+{
+    uint8_t record[252];
+    uint8_t frame[260];
+    size_t n;
+    int bad;
+
+    for (bad = 0; bad < 4; bad++)
+    {
+        SpawnBridge(true);
+        Step(12);
+        MakeSpawnInbound(record, 2);
+        if (bad == 0)
+            record[10] = 13;             // more than twelve slots
+        else if (bad == 1)
+            PutU32(record + 12 + 20, 0); // a listed slot without a spawn id
+        else if (bad == 2)
+            record[12 + 2 * 20] = 1;     // an unused slot that is not zero
+        else
+            PutU32(record, 0);           // slots without "enabled"
+        n = FrameOf(frame, 'n', record, sizeof(record));
+        Feed(frame, n, 100);
+        Step(2);
+        MT_CHECK(sNet.closed);
+        MT_EQ(GetU32(sMemory[MP_REGION_SPAWN] + 128), 0); // nothing reached the game
+    }
+}
+
+MT_TEST(spawn_inbound_needs_the_announcement)
+{
+    uint8_t record[252];
+    uint8_t frame[260];
+    size_t n;
+
+    SpawnBridge(false); // a game without the spawn mailbox
+    Step(12);
+    MakeSpawnInbound(record, 1);
+    n = FrameOf(frame, 'n', record, sizeof(record));
+    Feed(frame, n, 100);
+    Step(2);
+    MT_CHECK(sNet.closed);
+}
+
+// Position of the first complete outbound frame of `kind` among all frames
+// sent, or -1.
+static int FrameIndex(uint8_t kind)
+{
+    size_t at = 0;
+    int index = 0;
+
+    while (at + 5 <= sNet.sentLength)
+    {
+        uint32_t size = GetBE32(sNet.sent + at);
+
+        if (at + 4 + size > sNet.sentLength)
+            break;
+        if (sNet.sent[at + 4] == kind)
+            return index;
+        at += 4 + size;
+        index++;
+    }
+    return -1;
+}
+
+// A game that is already running when its companion (re)starts announces all
+// its capabilities at once while its records are due every frame (a slow 3D
+// frame on software OpenGL). The spawn record still never overtakes its 'w'
+// announcement: the companion drops a connection whose first 'g' precedes it.
+MT_TEST(spawn_record_never_overtakes_its_announcement)
+{
+    struct MpBridgeCaps caps;
+    uint8_t *w = sMemory[MP_REGION_WORLD];
+    uint8_t *v = sMemory[MP_REGION_SPAWN];
+    int round, i;
+
+    // The native game's capability set (its log: "save 1 trade 1 emergency 2
+    // battle 3/1/1 window 1 menu 2 effects 0/0/0 reset 2/1 world 1 spawns 1").
+    memset(&caps, 0, sizeof(caps));
+    caps.save = 1;
+    caps.trade = 1;
+    caps.emergencySave = 2;
+    caps.battle = 3;
+    caps.battleResume = 1;
+    caps.battleExecution = 1;
+    caps.battleAdmissionCleanup = 1;
+    caps.saveWindow = 1;
+    caps.menu = 2;
+    caps.reset = 2;
+    caps.resetInput = 1;
+    caps.world = 1;
+    caps.spawns = 1;
+    MT_CHECK(MpBridge_CheckCaps(&caps) == NULL);
+    Fresh(&caps);
+    sBridge.ops.milliseconds = FakeMilliseconds;
+    sBridge.ops.battleLooks = FakeBattleLooks;
+    sNet.chunk = 0;
+    sNowMs = 1000;
+    Ready(0);
+    SaveReady();
+    BattleReady();
+    PutU32(sMemory[MP_REGION_MENU], 0x31554D45);
+    PutU16(sMemory[MP_REGION_MENU] + 4, 2);
+    PutU16(sMemory[MP_REGION_MENU] + 6, 512);
+    PutU32(sMemory[MP_REGION_RESET], 0x31524D45);
+    PutU16(sMemory[MP_REGION_RESET] + 4, 2);
+    PutU16(sMemory[MP_REGION_RESET] + 6, 128);
+    PutU32(w, 0x31574D45);
+    PutU16(w + 4, 1);
+    PutU16(w + 6, 256);
+    PutU32(v, 0x31564D45);
+    PutU16(v + 4, 1);
+    PutU16(v + 6, 384);
+    memset(v + 12, 0x22, 116);
+    for (round = 0; round < 2; round++)
+    {
+        sNet.sentLength = 0;
+        for (i = 0; i < 8; i++) // 2.5 frames a second: every record is due every frame
+        {
+            sNowMs += 400;
+            Step(1);
+        }
+        MT_EQ(sNet.connects, round + 1);
+        MT_CHECK(!sNet.closed);
+        MT_EQ(FrameIndex('H'), 0);
+        MT_CHECK(FrameIndex('w') > 0);
+        MT_CHECK(FrameIndex('g') > FrameIndex('w'));
+        MT_CHECK(FrameIndex('P') > 0);
+        MT_EQ(sNet.errors, 0);
+        // The companion restarts: the game sees it close, then reconnects.
+        sNet.hangup = true;
+        sNowMs += 400;
+        Step(1);
+        MT_CHECK(sNet.closed);
+        MT_EQ(sNet.errors, 1);
+        sNet.errors = 0;
+        Step(119);
+        MT_EQ(sNet.connects, round + 1);
+    }
+}
+
 // tests/native/windows-input-guard.c
 static uint32_t AddKeys(struct MpBridgeInput *s, uint32_t keys)
 {
@@ -887,6 +1133,11 @@ int main(void)
     MT_RUN(battle_capability_waits_for_its_mailbox);
     MT_RUN(battle_looks_follow_their_announcement);
     MT_RUN(battle_looks_need_the_game);
+    MT_RUN(spawn_capability_waits_for_its_mailbox);
+    MT_RUN(spawn_record_and_inbound_round_trip);
+    MT_RUN(spawn_inbound_is_validated);
+    MT_RUN(spawn_inbound_needs_the_announcement);
+    MT_RUN(spawn_record_never_overtakes_its_announcement);
     MT_RUN(reset_chord_guard_masks);
     MT_RUN(reset_chord_guard_orders);
     MT_RUN(reset_chord_guard_native_capability);

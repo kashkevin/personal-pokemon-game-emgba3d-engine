@@ -179,6 +179,12 @@ extern int NativeSelfTest_PartyOrder(void);
 extern int NativeSelfTest_BattleNames(void);
 extern int NativeSelfTest_CryStop(void);
 extern int NativeSelfTest_ShakeAnim(void);
+extern int NativeSelfTest_LineBreak(void);
+extern int NativeSelfTest_WildWeather(void);
+extern int NativeSelfTest_Clock(void);
+extern int NativeSelfTest_MpObjects(void);
+extern int NativeSelfTest_SpawnClaims(void);
+extern int NativeSelfTest_DumpWildWeights(const char *keysPath, const char *outPath);
 extern bool32 GameMemory_Reset(void);
 
 static jmp_buf sGameResetPoint; // where the game thread restarts after a soft reset
@@ -896,6 +902,21 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_CryStop()); // src/platform/native_selftest.c (KNOWN_ISSUES N39)
         else if (strcmp(argv[i], "--selftest-shake-anim") == 0)
             exit(NativeSelfTest_ShakeAnim()); // src/platform/native_selftest.c (KNOWN_ISSUES N40)
+        else if (strcmp(argv[i], "--selftest-line-break") == 0)
+            exit(NativeSelfTest_LineBreak()); // src/platform/native_selftest.c (KNOWN_ISSUES U13)
+        else if (strcmp(argv[i], "--selftest-wild-weather") == 0)
+            exit(NativeSelfTest_WildWeather()); // src/platform/native_selftest.c (expansion Phase 2)
+        else if (strcmp(argv[i], "--selftest-clock") == 0)
+            exit(NativeSelfTest_Clock()); // src/platform/native_selftest.c (expansion Phase 11)
+        else if (strcmp(argv[i], "--selftest-mp-objects") == 0)
+            exit(NativeSelfTest_MpObjects()); // src/platform/native_selftest.c (KNOWN_ISSUES M15)
+        else if (strcmp(argv[i], "--selftest-spawn-claims") == 0)
+            exit(NativeSelfTest_SpawnClaims()); // src/platform/native_selftest.c (KNOWN_ISSUES M16-M19)
+        else if (strcmp(argv[i], "--dump-wild-weights") == 0 && i + 2 < argc)
+        {
+            const char *keysPath = argv[++i];
+            exit(NativeSelfTest_DumpWildWeights(keysPath, argv[++i])); // the host's consistency check
+        }
     }
 }
 
