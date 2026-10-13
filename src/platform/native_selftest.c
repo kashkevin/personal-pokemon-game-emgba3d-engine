@@ -740,7 +740,9 @@ int NativeSelfTest_LineBreak(void)
 //      Water x3 and the rare families x2; thunder Electric x3 (Water x2); snow
 //      Ice x3; sun and drought Fire x3 (Grass x2); sandstorm Ground x3 (Rock
 //      x2); fog Ghost x3 (Psychic x2); every other weather changes nothing - for
-//      every family, habitat and time of day;
+//      every family, habitat and time of day. "Sun" is the drought weather:
+//      WEATHER_SUNNY is Emerald's ordinary clear sky, the map weather of most
+//      routes, and changes nothing (KNOWN_ISSUES G12);
 //   3. underground maps ignore the weather (the same weights and the same
 //      Pokemon in every weather);
 //   4. the game's own roll (MPWild_RandomizeSpecies, weather read from the
@@ -777,8 +779,7 @@ static const struct { u8 weather; u8 primary; u8 secondary; bool8 heavy; const c
     {WEATHER_DOWNPOUR,          TYPE_WATER,    NO_TYPE,      TRUE,  "heavy rain"},
     {WEATHER_RAIN_THUNDERSTORM, TYPE_ELECTRIC, TYPE_WATER,   FALSE, "thunderstorm"},
     {WEATHER_SNOW,              TYPE_ICE,      NO_TYPE,      FALSE, "snow"},
-    {WEATHER_SUNNY,             TYPE_FIRE,     TYPE_GRASS,   FALSE, "sun"},
-    {WEATHER_DROUGHT,           TYPE_FIRE,     TYPE_GRASS,   FALSE, "drought"},
+    {WEATHER_DROUGHT,           TYPE_FIRE,     TYPE_GRASS,   FALSE, "sun (drought)"},
     {WEATHER_SANDSTORM,         TYPE_GROUND,   TYPE_ROCK,    FALSE, "sandstorm"},
     {WEATHER_FOG,               TYPE_GHOST,    TYPE_PSYCHIC, FALSE, "fog"},
     {WEATHER_FOG_HORIZONTAL,    TYPE_GHOST,    TYPE_PSYCHIC, FALSE, "fog (horizontal)"},
@@ -830,7 +831,8 @@ static u32 OwnerFactor(const struct MPWildFamily *family, u8 weather)
 static const char *WeatherName(u8 weather)
 {
     static const char *const sOther[WEATHER_COUNT] = {
-        [WEATHER_NONE] = "clear", [WEATHER_SUNNY_CLOUDS] = "sunny clouds", [WEATHER_VOLCANIC_ASH] = "volcanic ash",
+        [WEATHER_NONE] = "clear", [WEATHER_SUNNY] = "clear sky (WEATHER_SUNNY)",
+        [WEATHER_SUNNY_CLOUDS] = "sunny clouds", [WEATHER_VOLCANIC_ASH] = "volcanic ash",
         [WEATHER_UNDERWATER] = "underwater", [WEATHER_SHADE] = "shade", [WEATHER_UNDERWATER_BUBBLES] = "bubbles",
         [WEATHER_ABNORMAL] = "abnormal", [WEATHER_ROUTE119_CYCLE] = "Route 119 cycle",
         [WEATHER_ROUTE123_CYCLE] = "Route 123 cycle", [WEATHER_DYNAMIC] = "dynamic",
@@ -1036,8 +1038,16 @@ int NativeSelfTest_WildWeather(void)
 
     for (i = 0; i < ARRAY_COUNT(sRoutes); i++)
     {
+        u32 k, same = TRUE;
+
         UseMap(sRoutes[i].map);
         ExpectWeather("a route is not underground", gMapHeader.mapType != MAP_TYPE_UNDERGROUND);
+        // The route's own everyday weather is clear weather (G12).
+        for (k = 0; k < MPWild_TestFamilyCount(); k++)
+            same &= MPWild_TestFamilyWeight(k, MP_WILD_HABITAT_LAND, FALSE, gMapHeader.weather)
+                 == MPWild_TestFamilyWeight(k, MP_WILD_HABITAT_LAND, FALSE, WEATHER_NONE);
+        snprintf(what, sizeof(what), "%s's own weather (%s) changes nothing", sRoutes[i].name, WeatherName(gMapHeader.weather));
+        ExpectWeather(what, same);
         CheckClearWeights(sRoutes[i].name, sRoutes[i].areaTypes);
         CheckWeatherTable(sRoutes[i].name, FALSE);
     }
@@ -1373,9 +1383,318 @@ int NativeSelfTest_Clock(void)
     PassRealTime(3 * 3600);
     ClockStep("reconnected, three real hours later", 180);
 
+    // A save played while connected before Phase 11 (KNOWN_ISSUES G11): VAR_DAYS
+    // and the berry clock hold world days (MP_WORLD_DAY_ORIGIN and later); real
+    // time is the days since the game's clock was set, here 30.
+    {
+        struct Time real;
+        u16 treeBefore;
+
+        WorldConnect(FALSE, 0);
+        WallTime(&wall);
+        PassRealTime(-(s32)(wall.days - 30) * 86400);
+        WallTime(&real);
+        VarSet(VAR_DAYS, MP_WORLD_DAY_ORIGIN + 7);
+        gSaveBlock2Ptr->lastBerryTreeUpdate.days = MP_WORLD_DAY_ORIGIN + 7;
+        gSaveBlock2Ptr->lastBerryTreeUpdate.hours = 13;
+        treeBefore = TreeMinutes();
+        FlagSet(CLOCK_DAILY_FLAG);
+        DoTimeBasedEvents();
+        snprintf(what, sizeof(what), "an older save (VAR_DAYS %u, real day %d): VAR_DAYS back on the real day (%u)",
+                 MP_WORLD_DAY_ORIGIN + 7, real.days, VarGet(VAR_DAYS));
+        ExpectClock(what, VarGet(VAR_DAYS) == real.days);
+        ExpectClock("an older save: the berry clock back on real time",
+                    gSaveBlock2Ptr->lastBerryTreeUpdate.days == real.days);
+        ExpectClock("an older save: no daily reset and no berry growth for the gap",
+                    FlagGet(CLOCK_DAILY_FLAG) && TreeMinutes() == treeBefore);
+        PassRealTime(86400);
+        ClockStep("an older save, a real day later", 1440);
+        ExpectClock("an older save: VAR_DAYS moved on by one", VarGet(VAR_DAYS) == real.days + 1);
+        WorldConnect(TRUE, world + 86400);
+        PassRealTime(86400);
+        ClockStep("an older save connected, another real day", 1440);
+        ExpectClock("an older save connected: VAR_DAYS moved on by one again", VarGet(VAR_DAYS) == real.days + 2);
+    }
+
     WorldConnect(FALSE, 0);
     snprintf(what, sizeof(what), "the tree is still growing (%u minutes to its next stage)", TreeMinutes());
     ExpectClock(what, tree->berry == 1 && tree->stage != BERRY_STAGE_NO_BERRY);
     printf("selftest-clock: %d checks, %d failed\n", sClockChecks, sClockFailures);
     return sClockFailures ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
+// --selftest-mp-objects (KNOWN_ISSUES M15): the objects the multiplayer layer
+// makes at run time (shared wild Pokemon 224-235, other players 241-243, their
+// followers 244-246, the World Event Pokemon 247) have no map template. A save
+// must never hold them (they came back as ghosts that crashed when talked to),
+// a save that already holds them must drop them on load, and an object without
+// a template must give no script instead of reading through NULL.
+// ---------------------------------------------------------------------------
+
+#include "event_object_movement.h"
+#include "multiplayer.h"
+#include "multiplayer_spawns.h"
+#include "constants/event_objects.h"
+
+static int sObjChecks, sObjFailures;
+
+static void ExpectObj(const char *what, bool32 ok)
+{
+    sObjChecks++;
+    if (!ok)
+        sObjFailures++;
+    printf("%s %s\n", ok ? "ok  " : "FAIL", what);
+}
+
+static void PlaceObject(u32 index, u8 localId, u16 graphicsId)
+{
+    struct ObjectEvent *objectEvent = &gObjectEvents[index];
+
+    memset(objectEvent, 0, sizeof(*objectEvent));
+    objectEvent->active = TRUE;
+    objectEvent->localId = localId;
+    objectEvent->graphicsId = graphicsId;
+    objectEvent->mapGroup = MAP_GROUP(MAP_ROUTE101);
+    objectEvent->mapNum = MAP_NUM(MAP_ROUTE101);
+    objectEvent->spriteId = MAX_SPRITES; // no sprite
+}
+
+int NativeSelfTest_MpObjects(void)
+{
+    static const struct { u8 localId; const char *name; } sRuntime[] = {
+        {MP_SPAWN_LOCAL_ID_BASE,                          "a shared wild Pokemon (224)"},
+        {MP_SPAWN_LOCAL_ID_BASE + MP_SPAWN_MAX_SLOTS - 1, "the last shared wild Pokemon (235)"},
+        {MULTIPLAYER_LOCAL_ID_BASE,                       "another player (241)"},
+        {MP_WORLD_LOCAL_ID_FOLLOWER_BASE,                 "another player's follower (244)"},
+        {MP_WORLD_LOCAL_ID_EVENT,                         "the World Event Pokemon (247)"},
+    };
+    const u16 monGraphics = OBJ_EVENT_MON | SPECIES_ZIGZAGOON;
+    u8 npcLocalId;
+    u32 i;
+    char what[160];
+
+    SetSaveBlocksPointers(0);
+    MultiplayerWorld_Init();
+    UseMap(MAP_ROUTE101);
+    gSaveBlock1Ptr->location.mapGroup = MAP_GROUP(MAP_ROUTE101);
+    gSaveBlock1Ptr->location.mapNum = MAP_NUM(MAP_ROUTE101);
+    npcLocalId = gMapHeader.events->objectEvents[0].localId;
+    // The current map's templates live in the save, as the game copies them on load.
+    memcpy(gSaveBlock1Ptr->objectEventTemplates, gMapHeader.events->objectEvents,
+           gMapHeader.events->objectEventCount * sizeof(struct ObjectEventTemplate));
+    printf("multiplayer objects in saves (M15); Route 101's first person is local id %u\n", npcLocalId);
+    memset(gObjectEvents, 0, sizeof(gObjectEvents));
+    for (i = 0; i < ARRAY_COUNT(sRuntime); i++)
+        PlaceObject(1 + i, sRuntime[i].localId, monGraphics);
+    PlaceObject(10, npcLocalId, OBJ_EVENT_GFX_BOY_1);
+    PlaceObject(11, OBJ_EVENT_ID_PLAYER, OBJ_EVENT_GFX_BRENDAN_NORMAL);
+
+    // 1. Saving: none of them in the save; the map's person and the player are.
+    SaveObjectEvents();
+    for (i = 0; i < ARRAY_COUNT(sRuntime); i++)
+    {
+        snprintf(what, sizeof(what), "save: %s is not saved", sRuntime[i].name);
+        ExpectObj(what, !gSaveBlock1Ptr->objectEvents[1 + i].active);
+        snprintf(what, sizeof(what), "save: %s stays on the field until its own module removes it", sRuntime[i].name);
+        ExpectObj(what, gObjectEvents[1 + i].active);
+    }
+    ExpectObj("save: the map's own person is saved", gSaveBlock1Ptr->objectEvents[10].active
+              && gSaveBlock1Ptr->objectEvents[10].localId == npcLocalId);
+    ExpectObj("save: the player is saved", gSaveBlock1Ptr->objectEvents[11].active);
+
+    // 2. Loading a save written before the fix (expansion previews 1 and 2): the
+    // shared wild Pokemon in it are dropped, the rest comes back.
+    for (i = 0; i < ARRAY_COUNT(sRuntime); i++)
+        gSaveBlock1Ptr->objectEvents[1 + i].active = TRUE;
+    memset(gObjectEvents, 0, sizeof(gObjectEvents));
+    LoadObjectEvents();
+    for (i = 0; i < ARRAY_COUNT(sRuntime); i++)
+    {
+        snprintf(what, sizeof(what), "load: %s from an older save is dropped", sRuntime[i].name);
+        ExpectObj(what, !gObjectEvents[1 + i].active);
+    }
+    ExpectObj("load: the map's own person comes back", gObjectEvents[10].active && gObjectEvents[10].localId == npcLocalId);
+    ExpectObj("load: the player comes back", gObjectEvents[11].active);
+
+    // 3. Talking to an object without a template: no script, no NULL read.
+    PlaceObject(12, MP_SPAWN_LOCAL_ID_BASE + 3, monGraphics);
+    printf("  the script of an object without a template\n");
+    fflush(stdout); // a crash here is the bug itself
+    ExpectObj("an object without a map template has no script (no NULL read)",
+              GetObjectEventScriptPointerByObjectEventId(12) == NULL);
+    PlaceObject(13, npcLocalId, OBJ_EVENT_GFX_BOY_1);
+    ExpectObj("a map object keeps its script", GetObjectEventScriptPointerByObjectEventId(13) != NULL);
+
+    printf("selftest-mp-objects: %d checks, %d failed\n", sObjChecks, sObjFailures);
+    return sObjFailures ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
+// --selftest-spawn-claims: the game's side of a shared wild Pokemon claim
+// (src/multiplayer_spawns.c) against inbound records as the companion writes
+// them, with the claim task run as the game runs it:
+//   1. a Pokemon another player is battling answers "busy" (KNOWN_ISSUES M18);
+//   2. after running from one, the stale "ours" in the inbound is no grant: the
+//      game waits for the host to drop it, then asks again (M17);
+//   3. a Pokemon caught here that the host still lists as ours is reported again,
+//      never released to the others (M16);
+//   4. the first action after a reset does not reuse number 1 (M19).
+// ---------------------------------------------------------------------------
+
+#include "task.h"
+
+extern void MultiplayerSpawns_TestShowObject(u32 index, u32 spawnId);
+extern void MultiplayerSpawns_TestBeginBattle(u32 spawnId, u16 species);
+
+static int sClaimChecks, sClaimFailures;
+static u32 sSpawnGeneration;
+
+static void ExpectClaim(const char *what, bool32 ok)
+{
+    sClaimChecks++;
+    if (!ok)
+        sClaimFailures++;
+    printf("%s %s\n", ok ? "ok  " : "FAIL", what);
+}
+
+static struct MultiplayerSpawnSlot SpawnSlot(u32 spawnId, u8 flags)
+{
+    struct MultiplayerSpawnSlot slot = {0};
+
+    slot.spawnId = spawnId;
+    slot.personality = 0x12345678 + spawnId;
+    slot.species = SPECIES_ZIGZAGOON;
+    slot.level = 3;
+    slot.flags = flags;
+    slot.x = 5 + spawnId % 4;
+    slot.y = 6;
+    slot.facing = DIR_SOUTH;
+    return slot;
+}
+
+// The companion's inbound record (odd generation while writing), then one tick
+// of the module as the game makes it on the overworld.
+static void SpawnInbound(u32 ack, u32 count, const struct MultiplayerSpawnSlot *slots)
+{
+    u32 i;
+
+    sSpawnGeneration += 2;
+    gMultiplayerSpawnMailbox.inboundGeneration = sSpawnGeneration - 1;
+    gMultiplayerSpawnMailbox.flags = MP_SPAWN_FLAG_ENABLED;
+    gMultiplayerSpawnMailbox.actionAck = ack;
+    gMultiplayerSpawnMailbox.mapGroup = MAP_GROUP(MAP_ROUTE101);
+    gMultiplayerSpawnMailbox.mapNum = MAP_NUM(MAP_ROUTE101);
+    gMultiplayerSpawnMailbox.count = count;
+    for (i = 0; i < MP_SPAWN_MAX_SLOTS; i++)
+    {
+        struct MultiplayerSpawnSlot slot = {0};
+        if (i < count)
+            slot = slots[i];
+        memcpy((void *)&gMultiplayerSpawnMailbox.slots[i], &slot, sizeof(slot));
+    }
+    gMultiplayerSpawnMailbox.inboundGeneration = sSpawnGeneration;
+    MultiplayerSpawns_Tick(FALSE, TRUE);
+}
+
+static void ResetSpawnTest(void)
+{
+    SetSaveBlocksPointers(0);
+    MultiplayerWorld_Init(); // and the spawn module
+    UseMap(MAP_ROUTE101);
+    if (gMapHeader.mapLayout == NULL)
+        gMapHeader.mapLayout = GetMapLayout(gMapHeader.mapLayoutId);
+    gSaveBlock1Ptr->location.mapGroup = MAP_GROUP(MAP_ROUTE101);
+    gSaveBlock1Ptr->location.mapNum = MAP_NUM(MAP_ROUTE101);
+    gMain.callback2 = CB2_Overworld;
+    ResetTasks();
+    sSpawnGeneration = 0;
+}
+
+static u32 ActionSeq(void)
+{
+    return gMultiplayerSpawnMailbox.local.action.seq;
+}
+
+int NativeSelfTest_SpawnClaims(void)
+{
+    struct MultiplayerSpawnSlot slots[2];
+    u32 seq, firstSeq;
+    char what[160];
+
+    printf("shared wild Pokemon claims in the game (multiplayer_spawns.c)\n");
+
+    // 1. Busy.
+    ResetSpawnTest();
+    slots[0] = SpawnSlot(101, MP_SPAWN_SLOT_BUSY);
+    SpawnInbound(0, 1, slots);
+    ExpectClaim("the inbound record turned shared spawns on", MultiplayerSpawns_IsActive());
+    MultiplayerSpawns_TestShowObject(0, 101);
+    gSpecialVar_LastTalked = MP_SPAWN_LOCAL_ID_BASE;
+    ExpectClaim("talking to a shared wild Pokemon starts a claim", MultiplayerSpawns_TryClaimTalked());
+    RunTasks();
+    snprintf(what, sizeof(what), "one another player is battling: the busy message (VAR_RESULT %u, want 0)", gSpecialVar_Result);
+    ExpectClaim(what, gSpecialVar_Result == 0);
+    ExpectClaim("and no claim was sent for it", ActionSeq() == 0);
+
+    // 2. Ran from it: the stale "ours" is no grant.
+    ResetSpawnTest();
+    slots[0] = SpawnSlot(102, MP_SPAWN_SLOT_MINE);
+    MultiplayerSpawns_TestShowObject(1, 102);
+    MultiplayerSpawns_TestBeginBattle(102, SPECIES_ZIGZAGOON); // granted, battling
+    SpawnInbound(0, 1, slots);
+    ExpectClaim("nothing is sent during the battle", ActionSeq() == 0);
+    gBattleOutcome = B_OUTCOME_RAN;
+    ExpectClaim("the battle's end is the shared Pokemon's", MultiplayerSpawns_OnScriptedBattleEnd());
+    SpawnInbound(0, 1, slots); // the host has not seen the result yet: still ours
+    firstSeq = seq = ActionSeq();
+    ExpectClaim("the result \"ran\" is sent", gMultiplayerSpawnMailbox.local.action.kind == MP_SPAWN_ACTION_RESULT
+                && gMultiplayerSpawnMailbox.local.action.result == MP_WORLD_RESULT_RAN && seq != 0);
+    snprintf(what, sizeof(what), "the first action after a reset is not number 1 (it is %u; M19)", seq);
+    ExpectClaim(what, seq != 1);
+    gSpecialVar_LastTalked = MP_SPAWN_LOCAL_ID_BASE + 1;
+    gSpecialVar_Result = 2;
+    MultiplayerSpawns_TryClaimTalked();
+    RunTasks();
+    ExpectClaim("talked to again at once: the stale \"ours\" is no grant", gSpecialVar_Result != 1);
+    ExpectClaim("and no new action while the result is unanswered", ActionSeq() == seq);
+    slots[0] = SpawnSlot(102, 0);
+    SpawnInbound(seq, 1, slots); // the host has the result: free again
+    RunTasks();
+    ExpectClaim("once the host lets it go, the game asks for it again",
+                gMultiplayerSpawnMailbox.local.action.kind == MP_SPAWN_ACTION_CLAIM && ActionSeq() == seq + 1
+                && gSpecialVar_Result != 1);
+    seq = ActionSeq();
+    slots[0] = SpawnSlot(102, MP_SPAWN_SLOT_MINE);
+    SpawnInbound(seq, 1, slots); // granted
+    RunTasks();
+    ExpectClaim("and the host's new grant starts the battle", gSpecialVar_Result == 1);
+
+    // 3. Caught here, the host still lists it as ours: report again, never release.
+    ResetSpawnTest();
+    slots[0] = SpawnSlot(103, MP_SPAWN_SLOT_MINE);
+    MultiplayerSpawns_TestShowObject(2, 103);
+    MultiplayerSpawns_TestBeginBattle(103, SPECIES_ZIGZAGOON);
+    SpawnInbound(0, 1, slots);
+    gBattleOutcome = B_OUTCOME_CAUGHT;
+    MultiplayerSpawns_OnScriptedBattleEnd();
+    SpawnInbound(0, 1, slots);
+    seq = ActionSeq();
+    ExpectClaim("the result \"caught\" is sent", gMultiplayerSpawnMailbox.local.action.kind == MP_SPAWN_ACTION_RESULT
+                && gMultiplayerSpawnMailbox.local.action.result == MP_WORLD_RESULT_CAUGHT);
+    snprintf(what, sizeof(what), "again not number 1 after the next reset (%u; from the frame counter, %u in the first run)",
+             seq, firstSeq);
+    ExpectClaim(what, seq != 1);
+    SpawnInbound(seq, 1, slots); // answered, but the host still says ours
+    ExpectClaim("still ours on the host: \"caught\" is sent again, never a release",
+                ActionSeq() == seq + 1 && gMultiplayerSpawnMailbox.local.action.kind == MP_SPAWN_ACTION_RESULT
+                && gMultiplayerSpawnMailbox.local.action.result == MP_WORLD_RESULT_CAUGHT);
+    seq = ActionSeq();
+    SpawnInbound(seq, 0, slots); // the host removed it
+    ExpectClaim("once the host removed it, nothing more is sent", ActionSeq() == seq);
+
+    ResetTasks();
+    gMain.callback2 = NULL;
+    printf("selftest-spawn-claims: %d checks, %d failed\n", sClaimChecks, sClaimFailures);
+    return sClaimFailures ? 1 : 0;
 }
