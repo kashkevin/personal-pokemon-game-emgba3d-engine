@@ -32,13 +32,13 @@ GBA effects again.
 | `src/diorama/battlefx/bfx_test.c`, `include/diorama/battle_fx_test.h` | The test driver (test builds only, `-DBATTLEFX_TEST`). |
 | `battlefx/` | The data the game reads beside the executable (`tools/battlefx/pack_data.py`; `MANIFEST.txt` lists every file's SHA-256). |
 | `third_party/quickjs-ng`, `third_party/stb` | QuickJS-ng v0.10.1 (MIT), stb_image 2.30 (public domain); `VENDORED.txt` in each. |
-| `tools/battlefx/` | `convert_data.py` / `pack_data.py` (the data folder), `gallery.sh` / `realsuite.sh` / `summarize.py` (tests), `bfx_check.c` / `build_check.sh` (the core's numbers under the game's 32-bit builds against the package's). |
+| `tools/battlefx/` | `convert_data.py` / `pack_data.py` (the data folder), `gallery.sh` / `realsuite.sh` / `summarize.py` (tests), `bfx_check.c` / `build_check.sh` (the core's numbers under the game's 32-bit builds against the package's), `bfx_perf.c` / `build_perf.sh` (the core's begin, step and frame packet timed in the game's own QuickJS host). |
 
 Hooks in game code (each under `ENABLE_DIORAMA`, GBA line numbers kept with `#line`, the GBA
 ROM byte-identical): `battle_anim.c` (launch, the script advancing), `sprite.c` (OAM marks),
 `main.c` (frame start and end), `pokeball.c` (a send-out's ball made), `battle_anim_throw.c` (a
 shiny Pokemon's stars), `gl_battle.c` (drawing), `gba_easy_draw.c` (BG layers left out),
-`battle_controller_player.c` (test builds only). Fixes found by the galleries, native builds
+`battle_controller_player.c` and `battle_controller_safari.c` (test builds only). Fixes found by the galleries, native builds
 only (`PORTABLE`): `battle_anim_effects_1.c` (Mimic without a target partner),
 `battle_anim_mon_movement.c` (Struggle Bug's partner shake without a partner),
 `platform/m4a_pc.c` (a song number past the song table: Shadow Force / Phantom Force).
@@ -98,6 +98,17 @@ and position) with the core's. To make the replay the game's own:
   (`spritesInUse`): the core keeps as many taken, so an effect sprite the game cannot make
   (Fairy Lock's last bolt) is not made in the core either. The battlers' sprites start where the
   game has them (`battlerSprites`), not always their home.
+- **The loop that runs the script.** A move's animation is run by its battler's controller
+  (`Controller_DoMoveAnimation`, in `BattleMainCB1`): each frame its script first, then
+  `AnimateSprites`, `BuildOamBuffer`, `UpdatePaletteFade`, `RunTasks` - the runtime's own order. A
+  status, battle or special animation (`LaunchStatusAnimation`, `TryHandleLaunchBattleTableAnimation`,
+  `InitAndLaunchSpecialAnimation`) is run by the task of priority 10 its launcher makes: its script
+  runs inside `RunTasks`, after the sprites and the OAM, so what it makes moves and shows from the
+  next frame. Their requests say `"order": "task"` and the core runs their scripts from a task of
+  priority 10 too.
+- **Sprites a script leaves moving.** A script can end with effect sprites still moving (a caught
+  ball's stars). The core goes on replaying them with the game's, a frame for each game frame, until
+  the game's are gone (at most 120 frames), so they stay HD.
 - **GBA arithmetic where the port differed.** `x % 0` in Spark's blinking sparks is the GBA's
   (0 only for x = 0), the palette fade's delta is the 4-bit field it is in `palette.c`, and
   `gAnimDisableStructPtr->rolloutTimer` is the game's.
@@ -141,7 +152,11 @@ python3 tools/battlefx/pack_data.py --package <battlefx_kit>/native --data game_
   --source "Battle FX v3.3: battlefx_kit commit 9848e06, tag lab-perf-v3.3"
 ```
 
-Redo both after changing animation scripts, the generation config or sound effects.
+`convert_data.py` adds two things to the package's converter (v3.4 material): the `panse` commands'
+pan step and delay, and a `;` read as the end of a statement as GNU as reads it (Parabolic Charge's
+`goto ParabolicChargeHeal;`, which the package's reader took for a label it could not find, ending
+the double-battle branch early). Redo both after changing animation scripts, the generation config or
+sound effects.
 
 ## Tests
 
@@ -160,8 +175,23 @@ menu the Battle FX driver (`include/diorama/battle_fx_test.h`) plays:
   at a wild battle's menu waits for what only the Safari Zone gives it), the core's and the
   renderer's cost; captures (`PKMN_BFX_TEST_SHOTS`), traces (`PKMN_BFX_TEST_TRACE=1`: every
   frame's sprite lists, the game's and the core's task, fade, sprite and random-number state);
+- the effect sprites an animation leaves on screen once the HD layer has ended (`afterEnd`, the 24
+  frames the driver waits before the next one) and the frames the HD layer went on with them
+  (`hdTail`);
 - a battle fought (`PKMN_TEST_FIGHT`) with `PKMN_BFX_TEST_REAL_PARITY=1`: the parity of every
   animation the battle itself plays (`real_report.jsonl`).
+
+Battle animations are launched through the game's own launchers, so their scripts run in the
+launchers' tasks as in a battle; `PKMN_BFX_TEST_ANIM_ATTACKER=1` plays them as the opponent (a
+trainer's Mega Evolution). The battle environment test driver (test builds only) can also start a
+Safari Zone battle (`PKMN_TEST_BATTLE=safari:SPECIES:LEVEL`: the Safari menu is hooked as the
+player's, so the gallery plays the Pokeblock and rock throws and the trainer's ball throw there, and
+a fought one throws Safari Balls), make the wild Pokemon shiny (`PKMN_TEST_SHINY=1`), give the
+opponent's Pokemon its Mega Stone (`PKMN_TEST_MEGA=1`: the trainer's AI Mega Evolves it), and keep
+the field still while the battle waits to start (`PKMN_TEST_FREEZE_FIELD=1`, set by `gallery.sh`:
+otherwise a visible wild Pokemon may walk into the player and start another battle first;
+`gallery.sh` notes a run whose battle was not the one asked for in `out/problems.txt`, and
+`summarize.py` marks it NOT VALID).
 
 `tools/battlefx/gallery.sh` runs one (a run that crashes the game resumes after the animation
 that crashed; a stuck one goes on in a new game), `tools/battlefx/realsuite.sh` the battles of
