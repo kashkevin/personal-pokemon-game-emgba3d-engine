@@ -19,9 +19,13 @@
 # a break-out or the catch - until it is caught or flees; exit 4, the outcome not a win). The player's own
 # Mega Evolution needs the move menu's Mega trigger and a Pokeblock throw the Pokeblock case (the autopilot
 # only presses A): the gallery plays those animations (B_ANIM_MEGA_EVOLUTION, B_ANIM_POKEBLOCK_THROW at a
-# Safari battle's menu). Last, Roxanne fought with Fury Cutter and Sidney with Rollout (PKMN_TEST_FIRST_MOVE):
-# animations that follow a counter over consecutive turns (gAnimDisableStructPtr's furyCutterCounter,
-# rolloutTimer).
+# Safari battle's menu). Then battles fought with another first move (PKMN_TEST_FIRST_MOVE): Roxanne with
+# Fury Cutter and Sidney with Rollout (animations that follow a counter over consecutive turns), a wild
+# Zigzagoon with Metronome (the move it calls is the game's own choice: its animation follows Metronome's),
+# Roxanne with Mirror Move (the copied move's animation), a wild Zigzagoon with Secret Power (the
+# environment's version), a route trainer with Fury Attack (a hit's animation for every hit) and with Fly
+# (both turns: the user away, then the strike); and the multiplayer twin Gym partners whose Pokemon start
+# a sandstorm (Shale's Hippopotas) and rain (Juan's partner's): the weather's animations every turn.
 set -u
 OUT=$1; SAVE=$2; shift 2
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -47,4 +51,11 @@ run mega_trainer "trainer:759" 1 PKMN_TEST_MEGA=1 "$@"
 run safari_catch "safari:263:30" 1 "$@"
 run fury_cutter  "trainer:265" 1 PKMN_TEST_FIRST_MOVE=210 "$@"
 run rollout      "trainer:261" 1 PKMN_TEST_FIRST_MOVE=205 "$@"
+run metronome    "wild:263:30" 1 PKMN_TEST_FIRST_MOVE=118 "$@"
+run mirror_move  "trainer:265" 1 PKMN_TEST_FIRST_MOVE=119 "$@"
+run secret_power "wild:263:30" 1 PKMN_TEST_FIRST_MOVE=290 "$@"
+run multi_hit    "trainer:318" 1 PKMN_TEST_FIRST_MOVE=31 "$@"
+run two_turn     "trainer:318" 1 PKMN_TEST_FIRST_MOVE=19 "$@"
+run sandstorm    "trainer:855" 1 "$@"
+run rain         "trainer:862" 1 "$@"
 echo done >> "$OUT/realsuite.txt"
