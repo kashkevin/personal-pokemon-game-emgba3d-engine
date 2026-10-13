@@ -88,13 +88,6 @@ bool UiGfx_FieldSprite(const void *tiles, int frameCount, const uint16_t *palett
 /* ... frames of w x h (multiples of 8) */
 bool UiGfx_FieldSpriteSized(const void *tiles, int frameCount, const uint16_t *palette, int frame, int w, int h, int x,
                             int y, int scale, bool flip);
-/* a trainer's field sprite (any body: the default trainer or a character; ui_engine.h
- * struct NativeFieldSprite) in a pose (0 walk, 1 run), direction (0 down, 1 left,
- * 2 up, 3 right) and step (0-3). x, y is the top left of a 16x32 frame's place,
- * as for UiGfx_FieldSprite: a wider frame is centred on it, standing on its foot. */
-struct NativeFieldSprite;
-bool UiGfx_NativeFieldSprite(const struct NativeFieldSprite *sprite, int pose, int dir, int step, int x, int y,
-                             int scale);
 
 /* applies a filter to RGBA pixels in place */
 void UiFilter_Apply(uint8_t *rgba, int count, const struct UiFilter *f);

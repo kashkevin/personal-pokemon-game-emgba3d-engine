@@ -891,9 +891,7 @@ bool32 MultiplayerWorld_NativeUiNotice(u8 *windowId, u16 *shownFrames, u16 *tota
 
 /* ---------------------------------------------------------------- the STYLE editor (multiplayer_appearance.c) */
 
-/* The editor's rows (its cursor): four colour rows, SAVE and CANCEL, and the
- * character (the engine's editor shows it first; here it comes last, so the
- * colour rows keep their numbers). */
+/* The editor's rows (its cursor): four colour rows, then SAVE and CANCEL. */
 enum NativeAppearanceRow
 {
     NATIVE_LOOK_SKIN,
@@ -902,39 +900,10 @@ enum NativeAppearanceRow
     NATIVE_LOOK_HAT,     /* the hat (or bandana) and the bag */
     NATIVE_LOOK_SAVE,
     NATIVE_LOOK_CANCEL,
-    NATIVE_LOOK_CHARACTER, /* the character selection: DEFAULT and the approved catalogue */
+    NATIVE_LOOK_CHARACTER, /* the character selection's first row (claude/character-customization) */
     NATIVE_LOOK_ROW_COUNT,
 };
 #define NATIVE_LOOK_BYTES 8
-
-/* A trainer's field sprite as the UI draws it (any body: the default trainer
- * or a character): frames of width x height one after another (4bpp, OAM tile
- * order), the frame and mirroring of each pose (0 walk, 1 run), direction
- * (0 down, 1 left, 2 up, 3 right) and step (0-3: stand, step, stand, step),
- * and its 16 colours. UiGfx_NativeFieldSprite draws one. */
-struct NativeFieldSprite
-{
-    const void *tiles;
-    u8 frames;
-    u8 width;
-    u8 height;
-    u8 frame[2][4][4];
-    u8 flip[2][4][4];
-    u16 palette[16];
-};
-
-/* One entry of the character catalogue (0 = DEFAULT, the recolourable
- * Brendan or May): its name and its game or artist (game text), its front
- * picture (a TRAINER_PIC id) and its field sprite standing. */
-struct NativeCharacterCard
-{
-    const u8 *name;
-    const u8 *variant;
-    u8 gender;
-    u8 kind;             /* 0 the default trainer, 1 preset, 2 kit 1, 3 a kit 1 look */
-    u16 frontPic;
-    struct NativeFieldSprite sprite;
-};
 struct NativeAppearance
 {
     u8 look[NATIVE_LOOK_BYTES];    /* the look being edited (the field sprite shows it live) */
@@ -944,17 +913,54 @@ struct NativeAppearance
     bool8 pendingSave;             /* a saved look not yet confirmed by the host */
     bool8 connected;               /* the multiplayer host is there */
     bool8 hostHasLook;             /* the host keeps the player's current look */
-    u16 basePalette[16];           /* the body's own field palette */
-    u16 palette[16];               /* the same with the edited look (MultiplayerAppearance_BuildPalette) */
-    const void *frames;            /* the body's field frames: walking 0-8, running 9-17, 16x32 4bpp */
-    u8 character;                  /* the character shown (0 = DEFAULT) */
-    u8 startCharacter;             /* the character the editor started from */
-    u8 characterCount;             /* the catalogue with DEFAULT */
-    bool8 coloursEnabled;          /* the colour rows work (DEFAULT only: a character has its own) */
-    u16 portraitPic;               /* the shown character's front picture */
-    struct NativeFieldSprite sprite; /* the shown character's field sprite (the mirror) */
+    /* the character selection, when this build has it (claude/character-customization):
+     * its editor puts a CHARACTER row first; the colour rows recolour the trainer only */
+    bool8 characters;
+    u8 character;                  /* the character shown (0: the trainer, with the colour rows) */
+    u8 startCharacter;             /* the one the editor started from */
+    u8 characterCount;             /* the roster, the trainer included */
+    bool8 coloursEnabled;          /* the colour rows apply (the trainer) */
 };
 bool32 MultiplayerAppearance_NativeUiState(struct NativeAppearance *out);
+/* a character of the roster (FALSE: none; 0 is the trainer) */
+struct NativeCharacter
+{
+    const u8 *name;
+    const u8 *variant;             /* the game or the artist */
+    u8 gender;
+    u8 kind;                       /* 0 a preset, 1 kit 1, 2 a class look */
+    u16 frontPic;                  /* TRAINER_PIC_* */
+};
+bool32 MultiplayerAppearance_NativeUiCharacter(u32 character, struct NativeCharacter *out);
+/* picks a character in the open editor as its LEFT / RIGHT on CHARACTER would (FALSE: no selection here) */
+bool32 MultiplayerAppearance_NativeUiSelectCharacter(u32 character);
+/* one field frame of a character (0: the trainer recoloured by look; NULL look: its own colours) */
+enum
+{
+    NATIVE_GAIT_STAND,
+    NATIVE_GAIT_WALK,
+    NATIVE_GAIT_RUN,
+};
+struct NativeFieldFrame
+{
+    const void *tiles;             /* 4bpp, OAM tile order */
+    u8 width;
+    u8 height;
+    bool8 flip;
+    u16 palette[16];
+};
+/* dir: 0 down, 1 left, 2 up, 3 right; step: 0-3 of a walk or run */
+bool32 MultiplayerAppearance_NativeUiFieldFrame(u32 character, bool32 isMay, const u8 *look, u32 dir, u32 gait, u32 step,
+                                                struct NativeFieldFrame *out);
+/* the player's own field frame as the others see it (the saved character or look) */
+bool32 MultiplayerAppearance_NativeUiPlayerFrame(u32 dir, u32 gait, u32 step, struct NativeFieldFrame *out);
+/* the local player's character (the editor's while it is open, else the saved one; 0: none) */
+u32 MultiplayerAppearance_NativeUiLocalCharacter(void);
+/* the player's front picture (TRAINER_PIC_*: the character's, or Brendan's / May's) */
+u16 MultiplayerAppearance_NativeUiFrontPic(u32 character, bool32 isMay);
+/* the player's own Trainer Card picture when their character has a bigger one than
+ * the front picture (4bpp tiles, w x h, and its palette; FALSE: none) */
+bool32 MultiplayerAppearance_NativeUiCardPic(const void **tiles, const u16 **palette, u32 *w, u32 *h);
 /* a colour row's choices; DEFAULT (0) keeps the body's own colours */
 u32 MultiplayerAppearance_NativeUiOptionCount(u32 row);
 const u8 *MultiplayerAppearance_NativeUiOptionName(u32 row, u32 index);
@@ -964,20 +970,6 @@ u32 MultiplayerAppearance_NativeUiLookByte(u32 row);
 u32 MultiplayerAppearance_NativeUiSlots(u32 row, bool32 isMay, u8 *slots);
 /* a choice's colours, light to dark (up to 4; DEFAULT: the body's own); returns how many */
 u32 MultiplayerAppearance_NativeUiSwatch(u32 row, u32 index, bool32 isMay, u16 *colors);
-/* the player's field frames (walking 0-8, running 9-17) and palette with the saved look
- * (the default trainer's frames; with a character chosen use the next one) */
-void MultiplayerAppearance_NativeUiPlayerSprite(const void **frames, u16 *palette);
-/* the player's own field sprite as the others see it (the saved look): the
- * character's or the recoloured default trainer's */
-void MultiplayerAppearance_NativeUiLocalSprite(struct NativeFieldSprite *out);
-/* the player's front picture (TRAINER_PIC_*): the chosen character's */
-u16 MultiplayerAppearance_NativeUiLocalPortrait(void);
-/* the catalogue: entry 0 (DEFAULT) to characterCount - 1; FALSE past its end */
-bool32 MultiplayerAppearance_NativeUiCharacter(u32 id, struct NativeCharacterCard *out);
-/* the open editor: its cursor to a row (FALSE for a row it skips now), a character
- * shown (as LEFT / RIGHT on CHARACTER would) */
-bool32 MultiplayerAppearance_NativeUiSetCursor(u32 row);
-bool32 MultiplayerAppearance_NativeUiSelectCharacter(u32 id);
 
 /* ---------------------------------------------------------------- game art */
 

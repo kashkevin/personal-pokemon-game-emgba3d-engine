@@ -25,8 +25,6 @@
 #include "constants/songs.h"
 #ifdef PORTABLE
 #include "character_customization.h"
-#include "pokemon.h"
-#include "constants/event_object_movement.h"
 static void CharCustomEditor_Open(void);
 #endif
 #line 26 // gba-line
@@ -523,11 +521,74 @@ void MultiplayerAppearance_OpenEditor(void)
 
 #ifdef ENABLE_NATIVE_UI
 #include "native_ui/ui_engine.h"
+#include "constants/trainers.h"
+
+// The character selection (claude/character-customization), when this build
+// has it: its editor (Task_CharacterEditor) puts a CHARACTER row first and its
+// roster's characters have their own field frames, palettes and pictures. Its
+// header is found only then; without it everything below is the STYLE editor.
+#if defined(PORTABLE) && defined(__has_include)
+#if __has_include("character_customization.h")
+#include "character_customization.h"
+#define NATIVE_UI_CHARACTERS 1
+#endif
+#endif
+
+// The body's own field frames (with a character chosen, the engine's lookup
+// returns the character's for the player's ids)
+static const struct ObjectEventGraphicsInfo *NativeUiBodyGraphics(bool32 isMay)
+{
+#ifdef NATIVE_UI_CHARACTERS
+    return GetVanillaObjectEventGraphicsInfo(isMay ? OBJ_EVENT_GFX_MAY_NORMAL : OBJ_EVENT_GFX_BRENDAN_NORMAL);
+#else
+    return GetObjectEventGraphicsInfo(isMay ? OBJ_EVENT_GFX_MAY_NORMAL : OBJ_EVENT_GFX_BRENDAN_NORMAL);
+#endif
+}
 
 // The native PC UI (src/native_ui/screens/ui_customize.c) draws the STYLE
-// editor in place of its window and follows its state: the native build's
-// editor is the character editor, so MultiplayerAppearance_NativeUiState and
-// the other accessors it needs are with it at the end of this file.
+// editor in place of its window and follows this state; the input, the live
+// field preview and saving stay here.
+bool32 MultiplayerAppearance_NativeUiState(struct NativeAppearance *out)
+{
+    const u8 *host;
+    bool32 isMay;
+
+    memset(out, 0, sizeof(*out));
+    if (!sEditorActive || sEditorWindowId == WINDOW_NONE)
+        return FALSE;
+    isMay = gSaveBlock2Ptr->playerGender != MALE;
+#ifdef NATIVE_UI_CHARACTERS
+    {
+        struct CharCustomEditorState cc;
+
+        CharCustom_GetEditorState(&cc);
+        if (!cc.active)
+            return FALSE;
+        out->characters = TRUE;
+        out->character = cc.character;
+        out->characterCount = cc.count;
+        out->coloursEnabled = cc.coloursEnabled;
+        out->cursor = cc.cursor == CC_EDITOR_ROW_CHARACTER ? NATIVE_LOOK_CHARACTER : cc.cursor - 1;
+        if (!CharCustom_ReadSavedLook(out->start, NULL) && ValidLook(sLocal))
+            memcpy(out->start, sLocal, MP_APPEARANCE_BYTES);
+        out->startCharacter = CharCustom_FromLook(out->start);
+    }
+#else
+    if (!FuncIsActiveTask(Task_StyleEditor))
+        return FALSE;
+    if (ValidLook(sLocal))
+        memcpy(out->start, sLocal, MP_APPEARANCE_BYTES); // what OpenEditor started from
+    out->cursor = sEditorCursor;
+    out->coloursEnabled = TRUE;
+#endif
+    memcpy(out->look, sEditor, MP_APPEARANCE_BYTES);
+    out->isMay = isMay;
+    out->pendingSave = sPendingSave;
+    out->connected = Multiplayer_IsConnected();
+    host = out->connected ? MultiplayerWorld_GetSelfAppearance() : NULL;
+    out->hostHasLook = host != NULL && ValidLook(sLocal) && memcmp(host, sLocal, MP_APPEARANCE_BYTES) == 0;
+    return TRUE;
+}
 
 // The editor's value rows: how many choices, their names, the colours of a
 // choice (the body's own for DEFAULT) and the palette slots a row recolours.
@@ -635,6 +696,164 @@ u32 MultiplayerAppearance_NativeUiSwatch(u32 row, u32 index, bool32 isMay, u16 *
 }
 #endif // ENABLE_NATIVE_UI
 
+#ifdef ENABLE_NATIVE_UI
+bool32 MultiplayerAppearance_NativeUiCharacter(u32 character, struct NativeCharacter *out)
+{
+    memset(out, 0, sizeof(*out));
+#ifdef NATIVE_UI_CHARACTERS
+    {
+        const struct CharCustomCharacter *c = character != CC_CHARACTER_NONE ? CharCustom_Get(character) : NULL;
+
+        if (c == NULL)
+            return FALSE;
+        out->name = c->name;
+        out->variant = c->variant;
+        out->gender = c->gender;
+        out->kind = c->kind == CC_KIND_PRESET ? 0 : c->kind == CC_KIND_KIT1 ? 1 : 2;
+        out->frontPic = c->frontPic;
+        return TRUE;
+    }
+#else
+    (void)character;
+    return FALSE;
+#endif
+}
+
+// A roster card clicked (screen 9): the editor's own selection, as LEFT and
+// RIGHT on its CHARACTER row would (CharCustom_EditorSelect), with their sound
+bool32 MultiplayerAppearance_NativeUiSelectCharacter(u32 character)
+{
+#ifdef NATIVE_UI_CHARACTERS
+    if (CharCustom_EditorSelect(character))
+    {
+        PlaySE(SE_SELECT);
+        return TRUE;
+    }
+#else
+    (void)character;
+#endif
+    return FALSE;
+}
+
+// The body's walking frames of a direction's cycle (step 0-3); running adds 9;
+// right is left mirrored
+static const u8 sNativeUiWalkFrames[4][4] = {{0, 3, 0, 4}, {2, 7, 2, 8}, {1, 5, 1, 6}, {2, 7, 2, 8}};
+
+bool32 MultiplayerAppearance_NativeUiFieldFrame(u32 character, bool32 isMay, const u8 *look, u32 dir, u32 gait, u32 step,
+                                                struct NativeFieldFrame *out)
+{
+    const struct ObjectEventGraphicsInfo *info;
+    u32 frame;
+
+    memset(out, 0, sizeof(*out));
+    dir &= 3;
+    step &= 3;
+#ifdef NATIVE_UI_CHARACTERS
+    if (character != CC_CHARACTER_NONE && CharCustom_IsValid(character))
+    {
+        // its own frames, picked by its own animation table (the engine's standard one)
+        static const u8 sDirs[4] = {0, 2, 1, 3}; // down, left, up, right as SOUTH, WEST, NORTH, EAST
+        struct CharCustomFieldSprite fs;
+        const union AnimCmd *anim;
+        u32 index;
+
+        CharCustom_GetFieldSprite(character, isMay ? FEMALE : MALE, &fs);
+        if (fs.images == NULL || fs.anims == NULL)
+            return FALSE;
+        index = gait == NATIVE_GAIT_RUN ? ANIM_RUN_SOUTH : gait == NATIVE_GAIT_WALK ? ANIM_STD_GO_SOUTH : ANIM_STD_FACE_SOUTH;
+        anim = fs.anims[index + sDirs[dir]];
+        if (anim == NULL)
+            return FALSE;
+        if (gait == NATIVE_GAIT_STAND || anim[0].type < 0)
+            step = 0;
+        else
+        {
+            u32 i;
+
+            for (i = 0; i < step && anim[i + 1].type >= 0; i++)
+                ;
+            step = i;
+        }
+        out->tiles = fs.images[anim[step].frame.imageValue].data;
+        out->width = fs.width;
+        out->height = fs.height;
+        out->flip = anim[step].frame.hFlip;
+        if (fs.palette != NULL)
+            memcpy(out->palette, fs.palette, sizeof(out->palette));
+        else
+            MultiplayerAppearance_BuildPalette(isMay ? gObjectEventPal_May : gObjectEventPal_Brendan, isMay, NULL, out->palette);
+        return out->tiles != NULL;
+    }
+#else
+    (void)character;
+#endif
+    info = NativeUiBodyGraphics(isMay);
+    if (info == NULL || info->images == NULL)
+        return FALSE;
+    frame = sNativeUiWalkFrames[dir][gait == NATIVE_GAIT_STAND ? 0 : step] + (gait == NATIVE_GAIT_RUN ? 9 : 0);
+    out->tiles = (const u8 *)info->images[0].data + frame * (16 * 32 / 2);
+    out->width = 16;
+    out->height = 32;
+    out->flip = dir == 3;
+    MultiplayerAppearance_BuildPalette(isMay ? gObjectEventPal_May : gObjectEventPal_Brendan, isMay,
+                                       look != NULL && ValidLook(look) ? look : NULL, out->palette);
+    return TRUE;
+}
+
+// The player's own frame as the others see it: the saved character, or the
+// trainer with the saved look's colours
+bool32 MultiplayerAppearance_NativeUiPlayerFrame(u32 dir, u32 gait, u32 step, struct NativeFieldFrame *out)
+{
+    return MultiplayerAppearance_NativeUiFieldFrame(MultiplayerAppearance_NativeUiLocalCharacter(),
+                                                    gSaveBlock2Ptr->playerGender != MALE, ValidLook(sLocal) ? sLocal : NULL,
+                                                    dir, gait, step, out);
+}
+
+u32 MultiplayerAppearance_NativeUiLocalCharacter(void)
+{
+#ifdef NATIVE_UI_CHARACTERS
+    return CharCustom_LocalCharacter();
+#else
+    return 0;
+#endif
+}
+
+u16 MultiplayerAppearance_NativeUiFrontPic(u32 character, bool32 isMay)
+{
+#ifdef NATIVE_UI_CHARACTERS
+    const struct CharCustomCharacter *c = character != CC_CHARACTER_NONE ? CharCustom_Get(character) : NULL;
+
+    if (c != NULL)
+        return c->frontPic;
+#else
+    (void)character;
+#endif
+    return isMay ? TRAINER_PIC_MAY : TRAINER_PIC_BRENDAN;
+}
+
+// The bigger front a character shows whole on the player's own Trainer Card
+// (CharCustom_DrawTrainerCardPic draws it there)
+bool32 MultiplayerAppearance_NativeUiCardPic(const void **tiles, const u16 **palette, u32 *w, u32 *h)
+{
+#ifdef NATIVE_UI_CHARACTERS
+    const struct CharCustomCharacter *c = CharCustom_Get(CharCustom_LocalCharacter());
+
+    if (c != NULL && c->cardPic != NULL && c->cardPal != NULL && c->cardWidth > 0 && c->cardHeight > 0)
+    {
+        *tiles = c->cardPic;
+        *palette = c->cardPal;
+        *w = c->cardWidth;
+        *h = c->cardHeight;
+        return TRUE;
+    }
+#endif
+    *tiles = NULL;
+    *palette = NULL;
+    *w = 0;
+    *h = 0;
+    return FALSE;
+}
+#endif // ENABLE_NATIVE_UI
 
 #ifdef PORTABLE
 // ---------------------------------------------------------------------------
@@ -679,21 +898,15 @@ static const u8 *const sCharacterEditorRowLabels[CC_EDITOR_ROW_COUNT] =
 static EWRAM_DATA u8 sEditorColours[4] = {0}; // the default trainer's colours while a character is shown
 static EWRAM_DATA u8 sEditorFacing = 0;
 
-// The saved look: what the editor starts from, what the host gets.
-static const u8 *CharacterEditor_SavedLook(void)
+const u8 *MultiplayerAppearance_GetLocalLook(void)
 {
     static u8 sSaved[MP_APPEARANCE_BYTES];
 
+    if (sEditorActive)
+        return sEditor;
     if (CharCustom_ReadSavedLook(sSaved, NULL))
         return sSaved;
     return sLocal;
-}
-
-const u8 *MultiplayerAppearance_GetLocalLook(void)
-{
-    if (sEditorActive)
-        return sEditor;
-    return CharacterEditor_SavedLook();
 }
 
 static bool32 CharacterEditor_RowEnabled(u32 row)
@@ -951,206 +1164,4 @@ void CharCustom_GetEditorState(struct CharCustomEditorState *out)
     out->colours[3] = look[5];
     out->coloursEnabled = out->character == CC_CHARACTER_NONE;
 }
-
-#ifdef ENABLE_NATIVE_UI
-// ---------------------------------------------------------------------------
-// The native PC UI's view of the character editor (include/native_ui/ui_engine.h):
-// the dressing room (screen 9) draws over it, the Trainer Card, the Players and
-// the naming screens show the player's own sprite. Read-only, at the frame
-// boundary; the UI changes the look only through the editor (its buttons and
-// the two calls that move its cursor or pick a character).
-
-// The editor's rows (CC_EDITOR_ROW_*) as the UI numbers them (NativeAppearanceRow):
-// the colour rows, SAVE and CANCEL keep the old editor's numbers, CHARACTER is last.
-static u32 EditorRowToNativeUi(u32 row)
-{
-    return (row + NATIVE_LOOK_ROW_COUNT - 1) % NATIVE_LOOK_ROW_COUNT;
-}
-
-static u32 NativeUiRowToEditor(u32 row)
-{
-    return (row + 1) % NATIVE_LOOK_ROW_COUNT;
-}
-
-STATIC_ASSERT(NATIVE_LOOK_ROW_COUNT == CC_EDITOR_ROW_COUNT, NativeUiRowsAreTheEditorsRows);
-STATIC_ASSERT(NATIVE_LOOK_CHARACTER == NATIVE_LOOK_ROW_COUNT - 1 && CC_EDITOR_ROW_CHARACTER == 0, NativeUiCharacterRowLast);
-
-// A body's field sprite for the UI: its frames, the frame and mirroring of each
-// pose, direction and step (from its own animation table), and its colours.
-static void FillNativeFieldSprite(u32 character, bool32 isMay, const u8 *look, struct NativeFieldSprite *out)
-{
-    static const u8 sDirAnim[4] = {0, 2, 1, 3};      // down, left, up, right -> south, west, north, east
-    static const u8 sStepCmd[4] = {1, 0, 3, 2};      // stand, step, stand, step -> the GO / RUN commands
-    struct CharCustomFieldSprite sprite;
-    u32 pose, dir, step, maxFrame = 0;
-
-    memset(out, 0, sizeof(*out));
-    CharCustom_GetFieldSprite(character, isMay ? FEMALE : MALE, &sprite);
-    if (sprite.images == NULL || sprite.anims == NULL)
-        return;
-    out->tiles = sprite.images[0].data;
-    out->width = sprite.width;
-    out->height = sprite.height;
-    for (pose = 0; pose < 2; pose++)
-    {
-        for (dir = 0; dir < 4; dir++)
-        {
-            const union AnimCmd *anim = sprite.anims[(pose ? ANIM_RUN_SOUTH : ANIM_STD_GO_SOUTH) + sDirAnim[dir]];
-
-            for (step = 0; step < 4; step++)
-            {
-                const union AnimCmd *cmd = &anim[sStepCmd[step]];
-
-                out->frame[pose][dir][step] = cmd->frame.imageValue;
-                out->flip[pose][dir][step] = cmd->frame.hFlip;
-                if (cmd->frame.imageValue > maxFrame)
-                    maxFrame = cmd->frame.imageValue;
-            }
-        }
-    }
-    out->frames = maxFrame + 1;
-    if (sprite.palette != NULL)
-        memcpy(out->palette, sprite.palette, sizeof(out->palette));
-    else
-        MultiplayerAppearance_BuildPalette(isMay ? gObjectEventPal_May : gObjectEventPal_Brendan, isMay,
-                                           look != NULL && ValidLook(look) ? look : NULL, out->palette);
-}
-
-static u16 CharacterPortrait(u32 character, bool32 isMay)
-{
-    const struct CharCustomCharacter *ch = CharCustom_Get(character);
-
-    return ch != NULL ? ch->frontPic : PlayerGenderToFrontTrainerPicId(isMay ? FEMALE : MALE);
-}
-
-bool32 MultiplayerAppearance_NativeUiState(struct NativeAppearance *out)
-{
-    const struct ObjectEventGraphicsInfo *info;
-    const u8 *host;
-    bool32 isMay;
-
-    memset(out, 0, sizeof(*out));
-    if (!sEditorActive || !FuncIsActiveTask(Task_CharacterEditor) || sEditorWindowId == WINDOW_NONE)
-        return FALSE;
-    isMay = gSaveBlock2Ptr->playerGender != MALE;
-    memcpy(out->look, sEditor, MP_APPEARANCE_BYTES);
-    memcpy(out->start, CharacterEditor_SavedLook(), MP_APPEARANCE_BYTES); // what the editor started from
-    out->cursor = EditorRowToNativeUi(sEditorCursor);
-    out->isMay = isMay;
-    out->pendingSave = sPendingSave;
-    out->connected = Multiplayer_IsConnected();
-    host = out->connected ? MultiplayerWorld_GetSelfAppearance() : NULL;
-    out->hostHasLook = host != NULL && ValidLook(sLocal) && memcmp(host, sLocal, MP_APPEARANCE_BYTES) == 0;
-    memcpy(out->basePalette, isMay ? gObjectEventPal_May : gObjectEventPal_Brendan, sizeof(out->basePalette));
-    MultiplayerAppearance_BuildPalette(out->basePalette, isMay, sEditor, out->palette);
-    info = GetVanillaObjectEventGraphicsInfo(isMay ? OBJ_EVENT_GFX_MAY_NORMAL : OBJ_EVENT_GFX_BRENDAN_NORMAL);
-    if (info != NULL && info->images != NULL)
-        out->frames = info->images[0].data; // the body's: walking then running, 16x32 each
-    out->character = CharCustom_FromLook(sEditor);
-    out->startCharacter = CharCustom_FromLook(out->start);
-    out->characterCount = CharCustom_Count();
-    out->coloursEnabled = out->character == CC_CHARACTER_NONE;
-    out->portraitPic = CharacterPortrait(out->character, isMay);
-    FillNativeFieldSprite(out->character, isMay, sEditor, &out->sprite);
-    return TRUE;
-}
-
-// The default trainer's frames and the saved look's palette (unchanged for the
-// screens written for it; MultiplayerAppearance_NativeUiLocalSprite has a
-// character's own).
-void MultiplayerAppearance_NativeUiPlayerSprite(const void **frames, u16 *palette)
-{
-    bool32 isMay = gSaveBlock2Ptr->playerGender != MALE;
-    const struct ObjectEventGraphicsInfo *info = GetVanillaObjectEventGraphicsInfo(isMay ? OBJ_EVENT_GFX_MAY_NORMAL : OBJ_EVENT_GFX_BRENDAN_NORMAL);
-    const u8 *look = CharacterEditor_SavedLook();
-
-    *frames = info != NULL && info->images != NULL ? info->images[0].data : NULL;
-    MultiplayerAppearance_BuildPalette(isMay ? gObjectEventPal_May : gObjectEventPal_Brendan, isMay,
-                                       ValidLook(look) ? look : NULL, palette);
-}
-
-void MultiplayerAppearance_NativeUiLocalSprite(struct NativeFieldSprite *out)
-{
-    const u8 *look = CharacterEditor_SavedLook();
-
-    FillNativeFieldSprite(CharCustom_FromLook(look), gSaveBlock2Ptr->playerGender != MALE, look, out);
-}
-
-u16 MultiplayerAppearance_NativeUiLocalPortrait(void)
-{
-    return CharacterPortrait(CharCustom_FromLook(CharacterEditor_SavedLook()),
-                             gSaveBlock2Ptr->playerGender != MALE);
-}
-
-bool32 MultiplayerAppearance_NativeUiCharacter(u32 id, struct NativeCharacterCard *out)
-{
-    static const u8 sText_Default[] = _("DEFAULT");
-    static const u8 sText_Brendan[] = _("Recolour: BRENDAN");
-    static const u8 sText_May[] = _("Recolour: MAY");
-    const struct CharCustomCharacter *ch = CharCustom_Get(id);
-    bool32 isMay = gSaveBlock2Ptr->playerGender != MALE;
-    u8 look[MP_APPEARANCE_BYTES];
-
-    memset(out, 0, sizeof(*out));
-    if (id >= CharCustom_Count() || (id != CC_CHARACTER_NONE && ch == NULL))
-        return FALSE;
-    if (ch == NULL)
-    {
-        // DEFAULT with the colours the editor keeps for it
-        memset(look, 0, sizeof(look));
-        look[1] = sEditorColours[0];
-        look[2] = sEditorColours[1];
-        look[3] = sEditorColours[2];
-        look[5] = sEditorColours[3];
-        look[0] = (look[1] || look[2] || look[3] || look[5]) ? 1 : 0;
-        if (sEditorActive && CharCustom_FromLook(sEditor) == CC_CHARACTER_NONE)
-            memcpy(look, sEditor, sizeof(look));
-        out->name = sText_Default;
-        out->variant = isMay ? sText_May : sText_Brendan;
-        out->gender = isMay ? FEMALE : MALE;
-        out->kind = 0;
-        out->frontPic = CharacterPortrait(CC_CHARACTER_NONE, isMay);
-        FillNativeFieldSprite(CC_CHARACTER_NONE, isMay, look, &out->sprite);
-        return TRUE;
-    }
-    out->name = ch->name;
-    out->variant = ch->variant;
-    out->gender = ch->gender;
-    out->kind = ch->kind + 1;
-    out->frontPic = ch->frontPic;
-    FillNativeFieldSprite(id, ch->gender == FEMALE, NULL, &out->sprite);
-    return TRUE;
-}
-
-bool32 MultiplayerAppearance_NativeUiSetCursor(u32 row)
-{
-    u32 editorRow;
-
-    if (!sEditorActive || !FuncIsActiveTask(Task_CharacterEditor) || row >= NATIVE_LOOK_ROW_COUNT)
-        return FALSE;
-    editorRow = NativeUiRowToEditor(row);
-    if (!CharacterEditor_RowEnabled(editorRow))
-        return FALSE;
-    if (editorRow != sEditorCursor)
-    {
-        sEditorCursor = editorRow;
-        PlaySE(SE_SELECT);
-        CharacterEditor_Render();
-    }
-    return TRUE;
-}
-
-bool32 MultiplayerAppearance_NativeUiSelectCharacter(u32 id)
-{
-    if (!CharCustom_EditorSelect(id))
-        return FALSE;
-    if (sEditorCursor != CC_EDITOR_ROW_CHARACTER)
-    {
-        sEditorCursor = CC_EDITOR_ROW_CHARACTER;
-        CharacterEditor_Render();
-    }
-    PlaySE(SE_SELECT);
-    return TRUE;
-}
-#endif // ENABLE_NATIVE_UI
 #endif // PORTABLE

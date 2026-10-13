@@ -608,16 +608,6 @@ bool UiGfx_FieldSprite(const void *tiles, int frameCount, const uint16_t *palett
     return UiGfx_FieldSpriteSized(tiles, frameCount, palette, frame, 16, 32, x, y, scale, flip);
 }
 
-bool UiGfx_NativeFieldSprite(const struct NativeFieldSprite *sprite, int pose, int dir, int step, int x, int y,
-                             int scale)
-{
-    if (sprite == NULL || sprite->tiles == NULL || pose < 0 || pose > 1 || dir < 0 || dir > 3 || step < 0 || step > 3)
-        return false;
-    return UiGfx_FieldSpriteSized(sprite->tiles, sprite->frames, sprite->palette, sprite->frame[pose][dir][step],
-                                  sprite->width, sprite->height, x + (16 - sprite->width) * scale / 2,
-                                  y + (32 - sprite->height) * scale, scale, sprite->flip[pose][dir][step] != 0);
-}
-
 static void UiGfx_ArtShutdown(void)
 {
     for (int i = 0; i < ART_SLOTS; i++)

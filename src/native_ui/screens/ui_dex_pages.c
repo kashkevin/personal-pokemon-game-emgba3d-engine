@@ -270,7 +270,9 @@ void UiDexPages_Capture(const struct NativePokedex *p, const struct UiDexEntry *
     {
         StringCopyN(sPlayerName, gSaveBlock2Ptr->playerName, PLAYER_NAME_LENGTH);
         sPlayerName[PLAYER_NAME_LENGTH] = EOS;
-        sTrainerPic = PlayerGenderToFrontTrainerPicId(gSaveBlock2Ptr->playerGender);
+        /* the player's picture as the engine's page shows it (a chosen character's own) */
+        sTrainerPic = MultiplayerAppearance_NativeUiFrontPic(MultiplayerAppearance_NativeUiLocalCharacter(),
+                                                             gSaveBlock2Ptr->playerGender != MALE);
         UiGfx_PrepareTrainerPic(sTrainerPic);
         sMonScale = gSpeciesInfo[e->species].pokemonScale;
         sMonOffsetSigned = (s16)gSpeciesInfo[e->species].pokemonOffset;
