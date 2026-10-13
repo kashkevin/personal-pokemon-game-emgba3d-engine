@@ -86,6 +86,9 @@ static u32 sPendingResultSpawnId;
 static u8 sPendingResult;
 static u16 sPendingResultSpecies;
 static u32 sHiddenSpawnId;      // caught or defeated here: hidden until the host drops it
+static u8 sHiddenResult;        // its result, sent again while the host still says it is ours
+static u16 sHiddenSpecies;
+static u32 sReleasingSpawnId;   // ran from or lost to here: "ours" in the inbound is stale until it drops
 
 // ---------------------------------------------------------------------------
 // Mailbox
@@ -106,7 +109,7 @@ void MultiplayerSpawns_Init(void)
     }
     sSeenGeneration = 0;
     sHaveInbound = sConnected = sInteraction = sBattleActive = FALSE;
-    sClaimSpawnId = sBattleSpawnId = sPendingResultSpawnId = sHiddenSpawnId = 0;
+    sClaimSpawnId = sBattleSpawnId = sPendingResultSpawnId = sHiddenSpawnId = sReleasingSpawnId = 0;
 }
 
 static void ReadInbound(void)
@@ -151,6 +154,11 @@ static void PostAction(u8 kind, u8 result, u32 spawnId, u16 species)
     u32 generation = (gMultiplayerSpawnMailbox.localGeneration + 1) | 1;
 
     action.seq = gMultiplayerSpawnMailbox.local.action.seq + 1;
+    // The first action after a (soft) reset starts at a number of its own: a
+    // companion that saw the previous game's last number must not take this
+    // one for it and skip it.
+    if (gMultiplayerSpawnMailbox.local.action.seq == 0)
+        action.seq = (gMain.vblankCounter1 * 2654435761u) ^ 0x5EED0001u;
     if (action.seq == 0)
         action.seq = 1;
     action.kind = kind;
@@ -553,6 +561,14 @@ static void FlushPending(void)
         const struct MultiplayerSpawnSlot *slot = &sInbound.slots[i];
         if ((slot->flags & MP_SPAWN_SLOT_MINE) && slot->spawnId != sClaimSpawnId && slot->spawnId != sBattleSpawnId)
         {
+            if (slot->spawnId == sHiddenSpawnId)
+            {
+                // Caught or defeated here and still ours on the host: its
+                // result never arrived. Report it again; never let it go.
+                PostAction(MP_SPAWN_ACTION_RESULT, sHiddenResult, slot->spawnId, sHiddenSpecies);
+                return;
+            }
+            sReleasingSpawnId = slot->spawnId;
             PostAction(MP_SPAWN_ACTION_RELEASE, 0, slot->spawnId, slot->species);
             return;
         }
@@ -584,10 +600,20 @@ static void Task_WaitSpawnClaim(u8 taskId)
         gSpecialVar_Result = 2;
         done = TRUE;
     }
-    else if (slot->flags & MP_SPAWN_SLOT_MINE)
+    else if ((slot->flags & MP_SPAWN_SLOT_MINE) && slot->spawnId != sReleasingSpawnId)
     {
         gSpecialVar_Result = 1;
         done = TRUE;
+    }
+    else if (slot->flags & MP_SPAWN_SLOT_MINE)
+    {
+        // Ours only until the host has our "ran" or release: wait for it, then
+        // ask again (KNOWN_ISSUES M17).
+        if (++gTasks[taskId].tTimer > CLAIM_TIMEOUT_FRAMES)
+        {
+            gSpecialVar_Result = 2;
+            done = TRUE;
+        }
     }
     else if (slot->flags & MP_SPAWN_SLOT_BUSY)
     {
@@ -647,8 +673,8 @@ bool32 MultiplayerSpawns_TryClaimTalked(void)
     gSpecialVar_Result = 2;
     sClaimSpawnId = 0;
     slot = FindSlot(sObjects[index].spawnId);
-    if (MultiplayerSpawns_IsActive() && slot != NULL && !(slot->flags & MP_SPAWN_SLOT_BUSY))
-        sClaimSpawnId = slot->spawnId;
+    if (MultiplayerSpawns_IsActive() && slot != NULL)
+        sClaimSpawnId = slot->spawnId; // a busy one answers "busy" (KNOWN_ISSUES M18)
     taskId = CreateTask(Task_WaitSpawnClaim, 80);
     if (taskId == TASK_NONE)
     {
@@ -659,7 +685,9 @@ bool32 MultiplayerSpawns_TryClaimTalked(void)
     {
         gTasks[taskId].data[0] = 0;
         // Already granted (a reconnect, or a cancelled message): no new action.
-        gTasks[taskId].data[1] = (slot != NULL && (slot->flags & MP_SPAWN_SLOT_MINE)) ? TRUE : FALSE;
+        // Not after this game ran from it: that "ours" is stale.
+        gTasks[taskId].data[1] = (slot != NULL && (slot->flags & MP_SPAWN_SLOT_MINE)
+                               && slot->spawnId != sReleasingSpawnId && slot->spawnId != sPendingResultSpawnId) ? TRUE : FALSE;
     }
     return TRUE;
 }
@@ -678,7 +706,8 @@ void MultiplayerSpawns_StartBattle(void)
     u16 species;
 
     sBattleActive = FALSE;
-    if (!MultiplayerSpawns_IsActive() || slot == NULL || !(slot->flags & MP_SPAWN_SLOT_MINE) || !ValidSlot(slot))
+    if (!MultiplayerSpawns_IsActive() || slot == NULL || !(slot->flags & MP_SPAWN_SLOT_MINE)
+     || slot->spawnId == sReleasingSpawnId || !ValidSlot(slot))
     {
         sClaimSpawnId = 0;
         sInteraction = FALSE;
@@ -730,10 +759,17 @@ bool32 MultiplayerSpawns_OnScriptedBattleEnd(void)
     case B_OUTCOME_DREW:
     case B_OUTCOME_FORFEITED:
         result = MP_WORLD_RESULT_LOST;
+        sReleasingSpawnId = sBattleSpawnId;
         break;
     default:
         result = MP_WORLD_RESULT_RAN;
+        sReleasingSpawnId = sBattleSpawnId;
         break;
+    }
+    if (sHiddenSpawnId == sBattleSpawnId)
+    {
+        sHiddenResult = result;
+        sHiddenSpecies = sBattleSpecies;
     }
     sResult = result;
     // Reported from the field tick so an unanswered action never loses it
@@ -772,6 +808,12 @@ void MultiplayerSpawns_Tick(bool32 fieldReady, bool32 connected)
     PublishLocal();
     if (sHiddenSpawnId != 0 && sHaveInbound && FindSlot(sHiddenSpawnId) == NULL)
         sHiddenSpawnId = 0;
+    if (sReleasingSpawnId != 0 && sHaveInbound && !ActionPending())
+    {
+        const struct MultiplayerSpawnSlot *slot = FindSlot(sReleasingSpawnId);
+        if (slot == NULL || !(slot->flags & MP_SPAWN_SLOT_MINE))
+            sReleasingSpawnId = 0;
+    }
     if (!MultiplayerSpawns_IsActive() || gMain.callback2 != CB2_Overworld)
     {
         MultiplayerSpawns_LeaveField();
@@ -782,6 +824,28 @@ void MultiplayerSpawns_Tick(bool32 fieldReady, bool32 connected)
     if (!fieldReady)
         return;
     UpdateObjects();
+}
+
+// ---------------------------------------------------------------------------
+// Test hooks (native self-test --selftest-spawn-claims; never called by the
+// game): a Pokemon drawn for a slot, and a battle against it begun, without the
+// field and battle engines.
+
+void MultiplayerSpawns_TestShowObject(u32 index, u32 spawnId)
+{
+    if (index < MP_SPAWN_MAX_SLOTS)
+    {
+        sObjects[index].spawnId = spawnId;
+        sObjects[index].objectEventId = OBJECT_EVENTS_COUNT;
+    }
+}
+
+void MultiplayerSpawns_TestBeginBattle(u32 spawnId, u16 species)
+{
+    sClaimSpawnId = sBattleSpawnId = spawnId;
+    sBattleSpecies = species;
+    sInteraction = TRUE;
+    sBattleActive = TRUE;
 }
 
 #endif // PORTABLE
