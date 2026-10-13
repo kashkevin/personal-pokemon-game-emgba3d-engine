@@ -13,9 +13,17 @@ pan_from and pan_to. The game's panse runs a sound task until the pan reaches it
 script's end wait for); with the step and delay the core runs it too (bfx_game.c). The runtime ignores
 fields it does not know, so the data still plays in the package's Lab. Everything else is the
 package's converter as it is; its arguments pass through.
+
+And one fix to its script reader: GNU as ends a statement at ';' as at the end of a line (ARM), so
+`goto ParabolicChargeHeal;` (battle_anim_scripts.s, Parabolic Charge's double-battle branch) is a goto
+to ParabolicChargeHeal. The package's reader took the ';' as part of the label, found no such label and
+ended the branch there (no healing stars, no fade back in a double battle). The scripts are read with
+the ';' ending the statement, line numbers unchanged; a line with two statements stops the conversion.
 """
 import importlib.util
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -46,6 +54,29 @@ def main():
         return out
 
     bpd.compact_events = compact_events
+
+    parse = bpd.parse_scripts
+
+    def parse_scripts(script_path, expander, consts):
+        lines = []
+        for lineno, raw in enumerate(Path(script_path).read_text(encoding="utf-8").splitlines(), 1):
+            code, sep, comment = raw.partition("@")
+            if ";" in code:
+                statements = [x for x in code.split(";") if x.strip()]
+                if len(statements) > 1:
+                    raise SystemExit("convert_data.py: %s line %d holds %d statements; the converter reads one a line"
+                                     % (script_path, lineno, len(statements)))
+                code = statements[0] if statements else ""
+            lines.append(code + sep + comment)
+        fd, tmp = tempfile.mkstemp(suffix=".s")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+            return parse(Path(tmp), expander, consts)
+        finally:
+            os.unlink(tmp)
+
+    bpd.parse_scripts = parse_scripts
     sys.argv = [str(path)] + sys.argv[2:]
     return bpd.main()
 

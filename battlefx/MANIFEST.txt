@@ -1,7 +1,7 @@
 Battle FX data for the game's 3D battles (include/diorama/battle_fx.h).
 Packed by tools/battlefx/pack_data.py from the Battle FX integration package's native/ folder (Battle FX v3.3: battlefx_kit commit 9848e06, tag lab-perf-v3.3).
 The textures and meshes are procedural (no game or Nintendo art); the animation data is converted from
-pokeemerald-expansion's own battle_anim_scripts.s and C sources (commit in bfx_moves.json meta.commit: cd329e0b6f5564dbb8d6907dc48ea18ec414a1a3, this game's tree); by tools/battlefx/convert_data.py (the package's converter, keeping the panse commands' pan step and delay).
+pokeemerald-expansion's own battle_anim_scripts.s and C sources (commit in bfx_moves.json meta.commit: e5889235e57d49882e348c386100cb9cb0eaa8f4, this game's tree); by tools/battlefx/convert_data.py (the package's converter, keeping the panse commands' pan step and delay, a ';' ending a statement).
 
 00a30e0b164cab8e2e32f71ad244a34318c77e6dc5f8a4bfcb448ef8336594ec  assets/atlas.png
 176612c7d343015a22b6c3066ba8a6fd3dfd138bcf31f2d72becf4fe30e391e0  assets/info.txt
@@ -9,7 +9,7 @@ pokeemerald-expansion's own battle_anim_scripts.s and C sources (commit in bfx_m
 2aecb46117d257443a23ddd64d805e6c6a06891bd0941b0d3917ae9929543843  assets/ramps.png
 238929aa7ba8f115f41c34be917d61b0f2556f10bb88837458f9c6da249cf0ca  assets/strips.png
 5c518ef68906402904d58dddb8f5123ff948ffabd08779607a7e58861571bb0a  bfx_core.js
-a94440129920185b1d2da8c78e7d547ba5baefead18d76cf21f6a1ddd1e2b987  bfx_moves.json
+489b74bac60e8cccc4fd5ba215241e3f10cd779ec77aff592f743d68f08ee5de  bfx_moves.json
 1802d1709565f7b11d1be28dc3e255a94c5b072afe42b25883b60f58f1da8bc3  se_frames.json
 83db09a13e153a69ee357a9ae36acfe80c73d81079388441ae08afee968af68b  shaders/bright.frag
 75f5838e37636c16ea1eaf823402ca50b94ff070230340c7e9281ffafebdbba9  shaders/card.frag
