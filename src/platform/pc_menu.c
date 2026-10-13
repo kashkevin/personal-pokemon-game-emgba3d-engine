@@ -10,13 +10,16 @@
 static const char *const sLabels[PC_MENU_ITEM_COUNT] = {
     [PC_MENU_RESOLUTION]   = "Resolution",
     [PC_MENU_DISPLAY_MODE] = "Display mode",
+    [PC_MENU_RENDER_SCALE] = "3D render scale",
     [PC_MENU_VSYNC]        = "VSync",
+    [PC_MENU_FPS_CAP]      = "Frame rate limit",
     [PC_MENU_QUALITY]      = "Graphics quality",
     [PC_MENU_SHADOWS]      = "Shadows",
     [PC_MENU_LIGHTING]     = "Lighting",
     [PC_MENU_EFFECTS]      = "Effects",
     [PC_MENU_DETAILS]      = "World details",
     [PC_MENU_ANTIALIASING] = "Anti-aliasing",
+    [PC_MENU_MEMORY_BUDGET] = "Memory budget",
     [PC_MENU_PICTURE_SIZE] = "Game picture",
     [PC_MENU_FRAME_RATE]   = "Show frame rate",
     [PC_MENU_CAMERA]       = "Camera",
@@ -27,7 +30,8 @@ static const char *const sLabels[PC_MENU_ITEM_COUNT] = {
 static bool Visible(const struct PcMenuState *menu, int item)
 {
     return menu->hasCamera
-        || (item != PC_MENU_CAMERA && item != PC_MENU_TREES && item != PC_MENU_DETAILS);
+        || (item != PC_MENU_CAMERA && item != PC_MENU_TREES && item != PC_MENU_DETAILS
+         && item != PC_MENU_RENDER_SCALE && item != PC_MENU_MEMORY_BUDGET);
 }
 
 void PcMenu_Open(struct PcMenuState *menu, const struct DisplaySettings *settings, bool vsync,
@@ -102,9 +106,17 @@ static unsigned int Change(struct PcMenuState *menu, int item, int direction, un
             settings->fullscreenMode = settings->mode;
         settings->modeKept = true;
         break;
+    case PC_MENU_RENDER_SCALE:
+        settings->renderScale = DisplaySettings_StepRenderScale(settings->renderScale, direction);
+        settings->renderScaleKept = true;
+        return PC_MENU_CHANGED_RENDER_SCALE;
     case PC_MENU_VSYNC:
         menu->vsync = !menu->vsync;
         return PC_MENU_CHANGED_VSYNC;
+    case PC_MENU_FPS_CAP:
+        settings->fpsCap = DisplaySettings_StepFpsCap(settings->fpsCap, direction);
+        settings->fpsCapKept = true;
+        return PC_MENU_CHANGED_FPS_CAP;
     case PC_MENU_QUALITY:
         index = settings->quality == QUALITY_CUSTOM ? QUALITY_HIGH : settings->quality;
         DisplaySettings_SetQuality(settings, Wrap(index + direction, QUALITY_CUSTOM));
@@ -136,6 +148,10 @@ static unsigned int Change(struct PcMenuState *menu, int item, int direction, un
         settings->antialiasing = sSamples[Wrap(index + direction, 4)];
         QualityValueChanged(settings);
         return PC_MENU_CHANGED_QUALITY;
+    case PC_MENU_MEMORY_BUDGET:
+        settings->memoryBudget = DisplaySettings_StepMemoryBudget(settings->memoryBudget, direction);
+        settings->memoryBudgetKept = true;
+        return PC_MENU_CHANGED_MEMORY_BUDGET;
     case PC_MENU_PICTURE_SIZE:
         menu->pictureFill = !menu->pictureFill;
         return PC_MENU_CHANGED_PICTURE;
@@ -237,6 +253,43 @@ int PcMenu_ConfirmSecondsLeft(const struct PcMenuState *menu, unsigned int nowMs
     return (int)((PC_MENU_CONFIRM_MS - elapsed + 999) / 1000);
 }
 
+static void Megabytes(unsigned int megabytes, char *buffer, size_t size)
+{
+    if (megabytes >= 1024 && megabytes % 1024 == 0)
+        snprintf(buffer, size, "%u GB", megabytes / 1024);
+    else if (megabytes >= 1024)
+        snprintf(buffer, size, "%u.%u GB", megabytes / 1024, (megabytes % 1024) * 10 / 1024);
+    else
+        snprintf(buffer, size, "%u MB", megabytes);
+}
+
+static void MemoryBudgetValue(const struct PcMenuState *menu, char *value, size_t size)
+{
+    char budget[16];
+    char effective[16];
+    char used[16];
+    char text[96];
+    size_t length;
+
+    Megabytes(menu->settings.memoryBudget, budget, sizeof(budget));
+    Megabytes(menu->memoryEffectiveMB, effective, sizeof(effective));
+    Megabytes(menu->memoryInUseMB, used, sizeof(used));
+    if (menu->settings.memoryBudget == 0)
+        snprintf(text, sizeof(text), menu->memoryEffectiveMB != 0 ? "Auto: %s" : "Auto", effective);
+    else if (menu->memoryEffectiveMB != 0 && menu->memoryEffectiveMB < menu->settings.memoryBudget)
+        snprintf(text, sizeof(text), "%s (%s usable)", budget, effective);
+    else
+        snprintf(text, sizeof(text), "%s", budget);
+    length = strlen(text);
+    if (menu->memoryInUseMB != 0 && length + strlen(used) + 7 < size)
+        snprintf(text + length, sizeof(text) - length, ", %s used", used);
+    length = strlen(text);
+    if (length >= size)
+        length = size - 1;
+    memcpy(value, text, length);
+    value[length] = '\0';
+}
+
 static const char *Capitalized(const char *name, char *buffer, size_t size)
 {
     snprintf(buffer, size, "%s", name);
@@ -271,8 +324,20 @@ int PcMenu_Rows(const struct PcMenuState *menu, struct PcMenuRow *rows)
             snprintf(row->value, sizeof(row->value), "%s",
                      Capitalized(DisplaySettings_ModeName(settings->mode), name, sizeof(name)));
             break;
+        case PC_MENU_RENDER_SCALE:
+            if (settings->renderScale >= 100)
+                snprintf(row->value, sizeof(row->value), "100%% (native)");
+            else
+                snprintf(row->value, sizeof(row->value), "%u%% (upscaled)", settings->renderScale);
+            break;
         case PC_MENU_VSYNC:
             snprintf(row->value, sizeof(row->value), "%s", menu->vsync ? "On" : "Off");
+            break;
+        case PC_MENU_FPS_CAP:
+            if (settings->fpsCap == 0)
+                snprintf(row->value, sizeof(row->value), "Unlimited");
+            else
+                snprintf(row->value, sizeof(row->value), "%u fps", settings->fpsCap);
             break;
         case PC_MENU_QUALITY:
             snprintf(row->value, sizeof(row->value), "%s",
@@ -296,6 +361,9 @@ int PcMenu_Rows(const struct PcMenuState *menu, struct PcMenuRow *rows)
                 snprintf(row->value, sizeof(row->value), "Off");
             else
                 snprintf(row->value, sizeof(row->value), "%ux MSAA", settings->antialiasing);
+            break;
+        case PC_MENU_MEMORY_BUDGET:
+            MemoryBudgetValue(menu, row->value, sizeof(row->value));
             break;
         case PC_MENU_PICTURE_SIZE:
             snprintf(row->value, sizeof(row->value), "%s", menu->pictureFill ? "Largest" : "Standard");

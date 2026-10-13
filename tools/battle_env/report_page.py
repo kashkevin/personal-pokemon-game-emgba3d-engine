@@ -289,7 +289,7 @@ def write_page(rows, out, by_map, args):
     cls_after = collections.Counter(r['after_class'] for r in rows if r['after_class'])
     cls_before = collections.Counter(r['before_class'] for r in rows if r['before_class'] and r['after_class'])
     both = sum(1 for r in rows if r['before_class'] and r['after_class'])
-    # the class now (report.py current_class: this round's, else with the objects, else after)
+    # the class now (report.py current_class: round 4's, else round 3's, else with the objects, else after)
     cls_now = collections.Counter(r.get('current_class') for r in rows if r.get('current_class'))
     total = len(rows)
 
@@ -325,15 +325,19 @@ def write_page(rows, out, by_map, args):
                 html.escape(name), _chip(r['before_class'], 'before '), _chip(r['after_class'], 'after '),
                 (('<span class="arrow" title="with the overworld\'s detail objects">+</span>%s' % _chip(
                     r['props_class'], 'with the overworld\'s objects ')) if r.get('props_class') else '')
-                + (('<span class="arrow" title="now (claude/battle-environments-2)">→</span>%s' % _chip(
-                    r['now_class'], 'now ')) if r.get('now_class') else ''),
+                + (('<span class="arrow" title="round 3 (claude/battle-environments-2)">→</span>%s' % _chip(
+                    r['now_class'], 'round 3 ')) if r.get('now_class') else '')
+                + (('<span class="arrow" title="now: round 4 (claude/battle-environments-3)">→</span>%s' % _chip(
+                    r['r4_class'], 'now ')) if r.get('r4_class') else ''),
                 html.escape(r['map']), ''.join('<span>%s</span>' % t for t in tags), shot,
                 html.escape(status),
                 ('<p style="margin:0">%s</p>' % html.escape(r['notes']) if r['notes'] else '')
                 + ('<p style="margin:0"><strong>With the overworld\'s objects:</strong> %s</p>' % html.escape(
                     r['props_notes']) if r.get('props_notes') else '')
-                + ('<p style="margin:0"><strong>Now:</strong> %s</p>' % html.escape(
-                    r['now_notes']) if r.get('now_notes') else '')))
+                + ('<p style="margin:0"><strong>Round 3:</strong> %s</p>' % html.escape(
+                    r['now_notes']) if r.get('now_notes') else '')
+                + ('<p style="margin:0"><strong>Now (round 4):</strong> %s</p>' % html.escape(
+                    r['r4_notes']) if r.get('r4_notes') else '')))
 
     # the category table
     by_group = collections.OrderedDict((g, []) for g, _ in GROUPS)

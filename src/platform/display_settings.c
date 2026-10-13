@@ -13,6 +13,12 @@ const struct DisplayResolution gDisplayResolutions[DISPLAY_RESOLUTION_COUNT] = {
     {3840, 2160},
 };
 
+const unsigned short gDisplayFpsCaps[DISPLAY_FPS_CAP_COUNT] = {60, 120, 144, 165, 180, 200, 240, 0};
+
+const unsigned char gDisplayRenderScales[DISPLAY_RENDER_SCALE_COUNT] = {100, 83, 75, 67, 50};
+
+const unsigned short gDisplayMemoryBudgets[DISPLAY_MEMORY_BUDGET_COUNT] = {0, 512, 1024, 2048, 4096, 8192};
+
 static const char *const sModeNames[DISPLAY_MODE_COUNT] = {"windowed", "borderless", "fullscreen"};
 static const char *const sQualityNames[QUALITY_COUNT] = {"low", "medium", "high", "ultra", "custom"};
 static const char *const sShadowNames[SHADOWS_COUNT] = {"off", "low", "medium", "high"};
@@ -40,6 +46,8 @@ void DisplaySettings_Defaults(struct DisplaySettings *settings)
     settings->height = gDisplayResolutions[DISPLAY_DEFAULT_RESOLUTION].height;
     settings->mode = DISPLAY_MODE_WINDOWED;
     settings->fullscreenMode = DISPLAY_MODE_BORDERLESS;
+    settings->fpsCap = 0;         /* as before these settings: VSync decides */
+    settings->renderScale = 100;  /* native */
     DisplaySettings_SetQuality(settings, QUALITY_HIGH);
 }
 
@@ -147,6 +155,44 @@ bool DisplaySettings_ParseLine(struct DisplaySettings *settings, const char *lin
             settings->antialiasing = value;
         return QualityValueRead(settings);
     }
+    if (strncmp(line, "fpsCap=", 7) == 0)
+    {
+        if (strncmp(line + 7, "unlimited", 9) == 0)
+        {
+            settings->fpsCap = 0;
+            settings->fpsCapKept = true;
+        }
+        else if (sscanf(line + 7, "%u", &value) == 1
+              && value >= DISPLAY_FPS_CAP_MIN && value <= DISPLAY_FPS_CAP_MAX)
+        {
+            settings->fpsCap = (unsigned short)value;
+            settings->fpsCapKept = true;
+        }
+        return true;
+    }
+    if (strncmp(line, "memoryBudget=", 13) == 0)
+    {
+        if (strncmp(line + 13, "auto", 4) == 0)
+        {
+            settings->memoryBudget = 0;
+            settings->memoryBudgetKept = true;
+        }
+        else if (sscanf(line + 13, "%u", &value) == 1 && value >= 128 && value <= 65535)
+        {
+            settings->memoryBudget = (unsigned short)value;
+            settings->memoryBudgetKept = true;
+        }
+        return true;
+    }
+    if (sscanf(line, "renderScale=%u", &value) == 1)
+    {
+        if (value >= DISPLAY_RENDER_SCALE_MIN && value <= 100)
+        {
+            settings->renderScale = (unsigned char)value;
+            settings->renderScaleKept = true;
+        }
+        return true;
+    }
     return false;
 }
 
@@ -201,6 +247,22 @@ void DisplaySettings_Write(const struct DisplaySettings *settings, FILE *file)
         fprintf(file, "effects=%u\n", settings->effects ? 1 : 0);
         fprintf(file, "details=%u\n", settings->details ? 1 : 0);
         fprintf(file, "antialiasing=%u\n", settings->antialiasing);
+    }
+    if (settings->fpsCapKept)
+    {
+        if (settings->fpsCap == 0)
+            fprintf(file, "fpsCap=unlimited\n");
+        else
+            fprintf(file, "fpsCap=%u\n", settings->fpsCap);
+    }
+    if (settings->renderScaleKept)
+        fprintf(file, "renderScale=%u\n", settings->renderScale);
+    if (settings->memoryBudgetKept)
+    {
+        if (settings->memoryBudget == 0)
+            fprintf(file, "memoryBudget=auto\n");
+        else
+            fprintf(file, "memoryBudget=%u\n", settings->memoryBudget);
     }
 }
 
@@ -291,6 +353,145 @@ int DisplaySettings_PixelScale(int outputWidth, int outputHeight, bool fill)
             scale = outputWidth / 240;
     }
     return scale < 1 ? 1 : scale;
+}
+
+int DisplaySettings_ScaledHeight(int height, unsigned char renderScale)
+{
+    int scaled;
+
+    if (height <= 0 || renderScale >= 100 || renderScale == 0)
+        return height;
+    scaled = (int)(((long long)height * renderScale + 50) / 100);
+    return scaled < DISPLAY_MIN_HEIGHT / 2 ? DISPLAY_MIN_HEIGHT / 2 : scaled;
+}
+
+unsigned short DisplaySettings_StepFpsCap(unsigned short fpsCap, int direction)
+{
+    int index = -1;
+
+    for (int i = 0; i < DISPLAY_FPS_CAP_COUNT; i++)
+    {
+        if (gDisplayFpsCaps[i] == fpsCap)
+            index = i;
+    }
+    if (index < 0)
+    {
+        /* A limit of the file's own (90, say): the nearest listed one that way. */
+        if (direction > 0)
+        {
+            for (int i = 0; i < DISPLAY_FPS_CAP_COUNT - 1; i++)
+            {
+                if (gDisplayFpsCaps[i] > fpsCap)
+                    return gDisplayFpsCaps[i];
+            }
+            return 0;
+        }
+        for (int i = DISPLAY_FPS_CAP_COUNT - 2; i >= 0; i--)
+        {
+            if (gDisplayFpsCaps[i] < fpsCap)
+                return gDisplayFpsCaps[i];
+        }
+        return gDisplayFpsCaps[DISPLAY_FPS_CAP_COUNT - 1];
+    }
+    index = ((index + direction) % DISPLAY_FPS_CAP_COUNT + DISPLAY_FPS_CAP_COUNT) % DISPLAY_FPS_CAP_COUNT;
+    return gDisplayFpsCaps[index];
+}
+
+unsigned char DisplaySettings_StepRenderScale(unsigned char renderScale, int direction)
+{
+    int index = -1;
+
+    for (int i = 0; i < DISPLAY_RENDER_SCALE_COUNT; i++)
+    {
+        if (gDisplayRenderScales[i] == renderScale)
+            index = i;
+    }
+    if (index < 0)
+    {
+        /* A scale of the file's own: the nearest listed one that way. */
+        for (int i = 0; i < DISPLAY_RENDER_SCALE_COUNT; i++)
+        {
+            if (direction > 0 ? gDisplayRenderScales[i] < renderScale
+                              : gDisplayRenderScales[DISPLAY_RENDER_SCALE_COUNT - 1 - i] > renderScale)
+                return direction > 0 ? gDisplayRenderScales[i]
+                                     : gDisplayRenderScales[DISPLAY_RENDER_SCALE_COUNT - 1 - i];
+        }
+        return 100;
+    }
+    index = ((index + direction) % DISPLAY_RENDER_SCALE_COUNT + DISPLAY_RENDER_SCALE_COUNT)
+          % DISPLAY_RENDER_SCALE_COUNT;
+    return gDisplayRenderScales[index];
+}
+
+unsigned short DisplaySettings_StepMemoryBudget(unsigned short budget, int direction)
+{
+    int index = -1;
+
+    for (int i = 0; i < DISPLAY_MEMORY_BUDGET_COUNT; i++)
+    {
+        if (gDisplayMemoryBudgets[i] == budget)
+            index = i;
+    }
+    if (index < 0)
+    {
+        /* A budget of the file's own: the nearest listed one that way. */
+        for (int i = 1; i < DISPLAY_MEMORY_BUDGET_COUNT; i++)
+        {
+            int at = direction > 0 ? i : DISPLAY_MEMORY_BUDGET_COUNT - i;
+
+            if (direction > 0 ? gDisplayMemoryBudgets[at] > budget : gDisplayMemoryBudgets[at] < budget)
+                return gDisplayMemoryBudgets[at];
+        }
+        return 0;
+    }
+    index = ((index + direction) % DISPLAY_MEMORY_BUDGET_COUNT + DISPLAY_MEMORY_BUDGET_COUNT)
+          % DISPLAY_MEMORY_BUDGET_COUNT;
+    return gDisplayMemoryBudgets[index];
+}
+
+/* What the game needs of its address space besides the caches: its own data,
+ * SDL, the graphics driver's mappings, thread stacks. */
+#define GAME_ADDRESS_RESERVE_MB 768
+
+unsigned DisplaySettings_EffectiveMemoryBudget(unsigned short budget, unsigned physicalMB,
+                                               unsigned addressSpaceFreeMB)
+{
+    unsigned effective;
+
+    if (budget == 0)
+    {
+        effective = physicalMB > 0 ? physicalMB / 8 : 512;
+        if (effective < 256)
+            effective = 256;
+        if (effective > 1024)
+            effective = 1024;
+    }
+    else
+    {
+        effective = budget;
+        if (physicalMB > 0 && effective > physicalMB / 2)
+            effective = physicalMB / 2;
+    }
+    if (addressSpaceFreeMB > 0)
+    {
+        unsigned room = addressSpaceFreeMB > GAME_ADDRESS_RESERVE_MB + 128
+                      ? addressSpaceFreeMB - GAME_ADDRESS_RESERVE_MB : 128;
+
+        if (effective > room)
+            effective = room;
+    }
+    return effective < 128 ? 128 : effective;
+}
+
+unsigned DisplaySettings_TerrainCacheChunks(unsigned budgetMB)
+{
+    unsigned chunks = budgetMB / 2;
+
+    if (chunks < 100)
+        chunks = 100;
+    if (chunks > 1024)
+        chunks = 1024;
+    return chunks;
 }
 
 int DisplaySettings_ShadowMapSize(unsigned char shadows)

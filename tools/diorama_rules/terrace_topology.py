@@ -29,6 +29,16 @@ TERRACE_ROLES = {
 }
 
 
+# Water a blocked cell stands in or beside (a rock in the sea) keeps its own
+# height: only blocked cells on dry land take the land's level.
+WATER_BEHAVIORS = frozenset({
+    "MB_POND_WATER", "MB_INTERIOR_DEEP_WATER", "MB_DEEP_WATER", "MB_SOOTOPOLIS_DEEP_WATER",
+    "MB_OCEAN_WATER", "MB_SHALLOW_WATER", "MB_NO_SURFACING", "MB_SEAWEED", "MB_SEAWEED_NO_SURFACING",
+    "MB_WATERFALL", "MB_EASTWARD_CURRENT", "MB_WESTWARD_CURRENT", "MB_NORTHWARD_CURRENT",
+    "MB_SOUTHWARD_CURRENT", "MB_PUDDLE", "MB_HOT_SPRINGS",
+})
+
+
 def role_for_cell(cell: dict) -> TerraceRole | None:
     if cell.get("tileset") != "gTileset_General":
         return None
@@ -178,3 +188,116 @@ def solve_layout(cells: tuple[dict, ...], width: int, height: int,
                                       "topQ16": ground * 16,
                                       "profile": "none", "solid": False}
     return solved
+
+
+def join_water(cells: tuple[dict, ...], width: int, height: int,
+               solved: dict[int, dict]) -> dict[int, dict]:
+    """Water the solver left unsolved (shallows at another elevation, water no
+    terrace reaches) that joins solved water takes its level: a sea and its
+    shallows lie level (graphics overhaul, 2026-10-12: where the sea was solved
+    a terrace below its rocks, its shallows and sandbars stood a level above
+    it). Each body of unsolved walkable water, joined cell to cell (not through
+    a waterfall), that touches solved water at one level only takes that
+    level. Returns the joined cells' entries."""
+    def water(offset: int) -> bool:
+        cell = cells[offset]
+        return (cell.get("behavior") in WATER_BEHAVIORS and cell.get("behavior") != "MB_WATERFALL"
+                and cell.get("collision", 0) == 0 and role_for_cell(cell) is None)
+
+    def neighbours(offset: int):
+        x, y = offset % width, offset // width
+        for nx, ny in ((x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y)):
+            if 0 <= nx < width and 0 <= ny < height:
+                yield ny * width + nx
+
+    seen: set[int] = set()
+    joined: dict[int, dict] = {}
+    for start in range(len(cells)):
+        if start in seen or start in solved or not water(start):
+            continue
+        body = []
+        levels = set()
+        pending = deque((start,))
+        seen.add(start)
+        while pending:
+            offset = pending.popleft()
+            body.append(offset)
+            for n in neighbours(offset):
+                if n in solved:
+                    if water(n):
+                        levels.add(solved[n]["groundQ16"])
+                elif n not in seen and water(n):
+                    seen.add(n)
+                    pending.append(n)
+        if len(levels) == 1:
+            level = next(iter(levels))
+            for offset in body:
+                joined[offset] = {"groundQ16": level, "topQ16": level,
+                                  "profile": "none", "solid": False}
+    return joined
+
+
+def lift_blocked_cells(cells: tuple[dict, ...], width: int, height: int,
+                       solved: dict[int, dict], liftable=None) -> dict[int, dict]:
+    """Blocked cells that are no terrace course (a house, a tree, a rock) stand
+    on the ground nearest them. solve_layout gives levels to walkable regions
+    only, so on a level below the highest (Mossdeep's town under its cliffs'
+    tops, Sootopolis's lower terraces, the sea a level below the rocks in it)
+    houses, trees and rocks stayed at the top level, a tile up on plinths.
+    Each blocked cell `liftable(offset)` allows (all, when None; the compiler
+    leaves natural cliffs out) takes the level of the walkable ground nearest
+    it, counted through such cells: when that is a solved level below the top
+    (dry land, or the sea solved with it), that level is its ground ("lift":
+    its own height stands on it). Nearest to unsolved water (the sea at its
+    own height), to two levels at once, or to unsolved ground, it is left as
+    it was. Returns the lifted cells' entries (graphics overhaul phase 4,
+    2026-10-12)."""
+    def blocked(offset: int) -> bool:
+        return (cells[offset].get("collision", 0) != 0 and offset not in solved
+                and role_for_cell(cells[offset]) is None
+                and (liftable is None or liftable(offset)))
+
+    def neighbours(offset: int):
+        x, y = offset % width, offset // width
+        for nx, ny in ((x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y)):
+            if 0 <= nx < width and 0 <= ny < height:
+                yield ny * width + nx
+
+    def label(offset: int):
+        """What a walkable cell next to blocked ones offers them: its level
+        (water too, solved with the land), or "water", or "unsolved"."""
+        if offset in solved:
+            return solved[offset]["groundQ16"]
+        if cells[offset].get("behavior") in WATER_BEHAVIORS:
+            return "water"
+        return "unsolved"
+
+    labels: dict[int, set] = {}
+    frontier: list[int] = []
+    for offset in range(len(cells)):
+        if not blocked(offset):
+            continue
+        offered = {label(n) for n in neighbours(offset)
+                   if cells[n].get("collision", 0) == 0 and role_for_cell(cells[n]) is None}
+        if offered:
+            labels[offset] = offered
+            frontier.append(offset)
+    # Further in, level by level: a cell takes what its nearest labelled
+    # neighbours offer.
+    while frontier:
+        reached: dict[int, set] = {}
+        for offset in frontier:
+            for n in neighbours(offset):
+                if blocked(n) and n not in labels:
+                    reached.setdefault(n, set()).update(labels[offset])
+        labels.update(reached)
+        frontier = list(reached)
+    lifted: dict[int, dict] = {}
+    for offset, offered in labels.items():
+        if len(offered) != 1:
+            continue
+        level = next(iter(offered))
+        if isinstance(level, int) and level < 0:
+            lifted[offset] = {"groundQ16": level, "topQ16": level,
+                              "profile": "none", "solid": False, "lift": True}
+    return lifted

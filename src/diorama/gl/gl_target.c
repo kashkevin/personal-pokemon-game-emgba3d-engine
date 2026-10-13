@@ -9,6 +9,7 @@
 
 static int sWantHeight;
 static int sWantSamples;
+static int sScalePercent = 100;
 static bool sFailed;           /* the offscreen target could not be made: the window */
 static bool sActive;           /* drawing into the offscreen target now */
 static GLuint sFramebuffer;
@@ -45,6 +46,17 @@ void DioramaGLTarget_Configure(int renderHeight, int samples)
         sFailed = false; /* a new choice may work where the last did not */
     sWantHeight = renderHeight > 0 ? renderHeight : 0;
     sWantSamples = samples > 1 ? samples : 0;
+}
+
+void DioramaGLTarget_SetScale(int percent)
+{
+    if (percent < 25)
+        percent = 25;
+    if (percent > 100)
+        percent = 100;
+    if (percent != sScalePercent)
+        sFailed = false;
+    sScalePercent = percent;
 }
 
 static bool Allocate(int width, int height, int samples)
@@ -115,12 +127,23 @@ void DioramaGLTarget_Begin(int outputWidth, int outputHeight, int *renderWidth, 
     int height = outputHeight;
 
     sActive = false;
-    if (sWantHeight > 0 && sWantHeight != outputHeight && outputHeight > 0)
+    if (outputHeight > 0)
     {
-        height = sWantHeight;
-        width = (int)(((long long)outputWidth * height + outputHeight / 2) / outputHeight);
-        if (width < 1)
-            width = 1;
+        int wantHeight = sWantHeight > 0 ? sWantHeight : outputHeight;
+
+        if (sScalePercent < 100)
+        {
+            wantHeight = (int)(((long long)wantHeight * sScalePercent + 50) / 100);
+            if (wantHeight < 90)
+                wantHeight = 90;
+        }
+        if (wantHeight != outputHeight)
+        {
+            height = wantHeight;
+            width = (int)(((long long)outputWidth * height + outputHeight / 2) / outputHeight);
+            if (width < 1)
+                width = 1;
+        }
     }
     if (!sFailed && (width != outputWidth || height != outputHeight || sWantSamples > 0))
     {

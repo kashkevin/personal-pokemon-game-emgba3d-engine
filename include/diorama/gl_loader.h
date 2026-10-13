@@ -55,4 +55,8 @@ extern PFNGLUNIFORM4FVPROC dglUniform4fv;
 
 bool DioramaGL_LoadFunctions(void);
 
+/* Every renderer file counts its draws, uploads and GPU allocations through
+ * gl_profile.h's wrappers (included last, so they wrap the names declared above). */
+#include "diorama/gl_profile.h"
+
 #endif

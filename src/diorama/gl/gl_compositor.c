@@ -83,6 +83,19 @@ static struct DioramaResolvedCell sRenderedResolvedCells[DIORAMA_MAX_VISIBLE_CEL
 static u32 sDebugPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
 static u32 sWeatherPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
 static u32 sUiPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+/* The text boxes made this game frame, uploaded only when they differ from
+ * sUiPixels (what the texture holds; sUiUploaded false: nothing yet). A map's
+ * name shown for two seconds is then one upload, not 120 (performance work
+ * 2026-10-12). */
+static u32 sUiScratch[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+static bool sUiUploaded;
+/*
+ * The game's latest 240x160 picture until it is drawn (performance work
+ * 2026-10-11): in the 3D view it is hidden nearly always, so it is uploaded
+ * only when a frame draws it, not on each of the game's 60 frames a second.
+ * VDraw's buffer (sdl2.c), rewritten only by the next VDraw on this thread.
+ */
+static const u32 *sPendingFrame;
 static u32 sAtlasPixels[DIORAMA_ATLAS_PIXEL_COUNT];
 static u32 sBaseAtlasPixels[DIORAMA_ATLAS_PIXEL_COUNT];
 static u32 sForegroundAtlasPixels[DIORAMA_ATLAS_PIXEL_COUNT];
@@ -101,6 +114,29 @@ static u32 sAtlasMapGeneration;
 static u32 sAtlasPaletteGeneration;
 static u32 sAtlasAnimationGeneration;
 static u32 sAtlasPageSignature;
+/*
+ * The last grid resolution's inputs (performance work 2026-10-11): the rules
+ * resolve a grid from its cells, the map, the rules' generation and the cells
+ * the game marked dirty; the same cells of the same map resolve the same, so
+ * a snapshot that changes none of them (most of the game's frames) keeps the
+ * resolved cells instead of resolving all 2401 again.
+ */
+struct ResolveKey
+{
+    s16 gridOriginX;
+    s16 gridOriginY;
+    u16 visibleCellCount;
+    u16 mapLayoutId;
+    u8 mapGroup;
+    u8 mapNum;
+    u8 pad[2];
+    s32 mapCoordinateOffset;
+    u32 mapGeneration;
+    u32 rulesGeneration;
+};
+static struct ResolveKey sResolveKey;
+static bool sResolveValid;
+static struct DioramaCellSnapshot sResolveCells[DIORAMA_MAX_VISIBLE_CELLS];
 static bool sHasAtlasTileGraphics;
 static bool sHasSceneSnapshot;
 static bool sHasPreviousSceneSnapshot;
@@ -451,6 +487,23 @@ static void BuildDebugImage(const struct DioramaSceneSnapshot *snapshot)
                     GL_BGRA, GL_UNSIGNED_BYTE, sDebugPixels);
 }
 
+/* What the weather layer was last made from (BuildWeatherImageFor): its picture
+ * moves on 60 times a second, so at higher frame rates most frames would make
+ * and upload the same picture again (performance directive, 2026-10-12). */
+struct WeatherImageKey
+{
+    uint32_t phase;
+    uint16_t fogScrollOffset;
+    uint16_t weatherBlendEVA;
+    uint8_t effect;
+    uint8_t weather;
+    uint8_t rainVisibleCount;
+    uint8_t airDrawsFog;
+};
+static struct WeatherImageKey sWeatherKey;
+static bool sWeatherKeyValid;
+static bool sWeatherImageDrawn;
+
 /* The weather's picture for `weather` (constants/weather.h): the field's own
  * (BuildWeatherImage), or a battle's over its world (DioramaGL_DrawBattleWeather). */
 static bool BuildWeatherImageFor(uint8_t weather, const struct DioramaSceneSnapshot *snapshot)
@@ -458,7 +511,22 @@ static bool BuildWeatherImageFor(uint8_t weather, const struct DioramaSceneSnaps
     enum DioramaWeatherEffect effect = DioramaWeather_Classify(weather);
     uint32_t phase = (uint32_t)(SDL_GetPerformanceCounter() * 60
                              / SDL_GetPerformanceFrequency());
+    struct WeatherImageKey key;
     int i;
+
+    memset(&key, 0, sizeof(key));
+    key.phase = phase;
+    key.fogScrollOffset = snapshot->fogScrollOffset;
+    key.weatherBlendEVA = snapshot->weatherBlendEVA;
+    key.effect = (uint8_t)effect;
+    key.weather = weather;
+    key.rainVisibleCount = snapshot->rainVisibleCount;
+    key.airDrawsFog = effect == DIORAMA_WEATHER_FOG && DioramaGLAir_DrawsFog();
+    if (sWeatherKeyValid && memcmp(&key, &sWeatherKey, sizeof(key)) == 0)
+        return sWeatherImageDrawn; /* the picture in the texture is this one */
+    sWeatherKey = key;
+    sWeatherKeyValid = true;
+    sWeatherImageDrawn = false;
 
     memset(sWeatherPixels, 0, sizeof(sWeatherPixels));
     if (effect == DIORAMA_WEATHER_RAIN)
@@ -610,6 +678,7 @@ static bool BuildWeatherImageFor(uint8_t weather, const struct DioramaSceneSnaps
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT,
                     GL_BGRA, GL_UNSIGNED_BYTE, sWeatherPixels);
+    sWeatherImageDrawn = true;
     return true;
 }
 
@@ -902,8 +971,31 @@ static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
     }
     if (cellCount > DIORAMA_MAX_VISIBLE_CELLS)
         cellCount = DIORAMA_MAX_VISIBLE_CELLS;
-    DioramaRules_ResolveGrid(snapshot, sAtlasResolvedCells);
-    DioramaBuildings_FlattenResolvedCells(snapshot, sAtlasResolvedCells, cellCount);
+    {
+        struct ResolveKey key;
+
+        memset(&key, 0, sizeof(key));
+        key.gridOriginX = snapshot->gridOriginX;
+        key.gridOriginY = snapshot->gridOriginY;
+        key.visibleCellCount = (u16)cellCount;
+        key.mapLayoutId = snapshot->mapLayoutId;
+        key.mapGroup = snapshot->mapGroup;
+        key.mapNum = snapshot->mapNum;
+        key.mapCoordinateOffset = snapshot->mapCoordinateOffset;
+        key.mapGeneration = snapshot->mapGeneration;
+        key.rulesGeneration = DioramaRules_GetGeneration();
+        if (!sResolveValid || snapshot->dirtyCellCount != 0 || snapshot->dirtyOverflow
+         || memcmp(&key, &sResolveKey, sizeof(key)) != 0
+         || memcmp(sResolveCells, snapshot->cells, cellCount * sizeof(sResolveCells[0])) != 0)
+        {
+            DioramaRules_ResolveGrid(snapshot, sAtlasResolvedCells);
+            DioramaBuildings_FlattenResolvedCells(snapshot, sAtlasResolvedCells, cellCount);
+            /* Kept for the next snapshot only when no dirty cell shaped it. */
+            sResolveValid = snapshot->dirtyCellCount == 0 && !snapshot->dirtyOverflow;
+            sResolveKey = key;
+            memcpy(sResolveCells, snapshot->cells, cellCount * sizeof(sResolveCells[0]));
+        }
+    }
     for (i = 0; i < DIORAMA_ATLAS_SLOT_COUNT; i++)
     {
         sCutoutBaseMetatiles[i] = 0xFFFF;
@@ -1308,6 +1400,7 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
     }
     if (!DioramaGL_LoadFunctions() || !CreateProgram())
         return false;
+    DioramaProfile_Init();
     sTerrainAvailable = DioramaGLTerrain_Init();
     if (!sTerrainAvailable)
         SDL_Log("Diorama terrain renderer unavailable; retaining the 2D OpenGL fallback");
@@ -1366,6 +1459,8 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
     ConfigureTexture(sUiTexture.id);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, DISPLAY_WIDTH, DISPLAY_HEIGHT, 0,
                  GL_BGRA, GL_UNSIGNED_BYTE, NULL);
+    sUiUploaded = false;
+    sWeatherKeyValid = false;
     glGenTextures(1, &sWeatherTexture.id);
     sWeatherTexture.width = DISPLAY_WIDTH;
     sWeatherTexture.height = DISPLAY_HEIGHT;
@@ -1424,13 +1519,25 @@ void DioramaGL_LoadArtwork(void)
     sBorderTexture = LoadTexture("Border.bmp");
 }
 
-void DioramaGL_UploadFrame(const u32 *argb8888)
+static void EnsureFrameTexture(void)
 {
-    AdoptLatestSnapshot();
+    if (sPendingFrame == NULL)
+        return;
     glBindTexture(GL_TEXTURE_2D, sFrameTexture.id);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT,
-                    GL_BGRA, GL_UNSIGNED_BYTE, argb8888);
+                    GL_BGRA, GL_UNSIGNED_BYTE, sPendingFrame);
+    sPendingFrame = NULL;
+}
+
+void DioramaGL_UploadFrame(const u32 *argb8888)
+{
+    AdoptLatestSnapshot();
+    sPendingFrame = argb8888;
+    /* The text boxes over the 3D view are drawn only while the game shows
+     * some (DioramaGL_Present); without any there is nothing to make. */
+    if (!sHasSceneSnapshot || sSceneSnapshot.uiRectCount == 0)
+        return;
     DioramaUI_RenderBgOverlay(
         DISPLAY_WIDTH, DISPLAY_HEIGHT,
         sHasSceneSnapshot ? sSceneSnapshot.uiRects : NULL,
@@ -1441,10 +1548,14 @@ void DioramaGL_UploadFrame(const u32 *argb8888)
         sHasSceneSnapshot ? sSceneSnapshot.uiBgTileGraphics : NULL,
         sHasSceneSnapshot ? sSceneSnapshot.uiBgTilemap : NULL,
         sHasSceneSnapshot ? sSceneSnapshot.fadedPalette : NULL,
-        sUiPixels);
+        sUiScratch);
+    if (sUiUploaded && memcmp(sUiScratch, sUiPixels, sizeof(sUiPixels)) == 0)
+        return;
+    memcpy(sUiPixels, sUiScratch, sizeof(sUiPixels));
     glBindTexture(GL_TEXTURE_2D, sUiTexture.id);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT,
                     GL_BGRA, GL_UNSIGNED_BYTE, sUiPixels);
+    sUiUploaded = true;
 }
 
 void DioramaGL_Present(u8 background, bool border, bool integerScale, float frameAlpha)
@@ -1469,7 +1580,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     sIntegerScale = integerScale;
     // A battle in 3D draws its whole frame; the field's scene, atlases and
     // models stay as they were for it (gl_battle.c).
-    if (sSurveyView < 0 && DioramaGLBattle_Present(sWindow))
+    if (sSurveyView < 0 && DioramaGLBattle_Present(sWindow, frameAlpha))
     {
         sDrewField3D = false;
         sLastFrame3D = true;
@@ -1491,6 +1602,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         return;
     }
 
+    DioramaProfile_Begin(DIORAMA_PROF_FRAME);
     if (sRenderMode == DIORAMA_RENDER_AUTO
      && sTerrainAvailable
      && sObjectsAvailable
@@ -1501,12 +1613,27 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     {
         if (!sCurrent3DReady)
         {
+            DioramaProfile_Begin(DIORAMA_PROF_SYNC);
+            DioramaProfile_Begin(DIORAMA_PROF_SYNC_ATLAS);
             EnsureAtlas(&sSceneSnapshot);
-            sCurrent3DReady = DioramaGLTerrain_Sync(&sSceneSnapshot, sAtlasResolvedCells)
+            DioramaProfile_End(DIORAMA_PROF_SYNC_ATLAS);
+            DioramaProfile_Begin(DIORAMA_PROF_SYNC_TERRAIN);
+            sCurrent3DReady = DioramaGLTerrain_Sync(&sSceneSnapshot, sAtlasResolvedCells);
+            DioramaProfile_End(DIORAMA_PROF_SYNC_TERRAIN);
+            DioramaProfile_Begin(DIORAMA_PROF_SYNC_OBJECTS);
+            sCurrent3DReady = sCurrent3DReady
                            && DioramaGLObjects_Sync(&sSceneSnapshot, sAtlasResolvedCells);
+            DioramaProfile_End(DIORAMA_PROF_SYNC_OBJECTS);
+            DioramaProfile_Begin(DIORAMA_PROF_SYNC_BUILDINGS);
             DioramaGLBuildings_Sync(&sSceneSnapshot, sAtlasResolvedCells);
+            DioramaProfile_End(DIORAMA_PROF_SYNC_BUILDINGS);
+            DioramaProfile_Begin(DIORAMA_PROF_SYNC_TREES);
             DioramaGLTreeSprites_Sync(&sSceneSnapshot, sAtlasResolvedCells);
+            DioramaProfile_End(DIORAMA_PROF_SYNC_TREES);
+            DioramaProfile_Begin(DIORAMA_PROF_SYNC_PROPS);
             DioramaGLProps_Sync(&sSceneSnapshot, sAtlasResolvedCells);
+            DioramaProfile_End(DIORAMA_PROF_SYNC_PROPS);
+            DioramaProfile_End(DIORAMA_PROF_SYNC);
         }
         current3D = sCurrent3DReady;
     }
@@ -1678,6 +1805,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
             glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
             glViewport(0, 0, sceneWidth, sceneHeight);
         }
+        DioramaProfile_Begin(DIORAMA_PROF_SHADOW);
         if (DioramaGLShadow_Begin(cameraX, cameraZ,
                                   sTerrainDebug ? 0.0f : SunStrength(&sRenderedSceneSnapshot),
                                   ((uint64_t)DioramaGLBuildings_GetGeometryGeneration() << 32)
@@ -1692,15 +1820,24 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
             DioramaGLProps_DrawShadow();
             DioramaGLShadow_End(sceneWidth, sceneHeight);
         }
+        DioramaProfile_End(DIORAMA_PROF_SHADOW);
+        DioramaProfile_Begin(DIORAMA_PROF_TERRAIN);
         DioramaGLTerrain_Draw(sAtlasTexture.id, sBaseAtlasTexture.id,
                                sForegroundAtlasTexture.id, cameraX, cameraZ,
                                cameraPitch, cameraFocalLength,
                                aspectCorrection, sTerrainDebug);
+        DioramaProfile_End(DIORAMA_PROF_TERRAIN);
+        DioramaProfile_Begin(DIORAMA_PROF_TREES);
         DioramaGLTreeSprites_Draw(cameraX, cameraZ, cameraPitch, cameraFocalLength,
                                   aspectCorrection);
+        DioramaProfile_End(DIORAMA_PROF_TREES);
+        DioramaProfile_Begin(DIORAMA_PROF_PROPS);
         DioramaGLProps_Draw(cameraX, cameraZ, cameraPitch, cameraFocalLength, aspectCorrection);
+        DioramaProfile_End(DIORAMA_PROF_PROPS);
+        DioramaProfile_Begin(DIORAMA_PROF_BUILDINGS);
         DioramaGLBuildings_Draw(cameraX, cameraZ, cameraPitch, cameraFocalLength,
                                 aspectCorrection);
+        DioramaProfile_End(DIORAMA_PROF_BUILDINGS);
         /* Players hidden by a house or a tree are seen through it, except
          * in photo mode's pictures. */
         DioramaGLObjects_SetSilhouettes(DioramaCamera_GetMode() != DIORAMA_CAMERA_PHOTO);
@@ -1717,23 +1854,32 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                                                       (float)gameY * sceneHeight / outputHeight,
                                                       (float)gameWidth * sceneWidth / outputWidth,
                                                       (float)gameHeight * sceneHeight / outputHeight);
+        DioramaProfile_Begin(DIORAMA_PROF_OBJECTS);
         DioramaGLObjects_Draw(current3D ? frameAlpha : 1.0f,
                                cameraX, cameraZ, cameraPitch,
                                cameraFocalLength, aspectCorrection);
+        DioramaProfile_End(DIORAMA_PROF_OBJECTS);
         // The light in the air over it all (gl_air.h): dust, rays, bloom.
+        DioramaProfile_Begin(DIORAMA_PROF_AIR);
         DioramaGLAir_Draw(cameraX, cameraZ, cameraPitch, cameraFocalLength,
                           aspectCorrection, sceneWidth, sceneHeight);
+        DioramaProfile_End(DIORAMA_PROF_AIR);
         // A dark cave's circle of light round the player (gl_field_light.h):
         // everything but the game's text is dark outside it, as on the GBA.
+        DioramaProfile_Begin(DIORAMA_PROF_FIELD_LIGHT);
         DioramaGLFieldLight_Draw(&sRenderedSceneSnapshot, current3D ? frameAlpha : 1.0f,
                                  cameraX, cameraZ, cameraPitch, cameraFocalLength,
                                  aspectCorrection, sceneWidth, sceneHeight);
+        DioramaProfile_End(DIORAMA_PROF_FIELD_LIGHT);
         glDisable(GL_SCISSOR_TEST);
         gDioramaCameraRig.active = false;
         DioramaGLLight_SetEdgeFog(false, 0.0f, 0.0f, 0.0f, 0.0f, NULL);
         DioramaGLLamps_SetActive(false);
+        DioramaProfile_Begin(DIORAMA_PROF_RESOLVE);
         DioramaGLTarget_End(outputWidth, outputHeight);
+        DioramaProfile_End(DIORAMA_PROF_RESOLVE);
         glViewport(0, 0, outputWidth, outputHeight);
+        DioramaProfile_Begin(DIORAMA_PROF_2D);
         dglUseProgram(sProgram);
         dglBindVertexArray(sVertexArray);
         if (sSurveyView < 0 && BuildWeatherImage(&sRenderedSceneSnapshot))
@@ -1756,9 +1902,12 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         }
         /* Photo mode shows the world alone (no text boxes, no map name). */
         else if (sTwoDOpacity > 0.0f && DioramaCamera_GetMode() != DIORAMA_CAMERA_PHOTO)
+        {
+            EnsureFrameTexture();
             DrawTexture(&sFrameTexture, outputWidth, outputHeight,
                         gameX, gameY, gameWidth, gameHeight,
                         0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, sTwoDOpacity);
+        }
         if (current3D && sSceneSnapshot.uiRectCount > 0
          && DioramaCamera_GetMode() != DIORAMA_CAMERA_PHOTO)
             DrawTexture(&sUiTexture, outputWidth, outputHeight,
@@ -1766,9 +1915,13 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                         0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, 1.0f);
     }
     else
+    {
+        if (gameTexture == &sFrameTexture)
+            EnsureFrameTexture();
         DrawTexture(gameTexture, outputWidth, outputHeight,
                     gameX, gameY, gameWidth, gameHeight,
                     0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, false, 1.0f);
+    }
 
     sDrewField3D = drawTerrain && sSurveyView < 0;
     if (sSurveyView < 0 && !drawTerrain && border && sBorderTexture.id != 0)
@@ -1795,12 +1948,18 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         CaptureSurveyFrame(outputWidth, outputHeight, captureSnapshot, stateMatchesPixels);
     }
     sLastFrame3D = drawTerrain;
+    DioramaProfile_Begin(DIORAMA_PROF_2D); /* when no 3D was drawn: all of it is 2D */
     if (sOverlay != NULL && sSurveyView < 0)
     {
         glViewport(0, 0, outputWidth, outputHeight);
         sOverlay(outputWidth, outputHeight);
     }
+    DioramaProfile_End(DIORAMA_PROF_2D);
+    DioramaProfile_End(DIORAMA_PROF_FRAME);
+    DioramaProfile_Begin(DIORAMA_PROF_SWAP);
     SDL_GL_SwapWindow(sWindow);
+    DioramaProfile_End(DIORAMA_PROF_SWAP);
+    DioramaProfile_FrameDone();
 }
 
 void DioramaGL_SetOverlay(void (*overlay)(int outputWidth, int outputHeight))
@@ -1811,6 +1970,12 @@ void DioramaGL_SetOverlay(void (*overlay)(int outputWidth, int outputHeight))
 bool DioramaGL_LastFrameWas3D(void)
 {
     return sLastFrame3D;
+}
+
+unsigned DioramaGL_GetFrameTexture(void)
+{
+    EnsureFrameTexture();
+    return sFrameTexture.id;
 }
 
 void DioramaGL_DescribeRenderer(char *buffer, size_t size)
@@ -2001,11 +2166,6 @@ void DioramaGL_DrawBattleWorld(float cameraX, float cameraZ, float pitch, float 
     glDisable(GL_SCISSOR_TEST);
 }
 
-unsigned DioramaGL_GetFrameTexture(void)
-{
-    return sFrameTexture.id;
-}
-
 bool DioramaGL_SetBattleTiles(const uint8_t *tileGraphics)
 {
     static uint32_t sBattleTileGeneration;
@@ -2163,6 +2323,8 @@ void DioramaGL_Shutdown(void)
         glDeleteTextures(1, &sDebugTexture.id);
     if (sUiTexture.id != 0)
         glDeleteTextures(1, &sUiTexture.id);
+    sUiUploaded = false;
+    sWeatherKeyValid = false;
     if (sWeatherTexture.id != 0)
         glDeleteTextures(1, &sWeatherTexture.id);
     if (sAtlasTexture.id != 0)

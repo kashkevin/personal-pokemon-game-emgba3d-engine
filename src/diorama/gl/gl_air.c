@@ -792,15 +792,16 @@ static bool PrepareBloomTargets(int width, int height)
  */
 static void DrawBloom(const struct DioramaAirLight *air, int outputWidth, int outputHeight)
 {
-    GLint drawFramebuffer = 0;
-    GLint readFramebuffer = 0;
+    /* The scene's own framebuffer (gl_target.h), known without asking the
+     * driver: a glGet waits for a threaded driver to catch up (performance
+     * work 2026-10-11). */
+    GLint drawFramebuffer = (GLint)DioramaGLTarget_Framebuffer();
+    GLint readFramebuffer = drawFramebuffer;
     int width = outputWidth / 4;
     int height = outputHeight / 4;
 
     if (width < 1 || height < 1)
         return;
-    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawFramebuffer);
-    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &readFramebuffer);
     if (!PrepareBloomTargets(width, height))
     {
         dglBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)drawFramebuffer);

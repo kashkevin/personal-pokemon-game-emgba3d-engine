@@ -20,6 +20,9 @@
  */
 /* renderHeight 0: the window's own size; samples 0, 2, 4 or 8. */
 void DioramaGLTarget_Configure(int renderHeight, int samples);
+/* The render scale (display_settings.h): the scene at this percent of that
+ * height, scaled up into the window; 100 (the default) is native. */
+void DioramaGLTarget_SetScale(int percent);
 /* Before the scene: binds its framebuffer and gives its size. */
 void DioramaGLTarget_Begin(int outputWidth, int outputHeight, int *renderWidth, int *renderHeight);
 /* The framebuffer the scene is being drawn into (0: the window's). */

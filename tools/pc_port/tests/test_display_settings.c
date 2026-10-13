@@ -5,6 +5,7 @@
 #include "minitest.h"
 #include "platform/benchmark.h"
 #include "platform/display_settings.h"
+#include "platform/frame_limiter.h"
 #include "platform/pc_menu.h"
 
 static struct DisplaySettings Parse(const char *const *lines, int count)
@@ -249,9 +250,13 @@ MT_TEST(menu_changes_and_confirmation)
     MT_EQ(menu.settings.mode, DISPLAY_MODE_WINDOWED);
     MT_CHECK(menu.open);
     // Quality: the preset, then one value makes it custom.
+    PcMenu_Input(&menu, PC_MENU_INPUT_DOWN, 22000); // 3D render scale
+    MT_EQ(menu.cursor, PC_MENU_RENDER_SCALE);
     PcMenu_Input(&menu, PC_MENU_INPUT_DOWN, 22000); // VSync
     MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_ACCEPT, 22000), PC_MENU_CHANGED_VSYNC);
     MT_CHECK(!menu.vsync);
+    PcMenu_Input(&menu, PC_MENU_INPUT_DOWN, 22000); // Frame rate limit
+    MT_EQ(menu.cursor, PC_MENU_FPS_CAP);
     PcMenu_Input(&menu, PC_MENU_INPUT_DOWN, 22000); // Graphics quality
     MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_RIGHT, 22000), PC_MENU_CHANGED_QUALITY);
     MT_EQ(menu.settings.quality, QUALITY_ULTRA);
@@ -278,10 +283,15 @@ MT_TEST(menu_without_camera_rows)
 
     DisplaySettings_Defaults(&s);
     PcMenu_Open(&menu, &s, true, false, false, false, false, false);
-    MT_EQ(PcMenu_Rows(&menu, rows), PC_MENU_ITEM_COUNT - 3); // no camera, trees or world details
+    MT_EQ(PcMenu_Rows(&menu, rows), PC_MENU_ITEM_COUNT - 5); // no render scale, memory, camera, trees or details
+    menu.cursor = PC_MENU_DISPLAY_MODE;
+    PcMenu_Input(&menu, PC_MENU_INPUT_DOWN, 0);
+    MT_EQ(menu.cursor, PC_MENU_VSYNC);
     menu.cursor = PC_MENU_EFFECTS;
     PcMenu_Input(&menu, PC_MENU_INPUT_DOWN, 0);
     MT_EQ(menu.cursor, PC_MENU_ANTIALIASING);
+    PcMenu_Input(&menu, PC_MENU_INPUT_DOWN, 0);
+    MT_EQ(menu.cursor, PC_MENU_PICTURE_SIZE);
     menu.cursor = PC_MENU_FRAME_RATE;
     PcMenu_Input(&menu, PC_MENU_INPUT_DOWN, 0);
     MT_EQ(menu.cursor, PC_MENU_CLOSE);
@@ -325,6 +335,187 @@ MT_TEST(menu_from_a_resolution_not_listed)
     menu.settings.height = 1700;
     PcMenu_Input(&menu, PC_MENU_INPUT_LEFT, 0);
     MT_EQ(menu.settings.height, 1440);
+}
+
+MT_TEST(frame_rate_limit_setting)
+{
+    static const char *const lines[] = {"fpsCap=144\n"};
+    static const char *const unlimited[] = {"fpsCap=unlimited\n"};
+    static const char *const bad[] = {"fpsCap=5\n", "fpsCap=fast\n", "renderScale=10\n", "renderScale=101\n"};
+    struct DisplaySettings s = Parse(lines, 1);
+    char buffer[256] = {0};
+    FILE *file;
+
+    MT_EQ(s.fpsCap, 144);
+    MT_CHECK(s.fpsCapKept && !s.renderScaleKept);
+    MT_EQ(s.quality, QUALITY_HIGH); // not a quality value
+    file = fmemopen(buffer, sizeof(buffer), "w");
+    DisplaySettings_Write(&s, file);
+    fclose(file);
+    MT_CHECK(strstr(buffer, "fpsCap=144\n") != NULL);
+    MT_CHECK(strstr(buffer, "renderScale") == NULL);
+    s = Parse(unlimited, 1);
+    MT_EQ(s.fpsCap, 0);
+    MT_CHECK(s.fpsCapKept);
+    file = fmemopen(buffer, sizeof(buffer), "w");
+    DisplaySettings_Write(&s, file);
+    fclose(file);
+    MT_CHECK(strstr(buffer, "fpsCap=unlimited\n") != NULL);
+    s = Parse(bad, 4);
+    MT_EQ(s.fpsCap, 0);
+    MT_EQ(s.renderScale, 100);
+    MT_CHECK(!s.fpsCapKept && !s.renderScaleKept);
+    // The menu's order: 60 120 144 165 180 200 240 unlimited, round again.
+    MT_EQ(DisplaySettings_StepFpsCap(0, 1), 60);
+    MT_EQ(DisplaySettings_StepFpsCap(60, 1), 120);
+    MT_EQ(DisplaySettings_StepFpsCap(144, 1), 165);
+    MT_EQ(DisplaySettings_StepFpsCap(240, 1), 0);
+    MT_EQ(DisplaySettings_StepFpsCap(60, -1), 0);
+    MT_EQ(DisplaySettings_StepFpsCap(0, -1), 240);
+    // A limit of the file's own goes to the nearest listed one that way.
+    MT_EQ(DisplaySettings_StepFpsCap(90, 1), 120);
+    MT_EQ(DisplaySettings_StepFpsCap(90, -1), 60);
+    MT_EQ(DisplaySettings_StepFpsCap(500, 1), 0);
+    MT_EQ(DisplaySettings_StepFpsCap(500, -1), 240);
+    MT_EQ(DisplaySettings_StepFpsCap(40, -1), 0);
+}
+
+MT_TEST(render_scale_setting)
+{
+    static const char *const lines[] = {"renderScale=75\n"};
+    struct DisplaySettings s = Parse(lines, 1);
+    char buffer[256] = {0};
+    FILE *file = fmemopen(buffer, sizeof(buffer), "w");
+
+    MT_EQ(s.renderScale, 75);
+    MT_CHECK(s.renderScaleKept);
+    DisplaySettings_Write(&s, file);
+    fclose(file);
+    MT_CHECK(strstr(buffer, "renderScale=75\n") != NULL);
+    DisplaySettings_Defaults(&s);
+    MT_EQ(s.renderScale, 100);
+    MT_EQ(DisplaySettings_ScaledHeight(2160, 100), 2160);
+    MT_EQ(DisplaySettings_ScaledHeight(2160, 50), 1080);
+    MT_EQ(DisplaySettings_ScaledHeight(1080, 83), 896);
+    MT_EQ(DisplaySettings_ScaledHeight(0, 50), 0);
+    MT_EQ(DisplaySettings_StepRenderScale(100, 1), 83);
+    MT_EQ(DisplaySettings_StepRenderScale(50, 1), 100);
+    MT_EQ(DisplaySettings_StepRenderScale(100, -1), 50);
+    MT_EQ(DisplaySettings_StepRenderScale(90, 1), 83);
+    MT_EQ(DisplaySettings_StepRenderScale(90, -1), 100);
+    MT_EQ(DisplaySettings_StepRenderScale(60, 1), 50);
+    MT_EQ(DisplaySettings_StepRenderScale(60, -1), 67);
+}
+
+MT_TEST(menu_frame_rate_and_render_scale)
+{
+    struct PcMenuState menu;
+    struct PcMenuRow rows[PC_MENU_ITEM_COUNT];
+    struct DisplaySettings s;
+
+    DisplaySettings_Defaults(&s);
+    PcMenu_Open(&menu, &s, true, false, false, true, true, true);
+    PcMenu_Rows(&menu, rows);
+    MT_CHECK(strcmp(rows[PC_MENU_RENDER_SCALE].label, "3D render scale") == 0);
+    MT_CHECK(strcmp(rows[PC_MENU_RENDER_SCALE].value, "100% (native)") == 0);
+    MT_CHECK(strcmp(rows[PC_MENU_FPS_CAP].label, "Frame rate limit") == 0);
+    MT_CHECK(strcmp(rows[PC_MENU_FPS_CAP].value, "Unlimited") == 0);
+    menu.cursor = PC_MENU_FPS_CAP;
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_RIGHT, 0), PC_MENU_CHANGED_FPS_CAP);
+    MT_EQ(menu.settings.fpsCap, 60);
+    MT_CHECK(menu.settings.fpsCapKept);
+    PcMenu_Input(&menu, PC_MENU_INPUT_RIGHT, 0);
+    PcMenu_Input(&menu, PC_MENU_INPUT_RIGHT, 0);
+    PcMenu_Rows(&menu, rows);
+    MT_CHECK(strcmp(rows[PC_MENU_FPS_CAP].value, "144 fps") == 0);
+    menu.cursor = PC_MENU_RENDER_SCALE;
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_RIGHT, 0), PC_MENU_CHANGED_RENDER_SCALE);
+    MT_EQ(menu.settings.renderScale, 83);
+    MT_CHECK(menu.settings.renderScaleKept && !menu.confirming);
+    PcMenu_Rows(&menu, rows);
+    MT_CHECK(strcmp(rows[PC_MENU_RENDER_SCALE].value, "83% (upscaled)") == 0);
+    MT_EQ(menu.settings.quality, QUALITY_HIGH); // neither is a quality value
+}
+
+MT_TEST(memory_budget_setting)
+{
+    static const char *const lines[] = {"memoryBudget=2048\n"};
+    static const char *const automatic[] = {"memoryBudget=auto\n"};
+    static const char *const bad[] = {"memoryBudget=64\n", "memoryBudget=lots\n"};
+    struct DisplaySettings s = Parse(lines, 1);
+    char buffer[256] = {0};
+    FILE *file = fmemopen(buffer, sizeof(buffer), "w");
+
+    MT_EQ(s.memoryBudget, 2048);
+    MT_CHECK(s.memoryBudgetKept);
+    DisplaySettings_Write(&s, file);
+    fclose(file);
+    MT_CHECK(strstr(buffer, "memoryBudget=2048\n") != NULL);
+    s = Parse(automatic, 1);
+    MT_EQ(s.memoryBudget, 0);
+    MT_CHECK(s.memoryBudgetKept);
+    s = Parse(bad, 2);
+    MT_CHECK(!s.memoryBudgetKept);
+    // The menu's order: auto 512 1024 2048 4096 8192, round again.
+    MT_EQ(DisplaySettings_StepMemoryBudget(0, 1), 512);
+    MT_EQ(DisplaySettings_StepMemoryBudget(8192, 1), 0);
+    MT_EQ(DisplaySettings_StepMemoryBudget(0, -1), 8192);
+    MT_EQ(DisplaySettings_StepMemoryBudget(3000, 1), 4096);
+    MT_EQ(DisplaySettings_StepMemoryBudget(3000, -1), 2048);
+    // Automatic: an eighth of the PC's memory, 256 MB to 1 GB.
+    MT_EQ(DisplaySettings_EffectiveMemoryBudget(0, 8192, 3400), 1024);
+    MT_EQ(DisplaySettings_EffectiveMemoryBudget(0, 4096, 3400), 512);
+    MT_EQ(DisplaySettings_EffectiveMemoryBudget(0, 1024, 3400), 256);
+    // Chosen: held to half the PC's memory and to the free address space.
+    MT_EQ(DisplaySettings_EffectiveMemoryBudget(2048, 16384, 3400), 2048);
+    MT_EQ(DisplaySettings_EffectiveMemoryBudget(8192, 32768, 3400), 2632); // the 32-bit address space
+    MT_EQ(DisplaySettings_EffectiveMemoryBudget(8192, 6144, 0), 3072);     // half of 6 GB
+    MT_EQ(DisplaySettings_EffectiveMemoryBudget(512, 16384, 500), 128);    // never below 128
+    MT_EQ(DisplaySettings_TerrainCacheChunks(128), 100);
+    MT_EQ(DisplaySettings_TerrainCacheChunks(1024), 512);
+    MT_EQ(DisplaySettings_TerrainCacheChunks(8192), 1024);
+}
+
+MT_TEST(menu_memory_budget)
+{
+    struct PcMenuState menu;
+    struct PcMenuRow rows[PC_MENU_ITEM_COUNT];
+    struct DisplaySettings s;
+
+    DisplaySettings_Defaults(&s);
+    PcMenu_Open(&menu, &s, true, false, false, true, true, true);
+    menu.memoryEffectiveMB = 1024;
+    menu.memoryInUseMB = 210;
+    PcMenu_Rows(&menu, rows);
+    MT_CHECK(strcmp(rows[PC_MENU_MEMORY_BUDGET].label, "Memory budget") == 0);
+    MT_CHECK(strcmp(rows[PC_MENU_MEMORY_BUDGET].value, "Auto: 1 GB, 210 MB used") == 0);
+    menu.cursor = PC_MENU_ANTIALIASING;
+    PcMenu_Input(&menu, PC_MENU_INPUT_DOWN, 0);
+    MT_EQ(menu.cursor, PC_MENU_MEMORY_BUDGET);
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_LEFT, 0), PC_MENU_CHANGED_MEMORY_BUDGET);
+    MT_EQ(menu.settings.memoryBudget, 8192);
+    MT_CHECK(menu.settings.memoryBudgetKept);
+    menu.memoryEffectiveMB = 2632;
+    PcMenu_Rows(&menu, rows);
+    MT_CHECK(strcmp(rows[PC_MENU_MEMORY_BUDGET].value, "8 GB (2.5 GB usable), 210 MB used") == 0);
+    MT_EQ(menu.settings.quality, QUALITY_HIGH);
+}
+
+MT_TEST(frame_limiter_beat)
+{
+    struct FrameLimiter limiter;
+
+    FrameLimiter_Reset(&limiter);
+    MT_EQ(FrameLimiter_Next(&limiter, 1000, 100), 0);    // the first frame: at once
+    MT_EQ(FrameLimiter_Next(&limiter, 1050, 100), 1100); // early: wait for the beat
+    MT_EQ(FrameLimiter_Next(&limiter, 1190, 100), 1200);
+    MT_EQ(FrameLimiter_Next(&limiter, 1310, 100), 0);    // a little late: at once, on the beat
+    MT_EQ(FrameLimiter_Next(&limiter, 1350, 100), 1400); // the beat held (1300 + 100)
+    MT_EQ(FrameLimiter_Next(&limiter, 2000, 100), 0);    // late by more than a period:
+    MT_EQ(FrameLimiter_Next(&limiter, 2010, 100), 2100); // a new beat from then
+    MT_EQ(FrameLimiter_Next(&limiter, 2020, 0), 0);      // no limit
+    MT_EQ(FrameLimiter_Next(&limiter, 2030, 100), 0);    // a limit again: a new beat
+    MT_EQ(FrameLimiter_Next(&limiter, 2040, 100), 2130);
 }
 
 MT_TEST(benchmark_statistics)
@@ -415,6 +606,12 @@ int main(void)
     MT_RUN(menu_without_camera_rows);
     MT_RUN(menu_world_details);
     MT_RUN(menu_from_a_resolution_not_listed);
+    MT_RUN(frame_rate_limit_setting);
+    MT_RUN(render_scale_setting);
+    MT_RUN(menu_frame_rate_and_render_scale);
+    MT_RUN(memory_budget_setting);
+    MT_RUN(menu_memory_budget);
+    MT_RUN(frame_limiter_beat);
     MT_RUN(benchmark_statistics);
     MT_RUN(benchmark_timeline);
     MT_RUN(benchmark_without_a_field);

@@ -18,13 +18,16 @@ enum PcMenuItem
 {
     PC_MENU_RESOLUTION,
     PC_MENU_DISPLAY_MODE,
+    PC_MENU_RENDER_SCALE, /* the 3D build */
     PC_MENU_VSYNC,
+    PC_MENU_FPS_CAP,
     PC_MENU_QUALITY,
     PC_MENU_SHADOWS,
     PC_MENU_LIGHTING,
     PC_MENU_EFFECTS,
     PC_MENU_DETAILS,
     PC_MENU_ANTIALIASING,
+    PC_MENU_MEMORY_BUDGET, /* the 3D build */
     PC_MENU_PICTURE_SIZE,
     PC_MENU_FRAME_RATE,
     PC_MENU_CAMERA,
@@ -52,6 +55,9 @@ enum PcMenuInput
 #define PC_MENU_CHANGED_TREES    (1u << 5)
 #define PC_MENU_CLOSED           (1u << 6)
 #define PC_MENU_CHANGED_FRAME_RATE (1u << 9)
+#define PC_MENU_CHANGED_FPS_CAP  (1u << 10)
+#define PC_MENU_CHANGED_RENDER_SCALE (1u << 11)
+#define PC_MENU_CHANGED_MEMORY_BUDGET (1u << 12)
 #define PC_MENU_DISPLAY_KEPT     (1u << 7) /* the confirmation was answered: keep */
 #define PC_MENU_DISPLAY_REVERTED (1u << 8) /* answered no, or it timed out */
 
@@ -69,10 +75,14 @@ struct PcMenuState
     bool showFrameRate; /* frames a second in a corner of the screen */
     bool cameraDiorama;
     bool trees3ds;
-    bool hasCamera;     /* the 3D build: world details, camera and trees rows */
+    bool hasCamera;     /* the 3D build: render scale, world details, camera and trees rows */
     bool confirming;
     unsigned int confirmStartMs;
     struct DisplaySettings previous;
+    /* Shown with the memory budget (the platform keeps them current): the
+     * budget in effect and what the game uses now, in MB (0: unknown). */
+    unsigned int memoryEffectiveMB;
+    unsigned int memoryInUseMB;
 };
 
 struct PcMenuRow

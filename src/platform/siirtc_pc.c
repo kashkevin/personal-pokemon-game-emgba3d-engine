@@ -2,17 +2,55 @@
 // clock on the cartridge GPIO port). Date and time come from the host clock;
 // the game's own clock handling (src/rtc.c, including the multiplayer world
 // clock) sits on top of this unchanged.
+#include <stdlib.h> // before global.h, whose abs() macro stdlib.h's declaration would meet
 #include "global.h"
 #include "siirtc.h"
 
 #include <time.h>
 
 static bool8 sLocked;
+
 static u8 sStatus = SIIRTCINFO_24HOUR;
 
 static u8 ToBcd(u32 value)
 {
     return ((value / 10) << 4) | (value % 10);
+}
+
+// PKMN_CLOCK_HOUR=H (0-23; development and the benchmark's night scene): the
+// clock reads so that the game's own time is H:00 when it is first read - the
+// save's clock setting accounted for - and runs on from there as usual.
+// Unset (the player's game): the host clock as it is.
+static int ClockHourOverride(void)
+{
+    static int sHour = -2;
+
+    if (sHour == -2)
+    {
+        const char *value = getenv("PKMN_CLOCK_HOUR");
+
+        sHour = value != NULL && value[0] >= '0' && value[0] <= '9' ? atoi(value) : -1;
+        if (sHour > 23)
+            sHour = -1;
+    }
+    return sHour;
+}
+
+static void OverrideHour(struct tm *local, time_t now)
+{
+    static time_t sFirst;
+    long minuteOfDay;
+
+    if (sFirst == 0)
+        sFirst = now;
+    minuteOfDay = ClockHourOverride() * 60L + (long)(now - sFirst) / 60;
+    // The game's time is the clock's less the save's offset (rtc.c). The clock is
+    // first read at boot (RtcInit), before the save blocks exist: no offset then.
+    if (gSaveBlock2Ptr != NULL)
+        minuteOfDay += gSaveBlock2Ptr->localTimeOffset.hours * 60L + gSaveBlock2Ptr->localTimeOffset.minutes;
+    minuteOfDay = ((minuteOfDay % 1440) + 1440) % 1440;
+    local->tm_hour = (int)(minuteOfDay / 60);
+    local->tm_min = (int)(minuteOfDay % 60);
 }
 
 static void ReadHostClock(struct SiiRtcInfo *rtc, bool8 withDate)
@@ -25,6 +63,8 @@ static void ReadHostClock(struct SiiRtcInfo *rtc, bool8 withDate)
 #else
     localtime_r(&now, &local);
 #endif
+    if (ClockHourOverride() >= 0)
+        OverrideHour(&local, now);
     if (withDate)
     {
         // The cartridge clock stores a two-digit year (2000-2099).

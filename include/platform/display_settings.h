@@ -52,6 +52,40 @@ struct DisplayResolution
 #define DISPLAY_DEFAULT_RESOLUTION 1
 extern const struct DisplayResolution gDisplayResolutions[DISPLAY_RESOLUTION_COUNT];
 
+/*
+ * Frame rate limits (performance work 2026-10-11): at most this many frames a
+ * second are drawn; 0 is no limit, the display's VSync alone deciding. The
+ * game itself always runs its 59.73 frames a second (the GBA's) - a higher
+ * frame rate draws the same game more smoothly, it never runs it faster.
+ * In the menu's order: 60, 120, 144, 165, 180, 200, 240, unlimited.
+ */
+#define DISPLAY_FPS_CAP_COUNT 8
+extern const unsigned short gDisplayFpsCaps[DISPLAY_FPS_CAP_COUNT];
+#define DISPLAY_FPS_CAP_MIN 30
+#define DISPLAY_FPS_CAP_MAX 1000
+
+/*
+ * The 3D scene's render scale: the share of the resolution's height the 3D
+ * world is drawn at, then scaled up to it (100: native, every pixel drawn).
+ * The game's pixel-art picture and text are always drawn at the window's own
+ * resolution. In the menu's order: 100, 83, 75, 67, 50.
+ */
+#define DISPLAY_RENDER_SCALE_COUNT 5
+extern const unsigned char gDisplayRenderScales[DISPLAY_RENDER_SCALE_COUNT];
+#define DISPLAY_RENDER_SCALE_MIN 50
+
+/*
+ * The memory budget (performance work 2026-10-11): how far the 3D view's caches
+ * may grow, in MB; 0 is automatic (an eighth of the PC's memory, 256 MB to
+ * 1 GB). A budget, not an allocation: memory is used only as the caches fill
+ * (today the terrain's chunk cache, in graphics memory) and the game itself
+ * needs about 200 MB whatever the budget. The game is a 32-bit program with
+ * 4 GB of address space, and a budget is held to what is free there and to half
+ * the PC's memory. In the menu's order: auto, 512, 1024, 2048, 4096, 8192.
+ */
+#define DISPLAY_MEMORY_BUDGET_COUNT 6
+extern const unsigned short gDisplayMemoryBudgets[DISPLAY_MEMORY_BUDGET_COUNT];
+
 /* Any resolution in the file within these bounds is honoured (the test
  * harnesses use small windows). */
 #define DISPLAY_MIN_WIDTH 320
@@ -72,10 +106,16 @@ struct DisplaySettings
     bool details;                 /* the 3D view's world detail objects: grass, flowers,
                                      signs, fences, lamps, rocks standing up */
     unsigned char antialiasing;   /* multisamples: 0, 2, 4 or 8 */
+    unsigned short fpsCap;        /* frames a second at most; 0: no limit */
+    unsigned char renderScale;    /* percent; 100: native */
+    unsigned short memoryBudget;  /* MB; 0: automatic */
     bool resolutionKept;
     bool modeKept;
     bool qualityKept;
     bool qualityNamed; /* the file named a preset (parsing only) */
+    bool fpsCapKept;
+    bool renderScaleKept;
+    bool memoryBudgetKept;
 };
 
 void DisplaySettings_Defaults(struct DisplaySettings *settings);
@@ -110,6 +150,21 @@ void DisplaySettings_RenderSize(int height, int outputWidth, int outputHeight,
  * with 'fill' the largest that fits, otherwise the largest within 8/9 of the
  * height (6 at 1080p, 8 at 1440p, 12 at 2160p, as before at 16:9). At least 1. */
 int DisplaySettings_PixelScale(int outputWidth, int outputHeight, bool fill);
+/* The 3D scene's height for a target height at a render scale (100: the same). */
+int DisplaySettings_ScaledHeight(int height, unsigned char renderScale);
+/* The next frame rate limit in the menu's order (direction 1 or -1); a value of
+ * the file's own goes to the nearest listed one that way. */
+unsigned short DisplaySettings_StepFpsCap(unsigned short fpsCap, int direction);
+/* The next render scale in the menu's order (1: smaller, -1: larger). */
+unsigned char DisplaySettings_StepRenderScale(unsigned char renderScale, int direction);
+/* The next memory budget in the menu's order (1: larger). */
+unsigned short DisplaySettings_StepMemoryBudget(unsigned short budget, int direction);
+/* The budget in effect, in MB: automatic or chosen, held to half the PC's memory
+ * and to the free address space less what the game itself needs (0: unknown). */
+unsigned DisplaySettings_EffectiveMemoryBudget(unsigned short budget, unsigned physicalMB,
+                                               unsigned addressSpaceFreeMB);
+/* The terrain chunk cache for a budget: 100 (the grid's) to 1024 chunks. */
+unsigned DisplaySettings_TerrainCacheChunks(unsigned budgetMB);
 /* The sun depth map's side for a shadow quality; 0 for none. */
 int DisplaySettings_ShadowMapSize(unsigned char shadows);
 
