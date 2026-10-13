@@ -9,6 +9,7 @@
  *
  *   PKMN_TEST_BATTLE         what to start once the field is ready:
  *                            wild:<species>:<level>
+ *                            safari:<species>:<level>  (a Safari Zone battle: A throws balls)
  *                            wild2:<species>:<level>:<species>:<level>  (double)
  *                            legendary:<species>:<level>
  *                            trainer:<id>   double:<id>   two:<id>:<id>
@@ -29,6 +30,9 @@
  *                            5 not over in time)
  *   PKMN_TEST_STRONG=1       the party at level 100 and healed when the field is up (in
  *                            memory only), so a fought battle is won
+ *   PKMN_TEST_SHINY=1        the wild Pokemon is shiny (in memory only)
+ *   PKMN_TEST_MEGA=1         the opponent trainer's first Pokemon that can Mega Evolve
+ *                            holds its Mega Stone (in memory only): its AI Mega Evolves it
  *
  * Nothing here changes a battle: it starts one the way the debug menu's
  * "Try battle" does and reads the picture.

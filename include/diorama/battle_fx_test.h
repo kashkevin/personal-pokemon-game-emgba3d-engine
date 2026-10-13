@@ -32,6 +32,8 @@
  *   PKMN_BFX_TEST_VIEW      hd (default) or gba: the core still runs (parity, frame numbers), but the
  *                           GBA effect sprites stay and nothing HD is drawn: the reference pictures
  *   PKMN_BFX_TEST_ATTACKER, PKMN_BFX_TEST_TARGET   battlers (default 0 and 1)
+ *   PKMN_BFX_TEST_ANIM_ATTACKER   a battle animation's attacker in place of its preset's (an
+ *                          opponent's Mega Evolution: 1; its target the battler facing it)
  *   PKMN_BFX_TEST_TURN      gAnimMoveTurn (default 0)
  *   PKMN_BFX_TEST_DELAY     action-menu frames before the first animation (default 40)
  *   PKMN_BFX_TEST_EXIT=1    end the process when every animation has played (code 0; 6 if one failed)

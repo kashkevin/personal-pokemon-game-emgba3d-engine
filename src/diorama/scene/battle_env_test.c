@@ -18,6 +18,7 @@
 #include "battle_partner.h"
 #include "battle_setup.h"
 #include "data.h"
+#include "event_data.h"
 #include "event_object_movement.h"
 #include "field_screen_effect.h"
 #include "load_save.h"
@@ -26,9 +27,12 @@
 #include "palette.h"
 #include "party_menu.h"
 #include "pokemon.h"
+#include "safari_zone.h"
 #include "script.h"
 #include "script_pokemon_util.h"
 #include "constants/battle.h"
+#include "constants/flags.h"
+#include "constants/form_change_types.h"
 #include "constants/items.h"
 #include "constants/moves.h"
 #include "constants/opponents.h"
@@ -69,6 +73,9 @@ static struct
      * Town), then the battle. In memory only: the survey never writes a save. */
     int warpGroup, warpNum, warpId, warpX, warpY;
     bool warp, warped;
+    /* PKMN_TEST_SHINY=1: the wild Pokemon is shiny; PKMN_TEST_MEGA=1: the opponent trainer's first
+     * Pokemon that can Mega Evolve holds its Mega Stone (both in memory only, as the battle starts) */
+    bool shiny, mega;
 } s;
 
 /* Frames a press is held, and released after it: a game running at a frame or two a second
@@ -99,6 +106,8 @@ static void Init(void)
     s.timeoutSeconds = EnvInt("PKMN_TEST_TIMEOUT", 0);
     s.fightSeconds = EnvInt("PKMN_TEST_FIGHT", 0);
     s.strong = EnvInt("PKMN_TEST_STRONG", 0) != 0;
+    s.shiny = EnvInt("PKMN_TEST_SHINY", 0) != 0;
+    s.mega = EnvInt("PKMN_TEST_MEGA", 0) != 0;
     value = SDL_getenv("PKMN_TEST_WARP");
     s.warpX = s.warpY = -1;
     if (value != NULL && sscanf(value, "%d:%d:%d:%d:%d", &s.warpGroup, &s.warpNum, &s.warpId,
@@ -107,6 +116,43 @@ static void Init(void)
     if (s.spec[0] != '\0' || s.stem[0] != '\0')
         SDL_Log("Battle env test: battle '%s' after %d field frames, capture '%s'%s",
                 s.spec, s.delay, s.stem, s.exitAfter ? ", then exit" : "");
+}
+
+/* PKMN_TEST_SHINY: the wild Pokemon just made is shiny (its shiny stars play as it appears). */
+static void MaybeShiny(void)
+{
+    bool32 shiny = TRUE;
+
+    if (!s.shiny)
+        return;
+    SetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_IS_SHINY, &shiny);
+    SDL_Log("Battle env test: the wild Pokemon is shiny");
+}
+
+/* PKMN_TEST_MEGA: the first Pokemon of `party` that has a Mega Evolution by item holds that item, so
+ * the trainer's AI Mega Evolves it as it would any trainer's (B_ANIM_MEGA_EVOLUTION, fought). */
+static void MaybeGiveMegaStone(struct Pokemon *party)
+{
+    if (!s.mega)
+        return;
+    for (u32 i = 0; i < PARTY_SIZE; i++)
+    {
+        u32 species = GetMonData(&party[i], MON_DATA_SPECIES);
+        const struct FormChange *change = species != SPECIES_NONE ? GetSpeciesFormChanges(species) : NULL;
+
+        for (; change != NULL && change->method != FORM_CHANGE_TERMINATOR; change++)
+        {
+            if (change->method == FORM_CHANGE_BATTLE_MEGA_EVOLUTION_ITEM)
+            {
+                u32 item = change->param1;
+                SetMonData(&party[i], MON_DATA_HELD_ITEM, &item);
+                SDL_Log("Battle env test: the opponent's Pokemon %u (species %u) holds item %u to Mega Evolve",
+                        (unsigned)i, (unsigned)species, (unsigned)item);
+                return;
+            }
+        }
+    }
+    SDL_Log("Battle env test: no Pokemon of the opponent's can Mega Evolve by an item");
 }
 
 static void StartTrainer(int a, int b, bool doubles)
@@ -120,6 +166,7 @@ static void StartTrainer(int a, int b, bool doubles)
     TRAINER_BATTLE_PARAM.opponentA = a;
     TRAINER_BATTLE_PARAM.opponentB = 0xFFFF;
     CreateNPCTrainerPartyFromTrainer(gParties[B_TRAINER_OPPONENT_A], GetTrainerStructFromId(a));
+    MaybeGiveMegaStone(gParties[B_TRAINER_OPPONENT_A]);
     if (doubles || b > 0)
         gBattleTypeFlags |= BATTLE_TYPE_DOUBLE;
     if (b > 0)
@@ -180,7 +227,19 @@ static void StartBattle(void)
     if (strcmp(kind, "wild") == 0)
     {
         CreateScriptedWildMon(a, b > 0 ? b : 30, ITEM_NONE);
+        MaybeShiny();
         BattleSetup_StartScriptedWildBattle();
+    }
+    else if (strcmp(kind, "safari") == 0)
+    {
+        /* A Safari Zone battle, as the Safari Zone's grass starts one: the Safari controller's menu, where
+         * A throws a Safari Ball (the trainer's throw, the shakes, a catch or a break-out). The Safari flag
+         * and the 30 balls are set in memory only, as EnterSafariMode sets them. */
+        CreateScriptedWildMon(a, b > 0 ? b : 30, ITEM_NONE);
+        MaybeShiny();
+        FlagSet(FLAG_SYS_SAFARI_MODE);
+        gNumSafariBalls = 30;
+        BattleSetup_StartWildBattle();
     }
     else if (strcmp(kind, "wild2") == 0)
     {
@@ -285,6 +344,11 @@ void DioramaBattleEnvTest_FieldTick(void)
         ResetInitialPlayerAvatarState();
         return;
     }
+    /* A battle fought through (PKMN_TEST_FIGHT) is the one asked for: while it waits, the field stands
+     * still, so a visible wild Pokemon does not walk into the player and start another first (KNOWN_ISSUES
+     * N33; the trainer battles below freeze it too). */
+    if (s.fightSeconds > 0)
+        FreezeObjectEvents();
     if (++s.fieldFrames < s.delay)
         return;
     s.started = true;

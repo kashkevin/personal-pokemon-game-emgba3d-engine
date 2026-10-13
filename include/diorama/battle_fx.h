@@ -127,7 +127,8 @@ struct BattleFxAnimInfo
     char id[48];          /* MOVE_* / B_ANIM_* / CONTROLLER_* the core plays */
     int plannedFrames;    /* the core's length for it (script and its own tail) */
     int scriptFrames;     /* ... of which the game's script (the rest: the core's presentation tail) */
-    int gameFrames;       /* frames the game's animation has advanced */
+    int gameFrames;       /* frames the game's animation has advanced (with the tail) */
+    int tailFrames;       /* ... of which after its script ended: the effect sprites it left moving */
     int coreFrames;       /* frames the core has stepped */
     double beginMs, stepMsTotal, stepMsWorst;
     double stepMsWorstPlain; /* the worst step without a QuickJS garbage collection in it */

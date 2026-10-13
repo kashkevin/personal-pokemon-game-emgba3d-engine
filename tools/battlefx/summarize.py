@@ -7,7 +7,8 @@
 Per run: animations played, exact (every compared frame's effect sprites equal), different (first
 different frame, the game's and the core's sprite lists there), failed (the core refused or failed:
 GBA effects shown), crashed (the game crashed during it: listed by the runner), frames after the core's
-end with GBA effect sprites still on screen, length differences (game frames - core frames), and the
+end with GBA effect sprites still on screen, effect sprites left on screen after the game's animation ended
+(the 24 frames the driver waits before the next), length differences (game frames - core frames), and the
 cost: the core's begin and step, the renderer's GPU and CPU time a layer (software rendering in the
 cloud runs: not a graphics card's numbers).
 """
@@ -41,7 +42,7 @@ def summarise(folder):
     real = load(folder / "real_report.jsonl")
     crashes = load(folder / "crashes.jsonl")
     out = {"folder": str(folder), "played": len(rows), "real": len(real), "crashed": [c["id"] for c in crashes]}
-    exact, diff, failed, tails, longer, shorter, stuck = [], [], [], [], [], [], []
+    exact, diff, failed, tails, longer, shorter, stuck, leftover = [], [], [], [], [], [], [], []
     begin, step, worst, gpu, cpu = [], [], [], [], []
     gamefps, presfps, presp99 = [], [], []
     for r in rows:
@@ -59,7 +60,10 @@ def summarise(folder):
         t = r.get("tail", {})
         if t.get("withSprites", 0) > 0:
             tails.append({"id": key, "frames": t["withSprites"], "first": t.get("first", "")[:120]})
-        d = r.get("gameFrames", 0) - r.get("coreFrames", 0)
+        a = r.get("afterEnd", {})
+        if a.get("frames", 0) > 0 and not r.get("stuck"):
+            leftover.append({"id": key, "frames": a["frames"], "first": a.get("first", "")[:120]})
+        d = r.get("gameFrames", 0) - (r.get("coreFrames", 0) - r.get("hdTail", 0))
         if d > 1:
             longer.append(d)
         elif d < 0:
@@ -81,6 +85,7 @@ def summarise(folder):
     real_diff = [x for x in real if x["compared"] > 0 and x["equal"] != x["compared"]]
     out.update({
         "exact": len(exact), "different": diff, "failed": failed, "stuck": stuck, "tailSprites": tails,
+        "leftoverSprites": leftover,
         "gameLongerThanCore": {"count": len(longer), "medianFrames": statistics.median(longer) if longer else 0},
         "coreLongerThanGame": shorter,
         "beginMs": {"median": statistics.median(begin) if begin else 0, "p95": pct(begin, 0.95), "max": max(begin or [0])},
@@ -106,6 +111,8 @@ def markdown(s):
     lines.append("| crashed the game | %d %s |" % (len(s["crashed"]), " ".join(s["crashed"])))
     lines.append("| the game's own animation did not end here (stuck) | %d %s |" % (len(s["stuck"]), " ".join(s["stuck"])))
     lines.append("| GBA effect sprites after the core's end | %d %s |" % (len(s["tailSprites"]), " ".join(t["id"] for t in s["tailSprites"])))
+    lines.append("| effect sprites left on screen after the game's animation ended (settle, %d frames) | %d %s |"
+                 % (24, len(s["leftoverSprites"]), " ".join("%s (%d)" % (t["id"], t["frames"]) for t in s["leftoverSprites"])))
     lines.append("| core longer than the game | %d %s |" % (len(s["coreLongerThanGame"]), " ".join(s["coreLongerThanGame"])))
     lines.append("| game longer than the core (its end waits) | %d (median %s frames) |" % (s["gameLongerThanCore"]["count"], s["gameLongerThanCore"]["medianFrames"]))
     lines.append("| core begin, ms (median / p95 / max) | %.1f / %.1f / %.1f |" % (s["beginMs"]["median"], s["beginMs"]["p95"], s["beginMs"]["max"]))

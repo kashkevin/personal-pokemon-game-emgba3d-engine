@@ -105,6 +105,8 @@ static struct
     uint8_t controller; /* BATTLEFX_CONTROLLER_*: stepped every frame, ends with the core */
     char id[48];
     int gameFrames;
+    bool inTail;        /* the game's script has ended; effect sprites it left still move (stepped every frame) */
+    int tailFrames;
     int seq;            /* the core's frames asked for */
     uint32_t serial;
     struct CoreStatus status; /* the core's, as last read */
@@ -398,6 +400,8 @@ static const char kGameHelperJs[] =
     "    return (s & 2) !== 0 || (s & 8) !== 0;\n"
     "  }\n"
     "  function playing(w, f) { return live() ? gamePlaying(w, f) : estimate(w, f); }\n"
+    "  function leftover(w) { for (let i = 0; i < 64; i++) { const sp = w.sprites[i], g = sp && sp.inUse ? sp.tag | 0 : 0;\n"
+    "    if ((g >= 10000 && g < 20000) || (g >= 55000 && g <= 55027) || (g >= 65030 && g <= 65057)) return true; } return false; }\n"
     "  P.syncReady = function (op) {\n"
     "    if (op !== 'waitsound' || (!SE && !live())) return syncReady.call(this, op);\n"
     "    const w = this.w; if (w.soundCount > 0) { this.seWait = 0; return false; }\n"
@@ -410,7 +414,11 @@ static const char kGameHelperJs[] =
     "    if (!live()) { const d = done.call(this); if (!d || !SE) return d; return !(estimate(w, this.frame) && (this.seEndWait = (this.seEndWait | 0) + 1) <= 90); }\n"
     "    if (!this.ended) return false;\n"
     "    if (w.visualCount > 0 || w.soundCount > 0 || w.bg.monbgTask[0] !== 0xFF || w.bg.monbgTask[1] !== 0xFF) { this.seEndWait = 0; return false; }\n"
-    "    return !(playing(w, this.frame) && (this.seEndWait = (this.seEndWait | 0) + 1) <= 90);\n"
+    "    if (playing(w, this.frame) && (this.seEndWait = (this.seEndWait | 0) + 1) <= 90) return false;\n"
+    /* the script is over; effect sprites it left moving (a caught ball's stars) go on as the game's do (bfx_game.c:
+     * the tail), for up to 120 frames */
+    "    if (leftover(w) && (this.leftWait = (this.leftWait | 0) + 1) <= 120) return false;\n"
+    "    return true;\n"
     "  };\n"
     "  A.isSEPlaying = function () { const w = RT.world(); return (SE || live()) && w && w.sfx ? playing(w, w.frame) : ownSE.apply(this, arguments); };\n"
     "  A.m4aMPlayStop = function () { stopAll(RT.world()); return stop.apply(this, arguments); };\n"
@@ -541,6 +549,31 @@ static const char kGameHelperJs[] =
     "    }\n"
     "    return { nv, ni };\n"
     "  };\n"
+    "})();\n"
+    /* Which loop runs the script. A move's animation is run by its battler's controller (Controller_DoMoveAnimation,
+     * in BattleMainCB1): each frame the script first, then AnimateSprites, BuildOamBuffer, UpdatePaletteFade and
+     * RunTasks (BattleMainCB2) - the runtime's own order. A status, battle or special animation (LaunchStatusAnimation,
+     * TryHandleLaunchBattleTableAnimation, InitAndLaunchSpecialAnimation) is run by a task of priority 10 made at its
+     * launch: its script runs inside RunTasks, after AnimateSprites and BuildOamBuffer and after the tasks of a lower
+     * priority number. A sprite it makes moves, and shows, from the next frame; a task under priority 10 it makes runs
+     * from the next frame; its waits see this frame's sprites and those tasks already run. The request's order "task"
+     * runs the core's script the same way: from a task of priority 10 made as the animation begins. */
+    "(function () {\n"
+    "  const RT = globalThis.BFX_RT, B = globalThis.BFX_BRIDGE; if (!RT || !RT.Player || !RT.API || !B) return;\n"
+    "  const P = RT.Player.prototype, A = RT.API, reset = P.reset, runScript = P.runScript, begin = B.begin;\n"
+    "  if (!runScript || !A.createTask || !A.destroyTask) return;\n"
+    "  let order = '';\n"
+    "  B.begin = function (req) { order = req && req.order === 'task' ? 'task' : ''; return begin.call(this, req); };\n"
+    "  P.reset = function () {\n"
+    "    reset.call(this); this.taskOrder = order === 'task'; this.inDriver = false;\n"
+    "    if (!this.taskOrder || !this.w) return;\n"
+    "    const player = this;\n"
+    "    A.createTask(function Task_RunAnimScript(taskId) {\n"
+    "      if (!player.scriptDone) { player.inDriver = true; try { runScript.call(player); } finally { player.inDriver = false; } }\n"
+    "      if (player.scriptDone) A.destroyTask(taskId);\n"
+    "    }, 10);\n"
+    "  };\n"
+    "  P.runScript = function () { if (this.taskOrder && !this.inDriver) return; return runScript.apply(this, arguments); };\n"
     "})();\n"
     /* A move's script branches in the core's data, in its order: "kind|task|arg|value;..." */
     "globalThis.BFX_GAME_VARIANTS = function (id) {\n"
@@ -1695,6 +1728,9 @@ void BattleFx_OnLaunch(uint32_t animType, uint32_t animId, const void *script)
         len = Append(request, len, sizeof(request), "}");
     }
     len = AppendSetup(request, len, sizeof(request), gBattleAnimAttacker, gBattleAnimTarget);
+    /* a status, battle or special animation's script runs in a task (kGameHelperJs: which loop runs the script) */
+    if (animType != ANIM_TYPE_MOVE)
+        len = Append(request, len, sizeof(request), ",\"order\":\"task\"");
     len = Append(request, len, sizeof(request), "}");
     BeginRequest(id, request, len, animType, animId, 0);
 }
@@ -1729,6 +1765,8 @@ static bool BeginRequest(const char *id, const char *request, int len, uint32_t 
     sAnim.controller = controller;
     snprintf(sAnim.id, sizeof(sAnim.id), "%s", id);
     sAnim.gameFrames = 0;
+    sAnim.inTail = false;
+    sAnim.tailFrames = 0;
     sAnim.seq = 0;
     sAnim.serial++;
     c.kind = CORE_CMD_BEGIN;
@@ -1757,6 +1795,7 @@ void BattleFx_AnimInfo(struct BattleFxAnimInfo *info)
     info->plannedFrames = st->info.totalFrames;
     info->scriptFrames = st->info.frames;
     info->gameFrames = sAnim.gameFrames;
+    info->tailFrames = sAnim.tailFrames;
     info->coreFrames = st->frames;
     info->beginMs = st->beginMs;
     info->stepMsTotal = st->stepMs;
@@ -1916,6 +1955,19 @@ struct ShowRecord
 };
 static struct ShowRecord sRecords[2];
 
+/* Frames the core goes on replaying the effect sprites a script left moving after its end (the game's stars of a
+ * caught ball last about 30). */
+#define TAIL_MAX_FRAMES 120
+
+/* Whether the game has an effect sprite (one the HD layer stands in for) in use. */
+static bool GameHasEffectSprites(void)
+{
+    for (int i = 0; i < MAX_SPRITES; i++)
+        if (gSprites[i].inUse && BattleFx_IsEffectSprite(&gSprites[i]))
+            return true;
+    return false;
+}
+
 void BattleFx_OnFrameEnd(void)
 {
     struct BfxHost *host;
@@ -1940,6 +1992,11 @@ void BattleFx_OnFrameEnd(void)
     live = TakeCoreStatus();
     if (sAnim.controller && !begunNow)
         sAnim.ticked = true; /* the controllers' animations advance every frame */
+    else if (sAnim.inTail)
+    {
+        sAnim.ticked = true; /* so do the sprites a script left moving */
+        sAnim.tailFrames++;
+    }
     if (sAnim.ticked)
     {
         sAnim.ticked = false;
@@ -1974,9 +2031,18 @@ void BattleFx_OnFrameEnd(void)
             EndAnimation("too long");
     }
     /* The game's animation has ended: so has the core's (its last frame is
-     * still shown with the next picture, the one of this frame). */
+     * still shown with the next picture, the one of this frame) - unless the
+     * script left effect sprites moving (a caught ball's stars): the core
+     * replays them too, frame for frame, until the game's are gone. */
     else if (!gAnimScriptActive)
-        EndAnimation(sAnim.hdEnded ? "both ended" : "the game's animation ended first");
+    {
+        if (live && !sAnim.hdEnded && sAnim.tailFrames < TAIL_MAX_FRAMES && GameHasEffectSprites())
+            sAnim.inTail = true;
+        else if (sAnim.inTail)
+            EndAnimation(sAnim.hdEnded ? "both ended, after the sprites the script left" : "the sprites the script left are gone");
+        else
+            EndAnimation(sAnim.hdEnded ? "both ended" : "the game's animation ended first");
+    }
 }
 
 /* ── OAM: the effect sprites ─────────────────────────────────────────── */

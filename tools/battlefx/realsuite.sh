@@ -12,10 +12,14 @@
 #   environment: EXE (default ./pokeemerald-mp-diorama-bfxtest), DISPLAY, SCALE, TIMEOUT (per battle)
 #
 # The battles (this game's trainer ids): a wild Zigzagoon, a route trainer, Roxanne (gym), Sidney (Elite
-# Four), Tate & Liza (a gym double battle), a wild double battle, two trainers at once, and Wallace with the
-# save's own party (STRONG=0: a battle lost, exit 4). Mega Evolution and catching need the bag and a Mega
-# Ring (the autopilot only fights): their animations are played by the gallery (B_ANIM_MEGA_EVOLUTION,
-# B_ANIM_BALL_THROW, ...).
+# Four), Tate & Liza (a gym double battle), a wild double battle, two trainers at once, Wallace with the
+# save's own party (STRONG=0: a battle lost, exit 4), a shiny wild Zigzagoon (PKMN_TEST_SHINY: its stars as it
+# appears), Fabian's Manectric holding its Mega Stone (PKMN_TEST_MEGA: the trainer's AI Mega Evolves it), and
+# a Safari Zone battle with a wild Zigzagoon (catching: A throws Safari Balls - the trainer's throw, the shakes,
+# a break-out or the catch - until it is caught or flees; exit 4, the outcome not a win). The player's own
+# Mega Evolution needs the move menu's Mega trigger and a Pokeblock throw the Pokeblock case (the autopilot
+# only presses A): the gallery plays those animations (B_ANIM_MEGA_EVOLUTION, B_ANIM_POKEBLOCK_THROW at a
+# Safari battle's menu).
 set -u
 OUT=$1; SAVE=$2; shift 2
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -36,4 +40,7 @@ run gym_double   "double:271" 1 "$@"
 run wild_double  "wild2:263:30:261:30" 1 "$@"
 run two_trainers "two:318:319" 1 "$@"
 run defeat       "trainer:335" 0 "$@"
+run shiny_wild   "wild:263:30" 1 PKMN_TEST_SHINY=1 "$@"
+run mega_trainer "trainer:759" 1 PKMN_TEST_MEGA=1 "$@"
+run safari_catch "safari:263:30" 1 "$@"
 echo done >> "$OUT/realsuite.txt"

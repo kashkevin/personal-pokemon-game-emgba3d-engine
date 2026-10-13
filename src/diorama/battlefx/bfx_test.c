@@ -91,6 +91,7 @@ static struct
     char animsSpec[8192];
     char from[48];          /* PKMN_BFX_TEST_FROM: the list starts at this animation */
     int attacker, target, turn, delay, wait;
+    int animAttacker; /* PKMN_BFX_TEST_ANIM_ATTACKER: a battle animation's attacker in place of its preset's (-1: the preset's) */
     bool autoShots;
     int shots[MAX_SHOTS], shotCount;
     struct LinkBattleAnim disable;
@@ -125,6 +126,10 @@ static struct
     u32 traceCtr0;
     /* frames after the core's animation ended in which the game still showed effect sprites */
     int tailFrames, tailSprites;
+    /* frames after the game's script ended (the settle) with its effect sprites still on screen: sprites an
+     * animation leaves running (a caught ball's stars), drawn as GBA pixel art once the HD layer has ended */
+    int afterEnd;
+    char afterEndFirst[256];
     int gameDoneAt;         /* a controller animation: the frame the game's flags said it was done */
     struct Pokemon shinyMon; /* CONTROLLER_SHINY: a shiny copy of the battler's Pokemon */
     char tailFirst[256];
@@ -282,6 +287,7 @@ static void Init(void)
     t.exitAfter = EnvInt("PKMN_BFX_TEST_EXIT", 0) != 0;
     t.attacker = EnvInt("PKMN_BFX_TEST_ATTACKER", 0);
     t.target = EnvInt("PKMN_BFX_TEST_TARGET", 1);
+    t.animAttacker = EnvInt("PKMN_BFX_TEST_ANIM_ATTACKER", -1);
     t.turn = EnvInt("PKMN_BFX_TEST_TURN", 0);
     t.delay = EnvInt("PKMN_BFX_TEST_DELAY", 40);
     snprintf(t.from, sizeof(t.from), "%s", SDL_getenv("PKMN_BFX_TEST_FROM") ? SDL_getenv("PKMN_BFX_TEST_FROM") : "");
@@ -416,8 +422,9 @@ static bool BuildList(void)
     return t.count > 0;
 }
 
-/* A battle animation as the engine launches it (TryHandleLaunchBattleTableAnimation,
- * LaunchStatusAnimation, InitAndLaunchSpecialAnimation): the battlers, the argument. */
+/* A battle animation launched by the engine's own launcher (TryHandleLaunchBattleTableAnimation,
+ * LaunchStatusAnimation, InitAndLaunchSpecialAnimation), with the battlers and argument of the core's
+ * preset: the launcher's task (priority 10) runs the script in RunTasks, as in a battle. */
 static void LaunchAnim(u8 type, u16 num)
 {
     struct BfxHost *host = BattleFx_TestHost();
@@ -432,6 +439,13 @@ static void LaunchAnim(u8 type, u16 num)
         sscanf(preset, "%d %d %d %d", &attacker, &target, &arg, &throwCase);
         free(preset);
     }
+    if (t.animAttacker >= 0 && t.animAttacker < gBattlersCount)
+    {
+        /* the animation played by another battler (an opponent's Mega Evolution): one on the attacker itself
+         * stays on it, one with a target gets the battler facing the attacker (0 <-> 1, 2 <-> 3) */
+        target = target == attacker ? t.animAttacker : (t.animAttacker ^ 1);
+        attacker = t.animAttacker;
+    }
     if (attacker < 0 || attacker >= gBattlersCount)
         attacker = 0;
     if (target < 0 || target >= gBattlersCount)
@@ -445,7 +459,12 @@ static void LaunchAnim(u8 type, u16 num)
     }
     memset(&t.disable, 0, sizeof(t.disable));
     gAnimDisableStructPtr = &t.disable;
-    LaunchBattleAnimation(type, num);
+    if (type == ANIM_TYPE_STATUS)
+        LaunchStatusAnimation((u8)attacker, (u8)num);
+    else if (type == ANIM_TYPE_SPECIAL)
+        InitAndLaunchSpecialAnimation((u8)attacker, (u8)attacker, (u8)target, (u8)num);
+    else if (TryHandleLaunchBattleTableAnimation((u8)attacker, (u8)attacker, (u8)target, (u8)num, (u16)arg))
+        SDL_Log("Battle FX test: %s was not launched (the battler is behind a Substitute)", t.name);
 }
 
 static void Launch(u16 move)
@@ -566,13 +585,16 @@ static void WriteResult(void)
                 "{\"move\":%u,\"turn\":%d,\"id\":\"%s\",\"core\":\"%s\",\"gameFrames\":%d,\"coreFrames\":%d,\"planned\":%d,"
                 "\"failed\":%s,\"parity\":{\"compared\":%d,\"equal\":%d,\"firstBad\":%d,\"sprites\":%d,"
                 "\"game\":\"%s\",\"core\":\"%s\"},\"tail\":{\"frames\":%d,\"withSprites\":%d,\"first\":\"%s\"},"
+                "\"afterEnd\":{\"frames\":%d,\"first\":\"%s\"},\"hdTail\":%d,"
                 "\"scriptFrames\":%d,\"gameDoneAt\":%d,\"stuck\":%s,\"gcSteps\":%d,\"gcInBegin\":%s,\"stepMsWorstPlain\":%.3f,"
                 "\"beginMs\":%.2f,\"stepMs\":%.3f,\"stepMsWorst\":%.3f,\"wallMs\":%.1f,\"gameFps\":%.2f,"
                 "\"presents\":{\"count\":%d,\"fps\":%.2f,\"p50Ms\":%.2f,\"p99Ms\":%.2f,\"worstMs\":%.2f},\"shots\":[",
                 t.move, t.curTurn, t.name, info.serial == t.serial ? info.id : "",
                 t.frames, info.serial == t.serial ? info.coreFrames : 0, info.serial == t.serial ? info.plannedFrames : 0,
                 info.failed ? "true" : "false", t.compared, t.equal, t.firstBad, t.sprites, t.badGame, t.badCore,
-                t.tailFrames, t.tailSprites, t.tailFirst, info.serial == t.serial ? info.scriptFrames : 0, t.gameDoneAt,
+                t.tailFrames, t.tailSprites, t.tailFirst, t.afterEnd, t.afterEndFirst,
+                info.serial == t.serial ? info.tailFrames : 0,
+                info.serial == t.serial ? info.scriptFrames : 0, t.gameDoneAt,
                 t.stuck ? "true" : "false", info.gcSteps, info.gcInBegin ? "true" : "false", info.stepMsWorstPlain, info.beginMs, info.coreFrames ? info.stepMsTotal / info.coreFrames : 0.0, info.stepMsWorst,
                 wallMs, wallMs > 0 ? t.frames * 1000.0 / wallMs : 0.0, presents, presentFps, p50, p99, worst);
         for (int i = 0; i < t.wantCount; i++)
@@ -774,6 +796,8 @@ bool BattleFxTest_OnActionMenu(void)
         t.firstBad = -1;
         t.badGame[0] = t.badCore[0] = '\0';
         t.tailFrames = t.tailSprites = 0;
+        t.afterEnd = 0;
+        t.afterEndFirst[0] = '\0';
         t.gameDoneAt = -1;
         t.stuck = false;
         t.tailFirst[0] = '\0';
@@ -841,7 +865,10 @@ bool BattleFxTest_OnActionMenu(void)
             }
             return true;
         }
-        gAnimScriptCallback();
+        /* a move's script runs here, as Controller_DoMoveAnimation runs it (BattleMainCB1); a battle animation's
+         * runs in its launcher's task (RunTasks) */
+        if (t.type == 0)
+            gAnimScriptCallback();
         t.frames++;
         {
             /* The core's animation over (BattleFx_AnimInfo: the core frames stopped at its plan) while the game's
@@ -877,6 +904,15 @@ bool BattleFxTest_OnActionMenu(void)
         }
         return true;
     case TEST_SETTLE:
+        {
+            /* the HD layer covers what the script left only while its tail runs (bfx_game.c) */
+            struct BattleFxAnimInfo info;
+            char game[1024];
+            BattleFx_AnimInfo(&info);
+            GameSprites(game, sizeof(game));
+            if (game[0] && !(info.serial == t.serial && info.active) && t.afterEnd++ == 0)
+                snprintf(t.afterEndFirst, sizeof(t.afterEndFirst), "%d: %.200s", SETTLE_FRAMES - t.wait, game);
+        }
         if (t.wait-- > 0)
             return true;
         if (t.traceFile)
