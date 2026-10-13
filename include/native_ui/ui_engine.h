@@ -731,6 +731,7 @@ struct NativeEvolution
     bool8 yesNo;             /* the engine's YES / NO is up */
     u8 yesNoCursor;          /* 0: YES */
     u8 white;                /* how white the Pokémon in front is (0..16: the flash, the stop) */
+    bool8 trade;             /* an evolution inside a trade (trade.c): no stopping, the trade's window */
     bool8 shiny;
     u8 partyId;
     u16 preSpecies;
