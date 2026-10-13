@@ -332,6 +332,29 @@ void RtcCalcLocalTime(void)
     RtcCalcTimeDifference(&sRtc, &gLocalTime, &gSaveBlock2Ptr->localTimeOffset);
 }
 
+#if defined(PLATFORM_SDL2)
+// Real time for the native PC game: the player's own wall clock with their
+// localTimeOffset applied, even while connected (see RtcCalcRealTime).
+static void RtcCalcWallTime(struct Time *out)
+{
+    RtcGetInfo(&sRtc);
+    RtcCalcTimeDifference(&sRtc, out, &gSaveBlock2Ptr->localTimeOffset);
+}
+
+void RtcCalcRealTime(struct Time *out)
+{
+    // Daily resets, berry growth and other real-time timers use the wall clock
+    // even while connected, so the 12x world clock cannot make a day last 2 real
+    // hours. Stored timers stay meaningful across save, load and reconnect.
+    if (!MultiplayerWorld_HasClock())
+    {
+        *out = gLocalTime;
+        return;
+    }
+    RtcCalcWallTime(out);
+}
+#endif
+
 bool8 IsBetweenHours(s32 hours, s32 begin, s32 end)
 {
     if (end < begin)

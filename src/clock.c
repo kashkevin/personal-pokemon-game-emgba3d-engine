@@ -25,17 +25,36 @@ void InitTimeBasedEvents(void)
 {
     FlagSet(FLAG_SYS_CLOCK_SET);
     RtcCalcLocalTime();
+#if defined(PLATFORM_SDL2)
+    {
+        struct Time realTime;
+        RtcCalcRealTime(&realTime);
+        gSaveBlock2Ptr->lastBerryTreeUpdate = realTime;
+        VarSet(VAR_DAYS, realTime.days);
+    }
+#else
     gSaveBlock2Ptr->lastBerryTreeUpdate = gLocalTime;
     VarSet(VAR_DAYS, gLocalTime.days);
+#endif
 }
 
 void DoTimeBasedEvents(void)
 {
     if (FlagGet(FLAG_SYS_CLOCK_SET) && !InPokemonCenter())
     {
+#if defined(PLATFORM_SDL2)
+        // Visual time (gLocalTime) may run 12x while connected; the daily reset
+        // and berry growth follow real time.
+        struct Time realTime;
+        RtcCalcLocalTime();
+        RtcCalcRealTime(&realTime);
+        UpdatePerDay(&realTime);
+        UpdatePerMinute(&realTime);
+#else
         RtcCalcLocalTime();
         UpdatePerDay(&gLocalTime);
         UpdatePerMinute(&gLocalTime);
+#endif
     }
 }
 

@@ -25,6 +25,9 @@ u16 RtcCheckInfo(struct SiiRtcInfo *rtc);
 void RtcReset(void);
 void RtcCalcTimeDifference(struct SiiRtcInfo *rtc, struct Time *result, struct Time *t);
 void RtcCalcLocalTime(void);
+#if defined(PLATFORM_SDL2)
+void RtcCalcRealTime(struct Time *out);
+#endif
 bool8 IsBetweenHours(s32 hours, s32 begin, s32 end);
 enum TimeOfDay GetTimeOfDay(void);
 enum TimeOfDay GetTimeOfDayForDex(void);
