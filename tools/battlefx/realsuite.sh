@@ -19,7 +19,7 @@
 # a Safari Zone battle with a wild Zigzagoon (catching: A throws Safari Balls - the trainer's throw, the shakes,
 # a break-out or the catch - until it is caught or flees; exit 4, the outcome not a win), Wally's catch tutorial
 # (PKMN_TEST_BATTLE=tutorial: his own controller plays it - his Zigzagoon's Tackles, then he comes out and throws
-# the ball that catches the Ralts; exit 4, caught). The player's own
+# the ball that catches the Ralts; exit 4, caught - unless his Tackles knock the Ralts out first: exit 0, won). The player's own
 # Mega Evolution needs the move menu's Mega trigger and a Pokeblock throw the Pokeblock case (the autopilot
 # only presses A): the gallery plays those animations (B_ANIM_MEGA_EVOLUTION, B_ANIM_POKEBLOCK_THROW at a
 # Safari battle's menu). Then battles fought with another first move (PKMN_TEST_FIRST_MOVE) and the lead alone
@@ -29,11 +29,13 @@
 # Roxanne with Mirror Move (the copied move's animation), a wild Zigzagoon with Secret Power (the
 # environment's version), Sidney with Fury Attack (a hit's animation for every hit: his Pokemon take several),
 # a route trainer with Fly (both turns: the user away, then the strike); and the multiplayer twin Gym partners whose Pokemon start
-# a sandstorm (Shale's Hippopotas) and rain (Juan's partner's): the weather's animations every turn. Last, wild
+# a sandstorm (Shale's Hippopotas) and rain (Juan's partner's): the weather's animations every turn (rain's with the lead
+# alone and Thunderbolt: its Water Pokemon outlast Flamethrower in the rain, and once the lead faints the autopilot,
+# which only presses A, stays at the party menu). Last, wild
 # battles in four other 3D environments (PKMN_TEST_WARP, as the debug menu's warp): Granite Cave, Rustboro's Gym
-# (indoors), Route 119's long grass and Mt. Chimney; Secret Power in two of them (the game picks its animation
-# by the environment); and a move past the package's 621 (Fire Lash): the HD layer refuses it (logged) and the
-# game's own animation shows.
+# (indoors), Route 119 by the Weather Institute (where the warp arrives) and Mt. Chimney; Secret Power in two of
+# them (the game picks its animation by the battle environment: the cave's, and plain ground's on Route 119); and
+# a move past the package's 621 (Fire Lash): the HD layer refuses it (logged) and the game's own animation shows.
 set -u
 OUT=$1; SAVE=$2; shift 2
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -66,12 +68,12 @@ run secret_power "wild:263:30" 1 PKMN_TEST_FIRST_MOVE=290 PKMN_TEST_LEAD_ONLY=1 
 run multi_hit    "trainer:261" 1 PKMN_TEST_FIRST_MOVE=31 PKMN_TEST_LEAD_ONLY=1 "$@"
 run two_turn     "trainer:318" 1 PKMN_TEST_FIRST_MOVE=19 PKMN_TEST_LEAD_ONLY=1 "$@"
 run sandstorm    "trainer:855" 1 "$@"
-run rain         "trainer:862" 1 "$@"
+run rain         "trainer:862" 1 PKMN_TEST_FIRST_MOVE=85 PKMN_TEST_LEAD_ONLY=1 "$@"
 run cave         "wild:263:30" 1 PKMN_TEST_WARP=24:7:0 "$@"
 run indoor_gym   "wild:263:30" 1 PKMN_TEST_WARP=11:3:0 "$@"
-run long_grass   "wild:263:30" 1 PKMN_TEST_WARP=0:34:0 "$@"
+run route119     "wild:263:30" 1 PKMN_TEST_WARP=0:34:0 "$@"
 run volcano      "wild:263:30" 1 PKMN_TEST_WARP=24:12:0 "$@"
 run secret_power_cave  "wild:263:30" 1 PKMN_TEST_FIRST_MOVE=290 PKMN_TEST_LEAD_ONLY=1 PKMN_TEST_WARP=24:7:0 "$@"
-run secret_power_grass "wild:263:30" 1 PKMN_TEST_FIRST_MOVE=290 PKMN_TEST_LEAD_ONLY=1 PKMN_TEST_WARP=0:34:0 "$@"
+run secret_power_route119 "wild:263:30" 1 PKMN_TEST_FIRST_MOVE=290 PKMN_TEST_LEAD_ONLY=1 PKMN_TEST_WARP=0:34:0 "$@"
 run past_621     "wild:263:30" 1 PKMN_TEST_FIRST_MOVE=643 PKMN_TEST_LEAD_ONLY=1 "$@"
 echo done >> "$OUT/realsuite.txt"
