@@ -258,8 +258,10 @@ tilesets are unchanged.
   elevation's level - the lowest where it was, the highest a tile over it -
   and bridges (elevation 15) are decks at the floor they meet
   (`terrace_topology.py` `cave_levels`).
-* Terrain cost (V37): a cell's columns have no underside where they stand on
-  its floor (`DropBaseUndersides`), and each chunk is drawn from indices, a
-  quad's four corners shaded once (`DioramaTerrain_FoldQuads`; the same
-  triangles in the same order). `PKMN_DIORAMA_CHUNK_LOG=1` logs each chunk's
+* Terrain cost (V37): each chunk is drawn from indices, a quad's four corners
+  shaded once (`DioramaTerrain_FoldQuads`; the same triangles in the same
+  order). The columns' undersides on a cell's floor are kept (V47): the
+  terrain is drawn from both sides, and they are what shows through the
+  pixel-wide cracks where a merged face's edge meets smaller faces (without
+  them the sky showed there). `PKMN_DIORAMA_CHUNK_LOG=1` logs each chunk's
   cost.
