@@ -52,7 +52,6 @@ enum
 #define CW 404
 #define CH 252
 #define FLIP_STEPS 10        /* the squash of each flip frame; the other face from step 5 */
-#define FIELD_FRAMES 18      /* walking 0-8, running 9-17 */
 #define MSG_FRAMES 300       /* a tab's note stays 5 s */
 #define TAB_COUNT 6
 #define RECORD_ROWS 6
@@ -69,8 +68,6 @@ static const char *const sStarRows[11] = {".....#.....", "....###....", "....###
 static const char *const sLockRows[7] = {".###.", "#...#", "#...#", "#####", "##.##", "##.##", "#####"};
 /* the back's pages: the engine's records here, the host's in PLAYERS, friendship planned */
 static const char *const sTabLabels[TAB_COUNT] = {"RECORDS", "LINK", "CHAMP", "TRADES", "HUNTS", "FRIENDS"};
-/* walking frames of a direction's cycle (step 0..3); right is left mirrored */
-static const u8 sWalkFrames[4][4] = {{0, 3, 0, 4}, {2, 7, 2, 8}, {1, 5, 1, 6}, {2, 7, 2, 8}};
 
 static const u8 sText_IdNo[] = _("IDNo. ");
 static const u8 sText_Seen[] = _("seen ");
@@ -120,8 +117,13 @@ static uint32_t sLastCapture;
 static uint32_t sFlipStart;
 static bool sFlipping;
 static bool sFlipToBack;
-static const void *sFrames;
-static u16 sPalette[16];
+static struct NativeFieldFrame sWalk[4][4];   /* you walking: direction, step (your character or look) */
+static bool sHasWalk;
+static u16 sPicId;
+/* your character's bigger picture for the card (the engine shows it whole there) */
+static const void *sCardPic;
+static const u16 *sCardPal;
+static u32 sCardPicW, sCardPicH;
 static bool sConnected;
 static struct Peer sPeers[MULTIPLAYER_MAX_PEERS];
 static int sPeerCount;
@@ -226,10 +228,18 @@ static void Capture(void)
         sFlipToBack = sCard.phase == NATIVE_CARD_TO_BACK;
         sMsgTab = 0;
     }
-    UiGfx_PrepareTrainerPic(sCard.picId);
-    sFrames = NULL;
-    if (!sCard.isLink)
-        MultiplayerAppearance_NativeUiPlayerSprite(&sFrames, sPalette);
+    /* your own card: your character's picture when you chose one (the engine draws it there) */
+    sPicId = sCard.picId;
+    if (!sCard.isLink && MultiplayerAppearance_NativeUiLocalCharacter() != 0)
+        sPicId = MultiplayerAppearance_NativeUiFrontPic(MultiplayerAppearance_NativeUiLocalCharacter(), sCard.gender != MALE);
+    UiGfx_PrepareTrainerPic(sPicId);
+    if (sCard.isLink || !MultiplayerAppearance_NativeUiCardPic(&sCardPic, &sCardPal, &sCardPicW, &sCardPicH))
+        sCardPic = NULL;
+    sHasWalk = !sCard.isLink;
+    if (sHasWalk)
+        for (int d = 0; d < 4; d++)
+            for (int k = 0; k < 4; k++)
+                MultiplayerAppearance_NativeUiPlayerFrame(d, NATIVE_GAIT_WALK, k, &sWalk[d][k]);
     BuildRecords();
     sConnected = Multiplayer_IsConnected();
     sPeerCount = 0;
@@ -406,17 +416,31 @@ static void Front(int x, int y, int t, bool live, const struct UiRamp *r)
         UiG_Paint(UiM_Rounded4(ww, wh, 2, 2, 2, 2), wx, wy, UiMix(r->hi, white, 0.55),
                   &(struct UiPaint){r->ink, UI_NONE, UI_NONE, 0, 0, &diag, UiMix(r->hi, white, 0.25)});
     }
-    UiGfx_TrainerPic(sCard.picId, wx + 10, wy + 6, NULL);
+    if (sCardPic != NULL)
+    {
+        /* a character's bigger picture, whole, standing on the floor strip */
+        UiG_Save();
+        UiG_Clip(wx + 1, wy + 1, ww - 2, wh - 2);
+        UiGfx_FieldSpriteSized(sCardPic, 1, sCardPal, 0, (int)sCardPicW, (int)sCardPicH, wx + (ww - (int)sCardPicW) / 2,
+                               fy - (int)sCardPicH, 1, false);
+        UiG_Restore();
+    }
+    else
+    {
+        UiGfx_TrainerPic(sPicId, wx + 10, wy + 6, NULL);
+    }
     UiG_Rect(wx + 1, fy, ww - 2, 29, UiMix(r->lo, white, 0.35));
     for (int k = 0; k < ww - 2; k += 8)
         UiG_Rect(wx + 1 + k, fy + 1 + ((k / 8) % 2) * 14, ww - 2 - k < 8 ? ww - 2 - k : 8, 14, UiMix(r->lo, white, 0.5));
     UiG_HLine(wx + 1, fy, ww - 2, r->lo);
-    if (sFrames != NULL)
+    if (sHasWalk)
     {
         /* a step every 8 frames, a turn every 96: down, left, up, right (left mirrored) */
-        int step = (t / 8) % 4, di = (t / 96) % 4;
+        const struct NativeFieldFrame *f = &sWalk[(t / 96) % 4][(t / 8) % 4];
 
-        UiGfx_FieldSprite(sFrames, FIELD_FRAMES, sPalette, sWalkFrames[di][step], wx + (ww >> 1) - 8, fy - 5, 1, di == 3);
+        if (f->tiles != NULL)
+            UiGfx_FieldSpriteSized(f->tiles, 1, f->palette, 0, f->width, f->height, wx + (ww >> 1) - f->width / 2,
+                                   fy + 27 - f->height, 1, f->flip);
     }
 
     /* name row */
