@@ -17,7 +17,7 @@ engine's own button presses. It never decides anything the engine decides.
 | frame boundary, game parked | `NativeUi_CaptureFrame` (`sdl2.c`, before `VDraw`) | the active screen is detected and its state copied (`screens/*`, through `include/native_ui/ui_engine.h`); the picture policy is set |
 | `VDraw` | `gba_easy_draw.c` | the GBA picture without the hidden background layers (`gPlatformPictureHideBgMask`) and OAM entries (`gPlatformPictureHideObj`, a screen's `hideObjects`) |
 | frame boundary | `NativeUi_FilterKeys` | the buttons reaching the game: a screen may take some (its own rows), queued mouse presses land one edge at a time when the screen reads buttons (`ready`) |
-| present | `gl_compositor.c` | the 3D field; the GBA picture unless the policy hides it (`DioramaGL_SetPictureFilter`) |
+| present | `gl_compositor.c` | the 3D field (not drawn under a full screen: `HIDE_ALL` leaves nothing of it to see); the GBA picture unless the policy hides it (`DioramaGL_SetPictureFilter`) |
 | present, overlay | `NativeUi_Draw` (then the F10 menu) | the screen, at the window's resolution |
 
 ## Files
