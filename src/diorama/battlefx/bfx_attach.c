@@ -44,6 +44,18 @@ bool BattleFx_ShownFrame(int oamIndex, struct BattleFxShownFrame *out)
 #endif
 }
 
+bool BattleFx_ShownBgCopy(int bg)
+{
+#ifdef ENABLE_BATTLE_SPRITES
+    if (bg < 1 || bg > 2)
+        return false;
+    return gBattleSpriteBgCopies[bg].view != NULL;
+#else
+    (void)bg;
+    return false;
+#endif
+}
+
 bool BattleFx_ShownFramesBuilt(void)
 {
 #ifdef ENABLE_BATTLE_SPRITES
