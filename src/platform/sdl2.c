@@ -181,6 +181,7 @@ extern int NativeSelfTest_CryStop(void);
 extern int NativeSelfTest_ShakeAnim(void);
 extern int NativeSelfTest_LineBreak(void);
 extern int NativeSelfTest_WildWeather(void);
+extern int NativeSelfTest_Clock(void);
 extern int NativeSelfTest_DumpWildWeights(const char *keysPath, const char *outPath);
 extern bool32 GameMemory_Reset(void);
 
@@ -903,6 +904,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_LineBreak()); // src/platform/native_selftest.c (KNOWN_ISSUES U13)
         else if (strcmp(argv[i], "--selftest-wild-weather") == 0)
             exit(NativeSelfTest_WildWeather()); // src/platform/native_selftest.c (expansion Phase 2)
+        else if (strcmp(argv[i], "--selftest-clock") == 0)
+            exit(NativeSelfTest_Clock()); // src/platform/native_selftest.c (expansion Phase 11)
         else if (strcmp(argv[i], "--dump-wild-weights") == 0 && i + 2 < argc)
         {
             const char *keysPath = argv[++i];

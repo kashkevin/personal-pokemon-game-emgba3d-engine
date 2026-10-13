@@ -1183,3 +1183,199 @@ int NativeSelfTest_DumpWildWeights(const char *keysPath, const char *outPath)
     printf("dump-wild-weights: %u maps, %u families, %u weathers\n", maps, n, WEATHER_COUNT);
     return 0;
 }
+
+// ---------------------------------------------------------------------------
+// --selftest-clock (EmeraldTogether expansion Phase 11): while connected the
+// game's clock is the host's world clock, which runs 12x (one world day in two
+// real hours); the daily reset (VAR_DAYS, DoDailyEvents) and berry growth must
+// still follow the player's real clock (src/clock.c, RtcCalcRealTime), offline
+// and online alike, with no reset twice and none lost across connecting,
+// disconnecting and reconnecting. Driven through the game's own
+// InitTimeBasedEvents/DoTimeBasedEvents and the world mailbox as the companion
+// fills it; real time is moved on through the save's clock offset (as the
+// game's own clock setting does). Minute checks allow the one minute the wall
+// clock may turn during a step.
+// ---------------------------------------------------------------------------
+
+#include "berry.h"
+#include "clock.h"
+#include "dewford_trend.h"
+#include "event_data.h"
+#include "multiplayer_world.h"
+#include "constants/berry.h"
+#include "constants/flags.h"
+#include "constants/vars.h"
+
+#define CLOCK_DAILY_FLAG  FLAG_DAILY_CONTEST_LOBBY_RECEIVED_BERRY
+#define CLOCK_TREE        BERRY_TREE_ROUTE_103_CHERI_1
+#define CLOCK_TREE_START  10000
+
+static int sClockChecks, sClockFailures;
+static u32 sWorldGeneration;
+
+static void ExpectClock(const char *what, bool32 ok)
+{
+    sClockChecks++;
+    if (!ok)
+        sClockFailures++;
+    printf("%s %s\n", ok ? "ok  " : "FAIL", what);
+}
+
+// The player's real clock: the wall clock less the save's clock offset.
+static void WallTime(struct Time *out)
+{
+    struct SiiRtcInfo rtc;
+
+    RtcGetInfo(&rtc);
+    RtcCalcTimeDifference(&rtc, out, &gSaveBlock2Ptr->localTimeOffset);
+}
+
+static s32 MinutesOf(const struct Time *t)
+{
+    return t->days * 1440 + t->hours * 60 + t->minutes;
+}
+
+// Real time passes: the offset shrinks (kept normalised, as the game keeps it).
+static void PassRealTime(s32 seconds)
+{
+    struct Time *o = &gSaveBlock2Ptr->localTimeOffset;
+    s32 total = o->days * 86400 + o->hours * 3600 + o->minutes * 60 + o->seconds - seconds;
+    s32 days = total >= 0 ? total / 86400 : -((-total + 86399) / 86400);
+    s32 rest = total - days * 86400;
+
+    o->days = days;
+    o->hours = rest / 3600;
+    o->minutes = (rest / 60) % 60;
+    o->seconds = rest % 60;
+}
+
+// The companion's world record (MP_WORLD_FLAG_CLOCK_VALID and the seconds), then
+// one world tick as the game makes each frame.
+static void WorldConnect(bool32 connected, u32 worldSeconds)
+{
+    if (connected)
+    {
+        sWorldGeneration += 2;
+        gMultiplayerWorldMailbox.inboundGeneration = sWorldGeneration - 1;
+        gMultiplayerWorldMailbox.flags = MP_WORLD_FLAG_CLOCK_VALID;
+        gMultiplayerWorldMailbox.worldSeconds = worldSeconds;
+        gMultiplayerWorldMailbox.inboundGeneration = sWorldGeneration;
+    }
+    MultiplayerWorld_Tick(FALSE, connected);
+}
+
+static u16 TreeMinutes(void)
+{
+    return gSaveBlock1Ptr->berryTrees[CLOCK_TREE].minutesUntilNextStage;
+}
+
+// One DoTimeBasedEvents step: the daily flag is set before it, so the step
+// clears it exactly when a daily reset ran. Checks VAR_DAYS against the real
+// day, the berry minutes against the real minutes passed and the reset against
+// a change of real day.
+static void ClockStep(const char *label, s32 realMinutes)
+{
+    struct Time before, after;
+    u16 daysBefore = VarGet(VAR_DAYS), treeBefore = TreeMinutes();
+    s32 applied;
+    bool32 reset, dayChanged;
+    char what[200];
+
+    WallTime(&before);
+    FlagSet(CLOCK_DAILY_FLAG);
+    DoTimeBasedEvents();
+    WallTime(&after);
+    applied = treeBefore - TreeMinutes();
+    reset = !FlagGet(CLOCK_DAILY_FLAG);
+    dayChanged = VarGet(VAR_DAYS) != daysBefore;
+
+    snprintf(what, sizeof(what), "%s: VAR_DAYS is the real day (%u)", label, VarGet(VAR_DAYS));
+    ExpectClock(what, VarGet(VAR_DAYS) == before.days || VarGet(VAR_DAYS) == after.days);
+    snprintf(what, sizeof(what), "%s: a daily reset exactly when the real day changed (%s)", label,
+             reset ? "reset" : "no reset");
+    ExpectClock(what, reset == dayChanged);
+    snprintf(what, sizeof(what), "%s: the berry tree grew by the real minutes (%d, want %d)", label, applied,
+             realMinutes);
+    ExpectClock(what, applied >= realMinutes && applied <= realMinutes + 1);
+    snprintf(what, sizeof(what), "%s: the berry clock is the real time", label);
+    ExpectClock(what, MinutesOf(&gSaveBlock2Ptr->lastBerryTreeUpdate) >= MinutesOf(&before) - 1
+                   && MinutesOf(&gSaveBlock2Ptr->lastBerryTreeUpdate) <= MinutesOf(&after));
+}
+
+int NativeSelfTest_Clock(void)
+{
+    struct Time wall;
+    struct BerryTree *tree;
+    u16 day0;
+    u32 world = 7 * 86400 + 13 * 3600; // world day 7, 13:00
+    char what[160];
+
+    SetSaveBlocksPointers(0);
+    InitDewfordTrend(); // as a new game does (the daily reset divides by its limits)
+    MultiplayerWorld_Init();
+    gSaveBlock1Ptr->location.mapGroup = MAP_GROUP(MAP_ROUTE101); // not a Pokemon Center
+    gSaveBlock1Ptr->location.mapNum = MAP_NUM(MAP_ROUTE101);
+    tree = &gSaveBlock1Ptr->berryTrees[CLOCK_TREE];
+    tree->berry = 1; // Cheri
+    tree->stage = BERRY_STAGE_PLANTED;
+    tree->minutesUntilNextStage = CLOCK_TREE_START;
+    printf("real-time daily reset and berries with the world clock (Phase 11)\n");
+
+    // Offline: the clock is set; one real day later, one daily reset.
+    InitTimeBasedEvents();
+    WallTime(&wall);
+    day0 = VarGet(VAR_DAYS);
+    snprintf(what, sizeof(what), "offline, clock set: VAR_DAYS is the real day (%u)", day0);
+    ExpectClock(what, day0 == wall.days);
+    ExpectClock("offline, clock set: the game's time is the real time",
+                gLocalTime.days == wall.days && gLocalTime.hours == wall.hours);
+    PassRealTime(86400);
+    ClockStep("offline, a real day later", 1440);
+    ExpectClock("offline: VAR_DAYS moved on by one", VarGet(VAR_DAYS) == day0 + 1);
+
+    // Connected: the game's time jumps to the world's; nothing real happened.
+    WorldConnect(TRUE, world);
+    ExpectClock("connected: the world clock is in use", MultiplayerWorld_HasClock());
+    ClockStep("connected, the world clock days ahead", 0);
+    snprintf(what, sizeof(what), "connected: the game's time is the world's (day %u, %02u:00)", gLocalTime.days,
+             gLocalTime.hours);
+    ExpectClock(what, gLocalTime.days == 1000 + 7 && gLocalTime.hours == 13);
+    ExpectClock("connected: VAR_DAYS kept (no daily reset from the world clock)", VarGet(VAR_DAYS) == day0 + 1);
+
+    // Connected: a world day passes in two real hours.
+    world += 86400;
+    PassRealTime(2 * 3600);
+    WorldConnect(TRUE, world);
+    ClockStep("connected, a world day = two real hours", 120);
+    ExpectClock("connected: the game's time moved on a world day", gLocalTime.days == 1000 + 8);
+
+    // Connected: a real day passes (twelve world days).
+    world += 12 * 86400;
+    PassRealTime(86400);
+    WorldConnect(TRUE, world);
+    ClockStep("connected, a real day later", 1440);
+    ExpectClock("connected: VAR_DAYS moved on by one real day", VarGet(VAR_DAYS) == day0 + 2);
+    ClockStep("connected, the same real day again", 0);
+
+    // Disconnected: the game's time is the real time again; no second reset.
+    WorldConnect(FALSE, 0);
+    ExpectClock("disconnected: the world clock is not in use", !MultiplayerWorld_HasClock());
+    ClockStep("disconnected", 0);
+    WallTime(&wall);
+    ExpectClock("disconnected: the game's time is the real time", gLocalTime.days == wall.days);
+    ExpectClock("disconnected: VAR_DAYS kept", VarGet(VAR_DAYS) == day0 + 2);
+
+    // Reconnected to a world clock that is behind (another world, a restored
+    // host): nothing goes back, nothing resets.
+    WorldConnect(TRUE, 86400 + 3600);
+    ClockStep("reconnected, the world clock behind", 0);
+    ExpectClock("reconnected: VAR_DAYS kept", VarGet(VAR_DAYS) == day0 + 2);
+    PassRealTime(3 * 3600);
+    ClockStep("reconnected, three real hours later", 180);
+
+    WorldConnect(FALSE, 0);
+    snprintf(what, sizeof(what), "the tree is still growing (%u minutes to its next stage)", TreeMinutes());
+    ExpectClock(what, tree->berry == 1 && tree->stage != BERRY_STAGE_NO_BERRY);
+    printf("selftest-clock: %d checks, %d failed\n", sClockChecks, sClockFailures);
+    return sClockFailures ? 1 : 0;
+}
