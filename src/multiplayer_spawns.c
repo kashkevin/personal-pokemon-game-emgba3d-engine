@@ -43,6 +43,11 @@ _Static_assert(DIR_SOUTH == 1 && DIR_NORTH == 2 && DIR_WEST == 3 && DIR_EAST == 
 
 #define CLAIM_TIMEOUT_FRAMES 300
 #define SPAWN_SPRITE_RESERVE 12
+// Object events the shared Pokemon always leave free: the engine has 16 for
+// everything on the field, and the map's own people (trainers included), the
+// other players and their followers come first. Only as many shared Pokemon as
+// fit are drawn, the nearest first; when people need room, the farthest go.
+#define SPAWN_OBJECT_RESERVE 4
 
 volatile struct MultiplayerSpawnMailbox gMultiplayerSpawnMailbox = {0};
 const u32 gMultiplayerSpawnAbiVersion = MP_SPAWN_ABI_VERSION;
@@ -246,10 +251,13 @@ static bool32 ValidSlot(const struct MultiplayerSpawnSlot *slot)
         && slot->facing >= DIR_SOUTH && slot->facing <= DIR_EAST;
 }
 
+// The engine's own object window (TrySpawnObjectEvents, RemoveObjectEventsOutsideView)
+// in map coordinates with MAP_OFFSET; gSaveBlock1Ptr->pos is the camera's corner
+// there (the player stands at pos + MAP_OFFSET).
 static bool32 OnScreen(s32 mapX, s32 mapY)
 {
-    return mapX >= gSaveBlock1Ptr->pos.x - 2 + MAP_OFFSET && mapX <= gSaveBlock1Ptr->pos.x + 17 + MAP_OFFSET
-        && mapY >= gSaveBlock1Ptr->pos.y + MAP_OFFSET && mapY <= gSaveBlock1Ptr->pos.y + 16 + MAP_OFFSET;
+    return mapX >= gSaveBlock1Ptr->pos.x - 2 && mapX <= gSaveBlock1Ptr->pos.x + MAP_OFFSET_W + 2
+        && mapY >= gSaveBlock1Ptr->pos.y && mapY <= gSaveBlock1Ptr->pos.y + MAP_OFFSET_H + 2;
 }
 
 bool32 MultiplayerSpawns_IsSpawnObject(const struct ObjectEvent *objectEvent)
@@ -299,12 +307,22 @@ void MultiplayerSpawns_LeaveField(void)
     }
 }
 
+static u32 FreeObjectEvents(void)
+{
+    u32 i, free = 0;
+
+    for (i = 0; i < OBJECT_EVENTS_COUNT; i++)
+        if (!gObjectEvents[i].active)
+            free++;
+    return free;
+}
+
 static bool32 CanAllocateObject(u16 graphicsId)
 {
     u32 i, free;
     const struct ObjectEventGraphicsInfo *info = GetObjectEventGraphicsInfo(graphicsId);
 
-    if (info == NULL || GetFirstInactiveObjectEventId() == OBJECT_EVENTS_COUNT)
+    if (info == NULL || FreeObjectEvents() <= SPAWN_OBJECT_RESERVE)
         return FALSE;
     // Never ask the palette allocator to evict a live actor's palette.
     if (IndexOfSpritePaletteTag(info->paletteTag) == 0xFF && IndexOfSpritePaletteTag(TAG_NONE) == 0xFF)
@@ -408,9 +426,47 @@ static void UpdateSlotObject(u32 index, const struct MultiplayerSpawnSlot *slot)
     sObjects[index].moveSeq = slot->moveSeq;
 }
 
+static u32 DistanceToPlayer(s32 mapX, s32 mapY)
+{
+    s32 dx = mapX - (gSaveBlock1Ptr->pos.x + MAP_OFFSET);
+    s32 dy = mapY - (gSaveBlock1Ptr->pos.y + MAP_OFFSET);
+    return (u32)(abs(dx) + abs(dy));
+}
+
+// Keeps SPAWN_OBJECT_RESERVE object events free: removes the farthest drawn
+// Pokemon (never the one being talked to or battled) while too few are free.
+static void KeepObjectReserve(void)
+{
+    while (FreeObjectEvents() < SPAWN_OBJECT_RESERVE)
+    {
+        u32 i, farthest = MP_SPAWN_MAX_SLOTS, distance = 0;
+
+        for (i = 0; i < MP_SPAWN_MAX_SLOTS; i++)
+        {
+            struct ObjectEvent *objectEvent;
+            u32 d;
+
+            if (sObjects[i].spawnId == 0 || sObjects[i].spawnId == sClaimSpawnId || !ObjectStillOurs(i))
+                continue;
+            objectEvent = &gObjectEvents[sObjects[i].objectEventId];
+            d = DistanceToPlayer(objectEvent->currentCoords.x, objectEvent->currentCoords.y);
+            if (farthest == MP_SPAWN_MAX_SLOTS || d > distance)
+            {
+                farthest = i;
+                distance = d;
+            }
+        }
+        if (farthest == MP_SPAWN_MAX_SLOTS)
+            return;
+        RemoveSpawnObject(farthest);
+    }
+}
+
 static void UpdateObjects(void)
 {
     u32 i, j;
+    u8 order[MP_SPAWN_MAX_SLOTS];
+    u32 count;
 
     if (!InboundIsForThisMap())
     {
@@ -433,10 +489,28 @@ static void UpdateObjects(void)
         }
         UpdateSlotObject(i, slot);
     }
-    // Draw the listed Pokemon that are on screen and not drawn yet.
-    for (j = 0; j < sInbound.count; j++)
+    KeepObjectReserve();
+    // Draw the listed Pokemon that are on screen and not drawn yet, the
+    // nearest first (as many as the object reserve allows).
+    count = sInbound.count < MP_SPAWN_MAX_SLOTS ? sInbound.count : MP_SPAWN_MAX_SLOTS;
+    for (j = 0; j < count; j++)
+        order[j] = j;
+    for (j = 1; j < count; j++)
     {
-        const struct MultiplayerSpawnSlot *slot = &sInbound.slots[j];
+        u8 index = order[j];
+        u32 d = DistanceToPlayer(sInbound.slots[index].x + MAP_OFFSET, sInbound.slots[index].y + MAP_OFFSET);
+        i = j;
+        while (i > 0 && DistanceToPlayer(sInbound.slots[order[i - 1]].x + MAP_OFFSET,
+                                         sInbound.slots[order[i - 1]].y + MAP_OFFSET) > d)
+        {
+            order[i] = order[i - 1];
+            i--;
+        }
+        order[i] = index;
+    }
+    for (j = 0; j < count; j++)
+    {
+        const struct MultiplayerSpawnSlot *slot = &sInbound.slots[order[j]];
         u32 free = MP_SPAWN_MAX_SLOTS;
         bool32 drawn = FALSE;
 

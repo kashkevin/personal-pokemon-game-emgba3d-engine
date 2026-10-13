@@ -417,8 +417,16 @@ static u8 SpawnOwnedObject(u32 localId, u16 graphicsId, s16 mapX, s16 mapY, u8 e
 
 static bool32 OnScreen(s32 mapX, s32 mapY)
 {
+#ifdef PORTABLE
+    // The engine's object window (TrySpawnObjectEvents): gSaveBlock1Ptr->pos
+    // already is the camera's corner in MAP_OFFSET coordinates. The GBA build
+    // keeps its window, shifted by MAP_OFFSET, so its ROM stays byte-identical.
+    return mapX >= gSaveBlock1Ptr->pos.x - 2 && mapX <= gSaveBlock1Ptr->pos.x + 17
+        && mapY >= gSaveBlock1Ptr->pos.y && mapY <= gSaveBlock1Ptr->pos.y + 16;
+#else
     return mapX >= gSaveBlock1Ptr->pos.x - 2 + MAP_OFFSET && mapX <= gSaveBlock1Ptr->pos.x + 17 + MAP_OFFSET
         && mapY >= gSaveBlock1Ptr->pos.y + MAP_OFFSET && mapY <= gSaveBlock1Ptr->pos.y + 16 + MAP_OFFSET;
+#endif
 }
 
 // ---------------------------------------------------------------------------
