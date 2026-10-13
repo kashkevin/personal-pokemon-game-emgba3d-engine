@@ -1,4 +1,4 @@
-# Shared visible wild Pokémon (EmeraldTogether Phase 3)
+# Shared visible wild Pokémon and mass outbreaks (EmeraldTogether Phases 3-4)
 
 Owner decisions (2026-10-13): **Option A, visible overworld wild Pokémon** in the style of
 *Let's Go*; host-authoritative; used whenever the game is connected to an EmeraldTogether
@@ -8,8 +8,9 @@ claim wins; a caught or defeated Pokémon disappears for everyone and its slot i
 
 Status: implemented on `claude/emeraldtogether-expansion` (engine) and
 `claude/emeraldtogether-expansion-app` (app); tested in the cloud with the real host, real
-companions and two native Linux 3D clients (`native_spawn_proof.py`, see Testing). Not yet
-tested on Windows hardware or across two PCs.
+companions and two native Linux 3D clients, and with two Windows 3D exes under Wine
+(`native_spawn_proof.py`, see Testing). Not yet tested on Windows hardware or across two PCs. Mass outbreaks (Phase 4, section 10): host side
+implemented and tested (unit and shared-world tests); not yet seen in a game.
 
 ## 1. What a player sees
 
@@ -28,7 +29,10 @@ cancelled it stays for everyone.
 
 Offline (no world, or the link to the host is lost) the game's own overworld wild encounters
 (`wild_encounter_ow.c`) work exactly as before. Surfing, fishing and Rock Smash stay personal
-in both cases (decision of this phase: shared spawns cover land habitat only).
+in both cases (decision of this phase: shared spawns cover land habitat only). Maps whose wild
+battles follow their own rules keep the game's own encounters even while connected: the Safari
+Zones (Safari battles) and the Pokémon Tower (ghost battles); the host reports them as not
+shared (`"shared": false`), so the game spawns its own Pokémon there as offline.
 
 ## 2. Components
 
@@ -66,8 +70,10 @@ Each instance has a board of **slots**:
 | `state`, `claimant` | `open`, `claimed` (by one player) or `removed`. |
 | lifetime, grace | Remaining *active* seconds (see Timers). |
 
-Limits: 8 live slots normally, 12 in total while the map has an outbreak. Ending an outbreak
-removes nothing; new spawns wait until fewer than 8 remain, so nothing is duplicated.
+Limits: 8 live slots normally, 12 in total while the map has an outbreak (section 10). When an
+outbreak ends the map returns to 8: the open Pokémon above the limit are retired (outbreak ones
+first, oldest first), a claimed one is never taken away, and new spawns wait until fewer than 8
+remain, so nothing is duplicated.
 
 ### Ownership rules
 
@@ -116,15 +122,17 @@ Habitat tiles come from `shared_spawn_catalogue.py`, generated from the pinned e
 `tools/mp/gen_shared_spawns.py`: the tiles on which the game itself starts land encounters
 (`TILE_FLAG_HAS_ENCOUNTERS` and not surfable), without collision, not on the transition or
 multi-level elevations the overworld spawner refuses, clear of warps, triggers and the map's
-own objects, in an area reachable from a warp or map connection. 119 maps, 11 859 tiles. No
+own objects, in an area reachable from a warp or map connection; not the Safari Zones or the
+Pokémon Tower (section 1). 105 maps, 11 017 tiles. No
 spawn can therefore stand in a wall, a building, water or an unreachable pocket.
 
 ## 5. Messages
 
 ### Host ↔ companion (protocol 3, JSON)
 
-* `world` (per player) gains `"spawns"`: `{"map_group", "map_number", "slots": [...]}` for the
-  map that player stands on (or `null` without a pose). Each slot: `spawn_id, species, level,
+* `world` (per player) gains `"spawns"`: `{"map_group", "map_number", "shared", "slots": [...]}`
+  for the map that player stands on (or `null` without a pose); `shared` is false (and `slots`
+  empty) on a map without shared spawns, where the game keeps its own. Each slot: `spawn_id, species, level,
   personality, shiny, form, kind, x, y, facing, move_seq, mine, busy, fresh, seconds_left`.
   `mine`/`busy` are that player's view of the claim. At most 12 slots.
 * Request `spawn_action`: `{action: claim|result|release, spawn_id, result, seq}`; reply
@@ -179,7 +187,7 @@ lookup (the World Event Pokémon and the shared spawns now return the World Even
 `GetInteractedObjectEventScript`), and the spawn client must keep its objects while a script
 locks the field (the World Event object is still removed then; see KNOWN_ISSUES).
 
-## 7. Edge cases
+## 7. Edge cases (and section 10 for outbreaks)
 
 | Case | Behaviour |
 | --- | --- |
@@ -217,7 +225,8 @@ locks the field (the World Event object is still removed then; see KNOWN_ISSUES)
   ROM hash.
 * End to end: `scripts/multiplayer/native_spawn_proof.py` (app) with a real world server,
   real companions and two native Linux 3D clients on Route 101 (software OpenGL, about 5
-  frames a second each), run native-spawns-8, all 28 checks passed: same spawn ids on the
+  frames a second each), runs native-spawns-8 and -9 (after the window and object fixes), and
+  native-spawns-wine-1 with the package's Windows 3D exe under Wine; all 28 checks passed each time: same spawn ids on the
   same tiles in both games as the host, a host move redrawn by both, a shiny drawn by both,
   a real simultaneous A press (xdotool key presses) with exactly one claim granted and the
   other game shown the busy message, the battle won and the Pokémon removed for everybody and
@@ -228,3 +237,88 @@ locks the field (the World Event object is still removed then; see KNOWN_ISSUES)
   spawn objects were removed while the claim script locked the field; a reconnecting game at
   a low frame rate sent its spawn record before its announcement (app KNOWN_ISSUES M8).
 * Not yet: Windows clients on real hardware, two PCs over a network, 3–4 players.
+
+## 10. Mass outbreaks (Phase 4, app `outbreaks.py`)
+
+Owner requirements (2026-10-13): host-scheduled; exactly 12 slots during an outbreak;
+configurable species, weights, duration and cooldown; compatible with the Phase 2 weather; paused
+while nobody is online; kept across host restarts; announced through the existing notices.
+
+* **Scheduler** (host, one outbreak at a time): the first one 8-15 active minutes after the
+  world starts, then 20-35 active minutes after the previous one ended; each lasts 12-18 active
+  minutes (reminder notice 5 minutes before the end). Active minutes, as every Phase 11 timer:
+  nothing starts, ends or counts down while nobody is online.
+* **Where**: a Hoenn route (map type route: the routes, Petalburg Woods, Jagged Pass, Mt. Pyre's
+  outside) whose lowest wild level is at most the players' level + 5 (the players' level is the
+  World Events' progression: the average of each connected player's strongest Pokémon); rarely
+  the same map twice in a row. Never the FRLG maps the engine also carries, never a cave.
+* **Which species**: one of that map's own land families, weighted by outbreak rarity weights
+  (common 20, uncommon 40, rare 30, very rare 10, in place of the map's 30/15/6/3), the time of
+  day, the map's area boosts and the map's current weather with the Phase 2 table (the weather its
+  first player reports, else the map's default: rain favours Water types x3 and so on), as the
+  most evolved member the map's lowest level allows (so every spawn level fits it).
+* **On the map**: the board's limit becomes 12 in total; 70 % of new spawns are the outbreak
+  species (kind `outbreak`, the slot flag `outbreak` in EMV1), the rest keep the map's usual
+  weights; shiny odds stay the approved 1/4096 unless configured. Everything else is ordinary
+  shared spawning: same Pokémon for everyone, first claim wins, caught/defeated removed.
+* **End**: the map returns to 8 (section 3); notices "MASS OUTBREAK: ZIGZAGOON! / ROUTE 102
+  15:00 left" at the start and "The ZIGZAGOON outbreak / on ROUTE 102 has ended." at the end.
+* **Persistence**: the current outbreak (map, species, remaining duration, reminders), the
+  cooldown's remaining time and the outbreak counter are saved with the spawn boards (shared
+  world kv `outbreaks`, remaining durations only) and at once when one starts or ends; a
+  restarted host resumes the same outbreak.
+* **Settings**: defaults in `OutbreakSettings`; the host reads overrides from an optional JSON
+  file beside the world database, `<world.sqlite3>.outbreaks.json`, e.g.
+  `{"duration": [600, 900], "cooldown": [1800, 2400], "share": 0.8, "species": [263, 280],
+  "species_weights": {"280": 3}, "tier_weights": {"COMMON": 10, "UNCOMMON": 30, "RARE": 40,
+  "VERY_RARE": 20}, "enabled": true}`. Every field: `enabled, first_delay, cooldown, duration,
+  share, shiny_odds, tier_weights, species_weights, species, map_types, regions, exclude_maps,
+  level_margin, reminder_seconds, retry_seconds`. An unknown key or an invalid value stops the host
+  with the file named, so a typo never passes silently.
+* **Game**: no change; the native client already draws 12 slots (local IDs 224-235) within the
+  object and sprite budget. A PokéNav list of outbreaks is Phase 7.
+* Tests: `tests/test_outbreaks.py` (settings and the file, map and species choice incl. weather,
+  start/reminder/end/cooldown, retry, state round trip, the board's return to 8 with claims, and
+  the shared world: 12 slots exactly with mostly the outbreak species, paused with nobody online,
+  resumed after a restart, no duplicates after the end).
+
+## 11. Multiplayer following Pokémon (Phase 5)
+
+Every player's following Pokémon is drawn behind that player in every other game (EMW1 since the
+shared-world work; `multiplayer_world.c` `UpdateFollower`, local IDs 244-246). Phase 5 verified it
+end to end and closed the gaps around the shared spawns:
+
+* **What is synchronised**: the species exactly as the owner's game draws it, which carries the
+  form (forms are their own species IDs in this engine: the Unown letter from the personality,
+  Castform's weather form and every other form), the shiny and female flags (the follower's own
+  graphics bits) and whether it is visible. The art is the game's own overworld Pokémon graphics
+  (`GetGraphicsIdForMon`), as for the local follower. A rider's mount uses the same object.
+* **Never a shared spawn**: followers have their own local IDs and no host slot; the shared
+  spawns leave 4 of the engine's 16 object events free and draw the nearest Pokémon first, and
+  when people (the map's own, other players, their followers) need room the farthest shared
+  Pokémon are removed first, so followers and players always get an object.
+* **Cannot be claimed**: talking to another player, their follower or their mount does nothing
+  (no script, claim or battle): the engine's position lookup (`GetObjectEventIdByPosition`)
+  skips other players' objects, so the A button never reaches them, and they do not block
+  walking either. Verified in the proof, also with a build that had an extra guard removed (a
+  guard was tried and dropped as redundant).
+* **Transitions** (by the code, the battle one also in the proof): another map (a building, a cave,
+  a door, Fly): the player and follower are drawn only on the same map; large Pokémon wait outside
+  indoors, as the local follower; a battle: the game reports itself unavailable and the others stop
+  drawing it and its follower until it is back on the overworld; surfing and diving: no follower
+  (the owner's follower is in its Poké Ball); riding: the mount instead; while the local player is
+  in a menu or a script the others are hidden (existing behaviour).
+* **Object window**: the shared spawns (and, natively, the World Event Pokémon) were placed in the
+  engine's object window shifted 7 tiles to the south-east (`OnScreen` added `MAP_OFFSET` to
+  `gSaveBlock1Ptr->pos`, which already is in `MAP_OFFSET` coordinates): Pokémon north or far west
+  of the player were not drawn. Fixed natively; the GBA build keeps its World Event window so its
+  ROM stays byte-identical.
+* Tests: `scripts/multiplayer/native_follower_proof.py` (app; runs native-followers-5 on Linux and
+  native-followers-wine-1 with the package's Windows exe under Wine, all 16 checks passed): two
+  native clients, each followed by the save's lead; the follower data each game publishes, the host's relay and each game's inbound
+  record; talking to the other player's follower and to the other player (nothing happens, the game
+  keeps running); the other player battling a shared Pokémon (not drawn while it battles, back
+  after); every drawn spawn is a host slot. App tests for the follower fields:
+  `test_world_mailbox.py`, `test_world_companion.py`.
+* Not done: ledge jumps of other players and their followers are drawn as quick steps; the original
+  checklist's local follower extras (emotions, items, weather reactions) are not part of this phase.
