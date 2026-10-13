@@ -354,6 +354,7 @@ void RtcCalcRealTime(struct Time *out)
     RtcCalcWallTime(out);
 }
 #endif
+#line 334 // gba-line
 
 bool8 IsBetweenHours(s32 hours, s32 begin, s32 end)
 {

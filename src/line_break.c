@@ -421,6 +421,7 @@ void BuildNewString(struct StringLine *stringLines, u32 numLines, u32 maxLines, 
     while (numLines > 1 && stringLines[numLines - 1].numWords == 0)
         numLines--;
 #endif
+#line 414 // gba-line
     for (u32 lineIndex = 0; lineIndex < numLines; lineIndex++)
     {
         srcCharIndex += stringLines[lineIndex].words[0].length;
