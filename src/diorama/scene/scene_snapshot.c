@@ -6,6 +6,7 @@
 
 #include "global.h"
 #include "battle_pyramid.h"
+#include "bg.h"
 #include "decompress.h"
 #include "diorama/map_connection.h"
 #include "diorama/scene_snapshot.h"
@@ -212,6 +213,37 @@ static bool HasFieldUiWindow(void)
     return false;
 }
 
+/* Whether a window is on the screen: its first tile is in its background's
+ * tilemap. A window stays allocated while it is cleared from the screen. */
+static bool WindowShown(u8 windowId)
+{
+    const struct WindowTemplate *window;
+    const u16 *tilemap;
+    u32 index;
+
+    if (windowId >= WINDOWS_MAX || gWindows[windowId].window.bg == 0xFF)
+        return false;
+    window = &gWindows[windowId].window;
+    tilemap = GetBgTilemapBuffer(window->bg);
+    if (tilemap == NULL || IsTileMapOutsideWram(window->bg)
+     || GetBgAttribute(window->bg, BG_ATTR_TYPE) != BG_TYPE_NORMAL)
+        return false;
+    index = GetTileMapIndexFromCoords(window->tilemapLeft, window->tilemapTop,
+                                      GetBgAttribute(window->bg, BG_ATTR_SCREENSIZE),
+                                      GetBgMetricTextMode(window->bg, 1) * 0x20,
+                                      GetBgMetricTextMode(window->bg, 2) * 0x20);
+    return (tilemap[index] & 0x3FF) != 0;
+}
+
+/* The field's message box (window 0) is on the screen: while a message is
+ * printed into it (only then is IsFieldMessageBoxHidden() false) and after,
+ * while the script waits for a press; a save's prompt is printed into it
+ * without the field's message task (U12). */
+static bool FieldMessageBoxShown(void)
+{
+    return !IsFieldMessageBoxHidden() || WindowShown(0);
+}
+
 static bool FadesIn2D(void)
 {
     static int sFades2D = -1;
@@ -240,7 +272,7 @@ static enum DioramaSceneKind GetOverworldSceneKind(u32 *fallbackReasons)
         *fallbackReasons |= DIORAMA_FALLBACK_PALETTE_FADE;
         return DIORAMA_SCENE_TRANSITION;
     }
-    if (!IsFieldMessageBoxHidden())
+    if (FieldMessageBoxShown())
         return DIORAMA_SCENE_DIALOGUE;
     if (GetStartMenuWindowId() != WINDOW_NONE)
         return DIORAMA_SCENE_MENU;
@@ -319,7 +351,7 @@ static void CopyUiProfile(struct DioramaSceneSnapshot *snapshot)
     bool hasFieldWindow = HasFieldUiWindow();
     unsigned i;
 
-    if (!IsFieldMessageBoxHidden())
+    if (FieldMessageBoxShown())
     {
         snapshot->uiFlags |= DIORAMA_UI_DIALOGUE;
         AddUiRect(snapshot, 0, 14 * 8, DISPLAY_WIDTH, DISPLAY_HEIGHT - 14 * 8);

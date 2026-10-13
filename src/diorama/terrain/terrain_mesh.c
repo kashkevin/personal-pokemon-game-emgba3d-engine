@@ -1974,52 +1974,6 @@ static void FaceMaterial(const struct DioramaTerrainCell *cell, uint8_t surface,
     output->v1 = source->v0 + (source->v1 - source->v0) * (vMax - inset);
 }
 
-/*
- * The undersides of a cell's columns where they stand on its floor - the
- * bottom of every pixel column, a bottom face each - face the ground they
- * stand in and are never seen from the overworld's camera, which is always
- * above the terrain. Only the lowest undersides of each cell go: a bridge's
- * deck over its ground keeps its own. Mt. Chimney's rocks built a face under
- * every one of their pixels (V37: about a tenth of a chunk's faces there).
- * (The compressed shell of a plain chunk has one a cell: left as it is.)
- */
-static uint32_t DropBaseUndersides(const struct DioramaTerrainChunkInput *input,
-                                   uint32_t faceCount)
-{
-    static int16_t sLowest[DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE];
-    uint32_t read;
-    uint32_t write = 0;
-    unsigned i;
-
-    for (i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
-        sLowest[i] = INT16_MAX;
-    for (read = 0; read < faceCount; read++)
-    {
-        const struct DioramaShellFace *face = &sShellFaces[read];
-        const struct DioramaTerrainCell *cell;
-
-        if (face->axis != 1 || face->sign >= 0)
-            continue;
-        cell = FaceSourceCell(input, face);
-        if (cell != NULL && face->plane < sLowest[cell - input->cells])
-            sLowest[cell - input->cells] = (int16_t)face->plane;
-    }
-    for (read = 0; read < faceCount; read++)
-    {
-        const struct DioramaShellFace *face = &sShellFaces[read];
-
-        if (face->axis == 1 && face->sign < 0)
-        {
-            const struct DioramaTerrainCell *cell = FaceSourceCell(input, face);
-
-            if (cell != NULL && face->plane <= sLowest[cell - input->cells])
-                continue;
-        }
-        sShellFaces[write++] = *face;
-    }
-    return write;
-}
-
 bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
                                struct DioramaTerrainVertex *vertices,
                                uint32_t vertexCapacity,
@@ -2080,8 +2034,12 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
         return false;
     mesh->occupancySpanCount = spanCount;
     mesh->shellFaceCount = rawShellFaceCount;
-    if (!mesh->usedCompressedOccupancy)
-        shellFaceCount = DropBaseUndersides(input, shellFaceCount);
+    /* Every underside is kept, those on a cell's floor too: the terrain is
+     * drawn from both sides, and where a merged face's edge meets smaller
+     * faces (a T-junction) the rasterizer can leave a crack a pixel wide; the
+     * column's underside behind it is what shows there, not the sky. Dropping
+     * them (V37) showed sky-coloured lines along the Lavaridge relief's steps
+     * (V47, the battle session's E14). */
     shellFaceCount = DioramaOccupancy_MergeFaces(sShellFaces, shellFaceCount);
     for (faceIndex = 0; faceIndex < shellFaceCount; faceIndex++)
     {

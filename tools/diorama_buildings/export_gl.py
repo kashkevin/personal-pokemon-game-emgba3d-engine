@@ -143,7 +143,8 @@ def main():
                 return (((value >> 11) & 31) * 8, ((value >> 6) & 31) * 8, ((value >> 1) & 31) * 8)
 
             wall = window_glow.wall_mask(w, h, window_glow.page_triangles(blob, page))
-            pieces = window_glow.find_windows(w, h, colour, wall)
+            pieces = window_glow.find_page_windows(w, h, colour, wall,
+                                                   window_glow.model_rects(blob, page))
             for (y, x, length, level) in window_glow.runs(page, pieces):
                 window_runs.append((page, y, x, length << 8 | level))
 
