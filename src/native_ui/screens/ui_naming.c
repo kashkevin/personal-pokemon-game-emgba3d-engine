@@ -63,8 +63,6 @@ static const char *const sBoxIcon[13] = {
     ".#bbbbb#wllllllw#bbbbs#.", ".#bbbbb##########bbbbs#.", ".#bbbbbbbbbbbbbbbbbbbs#.", ".#ssssssssssssssssssss#.",
     "..####################..",
 };
-/* walking frames of the down cycle (step 0..3) */
-static const u8 sWalkDown[4] = {0, 3, 0, 4};
 
 static const u8 sText_Help[] = _("Type on your keyboard, or pick letters with the cursor.");
 static const u8 sText_HelpPad[] = _("Pick letters with the cursor. START jumps to OK.");
@@ -83,8 +81,8 @@ static const u8 sText_Saving[] = _("Saving the name…");
 static struct NativeNaming sN;
 static u8 sTitle[64];
 static bool sHasTitle;
-static const void *sFrames;
-static u16 sPalette[16];
+static struct NativeFieldFrame sWalk[4];   /* the player walking down */
+static bool sHasWalk;
 static int sLength;
 static uint32_t sLastCapture;
 /* the key the engine just took (the design's 2-frame press) */
@@ -245,9 +243,10 @@ static void Capture(void)
         sPressUntil = now + 2;
     }
     sHasTitle = TextPrinter_NativeUiWindowText(sN.titleWindow, sTitle, sizeof(sTitle), &printed, &active);
-    sFrames = NULL;
-    if (sN.kind == NAMING_SCREEN_PLAYER)
-        MultiplayerAppearance_NativeUiPlayerSprite(&sFrames, sPalette);
+    sHasWalk = sN.kind == NAMING_SCREEN_PLAYER;
+    if (sHasWalk)
+        for (int k = 0; k < 4; k++)
+            MultiplayerAppearance_NativeUiPlayerFrame(0, NATIVE_GAIT_WALK, k, &sWalk[k]);
     if (sN.phase == NATIVE_NAMING_DONE)
     {
         sTypedCount = 0;
@@ -267,8 +266,11 @@ static void Icon(int cx, int cy, int t)
 {
     if (sN.kind == NAMING_SCREEN_PLAYER)
     {
-        if (sFrames != NULL)
-            UiGfx_FieldSprite(sFrames, 18, sPalette, sWalkDown[(t / 10) % 4], cx - 8, cy - 20, 1, false);
+        const struct NativeFieldFrame *f = &sWalk[(t / 10) % 4];
+
+        if (sHasWalk && f->tiles != NULL)
+            UiGfx_FieldSpriteSized(f->tiles, 1, f->palette, 0, f->width, f->height, cx - f->width / 2, cy + 12 - f->height, 1,
+                                   f->flip);
     }
     else if (sN.kind == NAMING_SCREEN_CAUGHT_MON || sN.kind == NAMING_SCREEN_NICKNAME)
     {

@@ -13,9 +13,18 @@
  * The engine's STYLE editor (multiplayer_appearance.c, START > PLAYER > STYLE)
  * keeps running under it: its rows and cursor, what each button does, the live
  * recolour of the field sprite, and saving (the host stores the look). The
- * design's other categories (presets, body, styles of hair, headwear, tops,
- * bottoms, shoes, bags and accessories) need layered art the game does not
- * have yet: they are shown as PLANNED and do nothing. Project-owned.
+ * design's other categories (body, styles of hair, headwear, tops, bottoms,
+ * shoes, bags and accessories) need layered art the game does not have yet:
+ * they are shown as PLANNED and do nothing.
+ *
+ * With the character selection in the build (claude/character-customization:
+ * the editor's CHARACTER row first), PRESET is its roster: a card for each
+ * character on its own field sprite, the mirror and the portrait showing the
+ * character chosen (its own frames, palette and picture); the colour rows
+ * recolour the trainer only (a character keeps its own colours). Clicks walk
+ * the editor's own cursor (one press at a time, as its rows skip); a card picks
+ * its character through the editor's own selection (CharCustom_EditorSelect,
+ * as LEFT and RIGHT on CHARACTER would). Project-owned.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,6 +49,7 @@ enum
     HIT_MIRROR,
     HIT_SAVE,
     HIT_CANCEL,
+    HIT_CARD,       /* index: the character */
 };
 
 enum
@@ -84,21 +94,23 @@ enum
 #define BTN_X (SX + HELP_W + 6)
 #define BTN_W (SW - HELP_W - 6)
 #define SWATCH_COLUMNS 9
-#define FIELD_FRAMES 18      /* walking 0-8, running 9-17 */
 #define MAX_CHOICES 16
+#define ROSTER_MAX 64
+#define CARD_W 34
+#define CARD_H 36
+#define CARD_STEP 38
+#define CARD_COLUMNS 10
 
 static const char *const sTabLabels[TAB_COUNT] = {"PRESET", "BODY", "HAIR", "HAT", "TOP", "BOTTOM", "SHOES", "BAG", "EXTRA"};
-/* the editor's row behind each tag (-1: planned) and the tag of each row */
+/* the editor's row behind each tag (-1: planned; PRESET: the character selection's row) and the tag of each row */
 static const s8 sTabRow[TAB_COUNT] = {-1, NATIVE_LOOK_SKIN, NATIVE_LOOK_HAIR, NATIVE_LOOK_HAT, NATIVE_LOOK_OUTFIT, -1, -1, -1, -1};
-static const s8 sRowTab[NATIVE_LOOK_ROW_COUNT] = {TAB_BODY, TAB_HAIR, TAB_TOP, TAB_HAT, -1, -1};
+static const s8 sRowTab[NATIVE_LOOK_ROW_COUNT] = {TAB_BODY, TAB_HAIR, TAB_TOP, TAB_HAT, -1, -1, TAB_PRESET};
 /* the tags in the order L and R walk them (the engine's rows) */
-static const u8 sEnabledTabs[] = {TAB_BODY, TAB_HAIR, TAB_HAT, TAB_TOP};
+static const u8 sEnabledTabs[] = {TAB_PRESET, TAB_BODY, TAB_HAIR, TAB_HAT, TAB_TOP};
 
 static const char *const sTick[] = {"......##", ".....##.", "#...##..", "##.##...", ".###....", "..#....."};
 static const char *const sModeNames[MODE_COUNT] = {"AUTO", "WALK", "RUN", "TURN"};
 static const char *const sDirNames[4] = {"DOWN", "LEFT", "UP", "RIGHT"};
-/* walking frames of a direction's cycle (step 0..3); running adds 9; right is left mirrored */
-static const u8 sWalkFrames[4][4] = {{0, 3, 0, 4}, {2, 7, 2, 8}, {1, 5, 1, 6}, {2, 7, 2, 8}};
 
 /* the colour row of each value tag: its label and the planned style rows above it */
 static const char *const sColourLabels[NATIVE_LOOK_SAVE] = {"SKIN TONE", "HAIR COLOUR", "OUTFIT COLOUR", "HAT & BAG COLOUR"};
@@ -131,6 +143,12 @@ static const u8 sHint_Save[] = _("Save");
 static const u8 sHint_Pose[] = _("Pose");
 static const u8 sHint_Back[] = _("Back");
 static const u8 sFoot_Portraits[] = _("Portraits keep base art.");
+static const u8 sFoot_Characters[] = _("Each character has its own portrait.");
+static const u8 sNote_Fixed[] = _("This character keeps its own colours: the trainer (the first card under PRESET) is the one to recolour.");
+static const u8 sHelp_Trainer[] = _("The trainer: your own body. BODY, HAIR, HAT and TOP recolour it.");
+static const u8 sHelp_Of[] = _(" of ");
+static const u8 sHelp_Dot[] = _(" · ");
+static const u8 sHint_Choose[] = _("Choose");
 static const u8 sFoot_Planned[] = _("Styles and unlocks: planned.");
 
 /* one colour row of the editor, from the engine's tables */
@@ -147,6 +165,23 @@ struct LookRow
 
 static struct NativeAppearance sLook;
 static struct LookRow sRows[NATIVE_LOOK_SAVE];
+/* the character selection's roster (0: the trainer) and the frames drawn */
+static struct NativeCharacter sChars[ROSTER_MAX];
+static struct NativeFieldFrame sCardStand[ROSTER_MAX];
+static struct NativeFieldFrame sCardWalk[4];
+static struct NativeFieldFrame sMirror[4][3][4];   /* direction, gait, step */
+static int sRosterCount;
+static u16 sPortrait;
+/* a mouse goal: the editor's own presses, one at a time, until its cursor is on
+ * the row, then its choice turned (LEFT / RIGHT), then a button */
+static struct
+{
+    bool on;
+    int row;
+    int choice;          /* -1: none */
+    u16 then;
+    int frames;
+} sGoal;
 static u8 sName[PLAYER_NAME_LENGTH + 1];
 static bool sReady;
 static bool sFresh = true;
@@ -159,6 +194,8 @@ static int sMode;
 static int sSwing;                 /* the active tag's drop */
 static int sPrevTab = -1;
 
+static void GoalStep(void);
+
 static bool Detect(void)
 {
     struct NativeAppearance a;
@@ -166,9 +203,24 @@ static bool Detect(void)
     if (!MultiplayerAppearance_NativeUiState(&a))
     {
         sFresh = true;
+        sGoal.on = false;
         return false;
     }
     return true;
+}
+
+/* the editor's row behind a tag (-1: planned) */
+static int TabRow(int tab)
+{
+    if (tab == TAB_PRESET)
+        return sLook.characters ? NATIVE_LOOK_CHARACTER : -1;
+    return sTabRow[tab];
+}
+
+/* a colour tag whose row a character leaves out */
+static bool TabFixed(int tab)
+{
+    return TabRow(tab) >= 0 && TabRow(tab) < NATIVE_LOOK_SAVE && !sLook.coloursEnabled;
 }
 
 static void CaptureRows(void)
@@ -193,9 +245,34 @@ static int ShownTab(void)
 {
     if (sViewTab >= 0)
         return sViewTab;
-    if (sLook.cursor < NATIVE_LOOK_SAVE)
+    if (sLook.cursor < NATIVE_LOOK_ROW_COUNT && sRowTab[sLook.cursor] >= 0)
         return sRowTab[sLook.cursor];
     return sLastTab;
+}
+
+/* the roster and every frame the mirror and the cards draw (the shown character's
+ * own, or the trainer's recoloured by the look) */
+static void CaptureFrames(void)
+{
+    const u8 *look = sLook.character == 0 ? sLook.look : NULL;
+
+    for (int d = 0; d < 4; d++)
+        for (int g = 0; g < 3; g++)
+            for (int k = 0; k < 4; k++)
+                MultiplayerAppearance_NativeUiFieldFrame(sLook.character, sLook.isMay, look, d, g, k, &sMirror[d][g][k]);
+    sRosterCount = 0;
+    if (!sLook.characters)
+        return;
+    sRosterCount = sLook.characterCount < ROSTER_MAX ? sLook.characterCount : ROSTER_MAX;
+    for (int i = 0; i < sRosterCount; i++)
+    {
+        if (i > 0 && sChars[i].name == NULL)
+            continue;
+        /* the trainer's card wears the colours being edited (its own while a character is shown) */
+        MultiplayerAppearance_NativeUiFieldFrame(i, sLook.isMay, i == 0 ? look : NULL, 0, NATIVE_GAIT_STAND, 0, &sCardStand[i]);
+    }
+    for (int k = 0; k < 4; k++)
+        MultiplayerAppearance_NativeUiFieldFrame(sLook.character, sLook.isMay, look, 0, NATIVE_GAIT_WALK, k, &sCardWalk[k]);
 }
 
 static void Capture(void)
@@ -215,11 +292,18 @@ static void Capture(void)
         CaptureRows();
         StringCopyN(sName, gSaveBlock2Ptr->playerName, PLAYER_NAME_LENGTH);
         sName[PLAYER_NAME_LENGTH] = EOS;
+        memset(sChars, 0, sizeof(sChars));
+        for (int i = 1; i < sLook.characterCount && i < ROSTER_MAX; i++)
+            MultiplayerAppearance_NativeUiCharacter(i, &sChars[i]);
+        if (sLook.characters)
+            sLastTab = TAB_PRESET;
     }
-    UiGfx_PrepareTrainerPic(sLook.isMay ? TRAINER_PIC_MAY : TRAINER_PIC_BRENDAN);
+    CaptureFrames();
+    sPortrait = MultiplayerAppearance_NativeUiFrontPic(sLook.character, sLook.isMay);
+    UiGfx_PrepareTrainerPic(sPortrait);
     if (sViewTab >= 0 && sLook.cursor != sViewCursor)
         sViewTab = -1;
-    if (sLook.cursor < NATIVE_LOOK_SAVE)
+    if (sLook.cursor < NATIVE_LOOK_ROW_COUNT && sRowTab[sLook.cursor] >= 0)
         sLastTab = sRowTab[sLook.cursor];
     tab = ShownTab();
     if (tab != sPrevTab)
@@ -231,6 +315,7 @@ static void Capture(void)
     {
         sSwing--;
     }
+    GoalStep();
 }
 
 static bool Dirty(void)
@@ -305,7 +390,8 @@ static void Mirror(int t, const struct UiRamp *rose, const struct UiRamp *brass)
     const UiRGBA glassHi = UI_HEX(0xF4F4FA), glassBase = UI_HEX(0xDCE2F0), glassLo = UI_HEX(0xB8C2DC);
     int gw = MW - 14, gh = MH - 16, gx = MX + 7, gy = MY + 7, fy = gy + gh - 40;
     struct UiPattern diag = UiPat_Diag(48, 3, 0, -1), below = UiPat_Below(-1);
-    int dir, step, frame, stepEvery = 8, pw, nw, phx = MX + 12, phy = MY + 92;
+    int dir, step, stepEvery = 8, pw, nw, phx = MX + 12, phy = MY + 92;
+    const struct NativeFieldFrame *f;
     bool run = false, moving = true;
     char plate[40];
 
@@ -357,18 +443,20 @@ static void Mirror(int t, const struct UiRamp *rose, const struct UiRamp *brass)
         break;
     }
     step = moving ? (t / stepEvery) % 4 : 0;
-    frame = sWalkFrames[dir][step] + (run ? 9 : 0);
+    f = &sMirror[dir][!moving ? NATIVE_GAIT_STAND : run ? NATIVE_GAIT_RUN : NATIVE_GAIT_WALK][step];
     UiG_Save();
     UiG_Clip(gx + 1, gy + 1, gw - 2, gh - 2);
     UiG_Mask(UiM_Ellipse(30, 8), gx + 132 - 15, fy + 30 - 5, UiWithAlpha(UI_HEX(0x502038), 60));
-    UiGfx_FieldSprite(sLook.frames, FIELD_FRAMES, sLook.palette, frame, gx + 132 - 24, fy + 30 - 96, 3, dir == 3);
+    if (f->tiles != NULL)
+        UiGfx_FieldSpriteSized(f->tiles, 1, f->palette, 0, f->width, f->height, gx + 132 - f->width * 3 / 2,
+                               fy + 30 - f->height * 3, 3, f->flip);
     UiG_Restore();
 
     /* the pinned photo: the front picture, not recoloured (portraits need their own art) */
     UiG_Paint(UiM_Rounded4(72, 86, 1, 1, 1, 1), phx, phy, UI_HEX(0xF8F8F0),
               &(struct UiPaint){UiMix(brass->ink, glassLo, 0.3), UI_NONE, UI_HEX(0xD8D8D0), 0, 0, NULL, UI_NONE});
     UiG_Rect(phx + 4, phy + 4, 64, 64, UiMix(glassBase, rose->hi, 0.25));
-    UiGfx_TrainerPic(sLook.isMay ? TRAINER_PIC_MAY : TRAINER_PIC_BRENDAN, phx + 4, phy + 4, NULL);
+    UiGfx_TrainerPic(sPortrait, phx + 4, phy + 4, NULL);
     UiCaps_Draw(phx + 36, phy + 73, "PORTRAIT", UI_HEX(0x8890A0), UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_CENTER, UI_NONE);
     UiG_Rect(phx + 33, phy - 3, 6, 6, rose->base);
     UiG_Put(phx + 34, phy - 2, rose->hi);
@@ -394,7 +482,8 @@ static void Mirror(int t, const struct UiRamp *rose, const struct UiRamp *brass)
 /* the look's eight bytes as the host receives them, the shown tag's byte marked */
 static void SyncTag(int tab, const struct UiRamp *rose)
 {
-    int tx = 8, ty = 262, tw = 216, th = 54, hl = sTabRow[tab] >= 0 ? sRows[sTabRow[tab]].byte : -1;
+    int tx = 8, ty = 262, tw = 216, th = 54, row = TabRow(tab), hl = row >= 0 && row < NATIVE_LOOK_SAVE ? sRows[row].byte : -1;
+    bool chr = tab == TAB_PRESET && sLook.characters;   /* the character's id: bytes 4 and 6 */
     const char *status;
     char hex[4];
 
@@ -407,7 +496,7 @@ static void SyncTag(int tab, const struct UiRamp *rose)
     for (int i = 0; i < NATIVE_LOOK_BYTES; i++)
     {
         int bx = tx + 18 + i * 21, by = ty + 20;
-        bool on = i == hl;
+        bool on = i == hl || (chr && (i == 4 || i == 6));
 
         if (on)
             UiG_Paint(UiM_Rounded4(17, 11, 1, 1, 1, 1), bx - 3, by - 2, UiMix(rose->hi, UI_HEX(0xFFFFFF), 0.3),
@@ -434,7 +523,7 @@ static void HangTags(int tab, const struct UiRamp *rose, const struct UiRamp *br
     for (int i = 0; i < TAB_COUNT; i++)
     {
         int w = UiCaps_Width(sTabLabels[i]) + 12, drop = i == tab ? (sSwing > 1 ? 4 : 3) : 0;
-        bool on = i == tab, planned = sTabRow[i] < 0;
+        bool on = i == tab, planned = TabRow(i) < 0 || TabFixed(i);
         const struct UiMask *tm = UiM_Rounded(w, 16, UiCornerR(1), UiCornerR(1), UiCornerChamfer(3), UiCornerChamfer(3));
         UiRGBA body = planned ? UiMix(rose->base, UI_HEX(0xA8A0A0), 0.55) : rose->base;
 
@@ -478,8 +567,8 @@ static int StyleRow(int y, const char *label, const struct UiRamp *rose)
     UiG_Paint(tm, SX + 10, y, UiMix(UI_P_CREAM, UI_P_PAPER, 0.5),
               &(struct UiPaint){UiMix(UI_P_CREAM_LO, UI_P_CREAM, 0.2), UI_NONE, UI_NONE, 0, 0, &hatch,
                                 UiMix(UI_P_CREAM_LO, UI_P_CREAM, 0.5)});
-    UiCaps_Draw(SX + 40, y + 8, sLook.isMay ? "MAY" : "BRENDAN", UI_HEX(0x8C8478), UI_NONE, UI_CAPS_PLAIN,
-                UI_ALIGN_CENTER, UI_NONE);
+    UiCaps_Draw(SX + 40, y + 8, sLook.character != 0 ? "CHARACTER" : sLook.isMay ? "MAY" : "BRENDAN", UI_HEX(0x8C8478),
+                UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_CENTER, UI_NONE);
     UiW_Pix("cz_tick", sTick, 6, (const struct UiPixPal[]){{'#', rose->lo}}, 1, SX + 60, y + 15, false);
     NoteLines(SX + 78, y - 2, SW - 88, sNote_Style, UI_P_TEXT_MUTED);
     return y + 30;
@@ -489,7 +578,7 @@ static void ColourRow(int y, int row, const struct UiRamp *rose)
 {
     const struct LookRow *r = &sRows[row];
     int cur = sLook.look[r->byte], started = sLook.start[r->byte];
-    bool focused = sLook.cursor == row;
+    bool focused = sLook.cursor == row, fixed = !sLook.coloursEnabled;
     char slots[40];
     int len;
 
@@ -499,11 +588,23 @@ static void ColourRow(int y, int row, const struct UiRamp *rose)
         len += snprintf(slots + len, sizeof(slots) - len, " %d", r->slots[i]);
     UiCaps_Draw(SX + SW - 10, y + 1, slots, UI_HEX(0xA09080), UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_RIGHT, UI_NONE);
     y += 12;
+    if (fixed)
+    {
+        /* a character keeps its own colours: the swatches faded, the note */
+        UiG_Save();
+        UiG_Alpha(0.35);
+    }
     for (int i = 0; i < r->count; i++)
     {
         int x = SX + 10 + (i % SWATCH_COLUMNS) * 40, sy = y + (i / SWATCH_COLUMNS) * 40;
         const struct UiMask *sm = UiM_Rounded4(28, 24, 3, 3, 3, 3);
         struct UiRamp rr = SwatchRamp(r, i);
+
+        if (fixed)
+        {
+            UiG_Paint(sm, x, sy, rr.base, &(struct UiPaint){rr.ink, rr.hi, rr.lo, 3, 3, NULL, UI_NONE});
+            continue;
+        }
 
         if (focused && i == cur)
             UiW_SelectFrame(sm, x, sy, UI_NONE, UI_NONE, 2);
@@ -515,6 +616,59 @@ static void ColourRow(int y, int row, const struct UiRamp *rose)
         if (i == started)
             UiW_Pix("cz_tickw", sTick, 6, (const struct UiPixPal[]){{'#', UI_HEX(0xFFFFFF)}}, 1, x + 10, sy + 9, false);
         UiG_Hit(HIT_SWATCH, row * 32 + i, x - 2, sy - 2, 32, 28);
+    }
+    if (fixed)
+    {
+        UiG_Restore();
+        NoteLines(SX + 10, y + ((r->count + SWATCH_COLUMNS - 1) / SWATCH_COLUMNS) * 40 + 2, SW - 20, sNote_Fixed, UI_P_TEXT_MUTED);
+    }
+}
+
+/* the character selection's roster: a card for each on its own field sprite (the
+ * one shown walks while its row is up), the one the editor started from ticked */
+static void RosterSheet(const struct UiRamp *rose, int t)
+{
+    static const UiRGBA sTints[3] = {UI_HEX(0xFFFFFF), UI_HEX(0xF0F0E8), UI_HEX(0xF4ECEC)};
+    int y = SY + 6;
+    char count[32];
+
+    UiCaps_Draw(SX + 10, y + 1, "CHARACTERS", rose->lo, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
+    snprintf(count, sizeof(count), "%d IN THE ROSTER", sRosterCount);
+    UiCaps_Draw(SX + SW - 10, y + 1, count, UI_HEX(0xA09080), UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_RIGHT, UI_NONE);
+    y += 14;
+    for (int i = 0; i < sRosterCount; i++)
+    {
+        int x = SX + 10 + (i % CARD_COLUMNS) * CARD_STEP, cy = y + (i / CARD_COLUMNS) * CARD_STEP;
+        bool cur = i == sLook.character, focused = cur && sLook.cursor == NATIVE_LOOK_CHARACTER, worn = i == sLook.startCharacter;
+        const struct UiMask *tm = UiM_Rounded4(CARD_W, CARD_H, 2, 2, 2, 2);
+        const struct NativeFieldFrame *f = focused ? &sCardWalk[(t / 8) % 4] : &sCardStand[i];
+
+        if (i > 0 && sChars[i].name == NULL)
+            continue;
+        if (focused)
+            UiW_SelectFrame(tm, x, cy, UI_NONE, UI_NONE, 2);
+        else if (cur)
+            UiW_SelectFrame(tm, x, cy, UiMix(rose->base, UI_HEX(0xFFFFFF), 0.3), UiMix(rose->hi, UI_HEX(0xFFFFFF), 0.5), 1);
+        UiG_Paint(tm, x, cy, i == 0 ? sTints[0] : sTints[sChars[i].kind < 3 ? sChars[i].kind : 0],
+                  &(struct UiPaint){worn ? rose->lo : UiMix(UI_P_CREAM_LO, UI_P_INK, 0.3), UI_NONE, UI_P_PAPER_LO, 0, 0, NULL, UI_NONE});
+        if (f->tiles != NULL)
+        {
+            /* a frame bigger than the card is cut at its edge (a clip costs a draw call) */
+            bool big = f->width > CARD_W - 2 || f->height > CARD_H - 4;
+
+            if (big)
+            {
+                UiG_Save();
+                UiG_Clip(x + 1, cy + 1, CARD_W - 2, CARD_H - 2);
+            }
+            UiGfx_FieldSpriteSized(f->tiles, 1, f->palette, 0, f->width, f->height, x + (CARD_W - f->width) / 2,
+                                   cy + CARD_H - 2 - f->height, 1, f->flip);
+            if (big)
+                UiG_Restore();
+        }
+        if (worn)
+            UiW_Pix("cz_tick", sTick, 6, (const struct UiPixPal[]){{'#', rose->lo}}, 1, x + CARD_W - 9, cy + CARD_H - 8, false);
+        UiG_Hit(HIT_CARD, i, x, cy, CARD_W, CARD_H);
     }
 }
 
@@ -552,11 +706,15 @@ static void Unlocks(const struct UiRamp *rose)
     }
 }
 
-static void Sheet(int tab, const struct UiRamp *rose)
+static void Sheet(int tab, const struct UiRamp *rose, int t)
 {
     UiG_Paint(UiM_Rounded4(SW, SH, 3, 3, 3, 3), SX, SY, UI_P_CREAM,
               &(struct UiPaint){rose->ink, UI_P_CREAM_HI, UI_P_CREAM_LO, 0, 0, NULL, UI_NONE});
-    if (sTabRow[tab] < 0)
+    if (tab == TAB_PRESET && sLook.characters)
+    {
+        RosterSheet(rose, t);
+    }
+    else if (TabRow(tab) < 0)
     {
         PlannedSheet(tab, rose);
     }
@@ -564,7 +722,7 @@ static void Sheet(int tab, const struct UiRamp *rose)
     {
         int y = StyleRow(SY + 6, sStyleLabels[tab], rose);
 
-        ColourRow(y, sTabRow[tab], rose);
+        ColourRow(y, TabRow(tab), rose);
     }
     Unlocks(rose);
 }
@@ -579,8 +737,32 @@ static void Help(int tab)
 
     UiW_DialogBox(SX, 268, HELP_W, 48, NULL, UI_NONE, b);
     text[0] = EOS;
-    if (sTabRow[tab] < 0 && sViewTab >= 0)
+    if (TabFixed(tab) && sViewTab >= 0)
+        UiText_Append(text, sizeof(text), sNote_Fixed);
+    else if (TabRow(tab) < 0 && sViewTab >= 0)
         UiText_Append(text, sizeof(text), sHelp_Planned); /* the tag's own note is on the sheet */
+    else if (sLook.cursor == NATIVE_LOOK_CHARACTER)
+    {
+        const struct NativeCharacter *c = sLook.character < ROSTER_MAX ? &sChars[sLook.character] : NULL;
+
+        if (sLook.character == 0 || c == NULL || c->name == NULL)
+        {
+            UiText_Append(text, sizeof(text), sHelp_Trainer);
+        }
+        else
+        {
+            UiText_Append(text, sizeof(text), c->name);
+            if (c->variant != NULL && c->variant[0] != EOS)
+            {
+                UiText_Append(text, sizeof(text), sHelp_Dot);
+                UiText_Append(text, sizeof(text), c->variant);
+            }
+            UiText_Append(text, sizeof(text), sHelp_Dot);
+            UiText_AppendNumber(text, sizeof(text), sLook.character, 1, false);
+            UiText_Append(text, sizeof(text), sHelp_Of);
+            UiText_AppendNumber(text, sizeof(text), sRosterCount > 0 ? sRosterCount - 1 : 0, 1, false);
+        }
+    }
     else if (sLook.cursor == NATIVE_LOOK_SAVE)
         UiText_Append(text, sizeof(text), sLook.connected ? sHelp_Save : sHelp_SaveOffline);
     else if (sLook.cursor == NATIVE_LOOK_CANCEL)
@@ -650,17 +832,18 @@ static void Draw(int t)
     Mirror(t, &rose, &brass);
     SyncTag(tab, &rose);
     HangTags(tab, &rose, &brass);
-    Sheet(tab, &rose);
+    Sheet(tab, &rose, t);
     Help(tab);
     Buttons(t);
     {
-        struct UiHintItem hints[5] = {{UI_ACT_TABS, sHint_Category}, {UI_ACT_MOVE, sHint_Colour},
+        struct UiHintItem hints[5] = {{UI_ACT_TABS, sHint_Category}, {UI_ACT_MOVE, sLook.characters ? sHint_Choose : sHint_Colour},
                                       {UI_ACT_START, sHint_Save}, {UI_ACT_DETAILS, sHint_Pose},
                                       {UI_ACT_CANCEL, sHint_Back}};
 
         UiW_Hints(SX + 4, 330, hints, 5, true, 8);
     }
-    UiText_Draw(UI_FONT_SMALL, 12, 327, sFoot_Portraits, UiMix(rose.hi, UI_HEX(0xFFFFFF), 0.5), rose.ink, UI_ALIGN_LEFT, 0);
+    UiText_Draw(UI_FONT_SMALL, 12, 327, sLook.characters ? sFoot_Characters : sFoot_Portraits, UiMix(rose.hi, UI_HEX(0xFFFFFF), 0.5),
+                rose.ink, UI_ALIGN_LEFT, 0);
     UiText_Draw(UI_FONT_SMALL, 12, 340, sFoot_Planned, UiMix(rose.hi, UI_HEX(0xFFFFFF), 0.5), rose.ink, UI_ALIGN_LEFT, 0);
     Question(t);
     UiG_Veil(NativeUi_ScreenFade());
@@ -668,48 +851,108 @@ static void Draw(int t)
 
 /* ---------------------------------------------------------------- input: the engine's own buttons */
 
-/* presses that move the editor's cursor to a row (it wraps: the shorter way) */
+/* the editor's order of its rows (the character selection's starts with CHARACTER) */
+static int EngineIndex(int row)
+{
+    if (!sLook.characters)
+        return row;
+    return row == NATIVE_LOOK_CHARACTER ? 0 : row + 1;
+}
+
+static int EngineRowCount(void)
+{
+    return sLook.characters ? NATIVE_LOOK_ROW_COUNT : NATIVE_LOOK_ROW_COUNT - 1;
+}
+
+static void SetGoal(int row, int choice, u16 then)
+{
+    sGoal.on = true;
+    sGoal.row = row;
+    sGoal.choice = choice;
+    sGoal.then = then;
+    sGoal.frames = 0;
+}
+
 static void MoveTo(int row)
 {
-    int n = NATIVE_LOOK_ROW_COUNT, moves = row - sLook.cursor;
-
-    if (moves > n / 2)
-        moves -= n;
-    else if (moves < -(n / 2))
-        moves += n;
-    if (moves != 0)
-        NativeUi_QueuePresses(moves > 0 ? DPAD_DOWN : DPAD_UP, abs(moves));
+    SetGoal(row, -1, 0);
 }
 
-/* presses that set a colour row to a choice (the choices wrap: the shorter way) */
+/* a colour row's choice (the choices wrap: the shorter way) */
 static void Choose(int row, int choice)
 {
-    const struct LookRow *r = &sRows[row];
-    int n = r->count, d;
-
-    if (n <= 0 || choice >= n)
+    if (row < 0 || row >= NATIVE_LOOK_SAVE || choice < 0 || choice >= sRows[row].count || !sLook.coloursEnabled)
         return;
-    MoveTo(row);
-    d = (choice - sLook.look[r->byte] + n) % n;
-    if (d <= n / 2)
-        NativeUi_QueuePresses(DPAD_RIGHT, d);
-    else
-        NativeUi_QueuePresses(DPAD_LEFT, n - d);
+    SetGoal(row, choice, 0);
 }
 
-/* L and R: the next tag with a colour row, in the tags' order */
+/* a card: the editor's own selection, as LEFT and RIGHT on its CHARACTER row would
+ * (the character session's CharCustom_EditorSelect: one step, not a press per card) */
+static void ChooseCharacter(int character)
+{
+    if (!sLook.characters || character < 0 || character >= sRosterCount || (character > 0 && sChars[character].name == NULL))
+        return;
+    MultiplayerAppearance_NativeUiSelectCharacter(character);
+}
+
+/* one of the editor's presses toward the goal a frame: up or down until its cursor is
+ * on the row (it skips the rows it leaves out itself), then LEFT or RIGHT until the
+ * colour row shows the choice, then the button */
+static void GoalStep(void)
+{
+    int n, d, cur, count;
+
+    if (!sGoal.on)
+        return;
+    if (++sGoal.frames > 900 || sAsk != ASK_NONE)
+    {
+        sGoal.on = false;
+        return;
+    }
+    if (NativeUi_PressesPending() || !sReady)
+        return;
+    if (sLook.cursor != sGoal.row)
+    {
+        n = EngineRowCount();
+        d = (EngineIndex(sGoal.row) - EngineIndex(sLook.cursor) + n) % n;
+        NativeUi_QueuePress(d <= n / 2 ? DPAD_DOWN : DPAD_UP);
+        return;
+    }
+    if (sGoal.choice >= 0 && sGoal.row < NATIVE_LOOK_SAVE)
+    {
+        count = sRows[sGoal.row].count;
+        cur = sLook.look[sRows[sGoal.row].byte];
+        if (count > 0 && cur != sGoal.choice)
+        {
+            d = (sGoal.choice - cur + count) % count;
+            NativeUi_QueuePress(d <= count / 2 ? DPAD_RIGHT : DPAD_LEFT);
+            return;
+        }
+    }
+    if (sGoal.then != 0)
+        NativeUi_QueuePress(sGoal.then);
+    sGoal.on = false;
+}
+
+/* L and R: the next tag with a row of the editor's, in the tags' order */
 static void StepTab(int dir)
 {
-    int count = (int)sizeof(sEnabledTabs), at = 0, tab = sViewTab >= 0 ? sViewTab : ShownTab();
+    u8 tabs[sizeof(sEnabledTabs)];
+    int count = 0, at = -1, tab = sViewTab >= 0 ? sViewTab : ShownTab();
 
+    for (size_t i = 0; i < sizeof(sEnabledTabs); i++)
+        if (TabRow(sEnabledTabs[i]) >= 0 && !TabFixed(sEnabledTabs[i]))
+            tabs[count++] = sEnabledTabs[i];
+    if (count == 0)
+        return;
     for (int i = 0; i < count; i++)
-        if (sEnabledTabs[i] == tab)
+        if (tabs[i] == tab)
             at = i;
-    if (sTabRow[tab] < 0)
+    if (at < 0)
         at = dir > 0 ? count - 1 : 0; /* from a planned tag: the first or the last */
     at = (at + dir + count) % count;
     sViewTab = -1;
-    MoveTo(sTabRow[sEnabledTabs[at]]);
+    MoveTo(TabRow(tabs[at]));
 }
 
 static void Ask(int kind)
@@ -726,10 +969,7 @@ static void Answer(bool yes)
     if (!yes)
         return;
     if (kind == ASK_SAVE)
-    {
-        MoveTo(NATIVE_LOOK_SAVE);
-        NativeUi_QueuePress(A_BUTTON);
-    }
+        SetGoal(NATIVE_LOOK_SAVE, -1, A_BUTTON);
     else
     {
         NativeUi_QueuePress(B_BUTTON);
@@ -774,7 +1014,10 @@ static uint16_t FilterKeys(uint16_t keys, uint16_t newKeys)
         return keys & ~(L_BUTTON | R_BUTTON);
     }
     if (newKeys & (DPAD_UP | DPAD_DOWN | DPAD_LEFT | DPAD_RIGHT | A_BUTTON))
+    {
         sViewTab = -1;
+        sGoal.on = false;   /* the player's own buttons take over */
+    }
     return keys;
 }
 
@@ -801,17 +1044,17 @@ static bool Click(const struct UiHit *hit, int button)
         sMode = (sMode + 1) % MODE_COUNT;
         return true;
     }
-    if (NativeUi_PressesPending())
+    if (NativeUi_PressesPending() || sGoal.on)
         return true;
     switch (hit->id)
     {
     case HIT_TAG:
         if (hit->index >= 0 && hit->index < TAB_COUNT)
         {
-            if (sTabRow[hit->index] >= 0)
+            if (TabRow(hit->index) >= 0 && !TabFixed(hit->index))
             {
                 sViewTab = -1;
-                MoveTo(sTabRow[hit->index]);
+                MoveTo(TabRow(hit->index));
             }
             else
             {
@@ -823,6 +1066,10 @@ static bool Click(const struct UiHit *hit, int button)
     case HIT_SWATCH:
         sViewTab = -1;
         Choose(hit->index / 32, hit->index % 32);
+        return true;
+    case HIT_CARD:
+        sViewTab = -1;
+        ChooseCharacter(hit->index);
         return true;
     case HIT_SAVE:
         Ask(ASK_SAVE);
@@ -836,7 +1083,7 @@ static bool Click(const struct UiHit *hit, int button)
 
 static bool Wheel(int dy)
 {
-    if (sAsk == ASK_NONE && !NativeUi_PressesPending())
+    if (sAsk == ASK_NONE && !NativeUi_PressesPending() && !sGoal.on)
         StepTab(dy > 0 ? -1 : 1);
     return true;
 }
