@@ -1069,6 +1069,9 @@ u32 Battle_NativeUiPrizeMoney(void);
 bool32 Battle_NativeUiInIntro(void);
 /* battle_controller_player.c: what the player controller waits for from this battler */
 u32 Battle_NativeUiPlayerInput(u32 battler);
+/* battle_controller_safari.c: the same for the Safari Zone's controller (its action
+ * menu BALL, POKéBLOCK, GO NEAR, RUN on the same 2x2; the Pokéblock case as BAG) */
+u32 Battle_NativeUiSafariInput(u32 battler);
 /* sprite.c: the OBJ tiles a sheet tag holds */
 bool32 Sprite_NativeUiTagTiles(u16 tag, u16 *start, u16 *count);
 
