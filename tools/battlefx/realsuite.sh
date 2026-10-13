@@ -13,7 +13,8 @@
 #
 # The battles (this game's trainer ids): a wild Zigzagoon, a route trainer, Roxanne (gym), Sidney (Elite
 # Four), Tate & Liza (a gym double battle), a wild double battle, two trainers at once, Wallace with the
-# save's own party (STRONG=0: a battle lost, exit 4), a shiny wild Zigzagoon (PKMN_TEST_SHINY: its stars as it
+# save's own lead alone (STRONG=0, PKMN_TEST_LEAD_ONLY: a battle lost, exit 4; with the whole party the
+# autopilot would stop at the party menu once the lead faints), a shiny wild Zigzagoon (PKMN_TEST_SHINY: its stars as it
 # appears), Fabian's Manectric holding its Mega Stone (PKMN_TEST_MEGA: the trainer's AI Mega Evolves it), and
 # a Safari Zone battle with a wild Zigzagoon (catching: A throws Safari Balls - the trainer's throw, the shakes,
 # a break-out or the catch - until it is caught or flees; exit 4, the outcome not a win). The player's own
@@ -47,7 +48,7 @@ run e4_sidney    "trainer:261" 1 "$@"
 run gym_double   "double:271" 1 "$@"
 run wild_double  "wild2:263:30:261:30" 1 "$@"
 run two_trainers "two:318:319" 1 "$@"
-run defeat       "trainer:335" 0 "$@"
+run defeat       "trainer:335" 0 PKMN_TEST_LEAD_ONLY=1 "$@"
 run shiny_wild   "wild:263:30" 1 PKMN_TEST_SHINY=1 "$@"
 run mega_trainer "trainer:759" 1 PKMN_TEST_MEGA=1 "$@"
 run safari_catch "safari:263:30" 1 "$@"

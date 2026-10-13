@@ -81,6 +81,9 @@ static struct
     /* PKMN_TEST_FIRST_MOVE=<move number>: with PKMN_TEST_STRONG, the party's first move in place of
      * Flamethrower (a move whose animation follows a counter over turns: Fury Cutter, Rollout) */
     int firstMove;
+    /* PKMN_TEST_LEAD_ONLY=1: the party is its first Pokemon alone (in memory only), so a battle lost ends at
+     * its faint (the autopilot cannot choose the next one in the party menu) */
+    bool leadOnly, trimmed;
 } s;
 
 /* Frames a press is held, and released after it: a game running at a frame or two a second
@@ -114,6 +117,7 @@ static void Init(void)
     s.shiny = EnvInt("PKMN_TEST_SHINY", 0) != 0;
     s.mega = EnvInt("PKMN_TEST_MEGA", 0) != 0;
     s.freezeField = EnvInt("PKMN_TEST_FREEZE_FIELD", 0) != 0;
+    s.leadOnly = EnvInt("PKMN_TEST_LEAD_ONLY", 0) != 0;
     s.firstMove = EnvInt("PKMN_TEST_FIRST_MOVE", 0);
     if (s.firstMove <= MOVE_NONE || s.firstMove >= MOVES_COUNT)
         s.firstMove = MOVE_FLAMETHROWER;
@@ -308,6 +312,14 @@ void DioramaBattleEnvTest_FieldTick(void)
     {
         s.strengthened = true;
         StrengthenParty();
+    }
+    if (s.leadOnly && !s.trimmed)
+    {
+        s.trimmed = true;
+        for (u32 i = 1; i < PARTY_SIZE; i++)
+            ZeroMonData(&gParties[B_TRAINER_PLAYER][i]);
+        CalculatePlayerPartyCount();
+        SDL_Log("Battle env test: the party is its first Pokemon alone");
     }
     SDL_AtomicSet(&s.fieldSeen, 1);
     if (gMain.inBattle)

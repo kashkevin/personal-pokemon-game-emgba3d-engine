@@ -37,6 +37,8 @@
  *                            start (a visible wild Pokemon cannot start another first)
  *   PKMN_TEST_FIRST_MOVE=<n>  with PKMN_TEST_STRONG, the party's first move in place of
  *                            Flamethrower (move number; in memory only)
+ *   PKMN_TEST_LEAD_ONLY=1    the party is its first Pokemon alone (in memory only): a battle
+ *                            lost ends when it faints
  *
  * Nothing here changes a battle: it starts one the way the debug menu's
  * "Try battle" does and reads the picture.
