@@ -78,6 +78,12 @@ static struct
     bool shiny, mega;
     /* PKMN_TEST_FREEZE_FIELD=1: the field's objects stand still while the battle waits to start */
     bool freezeField;
+    /* PKMN_TEST_FIRST_MOVE=<move number>: with PKMN_TEST_STRONG, the party's first move in place of
+     * Flamethrower (a move whose animation follows a counter over turns: Fury Cutter, Rollout) */
+    int firstMove;
+    /* PKMN_TEST_LEAD_ONLY=1: the party is its first Pokemon alone (in memory only), so a battle lost ends at
+     * its faint (the autopilot cannot choose the next one in the party menu) */
+    bool leadOnly, trimmed;
 } s;
 
 /* Frames a press is held, and released after it: a game running at a frame or two a second
@@ -111,6 +117,10 @@ static void Init(void)
     s.shiny = EnvInt("PKMN_TEST_SHINY", 0) != 0;
     s.mega = EnvInt("PKMN_TEST_MEGA", 0) != 0;
     s.freezeField = EnvInt("PKMN_TEST_FREEZE_FIELD", 0) != 0;
+    s.leadOnly = EnvInt("PKMN_TEST_LEAD_ONLY", 0) != 0;
+    s.firstMove = EnvInt("PKMN_TEST_FIRST_MOVE", 0);
+    if (s.firstMove <= MOVE_NONE || s.firstMove >= MOVES_COUNT)
+        s.firstMove = MOVE_FLAMETHROWER;
     value = SDL_getenv("PKMN_TEST_WARP");
     s.warpX = s.warpY = -1;
     if (value != NULL && sscanf(value, "%d:%d:%d:%d:%d", &s.warpGroup, &s.warpNum, &s.warpId,
@@ -214,6 +224,8 @@ static void StartPartnerBattle(int a, int b, int partner)
     BattleSetup_StartTrainerBattle_Debug();
 }
 
+void LoadWallyZigzagoon(void); /* field_specials.c (a script special: no header declares it) */
+
 static void StartBattle(void)
 {
     char kind[16] = {0};
@@ -243,6 +255,16 @@ static void StartBattle(void)
         FlagSet(FLAG_SYS_SAFARI_MODE);
         gNumSafariBalls = 30;
         BattleSetup_StartWildBattle();
+    }
+    else if (strcmp(kind, "tutorial") == 0)
+    {
+        /* Wally's catch tutorial, as Petalburg City's scene starts it (PetalburgCity_EventScript_WallyTutorial):
+         * his Zigzagoon first in the party, a Ralts to catch. Wally's controller plays it by itself: two Tackles,
+         * then he calls Zigzagoon back, comes out and throws a Poke Ball (the trainer's throw, the catch).
+         * In memory only. */
+        SavePlayerParty();
+        LoadWallyZigzagoon();
+        StartWallyTutorialBattle();
     }
     else if (strcmp(kind, "wild2") == 0)
     {
@@ -284,14 +306,14 @@ static void StrengthenParty(void)
         exp = gExperienceTables[gSpeciesInfo[species].growthRate][MAX_LEVEL];
         SetMonData(mon, MON_DATA_EXP, &exp);
         CalculateMonStats(mon);
-        SetMonMoveSlot(mon, MOVE_FLAMETHROWER, 0);
+        SetMonMoveSlot(mon, s.firstMove, 0);
     }
     /* The Set battle style: in a single battle the Shift style asks whether to switch when
      * the opponent sends its next Pokemon, and A's "Yes" opens the party on the battler
      * already out ("already in battle!"), over and over. */
     gSaveBlock2Ptr->optionsBattleStyle = OPTIONS_BATTLE_STYLE_SET;
     HealPlayerParty();
-    SDL_Log("Battle env test: the party at level %d, healed", MAX_LEVEL);
+    SDL_Log("Battle env test: the party at level %d, healed, its first move %d", MAX_LEVEL, s.firstMove);
 }
 
 void DioramaBattleEnvTest_FieldTick(void)
@@ -302,6 +324,14 @@ void DioramaBattleEnvTest_FieldTick(void)
     {
         s.strengthened = true;
         StrengthenParty();
+    }
+    if (s.leadOnly && !s.trimmed)
+    {
+        s.trimmed = true;
+        for (u32 i = 1; i < PARTY_SIZE; i++)
+            ZeroMonData(&gParties[B_TRAINER_PLAYER][i]);
+        CalculatePlayerPartyCount();
+        SDL_Log("Battle env test: the party is its first Pokemon alone");
     }
     SDL_AtomicSet(&s.fieldSeen, 1);
     if (gMain.inBattle)
