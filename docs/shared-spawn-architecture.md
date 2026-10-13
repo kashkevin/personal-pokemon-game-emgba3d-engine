@@ -108,9 +108,12 @@ Once per active second, for every map with at least one player standing on it:
   map), on a habitat tile 3 or more tiles from every player and within about one screen
   (±7 × ±5 tiles) of a player, never on another Pokémon.
 * **Species**: an exact port of `MPWild_RandomizeSpecies` for land: the 312 Gen 1–6 families
-  of `src/data/mp_wild_pool.h`, rarity weights, time of day (from the shared world clock), the
+  of `src/data/mp_wild_pool.h`, rarity weights, time of day (from the shared world clock, with
+  the game's own GEN_6 hours: the night weights in the evening and at night, 18:00-03:59), the
   area type boosts of `GetAreaTypeBoost`, the Phase 2 weather table (the weather reported by the
-  map's first player, else the map's default) and the 35 % lower-stage chance.
+  map's first player, else the map's default) and the 35 % lower-stage chance. Checked value for
+  value against the game by the app's `scripts/multiplayer/check_engine_spawn_weights.py` (the
+  game's `--dump-wild-weights`; 0 differences on 2026-10-13).
 * **Wander**: each open Pokémon has a 35 % chance per second to step to an adjacent habitat tile
   of the same elevation that holds neither a player nor another Pokémon (else it turns in place),
   and a 15 % chance to just turn. One next to a player holds still.
