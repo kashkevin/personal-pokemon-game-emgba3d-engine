@@ -2,6 +2,9 @@
 #if defined(ENABLE_DIORAMA) && defined(DIORAMA_BATTLE_ENV_TEST)
 #include "diorama/battle_env_test.h"
 #endif
+#if defined(ENABLE_DIORAMA) && defined(BATTLEFX_TEST)
+#include "diorama/battle_fx_test.h"
+#endif
 #line 2 // gba-line
 #include "multiplayer_local_reset.h"
 #include "battle.h"
@@ -241,6 +244,10 @@ static void HandleInputChooseAction(enum BattlerId battler)
 {
 #if defined(ENABLE_DIORAMA) && defined(DIORAMA_BATTLE_ENV_TEST)
     DioramaBattleEnvTest_OnActionMenu(); // test builds only: the action menu is up
+#endif
+#if defined(ENABLE_DIORAMA) && defined(BATTLEFX_TEST)
+    if (BattleFxTest_OnActionMenu()) // test builds only (diorama/battle_fx_test.h): animations played here
+        return;
 #endif
 #line 238 // gba-line
     u32 localResetInput = MultiplayerLocalReset_HandlePlayerInput(battler);

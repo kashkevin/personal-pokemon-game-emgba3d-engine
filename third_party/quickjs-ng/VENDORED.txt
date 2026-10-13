@@ -1,0 +1,3 @@
+QuickJS-ng v0.10.1 (tag v0.10.1, commit 3c9afc9), MIT licence (LICENSE).
+Source: https://github.com/quickjs-ng/quickjs
+Only the engine sources are vendored (no quickjs-libc, no qjs/qjsc tools, no tests). Unmodified.

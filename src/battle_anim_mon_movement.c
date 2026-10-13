@@ -1148,6 +1148,15 @@ void SetupShakeBattlerBasedOnMovePowerOrDmg(u8 taskId, u8 animBattlerId)
     gTasks[taskId].data[10] = gBattleAnimArgs[3];
     gTasks[taskId].data[11] = gBattleAnimArgs[4];
     gTasks[taskId].data[7] = GetAnimBattlerSpriteId(animBattlerId);
+#ifdef PORTABLE
+    // No such battler (the target's partner in a single battle: Struggle Bug's script shakes it): SPRITE_NONE
+    // (255) is no index into gSprites (65 entries) - on the GBA this reads and writes 13 KiB past the sprite
+    // table in EWRAM, natively past the game's memory (a segmentation fault) or into the Windows import
+    // table. The task keeps its length (the script waits for it) and shakes the dummy entry instead.
+    if (gTasks[taskId].data[7] == SPRITE_NONE)
+        gTasks[taskId].data[7] = MAX_SPRITES;
+#endif
+#line 1151 // gba-line
     gTasks[taskId].data[8] = gSprites[gTasks[taskId].data[7]].x2;
     gTasks[taskId].data[9] = gSprites[gTasks[taskId].data[7]].y2;
     gTasks[taskId].data[0] = 0;
