@@ -49,6 +49,13 @@ FORMAT = 1
 WARP_CLEARANCE = 1
 OBJECT_CLEARANCE = 1
 
+# Maps whose wild battles follow their own rules keep the game's own (personal)
+# encounters even while connected: the Safari Zones (Safari battles with Safari
+# Balls) and the Pokemon Tower (ghost battles without the Silph Scope). A shared
+# spawn there would start an ordinary battle. The host reports such a map as
+# not shared, and the game spawns its own Pokemon there as offline.
+PERSONAL_MAPSECS = frozenset({"MAPSEC_SAFARI_ZONE", "MAPSEC_KANTO_SAFARI_ZONE", "MAPSEC_POKEMON_TOWER"})
+
 
 def tile_flags() -> dict[str, int]:
     """sTileBitAttributes of src/metatile_behavior.c: behaviour -> flag bits."""
@@ -242,22 +249,28 @@ def build() -> dict:
     species_ids = gw.evaluate_symbols("constants/species.h", species_names)
     type_names = sorted({f[5] for f in families} | {f[6] for f in families}
                         | {t for types in boosts.values() for t in types} | set(underground_types))
+    group_order = gw.read_json(ENGINE / "data/maps/map_groups.json")["group_order"]
     maps = {}
     for constant, encounter in sorted(land_encounters().items()):
         if constant not in constants or constant not in folders:
             continue  # data for maps this Emerald build does not have
         grid = gw.MapGrid(folders[constant], layouts, attrs, behaviors)
+        mapsec = grid.map.get("region_map_section", "MAPSEC_NONE")
+        if mapsec in PERSONAL_MAPSECS:
+            continue
         tiles = habitat_tiles(grid, land)
         if not tiles:
             continue
         group, number = constants[constant]
-        mapsec = grid.map.get("region_map_section", "MAPSEC_NONE")
         map_type = grid.map.get("map_type", "MAP_TYPE_NONE")
         boost = boosts.get(mapsec)
         if boost is None and map_type == "MAP_TYPE_UNDERGROUND":
             boost = underground_types
         maps[f"{group}.{number}"] = {
             "constant": constant, "folder": grid.folder, "name": display_name(mapsec), "mapsec": mapsec,
+            # The FRLG map groups (Kanto, Sevii) exist in this engine but not in
+            # an Emerald playthrough; mass outbreaks choose Hoenn maps only.
+            "region": "frlg" if group_order[group].endswith("_Frlg") else "hoenn",
             "map_type": map_type, "underground": map_type == "MAP_TYPE_UNDERGROUND",
             "weather": grid.map.get("weather", "WEATHER_NONE"),
             "width": grid.width, "height": grid.height, "boost": boost or [],
