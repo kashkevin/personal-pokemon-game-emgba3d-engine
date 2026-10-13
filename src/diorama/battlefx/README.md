@@ -67,6 +67,18 @@ and how long the pictures waited).
 every command: the frames pair with the game's frame for frame (the parity tests), and the test
 driver may use the core between frames.
 
+## The drawing budget
+
+The 3D battle paces the game by its pictures, so HD layers that take longer to draw than a
+frame allows would slow the battle (measured on software OpenGL: 33 ms a layer at 1280x720, 70
+at 1920x1080, and the game at 42 and 8 frames a second during HD animations). The renderer
+measures each animation's layers - GPU time from its timer queries, or the CPU time to submit
+them where the driver has none (`BattleFxGL_DrawTooSlow`) - and from an animation's sixth
+picture on, a cost above the budget a picture (`drawBudgetMs`, `PKMN_BATTLEFX_DRAW_BUDGET_MS`:
+8 ms in the player builds, 0 - no budget - in the test builds) ends its HD drawing as the core
+falling behind does: its GBA effects from that picture, logged. After two such animations the HD
+effects are off until the battle ends (`BeginRequest` refuses them; the next battle tries again).
+
 ## The replay follows the game frame for frame
 
 The test builds compare, every frame, the effect sprites the game has on screen (graphics tag
@@ -149,8 +161,9 @@ never leaves another animation's sprites out.
 
 ## Settings
 
-`battlefx/settings.cfg` (`enabled=1`, `log=0`; `sync=1` optional) or the environment (which overrides
-the file): `PKMN_BATTLEFX=0` plays the original GBA animations (the development fallback),
+`battlefx/settings.cfg` (`enabled=1`, `log=0`; `sync=1`, `drawBudgetMs=N` optional) or the environment
+(which overrides the file): `PKMN_BATTLEFX=0` plays the original GBA animations (the development fallback),
+`PKMN_BATTLEFX_DRAW_BUDGET_MS=N` sets the drawing budget (above; 0: none),
 `PKMN_BATTLEFX_LOG=1` logs every animation (the game's and the core's frame counts, the core's
 cost, how its pictures went; the renderer's GPU / CPU time), `PKMN_BATTLEFX_SYNC=1` makes the
 game wait for the core every frame, `PKMN_BATTLEFX_DIR=<folder>` reads the data from there
@@ -216,4 +229,9 @@ otherwise a visible wild Pokemon may walk into the player and start another batt
 
 `tools/battlefx/gallery.sh` runs one (a run that crashes the game resumes after the animation
 that crashed; a stuck one goes on in a new game), `tools/battlefx/realsuite.sh` the battles of
-the real-battle suite, and `tools/battlefx/summarize.py` sums the results up.
+the real-battle suite, and `tools/battlefx/summarize.py` sums the results up. The battle environment test
+driver's autopilot only presses A (the first move on the first target): once the lead faints with
+the whole party in the battle, it stays at the party menu, so the suite fights the battles that can
+cost the lead with the lead alone (`PKMN_TEST_LEAD_ONLY=1`: a faint loses the battle). The test
+drivers end a run with `exit()` on the game's thread while the main thread may be drawing; a crash
+there (seen once) comes after every result is written.
