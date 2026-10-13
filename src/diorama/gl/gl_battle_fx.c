@@ -1365,6 +1365,88 @@ static bool GbaBox(const struct BattleFxGameBattler *g, int box[4])
     return true;
 }
 
+/* Battler b this picture: drawn from a shown frame or not, and the placing for it (ComputeAttach). */
+static void AttachOne(const struct Frame *f, int b, float T)
+{
+    struct Attach *a = &s.attach[b];
+    const struct BattleFxGameBattler *g = &s.game[b];
+    const struct BfxBattler *B = &f->battlers[b];
+    int gb[4];
+    float cur[4], cg[2], hg[2], cs[2], hs[2], rt[2], shown[2], depth;
+    uint32_t look = 2166136261u;
+
+    a->frame = a->on = false;
+    if (!g->shown || !BattleFx_ShownFrame(g->oam, &a->view))
+        return;
+    if (a->view.width > SHOWN_TEX || a->view.height > SHOWN_TEX)
+        return; /* never in the pack (its largest frame is 155 x 121): the GBA picture's shape stays */
+    a->frame = true;
+    ScanFrame(a);
+    if (!a->fbEmpty)
+    {
+        float pv[2];
+        BoxToScreen(g, a->view.left + (a->fb[0] + a->fb[2]) * 0.5f, a->view.top + (a->fb[1] + a->fb[3]) * 0.5f, pv);
+        a->pivot[0] = pv[0];
+        a->pivot[1] = pv[1];
+    }
+    if (!BattleFx_Attach() || !s.attachInjected || a->fbEmpty || !B->present || !GbaBox(g, gb))
+        return;
+    /* one look: the same GBA picture's box and the same canvas (a new Pokemon, form or facing starts anew) */
+    look = Fnv(look, gb, sizeof(gb));
+    look = Fnv(look, &a->view.width, sizeof(a->view.width));
+    look = Fnv(look, &a->view.height, sizeof(a->view.height));
+    look = Fnv(look, &a->view.left, sizeof(a->view.left));
+    look = Fnv(look, &a->view.top, sizeof(a->view.top));
+    if (look != a->look || a->n == 0)
+    {
+        a->look = look;
+        a->n = 0;
+    }
+    cur[0] = (float)(a->view.left + a->fb[0]);
+    cur[1] = (float)(a->view.top + a->fb[1]);
+    cur[2] = (float)(a->view.left + a->fb[2]);
+    cur[3] = (float)(a->view.top + a->fb[3]);
+    if (a->n < ATTACH_MEAN_FRAMES)
+        a->n++;
+    for (int i = 0; i < 4; i++)
+        a->box[i] = a->n == 1 ? cur[i] : a->box[i] + (cur[i] - a->box[i]) / (float)a->n;
+    cg[0] = (gb[0] + gb[2]) * 0.5f;
+    cg[1] = (gb[1] + gb[3]) * 0.5f;
+    hg[0] = (gb[2] - gb[0]) * 0.5f;
+    hg[1] = (gb[3] - gb[1]) * 0.5f;
+    cs[0] = (a->box[0] + a->box[2]) * 0.5f;
+    cs[1] = (a->box[1] + a->box[3]) * 0.5f;
+    hs[0] = (a->box[2] - a->box[0]) * 0.5f;
+    hs[1] = (a->box[3] - a->box[1]) * 0.5f;
+    /* one scale for both axes (the effects keep their shapes; a body much taller than its GBA picture - a
+     * back picture cut by the text box - does not stretch them), held to 0.75 .. 1.6 */
+    a->sc = sqrtf((hs[0] / (hg[0] > 0.5f ? hg[0] : 0.5f)) * (hs[1] / (hg[1] > 0.5f ? hg[1] : 0.5f)));
+    a->sc = a->sc < 0.75f ? 0.75f : a->sc > 1.6f ? 1.6f : a->sc;
+    /* the region placed: the GBA body and what becomes the shown body, a little more; at least 12 pixels */
+    for (int i = 0; i < 2; i++)
+    {
+        rt[i] = (hg[i] > hs[i] / a->sc ? hg[i] : hs[i] / a->sc) * 1.1f;
+        rt[i] = rt[i] < 12.0f ? 12.0f : rt[i];
+    }
+    BoxToScreen(g, cg[0], cg[1], a->c);
+    BoxToScreen(g, cs[0], cs[1], shown);
+    a->d[0] = shown[0] - a->c[0];
+    a->d[1] = shown[1] - a->c[1];
+    ExtentToScreen(g, rt[0], rt[1], a->r);
+    memcpy(a->feet, B->feet, sizeof(a->feet));
+    depth = (a->feet[0] - s.attachCam[0]) * s.attachCam[12] + (a->feet[1] - s.attachCam[1]) * s.attachCam[13]
+          + (a->feet[2] - s.attachCam[2]) * s.attachCam[14];
+    a->groundR = a->r[0] * T * (depth > 1.0f ? depth : 1.0f) / 80.0f;
+    a->on = true;
+    if (BattleFx_Logging() && a->loggedLook != a->look && a->n >= ATTACH_MEAN_FRAMES / 2)
+    {
+        a->loggedLook = a->look;
+        SDL_Log("Battle FX: battler %d is shown %.0f x %.0f (its GBA picture %.0f x %.0f): the effects near it are "
+                "moved %+.1f, %+.1f pixels and scaled %.2f", b, hs[0] * 2.0f, hs[1] * 2.0f, hg[0] * 2.0f,
+                hg[1] * 2.0f, a->d[0], a->d[1], a->sc);
+    }
+}
+
 /* Once a picture, after it was drawn (the animated battle sprites decide their frames as the picture is drawn):
  * which battlers are shown by another frame than their GBA picture, and the placing for each. */
 static void ComputeAttach(const struct Frame *f)
@@ -1388,84 +1470,22 @@ static void ComputeAttach(const struct Frame *f)
     s.attachCam[7] = s.attachCam[11] = s.attachCam[15] = 0.0f;
     for (int b = 0; b < 4; b++)
     {
-        struct Attach *a = &s.attach[b];
-        const struct BattleFxGameBattler *g = &s.game[b];
-        const struct BfxBattler *B = &f->battlers[b];
-        int gb[4];
-        float cur[4], cg[2], hg[2], cs[2], hs[2], rt[2], shown[2], depth;
-        uint32_t look = 2166136261u;
+        AttachOne(f, b, T);
+        s.attachOn |= s.attach[b].on;
+#ifdef BATTLEFX_TEST
+        if (BattleFxTest_AttachTrace())
+        {
+            const struct Attach *a = &s.attach[b];
+            const struct BattleFxGameBattler *g = &s.game[b];
 
-        a->frame = a->on = false;
-        if (!g->shown || !BattleFx_ShownFrame(g->oam, &a->view))
-            continue;
-        if (a->view.width > SHOWN_TEX || a->view.height > SHOWN_TEX)
-            continue; /* never in the pack (its largest frame is 155 x 121): the GBA picture's shape stays */
-        a->frame = true;
-        ScanFrame(a);
-        if (!a->fbEmpty)
-        {
-            float pv[2];
-            BoxToScreen(g, a->view.left + (a->fb[0] + a->fb[2]) * 0.5f, a->view.top + (a->fb[1] + a->fb[3]) * 0.5f, pv);
-            a->pivot[0] = pv[0];
-            a->pivot[1] = pv[1];
+            SDL_Log("Battle FX attach: anim %u frame %d battler %d: shown %d oam %d present %d frame %d (%dx%d at %d,%d) "
+                    "on %d c %.1f,%.1f d %.1f,%.1f r %.1f,%.1f sc %.2f box %.1f,%.1f..%.1f,%.1f n %u",
+                    (unsigned)f->serial, f->frame, b, g->shown, g->oam, f->battlers[b].present, a->frame,
+                    a->frame ? a->view.width : 0, a->frame ? a->view.height : 0, a->frame ? a->view.left : 0,
+                    a->frame ? a->view.top : 0, a->on, a->c[0], a->c[1], a->d[0], a->d[1], a->r[0], a->r[1], a->sc,
+                    a->box[0], a->box[1], a->box[2], a->box[3], a->n);
         }
-        if (!BattleFx_Attach() || !s.attachInjected || a->fbEmpty || !B->present || !GbaBox(g, gb))
-            continue;
-        /* one look: the same GBA picture's box and the same canvas (a new Pokemon, form or facing starts anew) */
-        look = Fnv(look, gb, sizeof(gb));
-        look = Fnv(look, &a->view.width, sizeof(a->view.width));
-        look = Fnv(look, &a->view.height, sizeof(a->view.height));
-        look = Fnv(look, &a->view.left, sizeof(a->view.left));
-        look = Fnv(look, &a->view.top, sizeof(a->view.top));
-        if (look != a->look || a->n == 0)
-        {
-            a->look = look;
-            a->n = 0;
-        }
-        cur[0] = (float)(a->view.left + a->fb[0]);
-        cur[1] = (float)(a->view.top + a->fb[1]);
-        cur[2] = (float)(a->view.left + a->fb[2]);
-        cur[3] = (float)(a->view.top + a->fb[3]);
-        if (a->n < ATTACH_MEAN_FRAMES)
-            a->n++;
-        for (int i = 0; i < 4; i++)
-            a->box[i] = a->n == 1 ? cur[i] : a->box[i] + (cur[i] - a->box[i]) / (float)a->n;
-        cg[0] = (gb[0] + gb[2]) * 0.5f;
-        cg[1] = (gb[1] + gb[3]) * 0.5f;
-        hg[0] = (gb[2] - gb[0]) * 0.5f;
-        hg[1] = (gb[3] - gb[1]) * 0.5f;
-        cs[0] = (a->box[0] + a->box[2]) * 0.5f;
-        cs[1] = (a->box[1] + a->box[3]) * 0.5f;
-        hs[0] = (a->box[2] - a->box[0]) * 0.5f;
-        hs[1] = (a->box[3] - a->box[1]) * 0.5f;
-        /* one scale for both axes (the effects keep their shapes; a body much taller than its GBA picture - a
-         * back picture cut by the text box - does not stretch them), held to 0.75 .. 1.6 */
-        a->sc = sqrtf((hs[0] / (hg[0] > 0.5f ? hg[0] : 0.5f)) * (hs[1] / (hg[1] > 0.5f ? hg[1] : 0.5f)));
-        a->sc = a->sc < 0.75f ? 0.75f : a->sc > 1.6f ? 1.6f : a->sc;
-        /* the region placed: the GBA body and what becomes the shown body, a little more; at least 12 pixels */
-        for (int i = 0; i < 2; i++)
-        {
-            rt[i] = (hg[i] > hs[i] / a->sc ? hg[i] : hs[i] / a->sc) * 1.1f;
-            rt[i] = rt[i] < 12.0f ? 12.0f : rt[i];
-        }
-        BoxToScreen(g, cg[0], cg[1], a->c);
-        BoxToScreen(g, cs[0], cs[1], shown);
-        a->d[0] = shown[0] - a->c[0];
-        a->d[1] = shown[1] - a->c[1];
-        ExtentToScreen(g, rt[0], rt[1], a->r);
-        memcpy(a->feet, B->feet, sizeof(a->feet));
-        depth = (a->feet[0] - s.attachCam[0]) * s.attachCam[12] + (a->feet[1] - s.attachCam[1]) * s.attachCam[13]
-              + (a->feet[2] - s.attachCam[2]) * s.attachCam[14];
-        a->groundR = a->r[0] * T * (depth > 1.0f ? depth : 1.0f) / 80.0f;
-        a->on = true;
-        s.attachOn = true;
-        if (BattleFx_Logging() && a->loggedLook != a->look && a->n >= ATTACH_MEAN_FRAMES / 2)
-        {
-            a->loggedLook = a->look;
-            SDL_Log("Battle FX: battler %d is shown %.0f x %.0f (its GBA picture %.0f x %.0f): the effects near it are "
-                    "moved %+.1f, %+.1f pixels and scaled %.2f", b, hs[0] * 2.0f, hs[1] * 2.0f, hg[0] * 2.0f,
-                    hg[1] * 2.0f, a->d[0], a->d[1], a->sc);
-        }
+#endif
     }
 }
 

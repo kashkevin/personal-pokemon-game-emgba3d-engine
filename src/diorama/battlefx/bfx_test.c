@@ -1164,6 +1164,15 @@ bool BattleFxTest_PlainShaders(void)
     return EnvInt("PKMN_BFX_TEST_PLAIN_SHADERS", 0) != 0;
 }
 
+bool BattleFxTest_AttachTrace(void)
+{
+    static int on = -1;
+
+    if (on < 0)
+        on = EnvInt("PKMN_BFX_TEST_ATTACH_TRACE", 0) != 0;
+    return on != 0;
+}
+
 /* PKMN_BFX_TEST_LAYERS: the HD layers before they are composited (main thread). */
 static struct
 {
