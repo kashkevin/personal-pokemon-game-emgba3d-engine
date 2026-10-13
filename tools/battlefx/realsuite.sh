@@ -31,7 +31,9 @@
 # a route trainer with Fly (both turns: the user away, then the strike); and the multiplayer twin Gym partners whose Pokemon start
 # a sandstorm (Shale's Hippopotas) and rain (Juan's partner's): the weather's animations every turn. Last, wild
 # battles in four other 3D environments (PKMN_TEST_WARP, as the debug menu's warp): Granite Cave, Rustboro's Gym
-# (indoors), Route 119's long grass and Mt. Chimney.
+# (indoors), Route 119's long grass and Mt. Chimney; Secret Power in two of them (the game picks its animation
+# by the environment); and a move past the package's 621 (Fire Lash): the HD layer refuses it (logged) and the
+# game's own animation shows.
 set -u
 OUT=$1; SAVE=$2; shift 2
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -69,4 +71,7 @@ run cave         "wild:263:30" 1 PKMN_TEST_WARP=24:7:0 "$@"
 run indoor_gym   "wild:263:30" 1 PKMN_TEST_WARP=11:3:0 "$@"
 run long_grass   "wild:263:30" 1 PKMN_TEST_WARP=0:34:0 "$@"
 run volcano      "wild:263:30" 1 PKMN_TEST_WARP=24:12:0 "$@"
+run secret_power_cave  "wild:263:30" 1 PKMN_TEST_FIRST_MOVE=290 PKMN_TEST_LEAD_ONLY=1 PKMN_TEST_WARP=24:7:0 "$@"
+run secret_power_grass "wild:263:30" 1 PKMN_TEST_FIRST_MOVE=290 PKMN_TEST_LEAD_ONLY=1 PKMN_TEST_WARP=0:34:0 "$@"
+run past_621     "wild:263:30" 1 PKMN_TEST_FIRST_MOVE=643 PKMN_TEST_LEAD_ONLY=1 "$@"
 echo done >> "$OUT/realsuite.txt"

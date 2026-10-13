@@ -595,6 +595,15 @@ static const char kGameHelperJs[] =
     "    sprite.data[7] = h > w ? (h / 2) | 0 : (w / 2) | 0;\n"
     "    sprite.x2 = A.Cos(sprite.data[6], sprite.data[7]); sprite.y2 = A.Sin(sprite.data[6], sprite.data[7]); };\n"
     "})();\n"
+    /* The trainer's throwing frames: the request's trainerAnims (the back picture's own rest and throw, read from
+     * the game's sprite) in place of the package's Hoenn frames, set up after the package's Safari setup. */
+    "(function () {\n"
+    "  const RT = globalThis.BFX_RT; if (!RT || !RT.onWorldSetup || !RT.C) return;\n"
+    "  const C = RT.C;\n"
+    "  RT.onWorldSetup(function (w, o) {\n"
+    "    const g = (o && o.general) || {}; if (!g.safari || !Array.isArray(g.trainerAnims) || g.trainerAnims.length < 2) return;\n"
+    "    const s = w.sprites[C.B_POSITION_PLAYER_LEFT]; if (s) s.anims = g.trainerAnims; });\n"
+    "})();\n"
     /* The catch tutorial's throw (battle_anim_throw.c AnimTask_ThrowBall_StandingTrainer): Wally's ball starts at
      * (32 + 32, 11 | 80), the Safari Zone's at (23 + 32, 5 | 80) - the package's port has the Safari Zone's. The
      * request's catchTutorial is BATTLE_TYPE_CATCH_TUTORIAL; the ball (the task's data[0]) has not moved yet. */
@@ -922,6 +931,50 @@ static bool PlayerLeftIsTrainer(void)
     return sp->inUse && sp->anims != gAnims_MonPic;
 }
 
+/* The trainer's back picture's own frames, its rest and its throw (anims[0] and [1]): the throw's arm comes
+ * up at the throw's second command, when the ball or the Pokeblock leaves (AnimTask_ThrowBall_StandingTrainer,
+ * SpriteCB_PokeBlock_LiftArm), so the core times the throw by the picture the game shows - Brendan's, May's and
+ * Wally's are the Hoenn frames the package knows; another back picture (a custom character's) has its own.
+ * As the core's animation commands: [0, image, duration, hFlip, vFlip], [-1] end, [-2, target] jump,
+ * [-3, count] loop. */
+static int AppendTrainerAnims(char *buf, int len, int size)
+{
+    u32 b = GetBattlerAtPosition(B_POSITION_PLAYER_LEFT);
+    const struct Sprite *sp;
+
+    if (b >= gBattlersCount || gBattlerSpriteIds[b] >= MAX_SPRITES)
+        return len;
+    sp = &gSprites[gBattlerSpriteIds[b]];
+    if (!sp->inUse || sp->anims == NULL || sp->anims == gAnims_MonPic || sp->anims[0] == NULL || sp->anims[1] == NULL)
+        return len;
+    len = Append(buf, len, size, ",\"trainerAnims\":[");
+    for (u32 a = 0; a < 2; a++)
+    {
+        const union AnimCmd *cmd = sp->anims[a];
+
+        len = Append(buf, len, size, "%s[", a ? "," : "");
+        for (u32 i = 0; i < 32; i++)
+        {
+            const char *sep = i ? "," : "";
+
+            if (cmd[i].type == -1)
+            {
+                len = Append(buf, len, size, "%s[-1]", sep);
+                break;
+            }
+            if (cmd[i].type == -2)
+                len = Append(buf, len, size, "%s[-2,%u]", sep, (unsigned)cmd[i].jump.target);
+            else if (cmd[i].type == -3)
+                len = Append(buf, len, size, "%s[-3,%u]", sep, (unsigned)cmd[i].loop.count);
+            else
+                len = Append(buf, len, size, "%s[0,%u,%u,%u,%u]", sep, (unsigned)cmd[i].frame.imageValue,
+                             (unsigned)cmd[i].frame.duration, (unsigned)cmd[i].frame.hFlip, (unsigned)cmd[i].frame.vFlip);
+        }
+        len = Append(buf, len, size, "]");
+    }
+    return Append(buf, len, size, "]");
+}
+
 /* What the battle engine hands a battle animation, read where the game's own
  * scripts and tasks read it (battle_anim_throw.c, battle_anim_new.c,
  * battle_anim_utility_funcs.c), as the core's inputs (docs: the package's
@@ -975,6 +1028,8 @@ static int AppendInputs(char *buf, int len, int size, struct BfxHost *host, cons
                  (gBattleTypeFlags & BATTLE_TYPE_CATCH_TUTORIAL) ? "true" : "false",
                  gBattleCommunication[MULTISTRING_CHOOSER] < NUM_SAFARI_REACTIONS
                      ? (unsigned)gBattleCommunication[MULTISTRING_CHOOSER] : 0u);
+    if (PlayerLeftIsTrainer())
+        len = AppendTrainerAnims(buf, len, size);
     return len;
 }
 
