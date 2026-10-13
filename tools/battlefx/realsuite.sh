@@ -17,7 +17,9 @@
 # autopilot would stop at the party menu once the lead faints), a shiny wild Zigzagoon (PKMN_TEST_SHINY: its stars as it
 # appears), Fabian's Manectric holding its Mega Stone (PKMN_TEST_MEGA: the trainer's AI Mega Evolves it), and
 # a Safari Zone battle with a wild Zigzagoon (catching: A throws Safari Balls - the trainer's throw, the shakes,
-# a break-out or the catch - until it is caught or flees; exit 4, the outcome not a win). The player's own
+# a break-out or the catch - until it is caught or flees; exit 4, the outcome not a win), Wally's catch tutorial
+# (PKMN_TEST_BATTLE=tutorial: his own controller plays it - his Zigzagoon's Tackles, then he comes out and throws
+# the ball that catches the Ralts; exit 4, caught). The player's own
 # Mega Evolution needs the move menu's Mega trigger and a Pokeblock throw the Pokeblock case (the autopilot
 # only presses A): the gallery plays those animations (B_ANIM_MEGA_EVOLUTION, B_ANIM_POKEBLOCK_THROW at a
 # Safari battle's menu). Then battles fought with another first move (PKMN_TEST_FIRST_MOVE) and the lead alone
@@ -25,8 +27,8 @@
 # Rollout (animations that follow a counter over consecutive turns), a wild
 # Zigzagoon with Metronome (the move it calls is the game's own choice: its animation follows Metronome's),
 # Roxanne with Mirror Move (the copied move's animation), a wild Zigzagoon with Secret Power (the
-# environment's version), a route trainer with Fury Attack (a hit's animation for every hit) and with Fly
-# (both turns: the user away, then the strike); and the multiplayer twin Gym partners whose Pokemon start
+# environment's version), Sidney with Fury Attack (a hit's animation for every hit: his Pokemon take several),
+# a route trainer with Fly (both turns: the user away, then the strike); and the multiplayer twin Gym partners whose Pokemon start
 # a sandstorm (Shale's Hippopotas) and rain (Juan's partner's): the weather's animations every turn. Last, wild
 # battles in four other 3D environments (PKMN_TEST_WARP, as the debug menu's warp): Granite Cave, Rustboro's Gym
 # (indoors), Route 119's long grass and Mt. Chimney.
@@ -53,12 +55,13 @@ run defeat       "trainer:335" 0 PKMN_TEST_LEAD_ONLY=1 "$@"
 run shiny_wild   "wild:263:30" 1 PKMN_TEST_SHINY=1 "$@"
 run mega_trainer "trainer:759" 1 PKMN_TEST_MEGA=1 "$@"
 run safari_catch "safari:263:30" 1 "$@"
+run catch_tutorial "tutorial:0" 0 "$@"
 run fury_cutter  "trainer:265" 1 PKMN_TEST_FIRST_MOVE=210 PKMN_TEST_LEAD_ONLY=1 "$@"
 run rollout      "trainer:265" 1 PKMN_TEST_FIRST_MOVE=205 PKMN_TEST_LEAD_ONLY=1 "$@"
 run metronome    "wild:263:30" 1 PKMN_TEST_FIRST_MOVE=118 PKMN_TEST_LEAD_ONLY=1 "$@"
 run mirror_move  "trainer:265" 1 PKMN_TEST_FIRST_MOVE=119 PKMN_TEST_LEAD_ONLY=1 "$@"
 run secret_power "wild:263:30" 1 PKMN_TEST_FIRST_MOVE=290 PKMN_TEST_LEAD_ONLY=1 "$@"
-run multi_hit    "trainer:318" 1 PKMN_TEST_FIRST_MOVE=31 PKMN_TEST_LEAD_ONLY=1 "$@"
+run multi_hit    "trainer:261" 1 PKMN_TEST_FIRST_MOVE=31 PKMN_TEST_LEAD_ONLY=1 "$@"
 run two_turn     "trainer:318" 1 PKMN_TEST_FIRST_MOVE=19 PKMN_TEST_LEAD_ONLY=1 "$@"
 run sandstorm    "trainer:855" 1 "$@"
 run rain         "trainer:862" 1 "$@"

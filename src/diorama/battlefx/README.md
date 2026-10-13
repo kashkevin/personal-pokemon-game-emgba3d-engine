@@ -38,7 +38,7 @@ Hooks in game code (each under `ENABLE_DIORAMA`, GBA line numbers kept with `#li
 ROM byte-identical): `battle_anim.c` (launch, the script advancing), `sprite.c` (OAM marks),
 `main.c` (frame start and end), `pokeball.c` (a send-out's ball made), `battle_anim_throw.c` (a
 shiny Pokemon's stars), `gl_battle.c` (drawing), `gba_easy_draw.c` (BG layers left out),
-`battle_controller_player.c` and `battle_controller_safari.c` (test builds only). Fixes found by the galleries, native builds
+`battle_controller_player.c`, `battle_controller_safari.c` and `battle_controller_wally.c` (test builds only). Fixes found by the galleries, native builds
 only (`PORTABLE`): `battle_anim_effects_1.c` (Mimic without a target partner),
 `battle_anim_mon_movement.c` (Struggle Bug's partner shake without a partner),
 `platform/m4a_pc.c` (a song number past the song table: Shadow Force / Phantom Force).
@@ -111,6 +111,16 @@ and position) with the core's. To make the replay the game's own:
   1, as `battle_anim.c` does); the package's runtime made every one with 2. Future Sight's and Doom
   Desire's hit take the battle's own target again (`AnimTask_SetAnimTargetToBattlerTarget`): the
   request carries it (`battlerTarget`).
+- **The battle's attacker.** This game's `AnimSuperpowerOrb` and `AnimSuperpowerFireball` start at
+  the battle's attacker (`gBattlerAttacker`) and `AnimDragonDanceOrb` takes its radius from it,
+  where the package's ports read the animation's attacker. They are the same battler in a move's
+  animation and when a gimmick plays its animation (Ultra Burst, Mega Evolution), not when another
+  battler plays one; the request carries the battle's attacker (`battlerAttacker`) and the core
+  follows the game.
+- **The trainer who throws.** In the Safari Zone the player's left battler is the trainer's back
+  picture, and in Wally's catch tutorial once Wally has come back out to throw: the request's
+  `safari` says so (the core gives that battler the trainer's throwing frames), and
+  `catchTutorial` moves the tutorial's ball to where the game starts it (`AnimTask_ThrowBall_StandingTrainer`).
 - **Sprites a script leaves moving.** A script can end with effect sprites still moving (a caught
   ball's stars). The core goes on replaying them with the game's, a frame for each game frame, until
   the game's are gone (at most 120 frames), so they stay HD.
@@ -194,7 +204,8 @@ launchers' tasks as in a battle; `PKMN_BFX_TEST_ANIM_ATTACKER=1` plays them as t
 trainer's Mega Evolution). The battle environment test driver (test builds only) can also start a
 Safari Zone battle (`PKMN_TEST_BATTLE=safari:SPECIES:LEVEL`: the Safari menu is hooked as the
 player's, so the gallery plays the Pokeblock and rock throws and the trainer's ball throw there, and
-a fought one throws Safari Balls), make the wild Pokemon shiny (`PKMN_TEST_SHINY=1`), give the
+a fought one throws Safari Balls), start Wally's catch tutorial (`PKMN_TEST_BATTLE=tutorial:0`: his
+Zigzagoon in the party, his controller plays the battle by itself to the catch), make the wild Pokemon shiny (`PKMN_TEST_SHINY=1`), give the
 opponent's Pokemon its Mega Stone (`PKMN_TEST_MEGA=1`: the trainer's AI Mega Evolves it), and keep
 the field still while the battle waits to start (`PKMN_TEST_FREEZE_FIELD=1`, set by `gallery.sh`:
 otherwise a visible wild Pokemon may walk into the player and start another battle first;

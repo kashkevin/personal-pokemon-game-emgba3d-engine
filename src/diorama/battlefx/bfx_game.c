@@ -29,6 +29,7 @@
 #include "battle_anim.h"
 #include "battle_gfx_sfx_util.h"
 #include "battle_util.h"
+#include "data.h"
 #include "item.h"
 #include "m4a.h"
 #include "main.h"
@@ -564,6 +565,47 @@ static const char kGameHelperJs[] =
     "  B.begin = function (req) { target = req && req.battlerTarget != null ? req.battlerTarget | 0 : null; return begin.call(this, req); };\n"
     "  RT.LOGIC_TASKS.AnimTask_SetAnimTargetToBattlerTarget = function () { if (target != null && A.W) A.gBattleAnimTarget = target; return null; };\n"
     "})();\n"
+    /* The battle's attacker. Expansion's AnimSuperpowerOrb and AnimSuperpowerFireball (battle_anim_fight.c) start at
+     * gBattlerAttacker, the battle's attacker, and AnimDragonDanceOrb (battle_anim_dragon.c) takes its radius from it,
+     * where the package's ports read the animation's attacker: the same battler in a move's animation (DoMoveAnim) and
+     * when a gimmick plays its animation (TryActivateGimmick sets both), not when another battler plays one. The
+     * request's battlerAttacker is gBattlerAttacker at the launch (the engine does not change it while an animation
+     * plays); a sprite made as the game makes it is moved to where the game's is. */
+    "(function () {\n"
+    "  const RT = globalThis.BFX_RT, B = globalThis.BFX_BRIDGE; if (!RT || !RT.CB || !RT.API || !RT.C || !B) return;\n"
+    "  const A = RT.API, CB = RT.CB, C = RT.C, begin = B.begin; let atk = null;\n"
+    "  B.begin = function (req) { atk = req && req.battlerAttacker != null ? req.battlerAttacker | 0 : null; return begin.call(this, req); };\n"
+    "  const other = () => atk != null && A.W != null && atk !== A.gBattleAnimAttacker;\n"
+    "  const orb = CB.AnimSuperpowerOrb, fireball = CB.AnimSuperpowerFireball, dance = CB.AnimDragonDanceOrb;\n"
+    "  if (orb) CB.AnimSuperpowerOrb = function (sprite) {\n"
+    "    const fromAttacker = A.gBattleAnimArgs[0] === C.ANIM_ATTACKER; orb.call(this, sprite);\n"
+    "    if (!fromAttacker || !other()) return;\n"
+    "    sprite.x = A.getBattlerSpriteCoord(atk, C.BATTLER_COORD_X_2); sprite.y = A.getBattlerSpriteCoord(atk, C.BATTLER_COORD_Y_PIC_OFFSET); };\n"
+    "  if (fireball) CB.AnimSuperpowerFireball = function (sprite) {\n"
+    "    const fromAttacker = A.gBattleAnimArgs[0] === C.ANIM_ATTACKER; fireball.call(this, sprite);\n"
+    "    if (!fromAttacker || !other()) return;\n"
+    "    const b = A.gBattleAnimTarget;\n"
+    "    sprite.x = A.getBattlerSpriteCoord(atk, C.BATTLER_COORD_X_2); sprite.y = A.getBattlerSpriteCoord(atk, C.BATTLER_COORD_Y_PIC_OFFSET);\n"
+    "    sprite.data[0] = 16; sprite.data[1] = sprite.x; sprite.data[2] = A.getBattlerSpriteCoord(b, C.BATTLER_COORD_X_2);\n"
+    "    sprite.data[3] = sprite.y; sprite.data[4] = A.getBattlerSpriteCoord(b, C.BATTLER_COORD_Y_PIC_OFFSET);\n"
+    "    A.initAnimLinearTranslation(sprite); };\n"
+    "  if (dance) CB.AnimDragonDanceOrb = function (sprite) {\n"
+    "    dance.call(this, sprite); if (!other()) return;\n"
+    "    const h = A.getBattlerSpriteCoordAttr(atk, C.BATTLER_COORD_ATTR_HEIGHT) & 0xFFFF, w = A.getBattlerSpriteCoordAttr(atk, C.BATTLER_COORD_ATTR_WIDTH) & 0xFFFF;\n"
+    "    sprite.data[7] = h > w ? (h / 2) | 0 : (w / 2) | 0;\n"
+    "    sprite.x2 = A.Cos(sprite.data[6], sprite.data[7]); sprite.y2 = A.Sin(sprite.data[6], sprite.data[7]); };\n"
+    "})();\n"
+    /* The catch tutorial's throw (battle_anim_throw.c AnimTask_ThrowBall_StandingTrainer): Wally's ball starts at
+     * (32 + 32, 11 | 80), the Safari Zone's at (23 + 32, 5 | 80) - the package's port has the Safari Zone's. The
+     * request's catchTutorial is BATTLE_TYPE_CATCH_TUTORIAL; the ball (the task's data[0]) has not moved yet. */
+    "(function () {\n"
+    "  const RT = globalThis.BFX_RT; if (!RT || !RT.TK || !RT.API) return;\n"
+    "  const A = RT.API, TK = RT.TK, standing = TK.AnimTask_ThrowBall_StandingTrainer; if (!standing) return;\n"
+    "  TK.AnimTask_ThrowBall_StandingTrainer = function (taskId) {\n"
+    "    standing.call(this, taskId);\n"
+    "    const g = A.general(); if (!g || !g.catchTutorial) return;\n"
+    "    const t = A.gTasks[taskId], s = t ? A.gSprites[t.data[0]] : null; if (s && s.inUse) { s.x = 32 + 32; s.y = 11 | 80; } };\n"
+    "})();\n"
     /* The tasks' priorities. The game runs its tasks in priority order (task.c RunTasks; equal priorities in the order
      * made): createvisualtask's priority is the script's (the data's task rows carry it as their 8th field,
      * tools/battlefx/convert_data.py), createsoundtask's is 1 (battle_anim.c Cmd_createsoundtask). The runtime makes
@@ -863,6 +905,23 @@ static int AppendSetup(char *buf, int len, int size, u32 attacker, u32 target)
     return len;
 }
 
+/* The player's left battler is its trainer's back picture, which throws (battle_anim_throw.c
+ * AnimTask_ThrowBall_StandingTrainer and the Pokeblock throw move it): always in the Safari Zone; in the
+ * catch tutorial once Wally has come back out (BattleScript_ActionWallyThrow: returnatktoball,
+ * trainerslidein), when its sprite is no longer a Pokemon's picture. */
+static bool PlayerLeftIsTrainer(void)
+{
+    u32 b = GetBattlerAtPosition(B_POSITION_PLAYER_LEFT);
+    const struct Sprite *sp;
+
+    if (gBattleTypeFlags & BATTLE_TYPE_SAFARI)
+        return true;
+    if (!(gBattleTypeFlags & BATTLE_TYPE_CATCH_TUTORIAL) || b >= gBattlersCount || gBattlerSpriteIds[b] >= MAX_SPRITES)
+        return false;
+    sp = &gSprites[gBattlerSpriteIds[b]];
+    return sp->inUse && sp->anims != gAnims_MonPic;
+}
+
 /* What the battle engine hands a battle animation, read where the game's own
  * scripts and tasks read it (battle_anim_throw.c, battle_anim_new.c,
  * battle_anim_utility_funcs.c), as the core's inputs (docs: the package's
@@ -911,8 +970,9 @@ static int AppendInputs(char *buf, int len, int size, struct BfxHost *host, cons
         len = Append(buf, len, size, ",\"affection\":%u", (unsigned)GetBattlerAffectionHearts(gBattleAnimTarget));
     if (gAnimDisableStructPtr != NULL)
         len = Append(buf, len, size, ",\"syrupShiny\":%s", gAnimDisableStructPtr->syrupBombIsShiny ? "true" : "false");
-    len = Append(buf, len, size, ",\"safari\":%s,\"safariReaction\":%u",
-                 (gBattleTypeFlags & BATTLE_TYPE_SAFARI) ? "true" : "false",
+    len = Append(buf, len, size, ",\"safari\":%s,\"catchTutorial\":%s,\"safariReaction\":%u",
+                 PlayerLeftIsTrainer() ? "true" : "false",
+                 (gBattleTypeFlags & BATTLE_TYPE_CATCH_TUTORIAL) ? "true" : "false",
                  gBattleCommunication[MULTISTRING_CHOOSER] < NUM_SAFARI_REACTIONS
                      ? (unsigned)gBattleCommunication[MULTISTRING_CHOOSER] : 0u);
     return len;
@@ -1778,6 +1838,10 @@ void BattleFx_OnLaunch(uint32_t animType, uint32_t animId, const void *script)
         len = Append(request, len, sizeof(request), "}");
     }
     len = AppendSetup(request, len, sizeof(request), gBattleAnimAttacker, gBattleAnimTarget);
+    /* the battle's attacker (gBattlerAttacker), which three of the game's sprite callbacks read in place of the
+     * animation's (kGameHelperJs: the battle's attacker) */
+    if (gBattlerAttacker < MAX_BATTLERS_COUNT)
+        len = Append(request, len, sizeof(request), ",\"battlerAttacker\":%u", (unsigned)gBattlerAttacker);
     /* a status, battle or special animation's script runs in a task (kGameHelperJs: which loop runs the script) */
     if (animType != ANIM_TYPE_MOVE)
         len = Append(request, len, sizeof(request), ",\"order\":\"task\"");

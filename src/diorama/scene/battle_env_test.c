@@ -224,6 +224,8 @@ static void StartPartnerBattle(int a, int b, int partner)
     BattleSetup_StartTrainerBattle_Debug();
 }
 
+void LoadWallyZigzagoon(void); /* field_specials.c (a script special: no header declares it) */
+
 static void StartBattle(void)
 {
     char kind[16] = {0};
@@ -253,6 +255,16 @@ static void StartBattle(void)
         FlagSet(FLAG_SYS_SAFARI_MODE);
         gNumSafariBalls = 30;
         BattleSetup_StartWildBattle();
+    }
+    else if (strcmp(kind, "tutorial") == 0)
+    {
+        /* Wally's catch tutorial, as Petalburg City's scene starts it (PetalburgCity_EventScript_WallyTutorial):
+         * his Zigzagoon first in the party, a Ralts to catch. Wally's controller plays it by itself: two Tackles,
+         * then he calls Zigzagoon back, comes out and throws a Poke Ball (the trainer's throw, the catch).
+         * In memory only. */
+        SavePlayerParty();
+        LoadWallyZigzagoon();
+        StartWallyTutorialBattle();
     }
     else if (strcmp(kind, "wild2") == 0)
     {
