@@ -1,12 +1,15 @@
 #include "global.h"
 #include "mp_wild_random.h"
-#include "field_weather.h"
 #include "random.h"
 #include "rtc.h"
 #include "constants/layouts.h"
 #include "constants/map_types.h"
 #include "constants/region_map_sections.h"
+#if defined(PLATFORM_SDL2)
+#include "field_weather.h"
 #include "constants/weather.h"
+#endif
+#line 8 // gba-line
 
 #include "data/mp_wild_pool.h"
 
@@ -95,6 +98,9 @@ static u32 GetFamilyWeight(const struct MPWildFamily *family, u32 habitat, bool3
 // sun -> Fire and some Grass, sandstorm -> Ground and Rock, fog -> Ghost and some
 // Psychic, thunder -> Electric. Clear weather changes nothing. The multipliers
 // are configurable: set MP_WILD_WEATHER_ENABLED to 0 to turn the table off.
+// "Sun" is the harsh sunlight of WEATHER_DROUGHT: WEATHER_SUNNY is Emerald's
+// ordinary clear sky (most routes, towns and the sea), so it is clear weather
+// here (KNOWN_ISSUES G12).
 #ifndef MP_WILD_WEATHER_ENABLED
 #define MP_WILD_WEATHER_ENABLED 1
 #endif
@@ -130,7 +136,6 @@ static u32 GetWeatherWeight(const struct MPWildFamily *family, u32 weight, u8 we
     case WEATHER_SNOW:
         primary = TYPE_BIT(TYPE_ICE);
         break;
-    case WEATHER_SUNNY:
     case WEATHER_DROUGHT:
         primary = TYPE_BIT(TYPE_FIRE);
         secondary = TYPE_BIT(TYPE_GRASS);
@@ -167,6 +172,7 @@ static u32 GetWeatherWeight(const struct MPWildFamily *family, u32 weight, u8 we
 #define FAMILY_WEIGHT(family, habitat, night, typeBoost) \
     GetFamilyWeight(family, habitat, night, typeBoost)
 #endif
+#line 89 // gba-line
 
 static u16 ChooseMember(const struct MPWildFamily *family, u8 level)
 {
@@ -211,6 +217,7 @@ u16 MPWild_RandomizeSpecies(u16 vanillaSpecies, u8 level, enum WildPokemonArea a
 #if defined(PLATFORM_SDL2)
     u8 weather;
 #endif
+#line 130 // gba-line
 
     // Battle Frontier facilities keep their curated tables.
     if (gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS
@@ -240,6 +247,7 @@ u16 MPWild_RandomizeSpecies(u16 vanillaSpecies, u8 level, enum WildPokemonArea a
     // Underground maps keep their tables: no weather there.
     weather = (gMapHeader.mapType == MAP_TYPE_UNDERGROUND) ? WEATHER_NONE : GetCurrentWeather();
 #endif
+#line 155 // gba-line
 
     for (i = 0; i < MP_WILD_FAMILY_COUNT; i++)
         total += FAMILY_WEIGHT(&sMPWildFamilies[i], habitat, night, typeBoost);
