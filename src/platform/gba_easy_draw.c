@@ -25,10 +25,19 @@
 /* Native UI (src/native_ui): background layers the native interface draws
  * itself are left out of the picture (bit n: BG n). 0 outside it. */
 uint8_t gPlatformPictureHideBgMask;
-#define isbgEnabled(x) ((((REG_DISPCNT >> 8) & 0xF) & ~gPlatformPictureHideBgMask) & (1 << x))
 /* ...and the OAM entries it draws itself (bit n of [n / 32]: entry n; the
  * battle's healthboxes, bars and trays). 0 outside it. */
 uint32_t gPlatformPictureHideObj[4];
+#ifdef ENABLE_DIORAMA
+/* gDioramaSceneHideBg (diorama/battle_fx.h): BG layers left out of this frame
+ * as if DISPCNT had them off - an animation's effect picture that Battle FX
+ * redraws in HD. 0 outside its animations. A layer is drawn when DISPCNT has
+ * it on and neither the native UI nor Battle FX leaves it out. */
+extern uint8_t gDioramaSceneHideBg;
+#define isbgEnabled(x) ((((REG_DISPCNT >> 8) & 0xF) & ~gPlatformPictureHideBgMask & ~gDioramaSceneHideBg) & (1 << x))
+#else
+#define isbgEnabled(x) ((((REG_DISPCNT >> 8) & 0xF) & ~gPlatformPictureHideBgMask) & (1 << x))
+#endif
 
 #define WINMASK_BG0    (1 << 0)
 #define WINMASK_BG1    (1 << 1)
@@ -55,6 +64,7 @@ uint8_t gDioramaSceneLayers;
 uint8_t gDioramaSceneCover[DISPLAY_HEIGHT * DISPLAY_WIDTH];
 struct DioramaSceneEdge gDioramaSceneEdges[DISPLAY_HEIGHT][2];
 uint32_t gDioramaSceneSkipObj[4];
+uint8_t gDioramaSceneHideBg;
 int16_t gDioramaSceneLineShift[DISPLAY_HEIGHT][2];
 uint16_t gDioramaSceneArt[DISPLAY_HEIGHT * DISPLAY_WIDTH];
 bool gDioramaSceneArtWanted;

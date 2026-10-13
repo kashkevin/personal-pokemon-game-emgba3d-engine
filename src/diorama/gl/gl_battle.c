@@ -28,6 +28,7 @@
 
 #include "diorama/battle_environment.h"
 #include "diorama/battle_scene.h"
+#include "diorama/battle_fx.h"
 #include "diorama/battle_stage.h"
 #include "diorama/buildings.h"
 #include "diorama/gl_battle.h"
@@ -1795,6 +1796,7 @@ uint8_t DioramaGLBattle_BeginFrame(void)
 
     sBattle.fieldCompose = false;
     memset(gDioramaSceneSkipObj, 0, sizeof(gDioramaSceneSkipObj));
+    gDioramaSceneHideBg = 0;
     gDioramaSceneArtWanted = false;
     gDioramaSceneWideWanted = false;
     if (sBattle.active)
@@ -1841,6 +1843,9 @@ uint8_t DioramaGLBattle_BeginFrame(void)
         sBattle.mosaicLogged = false;
     sBattle.composedLastFrame = sBattle.fieldCompose;
     sBattle.sceneLayers = layers;
+    /* Battle FX (battle_fx.h): the HD effects of the frame this picture shows;
+     * the GBA effect sprites they stand in for are left out of the picture. */
+    BattleFx_FrameBoundary(sBattle.active && sBattle.frame.inBattle, gDioramaSceneSkipObj, &gDioramaSceneHideBg);
     return layers;
 }
 
@@ -3306,6 +3311,7 @@ static struct View ViewBetweenGameFrames(float frameAlpha)
 bool DioramaGLBattle_Present(SDL_Window *window, float frameAlpha)
 {
     struct Layout layout;
+    struct BattleFxLayout fxLayout;
     struct View stepped;
     bool world;
 
@@ -3353,12 +3359,21 @@ bool DioramaGLBattle_Present(SDL_Window *window, float frameAlpha)
         DrawWide(&layout);
         DrawCarriedOut(&layout);
     }
+    fxLayout.outW = layout.outW;
+    fxLayout.outH = layout.outH;
+    fxLayout.gameX = layout.gameX;
+    fxLayout.gameY = layout.gameY;
+    fxLayout.gameW = layout.gameW;
+    fxLayout.gameH = layout.gameH;
+    fxLayout.scale = layout.scale;
+    BattleFxGL_DrawBack(&fxLayout);  /* Battle FX: the effects behind the battlers */
     DrawPicture(&layout);
 #ifdef ENABLE_BATTLE_SPRITES
     /* The animated battle sprites' heads above the picture, where the window shows the world
      * (gl_battle_sprites.h). */
     DioramaGLBattleSprites_Draw(layout.outW, layout.outH, layout.gameX, layout.gameY, layout.scale);
 #endif
+    BattleFxGL_DrawFront(&fxLayout); /* and in front of them */
     if (world)
         DrawIntroBars(&layout);
     glDisable(GL_BLEND);

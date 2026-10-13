@@ -23,6 +23,10 @@
 #include "constants/moves.h"
 #include "constants/songs.h"
 #include "constants/rgb.h"
+#ifdef ENABLE_DIORAMA
+#include "diorama/battle_fx.h"
+#endif
+#line 26 // gba-line
 
 // iwram
 COMMON_DATA u32 gMonShrinkDuration = 0;
@@ -2179,6 +2183,10 @@ void TryShinyAnimation(enum BattlerId battler, struct Pokemon *mon)
             gTasks[taskDgnl].tBattler = battler;
             gTasks[taskCirc].tStarMove = SHINY_STAR_ENCIRCLE;
             gTasks[taskDgnl].tStarMove = SHINY_STAR_DIAGONAL;
+#ifdef ENABLE_DIORAMA
+            BattleFx_OnControllerAnim(BATTLEFX_CONTROLLER_SHINY, battler, 0); // diorama/battle_fx.h
+#endif
+#line 2182 // gba-line
             return;
         }
     }

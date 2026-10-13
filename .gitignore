@@ -80,3 +80,7 @@ src/data/diorama/*.generated.c
 include/diorama/*.generated.h
 /pokeemerald-mp-diorama
 /pokeemerald-mp-diorama.exe
+
+# Battle FX data (include/diorama/battle_fx.h): the animation core is shipped JavaScript
+!battlefx/*.js
+/pokeemerald-mp-diorama-bfxtest

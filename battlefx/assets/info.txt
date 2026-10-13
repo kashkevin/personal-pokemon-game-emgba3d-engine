@@ -1,0 +1,4 @@
+atlasGrid 14
+rampRows 141
+ribbonRows 8
+meshKinds rock boulder crystal gem spike ice d_shard d_caltrop d_gem d2_stone d2_iceball
