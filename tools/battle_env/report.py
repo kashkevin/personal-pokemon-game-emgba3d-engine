@@ -107,9 +107,13 @@ def main():
         rv = review.get(m, {})
         b, a = before.get(m), after.get(m)
         captured = a is not None and a['status'] == 'captured'
-        if rv.get('after') == 'n/a':
+        # the class now: round 4's (claude/battle-environments-3, 'r4'), else round 3's
+        # (claude/battle-environments-2, 'now') where it was looked at again, else with the
+        # overworld's objects ('props'), else the first rounds' ('after')
+        current = next((rv.get(k) for k in ('r4', 'now', 'props', 'after') if rv.get(k) in CLASSES), None)
+        if rv.get('after') == 'n/a' and current is None:
             state = 'excluded'   # no battle is fought on this map as it stands (a template)
-        elif rv.get('after') in CLASSES:
+        elif current is not None:
             state = 'reviewed'
         elif captured:
             state = 'tested'
@@ -130,6 +134,12 @@ def main():
             # merged with graphics-wip-20261010-8), where that was looked at
             'props_class': rv.get('props') if rv.get('props') in CLASSES else None,
             'props_notes': rv.get('props_notes', ''),
+            # round 3's class (claude/battle-environments-2) and round 4's (claude/battle-environments-3)
+            'now_class': rv.get('now') if rv.get('now') in CLASSES else None,
+            'now_notes': rv.get('now_notes', ''),
+            'r4_class': rv.get('r4') if rv.get('r4') in CLASSES else None,
+            'r4_notes': rv.get('r4_notes', ''),
+            'current_class': current,
             'state': state, 'notes': rv.get('notes', ''), 'problems': rv.get('problems', []),
             'before_png': b['png'] if b and b['status'] == 'captured' else None,
             'after_png': a['png'] if a and a['status'] == 'captured' else None,
@@ -142,25 +152,29 @@ def main():
     counts = collections.Counter(r['state'] for r in rows)
     cls_after = collections.Counter(r['after_class'] for r in rows if r['after_class'])
     cls_before = collections.Counter(r['before_class'] for r in rows if r['before_class'])
+    cls_now = collections.Counter(r['current_class'] for r in rows if r['current_class'])
     with open(os.path.join(args.out, 'report.md'), 'w') as f:
         f.write('# Battle environments: every battle map\n\n')
         f.write('%d maps: %s.\n\n' % (len(rows), ', '.join('%d %s' % (counts[k], k) for k in
                                                           ('reviewed', 'tested', 'untested', 'excluded'))))
-        f.write('Classes after: %s. Before (where reviewed): %s.\n\n' % (
+        f.write('Classes now: %s. After the first rounds: %s. Before (where reviewed): %s.\n\n' % (
+            ', '.join('%s %d' % (c, cls_now[c]) for c in CLASSES),
             ', '.join('%s %d' % (c, cls_after[c]) for c in CLASSES),
             ', '.join('%s %d' % (c, cls_before[c]) for c in CLASSES)))
         for cat in sorted({r['category'] for r in rows}):
-            f.write('\n## %s\n\n| map | battles | before | after | state | notes |\n|---|---|---|---|---|---|\n' % cat)
+            f.write('\n## %s\n\n| map | battles | before | after | now | state | notes |\n|---|---|---|---|---|---|---|\n' % cat)
             for r in rows:
                 if r['category'] != cat:
                     continue
-                f.write('| %s | %s | %s | %s | %s | %s |\n' % (
+                f.write('| %s | %s | %s | %s | %s | %s | %s |\n' % (
                     r['map'][4:], ', '.join(r['battles']), r['before_class'] or '-',
                     r['after_class'] + (' (%s with objects)' % r['props_class'] if r['props_class'] else '')
-                    if r['after_class'] else '-',
+                    if r['after_class'] else '-', r['current_class'] or '-',
                     r['state'] if r['after_status'] in ('captured', 'not surveyed')
                     else '%s (%s)' % (r['state'], r['after_status']),
-                    (r['notes'] + (' With objects: ' + r['props_notes'] if r['props_notes'] else '')).replace('|', '/')))
+                    (r['notes'] + (' With objects: ' + r['props_notes'] if r['props_notes'] else '')
+                     + (' Round 3: ' + r['now_notes'] if r['now_notes'] else '')
+                     + (' Round 4: ' + r['r4_notes'] if r['r4_notes'] else '')).replace('|', '/')))
     if args.no_html:
         return
     write_page(rows, os.path.join(args.out, 'page'), by_map, args)

@@ -490,7 +490,7 @@ static void BuildDebugImage(const struct DioramaSceneSnapshot *snapshot)
                     GL_BGRA, GL_UNSIGNED_BYTE, sDebugPixels);
 }
 
-/* What the weather layer was last made from (BuildWeatherImage): its picture
+/* What the weather layer was last made from (BuildWeatherImageFor): its picture
  * moves on 60 times a second, so at higher frame rates most frames would make
  * and upload the same picture again (performance directive, 2026-10-12). */
 struct WeatherImageKey
@@ -507,9 +507,11 @@ static struct WeatherImageKey sWeatherKey;
 static bool sWeatherKeyValid;
 static bool sWeatherImageDrawn;
 
-static bool BuildWeatherImage(const struct DioramaSceneSnapshot *snapshot)
+/* The weather's picture for `weather` (constants/weather.h): the field's own
+ * (BuildWeatherImage), or a battle's over its world (DioramaGL_DrawBattleWeather). */
+static bool BuildWeatherImageFor(uint8_t weather, const struct DioramaSceneSnapshot *snapshot)
 {
-    enum DioramaWeatherEffect effect = DioramaWeather_Classify(snapshot->weather);
+    enum DioramaWeatherEffect effect = DioramaWeather_Classify(weather);
     uint32_t phase = (uint32_t)(SDL_GetPerformanceCounter() * 60
                              / SDL_GetPerformanceFrequency());
     struct WeatherImageKey key;
@@ -520,7 +522,7 @@ static bool BuildWeatherImage(const struct DioramaSceneSnapshot *snapshot)
     key.fogScrollOffset = snapshot->fogScrollOffset;
     key.weatherBlendEVA = snapshot->weatherBlendEVA;
     key.effect = (uint8_t)effect;
-    key.weather = snapshot->weather;
+    key.weather = weather;
     key.rainVisibleCount = snapshot->rainVisibleCount;
     key.airDrawsFog = effect == DIORAMA_WEATHER_FOG && DioramaGLAir_DrawsFog();
     if (sWeatherKeyValid && memcmp(&key, &sWeatherKey, sizeof(key)) == 0)
@@ -534,8 +536,8 @@ static bool BuildWeatherImage(const struct DioramaSceneSnapshot *snapshot)
     {
         int dropCount = DioramaWeather_RainDropCount(snapshot->rainVisibleCount);
         /* A downpour's drops are longer and faster (the GBA's heavy rain). */
-        int dropLength = snapshot->weather == WEATHER_DOWNPOUR ? 11 : 7;
-        int fall = snapshot->weather == WEATHER_DOWNPOUR ? 10 : 7;
+        int dropLength = weather == WEATHER_DOWNPOUR ? 11 : 7;
+        int fall = weather == WEATHER_DOWNPOUR ? 10 : 7;
 
         for (i = 0; i < dropCount; i++)
         {
@@ -599,24 +601,26 @@ static bool BuildWeatherImage(const struct DioramaSceneSnapshot *snapshot)
     else if (effect == DIORAMA_WEATHER_SAND)
     {
         /* The air full of sand (the GBA's sandstorm layer) with streaks
-         * driven across it. */
+         * driven across it. As thick as the GBA's own, which hides much of
+         * the scene: thinner, the 3D view's sand haze and the battles' showed
+         * hardly any (the battle environments' work). */
         int x;
         int y;
 
         for (y = 0; y < DISPLAY_HEIGHT; y++)
         {
             int swirl = ((y + phase / 2) % 32);
-            int alpha = 54 + (swirl < 16 ? swirl : 32 - swirl);
+            int alpha = 66 + (swirl < 16 ? swirl : 32 - swirl);
 
             for (x = 0; x < DISPLAY_WIDTH; x++)
                 sWeatherPixels[y * DISPLAY_WIDTH + x] = RGBA(214, 178, 112, alpha);
         }
-        for (i = 0; i < 70; i++)
+        for (i = 0; i < 130; i++)
         {
             int cycleX = DISPLAY_WIDTH + 24;
             int px = (int)((i * 61 + phase * (5 + i % 3)) % cycleX) - 12;
             int py = (int)((i * 37 + phase / 3) % (DISPLAY_HEIGHT + 4)) - 2;
-            int length = 3 + i % 4;
+            int length = 4 + i % 5;
             int k;
 
             for (k = 0; k < length; k++)
@@ -678,6 +682,50 @@ static bool BuildWeatherImage(const struct DioramaSceneSnapshot *snapshot)
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT,
                     GL_BGRA, GL_UNSIGNED_BYTE, sWeatherPixels);
     sWeatherImageDrawn = true;
+    return true;
+}
+
+static bool BuildWeatherImage(const struct DioramaSceneSnapshot *snapshot)
+{
+    return BuildWeatherImageFor(snapshot->weather, snapshot);
+}
+
+static void DrawTexture(const struct DioramaTexture *texture,
+                        int outputWidth, int outputHeight,
+                        float x, float y, float width, float height,
+                        float sourceX, float sourceY, float sourceWidth, float sourceHeight,
+                        bool blend, float opacity);
+
+/* Rain, snow and the like over the whole window at one whole-number scale
+ * (not stretched to the window's shape), centred, the overhang cut off. */
+static void DrawWeatherImage(int outputWidth, int outputHeight, float opacity)
+{
+    int coverScale = (outputWidth + DISPLAY_WIDTH - 1) / DISPLAY_WIDTH;
+    int coverWidth;
+    int coverHeight;
+
+    if ((outputHeight + DISPLAY_HEIGHT - 1) / DISPLAY_HEIGHT > coverScale)
+        coverScale = (outputHeight + DISPLAY_HEIGHT - 1) / DISPLAY_HEIGHT;
+    coverWidth = DISPLAY_WIDTH * coverScale;
+    coverHeight = DISPLAY_HEIGHT * coverScale;
+    DrawTexture(&sWeatherTexture, outputWidth, outputHeight,
+                (outputWidth - coverWidth) / 2, (outputHeight - coverHeight) / 2,
+                coverWidth, coverHeight,
+                0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, opacity);
+}
+
+bool DioramaGL_DrawBattleWeather(uint8_t weather, int outputWidth, int outputHeight, float opacity)
+{
+    if (!sHasRenderedSceneSnapshot || opacity <= 0.0f || sWeatherTexture.id == 0
+     || !BuildWeatherImageFor(weather, &sRenderedSceneSnapshot))
+        return false;
+    glViewport(0, 0, outputWidth, outputHeight);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    dglUseProgram(sProgram);
+    dglBindVertexArray(sVertexArray);
+    dglActiveTexture(GL_TEXTURE0);
+    DrawWeatherImage(outputWidth, outputHeight, opacity > 1.0f ? 1.0f : opacity);
     return true;
 }
 
@@ -1536,7 +1584,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     sIntegerScale = integerScale;
     // A battle in 3D draws its whole frame; the field's scene, atlases and
     // models stay as they were for it (gl_battle.c).
-    if (sSurveyView < 0 && DioramaGLBattle_Present(sWindow))
+    if (sSurveyView < 0 && DioramaGLBattle_Present(sWindow, frameAlpha))
     {
         sDrewField3D = false;
         sLastFrame3D = true;
@@ -1842,23 +1890,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         dglUseProgram(sProgram);
         dglBindVertexArray(sVertexArray);
         if (sSurveyView < 0 && BuildWeatherImage(&sRenderedSceneSnapshot))
-        {
-            /* Rain, snow and the like over the whole window at one whole-number
-             * scale (not stretched to the window's shape), centred, the
-             * overhang cut off. */
-            int coverScale = (outputWidth + DISPLAY_WIDTH - 1) / DISPLAY_WIDTH;
-            int coverWidth;
-            int coverHeight;
-
-            if ((outputHeight + DISPLAY_HEIGHT - 1) / DISPLAY_HEIGHT > coverScale)
-                coverScale = (outputHeight + DISPLAY_HEIGHT - 1) / DISPLAY_HEIGHT;
-            coverWidth = DISPLAY_WIDTH * coverScale;
-            coverHeight = DISPLAY_HEIGHT * coverScale;
-            DrawTexture(&sWeatherTexture, outputWidth, outputHeight,
-                        (outputWidth - coverWidth) / 2, (outputHeight - coverHeight) / 2,
-                        coverWidth, coverHeight,
-                        0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, 1.0f);
-        }
+            DrawWeatherImage(outputWidth, outputHeight, 1.0f);
         if (sTerrainDebug)
         {
             BuildDebugImage(&sRenderedSceneSnapshot);
@@ -2071,15 +2103,47 @@ void DioramaGL_GetFieldCamera(float *cameraX, float *cameraZ, float *pitch, floa
 void DioramaGL_DrawBattleWorld(float cameraX, float cameraZ, float pitch, float focalLength,
                                float aspectCorrection, int outputWidth, int outputHeight)
 {
+    float sky[3] = {0.035f, 0.055f, 0.07f}; /* indoors and caves: the dark */
+    bool outdoors;
+
+    // The field's weather light (gl_light.h) first: the sky's colour follows
+    // it. Then the sun's depth map round the stage (gl_shadow.h), then the lit
+    // scene. A room's fog (the Lavaridge Gym's steam) is left out: the battle's
+    // low camera sees the whole room through it, a white veil over every wall,
+    // where the field's high one sees the floor at the player's feet; the GBA's
+    // battles show no fog there (battle_capture.c BattleWorldWeather).
+    if (sRenderedSceneSnapshot.mapType == MAP_TYPE_INDOOR
+     && DioramaWeather_Classify(sRenderedSceneSnapshot.weather) == DIORAMA_WEATHER_FOG)
+    {
+        uint8_t weather = sRenderedSceneSnapshot.weather;
+
+        sRenderedSceneSnapshot.weather = WEATHER_NONE;
+        DioramaGLLight_Update(&sRenderedSceneSnapshot, true);
+        sRenderedSceneSnapshot.weather = weather;
+    }
+    else
+        DioramaGLLight_Update(&sRenderedSceneSnapshot, true);
+    /* Outdoors the battle's world ends as the field's does (DioramaGL_Present):
+     * its cells fade into the sky's haze before they end, and what is past them
+     * - the horizon a battle's low camera looks out to - is that haze, through
+     * the palette's fade and the time of day, not the GBA's battle background. */
+    outdoors = SkyColour(&sRenderedSceneSnapshot, sky);
     glEnable(GL_SCISSOR_TEST);
     glScissor(0, 0, outputWidth, outputHeight);
-    glClearColor(0.035f, 0.055f, 0.07f, 1.0f);
+    glClearColor(sky[0], sky[1], sky[2], 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glViewport(0, 0, outputWidth, outputHeight);
-    // The field's weather light (gl_light.h), the sun's depth map round the
-    // stage (gl_shadow.h), then the lit scene.
-    DioramaGLLight_Update(&sRenderedSceneSnapshot, true);
+    if (outdoors)
+    {
+        float fogEnd = DioramaGLTerrain_FarShown() ? DIORAMA_FAR_RADIUS - 1.0f
+                                                   : DIORAMA_GRID_WIDTH / 2 - 1.0f;
+
+        DioramaGLLight_SetEdgeFog(true,
+                                  (float)(sRenderedSceneSnapshot.gridOriginX + DIORAMA_GRID_WIDTH / 2),
+                                  -(float)(sRenderedSceneSnapshot.gridOriginY + DIORAMA_GRID_HEIGHT / 2),
+                                  fogEnd - (DioramaGLTerrain_FarShown() ? 17.0f : 4.5f), fogEnd, sky);
+    }
     // The street lamps and lit windows (gl_lamps.h) round the stage, as the
     // field lights them (this pass only).
     DioramaGLLamps_SetFocus(cameraX, cameraZ);
@@ -2108,6 +2172,11 @@ void DioramaGL_DrawBattleWorld(float cameraX, float cameraZ, float pitch, float 
     // picture out, so without this pass a battle would show bare ground there.
     DioramaGLProps_Draw(cameraX, cameraZ, pitch, focalLength, aspectCorrection);
     DioramaGLBuildings_Draw(cameraX, cameraZ, pitch, focalLength, aspectCorrection);
+    // The light in the air over it (gl_air.h: sunlit dust, rays, bloom, the
+    // fog's banks), as over the field: the battle's world in the same air.
+    DioramaGLAir_Draw(cameraX, cameraZ, pitch, focalLength, aspectCorrection,
+                      outputWidth, outputHeight);
+    DioramaGLLight_SetEdgeFog(false, 0.0f, 0.0f, 0.0f, 0.0f, NULL);
     DioramaGLLamps_SetActive(false);
     glDisable(GL_SCISSOR_TEST);
 }

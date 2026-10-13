@@ -126,6 +126,13 @@ struct DioramaBattleFrame
     uint8_t battleEnvironment; /* gBattleEnvironment (BATTLE_ENVIRONMENT_*) */
     uint8_t backdropEnvironment; /* the backdrop the battle chose: a Gym's, an Elite Four room's */
     uint8_t mapType;           /* gMapHeader.mapType */
+    /* The weather in the battle's world, drawn as the field draws its own
+     * (constants/weather.h WEATHER_*; WEATHER_NONE for none): the battle's
+     * weather, which a battle takes from the place it is fought in, or a
+     * move's; the place's own before the battle has taken it; and the place's
+     * air that no battle weather stands for (Route 113's ash, the sea floor's
+     * bubbles). How the game looks only: the battle's weather is untouched. */
+    uint8_t weather;
 };
 
 /* Reads the game: only at the frame boundary, while the game thread is

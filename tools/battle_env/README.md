@@ -13,7 +13,7 @@ shipped; the survey needs a TEST build of the game.
 | `auto_rooms.py` | Reads rooms off their cells (`tools/diorama_buildings/battle_room_auto.py`), builds them with the shared model library's generator and proves them: every model against its drawing, and each room composed with every model standing in it against its drawing, pixel for pixel. `--repair N` leaves out the pieces that claim the cells that differ and proves the room again. |
 | `perf.py` | The survey's battles at 1080p, 1440p and 4K (each size on its own X display), the world redrawn every frame or kept; the game's own autopilot presses the keys (`survey.py --autopilot`). Writes `perf.json` and `perf.md`. Software OpenGL here: the times compare sizes and places, not graphics cards. |
 | `report.py` | The per-map report from the inventory, a before and an after survey and `review.json` (the classes given by looking at the pictures): `report.md`, `report.json` and `page/index.html` (`report_page.py`: coverage, the classes, every map's pictures, filters). A map is reviewed (classed), tested (photographed, not classed), untested (no picture) or excluded (`"after": "n/a"`: the Battle Pyramid's squares). |
-| `review.json` | The review: per map, the class before and after (A complete 3D, B needs polish, C partially 3D, D broken or mostly flat) and what the picture shows. Written by people (or Claude) looking at the survey's pictures, never by a script from the numbers. |
+| `review.json` | The review: per map, the class before and after (A complete 3D, B needs polish, C partially 3D, D broken or mostly flat) and what the picture shows. Written by people (or Claude) looking at the survey's pictures, never by a script from the numbers. Per map: `before` and `after` (the first rounds), `props` (with the overworld's detail objects), `now` (round 3, `claude/battle-environments-2`) and `r4` (round 4, `claude/battle-environments-3`), each with its `_notes`; the class now is the latest round's that the map has. |
 
 ## The test build
 
@@ -49,12 +49,18 @@ wild Pokemon would otherwise walk into the player, or empty the party, during th
 Any save with a party of two or more will do (`town.sav`; no save is written back). The game
 runs on the host's clock: `--hour` sets the time zone so the battles are in daylight (or at
 night). One game at a time: two at once on two cores make both too slow for the timeouts.
-`--kind trainer|wild_land|wild_water|legendary|wild` picks the battle (Routes 119 and 120 on
-their water: in the long grass the field is 2D), `--at X,Y` another cell to stand on (where two
-trainers see the test position the battle would be the two-opponent crash, KNOWN_ISSUES N37),
-`--cfg-extra 'cameraMode=diorama\n'` the Diorama camera, `--env PKMN_TEST_BATTLE=wild2:...` a
-double battle. A run whose game resumed on another map than the one asked for (a secret base
-comes back in Littleroot Town) is recorded as `wrong map`, not as a picture of that map.
+`--kind trainer|wild_land|wild_water|legendary|wild` picks the battle, `--spec` another battle
+(`trainer:ID`, `double:ID`, `partner:...`, `wild2:...`, `legendary:SPECIES:LEVEL`, `none`: the
+map's own trainers see the player) with `--label` its run's name, `--at X,Y` another cell to
+stand on, `--cfg-extra 'cameraMode=diorama\n'` the Diorama camera. `--warp-in` is for a map the
+game does not resume on (a secret base comes back in Littleroot Town): the TEST driver warps
+there in game first (`PKMN_TEST_WARP`, as the debug menu's warp does; in memory only, no save
+written), to the map's warp 0 or `--at`'s cell. `--autopilot` lets the game press its own keys
+(no xdotool), `--fight SECONDS` fights the battle through after the picture (A on the first move;
+`--env PKMN_TEST_STRONG=1` a party at level 100 that knows Flamethrower) and records how it ended
+(won, lost, crashed). A run whose game resumed on another map than the one asked for is recorded
+as `wrong map`, not as a picture of that map. Under water the survey presses no B in the field
+before the battle (B is the game's "surface?" there).
 
 `cap.json` holds, besides the camera:
 

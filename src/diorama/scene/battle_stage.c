@@ -232,8 +232,12 @@ static float FeetScore(const struct StageSearch *s, int side, float tx, float tz
         return -60.0f;
     if (cell->top > TALL)
         score -= 16.0f;
+    /* A surfing battle's Pokemon stand on the water: with the sea a level below the
+     * land (the battle environments' work: buildings.c LevelWaterBodies) a side
+     * stood on a quay, a pier or a beach stands a tile over the other, so that is
+     * as bad as the void, worse than anything standing in front of a picture. */
     if (want == DIORAMA_GROUND_WATER)
-        score += cell->kind == DIORAMA_GROUND_WATER ? 8.0f : -8.0f;
+        score += cell->kind == DIORAMA_GROUND_WATER ? 8.0f : -60.0f;
     else
     {
         if (cell->kind == DIORAMA_GROUND_WATER)

@@ -182,6 +182,122 @@ static void TestTargetOnABank(void)
     printf("  target on a bank: the battle stands at %.1f\n", result.ground);
 }
 
+/*
+ * Route 122, a wild battle surfed into below Mt. Pyre's landing (the battle survey's
+ * position, 11,4): the stage cells as the game gave them (PKMN_DIORAMA_STAGE_DUMP,
+ * cells-0.37.txt, with the sea a level below the land). The search stood the
+ * opponent on the landing's stone, a tile over the water its partner floated on
+ * (the picture showed a Tentacool on the pier). A surfing battle's sides stand on
+ * the water, at its height, wherever the stage goes.
+ */
+static void TestSurfingBelowALanding(void)
+{
+    static const struct { char c; uint8_t kind, blocked, slope; float top, lift, north; } sKinds[] = {
+        {'#', 0, 1, 0, 0.000f, 0.000f, 0.000f},
+        {'.', 0, 0, 0, 0.000f, 0.000f, 0.000f},
+        {'B', 0, 1, 0, 1.000f, 0.000f, 0.000f},
+        {'H', 0, 1, 0, 2.000f, 0.000f, 0.000f},
+        {'R', 0, 1, 0, 0.938f, -1.000f, 0.000f},
+        {'S', 0, 1, 0, 1.062f, -1.000f, 0.000f},
+        {'T', 0, 1, 0, 1.624f, 0.000f, 0.096f},
+        {'^', 0, 1, 1, 1.000f, 0.000f, 0.000f},
+        {'_', 0, 0, 0, 0.000f, -1.000f, 0.000f},
+        {'g', 1, 0, 0, 0.000f, 0.000f, 0.000f},
+        {'k', 0, 1, 0, 0.762f, 0.000f, 0.000f},
+        {'o', 0, 1, 0, 0.375f, -1.000f, 0.000f},
+        {'p', 0, 1, 0, 0.438f, -1.000f, 0.000f},
+        {'r', 0, 1, 0, 0.875f, -1.000f, 0.000f},
+        {'s', 0, 0, 1, 1.000f, 0.000f, 0.000f},
+        {'v', 0, 1, 1, 1.000f, -1.000f, 0.000f},
+        {'w', 3, 1, 0, 0.000f, -1.000f, 0.000f},
+        {'~', 3, 0, 0, 0.000f, -1.000f, 0.000f},
+    };
+    static const char *const sRows[49] = {
+        "TTTTTTTTTTTTTTTTTTTBTTTTTTTTHHHHHTT.B##TTTTTTTTTT",
+        "kkkkkkkkkkkkkkkkkkkBkkkkkkkkHHHHHkk.B##kkkkkkkkkk",
+        "TTTTTTT####TTTTTTTTB........HHHHH...B##........TT",
+        "kkkkkkk....kkkkkkkkB........HHHHH...B##........kk",
+        "TTTTTTTgggBBBBBBBBBBBBBBBBBBHHHHHBBBB##BBBBBBBBBB",
+        "kkkkkkkgggg.....ggg.........HHHHH.#vv##........gg",
+        "...............ggggg.....TT.....B.#__##.........g",
+        "...............ggggg.....kk.......####BBBBBB..BBB",
+        "..............ggggggg....TTTT#..^^#..#gg.........",
+        ".......gggBBBBBBBBBBBBB..kkkk#.......#gggBBBBBB.B",
+        ".....ggggggggggg.######..#####.......#ggggggg....",
+        "....ggggggggg##########..#####^^^#^..#BBBBBBBBBBB",
+        ".TTTTTTTT##########............ggggg............g",
+        ".kkkkkkkk######.....#^^..^^^....ggggggg.........g",
+        "^##########.....######...B######^ggggggg.......gg",
+        ".################~~~~#....#~~~~~#################",
+        "##ssssss####~~~~~~~ro#....#or~~~~~~~~~~~~~~~~~~~~",
+        "#########~~~~~~~~~~rp#....#orrr~~~~~~~~~~~~~~~~~~",
+        "~~~~~~~~~~~~~~~~~~rr~#....#~~rrrrrr~~~~~~~~~~~~~~",
+        "~~~~~~~~~~~~~~~~~~rr~~~~~~~~~~~rrrr~~~~~~~~~~~~~~",
+        "             ~~~~~RR~~~~~~~~~~~~~~rrRRRR~~~~~~~~~",
+        "             ~~~~~SS~~~~~~~~~~~~~~rrSSSSrr~~~~~~~",
+        "             ~~~~~~rr~~~~~~~~~~~~~~~~~~~rrRR~~~~~",
+        "             ~~~~~~rr~~~~~~~~~~~~~~~~~~~~~SSRRrr~",
+        "             ~~~~~RR~~~~~~~~~~~~~~~~~~~~~~~~SSrr~",
+        "             ~~~~~SS~~~~~~~~~~~~~~~~~~~~~~~~~~~rr",
+        "             ~~rrRR~~~~~~~~~~~~~~~~~~~~~~~~~~~~rr",
+        "             ~~rrSS~~~~~~~~~w^^^^^^^^^^w~~~~~~~~R",
+        "             ~rr~~~~~~~~~~~w##^^^^^^^#^^w~~~~~~~S",
+        "             ~rr~~~~~~~w^^^^^##^^^^#^#^^#w~~~~~~~",
+        "             ~RR~~~~~~w#^#^^^^#^^^^#^^^#^^w~~~~~~",
+        "             ~SS~~~~~w^^^#^#^^^#^^#^^^#^#^^w~~~~~",
+        "             ~RR~~~~w##^^^^#^#^^^^^#^^#^^^#^w~~~~",
+        "             ~SS~~~w^###^^^^##^^^^^^^#^^#^^##w~~~",
+        "             RR~~~~##^##^#^^^^#^^^^#^##^#^^###~~~",
+        "             SS~~~~###^###^#^^^^^^^####^#^^###~~~",
+        "             rr~~~~####^####^^^^^^^####^#^^###~~~",
+        "             rr~~~~####^####^^^^^^^######^####~~~",
+        "             rr~~~~####^#####^^^########^^#^##~~~",
+        "             rr~~~~####^####^#^^#^#########^##~~~",
+        "             RR~~~~####^###^#####^#^#####^^###~~~",
+        "             SS~~~~####^#^^##############^^#^#~~~",
+        "             rr~~~~###^#^#^#^^^^^#############~~~",
+        "             rr~~~~###^^#^#^#########^#^##^^#~~~~",
+        "             RR~~~~##^#^^###^^^^^^########^^#~~~~",
+        "             SS~~~~#^###^##^############^#^^#~~~~",
+        "             RR~~~~~##^^#^^##################~~~~",
+        "             SS~~~~~#^#^##^^^^#############~~~~~~",
+        "             ~rr~~~~~#^#^^#####^#######~~~~~~~~~~",
+    };
+    struct DioramaStageRequest r;
+    struct DioramaStageResult result;
+
+    memset(&sWorld, 0, sizeof(sWorld));
+    for (int y = 0; y < 49; ++y)
+        for (int x = 0; x < 49; ++x)
+            for (unsigned k = 0; k < sizeof(sKinds) / sizeof(sKinds[0]); ++k)
+                if (sKinds[k].c == sRows[y][x])
+                {
+                    struct DioramaStageCell *cell = &sWorld.cells[y + 4][x + 4];
+
+                    cell->kind = sKinds[k].kind;
+                    cell->blocked = sKinds[k].blocked;
+                    cell->slope = sKinds[k].slope;
+                    cell->top = sKinds[k].top;
+                    cell->lift = sKinds[k].lift;
+                    cell->north = sKinds[k].north;
+                    sWorld.known[y + 4][x + 4] = true;
+                }
+    /* the player at 18,11 of the dump (origin -6,-13), here 4 tiles further on */
+    Request(&r, 18 + 6 + 4, 11 + 13 + 4);
+    r.surfing = true;
+    DioramaStage_Choose(&r, &result);
+    for (int side = 0; side < 2; ++side)
+    {
+        int fx = (int)floorf(result.targetX + result.feetX[side]);
+        int fy = (int)floorf(result.targetY + result.feetY[side]);
+
+        assert(sWorld.known[fy][fx] && sWorld.cells[fy][fx].kind == DIORAMA_GROUND_WATER);
+    }
+    assert(result.ground == -1.0f);
+    printf("  surfing below a landing (Route 122): stage moved %+.0f,%+.0f, both sides on the water\n",
+           result.offsetX, result.offsetY);
+}
+
 static void TestIndoorVoid(void)
 {
     struct DioramaStageRequest r;
@@ -423,6 +539,7 @@ int main(void)
     TestWallInFront();
     TestSurfing();
     TestTargetOnABank();
+    TestSurfingBelowALanding();
     TestIndoorVoid();
     TestTreesInFrontOfTheOpponent();
     TestLeaningCrown();

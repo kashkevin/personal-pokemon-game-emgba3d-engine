@@ -130,16 +130,20 @@ class Run:
     def x(self, *args):
         return subprocess.run(['xdotool'] + list(args), env=self.env, capture_output=True, text=True).stdout
 
-    def find_window(self, timeout=30):
+    def find_window(self, timeout=90):
+        # (a busy computer: two games at once and a build took the window past half a minute)
         t0 = time.time()
         while time.time() - t0 < timeout and self.proc.poll() is None:
             ids = self.x('search', '--name', 'Pokemon Emerald').split()
             if ids:
                 self.wid = ids[-1]
                 self.x('windowfocus', self.wid)
-                g = dict(l.split('=') for l in self.x('getwindowgeometry', '--shell', self.wid).split())
-                self.geo = int(g['X']), int(g['Y']), int(g['WIDTH']), int(g['HEIGHT'])
-                return True
+                g = dict(l.split('=', 1) for l in self.x('getwindowgeometry', '--shell', self.wid).split()
+                         if '=' in l)
+                # the window may be gone again already (the game exited at once): look again
+                if all(k in g for k in ('X', 'Y', 'WIDTH', 'HEIGHT')):
+                    self.geo = int(g['X']), int(g['Y']), int(g['WIDTH']), int(g['HEIGHT'])
+                    return True
             time.sleep(0.3)
         return False
 
@@ -227,12 +231,21 @@ def run_map(args, rec, label, spec, p, results):
     env = {'PKMN_TEST_BATTLE': spec, 'PKMN_TEST_CAPTURE': os.path.join(rundir, 'cap'), 'PKMN_TEST_EXIT': '1',
            'PKMN_TEST_BATTLE_DELAY': str(args.delay), 'PKMN_TEST_CAPTURE_DELAY': str(args.capture_delay),
            'PKMN_DIORAMA_LOG': '1', 'TZ': tz_for_hour(args.hour)}
+    if args.warp_in:
+        # the game does not resume on this map (a secret base comes back in Littleroot Town):
+        # the TEST driver warps to it in game first, as the debug menu's "Warp to map warp"
+        # does (to the map's warp 0, or to --at's cell), in memory only
+        env['PKMN_TEST_WARP'] = ('%d:%d:0:%d:%d' % (rec['group'], rec['num'], p['x'], p['y'])
+                                 if args.at else '%d:%d:0' % (rec['group'], rec['num']))
     for kv in args.env:
         k, v = kv.split('=', 1)
         env[k] = v
     if args.autopilot:
         env['PKMN_TEST_AUTOPILOT'] = '1'
         env['PKMN_TEST_TIMEOUT'] = str(max(30, int(args.timeout) - 10))
+    if args.fight:
+        # A through the battle after the picture; the game reports the outcome and ends
+        env['PKMN_TEST_FIGHT'] = str(args.fight)
     t0 = time.time()
     run = Run(args.exe, rundir, args.display, env)
     status = 'timeout'
@@ -240,7 +253,8 @@ def run_map(args, rec, label, spec, p, results):
         if not run.find_window():
             status = 'no window'
         elif args.autopilot:
-            while time.time() - t0 < args.timeout and run.proc.poll() is None:
+            limit = args.timeout + (args.fight or 0)
+            while time.time() - t0 < limit and run.proc.poll() is None:
                 time.sleep(1.0)
             if os.path.exists(os.path.join(rundir, 'cap.json')):
                 status = 'captured'
@@ -262,12 +276,16 @@ def run_map(args, rec, label, spec, p, results):
             # before it: a map's own scene on arrival (the Champion walking in, a rival's
             # words) waits for a button too; B moves its text on and does nothing else in the
             # field
+            # - but under water B is the game's "surface?" (DIVE): where the sea above is open
+            # it starts that script and locks the field, and the battle never starts
+            # (Underwater Route 126), so no B there before the battle
+            field_b = rec['map_type'] != 'MAP_TYPE_UNDERWATER'
             idle = 0
             while time.time() - t0 < args.timeout and run.proc.poll() is None:
                 text = run.log_text()
                 if 'Diorama battle: 3D on' in text or 'Diorama battle: 2D' in text:
                     run.key('B', 0.08, 0.9)
-                elif 'Battle env test: starting' not in text and idle >= 3:
+                elif 'Battle env test: starting' not in text and idle >= 3 and field_b:
                     run.key('B', 0.08, 0.5)
                     idle = 0
                 else:
@@ -284,6 +302,11 @@ def run_map(args, rec, label, spec, p, results):
     log = run.log_text()
     res = {'map': rec['map'], 'label': label, 'spec': spec, 'position': p, 'category': rec['category'],
            'status': status, 'seconds': round(time.time() - t0, 1), 'dir': rundir}
+    if args.fight:
+        m = re.search(r'Battle env test: battle over, outcome \d+ \((\w+)\)', log)
+        res['fight'] = m.group(1) if m else ('crashed' if re.search(r'stack smashing|crashed|Aborted', log)
+                                              else 'not over')
+        status = res['status'] = '%s, %s' % (status, 'fought: ' + res['fight'])
     for pat, key in ((r'Diorama battle: 3D on (.*)', 'battle_3d'), (r'Diorama battle: (2D|refused|no world)(.*)', 'battle_2d'),
                      (r'Diorama battle: stage: (.*)', 'stage'), (r'Battle env test: starting (.*)', 'started'),
                      (r'Diorama battle: drawn by (.*)', 'renderer')):
@@ -333,6 +356,15 @@ def main():
                          'milliseconds): for sizes where it runs at a frame or two a second')
     ap.add_argument('--at', default='', help='X,Y: stand there instead of the map\'s test position '
                     '(with --maps; where two trainers see the test position)')
+    ap.add_argument('--spec', default='', help='the battle to start instead of the map\'s own (a '
+                    'PKMN_TEST_BATTLE spec; "none": start nothing, the map starts its own - two '
+                    'trainers who see the player)')
+    ap.add_argument('--label', default='', help='the run\'s name with --spec (default: the spec\'s kind)')
+    ap.add_argument('--fight', type=int, default=0, help='seconds: after the picture, press A '
+                    'through the battle and record how it ended (PKMN_TEST_FIGHT)')
+    ap.add_argument('--warp-in', action='store_true', help='a map the game does not resume on '
+                    '(a secret base): warp to it in game once the field is up (PKMN_TEST_WARP: its '
+                    'warp 0, or --at\'s cell), then the battle')
     args = ap.parse_args()
     args.exe = os.path.abspath(args.exe)
     args.save = os.path.abspath(args.save)
@@ -349,7 +381,12 @@ def main():
             continue
         if cats and rec['category'] not in cats:
             continue
-        for label, spec, p in choose(rec, species, trainers, args.kind):
+        options = choose(rec, species, trainers, args.kind)
+        if args.spec and options:
+            # the map's test position, another battle
+            options = [(args.label or args.spec.split(':')[0], '' if args.spec == 'none' else args.spec,
+                        options[0][2])]
+        for label, spec, p in options:
             if args.at:
                 x, y = (int(v) for v in args.at.split(','))
                 p = {'x': x, 'y': y, 'behaviour': '(--at)', 'environment': p.get('environment')}

@@ -56,7 +56,9 @@ static void TestMapSupport(void)
     assert(gDioramaLayoutV2Count == 441);
     assert(gDioramaMapV2Count == 518);
     assert(gDioramaTerrainV2Count == 325079);
-    assert(gDioramaAmbiguityV2Count == 94);
+    /* 93: the secret bases' wall pins (data/diorama/tilesets/secret_base_*.json) settled
+     * MB_SECRET_BASE_NORTH_WALL, ambiguous before (94). */
+    assert(gDioramaAmbiguityV2Count == 93);
     assert(gDioramaStructureV2Count > 2923);
     size_t terrainOffset = 0;
     for (size_t i = 0; i < gDioramaLayoutV2Count; i++)

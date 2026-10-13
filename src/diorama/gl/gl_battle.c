@@ -51,6 +51,7 @@
 #include "platform/display_settings.h"
 #include "constants/battle.h"
 #include "constants/map_types.h"
+#include "constants/weather.h"
 #ifdef DIORAMA_BATTLE_ENV_TEST
 #include "diorama/battle_env_test.h"
 #include "platform/png_write.h"
@@ -153,6 +154,12 @@ static struct
     struct View field;   /* where the field's camera was */
     struct View stage;   /* the battle camera at rest */
     struct View view;    /* this frame's */
+    /* The camera's own move (the glide, an effect's impulse) without the
+     * scenery's shift: this game frame's and the one before, for frames drawn
+     * between game frames (DioramaGLBattle_Present's frameAlpha). */
+    struct View flight, flightBefore;
+    bool viewCut; /* the view jumped (a battle begun, back from the classic view) */
+    uint32_t framesBetween; /* frames drawn from a view between game frames, for the log */
     struct IntroEffects intro;
     struct DioramaStageResult stageResult;
     uint8_t mapGroup, mapNum;
@@ -1152,6 +1159,12 @@ static void StepCamera(void)
     intro->bars = Smooth((float)sBattle.frames / BARS_IN) * (1.0f - Smooth((q - 0.35f) / 0.65f));
     intro->time = (float)sBattle.frames;
 
+    /* The camera's own move this game frame; the one before for a frame drawn
+     * between them, unless the view jumped. */
+    sBattle.flightBefore = sBattle.viewCut ? *v : sBattle.flight;
+    sBattle.flight = *v;
+    sBattle.viewCut = false;
+
     /* BG3's scroll moves the scenery: a GBA pixel at the target is this many
      * tiles - across, and along the ground foreshortened by the pitch. */
     tilesPerPixel = v->distance / v->focal;
@@ -1510,12 +1523,12 @@ static void DumpStageCells(const struct DioramaSceneSnapshot *snapshot, const st
             if (!StageCellAt((void *)now, x, y, &cell) || !StageCellAt((void *)before, x, y, &old))
                 continue;
             fprintf(file, "%d %d %u %d %d %.3f %.3f %.3f %.3f  shape %u arch %u ground %.2f top %.2f feature %.2f "
-                    "body %.2f roof %.2f facade %u x %.2f pixobj %u struct %u %ux%u\n", x, y, cell.kind,
+                    "body %.2f roof %.2f facade %u x %.2f pixobj %u struct %u %ux%u prof %u\n", x, y, cell.kind,
                     cell.blocked, cell.slope, cell.top, old.top, cell.lift, cell.north, r->shape, r->archetype,
                     r->groundHeight,
                     r->topHeight, r->featureHeight, r->structureBodyHeight, r->structureRoofHeight,
                     r->structureSouthFacadeRows, r->structureSouthFacadeUnitHeight, r->pixelObjectId, r->structureId,
-                    r->structureWidth, r->structureHeight);
+                    r->structureWidth, r->structureHeight, r->semanticProfile);
         }
     fclose(file);
 }
@@ -1633,6 +1646,8 @@ static void Begin(void)
     DioramaGL_GetFieldCamera(&cameraX, &cameraZ, &pitch, &focal, &eyeHeight, &eyeDistance);
     FieldView(&sBattle.field, &layout, cameraX, cameraZ, pitch, focal, eyeHeight, eyeDistance);
     sBattle.view = sBattle.field;
+    sBattle.viewCut = true;
+    sBattle.framesBetween = 0;
     ChooseStage(&layout, snapshot, resolved);
     /* Into 3D from the classic view in the middle of a battle: no flight. */
     if (sBattle.battleFrames > 30)
@@ -1678,10 +1693,11 @@ static void End(void)
         {
             SDL_Log("Diorama battle over after %u frames: the field's camera back "
                     "(world drawn %u times, kept %u; animated tiles redrew it %u times%s, "
-                    "every %u to %u game frames)", sBattle.frames, sWorldCache.drawn,
+                    "every %u to %u game frames; %u frames drawn between game frames)",
+                    sBattle.frames, sWorldCache.drawn,
                     sWorldCache.kept, sTileAnim.updates,
                     sTileAnim.mode == 0 ? ", off" : sTileAnim.mode == 1 ? ", forced on" : "",
-                    sTileAnim.stepMin, sTileAnim.stepMax);
+                    sTileAnim.stepMin, sTileAnim.stepMax, sBattle.framesBetween);
             SDL_Log("Diorama battle frame times: kept world %.2f ms on average (at most %.2f, %u frames); "
                     "world redrawn %.2f ms (at most %.2f, %u frames); glide %.2f ms (at most %.2f, %u frames)",
                     AverageFrameTime(&sFrameTime.kept), sFrameTime.kept.max, sFrameTime.kept.count,
@@ -1750,6 +1766,7 @@ uint8_t DioramaGLBattle_BeginFrame(void)
             /* Back to 3D: straight onto the stage, no flight. */
             sBattle.active = true;
             sBattle.suspended = false;
+            sBattle.viewCut = true;
             sWorldCache.valid = false;
             sBattle.glided = true;
             sBattle.glide = GLIDE_FRAMES;
@@ -1947,6 +1964,21 @@ static void DrawShadows(const struct Layout *layout)
         PushRect(x - rx, y - ry, x + rx, y + ry, shade);
     }
     QuadFlush(layout, sWhiteTexture, 1);
+}
+
+/* The weather in the battle's world (DioramaBattleFrame.weather) over it as
+ * over the field, under the battlers and the text; faded with the world.
+ * PKMN_DIORAMA_BATTLE_WEATHER=0 leaves it out. */
+static void DrawWeather(const struct Layout *layout)
+{
+    static int sEnabled = -1;
+    float opacity = 1.0f - sBattle.frame.fadeAmount;
+
+    if (sEnabled < 0)
+        sEnabled = EnvFloat("PKMN_DIORAMA_BATTLE_WEATHER", 1.0f) != 0.0f;
+    if (!sEnabled || sBattle.frame.weather == WEATHER_NONE || opacity <= 0.0f)
+        return;
+    DioramaGL_DrawBattleWeather(sBattle.frame.weather, layout->outW, layout->outH, opacity);
 }
 
 /* The world's fade: towards the colour the scenery's palettes fade to. */
@@ -3083,7 +3115,11 @@ static void DrawWorld(const struct Layout *layout)
 #endif
     gDioramaCameraRig.active = false;
     glViewport(0, 0, scene.outW, scene.outH);
-    DrawBackdrop(&scene);
+    /* Indoors, in caves and under the sea the GBA's battle background shows
+     * where the world has nothing; outdoors the sky's haze already does, as
+     * in the field (DioramaGL_DrawBattleWorld). */
+    if (IsIndoor(sBattle.frame.mapType))
+        DrawBackdrop(&scene);
     DioramaGLTarget_End(layout->outW, layout->outH);
     glViewport(0, 0, layout->outW, layout->outH);
     if (!sWorldCache.off)
@@ -3239,9 +3275,38 @@ void DioramaGLBattle_ComposeFieldPicture(int outW, int outH, int gameX, int game
     glDisable(GL_BLEND);
 }
 
-bool DioramaGLBattle_Present(SDL_Window *window)
+/*
+ * The view for a frame drawn between two game frames (frameAlpha, 0..1: how far
+ * from the game frame before to this one, as the field's camera and people are
+ * placed, gl_compositor.c): the camera's own move - the glide, an effect's
+ * impulse - on its way from the one to the other, so that above 60 frames a
+ * second it glides as the field's camera does instead of stepping 60 times a
+ * second; the scenery's shift (BG3's scroll) this game frame's, as the GBA
+ * picture over it is. At 1, and with the camera still, the game frame's own.
+ */
+static struct View ViewBetweenGameFrames(float frameAlpha)
+{
+    struct View v = sBattle.view;
+    const struct View *a = &sBattle.flightBefore, *b = &sBattle.flight;
+
+    if (frameAlpha >= 1.0f || memcmp(a, b, sizeof(*a)) == 0)
+        return v;
+    if (frameAlpha < 0.0f)
+        frameAlpha = 0.0f;
+    v.x = Lerp(a->x, b->x, frameAlpha) + (sBattle.view.x - b->x);
+    v.z = Lerp(a->z, b->z, frameAlpha) + (sBattle.view.z - b->z);
+    v.ground = Lerp(a->ground, b->ground, frameAlpha);
+    v.pitch = Lerp(a->pitch, b->pitch, frameAlpha);
+    v.distance = Lerp(a->distance, b->distance, frameAlpha);
+    v.focal = Lerp(a->focal, b->focal, frameAlpha);
+    v.row = Lerp(a->row, b->row, frameAlpha);
+    return v;
+}
+
+bool DioramaGLBattle_Present(SDL_Window *window, float frameAlpha)
 {
     struct Layout layout;
+    struct View stepped;
     bool world;
 
     if (!sBattle.ready || !sBattle.active)
@@ -3258,8 +3323,16 @@ bool DioramaGLBattle_Present(SDL_Window *window)
     sTest.stem = DioramaBattleEnvTest_CaptureStem();
     sTest.measured = false;
     if (sTest.stem != NULL)
+    {
         sWorldCache.valid = false; /* drawn afresh, so its depth can be read */
+        frameAlpha = 1.0f;         /* and from the game frame's own view */
+    }
 #endif
+    /* Drawn from the view between game frames; the game frame's is kept. */
+    stepped = sBattle.view;
+    sBattle.view = ViewBetweenGameFrames(frameAlpha);
+    if (memcmp(&sBattle.view, &stepped, sizeof(stepped)) != 0)
+        ++sBattle.framesBetween;
     glViewport(0, 0, layout.outW, layout.outH);
     glDisable(GL_SCISSOR_TEST);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -3271,6 +3344,7 @@ bool DioramaGLBattle_Present(SDL_Window *window)
         DrawStageLight(&layout);
         DrawFade(&layout);
         DrawShadows(&layout);
+        DrawWeather(&layout);
         DrawIntroAtmosphere(&layout);
         DrawCarriedOut(&layout);
     }
@@ -3292,6 +3366,7 @@ bool DioramaGLBattle_Present(SDL_Window *window)
     if (sTest.stem != NULL)
         TestWriteCapture(&layout);
 #endif
+    sBattle.view = stepped;
     EndFrameMeasure();
     return true;
 }

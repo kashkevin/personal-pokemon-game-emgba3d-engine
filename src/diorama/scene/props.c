@@ -107,6 +107,12 @@ static const struct DioramaProp sRustboro[] = {
     IRON_FENCE_NS(0x31D, 4),
     IRON_FENCE_EW(0x33F),
     IRON_FENCE_EW(0x352),
+    /* Southern Island's mossy stone (the only cell drawn with it), where the
+     * player meets Latias or Latios: painted with its grass on the lower layer,
+     * so the grass (colour 15) is left out and the cell's ground is its
+     * neighbours'. Added by the battle environments' work
+     * (docs/battle-environments.md): flat in that battle. */
+    { PROP(0x2C1, ROCK, RELIEF, 0, NEIGHBOUR), .keyIndex = 0xF, .depth = 12 },
 };
 
 /* Slateport: the market's baskets, pots and crates, the round bushes by the
@@ -233,7 +239,18 @@ static const struct DioramaProp sSlateport[] = {
                             .depth = 4 }
 #define WOOD_POSTS_NS(id, x) { PROP(id, FENCE, SLAB, 1, LOWER), .shadowIndex = 0xF, .shadowFromRow = 12, \
                                .depth = 4, .facing = 1, .offsetX = (x), .artMetatile = 0x291 }
+/* Route 117's and Verdanturf's flowers (pink and white 0x208-0x20F, yellow and
+ * blue 0x210-0x217: the same flower, its frames out of step): painted with
+ * their grass on the lower layer, so the cards leave the grass out (colour 13)
+ * and the cell's ground is its neighbours' plain grass. Added by the battle
+ * environments' work (docs/battle-environments.md): flat in Route 117's battles. */
+#define MAUVILLE_FLOWERS(id) { PROP(id, FLOWERS, CARDS, 0, NEIGHBOUR), .keyIndex = 0xD, .depth = 1, \
+                               .flags = DIORAMA_PROP_SWAY }
 static const struct DioramaProp sMauville[] = {
+    MAUVILLE_FLOWERS(0x208), MAUVILLE_FLOWERS(0x209), MAUVILLE_FLOWERS(0x20A), MAUVILLE_FLOWERS(0x20B),
+    MAUVILLE_FLOWERS(0x20C), MAUVILLE_FLOWERS(0x20D), MAUVILLE_FLOWERS(0x20E), MAUVILLE_FLOWERS(0x20F),
+    MAUVILLE_FLOWERS(0x210), MAUVILLE_FLOWERS(0x211), MAUVILLE_FLOWERS(0x212), MAUVILLE_FLOWERS(0x213),
+    MAUVILLE_FLOWERS(0x214), MAUVILLE_FLOWERS(0x215), MAUVILLE_FLOWERS(0x216), MAUVILLE_FLOWERS(0x217),
     WOOD_POSTS_EW(0x273),
     WOOD_POSTS_NS(0x288, -4),
     WOOD_POSTS_NS(0x28A, 4),
@@ -319,6 +336,97 @@ static const struct DioramaProp sFallarbor[] = {
     ASH_BOULDER(0x2BF),
 };
 
+/* Mt. Pyre's graves outdoors (the exterior and the summit): the stones, drawn
+ * from the front, stand as reliefs on their ground; inside, the floors' graves
+ * are the modelled rooms' own. Added by the battle environments' work
+ * (docs/battle-environments.md): flat in the exterior's battles. */
+static const struct DioramaProp sFacility[] = {
+    { PROP(0x324, DECOR, RELIEF, 1, LOWER), .depth = 8 },
+    { PROP(0x325, DECOR, RELIEF, 1, LOWER), .depth = 8 },
+};
+
+/* Sky Pillar (the Pacifidlog tileset's tower floors): its boulders and rubble
+ * heaps, all blocking the way. Where a floor is a modelled room its own pieces
+ * stand instead (DioramaProps_SetCellTaken); its top is not modelled, so there
+ * Rayquaza's battle stood among flat rubble. Low heaps of broken stone, not
+ * spires: three quarters of a tile stood the top as a field of spikes hiding
+ * the sky. Added by the battle environments' work (docs/battle-environments.md). */
+static const struct DioramaProp sPacifidlog[] = {
+    { PROP(0x207, ROCK, MOUND, 1, LOWER), .height16 = 7 },
+    { PROP(0x20F, ROCK, MOUND, 1, LOWER), .height16 = 7 },
+    { PROP(0x217, ROCK, MOUND, 1, LOWER), .height16 = 5 },
+    { PROP(0x21F, ROCK, MOUND, 1, LOWER), .height16 = 5 },
+    { PROP(0x2AD, ROCK, MOUND, 1, LOWER), .height16 = 7 },
+};
+
+/* The Trick House's eighth puzzle: its boulders (on the grass and on the floor),
+ * blocking the way; the room is not modelled (it does not pass the proof). */
+static const struct DioramaProp sTrickHousePuzzle[] = {
+    { PROP(0x214, ROCK, MOUND, 1, LOWER), .height16 = 12 },
+    { PROP(0x215, ROCK, MOUND, 1, LOWER), .height16 = 12 },
+    { PROP(0x26C, ROCK, MOUND, 1, LOWER), .height16 = 12 },
+};
+
+/* The Trainer Hill's floors (laid out at run time from the challenge's data, from
+ * these metatiles): the white blocks and the blue posts in the way, drawn on the
+ * floor as seen from above, now stand as blocks (their art on top, as the
+ * hedges). Added by the battle environments' work. */
+#define HILL_BLOCK(id) { PROP(id, DECOR, BLOCK, 1, LOWER), .height16 = 9 }
+static const struct DioramaProp sTrainerHill[] = {
+    HILL_BLOCK(0x223), HILL_BLOCK(0x224), HILL_BLOCK(0x22B), HILL_BLOCK(0x22C),
+    HILL_BLOCK(0x233), HILL_BLOCK(0x234), HILL_BLOCK(0x263), HILL_BLOCK(0x264),
+    HILL_BLOCK(0x26C), HILL_BLOCK(0x284), HILL_BLOCK(0x28B), HILL_BLOCK(0x28C),
+    HILL_BLOCK(0x294), HILL_BLOCK(0x297), HILL_BLOCK(0x2C3), HILL_BLOCK(0x2C4),
+    HILL_BLOCK(0x2CB), HILL_BLOCK(0x2CC), HILL_BLOCK(0x2D4), HILL_BLOCK(0x2D7),
+    HILL_BLOCK(0x2EB), HILL_BLOCK(0x2EC), HILL_BLOCK(0x2F4),
+};
+
+/* The Battle Frontier's east side: the round bushes round the Battle Tower and
+ * along its terraces, all blocking the way, the same bush as Slateport's
+ * (0x243). Added by the battle environments' work (docs/battle-environments.md):
+ * flat on the terrace behind the battles by the Pokemon Center. */
+static const struct DioramaProp sBattleFrontierOutsideEast[] = {
+    { PROP(0x202, BUSH, MOUND, 1, LOWER), .height16 = 11 },
+    { PROP(0x203, BUSH, MOUND, 1, LOWER), .height16 = 11 },
+};
+
+/* The Battle Pyramid's maze walls (MB_SECRET_BASE_WALL in this tileset): each
+ * floor is put together from its squares at run time, so the walls are found by
+ * their metatile, not by the floor's layout; they stand as blocks with their top
+ * drawn on, as the hedges. Added by the battle environments' work
+ * (docs/battle-environments.md): drawn flat round the Pyramid's battles. */
+#define PYRAMID_WALL(id) { PROP(id, DECOR, BLOCK, 1, LOWER), .height16 = 12 }
+static const struct DioramaProp sBattlePyramid[] = {
+    PYRAMID_WALL(0x260), PYRAMID_WALL(0x261), PYRAMID_WALL(0x262), PYRAMID_WALL(0x263),
+    PYRAMID_WALL(0x264), PYRAMID_WALL(0x265), PYRAMID_WALL(0x268), PYRAMID_WALL(0x269),
+    PYRAMID_WALL(0x26A), PYRAMID_WALL(0x26B), PYRAMID_WALL(0x26C), PYRAMID_WALL(0x270),
+    PYRAMID_WALL(0x271), PYRAMID_WALL(0x272), PYRAMID_WALL(0x273), PYRAMID_WALL(0x274),
+};
+
+/* Birth Island's three round trees (gTileset_Dewford; no other map draws these
+ * cells: Route 105's 0x341 and 0x342 and Navel Rock's bridge are other art).
+ * Each crown cell a heap of leaves lifted on the trunk - three cells wide, two
+ * rows deep, the top of the third row its hem; the few leaves at the sides lower
+ * - and the trunk's cells standing up a row north, under the crown, with the
+ * crown's hem over the trunk; the shadow the drawing paints on the grass
+ * (colours 14 and 15) left out for the real one; under it all the cells' own
+ * grass. Added by the battle environments' work (docs/battle-environments.md):
+ * the trees lay flat in the meadow where Deoxys is met (class C). */
+#define BIRTH_CROWN(id) { PROP(id, BUSH, MOUND, 1, LOWER), .height16 = 10, .lift16 = 12 }
+#define BIRTH_CROWN_SIDE(id) { PROP(id, BUSH, MOUND, 1, LOWER), .height16 = 5, .lift16 = 12 }
+#define BIRTH_CROWN_HEM(id) { PROP(id, BUSH, MOUND, 1, LOWER), .artBottom = 5, .height16 = 6, .lift16 = 12 }
+#define BIRTH_TRUNK(id) { PROP(id, BUSH, SLAB, 1, LOWER), .artBottom = 11, .keyIndex = 0xE, \
+                          .shadowIndex = 0xF, .depth = 3, .height16 = 21, .offsetZ = -16 }
+static const struct DioramaProp sDewford[] = {
+    BIRTH_CROWN(0x328), BIRTH_CROWN(0x329), BIRTH_CROWN(0x32A), BIRTH_CROWN_SIDE(0x32B),
+    BIRTH_CROWN(0x32C), BIRTH_CROWN(0x32D), BIRTH_CROWN_SIDE(0x32E), BIRTH_CROWN_SIDE(0x32F),
+    BIRTH_CROWN(0x330), BIRTH_CROWN(0x331), BIRTH_CROWN(0x332), BIRTH_CROWN(0x333),
+    BIRTH_CROWN(0x334), BIRTH_CROWN(0x335), BIRTH_CROWN(0x336), BIRTH_CROWN(0x337),
+    BIRTH_CROWN_HEM(0x338), BIRTH_TRUNK(0x339), BIRTH_CROWN_HEM(0x33A),
+    BIRTH_TRUNK(0x33C), BIRTH_TRUNK(0x33D),
+    BIRTH_CROWN_SIDE(0x340), BIRTH_CROWN(0x348),
+};
+
 /* Caves: heaps of rocks on the floor. */
 static const struct DioramaProp sCave[] = {
     { PROP(0x202, ROCK, MOUND, 1, LOWER), .height16 = 10 },
@@ -341,6 +449,13 @@ static const struct DioramaPropTileset sTilesets[] = {
     TILESET("gTileset_Mossdeep", sMossdeep),
     TILESET("gTileset_Fallarbor", sFallarbor),
     TILESET("gTileset_Petalburg", sPetalburg),
+    TILESET("gTileset_Pacifidlog", sPacifidlog),
+    TILESET("gTileset_TrickHousePuzzle", sTrickHousePuzzle),
+    TILESET("gTileset_Facility", sFacility),
+    TILESET("gTileset_TrainerHill", sTrainerHill),
+    TILESET("gTileset_BattleFrontierOutsideEast", sBattleFrontierOutsideEast),
+    TILESET("gTileset_BattlePyramid", sBattlePyramid),
+    TILESET("gTileset_Dewford", sDewford),
 };
 
 #define TILESET_COUNT (sizeof(sTilesets) / sizeof(sTilesets[0]))

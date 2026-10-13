@@ -15,12 +15,16 @@
 
 #include "global.h"
 #include "battle.h"
+#include "battle_partner.h"
 #include "battle_setup.h"
 #include "data.h"
 #include "event_object_movement.h"
+#include "field_screen_effect.h"
+#include "load_save.h"
 #include "main.h"
 #include "overworld.h"
 #include "palette.h"
+#include "party_menu.h"
 #include "pokemon.h"
 #include "script.h"
 #include "script_pokemon_util.h"
@@ -29,6 +33,8 @@
 #include "constants/items.h"
 #include "battle_gfx_sfx_util.h"
 #include "item.h"
+#include "constants/moves.h"
+#include "constants/opponents.h"
 #include "diorama/battle_env_test.h"
 
 static struct
@@ -68,6 +74,17 @@ static struct
     int paradeNext, paradeLast, paradeFrames, paradeWait;
     char paradeGender;        /* 'f' or 'm': a personality of that gender for each species */
     bool paradeShiny, paradeDone;
+    /* PKMN_TEST_FIGHT=<seconds>: after the picture, A through the battle to its end */
+    int fightSeconds;
+    unsigned int fightStartMs;
+    bool fightOver;
+    /* PKMN_TEST_STRONG=1: the party at level 100 and healed, once, when the field is up */
+    bool strong, strengthened;
+    /* PKMN_TEST_WARP=GROUP:NUM:WARP[:X:Y]: first warp there, as the debug menu's "Warp to map
+     * warp" does (a map the game does not resume on: a secret base comes back in Littleroot
+     * Town), then the battle. In memory only: the survey never writes a save. */
+    int warpGroup, warpNum, warpId, warpX, warpY;
+    bool warp, warped;
 } s;
 
 /* Frames a press is held, and released after it: a game running at a frame or two a second
@@ -125,6 +142,13 @@ static void Init(void)
         SDL_Log("Battle env test: parade of species %d to %d, %d frames each", s.paradeNext, s.paradeLast,
                 s.paradeFrames);
     }
+    s.fightSeconds = EnvInt("PKMN_TEST_FIGHT", 0);
+    s.strong = EnvInt("PKMN_TEST_STRONG", 0) != 0;
+    value = SDL_getenv("PKMN_TEST_WARP");
+    s.warpX = s.warpY = -1;
+    if (value != NULL && sscanf(value, "%d:%d:%d:%d:%d", &s.warpGroup, &s.warpNum, &s.warpId,
+                                &s.warpX, &s.warpY) >= 3)
+        s.warp = true;
     if (s.spec[0] != '\0' || s.stem[0] != '\0')
         SDL_Log("Battle env test: battle '%s' after %d field frames, capture '%s'%s",
                 s.spec, s.delay, s.stem, s.exitAfter ? ", then exit" : "");
@@ -265,6 +289,37 @@ static void StartTrainer(int a, int b, bool doubles)
     BattleSetup_StartTrainerBattle_Debug();
 }
 
+/* A Multi battle with an in-game partner, as the debug menu's "Try battle" with a
+ * partner sets one up (and a 2-vs-2 script such as Mossdeep's Space Center does):
+ * the player's three, the partner's party, one or two opponent trainers. */
+static void StartPartnerBattle(int a, int b, int partner)
+{
+    LockPlayerFieldControls();
+    FreezeObjectEvents();
+    gBattleTypeFlags = BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE;
+    TRAINER_BATTLE_PARAM.opponentA = a;
+    TRAINER_BATTLE_PARAM.opponentB = 0xFFFF;
+    CreateNPCTrainerPartyFromTrainer(gParties[B_TRAINER_OPPONENT_A], GetTrainerStructFromId(a));
+    if (b > 0)
+    {
+        TRAINER_BATTLE_PARAM.opponentB = b;
+        CreateNPCTrainerPartyFromTrainer(gParties[B_TRAINER_OPPONENT_B], GetTrainerStructFromId(b));
+        gBattleTypeFlags |= BATTLE_TYPE_TWO_OPPONENTS;
+    }
+    SavePlayerParty();
+    gPartnerTrainerId = TRAINER_PARTNER(partner);
+    gBattleTypeFlags |= BATTLE_TYPE_MULTI | BATTLE_TYPE_INGAME_PARTNER;
+    for (u32 i = 0; i < MAX_FRONTIER_PARTY_SIZE; i++)
+    {
+        gSelectedOrderFromParty[i] = i + 1;
+        gSaveBlock2Ptr->frontier.selectedPartyMons[i] = gSelectedOrderFromParty[i];
+    }
+    FillPartnerParty(gPartnerTrainerId);
+    gBattleEnvironment = BattleSetup_GetEnvironmentId();
+    CalculateEnemyPartyCount();
+    BattleSetup_StartTrainerBattle_Debug();
+}
+
 static void StartBattle(void)
 {
     char kind[16] = {0};
@@ -304,22 +359,91 @@ static void StartBattle(void)
         StartTrainer(a, 0, true);
     else if (strcmp(kind, "two") == 0)
         StartTrainer(a, b, true);
+    else if (strcmp(kind, "partner") == 0)
+        StartPartnerBattle(a, b, c);
     else
         SDL_Log("Battle env test: unknown battle kind '%s'", kind);
+}
+
+/* The test save's party at level 100, healed (PKMN_TEST_STRONG): a battle fought through
+ * with A (PKMN_TEST_FIGHT) is won and so runs through every opponent's Pokemon. A presses
+ * the first move, so that is one every type takes damage from (Flamethrower: no type is
+ * immune to Fire); the test save's own first move was a status move, used until its PP ran
+ * out. In memory only: the survey never writes a save. */
+static void StrengthenParty(void)
+{
+    for (u32 i = 0; i < PARTY_SIZE; i++)
+    {
+        struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][i];
+        u32 species = GetMonData(mon, MON_DATA_SPECIES);
+        u32 exp;
+
+        if (species == SPECIES_NONE || GetMonData(mon, MON_DATA_IS_EGG))
+            continue;
+        exp = gExperienceTables[gSpeciesInfo[species].growthRate][MAX_LEVEL];
+        SetMonData(mon, MON_DATA_EXP, &exp);
+        CalculateMonStats(mon);
+        SetMonMoveSlot(mon, MOVE_FLAMETHROWER, 0);
+    }
+    /* The Set battle style: in a single battle the Shift style asks whether to switch when
+     * the opponent sends its next Pokemon, and A's "Yes" opens the party on the battler
+     * already out ("already in battle!"), over and over. */
+    gSaveBlock2Ptr->optionsBattleStyle = OPTIONS_BATTLE_STYLE_SET;
+    HealPlayerParty();
+    SDL_Log("Battle env test: the party at level %d, healed", MAX_LEVEL);
 }
 
 void DioramaBattleEnvTest_FieldTick(void)
 {
     if (!s.init)
         Init();
+    if (s.strong && !s.strengthened)
+    {
+        s.strengthened = true;
+        StrengthenParty();
+    }
     SDL_AtomicSet(&s.fieldSeen, 1);
     if (gMain.inBattle)
         SDL_AtomicSet(&s.battleSeen, 1);
+    /* PKMN_TEST_FIGHT: the field is back after the fought battle - how it ended */
+    if (s.fightSeconds > 0 && !s.fightOver && SDL_AtomicGet(&s.menuSeen) != 0 && !gMain.inBattle)
+    {
+        s.fightOver = true;
+        SDL_Log("Battle env test: battle over, outcome %d (%s), back on map %d.%d at %d,%d",
+                gBattleOutcome, gBattleOutcome == B_OUTCOME_WON ? "won"
+                              : gBattleOutcome == B_OUTCOME_LOST ? "lost" : "other",
+                gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum,
+                gSaveBlock1Ptr->pos.x, gSaveBlock1Ptr->pos.y);
+        if (s.exitAfter)
+        {
+            fflush(stdout);
+            fflush(stderr);
+            _exit(gBattleOutcome == B_OUTCOME_WON ? 0 : 4);
+        }
+    }
     if (s.spec[0] == '\0' || s.started)
         return;
     if (ArePlayerFieldControlsLocked() || gPaletteFade.active || ScriptContext_IsEnabled())
     {
         s.fieldFrames = 0;
+        return;
+    }
+    if (s.warp && !s.warped)
+    {
+        /* the field settled first, as one would open the debug menu */
+        if (++s.fieldFrames < 30)
+            return;
+        s.warped = true;
+        s.fieldFrames = 0;
+        SDL_Log("Battle env test: warping from map %d.%d to map %d.%d warp %d (%d,%d)",
+                gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum,
+                s.warpGroup, s.warpNum, s.warpId, s.warpX, s.warpY);
+        if (s.warpX >= 0 && s.warpY >= 0)
+            SetWarpDestination(s.warpGroup, s.warpNum, WARP_ID_NONE, s.warpX, s.warpY);
+        else
+            SetWarpDestinationToMapWarp(s.warpGroup, s.warpNum, s.warpId);
+        DoWarp();
+        ResetInitialPlayerAvatarState();
         return;
     }
     if (++s.fieldFrames < s.delay)
@@ -389,7 +513,7 @@ void DioramaBattleEnvTest_OnActionMenu(void)
 {
     if (!s.init)
         Init();
-    if (s.stem[0] != '\0')
+    if (s.stem[0] != '\0' || s.fightSeconds > 0)
         SDL_AtomicSet(&s.menuSeen, 1);
     if (s.paradeFrames > 0)
         ParadeTick();
@@ -455,6 +579,40 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
     }
     if (SDL_AtomicGet(&s.menuSeen) != 0 && s.keys[0] != '\0')
         return keys | ScriptKeys();
+    /* PKMN_TEST_FIGHT: once the picture is taken (or none was asked for), A held for
+     * AUTOPILOT_HOLD frames and released for twice as long, until the field is back: the
+     * first move on the first target, every line, every question's first answer */
+    if (s.fightSeconds > 0 && SDL_AtomicGet(&s.menuSeen) != 0 && !s.fightOver
+     && (s.stem[0] == '\0' || SDL_AtomicGet(&s.captured) != 0))
+    {
+        if (s.fightStartMs == 0)
+            s.fightStartMs = nowMs == 0 ? 1 : nowMs;
+        if (nowMs - s.fightStartMs > (unsigned int)s.fightSeconds * 1000u)
+        {
+            SDL_Log("Battle env test: the battle did not end in %d seconds; giving up", s.fightSeconds);
+            s.fightOver = true;
+            if (s.exitAfter)
+            {
+                fflush(stdout);
+                fflush(stderr);
+                _exit(5);
+            }
+            return keys;
+        }
+        if (s.pressLeft > 0)
+        {
+            s.pressLeft--;
+            return keys | A_BUTTON;
+        }
+        if (s.gapLeft > 0)
+        {
+            s.gapLeft--;
+            return keys;
+        }
+        s.pressLeft = AUTOPILOT_HOLD - 1;
+        s.gapLeft = AUTOPILOT_HOLD * 2;
+        return keys | A_BUTTON;
+    }
     if (!s.autopilot || SDL_AtomicGet(&s.menuSeen) != 0)
         return keys;
     if (s.pressLeft > 0)
@@ -554,7 +712,7 @@ void DioramaBattleEnvTest_CaptureWritten(void)
         SDL_AtomicSet(&s.captured, 1);
         SDL_Log("Battle env test: captured %s", s.stem);
     }
-    if (s.exitAfter)
+    if (s.exitAfter && s.fightSeconds <= 0)
     {
         fflush(stdout);
         fflush(stderr);

@@ -80,6 +80,11 @@ void DioramaGL_GetFieldCamera(float *cameraX, float *cameraZ, float *pitch, floa
  * from the camera given, with the eye in gDioramaCameraRig. */
 void DioramaGL_DrawBattleWorld(float cameraX, float cameraZ, float pitch, float focalLength,
                                float aspectCorrection, int outputWidth, int outputHeight);
+/* The weather's rain, snow, ash, sand or bubbles over that world, drawn as the
+ * field draws its own over the 3D view, for `weather` (constants/weather.h;
+ * DioramaBattleFrame.weather), at `opacity`, over the window; false when that
+ * weather has none to draw. */
+bool DioramaGL_DrawBattleWeather(uint8_t weather, int outputWidth, int outputHeight, float opacity);
 /* That world with these tiles (the field's BG tiles, animated by
  * DioramaBattle_AnimateFieldTiles): its atlases updated where the tiles
  * changed; true when what it shows changed. */
