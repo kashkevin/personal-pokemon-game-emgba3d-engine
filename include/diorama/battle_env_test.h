@@ -35,6 +35,8 @@
  *                            holds its Mega Stone (in memory only): its AI Mega Evolves it
  *   PKMN_TEST_FREEZE_FIELD=1 the field's objects stand still while the battle waits to
  *                            start (a visible wild Pokemon cannot start another first)
+ *   PKMN_TEST_FIRST_MOVE=<n>  with PKMN_TEST_STRONG, the party's first move in place of
+ *                            Flamethrower (move number; in memory only)
  *
  * Nothing here changes a battle: it starts one the way the debug menu's
  * "Try battle" does and reads the picture.

@@ -19,7 +19,9 @@
 # a break-out or the catch - until it is caught or flees; exit 4, the outcome not a win). The player's own
 # Mega Evolution needs the move menu's Mega trigger and a Pokeblock throw the Pokeblock case (the autopilot
 # only presses A): the gallery plays those animations (B_ANIM_MEGA_EVOLUTION, B_ANIM_POKEBLOCK_THROW at a
-# Safari battle's menu).
+# Safari battle's menu). Last, Roxanne fought with Fury Cutter and Sidney with Rollout (PKMN_TEST_FIRST_MOVE):
+# animations that follow a counter over consecutive turns (gAnimDisableStructPtr's furyCutterCounter,
+# rolloutTimer).
 set -u
 OUT=$1; SAVE=$2; shift 2
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -43,4 +45,6 @@ run defeat       "trainer:335" 0 "$@"
 run shiny_wild   "wild:263:30" 1 PKMN_TEST_SHINY=1 "$@"
 run mega_trainer "trainer:759" 1 PKMN_TEST_MEGA=1 "$@"
 run safari_catch "safari:263:30" 1 "$@"
+run fury_cutter  "trainer:265" 1 PKMN_TEST_FIRST_MOVE=210 "$@"
+run rollout      "trainer:261" 1 PKMN_TEST_FIRST_MOVE=205 "$@"
 echo done >> "$OUT/realsuite.txt"
