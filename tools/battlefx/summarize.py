@@ -41,7 +41,9 @@ def summarise(folder):
     rows = load(folder / "report.jsonl")
     real = load(folder / "real_report.jsonl")
     crashes = load(folder / "crashes.jsonl")
-    out = {"folder": str(folder), "played": len(rows), "real": len(real), "crashed": [c["id"] for c in crashes]}
+    problems = (folder / "problems.txt").read_text().splitlines() if (folder / "problems.txt").exists() else []
+    out = {"folder": str(folder), "played": len(rows), "real": len(real), "crashed": [c["id"] for c in crashes],
+           "problems": problems}
     exact, diff, failed, tails, longer, shorter, stuck, leftover = [], [], [], [], [], [], [], []
     begin, step, worst, gpu, cpu = [], [], [], [], []
     gamefps, presfps, presp99 = [], [], []
@@ -102,6 +104,9 @@ def summarise(folder):
 
 def markdown(s):
     lines = ["### %s" % s["folder"], ""]
+    for p in s.get("problems", []):
+        lines.append("**NOT VALID: %s**" % p)
+        lines.append("")
     lines.append("| | |")
     lines.append("| --- | --- |")
     lines.append("| animations played (gallery) | %d |" % s["played"])

@@ -37,12 +37,15 @@ seg=0
 while :; do
   cp "$SAVE" "$OUT/test.sav"; chmod u+w "$OUT/test.sav"
   rm -f "$OUT/crash.log"
-  env SDL_AUDIODRIVER=dummy PKMN_TEST_BATTLE="$BATTLE" PKMN_TEST_AUTOPILOT=1 PKMN_TEST_BATTLE_DELAY=100 \
+  env SDL_AUDIODRIVER=dummy PKMN_TEST_BATTLE="$BATTLE" PKMN_TEST_AUTOPILOT=1 PKMN_TEST_BATTLE_DELAY=100 PKMN_TEST_FREEZE_FIELD=1 \
     PKMN_DIORAMA_LOG=1 PKMN_BFX_TEST_MOVES="$MOVES" PKMN_BFX_TEST_OUT="$OUT/out" PKMN_BFX_TEST_EXIT=1 \
     PKMN_BATTLEFX_LOG=1 PKMN_BATTLEFX_DIR="$OUT/battlefx" PKMN_BFX_TEST_FROM="$FROM" \
     "$@" timeout "${TIMEOUT:-7200}" "$OUT/game.bin" --save test.sav > "$OUT/game.$seg.log" 2>&1
   rc=$?
   echo "$rc" > "$OUT/exit.$seg"
+  # the battle asked for, not another (a wild Pokemon of the field's walking into the player first)
+  grep -q "Battle env test: starting" "$OUT/game.$seg.log" || \
+    echo "segment $seg: the battle asked for ($BATTLE) did not start; its results are not that battle's" >> "$OUT/out/problems.txt"
   [ -f "$OUT/crash.log" ] && mv "$OUT/crash.log" "$OUT/crash.$seg.log"
   if [ "$rc" -eq 0 ] || [ "$rc" -eq 6 ] || [ "$rc" -eq 4 ]; then break; fi
   LAST=$(grep -o 'Battle FX test: playing [A-Z0-9_]*' "$OUT/game.$seg.log" | tail -1 | awk '{print $5}')

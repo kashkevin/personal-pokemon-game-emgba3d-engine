@@ -33,6 +33,8 @@
  *   PKMN_TEST_SHINY=1        the wild Pokemon is shiny (in memory only)
  *   PKMN_TEST_MEGA=1         the opponent trainer's first Pokemon that can Mega Evolve
  *                            holds its Mega Stone (in memory only): its AI Mega Evolves it
+ *   PKMN_TEST_FREEZE_FIELD=1 the field's objects stand still while the battle waits to
+ *                            start (a visible wild Pokemon cannot start another first)
  *
  * Nothing here changes a battle: it starts one the way the debug menu's
  * "Try battle" does and reads the picture.

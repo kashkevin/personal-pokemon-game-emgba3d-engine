@@ -76,6 +76,8 @@ static struct
     /* PKMN_TEST_SHINY=1: the wild Pokemon is shiny; PKMN_TEST_MEGA=1: the opponent trainer's first
      * Pokemon that can Mega Evolve holds its Mega Stone (both in memory only, as the battle starts) */
     bool shiny, mega;
+    /* PKMN_TEST_FREEZE_FIELD=1: the field's objects stand still while the battle waits to start */
+    bool freezeField;
 } s;
 
 /* Frames a press is held, and released after it: a game running at a frame or two a second
@@ -108,6 +110,7 @@ static void Init(void)
     s.strong = EnvInt("PKMN_TEST_STRONG", 0) != 0;
     s.shiny = EnvInt("PKMN_TEST_SHINY", 0) != 0;
     s.mega = EnvInt("PKMN_TEST_MEGA", 0) != 0;
+    s.freezeField = EnvInt("PKMN_TEST_FREEZE_FIELD", 0) != 0;
     value = SDL_getenv("PKMN_TEST_WARP");
     s.warpX = s.warpY = -1;
     if (value != NULL && sscanf(value, "%d:%d:%d:%d:%d", &s.warpGroup, &s.warpNum, &s.warpId,
@@ -344,10 +347,10 @@ void DioramaBattleEnvTest_FieldTick(void)
         ResetInitialPlayerAvatarState();
         return;
     }
-    /* A battle fought through (PKMN_TEST_FIGHT) is the one asked for: while it waits, the field stands
-     * still, so a visible wild Pokemon does not walk into the player and start another first (KNOWN_ISSUES
-     * N33; the trainer battles below freeze it too). */
-    if (s.fightSeconds > 0)
+    /* PKMN_TEST_FREEZE_FIELD: the battle that starts is the one asked for - while it waits, the field
+     * stands still, so a visible wild Pokemon does not walk into the player and start another first
+     * (KNOWN_ISSUES N33; the trainer battles below freeze it too). */
+    if (s.freezeField)
         FreezeObjectEvents();
     if (++s.fieldFrames < s.delay)
         return;
