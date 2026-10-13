@@ -32,6 +32,9 @@ struct BattleFxShownFrame
 
 /* The frame OAM entry `oamIndex` is drawn as in the picture just drawn; false: its own GBA tiles. */
 bool BattleFx_ShownFrame(int oamIndex, struct BattleFxShownFrame *out);
+/* Whether the copy of a battler a move put on BG layer `bg` (1, 2: the scripts' "monbg") is drawn as such a frame
+ * in the picture just drawn. */
+bool BattleFx_ShownBgCopy(int bg);
 
 /* Whether this build can show other frames at all (built with the animated battle sprites). */
 bool BattleFx_ShownFramesBuilt(void);

@@ -202,6 +202,8 @@ struct Attach
                                      * region placed (half size), the scale (shown body / GBA picture's) */
     float feet[3], groundR;         /* world: its feet and the ground region's radius (decals) */
     float pivot[2];                 /* the shown body's centre now (the glow grows about it) */
+    float crel[2];                  /* c from where the core has the battler (its gba position): for a battler a
+                                     * script moved to a BG layer ("monbg"), no longer in OAM */
     /* the shown body's box (texture space), a running mean over the frames of one look: the look's frames
      * (an idle animation) move a little and the effects should not shake with them */
     uint32_t look;
@@ -1376,8 +1378,26 @@ static void AttachOne(const struct Frame *f, int b, float T)
     uint32_t look = 2166136261u;
 
     a->frame = a->on = false;
-    if (!g->shown || !BattleFx_ShownFrame(g->oam, &a->view))
+    if (!g->shown)
+    {
+        /* not in OAM: a script moved it to BG1 or BG2 ("monbg": a copy of its picture the layer's scroll moves),
+         * which the animated sprites draw from their frame as well. The core follows the copy (B->gba); the
+         * placing measured while it was a sprite goes with it. */
+        if (BattleFx_Attach() && s.attachInjected && a->n > 0 && B->present && B->drawn
+         && (B->onBgLayer == 1 || B->onBgLayer == 2) && BattleFx_ShownBgCopy(B->onBgLayer))
+        {
+            a->c[0] = B->gba[0] + a->crel[0];
+            a->c[1] = B->gba[1] + a->crel[1];
+            memcpy(a->feet, B->feet, sizeof(a->feet));
+            a->on = true;
+        }
         return;
+    }
+    if (!BattleFx_ShownFrame(g->oam, &a->view))
+    {
+        a->n = 0; /* drawn from its GBA picture now (a form the pack has not): the look measured is not this one */
+        return;
+    }
     if (a->view.width > SHOWN_TEX || a->view.height > SHOWN_TEX)
         return; /* never in the pack (its largest frame is 155 x 121): the GBA picture's shape stays */
     a->frame = true;
@@ -1433,6 +1453,8 @@ static void AttachOne(const struct Frame *f, int b, float T)
     a->d[0] = shown[0] - a->c[0];
     a->d[1] = shown[1] - a->c[1];
     ExtentToScreen(g, rt[0], rt[1], a->r);
+    a->crel[0] = a->c[0] - B->gba[0];
+    a->crel[1] = a->c[1] - B->gba[1];
     memcpy(a->feet, B->feet, sizeof(a->feet));
     depth = (a->feet[0] - s.attachCam[0]) * s.attachCam[12] + (a->feet[1] - s.attachCam[1]) * s.attachCam[13]
           + (a->feet[2] - s.attachCam[2]) * s.attachCam[14];
