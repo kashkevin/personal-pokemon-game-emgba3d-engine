@@ -729,3 +729,457 @@ int NativeSelfTest_LineBreak(void)
     printf("selftest-line-break: %d checks, %d failed\n", sBreakChecks, sBreakFailures);
     return sBreakFailures ? 1 : 0;
 }
+
+// ---------------------------------------------------------------------------
+// --selftest-wild-weather (EmeraldTogether expansion Phase 2): the weather table
+// of the randomized wild Pokemon (src/mp_wild_random.c, PC builds), checked
+// through the game's own code on real map headers:
+//   1. clear weather leaves the Phase 0 weights (rarity tier 10:5:2:1 x3, time
+//      of day x3 or /3, the map's area types x3, at least 1);
+//   2. the owner's table, written out again here: rain Water x3; heavy rain
+//      Water x3 and the rare families x2; thunder Electric x3 (Water x2); snow
+//      Ice x3; sun and drought Fire x3 (Grass x2); sandstorm Ground x3 (Rock
+//      x2); fog Ghost x3 (Psychic x2); every other weather changes nothing - for
+//      every family, habitat and time of day;
+//   3. underground maps ignore the weather (the same weights and the same
+//      Pokemon in every weather);
+//   4. the game's own roll (MPWild_RandomizeSpecies, weather read from the
+//      weather engine, time of day from the clock) picks exactly the family
+//      these weights pick, for land, surfing, fishing and Rock Smash;
+//   5. the Battle Frontier's Pike and Pyramid keep their own Pokemon.
+// --dump-wild-weights KEYS OUT writes the land weights of the maps listed in
+// KEYS ("group.number" per line) for both times of day and every weather, the
+// family table and the clock's time of day per hour, for the app's
+// scripts/multiplayer/check_engine_spawn_weights.py (the host must match).
+// ---------------------------------------------------------------------------
+
+#include "field_weather.h"
+#include "load_save.h"
+#include "mp_wild_random.h"
+#include "overworld.h"
+#include "random.h"
+#include "rtc.h"
+#include "constants/layouts.h"
+#include "constants/map_types.h"
+#include "constants/maps.h"
+#include "constants/weather.h"
+
+extern const struct MapHeader *const *const gMapGroups[];
+extern u32 MPWild_TestFamilyCount(void);
+extern const struct MPWildFamily *MPWild_TestFamily(u32 index);
+extern const struct MPWildMember *MPWild_TestMembers(void);
+extern u32 MPWild_TestFamilyWeight(u32 index, u32 habitat, bool32 night, u8 weather);
+
+#define NO_TYPE 0xFF
+
+static const struct { u8 weather; u8 primary; u8 secondary; bool8 heavy; const char *name; } sOwnerWeather[] = {
+    {WEATHER_RAIN,              TYPE_WATER,    NO_TYPE,      FALSE, "rain"},
+    {WEATHER_DOWNPOUR,          TYPE_WATER,    NO_TYPE,      TRUE,  "heavy rain"},
+    {WEATHER_RAIN_THUNDERSTORM, TYPE_ELECTRIC, TYPE_WATER,   FALSE, "thunderstorm"},
+    {WEATHER_SNOW,              TYPE_ICE,      NO_TYPE,      FALSE, "snow"},
+    {WEATHER_SUNNY,             TYPE_FIRE,     TYPE_GRASS,   FALSE, "sun"},
+    {WEATHER_DROUGHT,           TYPE_FIRE,     TYPE_GRASS,   FALSE, "drought"},
+    {WEATHER_SANDSTORM,         TYPE_GROUND,   TYPE_ROCK,    FALSE, "sandstorm"},
+    {WEATHER_FOG,               TYPE_GHOST,    TYPE_PSYCHIC, FALSE, "fog"},
+    {WEATHER_FOG_HORIZONTAL,    TYPE_GHOST,    TYPE_PSYCHIC, FALSE, "fog (horizontal)"},
+    {WEATHER_FOG_DIAGONAL,      TYPE_GHOST,    TYPE_PSYCHIC, FALSE, "fog (diagonal)"},
+};
+
+static const u32 sHabitats[] = {MP_WILD_HABITAT_LAND, MP_WILD_HABITAT_SURF, MP_WILD_HABITAT_FISH, MP_WILD_HABITAT_ROCK};
+static const char *const sHabitatNames[] = {"land", "surfing", "fishing", "Rock Smash"};
+
+static int sWeatherChecks, sWeatherFailures;
+
+static void ExpectWeather(const char *what, bool32 ok)
+{
+    sWeatherChecks++;
+    if (!ok)
+        sWeatherFailures++;
+    printf("%s %s\n", ok ? "ok  " : "FAIL", what);
+}
+
+static void UseMap(u16 map)
+{
+    gMapHeader = *Overworld_GetMapHeaderByGroupAndId(MAP_GROUP(map), MAP_NUM(map));
+}
+
+static bool32 HasType(const struct MPWildFamily *family, u8 type)
+{
+    return type != NO_TYPE && (family->type1 == type || family->type2 == type);
+}
+
+// The weather's multiplier for a family by the owner's table (1 when neutral).
+static u32 OwnerFactor(const struct MPWildFamily *family, u8 weather)
+{
+    u32 i, factor = 1;
+
+    for (i = 0; i < ARRAY_COUNT(sOwnerWeather); i++)
+    {
+        if (sOwnerWeather[i].weather != weather)
+            continue;
+        if (HasType(family, sOwnerWeather[i].primary))
+            factor *= 3;
+        if (HasType(family, sOwnerWeather[i].secondary))
+            factor *= 2;
+        if (sOwnerWeather[i].heavy && family->tier >= MP_WILD_TIER_RARE)
+            factor *= 2;
+    }
+    return factor;
+}
+
+static const char *WeatherName(u8 weather)
+{
+    static const char *const sOther[WEATHER_COUNT] = {
+        [WEATHER_NONE] = "clear", [WEATHER_SUNNY_CLOUDS] = "sunny clouds", [WEATHER_VOLCANIC_ASH] = "volcanic ash",
+        [WEATHER_UNDERWATER] = "underwater", [WEATHER_SHADE] = "shade", [WEATHER_UNDERWATER_BUBBLES] = "bubbles",
+        [WEATHER_ABNORMAL] = "abnormal", [WEATHER_ROUTE119_CYCLE] = "Route 119 cycle",
+        [WEATHER_ROUTE123_CYCLE] = "Route 123 cycle", [WEATHER_DYNAMIC] = "dynamic",
+    };
+    u32 i;
+
+    for (i = 0; i < ARRAY_COUNT(sOwnerWeather); i++)
+    {
+        if (sOwnerWeather[i].weather == weather)
+            return sOwnerWeather[i].name;
+    }
+    return weather < WEATHER_COUNT && sOther[weather] ? sOther[weather] : "?";
+}
+
+// 1. Clear weather: the Phase 0 weights (area types as the map's own boost).
+static void CheckClearWeights(const char *mapName, u32 areaTypes)
+{
+    static const u32 sTier[MP_WILD_TIER_COUNT] = {30, 15, 6, 3};
+    u32 i, h, night, bad = 0, n = MPWild_TestFamilyCount();
+    char what[160];
+
+    for (h = 0; h < ARRAY_COUNT(sHabitats); h++)
+    {
+        for (night = 0; night < 2; night++)
+        {
+            for (i = 0; i < n; i++)
+            {
+                const struct MPWildFamily *family = MPWild_TestFamily(i);
+                u32 want = 0, got = MPWild_TestFamilyWeight(i, sHabitats[h], night, WEATHER_NONE);
+
+                if (family->habitat & sHabitats[h])
+                {
+                    want = sTier[family->tier];
+                    if (family->time == MP_WILD_TIME_NOCTURNAL)
+                        want = night ? want * 3 : want / 3;
+                    else if (family->time == MP_WILD_TIME_DIURNAL)
+                        want = night ? want / 3 : want * 3;
+                    if (areaTypes & ((1u << family->type1) | (1u << family->type2)))
+                        want *= 3;
+                    if (want == 0)
+                        want = 1;
+                }
+                if (got != want && bad++ == 0)
+                    printf("  %s, %s, %s: family %u weighs %u, want %u\n", mapName, sHabitatNames[h],
+                           night ? "night" : "day", i, got, want);
+            }
+        }
+    }
+    snprintf(what, sizeof(what), "%s, clear weather: the Phase 0 weights (%u families, 4 habitats, day and night)",
+             mapName, n);
+    ExpectWeather(what, bad == 0);
+}
+
+// 2. and 3. Every weather against clear weather, for every family, habitat and
+// time of day: the owner's factor, or none at all underground.
+static void CheckWeatherTable(const char *mapName, bool32 underground)
+{
+    u32 w, i, h, night, n = MPWild_TestFamilyCount();
+    char what[200];
+
+    for (w = 0; w < WEATHER_COUNT; w++)
+    {
+        u32 bad = 0, boosted = 0;
+
+        for (h = 0; h < ARRAY_COUNT(sHabitats); h++)
+        {
+            for (night = 0; night < 2; night++)
+            {
+                for (i = 0; i < n; i++)
+                {
+                    const struct MPWildFamily *family = MPWild_TestFamily(i);
+                    u32 clear = MPWild_TestFamilyWeight(i, sHabitats[h], night, WEATHER_NONE);
+                    u32 got = MPWild_TestFamilyWeight(i, sHabitats[h], night, w);
+                    u32 want = underground ? clear : clear * OwnerFactor(family, w);
+
+                    if (got != clear)
+                        boosted++;
+                    if (got != want && bad++ == 0)
+                        printf("  %s, %s, %s, %s: family %u weighs %u, want %u\n", mapName, WeatherName(w),
+                               sHabitatNames[h], night ? "night" : "day", i, got, want);
+                }
+            }
+        }
+        if (underground)
+            snprintf(what, sizeof(what), "%s (underground), %s: the clear-weather weights", mapName, WeatherName(w));
+        else
+            snprintf(what, sizeof(what), "%s, %s: the owner's table (%u family weights changed)", mapName,
+                     WeatherName(w), boosted);
+        ExpectWeather(what, bad == 0);
+    }
+}
+
+static s32 FamilyOfSpecies(u16 species)
+{
+    const struct MPWildMember *members = MPWild_TestMembers();
+    u32 i, j, n = MPWild_TestFamilyCount();
+
+    for (i = 0; i < n; i++)
+    {
+        const struct MPWildFamily *family = MPWild_TestFamily(i);
+        for (j = 0; j < family->memberCount; j++)
+        {
+            if (members[family->firstMember + j].species == species)
+                return i;
+        }
+    }
+    return -1;
+}
+
+// 4. The game's own roll against these weights: the same random state, the
+// family the weights pick against the family of the Pokemon the game made.
+static void CheckGameRoll(const char *mapName, u8 weather, u16 hour, enum WildPokemonArea area, u32 habitat,
+                          const char *areaName, u32 draws)
+{
+    u32 i, k, total, roll, mismatches = 0, n = MPWild_TestFamilyCount();
+    bool32 night;
+    char what[200];
+
+    SetTimeOfDay(hour);
+    night = (GetTimeOfDay() == TIME_EVENING || GetTimeOfDay() == TIME_NIGHT);
+    gWeatherPtr->currWeather = weather;
+    for (i = 0; i < draws; i++)
+    {
+        rng_value_t saved = gRngValue;
+        s32 want = -1, got;
+
+        total = 0;
+        for (k = 0; k < n; k++)
+            total += MPWild_TestFamilyWeight(k, habitat, night, weather);
+        roll = Random32() % total;
+        for (k = 0; k < n; k++)
+        {
+            u32 weight = MPWild_TestFamilyWeight(k, habitat, night, weather);
+            if (roll < weight)
+            {
+                want = k;
+                break;
+            }
+            roll -= weight;
+        }
+        gRngValue = saved;
+        got = FamilyOfSpecies(MPWild_RandomizeSpecies(SPECIES_ZIGZAGOON, 30, area));
+        if (got != want && mismatches++ == 0)
+            printf("  %s, %s, %s, hour %u, draw %u: the game made family %d, the weights pick %d\n", mapName,
+                   WeatherName(weather), areaName, hour, i, got, want);
+    }
+    snprintf(what, sizeof(what), "%s, %s, %s, %s (hour %u): the game's roll follows these weights (%u draws)",
+             mapName, WeatherName(weather), areaName, night ? "night" : "day", hour, draws);
+    ExpectWeather(what, mismatches == 0);
+}
+
+static void RunSpecies(u16 *out, u32 count, u8 weather, u32 seed)
+{
+    u32 i;
+
+    SeedRng(seed);
+    gWeatherPtr->currWeather = weather;
+    for (i = 0; i < count; i++)
+        out[i] = MPWild_RandomizeSpecies(SPECIES_ZIGZAGOON, 30, WILD_AREA_LAND);
+}
+
+// The share of the weight (land, day) held by families of a type, per mille.
+static u32 TypeShare(u8 type, u8 weather, bool32 rareTiers)
+{
+    u32 i, all = 0, part = 0, n = MPWild_TestFamilyCount();
+
+    for (i = 0; i < n; i++)
+    {
+        const struct MPWildFamily *family = MPWild_TestFamily(i);
+        u32 weight = MPWild_TestFamilyWeight(i, MP_WILD_HABITAT_LAND, FALSE, weather);
+        all += weight;
+        if (rareTiers ? family->tier >= MP_WILD_TIER_RARE : HasType(family, type))
+            part += weight;
+    }
+    return all ? part * 1000 / all : 0;
+}
+
+int NativeSelfTest_WildWeather(void)
+{
+    static u16 sRain[400], sClear[400];
+    static const struct { u16 map; const char *name; u32 areaTypes; } sRoutes[] = {
+        {MAP_ROUTE101, "Route 101", 0},
+        {MAP_ROUTE119, "Route 119", (1u << TYPE_GRASS) | (1u << TYPE_BUG) | (1u << TYPE_WATER)},
+        {MAP_ROUTE111, "Route 111", (1u << TYPE_GROUND) | (1u << TYPE_ROCK)},
+    };
+    static const struct { u8 weather; u16 hour; } sRolls[] = {
+        {WEATHER_NONE, 12}, {WEATHER_RAIN, 12}, {WEATHER_DOWNPOUR, 22}, {WEATHER_RAIN_THUNDERSTORM, 19},
+        {WEATHER_SUNNY, 9}, {WEATHER_SANDSTORM, 15}, {WEATHER_FOG_HORIZONTAL, 2}, {WEATHER_SHADE, 12},
+    };
+    static const struct { enum WildPokemonArea area; u32 habitat; const char *name; } sAreas[] = {
+        {WILD_AREA_LAND, MP_WILD_HABITAT_LAND, "land"},
+        {WILD_AREA_WATER, MP_WILD_HABITAT_SURF, "surfing"},
+        {WILD_AREA_FISHING, MP_WILD_HABITAT_FISH, "fishing"},
+        {WILD_AREA_ROCKS, MP_WILD_HABITAT_ROCK, "Rock Smash"},
+    };
+    const u32 caveTypes = (1u << TYPE_ROCK) | (1u << TYPE_GROUND) | (1u << TYPE_DARK) | (1u << TYPE_GHOST)
+                        | (1u << TYPE_POISON) | (1u << TYPE_STEEL);
+    u32 i, a, differ;
+    char what[160];
+
+    SetSaveBlocksPointers(0); // the clock reads the save's time offset when not connected
+    printf("wild Pokemon and the weather (Phase 2), %u families\n", MPWild_TestFamilyCount());
+
+    for (i = 0; i < ARRAY_COUNT(sRoutes); i++)
+    {
+        UseMap(sRoutes[i].map);
+        ExpectWeather("a route is not underground", gMapHeader.mapType != MAP_TYPE_UNDERGROUND);
+        CheckClearWeights(sRoutes[i].name, sRoutes[i].areaTypes);
+        CheckWeatherTable(sRoutes[i].name, FALSE);
+    }
+    UseMap(MAP_GRANITE_CAVE_1F);
+    ExpectWeather("Granite Cave 1F is underground", gMapHeader.mapType == MAP_TYPE_UNDERGROUND);
+    CheckClearWeights("Granite Cave 1F", caveTypes);
+    CheckWeatherTable("Granite Cave 1F", TRUE);
+
+    // 4. The game's roll, on a route with area types and in the cave.
+    for (i = 0; i < ARRAY_COUNT(sRolls); i++)
+    {
+        UseMap(MAP_ROUTE119);
+        SeedRng(0x5EED0000 + i);
+        for (a = 0; a < ARRAY_COUNT(sAreas); a++)
+            CheckGameRoll("Route 119", sRolls[i].weather, sRolls[i].hour, sAreas[a].area, sAreas[a].habitat,
+                          sAreas[a].name, 300);
+    }
+    UseMap(MAP_GRANITE_CAVE_1F);
+    SeedRng(0xCA5E);
+    CheckGameRoll("Granite Cave 1F", WEATHER_RAIN, 12, WILD_AREA_LAND, MP_WILD_HABITAT_LAND, "land", 300);
+    CheckGameRoll("Granite Cave 1F", WEATHER_SANDSTORM, 22, WILD_AREA_ROCKS, MP_WILD_HABITAT_ROCK, "Rock Smash", 300);
+
+    // 3. Underground: the same Pokemon, one by one, in rain as in clear weather;
+    // on a route the rain does change them (the weather engine is really read).
+    SetTimeOfDay(12);
+    UseMap(MAP_GRANITE_CAVE_1F);
+    RunSpecies(sRain, ARRAY_COUNT(sRain), WEATHER_RAIN, 0xB0B);
+    RunSpecies(sClear, ARRAY_COUNT(sClear), WEATHER_NONE, 0xB0B);
+    ExpectWeather("Granite Cave 1F: the same 400 Pokemon in rain as in clear weather",
+                  memcmp(sRain, sClear, sizeof(sRain)) == 0);
+    UseMap(MAP_ROUTE119);
+    RunSpecies(sRain, ARRAY_COUNT(sRain), WEATHER_RAIN, 0xB0B);
+    RunSpecies(sClear, ARRAY_COUNT(sClear), WEATHER_NONE, 0xB0B);
+    for (i = 0, differ = 0; i < ARRAY_COUNT(sRain); i++)
+        differ += sRain[i] != sClear[i];
+    snprintf(what, sizeof(what), "Route 119: rain changes some of 400 Pokemon (%u differ)", differ);
+    ExpectWeather(what, differ > 0);
+
+    // 5. The Battle Frontier keeps its own Pokemon in any weather.
+    gMapHeader.mapLayoutId = LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS;
+    gWeatherPtr->currWeather = WEATHER_RAIN;
+    ExpectWeather("Battle Pike: its own Pokemon", MPWild_RandomizeSpecies(SPECIES_SEVIPER, 60, WILD_AREA_LAND) == SPECIES_SEVIPER);
+    gMapHeader.mapLayoutId = LAYOUT_BATTLE_FRONTIER_BATTLE_PYRAMID_FLOOR;
+    gWeatherPtr->currWeather = WEATHER_SANDSTORM;
+    ExpectWeather("Battle Pyramid: its own Pokemon", MPWild_RandomizeSpecies(SPECIES_SANDSLASH, 60, WILD_AREA_LAND) == SPECIES_SANDSLASH);
+
+    // What a player sees on Route 101 by day (land): the share of each table's
+    // types, clear weather -> that weather.
+    UseMap(MAP_ROUTE101);
+    printf("  Route 101, land, day: share of the weight, clear -> weather\n");
+    for (i = 0; i < ARRAY_COUNT(sOwnerWeather); i++)
+    {
+        u32 before = TypeShare(sOwnerWeather[i].primary, WEATHER_NONE, FALSE);
+        u32 after = TypeShare(sOwnerWeather[i].primary, sOwnerWeather[i].weather, FALSE);
+        u32 rareBefore = TypeShare(0, WEATHER_NONE, TRUE), rareAfter = TypeShare(0, sOwnerWeather[i].weather, TRUE);
+
+        printf("    %-16s type %2u: %3u.%u%% -> %3u.%u%%", sOwnerWeather[i].name, sOwnerWeather[i].primary,
+               before / 10, before % 10, after / 10, after % 10);
+        if (sOwnerWeather[i].heavy)
+            printf("; rare and very rare: %u.%u%% -> %u.%u%%", rareBefore / 10, rareBefore % 10, rareAfter / 10,
+                   rareAfter % 10);
+        printf("\n");
+        if (sOwnerWeather[i].heavy)
+            ExpectWeather("heavy rain: more rare families", rareAfter > rareBefore);
+        snprintf(what, sizeof(what), "%s: the main type's share at least doubles", sOwnerWeather[i].name);
+        ExpectWeather(what, after >= 2 * before && before > 0);
+    }
+
+    SetTimeOfDay(0);
+    gWeatherPtr->currWeather = WEATHER_NONE;
+    printf("selftest-wild-weather: %d checks, %d failed\n", sWeatherChecks, sWeatherFailures);
+    return sWeatherFailures ? 1 : 0;
+}
+
+int NativeSelfTest_DumpWildWeights(const char *keysPath, const char *outPath)
+{
+    static const char *const sTimes[] = {"morning", "day", "evening", "night"};
+    FILE *keys = fopen(keysPath, "r"), *out = fopen(outPath, "w");
+    char line[64];
+    u32 i, n = MPWild_TestFamilyCount(), maps = 0;
+    u16 hour;
+
+    if (keys == NULL || out == NULL)
+    {
+        fprintf(stderr, "dump-wild-weights: cannot open %s or %s\n", keysPath, outPath);
+        return 2;
+    }
+    SetSaveBlocksPointers(0);
+    fprintf(out, "format 1\nfamilies %u\n", n);
+    for (i = 0; i < n; i++)
+    {
+        const struct MPWildFamily *f = MPWild_TestFamily(i);
+        u32 j;
+
+        fprintf(out, "family %u %u %u %u %u %u %u %u\n", i, f->firstMember, f->memberCount, f->tier, f->habitat,
+                f->time, f->type1, f->type2);
+        for (j = 0; j < f->memberCount; j++)
+        {
+            const struct MPWildMember *m = &MPWild_TestMembers()[f->firstMember + j];
+            fprintf(out, "member %u %u %u %u\n", f->firstMember + j, m->species, m->minLevel, m->depth);
+        }
+    }
+    // The clock's time of day for each hour (hour 0 cannot be forced: 0 means
+    // "no override"; it lies inside the night, NIGHT_HOUR_BEGIN..END).
+    fprintf(out, "hours %d %d %d %d %d %d %d %d\n", MORNING_HOUR_BEGIN, MORNING_HOUR_END, DAY_HOUR_BEGIN,
+            DAY_HOUR_END, EVENING_HOUR_BEGIN, EVENING_HOUR_END, NIGHT_HOUR_BEGIN, NIGHT_HOUR_END);
+    for (hour = 1; hour < 24; hour++)
+    {
+        SetTimeOfDay(hour);
+        fprintf(out, "hour %u %s\n", hour, sTimes[GetTimeOfDay()]);
+    }
+    SetTimeOfDay(0);
+    while (fgets(line, sizeof(line), keys))
+    {
+        unsigned group, number;
+        u32 night, w;
+
+        if (sscanf(line, "%u.%u", &group, &number) != 2)
+            continue;
+        if (group >= MAP_GROUPS_COUNT || gMapGroups[group] == NULL)
+        {
+            // Groups this game does not build (the Kanto groups of an Emerald build).
+            fprintf(out, "nomap %u.%u\n", group, number);
+            continue;
+        }
+        gMapHeader = *Overworld_GetMapHeaderByGroupAndId(group, number);
+        fprintf(out, "map %u.%u %u %u %u\n", group, number, gMapHeader.regionMapSectionId, gMapHeader.mapType,
+                gMapHeader.mapLayoutId);
+        for (night = 0; night < 2; night++)
+        {
+            for (w = 0; w < WEATHER_COUNT; w++)
+            {
+                fprintf(out, "w %u.%u %u %u", group, number, night, w);
+                for (i = 0; i < n; i++)
+                    fprintf(out, " %u", MPWild_TestFamilyWeight(i, MP_WILD_HABITAT_LAND, night, w));
+                fputc('\n', out);
+            }
+        }
+        maps++;
+    }
+    fclose(keys);
+    fclose(out);
+    printf("dump-wild-weights: %u maps, %u families, %u weathers\n", maps, n, WEATHER_COUNT);
+    return 0;
+}

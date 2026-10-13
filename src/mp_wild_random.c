@@ -272,3 +272,39 @@ u8 MPWild_GetSpeciesTier(u16 species)
     }
     return MP_WILD_TIER_COUNT;
 }
+
+#if defined(PLATFORM_SDL2)
+// Test hooks (PC builds only, never called by the game): the native self-test
+// --selftest-wild-weather and the weight dump --dump-wild-weights, which the
+// app's scripts/multiplayer/check_engine_spawn_weights.py compares with the
+// host's shared spawn director. MPWild_TestFamilyWeight is the weight
+// MPWild_RandomizeSpecies gives a family on the current map (gMapHeader) for a
+// habitat, time of day and weather, by the same steps (no weather underground);
+// the self-test checks it against the game's own rolls.
+u32 MPWild_TestFamilyCount(void)
+{
+    return MP_WILD_FAMILY_COUNT;
+}
+
+const struct MPWildFamily *MPWild_TestFamily(u32 index)
+{
+    return index < MP_WILD_FAMILY_COUNT ? &sMPWildFamilies[index] : NULL;
+}
+
+const struct MPWildMember *MPWild_TestMembers(void)
+{
+    return sMPWildMembers;
+}
+
+u32 MPWild_TestFamilyWeight(u32 index, u32 habitat, bool32 night, u8 weather)
+{
+    const struct MPWildFamily *family;
+
+    if (index >= MP_WILD_FAMILY_COUNT)
+        return 0;
+    family = &sMPWildFamilies[index];
+    if (gMapHeader.mapType == MAP_TYPE_UNDERGROUND)
+        weather = WEATHER_NONE;
+    return GetWeatherWeight(family, GetFamilyWeight(family, habitat, night, GetAreaTypeBoost()), weather);
+}
+#endif
