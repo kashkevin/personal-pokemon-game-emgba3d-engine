@@ -1,5 +1,6 @@
 #include "global.h"
 #include "gba/m4a_internal.h"
+#include "constants/songs.h"
 
 #ifdef PORTABLE
     #include "cgb_audio.h"
@@ -123,8 +124,29 @@ void m4aSoundMain(void)
 #endif
 }
 
+// A song number past the song table: Shadow Force's second turn plays "SOUND_PAN_ATTACKER" (-64, as a
+// u16 65472) as a sound effect (data/battle_anim_scripts.s, `playsewithpan SOUND_PAN_ATTACKER, ...`). The
+// GBA reads whatever lies past gSongTable in ROM as a song; natively that is a segmentation fault (found by
+// the Battle FX move gallery). Nothing is played, as for a song that is not there.
+static bool32 SongNumValid(u16 n)
+{
+    static bool32 sLogged;
+
+    if (n <= LAST_PHONEME_SONG)
+        return TRUE;
+    if (!sLogged)
+    {
+        sLogged = TRUE;
+        fprintf(stderr, "[compat] song %u past the song table (0-%u); not played\n", (unsigned)n,
+                (unsigned)LAST_PHONEME_SONG);
+    }
+    return FALSE;
+}
+
 void m4aSongNumStart(u16 n)
 {
+    if (!SongNumValid(n)) // before gSongTable[n] is read
+        return;
     const struct MusicPlayer *mplayTable = gMPlayTable;
     const struct Song *songTable = gSongTable;
     const struct Song *song = &songTable[n];
@@ -135,6 +157,8 @@ void m4aSongNumStart(u16 n)
 
 void m4aSongNumStartOrChange(u16 n)
 {
+    if (!SongNumValid(n)) // before gSongTable[n] is read
+        return;
     const struct MusicPlayer *mplayTable = gMPlayTable;
     const struct Song *songTable = gSongTable;
     const struct Song *song = &songTable[n];
@@ -156,6 +180,8 @@ void m4aSongNumStartOrChange(u16 n)
 
 void m4aSongNumStartOrContinue(u16 n)
 {
+    if (!SongNumValid(n)) // before gSongTable[n] is read
+        return;
     const struct MusicPlayer *mplayTable = gMPlayTable;
     const struct Song *songTable = gSongTable;
     const struct Song *song = &songTable[n];
@@ -171,6 +197,8 @@ void m4aSongNumStartOrContinue(u16 n)
 
 void m4aSongNumStop(u16 n)
 {
+    if (!SongNumValid(n)) // before gSongTable[n] is read
+        return;
     const struct MusicPlayer *mplayTable = gMPlayTable;
     const struct Song *songTable = gSongTable;
     const struct Song *song = &songTable[n];
@@ -182,6 +210,8 @@ void m4aSongNumStop(u16 n)
 
 void m4aSongNumContinue(u16 n)
 {
+    if (!SongNumValid(n)) // before gSongTable[n] is read
+        return;
     const struct MusicPlayer *mplayTable = gMPlayTable;
     const struct Song *songTable = gSongTable;
     const struct Song *song = &songTable[n];

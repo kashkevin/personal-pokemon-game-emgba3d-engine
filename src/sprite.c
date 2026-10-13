@@ -9,6 +9,7 @@
 #include "test/test.h"
 #ifdef ENABLE_DIORAMA
 #include "diorama/battle_scene.h"
+#include "diorama/battle_fx.h"
 #endif
 #ifdef ENABLE_BATTLE_SPRITES
 #include "platform/battle_sprites.h"
@@ -395,6 +396,7 @@ void BuildOamBuffer(void)
     // view draws those sprites in its scene and leaves them out of a battle
     // transition it composes over it (latched as OAM is loaded, LoadOam).
     DioramaSprites_BeginOam();
+    BattleFx_BeginOam(); // and the battle effects' (diorama/battle_fx.h)
     for (i = 0, oamIndex = 0; i < toSort; i++)
     {
         struct Sprite *sprite = &gSprites[spritePriorities[i] & 0xFF];
@@ -402,6 +404,7 @@ void BuildOamBuffer(void)
         bool8 full = AddSpriteToOamBuffer(sprite, &oamIndex);
 
         DioramaSprites_MarkOam(sprite, first, oamIndex);
+        BattleFx_MarkOam(sprite, first, oamIndex);
         if (full)
             break;
     }
@@ -529,6 +532,10 @@ u32 CreateSpriteAt(u32 index, const struct SpriteTemplate *template, s16 x, s16 
     sprite->anims = template->anims ? template->anims : gDummySpriteAnimTable;
     sprite->affineAnims = template->affineAnims ? template->affineAnims : gDummySpriteAffineAnimTable;
     sprite->template = template;
+#ifdef ENABLE_DIORAMA
+    BattleFx_OnSpriteMade(index, template); // diorama/battle_fx.h: the graphics it is made with
+#endif
+#line 506 // gba-line
     sprite->callback = template->callback ? template->callback : SpriteCallbackDummy;
     sprite->x = x;
     sprite->y = y;
@@ -620,6 +627,8 @@ void LoadOam(void)
 #ifdef ENABLE_DIORAMA
     if (!gMain.oamLoadDisabled)
         DioramaSprites_LatchOam(); // the map's entries of the OAM just loaded
+    if (!gMain.oamLoadDisabled)
+        BattleFx_LatchOam(); // the battle effects' entries (diorama/battle_fx.h)
 #endif
 #ifdef ENABLE_BATTLE_SPRITES
     if (!gMain.oamLoadDisabled)

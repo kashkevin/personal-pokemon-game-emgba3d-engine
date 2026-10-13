@@ -17,6 +17,10 @@
 #include "data.h"
 #include "item.h"
 #include "constants/songs.h"
+#ifdef ENABLE_DIORAMA
+#include "diorama/battle_fx.h"
+#endif
+#line 20 // gba-line
 
 static void Task_DoPokeballSendOutAnim(u8 taskId);
 static inline void DoPokeballSendOutSoundEffect(enum BattlerId battler);
@@ -454,6 +458,11 @@ static void Task_DoPokeballSendOutAnim(u8 taskId)
     }
 
     gSprites[ballSpriteId].sBattler = gBattlerTarget;
+#ifdef ENABLE_DIORAMA
+    if (!notSendOut && throwCaseId != POKEBALL_PLAYER_SLIDEIN)
+        BattleFx_OnControllerAnim(BATTLEFX_CONTROLLER_SEND_OUT, battler, ballId); // diorama/battle_fx.h
+#endif
+#line 457 // gba-line
     if (!notSendOut)
     {
         DestroyTask(taskId);

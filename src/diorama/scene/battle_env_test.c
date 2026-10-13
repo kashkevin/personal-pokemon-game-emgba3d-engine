@@ -18,6 +18,7 @@
 #include "battle_partner.h"
 #include "battle_setup.h"
 #include "data.h"
+#include "event_data.h"
 #include "event_object_movement.h"
 #include "field_screen_effect.h"
 #include "load_save.h"
@@ -26,10 +27,13 @@
 #include "palette.h"
 #include "party_menu.h"
 #include "pokemon.h"
+#include "safari_zone.h"
 #include "script.h"
 #include "script_pokemon_util.h"
 #include "constants/battle.h"
 #include "constants/battle_anim.h"
+#include "constants/flags.h"
+#include "constants/form_change_types.h"
 #include "constants/items.h"
 #include "battle_gfx_sfx_util.h"
 #include "item.h"
@@ -85,6 +89,17 @@ static struct
      * Town), then the battle. In memory only: the survey never writes a save. */
     int warpGroup, warpNum, warpId, warpX, warpY;
     bool warp, warped;
+    /* PKMN_TEST_SHINY=1: the wild Pokemon is shiny; PKMN_TEST_MEGA=1: the opponent trainer's first
+     * Pokemon that can Mega Evolve holds its Mega Stone (both in memory only, as the battle starts) */
+    bool shiny, mega;
+    /* PKMN_TEST_FREEZE_FIELD=1: the field's objects stand still while the battle waits to start */
+    bool freezeField;
+    /* PKMN_TEST_FIRST_MOVE=<move number>: with PKMN_TEST_STRONG, the party's first move in place of
+     * Flamethrower (a move whose animation follows a counter over turns: Fury Cutter, Rollout) */
+    int firstMove;
+    /* PKMN_TEST_LEAD_ONLY=1: the party is its first Pokemon alone (in memory only), so a battle lost ends at
+     * its faint (the autopilot cannot choose the next one in the party menu) */
+    bool leadOnly, trimmed;
 } s;
 
 /* Frames a press is held, and released after it: a game running at a frame or two a second
@@ -144,6 +159,13 @@ static void Init(void)
     }
     s.fightSeconds = EnvInt("PKMN_TEST_FIGHT", 0);
     s.strong = EnvInt("PKMN_TEST_STRONG", 0) != 0;
+    s.shiny = EnvInt("PKMN_TEST_SHINY", 0) != 0;
+    s.mega = EnvInt("PKMN_TEST_MEGA", 0) != 0;
+    s.freezeField = EnvInt("PKMN_TEST_FREEZE_FIELD", 0) != 0;
+    s.leadOnly = EnvInt("PKMN_TEST_LEAD_ONLY", 0) != 0;
+    s.firstMove = EnvInt("PKMN_TEST_FIRST_MOVE", 0);
+    if (s.firstMove <= MOVE_NONE || s.firstMove >= MOVES_COUNT)
+        s.firstMove = MOVE_FLAMETHROWER;
     value = SDL_getenv("PKMN_TEST_WARP");
     s.warpX = s.warpY = -1;
     if (value != NULL && sscanf(value, "%d:%d:%d:%d:%d", &s.warpGroup, &s.warpNum, &s.warpId,
@@ -263,6 +285,41 @@ static void RedoTestFoes(int count)
         if (p != NULL)
             p++;
     }
+/* PKMN_TEST_SHINY: the wild Pokemon just made is shiny (its shiny stars play as it appears). */
+static void MaybeShiny(void)
+{
+    bool32 shiny = TRUE;
+
+    if (!s.shiny)
+        return;
+    SetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_IS_SHINY, &shiny);
+    SDL_Log("Battle env test: the wild Pokemon is shiny");
+}
+
+/* PKMN_TEST_MEGA: the first Pokemon of `party` that has a Mega Evolution by item holds that item, so
+ * the trainer's AI Mega Evolves it as it would any trainer's (B_ANIM_MEGA_EVOLUTION, fought). */
+static void MaybeGiveMegaStone(struct Pokemon *party)
+{
+    if (!s.mega)
+        return;
+    for (u32 i = 0; i < PARTY_SIZE; i++)
+    {
+        u32 species = GetMonData(&party[i], MON_DATA_SPECIES);
+        const struct FormChange *change = species != SPECIES_NONE ? GetSpeciesFormChanges(species) : NULL;
+
+        for (; change != NULL && change->method != FORM_CHANGE_TERMINATOR; change++)
+        {
+            if (change->method == FORM_CHANGE_BATTLE_MEGA_EVOLUTION_ITEM)
+            {
+                u32 item = change->param1;
+                SetMonData(&party[i], MON_DATA_HELD_ITEM, &item);
+                SDL_Log("Battle env test: the opponent's Pokemon %u (species %u) holds item %u to Mega Evolve",
+                        (unsigned)i, (unsigned)species, (unsigned)item);
+                return;
+            }
+        }
+    }
+    SDL_Log("Battle env test: no Pokemon of the opponent's can Mega Evolve by an item");
 }
 
 static void StartTrainer(int a, int b, bool doubles)
@@ -276,6 +333,7 @@ static void StartTrainer(int a, int b, bool doubles)
     TRAINER_BATTLE_PARAM.opponentA = a;
     TRAINER_BATTLE_PARAM.opponentB = 0xFFFF;
     CreateNPCTrainerPartyFromTrainer(gParties[B_TRAINER_OPPONENT_A], GetTrainerStructFromId(a));
+    MaybeGiveMegaStone(gParties[B_TRAINER_OPPONENT_A]);
     if (doubles || b > 0)
         gBattleTypeFlags |= BATTLE_TYPE_DOUBLE;
     if (b > 0)
@@ -320,6 +378,8 @@ static void StartPartnerBattle(int a, int b, int partner)
     BattleSetup_StartTrainerBattle_Debug();
 }
 
+void LoadWallyZigzagoon(void); /* field_specials.c (a script special: no header declares it) */
+
 static void StartBattle(void)
 {
     char kind[16] = {0};
@@ -339,7 +399,29 @@ static void StartBattle(void)
     {
         CreateScriptedWildMon(a, b > 0 ? b : 30, ITEM_NONE);
         RedoTestFoes(1);
+        MaybeShiny();
         BattleSetup_StartScriptedWildBattle();
+    }
+    else if (strcmp(kind, "safari") == 0)
+    {
+        /* A Safari Zone battle, as the Safari Zone's grass starts one: the Safari controller's menu, where
+         * A throws a Safari Ball (the trainer's throw, the shakes, a catch or a break-out). The Safari flag
+         * and the 30 balls are set in memory only, as EnterSafariMode sets them. */
+        CreateScriptedWildMon(a, b > 0 ? b : 30, ITEM_NONE);
+        MaybeShiny();
+        FlagSet(FLAG_SYS_SAFARI_MODE);
+        gNumSafariBalls = 30;
+        BattleSetup_StartWildBattle();
+    }
+    else if (strcmp(kind, "tutorial") == 0)
+    {
+        /* Wally's catch tutorial, as Petalburg City's scene starts it (PetalburgCity_EventScript_WallyTutorial):
+         * his Zigzagoon first in the party, a Ralts to catch. Wally's controller plays it by itself: two Tackles,
+         * then he calls Zigzagoon back, comes out and throws a Poke Ball (the trainer's throw, the catch).
+         * In memory only. */
+        SavePlayerParty();
+        LoadWallyZigzagoon();
+        StartWallyTutorialBattle();
     }
     else if (strcmp(kind, "wild2") == 0)
     {
@@ -383,14 +465,14 @@ static void StrengthenParty(void)
         exp = gExperienceTables[gSpeciesInfo[species].growthRate][MAX_LEVEL];
         SetMonData(mon, MON_DATA_EXP, &exp);
         CalculateMonStats(mon);
-        SetMonMoveSlot(mon, MOVE_FLAMETHROWER, 0);
+        SetMonMoveSlot(mon, s.firstMove, 0);
     }
     /* The Set battle style: in a single battle the Shift style asks whether to switch when
      * the opponent sends its next Pokemon, and A's "Yes" opens the party on the battler
      * already out ("already in battle!"), over and over. */
     gSaveBlock2Ptr->optionsBattleStyle = OPTIONS_BATTLE_STYLE_SET;
     HealPlayerParty();
-    SDL_Log("Battle env test: the party at level %d, healed", MAX_LEVEL);
+    SDL_Log("Battle env test: the party at level %d, healed, its first move %d", MAX_LEVEL, s.firstMove);
 }
 
 void DioramaBattleEnvTest_FieldTick(void)
@@ -401,6 +483,14 @@ void DioramaBattleEnvTest_FieldTick(void)
     {
         s.strengthened = true;
         StrengthenParty();
+    }
+    if (s.leadOnly && !s.trimmed)
+    {
+        s.trimmed = true;
+        for (u32 i = 1; i < PARTY_SIZE; i++)
+            ZeroMonData(&gParties[B_TRAINER_PLAYER][i]);
+        CalculatePlayerPartyCount();
+        SDL_Log("Battle env test: the party is its first Pokemon alone");
     }
     SDL_AtomicSet(&s.fieldSeen, 1);
     if (gMain.inBattle)
@@ -446,6 +536,11 @@ void DioramaBattleEnvTest_FieldTick(void)
         ResetInitialPlayerAvatarState();
         return;
     }
+    /* PKMN_TEST_FREEZE_FIELD: the battle that starts is the one asked for - while it waits, the field
+     * stands still, so a visible wild Pokemon does not walk into the player and start another first
+     * (KNOWN_ISSUES N33; the trainer battles below freeze it too). */
+    if (s.freezeField)
+        FreezeObjectEvents();
     if (++s.fieldFrames < s.delay)
         return;
     s.started = true;

@@ -9,6 +9,7 @@
  *
  *   PKMN_TEST_BATTLE         what to start once the field is ready:
  *                            wild:<species>:<level>
+ *                            safari:<species>:<level>  (a Safari Zone battle: A throws balls)
  *                            wild2:<species>:<level>:<species>:<level>  (double)
  *                            legendary:<species>:<level>
  *                            trainer:<id>   double:<id>   two:<id>:<id>
@@ -29,6 +30,15 @@
  *                            5 not over in time)
  *   PKMN_TEST_STRONG=1       the party at level 100 and healed when the field is up (in
  *                            memory only), so a fought battle is won
+ *   PKMN_TEST_SHINY=1        the wild Pokemon is shiny (in memory only)
+ *   PKMN_TEST_MEGA=1         the opponent trainer's first Pokemon that can Mega Evolve
+ *                            holds its Mega Stone (in memory only): its AI Mega Evolves it
+ *   PKMN_TEST_FREEZE_FIELD=1 the field's objects stand still while the battle waits to
+ *                            start (a visible wild Pokemon cannot start another first)
+ *   PKMN_TEST_FIRST_MOVE=<n>  with PKMN_TEST_STRONG, the party's first move in place of
+ *                            Flamethrower (move number; in memory only)
+ *   PKMN_TEST_LEAD_ONLY=1    the party is its first Pokemon alone (in memory only): a battle
+ *                            lost ends when it faints
  *
  * For the battle sprite tests (platform/battle_sprites.h):
  *   PKMN_TEST_PARTY          the player's party instead: species:level[:flags],...
