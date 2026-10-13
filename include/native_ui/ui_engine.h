@@ -835,7 +835,7 @@ struct NativeShop
     u16 chosen;               /* the item being bought (ITEM_NONE: none) */
     u16 quantity;
     u16 maxQuantity;
-    u16 inBag;                /* of the chosen item, else of the row's */
+    u16 inBag;                /* of the chosen item, else of the row's (a decoration: how many the PC has) */
     u32 totalCost;
     u32 money;
     u16 items[NATIVE_SHOP_MAX_ITEMS];
@@ -843,6 +843,27 @@ struct NativeShop
     bool8 soldOut[NATIVE_SHOP_MAX_ITEMS];  /* a key item already owned */
 };
 bool32 Shop_NativeUiState(struct NativeShop *out);
+
+/* decoration.c: a decoration's picture as the game's shops and menus show it */
+enum
+{
+    NATIVE_DECOR_PIC_NONE,
+    NATIVE_DECOR_PIC_ICON,      /* its icon: 24x24 4bpp, compressed with its header */
+    NATIVE_DECOR_PIC_OBJECT,    /* a doll or a cushion: its object event's first frame */
+    NATIVE_DECOR_PIC_TILES,     /* composed from the secret base's metatiles: width x height, OBJ order */
+};
+struct NativeDecorPicture
+{
+    u8 kind;
+    const u32 *iconPic;
+    const u16 *iconPal;
+    u16 graphicsId;
+    u8 width;
+    u8 height;
+    u8 image[0x800];
+    u16 palette[16];
+};
+bool32 Decoration_NativeUiPicture(u16 decor, struct NativeDecorPicture *out);
 
 /* ---------------------------------------------------------------- the Trainer Card (trainer_card.c) */
 

@@ -11,22 +11,27 @@
  * The field's BUY / SELL / QUIT menu shows the mart with its board FOR SALE and
  * the clerk's line from the field's message box; BUY is the engine's buy screen
  * (the list, how many, YES / NO, the clerk's lines); SELL is the Bag in its
- * selling mode (ui_bag.c). Decoration shops keep the game's picture (their
- * pictures are the decorations' own). No clerk is drawn: the clerk speaks in the
- * message box. Keys stay the engine's; clicks and the wheel become its presses.
- * Project-owned.
+ * selling mode (ui_bag.c). The decoration shops (Fortree, Lilycove, Slateport,
+ * the Pretty Petal flower shop) are the same counter with the decorations' own
+ * pictures (their icons, a doll's field sprite, the image the game composes
+ * from the secret base's metatiles), names, prices and descriptions, and how
+ * many of each your PC holds; one at a time, as the engine sells them. No clerk
+ * is drawn: the clerk speaks in the message box. Keys stay the engine's; clicks
+ * and the wheel become its presses. Project-owned.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "global.h"
+#include "decoration.h"
 #include "item.h"
 #include "main.h"
 #include "move.h"
 #include "strings.h"
 #include "window.h"
 #include "constants/characters.h"
+#include "constants/decorations.h"
 #include "constants/items.h"
 #include "native_ui/ui_draw.h"
 #include "native_ui/ui_engine.h"
@@ -71,6 +76,8 @@ static const u8 sText_MenuHelp[] = _("BUY: what this shop sells. SELL: the items
 #else
 static const u8 sText_MenuHelp[] = _("BUY: what this shop sells. SELL: the items in your Bag, for part of their price.");
 #endif
+static const u8 sText_DecorHelp[] = _("BUY: decorations for your room and Secret Base, sent to your PC.");
+static const u8 sText_None[] = _("");
 
 /* the mart's ramps (the design's MART: the RUN command's blue) */
 #define MART_BASE UI_P_CMD_RUN
@@ -100,7 +107,47 @@ static bool Detect(void)
 {
     struct NativeShop s;
 
-    return Shop_NativeUiState(&s) && !s.decorations && s.phase != NATIVE_SHOP_NONE;
+    return Shop_NativeUiState(&s) && s.phase != NATIVE_SHOP_NONE;
+}
+
+/* an item's or (a decoration shop) a decoration's picture, name and description */
+static void PrepareArt(u16 item)
+{
+    if (sS.decorations)
+        UiGfx_PrepareDecor(item);
+    else
+        UiGfx_PrepareItemIcon(item);
+}
+
+static void Art(u16 item, int x, int y, int scale)
+{
+    if (sS.decorations)
+        UiGfx_Decor(item, x, y, 24 * scale, scale);
+    else if (scale > 1)
+        UiGfx_ItemIconScaled(item, x, y, scale);
+    else
+        UiGfx_ItemIcon(item, x, y, NULL);
+}
+
+static void Name(u8 *dst, int size, u16 item)
+{
+    if (sS.decorations)
+    {
+        dst[0] = EOS;
+        if (item <= NUM_DECORATIONS)
+            UiText_Append(dst, size, gDecorations[item].name);
+    }
+    else
+    {
+        UiItems_ItemName(dst, size, item);
+    }
+}
+
+static const u8 *Description(u16 item)
+{
+    if (sS.decorations)
+        return item <= NUM_DECORATIONS ? gDecorations[item].description : sText_None;
+    return GetItemDescription(item);
 }
 
 static bool OnField(void)
@@ -170,13 +217,13 @@ static void Capture(void)
     if (sFirst < 0)
         sFirst = 0;
     for (int i = sFirst; i < sFirst + VIS && i < sS.count; i++)
-        UiGfx_PrepareItemIcon(sS.items[i]);
+        PrepareArt(sS.items[i]);
     for (int i = 0; i < 2 * SHELF && i < sS.count; i++)
-        UiGfx_PrepareItemIcon(sS.items[i]);
+        PrepareArt(sS.items[i]);
     if (sS.chosen != ITEM_NONE)
-        UiGfx_PrepareItemIcon(sS.chosen);
+        PrepareArt(sS.chosen);
     sBonusTip = false;
-    for (int i = 0; i < sS.count; i++)
+    for (int i = 0; i < sS.count && !sS.decorations; i++)
     {
 #if I_PREMIER_BALL_BONUS >= GEN_8
         if (GetItemPocket(sS.items[i]) == POCKET_POKE_BALLS)
@@ -277,9 +324,11 @@ static void CounterScene(int x, int y, int w, int h, const struct UiRamp *m, u16
     for (int si = 0; si < 2; si++)
     {
         int sy = y + 30 + si * 30;
+        /* decorations: eight a shelf, room for the two-wide posters */
+        int per = sS.decorations ? SHELF - 1 : SHELF, step = sS.decorations ? 34 : 30;
 
-        for (int i = 0; i < SHELF && si * SHELF + i < sS.count; i++)
-            UiGfx_ItemIcon(sS.items[si * SHELF + i], x + 12 + i * 30, sy - 25, NULL);
+        for (int i = 0; i < per && si * per + i < sS.count; i++)
+            Art(sS.items[si * per + i], x + 12 + i * step + (sS.decorations ? 4 : 0), sy - 25, 1);
         UiG_Paint(UiM_Rect(w - 16, 5), x + 8, sy, wood.base, &(struct UiPaint){wood.ink, wood.hi, wood.lo, 0, 0, NULL, UI_NONE});
         for (int k = 0; k < 2; k++)
         {
@@ -299,7 +348,8 @@ static void CounterScene(int x, int y, int w, int h, const struct UiRamp *m, u16
     sy2 = cy + 13;
     UiG_Paint(UiM_Rounded4(sw, 26, 2, 2, 2, 2), sx, sy2, m->lo,
               &(struct UiPaint){m->ink, UiMix(m->lo, m->hi, 0.5), UiMix(m->lo, m->ink, 0.4), 0, 0, NULL, UI_NONE});
-    UiItems_BigCaps(sx + (sw >> 1), sy2 + 5, "POK" UI_CAPS_E_ACUTE " MART", 2, UI_P_TEXT_W, m->ink, UI_ALIGN_CENTER);
+    UiItems_BigCaps(sx + (sw >> 1), sy2 + 5, sS.decorations ? "DECOR SHOP" : "POK" UI_CAPS_E_ACUTE " MART", 2, UI_P_TEXT_W,
+                    m->ink, UI_ALIGN_CENTER);
     {
         struct UiPixPal pal[7] = {
             {'a', m->ink}, {'b', UI_P_PAPER}, {'c', UiMix(UI_P_HP_GREEN_0, UI_P_PAPER, 0.3)}, {'d', m->hi},
@@ -310,15 +360,19 @@ static void CounterScene(int x, int y, int w, int h, const struct UiRamp *m, u16
     }
     if (cur != ITEM_NONE)
     {
-        int ix = x + 28, iy = cy - 46;
+        int ix = x + 28, iy = cy - 46, aw = 24, ah = 24, wide;
 
-        UiG_Mask(UiM_Ellipse(44, 6), ix + 2, cy - 2, UiMix(wood.lo, wood.ink, 0.25));
-        UiGfx_ItemIconScaled(cur, ix, iy, 2);
+        /* a decoration wider than the icon's place (a long poster) starts there */
+        if (sS.decorations)
+            UiGfx_DecorSize(cur, &aw, &ah);
+        wide = aw * 2 > 48 ? aw * 2 : 48;
+        UiG_Mask(UiM_Ellipse(wide - 4, 6), ix + 2, cy - 2, UiMix(wood.lo, wood.ink, 0.25));
+        Art(cur, ix + (wide - 48) / 2, iy, 2);
         if (tag != NULL)
         {
-            int tx = ix + 62, ty = cy - 32;
+            int tx = ix + wide + 14, ty = cy - 32;
 
-            UiItems_TagString(ix + 40, iy + 14, tx + 9, ty + 7, m->ink);
+            UiItems_TagString(ix + wide - 8, iy + 14, tx + 9, ty + 7, m->ink);
             UiItems_PriceTag(tx, ty, 78, tag, m->ink, dim);
         }
     }
@@ -334,8 +388,8 @@ static void DescBox(int x, int y, int w, int h, const struct UiRamp *m, u16 item
         return;
     }
     UiG_Paint(UiM_Rounded4(30, 30, 2, 2, 2, 2), x + 6, y + 6, UI_P_CREAM, &(struct UiPaint){m->ink, UI_NONE, UI_P_CREAM_LO, 0, 0, NULL, UI_NONE});
-    UiGfx_ItemIcon(item, x + 9, y + 9, NULL);
-    UiW_MessagePage(text != NULL ? text : GetItemDescription(item), -1, x + 44, y + 4, w - 52, 3);
+    Art(item, x + 9, y + 9, 1);
+    UiW_MessagePage(text != NULL ? text : Description(item), -1, x + 44, y + 4, w - 52, 3);
 }
 
 /* ---------------------------------------------------------------- the price board */
@@ -365,8 +419,8 @@ static void Board(int t, const struct UiRamp *m)
             UiG_HLine(sx + 12, ry + ROW_H, sw - 34, UiMix(UI_P_CREAM_LO, UI_P_CREAM, 0.4));
         if (idx == sS.count)
         {
-            UiGfx_Icon("return_blue", sx + 14, ry + 5, 0);
-            UiG_Text(sx + 38, ry + 4, gText_Cancel2);
+            UiGfx_Icon("return_blue", sx + (sS.decorations ? 18 : 14), ry + 5, 0);
+            UiG_Text(sx + (sS.decorations ? 46 : 38), ry + 4, gText_Cancel2);
         }
         else
         {
@@ -374,9 +428,10 @@ static void Board(int t, const struct UiRamp *m)
             u16 item = sS.items[idx];
             const u8 *pt = PriceText(idx, price, sizeof(price));
 
-            UiGfx_ItemIcon(item, sx + 10, ry, NULL);
-            UiItems_ItemName(name, sizeof(name), item);
-            UiG_Text(sx + 38, ry + 4, name);
+            /* a decoration's picture may be two tiles wide (a long poster) */
+            Art(item, sx + (sS.decorations ? 14 : 10), ry, 1);
+            Name(name, sizeof(name), item);
+            UiG_Text(sx + (sS.decorations ? 46 : 38), ry + 4, name);
             UiItems_PriceTag(sx + sw - 16 - 74, ry + 5, 74, pt, m->lo, sS.soldOut[idx] || sS.prices[idx] > sS.money);
         }
         if (sel && list)
@@ -506,7 +561,7 @@ static void Draw(int t)
     if (!field)
         item = sS.chosen != ITEM_NONE ? sS.chosen : sS.cursor < sS.count ? sS.items[sS.cursor] : ITEM_NONE;
     Background(&m);
-    UiW_TitleTab(0, 8, "POK" UI_CAPS_E_ACUTE " MART", &m, 0, NULL);
+    UiW_TitleTab(0, 8, sS.decorations ? "DECORATIONS" : "POK" UI_CAPS_E_ACUTE " MART", &m, 0, NULL);
     /* left column: money, how many in the Bag, the counter, the description */
     UiItems_Money(money, sizeof(money), sS.money);
     UiItems_MoneyBox(8, 34, 148, "MONEY", money, m.ink);
@@ -520,7 +575,7 @@ static void Draw(int t)
     {
         UiText_FromAscii(inBag, sizeof(inBag), "---");
     }
-    UiItems_MoneyBox(160, 34, 140, "IN BAG", inBag, m.ink);
+    UiItems_MoneyBox(160, 34, 140, sS.decorations ? "IN YOUR PC" : "IN BAG", inBag, m.ink);
     if (item != ITEM_NONE)
     {
         for (int i = 0; i < sS.count; i++)
@@ -533,7 +588,8 @@ static void Draw(int t)
     }
     CounterScene(8, 62, 292, 164, &m, item, tagText, dim);
     if (field)
-        DescBox(8, 230, 292, 62, &m, sBonusTip ? ITEM_PREMIER_BALL : ITEM_NONE, sBonusTip ? sText_Premier : sText_MenuHelp);
+        DescBox(8, 230, 292, 62, &m, sBonusTip ? ITEM_PREMIER_BALL : ITEM_NONE,
+                sBonusTip ? sText_Premier : sS.decorations ? sText_DecorHelp : sText_MenuHelp);
     else if (item != ITEM_NONE)
         DescBox(8, 230, 292, 62, &m, item, NULL);
     else

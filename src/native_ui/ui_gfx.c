@@ -23,6 +23,7 @@
 #include "native_ui/ui_gfx.h"
 #include "data.h"
 #include "decompress.h"
+#include "event_object_movement.h"
 #include "item_icon.h"
 #include "pokemon.h"
 #include "constants/items.h"
@@ -185,6 +186,7 @@ enum
     ART_MON_PIC = 1,
     ART_ITEM_ICON,
     ART_TRAINER_PIC,
+    ART_DECOR,
 };
 struct ArtEntry
 {
@@ -441,6 +443,121 @@ bool UiGfx_ItemIconScaled(uint16_t item, int x, int y, int scale)
     c.filter = NULL;
     snprintf(key, sizeof(key), "item:%u", (unsigned)item);
     UiG_BlitPart(UiG_Cached(key, 24, 24, BuildArt, &c), 0, 0, 24, 24, x, y, scale < 1 ? 1 : scale, false, 1.0);
+    return true;
+}
+
+/* a decoration's picture (Decoration_NativeUiPicture): its icon (24x24), else a
+ * doll's or a cushion's field sprite, else the image the game composes from the
+ * secret base's metatiles, cropped to its painted pixels */
+bool UiGfx_PrepareDecor(uint16_t decor)
+{
+    static struct NativeDecorPicture sPic;
+    struct ArtEntry *e;
+    const uint8_t *tiles = NULL;
+    const uint16_t *palette = NULL;
+    uint8_t *full;
+    int w = 0, h = 0, x0, y0, x1, y1;
+
+    if (ArtFind(ART_DECOR, decor, 0) != NULL)
+        return true;
+    if (!Decoration_NativeUiPicture(decor, &sPic))
+        return false;
+    switch (sPic.kind)
+    {
+    case NATIVE_DECOR_PIC_ICON:
+        if (sPic.iconPic == NULL || sPic.iconPal == NULL || !ArtScratch())
+            return false;
+        DecompressDataWithHeaderWram(sPic.iconPic, sArtScratch);
+        e = ArtNew(ART_DECOR, decor, 0, 24, 24);
+        if (e == NULL)
+            return false;
+        UiGfx_Decode4bpp(e->rgba, 24, sArtScratch, sPic.iconPal, 24, 24);
+        e->frames = 1;
+        return true;
+    case NATIVE_DECOR_PIC_OBJECT:
+    {
+        const struct ObjectEventGraphicsInfo *info = GetObjectEventGraphicsInfo(sPic.graphicsId);
+
+        if (info == NULL || info->compressed || info->images == NULL)
+            return false;
+        tiles = info->images[0].data;
+        palette = ObjectEvent_NativeUiPalette(info->paletteTag);
+        w = info->width;
+        h = info->height;
+        break;
+    }
+    case NATIVE_DECOR_PIC_TILES:
+        tiles = sPic.image;
+        palette = sPic.palette;
+        w = sPic.width;
+        h = sPic.height;
+        break;
+    default:
+        return false;
+    }
+    if (tiles == NULL || palette == NULL || w <= 0 || h <= 0 || w % 8 || h % 8)
+        return false;
+    full = calloc((size_t)w * h, 4);
+    if (full == NULL)
+        return false;
+    UiGfx_Decode4bpp(full, w, tiles, palette, w, h);
+    /* the painted pixels' box */
+    x0 = w, y0 = h, x1 = -1, y1 = -1;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++)
+            if (full[(y * w + x) * 4 + 3] != 0)
+            {
+                x0 = x < x0 ? x : x0;
+                y0 = y < y0 ? y : y0;
+                x1 = x > x1 ? x : x1;
+                y1 = y > y1 ? y : y1;
+            }
+    if (x1 < 0)
+    {
+        free(full);
+        return false;
+    }
+    e = ArtNew(ART_DECOR, decor, 0, x1 - x0 + 1, y1 - y0 + 1);
+    if (e == NULL)
+    {
+        free(full);
+        return false;
+    }
+    for (int y = 0; y < e->h; y++)
+        memcpy(&e->rgba[(size_t)y * e->w * 4], &full[((size_t)(y + y0) * w + x0) * 4], (size_t)e->w * 4);
+    e->frames = 1;
+    free(full);
+    return true;
+}
+
+bool UiGfx_DecorSize(uint16_t decor, int *w, int *h)
+{
+    const struct ArtEntry *e = ArtFind(ART_DECOR, decor, 0);
+
+    if (e == NULL)
+        return false;
+    *w = e->w;
+    *h = e->h;
+    return true;
+}
+
+bool UiGfx_Decor(uint16_t decor, int x, int y, int box, int scale)
+{
+    const struct ArtEntry *e = ArtFind(ART_DECOR, decor, 0);
+    struct ArtCtx c;
+    char key[48];
+
+    if (e == NULL)
+        return false;
+    if (scale < 1)
+        scale = 1;
+    c.e = e;
+    c.y = 0;
+    c.h = e->h;
+    c.filter = NULL;
+    snprintf(key, sizeof(key), "decor:%u", (unsigned)decor);
+    UiG_BlitPart(UiG_Cached(key, e->w, e->h, BuildArt, &c), 0, 0, e->w, e->h, x + (box - e->w * scale) / 2,
+                 y + (box - e->h * scale) / 2, scale, false, 1.0);
     return true;
 }
 

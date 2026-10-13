@@ -2728,3 +2728,57 @@ static void TossDecoration(u8 taskId)
     StringExpandPlaceholders(gStringVar4, gText_DecorationThrownAway);
     DisplayItemMessageOnField(taskId, gStringVar4, ReturnToDecorationItemsAfterInvalidSelection);
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// Native PC UI (src/native_ui: the decoration shops): a decoration's picture as
+// the game shows it in its shops and menus (AddDecorationIconObject): its icon,
+// or a doll's or a cushion's object event, or the image the game composes from
+// the secret base's metatiles. Read-only: the image goes to the caller's buffer.
+bool32 Decoration_NativeUiPicture(u16 decor, struct NativeDecorPicture *out)
+{
+    static const u8 sObjDims[3][4][2] = {
+        {{8, 8}, {16, 16}, {32, 32}, {64, 64}},  // square
+        {{16, 8}, {32, 8}, {32, 16}, {64, 32}},  // horizontal
+        {{8, 16}, {8, 32}, {16, 32}, {32, 64}},  // vertical
+    };
+    static struct PlaceDecorationGraphicsDataBuffer sBuffer;
+    const struct Decoration *d;
+    const struct DecorShape *shape;
+
+    memset(out, 0, sizeof(*out));
+    if (decor == DECOR_NONE || decor > NUM_DECORATIONS)
+        return FALSE;
+    d = &gDecorations[decor];
+    if (d->icon.pic != NULL)
+    {
+        out->kind = NATIVE_DECOR_PIC_ICON;
+        out->iconPic = d->icon.pic;
+        out->iconPal = d->icon.pal;
+        return TRUE;
+    }
+    if (d->tiles == NULL || d->shape >= ARRAY_COUNT(sDecorShapes))
+        return FALSE;
+    if (d->permission == DECORPERM_SPRITE)
+    {
+        out->kind = NATIVE_DECOR_PIC_OBJECT;
+        out->graphicsId = d->tiles[0];
+        return TRUE;
+    }
+    shape = &sDecorShapes[d->shape];
+    if (shape->spriteShape > 2 || shape->spriteSize > 3)
+        return FALSE;
+    ClearPlaceDecorationGraphicsDataBuffer(&sBuffer);
+    sBuffer.decoration = d;
+    SetDecorSelectionMetatiles(&sBuffer);
+    SetDecorSelectionBoxTiles(&sBuffer);
+    CopyPalette(sBuffer.palette, gTilesetPointer_SecretBaseRedCave->metatiles[(d->tiles[0] * NUM_TILES_PER_METATILE) + 7] >> 12);
+    out->kind = NATIVE_DECOR_PIC_TILES;
+    out->width = sObjDims[shape->spriteShape][shape->spriteSize][0];
+    out->height = sObjDims[shape->spriteShape][shape->spriteSize][1];
+    memcpy(out->image, sBuffer.image, sizeof(out->image));
+    memcpy(out->palette, sBuffer.palette, sizeof(out->palette));
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI
