@@ -107,10 +107,12 @@ def main():
         rv = review.get(m, {})
         b, a = before.get(m), after.get(m)
         captured = a is not None and a['status'] == 'captured'
-        # the class now: round 4's (claude/battle-environments-3, 'r4'), else round 3's
-        # (claude/battle-environments-2, 'now') where it was looked at again, else with the
-        # overworld's objects ('props'), else the first rounds' ('after')
-        current = next((rv.get(k) for k in ('r4', 'now', 'props', 'after') if rv.get(k) in CLASSES), None)
+        # the class now: the combined development branch's (claude/combined-dev, 'combined') where
+        # it was photographed there, else round 4's (claude/battle-environments-3, 'r4'), else
+        # round 3's (claude/battle-environments-2, 'now') where it was looked at again, else with
+        # the overworld's objects ('props'), else the first rounds' ('after')
+        current = next((rv.get(k) for k in ('combined', 'r4', 'now', 'props', 'after')
+                        if rv.get(k) in CLASSES), None)
         if rv.get('after') == 'n/a' and current is None:
             state = 'excluded'   # no battle is fought on this map as it stands (a template)
         elif current is not None:
@@ -139,6 +141,9 @@ def main():
             'now_notes': rv.get('now_notes', ''),
             'r4_class': rv.get('r4') if rv.get('r4') in CLASSES else None,
             'r4_notes': rv.get('r4_notes', ''),
+            # the combined development branch (claude/combined-dev), where photographed there
+            'combined_class': rv.get('combined') if rv.get('combined') in CLASSES else None,
+            'combined_notes': rv.get('combined_notes', ''),
             'current_class': current,
             'state': state, 'notes': rv.get('notes', ''), 'problems': rv.get('problems', []),
             'before_png': b['png'] if b and b['status'] == 'captured' else None,
@@ -174,7 +179,8 @@ def main():
                     else '%s (%s)' % (r['state'], r['after_status']),
                     (r['notes'] + (' With objects: ' + r['props_notes'] if r['props_notes'] else '')
                      + (' Round 3: ' + r['now_notes'] if r['now_notes'] else '')
-                     + (' Round 4: ' + r['r4_notes'] if r['r4_notes'] else '')).replace('|', '/')))
+                     + (' Round 4: ' + r['r4_notes'] if r['r4_notes'] else '')
+                     + (' Combined: ' + r['combined_notes'] if r['combined_notes'] else '')).replace('|', '/')))
     if args.no_html:
         return
     write_page(rows, os.path.join(args.out, 'page'), by_map, args)

@@ -327,8 +327,10 @@ def write_page(rows, out, by_map, args):
                     r['props_class'], 'with the overworld\'s objects ')) if r.get('props_class') else '')
                 + (('<span class="arrow" title="round 3 (claude/battle-environments-2)">→</span>%s' % _chip(
                     r['now_class'], 'round 3 ')) if r.get('now_class') else '')
-                + (('<span class="arrow" title="now: round 4 (claude/battle-environments-3)">→</span>%s' % _chip(
-                    r['r4_class'], 'now ')) if r.get('r4_class') else ''),
+                + (('<span class="arrow" title="round 4 (claude/battle-environments-3)">→</span>%s' % _chip(
+                    r['r4_class'], 'round 4 ' if r.get('combined_class') else 'now ')) if r.get('r4_class') else '')
+                + (('<span class="arrow" title="now: the combined development branch (claude/combined-dev)">→</span>%s'
+                    % _chip(r['combined_class'], 'now ')) if r.get('combined_class') else ''),
                 html.escape(r['map']), ''.join('<span>%s</span>' % t for t in tags), shot,
                 html.escape(status),
                 ('<p style="margin:0">%s</p>' % html.escape(r['notes']) if r['notes'] else '')
@@ -336,8 +338,11 @@ def write_page(rows, out, by_map, args):
                     r['props_notes']) if r.get('props_notes') else '')
                 + ('<p style="margin:0"><strong>Round 3:</strong> %s</p>' % html.escape(
                     r['now_notes']) if r.get('now_notes') else '')
-                + ('<p style="margin:0"><strong>Now (round 4):</strong> %s</p>' % html.escape(
-                    r['r4_notes']) if r.get('r4_notes') else '')))
+                + ('<p style="margin:0"><strong>%s</strong> %s</p>' % (
+                    'Round 4:' if r.get('combined_notes') else 'Now (round 4):', html.escape(r['r4_notes']))
+                   if r.get('r4_notes') else '')
+                + ('<p style="margin:0"><strong>Now (combined branch):</strong> %s</p>' % html.escape(
+                    r['combined_notes']) if r.get('combined_notes') else '')))
 
     # the category table
     by_group = collections.OrderedDict((g, []) for g, _ in GROUPS)
