@@ -148,5 +148,38 @@ class FacadeTests(unittest.TestCase):
         self.assertEqual(auto_buildings.facade_height(img, 8), 20)
 
 
+class HeightTests(unittest.TestCase):
+    """V29: buildings whose eave the search cannot find stand as their
+    drawing says - a tower up to its roof's outline, a second storey with
+    the first - and a building is its own cells, not the trees over it."""
+
+    def test_a_sootopolis_tower_stands_up_to_its_roof(self):
+        specs = specs_of("SootopolisCity")
+        towers = [s for n, s in specs.items() if "_tower_" in n]
+        self.assertEqual(len(towers), 11)
+        # the search stops at the door's lintel (20); the roof's outline is
+        # 8 rows higher
+        self.assertTrue(all(s["relief"]["height"] == 28 for s in towers))
+        boxes = [s for n, s in specs.items() if "_box_" in n]
+        self.assertEqual(len(boxes), 11)
+        self.assertTrue(all(s["relief"]["height"] == 34 for s in boxes))
+
+    def test_a_second_storey_is_wall_not_roof(self):
+        self.assertEqual(specs_of("LilycoveCity")["auto_lilycovecity_37_24"]["relief"]["height"], 64)
+        factory = specs_of("BattleFrontier_OutsideWest")["auto_battlefrontier_outsidewest_19_17"]
+        self.assertEqual(factory["relief"]["height"], 56)
+
+    def test_the_glass_workshop_is_its_own_cells(self):
+        shop = specs_of("Route113")["auto_route113_33_5"]
+        x, y, w, h = shop["rect"]
+        cells = {(x + i, y + j) for (i, j) in shop["owned"]}
+        # its four rows, not the two rows of trees over them; its window's
+        # cell (walkable on the map) is no hole in its front
+        self.assertEqual((x, y, w, h), (32, 2, 4, 4))
+        self.assertIn((34, 4), cells)
+        self.assertEqual(len(cells), 16)
+        self.assertEqual(shop["relief"]["height"], 28)
+
+
 if __name__ == "__main__":
     unittest.main()

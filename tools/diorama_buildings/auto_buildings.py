@@ -88,7 +88,9 @@ OVERRIDES = {
     ("FallarborTown", 8, 7): {"top": 3},                 # the Battle Tent
     ("FallarborTown", 1, 6): {"top": 3},
     ("FallarborTown", 14, 7): {"top": 3},
-    ("Route113", 33, 5): {"cols": (32, 35), "facade": 24},   # the glass workshop
+    # The glass workshop: the trees over it are not it, and the cell of its
+    # window is walkable but drawn with it (V29: a hole in its front).
+    ("Route113", 33, 5): {"cols": (32, 35), "top": 2, "cells": [(34, 4)], "facade": 28},
     # Slateport's museum: the sea wall along its back is not its roof.
     ("SlateportCity", 30, 26): {"top": 23},
     # Not buildings: Sky Pillar's top.
@@ -111,6 +113,10 @@ OVERRIDES = {
     ("MossdeepCity", 19, 10): {"facade": 40},
     ("MossdeepCity", 18, 16): {"facade": 40},
     ("MossdeepCity", 36, 24): {"facade": 56},
+    # A second storey over the first (V29): the search stopped at the eave
+    # between them and laid the upper storey back as roof.
+    ("LilycoveCity", 37, 24): {"facade": 64},    # the Cove Lily Motel, its lattice storey
+    ("BattleFrontier_OutsideWest", 19, 17): {"facade": 56},   # the Battle Factory, two rows of windows
 }
 # Maps whose doors are cut into the rock round them (Sootopolis's crater):
 # the door search runs on into the rock. Their houses are found by their
@@ -125,6 +131,9 @@ CRATER_HOUSES = {
     "SootopolisCity": {"tops": {0x201: "tower", 0x208: "tower", 0x24B: "box", 0x205: "box"},
                        "tips": {0x238, 0x239}, "size": (3, 4),
                        # an octagonal pyramid over the tower (dimensional.py)
+                       # a tower's wall reaches up to its roof's outline (V29:
+                       # the search stopped at the door's lintel, 8 rows lower)
+                       "facades": {"tower": 28},
                        "roofs": {"tower": {"type": "pyramid8", "rise": 1.1, "cut": 0.3},
                                  "box": {"type": "flat"}}},
 }
@@ -537,7 +546,7 @@ def crater_specs(map_, data, taken, done):
                 done.add((data["layout"], c[0], c[1]))
             ground = ground_of(map_, cells)
             (x0, y0, bw, bh), owned, _, img = building_art(map_, cells, ground)
-            height = facade_height(img, (x + 1 - x0) * 16)
+            height = kinds.get("facades", {}).get(kind) or facade_height(img, (x + 1 - x0) * 16)
             relief = {"height": height, "back": (y - y0) * 16, "auto": True}
             band = roof_band(bh * 16 - height)
             if band is not None:
