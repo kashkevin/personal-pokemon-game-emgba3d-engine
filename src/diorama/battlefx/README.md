@@ -135,17 +135,20 @@ driver has none) - `BattleFxGL_Pace`.
   than leaving frames unseen): nothing changes, however much the HD layers cost. A PC that keeps
   up - every graphics card with room for them - is never lowered.
 - Frames unseen (or a slide show), and the HD layers could close much of the gap (their cost at
-  least half the pictures' lateness, or a quarter of each picture): the next tier down, from this
-  picture on.
+  least half the pictures' lateness, or a quarter of each picture - with pictures faster than game
+  frames on average, frames go unseen through uneven pictures and only the share counts): the next
+  tier down, from this picture on.
 - Frames unseen and the HD layers a smaller but real part (a tenth of a game frame, 1.7 ms, or
   more): the next tier down on trial (with VSync a picture a little too slow waits for the next
   refresh, so the time between pictures says less than the work does); if the next half second
   does not win back half the frames lost, the tier goes back up and no more trials this battle -
   the HD effects are not what holds the game back.
 - Less than that: kept (logged once a battle).
-- At `low`, frames still unseen because of the HD layers: that animation plays its GBA effects
-  (as when the core falls behind), and after two such the battle does (`BeginRequest` refuses
-  them; the next battle tries again).
+- At `low`, the game still showing fewer than three quarters of its frames because of the HD
+  layers (`gbaBelowFps=45`, `PKMN_BATTLEFX_GBA_BELOW_FPS`; 0: never): that animation plays its GBA
+  effects (as when the core falls behind), and after two such the battle does (`BeginRequest`
+  refuses them; the next battle tries again). Above that the HD effects stay at `low` (a few
+  frames lost, logged once a battle).
 - A battle that kept the pace with room to spare (300 game frames or more, none lost, the next
   tier's estimated cost within a quarter of a game frame) raises the tier at the next battle's
   start; a tier raised that has to be lowered again is not raised again this session.
@@ -241,11 +244,12 @@ never leaves another animation's sprites out.
 
 ## Settings
 
-`battlefx/settings.cfg` (`enabled=1`, `log=0`; `sync=1`, `quality=...`, `attach=0`, `drawBudgetMs=N`
-optional) or the environment (which overrides the file): `PKMN_BATTLEFX=0` plays the original GBA
-animations (the development fallback), `PKMN_BATTLEFX_QUALITY=auto|full|high|medium|low|gba` the quality
-(above; auto in the player builds, full in the test builds), `PKMN_BATTLEFX_ATTACH=0` the effects placed
-for the GBA pictures (above), `PKMN_BATTLEFX_DRAW_BUDGET_MS=N` an explicit drawing budget (0: none),
+`battlefx/settings.cfg` (`enabled=1`, `log=0`; `sync=1`, `quality=...`, `attach=0`, `gbaBelowFps=N`,
+`drawBudgetMs=N` optional) or the environment (which overrides the file): `PKMN_BATTLEFX=0` plays the
+original GBA animations (the development fallback), `PKMN_BATTLEFX_QUALITY=auto|full|high|medium|low|gba`
+the quality (above; auto in the player builds, full in the test builds), `PKMN_BATTLEFX_ATTACH=0` the
+effects placed for the GBA pictures (above), `PKMN_BATTLEFX_GBA_BELOW_FPS=N` the auto quality's last
+fallback (above; default 45, 0: never), `PKMN_BATTLEFX_DRAW_BUDGET_MS=N` an explicit drawing budget (0: none),
 `PKMN_BATTLEFX_LOG=1` logs every animation (the game's and the core's frame counts, the core's
 cost, how its pictures went; the renderer's GPU / CPU time), `PKMN_BATTLEFX_SYNC=1` makes the
 game wait for the core every frame, `PKMN_BATTLEFX_DIR=<folder>` reads the data from there
