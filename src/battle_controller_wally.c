@@ -393,3 +393,33 @@ static void WallyHandleEndLinkBattle(enum BattlerId battler)
     if (!(gBattleTypeFlags & BATTLE_TYPE_IS_MASTER) && gBattleTypeFlags & BATTLE_TYPE_LINK)
         gBattlerControllerFuncs[battler] = SetBattleEndCallbacks;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// Native PC UI (src/native_ui/screens/ui_battle.c): what Wally's catching
+// tutorial shows of its own choices. It makes them itself (nothing here waits
+// for the player's buttons); its action cursor goes to BAG before the Poké
+// Ball (ActionSelectionCreateCursorAt(1) in WallyHandleActions). Read-only.
+u32 Battle_NativeUiWallyInput(u32 battler, u8 *actionCursor)
+{
+    void (*f)(enum BattlerId);
+
+    if (battler >= MAX_BATTLERS_COUNT || battler >= gBattlersCount
+     || gBattlerBattleController[battler] != BATTLE_CONTROLLER_WALLY)
+        return NATIVE_BATTLE_INPUT_NONE;
+    if (actionCursor != NULL)
+        *actionCursor = gBattleStruct->wallyBattleState >= 5 ? 1 : (gActionSelectionCursor[battler] & 3);
+    f = gBattlerControllerFuncs[battler];
+    if (f == HandleChooseActionAfterDma3)
+        return NATIVE_BATTLE_INPUT_ACTION_WAIT;
+    if (f == WallyHandleActions)
+        return NATIVE_BATTLE_INPUT_ACTION;
+    if (f == WallyBufferRunCommand && IsBattleControllerActiveOnLocal(battler)
+     && gBattleResources->bufferA[battler][0] == CONTROLLER_CHOOSEMOVE)
+        return gBattleStruct->wallyMovesState >= 2 ? NATIVE_BATTLE_INPUT_MOVE : NATIVE_BATTLE_INPUT_MOVE_WAIT;
+    if (f == OpenBagAfterPaletteFade || f == CompleteOnChosenItem)
+        return NATIVE_BATTLE_INPUT_BAG;
+    return NATIVE_BATTLE_INPUT_NONE;
+}
+#endif // ENABLE_NATIVE_UI

@@ -1743,6 +1743,96 @@ static bool32 EvoScene_IsMonAnimFinished(u8 monSpriteId)
 // new move's state, 9 stopped, 10 the party slot. The alternation task
 // (evolution_graphics.c, CycleEvolutionMonSprite): 3 / 4 the sizes of the old
 // and the new form (16..256).
+// An evolution inside a trade (Task_TradeEvolutionScene): the same steps
+// without the fade in and without stopping it; its messages on the trade's
+// window 0, its move's YES / NO the standard menu's; the Pokemon may be the one
+// the trade sent from the PC.
+static bool32 NativeUiTradeEvolutionState(struct NativeEvolution *out)
+{
+    struct Task *task = &gTasks[sEvoStructPtr->evoTaskId];
+    struct Pokemon *mon;
+    u32 state;
+
+    if (!task->isActive || task->func != Task_TradeEvolutionScene)
+        return FALSE;
+    if (task->data[10] == PC_MON_CHOSEN)
+        mon = &gParties[B_TRAINER_OPPONENT_A][TRADEMON_FROM_PC];
+    else if (task->data[10] < PARTY_SIZE)
+        mon = &gParties[B_TRAINER_PLAYER][task->data[10]];
+    else
+        return FALSE;
+    state = task->data[0];
+    out->trade = TRUE;
+    out->preSpecies = task->data[1];
+    out->postSpecies = task->data[2];
+    out->partyId = task->data[10];
+    out->personality = GetMonData(mon, MON_DATA_PERSONALITY);
+    out->shiny = GetMonData(mon, MON_DATA_IS_SHINY);
+    out->msgValid = TRUE;
+    switch (state)
+    {
+    case T_EVOSTATE_INTRO_MSG:
+    case T_EVOSTATE_INTRO_CRY:
+    case T_EVOSTATE_INTRO_SOUND:
+    case T_EVOSTATE_START_MUSIC:
+        out->phase = NATIVE_EVO_INTRO;
+        out->msgValid = state > T_EVOSTATE_INTRO_MSG;
+        break;
+    case T_EVOSTATE_START_BG_AND_SPARKLE_SPIRAL:
+    case T_EVOSTATE_SPARKLE_ARC:
+    case T_EVOSTATE_CYCLE_MON_SPRITE:
+        out->phase = NATIVE_EVO_CHARGING;
+        break;
+    case T_EVOSTATE_WAIT_CYCLE_MON_SPRITE:
+        out->phase = NATIVE_EVO_CYCLING;
+        out->cycleActive = gTasks[sEvoGraphicsTaskId].isActive;
+        out->showNew = out->cycleActive ? gTasks[sEvoGraphicsTaskId].data[4] > gTasks[sEvoGraphicsTaskId].data[3] : TRUE;
+        break;
+    case T_EVOSTATE_SPARKLE_CIRCLE:
+    case T_EVOSTATE_SPARKLE_SPRAY:
+    case T_EVOSTATE_EVO_SOUND:
+        out->phase = NATIVE_EVO_FLASH;
+        out->showNew = TRUE;
+        out->white = state == T_EVOSTATE_EVO_SOUND && gPaletteFade.yDec && gPaletteFade.blendColor == RGB_WHITE
+                   ? gPaletteFade.y : 16;
+        break;
+    case T_EVOSTATE_CANCEL:
+    case T_EVOSTATE_CANCEL_MON_ANIM:
+    case T_EVOSTATE_CANCEL_MSG:
+        out->phase = NATIVE_EVO_STOPPED;
+        out->white = state != T_EVOSTATE_CANCEL_MSG && gPaletteFade.blendColor == RGB_WHITE ? gPaletteFade.y : 0;
+        if (state == T_EVOSTATE_CANCEL && gTasks[sEvoGraphicsTaskId].isActive)
+            out->white = 16;
+        out->monAnim = state == T_EVOSTATE_CANCEL_MSG;
+        break;
+    case T_EVOSTATE_END:
+        out->phase = NATIVE_EVO_ENDING;
+        out->showNew = !task->data[9];
+        break;
+    default:
+        // EVO_MON_ANIM .. TRY_LEARN_MOVE, LEARNED_MOVE .. REPLACE_MOVE
+        out->phase = task->data[9] ? NATIVE_EVO_STOPPED : NATIVE_EVO_EVOLVED;
+        out->showNew = !task->data[9];
+        out->monAnim = state == T_EVOSTATE_SET_MON_EVOLVED;
+        out->learning = (task->data[3] & TASK_BIT_LEARN_MOVE) != 0;
+        if (state == T_EVOSTATE_REPLACE_MOVE)
+        {
+            if (task->data[6] == T_MVSTATE_HANDLE_MOVE_SELECT || task->data[6] == T_MVSTATE_SHOW_MOVE_SELECT)
+                out->msgValid = task->data[6] == T_MVSTATE_SHOW_MOVE_SELECT;
+            if (task->data[6] == T_MVSTATE_HANDLE_YES_NO)
+            {
+                out->yesNo = TRUE;
+                out->yesNoCursor = Menu_GetCursorPos() != 0;
+                out->ready = TRUE;
+            }
+        }
+        break;
+    }
+    if (!out->ready && out->msgValid && TextPrinter_NativeUiWindowWaiting(0) && !gPaletteFade.active)
+        out->ready = TRUE;
+    return TRUE;
+}
+
 bool32 Evolution_NativeUiState(struct NativeEvolution *out)
 {
     struct Task *task;
@@ -1751,11 +1841,14 @@ bool32 Evolution_NativeUiState(struct NativeEvolution *out)
 
     memset(out, 0, sizeof(*out));
     // fading out of the screen before, or back from the summary's move choice (one frame)
-    if (gMain.callback2 == CB2_BeginEvolutionScene || gMain.callback2 == CB2_EvolutionSceneLoadGraphics)
+    if (gMain.callback2 == CB2_BeginEvolutionScene || gMain.callback2 == CB2_EvolutionSceneLoadGraphics
+     || gMain.callback2 == CB2_TradeEvolutionSceneLoadGraphics)
     {
         out->phase = NATIVE_EVO_LOADING;
         return TRUE;
     }
+    if (gMain.callback2 == CB2_TradeEvolutionSceneUpdate && sEvoStructPtr != NULL)
+        return NativeUiTradeEvolutionState(out);
     if (gMain.callback2 != CB2_EvolutionSceneUpdate || sEvoStructPtr == NULL)
         return FALSE;
     task = &gTasks[sEvoStructPtr->evoTaskId];

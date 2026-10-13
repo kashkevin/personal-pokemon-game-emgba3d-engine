@@ -383,3 +383,27 @@ static void SafariHandleEndLinkBattle(enum BattlerId battler)
     if ((gBattleTypeFlags & BATTLE_TYPE_LINK) && !(gBattleTypeFlags & BATTLE_TYPE_IS_MASTER))
         gBattlerControllerFuncs[battler] = SafariSetBattleEndCallbacks;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// Native PC UI (src/native_ui/screens/ui_battle.c): which of the Safari
+// controller's choices waits for this battler (BALL, POKéBLOCK, GO NEAR, RUN
+// on the engine's 2x2; the Pokéblock case as the bag). Read-only.
+u32 Battle_NativeUiSafariInput(u32 battler)
+{
+    void (*f)(enum BattlerId);
+
+    if (battler >= MAX_BATTLERS_COUNT || battler >= gBattlersCount
+     || gBattlerBattleController[battler] != BATTLE_CONTROLLER_SAFARI)
+        return NATIVE_BATTLE_INPUT_NONE;
+    f = gBattlerControllerFuncs[battler];
+    if (f == HandleChooseActionAfterDma3)
+        return NATIVE_BATTLE_INPUT_ACTION_WAIT;
+    if (f == HandleInputChooseAction)
+        return NATIVE_BATTLE_INPUT_ACTION;
+    if (f == SafariOpenPokeblockCase || f == CompleteWhenChosePokeblock)
+        return NATIVE_BATTLE_INPUT_BAG;
+    return NATIVE_BATTLE_INPUT_NONE;
+}
+#endif // ENABLE_NATIVE_UI
