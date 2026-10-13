@@ -128,6 +128,16 @@ static bool8 StartMenuPlayersCallback(void);
 static bool8 StartMenuPlayerBackCallback(void);
 static bool8 StartMenuRideCallback(void);
 static bool8 StartMenuStyleCallback(void);
+#ifdef PORTABLE
+// STYLE (the look and character editor) and RIDE stay in the field: no fade to
+// black for them, as for PLAYERS (else the field stays black). Native build only,
+// so the GBA ROM keeps its pairing; the same fix for both builds is
+// a85ed3a47 on claude/fix-player-menu-fade.
+#define MENU_STAYS_IN_FIELD(callback) ((callback) == StartMenuStyleCallback || (callback) == StartMenuRideCallback)
+#else
+#define MENU_STAYS_IN_FIELD(callback) FALSE
+#endif
+#line 131 // gba-line
 
 // Menu callbacks
 static bool8 SaveStartCallback(void);
@@ -703,7 +713,7 @@ static bool8 HandleStartMenuInput(void)
             && gMenuCallback != StartMenuBattlePyramidRetireCallback)
         {
            if (gMenuCallback != StartMenuPlayerOptionsCallback && gMenuCallback != StartMenuPlayersCallback
-            && gMenuCallback != StartMenuPlayerBackCallback && gMenuCallback != StartMenuStyleCallback && gMenuCallback != StartMenuRideCallback)
+            && gMenuCallback != StartMenuPlayerBackCallback && !MENU_STAYS_IN_FIELD(gMenuCallback))
                FadeScreen(FADE_TO_BLACK, 0);
         }
 
