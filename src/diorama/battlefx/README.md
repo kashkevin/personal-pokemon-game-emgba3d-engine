@@ -21,6 +21,18 @@ with `gPotentialItemEffectBattler` put back) or decides anything about the battl
 accuracy, turn order, abilities, saves and multiplayer are untouched. A failure only shows the
 GBA effects again.
 
+**The Poke Ball animations are the game's original ones** (the owner's decision, 2026-10-13): a
+trainer's throw and the send-out (`CONTROLLER_SEND_OUT`, `B_ANIM_BALL_THROW_WITH_TRAINER`), the
+throw at a wild Pokemon with its fall, shakes, break-out or catch and the caught ball's stars
+(`B_ANIM_BALL_THROW`, `B_ANIM_CRITICAL_CAPTURE_THROW`) and the recall into the ball
+(`B_ANIM_SWITCH_OUT_PLAYER_MON`, `B_ANIM_SWITCH_OUT_OPPONENT_MON`) are not taken (`bfx_game.c`
+`PokeBallAnimation`), and the balls and their particles stay in the GBA picture even while another
+animation is drawn in HD (a shiny Pokemon's stars as its ball opens; `IsPokeBallSprite`).
+Everything else - the 621 moves, the status, stat, weather, healing and other battle animations, a
+shiny's stars, the Pokeblock throw - stays HD. `pokeBalls=hd` (settings) or
+`PKMN_BATTLEFX_POKEBALLS=hd` brings back the HD Poke Ball animations described below (the trainer
+who throws, the caught ball's stars, the send-out).
+
 ## Files
 
 | File | |
@@ -231,6 +243,7 @@ package itself (v3.4): see the integration report.
 
 ## The controllers' own animations
 
+(With `pokeBalls=hd` only for the send-out: by default it is the game's original animation.)
 A send-out (`CONTROLLER_SEND_OUT`, hooked once `Task_DoPokeballSendOutAnim` has made the ball,
 after the multiplayer battle's send-out gate) and a shiny Pokemon's stars (`CONTROLLER_SHINY`)
 are not battle animation scripts; the controllers run them. The core replays them from the
@@ -245,11 +258,12 @@ never leaves another animation's sprites out.
 ## Settings
 
 `battlefx/settings.cfg` (`enabled=1`, `log=0`; `sync=1`, `quality=...`, `attach=0`, `gbaBelowFps=N`,
-`drawBudgetMs=N` optional) or the environment (which overrides the file): `PKMN_BATTLEFX=0` plays the
+`drawBudgetMs=N`, `pokeBalls=original|hd` optional) or the environment (which overrides the file): `PKMN_BATTLEFX=0` plays the
 original GBA animations (the development fallback), `PKMN_BATTLEFX_QUALITY=auto|full|high|medium|low|gba`
 the quality (above; auto in the player builds, full in the test builds), `PKMN_BATTLEFX_ATTACH=0` the
 effects placed for the GBA pictures (above), `PKMN_BATTLEFX_GBA_BELOW_FPS=N` the auto quality's last
 fallback (above; default 45, 0: never), `PKMN_BATTLEFX_DRAW_BUDGET_MS=N` an explicit drawing budget (0: none),
+`PKMN_BATTLEFX_POKEBALLS=original|hd` the Poke Ball animations (above; default original),
 `PKMN_BATTLEFX_LOG=1` logs every animation (the game's and the core's frame counts, the core's
 cost, how its pictures went; the renderer's GPU / CPU time), `PKMN_BATTLEFX_SYNC=1` makes the
 game wait for the core every frame, `PKMN_BATTLEFX_DIR=<folder>` reads the data from there

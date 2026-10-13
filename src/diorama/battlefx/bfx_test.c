@@ -23,8 +23,11 @@
 #include "global.h"
 #include "battle.h"
 #include "battle_anim.h"
+#include "battle_controllers.h"
 #include "battle_gfx_sfx_util.h"
+#include "battle_interface.h"
 #include "battle_util.h"
+#include "item.h"
 #include "main.h"
 #include "m4a.h"
 #include "move.h"
@@ -36,7 +39,9 @@
 #include "sprite.h"
 #include "task.h"
 #include "constants/battle_anim.h"
+#include "constants/items.h"
 #include "constants/moves.h"
+#include "constants/songs.h"
 #include "diorama/battle_fx.h"
 #include "diorama/battle_fx_host.h"
 #include "diorama/battle_fx_render.h"
@@ -148,6 +153,12 @@ static struct
     uint32_t realSerial;
     int realWant[3];
     bool realWritten[3];
+    /* PKMN_BFX_TEST_THROW=<item number>[:<count>]: a wild battle fought (no gallery) first throws that ball
+     * `count` times (default 1) from its action menu, as the last-used-ball button does (the ball put in the
+     * bag in memory if the bag has none), then goes on as the autopilot does; the throw waits
+     * PKMN_BFX_TEST_THROW_DELAY action-menu frames (default 30) */
+    u16 throwItem;
+    int throwsLeft, throwDelay, throwWait;
     /* results */
     int played, failedCount, parityFailures;
     bool stuck; /* the game's animation did not end within MAX_ANIM_FRAMES (this battle lacks what it waits for) */
@@ -262,6 +273,16 @@ static void Init(void)
         t.exitAfter = EnvInt("PKMN_BFX_TEST_EXIT", 0) != 0;
     }
     t.trace = EnvInt("PKMN_BFX_TEST_TRACE", 0) != 0;
+    if (SDL_getenv("PKMN_BFX_TEST_THROW") && SDL_getenv("PKMN_BFX_TEST_THROW")[0])
+    {
+        int item = 0, count = 1;
+        sscanf(SDL_getenv("PKMN_BFX_TEST_THROW"), "%d:%d", &item, &count);
+        t.throwItem = (u16)item;
+        t.throwsLeft = count > 0 ? count : 1;
+        t.throwDelay = EnvInt("PKMN_BFX_TEST_THROW_DELAY", 30);
+        t.throwWait = t.throwDelay;
+        SDL_Log("Battle FX test: throwing item %d %d time(s) at a wild battle's menu", item, t.throwsLeft);
+    }
     snprintf(t.out, sizeof(t.out), "%s", SDL_getenv("PKMN_BFX_TEST_OUT") ? SDL_getenv("PKMN_BFX_TEST_OUT") : "bfx_test");
     if (t.realShots || t.realParity)
     {
@@ -730,11 +751,43 @@ static bool MeasureSoundEffects(void)
     return true;
 }
 
+/* PKMN_BFX_TEST_THROW: the ball thrown from the action menu, as battle_controller_player.c does when the
+ * last-used-ball button is released (HandleInputChooseAction). true: thrown (the menu is done). */
+static bool ThrowBall(void)
+{
+    u32 battler = gBattlerInMenuId;
+
+    if (t.throwsLeft <= 0 || t.throwItem == ITEM_NONE || battler >= MAX_BATTLERS_COUNT
+     || (gBattleTypeFlags & (BATTLE_TYPE_TRAINER | BATTLE_TYPE_SAFARI | BATTLE_TYPE_CATCH_TUTORIAL)))
+        return false;
+    if (t.throwWait-- > 0)
+        return true; /* the menu up for a moment first, as a player would see it */
+    if (!CheckBagHasItem(t.throwItem, 1))
+        AddBagItem(t.throwItem, 10);
+    gBallToDisplay = t.throwItem;
+    if (!CanThrowLastUsedBall())
+    {
+        SDL_Log("Battle FX test: item %u cannot be thrown here; fighting instead", t.throwItem);
+        t.throwsLeft = 0;
+        return false;
+    }
+    SDL_Log("Battle FX test: throwing item %u (%d left)", t.throwItem, t.throwsLeft - 1);
+    t.throwsLeft--;
+    t.throwWait = t.throwDelay;
+    PlaySE(SE_SELECT);
+    TryHideLastUsedBall();
+    BtlController_EmitTwoReturnValues(battler, B_COMM_TO_ENGINE, B_ACTION_THROW_BALL, 0);
+    BtlController_Complete(battler);
+    return true;
+}
+
 bool BattleFxTest_OnActionMenu(void)
 {
     if (!t.init)
         Init();
     if (MeasureSoundEffects())
+        return true;
+    if (t.state == TEST_OFF && ThrowBall())
         return true;
     switch (t.state)
     {

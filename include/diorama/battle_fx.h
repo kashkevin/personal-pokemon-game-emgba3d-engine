@@ -35,10 +35,13 @@
  * for the GBA pictures even where the animated battle sprites show others;
  * PKMN_BATTLEFX_GBA_BELOW_FPS=N (quality auto, default 45): at the lowest
  * tier, an animation plays its GBA effects when the game shows fewer than N of
- * its frames a second because of them (0: never). The same keys can be put in
- * battlefx/settings.cfg (key=value lines: enabled, log, sync, quality, attach,
- * gbaBelowFps, drawBudgetMs). Failures are always logged and the GBA animation
- * is shown.
+ * its frames a second because of them (0: never). The Poke Ball animations (a
+ * trainer's throw and send-out, the throw at a wild Pokemon with its shakes,
+ * break-out or catch, the recall) are the game's original ones by default;
+ * PKMN_BATTLEFX_POKEBALLS=hd draws them in HD as before 2026-10-13. The same
+ * keys can be put in battlefx/settings.cfg (key=value lines: enabled, log,
+ * sync, quality, attach, gbaBelowFps, drawBudgetMs, pokeBalls). Failures are
+ * always logged and the GBA animation is shown.
  *
  * Built only with DIORAMA=1 (ENABLE_DIORAMA).
  */
@@ -66,7 +69,8 @@ void BattleFx_OnFrameEnd(void);
  * send-out (`arg`: the ball, enum PokeBall), battle_anim_throw.c
  * TryShinyAnimation once it has started a shiny Pokemon's stars. The core
  * replays one at a time and only when it is alone: two that begin in the same
- * frame (a double battle's opening) or one while another plays stay GBA. */
+ * frame (a double battle's opening) or one while another plays stay GBA. The
+ * send-out is the game's original Poke Ball animation unless pokeBalls=hd. */
 enum
 {
     BATTLEFX_CONTROLLER_SEND_OUT = 1,
