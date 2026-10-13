@@ -41,6 +41,7 @@
  *                           a frame (else the display's clock): the same pictures run after run (comparisons)
  *   PKMN_BFX_TEST_PLAIN_SHADERS=1  the effect shaders without the placing for the battlers as shown
  *                           (gl_battle_fx.c WithAttach): what the shaders draw with it off, to compare
+ *   PKMN_BFX_TEST_ATTACH_TRACE=1  a log line per battler and picture: the placing for the battlers as shown
  *   PKMN_BFX_TEST_LAYERS=1  the HD layers themselves, read back before they are composited, at every 8th
  *                           frame of each animation: a line each in layers.jsonl with a hash of the layer's
  *                           values (with PKMN_BFX_TEST_ALPHA the same layer run after run, whatever the 3D
@@ -72,6 +73,8 @@ bool BattleFxTest_ViewHd(void);
 bool BattleFxTest_FixedAlpha(float *alpha);
 /* PKMN_BFX_TEST_PLAIN_SHADERS (main thread). */
 bool BattleFxTest_PlainShaders(void);
+/* PKMN_BFX_TEST_ATTACH_TRACE=1: a log line per battler and picture, the placing for the battlers as shown. */
+bool BattleFxTest_AttachTrace(void);
 /* PKMN_BFX_TEST_LAYERS (main thread, gl_battle_fx.c): whether to read back layer `which` (0 back, 1 front) of
  * the animation's frame `frame`; then its values (RGBA floats, w x h, bottom row first). */
 bool BattleFxTest_WantLayer(uint32_t serial, int frame, int which);
