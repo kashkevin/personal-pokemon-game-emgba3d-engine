@@ -8,6 +8,7 @@
  * window captures and the core's cost.
  */
 
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1161,6 +1162,90 @@ bool BattleFxTest_FixedAlpha(float *alpha)
 bool BattleFxTest_PlainShaders(void)
 {
     return EnvInt("PKMN_BFX_TEST_PLAIN_SHADERS", 0) != 0;
+}
+
+/* PKMN_BFX_TEST_LAYERS: the HD layers before they are composited (main thread). */
+static struct
+{
+    int mode; /* -1 not read yet, 0 off, 1 hashes, 2 hashes and pictures */
+    uint32_t serial;
+    uint8_t done[2][1024];
+    FILE *file;
+} sLayers = {.mode = -1};
+
+static int LayersMode(void)
+{
+    if (sLayers.mode < 0)
+    {
+        const char *v = SDL_getenv("PKMN_BFX_TEST_LAYERS");
+        sLayers.mode = v == NULL || v[0] == '\0' || v[0] == '0' ? 0 : strcmp(v, "png") == 0 ? 2 : 1;
+    }
+    return sLayers.mode;
+}
+
+bool BattleFxTest_WantLayer(uint32_t serial, int frame, int which)
+{
+    if (LayersMode() == 0 || !t.init || t.state != TEST_RUN || (int)serial != SDL_AtomicGet(&t.wantSerial))
+        return false;
+    if (frame <= 0 || frame % 8 != 0 || frame / 8 >= 1024 || which < 0 || which > 1)
+        return false;
+    if (serial != sLayers.serial)
+    {
+        sLayers.serial = serial;
+        memset(sLayers.done, 0, sizeof(sLayers.done));
+    }
+    return !sLayers.done[which][frame / 8];
+}
+
+void BattleFxTest_TakeLayer(uint32_t serial, int frame, int which, int w, int h, const float *rgba)
+{
+    uint32_t hash = 2166136261u;
+    double sum[4] = {0.0, 0.0, 0.0, 0.0};
+    size_t n = (size_t)w * h * 4;
+    char path[700];
+
+    (void)serial;
+    sLayers.done[which][frame / 8] = 1;
+    for (size_t i = 0; i < n; i++)
+    {
+        uint32_t bits;
+
+        memcpy(&bits, &rgba[i], sizeof(bits));
+        hash = (hash ^ bits) * 16777619u;
+        sum[i & 3] += rgba[i];
+    }
+    if (sLayers.file == NULL)
+    {
+        snprintf(path, sizeof(path), "%s/layers.jsonl", t.out);
+        sLayers.file = fopen(path, "a");
+    }
+    if (sLayers.file != NULL)
+    {
+        fprintf(sLayers.file, "{\"anim\":\"%s\",\"turn\":%d,\"frame\":%d,\"layer\":\"%s\",\"w\":%d,\"h\":%d,"
+                              "\"hash\":\"%08x\",\"sum\":[%.4f,%.4f,%.4f,%.4f]}\n",
+                t.name, t.curTurn, frame, which ? "front" : "back", w, h, (unsigned)hash, sum[0], sum[1], sum[2], sum[3]);
+        fflush(sLayers.file);
+    }
+    if (LayersMode() == 2)
+    {
+        uint8_t *px = malloc((size_t)w * h * 4);
+
+        if (px == NULL)
+            return;
+        for (size_t i = 0; i < (size_t)w * h; i++)
+            for (int c = 0; c < 4; c++)
+            {
+                /* linear premultiplied over black, to sRGB */
+                float v = c == 3 ? 1.0f : rgba[i * 4 + c];
+                v = v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v;
+                v = v <= 0.0031308f ? v * 12.92f : 1.055f * powf(v, 1.0f / 2.4f) - 0.055f;
+                px[i * 4 + c] = (uint8_t)(v * 255.0f + 0.5f);
+            }
+        snprintf(path, sizeof(path), "%s/%s_t%d_%03d_%s_layer.png", t.out, t.name, t.curTurn, frame,
+                 which ? "front" : "back");
+        PngWrite_RGBA(path, px, w, h, true);
+        free(px);
+    }
 }
 
 #endif

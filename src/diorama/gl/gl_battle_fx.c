@@ -2220,6 +2220,21 @@ static void DrawLayer(const struct BattleFxLayout *L, enum Layer which)
             DrawQuads(&s.qCards, &f->cards);
         }
     }
+#ifdef BATTLEFX_TEST
+    if (BattleFxTest_WantLayer(f->serial, f->frame, which == LAYER_FRONT ? 1 : 0))
+    {
+        float *px = malloc((size_t)s.layer.w * s.layer.h * 4 * sizeof(float));
+
+        if (px != NULL)
+        {
+            bglBindFramebuffer(GL_READ_FRAMEBUFFER, s.layer.fbo);
+            glPixelStorei(GL_PACK_ALIGNMENT, 4);
+            glReadPixels(0, 0, s.layer.w, s.layer.h, GL_RGBA, GL_FLOAT, px);
+            BattleFxTest_TakeLayer(f->serial, f->frame, which == LAYER_FRONT ? 1 : 0, s.layer.w, s.layer.h, px);
+            free(px);
+        }
+    }
+#endif
     Bloom(f, kTiers[s.tier].bloomLevels);
 
     /* Composite into the window's region. */
