@@ -19,14 +19,20 @@
 #define getRedChannel(x) ((x >>  0) & 0x1F)
 #define getGreenChannel(x) ((x >>  5) & 0x1F)
 #define getBlueChannel(x) ((x >>  10) & 0x1F)
+/* Native UI (src/native_ui): background layers the native interface draws
+ * itself are left out of the picture (bit n: BG n). 0 outside it. */
+uint8_t gPlatformPictureHideBgMask;
+/* ...and the OAM entries it draws itself (bit n of [n / 32]: entry n; the
+ * battle's healthboxes, bars and trays). 0 outside it. */
+uint32_t gPlatformPictureHideObj[4];
 #ifdef ENABLE_DIORAMA
 /* gDioramaSceneHideBg (diorama/battle_fx.h): BG layers left out of this frame
  * as if DISPCNT had them off - an animation's effect picture that Battle FX
  * redraws in HD. 0 outside its animations. */
 extern uint8_t gDioramaSceneHideBg;
-#define isbgEnabled(x) (((REG_DISPCNT >> 8) & 0xF & ~gDioramaSceneHideBg) & (1 << x))
+#define isbgEnabled(x) ((((REG_DISPCNT >> 8) & 0xF) & ~gPlatformPictureHideBgMask & ~gDioramaSceneHideBg) & (1 << x))
 #else
-#define isbgEnabled(x) ((REG_DISPCNT >> 8) & 0xF) & (1 << x)
+#define isbgEnabled(x) ((((REG_DISPCNT >> 8) & 0xF) & ~gPlatformPictureHideBgMask) & (1 << x))
 #endif
 
 #define WINMASK_BG0    (1 << 0)
@@ -841,6 +847,9 @@ static void DrawSprites(struct scanlineData* scanline, uint16_t vcount, bool win
         puts("2-D OBJ Character mapping not supported.");
     }
 
+    bool hideObj = (gPlatformPictureHideObj[0] | gPlatformPictureHideObj[1]
+                  | gPlatformPictureHideObj[2] | gPlatformPictureHideObj[3]) != 0;
+
     for (i = 127; i >= 0; i--)
     {
         struct OamData *oam = &((struct OamData *)OAM)[i];
@@ -857,6 +866,9 @@ static void DrawSprites(struct scanlineData* scanline, uint16_t vcount, bool win
         bool doubleSizeOrDisabled = (oam->affineMode >> 1) & 1;
         bool isSemiTransparent = (oam->objMode == 1);
         bool isObjWin = (oam->objMode == 2);
+
+        if (hideObj && (gPlatformPictureHideObj[i >> 5] >> (i & 31)) & 1)
+            continue; // the native interface draws it
 
         if (!(isAffine) && doubleSizeOrDisabled) // disable for non-affine
         {

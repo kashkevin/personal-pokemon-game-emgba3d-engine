@@ -2535,3 +2535,14 @@ void SetFlyDestination(struct RegionMap* regionMap)
     else
         SetWarpDestinationToMapWarp(sMapHealLocations[regionMap->mapSecId][0], sMapHealLocations[regionMap->mapSecId][1], WARP_ID_NONE);
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI's Pokédex AREA page draws the player's icon (read-only).
+const u8 *RegionMap_NativeUiPlayerIcon(bool32 female, const u16 **palette)
+{
+    *palette = female ? sRegionMapPlayerIcon_MayPal : sRegionMapPlayerIcon_BrendanPal;
+    return female ? sRegionMapPlayerIcon_MayGfx : sRegionMapPlayerIcon_BrendanGfx;
+}
+#endif // ENABLE_NATIVE_UI

@@ -682,3 +682,53 @@ static void DrawBgWindowFrames(void)
 
     CopyBgTilemapBufferToVram(1);
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+STATIC_ASSERT(NATIVE_OPTION_CANCEL == MENUITEM_CANCEL, NativeUiOptionRowsMatch);
+
+// The native PC UI (src/native_ui/screens/ui_options.c) draws this screen in
+// place of its windows and follows this state; the input stays here.
+bool32 OptionMenu_NativeUiState(struct NativeOptionMenu *out)
+{
+    static const TaskFunc sTasks[] = {Task_OptionMenuFadeIn, Task_OptionMenuProcessInput, Task_OptionMenuSave,
+                                      Task_OptionMenuFadeOut};
+    u8 taskId = TASK_NONE;
+    TaskFunc func = NULL;
+    u32 i;
+
+    memset(out, 0, sizeof(*out));
+    out->textSpeedCount = 3; // TextSpeed_ProcessInput: Slow, Mid, Fast
+    out->frameCount = WINDOW_FRAMES_COUNT;
+    if (gMain.callback2 == CB2_InitOptionMenu)
+    {
+        out->phase = NATIVE_OPTION_LOADING;
+        return TRUE;
+    }
+    if (gMain.callback2 != MainCB2)
+        return FALSE;
+    for (i = 0; i < ARRAY_COUNT(sTasks) && taskId == TASK_NONE; i++)
+    {
+        taskId = FindTaskIdByFunc(sTasks[i]);
+        func = sTasks[i];
+    }
+    if (taskId == TASK_NONE)
+        return FALSE;
+    out->cursor = gTasks[taskId].tMenuSelection;
+    out->values[NATIVE_OPTION_TEXT_SPEED] = gTasks[taskId].tTextSpeed;
+    out->values[NATIVE_OPTION_BATTLE_SCENE] = gTasks[taskId].tBattleSceneOff;
+    out->values[NATIVE_OPTION_BATTLE_STYLE] = gTasks[taskId].tBattleStyle;
+    out->values[NATIVE_OPTION_SOUND] = gTasks[taskId].tSound;
+    out->values[NATIVE_OPTION_BUTTON_MODE] = gTasks[taskId].tButtonMode;
+    out->values[NATIVE_OPTION_FRAME] = gTasks[taskId].tWindowFrameType;
+    if (func == Task_OptionMenuFadeIn)
+        out->phase = NATIVE_OPTION_LOADING;
+    else if (func == Task_OptionMenuProcessInput)
+        out->phase = NATIVE_OPTION_INPUT;
+    else
+        out->phase = NATIVE_OPTION_LEAVING;
+    out->ready = func == Task_OptionMenuProcessInput;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI
