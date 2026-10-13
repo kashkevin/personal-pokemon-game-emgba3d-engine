@@ -116,7 +116,7 @@ OVERRIDES = {
     # A second storey over the first (V29): the search stopped at the eave
     # between them and laid the upper storey back as roof.
     ("LilycoveCity", 37, 24): {"facade": 64},    # the Cove Lily Motel, its lattice storey
-    ("BattleFrontier_OutsideWest", 19, 17): {"facade": 56},   # the Battle Factory, two rows of windows
+    ("BattleFrontier_OutsideWest", 19, 17): {"facade": 56},   # the Battle Dome, two rows of windows
 }
 # Maps whose doors are cut into the rock round them (Sootopolis's crater):
 # the door search runs on into the rock. Their houses are found by their

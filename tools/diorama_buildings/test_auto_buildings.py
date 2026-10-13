@@ -166,8 +166,8 @@ class HeightTests(unittest.TestCase):
 
     def test_a_second_storey_is_wall_not_roof(self):
         self.assertEqual(specs_of("LilycoveCity")["auto_lilycovecity_37_24"]["relief"]["height"], 64)
-        factory = specs_of("BattleFrontier_OutsideWest")["auto_battlefrontier_outsidewest_19_17"]
-        self.assertEqual(factory["relief"]["height"], 56)
+        dome = specs_of("BattleFrontier_OutsideWest")["auto_battlefrontier_outsidewest_19_17"]
+        self.assertEqual(dome["relief"]["height"], 56)   # the Battle Dome
 
     def test_the_glass_workshop_is_its_own_cells(self):
         shop = specs_of("Route113")["auto_route113_33_5"]
