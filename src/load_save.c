@@ -225,6 +225,14 @@ void SaveObjectEvents(void)
         // To avoid crash on vanilla, save follower as inactive
         if (gObjectEvents[i].localId == OBJ_EVENT_ID_FOLLOWER)
             gSaveBlock1Ptr->objectEvents[i].active = FALSE;
+#ifdef PORTABLE
+        // The objects the multiplayer layer makes at run time (shared wild
+        // Pokemon, other players and their followers, the World Event Pokemon)
+        // have no map template to come back to: never saved (KNOWN_ISSUES M15).
+        if (Multiplayer_IsRuntimeLocalId(gObjectEvents[i].localId))
+            gSaveBlock1Ptr->objectEvents[i].active = FALSE;
+#endif
+#line 228 // gba-line
     }
 }
 
@@ -249,6 +257,13 @@ void LoadObjectEvents(void)
             !gObjectEvents[i].active &&
             gObjectEvents[i].graphicsId & OBJ_EVENT_MON)
             gObjectEvents[i].active = TRUE;
+#ifdef PORTABLE
+        // Saves written by expansion previews 1 and 2 can hold shared wild
+        // Pokemon (KNOWN_ISSUES M15): nothing could ever talk to them again.
+        if (Multiplayer_IsRuntimeLocalId(gObjectEvents[i].localId))
+            gObjectEvents[i].active = FALSE;
+#endif
+#line 252 // gba-line
     }
     SetMinimumOWESpawnTimer();
 }
