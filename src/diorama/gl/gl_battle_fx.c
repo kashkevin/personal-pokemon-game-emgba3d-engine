@@ -1352,6 +1352,27 @@ void BattleFxGL_Stats(struct BattleFxRenderStats *stats)
     *stats = s.stats;
 }
 
+/* The HD layers' drawing cost a picture for animation `serial`, against `budgetMs` (the boundary's check, this
+ * thread): the layers' GPU time (timer queries, read back a few pictures later) or, from a driver that gives none,
+ * the CPU time to submit them, times the layers a picture draws; once DRAW_BUDGET_PICTURES pictures of it are
+ * drawn, so that one slow first picture (its textures uploaded) does not decide. */
+#define DRAW_BUDGET_PICTURES 6
+bool BattleFxGL_DrawTooSlow(uint32_t serial, int budgetMs, double *msPerPicture)
+{
+    double perLayer;
+
+    if (budgetMs <= 0 || serial != s.stats.serial || s.stats.frames < DRAW_BUDGET_PICTURES || s.stats.layers == 0)
+        return false;
+    if (s.stats.gpuSamples >= 4)
+        perLayer = s.stats.gpuMsTotal / s.stats.gpuSamples;
+    else if (s.stats.gpuSamples == 0 && s.stats.layers >= 2 * DRAW_BUDGET_PICTURES)
+        perLayer = s.stats.cpuMsTotal / s.stats.layers; /* no timer queries */
+    else
+        return false;
+    *msPerPicture = perLayer * (double)s.stats.layers / (double)s.stats.frames;
+    return *msPerPicture > (double)budgetMs;
+}
+
 static void DrawLayer(const struct BattleFxLayout *L, enum Layer which)
 {
     const struct Frame *f = &s.frames[s.show];
