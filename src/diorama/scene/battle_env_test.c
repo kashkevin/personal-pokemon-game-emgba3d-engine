@@ -285,6 +285,8 @@ static void RedoTestFoes(int count)
         if (p != NULL)
             p++;
     }
+}
+
 /* PKMN_TEST_SHINY: the wild Pokemon just made is shiny (its shiny stars play as it appears). */
 static void MaybeShiny(void)
 {
