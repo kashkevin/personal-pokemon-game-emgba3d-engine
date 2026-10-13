@@ -1089,6 +1089,9 @@ bool32 Battle_NativeUiLevelUpBox(struct NativeLevelUpBox *out);
 u32 Battle_NativeUiPrizeMoney(void);
 /* battle_main.c: the battle's intro runs (money and Exp. as before the battle) */
 bool32 Battle_NativeUiInIntro(void);
+/* battle_message.c: the name of the trainer a battler belongs to, as the battle's
+ * messages name them; NULL for a wild Pokémon (text: 32 bytes at least) */
+const u8 *Battle_NativeUiTrainerName(u32 battler, u8 *text);
 /* battle_controller_player.c: what the player controller waits for from this battler */
 u32 Battle_NativeUiPlayerInput(u32 battler);
 /* battle_controller_safari.c: the same for the Safari Zone's controller (its action

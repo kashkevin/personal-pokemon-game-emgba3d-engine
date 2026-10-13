@@ -19,6 +19,7 @@
  * 26's (ui_results.c).
  * Project-owned.
  */
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -113,6 +114,7 @@ struct Box
     bool caught;       /* a wild Pokémon whose species was caught (the game's ball) */
     int slide;         /* the healthbox's slide (x2), GBA pixels */
     int bob;           /* its bounce (y2) */
+    char owner[24];    /* its trainer's name in capitals, as the messages name them ("" wild) */
 };
 
 static struct
@@ -210,6 +212,17 @@ static void CaptureBox(u32 battler)
         shown = mon;
     b->on = true;
     b->battler = battler;
+    {
+        u8 text[32];
+        const u8 *owner = Battle_NativeUiTrainerName(battler, text);
+
+        if (owner != NULL)
+        {
+            UiText_ToAscii(b->owner, sizeof(b->owner), owner);
+            for (char *c = b->owner; *c != '\0'; c++)
+                *c = toupper((unsigned char)*c);
+        }
+    }
     b->position = GetBattlerPosition(battler);
     b->foe = !IsOnPlayerSide(battler);
     UiMon_FromPokemon(&b->mon, shown);
@@ -623,14 +636,15 @@ static void Databox2(int x, int y, const struct Box *b, bool mine)
     if (b->caught && bx == nx0 - 2)
         Ball(nx0 - 2, ry + 2, 4), bx = nx0 + 9;
     UiW_HpBar(bx, ry + 2, x + w - (foe ? 10 : 14) - bx - 13, b->hpFrac, true, ink);
-    if (!foe)
+    /* the HP numbers and the Exp. bar on the player's own boxes only, as the
+     * design's (a partner's box is the short one: its numbers would fall off it) */
+    if (mine)
     {
         char hp[24];
 
         snprintf(hp, sizeof(hp), "%d/%d", (int)b->hp, (int)b->maxHp);
         UiCaps_Draw(x + w - 14, y + 34, hp, UI_P_TEXT, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_RIGHT, UI_NONE);
-        if (mine)
-            UiW_ExpBar(x + 12, y + 36, 80, b->expFrac, true);
+        UiW_ExpBar(x + 12, y + 36, 80, b->expFrac, true);
     }
 }
 
@@ -886,6 +900,10 @@ static void TargetPlate(int x, int y, int w, int h, const struct Box *b, int sta
     UiGfx_MonIcon(b->mon.species, b->mon.personality, false, state == 2 ? (t / 10) % 2 : 0, x + 9, y + 1, inv ? &sGray : NULL);
     UiText_Draw(UI_FONT_NORMAL, x + 46, y + 1, b->mon.nickname, inv ? UI_HEX(0x888888) : UI_P_TEXT, inv ? UI_NONE : UI_P_TEXT_SH,
                 UI_ALIGN_LEFT, 0);
+    /* whose it is (the design's trainer name; the role's colour stands for the trainer's) */
+    if (b->owner[0] != '\0')
+        UiCaps_Draw(x + 46, y + 20, b->owner, inv ? UI_HEX(0x909090) : UiMix(tag, UI_P_INK, 0.25), UI_NONE, UI_CAPS_PLAIN,
+                    UI_ALIGN_LEFT, UI_NONE);
     UiCaps_Draw(x + w - 8, y + 20, role, inv ? UI_HEX(0x909090) : tag, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_RIGHT, UI_NONE);
     if (!inv)
         UiW_HpBar(x + w - 78, y + 5, 58, b->hpFrac, false, UI_NONE);

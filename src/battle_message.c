@@ -3989,3 +3989,27 @@ u8 GetCurrentPPToMaxPPState(u8 currentPP, u8 maxPP)
 
     return 0;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_battle.c) names the trainer each
+// Pokemon belongs to on its target plates, as this battle's messages name them
+// (BattleStringGetTrainerName: the player, an in-game partner, a link player,
+// each of two opponents); NULL for a wild Pokemon. Read-only; text holds 32
+// bytes at least, as BufferStringBattle's.
+const u8 *Battle_NativeUiTrainerName(u32 battler, u8 *text)
+{
+    u8 multiplayerId;
+
+    if (battler >= gBattlersCount)
+        return NULL;
+    if (!IsOnPlayerSide(battler) && !(gBattleTypeFlags & (BATTLE_TYPE_TRAINER | BATTLE_TYPE_LINK | BATTLE_TYPE_RECORDED_LINK)))
+        return NULL;
+    if (gBattleTypeFlags & BATTLE_TYPE_RECORDED_LINK)
+        multiplayerId = gRecordedBattleMultiplayerId;
+    else
+        multiplayerId = GetMultiplayerId();
+    return BattleStringGetTrainerName(text, multiplayerId, battler);
+}
+#endif // ENABLE_NATIVE_UI
