@@ -27,8 +27,9 @@ data the game ships is converted from the game's own tree, with the package's co
   python3 tools/battlefx/pack_data.py --package <battlefx_kit>/native --data game_moves.json [--se-frames se_frames.json]
 
 (convert_data.py runs <battlefx_kit>/prototype/build_preview_data.py, keeping the panse commands' pan step
-and delay it leaves out - the game's pan sound task, which the scripts' waitsound and end wait for - and
-reading a ';' as the end of a statement, as GNU as does: Parabolic Charge's `goto ParabolicChargeHeal;`.)
+and delay it leaves out - the game's pan sound task, which the scripts' waitsound and end wait for -, the
+createvisualtask priorities (the order the game runs tasks in) and reading a ';' as the end of a statement,
+as GNU as does: Parabolic Charge's `goto ParabolicChargeHeal;`.)
 
 se_frames.json comes from the Battle FX test build (it plays every sound effect at a battle's action menu):
 
@@ -136,7 +137,7 @@ def main():
              "pokeemerald-expansion's own battle_anim_scripts.s and C sources (commit in bfx_moves.json meta.commit: "
              + str(data_meta.get("commit", "?")) + (", this game's tree" if a.data else ", the package's expansion")
              + ")" + ("; by tools/battlefx/convert_data.py (the package's converter, keeping the panse commands'"
-                      " pan step and delay, a ';' ending a statement)." if '"pan_step"' in (out / "bfx_moves.json").read_text() else "."),
+                      " pan step and delay and the tasks' priorities, a ';' ending a statement)." if '"pan_step"' in (out / "bfx_moves.json").read_text() else "."),
              ""]
     lines += [f"{sha256(out / f)}  {f}" for f in sorted(files)]
     (out / "MANIFEST.txt").write_text("\n".join(lines) + "\n")

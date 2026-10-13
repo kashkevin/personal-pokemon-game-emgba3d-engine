@@ -14,6 +14,11 @@ script's end wait for); with the step and delay the core runs it too (bfx_game.c
 fields it does not know, so the data still plays in the package's Lab. Everything else is the
 package's converter as it is; its arguments pass through.
 
+Its task rows also keep a createvisualtask's priority (the script's 2nd argument), as an 8th field (the
+optional 6th and 7th, on-targets and the battler argument's index, are 0 where the row had none): the
+game runs its tasks in priority order (task.c), and a battle animation's script runs inside a task of
+priority 10 (bfx_game.c). The runtime reads rows by index, so the field changes nothing in the Lab.
+
 And one fix to its script reader: GNU as ends a statement at ';' as at the end of a line (ARM), so
 `goto ParabolicChargeHeal;` (battle_anim_scripts.s, Parabolic Charge's double-battle branch) is a goto
 to ParabolicChargeHeal. The package's reader took the ';' as part of the label, found no such label and
@@ -51,9 +56,33 @@ def main():
                 extra["pan_step"] = e.get("pan_step")
                 extra["pan_delay"] = e.get("pan_delay")
                 row[5] = extra
+        # every task event gives exactly one EV_TASK row, in order: the task's priority as the 8th field
+        task_in = [e for e in events if e.get("kind") == "task"]
+        task_out = [r for r in out if r[1] == bpd.EV_TASK]
+        if len(task_in) != len(task_out):
+            raise SystemExit("convert_data.py: the converter's task rows no longer pair with its events")
+        for e, row in zip(task_in, task_out):
+            if e.get("task") != row[2]:
+                raise SystemExit("convert_data.py: a task row is not its event's (%s, %s)" % (e.get("task"), row[2]))
+            if e.get("priority") is not None:
+                while len(row) < 7:
+                    row.append(0)
+                row.append(int(e["priority"]))
         return out
 
     bpd.compact_events = compact_events
+
+    # the IR's task events with the createvisualtask's priority (both macros: addr, priority, ...)
+    conv = sys.modules["convert"]
+    task_event = conv.Simulator._task_event
+
+    def _task_event(self, ins, t, src_ref):
+        ev = task_event(self, ins, t, src_ref)
+        if len(ins.args) > 1:
+            ev["priority"] = self.res.num(ins.args[1])
+        return ev
+
+    conv.Simulator._task_event = _task_event
 
     parse = bpd.parse_scripts
 

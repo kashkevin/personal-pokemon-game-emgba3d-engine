@@ -94,6 +94,10 @@ struct CoreStatus
     char error[200];
 };
 
+/* Game frames counted (BattleFx_OnFrameBegin; game thread). */
+static u32 sGameFrame;
+static bool EarlierEffectSprites(void);
+
 /* The animation in progress (game thread). */
 static struct
 {
@@ -549,6 +553,47 @@ static const char kGameHelperJs[] =
     "    }\n"
     "    return { nv, ni };\n"
     "  };\n"
+    "})();\n"
+    /* battle_anim_utility_funcs.c AnimTask_SetAnimTargetToBattlerTarget: gBattleAnimTarget = gBattlerTarget (the
+     * request's battlerTarget; the battle engine does not change it while an animation plays). The runtime takes the
+     * task for one that only computes a branch's value (LOGIC_TASKS: run at once, as the game's destroys itself at
+     * once) and left the target as it was. */
+    "(function () {\n"
+    "  const RT = globalThis.BFX_RT, B = globalThis.BFX_BRIDGE; if (!RT || !RT.LOGIC_TASKS || !RT.API || !B) return;\n"
+    "  const A = RT.API, begin = B.begin; let target = null;\n"
+    "  B.begin = function (req) { target = req && req.battlerTarget != null ? req.battlerTarget | 0 : null; return begin.call(this, req); };\n"
+    "  RT.LOGIC_TASKS.AnimTask_SetAnimTargetToBattlerTarget = function () { if (target != null && A.W) A.gBattleAnimTarget = target; return null; };\n"
+    "})();\n"
+    /* The tasks' priorities. The game runs its tasks in priority order (task.c RunTasks; equal priorities in the order
+     * made): createvisualtask's priority is the script's (the data's task rows carry it as their 8th field,
+     * tools/battlefx/convert_data.py), createsoundtask's is 1 (battle_anim.c Cmd_createsoundtask). The runtime makes
+     * every one with priority 2: a script's tasks run here in the game's order instead (a priority-10 palette blend
+     * after the task that runs a battle animation's script, in the same frame, as in the game). */
+    "(function () {\n"
+    "  const RT = globalThis.BFX_RT; if (!RT || !RT.Player || !RT.EV || !RT.API) return;\n"
+    "  const P = RT.Player.prototype, EV = RT.EV, A = RT.API, fire = P.fire, startTask = P.startTask, fireSound = P.fireSound;\n"
+    "  if (!fire || !startTask || !fireSound) return;\n"
+    "  const HEAD = 0xFE, TAIL = 0xFF;\n"
+    "  P.fire = function (e) { const before = this.taskPrio; this.taskPrio = e && e[1] === EV.TASK && typeof e[7] === 'number' ? e[7] : null;\n"
+    "    try { return fire.apply(this, arguments); } finally { this.taskPrio = before; } };\n"
+    "  P.startTask = function (name, prio, est, sound) { return startTask.call(this, name, this.taskPrio != null ? this.taskPrio : prio, est, sound); };\n"
+    /* a task already in the list given another priority: taken out and put in again as InsertTask puts a new one */
+    "  function relink(T, id, prio) {\n"
+    "    const t = T[id]; if (!t || !t.isActive || t.priority === prio) return;\n"
+    "    if (t.prev === HEAD) { if (t.next !== TAIL) T[t.next].prev = HEAD; } else if (t.next === TAIL) T[t.prev].next = TAIL;\n"
+    "    else { T[t.prev].next = t.next; T[t.next].prev = t.prev; }\n"
+    "    t.priority = prio; t.prev = HEAD; t.next = TAIL;\n"
+    "    let cur = -1; for (let i = 0; i < T.length; i++) { const u = T[i]; if (u && u.isActive && i !== id && u.prev === HEAD) { cur = i; break; } }\n"
+    "    if (cur < 0) return;\n"
+    "    for (;;) { const u = T[cur];\n"
+    "      if (prio < u.priority) { t.prev = u.prev; t.next = cur; if (u.prev !== HEAD) T[u.prev].next = id; u.prev = id; return; }\n"
+    "      if (u.next === TAIL) { t.prev = cur; t.next = TAIL; u.next = id; return; }\n"
+    "      cur = u.next; } }\n"
+    "  P.fireSound = function (e) {\n"
+    "    if (!e || e[2] !== 'createsoundtask') return fireSound.apply(this, arguments);\n"
+    "    const T = A.gTasks, had = T.map((t) => !!(t && t.isActive)); const r = fireSound.apply(this, arguments);\n"
+    "    for (let i = 0; i < T.length; i++) if (T[i] && T[i].isActive && !had[i] && T[i].sound) relink(T, i, 1);\n"
+    "    return r; };\n"
     "})();\n"
     /* Which loop runs the script. A move's animation is run by its battler's controller (Controller_DoMoveAnimation,
      * in BattleMainCB1): each frame the script first, then AnimateSprites, BuildOamBuffer, UpdatePaletteFade and
@@ -1665,6 +1710,7 @@ void BattleFx_OnFrameBegin(void)
 {
     u32 se1, se2;
 
+    sGameFrame++;
     if (!gMain.inBattle)
         return;
     se1 = gMPlayInfo_SE1.status;
@@ -1703,6 +1749,10 @@ void BattleFx_OnLaunch(uint32_t animType, uint32_t animId, const void *script)
                      ",\"turn\":%u,\"movePower\":%u,\"damage\":%d,\"friendship\":%u,\"weather\":%u,\"hit\":\"%s\"",
                      (unsigned)gAnimMoveTurn, (unsigned)gAnimMovePower, (int)gAnimMoveDmg,
                      (unsigned)gAnimFriendship, (unsigned)gWeatherMoveAnim, HitPresentation(animId));
+        /* the battle's target (gBattlerTarget), which Future Sight's and Doom Desire's hit take again as the
+         * animation's (AnimTask_SetAnimTargetToBattlerTarget; DoMoveAnim may have changed it for a spread move) */
+        if (gBattlerTarget < MAX_BATTLERS_COUNT)
+            len = Append(request, len, sizeof(request), ",\"battlerTarget\":%u", (unsigned)gBattlerTarget);
         if (gAnimDisableStructPtr != NULL)
             len = Append(request, len, sizeof(request), ",\"rolloutTimer\":%u", (unsigned)gAnimDisableStructPtr->rolloutTimer);
         if (CalledByMirrorMove(animId))
@@ -1930,6 +1980,15 @@ static bool TakeControllerRequests(void)
             SDL_Log("Battle FX: %d controller animations began together; they play as on the GBA", count);
         return false;
     }
+    if (EarlierEffectSprites())
+    {
+        /* another animation's sprites still move (the send-outs of a double battle's opening, played as on the
+         * GBA): drawing this one would leave them out of the picture with it */
+        if (sCore.log)
+            SDL_Log("Battle FX: %s began while another animation's effect sprites are on screen; it plays as on the GBA",
+                    sControllerPending[0].kind == BATTLEFX_CONTROLLER_SEND_OUT ? "CONTROLLER_SEND_OUT" : "CONTROLLER_SHINY");
+        return false;
+    }
     b = sControllerPending[0].battler;
     id = sControllerPending[0].kind == BATTLEFX_CONTROLLER_SEND_OUT ? "CONTROLLER_SEND_OUT" : "CONTROLLER_SHINY";
     len = Append(request, len, sizeof(request), "{\"anim\":\"%s\",\"inputs\":{\"ball\":%u,\"intro\":%s}", id,
@@ -2080,6 +2139,7 @@ static struct
 {
     const struct SpriteTemplate *template;
     u16 tag;
+    u32 frame; /* sGameFrame when it was made */
 } sSpriteMade[MAX_SPRITES + 1];
 
 void BattleFx_OnSpriteMade(uint32_t index, const struct SpriteTemplate *template)
@@ -2088,7 +2148,18 @@ void BattleFx_OnSpriteMade(uint32_t index, const struct SpriteTemplate *template
     {
         sSpriteMade[index].template = template;
         sSpriteMade[index].tag = template->tileTag;
+        sSpriteMade[index].frame = sGameFrame;
     }
+}
+
+/* Whether an effect sprite made before this game frame is in use: another animation's (a double battle's
+ * send-outs, played as on the GBA, still throwing their balls' particles). */
+static bool EarlierEffectSprites(void)
+{
+    for (int i = 0; i < MAX_SPRITES; i++)
+        if (gSprites[i].inUse && BattleFx_IsEffectSprite(&gSprites[i]) && sSpriteMade[i].frame != sGameFrame)
+            return true;
+    return false;
 }
 
 uint16_t BattleFx_SpriteGfxTag(const struct Sprite *sprite)

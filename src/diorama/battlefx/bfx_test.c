@@ -92,6 +92,8 @@ static struct
     char from[48];          /* PKMN_BFX_TEST_FROM: the list starts at this animation */
     int attacker, target, turn, delay, wait;
     int animAttacker; /* PKMN_BFX_TEST_ANIM_ATTACKER: a battle animation's attacker in place of its preset's (-1: the preset's) */
+    u8 savedAttacker, savedTarget; /* gBattlerAttacker / gBattlerTarget before a move's animation (Launch) */
+    bool restoreBattlers;
     bool autoShots;
     int shots[MAX_SHOTS], shotCount;
     struct LinkBattleAnim disable;
@@ -469,8 +471,12 @@ static void LaunchAnim(u8 type, u16 num)
 
 static void Launch(u16 move)
 {
-    u8 attacker = gBattlerAttacker, target = gBattlerTarget;
-
+    /* the battle's attacker and target for as long as the animation plays, as the battle engine keeps them (Future
+     * Sight's and Doom Desire's hit read gBattlerTarget again: AnimTask_SetAnimTargetToBattlerTarget); put back
+     * when it has ended */
+    t.savedAttacker = gBattlerAttacker;
+    t.savedTarget = gBattlerTarget;
+    t.restoreBattlers = true;
     memset(&t.disable, 0, sizeof(t.disable));
     gBattlerAttacker = (u8)t.attacker;
     gBattlerTarget = (u8)t.target;
@@ -482,8 +488,6 @@ static void Launch(u16 move)
     gAnimDisableStructPtr = &t.disable;
     SetBattlerSpriteAffineMode(ST_OAM_AFFINE_OFF);
     DoMoveAnim(move);
-    gBattlerAttacker = attacker;
-    gBattlerTarget = target;
 }
 
 /* One of the controllers' own animations, started as the controller starts it, for battler
@@ -904,6 +908,12 @@ bool BattleFxTest_OnActionMenu(void)
         }
         return true;
     case TEST_SETTLE:
+        if (t.restoreBattlers)
+        {
+            t.restoreBattlers = false;
+            gBattlerAttacker = t.savedAttacker;
+            gBattlerTarget = t.savedTarget;
+        }
         {
             /* the HD layer covers what the script left only while its tail runs (bfx_game.c) */
             struct BattleFxAnimInfo info;
