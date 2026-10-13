@@ -37,6 +37,10 @@
  *   PKMN_BFX_TEST_TURN      gAnimMoveTurn (default 0)
  *   PKMN_BFX_TEST_DELAY     action-menu frames before the first animation (default 40)
  *   PKMN_BFX_TEST_EXIT=1    end the process when every animation has played (code 0; 6 if one failed)
+ *   PKMN_BFX_TEST_ALPHA     0 .. 1: the particles' time between two frame boundaries fixed at this share of
+ *                           a frame (else the display's clock): the same pictures run after run (comparisons)
+ *   PKMN_BFX_TEST_PLAIN_SHADERS=1  the effect shaders without the placing for the battlers as shown
+ *                           (gl_battle_fx.c WithAttach): what the shaders draw with it off, to compare
  *
  * Nothing here exists in a player build. It changes the battle only as far as
  * playing an animation does (sprites, palettes, the animation variables).
@@ -60,6 +64,10 @@ void BattleFxTest_OnAnimEnd(uint32_t serial);
 void BattleFxTest_AfterDraw(uint32_t serial, int frame, bool showing, int outW, int outH);
 /* Whether the HD layer is shown (PKMN_BFX_TEST_VIEW). */
 bool BattleFxTest_ViewHd(void);
+/* PKMN_BFX_TEST_ALPHA: true and *alpha set when the particles' time is fixed (main thread). */
+bool BattleFxTest_FixedAlpha(float *alpha);
+/* PKMN_BFX_TEST_PLAIN_SHADERS (main thread). */
+bool BattleFxTest_PlainShaders(void);
 /* bfx_game.c: the core once it is ready (game thread), NULL before. */
 struct BfxHost *BattleFx_TestHost(void);
 

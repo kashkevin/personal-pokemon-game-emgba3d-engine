@@ -28,7 +28,8 @@ GBA effects again.
 | `include/diorama/battle_fx.h` | The hooks and settings. |
 | `src/diorama/battlefx/bfx_game.c` | Game side: requests, the core's thread, the controllers' animations, OAM marks, the frame boundary. |
 | `src/diorama/battlefx/bfx_host.c`, `include/diorama/battle_fx_host.h` | The QuickJS-ng host for the core: begin / step / frame packets. |
-| `src/diorama/gl/gl_battle_fx.c`, `include/diorama/battle_fx_render.h` | The renderer (OpenGL 3.3, the game's context and frame): particles, cards, ribbons, meshes, lights, distortion, bloom, the game's own battlers lit / flashed / glowing. |
+| `src/diorama/gl/gl_battle_fx.c`, `include/diorama/battle_fx_render.h` | The renderer (OpenGL 3.3, the game's context and frame): particles, cards, ribbons, meshes, lights, distortion, bloom, the game's own battlers lit / flashed / glowing; the effects placed for the battlers as shown; the quality tiers and the pace measured. |
+| `src/diorama/battlefx/bfx_attach.c`, `include/diorama/battle_fx_attach.h` | The battlers as the game shows them: the animated battle sprites' frames, read from their renderer interface (`ENABLE_BATTLE_SPRITES`; nothing without them). |
 | `src/diorama/battlefx/bfx_test.c`, `include/diorama/battle_fx_test.h` | The test driver (test builds only, `-DBATTLEFX_TEST`). |
 | `battlefx/` | The data the game reads beside the executable (`tools/battlefx/pack_data.py`; `MANIFEST.txt` lists every file's SHA-256). |
 | `third_party/quickjs-ng`, `third_party/stb` | QuickJS-ng v0.10.1 (MIT), stb_image 2.30 (public domain); `VENDORED.txt` in each. |
@@ -67,17 +68,92 @@ and how long the pictures waited).
 every command: the frames pair with the game's frame for frame (the parity tests), and the test
 driver may use the core between frames.
 
-## The drawing budget
+## The battlers as the game shows them
 
-The 3D battle paces the game by its pictures, so HD layers that take longer to draw than a
-frame allows would slow the battle (measured on software OpenGL: 33 ms a layer at 1280x720, 70
-at 1920x1080, and the game at 42 and 8 frames a second during HD animations). The renderer
-measures each animation's layers - GPU time from its timer queries, or the CPU time to submit
-them where the driver has none (`BattleFxGL_DrawTooSlow`) - and from an animation's sixth
-picture on, a cost above the budget a picture (`drawBudgetMs`, `PKMN_BATTLEFX_DRAW_BUDGET_MS`:
-8 ms in the player builds, 0 - no budget - in the test builds) ends its HD drawing as the core
-falling behind does: its GBA effects from that picture, logged. After two such animations the HD
-effects are off until the battle ends (`BeginRequest` refuses them; the next battle tries again).
+With the animated battle sprites (`ENABLE_BATTLE_SPRITES`, `platform/battle_sprites.h`) the game
+draws a battler from the sprite pack in place of its GBA picture: a frame of its own size, on
+the GBA picture's feet line and centred on its body (Wailord's front 89 x 75 where its GBA
+picture is 64 x 56, Lugia's 115 x 75, Rayquaza's back 80 x 93; Pikachu's back 36 x 44 against
+57 x 55). The scripts - and so the core - place every effect for the GBA picture. Battle FX
+reads what is drawn (`include/diorama/battle_fx_attach.h`, `bfx_attach.c`: the sprite system's
+renderer interface `gBattleSpriteObjViews`, read only) and for each battler and picture
+(`gl_battle_fx.c`, `ComputeAttach`):
+
+- draws the battler's glow, flash, light and depth from the frame shown - its shape, its colours
+  as faded - rather than from the GBA tiles still in VRAM (as `gba_easy_draw.c`
+  `DrawLibraryObjLine` draws it: offset in the entry's box, not cut to it, flips, affine matrix,
+  the sinking foe's clip; the glow grows about the shown body's centre);
+- places the effects near the battler for its body as shown. The GBA picture's body (its opaque
+  box) against the shown body (the frames' opaque box, averaged over the frames of one look so
+  the idle animation does not shake the effects) gives a shift of the body's centre and one
+  scale for both axes (held to 0.75 .. 1.6: a back picture the text box cuts short does not
+  stretch the effects). Each effect point near the battler is moved with the centre and scaled
+  about it on the GBA screen, then lifted back at its own depth as the core lifts its points: in
+  full within the body's region (both boxes, a tenth more), fading out to 1.8 times it, shared
+  where two battlers' regions meet, less for elements over 96 GBA pixels and not at all from 176
+  (a screen-wide card stays). Cards and distortion cards (centre placed, card sized), particles
+  (where each is now: one flying from a battler to another leaves the one and reaches the
+  other), ribbons (each vertex: a beam's ends meet both bodies), meshes (centre placed, mesh
+  sized) and their lights; ground decals about the battler's feet, on the ground. The card,
+  particle, ribbon and mesh shaders get this code as they load (`WithAttach`; the shader files
+  are the Lab's generated ones, unchanged, and a shader that is not the one expected loads
+  without it - all four or none); with no battler shown otherwise, every expression is the
+  shader's own.
+
+Without the animated sprites, and for a battler they leave to its GBA picture (Megas, Primals
+and Gen 6 - not in the pack -, the Substitute doll, a palette change that is not a fade),
+nothing changes. `attach=0` (`PKMN_BATTLEFX_ATTACH=0`) keeps the GBA placing (the battlers are
+still drawn from their frames). With `PKMN_BATTLEFX_LOG=1` each look is logged once (`battler 1
+is shown 89 x 75 (its GBA picture 64 x 56): the effects near it are moved +0.5, -9.5 pixels and
+scaled 1.37`). Drawing only: the core's replay, its frames, the parity with the game, timing and
+the battle are untouched.
+
+## Quality and the pace of the pictures
+
+The game runs its 59.73 frames a second on its own clock (`sdl2.c`: the drawing does not pace
+it). A picture that takes longer to draw than a game frame leaves game frames unseen - the next
+frame is drawn over them before a present shows them - and past about 12 pictures a second the
+game itself slows. The HD layers' share of a picture depends on the graphics card and the
+window's size: their cost is mostly pixels (each layer: a copy of the window, the layer at the
+window's resolution, its bloom chain, the composite), so it grows with the resolution (4K is
+four times 1080p) and is small on a desktop graphics card.
+
+Quality tiers (`BattleFxGL_SetTier`) draw the same effects for less: `high` draws the layers at
+3/4 of the window's resolution, `medium` at half with one bloom level less (the same bloom size
+on the window), `low` at half without bloom and distortion. The composite scales them up; the
+copy of the window and the composite stay at its resolution.
+
+`quality=auto` (the player builds' default) draws them in full and decides on this PC's own
+measurements, at the frame boundaries (`bfx_game.c` `PaceCheck`), never on a fixed number of
+milliseconds: per half second (30 game frames with HD layers, after an animation's first 6
+pictures) the renderer counts the game frames whose pictures were never presented and times its
+layers on the GPU (timer queries; the CPU's time where a driver has none) - `BattleFxGL_Pace`.
+
+- The game's pace kept (at most one frame unseen in 30): nothing changes, however much the HD
+  layers cost. A PC that keeps up - every graphics card with room for them - is never lowered.
+- Frames unseen, and the HD layers could close much of the gap (their cost at least half the
+  pictures' lateness, or a quarter of each picture): the next tier down, from this picture on.
+- Frames unseen and the HD layers a smaller but real part (a tenth of a game frame, 1.7 ms, or
+  more): the next tier down on trial (with VSync a picture a little too slow waits for the next
+  refresh, so the time between pictures says less than the work does); if the next half second
+  does not win back half the frames lost, the tier goes back up and no more trials this battle -
+  the HD effects are not what holds the game back.
+- Less than that: kept (logged once a battle).
+- At `low`, frames still unseen because of the HD layers: that animation plays its GBA effects
+  (as when the core falls behind), and after two such the battle does (`BeginRequest` refuses
+  them; the next battle tries again).
+- A battle that kept the pace with room to spare (300 game frames or more, none lost, the next
+  tier's estimated cost within a quarter of a game frame) raises the tier at the next battle's
+  start; a tier raised that has to be lowered again is not raised again this session.
+
+Every change is logged (`the game showed 41.8 of its 60 frames a second while the HD effects
+took 9.6 ms of each 24.1 ms picture on the GPU: high quality from now on`). `quality=full`,
+`high`, `medium`, `low` fix a tier with no automatic change (the test builds: `full`, so the
+galleries and the benchmark draw everything); `gba` plays the original animations.
+`BattleFx_SetQuality` lets a settings menu change it while the game runs. `drawBudgetMs=N`
+(`PKMN_BATTLEFX_DRAW_BUDGET_MS`; none by default) still gives an explicit budget: an animation
+whose layers take more than N ms a picture plays as on the GBA. The benchmark kit
+(`run-battlefx-benchmark.bat`) measures each tier on a PC.
 
 ## The replay follows the game frame for frame
 
@@ -161,9 +237,11 @@ never leaves another animation's sprites out.
 
 ## Settings
 
-`battlefx/settings.cfg` (`enabled=1`, `log=0`; `sync=1`, `drawBudgetMs=N` optional) or the environment
-(which overrides the file): `PKMN_BATTLEFX=0` plays the original GBA animations (the development fallback),
-`PKMN_BATTLEFX_DRAW_BUDGET_MS=N` sets the drawing budget (above; 0: none),
+`battlefx/settings.cfg` (`enabled=1`, `log=0`; `sync=1`, `quality=...`, `attach=0`, `drawBudgetMs=N`
+optional) or the environment (which overrides the file): `PKMN_BATTLEFX=0` plays the original GBA
+animations (the development fallback), `PKMN_BATTLEFX_QUALITY=auto|full|high|medium|low|gba` the quality
+(above; auto in the player builds, full in the test builds), `PKMN_BATTLEFX_ATTACH=0` the effects placed
+for the GBA pictures (above), `PKMN_BATTLEFX_DRAW_BUDGET_MS=N` an explicit drawing budget (0: none),
 `PKMN_BATTLEFX_LOG=1` logs every animation (the game's and the core's frame counts, the core's
 cost, how its pictures went; the renderer's GPU / CPU time), `PKMN_BATTLEFX_SYNC=1` makes the
 game wait for the core every frame, `PKMN_BATTLEFX_DIR=<folder>` reads the data from there

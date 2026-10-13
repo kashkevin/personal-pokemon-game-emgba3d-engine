@@ -65,10 +65,6 @@ enum CoreState
     CORE_FAILED,
 };
 
-/* The player builds' drawing budget a picture for the HD layers (battlefx/settings.cfg drawBudgetMs,
- * PKMN_BATTLEFX_DRAW_BUDGET_MS; 0: none): half a 60 Hz frame, the other half left to the 3D battle. */
-#define BFX_DRAW_BUDGET_MS 8
-
 /* Settings and the core (loaded once, on a thread of its own). */
 static struct
 {
@@ -76,7 +72,9 @@ static struct
     bool enabled;
     bool log;
     bool sync;          /* the game thread waits for the core every frame (tests) */
-    int drawBudgetMs;   /* the HD layers' drawing budget a picture (0: none; ShowWanted) */
+    bool attach;        /* the effects placed for the battlers as shown (battle_fx_attach.h) */
+    int quality;        /* BATTLEFX_QUALITY_* (Quality below) */
+    int drawBudgetMs;   /* an explicit drawing budget a picture for the HD layers (0: none, the default; ShowWanted) */
     char dir[1024];
     SDL_atomic_t state; /* enum CoreState */
     SDL_Thread *loader;
@@ -169,6 +167,30 @@ static bool EnvFlag(const char *name, bool fallback)
     return !(v[0] == '0' || v[0] == 'n' || v[0] == 'N' || v[0] == 'f' || v[0] == 'F');
 }
 
+static const char *const kQualityNames[BATTLEFX_QUALITY_COUNT] = {"auto", "full", "high", "medium", "low", "gba"};
+
+/* A quality's name (auto, full, ...) or number; -1 when neither. */
+static int ParseQuality(const char *text)
+{
+    char word[16];
+    size_t n = 0;
+
+    while (*text == ' ' || *text == '\t')
+        text++;
+    while (n + 1 < sizeof(word) && text[n] != '\0' && text[n] != '\r' && text[n] != '\n' && text[n] != ' ')
+    {
+        word[n] = (char)(text[n] >= 'A' && text[n] <= 'Z' ? text[n] - 'A' + 'a' : text[n]);
+        n++;
+    }
+    word[n] = '\0';
+    for (int q = 0; q < BATTLEFX_QUALITY_COUNT; q++)
+        if (strcmp(word, kQualityNames[q]) == 0)
+            return q;
+    if (n == 1 && word[0] >= '0' && word[0] < '0' + BATTLEFX_QUALITY_COUNT)
+        return word[0] - '0';
+    return -1;
+}
+
 static void ReadSettingsFile(void)
 {
     char path[1200];
@@ -196,6 +218,10 @@ static void ReadSettingsFile(void)
             sCore.sync = value != 0;
         else if (strcmp(line, "drawBudgetMs") == 0)
             sCore.drawBudgetMs = value > 0 ? value : 0;
+        else if (strcmp(line, "attach") == 0)
+            sCore.attach = value != 0;
+        else if (strcmp(line, "quality") == 0 && ParseQuality(eq + 1) >= 0)
+            sCore.quality = ParseQuality(eq + 1);
     }
     fclose(f);
 }
@@ -210,12 +236,14 @@ static void ReadSettings(void)
     sCore.settingsRead = true;
     sCore.enabled = true;
     sCore.log = false;
+    sCore.attach = true;
+    sCore.drawBudgetMs = 0;
 #ifdef BATTLEFX_TEST
     sCore.sync = true; /* the test driver compares the core's frames with the game's, frame for frame */
-    sCore.drawBudgetMs = 0; /* the tests draw every animation, however slow the drawing (software OpenGL) */
+    sCore.quality = BATTLEFX_QUALITY_FULL; /* the tests draw every animation in full, however slow the drawing */
 #else
     sCore.sync = false;
-    sCore.drawBudgetMs = BFX_DRAW_BUDGET_MS;
+    sCore.quality = BATTLEFX_QUALITY_AUTO;
 #endif
     if (dir != NULL && dir[0] != '\0')
         snprintf(sCore.dir, sizeof(sCore.dir), "%s", dir);
@@ -240,20 +268,60 @@ static void ReadSettings(void)
     sCore.enabled = EnvFlag("PKMN_BATTLEFX", sCore.enabled);
     sCore.log = EnvFlag("PKMN_BATTLEFX_LOG", sCore.log);
     sCore.sync = EnvFlag("PKMN_BATTLEFX_SYNC", sCore.sync);
+    sCore.attach = EnvFlag("PKMN_BATTLEFX_ATTACH", sCore.attach);
     {
         const char *budget = SDL_getenv("PKMN_BATTLEFX_DRAW_BUDGET_MS");
+        const char *quality = SDL_getenv("PKMN_BATTLEFX_QUALITY");
 
         if (budget != NULL && budget[0] != '\0')
             sCore.drawBudgetMs = atoi(budget) > 0 ? atoi(budget) : 0;
+        if (quality != NULL && quality[0] != '\0')
+        {
+            if (ParseQuality(quality) >= 0)
+                sCore.quality = ParseQuality(quality);
+            else
+                SDL_Log("Battle FX: PKMN_BATTLEFX_QUALITY=%s is not a quality (auto, full, high, medium, low, gba)",
+                        quality);
+        }
     }
-    if (!sCore.enabled)
+    if (!sCore.enabled || sCore.quality == BATTLEFX_QUALITY_GBA)
         SDL_Log("Battle FX: off (the original GBA animations play)");
+    else if (sCore.quality != BATTLEFX_QUALITY_AUTO || sCore.drawBudgetMs > 0 || !sCore.attach)
+        SDL_Log("Battle FX: quality %s%s%s", kQualityNames[sCore.quality],
+                sCore.drawBudgetMs > 0 ? ", with a drawing budget" : "",
+                sCore.attach ? "" : ", effects placed for the GBA pictures");
 }
 
 bool BattleFx_Enabled(void)
 {
     ReadSettings();
-    return sCore.enabled;
+    return sCore.enabled && sCore.quality != BATTLEFX_QUALITY_GBA;
+}
+
+bool BattleFx_Attach(void)
+{
+    ReadSettings();
+    return sCore.attach;
+}
+
+int BattleFx_Quality(void)
+{
+    ReadSettings();
+    return sCore.quality;
+}
+
+void BattleFx_SetQuality(int quality)
+{
+    ReadSettings();
+    if (quality < 0 || quality >= BATTLEFX_QUALITY_COUNT || quality == sCore.quality)
+        return;
+    SDL_Log("Battle FX: quality %s (was %s)", kQualityNames[quality], kQualityNames[sCore.quality]);
+    sCore.quality = quality; /* the renderer's tier follows at the next frame boundary (PaceCheck) */
+}
+
+const char *BattleFx_QualityName(int quality)
+{
+    return quality >= 0 && quality < BATTLEFX_QUALITY_COUNT ? kQualityNames[quality] : "?";
 }
 
 bool BattleFx_Drawing(void)
@@ -761,8 +829,7 @@ static int LoadCore(void *unused)
 
 static void StartLoading(void)
 {
-    ReadSettings();
-    if (!sCore.enabled || SDL_AtomicGet(&sCore.state) != CORE_IDLE)
+    if (!BattleFx_Enabled() || SDL_AtomicGet(&sCore.state) != CORE_IDLE)
         return;
     if (!CoreInit())
     {
@@ -1373,11 +1440,13 @@ static struct CoreStatus sRun;   /* the core's thread's */
 static int sRunSound = -1;       /* the core's thread's: the sound state the core was given last */
 static SDL_atomic_t sTooSlow;    /* serial of the animation the boundary found the core too far behind on */
 static unsigned sTooSlowCount;
-/* The drawing over its budget (sCore.drawBudgetMs): on a PC whose graphics take longer than that a picture to draw
- * the HD layers, the 3D battle - which paces the game by its pictures - would slow the game. Such an animation
- * goes on as on the GBA (sDrawSlow: its serial, also in sTooSlow; sDrawSlowTenths: the cost measured, 0.1 ms), and
- * after DRAW_SLOW_MAX of them the HD effects are off until the battle ends (sHdOff, game thread). */
-static SDL_atomic_t sDrawSlow, sDrawSlowTenths;
+/* The HD effects holding the game back (PaceCheck, main thread): at the lowest quality tier the HD layers still
+ * cost so much of each picture that the game's frames go unseen - or, with an explicit drawing budget
+ * (sCore.drawBudgetMs), they cost more than it. Such an animation goes on as on the GBA (sDrawSlow: its serial, also
+ * in sTooSlow; sDrawSlowTenths: the HD layers' cost a picture, 0.1 ms; sDrawSlowShown: the game frames a second
+ * shown, tenths, 0 for the budget), and after DRAW_SLOW_MAX of them the HD effects are off until the battle ends
+ * (sHdOff, game thread). */
+static SDL_atomic_t sDrawSlow, sDrawSlowTenths, sDrawSlowShown;
 static unsigned sDrawSlowCount;
 static bool sHdOff;
 
@@ -1939,7 +2008,9 @@ static bool BeginRequest(const char *id, const char *request, int len, uint32_t 
     struct CoreCommand c;
 
     if (sHdOff)
-        return false; /* the drawing was over its budget: the original animations until the battle ends */
+        return false; /* the HD effects held the game back: the original animations until the battle ends */
+    if (!BattleFx_Enabled())
+        return false; /* quality gba (set since the core loaded) */
 
     if (len >= BFX_REQUEST_MAX - 1)
     {
@@ -2055,18 +2126,25 @@ static bool TakeCoreStatus(void)
     }
     if ((uint32_t)SDL_AtomicGet(&sTooSlow) == sAnim.serial && (uint32_t)SDL_AtomicGet(&sDrawSlow) == sAnim.serial)
     {
+        int shown = SDL_AtomicGet(&sDrawSlowShown);
+
         sDrawSlowCount++;
-        SDL_Log("Battle FX: %s: drawing its HD effects took %.1f ms a picture on this PC (the budget %d ms, battlefx "
-                "settings.cfg drawBudgetMs: more would slow the battle); the rest of it plays as on the GBA", sAnim.id,
-                SDL_AtomicGet(&sDrawSlowTenths) / 10.0, sCore.drawBudgetMs);
+        if (shown > 0)
+            SDL_Log("Battle FX: %s: even at the lowest quality its HD effects took %.1f ms of each picture on this PC "
+                    "and the game showed %.1f of its 60 frames a second; the rest of it plays as on the GBA", sAnim.id,
+                    SDL_AtomicGet(&sDrawSlowTenths) / 10.0, shown / 10.0);
+        else
+            SDL_Log("Battle FX: %s: drawing its HD effects took %.1f ms a picture on this PC (the budget %d ms, "
+                    "battlefx settings.cfg drawBudgetMs); the rest of it plays as on the GBA", sAnim.id,
+                    SDL_AtomicGet(&sDrawSlowTenths) / 10.0, sCore.drawBudgetMs);
         if (sDrawSlowCount >= DRAW_SLOW_MAX && !sHdOff)
         {
             sHdOff = true;
-            SDL_Log("Battle FX: the HD effects are off until this battle ends (%u animations over the drawing budget); "
-                    "the original animations play", sDrawSlowCount);
+            SDL_Log("Battle FX: the HD effects are off until this battle ends (%u animations they held back); the "
+                    "original animations play", sDrawSlowCount);
         }
         sAnim.failed = true;
-        EndAnimation("the drawing over its budget");
+        EndAnimation(shown > 0 ? "the HD effects held the game back" : "the drawing over its budget");
         return false;
     }
     if ((uint32_t)SDL_AtomicGet(&sTooSlow) == sAnim.serial)
@@ -2379,6 +2457,7 @@ static void DecodeBattler(struct BattleFxGameBattler *out, int index)
     int w, h;
 
     out->shown = false;
+    out->oam = index;
     if (oam->shape > 2 || oam->objMode == ST_OAM_OBJ_WINDOW || oam->bpp
      || (!(oam->affineMode & 1) && (oam->affineMode & 2)) || !(REG_DISPCNT & DISPCNT_OBJ_ON)
      || !(REG_DISPCNT & DISPCNT_OBJ_1D_MAP))
@@ -2534,6 +2613,189 @@ static struct CoreSlot *WaitForFrame(int within, Uint32 ms)
     return best;
 }
 
+/* ── Quality (BattleFx_Quality; src/diorama/battlefx/README.md, "Quality") ──
+ *
+ * auto: the HD effects are drawn in full, and only when the game's own pictures fall behind while they draw - game
+ * frames the window never shows (BattleFxGL_Pace: a game frame drawn over by the next before any present showed it)
+ * - and the HD layers are a part of why (their cost measured on this PC: GPU timer queries), the next tier down is
+ * drawn: at once when their cost could close much of the gap, on trial (undone when it does not help) when it is
+ * smaller but not negligible. Below the lowest tier the animation plays its GBA effects, and after DRAW_SLOW_MAX
+ * of those the battle does (sHdOff). A PC that keeps the game's pace - every powerful graphics card - is never
+ * lowered, however much the HD layers cost; a battle that kept the pace with room to spare raises the tier again
+ * at the next battle's start (once: a tier raised that had to be lowered again stays). Main thread. */
+#define GAME_FRAME_MS (1000.0 / 59.7275)
+#define PACE_FRAMES 30   /* game frames with HD layers a decision looks at (half a second) */
+#define PACE_SKIPS_OK 1  /* ... of them unseen and still keeping the pace (a stray hitch) */
+#define PACE_RAISE_FRAMES 300
+static struct
+{
+    int tier;           /* the tier drawn (auto) */
+    int trialFrom;      /* the tier lowered on trial (-1: none) */
+    double trialShown;  /* the share of game frames shown before it */
+    int raisedTo;       /* the tier raised to at this battle's start (-1: none) */
+    bool raiseBlocked;  /* a tier raised had to be lowered again: not raised again this session */
+    bool noGain;        /* this battle: a lower tier did not help (not lowered on trial again) */
+    bool notCauseLogged;
+    unsigned goodFrames, badFrames; /* this battle at this tier: game frames in windows that kept the pace, didn't */
+    double hdMsGood;    /* the HD layers' cost a picture in the windows that kept the pace (running mean) */
+    unsigned hdMsCount;
+    bool inBattle;
+} sQuality = {.trialFrom = -1, .raisedTo = -1};
+
+static void QualitySetTier(int tier)
+{
+    sQuality.tier = tier;
+    sQuality.goodFrames = sQuality.badFrames = 0;
+    sQuality.hdMsCount = 0;
+    sQuality.hdMsGood = 0.0;
+    BattleFxGL_SetTier(tier);
+    BattleFxGL_PaceReset();
+}
+
+/* A battle begins (main thread, at a frame boundary): what the last one showed may raise the tier. */
+static void QualityBattleStart(void)
+{
+    /* the next tier up costs about this many times more (its share of the window's pixels, its bloom) */
+    static const double kRaiseCost[BFX_TIER_COUNT] = {1.0, 1.8, 2.25, 1.4};
+    int t = sQuality.tier;
+
+    sQuality.trialFrom = -1;
+    sQuality.noGain = false;
+    sQuality.notCauseLogged = false;
+    sQuality.raisedTo = -1;
+    if (BattleFx_Quality() == BATTLEFX_QUALITY_AUTO && t > BFX_TIER_FULL && !sQuality.raiseBlocked
+     && sQuality.goodFrames >= PACE_RAISE_FRAMES && sQuality.badFrames == 0 && sQuality.hdMsCount > 0
+     && sQuality.hdMsGood * kRaiseCost[t] <= 0.25 * GAME_FRAME_MS)
+    {
+        SDL_Log("Battle FX: the last battle kept the game's pace at %s quality, the HD effects taking %.1f ms of each "
+                "picture: %s quality again", BattleFxGL_TierName(t), sQuality.hdMsGood, BattleFxGL_TierName(t - 1));
+        QualitySetTier(t - 1);
+        sQuality.raisedTo = t - 1;
+        return;
+    }
+    sQuality.goodFrames = sQuality.badFrames = 0;
+}
+
+/* The animation shown goes on as on the GBA (TakeCoreStatus ends it on the game thread). */
+static void PlayGba(double hdMs, double shownPerSecond)
+{
+    sShow.slowSerial = sShow.want.serial;
+    SDL_AtomicSet(&sDrawSlowTenths, (int)(hdMs * 10.0 + 0.5));
+    SDL_AtomicSet(&sDrawSlowShown, (int)(shownPerSecond * 10.0 + 0.5));
+    SDL_AtomicSet(&sDrawSlow, (int)sShow.want.serial);
+    SDL_AtomicSet(&sTooSlow, (int)sShow.want.serial);
+}
+
+/* At the frame boundary, before the picture's frame is chosen: the quality to draw it at. */
+static void PaceCheck(void)
+{
+    struct BattleFxPace p;
+    int quality = BattleFx_Quality();
+    double interval, shown, deficit;
+    bool strong, worth;
+
+    if (quality >= BATTLEFX_QUALITY_FULL && quality <= BATTLEFX_QUALITY_LOW)
+        BattleFxGL_SetTier(quality - BATTLEFX_QUALITY_FULL);
+    else if (quality == BATTLEFX_QUALITY_AUTO)
+        BattleFxGL_SetTier(sQuality.tier);
+    if (sShow.want.serial == 0 || sShow.want.serial == sShow.slowSerial)
+        return;
+    /* an explicit drawing budget (none by default): the HD layers' cost a picture, measured over this animation's
+     * pictures so far, against it */
+    if (sCore.drawBudgetMs > 0)
+    {
+        double ms = 0.0;
+
+        if (BattleFxGL_DrawTooSlow(sShow.want.serial, sCore.drawBudgetMs, &ms))
+        {
+            PlayGba(ms, 0.0);
+            return;
+        }
+    }
+    if (quality != BATTLEFX_QUALITY_AUTO)
+        return;
+    BattleFxGL_Pace(&p);
+    if (p.serial != sShow.want.serial || p.tier != sQuality.tier || p.gameFrames < PACE_FRAMES)
+        return;
+    if (p.skipped <= PACE_SKIPS_OK)
+    {
+        /* the game's pace kept */
+        if (sQuality.trialFrom >= 0)
+            SDL_Log("Battle FX: %s quality keeps the game's pace", BattleFxGL_TierName(sQuality.tier));
+        sQuality.trialFrom = -1;
+        sQuality.goodFrames += p.gameFrames;
+        if (p.hdMs >= 0.0)
+        {
+            sQuality.hdMsCount += sQuality.hdMsCount < 64 ? 1 : 0;
+            sQuality.hdMsGood += (p.hdMs - sQuality.hdMsGood) / sQuality.hdMsCount;
+        }
+        BattleFxGL_PaceReset();
+        return;
+    }
+    if (p.hdMs < 0.0 && p.gameFrames < 4 * PACE_FRAMES)
+        return; /* the HD layers' cost not measured yet (timer query results come a few pictures late) */
+    sQuality.badFrames += p.gameFrames;
+    interval = p.presents > 0 ? p.presentMs / p.presents : 4.0 * GAME_FRAME_MS;
+    shown = 59.7275 * (double)(p.gameFrames - p.skipped) / (double)p.gameFrames;
+    deficit = interval - GAME_FRAME_MS;
+    if (p.hdMs < 0.0)
+        p.hdMs = p.plainMs > 0.0 && interval > p.plainMs ? interval - p.plainMs : 0.0;
+    /* lowering the tier could close much of the gap (or the HD layers take a large share of each picture) */
+    strong = p.hdMs >= 0.5 * deficit || p.hdMs >= 0.25 * interval;
+    /* ... or is worth a trial: they take a tenth of a game frame or more (with VSync a picture a little too slow
+     * waits for the next refresh, so the time between presents can say less than the work does) */
+    worth = p.hdMs >= 0.1 * GAME_FRAME_MS;
+    if (sQuality.trialFrom >= 0)
+    {
+        double before = sQuality.trialShown;
+        int from = sQuality.trialFrom;
+
+        sQuality.trialFrom = -1;
+        if (shown < before + 0.5 * (59.7275 - before) && !strong)
+        {
+            /* it did not help: back up, and no more trials this battle */
+            SDL_Log("Battle FX: %s quality did not help (the game showed %.1f of its 60 frames a second, %.1f "
+                    "before): %s quality again; the HD effects are not what holds the game back here",
+                    BattleFxGL_TierName(sQuality.tier), shown, before, BattleFxGL_TierName(from));
+            sQuality.noGain = true;
+            QualitySetTier(from);
+            return;
+        }
+    }
+    if (!worth || (sQuality.noGain && !strong))
+    {
+        if (!sQuality.notCauseLogged)
+            SDL_Log("Battle FX: the game showed %.1f of its 60 frames a second, but the HD effects take only %.1f ms of "
+                    "each %.1f ms picture%s: kept at %s quality", shown, p.hdMs, interval,
+                    p.gpuTimed ? " on the GPU" : "", BattleFxGL_TierName(sQuality.tier));
+        sQuality.notCauseLogged = true;
+        BattleFxGL_PaceReset();
+        return;
+    }
+    if (sQuality.tier < BFX_TIER_LOW)
+    {
+        SDL_Log("Battle FX: the game showed %.1f of its 60 frames a second while the HD effects took %.1f ms of each "
+                "%.1f ms picture%s: %s quality from now on%s", shown, p.hdMs, interval, p.gpuTimed ? " on the GPU" : "",
+                BattleFxGL_TierName(sQuality.tier + 1), strong ? "" : " (on trial)");
+        if (sQuality.raisedTo == sQuality.tier)
+            sQuality.raiseBlocked = true;
+        if (!strong)
+        {
+            sQuality.trialFrom = sQuality.tier;
+            sQuality.trialShown = shown;
+        }
+        QualitySetTier(sQuality.tier + 1);
+        return;
+    }
+    if (strong)
+    {
+        PlayGba(p.hdMs, shown); /* below the lowest tier */
+        BattleFxGL_PaceReset();
+        return;
+    }
+    BattleFxGL_PaceReset();
+}
+
 /* Shows the core's frame for the picture being drawn (at the boundary) or, later in the picture's time, one for
  * it that the core has finished since (not at the boundary: only in place of an older frame of the same
  * animation already shown). */
@@ -2543,21 +2805,8 @@ static void ShowWanted(bool boundary)
 
     if (sQ.lock == NULL)
         return;
-    /* The drawing over its budget (BattleFxGL_DrawTooSlow: the HD layers' cost a picture, measured over this
-     * animation's pictures so far): its GBA effects from this picture on, as when the core is behind; the game
-     * thread ends it (TakeCoreStatus). */
-    if (boundary && sCore.drawBudgetMs > 0 && sShow.want.serial != 0 && sShow.want.serial != sShow.slowSerial)
-    {
-        double ms = 0.0;
-
-        if (BattleFxGL_DrawTooSlow(sShow.want.serial, sCore.drawBudgetMs, &ms))
-        {
-            sShow.slowSerial = sShow.want.serial;
-            SDL_AtomicSet(&sDrawSlowTenths, (int)(ms * 10.0 + 0.5));
-            SDL_AtomicSet(&sDrawSlow, (int)sShow.want.serial);
-            SDL_AtomicSet(&sTooSlow, (int)sShow.want.serial);
-        }
-    }
+    if (boundary)
+        PaceCheck(); /* the quality to draw at, the HD effects held back */
     if (sShow.want.serial == 0 || sShow.want.serial == sShow.slowSerial)
     {
         if (boundary)
@@ -2656,6 +2905,14 @@ void BattleFx_FrameBoundary(bool view3d, uint32_t skipObj[4], uint8_t *hideBg)
      * frame that built it): the core's frame for that game frame goes with it */
     bool waiting;
 
+    /* the last picture's game frame, seen or not (the pace), and a battle's start (the quality) */
+    BattleFxGL_PaceBoundary(view3d);
+    if ((bool)gMain.inBattle != sQuality.inBattle)
+    {
+        sQuality.inBattle = gMain.inBattle;
+        if (sQuality.inBattle)
+            QualityBattleStart();
+    }
     sShow.want = sRecords[1];
     ShowStats(sShow.want.serial);
     ShowWanted(true);

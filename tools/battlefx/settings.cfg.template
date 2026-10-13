@@ -1,0 +1,17 @@
+# Battle FX settings (include/diorama/battle_fx.h, src/diorama/battlefx/README.md); the environment
+# variables PKMN_BATTLEFX, PKMN_BATTLEFX_QUALITY, PKMN_BATTLEFX_ATTACH, PKMN_BATTLEFX_LOG,
+# PKMN_BATTLEFX_SYNC and PKMN_BATTLEFX_DRAW_BUDGET_MS override them.
+# enabled=0 plays the original GBA animations.
+# quality=auto (the player builds' default) draws the HD effects in full and lowers their quality
+# only while the game's own pictures fall behind because of them, as measured on this PC (logged);
+# quality=full, high, medium or low fixes a tier (high: the effects at 3/4 of the window's
+# resolution; medium: half; low: half, without bloom and distortion; the test builds: full);
+# quality=gba plays the original animations.
+# attach=0 places the effects for the GBA pictures even where the animated battle sprites show
+# larger or smaller Pokemon (default 1: placed and sized for the Pokemon as shown).
+# drawBudgetMs=N (optional; none by default): an animation whose HD effects take more than N ms a
+# picture to draw plays as on the GBA.
+# log=1 logs every animation; sync=1 makes the game wait for the animation core every frame (the
+# test builds' default).
+enabled=1
+log=0

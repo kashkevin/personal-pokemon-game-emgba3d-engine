@@ -29,9 +29,13 @@
  * "battlefx" folder beside the executable, then in the working folder);
  * PKMN_BATTLEFX_LOG=1 logs every animation (the game's and the core's frame
  * counts, the core's cost, how its pictures went); PKMN_BATTLEFX_SYNC=1 makes
- * the game wait for the core every frame (the default in test builds). The
+ * the game wait for the core every frame (the default in test builds);
+ * PKMN_BATTLEFX_QUALITY=auto|full|high|medium|low|gba picks the HD effects'
+ * quality (BattleFx_Quality below); PKMN_BATTLEFX_ATTACH=0 places the effects
+ * for the GBA pictures even where the animated battle sprites show others. The
  * same keys can be put in battlefx/settings.cfg (key=value lines: enabled,
- * log, sync). Failures are always logged and the GBA animation is shown.
+ * log, sync, quality, attach, drawBudgetMs). Failures are always logged and
+ * the GBA animation is shown.
  *
  * Built only with DIORAMA=1 (ENABLE_DIORAMA).
  */
@@ -149,5 +153,28 @@ bool BattleFx_Drawing(void);
 bool BattleFx_Enabled(void);
 bool BattleFx_Logging(void);
 const char *BattleFx_DataDir(void);
+/* Whether the effects are placed and sized for the battlers as the game shows them - the animated battle
+ * sprites, larger or smaller than the GBA pictures the animations were made for (battle_fx_attach.h; settings
+ * attach, PKMN_BATTLEFX_ATTACH; on by default). */
+bool BattleFx_Attach(void);
+
+/* The HD effects' quality (settings quality, PKMN_BATTLEFX_QUALITY; src/diorama/battlefx/README.md, "Quality"):
+ * auto - the player builds' default - draws them in full and lowers the quality only while the game's own
+ * pictures fall behind (frames it shows no more) because of them, as measured on the PC itself; the others fix
+ * one tier (the test builds: full) and gba plays the original animations. Main thread; a settings menu may set
+ * it (BattleFx_SetQuality takes effect from the next picture). */
+enum
+{
+    BATTLEFX_QUALITY_AUTO,
+    BATTLEFX_QUALITY_FULL,
+    BATTLEFX_QUALITY_HIGH,
+    BATTLEFX_QUALITY_MEDIUM,
+    BATTLEFX_QUALITY_LOW,
+    BATTLEFX_QUALITY_GBA,
+    BATTLEFX_QUALITY_COUNT,
+};
+int BattleFx_Quality(void);
+void BattleFx_SetQuality(int quality);
+const char *BattleFx_QualityName(int quality);
 
 #endif // GUARD_DIORAMA_BATTLE_FX_H
