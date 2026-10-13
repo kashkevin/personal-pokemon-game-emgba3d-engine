@@ -91,7 +91,7 @@ struct BattleFxPace
     unsigned gameFrames; /* game frames whose picture had the HD layers (after the animation's first pictures) */
     unsigned skipped;    /* ... of them never presented: the game ran on without them being seen */
     unsigned presents;   /* presents with the HD layers ... */
-    double presentMs;    /* ... and the time between them, summed */
+    double presentMs;    /* ... and the time between them, summed (the window's time on the clock) */
     double hdMs;         /* the HD layers' cost a picture: GPU time (timer queries) or, without them, the CPU's; < 0 unknown */
     bool gpuTimed;       /* hdMs from timer queries */
     double plainMs;      /* the battle's time between presents without HD layers (average), 0: unknown */
