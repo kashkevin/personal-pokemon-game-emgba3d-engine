@@ -25,7 +25,9 @@
 # Roxanne with Mirror Move (the copied move's animation), a wild Zigzagoon with Secret Power (the
 # environment's version), a route trainer with Fury Attack (a hit's animation for every hit) and with Fly
 # (both turns: the user away, then the strike); and the multiplayer twin Gym partners whose Pokemon start
-# a sandstorm (Shale's Hippopotas) and rain (Juan's partner's): the weather's animations every turn.
+# a sandstorm (Shale's Hippopotas) and rain (Juan's partner's): the weather's animations every turn. Last, wild
+# battles in four other 3D environments (PKMN_TEST_WARP, as the debug menu's warp): Granite Cave, Rustboro's Gym
+# (indoors), Route 119's long grass and Mt. Chimney.
 set -u
 OUT=$1; SAVE=$2; shift 2
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -58,4 +60,8 @@ run multi_hit    "trainer:318" 1 PKMN_TEST_FIRST_MOVE=31 "$@"
 run two_turn     "trainer:318" 1 PKMN_TEST_FIRST_MOVE=19 "$@"
 run sandstorm    "trainer:855" 1 "$@"
 run rain         "trainer:862" 1 "$@"
+run cave         "wild:263:30" 1 PKMN_TEST_WARP=24:7:0 "$@"
+run indoor_gym   "wild:263:30" 1 PKMN_TEST_WARP=11:3:0 "$@"
+run long_grass   "wild:263:30" 1 PKMN_TEST_WARP=0:34:0 "$@"
+run volcano      "wild:263:30" 1 PKMN_TEST_WARP=24:12:0 "$@"
 echo done >> "$OUT/realsuite.txt"
