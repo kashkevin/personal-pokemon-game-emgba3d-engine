@@ -28,6 +28,12 @@
  * records stay exactly the ROM's. A companion that does not know 'A' never
  * meets it: the launcher pairs this game with its own companion.
  *
+ * A second native extension, the shared wild Pokemon of EmeraldTogether Phase 3
+ * (multiplayer_spawns.h): once the world mailbox is ready the bridge announces
+ * 'w' (version 1, 12 slots, 384 bytes, 20-byte slots), publishes the game's
+ * 116-byte spawn record as 'g' (as 'G' for the world record) and accepts the
+ * companion's 252-byte spawn inbound record as 'n' (only after 'w').
+ *
  * Started with `--bridge FILE`; FILE holds `port=N` (1-65535) and `token=` 64
  * lowercase hex digits, and the manifest's explicit opt-ins it has, each on
  * its own line: `trade_effect_prepare=1`, `trade_effect_save=1`,
@@ -60,6 +66,7 @@ enum MpRegion
     MP_REGION_RESET,    /* gMultiplayerResetMailbox, 128 */
     MP_REGION_WORLD,    /* gMultiplayerWorldMailbox, 256 */
     MP_REGION_WINDOW,   /* gSaveDataBuffer, 4096 (read only) */
+    MP_REGION_SPAWN,    /* gMultiplayerSpawnMailbox, 384 (native extension) */
     MP_REGION_COUNT
 };
 
@@ -82,6 +89,7 @@ struct MpBridgeCaps
     uint32_t reset;                  /* 1 or 2 */
     uint32_t resetInput;             /* 1 */
     uint32_t world;                  /* 1 */
+    uint32_t spawns;                 /* 1: shared wild Pokemon (native extension, needs world) */
 };
 
 enum
@@ -159,6 +167,9 @@ struct MpBridge
     bool hasLatestWorld, poseSentLast;
     bool posePublished, worldPublished; /* RecordDue with a clock */
     uint32_t poseAt, worldAt;
+    uint8_t latestSpawn[4 + 1 + 116];
+    bool hasLatestSpawn, spawnTurn, spawnPublished, spawnCapabilitySent;
+    uint32_t spawnAt;
     struct MpBridgeSave save;
     bool hasSaveGeneration;
     uint32_t saveGeneration;

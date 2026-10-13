@@ -4,6 +4,7 @@
 #include "multiplayer_world.h"
 #include "multiplayer_ride.h"
 #include "multiplayer_appearance.h"
+#include "multiplayer_spawns.h"
 #include "battle.h"
 #include "battle_setup.h"
 #include "event_data.h"
@@ -135,6 +136,9 @@ void MultiplayerWorld_Init(void)
     gMultiplayerWorldMailbox.byteSize = sizeof(gMultiplayerWorldMailbox);
     if (*(const volatile u32 *)&gMultiplayerWorldAbiVersion == MP_WORLD_ABI_VERSION)
         gMultiplayerWorldMailbox.magic = MP_WORLD_MAGIC;
+#ifdef PORTABLE
+    MultiplayerSpawns_Init(); // shared wild Pokemon (native PC only)
+#endif
 }
 
 static void ReadInbound(void)
@@ -716,6 +720,12 @@ void MultiplayerWorld_TryClaimEvent(void)
     const struct MultiplayerWorldEvent *event = &sInbound.event;
     u8 taskId;
 
+#ifdef PORTABLE
+    // A shared wild Pokemon uses the same script and messages.
+    if (MultiplayerSpawns_TryClaimTalked())
+        return;
+#endif
+
     gSpecialVar_Result = 2;
     sClaimEventId = 0;
     if (sConnected && sHaveInbound && event->eventId != 0 && event->eventId != sHiddenEventId
@@ -778,6 +788,13 @@ u16 MultiplayerWorld_GetBattleFormBase(u16 species)
 
 void MultiplayerWorld_StartEventBattle(void)
 {
+#ifdef PORTABLE
+    if (MultiplayerSpawns_InInteraction())
+    {
+        MultiplayerSpawns_StartBattle();
+        return;
+    }
+#endif
     const struct MultiplayerWorldEvent *event = &sInbound.event;
     struct Pokemon *mon = &gParties[B_TRAINER_OPPONENT_A][0];
     bool32 shiny = (event->flags & MP_WORLD_EVENT_SHINY) ? TRUE : FALSE;
@@ -888,6 +905,13 @@ void MultiplayerWorld_OnScriptedBattleEnd(void)
 {
     u8 result;
 
+#ifdef PORTABLE
+    if (MultiplayerSpawns_OnScriptedBattleEnd())
+    {
+        sEventResult = MultiplayerSpawns_TakeResult();
+        return;
+    }
+#endif
     if (!sEventBattleActive)
         return;
     sEventBattleActive = FALSE;
@@ -1161,6 +1185,9 @@ void MultiplayerWorld_LeaveField(void)
         RemoveFollower(i);
     RemoveOwnedObject(&sEventObjectId, MP_WORLD_LOCAL_ID_EVENT);
     sEventObjectEventId = 0;
+    // Shared wild Pokemon are not removed here: this runs whenever a script
+    // locks the field, including the one talking to a spawn. Their module
+    // removes them itself when the game leaves the overworld or disconnects.
 }
 
 void MultiplayerWorld_Tick(bool32 fieldReady, bool32 connected)
@@ -1169,6 +1196,9 @@ void MultiplayerWorld_Tick(bool32 fieldReady, bool32 connected)
 
     if (gMultiplayerWorldMailbox.magic != MP_WORLD_MAGIC)
         return;
+#ifdef PORTABLE
+    MultiplayerSpawns_Tick(fieldReady, connected);
+#endif
     sConnected = connected;
     ReadInbound();
     if (!connected)

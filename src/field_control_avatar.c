@@ -13,6 +13,11 @@
 #include "fieldmap.h"
 #include "field_control_avatar.h"
 #include "multiplayer_ride.h"
+#ifdef PORTABLE
+#include "multiplayer_spawns.h"
+#include "multiplayer_world.h"
+#endif
+#line 16 // gba-line
 #include "field_message_box.h"
 #include "field_move.h"
 #include "field_effect.h"
@@ -407,6 +412,15 @@ static const u8 *GetInteractedObjectEventScript(struct MapPosition *position, u8
     gSelectedObjectEvent = objectEventId;
     gSpecialVar_LastTalked = gObjectEvents[objectEventId].localId;
 
+#ifdef PORTABLE
+    // Objects the multiplayer layer spawns have no map template: the World
+    // Event Pokemon and the shared wild Pokemon (multiplayer_spawns.c) run the
+    // World Event script, which hands spawn objects to their own module.
+    if (MultiplayerSpawns_IsSpawnObject(&gObjectEvents[objectEventId])
+     || MultiplayerWorld_IsEventObject(&gObjectEvents[objectEventId]))
+        return GetRamScript(gSpecialVar_LastTalked, EventScript_MultiplayerWorldEvent);
+#endif
+#line 410 // gba-line
     if (PlayerHasFollowerNPC() && objectEventId == GetFollowerNPCObjectId())
         script = GetFollowerNPCScriptPointer();
     else if (IsOverworldWildEncounter(&gObjectEvents[objectEventId], OWE_ANY))
