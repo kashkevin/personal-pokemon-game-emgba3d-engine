@@ -13,7 +13,8 @@ The game's Battle FX (include/diorama/battle_fx.h) reads, beside the executable:
   battlefx/se_frames.json       the game's sound effect lengths (frames IsSEPlaying() stays true), measured by the
                                 test build: the core's waitsound / end wait as the game's scripts do (optional)
   battlefx/MANIFEST.txt         where it all came from, and each file's SHA-256
-  battlefx/settings.cfg         development settings (enabled=1, log=0; sync=1 optional)
+  battlefx/settings.cfg         settings (enabled=1, log=0; quality, attach, sync, drawBudgetMs optional):
+                                tools/battlefx/settings.cfg.template when the folder has none
 
 Usage: pack_data.py --package <battlefx_kit/native> [--out battlefx] [--source "<what the package is>"]
                     [--data <bfx_moves.json converted from THIS game's tree>]
@@ -125,11 +126,7 @@ def main():
     files.append("assets/info.txt")
     settings = out / "settings.cfg"
     if not settings.exists():
-        settings.write_text("# Battle FX development settings (include/diorama/battle_fx.h); the environment\n"
-                            "# variables PKMN_BATTLEFX, PKMN_BATTLEFX_LOG and PKMN_BATTLEFX_SYNC override them.\n"
-                            "# enabled=0 plays the original GBA animations. A line sync=1 makes the game wait for\n"
-                            "# the animation core every frame (the test builds' default).\n"
-                            "enabled=1\nlog=0\n")
+        settings.write_text(Path(__file__).with_name("settings.cfg.template").read_text())
     lines = ["Battle FX data for the game's 3D battles (include/diorama/battle_fx.h).",
              "Packed by tools/battlefx/pack_data.py from the Battle FX integration package's native/ folder"
              + (f" ({a.source})" if a.source else "") + ".",

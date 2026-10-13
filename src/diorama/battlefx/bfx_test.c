@@ -609,9 +609,10 @@ static void WriteResult(void)
             BattleFxGL_Stats(&rs); /* the main thread's (test only: read across threads) */
             if (rs.serial == t.serial)
                 fprintf(t.report, "],\"render\":{\"frames\":%u,\"layers\":%u,\"gpuSamples\":%u,\"gpuMs\":%.4f,"
-                                  "\"gpuMsWorst\":%.4f,\"cpuMs\":%.4f,\"cpuMsWorst\":%.4f}}\n",
+                                  "\"gpuMsWorst\":%.4f,\"cpuMs\":%.4f,\"cpuMsWorst\":%.4f,\"tier\":\"%s\"}}\n",
                         rs.frames, rs.layers, rs.gpuSamples, rs.gpuSamples ? rs.gpuMsTotal / rs.gpuSamples : 0.0,
-                        rs.gpuMsWorst, rs.layers ? rs.cpuMsTotal / rs.layers : 0.0, rs.cpuMsWorst);
+                        rs.gpuMsWorst, rs.layers ? rs.cpuMsTotal / rs.layers : 0.0, rs.cpuMsWorst,
+                        BattleFxGL_TierName(rs.tier));
             else
                 fprintf(t.report, "]}\n");
         }
@@ -1145,6 +1146,21 @@ bool BattleFxTest_ViewHd(void)
     if (!t.init)
         return true;
     return t.viewHd;
+}
+
+bool BattleFxTest_FixedAlpha(float *alpha)
+{
+    const char *v = SDL_getenv("PKMN_BFX_TEST_ALPHA");
+
+    if (v == NULL || v[0] == '\0')
+        return false;
+    *alpha = (float)atof(v);
+    return true;
+}
+
+bool BattleFxTest_PlainShaders(void)
+{
+    return EnvInt("PKMN_BFX_TEST_PLAIN_SHADERS", 0) != 0;
 }
 
 #endif
