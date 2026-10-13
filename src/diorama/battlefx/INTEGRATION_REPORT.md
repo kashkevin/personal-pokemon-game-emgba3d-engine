@@ -1,452 +1,548 @@
-# Battle FX in the 3D battles — integration report
+# Battle FX in the EmeraldTogether game — integration report, round 2
 
-Checkpoint **battlefx-int-wip-20261012-1** · engine branch `claude/battle-fx-integration` · 2026-10-12
+Checkpoint **battlefx-int-wip-20261013-1** · engine branch `claude/battle-fx-integration` (the code of
+`dc7fb055c`) · 2026-10-13
 
 PRIVATE: the builds in this checkpoint contain game data, and `src/platform/bios.c` still contains
 GPL/MPL-derived code. Do not share them.
 
+This round does what your last message asked before the final handoff: the effects placed and sized for
+the animated Pokemon sprites, a performance fallback that decides on this PC's own measurements instead of
+a fixed 8 ms, and the handoff to the main EmeraldTogether session. The first integration
+(battlefx-int-wip-20261012-1, `2907a098b`) is unchanged and kept: its report - in its checkpoint folder,
+and on the branch as `INTEGRATION_REPORT_ROUND1.md` - covers everything before this round (all 621 moves
+and 83 battle animations replayed frame for frame, the battles fought, the merge checks).
+
 ## Summary
 
-- The Battle FX package (v3.3: `battlefx_kit` commit `9848e06`, tag `lab-perf-v3.3`) now runs inside
-  the game. Every move animation (621 moves, 651 animations with the second turns) and every battle
-  animation the game plays (81 status, general and special scripts, and the controllers' send-out and
-  shiny stars) is replayed by the Battle FX core beside the game's own animation and drawn in HD in
-  the 3D battle, over Astra's newest battle environments (round 4, `aa63a98a3`, merged).
-- The game stays the authority. Its own animation still runs, frame for frame, and decides
-  everything; the core replays it from the game's state and only its picture reaches the screen. The
-  replay is checked against the game every frame: in the final runs the effect sprites of the core
-  and of the game are identical in every compared frame of every move in single and in double
-  battles, of every battle animation (as the attacker), and of every animation in
-  28 battles fought through to their end - wild, trainer, gym, Elite Four, double,
-  Mega, shiny, the Safari Zone's and Wally's catches, weather, five 3D environments, a lost battle.
-- Nothing about the battle changed. Battle FX never writes game memory; damage, accuracy, abilities,
-  effects, turn order, saves and multiplayer are untouched, and the GBA ROM built from this branch is
-  byte-identical (SHA-256 `f214735b…3387`). `PKMN_BATTLEFX=0` plays the original animations; an
-  animation the HD layer cannot draw falls back to the GBA effects from that frame.
-- Performance: the animation core runs on a thread of its own and never holds a game frame up. Drawing
-  the HD layers is ordinary full-screen GPU work, but on this VM's software OpenGL it took longer than a
-  frame and slowed the battle, so the player builds carry a drawing budget (8 ms a picture): over it,
-  the original animations play, logged, and the game keeps 60 frames a second. What a graphics card
-  costs at 1080p, 1440p and 4K is what the benchmark kit in this checkpoint measures.
-- The animated battle sprites (sprite-integration-v2, in the EmeraldTogether integration): Battle FX
-  merged into that integration in a trial branch, built and tested with the sprite pack:
-  795 of 795 animations exact (every move, every battle animation, ten moves with pictures, 4 battles fought; the test build crashed once as it exited, known issues 13); the effects land on the right battlers, sized for the GBA boxes (Verification).
-- Not verified: anything on a real graphics card (every picture and number here is from software
-  OpenGL in the cloud, or Wine), 1440p and 4K drawing, a high-refresh display, Windows itself, a
-  two-player battle, the player's own Mega Evolution, a voluntary switch, a Pokeblock throw in a
-  real Safari battle, the animated sprites on this branch itself (only in the trial merge). The
-  benchmark kit in this checkpoint measures the first three on your PC.
+- **Placement for the animated sprites.** Where the animated battle sprites show a battler (a frame of its
+  own size - Wailord's front 89 x 75 where its GBA picture is 64 x 56, Lugia's front about 115 x 75),
+  Battle FX now reads what is drawn, through the sprite system's own renderer interface (read only), and
+  places the effects near each battler for its body as shown: moved with the body's centre and scaled with
+  its size, per battler, front and back, singles and doubles, also while a script has moved the battler
+  onto a background layer. The battler's own glow, flash and light are drawn from the frame shown (before,
+  a flash drew the GBA picture's shape over the animated sprite). Battlers the pack does not hold (Megas,
+  Primals, Gen 6, the Substitute doll) and every battle without the animated sprites draw exactly as
+  before - checked bit for bit (below).
+- **Quality and the fallback.** The fixed 8 ms drawing budget is gone as the policy. The HD effects now
+  have quality tiers (full; high: 3/4 resolution; medium: half; low: half, no bloom or distortion) and the
+  player builds choose by measuring this PC while it plays: nothing changes while the game shows all its
+  60 frames a second, however much the effects cost; only when game frames go unseen and the HD layers'
+  measured GPU time is part of why does the next tier down draw (on trial when the evidence is small,
+  undone when it does not help); if even the lowest tier leaves the game under three quarters of its
+  frames, the animation plays its GBA effects, as before.
+  `quality=auto|full|high|medium|low|gba` in `battlefx\settings.cfg` (or `PKMN_BATTLEFX_QUALITY`) fixes it;
+  a settings menu can set it (`BattleFx_SetQuality`). The 621 moves and the 81 status, general and special
+  animations are untouched (the package's data and core are unchanged).
+- **Handoff.** Battle FX merges into the unified game (`claude/emeraldtogether-unified` `8c8c11ab2`) with
+  four conflicting files, all additions on both sides. `claude/battle-fx-unified-candidate` is that merge,
+  ready to take: one merge commit with the tree of `claude/battle-fx-unified-trial`, where it was built
+  and tested with the sprite pack. The newest native UI, handed over at the same time
+  (ui-native-handoff-20261013-1), and Battle FX merge into each other without a conflict in either order
+  (the same tree); that combined tree was built and its battles played here. The character customization
+  is already in the unified game. Step by step: section 3 and COORDINATION.txt.
+- **Verified here** (Linux, software OpenGL, the test builds): the placing on the unified trial with the
+  sprite pack - seven galleries of twelve moves (Wailord, Joltik, Rayquaza, Lugia, Altaria, Pidgeot,
+  Gardevoir; fronts and backs; a double battle) 84 of 84 animations exact, every move animation with Wailord
+  against Joltik 651 of 651 exact, the Mega Evolutions drawn bit-identically with the placing on and off,
+  four battles fought with the HD layer drawn (20 of 20 exact); without the sprites, the HD layers
+  bit-identical to the first checkpoint's (108 of 108 read back), the 81 battle animations exact, four
+  battles fought (21 of 21) and Battle FX off; the tiers (every frame exact at each) and the auto policy on
+  software OpenGL (from `full` down to `low` where this machine fell behind, `low` kept while the game still
+  showed three quarters of its frames, the GBA effects below that); the combined tree - the unified game,
+  the newest native UI, Battle FX - built and four battles fought (18 of 18); the Windows builds under Wine;
+  the GBA ROM byte-identical.
+- **Not verified:** anything on a real graphics card or Windows itself (the benchmark kit in this
+  checkpoint measures the tiers on your PC), a two-player battle, the player's own Mega Evolution, and the
+  unified game's own player build with Battle FX (that build is the main session's to make).
 
-## Versions and sources
+## 1. Effects placed for the animated sprites
+
+### What the animated sprites change
+
+The scripts place every effect for the GBA picture: its 64 x 64 box, the game's coordinates for the
+battler, its height and elevation. The sprite system (sprite-integration-v2, in the unified game) draws
+each battler from its pack in place of the GBA picture: a frame of its own size standing on the GBA
+picture's feet line and centred on its body. Compared over the pack (1588 facings with a GBA picture to
+compare; the opaque boxes, the frames averaged by their durations):
 
 | | |
 | --- | --- |
-| Battle FX package | v3.3, `battlefx_kit` `9848e06` (tag `lab-perf-v3.3`): the core `battlefx/bfx_core.js`, textures, shaders, the converter |
-| Animation data | converted from this game's own `battle_anim_scripts.s` and C sources by the package's converter (`tools/battlefx/convert_data.py`: three additions, below), packed into `battlefx/` |
-| Game base | `claude/battle-environments-3` (Astra, battle3d-env-wip-20261012-2, `aa63a98a3`), merged into this branch at `865fbf745` |
-| Built first on | `claude/battle-environments-2` (`719e16c78`, battle3d-env-wip-20261012-1); that state is tagged `battlefx-int-premerge-20261012` |
-| JavaScript engine | QuickJS-ng v0.10.1 (MIT), `third_party/quickjs-ng`; stb_image 2.30 (public domain) |
+| scale of the shown body against the GBA picture's (square root of width ratio x height ratio) | median 1.05, 90th percentile 1.25, 95th 1.34, largest 2.17 (Wailord's back), smallest 0.55 |
+| larger by a fifth or more | 14.6 % of facings; by two fifths or more 3.2 % |
+| smaller by a tenth or more | 17.5 % (back pictures mostly: their median is 0.99, fronts' 1.09) |
+| body centre moved 8 GBA pixels or more | 10 % (the shown body is taller and stands on the same feet) |
 
-## How it works (in short)
+Examples: Wailord's front 89 x 75 against 64 x 56, its back 97 x 66 against 64 x 21 (the GBA back
+picture is mostly below the text box); Rayquaza's back 80 x 93 against 58 x 64; Lugia's front 115 x 75
+against 60 x 64; Joltik's front 41 x 32 against 32 x 26; Pikachu's back 36 x 44 against 57 x 55.
 
-`battle_anim.c` launches and runs every animation exactly as before. At the launch Battle FX sends the
-core a request built from the game's state: the script the game chose (Secret Power's swap included),
-the battlers, their sprites' places, the move's power, damage, turn, friendship and weather, the
-random-number states, the script branch the game will take (read as the game's own tasks read it),
-how many sprite slots the battle already uses and which loop runs the script. Then, for every frame the
-game's animation advances, the core advances one frame - on a thread of its own, so its cost never
-holds a game frame up - and sends a frame packet (particles, cards, ribbons, meshes, lights,
-distortion) to the renderer. At each frame boundary the picture the game shows is paired with the core
-frame made for the same game frame; the GBA effect sprites and effect BG layers that frame stands in
-for are left out of the GBA picture, and the HD layers are drawn behind and in front of it in the
-battle's own OpenGL frame (`DioramaGLBattle_Present`). When the game's animation ends, so does the
-core's. The developer README is `src/diorama/battlefx/README.md`.
+So an effect aimed at a large battler's GBA centre hits its lower body, a shield sized for 64 pixels
+covers half of Wailord, and a projectile starts from the middle of a body rather than near its head.
 
-## Status of every item
+### How Battle FX places them now
 
-Levels, highest reached: **Implemented** (written, builds) · **Tested in standalone Lab** (the
-package's Lab, before this integration) · **Tested through native bridge** (in the game: the game's
-own launcher plays the animation at a battle's menu and every frame of the core's replay is compared
-with the game's - the galleries) · **Tested inside actual gameplay** (a battle fought through to its
-end by the test autopilot, every animation it played compared) · **Not yet verified**. Everything
-here ran in the cloud (Linux, software OpenGL) or under Wine; nothing on a graphics card.
+Read only, through the sprite system's renderer interface (`include/platform/battle_sprites.h`):
+`gBattleSpriteObjViews` (the frame drawn in place of an OAM entry: its pixels, size, place in the entry's
+box, colours, the fainting clip) and `gBattleSpriteBgCopies` (the copy a script puts on BG1 / BG2,
+"monbg"). Nothing of the sprite system or the sprite library is changed; Battle FX's own file
+`src/diorama/battlefx/bfx_attach.c` is the only place that reads them (`include/diorama/battle_fx_attach.h`),
+and without `ENABLE_BATTLE_SPRITES` it reads nothing.
 
-| Item | Status | Evidence, notes |
+Every battle picture, per battler (`gl_battle_fx.c`, `MeasureLook`):
+
+- the GBA picture's body: the opaque box of the picture in OAM (decoded as the GBA draws it);
+- the shown body: the opaque box of the frame drawn, averaged over the frames of one look (an idle
+  animation moves a few pixels; the effects should not shake with it). A look is one canvas (each facing
+  of each form has its own) and about the same GBA picture - a new Pokemon, form or facing starts anew;
+- from the two: the shift of the body's centre, one scale for both axes (the square root of the two
+  ratios, held to 0.75 .. 1.6 - effects keep their shapes, and a back picture the text box cuts short
+  does not stretch them threefold), and the region to place: both bodies, a tenth more.
+
+While an animation draws, the effects near each battler are moved with that centre and scaled about it on
+the GBA screen, and lifted back to the world at their own depth exactly as the core lifts its points (its
+`Space.lift` / `Space.project`): in full inside the region, fading out by 1.8 times its size, shared where
+two battlers' regions meet (doubles), less for elements over 96 GBA pixels and not at all from 176 (a
+screen-wide card stays). Cards and distortion cards (centre placed, card sized), particles (where each is
+now: one flying from a battler to another leaves the one body and reaches the other), ribbons (each
+vertex: a beam's two ends meet both bodies), meshes (centre placed, mesh sized) and the lights that light
+them; ground decals scale about the battler's feet on the ground. This is code added to the card,
+particle, ribbon and mesh shaders as they load - the shader files are the Lab's generated ones, unchanged;
+a shader that is not the expected one loads without it, all four or none - and with no battler shown by
+another frame every expression is the shader's own.
+
+A battler a script moves onto a background layer ("monbg": Protect's and Swords Dance's user, Flamethrower's
+target...) leaves OAM; the sprite system draws the copy from its frame too, and the look measured while it
+was a sprite goes with the copy, about where the core has it (the core follows the layer's scroll).
+
+The battler's own HD state - the glow behind it, the flash and the effects' light on it, its depth for
+meshes behind it - is drawn from the frame shown (its shape and faded colours, placed as
+`gba_easy_draw.c` `DrawLibraryObjLine` places it, not cut to the 64 x 64 box; the glow grows about the
+shown body's centre). In the sprite trial of the last checkpoint these were still drawn from the GBA
+tiles that stay in VRAM: a hit's flash showed the GBA picture over the animated sprite.
+
+`attach=0` in `battlefx\settings.cfg` (or `PKMN_BATTLEFX_ATTACH=0`) keeps the GBA placing (the battlers
+are still drawn from their frames). With `PKMN_BATTLEFX_LOG=1` each look is logged once ("battler 1 is
+shown 89 x 75 (its GBA picture 64 x 56): the effects near it are moved +1.8, -14.7 pixels and scaled
+1.37"). Drawing only: the core's replay and its frames, the parity with the game, the animations'
+timing and the battle are untouched.
+
+### Results
+
+On the unified trial's test build with the sprite pack: seven galleries of twelve moves - Flamethrower,
+Thunderbolt, Protect, Hyper Beam, Rock Slide, Swords Dance, Fire Spin, Slash, Absorb, Psychic, Earthquake,
+Spore: projectiles and beams from one body to another, a shield around the user, a vortex around the
+target, energy drained back, a strike, a screen-wide effect, a ground shake. Each look as the log names it
+(the boxes are the bodies' opaque pixels, in GBA pixels; "up" moves the effects up the screen):
+
+| Gallery (12 moves) | Each look placed: the body shown against the GBA picture's (opaque boxes, GBA pixels) - the centre moved, the scale | Animations exact |
 | --- | --- | --- |
-| Native bridge: the game's own animation events drive the core (launch, each frame the game's animation advances, its end) | Tested inside actual gameplay | 28 battles (30 runs), 281 animations, all exact |
-| Hooks on the game's animation events, no move logic in the renderer | Tested inside actual gameplay | `battle_anim.c` launch/advance, `pokeball.c` / `battle_anim_throw.c` for the controllers' send-out and stars; the script the game chose is replayed, nothing re-decided |
-| Native OpenGL renderer in the game's own GL context and frame; no second window, no render loop of its own | Tested inside actual gameplay | drawn in `DioramaGLBattle_Present`; software OpenGL only |
-| No full-resolution CPU / GPU copies each frame | Implemented | one `glCopyTexSubImage2D` of the battle's region a layer (GPU to GPU) for distortion; nothing read back to the CPU (code; not profiled on a GPU) |
-| Effects at the battlers' places in the 3D battles (Astra's round 4) | Tested inside actual gameplay | the effect sprites' places compared every frame; 3D battles on Route 101, trainers' maps, Granite Cave, Rustboro Gym, Route 119 (by the Weather Institute), Mt. Chimney |
-| Real Pokemon sprites, attachment points | Tested inside actual gameplay (GBA sprites); the animated sprites: tested inside actual gameplay in a trial merge (not on this branch) | positions from the game's own sprites and coordinate functions, so every species' size and shape is the game's own; the animated battle sprites (sprite-integration-v2, in the EmeraldTogether integration): all moves, single battle: 651 of 651 exact (Ally Switch without a partner crashed the game, as on this branch: known issues 1); the battle animations: 81 of 81 exact (the test build crashed once as it exited after POKEBLOCK_THROW, a Safari animation that does not end at a wild battle's menu; the run resumed after it - known issues 13); ten moves with pictures (Wailord against Joltik and back, a shiny wild Pokemon and a female Pikachu, a double battle): 40 of 40 exact; battles fought: Calvin (won, 3 of 3 exact), Tate & Liza (double) (won, 11 of 11 exact), Fabian's Mega Manectric (won, 5 of 5 exact), the Safari Zone (caught, 2 of 2 exact) |
-| Singles | Tested inside actual gameplay | single-battle gallery 651 of 651 animations exact; crashed the game: MOVE_ALLY_SWITCH (known issues 1: only the gallery plays Ally Switch without a partner) |
-| Doubles (attacker and target per battler) | Tested inside actual gameplay | double-battle gallery 652 of 652 animations exact; a gym double battle, a wild double battle, two trainers at once fought |
-| All 621 moves (651 animations with the second turns) | Tested through native bridge | every one exact in the single and the double gallery; 29 of them also in fought battles |
-| All 83 battle animations (81 status / general / special scripts, the send-out, a shiny Pokemon's stars) | Tested through native bridge | the player's side: 81 of 81 scripts exact; POKEBLOCK_THROW, ROCK_THROW, BALL_THROW_WITH_TRAINER wait for the Safari Zone (at a wild battle's menu the game's own animation does not end) - at a Safari battle's menu 4 of 4 exact; played by the opponent: 80 of 81 exact - different: BALL_THROW_WITH_TRAINER from frame 11 (the trainer's ball throw is never the opponent's in this game (only the Safari, Wally and Old Man controllers throw with a trainer, all on the player's side), and at a wild battle's menu its game animation does not end); the send-out and the shiny stars: 6 of 6 exact for battlers 0, 1 and 2; 13 of the 83 also in fought battles |
-| Mirror Move plays the copied move | Tested inside actual gameplay | Mirror Move against Roxanne: Mirror Move x4, the moves it copied: Rock Tomb x4 - all exact |
-| Metronome calls the game's own choice | Tested inside actual gameplay | Metronome against a wild Zigzagoon: Metronome x1, the moves it called: Hyper Voice - all exact |
-| Assist, Copycat, Me First, Sleep Talk | Tested through native bridge | their own animations exact; the move they call is a launch of the game's own, the path Metronome's took in a battle; not fought |
-| Secret Power by environment | Tested inside actual gameplay | the game's own choice by the environment, each exact - Route 101: BODY_SLAM; Granite Cave: ROCK_THROW; Route 119: BODY_SLAM |
-| Multi-hit moves | Tested inside actual gameplay | Fury Attack against Sidney: 24 Fury Attack hit animations, each exact |
-| Two-turn moves | Tested inside actual gameplay | Fly against a route trainer: Fly x2 (the turn away and the strike), exact; every second turn (30) in the galleries |
-| Rollout / Fury Cutter counters | Tested inside actual gameplay | against Roxanne: Rollout x4, Fury Cutter x4 on consecutive turns, exact |
-| Weather | Tested inside actual gameplay | a sandstorm (x4) and rain (x15 in its 2 runs) every turn, the multiplayer twin Gym trainers' Pokemon; hail, sun: galleries |
-| Terrain | Tested through native bridge | galleries only |
-| Mega Evolution | Tested inside actual gameplay (the opponent's) | Fabian's Manectric Mega Evolves (B_ANIM_MEGA_EVOLUTION x1, exact); the player's own: gallery only (the autopilot cannot press the Mega trigger) |
-| Status and general animations | Tested inside actual gameplay | fought: Ball Throw With Trainer, Held Item Berry, Leech Seed Drain, Mega Evolution, Rain Continues, Sandstorm Continues, Simple Heal, Stats Change, Status Brn, Status Slp, Switch Out Player Mon; all of them in the galleries |
-| Shiny | Tested inside actual gameplay | a shiny wild Zigzagoon's stars, the test save's own shiny lead's stars (CONTROLLER_SHINY x19 in all) |
-| Catching | Tested inside actual gameplay | the Safari Zone: the trainer's throws, shakes, the catch (BALL_THROW_WITH_TRAINER x1); Wally's catch tutorial: his Zigzagoon's Tackles, the call-back, his throw and the catch (BALL_THROW_WITH_TRAINER x1 in the run again); in the suite's run the Ralts fainted from the second Tackle first (the game's damage; known issues 12) - all exact |
-| Switching | Tested inside actual gameplay (forced) | the opponents' send-outs (x31 in HD, the next Pokemon after each faint), the player's side's (x8: the lead, where it does not slide in as a follower; Wally's Zigzagoon) and Zigzagoon called back in the tutorial (SWITCH_OUT_PLAYER_MON); a voluntary switch: **not yet verified** |
-| Victory / defeat | Tested inside actual gameplay | 30 runs: 25 won, 2 lost, 2 caught, 1 not ended. Lost: Wallace against the save's lead alone, on purpose; Sidney against the level-100 lead alone with Fury Attack. Not ended: the rain battle's suite run, at the party menu. Every battle ended in at least one run |
-| Wild, trainer, gym, Elite Four, double battles | Tested inside actual gameplay | see Verification |
-| Original GBA animations behind a development setting | Tested inside actual gameplay | `PKMN_BATTLEFX=0` (or `battlefx/settings.cfg` `enabled=0`): a battle against Roxanne fought to its end (won), no HD animation begun (0) |
-| Failure: recorded, GBA from that frame, no crash, no desync | Tested inside actual gameplay (refused) | a move past the 621 in a fought battle (Fire Lash): logged "move 643 plays as on the GBA (not in the Battle FX data)"; the battle won. The core falling behind: on the busy VM it fell more than 6 frames behind in two of the thread runs (core on its own thread): logged, the rest of those animations played as on the GBA, the runs went on (`failed: true` in their reports) |
-| Game logic at 60 frames a second, the HD layer between game frames | Tested inside actual gameplay | the core advances one frame per game frame (every animation's length equals the game's, all galleries and battles); the HD layer is drawn at every present, its particles' time running on between game frames; on this VM's software OpenGL the HD layers cost more than a frame, so the player builds' drawing budget keeps the game at 60 (next row); a graphics card and a 120-240 Hz display: **not yet verified** |
-| Drawing budget: the HD layers never slow the game | Tested through native bridge | the fifteen heavy moves at 1280x720 on software OpenGL with the 8 ms budget: 2 animations over it (70.1 and 73.5 ms a picture, logged) went on as GBA, then "the HD effects are off until this battle ends"; the game at 59.9 frames a second (median; 42.5 with no budget) |
-| 1080p / 1440p / 4K | 720p and 1080p measured (software OpenGL) | the HD layers' cost scales with the window's pixels (33 ms a layer at 720p, 70 at 1080p here); 1440p, 4K and any graphics card: **not yet verified** - the benchmark kit measures them |
-| Nothing about the battle changed (damage, accuracy, abilities, effects, turn order, saves, multiplayer) | Tested inside actual gameplay | the GBA ROM byte-identical; Battle FX never writes game memory; every battle's outcome as the game decided it; a two-player battle: **not yet verified** |
-| Automated regression tests | Implemented, run | `tools/battlefx/gallery.sh`, `realsuite.sh`, `summarize.py` |
-| Windows test build | Tested under Wine | the Windows test build: 6 of 6 animations exact frame for frame (Flamethrower, Thunderbolt, Surf, Earthquake, Protect, Bolt Strike), drawn over the 3D battle; the Windows player starts and loads the core; on Windows itself: **not yet verified** |
+| Wailord (back) attacks Joltik (front) | Joltik's front 41 x 32 against 32 x 26: up 4, x 1.25; Wailord's back 99 x 63 against 64 x 21: up 24, right 2, x 1.60 (the limit) | 12 of 12 |
+| Joltik (back) attacks Wailord (front) | Wailord's front 93 x 70 against 64 x 56: up 12, x 1.35; Joltik's back 40 x 30 against 47 x 25: up 4, x 1.01 | 12 of 12 |
+| Joltik (front) attacks Wailord (back) | Joltik's front 41 x 32 against 32 x 26: up 4, x 1.26; Wailord's back 97 x 65 against 64 x 21: up 26, right 4, x 1.60 (the limit) | 12 of 12 |
+| Lugia (back) attacks Rayquaza (front) | Rayquaza's front 89 x 83 against 61 x 64: up 13, right 9, x 1.37; Lugia's back 126 x 73 against 62 x 62: up 10, left 2, x 1.55 | 12 of 12 |
+| Rayquaza (back) attacks Lugia (front) | Lugia's front 123 x 68 against 60 x 64: up 8, left 3, x 1.48; Rayquaza's back 76 x 94 against 58 x 64: up 24, left 8, x 1.39 | 12 of 12 |
+| Altaria (back) attacks Pidgeot (front) | Pidgeot's front 55 x 67 against 64 x 61: up 3, left 1, x 0.98; Altaria's back 57 x 69 against 62 x 43: up 14, right 1, x 1.22 | 12 of 12 |
+| double battle: Gardevoir and Wailord (backs) against Wailord and Lugia (fronts) | Wailord's front 86 x 82 against 64 x 56: up 15, right 2, x 1.41; Lugia's front 105 x 83 against 60 x 64: up 17, left 8, x 1.51; Gardevoir's back 67 x 74 against 42 x 52: up 12, left 2, x 1.51; Wailord's back 99 x 63 against 64 x 21: up 24, right 1, x 1.60 (the limit) | 12 of 12 |
 
-## Verification
+Every one of the 84 animations exact (the placing draws; it never changes the replay). `results\placement\`
+has a sheet per gallery: six of the moves at the same frame, placed for the battlers as shown (left) and as
+for the GBA pictures (right, `attach=0`). In them: Flamethrower and Thunderbolt reach Wailord's and Lugia's
+bodies where they are drawn, not their lower edges; Fire Spin's vortex wraps the large bodies instead of
+their lower halves; Protect's shield is sized for Rayquaza's and Gardevoir's backs; Hyper Beam starts at the
+user's body as shown and ends in the target's.
 
-All on the final test build (`claude/battle-fx-integration` `3db63631c`; the report's own commit
-after it changes no game code: the report, the developer README and the test suite's battle list - two
-names, the rain battle's settings), Linux, software OpenGL (llvmpipe) on a virtual display, the game
-waiting for the core every frame so that each game frame is compared with the core's frame for it.
-"Exact": in every compared frame the effect sprites of the game and of the core are the same
-(graphics tag and screen position); palette blends, BG layers and battler offsets are not compared.
+More, on the trial: every move animation (621 moves, 651 animations) with Wailord's back against Joltik's
+front and the HD layer drawn, 651 of 651 exact (the looks followed Transform: Wailord in Joltik's shape);
+Mega Rayquaza against Mega Salamence, drawn from their GBA pictures (the pack holds no Mega forms),
+bit-identical with the placing on and off (23 of 23 layers read back), and against Wailord only Wailord is
+placed; Pikachu's back, smaller in the pack (40 x 40 against 58 x 55), placed at x 0.75; four battles fought
+with the HD layer drawn - Calvin, Tate & Liza (all four battlers placed, Wailord's back among them), Fabian
+(his Manectric placed as shown, then its Mega Evolution - a GBA picture - as before) and the Safari Zone: 20
+of 20 animations exact.
 
-### Galleries (the game's own launchers, at a battle's action menu)
+## 2. Performance: quality tiers and a fallback decided on this PC
 
-| Run | Played | Exact | Different | GBA shown | Crashed | Game's own did not end there | Core begin ms (median / max) | Step ms (median) |
-| --- | ---: | ---: | --- | --- | --- | --- | --- | ---: |
-| All moves, single battle - the player's Pokemon attacking | 651 | 651 | 0 | 0 | MOVE_ALLY_SWITCH | 0 | 53 / 458 | 1.64 |
-| All moves, double battle - battler 0 attacking, its partner and both foes present | 652 | 652 | 0 | 0 | 0 | 0 | 68 / 1061 | 1.91 |
-| Battle animations - status, general and special scripts (the player's side) | 81 | 81 | 0 | 0 | 0 | B_ANIM_POKEBLOCK_THROW, B_ANIM_ROCK_THROW, B_ANIM_BALL_THROW_WITH_TRAINER | 32 / 435 | 1.65 |
-| Battle animations as the opponent - played by battler 1 (a trainer's Mega Evolution...) | 81 | 80 | B_ANIM_BALL_THROW_WITH_TRAINER (frame 11) | 0 | 0 | B_ANIM_POKEBLOCK_THROW, B_ANIM_ROCK_THROW, B_ANIM_BALL_THROW_WITH_TRAINER | 30 / 692 | 1.82 |
-| At a Safari battle's menu - Pokeblock and rock throws, the reactions, the trainer's ball throw | 4 | 4 | 0 | 0 | 0 | 0 | 32 / 138 | 1.42 |
-| Send-out and shiny stars, battler 0 - the controllers' own animations | 2 | 2 | 0 | 0 | 0 | 0 | 54 / 58 | 1.77 |
-| Send-out and shiny stars, battler 1 | 2 | 2 | 0 | 0 | 0 | 0 | 147 / 277 | 1.73 |
-| Send-out and shiny stars, battler 2 - a double battle | 2 | 2 | 0 | 0 | 0 | 0 | 17 / 20 | 1.97 |
+### Why not a fixed number of milliseconds
 
-### Battles fought through to their end
+The game runs its 59.73 frames a second on its own clock; the drawing does not pace it (`sdl2.c`: a
+present that takes longer leaves game frames unseen, and below about 12 presents a second the game itself
+slows). What a player sees is whether every game frame reaches the screen. The HD layers' cost is mostly
+pixels: each layer copies the window region, draws the effects into a half-float target the size of the
+region, runs a five-level bloom chain and composites. Estimated from the passes' sizes (not measured on a
+graphics card), that is on the order of 100 MB of memory traffic a layer at 1920 x 1080, two layers while
+an effect is both behind and in front of the battlers - divided by a graphics card's memory bandwidth,
+well under a millisecond on a current desktop card and a few milliseconds on an integrated one - and it
+grows with the window (4K is four times 1080p). On this cloud machine's software OpenGL, where the CPU
+draws every pixel, the measured cost is in the table below. A fixed 8 ms budget is wrong both ways: it
+would play GBA effects on a PC that keeps 60 frames a second at 9 ms of HD work (the 3D battle taking the
+rest), and it says nothing on a high-refresh display, where every frame has less time but the game's own
+60 frames are still all shown. Engines that adapt their resolution measure instead - Unreal Engine's
+dynamic resolution, for example, sets the screen percentage from "the previous frames' GPU workload": a
+frame time budget, a targeted headroom under it, a history of frames, and by default between 50 and 100 %
+of the resolution (its documentation, linked at the end).
 
-The test autopilot presses A (the first move on the first target, every message); the party at level
-100 unless noted. GBA notes: a controller animation the HD layer left to the GBA (known issues 2).
+### The tiers
 
-Two battles were run a second time on the same build, and both runs of each are in the table: Wally's catch tutorial, whose run in the suite ended before the throw (known issues 12); and the rain battle, whose suite run (the whole party, Flamethrower) never ended: the lead fainted against the rain team's Water Pokemon and the autopilot, which only presses A, stayed at the party menu (a second such run, stopped by hand, showed that menu: `results\pictures\rain__party_menu.png`); run again as `realsuite.sh` now runs it, the lead alone with Thunderbolt.
+The same effects for less (`BattleFxGL_SetTier`): the effect layers are drawn at a share of the window's
+resolution and scaled up as they are composited; the copy of the window and the composite stay at the
+window's resolution (so the picture under the effects is untouched).
 
-| Battle | Ended | Animations | Exact | GBA notes | Animations played |
-| --- | --- | ---: | ---: | ---: | --- |
-| a wild Zigzagoon, Route 101 | won | 2 | 2 | 0 | CTL_SHINY, FLAMETHROWER |
-| Calvin, a route trainer | won | 3 | 3 | 0 | CTL_SEND_OUT, CTL_SHINY, FLAMETHROWER |
-| Roxanne, Rustboro Gym | won | 12 | 12 | 0 | CTL_SEND_OUT x3, CTL_SHINY, FLAMETHROWER x4, HELD_ITEM_BERRY, SIMPLE_HEAL, ROCK_TOMB, STATS_CHANGE |
-| Sidney, Elite Four | won | 14 | 14 | 0 | CTL_SEND_OUT x5, CTL_SHINY, STATS_CHANGE, FLAMETHROWER x6, FACADE |
-| Tate & Liza, a gym double battle | won | 29 | 29 | 3 | FLAMETHROWER x14, CTL_SEND_OUT x2, HELD_ITEM_BERRY x2, SIMPLE_HEAL x2, LIGHT_SCREEN, STATUS_BRN x6, CALM_MIND, STATS_CHANGE |
-| a wild double battle | won | 2 | 2 | 2 | FLAMETHROWER x2 |
-| two trainers at once (Calvin, Billy) | won | 5 | 5 | 3 | CTL_SEND_OUT x2, FLAMETHROWER x3 |
-| Wallace, the save's lead alone at its own level: lost on purpose | lost | 6 | 6 | 0 | CTL_SEND_OUT, CTL_SHINY, RAIN_DANCE, IMPRISON, RAIN_CONTINUES, WATER_SPOUT |
-| a shiny wild Zigzagoon | won | 3 | 3 | 0 | CTL_SHINY x2, FLAMETHROWER |
-| Fabian: his Manectric Mega Evolves | won | 5 | 5 | 0 | CTL_SEND_OUT, CTL_SHINY, MEGA_EVOLUTION, STATS_CHANGE, FLAMETHROWER |
-| the Safari Zone: Safari Balls until caught | caught | 1 | 1 | 0 | BALL_THROW_WITH_TRAINER |
-| Wally's catch tutorial (his controller plays it) - the suite's run | won: the Ralts fainted from the second Tackle, no throw (the game's damage roll; known issues 12) | 4 | 4 | 0 | CTL_SEND_OUT, TACKLE x2, CONFUSION |
-| Wally's catch tutorial (his controller plays it) - run again | caught | 9 | 9 | 0 | CTL_SEND_OUT, TACKLE x2, GROWL x2, STATS_CHANGE x2, SWITCH_OUT_PLAYER_MON, BALL_THROW_WITH_TRAINER |
-| Roxanne, Fury Cutter (the counter) | won | 12 | 12 | 0 | CTL_SEND_OUT x3, CTL_SHINY, FURY_CUTTER x4, HELD_ITEM_BERRY, SIMPLE_HEAL, ROCK_TOMB, STATS_CHANGE |
-| Roxanne, Rollout (the counter) | won | 14 | 14 | 0 | CTL_SEND_OUT x3, CTL_SHINY, ROLLOUT x4, ROCK_TOMB x2, STATS_CHANGE x2, HELD_ITEM_BERRY, SIMPLE_HEAL |
-| a wild Zigzagoon, Metronome | won | 3 | 3 | 0 | CTL_SHINY, METRONOME, HYPER_VOICE |
-| Roxanne, Mirror Move | won | 23 | 23 | 0 | CTL_SEND_OUT x3, CTL_SHINY, ROCK_TOMB x8, STATS_CHANGE x5, MIRROR_MOVE x4, HELD_ITEM_BERRY, SIMPLE_HEAL |
-| a wild Zigzagoon, Secret Power on Route 101 (plain ground) | won | 2 | 2 | 0 | CTL_SHINY, BODY_SLAM |
-| Sidney, Fury Attack | lost | 47 | 47 | 0 | CTL_SEND_OUT x2, CTL_SHINY, STATS_CHANGE x6, FURY_ATTACK x24, SAND_ATTACK x2, LEECH_SEED, LEECH_SEED_DRAIN x6, COTTON_SPORE x3, FEINT_ATTACK x2 |
-| Calvin, Fly | won | 4 | 4 | 0 | CTL_SEND_OUT, CTL_SHINY, FLY x2 |
-| a multiplayer twin Gym trainer: sandstorm | won | 16 | 16 | 0 | CTL_SEND_OUT x3, CTL_SHINY, SANDSTORM_CONTINUES x4, FLAMETHROWER x4, HELD_ITEM_BERRY, SIMPLE_HEAL, ROCK_TOMB, STATS_CHANGE |
-| a multiplayer twin Gym trainer: rain - the suite's run | not ended: the lead fainted and the autopilot, which only presses A, stayed at the party menu (no animation in its last 14 minutes) until the test's 20-minute limit | 39 | 39 | 0 | CTL_SEND_OUT x2, CTL_SHINY, RAIN_CONTINUES x11, FLAMETHROWER x7, HYPNOSIS, STATUS_SLP x4, SURF x4, STATUS_BRN x6, RAIN_DANCE, WATERFALL x2 |
-| a multiplayer twin Gym trainer: rain - run again as the suite now runs it: the lead alone, Thunderbolt | won | 13 | 13 | 0 | CTL_SEND_OUT x3, CTL_SHINY, RAIN_CONTINUES x4, THUNDERBOLT x3, WATERFALL, FAKE_OUT |
-| a wild Zigzagoon in Granite Cave | won | 2 | 2 | 1 | CTL_SEND_OUT, FLAMETHROWER |
-| a wild Zigzagoon in Rustboro Gym (indoors) | won | 2 | 2 | 1 | CTL_SEND_OUT, FLAMETHROWER |
-| a wild Zigzagoon on Route 119, by the Weather Institute | won | 2 | 2 | 1 | CTL_SEND_OUT, FLAMETHROWER |
-| a wild Zigzagoon on Mt. Chimney | won | 2 | 2 | 1 | CTL_SEND_OUT, FLAMETHROWER |
-| Secret Power in Granite Cave | won | 2 | 2 | 1 | CTL_SEND_OUT, ROCK_THROW |
-| Secret Power on Route 119 (plain ground) | won | 2 | 2 | 1 | CTL_SEND_OUT, BODY_SLAM |
-| Fire Lash, a move past the 621: refused, the game's own animation | won | 1 | 1 | 1 | CTL_SHINY |
+| Tier | Layer resolution | Bloom | Distortion |
+| --- | --- | --- | --- |
+| full | the window's | 5 levels | on |
+| high | 3/4 | 5 levels | on |
+| medium | 1/2 | 4 levels (the same size on the window) | on |
+| low | 1/2 | none | none |
 
-28 battles in 30 runs (Wally's catch tutorial and the rain battle run a second time on the same build), 281 animations compared, 281 exact; 42 distinct animations (29 moves, 13 others).
+Measured here: six of the heaviest moves (Bolt Strike, Eruption, Surf, Hyper Beam, Blizzard, Thunder) at a
+wild battle's menu, each tier fixed, in a 1834 x 1032 window (the largest the cloud's virtual screen
+holds), the game waiting for the core every frame as the galleries do. This is software OpenGL (llvmpipe on
+two CPU cores): the "GPU time" is the CPU drawing pixels. The milliseconds say nothing about a graphics
+card; the proportions show what each tier saves when pixels are the cost.
 
-### The Windows builds (Wine, 32-bit, software OpenGL)
+| Tier | HD layers, a layer (median of the six moves) | a picture (1.6 - 2 layers) | against full | pictures a second |
+| --- | --- | --- | --- | --- |
+| full | 83.3 ms | 152.3 ms | 1.00 | 6.2 |
+| high | 54.7 ms | 104.0 ms | 0.68 | 8.3 |
+| medium | 42.6 ms | 81.2 ms | 0.53 | 10.0 |
+| low | 33.5 ms | 61.9 ms | 0.41 | 11.7 |
+| GBA effects (no HD layer) | - | - | - | 36.0 |
 
-- The Windows test build at a wild battle's menu, borderless on the 1920x1080 virtual display, the game waiting for the core every frame so that each frame is compared: 6 of 6 animations exact (Flamethrower, Thunderbolt, Surf, Earthquake, Protect, Bolt Strike), drawn in HD over the 3D battle (pictures in `results\wine`). Wine's OpenGL on software rendering took 187 ms a layer at 1920x1080 (median of the animations).
-- Again windowed at 640x360 with the 3D log on: the game logs "3D on map 0.16 (wild), player 10,12 facing 4", drawn by Mesa's llvmpipe through Wine's OpenGL; 1 of 1 animations exact (Flamethrower), 11.5 ms a layer (`results\wine\windowed640_*`).
-- The black pictures of Bolt Strike are the move's own: its animation darkens the battle's background (and, at the test's action menu, the menu's frame). It looks the same on Linux with the HD layer and without it (`results\wine\linux_MOVE_BOLT_STRIKE_*`); in a battle the menu is not up during a move.
-- The Windows 3D player: starts, loads the core (ready 691 ms after start) and runs the title at 59.9 game frames a second (median), 45 seconds.
-- Wine 32-bit with software OpenGL on a virtual display: nothing here says how Windows itself or a graphics card runs it.
+Every frame of every animation was exact in all five runs (1739 of 1739 compared frames each: the tiers
+change the drawing, never the replay). On a CPU the fixed part of a layer - the copy of the window and the
+composite, both at the window's resolution - keeps `low` at about 40 % of `full`; on a graphics card the
+proportions will differ, and the benchmark measures them. For raising a tier again the policy assumes
+larger steps than these (full 1.8 times high, high 2.25 times medium, medium 1.4 times low: the pixel
+counts and the bloom), so it raises only with room to spare.
 
-### With the animated battle sprites (a trial merge)
+Pictures of one frame at each tier: `results\tiers\` (Hyper Beam, Surf, Psychic; the whole window at half
+size, and the part at full size where `full` and `low` differ most). `high` and `medium` are a little softer;
+`low` has no glow (bloom) around bright effects, so a beam shows its inner strands and looks thinner. The
+shapes, colours and timing are the same at every tier.
 
-Your brief asks for Battle FX with the animated sprites once they exist. They are in the EmeraldTogether
-integration (`claude/emeraldtogether-integration` `8706f8f6c`, "Native 3D preview 9": sprite-integration-v2,
-the native UI's rounds 3-4, the character selection), so this checkpoint adds a trial branch,
-`claude/battle-fx-sprites-trial`: that integration with this branch merged in. Four files conflicted, all
-additions on both sides, resolved as COORDINATION.txt 10 describes (and one brace the resolution dropped,
-fixed in a commit of its own). Its GBA ROM is byte-identical (`f214735b…3387`). It was built (the Linux
-test build) and run with the sprite pack from emeraldtogether-integration-20261012-3 (`battle-sprites.ebsp`:
-948 species; private, not copied into this checkpoint). The sprites were drawn in every run (the log's
-"Battle sprites: ... 948 targets").
+### The policy (`quality=auto`, the player builds' default)
 
-Results, the game's effect sprites against the core's in every frame: all moves, single battle: 651 of 651 exact (Ally Switch without a partner crashed the game, as on this branch: known issues 1); the battle animations: 81 of 81 exact (the test build crashed once as it exited after POKEBLOCK_THROW, a Safari animation that does not end at a wild battle's menu; the run resumed after it - known issues 13); ten moves with pictures (Wailord against Joltik and back, a shiny wild Pokemon and a female Pikachu, a double battle): 40 of 40 exact; battles fought: Calvin (won, 3 of 3 exact), Tate & Liza (double) (won, 11 of 11 exact), Fabian's Mega Manectric (won, 5 of 5 exact), the Safari Zone (caught, 2 of 2 exact).
+Measured on the PC itself, at every frame boundary (`bfx_game.c` `PaceCheck`; the measurement
+`gl_battle_fx.c` `BattleFxGL_Pace`), over half-second windows of 30 game frames that showed HD layers
+(each animation's first 6 pictures left out: textures uploaded, programs first used):
 
-What the pictures show (`results\pictures\sprites_*`):
+- **The game's pace kept** - at most one game frame of 30 never presented, and at least three quarters of
+  the game's 60 frames shown a second of the clock (below about 12 pictures a second the game slows down
+  instead of leaving frames unseen - `sdl2.c` then runs one game frame a picture - so unseen frames alone
+  would take a slide show for the pace kept): nothing changes, whatever the HD layers cost. Every PC that
+  keeps up is left at full quality.
+- **Game frames unseen (or a slide show), and the HD layers could close much of the gap** - their GPU time
+  (timer queries; the CPU's time where a driver has none) at least half of the pictures' lateness, or a
+  quarter of each picture (when the pictures are faster than game frames on average and frames go unseen
+  through uneven pictures, only the share counts): the next tier down, from this picture on.
+- **Game frames unseen, and the HD layers a smaller but real part** (a tenth of a game frame, 1.7 ms, or
+  more): the next tier down **on trial** - with VSync a picture slightly too slow waits a whole refresh, so
+  the time between pictures understates how little would suffice. If the next window does not win back
+  at least half the frames lost, the tier goes back and no more trials this battle: the HD effects are
+  not what holds the game back here.
+- **Less than that**: kept (logged once a battle: the slowness is elsewhere - the 3D world, the CPU).
+- **At low, and the game still under three quarters of its frames because of them** (fewer than 45 shown
+  a second; `gbaBelowFps`): that animation plays its GBA effects from that picture (as when the core falls
+  behind), and after two such the battle plays the original animations (the existing mechanism; the next
+  battle tries again). Above that, `low` stays: a few frames lost, the HD effects kept (logged once a
+  battle).
+- **Raising again**: at a battle's start, if the last battle kept the pace at this tier for 300 game
+  frames or more with none lost and the next tier's estimated cost stays within a quarter of a game frame,
+  the tier goes up one; a tier raised that has to be lowered again is not raised again this session.
 
-- Effects land on the right battler and in the right place. Flamethrower runs from a small Joltik into a
-  Wailord and back. Thunderbolt strikes the target. Earthquake's dust covers all four battlers in a double
-  battle. Surf's wave rises from the attacker.
-- They are placed by the game's own coordinates for the battlers' 64x64 GBA boxes, as the original
-  animations are. The sprite system aligns each animated picture on that box.
-- The animated pictures are larger than the GBA box, Wailord most of all. An effect sized for the box
-  therefore covers less of a big Pokémon, and a projectile starts from the battler's GBA centre: Wailord's
-  middle, not its mouth.
-- The library gives each facing its frame size and a feet point (`BslFacingInfo.anchor_x` and `anchor_y`),
-  with no mouth or hand points. Scaling or aiming the HD effects by them is a renderer-side step, for a
-  later round with the sprite session. It would leave the core's replay of the game untouched.
-- Layering:
-  - The back layer is drawn behind the battlers.
-  - The front layer is drawn over them, the animated sprites' heads above the picture included.
-  - The sprite session's overflow drawing comes first, then Battle FX's front layer.
-- At the bottom of these test pictures is the native UI's panel area, which the test capture leaves out.
-  Battlers and effects are cut at the same line there, as the GBA text box hides them in the game.
-- Double Kick, Karate Chop, Trick and Avalanche are the improved versions (Lab v3). There is no floating
-  footprint or hand; Trick swaps glowing bags along an arc, and Avalanche drops ice chunks in a snow cloud.
+Every change is logged ("the game showed 41.8 of its 60 frames a second while the HD effects took 9.6 ms
+of each 24.1 ms picture on the GPU: high quality from now on"). The thresholds are fractions of the
+game's own frame and of what was measured, not absolute milliseconds: one game frame of 30 for the pace,
+three quarters of its frames for a slide show and for the last fallback; the one absolute number is the
+floor for a trial (a tenth of a 60 Hz frame).
 
-### The GBA ROM
+Measured here with `quality=auto` and the core on its own thread, as in the player build: the six heavy
+moves at a battle's menu (Bolt Strike, Eruption, Surf, Hyper Beam, Blizzard, Thunder) at three window
+sizes, and a battle fought. Software OpenGL draws far slower than a graphics card, so every one of these is
+a PC that cannot keep up at `full` - the case the policy is for:
 
-Built from this branch after every change to a game file: SHA-256
-`f214735b64e113fd10730eacca5764d757f2c93a3685230aa905af7a7cdd3387`, byte-identical.
-
-## Performance
-
-Measured on a 2-core cloud VM with software OpenGL (llvmpipe): the CPU draws every pixel, so these
-are not a graphics card's numbers (a card draws the same passes in hardware; what that costs is for the
-benchmark kit to measure). The core runs on a thread of its own (as the player build runs it).
-
-**The core** (QuickJS interprets the package's JavaScript; `tools/battlefx/bfx_perf.c`, the game's
-data, the heaviest moves, three plays each, steady state):
-
-| Move | Frames | Begin ms (first play / then) | Step ms (average / p95) | Packet ms (average / p95 / worst) |
-| --- | ---: | --- | --- | --- |
-| Bolt Strike | 230 | 68 / 36 | 0.95 / 3.38 | 4.30 / 14.09 / 50.9 |
-| Shock Wave | 250 | 24 / 26 | 0.86 / 2.19 | 2.90 / 7.20 / 11.7 |
-| Zap Cannon | 85 | 8 / 8 | 0.76 / 2.15 | 3.01 / 10.60 / 23.5 |
-| Volt Tackle | 265 | 27 / 26 | 0.83 / 3.25 | 2.22 / 6.59 / 38.1 |
-| Eruption | 442 | 26 / 26 | 0.25 / 0.54 | 0.53 / 0.87 / 2.7 |
-| Fairy Lock | 109 | 29 / 37 | 1.11 / 2.87 | 1.18 / 2.54 / 5.6 |
-| Surf | 136 | 10 / 10 | 0.41 / 0.86 | 1.07 / 3.09 / 7.1 |
-| Flamethrower | 127 | 14 / 15 | 0.50 / 0.94 | 0.82 / 1.34 / 6.9 |
-| Blizzard | 364 | 42 / 42 | 0.63 / 1.86 | 1.45 / 3.48 / 22.9 |
-| Sandstorm | 159 | 9 / 9 | 0.47 / 0.70 | 0.85 / 0.99 / 1.3 |
-| Hyper Beam | 275 | 21 / 73 | 0.36 / 1.08 | 0.90 / 1.89 / 56.1 |
-| Solar Beam | 101 | 10 / 10 | 0.41 / 0.75 | 0.72 / 1.02 / 2.7 |
-| Thunder | 257 | 16 / 14 | 0.38 / 1.18 | 1.06 / 3.09 / 4.0 |
-| Earthquake | 197 | 8 / 10 | 0.19 / 0.36 | 0.70 / 1.40 / 4.8 |
-| Draco Meteor | 189 | 25 / 19 | 0.50 / 1.16 | 0.92 / 1.72 / 3.3 |
-
-Begin = planning the animation when it starts (the game does not wait: the first picture waits at
-most 60 ms once). Step = one frame of the replay; packet = the frame's drawing data. Over all the
-galleries (three test runs at once on the 2 cores, so slower than one alone): begin 43 ms median (287 p95, 1061 at most, first plays
-included), a step 1.75 ms median.
-
-**The game with the HD layer on and off** (the fifteen heaviest moves at a wild battle's menu, no
-frame cap, VSync off):
-
-| Window | Effects | Animations | HD layer, ms (median) | Game frames a second (median / lowest) | Presents a second (median / lowest) | 99th percentile present interval, ms (median / worst) | GBA shown |
-| --- | --- | ---: | ---: | --- | --- | --- | --- |
-| 1280x720 windowed | HD, no budget | 16 | 33 | 42.5 / 15.9 | 15 / 10 | 101.1 / 179.0 | 0 |
-| 1280x720 windowed | GBA | 16 | - | 59.7 / 46.0 | 70 / 21 | 27.9 / 93.7 | 0 |
-| 1920x1080 borderless | HD, no budget | 16 | 70 | 8.3 / 5.3 | 7 / 5 | 206.6 / 349.7 | 0 |
-| 1920x1080 borderless | GBA | 16 | - | 58.1 / 15.1 | 36 / 12 | 58.1 / 144.8 | 0 |
-| 1280x720, the core on the game thread | HD, no budget | 16 | 33 | 33.6 / 15.4 | 14 / 10 | 128.0 / 230.4 | 0 |
-| 1280x720 windowed | HD, the player builds' 8 ms budget | 16 | 35 | 59.9 / 50.5 | 76 / 29 | 24.2 / 110.8 | 16 (the budget) |
-
-What this shows. Here the CPU also draws every pixel (llvmpipe), so the HD layers cost about 33 ms a
-layer at 1280x720 and 70 at 1920x1080 (a picture draws two while an effect is both behind and in front
-of the battlers): the GPU-to-GPU copy of the battle's region, the effects, a bloom chain of five
-smaller targets and one composite, all rasterised by the CPU. The 3D battle paces the game by its
-pictures, so with no budget the game fell to about 42 and 8 frames a second here while HD animations
-played; with the GBA effects it kept about 60 (58 at 1920x1080, where the 3D world alone takes about
-28 ms a picture on this VM). With the player builds' drawing budget (8 ms a picture) the first two
-animations went on as GBA from their sixth picture (70 and 74 ms a picture, logged), the rest played the
-original animations, and the game kept 60 frames a second. On a graphics card the same passes are
-ordinary full-screen work; what they cost on yours at 1080p, 1440p and 4K is not measured here - the
-benchmark kit measures it (its test build has no budget, so it shows the full cost; each game.log's
-"drawn ... GPU ... ms a layer" lines give the layers' GPU time).
-
-## Nothing about the battle changed — how that is kept and checked
-
-- **Read only.** Battle FX reads the game's state at an animation's launch and at frame boundaries and
-  writes none of it (`bfx_game.c`: "Everything here reads the game; nothing writes game memory"). The one
-  getter pair that notes a battler for item messages (`GetBattlerHoldEffect` / `GetBattlerAbility`) is
-  read with `gPotentialItemEffectBattler` put back. The core works on its own copy of the world.
-- **The game decides when.** The core steps only when the game's animation advances, and an
-  animation ends when the game's does; the battle waits for the game's animation as before. A core
-  that is slow, refuses or fails changes nothing but the picture (its GBA effects show).
-- **The GBA ROM is byte-identical** (SHA-256 `f214735b64e113fd10730eacca5764d757f2c93a3685230aa905af7a7cdd3387`,
-  checked after every change to a game file): every hook is under `ENABLE_DIORAMA`, `PORTABLE` or the
-  test builds' flags, with `#line` keeping the GBA build's line numbers (assertions embed them).
-- **Game-code changes outside Battle FX** are three native-only crash fixes found by the galleries
-  (`PORTABLE`, each where the GBA reads or writes past an array: Mimic and Struggle Bug's partner in a
-  single battle, a sound number past the song table in Shadow Force's second turn) - none changes a
-  battle's result - and test-build-only drivers.
-- **Multiplayer.** Battle FX draws only; it sends nothing and reads nothing a partner's game does not
-  have. Not run in a two-player battle.
-
-## Found and fixed while integrating
-
-Earlier rounds (stage 1-6, before this checkpoint's last day): the core reads the game's own sound
-state (cries, the SE players: `waitsound`, Chatter's cries, the script's end), the game's random numbers
-(`Random2` stream 29, `Random` for `SpriteCB_RandomCentredHits`), its sprite slots in use (Fairy Lock's
-last bolt not made), the battlers' sprite places (a battler a move moved), the pan sound task
-(`panse`), Spark's `x % 0`, the palette fade's 4-bit step, the Rollout / Ice Ball counters; lightning's
-frame packets made twice as fast; the core moved to a thread of its own with the frame boundary pairing
-its frames with the pictures; three native crashes fixed (above).
-
-This checkpoint:
-
-| Found by | What | Fixed |
+| Window | What the policy did (its log) | Animations that ended with their GBA effects |
 | --- | --- | --- |
-| general gallery | Knock Off's and Thief's item showed as GBA: the game frees the item's sheet while its sprite still shows it, and a heap template (the last used ball's icon) is freed once its sprite is made | effect sprites are told by the template they were made with, recorded in `CreateSpriteAt` |
-| general gallery | Mega Evolution, Primal Reversion, Power Construct, Z-Move and Tera differed - the test driver's own doing: it reset the battlers' affine mode before them, as only a move's controller does | the test driver |
-| a trainer's Mega Evolution, fought | a battle animation's script runs in a task (priority 10) after the sprites and OAM, not first in the frame as a move's: the core's sprites were a frame ahead | the request says `"order": "task"`; the core runs such scripts from a task of priority 10; the gallery now launches them through the game's launchers |
-| Safari battle | a caught ball's stars outlive the script: they showed as GBA once the HD layer ended | the core goes on with the sprites a script leaves moving until the game's are gone |
-| double-battle gallery | Parabolic Charge's double-battle branch ended early: the script's `goto ParabolicChargeHeal;` - GNU as ends a statement at `;`, the package's converter took it for part of the label | `convert_data.py` reads `;` as GNU as does |
-| a test of the task order | every script task ran at priority 2 in the core; the game runs them by the script's priority (and sound tasks at 1) | the data carries the priorities; the core uses them |
-| double-battle gallery | Doom Desire's and Future Sight's hit take the battle's target again (`AnimTask_SetAnimTargetToBattlerTarget`); the core kept the request's | the request carries the battle's target |
-| a gym double battle, fought | a shiny Pokemon's stars beginning while the opening send-outs' particles (played as GBA) still flew hid those particles | such a controller animation plays as GBA |
-| the double-battle gallery's results | a visible wild Pokemon could walk into the player before the test driver started its battle: a "double battle" gallery had run in a single one | the field stands still while a test battle waits (`PKMN_TEST_FREEZE_FIELD`); a run in the wrong battle is flagged NOT VALID |
-| the battle animations played as the opponent | an opponent's Ultra Burst: this game's `AnimSuperpowerOrb` starts at the battle's attacker (`gBattlerAttacker`), the package's port at the animation's; the gallery's battle had another attacker (in a battle the two are the same for a gimmick: `TryActivateGimmick`) | the request carries `battlerAttacker`; the core follows the game in that callback, `AnimSuperpowerFireball` and `AnimDragonDanceOrb` |
-| the same run (the trainer's ball throw at a wild battle's menu) and the game's code | Wally's catch tutorial: Wally comes back out and throws (`BattleScript_ActionWallyThrow`), but the request said the player's left battler is the trainer only in the Safari Zone, and the tutorial's ball starts elsewhere (`AnimTask_ThrowBall_StandingTrainer`) | `safari` also once Wally is out; `catchTutorial` moves the ball; a test battle for the tutorial (fought: every animation exact) |
-| the performance runs (software OpenGL) | drawing the HD layers slowed the game during HD animations (42 and 8 frames a second at 1280x720 and 1920x1080): the 3D battle paces the game by its pictures | the player builds' drawing budget (8 ms a picture): over it an animation goes on as GBA (logged), after two the HD effects are off for the battle; checked: the game at 60 |
-| reading the character session's branch (COORDINATION.txt 5) | the core times the trainer's throw by the Hoenn back pictures' frames; the custom characters' back pictures throw 4 frames sooner | the request carries the back picture's own animation table (`trainerAnims`); checked by playing the throws with a deliberately wrong built-in table: exact with the change, different (from frame 29 / 30) without it |
+| 1834 x 1032 | full, high, medium, low within the battle's first animations; even at `low` the game showed 10 - 11 of its 60 frames a second (about 60 ms of HD work a picture: a slide show), so Bolt Strike and Eruption went on with their GBA effects, and after those two the battle played the original animations | 6 of 6 (two from mid-animation, then the battle's rest) |
+| 640 x 360 | full to `low` by Bolt Strike; at `low` Eruption showed 53.6 frames a second: kept, until its heaviest part (43.9) went to its GBA effects; Surf and Hyper Beam drew in HD at `low`; Blizzard (34.8 a second) went to its GBA effects - the second, so Thunder played the original | 3 of 6 |
+| 480 x 270 | full to `low` by Bolt Strike; Eruption's heaviest part (42.6 a second) went to its GBA effects; Surf, Hyper Beam, Blizzard (47.4 a second: kept) and Thunder drew in HD at `low` | 1 of 6 |
+| 640 x 360, Calvin fought | full to medium in the send-out, `low` in Flamethrower; at `low` 56.6 frames a second: kept; the battle won | none |
 
-## Known issues and limits
+Two changes came from these runs. The first version of the last step (the GBA effects for any frame lost
+at `low`) sent 5 of 6 animations to their GBA effects at 640 x 360 and at 480 x 270, three of its four
+fallbacks with the game still showing 53 - 56 frames a second: hence the floor (`gbaBelowFps`, three
+quarters of the game's frames; `dc7fb055c`). And the first runs at 1834 x 1032 counted a slide show's
+frames as shown - below about 12 pictures a second the game slows rather than skipping frames: hence the
+pace measured against the clock (`3f84eeea0`). With the core not waiting, these runs compare no frames
+(the galleries with the tiers fixed do).
 
-1. **Ally Switch** without a partner crashes the native game (the GBA reads `gSprites[255]`). Only the
-   gallery forces it: in a battle Ally Switch fails before its animation without an ally
-   (`tryallyswitch`). In a double battle it is exact.
-2. **One HD animation at a time.** A double battle's opening send-outs (two at once) play as GBA; when a
-   shiny Pokemon is sent out, the send-out's HD stops when the stars begin and both finish as GBA; a
-   controller animation beginning while another's sprites are on screen plays as GBA. If a battle
-   animation starts while a previous one's leftover sprites still move, those are hidden early.
-3. **Contests** are not drawn by Battle FX (their animations play as before).
-4. **The core's cost** (QuickJS interprets the package's JavaScript): planning an animation at its
-   begin takes 43 ms (median; up to 1061 ms) on the core's thread, a frame
-   1.75 ms (median of the averages; the galleries, three runs at once on a 2-core VM), with occasional garbage-collection frames of tens to hundreds
-   of ms. The game never waits for it; a picture waits at most 60 ms once for an animation's first
-   frame and 8 ms when 3 or more frames behind. On a slow CPU an animation whose core falls more than 6
-   frames behind plays as GBA from there (logged). Measured on a busy 2-core cloud VM, not a gaming PC.
-5. **Placement.** Effects are placed in the battle picture's frame, where the battlers are (they are the
-   picture's own sprites), and drawn at the window's resolution; the 3D world behind is drawn at the
-   chosen render resolution and its camera glides between game frames - the effects ride with the
-   battlers, not with the world.
-6. **What the parity check sees.** Effect sprites (graphics tag and screen position) every frame, and
-   the animations' lengths. Palette blends, BG layers and battler offsets are not compared.
-7. **Not in a fought battle yet**: the player's own Mega Evolution (the autopilot only presses A), a
-   Pokeblock throw (needs the Pokeblock case), a voluntary switch, Z-Moves / Tera (gallery only), a
-   two-player battle, the animated sprites on this branch (only in the trial merge, `claude/battle-fx-sprites-trial`).
-8. **The package (Lab) has the same two data issues** (Parabolic Charge's double branch, the tasks'
-   priorities); upstream below.
-9. **The player's lead slides in** without a ball when it follows the player on the field (this game's
-   followers): there is no send-out to draw then, only a shiny lead's stars. Where the follower is
-   hidden (the four other environments' battles) the ball send-out is drawn in HD - and the test
-   save's lead is shiny, so its stars stop the send-out's HD (2).
-10. **Round 4's multiplayer freeze is on this branch.** A native multiplayer battle in this branch's 3D
-   game freezes as it begins: the battle environments' backdrop reads a trainer class for the other
-   player (found by the EmeraldTogether session; fixed by `f86368c23` on `claude/combined-dev`, which
-   merges with this branch without a conflict). Not Battle FX's; this branch keeps round 4 as it was.
-   The Windows player here is meant for single-player battles.
-11. **The drawing budget's 8 ms is a starting point**, from a 60 Hz frame's arithmetic (half for the HD
-   layers, half for the 3D battle), not measured on a graphics card. A PC whose card takes longer than
-   that at its resolution plays the original animations, logged; `drawBudgetMs=0` in
-   `battlefx\settings.cfg` draws them anyway, `drawBudgetMs=12` allows more.
-12. **Wally's catch tutorial can end without the catch** (the game's, not Battle FX's): in the suite's
-   run his Zigzagoon's second Tackle knocked the Ralts out, so the battle ended as won and no ball was
-   thrown. The tutorial has no critical hits, but Tackle has 40 power in this game and both Pokemon get
-   random IVs and natures (`LoadWallyZigzagoon`, `StartWallyTutorialBattle`). Run again, it went as the
-   story wants (the throw, the catch). Noted for the game's own balance; Battle FX changes no damage.
-13. **The test builds exit from the game's thread** (`exit()` in the test drivers, on the `AgbMain` thread:
-   after an animation that does not end, and at the end of a run) while the main thread may be drawing.
-   Once, in the sprite trial's battle-animation gallery, that exit crashed: signal 11 in the OpenGL
-   driver, the main thread's stack inside `DioramaGL_Present` (crash.log) while the game's thread was
-   exiting. The runner resumed after it and every animation was exact; results are written before the
-   exit. Test builds only (the player builds never exit there). Should a benchmark run end with a
-   crash.log, its results are complete. The fix belongs in the test drivers (`_exit` after flushing, or
-   leaving the exit to the main thread).
+What this machine cannot show is a PC that keeps up: there the policy changes nothing - its first test is
+the pace kept - and the benchmark's `auto` run measures that on your graphics card.
 
-## Upstream for v3.4 (the package)
+### Configuration
 
-What the game had to add over the package's core, all in `bfx_game.c` (`kGameHelperJs`, installed over
-the runtime when the core loads; none changes the Lab's behaviour) and `tools/battlefx/convert_data.py`.
-They belong in the package so the Lab and the game run the same core:
+| Setting (`battlefx\settings.cfg`) | Environment | |
+| --- | --- | --- |
+| `quality=auto` | `PKMN_BATTLEFX_QUALITY=auto` | the player builds' default (above) |
+| `quality=full` / `high` / `medium` / `low` | the same | one tier, no automatic change (the test builds: `full`, so galleries and the benchmark draw everything) |
+| `quality=gba` | `PKMN_BATTLEFX_QUALITY=gba` | the original animations (as `enabled=0`) |
+| `gbaBelowFps=45` | `PKMN_BATTLEFX_GBA_BELOW_FPS=45` | `auto`'s last step: at `low`, the GBA effects when the game shows fewer frames a second than this because of the HD effects (0: never; 60: at any frame lost) |
+| `attach=0` | `PKMN_BATTLEFX_ATTACH=0` | effects placed for the GBA pictures |
+| `drawBudgetMs=N` | `PKMN_BATTLEFX_DRAW_BUDGET_MS=N` | optional explicit budget (none by default): an animation over it plays as on the GBA |
+| `enabled=0` | `PKMN_BATTLEFX=0` | Battle FX off |
 
-- the request's game state: the script's branch (`variant` / `BFX_GAME_VARIANTS`), `rng2` / `rng1` /
-  `rng1PerFrame` (the game's SFC32 streams), `rolloutTimer`, `spritesInUse`, `battlerSprites`,
-  `battlerTarget`, `battlerAttacker`, `order: "task"`, `catchTutorial`, `trainerAnims` (the back picture's
-  own frames), and `safari` meaning "the player's left battler is the trainer" (the catch tutorial too);
-- the live sound state (`BFX_GAME_SOUND`, `se_frames.json`), `stopsound`, a sound by number, the `panse`
-  task;
-- the runtime: the script run from a task of priority 10 for battle animations; tasks at their own
-  priorities (`createsoundtask` at 1); `AnimTask_SetAnimTargetToBattlerTarget`; the battle's attacker in
-  `AnimSuperpowerOrb` / `AnimSuperpowerFireball` / `AnimDragonDanceOrb` (this game's; vanilla Emerald reads
-  the animation's); the catch tutorial's ball start; Spark's `x % 0`; the
-  palette fade's 4-bit step; the end that waits for sprites left moving; the hidden-BG mask
-  (`BFX_GAME_HIDDEN_BGS`); the Poke Ball check (`BFX_GAME_HAS_BALL`);
-- the renderer side: the faster ribbon packing (`packRibbons`);
-- the converter: `panse`'s pan step and delay, the tasks' priorities, `;` ending a statement.
+For a settings menu (the native UI's F10 screen, for example): `BattleFx_Quality()`,
+`BattleFx_SetQuality(BATTLEFX_QUALITY_*)` and `BattleFx_QualityName()` in `include/diorama/battle_fx.h`
+(main thread; it takes effect from the next picture). Not wired into any menu here - the menus are the UI
+session's.
 
-## Merging, once it is validated on your PC
+### What to measure on your PC
 
-Nothing is merged and nothing is pushed: `claude/battle-fx-integration` waits for your go.
+`benchmark\run-battlefx-benchmark.bat` plays fifteen of the heaviest moves at a wild battle's menu, each run
+about 100 seconds (the game's own 60 frames a second): 1920 x 1080 at `full` and with the GBA effects, 3840 x
+2160 at every tier and with the GBA effects (VSync off, no frame-rate limit), then once with `quality=auto`
+and VSync on, as a player plays - 8 runs, about 14 minutes; `quick` 4 runs, about 7 minutes; `all` every
+tier at 1080p, 1440p and 4K, about 27 minutes. Each run's `report.jsonl` gives per animation the HD layers'
+GPU time, the tier and the pictures a second; `game.log` the auto policy's decisions. Claude reads the results
+folder. These are the real graphics-card numbers this round could not get in the cloud. (Borderless, the
+window is the display's own size: on a 1080p display the "4K" runs draw the effects at 1080p - each
+`game.log` names the sizes.)
 
-1. **Validate first** (your PC): play with `windows-player-battle-fx.zip`; run
-   `benchmark\run-battlefx-benchmark.bat` (the graphics card's numbers at 1080p, 1440p and 4K).
-2. **Restore** (README.txt, RESTORE): battle3d-env-wip-20261012-2's engine bundle (`aa63a98a3`),
-   ui-native-wip-20261012-4's (`035b263cc`) and emeraldtogether-integration-20261012-3's (`8706f8f6c`)
-   first, then this checkpoint's.
-3. **Order.** This branch already contains the battle environments' round 4
-   (`claude/battle-environments-3`, merged at `865fbf745`). Merge it into the line that is to receive
-   the battle environments, after them: `git merge --no-ff claude/battle-fx-integration`. If the battle
-   environments have moved on since `aa63a98a3`, merge their newer tip into `claude/battle-fx-integration`
-   first (the only conflict so far was two declarations in `gl_battle.c`, COORDINATION.txt 2) and run the
-   checks below again.
-4. **With the other lines** (git merge-tree against the tag's commit): the combined development game
-   `claude/combined-dev` (`22661c214`: the overworld's newest, round 4, the multiplayer freeze fix)
-   merges without a conflict - the natural next step; the native UI (round 4 `035b263cc`, round 5
-   `31887d7dd` and the newest, ui-native-wip-20261013-3 `0b7523cdb`) conflicts in the same four files with
-   the same hunks, all mechanical (COORDINATION.txt 4) - `claude/battle-fx-ui-trial`
-   shows them resolved and builds (Linux 3D player, here; not run): use it as the reference for the resolution, not as the
-   branch to merge; the EmeraldTogether integration (`8706f8f6c`, preview 9) conflicts in four files,
-   all additions on both sides (COORDINATION.txt 10) - `claude/battle-fx-sprites-trial` is that merge,
-   built and tested with the animated sprites.
-5. **Checks after any merge**: `make` (the GBA ROM) still gives SHA-256 `f214735b…3387`; the test build
-   (`make -f Makefile_pc DIORAMA=1 CC="gcc -DDIORAMA_BATTLE_ENV_TEST -DBATTLEFX_TEST"
-   TARGET=pokeemerald-mp-diorama-bfxtest OBJ_DIR=build/pc-linux-diorama-bfxtest`, `NATIVE_LINUX=1` on
-   Linux) runs `tools/battlefx/gallery.sh` (all moves single and double, all battle animations) and
-   `tools/battlefx/realsuite.sh`; `tools/battlefx/summarize.py` must show every animation exact.
-6. **Rollback.** Before the merge the main line is as it was; `battlefx-int-premerge-20261012` is this
-   work before round 4; `PKMN_BATTLEFX=0` or `battlefx\settings.cfg` `enabled=0` turns Battle FX off
-   without a rebuild (the game's own animations, as before).
+## 3. Handoff: Battle FX in the unified EmeraldTogether build
 
-## This checkpoint
+Nothing is merged into another session's branch and nothing is pushed: the unified game is the main
+EmeraldTogether session's to build. This is what it needs.
 
-`C:\Users\kashh\AppData\Local\PokemonPrivate\claude-checkpoints\battlefx-int-wip-20261012-1\` (PRIVATE)
+**What is where** (engine; all in `engine-battle-fx-integration.bundle`, which needs `2907a098b` - the
+first integration's bundle - and `8c8c11ab2` - emeraldtogether-unified-20261013-1's - restored first; the
+exact commits and trees are in COORDINATION.txt section 1).
+
+| | |
+| --- | --- |
+| `claude/battle-fx-integration`, tag `battlefx-int-wip-20261013-1` | THE BATTLE FX BRANCH: the first integration (`2907a098b`, tag `battlefx-int-wip-20261012-1`, kept) and this round's 11 commits, all in Battle FX's own files (no shared game file changed this round: `git diff --stat battlefx-int-wip-20261012-1 battlefx-int-wip-20261013-1`) |
+| `claude/battle-fx-unified-candidate` | the merge ready to take: `git merge --no-ff battlefx-int-wip-20261013-1` into `claude/emeraldtogether-unified` `8c8c11ab2`, the four conflicts resolved. One merge commit; its tree is the tested trial's exactly |
+| `claude/battle-fx-unified-trial` | TEST ONLY - where that merge was built and tested (with the sprite pack), commit by commit; the same tree |
+
+**What the unified game already holds** (`git merge-base --is-ancestor` against `8c8c11ab2`): the 3D battle
+environments' round 4 (`aa63a98a3`, which the Battle FX branch also holds), the overworld graphics handoff
+(`53bb34a63`), the animated battle sprites (preview 9's, `8706f8f6c`) and the character customization
+(`059dbc4b1`). Not yet: the newest native UI, which its session handed over at the same time
+(ui-native-handoff-20261013-1: `claude/native-ui` `0b7523cdb`, and its own merge candidate
+`claude/native-ui-unified-candidate` `89dea9e00`, also a merge into `8c8c11ab2`).
+
+**Taking both handoffs** (Git Bash, in an engine clone with both bundles fetched; the UI's own
+COORDINATION.txt says how to fetch its bundle):
+
+1. If `claude/emeraldtogether-unified` is still `8c8c11ab2`: `git merge --ff-only
+   ui-handoff/native-ui-unified-candidate` (the UI's step), then `git merge --no-ff
+   claude/battle-fx-unified-candidate` - **no conflict** (`git merge-tree`); or the other way round
+   (`--ff-only` Battle FX's candidate, then the UI's: no conflict either). Both orders give the same tree,
+   which is also the tree of the trial with the UI merged - built and played here (section 4).
+2. On a newer tip of yours: `git merge --no-ff battlefx-int-wip-20261013-1`. Four files conflict, all
+   additions on both sides - against `8c8c11ab2` and against `8c8c11ab2` with the newest UI merged the
+   same four with the same hunks (the UI leaves those files as `8c8c11ab2` has them):
+
+| File | Resolution (as in the candidate and the trial) |
+| --- | --- |
+| `src/diorama/gl/gl_battle.c` | in `DioramaGLBattle_Present` keep both: `BattleFxGL_DrawBack(&fxLayout)` before `DrawPicture`, then `DrawPicture`, then the animated sprites' `DioramaGLBattleSprites_Draw` (`#ifdef ENABLE_BATTLE_SPRITES`), then `BattleFxGL_DrawFront(&fxLayout)` - the effects stay in front of the Pokemon, heads above the picture included |
+| `src/platform/gba_easy_draw.c` | `isbgEnabled` clears both masks: `((((REG_DISPCNT >> 8) & 0xF) & ~gPlatformPictureHideBgMask & ~gDioramaSceneHideBg) & (1 << x))` in Diorama builds (the layers the native UI and Battle FX leave out), the native UI's form otherwise |
+| `Makefile_pc` | both blocks: Battle FX's QuickJS-ng / stb objects inside the `DIORAMA` block, the native UI's and the `BATTLE_SPRITES` preserved objects, each with its own `endif` |
+| `src/diorama/scene/battle_env_test.c` | test builds only: both sides' includes, options and helpers |
+
+   If those four files are still as in `8c8c11ab2` on your branch, after the merge
+   `git checkout claude/battle-fx-unified-candidate -- Makefile_pc src/diorama/gl/gl_battle.c
+   src/diorama/scene/battle_env_test.c src/platform/gba_easy_draw.c` takes the resolution as built and
+   tested here.
+
+**With each part of the game.**
+
+- *Latest 3D graphics and 3D battle environments.* Battle FX draws in the 3D battle's own frame: its back
+  layer after the world, its front layer after the picture and the sprites' heads; it reads the window
+  through `DioramaGLTarget_ReadableFramebuffer` (one GPU-to-GPU copy a layer). The effect layers follow the
+  window's resolution and the quality tier, not the 3D render scale; the policy reacts only to the game's
+  frames not reaching the screen, so the frame-rate limit and VSync settings need nothing from it.
+- *Animated Pokemon sprites.* Read only, through `gBattleSpriteObjViews` / `gBattleSpriteBgCopies`, in one
+  file of Battle FX's own (section 1); nothing of the sprite system or the library changed. Without the
+  sprite pack, or for a Pokemon it does not hold, Battle FX draws as before.
+- *New native UI.* The conflicts above; the UI's battle HUD hides none of Battle FX's sprites (checked by
+  the UI session, ui-native-handoff-20261013-1 section 6); the battles its newest round changed (the Safari
+  Zone, Wally's catch tutorial, two trainers at once) were fought here on the combined tree with Battle FX
+  drawing (below). A settings row can call `BattleFx_SetQuality` (Auto, Full, High, Medium, Low, Off).
+- *Character customization.* The trainer's throws are timed by the back picture's own animation table
+  (since the first integration), so the characters' throws are followed; trainers are not drawn by the
+  animated sprites, so the placing does not apply to them.
+
+**Checks after merging.** `make` (the GBA ROM) gives SHA-256 `f214735b…3387`; the test build
+(`make -f Makefile_pc DIORAMA=1 CC="gcc -DDIORAMA_BATTLE_ENV_TEST -DBATTLEFX_TEST"
+TARGET=pokeemerald-mp-diorama-bfxtest OBJ_DIR=build/pc-linux-diorama-bfxtest`, `NATIVE_LINUX=1` on Linux)
+runs `tools/battlefx/gallery.sh` with the sprite pack (`PKMN_BATTLE_SPRITES_PACK=...`): every animation exact
+(`tools/battlefx/summarize.py`), and in a battle the log says `Battle FX: renderer ready ... effects placed
+for the battlers as shown`. The player build needs the `battlefx` folder beside the executable, as the
+sprite pack is; its `settings.cfg` needs no change (`quality=auto`, `attach=1` are the defaults).
+
+**Rollback.** One merge commit; `battlefx\settings.cfg` `enabled=0` (or `quality=gba`, or
+`PKMN_BATTLEFX=0`) plays the original animations without a rebuild; the first integration is tag
+`battlefx-int-wip-20261012-1`.
+
+## 4. Verification
+
+All on the cloud computer: Linux, software OpenGL (llvmpipe) on a virtual screen, two CPU cores; the
+Windows builds under Wine. The test builds (`BATTLEFX_TEST`) compare the game's own effect sprites with the
+core's replay in every frame of every animation - "exact" below means every compared frame equal; the
+HD drawing does not enter that comparison, so it is checked separately (read back, pictures). The game's
+window was 1834 x 1032 (the largest the virtual screen holds) unless a size is given. The code tested is
+this branch's: the galleries and battles of A and B ran on the build of `5a0cef4dc` (the trial's
+`62b7014f0`); the only code changes after it, `3f84eeea0` and `dc7fb055c`, are the auto policy's (the pace
+against the clock, the last step's floor), which run with `quality=auto` only - C, the all-moves gallery and
+the Megas ran on builds with the first, D and E on builds with both.
+
+**A. The Battle FX branch, without the animated sprites** (the drawing every other build gets):
+
+| Check | Result |
+| --- | --- |
+| The HD layers against the first checkpoint's renderer: both builds read their layers back (`PKMN_BFX_TEST_LAYERS`, the particles' time fixed), ten moves | 108 layers drawn at the same frames in both runs, 108 bit-identical (9 of the moves had such frames; every animation of the run exact) |
+| Every battle animation (status, general, special) as the player's side | 81 played, 81 exact, none failed or crashed (the Pokeblock throw, the rock throw and the trainer's ball throw do not end at a wild battle's menu - they wait for the Safari Zone - as in the first round, where they were exact at a Safari battle's menu; the ball throw again in the Safari battle below) |
+| Battles fought to their end by the autopilot, the HD layer drawn | Calvin (won, 3 of 3 exact), the gym double battle Tate & Liza (won, 11 of 11), Fabian's Manectric Mega Evolving (won, 5 of 5), the Safari Zone (caught on the second ball, 2 of 2): 21 of 21 exact |
+| Battle FX off (`PKMN_BATTLEFX=0`): Roxanne fought | won; no HD animation begun, the original animations played |
+
+**B. The unified trial with the animated sprites and the placing** (the sprite pack, read from the
+session's private copy):
+
+| Check | Result |
+| --- | --- |
+| Seven placing galleries, 12 moves each (section 1) | 84 of 84 animations exact; every look logged once, as in the table of section 1; pictures in `results\placement\` |
+| Every move animation (621 moves, 651 animations with second turns), Wailord's back against Joltik's front, the HD layer drawn (640 x 360) | 651 played, 651 exact, none failed; the HD layer drawn in every animation (72,371 pictures); the looks followed Transform (Wailord in Joltik's shape: Joltik's back placed); Ally Switch without a partner crashed the game after its animation, as in every build (known issue 9; the gallery resumed after it) |
+| Mega Rayquaza against Mega Salamence (GBA pictures: the pack has no Mega forms), the placing on and off, layers read back | 23 layers drawn at the same frames in both runs, 23 bit-identical; no look placed for either Mega (against Wailord's back, only Wailord's); Pikachu's back, smaller in the pack (40 x 40 against 58 x 55), placed at x 0.75 (the limit); six moves in each of the six runs, all exact |
+| Battles fought with the sprites, the HD layer drawn | Calvin (won, 3 of 3 exact), Tate & Liza (won, 11 of 11; all four battlers placed, six looks with the Pokemon sent out later, Wailord's back among them), Fabian (won, 5 of 5: his Manectric placed as shown, then its Mega Evolution - a GBA picture - placed as before), the Safari Zone (caught with the first ball, 1 of 1): 20 of 20 exact; "renderer ready ... effects placed for the battlers as shown" logged in each |
+
+**C. The combined tree** - the unified game, the newest native UI and Battle FX (the tree both handoffs give
+together, either order; a scratch build, no branch): the trial (`27242df69`) with `claude/native-ui`
+`0b7523cdb` merged (no conflict; the same tree as the UI's candidate with Battle FX merged), built (the test
+build; the native UI on) and four battles fought with the sprite pack: the Safari Zone (caught with the
+first ball, 1 of 1 exact) and Wally's catch tutorial (his Ralts caught, 8 of 8) on the newest UI's screens
+(the GBA text boxes hidden there: the UI draws its own), Calvin and Billy at once (won, 6 of 6), Calvin
+(won, 3 of 3) - 18 of 18 exact, the HD layer drawn, the battlers placed as shown. No warning in the files
+the UI's merge touched or in Battle FX's.
+
+**D. Quality.** The tiers fixed: every frame exact in all five runs (section 2). The auto policy: at 1834 x
+1032 (a slide show even at `low`) down to the GBA effects; at 640 x 360 and 480 x 270 down to `low`, kept
+for most moves, the heaviest parts under 45 frames a second going to their GBA effects (3 and 1 of 6
+animations); Calvin's battle at 640 x 360 at `low` throughout its Flamethrower, nothing to the GBA effects
+(section 2). Built from `dc7fb055c`.
+
+**E. Windows (under Wine, software OpenGL).** The Windows test build (the benchmark's), borderless on the
+virtual screen: six moves (Flamethrower, Thunderbolt, Surf, Earthquake, Protect, Bolt Strike) 6 of 6 exact,
+the HD layer drawn in all six. The Windows player build (windowed 640 x 360): starts, loads the core (720
+ms) and runs at the title until the 45 seconds' time limit stops it, as intended. Both built from
+`dc7fb055c`.
+
+**F. Merges and the branch.**
+
+- `git merge-tree` of the tag into `8c8c11ab2`: `Makefile_pc`, `src/diorama/gl/gl_battle.c`,
+  `src/diorama/scene/battle_env_test.c`, `src/platform/gba_easy_draw.c` (section 3). Into the UI's
+  candidate `89dea9e00`: the same four. The candidate's tree equals the one-shot merge with the trial's
+  four files and the trial's own tree; the UI's candidate and Battle FX's merge into each other without a
+  conflict in either order, to the same tree as the trial with the UI merged (the trees: COORDINATION.txt).
+- The GBA ROM built from the tag: SHA-256 `f214735b…3387`, byte-identical (the launcher's pin).
+- Builds: Linux test and player, Windows test and player (the branch); Linux test (the trial, the combined
+  tree). No warning in Battle FX's files (the player build's full rebuild warns in eight game files, as it
+  did before).
+- `git diff --stat battlefx-int-wip-20261012-1 battlefx-int-wip-20261013-1`: 12 files, +1732 -124, all
+  Battle FX's own (its four headers, its sources in `src/diorama/battlefx/` and `gl_battle_fx.c`, its
+  README, `settings.cfg`, its data tool and the settings template; COORDINATION.txt section 1 lists them),
+  and the two report files. Damage, accuracy, critical hits, abilities, move effects, stats, status, Mega
+  Evolution, turn order, outcomes, saves and multiplayer code: untouched.
+
+**A correction to the first checkpoint (battlefx-int-wip-20261012-1).** In its battles fought (not in the
+galleries) the test build did not draw the HD layer: a test-driver setting was read after an early return
+(test builds only; fixed in `5a0cef4dc`). The pictures from fought battles in its `results\pictures`
+therefore show the GBA effects, and the HD layer was checked over galleries only. Its parity results stand
+(the comparison does not depend on the drawing). This round's fought battles draw the HD layer (above).
+
+## 5. Known issues and limits
+
+New or changed in this round:
+
+1. **The placing follows bodies, not mouths and hands.** The sprite library gives each facing its frame and a
+   feet point, no mouth or hand points; the effects are moved and scaled with the shown body's box. A
+   projectile therefore starts from the corresponding place on the shown body (for Wailord's back: its upper
+   body), which matches the GBA's intent (the GBA's own projectiles start from the box's centre) but is not
+   aimed at a mouth.
+2. **One scale for both axes, held to 0.75 .. 1.6.** Bodies much wider than tall (or the reverse) against
+   their GBA picture are approximated: effects keep their shapes. 0.3 % of the pack's facings are larger
+   than 1.6 (Wailord's back, its GBA picture cut by the text box: 2.2) and 4.3 % smaller than 0.75; they
+   get the limit.
+3. **Big elements are placed less** (from 96 GBA pixels, not at all from 176): screen-wide backgrounds and
+   flashes stay where the GBA puts them; a large vortex around a small Pokemon is moved less than its
+   centre would ask.
+4. **A battler on a background layer** (a script's "monbg") keeps the look measured while it was a sprite;
+   its own HD glow / flash / light is not drawn while it is there (as with the GBA pictures before: the
+   game's copy on the layer is not an OAM entry). The effects around it are placed.
+5. **A new look settles over a second**: the shown body's box is a running mean over the look's frames
+   (64 pictures), so right after a switch or a form change the placing follows the first frames more
+   closely, then the average.
+6. **Lower tiers draw at lower resolution**: at medium and low the battler's own flash and light are drawn
+   at half resolution too (softer edges while a flash shows); the effects themselves are mostly soft
+   (particles, glows) and scale well.
+7. **The auto policy waits for evidence**: on a PC that cannot keep up it lowers the tier after half a second
+   of game frames with the HD layers (a short stutter first; more on a PC that shows only a few pictures a
+   second), and a trial may show a lower tier for half a second before it is undone. Without GPU timer
+   queries (part of OpenGL 3.3, so a driver without them is rare) it measures the CPU's time, which
+   understates the GPU's, so it lowers less readily. Exercised here only on software OpenGL; raising a
+   tier again at a later battle's start is not exercised (the test runs play one battle each).
+8. **Not Battle FX's, seen while testing** (COORDINATION.txt section 3): an animated sprite that reaches
+   the GBA picture's left or right edge (Lugia's back wing, a large foe in a double battle) has its edge
+   pixel row carried out across the world as a dark line (`gl_battle.c` `DrawCarriedOut`); Battle FX's
+   layers are empty there (read back and checked).
+
+Unchanged from the first integration (its report has the details):
+
+9. **Ally Switch** without a partner crashes the native game (the GBA reads `gSprites[255]`); only the
+   gallery forces it. In a double battle it is exact.
+10. **One HD animation at a time** (a double battle's opening send-outs and a shiny send-out's overlap play
+    as GBA).
+11. **Contests** are not drawn by Battle FX.
+12. **The core's cost** (QuickJS interprets the package's JavaScript): a begin 43 ms median on its own
+    thread, a frame about 1.75 ms; the game never waits for it; an animation it falls more than 6 frames
+    behind on plays as GBA from there.
+13. **What the parity check sees**: effect sprites (graphics tag and screen position) every frame and the
+    animations' lengths; palette blends, BG layers and battler offsets are not compared.
+14. **Not in a fought battle**: the player's own Mega Evolution (the autopilot only presses A), a Pokeblock
+    throw, a voluntary switch, Z-Moves / Tera (gallery only), a two-player battle.
+15. **Test builds exit from the game's thread** (`exit()` in the test drivers while the main thread may be
+    drawing; it crashed once in an earlier run, results written first). Test builds only.
+16. **Round 4's multiplayer freeze** (the battle backdrop reading a trainer class for the other player)
+    is on the Battle FX branch itself, which holds round 4 as it was; the unified game has the fix
+    (`battle_capture.c` `BackdropEnvironment`), so the merged game does not freeze there.
+
+## 6. This checkpoint
+
+Folder `battlefx-int-wip-20261013-1` (in your private checkpoints folder). No playable build: the next
+playable game with Battle FX is the main session's unified build.
 
 | File | |
 | --- | --- |
-| `engine-battle-fx-integration.bundle` | `claude/battle-fx-integration` (tag `battlefx-int-wip-20261012-1`), the trials `claude/battle-fx-ui-trial` and `claude/battle-fx-sprites-trial`, tag `battlefx-int-premerge-20261012` (needs `aa63a98a3`, `035b263cc` and `8706f8f6c` restored first) |
-| `windows-player-battle-fx.zip` | the Windows 3D player with Battle FX, SDL2.dll, the `battlefx` folder, BATTLE-FX.txt |
-| `test-run\`, `test-run.zip` | the Windows test build the benchmark uses, with its `battlefx` folder (and the same packed) |
-| `benchmark\` | `run-battlefx-benchmark.bat`, the battle sessions' private test save |
-| `debug-symbols\` | the two Windows executables' debug symbols (xz) |
-| `results\` | the final runs' summaries (Markdown, JSON); pictures from the battles fought (`pictures\<battle>__*`), the sprite trial (`pictures\sprites_*`) and the Wine runs (`wine\`) |
-| `INTEGRATION_REPORT.md` | this report (also `src/diorama/battlefx/INTEGRATION_REPORT.md` on the branch) |
-| `COORDINATION.txt` | for the other sessions |
-| `README.txt`, `SHA256SUMS.txt` | |
+| `engine-battle-fx-integration.bundle` | `claude/battle-fx-integration`, `claude/battle-fx-unified-candidate`, `claude/battle-fx-unified-trial`, tag `battlefx-int-wip-20261013-1`. Needs `2907a098b` (battlefx-int-wip-20261012-1's bundle) and `8c8c11ab2` (emeraldtogether-unified-20261013-1's) restored first |
+| `INTEGRATION_REPORT.md` | this report (also on the branch: `src/diorama/battlefx/INTEGRATION_REPORT.md`) |
+| `COORDINATION.txt` | for the main EmeraldTogether session and the other sessions |
+| `benchmark\run-battlefx-benchmark.bat`, `benchmark\saves\battle-test.sav` | the graphics card measurement (section 2, "What to measure on your PC") and the battle sessions' private test save |
+| `test-run\`, `test-run.zip` | the Windows Battle FX test build the benchmark runs (a measuring tool with a test driver, not a game to play), its `battlefx` folder and `SDL2.dll`; the zip is the same folder |
+| `debug-symbols\` | the test build's debug symbols (xz) |
+| `results\` | the runs' summaries (`*.md`, `*.json`); `placement\` (the effects placed for the battlers as shown, left, against as for the GBA pictures, right); `tiers\` (one frame at each quality tier); `pictures\` (the battles fought with the sprites, on the trial and on the combined tree: the middle capture of each animation) |
+| `SHA256SUMS.txt` | checksums of every file here |
 
-The earlier checkpoints (the Lab's, the battle environments', the native UI's) are untouched.
+Restore (Git Bash, in a clone that has battlefx-int-wip-20261012-1 and emeraldtogether-unified-20261013-1
+restored, with none of these branches checked out):
+`git fetch <path>\engine-battle-fx-integration.bundle "refs/heads/*:refs/heads/*" "refs/tags/*:refs/tags/*"`
+
+Rollback: nothing here changes a game you play. The first integration is tag `battlefx-int-wip-20261012-1`
+(its checkpoint folder untouched); in a build with Battle FX, `battlefx\settings.cfg` `enabled=0` (or
+`quality=gba`) plays the original animations without a rebuild.
+
+## Sources
+
+- Unreal Engine documentation, "Dynamic Resolution":
+  https://dev.epicgames.com/documentation/en-us/unreal-engine/dynamic-resolution-in-unreal-engine
+- Unreal Engine 4.27 documentation, "Dynamic Resolution" (console variables and defaults):
+  https://dev.epicgames.com/documentation/en-us/unreal-engine/dynamic-resolution?application_version=4.27
