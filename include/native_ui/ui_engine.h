@@ -299,6 +299,8 @@ bool32 MenuHelpers_NativeUiMessage(u8 *windowId);
 bool32 MenuHelpers_NativeUiRunsHelper(u8 taskId);
 void (*MenuHelpers_NativeUiMessageNext(void))(u8);
 void (*MenuHelpers_NativeUiYesFunc(void))(u8);
+/* the list menus' move line's sprite sheet tag */
+u16 MenuHelpers_NativeUiSwapLineTag(void);
 
 /* ---------------------------------------------------------------- Pokédex (pokedex.c, the classic one) */
 
@@ -609,6 +611,38 @@ struct NativePcMenu
 };
 bool32 Storage_NativeUiMainMenu(struct NativePcMenu *out);
 bool32 PlayerPC_NativeUiState(struct NativePcMenu *out);
+/* the player's PC's ITEM STORAGE lists: WITHDRAW ITEM and TOSS ITEM (player_pc.c) */
+enum NativePcItemsPhase
+{
+    NATIVE_PC_ITEMS_NONE,
+    NATIVE_PC_ITEMS_OPENING,     /* the list is put up */
+    NATIVE_PC_ITEMS_LIST,        /* the list reads buttons */
+    NATIVE_PC_ITEMS_SWAP,        /* SELECT: an item being moved */
+    NATIVE_PC_ITEMS_QUANTITY,    /* how many */
+    NATIVE_PC_ITEMS_CONFIRM,     /* the toss's YES / NO */
+    NATIVE_PC_ITEMS_MESSAGE,     /* a line waits for A or B (withdrew, threw away, no room, too important) */
+};
+#define NATIVE_PC_ITEMS_MAX 50   /* PC_ITEMS_COUNT */
+struct NativePcItems
+{
+    u8 phase;                    /* enum NativePcItemsPhase */
+    bool8 toss;                  /* TOSS ITEM (else WITHDRAW ITEM) */
+    bool8 ready;
+    u8 count;                    /* the items; the list's last row (count) is CANCEL */
+    u8 cursor;
+    u8 swapFrom;                 /* SWAP: the row being moved (0xFF: none) */
+    u8 yesNoCursor;              /* CONFIRM */
+    u8 messageWindow;            /* the window with the description or the line */
+    u16 quantity;                /* QUANTITY: how many */
+    u16 quantityMax;             /* how many of the item the PC has */
+    u16 inBag;                   /* how many of it the bag has */
+    const u8 *title;             /* the engine's WITHDRAW ITEM / TOSS ITEM */
+    u16 items[NATIVE_PC_ITEMS_MAX];
+    u16 quantities[NATIVE_PC_ITEMS_MAX];
+};
+bool32 PlayerPC_NativeUiItems(struct NativePcItems *out);
+/* the sheets of the lists' own sprites (the item's icon, the scroll arrows, the move line) */
+void PlayerPC_NativeUiItemTiles(u32 mask[32]);
 /* script_menu.c: the PC's own multichoice (MULTI_PC) as the engine prints it;
  * {PLAYER}'s PC is expanded into playersPc (32 bytes); returns how many rows */
 u32 ScriptMenu_NativeUiPcRows(const u8 **labels, u32 max, u8 *playersPc);

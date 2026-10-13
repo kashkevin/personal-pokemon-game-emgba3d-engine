@@ -481,4 +481,9 @@ void (*MenuHelpers_NativeUiYesFunc(void))(u8)
 {
     return FuncIsActiveTask(Task_CallYesOrNoCallback) ? sYesNo.yesFunc : NULL;
 }
+
+u16 MenuHelpers_NativeUiSwapLineTag(void)
+{
+    return TAG_SWAP_LINE;
+}
 #endif // ENABLE_NATIVE_UI
