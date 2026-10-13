@@ -1723,6 +1723,11 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         return;
     if (sPictureFilter != NULL && sSurveyView < 0)
         pictureFlags = sPictureFilter();
+    /* A native screen over the whole window (ENABLE_NATIVE_UI: the dressing
+     * room, Players, the mart, the Game Corner over the field) leaves nothing
+     * of the 3D scene to see: it is not drawn while one is up. */
+    if (pictureFlags & DIORAMA_PICTURE_HIDE_ALL)
+        drawTerrain = false;
     glViewport(0, 0, outputWidth, outputHeight);
     glStencilMask(0xFF);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);

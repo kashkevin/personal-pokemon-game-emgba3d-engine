@@ -11,11 +11,15 @@
  * scenery and the move animations; its message box, menus (BG0) and the
  * interface sprites (healthboxes, bars, trays, triggers) are left out.
  *
- * Kept as the game's picture: the Safari Zone, the catching tutorial, the
- * Battle Arena (their menus differ), ability pop-ups. The level-up box and a
- * trainer battle's rewards are screen 26's (ui_results.c).
+ * The Safari Zone: its own commands (BALL, POKéBLOCK, GO NEAR, RUN) on the same
+ * grid and the Safari Balls left in the player's plate. Wally's catching
+ * tutorial: his choices as his controller makes them (the cursor on FIGHT, then
+ * BAG; nothing to press but the messages). Kept as the game's picture: the
+ * Battle Arena (its menus differ), ability pop-ups. The level-up box and a trainer battle's rewards are screen
+ * 26's (ui_results.c).
  * Project-owned.
  */
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,6 +31,7 @@
 #include "battle_interface.h"
 #include "battle_main.h"
 #include "battle_util.h"
+#include "battle_message.h"
 #include "bg.h"
 #include "graphics.h"
 #include "item.h"
@@ -35,9 +40,11 @@
 #include "party_menu.h"
 #include "pokedex.h"
 #include "pokemon.h"
+#include "safari_zone.h"
 #include "string_util.h"
 #include "constants/battle.h"
 #include "constants/characters.h"
+#include "constants/items.h"
 #include "constants/party_menu.h"
 #include "constants/moves.h"
 #include "constants/species.h"
@@ -94,6 +101,7 @@ struct Box
     u8 battler;
     u8 position;       /* B_POSITION_* */
     bool foe;
+    bool mine;         /* the player's own (not a partner's: Steven's, another link player's) */
     struct UiMon mon;  /* who it shows (an Illusion shows its disguise) */
     u8 level;
     s32 hp;
@@ -107,10 +115,14 @@ struct Box
     bool caught;       /* a wild Pokémon whose species was caught (the game's ball) */
     int slide;         /* the healthbox's slide (x2), GBA pixels */
     int bob;           /* its bounce (y2) */
+    char owner[24];    /* its trainer's name in capitals, as the messages name them ("" wild) */
 };
 
 static struct
 {
+    bool safari;                   /* the Safari Zone: its own commands and the Safari Balls left */
+    bool wallyChooses;             /* Wally's catching tutorial: his controller chooses (nothing to press) */
+    u8 safariBalls;
     bool doubles;
     bool partnerIsMine;            /* both player-side battlers are the player's (not a multi battle) */
     u8 atPosition[MAX_BATTLERS_COUNT]; /* the battler at each B_POSITION_* (MAX_BATTLERS_COUNT: none) */
@@ -168,7 +180,13 @@ static bool sCmdGoalThenA;
 
 static bool Supported(void)
 {
-    if (gBattleTypeFlags & (BATTLE_TYPE_SAFARI | BATTLE_TYPE_CATCH_TUTORIAL | BATTLE_TYPE_ARENA | BATTLE_TYPE_POKEDUDE))
+    u32 player = GetBattlerAtPosition(B_POSITION_PLAYER_LEFT);
+
+    if (gBattleTypeFlags & (BATTLE_TYPE_ARENA | BATTLE_TYPE_POKEDUDE))
+        return false;
+    /* the catching tutorial: Wally's (his controller on the player's side) */
+    if ((gBattleTypeFlags & BATTLE_TYPE_CATCH_TUTORIAL)
+     && (player >= MAX_BATTLERS_COUNT || gBattlerBattleController[player] != BATTLE_CONTROLLER_WALLY))
         return false;
     return true;
 }
@@ -195,8 +213,20 @@ static void CaptureBox(u32 battler)
         shown = mon;
     b->on = true;
     b->battler = battler;
+    {
+        u8 text[32];
+        const u8 *owner = Battle_NativeUiTrainerName(battler, text);
+
+        if (owner != NULL)
+        {
+            UiText_ToAscii(b->owner, sizeof(b->owner), owner);
+            for (char *c = b->owner; *c != '\0'; c++)
+                *c = toupper((unsigned char)*c);
+        }
+    }
     b->position = GetBattlerPosition(battler);
     b->foe = !IsOnPlayerSide(battler);
+    b->mine = !b->foe && GetBattlerTrainer(battler) == B_TRAINER_PLAYER;
     UiMon_FromPokemon(&b->mon, shown);
     b->level = nb.level != 0 ? nb.level : b->mon.level;
     b->maxHp = GetMonData(mon, MON_DATA_MAX_HP);
@@ -305,15 +335,23 @@ static u8 PrintedEffect(void)
 
 static void CaptureChooser(void)
 {
+    u8 wallyCursor = 0;
+
     sB.chooser = -1;
     sB.input = NATIVE_BATTLE_INPUT_NONE;
+    sB.wallyChooses = false;
     for (u32 i = 0; i < gBattlersCount; i++)
     {
         u32 in;
 
         if (!IsOnPlayerSide(i))
             continue;
-        in = Battle_NativeUiPlayerInput(i);
+        if (sB.safari)
+            in = Battle_NativeUiSafariInput(i);
+        else if ((in = Battle_NativeUiWallyInput(i, &wallyCursor)) != NATIVE_BATTLE_INPUT_NONE)
+            sB.wallyChooses = true;
+        else
+            in = Battle_NativeUiPlayerInput(i);
         if (in != NATIVE_BATTLE_INPUT_NONE)
         {
             sB.chooser = i;
@@ -328,7 +366,7 @@ static void CaptureChooser(void)
         struct ChooseMoveStruct *moveInfo = (struct ChooseMoveStruct *)(&gBattleResources->bufferA[c][4]);
         struct Pokemon *lead = GetBattlerMon(c);
 
-        sB.actionCursor = gActionSelectionCursor[c] & 3;
+        sB.actionCursor = sB.wallyChooses ? wallyCursor : gActionSelectionCursor[c] & 3;
         sB.moveCursor = gMoveSelectionCursor[c] & 3;
         sB.targetCursor = gMultiUsePlayerCursor;
         sB.switchCursor = gMultiUsePlayerCursor & 3;
@@ -359,7 +397,7 @@ static void CaptureChooser(void)
             sB.shownAsTarget[i] = i < gBattlersCount && sB.input == NATIVE_BATTLE_INPUT_TARGETS_SHOWN && ShouldHideBattler(i);
         sB.userTargetable = sB.input == NATIVE_BATTLE_INPUT_TARGET
                          && GetBattlerMoveSelectionTargetType(c, sB.moves[sB.moveCursor]) == TARGET_USER_OR_ALLY;
-        sB.ballOn = sB.input == NATIVE_BATTLE_INPUT_ACTION && gLastUsedBallMenuPresent && CanThrowLastUsedBall();
+        sB.ballOn = !sB.wallyChooses && sB.input == NATIVE_BATTLE_INPUT_ACTION && gLastUsedBallMenuPresent && CanThrowLastUsedBall();
         sB.ball = gBallToDisplay;
         if (sB.ballOn)
             UiGfx_PrepareItemIcon(sB.ball);
@@ -388,6 +426,13 @@ static void Capture(void)
 {
     bool8 active;
 
+    sB.safari = (gBattleTypeFlags & BATTLE_TYPE_SAFARI) != 0;
+    sB.safariBalls = gNumSafariBalls;
+    if (sB.safari)
+    {
+        UiGfx_PrepareItemIcon(ITEM_SAFARI_BALL);
+        UiGfx_PrepareItemIcon(ITEM_POKEBLOCK_CASE);
+    }
     sB.doubles = IsDoubleBattle();
     sB.partnerIsMine = !(gBattleTypeFlags & BATTLE_TYPE_PLAYER_HAS_PARTNER);
     for (u32 p = 0; p < MAX_BATTLERS_COUNT; p++)
@@ -420,17 +465,21 @@ static void Capture(void)
     }
     UiResults_Capture();
     sB.ready = sB.msgWaiting || sB.yesNo || UiResults_LevelUpWaiting()
-            || (sB.chooser >= 0 && sB.input != NATIVE_BATTLE_INPUT_ACTION_WAIT && sB.input != NATIVE_BATTLE_INPUT_MOVE_WAIT
-                && sB.input != NATIVE_BATTLE_INPUT_PARTY && sB.input != NATIVE_BATTLE_INPUT_BAG);
+            || (sB.chooser >= 0 && !sB.wallyChooses && sB.input != NATIVE_BATTLE_INPUT_ACTION_WAIT
+                && sB.input != NATIVE_BATTLE_INPUT_MOVE_WAIT && sB.input != NATIVE_BATTLE_INPUT_PARTY
+                && sB.input != NATIVE_BATTLE_INPUT_BAG);
     if (NativeUi_LogEnabled())
     {
-        static int sLastPage = -1, sLastInput = -1, sLastYesNo = -1;
+        static int sLastPage = -1, sLastInput = -1, sLastYesNo = -1, sLastCursor = -1;
+        int cursor = sB.input == NATIVE_BATTLE_INPUT_ACTION ? sB.actionCursor : -1;
 
-        if (sB.page != sLastPage || sB.input != sLastInput || sB.yesNo != sLastYesNo)
-            NativeUi_Logf("battle: page %d input %d yesno %d chooser %d", sB.page, sB.input, sB.yesNo, sB.chooser);
+        if (sB.page != sLastPage || sB.input != sLastInput || sB.yesNo != sLastYesNo || cursor != sLastCursor)
+            NativeUi_Logf("battle: page %d input %d yesno %d chooser %d cursor %d%s", sB.page, sB.input, sB.yesNo,
+                          sB.chooser, cursor, sB.wallyChooses ? " (Wally)" : "");
         sLastPage = sB.page;
         sLastInput = sB.input;
         sLastYesNo = sB.yesNo;
+        sLastCursor = cursor;
     }
     if (sB.input != NATIVE_BATTLE_INPUT_TARGET)
         sTargetGoal = -1;
@@ -548,6 +597,23 @@ static void Databox(int x, int y, const struct Box *b)
     }
 }
 
+/* the player's plate in the Safari Zone: the engine's "Safari Balls" and "Left:" with the count */
+static void SafariBox(int x, int y)
+{
+    UiRGBA ink = UI_P_DATABOX_INK;
+    int w = 168, h = 46;
+    u8 left[24];
+
+    UiG_Paint(UiM_Rounded4(w, h, 4, 0, 4, 0), x, y, sPlateBase, &(struct UiPaint){ink, sPlateHi, sPlateLo, 0, 2, NULL, 0});
+    UiG_HLine(x + 4, y + 17, w - 6, sPlateLo);
+    UiG_Text(x + 12, y + 1, gText_SafariBalls);
+    UiGfx_ItemIcon(ITEM_SAFARI_BALL, x + w - 34, y + 18, NULL);
+    left[0] = EOS;
+    UiText_Append(left, sizeof(left), gText_SafariBallLeft);
+    UiText_AppendNumber(left, sizeof(left), sB.safariBalls, 1, false);
+    UiG_Text(x + 12, y + 22, left);
+}
+
 /* the 2v2 databox (battle2v2.py) without the multiplayer owner tags */
 static void Databox2(int x, int y, const struct Box *b, bool mine)
 {
@@ -572,14 +638,15 @@ static void Databox2(int x, int y, const struct Box *b, bool mine)
     if (b->caught && bx == nx0 - 2)
         Ball(nx0 - 2, ry + 2, 4), bx = nx0 + 9;
     UiW_HpBar(bx, ry + 2, x + w - (foe ? 10 : 14) - bx - 13, b->hpFrac, true, ink);
-    if (!foe)
+    /* the HP numbers and the Exp. bar on the player's own boxes only, as the
+     * design's (a partner's box is the short one: its numbers would fall off it) */
+    if (mine)
     {
         char hp[24];
 
         snprintf(hp, sizeof(hp), "%d/%d", (int)b->hp, (int)b->maxHp);
         UiCaps_Draw(x + w - 14, y + 34, hp, UI_P_TEXT, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_RIGHT, UI_NONE);
-        if (mine)
-            UiW_ExpBar(x + 12, y + 36, 80, b->expFrac, true);
+        UiW_ExpBar(x + 12, y + 36, 80, b->expFrac, true);
     }
 }
 
@@ -622,6 +689,56 @@ static void MessageText(int x, int y, int width, const u8 *text, int printed)
 }
 
 /* FIGHT / BAG / POKéMON / RUN | GIVE UP, with FIGHT's speed stripes */
+/* the Safari Zone's commands on the same grid: BALL over POKéBLOCK, GO NEAR, RUN
+ * (the engine's 2x2 in the same order), with the game's Safari Ball and
+ * Pokéblock case icons in their chips */
+static void SafariCommands(int x, int y, int sel)
+{
+    static const u8 sBall[] = _("BALL"), sPokeblock[] = _("POKéBLOCK"), sGoNear[] = _("GO NEAR"), sRun[] = _("RUN");
+    const struct UiMask *fm;
+    struct UiRamp fr = UiRampOf(UI_P_CMD_FIGHT, 0.38, 0.28, 0.62);
+    struct UiPattern diag = UiPat_Diag(12, 3, 0, -1);
+    int bx = x;
+
+    fm = UiW_DsButton(x, y, 252, 38, UI_P_CMD_FIGHT, (const u8 *)"\xFF",
+                      &(struct UiDsButtonOpt){.noChip = true, .selected = sel == CMD_FIGHT, .center = true});
+    UiG_Mask(UiM_Pattern(UiM_Window(UiM_Erode4(fm), 40, 4, 252, 30), &diag), x, y,
+             UiMix(UI_P_CMD_FIGHT, UI_HEX(0xFFFFFF), 0.16));
+    UiG_Paint(UiM_Ellipse(28, 28), x + 7, y + 3, UiMix(fr.base, UI_HEX(0xFFFFFF), 0.45),
+              &(struct UiPaint){fr.ink, UI_NONE, UiMix(fr.base, UI_HEX(0xFFFFFF), 0.2), 0, 0, NULL, 0});
+    UiGfx_ItemIcon(ITEM_SAFARI_BALL, x + 9, y + 5, NULL);
+    UiText_Draw(UI_FONT_NORMAL, x + ((40 + 252) >> 1), y + 8, sBall, UI_P_TEXT_W, fr.ink, UI_ALIGN_CENTER, 0);
+    UiG_Hit(HIT_CMD, CMD_FIGHT, x, y, 252, 38);
+    {
+        const u8 *labels[3] = {sPokeblock, sGoNear, sRun};
+        const char *icons[3] = {NULL, "footprints", "shoe"};
+        int widths[3] = {100, 82, 62};
+        UiRGBA colours[3] = {UI_P_CMD_BAG, UI_P_CMD_POKEMON, UI_P_CMD_RUN};
+        int cmds[3] = {CMD_BAG, CMD_POKEMON, CMD_RUN};
+
+        for (int i = 0; i < 3; i++)
+        {
+            int by = y + 42, bw = widths[i], bh = 32;
+
+            UiW_DsButton(bx, by, bw, bh, colours[i], icons[i] != NULL ? labels[i] : (const u8 *)"\xFF",
+                         &(struct UiDsButtonOpt){.icon = icons[i], .noChip = icons[i] == NULL, .selected = sel == cmds[i]});
+            if (icons[i] == NULL)
+            {
+                /* the chip holds the game's Pokéblock case */
+                struct UiRamp r = UiRampOf(colours[i], 0.42, 0.25, 0.62);
+                int d = 26 < bh - 3 - 4 ? 26 : bh - 3 - 4, cy = by + ((bh - 3) >> 1);
+
+                UiText_Draw(UI_FONT_NORMAL, bx + 5 + d + 6, cy - 9, labels[i], UI_P_TEXT_W, r.ink, UI_ALIGN_LEFT, 0);
+                UiG_Paint(UiM_Ellipse(d, d), bx + 5, cy - (d >> 1), UiMix(r.base, UI_HEX(0xFFFFFF), 0.45),
+                          &(struct UiPaint){r.ink, UI_NONE, UiMix(r.base, UI_HEX(0xFFFFFF), 0.2), 0, 0, NULL, 0});
+                UiGfx_ItemIcon(ITEM_POKEBLOCK_CASE, bx + 5 + (d >> 1) - 12, cy - 12, NULL);
+            }
+            UiG_Hit(HIT_CMD, cmds[i], bx, by, bw, bh);
+            bx += bw + 4;
+        }
+    }
+}
+
 static void Commands(int x, int y, int sel, int t)
 {
     static const u8 sFight[] = _("FIGHT"), sBag[] = _("BAG"), sPokemon[] = _("POKéMON"), sRun[] = _("RUN"), sGiveUp[] = _("GIVE UP");
@@ -785,6 +902,10 @@ static void TargetPlate(int x, int y, int w, int h, const struct Box *b, int sta
     UiGfx_MonIcon(b->mon.species, b->mon.personality, false, state == 2 ? (t / 10) % 2 : 0, x + 9, y + 1, inv ? &sGray : NULL);
     UiText_Draw(UI_FONT_NORMAL, x + 46, y + 1, b->mon.nickname, inv ? UI_HEX(0x888888) : UI_P_TEXT, inv ? UI_NONE : UI_P_TEXT_SH,
                 UI_ALIGN_LEFT, 0);
+    /* whose it is (the design's trainer name; the role's colour stands for the trainer's) */
+    if (b->owner[0] != '\0')
+        UiCaps_Draw(x + 46, y + 20, b->owner, inv ? UI_HEX(0x909090) : UiMix(tag, UI_P_INK, 0.25), UI_NONE, UI_CAPS_PLAIN,
+                    UI_ALIGN_LEFT, UI_NONE);
     UiCaps_Draw(x + w - 8, y + 20, role, inv ? UI_HEX(0x909090) : tag, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_RIGHT, UI_NONE);
     if (!inv)
         UiW_HpBar(x + w - 78, y + 5, 58, b->hpFrac, false, UI_NONE);
@@ -813,23 +934,41 @@ static void DrawBoxes(int L, int R, int T, int dyB)
                     if (sB.foePips[i] != 0)
                         Ball(L + 8 + i * 9, T + 58, sB.foePips[i] == 1 ? 0 : sB.foePips[i] == 2 ? 2 : 3);
         }
-        if (me != NULL)
+        if (me != NULL && sB.safari)
+            SafariBox(R - 184 + me->slide * 2, 222 + dyB + me->bob);
+        else if (me != NULL)
             Databox(R - 184 + me->slide * 2, 222 + dyB + me->bob, me);
         return;
     }
     {
         const struct Box *fa = BoxAt(B_POSITION_OPPONENT_LEFT), *fb = BoxAt(B_POSITION_OPPONENT_RIGHT);
         const struct Box *pa = BoxAt(B_POSITION_PLAYER_LEFT), *pb = BoxAt(B_POSITION_PLAYER_RIGHT);
-        bool partnerIsMine = sB.partnerIsMine;
 
         if (fa != NULL)
             Databox2(L + fa->slide * 2, T + 22 + fa->bob, fa, false);
         if (fb != NULL)
             Databox2(L + fb->slide * 2, T + 74 + fb->bob, fb, false);
-        if (pb != NULL)
-            Databox2(R - (partnerIsMine ? 176 : 156) + pb->slide * 2, 178 + dyB + pb->bob, pb, partnerIsMine);
-        if (pa != NULL)
-            Databox2(R - 176 + pa->slide * 2, 228 + dyB + pa->bob, pa, true);
+        if (sB.partnerIsMine)
+        {
+            if (pb != NULL)
+                Databox2(R - 176 + pb->slide * 2, 178 + dyB + pb->bob, pb, true);
+            if (pa != NULL)
+                Databox2(R - 176 + pa->slide * 2, 228 + dyB + pa->bob, pa, true);
+        }
+        else
+        {
+            /* a partner's Pokémon (Steven's, another player's) in the design's short
+             * ally box above, the player's own below, whichever side each stands on:
+             * in a link multi battle a team's second player stands on the right */
+            const struct Box *ally = pb, *own = pa;
+
+            if ((pa != NULL && !pa->mine) || (pb != NULL && pb->mine))
+                ally = pa, own = pb;
+            if (ally != NULL)
+                Databox2(R - 156 + ally->slide * 2, 178 + dyB + ally->bob, ally, false);
+            if (own != NULL)
+                Databox2(R - 176 + own->slide * 2, 228 + dyB + own->bob, own, true);
+        }
     }
 }
 
@@ -856,8 +995,13 @@ static void DrawActionPage(int L, int R, int dyB, int t)
     MessagePlate(L, 284 + dyB, cx - 8 - L, 70);
     if (sB.hasPrompt)
         MessageText(L + 14, 293 + dyB, cx - 8 - L - 28, sB.prompt, -1);
-    UiW_Hints(L + 14, 340 + dyB, h, 2, true, 8);
-    Commands(cx, 282 + dyB, sB.input == NATIVE_BATTLE_INPUT_ACTION || sB.input == NATIVE_BATTLE_INPUT_ACTION_WAIT ? sB.actionCursor : -1, t);
+    /* the prompts while the player's own choice waits (not between turns, nor Wally's) */
+    if (sB.chooser >= 0 && !sB.wallyChooses)
+        UiW_Hints(L + 14, 340 + dyB, h, sB.safari ? 1 : 2, true, 8);
+    if (sB.safari)
+        SafariCommands(cx, 282 + dyB, sB.input == NATIVE_BATTLE_INPUT_ACTION || sB.input == NATIVE_BATTLE_INPUT_ACTION_WAIT ? sB.actionCursor : -1);
+    else
+        Commands(cx, 282 + dyB, sB.input == NATIVE_BATTLE_INPUT_ACTION || sB.input == NATIVE_BATTLE_INPUT_ACTION_WAIT ? sB.actionCursor : -1, t);
     if (sB.ballOn)
     {
         /* the last used Ball: R throws it (B_LAST_USED_BALL) */
@@ -893,7 +1037,11 @@ static void DrawMovePage(int L, int R, int dyB, int t)
         UiG_Hit(HIT_MOVE, i, mx, my, 204, 34);
     }
     InfoCard(R - 204, 284 + dyB, 196, 72);
-    if (switching)
+    if (sB.chooser < 0 || sB.wallyChooses)
+    {
+        /* no prompts between turns, nor while Wally chooses his move himself */
+    }
+    else if (switching)
     {
         UiText_Draw(UI_FONT_SMALL, R - 198, 342 + dyB, sSwitch, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
     }
@@ -1036,7 +1184,8 @@ static void QueueMovePath(int from, int to)
 
 static bool Click(const struct UiHit *hit, int button)
 {
-    if (NativeUi_PressesPending() || sCmdGoal >= 0 || sTargetGoal >= 0)
+    /* Wally's choices are his controller's own: nothing to press meanwhile */
+    if (NativeUi_PressesPending() || sCmdGoal >= 0 || sTargetGoal >= 0 || sB.wallyChooses)
         return true;
     if (button == 3)
     {
@@ -1113,7 +1262,7 @@ static bool Click(const struct UiHit *hit, int button)
 
 static bool Wheel(int dy)
 {
-    if (NativeUi_PressesPending())
+    if (NativeUi_PressesPending() || sB.wallyChooses)
         return true;
     if (sB.input == NATIVE_BATTLE_INPUT_MOVE && !sB.descOpen)
     {
@@ -1133,7 +1282,7 @@ static uint16_t FilterKeys(uint16_t keys, uint16_t newKeys)
 
     /* not while a YES / NO box is up over it (the encounter reset), nor while R cycles the last used Ball */
     if (sB.input != NATIVE_BATTLE_INPUT_ACTION || sB.page != PAGE_ACTION || sB.yesNo || !(newKeys & DPAD_ANY)
-     || (keys & R_BUTTON))
+     || (keys & R_BUTTON) || sB.wallyChooses)
         return keys;
     at = sB.actionCursor;
     if (newKeys & DPAD_UP)

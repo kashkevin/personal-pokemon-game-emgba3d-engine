@@ -12,6 +12,7 @@
 #include <SDL2/SDL_opengl.h>
 
 #include "global.h"
+#include "gpu_regs.h"
 #include "palette.h"
 #include "native_ui/native_ui.h"
 #include "native_ui/ui_bench.h"
@@ -37,6 +38,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_Bag,
     &gUiScreen_Pokedex,
     &gUiScreen_Storage,
+    &gUiScreen_PcItems,       /* the player's PC's ITEM STORAGE lists, over the field */
     &gUiScreen_StorageMenus,  /* the PC's first menus, over the field */
     &gUiScreen_DexNewEntry,   /* before the battle: a catch's new entry page runs inside it */
     &gUiScreen_Battle,
@@ -183,6 +185,22 @@ static UiRGBA CaptureScreenFade(void)
 {
     u32 y = gPaletteFade.y;
     u32 c = gPaletteFade.blendColor;
+
+    /* mode 2: HARDWARE_FADE (palette.c), BLDY over the picture (the battle's
+     * return from a menu, weather's fades): the screen's when it takes every
+     * background and the sprites, else a layer effect (a move's) */
+    if (gPaletteFade.mode == 2)
+    {
+        u32 cnt = GetGpuReg(REG_OFFSET_BLDCNT), level = GetGpuReg(REG_OFFSET_BLDY) & 0x1F;
+        u32 effect = cnt & BLDCNT_EFFECT_EFF_MASK;
+
+        if ((cnt & (BLDCNT_TGT1_BG_ALL | BLDCNT_TGT1_OBJ)) != (BLDCNT_TGT1_BG_ALL | BLDCNT_TGT1_OBJ)
+         || (effect != BLDCNT_EFFECT_DARKEN && effect != BLDCNT_EFFECT_LIGHTEN) || level == 0
+         || (!gPaletteFade.active && level < 16))
+            return UI_NONE;
+        c = effect == BLDCNT_EFFECT_DARKEN ? 0 : 255;
+        return UI_RGBA(c, c, c, level >= 16 ? 255 : (int)(level * 255 / 16));
+    }
 
     /* mode 0: NORMAL_FADE (palette.c); a fade that has settled part-way is
      * a tint (time of day, a dimmed menu), not a transition */

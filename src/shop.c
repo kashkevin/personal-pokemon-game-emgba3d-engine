@@ -1474,14 +1474,25 @@ bool32 Shop_NativeUiState(struct NativeShop *out)
     out->decorations = sMartInfo.martType != MART_TYPE_NORMAL;
     out->sale = sMartInfo.martType == MART_TYPE_NORMAL && IsPokeNewsActive(POKENEWS_SLATEPORT);
     out->money = GetMoney(&gSaveBlock1Ptr->money);
-    if (!out->decorations)
     {
         u16 item = out->chosen != ITEM_NONE ? out->chosen
                  : out->cursor < out->count && out->phase != NATIVE_SHOP_MENU && out->phase != NATIVE_SHOP_FIELD
                  ? out->items[out->cursor] : ITEM_NONE;
 
-        if (item != ITEM_NONE)
+        if (item == ITEM_NONE)
+            ;
+        else if (!out->decorations)
             out->inBag = CountTotalItemQuantityInBag(item);
+        else if (item <= NUM_DECORATIONS)
+        {
+            // a decoration goes to the PC: how many of it are there
+            const struct DecorationInventory *inv = &gDecorationInventories[gDecorations[item].category];
+            u32 i;
+
+            for (i = 0; i < inv->size; i++)
+                if (inv->items[i] == item)
+                    out->inBag++;
+        }
     }
     return TRUE;
 }

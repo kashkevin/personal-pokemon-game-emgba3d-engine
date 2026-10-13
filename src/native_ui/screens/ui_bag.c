@@ -7,7 +7,9 @@
  * item (SELECT), sorting (START), selling and depositing, the battle bag. The
  * design's FIND box and favourites are not in the game: FIND is marked
  * PLANNED, favourites are left out. Tab (the pad's Y, or the Details prompt)
- * opens the item details (ui_item_detail.c) over the list. Project-owned.
+ * opens the item details (ui_item_detail.c) over the list. Wally's catching
+ * tutorial drives the bag itself (the POKé BALLS pocket, the POKé BALL's
+ * menu): shown as it goes, nothing to press. Project-owned.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -102,8 +104,7 @@ static bool Detect(void)
 
     if (!Bag_NativeUiState(&b))
         return false;
-    /* Wally's catching tutorial drives the bag itself: the game's own picture */
-    return b.phase != NATIVE_BAG_NONE && b.phase != NATIVE_BAG_TUTORIAL;
+    return b.phase != NATIVE_BAG_NONE;
 }
 
 static int RowCount(void)
@@ -132,11 +133,24 @@ static void GoalStep(void)
 
 static void Capture(void)
 {
+    static struct NativeBag sNow;
     u8 prevPocket = sB.pocket;
     bool8 active;
     u32 printed;
 
-    Bag_NativeUiState(&sB);
+    Bag_NativeUiState(&sNow);
+    /* Wally's tutorial puts the player's own bag back before it fades out:
+     * the tutorial's last picture fades */
+    if (sNow.location == ITEMMENULOCATION_WALLY && sNow.phase == NATIVE_BAG_CLOSING
+     && sB.location == ITEMMENULOCATION_WALLY && sB.phase != NATIVE_BAG_NONE && sB.phase != NATIVE_BAG_LOADING)
+    {
+        sB.phase = NATIVE_BAG_CLOSING;
+        sB.menuCount = 0;
+        sB.ready = FALSE;
+        sHasDesc = false;
+        return;
+    }
+    sB = sNow;
     if (sB.phase != NATIVE_BAG_BROWSE)
         UiItemDetail_Close();
     if (sB.phase == NATIVE_BAG_LOADING)
@@ -365,6 +379,7 @@ static void InfoPane(int t, const struct UiRamp *pr, UiRGBA pc)
         {
             UiW_MessagePage(GetItemDescription(item), -1, ix + 16, yy, iw - 32, 4);
         }
+        if (sB.phase != NATIVE_BAG_TUTORIAL && sB.location != ITEMMENULOCATION_WALLY)
         {
             struct UiHintItem h[2] = {{UI_ACT_CONFIRM, sText_Select}, {UI_ACT_DETAILS, sText_Details}};
 
@@ -605,7 +620,8 @@ static void DrawBag(int t)
     struct UiRamp pr = UiRampOf(pc, 0.4, 0.25, 0.62);
     struct UiRamp tab = {sTan.hi, sTan.lo, UI_HEX(0x8A5A2A), sTan.ink};
     struct UiPattern diag = UiPat_Diag(32, 16, 0, 1);
-    bool menuUp = sB.phase == NATIVE_BAG_MENU || sB.phase == NATIVE_BAG_YES_NO || sB.phase == NATIVE_BAG_QUANTITY;
+    bool tutorialMenu = sB.phase == NATIVE_BAG_TUTORIAL && sB.menuCount > 0;
+    bool menuUp = sB.phase == NATIVE_BAG_MENU || sB.phase == NATIVE_BAG_YES_NO || sB.phase == NATIVE_BAG_QUANTITY || tutorialMenu;
 
     UiG_Bleed(&x0, &y0, &w, &h);
     UiG_Rect(x0, y0, w, h, LEATHER_BG);
@@ -625,7 +641,7 @@ static void DrawBag(int t)
     ListPanel(t, &pr, pc);
     Hints();
     /* the game's messages and questions in the message box */
-    if (sHasMsg || ((sB.phase == NATIVE_BAG_MENU || sB.phase == NATIVE_BAG_YES_NO || sB.phase == NATIVE_BAG_QUANTITY) && sHasDesc))
+    if (sHasMsg || (menuUp && sHasDesc))
     {
         int b[4];
 
@@ -645,7 +661,7 @@ static void DrawBag(int t)
         UiG_Bleed(&bx, &by, &bw, &bh);
         UiG_Hit(HIT_BACKDROP, 0, bx, by, bw, bh);
     }
-    if (sB.phase == NATIVE_BAG_MENU)
+    if (sB.phase == NATIVE_BAG_MENU || tutorialMenu)
         ContextMenu(t);
     else if (sB.phase == NATIVE_BAG_YES_NO)
         UiW_YesNo(624, 296, sB.menuCursor, t, UI_ANCHOR_BOTTOMRIGHT, NULL);
@@ -748,6 +764,9 @@ static bool Click(const struct UiHit *hit, int button)
 {
     if (UiItemDetail_IsOpen())
         return UiItemDetail_Click(hit, button);
+    /* Wally's tutorial: his own choices, nothing to press */
+    if (sB.phase == NATIVE_BAG_TUTORIAL || (sB.phase == NATIVE_BAG_CLOSING && sB.location == ITEMMENULOCATION_WALLY))
+        return true;
     if (button == 3)
     {
         NativeUi_QueuePress(B_BUTTON);

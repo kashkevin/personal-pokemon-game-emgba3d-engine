@@ -82,7 +82,10 @@ static bool sTraded[PARTY_SIZE];
 static int sPartyCount;
 static u8 sTrainerClass[32];
 static u8 sTrainerName[32];
-static u8 sFoePips[PARTY_SIZE]; /* the tray's balls: 0 full, 1 empty, 2 fainted, 3 statused */
+#define FOE_PIPS_MAX (PARTY_SIZE * 2)
+static u8 sFoePips[FOE_PIPS_MAX]; /* the tray's balls: 0 full, 1 empty, 2 fainted, 3 statused */
+static u8 sFoePipCount;           /* one trainer: the party's six slots; two: each one's Pokémon */
+static u8 sFoePipSplit;           /* two trainers: where the second one's Pokémon begin (0: one) */
 static bool sFoePipsOn;
 
 /* a battle that pays the engine's prize money (an AI trainer, not link or multiplayer) */
@@ -120,6 +123,19 @@ static const struct Snap *SnapOf(u32 personality, u32 otId)
     return NULL;
 }
 
+static u8 PipOf(struct Pokemon *mon)
+{
+    u16 species = GetMonData(mon, MON_DATA_SPECIES_OR_EGG);
+
+    if (species == SPECIES_NONE || species == SPECIES_EGG)
+        return 1;
+    if (GetMonData(mon, MON_DATA_HP) == 0)
+        return 2;
+    if (GetMonData(mon, MON_DATA_STATUS) != 0)
+        return 3;
+    return 0;
+}
+
 static void CaptureFoe(void)
 {
     u32 foe = GetBattlerAtPosition(B_POSITION_OPPONENT_LEFT);
@@ -129,28 +145,40 @@ static void CaptureFoe(void)
     sTrainerClass[0] = sTrainerName[0] = EOS;
     UiText_Append(sTrainerClass, sizeof(sTrainerClass), GetTrainerClassNameFromId(trainerId));
     UiText_Append(sTrainerName, sizeof(sTrainerName), GetTrainerNameFromId(trainerId));
+    sFoePipsOn = false;
+    sFoePipCount = sFoePipSplit = 0;
     if (gBattleTypeFlags & BATTLE_TYPE_TWO_OPPONENTS)
     {
+        /* two trainers at once: both named, each with its class as the engine's
+         * messages put them ("MAGMA LEADER MAXIE and MAGMA ADMIN TABITHA"), and
+         * each one's own party (gParties: one array a trainer) */
+        u16 trainerB = TRAINER_BATTLE_PARAM.opponentB;
+
+        if (GetTrainerClassFromId(trainerB) != GetTrainerClassFromId(trainerId))
+        {
+            UiText_AppendAscii(sTrainerClass, sizeof(sTrainerClass), " & ");
+            UiText_Append(sTrainerClass, sizeof(sTrainerClass), GetTrainerClassNameFromId(trainerB));
+        }
         UiText_AppendAscii(sTrainerName, sizeof(sTrainerName), " & ");
-        UiText_Append(sTrainerName, sizeof(sTrainerName), GetTrainerNameFromId(TRAINER_BATTLE_PARAM.opponentB));
+        UiText_Append(sTrainerName, sizeof(sTrainerName), GetTrainerNameFromId(trainerB));
+        for (int t = 0; t < 2; t++)
+        {
+            party = GetTrainerParty(t == 0 ? B_TRAINER_OPPONENT_A : B_TRAINER_OPPONENT_B);
+            if (t == 1)
+                sFoePipSplit = sFoePipCount;
+            for (int i = 0; i < PARTY_SIZE && sFoePipCount < FOE_PIPS_MAX; i++)
+                if (GetMonData(&party[i], MON_DATA_SPECIES_OR_EGG) != SPECIES_NONE)
+                    sFoePips[sFoePipCount++] = PipOf(&party[i]);
+        }
+        sFoePipsOn = sFoePipCount > 0;
+        return;
     }
-    sFoePipsOn = false;
     if (foe >= gBattlersCount || (party = GetBattlerParty(foe)) == NULL)
         return;
     sFoePipsOn = true;
+    sFoePipCount = PARTY_SIZE;
     for (int i = 0; i < PARTY_SIZE; i++)
-    {
-        u16 species = GetMonData(&party[i], MON_DATA_SPECIES_OR_EGG);
-
-        if (species == SPECIES_NONE || species == SPECIES_EGG)
-            sFoePips[i] = 1;
-        else if (GetMonData(&party[i], MON_DATA_HP) == 0)
-            sFoePips[i] = 2;
-        else if (GetMonData(&party[i], MON_DATA_STATUS) != 0)
-            sFoePips[i] = 3;
-        else
-            sFoePips[i] = 0;
-    }
+        sFoePips[i] = PipOf(&party[i]);
 }
 
 void UiResults_Capture(void)
@@ -270,15 +298,25 @@ static void Ball(int x, int y, u32 kind)
 /* the defeated (or winning) trainer's plate, where the foe's databox was */
 static void TrainerPlate(int x, int y)
 {
-    int w = 176, h = 40;
+    int pipsW = sFoePipsOn ? sFoePipCount * 9 + (sFoePipSplit > 0 ? 5 : 0) : 0;
+    int w = 176, h = 40, px;
 
+    /* two trainers' names, classes and Pokémon can need more than the one trainer's plate */
+    w = max(w, 8 + UiText_Width(UI_FONT_SMALL, sTrainerClass, 0) + 10 + pipsW + 8);
+    w = max(w, 8 + UiText_Width(UI_FONT_NORMAL, sTrainerName, 0) + 8);
+    w = min(w, 280);
     UiG_Paint(UiM_Rounded4(w, h, 0, 4, 0, 4), x, y, UI_HEX(0xF4F4E6),
               &(struct UiPaint){UI_P_DATABOX_INK, UI_HEX(0xFFFFFF), UI_HEX(0xCFCFBE), 0, 2, NULL, UI_NONE});
     UiText_Draw(UI_FONT_SMALL, x + 8, y + 2, sTrainerClass, UI_P_TEXT_MUTED, UI_NONE, UI_ALIGN_LEFT, 0);
     UiG_Text(x + 8, y + 15, sTrainerName);
-    if (sFoePipsOn)
-        for (int i = 0; i < PARTY_SIZE; i++)
-            Ball(x + w - 62 + i * 9, y + 5, sFoePips[i]);
+    px = x + w - 8 - pipsW;
+    for (int i = 0; sFoePipsOn && i < sFoePipCount; i++)
+    {
+        if (i == sFoePipSplit && i > 0)
+            px += 5;           /* the second trainer's Pokémon */
+        Ball(px, y + 5, sFoePips[i]);
+        px += 9;
+    }
 }
 
 static void Money(u8 *dst, int size, u32 amount)

@@ -1524,4 +1524,103 @@ bool32 PlayerPC_NativeUiState(struct NativePcMenu *out)
     }
     return FALSE;
 }
+
+// The native PC UI's ITEM STORAGE lists (src/native_ui/screens/ui_pc_items.c):
+// WITHDRAW ITEM and TOSS ITEM as their task runs them. The list is the PC's
+// items in order (compacted when the list is put up); every button stays here.
+STATIC_ASSERT(PC_ITEMS_COUNT <= NATIVE_PC_ITEMS_MAX, NativeUiPcItemsCount);
+
+static u8 NativeUiItemsTask(u8 *phase)
+{
+    static const TaskFunc sFuncs[] = {
+        ItemStorage_CreateListMenu, ItemStorage_ProcessInput, ItemStorage_ProcessItemSwapInput,
+        ItemStorage_HandleQuantityRolling, ItemStorage_HandleRemoveItem, ItemStorage_HandleErrorMessageInput,
+    };
+    static const u8 sPhases[] = {
+        NATIVE_PC_ITEMS_OPENING, NATIVE_PC_ITEMS_LIST, NATIVE_PC_ITEMS_SWAP,
+        NATIVE_PC_ITEMS_QUANTITY, NATIVE_PC_ITEMS_MESSAGE, NATIVE_PC_ITEMS_MESSAGE,
+    };
+    u8 taskId;
+    u32 i;
+
+    for (i = 0; i < ARRAY_COUNT(sFuncs); i++)
+    {
+        if ((taskId = FindTaskIdByFunc(sFuncs[i])) != TASK_NONE)
+        {
+            *phase = sPhases[i];
+            return taskId;
+        }
+    }
+    // the toss's YES / NO: the shared helper runs the item storage's task meanwhile
+    if (MenuHelpers_NativeUiYesFunc() == ItemStorage_TossItemYes)
+    {
+        for (taskId = 0; taskId < NUM_TASKS; taskId++)
+        {
+            if (MenuHelpers_NativeUiRunsHelper(taskId))
+            {
+                *phase = NATIVE_PC_ITEMS_CONFIRM;
+                return taskId;
+            }
+        }
+    }
+    return TASK_NONE;
+}
+
+bool32 PlayerPC_NativeUiItems(struct NativePcItems *out)
+{
+    u8 phase = NATIVE_PC_ITEMS_NONE;
+    u8 taskId = NativeUiItemsTask(&phase);
+    s16 *data;
+    u32 i, n = 0;
+
+    memset(out, 0, sizeof(*out));
+    if (taskId == TASK_NONE || sItemStorageMenu == NULL)
+        return FALSE;
+    data = gTasks[taskId].data;
+    out->phase = phase;
+    out->toss = tInTossMenu;
+    out->title = tInTossMenu ? sText_TossItem : sText_WithdrawItem;
+    for (i = 0; i < PC_ITEMS_COUNT; i++)
+    {
+        if (gSaveBlock1Ptr->pcItems[i].itemId == ITEM_NONE || gSaveBlock1Ptr->pcItems[i].quantity == 0)
+            continue;
+        out->items[n] = gSaveBlock1Ptr->pcItems[i].itemId;
+        out->quantities[n] = gSaveBlock1Ptr->pcItems[i].quantity;
+        n++;
+    }
+    out->count = n;
+    // the list starts on its first row (ItemStorage_Enter)
+    out->cursor = phase == NATIVE_PC_ITEMS_OPENING ? 0 : gPlayerPCItemPageInfo.itemsAbove + gPlayerPCItemPageInfo.cursorPos;
+    if (out->cursor > n)
+        out->cursor = n;
+    out->swapFrom = phase == NATIVE_PC_ITEMS_SWAP ? sItemStorageMenu->toSwapPos : NOT_SWAPPING;
+    out->quantity = tQuantity;
+    if (out->cursor < n)
+    {
+        out->quantityMax = out->quantities[out->cursor];
+        out->inBag = CountTotalItemQuantityInBag(out->items[out->cursor]);
+    }
+    out->yesNoCursor = phase == NATIVE_PC_ITEMS_CONFIRM ? Menu_GetCursorPos() : 0;
+    out->messageWindow = sItemStorageMenu->windowIds[ITEMPC_WIN_MESSAGE];
+    out->ready = phase != NATIVE_PC_ITEMS_OPENING && !gPaletteFade.active;
+    return TRUE;
+}
+
+static void NativeUiMarkTag(u32 mask[32], u16 tag)
+{
+    u16 start, count;
+
+    if (!Sprite_NativeUiTagTiles(tag, &start, &count))
+        return;
+    for (u32 t = start; t < (u32)start + count && t < 1024; t++)
+        mask[t / 32] |= 1u << (t % 32);
+}
+
+void PlayerPC_NativeUiItemTiles(u32 mask[32])
+{
+    memset(mask, 0, 32 * sizeof(u32));
+    NativeUiMarkTag(mask, TAG_ITEM_ICON);
+    NativeUiMarkTag(mask, TAG_SCROLL_ARROW);
+    NativeUiMarkTag(mask, MenuHelpers_NativeUiSwapLineTag());
+}
 #endif // ENABLE_NATIVE_UI
