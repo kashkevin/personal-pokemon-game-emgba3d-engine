@@ -119,8 +119,10 @@ and position) with the core's. To make the replay the game's own:
   follows the game.
 - **The trainer who throws.** In the Safari Zone the player's left battler is the trainer's back
   picture, and in Wally's catch tutorial once Wally has come back out to throw: the request's
-  `safari` says so (the core gives that battler the trainer's throwing frames), and
-  `catchTutorial` moves the tutorial's ball to where the game starts it (`AnimTask_ThrowBall_StandingTrainer`).
+  `safari` says so, `trainerAnims` carries that picture's own animation table (its rest and its
+  throw: the ball or the Pokeblock leaves at the throw's second command, so a back picture with
+  other timings - a custom character's - is followed as the game shows it), and `catchTutorial`
+  moves the tutorial's ball to where the game starts it (`AnimTask_ThrowBall_StandingTrainer`).
 - **Sprites a script leaves moving.** A script can end with effect sprites still moving (a caught
   ball's stars). The core goes on replaying them with the game's, a frame for each game frame, until
   the game's are gone (at most 120 frames), so they stay HD.
