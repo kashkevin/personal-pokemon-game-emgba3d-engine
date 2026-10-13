@@ -145,6 +145,182 @@ class DarkPaneTests(unittest.TestCase):
         self.assertEqual(found, [])
 
 
+DOOR_BLUE = (96, 168, 232)
+DOOR_SILL = (216, 224, 232)
+
+
+def page_windows(page, rects):
+    wall = window_glow.wall_mask(page.w, page.h, upright(page.w, page.h))
+    return [f for f in window_glow.find_page_windows(page.w, page.h, page.colour, wall, rects)
+            if f["window"]]
+
+
+def pixels_of(found):
+    return {q for f in found for q in f["pixels"]}
+
+
+class PageWindowsTests(unittest.TestCase):
+    """V32: the windows that glow are the ones each building's drawing has,
+    every pane of them, and none the page had before is lost."""
+
+    LEFT, RIGHT = (0, 0, 32, 24), (32, 0, 64, 24)
+
+    def beside_a_blue_building(self, wall_colour=BLUE_WALL):
+        # the building on the left is walled in the colour the right one's
+        # glass is drawn in
+        page = Page(64, 24)
+        page.rect(2, 2, 28, 20, wall_colour)
+        return page
+
+    def test_a_house_beside_a_blue_walled_building_has_its_windows(self):
+        page = self.beside_a_blue_building()
+        page.rect(40, 6, 7, 5, FRAME)
+        page.rect(41, 7, 5, 3, BLUE_WALL)
+        wall, found = windows(page, upright(64, 24))
+        self.assertEqual(found, [])          # the page's search: the left one's wall
+        glass = {(x, y) for x in range(41, 46) for y in range(7, 10)}
+        self.assertEqual(pixels_of(page_windows(page, [self.LEFT, self.RIGHT])), glass)
+
+    def test_a_walls_shading_band_is_not_a_window(self):
+        page = self.beside_a_blue_building()
+        page.rect(34, 20, 25, 1, FRAME)      # the wall's foot
+        for x in (36, 44, 52):               # columns
+            page.rect(x, 4, 1, 16, FRAME)
+        page.rect(37, 17, 7, 3, BLUE_WALL)   # the shading along the foot
+        page.rect(45, 17, 7, 3, BLUE_WALL)
+        wall = window_glow.wall_mask(64, 24, upright(64, 24))
+        # the drawing's own search takes the band for panes ...
+        self.assertTrue([f for f in window_glow.find_windows(64, 24, page.colour, wall, self.RIGHT)
+                         if f["window"]])
+        # ... but a frame does not close round it: the wall runs on above
+        self.assertEqual(page_windows(page, [self.LEFT, self.RIGHT]), [])
+
+    def test_a_glint_is_not_a_window(self):
+        page = self.beside_a_blue_building()
+        page.rect(40, 6, 4, 4, (80, 80, 88))   # grey: not itself a dark pane
+        page.rect(41, 7, 2, 2, BLUE_WALL)
+        self.assertEqual(page_windows(page, [self.LEFT, self.RIGHT]), [])
+
+    def test_blue_glass_needs_no_frame_all_round(self):
+        # a glass door: its frame at its sides and top, a sill under it
+        page = self.beside_a_blue_building(DOOR_BLUE)
+        page.rect(40, 7, 8, 9, FRAME)
+        page.rect(41, 8, 6, 8, DOOR_BLUE)
+        page.rect(41, 16, 6, 1, DOOR_SILL)
+        glass = {(x, y) for x in range(41, 47) for y in range(8, 16)}
+        self.assertTrue(glass <= pixels_of(page_windows(page, [self.LEFT, self.RIGHT])))
+
+    def test_every_pane_of_a_window(self):
+        # a pane white with the sky over a glazing bar: the page's search
+        # finds the glass under it
+        page = Page(24, 20)
+        page.rect(4, 2, 8, 10, FRAME)
+        page.rect(5, 3, 6, 3, GLARE)
+        page.rect(5, 7, 6, 4, GLASS)
+        lower = {(x, y) for x in range(5, 11) for y in range(7, 11)}
+        upper = {(x, y) for x in range(5, 11) for y in range(3, 6)}
+        wall, found = windows(page, upright(24, 20))
+        self.assertEqual(pixels_of(found), lower)
+        lit = pixels_of(page_windows(page, [(0, 0, 24, 20)]))
+        self.assertEqual(lit, lower | upper)   # the bar stays dark
+
+    def test_none_of_the_pages_windows_is_lost(self):
+        page = Page(24, 16)
+        page.window(4, 4, 6, 4)
+        glass = {(x, y) for x in range(5, 11) for y in range(5, 9)}
+        # at the side of its drawing, and outside any drawing
+        self.assertTrue(glass <= pixels_of(page_windows(page, [(0, 0, 11, 16)])))
+        self.assertTrue(glass <= pixels_of(page_windows(page, [])))
+
+    def test_a_window_is_one_window_however_many_drawings_see_it(self):
+        page = Page(24, 16)
+        page.window(4, 4, 6, 4)
+        found = page_windows(page, [(0, 0, 24, 16), (0, 0, 24, 16), (2, 2, 20, 14)])
+        self.assertEqual(len(found), 1)
+        runs = window_glow.runs(3, found)
+        self.assertEqual(sum(n for y, x, n, level in runs), 24)
+
+
+MINT = (144, 216, 200)
+MINT_SHADE = (120, 176, 168)
+BLIND = (248, 248, 248)
+STRIPE = (240, 192, 96)
+BAR = (128, 128, 136)
+
+
+class ShopWindowTests(unittest.TestCase):
+    def test_a_shop_window_with_a_blind_and_a_stripe_glows(self):
+        # Mauville's Game Corner: its frame holds the glass at the sides; a
+        # blind over it and a stripe across it, a bar under it; the goods
+        # behind the glass in its shade
+        page = Page(40, 32)
+        page.rect(4, 2, 26, 24, FRAME)
+        page.rect(5, 3, 24, 1, BAR)
+        page.rect(5, 4, 24, 2, BLIND)
+        page.rect(5, 6, 24, 9, MINT)
+        page.rect(5, 15, 24, 2, STRIPE)
+        page.rect(5, 17, 24, 5, MINT)
+        page.rect(5, 22, 24, 1, BAR)
+        for y in list(range(10, 14)) + list(range(17, 22)):
+            for x in (2, 3, 4, 5, 10, 11, 12, 13, 18, 19, 20, 21):
+                page.px[y][5 + x] = MINT_SHADE
+        page.rect(5, 14, 24, 1, MINT_SHADE)
+        wall, found = windows(page, upright(40, 32))
+        self.assertEqual(found, [])          # no pane by its framing
+        lit = pixels_of(page_windows(page, [(0, 0, 40, 32)]))
+        glass = {(x, y) for x in range(5, 29) for y in list(range(6, 15)) + list(range(17, 22))}
+        self.assertTrue(glass <= lit)
+        self.assertNotIn((10, 15), lit)      # the stripe stays dark
+        self.assertNotIn((10, 22), lit)
+
+
+STONE = (120, 128, 120)
+STONE_DARK = (80, 88, 80)
+CRATER_WALL = (216, 216, 176)
+OUTLINE = (64, 72, 104)
+
+
+class StoneWindowTests(unittest.TestCase):
+    """Sootopolis's houses: windows, emblems and doors in the same greys."""
+
+    def page(self):
+        page = Page(48, 32)
+        page.rect(0, 0, 48, 32, CRATER_WALL)
+        return page
+
+    def arch(self, page, x, y, glints=True):
+        # inside: an arch 5 rows high (2 to 10 wide) over 6 rows 12 wide
+        page.rect(x + 5, y - 1, 2, 1, OUTLINE)
+        for r in range(5):
+            half = r + 1
+            page.rect(x + 6 - half - 1, y + r, 2 * half + 2, 1, OUTLINE)
+            page.rect(x + 6 - half, y + r, 2 * half, 1, STONE)
+        page.rect(x - 1, y + 5, 14, 6, OUTLINE)
+        page.rect(x, y + 5, 12, 6, STONE)
+        page.rect(x, y + 6, 12, 1, STONE_DARK)
+        if glints:
+            page.px[y + 7][x + 3] = page.px[y + 7][x + 8] = BLIND
+        page.rect(x - 1, y + 11, 14, 1, BLIND)      # the sill
+
+    def test_an_arched_window_glows(self):
+        page = self.page()
+        self.arch(page, 8, 6)
+        lit = pixels_of(page_windows(page, [(0, 0, 48, 32)]))
+        self.assertIn((11, 13), lit)          # a glint
+        self.assertIn((14, 6), lit)           # the arch's top
+        self.assertNotIn((7, 13), lit)        # the outline
+        self.assertNotIn((10, 17), lit)       # the sill
+        self.assertEqual(len(lit), 2 + 4 + 6 + 8 + 10 + 12 * 6)
+
+    def test_an_emblem_or_a_door_does_not(self):
+        page = self.page()
+        self.arch(page, 8, 6, glints=False)   # no glint: an emblem's greys
+        page.rect(27, 4, 14, 22, OUTLINE)     # a door: square, its knob
+        page.rect(28, 5, 12, 20, STONE)
+        page.px[15][29] = BLIND
+        self.assertEqual(page_windows(page, [(0, 0, 48, 32)]), [])
+
+
 class RunTests(unittest.TestCase):
     def test_runs_cover_the_pane_with_one_brightness(self):
         page = Page(24, 16)
