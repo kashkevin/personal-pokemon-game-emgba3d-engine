@@ -59,4 +59,8 @@ struct BattleFxRenderStats
 };
 void BattleFxGL_Stats(struct BattleFxRenderStats *stats);
 
+/* Render thread: whether drawing animation `serial`'s HD layers takes more than `budgetMs` a picture on this PC
+ * (measured over its pictures so far; *msPerPicture: the cost). BattleFx's drawing budget. */
+bool BattleFxGL_DrawTooSlow(uint32_t serial, int budgetMs, double *msPerPicture);
+
 #endif // GUARD_DIORAMA_BATTLE_FX_RENDER_H
