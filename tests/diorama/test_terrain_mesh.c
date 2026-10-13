@@ -466,9 +466,7 @@ static void TestBridgeHasTwoSurfaces(void)
     assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
     assert(!mesh.usedCompressedOccupancy);
     assert(mesh.topFaceCount == 65);
-    /* the cells' undersides on their floors are never seen: only the
-     * bridge's deck keeps its underside (DropBaseUndersides, V37) */
-    assert(mesh.bottomFaceCount == 1);
+    assert(mesh.bottomFaceCount == 65);
     assert(mesh.sideFaceCount == 12);
     assert(mesh.bounds.minY == -3.0f / 16.0f);
     assert(mesh.bounds.maxY == 1.75f);
@@ -606,8 +604,9 @@ static void TestMountainArtworkMask(void)
     assert(mesh.occupancySpanCount == flatSpans);
     assert(mesh.sideFaceCount > 4);
     assert(mesh.topFaceCount > 64);
-    /* no column's underside on its floor (V37) */
-    assert(mesh.bottomFaceCount == 0);
+    /* the columns keep their undersides on the floor: they are what a crack
+     * between the faces above shows (V47, the battle session's E14) */
+    assert(mesh.bottomFaceCount > 0);
     bool hasIntermediateHeight = false;
     for (uint32_t vertex = 0; vertex < mesh.vertexCount; vertex++)
         hasIntermediateHeight |= sVertices[vertex].y > 0.0f && sVertices[vertex].y < 1.0f;
@@ -645,9 +644,7 @@ static void TestTerraceArtworkCourse(void)
 
     assert(DioramaTerrain_BuildChunk(&input, sVertices,
                                      DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
-    /* the lowered floor's undersides (at -17/16) are not built (V37): the
-     * lowest faces left are the course's sides, down to the floor's top */
-    assert(mesh.bounds.minY == -1.0f);
+    assert(mesh.bounds.minY == -17.0f / 16.0f);
     assert(mesh.bounds.maxY == 0.0f);
     for (uint32_t vertex = 0; vertex < mesh.vertexCount; vertex += 6)
     {
@@ -1039,8 +1036,7 @@ static void TestRoundHullUsesArtworkChords(void)
     assert(!round.usedCompressedOccupancy);
     assert(round.geometryHash != box.geometryHash);
     assert(round.bounds.maxY == 14.0f / 16.0f);
-    /* (its columns' undersides on the floor are not built: V37) */
-    assert(round.bounds.minY == 0.0f);
+    assert(round.bounds.minY == -1.0f / 16.0f);
     assert(round.sideFaceCount > box.sideFaceCount);
     for (uint32_t vertex = 0; vertex < round.vertexCount; vertex++)
         if (sVertices[vertex].y > 0.0f)
@@ -1204,8 +1200,7 @@ static void TestLargeGroupedTreeUsesAuthoredVoxelModel(void)
     assert(gDioramaTreeModelFaceCount < 3182);
     assert(mesh.bounds.maxY
         == (DIORAMA_TREE_MODEL_MAX_Y - DIORAMA_TREE_MODEL_MIN_Y) / 16.0f);
-    /* (its columns' undersides on the floor are not built: V37) */
-    assert(mesh.bounds.minY == 0.0f);
+    assert(mesh.bounds.minY == -1.0f / 16.0f);
     assert(mesh.treeInstanceCount == 1);
     assert(mesh.treeInstances[0].x == 2.0f);
     assert(mesh.treeInstances[0].y == 0.0f);
