@@ -76,6 +76,7 @@ static struct
     int quality;        /* BATTLEFX_QUALITY_* (Quality below) */
     int drawBudgetMs;   /* an explicit drawing budget a picture for the HD layers (0: none, the default; ShowWanted) */
     int gbaBelowFps;    /* quality auto, at the lowest tier: the GBA effects when fewer game frames a second show (PaceCheck) */
+    bool hdPokeBalls;   /* pokeBalls=hd: the HD Poke Ball animations (PokeBallAnimation; default: the game's original ones) */
     char dir[1024];
     SDL_atomic_t state; /* enum CoreState */
     SDL_Thread *loader;
@@ -192,6 +193,18 @@ static int ParseQuality(const char *text)
     return -1;
 }
 
+/* pokeBalls=original|hd (also 0|1): 0 the game's own Poke Ball animations, 1 the HD ones, -1 neither. */
+static int ParsePokeBalls(const char *text)
+{
+    while (*text == ' ')
+        text++;
+    if (strncmp(text, "original", 8) == 0 || strncmp(text, "gba", 3) == 0 || text[0] == '0')
+        return 0;
+    if (strncmp(text, "hd", 2) == 0 || text[0] == '1')
+        return 1;
+    return -1;
+}
+
 static void ReadSettingsFile(void)
 {
     char path[1200];
@@ -223,6 +236,8 @@ static void ReadSettingsFile(void)
             sCore.gbaBelowFps = value < 0 ? 0 : value > 60 ? 60 : value;
         else if (strcmp(line, "attach") == 0)
             sCore.attach = value != 0;
+        else if (strcmp(line, "pokeBalls") == 0 && ParsePokeBalls(eq + 1) >= 0)
+            sCore.hdPokeBalls = ParsePokeBalls(eq + 1) == 1;
         else if (strcmp(line, "quality") == 0 && ParseQuality(eq + 1) >= 0)
             sCore.quality = ParseQuality(eq + 1);
     }
@@ -242,6 +257,7 @@ static void ReadSettings(void)
     sCore.attach = true;
     sCore.drawBudgetMs = 0;
     sCore.gbaBelowFps = 45; /* three quarters of the game's 60 frames a second */
+    sCore.hdPokeBalls = false; /* the original Emerald Poke Ball animations (the owner's decision, 2026-10-13) */
 #ifdef BATTLEFX_TEST
     sCore.sync = true; /* the test driver compares the core's frames with the game's, frame for frame */
     sCore.quality = BATTLEFX_QUALITY_FULL; /* the tests draw every animation in full, however slow the drawing */
@@ -277,11 +293,19 @@ static void ReadSettings(void)
         const char *budget = SDL_getenv("PKMN_BATTLEFX_DRAW_BUDGET_MS");
         const char *quality = SDL_getenv("PKMN_BATTLEFX_QUALITY");
         const char *below = SDL_getenv("PKMN_BATTLEFX_GBA_BELOW_FPS");
+        const char *balls = SDL_getenv("PKMN_BATTLEFX_POKEBALLS");
 
         if (budget != NULL && budget[0] != '\0')
             sCore.drawBudgetMs = atoi(budget) > 0 ? atoi(budget) : 0;
         if (below != NULL && below[0] != '\0')
             sCore.gbaBelowFps = atoi(below) < 0 ? 0 : atoi(below) > 60 ? 60 : atoi(below);
+        if (balls != NULL && balls[0] != '\0')
+        {
+            if (ParsePokeBalls(balls) >= 0)
+                sCore.hdPokeBalls = ParsePokeBalls(balls) == 1;
+            else
+                SDL_Log("Battle FX: PKMN_BATTLEFX_POKEBALLS=%s is not original or hd", balls);
+        }
         if (quality != NULL && quality[0] != '\0')
         {
             if (ParseQuality(quality) >= 0)
@@ -293,10 +317,11 @@ static void ReadSettings(void)
     }
     if (!sCore.enabled || sCore.quality == BATTLEFX_QUALITY_GBA)
         SDL_Log("Battle FX: off (the original GBA animations play)");
-    else if (sCore.quality != BATTLEFX_QUALITY_AUTO || sCore.drawBudgetMs > 0 || !sCore.attach)
-        SDL_Log("Battle FX: quality %s%s%s", kQualityNames[sCore.quality],
+    else if (sCore.quality != BATTLEFX_QUALITY_AUTO || sCore.drawBudgetMs > 0 || !sCore.attach || sCore.hdPokeBalls)
+        SDL_Log("Battle FX: quality %s%s%s%s", kQualityNames[sCore.quality],
                 sCore.drawBudgetMs > 0 ? ", with a drawing budget" : "",
-                sCore.attach ? "" : ", effects placed for the GBA pictures");
+                sCore.attach ? "" : ", effects placed for the GBA pictures",
+                sCore.hdPokeBalls ? ", the HD Poke Ball animations (pokeBalls=hd)" : "");
 }
 
 bool BattleFx_Enabled(void)
@@ -2007,6 +2032,25 @@ void BattleFx_OnLaunch(uint32_t animType, uint32_t animId, const void *script)
     BeginRequest(id, request, len, animType, animId, 0);
 }
 
+/* The Poke Ball animations: a trainer's ball throw and the send-out (B_ANIM_BALL_THROW_WITH_TRAINER is Wally's,
+ * the Safari Zone's and the old man's; the opening send-out is the controllers' CONTROLLER_SEND_OUT), the throw at a
+ * wild Pokemon with its fall, shakes, break-out or catch (B_ANIM_BALL_THROW, B_ANIM_CRITICAL_CAPTURE_THROW) and the
+ * recall into the ball (B_ANIM_SWITCH_OUT_*). The owner's decision (2026-10-13): these play as the game's own
+ * original animations - only the moves and the other battle animations are drawn in HD. pokeBalls=hd
+ * (settings.cfg) or PKMN_BATTLEFX_POKEBALLS=hd brings back the HD versions. */
+static bool PokeBallAnimation(const char *id)
+{
+    static const char *const kIds[] = {
+        "B_ANIM_BALL_THROW", "B_ANIM_BALL_THROW_WITH_TRAINER", "B_ANIM_CRITICAL_CAPTURE_THROW",
+        "B_ANIM_SWITCH_OUT_PLAYER_MON", "B_ANIM_SWITCH_OUT_OPPONENT_MON", "CONTROLLER_SEND_OUT",
+    };
+
+    for (size_t i = 0; i < sizeof(kIds) / sizeof(kIds[0]); i++)
+        if (strcmp(id, kIds[i]) == 0)
+            return true;
+    return false;
+}
+
 /* Hands the core `id`'s begin (the request built): the animation in progress
  * from now on. Its result comes back with the frames (OnFrameEnd). */
 static bool BeginRequest(const char *id, const char *request, int len, uint32_t animType, uint32_t animId,
@@ -2019,6 +2063,12 @@ static bool BeginRequest(const char *id, const char *request, int len, uint32_t 
     if (!BattleFx_Enabled())
         return false; /* quality gba (set since the core loaded) */
 
+    if (!sCore.hdPokeBalls && PokeBallAnimation(id))
+    {
+        if (sCore.log)
+            SDL_Log("Battle FX: %s plays the original Poke Ball animation", id);
+        return false;
+    }
     if (len >= BFX_REQUEST_MAX - 1)
     {
         NoteRefused(id, "request too long");
@@ -2188,6 +2238,13 @@ void BattleFx_OnControllerAnim(uint32_t kind, uint32_t battler, uint32_t arg)
 {
     if (!gMain.inBattle || battler >= MAX_BATTLERS_COUNT || !BattleFx_Enabled())
         return;
+    if (kind == BATTLEFX_CONTROLLER_SEND_OUT && !sCore.hdPokeBalls)
+    {
+        /* the original send-out (PokeBallAnimation); not queued, so it does not hold back a shiny's stars */
+        if (sCore.log)
+            SDL_Log("Battle FX: CONTROLLER_SEND_OUT plays the original Poke Ball animation");
+        return;
+    }
     if (sControllerPendingCount < MAX_CONTROLLER_REQUESTS)
     {
         sControllerPending[sControllerPendingCount].kind = (uint8_t)kind;
@@ -2403,11 +2460,13 @@ void BattleFx_OnSpriteMade(uint32_t index, const struct SpriteTemplate *template
 }
 
 /* Whether an effect sprite made before this game frame is in use: another animation's (a double battle's
- * send-outs, played as on the GBA, still throwing their balls' particles). */
+ * send-outs, played as on the GBA, still throwing their balls' particles). The balls and their particles count
+ * here also when they are the game's to draw (pokeBalls=original: BattleFx_IsEffectSprite leaves them out), so a
+ * shiny Pokemon's stars that begin while they fly stay GBA as before. */
 static bool EarlierEffectSprites(void)
 {
     for (int i = 0; i < MAX_SPRITES; i++)
-        if (gSprites[i].inUse && BattleFx_IsEffectSprite(&gSprites[i]) && sSpriteMade[i].frame != sGameFrame)
+        if (gSprites[i].inUse && IsEffectTag(BattleFx_SpriteGfxTag(&gSprites[i])) && sSpriteMade[i].frame != sGameFrame)
             return true;
     return false;
 }
@@ -2424,9 +2483,31 @@ uint16_t BattleFx_SpriteGfxTag(const struct Sprite *sprite)
     return sSpriteMade[index].tag;
 }
 
+/* A Poke Ball's sprite (made with a gPokeBalls template; tag 55019 is also Smokescreen's cloud, not one) or a ball's
+ * opening particles. */
+static bool IsPokeBallSprite(const struct Sprite *sprite, u16 tag)
+{
+    if (tag >= BALL_PARTICLE_TAGS_FIRST && tag <= BALL_PARTICLE_TAGS_LAST)
+        return true;
+    if (tag < BALL_GFX_TAGS_FIRST || tag > BALL_GFX_TAGS_LAST)
+        return false;
+    for (int i = 0; i < POKEBALL_COUNT; i++)
+        if (sprite->template == &gPokeBalls[i].spriteTemplate)
+            return true;
+    return false;
+}
+
 bool BattleFx_IsEffectSprite(const struct Sprite *sprite)
 {
-    return IsEffectTag(BattleFx_SpriteGfxTag(sprite));
+    u16 tag = BattleFx_SpriteGfxTag(sprite);
+
+    if (!IsEffectTag(tag))
+        return false;
+    /* the original Poke Ball animations (PokeBallAnimation): the balls and their particles are the game's to draw,
+     * also while an HD animation shows (a shiny Pokemon's stars as its ball opens) */
+    if (!sCore.hdPokeBalls && IsPokeBallSprite(sprite, tag))
+        return false;
+    return true;
 }
 
 void BattleFx_MarkOam(const struct Sprite *sprite, uint8_t first, uint8_t end)
