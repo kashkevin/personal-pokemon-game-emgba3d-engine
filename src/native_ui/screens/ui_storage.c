@@ -10,8 +10,12 @@
  * and mail checks, releasing, markings, box options (jump, wallpaper, name),
  * the summary. The design's toolbar keeps its two buttons for the game's
  * own: PARTY POKéMON (the design's Box list is the game's JUMP, in the
- * plate's box options) and CLOSE BOX. Moving several Pokémon at once keeps
- * the game's own picture while it runs. Project-owned.
+ * plate's box options) and CLOSE BOX. Several Pokémon at once (MOVE POKéMON
+ * with the quick hand, A held over a Pokémon): the selection grows with the
+ * cursor while A is held, then the hand carries the group lifted over the box
+ * (its shadow, the places in the way marked), a cell at a time and into the
+ * next box, and puts it down; the mouse drags a selection (held button) and
+ * clicks a place to put the group down. Project-owned.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -112,6 +116,18 @@ static const u8 sText_BackHelp[] = _("Put the party away and go back to the Box.
 static const u8 sText_ItemInHand[] = _(" is in your hand.");
 static const u8 sText_ItemWhere[] = _("Give it to a Pokémon, or put it away.");
 static const u8 sText_Dot[] = _(" · ");
+static const u8 sText_Selected[] = _(" selected.");
+static const u8 sText_OnePokemon[] = _("1 Pokémon");
+static const u8 sText_Pokemon[] = _(" Pokémon");
+static const u8 sText_SelectMore[] = _("Move to select more; let go to pick them up.");
+static const u8 sText_SelectMoreHint[] = _("Select more");
+static const u8 sText_LetGo[] = _("Let go: pick up");
+static const u8 sText_MoveGroup1[] = _("Move ");
+static const u8 sText_MoveGroup2[] = _(" where?");
+static const u8 sText_GroupFits[] = _("Nothing is in the way here.");
+static const u8 sText_GroupBlocked[] = _("Another Pokémon is in the way here.");
+static const u8 sText_Move[] = _("Move");
+static const u8 sText_HoldForSeveral[] = _("Hold the button down to select several at once.");
 
 /* ---------------------------------------------------------------- captured state */
 
@@ -150,6 +166,20 @@ static u8 sListCounts[TOTAL_BOXES_COUNT];
 static int sClosingT;
 static u8 sHeldItemName[24];
 static u8 sSwapName[POKEMON_NAME_BUFFER_SIZE];   /* holding: the Pokémon a put-down would swap with */
+static struct NativeStorageBox sGroup;   /* several at once: the group the hand carries */
+static int sGroupOffX, sGroupOffY;       /* ... the hand's place in it (cells) */
+/* a mouse drag selecting several Pokémon: A held while the button is */
+static struct
+{
+    bool armed;          /* the goal walks the cursor there, then the button decides */
+    bool holdA;
+} sDrag;
+/* a click on a box arrow while carrying a group: pushed that way until the box turns */
+static struct
+{
+    s8 dir;              /* -1 left, 1 right, 0 none */
+    int presses;
+} sPush;
 /* a mouse goal: the game's own presses until its cursor is there, then a button */
 static struct
 {
@@ -157,6 +187,7 @@ static struct
     u8 area;
     s8 pos;
     u16 then;            /* A_BUTTON, DPAD_LEFT/RIGHT (turning the box on its title), or 0 */
+    bool noWrap;         /* carrying a group: it may not wrap round the box's sides */
     int frames;
 } sGoal;
 
@@ -167,12 +198,13 @@ static bool Detect(void)
     if (!Storage_NativeUiState(&s))
     {
         sGoal.on = false;
+        sDrag.armed = sDrag.holdA = false;
+        sPush.dir = 0;
         sSliding = false;
         sSlideTo = -1;
         return false;
     }
-    /* several Pokémon moving at once: the game's own picture while it runs */
-    return s.phase != NATIVE_STORAGE_NONE && s.phase != NATIVE_STORAGE_MULTI;
+    return s.phase != NATIVE_STORAGE_NONE;
 }
 
 /* the box the screen shows now (the scroll's target as soon as it starts) */
@@ -186,6 +218,21 @@ static int ShownBoxId(void)
     return sS.scrollTo >= 0 ? sS.scrollTo : sS.box;
 }
 
+static bool Carrying(void)
+{
+    return sS.multi == NATIVE_STORAGE_MULTI_MOVING || sS.multi == NATIVE_STORAGE_MULTI_PLACING;
+}
+
+/* the group's index of a box position (-1: outside it) */
+static int GroupIndexAt(int pos)
+{
+    int c = pos % IN_BOX_COLUMNS - sS.groupPos % IN_BOX_COLUMNS, r = pos / IN_BOX_COLUMNS - sS.groupPos / IN_BOX_COLUMNS;
+
+    if (c < 0 || r < 0 || c >= sS.groupCols || r >= sS.groupRows)
+        return -1;
+    return r * sS.groupCols + c;
+}
+
 static void CaptureDisplay(void)
 {
     struct Pokemon mon;
@@ -195,6 +242,13 @@ static void CaptureDisplay(void)
     if (sS.phase == NATIVE_STORAGE_LOADING)
     {
         has = false;
+    }
+    else if (Carrying())
+    {
+        /* the group's Pokémon under the hand (kept while the group slides a cell) */
+        if (sS.groupSlideX != 0 || sS.groupSlideY != 0)
+            return;
+        has = Storage_NativeUiGroupMon((sGroupOffY * sS.groupCols) + sGroupOffX, &mon);
     }
     else if (sS.holdingMon)
     {
@@ -276,6 +330,7 @@ static void SetGoal(u8 area, s8 pos, u16 then)
     sGoal.area = area;
     sGoal.pos = pos;
     sGoal.then = then;
+    sGoal.noWrap = false;
     sGoal.frames = 0;
 }
 
@@ -296,8 +351,19 @@ static void GoalStep(void)
         return;
     if (sS.cursorArea == sGoal.area && (sS.cursorPos == sGoal.pos || sGoal.area == NATIVE_STORAGE_BOX_TITLE))
     {
-        if (sGoal.then != 0)
+        if (sDrag.armed)
+        {
+            /* still held: A goes down and stays down (several at once); else a click */
+            sDrag.armed = false;
+            if (NativeUi_MouseHeld())
+                sDrag.holdA = true;
+            else
+                NativeUi_QueuePress(A_BUTTON);
+        }
+        else if (sGoal.then != 0)
+        {
             NativeUi_QueuePress(sGoal.then);
+        }
         sGoal.on = false;
         return;
     }
@@ -312,6 +378,8 @@ static void GoalStep(void)
             c = sS.cursorPos % IN_BOX_COLUMNS;
             if (r != tr)
                 key = tr > r ? DPAD_DOWN : DPAD_UP;
+            else if (sGoal.noWrap)
+                key = tc > c ? DPAD_RIGHT : DPAD_LEFT;
             else
                 key = (tc - c + IN_BOX_COLUMNS) % IN_BOX_COLUMNS <= (c - tc + IN_BOX_COLUMNS) % IN_BOX_COLUMNS ? DPAD_RIGHT : DPAD_LEFT;
         }
@@ -375,6 +443,55 @@ static void GoalStep(void)
         NativeUi_QueuePress(key);
 }
 
+/* a mouse drag: while the button is held the game's cursor follows the mouse
+ * over the box (A held, the selection grows); letting go lets go of A */
+static void DragStep(void)
+{
+    const struct UiHit *hover;
+    int r, c, tr, tc;
+
+    if (!sDrag.holdA)
+        return;
+    if (!NativeUi_MouseHeld() || sS.mode != NATIVE_STORAGE_MOVE_MONS || sS.phase == NATIVE_STORAGE_CLOSING)
+    {
+        sDrag.holdA = false;
+        return;
+    }
+    if (sS.multi != NATIVE_STORAGE_MULTI_SELECTING || sS.phase != NATIVE_STORAGE_MAIN || !sS.ready
+     || NativeUi_PressesPending() || sS.cursorArea != NATIVE_STORAGE_IN_BOX)
+        return;
+    hover = NativeUi_MouseHover();
+    if (hover == NULL || hover->id != HIT_SLOT || hover->index == sS.cursorPos)
+        return;
+    r = sS.cursorPos / IN_BOX_COLUMNS;
+    c = sS.cursorPos % IN_BOX_COLUMNS;
+    tr = hover->index / IN_BOX_COLUMNS;
+    tc = hover->index % IN_BOX_COLUMNS;
+    if (r != tr)
+        NativeUi_QueuePress(tr > r ? DPAD_DOWN : DPAD_UP);
+    else
+        NativeUi_QueuePress(tc > c ? DPAD_RIGHT : DPAD_LEFT);
+}
+
+/* carrying a group: a box arrow pushes it that way until the box turns (or L / R) */
+static void PushStep(void)
+{
+    if (sPush.dir == 0)
+        return;
+    if (!Carrying() || sS.scrollTo >= 0 || sPush.presses > IN_BOX_COLUMNS + 1)
+    {
+        sPush.dir = 0;
+        return;
+    }
+    if (sS.phase != NATIVE_STORAGE_MAIN || !sS.ready || NativeUi_PressesPending())
+        return;
+    if (sS.lrBoxes)
+        NativeUi_QueuePress(sPush.dir < 0 ? L_BUTTON : R_BUTTON);
+    else
+        NativeUi_QueuePress(sPush.dir < 0 ? DPAD_LEFT : DPAD_RIGHT);
+    sPush.presses++;
+}
+
 /* ---------------------------------------------------------------- capture */
 
 static void Capture(void)
@@ -383,6 +500,20 @@ static void Capture(void)
 
     Storage_NativeUiState(&sS);
     Storage_NativeUiBox(sS.box, &sBox);
+    if (Carrying())
+    {
+        Storage_NativeUiGroup(&sGroup);
+        /* the hand's place in the group (the cursor lags while the group slides a cell) */
+        if (sS.groupSlideX == 0 && sS.groupSlideY == 0 && sS.cursorArea == NATIVE_STORAGE_IN_BOX)
+        {
+            sGroupOffX = sS.cursorPos % IN_BOX_COLUMNS - sS.groupPos % IN_BOX_COLUMNS;
+            sGroupOffY = sS.cursorPos / IN_BOX_COLUMNS - sS.groupPos / IN_BOX_COLUMNS;
+        }
+    }
+    else
+    {
+        memset(&sGroup, 0, sizeof(sGroup));
+    }
     if (sS.scrollTo >= 0)
     {
         Storage_NativeUiBox(sS.scrollTo, &sTarget);
@@ -447,6 +578,8 @@ static void Capture(void)
     }
     sClosingT = sS.phase == NATIVE_STORAGE_CLOSING ? sClosingT + 1 : 0;
     GoalStep();
+    DragStep();
+    PushStep();
 }
 
 /* ---------------------------------------------------------------- pieces */
@@ -697,16 +830,52 @@ static void Monitor(int t)
 
 /* ---------------------------------------------------------------- the box */
 
+/* the quick hand's green (several at once happen with it) */
+static struct UiRamp QuickRamp(void)
+{
+    return UiRampDefault(UI_P_CMD_POKEMON);
+}
+
+/* SELECTING: the rectangle from where A went down to the cursor (cells) */
+static void SelectionRect(int *c0, int *r0, int *c1, int *r1)
+{
+    int fc = sS.multiFrom % IN_BOX_COLUMNS, fr = sS.multiFrom / IN_BOX_COLUMNS;
+    int tc = sS.multiTo % IN_BOX_COLUMNS, tr = sS.multiTo / IN_BOX_COLUMNS;
+
+    *c0 = fc < tc ? fc : tc;
+    *c1 = fc < tc ? tc : fc;
+    *r0 = fr < tr ? fr : tr;
+    *r1 = fr < tr ? tr : fr;
+}
+
 static void BoxContents(const struct NativeStorageBox *b, int ox, bool current, int t)
 {
     UiG_Blit(UiStorage_Wall(b->wallpaper, sS.waldaColors), BX + 4 + ox, BY + 4);
+    if (current && sS.multi == NATIVE_STORAGE_MULTI_SELECTING)
+    {
+        /* the selected places light up under their Pokémon */
+        struct UiRamp q = QuickRamp();
+        int c0, r0, c1, r1;
+
+        SelectionRect(&c0, &r0, &c1, &r1);
+        UiG_Save();
+        UiG_Alpha(0.55);
+        for (int r = r0; r <= r1; r++)
+            for (int c = c0; c <= c1; c++)
+                UiG_Paint(UiM_Rounded4(36, 36, 3, 3, 3, 3), GX + c * CELL + 2 + ox, GY + r * CELL + 2, UiMix(q.hi, UI_HEX(0xFFFFFF), 0.5),
+                          &(struct UiPaint){UI_NONE, UI_NONE, UI_NONE, 0, 0, NULL, 0});
+        UiG_Restore();
+    }
     for (int i = 0; i < IN_BOX_COUNT; i++)
     {
         int cx = GX + (i % IN_BOX_COLUMNS) * CELL + ox, cy = GY + (i / IN_BOX_COLUMNS) * CELL;
-        bool on = current && !sSliding && sS.cursorArea == NATIVE_STORAGE_IN_BOX && sS.cursorPos == i;
+        bool on = current && !sSliding && sS.cursorArea == NATIVE_STORAGE_IN_BOX && sS.cursorPos == i && !Carrying();
         int fr = on ? (t / 10) % 2 : 0;
 
         if (b->species[i] == SPECIES_NONE)
+            continue;
+        /* being put down: the group draws them until they land */
+        if (current && sS.multi == NATIVE_STORAGE_MULTI_PLACING && GroupIndexAt(i) >= 0 && sGroup.species[GroupIndexAt(i)] != SPECIES_NONE)
             continue;
         UiGfx_MonIcon(b->species[i], b->personality[i], b->isEgg[i], fr, cx + 4, cy + 3 - (on && fr ? 1 : 0), NULL);
         if (b->heldItem[i] != ITEM_NONE)
@@ -755,11 +924,74 @@ static void Box(int t)
     if (canBox)
         for (int i = 0; i < IN_BOX_COUNT; i++)
             UiG_Hit(HIT_SLOT, i, GX + (i % IN_BOX_COLUMNS) * CELL, GY + (i / IN_BOX_COLUMNS) * CELL, CELL, CELL);
-    if (sS.cursorArea == NATIVE_STORAGE_IN_BOX && !sSliding && !sS.holdingMon && sS.heldItem == ITEM_NONE && sS.phase != NATIVE_STORAGE_LOADING)
+    if (sS.multi == NATIVE_STORAGE_MULTI_SELECTING && !sSliding)
+    {
+        struct UiRamp q = QuickRamp();
+        int c0, r0, c1, r1;
+
+        SelectionRect(&c0, &r0, &c1, &r1);
+        UiW_SelectFrame(UiM_Rounded4((c1 - c0 + 1) * CELL - 4, (r1 - r0 + 1) * CELL - 4, 3, 3, 3, 3), GX + c0 * CELL + 2,
+                        GY + r0 * CELL + 2, q.base, q.hi, 0);
+    }
+    else if (sS.cursorArea == NATIVE_STORAGE_IN_BOX && !sSliding && !sS.holdingMon && sS.heldItem == ITEM_NONE
+          && sS.phase != NATIVE_STORAGE_LOADING && sS.multi == NATIVE_STORAGE_MULTI_NONE)
     {
         int cx = GX + (sS.cursorPos % IN_BOX_COLUMNS) * CELL, cy = GY + (sS.cursorPos / IN_BOX_COLUMNS) * CELL;
 
         UiW_SelectFrame(UiM_Rounded4(36, 36, 3, 3, 3, 3), cx + 2, cy + 2, UI_NONE, UI_NONE, 0);
+    }
+}
+
+/* the group's top left as drawn (it slides a cell at a time) */
+static void GroupOrigin(int *x, int *y)
+{
+    *x = GX + (sS.groupPos % IN_BOX_COLUMNS) * CELL + sS.groupSlideX * CELL / 6;
+    *y = GY + (sS.groupPos / IN_BOX_COLUMNS) * CELL + sS.groupSlideY * CELL / 6;
+}
+
+/* several at once: the group over the box, lifted (GBA pixels to the design's
+ * cell), its shadow where it would land, the places in the way marked */
+static void Group(int t)
+{
+    int gx, gy, w, h, lift;
+
+    if (!Carrying() || sGroup.count == 0)
+        return;
+    GroupOrigin(&gx, &gy);
+    w = sS.groupCols * CELL;
+    h = sS.groupRows * CELL;
+    lift = sS.groupLift * CELL / 24;
+    if (!sSliding)
+    {
+        UiG_Save();
+        UiG_Clip(BX + 4, BY + 4, WW, WH);
+        UiG_Alpha(0.3);
+        UiG_Paint(UiM_Rounded4(w - 4, h - 4, 4, 4, 4, 4), gx + 2, gy + 2, UI_P_INK, &(struct UiPaint){UI_NONE, UI_NONE, UI_NONE, 0, 0, NULL, 0});
+        UiG_Restore();
+        /* where a Pokémon is in the way (the engine says whether it can be put down) */
+        if (!sS.canPlace && sS.multi == NATIVE_STORAGE_MULTI_MOVING && sS.groupSlideX == 0 && sS.groupSlideY == 0)
+        {
+            for (int i = 0; i < sS.groupCols * sS.groupRows; i++)
+            {
+                int pos = sS.groupPos + (i / sS.groupCols) * IN_BOX_COLUMNS + i % sS.groupCols;
+
+                if (sGroup.species[i] == SPECIES_NONE || pos >= IN_BOX_COUNT || sBox.species[pos] == SPECIES_NONE)
+                    continue;
+                UiW_SelectFrame(UiM_Rounded4(36, 36, 3, 3, 3, 3), GX + (pos % IN_BOX_COLUMNS) * CELL + 2,
+                                GY + (pos / IN_BOX_COLUMNS) * CELL + 2, UI_P_CMD_FIGHT, UiMix(UI_P_CMD_FIGHT, UI_HEX(0xFFFFFF), 0.5), 0);
+            }
+        }
+    }
+    UiW_CarryFrame(UiM_Rounded4(w - 4, h - 4, 4, 4, 4, 4), gx + 2, gy + 2 - lift);
+    for (int i = 0; i < sS.groupCols * sS.groupRows; i++)
+    {
+        int cx = gx + (i % sS.groupCols) * CELL, cy = gy + (i / sS.groupCols) * CELL - lift;
+
+        if (sGroup.species[i] == SPECIES_NONE)
+            continue;
+        UiGfx_MonIcon(sGroup.species[i], sGroup.personality[i], sGroup.isEgg[i], (t / 10) % 2, cx + 4, cy + 3, NULL);
+        if (sGroup.heldItem[i] != ITEM_NONE)
+            UiGfx_Icon("held_item", cx + 28, cy + 28, 0);
     }
 }
 
@@ -885,7 +1117,20 @@ static void HandOver(int t)
 {
     int x, y, bob = UiW_Nudge(t);
 
-    if (sSliding || sS.phase == NATIVE_STORAGE_LOADING)
+    if (sS.phase == NATIVE_STORAGE_LOADING)
+        return;
+    if (Carrying())
+    {
+        /* the closed hand over its place in the group, lifted with it */
+        int gx, gy;
+
+        GroupOrigin(&gx, &gy);
+        x = gx + sGroupOffX * CELL + 4;
+        y = gy + sGroupOffY * CELL + 3 - sS.groupLift * CELL / 24;
+        Hand(x + 9, y - 9, true);
+        return;
+    }
+    if (sSliding)
         return;
     switch (sS.cursorArea)
     {
@@ -945,6 +1190,42 @@ static void StatusLines(u8 *l1, int s1, u8 *l2, int s2)
     const struct NativeStorageBox *b = ShownBox();
 
     l1[0] = l2[0] = EOS;
+    if (sS.multi == NATIVE_STORAGE_MULTI_SELECTING)
+    {
+        int c0, r0, c1, r1, n = 0;
+        u8 num[8];
+
+        SelectionRect(&c0, &r0, &c1, &r1);
+        for (int r = r0; r <= r1; r++)
+            for (int c = c0; c <= c1; c++)
+                n += b->species[r * IN_BOX_COLUMNS + c] != SPECIES_NONE;
+        if (n == 1)
+        {
+            UiText_Append(l1, s1, sText_OnePokemon);
+        }
+        else
+        {
+            NumberText(num, sizeof(num), n, 1);
+            UiText_Append(l1, s1, num);
+            UiText_Append(l1, s1, sText_Pokemon);
+        }
+        UiText_Append(l1, s1, sText_Selected);
+        UiText_Append(l2, s2, sText_SelectMore);
+        return;
+    }
+    if (Carrying())
+    {
+        u8 num[8];
+
+        UiText_Append(l1, s1, sText_MoveGroup1);
+        NumberText(num, sizeof(num), sGroup.count, 1);
+        UiText_Append(l1, s1, num);
+        UiText_Append(l1, s1, sText_Pokemon);
+        UiText_Append(l1, s1, sText_MoveGroup2);
+        if (sS.multi == NATIVE_STORAGE_MULTI_MOVING && !sSliding)
+            UiText_Append(l2, s2, sS.canPlace ? sText_GroupFits : sText_GroupBlocked);
+        return;
+    }
     if (sS.holdingMon)
     {
         struct UiMon held;
@@ -1011,6 +1292,9 @@ static void StatusLines(u8 *l1, int s1, u8 *l2, int s2)
         UiText_Append(l1, s1, sText_IsIn);
         UiText_Append(l1, s1, b->name);
         UiText_Append(l1, s1, sText_Period);
+        /* the quick hand in MOVE POKéMON: held over a Pokémon, it selects several */
+        if (sS.mode == NATIVE_STORAGE_MOVE_MONS && sS.quickMode)
+            UiText_Append(l2, s2, sText_HoldForSeveral);
         return;
     }
 }
@@ -1046,6 +1330,21 @@ static void Hints(void)
     switch (sS.phase)
     {
     case NATIVE_STORAGE_MAIN:
+    case NATIVE_STORAGE_BUSY:
+        if (sS.multi == NATIVE_STORAGE_MULTI_SELECTING)
+        {
+            h[n++] = (struct UiHintItem){UI_ACT_MOVE, sText_SelectMoreHint};
+            h[n++] = (struct UiHintItem){UI_ACT_CONFIRM, sText_LetGo};
+            break;
+        }
+        if (Carrying())
+        {
+            h[n++] = (struct UiHintItem){UI_ACT_MOVE, sText_Move};
+            h[n++] = (struct UiHintItem){UI_ACT_CONFIRM, sText_PutDown};
+            if (sS.lrBoxes)
+                h[n++] = (struct UiHintItem){UI_ACT_TABS, sText_TurnBox};
+            break;
+        }
         if (sS.holdingMon)
         {
             h[n++] = (struct UiHintItem){UI_ACT_CONFIRM, sText_PutDown};
@@ -1178,6 +1477,7 @@ static void Draw(int t)
     UiW_TitleTab(0, 8, "POK" UI_CAPS_E_ACUTE "MON STORAGE", &r, 0, NULL);
     Monitor(t);
     Box(t);
+    Group(t);
     Party(t);
     Toolbar();
     HandOver(t);
@@ -1257,10 +1557,35 @@ static bool Click(const struct UiHit *hit, int button)
     {
     case NATIVE_STORAGE_MAIN:
     case NATIVE_STORAGE_BUSY:
+        if (sS.multi == NATIVE_STORAGE_MULTI_SELECTING || sS.multi == NATIVE_STORAGE_MULTI_PLACING || sDrag.holdA)
+            return true;   /* A is held (the keys or the mouse): the engine is selecting */
+        if (sS.multi == NATIVE_STORAGE_MULTI_MOVING)
+        {
+            if (hit->id == HIT_SLOT && sS.groupCols > 0 && sS.groupRows > 0)
+            {
+                /* the group goes as near the place as it fits (its hand there), then down */
+                int tc = hit->index % IN_BOX_COLUMNS - sGroupOffX, tr = hit->index / IN_BOX_COLUMNS - sGroupOffY;
+
+                tc = tc < 0 ? 0 : tc > IN_BOX_COLUMNS - sS.groupCols ? IN_BOX_COLUMNS - sS.groupCols : tc;
+                tr = tr < 0 ? 0 : tr > IN_BOX_ROWS - sS.groupRows ? IN_BOX_ROWS - sS.groupRows : tr;
+                SetGoal(NATIVE_STORAGE_IN_BOX, (tr + sGroupOffY) * IN_BOX_COLUMNS + tc + sGroupOffX, A_BUTTON);
+                sGoal.noWrap = true;
+            }
+            else if (hit->id == HIT_ARROW)
+            {
+                sPush.dir = hit->index == 0 ? -1 : 1;
+                sPush.presses = 0;
+            }
+            return true;
+        }
         switch (hit->id)
         {
         case HIT_SLOT:
             SetGoal(NATIVE_STORAGE_IN_BOX, hit->index, A_BUTTON);
+            /* the quick hand over a Pokémon in MOVE POKéMON: held, it selects several */
+            if (sS.mode == NATIVE_STORAGE_MOVE_MONS && sS.quickMode && !sS.holdingMon && sS.scrollTo < 0
+             && sBox.species[hit->index] != SPECIES_NONE)
+                sDrag.armed = true;
             return true;
         case HIT_PARTY:
             if (sS.mode == NATIVE_STORAGE_WITHDRAW)
@@ -1362,7 +1687,13 @@ static bool Wheel(int dy)
 static uint16_t FilterKeys(uint16_t keys, uint16_t newKeys)
 {
     if (newKeys != 0)
+    {
         sGoal.on = false;   /* the player's own buttons take over */
+        sDrag.armed = false;
+        sPush.dir = 0;
+    }
+    if (sDrag.holdA)
+        keys |= A_BUTTON;
     return keys;
 }
 

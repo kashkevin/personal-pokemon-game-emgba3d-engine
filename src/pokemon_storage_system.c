@@ -10214,6 +10214,66 @@ static u8 NativeUiStorageMode(u8 boxOption)
     }
 }
 
+// Several Pokémon at once (MOVE POKéMON with the quick hand): the selection while
+// A is held, then the group the hand carries (lifted, sliding a cell at a time,
+// put down), from sMultiMove. Its functions run in MSTATE_MULTIMOVE_RUN*.
+static void NativeUiStorageMulti(TaskFunc f, struct NativeStorage *out)
+{
+    bool32 running = f == Task_PokeStorageMain && sStorage->state >= MSTATE_MULTIMOVE_RUN
+                  && sStorage->state <= MSTATE_MULTIMOVE_RUN_MOVED;
+    u8 func, state, steps;
+
+    out->multi = NATIVE_STORAGE_MULTI_NONE;
+    if (sMultiMove == NULL || sStorage->boxOption != OPTION_MOVE_MONS)
+        return;
+    func = sMultiMove->funcId;
+    state = sMultiMove->state;
+    steps = sMultiMove->bgMoveSteps;
+    if (sStorage->inBoxMovingMode == MOVE_MODE_MULTIPLE_SELECTING
+     || (sStorage->inBoxMovingMode == MOVE_MODE_MULTIPLE_MOVING && running && func == MULTIMOVE_GRAB_SELECTION && state == 0))
+    {
+        out->multi = NATIVE_STORAGE_MULTI_SELECTING;
+        if (running && func == MULTIMOVE_START && state < 2)
+        {
+            // its corners are set at its second step
+            out->multiFrom = out->multiTo = sCursorPosition;
+        }
+        else
+        {
+            out->multiFrom = sMultiMove->fromRow * IN_BOX_COLUMNS + sMultiMove->fromColumn;
+            out->multiTo = sMultiMove->toRow * IN_BOX_COLUMNS + sMultiMove->toColumn;
+        }
+        return;
+    }
+    if (sStorage->inBoxMovingMode == MOVE_MODE_MULTIPLE_MOVING)
+    {
+        out->multi = NATIVE_STORAGE_MULTI_MOVING;
+        out->groupLift = 8;
+        if (running && func == MULTIMOVE_GRAB_SELECTION)
+            out->groupLift = state < 2 ? 0 : 8 - steps;
+        else if (running && func == MULTIMOVE_MOVE_MONS && steps != 0)
+        {
+            out->groupSlideX = (s16)sMultiMove->bgX < 0 ? -steps : (s16)sMultiMove->bgX > 0 ? steps : 0;
+            out->groupSlideY = (s16)sMultiMove->bgY < 0 ? -steps : (s16)sMultiMove->bgY > 0 ? steps : 0;
+        }
+        out->canPlace = MultiMove_CanPlaceSelection();
+    }
+    else if (running && func == MULTIMOVE_PLACE_MONS && state <= 1)
+    {
+        // put down: the Pokémon are in the box from its first step on
+        out->multi = NATIVE_STORAGE_MULTI_PLACING;
+        out->groupLift = state == 0 ? 8 : steps;
+        out->canPlace = TRUE;
+    }
+    else
+    {
+        return;
+    }
+    out->groupPos = sMultiMove->minRow * IN_BOX_COLUMNS + sMultiMove->minColumn;
+    out->groupCols = sMultiMove->columnsTotal;
+    out->groupRows = sMultiMove->rowsTotal;
+}
+
 bool32 Storage_NativeUiState(struct NativeStorage *out)
 {
     TaskFunc f;
@@ -10241,11 +10301,9 @@ bool32 Storage_NativeUiState(struct NativeStorage *out)
     else if (f == Task_ChangeScreen || f == Task_ShowMonSummary || f == Task_NameBox || f == Task_GiveItemFromBag
           || ((f == Task_OnCloseBoxPressed || f == Task_OnBPressed) && sStorage->state >= 3))
         out->phase = NATIVE_STORAGE_CLOSING;
-    else if (sStorage->inBoxMovingMode != MOVE_MODE_NORMAL
-          || (f == Task_PokeStorageMain && sStorage->state >= MSTATE_MULTIMOVE_RUN && sStorage->state <= MSTATE_MULTIMOVE_RUN_MOVED))
-        out->phase = NATIVE_STORAGE_MULTI;
     else
         out->phase = NATIVE_STORAGE_BUSY;
+    NativeUiStorageMulti(f, out);
     for (i = 0; i < ARRAY_COUNT(sNativeUiStorageWaits); i++)
     {
         if (sNativeUiStorageWaits[i].func == f && sNativeUiStorageWaits[i].state == sStorage->state
@@ -10268,7 +10326,7 @@ bool32 Storage_NativeUiState(struct NativeStorage *out)
         out->scrollDir = sStorage->scrollDirection > 0 ? 1 : -1;
     }
     // (while the screen sets itself up again, the moving Pokémon is restored only at its fifth step)
-    out->holdingMon = sIsMonBeingMoved && sStorage->inBoxMovingMode == MOVE_MODE_NORMAL
+    out->holdingMon = sIsMonBeingMoved && sStorage->inBoxMovingMode == MOVE_MODE_NORMAL && out->multi == NATIVE_STORAGE_MULTI_NONE
                    && !(f == Task_InitPokeStorage && sStorage->state <= 4);
     if (out->holdingMon)
         out->heldMon = sStorage->movingMon;
@@ -10300,7 +10358,8 @@ bool32 Storage_NativeUiState(struct NativeStorage *out)
         for (i = 0; i < NUM_MON_MARKINGS && i < ARRAY_COUNT(out->marks); i++)
             out->marks[i] = sStorage->markMenu.markingsArray[i];
     }
-    out->messageShown = Window_NativeUiShown(WIN_MESSAGE);
+    // (several at once: their window on BG0 covers the message window's place)
+    out->messageShown = out->multi == NATIVE_STORAGE_MULTI_NONE && Window_NativeUiShown(WIN_MESSAGE);
     if (out->messageShown)
         StringCopyN(out->message, sStorage->messageText, min(sizeof(out->message), sizeof(sStorage->messageText)));
     return TRUE;
@@ -10354,6 +10413,87 @@ bool32 Storage_NativeUiBoxMon(u32 box, u32 pos, struct Pokemon *out)
     if (mon == NULL || !GetBoxMonData(mon, MON_DATA_SANITY_HAS_SPECIES))
         return FALSE;
     BoxMonToMon(mon, out);
+    return TRUE;
+}
+
+// The group the hand carries (row by row, groupCols a row; empty places too).
+void Storage_NativeUiGroup(struct NativeStorageBox *out)
+{
+    u32 i, count;
+
+    memset(out, 0, sizeof(*out));
+    if (sMultiMove == NULL)
+        return;
+    count = min(sMultiMove->columnsTotal * sMultiMove->rowsTotal, IN_BOX_COUNT);
+    for (i = 0; i < count; i++)
+    {
+        struct BoxPokemon *mon = &sMultiMove->boxMons[i];
+
+        if (!GetBoxMonData(mon, MON_DATA_SANITY_HAS_SPECIES))
+            continue;
+        out->species[i] = GetBoxMonData(mon, MON_DATA_SPECIES);
+        out->personality[i] = GetBoxMonData(mon, MON_DATA_PERSONALITY);
+        out->isEgg[i] = GetBoxMonData(mon, MON_DATA_IS_EGG);
+        out->heldItem[i] = GetBoxMonData(mon, MON_DATA_HELD_ITEM);
+        out->count++;
+    }
+}
+
+bool32 Storage_NativeUiGroupMon(u32 index, struct Pokemon *out)
+{
+    if (sMultiMove == NULL || index >= (u32)(sMultiMove->columnsTotal * sMultiMove->rowsTotal) || index >= IN_BOX_COUNT
+     || !GetBoxMonData(&sMultiMove->boxMons[index], MON_DATA_SANITY_HAS_SPECIES))
+        return FALSE;
+    BoxMonToMon(&sMultiMove->boxMons[index], out);
+    return TRUE;
+}
+
+// The Pokémon Storage System's own menu (Task_PCMainMenu, on the field): its
+// options and their descriptions, the cursor, the refusals. data[0] its
+// state, 1 the option shown, 2 the option chosen (see the task's #defines).
+STATIC_ASSERT(OPTIONS_COUNT <= NATIVE_PC_MENU_MAX, NativeUiPcMenuRows);
+
+bool32 Storage_NativeUiMainMenu(struct NativePcMenu *out)
+{
+    u8 taskId = FindTaskIdByFunc(Task_PCMainMenu);
+    const s16 *data;
+    u32 i;
+
+    memset(out, 0, sizeof(*out));
+    if (taskId == TASK_NONE)
+        return FALSE;
+    data = gTasks[taskId].data;
+    out->menu = NATIVE_PC_MENU_STORAGE;
+    out->count = OPTIONS_COUNT;
+    for (i = 0; i < OPTIONS_COUNT; i++)
+        out->labels[i] = sMainMenuTexts[i].text;
+    out->cursor = data[1] >= 0 && data[1] < OPTIONS_COUNT ? data[1] : 0;
+    switch (data[0])
+    {
+    case STATE_LOAD:
+    case STATE_FADE_IN:
+        out->state = NATIVE_PC_MENU_OPENING;
+        break;
+    case STATE_HANDLE_INPUT:
+        out->state = NATIVE_PC_MENU_INPUT;
+        out->cursor = Menu_GetCursorPos();
+        out->ready = !gPaletteFade.active;
+        break;
+    case STATE_ERROR_MSG:
+        out->state = NATIVE_PC_MENU_REFUSED;
+        out->cursor = Menu_GetCursorPos();
+        out->ready = TRUE;
+        out->message = data[2] == OPTION_WITHDRAW ? gText_PartyFull : gText_JustOnePkmn;
+        break;
+    default:
+        out->state = NATIVE_PC_MENU_ENTERING;
+        out->cursor = data[2] >= 0 && data[2] < OPTIONS_COUNT ? data[2] : out->cursor;
+        break;
+    }
+    if (out->cursor >= OPTIONS_COUNT)
+        out->cursor = 0;
+    if (out->message == NULL)
+        out->message = sMainMenuTexts[out->cursor].desc;
     return TRUE;
 }
 #endif // ENABLE_NATIVE_UI

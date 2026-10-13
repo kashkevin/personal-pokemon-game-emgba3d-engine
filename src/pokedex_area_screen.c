@@ -1038,3 +1038,69 @@ static void LoadHGSSScreenSelectBarSubmenu(void)
     CopyToBgTilemapBuffer(1, sPokedexPlusHGSS_ScreenSelectBarSubmenu_Tilemap, 0, 0);
     CopyBgTilemapBufferToVram(1);
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI's AREA page (src/native_ui/screens/ui_dex_pages.c) draws the
+// region map and the species' areas from this state; working out the areas,
+// the input, the glow's pulse and the markers' blink stay here.
+bool32 PokedexArea_NativeUiState(struct NativeDexArea *out)
+{
+    u8 taskId;
+    u32 i, n;
+
+    memset(out, 0, sizeof(*out));
+    if (sPokedexAreaScreen == NULL)
+        return FALSE;
+    out->species = sPokedexAreaScreen->species;
+    out->regionMapType = GetRegionMapType(gMapHeader.regionMapSectionId);
+    taskId = FindTaskIdByFunc(Task_HandlePokedexAreaScreenInput);
+    if (taskId != TASK_NONE)
+    {
+        out->ready = gTasks[taskId].tState == 1 && !gPaletteFade.active;
+        out->leaving = gTasks[taskId].tState >= 2;
+        out->next = gTasks[taskId].data[1];
+    }
+    // FindMapsWithMon, then BuildAreaGlowTilemap (DrawAreaGlow's first two steps)
+    out->found = taskId != TASK_NONE || sPokedexAreaScreen->drawAreaGlowState >= 2;
+    if (!out->found)
+        return TRUE;
+    n = sPokedexAreaScreen->numOverworldAreas < NATIVE_DEX_AREA_MAX ? sPokedexAreaScreen->numOverworldAreas : NATIVE_DEX_AREA_MAX;
+    for (i = 0; i < n; i++)
+        out->overworldSections[i] = sPokedexAreaScreen->overworldAreasWithMons[i].regionMapSectionId;
+    out->overworldCount = n;
+    n = sPokedexAreaScreen->numSpecialAreas < NATIVE_DEX_AREA_MARKERS ? sPokedexAreaScreen->numSpecialAreas : NATIVE_DEX_AREA_MARKERS;
+    for (i = 0; i < n; i++)
+        out->specialSections[i] = sPokedexAreaScreen->specialAreaRegionMapSectionIds[i];
+    out->specialCount = n;
+    for (i = 0; i < sPokedexAreaScreen->numAreaMarkerSprites && i < NATIVE_DEX_AREA_MARKERS; i++)
+    {
+        const struct Sprite *sprite = sPokedexAreaScreen->areaMarkerSprites[i];
+
+        out->markerX[i] = sprite->x + sprite->x2;
+        out->markerY[i] = sprite->y + sprite->y2;
+        if (i == 0)
+            out->markersShown = !sprite->invisible;
+    }
+    out->showingMarkers = sPokedexAreaScreen->showingMarkers;
+    out->glowEva = gSineTable[sPokedexAreaScreen->areaShadeBldArgLo & 0x7F] >> 4;
+    out->glowEvb = gSineTable[sPokedexAreaScreen->areaShadeBldArgHi & 0x7F] >> 4;
+    out->glowTilemap = sPokedexAreaScreen->areaGlowTilemap;
+    out->glowGfx = sAreaGlow_Gfx;
+    out->glowPalette = (const u16 *)sAreaGlow_Pal;
+    out->markerGfx = sAreaMarkerTiles;
+    out->markerPalette = sAreaMarkerPalette;
+    if (sPokedexAreaScreen->regionMap.playerIconSprite != NULL)
+    {
+        const struct Sprite *icon = sPokedexAreaScreen->regionMap.playerIconSprite;
+
+        out->playerShown = !icon->invisible;
+        out->playerX = icon->x + icon->x2;
+        out->playerY = icon->y + icon->y2;
+    }
+    out->female = gSaveBlock2Ptr->playerGender == FEMALE;
+    out->mapScrollY = 8;   // PokedexAreaMapChangeBgY(-8): the map sits 8 pixels down
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI
