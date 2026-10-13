@@ -1072,6 +1072,10 @@ u32 Battle_NativeUiPlayerInput(u32 battler);
 /* battle_controller_safari.c: the same for the Safari Zone's controller (its action
  * menu BALL, POKéBLOCK, GO NEAR, RUN on the same 2x2; the Pokéblock case as BAG) */
 u32 Battle_NativeUiSafariInput(u32 battler);
+/* battle_controller_wally.c: what Wally's catching tutorial shows of its own
+ * choices (it makes them itself: nothing waits for the player's buttons);
+ * actionCursor: where its action cursor is (it goes to BAG before the Ball) */
+u32 Battle_NativeUiWallyInput(u32 battler, u8 *actionCursor);
 /* sprite.c: the OBJ tiles a sheet tag holds */
 bool32 Sprite_NativeUiTagTiles(u16 tag, u16 *start, u16 *count);
 
@@ -1086,6 +1090,9 @@ bool32 TextPrinter_NativeUiWindow(u8 windowId, const u8 **start, const u8 **curr
 bool32 TextPrinter_NativeUiWindowText(u8 windowId, u8 *dst, u32 size, u32 *printed, bool8 *active);
 /* the window's printer waits for a button (a page break or a pause) */
 bool32 TextPrinter_NativeUiWindowWaiting(u8 windowId);
+/* window.c: a window removed forgets its last string (WINDOWS_MAX: every
+ * window, as InitWindows sets them up anew) */
+void TextPrinter_NativeUiForgetWindow(u32 windowId);
 
 /* window.c: the window's tiles are on its background now (shown, not cleared) */
 bool32 Window_NativeUiShown(u8 windowId);

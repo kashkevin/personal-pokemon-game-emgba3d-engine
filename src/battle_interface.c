@@ -3416,6 +3416,20 @@ static void NativeUiNoteLevel(enum BattlerId battler, u8 level)
         sNativeUiBoxNotes[battler].level = level;
 }
 
+// Still this battler's healthbox: a menu's return rebuilds the sprites, and
+// Wally's tutorial leaves the player's out (ReshowBattleScreen), its id stale.
+static bool32 NativeUiIsHealthboxOf(const struct Sprite *s, u32 battler)
+{
+    const struct SpriteTemplate *t = s->template;
+
+    if (t == &sHealthboxSafariSpriteTemplate)
+        return TRUE;
+    if ((t < &sHealthboxPlayerSpriteTemplates[0] || t >= &sHealthboxPlayerSpriteTemplates[ARRAY_COUNT(sHealthboxPlayerSpriteTemplates)])
+     && (t < &sHealthboxOpponentSpriteTemplates[0] || t >= &sHealthboxOpponentSpriteTemplates[ARRAY_COUNT(sHealthboxOpponentSpriteTemplates)]))
+        return FALSE;
+    return s->hMain_Battler == (s16)battler;
+}
+
 bool32 Battle_NativeUiBox(u32 battler, struct NativeBattleBox *out)
 {
     const struct NativeUiBoxNotes *n;
@@ -3426,7 +3440,7 @@ bool32 Battle_NativeUiBox(u32 battler, struct NativeBattleBox *out)
     if (battler >= MAX_BATTLERS_COUNT || battler >= gBattlersCount || gBattleSpritesDataPtr == NULL)
         return FALSE;
     id = gHealthboxSpriteIds[battler];
-    if (id >= MAX_SPRITES || !gSprites[id].inUse)
+    if (id >= MAX_SPRITES || !gSprites[id].inUse || !NativeUiIsHealthboxOf(&gSprites[id], battler))
         return FALSE;
     box = &gSprites[id];
     n = &sNativeUiBoxNotes[battler];

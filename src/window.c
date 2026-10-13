@@ -4,6 +4,10 @@
 #include "bg.h"
 #include "blit.h"
 #include "decompress.h"
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+#endif
+#line 7
 
 COMMON_DATA void *gWindowBgTilemapBuffers[NUM_BACKGROUNDS] = {0};
 extern u32 gWindowTileAutoAllocEnabled;
@@ -76,6 +80,10 @@ bool32 InitWindowsUnchecked(const struct WindowTemplate *templates)
         gWindows[i].window = sDummyWindowTemplate;
         gWindows[i].tileData = NULL;
     }
+#ifdef ENABLE_NATIVE_UI
+    TextPrinter_NativeUiForgetWindow(WINDOWS_MAX); // the windows are gone: their last strings too
+#endif
+#line 79
 
     for (i = 0, allocatedBaseBlock = 0, bgLayer = templates[i].bg; bgLayer != 0xFF && i < WINDOWS_MAX; ++i, bgLayer = templates[i].bg)
     {
@@ -246,6 +254,10 @@ int AddWindowWithoutTileMap(const struct WindowTemplate *template)
 void RemoveWindow(u32 windowId)
 {
     u32 bgLayer = gWindows[windowId].window.bg;
+#ifdef ENABLE_NATIVE_UI
+    TextPrinter_NativeUiForgetWindow(windowId);
+#endif
+#line 249
 
     if (gWindowTileAutoAllocEnabled == TRUE)
         BgTileAllocOp(bgLayer, gWindows[windowId].window.baseBlock, gWindows[windowId].window.width * gWindows[windowId].window.height, 2);
