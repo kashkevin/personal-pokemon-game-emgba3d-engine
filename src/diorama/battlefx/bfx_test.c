@@ -271,6 +271,10 @@ static void Init(void)
         mkdir(t.out, 0755);
 #endif
     }
+    /* the view first: a battle fought without a gallery (PKMN_BFX_TEST_REAL_*) draws the HD layer too (before,
+     * it was set only for galleries, so such battles drew their GBA effects) */
+    view = SDL_getenv("PKMN_BFX_TEST_VIEW");
+    t.viewHd = !(view && strcmp(view, "gba") == 0);
     moves = SDL_getenv("PKMN_BFX_TEST_MOVES");
     snprintf(t.animsSpec, sizeof(t.animsSpec), "%s", SDL_getenv("PKMN_BFX_TEST_ANIMS") ? SDL_getenv("PKMN_BFX_TEST_ANIMS") : "");
     if ((moves == NULL || moves[0] == '\0') && t.animsSpec[0] == '\0')
@@ -285,8 +289,6 @@ static void Init(void)
 #else
     mkdir(t.out, 0755);
 #endif
-    view = SDL_getenv("PKMN_BFX_TEST_VIEW");
-    t.viewHd = !(view && strcmp(view, "gba") == 0);
     t.exitAfter = EnvInt("PKMN_BFX_TEST_EXIT", 0) != 0;
     t.attacker = EnvInt("PKMN_BFX_TEST_ATTACKER", 0);
     t.target = EnvInt("PKMN_BFX_TEST_TARGET", 1);
