@@ -32,10 +32,13 @@
  * the game wait for the core every frame (the default in test builds);
  * PKMN_BATTLEFX_QUALITY=auto|full|high|medium|low|gba picks the HD effects'
  * quality (BattleFx_Quality below); PKMN_BATTLEFX_ATTACH=0 places the effects
- * for the GBA pictures even where the animated battle sprites show others. The
- * same keys can be put in battlefx/settings.cfg (key=value lines: enabled,
- * log, sync, quality, attach, drawBudgetMs). Failures are always logged and
- * the GBA animation is shown.
+ * for the GBA pictures even where the animated battle sprites show others;
+ * PKMN_BATTLEFX_GBA_BELOW_FPS=N (quality auto, default 45): at the lowest
+ * tier, an animation plays its GBA effects when the game shows fewer than N of
+ * its frames a second because of them (0: never). The same keys can be put in
+ * battlefx/settings.cfg (key=value lines: enabled, log, sync, quality, attach,
+ * gbaBelowFps, drawBudgetMs). Failures are always logged and the GBA animation
+ * is shown.
  *
  * Built only with DIORAMA=1 (ENABLE_DIORAMA).
  */

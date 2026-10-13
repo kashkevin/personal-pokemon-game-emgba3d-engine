@@ -75,6 +75,7 @@ static struct
     bool attach;        /* the effects placed for the battlers as shown (battle_fx_attach.h) */
     int quality;        /* BATTLEFX_QUALITY_* (Quality below) */
     int drawBudgetMs;   /* an explicit drawing budget a picture for the HD layers (0: none, the default; ShowWanted) */
+    int gbaBelowFps;    /* quality auto, at the lowest tier: the GBA effects when fewer game frames a second show (PaceCheck) */
     char dir[1024];
     SDL_atomic_t state; /* enum CoreState */
     SDL_Thread *loader;
@@ -218,6 +219,8 @@ static void ReadSettingsFile(void)
             sCore.sync = value != 0;
         else if (strcmp(line, "drawBudgetMs") == 0)
             sCore.drawBudgetMs = value > 0 ? value : 0;
+        else if (strcmp(line, "gbaBelowFps") == 0)
+            sCore.gbaBelowFps = value < 0 ? 0 : value > 60 ? 60 : value;
         else if (strcmp(line, "attach") == 0)
             sCore.attach = value != 0;
         else if (strcmp(line, "quality") == 0 && ParseQuality(eq + 1) >= 0)
@@ -238,6 +241,7 @@ static void ReadSettings(void)
     sCore.log = false;
     sCore.attach = true;
     sCore.drawBudgetMs = 0;
+    sCore.gbaBelowFps = 45; /* three quarters of the game's 60 frames a second */
 #ifdef BATTLEFX_TEST
     sCore.sync = true; /* the test driver compares the core's frames with the game's, frame for frame */
     sCore.quality = BATTLEFX_QUALITY_FULL; /* the tests draw every animation in full, however slow the drawing */
@@ -272,9 +276,12 @@ static void ReadSettings(void)
     {
         const char *budget = SDL_getenv("PKMN_BATTLEFX_DRAW_BUDGET_MS");
         const char *quality = SDL_getenv("PKMN_BATTLEFX_QUALITY");
+        const char *below = SDL_getenv("PKMN_BATTLEFX_GBA_BELOW_FPS");
 
         if (budget != NULL && budget[0] != '\0')
             sCore.drawBudgetMs = atoi(budget) > 0 ? atoi(budget) : 0;
+        if (below != NULL && below[0] != '\0')
+            sCore.gbaBelowFps = atoi(below) < 0 ? 0 : atoi(below) > 60 ? 60 : atoi(below);
         if (quality != NULL && quality[0] != '\0')
         {
             if (ParseQuality(quality) >= 0)
@@ -2620,10 +2627,12 @@ static struct CoreSlot *WaitForFrame(int within, Uint32 ms)
  * or fewer game frames shown a second than the game's rate (a slide show: the game slowed instead) - and the HD
  * layers are a part of why (their cost measured on this PC: GPU timer queries), the next tier down is
  * drawn: at once when their cost could close much of the gap, on trial (undone when it does not help) when it is
- * smaller but not negligible. Below the lowest tier the animation plays its GBA effects, and after DRAW_SLOW_MAX
- * of those the battle does (sHdOff). A PC that keeps the game's pace - every powerful graphics card - is never
- * lowered, however much the HD layers cost; a battle that kept the pace with room to spare raises the tier again
- * at the next battle's start (once: a tier raised that had to be lowered again stays). Main thread. */
+ * smaller but not negligible. At the lowest tier, with the game showing fewer than gbaBelowFps of its frames a
+ * second (45: three quarters) because of them, the animation plays its GBA effects, and after DRAW_SLOW_MAX of
+ * those the battle does (sHdOff); above that the lowest tier stays (a few frames lost, the HD effects kept). A PC
+ * that keeps the game's pace - every powerful graphics card - is never lowered, however much the HD layers cost;
+ * a battle that kept the pace with room to spare raises the tier again at the next battle's start (once: a tier
+ * raised that had to be lowered again stays). Main thread. */
 #define GAME_FRAME_MS (1000.0 / 59.7275)
 #define PACE_FRAMES 30   /* game frames with HD layers a decision looks at (half a second) */
 #define PACE_SKIPS_OK 1  /* ... of them unseen and still keeping the pace (a stray hitch) */
@@ -2641,6 +2650,7 @@ static struct
     bool raiseBlocked;  /* a tier raised had to be lowered again: not raised again this session */
     bool noGain;        /* this battle: a lower tier did not help (not lowered on trial again) */
     bool notCauseLogged;
+    bool lowKeptLogged; /* this battle: the lowest tier kept, the game above sCore.gbaBelowFps (logged once) */
     unsigned goodFrames, badFrames; /* this battle at this tier: game frames in windows that kept the pace, didn't */
     double hdMsGood;    /* the HD layers' cost a picture in the windows that kept the pace (running mean) */
     unsigned hdMsCount;
@@ -2667,6 +2677,7 @@ static void QualityBattleStart(void)
     sQuality.trialFrom = -1;
     sQuality.noGain = false;
     sQuality.notCauseLogged = false;
+    sQuality.lowKeptLogged = false;
     sQuality.raisedTo = -1;
     if (BattleFx_Quality() == BATTLEFX_QUALITY_AUTO && t > BFX_TIER_FULL && !sQuality.raiseBlocked
      && sQuality.goodFrames >= PACE_RAISE_FRAMES && sQuality.badFrames == 0 && sQuality.hdMsCount > 0
@@ -2753,8 +2764,9 @@ static void PaceCheck(void)
     deficit = interval - GAME_FRAME_MS;
     if (p.hdMs < 0.0)
         p.hdMs = p.plainMs > 0.0 && interval > p.plainMs ? interval - p.plainMs : 0.0;
-    /* lowering the tier could close much of the gap (or the HD layers take a large share of each picture) */
-    strong = p.hdMs >= 0.5 * deficit || p.hdMs >= 0.25 * interval;
+    /* lowering the tier could close much of the gap (or the HD layers take a large share of each picture: with
+     * pictures faster than game frames on average, frames go unseen through uneven pictures, not a gap) */
+    strong = (deficit > 0.0 && p.hdMs >= 0.5 * deficit) || p.hdMs >= 0.25 * interval;
     /* ... or is worth a trial: they take a tenth of a game frame or more (with VSync a picture a little too slow
      * waits for the next refresh, so the time between presents can say less than the work does) */
     worth = p.hdMs >= 0.1 * GAME_FRAME_MS;
@@ -2800,11 +2812,18 @@ static void PaceCheck(void)
         QualitySetTier(sQuality.tier + 1);
         return;
     }
-    if (strong)
+    if (strong && shown < (double)sCore.gbaBelowFps)
     {
         PlayGba(p.hdMs, shown); /* below the lowest tier */
         BattleFxGL_PaceReset();
         return;
+    }
+    if (strong && !sQuality.lowKeptLogged)
+    {
+        SDL_Log("Battle FX: at the lowest quality the HD effects take %.1f ms of each %.1f ms picture%s and the game "
+                "shows %.1f of its 60 frames a second: kept (the GBA effects play below %d)", p.hdMs, interval,
+                p.gpuTimed ? " on the GPU" : "", shown, sCore.gbaBelowFps);
+        sQuality.lowKeptLogged = true;
     }
     BattleFxGL_PaceReset();
 }
