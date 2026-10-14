@@ -261,7 +261,7 @@ OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS) $(BFX_QJS_OBJS)
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
-.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-clock check-mp-objects check-spawn-claims check-coop-exp check-coop-controller
+.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-clock check-mp-objects check-spawn-claims check-coop-exp check-coop-controller check-graphics-mode
 .SUFFIXES:
 .SECONDARY:
 .DELETE_ON_ERROR:
@@ -328,6 +328,12 @@ check-battle-names: $(TARGET)
 # The Pokemon cry functions before any cry has played (KNOWN_ISSUES N39: a double
 # battle's send-out right after a save was continued stopped a cry that was not
 # there, natively a segmentation fault). Each must return.
+# The launcher's Graphics mode (3D Diorama / Classic 2D): --probe-graphics, a failed
+# renderer start (exit 78 with an explanation, no save or settings written) and the
+# Classic 2D game keeping the 3D view's settings. Run it on either game build.
+check-graphics-mode: $(TARGET)
+	@bash tools/pc_port/tests/check_graphics_mode.sh ./$(TARGET)
+
 check-cry-stop: $(TARGET)
 	@./$(TARGET) --selftest-cry-stop > $(OBJ_DIR)/selftest-cry-stop.log 2>&1; status=$$?; \
 	  tail -n 3 $(OBJ_DIR)/selftest-cry-stop.log; exit $$status

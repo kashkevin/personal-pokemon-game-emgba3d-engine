@@ -368,6 +368,171 @@ static void SampleGameHeap(void)
         sGameHeapPeak = used;
 }
 
+
+// ---------------------------------------------------------------------------
+// Graphics start-up check and failure report (the launcher's Graphics mode).
+//
+//   --probe-graphics   Checks, on a hidden throwaway window, what this build's
+//                      renderer needs (the 3D build: an OpenGL 3.3 core context,
+//                      every entry point and the compositor's shaders; the
+//                      Classic 2D build: an SDL renderer), prints one JSON line
+//                      on stdout and exits: 0 = usable, 78 = not usable. It
+//                      reads no save or settings file and writes nothing.
+//   When the same things fail at a normal start the game says so in a message
+//   box and exits with 78 (it never closes silently).
+//
+// Test hooks: PKMN_GRAPHICS_FORCE_FAIL=<reason> makes both fail as if the
+// renderer were unavailable; PKMN_GRAPHICS_NO_DIALOG=1 prints the message
+// instead of showing a message box (unattended runs).
+// ---------------------------------------------------------------------------
+#define EXIT_GRAPHICS_UNAVAILABLE 78
+
+#ifdef ENABLE_DIORAMA
+#define GRAPHICS_MODE_ID "3d"
+#define GRAPHICS_MODE_NAME "3D Diorama"
+#else
+#define GRAPHICS_MODE_ID "2d"
+#define GRAPHICS_MODE_NAME "Classic 2D"
+#endif
+
+static const char *GraphicsForcedFailure(void)
+{
+    const char *value = SDL_getenv("PKMN_GRAPHICS_FORCE_FAIL");
+
+    return value != NULL && value[0] != '\0' && strcmp(value, "0") != 0 ? value : NULL;
+}
+
+// A JSON string body: quotes, backslashes and control characters made safe.
+static void JsonText(const char *in, char *out, size_t size)
+{
+    size_t n = 0;
+
+    for (; in != NULL && *in != '\0' && n + 7 < size; in++)
+    {
+        unsigned char c = (unsigned char)*in;
+
+        if (c == '"' || c == '\\')
+        {
+            out[n++] = '\\';
+            out[n++] = (char)c;
+        }
+        else if (c < 0x20 || c >= 0x7f)
+            out[n++] = ' ';
+        else
+            out[n++] = (char)c;
+    }
+    out[n] = '\0';
+}
+
+static void PrintGraphicsProbe(bool supported, const char *reason, const char *detail,
+                               const char *renderer, const char *version)
+{
+    char r[64], d[240], g[160], v[100];
+
+    JsonText(reason, r, sizeof(r));
+    JsonText(detail, d, sizeof(d));
+    JsonText(renderer, g, sizeof(g));
+    JsonText(version, v, sizeof(v));
+    printf("{\"graphics\":\"%s\",\"supported\":%s,\"reason\":\"%s\",\"detail\":\"%s\","
+           "\"renderer\":\"%s\",\"version\":\"%s\"}\n",
+           GRAPHICS_MODE_ID, supported ? "true" : "false", r, d, g, v);
+    fflush(stdout);
+}
+
+static int RunGraphicsProbe(void)
+{
+    SDL_Window *window;
+    const char *forced = GraphicsForcedFailure();
+
+    if (forced != NULL)
+    {
+        PrintGraphicsProbe(false, "forced", forced, "", "");
+        return EXIT_GRAPHICS_UNAVAILABLE;
+    }
+    if (SDL_Init(SDL_INIT_VIDEO) < 0)
+    {
+        PrintGraphicsProbe(false, "sdl_init", SDL_GetError(), "", "");
+        return EXIT_GRAPHICS_UNAVAILABLE;
+    }
+#ifdef ENABLE_DIORAMA
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+    window = SDL_CreateWindow("probe", 0, 0, 64, 64, SDL_WINDOW_HIDDEN | SDL_WINDOW_OPENGL);
+    if (window == NULL)
+    {
+        PrintGraphicsProbe(false, "window", SDL_GetError(), "", "");
+        SDL_Quit();
+        return EXIT_GRAPHICS_UNAVAILABLE;
+    }
+    {
+        struct DioramaGLProbe probe;
+        bool ok = DioramaGL_Probe(window, &probe);
+
+        PrintGraphicsProbe(ok, probe.reason, probe.detail, probe.renderer, probe.version);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return ok ? 0 : EXIT_GRAPHICS_UNAVAILABLE;
+    }
+#else
+    window = SDL_CreateWindow("probe", 0, 0, 64, 64, SDL_WINDOW_HIDDEN);
+    if (window == NULL)
+    {
+        PrintGraphicsProbe(false, "window", SDL_GetError(), "", "");
+        SDL_Quit();
+        return EXIT_GRAPHICS_UNAVAILABLE;
+    }
+    {
+        // The game asks for an accelerated renderer; any renderer, software
+        // included, is enough for the Classic 2D picture.
+        SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, 0);
+        SDL_RendererInfo info;
+        bool ok = renderer != NULL;
+
+        if (!ok)
+            renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+        ok = renderer != NULL;
+        if (ok && SDL_GetRendererInfo(renderer, &info) == 0)
+            PrintGraphicsProbe(true, "ok", "", info.name, "");
+        else
+            PrintGraphicsProbe(ok, ok ? "ok" : "renderer", ok ? "" : SDL_GetError(), "", "");
+        if (renderer != NULL)
+            SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return ok ? 0 : EXIT_GRAPHICS_UNAVAILABLE;
+    }
+#endif
+}
+
+// A normal start whose graphics cannot start: say so, never close silently.
+static int ReportGraphicsFailure(const char *reason, const char *detail)
+{
+    char message[900];
+
+    SDL_Log("Graphics unavailable (%s): %s", GRAPHICS_MODE_NAME, detail);
+    SDL_snprintf(message, sizeof(message),
+#ifdef ENABLE_DIORAMA
+        "EmeraldTogether could not start its 3D graphics on this PC.\n\n"
+        "Your game, save and progress are untouched.\n\n"
+        "Close this message, then start the game again from the EmeraldTogether launcher and "
+        "choose \"Launch in Classic 2D\" (or set Graphics mode to Classic 2D under Help > Game display). "
+        "Updating your graphics driver may also make 3D work.\n\n"
+#else
+        "EmeraldTogether could not start its Classic 2D graphics on this PC.\n\n"
+        "Your game, save and progress are untouched. Updating your graphics driver may fix this.\n\n"
+#endif
+        "Technical detail: %s (%s)", reason, detail);
+    if (SDL_getenv("PKMN_GRAPHICS_NO_DIALOG") != NULL)
+        fprintf(stderr, "%s\n", message);
+    else
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "EmeraldTogether", message, NULL);
+    return EXIT_GRAPHICS_UNAVAILABLE;
+}
+
 int main(int argc, char **argv)
 {
     // PKMN_HIGH_ADDRESS_TEST=1 (Windows): everything after this lies above 2 GB
@@ -377,6 +542,12 @@ int main(int argc, char **argv)
     FaultCompat_Init(); // GBA results for integer division by zero
     NullTrap_Init(); // development aid; no-op unless PKMN_NULL_TRAP=1 on Linux
     CrashReport_Init(); // writes crash.log if the game crashes
+    for (int i = 1; i < argc; i++)
+    {
+        // Before the console below: stdout must stay the launcher's pipe.
+        if (strcmp(argv[i], "--probe-graphics") == 0)
+            return RunGraphicsProbe();
+    }
 
     // Open an output console on Windows
 #ifdef _WIN32
@@ -403,7 +574,7 @@ int main(int argc, char **argv)
                 ) < 0)
     {
         DBGPRINTF("SDL could not initialize! SDL_Error: %s\n", SDL_GetError());
-        return 1;
+        return ReportGraphicsFailure("sdl_init", SDL_GetError());
     }
 
 #ifdef __ANDROID__
@@ -435,6 +606,8 @@ int main(int argc, char **argv)
         MemoryInfo_Format(&memory, line, sizeof(line));
         SDL_Log("Memory: %s", line);
     }
+    if (GraphicsForcedFailure() != NULL)
+        return ReportGraphicsFailure("forced", GraphicsForcedFailure()); // before any save is read
     ReadSaveFile(sSavePath);
     ReadConfigFile();
 
@@ -473,7 +646,7 @@ int main(int argc, char **argv)
     if (sdlWindow == NULL)
     {
         DBGPRINTF("Window could not be created! SDL_Error: %s\n", SDL_GetError());
-        return 1;
+        return ReportGraphicsFailure("window", SDL_GetError());
     }
 
 #ifndef ENABLE_DIORAMA
@@ -489,7 +662,7 @@ int main(int argc, char **argv)
     if (sdlRenderer == NULL)
     {
         DBGPRINTF("Renderer could not be created! SDL_Error: %s\n", SDL_GetError());
-        return 1;
+        return ReportGraphicsFailure("renderer", SDL_GetError());
     }
 
     SDL_SetRenderDrawColor(sdlRenderer, 0, 0, 0, 255);
@@ -526,10 +699,14 @@ int main(int argc, char **argv)
 #ifdef ENABLE_DIORAMA
     if (!DioramaGL_Init(sdlWindow, sBorderBackgroundCount))
     {
+        const char *missing = DioramaGL_MissingFunction();
+        char detail[128];
+
+        SDL_snprintf(detail, sizeof(detail), missing[0] != '\0' ? "%s is missing" : "OpenGL setup failed", missing);
         DioramaGL_Shutdown();
         SDL_DestroyWindow(sdlWindow);
         SDL_Quit();
-        return 1;
+        return ReportGraphicsFailure("opengl", detail);
     }
     DioramaSnapshotExchange_Init();
     DioramaScene_Init();
@@ -947,6 +1124,31 @@ static void ReadSaveFile(const char *path)
     SDL_Log("Loaded %u bytes of save data from %s", (unsigned)bytesRead, path);
 }
 
+#ifndef ENABLE_DIORAMA
+// The 3D view's own settings (camera, trees, zoom, tilt) pass through a
+// Classic 2D session unchanged: this build does not use them, but it rewrites
+// the same settings file, and a player who switches back to 3D keeps their choices.
+static char sKept3dLines[6][48];
+static unsigned sKept3dCount;
+
+static bool Keep3dLine(const char *line)
+{
+    static const char *const keys[] = { "cameraMode=", "treeStyle=", "adventureZoom=", "adventureTilt=",
+                                        "dioramaZoom=", "dioramaTilt=" };
+
+    for (unsigned i = 0; i < sizeof(keys) / sizeof(keys[0]); i++)
+    {
+        if (strncmp(line, keys[i], strlen(keys[i])) == 0)
+        {
+            if (sKept3dCount < sizeof(sKept3dLines) / sizeof(sKept3dLines[0]))
+                SDL_snprintf(sKept3dLines[sKept3dCount++], sizeof(sKept3dLines[0]), "%s", line);
+            return true;
+        }
+    }
+    return false;
+}
+#endif
+
 static void ReadConfigFile(void)
 {
     FILE *configFile = fopen(sConfigPath, "r");
@@ -992,6 +1194,10 @@ static void ReadConfigFile(void)
             sPlatformSettings[PLATFORM_SETTING_VOLUME] = value;
         else if (sscanf(line, "cryVolume=%u", &value) == 1 && value <= 10)
             sPlatformSettings[PLATFORM_SETTING_CRY_VOLUME] = value;
+#ifndef ENABLE_DIORAMA
+        else if (Keep3dLine(line))
+            ; // kept for the next 3D session
+#endif
 #ifdef ENABLE_DIORAMA
         else if (strncmp(line, "cameraMode=", 11) == 0)
         {
@@ -1064,6 +1270,9 @@ static void StoreConfigFile(void)
     fprintf(configFile, "adventureTilt=%d\n", sCameraTiltSteps[DIORAMA_CAMERA_ADVENTURE]);
     fprintf(configFile, "dioramaZoom=%d\n", sCameraZoomSteps[DIORAMA_CAMERA_DIORAMA]);
     fprintf(configFile, "dioramaTilt=%d\n", sCameraTiltSteps[DIORAMA_CAMERA_DIORAMA]);
+#else
+    for (unsigned i = 0; i < sKept3dCount; i++)
+        fprintf(configFile, "%s%s", sKept3dLines[i], strchr(sKept3dLines[i], '\n') != NULL ? "" : "\n");
 #endif
     fclose(configFile);
 }

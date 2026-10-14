@@ -1391,6 +1391,44 @@ static void AdoptLatestSnapshot(void)
     }
 }
 
+bool DioramaGL_Probe(SDL_Window *window, struct DioramaGLProbe *probe)
+{
+    const char *text;
+    SDL_GLContext context;
+
+    memset(probe, 0, sizeof(*probe));
+    probe->reason = "context";
+    context = SDL_GL_CreateContext(window);
+    if (context == NULL)
+    {
+        SDL_snprintf(probe->detail, sizeof(probe->detail), "%s", SDL_GetError());
+        return false;
+    }
+    text = (const char *)glGetString(GL_RENDERER);
+    SDL_snprintf(probe->renderer, sizeof(probe->renderer), "%s", text != NULL ? text : "");
+    text = (const char *)glGetString(GL_VERSION);
+    SDL_snprintf(probe->version, sizeof(probe->version), "%s", text != NULL ? text : "");
+    probe->reason = "functions";
+    if (!DioramaGL_LoadFunctions())
+    {
+        SDL_snprintf(probe->detail, sizeof(probe->detail), "%s is missing", DioramaGL_MissingFunction());
+        SDL_GL_DeleteContext(context);
+        return false;
+    }
+    probe->reason = "shaders";
+    if (!CreateProgram())
+    {
+        SDL_snprintf(probe->detail, sizeof(probe->detail), "the compositor's shaders did not compile");
+        SDL_GL_DeleteContext(context);
+        return false;
+    }
+    dglDeleteProgram(sProgram);
+    sProgram = 0;
+    SDL_GL_DeleteContext(context);
+    probe->reason = "ok";
+    return true;
+}
+
 bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
 {
     sWindow = window;
