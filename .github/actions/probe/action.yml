@@ -1,0 +1,10 @@
+name: Engine access probe
+description: Proves a workflow in another repository of the same owner can read this repository's files without a token. Changes nothing.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        root="$(cd "${{ github.action_path }}/../../.." && pwd)"
+        echo "action path: ${{ github.action_path }}"
+        if [ -f "$root/Makefile_pc" ]; then echo "ENGINE SOURCE VISIBLE ($(ls "$root" | wc -l) top-level entries)"; else echo "engine source NOT visible"; exit 1; fi
