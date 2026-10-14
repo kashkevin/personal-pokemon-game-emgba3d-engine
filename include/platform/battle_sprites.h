@@ -78,12 +78,15 @@ struct BattleSpriteView
 
 /* Per OAM entry, the library sprite drawn in its place this frame (NULL: drawn as ever). */
 extern const struct BattleSpriteView *gBattleSpriteObjViews[128];
-/* Per BG, the battler copy on it (BG1, BG2; NULL: none), its tiles and palette. */
+/* Per BG, the battler copy on it (BG1, BG2): its library frame (NULL: drawn as ever), its tiles
+ * and palette. shown: the layer shows a copy this frame, with or without a library frame (the 3D
+ * battle carries the picture's edges out from the background only). */
 struct BattleSpriteBgCopy
 {
     const struct BattleSpriteView *view;
     uint16_t firstTile;
     uint8_t paletteId;
+    bool shown;
 };
 extern struct BattleSpriteBgCopy gBattleSpriteBgCopies[4];
 

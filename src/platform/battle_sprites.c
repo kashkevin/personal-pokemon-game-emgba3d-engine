@@ -802,6 +802,31 @@ static void Overflow(void)
     }
 }
 
+/* A move's copy of a battler on BG1 or BG2 ("monbg"), while the layer still shows it: its tiles
+ * and palette, with the pack or without (gBattleSpriteBgCopies). */
+static void NoteBgCopies(void)
+{
+    unsigned i;
+
+    for (i = 1; i < 3; i++)
+    {
+        const struct MonBg *copy = &sLatched.monBg[i];
+        uint16_t control = *(uint16_t *)(REG_ADDR_BG0CNT + i * 2);
+        const uint16_t *screen;
+
+        if (copy->battler < 0 || copy->battler >= BS_BATTLERS)
+            continue;
+        if ((REG_DISPCNT & 7) != 0 || !(REG_DISPCNT & (0x100 << i)) || (control & BGCNT_256COLOR))
+            continue;
+        screen = (const uint16_t *)BG_SCREEN_ADDR((control >> 8) & 0x1F);
+        if (screen[0] != (uint16_t)(copy->firstTile | (copy->paletteId << 12)))
+            continue;
+        gBattleSpriteBgCopies[i].firstTile = copy->firstTile;
+        gBattleSpriteBgCopies[i].paletteId = copy->paletteId;
+        gBattleSpriteBgCopies[i].shown = true;
+    }
+}
+
 void BattleSprites_BeginFrame(void)
 {
     const struct OamData *oam = (const struct OamData *)OAM;
@@ -816,6 +841,8 @@ void BattleSprites_BeginFrame(void)
     if (!sInit)
         Init();
     sFrames++;
+    if (sLatched.battleScreen)
+        NoteBgCopies();
     if (sPack == NULL || !sLatched.battleScreen)
     {
         sBattleFrames = 0;
@@ -881,23 +908,15 @@ void BattleSprites_BeginFrame(void)
         gBattleSpriteObjViews[i] = ViewFor(b, (const uint16_t *)(PLTT + 0x200) + e->paletteNum * 16);
     }
 
-    /* A move's copy of a battler on BG1 or BG2 ("monbg"), while the layer still shows it. */
+    /* A move's copy of a battler on BG1 or BG2 ("monbg"), while the layer still shows it
+     * (NoteBgCopies): drawn from the library. */
     for (i = 1; i < 3; i++)
     {
         const struct MonBg *copy = &sLatched.monBg[i];
-        uint16_t control = *(uint16_t *)(REG_ADDR_BG0CNT + i * 2);
-        const uint16_t *screen;
 
-        if (copy->battler < 0 || !sBaseUsable[copy->battler])
-            continue;
-        if ((REG_DISPCNT & 7) != 0 || !(REG_DISPCNT & (0x100 << i)) || (control & BGCNT_256COLOR))
-            continue;
-        screen = (const uint16_t *)BG_SCREEN_ADDR((control >> 8) & 0x1F);
-        if (screen[0] != (uint16_t)(copy->firstTile | (copy->paletteId << 12)))
+        if (!gBattleSpriteBgCopies[i].shown || !sBaseUsable[copy->battler])
             continue;
         gBattleSpriteBgCopies[i].view = ViewFor(copy->battler, (const uint16_t *)PLTT + copy->paletteId * 16);
-        gBattleSpriteBgCopies[i].firstTile = copy->firstTile;
-        gBattleSpriteBgCopies[i].paletteId = copy->paletteId;
     }
     Overflow();
     sCost.setupSum += SDL_GetPerformanceCounter() - sCost.begin;

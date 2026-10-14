@@ -532,9 +532,18 @@ static bool winCheckHorizontalBounds(u16 left, u16 right, u16 xpos)
         return (xpos >= left && xpos < right);
 }
 
+#ifdef ENABLE_BATTLE_SPRITES
+// Per BG, whether this line's first and last pixels (side 0, 1) are a
+// battler's body: a move's copy of the battler drawn from the library
+// (LibraryBgCopyLine), not the layer's own background.
+static bool sBgCopyAtEdge[4][2];
+#endif
+
 #ifdef ENABLE_DIORAMA
 // The backgrounds alone at column x (the composite below without sprites),
-// for carrying the picture out past its edges (gDioramaSceneEdges).
+// for carrying the picture out past its edges (gDioramaSceneEdges). A
+// battler is not background: its copy on a BG is passed over, as its sprite
+// is, or a frame reaching the edge would be smeared across the window.
 static void SceneEdge(struct scanlineData *scanline, uint16_t backdrop, int x,
                       bool windowsEnabled, unsigned blendMode, struct DioramaSceneEdge *out)
 {
@@ -554,6 +563,10 @@ static void SceneEdge(struct scanlineData *scanline, uint16_t backdrop, int x,
 
             if (!isbgEnabled(bgnum) || !getAlphaBit(pixel))
                 continue;
+#ifdef ENABLE_BATTLE_SPRITES
+            if (sBgCopyAtEdge[(int)bgnum][x != 0])
+                continue;
+#endif
             if (windowsEnabled)
             {
                 winEffectEnable = (scanline->winMask[x] & WINMASK_CLR) != 0;
@@ -1001,7 +1014,7 @@ static void DrawLibraryObjLine(struct scanlineData *scanline, uint16_t vcount, b
  * shows nothing; anything else the move drew on the layer stays.
  */
 static void LibraryBgCopyLine(uint16_t control, uint16_t hoffs, uint16_t voffs, int lineNum, uint16_t *line,
-                              const struct BattleSpriteBgCopy *copy)
+                              const struct BattleSpriteBgCopy *copy, bool atEdge[2])
 {
     const struct BattleSpriteView *view = copy->view;
     unsigned int mapW = bgMapSizes[control >> 14][0] * 8, mapH = bgMapSizes[control >> 14][1] * 8;
@@ -1030,6 +1043,38 @@ static void LibraryBgCopyLine(uint16_t control, uint16_t hoffs, uint16_t voffs, 
         }
         else if (index != 0 && !(line[x] & 0x8000))
             line[x] = view->colors[index] | 0x8000;
+        else
+            continue;
+        /* The battler's body at the picture's edge (SceneEdge passes it over). */
+        if (index != 0 && (x == 0 || x == DISPLAY_WIDTH - 1))
+            atEdge[x != 0] = true;
+    }
+}
+
+/* The same copy drawn from its own tiles (no library frame): whether the line's first and last
+ * pixels are the battler's body (SceneEdge passes it over). */
+static void GbaBgCopyEdges(uint16_t control, uint16_t hoffs, uint16_t voffs, int lineNum, const uint16_t *line,
+                           const struct BattleSpriteBgCopy *copy, bool atEdge[2])
+{
+    unsigned int mapW = bgMapSizes[control >> 14][0] * 8, mapH = bgMapSizes[control >> 14][1] * 8;
+    const uint16_t *screen = (const uint16_t *)BG_SCREEN_ADDR((control >> 8) & 0x1F);
+    unsigned int yy = (lineNum + voffs) & (mapH - 1);
+    int side;
+
+    if (yy >= 64)
+        return;
+    for (side = 0; side < 2; side++)
+    {
+        unsigned int x = side ? DISPLAY_WIDTH - 1 : 0;
+        unsigned int xx = (x + hoffs) & (mapW - 1);
+        uint16_t entry;
+
+        /* the copy's 64x64 block is at the layer's map origin */
+        if (xx >= 64 || !(line[x] & 0x8000))
+            continue;
+        entry = screen[(yy / 8) * 32 + xx / 8];
+        if ((unsigned int)((entry & 0x3FF) - copy->firstTile) < 64u)
+            atEdge[side] = true;
     }
 }
 #endif
@@ -1327,6 +1372,9 @@ static void DrawScanline(uint16_t *pixels, uint16_t vcount)
         scanline.prioritySortedBgsCount[priority]++;
     }
     
+#ifdef ENABLE_BATTLE_SPRITES
+    memset(sBgCopyAtEdge, 0, sizeof(sBgCopyAtEdge));
+#endif
     switch (mode)
     {
     case 0:
@@ -1365,7 +1413,10 @@ static void DrawScanline(uint16_t *pixels, uint16_t vcount)
                 // A move's copy of a battler on this layer: its library sprite instead.
                 if (gBattleSpriteBgCopies[bgnum].view != NULL)
                     LibraryBgCopyLine(scanline.bgcnts[bgnum], bghoffs, bgvoffs, vcount, scanline.layers[bgnum],
-                                      &gBattleSpriteBgCopies[bgnum]);
+                                      &gBattleSpriteBgCopies[bgnum], sBgCopyAtEdge[bgnum]);
+                else if (gBattleSpriteBgCopies[bgnum].shown)
+                    GbaBgCopyEdges(scanline.bgcnts[bgnum], bghoffs, bgvoffs, vcount, scanline.layers[bgnum],
+                                   &gBattleSpriteBgCopies[bgnum], sBgCopyAtEdge[bgnum]);
 #endif
             }
         }
