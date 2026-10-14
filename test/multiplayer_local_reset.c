@@ -569,7 +569,11 @@ TEST("Multiplayer static reset: Gen6 new personal shiny rolls preserve the exist
 {
     struct ResetFixture f; SetUpPilot(&f);
     EXPECT(!MultiplayerLocalReset_PersonalGeneration());
-    EXPECT(!ComputePlayerShinyOdds(8, 0));
+    // Every personal roll uses the Gen 6 rate since 80fef1a823 (owner-approved
+    // "Gen 6 personal shiny rate"), not only a static reset's: 0-15 are shiny,
+    // 16 is not. The stored predicate (SHINY_ODDS + shinyModifier) is checked below.
+    EXPECT(ComputePlayerShinyOdds(8, 0));
+    EXPECT(!ComputePlayerShinyOdds(16, 0));
     EXPECT(MultiplayerLocalReset_TryBegin(MP_STATIC_RESET_VOLTORB_1));
     EXPECT(MultiplayerLocalReset_PersonalGeneration());
     EXPECT(ComputePlayerShinyOdds(0, 0)); EXPECT(ComputePlayerShinyOdds(15, 0));

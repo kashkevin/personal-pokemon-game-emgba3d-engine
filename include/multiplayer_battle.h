@@ -145,6 +145,7 @@ void MultiplayerBattle_ResetReceivedFlags(void);
 
 #if TESTING
 void MultiplayerBattle_TestResetAdmissionCleanup(void);
+void MultiplayerBattle_TestSetCoreCount(u8 count);
 #endif
 
 #endif

@@ -7,6 +7,11 @@
 #include "constants/characters.h"
 #include "test/test.h"
 
+// Each test binds the two cores of a native 1v1 to the validator
+// (MultiplayerBattle_TestSetCoreCount): since the co-op commit 761c9c27ff the
+// validator counts cores from the binding, and an unbound one refuses every
+// block. The tests predate that and failed on their first expectation.
+
 static u16 Packet(u8 *wire, u8 buffer, u8 battler, const void *payload, u16 raw)
 {
     u16 padded = raw - raw % 4 + 4;
@@ -34,7 +39,7 @@ TEST("Multiplayer native controller: roles padding sizes and unsafe commands can
 {
     u8 wire[256], bad[4] = {CONTROLLER_DMA3TRANSFER};
     u16 size;
-    MultiplayerBattle_ResetControllerValidation();
+    MultiplayerBattle_ResetControllerValidation(); MultiplayerBattle_TestSetCoreCount(2);
     size = Request(wire, 0, CONTROLLER_LOADMONSPRITE);
     EXPECT(MultiplayerBattle_ValidateController(wire, size, 0));
     EXPECT(!MultiplayerBattle_ValidateController(wire, size, 1));
@@ -48,6 +53,7 @@ TEST("Multiplayer native controller: roles padding sizes and unsafe commands can
     EXPECT(!MultiplayerBattle_ValidateController(wire, size, 0));
     bad[0] = CONTROLLER_GETRAWMONDATA; Packet(wire, B_COMM_TO_CONTROLLER, 0, bad, 4);
     EXPECT(!MultiplayerBattle_ValidateController(wire, size, 0));
+    MultiplayerBattle_TestSetCoreCount(0);
 }
 
 TEST("Multiplayer native controller: GET ALL prevents multi-mon buffer overflow and requires owned reply")
@@ -56,7 +62,7 @@ TEST("Multiplayer native controller: GET ALL prevents multi-mon buffer overflow 
     u8 reply[144] = {CONTROLLER_DATATRANSFER, CONTROLLER_DATATRANSFER, 140};
     struct BattlePokemon mon = {0};
     u16 size;
-    MultiplayerBattle_ResetControllerValidation();
+    MultiplayerBattle_ResetControllerValidation(); MultiplayerBattle_TestSetCoreCount(2);
     size = Packet(wire, B_COMM_TO_CONTROLLER, 1, get, 4);
     EXPECT(!MultiplayerBattle_ValidateController(wire, size, 0));
     wire[10] = 1; EXPECT(MultiplayerBattle_ValidateController(wire, size, 0));
@@ -80,6 +86,7 @@ TEST("Multiplayer native controller: GET ALL prevents multi-mon buffer overflow 
     MultiplayerBattle_NoteController(wire, 0);
     size = Request(wire, 1, CONTROLLER_LOADMONSPRITE);
     EXPECT(MultiplayerBattle_ValidateController(wire, size, 0));
+    MultiplayerBattle_TestSetCoreCount(0);
 }
 
 TEST("Multiplayer native controller: owner DONE waits for action move and party replies")
@@ -90,7 +97,7 @@ TEST("Multiplayer native controller: owner DONE waits for action move and party 
     u16 size;
     for (i = 0; i < ARRAY_COUNT(requests); i++)
     {
-        MultiplayerBattle_ResetControllerValidation();
+        MultiplayerBattle_ResetControllerValidation(); MultiplayerBattle_TestSetCoreCount(2);
         size = Request(wire, 1, requests[i]);
         EXPECT(MultiplayerBattle_ValidateController(wire, size, 0));
         MultiplayerBattle_NoteController(wire, 0);
@@ -109,6 +116,7 @@ TEST("Multiplayer native controller: owner DONE waits for action move and party 
         size = Request(wire, 1, CONTROLLER_LOADMONSPRITE);
         EXPECT(MultiplayerBattle_ValidateController(wire, size, 0));
     }
+    MultiplayerBattle_TestSetCoreCount(0);
 }
 
 TEST("Multiplayer native controller: malformed text cannot index arrays or overrun expansion")
@@ -116,7 +124,7 @@ TEST("Multiplayer native controller: malformed text cannot index arrays or overr
     u8 wire[256], payload[80] = {CONTROLLER_PRINTSTRING};
     struct BattleMsgData message = {0};
     u16 size;
-    MultiplayerBattle_ResetControllerValidation();
+    MultiplayerBattle_ResetControllerValidation(); MultiplayerBattle_TestSetCoreCount(2);
     message.textBuffs[0][0] = message.textBuffs[1][0] = message.textBuffs[2][0] = EOS;
     memcpy(payload + 4, &message, sizeof(message));
     size = Packet(wire, B_COMM_TO_CONTROLLER, 0, payload, sizeof(payload));
@@ -140,6 +148,7 @@ TEST("Multiplayer native controller: malformed text cannot index arrays or overr
     wire[12 + offsetof(struct BattleMsgData, textBuffs) + 2] = 0xFF;
     wire[12 + offsetof(struct BattleMsgData, textBuffs) + 3] = 0xFF;
     EXPECT(!MultiplayerBattle_ValidateController(wire, size, 0));
+    MultiplayerBattle_TestSetCoreCount(0);
 }
 
 TEST("Multiplayer native controller: forbidden setters and invalid selection metadata refuse")
@@ -147,7 +156,7 @@ TEST("Multiplayer native controller: forbidden setters and invalid selection met
     u8 wire[256], payload[44] = {CONTROLLER_SETMONDATA, REQUEST_PERSONALITY_BATTLE};
     struct ChooseMoveStruct moves = {0};
     u16 size;
-    MultiplayerBattle_ResetControllerValidation();
+    MultiplayerBattle_ResetControllerValidation(); MultiplayerBattle_TestSetCoreCount(2);
     size = Packet(wire, B_COMM_TO_CONTROLLER, 0, payload, 7);
     EXPECT(!MultiplayerBattle_ValidateController(wire, size, 0));
     memset(payload, 0, sizeof(payload)); payload[0] = CONTROLLER_CHOOSEMOVE;
@@ -159,4 +168,5 @@ TEST("Multiplayer native controller: forbidden setters and invalid selection met
     moves.moves[0] = 1; moves.currentPP[0] = 2; moves.maxPP[0] = 1;
     memcpy(wire + 12, &moves, sizeof(moves));
     EXPECT(!MultiplayerBattle_ValidateController(wire, size, 0));
+    MultiplayerBattle_TestSetCoreCount(0);
 }

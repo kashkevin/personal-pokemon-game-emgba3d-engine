@@ -1403,7 +1403,16 @@ void MultiplayerBattle_TestResetAdmissionCleanup(void)
     sAdmissionCleanupWaiting = sAdmissionCleanupHandedOff = FALSE;
     memset(&sAdmissionCleanup, 0, sizeof(sAdmissionCleanup));
 }
+
+// test/multiplayer_battle_controller.c checks the controller validator on its
+// own: the number of cores a bound battle gives it (0: unbound again). Since
+// the co-op phase the validator counts cores from the binding.
+void MultiplayerBattle_TestSetCoreCount(u8 count)
+{
+    sBinding.playerCount = count;
+}
 #endif
+#line 1407
 
 void MultiplayerBattle_Init(void)
 {
