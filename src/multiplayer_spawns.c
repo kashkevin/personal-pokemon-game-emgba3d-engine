@@ -470,6 +470,78 @@ static void KeepObjectReserve(void)
     }
 }
 
+// Whether a Pokemon with this look could be drawn once the drawn one at
+// `index` is gone: CanAllocateObject's conditions with its object event, its
+// sprite and (when nothing else uses it) its palette given back.
+static bool32 RoomAfterRemoving(u32 index, u16 graphicsId)
+{
+    const struct ObjectEventGraphicsInfo *info = GetObjectEventGraphicsInfo(graphicsId);
+    const struct ObjectEvent *victim = &gObjectEvents[sObjects[index].objectEventId];
+    u32 i, freeSprites = 0, paletteUsers = 0, paletteNum;
+
+    if (info == NULL || victim->spriteId >= MAX_SPRITES || FreeObjectEvents() + 1 <= SPAWN_OBJECT_RESERVE)
+        return FALSE;
+    for (i = 0; i < MAX_SPRITES; i++)
+        if (!gSprites[i].inUse)
+            freeSprites++;
+    if (freeSprites + 1 < SPAWN_SPRITE_RESERVE)
+        return FALSE;
+    if (IndexOfSpritePaletteTag(info->paletteTag) != 0xFF || IndexOfSpritePaletteTag(TAG_NONE) != 0xFF)
+        return TRUE;
+    paletteNum = gSprites[victim->spriteId].oam.paletteNum;
+    for (i = 0; i < MAX_SPRITES; i++)
+        if (gSprites[i].inUse && gSprites[i].oam.paletteNum == paletteNum)
+            paletteUsers++;
+    return paletteUsers == 1; // RemoveObjectEvent frees an unused palette
+}
+
+// KNOWN_ISSUES M26: the nearest first also when the field is full. A nearer
+// Pokemon that found no room takes the place of the farthest drawn one (never
+// the one being talked to or battled), one a frame, only when that makes room
+// for it and the drawn one is clearly farther (no swapping back and forth).
+#define SPAWN_SWAP_MARGIN 2
+static void MakeRoomForNearest(const u8 *order, u32 count)
+{
+    const struct MultiplayerSpawnSlot *nearest = NULL;
+    u32 i, j, farthest = MP_SPAWN_MAX_SLOTS, farDistance = 0, nearDistance;
+
+    for (j = 0; j < count && nearest == NULL; j++)
+    {
+        const struct MultiplayerSpawnSlot *slot = &sInbound.slots[order[j]];
+        bool32 drawn = FALSE;
+        if (!ValidSlot(slot) || slot->spawnId == sHiddenSpawnId
+         || !OnScreen(slot->x + MAP_OFFSET, slot->y + MAP_OFFSET))
+            continue;
+        for (i = 0; i < MP_SPAWN_MAX_SLOTS; i++)
+            if (sObjects[i].spawnId == slot->spawnId)
+                drawn = TRUE;
+        if (!drawn)
+            nearest = slot;
+    }
+    if (nearest == NULL)
+        return;
+    nearDistance = DistanceToPlayer(nearest->x + MAP_OFFSET, nearest->y + MAP_OFFSET);
+    for (i = 0; i < MP_SPAWN_MAX_SLOTS; i++)
+    {
+        const struct ObjectEvent *objectEvent;
+        u32 d;
+        if (sObjects[i].spawnId == 0 || sObjects[i].spawnId == sClaimSpawnId || !ObjectStillOurs(i))
+            continue;
+        objectEvent = &gObjectEvents[sObjects[i].objectEventId];
+        d = DistanceToPlayer(objectEvent->currentCoords.x, objectEvent->currentCoords.y);
+        if (farthest == MP_SPAWN_MAX_SLOTS || d > farDistance)
+        {
+            farthest = i;
+            farDistance = d;
+        }
+    }
+    if (farthest == MP_SPAWN_MAX_SLOTS || farDistance <= nearDistance + SPAWN_SWAP_MARGIN
+     || !RoomAfterRemoving(farthest, SlotGraphicsId(nearest)))
+        return;
+    RemoveSpawnObject(farthest);
+    SpawnSlotObject(farthest, nearest);
+}
+
 static void UpdateObjects(void)
 {
     u32 i, j;
@@ -535,6 +607,7 @@ static void UpdateObjects(void)
         if (!drawn && free < MP_SPAWN_MAX_SLOTS)
             SpawnSlotObject(free, slot);
     }
+    MakeRoomForNearest(order, count);
 }
 
 // ---------------------------------------------------------------------------
@@ -838,6 +911,15 @@ void MultiplayerSpawns_TestShowObject(u32 index, u32 spawnId)
         sObjects[index].spawnId = spawnId;
         sObjects[index].objectEventId = OBJECT_EVENTS_COUNT;
     }
+}
+
+bool32 MultiplayerSpawns_TestIsDrawn(u32 spawnId)
+{
+    u32 i;
+    for (i = 0; i < MP_SPAWN_MAX_SLOTS; i++)
+        if (sObjects[i].spawnId == spawnId && ObjectStillOurs(i))
+            return TRUE;
+    return FALSE;
 }
 
 void MultiplayerSpawns_TestBeginBattle(u32 spawnId, u16 species)

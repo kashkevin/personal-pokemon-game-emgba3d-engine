@@ -1546,6 +1546,7 @@ int NativeSelfTest_MpObjects(void)
 
 extern void MultiplayerSpawns_TestShowObject(u32 index, u32 spawnId);
 extern void MultiplayerSpawns_TestBeginBattle(u32 spawnId, u16 species);
+extern bool32 MultiplayerSpawns_TestIsDrawn(u32 spawnId);
 
 static int sClaimChecks, sClaimFailures;
 static u32 sSpawnGeneration;
@@ -1574,8 +1575,15 @@ static struct MultiplayerSpawnSlot SpawnSlot(u32 spawnId, u8 flags)
 }
 
 // The companion's inbound record (odd generation while writing), then one tick
-// of the module as the game makes it on the overworld.
+// of the module as the game makes it on the overworld (fieldReady: the field
+// is free, so the module draws its Pokemon).
+static void SpawnInboundTick(u32 ack, u32 count, const struct MultiplayerSpawnSlot *slots, bool32 fieldReady);
 static void SpawnInbound(u32 ack, u32 count, const struct MultiplayerSpawnSlot *slots)
+{
+    SpawnInboundTick(ack, count, slots, FALSE);
+}
+
+static void SpawnInboundTick(u32 ack, u32 count, const struct MultiplayerSpawnSlot *slots, bool32 fieldReady)
 {
     u32 i;
 
@@ -1594,7 +1602,7 @@ static void SpawnInbound(u32 ack, u32 count, const struct MultiplayerSpawnSlot *
         memcpy((void *)&gMultiplayerSpawnMailbox.slots[i], &slot, sizeof(slot));
     }
     gMultiplayerSpawnMailbox.inboundGeneration = sSpawnGeneration;
-    MultiplayerSpawns_Tick(FALSE, TRUE);
+    MultiplayerSpawns_Tick(fieldReady, TRUE);
 }
 
 static void ResetSpawnTest(void)
@@ -1692,6 +1700,59 @@ int NativeSelfTest_SpawnClaims(void)
     seq = ActionSeq();
     SpawnInbound(seq, 0, slots); // the host removed it
     ExpectClaim("once the host removed it, nothing more is sent", ActionSeq() == seq);
+
+    // 5. The nearest first also when the field is full (KNOWN_ISSUES M26): a
+    // Pokemon placed next to the player while the field already holds as many
+    // as fit takes the place of the farthest one.
+    {
+        struct MultiplayerSpawnSlot room[4];
+        u32 i, free;
+
+        ResetSpawnTest();
+        ResetSpriteData();
+        FreeAllSpritePalettes();
+        memset(gObjectEvents, 0, sizeof(gObjectEvents));
+        gSaveBlock1Ptr->pos.x = 10; // the player's tile (the camera's corner with MAP_OFFSET)
+        gSaveBlock1Ptr->pos.y = 10;
+        // The map's people, the other players and their followers: room for
+        // exactly two shared Pokemon above the module's reserve of four.
+        for (i = 0; i < OBJECT_EVENTS_COUNT - 6; i++)
+            PlaceObject(i, 1 + i, OBJ_EVENT_GFX_BOY_1);
+        room[0] = SpawnSlot(201, 0);
+        room[0].x = 16; room[0].y = 10; // 6 tiles away
+        room[1] = SpawnSlot(202, 0);
+        room[1].x = 16; room[1].y = 13; // 9 tiles away
+        SpawnInboundTick(0, 2, room, TRUE);
+        ExpectClaim("room for two: both far Pokemon are drawn",
+                    MultiplayerSpawns_TestIsDrawn(201) && MultiplayerSpawns_TestIsDrawn(202));
+        for (i = 0, free = 0; i < OBJECT_EVENTS_COUNT; i++)
+            free += !gObjectEvents[i].active;
+        snprintf(what, sizeof(what), "and the reserve is kept (%u object events free, 4 wanted)", free);
+        ExpectClaim(what, free == 4);
+        room[2] = SpawnSlot(203, 0);
+        room[2].x = 11; room[2].y = 10; // right next to the player
+        SpawnInboundTick(0, 3, room, TRUE);
+        ExpectClaim("a Pokemon placed next to the player is drawn although the field was full (M26)",
+                    MultiplayerSpawns_TestIsDrawn(203));
+        ExpectClaim("... in place of the farthest one", !MultiplayerSpawns_TestIsDrawn(202)
+                    && MultiplayerSpawns_TestIsDrawn(201));
+        SpawnInboundTick(0, 3, room, TRUE);
+        SpawnInboundTick(0, 3, room, TRUE);
+        ExpectClaim("no swapping back on the next frames", MultiplayerSpawns_TestIsDrawn(203)
+                    && MultiplayerSpawns_TestIsDrawn(201) && !MultiplayerSpawns_TestIsDrawn(202));
+        for (i = 0, free = 0; i < OBJECT_EVENTS_COUNT; i++)
+            free += !gObjectEvents[i].active;
+        ExpectClaim("the reserve is still kept", free == 4);
+        // Only a clearly farther one makes room: one tile apart, nothing moves.
+        room[3] = SpawnSlot(204, 0);
+        room[3].x = 15; room[3].y = 10; // 5 tiles: the farthest drawn one is 6 away
+        SpawnInboundTick(0, 4, room, TRUE);
+        ExpectClaim("a newcomer about as far as the drawn ones waits (no swapping on near ties)",
+                    !MultiplayerSpawns_TestIsDrawn(204) && MultiplayerSpawns_TestIsDrawn(201)
+                    && MultiplayerSpawns_TestIsDrawn(203));
+        MultiplayerSpawns_LeaveField();
+        memset(gObjectEvents, 0, sizeof(gObjectEvents));
+    }
 
     ResetTasks();
     gMain.callback2 = NULL;
