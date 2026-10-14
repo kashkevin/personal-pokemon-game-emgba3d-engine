@@ -257,7 +257,20 @@ bool32 MultiplayerBattle_ValidateController(const u8 *data, u16 size, u8 source)
     {
         u32 choice = Word(p + 2);
         if (sPending[battler] == CONTROLLER_CHOOSEACTION)
+#ifdef PORTABLE
+            // Co-op Gym: the master's AI foes (battlers 1 and 3) answer a move
+            // action with their default Struggle target, an opposing player
+            // battler, in the high byte (AI_TrySwitchOrUseItem:
+            // GetOppositeBattler << 8; HandleTurnActionSelectionState reads
+            // it as moveTarget). Trainers' own controllers send 0.
+            return (p[1] <= B_ACTION_RUN || p[1] == B_ACTION_NOTHING_FAINTED || p[1] == B_ACTION_UNK_14)
+                && (!choice || (MultiplayerBattle_IsCoop() && (battler & 1) && p[1] == B_ACTION_USE_MOVE
+                    && !(choice & ~0xFF00) && (choice >> 8) < count && !((choice >> 8) & 1)));
+#else
+#line 260 // gba-line
             return (p[1] <= B_ACTION_RUN || p[1] == B_ACTION_NOTHING_FAINTED || p[1] == B_ACTION_UNK_14) && !choice;
+#endif
+#line 261 // gba-line
         if (sPending[battler] == CONTROLLER_CHOOSEMOVE)
             return p[1] == B_ACTION_EXEC_SCRIPT && (choice == 0xFFFF
                 || (!(choice & ~(MultiplayerBattle_IsNativeDouble() ? 0x3FF : 0x1FF))

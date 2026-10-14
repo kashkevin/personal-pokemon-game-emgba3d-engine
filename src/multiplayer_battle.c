@@ -1468,4 +1468,21 @@ bool32 MultiplayerBattle_GetBindingGeneration(u8 *generation)
     memcpy(generation, sBinding.generation, sizeof(sBinding.generation));
     return TRUE;
 }
+
+// Native self-tests (--selftest-coop-controller): the controller validator in
+// a bound battle's shape (phase, cores) without a session; mode 0 restores.
+void MultiplayerBattle_NativeTestShape(u8 mode, u8 cores)
+{
+    static u32 savedState;
+    static u8 savedMode, savedCores;
+    if (mode)
+    {
+        savedState = sState; savedMode = sBinding.mode; savedCores = sBinding.playerCount;
+        sState = MP_BATTLE_RUNNING; sBinding.mode = mode; sBinding.playerCount = cores;
+    }
+    else
+    {
+        sState = savedState; sBinding.mode = savedMode; sBinding.playerCount = savedCores;
+    }
+}
 #endif // PORTABLE

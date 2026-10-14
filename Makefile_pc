@@ -261,7 +261,7 @@ OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS) $(BFX_QJS_OBJS)
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
-.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-clock check-mp-objects check-spawn-claims check-coop-exp
+.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-clock check-mp-objects check-spawn-claims check-coop-exp check-coop-controller
 .SUFFIXES:
 .SECONDARY:
 .DELETE_ON_ERROR:
@@ -365,6 +365,10 @@ check-spawn-claims: $(TARGET)
 check-coop-exp: $(TARGET)
 	@./$(TARGET) --selftest-coop-exp > $(OBJ_DIR)/selftest-coop-exp.log 2>&1; status=$$?; \
 	  tail -n 3 $(OBJ_DIR)/selftest-coop-exp.log; exit $$status
+
+check-coop-controller: $(TARGET)
+	@./$(TARGET) --selftest-coop-controller > $(OBJ_DIR)/selftest-coop-controller.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-coop-controller.log; exit $$status
 
 # C: preprocess (same flags as the GBA build + PORTABLE), expand INCBIN/charmap
 # strings with preproc, then compile for 32-bit x86.

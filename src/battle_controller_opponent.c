@@ -42,6 +42,10 @@
 #include "trainer_tower.h"
 #include "test_runner.h"
 #include "test/battle.h"
+#ifdef PORTABLE
+#include "multiplayer_battle.h"
+#endif
+#line 45 // gba-line
 
 static void OpponentHandleDrawTrainerPic(enum BattlerId battler);
 static void OpponentHandleTrainerSlideBack(enum BattlerId battler);
@@ -571,6 +575,16 @@ static void OpponentHandleChoosePokemon(enum BattlerId battler)
     #if TESTING
     TestRunner_Battle_CheckSwitch(battler, chosenMonId);
     #endif // TESTING
+#ifdef PORTABLE
+    // A native link battle copies this reply's party-order bytes into the
+    // battler's order on every core (UpdateLinkBattlePartyOrder); NULL left
+    // stale transfer-buffer bytes there, which the controller validator
+    // refuses. The co-op AI keeps its current order.
+    if (MultiplayerBattle_IsNative())
+        BtlController_EmitChosenMonReturnValue(battler, B_COMM_TO_ENGINE, chosenMonId, gBattleStruct->battlerPartyOrders[battler]);
+    else
+#endif
+#line 574 // gba-line
     BtlController_EmitChosenMonReturnValue(battler, B_COMM_TO_ENGINE, chosenMonId, NULL);
     BtlController_Complete(battler);
 }

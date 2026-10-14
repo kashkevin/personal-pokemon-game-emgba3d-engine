@@ -2042,3 +2042,92 @@ int NativeSelfTest_CoopExp(void)
     printf("selftest-coop-exp: %d checks, %d failed\n", sCoopChecks, sCoopFailures);
     return sCoopFailures ? 1 : 0;
 }
+
+/* --selftest-coop-controller: native co-op Gym controller blocks (two-player
+ * launcher proof, 2026-10-13). The master core runs both AI foes (battlers 1
+ * and 3); their move action carries a default Struggle target, and their
+ * replacement choice must carry a real party order. */
+#include "multiplayer_battle.h"
+#include "multiplayer_battle_schema.h"
+
+void MultiplayerBattle_NativeTestShape(u8 mode, u8 cores);
+static int sCoopCtlChecks, sCoopCtlFailures;
+
+static void ExpectCoopCtl(const char *what, bool32 ok)
+{
+    sCoopCtlChecks++;
+    if (!ok) sCoopCtlFailures++;
+    printf("  %s %s\n", ok ? "ok  " : "FAIL", what);
+}
+
+/* One battler's CHOOSEACTION round: the master's request, then `reply`
+ * (action, choice) from `source`; returns whether the validator accepts it. */
+static bool32 CoopActionReply(u8 battler, u8 source, u8 action, u16 choice)
+{
+    u8 request[16] = {B_COMM_TO_CONTROLLER, 0, 0, 0, 8, 0, 0, 0, CONTROLLER_CHOOSEACTION};
+    u8 reply[16] = {B_COMM_TO_ENGINE, 0, 0, 0, 8, 0, 0, 0, CONTROLLER_TWORETURNVALUES};
+    MultiplayerBattle_ResetControllerValidation();
+    request[1] = reply[1] = battler;
+    if (!MultiplayerBattle_ValidateController(request, sizeof(request), 0)) return FALSE;
+    MultiplayerBattle_NoteController(request, 0);
+    reply[9] = action; reply[10] = choice; reply[11] = choice >> 8;
+    return MultiplayerBattle_ValidateController(reply, sizeof(reply), source);
+}
+
+static bool32 CoopChosenMon(u8 battler, const u8 *order)
+{
+    u8 party[20] = {B_COMM_TO_CONTROLLER, 0, 0, 0, 12, 0, 0, 0, CONTROLLER_CHOOSEPOKEMON, 0, 6, 0, 0x10, 0x32, 0x54, 0, 0};
+    u8 chosen[16] = {B_COMM_TO_ENGINE, 0, 0, 0, 8, 0, 0, 0, CONTROLLER_CHOSENMONRETURNVALUE, 1};
+    MultiplayerBattle_ResetControllerValidation();
+    party[1] = chosen[1] = battler;
+    if (!MultiplayerBattle_ValidateController(party, sizeof(party), 0)) return FALSE;
+    MultiplayerBattle_NoteController(party, 0);
+    memcpy(chosen + 10, order, 3);
+    return MultiplayerBattle_ValidateController(chosen, sizeof(chosen), 0);
+}
+
+int NativeSelfTest_CoopController(void)
+{
+    static const u8 identity[3] = {0x10, 0x32, 0x54}, stale[3] = {0xF7, 0x00, 0x9C};
+    printf("co-op Gym controller blocks\n");
+
+    MultiplayerBattle_NativeTestShape(MP_BATTLE_PHASE_COOP, 2);
+    ExpectCoopCtl("co-op shape: four battlers, two cores, master owns 0/1/3",
+        MultiplayerBattle_IsCoop() && MultiplayerBattle_GetBattlerCount() == 4
+        && MultiplayerBattle_GetBattlerOwner(1) == 0 && MultiplayerBattle_GetBattlerOwner(2) == 1
+        && MultiplayerBattle_GetBattlerOwner(3) == 0);
+    // The failure the launcher proof found: battler 3's AI move action with
+    // its default target, the opposing player battler 2.
+    ExpectCoopCtl("AI foe 3: move action with target 2 (the proof's refused block)",
+        CoopActionReply(3, 0, B_ACTION_USE_MOVE, 2 << 8));
+    ExpectCoopCtl("AI foe 1: move action with target 0", CoopActionReply(1, 0, B_ACTION_USE_MOVE, 0 << 8));
+    ExpectCoopCtl("AI foe 1: move action with target 2", CoopActionReply(1, 0, B_ACTION_USE_MOVE, 2 << 8));
+    ExpectCoopCtl("AI foe: plain actions still pass", CoopActionReply(3, 0, B_ACTION_USE_MOVE, 0)
+        && CoopActionReply(3, 0, B_ACTION_SWITCH, 0) && CoopActionReply(1, 0, B_ACTION_USE_ITEM, 0));
+    ExpectCoopCtl("AI foe: a target on its own side is refused",
+        !CoopActionReply(3, 0, B_ACTION_USE_MOVE, 1 << 8) && !CoopActionReply(3, 0, B_ACTION_USE_MOVE, 3 << 8));
+    ExpectCoopCtl("AI foe: a target past the field is refused",
+        !CoopActionReply(3, 0, B_ACTION_USE_MOVE, 4 << 8) && !CoopActionReply(3, 0, B_ACTION_USE_MOVE, 6 << 8));
+    ExpectCoopCtl("AI foe: low choice bits stay zero",
+        !CoopActionReply(3, 0, B_ACTION_USE_MOVE, (2 << 8) | 1) && !CoopActionReply(3, 0, B_ACTION_USE_MOVE, 0x80));
+    ExpectCoopCtl("AI foe: a target only with a move action",
+        !CoopActionReply(3, 0, B_ACTION_SWITCH, 2 << 8) && !CoopActionReply(1, 0, B_ACTION_RUN, 0 << 8 | 0x200));
+    ExpectCoopCtl("AI foe: only the master answers for it", !CoopActionReply(3, 1, B_ACTION_USE_MOVE, 2 << 8));
+    ExpectCoopCtl("trainers (battlers 0 and 2) still send no target",
+        CoopActionReply(0, 0, B_ACTION_USE_MOVE, 0) && CoopActionReply(2, 1, B_ACTION_USE_MOVE, 0)
+        && !CoopActionReply(0, 0, B_ACTION_USE_MOVE, 1 << 8) && !CoopActionReply(2, 1, B_ACTION_USE_MOVE, 1 << 8));
+    ExpectCoopCtl("AI replacement: a real party order passes", CoopChosenMon(1, identity) && CoopChosenMon(3, identity));
+    ExpectCoopCtl("AI replacement: stale transfer-buffer bytes are refused (why the AI now sends its order)",
+        !CoopChosenMon(3, stale));
+    MultiplayerBattle_NativeTestShape(0, 0);
+
+    // Full Multi: four human trainers, no AI; a target in an action stays refused.
+    MultiplayerBattle_NativeTestShape(MP_BATTLE_PHASE_FULL_MULTI, 4);
+    ExpectCoopCtl("full Multi: battler 3's own trainer sends no target",
+        CoopActionReply(3, 3, B_ACTION_USE_MOVE, 0) && !CoopActionReply(3, 3, B_ACTION_USE_MOVE, 2 << 8));
+    MultiplayerBattle_NativeTestShape(0, 0);
+    MultiplayerBattle_ResetControllerValidation();
+
+    printf("selftest-coop-controller: %d checks, %d failed\n", sCoopCtlChecks, sCoopCtlFailures);
+    return sCoopCtlFailures ? 1 : 0;
+}

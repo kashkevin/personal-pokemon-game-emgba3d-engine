@@ -184,6 +184,7 @@ extern int NativeSelfTest_WildWeather(void);
 extern int NativeSelfTest_Clock(void);
 extern int NativeSelfTest_MpObjects(void);
 extern int NativeSelfTest_CoopExp(void);
+extern int NativeSelfTest_CoopController(void);
 extern void MultiplayerCoop_TestArmAward(void);
 extern int NativeSelfTest_SpawnClaims(void);
 extern int NativeSelfTest_DumpWildWeights(const char *keysPath, const char *outPath);
@@ -914,6 +915,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_MpObjects()); // src/platform/native_selftest.c (KNOWN_ISSUES M15)
         else if (strcmp(argv[i], "--selftest-coop-exp") == 0)
             exit(NativeSelfTest_CoopExp()); // src/platform/native_selftest.c (co-op experience)
+        else if (strcmp(argv[i], "--selftest-coop-controller") == 0)
+            exit(NativeSelfTest_CoopController()); // src/platform/native_selftest.c (co-op AI controller blocks)
         else if (strcmp(argv[i], "--test-coop-exp-award") == 0)
             MultiplayerCoop_TestArmAward(); // the co-op experience award's screens, once (multiplayer_coop.c)
         else if (strcmp(argv[i], "--selftest-spawn-claims") == 0)
