@@ -697,7 +697,12 @@ static bool BattleControl(const struct MpBridge *b, const uint8_t *p, size_t len
      || dataLength > 192 || !AllZero(data + dataLength, 192 - dataLength)
      || MpBridge_Crc32(data, dataLength) != crc)
         return false;
-    native = ((c->battle == 2 || c->battle == 3) && phase == 2) || (c->battle == 3 && phase == 3);
+    /* Native phases: 2 singles, 3 full Multi (four cores), 4 co-op Gym (two
+     * cores, the master also running both AI trainers). Phase 4 was missing
+     * here (and in mgba.lua), so every co-op command stopped the bridge
+     * ("invalid battle command") and no co-op battle could start. */
+    native = ((c->battle == 2 || c->battle == 3) && phase == 2)
+          || (c->battle == 3 && (phase == 3 || phase == 4));
     count = phase == 3 ? 4 : 2;
     if (!native && (phase != 1 || opcode > 9 || kind > 1))
         return false;

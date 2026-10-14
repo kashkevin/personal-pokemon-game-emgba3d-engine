@@ -753,6 +753,44 @@ MT_TEST(battle_looks_need_the_game)
     MT_CHECK(sNet.closed);
 }
 
+// Native battle commands by phase: 2 singles, 3 full Multi, 4 co-op Gym (two
+// cores). A co-op command once stopped the bridge ("invalid battle command").
+static void MakeBattleControl(uint8_t out[240], uint8_t opcode, uint8_t phase)
+{
+    memset(out, 0, 240);
+    PutU32(out, 7);            // incarnation
+    PutU32(out + 4, 3);        // epoch
+    memset(out + 8, 0x5a, 16); // battle id
+    PutU32(out + 24, 1);       // sequence
+    out[36] = opcode;
+    out[38] = phase;
+    PutU32(out + 44, MpBridge_Crc32(NULL, 0));
+}
+
+static bool BattleCommandAccepted(uint8_t phase)
+{
+    uint8_t command[240];
+    uint8_t frame[260];
+    uint8_t *m = sMemory[MP_REGION_BATTLE];
+    size_t n;
+
+    LooksBridge(false);
+    MakeBattleControl(command, 2, phase); // a native command without data
+    n = FrameOf(frame, 'D', command, sizeof(command));
+    Feed(frame, n, 200);
+    Step(2);
+    return !sNet.closed && GetU32(m + 24) == 2 && memcmp(m + 28, command, 240) == 0;
+}
+
+MT_TEST(native_battle_phases_reach_the_game)
+{
+    MT_CHECK(BattleCommandAccepted(2)); // singles
+    MT_CHECK(BattleCommandAccepted(3)); // full Multi
+    MT_CHECK(BattleCommandAccepted(4)); // co-op Gym
+    MT_CHECK(!BattleCommandAccepted(5));
+    MT_CHECK(sNet.closed);
+}
+
 // Shared wild Pokemon (the second native extension, mp_bridge.h).
 static void SpawnBridge(bool spawnMailbox)
 {
@@ -1133,6 +1171,7 @@ int main(void)
     MT_RUN(battle_capability_waits_for_its_mailbox);
     MT_RUN(battle_looks_follow_their_announcement);
     MT_RUN(battle_looks_need_the_game);
+    MT_RUN(native_battle_phases_reach_the_game);
     MT_RUN(spawn_capability_waits_for_its_mailbox);
     MT_RUN(spawn_record_and_inbound_round_trip);
     MT_RUN(spawn_inbound_is_validated);
