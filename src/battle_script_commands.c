@@ -2172,7 +2172,14 @@ static void Cmd_getexp(void)
         else
         {
             gBattleScripting.getexpState++;
+#if defined(PORTABLE) || TESTING
+            // KNOWN_ISSUES G14: one slot per opposing trainer (index 2, B_TRAINER_OPPONENT_B & BIT_FLANK, was past the array).
+            gBattleStruct->givenExpMons[GetBattlerTrainer(gBattlerFainted) == B_TRAINER_OPPONENT_B] |= (1u << gBattlerPartyIndexes[gBattlerFainted]);
+#else
+#line 2175 // gba-line
             gBattleStruct->givenExpMons[GetBattlerTrainer(gBattlerFainted) & BIT_FLANK] |= (1u << gBattlerPartyIndexes[gBattlerFainted]);
+#endif
+#line 2176 // gba-line
         }
         break;
     case 1: // calculate experience points to redistribute
