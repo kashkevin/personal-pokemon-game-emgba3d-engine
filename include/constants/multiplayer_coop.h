@@ -19,4 +19,11 @@
 #define MP_COOP_OFFER_NONE      0 // no teammate here: the ordinary solo battle
 #define MP_COOP_OFFER_READY     1
 
+// VAR_RESULT values of MultiplayerCoop_ExpStep (PC game only): the co-op
+// experience award after a co-op battle (multiplayer_coop.c).
+#define MP_COOP_EXP_DONE        0
+#define MP_COOP_EXP_MESSAGE     1 // gStringVar4
+#define MP_COOP_EXP_MOVE_FULL   2 // STR_VAR_1 wants to learn STR_VAR_2 and knows four moves
+#define MP_COOP_EXP_EVOLVE      3 // VAR_0x8005 = party slot
+
 #endif // GUARD_CONSTANTS_MULTIPLAYER_COOP_H

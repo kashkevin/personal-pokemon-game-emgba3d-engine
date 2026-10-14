@@ -33,6 +33,9 @@ EventScript_MultiplayerCoopGymOfferReturn::
 @ Started by the game itself after a co-op Gym victory (VAR_0x8004 = Gym).
 EventScript_MultiplayerCoopVictory::
 	lockall
+.ifdef PORTABLE
+	call EventScript_MultiplayerCoopExp
+.endif
 	special MultiplayerCoop_GivePrizeMoney
 	playse SE_SHOP
 	msgbox gText_MultiplayerCoopPrize, MSGBOX_DEFAULT
@@ -109,6 +112,9 @@ EventScript_MultiplayerCoopHelper::
 @ never change a party, so there is no whiteout.
 EventScript_MultiplayerCoopDefeat::
 	lockall
+.ifdef PORTABLE
+	call EventScript_MultiplayerCoopExp
+.endif
 	msgbox gText_MultiplayerCoopDefeat, MSGBOX_DEFAULT
 	releaseall
 	end
@@ -139,3 +145,61 @@ gText_MultiplayerCoopHelped::
 gText_MultiplayerCoopDefeat::
 	.string "You and your teammate were\n"
 	.string "defeated… Train up and try again!$"
+
+.ifdef PORTABLE
+@ Co-op battles award experience (PC game; owner decision 2026-10-13): this
+@ game's own party gets its share of the defeated Pokemon once, now that the
+@ battle has released it (multiplayer_coop.c). PvP battles never come here.
+EventScript_MultiplayerCoopExp::
+	special MultiplayerCoop_ExpBegin
+	goto_if_eq VAR_RESULT, FALSE, EventScript_MultiplayerCoopExpEnd
+EventScript_MultiplayerCoopExpNext::
+	special MultiplayerCoop_ExpStep
+	goto_if_eq VAR_RESULT, MP_COOP_EXP_MESSAGE, EventScript_MultiplayerCoopExpMessage
+	goto_if_eq VAR_RESULT, MP_COOP_EXP_MOVE_FULL, EventScript_MultiplayerCoopExpMoveFull
+	goto_if_eq VAR_RESULT, MP_COOP_EXP_EVOLVE, EventScript_MultiplayerCoopExpEvolve
+EventScript_MultiplayerCoopExpEnd::
+	return
+
+EventScript_MultiplayerCoopExpMessage::
+	msgbox gStringVar4, MSGBOX_DEFAULT
+	goto EventScript_MultiplayerCoopExpNext
+
+EventScript_MultiplayerCoopExpMoveFull::
+	msgbox gText_MultiplayerCoopExpMoveFull, MSGBOX_YESNO
+	goto_if_eq VAR_RESULT, NO, EventScript_MultiplayerCoopExpSkipMove
+	closemessage
+	special MultiplayerCoop_ExpChooseForget
+	special MultiplayerCoop_ExpForgetResult
+	goto_if_eq VAR_RESULT, FALSE, EventScript_MultiplayerCoopExpNotForgotten
+	msgbox gStringVar4, MSGBOX_DEFAULT
+	goto EventScript_MultiplayerCoopExpNext
+
+EventScript_MultiplayerCoopExpNotForgotten::
+	special MultiplayerCoop_ExpSkipMove
+	msgbox gStringVar4, MSGBOX_DEFAULT
+	goto EventScript_MultiplayerCoopExpNext
+
+EventScript_MultiplayerCoopExpSkipMove::
+	msgbox gText_MultiplayerCoopExpStopLearning, MSGBOX_YESNO
+	goto_if_eq VAR_RESULT, NO, EventScript_MultiplayerCoopExpMoveFull
+	special MultiplayerCoop_ExpSkipMove
+	msgbox gStringVar4, MSGBOX_DEFAULT
+	goto EventScript_MultiplayerCoopExpNext
+
+EventScript_MultiplayerCoopExpEvolve::
+	closemessage
+	special MultiplayerCoop_ExpEvolve
+	goto EventScript_MultiplayerCoopExpNext
+
+gText_MultiplayerCoopExpMoveFull::
+	.string "{STR_VAR_1} wants to learn the\n"
+	.string "move {STR_VAR_2}.\p"
+	.string "However, {STR_VAR_1} already\n"
+	.string "knows four moves.\p"
+	.string "Should a move be forgotten to make\n"
+	.string "space for {STR_VAR_2}?$"
+
+gText_MultiplayerCoopExpStopLearning::
+	.string "Stop learning {STR_VAR_2}?$"
+.endif

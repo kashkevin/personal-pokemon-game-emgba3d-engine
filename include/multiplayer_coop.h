@@ -24,4 +24,23 @@ void MultiplayerCoop_RequestBattle(void);
 void MultiplayerCoop_GivePrizeMoney(void);
 void MultiplayerCoop_BufferPartnerName(void);
 
+#ifdef PORTABLE
+// Co-op experience (PC game): each player's own game awards its own party the
+// experience of a co-op battle after the party is released (multiplayer_coop.c).
+void MultiplayerCoop_ExpBegin(void);
+void MultiplayerCoop_ExpStep(void);
+void MultiplayerCoop_ExpChooseForget(void);
+void MultiplayerCoop_ExpForgetResult(void);
+void MultiplayerCoop_ExpSkipMove(void);
+void MultiplayerCoop_ExpEvolve(void);
+u32 MultiplayerCoop_ExpReward(struct Pokemon *mon, enum Species faintedSpecies, u32 faintedLevel, bool32 faced);
+// --selftest-coop-exp
+void MultiplayerCoop_TestTrackFrame(void);
+void MultiplayerCoop_TestCapture(u32 outcome);
+bool32 MultiplayerCoop_TestForget(u32 moveSlot);
+u32 MultiplayerCoop_TestKoCount(void);
+void MultiplayerCoop_TestReset(void);
+void MultiplayerCoop_TestArmAward(void); // --test-coop-exp-award
+#endif
+
 #endif // GUARD_MULTIPLAYER_COOP_H

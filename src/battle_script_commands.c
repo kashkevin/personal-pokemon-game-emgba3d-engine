@@ -12488,3 +12488,74 @@ u32 Battle_NativeUiPrizeMoney(void)
     return money;
 }
 #endif // ENABLE_NATIVE_UI
+
+#ifdef PORTABLE
+// Co-op battles award experience (owner decision 2026-10-13). Only the master
+// game runs the battle script and link battles give none in battle, so each
+// player's own game computes its share after the battle (multiplayer_coop.c)
+// with this: the experience one defeated Pokemon gives one party member in a
+// trainer battle with the permanent Exp. Share, exactly as Cmd_getexp cases
+// 1-2 and ApplyExperienceMultipliers compute it (B_SPLIT_EXP Gen 6+: the
+// full amount to a Pokemon that faced it, half to the rest), the fainted
+// Pokemon's level passed in instead of read from gBattleMons.
+u32 MultiplayerCoop_ExpReward(struct Pokemon *mon, enum Species faintedSpecies, u32 faintedLevel, bool32 faced)
+{
+    u32 level = GetMonData(mon, MON_DATA_LEVEL);
+    u32 calculatedExp, value;
+    enum HoldEffect holdEffect = GetMonHoldEffect(mon);
+    s32 reward;
+
+    if (level >= MAX_LEVEL || faintedSpecies == SPECIES_NONE || faintedSpecies >= NUM_SPECIES)
+        return 0;
+    calculatedExp = gSpeciesInfo[faintedSpecies].expYield * faintedLevel;
+    if (GetConfig(B_SCALED_EXP) >= GEN_5 && GetConfig(B_SCALED_EXP) != GEN_6)
+        calculatedExp /= 5;
+    else
+        calculatedExp /= 7;
+    if (GetConfig(B_TRAINER_EXP_MULTIPLIER) <= GEN_7)
+        calculatedExp = (calculatedExp * 150) / 100; // a trainer battle
+    if (faced)
+    {
+        value = calculatedExp;
+    }
+    else
+    {
+        value = calculatedExp / 2;
+        if (value == 0)
+            value = 1;
+    }
+    reward = GetSoftLevelCapExpValue(level, value);
+
+    // ApplyExperienceMultipliers
+    if (IsTradedMon(mon))
+        reward = (reward * 150) / 100;
+    if (holdEffect == HOLD_EFFECT_LUCKY_EGG)
+        reward = (reward * 150) / 100;
+    if (GetConfig(B_UNEVOLVED_EXP_MULTIPLIER) >= GEN_6 && IsMonPastEvolutionLevel(mon))
+        reward = (reward * 4915) / 4096;
+    if (GetConfig(B_AFFECTION_MECHANICS) == TRUE && GetMonAffectionHearts(mon) >= AFFECTION_FOUR_HEARTS)
+        reward = (reward * 4915) / 4096;
+    if (CheckBagHasItem(ITEM_EXP_CHARM, 1))
+        reward = (reward * 150) / 100;
+    if (GetConfig(B_SCALED_EXP) >= GEN_5 && GetConfig(B_SCALED_EXP) != GEN_6)
+    {
+        u64 scaled = reward;
+        scaled *= sExperienceScalingFactors[(faintedLevel * 2) + 10];
+        scaled /= sExperienceScalingFactors[faintedLevel + level + 10];
+        reward = scaled + 1;
+    }
+
+    if (B_EXP_CAP_TYPE == EXP_CAP_HARD && reward != 0)
+    {
+        enum GrowthRate growthRate = gSpeciesInfo[GetMonData(mon, MON_DATA_SPECIES)].growthRate;
+        u32 currentExp = GetMonData(mon, MON_DATA_EXP);
+        u32 levelCap = GetCurrentLevelCap();
+
+        if (level >= levelCap)
+            reward = 0;
+        else if (gExperienceTables[growthRate][levelCap] < currentExp + reward)
+            reward = gExperienceTables[growthRate][levelCap] - currentExp;
+    }
+    return reward > 0 ? reward : 0;
+}
+#endif // PORTABLE

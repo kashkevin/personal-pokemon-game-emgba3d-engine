@@ -656,3 +656,12 @@ gSpecials::
 	def_special MultiplayerCoop_RequestBattle
 	def_special MultiplayerCoop_GivePrizeMoney
 	def_special MultiplayerCoop_BufferPartnerName
+.ifdef PORTABLE
+	@ Co-op experience (PC game only; the GBA table is unchanged).
+	def_special MultiplayerCoop_ExpBegin
+	def_special MultiplayerCoop_ExpStep
+	def_special MultiplayerCoop_ExpChooseForget, waitstate=1
+	def_special MultiplayerCoop_ExpForgetResult
+	def_special MultiplayerCoop_ExpSkipMove
+	def_special MultiplayerCoop_ExpEvolve, waitstate=1
+.endif

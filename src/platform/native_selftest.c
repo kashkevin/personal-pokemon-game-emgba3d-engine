@@ -1698,3 +1698,347 @@ int NativeSelfTest_SpawnClaims(void)
     printf("selftest-spawn-claims: %d checks, %d failed\n", sClaimChecks, sClaimFailures);
     return sClaimFailures ? 1 : 0;
 }
+
+// ---------------------------------------------------------------------------
+// --selftest-coop-exp (owner decision 2026-10-13: co-op battles award
+// experience, PvP never does). Drives src/multiplayer_coop.c's co-op award with
+// a battle's state as each game sees it: this player's own Pokemon (battler 0
+// here; the slave game's is battler 2), the teammate's party (never touched)
+// and two opposing trainers. Checks who gets what, the battle's formula, once
+// only, no award without a co-op battle, level-ups, moves and evolution.
+// ---------------------------------------------------------------------------
+
+#include "battle_controllers.h"
+#include "multiplayer_coop.h"
+#include "constants/battle.h"
+
+static int sCoopChecks, sCoopFailures;
+
+static void ExpectCoop(const char *what, bool32 ok)
+{
+    sCoopChecks++;
+    if (!ok)
+        sCoopFailures++;
+    printf("%s %s\n", ok ? "ok  " : "FAIL", what);
+}
+
+static void CoopMon(struct Pokemon *mon, u16 species, u8 level)
+{
+    CreateMonWithIVs(mon, species, level, 0x1000 + species, OTID_STRUCT_PLAYER_ID, 0);
+}
+
+static void SetCoopHp(struct Pokemon *mon, u16 hp)
+{
+    SetMonData(mon, MON_DATA_HP, &hp);
+}
+
+static u32 CoopEvSum(struct Pokemon *mon)
+{
+    return GetMonData(mon, MON_DATA_HP_EV) + GetMonData(mon, MON_DATA_ATK_EV) + GetMonData(mon, MON_DATA_DEF_EV)
+         + GetMonData(mon, MON_DATA_SPEED_EV) + GetMonData(mon, MON_DATA_SPATK_EV) + GetMonData(mon, MON_DATA_SPDEF_EV);
+}
+
+// The battle's Gen 6 numbers, written out independently: a trainer battle's
+// base (yield x level / 7, x1.5), all of it for a Pokemon that faced the fallen
+// one, half (at least 1) for the rest, then the getter's multipliers.
+static u32 ExpectedCoopReward(struct Pokemon *getter, u16 species, u8 level, bool32 faced)
+{
+    u32 base = gSpeciesInfo[species].expYield * level / 7 * 150 / 100;
+    u32 reward = faced ? base : (base / 2 ? base / 2 : 1);
+
+    if (IsMonPastEvolutionLevel(getter))
+        reward = reward * 4915 / 4096;
+    if (GetMonAffectionHearts(getter) >= AFFECTION_FOUR_HEARTS)
+        reward = reward * 4915 / 4096;
+    return reward;
+}
+
+// Gains of one getter over the defeated Pokemon in order (its level, and so
+// its multipliers, rising as the battle's would).
+struct CoopExpected { u16 species; u8 level; bool8 faced; bool8 able; };
+
+static u32 ExpectedCoopTotal(const struct Pokemon *start, const struct CoopExpected *kos, u32 count)
+{
+    struct Pokemon copy = *start;
+    u32 k, total = 0;
+
+    for (k = 0; k < count; k++)
+    {
+        u32 reward, exp;
+
+        if (!kos[k].able || GetMonData(&copy, MON_DATA_LEVEL) >= MAX_LEVEL)
+            continue;
+        reward = ExpectedCoopReward(&copy, kos[k].species, kos[k].level, kos[k].faced);
+        total += reward;
+        exp = GetMonData(&copy, MON_DATA_EXP) + reward;
+        SetMonData(&copy, MON_DATA_EXP, &exp);
+        CalculateMonStats(&copy);
+    }
+    return total;
+}
+
+static void CoopBattleState(void)
+{
+    u32 b;
+
+    gBattlersCount = MAX_BATTLERS_COUNT;
+    for (b = 0; b < MAX_BATTLERS_COUNT; b++)
+        gBattlerPositions[b] = b;
+    gBattlerBattleController[0] = BATTLE_CONTROLLER_PLAYER;       // this player
+    gBattlerBattleController[1] = BATTLE_CONTROLLER_OPPONENT;     // trainer A
+    gBattlerBattleController[2] = BATTLE_CONTROLLER_LINK_PARTNER; // the teammate
+    gBattlerBattleController[3] = BATTLE_CONTROLLER_OPPONENT;     // trainer B
+    memset(gBattlerPartyIndexes, 0, sizeof(gBattlerPartyIndexes));
+    gAbsentBattlerFlags = 0;
+}
+
+#include "party_menu.h"
+
+// Game text as plain ASCII for the log (letters, digits, common punctuation).
+static const char *ConvertToAscii(const u8 *text)
+{
+    static char out[256];
+    u32 n = 0;
+
+    for (; *text != EOS && n < sizeof(out) - 1; text++)
+    {
+        u8 c = *text;
+
+        if (c >= CHAR_A && c <= CHAR_Z)
+            out[n++] = 'A' + (c - CHAR_A);
+        else if (c >= CHAR_a && c <= CHAR_z)
+            out[n++] = 'a' + (c - CHAR_a);
+        else if (c >= CHAR_0 && c <= CHAR_9)
+            out[n++] = '0' + (c - CHAR_0);
+        else if (c == CHAR_EXTRA_SYMBOL || c == EXT_CTRL_CODE_BEGIN)
+            text++; // a control code and its argument
+        else
+            out[n++] = c == CHAR_EXCL_MARK ? '!' : c == CHAR_QUESTION_MARK ? '?' : c == CHAR_PERIOD ? '.'
+                     : c == CHAR_COMMA ? ',' : c == CHAR_HYPHEN ? '-' : ' ';
+    }
+    out[n] = 0;
+    return out;
+}
+
+static u16 sCoopPromptMove;
+static bool8 sCoopForgot;
+
+static u32 RunCoopAward(u32 *messages, u32 *moveFull, u32 *evolveSlot, u16 *evolveTo, bool32 forgetFirst)
+{
+    u32 steps = 0;
+
+    *messages = *moveFull = 0;
+    *evolveSlot = PARTY_SIZE;
+    *evolveTo = SPECIES_NONE;
+    for (;;)
+    {
+        MultiplayerCoop_ExpStep();
+        if (gSpecialVar_Result == MP_COOP_EXP_DONE || ++steps > 200)
+            break;
+        if (gSpecialVar_Result == MP_COOP_EXP_MESSAGE)
+        {
+            printf("     message: %s\n", ConvertToAscii(gStringVar4));
+            (*messages)++;
+        }
+        else if (gSpecialVar_Result == MP_COOP_EXP_MOVE_FULL)
+        {
+            (*moveFull)++;
+            if (forgetFirst && *moveFull == 1)
+            {
+                sCoopPromptMove = gMoveToLearn;
+                sCoopForgot = MultiplayerCoop_TestForget(0);
+            }
+            else
+                MultiplayerCoop_ExpSkipMove();
+            printf("     move prompt: %s\n", ConvertToAscii(gStringVar4));
+        }
+        else if (gSpecialVar_Result == MP_COOP_EXP_EVOLVE)
+        {
+            bool32 canStop = TRUE;
+
+            *evolveSlot = gSpecialVar_0x8005;
+            *evolveTo = GetEvolutionTargetSpecies(&gParties[B_TRAINER_PLAYER][*evolveSlot], EVO_MODE_BATTLE_ONLY, 0, NULL, &canStop, CHECK_EVO);
+            printf("     evolution offered: slot %u\n", *evolveSlot);
+        }
+    }
+    return steps;
+}
+
+int NativeSelfTest_CoopExp(void)
+{
+    struct Pokemon before[PARTY_SIZE], partner;
+    struct Pokemon *own = gParties[B_TRAINER_PLAYER];
+    struct Pokemon *a = gParties[B_TRAINER_OPPONENT_A], *b = gParties[B_TRAINER_OPPONENT_B];
+    u32 messages, moveFull, evolveSlot, steps, gained[PARTY_SIZE], evs[PARTY_SIZE], i, exp;
+    u16 evolveTo;
+    char what[200];
+
+    SetSaveBlocksPointers(0);
+    MultiplayerCoop_Init();
+    printf("co-op experience (owner decision 2026-10-13)\n");
+
+    // This player's party: 0 leads; 1 never sent out, one Exp. Point from Lv. 16
+    // (Treecko evolves at 16); 2 sent out after the first knockout, then
+    // fainted; 3 an Egg; 4 fainted before the battle; 5 Lv. 100.
+    memset(gParties, 0, sizeof(gParties));
+    CoopMon(&own[0], SPECIES_ZIGZAGOON, 10);
+    SetMonMoveSlot(&own[0], MOVE_TACKLE, 0);   // four moves: the next one asks
+    SetMonMoveSlot(&own[0], MOVE_GROWL, 1);
+    SetMonMoveSlot(&own[0], MOVE_TAIL_WHIP, 2);
+    SetMonMoveSlot(&own[0], MOVE_SAND_ATTACK, 3);
+    CoopMon(&own[1], SPECIES_TREECKO, 15);
+    exp = gExperienceTables[gSpeciesInfo[SPECIES_TREECKO].growthRate][16] - 1;
+    SetMonData(&own[1], MON_DATA_EXP, &exp);
+    CalculateMonStats(&own[1]);
+    CoopMon(&own[2], SPECIES_WURMPLE, 5);
+    CoopMon(&own[3], SPECIES_WINGULL, 5);
+    exp = TRUE;
+    SetMonData(&own[3], MON_DATA_IS_EGG, &exp);
+    CoopMon(&own[4], SPECIES_POOCHYENA, 8);
+    SetCoopHp(&own[4], 0);
+    CoopMon(&own[5], SPECIES_SLAKING, 100);
+    gPartiesCount[B_TRAINER_PLAYER] = PARTY_SIZE;
+    CoopMon(&gParties[B_TRAINER_PARTNER][0], SPECIES_MUDKIP, 10);
+    partner = gParties[B_TRAINER_PARTNER][0];
+    CoopMon(&a[0], SPECIES_GEODUDE, 12);
+    CoopMon(&a[1], SPECIES_NOSEPASS, 15);
+    CoopMon(&b[0], SPECIES_MAKUHITA, 14);
+    memcpy(before, own, sizeof(before)); // the native battle restores this copy
+    for (i = 0; i < PARTY_SIZE; i++)
+        evs[i] = CoopEvSum(&own[i]);
+    CoopBattleState();
+
+    // The battle, frame by frame as each game sees it.
+    for (i = 0; i < 3; i++)
+        MultiplayerCoop_TestTrackFrame();             // Zigzagoon vs Geodude and Makuhita
+    SetCoopHp(&a[0], 0);
+    MultiplayerCoop_TestTrackFrame();                 // 1: Geodude falls
+    gBattlerPartyIndexes[0] = 2;                      // Wurmple comes in
+    gBattlerPartyIndexes[1] = 1;                      // Nosepass comes in
+    MultiplayerCoop_TestTrackFrame();
+    MultiplayerCoop_TestTrackFrame();
+    SetCoopHp(&own[2], 0);                            // Wurmple faints
+    MultiplayerCoop_TestTrackFrame();
+    gBattlerPartyIndexes[0] = 0;                      // Zigzagoon again
+    MultiplayerCoop_TestTrackFrame();
+    SetCoopHp(&b[0], 0);
+    MultiplayerCoop_TestTrackFrame();                 // 2: Makuhita falls
+    SetCoopHp(&a[1], 0);
+    MultiplayerCoop_TestTrackFrame();                 // 3: Nosepass falls
+    MultiplayerCoop_TestCapture(B_OUTCOME_WON);
+    snprintf(what, sizeof(what), "three defeated Pokemon recorded (%u)", MultiplayerCoop_TestKoCount());
+    ExpectCoop(what, MultiplayerCoop_TestKoCount() == 3);
+
+    // The native battle restores the party exactly; the award follows.
+    memcpy(own, before, sizeof(before));
+    MultiplayerCoop_ExpBegin();
+    ExpectCoop("there is experience to award", gSpecialVar_Result == TRUE);
+    for (i = 0; i < PARTY_SIZE; i++)
+        gained[i] = GetMonData(&own[i], MON_DATA_EXP) - GetMonData(&before[i], MON_DATA_EXP);
+    {
+        static const struct CoopExpected zig[] = {{SPECIES_GEODUDE, 12, TRUE, TRUE}, {SPECIES_MAKUHITA, 14, TRUE, TRUE}, {SPECIES_NOSEPASS, 15, TRUE, TRUE}};
+        static const struct CoopExpected tree[] = {{SPECIES_GEODUDE, 12, FALSE, TRUE}, {SPECIES_MAKUHITA, 14, FALSE, TRUE}, {SPECIES_NOSEPASS, 15, FALSE, TRUE}};
+        static const struct CoopExpected wurm[] = {{SPECIES_GEODUDE, 12, FALSE, TRUE}, {SPECIES_MAKUHITA, 14, TRUE, FALSE}, {SPECIES_NOSEPASS, 15, TRUE, FALSE}};
+        u32 zigWant = ExpectedCoopTotal(&before[0], zig, 3);
+        u32 treeWant = ExpectedCoopTotal(&before[1], tree, 3);
+        u32 wurmWant = ExpectedCoopTotal(&before[2], wurm, 3);
+        u32 fullGeodude = gSpeciesInfo[SPECIES_GEODUDE].expYield * 12 / 7 * 150 / 100;
+
+        snprintf(what, sizeof(what), "the lead, which faced all three, gets the full amount for each: %u (expected %u)", gained[0], zigWant);
+        ExpectCoop(what, gained[0] == zigWant && zigWant > 0);
+        snprintf(what, sizeof(what), "Geodude (Lv. 12) gives the lead %u, the battle's Gen 6 trainer formula", fullGeodude);
+        ExpectCoop(what, ExpectedCoopReward(&before[0], SPECIES_GEODUDE, 12, TRUE) == fullGeodude);
+        snprintf(what, sizeof(what), "a Pokemon never sent out gets the Exp. Share's half of each: %u (expected %u)", gained[1], treeWant);
+        ExpectCoop(what, gained[1] == treeWant && treeWant > 0);
+        snprintf(what, sizeof(what), "the half is half: %u of %u for Geodude", ExpectedCoopReward(&before[1], SPECIES_GEODUDE, 12, FALSE), fullGeodude);
+        ExpectCoop(what, ExpectedCoopReward(&before[1], SPECIES_GEODUDE, 12, FALSE) == fullGeodude / 2);
+        snprintf(what, sizeof(what), "a Pokemon that fainted gets only what it earned while standing (the first, shared): %u (expected %u)", gained[2], wurmWant);
+        ExpectCoop(what, gained[2] == wurmWant && wurmWant > 0);
+    }
+    ExpectCoop("an Egg gets nothing", gained[3] == 0 && GetMonData(&own[3], MON_DATA_LEVEL) == GetMonData(&before[3], MON_DATA_LEVEL));
+    ExpectCoop("a Pokemon fainted before the battle gets nothing", gained[4] == 0 && CoopEvSum(&own[4]) == evs[4]);
+    ExpectCoop("a Lv. 100 Pokemon gets no experience but its EVs (Gen 5+)", gained[5] == 0 && CoopEvSum(&own[5]) > evs[5]);
+    ExpectCoop("the lead and the Exp. Share getter gain EVs", CoopEvSum(&own[0]) > evs[0] && CoopEvSum(&own[1]) > evs[1]);
+    ExpectCoop("the teammate's Pokemon (the partner party) is untouched",
+               memcmp(&gParties[B_TRAINER_PARTNER][0], &partner, sizeof(partner)) == 0);
+    snprintf(what, sizeof(what), "the Exp. Share getter grew to Lv. %u (from 15) with its stats", GetMonData(&own[1], MON_DATA_LEVEL));
+    ExpectCoop(what, GetMonData(&own[1], MON_DATA_LEVEL) >= 16
+               && GetMonData(&own[1], MON_DATA_MAX_HP) > GetMonData(&before[1], MON_DATA_MAX_HP));
+    ExpectCoop("growing a level raised friendship", GetMonData(&own[1], MON_DATA_FRIENDSHIP) > GetMonData(&before[1], MON_DATA_FRIENDSHIP));
+
+    // The messages, the moves of the new levels and the evolution.
+    steps = RunCoopAward(&messages, &moveFull, &evolveSlot, &evolveTo, TRUE);
+    snprintf(what, sizeof(what), "the award ends (%u steps, %u messages, %u move prompts)", steps, messages, moveFull);
+    ExpectCoop(what, steps <= 200 && messages >= 4);
+    snprintf(what, sizeof(what), "the lead knows four moves: asked once to forget one for its new move %u", sCoopPromptMove);
+    ExpectCoop(what, moveFull == 1 && sCoopPromptMove != MOVE_NONE);
+    ExpectCoop("forgetting the first move teaches the new one in its place",
+               sCoopForgot && GetMonData(&own[0], MON_DATA_MOVE1) == sCoopPromptMove && !MonKnowsMove(&own[0], MOVE_TACKLE));
+    snprintf(what, sizeof(what), "Treecko (slot 1) is offered its evolution into Grovyle (slot %u, species %u)", evolveSlot, evolveTo);
+    ExpectCoop(what, evolveSlot == 1 && evolveTo == SPECIES_GROVYLE);
+    {
+        // Every move of every level each Pokemon grew through is known now,
+        // unless it was declined at a "forget a move?" prompt.
+        bool32 all = TRUE;
+        u32 slot, level, known = 0;
+
+        for (slot = 0; slot < PARTY_SIZE; slot++)
+        {
+            const struct LevelUpMove *learnset = GetSpeciesLevelUpLearnset(GetMonData(&own[slot], MON_DATA_SPECIES));
+
+            for (i = 0; learnset[i].move != LEVEL_UP_MOVE_END; i++)
+            {
+                level = learnset[i].level;
+                if (level > GetMonData(&before[slot], MON_DATA_LEVEL) && level <= GetMonData(&own[slot], MON_DATA_LEVEL))
+                {
+                    bool32 has = MonKnowsMove(&own[slot], learnset[i].move);
+                    known += has;
+                    if (!has && moveFull == 0)
+                        all = FALSE;
+                }
+            }
+        }
+        snprintf(what, sizeof(what), "the moves of the new levels are learned (%u known; declined ones only after a prompt)", known);
+        ExpectCoop(what, all);
+    }
+
+    // Once only: the list is consumed.
+    MultiplayerCoop_ExpBegin();
+    ExpectCoop("a second award gives nothing (once per defeated Pokemon)", gSpecialVar_Result == FALSE);
+    memcpy(before, own, sizeof(before));
+    MultiplayerCoop_TestCapture(B_OUTCOME_WON); // the same battle's end seen again
+    MultiplayerCoop_ExpBegin();
+    ExpectCoop("ending the same battle again finds nothing new (nothing fell since)", gSpecialVar_Result == FALSE
+               && memcmp(before, own, sizeof(before)) == 0);
+
+    // A lost battle: only what fell counts.
+    MultiplayerCoop_TestReset();
+    CoopMon(&a[0], SPECIES_GEODUDE, 12);
+    CoopMon(&a[1], SPECIES_NOSEPASS, 15);
+    CoopMon(&b[0], SPECIES_MAKUHITA, 14);
+    CoopBattleState();
+    memcpy(before, own, sizeof(before));
+    MultiplayerCoop_TestTrackFrame();
+    SetCoopHp(&a[0], 0);
+    MultiplayerCoop_TestTrackFrame();
+    MultiplayerCoop_TestCapture(B_OUTCOME_LOST);
+    snprintf(what, sizeof(what), "a lost battle counts only the Pokemon that fell (%u)", MultiplayerCoop_TestKoCount());
+    ExpectCoop(what, MultiplayerCoop_TestKoCount() == 1);
+    memcpy(own, before, sizeof(before));
+    MultiplayerCoop_ExpBegin();
+    ExpectCoop("... and awards it", gSpecialVar_Result == TRUE && GetMonData(&own[0], MON_DATA_EXP) > GetMonData(&before[0], MON_DATA_EXP));
+    RunCoopAward(&messages, &moveFull, &evolveSlot, &evolveTo, FALSE);
+
+    // No co-op battle (PvP, or no battle): the battle's end records nothing.
+    MultiplayerCoop_TestReset();
+    CoopMon(&a[0], SPECIES_GEODUDE, 12);
+    memcpy(before, own, sizeof(before));
+    MultiplayerCoop_OnNativeResult(MP_COOP_GYM_RUSTBORO, B_OUTCOME_WON);
+    MultiplayerCoop_ExpBegin();
+    ExpectCoop("without a co-op battle (PvP) nothing is recorded or awarded", MultiplayerCoop_TestKoCount() == 0
+               && gSpecialVar_Result == FALSE && memcmp(before, own, sizeof(before)) == 0);
+    MultiplayerCoop_Init();
+
+    printf("selftest-coop-exp: %d checks, %d failed\n", sCoopChecks, sCoopFailures);
+    return sCoopFailures ? 1 : 0;
+}
