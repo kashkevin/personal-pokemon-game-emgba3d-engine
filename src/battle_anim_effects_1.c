@@ -6897,8 +6897,29 @@ static void AnimDoubleTeam(struct Sprite *sprite)
     }
 }
 
+#ifdef PORTABLE
+static bool32 AllySwitchPartnerPresent(void)
+{
+    enum BattlerId partner = GetPartnerBattler(gBattlerAttacker);
+    return partner < MAX_BATTLERS_COUNT && IsBattlerSpritePresent(partner)
+        && gBattlerSpriteIds[partner] < MAX_SPRITES && gSprites[gBattlerSpriteIds[partner]].inUse;
+}
+#endif
+#line 6877 // gba-line
 void AnimTask_AllySwitchAttacker(u8 taskId)
 {
+#ifdef PORTABLE
+    // Native only: without a partner on the field there is nothing to switch
+    // with (gBattlerSpriteIds holds 0xFF: gSprites[255] is past the table). A
+    // battle's Ally Switch fails before its animation (BS_TryAllySwitch); only
+    // the Battle FX test gallery plays it alone. End the task instead.
+    if (!AllySwitchPartnerPresent())
+    {
+        DestroyAnimVisualTask(taskId);
+        return;
+    }
+#endif
+#line 6879 // gba-line
     PrepareDoubleTeamAnim(taskId, ANIM_ATTACKER, TRUE);
     gSprites[gBattlerSpriteIds[gBattlerAttacker]].invisible = TRUE;
     gSprites[gBattlerSpriteIds[GetPartnerBattler(gBattlerAttacker)]].invisible = TRUE;
@@ -6912,6 +6933,18 @@ void AnimTask_AllySwitchAttacker(u8 taskId)
 
 void AnimTask_AllySwitchPartner(u8 taskId)
 {
+#ifdef PORTABLE
+    // Native only: without a partner on the field there is nothing to switch
+    // with (gBattlerSpriteIds holds 0xFF: gSprites[255] is past the table). A
+    // battle's Ally Switch fails before its animation (BS_TryAllySwitch); only
+    // the Battle FX test gallery plays it alone. End the task instead.
+    if (!AllySwitchPartnerPresent())
+    {
+        DestroyAnimVisualTask(taskId);
+        return;
+    }
+#endif
+#line 6892 // gba-line
     PrepareDoubleTeamAnim(taskId, ANIM_ATK_PARTNER, TRUE);
 }
 
