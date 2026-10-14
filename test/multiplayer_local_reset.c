@@ -582,7 +582,9 @@ TEST("Multiplayer static reset: Gen6 new personal shiny rolls preserve the exist
     EXPECT(GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_IS_SHINY));
     struct Pokemon owned = gParties[B_TRAINER_OPPONENT_A][0];
     MultiplayerLocalReset_Finish();
-    EXPECT(!MultiplayerLocalReset_PersonalGeneration()); EXPECT(!ComputePlayerShinyOdds(8, 0));
+    // After the reset the ordinary personal roll is still Gen 6 (8 shiny, 16 not).
+    EXPECT(!MultiplayerLocalReset_PersonalGeneration());
+    EXPECT(ComputePlayerShinyOdds(8, 0)); EXPECT(!ComputePlayerShinyOdds(16, 0));
     EXPECT(GetMonData(&owned, MON_DATA_IS_SHINY));
     EXPECT(!memcmp(&owned, &gParties[B_TRAINER_OPPONENT_A][0], sizeof(owned)));
     TearDown(&f);
