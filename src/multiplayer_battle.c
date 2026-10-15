@@ -65,6 +65,9 @@ const u32 gMultiplayerBattleAbiVersion = MULTIPLAYER_BATTLE_ABI;
 const u32 gMultiplayerBattleResumeAbiVersion = MULTIPLAYER_BATTLE_RESUME_ABI;
 const u32 gMultiplayerBattleAdmissionCleanupAbiVersion = MULTIPLAYER_BATTLE_ADMISSION_CLEANUP_ABI;
 const u32 gMultiplayerBattleCoopAbiVersion = MULTIPLAYER_BATTLE_COOP_ABI;
+#if MP_FFA_ENABLED
+const u32 gMultiplayerBattleFfaAbiVersion = MULTIPLAYER_BATTLE_FFA_ABI;
+#endif
 EWRAM_DATA volatile struct MultiplayerBattleMailbox gMultiplayerBattleMailbox = {0};
 // Read-only proof observation; never an authority or command input.
 EWRAM_DATA volatile u32 gMultiplayerBattleHoldFlags = 0;

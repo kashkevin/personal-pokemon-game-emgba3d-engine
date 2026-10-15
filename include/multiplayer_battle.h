@@ -10,6 +10,7 @@
 // its partner, both run by the master core's AI (Emerald's tower link-multi
 // controller layout). Parties are restored exactly afterwards, like PvP.
 #define MULTIPLAYER_BATTLE_COOP_ABI 1
+#define MULTIPLAYER_BATTLE_FFA_ABI 1
 #define MULTIPLAYER_BATTLE_SIZE 512
 #define MULTIPLAYER_BATTLE_BLOCK_SIZE 256
 #define MULTIPLAYER_BATTLE_CHUNK_SIZE 128
@@ -108,6 +109,7 @@ extern const u32 gMultiplayerBattleAbiVersion;
 extern const u32 gMultiplayerBattleResumeAbiVersion;
 extern const u32 gMultiplayerBattleAdmissionCleanupAbiVersion;
 extern const u32 gMultiplayerBattleCoopAbiVersion;
+extern const u32 gMultiplayerBattleFfaAbiVersion; // PC build and test ROM only: four-player free-for-all
 extern volatile struct MultiplayerBattleMailbox gMultiplayerBattleMailbox;
 extern volatile u32 gMultiplayerBattleHoldFlags;
 void MultiplayerBattle_Init(void);
