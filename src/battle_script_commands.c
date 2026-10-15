@@ -2,6 +2,7 @@
 #include "multiplayer_local_reset.h"
 #include "battle.h"
 #include "multiplayer_battle.h"
+#include "battle_ffa.h"
 #include "battle_hold_effects.h"
 #include "battle_message.h"
 #include "battle_anim.h"
@@ -1133,7 +1134,7 @@ static void Cmd_attackanimation(void)
         && effect != EFFECT_SUBSTITUTE
         && effect != EFFECT_ALLY_SWITCH
         // In a wild double battle gotta use the teleport animation if two wild Pokémon are alive.
-        && !(GetMoveEffect(gCurrentMove) == EFFECT_TELEPORT && WILD_DOUBLE_BATTLE && !IsOnPlayerSide(gBattlerAttacker) && IsBattlerAlive(GetPartnerBattler(gBattlerAttacker))))
+        && !(GetMoveEffect(gCurrentMove) == EFFECT_TELEPORT && WILD_DOUBLE_BATTLE && !IsOnPlayerSide(gBattlerAttacker) && IsPartnerAlive(gBattlerAttacker)))
     {
         BattleScriptPush(cmd->nextInstr);
         gBattlescriptCurrInstr = BattleScript_Pausex20;
@@ -1299,7 +1300,8 @@ static void Cmd_effectivenesssound(void)
 
 static inline bool32 ShouldPrintTwoFoesMessage(u32 moveResult)
 {
-    return gBattlerTarget == GetOppositeBattler(gBattlerAttacker)
+    return !IsFreeForAllBattle()
+        && gBattlerTarget == GetOppositeBattler(gBattlerAttacker)
         && gBattleStruct->moveResultFlags[GetPartnerBattler(gBattlerTarget)] & moveResult
         && !(gBattleStruct->moveResultFlags[GetPartnerBattler(gBattlerTarget)] & MOVE_RESULT_AVOIDED_ATTACK);
 }
@@ -1307,7 +1309,8 @@ static inline bool32 ShouldPrintTwoFoesMessage(u32 moveResult)
 static inline bool32 ShouldRelyOnTwoFoesMessage(u32 moveResult)
 {
     enum BattlerId oppositeTarget = GetOppositeBattler(gBattlerAttacker);
-    return gBattlerTarget == GetPartnerBattler(oppositeTarget)
+    return !IsFreeForAllBattle()
+        && gBattlerTarget == GetPartnerBattler(oppositeTarget)
         && gBattleStruct->moveResultFlags[oppositeTarget] & moveResult
         && !(gBattleStruct->moveResultFlags[oppositeTarget] & MOVE_RESULT_AVOIDED_ATTACK);
 }
@@ -2549,6 +2552,10 @@ static bool32 NoAliveMonsForOpponent(void)
 
 bool32 NoAliveMonsForEitherParty(void)
 {
+#if MP_FFA_ENABLED
+    if (IsFreeForAllBattle())
+        return FFA_CountTrainersLeft() <= 1;
+#endif
     return (NoAliveMonsForPlayer() || NoAliveMonsForOpponent());
 }
 
@@ -2561,6 +2568,35 @@ static void Cmd_checkteamslost(void)
 
     if (gBattleControllerExecFlags)
         return;
+
+#if MP_FFA_ENABLED
+    if (IsFreeForAllBattle())
+    {
+        // Last trainer standing wins. Nobody left at the same moment is a draw.
+        u32 trainersLeft = FFA_CountTrainersLeft();
+
+        if (trainersLeft <= 1)
+        {
+            enum BattlerId winner = trainersLeft == 1 ? FFA_GetSoleSurvivor() : gBattlersCount;
+
+            gBattleOutcome = FFA_GetOutcomeForWinner(FFA_RecordWinner(winner));
+            gBattlescriptCurrInstr = cmd->nextInstr;
+        }
+        else
+        {
+            // Everyone who has lost a Pokemon this turn and still has another picks the next one together.
+            u32 emptySpots = 0;
+
+            for (enum BattlerId battler = 0; battler < gBattlersCount; battler++)
+            {
+                if ((gHitMarker & HITMARKER_FAINTED(battler)) && !gSpecialStatuses[battler].faintedHasReplacement)
+                    emptySpots++;
+            }
+            gBattlescriptCurrInstr = emptySpots > 1 ? cmd->jumpInstr : cmd->nextInstr;
+        }
+        return;
+    }
+#endif
 
     if (NoAliveMonsForPlayer())
         gBattleOutcome |= B_OUTCOME_LOST;
@@ -4960,7 +4996,7 @@ bool32 TryDefogClear(enum BattlerId battlerAtk, bool32 clear)
 {
     s32 i;
 
-    for (i = 0; i < NUM_BATTLE_SIDES; i++)
+    for (i = 0; i < NUM_BATTLE_LOGIC_SIDES; i++)
     {
         struct SideTimer *sideTimer = &gSideTimers[i];
         u32 *sideStatuses = &gSideStatuses[i];
@@ -5007,7 +5043,7 @@ bool32 TryTidyUpClear(bool32 clear)
     u32 i;
     u32 clearFound = FALSE;
 
-    for (i = 0; i < NUM_BATTLE_SIDES; i++)
+    for (i = 0; i < NUM_BATTLE_LOGIC_SIDES; i++)
     {
         gBattleScripting.battler = i;
         if (DefogClearHazards(i, clear))
@@ -5089,9 +5125,58 @@ u32 IsAbilityStatusProtected(enum BattlerId battler, enum Ability ability)
     sideTimerOpp->structField = (temp ^ BIT_SIDE);        \
 }                                               \
 
+#if MP_FFA_ENABLED
+// Court Change in a free-for-all trades the user's side with the side of the trainer it was aimed at.
+#define COURTCHANGE_SWAP_SIDES(a, b, status, structField)               \
+{                                                                       \
+    u32 hadA = gSideStatuses[a] & (status);                             \
+    u32 hadB = gSideStatuses[b] & (status);                             \
+    gSideStatuses[a] = (gSideStatuses[a] & ~(status)) | hadB;           \
+    gSideStatuses[b] = (gSideStatuses[b] & ~(status)) | hadA;           \
+    SWAP(gSideTimers[a].structField, gSideTimers[b].structField, temp); \
+}
+
+static void CourtChangeSwapSides(enum BattleSide a, enum BattleSide b)
+{
+    u32 temp;
+
+    if (a == b)
+        return;
+    COURTCHANGE_SWAP_SIDES(a, b, SIDE_STATUS_REFLECT, reflectTimer)
+    COURTCHANGE_SWAP_SIDES(a, b, SIDE_STATUS_LIGHTSCREEN, lightscreenTimer)
+    COURTCHANGE_SWAP_SIDES(a, b, SIDE_STATUS_MIST, mistTimer)
+    COURTCHANGE_SWAP_SIDES(a, b, SIDE_STATUS_SAFEGUARD, safeguardTimer)
+    COURTCHANGE_SWAP_SIDES(a, b, SIDE_STATUS_AURORA_VEIL, auroraVeilTimer)
+    COURTCHANGE_SWAP_SIDES(a, b, SIDE_STATUS_TAILWIND, tailwindTimer)
+    COURTCHANGE_SWAP_SIDES(a, b, SIDE_STATUS_LUCKY_CHANT, luckyChantTimer)
+    COURTCHANGE_SWAP_SIDES(a, b, SIDE_STATUS_DAMAGE_NON_TYPES, damageNonTypesTimer)
+    COURTCHANGE_SWAP_SIDES(a, b, SIDE_STATUS_RAINBOW, rainbowTimer)
+    COURTCHANGE_SWAP_SIDES(a, b, SIDE_STATUS_SEA_OF_FIRE, seaOfFireTimer)
+    COURTCHANGE_SWAP_SIDES(a, b, SIDE_STATUS_SWAMP, swampTimer)
+
+    for (u32 i = 0; i < HAZARDS_MAX_COUNT; i++)
+        SWAP(gBattleStruct->hazardsQueue[a][i], gBattleStruct->hazardsQueue[b][i], temp);
+    SWAP(gBattleStruct->numHazards[a], gBattleStruct->numHazards[b], temp);
+    SWAP(gSideTimers[a].spikesAmount, gSideTimers[b].spikesAmount, temp);
+    SWAP(gSideTimers[a].toxicSpikesAmount, gSideTimers[b].toxicSpikesAmount, temp);
+    SWAP(gSideTimers[a].stickyWebBattlerId, gSideTimers[b].stickyWebBattlerId, temp);
+    SWAP(gSideTimers[a].stickyWebBattlerSide, gSideTimers[b].stickyWebBattlerSide, temp);
+    SWAP(gSideTimers[a].damageNonTypesType, gSideTimers[b].damageNonTypesType, temp);
+}
+#endif
+
 void BS_CourtChangeSwapSideStatuses(void)
 {
     NATIVE_ARGS();
+
+#if MP_FFA_ENABLED
+    if (IsFreeForAllBattle())
+    {
+        CourtChangeSwapSides(GetBattlerSide(gBattlerAttacker), GetBattlerSide(gBattlerTarget));
+        gBattlescriptCurrInstr = cmd->nextInstr;
+        return;
+    }
+#endif
 
     struct SideTimer *sideTimerPlayer = &gSideTimers[B_SIDE_PLAYER];
     struct SideTimer *sideTimerOpp = &gSideTimers[B_SIDE_OPPONENT];
@@ -5893,7 +5978,7 @@ static void Cmd_updatestatusicon(void)
             BtlController_EmitStatusIconUpdate(battler, B_COMM_TO_CONTROLLER, gBattleMons[battler].status1);
             MarkBattlerForControllerExec(battler);
         }
-        if ((IsDoubleBattle()))
+        if ((IsDoubleBattle()) && !IsFreeForAllBattle())
         {
             battler = GetBattlerAtPosition(GetPartnerPosition(GetBattlerPosition(gBattlerAttacker)));
             if (!(gAbsentBattlerFlags & (1u << battler)))
@@ -6466,7 +6551,11 @@ static void Cmd_healpartystatus(void)
     u32 i = 0;
     u32 zero = 0;
     u32 toHeal = 0;
+#if MP_FFA_ENABLED
+    enum BattlerId partner = GetPartnerBattler(gBattlerAttacker); // the user itself in a free-for-all: no ally to heal
+#else
     enum BattlerId partner = GetBattlerAtPosition(GetPartnerPosition(GetBattlerPosition(gBattlerAttacker)));
+#endif
     struct Pokemon *party = GetBattlerParty(gBattlerAttacker);
     bool32 isSoundMove = IsSoundMove(gCurrentMove);
 
@@ -6489,7 +6578,7 @@ static void Cmd_healpartystatus(void)
 
     gBattleScripting.battler = partner;
 
-    if (IsBattlerAlive(partner))
+    if (IsBattlerAlive(partner) && !IsFreeForAllBattle())
     {
         if (GetConfig(B_HEAL_BELL_SOUNDPROOF) == GEN_5
          || !(isSoundMove && GetBattlerAbility(partner) == ABILITY_SOUNDPROOF))
@@ -6582,7 +6671,12 @@ static void Cmd_trysetspikes(void)
 {
     CMD_ARGS(const u8 *failInstr);
 
+#if MP_FFA_ENABLED
+    // The side of the trainer the move was aimed at (the opposite Pokemon is not a thing with three foes).
+    enum BattleSide targetSide = GetBattlerSide(IsFreeForAllBattle() ? gBattlerTarget : GetOppositeBattler(gBattlerAttacker));
+#else
     enum BattleSide targetSide = GetBattlerSide(GetOppositeBattler(gBattlerAttacker));
+#endif
 
     if (gSideTimers[targetSide].spikesAmount == 3)
     {
@@ -7040,7 +7134,7 @@ static void Cmd_trysethelpinghand(void)
 {
     CMD_ARGS(const u8 *failInstr);
 
-    if (!IsDoubleBattle())
+    if (!IsDoubleBattle() || IsFreeForAllBattle())
     {
         gBattlescriptCurrInstr = cmd->failInstr;
         return;
@@ -7190,7 +7284,7 @@ static void Cmd_trycopyability(void)
     enum BattlerId battler = GetBattlerForBattleScript(cmd->battler);
     enum BattlerId partner = GetPartnerBattler(battler);
     enum Ability defAbility = gBattleMons[gBattlerTarget].ability;
-    bool32 shouldConsiderPartner = IsBattlerAlive(partner) && GetMoveEffect(gCurrentMove) == EFFECT_DOODLE;
+    bool32 shouldConsiderPartner = IsPartnerAlive(battler) && GetMoveEffect(gCurrentMove) == EFFECT_DOODLE;
 
     if (gBattleMons[battler].ability == defAbility
       || defAbility == ABILITY_NONE
@@ -9234,7 +9328,11 @@ void BS_JumpIfCantLoseItem(void)
 void BS_GetBattlerSide(void)
 {
     NATIVE_ARGS(u8 battler);
+#if MP_FFA_ENABLED
+    gBattleCommunication[0] = GetBattlerPositionSide(GetBattlerForBattleScript(cmd->battler)); // for choosing text
+#else
     gBattleCommunication[0] = GetBattlerSide(GetBattlerForBattleScript(cmd->battler));
+#endif
     gBattlescriptCurrInstr = cmd->nextInstr;
 }
 
@@ -9244,7 +9342,7 @@ void BS_TrySymbiosis(void)
     enum BattlerId battler = GetBattlerForBattleScript(cmd->battler);
     //called by Bestow, Fling, and Bug Bite, which don't work with Cmd_removeitem.
     enum BattlerId partner = GetPartnerBattler(battler);
-    if (TryTriggerSymbiosis(battler, partner))
+    if (!IsFreeForAllBattle() && TryTriggerSymbiosis(battler, partner))
     {
         BestowItem(partner, battler);
         gLastUsedAbility = gBattleMons[partner].ability;
@@ -9382,7 +9480,7 @@ void BS_ItemRestoreHP(void)
 
             enum BattlerId partner = GetPartnerBattler(gBattlerAttacker);
             // Absent battlers on the field need to be replaced
-            if (IsDoubleBattle() && (gAbsentBattlerFlags & (1u << partner)))
+            if (IsDoubleBattle() && !IsFreeForAllBattle() && (gAbsentBattlerFlags & (1u << partner)))
             {
                 gAbsentBattlerFlags &= ~(1u << partner);
                 gBattleCommunication[MULTIUSE_STATE] = TRUE;
@@ -9733,6 +9831,7 @@ void BS_TryAllySwitch(void)
     enum BattlerId partner = GetPartnerBattler(gBattlerAttacker);
 
     if (!IsBattlerAlive(partner)
+     || IsFreeForAllBattle()
      || HasPartnerTrainer(gBattlerAttacker)
      || gBattleStruct->battlerState[gBattlerAttacker].commanderSpecies != SPECIES_NONE
      || gBattleStruct->battlerState[partner].commanderSpecies != SPECIES_NONE)
@@ -10492,7 +10591,7 @@ void BS_JumpIfNoAlly(void)
 {
     NATIVE_ARGS(u8 battler, const u8 *jumpInstr);
     enum BattlerId partner = GetPartnerBattler(GetBattlerForBattleScript(cmd->battler));
-    if (!IsBattlerAlive(partner))
+    if (IsFreeForAllBattle() || !IsBattlerAlive(partner))
         gBattlescriptCurrInstr = cmd->jumpInstr;
     else
         gBattlescriptCurrInstr = cmd->nextInstr;
@@ -10844,7 +10943,7 @@ void BS_SetTeleportOutcome(void)
 
     // Don't end the battle if one of the wild mons teleported from the wild double battle
     // and its partner is still alive.
-    if (!IsOnPlayerSide(battler) && IsBattlerAlive(GetPartnerBattler(battler)))
+    if (!IsOnPlayerSide(battler) && IsPartnerAlive(battler))
     {
         gAbsentBattlerFlags |= 1u << battler;
         gHitMarker |= HITMARKER_FAINTED(battler);
@@ -10996,7 +11095,8 @@ void BS_TryActivateReceiver(void)
     enum BattlerId receiverBattler = GetPartnerBattler(faintedBattler);
     enum Ability receiverAbility = GetBattlerAbility(receiverBattler);
 
-    if (IsBattlerAlive(receiverBattler)
+    if (!IsFreeForAllBattle()
+     && IsBattlerAlive(receiverBattler)
      && (receiverAbility == ABILITY_RECEIVER || receiverAbility == ABILITY_POWER_OF_ALCHEMY)
      && GetBattlerHoldEffectIgnoreAbility(receiverBattler) != HOLD_EFFECT_ABILITY_SHIELD
      && !gAbilitiesInfo[gBattleMons[faintedBattler].ability].cantBeCopied)
@@ -11427,7 +11527,7 @@ void BS_HandleTrainerSlideMsg(void)
             BattleLoadMonSpriteGfx(GetBattlerMon(battler), battler);
         }
         enum BattlerId partner = GetPartnerBattler(battler);
-        if (IsBattlerAlive(partner))
+        if (IsPartnerAlive(battler))
         {
             SetBattlerShadowSpriteCallback(partner, gBattleMons[partner].species);
             BattleLoadMonSpriteGfx(GetBattlerMon(partner), partner);
@@ -11784,7 +11884,7 @@ void BS_JumpIfTeamHealthy(void)
 {
     NATIVE_ARGS(const u8 *jumpInstr);
     enum BattlerId battler = gBattlerAttacker;
-    if ((IsDoubleBattle()) && IsBattlerAlive(GetPartnerBattler(battler)))
+    if ((IsDoubleBattle()) && IsPartnerAlive(battler))
     {
         enum BattlerId partner = GetPartnerBattler(battler);
         if ((gBattleMons[battler].hp == gBattleMons[battler].maxHP && !(gBattleMons[battler].status1 & STATUS1_ANY))

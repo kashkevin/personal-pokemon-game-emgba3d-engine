@@ -4174,7 +4174,7 @@ bool32 HasPartner(enum BattlerId battler)
 
 bool32 HasPartnerIgnoreFlags(enum BattlerId battler)
 {
-    if (IsDoubleBattle() && IsBattlerAlive(GetPartnerBattler(battler)))
+    if (IsDoubleBattle() && IsPartnerAlive(battler))
     {
         return TRUE;
     }

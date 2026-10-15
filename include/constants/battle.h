@@ -91,6 +91,23 @@ enum BattleSide
     NUM_BATTLE_SIDES = 2,
 };
 
+// EmeraldTogether four-player free-for-all (1v1v1v1). Every battler is then its own side for the battle's rules
+// (screens, hazards, allies, foes), while the screen keeps its two columns (a battler's position decides where it is
+// drawn). The code exists only where it can be tested or played: the PC build and the GBA test ROM. The release GBA ROM
+// is compiled without it, so it stays byte-identical.
+#if TESTING || defined(PORTABLE)
+#define MP_FFA_ENABLED 1
+#else
+#define MP_FFA_ENABLED 0
+#endif
+
+// Number of sides the rules can see (the arrays of side statuses, timers and hazards).
+#if MP_FFA_ENABLED
+#define NUM_BATTLE_LOGIC_SIDES 4 // one per battler (MAX_BATTLERS_COUNT)
+#else
+#define NUM_BATTLE_LOGIC_SIDES NUM_BATTLE_SIDES
+#endif
+
 #define B_FLANK_LEFT  0
 #define B_FLANK_RIGHT 1
 
@@ -112,7 +129,7 @@ enum BattleSide
 #define BATTLE_TYPE_EREADER_TRAINER    (1 << 11)
 #define BATTLE_TYPE_RAID               (1 << 12)
 #define BATTLE_TYPE_LEGENDARY          (1 << 13)
-#define BATTLE_TYPE_14                 (1 << 14)
+#define BATTLE_TYPE_FFA                (1 << 14) // EmeraldTogether: four independent trainers, each on a side of its own
 #define BATTLE_TYPE_TWO_OPPONENTS      (1 << 15)
 #define BATTLE_TYPE_DOME               (1 << 16)
 #define BATTLE_TYPE_PALACE             (1 << 17)

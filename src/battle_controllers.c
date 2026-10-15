@@ -6,6 +6,7 @@
 #include "battle_anim.h"
 #include "battle_arena.h"
 #include "battle_controllers.h"
+#include "battle_ffa.h"
 #include "battle_gfx_sfx_util.h"
 #include "battle_interface.h"
 #include "battle_message.h"
@@ -1580,6 +1581,10 @@ void BtlController_EmitEndLinkBattle(enum BattlerId battler, u32 bufferId, u8 ba
         gBattleResources->transferBuffer[3] = gSaveBlock2Ptr->frontier.disableRecordBattle;
         gBattleResources->transferBuffer[5] = gBattleResources->transferBuffer[4] = RecordedBattle_BufferNewBattlerData(&gBattleResources->transferBuffer[6]);
     }
+#if MP_FFA_ENABLED
+    if (IsFreeForAllBattle())
+        gBattleResources->transferBuffer[2] = FFA_GetWinnerByte(); // every core works out its own result from the winner
+#endif
     PrepareBufferDataTransfer(battler, bufferId, gBattleResources->transferBuffer, gBattleResources->transferBuffer[4] + 6);
 }
 
@@ -3533,7 +3538,7 @@ void SetFinalChosenTarget(enum BattlerId battler, bool32 checkPartner)
         chosenTarget = GetPartnerBattler(battler);
         break;
     case TARGET_USER_OR_ALLY: // AI could have chosen opponent as the target because of the way the score system works
-        if (!IsBattlerAlly(battler, chosenTarget) || !IsBattlerAlive(GetPartnerBattler(battler)))
+        if (!IsBattlerAlly(battler, chosenTarget) || !IsPartnerAlive(battler))
             chosenTarget = battler;
         break;
     case TARGET_USER:

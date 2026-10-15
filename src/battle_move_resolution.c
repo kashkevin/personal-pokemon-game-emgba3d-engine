@@ -755,6 +755,11 @@ static bool32 IsTargetingField(enum BattlerId battlerAtk, enum BattlerId battler
 
 static bool32 IsTargetingOpponentsField(enum BattlerId battlerAtk, enum BattlerId battlerDef)
 {
+#if MP_FFA_ENABLED
+    // A free-for-all move at "the opponents' field" goes to the side of the one trainer it was aimed at.
+    if (IsFreeForAllBattle())
+        return battlerDef == gBattlerTarget ? checkFailure : skipFailure;
+#endif
     if (IsBattlerAlly(battlerDef, GetOppositeBattler(battlerAtk)))
         return checkFailure;
     return skipFailure;
@@ -848,7 +853,8 @@ static bool32 HandleMoveTargetRedirection(struct BattleCalcValues *cv, enum Move
             cv->battlerDef = gBattleStruct->moveTarget[cv->battlerAtk] = gProtectStructs[cv->battlerAtk].specialBattlerId;
     }
 
-    if (IsAffectedByFollowMe(cv->battlerAtk, side, cv->move)
+    if (!IsFreeForAllBattle() // Follow Me draws attacks meant for allies, and nobody has allies here
+     && IsAffectedByFollowMe(cv->battlerAtk, side, cv->move)
      && (moveTarget == TARGET_SELECTED || moveTarget == TARGET_SMART || cv->moveEffect == EFFECT_REFLECT_DAMAGE)
      && !IsBattlerAlly(cv->battlerAtk, gSideTimers[side].followmeTarget))
     {
@@ -962,7 +968,8 @@ static enum CancelerResult CancelerSetTargets(struct BattleCalcValues *cv)
               && !IsBattlerAlive(cv->battlerDef)
               && !IsBattlerAlly(cv->battlerAtk, cv->battlerDef))
         {
-            cv->battlerDef = GetPartnerBattler(cv->battlerDef);
+            // The target is gone: the partner takes the hit; in a free-for-all there is none, so any trainer still standing.
+            cv->battlerDef = IsFreeForAllBattle() ? SetRandomTarget(cv->battlerAtk) : GetPartnerBattler(cv->battlerDef);
         }
     }
 
@@ -1610,6 +1617,7 @@ static bool32 CanPledgeComboAttackHappen(struct BattleCalcValues *cv)
         return FALSE; // already in progress
 
     if (!IsDoubleBattle()
+     || IsFreeForAllBattle()
      || GetMoveEffect(partnerMove) != EFFECT_PLEDGE
      || !IsBattlerAlive(partner)
      || cv->move == partnerMove
@@ -1975,11 +1983,11 @@ static bool32 NoTargetPresent(enum BattlerId battler, enum Move move, enum MoveT
         break;
     case TARGET_BOTH:
     case TARGET_SMART:
-        if (!IsBattlerAlive(gBattlerTarget) && !IsBattlerAlive(GetPartnerBattler(gBattlerTarget)))
+        if (!IsBattlerAlive(gBattlerTarget) && !IsPartnerAlive(gBattlerTarget))
             return TRUE;
         break;
     case TARGET_FOES_AND_ALLY:
-        if (!IsBattlerAlive(gBattlerTarget) && !IsBattlerAlive(GetPartnerBattler(gBattlerTarget)) && !IsBattlerAlive(GetPartnerBattler(gBattlerAttacker)))
+        if (!IsBattlerAlive(gBattlerTarget) && !IsPartnerAlive(gBattlerTarget) && !IsPartnerAlive(gBattlerAttacker))
             return TRUE;
         break;
     default:
@@ -2769,7 +2777,7 @@ static enum CancelerResult CancelerMoveAnimation(struct BattleCalcValues *cv)
      && cv->moveEffect != EFFECT_SUBSTITUTE
      && cv->moveEffect != EFFECT_ALLY_SWITCH
      // In a wild double battle gotta use the teleport animation if two wild Pokémon are alive.
-     && !(cv->moveEffect == EFFECT_TELEPORT && WILD_DOUBLE_BATTLE && !IsOnPlayerSide(cv->battlerAtk) && IsBattlerAlive(GetPartnerBattler(cv->battlerAtk))))
+     && !(cv->moveEffect == EFFECT_TELEPORT && WILD_DOUBLE_BATTLE && !IsOnPlayerSide(cv->battlerAtk) && IsPartnerAlive(cv->battlerAtk)))
     {
         gBattleScripting.animTurn++;
         gBattleScripting.animTargetsHit++;
@@ -3607,6 +3615,7 @@ static enum MoveEndResult MoveEndSymbiosis(struct BattleCalcValues *cv)
     {
         if ((gSpecialStatuses[battler].berryReduced
               || (GetConfig(B_SYMBIOSIS_GEMS) >= GEN_7 && gSpecialStatuses[battler].gemBoost))
+            && !IsFreeForAllBattle()
             && TryTriggerSymbiosis(battler, GetPartnerBattler(battler)))
         {
             BestowItem(GetPartnerBattler(battler), battler);

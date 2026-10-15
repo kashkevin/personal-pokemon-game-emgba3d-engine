@@ -3721,7 +3721,7 @@ static void IllusionNickHack(enum BattlerId battler, u32 partyId, u8 *dst)
 
     if (GetMonAbility(mon) == ABILITY_ILLUSION)
     {
-        if (IsBattlerAlive(GetPartnerBattler(battler)))
+        if (IsPartnerAlive(battler))
             partnerMon = GetBattlerMon(GetPartnerBattler(battler));
         else
             partnerMon = mon;

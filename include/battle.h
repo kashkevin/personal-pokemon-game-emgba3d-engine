@@ -704,7 +704,7 @@ struct BattleStruct
     u8 shellSideArmCategory[MAX_BATTLERS_COUNT][MAX_BATTLERS_COUNT];
     u8 speedTieBreaks; // MAX_BATTLERS_COUNT! values.
     u32 stellarBoostFlags[MAX_BATTLE_TRAINERS]; // bitfield
-    struct SleepClause monCausingSleepClause[NUM_BATTLE_SIDES]; // Stores which Pokémon on a given side is causing Sleep Clause to be active as the mon's index in the party
+    struct SleepClause monCausingSleepClause[NUM_BATTLE_LOGIC_SIDES]; // Stores which Pokémon on a given side is causing Sleep Clause to be active as the mon's index in the party
     u8 additionalEffectsCounter:4; // A counter for the additionalEffects applied by the current move in Cmd_setadditionaleffects
     u8 pursuitStoredSwitch:4; // Stored id for the Pursuit target's switch (value between 0 and PARTY_SIZE included)
     s32 battlerExpReward;
@@ -719,8 +719,8 @@ struct BattleStruct
     u8 unused4:4;
     struct MessageStatus slideMessageStatus;
     u8 trainerSlideSpriteIds[MAX_BATTLERS_COUNT];
-    u8 hazardsQueue[NUM_BATTLE_SIDES][HAZARDS_MAX_COUNT];
-    u8 numHazards[NUM_BATTLE_SIDES];
+    u8 hazardsQueue[NUM_BATTLE_LOGIC_SIDES][HAZARDS_MAX_COUNT];
+    u8 numHazards[NUM_BATTLE_LOGIC_SIDES];
     u8 hazardsCounter:4; // Counter for applying hazard on switch in
     enum SubmoveState submoveAnnouncement:2;
     enum VictoryCatch victoryCatchState:2;
@@ -1054,8 +1054,8 @@ extern u8 gLastHitBy[MAX_BATTLERS_COUNT];
 extern u16 gChosenMoveByBattler[MAX_BATTLERS_COUNT];
 extern u32 gHitMarker;
 extern u8 gBideTarget[MAX_BATTLERS_COUNT];
-extern u32 gSideStatuses[NUM_BATTLE_SIDES];
-extern struct SideTimer gSideTimers[NUM_BATTLE_SIDES];
+extern u32 gSideStatuses[NUM_BATTLE_LOGIC_SIDES];
+extern struct SideTimer gSideTimers[NUM_BATTLE_LOGIC_SIDES];
 extern u16 gPauseCounterBattle;
 extern u16 gPaydayMoney;
 extern u8 gBattleCommunication[BATTLE_COMMUNICATION_ENTRIES_COUNT];
@@ -1161,19 +1161,49 @@ static inline enum BattlerPosition GetBattlerPosition(enum BattlerId battler)
     return gBattlerPositions[battler];
 }
 
-static inline enum BattleSide GetBattlerSide(enum BattlerId battler)
+// The column of the screen a battler is drawn in (what a player sees: their own team at the bottom). Used by
+// everything that draws or animates.
+static inline enum BattleSide GetBattlerPositionSide(enum BattlerId battler)
 {
     return GetBattlerPosition(battler) & BIT_SIDE;
 }
 
+static inline bool32 IsFreeForAllBattle(void)
+{
+#if MP_FFA_ENABLED
+    return (gBattleTypeFlags & BATTLE_TYPE_FFA) != 0;
+#else
+    return FALSE;
+#endif
+}
+
+// The side a battler fights for in the battle's rules: its screens, hazards, allies and foes. Two sides, decided by
+// the battler's position, in every battle but a free-for-all, where every battler is a side of its own.
+static inline enum BattleSide GetBattlerSide(enum BattlerId battler)
+{
+#if MP_FFA_ENABLED
+    if (gBattleTypeFlags & BATTLE_TYPE_FFA)
+        return (enum BattleSide)battler;
+#endif
+    return GetBattlerPositionSide(battler);
+}
+
 static inline bool32 IsOnPlayerSide(enum BattlerId battler)
 {
-    return GetBattlerSide(battler) == B_SIDE_PLAYER;
+    return GetBattlerPositionSide(battler) == B_SIDE_PLAYER;
 }
 
 static inline bool32 IsBattlerAlly(enum BattlerId battlerAtk, enum BattlerId battlerDef)
 {
     return GetBattlerSide(battlerAtk) == GetBattlerSide(battlerDef);
+}
+
+// TRUE when this battler has a living ally on the field. A free-for-all has no allies: GetPartnerBattler() answers with
+// the battler itself there (so array reads stay in range), and this is the question to ask instead of
+// IsBattlerAlive(GetPartnerBattler(battler)).
+static inline bool32 IsPartnerAlive(enum BattlerId battler)
+{
+    return !IsFreeForAllBattle() && IsBattlerAlive(GetPartnerBattler(battler));
 }
 
 static inline bool32 IsDoubleBattle(void)

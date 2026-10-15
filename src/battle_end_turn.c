@@ -27,6 +27,14 @@ static enum BattlerId GetBattlerSideForMessage(enum BattleSide side)
     return battler;
 }
 
+// The string tables only know "your side" and "the opposing side": in a free-for-all those are told by where the
+// trainer's Pokemon is drawn, not by which side of the rules it is.
+#if MP_FFA_ENABLED
+#define SIDE_FOR_MESSAGE(side) ((u32)GetBattlerPositionSide(GetBattlerSideForMessage(side)))
+#else
+#define SIDE_FOR_MESSAGE(side) (side)
+#endif
+
 static bool32 HandleEndTurnOrder(enum BattlerId battler)
 {
     bool32 effect = FALSE;
@@ -50,7 +58,7 @@ static bool32 HandleEndTurnVarious(enum BattlerId battler)
     if (gFieldTimers.fairyLockTimer > 0 && --gFieldTimers.fairyLockTimer == 0)
         gFieldStatuses &= ~STATUS_FIELD_FAIRY_LOCK;
 
-    for (enum BattleSide i = 0; i < NUM_BATTLE_SIDES; i++)
+    for (enum BattleSide i = 0; i < NUM_BATTLE_LOGIC_SIDES; i++)
     {
         if (gSideTimers[i].damageNonTypesTimer > 0 && --gSideTimers[i].damageNonTypesTimer == 0)
             gSideStatuses[i] &= ~SIDE_STATUS_DAMAGE_NON_TYPES;
@@ -1044,7 +1052,7 @@ static bool32 HandleEndTurnSecondEventBlock(enum BattlerId battler)
             gBattleScripting.battler = GetBattlerSideForMessage(side);
             gSideStatuses[side] &= ~SIDE_STATUS_REFLECT;
             BattleScriptCall(BattleScript_SideStatusWoreOff);
-            gBattleCommunication[MULTISTRING_CHOOSER] = side;
+            gBattleCommunication[MULTISTRING_CHOOSER] = SIDE_FOR_MESSAGE(side);
             PREPARE_MOVE_BUFFER(gBattleTextBuff1, MOVE_REFLECT);
             effect = TRUE;
         }
@@ -1056,7 +1064,7 @@ static bool32 HandleEndTurnSecondEventBlock(enum BattlerId battler)
             gBattleScripting.battler = GetBattlerSideForMessage(side);
             gSideStatuses[side] &= ~SIDE_STATUS_LIGHTSCREEN;
             BattleScriptCall(BattleScript_SideStatusWoreOff);
-            gBattleCommunication[MULTISTRING_CHOOSER] = side;
+            gBattleCommunication[MULTISTRING_CHOOSER] = SIDE_FOR_MESSAGE(side);
             PREPARE_MOVE_BUFFER(gBattleTextBuff1, MOVE_LIGHT_SCREEN);
             effect = TRUE;
         }
@@ -1078,7 +1086,7 @@ static bool32 HandleEndTurnSecondEventBlock(enum BattlerId battler)
             gBattleScripting.battler = GetBattlerSideForMessage(side);
             gSideStatuses[side] &= ~SIDE_STATUS_MIST;
             BattleScriptCall(BattleScript_SideStatusWoreOff);
-            gBattleCommunication[MULTISTRING_CHOOSER] = side;
+            gBattleCommunication[MULTISTRING_CHOOSER] = SIDE_FOR_MESSAGE(side);
             PREPARE_MOVE_BUFFER(gBattleTextBuff1, MOVE_MIST);
             effect = TRUE;
         }
@@ -1141,7 +1149,7 @@ static bool32 HandleEndTurnSecondEventBlock(enum BattlerId battler)
             gBattleScripting.battler = GetBattlerSideForMessage(side);
             gSideStatuses[side] &= ~SIDE_STATUS_AURORA_VEIL;
             BattleScriptCall(BattleScript_SideStatusWoreOff);
-            gBattleCommunication[MULTISTRING_CHOOSER] = side;
+            gBattleCommunication[MULTISTRING_CHOOSER] = SIDE_FOR_MESSAGE(side);
             PREPARE_MOVE_BUFFER(gBattleTextBuff1, MOVE_AURORA_VEIL);
             effect = TRUE;
         }
@@ -1658,7 +1666,7 @@ bool32 DoEndTurnEffects(void)
             }
         }
         // If either turnEffectsBattlerId or turnSideTracker are at max count, reset values and go to the next state
-        if (gBattleStruct->eventState.endTurnBattler == gBattlersCount || gBattleStruct->eventState.battlerSide == NUM_BATTLE_SIDES)
+        if (gBattleStruct->eventState.endTurnBattler == gBattlersCount || gBattleStruct->eventState.battlerSide == NUM_BATTLE_LOGIC_SIDES)
         {
             gBattleStruct->eventState.endTurnBattler = 0;
             gBattleStruct->eventState.battlerSide = 0;

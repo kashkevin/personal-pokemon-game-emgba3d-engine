@@ -200,8 +200,8 @@ EWRAM_DATA u8 gLastHitBy[MAX_BATTLERS_COUNT] = {0};
 EWRAM_DATA u16 gChosenMoveByBattler[MAX_BATTLERS_COUNT] = {0};
 EWRAM_DATA u32 gHitMarker = 0;
 EWRAM_DATA u8 gBideTarget[MAX_BATTLERS_COUNT] = {0};
-EWRAM_DATA u32 gSideStatuses[NUM_BATTLE_SIDES] = {0};
-EWRAM_DATA struct SideTimer gSideTimers[NUM_BATTLE_SIDES] = {0};
+EWRAM_DATA u32 gSideStatuses[NUM_BATTLE_LOGIC_SIDES] = {0};
+EWRAM_DATA struct SideTimer gSideTimers[NUM_BATTLE_LOGIC_SIDES] = {0};
 EWRAM_DATA u16 gPauseCounterBattle = 0;
 EWRAM_DATA u16 gPaydayMoney = 0;
 EWRAM_DATA u8 gBattleCommunication[BATTLE_COMMUNICATION_ENTRIES_COUNT] = {0};
@@ -3126,10 +3126,18 @@ static void BattleStartClearSetData(void)
     if (IsSleepClauseEnabled())
     {
         // If monCausingSleepClause[side].partyIndex equals PARTY_SIZE, Sleep Clause is not active for the given side.
+#if MP_FFA_ENABLED
+        for (u32 side = 0; side < NUM_BATTLE_LOGIC_SIDES; side++)
+        {
+            gBattleStruct->monCausingSleepClause[side].partyIndex = PARTY_SIZE;
+            gBattleStruct->monCausingSleepClause[side].trainer = MAX_BATTLE_TRAINERS;
+        }
+#else
         gBattleStruct->monCausingSleepClause[B_SIDE_PLAYER].partyIndex = PARTY_SIZE;
         gBattleStruct->monCausingSleepClause[B_SIDE_PLAYER].trainer = MAX_BATTLE_TRAINERS;
         gBattleStruct->monCausingSleepClause[B_SIDE_OPPONENT].partyIndex = PARTY_SIZE;
         gBattleStruct->monCausingSleepClause[B_SIDE_OPPONENT].trainer = MAX_BATTLE_TRAINERS;
+#endif
     }
 
     MultiplayerWorld_PrepareEventBattle();
@@ -3178,7 +3186,7 @@ static void ClearSetDataOnLeave(enum BattlerId battler)
     gLastPrintedMoves[battler] = MOVE_NONE;
     gLastHitBy[battler] = 0xFF;
 
-    for (u32 i = 0; i < NUM_BATTLE_SIDES; i++)
+    for (u32 i = 0; i < NUM_BATTLE_LOGIC_SIDES; i++)
     {
         // User of sticky web fainted, so reset the stored battler ID
         if (gSideTimers[i].stickyWebBattlerId == battler)
@@ -3911,7 +3919,7 @@ bool32 EndTurnEvents(void) // Called from Battle Script
             gBattleStruct->battlerState[battler].stompingTantrumTimer--;
     }
 
-    for (u32 i = 0; i < NUM_BATTLE_SIDES; i++)
+    for (u32 i = 0; i < NUM_BATTLE_LOGIC_SIDES; i++)
     {
         if (gSideTimers[i].retaliateTimer > 0)
             gSideTimers[i].retaliateTimer--;
@@ -5035,8 +5043,13 @@ static void TurnValuesCleanUp(bool32 endTurn)
         gBattleMons[i].volatiles.endured = FALSE;
     }
 
+#if MP_FFA_ENABLED
+    for (u32 side = 0; side < NUM_BATTLE_LOGIC_SIDES; side++)
+        gSideTimers[side].followmeTimer = 0;
+#else
     gSideTimers[B_SIDE_PLAYER].followmeTimer = 0;
     gSideTimers[B_SIDE_OPPONENT].followmeTimer = 0;
+#endif
 
     ClearPursuitValues();
     ClearDamageCalcResults();

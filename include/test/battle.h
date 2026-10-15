@@ -577,7 +577,8 @@ enum {
     BATTLE_TEST_AI_DOUBLES,
     BATTLE_TEST_AI_MULTI,
     BATTLE_TEST_AI_TWO_VS_ONE,
-    BATTLE_TEST_AI_ONE_VS_TWO
+    BATTLE_TEST_AI_ONE_VS_TWO,
+    BATTLE_TEST_FFA, // EmeraldTogether: four independent trainers (1v1v1v1), see FFA_BATTLE_TEST
 };
 
 typedef void (*SingleBattleTestFunction)(void *, const u32, struct BattlePokemon *, struct BattlePokemon *);
@@ -984,6 +985,11 @@ bool32 IsAITest(void);
 
 #define MULTI_BATTLE_TEST(_name, ...) BATTLE_TEST_ARGS_MULTI(_name, BATTLE_TEST_MULTI, __VA_ARGS__)
 #define AI_MULTI_BATTLE_TEST(_name, ...) BATTLE_TEST_ARGS_MULTI(_name, BATTLE_TEST_AI_MULTI, __VA_ARGS__)
+
+// Four independent trainers on four sides of their own. Written like MULTI_BATTLE_TEST: PLAYER, PARTNER, OPPONENT_A and
+// OPPONENT_B each give one trainer's party (positions playerLeft, playerRight, opponentLeft, opponentRight), but here
+// nobody is anybody's partner or opponent's partner: every trainer's every other trainer is a foe.
+#define FFA_BATTLE_TEST(_name, ...) BATTLE_TEST_ARGS_MULTI(_name, BATTLE_TEST_FFA, __VA_ARGS__)
 
 #define TWO_VS_ONE_BATTLE_TEST(_name, ...) BATTLE_TEST_ARGS_TWO_VS_ONE(_name, BATTLE_TEST_TWO_VS_ONE, __VA_ARGS__)
 #define AI_TWO_VS_ONE_BATTLE_TEST(_name, ...) BATTLE_TEST_ARGS_TWO_VS_ONE(_name, BATTLE_TEST_AI_TWO_VS_ONE, __VA_ARGS__)

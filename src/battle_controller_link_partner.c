@@ -3,6 +3,7 @@
 #include "multiplayer_battle.h"
 #include "battle_anim.h"
 #include "battle_controllers.h"
+#include "battle_ffa.h"
 #include "battle_interface.h"
 #include "battle_message.h"
 #include "battle_setup.h"
@@ -183,6 +184,11 @@ static void LinkPartnerHandleEndLinkBattle(enum BattlerId battler)
 {
     if (!MultiplayerBattle_IsNative())
         RecordedBattle_RecordAllBattlerData(&gBattleResources->bufferA[battler][4]);
+#if MP_FFA_ENABLED
+    if (IsFreeForAllBattle())
+        gBattleOutcome = FFA_GetOutcomeForWinner(gBattleResources->bufferA[battler][2]);
+    else
+#endif
     gBattleOutcome = gBattleResources->bufferA[battler][1];
     if (!MultiplayerBattle_IsNative())
         gSaveBlock2Ptr->frontier.disableRecordBattle = gBattleResources->bufferA[battler][2];
