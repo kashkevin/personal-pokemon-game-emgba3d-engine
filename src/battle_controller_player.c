@@ -12,6 +12,7 @@
 #include "battle_arena.h"
 #include "battle_controllers.h"
 #include "battle_ffa.h"
+#line 7 // gba-line
 #include "battle_dome.h"
 #include "battle_interface.h"
 #include "battle_message.h"
@@ -351,6 +352,7 @@ static void HandleInputChooseAction(enum BattlerId battler)
                 return;
             }
 #endif
+#line 331 // gba-line
             BtlController_EmitTwoReturnValues(battler, B_COMM_TO_ENGINE, B_ACTION_RUN, 0);
             break;
         }
@@ -743,14 +745,14 @@ void HandleInputChooseMove(enum BattlerId battler)
         {
             if (!CanSelectBattler(moveTarget))
                 canSelectTarget = 1; // either selected or user
-            if (moveTarget == TARGET_USER_OR_ALLY && IsPartnerAlive(battler))
+            if (moveTarget == TARGET_USER_OR_ALLY && IsFetchedPartnerAlive(partner))
                 canSelectTarget = 1;
 
             if (moveInfo->currentPP[gMoveSelectionCursor[battler]] == 0)
             {
                 canSelectTarget = 0;
             }
-            else if (isUserOrAlly && !IsPartnerAlive(battler))
+            else if (isUserOrAlly && !IsFetchedPartnerAlive(partner))
             {
                 gMultiUsePlayerCursor = battler;
                 canSelectTarget = 0;
@@ -781,11 +783,13 @@ void HandleInputChooseMove(enum BattlerId battler)
                     else
 #endif
                     {
+#line 748 // gba-line
                     TryShowAsTarget(gMultiUsePlayerCursor);
                     TryShowAsTarget(GetPartnerBattler(gMultiUsePlayerCursor));
                     if (moveTarget == TARGET_FOES_AND_ALLY)
                         TryShowAsTarget(GetPartnerBattler(battler));
                     }
+#line 752 // gba-line
                     canSelectTarget = 2;
                 }
             }
@@ -794,6 +798,7 @@ void HandleInputChooseMove(enum BattlerId battler)
             if (IsFreeForAllBattle() && moveTarget == TARGET_OPPONENTS_FIELD && moveInfo->currentPP[gMoveSelectionCursor[battler]] != 0)
                 canSelectTarget = 1;
 #endif
+#line 755 // gba-line
         }
 
         switch (canSelectTarget)
@@ -817,6 +822,7 @@ void HandleInputChooseMove(enum BattlerId battler)
             else if (IsFreeForAllBattle())
                 gMultiUsePlayerCursor = GetBattlerLeftFoe(battler);
 #endif
+#line 774 // gba-line
             else if (!IsBattlerAlive(GetBattlerAtPosition(B_POSITION_OPPONENT_LEFT)))
                 gMultiUsePlayerCursor = GetBattlerAtPosition(B_POSITION_OPPONENT_RIGHT);
             else
@@ -2405,6 +2411,7 @@ static void PlayerHandleEndLinkBattle(enum BattlerId battler)
         gBattleOutcome = FFA_GetOutcomeForWinner(gBattleResources->bufferA[battler][2]);
     else
 #endif
+#line 2349 // gba-line
     gBattleOutcome = gBattleResources->bufferA[battler][1];
     if (!MultiplayerBattle_IsNative())
         gSaveBlock2Ptr->frontier.disableRecordBattle = gBattleResources->bufferA[battler][2];

@@ -311,6 +311,11 @@ C_SRCS_IN := $(wildcard $(C_SUBDIR)/*.c $(C_SUBDIR)/*/*.c $(C_SUBDIR)/*/*/*.c)
 # renderer, src/native_ui/ (the native PC UI), character_customization.c (the
 # character selection), multiplayer_spawns.c (shared wild Pokemon) and multiplayer_extras.c (Secret Bases) and multiplayer_ladder.c (co-op ladder battles).
 C_SRCS := $(filter-out $(C_SUBDIR)/platform/% $(C_SUBDIR)/diorama/% $(C_SUBDIR)/data/diorama/% $(C_SUBDIR)/native_ui/% $(C_SUBDIR)/character_customization.c $(C_SUBDIR)/multiplayer_spawns.c $(C_SUBDIR)/multiplayer_extras.c $(C_SUBDIR)/multiplayer_ladder.c,$(foreach src,$(C_SRCS_IN),$(if $(findstring .inc.c,$(src)),,$(src))))
+# The four-player free-for-all rules (battle_ffa.c) exist in the PC build and the test ROM only. Even an empty object would
+# change the order the linker places its interworking veneers in, and the release ROM must stay byte-identical.
+ifneq ($(TEST),1)
+C_SRCS := $(filter-out $(C_SUBDIR)/battle_ffa.c,$(C_SRCS))
+endif
 C_OBJS := $(patsubst $(C_SUBDIR)/%.c,$(C_BUILDDIR)/%.o,$(C_SRCS))
 
 TEST_SRCS_IN := $(wildcard $(TEST_SUBDIR)/*.c $(TEST_SUBDIR)/*/*.c $(TEST_SUBDIR)/*/*/*.c)

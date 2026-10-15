@@ -1168,14 +1168,15 @@ static inline enum BattleSide GetBattlerPositionSide(enum BattlerId battler)
     return GetBattlerPosition(battler) & BIT_SIDE;
 }
 
+#if MP_FFA_ENABLED
 static inline bool32 IsFreeForAllBattle(void)
 {
-#if MP_FFA_ENABLED
     return (gBattleTypeFlags & BATTLE_TYPE_FFA) != 0;
-#else
-    return FALSE;
-#endif
 }
+#else
+// The GBA build has no free-for-all: a constant, so the compiler sees exactly the code of the original game.
+#define IsFreeForAllBattle() FALSE
+#endif
 
 // The side a battler fights for in the battle's rules: its screens, hazards, allies and foes. Two sides, decided by
 // the battler's position, in every battle but a free-for-all, where every battler is a side of its own.
@@ -1184,8 +1185,10 @@ static inline enum BattleSide GetBattlerSide(enum BattlerId battler)
 #if MP_FFA_ENABLED
     if (gBattleTypeFlags & BATTLE_TYPE_FFA)
         return (enum BattleSide)battler;
-#endif
     return GetBattlerPositionSide(battler);
+#else
+    return GetBattlerPosition(battler) & BIT_SIDE;
+#endif
 }
 
 static inline bool32 IsOnPlayerSide(enum BattlerId battler)
@@ -1201,10 +1204,25 @@ static inline bool32 IsBattlerAlly(enum BattlerId battlerAtk, enum BattlerId bat
 // TRUE when this battler has a living ally on the field. A free-for-all has no allies: GetPartnerBattler() answers with
 // the battler itself there (so array reads stay in range), and this is the question to ask instead of
 // IsBattlerAlive(GetPartnerBattler(battler)).
+#if MP_FFA_ENABLED
 static inline bool32 IsPartnerAlive(enum BattlerId battler)
 {
     return !IsFreeForAllBattle() && IsBattlerAlive(GetPartnerBattler(battler));
 }
+#else
+#define IsPartnerAlive(battler) IsBattlerAlive(GetPartnerBattler(battler))
+#endif
+
+// The same question when the partner battler was already fetched (GetPartnerBattler() is a call, so the GBA code must
+// not fetch it twice).
+#if MP_FFA_ENABLED
+static inline bool32 IsFetchedPartnerAlive(enum BattlerId partner)
+{
+    return !IsFreeForAllBattle() && IsBattlerAlive(partner);
+}
+#else
+#define IsFetchedPartnerAlive(partner) IsBattlerAlive(partner)
+#endif
 
 static inline bool32 IsDoubleBattle(void)
 {

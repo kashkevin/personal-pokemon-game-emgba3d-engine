@@ -760,6 +760,7 @@ static bool32 IsTargetingOpponentsField(enum BattlerId battlerAtk, enum BattlerI
     if (IsFreeForAllBattle())
         return battlerDef == gBattlerTarget ? checkFailure : skipFailure;
 #endif
+#line 758 // gba-line
     if (IsBattlerAlly(battlerDef, GetOppositeBattler(battlerAtk)))
         return checkFailure;
     return skipFailure;
@@ -855,6 +856,7 @@ static bool32 HandleMoveTargetRedirection(struct BattleCalcValues *cv, enum Move
 
     if (!IsFreeForAllBattle() // Follow Me draws attacks meant for allies, and nobody has allies here
      && IsAffectedByFollowMe(cv->battlerAtk, side, cv->move)
+#line 852 // gba-line
      && (moveTarget == TARGET_SELECTED || moveTarget == TARGET_SMART || cv->moveEffect == EFFECT_REFLECT_DAMAGE)
      && !IsBattlerAlly(cv->battlerAtk, gSideTimers[side].followmeTarget))
     {
@@ -970,6 +972,7 @@ static enum CancelerResult CancelerSetTargets(struct BattleCalcValues *cv)
         {
             // The target is gone: the partner takes the hit; in a free-for-all there is none, so any trainer still standing.
             cv->battlerDef = IsFreeForAllBattle() ? SetRandomTarget(cv->battlerAtk) : GetPartnerBattler(cv->battlerDef);
+#line 966 // gba-line
         }
     }
 
@@ -991,6 +994,7 @@ static enum CancelerResult CancelerSetTargets(struct BattleCalcValues *cv)
         gBattlescriptCurrInstr = BattleScript_ButItFailed; // a move for an ally, with nobody to be an ally
         return CANCELER_RESULT_FAILURE;
     }
+#line 981 // gba-line
 
     if (IsBattlerAlly(cv->battlerAtk, cv->battlerDef) && !IsBattlerAlive(cv->battlerDef))
     {
@@ -1624,6 +1628,7 @@ static bool32 CanPledgeComboAttackHappen(struct BattleCalcValues *cv)
 
     if (!IsDoubleBattle()
      || IsFreeForAllBattle()
+#line 1613 // gba-line
      || GetMoveEffect(partnerMove) != EFFECT_PLEDGE
      || !IsBattlerAlive(partner)
      || cv->move == partnerMove
@@ -3622,6 +3627,7 @@ static enum MoveEndResult MoveEndSymbiosis(struct BattleCalcValues *cv)
         if ((gSpecialStatuses[battler].berryReduced
               || (GetConfig(B_SYMBIOSIS_GEMS) >= GEN_7 && gSpecialStatuses[battler].gemBoost))
             && !IsFreeForAllBattle()
+#line 3610 // gba-line
             && TryTriggerSymbiosis(battler, GetPartnerBattler(battler)))
         {
             BestowItem(GetPartnerBattler(battler), battler);

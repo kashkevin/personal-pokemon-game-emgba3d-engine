@@ -226,6 +226,7 @@ static bool32 MasterDataValid(const u8 *p)
                 && (p[2] < BattlerCount() || p[2] == 0xFF) && !p[3] && !p[4] && !p[5];
 #endif
         return (value == B_OUTCOME_WON || value == B_OUTCOME_LOST || value == B_OUTCOME_DREW)
+#line 222 // gba-line
             && !p[2] && !p[3] && !p[4] && !p[5];
     default: return TRUE;
     }

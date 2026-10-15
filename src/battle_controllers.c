@@ -7,6 +7,7 @@
 #include "battle_arena.h"
 #include "battle_controllers.h"
 #include "battle_ffa.h"
+#line 9 // gba-line
 #include "battle_gfx_sfx_util.h"
 #include "battle_interface.h"
 #include "battle_message.h"
@@ -407,6 +408,7 @@ static void InitBtlControllersInternal(void)
                 continue;
             }
 #endif
+#line 394 // gba-line
             if (i == multiplayerId)
             {
                 linkPositionLeft = B_POSITION_PLAYER_LEFT;
@@ -1600,6 +1602,7 @@ void BtlController_EmitEndLinkBattle(enum BattlerId battler, u32 bufferId, u8 ba
     if (IsFreeForAllBattle())
         gBattleResources->transferBuffer[2] = FFA_GetWinnerByte(); // every core works out its own result from the winner
 #endif
+#line 1583 // gba-line
     PrepareBufferDataTransfer(battler, bufferId, gBattleResources->transferBuffer, gBattleResources->transferBuffer[4] + 6);
 }
 
@@ -3496,6 +3499,7 @@ enum BattleTrainer GetBattlerTrainer(enum BattlerId battler)
     if (IsFreeForAllBattle())
         return (enum BattleTrainer)GetBattlerPosition(battler);
 #endif
+#line 3465 // gba-line
     if (gBattleTypeFlags & BATTLE_TYPE_LINK)
     {
         switch (gBattlerBattleController[battler])
@@ -3527,10 +3531,6 @@ enum BattleTrainer GetTrainerFromBattlePosition(enum BattlerPosition position)
 
 bool32 BattleSideHasTwoTrainers(enum BattleSide side)
 {
-#if MP_FFA_ENABLED
-    if (IsFreeForAllBattle())
-        return FALSE; // a side is one trainer and one battler
-#endif
     if (side == B_SIDE_PLAYER)
         return gBattleTypeFlags & BATTLE_TYPE_MULTI;
     else

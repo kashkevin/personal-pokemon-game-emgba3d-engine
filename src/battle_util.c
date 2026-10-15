@@ -8,6 +8,7 @@
 #include "battle_pyramid.h"
 #include "battle_util.h"
 #include "battle_ffa.h"
+#line 10 // gba-line
 #include "battle_controllers.h"
 #include "battle_interface.h"
 #include "battle_setup.h"
@@ -108,6 +109,7 @@ enum BattlerId GetPartnerBattler(enum BattlerId battler)
     if (IsFreeForAllBattle())
         return battler;
 #endif
+#line 104 // gba-line
     return GetBattlerAtPosition(GetPartnerPosition(GetBattlerPosition(battler)));
 }
 
@@ -117,6 +119,7 @@ enum BattlerId GetOppositeBattler(enum BattlerId battler)
     if (IsFreeForAllBattle())
         return GetBattlerLeftFoe(battler);
 #endif
+#line 109 // gba-line
     return GetBattlerAtPosition(GetOppositePosition(GetBattlerPosition(battler)));
 }
 
@@ -140,6 +143,7 @@ static enum BattlerId GetFfaFoe(enum BattlerId battler, u32 n)
     return alive[n < count ? n : 0];
 }
 #endif
+#line 111 // gba-line
 
 // Left and right are determined by how they're referred to in tests and everywhere else.
 // Left is battlers 0 and 1, right 2 and 3; if you assume the battler referencing them is south, left is to the northeast and right to the northwest.
@@ -149,6 +153,7 @@ enum BattlerId GetBattlerLeftFoe(enum BattlerId battler)
     if (IsFreeForAllBattle())
         return GetFfaFoe(battler, 0);
 #endif
+#line 116 // gba-line
     return GetBattlerAtPosition(GetOppositePosition((enum BattlerPosition)GetBattlerSide(battler)));
 }
 
@@ -158,6 +163,7 @@ enum BattlerId GetBattlerRightFoe(enum BattlerId battler)
     if (IsFreeForAllBattle())
         return GetFfaFoe(battler, 1);
 #endif
+#line 121 // gba-line
     return GetPartnerBattler(GetBattlerLeftFoe(battler));
 }
 
@@ -643,7 +649,7 @@ void HandleAction_Switch(void)
     enum BattlerId partnerAtk = GetPartnerBattler(gBattlerAttacker);
     // if switching to a mon that is already on field, cancel switch
     if (!(gAbsentBattlerFlags & (1u << partnerAtk))
-     && IsPartnerAlive(gBattlerAttacker)
+     && IsFetchedPartnerAlive(partnerAtk)
      && gBattlerPartyIndexes[partnerAtk] == gBattleStruct->monToSwitchIntoId[gBattlerAttacker]
      && BattlersShareParty(gBattlerAttacker, partnerAtk))
     {
@@ -794,6 +800,7 @@ void HandleAction_Run(void)
         return;
     }
 #endif
+#line 749 // gba-line
     if (gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_RECORDED_LINK))
     {
         gCurrentTurnActionNumber = gBattlersCount;
@@ -3182,6 +3189,7 @@ u32 AbilityBattleEffects(enum AbilityEffect caseID, enum BattlerId battler, enum
                 }
                 else
 #endif
+#line 3110 // gba-line
                 if (IsDoubleBattle())
                 {
                     if (!gAbilitiesInfo[gBattleMons[target1].ability].cantBeTraced && gBattleMons[target1].hp != 0
@@ -3836,6 +3844,7 @@ u32 AbilityBattleEffects(enum AbilityEffect caseID, enum BattlerId battler, enum
                 gBattleScripting.battler = GetPartnerBattler(battler);
                 if (!IsFreeForAllBattle()
                  && IsBattlerAlive(gBattleScripting.battler)
+#line 3763 // gba-line
                  && gBattleMons[gBattleScripting.battler].status1 & STATUS1_ANY
                  && RandomPercentage(RNG_HEALER, 30))
                 {
@@ -4789,6 +4798,7 @@ u32 AbilityBattleEffects(enum AbilityEffect caseID, enum BattlerId battler, enum
         partner = GetPartnerBattler(battler);
         if (IsFreeForAllBattle())
             break; // nobody has an ally
+#line 4714 // gba-line
         switch (ability)
         {
         case ABILITY_COMMANDER:
@@ -5642,6 +5652,7 @@ u32 SetRandomTarget(enum BattlerId battlerAtk)
         return PickRandomAliveFoe(battlerAtk);
 #endif
 
+#line 5562 // gba-line
     if (IsDoubleBattle())
     {
         target = GetBattlerAtPosition(targets[GetBattlerSide(battlerAtk)][RandomUniform(RNG_RANDOM_TARGET, 0, 1)]);
@@ -5677,6 +5688,7 @@ u32 GetBattleMoveTarget(enum Move move, enum MoveTarget moveTarget)
             break;
         }
 #endif
+#line 5590 // gba-line
         side = (GetBattlerSide(gBattlerAttacker) ^ BIT_SIDE);
         if (IsAffectedByFollowMe(gBattlerAttacker, side, move))
             targetBattler = gSideTimers[side].followmeTarget;
@@ -6157,6 +6169,7 @@ static inline enum Ability GetAllyAbilityInContext(struct DamageContext *ctx, en
     return IsFreeForAllBattle() ? ABILITY_NONE : ctx->abilities[GetPartnerBattler(battler)];
 }
 
+#line 6064 // gba-line
 u32 GetMoveTargetCount(struct DamageContext *ctx)
 {
     switch (GetBattlerMoveTargetType(ctx->battlerAtk, ctx->move))
@@ -6166,6 +6179,7 @@ u32 GetMoveTargetCount(struct DamageContext *ctx)
         if (IsFreeForAllBattle())
             return CountAliveFoes(ctx->battlerAtk);
 #endif
+#line 6069 // gba-line
         return CountTrue(
             IsBattlerAlive(ctx->battlerDef),
             IsPartnerAlive(ctx->battlerDef)
@@ -6175,6 +6189,7 @@ u32 GetMoveTargetCount(struct DamageContext *ctx)
         if (IsFreeForAllBattle())
             return CountAliveFoes(ctx->battlerAtk);
 #endif
+#line 6074 // gba-line
         return CountTrue(
             IsBattlerAlive(ctx->battlerDef),
             IsPartnerAlive(ctx->battlerDef),
@@ -10289,6 +10304,7 @@ bool32 TrySymbiosis(enum BattlerId battler, enum Item itemId, const u8 *nextInst
      && (GetConfig(B_SYMBIOSIS_GEMS) < GEN_7 || !(gSpecialStatuses[battler].gemBoost))
      && !gSpecialStatuses[battler].berryReduced //Fling and damage-reducing berries are handled separately.
      && !IsFreeForAllBattle()
+#line 10175 // gba-line
      && TryTriggerSymbiosis(battler, GetPartnerBattler(battler)))
     {
         BestowItem(GetPartnerBattler(battler), battler);
@@ -10621,7 +10637,7 @@ u32 GetTotalAccuracy(struct BattleCalcValues *cv, u32 weather)
     switch (cv->abilities[atkAlly])
     {
     case ABILITY_VICTORY_STAR:
-        if (IsPartnerAlive(battlerAtk))
+        if (IsFetchedPartnerAlive(atkAlly))
             calc = (calc * 110) / 100; // 1.1 ally's victory star boost
         break;
     default:
@@ -10812,6 +10828,7 @@ bool32 HasPartnerTrainer(enum BattlerId battler)
 {
     if (IsFreeForAllBattle())
         return FALSE;
+#line 10696 // gba-line
     if ((GetBattlerSide(battler) == B_SIDE_PLAYER && gBattleTypeFlags & BATTLE_TYPE_PLAYER_HAS_PARTNER)
      || (GetBattlerSide(battler) == B_SIDE_OPPONENT && gBattleTypeFlags & BATTLE_TYPE_TWO_OPPONENTS))
         return TRUE;
@@ -10828,6 +10845,7 @@ static bool32 IsOpposingSideEmpty(enum BattlerId battler)
         return CountAliveFoes(battler) == 0;
 #endif
 
+#line 10707 // gba-line
     if (IsBattlerAlive(oppositeBattler))
         return FALSE;
 
@@ -11220,6 +11238,7 @@ enum BattlerId GetTargetFromSlotId(enum BattlerId battlerAtk, enum BattlerId bat
     if (IsFreeForAllBattle())
         return (battlerAtk + battlerDef) % gBattlersCount;
 #endif
+#line 11094 // gba-line
     switch (battlerDef)
     {
     case B_BATTLER_0:
@@ -11284,6 +11303,7 @@ enum Stat GetDownloadStat(enum BattlerId battler)
         return opposingDef < opposingSpDef ? STAT_ATK : STAT_SPATK;
     }
 #endif
+#line 11139 // gba-line
 
     opposingBattler = GetOppositeBattler(battler);
     for (u32 i = 0; i < 2; opposingBattler ^= BIT_FLANK, i++)

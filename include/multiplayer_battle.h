@@ -122,7 +122,9 @@ bool32 MultiplayerBattle_SkipCallbacks(void);
 bool32 MultiplayerBattle_IsNative(void);
 bool32 MultiplayerBattle_IsFullMulti(void);
 bool32 MultiplayerBattle_IsCoop(void);
+#if MP_FFA_ENABLED
 bool32 MultiplayerBattle_IsFreeForAll(void);
+#endif
 bool32 MultiplayerBattle_IsNativeDouble(void);
 u32 MultiplayerBattle_GetBattlerCount(void);
 u32 MultiplayerBattle_GetBattlerOwner(u32 battler);

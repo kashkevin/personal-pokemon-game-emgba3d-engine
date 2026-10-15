@@ -41,6 +41,7 @@
 #define IS_FFA_PHASE(mode) FALSE
 #define LAST_PHASE MP_BATTLE_PHASE_COOP
 #endif
+#line 30 // gba-line
 
 _Static_assert(sizeof(struct MultiplayerBattleControl) == 240, "Battle control ABI");
 _Static_assert(sizeof(struct MultiplayerBattleMailbox) == 512, "Battle mailbox ABI");
@@ -68,6 +69,7 @@ const u32 gMultiplayerBattleCoopAbiVersion = MULTIPLAYER_BATTLE_COOP_ABI;
 #if MP_FFA_ENABLED
 const u32 gMultiplayerBattleFfaAbiVersion = MULTIPLAYER_BATTLE_FFA_ABI;
 #endif
+#line 54 // gba-line
 EWRAM_DATA volatile struct MultiplayerBattleMailbox gMultiplayerBattleMailbox = {0};
 // Read-only proof observation; never an authority or command input.
 EWRAM_DATA volatile u32 gMultiplayerBattleHoldFlags = 0;
@@ -214,7 +216,10 @@ bool32 MultiplayerBattle_SkipCallbacks(void) { return MultiplayerBattle_PauseClo
 // The free-for-all is the four-core full Multi with every trainer on a side of their own: it shares all of the full
 // Multi's startup, party exchange and controller relay.
 bool32 MultiplayerBattle_IsFullMulti(void) { return MultiplayerBattle_IsActive() && sState != MP_BATTLE_ADMITTING && (sBinding.mode == MP_BATTLE_PHASE_FULL_MULTI || IS_FFA_PHASE(sBinding.mode)); }
+#if MP_FFA_ENABLED
 bool32 MultiplayerBattle_IsFreeForAll(void) { return MultiplayerBattle_IsActive() && sState != MP_BATTLE_ADMITTING && IS_FFA_PHASE(sBinding.mode); }
+#endif
+#line 198 // gba-line
 bool32 MultiplayerBattle_IsCoop(void) { return MultiplayerBattle_IsActive() && sState != MP_BATTLE_ADMITTING && sBinding.mode == MP_BATTLE_PHASE_COOP; }
 bool32 MultiplayerBattle_IsNative(void) { return MultiplayerBattle_IsActive() && sState != MP_BATTLE_ADMITTING && (sBinding.mode == MP_BATTLE_PHASE_SINGLES || sBinding.mode == MP_BATTLE_PHASE_FULL_MULTI || sBinding.mode == MP_BATTLE_PHASE_COOP || IS_FFA_PHASE(sBinding.mode)); }
 bool32 MultiplayerBattle_IsNativeDouble(void) { return MultiplayerBattle_IsFullMulti() || MultiplayerBattle_IsCoop(); }
@@ -398,6 +403,7 @@ static bool32 BindingValid(const struct MultiplayerBattleBinding *b, const struc
      || (b->mode == MP_BATTLE_PHASE_SINGLES && b->playerCount != 2)
      || (b->mode == MP_BATTLE_PHASE_FULL_MULTI && b->playerCount != 4)
      || (IS_FFA_PHASE(b->mode) && b->playerCount != 4)
+#line 380 // gba-line
      || (b->mode == MP_BATTLE_PHASE_COOP && b->playerCount != 2)
      || Zero(b->generation, 16))
         return FALSE;
@@ -552,6 +558,7 @@ static void NoteNativeController(const u8 *data, u8 source)
     MultiplayerBattle_NoteController(data, source);
     if (data[0] == B_COMM_TO_CONTROLLER && data[8] == CONTROLLER_ENDLINKBATTLE)
     {
+#line 533 // gba-line
         sOutcome = data[9]; // Master slot0's projection is the fixed-side result.
 #if MP_FFA_ENABLED
         // Free-for-all: the result is the winner (slot + 1) or a draw (5), the same on every core.
@@ -559,6 +566,7 @@ static void NoteNativeController(const u8 *data, u8 source)
             sOutcome = data[10] < 4 ? data[10] + 1 : 5;
 #endif
     }
+#line 534 // gba-line
 }
 
 u16 MultiplayerBattle_PackController(u8 *dest, u8 battler, u8 bufferId, u16 size, const u8 *data)
@@ -679,6 +687,7 @@ static u8 StartSingles(void)
     if (MultiplayerBattle_IsFreeForAll())
         gBattleTypeFlags |= BATTLE_TYPE_FFA; // four sides: nobody is anybody's partner
 #endif
+#line 650 // gba-line
     TRAINER_BATTLE_PARAM.opponentA = TRAINER_LINK_OPPONENT;
     if (MultiplayerBattle_IsCoop())
     {
@@ -722,6 +731,7 @@ bool8 MultiplayerBattle_CopyFullMultiPartyPair(u8 index)
             trainer = (enum BattleTrainer)((source + 4 - sBinding.localSlot) % 4); // the trainer slot is the screen position
         else
 #endif
+#line 688 // gba-line
         if ((source & 1) == (sBinding.localSlot & 1))
             trainer = B_TRAINER_PARTNER;
         else
@@ -806,6 +816,7 @@ bool32 MultiplayerBattle_TryReturnNative(void)
     }
     else
 #endif
+#line 758 // gba-line
     if (!MultiplayerBattle_IsCoop() && (sBinding.localSlot & 1) && outcome != B_OUTCOME_DREW) outcome ^= B_OUTCOME_DREW;
     if (outcome != sOutcome)
     {
@@ -1462,8 +1473,10 @@ void MultiplayerBattle_TestSetCoreCount(u8 count)
 {
     sBinding.playerCount = count;
 }
+#line 1406 // gba-line
 #endif
 #line 1407
+#line 1407 // gba-line
 
 void MultiplayerBattle_Init(void)
 {

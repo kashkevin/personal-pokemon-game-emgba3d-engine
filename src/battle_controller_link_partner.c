@@ -4,6 +4,7 @@
 #include "battle_anim.h"
 #include "battle_controllers.h"
 #include "battle_ffa.h"
+#line 6 // gba-line
 #include "battle_interface.h"
 #include "battle_message.h"
 #include "battle_setup.h"
@@ -189,6 +190,7 @@ static void LinkPartnerHandleEndLinkBattle(enum BattlerId battler)
         gBattleOutcome = FFA_GetOutcomeForWinner(gBattleResources->bufferA[battler][2]);
     else
 #endif
+#line 186 // gba-line
     gBattleOutcome = gBattleResources->bufferA[battler][1];
     if (!MultiplayerBattle_IsNative())
         gSaveBlock2Ptr->frontier.disableRecordBattle = gBattleResources->bufferA[battler][2];

@@ -3,6 +3,7 @@
 #include "battle.h"
 #include "multiplayer_battle.h"
 #include "battle_ffa.h"
+#line 5 // gba-line
 #include "battle_hold_effects.h"
 #include "battle_message.h"
 #include "battle_anim.h"
@@ -1302,6 +1303,7 @@ static inline bool32 ShouldPrintTwoFoesMessage(u32 moveResult)
 {
     return !IsFreeForAllBattle()
         && gBattlerTarget == GetOppositeBattler(gBattlerAttacker)
+#line 1303 // gba-line
         && gBattleStruct->moveResultFlags[GetPartnerBattler(gBattlerTarget)] & moveResult
         && !(gBattleStruct->moveResultFlags[GetPartnerBattler(gBattlerTarget)] & MOVE_RESULT_AVOIDED_ATTACK);
 }
@@ -1311,6 +1313,7 @@ static inline bool32 ShouldRelyOnTwoFoesMessage(u32 moveResult)
     enum BattlerId oppositeTarget = GetOppositeBattler(gBattlerAttacker);
     return !IsFreeForAllBattle()
         && gBattlerTarget == GetPartnerBattler(oppositeTarget)
+#line 1311 // gba-line
         && gBattleStruct->moveResultFlags[oppositeTarget] & moveResult
         && !(gBattleStruct->moveResultFlags[oppositeTarget] & MOVE_RESULT_AVOIDED_ATTACK);
 }
@@ -2556,6 +2559,7 @@ bool32 NoAliveMonsForEitherParty(void)
     if (IsFreeForAllBattle())
         return FFA_CountTrainersLeft() <= 1;
 #endif
+#line 2545 // gba-line
     return (NoAliveMonsForPlayer() || NoAliveMonsForOpponent());
 }
 
@@ -2597,6 +2601,7 @@ static void Cmd_checkteamslost(void)
         return;
     }
 #endif
+#line 2557 // gba-line
 
     if (NoAliveMonsForPlayer())
         gBattleOutcome |= B_OUTCOME_LOST;
@@ -5165,6 +5170,7 @@ static void CourtChangeSwapSides(enum BattleSide a, enum BattleSide b)
 }
 #endif
 
+#line 5075 // gba-line
 void BS_CourtChangeSwapSideStatuses(void)
 {
     NATIVE_ARGS();
@@ -5177,6 +5183,7 @@ void BS_CourtChangeSwapSideStatuses(void)
         return;
     }
 #endif
+#line 5078 // gba-line
 
     struct SideTimer *sideTimerPlayer = &gSideTimers[B_SIDE_PLAYER];
     struct SideTimer *sideTimerOpp = &gSideTimers[B_SIDE_OPPONENT];
@@ -6554,8 +6561,10 @@ static void Cmd_healpartystatus(void)
 #if MP_FFA_ENABLED
     enum BattlerId partner = GetPartnerBattler(gBattlerAttacker); // the user itself in a free-for-all: no ally to heal
 #else
+#line 6452 // gba-line
     enum BattlerId partner = GetBattlerAtPosition(GetPartnerPosition(GetBattlerPosition(gBattlerAttacker)));
 #endif
+#line 6453 // gba-line
     struct Pokemon *party = GetBattlerParty(gBattlerAttacker);
     bool32 isSoundMove = IsSoundMove(gCurrentMove);
 
@@ -6675,8 +6684,10 @@ static void Cmd_trysetspikes(void)
     // The side of the trainer the move was aimed at (the opposite Pokemon is not a thing with three foes).
     enum BattleSide targetSide = GetBattlerSide(IsFreeForAllBattle() ? gBattlerTarget : GetOppositeBattler(gBattlerAttacker));
 #else
+#line 6568 // gba-line
     enum BattleSide targetSide = GetBattlerSide(GetOppositeBattler(gBattlerAttacker));
 #endif
+#line 6569 // gba-line
 
     if (gSideTimers[targetSide].spikesAmount == 3)
     {
@@ -7284,7 +7295,7 @@ static void Cmd_trycopyability(void)
     enum BattlerId battler = GetBattlerForBattleScript(cmd->battler);
     enum BattlerId partner = GetPartnerBattler(battler);
     enum Ability defAbility = gBattleMons[gBattlerTarget].ability;
-    bool32 shouldConsiderPartner = IsPartnerAlive(battler) && GetMoveEffect(gCurrentMove) == EFFECT_DOODLE;
+    bool32 shouldConsiderPartner = IsFetchedPartnerAlive(partner) && GetMoveEffect(gCurrentMove) == EFFECT_DOODLE;
 
     if (gBattleMons[battler].ability == defAbility
       || defAbility == ABILITY_NONE
@@ -9331,8 +9342,10 @@ void BS_GetBattlerSide(void)
 #if MP_FFA_ENABLED
     gBattleCommunication[0] = GetBattlerPositionSide(GetBattlerForBattleScript(cmd->battler)); // for choosing text
 #else
+#line 9220 // gba-line
     gBattleCommunication[0] = GetBattlerSide(GetBattlerForBattleScript(cmd->battler));
 #endif
+#line 9221 // gba-line
     gBattlescriptCurrInstr = cmd->nextInstr;
 }
 
@@ -9832,6 +9845,7 @@ void BS_TryAllySwitch(void)
 
     if (!IsBattlerAlive(partner)
      || IsFreeForAllBattle()
+#line 9719 // gba-line
      || HasPartnerTrainer(gBattlerAttacker)
      || gBattleStruct->battlerState[gBattlerAttacker].commanderSpecies != SPECIES_NONE
      || gBattleStruct->battlerState[partner].commanderSpecies != SPECIES_NONE)
@@ -11097,6 +11111,7 @@ void BS_TryActivateReceiver(void)
 
     if (!IsFreeForAllBattle()
      && IsBattlerAlive(receiverBattler)
+#line 10983 // gba-line
      && (receiverAbility == ABILITY_RECEIVER || receiverAbility == ABILITY_POWER_OF_ALCHEMY)
      && GetBattlerHoldEffectIgnoreAbility(receiverBattler) != HOLD_EFFECT_ABILITY_SHIELD
      && !gAbilitiesInfo[gBattleMons[faintedBattler].ability].cantBeCopied)
@@ -11527,7 +11542,7 @@ void BS_HandleTrainerSlideMsg(void)
             BattleLoadMonSpriteGfx(GetBattlerMon(battler), battler);
         }
         enum BattlerId partner = GetPartnerBattler(battler);
-        if (IsPartnerAlive(battler))
+        if (IsFetchedPartnerAlive(partner))
         {
             SetBattlerShadowSpriteCallback(partner, gBattleMons[partner].species);
             BattleLoadMonSpriteGfx(GetBattlerMon(partner), partner);

@@ -3133,11 +3133,13 @@ static void BattleStartClearSetData(void)
             gBattleStruct->monCausingSleepClause[side].trainer = MAX_BATTLE_TRAINERS;
         }
 #else
+#line 3120 // gba-line
         gBattleStruct->monCausingSleepClause[B_SIDE_PLAYER].partyIndex = PARTY_SIZE;
         gBattleStruct->monCausingSleepClause[B_SIDE_PLAYER].trainer = MAX_BATTLE_TRAINERS;
         gBattleStruct->monCausingSleepClause[B_SIDE_OPPONENT].partyIndex = PARTY_SIZE;
         gBattleStruct->monCausingSleepClause[B_SIDE_OPPONENT].trainer = MAX_BATTLE_TRAINERS;
 #endif
+#line 3124 // gba-line
     }
 
     MultiplayerWorld_PrepareEventBattle();
@@ -5047,9 +5049,11 @@ static void TurnValuesCleanUp(bool32 endTurn)
     for (u32 side = 0; side < NUM_BATTLE_LOGIC_SIDES; side++)
         gSideTimers[side].followmeTimer = 0;
 #else
+#line 5029 // gba-line
     gSideTimers[B_SIDE_PLAYER].followmeTimer = 0;
     gSideTimers[B_SIDE_OPPONENT].followmeTimer = 0;
 #endif
+#line 5031 // gba-line
 
     ClearPursuitValues();
     ClearDamageCalcResults();

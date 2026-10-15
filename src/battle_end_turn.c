@@ -35,6 +35,7 @@ static enum BattlerId GetBattlerSideForMessage(enum BattleSide side)
 #define SIDE_FOR_MESSAGE(side) (side)
 #endif
 
+#line 30 // gba-line
 static bool32 HandleEndTurnOrder(enum BattlerId battler)
 {
     bool32 effect = FALSE;

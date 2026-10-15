@@ -3,6 +3,7 @@
 #include "battle_anim.h"
 #include "battle_controllers.h"
 #include "battle_ffa.h"
+#line 5 // gba-line
 #include "battle_interface.h"
 #include "battle_message.h"
 #include "battle_setup.h"
@@ -407,6 +408,7 @@ static void LinkOpponentHandleEndLinkBattle(enum BattlerId battler)
         gBattleOutcome = FFA_GetOutcomeForWinner(gBattleResources->bufferA[battler][2]);
     else
 #endif
+#line 404 // gba-line
     if (gBattleResources->bufferA[battler][1] == B_OUTCOME_DREW)
         gBattleOutcome = gBattleResources->bufferA[battler][1];
     else
