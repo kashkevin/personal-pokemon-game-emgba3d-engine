@@ -309,8 +309,8 @@ endif
 C_SRCS_IN := $(wildcard $(C_SUBDIR)/*.c $(C_SUBDIR)/*/*.c $(C_SUBDIR)/*/*/*.c)
 # Native PC only (Makefile_pc): src/platform/ (the platform layer), the Diorama
 # renderer, src/native_ui/ (the native PC UI), character_customization.c (the
-# character selection) and multiplayer_spawns.c (shared wild Pokemon).
-C_SRCS := $(filter-out $(C_SUBDIR)/platform/% $(C_SUBDIR)/diorama/% $(C_SUBDIR)/data/diorama/% $(C_SUBDIR)/native_ui/% $(C_SUBDIR)/character_customization.c $(C_SUBDIR)/multiplayer_spawns.c,$(foreach src,$(C_SRCS_IN),$(if $(findstring .inc.c,$(src)),,$(src))))
+# character selection), multiplayer_spawns.c (shared wild Pokemon) and multiplayer_extras.c (Secret Bases).
+C_SRCS := $(filter-out $(C_SUBDIR)/platform/% $(C_SUBDIR)/diorama/% $(C_SUBDIR)/data/diorama/% $(C_SUBDIR)/native_ui/% $(C_SUBDIR)/character_customization.c $(C_SUBDIR)/multiplayer_spawns.c $(C_SUBDIR)/multiplayer_extras.c,$(foreach src,$(C_SRCS_IN),$(if $(findstring .inc.c,$(src)),,$(src))))
 C_OBJS := $(patsubst $(C_SUBDIR)/%.c,$(C_BUILDDIR)/%.o,$(C_SRCS))
 
 TEST_SRCS_IN := $(wildcard $(TEST_SUBDIR)/*.c $(TEST_SUBDIR)/*/*.c $(TEST_SUBDIR)/*/*/*.c)
