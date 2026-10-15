@@ -9,7 +9,7 @@
 #include "minitest.h"
 
 static uint8_t sMemory[MP_REGION_COUNT][4096];
-static const uint32_t sSizes[MP_REGION_COUNT] = {128, 512, 512, 512, 128, 256, 4096, 384};
+static const uint32_t sSizes[MP_REGION_COUNT] = {128, 512, 512, 512, 128, 256, 4096, 384, 384};
 
 struct FakeTransport
 {
@@ -934,6 +934,163 @@ MT_TEST(spawn_inbound_needs_the_announcement)
     MT_CHECK(sNet.closed);
 }
 
+// Multiplayer Secret Bases (the third native extension, mp_bridge.h).
+static void ExtrasBridge(bool mailbox)
+{
+    struct MpBridgeCaps caps;
+    uint8_t *w = sMemory[MP_REGION_WORLD];
+    uint8_t *x = sMemory[MP_REGION_EXTRAS];
+
+    memset(&caps, 0, sizeof(caps));
+    caps.world = 1;
+    caps.extras = 1;
+    Fresh(&caps);
+    sNet.chunk = 0;
+    Ready(0);
+    PutU32(w, 0x31574D45);
+    PutU16(w + 4, 1);
+    PutU16(w + 6, 256);
+    if (mailbox)
+    {
+        PutU32(x, 0x31584D45);
+        PutU16(x + 4, 1);
+        PutU16(x + 6, 384);
+    }
+}
+
+// flags, baseAck, recordSeq, source slot, three zeros, the 160-byte base
+static void MakeExtrasInbound(uint8_t record[176], uint32_t seq, uint8_t fill)
+{
+    memset(record, 0, 176);
+    PutU32(record, 1);
+    PutU32(record + 4, 5);
+    PutU32(record + 8, seq);
+    record[12] = 2;
+    memset(record + 16, fill, 160);
+}
+
+MT_TEST(extras_capability_waits_for_its_mailbox_and_the_world)
+{
+    const uint8_t *payload;
+
+    MT_CHECK(MpBridge_CheckCaps(&(struct MpBridgeCaps){.extras = 1}) != NULL); // needs the world mailbox
+    MT_CHECK(MpBridge_CheckCaps(&(struct MpBridgeCaps){.world = 1, .extras = 2}) != NULL);
+    ExtrasBridge(false);
+    Step(12);
+    MT_EQ(SentFrame('e', 0, &payload), -1);
+    PutU32(sMemory[MP_REGION_EXTRAS], 0x31584D45);
+    PutU16(sMemory[MP_REGION_EXTRAS] + 4, 1);
+    PutU16(sMemory[MP_REGION_EXTRAS] + 6, 384);
+    Step(2);
+    MT_EQ(SentFrame('e', 0, &payload), 8);
+    MT_EQ(payload[0], 1);
+    MT_EQ(payload[2] | (payload[3] << 8), 384);
+    MT_EQ(payload[4], 160);
+    MT_EQ(SentFrame('e', 1, &payload), -1); // announced once
+}
+
+MT_TEST(extras_local_base_goes_out_when_it_changes_and_after_a_reconnect)
+{
+    uint8_t *x = sMemory[MP_REGION_EXTRAS];
+    const uint8_t *payload;
+
+    ExtrasBridge(true);
+    Step(12);
+    MT_EQ(SentFrame('x', 0, &payload), -1);      // nothing published yet (sequence 0)
+    PutU32(x + 8, 2);                            // the game's local generation (even)
+    PutU32(x + 12, 77);                          // base sequence
+    x[16] = 1;                                   // has a base
+    memset(x + 20, 0x5A, 160);
+    Step(12);
+    MT_EQ(SentFrame('x', 0, &payload), 168);
+    MT_EQ(GetU32(payload), 77);
+    MT_EQ(payload[4], 1);
+    MT_EQ(payload[8], 0x5A);
+    MT_EQ(payload[167], 0x5A);
+    Step(40);
+    MT_EQ(SentFrame('x', 1, &payload), -1);      // unchanged: not sent again
+    PutU32(x + 12, 78);
+    memset(x + 20, 0x6B, 160);
+    Step(12);
+    MT_EQ(SentFrame('x', 1, &payload), 168);
+    MT_EQ(GetU32(payload), 78);
+    MT_EQ(payload[8], 0x6B);
+    PutU32(x + 8, 3);                            // odd: the game is writing: nothing is read
+    PutU32(x + 12, 79);
+    Step(12);
+    MT_EQ(SentFrame('x', 2, &payload), -1);
+}
+
+MT_TEST(extras_inbound_base_reaches_the_game)
+{
+    uint8_t record[176];
+    uint8_t frame[200];
+    uint8_t *x = sMemory[MP_REGION_EXTRAS];
+    size_t n;
+
+    ExtrasBridge(true);
+    Step(12);
+    MakeExtrasInbound(record, 9, 0x33);
+    n = FrameOf(frame, 'y', record, sizeof(record));
+    Feed(frame, n, 100);
+    Step(2);
+    MT_CHECK(!sNet.closed);
+    MT_EQ(GetU32(x + 180), 2);                   // odd while writing, even after
+    MT_CHECK(memcmp(x + 184, record, 176) == 0);
+    MT_EQ(GetU32(x + 192), 9);                   // the record number
+    MT_EQ(x[200], 0x33);
+    MT_EQ(x[359], 0x33);
+    MakeExtrasInbound(record, 10, 0x44);
+    n = FrameOf(frame, 'y', record, sizeof(record));
+    Feed(frame, n, 100);
+    Step(2);
+    MT_EQ(GetU32(x + 180), 4);
+    MT_EQ(GetU32(x + 192), 10);
+}
+
+MT_TEST(extras_inbound_is_validated)
+{
+    uint8_t record[176];
+    uint8_t frame[200];
+    size_t n;
+    int bad;
+
+    for (bad = 0; bad < 4; bad++)
+    {
+        ExtrasBridge(true);
+        Step(12);
+        MakeExtrasInbound(record, 3, 0x11);
+        if (bad == 0)
+            PutU32(record, 2);          // a flag the ABI does not have
+        else if (bad == 1)
+            record[12] = 4;             // a roster slot beyond four
+        else if (bad == 2)
+            record[14] = 1;             // padding that is not zero
+        else
+            n = 0;                      // a short frame, below
+        n = FrameOf(frame, 'y', record, bad == 3 ? 100 : sizeof(record));
+        Feed(frame, n, 100);
+        Step(2);
+        MT_CHECK(sNet.closed);
+        MT_EQ(GetU32(sMemory[MP_REGION_EXTRAS] + 180), 0); // nothing reached the game
+    }
+}
+
+MT_TEST(extras_inbound_needs_the_announcement)
+{
+    uint8_t record[176];
+    uint8_t frame[200];
+    size_t n;
+
+    ExtrasBridge(false); // a game without the extras mailbox
+    Step(12);
+    MakeExtrasInbound(record, 1, 0x11);
+    n = FrameOf(frame, 'y', record, sizeof(record));
+    Feed(frame, n, 100);
+    Step(2);
+    MT_CHECK(sNet.closed);
+}
+
 // Position of the first complete outbound frame of `kind` among all frames
 // sent, or -1.
 static int FrameIndex(uint8_t kind)
@@ -1177,6 +1334,11 @@ int main(void)
     MT_RUN(spawn_inbound_is_validated);
     MT_RUN(spawn_inbound_needs_the_announcement);
     MT_RUN(spawn_record_never_overtakes_its_announcement);
+    MT_RUN(extras_capability_waits_for_its_mailbox_and_the_world);
+    MT_RUN(extras_local_base_goes_out_when_it_changes_and_after_a_reconnect);
+    MT_RUN(extras_inbound_base_reaches_the_game);
+    MT_RUN(extras_inbound_is_validated);
+    MT_RUN(extras_inbound_needs_the_announcement);
     MT_RUN(reset_chord_guard_masks);
     MT_RUN(reset_chord_guard_orders);
     MT_RUN(reset_chord_guard_native_capability);

@@ -26,6 +26,11 @@
 #define MP_SPAWN_LOCAL    116
 #define MP_SPAWN_INBOUND  252
 
+#define MP_EXTRAS_MAGIC   0x31584D45u /* EMX1: multiplayer Secret Bases (native extension) */
+#define MP_EXTRAS_BYTES   384
+#define MP_EXTRAS_LOCAL   168
+#define MP_EXTRAS_INBOUND 176
+
 #define RECONNECT_FRAMES 120
 #define MAX_INBOUND_FRAME 256
 #define RX_LIMIT 260
@@ -169,6 +174,8 @@ const char *MpBridge_CheckCaps(const struct MpBridgeCaps *c)
         return "invalid shared-world capability";
     if (c->spawns && (!c->world || c->spawns != 1))
         return "invalid shared spawn capability";
+    if (c->extras && (!c->world || c->extras != 1))
+        return "invalid secret base capability";
     return NULL;
 }
 
@@ -362,6 +369,38 @@ static bool CommitSpawn(struct MpBridge *b, const uint8_t *p, size_t length)
     for (offset = 0; offset < MP_SPAWN_INBOUND; offset += 4)
         W32(b, MP_REGION_SPAWN, 132 + offset, U32(p + offset));
     W32(b, MP_REGION_SPAWN, 128, odd + 1);
+    return true;
+}
+
+/* The extras mailbox (native extension, no mgba.lua counterpart). */
+static bool ExtrasHeaderReady(const struct MpBridge *b)
+{
+    return Enabled(b->caps.extras) && b->ops.region[MP_REGION_EXTRAS] != NULL
+        && b->ops.regionSize[MP_REGION_EXTRAS] == MP_EXTRAS_BYTES
+        && R32(b, MP_REGION_EXTRAS, 0) == MP_EXTRAS_MAGIC
+        && R16(b, MP_REGION_EXTRAS, 4) == b->caps.extras && R16(b, MP_REGION_EXTRAS, 6) == MP_EXTRAS_BYTES;
+}
+
+/* Flags carry only "enabled"; the source slot byte is followed by three zeros. */
+static bool ValidExtrasInbound(const uint8_t *p, size_t length)
+{
+    if (length != MP_EXTRAS_INBOUND || (U32(p) & ~1u) != 0 || p[13] != 0 || p[14] != 0 || p[15] != 0)
+        return false;
+    return p[12] < 4;
+}
+
+static bool CommitExtras(struct MpBridge *b, const uint8_t *p, size_t length)
+{
+    uint32_t odd;
+    uint32_t offset;
+
+    if (!ExtrasHeaderReady(b) || length != MP_EXTRAS_INBOUND)
+        return false;
+    odd = Odd(R32(b, MP_REGION_EXTRAS, 180));
+    W32(b, MP_REGION_EXTRAS, 180, odd);
+    for (offset = 0; offset < MP_EXTRAS_INBOUND; offset += 4)
+        W32(b, MP_REGION_EXTRAS, 184 + offset, U32(p + offset));
+    W32(b, MP_REGION_EXTRAS, 180, odd + 1);
     return true;
 }
 
@@ -833,6 +872,7 @@ static void ForgetConnection(struct MpBridge *b)
     b->hasLatestWorld = b->poseSentLast = false;
     b->hasLatestSpawn = b->spawnTurn = false;
     b->spawnCapabilitySent = false;
+    b->hasLatestExtras = b->extrasCapabilitySent = b->extrasSentValid = false;
     b->controlCount = b->controlBurst = 0;
     b->save.pending = false;
     b->hasSaveGeneration = false;
@@ -1408,6 +1448,17 @@ static bool Dispatch(struct MpBridge *b, const uint8_t *payload, size_t size)
             return false;
         }
     }
+    else if (payload[0] == 'y')
+    {
+        /* The third extension (mp_bridge.h): a secret base from the host, only
+         * after the 'e' announcement. */
+        if (!b->extrasCapabilitySent || !ValidExtrasInbound(rest, restLength)
+         || !CommitExtras(b, rest, restLength))
+        {
+            Stop(b, "invalid secret base update", true);
+            return false;
+        }
+    }
     else if (payload[0] == 'B')
     {
         /* The extension (mp_bridge.h): a bound battle's generation and a look
@@ -1515,6 +1566,16 @@ static bool FlushOne(struct MpBridge *b)
             b->txLength = sizeof(b->latestSpawn);
             b->hasLatestSpawn = false;
             b->spawnTurn = false;
+            b->controlBurst = 0;
+        }
+        else if (b->hasLatestExtras && !ControlQueued(b, 'e') && !b->hasLatestPose && !b->hasLatestWorld
+              && !b->hasLatestSpawn)
+        {
+            /* A base changes rarely: it goes out only when nothing else waits, and never
+             * before its 'e' announcement has left. */
+            memcpy(b->tx, b->latestExtras, sizeof(b->latestExtras));
+            b->txLength = sizeof(b->latestExtras);
+            b->hasLatestExtras = false;
             b->controlBurst = 0;
         }
         else if (b->hasLatestPose && !(b->hasLatestWorld && b->poseSentLast))
@@ -1710,6 +1771,18 @@ void MpBridge_Step(struct MpBridge *b)
             return;
         b->spawnCapabilitySent = true;
     }
+    /* The third extension: multiplayer Secret Bases, once the world mailbox is up. */
+    if (WorldHeaderReady(b) && ExtrasHeaderReady(b) && !b->extrasCapabilitySent
+     && b->controlCount < MP_BRIDGE_CONTROL_LIMIT)
+    {
+        PutU16(cap, 1);
+        PutU16(cap + 2, MP_EXTRAS_BYTES);
+        PutU16(cap + 4, 160);
+        PutU16(cap + 6, 0);
+        if (!Reliable(b, 'e', cap, 8, NULL, 0))
+            return;
+        b->extrasCapabilitySent = true;
+    }
     Receive(b);
     if (!b->connected)
         return;
@@ -1762,6 +1835,31 @@ void MpBridge_Step(struct MpBridge *b)
             {
                 Frame(b->latestSpawn, 'g', record, sizeof(record), NULL, 0);
                 b->hasLatestSpawn = true;
+            }
+        }
+    }
+    if (b->extrasCapabilitySent && ExtrasHeaderReady(b) && RecordDue(b, &b->extrasPublished, &b->extrasAt, 2))
+    {
+        uint32_t generation = R32(b, MP_REGION_EXTRAS, 8);
+
+        if (generation % 2 == 0)
+        {
+            uint8_t record[MP_EXTRAS_LOCAL];
+
+            ReadRange(b, MP_REGION_EXTRAS, 12, record, sizeof(record));
+            if (generation == R32(b, MP_REGION_EXTRAS, 8))
+            {
+                uint32_t seq = U32(record);
+
+                /* Only a base the host has not seen on this connection: the record's number
+                 * is the game's, and a new connection forgets what was sent. */
+                if (seq != 0 && (!b->extrasSentValid || seq != b->extrasSentSeq) && !b->hasLatestExtras)
+                {
+                    Frame(b->latestExtras, 'x', record, sizeof(record), NULL, 0);
+                    b->hasLatestExtras = true;
+                    b->extrasSentValid = true;
+                    b->extrasSentSeq = seq;
+                }
             }
         }
     }
@@ -1869,6 +1967,7 @@ typedef int MpSocket;
 #include "multiplayer_reset_admission.h"
 #include "multiplayer_save.h"
 #include "multiplayer_spawns.h"
+#include "multiplayer_extras.h"
 #include "multiplayer_world.h"
 #include "save.h"
 #include "character_customization.h"
@@ -2115,6 +2214,7 @@ bool MpBridge_Configure(const char *path)
     caps.resetInput = *(const volatile u32 *)&gMultiplayerResetInputAbiVersion;
     caps.world = *(const volatile u32 *)&gMultiplayerWorldAbiVersion;
     caps.spawns = caps.world ? *(const volatile u32 *)&gMultiplayerSpawnAbiVersion : 0;
+    caps.extras = caps.world ? *(const volatile u32 *)&gMultiplayerExtrasAbiVersion : 0;
     problem = MpBridge_CheckCaps(&caps);
     if (problem != NULL)
     {
@@ -2139,10 +2239,13 @@ bool MpBridge_Configure(const char *path)
     ops.regionSize[MP_REGION_WINDOW] = sizeof(gSaveDataBuffer);
     ops.region[MP_REGION_SPAWN] = (volatile uint8_t *)&gMultiplayerSpawnMailbox;
     ops.regionSize[MP_REGION_SPAWN] = sizeof(gMultiplayerSpawnMailbox);
+    ops.region[MP_REGION_EXTRAS] = (volatile uint8_t *)&gMultiplayerExtrasMailbox;
+    ops.regionSize[MP_REGION_EXTRAS] = sizeof(gMultiplayerExtrasMailbox);
     if (ops.regionSize[MP_REGION_PRESENCE] != 128 || ops.regionSize[MP_REGION_SAVE] != 512
      || ops.regionSize[MP_REGION_BATTLE] != 512 || ops.regionSize[MP_REGION_MENU] != 512
      || ops.regionSize[MP_REGION_RESET] != 128 || ops.regionSize[MP_REGION_WORLD] != 256
-     || ops.regionSize[MP_REGION_WINDOW] != 4096 || ops.regionSize[MP_REGION_SPAWN] != 384)
+     || ops.regionSize[MP_REGION_WINDOW] != 4096 || ops.regionSize[MP_REGION_SPAWN] != 384
+     || ops.regionSize[MP_REGION_EXTRAS] != 384)
     {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Multiplayer bridge: mailbox sizes differ from the ABI");
         return false;

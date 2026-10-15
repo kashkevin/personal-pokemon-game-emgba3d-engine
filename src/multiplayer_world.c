@@ -6,6 +6,7 @@
 #include "multiplayer_appearance.h"
 #ifdef PORTABLE
 #include "multiplayer_spawns.h"
+#include "multiplayer_extras.h"
 #endif
 #line 7 // gba-line
 #include "battle.h"
@@ -141,6 +142,7 @@ void MultiplayerWorld_Init(void)
         gMultiplayerWorldMailbox.magic = MP_WORLD_MAGIC;
 #ifdef PORTABLE
     MultiplayerSpawns_Init(); // shared wild Pokemon (native PC only)
+    MultiplayerExtras_Init(); // multiplayer Secret Bases (native PC only)
 #endif
 #line 138 // gba-line
 }
@@ -1218,6 +1220,7 @@ void MultiplayerWorld_Tick(bool32 fieldReady, bool32 connected)
         return;
 #ifdef PORTABLE
     MultiplayerSpawns_Tick(fieldReady, connected);
+    MultiplayerExtras_Tick(fieldReady, connected);
 #endif
 #line 1172 // gba-line
     sConnected = connected;

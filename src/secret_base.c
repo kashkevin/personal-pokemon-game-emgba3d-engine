@@ -2074,3 +2074,157 @@ void CheckInteractedWithFriendsSandOrnament(void)
             break;
     }
 }
+
+#ifdef PORTABLE
+// ---------------------------------------------------------------------------
+// Multiplayer Secret Bases (EmeraldTogether expansion Phase 6, native PC game
+// only; the GBA ROM keeps its single-player record mixing untouched).
+//
+// The game's own machinery does the work. A player's base is secretBases[0];
+// other trainers' bases live in secretBases[1..19] exactly as record mixing
+// leaves them, so entering one, its decorations, its owner's party as the
+// trainer to battle, registering it and the PC's registry menu all work as in
+// the original. What replaces the link cable is the host: it relays each
+// player's base to the others (multiplayer_extras.c, mailbox EMX1) and these
+// two functions are the only places a record crosses the save boundary.
+
+#include <stddef.h>
+
+#define MP_BASE_BYTES 160
+
+STATIC_ASSERT(sizeof(struct SecretBase) == MP_BASE_BYTES, SecretBaseRecordIs160Bytes);
+STATIC_ASSERT(offsetof(struct SecretBase, party) == 0x34, SecretBasePartyOffset);
+STATIC_ASSERT(sizeof(struct SecretBaseParty) == 108, SecretBasePartyIs108Bytes);
+
+static bool32 BaseRecordIsSane(const struct SecretBase *base)
+{
+    u32 i;
+
+    if (base->secretBaseId == 0)
+        return FALSE;
+    if (base->secretBaseId / 10 >= NUM_SECRET_BASE_GROUPS || base->secretBaseId % 10 < 1 || base->secretBaseId % 10 > 4)
+        return FALSE;
+    for (i = 0; i < PLAYER_NAME_LENGTH; i++)
+    {
+        if (base->trainerName[i] == EOS)
+            break;
+    }
+    if (i == 0)
+        return FALSE; // a name of at least one character, terminated within the field or filling it
+    for (i = 0; i < DECOR_MAX_SECRET_BASE; i++)
+    {
+        if (base->decorations[i] > NUM_DECORATIONS)
+            return FALSE;
+    }
+    for (i = 0; i < PARTY_SIZE; i++)
+    {
+        if (base->party.species[i] >= NUM_SPECIES || base->party.levels[i] > MAX_LEVEL)
+            return FALSE;
+    }
+    return TRUE;
+}
+
+// The base as it is published: the record without what the player's own
+// game keeps for itself (registry flags, entries, the record-mix counter) and
+// with its two padding bytes cleared, so an unchanged base compares equal.
+static void NormalizeForSharing(struct SecretBase *base)
+{
+    u8 *bytes = (u8 *)base;
+
+    base->toRegister = 0;
+    base->battledOwnerToday = 0;
+    base->registryStatus = 0;
+    base->numSecretBasesReceived = 0;
+    base->numTimesEntered = 0;
+    base->unused = 0;
+    bytes[0x32] = bytes[0x33] = 0;
+}
+
+// Copies the player's own base into out (MP_BASE_BYTES). FALSE: the player has none.
+bool32 MultiplayerSecretBase_GetOwn(u8 *out)
+{
+    struct SecretBase copy = gSaveBlock1Ptr->secretBases[0];
+
+    if (copy.secretBaseId == 0)
+    {
+        memset(out, 0, MP_BASE_BYTES);
+        return FALSE;
+    }
+    NormalizeForSharing(&copy);
+    memcpy(out, &copy, MP_BASE_BYTES);
+    return TRUE;
+}
+
+static s32 FindBaseOfSamePlayer(struct SecretBase *base)
+{
+    s32 i;
+
+    for (i = 1; i < SECRET_BASES_COUNT; i++)
+    {
+        if (gSaveBlock1Ptr->secretBases[i].secretBaseId != 0
+         && SecretBasesBelongToSamePlayer(&gSaveBlock1Ptr->secretBases[i], base))
+            return i;
+    }
+    return -1;
+}
+
+// One base from the host. A record with a trainer but no location (secretBaseId
+// 0) withdraws that trainer's base from this save (the owner took it away or no
+// longer shares it). Returns TRUE when the save changed.
+//   - the player's own base is never replaced;
+//   - a base of a trainer already in secretBases[1..] replaces that trainer's
+//     older record, keeping what the player decided about it (registered or not);
+//   - otherwise the original's rules for a friend's base decide whether it fits
+//     (a free slot, an unregistered slot, a location already taken).
+bool32 MultiplayerSecretBase_Receive(const u8 *record)
+{
+    struct SecretBase base, backup;
+    s32 index, oldIndex = -1;
+    u8 oldStatus = UNREGISTERED, oldToRegister = FALSE;
+
+    memcpy(&base, record, MP_BASE_BYTES);
+    if (base.secretBaseId == 0)
+    {
+        if (base.trainerName[0] == EOS || base.trainerName[0] == 0)
+            return FALSE;
+        if (SecretBasesBelongToSamePlayer(&gSaveBlock1Ptr->secretBases[0], &base))
+            return FALSE;
+        index = FindBaseOfSamePlayer(&base);
+        if (index < 0)
+            return FALSE;
+        ClearSecretBase(&gSaveBlock1Ptr->secretBases[index]);
+        return TRUE;
+    }
+    if (!BaseRecordIsSane(&base))
+        return FALSE;
+    NormalizeForSharing(&base);
+    if (gSaveBlock1Ptr->secretBases[0].secretBaseId != 0
+     && SecretBasesBelongToSamePlayer(&gSaveBlock1Ptr->secretBases[0], &base))
+        return FALSE;
+    oldIndex = FindBaseOfSamePlayer(&base);
+    if (oldIndex >= 0)
+    {
+        struct SecretBase held;
+
+        backup = held = gSaveBlock1Ptr->secretBases[oldIndex];
+        oldStatus = held.registryStatus == NEW ? UNREGISTERED : held.registryStatus; // NEW only lives within one record mix
+        oldToRegister = held.toRegister;
+        NormalizeForSharing(&held);
+        if (memcmp(&held, &base, MP_BASE_BYTES) == 0)
+            return FALSE; // already here, unchanged
+        ClearSecretBase(&gSaveBlock1Ptr->secretBases[oldIndex]);
+    }
+    index = TrySaveFriendsSecretBase(&base, VERSION_EMERALD, GAME_LANGUAGE);
+    if (index == 0)
+    {
+        // It does not fit (its location is taken by a registered base, or all slots are):
+        // the trainer's older base stays as it was.
+        if (oldIndex >= 0)
+            gSaveBlock1Ptr->secretBases[oldIndex] = backup;
+        return FALSE;
+    }
+    gSaveBlock1Ptr->secretBases[index].registryStatus = oldStatus;
+    gSaveBlock1Ptr->secretBases[index].toRegister = oldToRegister;
+    return TRUE;
+}
+#endif // PORTABLE

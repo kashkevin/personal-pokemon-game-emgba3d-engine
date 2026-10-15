@@ -34,6 +34,13 @@
  * 116-byte spawn record as 'g' (as 'G' for the world record) and accepts the
  * companion's 252-byte spawn inbound record as 'n' (only after 'w').
  *
+ * A third native extension, multiplayer Secret Bases (multiplayer_extras.h,
+ * mailbox EMX1): once the world mailbox is ready the bridge announces 'e'
+ * (version 1, 384 bytes, 160-byte base records), publishes the game's own base
+ * record (168 bytes) as 'x' whenever its number changes and after every
+ * connection, and accepts one 176-byte base hand-over from the companion as 'y'
+ * (only after 'e').
+ *
  * Started with `--bridge FILE`; FILE holds `port=N` (1-65535) and `token=` 64
  * lowercase hex digits, and the manifest's explicit opt-ins it has, each on
  * its own line: `trade_effect_prepare=1`, `trade_effect_save=1`,
@@ -67,6 +74,7 @@ enum MpRegion
     MP_REGION_WORLD,    /* gMultiplayerWorldMailbox, 256 */
     MP_REGION_WINDOW,   /* gSaveDataBuffer, 4096 (read only) */
     MP_REGION_SPAWN,    /* gMultiplayerSpawnMailbox, 384 (native extension) */
+    MP_REGION_EXTRAS,   /* gMultiplayerExtrasMailbox, 384 (native extension) */
     MP_REGION_COUNT
 };
 
@@ -90,6 +98,7 @@ struct MpBridgeCaps
     uint32_t resetInput;             /* 1 */
     uint32_t world;                  /* 1 */
     uint32_t spawns;                 /* 1: shared wild Pokemon (native extension, needs world) */
+    uint32_t extras;                 /* 1: multiplayer Secret Bases (native extension, needs world) */
 };
 
 enum
@@ -170,6 +179,9 @@ struct MpBridge
     uint8_t latestSpawn[4 + 1 + 116];
     bool hasLatestSpawn, spawnTurn, spawnPublished, spawnCapabilitySent;
     uint32_t spawnAt;
+    uint8_t latestExtras[4 + 1 + 168];
+    bool hasLatestExtras, extrasPublished, extrasCapabilitySent, extrasSentValid;
+    uint32_t extrasAt, extrasSentSeq;
     struct MpBridgeSave save;
     bool hasSaveGeneration;
     uint32_t saveGeneration;

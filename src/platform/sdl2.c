@@ -190,6 +190,7 @@ extern int NativeSelfTest_CoopExp(void);
 extern int NativeSelfTest_CoopController(void);
 extern void MultiplayerCoop_TestArmAward(void);
 extern int NativeSelfTest_SpawnClaims(void);
+extern int NativeSelfTest_SecretBase(void);
 extern int NativeSelfTest_DumpWildWeights(const char *keysPath, const char *outPath);
 extern bool32 GameMemory_Reset(void);
 
@@ -1103,6 +1104,8 @@ static void ParseArguments(int argc, char **argv)
             MultiplayerCoop_TestArmAward(); // the co-op experience award's screens, once (multiplayer_coop.c)
         else if (strcmp(argv[i], "--selftest-spawn-claims") == 0)
             exit(NativeSelfTest_SpawnClaims()); // src/platform/native_selftest.c (KNOWN_ISSUES M16-M19)
+        else if (strcmp(argv[i], "--selftest-secret-base") == 0)
+            exit(NativeSelfTest_SecretBase()); // src/platform/native_selftest.c (expansion Phase 6)
         else if (strcmp(argv[i], "--dump-wild-weights") == 0 && i + 2 < argc)
         {
             const char *keysPath = argv[++i];

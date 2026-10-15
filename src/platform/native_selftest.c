@@ -2303,3 +2303,166 @@ int NativeSelfTest_CoopController(void)
     printf("selftest-coop-controller: %d checks, %d failed\n", sCoopCtlChecks, sCoopCtlFailures);
     return sCoopCtlFailures ? 1 : 0;
 }
+
+// ---------------------------------------------------------------------------
+// --selftest-secret-base (expansion Phase 6): the game's side of multiplayer
+// Secret Bases. The host relays each player's base record; Receive/GetOwn
+// (src/secret_base.c) are the only places a record crosses the save boundary.
+// Checks: a new base lands in secretBases[1..]; an unchanged repeat changes
+// nothing; the owner's new version replaces the old one and keeps the player's
+// registry decision; the player's own base is never replaced; a withdraw record
+// removes that trainer's base; malformed records are refused; a registered
+// base's location is never taken; a full table keeps the older bases.
+// ---------------------------------------------------------------------------
+
+#include "multiplayer_extras.h"
+#include "constants/decorations.h"
+
+// secret_base.c keeps its registry states private: 0 unregistered, 1 registered, 2 new
+#define BASE_UNREGISTERED 0
+#define BASE_REGISTERED 1
+
+static int sBaseChecks, sBaseFailures;
+
+static void ExpectBase(const char *what, bool32 ok)
+{
+    sBaseChecks++;
+    if (!ok)
+        sBaseFailures++;
+    printf("%s %s\n", ok ? "ok  " : "FAIL", what);
+}
+
+static void MakeBase(struct SecretBase *base, u8 locationId, u8 ownerSeed)
+{
+    u32 i;
+
+    memset(base, 0, sizeof(*base));
+    base->secretBaseId = locationId;
+    base->gender = ownerSeed & 1;
+    for (i = 0; i < 4; i++)
+        base->trainerName[i] = CHAR_A + ownerSeed + i;
+    for (i = 4; i < PLAYER_NAME_LENGTH; i++)
+        base->trainerName[i] = EOS;
+    for (i = 0; i < TRAINER_ID_LENGTH; i++)
+        base->trainerId[i] = 0x10 * ownerSeed + i;
+    base->language = GAME_LANGUAGE;
+    base->decorations[0] = 1;
+    base->decorationPositions[0] = 0x23;
+    base->party.species[0] = SPECIES_ZIGZAGOON;
+    base->party.levels[0] = 5;
+}
+
+static void ClearAllBases(void)
+{
+    memset(gSaveBlock1Ptr->secretBases, 0, sizeof(gSaveBlock1Ptr->secretBases));
+}
+
+int NativeSelfTest_SecretBase(void)
+{
+    struct SecretBase a, a2, b, own, tomb;
+    u8 out[160];
+    u32 i;
+
+    SetSaveBlocksPointers(0);
+    ClearAllBases();
+    MakeBase(&a, 11, 1);
+    ExpectBase("a new base is saved", MultiplayerSecretBase_Receive((u8 *)&a));
+    ExpectBase("  in a visitor slot, not the player's own", gSaveBlock1Ptr->secretBases[0].secretBaseId == 0
+               && gSaveBlock1Ptr->secretBases[1].secretBaseId == 11);
+    ExpectBase("  as a new, unregistered base", gSaveBlock1Ptr->secretBases[1].registryStatus == BASE_UNREGISTERED);
+    ExpectBase("an unchanged repeat changes nothing", !MultiplayerSecretBase_Receive((u8 *)&a));
+
+    gSaveBlock1Ptr->secretBases[1].registryStatus = BASE_REGISTERED;
+    a2 = a;
+    a2.secretBaseId = 12;
+    a2.decorations[1] = 2;
+    ExpectBase("the owner's new version replaces the old", MultiplayerSecretBase_Receive((u8 *)&a2));
+    ExpectBase("  there is still one base from that player", gSaveBlock1Ptr->secretBases[1].secretBaseId == 12
+               && gSaveBlock1Ptr->secretBases[2].secretBaseId == 0 && gSaveBlock1Ptr->secretBases[1].decorations[1] == 2);
+    ExpectBase("  and the registry decision is kept", gSaveBlock1Ptr->secretBases[1].registryStatus == BASE_REGISTERED);
+
+    MakeBase(&own, 21, 5);
+    gSaveBlock1Ptr->secretBases[0] = own;
+    a2 = own;
+    a2.secretBaseId = 22;
+    a2.decorations[2] = 3;
+    ExpectBase("the player's own base is never replaced", !MultiplayerSecretBase_Receive((u8 *)&a2)
+               && gSaveBlock1Ptr->secretBases[0].secretBaseId == 21 && gSaveBlock1Ptr->secretBases[0].decorations[2] == 0);
+    ExpectBase("GetOwn returns the player's base", MultiplayerSecretBase_GetOwn(out) && out[0] == 21);
+    {
+        struct SecretBase copy;
+
+        memcpy(&copy, out, sizeof(copy));
+        gSaveBlock1Ptr->secretBases[0].registryStatus = BASE_REGISTERED;
+        gSaveBlock1Ptr->secretBases[0].numTimesEntered = 9;
+        gSaveBlock1Ptr->secretBases[0].battledOwnerToday = 1;
+        MultiplayerSecretBase_GetOwn(out);
+        ExpectBase("  bookkeeping bits are not shared", memcmp(&copy, out, sizeof(copy)) == 0);
+    }
+    gSaveBlock1Ptr->secretBases[0].secretBaseId = 0;
+    ExpectBase("GetOwn says so when there is none", !MultiplayerSecretBase_GetOwn(out));
+    gSaveBlock1Ptr->secretBases[0] = own;
+
+    memset(&tomb, 0, sizeof(tomb));
+    memcpy(tomb.trainerName, a.trainerName, sizeof(tomb.trainerName));
+    memcpy(tomb.trainerId, a.trainerId, sizeof(tomb.trainerId));
+    tomb.gender = a.gender;
+    ExpectBase("a withdraw record removes that trainer's base", MultiplayerSecretBase_Receive((u8 *)&tomb)
+               && gSaveBlock1Ptr->secretBases[1].secretBaseId == 0);
+    ExpectBase("  and repeating it is a no-op", !MultiplayerSecretBase_Receive((u8 *)&tomb));
+    memcpy(tomb.trainerName, own.trainerName, sizeof(tomb.trainerName));
+    memcpy(tomb.trainerId, own.trainerId, sizeof(tomb.trainerId));
+    tomb.gender = own.gender;
+    ExpectBase("  a withdraw naming the player is ignored", !MultiplayerSecretBase_Receive((u8 *)&tomb)
+               && gSaveBlock1Ptr->secretBases[0].secretBaseId == 21);
+
+    MakeBase(&b, 31, 2);
+    b.secretBaseId = 0xFF;
+    ExpectBase("a location that does not exist is refused", !MultiplayerSecretBase_Receive((u8 *)&b));
+    MakeBase(&b, 35, 2);
+    ExpectBase("  and a seat number that does not exist", !MultiplayerSecretBase_Receive((u8 *)&b));
+    MakeBase(&b, 31, 2);
+    b.trainerName[0] = EOS;
+    ExpectBase("a base without an owner name is refused", !MultiplayerSecretBase_Receive((u8 *)&b));
+    MakeBase(&b, 31, 2);
+    b.decorations[3] = NUM_DECORATIONS + 1;
+    ExpectBase("an unknown decoration is refused", !MultiplayerSecretBase_Receive((u8 *)&b));
+    MakeBase(&b, 31, 2);
+    b.party.species[0] = NUM_SPECIES;
+    ExpectBase("an unknown species is refused", !MultiplayerSecretBase_Receive((u8 *)&b));
+    MakeBase(&b, 31, 2);
+    b.party.levels[1] = MAX_LEVEL + 1;
+    ExpectBase("a level over the maximum is refused", !MultiplayerSecretBase_Receive((u8 *)&b));
+    ExpectBase("  nothing of that was kept", gSaveBlock1Ptr->secretBases[1].secretBaseId == 0);
+
+    // A registered base's location is never taken by another player.
+    ClearAllBases();
+    gSaveBlock1Ptr->secretBases[0] = own;
+    MakeBase(&a, 41, 1);
+    MultiplayerSecretBase_Receive((u8 *)&a);
+    gSaveBlock1Ptr->secretBases[1].toRegister = TRUE;
+    MakeBase(&b, 41, 2);
+    ExpectBase("a registered base's location is not taken", !MultiplayerSecretBase_Receive((u8 *)&b)
+               && gSaveBlock1Ptr->secretBases[1].trainerName[0] == a.trainerName[0]);
+    // The owner moving onto it keeps the older record when it cannot fit.
+    MakeBase(&a2, 41, 1);
+    a2.decorations[5] = 4;
+    ExpectBase("the owner's own update of a registered base still lands", MultiplayerSecretBase_Receive((u8 *)&a2)
+               && gSaveBlock1Ptr->secretBases[1].decorations[5] == 4);
+
+    // A full table keeps what the player has.
+    ClearAllBases();
+    for (i = 1; i < SECRET_BASES_COUNT; i++)
+    {
+        MakeBase(&a, (i - 1) * 10 + 1, i);
+        MultiplayerSecretBase_Receive((u8 *)&a);
+        gSaveBlock1Ptr->secretBases[i].toRegister = TRUE; // the player registered every one
+    }
+    MakeBase(&b, 231, 30);
+    ExpectBase("a full table of registered bases refuses a newcomer", !MultiplayerSecretBase_Receive((u8 *)&b)
+               && gSaveBlock1Ptr->secretBases[19].secretBaseId == 181);
+    ClearAllBases();
+
+    printf("selftest-secret-base: %d checks, %d failed\n", sBaseChecks, sBaseFailures);
+    return sBaseFailures ? 1 : 0;
+}
