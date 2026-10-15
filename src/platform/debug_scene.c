@@ -35,6 +35,8 @@
 #include "string_util.h"
 #include "constants/characters.h"
 #include "rtc.h"
+#include "m4a.h"
+#include <math.h>
 #include "field_screen_effect.h"
 #include "field_player_avatar.h"
 #include "script.h"
@@ -328,6 +330,87 @@ static void StartFfaScene(void)
     }
 }
 
+// PKMN_DEBUG_SCENE=audio: every song and sound effect in turn through the game's own mixer (m4a), measuring what comes out of
+// it (Platform_QueueAudio) frame by frame, one line per song: peak, RMS, how many frames made sound, clipped samples. Silent,
+// clipped or stuck songs show up as numbers (docs/visual-audio-audit.md). PKMN_DEBUG_AUDIO=first,last,frames (frames per song).
+static struct
+{
+    bool on;
+    u16 song, first, last, frames, frame;
+    double sumSquares;
+    float peak;
+    u32 samples, loudFrames, clipped;
+    bool started;
+} sAudio;
+
+void DebugScene_AudioTap(const float *buffer, int count)
+{
+    float framePeak = 0.0f;
+
+    if (!sAudio.on || !sAudio.started)
+        return;
+    for (int i = 0; i < count; i++)
+    {
+        float a = fabsf(buffer[i]);
+
+        sAudio.sumSquares += (double)buffer[i] * buffer[i];
+        if (a > framePeak)
+            framePeak = a;
+        if (a >= 0.999f)
+            sAudio.clipped++;
+    }
+    sAudio.samples += (u32)count;
+    if (framePeak > sAudio.peak)
+        sAudio.peak = framePeak;
+    if (framePeak > 0.002f)
+        sAudio.loudFrames++;
+}
+
+static void CB2_AudioAudit(void)
+{
+    if (!sAudio.started || sAudio.frame >= sAudio.frames)
+    {
+        if (sAudio.started)
+            SDL_Log("audio song %3u: peak %.3f rms %.4f loud-frames %u/%u clipped %u", sAudio.song, sAudio.peak,
+                    sAudio.samples ? sqrt(sAudio.sumSquares / sAudio.samples) : 0.0, sAudio.loudFrames, sAudio.frames, sAudio.clipped);
+        m4aMPlayAllStop();
+        if (sAudio.started)
+            sAudio.song++;
+        if (sAudio.song > sAudio.last)
+        {
+            SDL_Log("audio audit done");
+            exit(0);
+        }
+        sAudio.sumSquares = 0;
+        sAudio.peak = 0;
+        sAudio.samples = sAudio.loudFrames = sAudio.clipped = 0;
+        sAudio.frame = 0;
+        sAudio.started = true;
+        m4aSongNumStart(sAudio.song);
+        return;
+    }
+    sAudio.frame++;
+}
+
+static void StartAudioScene(void)
+{
+    const char *value;
+    int v[4];
+
+    sAudio.first = 1;
+    sAudio.last = 558;
+    sAudio.frames = 90;
+    if ((value = SDL_getenv("PKMN_DEBUG_AUDIO")) != NULL && Numbers(value, v, 3) >= 3)
+    {
+        sAudio.first = (u16)v[0];
+        sAudio.last = (u16)v[1];
+        sAudio.frames = (u16)v[2];
+    }
+    sAudio.song = sAudio.first;
+    sAudio.on = true;
+    SetMainCallback2(CB2_AudioAudit);
+}
+
 // PKMN_DEBUG_SCENE=field: the overworld at PKMN_DEBUG_HERE=group,num,x,y[,gender] (a new game's player with one Pokemon, no
 // save), for looking at maps in either renderer (the visual audit, docs/visual-audio-audit.md). PKMN_DEBUG_HOUR=h sets the
 // clock (0-23), PKMN_DEBUG_SPECIES=n the Pokemon the player has (and PKMN_DEBUG_FOLLOWER=1 sets the follower flag).
@@ -341,8 +424,8 @@ static void StartFieldScene(void)
         species = (u16)v[0];
     struct OriginalTrainerId id = {OT_ID_PRESET, 0x2222u};
 
-    CreateMonWithIVs(&gPlayerParty[0], species, 20, 0x1234u, id, 20);
-    gPlayerPartyCount = 1;
+    CreateMonWithIVs(&gParties[B_TRAINER_PLAYER][0], species, 20, 0x1234u, id, 20);
+    gPartiesCount[B_TRAINER_PLAYER] = 1;
     if ((value = SDL_getenv("PKMN_DEBUG_HOUR")) != NULL && Numbers(value, v, 1) >= 1)
         RtcCalcLocalTimeOffset(0, v[0], 0, 0);
     ResetInitialPlayerAvatarState();
@@ -392,6 +475,11 @@ static void CB2_DebugSceneSetup(void)
             gSaveBlock2Ptr->playerGender = (u8)v[4];
     }
     gMapHeader = *Overworld_GetMapHeaderByGroupAndId(gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum);
+    if (gSaveBlock1Ptr->pos.x < 0 && gMapHeader.mapLayout != NULL) // x < 0: the middle of the map (the visual audit's sweep)
+    {
+        gSaveBlock1Ptr->pos.x = (s16)(gMapHeader.mapLayout->width / 2);
+        gSaveBlock1Ptr->pos.y = (s16)(gMapHeader.mapLayout->height / 2);
+    }
 
     memset(&test, 0, sizeof(test));
     if ((value = SDL_getenv("PKMN_DEBUG_PEERS")) != NULL)
@@ -422,6 +510,8 @@ static void CB2_DebugSceneSetup(void)
         StartFfaScene();
     else if (strcmp(scene, "field") == 0)
         StartFieldScene();
+    else if (strcmp(scene, "audio") == 0)
+        StartAudioScene();
 }
 
 void DebugScene_Start(void)

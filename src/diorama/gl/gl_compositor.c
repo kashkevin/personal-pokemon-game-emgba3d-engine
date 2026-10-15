@@ -1653,6 +1653,10 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                     sSceneSnapshot.valid, (int)sSceneSnapshot.sceneKind, (unsigned)sSceneSnapshot.visibleCellCount,
                     (unsigned)sSceneSnapshot.fallbackReasons, sSceneSnapshot.tilesetResourcesValid, sSceneSnapshot.mapGroup,
                     sSceneSnapshot.mapNum, sSceneSnapshot.mapLayoutId, sTerrainAvailable, sObjectsAvailable);
+        if (sHasSceneSnapshot && SDL_getenv("PKMN_DEBUG_TRACE") != NULL && (sLogEvery % 200) == 0)
+            SDL_Log("Diorama: seq %u objs %u player? mode %d supported %d flat %d ready %d", (unsigned)sSceneSnapshot.sequence, (unsigned)sSceneSnapshot.objectCount, (int)sRenderMode,
+                    DioramaRules_IsMapSupported(sSceneSnapshot.mapGroup, sSceneSnapshot.mapNum, sSceneSnapshot.mapLayoutId),
+                    DioramaSnapshot_CanRenderFlatMap(&sSceneSnapshot), sCurrent3DReady);
     }
     if (sRenderMode == DIORAMA_RENDER_AUTO
      && sTerrainAvailable
@@ -1670,6 +1674,13 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
             DioramaProfile_End(DIORAMA_PROF_SYNC_ATLAS);
             DioramaProfile_Begin(DIORAMA_PROF_SYNC_TERRAIN);
             sCurrent3DReady = DioramaGLTerrain_Sync(&sSceneSnapshot, sAtlasResolvedCells);
+            if (!sCurrent3DReady && SDL_getenv("PKMN_DEBUG_TRACE") != NULL)
+            {
+                static unsigned sTerrainFails;
+
+                if ((++sTerrainFails % 100) == 1)
+                    SDL_Log("Diorama: terrain sync not ready (%u)", sTerrainFails);
+            }
             DioramaProfile_End(DIORAMA_PROF_SYNC_TERRAIN);
             DioramaProfile_Begin(DIORAMA_PROF_SYNC_OBJECTS);
             sCurrent3DReady = sCurrent3DReady
@@ -2010,6 +2021,15 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         CaptureSurveyFrame(outputWidth, outputHeight, captureSnapshot, stateMatchesPixels);
     }
     sLastFrame3D = drawTerrain;
+    if (SDL_getenv("PKMN_DEBUG_TRACE") != NULL)
+    {
+        static unsigned sFrames3D, sFramesAll;
+
+        sFramesAll++;
+        sFrames3D += drawTerrain;
+        if ((sFramesAll % 100) == 0)
+            SDL_Log("Diorama: frames %u of which 3D %u (last %d)", sFramesAll, sFrames3D, drawTerrain);
+    }
     DioramaProfile_Begin(DIORAMA_PROF_2D); /* when no 3D was drawn: all of it is 2D */
     if (sOverlay != NULL && sSurveyView < 0)
     {

@@ -2182,6 +2182,7 @@ u32 Platform_GetEntropy32(void)
 
 void Platform_QueueAudio(float *audioBuffer, s32 samplesPerFrame)
 {
+    DebugScene_AudioTap(audioBuffer, samplesPerFrame / sizeof(float));
     if (sdlAudioDevice != 0)
     {
         int floatCount = samplesPerFrame / sizeof(float);
@@ -2928,6 +2929,33 @@ static int SelfTestKeybinds(void)
     WriteScratchConfig("volume=3\n");
     ReadConfigFile();
     ExpectKeys("without key lines the defaults are back", sKeybinds.key[KEYBIND_A] == SDLK_z && !sKeybinds.custom[KEYBIND_A]);
+
+    // The pad (the Windows XInput buttons and the SDL controller map into the same table): every face and shoulder button,
+    // the d-pad and the stick reach the game, and Back/Cancel works from either left or right face button.
+    {
+        struct GamepadInput pad = {0};
+
+        pad.buttons = GAMEPAD_A;
+        ExpectKeys("pad A is the A button", Gamepad_MapKeys(&pad).keys == A_BUTTON);
+        pad.buttons = GAMEPAD_X;
+        ExpectKeys("pad X (left face) is the B button", Gamepad_MapKeys(&pad).keys == B_BUTTON);
+        pad.buttons = GAMEPAD_B;
+        ExpectKeys("pad B (right face) is also the B button: Cancel and Back work from it", Gamepad_MapKeys(&pad).keys == B_BUTTON);
+        pad.buttons = GAMEPAD_START;
+        ExpectKeys("pad Start is Start", Gamepad_MapKeys(&pad).keys == START_BUTTON);
+        pad.buttons = GAMEPAD_BACK;
+        ExpectKeys("pad Back is Select", Gamepad_MapKeys(&pad).keys == SELECT_BUTTON);
+        pad.buttons = GAMEPAD_LEFT_SHOULDER | GAMEPAD_RIGHT_SHOULDER;
+        ExpectKeys("pad shoulders are L and R", Gamepad_MapKeys(&pad).keys == (L_BUTTON | R_BUTTON));
+        pad.buttons = GAMEPAD_DPAD_UP | GAMEPAD_DPAD_LEFT;
+        ExpectKeys("pad d-pad reaches the menus", Gamepad_MapKeys(&pad).keys == (DPAD_UP | DPAD_LEFT));
+        pad.buttons = 0;
+        pad.stickX = -32767;
+        ExpectKeys("pad stick left is Left", Gamepad_MapKeys(&pad).keys == DPAD_LEFT);
+        pad.stickX = 0;
+        pad.buttons = GAMEPAD_Y;
+        ExpectKeys("pad Y is the details key (and no GBA button)", Gamepad_MapKeys(&pad).details && Gamepad_MapKeys(&pad).keys == 0);
+    }
 
     remove(sConfigPath);
     printf("selftest-keybinds: %d checks, %d failed\n", sKeyChecks, sKeyFailures);

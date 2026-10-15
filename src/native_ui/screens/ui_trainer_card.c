@@ -33,6 +33,7 @@
 #include "multiplayer.h"
 #include "overworld.h"
 #include "region_map.h"
+#include "string_util.h"
 #include "constants/characters.h"
 #include "native_ui/ui_draw.h"
 #include "native_ui/ui_engine.h"
@@ -40,6 +41,8 @@
 #include "native_ui/ui_screen.h"
 #include "native_ui/ui_text.h"
 #include "native_ui/ui_widgets.h"
+
+static const u8 sText_LocationHidden[] = _("Location hidden");
 
 enum
 {
@@ -253,7 +256,10 @@ static void Capture(void)
             continue;
         p->here = activity != MULTIPLAYER_ACTIVITY_UNAVAILABLE && group == gSaveBlock1Ptr->location.mapGroup
                && num == gSaveBlock1Ptr->location.mapNum;
-        GetMapName(p->where, Overworld_GetMapHeaderByGroupAndId(group, num)->regionMapSectionId, 0);
+        if (RegionMap_PortableMapKnown(group, num))
+            GetMapName(p->where, Overworld_GetMapHeaderByGroupAndId(group, num)->regionMapSectionId, 0);
+        else
+            StringCopy(p->where, sText_LocationHidden); /* the player chose not to share where they are */
         sPeerCount++;
     }
 }

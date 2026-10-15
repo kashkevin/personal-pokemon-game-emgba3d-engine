@@ -20,6 +20,7 @@ struct GamepadKeys Gamepad_MapKeys(const struct GamepadInput *input)
 
     if (b & GAMEPAD_A)              out.keys |= KEY_A;
     if (b & GAMEPAD_X)              out.keys |= KEY_B;      // the left face button is the GBA's B
+    if (b & GAMEPAD_B)              out.keys |= KEY_B;      // and so is the right one: Cancel/Back on an Xbox pad (it did nothing)
     if (b & GAMEPAD_START)          out.keys |= KEY_START;
     if (b & GAMEPAD_BACK)           out.keys |= KEY_SELECT;
     if (b & GAMEPAD_LEFT_SHOULDER)  out.keys |= KEY_L;

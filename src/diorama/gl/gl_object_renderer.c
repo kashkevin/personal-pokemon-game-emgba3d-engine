@@ -587,7 +587,10 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
             reflection.vFlip = !object->vFlip;
             texture = GetTexture(snapshot, &reflection);
             if (texture == NULL)
+            {
+                LogObjectRefusal(object, "no reflection texture");
                 return false;
+            }
             item->reflectionTexture = texture->texture;
         }
         if (!DioramaSprite_BuildResolvedPose(snapshot, resolvedCells,

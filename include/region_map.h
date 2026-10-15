@@ -158,6 +158,7 @@ void RegionMap_PortableHideMarkers(void);
 void RegionMap_PortableUnhideMarkers(void);
 u8 RegionMap_PortableJump(void);
 void RegionMap_PortableTick(void);
+bool32 RegionMap_PortableMapKnown(u8 mapGroup, u8 mapNum);
 bool32 RegionMap_PortableLocate(u8 mapGroup, u8 mapNum, s16 x, s16 y, u16 *gridX, u16 *gridY, mapsec_u16_t *mapSec);
 void RegionMap_PortableSetTest(const struct RegionMapTestMarkers *test); // NULL: back to the live roster
 u32 RegionMap_PortableMarkerCount(void);

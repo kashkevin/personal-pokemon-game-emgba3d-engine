@@ -2648,6 +2648,13 @@ static void SpriteCB_PortableMarker(struct Sprite *sprite);
 #define sFlashOff data[4]
 #define sTimer   data[7]
 
+// TRUE when this is a map that exists. A player who hides their location is sent to the others as map 255.255 (the host's
+// privacy setting): the screens that name another player's place must not look it up.
+bool32 RegionMap_PortableMapKnown(u8 mapGroup, u8 mapNum)
+{
+    return mapGroup < MAP_GROUPS_COUNT && gMapGroups[mapGroup] != NULL && mapNum < sMapGroupCounts[mapGroup];
+}
+
 bool32 RegionMap_PortableLocate(u8 mapGroup, u8 mapNum, s16 px, s16 py, u16 *gridX, u16 *gridY, mapsec_u16_t *mapSecOut)
 {
     const struct MapHeader *header;
