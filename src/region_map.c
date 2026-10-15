@@ -824,6 +824,10 @@ void BlendRegionMap(u16 color, u32 coeff)
 
 void FreeRegionMapIconResources(void)
 {
+#ifdef PORTABLE
+    RegionMap_PortableFreeMarkers();
+#endif
+#line 827 // gba-line
     if (sRegionMap->cursorSprite != NULL)
     {
         DestroySprite(sRegionMap->cursorSprite);
@@ -882,6 +886,11 @@ static u8 ProcessRegionMapInput_Full(void)
     {
         input = MAP_INPUT_R_BUTTON;
     }
+#ifdef PORTABLE
+    if (input == MAP_INPUT_NONE && JOY_NEW(SELECT_BUTTON))
+        input = RegionMap_PortableJump(); // multiplayer: cursor to the next trainer or event
+#endif
+#line 885 // gba-line
     if (input == MAP_INPUT_MOVE_START)
     {
         sRegionMap->cursorMovementFrameCounter = 4;
@@ -1779,6 +1788,10 @@ void CreateRegionMapPlayerIcon(u16 tileTag, u16 paletteTag)
 
 static void HideRegionMapPlayerIcon(void)
 {
+#ifdef PORTABLE
+    RegionMap_PortableHideMarkers();
+#endif
+#line 1782 // gba-line
     if (sRegionMap->playerIconSprite != NULL)
     {
         sRegionMap->playerIconSprite->invisible = TRUE;
@@ -1788,6 +1801,10 @@ static void HideRegionMapPlayerIcon(void)
 
 static void UnhideRegionMapPlayerIcon(void)
 {
+#ifdef PORTABLE
+    RegionMap_PortableUnhideMarkers();
+#endif
+#line 1791 // gba-line
     if (sRegionMap->playerIconSprite != NULL)
     {
         if (sRegionMap->zoomed == TRUE)
@@ -1990,6 +2007,10 @@ void CB2_OpenFlyMap(void)
         InitRegionMap(&sFlyMap->regionMap, FALSE);
         CreateRegionMapCursor(TAG_CURSOR, TAG_CURSOR);
         CreateRegionMapPlayerIcon(TAG_PLAYER_ICON, TAG_PLAYER_ICON);
+#ifdef PORTABLE
+        RegionMap_PortableCreateMarkers();
+#endif
+#line 1993 // gba-line
         sFlyMap->mapSecId = sFlyMap->regionMap.mapSecId;
         StringFill(sFlyMap->nameBuffer, CHAR_SPACE, MAP_NAME_LENGTH);
         sDrawFlyDestTextWindow = TRUE;
@@ -2535,6 +2556,511 @@ void SetFlyDestination(struct RegionMap* regionMap)
     else
         SetWarpDestinationToMapWarp(sMapHealLocations[regionMap->mapSecId][0], sMapHealLocations[regionMap->mapSecId][1], WARP_ID_NONE);
 }
+
+#ifdef PORTABLE
+// ---------------------------------------------------------------------------
+// Multiplayer markers on the Town Map (PC build only).
+//
+// Draws the other trainers, the visible World Event and the running outbreak on
+// the map the game already has, using the original art only: each trainer is the
+// map's own Brendan/May icon with its accent colours swapped for a per-slot ramp
+// (derived from the game's palette at run time, no new asset); the event is the
+// original red Battle Frontier outline and the outbreak the original pink fly-destination
+// dot from the same sheet, both flashing. SELECT jumps the cursor
+// from marker to marker. The host's text pages stay as the fallback.
+// ---------------------------------------------------------------------------
+#include "multiplayer.h"
+#include "multiplayer_world.h"
+
+#define MP_MARKER_MAX        5
+#define MP_MARKER_PEER       0
+#define MP_MARKER_EVENT      1
+#define MP_MARKER_OUTBREAK   2
+#define TAG_MP_TILES_MALE    0x4D40
+#define TAG_MP_TILES_FEMALE  0x4D41
+#define TAG_MP_TILES_ICONS   0x4D42
+#define TAG_MP_PAL_PEER      0x4D50 // + 0..3 for the trainer slots (player ids 1-4)
+#define TAG_MP_PAL_ICONS     0x4D58
+#define MP_OUTBREAK_BYTES    8      // world mailbox reserved[0..7]: valid, group, number, 0, species (LE16)
+
+// How many maps each map group holds (tools/pc_port/map_group_counts.py checks it against the header). Another player's
+// map ids arrive over the network, so no lookup trusts them.
+extern const struct MapHeader *const *const gMapGroups[];
+static const u8 sMapGroupCounts[MAP_GROUPS_COUNT] =
+{
+    57, 5, 5, 6, 7, 8, 9, 7, 7, 14, 8, 17, 10, 23, 13, 15,
+    15, 2, 2, 2, 3, 1, 1, 1, 108, 61, 89, 2, 1, 13, 1, 1,
+    3, 1, 5, 123, 60, 62, 4, 6, 8, 10, 6, 8, 20, 10, 8, 2,
+    10, 4, 2, 2, 1, 1, 1, 2, 2, 3, 2, 3, 2, 1, 1, 6,
+    5, 5, 8, 8, 5, 5, 1, 1, 1, 2, 1,
+};
+
+struct PortableMarker
+{
+    struct Sprite *sprite;
+    u8 kind;
+    u8 slot;   // trainer slot 0-3 (player id - 1)
+    u8 gender;
+    u16 gridX; // cursor coordinates, like sRegionMap->cursorPosX
+    u16 gridY;
+    mapsec_u16_t mapSec;
+};
+
+static struct PortableMarker sMarkers[MP_MARKER_MAX];
+static u8 sMarkerCount;
+static s8 sJumpIndex;
+static bool8 sMarkersHidden;
+static u16 sPeerPalette[4][16];
+static u8 sIconTiles[0x1C0];
+static struct RegionMapTestMarkers sTest;
+static bool8 sTestActive;
+
+// The accent colours of the map's trainer icons (palette entries 10-13: the hat
+// band and the shirt) become one ramp per trainer slot; everything else (skin,
+// outline, white) is untouched so a marker still reads as a trainer.
+static const u16 sSlotLight[4] = { RGB(10, 18, 31), RGB(31, 28, 6), RGB(24, 12, 31), RGB(31, 18, 4) };
+static const u16 sSlotDark[4] = { RGB(3, 8, 22), RGB(22, 18, 2), RGB(15, 5, 22), RGB(22, 10, 1) };
+
+static const struct SpritePalette sMpIconPalette = { sFlyTargetIcons_Pal, TAG_MP_PAL_ICONS };
+
+static const struct OamData sMpMarkerOam16 = { .shape = SPRITE_SHAPE(16x16), .size = SPRITE_SIZE(16x16), .priority = 2 };
+static const struct OamData sMpMarkerOam8 = { .shape = SPRITE_SHAPE(8x8), .size = SPRITE_SIZE(8x8), .priority = 2 };
+static const union AnimCmd sMpAnimIcon[] = { ANIMCMD_FRAME(0, 5), ANIMCMD_END };
+static const union AnimCmd sMpAnimOutline[] = { ANIMCMD_FRAME(10, 5), ANIMCMD_END };
+static const union AnimCmd sMpAnimSquare[] = { ANIMCMD_FRAME(0, 5), ANIMCMD_END };
+static const union AnimCmd *const sMpAnimsIcon[] = { sMpAnimIcon };
+static const union AnimCmd *const sMpAnimsOutline[] = { sMpAnimOutline };
+static const union AnimCmd *const sMpAnimsSquare[] = { sMpAnimSquare };
+
+static void SpriteCB_PortableMarker(struct Sprite *sprite);
+
+#define sGridX   data[0]
+#define sGridY   data[1]
+#define sKind    data[2]
+#define sStaggerX data[3]
+#define sStaggerY data[5]
+#define sFlashOff data[4]
+#define sTimer   data[7]
+
+bool32 RegionMap_PortableLocate(u8 mapGroup, u8 mapNum, s16 px, s16 py, u16 *gridX, u16 *gridY, mapsec_u16_t *mapSecOut)
+{
+    const struct MapHeader *header;
+    mapsec_u16_t mapSec;
+    u16 width, height, scale, x, y;
+    bool32 outdoors;
+
+    if (mapGroup >= MAP_GROUPS_COUNT || gMapGroups[mapGroup] == NULL || mapNum >= sMapGroupCounts[mapGroup])
+        return FALSE;
+    header = Overworld_GetMapHeaderByGroupAndId(mapGroup, mapNum);
+    if (header == NULL || header->mapLayout == NULL)
+        return FALSE;
+    mapSec = header->regionMapSectionId;
+    if (mapSec >= MAPSEC_NONE || mapSec == MAPSEC_DYNAMIC || mapSec == MAPSEC_SECRET_BASE)
+        return FALSE;
+    width = gRegionMapEntries[mapSec].width;
+    height = gRegionMapEntries[mapSec].height;
+    if (width == 0 || height == 0)
+        return FALSE;
+    switch (header->mapType)
+    {
+    case MAP_TYPE_TOWN:
+    case MAP_TYPE_CITY:
+    case MAP_TYPE_ROUTE:
+    case MAP_TYPE_UNDERWATER:
+    case MAP_TYPE_OCEAN_ROUTE:
+        outdoors = mapSec != MAPSEC_UNDERWATER_MARINE_CAVE;
+        break;
+    default:
+        outdoors = FALSE; // inside a building or a cave: the middle of its map section
+        break;
+    }
+    if (px < 0)
+        px = 0;
+    if (py < 0)
+        py = 0;
+    if (!outdoors)
+    {
+        x = width / 2;
+        y = height / 2;
+    }
+    else
+    {
+        scale = header->mapLayout->width / width;
+        x = px / (scale == 0 ? 1 : scale);
+        if (x >= width)
+            x = width - 1;
+        scale = header->mapLayout->height / height;
+        y = py / (scale == 0 ? 1 : scale);
+        if (y >= height)
+            y = height - 1;
+        switch (mapSec)
+        {
+        case MAPSEC_ROUTE_114:
+            if (y != 0)
+                x = 0;
+            break;
+        case MAPSEC_ROUTE_126:
+        case MAPSEC_UNDERWATER_126:
+            x = (px > 32) + (px > 51);
+            y = (py > 37) + (py > 56);
+            break;
+        case MAPSEC_ROUTE_121:
+            x = (px > 14) + (px > 28) + (px > 54);
+            break;
+        }
+    }
+    *gridX = gRegionMapEntries[mapSec].x + x + MAPCURSOR_X_MIN;
+    *gridY = gRegionMapEntries[mapSec].y + y + MAPCURSOR_Y_MIN;
+    *mapSecOut = mapSec;
+    return TRUE;
+}
+
+void RegionMap_PortableSetTest(const struct RegionMapTestMarkers *test)
+{
+    if (test == NULL)
+    {
+        sTestActive = FALSE;
+        return;
+    }
+    sTest = *test;
+    sTestActive = TRUE;
+}
+
+static bool32 ReadWorldMarkers(struct MultiplayerWorldEvent *event, u8 *outbreak)
+{
+    u32 generation = gMultiplayerWorldMailbox.inboundGeneration;
+    u32 i;
+
+    if (sTestActive)
+    {
+        memset(event, 0, sizeof(*event));
+        event->eventId = sTest.eventId;
+        event->species = sTest.eventSpecies;
+        event->flags = MP_WORLD_EVENT_VISIBLE;
+        event->mapGroup = sTest.eventMapGroup;
+        event->mapNum = sTest.eventMapNum;
+        event->x = sTest.eventX;
+        event->y = sTest.eventY;
+        for (i = 0; i < MP_OUTBREAK_BYTES; i++)
+            outbreak[i] = sTest.outbreak[i];
+        return TRUE;
+    }
+    if ((generation & 1) || generation == 0 || !Multiplayer_IsConnected())
+        return FALSE;
+    *event = *(const struct MultiplayerWorldEvent *)&gMultiplayerWorldMailbox.event;
+    for (i = 0; i < MP_OUTBREAK_BYTES; i++)
+        outbreak[i] = gMultiplayerWorldMailbox.reserved[i];
+    return generation == gMultiplayerWorldMailbox.inboundGeneration;
+}
+
+static void AddMarker(u8 kind, u8 slot, u8 gender, u16 gridX, u16 gridY, mapsec_u16_t mapSec)
+{
+    struct PortableMarker *marker;
+
+    if (sMarkerCount >= MP_MARKER_MAX)
+        return;
+    marker = &sMarkers[sMarkerCount++];
+    marker->sprite = NULL;
+    marker->kind = kind;
+    marker->slot = slot;
+    marker->gender = gender;
+    marker->gridX = gridX;
+    marker->gridY = gridY;
+    marker->mapSec = mapSec;
+}
+
+// What there is to draw now: the other trainers (their poses come from the same
+// roster the avatars use, so a trainer on another map is still located), the
+// World Event the host shows to everyone, and the outbreak the host announces.
+static void CollectMarkers(enum RegionMapType viewed)
+{
+    struct MultiplayerWorldEvent event;
+    u8 outbreak[MP_OUTBREAK_BYTES];
+    u16 gridX, gridY;
+    mapsec_u16_t mapSec;
+    u32 i;
+
+    sMarkerCount = 0;
+    for (i = 0; i < MULTIPLAYER_MAX_PEERS; i++)
+    {
+        u32 playerId = 0;
+        struct MultiplayerPose pose = {0};
+        bool32 present;
+
+        if (sTestActive)
+        {
+            present = sTest.peers[i].present;
+            playerId = sTest.peers[i].slot + 1;
+            pose.mapGroup = sTest.peers[i].mapGroup;
+            pose.mapNum = sTest.peers[i].mapNum;
+            pose.x = sTest.peers[i].x;
+            pose.y = sTest.peers[i].y;
+            pose.gender = sTest.peers[i].gender;
+        }
+        else
+        {
+            present = Multiplayer_GetRemotePose(i, &playerId, &pose) && pose.activity != MULTIPLAYER_ACTIVITY_UNAVAILABLE;
+        }
+        if (!present || playerId < 1 || playerId > 4)
+            continue;
+        if (!RegionMap_PortableLocate(pose.mapGroup, pose.mapNum, pose.x, pose.y, &gridX, &gridY, &mapSec)
+         || GetRegionMapType(mapSec) != viewed)
+            continue;
+        AddMarker(MP_MARKER_PEER, playerId - 1, pose.gender, gridX, gridY, mapSec);
+    }
+    if (!ReadWorldMarkers(&event, outbreak))
+        return;
+    if (event.eventId != 0 && (event.flags & MP_WORLD_EVENT_VISIBLE) && event.species != SPECIES_NONE
+     && RegionMap_PortableLocate(event.mapGroup, event.mapNum, event.x, event.y, &gridX, &gridY, &mapSec)
+     && GetRegionMapType(mapSec) == viewed)
+        AddMarker(MP_MARKER_EVENT, 0, 0, gridX, gridY, mapSec);
+    if (outbreak[0] == 1 && RegionMap_PortableLocate(outbreak[1], outbreak[2], 0, 0, &gridX, &gridY, &mapSec)
+     && GetRegionMapType(mapSec) == viewed)
+        AddMarker(MP_MARKER_OUTBREAK, 0, 0, gridX, gridY, mapSec);
+}
+
+static void SetMarkerPosition(struct Sprite *sprite)
+{
+    if (!sRegionMap->zoomed)
+    {
+        sprite->x = sprite->sGridX * 8 + 4;
+        sprite->y = sprite->sGridY * 8 + 4;
+        sprite->x2 = sprite->sStaggerX;
+        sprite->y2 = sprite->sStaggerY;
+        sprite->invisible = FALSE;
+    }
+    else
+    {
+        // The same transform the map's own trainer icon uses when zoomed.
+        sprite->x = sprite->sGridX * 16 - 0x30;
+        sprite->y = sprite->sGridY * 16 - 0x42;
+        sprite->x2 = -2 * sRegionMap->scrollX + 2 * sprite->sStaggerX;
+        sprite->y2 = -2 * sRegionMap->scrollY + 2 * sprite->sStaggerY;
+        sprite->invisible = FALSE;
+        if (sprite->y + sprite->y2 + sprite->centerToCornerVecY < -8 || sprite->y + sprite->y2 + sprite->centerToCornerVecY > DISPLAY_HEIGHT + 8
+         || sprite->x + sprite->x2 + sprite->centerToCornerVecX < -8 || sprite->x + sprite->x2 + sprite->centerToCornerVecX > DISPLAY_WIDTH + 8)
+            sprite->invisible = TRUE;
+    }
+}
+
+static void SpriteCB_PortableMarker(struct Sprite *sprite)
+{
+    if (sMarkersHidden)
+    {
+        sprite->invisible = TRUE;
+        return;
+    }
+    SetMarkerPosition(sprite);
+    if (sprite->sKind != MP_MARKER_PEER)
+    {
+        // events and outbreaks flash, as the map's own marked destinations do
+        if (++sprite->sTimer > 16)
+        {
+            sprite->sTimer = 0;
+            sprite->sFlashOff = !sprite->sFlashOff;
+        }
+        if (sprite->sFlashOff)
+            sprite->invisible = TRUE;
+    }
+}
+
+static void TintPalette(u32 slot)
+{
+    const u16 *base = sRegionMapPlayerIcon_BrendanPal;
+    u32 i;
+
+    for (i = 0; i < 16; i++)
+        sPeerPalette[slot][i] = base[i];
+    sPeerPalette[slot][10] = sSlotLight[slot];
+    sPeerPalette[slot][11] = sSlotDark[slot];
+    sPeerPalette[slot][12] = sSlotLight[slot];
+    sPeerPalette[slot][13] = sSlotDark[slot];
+}
+
+void RegionMap_PortableCreateMarkers(void)
+{
+    enum RegionMapType viewed = GetRegionMapType(gMapHeader.regionMapSectionId);
+    bool8 maleLoaded = FALSE, femaleLoaded = FALSE, iconsLoaded = FALSE;
+    u32 i;
+
+    sMarkersHidden = FALSE;
+    sJumpIndex = -1;
+    CollectMarkers(viewed);
+    for (i = 0; i < sMarkerCount; i++)
+    {
+        struct PortableMarker *marker = &sMarkers[i];
+        struct SpriteTemplate template = {0, 0, NULL, NULL, NULL, gDummySpriteAffineAnimTable, SpriteCB_PortableMarker};
+        u8 spriteId;
+
+        if (marker->kind == MP_MARKER_PEER)
+        {
+            bool8 female = marker->gender == FEMALE;
+            struct SpriteSheet sheet = {female ? sRegionMapPlayerIcon_MayGfx : sRegionMapPlayerIcon_BrendanGfx, 0x80,
+                                        female ? TAG_MP_TILES_FEMALE : TAG_MP_TILES_MALE};
+            struct SpritePalette palette;
+
+            if (female ? !femaleLoaded : !maleLoaded)
+            {
+                LoadSpriteSheet(&sheet);
+                if (female)
+                    femaleLoaded = TRUE;
+                else
+                    maleLoaded = TRUE;
+            }
+            TintPalette(marker->slot);
+            palette.data = sPeerPalette[marker->slot];
+            palette.tag = TAG_MP_PAL_PEER + marker->slot;
+            if (IndexOfSpritePaletteTag(palette.tag) == 0xFF)
+                LoadSpritePalette(&palette);
+            template.tileTag = sheet.tag;
+            template.paletteTag = palette.tag;
+            template.oam = &sMpMarkerOam16;
+            template.anims = sMpAnimsIcon;
+        }
+        else
+        {
+            if (!iconsLoaded)
+            {
+                struct SpriteSheet sheet = {sIconTiles, sizeof(sIconTiles), TAG_MP_TILES_ICONS};
+
+                DecompressDataWithHeaderWram(sFlyTargetIcons_Gfx, sIconTiles);
+                LoadSpriteSheet(&sheet);
+                LoadSpritePalette(&sMpIconPalette);
+                iconsLoaded = TRUE;
+            }
+            template.tileTag = TAG_MP_TILES_ICONS;
+            template.paletteTag = TAG_MP_PAL_ICONS;
+            template.oam = marker->kind == MP_MARKER_EVENT ? &sMpMarkerOam16 : &sMpMarkerOam8;
+            template.anims = marker->kind == MP_MARKER_EVENT ? sMpAnimsOutline : sMpAnimsSquare;
+        }
+        spriteId = CreateSpriteUnchecked(&template, 0, 0, marker->kind == MP_MARKER_PEER ? 3 : 4);
+        if (spriteId == MAX_SPRITES)
+        {
+            marker->sprite = NULL;
+            continue;
+        }
+        marker->sprite = &gSprites[spriteId];
+        marker->sprite->sGridX = marker->gridX;
+        marker->sprite->sGridY = marker->gridY;
+        marker->sprite->sKind = marker->kind;
+        // Trainers on the same square (yours included) are fanned out so each one shows.
+        if (marker->kind == MP_MARKER_PEER)
+        {
+            static const s8 sFan[4][2] = {{0, 0}, {-5, -3}, {5, -3}, {0, 5}};
+            u32 rank = (sRegionMap->playerIconSprite != NULL && sRegionMap->playerIconSpritePosX == marker->gridX
+                        && sRegionMap->playerIconSpritePosY == marker->gridY) ? 1 : 0;
+            u32 earlier;
+
+            for (earlier = 0; earlier < i; earlier++)
+                if (sMarkers[earlier].kind == MP_MARKER_PEER && sMarkers[earlier].gridX == marker->gridX
+                 && sMarkers[earlier].gridY == marker->gridY)
+                    rank++;
+            marker->sprite->sStaggerX = sFan[rank & 3][0];
+            marker->sprite->sStaggerY = sFan[rank & 3][1];
+        }
+        SetMarkerPosition(marker->sprite);
+    }
+}
+
+void RegionMap_PortableFreeMarkers(void)
+{
+    u32 i;
+
+    for (i = 0; i < sMarkerCount; i++)
+    {
+        if (sMarkers[i].sprite != NULL)
+        {
+            DestroySprite(sMarkers[i].sprite);
+            sMarkers[i].sprite = NULL;
+        }
+    }
+    if (sMarkerCount != 0)
+    {
+        FreeSpriteTilesByTag(TAG_MP_TILES_MALE);
+        FreeSpriteTilesByTag(TAG_MP_TILES_FEMALE);
+        FreeSpriteTilesByTag(TAG_MP_TILES_ICONS);
+        for (i = 0; i < 4; i++)
+            FreeSpritePaletteByTag(TAG_MP_PAL_PEER + i);
+        FreeSpritePaletteByTag(TAG_MP_PAL_ICONS);
+    }
+    sMarkerCount = 0;
+}
+
+void RegionMap_PortableHideMarkers(void)
+{
+    u32 i;
+
+    sMarkersHidden = TRUE;
+    for (i = 0; i < sMarkerCount; i++)
+        if (sMarkers[i].sprite != NULL)
+            sMarkers[i].sprite->invisible = TRUE;
+}
+
+void RegionMap_PortableUnhideMarkers(void)
+{
+    sMarkersHidden = FALSE;
+}
+
+// SELECT: put the cursor on the next trainer, event or outbreak (the map's own
+// icon for yourself is where it starts). Returns MAP_INPUT_MOVE_END when the
+// cursor moved, so the screen refreshes its name box like after any cursor move.
+u8 RegionMap_PortableJump(void)
+{
+    struct PortableMarker *marker;
+    u32 tries;
+
+    if (sMarkerCount == 0)
+        return MAP_INPUT_NONE;
+    for (tries = 0; tries < sMarkerCount; tries++)
+    {
+        sJumpIndex = (sJumpIndex + 1) % sMarkerCount;
+        if (sMarkers[sJumpIndex].sprite != NULL)
+            break;
+    }
+    marker = &sMarkers[sJumpIndex];
+    if (marker->sprite == NULL)
+        return MAP_INPUT_NONE;
+    sRegionMap->cursorPosX = marker->gridX;
+    sRegionMap->cursorPosY = marker->gridY;
+    if (sRegionMap->cursorSprite != NULL)
+    {
+        sRegionMap->cursorSprite->x = 8 * sRegionMap->cursorPosX + 4;
+        sRegionMap->cursorSprite->y = 8 * sRegionMap->cursorPosY + 4;
+    }
+    sRegionMap->cursorMovementFrameCounter = 0;
+    sRegionMap->mapSecId = GetMapSecIdAt(sRegionMap->cursorPosX, sRegionMap->cursorPosY);
+    sRegionMap->mapSecType = GetMapsecType(sRegionMap->mapSecId);
+    GetMapName(sRegionMap->mapSecName, sRegionMap->mapSecId, MAP_NAME_LENGTH);
+    GetPositionOfCursorWithinMapSec();
+    m4aSongNumStart(SE_SELECT);
+    return MAP_INPUT_MOVE_END;
+}
+
+// For --selftest-pokenav-map and the debug scene.
+u32 RegionMap_PortableMarkerCount(void)
+{
+    return sMarkerCount;
+}
+
+bool32 RegionMap_PortableMarkerAt(u32 index, u8 *kind, u8 *slot, u16 *gridX, u16 *gridY)
+{
+    if (index >= sMarkerCount)
+        return FALSE;
+    *kind = sMarkers[index].kind;
+    *slot = sMarkers[index].slot;
+    *gridX = sMarkers[index].gridX;
+    *gridY = sMarkers[index].gridY;
+    return TRUE;
+}
+
+#undef sGridX
+#undef sGridY
+#undef sKind
+#undef sStaggerX
+#undef sStaggerY
+#undef sFlashOff
+#undef sTimer
+#endif // PORTABLE
 
 #ifdef ENABLE_NATIVE_UI
 #include "native_ui/ui_engine.h"

@@ -333,6 +333,10 @@ static u32 LoopedTask_OpenRegionMap(s32 taskState)
         if (!GetZoomDisabled())
         {
             CreateRegionMapPlayerIcon(4, 9);
+#ifdef PORTABLE
+            RegionMap_PortableCreateMarkers();
+#endif
+#line 336 // gba-line
             CreateRegionMapCursor(5, 10);
             TrySetPlayerIconBlink();
         }

@@ -73,6 +73,8 @@ bool32 Multiplayer_IsPeerOnCurrentMap(u32 playerId);
 // Event Pokemon (multiplayer_world.h). They have no map template and are never
 // part of a save.
 bool32 Multiplayer_IsRuntimeLocalId(u32 localId);
+// The pose of the i-th other player the bridge reports (any map). FALSE: nobody there.
+bool32 Multiplayer_GetRemotePose(u32 i, u32 *playerId, struct MultiplayerPose *pose);
 #endif
 
 #endif

@@ -261,7 +261,7 @@ OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS) $(BFX_QJS_OBJS)
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
-.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-clock check-mp-objects check-spawn-claims check-secret-base check-rewards check-catch-reconcile check-ladder check-coop-exp check-coop-controller check-keybinds check-graphics-mode
+.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-clock check-mp-objects check-spawn-claims check-secret-base check-rewards check-catch-reconcile check-pokenav-map check-ladder check-coop-exp check-coop-controller check-keybinds check-graphics-mode
 .SUFFIXES:
 .SECONDARY:
 .DELETE_ON_ERROR:
@@ -393,6 +393,11 @@ check-rewards: $(TARGET)
 check-catch-reconcile: $(TARGET)
 	@./$(TARGET) --selftest-catch-reconcile > $(OBJ_DIR)/selftest-catch-reconcile.log 2>&1; status=$$?; \
 	  tail -n 3 $(OBJ_DIR)/selftest-catch-reconcile.log; exit $$status
+
+check-pokenav-map: $(TARGET)
+	@python3 tools/pc_port/map_group_counts.py --check || exit 1
+	@./$(TARGET) --selftest-pokenav-map > $(OBJ_DIR)/selftest-pokenav-map.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-pokenav-map.log; exit $$status
 
 check-ladder: $(TARGET)
 	@./$(TARGET) --selftest-ladder > $(OBJ_DIR)/selftest-ladder.log 2>&1; status=$$?; \

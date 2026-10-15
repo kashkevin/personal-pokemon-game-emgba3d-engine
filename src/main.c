@@ -167,6 +167,11 @@ void AgbMain(void)
     AGBPrintInit();
 #endif
 #endif
+#ifdef PORTABLE
+    extern void DebugScene_Start(void);
+    DebugScene_Start(); // development aid: does nothing unless PKMN_DEBUG_SCENE is set
+#endif
+#line 149 // gba-line
     gAgbMainLoop_sp = __builtin_frame_address(0);
     AgbMainLoop();
 }

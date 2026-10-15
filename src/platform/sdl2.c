@@ -39,6 +39,7 @@
 #include "platform/gamepad.h"
 #include "platform/pc_menu.h"
 #include "platform/png_write.h"
+#include "platform/debug_scene.h"
 #include "platform/memory_info.h"
 #include "platform/frame_limiter.h"
 #include "malloc.h"
@@ -195,6 +196,7 @@ extern int NativeSelfTest_SecretBase(void);
 extern int NativeSelfTest_Ladder(void);
 extern int NativeSelfTest_Rewards(void);
 extern int NativeSelfTest_CatchReconcile(void);
+extern int NativeSelfTest_PokenavMap(void);
 extern int NativeSelfTest_DumpWildWeights(const char *keysPath, const char *outPath);
 extern bool32 GameMemory_Reset(void);
 
@@ -955,6 +957,7 @@ int main(int argc, char **argv)
                         // In multiplayer the reset chord reaches the game only when
                         // its native reset handler has been offered it.
                         keys = MpBridge_FilterKeys(keys);
+                        keys = DebugScene_FilterKeys(keys);
                         REG_KEYINPUT = ~keys & KEYS_MASK;
                     }
 #ifdef ENABLE_DIORAMA
@@ -1112,6 +1115,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_SecretBase()); // src/platform/native_selftest.c (expansion Phase 6)
         else if (strcmp(argv[i], "--selftest-catch-reconcile") == 0)
             exit(NativeSelfTest_CatchReconcile()); // src/platform/native_selftest.c (World Event catch verdicts)
+        else if (strcmp(argv[i], "--selftest-pokenav-map") == 0)
+            exit(NativeSelfTest_PokenavMap()); // src/platform/native_selftest.c (Town Map markers)
         else if (strcmp(argv[i], "--selftest-rewards") == 0)
             exit(NativeSelfTest_Rewards()); // src/platform/native_selftest.c (Battle Frontier rewards over the wallet stream)
         else if (strcmp(argv[i], "--selftest-ladder") == 0)
@@ -3038,6 +3043,7 @@ void VDraw(SDL_Texture *texture)
     gDioramaSceneLayers = DioramaGLBattle_BeginFrame();
 #endif
     DrawFrame(gbaImage);
+    DebugScene_Frame(gbaImage);
     for (int i = 0; i < DISPLAY_WIDTH * DISPLAY_HEIGHT; i++)
     {
         uint16_t color = gbaImage[i];

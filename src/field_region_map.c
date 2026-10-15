@@ -150,6 +150,10 @@ static void FieldUpdateRegionMap(void)
     case 0:
         InitRegionMap(&sFieldRegionMapHandler->regionMap, FALSE);
         CreateRegionMapPlayerIcon(TAG_PLAYER_ICON, TAG_PLAYER_ICON);
+#ifdef PORTABLE
+        RegionMap_PortableCreateMarkers();
+#endif
+#line 153 // gba-line
         CreateRegionMapCursor(TAG_CURSOR, TAG_CURSOR);
         sFieldRegionMapHandler->state++;
         break;

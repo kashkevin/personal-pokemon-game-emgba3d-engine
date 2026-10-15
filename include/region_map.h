@@ -141,6 +141,28 @@ enum RegionMapType GetRegionMapType(u32 mapSecId);
 u32 FilterFlyDestination(struct RegionMap* regionMap);
 void SetFlyDestination(struct RegionMap* regionMap);
 
+#ifdef PORTABLE
+// Other trainers, the World Event and the outbreak on the Town Map (src/region_map.c).
+struct RegionMapTestMarkers
+{
+    struct { u8 present, slot, gender, mapGroup, mapNum; s16 x, y; } peers[3];
+    u32 eventId;
+    u16 eventSpecies;
+    u8 eventMapGroup, eventMapNum;
+    s16 eventX, eventY;
+    u8 outbreak[8]; // [0] 1 = running, [1] map group, [2] map number
+};
+void RegionMap_PortableCreateMarkers(void);
+void RegionMap_PortableFreeMarkers(void);
+void RegionMap_PortableHideMarkers(void);
+void RegionMap_PortableUnhideMarkers(void);
+u8 RegionMap_PortableJump(void);
+bool32 RegionMap_PortableLocate(u8 mapGroup, u8 mapNum, s16 x, s16 y, u16 *gridX, u16 *gridY, mapsec_u16_t *mapSec);
+void RegionMap_PortableSetTest(const struct RegionMapTestMarkers *test); // NULL: back to the live roster
+u32 RegionMap_PortableMarkerCount(void);
+bool32 RegionMap_PortableMarkerAt(u32 index, u8 *kind, u8 *slot, u16 *gridX, u16 *gridY);
+#endif
+
 extern const struct RegionMapLocation gRegionMapEntries[];
 extern const struct RegionMapInfo gRegionMapInfos[];
 

@@ -542,4 +542,13 @@ bool32 Multiplayer_IsRuntimeLocalId(u32 localId)
         return TRUE; // shared wild Pokemon 224-235
     return localId >= MULTIPLAYER_LOCAL_ID_BASE && localId <= MP_WORLD_LOCAL_ID_EVENT; // 241-247
 }
+
+bool32 Multiplayer_GetRemotePose(u32 i, u32 *playerId, struct MultiplayerPose *pose)
+{
+    if (!sConnected || i >= MULTIPLAYER_MAX_PEERS || sRemotes[i].peer.playerId == 0)
+        return FALSE;
+    *playerId = sRemotes[i].peer.playerId;
+    *pose = sRemotes[i].peer.pose;
+    return TRUE;
+}
 #endif // PORTABLE

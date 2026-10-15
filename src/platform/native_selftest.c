@@ -2930,3 +2930,89 @@ int NativeSelfTest_CatchReconcile(void)
     printf("selftest-catch-reconcile: %d checks, %d failed\n", sCatchChecks, sCatchFailures);
     return sCatchFailures ? 1 : 0;
 }
+
+/* --selftest-pokenav-map: where another player (or the World Event, or the outbreak) is drawn on the Town Map
+ * (src/region_map.c). The sprites themselves are looked at, not asserted: see docs/graphical-pokenav-map.md. */
+#include "region_map.h"
+#include "constants/region_map_sections.h"
+#include "constants/map_groups.h"
+
+static int sMapChecks, sMapFailures;
+
+static void ExpectMap(const char *what, int ok)
+{
+    sMapChecks++;
+    if (!ok)
+        sMapFailures++;
+    printf("  %s %s\n", ok ? "ok  " : "FAIL", what);
+}
+
+static int Located(u8 group, u8 num, s16 x, s16 y, u16 *gx, u16 *gy, mapsec_u16_t *sec)
+{
+    return RegionMap_PortableLocate(group, num, x, y, gx, gy, sec);
+}
+
+int NativeSelfTest_PokenavMap(void)
+{
+    u16 gx, gy, gx2, gy2;
+    mapsec_u16_t sec;
+    u32 group, number, located = 0, offMap = 0;
+    const struct RegionMapLocation *entry;
+    s16 probes[] = {0, 1, 17, 33, 52, 70, 140, 255, 32767};
+    u32 p;
+
+    printf("Town Map markers\n");
+    // 1. Every map any trainer could stand on lands inside the map (or is refused), whatever its coordinates.
+    for (group = 0; group < 256; group++)
+    {
+        for (number = 0; number < 256; number++)
+        {
+            for (p = 0; p < ARRAY_COUNT(probes); p++)
+            {
+                if (!Located(group, number, probes[p], probes[ARRAY_COUNT(probes) - 1 - p], &gx, &gy, &sec))
+                    continue;
+                if (p == 0)
+                    located++;
+                entry = &gRegionMapEntries[sec];
+                if (gx < 1 || gx > 28 || gy < 2 || gy > 16
+                 || gx < entry->x + 1 || gx >= entry->x + 1 + entry->width || gy < entry->y + 2 || gy >= entry->y + 2 + entry->height)
+                    offMap++;
+            }
+        }
+    }
+    ExpectMap("every located map is on the Town Map and inside its own map section, for any coordinates", offMap == 0);
+    ExpectMap("most of the maps can be located", located > 400);
+    ExpectMap("ids that are not maps are refused (group 75, group 255, number 255)",
+        !Located(75, 0, 0, 0, &gx, &gy, &sec) && !Located(255, 0, 0, 0, &gx, &gy, &sec) && !Located(0, 255, 0, 0, &gx, &gy, &sec)
+        && !Located(0, 58, 0, 0, &gx, &gy, &sec));
+
+    // 2. The same cell the game itself puts the player's own icon on: Route 121 and Route 126 are split by position.
+    ExpectMap("Route 121: four sections by x",
+        Located(MAP_GROUP(MAP_ROUTE121), MAP_NUM(MAP_ROUTE121), 0, 5, &gx, &gy, &sec) && sec == MAPSEC_ROUTE_121
+        && Located(MAP_GROUP(MAP_ROUTE121), MAP_NUM(MAP_ROUTE121), 20, 5, &gx2, &gy2, &sec) && gx2 == gx + 1
+        && Located(MAP_GROUP(MAP_ROUTE121), MAP_NUM(MAP_ROUTE121), 40, 5, &gx2, &gy2, &sec) && gx2 == gx + 2
+        && Located(MAP_GROUP(MAP_ROUTE121), MAP_NUM(MAP_ROUTE121), 60, 5, &gx2, &gy2, &sec) && gx2 == gx + 3);
+    ExpectMap("Route 126: three by three by x and y",
+        Located(MAP_GROUP(MAP_ROUTE126), MAP_NUM(MAP_ROUTE126), 0, 0, &gx, &gy, &sec) && sec == MAPSEC_ROUTE_126
+        && Located(MAP_GROUP(MAP_ROUTE126), MAP_NUM(MAP_ROUTE126), 40, 40, &gx2, &gy2, &sec) && gx2 == gx + 1 && gy2 == gy + 1
+        && Located(MAP_GROUP(MAP_ROUTE126), MAP_NUM(MAP_ROUTE126), 60, 60, &gx2, &gy2, &sec) && gx2 == gx + 2 && gy2 == gy + 2);
+    ExpectMap("a Route 104 position scales into its map section (corner and far corner)",
+        Located(MAP_GROUP(MAP_ROUTE104), MAP_NUM(MAP_ROUTE104), 0, 0, &gx, &gy, &sec) && sec == MAPSEC_ROUTE_104
+        && gx == gRegionMapEntries[sec].x + 1 && gy == gRegionMapEntries[sec].y + 2
+        && Located(MAP_GROUP(MAP_ROUTE104), MAP_NUM(MAP_ROUTE104), 32767, 32767, &gx2, &gy2, &sec)
+        && gx2 == gRegionMapEntries[sec].x + gRegionMapEntries[sec].width && gy2 == gRegionMapEntries[sec].y + gRegionMapEntries[sec].height + 1);
+
+    // 3. Inside a building: the middle of the town's map section.
+    ExpectMap("inside the Oldale Pokemon Center: the middle of Oldale Town",
+        Located(MAP_GROUP(MAP_OLDALE_TOWN_POKEMON_CENTER_1F), MAP_NUM(MAP_OLDALE_TOWN_POKEMON_CENTER_1F), 5, 5, &gx, &gy, &sec)
+        && sec == MAPSEC_OLDALE_TOWN
+        && gx == gRegionMapEntries[sec].x + gRegionMapEntries[sec].width / 2 + 1
+        && gy == gRegionMapEntries[sec].y + gRegionMapEntries[sec].height / 2 + 2);
+    // negative coordinates (a malformed pose) are clamped, not wrapped
+    ExpectMap("a negative coordinate is clamped to the map section's first square",
+        Located(MAP_GROUP(MAP_ROUTE104), MAP_NUM(MAP_ROUTE104), -5, -5, &gx, &gy, &sec) && gx == gRegionMapEntries[sec].x + 1
+        && gy == gRegionMapEntries[sec].y + 2);
+
+    printf("selftest-pokenav-map: %d checks, %d failed\n", sMapChecks, sMapFailures);
+    return sMapFailures ? 1 : 0;
+}
