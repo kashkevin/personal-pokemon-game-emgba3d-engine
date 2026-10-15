@@ -261,7 +261,7 @@ OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS) $(BFX_QJS_OBJS)
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
-.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-clock check-mp-objects check-spawn-claims check-secret-base check-coop-exp check-coop-controller check-keybinds check-graphics-mode
+.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-clock check-mp-objects check-spawn-claims check-secret-base check-ladder check-coop-exp check-coop-controller check-keybinds check-graphics-mode
 .SUFFIXES:
 .SECONDARY:
 .DELETE_ON_ERROR:
@@ -385,6 +385,10 @@ check-spawn-claims: $(TARGET)
 check-secret-base: $(TARGET)
 	@./$(TARGET) --selftest-secret-base > $(OBJ_DIR)/selftest-secret-base.log 2>&1; status=$$?; \
 	  tail -n 3 $(OBJ_DIR)/selftest-secret-base.log; exit $$status
+
+check-ladder: $(TARGET)
+	@./$(TARGET) --selftest-ladder > $(OBJ_DIR)/selftest-ladder.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-ladder.log; exit $$status
 
 check-coop-exp: $(TARGET)
 	@./$(TARGET) --selftest-coop-exp > $(OBJ_DIR)/selftest-coop-exp.log 2>&1; status=$$?; \

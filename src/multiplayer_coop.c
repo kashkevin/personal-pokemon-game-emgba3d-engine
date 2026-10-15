@@ -20,6 +20,7 @@
 #include "constants/maps.h"
 #include "constants/opponents.h"
 #ifdef PORTABLE
+#include "multiplayer_ladder.h"
 #include "battle_controllers.h"
 #include "evolution_scene.h"
 #include "field_weather.h"
@@ -76,16 +77,31 @@ static EWRAM_DATA u8 sPendingOutcome = 0;
 
 bool32 MultiplayerCoop_IsValidGym(u32 gym)
 {
+#ifdef PORTABLE
+    if (MultiplayerLadder_IsLadder(gym))
+        return MultiplayerLadder_IsValid(gym);
+#endif
+#line 65 // gba-line
     return gym >= MP_COOP_GYM_RUSTBORO && gym <= MP_COOP_GYM_COUNT;
 }
 
 u16 MultiplayerCoop_GetLeader(u32 gym)
 {
+#ifdef PORTABLE
+    if (MultiplayerLadder_IsLadder(gym))
+        return MultiplayerLadder_IsValid(gym) ? MultiplayerLadder_TrainerA(gym) : TRAINER_NONE;
+#endif
+#line 70 // gba-line
     return MultiplayerCoop_IsValidGym(gym) ? sCoopGyms[gym].leader : TRAINER_NONE;
 }
 
 u16 MultiplayerCoop_GetTwin(u32 gym)
 {
+#ifdef PORTABLE
+    if (MultiplayerLadder_IsLadder(gym))
+        return MultiplayerLadder_IsValid(gym) ? MultiplayerLadder_TrainerB(gym) : TRAINER_NONE;
+#endif
+#line 75 // gba-line
     return MultiplayerCoop_IsValidGym(gym) ? sCoopGyms[gym].twin : TRAINER_NONE;
 }
 
@@ -206,6 +222,15 @@ void MultiplayerCoop_OnNativeResult(u32 gym, u32 outcome)
 #ifdef PORTABLE
     // Co-op experience: kept before the party is restored (below).
     CaptureCoopExp(outcome);
+    if (MultiplayerLadder_IsLadder(gym))
+    {
+        // A ladder battle (Frontier, League): the host keeps the rewards and the progress. The game shows the result,
+        // and awards experience only when the host allowed it for this battle.
+        if (!MultiplayerLadder_ExpAllowed(gym))
+            ResetCoopExp();
+        MultiplayerLadder_OnResult(gym, outcome);
+        return;
+    }
 #endif
 #line 188 // gba-line
     if (!MultiplayerCoop_IsValidGym(gym))
@@ -220,6 +245,7 @@ void MultiplayerCoop_Tick(void)
 {
 #ifdef PORTABLE
     TrackCoopBattle();
+    MultiplayerLadder_Tick();
 #endif
 #line 198 // gba-line
     if (sPendingGym == 0)

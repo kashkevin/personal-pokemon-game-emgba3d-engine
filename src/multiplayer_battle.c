@@ -5,6 +5,10 @@
 #include "multiplayer_ownership.h"
 #include "multiplayer.h"
 #include "multiplayer_coop.h"
+#ifdef PORTABLE
+#include "multiplayer_ladder.h"
+#endif
+#line 8 // gba-line
 #include "main.h"
 #include "link.h"
 #include "multiplayer_battle_schema.h"
@@ -747,6 +751,11 @@ void MultiplayerBattle_CreateCoopOpponents(void)
         return;
     memcpy(&gRngValue, sPreparation.rng, 16);
     CreateCoopTrainerParties(TRAINER_BATTLE_PARAM.opponentA, TRAINER_BATTLE_PARAM.opponentB);
+#ifdef PORTABLE
+    if (MultiplayerLadder_IsLadder(sPreparation.flags))
+        MultiplayerLadder_ScaleOpponents(sPreparation.flags);
+#endif
+#line 750 // gba-line
     gRngValue = saved;
 }
 

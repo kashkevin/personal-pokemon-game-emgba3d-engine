@@ -2502,3 +2502,118 @@ int NativeSelfTest_SecretBase(void)
     printf("selftest-secret-base: %d checks, %d failed\n", sBaseChecks, sBaseFailures);
     return sBaseFailures ? 1 : 0;
 }
+
+// ---------------------------------------------------------------------------
+// --selftest-ladder (expansion Phases 8 and 10): the co-op ladder battle's code (multiplayer_ladder.c) and the opposing
+// parties it builds. Every trainer the host may name must give a real party; every opposing Pokemon must come out at
+// exactly the chosen level with full HP and a stat line computed for it; a Gym code keeps its meaning.
+// ---------------------------------------------------------------------------
+
+#include "multiplayer_ladder.h"
+#include "multiplayer_coop.h"
+#include "battle_setup.h"
+#include "random.h"
+
+static int sLadderChecks, sLadderFailures;
+
+static void ExpectLadder(const char *what, bool32 ok)
+{
+    sLadderChecks++;
+    if (!ok)
+        sLadderFailures++;
+    printf("%s %s\n", ok ? "ok  " : "FAIL", what);
+}
+
+static u32 CountParty(u32 side)
+{
+    u32 n = 0, i;
+
+    for (i = 0; i < PARTY_SIZE; i++)
+        n += GetMonData(&gParties[side][i], MON_DATA_SPECIES) != SPECIES_NONE;
+    return n;
+}
+
+static bool32 AllAtLevel(u32 side, u32 level)
+{
+    u32 i;
+
+    for (i = 0; i < PARTY_SIZE; i++)
+    {
+        struct Pokemon *mon = &gParties[side][i];
+
+        if (GetMonData(mon, MON_DATA_SPECIES) == SPECIES_NONE)
+            continue;
+        if (GetMonData(mon, MON_DATA_LEVEL) != level || GetMonData(mon, MON_DATA_HP) != GetMonData(mon, MON_DATA_MAX_HP)
+         || GetMonData(mon, MON_DATA_MAX_HP) == 0)
+            return FALSE;
+    }
+    return TRUE;
+}
+
+int NativeSelfTest_Ladder(void)
+{
+    u32 code, id, usable = 0, built = 0, scaledOk = 0, level;
+    u16 a, b;
+
+    SetSaveBlocksPointers(0);
+    InitHeap(gHeap, HEAP_SIZE); // the trainer party generator allocates from the game heap
+    code = MultiplayerLadder_Encode(TRAINER_SIDNEY, TRAINER_PHOEBE, 57, TRUE);
+    ExpectLadder("a code round-trips (trainers, level, experience)", MultiplayerLadder_IsValid(code)
+                 && MultiplayerLadder_TrainerA(code) == TRAINER_SIDNEY && MultiplayerLadder_TrainerB(code) == TRAINER_PHOEBE
+                 && MultiplayerLadder_Level(code) == 57 && MultiplayerLadder_ExpAllowed(code));
+    ExpectLadder("the experience bit is the host's choice", !MultiplayerLadder_ExpAllowed(MultiplayerLadder_Encode(TRAINER_SIDNEY, TRAINER_PHOEBE, 57, FALSE)));
+    ExpectLadder("the game's coop checks accept it and name its trainers", MultiplayerCoop_IsValidGym(code)
+                 && MultiplayerCoop_GetLeader(code) == TRAINER_SIDNEY && MultiplayerCoop_GetTwin(code) == TRAINER_PHOEBE);
+    ExpectLadder("Gym 1..8 keep their meaning", MultiplayerCoop_IsValidGym(1) && MultiplayerCoop_IsValidGym(8)
+                 && !MultiplayerCoop_IsValidGym(0) && !MultiplayerCoop_IsValidGym(9)
+                 && MultiplayerCoop_GetLeader(1) == TRAINER_ROXANNE_1 && MultiplayerCoop_GetTwin(8) == TRAINER_MP_TWIN_JUAN);
+    ExpectLadder("level 0 and 101 are refused", !MultiplayerLadder_IsValid(MultiplayerLadder_Encode(TRAINER_SIDNEY, TRAINER_PHOEBE, 0, FALSE))
+                 && !MultiplayerLadder_IsValid(MultiplayerLadder_Encode(TRAINER_SIDNEY, TRAINER_PHOEBE, 101, FALSE)));
+    ExpectLadder("the same trainer twice is refused", !MultiplayerLadder_IsValid(MultiplayerLadder_Encode(TRAINER_SIDNEY, TRAINER_SIDNEY, 50, FALSE)));
+    ExpectLadder("no trainer and a trainer past the table are refused",
+                 !MultiplayerLadder_IsValid(MultiplayerLadder_Encode(0, TRAINER_PHOEBE, 50, FALSE))
+                 && !MultiplayerLadder_IsValid(MultiplayerLadder_Encode(900, TRAINER_PHOEBE, 50, FALSE))
+                 && !MultiplayerLadder_IsValid(MultiplayerLadder_Encode(TRAINER_PHOEBE, 863, 50, FALSE)));
+    ExpectLadder("reserved bits make a code invalid", !MultiplayerLadder_IsValid(code | 0x80)
+                 && !MultiplayerLadder_IsValid(code | 0x100) && !MultiplayerLadder_IsValid(code | 0x200));
+    ExpectLadder("a code that is no ladder is not one", !MultiplayerLadder_IsLadder(5) && !MultiplayerLadder_IsLadder(0));
+
+    // Every trainer the host may name builds a real party, scaled exactly.
+    gBattleTypeFlags = BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_MULTI | BATTLE_TYPE_TWO_OPPONENTS
+                     | BATTLE_TYPE_TOWER_LINK_MULTI;
+    for (id = 1; id < TRAINERS_COUNT_EMERALD; id++)
+    {
+        a = id;
+        b = id == TRAINER_SIDNEY ? TRAINER_PHOEBE : TRAINER_SIDNEY;
+        code = MultiplayerLadder_Encode(a, b, 50, FALSE);
+        if (!MultiplayerLadder_IsValid(code))
+            continue;
+        usable++;
+        gRngValue.a = 0x1234 + id; gRngValue.b = 0x5678; gRngValue.c = 0x9ABC; gRngValue.ctr = 0xDEF1;
+        CreateCoopTrainerParties(a, b);
+        if (CountParty(B_TRAINER_OPPONENT_A) == 0 || CountParty(B_TRAINER_OPPONENT_B) == 0)
+            continue;
+        built++;
+        MultiplayerLadder_ScaleOpponents(code);
+        if (AllAtLevel(B_TRAINER_OPPONENT_A, 50) && AllAtLevel(B_TRAINER_OPPONENT_B, 50))
+            scaledOk++;
+    }
+    printf("ladder trainers: %u usable of %u, %u build a party, %u scale exactly\n", usable, TRAINERS_COUNT_EMERALD - 1, built, scaledOk);
+    ExpectLadder("most trainers are usable and every usable one builds a party", usable > 500 && built == usable);
+    ExpectLadder("every built party scales to the chosen level with full HP", scaledOk == built);
+
+    // Levels in both directions, for the trainers the Frontier uses.
+    for (level = 5; level <= 100; level += 19)
+    {
+        gRngValue.a = 7; gRngValue.b = level; gRngValue.c = 3; gRngValue.ctr = 1;
+        CreateCoopTrainerParties(TRAINER_WALLACE, TRAINER_STEVEN);
+        MultiplayerLadder_ScaleOpponents(MultiplayerLadder_Encode(TRAINER_WALLACE, TRAINER_STEVEN, level, FALSE));
+        ExpectLadder("Wallace and Steven scale to a chosen level", AllAtLevel(B_TRAINER_OPPONENT_A, level) && AllAtLevel(B_TRAINER_OPPONENT_B, level));
+    }
+    ExpectLadder("each opponent brings three (a Gym trainer's own six are cut) and the party count follows",
+                 CountParty(B_TRAINER_OPPONENT_A) == 3 && CountParty(B_TRAINER_OPPONENT_B) == 3
+                 && gPartiesCount[B_TRAINER_OPPONENT_A] == 3 && gPartiesCount[B_TRAINER_OPPONENT_B] == 3);
+
+    printf("selftest-ladder: %d checks, %d failed\n", sLadderChecks, sLadderFailures);
+    return sLadderFailures ? 1 : 0;
+}

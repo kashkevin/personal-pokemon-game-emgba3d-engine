@@ -203,3 +203,32 @@ gText_MultiplayerCoopExpMoveFull::
 gText_MultiplayerCoopExpStopLearning::
 	.string "Stop learning {STR_VAR_2}?$"
 .endif
+
+.ifdef PORTABLE
+@ A co-op ladder battle (Battle Frontier, Pokemon League; multiplayer_ladder.c) has ended and the field is calm.
+@ VAR_0x8004 = 1 when won, VAR_0x8005 = 1 when the host allowed experience for it. The host pays the prize and keeps
+@ the progress; this only shows the result and awards the experience.
+EventScript_MultiplayerLadderResult::
+	lockall
+	goto_if_eq VAR_0x8004, FALSE, EventScript_MultiplayerLadderLost
+	msgbox gText_MultiplayerLadderWon, MSGBOX_DEFAULT
+	goto EventScript_MultiplayerLadderExp
+
+EventScript_MultiplayerLadderLost::
+	msgbox gText_MultiplayerLadderLost, MSGBOX_DEFAULT
+
+EventScript_MultiplayerLadderExp::
+	goto_if_eq VAR_0x8005, FALSE, EventScript_MultiplayerLadderEnd
+	call EventScript_MultiplayerCoopExp
+EventScript_MultiplayerLadderEnd::
+	releaseall
+	end
+
+gText_MultiplayerLadderWon::
+	.string "You and your teammate won!\n"
+	.string "Open PLAYERS to see your progress.$"
+
+gText_MultiplayerLadderLost::
+	.string "You and your teammate were\n"
+	.string "beaten. Open PLAYERS to see your run.$"
+.endif
