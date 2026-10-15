@@ -887,6 +887,7 @@ static u8 ProcessRegionMapInput_Full(void)
         input = MAP_INPUT_R_BUTTON;
     }
 #ifdef PORTABLE
+    RegionMap_PortableTick(); // multiplayer: keep the trainer markers current
     if (input == MAP_INPUT_NONE && JOY_NEW(SELECT_BUTTON))
         input = RegionMap_PortableJump(); // multiplayer: cursor to the next trainer or event
 #endif
@@ -974,6 +975,10 @@ static u8 ProcessRegionMapInput_Zoomed(void)
     {
         input = MAP_INPUT_R_BUTTON;
     }
+#ifdef PORTABLE
+    RegionMap_PortableTick(); // multiplayer: keep the trainer markers current
+#endif
+#line 968 // gba-line
     if (input == MAP_INPUT_MOVE_START)
     {
         sRegionMap->inputCallback = MoveRegionMapCursor_Zoomed;
@@ -2610,6 +2615,7 @@ static struct PortableMarker sMarkers[MP_MARKER_MAX];
 static u8 sMarkerCount;
 static s8 sJumpIndex;
 static bool8 sMarkersHidden;
+static u8 sRefreshTimer;
 static u16 sPeerPalette[4][16];
 static u8 sIconTiles[0x1C0];
 static struct RegionMapTestMarkers sTest;
@@ -2885,6 +2891,7 @@ void RegionMap_PortableCreateMarkers(void)
 
     sMarkersHidden = FALSE;
     sJumpIndex = -1;
+    sRefreshTimer = 0;
     CollectMarkers(viewed);
     for (i = 0; i < sMarkerCount; i++)
     {
@@ -2998,6 +3005,35 @@ void RegionMap_PortableHideMarkers(void)
 
 void RegionMap_PortableUnhideMarkers(void)
 {
+    sMarkersHidden = FALSE;
+}
+
+// The map stays live while it is open: every ~1.5 s the roster is read again and, if anyone moved, came or left, the markers
+// are drawn again (the cursor's place in the SELECT order is kept).
+void RegionMap_PortableTick(void)
+{
+    struct PortableMarker old[MP_MARKER_MAX];
+    u8 oldCount = sMarkerCount;
+    s8 jump = sJumpIndex;
+    bool32 same;
+    u32 i;
+
+    if (++sRefreshTimer < 90)
+        return;
+    sRefreshTimer = 0;
+    memcpy(old, sMarkers, sizeof(old));
+    CollectMarkers(GetRegionMapType(gMapHeader.regionMapSectionId));
+    same = sMarkerCount == oldCount;
+    for (i = 0; same && i < oldCount; i++)
+        same = old[i].kind == sMarkers[i].kind && old[i].slot == sMarkers[i].slot && old[i].gender == sMarkers[i].gender
+            && old[i].gridX == sMarkers[i].gridX && old[i].gridY == sMarkers[i].gridY;
+    memcpy(sMarkers, old, sizeof(old));
+    sMarkerCount = oldCount;
+    if (same)
+        return;
+    RegionMap_PortableFreeMarkers();
+    RegionMap_PortableCreateMarkers();
+    sJumpIndex = jump < (s8)sMarkerCount ? jump : -1;
     sMarkersHidden = FALSE;
 }
 

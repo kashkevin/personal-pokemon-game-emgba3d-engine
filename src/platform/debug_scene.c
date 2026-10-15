@@ -92,9 +92,62 @@ static void ParseShots(const char *text)
     }
 }
 
+static int Numbers(const char *text, int *out, int max)
+{
+    int n = 0;
+
+    while (*text != '\0' && n < max)
+    {
+        char *end;
+
+        out[n++] = (int)strtol(text, &end, 10);
+        if (end == text)
+            break;
+        text = (*end == ',') ? end + 1 : end;
+    }
+    return n;
+}
+
+static struct RegionMapTestMarkers sTest;
+static unsigned sPeersThenFrame;
+
+static void ParsePeers(const char *value, struct RegionMapTestMarkers *test)
+{
+    int peer = 0;
+    int v[8];
+
+    memset(test->peers, 0, sizeof(test->peers));
+    while (*value != '\0' && peer < 3)
+    {
+        char one[96];
+        const char *end = strchr(value, ';');
+        size_t length = end != NULL ? (size_t)(end - value) : strlen(value);
+
+        SDL_strlcpy(one, value, length + 1 < sizeof(one) ? length + 1 : sizeof(one));
+        if (Numbers(one, v, 6) >= 6)
+        {
+            test->peers[peer].present = 1;
+            test->peers[peer].mapGroup = (u8)v[0];
+            test->peers[peer].mapNum = (u8)v[1];
+            test->peers[peer].x = (s16)v[2];
+            test->peers[peer].y = (s16)v[3];
+            test->peers[peer].gender = (u8)v[4];
+            test->peers[peer].slot = (u8)v[5];
+            peer++;
+        }
+        value += length + (end != NULL ? 1 : 0);
+    }
+}
+
 uint16_t DebugScene_FilterKeys(uint16_t keys)
 {
     sKeyFrame++;
+    if (sPeersThenFrame != 0 && sKeyFrame == sPeersThenFrame && SDL_getenv("PKMN_DEBUG_PEERS_THEN") != NULL)
+    {
+        // the other trainers move (or come, or leave) while the screen is open
+        ParsePeers(SDL_getenv("PKMN_DEBUG_PEERS_THEN"), &sTest);
+        RegionMap_PortableSetTest(&sTest);
+    }
     for (unsigned i = 0; i < sScriptCount; i++)
         if (sKeyFrame >= sScript[i].frame && sKeyFrame < sScript[i].frame + HOLD_FRAMES)
             keys |= sScript[i].keys;
@@ -130,29 +183,12 @@ void DebugScene_Frame(const uint16_t *pixels)
     }
 }
 
-static int Numbers(const char *text, int *out, int max)
-{
-    int n = 0;
-
-    while (*text != '\0' && n < max)
-    {
-        char *end;
-
-        out[n++] = (int)strtol(text, &end, 10);
-        if (end == text)
-            break;
-        text = (*end == ',') ? end + 1 : end;
-    }
-    return n;
-}
-
 static void CB2_DebugSceneSetup(void)
 {
     const char *scene = SDL_getenv("PKMN_DEBUG_SCENE");
     const char *value;
     struct RegionMapTestMarkers test;
     int v[8];
-
     // what the game does before its first screen (CB2_InitCopyrightScreenAfterBootup)
     SetSaveBlocksPointers(GetSaveBlocksPointersBaseOffset());
     ResetMenuAndMonGlobals();
@@ -187,30 +223,7 @@ static void CB2_DebugSceneSetup(void)
 
     memset(&test, 0, sizeof(test));
     if ((value = SDL_getenv("PKMN_DEBUG_PEERS")) != NULL)
-    {
-        int peer = 0;
-
-        while (*value != '\0' && peer < 3)
-        {
-            char one[96];
-            const char *end = strchr(value, ';');
-            size_t length = end != NULL ? (size_t)(end - value) : strlen(value);
-
-            SDL_strlcpy(one, value, length + 1 < sizeof(one) ? length + 1 : sizeof(one));
-            if (Numbers(one, v, 6) >= 6)
-            {
-                test.peers[peer].present = 1;
-                test.peers[peer].mapGroup = (u8)v[0];
-                test.peers[peer].mapNum = (u8)v[1];
-                test.peers[peer].x = (s16)v[2];
-                test.peers[peer].y = (s16)v[3];
-                test.peers[peer].gender = (u8)v[4];
-                test.peers[peer].slot = (u8)v[5];
-                peer++;
-            }
-            value += length + (end != NULL ? 1 : 0);
-        }
-    }
+        ParsePeers(value, &test);
     if ((value = SDL_getenv("PKMN_DEBUG_EVENT")) != NULL && Numbers(value, v, 4) >= 4)
     {
         test.eventId = 1;
@@ -226,7 +239,8 @@ static void CB2_DebugSceneSetup(void)
         test.outbreak[1] = (u8)v[0];
         test.outbreak[2] = (u8)v[1];
     }
-    RegionMap_PortableSetTest(&test);
+    sTest = test;
+    RegionMap_PortableSetTest(&sTest);
 
     if (strcmp(scene, "regionmap") == 0)
         SetMainCallback2(CB2_OpenFlyMap);
@@ -244,6 +258,8 @@ void DebugScene_Start(void)
         ParseShots(value);
     if ((value = SDL_getenv("PKMN_DEBUG_STEM")) != NULL)
         SDL_strlcpy(sStem, value, sizeof(sStem));
+    if ((value = SDL_getenv("PKMN_DEBUG_PEERS_AT")) != NULL)
+        sPeersThenFrame = (unsigned)strtoul(value, NULL, 10);
     if ((value = SDL_getenv("PKMN_DEBUG_SCENE")) != NULL && value[0] != '\0')
         SetMainCallback2(CB2_DebugSceneSetup);
 }
