@@ -1,5 +1,6 @@
 #include "global.h"
 #include "multiplayer_battle.h"
+#include "multiplayer_coop.h"
 #include "multiplayer_battle_schema.h"
 #include "multiplayer_save.h"
 #include "multiplayer_menu.h"
@@ -567,6 +568,99 @@ TEST("Multiplayer free-for-all: four independent trainers start as one battle wi
         TearDown(&f);
     }
     Free(peers); Free(original);
+}
+
+static void CoopPreparation(struct ChannelFixture *f, u8 bringByte)
+{
+    struct MultiplayerBattlePreparation p = {0};
+    p.checkpointRevision = 1; p.nativeCounter = gSaveCounter;
+    p.trainerId = READ_OTID_FROM_SAVE; p.partyCrc32 = Crc((const u8 *)gParties[B_TRAINER_PLAYER], 600);
+    p.rng[0] = 1; p.rng[4] = 2; p.rng[8] = 3; p.rng[12] = 4; p.rng[15] = bringByte;
+    p.flags = MP_COOP_GYM_RUSTBORO;
+    Next(f, MP_BATTLE_PREPARE_SINGLES); f->command.length = sizeof(p);
+    memcpy(f->command.data, &p, sizeof(p));
+}
+
+static void SixDistinctMons(void)
+{
+    for (u32 slot = 0; slot < PARTY_SIZE; slot++)
+    {
+        u32 serial = slot + 1;
+        CreateMon(&gParties[B_TRAINER_PLAYER][slot], SPECIES_WURMPLE + slot, 5 + slot, 0, OTID_STRUCT_PLAYER_ID);
+        SetMonData(&gParties[B_TRAINER_PLAYER][slot], MON_DATA_MULTIPLAYER_ID, &serial);
+        CalculateMonStats(&gParties[B_TRAINER_PLAYER][slot]);
+    }
+    CalculatePlayerPartyCount();
+}
+
+TEST("Multiplayer co-op team selection: the battle uses the named Pokemon in saved order and the personal party returns whole")
+{
+    struct ChannelFixture f;
+    struct Pokemon *original = Alloc(sizeof(struct Pokemon) * PARTY_SIZE);
+    static const u8 selections[] = {0x80 | (1 << 1) | (1 << 4), 0x80 | 0x3F, 0x80 | (1 << 5), 0x80 | (1 << 0) | (1 << 2) | (1 << 4)};
+
+    for (u32 test = 0; test < ARRAY_COUNT(selections); test++)
+    {
+        u8 mask = selections[test] & 0x3F, kept = 0;
+
+        SetUp(&f, 2, 0);
+        SixDistinctMons();
+        gSaveBlock2Ptr->playerName[0] = EOS;
+        f.binding.mode = f.command.phase = MP_BATTLE_PHASE_COOP;
+        memcpy(f.command.data, &f.binding, sizeof(f.binding));
+        Bind(&f);
+        memcpy(original, gParties[B_TRAINER_PLAYER], sizeof(struct Pokemon) * PARTY_SIZE);
+        CoopPreparation(&f, selections[test]);
+        EXPECT_EQ(Submit(&f), MP_BATTLE_OK);
+        for (u32 slot = 0; slot < PARTY_SIZE; slot++)
+        {
+            if (!(mask & (1 << slot)))
+                continue;
+            EXPECT(!memcmp(&gParties[B_TRAINER_PLAYER][kept], &original[slot], sizeof(struct Pokemon)));
+            kept++;
+        }
+        EXPECT_EQ(gPartiesCount[B_TRAINER_PLAYER], kept);
+        for (u32 slot = kept; slot < PARTY_SIZE; slot++)
+            EXPECT(GetMonData(&gParties[B_TRAINER_PLAYER][slot], MON_DATA_SPECIES) == SPECIES_NONE);
+        // The personal party comes back exactly as it was (every slot, including the unselected ones).
+        RestorePlayerPartyExact();
+        EXPECT_EQ(gPartiesCount[B_TRAINER_PLAYER], PARTY_SIZE);
+        EXPECT(!memcmp(original, gParties[B_TRAINER_PLAYER], sizeof(struct Pokemon) * PARTY_SIZE));
+        TearDown(&f);
+    }
+    Free(original);
+}
+
+TEST("Multiplayer co-op team selection: no selection keeps the whole party and an invalid one is refused before anything changes")
+{
+    struct ChannelFixture f;
+    struct Pokemon *original = Alloc(sizeof(struct Pokemon) * PARTY_SIZE);
+    u8 egg = TRUE, count;
+
+    SetUp(&f, 2, 0);
+    SixDistinctMons();
+    gSaveBlock2Ptr->playerName[0] = EOS;
+    f.binding.mode = f.command.phase = MP_BATTLE_PHASE_COOP;
+    memcpy(f.command.data, &f.binding, sizeof(f.binding));
+    Bind(&f);
+    SetMonData(&gParties[B_TRAINER_PLAYER][3], MON_DATA_IS_EGG, &egg);
+    memcpy(original, gParties[B_TRAINER_PLAYER], sizeof(struct Pokemon) * PARTY_SIZE);
+    count = gPartiesCount[B_TRAINER_PLAYER];
+    // flag clear, empty mask, the reserved bit, an Egg, and a slot with no Pokemon (the party is checked as it is)
+    static const u8 invalid[] = {0x00 | 0x12, 0x80, 0x80 | 0x40 | 1, 0x80 | (1 << 3), 0x80 | (1 << 0) | (1 << 3)};
+    for (u32 i = 0; i < ARRAY_COUNT(invalid); i++)
+    {
+        CoopPreparation(&f, invalid[i]);
+        EXPECT_EQ(Submit(&f), MP_BATTLE_UNSAFE);
+        EXPECT_EQ(gPartiesCount[B_TRAINER_PLAYER], count);
+        EXPECT(!memcmp(original, gParties[B_TRAINER_PLAYER], sizeof(struct Pokemon) * PARTY_SIZE));
+    }
+    CoopPreparation(&f, 0);                                       // no selection: the party is untouched
+    EXPECT_EQ(Submit(&f), MP_BATTLE_OK);
+    EXPECT_EQ(gPartiesCount[B_TRAINER_PLAYER], count);
+    EXPECT(!memcmp(original, gParties[B_TRAINER_PLAYER], sizeof(struct Pokemon) * PARTY_SIZE));
+    TearDown(&f);
+    Free(original);
 }
 
 TEST("Multiplayer full Multi: every device owns its controller, sixth lead and independent switch order")

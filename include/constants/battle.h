@@ -101,6 +101,10 @@ enum BattleSide
 #define MP_FFA_ENABLED 0
 #endif
 
+// EmeraldTogether team selection for co-op battles (Battle Frontier): the host may name which of the player's saved Pokemon
+// a co-op battle uses. Same rule as above: the release GBA ROM does not contain the code.
+#define MP_BRING_ENABLED MP_FFA_ENABLED
+
 // Number of sides the rules can see (the arrays of side statuses, timers and hazards).
 #if MP_FFA_ENABLED
 #define NUM_BATTLE_LOGIC_SIDES 4 // one per battler (MAX_BATTLERS_COUNT)

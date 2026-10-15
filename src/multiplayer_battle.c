@@ -129,6 +129,13 @@ static EWRAM_DATA u8 sNextReceiveKind[4] = {0};
 static EWRAM_DATA u8 sNextSendKind = 0;
 static EWRAM_DATA u8 sSavedWireless = 0;
 static EWRAM_DATA u8 sOriginalCount = 0;
+#if MP_BRING_ENABLED
+// Co-op team selection: the party the battle really uses (the personal party reduced to the Pokemon the host named),
+// which differs from the original only while a battle with a bring selection runs.
+static EWRAM_DATA u8 sBattleCount = 0;
+static EWRAM_DATA u32 sBattleCrc = 0;
+#endif
+#line 113 // gba-line
 static EWRAM_DATA bool8 sPrepared = FALSE;
 static EWRAM_DATA bool8 sStarted = FALSE;
 static EWRAM_DATA bool8 sRestored = FALSE;
@@ -630,15 +637,78 @@ u16 MultiplayerBattle_PackController(u8 *dest, u8 battler, u8 bufferId, u16 size
     return padded + 8;
 }
 
+#if MP_BRING_ENABLED
+// The selection is valid when it names 1-6 saved Pokemon that exist, are not Eggs, at least one able to fight.
+static bool32 BringSelectionValid(u8 bring)
+{
+    u32 slot, able = 0, mask = bring & 0x3F;
+
+    if (!(bring & 0x80) || (bring & 0x40) || !mask)
+        return FALSE;
+    for (slot = 0; slot < PARTY_SIZE; slot++)
+    {
+        struct Pokemon mon;
+
+        if (!(mask & (1u << slot)))
+            continue;
+        if (slot >= gPartiesCount[B_TRAINER_PLAYER])
+            return FALSE;
+        mon = gParties[B_TRAINER_PLAYER][slot];
+        if (!GetMonData(&mon, MON_DATA_SPECIES) || GetMonData(&mon, MON_DATA_IS_EGG))
+            return FALSE;
+        if (mon.hp)
+            able++;
+    }
+    return able != 0;
+}
+
+// The battle's party: the selected Pokemon in their saved order, the rest of the six slots empty. Pokemon are copied
+// whole, so the host's expected party bytes are the same slots of the saved party (battle_roster.py).
+static void ApplyBringSelection(u8 mask)
+{
+    struct Pokemon *party = gParties[B_TRAINER_PLAYER];
+    u32 slot, kept = 0;
+
+    for (slot = 0; slot < PARTY_SIZE; slot++)
+    {
+        if (!(mask & (1u << slot)))
+            continue;
+        if (kept != slot)
+            party[kept] = party[slot];
+        kept++;
+    }
+    for (slot = kept; slot < PARTY_SIZE; slot++)
+        memset(&party[slot], 0, sizeof(party[slot]));
+    gPartiesCount[B_TRAINER_PLAYER] = kept;
+    sBattleCount = kept;
+    sBattleCrc = Crc32((const u8 *)party, 600);
+}
+#endif
+
+#line 597 // gba-line
 static u8 PrepareSingles(const struct MultiplayerBattleControl *c)
 {
     struct MultiplayerBattlePreparation preparation;
     struct LinkPlayer player;
     u8 ownership[80];
     u32 i, usable = 0;
+#if MP_BRING_ENABLED
+    u8 bring = 0;
+#endif
+#line 603 // gba-line
     if (sState != MP_BATTLE_CHANNEL || sPrepared || c->length != sizeof(preparation)
      || c->blockSeq || c->offset || c->totalSize || c->kind) return MP_BATTLE_ORDER;
     memcpy(&preparation, c->data, sizeof(preparation));
+#if MP_BRING_ENABLED
+    // A co-op preparation carries the host's team selection in the last byte of the seed: 0x80 | slot mask (bit n = the
+    // n-th saved Pokemon), or 0 for the whole party. It is not part of the seed, so every core seeds identically.
+    if (MultiplayerBattle_IsCoop())
+    {
+        bring = preparation.rng[15];
+        preparation.rng[15] = 0;
+    }
+#endif
+#line 606 // gba-line
     if (!preparation.checkpointRevision || preparation.checkpointRevision > 0x7FFFFFFF
      || (MultiplayerBattle_IsCoop() ? !MultiplayerCoop_IsValidGym(preparation.flags) : preparation.flags != 0)
      || Zero(preparation.rng, 16)) return MP_BATTLE_MALFORMED;
@@ -654,11 +724,20 @@ static u8 PrepareSingles(const struct MultiplayerBattleControl *c)
         if (species && !GetMonData(&mon, MON_DATA_IS_EGG) && mon.hp) usable++;
     }
     if (!usable || gSaveBlock2Ptr->playerGender > 1 || !NameValid(gSaveBlock2Ptr->playerName, PLAYER_NAME_LENGTH + 1)) return MP_BATTLE_UNSAFE;
+#if MP_BRING_ENABLED
+    if (bring && !BringSelectionValid(bring)) return MP_BATTLE_UNSAFE;
+#endif
+#line 621 // gba-line
     sPreparation = preparation; sOriginalCount = gPartiesCount[B_TRAINER_PLAYER];
     sPersonalRng = gRngValue; sPersonalRng2 = gRng2Value;
     sSavedCallback = gMain.savedCallback; sSavedBattleFlags = gBattleTypeFlags;
     sSavedWireless = gWirelessCommType; sSavedLinkType = gLinkType;
     SavePlayerParty(); sPrepared = TRUE; sState = MP_BATTLE_PREPARED;
+#if MP_BRING_ENABLED
+    sBattleCount = sOriginalCount; sBattleCrc = preparation.partyCrc32;
+    if (bring) ApplyBringSelection(bring & 0x3F); // after the original party is saved: the personal party comes back at the end
+#endif
+#line 626 // gba-line
     memset(&player, 0, sizeof(player));
     player.version = VERSION_EMERALD + 0x4000; player.trainerId = READ_OTID_FROM_SAVE;
     memcpy(player.name, gSaveBlock2Ptr->playerName, sizeof(player.name));
@@ -675,8 +754,15 @@ static u8 PrepareSingles(const struct MultiplayerBattleControl *c)
 static u8 StartSingles(void)
 {
     if (sState != MP_BATTLE_PREPARED || !sPrepared || sStarted || sOutPending || sReceiveFlags != (1 << sBinding.playerCount) - 1) return MP_BATTLE_BUSY;
+#if MP_BRING_ENABLED
+    if (Crc32((const u8 *)gParties[B_TRAINER_PLAYER], 600) != sBattleCrc
+     || gPartiesCount[B_TRAINER_PLAYER] != sBattleCount || gSaveCounter != sPreparation.nativeCounter) return MP_BATTLE_ORDER;
+#else
+#line 642 // gba-line
     if (Crc32((const u8 *)gParties[B_TRAINER_PLAYER], 600) != sPreparation.partyCrc32
      || gPartiesCount[B_TRAINER_PLAYER] != sOriginalCount || gSaveCounter != sPreparation.nativeCounter) return MP_BATTLE_ORDER;
+#endif
+#line 644 // gba-line
     ResetBlockReceivedFlags(); sStarted = TRUE; sState = MP_BATTLE_RUNNING;
     gWirelessCommType = 0; gReceivedRemoteLinkPlayers = TRUE;
     gLinkType = MultiplayerBattle_IsFullMulti() ? LINKTYPE_MULTI_BATTLE : LINKTYPE_BATTLE;

@@ -24,6 +24,7 @@
 #include "item.h"
 #include "constants/battle_frontier.h"
 #endif
+#line 18 // gba-line
 #include "overworld.h"
 #include "palette.h"
 #include "pokemon.h"
@@ -1181,6 +1182,7 @@ u32 MultiplayerWorld_ApplyRewardWord(s32 delta, u8 *result)
 }
 #endif
 
+#line 1091 // gba-line
 static void QueueWalletNotice(u8 result, u32 amount)
 {
     char *end = sWalletNotice;
@@ -1221,10 +1223,12 @@ static void UpdateWallet(bool32 fieldReady)
      || delta == 0 || (delta > MAX_MONEY && !MultiplayerWorld_IsRewardWord(delta)) || delta < -MAX_MONEY)
         return;
 #else
+#line 1126 // gba-line
     if (seq == 0 || seq > 0xFFFF || seq != ((applied + 1) & 0xFFFF)
      || delta == 0 || delta > MAX_MONEY || delta < -MAX_MONEY)
         return;
 #endif
+#line 1129 // gba-line
     money = GetMoney(&gSaveBlock1Ptr->money);
 #ifdef PORTABLE
     if (MultiplayerWorld_IsRewardWord(delta))
@@ -1237,6 +1241,7 @@ static void UpdateWallet(bool32 fieldReady)
         return; // the host's own notice names a Frontier prize
     }
 #endif
+#line 1130 // gba-line
     if (delta > 0)
     {
         amount = delta;
