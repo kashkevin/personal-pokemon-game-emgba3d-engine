@@ -786,6 +786,14 @@ bool32 TryRunFromBattle(enum BattlerId battler)
 void HandleAction_Run(void)
 {
     gBattlerAttacker = gBattlerByTurnOrder[gCurrentTurnActionNumber];
+#if MP_FFA_ENABLED
+    // There is no leaving a free-for-all: the menu does not offer it, and a stray request does nothing.
+    if (IsFreeForAllBattle())
+    {
+        gCurrentActionFuncId = B_ACTION_FINISHED;
+        return;
+    }
+#endif
     if (gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_RECORDED_LINK))
     {
         gCurrentTurnActionNumber = gBattlersCount;

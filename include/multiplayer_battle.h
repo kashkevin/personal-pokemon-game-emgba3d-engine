@@ -33,6 +33,7 @@ enum MultiplayerBattleState {
 enum MultiplayerBattlePhase {
     MP_BATTLE_PHASE_DIAGNOSTIC = 1, MP_BATTLE_PHASE_SINGLES, MP_BATTLE_PHASE_FULL_MULTI,
     MP_BATTLE_PHASE_COOP,
+    MP_BATTLE_PHASE_FFA, // four independent trainers, one battle (BATTLE_TYPE_FFA); see include/battle_ffa.h
 };
 enum MultiplayerBattleKind {
     MP_BATTLE_KIND_NONE, MP_BATTLE_KIND_DIAGNOSTIC, MP_BATTLE_KIND_TRAINER,
@@ -119,6 +120,7 @@ bool32 MultiplayerBattle_SkipCallbacks(void);
 bool32 MultiplayerBattle_IsNative(void);
 bool32 MultiplayerBattle_IsFullMulti(void);
 bool32 MultiplayerBattle_IsCoop(void);
+bool32 MultiplayerBattle_IsFreeForAll(void);
 bool32 MultiplayerBattle_IsNativeDouble(void);
 u32 MultiplayerBattle_GetBattlerCount(void);
 u32 MultiplayerBattle_GetBattlerOwner(u32 battler);

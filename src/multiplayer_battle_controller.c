@@ -218,7 +218,14 @@ static bool32 MasterDataValid(const u8 *p)
     case CONTROLLER_LINKSTANDBYMSG: return p[1] <= LINK_STANDBY_MSG_ONLY && !p[2] && !p[3];
     case CONTROLLER_RESETACTIONMOVESELECTION: return p[1] <= RESET_MOVE_SELECTION;
     case CONTROLLER_ENDLINKBATTLE:
-        value = p[1]; return (value == B_OUTCOME_WON || value == B_OUTCOME_LOST || value == B_OUTCOME_DREW)
+        value = p[1];
+#if MP_FFA_ENABLED
+        // Free-for-all: byte 2 names the winner's battler (0xFF: a draw); every core works out its own result from it.
+        if (MultiplayerBattle_IsFreeForAll())
+            return (value == B_OUTCOME_WON || value == B_OUTCOME_LOST || value == B_OUTCOME_DREW)
+                && (p[2] < BattlerCount() || p[2] == 0xFF) && !p[3] && !p[4] && !p[5];
+#endif
+        return (value == B_OUTCOME_WON || value == B_OUTCOME_LOST || value == B_OUTCOME_DREW)
             && !p[2] && !p[3] && !p[4] && !p[5];
     default: return TRUE;
     }

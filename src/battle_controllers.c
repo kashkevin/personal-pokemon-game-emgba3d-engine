@@ -392,6 +392,21 @@ static void InitBtlControllersInternal(void)
             enum BattlerPosition linkPositionLeft, linkPositionRight;
             BattleControllerFunc linkBtlControllerFunc;
 
+#if MP_FFA_ENABLED
+            if (IsFreeForAllBattle())
+            {
+                // Four trainers, no teams. Each core draws itself at the bottom left and the others, counting on
+                // from it, at the opponent left, the (other) player slot and the opponent right.
+                enum BattlerId battlerId = gLinkPlayers[i].id;
+
+                linkBtlControllerFunc = (i == multiplayerId) ? SetControllerToPlayer : SetControllerToLinkOpponent;
+                linkBtlControllerFunc(battlerId);
+                gBattlerPositions[battlerId] = (battlerId + MAX_LINK_PLAYERS - gLinkPlayers[multiplayerId].id) % MAX_LINK_PLAYERS;
+                BufferBattlePartyCurrentOrderBySide(battlerId, battlerId & BIT_FLANK);
+                gBattlerPartyIndexes[battlerId] = 0;
+                continue;
+            }
+#endif
             if (i == multiplayerId)
             {
                 linkPositionLeft = B_POSITION_PLAYER_LEFT;
@@ -3475,6 +3490,12 @@ void FreeShinyStars(void)
 
 enum BattleTrainer GetBattlerTrainer(enum BattlerId battler)
 {
+#if MP_FFA_ENABLED
+    // Free-for-all: nobody shares a party. The trainer slots are numbered like the screen positions
+    // (player, opponent A, partner, opponent B <-> player left, opponent left, player right, opponent right).
+    if (IsFreeForAllBattle())
+        return (enum BattleTrainer)GetBattlerPosition(battler);
+#endif
     if (gBattleTypeFlags & BATTLE_TYPE_LINK)
     {
         switch (gBattlerBattleController[battler])
@@ -3506,6 +3527,10 @@ enum BattleTrainer GetTrainerFromBattlePosition(enum BattlerPosition position)
 
 bool32 BattleSideHasTwoTrainers(enum BattleSide side)
 {
+#if MP_FFA_ENABLED
+    if (IsFreeForAllBattle())
+        return FALSE; // a side is one trainer and one battler
+#endif
     if (side == B_SIDE_PLAYER)
         return gBattleTypeFlags & BATTLE_TYPE_MULTI;
     else

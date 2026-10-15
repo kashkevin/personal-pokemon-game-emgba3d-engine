@@ -32,6 +32,16 @@
 #include "constants/characters.h"
 #include "constants/form_change_types.h"
 
+// The free-for-all (MP_BATTLE_PHASE_FFA) exists where it can be played and tested (the PC build and the test ROM); the GBA
+// release ROM does not carry it, so the phase is never a valid one there.
+#if MP_FFA_ENABLED
+#define IS_FFA_PHASE(mode) ((mode) == MP_BATTLE_PHASE_FFA)
+#define LAST_PHASE MP_BATTLE_PHASE_FFA
+#else
+#define IS_FFA_PHASE(mode) FALSE
+#define LAST_PHASE MP_BATTLE_PHASE_COOP
+#endif
+
 _Static_assert(sizeof(struct MultiplayerBattleControl) == 240, "Battle control ABI");
 _Static_assert(sizeof(struct MultiplayerBattleMailbox) == 512, "Battle mailbox ABI");
 _Static_assert(offsetof(struct MultiplayerBattleMailbox, commandGeneration) == 24, "Battle command commit");
@@ -198,9 +208,12 @@ bool32 MultiplayerBattle_PauseClocks(void)
 }
 
 bool32 MultiplayerBattle_SkipCallbacks(void) { return MultiplayerBattle_PauseClocks(); }
-bool32 MultiplayerBattle_IsFullMulti(void) { return MultiplayerBattle_IsActive() && sState != MP_BATTLE_ADMITTING && sBinding.mode == MP_BATTLE_PHASE_FULL_MULTI; }
+// The free-for-all is the four-core full Multi with every trainer on a side of their own: it shares all of the full
+// Multi's startup, party exchange and controller relay.
+bool32 MultiplayerBattle_IsFullMulti(void) { return MultiplayerBattle_IsActive() && sState != MP_BATTLE_ADMITTING && (sBinding.mode == MP_BATTLE_PHASE_FULL_MULTI || IS_FFA_PHASE(sBinding.mode)); }
+bool32 MultiplayerBattle_IsFreeForAll(void) { return MultiplayerBattle_IsActive() && sState != MP_BATTLE_ADMITTING && IS_FFA_PHASE(sBinding.mode); }
 bool32 MultiplayerBattle_IsCoop(void) { return MultiplayerBattle_IsActive() && sState != MP_BATTLE_ADMITTING && sBinding.mode == MP_BATTLE_PHASE_COOP; }
-bool32 MultiplayerBattle_IsNative(void) { return MultiplayerBattle_IsActive() && sState != MP_BATTLE_ADMITTING && (sBinding.mode == MP_BATTLE_PHASE_SINGLES || sBinding.mode == MP_BATTLE_PHASE_FULL_MULTI || sBinding.mode == MP_BATTLE_PHASE_COOP); }
+bool32 MultiplayerBattle_IsNative(void) { return MultiplayerBattle_IsActive() && sState != MP_BATTLE_ADMITTING && (sBinding.mode == MP_BATTLE_PHASE_SINGLES || sBinding.mode == MP_BATTLE_PHASE_FULL_MULTI || sBinding.mode == MP_BATTLE_PHASE_COOP || IS_FFA_PHASE(sBinding.mode)); }
 bool32 MultiplayerBattle_IsNativeDouble(void) { return MultiplayerBattle_IsFullMulti() || MultiplayerBattle_IsCoop(); }
 // Battlers on the field: two in singles, four in both double phases.
 u32 MultiplayerBattle_GetBattlerCount(void) { return MultiplayerBattle_IsNativeDouble() ? MAX_BATTLERS_COUNT : 2; }
@@ -216,7 +229,7 @@ u32 MultiplayerBattle_GetCoopGym(void) { return MultiplayerBattle_IsCoop() ? sPr
 
 static u32 PhasePlayerCount(u32 phase)
 {
-    return phase == MP_BATTLE_PHASE_FULL_MULTI ? 4 : 2;
+    return phase == MP_BATTLE_PHASE_FULL_MULTI || IS_FFA_PHASE(phase) ? 4 : 2;
 }
 // Four full parties keep more status sprites live than cable Multi. Delayed
 // controller delivery can overlap a later ball with the earlier ball's entire
@@ -381,6 +394,7 @@ static bool32 BindingValid(const struct MultiplayerBattleBinding *b, const struc
      || b->localSlot != c->sourceSlot || b->mode != c->phase || b->reserved > 1 || (b->reserved && b->mode == MP_BATTLE_PHASE_DIAGNOSTIC)
      || (b->mode == MP_BATTLE_PHASE_SINGLES && b->playerCount != 2)
      || (b->mode == MP_BATTLE_PHASE_FULL_MULTI && b->playerCount != 4)
+     || (IS_FFA_PHASE(b->mode) && b->playerCount != 4)
      || (b->mode == MP_BATTLE_PHASE_COOP && b->playerCount != 2)
      || Zero(b->generation, 16))
         return FALSE;
@@ -534,7 +548,14 @@ static void NoteNativeController(const u8 *data, u8 source)
 {
     MultiplayerBattle_NoteController(data, source);
     if (data[0] == B_COMM_TO_CONTROLLER && data[8] == CONTROLLER_ENDLINKBATTLE)
+    {
         sOutcome = data[9]; // Master slot0's projection is the fixed-side result.
+#if MP_FFA_ENABLED
+        // Free-for-all: the result is the winner (slot + 1) or a draw (5), the same on every core.
+        if (MultiplayerBattle_IsFreeForAll())
+            sOutcome = data[10] < 4 ? data[10] + 1 : 5;
+#endif
+    }
 }
 
 u16 MultiplayerBattle_PackController(u8 *dest, u8 battler, u8 bufferId, u16 size, const u8 *data)
@@ -651,6 +672,10 @@ static u8 StartSingles(void)
     gBattleTypeFlags = BATTLE_TYPE_LINK | BATTLE_TYPE_TRAINER;
     if (MultiplayerBattle_IsFullMulti())
         gBattleTypeFlags |= BATTLE_TYPE_DOUBLE | BATTLE_TYPE_MULTI;
+#if MP_FFA_ENABLED
+    if (MultiplayerBattle_IsFreeForAll())
+        gBattleTypeFlags |= BATTLE_TYPE_FFA; // four sides: nobody is anybody's partner
+#endif
     TRAINER_BATTLE_PARAM.opponentA = TRAINER_LINK_OPPONENT;
     if (MultiplayerBattle_IsCoop())
     {
@@ -689,6 +714,11 @@ bool8 MultiplayerBattle_CopyFullMultiPartyPair(u8 index)
         enum BattleTrainer trainer;
         if (source == sBinding.localSlot)
             continue; // Local temporary forms were already applied at entry.
+#if MP_FFA_ENABLED
+        if (MultiplayerBattle_IsFreeForAll())
+            trainer = (enum BattleTrainer)((source + 4 - sBinding.localSlot) % 4); // the trainer slot is the screen position
+        else
+#endif
         if ((source & 1) == (sBinding.localSlot & 1))
             trainer = B_TRAINER_PARTNER;
         else
@@ -764,6 +794,15 @@ bool32 MultiplayerBattle_TryReturnNative(void)
     u32 outcome = gBattleOutcome;
     if (!MultiplayerBattle_IsNative() || sState != MP_BATTLE_RUNNING || !sOutcome || sOutPending
      || sReceiveFlags || gBattleControllerExecFlags || BattleControllers_HasPendingLinkBlocks()) return FALSE;
+#if MP_FFA_ENABLED
+    if (MultiplayerBattle_IsFreeForAll())
+    {
+        // This core's own result must be the one the winner implies: won if it is the winner, lost otherwise, drew on a draw.
+        u32 expected = sOutcome == 5 ? B_OUTCOME_DREW : sOutcome == sBinding.localSlot + 1u ? B_OUTCOME_WON : B_OUTCOME_LOST;
+        outcome = outcome == expected ? sOutcome : 0;
+    }
+    else
+#endif
     if (!MultiplayerBattle_IsCoop() && (sBinding.localSlot & 1) && outcome != B_OUTCOME_DREW) outcome ^= B_OUTCOME_DREW;
     if (outcome != sOutcome)
     {
@@ -1136,7 +1175,7 @@ static void Handle(const struct MultiplayerBattleControl *c)
     bool32 cache = TRUE;
     if (c->status || c->reserved || c->length > 192 || !c->incarnation || !c->sessionEpoch
      || c->sessionEpoch > 0x7FFFFFFF || !c->commandSeq || Zero(c->battleId, 16)
-     || (c->phase < MP_BATTLE_PHASE_DIAGNOSTIC || c->phase > MP_BATTLE_PHASE_COOP) || c->sourceSlot >= 4
+     || (c->phase < MP_BATTLE_PHASE_DIAGNOSTIC || c->phase > LAST_PHASE) || c->sourceSlot >= 4
      || c->totalSize > MULTIPLAYER_BATTLE_BLOCK_SIZE || c->offset > c->totalSize
      || !Zero(c->data + c->length, 192 - c->length)
      || c->opcode < MP_BATTLE_BIND || c->opcode > MP_BATTLE_ADMISSION_CANCEL_READY)

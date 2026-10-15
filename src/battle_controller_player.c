@@ -344,6 +344,13 @@ static void HandleInputChooseAction(enum BattlerId battler)
             BtlController_EmitTwoReturnValues(battler, B_COMM_TO_ENGINE, B_ACTION_SWITCH, 0);
             break;
         case 3: // Bottom right
+#if MP_FFA_ENABLED
+            if (IsFreeForAllBattle())
+            {
+                PlaySE(SE_FAILURE); // nobody leaves a free-for-all halfway; a trainer is out when their last Pokemon faints
+                return;
+            }
+#endif
             BtlController_EmitTwoReturnValues(battler, B_COMM_TO_ENGINE, B_ACTION_RUN, 0);
             break;
         }

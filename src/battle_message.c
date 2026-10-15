@@ -3338,6 +3338,26 @@ u32 BattleStringExpandPlaceholders(const u8 *src, u8 *dst, u32 dstSize)
             case B_TXT_LINK_PLAYER_NAME: // link player name
                 toCpy = gLinkPlayers[multiplayerId].name;
                 break;
+#if MP_FFA_ENABLED
+            case B_TXT_LINK_PARTNER_NAME: // link partner name (free-for-all: the trainer drawn in the second player slot)
+                if (IsFreeForAllBattle())
+                    toCpy = gLinkPlayers[GetBattlerMultiplayerId(GetBattlerAtPosition(B_POSITION_PLAYER_RIGHT))].name;
+                else
+                    toCpy = gLinkPlayers[GetBattlerMultiplayerId(GetPartnerPosition(gLinkPlayers[multiplayerId].id))].name;
+                break;
+            case B_TXT_LINK_OPPONENT1_NAME: // link opponent 1 name
+                if (IsFreeForAllBattle())
+                    toCpy = gLinkPlayers[GetBattlerMultiplayerId(GetBattlerAtPosition(B_POSITION_OPPONENT_LEFT))].name;
+                else
+                    toCpy = gLinkPlayers[GetBattlerMultiplayerId(GetBattlerLeftFoe(gLinkPlayers[multiplayerId].id))].name;
+                break;
+            case B_TXT_LINK_OPPONENT2_NAME: // link opponent 2 name
+                if (IsFreeForAllBattle())
+                    toCpy = gLinkPlayers[GetBattlerMultiplayerId(GetBattlerAtPosition(B_POSITION_OPPONENT_RIGHT))].name;
+                else
+                    toCpy = gLinkPlayers[GetBattlerMultiplayerId(GetBattlerRightFoe(gLinkPlayers[multiplayerId].id))].name;
+                break;
+#else
             case B_TXT_LINK_PARTNER_NAME: // link partner name
                 toCpy = gLinkPlayers[GetBattlerMultiplayerId(GetPartnerPosition(gLinkPlayers[multiplayerId].id))].name;
                 break;
@@ -3347,6 +3367,7 @@ u32 BattleStringExpandPlaceholders(const u8 *src, u8 *dst, u32 dstSize)
             case B_TXT_LINK_OPPONENT2_NAME: // link opponent 2 name
                 toCpy = gLinkPlayers[GetBattlerMultiplayerId(GetBattlerRightFoe(gLinkPlayers[multiplayerId].id))].name;
                 break;
+#endif
             case B_TXT_LINK_SCR_TRAINER_NAME: // link scripting active name
                 toCpy = gLinkPlayers[GetBattlerMultiplayerId(gBattleScripting.battler)].name;
                 break;
