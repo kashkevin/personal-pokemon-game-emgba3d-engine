@@ -261,7 +261,7 @@ OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS) $(BFX_QJS_OBJS)
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
-.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-clock check-mp-objects check-spawn-claims check-coop-exp check-coop-controller
+.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-clock check-mp-objects check-spawn-claims check-coop-exp check-coop-controller check-keybinds
 .SUFFIXES:
 .SECONDARY:
 .DELETE_ON_ERROR:
@@ -289,10 +289,14 @@ check-native:
 	  tools/pc_port/tests/test_mp_bridge.c src/platform/mp_bridge.c -o $(NATIVE_TEST_DIR)/test_mp_bridge
 	@$(NATIVE_TEST_DIR)/test_mp_bridge
 	@gcc -m32 -std=gnu99 -Wall -Wextra -Werror -O1 -g -iquote include -iquote tools/pc_port/tests \
-	  -DFRAME_LIMITER_UNIT_TEST tools/pc_port/tests/test_display_settings.c src/platform/display_settings.c \
-	  src/platform/pc_menu.c src/platform/benchmark.c src/platform/frame_limiter.c \
+	  $$($(NATIVE_TEST_SDL) --cflags sdl2) -DFRAME_LIMITER_UNIT_TEST tools/pc_port/tests/test_display_settings.c src/platform/display_settings.c \
+	  src/platform/pc_menu.c src/platform/keybinds.c src/platform/benchmark.c src/platform/frame_limiter.c \
 	  -o $(NATIVE_TEST_DIR)/test_display_settings
 	@$(NATIVE_TEST_DIR)/test_display_settings
+	@gcc -m32 -std=gnu99 -Wall -Wextra -Werror -O1 -g -iquote include -iquote tools/pc_port/tests \
+	  $$($(NATIVE_TEST_SDL) --cflags sdl2) tools/pc_port/tests/test_keybinds.c src/platform/keybinds.c \
+	  -o $(NATIVE_TEST_DIR)/test_keybinds
+	@$(NATIVE_TEST_DIR)/test_keybinds
 	@gcc -m32 -std=gnu99 -Wall -Wextra -Werror -O1 -g -iquote include -iquote tools/pc_port/tests \
 	  $$($(NATIVE_TEST_SDL) --cflags sdl2) tools/pc_port/tests/test_png_write.c src/platform/png_write.c \
 	  $$($(NATIVE_TEST_SDL) --libs sdl2) -o $(NATIVE_TEST_DIR)/test_png_write
@@ -356,6 +360,10 @@ check-clock: $(TARGET)
 	@status=0; for tz in UTC-0 UTC-6 UTC-12 UTC+6; do \
 	  TZ=$$tz ./$(TARGET) --selftest-clock > $(OBJ_DIR)/selftest-clock.log 2>&1 || { status=1; echo "check-clock failed with TZ=$$tz"; }; \
 	  tail -n 1 $(OBJ_DIR)/selftest-clock.log; done; exit $$status
+
+check-keybinds: $(TARGET)
+	@./$(TARGET) --selftest-keybinds > $(OBJ_DIR)/selftest-keybinds.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-keybinds.log; exit $$status
 
 check-mp-objects: $(TARGET)
 	@./$(TARGET) --selftest-mp-objects > $(OBJ_DIR)/selftest-mp-objects.log 2>&1; status=$$?; \

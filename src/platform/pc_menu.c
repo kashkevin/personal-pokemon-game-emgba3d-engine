@@ -24,6 +24,7 @@ static const char *const sLabels[PC_MENU_ITEM_COUNT] = {
     [PC_MENU_FRAME_RATE]   = "Show frame rate",
     [PC_MENU_CAMERA]       = "Camera",
     [PC_MENU_TREES]        = "Trees",
+    [PC_MENU_CONTROLS]     = "Controls",
     [PC_MENU_CLOSE]        = "Close",
 };
 
@@ -46,6 +47,174 @@ void PcMenu_Open(struct PcMenuState *menu, const struct DisplaySettings *setting
     menu->hasCamera = hasCamera;
     menu->cameraDiorama = cameraDiorama;
     menu->trees3ds = trees3ds;
+    Keybinds_Defaults(&menu->keybinds);
+}
+
+void PcMenu_SetKeybinds(struct PcMenuState *menu, const struct Keybinds *keybinds, const struct KeybindNames *names)
+{
+    menu->keybinds = *keybinds;
+    menu->keyNames = names;
+}
+
+bool PcMenu_IsCapturing(const struct PcMenuState *menu)
+{
+    return menu->open && menu->page == PC_MENU_PAGE_CONTROLS && menu->capturing;
+}
+
+const char *PcMenu_Title(const struct PcMenuState *menu)
+{
+    return menu->page == PC_MENU_PAGE_CONTROLS ? "Controls" : "Display & Graphics";
+}
+
+const char *PcMenu_Message(const struct PcMenuState *menu)
+{
+    return menu->page == PC_MENU_PAGE_CONTROLS && menu->message[0] != '\0' ? menu->message : NULL;
+}
+
+const char *PcMenu_BackLabel(const struct PcMenuState *menu)
+{
+    return menu->page == PC_MENU_PAGE_CONTROLS ? "Back" : "Close";
+}
+
+/* ---- The Controls page ---------------------------------------------------------------------- */
+
+static int Wrap(int value, int count);
+
+#define CONTROLS_ROW_RESTORE KEYBIND_COUNT
+#define CONTROLS_ROW_BACK    (KEYBIND_COUNT + 1)
+#define CONTROLS_ROW_COUNT   (KEYBIND_COUNT + 2)
+
+static void KeyText(const struct PcMenuState *menu, int key, char *out, int size)
+{
+    if (menu->keyNames != NULL)
+        Keybinds_KeyLabel(key, menu->keyNames, out, size);
+    else
+        snprintf(out, (size_t)size, "?");
+}
+
+static void SetMessage(struct PcMenuState *menu, const char *format, const char *a, const char *b, const char *warning)
+{
+    int used = snprintf(menu->message, sizeof(menu->message), format, a, b);
+
+    if (warning != NULL && used > 0 && (size_t)used < sizeof(menu->message))
+        snprintf(menu->message + used, sizeof(menu->message) - (size_t)used, "|%s", warning);
+}
+
+static void CancelCapture(struct PcMenuState *menu)
+{
+    menu->capturing = false;
+    menu->conflicting = false;
+    menu->message[0] = '\0';
+}
+
+static unsigned int ControlsInput(struct PcMenuState *menu, enum PcMenuInput input)
+{
+    int action = menu->controlsCursor;
+    char label[40];
+
+    if (menu->capturing)
+    {
+        if (input == PC_MENU_INPUT_BACK)
+        {
+            CancelCapture(menu);
+            snprintf(menu->message, sizeof(menu->message), "Cancelled. Nothing changed.");
+        }
+        return 0; /* keys go to PcMenu_CaptureKey meanwhile */
+    }
+    if (menu->conflicting)
+    {
+        if (input == PC_MENU_INPUT_ACCEPT)
+        {
+            int holder = menu->pendingOther;
+            enum KeybindResult result = Keybinds_Assign(&menu->keybinds, action, menu->pendingKey, true, &holder);
+
+            menu->conflicting = false;
+            if (result == KEYBIND_SWAPPED)
+            {
+                SetMessage(menu, "%s and %s traded keys.", Keybinds_ActionLabel(action), Keybinds_ActionLabel(holder), NULL);
+                return PC_MENU_CHANGED_KEYS;
+            }
+            CancelCapture(menu);
+        }
+        else if (input == PC_MENU_INPUT_BACK)
+        {
+            CancelCapture(menu);
+            snprintf(menu->message, sizeof(menu->message), "Cancelled. Nothing changed.");
+        }
+        return 0;
+    }
+    switch (input)
+    {
+    case PC_MENU_INPUT_UP:
+        menu->controlsCursor = Wrap(action - 1, CONTROLS_ROW_COUNT);
+        menu->message[0] = '\0';
+        return 0;
+    case PC_MENU_INPUT_DOWN:
+        menu->controlsCursor = Wrap(action + 1, CONTROLS_ROW_COUNT);
+        menu->message[0] = '\0';
+        return 0;
+    case PC_MENU_INPUT_ACCEPT:
+        if (action == CONTROLS_ROW_BACK)
+        {
+            menu->page = PC_MENU_PAGE_MAIN;
+            menu->message[0] = '\0';
+            return 0;
+        }
+        if (action == CONTROLS_ROW_RESTORE)
+        {
+            Keybinds_Reset(&menu->keybinds);
+            snprintf(menu->message, sizeof(menu->message), "Default keys restored.");
+            return PC_MENU_CHANGED_KEYS;
+        }
+        menu->capturing = true;
+        KeyText(menu, menu->keybinds.key[action], label, sizeof(label));
+        SetMessage(menu, "Press the new key for %s (now %s).|Esc cancels.", Keybinds_ActionLabel(action), label, NULL);
+        return 0;
+    case PC_MENU_INPUT_BACK:
+        menu->page = PC_MENU_PAGE_MAIN;
+        menu->message[0] = '\0';
+        return 0;
+    default:
+        return 0;
+    }
+}
+
+unsigned int PcMenu_CaptureKey(struct PcMenuState *menu, int key)
+{
+    int action = menu->controlsCursor, holder = -1;
+    char label[40], holderLabel[40];
+    enum KeybindResult result;
+
+    if (!PcMenu_IsCapturing(menu) || action < 0 || action >= KEYBIND_COUNT)
+        return 0;
+    KeyText(menu, key, label, sizeof(label));
+    result = Keybinds_Assign(&menu->keybinds, action, key, false, &holder);
+    switch (result)
+    {
+    case KEYBIND_ASSIGNED:
+        menu->capturing = false;
+        SetMessage(menu, "%s is now %s.", Keybinds_ActionLabel(action), label, Keybinds_SharedWarning(key));
+        return PC_MENU_CHANGED_KEYS;
+    case KEYBIND_UNCHANGED:
+        menu->capturing = false;
+        SetMessage(menu, "%s stays %s.", Keybinds_ActionLabel(action), label, NULL);
+        return 0;
+    case KEYBIND_CONFLICT:
+        menu->capturing = false;
+        menu->conflicting = true;
+        menu->pendingKey = key;
+        menu->pendingOther = holder;
+        KeyText(menu, key, holderLabel, sizeof(holderLabel));
+        SetMessage(menu, "%s is already the key for %s.|Enter swaps the two keys, Esc cancels.",
+                   holderLabel, Keybinds_ActionLabel(holder), NULL);
+        return 0;
+    case KEYBIND_RESERVED:
+        SetMessage(menu, "%s can't be a game button (F1-F12 and Esc are kept for the menus).|Press another key, or Esc to cancel.",
+                   label, "", NULL);
+        return 0;
+    default:
+        return 0;
+    }
 }
 
 static int Wrap(int value, int count)
@@ -204,6 +373,8 @@ unsigned int PcMenu_Input(struct PcMenuState *menu, enum PcMenuInput input, unsi
             return Revert(menu);
         return 0;
     }
+    if (menu->page == PC_MENU_PAGE_CONTROLS)
+        return ControlsInput(menu, input);
     switch (input)
     {
     case PC_MENU_INPUT_UP:
@@ -225,6 +396,14 @@ unsigned int PcMenu_Input(struct PcMenuState *menu, enum PcMenuInput input, unsi
         {
             menu->open = false;
             return PC_MENU_CLOSED;
+        }
+        if (menu->cursor == PC_MENU_CONTROLS)
+        {
+            menu->page = PC_MENU_PAGE_CONTROLS;
+            menu->controlsCursor = 0;
+            menu->capturing = menu->conflicting = false;
+            menu->message[0] = '\0';
+            return 0;
         }
         return Change(menu, menu->cursor, 1, nowMs);
     case PC_MENU_INPUT_BACK:
@@ -304,6 +483,28 @@ int PcMenu_Rows(const struct PcMenuState *menu, struct PcMenuRow *rows)
     char name[16];
     int count = 0;
 
+    if (menu->page == PC_MENU_PAGE_CONTROLS)
+    {
+        for (int row = 0; row < CONTROLS_ROW_COUNT; row++)
+        {
+            struct PcMenuRow *r = &rows[count++];
+
+            r->value[0] = '\0';
+            r->selected = row == menu->controlsCursor;
+            r->adjustable = false;
+            if (row < KEYBIND_COUNT)
+            {
+                r->label = Keybinds_ActionLabel(row);
+                if (menu->capturing && r->selected)
+                    snprintf(r->value, sizeof(r->value), "Press a key...");
+                else
+                    KeyText(menu, menu->keybinds.key[row], r->value, (int)sizeof(r->value));
+            }
+            else
+                r->label = row == CONTROLS_ROW_RESTORE ? "Restore defaults" : "Back";
+        }
+        return count;
+    }
     for (int item = 0; item < PC_MENU_ITEM_COUNT; item++)
     {
         struct PcMenuRow *row;
@@ -314,7 +515,7 @@ int PcMenu_Rows(const struct PcMenuState *menu, struct PcMenuRow *rows)
         row->label = sLabels[item];
         row->value[0] = '\0';
         row->selected = item == menu->cursor;
-        row->adjustable = item != PC_MENU_CLOSE;
+        row->adjustable = item != PC_MENU_CLOSE && item != PC_MENU_CONTROLS;
         switch (item)
         {
         case PC_MENU_RESOLUTION:

@@ -294,6 +294,8 @@ MT_TEST(menu_without_camera_rows)
     MT_EQ(menu.cursor, PC_MENU_PICTURE_SIZE);
     menu.cursor = PC_MENU_FRAME_RATE;
     PcMenu_Input(&menu, PC_MENU_INPUT_DOWN, 0);
+    MT_EQ(menu.cursor, PC_MENU_CONTROLS); // the Controls page comes before Close
+    PcMenu_Input(&menu, PC_MENU_INPUT_DOWN, 0);
     MT_EQ(menu.cursor, PC_MENU_CLOSE);
 }
 
@@ -590,6 +592,165 @@ MT_TEST(benchmark_without_a_field)
     MT_CHECK(results[0].frames > 0);
 }
 
+// ---- The Controls page ---------------------------------------------------------------------------
+
+#include <SDL_keycode.h>
+#include <strings.h>
+
+static const char *KeyName(int code)
+{
+    switch (code)
+    {
+    case SDLK_z: return "Z";
+    case SDLK_x: return "X";
+    case SDLK_q: return "Q";
+    case SDLK_w: return "W";
+    case SDLK_RETURN: return "Return";
+    case SDLK_F10: return "F10";
+    case SDLK_ESCAPE: return "Escape";
+    case SDLK_l: return "L";
+    default: return "Key";
+    }
+}
+
+static int KeyCode(const char *name)
+{
+    (void)name;
+    return 0;
+}
+
+static const struct KeybindNames sTestNames = {KeyName, KeyCode};
+
+static struct PcMenuState ControlsMenu(void)
+{
+    struct PcMenuState menu;
+    struct DisplaySettings s;
+    struct Keybinds kb;
+
+    DisplaySettings_Defaults(&s);
+    Keybinds_Defaults(&kb);
+    PcMenu_Open(&menu, &s, true, false, false, true, false, false);
+    PcMenu_SetKeybinds(&menu, &kb, &sTestNames);
+    menu.cursor = PC_MENU_CONTROLS;
+    PcMenu_Input(&menu, PC_MENU_INPUT_ACCEPT, 0);
+    return menu;
+}
+
+MT_TEST(controls_page_lists_every_action_with_its_key)
+{
+    struct PcMenuState menu = ControlsMenu();
+    struct PcMenuRow rows[PC_MENU_ITEM_COUNT];
+
+    MT_EQ(menu.page, PC_MENU_PAGE_CONTROLS);
+    MT_CHECK(strcmp(PcMenu_Title(&menu), "Controls") == 0);
+    MT_CHECK(strcmp(PcMenu_BackLabel(&menu), "Back") == 0);
+    MT_EQ(PcMenu_Rows(&menu, rows), KEYBIND_COUNT + 2);
+    MT_CHECK(strcmp(rows[KEYBIND_A].label, "A button") == 0);
+    MT_CHECK(strcmp(rows[KEYBIND_A].value, "Z") == 0);   // the current key is shown
+    MT_CHECK(strcmp(rows[KEYBIND_START].value, "ENTER") == 0);
+    MT_CHECK(strcmp(rows[KEYBIND_COUNT].label, "Restore defaults") == 0);
+    MT_CHECK(strcmp(rows[KEYBIND_COUNT + 1].label, "Back") == 0);
+    MT_CHECK(rows[0].selected && !rows[0].adjustable);
+}
+
+MT_TEST(controls_page_rebinds_a_key_and_reports_the_change)
+{
+    struct PcMenuState menu = ControlsMenu();
+    struct PcMenuRow rows[PC_MENU_ITEM_COUNT];
+
+    MT_CHECK(!PcMenu_IsCapturing(&menu));
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_ACCEPT, 0), 0);      // A button: wait for a key
+    MT_CHECK(PcMenu_IsCapturing(&menu));
+    PcMenu_Rows(&menu, rows);
+    MT_CHECK(strcmp(rows[0].value, "Press a key...") == 0);
+    MT_CHECK(PcMenu_Message(&menu) != NULL && strstr(PcMenu_Message(&menu), "A button") != NULL);
+    MT_EQ(PcMenu_CaptureKey(&menu, SDLK_q), PC_MENU_CHANGED_KEYS);
+    MT_CHECK(!PcMenu_IsCapturing(&menu));
+    MT_EQ(menu.keybinds.key[KEYBIND_A], SDLK_q);
+    MT_CHECK(menu.keybinds.custom[KEYBIND_A]);
+    MT_CHECK(strstr(PcMenu_Message(&menu), "A button is now Q") != NULL);
+    PcMenu_Rows(&menu, rows);
+    MT_CHECK(strcmp(rows[0].value, "Q") == 0);
+}
+
+MT_TEST(controls_page_warns_of_a_conflict_and_swaps_only_when_accepted)
+{
+    struct PcMenuState menu = ControlsMenu();
+
+    PcMenu_Input(&menu, PC_MENU_INPUT_DOWN, 0);                   // B button
+    PcMenu_Input(&menu, PC_MENU_INPUT_ACCEPT, 0);
+    MT_EQ(PcMenu_CaptureKey(&menu, SDLK_z), 0);                   // Z is the A button's
+    MT_CHECK(menu.conflicting && !PcMenu_IsCapturing(&menu));
+    MT_CHECK(strstr(PcMenu_Message(&menu), "already the key for A button") != NULL);
+    MT_EQ(menu.keybinds.key[KEYBIND_B], SDLK_x);                  // nothing changed yet
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_BACK, 0), 0);          // cancel
+    MT_CHECK(!menu.conflicting);
+    MT_EQ(menu.keybinds.key[KEYBIND_B], SDLK_x);
+    MT_EQ(menu.keybinds.key[KEYBIND_A], SDLK_z);
+    MT_EQ(menu.page, PC_MENU_PAGE_CONTROLS);                      // cancelling stays on the page
+    // Again, and accept the swap.
+    PcMenu_Input(&menu, PC_MENU_INPUT_ACCEPT, 0);
+    PcMenu_CaptureKey(&menu, SDLK_z);
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_ACCEPT, 0), PC_MENU_CHANGED_KEYS);
+    MT_EQ(menu.keybinds.key[KEYBIND_B], SDLK_z);
+    MT_EQ(menu.keybinds.key[KEYBIND_A], SDLK_x);                  // no action is left without a key
+    MT_CHECK(strstr(PcMenu_Message(&menu), "traded keys") != NULL);
+}
+
+MT_TEST(controls_page_refuses_the_keys_that_reach_the_menu)
+{
+    struct PcMenuState menu = ControlsMenu();
+
+    PcMenu_Input(&menu, PC_MENU_INPUT_ACCEPT, 0);
+    MT_EQ(PcMenu_CaptureKey(&menu, SDLK_F10), 0);
+    MT_CHECK(PcMenu_IsCapturing(&menu));                          // still waiting for a usable key
+    MT_CHECK(strstr(PcMenu_Message(&menu), "can't be a game button") != NULL);
+    MT_EQ(PcMenu_CaptureKey(&menu, SDLK_ESCAPE), 0);
+    MT_EQ(menu.keybinds.key[KEYBIND_A], SDLK_z);
+    // Esc cancels the capture without leaving the page, a second Esc leaves the page.
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_BACK, 0), 0);
+    MT_CHECK(!PcMenu_IsCapturing(&menu) && menu.page == PC_MENU_PAGE_CONTROLS);
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_BACK, 0), 0);
+    MT_EQ(menu.page, PC_MENU_PAGE_MAIN);
+    MT_CHECK(menu.open);
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_BACK, 0), PC_MENU_CLOSED); // and the menu closes as before
+}
+
+MT_TEST(controls_page_restores_the_defaults_and_goes_back)
+{
+    struct PcMenuState menu = ControlsMenu();
+
+    PcMenu_Input(&menu, PC_MENU_INPUT_ACCEPT, 0);
+    PcMenu_CaptureKey(&menu, SDLK_q);
+    menu.controlsCursor = KEYBIND_COUNT;                          // Restore defaults
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_ACCEPT, 0), PC_MENU_CHANGED_KEYS);
+    for (int i = 0; i < KEYBIND_COUNT; i++)
+        MT_CHECK(menu.keybinds.key[i] == Keybinds_DefaultKey(i) && !menu.keybinds.custom[i]);
+    menu.controlsCursor = KEYBIND_COUNT + 1;                      // Back
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_ACCEPT, 0), 0);
+    MT_EQ(menu.page, PC_MENU_PAGE_MAIN);
+    MT_EQ(menu.cursor, PC_MENU_CONTROLS);
+}
+
+MT_TEST(the_menu_itself_does_not_follow_the_bindings)
+{
+    // Whatever the player binds, the menu's own inputs are fixed: the model has no key codes at all in
+    // its navigation (PcMenuInput), and the cursor wraps over every row including Restore and Back.
+    struct PcMenuState menu = ControlsMenu();
+
+    for (int i = 0; i < KEYBIND_COUNT; i++)
+    {
+        PcMenu_Input(&menu, PC_MENU_INPUT_ACCEPT, 0);
+        PcMenu_CaptureKey(&menu, SDLK_q + i + 100); // an unrelated run of keys
+        PcMenu_Input(&menu, PC_MENU_INPUT_DOWN, 0);
+    }
+    MT_EQ(menu.controlsCursor, KEYBIND_COUNT);
+    PcMenu_Input(&menu, PC_MENU_INPUT_DOWN, 0);
+    PcMenu_Input(&menu, PC_MENU_INPUT_DOWN, 0);
+    MT_EQ(menu.controlsCursor, 0);                                // wrapped
+    MT_CHECK(menu.open);
+}
+
 int main(void)
 {
     MT_RUN(defaults_are_1080p_windowed_high);
@@ -615,5 +776,11 @@ int main(void)
     MT_RUN(benchmark_statistics);
     MT_RUN(benchmark_timeline);
     MT_RUN(benchmark_without_a_field);
+    MT_RUN(controls_page_lists_every_action_with_its_key);
+    MT_RUN(controls_page_rebinds_a_key_and_reports_the_change);
+    MT_RUN(controls_page_warns_of_a_conflict_and_swaps_only_when_accepted);
+    MT_RUN(controls_page_refuses_the_keys_that_reach_the_menu);
+    MT_RUN(controls_page_restores_the_defaults_and_goes_back);
+    MT_RUN(the_menu_itself_does_not_follow_the_bindings);
     return MT_REPORT();
 }

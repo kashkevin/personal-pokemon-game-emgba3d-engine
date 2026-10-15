@@ -701,7 +701,7 @@ static void UiUpper(char *out, size_t size, const char *text)
 }
 
 static void DrawSettingsSheet(const char *title, const struct DioramaOverlayRow *rows, int count,
-                              int confirmSeconds)
+                              int confirmSeconds, const char *message, const char *backLabel)
 {
     static const char *const sChooseKeys[] = {"^", "_"};
     static const char *const sChangeKeys[] = {"{", "}"};
@@ -800,11 +800,36 @@ static void DrawSettingsSheet(const char *title, const struct DioramaOverlayRow 
         return;
     }
 
+    /* A prompt or result of the page (the Controls page): up to two lines in a box under the sheet. */
+    if (message != NULL)
+    {
+        char first[96], second[96];
+        const char *bar = strchr(message, '|');
+        int boxWidth = width < 420 ? 420 : width;
+        int boxHeight = 12 + LINE_HEIGHT * (bar != NULL ? 2 : 1);
+        int boxX;
+        int boxY = y + height + 4;
+        int inner[4];
+
+        SDL_snprintf(first, sizeof(first), "%.*s", bar != NULL ? (int)(bar - message) : (int)sizeof(first), message);
+        SDL_snprintf(second, sizeof(second), "%s", bar != NULL ? bar + 1 : "");
+        if (boxWidth > sWidth - 16)
+            boxWidth = sWidth - 16;
+        boxX = (sWidth - boxWidth) / 2;
+        if (boxY + boxHeight > sHeight - 4)
+            boxY = sHeight - 4 - boxHeight;
+        UiFieldFrame(boxX, boxY, boxWidth, boxHeight, PAPER, PAPER_LO, inner);
+        UiText(FONT_NORMAL, inner[0] + 6, inner[1] + 2, first, TEXT, TEXT_SH);
+        if (bar != NULL)
+            UiText(FONT_NORMAL, inner[0] + 6, inner[1] + 2 + LINE_HEIGHT, second, TEXT_MUTED, TEXT_SH);
+        return;
+    }
+
     /* The prompts in their own plate under the sheet, right-aligned. */
     {
         struct Shape plate = {0};
         int hints = UiHintWidth(sChooseKeys, 2, "Choose") + 8 + UiHintWidth(sChangeKeys, 2, "Change")
-                  + 8 + UiHintWidth(sBackKeys, 1, "Close");
+                  + 8 + UiHintWidth(sBackKeys, 1, backLabel != NULL ? backLabel : "Close");
         int plateX;
         int plateY = y + height + 4;
         int penX;
@@ -816,7 +841,7 @@ static void DrawSettingsSheet(const char *title, const struct DioramaOverlayRow 
         UiPaint(&plate, plateX, plateY, PAPER, FIELD_INK, 0, PAPER_LO, 1);
         penX = UiHint(plateX + 6, plateY + 4, sChooseKeys, 2, "Choose") + 8;
         penX = UiHint(penX, plateY + 4, sChangeKeys, 2, "Change") + 8;
-        UiHint(penX, plateY + 4, sBackKeys, 1, "Close");
+        UiHint(penX, plateY + 4, sBackKeys, 1, backLabel != NULL ? backLabel : "Close");
     }
 }
 
@@ -848,8 +873,9 @@ static void UiSignature(char *out, size_t size, const struct DioramaOverlayMenu 
 
     if (menu == NULL || used >= size)
         return;
-    used += (size_t)SDL_snprintf(out + used, size - used, "%s %d %u|", menu->title, menu->confirmSeconds,
-                                 (FrameCount() / 16u) % 2u);
+    used += (size_t)SDL_snprintf(out + used, size - used, "%s %d %u|%s|%s|", menu->title, menu->confirmSeconds,
+                                 (FrameCount() / 16u) % 2u, menu->message != NULL ? menu->message : "",
+                                 menu->backLabel != NULL ? menu->backLabel : "");
     for (int i = 0; i < menu->count && used < size; i++)
         used += (size_t)SDL_snprintf(out + used, size - used, "%s=%s%c%c|", menu->rows[i].label,
                                      menu->rows[i].value, menu->rows[i].selected ? '*' : ' ',
@@ -925,7 +951,7 @@ void DioramaPCOverlay_Draw(const struct DioramaOverlayMenu *menu, const char *co
         if (notice != NULL)
             DrawNotice(notice, hints);
         if (menu != NULL)
-            DrawSettingsSheet(menu->title, menu->rows, menu->count, menu->confirmSeconds);
+            DrawSettingsSheet(menu->title, menu->rows, menu->count, menu->confirmSeconds, menu->message, menu->backLabel);
         if (corner != NULL)
             DrawCorner(corner);
         SDL_strlcpy(sShown, signature, sizeof(sShown));

@@ -35,6 +35,7 @@
 #include "platform/mp_bridge.h"
 #include "platform/benchmark.h"
 #include "platform/display_settings.h"
+#include "platform/keybinds.h"
 #include "platform/pc_menu.h"
 #include "platform/png_write.h"
 #include "platform/memory_info.h"
@@ -103,6 +104,7 @@ static int sLegacyFullscreen = -1;
 static int sLegacyWindowScale = -1;
 static struct PcMenuState sPcMenu; // F10: the PC settings menu (3D build)
 static u16 keyboardKeys;           // the GBA buttons held on the keyboard (defined below)
+static struct Keybinds sKeybinds;  // the keyboard bindings (key.* lines; include/platform/keybinds.h)
 static bool sShowFrameRate;        // pokeemerald.cfg showFrameRate=1
 static int sBenchmarkSeconds;      // --benchmark [seconds per resolution]
 // --bench-name, --bench-log, --bench-csv, --bench-heights (include/platform/benchmark.h)
@@ -136,6 +138,7 @@ extern void DoSoftReset(void);
 
 int DoMain(void *param);
 void ProcessEvents(void);
+static int SelfTestKeybinds(void);
 void VDraw(SDL_Texture *texture);
 
 static void ReadSaveFile(const char *path);
@@ -901,6 +904,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_PartyOrder()); // src/platform/native_selftest.c (KNOWN_ISSUES N37)
         else if (strcmp(argv[i], "--selftest-battle-names") == 0)
             exit(NativeSelfTest_BattleNames()); // src/platform/native_selftest.c (KNOWN_ISSUES N38)
+        else if (strcmp(argv[i], "--selftest-keybinds") == 0)
+            exit(SelfTestKeybinds()); // the keyboard bindings through the real event loop
         else if (strcmp(argv[i], "--selftest-cry-stop") == 0)
             exit(NativeSelfTest_CryStop()); // src/platform/native_selftest.c (KNOWN_ISSUES N39)
         else if (strcmp(argv[i], "--selftest-shake-anim") == 0)
@@ -947,6 +952,18 @@ static void ReadSaveFile(const char *path)
     SDL_Log("Loaded %u bytes of save data from %s", (unsigned)bytesRead, path);
 }
 
+static const char *KeyCodeToName(int code)
+{
+    return SDL_GetKeyName((SDL_Keycode)code);
+}
+
+static int KeyNameToCode(const char *name)
+{
+    return (int)SDL_GetKeyFromName(name);
+}
+
+static const struct KeybindNames sKeyNames = {KeyCodeToName, KeyNameToCode};
+
 static void ReadConfigFile(void)
 {
     FILE *configFile = fopen(sConfigPath, "r");
@@ -957,11 +974,12 @@ static void ReadConfigFile(void)
 #endif
 
     DisplaySettings_Defaults(&sDisplay);
+    Keybinds_Defaults(&sKeybinds);
     if (configFile == NULL)
         return;
     while (fgets(line, sizeof(line), configFile) != NULL)
     {
-        if (DisplaySettings_ParseLine(&sDisplay, line))
+        if (DisplaySettings_ParseLine(&sDisplay, line) || Keybinds_ParseLine(&sKeybinds, line, &sKeyNames))
             continue;
         if (sscanf(line, "showFrameRate=%u", &value) == 1)
             sShowFrameRate = value != 0;
@@ -1016,6 +1034,7 @@ static void ReadConfigFile(void)
     }
     fclose(configFile);
     DisplaySettings_Finish(&sDisplay);
+    Keybinds_Finish(&sKeybinds);
     // A file written before resolution= and displayMode= existed.
     DisplaySettings_ApplyLegacy(&sDisplay, sLegacyFullscreen, sLegacyWindowScale);
     sPlatformSettings[PLATFORM_SETTING_FULLSCREEN] = sDisplay.mode != DISPLAY_MODE_WINDOWED;
@@ -1048,6 +1067,7 @@ static void StoreConfigFile(void)
     if (stored.resolutionKept && DisplaySettings_LegacyWindowScale(&stored) != 0)
         fprintf(configFile, "windowScale=%u\n", DisplaySettings_LegacyWindowScale(&stored));
     DisplaySettings_Write(&stored, configFile);
+    Keybinds_Write(&sKeybinds, configFile, &sKeyNames);
     if (sShowFrameRate)
         fprintf(configFile, "showFrameRate=1\n");
     fprintf(configFile, "integerScale=%u\n", sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE]);
@@ -1305,6 +1325,20 @@ static void ApplyPcMenuResult(unsigned int bits)
         DioramaTreeSprites_SetEnabled(sTreeStyle3ds);
         store = true;
     }
+    if (bits & PC_MENU_CHANGED_KEYS)
+    {
+        // New bindings: no old key may stay held (its release would now find another action).
+        sKeybinds = sPcMenu.keybinds;
+        keyboardKeys = 0;
+        if (speedUp)
+        {
+            speedUp = false;
+            timeScale = 1.0;
+            SDL_ClearQueuedAudio(sdlAudioDevice);
+            SDL_PauseAudioDevice(sdlAudioDevice, 0);
+        }
+        store = true;
+    }
     if (store)
         StoreConfigFile();
 }
@@ -1368,6 +1402,7 @@ static bool HandlePcMenuKey(const SDL_KeyboardEvent *key)
             PcMenu_Open(&sPcMenu, &sDisplay, sPlatformSettings[PLATFORM_SETTING_VSYNC],
                         sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE], sShowFrameRate, true,
                         sCameraMode == DIORAMA_CAMERA_DIORAMA, DioramaTreeSprites_Enabled());
+            PcMenu_SetKeybinds(&sPcMenu, &sKeybinds, &sKeyNames);
             UpdateMenuMemory(true);
             keyboardKeys = 0; // no button stays held for the game while the menu is open
         }
@@ -1375,6 +1410,18 @@ static bool HandlePcMenuKey(const SDL_KeyboardEvent *key)
     }
     if (!sPcMenu.open)
         return false;
+    // Controls page, waiting for the key to bind: every key but Esc (cancel) and F11 (fullscreen,
+    // as everywhere) is the answer. F10 was handled above, so the menu can always be left.
+    if (PcMenu_IsCapturing(&sPcMenu) && key->keysym.sym != SDLK_F11)
+    {
+        if (key->repeat != 0)
+            return true;
+        if (key->keysym.sym == SDLK_ESCAPE)
+            ApplyPcMenuResult(PcMenu_Input(&sPcMenu, PC_MENU_INPUT_BACK, SDL_GetTicks()));
+        else
+            ApplyPcMenuResult(PcMenu_CaptureKey(&sPcMenu, (int)key->keysym.sym));
+        return true;
+    }
     switch (key->keysym.sym)
     {
     case SDLK_UP:
@@ -1488,7 +1535,9 @@ static void DrawPcOverlay(int outputWidth, int outputHeight)
             view[i].selected = rows[i].selected;
             view[i].adjustable = rows[i].adjustable;
         }
-        menu.title = "Display & Graphics";
+        menu.title = PcMenu_Title(&sPcMenu);
+        menu.message = PcMenu_Message(&sPcMenu);
+        menu.backLabel = PcMenu_BackLabel(&sPcMenu);
         menu.rows = view;
         menu.confirmSeconds = PcMenu_ConfirmSecondsLeft(&sPcMenu, SDL_GetTicks());
     }
@@ -2008,23 +2057,14 @@ JNIEXPORT jint JNICALL Java_com_pokeemerald_experimental_GbaControlsView_getPlat
 #endif
 
 
-// Key mappings
-#define KEY_A_BUTTON      SDLK_z
-#define KEY_B_BUTTON      SDLK_x
-#define KEY_START_BUTTON  SDLK_RETURN
-#define KEY_SELECT_BUTTON SDLK_BACKSLASH
-#define KEY_L_BUTTON      SDLK_a
-#define KEY_R_BUTTON      SDLK_s
-#define KEY_DPAD_UP       SDLK_UP
-#define KEY_DPAD_DOWN     SDLK_DOWN
-#define KEY_DPAD_LEFT     SDLK_LEFT
-#define KEY_DPAD_RIGHT    SDLK_RIGHT
-
-#define HANDLE_KEYUP(key) \
-case KEY_##key:  keyboardKeys &= ~key; break;
-
-#define HANDLE_KEYDOWN(key) \
-case KEY_##key:  keyboardKeys |= key; break;
+// Key mappings: the bindings (sKeybinds) name the key of each action; this is the button each
+// of the first KEYBIND_GAME_BUTTONS actions presses.
+static const u16 sKeybindButtons[KEYBIND_GAME_BUTTONS] = {
+    [KEYBIND_A] = A_BUTTON, [KEYBIND_B] = B_BUTTON, [KEYBIND_START] = START_BUTTON,
+    [KEYBIND_SELECT] = SELECT_BUTTON, [KEYBIND_L] = L_BUTTON, [KEYBIND_R] = R_BUTTON,
+    [KEYBIND_UP] = DPAD_UP, [KEYBIND_DOWN] = DPAD_DOWN, [KEYBIND_LEFT] = DPAD_LEFT,
+    [KEYBIND_RIGHT] = DPAD_RIGHT,
+};
 
 static u16 keyboardKeys;
 
@@ -2356,29 +2396,20 @@ void ProcessEvents(void)
             break;
 #endif
         case SDL_KEYUP:
-            switch (event.key.keysym.sym)
+        {
+            int action = Keybinds_ActionForKey(&sKeybinds, (int)event.key.keysym.sym);
+
+            if (action >= 0 && action < KEYBIND_GAME_BUTTONS)
+                keyboardKeys &= ~sKeybindButtons[action];
+            else if (action == KEYBIND_FAST_FORWARD && speedUp)
             {
-            HANDLE_KEYUP(A_BUTTON)
-            HANDLE_KEYUP(B_BUTTON)
-            HANDLE_KEYUP(START_BUTTON)
-            HANDLE_KEYUP(SELECT_BUTTON)
-            HANDLE_KEYUP(L_BUTTON)
-            HANDLE_KEYUP(R_BUTTON)
-            HANDLE_KEYUP(DPAD_UP)
-            HANDLE_KEYUP(DPAD_DOWN)
-            HANDLE_KEYUP(DPAD_LEFT)
-            HANDLE_KEYUP(DPAD_RIGHT)
-            case SDLK_SPACE:
-                if (speedUp)
-                {
-                    speedUp = false;
-                    timeScale = 1.0;
-                    SDL_ClearQueuedAudio(sdlAudioDevice);
-                    SDL_PauseAudioDevice(sdlAudioDevice, 0);
-                }
-                break;
+                speedUp = false;
+                timeScale = 1.0;
+                SDL_ClearQueuedAudio(sdlAudioDevice);
+                SDL_PauseAudioDevice(sdlAudioDevice, 0);
             }
             break;
+        }
         case SDL_KEYDOWN:
 #ifdef ENABLE_DIORAMA
             // F10 and, while the PC settings menu is open, its keys.
@@ -2388,18 +2419,30 @@ void ProcessEvents(void)
             if (HandlePhotoKey(&event.key))
                 break;
 #endif
+            {
+                // The bound keys (Ctrl+R and Ctrl+P stay the reset chord and pause, whatever is bound).
+                int action = Keybinds_ActionForKey(&sKeybinds, (int)event.key.keysym.sym);
+                bool chord = (event.key.keysym.sym == SDLK_r || event.key.keysym.sym == SDLK_p)
+                          && (event.key.keysym.mod & (KMOD_LCTRL | KMOD_RCTRL));
+
+                if (action >= 0 && action < KEYBIND_GAME_BUTTONS && !chord)
+                {
+                    keyboardKeys |= sKeybindButtons[action];
+                    break;
+                }
+                if (action == KEYBIND_FAST_FORWARD && !chord)
+                {
+                    if (!speedUp)
+                    {
+                        speedUp = true;
+                        timeScale = 5.0;
+                        SDL_PauseAudioDevice(sdlAudioDevice, 1);
+                    }
+                    break;
+                }
+            }
             switch (event.key.keysym.sym)
             {
-            HANDLE_KEYDOWN(A_BUTTON)
-            HANDLE_KEYDOWN(B_BUTTON)
-            HANDLE_KEYDOWN(START_BUTTON)
-            HANDLE_KEYDOWN(SELECT_BUTTON)
-            HANDLE_KEYDOWN(L_BUTTON)
-            HANDLE_KEYDOWN(R_BUTTON)
-            HANDLE_KEYDOWN(DPAD_UP)
-            HANDLE_KEYDOWN(DPAD_DOWN)
-            HANDLE_KEYDOWN(DPAD_LEFT)
-            HANDLE_KEYDOWN(DPAD_RIGHT)
             case SDLK_r:
                 // Ctrl+R: hold A+B+START+SELECT for one frame (the chord is awkward
                 // on a keyboard). The game decides what it means: this multiplayer
@@ -2428,14 +2471,6 @@ void ProcessEvents(void)
                     sDisplay.modeKept = true;
                     ApplyDisplaySettings(true);
                     StoreConfigFile();
-                }
-                break;
-            case SDLK_SPACE:
-                if (!speedUp)
-                {
-                    speedUp = true;
-                    timeScale = 5.0;
-                    SDL_PauseAudioDevice(sdlAudioDevice, 1);
                 }
                 break;
 #ifdef ENABLE_DIORAMA
@@ -2531,6 +2566,144 @@ void ProcessEvents(void)
             break;
         }
     }
+}
+
+// --selftest-keybinds: the bindings through the real event loop (ReadConfigFile, ProcessEvents,
+// Platform_GetKeyInput, StoreConfigFile) with synthetic key events and a scratch settings file.
+static int sKeyChecks, sKeyFailures;
+
+static void ExpectKeys(const char *what, bool ok)
+{
+    sKeyChecks++;
+    if (!ok)
+        sKeyFailures++;
+    printf("%s %s\n", ok ? "ok  " : "FAIL", what);
+}
+
+static void KeyEvent(SDL_Keycode sym, bool down, Uint16 mod)
+{
+    SDL_Event event;
+
+    SDL_zero(event);
+    event.type = down ? SDL_KEYDOWN : SDL_KEYUP;
+    event.key.state = down ? SDL_PRESSED : SDL_RELEASED;
+    event.key.keysym.sym = sym;
+    event.key.keysym.scancode = SDL_GetScancodeFromKey(sym);
+    event.key.keysym.mod = mod;
+    SDL_PushEvent(&event);
+    ProcessEvents();
+}
+
+static void WriteScratchConfig(const char *text)
+{
+    FILE *file = fopen(sConfigPath, "w");
+
+    if (file != NULL)
+    {
+        fputs(text, file);
+        fclose(file);
+    }
+}
+
+static int SelfTestKeybinds(void)
+{
+    char stored[1024] = "";
+    FILE *file;
+    size_t length;
+
+    SDL_setenv("SDL_VIDEODRIVER", "dummy", 1);
+    if (SDL_Init(SDL_INIT_VIDEO) != 0)
+    {
+        printf("FAIL SDL could not start: %s\n", SDL_GetError());
+        return 1;
+    }
+    SDL_strlcpy(sConfigPath, "keybinds-selftest.cfg", sizeof(sConfigPath));
+    printf("keyboard bindings (key.* lines of the settings file)\n");
+
+    // Defaults: the keys of every earlier build.
+    remove(sConfigPath);
+    ReadConfigFile();
+    KeyEvent(SDLK_z, true, 0);
+    KeyEvent(SDLK_UP, true, 0);
+    ExpectKeys("default Z is A and Up is Up", Platform_GetKeyInput() == (A_BUTTON | DPAD_UP));
+    KeyEvent(SDLK_z, false, 0);
+    KeyEvent(SDLK_UP, false, 0);
+    ExpectKeys("releasing them releases the buttons", Platform_GetKeyInput() == 0);
+    KeyEvent(SDLK_RETURN, true, 0);
+    KeyEvent(SDLK_BACKSLASH, true, 0);
+    ExpectKeys("default Enter is Start, \\ is Select", Platform_GetKeyInput() == (START_BUTTON | SELECT_BUTTON));
+    KeyEvent(SDLK_RETURN, false, 0);
+    KeyEvent(SDLK_BACKSLASH, false, 0);
+    KeyEvent(SDLK_SPACE, true, 0);
+    ExpectKeys("default Space holds fast forward", speedUp && timeScale > 1.0);
+    KeyEvent(SDLK_SPACE, false, 0);
+    ExpectKeys("releasing Space ends it", !speedUp && timeScale == 1.0);
+
+    // A settings file with bindings (and settings of other kinds left alone).
+    WriteScratchConfig("volume=7\nkey.a=Q\nkey.b=Left Shift\nkey.fastforward=Tab\nkey.up=W\nkey.l=Escape\nkey.r=Nonsense\n");
+    ReadConfigFile();
+    ExpectKeys("the file's A key is Q", sKeybinds.key[KEYBIND_A] == SDLK_q);
+    ExpectKeys("a reserved key (Esc) or an unknown name in the file is ignored",
+               sKeybinds.key[KEYBIND_L] == SDLK_a && sKeybinds.key[KEYBIND_R] == SDLK_s);
+    KeyEvent(SDLK_q, true, 0);
+    ExpectKeys("Q presses A", Platform_GetKeyInput() == A_BUTTON);
+    KeyEvent(SDLK_q, false, 0);
+    KeyEvent(SDLK_z, true, 0);
+    ExpectKeys("the old Z does nothing now", Platform_GetKeyInput() == 0);
+    KeyEvent(SDLK_z, false, 0);
+    KeyEvent(SDLK_LSHIFT, true, 0);
+    KeyEvent(SDLK_w, true, 0);
+    ExpectKeys("Left Shift presses B and W presses Up", Platform_GetKeyInput() == (B_BUTTON | DPAD_UP));
+    KeyEvent(SDLK_LSHIFT, false, 0);
+    KeyEvent(SDLK_w, false, 0);
+    KeyEvent(SDLK_UP, true, 0);
+    ExpectKeys("the arrow that was Up does nothing once Up is W", Platform_GetKeyInput() == 0);
+    KeyEvent(SDLK_UP, false, 0);
+    KeyEvent(SDLK_TAB, true, 0);
+    ExpectKeys("Tab holds fast forward", speedUp);
+    KeyEvent(SDLK_TAB, false, 0);
+    ExpectKeys("and releasing it ends it", !speedUp);
+    KeyEvent(SDLK_SPACE, true, 0);
+    ExpectKeys("Space no longer does", !speedUp);
+    KeyEvent(SDLK_SPACE, false, 0);
+    KeyEvent(SDLK_ESCAPE, true, 0);
+    ExpectKeys("Esc is never a game button", Platform_GetKeyInput() == 0);
+    KeyEvent(SDLK_ESCAPE, false, 0);
+
+    // The reset chord stays Ctrl+R whatever is bound to R.
+    WriteScratchConfig("key.a=R\n");
+    ReadConfigFile();
+    sSoftResetChordFrames = 0;
+    KeyEvent(SDLK_r, true, KMOD_LCTRL);
+    ExpectKeys("Ctrl+R is still the reset chord, not the A button", sSoftResetChordFrames == 1 && Platform_GetKeyInput() == 0);
+    KeyEvent(SDLK_r, false, 0);
+    KeyEvent(SDLK_r, true, 0);
+    ExpectKeys("a plain R is the A button", Platform_GetKeyInput() == A_BUTTON);
+    KeyEvent(SDLK_r, false, 0);
+
+    // Stored: only what differs from the defaults, and other lines are kept by StoreConfigFile.
+    WriteScratchConfig("key.a=Q\nkey.b=X\n");
+    ReadConfigFile();
+    StoreConfigFile();
+    file = fopen(sConfigPath, "r");
+    length = file != NULL ? fread(stored, 1, sizeof(stored) - 1, file) : 0;
+    stored[length] = '\0';
+    if (file != NULL)
+        fclose(file);
+    ExpectKeys("the changed binding is written back (key.a=Q)", strstr(stored, "key.a=Q\n") != NULL);
+    ExpectKeys("a default binding is not written (key.b=X was the default)", strstr(stored, "key.b") == NULL);
+    ReadConfigFile();
+    ExpectKeys("what was written reads back", sKeybinds.key[KEYBIND_A] == SDLK_q && sKeybinds.key[KEYBIND_B] == SDLK_x);
+
+    // A file with no bindings: back to the defaults.
+    WriteScratchConfig("volume=3\n");
+    ReadConfigFile();
+    ExpectKeys("without key lines the defaults are back", sKeybinds.key[KEYBIND_A] == SDLK_z && !sKeybinds.custom[KEYBIND_A]);
+
+    remove(sConfigPath);
+    printf("selftest-keybinds: %d checks, %d failed\n", sKeyChecks, sKeyFailures);
+    SDL_Quit();
+    return sKeyFailures ? 1 : 0;
 }
 
 #ifdef _WIN32
@@ -2743,6 +2916,15 @@ void SoftReset(u32 resetFlags)
 bool8 Platform_NativeUiPcMenuOpen(void)
 {
     return sPcMenu.open;
+}
+
+void Platform_NativeUiKeyLabel(int action, char *out, int size)
+{
+    if (size <= 0)
+        return;
+    out[0] = '\0';
+    if (action >= 0 && action < KEYBIND_COUNT)
+        Keybinds_KeyLabel(sKeybinds.key[action], &sKeyNames, out, size);
 }
 
 void Platform_NativeUiSaveWrites(u32 *written, u32 *failed, bool8 *pending)

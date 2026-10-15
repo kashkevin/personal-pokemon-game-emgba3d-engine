@@ -1126,6 +1126,9 @@ bool32 Window_NativeUiShown(u8 windowId);
 
 /* the PC's F10 settings menu is open (the game gets no buttons meanwhile) */
 bool8 Platform_NativeUiPcMenuOpen(void);
+/* the keyboard key now bound to a game button, as a prompt shows it ("Z", "ENTER", "\\"...);
+ * action is a KeybindAction (include/platform/keybinds.h); empty when unknown */
+void Platform_NativeUiKeyLabel(int action, char *out, int size);
 /* save file writes since start-up: written, failed; *pending: an image waits for the next write */
 void Platform_NativeUiSaveWrites(u32 *written, u32 *failed, bool8 *pending);
 

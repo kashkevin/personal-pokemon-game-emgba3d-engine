@@ -27,6 +27,8 @@ struct DioramaOverlayMenu
     const struct DioramaOverlayRow *rows;
     int count;
     int confirmSeconds; /* seconds left to keep a new display setting; -1: none waiting */
+    const char *message;   /* one or two lines ('|' splits them) in a box under the rows; NULL: none */
+    const char *backLabel; /* what Esc does on this sheet ("Close", "Back"); NULL: Close */
 };
 
 struct DioramaOverlayExtras

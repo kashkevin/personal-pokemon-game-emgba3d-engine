@@ -9,6 +9,7 @@
 
 #include "native_ui/ui_gfx.h"
 #include "native_ui/ui_widgets.h"
+#include "platform/keybinds.h"
 
 static enum UiDevice sPromptDevice = UI_DEVICE_KEYBOARD;
 static bool sPromptDeviceForced;
@@ -400,19 +401,31 @@ static int PadButtonWidth(const char *label)
 /* The game's keys (src/platform/sdl2.c) and its XInput mapping (A = A, the
  * pad's X = B, Back = Select, LB / RB = L / R); Tab / the pad's Y (not game
  * buttons) open a screen's details view. */
+/* The keyboard key bound to a game button (the Controls page of the F10 menu), else the default. */
+static const char *KeyGlyph(int bind, const char *fallback, int slot)
+{
+    static char sLabels[2][24];
+
+    Platform_NativeUiKeyLabel(bind, sLabels[slot], sizeof(sLabels[slot]));
+    return sLabels[slot][0] != '\0' ? sLabels[slot] : fallback;
+}
+
 static int Glyphs(enum UiAction action, const char *out[2])
 {
     bool pad = sPromptDevice == UI_DEVICE_PAD;
 
     switch (action)
     {
-    case UI_ACT_CONFIRM: out[0] = pad ? "A" : "Z"; return 1;
-    case UI_ACT_CANCEL: out[0] = "X"; return 1;
-    case UI_ACT_START: out[0] = pad ? "START" : "ENTER"; return 1;
-    case UI_ACT_SELECT: out[0] = pad ? "BACK" : "\\"; return 1;
-    case UI_ACT_L: out[0] = pad ? "LB" : "A"; return 1;
-    case UI_ACT_R: out[0] = pad ? "RB" : "S"; return 1;
-    case UI_ACT_TABS: out[0] = pad ? "LB" : "A"; out[1] = pad ? "RB" : "S"; return 2;
+    case UI_ACT_CONFIRM: out[0] = pad ? "A" : KeyGlyph(KEYBIND_A, "Z", 0); return 1;
+    case UI_ACT_CANCEL: out[0] = pad ? "X" : KeyGlyph(KEYBIND_B, "X", 0); return 1;
+    case UI_ACT_START: out[0] = pad ? "START" : KeyGlyph(KEYBIND_START, "ENTER", 0); return 1;
+    case UI_ACT_SELECT: out[0] = pad ? "BACK" : KeyGlyph(KEYBIND_SELECT, "\\", 0); return 1;
+    case UI_ACT_L: out[0] = pad ? "LB" : KeyGlyph(KEYBIND_L, "A", 0); return 1;
+    case UI_ACT_R: out[0] = pad ? "RB" : KeyGlyph(KEYBIND_R, "S", 0); return 1;
+    case UI_ACT_TABS:
+        out[0] = pad ? "LB" : KeyGlyph(KEYBIND_L, "A", 0);
+        out[1] = pad ? "RB" : KeyGlyph(KEYBIND_R, "S", 1);
+        return 2;
     case UI_ACT_MOVE: out[0] = UI_CAPS_LEFT; out[1] = UI_CAPS_RIGHT; return 2;
     case UI_ACT_SCROLL: out[0] = UI_CAPS_UP; out[1] = UI_CAPS_DOWN; return 2;
     case UI_ACT_PC_MENU: out[0] = "F10"; return 1;

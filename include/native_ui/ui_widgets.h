@@ -150,4 +150,7 @@ void UiW_MessagePage(const uint8_t *text, int printed, int x, int y, int width, 
 /* ... lineH pixels from one line to the next (16 above) */
 void UiW_MessagePageEx(const uint8_t *text, int printed, int x, int y, int width, int maxLines, int lineH);
 
+/* src/platform/sdl2.c: the key bound to a game button for the prompts (see ui_engine.h) */
+void Platform_NativeUiKeyLabel(int action, char *out, int size);
+
 #endif // GUARD_NATIVE_UI_WIDGETS_H
