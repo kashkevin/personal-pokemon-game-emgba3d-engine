@@ -12,13 +12,14 @@ static const uint16_t sButtons[] = {
     GAMEPAD_LEFT_SHOULDER, GAMEPAD_RIGHT_SHOULDER, GAMEPAD_A, GAMEPAD_B, GAMEPAD_X, GAMEPAD_Y,
 };
 
-// The mapping as sdl2.c wrote it before (buttons only), kept here as the oracle.
+// The mapping as sdl2.c wrote it before (buttons only), kept here as the oracle, plus Update 24's one addition (B = the B key).
 static uint16_t OldButtons(uint16_t w)
 {
     uint16_t k = 0;
 
     k |= (w & GAMEPAD_A) >> 12;
     k |= (w & GAMEPAD_X) >> 13;
+    k |= (w & GAMEPAD_B) >> 12;   // Update 24: the right face button is the GBA's B as well (it used to do nothing)
     k |= (w & GAMEPAD_START) >> 1;
     k |= (w & GAMEPAD_BACK) >> 3;
     k |= (w & GAMEPAD_LEFT_SHOULDER) << 1;
@@ -51,7 +52,7 @@ MT_TEST(all_4096_button_combinations_match_the_old_arithmetic)
 MT_TEST(each_button_is_the_key_it_always_was)
 {
     struct { uint16_t pad; uint16_t key; } table[] = {
-        {GAMEPAD_A, 0x0001}, {GAMEPAD_X, 0x0002}, {GAMEPAD_BACK, 0x0004}, {GAMEPAD_START, 0x0008},
+        {GAMEPAD_A, 0x0001}, {GAMEPAD_X, 0x0002}, {GAMEPAD_B, 0x0002}, {GAMEPAD_BACK, 0x0004}, {GAMEPAD_START, 0x0008},
         {GAMEPAD_DPAD_RIGHT, 0x0010}, {GAMEPAD_DPAD_LEFT, 0x0020}, {GAMEPAD_DPAD_UP, 0x0040},
         {GAMEPAD_DPAD_DOWN, 0x0080}, {GAMEPAD_RIGHT_SHOULDER, 0x0100}, {GAMEPAD_LEFT_SHOULDER, 0x0200},
     };
@@ -62,7 +63,7 @@ MT_TEST(each_button_is_the_key_it_always_was)
 
         MT_EQ(Gamepad_MapKeys(&in).keys, table[i].key);
     }
-    struct GamepadInput unused = {GAMEPAD_B | 0x0040 | 0x0080, 0, 0, 0};   // B and the thumb clicks: no game button
+    struct GamepadInput unused = {0x0040 | 0x0080, 0, 0, 0};   // the thumb clicks: no game button
     MT_EQ(Gamepad_MapKeys(&unused).keys, 0);
 }
 
