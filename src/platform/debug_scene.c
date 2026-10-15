@@ -1,7 +1,7 @@
 /*
  * Development aid: see include/platform/debug_scene.h. Project-owned.
  */
-#include <SDL.h>
+#include <SDL2/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
