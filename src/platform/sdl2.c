@@ -2188,8 +2188,11 @@ void Platform_QueueAudio(float *audioBuffer, s32 samplesPerFrame)
         int floatCount = samplesPerFrame / sizeof(float);
         float adjustedAudio[floatCount];
         // The mixer leaves output headroom, so full volume sounds quiet. Apply a
-        // modest make-up gain and hard-clamp to [-1,1] so loud passages can't clip.
-        float volume = (sPlatformSettings[PLATFORM_SETTING_VOLUME] / 10.0f) * 2.0f;
+        // make-up gain and hard-clamp to [-1,1] so loud passages can't clip. Measured with the audio audit
+        // (PKMN_DEBUG_SCENE=audio, all 479 sounds): music peaks 0.06 at the median and 0.115 at most, a sound effect
+        // 0.04 / 0.10, so the old gain of 2 left music near -18 dBFS peak. Gain 4 puts the loudest music at 0.46 and
+        // music plus the loudest effect at 0.86: still under full scale, no clipping in the whole library.
+        float volume = (sPlatformSettings[PLATFORM_SETTING_VOLUME] / 10.0f) * 4.0f;
         for (int i = 0; i < floatCount; i++)
         {
             float s = audioBuffer[i] * volume;
