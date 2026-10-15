@@ -5,6 +5,7 @@
 #include "main.h"
 #include "multiplayer_extras.h"
 #include "overworld.h"
+#include "secret_base.h"
 
 STATIC_ASSERT(sizeof(struct MultiplayerExtrasMailbox) == MP_EXTRAS_MAILBOX_BYTES, ExtrasMailboxIs384Bytes);
 STATIC_ASSERT(offsetof(struct MultiplayerExtrasMailbox, local) == 12, ExtrasLocalOffset);
@@ -88,8 +89,7 @@ static void ApplyInbound(void)
 
 void MultiplayerExtras_Tick(bool32 fieldReady, bool32 connected)
 {
-    (void)fieldReady;
-    if (!SaveLoaded())
+        if (!SaveLoaded())
         return;
     if (!connected)
     {
@@ -103,6 +103,11 @@ void MultiplayerExtras_Tick(bool32 fieldReady, bool32 connected)
         sHavePublished = FALSE; // publish the base at every (re)connection
     }
     PublishOwnBase();
-    ApplyInbound();
+    // A visitor's base is only put into the save while the player stands in the calm overworld outside every
+    // secret base: the game keeps the slot numbers of the bases it entered, listed or is about to battle (a
+    // script variable, the registry menu), and a replaced record may move to another slot. The host offers
+    // each base again every so often, so waiting costs nothing.
+    if (fieldReady && !CurMapIsSecretBase())
+        ApplyInbound();
 }
 #endif // PORTABLE

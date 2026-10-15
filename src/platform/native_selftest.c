@@ -2463,6 +2463,42 @@ int NativeSelfTest_SecretBase(void)
                && gSaveBlock1Ptr->secretBases[19].secretBaseId == 181);
     ClearAllBases();
 
+    // The mailbox path: a base is applied only in the calm overworld outside every secret base.
+    {
+        struct SecretBase offered;
+        u32 generation;
+
+        UseMap(MAP_ROUTE101);
+        gSaveBlock1Ptr->location.mapGroup = MAP_GROUP(MAP_ROUTE101);
+        gSaveBlock1Ptr->location.mapNum = MAP_NUM(MAP_ROUTE101);
+        ClearAllBases();
+        MultiplayerExtras_Init();
+        MakeBase(&offered, 31, 6);
+        generation = 2;
+        gMultiplayerExtrasMailbox.inboundGeneration = generation + 1;
+        gMultiplayerExtrasMailbox.flags = MP_EXTRAS_FLAG_ENABLED;
+        gMultiplayerExtrasMailbox.recordSeq = 1;
+        memcpy((void *)gMultiplayerExtrasMailbox.base, &offered, sizeof(offered));
+        gMultiplayerExtrasMailbox.inboundGeneration = generation + 2;
+
+        gSaveBlock1Ptr->location.mapGroup = MAP_GROUP(MAP_SECRET_BASE_RED_CAVE1);
+        gSaveBlock1Ptr->location.mapNum = MAP_NUM(MAP_SECRET_BASE_RED_CAVE1);
+        MultiplayerExtras_Tick(TRUE, TRUE);
+        ExpectBase("mailbox: nothing is applied inside a secret base", gSaveBlock1Ptr->secretBases[1].secretBaseId == 0);
+        gSaveBlock1Ptr->location.mapGroup = MAP_GROUP(MAP_ROUTE101);
+        gSaveBlock1Ptr->location.mapNum = MAP_NUM(MAP_ROUTE101);
+        MultiplayerExtras_Tick(FALSE, TRUE);
+        ExpectBase("mailbox: nothing is applied while a menu or script holds the field", gSaveBlock1Ptr->secretBases[1].secretBaseId == 0);
+        MultiplayerExtras_Tick(TRUE, FALSE);
+        ExpectBase("mailbox: nothing is applied while disconnected", gSaveBlock1Ptr->secretBases[1].secretBaseId == 0);
+        MultiplayerExtras_Tick(TRUE, TRUE);
+        ExpectBase("mailbox: it is applied once the field is calm (the offer waited)", gSaveBlock1Ptr->secretBases[1].secretBaseId == 31);
+        gSaveBlock1Ptr->secretBases[1].secretBaseId = 0;
+        MultiplayerExtras_Tick(TRUE, TRUE);
+        ExpectBase("mailbox: a record number is applied only once", gSaveBlock1Ptr->secretBases[1].secretBaseId == 0);
+        ClearAllBases();
+    }
+
     printf("selftest-secret-base: %d checks, %d failed\n", sBaseChecks, sBaseFailures);
     return sBaseFailures ? 1 : 0;
 }
