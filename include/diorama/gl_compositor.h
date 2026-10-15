@@ -7,6 +7,19 @@
 #include "global.h"
 
 bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount);
+
+/* What the graphics start-up check (--probe-graphics, src/platform/sdl2.c)
+ * learns. DioramaGL_Probe runs the checks that make DioramaGL_Init fail (an
+ * OpenGL 3.3 core context, every entry point, the compositor's shaders) on a
+ * throwaway context and changes nothing else. */
+struct DioramaGLProbe
+{
+    const char *reason; /* "ok", "context", "functions" or "shaders" */
+    char detail[160];
+    char renderer[96];
+    char version[64];
+};
+bool DioramaGL_Probe(SDL_Window *window, struct DioramaGLProbe *probe);
 void DioramaGL_LoadArtwork(void);
 void DioramaGL_UploadFrame(const u32 *argb8888);
 void DioramaGL_Present(u8 background, bool border, bool integerScale, float frameAlpha);

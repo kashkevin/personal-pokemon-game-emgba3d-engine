@@ -55,6 +55,13 @@
 #define DEFINE_GL_FUNCTION(name, type) type dgl##name;
 DIORAMA_GL_FUNCTIONS(DEFINE_GL_FUNCTION)
 
+static const char *sMissingFunction = "";
+
+const char *DioramaGL_MissingFunction(void)
+{
+    return sMissingFunction;
+}
+
 bool DioramaGL_LoadFunctions(void)
 {
 #define LOAD_GL_FUNCTION(name, type) \
@@ -62,6 +69,7 @@ bool DioramaGL_LoadFunctions(void)
     if (dgl##name == NULL) \
     { \
         SDL_Log("OpenGL function gl%s is unavailable", #name); \
+        sMissingFunction = "gl" #name; \
         return false; \
     }
     DIORAMA_GL_FUNCTIONS(LOAD_GL_FUNCTION)

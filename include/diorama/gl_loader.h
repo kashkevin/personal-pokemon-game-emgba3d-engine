@@ -54,6 +54,8 @@ extern PFNGLDELETERENDERBUFFERSPROC dglDeleteRenderbuffers;
 extern PFNGLUNIFORM4FVPROC dglUniform4fv;
 
 bool DioramaGL_LoadFunctions(void);
+/* The first entry point DioramaGL_LoadFunctions could not find ("" if none). */
+const char *DioramaGL_MissingFunction(void);
 
 /* Every renderer file counts its draws, uploads and GPU allocations through
  * gl_profile.h's wrappers (included last, so they wrap the names declared above). */
