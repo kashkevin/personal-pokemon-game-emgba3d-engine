@@ -2919,6 +2919,8 @@ void RegionMap_PortableCreateMarkers(void)
             palette.tag = TAG_MP_PAL_PEER + marker->slot;
             if (IndexOfSpritePaletteTag(palette.tag) == 0xFF)
                 LoadSpritePalette(&palette);
+            if (IndexOfSpritePaletteTag(palette.tag) == 0xFF)
+                continue; // every sprite palette is taken: no marker rather than one in somebody else's colours
             template.tileTag = sheet.tag;
             template.paletteTag = palette.tag;
             template.oam = &sMpMarkerOam16;
@@ -2935,6 +2937,8 @@ void RegionMap_PortableCreateMarkers(void)
                 LoadSpritePalette(&sMpIconPalette);
                 iconsLoaded = TRUE;
             }
+            if (IndexOfSpritePaletteTag(TAG_MP_PAL_ICONS) == 0xFF)
+                continue;
             template.tileTag = TAG_MP_TILES_ICONS;
             template.paletteTag = TAG_MP_PAL_ICONS;
             template.oam = marker->kind == MP_MARKER_EVENT ? &sMpMarkerOam16 : &sMpMarkerOam8;
