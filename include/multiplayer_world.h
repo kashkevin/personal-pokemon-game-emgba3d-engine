@@ -63,8 +63,13 @@
 #define MP_REWARD_BP                1
 #define MP_REWARD_ITEM              2
 #define MP_REWARD_BP_DEBIT          3
+#define MP_REWARD_CATCH_KEEP        4 // payload = event number (23 bits): the host confirms this save's World Event catch
+#define MP_REWARD_CATCH_RELEASE     5 // ... or says another trainer caught it first: the duplicate is released
 bool32 MultiplayerWorld_IsRewardWord(s32 delta);
 u32 MultiplayerWorld_ApplyRewardWord(s32 delta, u8 *result);
+// --selftest-catch-reconcile
+void MultiplayerWorld_TestRecordCatch(u32 eventId, u16 species, u32 personality);
+bool32 MultiplayerWorld_TestHasCatchRecord(void);
 #endif
 
 #define MP_WORLD_RESULT_CAUGHT      1

@@ -22,6 +22,7 @@
 #include "money.h"
 #ifdef PORTABLE
 #include "item.h"
+#include "tv.h"
 #include "constants/battle_frontier.h"
 #endif
 #line 18 // gba-line
@@ -944,6 +945,17 @@ void MultiplayerWorld_OnScriptedBattleEnd(void)
         result = MP_WORLD_RESULT_CAUGHT;
         RevertCaughtBattleForm();
         sHiddenEventId = sClaimEventId;
+#ifdef PORTABLE
+        {
+            // Remember this catch in the save until the host rules on it (Update 17).
+            u16 base = MultiplayerWorld_GetBattleFormBase(sBattleSpecies);
+            u16 species = (base != SPECIES_NONE && IsBattleOnlyForm(sBattleSpecies)) ? base : sBattleSpecies;
+
+            if (sClaimEventId != 0)
+                MultiplayerWorld_TestRecordCatch(sClaimEventId, species, sBattlePersonality);
+        }
+#endif
+#line 900 // gba-line
         break;
     case B_OUTCOME_WON:
         result = MP_WORLD_RESULT_DEFEATED;
@@ -1147,6 +1159,122 @@ bool32 MultiplayerWorld_IsRewardWord(s32 delta)
     return delta > MAX_MONEY && ((u32)delta & 0x70000000) == MP_REWARD_FLAG;
 }
 
+// ---------------------------------------------------------------------------
+// World Event catch reconciliation (Update 17). A catch is written into the save (a few unused game variables) when the
+// battle ends, before anything is reported. The game tells the host again and again until the host's verdict arrives on
+// the wallet stream: KEEP (this save's catch is the recorded one) or RELEASE (another trainer's report came first, so the
+// copy in this save is a duplicate and is released). A record is never guessed at: the Pokemon released is the one with the
+// recorded species, personality and this trainer as OT, nothing else.
+
+static u32 CatchRecordEvent(void)
+{
+    return VarGet(VAR_MP_CATCH_EVENT_LO) | ((u32)VarGet(VAR_MP_CATCH_EVENT_HI) << 16);
+}
+
+static u32 CatchRecordPersonality(void)
+{
+    return VarGet(VAR_MP_CATCH_PID_LO) | ((u32)VarGet(VAR_MP_CATCH_PID_HI) << 16);
+}
+
+// The 23-bit number the host's verdict carries for an event (never zero).
+static u32 CatchEventNumber(u32 eventId)
+{
+    return ((eventId - 1) & 0x7FFFFF) + 1;
+}
+
+static void ClearCatchRecord(void)
+{
+    VarSet(VAR_MP_CATCH_EVENT_LO, 0);
+    VarSet(VAR_MP_CATCH_EVENT_HI, 0);
+    VarSet(VAR_MP_CATCH_SPECIES, 0);
+    VarSet(VAR_MP_CATCH_PID_LO, 0);
+    VarSet(VAR_MP_CATCH_PID_HI, 0);
+}
+
+void MultiplayerWorld_TestRecordCatch(u32 eventId, u16 species, u32 personality)
+{
+    VarSet(VAR_MP_CATCH_EVENT_LO, eventId & 0xFFFF);
+    VarSet(VAR_MP_CATCH_EVENT_HI, eventId >> 16);
+    VarSet(VAR_MP_CATCH_SPECIES, species);
+    VarSet(VAR_MP_CATCH_PID_LO, personality & 0xFFFF);
+    VarSet(VAR_MP_CATCH_PID_HI, personality >> 16);
+}
+
+bool32 MultiplayerWorld_TestHasCatchRecord(void)
+{
+    return CatchRecordEvent() != 0;
+}
+
+// Release the recorded Pokemon. TRUE when exactly it was found and released. A party keeps at least one Pokemon.
+static bool32 ReleaseRecordedCatch(void)
+{
+    u32 i, box, pos, personality = CatchRecordPersonality(), otId = GetPlayerIDAsU32();
+    u16 species = VarGet(VAR_MP_CATCH_SPECIES);
+
+    for (i = 0; i < PARTY_SIZE; i++)
+    {
+        struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][i];
+
+        if (GetMonData(mon, MON_DATA_SPECIES) == species && GetMonData(mon, MON_DATA_PERSONALITY) == personality
+         && GetMonData(mon, MON_DATA_OT_ID) == otId)
+        {
+            if (gPartiesCount[B_TRAINER_PLAYER] <= 1)
+                return FALSE; // never empties the party
+            ZeroMonData(mon);
+            CompactPartySlots();
+            CalculatePlayerPartyCount();
+            return TRUE;
+        }
+    }
+    for (box = 0; box < TOTAL_BOXES_COUNT; box++)
+    {
+        for (pos = 0; pos < IN_BOX_COUNT; pos++)
+        {
+            struct BoxPokemon *mon = GetBoxedMonPtr(box, pos);
+
+            if (GetBoxMonData(mon, MON_DATA_SPECIES) == species && GetBoxMonData(mon, MON_DATA_PERSONALITY) == personality
+             && GetBoxMonData(mon, MON_DATA_OT_ID) == otId)
+            {
+                ZeroBoxMonAt(box, pos);
+                return TRUE;
+            }
+        }
+    }
+    return FALSE;
+}
+
+static u32 ApplyCatchVerdict(u32 kind, u32 payload)
+{
+    u32 eventId = CatchRecordEvent(), amount = 0;
+
+    if (eventId == 0 || payload != CatchEventNumber(eventId))
+        return 0; // nothing recorded for that event in this save (an older save, or already settled)
+    if (kind == MP_REWARD_CATCH_RELEASE && ReleaseRecordedCatch())
+        amount = 1;
+    else if (kind == MP_REWARD_CATCH_KEEP)
+        amount = 1;
+    ClearCatchRecord();
+    return amount;
+}
+
+static u16 sCatchRepostTimer = 0;
+
+// Until the verdict is applied the record is reported again now and then (a lost report, a reset, a host restart).
+static void RepostCatchRecord(void)
+{
+    u32 eventId = CatchRecordEvent();
+
+    if (eventId == 0 || sPendingResultEventId != 0 || ActionPending())
+        return;
+    if (sCatchRepostTimer != 0)
+    {
+        sCatchRepostTimer--;
+        return;
+    }
+    sCatchRepostTimer = 60 * 20;
+    PostAction(MP_WORLD_ACTION_RESULT, MP_WORLD_RESULT_CAUGHT, eventId, VarGet(VAR_MP_CATCH_SPECIES));
+}
+
 u32 MultiplayerWorld_ApplyRewardWord(s32 delta, u8 *result)
 {
     u32 kind = ((u32)delta >> 24) & 0xF, payload = (u32)delta & 0xFFFFFF, amount = 0;
@@ -1167,6 +1295,10 @@ u32 MultiplayerWorld_ApplyRewardWord(s32 delta, u8 *result)
         amount = payload < *points ? payload : *points;
         *points -= amount;
         *result = MP_WORLD_WALLET_DEBIT;
+    }
+    else if (kind == MP_REWARD_CATCH_KEEP || kind == MP_REWARD_CATCH_RELEASE)
+    {
+        amount = ApplyCatchVerdict(kind, payload);
     }
     else if (kind == MP_REWARD_ITEM)
     {
@@ -1306,7 +1438,14 @@ void MultiplayerWorld_Tick(bool32 fieldReady, bool32 connected)
     }
     PublishLocalState();
     if (connected)
+    {
+#line 1182 // gba-line
         FlushPendingResult();
+#ifdef PORTABLE
+        RepostCatchRecord();
+#endif
+    }
+#line 1183 // gba-line
     if (sHiddenEventId != 0 && sHaveInbound && sInbound.event.eventId != sHiddenEventId)
         sHiddenEventId = 0;
     if (!connected || gMain.callback2 != CB2_Overworld)

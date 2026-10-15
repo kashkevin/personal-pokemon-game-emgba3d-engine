@@ -532,8 +532,9 @@ MT_TEST(world_wallet_money_and_reward_words)
     uint8_t frame[230];
     uint8_t *w = sMemory[MP_REGION_WORLD];
     const uint32_t good[] = {1, 999999, 0xFFF0BDC1u /* -999999 */, 0x41000005u /* 5 Battle Points */,
-                             0x42006601u /* an item */, 0x43000010u /* a shop debit */};
-    const uint32_t bad[] = {1000000, 0x40000005u /* no kind */, 0x44000005u /* kind 4 */, 0x61000005u, 0x7F000005u, 0xC1000005u};
+                             0x42006601u /* an item */, 0x43000010u /* a shop debit */,
+                             0x44000007u /* keep a catch */, 0x45000007u /* release a catch */};
+    const uint32_t bad[] = {1000000, 0x40000005u /* no kind */, 0x46000005u /* kind 6 */, 0x61000005u, 0x7F000005u, 0xC1000005u};
     size_t n, i;
 
     for (i = 0; i < sizeof(good) / sizeof(good[0]) + sizeof(bad) / sizeof(bad[0]); i++)

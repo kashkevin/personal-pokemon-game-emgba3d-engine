@@ -2804,3 +2804,129 @@ int NativeSelfTest_Rewards(void)
     printf("selftest-rewards: %d checks, %d failed\n", sRewardChecks, sRewardFailures);
     return sRewardFailures ? 1 : 0;
 }
+
+
+/* --selftest-catch-reconcile: the host's verdict on a World Event catch (src/multiplayer_world.c). A duplicate is released
+ * only by an exact match (species, personality, this trainer as OT); everything else in the save is left alone. */
+#include "pokemon_storage_system.h"
+#include "tv.h"
+#include "constants/species.h"
+
+static int sCatchChecks, sCatchFailures;
+
+static void ExpectCatch(const char *what, bool32 ok)
+{
+    sCatchChecks++;
+    if (!ok) sCatchFailures++;
+    printf("  %s %s\n", ok ? "ok  " : "FAIL", what);
+}
+
+static s32 VerdictWord(u32 kind, u32 payload) { return (s32)(MP_REWARD_FLAG | (kind << 24) | payload); }
+
+static void CatchMon(struct Pokemon *mon, enum Species species, u32 personality, u32 otId)
+{
+    struct OriginalTrainerId id = {OT_ID_PRESET, otId};
+
+    ZeroMonData(mon);
+    CreateMonWithIVs(mon, species, 40, personality, id, 10);
+}
+
+int NativeSelfTest_CatchReconcile(void)
+{
+    struct Pokemon before[PARTY_SIZE];
+    u8 result;
+    u32 i, ours;
+
+    printf("World Event catch reconciliation\n");
+    InitHeap(gHeap, HEAP_SIZE);
+    SetSaveBlocksPointers(0);
+    memset(gParties, 0, sizeof(gParties));
+    gSaveBlock2Ptr->playerTrainerId[0] = 0x11; gSaveBlock2Ptr->playerTrainerId[1] = 0x22;
+    gSaveBlock2Ptr->playerTrainerId[2] = 0x33; gSaveBlock2Ptr->playerTrainerId[3] = 0x44;
+    ours = GetPlayerIDAsU32();
+
+    // 1. The duplicate is released from the party: only it, the rest compacts.
+    CatchMon(&gParties[B_TRAINER_PLAYER][0], SPECIES_ZIGZAGOON, 0x1111, ours);
+    CatchMon(&gParties[B_TRAINER_PLAYER][1], SPECIES_RAYQUAZA, 0xABCD1234, ours);
+    CatchMon(&gParties[B_TRAINER_PLAYER][2], SPECIES_WURMPLE, 0x3333, ours);
+    gPartiesCount[B_TRAINER_PLAYER] = 3;
+    memcpy(before, gParties[B_TRAINER_PLAYER], sizeof(before));
+    MultiplayerWorld_TestRecordCatch(77, SPECIES_RAYQUAZA, 0xABCD1234);
+    ExpectCatch("a catch is recorded in the save", MultiplayerWorld_TestHasCatchRecord());
+    ExpectCatch("a verdict for another event changes nothing (and keeps the record)",
+        MultiplayerWorld_ApplyRewardWord(VerdictWord(MP_REWARD_CATCH_RELEASE, 78), &result) == 0 && MultiplayerWorld_TestHasCatchRecord()
+        && gPartiesCount[B_TRAINER_PLAYER] == 3 && memcmp(before, gParties[B_TRAINER_PLAYER], sizeof(before)) == 0);
+    ExpectCatch("RELEASE removes exactly the recorded Pokemon (receipt 1)",
+        MultiplayerWorld_ApplyRewardWord(VerdictWord(MP_REWARD_CATCH_RELEASE, 77), &result) == 1);
+    ExpectCatch("  the party is Zigzagoon and Wurmple, unchanged and compacted",
+        gPartiesCount[B_TRAINER_PLAYER] == 2 && memcmp(&before[0], &gParties[B_TRAINER_PLAYER][0], sizeof(before[0])) == 0
+        && memcmp(&before[2], &gParties[B_TRAINER_PLAYER][1], sizeof(before[2])) == 0
+        && GetMonData(&gParties[B_TRAINER_PLAYER][2], MON_DATA_SPECIES) == SPECIES_NONE);
+    ExpectCatch("  the record is gone and a repeat does nothing",
+        !MultiplayerWorld_TestHasCatchRecord() && MultiplayerWorld_ApplyRewardWord(VerdictWord(MP_REWARD_CATCH_RELEASE, 77), &result) == 0
+        && gPartiesCount[B_TRAINER_PLAYER] == 2);
+
+    // 2. KEEP only clears the record.
+    CatchMon(&gParties[B_TRAINER_PLAYER][2], SPECIES_RAYQUAZA, 0xABCD1234, ours);
+    gPartiesCount[B_TRAINER_PLAYER] = 3;
+    memcpy(before, gParties[B_TRAINER_PLAYER], sizeof(before));
+    MultiplayerWorld_TestRecordCatch(78, SPECIES_RAYQUAZA, 0xABCD1234);
+    ExpectCatch("KEEP clears the record and keeps the Pokemon (receipt 1)",
+        MultiplayerWorld_ApplyRewardWord(VerdictWord(MP_REWARD_CATCH_KEEP, 78), &result) == 1 && !MultiplayerWorld_TestHasCatchRecord()
+        && memcmp(before, gParties[B_TRAINER_PLAYER], sizeof(before)) == 0);
+
+    // 3. Look-alikes are never touched: same species with another personality, or another trainer's OT.
+    CatchMon(&gParties[B_TRAINER_PLAYER][1], SPECIES_RAYQUAZA, 0x5555, ours);                 // same species, other personality
+    CatchMon(&gParties[B_TRAINER_PLAYER][2], SPECIES_RAYQUAZA, 0xABCD1234, ours ^ 0xFFFF);    // same personality, traded in
+    memcpy(before, gParties[B_TRAINER_PLAYER], sizeof(before));
+    MultiplayerWorld_TestRecordCatch(79, SPECIES_RAYQUAZA, 0xABCD1234);
+    ExpectCatch("a look-alike with another personality or another OT is left alone (receipt 0)",
+        MultiplayerWorld_ApplyRewardWord(VerdictWord(MP_REWARD_CATCH_RELEASE, 79), &result) == 0 && !MultiplayerWorld_TestHasCatchRecord()
+        && gPartiesCount[B_TRAINER_PLAYER] == 3 && memcmp(before, gParties[B_TRAINER_PLAYER], sizeof(before)) == 0);
+
+    // 4. In a box.
+    memset(gParties, 0, sizeof(gParties));
+    CatchMon(&gParties[B_TRAINER_PLAYER][0], SPECIES_ZIGZAGOON, 0x1111, ours);
+    gPartiesCount[B_TRAINER_PLAYER] = 1;
+    CatchMon(&gParties[B_TRAINER_PLAYER][5], SPECIES_RAYQUAZA, 0xABCD1234, ours);              // scratch copy to fill the box slot
+    {
+        struct BoxPokemon *slot = GetBoxedMonPtr(3, 5), *other = GetBoxedMonPtr(3, 6);
+        struct BoxPokemon otherBefore;
+
+        BoxMonToMon(&gParties[B_TRAINER_PLAYER][5].box, &gParties[B_TRAINER_PLAYER][5]);   // keeps it a valid box mon
+        *slot = gParties[B_TRAINER_PLAYER][5].box;
+        CatchMon(&gParties[B_TRAINER_PLAYER][4], SPECIES_MEW, 0x7777, ours);
+        *other = gParties[B_TRAINER_PLAYER][4].box;
+        otherBefore = *other;
+        ZeroMonData(&gParties[B_TRAINER_PLAYER][5]); ZeroMonData(&gParties[B_TRAINER_PLAYER][4]);
+        MultiplayerWorld_TestRecordCatch(80, SPECIES_RAYQUAZA, 0xABCD1234);
+        ExpectCatch("RELEASE finds the duplicate in a box (receipt 1) and leaves its neighbour alone",
+            MultiplayerWorld_ApplyRewardWord(VerdictWord(MP_REWARD_CATCH_RELEASE, 80), &result) == 1
+            && GetBoxMonData(slot, MON_DATA_SPECIES) == SPECIES_NONE && memcmp(&otherBefore, other, sizeof(otherBefore)) == 0
+            && gPartiesCount[B_TRAINER_PLAYER] == 1);
+    }
+
+    // 5. The only Pokemon in the party is never released; a save with no record ignores every verdict.
+    memset(gParties, 0, sizeof(gParties));
+    CatchMon(&gParties[B_TRAINER_PLAYER][0], SPECIES_RAYQUAZA, 0xABCD1234, ours);
+    gPartiesCount[B_TRAINER_PLAYER] = 1;
+    MultiplayerWorld_TestRecordCatch(81, SPECIES_RAYQUAZA, 0xABCD1234);
+    ExpectCatch("the only Pokemon of the party stays (receipt 0, record cleared)",
+        MultiplayerWorld_ApplyRewardWord(VerdictWord(MP_REWARD_CATCH_RELEASE, 81), &result) == 0 && gPartiesCount[B_TRAINER_PLAYER] == 1
+        && GetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_SPECIES) == SPECIES_RAYQUAZA && !MultiplayerWorld_TestHasCatchRecord());
+    for (i = 1; i <= 5; i++)
+        MultiplayerWorld_ApplyRewardWord(VerdictWord(i % 2 ? MP_REWARD_CATCH_RELEASE : MP_REWARD_CATCH_KEEP, 81 + i), &result);
+    ExpectCatch("without a record no verdict does anything (an older or already settled save)",
+        gPartiesCount[B_TRAINER_PLAYER] == 1 && GetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_SPECIES) == SPECIES_RAYQUAZA);
+
+    // 6. A big event number: the verdict carries its low 23 bits (never zero), as the host sends it.
+    CatchMon(&gParties[B_TRAINER_PLAYER][1], SPECIES_ZIGZAGOON, 0x1111, ours);
+    gPartiesCount[B_TRAINER_PLAYER] = 2;
+    MultiplayerWorld_TestRecordCatch(0x1000005, SPECIES_ZIGZAGOON, 0x1111);
+    ExpectCatch("an event number past 23 bits matches by ((n - 1) & 0x7FFFFF) + 1",
+        MultiplayerWorld_ApplyRewardWord(VerdictWord(MP_REWARD_CATCH_RELEASE, ((0x1000005 - 1) & 0x7FFFFF) + 1), &result) == 1
+        && gPartiesCount[B_TRAINER_PLAYER] == 1);
+
+    printf("selftest-catch-reconcile: %d checks, %d failed\n", sCatchChecks, sCatchFailures);
+    return sCatchFailures ? 1 : 0;
+}
