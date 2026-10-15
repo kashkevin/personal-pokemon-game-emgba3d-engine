@@ -36,6 +36,7 @@
 #include "platform/benchmark.h"
 #include "platform/display_settings.h"
 #include "platform/keybinds.h"
+#include "platform/gamepad.h"
 #include "platform/pc_menu.h"
 #include "platform/png_write.h"
 #include "platform/memory_info.h"
@@ -2919,7 +2920,6 @@ static int SelfTestKeybinds(void)
 }
 
 #ifdef _WIN32
-#define STICK_THRESHOLD 0.5f
 
 // XInput is loaded when it is first needed, newest first: xinput1_4.dll
 // (Windows 8 and later), xinput1_3.dll (the DirectX redistributable),
@@ -2966,35 +2966,20 @@ u16 GetXInputKeys()
 
     if (dwResult == ERROR_SUCCESS)
     {
-        /* A */      xinputKeys |= (state.Gamepad.wButtons & XINPUT_GAMEPAD_A) >> 12;
-        /* B */      xinputKeys |= (state.Gamepad.wButtons & XINPUT_GAMEPAD_X) >> 13;
-        /* Start */  xinputKeys |= (state.Gamepad.wButtons & XINPUT_GAMEPAD_START) >> 1;
-        /* Select */ xinputKeys |= (state.Gamepad.wButtons & XINPUT_GAMEPAD_BACK) >> 3;
-        /* L */      xinputKeys |= (state.Gamepad.wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER) << 1;
-        /* R */      xinputKeys |= (state.Gamepad.wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER) >> 1;
-        /* Up */     xinputKeys |= (state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_UP) << 6;
-        /* Down */   xinputKeys |= (state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN) << 6;
-        /* Left */   xinputKeys |= (state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT) << 3;
-        /* Right */  xinputKeys |= (state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT) << 1;
+        // The button, stick and trigger mapping is platform/gamepad.c (unit tested on any machine).
+        struct GamepadInput input = {state.Gamepad.wButtons, state.Gamepad.sThumbLX, state.Gamepad.sThumbLY,
+                                     state.Gamepad.bRightTrigger};
+        struct GamepadKeys mapped = Gamepad_MapKeys(&input);
+
+        xinputKeys = mapped.keys;
 #ifdef ENABLE_NATIVE_UI
-        sXInputDetails = (state.Gamepad.wButtons & XINPUT_GAMEPAD_Y) != 0;
+        sXInputDetails = mapped.details;
 #endif
-
-
-        /* Control Stick */
-        float xAxis = (float)state.Gamepad.sThumbLX / (float)SHRT_MAX;
-        float yAxis = (float)state.Gamepad.sThumbLY / (float)SHRT_MAX;
-
-        if (xAxis < -STICK_THRESHOLD) xinputKeys |= DPAD_LEFT;
-        if (xAxis >  STICK_THRESHOLD) xinputKeys |= DPAD_RIGHT;
-        if (yAxis < -STICK_THRESHOLD) xinputKeys |= DPAD_DOWN;
-        if (yAxis >  STICK_THRESHOLD) xinputKeys |= DPAD_UP;
-
 
         /* Speedup */
         // Note: 'speedup' variable is only (un)set on keyboard input
         double oldTimeScale = timeScale;
-        timeScale = (state.Gamepad.bRightTrigger > 0x80 || speedUp) ? 5.0 : 1.0;
+        timeScale = (mapped.fastForward || speedUp) ? 5.0 : 1.0;
 
         if (oldTimeScale != timeScale)
         {

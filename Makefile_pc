@@ -298,6 +298,9 @@ check-native:
 	  -o $(NATIVE_TEST_DIR)/test_keybinds
 	@$(NATIVE_TEST_DIR)/test_keybinds
 	@gcc -m32 -std=gnu99 -Wall -Wextra -Werror -O1 -g -iquote include -iquote tools/pc_port/tests \
+	  tools/pc_port/tests/test_gamepad.c src/platform/gamepad.c -o $(NATIVE_TEST_DIR)/test_gamepad
+	@$(NATIVE_TEST_DIR)/test_gamepad
+	@gcc -m32 -std=gnu99 -Wall -Wextra -Werror -O1 -g -iquote include -iquote tools/pc_port/tests \
 	  $$($(NATIVE_TEST_SDL) --cflags sdl2) tools/pc_port/tests/test_png_write.c src/platform/png_write.c \
 	  $$($(NATIVE_TEST_SDL) --libs sdl2) -o $(NATIVE_TEST_DIR)/test_png_write
 	@rm -f $(NATIVE_TEST_DIR)/png-*.png
