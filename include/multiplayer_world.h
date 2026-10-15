@@ -57,6 +57,15 @@
 #define MP_WORLD_WALLET_RECEIPT     0 // re-sent receipt of the save's last adjustment
 #define MP_WORLD_WALLET_CREDIT      1
 #define MP_WORLD_WALLET_DEBIT       2
+#ifdef PORTABLE
+// A wallet delta above MAX_MONEY with this flag is a Frontier reward (src/multiplayer_world.c).
+#define MP_REWARD_FLAG              0x40000000
+#define MP_REWARD_BP                1
+#define MP_REWARD_ITEM              2
+#define MP_REWARD_BP_DEBIT          3
+bool32 MultiplayerWorld_IsRewardWord(s32 delta);
+u32 MultiplayerWorld_ApplyRewardWord(s32 delta, u8 *result);
+#endif
 
 #define MP_WORLD_RESULT_CAUGHT      1
 #define MP_WORLD_RESULT_DEFEATED    2

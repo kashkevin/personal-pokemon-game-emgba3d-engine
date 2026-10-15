@@ -294,7 +294,10 @@ static bool ValidWorldInbound(const uint8_t *p, size_t length)
     walletSeq = U32(p + 180);
     walletDelta = (int32_t)U32(p + 184);
     teammate = U32(p + 188);
-    if (walletSeq > 0xFFFF || walletDelta > 999999 || walletDelta < -999999
+    /* money (+-999,999) or a Frontier reward word: bit 30, kind 1-3 in bits 24-27 (src/multiplayer_world.c) */
+    if (walletSeq > 0xFFFF || walletDelta < -999999
+     || (walletDelta > 999999 && (((uint32_t)walletDelta & 0x70000000u) != 0x40000000u
+                                  || ((((uint32_t)walletDelta) >> 24) & 0xFu) < 1 || ((((uint32_t)walletDelta) >> 24) & 0xFu) > 3))
      || (walletSeq == 0) != (walletDelta == 0))
         return false;
     if (teammate != 0)

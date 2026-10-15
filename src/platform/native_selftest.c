@@ -2725,3 +2725,73 @@ int NativeSelfTest_Ladder(void)
     printf("selftest-ladder: %d checks, %d failed\n", sLadderChecks, sLadderFailures);
     return sLadderFailures ? 1 : 0;
 }
+
+
+/* --selftest-rewards: Battle Frontier rewards over the wager wallet stream (src/multiplayer_world.c). The host sends Battle
+ * Points and items as wallet deltas above the money range; the receipt must say what really landed. */
+#include "item.h"
+#include "money.h"
+#include "constants/battle_frontier.h"
+#include "constants/items.h"
+#include "multiplayer_world.h"
+
+static int sRewardChecks, sRewardFailures;
+
+static void ExpectReward(const char *what, bool32 ok)
+{
+    sRewardChecks++;
+    if (!ok) sRewardFailures++;
+    printf("  %s %s\n", ok ? "ok  " : "FAIL", what);
+}
+
+static s32 RewardWord(u32 kind, u32 payload) { return (s32)(MP_REWARD_FLAG | (kind << 24) | payload); }
+
+int NativeSelfTest_Rewards(void)
+{
+    u8 result;
+    u32 amount, i;
+
+    printf("Battle Frontier rewards\n");
+    InitHeap(gHeap, HEAP_SIZE); // the bag allocates from the game heap
+    SetSaveBlocksPointers(0);
+    SetBagItemsPointers();
+    ClearBag();
+    gSaveBlock2Ptr->frontier.battlePoints = 0;
+
+    ExpectReward("money is not a reward word", !MultiplayerWorld_IsRewardWord(1) && !MultiplayerWorld_IsRewardWord(-500)
+                 && !MultiplayerWorld_IsRewardWord(MAX_MONEY) && !MultiplayerWorld_IsRewardWord(MAX_MONEY + 1));
+    ExpectReward("a reward word is flagged", MultiplayerWorld_IsRewardWord(RewardWord(MP_REWARD_BP, 3))
+                 && MultiplayerWorld_IsRewardWord(RewardWord(MP_REWARD_ITEM, (ITEM_RARE_CANDY << 8) | 2)));
+    ExpectReward("an unflagged big delta is no reward", !MultiplayerWorld_IsRewardWord(0x20000000 | 5) && !MultiplayerWorld_IsRewardWord(0x7F000005));
+
+    amount = MultiplayerWorld_ApplyRewardWord(RewardWord(MP_REWARD_BP, 12), &result);
+    ExpectReward("12 Battle Points are added to the save", amount == 12 && result == MP_WORLD_WALLET_CREDIT
+                 && gSaveBlock2Ptr->frontier.battlePoints == 12);
+    amount = MultiplayerWorld_ApplyRewardWord(RewardWord(MP_REWARD_BP, 9999), &result);
+    ExpectReward("Battle Points stop at the game's 9999 and the receipt says how many landed", amount == 9987 && gSaveBlock2Ptr->frontier.battlePoints == 9999);
+    amount = MultiplayerWorld_ApplyRewardWord(RewardWord(MP_REWARD_BP, 5), &result);
+    ExpectReward("at the cap nothing lands (receipt 0)", amount == 0 && gSaveBlock2Ptr->frontier.battlePoints == 9999);
+    gSaveBlock2Ptr->frontier.battlePoints = 20;
+    amount = MultiplayerWorld_ApplyRewardWord(RewardWord(MP_REWARD_BP_DEBIT, 16), &result);
+    ExpectReward("a shop debit takes the price", amount == 16 && result == MP_WORLD_WALLET_DEBIT && gSaveBlock2Ptr->frontier.battlePoints == 4);
+    amount = MultiplayerWorld_ApplyRewardWord(RewardWord(MP_REWARD_BP_DEBIT, 16), &result);
+    ExpectReward("a debit never takes more than the save holds (receipt = 4)", amount == 4 && gSaveBlock2Ptr->frontier.battlePoints == 0);
+    amount = MultiplayerWorld_ApplyRewardWord(RewardWord(MP_REWARD_BP_DEBIT, 16), &result);
+    ExpectReward("with no points a debit moves nothing", amount == 0 && gSaveBlock2Ptr->frontier.battlePoints == 0);
+
+    amount = MultiplayerWorld_ApplyRewardWord(RewardWord(MP_REWARD_ITEM, (ITEM_RARE_CANDY << 8) | 3), &result);
+    ExpectReward("an item goes into the bag", amount == 3 && CountTotalItemQuantityInBag(ITEM_RARE_CANDY) == 3);
+    amount = MultiplayerWorld_ApplyRewardWord(RewardWord(MP_REWARD_ITEM, (ITEM_RARE_CANDY << 8) | 2), &result);
+    ExpectReward("a second prize stacks", amount == 2 && CountTotalItemQuantityInBag(ITEM_RARE_CANDY) == 5);
+
+    for (i = 0; i < 7; i++)
+        ExpectReward("malformed words land nothing",
+            ({ u32 bad[] = {RewardWord(MP_REWARD_ITEM, (ITEM_NONE << 8) | 1), RewardWord(MP_REWARD_ITEM, (ITEMS_COUNT << 8) | 1),
+                            RewardWord(MP_REWARD_ITEM, (ITEM_RARE_CANDY << 8) | 0), RewardWord(MP_REWARD_ITEM, (ITEM_RARE_CANDY << 8) | 100),
+                            RewardWord(MP_REWARD_BP, 0), RewardWord(MP_REWARD_BP, 10000), RewardWord(7, 1)};
+               MultiplayerWorld_ApplyRewardWord((s32)bad[i], &result) == 0; })
+            && CountTotalItemQuantityInBag(ITEM_RARE_CANDY) == 5 && gSaveBlock2Ptr->frontier.battlePoints == 0);
+
+    printf("selftest-rewards: %d checks, %d failed\n", sRewardChecks, sRewardFailures);
+    return sRewardFailures ? 1 : 0;
+}

@@ -20,6 +20,10 @@
 #include "map_name_popup.h"
 #include "malloc.h"
 #include "money.h"
+#ifdef PORTABLE
+#include "item.h"
+#include "constants/battle_frontier.h"
+#endif
 #include "overworld.h"
 #include "palette.h"
 #include "pokemon.h"
@@ -1130,6 +1134,53 @@ static char *AppendMoneyAscii(char *dest, u32 amount)
     return dest;
 }
 
+#ifdef PORTABLE
+// Battle Frontier rewards ride the wager wallet stream (one numbered, exactly-once sequence per save): a delta above
+// MAX_MONEY with the reward flag is not money. Bits 24-27 name the kind, the low 24 bits are its payload:
+//   1 Battle Points added (payload = points, the save holds at most MAX_BATTLE_FRONTIER_POINTS)
+//   2 an item (payload = item id << 8 | quantity 1-99): into the bag, else the PC's item storage
+//   3 Battle Points taken (a shop purchase; payload = points asked, at most the points on hand are taken)
+// The receipt carries what really moved, so the host never believes a reward that did not land.
+bool32 MultiplayerWorld_IsRewardWord(s32 delta)
+{
+    return delta > MAX_MONEY && ((u32)delta & 0x70000000) == MP_REWARD_FLAG;
+}
+
+u32 MultiplayerWorld_ApplyRewardWord(s32 delta, u8 *result)
+{
+    u32 kind = ((u32)delta >> 24) & 0xF, payload = (u32)delta & 0xFFFFFF, amount = 0;
+    u16 *points = &gSaveBlock2Ptr->frontier.battlePoints;
+
+    *result = MP_WORLD_WALLET_CREDIT;
+    if (kind == MP_REWARD_BP && payload >= 1 && payload <= MAX_BATTLE_FRONTIER_POINTS)
+    {
+        amount = payload;
+        if (*points > MAX_BATTLE_FRONTIER_POINTS)
+            *points = MAX_BATTLE_FRONTIER_POINTS;
+        if (amount > MAX_BATTLE_FRONTIER_POINTS - *points)
+            amount = MAX_BATTLE_FRONTIER_POINTS - *points;
+        *points += amount;
+    }
+    else if (kind == MP_REWARD_BP_DEBIT && payload >= 1 && payload <= MAX_BATTLE_FRONTIER_POINTS)
+    {
+        amount = payload < *points ? payload : *points;
+        *points -= amount;
+        *result = MP_WORLD_WALLET_DEBIT;
+    }
+    else if (kind == MP_REWARD_ITEM)
+    {
+        u32 item = payload >> 8, quantity = payload & 0xFF;
+
+        if (item != ITEM_NONE && item < ITEMS_COUNT && quantity >= 1 && quantity <= 99)
+        {
+            if (AddBagItem(item, quantity) || AddPCItem(item, quantity))
+                amount = quantity;
+        }
+    }
+    return amount;
+}
+#endif
+
 static void QueueWalletNotice(u8 result, u32 amount)
 {
     char *end = sWalletNotice;
@@ -1165,10 +1216,27 @@ static void UpdateWallet(bool32 fieldReady)
     }
     seq = sInbound.walletSeq;
     delta = sInbound.walletDelta;
+#ifdef PORTABLE
+    if (seq == 0 || seq > 0xFFFF || seq != ((applied + 1) & 0xFFFF)
+     || delta == 0 || (delta > MAX_MONEY && !MultiplayerWorld_IsRewardWord(delta)) || delta < -MAX_MONEY)
+        return;
+#else
     if (seq == 0 || seq > 0xFFFF || seq != ((applied + 1) & 0xFFFF)
      || delta == 0 || delta > MAX_MONEY || delta < -MAX_MONEY)
         return;
+#endif
     money = GetMoney(&gSaveBlock1Ptr->money);
+#ifdef PORTABLE
+    if (MultiplayerWorld_IsRewardWord(delta))
+    {
+        amount = MultiplayerWorld_ApplyRewardWord(delta, &result);
+        VarSet(VAR_MP_WALLET_SEQ, seq);
+        VarSet(VAR_MP_WALLET_AMOUNT_LO, amount & 0xFFFF);
+        VarSet(VAR_MP_WALLET_AMOUNT_HI, amount >> 16);
+        PostActionWithAmount(MP_WORLD_ACTION_WALLET, result, seq, 0, amount);
+        return; // the host's own notice names a Frontier prize
+    }
+#endif
     if (delta > 0)
     {
         amount = delta;

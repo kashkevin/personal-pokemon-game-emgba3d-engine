@@ -523,6 +523,43 @@ MT_TEST(world_inbound_validated)
     MT_CHECK(sNet.closed);
 }
 
+// The wager wallet accepts money (+-999,999) and, for the Battle Frontier, reward words (bit 30, kind 1-3): anything
+// else above the money range closes the connection like any other malformed world record.
+MT_TEST(world_wallet_money_and_reward_words)
+{
+    struct MpBridgeCaps caps;
+    uint8_t record[208];
+    uint8_t frame[230];
+    uint8_t *w = sMemory[MP_REGION_WORLD];
+    const uint32_t good[] = {1, 999999, 0xFFF0BDC1u /* -999999 */, 0x41000005u /* 5 Battle Points */,
+                             0x42006601u /* an item */, 0x43000010u /* a shop debit */};
+    const uint32_t bad[] = {1000000, 0x40000005u /* no kind */, 0x44000005u /* kind 4 */, 0x61000005u, 0x7F000005u, 0xC1000005u};
+    size_t n, i;
+
+    for (i = 0; i < sizeof(good) / sizeof(good[0]) + sizeof(bad) / sizeof(bad[0]); i++)
+    {
+        int accepted = i < sizeof(good) / sizeof(good[0]);
+
+        memset(&caps, 0, sizeof(caps));
+        caps.world = 1;
+        Fresh(&caps);
+        sNet.chunk = 0;
+        Ready(0);
+        PutU32(w, 0x31574D45);
+        PutU16(w + 4, 1);
+        PutU16(w + 6, 256);
+        Step(12);
+        memset(record, 0, sizeof(record));
+        PutU32(record, 1);
+        PutU32(record + 180, 7);                                      /* wallet sequence */
+        PutU32(record + 184, accepted ? good[i] : bad[i - sizeof(good) / sizeof(good[0])]);
+        n = FrameOf(frame, 'N', record, sizeof(record));
+        Feed(frame, n, 200);
+        Step(2);
+        MT_CHECK(accepted ? !sNet.closed : sNet.closed);
+    }
+}
+
 // A slow game (2-3 frames a second in the 3D view on software OpenGL) still
 // takes everything the companion sent since the last frame: 20 snapshots
 // (1.8 KiB, more than mgba.lua's 1 KiB per frame) and the save command behind
@@ -1322,6 +1359,7 @@ int main(void)
     MT_RUN(save_command_and_response);
     MT_RUN(save_command_with_bad_crc_refused);
     MT_RUN(world_inbound_validated);
+    MT_RUN(world_wallet_money_and_reward_words);
     MT_RUN(slow_frame_drains_the_backlog);
     MT_RUN(clock_paces_records_by_real_time);
     MT_RUN(no_clock_keeps_the_six_frame_cadence);
