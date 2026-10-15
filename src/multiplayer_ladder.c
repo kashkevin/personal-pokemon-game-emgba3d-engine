@@ -47,7 +47,7 @@ bool32 MultiplayerLadder_IsValid(u32 code)
     u32 level = MultiplayerLadder_Level(code);
 
     return MultiplayerLadder_IsLadder(code) && (code & 0x380) == 0
-        && level >= MP_LADDER_MIN_LEVEL && level <= MP_LADDER_MAX_LEVEL
+        && level >= MP_LADDER_MIN_LEVEL && level <= MP_LADDER_MAX_LEVEL // 0: the trainers' own levels
         && MultiplayerLadder_TrainerA(code) != MultiplayerLadder_TrainerB(code)
         && UsableTrainer(MultiplayerLadder_TrainerA(code)) && UsableTrainer(MultiplayerLadder_TrainerB(code));
 }
@@ -55,6 +55,7 @@ bool32 MultiplayerLadder_IsValid(u32 code)
 void MultiplayerLadder_ScaleOpponents(u32 code)
 {
     u32 level = MultiplayerLadder_Level(code), side, slot;
+    bool32 rescale = level != 0; // level 0: the trainers keep their own levels (the Pokemon League)
 
     for (side = B_TRAINER_OPPONENT_A; side <= B_TRAINER_OPPONENT_B; side++)
     {
@@ -70,7 +71,7 @@ void MultiplayerLadder_ScaleOpponents(u32 code)
                 ZeroMonData(mon);
                 continue;
             }
-            if (species == SPECIES_NONE)
+            if (species == SPECIES_NONE || !rescale)
                 continue;
             SetMonData(mon, MON_DATA_EXP, &gExperienceTables[gSpeciesInfo[species].growthRate][level]);
             CalculateMonStats(mon);

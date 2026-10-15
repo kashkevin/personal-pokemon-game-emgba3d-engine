@@ -12,7 +12,7 @@
 //   bit 31      ladder battle
 //   bit 30      this battle's experience is awarded (the host decides; the Frontier's never is, as in the Battle Frontier)
 //   bits 20-29  first opposing trainer (TRAINER_*)     bits 10-19  second opposing trainer
-//   bits 7-9    zero                                    bits 0-6    opposing level 1..100
+//   bits 7-9    zero                                    bits 0-6    opposing level 1..100, or 0: the trainers' own
 //
 // Rewards are not the game's business: the host pays money through the wallet adjustments (exactly once per save) and keeps
 // the progress; the game only shows the result and, when allowed, awards experience.
@@ -21,7 +21,7 @@
 
 #define MP_LADDER_FLAG     0x80000000u
 #define MP_LADDER_EXP      0x40000000u
-#define MP_LADDER_MIN_LEVEL 1
+#define MP_LADDER_MIN_LEVEL 0 // 0: keep the trainers' own levels
 #define MP_LADDER_MAX_LEVEL 100
 #define MP_LADDER_TEAM_SIZE 3 // Pokemon each of the two opposing trainers brings
 

@@ -2509,6 +2509,8 @@ int NativeSelfTest_SecretBase(void)
 // exactly the chosen level with full HP and a stat line computed for it; a Gym code keeps its meaning.
 // ---------------------------------------------------------------------------
 
+#include <stddef.h>
+#include "constants/flags.h"
 #include "multiplayer_ladder.h"
 #include "multiplayer_coop.h"
 #include "battle_setup.h"
@@ -2567,8 +2569,8 @@ int NativeSelfTest_Ladder(void)
     ExpectLadder("Gym 1..8 keep their meaning", MultiplayerCoop_IsValidGym(1) && MultiplayerCoop_IsValidGym(8)
                  && !MultiplayerCoop_IsValidGym(0) && !MultiplayerCoop_IsValidGym(9)
                  && MultiplayerCoop_GetLeader(1) == TRAINER_ROXANNE_1 && MultiplayerCoop_GetTwin(8) == TRAINER_MP_TWIN_JUAN);
-    ExpectLadder("level 0 and 101 are refused", !MultiplayerLadder_IsValid(MultiplayerLadder_Encode(TRAINER_SIDNEY, TRAINER_PHOEBE, 0, FALSE))
-                 && !MultiplayerLadder_IsValid(MultiplayerLadder_Encode(TRAINER_SIDNEY, TRAINER_PHOEBE, 101, FALSE)));
+    ExpectLadder("level 101 is refused, level 0 means the trainers' own", !MultiplayerLadder_IsValid(MultiplayerLadder_Encode(TRAINER_SIDNEY, TRAINER_PHOEBE, 101, FALSE))
+                 && MultiplayerLadder_IsValid(MultiplayerLadder_Encode(TRAINER_SIDNEY, TRAINER_PHOEBE, 0, FALSE)));
     ExpectLadder("the same trainer twice is refused", !MultiplayerLadder_IsValid(MultiplayerLadder_Encode(TRAINER_SIDNEY, TRAINER_SIDNEY, 50, FALSE)));
     ExpectLadder("no trainer and a trainer past the table are refused",
                  !MultiplayerLadder_IsValid(MultiplayerLadder_Encode(0, TRAINER_PHOEBE, 50, FALSE))
@@ -2610,9 +2612,26 @@ int NativeSelfTest_Ladder(void)
         MultiplayerLadder_ScaleOpponents(MultiplayerLadder_Encode(TRAINER_WALLACE, TRAINER_STEVEN, level, FALSE));
         ExpectLadder("Wallace and Steven scale to a chosen level", AllAtLevel(B_TRAINER_OPPONENT_A, level) && AllAtLevel(B_TRAINER_OPPONENT_B, level));
     }
+    // Level 0 leaves the levels as the trainers have them (Wallace's and Steven's differ from 50).
+    gRngValue.a = 9; gRngValue.b = 8; gRngValue.c = 7; gRngValue.ctr = 6;
+    CreateCoopTrainerParties(TRAINER_WALLACE, TRAINER_STEVEN);
+    {
+        u32 own = GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_LEVEL);
+
+        MultiplayerLadder_ScaleOpponents(MultiplayerLadder_Encode(TRAINER_WALLACE, TRAINER_STEVEN, 0, FALSE));
+        ExpectLadder("level 0 keeps the trainers' own levels but still brings three each", own > 50
+                     && GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_LEVEL) == own && CountParty(B_TRAINER_OPPONENT_A) == 3);
+    }
     ExpectLadder("each opponent brings three (a Gym trainer's own six are cut) and the party count follows",
                  CountParty(B_TRAINER_OPPONENT_A) == 3 && CountParty(B_TRAINER_OPPONENT_B) == 3
                  && gPartiesCount[B_TRAINER_OPPONENT_A] == 3 && gPartiesCount[B_TRAINER_OPPONENT_B] == 3);
+
+    // The host reads the League's progress from a saved game: where the flags are and which they are.
+    printf("save layout: flags at 0x%X, badge 1 = flag 0x%X, badge 8 = flag 0x%X, game clear = flag 0x%X\n",
+           (unsigned)offsetof(struct SaveBlock1, flags), FLAG_BADGE01_GET, FLAG_BADGE08_GET, FLAG_SYS_GAME_CLEAR);
+    ExpectLadder("the host's reading of the badges matches the game (flags 0x1270, badges 0x867-0x86E, clear 0x864)",
+                 offsetof(struct SaveBlock1, flags) == 0x1270 && FLAG_BADGE01_GET == 0x867 && FLAG_BADGE08_GET == 0x86E
+                 && FLAG_SYS_GAME_CLEAR == 0x864);
 
     printf("selftest-ladder: %d checks, %d failed\n", sLadderChecks, sLadderFailures);
     return sLadderFailures ? 1 : 0;
