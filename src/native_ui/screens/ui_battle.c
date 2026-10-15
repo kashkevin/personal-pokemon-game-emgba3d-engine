@@ -27,6 +27,7 @@
 #include "global.h"
 #include "battle.h"
 #include "battle_controllers.h"
+#include "battle_ffa.h"
 #include "battle_gimmick.h"
 #include "battle_interface.h"
 #include "battle_main.h"
@@ -131,6 +132,10 @@ static struct
     bool wild;
     u8 page;
     struct Box box[MAX_BATTLERS_COUNT];
+    /* a free-for-all (1v1v1v1): who each battler's trainer is, and whether that trainer is out of Pokémon (their box is gone) */
+    bool ffa;
+    char ffaName[MAX_BATTLERS_COUNT][24];
+    bool ffaOut[MAX_BATTLERS_COUNT];
     /* the foe trainer's party tray (singles trainer battles): 0 none, 1 able, 2 fainted, 3 status */
     u8 foePips[PARTY_SIZE];
     bool foePipsOn;
@@ -197,6 +202,20 @@ static bool Detect(void)
         && gBattleResources != NULL && Supported();
 }
 
+/* a battler's trainer's name in capitals, as the messages name them ("" wild) */
+static void OwnerName(u32 battler, char *dst, size_t size)
+{
+    u8 text[32];
+    const u8 *owner = Battle_NativeUiTrainerName(battler, text);
+
+    dst[0] = '\0';
+    if (owner == NULL)
+        return;
+    UiText_ToAscii(dst, size, owner);
+    for (char *c = dst; *c != '\0'; c++)
+        *c = toupper((unsigned char)*c);
+}
+
 static void CaptureBox(u32 battler)
 {
     struct Box *b = &sB.box[battler];
@@ -213,17 +232,7 @@ static void CaptureBox(u32 battler)
         shown = mon;
     b->on = true;
     b->battler = battler;
-    {
-        u8 text[32];
-        const u8 *owner = Battle_NativeUiTrainerName(battler, text);
-
-        if (owner != NULL)
-        {
-            UiText_ToAscii(b->owner, sizeof(b->owner), owner);
-            for (char *c = b->owner; *c != '\0'; c++)
-                *c = toupper((unsigned char)*c);
-        }
-    }
+    OwnerName(battler, b->owner, sizeof(b->owner));
     b->position = GetBattlerPosition(battler);
     b->foe = !IsOnPlayerSide(battler);
     b->mine = !b->foe && GetBattlerTrainer(battler) == B_TRAINER_PLAYER;
@@ -452,6 +461,17 @@ static void Capture(void)
         else
             sB.box[i].on = false;
     }
+    sB.ffa = IsFreeForAllBattle();
+    for (u32 i = 0; i < MAX_BATTLERS_COUNT; i++)
+    {
+        sB.ffaName[i][0] = '\0';
+        sB.ffaOut[i] = false;
+        if (sB.ffa && i < gBattlersCount)
+        {
+            OwnerName(i, sB.ffaName[i], sizeof(sB.ffaName[i]));
+            sB.ffaOut[i] = FFA_IsEliminated(i);
+        }
+    }
     CaptureFoePips();
     CaptureChooser();
     CaptureYesNo();
@@ -647,6 +667,67 @@ static void Databox2(int x, int y, const struct Box *b, bool mine)
         snprintf(hp, sizeof(hp), "%d/%d", (int)b->hp, (int)b->maxHp);
         UiCaps_Draw(x + w - 14, y + 34, hp, UI_P_TEXT, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_RIGHT, UI_NONE);
         UiW_ExpBar(x + 12, y + 36, 80, b->expFrac, true);
+    }
+}
+
+/* a free-for-all's trainer colours: you, then the three others; the same on the boxes and on the target plates */
+static UiRGBA TrainerTint(u32 battler)
+{
+    switch (battler & 3)
+    {
+    case 0:
+        return UI_HEX(0x3C78C8);
+    case 1:
+        return UI_HEX(0xC85048);
+    case 2:
+        return UI_HEX(0x48A060);
+    default:
+        return UI_HEX(0xB88820);
+    }
+}
+
+/* the trainer's name tag on a free-for-all box: "BOB" in the trainer's colour, "ALICE (YOU)" on your own, greyed with
+ * "OUT" once the trainer has no Pokémon left. Right-aligned boxes hang it from their right edge. */
+static void FfaTag(int x, int y, int w, bool right, u32 battler, bool out)
+{
+    char text[40];
+    int tw;
+    UiRGBA tint = out ? UI_HEX(0x787878) : TrainerTint(battler);
+
+    if (battler >= MAX_BATTLERS_COUNT || sB.ffaName[battler][0] == '\0')
+        return;
+    snprintf(text, sizeof(text), "%s%s", sB.ffaName[battler],
+             out ? " - OUT" : FFA_IsLocalBattler((enum BattlerId)battler) ? " (YOU)" : "");
+    tw = UiCaps_Width(text) + 12;
+    if (right)
+        x += w - tw;
+    UiG_Paint(UiM_Rounded4(tw, 12, 3, 3, 0, 0), x, y - 11, tint, &(struct UiPaint){UI_P_DATABOX_INK, UI_NONE, UI_NONE, 0, 0, NULL, 0});
+    UiCaps_Draw(x + 6, y - 9, text, UI_P_TEXT_W, UI_HEX(0x101018), UI_CAPS_SHADOW, UI_ALIGN_LEFT, UI_NONE);
+}
+
+static const struct Box *BoxAt(u32 position);
+
+/* the free-for-all's four boxes: the other three trainers' Pokémon and yours, each under its trainer's name tag. The
+ * foes stand top left (the second's Pokémon is drawn on your column, so its box is the short one above yours). */
+static void DrawBoxesFfa(int L, int R, int T, int dyB)
+{
+    static const u8 sPos[4] = {B_POSITION_OPPONENT_LEFT, B_POSITION_OPPONENT_RIGHT, B_POSITION_PLAYER_RIGHT, B_POSITION_PLAYER_LEFT};
+
+    for (int i = 0; i < 4; i++)
+    {
+        const struct Box *b = BoxAt(sPos[i]);
+        u32 battler = sB.atPosition[sPos[i]];
+        bool mine = sPos[i] == B_POSITION_PLAYER_LEFT, right = i >= 2;
+        int w = mine ? 176 : 156, x = right ? R - w : L, y = i == 0 ? T + 22 : i == 1 ? T + 74 : i == 2 ? 178 + dyB : 228 + dyB;
+
+        if (b != NULL)
+        {
+            Databox2(x + b->slide * 2, y + b->bob, b, mine);
+            if (b->slide == 0)
+                FfaTag(x, y + b->bob, w, right, battler, false);
+        }
+        else if (battler < MAX_BATTLERS_COUNT && sB.ffaOut[battler])
+            FfaTag(x, y, w, right, battler, true);
     }
 }
 
@@ -894,6 +975,8 @@ static void TargetPlate(int x, int y, int w, int h, const struct Box *b, int sta
     UiRGBA tag = strcmp(role, "FOE") == 0 ? UI_HEX(0xC85048) : strcmp(role, "ALLY") == 0 ? UI_HEX(0x48A060) : UI_HEX(0x808080);
     static const struct UiFilter sGray = {0.6f, 0, 0, 0, 0};
 
+    if (sB.ffa && b != NULL && b->on)
+        tag = TrainerTint(b->battler); /* each trainer has a colour, as on the boxes */
     if (state == 2)
         UiW_SelectFrame(m, x, y, UI_NONE, UI_NONE, 0);
     UiG_Paint(m, x, y, body, &(struct UiPaint){UI_P_DATABOX_INK, hi, lo, 0, 2, NULL, 0});
@@ -922,6 +1005,11 @@ static const struct Box *BoxAt(u32 position)
 
 static void DrawBoxes(int L, int R, int T, int dyB)
 {
+    if (sB.ffa)
+    {
+        DrawBoxesFfa(L, R, T, dyB);
+        return;
+    }
     if (!sB.doubles)
     {
         const struct Box *foe = BoxAt(B_POSITION_OPPONENT_LEFT), *me = BoxAt(B_POSITION_PLAYER_LEFT);
@@ -1080,7 +1168,9 @@ static void DrawTargetPage(int L, int R, int dyB, int t)
         int px = L + 8 + (i % 2) * 208, py = 284 + dyB + (i / 2) * 38, state;
         const char *role = sRoles[i];
 
-        if (sPos[i] == B_POSITION_PLAYER_RIGHT && battler == (u32)sB.chooser)
+        if (sB.ffa)
+            role = battler == (u32)sB.chooser ? "YOU" : "FOE"; /* nobody is anybody's ally */
+        else if (sPos[i] == B_POSITION_PLAYER_RIGHT && battler == (u32)sB.chooser)
             role = "YOU";
         else if (sPos[i] == B_POSITION_PLAYER_LEFT && battler != (u32)sB.chooser)
             role = "ALLY";

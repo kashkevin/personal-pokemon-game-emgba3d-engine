@@ -657,7 +657,7 @@ void BattleLoadMonSpriteGfx(struct Pokemon *mon, enum BattlerId battler)
     }
 
     position = GetBattlerPosition(battler);
-    HandleLoadSpecialPokePic(!IsOnPlayerSide(battler),
+    HandleLoadSpecialPokePic(!IsDrawnOnPlayerSide(battler),
                              gMonSpritesGfxPtr->spritesGfx[position],
                              species, personalityValue);
 
@@ -948,7 +948,7 @@ void HandleSpeciesGfxDataChange(enum BattlerId battlerAtk, enum BattlerId battle
             personalityValue = GetMonData(monAtk, MON_DATA_PERSONALITY);
             isShiny = GetMonData(monAtk, MON_DATA_IS_SHINY);
         }
-        HandleLoadSpecialPokePic(!IsOnPlayerSide(battlerAtk),
+        HandleLoadSpecialPokePic(!IsDrawnOnPlayerSide(battlerAtk),
                                  gMonSpritesGfxPtr->spritesGfx[position],
                                  targetSpecies,
                                  personalityValue);

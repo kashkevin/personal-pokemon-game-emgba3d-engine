@@ -1164,6 +1164,7 @@ static inline enum BattlerPosition GetBattlerPosition(enum BattlerId battler)
 // The column of the screen a battler is drawn in (what a player sees: their own team at the bottom). Used by
 // everything that draws or animates.
 static inline enum BattleSide GetBattlerPositionSide(enum BattlerId battler)
+#line 1165 // gba-line
 {
     return GetBattlerPosition(battler) & BIT_SIDE;
 }
@@ -1191,10 +1192,26 @@ static inline enum BattleSide GetBattlerSide(enum BattlerId battler)
 #endif
 }
 
+#line 1169 // gba-line
 static inline bool32 IsOnPlayerSide(enum BattlerId battler)
 {
     return GetBattlerPositionSide(battler) == B_SIDE_PLAYER;
 }
+
+// What the screen draws a battler as: your own team (a back sprite, a player's healthbox) or a foe (a front sprite, an
+// opponent's healthbox). The same as IsOnPlayerSide() in every battle but a free-for-all, where the Pokemon in the second
+// player slot is somebody else's and is drawn facing you like the other foes. Rules code never asks this.
+#if MP_FFA_ENABLED
+static inline bool32 IsDrawnOnPlayerSide(enum BattlerId battler)
+{
+    if (gBattleTypeFlags & BATTLE_TYPE_FFA)
+        return GetBattlerPosition(battler) == B_POSITION_PLAYER_LEFT;
+    return IsOnPlayerSide(battler);
+}
+#else
+#define IsDrawnOnPlayerSide(battler) IsOnPlayerSide(battler)
+#endif
+#line 1173 // gba-line
 
 static inline bool32 IsBattlerAlly(enum BattlerId battlerAtk, enum BattlerId battlerDef)
 {
@@ -1223,6 +1240,7 @@ static inline bool32 IsFetchedPartnerAlive(enum BattlerId partner)
 #else
 #define IsFetchedPartnerAlive(partner) IsBattlerAlive(partner)
 #endif
+#line 1178 // gba-line
 
 static inline bool32 IsDoubleBattle(void)
 {

@@ -15,7 +15,7 @@ FFA_BATTLE_TEST("FFA: a trainer with no Pokemon left is out, the others fight on
         TURN { MOVE(playerLeft, MOVE_TACKLE, target: opponentLeft); MOVE(opponentLeft, MOVE_CELEBRATE); MOVE(playerRight, MOVE_CELEBRATE); MOVE(opponentRight, MOVE_CELEBRATE); }
         TURN { MOVE(playerLeft, MOVE_CELEBRATE); MOVE(playerRight, MOVE_CELEBRATE); MOVE(opponentRight, MOVE_TACKLE, target: playerLeft); }
     } SCENE {
-        MESSAGE("The opposing Wobbuffet fainted!");
+        MESSAGE("2's Wobbuffet fainted!"); // a free-for-all names the trainer (Update 21)
         ANIMATION(ANIM_TYPE_MOVE, MOVE_TACKLE, opponentRight);
         HP_BAR(playerLeft);
     } THEN {

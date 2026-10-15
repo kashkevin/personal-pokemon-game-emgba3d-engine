@@ -4,6 +4,8 @@
 #include "battle_ai_record.h"
 #include "battle_controllers.h"
 #include "battle_message.h"
+#include "battle_ffa.h"
+#line 7 // gba-line
 #include "multiplayer_battle.h"
 #include "battle_setup.h"
 #include "battle_special.h"
@@ -2884,7 +2886,30 @@ static void GetBattlerNick(enum BattlerId battler, u8 *dst)
     StringGet_Nickname(dst);
 }
 
+#if MP_FFA_ENABLED
+// A free-for-all names the trainer instead of "The opposing": "ALICE's Gardevoir" (every Pokemon but your own).
+static u32 FfaOwnerPrefix(enum BattlerId battler, u8 *dst, u32 dstID)
+{
+    const u8 *owner = FFA_GetOwnerName(battler);
+    static const u8 sPossessive[] = _("'s ");
+
+    if (owner == NULL || FFA_IsLocalBattler(battler))
+        return dstID;
+    for (; *owner != EOS && dstID < 16; owner++)
+        dst[dstID++] = *owner;
+    for (const u8 *s = sPossessive; *s != EOS; s++)
+        dst[dstID++] = *s;
+    return dstID;
+}
+#define FFA_PREFIX(battler) if (IsFreeForAllBattle()) { dstID = FfaOwnerPrefix(battler, dst, dstID); GetBattlerNick(battler, text); toCpy = text; } else
+#else
+#define FFA_PREFIX(battler)
+#endif
+
+#line 2887 // gba-line
 #define HANDLE_NICKNAME_STRING_CASE(battler)                            \
+    FFA_PREFIX(battler)                                                 \
+    {                                                                   \
     if (!IsOnPlayerSide(battler))                                       \
     {                                                                   \
         if (gBattleTypeFlags & BATTLE_TYPE_TRAINER)                     \
@@ -2899,9 +2924,13 @@ static void GetBattlerNick(enum BattlerId battler, u8 *dst)
         }                                                               \
     }                                                                   \
     GetBattlerNick(battler, text);                                      \
-    toCpy = text;
+    toCpy = text;                                                       \
+    }
+#line 2903 // gba-line
 
 #define HANDLE_NICKNAME_STRING_LOWERCASE(battler)                       \
+    FFA_PREFIX(battler)                                                 \
+    {                                                                   \
     if (!IsOnPlayerSide(battler))                       \
     {                                                                   \
         if (gBattleTypeFlags & BATTLE_TYPE_TRAINER)                     \
@@ -2916,7 +2945,9 @@ static void GetBattlerNick(enum BattlerId battler, u8 *dst)
         }                                                               \
     }                                                                   \
     GetBattlerNick(battler, text);                                      \
-    toCpy = text;
+    toCpy = text;                                                       \
+    }
+#line 2920 // gba-line
 
 static const u8 *BattleStringGetOpponentNameByTrainerId(u16 trainerId, u8 *text, u8 multiplayerId, enum BattlerId battler)
 {
@@ -4040,6 +4071,10 @@ const u8 *Battle_NativeUiTrainerName(u32 battler, u8 *text)
 
     if (battler >= gBattlersCount)
         return NULL;
+#if MP_FFA_ENABLED
+    if (IsFreeForAllBattle() && FFA_GetOwnerName(battler) != NULL)
+        return FFA_GetOwnerName(battler);
+#endif
     if (!IsOnPlayerSide(battler) && !(gBattleTypeFlags & (BATTLE_TYPE_TRAINER | BATTLE_TYPE_LINK | BATTLE_TYPE_RECORDED_LINK)))
         return NULL;
     if ((gBattleTypeFlags & BATTLE_TYPE_LINK) && !(gBattleTypeFlags & BATTLE_TYPE_RECORDED_LINK))

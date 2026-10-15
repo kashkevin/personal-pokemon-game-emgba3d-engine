@@ -76,6 +76,28 @@ static const struct SpriteSheet sSpriteSheets_MoveEffectMons[] =
     { gMiscBlank_Gfx, MON_PIC_SIZE, TAG_MOVE_EFFECT_MON_2, },
 };
 
+#if MP_FFA_ENABLED
+// A free-for-all draws four Pokemon on the doubles screen but spread out so none stands on another: you bottom left
+// (back to us), the three others facing us, one of them in the player's second slot.
+static const struct UCoords8 sFfaBattlerCoords[MAX_BATTLERS_COUNT] =
+{
+    [B_POSITION_PLAYER_LEFT]    = { 40, 80 },
+    [B_POSITION_OPPONENT_LEFT]  = { 208, 44 },
+    [B_POSITION_PLAYER_RIGHT]   = { 100, 84 },
+    [B_POSITION_OPPONENT_RIGHT] = { 140, 30 },
+};
+
+static inline struct UCoords8 GetBattlerBaseCoords(enum BattlerId battler)
+{
+    if (IsFreeForAllBattle())
+        return sFfaBattlerCoords[GetBattlerPosition(battler)];
+    return sBattlerCoords[GetBattlerCoordsIndex(battler)][GetBattlerPosition(battler)];
+}
+#else
+#define GetBattlerBaseCoords(battler) (sBattlerCoords[GetBattlerCoordsIndex(battler)][GetBattlerPosition(battler)])
+#endif
+
+#line 79 // gba-line
 u8 GetBattlerSpriteCoord(enum BattlerId battler, u8 coordType)
 {
     u8 retVal;
@@ -93,10 +115,10 @@ u8 GetBattlerSpriteCoord(enum BattlerId battler, u8 coordType)
     {
     case BATTLER_COORD_X:
     case BATTLER_COORD_X_2:
-        retVal = sBattlerCoords[GetBattlerCoordsIndex(battler)][GetBattlerPosition(battler)].x;
+        retVal = GetBattlerBaseCoords(battler).x;
         break;
     case BATTLER_COORD_Y:
-        retVal = sBattlerCoords[GetBattlerCoordsIndex(battler)][GetBattlerPosition(battler)].y;
+        retVal = GetBattlerBaseCoords(battler).y;
         break;
     case BATTLER_COORD_Y_PIC_OFFSET:
     case BATTLER_COORD_Y_PIC_OFFSET_DEFAULT:
@@ -161,7 +183,7 @@ u8 GetBattlerYDelta(enum BattlerId battler, enum Species species)
         }
     }
 
-    if (IsOnPlayerSide(battler) || IsContest())
+    if (IsDrawnOnPlayerSide(battler) || IsContest())
         ret = gSpeciesInfo[species].backPicYOffset;
     else
         ret = gSpeciesInfo[species].frontPicYOffset;
@@ -171,7 +193,7 @@ u8 GetBattlerYDelta(enum BattlerId battler, enum Species species)
 u8 GetBattlerElevation(enum BattlerId battler, enum Species species)
 {
     u8 ret = 0;
-    if (!IsOnPlayerSide(battler))
+    if (!IsDrawnOnPlayerSide(battler))
     {
         if (!IsContest())
         {
@@ -187,7 +209,7 @@ u8 GetBattlerSpriteFinal_Y(enum BattlerId battler, enum Species species, bool32 
     u16 offset;
     u8 y;
 
-    if (IsOnPlayerSide(battler) || IsContest())
+    if (IsDrawnOnPlayerSide(battler) || IsContest())
     {
         offset = GetBattlerYDelta(battler, species);
     }
@@ -196,10 +218,10 @@ u8 GetBattlerSpriteFinal_Y(enum BattlerId battler, enum Species species, bool32 
         offset = GetBattlerYDelta(battler, species);
         offset -= GetBattlerElevation(battler, species);
     }
-    y = offset + sBattlerCoords[GetBattlerCoordsIndex(battler)][GetBattlerPosition(battler)].y;
+    y = offset + GetBattlerBaseCoords(battler).y;
     if (a3)
     {
-        if (IsOnPlayerSide(battler))
+        if (IsDrawnOnPlayerSide(battler))
             y += 8;
         if (y > DISPLAY_HEIGHT - MON_PIC_HEIGHT + 8)
             y = DISPLAY_HEIGHT - MON_PIC_HEIGHT + 8;

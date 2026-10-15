@@ -1865,7 +1865,7 @@ void SetMultiuseSpriteTemplateToPokemon(enum Species speciesTag, enum BattlerPos
         gMultiuseSpriteTemplate = gBattlerSpriteTemplates[battlerPosition];
 
     gMultiuseSpriteTemplate.paletteTag = speciesTag;
-    if (battlerPosition == B_POSITION_PLAYER_LEFT || battlerPosition == B_POSITION_PLAYER_RIGHT)
+    if (battlerPosition == B_POSITION_PLAYER_LEFT || (battlerPosition == B_POSITION_PLAYER_RIGHT && !IsFreeForAllBattle()))
         gMultiuseSpriteTemplate.anims = gAnims_MonPic;
     else
     {

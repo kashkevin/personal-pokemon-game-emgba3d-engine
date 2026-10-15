@@ -33,6 +33,12 @@ enum BattlerId FFA_GetSoleSurvivor(void);
 enum BattlerId FFA_GetLocalBattler(void);
 u32 FFA_GetOutcomeForWinner(u32 winnerByte);
 
+// The trainer a Pokemon belongs to, as the battle's link players name them (the game's text), or NULL: never for a Pokemon
+// that is not in a free-for-all. Everything that tells the players whose Pokemon is whose asks this.
+const u8 *FFA_GetOwnerName(enum BattlerId battler);
+// TRUE for the Pokemon this core's player controls.
+bool32 FFA_IsLocalBattler(enum BattlerId battler);
+
 // The winner as the byte the end-of-battle command carries: a battler number, or 0xFF for a draw.
 u8 FFA_RecordWinner(enum BattlerId winner);
 u8 FFA_GetWinnerByte(void);

@@ -22,7 +22,24 @@
 #include "palette.h"
 #include "sprite.h"
 #include "constants/flags.h"
+#include "constants/species.h"
+#include "constants/moves.h"
+#include "constants/opponents.h"
+#include "constants/battle.h"
+#include "battle.h"
+#include "battle_interface.h"
+#include "sprite.h"
+#include "battle_setup.h"
+#include "link.h"
+#include "pokemon.h"
+#include "string_util.h"
+#include "constants/characters.h"
+#include "rtc.h"
+#include "field_screen_effect.h"
+#include "field_player_avatar.h"
+#include "script.h"
 #include "platform/debug_scene.h"
+#include <stdbool.h>
 #include "platform/png_write.h"
 
 #define MAX_KEYS 64
@@ -139,9 +156,32 @@ static void ParsePeers(const char *value, struct RegionMapTestMarkers *test)
     }
 }
 
+static void TraceBattlers(void)
+{
+    for (int b = 0; b < 4; b++)
+    {
+        struct Sprite *h = &gSprites[gHealthboxSpriteIds[b]];
+        struct Sprite *m = &gSprites[gBattlerSpriteIds[b]];
+
+        SDL_Log("battler %d pos %d side %d | healthbox sprite %d x=%d y=%d x2=%d y2=%d inv=%d | mon sprite %d x=%d y=%d inv=%d", b,
+                gBattlerPositions[b], GetBattlerSide(b), gHealthboxSpriteIds[b], h->x, h->y, h->x2, h->y2, h->invisible,
+                gBattlerSpriteIds[b], m->x, m->y, m->invisible);
+        SDL_Log("   slide=%d ball=%d cry=%d execflags=%08x ctrl=%p", gBattleSpritesDataPtr->healthBoxesData[b].healthboxSlideInStarted,
+                gBattleSpritesDataPtr->healthBoxesData[b].ballAnimActive, gBattleSpritesDataPtr->healthBoxesData[b].waitForCry,
+                gBattleControllerExecFlags, (void *)gBattlerControllerFuncs[b]);
+        SDL_Log("   hbcb=%p dummy=%p tried=%d finished=%d", (void *)gSprites[gHealthboxSpriteIds[b]].callback, (void *)SpriteCallbackDummy,
+                gBattleSpritesDataPtr->healthBoxesData[b].triedShinyMonAnim, gBattleSpritesDataPtr->healthBoxesData[b].finishedShinyMonAnim);
+    }
+}
+
 uint16_t DebugScene_FilterKeys(uint16_t keys)
 {
     sKeyFrame++;
+    if (SDL_getenv("PKMN_DEBUG_TRACE") != NULL && sKeyFrame % 100 == 0)
+        SDL_Log("callbacks: main1 %p main2 %p state %d dispcnt %04x bldy %d fade %d bgvis %d", (void *)gMain.callback1, (void *)gMain.callback2,
+                gMain.state, REG_DISPCNT, REG_BLDY, gPaletteFade.active, (int)gPaletteFade.bufferTransferDisabled);
+    if (SDL_getenv("PKMN_DEBUG_TRACE") != NULL && sKeyFrame % 400 == 0 && gBattleSpritesDataPtr != NULL)
+        TraceBattlers();
     if (sPeersThenFrame != 0 && sKeyFrame == sPeersThenFrame && SDL_getenv("PKMN_DEBUG_PEERS_THEN") != NULL)
     {
         // the other trainers move (or come, or leave) while the screen is open
@@ -152,6 +192,38 @@ uint16_t DebugScene_FilterKeys(uint16_t keys)
         if (sKeyFrame >= sScript[i].frame && sKeyFrame < sScript[i].frame + HOLD_FRAMES)
             keys |= sScript[i].keys;
     return keys;
+}
+
+// PKMN_DEBUG_GLSHOTS=frame,frame: the window's own picture (the 3D view with the native interface over it) through the
+// F12 screenshot path, into the screenshots folder; the program ends two presented frames after the last one.
+static unsigned sGlShots[MAX_SHOTS];
+static unsigned sGlShotCount, sGlFrame;
+
+bool DebugScene_WantGlShot(void)
+{
+    const char *value = SDL_getenv("PKMN_DEBUG_GLSHOTS");
+
+    if (value == NULL)
+        return false;
+    if (sGlShotCount == 0)
+    {
+        while (*value != '\0' && sGlShotCount < MAX_SHOTS)
+        {
+            char *end;
+
+            sGlShots[sGlShotCount++] = (unsigned)strtoul(value, &end, 10);
+            value = (*end == ',') ? end + 1 : end;
+            if (end == value && *value != '\0')
+                break;
+        }
+    }
+    sGlFrame++;
+    if (sGlShotCount > 0 && sGlFrame == sGlShots[sGlShotCount - 1] + 2)
+        exit(0);
+    for (unsigned i = 0; i < sGlShotCount; i++)
+        if (sGlShots[i] == sGlFrame)
+            return true;
+    return false;
 }
 
 void DebugScene_Frame(const uint16_t *pixels)
@@ -181,6 +253,106 @@ void DebugScene_Frame(const uint16_t *pixels)
         if (i + 1 == sShotCount)
             exit(0);
     }
+}
+
+
+// PKMN_DEBUG_SCENE=ffa: a free-for-all battle on this screen, you and three computer trainers, for looking at the layout
+// (docs/four-player-battle-ui.md). PKMN_DEBUG_FFA="species,species,species,species" and PKMN_DEBUG_FFA_PARTY=n (Pokemon each).
+static void StartFfaScene(void)
+{
+    static const char *const names[4] = {"ALICE", "BOB", "CY", "DI"};
+    u16 species[4] = {SPECIES_BLAZIKEN, SPECIES_GARDEVOIR, SPECIES_PIKACHU, SPECIES_RAYQUAZA};
+    const char *value;
+    int v[8], partySize = 2, i, j;
+    bool weak = SDL_getenv("PKMN_DEBUG_FFA_WEAK") != NULL;
+
+    if ((value = SDL_getenv("PKMN_DEBUG_FFA")) != NULL && Numbers(value, v, 4) >= 4)
+        for (i = 0; i < 4; i++)
+            species[i] = (u16)v[i];
+    if ((value = SDL_getenv("PKMN_DEBUG_FFA_PARTY")) != NULL && Numbers(value, v, 1) >= 1 && v[0] >= 1 && v[0] <= 6)
+        partySize = v[0];
+    memset(gParties, 0, sizeof(gParties));
+    for (i = FLAG_BADGE01_GET; i <= FLAG_BADGE08_GET; i++)
+        FlagSet((u16)i); // so the level 50 Pokemon obeys
+    for (i = 0; i < 4; i++)
+    {
+        for (j = 0; j < partySize; j++)
+        {
+            struct OriginalTrainerId id = {OT_ID_PRESET, 0x1111u * (u32)(i + 1)};
+
+            // PKMN_DEBUG_FFA_WEAK: the three other trainers' Pokemon are level 3, so one Swift knocks them all out
+            // (to look at the elimination display)
+            u8 level = weak && i > 0 ? 3 : 50 - 3 * j;
+
+            CreateMonWithIVs(&gParties[i][j], j == 0 ? species[i] : SPECIES_ZIGZAGOON, level, 0x1000u * (u32)(i + 1) + (u32)j, id, 20);
+        }
+        for (j = 0; j < partySize; j++)
+        {
+            static const u16 moves[4] = {MOVE_TACKLE, MOVE_SWIFT, MOVE_SURF, MOVE_GROWL};
+
+            u8 noGimmick = BLOCK_AI_DYNAMAX; // the computer trainers here would otherwise Dynamax (the debug party has no trainer data)
+
+            for (int m = 0; m < 4; m++)
+                SetMonMoveSlot(&gParties[i][j], moves[m], m);
+            SetMonData(&gParties[i][j], MON_DATA_DYNAMAX_LEVEL, &noGimmick);
+            {
+                u8 noTera = TYPE_MYSTERY;
+
+                SetMonData(&gParties[i][j], MON_DATA_TERA_TYPE, &noTera);
+            }
+        }
+        gPartiesCount[i] = (u8)partySize;
+        memset(&gLinkPlayers[i], 0, sizeof(gLinkPlayers[i]));
+        gLinkPlayers[i].id = (u16)i;
+        gLinkPlayers[i].gender = (u8)(i & 1);
+        for (j = 0; names[i][j] != '\0'; j++)
+            gLinkPlayers[i].name[j] = (u8)(CHAR_A + names[i][j] - 'A');
+        gLinkPlayers[i].name[j] = EOS;
+    }
+    gBattleTypeFlags = BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_MULTI | BATTLE_TYPE_INGAME_PARTNER | BATTLE_TYPE_FFA;
+    if (SDL_getenv("PKMN_DEBUG_FFA_AS_2V2") != NULL)
+    {
+        // the same four Pokemon as a two against two (you and Steven against two trainers): for comparing the layouts
+        gBattleTypeFlags = BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_TWO_OPPONENTS | BATTLE_TYPE_MULTI | BATTLE_TYPE_INGAME_PARTNER;
+        TRAINER_BATTLE_PARAM.opponentB = TRAINER_BRAWLY_1;
+        for (j = 0; j < partySize; j++)
+            gParties[B_TRAINER_OPPONENT_B][j] = gParties[3][j];
+        gPartiesCount[B_TRAINER_OPPONENT_B] = (u8)partySize;
+    }
+    gPartnerTrainerId = TRAINER_PARTNER(PARTNER_STEVEN);
+    TRAINER_BATTLE_PARAM.opponentB = TRAINER_ROXANNE_1;
+    TRAINER_BATTLE_PARAM.opponentA = TRAINER_ROXANNE_1;
+    {
+        extern void CB2_InitBattleForPreview(void);
+        SetMainCallback2(CB2_InitBattleForPreview);
+    }
+}
+
+// PKMN_DEBUG_SCENE=field: the overworld at PKMN_DEBUG_HERE=group,num,x,y[,gender] (a new game's player with one Pokemon, no
+// save), for looking at maps in either renderer (the visual audit, docs/visual-audio-audit.md). PKMN_DEBUG_HOUR=h sets the
+// clock (0-23), PKMN_DEBUG_SPECIES=n the Pokemon the player has (and PKMN_DEBUG_FOLLOWER=1 sets the follower flag).
+static void StartFieldScene(void)
+{
+    const char *value;
+    int v[4];
+    u16 species = SPECIES_MUDKIP;
+
+    if ((value = SDL_getenv("PKMN_DEBUG_SPECIES")) != NULL && Numbers(value, v, 1) >= 1)
+        species = (u16)v[0];
+    struct OriginalTrainerId id = {OT_ID_PRESET, 0x2222u};
+
+    CreateMonWithIVs(&gPlayerParty[0], species, 20, 0x1234u, id, 20);
+    gPlayerPartyCount = 1;
+    if ((value = SDL_getenv("PKMN_DEBUG_HOUR")) != NULL && Numbers(value, v, 1) >= 1)
+        RtcCalcLocalTimeOffset(0, v[0], 0, 0);
+    ResetInitialPlayerAvatarState();
+    ScriptContext_Init();
+    UnlockPlayerFieldControls();
+    SetWarpDestination(gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum, WARP_ID_NONE, gSaveBlock1Ptr->pos.x, gSaveBlock1Ptr->pos.y);
+    WarpIntoMap();
+    gFieldCallback = FieldCB_WarpExitFadeFromBlack;
+    gFieldCallback2 = NULL;
+    SetMainCallback2(CB2_LoadMap);
 }
 
 static void CB2_DebugSceneSetup(void)
@@ -246,6 +418,10 @@ static void CB2_DebugSceneSetup(void)
         SetMainCallback2(CB2_OpenFlyMap);
     else if (strcmp(scene, "pokenav") == 0)
         SetMainCallback2(CB2_InitPokeNav);
+    else if (strcmp(scene, "ffa") == 0)
+        StartFfaScene();
+    else if (strcmp(scene, "field") == 0)
+        StartFieldScene();
 }
 
 void DebugScene_Start(void)

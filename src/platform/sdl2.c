@@ -1778,6 +1778,8 @@ static void DrawPcOverlay(int outputWidth, int outputHeight)
         SDL_snprintf(corner, sizeof(corner), "%s%.0f fps   3D %dx%d%s", Benchmark_Active() ? "Benchmark   " : "",
                      sFrameRateShown, width, height, samples > 0 ? " MSAA" : "");
     }
+    if (DebugScene_WantGlShot())
+        sScreenshotRequested = true;
     // F12: the picture as drawn, before the PC's own interface goes over it.
     if (sScreenshotRequested)
     {

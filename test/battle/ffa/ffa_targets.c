@@ -126,7 +126,7 @@ FFA_BATTLE_TEST("FFA: Spikes go on the side of the trainer they were aimed at, a
         TURN { SWITCH(opponentLeft, 1); SWITCH(opponentRight, 1); MOVE(playerLeft, MOVE_CELEBRATE); MOVE(playerRight, MOVE_CELEBRATE); }
     } SCENE {
         ANIMATION(ANIM_TYPE_MOVE, MOVE_SPIKES, playerLeft);
-        MESSAGE("The opposing Wynaut was hurt by the spikes!");
+        MESSAGE("2's Wynaut was hurt by the spikes!"); // a free-for-all names the trainer (Update 21)
     } THEN {
         EXPECT_LT(opponentLeft->hp, opponentLeft->maxHP);
         EXPECT_EQ(opponentRight->species, SPECIES_WYNAUT);

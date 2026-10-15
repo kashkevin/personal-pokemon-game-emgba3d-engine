@@ -364,6 +364,24 @@ static void InitBtlControllersInternal(void)
             }
         }
 
+#if MP_FFA_ENABLED
+        if (!isLink && !isRecorded && IsFreeForAllBattle())
+        {
+            // A free-for-all with no link (the PC build's screen preview, tools/pc_port): you and three computer
+            // opponents, every Pokemon on its own screen position, each with its own party.
+            SetBattlerControllerFunc(B_POSITION_PLAYER_LEFT, SetControllerToPlayer);
+            SetBattlerControllerFunc(B_POSITION_OPPONENT_LEFT, SetControllerToOpponent);
+            SetBattlerControllerFunc(B_POSITION_PLAYER_RIGHT, SetControllerToOpponent);
+            SetBattlerControllerFunc(B_POSITION_OPPONENT_RIGHT, SetControllerToOpponent);
+            for (i = 0; i < MAX_BATTLERS_COUNT; i++)
+            {
+                BufferBattlePartyCurrentOrderBySide(i, i & BIT_FLANK);
+                gBattlerPartyIndexes[i] = 0;
+            }
+            return;
+        }
+#endif
+#line 365 // gba-line
         bool32 bufferPartyOrders;
 
         if (!isLink)

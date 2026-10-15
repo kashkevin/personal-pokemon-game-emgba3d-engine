@@ -1,6 +1,9 @@
 #include "global.h"
 #include "battle.h"
 #include "battle_ffa.h"
+#include "link.h"
+#include "text.h"
+#include "pokemon.h"
 #include "battle_controllers.h"
 #include "battle_util.h"
 #include "pokemon.h"
@@ -130,3 +133,20 @@ u32 FFA_GetOutcomeForWinner(u32 winnerByte)
 }
 
 #endif // MP_FFA_ENABLED
+
+const u8 *FFA_GetOwnerName(enum BattlerId battler)
+{
+    s32 id;
+
+    if (!IsFreeForAllBattle() || battler >= gBattlersCount)
+        return NULL;
+    id = GetBattlerMultiplayerId(battler);
+    if (id < 0 || id >= MAX_LINK_PLAYERS || gLinkPlayers[id].name[0] == EOS)
+        return NULL;
+    return gLinkPlayers[id].name;
+}
+
+bool32 FFA_IsLocalBattler(enum BattlerId battler)
+{
+    return IsFreeForAllBattle() && GetBattlerPosition(battler) == B_POSITION_PLAYER_LEFT;
+}

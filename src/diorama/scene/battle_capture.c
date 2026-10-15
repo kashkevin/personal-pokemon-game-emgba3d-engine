@@ -169,7 +169,7 @@ static void Battlers(struct DioramaBattleFrame *frame)
 
         out->battler = b;
         out->position = GetBattlerPosition(b);
-        out->opponent = GetBattlerPositionSide(b) != B_SIDE_PLAYER;
+        out->opponent = !IsDrawnOnPlayerSide(b); /* a free-for-all's third foe stands on the player's column but faces it */
         if ((gAbsentBattlerFlags & (1u << b)) == 0 && id < MAX_SPRITES)
         {
             sprite = &gSprites[id];

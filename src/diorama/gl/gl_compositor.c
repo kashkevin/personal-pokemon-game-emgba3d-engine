@@ -1645,6 +1645,15 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     }
 
     DioramaProfile_Begin(DIORAMA_PROF_FRAME);
+    {
+        static unsigned sLogEvery;
+
+        if (sHasSceneSnapshot && SDL_getenv("PKMN_DEBUG_TRACE") != NULL && (++sLogEvery % 200) == 0)
+            SDL_Log("Diorama snapshot: valid %d kind %d cells %u fallback 0x%x tilesets %d map %d.%d layout %d terrain %d objects %d",
+                    sSceneSnapshot.valid, (int)sSceneSnapshot.sceneKind, (unsigned)sSceneSnapshot.visibleCellCount,
+                    (unsigned)sSceneSnapshot.fallbackReasons, sSceneSnapshot.tilesetResourcesValid, sSceneSnapshot.mapGroup,
+                    sSceneSnapshot.mapNum, sSceneSnapshot.mapLayoutId, sTerrainAvailable, sObjectsAvailable);
+    }
     if (sRenderMode == DIORAMA_RENDER_AUTO
      && sTerrainAvailable
      && sObjectsAvailable

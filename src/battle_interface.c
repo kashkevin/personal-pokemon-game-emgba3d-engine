@@ -4,6 +4,8 @@
 #include "pokemon.h"
 #include "battle_controllers.h"
 #include "battle_interface.h"
+#include "battle_ffa.h"
+#line 7 // gba-line
 #include "battle_z_move.h"
 #include "graphics.h"
 #include "sprite.h"
@@ -906,6 +908,28 @@ static void UpdateLvlInHealthbox(u8 healthboxSpriteId, u8 lvl)
         UpdateIndicatorVisibilityAndType(healthboxSpriteId, TRUE);
     }
 
+#if MP_FFA_ENABLED
+    // In a free-for-all every Pokemon but your own shows its trainer's name where the level would be: the level
+    // is the same for everyone there and "whose is this" is the question the screen has to answer.
+    if (IsFreeForAllBattle() && !FFA_IsLocalBattler(battler) && FFA_GetOwnerName(battler) != NULL)
+    {
+        const u8 *owner = FFA_GetOwnerName(battler);
+        u32 length = 0;
+
+        while (owner[length] != EOS && length < 7)
+        {
+            text[length] = owner[length];
+            length++;
+        }
+        text[length] = EOS;
+        while (length > 3 && GetStringWidth(FONT_SMALL_NARROW, text, 0) > 30)
+            text[--length] = EOS;
+        FillSpriteRectColor(spriteId, IsOnPlayerSide(battler) ? 8 : 0, 5, 30, 11, HEALTHBOX_BG_INDEX);
+        AddSpriteTextPrinterParameterized6(spriteId, FONT_SMALL_NARROW, IsOnPlayerSide(battler) ? 8 : 0, 3, 0, 0, sHealthBoxTextColor, 0, text);
+        return;
+    }
+#endif
+#line 896 // gba-line
     u32 width = GetStringWidth(FONT_SMALL, text, 0);
 
     if (IsOnPlayerSide(battler))

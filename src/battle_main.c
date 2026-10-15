@@ -479,6 +479,19 @@ const u8 *const gStatusConditionStringsTable[][2] =
     {gStatusConditionString_LoveJpn, gText_Love}
 };
 
+#ifdef PORTABLE
+// The PC build's screen preview (src/platform/debug_scene.c): a battle set up by hand starts here, past the party showcase.
+void CB2_InitBattleForPreview(void)
+{
+    MoveSaveBlocks_ResetHeap();
+    AllocateBattleResources();
+    AllocateBattleSpritesData();
+    AllocateMonSpritesGfx();
+    RecordedBattle_ClearFrontierPassFlag();
+    CB2_InitBattleInternal();
+}
+#endif
+#line 478 // gba-line
 void CB2_InitBattle(void)
 {
     if (!gTestRunnerEnabled)

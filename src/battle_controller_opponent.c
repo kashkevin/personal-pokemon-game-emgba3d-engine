@@ -173,7 +173,12 @@ static void Intro_WaitForShinyAnimAndHealthbox(enum BattlerId battler)
         }
         else if (gBattleSpritesDataPtr->healthBoxesData[battler].finishedShinyMonAnim)
         {
-            if (GetBattlerPosition(battler) == B_POSITION_OPPONENT_RIGHT)
+            if (GetBattlerPosition(battler) == B_POSITION_OPPONENT_RIGHT
+#if MP_FFA_ENABLED
+             && !IsFreeForAllBattle() // no partner: GetPartnerBattler() is the battler itself, which would wait on its own flags
+#endif
+               )
+#line 173 // gba-line
             {
                 if (!gBattleSpritesDataPtr->healthBoxesData[GetPartnerBattler(battler)].triedShinyMonAnim
                  && !gBattleSpritesDataPtr->healthBoxesData[GetPartnerBattler(battler)].finishedShinyMonAnim)
