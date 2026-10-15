@@ -350,9 +350,12 @@ check-wild-weather: $(TARGET)
 	@./$(TARGET) --selftest-wild-weather > $(OBJ_DIR)/selftest-wild-weather.log 2>&1; status=$$?; \
 	  tail -n 3 $(OBJ_DIR)/selftest-wild-weather.log; exit $$status
 
+# The test pins its start to noon of the player's day, so it must pass at any wall-clock time of day:
+# run it in four zones six hours apart (one of them is always within three hours of local midnight).
 check-clock: $(TARGET)
-	@./$(TARGET) --selftest-clock > $(OBJ_DIR)/selftest-clock.log 2>&1; status=$$?; \
-	  tail -n 3 $(OBJ_DIR)/selftest-clock.log; exit $$status
+	@status=0; for tz in UTC-0 UTC-6 UTC-12 UTC+6; do \
+	  TZ=$$tz ./$(TARGET) --selftest-clock > $(OBJ_DIR)/selftest-clock.log 2>&1 || { status=1; echo "check-clock failed with TZ=$$tz"; }; \
+	  tail -n 1 $(OBJ_DIR)/selftest-clock.log; done; exit $$status
 
 check-mp-objects: $(TARGET)
 	@./$(TARGET) --selftest-mp-objects > $(OBJ_DIR)/selftest-mp-objects.log 2>&1; status=$$?; \

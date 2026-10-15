@@ -1321,6 +1321,12 @@ int NativeSelfTest_Clock(void)
     char what[160];
 
     SetSaveBlocksPointers(0);
+    // The steps below move the player's clock on by up to 2 + 3 hours inside one day and by whole days
+    // otherwise, and each step checks "a daily reset exactly when the real day changed". Started within
+    // five hours of midnight, a step crosses midnight early and the later day-count checks are off by one
+    // (a test defect, KNOWN_ISSUES D2). Pin the start to noon of the player's day, whatever the wall clock.
+    WallTime(&wall);
+    PassRealTime(12 * 3600 - (wall.hours * 3600 + wall.minutes * 60 + wall.seconds));
     InitDewfordTrend(); // as a new game does (the daily reset divides by its limits)
     MultiplayerWorld_Init();
     gSaveBlock1Ptr->location.mapGroup = MAP_GROUP(MAP_ROUTE101); // not a Pokemon Center
