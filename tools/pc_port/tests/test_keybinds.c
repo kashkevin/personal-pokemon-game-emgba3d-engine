@@ -1,6 +1,6 @@
 // Keyboard bindings (include/platform/keybinds.h): defaults, the settings file's lines, conflicts,
 // reserved keys, and that a damaged or hand-edited file can never leave the game without usable keys.
-#include <SDL_keycode.h>
+#include <SDL2/SDL_keycode.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>

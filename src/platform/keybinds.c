@@ -1,6 +1,6 @@
 #include "platform/keybinds.h"
 
-#include <SDL_keycode.h>
+#include <SDL2/SDL_keycode.h>
 #include <ctype.h>
 #include <string.h>
 

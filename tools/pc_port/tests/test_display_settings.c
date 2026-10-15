@@ -594,7 +594,7 @@ MT_TEST(benchmark_without_a_field)
 
 // ---- The Controls page ---------------------------------------------------------------------------
 
-#include <SDL_keycode.h>
+#include <SDL2/SDL_keycode.h>
 #include <strings.h>
 
 static const char *KeyName(int code)
