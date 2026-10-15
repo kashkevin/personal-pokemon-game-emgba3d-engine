@@ -575,7 +575,7 @@ static void PrintOakTextWithMainBgDarkened(enum BattlerId battler, const u8 *tex
         if (!gPaletteFade.active)
         {
             BtlCtrl_RemoveVoiceoverMessageFrame();
-            if (GetBattlerSide(battler) == B_SIDE_PLAYER)
+            if (GetBattlerPositionSide(battler) == B_SIDE_PLAYER)
                 OakOldManBufferExecCompleted(battler);
             else
                 OpponentBufferExecCompleted(battler);
@@ -750,7 +750,7 @@ static void OakOldManHandlePrintString(enum BattlerId battler)
 
 static void OakOldManHandlePrintSelectionString(enum BattlerId battler)
 {
-    if (GetBattlerSide(battler) == B_SIDE_PLAYER)
+    if (GetBattlerPositionSide(battler) == B_SIDE_PLAYER)
         OakOldManHandlePrintString(battler);
     else
         OakOldManBufferExecCompleted(battler);
@@ -888,7 +888,7 @@ static void OakOldManHandleIntroTrainerBallThrow(enum BattlerId battler)
 static void OakOldManHandleDrawPartyStatusSummary(enum BattlerId battler)
 {
     if (gBattleResources->bufferA[battler][1] != 0
-     && GetBattlerSide(battler) == B_SIDE_PLAYER)
+     && GetBattlerPositionSide(battler) == B_SIDE_PLAYER)
     {
         OakOldManBufferExecCompleted(battler);
     }

@@ -740,7 +740,7 @@ static void AnimTask_UpdateSlidingBg(u8 taskId)
 
 void AnimTask_GetAttackerSide(u8 taskId)
 {
-    gBattleAnimArgs[ARG_RET_ID] = GetBattlerSide(gBattleAnimAttacker);
+    gBattleAnimArgs[ARG_RET_ID] = GetBattlerPositionSide(gBattleAnimAttacker);
     DestroyAnimVisualTask(taskId);
 }
 

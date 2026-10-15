@@ -2905,9 +2905,9 @@ void AnimTask_RockMonBackAndForth(u8 taskId)
     task->data[15] = GetAnimBattlerSpriteId(animBattler);
 
     if (animBattler == ANIM_ATTACKER)
-        side = GetBattlerSide(gBattleAnimAttacker);
+        side = GetBattlerPositionSide(gBattleAnimAttacker);
     else
-        side = GetBattlerSide(gBattleAnimTarget);
+        side = GetBattlerPositionSide(gBattleAnimTarget);
 
     if (side == B_SIDE_OPPONENT)
     {

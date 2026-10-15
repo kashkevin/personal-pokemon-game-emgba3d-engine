@@ -2469,7 +2469,7 @@ void AnimWeatherBallDown(struct Sprite *sprite)
 
 u8 GetGhostSpriteDefault_Y(enum BattlerId battler)
 {
-    if (GetBattlerSide(battler) != B_SIDE_OPPONENT)
+    if (GetBattlerPositionSide(battler) != B_SIDE_OPPONENT)
         return GetBattlerSpriteCoord(battler, BATTLER_COORD_Y_PIC_OFFSET_DEFAULT);
     else
         return GetBattlerSpriteCoord(battler, BATTLER_COORD_Y);

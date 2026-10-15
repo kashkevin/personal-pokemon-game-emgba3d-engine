@@ -8032,7 +8032,7 @@ void AnimTask_TwinkleTackleLaunch(u8 taskId)
     struct Task* task = &gTasks[taskId];
 
     task->tSpriteId = GetAnimBattlerSpriteId(ANIM_TARGET);
-    task->tSide = GetBattlerSide(gBattleAnimTarget);
+    task->tSide = GetBattlerPositionSide(gBattleAnimTarget);
     task->tAnimLengthTime = gBattleAnimArgs[0];
     task->tInitialXPos = gSprites[task->tSpriteId].x;
     task->tInitialYPos = gSprites[task->tSpriteId].y;

@@ -177,12 +177,12 @@ static bool32 ShouldRunTrainerSlideLandsFirstSuperEffectiveHit(enum BattlerId ba
 {
     if (slideId == TRAINER_SLIDE_DEFENDER_TAKES_FIRST_SUPER_EFFECTIVE_HIT)
     {
-        if (GetBattlerSide(battler) == GetBattlerSide(gBattlerAttacker))
+        if (GetBattlerPositionSide(battler) == GetBattlerPositionSide(gBattlerAttacker))
             return FALSE;
     }
     else
     {
-        if (GetBattlerSide(battler) != GetBattlerSide(gBattlerAttacker))
+        if (GetBattlerPositionSide(battler) != GetBattlerPositionSide(gBattlerAttacker))
             return FALSE;
     }
 
@@ -465,7 +465,7 @@ void TryInitializeFirstSTABMoveTrainerSlide(enum BattlerId battlerDef, enum Batt
     if (IS_BATTLER_OF_TYPE(battlerAtk, moveType) == FALSE)
         return;
 
-    if (GetBattlerSide(battlerDef) == GetBattlerSide(battlerAtk))
+    if (GetBattlerPositionSide(battlerDef) == GetBattlerPositionSide(battlerAtk))
         return;
 
     if (!skip)
@@ -515,7 +515,7 @@ void TryInitializeTrainerSlideLandsFirstSuperEffectiveHit(enum BattlerId battler
     if (IsSlideInitalizedOrPlayed(slideBattler, slideId))
         skip = TRUE;
 
-    if (GetBattlerSide(battlerDef) == GetBattlerSide(battlerAtk))
+    if (GetBattlerPositionSide(battlerDef) == GetBattlerPositionSide(battlerAtk))
         return;
 
     if (!skip)
@@ -539,7 +539,7 @@ void TryInitializeTrainerSlideMonUnaffected(enum BattlerId battlerDef, enum Batt
     if (IsSlideInitalizedOrPlayed(slideBattler, slideId))
         skip = TRUE;
 
-    if (GetBattlerSide(battlerDef) == GetBattlerSide(battlerAtk))
+    if (GetBattlerPositionSide(battlerDef) == GetBattlerPositionSide(battlerAtk))
         return;
 
     if (!skip)

@@ -736,14 +736,14 @@ void HandleInputChooseMove(enum BattlerId battler)
         {
             if (!CanSelectBattler(moveTarget))
                 canSelectTarget = 1; // either selected or user
-            if (moveTarget == TARGET_USER_OR_ALLY && IsBattlerAlive(partner))
+            if (moveTarget == TARGET_USER_OR_ALLY && IsPartnerAlive(battler))
                 canSelectTarget = 1;
 
             if (moveInfo->currentPP[gMoveSelectionCursor[battler]] == 0)
             {
                 canSelectTarget = 0;
             }
-            else if (isUserOrAlly && !IsBattlerAlive(partner))
+            else if (isUserOrAlly && !IsPartnerAlive(battler))
             {
                 gMultiUsePlayerCursor = battler;
                 canSelectTarget = 0;
@@ -761,13 +761,32 @@ void HandleInputChooseMove(enum BattlerId battler)
                 }
                 else if (IsSpreadMove(moveTarget) || moveTarget == TARGET_OPPONENTS_FIELD || moveTarget == TARGET_USER_AND_ALLY)
                 {
+#if MP_FFA_ENABLED
+                    if (IsFreeForAllBattle())
+                    {
+                        // Every other trainer's Pokemon is a target of a spread move.
+                        for (enum BattlerId i = 0; i < gBattlersCount; i++)
+                        {
+                            if (i != battler)
+                                TryShowAsTarget(i);
+                        }
+                    }
+                    else
+#endif
+                    {
                     TryShowAsTarget(gMultiUsePlayerCursor);
                     TryShowAsTarget(GetPartnerBattler(gMultiUsePlayerCursor));
                     if (moveTarget == TARGET_FOES_AND_ALLY)
                         TryShowAsTarget(GetPartnerBattler(battler));
+                    }
                     canSelectTarget = 2;
                 }
             }
+#if MP_FFA_ENABLED
+            // A field move aimed at "the opponents' side" goes to the side of the one trainer you pick.
+            if (IsFreeForAllBattle() && moveTarget == TARGET_OPPONENTS_FIELD && moveInfo->currentPP[gMoveSelectionCursor[battler]] != 0)
+                canSelectTarget = 1;
+#endif
         }
 
         switch (canSelectTarget)
@@ -787,6 +806,10 @@ void HandleInputChooseMove(enum BattlerId battler)
 
             if (moveTarget == TARGET_USER || moveTarget == TARGET_USER_OR_ALLY)
                 gMultiUsePlayerCursor = battler;
+#if MP_FFA_ENABLED
+            else if (IsFreeForAllBattle())
+                gMultiUsePlayerCursor = GetBattlerLeftFoe(battler);
+#endif
             else if (!IsBattlerAlive(GetBattlerAtPosition(B_POSITION_OPPONENT_LEFT)))
                 gMultiUsePlayerCursor = GetBattlerAtPosition(B_POSITION_OPPONENT_RIGHT);
             else

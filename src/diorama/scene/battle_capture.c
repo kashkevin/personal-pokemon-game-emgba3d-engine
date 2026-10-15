@@ -137,7 +137,7 @@ static void Shadows(struct DioramaBattleFrame *frame)
         sprite = &gSprites[id];
         if (!sprite->inUse || sprite->invisible)
             continue;
-        enemy = GetBattlerSide(b) != B_SIDE_PLAYER;
+        enemy = GetBattlerPositionSide(b) != B_SIDE_PLAYER;
         shadow = gBattleSpritesDataPtr->healthBoxesData[b].shadowSpriteIdPrimary;
         if (enemy && shadow < MAX_SPRITES && gSprites[shadow].inUse && !gSprites[shadow].invisible)
             continue;
@@ -169,7 +169,7 @@ static void Battlers(struct DioramaBattleFrame *frame)
 
         out->battler = b;
         out->position = GetBattlerPosition(b);
-        out->opponent = GetBattlerSide(b) != B_SIDE_PLAYER;
+        out->opponent = GetBattlerPositionSide(b) != B_SIDE_PLAYER;
         if ((gAbsentBattlerFlags & (1u << b)) == 0 && id < MAX_SPRITES)
         {
             sprite = &gSprites[id];

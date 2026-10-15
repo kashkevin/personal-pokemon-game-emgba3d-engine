@@ -191,7 +191,7 @@ void BattleSprites_NoteMon(uint32_t battler, uint32_t species, uint32_t personal
     look->personality = personality;
     look->shiny = shiny;
     look->female = GetGenderFromSpeciesAndPersonality(species, personality) == MON_FEMALE;
-    look->back = GetBattlerSide(battler) == B_SIDE_PLAYER;
+    look->back = GetBattlerPositionSide(battler) == B_SIDE_PLAYER;
     memcpy(look->palette, palette, sizeof(look->palette));
     PicBox(pic, look);
     look->serial = ++sPending.serial;

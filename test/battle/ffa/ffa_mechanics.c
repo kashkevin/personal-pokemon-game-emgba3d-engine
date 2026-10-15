@@ -138,3 +138,69 @@ FFA_BATTLE_TEST("FFA: Imprison stops the user's moves for every other trainer")
         MESSAGE("Wobbuffet used Imprison!");
     }
 }
+
+FFA_BATTLE_TEST("FFA: a move for an ally fails when nobody is an ally")
+{
+    GIVEN {
+        ASSUME(GetMoveTarget(MOVE_COACHING) == TARGET_ALLY);
+        PLAYER(SPECIES_WOBBUFFET);
+        PARTNER(SPECIES_WOBBUFFET);
+        OPPONENT_A(SPECIES_WOBBUFFET);
+        OPPONENT_B(SPECIES_WOBBUFFET);
+    } WHEN {
+        TURN { MOVE(playerLeft, MOVE_COACHING); MOVE(opponentLeft, MOVE_CELEBRATE); MOVE(playerRight, MOVE_CELEBRATE); MOVE(opponentRight, MOVE_CELEBRATE); }
+    } SCENE {
+        MESSAGE("But it failed!");
+    } THEN {
+        EXPECT_EQ(playerLeft->statStages[STAT_ATK], DEFAULT_STAT_STAGE);
+    }
+}
+
+FFA_BATTLE_TEST("FFA: Roar sends in the target trainer's own next Pokemon")
+{
+    GIVEN {
+        PLAYER(SPECIES_WOBBUFFET) { Speed(40); }
+        PARTNER(SPECIES_WOBBUFFET) { Speed(30); }
+        OPPONENT_A(SPECIES_WOBBUFFET) { Speed(20); }
+        OPPONENT_A(SPECIES_WYNAUT) { Speed(20); }
+        OPPONENT_B(SPECIES_WOBBUFFET) { Speed(10); }
+    } WHEN {
+        TURN { MOVE(playerLeft, MOVE_ROAR, target: opponentLeft); MOVE(opponentLeft, MOVE_CELEBRATE); MOVE(playerRight, MOVE_CELEBRATE); MOVE(opponentRight, MOVE_CELEBRATE); }
+    } THEN {
+        EXPECT_EQ(opponentLeft->species, SPECIES_WYNAUT);
+        EXPECT_EQ(opponentRight->species, SPECIES_WOBBUFFET);
+        EXPECT_EQ(playerLeft->species, SPECIES_WOBBUFFET);
+    }
+}
+
+FFA_BATTLE_TEST("FFA: each trainer's Mega Evolution is their own")
+{
+    GIVEN {
+        PLAYER(SPECIES_VENUSAUR) { Item(ITEM_VENUSAURITE); }
+        PARTNER(SPECIES_GARDEVOIR) { Item(ITEM_GARDEVOIRITE); }
+        OPPONENT_A(SPECIES_WOBBUFFET);
+        OPPONENT_B(SPECIES_WOBBUFFET);
+    } WHEN {
+        TURN { MOVE(playerLeft, MOVE_CELEBRATE, gimmick: GIMMICK_MEGA); MOVE(playerRight, MOVE_CELEBRATE, gimmick: GIMMICK_MEGA); MOVE(opponentLeft, MOVE_CELEBRATE); MOVE(opponentRight, MOVE_CELEBRATE); }
+    } THEN {
+        EXPECT_EQ(playerLeft->species, SPECIES_VENUSAUR_MEGA);
+        EXPECT_EQ(playerRight->species, SPECIES_GARDEVOIR_MEGA);
+    }
+}
+
+FFA_BATTLE_TEST("FFA: weather and terrain are shared by all four")
+{
+    GIVEN {
+        PLAYER(SPECIES_WOBBUFFET);
+        PARTNER(SPECIES_WOBBUFFET);
+        OPPONENT_A(SPECIES_WOBBUFFET);
+        OPPONENT_B(SPECIES_WOBBUFFET);
+    } WHEN {
+        TURN { MOVE(opponentRight, MOVE_SANDSTORM); MOVE(playerLeft, MOVE_CELEBRATE); MOVE(opponentLeft, MOVE_CELEBRATE); MOVE(playerRight, MOVE_CELEBRATE); }
+    } THEN {
+        EXPECT_LT(playerLeft->hp, playerLeft->maxHP);
+        EXPECT_LT(opponentLeft->hp, opponentLeft->maxHP);
+        EXPECT_LT(playerRight->hp, playerRight->maxHP);
+        EXPECT_LT(opponentRight->hp, opponentRight->maxHP);
+    }
+}

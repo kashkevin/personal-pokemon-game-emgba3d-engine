@@ -414,7 +414,7 @@ static bool32 ShouldFlipTypeIcon(bool32 useDoubleBattleCoords, u32 position, enu
 {
     enum BattleSide side = (useDoubleBattleCoords) ? B_SIDE_OPPONENT : B_SIDE_PLAYER;
 
-    if (GetBattlerSide(GetBattlerAtPosition(position)) != side)
+    if (GetBattlerPositionSide(GetBattlerAtPosition(position)) != side)
         return FALSE;
 
     return !gTypesInfo[typeId].isSpecialCaseType;

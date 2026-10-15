@@ -986,6 +986,12 @@ static enum CancelerResult CancelerSetTargets(struct BattleCalcValues *cv)
     }
     gBattleStruct->eventState.atkCancelerBattler = 0;
 
+    if (IsFreeForAllBattle() && moveTarget == TARGET_ALLY)
+    {
+        gBattlescriptCurrInstr = BattleScript_ButItFailed; // a move for an ally, with nobody to be an ally
+        return CANCELER_RESULT_FAILURE;
+    }
+
     if (IsBattlerAlly(cv->battlerAtk, cv->battlerDef) && !IsBattlerAlive(cv->battlerDef))
     {
         gBattlescriptCurrInstr = BattleScript_ButItFailed;

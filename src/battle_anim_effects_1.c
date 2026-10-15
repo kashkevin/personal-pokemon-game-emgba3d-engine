@@ -5859,7 +5859,7 @@ static void AnimBowMon_Step3_Callback(struct Sprite *sprite)
     if (sprite->data[0] == 0)
     {
         sprite->data[3] = gBattlerSpriteIds[gBattleAnimAttacker];
-        sprite->data[6] = GetBattlerSide(gBattleAnimAttacker);
+        sprite->data[6] = GetBattlerPositionSide(gBattleAnimAttacker);
         if (!IsOnPlayerSide(gBattleAnimAttacker))
         {
             sprite->data[4] = 0xFC00;
@@ -5900,7 +5900,7 @@ static void AnimTipMon_Step(struct Sprite *sprite)
     case 0:
         sprite->data[1] = 0;
         sprite->data[2] = gBattlerSpriteIds[gBattleAnimAttacker];
-        sprite->data[3] = GetBattlerSide(gBattleAnimAttacker);
+        sprite->data[3] = GetBattlerPositionSide(gBattleAnimAttacker);
         sprite->data[4] = !IsOnPlayerSide(gBattleAnimAttacker) ? 0x200 : -0x200;
         sprite->data[5] = 0;
         PrepareBattlerSpriteForRotScale(sprite->data[2], ST_OAM_OBJ_NORMAL);
@@ -5935,7 +5935,7 @@ void AnimTask_SkullBashPosition(u8 taskId)
     CMD_ARGS(unk0);
 
     gTasks[taskId].data[0] = gBattlerSpriteIds[gBattleAnimAttacker];
-    gTasks[taskId].data[1] = GetBattlerSide(gBattleAnimAttacker);
+    gTasks[taskId].data[1] = GetBattlerPositionSide(gBattleAnimAttacker);
     gTasks[taskId].data[2] = 0;
     switch (cmd->unk0)
     {
@@ -6670,7 +6670,7 @@ static void ReloadBattlerSprites(enum BattlerId battler, struct Pokemon *party)
 
 static void TrySwapStickyWebBattlerId(enum BattlerId battlerAtk, enum BattlerId battlerPartner)
 {
-    u32 oppSide = GetBattlerSide(GetOppositeBattler(battlerAtk));
+    u32 oppSide = GetBattlerPositionSide(GetOppositeBattler(battlerAtk));
 
     // if we've set sticky web on the opposing side, need to swap stickyWebBattlerId for mirror armor
     TRY_SIDE_TIMER_BATTLER_ID_SWAP(battlerAtk, battlerPartner, oppSide, stickyWebBattlerId);

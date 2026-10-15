@@ -860,7 +860,7 @@ void AnimTask_EruptionLaunchRocks(u8 taskId)
     task->tTimer2 = 0;
     task->tTimer3 = 0;
     task->tAttackerY = gSprites[task->tAttackerSpriteId].y;
-    task->tAttackerSide = GetBattlerSide(gBattleAnimAttacker);
+    task->tAttackerSide = GetBattlerPositionSide(gBattleAnimAttacker);
     task->tActiveSprites = 0;
 
     PrepareBattlerSpriteForRotScale(task->tAttackerSpriteId, ST_OAM_OBJ_NORMAL);

@@ -1204,9 +1204,9 @@ static bool BranchValue(const char *move, const char *task, int arg, int *value)
     else if (strcmp(task, "AnimTask_IsAttackerPlayerSide") == 0)
         *value = IsOnPlayerSide(atk) ? 1 : 0;
     else if (strcmp(task, "AnimTask_GetAttackerSide") == 0)
-        *value = GetBattlerSide(atk);
+        *value = GetBattlerPositionSide(atk);
     else if (strcmp(task, "AnimTask_GetTargetSide") == 0)
-        *value = GetBattlerSide(tgt);
+        *value = GetBattlerPositionSide(tgt);
     else if (strcmp(task, "AnimTask_IsDoubleBattle") == 0)
         *value = IsDoubleBattle() && !IsContest();
     else if (strcmp(task, "AnimTask_IsContest") == 0)

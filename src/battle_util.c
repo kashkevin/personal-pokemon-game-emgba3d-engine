@@ -10802,6 +10802,8 @@ bool32 IsBattlerOnAir(enum BattlerId battler)
 
 bool32 HasPartnerTrainer(enum BattlerId battler)
 {
+    if (IsFreeForAllBattle())
+        return FALSE;
     if ((GetBattlerSide(battler) == B_SIDE_PLAYER && gBattleTypeFlags & BATTLE_TYPE_PLAYER_HAS_PARTNER)
      || (GetBattlerSide(battler) == B_SIDE_OPPONENT && gBattleTypeFlags & BATTLE_TYPE_TWO_OPPONENTS))
         return TRUE;

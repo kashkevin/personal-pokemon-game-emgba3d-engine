@@ -2347,7 +2347,7 @@ void Controller_WaitForHealthBar(enum BattlerId battler)
         if (IsOnPlayerSide(battler))
             HandleLowHpMusicChange(GetBattlerMon(battler), battler);
 
-        if (IS_FRLG && GetBattlerSide(battler) == B_SIDE_OPPONENT && !BtlCtrl_OakOldMan_TestState2Flag(1) && (gBattleTypeFlags & BATTLE_TYPE_FIRST_BATTLE))
+        if (IS_FRLG && GetBattlerPositionSide(battler) == B_SIDE_OPPONENT && !BtlCtrl_OakOldMan_TestState2Flag(1) && (gBattleTypeFlags & BATTLE_TYPE_FIRST_BATTLE))
         {
             BtlCtrl_OakOldMan_SetState2Flag(1);
             gBattlerControllerFuncs[battler] = PrintOakText_InflictingDamageIsKey;
@@ -2514,7 +2514,7 @@ void BtlController_HandleLoadMonSprite(enum BattlerId battler)
     struct Pokemon *mon = GetBattlerMon(battler);
     enum Species species = GetBattlerVisualSpecies(battler);
 
-    if (gBattleTypeFlags & BATTLE_TYPE_GHOST && GetBattlerSide(battler) == B_SIDE_OPPONENT)
+    if (gBattleTypeFlags & BATTLE_TYPE_GHOST && GetBattlerPositionSide(battler) == B_SIDE_OPPONENT)
     {
         DecompressGhostFrontPic(battler);
         y = GetGhostSpriteDefault_Y(battler);
@@ -2835,7 +2835,7 @@ void BtlController_HandlePrintString(enum BattlerId battler)
     // else
         BattlePutTextOnWindow(gDisplayedStringBattle, B_WIN_MSG);
 
-    if (gBattleTypeFlags & BATTLE_TYPE_FIRST_BATTLE && GetBattlerSide(battler) == B_SIDE_OPPONENT)
+    if (gBattleTypeFlags & BATTLE_TYPE_FIRST_BATTLE && GetBattlerPositionSide(battler) == B_SIDE_OPPONENT)
     {
         switch (*stringId)
         {
@@ -3031,7 +3031,7 @@ bool32 TwoOpponentIntroMons(enum BattlerId battler) // Double battle with both o
 void BtlController_HandleIntroTrainerBallThrow(enum BattlerId battler, u16 tagTrainerPal, const u16 *trainerPal, s16 framesToWait, void (*controllerCallback)(enum BattlerId battler))
 {
     u8 taskId;
-    enum BattleSide side = GetBattlerSide(battler);
+    enum BattleSide side = GetBattlerPositionSide(battler);
 
     SetSpritePrimaryCoordsFromSecondaryCoords(&gSprites[gBattleStruct->trainerSlideSpriteIds[battler]]);
     if (side == B_SIDE_PLAYER)
@@ -3357,7 +3357,7 @@ void BtlController_HandleSwitchInSoundAndEnd(enum BattlerId battler)
 
 void BtlController_HandleSwitchInShowHealthbox(enum BattlerId battler)
 {
-    enum BattleSide side = GetBattlerSide(battler);
+    enum BattleSide side = GetBattlerPositionSide(battler);
     if (gBattleSpritesDataPtr->healthBoxesData[battler].finishedShinyMonAnim
      && (side == B_SIDE_PLAYER || gSprites[gBattlerSpriteIds[battler]].callback == SpriteCallbackDummy))
     {
@@ -3414,7 +3414,7 @@ void BtlController_HandleSwitchInTryShinyAnim(enum BattlerId battler)
     {
         DestroySprite(&gSprites[gBattleControllerData[battler]]);
 
-        if (GetBattlerSide(battler) == B_SIDE_OPPONENT)
+        if (GetBattlerPositionSide(battler) == B_SIDE_OPPONENT)
             SetBattlerShadowSpriteCallback(battler, GetMonData(GetBattlerMon(battler), MON_DATA_SPECIES));
 
         if (IsControllerPlayer(battler))

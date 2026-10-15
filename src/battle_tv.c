@@ -165,10 +165,10 @@ void BattleTv_SetDataBasedOnString(enum StringID stringId)
 
     tvPtr = &gBattleStruct->tv;
 
-    atkSide = GetBattlerSide(gBattlerAttacker);
-    defSide = GetBattlerSide(gBattlerTarget);
-    effSide = GetBattlerSide(gEffectBattler);
-    scriptingSide = GetBattlerSide(gBattleMsgDataPtr->scrActive);
+    atkSide = GetBattlerPositionSide(gBattlerAttacker);
+    defSide = GetBattlerPositionSide(gBattlerTarget);
+    effSide = GetBattlerPositionSide(gEffectBattler);
+    scriptingSide = GetBattlerPositionSide(gBattleMsgDataPtr->scrActive);
     atkMon = GetBattlerMon(gBattlerAttacker);
     defMon = GetBattlerMon(gBattlerTarget);
     moveSlot = GetBattlerMoveSlotId(gBattlerAttacker, gBattleMsgDataPtr->currentMove);
@@ -590,8 +590,8 @@ void BattleTv_SetDataBasedOnMove(enum Move move, u16 weatherFlags)
 
     tvPtr = &gBattleStruct->tv;
 
-    atkSide = GetBattlerSide(gBattlerAttacker);
-    defSide = GetBattlerSide(gBattlerTarget);
+    atkSide = GetBattlerPositionSide(gBattlerAttacker);
+    defSide = GetBattlerPositionSide(gBattlerTarget);
     moveSlot = GetBattlerMoveSlotId(gBattlerAttacker, move);
 
     if (moveSlot >= MAX_MON_MOVES)
@@ -638,7 +638,7 @@ void BattleTv_SetDataBasedOnAnimation(u8 animationId)
         return;
 
     tvPtr = &gBattleStruct->tv;
-    atkSide = GetBattlerSide(gBattlerAttacker);
+    atkSide = GetBattlerPositionSide(gBattlerAttacker);
     if (GetMoveAnimationScript(gCurrentMove) == gBattleAnimMove_FutureSight)
     {
         if (tvPtr->side[atkSide].futureSightMonId != 0 && gBattleScripting.animTurn > 0)
@@ -791,8 +791,8 @@ static void AddMovePoints(u8 caseId, u16 arg1, u8 arg2, u8 arg3)
 {
     struct BattleTvMovePoints *movePoints = &gBattleStruct->tvMovePoints;
     struct BattleTv *tvPtr = &gBattleStruct->tv;
-    u32 atkSide = GetBattlerSide(gBattlerAttacker);
-    u32 defSide = GetBattlerSide(gBattlerTarget);
+    u32 atkSide = GetBattlerPositionSide(gBattlerAttacker);
+    u32 defSide = GetBattlerPositionSide(gBattlerTarget);
     s32 i;
 
     switch (caseId)
@@ -1113,8 +1113,8 @@ static void AddMovePoints(u8 caseId, u16 arg1, u8 arg2, u8 arg3)
 static void AddPointsOnFainting(void)
 {
     struct BattleTv *tvPtr = &gBattleStruct->tv;
-    u32 atkSide = GetBattlerSide(gBattlerAttacker);
-    u32 defSide = GetBattlerSide(gBattlerTarget);
+    u32 atkSide = GetBattlerPositionSide(gBattlerAttacker);
+    u32 defSide = GetBattlerPositionSide(gBattlerTarget);
     u32 atkArrId = tvPtr->side[atkSide].faintCauseMonId;
     s32 i;
 
