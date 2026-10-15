@@ -487,6 +487,25 @@ static void TrackCoopBattle(void)
     TrackCoopFrame();
 }
 
+// Battle party slot bits -> saved party slot bits, for a battle that used the saved Pokemon in `mask` (0: all of them).
+u8 MultiplayerCoop_RemapBringSlots(u8 bits, u8 mask)
+{
+    u32 slot, battleSlot = 0;
+    u8 out = 0;
+
+    if (!mask)
+        return bits;
+    for (slot = 0; slot < PARTY_SIZE; slot++)
+    {
+        if (!(mask & (1u << slot)))
+            continue;
+        if (bits & (1u << battleSlot))
+            out |= 1u << slot;
+        battleSlot++;
+    }
+    return out;
+}
+
 static void CaptureCoopExpNow(u32 outcome)
 {
     u32 side, slot;
@@ -507,6 +526,13 @@ static void CaptureCoopExpNow(u32 outcome)
     }
     sCoopExp.tracking = FALSE;
     sCoopExp.pending = sCoopExp.count != 0;
+    // A team selection (Battle Frontier) fought with a reduced party: the award is for the personal party, whose slots
+    // are the saved ones.
+    for (slot = 0; slot < sCoopExp.count; slot++)
+    {
+        sCoopExp.kos[slot].faced = MultiplayerCoop_RemapBringSlots(sCoopExp.kos[slot].faced, MultiplayerBattle_GetBringMask());
+        sCoopExp.kos[slot].alive = MultiplayerCoop_RemapBringSlots(sCoopExp.kos[slot].alive, MultiplayerBattle_GetBringMask());
+    }
 }
 
 static void CaptureCoopExp(u32 outcome)

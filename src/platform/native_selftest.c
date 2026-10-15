@@ -2211,6 +2211,15 @@ int NativeSelfTest_CoopExp(void)
 
     CoopExpParity();
 
+    // Team selection (Battle Frontier): the battle's party slots map back to the saved party's slots.
+    ExpectCoop("no selection: slots are unchanged", MultiplayerCoop_RemapBringSlots(0x2D, 0) == 0x2D);
+    ExpectCoop("battle slot 0 and 1 were saved slots 1 and 4", MultiplayerCoop_RemapBringSlots(0x03, (1 << 1) | (1 << 4)) == ((1 << 1) | (1 << 4)));
+    ExpectCoop("only the second chosen Pokemon faced it", MultiplayerCoop_RemapBringSlots(0x02, (1 << 1) | (1 << 4)) == (1 << 4));
+    ExpectCoop("only the first chosen Pokemon could still battle", MultiplayerCoop_RemapBringSlots(0x01, (1 << 2) | (1 << 3) | (1 << 5)) == (1 << 2));
+    ExpectCoop("a Pokemon that was not chosen can never gain from the battle",
+               (MultiplayerCoop_RemapBringSlots(0x3F, (1 << 0) | (1 << 5)) & ~((1 << 0) | (1 << 5))) == 0);
+    ExpectCoop("battle slots beyond the chosen team map to nothing", MultiplayerCoop_RemapBringSlots(0x3C, (1 << 3) | (1 << 4)) == 0);
+
     printf("selftest-coop-exp: %d checks, %d failed\n", sCoopChecks, sCoopFailures);
     return sCoopFailures ? 1 : 0;
 }

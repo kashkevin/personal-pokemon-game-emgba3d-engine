@@ -134,6 +134,7 @@ static EWRAM_DATA u8 sOriginalCount = 0;
 // which differs from the original only while a battle with a bring selection runs.
 static EWRAM_DATA u8 sBattleCount = 0;
 static EWRAM_DATA u32 sBattleCrc = 0;
+static EWRAM_DATA u8 sBringMask = 0;
 #endif
 #line 113 // gba-line
 static EWRAM_DATA bool8 sPrepared = FALSE;
@@ -680,8 +681,18 @@ static void ApplyBringSelection(u8 mask)
     for (slot = kept; slot < PARTY_SIZE; slot++)
         memset(&party[slot], 0, sizeof(party[slot]));
     gPartiesCount[B_TRAINER_PLAYER] = kept;
+    sBringMask = mask;
     sBattleCount = kept;
     sBattleCrc = Crc32((const u8 *)party, 600);
+}
+#endif
+
+#if MP_BRING_ENABLED
+// The saved party slots the running battle uses (bit n = slot n), 0 when it uses the whole party. Co-op experience maps the
+// battle's party slots back to the personal party with it.
+u8 MultiplayerBattle_GetBringMask(void)
+{
+    return sBringMask;
 }
 #endif
 
@@ -734,7 +745,7 @@ static u8 PrepareSingles(const struct MultiplayerBattleControl *c)
     sSavedWireless = gWirelessCommType; sSavedLinkType = gLinkType;
     SavePlayerParty(); sPrepared = TRUE; sState = MP_BATTLE_PREPARED;
 #if MP_BRING_ENABLED
-    sBattleCount = sOriginalCount; sBattleCrc = preparation.partyCrc32;
+    sBattleCount = sOriginalCount; sBattleCrc = preparation.partyCrc32; sBringMask = 0;
     if (bring) ApplyBringSelection(bring & 0x3F); // after the original party is saved: the personal party comes back at the end
 #endif
 #line 626 // gba-line

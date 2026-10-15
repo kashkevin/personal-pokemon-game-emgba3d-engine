@@ -43,4 +43,8 @@ void MultiplayerCoop_TestReset(void);
 void MultiplayerCoop_TestArmAward(void); // --test-coop-exp-award
 #endif
 
+#ifdef PORTABLE
+u8 MultiplayerCoop_RemapBringSlots(u8 bits, u8 mask);
+#endif
+
 #endif // GUARD_MULTIPLAYER_COOP_H

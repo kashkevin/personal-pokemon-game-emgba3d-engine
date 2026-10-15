@@ -125,6 +125,9 @@ bool32 MultiplayerBattle_IsCoop(void);
 #if MP_FFA_ENABLED
 bool32 MultiplayerBattle_IsFreeForAll(void);
 #endif
+#if MP_BRING_ENABLED
+u8 MultiplayerBattle_GetBringMask(void);
+#endif
 bool32 MultiplayerBattle_IsNativeDouble(void);
 u32 MultiplayerBattle_GetBattlerCount(void);
 u32 MultiplayerBattle_GetBattlerOwner(u32 battler);
