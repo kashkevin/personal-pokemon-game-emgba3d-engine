@@ -2246,6 +2246,15 @@ static bool32 CoopActionReply(u8 battler, u8 source, u8 action, u16 choice)
     return MultiplayerBattle_ValidateController(reply, sizeof(reply), source);
 }
 
+/* The master's end-of-battle block: `outcome` for the master's own side and, in a free-for-all, the winner's battler. */
+static bool32 FfaEnd(u8 outcome, u8 winner, u8 source)
+{
+    u8 end[16] = {B_COMM_TO_CONTROLLER, 0, 0, 0, 8, 0, 0, 0, CONTROLLER_ENDLINKBATTLE};
+    MultiplayerBattle_ResetControllerValidation();
+    end[9] = outcome; end[10] = winner;
+    return MultiplayerBattle_ValidateController(end, sizeof(end), source);
+}
+
 static bool32 CoopChosenMon(u8 battler, const u8 *order)
 {
     u8 party[20] = {B_COMM_TO_CONTROLLER, 0, 0, 0, 12, 0, 0, 0, CONTROLLER_CHOOSEPOKEMON, 0, 6, 0, 0x10, 0x32, 0x54, 0, 0};
@@ -2297,6 +2306,41 @@ int NativeSelfTest_CoopController(void)
     MultiplayerBattle_NativeTestShape(MP_BATTLE_PHASE_FULL_MULTI, 4);
     ExpectCoopCtl("full Multi: battler 3's own trainer sends no target",
         CoopActionReply(3, 3, B_ACTION_USE_MOVE, 0) && !CoopActionReply(3, 3, B_ACTION_USE_MOVE, 2 << 8));
+    MultiplayerBattle_NativeTestShape(0, 0);
+
+    // Four-player free-for-all: four cores, one trainer each, nobody's partner; the end command names the winner.
+    MultiplayerBattle_NativeTestShape(MP_BATTLE_PHASE_FFA, 4);
+    ExpectCoopCtl("free-for-all shape: four battlers, four cores, a battler per trainer",
+        MultiplayerBattle_IsFreeForAll() && MultiplayerBattle_IsFullMulti() && !MultiplayerBattle_IsCoop()
+        && MultiplayerBattle_GetBattlerCount() == 4
+        && MultiplayerBattle_GetBattlerOwner(0) == 0 && MultiplayerBattle_GetBattlerOwner(1) == 1
+        && MultiplayerBattle_GetBattlerOwner(2) == 2 && MultiplayerBattle_GetBattlerOwner(3) == 3);
+    ExpectCoopCtl("free-for-all: every trainer answers for their own battler, with no target",
+        CoopActionReply(0, 0, B_ACTION_USE_MOVE, 0) && CoopActionReply(1, 1, B_ACTION_USE_MOVE, 0)
+        && CoopActionReply(2, 2, B_ACTION_SWITCH, 0) && CoopActionReply(3, 3, B_ACTION_USE_ITEM, 0)
+        && !CoopActionReply(3, 3, B_ACTION_USE_MOVE, 1 << 8));
+    ExpectCoopCtl("free-for-all: nobody answers for another trainer's battler",
+        !CoopActionReply(0, 1, B_ACTION_USE_MOVE, 0) && !CoopActionReply(1, 0, B_ACTION_USE_MOVE, 0)
+        && !CoopActionReply(2, 3, B_ACTION_USE_MOVE, 0) && !CoopActionReply(3, 2, B_ACTION_USE_MOVE, 0));
+    {
+        static const u8 winners[] = {0, 1, 2, 3, 0xFF}, bad[] = {4, 5, 7, 0xFE};
+        bool32 all = TRUE, none = TRUE;
+        u32 i;
+        for (i = 0; i < sizeof(winners); i++) all &= FfaEnd(B_OUTCOME_WON, winners[i], 0);
+        for (i = 0; i < sizeof(bad); i++) none &= !FfaEnd(B_OUTCOME_WON, bad[i], 0);
+        ExpectCoopCtl("free-for-all end: a winning battler 0-3 or a draw (255) is a valid result", all);
+        ExpectCoopCtl("free-for-all end: a winner beyond the field is refused", none);
+        ExpectCoopCtl("free-for-all end: only won/lost/drew, never another word, and only from the master",
+            !FfaEnd(0, 1, 0) && !FfaEnd(4, 1, 0) && FfaEnd(B_OUTCOME_LOST, 2, 0) && FfaEnd(B_OUTCOME_DREW, 0xFF, 0)
+            && !FfaEnd(B_OUTCOME_WON, 1, 1) && !FfaEnd(B_OUTCOME_WON, 1, 3));
+    }
+    MultiplayerBattle_NativeTestShape(0, 0);
+
+    // The winner byte exists only in a free-for-all: Multi and co-op battles still refuse it.
+    MultiplayerBattle_NativeTestShape(MP_BATTLE_PHASE_FULL_MULTI, 4);
+    ExpectCoopCtl("full Multi: the end command keeps a zero winner byte", FfaEnd(B_OUTCOME_WON, 0, 0) && !FfaEnd(B_OUTCOME_WON, 2, 0));
+    MultiplayerBattle_NativeTestShape(MP_BATTLE_PHASE_COOP, 2);
+    ExpectCoopCtl("co-op: the end command keeps a zero winner byte", FfaEnd(B_OUTCOME_WON, 0, 0) && !FfaEnd(B_OUTCOME_WON, 1, 0));
     MultiplayerBattle_NativeTestShape(0, 0);
     MultiplayerBattle_ResetControllerValidation();
 

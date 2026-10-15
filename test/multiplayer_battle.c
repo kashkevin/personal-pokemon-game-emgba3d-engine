@@ -303,7 +303,7 @@ static void AckNativeOutput(struct ChannelFixture *f, bool32 clearLocal)
 
 static void AcknowledgeNativeOutput(struct ChannelFixture *f) { AckNativeOutput(f, TRUE); }
 
-static void FullMultiBinding(struct ChannelFixture *f, u8 local)
+static void FullMultiBindingPhase(struct ChannelFixture *f, u8 local, u8 phase)
 {
     SetUp(f, 4, local);
     for (u32 slot = 0; slot < PARTY_SIZE; slot++)
@@ -315,9 +315,14 @@ static void FullMultiBinding(struct ChannelFixture *f, u8 local)
     }
     CalculatePlayerPartyCount();
     gSaveBlock2Ptr->playerName[0] = EOS;
-    f->binding.mode = f->command.phase = MP_BATTLE_PHASE_FULL_MULTI;
+    f->binding.mode = f->command.phase = phase;
     memcpy(f->command.data, &f->binding, sizeof(f->binding));
     Bind(f);
+}
+
+static void FullMultiBinding(struct ChannelFixture *f, u8 local)
+{
+    FullMultiBindingPhase(f, local, MP_BATTLE_PHASE_FULL_MULTI);
 }
 
 static void ReceiveFullBlock(struct ChannelFixture *f, u8 source, u8 kind, u32 sequence, const void *data, u16 size)
@@ -501,6 +506,61 @@ TEST("Multiplayer full Multi: four fixed owners retain six separate party slots 
             if (source == local) continue;
             trainer = (source & 1) == (local & 1) ? B_TRAINER_PARTNER
                 : source < 2 ? B_TRAINER_OPPONENT_A : B_TRAINER_OPPONENT_B;
+            EXPECT_EQ(gPartiesCount[trainer], PARTY_SIZE);
+            EXPECT(!memcmp(peers[source], gParties[trainer], sizeof(struct Pokemon) * PARTY_SIZE));
+        }
+        TearDown(&f);
+    }
+    Free(peers); Free(original);
+}
+
+TEST("Multiplayer free-for-all: four independent trainers start as one battle with the four parties on four trainer slots")
+{
+    struct ChannelFixture f;
+    struct LinkBattlerHeader header = {0};
+    struct Pokemon *original = Alloc(sizeof(struct Pokemon) * PARTY_SIZE);
+    struct Pokemon (*peers)[PARTY_SIZE] = Alloc(sizeof(struct Pokemon) * PARTY_SIZE * 4);
+    for (u32 local = 0; local < 4; local++)
+    {
+        FullMultiBindingPhase(&f, local, MP_BATTLE_PHASE_FFA);
+        EXPECT(MultiplayerBattle_IsFullMulti()); EXPECT(MultiplayerBattle_IsFreeForAll());
+        EXPECT(!MultiplayerBattle_IsCoop()); EXPECT_EQ(MultiplayerBattle_GetPlayerCount(), 4);
+        EXPECT_EQ(MultiplayerBattle_GetBattlerCount(), 4);
+        for (u32 battler = 0; battler < 4; battler++)
+            EXPECT_EQ(MultiplayerBattle_GetBattlerOwner(battler), battler); // a battler per trainer, nobody shares
+        memcpy(original, gParties[B_TRAINER_PLAYER], sizeof(struct Pokemon) * PARTY_SIZE);
+        for (u32 source = 0; source < 4; source++)
+            for (u32 slot = 0; slot < PARTY_SIZE; slot++)
+            {
+                u32 serial = 33 + source * PARTY_SIZE + slot;
+                peers[source][slot] = original[slot];
+                SetMonData(&peers[source][slot], MON_DATA_MULTIPLAYER_ID, &serial);
+            }
+        StartFullMulti(&f);
+        EXPECT(gBattleTypeFlags & BATTLE_TYPE_FFA);
+        EXPECT(IsFreeForAllBattle());
+        header.versionSignatureHi = 3; header.battleEnigmaBerry.name[0] = EOS;
+        EXPECT(MultiplayerBattle_SendBlock(&header, sizeof(header))); AckNativeOutput(&f, FALSE);
+        for (u32 source = 0; source < 4; source++)
+            if (source != local) ReceiveFullBlock(&f, source, MP_BATTLE_KIND_START_HEADER, 2, &header, sizeof(header));
+        ResetBlockReceivedFlags();
+        for (u32 pair = 0; pair < 3; pair++)
+        {
+            EXPECT(MultiplayerBattle_SendPartyPair(pair * 2)); AckNativeOutput(&f, FALSE);
+            EXPECT(!MultiplayerBattle_CopyFullMultiPartyPair(pair * 2));
+            for (u32 source = 0; source < 4; source++)
+                if (source != local) ReceiveFullBlock(&f, source, MP_BATTLE_KIND_PARTY_0 + pair, 3 + pair,
+                                                     peers[source] + pair * 2, sizeof(struct Pokemon) * 2);
+            EXPECT_EQ(GetBlockReceivedStatus(), 15);
+            EXPECT(MultiplayerBattle_CopyFullMultiPartyPair(pair * 2));
+            ResetBlockReceivedFlags();
+        }
+        EXPECT(!memcmp(original, gParties[B_TRAINER_PLAYER], sizeof(struct Pokemon) * PARTY_SIZE));
+        for (u32 source = 0; source < 4; source++)
+        {
+            // This core draws itself as trainer slot 0 and the others counting on from it (the screen positions).
+            enum BattleTrainer trainer = (enum BattleTrainer)((source + 4 - local) % 4);
+            if (source == local) continue;
             EXPECT_EQ(gPartiesCount[trainer], PARTY_SIZE);
             EXPECT(!memcmp(peers[source], gParties[trainer], sizeof(struct Pokemon) * PARTY_SIZE));
         }
