@@ -39,6 +39,14 @@ static void CharCustomEditor_Open(void);
 #define CLOTH_COUNT  16
 
 #define HINT_DELAY_FRAMES (60 * 12)
+#ifdef PORTABLE
+// The notice banner's font has no '>' glyph, so the arrows of "START > PLAYER > STYLE" drew as blanks
+// ("START  PLAYER  STYLE", KNOWN_ISSUES M27). PC wording without them; the GBA text is unchanged.
+#define APPEARANCE_HINT "Make your own TRAINER look:|START menu: PLAYER, then STYLE"
+#else
+#define APPEARANCE_HINT "Make your own TRAINER look:|START > PLAYER > STYLE"
+#endif
+#line 37 // gba-line
 #define SAVE_RETRY_FRAMES 300
 
 enum { ROW_SKIN, ROW_HAIR, ROW_OUTFIT, ROW_HAT, ROW_SAVE, ROW_CANCEL, ROW_COUNT };
@@ -366,7 +374,7 @@ void MultiplayerAppearance_Tick(bool32 connected)
     if (!sHintShown && host != NULL && !IsCustomized(host) && !sPendingSave && !sEditorActive
      && !ArePlayerFieldControlsLocked())
     {
-        if (++sHintTimer >= HINT_DELAY_FRAMES && MultiplayerWorld_ShowLocalNotice("Make your own TRAINER look:|START > PLAYER > STYLE"))
+        if (++sHintTimer >= HINT_DELAY_FRAMES && MultiplayerWorld_ShowLocalNotice(APPEARANCE_HINT))
             sHintShown = TRUE;
     }
 }
