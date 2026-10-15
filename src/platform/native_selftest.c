@@ -1771,6 +1771,8 @@ int NativeSelfTest_SpawnClaims(void)
 
 #include "battle_controllers.h"
 #include "multiplayer_coop.h"
+#include "caps.h"
+#include "item.h"
 #include "constants/battle.h"
 
 static int sCoopChecks, sCoopFailures;
@@ -1923,6 +1925,107 @@ static u32 RunCoopAward(u32 *messages, u32 *moveFull, u32 *evolveSlot, u16 *evol
         }
     }
     return steps;
+}
+
+// Parity with the battle's own path. MultiplayerCoop_ExpReward repeats the formula of Cmd_getexp (states 1
+// and 2) for a game that did not run the battle script. This writes that state machine's arithmetic out
+// once more and runs the multiplier chain through the REAL ApplyExperienceMultipliers and
+// GetSoftLevelCapExpValue, for getters carrying every multiplier, so a later upstream merge that changes
+// the battle's experience rules fails here instead of silently drifting from co-op.
+extern void ApplyExperienceMultipliers(s32 *expAmount, u8 expGetterMonId, u8 faintedBattler);
+
+static u32 BattlePathReward(u32 slot, u16 species, u8 foeLevel, bool32 wasSentOut)
+{
+    struct Pokemon *getter = &gParties[B_TRAINER_PLAYER][slot];
+    u32 level = GetMonData(getter, MON_DATA_LEVEL), calculated = gSpeciesInfo[species].expYield * foeLevel;
+    u32 expValue, shareValue;
+    s32 reward;
+
+    calculated /= (GetConfig(B_SCALED_EXP) >= GEN_5 && GetConfig(B_SCALED_EXP) != GEN_6) ? 5 : 7;
+    if (GetConfig(B_TRAINER_EXP_MULTIPLIER) <= GEN_7)
+        calculated = calculated * 150 / 100; // always a trainer battle here
+    expValue = calculated; // B_SPLIT_EXP >= GEN_6
+    shareValue = calculated / 2 ? calculated / 2 : 1;
+    reward = wasSentOut ? GetSoftLevelCapExpValue(level, expValue) : 0;
+    if (reward == 0) // the permanent Exp. Share (IsGen6ExpShareEnabled)
+        reward += GetSoftLevelCapExpValue(level, shareValue);
+    gBattleMons[1].level = foeLevel;
+    ApplyExperienceMultipliers(&reward, slot, 1);
+    if (B_EXP_CAP_TYPE == EXP_CAP_HARD && reward != 0)
+    {
+        u32 cap = GetCurrentLevelCap(), have = GetMonData(getter, MON_DATA_EXP);
+        u32 growth = gSpeciesInfo[GetMonData(getter, MON_DATA_SPECIES)].growthRate;
+
+        if (level >= cap)
+            reward = 0;
+        else if (gExperienceTables[growth][cap] < have + reward)
+            reward = gExperienceTables[growth][cap] - have;
+    }
+    return reward > 0 ? reward : 0;
+}
+
+static void CoopExpParity(void)
+{
+    static const struct { u16 species; u8 level; } foes[] = {
+        {SPECIES_GEODUDE, 12}, {SPECIES_MAGIKARP, 5}, {SPECIES_BLISSEY, 100}, {SPECIES_RAYQUAZA, 70}, {SPECIES_NOSEPASS, 1},
+    };
+    static const char *const names[] = {"plain", "traded", "Lucky Egg", "past its evolution level", "four hearts", "all of them"};
+    struct Pokemon *getter = &gParties[B_TRAINER_PLAYER][0];
+    u32 variant, charm, foe, faced, checked = 0, bad = 0;
+    char what[200];
+
+    InitHeap(gHeap, HEAP_SIZE); // the bag allocates from the game heap
+    memset(gParties, 0, sizeof(gParties));
+    for (charm = 0; charm < 2; charm++)
+    {
+        if (charm)
+            AddBagItem(ITEM_EXP_CHARM, 1);
+        for (variant = 0; variant < ARRAY_COUNT(names); variant++)
+        {
+            u32 level = (variant == 3 || variant == 5) ? 22 : 17, friendship = (variant == 4 || variant == 5) ? 255 : 70;
+            enum Item item = (variant == 2 || variant == 5) ? ITEM_LUCKY_EGG : ITEM_NONE;
+            u32 otId = (variant == 1 || variant == 5) ? 0x1234567 : 0, expBefore;
+
+            CoopMon(getter, SPECIES_TREECKO, level); // evolves at 16: past it at 22 and 17
+            if (otId)
+                SetMonData(getter, MON_DATA_OT_ID, &otId);
+            SetMonData(getter, MON_DATA_HELD_ITEM, &item);
+            SetMonData(getter, MON_DATA_FRIENDSHIP, &friendship);
+            expBefore = GetMonData(getter, MON_DATA_EXP);
+            for (foe = 0; foe < ARRAY_COUNT(foes); foe++)
+            {
+                for (faced = 0; faced < 2; faced++)
+                {
+                    u32 want = BattlePathReward(0, foes[foe].species, foes[foe].level, faced);
+                    u32 got = MultiplayerCoop_ExpReward(getter, foes[foe].species, foes[foe].level, faced);
+
+                    checked++;
+                    if (want != got)
+                    {
+                        if (!bad++)
+                            printf("     first mismatch: %s getter Lv. %u%s vs species %u Lv. %u %s: battle %u, co-op %u\n",
+                                   names[variant], level, charm ? " (Exp. Charm)" : "", foes[foe].species,
+                                   foes[foe].level, faced ? "faced" : "shared", want, got);
+                    }
+                }
+            }
+            (void)expBefore;
+        }
+    }
+    snprintf(what, sizeof(what), "co-op rewards equal the battle's own path in %u of %u cases (%u multiplier variants x Exp. Charm x 5 foes x faced/shared)",
+             checked - bad, checked, (u32)ARRAY_COUNT(names));
+    ExpectCoop(what, bad == 0 && checked == ARRAY_COUNT(names) * 2 * ARRAY_COUNT(foes) * 2);
+    // The comparison must be able to fail: a getter with the multipliers is rewarded more than a plain one.
+    CoopMon(getter, SPECIES_TREECKO, 17);
+    {
+        u32 plain = MultiplayerCoop_ExpReward(getter, SPECIES_GEODUDE, 12, TRUE);
+        enum Item egg = ITEM_LUCKY_EGG;
+
+        SetMonData(getter, MON_DATA_HELD_ITEM, &egg);
+        ExpectCoop("a Lucky Egg raises the co-op reward (the comparison is not vacuous)",
+                   MultiplayerCoop_ExpReward(getter, SPECIES_GEODUDE, 12, TRUE) > plain && plain > 0);
+    }
+    RemoveBagItem(ITEM_EXP_CHARM, 1);
 }
 
 int NativeSelfTest_CoopExp(void)
@@ -2099,6 +2202,8 @@ int NativeSelfTest_CoopExp(void)
     ExpectCoop("without a co-op battle (PvP) nothing is recorded or awarded", MultiplayerCoop_TestKoCount() == 0
                && gSpecialVar_Result == FALSE && memcmp(before, own, sizeof(before)) == 0);
     MultiplayerCoop_Init();
+
+    CoopExpParity();
 
     printf("selftest-coop-exp: %d checks, %d failed\n", sCoopChecks, sCoopFailures);
     return sCoopFailures ? 1 : 0;
