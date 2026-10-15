@@ -2499,6 +2499,51 @@ int NativeSelfTest_SecretBase(void)
         ClearAllBases();
     }
 
+    // The defending team: the own base shows the party the player carries, refreshed in the calm overworld only.
+    {
+        u8 out[MP_EXTRAS_BASE_BYTES];
+        struct SecretBase *ownBase = &gSaveBlock1Ptr->secretBases[0];
+
+        UseMap(MAP_ROUTE101);
+        gSaveBlock1Ptr->location.mapGroup = MAP_GROUP(MAP_ROUTE101);
+        gSaveBlock1Ptr->location.mapNum = MAP_NUM(MAP_ROUTE101);
+        ClearAllBases();
+        MakeBase(ownBase, 21, 4);
+        ownBase->party.species[0] = SPECIES_NONE;
+        ownBase->party.levels[0] = 0;
+        ZeroPlayerPartyMons();
+        CoopMon(&gParties[B_TRAINER_PLAYER][0], SPECIES_MUDKIP, 17);
+        CoopMon(&gParties[B_TRAINER_PLAYER][1], SPECIES_RALTS, 9);
+        MultiplayerExtras_Init();
+        MultiplayerExtras_Tick(FALSE, TRUE);
+        ExpectBase("defenders: not refreshed while a menu or script holds the field", ownBase->party.species[0] == SPECIES_NONE);
+        gSaveBlock1Ptr->location.mapGroup = MAP_GROUP(MAP_SECRET_BASE_RED_CAVE1);
+        gSaveBlock1Ptr->location.mapNum = MAP_NUM(MAP_SECRET_BASE_RED_CAVE1);
+        MultiplayerExtras_Tick(TRUE, TRUE);
+        ExpectBase("defenders: not refreshed inside a secret base", ownBase->party.species[0] == SPECIES_NONE);
+        gSaveBlock1Ptr->location.mapGroup = MAP_GROUP(MAP_ROUTE101);
+        gSaveBlock1Ptr->location.mapNum = MAP_NUM(MAP_ROUTE101);
+        MultiplayerExtras_Tick(TRUE, FALSE);
+        ExpectBase("defenders: not refreshed while disconnected", ownBase->party.species[0] == SPECIES_NONE);
+        MultiplayerExtras_Tick(TRUE, TRUE);
+        ExpectBase("defenders: the carried party becomes the base's team",
+                   ownBase->party.species[0] == SPECIES_MUDKIP && ownBase->party.levels[0] == 17
+                   && ownBase->party.species[1] == SPECIES_RALTS && ownBase->party.species[2] == SPECIES_NONE);
+        ExpectBase("defenders: the published record carries it", MultiplayerSecretBase_GetOwn(out)
+                   && gMultiplayerExtrasMailbox.local.hasBase
+                   && memcmp((const void *)gMultiplayerExtrasMailbox.local.base, ownBase, sizeof(*ownBase)) == 0);
+        gParties[B_TRAINER_PLAYER][0] = gParties[B_TRAINER_PLAYER][1];
+        MultiplayerExtras_Tick(TRUE, TRUE);
+        ExpectBase("defenders: the refresh waits its interval (no work every frame)", ownBase->party.species[0] == SPECIES_MUDKIP);
+        {
+            u32 i;
+            for (i = 0; i < 300; i++)
+                MultiplayerExtras_Tick(TRUE, TRUE);
+        }
+        ExpectBase("defenders: and follows later party changes", ownBase->party.species[0] == SPECIES_RALTS);
+        ClearAllBases();
+    }
+
     printf("selftest-secret-base: %d checks, %d failed\n", sBaseChecks, sBaseFailures);
     return sBaseFailures ? 1 : 0;
 }

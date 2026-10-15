@@ -21,6 +21,12 @@ static bool8 sHavePublished;
 static u32 sSeenGeneration;
 static u32 sAppliedRecordSeq;
 static bool8 sWasConnected;
+static u16 sPartyRefreshTimer;
+
+// The party that defends the player's own base. The game copies it into the base only when two games mix records, so
+// a base published to the shared world would show an empty or stale team; refresh it while the player stands in the
+// calm overworld (never mid-battle, never inside a base) so every visitor meets the team the owner really carries.
+#define MP_EXTRAS_PARTY_REFRESH_TICKS 300
 
 void MultiplayerExtras_Init(void)
 {
@@ -32,6 +38,7 @@ void MultiplayerExtras_Init(void)
     sPublishedHas = sHavePublished = sWasConnected = FALSE;
     sSeenGeneration = 0;
     sAppliedRecordSeq = 0;
+    sPartyRefreshTimer = 0;
 }
 
 static bool32 SaveLoaded(void)
@@ -101,6 +108,11 @@ void MultiplayerExtras_Tick(bool32 fieldReady, bool32 connected)
     {
         sWasConnected = TRUE;
         sHavePublished = FALSE; // publish the base at every (re)connection
+    }
+    if (fieldReady && !CurMapIsSecretBase() && sPartyRefreshTimer-- == 0)
+    {
+        sPartyRefreshTimer = MP_EXTRAS_PARTY_REFRESH_TICKS;
+        SetPlayerSecretBaseParty();
     }
     PublishOwnBase();
     // A visitor's base is only put into the save while the player stands in the calm overworld outside every
