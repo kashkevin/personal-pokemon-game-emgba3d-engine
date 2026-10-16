@@ -272,7 +272,7 @@ OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS) $(BFX_QJS_OBJS)
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
-.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-clock check-mp-objects check-spawn-claims check-secret-base check-rewards check-catch-reconcile check-pokenav-map check-ladder check-coop-exp check-coop-controller check-keybinds check-graphics-mode
+.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-legend check-shiny check-coins check-species-data check-clock check-mp-objects check-spawn-claims check-secret-base check-rewards check-catch-reconcile check-pokenav-map check-ladder check-coop-exp check-coop-controller check-keybinds check-graphics-mode
 .SUFFIXES:
 .SECONDARY:
 .DELETE_ON_ERROR:
@@ -376,6 +376,23 @@ check-line-break: $(TARGET)
 check-wild-weather: $(TARGET)
 	@./$(TARGET) --selftest-wild-weather > $(OBJ_DIR)/selftest-wild-weather.log 2>&1; status=$$?; \
 	  tail -n 3 $(OBJ_DIR)/selftest-wild-weather.log; exit $$status
+
+# Update 29: random Legendary / Mythical encounters (60M-roll statistics, about 90 s), shiny odds (20M per case), the coin economy.
+check-legend: $(TARGET)
+	@./$(TARGET) --selftest-legend > $(OBJ_DIR)/selftest-legend.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-legend.log; exit $$status
+
+check-shiny: $(TARGET)
+	@./$(TARGET) --selftest-shiny > $(OBJ_DIR)/selftest-shiny.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-shiny.log; exit $$status
+
+check-coins: $(TARGET)
+	@./$(TARGET) --selftest-coins > $(OBJ_DIR)/selftest-coins.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-coins.log; exit $$status
+
+# Species data, moves, abilities, trainers, wild level tables: fingerprints against the pre-update baseline.
+check-species-data: $(TARGET)
+	@python3 tools/pc_port/species_data_check.py --binary ./$(TARGET)
 
 # The test pins its start to noon of the player's day, so it must pass at any wall-clock time of day:
 # run it in four zones six hours apart (one of them is always within three hours of local midnight).
