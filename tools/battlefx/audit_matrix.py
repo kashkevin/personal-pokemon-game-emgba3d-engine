@@ -143,7 +143,7 @@ def main():
         files = [p for p in files if os.path.isfile(p)]
         if files:
             mid = files[len(files) // 2]
-        lit = lit_fraction(mid, scene) if mid and scene is not None else None
+        lit = max((lit_fraction(p, scene) for p in files), default=None) if scene is not None else None
         par = r.get("parity", {})
         render = r.get("render", {})
         matrix.append({

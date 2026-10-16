@@ -41,7 +41,7 @@ def run_one(binary, move, num, out_dir, timeout):
     work = tempfile.mkdtemp(prefix="move3d-")
     keys = ",".join(f"{f}:A" for f in range(300, 4000, 36))
     env = dict(os.environ, PKMN_DEBUG_SCENE="field", PKMN_DEBUG_HERE="0,16,12,14", PKMN_DEBUG_MOVES=str(num),
-               PKMN_DEBUG_BATTLE="wild:263:90", PKMN_DEBUG_BATTLE_AT="60", PKMN_DEBUG_KEYS=keys,
+               PKMN_DEBUG_BATTLE="wild:%s:%s" % (os.environ.get("PKMN_CHECK_FOE", "263"), os.environ.get("PKMN_CHECK_FOE_LEVEL", "90")), PKMN_DEBUG_BATTLE_AT="60", PKMN_DEBUG_KEYS=keys,
                PKMN_DEBUG_GLANIM="8:10", SDL_AUDIODRIVER="dummy")
     xvfb = shutil.which("xvfb-run")
     cmd = ([xvfb, "-a", "-s", "-screen 0 1280x800x24"] if xvfb and not os.environ.get("DISPLAY") else []) + [

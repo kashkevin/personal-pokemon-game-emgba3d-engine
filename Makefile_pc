@@ -481,6 +481,11 @@ check-update26:
 	python3 tools/pc_port/first_battle_check.py
 	python3 tools/pc_port/party_menu_check.py
 
+# Update 27: a move's background leaves no black block (needs BFX_TEST=1's build as well).
+.PHONY: check-battlefx-bg
+check-battlefx-bg:
+	sh tools/battlefx/bg_check.sh
+
 # The voxel project's renderer unit tests (Linux, 32-bit host gcc; no game code).
 # check-diorama-tools runs the rule compiler's own Python tests (slow: ~1 h).
 DIORAMA_TEST_DIR   := build/pc-tests/diorama

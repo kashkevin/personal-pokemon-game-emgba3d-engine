@@ -349,8 +349,15 @@ static bool WantAnimShot(void)
         return false;
     if (gMain.inBattle && ++sGuard > 6000)
         exit(2);
-    if (!(gAnimScriptActive && gBattleAnimAttacker == 0 && gMain.inBattle))
-        return false;
+    // PKMN_DEBUG_GLANIM_ATTACKER=n: whose animations (default 0, the player's; -1: any battler's - the free-for-all's)
+    {
+        static int sWho = -2;
+
+        if (sWho == -2)
+            sWho = (value = SDL_getenv("PKMN_DEBUG_GLANIM_ATTACKER")) != NULL ? atoi(value) : 0;
+        if (!(gAnimScriptActive && (sWho < 0 || gBattleAnimAttacker == sWho) && gMain.inBattle))
+            return false;
+    }
     if (sCounter++ % sEvery != 0)
         return false;
     if (++sTaken > sMax)
