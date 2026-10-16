@@ -466,7 +466,7 @@ $(C_OBJS): | $(DIORAMA_RULE_HEADER) $(DIORAMA_TREE_HEADER) $(DIORAMA_TREES3DS_HE
 .PHONY: check-update26
 check-update26:
 	python3 tools/pc_port/battle_end_check.py --kind wild
-	python3 tools/pc_port/battle_end_check.py --kind trainer --timeout 2700
+	python3 tools/pc_port/battle_end_check.py --kind trainer
 	python3 tools/pc_port/first_battle_check.py
 	python3 tools/pc_port/party_menu_check.py
 

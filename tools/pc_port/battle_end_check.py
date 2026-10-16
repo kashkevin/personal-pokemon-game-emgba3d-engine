@@ -33,7 +33,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 LINE = re.compile(r"game frame (\d+): callback2 \S+ fade (\d+) inBattle (\d+) battleCb (\d+) native screen (\S+)")
 OVER = re.compile(r"debug battle: battle (\d+) over")
 
-KINDS = {"wild": "wild:263:5", "trainer": "trainer:1"}
+# trainer 318: TRAINER_CALVIN_1, one Poochyena - a short battle (the slow software-GL run has to see it end)
+KINDS = {"wild": "wild:263:5", "trainer": "trainer:318"}
 
 
 def run(binary, kind, timeout):
