@@ -796,21 +796,39 @@ void UiW_MessagePage(const uint8_t *text, int printed, int x, int y, int width, 
     UiW_MessagePageEx(text, printed, x, y, width, maxLines, 16);
 }
 
-void UiW_MessagePageEx(const uint8_t *text, int printed, int x, int y, int width, int maxLines, int lineH)
+// The page of a message the box shows when `printed` characters have been printed (-1: all): the text after the last
+// page break (\p, \l) that has a character after it. With `flip` a \p that is the last character printed already starts the
+// next page (blank until its first character): the printer has left its wait, the player pressed A, and the old page must
+// not stay up until the first letter comes (a slow text speed made that a visible pause: "nothing happened"). Used by the
+// draw and by the dialogue trace.
+int UiW_MessagePageFlip(const uint8_t *text, int printed, bool flip, uint8_t *page, int size)
 {
-    const uint8_t *starts[8];
-    int lengths[8];
-    uint8_t page[256];
-    int len = 0, n, total = 0, pageStart = 0;
+    int len = 0, total = 0, pageStart = 0;
 
     while (text[total] != 0xFF && (printed < 0 || total < printed))
         total++;
     for (int i = 0; i < total; i++)
-        if ((text[i] == 0xFA || text[i] == 0xFB) && i + 1 < total)
+        if ((text[i] == 0xFA || text[i] == 0xFB) && (i + 1 < total || (flip && text[i] == 0xFB)))
             pageStart = i + 1;
-    for (int i = pageStart; i < total && text[i] != 0xFA && text[i] != 0xFB && len < 254; i++)
+    for (int i = pageStart; i < total && text[i] != 0xFA && text[i] != 0xFB && len < size - 2; i++)
         page[len++] = text[i];
     page[len] = 0xFF;
+    return pageStart;
+}
+
+int UiW_MessagePageText(const uint8_t *text, int printed, uint8_t *page, int size)
+{
+    return UiW_MessagePageFlip(text, printed, false, page, size);
+}
+
+void UiW_MessagePageFlipDraw(const uint8_t *text, int printed, bool flip, int x, int y, int width, int maxLines, int lineH)
+{
+    const uint8_t *starts[8];
+    int lengths[8];
+    uint8_t page[256];
+    int n;
+
+    UiW_MessagePageFlip(text, printed, flip, page, (int)sizeof(page));
     if (maxLines > 8)
         maxLines = 8;
     n = UiText_Wrap(page, width, UI_FONT_NORMAL, starts, lengths, 8);
@@ -821,5 +839,10 @@ void UiW_MessagePageEx(const uint8_t *text, int printed, int x, int y, int width
         UiText_CopyN(line, sizeof(line), starts[i], lengths[i]);
         UiG_Text(x, y + row * lineH, line);
     }
+}
+
+void UiW_MessagePageEx(const uint8_t *text, int printed, int x, int y, int width, int maxLines, int lineH)
+{
+    UiW_MessagePageFlipDraw(text, printed, false, x, y, width, maxLines, lineH);
 }
 #endif // ENABLE_NATIVE_UI

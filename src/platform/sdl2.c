@@ -36,6 +36,7 @@
 #include "platform/benchmark.h"
 #include "platform/display_settings.h"
 #include "platform/keybinds.h"
+#include "platform/key_queue.h"
 #include "platform/gamepad.h"
 #include "platform/pc_menu.h"
 #include "platform/png_write.h"
@@ -106,6 +107,26 @@ static int sLegacyFullscreen = -1;
 static int sLegacyWindowScale = -1;
 static struct PcMenuState sPcMenu; // F10: the PC settings menu (3D build)
 static u16 keyboardKeys;           // the GBA buttons held on the keyboard (defined below)
+static struct KeyQueue sKeyQueue; // what the keyboard did between game frames, one step per frame (key_queue.h)
+static struct KeyQueue sPadQueue; // the same for the gamepad
+#ifdef _WIN32
+u16 GetXInputKeys(void);
+static bool sPadConnected;        // the last read found a pad (the extra read between frames is made only then)
+#endif
+
+// Every change of the keyboard's buttons goes through here: the game frame takes them one step at a time, so a tap that
+// begins and ends between two frames still reaches the game (Update 28).
+static void KeyboardKeysChanged(void)
+{
+    KeyQueue_Set(&sKeyQueue, keyboardKeys);
+}
+
+// No button stays held for the game, and nothing pressed before reaches it later.
+static void KeyboardKeysClear(void)
+{
+    keyboardKeys = 0;
+    KeyQueue_Reset(&sKeyQueue);
+}
 static struct Keybinds sKeybinds;  // the keyboard bindings (key.* lines; include/platform/keybinds.h)
 static bool sShowFrameRate;        // pokeemerald.cfg showFrameRate=1
 static int sBenchmarkSeconds;      // --benchmark [seconds per resolution]
@@ -342,7 +363,7 @@ static void SetPhotoMode(bool on)
         return;
     sPhotoMode = on;
     paused = on;
-    keyboardKeys = 0;
+    KeyboardKeysClear();
     DioramaGL_SetCameraMode(on ? DIORAMA_CAMERA_PHOTO : sCameraMode);
     SDL_Log("3D view: photo mode %s", on ? "on" : "off");
 }
@@ -846,6 +867,11 @@ int main(int argc, char **argv)
         }
 #endif
         ProcessEvents();
+#ifdef _WIN32
+        // A pad button pressed and released while a slow frame was drawing still reaches the game (key_queue.h)
+        if (!sPcMenu.open && sPadConnected)
+            KeyQueue_Set(&sPadQueue, GetXInputKeys());
+#endif
 #ifdef ENABLE_DIORAMA
         if (sCameraStepsDirty && SDL_GetTicks() - sCameraStepsChangedMs >= 1000)
         {
@@ -1556,7 +1582,7 @@ static void ApplyPcMenuResult(unsigned int bits)
     {
         // New bindings: no old key may stay held (its release would now find another action).
         sKeybinds = sPcMenu.keybinds;
-        keyboardKeys = 0;
+        KeyboardKeysClear();
         if (speedUp)
         {
             speedUp = false;
@@ -1631,7 +1657,7 @@ static bool HandlePcMenuKey(const SDL_KeyboardEvent *key)
                         sCameraMode == DIORAMA_CAMERA_DIORAMA, DioramaTreeSprites_Enabled());
             PcMenu_SetKeybinds(&sPcMenu, &sKeybinds, &sKeyNames);
             UpdateMenuMemory(true);
-            keyboardKeys = 0; // no button stays held for the game while the menu is open
+            KeyboardKeysClear(); // no button stays held for the game while the menu is open
         }
         return true;
     }
@@ -2633,7 +2659,7 @@ void ProcessEvents(void)
             int action = Keybinds_ActionForKey(&sKeybinds, (int)event.key.keysym.sym);
 
             if (action >= 0 && action < KEYBIND_GAME_BUTTONS)
-                keyboardKeys &= ~sKeybindButtons[action];
+                keyboardKeys &= ~sKeybindButtons[action], KeyboardKeysChanged();
             else if (action == KEYBIND_FAST_FORWARD && speedUp)
             {
                 speedUp = false;
@@ -2661,6 +2687,7 @@ void ProcessEvents(void)
                 if (action >= 0 && action < KEYBIND_GAME_BUTTONS && !chord)
                 {
                     keyboardKeys |= sKeybindButtons[action];
+                    KeyboardKeysChanged();
                     break;
                 }
                 if (action == KEYBIND_FAST_FORWARD && !chord)
@@ -2862,6 +2889,20 @@ static int SelfTestKeybinds(void)
     KeyEvent(SDLK_z, false, 0);
     KeyEvent(SDLK_UP, false, 0);
     ExpectKeys("releasing them releases the buttons", Platform_GetKeyInput() == 0);
+    // Update 28: a tap that begins and ends between two game frames (a slow 3D frame; Windows delivers both events in one
+    // batch) used to leave nothing at the frame boundary, and the player had to press A again.
+    KeyEvent(SDLK_z, true, 0);
+    KeyEvent(SDLK_z, false, 0);
+    ExpectKeys("a tap between two frames is down for one frame", Platform_GetKeyInput() == A_BUTTON);
+    ExpectKeys("and up the next", Platform_GetKeyInput() == 0);
+    KeyEvent(SDLK_z, true, 0);
+    ExpectKeys("a key held at the frame boundary is down", Platform_GetKeyInput() == A_BUTTON);
+    KeyEvent(SDLK_z, false, 0);
+    KeyEvent(SDLK_z, true, 0);
+    KeyEvent(SDLK_z, false, 0);
+    ExpectKeys("a second tap in the next batch: up for a frame first", Platform_GetKeyInput() == 0);
+    ExpectKeys("then down again (a new press)", Platform_GetKeyInput() == A_BUTTON);
+    ExpectKeys("then up", Platform_GetKeyInput() == 0);
     KeyEvent(SDLK_RETURN, true, 0);
     KeyEvent(SDLK_BACKSLASH, true, 0);
     ExpectKeys("default Enter is Start, \\ is Select", Platform_GetKeyInput() == (START_BUTTON | SELECT_BUTTON));
@@ -3000,13 +3041,14 @@ static DWORD LoadedXInputGetState(DWORD index, XINPUT_STATE *state)
 static bool sXInputDetails; // the pad's Y: no game button; the native UI's details view
 #endif
 
-u16 GetXInputKeys()
+u16 GetXInputKeys(void)
 {
     XINPUT_STATE state;
     ZeroMemory(&state, sizeof(XINPUT_STATE));
 
     DWORD dwResult = LoadedXInputGetState(0, &state);
     u16 xinputKeys = 0;
+    sPadConnected = dwResult == ERROR_SUCCESS;
 #ifdef ENABLE_NATIVE_UI
     sXInputDetails = false;
 #endif
@@ -3049,19 +3091,26 @@ u16 GetXInputKeys()
 u16 Platform_GetKeyInput(void)
 {
     if (sPcMenu.open)
+    {
+        KeyQueue_Reset(&sPadQueue);
         return 0; // the PC settings menu has the keys; the game keeps running
+    }
+    // The keyboard (and the pad) as the events left them since the last frame, one step at a time: KeyQueue_Take is this
+    // frame's keys; a tap shorter than a frame is one frame down and the next up.
+    u16 keyboard = KeyQueue_Take(&sKeyQueue);
 #ifdef _WIN32
-    u16 gamepadKeys = GetXInputKeys();
+    KeyQueue_Set(&sPadQueue, GetXInputKeys());
+    u16 gamepadKeys = KeyQueue_Take(&sPadQueue);
 #ifdef ENABLE_NATIVE_UI
     NativeUi_NotePadKeys(gamepadKeys); // the prompts show the pad's buttons
     NativeUi_NotePadDetails(sXInputDetails);
 #endif
-    return gamepadKeys | keyboardKeys;
+    return gamepadKeys | keyboard;
 #elif defined(__ANDROID__)
-    return keyboardKeys | controllerKeys | controllerAxisKeys;
+    return keyboard | controllerKeys | controllerAxisKeys;
 #endif
 
-    return keyboardKeys;
+    return keyboard;
 }
 
 void VDraw(SDL_Texture *texture)

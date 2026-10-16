@@ -261,10 +261,187 @@ static void BattleScriptTick(void)
     }
 }
 
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+#include "native_ui/ui_widgets.h"
+#endif
+
+// PKMN_DEBUG_DIALOG=name[:frame]  (with the field scene): runs one of the game's own scripts (rescue = Birch's call on Route 101,
+// boy, youngster, sign, bag) once the field has settled (or at game frame `frame`), and logs, every game frame in which
+// anything changed, the line "dialog F: ..." with the script's position (offset into the map's script data and the mode), the
+// window 0 text printer (state, offset into the string, delay), the keys of the frame (held/new), the Native UI's view of the
+// window (printed offset, waiting, the page the 3D box would draw). Written for the Update 28 dialogue bug; see
+// tools/pc_port/dialogue_check.py.
+static struct { bool read, started; int which; unsigned at; } sDialog;
+
+#ifdef ENABLE_NATIVE_UI
+static void AsciiOf(const u8 *in, char *out, size_t size)
+{
+    size_t n = 0;
+
+    for (; *in != 0xFF && n + 6 < size; in++)
+    {
+        u8 c = *in;
+
+        if (c >= 0xBB && c <= 0xD4)
+            out[n++] = 'A' + (c - 0xBB);
+        else if (c >= 0xD5 && c <= 0xEE)
+            out[n++] = 'a' + (c - 0xD5);
+        else if (c >= 0xA1 && c <= 0xAA)
+            out[n++] = '0' + (c - 0xA1);
+        else if (c == 0x00)
+            out[n++] = ' ';
+        else if (c == 0xAB) out[n++] = '!';
+        else if (c == 0xAC) out[n++] = '?';
+        else if (c == 0xAD) out[n++] = '.';
+        else if (c == 0xB8) out[n++] = ',';
+        else if (c == 0xFE) { out[n++] = '\\'; out[n++] = 'n'; }
+        else if (c == 0xFB) { out[n++] = '\\'; out[n++] = 'p'; }
+        else if (c == 0xFA) { out[n++] = '\\'; out[n++] = 'l'; }
+        else n += (size_t)SDL_snprintf(out + n, 6, "<%02X>", c);
+    }
+    out[n] = '\0';
+}
+#endif // ENABLE_NATIVE_UI
+
+extern const u8 *ScriptContext_DebugPosition(int *mode, int *status);
+extern bool32 TextPrinter_DebugState(u8 windowId, int *state, int *delay);
+
+static void DialogTick(void)
+{
+    extern const u8 Route101_EventScript_StartBirchRescue[], Route101_EventScript_Boy[], Route101_EventScript_Youngster[],
+        Route101_EventScript_RouteSign[], Route101_EventScript_BirchsBag[];
+    static const struct { const char *name; const u8 *script; } scripts[] = {
+        {"rescue", Route101_EventScript_StartBirchRescue}, {"boy", Route101_EventScript_Boy}, {"youngster", Route101_EventScript_Youngster},
+        {"sign", Route101_EventScript_RouteSign}, {"bag", Route101_EventScript_BirchsBag},
+    };
+    static struct { const u8 *pos; int mode, status, state, delay; unsigned printed; bool waiting, printer; char page[200]; u16 held, newk; } prev;
+    const char *value;
+    int mode, status, state = -1, delay = -1;
+    const u8 *pos;
+    bool printer;
+    char ascii[200] = "";
+    unsigned printed = 0;
+    int active = 0, waiting = 0;
+
+    if (!sDialog.read)
+    {
+        char name[16] = {0};
+        int at = 0;
+
+        sDialog.read = true;
+        sDialog.which = -1;
+        if ((value = SDL_getenv("PKMN_DEBUG_DIALOG")) != NULL && sscanf(value, "%15[a-z]:%d", name, &at) >= 1)
+            for (unsigned i = 0; i < sizeof(scripts) / sizeof(scripts[0]); i++)
+                if (strcmp(name, scripts[i].name) == 0)
+                    sDialog.which = (int)i;
+        sDialog.at = at > 0 ? (unsigned)at : 0;
+    }
+    if (sDialog.which < 0)
+        return;
+    if (!sDialog.started)
+    {
+        static unsigned settled;
+
+        if (gMain.callback2 != CB2_Overworld || gMain.inBattle || ArePlayerFieldControlsLocked() || gPaletteFade.active || ScriptContext_IsEnabled())
+        {
+            settled = 0;
+            return;
+        }
+        if (++settled < 90 || (sDialog.at != 0 && sKeyFrame < sDialog.at))
+            return;
+        sDialog.started = true;
+        SDL_Log("dialog %u: START script %s", sKeyFrame, scripts[sDialog.which].name);
+        ScriptContext_SetupScript(scripts[sDialog.which].script);
+    }
+    pos = ScriptContext_DebugPosition(&mode, &status);
+    printer = TextPrinter_DebugState(0, &state, &delay) != FALSE;
+    waiting = printer && (state == 1 || state == 2 || state == 3);   // RENDER_STATE_WAIT, CLEAR, SCROLL_START
+#ifdef ENABLE_NATIVE_UI
+    {
+        u8 text[256], page[256];
+        u32 chars = 0;
+        bool8 on = FALSE;
+
+        if (TextPrinter_NativeUiWindowText(0, text, sizeof(text), &chars, &on))
+        {
+            // what the 3D message box draws: the same page selection (UiW_MessagePageFlip), flipped as the field box flips it
+            UiW_MessagePageFlip(text, on ? (int)chars : -1, on && !waiting, page, sizeof(page));
+            AsciiOf(page, ascii, sizeof(ascii));
+        }
+        printed = chars;
+        active = on;
+    }
+#endif
+    if (pos != prev.pos || mode != prev.mode || status != prev.status || printer != prev.printer || state != prev.state
+        || printed != prev.printed || waiting != prev.waiting || strcmp(ascii, prev.page) != 0 || gMain.heldKeys != prev.held || gMain.newKeys != prev.newk)
+    {
+        SDL_Log("dialog %u: script %p mode %d status %d | printer %d state %d delay %d waiting %d | native printed %u active %d | keys held %04x new %04x | page \"%s\"",
+                sKeyFrame, (const void *)pos, mode, status, printer, state, delay, waiting, printed, active, gMain.heldKeys, gMain.newKeys, ascii);
+        prev.pos = pos; prev.mode = mode; prev.status = status; prev.printer = printer; prev.state = state;
+        prev.printed = printed; prev.waiting = waiting; prev.held = gMain.heldKeys; prev.newk = gMain.newKeys;
+        SDL_strlcpy(prev.page, ascii, sizeof(prev.page));
+    }
+}
+
+// PKMN_DEBUG_TAPS=startMs:periodMs:durationMs:count  (Update 28, the dialogue bug): a thread presses the key bound to A (Z) as real SDL
+// key events (SDL_PushEvent: the path of a keyboard), count times, each held durationMs and one every periodMs, and the game
+// counts the presses it sees at its frame boundary (a rising edge of the A bit). The line "taps: pushed N seen M (lost L)"
+// closes the run. tools/pc_port/input_tap_check.py.
+static struct { int start, period, duration, count; unsigned seen, pushed; bool prevA; unsigned lastPushMs; } sTaps;
+
+static int TapThread(void *unused)
+{
+    SDL_Event ev;
+
+    (void)unused;
+    SDL_Delay((Uint32)sTaps.start);
+    for (int i = 0; i < sTaps.count; i++)
+    {
+        memset(&ev, 0, sizeof(ev));
+        ev.type = SDL_KEYDOWN;
+        ev.key.state = SDL_PRESSED;
+        ev.key.keysym.sym = SDLK_z;
+        ev.key.keysym.scancode = SDL_SCANCODE_Z;
+        SDL_PushEvent(&ev);
+        sTaps.pushed++;
+        SDL_Delay((Uint32)sTaps.duration);
+        ev.type = SDL_KEYUP;
+        ev.key.state = SDL_RELEASED;
+        SDL_PushEvent(&ev);
+        SDL_Delay((Uint32)(sTaps.period > sTaps.duration ? sTaps.period - sTaps.duration : 1));
+    }
+    SDL_Delay(1500);
+    SDL_Log("taps: pushed %u seen %u (lost %d)", sTaps.pushed, sTaps.seen, (int)sTaps.pushed - (int)sTaps.seen);
+    sTaps.count = -1;
+    return 0;
+}
+
+static void TapsStart(void)
+{
+    const char *value = SDL_getenv("PKMN_DEBUG_TAPS");
+
+    if (value != NULL && sscanf(value, "%d:%d:%d:%d", &sTaps.start, &sTaps.period, &sTaps.duration, &sTaps.count) == 4)
+        SDL_DetachThread(SDL_CreateThread(TapThread, "taps", NULL));
+    else
+        sTaps.count = -1;
+}
+
+static void TapsFrame(uint16_t keys)
+{
+    bool a = (keys & A_BUTTON) != 0;
+
+    if (a && !sTaps.prevA)
+        sTaps.seen++;
+    sTaps.prevA = a;
+}
+
 uint16_t DebugScene_FilterKeys(uint16_t keys)
 {
     sKeyFrame++;
     BattleScriptTick();
+    DialogTick();
     if (SDL_getenv("PKMN_DEBUG_FRAMES") != NULL)
     {
         static const void *sPrevCb2;
@@ -301,6 +478,8 @@ uint16_t DebugScene_FilterKeys(uint16_t keys)
     for (unsigned i = 0; i < sScriptCount; i++)
         if (sKeyFrame >= sScript[i].frame && sKeyFrame < sScript[i].frame + HOLD_FRAMES)
             keys |= sScript[i].keys;
+    if (sTaps.count != -1 || sTaps.pushed != 0)
+        TapsFrame(keys);
     return keys;
 }
 
@@ -751,6 +930,8 @@ static void CB2_DebugSceneSetup(void)
 void DebugScene_Start(void)
 {
     const char *value;
+
+    TapsStart();
 
     if ((value = SDL_getenv("PKMN_DEBUG_KEYS")) != NULL)
         ParseKeys(value);

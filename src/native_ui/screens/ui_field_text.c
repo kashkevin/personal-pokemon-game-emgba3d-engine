@@ -63,7 +63,7 @@ void UiField_MessageBox(int t, int L, int R, int B, const u8 *msg, int printed, 
 
     UiW_DialogBox(L + 8, B - UI_FIELD_MSG_H - 8, UI_FIELD_MSG_W, UI_FIELD_MSG_H, band, UI_NONE, b);
     if (msg != NULL)
-        UiW_MessagePage(msg, printed, b[0] + 2, b[1] - 1, b[2] - 4, 2);
+        UiW_MessagePageFlipDraw(msg, printed, printed >= 0 && !waiting, b[0] + 2, b[1] - 1, b[2] - 4, 2, 16);
     if (waiting)
         UiW_DownArrow(b[0] + b[2] - 10, b[1] + 20 + ((t / 16) % 2), UI_P_CURSOR, false);
     if (hitId != 0)

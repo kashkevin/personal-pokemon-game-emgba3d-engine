@@ -759,3 +759,13 @@ u8 (*ScriptContext_NativeUiWaitFunc(void))(void)
     return sGlobalScriptContext.nativePtr;
 }
 #endif // ENABLE_NATIVE_UI
+
+#ifdef PORTABLE
+// Development trace of the script (PKMN_DEBUG_DIALOG, platform/debug_scene.c): where the field's script stands.
+const u8 *ScriptContext_DebugPosition(int *mode, int *status)
+{
+    *mode = sGlobalScriptContext.mode;
+    *status = sGlobalScriptContextStatus;
+    return sGlobalScriptContext.scriptPtr;
+}
+#endif // PORTABLE

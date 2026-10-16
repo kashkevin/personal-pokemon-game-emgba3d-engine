@@ -149,6 +149,9 @@ void UiW_Missing(int x, int y, int w, int h);
 void UiW_MessagePage(const uint8_t *text, int printed, int x, int y, int width, int maxLines);
 /* ... lineH pixels from one line to the next (16 above) */
 void UiW_MessagePageEx(const uint8_t *text, int printed, int x, int y, int width, int maxLines, int lineH);
+int UiW_MessagePageText(const uint8_t *text, int printed, uint8_t *page, int size);
+int UiW_MessagePageFlip(const uint8_t *text, int printed, bool flip, uint8_t *page, int size);
+void UiW_MessagePageFlipDraw(const uint8_t *text, int printed, bool flip, int x, int y, int width, int maxLines, int lineH);
 
 /* src/platform/sdl2.c: the key bound to a game button for the prompts (see ui_engine.h) */
 void Platform_NativeUiKeyLabel(int action, char *out, int size);

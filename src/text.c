@@ -2969,3 +2969,20 @@ bool32 TextPrinter_NativeUiWindowText(u8 windowId, u8 *dst, u32 size, u32 *print
     return TRUE;
 }
 #endif // ENABLE_NATIVE_UI
+
+#ifdef PORTABLE
+// Development trace (PKMN_DEBUG_DIALOG, platform/debug_scene.c): the window's printer as the engine has it.
+bool32 TextPrinter_DebugState(u8 windowId, int *state, int *delay)
+{
+    struct TextPrinter *printer;
+
+    for (printer = sFirstTextPrinter; printer != NULL; printer = printer->nextPrinter)
+        if (printer->active && printer->printerTemplate.type == WINDOW_TEXT_PRINTER && printer->printerTemplate.windowId == windowId)
+        {
+            *state = printer->state;
+            *delay = printer->delayCounter;
+            return TRUE;
+        }
+    return FALSE;
+}
+#endif // PORTABLE
