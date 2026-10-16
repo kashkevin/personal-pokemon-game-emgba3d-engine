@@ -215,6 +215,7 @@ extern void MultiplayerCoop_TestArmAward(void);
 extern int NativeSelfTest_SpawnClaims(void);
 extern int NativeSelfTest_SecretBase(void);
 extern int NativeSelfTest_Ladder(void);
+extern int NativeSelfTest_DumpSpeciesData(const char *outPath);
 extern int NativeSelfTest_Rewards(void);
 extern int NativeSelfTest_CatchReconcile(void);
 extern int NativeSelfTest_PokenavMap(void);
@@ -1147,6 +1148,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_Rewards()); // src/platform/native_selftest.c (Battle Frontier rewards over the wallet stream)
         else if (strcmp(argv[i], "--selftest-ladder") == 0)
             exit(NativeSelfTest_Ladder()); // src/platform/native_selftest.c (expansion Phases 8 and 10)
+        else if (strcmp(argv[i], "--dump-species-data") == 0 && i + 1 < argc)
+            exit(NativeSelfTest_DumpSpeciesData(argv[++i])); // src/platform/native_selftest_u29.c (data integrity)
         else if (strcmp(argv[i], "--dump-wild-weights") == 0 && i + 2 < argc)
         {
             const char *keysPath = argv[++i];
