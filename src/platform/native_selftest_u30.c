@@ -106,6 +106,43 @@ static void RunChecks(u32 windows, struct EggRun *out)
     }
 }
 
+// A parent with chosen nature, held item, IVs, ability slot, ball and first move.
+static void DepositEx(u32 slot, enum Species species, u32 gender, u32 otId, u32 nature, u32 item, const u8 *ivs, u32 abilityNum, u32 ball, u32 move)
+{
+    struct Pokemon mon;
+    u32 personality = GetMonPersonality(species, gender, nature, RANDOM_UNOWN_LETTER);
+    u32 shiny = FALSE;
+
+    CreateMonWithIVs(&mon, species, 30, personality, OTID_STRUCT_PRESET(otId), 0);
+    SetMonData(&mon, MON_DATA_IS_SHINY, &shiny);
+    for (u32 i = 0; i < 6; i++)
+        SetMonData(&mon, MON_DATA_HP_IV + i, &ivs[i]);
+    SetMonData(&mon, MON_DATA_HELD_ITEM, &item);
+    SetMonData(&mon, MON_DATA_ABILITY_NUM, &abilityNum);
+    SetMonData(&mon, MON_DATA_POKEBALL, &ball);
+    if (move != MOVE_NONE)
+        SetMonData(&mon, MON_DATA_MOVE1, &move);
+    gSaveBlock1Ptr->daycare.mons[slot].mon = mon.box;
+    gSaveBlock1Ptr->daycare.mons[slot].steps = 0;
+    gSaveBlock1Ptr->daycare.offspringPersonality = 0;
+}
+
+static bool32 NextEgg(struct Pokemon *egg)
+{
+    gSaveBlock1Ptr->daycare.mons[0].steps = 63;
+    gSaveBlock1Ptr->daycare.mons[1].steps = 63;
+    IncrementDaycareSteps();
+    return MPDaycare_QueuePop(egg);
+}
+
+// PKMN_BREED_ONLY=9 (a section number) runs just that section: quicker while one of them is being worked on.
+static bool32 SectionWanted(u32 number)
+{
+    const char *only = getenv("PKMN_BREED_ONLY");
+
+    return only == NULL || (u32)atoi(only) == number;
+}
+
 static int StepsToHatch(u32 cycles, bool32 incubator)
 {
     struct Pokemon egg;
@@ -139,6 +176,7 @@ int NativeSelfTest_Breeding(void)
     printf("selftest-breeding: Update 30 breeding\n");
 
     // 1. compatibility (the original chances, incompatible pairs never)
+    if (SectionWanted(1))
     {
         ExpectLeg("same species, different trainers: 70 %", Score(SPECIES_PIKACHU, MON_FEMALE, 1, SPECIES_PIKACHU, MON_MALE, 2) == PARENTS_MAX_COMPATIBILITY);
         ExpectLeg("same species, same trainer: 50 %", Score(SPECIES_PIKACHU, MON_FEMALE, 1, SPECIES_PIKACHU, MON_MALE, 1) == PARENTS_MED_COMPATIBILITY);
@@ -160,6 +198,7 @@ int NativeSelfTest_Breeding(void)
     }
 
     // 2. an Egg check every 64 steps and no other
+    if (SectionWanted(2))
     {
         struct EggRun run;
         u32 early = 0;
@@ -229,6 +268,7 @@ int NativeSelfTest_Breeding(void)
     }
 
     // 3. the queue: five Eggs, oldest first, nothing overwritten, nothing lost
+    if (SectionWanted(3))
     {
         struct Pokemon egg, out;
         u32 species[7] = {SPECIES_PICHU, SPECIES_CHARMANDER, SPECIES_SQUIRTLE, SPECIES_BULBASAUR, SPECIES_MUDKIP, SPECIES_TREECKO, SPECIES_TORCHIC};
@@ -311,6 +351,7 @@ int NativeSelfTest_Breeding(void)
     }
 
     // 4. hatching: 75 % fewer steps, Flame Body / Magma Armor halve once, level 1
+    if (SectionWanted(4))
     {
         bool32 exact = TRUE, flame = TRUE;
 
@@ -372,6 +413,7 @@ int NativeSelfTest_Breeding(void)
     }
 
     // 5. Eggs in the PC: stay Eggs, do not hatch, keep their cycles, come back unchanged
+    if (SectionWanted(5))
     {
         struct Pokemon egg, back;
         u32 isEgg = TRUE, cycles = 7, before, after;
@@ -397,6 +439,7 @@ int NativeSelfTest_Breeding(void)
     }
 
     // 6. Egg shiny rates through the whole Day Care (parents, Charm, Egg shiny rolls)
+    if (SectionWanted(6))
     {
         static const struct { const char *name; bool32 parentShiny, charm; double odds; } sCases[] =
         {
@@ -490,6 +533,7 @@ int NativeSelfTest_Breeding(void)
     }
 
     // 7. the whole implemented roster: every species that can breed makes a valid level-1 Egg of its own line with a Ditto
+    if (SectionWanted(7))
     {
         u32 swept = 0, noEgg = 0, bad = 0, exceptions = 0, ivBad = 0, moveBad = 0, shown = 0;
 
@@ -562,6 +606,7 @@ int NativeSelfTest_Breeding(void)
     }
 
     // 8. inheritance: the baby species, three IVs from the parents, the mother's ability
+    if (SectionWanted(8))
     {
         u32 pichu = 0, total = 20000, ivSum = 0, perfect = 0, abil0 = 0, eggs = 0, nidoM = 0, nidoF = 0, phione = 0;
         struct Pokemon egg;
@@ -622,6 +667,131 @@ int NativeSelfTest_Breeding(void)
         }
         ExpectLeg("Manaphy with a Ditto: the Egg is a Phione (Manaphy itself is also barred as a plain pair)", phione > 0);
         (void)abil0; (void)total;
+    }
+
+
+    // 9. the modern rules of the expansion's breeding (Gen 6 and later), on the real Day Care code
+    if (SectionWanted(9))
+    {
+        static const u8 all31[6] = {31, 31, 31, 31, 31, 31};
+        static const u8 hp7[6] = {7, 31, 31, 31, 31, 31};
+        static const u8 zero[6] = {0, 0, 0, 0, 0, 0};
+        struct Pokemon egg;
+        u32 eggs, adamant, modest, knot5, plainBelow3, hpWeight, ha, haEggs, moveHeld, nest, differentSpeciesBall;
+        const u16 *eggMoves = GetSpeciesEggMoves(SPECIES_BULBASAUR);
+
+        Setup();
+        SeedRng(0x4090);
+        // Everstone: the holder passes its Nature on, always
+        ClearDaycare();
+        DepositEx(0, SPECIES_BULBASAUR, MON_FEMALE, 1, NATURE_MODEST, ITEM_NONE, all31, 0, BALL_POKE, MOVE_NONE);
+        DepositEx(1, SPECIES_BULBASAUR, MON_MALE, 2, NATURE_ADAMANT, ITEM_EVERSTONE, all31, 0, BALL_POKE, MOVE_NONE);
+        eggs = adamant = 0;
+        for (u32 i = 0; i < 3000; i++)
+            if (NextEgg(&egg))
+            {
+                eggs++;
+                adamant += GetNature(&egg) == NATURE_ADAMANT;
+            }
+        ExpectLeg("an Everstone on the father: every Egg has his Nature", eggs > 500 && adamant == eggs);
+        DepositEx(0, SPECIES_BULBASAUR, MON_FEMALE, 1, NATURE_MODEST, ITEM_EVERSTONE, all31, 0, BALL_POKE, MOVE_NONE);
+        eggs = adamant = modest = 0;
+        for (u32 i = 0; i < 6000; i++)
+            if (NextEgg(&egg))
+            {
+                eggs++;
+                adamant += GetNature(&egg) == NATURE_ADAMANT;
+                modest += GetNature(&egg) == NATURE_MODEST;
+            }
+        ExpectLeg("an Everstone on both: either parent's Nature, about half each, nothing else", eggs > 1000 && adamant + modest == eggs
+                  && adamant > eggs * 4 / 10 && adamant < eggs * 6 / 10);
+        // Destiny Knot: five IVs from the parents instead of three
+        ClearDaycare();
+        DepositEx(0, SPECIES_BULBASAUR, MON_FEMALE, 1, NATURE_MODEST, ITEM_DESTINY_KNOT, all31, 0, BALL_POKE, MOVE_NONE);
+        DepositEx(1, SPECIES_BULBASAUR, MON_MALE, 2, NATURE_ADAMANT, ITEM_NONE, all31, 0, BALL_POKE, MOVE_NONE);
+        eggs = knot5 = 0;
+        for (u32 i = 0; i < 3000; i++)
+            if (NextEgg(&egg))
+            {
+                u32 n31 = 0;
+
+                eggs++;
+                for (u32 iv = MON_DATA_HP_IV; iv <= MON_DATA_SPDEF_IV; iv++)
+                    n31 += GetMonData(&egg, iv) == 31;
+                knot5 += n31 >= 5;
+            }
+        ExpectLeg("a Destiny Knot: at least five inherited IVs in every Egg", eggs > 500 && knot5 == eggs);
+        ClearDaycare();
+        DepositEx(0, SPECIES_BULBASAUR, MON_FEMALE, 1, NATURE_MODEST, ITEM_NONE, zero, 0, BALL_POKE, MOVE_NONE);
+        DepositEx(1, SPECIES_BULBASAUR, MON_MALE, 2, NATURE_ADAMANT, ITEM_NONE, zero, 0, BALL_POKE, MOVE_NONE);
+        eggs = plainBelow3 = 0;
+        for (u32 i = 0; i < 3000; i++)
+            if (NextEgg(&egg))
+            {
+                u32 n0 = 0;
+
+                eggs++;
+                for (u32 iv = MON_DATA_HP_IV; iv <= MON_DATA_SPDEF_IV; iv++)
+                    n0 += GetMonData(&egg, iv) == 0;
+                plainBelow3 += n0 < 3;
+            }
+        ExpectLeg("without a Knot only three IVs are inherited (all-0 parents: at least three 0s, never more than the chance gives)", eggs > 500 && plainBelow3 == 0);
+        // A Power item hands over its stat from that parent
+        ClearDaycare();
+        DepositEx(0, SPECIES_BULBASAUR, MON_FEMALE, 1, NATURE_MODEST, ITEM_NONE, all31, 0, BALL_POKE, MOVE_NONE);
+        DepositEx(1, SPECIES_BULBASAUR, MON_MALE, 2, NATURE_ADAMANT, ITEM_POWER_WEIGHT, hp7, 0, BALL_POKE, MOVE_NONE);
+        eggs = hpWeight = 0;
+        for (u32 i = 0; i < 3000; i++)
+            if (NextEgg(&egg))
+            {
+                eggs++;
+                hpWeight += GetMonData(&egg, MON_DATA_HP_IV) == 7;
+            }
+        ExpectLeg("a Power Weight: the Egg always has its holder's HP IV", eggs > 500 && hpWeight == eggs);
+        // The mother's Hidden Ability is passed on 60% of the time (regular abilities 80%), with a Ditto too
+        ClearDaycare();
+        DepositEx(0, SPECIES_BULBASAUR, MON_FEMALE, 1, NATURE_MODEST, ITEM_NONE, all31, 2, BALL_POKE, MOVE_NONE);
+        DepositEx(1, SPECIES_DITTO, MON_GENDERLESS, 2, NATURE_ADAMANT, ITEM_NONE, all31, 0, BALL_POKE, MOVE_NONE);
+        eggs = ha = haEggs = 0;
+        for (u32 i = 0; i < 30000; i++)
+            if (NextEgg(&egg))
+            {
+                eggs++;
+                ha += GetMonData(&egg, MON_DATA_ABILITY_NUM) == 2;
+            }
+        haEggs = eggs;
+        printf("Bulbasaur mother with her Hidden Ability + Ditto: %u of %u Eggs inherit it (%.1f %%; the rule is 60 %%)\n", ha, haEggs, haEggs ? 100.0 * ha / haEggs : 0.0);
+        ExpectLeg("a Hidden Ability mother passes it on about 60% of the time", haEggs > 3000 && ha * 100 > haEggs * 56 && ha * 100 < haEggs * 64);
+        // Egg moves from a parent that knows one (the species' own list)
+        ClearDaycare();
+        DepositEx(0, SPECIES_BULBASAUR, MON_FEMALE, 1, NATURE_MODEST, ITEM_NONE, all31, 0, BALL_POKE, MOVE_NONE);
+        DepositEx(1, SPECIES_BULBASAUR, MON_MALE, 2, NATURE_ADAMANT, ITEM_NONE, all31, 0, BALL_POKE, eggMoves != NULL ? eggMoves[0] : MOVE_NONE);
+        eggs = moveHeld = 0;
+        for (u32 i = 0; i < 2000; i++)
+            if (NextEgg(&egg))
+            {
+                eggs++;
+                for (u32 m = 0; m < MAX_MON_MOVES; m++)
+                    if (eggMoves != NULL && GetMonData(&egg, MON_DATA_MOVE1 + m) == eggMoves[0])
+                    {
+                        moveHeld++;
+                        break;
+                    }
+            }
+        ExpectLeg("an Egg move known by a parent is inherited", eggMoves != NULL && eggMoves[0] != MOVE_UNAVAILABLE && eggs > 300 && moveHeld == eggs);
+        // The mother's Ball (Gen 6 rule); another species' father adds nothing
+        ClearDaycare();
+        DepositEx(0, SPECIES_BULBASAUR, MON_FEMALE, 1, NATURE_MODEST, ITEM_NONE, all31, 0, BALL_NEST, MOVE_NONE);
+        DepositEx(1, SPECIES_BULBASAUR, MON_MALE, 2, NATURE_ADAMANT, ITEM_NONE, all31, 0, BALL_ULTRA, MOVE_NONE);
+        eggs = nest = 0;
+        for (u32 i = 0; i < 2000; i++)
+            if (NextEgg(&egg))
+            {
+                eggs++;
+                nest += GetMonData(&egg, MON_DATA_POKEBALL) == BALL_NEST;
+            }
+        differentSpeciesBall = nest;
+        ExpectLeg("the Egg is in the mother's Poke Ball", eggs > 300 && differentSpeciesBall == eggs);
     }
 
     printf("selftest-breeding: %d checks, %d failed\n", sLegChecks, sLegFailures);

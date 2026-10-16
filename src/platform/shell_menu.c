@@ -5,6 +5,7 @@
 // Nothing here decides anything: it shows what the application describes and reports what the player chose.
 #include <SDL2/SDL.h>
 #ifdef _WIN32
+#include <fcntl.h>
 #include <io.h>
 #define PIPE_READ(buffer, count) _read(0, (buffer), (unsigned)(count))
 #else
@@ -38,7 +39,7 @@ struct Item
     char id[48];
     char label[120];
     char detail[200];
-    bool disabled, start, warn, accent, twoLine, digits, longValue;
+    bool disabled, start, warn, accent, twoLine, digits, longValue, keyRow;
     int maxLength;
     char *value; // fields: FIELD_MAX + 1 bytes
     int length;
@@ -65,6 +66,8 @@ static bool sPendingOpen;
 static int sFocus;
 static int sScroll;
 static bool sLocked;     // an event was sent; wait for the application's next screen
+static bool sCapturing;  // a key row (flag k) is waiting for the next key press
+static char sCapturedKey[40];
 static bool sTest;
 static Uint32 sCommandEvent;
 static void UpdateScale(void);
@@ -129,6 +132,13 @@ static void EmitEvent(const char *kind, const char *id)
             Escape(item->value, big, sizeof(big));
             fputs(big, stdout);
         }
+    }
+    if (sCapturedKey[0] != '\0')
+    {
+        fputs("\tkey\t", stdout);
+        Escape(sCapturedKey, escaped, sizeof(escaped));
+        fputs(escaped, stdout);
+        sCapturedKey[0] = '\0';
     }
     fputc('\n', stdout);
     fflush(stdout);
@@ -581,11 +591,12 @@ static void DrawScreen(void)
                     else
                     {
                         int labelW = TextWidth(line);
+                        const char *detail = item->keyRow && sCapturing && focused ? "press a key (Esc cancels)" : item->detail;
 
                         Text(contentX + 18, y + 6, line, ink, 0);
-                        if (item->detail[0] != '\0')
+                        if (detail[0] != '\0')
                         {
-                            Fit(item->detail, contentW - 44 - labelW - 12, line, sizeof(line));
+                            Fit(detail, contentW - 44 - labelW - 12, line, sizeof(line));
                             Text(contentX + contentW - 12 - TextWidth(line), y + 6, line, COL_MUTED, 0);
                         }
                     }
@@ -687,6 +698,7 @@ static void ParseFlags(struct Item *item, const char *flags)
         case 'w': item->warn = true; break;
         case 'a': item->accent = true; break;
         case '2': item->twoLine = true; break;
+        case 'k': item->keyRow = true; break;
         case 'n': item->digits = true; break;
         case 'm': item->longValue = true; item->maxLength = FIELD_MAX; break;
         case 'l': item->maxLength = atoi(f + 1); while (f[1] >= '0' && f[1] <= '9') f++; break;
@@ -803,6 +815,7 @@ static void HandleCommand(char *line)
         memset(&sPending, 0, sizeof(sPending));
         sPendingOpen = false;
         sLocked = false;
+        sCapturing = false;
         FocusFirst();
         SDL_StartTextInput();
     }
@@ -873,6 +886,11 @@ static void Activate(void)
         FocusStep(1);
         return;
     }
+    if (item->keyRow)
+    {
+        sCapturing = true;      // the next key press is the answer (Esc cancels)
+        return;
+    }
     sLocked = true;
     EmitEvent("select", item->id);
 }
@@ -913,6 +931,17 @@ static void OnKey(SDL_Keycode key, Uint16 mod)
         Uint32 flags = SDL_GetWindowFlags(sWindow);
 
         SDL_SetWindowFullscreen(sWindow, (flags & SDL_WINDOW_FULLSCREEN_DESKTOP) ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
+        return;
+    }
+    if (sCapturing)
+    {
+        sCapturing = false;
+        if (key != SDLK_ESCAPE && !sLocked && item != NULL)
+        {
+            snprintf(sCapturedKey, sizeof(sCapturedKey), "%s", SDL_GetKeyName(key));
+            sLocked = true;
+            EmitEvent("select", item->id);
+        }
         return;
     }
     if (sLocked && key != SDLK_ESCAPE)
@@ -1124,6 +1153,10 @@ int ShellMenu_Main(int argc, char **argv)
     int w = 1280, h = 720;
 
     (void)argv;
+#ifdef _WIN32
+    _setmode(0, _O_BINARY);      // the pipe carries bytes: no CRLF changes and no Ctrl-Z end of file
+    _setmode(1, _O_BINARY);
+#endif
     sTest = SDL_getenv("PKMN_SHELL_TEST") != NULL && SDL_getenv("PKMN_SHELL_TEST")[0] == '1';
     for (int i = 1; i + 1 < argc; i++)
         if (strcmp(argv[i], "--shell-size") == 0)
