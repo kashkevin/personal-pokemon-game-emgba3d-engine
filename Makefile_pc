@@ -62,6 +62,14 @@ ifeq ($(DIORAMA),1)
   TARGET        := $(basename $(TARGET))-diorama$(suffix $(TARGET))
   OBJ_DIR       := $(OBJ_DIR)-diorama
 endif
+# BFX_TEST=1 (with DIORAMA=1): the Battle FX and battle-environment test drivers (src/diorama/battlefx/bfx_test.c,
+# src/diorama/scene/battle_env_test.c; tools/battlefx/gallery.sh). A test build, never shipped:
+# pokeemerald-mp-diorama-bfxtest, objects in build/pc-linux-diorama-bfxtest.
+BFX_TEST      ?= 0
+ifeq ($(BFX_TEST),1)
+  TARGET        := $(basename $(TARGET))-bfxtest$(suffix $(TARGET))
+  OBJ_DIR       := $(OBJ_DIR)-bfxtest
+endif
 ifneq ($(NATIVE_LINUX),1)
   # SDL2 for i686-w64-mingw32 (headers in $(SDL_DIR)/include, libs in $(SDL_DIR)/lib)
   SDL_DIR       ?= /usr/i686-w64-mingw32
@@ -107,6 +115,9 @@ else
 endif
 ifeq ($(DIORAMA),1)
   CPPFLAGS += -DENABLE_DIORAMA
+  ifeq ($(BFX_TEST),1)
+    CPPFLAGS += -DBATTLEFX_TEST -DDIORAMA_BATTLE_ENV_TEST
+  endif
   ifeq ($(NATIVE_UI),1)
     CPPFLAGS += -DENABLE_NATIVE_UI
   endif

@@ -28,6 +28,7 @@
 #include "constants/battle.h"
 #include "battle.h"
 #include "battle_interface.h"
+#include "battle_anim.h"
 #include "sprite.h"
 #include "battle_setup.h"
 #include "link.h"
@@ -330,10 +331,42 @@ static bool WantEndShot(void)
     return (++sEndCounter % every) == 0;
 }
 
+// PKMN_DEBUG_GLANIM=every[:count]: while the player's Pokemon's move animation runs, a window screenshot every n presented
+// frames (count of them, default 10), then the program ends (tools/pc_port/move_3d_check.py); the 3D view of what
+// PKMN_DEBUG_ANIMSHOTS takes from the GBA frame.
+static bool WantAnimShot(void)
+{
+    static int sEvery = -1, sMax = 10, sTaken, sCounter, sGuard;
+    const char *value;
+
+    if (sEvery < 0)
+    {
+        sEvery = (value = SDL_getenv("PKMN_DEBUG_GLANIM")) != NULL ? atoi(value) : 0;
+        if (value != NULL && strchr(value, ':') != NULL)
+            sMax = atoi(strchr(value, ':') + 1);
+    }
+    if (sEvery <= 0)
+        return false;
+    if (gMain.inBattle && ++sGuard > 6000)
+        exit(2);
+    if (!(gAnimScriptActive && gBattleAnimAttacker == 0 && gMain.inBattle))
+        return false;
+    if (sCounter++ % sEvery != 0)
+        return false;
+    if (++sTaken > sMax)
+    {
+        SDL_Log("Debug scene: %d window captures of move %d", sMax, (int)gAnimMoveIndex);
+        exit(0);
+    }
+    return true;
+}
+
 bool DebugScene_WantGlShot(void)
 {
     const char *value = SDL_getenv("PKMN_DEBUG_GLSHOTS");
 
+    if (WantAnimShot())
+        return true;
     if (WantEndShot())
         return true;
     if (value == NULL)
@@ -364,6 +397,48 @@ void DebugScene_Frame(const uint16_t *pixels)
     static uint8_t rgba[DISPLAY_WIDTH * DISPLAY_HEIGHT * 4];
     char path[480];
 
+    // PKMN_DEBUG_ANIMSHOTS=every[:count]: while the player's Pokemon's move animation runs, a capture every n drawn frames
+    // (count of them, default 10), then the program ends (tools/pc_port/classic_move_check.py)
+    {
+        static int sEvery = -1, sMax = 10, sTaken, sCounter, sGuard;
+        const char *value;
+
+        if (sEvery < 0)
+        {
+            sEvery = (value = SDL_getenv("PKMN_DEBUG_ANIMSHOTS")) != NULL ? atoi(value) : 0;
+            if (value != NULL && strchr(value, ':') != NULL)
+                sMax = atoi(strchr(value, ':') + 1);
+        }
+        if (sEvery > 0 && sShotCount == 0)
+        {
+            // a guard against a move that never animates: end after 4000 drawn frames in a battle
+            if (gMain.inBattle && ++sGuard > 4000)
+                exit(2);
+            if (gAnimScriptActive && gBattleAnimAttacker == 0 && gMain.inBattle)
+            {
+                if (sCounter++ % sEvery == 0)
+                {
+                    for (unsigned p = 0; p < DISPLAY_WIDTH * DISPLAY_HEIGHT; p++)
+                    {
+                        uint16_t c = pixels[p];
+
+                        rgba[p * 4 + 0] = (uint8_t)((c & 31) * 255 / 31);
+                        rgba[p * 4 + 1] = (uint8_t)(((c >> 5) & 31) * 255 / 31);
+                        rgba[p * 4 + 2] = (uint8_t)(((c >> 10) & 31) * 255 / 31);
+                        rgba[p * 4 + 3] = 255;
+                    }
+                    SDL_snprintf(path, sizeof(path), "%s-anim%02d.png", sStem[0] ? sStem : "debug-scene", sTaken);
+                    PngWrite_RGBA(path, rgba, DISPLAY_WIDTH, DISPLAY_HEIGHT, false);
+                    if (++sTaken >= sMax)
+                    {
+                        SDL_Log("Debug scene: %d animation captures of move %d", sTaken, (int)gAnimMoveIndex);
+                        exit(0);
+                    }
+                }
+            }
+            return;
+        }
+    }
     if (sShotCount == 0)
         return;
     sDrawFrame++;
@@ -558,6 +633,15 @@ static void StartFieldScene(void)
     CreateMonWithIVs(&gParties[B_TRAINER_PLAYER][0], species, 30, 0x1234u, id, 20);
     SetMonMoveSlot(&gParties[B_TRAINER_PLAYER][0], MOVE_TACKLE, 0);
     SetMonMoveSlot(&gParties[B_TRAINER_PLAYER][0], MOVE_WATER_GUN, 1);
+    // PKMN_DEBUG_MOVES=n,n,n,n: the Pokemon's moves by number (the Classic 2D move checks of Update 27)
+    if ((value = SDL_getenv("PKMN_DEBUG_MOVES")) != NULL)
+    {
+        int mv[4] = {0};
+        int count = Numbers(value, mv, 4);
+
+        for (int m = 0; m < count && m < 4; m++)
+            SetMonMoveSlot(&gParties[B_TRAINER_PLAYER][0], (u16)mv[m], (u8)m);
+    }
     gPartiesCount[B_TRAINER_PLAYER] = 1;
     for (int badge = FLAG_BADGE01_GET; badge <= FLAG_BADGE08_GET; badge++)
         FlagSet((u16)badge); // so the level 30 Pokemon obeys

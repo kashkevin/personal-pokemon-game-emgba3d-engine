@@ -1,4 +1,5 @@
 #ifdef RENDERER_EASY_DRAW
+#include <stdlib.h>
 #include "global.h"
 #include <stdbool.h>
 #include "platform/dma.h"
@@ -28,15 +29,29 @@ uint8_t gPlatformPictureHideBgMask;
 /* ...and the OAM entries it draws itself (bit n of [n / 32]: entry n; the
  * battle's healthboxes, bars and trays). 0 outside it. */
 uint32_t gPlatformPictureHideObj[4];
+/* PKMN_DEBUG_HIDEBG=mask (bit n: BG n): layers left out of every frame, to find which layer holds a picture (Update 27's
+ * look at the black rectangles behind some animations' backgrounds). 0 when unset. */
+static unsigned DebugHideBg(void)
+{
+    static int sMask = -1;
+
+    if (sMask < 0)
+    {
+        const char *value = getenv("PKMN_DEBUG_HIDEBG");
+
+        sMask = value != NULL ? atoi(value) : 0;
+    }
+    return (unsigned)sMask;
+}
 #ifdef ENABLE_DIORAMA
 /* gDioramaSceneHideBg (diorama/battle_fx.h): BG layers left out of this frame
  * as if DISPCNT had them off - an animation's effect picture that Battle FX
  * redraws in HD. 0 outside its animations. A layer is drawn when DISPCNT has
  * it on and neither the native UI nor Battle FX leaves it out. */
 extern uint8_t gDioramaSceneHideBg;
-#define isbgEnabled(x) ((((REG_DISPCNT >> 8) & 0xF) & ~gPlatformPictureHideBgMask & ~gDioramaSceneHideBg) & (1 << x))
+#define isbgEnabled(x) ((((REG_DISPCNT >> 8) & 0xF) & ~gPlatformPictureHideBgMask & ~gDioramaSceneHideBg & ~DebugHideBg()) & (1 << x))
 #else
-#define isbgEnabled(x) ((((REG_DISPCNT >> 8) & 0xF) & ~gPlatformPictureHideBgMask) & (1 << x))
+#define isbgEnabled(x) ((((REG_DISPCNT >> 8) & 0xF) & ~gPlatformPictureHideBgMask & ~DebugHideBg()) & (1 << x))
 #endif
 
 #define WINMASK_BG0    (1 << 0)
@@ -831,8 +846,11 @@ static void WideLine(const uint16_t *winMask, bool windowsEnabled, uint16_t vcou
     unsigned int rightMask = windowsEnabled ? winMask[DISPLAY_WIDTH - 1] : 0xFF;
     uint16_t *row = &gDioramaSceneWide[(sWideTop + vcount) * sWideStride];
 
-    WideRun(row, -sWideLeft, 0, vcount, leftMask, NULL, backdrop);
-    WideRun(row + sWideLeft + DISPLAY_WIDTH, DISPLAY_WIDTH, DISPLAY_WIDTH + sWideRight, vcount,
+    // The rows the GBA's text box covered (112 and below) show the rows above, mirrored, as the picture's own do (DrawLine).
+    int srcLine = vcount >= 112 ? 2 * 112 - 1 - (int)vcount : (int)vcount;
+
+    WideRun(row, -sWideLeft, 0, srcLine, leftMask, NULL, backdrop);
+    WideRun(row + sWideLeft + DISPLAY_WIDTH, DISPLAY_WIDTH, DISPLAY_WIDTH + sWideRight, srcLine,
             rightMask, NULL, backdrop);
     if (vcount == 0)
         for (int y = -sWideTop; y < 0; y++)
@@ -1408,7 +1426,19 @@ static void DrawScanline(uint16_t *pixels, uint16_t vcount)
                 uint16_t bghoffs = *(uint16_t *)(REG_ADDR_BG0HOFS + bgnum * 4);
                 uint16_t bgvoffs = *(uint16_t *)(REG_ADDR_BG0VOFS + bgnum * 4);
                 
-                RenderBGScanline(bgnum, scanline.bgcnts[bgnum], bghoffs, bgvoffs, vcount, scanline.layers[bgnum]);
+                {
+                    int bgLine = vcount;
+#ifdef ENABLE_DIORAMA
+                    /* A move's background in the 3D battle (Update 27): the picture's rows 112-160 are what the opaque text box
+                     * covered on the GBA, so a move's background owes them nothing - its map is empty there (black), or holds
+                     * what was hidden - yet the window shows them round the native interface's small strip: a black block
+                     * over the player's Pokemon in about forty animations. They show the rows above, mirrored at row 112
+                     * (the wide picture's way of going on past an edge, here at the text box's top). */
+                    if (bgnum == 3 && sWideWanted && vcount >= 112)
+                        bgLine = 2 * 112 - 1 - vcount;
+#endif
+                    RenderBGScanline(bgnum, scanline.bgcnts[bgnum], bghoffs, bgvoffs, bgLine, scanline.layers[bgnum]);
+                }
 #ifdef ENABLE_BATTLE_SPRITES
                 // A move's copy of a battler on this layer: its library sprite instead.
                 if (gBattleSpriteBgCopies[bgnum].view != NULL)

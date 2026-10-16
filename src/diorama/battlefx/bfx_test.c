@@ -101,6 +101,7 @@ static struct
     u8 savedAttacker, savedTarget; /* gBattlerAttacker / gBattlerTarget before a move's animation (Launch) */
     bool restoreBattlers;
     bool autoShots;
+    bool noPlan;            /* the animation being played has no Battle FX plan (a move past the core): the game's own */
     int shots[MAX_SHOTS], shotCount;
     struct LinkBattleAnim disable;
     /* the animation playing */
@@ -298,7 +299,7 @@ static void Init(void)
     t.viewHd = !(view && strcmp(view, "gba") == 0);
     moves = SDL_getenv("PKMN_BFX_TEST_MOVES");
     snprintf(t.animsSpec, sizeof(t.animsSpec), "%s", SDL_getenv("PKMN_BFX_TEST_ANIMS") ? SDL_getenv("PKMN_BFX_TEST_ANIMS") : "");
-    if ((moves == NULL || moves[0] == '\0') && t.animsSpec[0] == '\0')
+    if ((moves == NULL || moves[0] == '\0') && t.animsSpec[0] == '\0' && SDL_getenv("PKMN_BFX_TEST_MOVE_NUMS") == NULL)
     {
         t.state = TEST_OFF;
         return;
@@ -404,6 +405,22 @@ static bool BuildList(void)
             }
             if (!found)
                 SDL_Log("Battle FX test: %s is not in the core's data", tok);
+        }
+    }
+    /* PKMN_BFX_TEST_MOVE_NUMS=n,n,...: moves by number, whether or not the core has them (a move past the package's 621
+     * plays as the game's own animation: the HD layer refuses it) */
+    if (SDL_getenv("PKMN_BFX_TEST_MOVE_NUMS") != NULL)
+    {
+        snprintf(buf, sizeof(buf), "%s", SDL_getenv("PKMN_BFX_TEST_MOVE_NUMS"));
+        for (tok = strtok(buf, ","); tok && t.count < MAX_LIST; tok = strtok(NULL, ","))
+        {
+            int n = atoi(tok);
+
+            if (n > 0 && n < MOVES_COUNT)
+            {
+                t.types[t.count] = 0;
+                t.list[t.count++] = (u16)n;
+            }
         }
     }
     if (t.animsSpec[0])
@@ -832,7 +849,10 @@ bool BattleFxTest_OnActionMenu(void)
                 t.host = BattleFx_TestHost();
             {
                 const char *id = TypeName(t.host, t.type, t.move);
-                snprintf(t.name, sizeof(t.name), "%s", id ? id : "?");
+                if (id == NULL && t.type == 0)
+                    snprintf(t.name, sizeof(t.name), "MOVEN_%u", (unsigned)t.move); /* a move past the core: PKMN_BFX_TEST_MOVE_NUMS */
+                else
+                    snprintf(t.name, sizeof(t.name), "%s", id ? id : "?");
             }
             if (t.type == 0 && t.turn == 0 && t.host != NULL)
             {
@@ -882,6 +902,7 @@ bool BattleFxTest_OnActionMenu(void)
         /* a controller animation's replay begins at the end of this frame (bfx_game.c) */
         t.serial = t.type >= TYPE_CONTROLLER ? info.serial + 1 : info.serial;
         total = info.plannedFrames;
+        t.noPlan = t.type == 0 && total <= 0;
         /* captures wanted */
         t.wantCount = 0;
         if (t.autoShots && total > 0)
@@ -889,6 +910,13 @@ bool BattleFxTest_OnActionMenu(void)
             t.want[t.wantCount++] = total / 4 > 0 ? total / 4 : 1;
             t.want[t.wantCount++] = total / 2 > 0 ? total / 2 : 1;
             t.want[t.wantCount++] = total * 3 / 4 > 0 ? total * 3 / 4 : 1;
+        }
+        else if (t.autoShots)
+        {
+            /* no plan (a move past the core): the game's own animation, at fixed frames */
+            t.want[t.wantCount++] = 20;
+            t.want[t.wantCount++] = 50;
+            t.want[t.wantCount++] = 90;
         }
         else
             for (int i = 0; i < t.shotCount; i++)
@@ -1186,6 +1214,17 @@ void BattleFxTest_AfterDraw(uint32_t serial, int frame, bool showing, int outW, 
             t.presentMs[t.presentCount++] = (float)((now - t.lastPresent) * 1000.0 / SDL_GetPerformanceFrequency());
         t.lastPresent = now;
         SDL_AtomicUnlock(&t.presentLock);
+    }
+    if (t.noPlan && t.state == TEST_RUN)
+    {
+        /* no HD frame is ever shown for it: the captures follow the game's own frame count */
+        for (int i = 0; i < t.wantCount; i++)
+            if (!t.written[i] && t.frames >= t.want[i])
+            {
+                Capture(t.shotNames[i], outW, outH);
+                t.written[i] = true;
+            }
+        return;
     }
     if (!showing || (int)serial != SDL_AtomicGet(&t.wantSerial))
         return;

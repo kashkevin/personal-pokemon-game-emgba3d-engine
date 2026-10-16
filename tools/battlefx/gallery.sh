@@ -6,7 +6,9 @@
 #
 #   OUT     a new folder for the run (the binary and its battlefx data folder are copied into it first, so a
 #           rebuild during the run cannot swap them; crash.<n>.log addresses symbolise against that copy)
-#   SAVE    a save to start from (copied; the file itself is never written)
+#   SAVE    a save to start from (copied; the file itself is never written); "-": no save, the debug field scene
+#           (PKMN_DEBUG_SCENE=field, a fresh game's field with a Level 30 Mudkip: src/platform/debug_scene.c) and the
+#           autopilot's keys - what the cloud runs of Update 27 used
 #   BATTLE  PKMN_TEST_BATTLE: wild:SPECIES:LEVEL, wild2:A:LA:B:LB, trainer:ID, double:ID, two:A:B, ...
 #   MOVES   PKMN_BFX_TEST_MOVES: all, MOVE_A,MOVE_B,... or "" (with PKMN_BFX_TEST_ANIMS=..., or a fought battle:
 #           PKMN_TEST_FIGHT=SECONDS PKMN_TEST_STRONG=1 PKMN_BFX_TEST_REAL_PARITY=1)
@@ -35,12 +37,19 @@ cd "$OUT" || exit 1
 FROM=""
 seg=0
 while :; do
-  cp "$SAVE" "$OUT/test.sav"; chmod u+w "$OUT/test.sav"
+  if [ "$SAVE" = "-" ]; then
+    SAVEARGS=""
+    SCENE="PKMN_DEBUG_SCENE=field PKMN_DEBUG_HERE=0,16,12,14"
+  else
+    cp "$SAVE" "$OUT/test.sav"; chmod u+w "$OUT/test.sav"
+    SAVEARGS="--save test.sav"
+    SCENE="PKMN_NOSCENE=1"
+  fi
   rm -f "$OUT/crash.log"
-  env SDL_AUDIODRIVER=dummy PKMN_TEST_BATTLE="$BATTLE" PKMN_TEST_AUTOPILOT=1 PKMN_TEST_BATTLE_DELAY=100 PKMN_TEST_FREEZE_FIELD=1 \
+  env $SCENE SDL_AUDIODRIVER=dummy PKMN_TEST_BATTLE="$BATTLE" PKMN_TEST_AUTOPILOT=1 PKMN_TEST_BATTLE_DELAY=100 PKMN_TEST_FREEZE_FIELD=1 \
     PKMN_DIORAMA_LOG=1 PKMN_BFX_TEST_MOVES="$MOVES" PKMN_BFX_TEST_OUT="$OUT/out" PKMN_BFX_TEST_EXIT=1 \
     PKMN_BATTLEFX_LOG=1 PKMN_BATTLEFX_DIR="$OUT/battlefx" PKMN_BFX_TEST_FROM="$FROM" \
-    "$@" timeout "${TIMEOUT:-7200}" "$OUT/game.bin" --save test.sav > "$OUT/game.$seg.log" 2>&1
+    "$@" timeout "${TIMEOUT:-7200}" "$OUT/game.bin" $SAVEARGS > "$OUT/game.$seg.log" 2>&1
   rc=$?
   echo "$rc" > "$OUT/exit.$seg"
   # the battle asked for, not another (a wild Pokemon of the field's walking into the player first)
