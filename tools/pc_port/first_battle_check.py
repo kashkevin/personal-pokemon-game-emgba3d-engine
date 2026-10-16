@@ -28,7 +28,9 @@ import tempfile
 from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SHOT_FRAMES = (1350, 1650, 1800)  # inside the battle (it runs from about frame 130 to 2540 on this script)
+SHOT_FRAMES = (1350, 1650, 1800)  # GAME frames (PKMN_DEBUG_GLSHOTS_GAME=1), inside the battle: it runs from about frame 130 to 2540 on this
+                                  # script. Presented frames were used before (Update 28): a machine that presents faster or slower
+                                  # than the one the numbers came from put the pictures at the starter screen, or after the battle.
 LIT = 24  # a channel above this is not black
 MIN_LIT = 0.6  # of the sampled stretch
 
@@ -57,7 +59,7 @@ def main():
         return 2
     work = tempfile.mkdtemp(prefix="first-battle-check-")
     env = dict(os.environ, PKMN_DEBUG_SCENE="field", PKMN_DEBUG_HERE="0,16,7,15", PKMN_DEBUG_BATTLE="bag:0:0", PKMN_DEBUG_BATTLE_AT="100",
-               PKMN_DEBUG_KEYS=keys(), PKMN_DEBUG_GLSHOTS=",".join(str(f) for f in SHOT_FRAMES), SDL_AUDIODRIVER="dummy")
+               PKMN_DEBUG_KEYS=keys(), PKMN_DEBUG_GLSHOTS=",".join(str(f) for f in SHOT_FRAMES), PKMN_DEBUG_GLSHOTS_GAME="1", SDL_AUDIODRIVER="dummy")
     xvfb = shutil.which("xvfb-run")
     cmd = ([xvfb, "-a", "-s", "-screen 0 1280x800x24"] if xvfb and not os.environ.get("DISPLAY") else []) + [
         "timeout", "-k", "3", str(args.timeout), os.path.abspath(args.binary)]

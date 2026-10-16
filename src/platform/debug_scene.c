@@ -569,6 +569,23 @@ bool DebugScene_WantGlShot(void)
                 break;
         }
     }
+    if (SDL_getenv("PKMN_DEBUG_GLSHOTS_GAME") != NULL)
+    {
+        // PKMN_DEBUG_GLSHOTS_GAME=1: the numbers are GAME frames (the frames PKMN_DEBUG_KEYS counts), not presented frames: a
+        // check's pictures then fall at the same point of the script on a fast machine and a slow one (a software display
+        // presents far fewer frames per game frame than a GPU). The first presented frame at or after each number is taken.
+        static unsigned sTaken, sAfterLast;
+
+        for (unsigned i = 0; i < sGlShotCount; i++)
+            if (!(sTaken & (1u << i)) && sKeyFrame >= sGlShots[i])
+            {
+                sTaken |= 1u << i;
+                return true;
+            }
+        if (sGlShotCount > 0 && sTaken == (1u << sGlShotCount) - 1 && ++sAfterLast > 2)
+            exit(0);
+        return false;
+    }
     sGlFrame++;
     if (sGlShotCount > 0 && sGlFrame == sGlShots[sGlShotCount - 1] + 2)
         exit(0);
