@@ -664,4 +664,9 @@ gSpecials::
 	def_special MultiplayerCoop_ExpForgetResult
 	def_special MultiplayerCoop_ExpSkipMove
 	def_special MultiplayerCoop_ExpEvolve, waitstate=1
+	@ Game Corner coins above 65,535 (Update 29): the amount travels in VAR_0x8004 (high) and VAR_0x8005 (low).
+	def_special CoinWallet_Has
+	def_special CoinWallet_Spend
+	def_special CoinWallet_HasRoom
+	def_special CoinWallet_Give
 .endif

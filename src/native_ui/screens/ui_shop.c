@@ -247,12 +247,25 @@ static struct UiRamp Mart(void)
     return UiRampOf(MART_BASE, 0.42, 0.25, 0.62);
 }
 
+/* an amount of the shop's currency: yen, or Game Corner coins in the Mega Stone dealer's shop (Update 29) */
+static void Cash(u8 *dst, int size, u32 amount)
+{
+    if (!sS.coins)
+    {
+        UiItems_Money(dst, size, amount);
+        return;
+    }
+    dst[0] = EOS;
+    UiText_AppendNumber(dst, size, (long)amount, 1, true);
+    UiText_AppendAscii(dst, size, " COINS");
+}
+
 /* the price an item row shows: the engine's price, or SOLD OUT */
 static const u8 *PriceText(int i, u8 *buf, int size)
 {
     if (sS.soldOut[i])
         return gText_SoldOut;
-    UiItems_Money(buf, size, sS.prices[i]);
+    Cash(buf, size, sS.prices[i]);
     return buf;
 }
 
@@ -537,7 +550,7 @@ static void Windows(int t, const struct UiRamp *m)
         q[1] = EOS;
         UiText_AppendNumber(q, sizeof(q), sS.quantity, 2, false);
         UiG_Text(qx + 9, qy + 12, q);
-        UiItems_Money(total, sizeof(total), sS.totalCost);
+        Cash(total, sizeof(total), sS.totalCost);
         UiItems_PriceTag(qx + qw - 92, qy + 15, 84, total, m->lo, false);
         UiG_Hit(HIT_QTY_UP, 0, qx + 4, qy + 1, 30, 14);
         UiG_Hit(HIT_QTY_DOWN, 0, qx + 4, qy + 30, 30, 14);
@@ -563,8 +576,8 @@ static void Draw(int t)
     Background(&m);
     UiW_TitleTab(0, 8, sS.decorations ? "DECORATIONS" : "POK" UI_CAPS_E_ACUTE " MART", &m, 0, NULL);
     /* left column: money, how many in the Bag, the counter, the description */
-    UiItems_Money(money, sizeof(money), sS.money);
-    UiItems_MoneyBox(8, 34, 148, "MONEY", money, m.ink);
+    Cash(money, sizeof(money), sS.money);
+    UiItems_MoneyBox(8, 34, 148, sS.coins ? "COINS" : "MONEY", money, m.ink);
     if (item != ITEM_NONE)
     {
         inBag[0] = CHAR_MULT_SIGN;

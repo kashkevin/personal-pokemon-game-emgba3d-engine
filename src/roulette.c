@@ -31,6 +31,13 @@
 #include "constants/rgb.h"
 #include "constants/roulette.h"
 #include "constants/songs.h"
+#ifdef PORTABLE
+// Update 29: tables take a stake from the 32-bit wallet (include/platform/coin_wallet.h)
+#include "platform/coin_wallet.h"
+#define GetCoins CoinWallet_TableGet
+#define SetCoins CoinWallet_TableSet
+#endif
+#line 34 // gba-line
 
 #define BALLS_PER_ROUND 6
 
@@ -3410,6 +3417,10 @@ void PlayRoulette(void)
 {
     u8 taskId;
     LockPlayerFieldControls();
+#ifdef PORTABLE
+    CoinWallet_BeginTable();
+#endif
+#line 3413 // gba-line
     ShowCoinsWindow(GetCoins(), 1, 1);
     taskId = CreateTask(Task_PrintRouletteEntryMsg, 0);
     gTasks[taskId].tCoins = GetCoins();

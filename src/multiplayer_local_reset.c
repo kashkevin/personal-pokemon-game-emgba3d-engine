@@ -28,7 +28,13 @@ struct LocalResetGuard {
     struct Pokemon party[PARTY_SIZE];
     struct Bag bag;
     u32 money, storageHash, daycareHash, ownershipHash;
+#ifdef PORTABLE
+    u32 coins;    // the wallet is 32 bits (Update 29)
+#else
+#line 31 // gba-line
     u16 coins;
+#endif
+#line 32 // gba-line
     u8 partyCount;
     u8 dexCaught[NUM_DEX_FLAG_BYTES];
 };

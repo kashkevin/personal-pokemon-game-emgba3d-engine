@@ -69,6 +69,10 @@
 #include "constants/mystery_gift.h"
 #include "constants/slot_machine.h"
 #include "constants/songs.h"
+#ifdef PORTABLE
+#include "coins.h"
+#endif
+#line 72 // gba-line
 #include "constants/moves.h"
 #include "constants/party_menu.h"
 #include "constants/battle_frontier.h"
@@ -5761,8 +5765,15 @@ u16 StickerManGetBragFlags(void)
 
 bool8 CheckAddCoins(void)
 {
+#ifdef PORTABLE
+    if (GetCoins() + gSpecialVar_0x8006 > MAX_COINS_WALLET)
+        return FALSE;
+#else
+#line 5764 // gba-line
     if (gSpecialVar_Result + gSpecialVar_0x8006 > 9999)
         return FALSE;
+#endif
+#line 5766 // gba-line
     else
         return TRUE;
 }

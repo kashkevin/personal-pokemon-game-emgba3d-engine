@@ -42,6 +42,11 @@
 #include "script_pokemon_util.h"
 #include "event_object_movement.h"
 #include "m4a.h"
+#include "constants/global.h"
+#include "item.h"
+#include "money.h"
+#include "coins.h"
+#include "constants/items.h"
 #include <math.h>
 #include "field_screen_effect.h"
 #include "field_player_avatar.h"
@@ -308,13 +313,67 @@ static void AsciiOf(const u8 *in, char *out, size_t size)
 extern const u8 *ScriptContext_DebugPosition(int *mode, int *status);
 extern bool32 TextPrinter_DebugState(u8 windowId, int *state, int *delay);
 
+// PKMN_DEBUG_SETUP="coins=130000,money=1000000,case=1,ring=0,charm=0,stone=ITEM" (Update 29): the player's wallet and bag when the
+// script starts. The line "econ F: coins C money M ring R charm H stones N" is logged whenever any of them changes.
+static void EconSetup(void)
+{
+    const char *value = SDL_getenv("PKMN_DEBUG_SETUP");
+    char copy[200], *token, *save = NULL;
+
+    if (value == NULL)
+        return;
+    gSaveBlock2Ptr->optionsTextSpeed = OPTIONS_TEXT_SPEED_FAST;      // the check presses A on a timer: fast text
+    SDL_strlcpy(copy, value, sizeof(copy));
+    for (token = strtok_r(copy, ",", &save); token != NULL; token = strtok_r(NULL, ",", &save))
+    {
+        unsigned amount;
+
+        if (sscanf(token, "coins=%u", &amount) == 1)
+            SetCoins(amount);
+        else if (sscanf(token, "money=%u", &amount) == 1)
+            SetMoney(&gSaveBlock1Ptr->money, amount);
+        else if (sscanf(token, "case=%u", &amount) == 1 && amount)
+            AddBagItem(ITEM_COIN_CASE, 1);
+        else if (sscanf(token, "ring=%u", &amount) == 1 && amount)
+            AddBagItem(ITEM_MEGA_RING, 1);
+        else if (sscanf(token, "charm=%u", &amount) == 1 && amount)
+            AddBagItem(ITEM_SHINY_CHARM, 1);
+    }
+}
+
+static void EconLog(void)
+{
+    static struct { u32 coins, money; int ring, charm, stones; bool init; } prev;
+    u32 coins = GetCoins(), money = GetMoney(&gSaveBlock1Ptr->money);
+    int ring = CheckBagHasItem(ITEM_MEGA_RING, 1), charm = CheckBagHasItem(ITEM_SHINY_CHARM, 1), stones = 0;
+
+    {
+        extern const u16 MauvilleCity_Mart_Pokemart_MegaStones[];
+
+        for (int i = 0; MauvilleCity_Mart_Pokemart_MegaStones[i] != ITEM_NONE; i++)
+            stones += CountTotalItemQuantityInBag(MauvilleCity_Mart_Pokemart_MegaStones[i]);
+    }
+    if (!prev.init || coins != prev.coins || money != prev.money || ring != prev.ring || charm != prev.charm || stones != prev.stones)
+    {
+        SDL_Log("econ %u: coins %u money %u ring %d charm %d stones %d", sKeyFrame, coins, money, ring, charm, stones);
+        prev.coins = coins; prev.money = money; prev.ring = ring; prev.charm = charm; prev.stones = stones; prev.init = true;
+    }
+}
+
 static void DialogTick(void)
 {
     extern const u8 Route101_EventScript_StartBirchRescue[], Route101_EventScript_Boy[], Route101_EventScript_Youngster[],
         Route101_EventScript_RouteSign[], Route101_EventScript_BirchsBag[];
+    extern const u8 MauvilleCity_GameCorner_EventScript_ShinyCharmClerk[], MauvilleCity_Mart_EventScript_MegaStoneDealer[],
+        MauvilleCity_GameCorner_EventScript_CoinsClerk[], MauvilleCity_GameCorner_EventScript_Buy5000Coins[],
+        MauvilleCity_GameCorner_EventScript_Buy500Coins[];
     static const struct { const char *name; const u8 *script; } scripts[] = {
         {"rescue", Route101_EventScript_StartBirchRescue}, {"boy", Route101_EventScript_Boy}, {"youngster", Route101_EventScript_Youngster},
         {"sign", Route101_EventScript_RouteSign}, {"bag", Route101_EventScript_BirchsBag},
+        // Update 29 (tools/pc_port/economy_check.py): the Game Corner's prize counter, the Mega Stone dealer and the coin counter
+        {"prizes", MauvilleCity_GameCorner_EventScript_ShinyCharmClerk}, {"dealer", MauvilleCity_Mart_EventScript_MegaStoneDealer},
+        {"coinclerk", MauvilleCity_GameCorner_EventScript_CoinsClerk}, {"pack5000", MauvilleCity_GameCorner_EventScript_Buy5000Coins},
+        {"pack500", MauvilleCity_GameCorner_EventScript_Buy500Coins},
     };
     static struct { const u8 *pos; int mode, status, state, delay; unsigned printed; bool waiting, printer; char page[200]; u16 held, newk; } prev;
     const char *value;
@@ -332,7 +391,7 @@ static void DialogTick(void)
 
         sDialog.read = true;
         sDialog.which = -1;
-        if ((value = SDL_getenv("PKMN_DEBUG_DIALOG")) != NULL && sscanf(value, "%15[a-z]:%d", name, &at) >= 1)
+        if ((value = SDL_getenv("PKMN_DEBUG_DIALOG")) != NULL && sscanf(value, "%15[a-z0-9]:%d", name, &at) >= 1)
             for (unsigned i = 0; i < sizeof(scripts) / sizeof(scripts[0]); i++)
                 if (strcmp(name, scripts[i].name) == 0)
                     sDialog.which = (int)i;
@@ -352,9 +411,11 @@ static void DialogTick(void)
         if (++settled < 90 || (sDialog.at != 0 && sKeyFrame < sDialog.at))
             return;
         sDialog.started = true;
+        EconSetup();
         SDL_Log("dialog %u: START script %s", sKeyFrame, scripts[sDialog.which].name);
         ScriptContext_SetupScript(scripts[sDialog.which].script);
     }
+    EconLog();
     pos = ScriptContext_DebugPosition(&mode, &status);
     printer = TextPrinter_DebugState(0, &state, &delay) != FALSE;
     waiting = printer && (state == 1 || state == 2 || state == 3);   // RENDER_STATE_WAIT, CLEAR, SCROLL_START

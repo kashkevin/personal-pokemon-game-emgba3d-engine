@@ -916,3 +916,217 @@ int NativeSelfTest_Shiny(void)
     printf("selftest-shiny: %d checks, %d failed\n", sLegChecks, sLegFailures);
     return sLegFailures ? 1 : 0;
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// --selftest-coins (Update 29): the 32-bit Coin Case, the table stake, the Mega Stone price list, the coin shop's payment and
+// the script specials the Game Corner clerks use.
+// ---------------------------------------------------------------------------------------------------------------------
+#include "coins.h"
+#include "money.h"
+#include "constants/coins.h"
+#include "constants/multiplayer_balance.h"
+#include "platform/coin_wallet.h"
+#include "platform/coin_shop.h"
+#include "mp_mega_prices.h"
+#include "battle_util.h"
+extern bool32 DoesSpeciesUseHoldItemToChangeForm(enum Species species, enum Item heldItemId);
+
+extern u16 gSpecialVar_0x8004;
+extern u16 gSpecialVar_0x8005;
+
+int NativeSelfTest_Coins(void)
+{
+    static const u32 sAmounts[] = {0, 1, 50, 500, 5000, 9998, 9999, 10000, 25000, 30000, 32767, 32768, 65535, 65536, 65537, 99999, 100000,
+                                   123456, 500000, 999998, 999999};
+
+    InitHeap(gHeap, HEAP_SIZE);
+    SetSaveBlocksPointers(0);
+    memset(gSaveBlock1Ptr, 0, sizeof(*gSaveBlock1Ptr));
+    memset(gSaveBlock2Ptr, 0, sizeof(*gSaveBlock2Ptr));
+    SetBagItemsPointers();
+    ClearBag();
+    printf("selftest-coins: Update 29 coin economy\n");
+
+    // 1. the wallet
+    {
+        bool32 roundTrip = TRUE, keyed = TRUE, capped;
+        u32 key;
+
+        gSaveBlock2Ptr->encryptionKey = 0xA5C3F00D;
+        for (u32 i = 0; i < ARRAY_COUNT(sAmounts); i++)
+        {
+            SetCoins(sAmounts[i]);
+            if (GetCoins() != sAmounts[i])
+                roundTrip = FALSE;
+        }
+        ExpectLeg("the wallet round-trips every amount from 0 to 999,999 (the 16-bit edges included)", roundTrip);
+        for (u32 i = 0; i < ARRAY_COUNT(sAmounts); i++)
+        {
+            // the game re-encrypts the low half when the save key changes (load_save.c); the total must not move
+            u16 *low = &gSaveBlock1Ptr->coins;
+
+            SetCoins(sAmounts[i]);
+            key = gSaveBlock2Ptr->encryptionKey;
+            *low ^= key;
+            *low ^= 0x1234BEEF;
+            gSaveBlock2Ptr->encryptionKey = 0x1234BEEF;
+            if (GetCoins() != sAmounts[i])
+                keyed = FALSE;
+            gSaveBlock2Ptr->encryptionKey = key;
+        }
+        ExpectLeg("a new save encryption key keeps every balance (the high half is plain, the low half re-encrypted)", keyed);
+        SetCoins(MAX_COINS_WALLET + 5000);
+        capped = GetCoins() == MAX_COINS_WALLET;
+        ExpectLeg("the wallet caps at 999,999", capped);
+        SetCoins(999990);
+        ExpectLeg("AddCoins fills the wallet to its cap and stops", AddCoins(50) && GetCoins() == MAX_COINS_WALLET && !AddCoins(1));
+        SetCoins(100);
+        ExpectLeg("RemoveCoins refuses more than the wallet holds, and takes exactly what it is asked",
+                  !RemoveCoins(101) && GetCoins() == 100 && RemoveCoins(100) && GetCoins() == 0);
+        // a save from before this update: the old u16 balance, the two spare bytes zero
+        gSaveBlock2Ptr->encryptionKey = 0x00C0FFEE;
+        memset(gSaveBlock1Ptr->unused_9C2, 0, sizeof(gSaveBlock1Ptr->unused_9C2));
+        gSaveBlock1Ptr->coins = (u16)(7777 ^ gSaveBlock2Ptr->encryptionKey);
+        ExpectLeg("a save from before the update keeps its balance (7,777 stays 7,777)", GetCoins() == 7777);
+        SetCoins(65535);
+        ExpectLeg("the old u16 field alone cannot hold 100,000 (the high half carries it)", (SetCoins(100000), GetCoins() == 100000
+                  && (u16)(gSaveBlock1Ptr->coins ^ gSaveBlock2Ptr->encryptionKey) == 34464));
+    }
+
+    // 2. the Slot Machine / Roulette stake
+    {
+        bool32 stakes = CoinWallet_StakeFor(0) == 0 && CoinWallet_StakeFor(100) == 100 && CoinWallet_StakeFor(9998) == 9998
+                     && CoinWallet_StakeFor(9999) == COIN_TABLE_STAKE && CoinWallet_StakeFor(10000) == COIN_TABLE_STAKE
+                     && CoinWallet_StakeFor(999999) == COIN_TABLE_STAKE;
+
+        ExpectLeg("a wallet below 9,999 is staked whole (as in the vanilla game); at 9,999 and above the table gets 5,000", stakes);
+        SetCoins(50000);
+        ExpectLeg("a table takes 5,000 of 50,000 and remembers 45,000", CoinWallet_BeginTable() == 5000 && CoinWallet_Reserve() == 45000
+                  && CoinWallet_TableGet() == 5000);
+        CoinWallet_TableSet(8200);
+        ExpectLeg("leaving with 8,200 on the table gives a wallet of 53,200", GetCoins() == 53200 && CoinWallet_TableGet() == 8200);
+        CoinWallet_TableSet(0);
+        ExpectLeg("leaving with nothing keeps the reserve", GetCoins() == 45000);
+        SetCoins(7000);
+        ExpectLeg("a small wallet is staked whole and comes back whole", CoinWallet_BeginTable() == 7000 && CoinWallet_Reserve() == 0
+                  && (CoinWallet_TableSet(7400), GetCoins() == 7400));
+        SetCoins(999999);
+        CoinWallet_BeginTable();
+        CoinWallet_TableSet(9999);
+        ExpectLeg("a full wallet cannot overflow", GetCoins() == MAX_COINS_WALLET);
+    }
+
+    // 3. the price list
+    {
+        extern const u16 MauvilleCity_Mart_Pokemart_MegaStones[];
+        u32 tiers[8] = {0}, listed = 0;
+        bool32 allInList = TRUE, pricesOk = TRUE, unique = TRUE, held = TRUE;
+        static const u32 sTierValues[] = {30000, 35000, 40000, 60000, 80000, 90000, 100000};
+
+        for (u32 i = 0; MauvilleCity_Mart_Pokemart_MegaStones[i] != ITEM_NONE; i++)
+        {
+            u16 item = MauvilleCity_Mart_Pokemart_MegaStones[i];
+            u32 coins = CoinShop_StonePrice(item), t;
+
+            listed++;
+            if (coins == 0)
+                allInList = FALSE;
+            for (t = 0; t < ARRAY_COUNT(sTierValues) && sTierValues[t] != coins; t++)
+                ;
+            if (t == ARRAY_COUNT(sTierValues))
+                pricesOk = FALSE;
+            else
+                tiers[t]++;
+            if (GetItemHoldEffect(item) != HOLD_EFFECT_MEGA_STONE)
+                held = FALSE;
+            for (u32 j = 0; j < i; j++)
+                if (MauvilleCity_Mart_Pokemart_MegaStones[j] == item)
+                    unique = FALSE;
+        }
+        printf("Mega Stones for sale: %u; by price:", listed);
+        for (u32 t = 0; t < ARRAY_COUNT(sTierValues); t++)
+            printf(" %u x %u coins;", tiers[t], sTierValues[t]);
+        printf("\n");
+        ExpectLeg("every Mega Stone the dealer sells has a coin price, and only one", listed == MP_MEGA_STONE_COUNT && allInList && unique);
+        ExpectLeg("every price is one of the seven tiers: 30,000 / 35,000 / 40,000 (common), 60,000 / 80,000 (strong), 90,000 / 100,000", pricesOk);
+        ExpectLeg("the cheapest stone costs 30,000 and the dearest 100,000", MP_MEGA_STONE_PRICE_MIN == 30000 && MP_MEGA_STONE_PRICE_MAX == 100000);
+        {
+            // Mega flow: every stone sold is the one a Pokemon of the game holds to Mega Evolve (the form change table), so a
+            // bought stone, held by its Pokemon with the Mega Ring in the bag, is what CanMegaEvolve looks for
+            u32 withUser = 0;
+
+            for (u32 i = 0; MauvilleCity_Mart_Pokemart_MegaStones[i] != ITEM_NONE; i++)
+            {
+                bool32 found = FALSE;
+
+                for (u32 species = 1; species < NUM_SPECIES && !found; species++)
+                    if (IsSpeciesEnabled(species) && DoesSpeciesUseHoldItemToChangeForm(species, MauvilleCity_Mart_Pokemart_MegaStones[i]))
+                        found = TRUE;
+                withUser += found;
+            }
+            ExpectLeg("every Mega Stone sold has a Pokemon that Mega Evolves with it", withUser == listed);
+        }
+        ExpectLeg("every priced item is a real Mega Stone (hold effect)", held);
+        ExpectLeg("Mewtwonite X and Y cost 100,000 coins; Venusaurite (a standard Mega) 60,000; Beedrillite (the lightest) 30,000",
+                  CoinShop_StonePrice(ITEM_MEWTWONITE_X) == 100000 && CoinShop_StonePrice(ITEM_MEWTWONITE_Y) == 100000
+                  && CoinShop_StonePrice(ITEM_VENUSAURITE) == 60000 && CoinShop_StonePrice(ITEM_BEEDRILLITE) == 30000);
+        ExpectLeg("a stone that is not on the list has no price", CoinShop_StonePrice(ITEM_POTION) == 0);
+        ExpectLeg("the Mega Ring costs 25,000 coins and the Shiny Charm 100,000", MP_MEGA_RING_COINS == 25000 && MP_SHINY_CHARM_COINS == 100000);
+        ExpectLeg("the large coin pack is the same 20 yen a coin as the others (5,000 for 100,000)",
+                  MP_COINS_PACK_LARGE * 20 == MP_COINS_PACK_LARGE_YEN);
+    }
+
+    // 4. the dealer's coin shop pays in coins, every other shop in yen
+    {
+        u32 money = 1000000, coins = 90000;
+
+        SetMoney(&gSaveBlock1Ptr->money, money);
+        SetCoins(coins);
+        gCoinShopActive = FALSE;
+        ExpectLeg("(yen shop) the price is the item's yen price and the balance the money",
+                  CoinShop_ItemPrice(ITEM_POTION) == GetItemPrice(ITEM_POTION) && CoinShop_Balance(&gSaveBlock1Ptr->money) == money);
+        CoinShop_Pay(&gSaveBlock1Ptr->money, 300);
+        ExpectLeg("(yen shop) paying takes yen and leaves the coins", GetMoney(&gSaveBlock1Ptr->money) == money - 300 && GetCoins() == coins);
+        CoinShop_OnOpen(MauvilleCity_Mart_Pokemart_MegaStones);
+        ExpectLeg("the dealer's list switches the shop to coins", gCoinShopActive);
+        ExpectLeg("(coin shop) the price is the stone's coin price", CoinShop_ItemPrice(ITEM_GENGARITE) == CoinShop_StonePrice(ITEM_GENGARITE)
+                  && CoinShop_ItemPrice(ITEM_GENGARITE) >= 30000);
+        ExpectLeg("(coin shop) the balance is the coins; the POKeNEWS sale does not apply", CoinShop_Balance(&gSaveBlock1Ptr->money) == coins && CoinShop_SaleShift(0) == 0);
+        ExpectLeg("(coin shop) an item without a coin price is out of reach, never free", CoinShop_ItemPrice(ITEM_POTION) > 999999);
+        ExpectLeg("(coin shop) 90,000 coins can pay 80,000 and not 90,001",
+                  CoinShop_CanPay(&gSaveBlock1Ptr->money, 80000) && CoinShop_CanPay(&gSaveBlock1Ptr->money, 90000) && !CoinShop_CanPay(&gSaveBlock1Ptr->money, 90001));
+        CoinShop_Pay(&gSaveBlock1Ptr->money, 60000);
+        ExpectLeg("(coin shop) paying takes coins and leaves the money alone", GetCoins() == 30000 && GetMoney(&gSaveBlock1Ptr->money) == money - 300);
+        ExpectLeg("(coin shop) 30,000 coins cannot pay a 60,000-coin stone", !CoinShop_CanPay(&gSaveBlock1Ptr->money, 60000));
+        CoinShop_OnOpen(NULL);
+        ExpectLeg("any other shop list switches back to yen", !gCoinShopActive);
+    }
+
+    // 5. the Game Corner clerks' specials (32-bit amounts in two script variables)
+    {
+        SetCoins(130000);
+        gSpecialVar_0x8004 = MP_SHINY_CHARM_COINS >> 16;
+        gSpecialVar_0x8005 = MP_SHINY_CHARM_COINS & 0xFFFF;
+        ExpectLeg("(specials) the 100,000-coin price splits into 1 and 34,464", gSpecialVar_0x8004 == 1 && gSpecialVar_0x8005 == 34464);
+        ExpectLeg("(specials) a wallet of 130,000 has the Charm's 100,000", CoinWallet_Has() == 1);
+        ExpectLeg("(specials) paying takes exactly 100,000", CoinWallet_Spend() == 1 && GetCoins() == 30000);
+        ExpectLeg("(specials) 30,000 no longer has it, and a failed payment takes nothing", CoinWallet_Has() == 0 && CoinWallet_Spend() == 0 && GetCoins() == 30000);
+        gSpecialVar_0x8004 = MP_MEGA_RING_COINS >> 16;
+        gSpecialVar_0x8005 = MP_MEGA_RING_COINS & 0xFFFF;
+        ExpectLeg("(specials) the Mega Ring's 25,000 is within 30,000, and leaves 5,000", CoinWallet_Has() == 1 && CoinWallet_Spend() == 1 && GetCoins() == 5000);
+        SetCoins(999000);
+        gSpecialVar_0x8004 = 0;
+        gSpecialVar_0x8005 = 999;
+        ExpectLeg("(specials) room for 999 more at 999,000, none for 1,000", CoinWallet_HasRoom() == 1 && (gSpecialVar_0x8005 = 1000, CoinWallet_HasRoom() == 0));
+        gSpecialVar_0x8005 = 1000;
+        ExpectLeg("(specials) giving more than there is room for is refused whole", CoinWallet_Give() == 0 && GetCoins() == 999000);
+        gSpecialVar_0x8005 = 500;
+        ExpectLeg("(specials) giving 500 coins works", CoinWallet_Give() == 1 && GetCoins() == 999500);
+        gSpecialVar_0x8004 = 1;
+        gSpecialVar_0x8005 = 0;
+        SetCoins(0);
+        ExpectLeg("(specials) the pack of 65,536 and more is also exact (high half 1, low 0)", CoinWallet_Give() == 1 && GetCoins() == 65536);
+    }
+    printf("selftest-coins: %d checks, %d failed\n", sLegChecks, sLegFailures);
+    return sLegFailures ? 1 : 0;
+}

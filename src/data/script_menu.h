@@ -285,6 +285,10 @@ static const struct MenuAction MultichoiceList_GameCornerCoins[] =
 {
     {COMPOUND_STRING("  50 COINS    ¥1,000")},
     {COMPOUND_STRING("500 COINS  ¥10,000")},
+#ifdef PORTABLE
+    {COMPOUND_STRING("5,000 COINS ¥100,000")},
+#endif
+#line 288 // gba-line
     {gText_Exit},
 };
 

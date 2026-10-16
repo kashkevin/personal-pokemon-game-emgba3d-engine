@@ -5,6 +5,11 @@
 @ Flannery hands over the Mega Ring with the 4th badge (also on a later visit
 @ for saves that already had the badge).
 EventScript_MultiplayerGiveMegaRing::
+.ifdef PORTABLE
+	@ Update 29 (PC game): the Mega Ring is a Game Corner prize now (25,000 coins). Nothing is given here, and a ring a player
+	@ already owns stays theirs.
+	return
+.endif
 	checkitem ITEM_MEGA_RING
 	goto_if_eq VAR_RESULT, TRUE, EventScript_MultiplayerGiveMegaRingDone
 	msgbox EventScript_MultiplayerMegaRing_Text_Offer, MSGBOX_DEFAULT
@@ -20,10 +25,16 @@ MauvilleCity_Mart_EventScript_MegaStoneDealer::
 	faceplayer
 	checkitem ITEM_MEGA_RING
 	goto_if_eq VAR_RESULT, TRUE, MauvilleCity_Mart_EventScript_MegaStoneShop
+.ifdef PORTABLE
+	msgbox MauvilleCity_Mart_Text_MegaStoneNoRingCoins, MSGBOX_DEFAULT
+	release
+	end
+.else
 	goto_if_set FLAG_BADGE04_GET, MauvilleCity_Mart_EventScript_MegaStoneDealerRing
 	msgbox MauvilleCity_Mart_Text_MegaStoneNoRing, MSGBOX_DEFAULT
 	release
 	end
+.endif
 
 MauvilleCity_Mart_EventScript_MegaStoneDealerRing::
 	msgbox MauvilleCity_Mart_Text_MegaStoneFlanneryRing, MSGBOX_DEFAULT
@@ -39,7 +50,71 @@ MauvilleCity_Mart_EventScript_MegaStoneDealerEnd:
 	release
 	end
 
-@ Mauville City Game Corner: the Shiny Charm prize counter.
+@ Mauville City Game Corner: the major prize counter (Shiny Charm, and on the PC game the Mega Ring).
+.ifdef PORTABLE
+@ Update 29 (PC game). The clerk sells the MEGA RING (25,000 coins) and the SHINY CHARM (100,000 coins) for Game Corner coins. A
+@ prize the player already has is never offered again. VAR_TEMP_2 names the prize being offered (the native Game Corner screen
+@ reads it). The prices are 32-bit: they travel in VAR_0x8004 (high) and VAR_0x8005 (low) to the CoinWallet specials.
+MauvilleCity_GameCorner_EventScript_ShinyCharmClerk::
+	lock
+	faceplayer
+	setvar VAR_TEMP_2, ITEM_NONE
+	checkitem ITEM_COIN_CASE
+	goto_if_eq VAR_RESULT, FALSE, MauvilleCity_GameCorner_EventScript_ShinyCharmNoCase
+	msgbox MauvilleCity_GameCorner_Text_MajorPrizesIntro, MSGBOX_DEFAULT
+	showcoinsbox 0, 0
+	checkitem ITEM_MEGA_RING
+	goto_if_eq VAR_RESULT, TRUE, MauvilleCity_GameCorner_EventScript_CharmOffer
+	setvar VAR_TEMP_2, ITEM_MEGA_RING
+	msgbox MauvilleCity_GameCorner_Text_MegaRingConfirm, MSGBOX_YESNO
+	goto_if_eq VAR_RESULT, NO, MauvilleCity_GameCorner_EventScript_CharmOffer
+	setvar VAR_0x8004, (MP_MEGA_RING_COINS >> 16)
+	setvar VAR_0x8005, (MP_MEGA_RING_COINS & 0xFFFF)
+	specialvar VAR_RESULT, CoinWallet_Has
+	goto_if_eq VAR_RESULT, FALSE, MauvilleCity_GameCorner_EventScript_MegaRingNotEnough
+	checkitemspace ITEM_MEGA_RING
+	goto_if_eq VAR_RESULT, FALSE, MauvilleCity_GameCorner_EventScript_ShinyCharmNoRoom
+	specialvar VAR_RESULT, CoinWallet_Spend
+	updatecoinsbox
+	playse SE_SHOP
+	giveitem ITEM_MEGA_RING
+	msgbox MauvilleCity_GameCorner_Text_MegaRingGiven, MSGBOX_DEFAULT
+MauvilleCity_GameCorner_EventScript_CharmOffer::
+	checkitem ITEM_SHINY_CHARM
+	goto_if_eq VAR_RESULT, TRUE, MauvilleCity_GameCorner_EventScript_AllPrizesOwned
+	setvar VAR_TEMP_2, ITEM_SHINY_CHARM
+	msgbox MauvilleCity_GameCorner_Text_ShinyCharmConfirm, MSGBOX_YESNO
+	goto_if_eq VAR_RESULT, NO, MauvilleCity_GameCorner_EventScript_ShinyCharmDeclined
+	setvar VAR_0x8004, (MP_SHINY_CHARM_COINS_PC >> 16)
+	setvar VAR_0x8005, (MP_SHINY_CHARM_COINS_PC & 0xFFFF)
+	specialvar VAR_RESULT, CoinWallet_Has
+	goto_if_eq VAR_RESULT, FALSE, MauvilleCity_GameCorner_EventScript_ShinyCharmNotEnough
+	checkitemspace ITEM_SHINY_CHARM
+	goto_if_eq VAR_RESULT, FALSE, MauvilleCity_GameCorner_EventScript_ShinyCharmNoRoom
+	specialvar VAR_RESULT, CoinWallet_Spend
+	updatecoinsbox
+	playse SE_SHOP
+	hidecoinsbox
+	giveitem ITEM_SHINY_CHARM
+	msgbox MauvilleCity_GameCorner_Text_ShinyCharmGiven, MSGBOX_DEFAULT
+	setvar VAR_TEMP_2, ITEM_NONE
+	release
+	end
+
+MauvilleCity_GameCorner_EventScript_AllPrizesOwned::
+	hidecoinsbox
+	msgbox MauvilleCity_GameCorner_Text_ShinyCharmOwned, MSGBOX_DEFAULT
+	setvar VAR_TEMP_2, ITEM_NONE
+	release
+	end
+
+MauvilleCity_GameCorner_EventScript_MegaRingNotEnough::
+	msgbox MauvilleCity_GameCorner_Text_MegaRingNotEnough, MSGBOX_DEFAULT
+	hidecoinsbox
+	setvar VAR_TEMP_2, ITEM_NONE
+	release
+	end
+.else
 MauvilleCity_GameCorner_EventScript_ShinyCharmClerk::
 	lock
 	faceplayer
@@ -63,6 +138,8 @@ MauvilleCity_GameCorner_EventScript_ShinyCharmClerk::
 	msgbox MauvilleCity_GameCorner_Text_ShinyCharmGiven, MSGBOX_DEFAULT
 	release
 	end
+
+.endif
 
 MauvilleCity_GameCorner_EventScript_ShinyCharmOwned::
 	msgbox MauvilleCity_GameCorner_Text_ShinyCharmOwned, MSGBOX_DEFAULT
@@ -115,23 +192,48 @@ MauvilleCity_Mart_Text_MegaStoneFlanneryRing:
 	.string "FLANNERY left this MEGA RING here\n"
 	.string "for you. Please take it!$"
 
+.ifdef PORTABLE
+MauvilleCity_Mart_Text_MegaStoneWelcome:
+	.string "MEGA STONES! Every one has its own\n"
+	.string "price, paid in GAME CORNER COINS.$"
+.else
 MauvilleCity_Mart_Text_MegaStoneWelcome:
 	.string "MEGA STONES! Choose carefully,\n"
 	.string "they don't come cheap!$"
+.endif
 
+.ifdef PORTABLE
+MauvilleCity_GameCorner_Text_ShinyCharmIntro:
+	.string "This counter offers our grand prizes:\n"
+	.string "the MEGA RING and the SHINY CHARM!$"
+.else
 MauvilleCity_GameCorner_Text_ShinyCharmIntro:
 	.string "This counter offers our grand prize:\n"
 	.string "the SHINY CHARM!\p"
 	.string "Its owner meets SHINY POKéMON far\n"
 	.string "more often. It costs 9,000 COINS.$"
+.endif
 
+.ifdef PORTABLE
+MauvilleCity_GameCorner_Text_ShinyCharmConfirm:
+	.string "The SHINY CHARM makes SHINY POKéMON\n"
+	.string "turn up far more often.\p"
+	.string "Trade 100,000 COINS for it?$"
+.else
 MauvilleCity_GameCorner_Text_ShinyCharmConfirm:
 	.string "Trade 9,000 COINS for the\n"
 	.string "SHINY CHARM?$"
+.endif
 
+.ifdef PORTABLE
+MauvilleCity_GameCorner_Text_ShinyCharmNotEnough:
+	.string "I'm sorry, you need 100,000 COINS.\n"
+	.string "Good luck at the tables!$"
+.else
 MauvilleCity_GameCorner_Text_ShinyCharmNotEnough:
 	.string "I'm sorry, you need 9,000 COINS.\n"
 	.string "Good luck at the tables!$"
+.endif
 
 MauvilleCity_GameCorner_Text_ShinyCharmNeedCase:
 	.string "Prizes are paid in COINS.\n"
@@ -146,3 +248,31 @@ MauvilleCity_GameCorner_Text_ShinyCharmGiven:
 MauvilleCity_GameCorner_Text_ShinyCharmOwned:
 	.string "The SHINY CHARM suits you!\n"
 	.string "Happy hunting!$"
+
+.ifdef PORTABLE
+@ Update 29 (PC game): the major prize counter and the dealer.
+MauvilleCity_GameCorner_Text_MajorPrizesIntro:
+	.string "Welcome to the PRIZE COUNTER for\n"
+	.string "our biggest prizes!$"
+
+MauvilleCity_GameCorner_Text_MegaRingConfirm:
+	.string "The MEGA RING lets a POKéMON holding\n"
+	.string "its own MEGA STONE MEGA EVOLVE.\p"
+	.string "Trade 25,000 COINS for it?$"
+
+MauvilleCity_GameCorner_Text_MegaRingNotEnough:
+	.string "I'm sorry, you need 25,000 COINS\n"
+	.string "for the MEGA RING.$"
+
+MauvilleCity_GameCorner_Text_MegaRingGiven:
+	.string "The MEGA RING is yours to keep!\p"
+	.string "MEGA STONES are sold at the\n"
+	.string "MAUVILLE CITY POKé MART, for COINS.$"
+
+MauvilleCity_Mart_Text_MegaStoneNoRingCoins:
+	.string "I deal in MEGA STONES, for GAME\n"
+	.string "CORNER COINS.\p"
+	.string "They're no use without a MEGA RING.\n"
+	.string "The GAME CORNER's PRIZE COUNTER\l"
+	.string "sells one for 25,000 COINS.$"
+.endif

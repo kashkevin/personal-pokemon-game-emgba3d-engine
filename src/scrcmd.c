@@ -2845,7 +2845,14 @@ bool8 ScrCmd_checkcoins(struct ScriptContext *ctx)
     Script_RequestEffects(SCREFF_V1);
     Script_RequestWriteVar(varId);
 
+#ifdef PORTABLE
+    // Update 29: the wallet holds more than a 16-bit script variable; scripts that need the exact amount use CoinWallet_Has.
+    *ptr = GetCoins() > 0xFFFF ? 0xFFFF : GetCoins();
+#else
+#line 2848 // gba-line
     *ptr = GetCoins();
+#endif
+#line 2849 // gba-line
     return FALSE;
 }
 

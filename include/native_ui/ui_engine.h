@@ -826,6 +826,7 @@ struct NativeShop
     bool8 ready;              /* the engine reads buttons now */
     bool8 decorations;        /* a decoration shop: its list holds decorations */
     bool8 sale;               /* Slateport's POKéNEWS sale halves the prices */
+    bool8 coins;              /* the prices and the money are Game Corner coins (the Mega Stone dealer; Update 29) */
     u8 menuCount;             /* the field menu's rows */
     u8 menuCursor;            /* the field menu's row; the YES / NO's (0: YES) */
     u8 msgWindow;             /* the clerk's line (WINDOW_NONE: none) */

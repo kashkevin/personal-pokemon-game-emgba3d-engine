@@ -27,6 +27,13 @@
 #include "constants/rgb.h"
 #include "constants/slot_machine.h"
 #include "constants/songs.h"
+#ifdef PORTABLE
+// Update 29: tables take a stake from the 32-bit wallet (include/platform/coin_wallet.h)
+#include "platform/coin_wallet.h"
+#define GetCoins CoinWallet_TableGet
+#define SetCoins CoinWallet_TableSet
+#endif
+#line 30 // gba-line
 
 #define SLOTMACHINE_GFX_TILES 233
 #define MAX_BET 3
@@ -1206,6 +1213,10 @@ static void InitSlotMachine(void)
     sSlotMachine->matches = 0;
     sSlotMachine->reelTimeSpinsLeft = 0;
     sSlotMachine->reelTimeSpinsUsed = 0;
+#ifdef PORTABLE
+    CoinWallet_BeginTable();
+#endif
+#line 1209 // gba-line
     sSlotMachine->coins = GetCoins();
     sSlotMachine->payout = 0;
     sSlotMachine->netCoinLoss = 0;

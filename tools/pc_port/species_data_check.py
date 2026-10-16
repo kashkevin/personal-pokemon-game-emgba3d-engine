@@ -35,7 +35,11 @@ PROTECTED = (
     "include/constants/pokemon.h", "src/data/starter*", "data/maps/*/scripts.inc",
 )
 # Reviewed exceptions: files that match a protected pattern but were changed on purpose, with the reason.
-ALLOWED = {}
+ALLOWED = {
+    # Update 29: the coin counter's 5,000-coin pack and the wallet's room check (PC branches under .ifdef PORTABLE). No encounter,
+    # level, species or trainer data.
+    "data/maps/MauvilleCity_GameCorner/scripts.inc": "Game Corner coin counter (coins economy)",
+}
 
 
 def run(cmd, **kw):

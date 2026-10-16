@@ -29,6 +29,9 @@ MauvilleCity_GameCorner_EventScript_ChooseCoinsDefault50::
 	switch VAR_RESULT
 	case 0, MauvilleCity_GameCorner_EventScript_Buy50Coins
 	case 1, MauvilleCity_GameCorner_EventScript_Buy500Coins
+.ifdef PORTABLE
+	case 2, MauvilleCity_GameCorner_EventScript_Buy5000Coins
+.endif
 	goto MauvilleCity_GameCorner_EventScript_CancelBuyCoins
 	end
 
@@ -42,8 +45,15 @@ MauvilleCity_GameCorner_EventScript_ChooseCoinsDefault500::
 	end
 
 MauvilleCity_GameCorner_EventScript_Buy50Coins::
+.ifdef PORTABLE
+	setvar VAR_0x8004, 0
+	setvar VAR_0x8005, 50
+	specialvar VAR_RESULT, CoinWallet_HasRoom
+	goto_if_eq VAR_RESULT, FALSE, MauvilleCity_GameCorner_EventScript_NoRoomForCoins
+.else
 	checkcoins VAR_TEMP_1
 	goto_if_ge VAR_TEMP_1, (MAX_COINS + 1 - 50), MauvilleCity_GameCorner_EventScript_NoRoomForCoins
+.endif
 	checkmoney COINS_PRICE_50
 	goto_if_eq VAR_RESULT, FALSE, MauvilleCity_GameCorner_EventScript_NotEnoughMoney
 	addcoins 50
@@ -58,8 +68,15 @@ MauvilleCity_GameCorner_EventScript_Buy50Coins::
 	end
 
 MauvilleCity_GameCorner_EventScript_Buy500Coins::
+.ifdef PORTABLE
+	setvar VAR_0x8004, 0
+	setvar VAR_0x8005, 500
+	specialvar VAR_RESULT, CoinWallet_HasRoom
+	goto_if_eq VAR_RESULT, FALSE, MauvilleCity_GameCorner_EventScript_NoRoomForCoins
+.else
 	checkcoins VAR_TEMP_1
 	goto_if_ge VAR_TEMP_1, (MAX_COINS + 1 - 500), MauvilleCity_GameCorner_EventScript_NoRoomForCoins
+.endif
 	checkmoney COINS_PRICE_500
 	goto_if_eq VAR_RESULT, FALSE, MauvilleCity_GameCorner_EventScript_NotEnoughMoney
 	addcoins 500
@@ -72,6 +89,27 @@ MauvilleCity_GameCorner_EventScript_Buy500Coins::
 	hidecoinsbox
 	release
 	end
+
+.ifdef PORTABLE
+@ Update 29 (PC game): a large pack, at the same 20 yen a coin: the 100,000-coin Shiny Charm would take 200 small packs.
+MauvilleCity_GameCorner_EventScript_Buy5000Coins::
+	setvar VAR_0x8004, 0
+	setvar VAR_0x8005, MP_COINS_PACK_LARGE
+	specialvar VAR_RESULT, CoinWallet_HasRoom
+	goto_if_eq VAR_RESULT, FALSE, MauvilleCity_GameCorner_EventScript_NoRoomForCoins
+	checkmoney MP_COINS_PACK_LARGE_YEN
+	goto_if_eq VAR_RESULT, FALSE, MauvilleCity_GameCorner_EventScript_NotEnoughMoney
+	addcoins MP_COINS_PACK_LARGE
+	removemoney MP_COINS_PACK_LARGE_YEN
+	updatemoneybox
+	updatecoinsbox
+	playse SE_SHOP
+	msgbox MauvilleCity_GameCorner_Text_ThankYouHereAreYourCoins, MSGBOX_DEFAULT
+	hidemoneybox
+	hidecoinsbox
+	release
+	end
+.endif
 
 MauvilleCity_GameCorner_EventScript_NeedCoinCase::
 	msgbox MauvilleCity_GameCorner_Text_NeedCoinCaseForCoins, MSGBOX_DEFAULT

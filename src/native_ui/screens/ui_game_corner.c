@@ -24,6 +24,7 @@
 #include "coins.h"
 #include "decoration.h"
 #include "decoration_inventory.h"
+#include "event_data.h"
 #include "event_object_movement.h"
 #include "item.h"
 #include "main.h"
@@ -37,6 +38,7 @@
 #include "constants/coins.h"
 #include "constants/decorations.h"
 #include "constants/items.h"
+#include "constants/vars.h"
 #include "constants/map_groups.h"
 #include "constants/multiplayer_balance.h"
 #include "constants/script_menu.h"
@@ -128,6 +130,9 @@ static const u8 sText_CharmLine[] = _("The major prize. Yours to keep.");
 static const u8 sText_CharmOwnedLine[] = _("Already yours.");
 static const u8 sText_CharmRule1[] = _("Guaranteed: never a random prize.");
 static const u8 sText_CharmRule2[] = _("One per player: a second is refused.");
+static const u8 sText_RingLine[] = _("Unlocks Mega Evolution. Yours to keep.");
+static const u8 sText_RingRule1[] = _("Needed before any Mega Stone is sold.");
+static const u8 sText_RingRule2[] = _("One per player: a second is refused.");
 static const u8 sText_RoomFor[] = _("Room for ");
 static const u8 sText_MoreCoins[] = _(" more Coins.");
 
@@ -139,7 +144,6 @@ static u8 sCounter;               /* the board's counter (tab) */
 static struct Row sRows[MAX_ROWS];
 static int sRowCount;
 static int sSel;                  /* the selected row (the engine's cursor, kept after its list closes) */
-static bool sCharmOwned;
 static const u8 *sNote;
 static int sFirst;
 static u32 sCoins;
@@ -312,6 +316,7 @@ static void BuildRows(u8 counter)
         AddList(counter, CLERK_TMS, MULTI_GAME_CORNER_TMS);
         break;
     case COUNTER_PRIZES:
+        sRows[sRowCount++] = (struct Row){ROW_CHARM, CLERK_CHARM, -1, ITEM_MEGA_RING, MP_MEGA_RING_COINS, 0, 0, NULL};
         sRows[sRowCount++] = (struct Row){ROW_CHARM, CLERK_CHARM, -1, ITEM_SHINY_CHARM, MP_SHINY_CHARM_COINS, 0, 0, NULL};
         AddList(counter, CLERK_DOLLS, MULTI_GAME_CORNER_DOLLS);
         break;
@@ -445,9 +450,16 @@ static void Capture(void)
     if (ListUp() && RowOf(sMenu.cursor) >= 0)
         sSel = RowOf(sMenu.cursor);
     else if (sClerk == CLERK_CHARM)
+    {
+        /* the prize the clerk is offering now (the script keeps its item in VAR_TEMP_2); else the first */
+        u16 offered = VarGet(VAR_TEMP_2);
+
         sSel = 0;
+        for (int i = 0; i < sRowCount; i++)
+            if (sRows[i].kind == ROW_CHARM && sRows[i].id == offered)
+                sSel = i;
+    }
     Clamp();
-    sCharmOwned = CheckBagHasItem(ITEM_SHINY_CHARM, 1);
     sCoins = GetCoins();
     sMoney = GetMoney(&gSaveBlock1Ptr->money);
     for (int i = 0; i < sRowCount; i++)
@@ -585,7 +597,7 @@ static void CoinCase(int x, int y, int w, int h, int t)
 {
     struct UiRamp gold = Gold(), red = Red();
     UiRGBA plate = Plate();
-    char digits[8];
+    char digits[12];
     u8 line[40];
     int lead;
 
@@ -595,20 +607,21 @@ static void CoinCase(int x, int y, int w, int h, int t)
     BulbRing(x + 8, y + 8, w - 16, h - 16, 8, t);
     UiGfx_ItemIconScaled(ITEM_COIN_CASE, x + 16, y + 26, 2);
     UiCaps_Draw(x + 72, y + 20, "COINS", gold.hi, red.ink, UI_CAPS_OUTLINE, UI_ALIGN_LEFT, UI_NONE);
-    snprintf(digits, sizeof(digits), "%04u", (unsigned)(sCoins > 9999 ? 9999 : sCoins));
-    lead = 4 - (int)snprintf(NULL, 0, "%u", (unsigned)sCoins);
-    for (int i = 0; i < 4; i++)
+    /* the Coin Case holds up to 999,999 coins (the PC game's wallet): six reels */
+    snprintf(digits, sizeof(digits), "%06u", (unsigned)(sCoins > MAX_COINS_WALLET ? MAX_COINS_WALLET : sCoins));
+    lead = 6 - (int)snprintf(NULL, 0, "%u", (unsigned)sCoins);
+    for (int i = 0; i < 6; i++)
     {
-        int cx = x + 72 + i * 28, cy = y + 32;
+        int cx = x + 72 + i * 21, cy = y + 32;
         char d[2] = {digits[i], 0};
 
-        UiG_Paint(UiM_Rounded4(25, 32, 2, 2, 2, 2), cx, cy, UI_P_PAPER, &(struct UiPaint){red.ink, UI_HEX(0xFFFFFF), UI_P_PAPER_LO, 0, 0, NULL, UI_NONE});
-        UiG_HLine(cx + 2, cy + 15, 21, UiMix(UI_P_PAPER, UI_P_PAPER_LO, 0.6));
-        UiItems_BigCaps(cx + 13, cy + 6, d, 2, i < lead ? UI_P_PAPER_LO : UI_P_TEXT, UI_NONE, UI_ALIGN_CENTER);
+        UiG_Paint(UiM_Rounded4(19, 32, 2, 2, 2, 2), cx, cy, UI_P_PAPER, &(struct UiPaint){red.ink, UI_HEX(0xFFFFFF), UI_P_PAPER_LO, 0, 0, NULL, UI_NONE});
+        UiG_HLine(cx + 2, cy + 15, 15, UiMix(UI_P_PAPER, UI_P_PAPER_LO, 0.6));
+        UiItems_BigCaps(cx + 10, cy + 6, d, 2, i < lead ? UI_P_PAPER_LO : UI_P_TEXT, UI_NONE, UI_ALIGN_CENTER);
     }
     line[0] = EOS;
     UiText_Append(line, sizeof(line), sText_HoldsUpTo);
-    UiText_AppendNumber(line, sizeof(line), MAX_COINS, 1, true);
+    UiText_AppendNumber(line, sizeof(line), MAX_COINS_WALLET, 1, true);
     UiText_AppendAscii(line, sizeof(line), ".");
     UiText_Draw(UI_FONT_SMALL, x + 72, y + 68, line, UiMix(gold.hi, UI_P_PAPER, 0.4), UI_NONE, UI_ALIGN_LEFT, 0);
 }
@@ -696,7 +709,7 @@ static void InfoCard(int x, int y, int w, int h)
         UiItems_PriceTag(x + w - 92, y + 5, 84, buf, red.ink, false);
         Paragraph(sText_CoinsInfo, x + 10, y + 28, w - 20, 12, 5, UI_FONT_SMALL);
         UiCaps_Draw(x + 10, y + h - 30, "RATES: EMERALD DEFAULT", UI_P_TEXT_MUTED, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
-        UiW_Planned(x + 10, y + h - 20, "COIN ECONOMY PENDING");
+        UiCaps_Draw(x + 10, y + h - 20, "20 YEN A COIN, ALL PACKS", UI_P_TEXT_MUTED, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
         return;
     case ROW_CHARM:
     {
@@ -710,14 +723,14 @@ static void InfoCard(int x, int y, int w, int h)
         UiText_Append(buf, sizeof(buf), sText_Coins);
         UiG_TextEx(x + 46, y + 16, buf, UI_FONT_NORMAL, sCoins >= r->price ? UI_P_TEXT : UI_P_TEXT_RED,
                    sCoins >= r->price ? UI_P_TEXT_SH : UI_P_TEXT_RED_SH, UI_ALIGN_LEFT);
-        if (sCharmOwned)
+        if (CheckBagHasItem(r->id, 1))
             OwnedTag(x + w - 58, y + 19);
         Paragraph(GetItemDescription(r->id), x + 10, yy, w - 20, 12, 3, UI_FONT_SMALL);
         yy += 40;
         UiG_Rect(x + 10, yy + 5, 3, 3, Gold().base);
-        UiText_Draw(UI_FONT_SMALL, x + 17, yy, sText_CharmRule1, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+        UiText_Draw(UI_FONT_SMALL, x + 17, yy, r->id == ITEM_MEGA_RING ? sText_RingRule1 : sText_CharmRule1, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
         UiG_Rect(x + 10, yy + 17, 3, 3, Gold().base);
-        UiText_Draw(UI_FONT_SMALL, x + 17, yy + 12, sText_CharmRule2, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+        UiText_Draw(UI_FONT_SMALL, x + 17, yy + 12, r->id == ITEM_MEGA_RING ? sText_RingRule2 : sText_CharmRule2, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
         return;
     }
     case ROW_EXIT:
@@ -804,16 +817,16 @@ static void PartyRow(int x, int y, int w, int t)
 static void CaseGauge(int x, int y, int w)
 {
     struct UiRamp gold = Gold();
-    int bw = w - 8, fill = (int)((bw - 2) * (double)(sCoins > MAX_COINS ? MAX_COINS : sCoins) / MAX_COINS + 0.5);
+    int bw = w - 8, fill = (int)((bw - 2) * (double)(sCoins > MAX_COINS_WALLET ? MAX_COINS_WALLET : sCoins) / MAX_COINS_WALLET + 0.5);
     char caps[32];
     u8 line[48];
 
     UiG_Rect(x, y - 4, w, 1, UI_P_CREAM_LO);
     UiG_Rect(x, y - 3, w, 1, UI_P_CREAM_HI);
     UiCaps_Draw(x + 4, y + 2, "COIN CASE", UI_P_TEXT_MUTED, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
-    snprintf(caps, sizeof(caps), "%u,%03u / 9,999", (unsigned)(sCoins / 1000), (unsigned)(sCoins % 1000));
+    snprintf(caps, sizeof(caps), "%u,%03u / 999,999", (unsigned)(sCoins / 1000), (unsigned)(sCoins % 1000));
     if (sCoins < 1000)
-        snprintf(caps, sizeof(caps), "%u / 9,999", (unsigned)sCoins);
+        snprintf(caps, sizeof(caps), "%u / 999,999", (unsigned)sCoins);
     UiCaps_Draw(x + w - 4, y + 2, caps, UI_P_TEXT, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_RIGHT, UI_NONE);
     UiG_Paint(UiM_Rounded4(bw, 10, 2, 2, 2, 2), x + 4, y + 13, UiMix(gold.lo, UI_P_INK, 0.5),
               &(struct UiPaint){gold.ink, UI_NONE, UI_NONE, 0, 0, NULL, UI_NONE});
@@ -825,7 +838,7 @@ static void CaseGauge(int x, int y, int w)
     }
     line[0] = EOS;
     UiText_Append(line, sizeof(line), sText_RoomFor);
-    UiText_AppendNumber(line, sizeof(line), (long)(sCoins >= MAX_COINS ? 0 : MAX_COINS - sCoins), 1, true);
+    UiText_AppendNumber(line, sizeof(line), (long)(sCoins >= MAX_COINS_WALLET ? 0 : MAX_COINS_WALLET - sCoins), 1, true);
     UiText_Append(line, sizeof(line), sText_MoreCoins);
     UiG_Text(x + 4, y + 26, line);
 }
@@ -881,9 +894,9 @@ static void Board(int t)
             BulbRing(sx + 12, ry + 2, sw - 24, rh - 6, 10, t);
             UiGfx_ItemIcon(r->id, sx + 24, ry + 10, NULL);
             UiG_Text(sx + 52, ry + 7, name);
-            UiText_Draw(UI_FONT_SMALL, sx + 52, ry + 23, sCharmOwned ? sText_CharmOwnedLine : sText_CharmLine, UI_P_TEXT_MUTED,
+            UiText_Draw(UI_FONT_SMALL, sx + 52, ry + 23, CheckBagHasItem(r->id, 1) ? sText_CharmOwnedLine : (r->id == ITEM_MEGA_RING ? sText_RingLine : sText_CharmLine), UI_P_TEXT_MUTED,
                         UI_NONE, UI_ALIGN_LEFT, 0);
-            if (sCharmOwned)
+            if (CheckBagHasItem(r->id, 1))
                 OwnedTag(sx + sw - 148, ry + 17);
             Num(price, sizeof(price), r->price);
             UiG_TextEx(sx + sw - 30, ry + 14, price, UI_FONT_NORMAL, r->price > sCoins ? UI_HEX(0x909090) : UI_P_TEXT,

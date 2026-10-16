@@ -748,7 +748,13 @@ static void Task_AccessPokemonBoxLink(u8 taskId)
 
 void ItemUseOutOfBattle_CoinCase(u8 taskId)
 {
+#ifdef PORTABLE
+    ConvertIntToDecimalStringN(gStringVar1, GetCoins(), STR_CONV_MODE_LEFT_ALIGN, WALLET_COIN_DIGITS);
+#else
+#line 751 // gba-line
     ConvertIntToDecimalStringN(gStringVar1, GetCoins(), STR_CONV_MODE_LEFT_ALIGN, 4);
+#endif
+#line 752 // gba-line
     StringExpandPlaceholders(gStringVar4, sText_CoinCase);
 
     if (!gTasks[taskId].tUsingRegisteredKeyItem)

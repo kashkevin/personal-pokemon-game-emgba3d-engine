@@ -41,6 +41,22 @@
 #include "constants/metatile_behaviors.h"
 #include "constants/rgb.h"
 #include "constants/songs.h"
+#ifdef PORTABLE
+// Update 29: the Mega Stone dealer's shop is paid in Game Corner coins (include/platform/coin_shop.h); every other shop is unchanged.
+#include "platform/coin_shop.h"
+#define GetItemPrice CoinShop_ItemPrice
+#define GetMoney CoinShop_Balance
+#define IsEnoughMoney CoinShop_CanPay
+#define RemoveMoney CoinShop_Pay
+#define IsPokeNewsActive CoinShop_SaleShift
+#define PrintMoneyAmount CoinShop_PrintAmount
+#define PrintMoneyAmountInMoneyBox CoinShop_PrintBox
+#define PrintMoneyAmountInMoneyBoxWithBorder CoinShop_PrintBoxWithBorder
+#define AddMoneyLabelObject CoinShop_AddLabel
+#define RemoveMoneyLabelObject CoinShop_RemoveLabel
+#define gText_PokedollarVar1 CoinShop_PriceText()
+#endif
+#line 44 // gba-line
 
 #define TAG_SCROLL_ARROW   2100
 #define TAG_ITEM_ICON_BASE 9110 // immune to time blending
@@ -386,6 +402,10 @@ static void SetShopItemsForSale(const u16 *items)
     u16 i = 0;
 
     sMartInfo.itemList = items;
+#ifdef PORTABLE
+    CoinShop_OnOpen(items);
+#endif
+#line 389 // gba-line
     sMartInfo.itemCount = 0;
 
     assertf(items != NULL, "Shop items list should never be set as NULL")
@@ -1474,6 +1494,10 @@ bool32 Shop_NativeUiState(struct NativeShop *out)
     out->decorations = sMartInfo.martType != MART_TYPE_NORMAL;
     out->sale = sMartInfo.martType == MART_TYPE_NORMAL && IsPokeNewsActive(POKENEWS_SLATEPORT);
     out->money = GetMoney(&gSaveBlock1Ptr->money);
+#ifdef PORTABLE
+    out->coins = gCoinShopActive;
+#endif
+#line 1477 // gba-line
     {
         u16 item = out->chosen != ITEM_NONE ? out->chosen
                  : out->cursor < out->count && out->phase != NATIVE_SHOP_MENU && out->phase != NATIVE_SHOP_FIELD
