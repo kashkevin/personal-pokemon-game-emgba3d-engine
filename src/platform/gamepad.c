@@ -14,7 +14,7 @@
 
 struct GamepadKeys Gamepad_MapKeys(const struct GamepadInput *input)
 {
-    struct GamepadKeys out = {0, false, false};
+    struct GamepadKeys out = {0, false};
     uint16_t b = input->buttons;
     float x = (float)input->stickX / 32767.0f, y = (float)input->stickY / 32767.0f;
 
@@ -34,6 +34,5 @@ struct GamepadKeys Gamepad_MapKeys(const struct GamepadInput *input)
     if (x >  GAMEPAD_STICK_THRESHOLD) out.keys |= KEY_RIGHT;
     if (y < -GAMEPAD_STICK_THRESHOLD) out.keys |= KEY_DOWN;
     if (y >  GAMEPAD_STICK_THRESHOLD) out.keys |= KEY_UP;
-    out.fastForward = input->rightTrigger > GAMEPAD_TRIGGER_THRESHOLD;
     return out;
 }

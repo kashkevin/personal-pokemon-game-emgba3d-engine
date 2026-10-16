@@ -772,13 +772,13 @@ bool32 MultiplayerSpawns_InInteraction(void)
     return sInteraction;
 }
 
-// Update 29, Shiny Charm on a shared spawn. The host rolls a shared Pokemon's shiny status once, when it appears (one
-// 1/4096 roll for everybody); the Charm is the claiming player's own, so its two extra rolls are made here from the Pokemon's
-// own numbers, not from a random source: the same Pokemon gives the same answer however often it is claimed, released and
-// claimed again, after a reconnect, and on every game, so there is nothing to reroll. A hash of (spawn id, personality) falls
-// below 8191 x 256 of 2^32 exactly as often as two independent 1/4096 rolls would hit: 1 - (4095/4096)^2 = 8191/4096^2.
+// Update 29/30, Shiny Charm on a shared spawn. The host rolls a shared Pokemon's shiny status once, when it appears (one
+// 1/4096 roll for everybody); the Charm is the claiming player's own, so its bonus is made here from the Pokemon's own numbers,
+// not from a random source: the same Pokemon gives the same answer however often it is claimed, released and claimed again,
+// after a reconnect, and on every game, so there is nothing to reroll. A hash of (spawn id, personality) falls below
+// MP_SPAWN_CHARM_THRESHOLD of 2^32 exactly as often as the Charm's extra chance needs for 1 in 2500 in all (as for a wild Pokemon).
 // Only the Charm's owner gets it (the bag is the player's own); nobody else's game is changed.
-#define MP_SPAWN_CHARM_THRESHOLD (8191u * 256u)
+#define MP_SPAWN_CHARM_THRESHOLD 669574u    // 2^32 * q, q = (1/2500 - 1/4096) / (1 - 1/4096): host roll + this = 1 in 2500
 
 u32 MultiplayerSpawns_CharmHash(u32 spawnId, u32 personality)
 {

@@ -80,7 +80,7 @@ static u8 sBorderBackgroundCount = 1;
 SDL_AudioDeviceID sdlAudioDevice;
 SDL_sem *vBlankSemaphore;
 SDL_atomic_t isFrameAvailable;
-bool speedUp = false;
+// Update 30: the player-facing 2x speed (fast forward) was removed; timeScale stays 1.0 in play.
 unsigned int videoScale = 1;
 bool isRunning = true;
 bool paused = false;
@@ -219,6 +219,7 @@ extern int NativeSelfTest_DumpSpeciesData(const char *outPath);
 extern int NativeSelfTest_Legend(void);
 extern int NativeSelfTest_Shiny(void);
 extern int NativeSelfTest_Coins(void);
+extern int NativeSelfTest_Breeding(void);
 extern int NativeSelfTest_DumpLegendPool(const char *outPath);
 extern int NativeSelfTest_Rewards(void);
 extern int NativeSelfTest_CatchReconcile(void);
@@ -1154,6 +1155,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_Ladder()); // src/platform/native_selftest.c (expansion Phases 8 and 10)
         else if (strcmp(argv[i], "--dump-legend-pool") == 0 && i + 1 < argc)
             exit(NativeSelfTest_DumpLegendPool(argv[++i])); // src/platform/native_selftest_u29.c (host parity)
+        else if (strcmp(argv[i], "--selftest-breeding") == 0)
+            exit(NativeSelfTest_Breeding()); // src/platform/native_selftest_u30.c (Update 30)
         else if (strcmp(argv[i], "--selftest-coins") == 0)
             exit(NativeSelfTest_Coins()); // src/platform/native_selftest_u29.c (Update 29)
         else if (strcmp(argv[i], "--selftest-shiny") == 0)
@@ -1598,13 +1601,6 @@ static void ApplyPcMenuResult(unsigned int bits)
         // New bindings: no old key may stay held (its release would now find another action).
         sKeybinds = sPcMenu.keybinds;
         KeyboardKeysClear();
-        if (speedUp)
-        {
-            speedUp = false;
-            timeScale = 1.0;
-            SDL_ClearQueuedAudio(sdlAudioDevice);
-            SDL_PauseAudioDevice(sdlAudioDevice, 0);
-        }
         store = true;
     }
     if (store)
@@ -2675,13 +2671,6 @@ void ProcessEvents(void)
 
             if (action >= 0 && action < KEYBIND_GAME_BUTTONS)
                 keyboardKeys &= ~sKeybindButtons[action], KeyboardKeysChanged();
-            else if (action == KEYBIND_FAST_FORWARD && speedUp)
-            {
-                speedUp = false;
-                timeScale = 1.0;
-                SDL_ClearQueuedAudio(sdlAudioDevice);
-                SDL_PauseAudioDevice(sdlAudioDevice, 0);
-            }
             break;
         }
         case SDL_KEYDOWN:
@@ -2703,16 +2692,6 @@ void ProcessEvents(void)
                 {
                     keyboardKeys |= sKeybindButtons[action];
                     KeyboardKeysChanged();
-                    break;
-                }
-                if (action == KEYBIND_FAST_FORWARD && !chord)
-                {
-                    if (!speedUp)
-                    {
-                        speedUp = true;
-                        timeScale = 5.0;
-                        SDL_PauseAudioDevice(sdlAudioDevice, 1);
-                    }
                     break;
                 }
             }
@@ -2924,9 +2903,8 @@ static int SelfTestKeybinds(void)
     KeyEvent(SDLK_RETURN, false, 0);
     KeyEvent(SDLK_BACKSLASH, false, 0);
     KeyEvent(SDLK_SPACE, true, 0);
-    ExpectKeys("default Space holds fast forward", speedUp && timeScale > 1.0);
+    ExpectKeys("Space (once fast forward) does nothing now: no speed-up exists", Platform_GetKeyInput() == 0 && timeScale == 1.0);
     KeyEvent(SDLK_SPACE, false, 0);
-    ExpectKeys("releasing Space ends it", !speedUp && timeScale == 1.0);
 
     // A settings file with bindings (and settings of other kinds left alone).
     WriteScratchConfig("volume=7\nkey.a=Q\nkey.b=Left Shift\nkey.fastforward=Tab\nkey.up=W\nkey.l=Escape\nkey.r=Nonsense\n");
@@ -2949,12 +2927,8 @@ static int SelfTestKeybinds(void)
     ExpectKeys("the arrow that was Up does nothing once Up is W", Platform_GetKeyInput() == 0);
     KeyEvent(SDLK_UP, false, 0);
     KeyEvent(SDLK_TAB, true, 0);
-    ExpectKeys("Tab holds fast forward", speedUp);
+    ExpectKeys("an old key.fastforward=Tab line in the file binds nothing", Platform_GetKeyInput() == 0 && timeScale == 1.0);
     KeyEvent(SDLK_TAB, false, 0);
-    ExpectKeys("and releasing it ends it", !speedUp);
-    KeyEvent(SDLK_SPACE, true, 0);
-    ExpectKeys("Space no longer does", !speedUp);
-    KeyEvent(SDLK_SPACE, false, 0);
     KeyEvent(SDLK_ESCAPE, true, 0);
     ExpectKeys("Esc is never a game button", Platform_GetKeyInput() == 0);
     KeyEvent(SDLK_ESCAPE, false, 0);
@@ -3080,23 +3054,7 @@ u16 GetXInputKeys(void)
         sXInputDetails = mapped.details;
 #endif
 
-        /* Speedup */
-        // Note: 'speedup' variable is only (un)set on keyboard input
-        double oldTimeScale = timeScale;
-        timeScale = (mapped.fastForward || speedUp) ? 5.0 : 1.0;
-
-        if (oldTimeScale != timeScale)
-        {
-            if (timeScale > 1.0)
-            {
-                SDL_PauseAudioDevice(sdlAudioDevice, 1);
-            }
-            else
-            {
-                SDL_ClearQueuedAudio(sdlAudioDevice);
-                SDL_PauseAudioDevice(sdlAudioDevice, 0);
-            }
-        }
+        // Update 30: no player-facing speed-up (the right trigger and the Space key used to run the game 5x faster).
     }
 
     return xinputKeys;

@@ -35,7 +35,13 @@ _Static_assert(offsetof(struct MultiplayerSaveControl, chunkCrc32) == 44, "Save 
 _Static_assert(offsetof(struct MultiplayerSaveControl, data) == 48, "Save payload offset");
 _Static_assert(sizeof(struct SaveBlock1) == 15568, "Pinned SaveBlock1");
 _Static_assert(sizeof(struct SaveBlock2) == 3884, "Pinned SaveBlock2");
+#ifdef PORTABLE
+_Static_assert(sizeof(struct SaveBlock3) == 600 + sizeof(struct MPDaycareEggQueue), "Ownership SaveBlock3 plus the Day Care egg queue");
+#else
+#line 38 // gba-line
 _Static_assert(sizeof(struct SaveBlock3) == 600, "Ownership SaveBlock3");
+#endif
+#line 39 // gba-line
 _Static_assert(offsetof(struct SaveBlock1, daycare) == 0x3030, "Pinned daycare offset");
 _Static_assert(sizeof(struct DaycareMon) == 140, "Pinned daycare size");
 _Static_assert(sizeof(struct PokemonStorage) == 34144, "Pinned storage");
@@ -426,6 +432,16 @@ static bool32 ValidPlayerSector(const u8 *raw)
     return TRUE;
 }
 
+#ifdef PORTABLE
+// SaveBlock3 bytes a sector's 116-byte chunk may carry: the 600-byte ownership profile plus the Day Care egg queue (Update 30)
+static u32 Block3Used(u32 id)
+{
+    s32 used = (s32)MP_SAVE_BLOCK_3_BYTES - (s32)(id * 116);
+
+    return used < 0 ? 0 : used > 116 ? 116 : (u32)used;
+}
+#endif
+#line 429 // gba-line
 static u8 ValidateSector(u32 physical)
 {
     struct SaveSector *sector = &gSaveDataBuffer;
@@ -454,7 +470,13 @@ static u8 ValidateSector(u32 physical)
         return MP_SAVE_VALIDATION;
     size = sSectionSizes[id];
     if (sector->checksum != Checksum(raw, size) || !AllBytes(raw + size, 3968 - size, 0)
+#ifdef PORTABLE
+     || !AllBytes(raw + 3968 + Block3Used(id), 116 - Block3Used(id), 0))
+#else
+#line 457 // gba-line
      || !AllBytes(raw + 3968 + (id < 5 ? 116 : id == 5 ? 20 : 0), id < 5 ? 0 : id == 5 ? 96 : 116, 0))
+#endif
+#line 458 // gba-line
         return MP_SAVE_VALIDATION;
     if (id < 6)
     {

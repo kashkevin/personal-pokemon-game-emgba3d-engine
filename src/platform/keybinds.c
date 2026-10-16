@@ -20,7 +20,6 @@ static const struct
     [KEYBIND_DOWN]         = {"key.down", "Down", SDLK_DOWN},
     [KEYBIND_LEFT]         = {"key.left", "Left", SDLK_LEFT},
     [KEYBIND_RIGHT]        = {"key.right", "Right", SDLK_RIGHT},
-    [KEYBIND_FAST_FORWARD] = {"key.fastforward", "Fast forward (hold)", SDLK_SPACE},
 };
 
 static bool ValidAction(int action)

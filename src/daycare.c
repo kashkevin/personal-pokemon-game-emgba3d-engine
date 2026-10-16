@@ -29,6 +29,10 @@
 #include "constants/moves.h"
 #include "constants/party_menu.h"
 #include "constants/region_map_sections.h"
+#ifdef PORTABLE
+#include "platform/mp_breeding.h"
+#endif
+#line 32 // gba-line
 
 #define IS_DITTO(species) (gSpeciesInfo[species].eggGroups[0] == EGG_GROUP_DITTO || gSpeciesInfo[species].eggGroups[1] == EGG_GROUP_DITTO)
 
@@ -886,6 +890,16 @@ static void BuildEggMoveset(struct Pokemon *egg, struct BoxPokemon *father, stru
 
 static void RemoveEggFromDayCare(struct DayCare *daycare)
 {
+#ifdef PORTABLE
+    // Update 30: turning an Egg down drops only the oldest one; the others keep waiting
+    if (MPDaycare_QueueCount() > 1)
+    {
+        MPDaycare_QueueDropOldest();
+        return;
+    }
+    MPDaycare_QueueClear();
+#endif
+#line 889 // gba-line
     FlagClear(FLAG_PENDING_DAYCARE_EGG);
     daycare->stepCounter = 0;
 }
@@ -991,6 +1005,44 @@ static enum Species DetermineEggSpeciesAndParentSlots(struct DayCare *daycare, u
     return eggSpecies;
 }
 
+#ifdef PORTABLE
+// Update 30: make the Egg the parents now produce (all of it, once: species, personality and shiny status, IVs, moves, ability, ball)
+static bool32 MPDaycare_MakeEgg(struct DayCare *daycare, struct Pokemon *egg)
+{
+    enum Species species;
+    u8 parentSlots[DAYCARE_MON_COUNT] = {0};
+    bool8 isEgg;
+
+    if (GetDaycareCompatibilityScore(daycare) == PARENTS_INCOMPATIBLE)
+        return FALSE;
+    // The offspring personality's EGG_GENDER_MALE bit chooses the sex of a Nidoran / Illumise-line Egg (and of a Ditto Egg of
+    // Nidoran M / Volbeat). Nothing in this fork ever set it (the field stayed 0), so those Eggs were always the mother's species.
+    daycare->offspringPersonality = Random32();
+    species = DetermineEggSpeciesAndParentSlots(daycare, parentSlots);
+    if (P_INCENSE_BREEDING < GEN_9)
+        AlterEggSpeciesWithIncenseItem(&species, daycare);
+    SetInitialEggData(egg, species, daycare);
+    InheritIVs(egg, daycare);
+    InheritPokeball(egg, daycare);
+    BuildEggMoveset(egg, &daycare->mons[parentSlots[1]].mon, &daycare->mons[parentSlots[0]].mon);
+    InheritAbility(egg, daycare);
+    isEgg = TRUE;
+    SetMonData(egg, MON_DATA_IS_EGG, &isEgg);
+    return TRUE;
+}
+
+// A step check passed: make an Egg and put it in the queue (up to five wait at the Day Care).
+static void MPDaycare_ProduceEgg(struct DayCare *daycare)
+{
+    struct Pokemon egg;
+
+    if (MPDaycare_QueueCount() >= MP_DAYCARE_EGG_QUEUE_SIZE || !MPDaycare_MakeEgg(daycare, &egg))
+        return;
+    if (MPDaycare_QueuePush(&egg))
+        FlagSet(FLAG_PENDING_DAYCARE_EGG);
+}
+#endif
+#line 994 // gba-line
 static void _GiveEggFromDaycare(struct DayCare *daycare)
 {
     struct Pokemon egg;
@@ -998,6 +1050,20 @@ static void _GiveEggFromDaycare(struct DayCare *daycare)
     u8 parentSlots[DAYCARE_MON_COUNT] = {0};
     bool8 isEgg;
 
+#ifdef PORTABLE
+    // Update 30: hand over the oldest waiting Egg. A save from before the update has a pending flag and no queue: the Egg is made now
+    // from the parents, as it always was.
+    if (MPDaycare_QueuePop(&egg))
+    {
+        gParties[B_TRAINER_PLAYER][PARTY_SIZE - 1] = egg;
+        CompactPartySlots();
+        CalculatePlayerPartyCount();
+        if (MPDaycare_QueueCount() == 0)
+            FlagClear(FLAG_PENDING_DAYCARE_EGG);
+        return;
+    }
+#endif
+#line 1001 // gba-line
     if (GetDaycareCompatibilityScore(daycare) == PARENTS_INCOMPATIBLE)
         return;
 
@@ -1052,7 +1118,17 @@ static void SetInitialEggData(struct Pokemon *mon, enum Species species, struct 
     u8 language;
 
     personality = GetMonPersonality(species, MON_GENDER_RANDOM, GetChildNature(daycare), RANDOM_UNOWN_LETTER);
+#ifdef PORTABLE
+    // Update 30: the Egg's own shiny calculation, from the parents (any shiny one) and the owner's Shiny Charm
+    gMPEggShinyRolls = MPBreeding_EggShinyRolls(GetBoxMonData(&daycare->mons[0].mon, MON_DATA_IS_SHINY) || GetBoxMonData(&daycare->mons[1].mon, MON_DATA_IS_SHINY),
+                                                 CheckBagHasItem(ITEM_SHINY_CHARM, 1));
     CreateMonWithIVs(mon, species, EGG_HATCH_LEVEL, personality, OTID_STRUCT_PLAYER_ID, USE_RANDOM_IVS);
+    gMPEggShinyRolls = 0;
+#else
+#line 1055 // gba-line
+    CreateMonWithIVs(mon, species, EGG_HATCH_LEVEL, personality, OTID_STRUCT_PLAYER_ID, USE_RANDOM_IVS);
+#endif
+#line 1056 // gba-line
     metLevel = 0;
     language = LANGUAGE_JAPANESE;
     SetMonData(mon, MON_DATA_NICKNAME, sJapaneseEggNickname);
@@ -1078,6 +1154,20 @@ static void _IncrementDaycareSteps(struct DayCare *daycare)
         }
     }
 
+#ifdef PORTABLE
+    // Update 30: an Egg check every 64 steps (not 256) with the original compatibility chances; a full queue (five Eggs) waits
+    if (daycareParentCount != DAYCARE_MON_COUNT || MPDaycare_QueueCount() >= MP_DAYCARE_EGG_QUEUE_SIZE)
+        return;
+
+    if ((daycare->mons[1].steps & (MP_EGG_CHECK_STEPS - 1)) == 0)      // the 64th, 128th, ... step since the deposit
+    {
+        u8 compatibility = ModifyBreedingScoreForOvalCharm(GetDaycareCompatibilityScore(daycare));
+        if (RandomPercentage(RNG_DAYCARE_MAKE_EGG, compatibility))
+            MPDaycare_ProduceEgg(daycare);
+    }
+    return;
+#endif
+#line 1081 // gba-line
     if (daycareParentCount != DAYCARE_MON_COUNT || IsEggPending(daycare))
         return;
 
@@ -1101,6 +1191,11 @@ void IncrementDaycareSteps(void)
 
 static inline u32 GetEggCycleLength(void)
 {
+#ifdef PORTABLE
+    // Update 30: 75 percent fewer steps to hatch (128 -> 32 per egg cycle); every species keeps its own number of cycles
+    return MP_EGG_CYCLE_STEPS;
+#endif
+#line 1104 // gba-line
     switch (P_EGG_CYCLE_LENGTH)
     {
     case GEN_1:

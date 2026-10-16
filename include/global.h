@@ -305,6 +305,26 @@ struct MultiplayerOwnershipRecord
     u32 checksum;
 };
 
+#ifdef PORTABLE
+// Update 30 (PC game): eggs the Day Care has made and the player has not collected yet, at most five, oldest first. They are
+// whole Egg Pokemon (made once, when the Day Care produced them), so their species, personality, shiny status, IVs, moves,
+// ability and ball cannot change afterwards; they live in the save, so leaving the map, saving, reloading, disconnecting or
+// reconnecting loses and duplicates nothing. The block follows the 600-byte ownership profile (the profile's own part is
+// untouched) and carries its own magic and CRC-32: a save from before this update has zeros here, which reads as "no eggs".
+#define MP_DAYCARE_EGG_QUEUE_SIZE 5
+#define MP_DAYCARE_EGG_QUEUE_MAGIC 0x45474751 // "QGGE"
+struct MPDaycareEggQueue
+{
+    u32 magic;
+    u8 version;
+    u8 count;
+    u16 reserved;
+    u32 eggs[MP_DAYCARE_EGG_QUEUE_SIZE][20]; // struct BoxPokemon (80 bytes, 4-byte aligned; defined after this block)
+    u32 crc32;
+};
+#define MP_SAVE_BLOCK_3_BYTES (600 + sizeof(struct MPDaycareEggQueue))
+#endif
+
 struct SaveBlock3
 {
 #if OW_USE_FAKE_RTC
@@ -324,6 +344,9 @@ struct SaveBlock3
     u8 apricornTrees[NUM_APRICORN_TREE_BYTES];
 #endif
     struct MultiplayerOwnershipRecord ownership;
+#ifdef PORTABLE
+    struct MPDaycareEggQueue eggQueue;
+#endif
 }; /* max size 1624 bytes */
 
 extern struct SaveBlock3 *gSaveBlock3Ptr;

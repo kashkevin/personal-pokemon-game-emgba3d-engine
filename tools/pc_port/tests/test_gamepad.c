@@ -82,14 +82,13 @@ MT_TEST(the_left_stick_is_a_dpad_beyond_half_deflection)
     MT_EQ(Gamepad_MapKeys(&in).keys, 0x0020 | 0x0010);              // pad and stick together: both, as before
 }
 
-MT_TEST(the_right_trigger_speeds_the_game_up_past_its_threshold)
+MT_TEST(the_right_trigger_no_longer_speeds_the_game_up)
 {
     struct GamepadInput in = {0, 0, 0, 0};
 
-    in.rightTrigger = 0x80; MT_CHECK(!Gamepad_MapKeys(&in).fastForward);
-    in.rightTrigger = 0x81; MT_CHECK(Gamepad_MapKeys(&in).fastForward);
-    in.rightTrigger = 255;  MT_CHECK(Gamepad_MapKeys(&in).fastForward);
-    in.rightTrigger = 0;    MT_CHECK(!Gamepad_MapKeys(&in).fastForward);
+    // Update 30: the right trigger no longer fast-forwards; it maps to no key at all
+    in.rightTrigger = 255;  MT_CHECK(Gamepad_MapKeys(&in).keys == 0);
+    in.rightTrigger = 0;    MT_CHECK(Gamepad_MapKeys(&in).keys == 0);
     MT_EQ(Gamepad_MapKeys(&in).keys, 0);   // the trigger is never a game button
 }
 
@@ -109,7 +108,7 @@ int main(void)
     MT_RUN(all_4096_button_combinations_match_the_old_arithmetic);
     MT_RUN(each_button_is_the_key_it_always_was);
     MT_RUN(the_left_stick_is_a_dpad_beyond_half_deflection);
-    MT_RUN(the_right_trigger_speeds_the_game_up_past_its_threshold);
+    MT_RUN(the_right_trigger_no_longer_speeds_the_game_up);
     MT_RUN(random_input_never_sets_a_bit_outside_the_ten_game_keys);
     return MT_REPORT();
 }

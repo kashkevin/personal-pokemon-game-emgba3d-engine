@@ -81,7 +81,7 @@ MT_TEST(defaults_are_the_keys_before_rebinding)
     MT_EQ(kb.key[KEYBIND_DOWN], SDLK_DOWN);
     MT_EQ(kb.key[KEYBIND_LEFT], SDLK_LEFT);
     MT_EQ(kb.key[KEYBIND_RIGHT], SDLK_RIGHT);
-    MT_EQ(kb.key[KEYBIND_FAST_FORWARD], SDLK_SPACE);
+    MT_EQ(KEYBIND_COUNT, 10);   // Update 30: no fast forward action any more
     MT_CHECK(ConflictFree(&kb));
     for (int i = 0; i < KEYBIND_COUNT; i++)
         MT_CHECK(!kb.custom[i] && kb.key[i] == Keybinds_DefaultKey(i));
@@ -104,7 +104,7 @@ MT_TEST(nothing_is_written_until_a_binding_changes)
 
 MT_TEST(file_round_trip)
 {
-    static const char *const lines[] = {"key.a=Q\n", "key.b=E\r\n", "key.up=W\n", "key.fastforward=Left Shift\n"};
+    static const char *const lines[] = {"key.a=Q\n", "key.b=E\r\n", "key.up=W\n", "key.fastforward=Left Shift\n"};   // the last is an old file's line: ignored
     struct Keybinds kb = Parse(lines, 4), again;
     char buffer[512] = "", *line;
     FILE *file = fmemopen(buffer, sizeof(buffer), "w");
@@ -112,13 +112,12 @@ MT_TEST(file_round_trip)
     MT_EQ(kb.key[KEYBIND_A], SDLK_q);
     MT_EQ(kb.key[KEYBIND_B], SDLK_e);
     MT_EQ(kb.key[KEYBIND_UP], SDLK_w);
-    MT_EQ(kb.key[KEYBIND_FAST_FORWARD], SDLK_LSHIFT);
     MT_CHECK(kb.custom[KEYBIND_A] && kb.custom[KEYBIND_UP] && !kb.custom[KEYBIND_START]);
     MT_EQ(kb.key[KEYBIND_START], SDLK_RETURN); // untouched keys keep their default
     Keybinds_Write(&kb, file, &sNames);
     fclose(file);
     MT_CHECK(strstr(buffer, "key.a=Q\n") != NULL);
-    MT_CHECK(strstr(buffer, "key.fastforward=Left Shift\n") != NULL);
+    MT_CHECK(strstr(buffer, "fastforward") == NULL);   // an old line is dropped when the file is written again
     MT_CHECK(strstr(buffer, "key.start") == NULL); // only the changed ones
     Keybinds_Defaults(&again);
     for (line = strtok(buffer, "\n"); line != NULL; line = strtok(NULL, "\n"))
@@ -314,7 +313,7 @@ MT_TEST(labels_are_short_and_upper_case)
     MT_CHECK(strcmp(label, "?") == 0);
     Keybinds_KeyLabel(SDLK_LSHIFT, &sNames, label, 5); // truncated, still terminated
     MT_CHECK(strcmp(label, "LEFT") == 0);
-    MT_CHECK(strlen(Keybinds_ActionLabel(KEYBIND_FAST_FORWARD)) > 0);
+    MT_CHECK(strlen(Keybinds_ActionLabel(KEYBIND_RIGHT)) > 0);
     MT_CHECK(strcmp(Keybinds_ConfigName(KEYBIND_A), "key.a") == 0);
 }
 

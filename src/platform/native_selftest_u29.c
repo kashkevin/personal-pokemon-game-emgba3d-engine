@@ -801,15 +801,16 @@ int NativeSelfTest_DumpLegendPool(const char *outPath)
 
 int NativeSelfTest_Shiny(void)
 {
-    static const struct { const char *name; bool32 charm, safari; u32 rolls; } sCases[] =
-    {
-        {"normal wild Pokemon", FALSE, FALSE, 1},
-        {"normal wild Pokemon with the Shiny Charm", TRUE, FALSE, 3},
-        {"Safari Zone", FALSE, TRUE, 2},
-        {"Safari Zone with the Shiny Charm", TRUE, TRUE, 4},
-    };
     const u32 n = 20000000;
-    const double p = 16.0 / 65536.0;
+    const double p = 16.0 / 65536.0, f = 41848.0 / 65536.0;
+    // Update 30 targets: 1/4096; Charm about 1/2500 (one extra roll made with chance f); Safari 1/2048.3 (two rolls); Safari + Charm 1/1024.4 (four)
+    const struct { const char *name; bool32 charm, safari; double odds; } sCases[] =
+    {
+        {"normal wild Pokemon", FALSE, FALSE, p},
+        {"normal wild Pokemon with the Shiny Charm", TRUE, FALSE, p + f * p * (1.0 - p)},
+        {"Safari Zone", FALSE, TRUE, 1.0 - (1.0 - p) * (1.0 - p)},
+        {"Safari Zone with the Shiny Charm", TRUE, TRUE, 1.0 - __builtin_pow(1.0 - p, 4)},
+    };
 
     InitHeap(gHeap, HEAP_SIZE);
     SetSaveBlocksPointers(0);
@@ -824,7 +825,7 @@ int NativeSelfTest_Shiny(void)
     for (u32 c = 0; c < ARRAY_COUNT(sCases); c++)
     {
         u32 hits = 0, i;
-        double odds = 1.0 - __builtin_pow(1.0 - p, sCases[c].rolls), expected = n * odds, sigma = __builtin_sqrt(expected * (1.0 - odds)), diff;
+        double odds = sCases[c].odds, expected = n * odds, sigma = __builtin_sqrt(expected * (1.0 - odds)), diff;
         char what[160];
 
         ClearBag();
@@ -839,9 +840,9 @@ int NativeSelfTest_Shiny(void)
             if (ComputePlayerShinyOdds(Random32(), 0x00123456))
                 hits++;
         diff = (double)hits - expected;
-        printf("%s: %u rolls of 1/4096 -> %u shiny of %u (expected %.0f +- %.0f), observed 1 in %.1f, documented 1 in %.1f\n", sCases[c].name,
-               sCases[c].rolls, hits, n, expected, sigma, hits ? (double)n / hits : 0.0, 1.0 / odds);
-        snprintf(what, sizeof(what), "%s: shiny odds match %u independent rolls of 1/4096 (within 4.5 sigma)", sCases[c].name, sCases[c].rolls);
+        printf("%s: %u shiny of %u (expected %.0f +- %.0f), observed 1 in %.1f, documented 1 in %.1f\n", sCases[c].name,
+               hits, n, expected, sigma, hits ? (double)n / hits : 0.0, 1.0 / odds);
+        snprintf(what, sizeof(what), "%s: shiny odds are 1 in %.1f (within 4.5 sigma)", sCases[c].name, 1.0 / odds);
         ExpectLeg(what, diff > -4.5 * sigma && diff < 4.5 * sigma);
     }
     // the Charm belongs to the bag it is in: with another save's empty bag a hunter gets the plain odds (checked above by case 1)
@@ -879,7 +880,7 @@ int NativeSelfTest_Shiny(void)
     // shared (multiplayer) spawns: the Charm's two extra rolls are a pure function of the Pokemon, so they cannot be rerolled
     {
         u32 hits = 0, total = 20000000, again = 0, mixed = 0;
-        double expected = total * (8191.0 / 16777216.0), sigma = __builtin_sqrt(expected), diff;
+        double q = 669574.0 / 4294967296.0, expected = total * q, sigma = __builtin_sqrt(expected), diff;
 
         SeedRng(0x5A4ED);
         for (u32 i = 0; i < total; i++)
@@ -896,8 +897,8 @@ int NativeSelfTest_Shiny(void)
         }
         diff = (double)hits - expected;
         printf("shared spawns, Charm bonus: %u shiny in %u Pokemon (expected %.0f +- %.0f, 1 in %.1f); total with the host's 1/4096: 1 in %.1f\n",
-               hits, total, expected, sigma, total / (double)hits, 1.0 / (1.0 - (4095.0 / 4096.0) * (1.0 - 8191.0 / 16777216.0)));
-        ExpectLeg("(shared) the Charm bonus on a shared spawn converges to two extra 1/4096 rolls", diff > -4.5 * sigma && diff < 4.5 * sigma);
+               hits, total, expected, sigma, total / (double)hits, 1.0 / (1.0 - (4095.0 / 4096.0) * (1.0 - q)));
+        ExpectLeg("(shared) the Charm bonus on a shared spawn converges to the 1-in-2500 target", diff > -4.5 * sigma && diff < 4.5 * sigma);
         ExpectLeg("(shared) claiming the same Pokemon again always gives the same answer (nothing to reroll)", again == 0);
         ExpectLeg("(shared) different Pokemon give different answers (the hash is not constant)", mixed > 0);
     }

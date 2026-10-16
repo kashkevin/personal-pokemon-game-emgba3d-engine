@@ -27,6 +27,10 @@ import sys
 
 from elftools.elf.elffile import ELFFile
 
+# Types the PC game extends after the GBA's last member (value: how many members it adds). The GBA part is unchanged.
+#   SaveBlock3: the Day Care egg queue after the 600-byte ownership profile (Update 30; the sector padding rules are in flash.py).
+PC_ONLY_TAILS = {'SaveBlock3': 1}
+
 ENGINE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PROBE = 'tools/pc_port/abi_probe.c'
 OUT_DIR = os.path.join(ENGINE, 'build', 'abi')
@@ -187,6 +191,10 @@ def compare(gba, pc):
             p = by_name.get((g['kind'], g['name']))
         if g is None or p is None:
             bad[key] = 'type only present on one target'
+            return
+        if g['name'] in PC_ONLY_TAILS and len(p['members']) == len(g['members']) + PC_ONLY_TAILS[g['name']] \
+                and g['members'] == p['members'][:len(g['members'])]:
+            # A deliberate PC-only tail after the GBA's members (the same prefix, byte for byte); see PC_ONLY_TAILS.
             return
         if g['size'] != p['size']:
             bad[key] = 'size gba=%d pc=%d' % (g['size'], p['size'])

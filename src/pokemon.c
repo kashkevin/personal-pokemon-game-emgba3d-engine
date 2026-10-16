@@ -867,6 +867,13 @@ void CreateMonWithIVs(struct Pokemon *mon, enum Species species, u8 level, u32 p
     CalculateMonStats(mon);
 }
 
+#ifdef PORTABLE
+// Update 30: shiny rates (docs/update30-gameplay.md). Egg rolls are set around egg generation by platform/mp_breeding.c.
+u8 gMPEggShinyRolls;
+#define MP_CHARM_EXTRA_ROLL_CHANCE 41848     // out of 65536: the Charm's partial extra roll outside the Safari Zone (1 in 2500)
+#define MP_SAFARI_CHARM_ADDITIONAL_ROLLS 2   // Safari + Charm: 4 rolls in all (1 in 1024.4)
+#endif
+#line 870 // gba-line
 bool32 ComputePlayerShinyOdds(u32 personality, u32 value)
 {
     if (FlagGet(P_FLAG_FORCE_NO_SHINY))
@@ -875,6 +882,22 @@ bool32 ComputePlayerShinyOdds(u32 personality, u32 value)
     if (FlagGet(P_FLAG_FORCE_SHINY))
         return TRUE;
 
+#ifdef PORTABLE
+    // Update 30: an Egg made at the Day Care has its own shiny calculation (gMPEggShinyRolls independent 1/4096 rolls: 1; 3 with a
+    // shiny parent or the Shiny Charm; 6 with both), never the wild one below (no lure, chain, DexNav or Safari bonus).
+    if (gMPEggShinyRolls != 0)
+    {
+        u32 eggRerolls = gMPEggShinyRolls - 1;
+
+        while (GET_SHINY_VALUE(value, personality) >= MP_GEN6_SHINY_ODDS && eggRerolls > 0)
+        {
+            personality = Random32();
+            eggRerolls--;
+        }
+        return GET_SHINY_VALUE(value, personality) < MP_GEN6_SHINY_ODDS;
+    }
+#endif
+#line 878 // gba-line
     // Gen 6 personal-static generation uses the 16-value shiny xor range.
     // Keep the stored-mon/display predicate unchanged: CreateBoxMon writes
     // MON_DATA_IS_SHINY through the existing shinyModifier representation.
@@ -900,8 +923,23 @@ bool32 ComputePlayerShinyOdds(u32 personality, u32 value)
 
     u32 totalRerolls = 0;
 
+#ifdef PORTABLE
+    // Update 30: the Shiny Charm outside the Safari Zone makes a wild Pokemon shiny about 1 in 2500 (1 in 4096 without it): one extra
+    // 1/4096 roll made with probability 41848/65536 (exactly p + f*p*(1-p) = 1/2500.009). Inside the Safari Zone it adds two rolls
+    // (four in all: about 1 in 1024). The bonus is applied once, here, for the hunter's own bag.
+    if (CheckBagHasItem(ITEM_SHINY_CHARM, 1))
+    {
+        if (FlagGet(FLAG_SYS_SAFARI_MODE))
+            totalRerolls += MP_SAFARI_CHARM_ADDITIONAL_ROLLS;
+        else if ((Random() & 0xFFFF) < MP_CHARM_EXTRA_ROLL_CHANCE)
+            totalRerolls += 1;
+    }
+#else
+#line 903 // gba-line
     if (CheckBagHasItem(ITEM_SHINY_CHARM, 1))
         totalRerolls += I_SHINY_CHARM_ADDITIONAL_ROLLS;
+#endif
+#line 905 // gba-line
 
     if (LURE_STEP_COUNT != 0)
         totalRerolls += 1;

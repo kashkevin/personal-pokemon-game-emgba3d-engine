@@ -33,7 +33,6 @@ struct GamepadKeys
 {
     uint16_t keys;           // GBA key bits (A_BUTTON... DPAD_DOWN)
     bool details;            // Y: no game button, the native UI's details view
-    bool fastForward;        // right trigger held
 };
 
 struct GamepadKeys Gamepad_MapKeys(const struct GamepadInput *input);

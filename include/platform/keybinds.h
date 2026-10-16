@@ -34,9 +34,8 @@ enum KeybindAction
     KEYBIND_DOWN,
     KEYBIND_LEFT,
     KEYBIND_RIGHT,
-    KEYBIND_FAST_FORWARD,
     KEYBIND_COUNT,
-    KEYBIND_GAME_BUTTONS = KEYBIND_FAST_FORWARD, /* the actions before this are GBA buttons */
+    KEYBIND_GAME_BUTTONS = KEYBIND_COUNT, /* every action is a GBA button (the 2x "fast forward" key was removed in Update 30) */
 };
 
 /* SDL's names for keys; sdl2.c passes SDL_GetKeyName / SDL_GetKeyFromName, tests pass their own. */
@@ -64,7 +63,7 @@ enum KeybindResult
 
 void Keybinds_Defaults(struct Keybinds *kb);
 int Keybinds_DefaultKey(int action);
-/* "A", "Fast forward"... : what the settings screens call the action. */
+/* "A", "Start"... : what the settings screens call the action. */
 const char *Keybinds_ActionLabel(int action);
 /* "key.a" ... the line's name in game-settings.cfg. */
 const char *Keybinds_ConfigName(int action);
