@@ -43,6 +43,10 @@
 #include "strings.h"
 #include "string_util.h"
 #include "task.h"
+#ifdef PORTABLE
+#include "platform/mp_legend.h"
+#endif
+#line 46 // gba-line
 #include "trainer_hill.h"
 #include "trainer_pools.h"
 #include "trainer_see.h"
@@ -338,6 +342,10 @@ static bool8 CheckSilphScopeInPokemonTower(u16 mapGroup, u16 mapNum)
 
 void BattleSetup_StartWildBattle(void)
 {
+#ifdef PORTABLE
+    MPLegend_ApplyToPendingWildBattle();
+#endif
+#line 341 // gba-line
     if (GetSafariZoneFlag())
         DoSafariBattle();
     else if (CheckSilphScopeInPokemonTower(gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum))

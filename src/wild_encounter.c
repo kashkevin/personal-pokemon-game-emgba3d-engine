@@ -23,6 +23,10 @@
 #include "tv.h"
 #include "wild_encounter.h"
 #include "mp_wild_random.h"
+#ifdef PORTABLE
+#include "platform/mp_legend.h"
+#endif
+#line 26 // gba-line
 #include "battle_debug.h"
 #include "battle_pike.h"
 #include "battle_pyramid.h"
@@ -581,6 +585,10 @@ bool8 TryGenerateWildMon(const struct WildPokemonInfo *wildMonInfo, enum WildPok
 
     // Project: randomized rarity-weighted Gen 1-6 species; the table keeps the level.
     CreateWildMon(MPWild_RandomizeSpecies(wildMonInfo->wildPokemon[wildMonIndex].species, level, area), level);
+#ifdef PORTABLE
+    MPLegend_NoteWildMon(area);
+#endif
+#line 584 // gba-line
     return TRUE;
 }
 
@@ -593,6 +601,10 @@ static u16 GenerateFishingWildMon(const struct WildPokemonInfo *wildMonInfo, u8 
     wildMonSpecies = MPWild_RandomizeSpecies(wildMonSpecies, level, WILD_AREA_FISHING);
     UpdateChainFishingStreak();
     CreateWildMon(wildMonSpecies, level);
+#ifdef PORTABLE
+    MPLegend_NoteWildMon(WILD_AREA_FISHING);
+#endif
+#line 600 // gba-line
     return wildMonSpecies;
 }
 

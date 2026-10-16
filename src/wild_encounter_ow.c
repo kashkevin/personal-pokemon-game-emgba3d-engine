@@ -34,6 +34,7 @@
 #include "constants/wild_encounter.h"
 #ifdef PORTABLE
 #include "multiplayer_spawns.h"
+#include "platform/mp_legend.h"
 #endif
 #line 35 // gba-line
 
@@ -509,6 +510,14 @@ void StartWildBattleWithOWE(struct ScriptContext *ctx)
     CreateMonWithIVs(&gParties[B_TRAINER_OPPONENT_A][0], speciesId, level, personality, OTID_STRUCT_PLAYER_ID, USE_RANDOM_IVS);
     GiveMonInitialMoveset(&gParties[B_TRAINER_OPPONENT_A][0]);
     SetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_IS_SHINY, &shiny);
+#ifdef PORTABLE
+    // Update 29: a generated overworld Pokemon the player walks into is one random wild encounter (the Legendary roll is
+    // made when the battle starts, not when the Pokemon appears, so a visible spawn cannot be picked for its species)
+    if (category == OWE_CATEGORY_WILD && IS_LOCALID_GENERATED_OWE(owe->localId))
+        MPLegend_NoteWildMon(MetatileBehavior_IsWaterWildEncounter(MapGridGetMetatileBehaviorAt(owe->currentCoords.x, owe->currentCoords.y))
+                             ? WILD_AREA_WATER : WILD_AREA_LAND);
+#endif
+#line 512 // gba-line
     
     if (StartWildBattleWithOWE_CheckBattleFrontier(headerId))
         return;
