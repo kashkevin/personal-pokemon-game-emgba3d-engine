@@ -33,6 +33,7 @@
 #include "platform/dma.h"
 #include "platform/framedraw.h"
 #include "platform/mp_bridge.h"
+#include "platform/shell_menu.h"
 #include "platform/benchmark.h"
 #include "platform/display_settings.h"
 #include "platform/keybinds.h"
@@ -584,6 +585,9 @@ int main(int argc, char **argv)
         // Before the console below: stdout must stay the launcher's pipe.
         if (strcmp(argv[i], "--probe-graphics") == 0)
             return RunGraphicsProbe();
+        // The pre-game menu (include/platform/shell_menu.h): no game, no ROM, no console; stdout is the application's pipe.
+        if (strcmp(argv[i], "--shell") == 0)
+            return ShellMenu_Main(argc, argv);
     }
 
     // Open an output console on Windows
