@@ -771,6 +771,7 @@ extern u32 MPWild_TestFamilyCount(void);
 extern const struct MPWildFamily *MPWild_TestFamily(u32 index);
 extern const struct MPWildMember *MPWild_TestMembers(void);
 extern u32 MPWild_TestFamilyWeight(u32 index, u32 habitat, bool32 night, u8 weather);
+extern bool32 MPWild_TestSafariOnly(u32 index);
 
 #define NO_TYPE 0xFF
 
@@ -874,6 +875,8 @@ static void CheckClearWeights(const char *mapName, u32 areaTypes)
                         want *= 3;
                     if (want == 0)
                         want = 1;
+                    if (MPWild_TestSafariOnly(i))
+                        want = 0;       // Update 29: found only inside the Safari Zone (the test runs with the Safari flag clear)
                 }
                 if (got != want && bad++ == 0)
                     printf("  %s, %s, %s: family %u weighs %u, want %u\n", mapName, sHabitatNames[h],

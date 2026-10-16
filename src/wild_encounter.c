@@ -604,7 +604,7 @@ static u16 GenerateFishingWildMon(const struct WildPokemonInfo *wildMonInfo, u8 
 #ifdef PORTABLE
     MPLegend_NoteWildMon(WILD_AREA_FISHING);
 #endif
-#line 600 // gba-line
+#line 596 // gba-line
     return wildMonSpecies;
 }
 

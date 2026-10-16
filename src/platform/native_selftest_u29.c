@@ -125,6 +125,12 @@ int NativeSelfTest_DumpSpeciesData(const char *outPath)
 #include "constants/maps.h"
 #include "constants/region_map_sections.h"
 #include "constants/weather.h"
+#include "field_weather.h"
+
+extern u32 MPWild_TestFamilyCount(void);
+extern const struct MPWildFamily *MPWild_TestFamily(u32 index);
+extern const struct MPWildMember *MPWild_TestMembers(void);
+extern u32 MPWild_TestFamilyWeight(u32 index, u32 habitat, bool32 night, u8 weather);
 
 #define TAG_FIELD    MP_LEGEND_FIELD
 #define MP_LEGEND_SPECIES_COUNT_MAX 64
@@ -670,6 +676,172 @@ int NativeSelfTest_Legend(void)
         MPLegend_TestForce(0);
     }
 
+    // 6. Safari-only ordinary Pokemon (Kangaskhan, Tauros, Happiny, Scyther, Pinsir, Heracross, Mime Jr., Farfetch'd): weight 0
+    //    outside the Zone, a normal weight inside it, found in the Zone's grass and never on an ordinary route
+    {
+        u32 families = MPWild_TestFamilyCount(), exclusives = 0, rareBoosted = 0, rareTotal = 0, outside = 0, inside = 0;
+        static u8 isExclusive[1500];
+#define MP_WILD_SAFARI_RARE_BOOST_TEST 3
+        const struct MPWildMember *members = MPWild_TestMembers();
+        u32 insideAll = 0, outsideAll = 0;
+
+        memset(isExclusive, 0, sizeof(isExclusive));
+        for (u32 f = 0; f < families; f++)
+        {
+            const struct MPWildFamily *family = MPWild_TestFamily(f);
+            u32 out, in;
+
+            UseMapHeader(MAP_ROUTE101);
+            FlagClear(FLAG_SYS_SAFARI_MODE);
+            out = MPWild_TestFamilyWeight(f, MP_WILD_HABITAT_LAND, FALSE, WEATHER_NONE);
+            UseMapHeader(MAP_SAFARI_ZONE_SOUTH);
+            FlagSet(FLAG_SYS_SAFARI_MODE);
+            in = MPWild_TestFamilyWeight(f, MP_WILD_HABITAT_LAND, FALSE, WEATHER_NONE);
+            outsideAll += out;
+            insideAll += in;
+            if (out == 0 && in > 0)
+            {
+                for (u32 m = 0; m < family->memberCount; m++)
+                    isExclusive[members[family->firstMember + m].species] = 1;
+                exclusives++;
+            }
+            else if (family->tier >= MP_WILD_TIER_RARE && out > 0)
+            {
+                rareTotal++;
+                if (in == out * MP_WILD_SAFARI_RARE_BOOST_TEST)
+                    rareBoosted++;
+            }
+        }
+        ExpectLeg("exactly eight families (the Safari-only ones) have weight 0 outside the Zone and a weight inside it", exclusives == 8);
+        ExpectLeg("(Safari) every other rare and very rare family is three times as likely inside the Zone", rareTotal > 0 && rareBoosted == rareTotal);
+        ExpectLeg("(Safari) the Zone's pool is wider than the routes' (exclusives plus the boosted rares)", insideAll > outsideAll);
+        SeedRng(0x2961);
+        FlagClear(FLAG_SYS_SAFARI_MODE);
+        UseMapHeader(MAP_ROUTE101);
+        for (i = 0; i < 1500000; i++)
+        {
+            u16 species = MPWild_RandomizeSpecies(SPECIES_ZIGZAGOON, 3, WILD_AREA_LAND);
+
+            if (species < ARRAY_COUNT(isExclusive) && isExclusive[species])
+                outside++;
+        }
+        ExpectLeg("(1.5M encounters on Route 101) no Safari-only Pokemon ever appears outside the Safari Zone", outside == 0);
+        UseMapHeader(MAP_SAFARI_ZONE_SOUTH);
+        FlagSet(FLAG_SYS_SAFARI_MODE);
+        for (i = 0; i < 3000000; i++)
+        {
+            u16 species = MPWild_RandomizeSpecies(SPECIES_ZIGZAGOON, 28, WILD_AREA_LAND);
+
+            if (species < ARRAY_COUNT(isExclusive) && isExclusive[species])
+                inside++;
+        }
+        ExpectLeg("(3M encounters in the Safari Zone) the Safari-only Pokemon do appear, as a few percent of encounters", inside > 3000000 / 200 && inside < 3000000 / 4);
+        FlagClear(FLAG_SYS_SAFARI_MODE);
+        UseMapHeader(MAP_ROUTE101);
+    }
+
     printf("selftest-legend: %d checks, %d failed\n", sLegChecks, sLegFailures);
+    return sLegFailures ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// --selftest-shiny (Update 29): the shiny rolls of a wild Pokemon, through the game's own ComputePlayerShinyOdds.
+// Every roll is an independent 1/4096 (16/65536). The number of rolls is 1, plus 2 with the Shiny Charm, plus 1 inside the
+// Safari Zone, so the odds are exactly 1 - (4095/4096)^rolls:
+//     normal 1/4096       Charm 3 rolls 1/1365.6      Safari 2 rolls 1/2048.5      Safari + Charm 4 rolls 1/1024.4
+// The test runs 20 million creations of each and compares with these (4.5 sigma), checks that the Charm is the hunter's own
+// (a bag without it gets nothing), that it leaves the Legendary/Mythical share alone, and that stored Pokemon keep their status.
+// ---------------------------------------------------------------------------------------------------------------------
+#include "item.h"
+
+int NativeSelfTest_Shiny(void)
+{
+    static const struct { const char *name; bool32 charm, safari; u32 rolls; } sCases[] =
+    {
+        {"normal wild Pokemon", FALSE, FALSE, 1},
+        {"normal wild Pokemon with the Shiny Charm", TRUE, FALSE, 3},
+        {"Safari Zone", FALSE, TRUE, 2},
+        {"Safari Zone with the Shiny Charm", TRUE, TRUE, 4},
+    };
+    const u32 n = 20000000;
+    const double p = 16.0 / 65536.0;
+
+    InitHeap(gHeap, HEAP_SIZE);
+    SetSaveBlocksPointers(0);
+    memset(gSaveBlock1Ptr, 0, sizeof(*gSaveBlock1Ptr));
+    memset(gSaveBlock2Ptr, 0, sizeof(*gSaveBlock2Ptr));
+    SetBagItemsPointers();
+    ClearBag();
+    printf("selftest-shiny: Update 29 shiny rolls\n");
+    ExpectLeg("the Shiny Charm is a Key Item the bag can hold and the game's shiny code reads from the hunter's own bag",
+              AddBagItem(ITEM_SHINY_CHARM, 1) && CheckBagHasItem(ITEM_SHINY_CHARM, 1));
+    ClearBag();
+    for (u32 c = 0; c < ARRAY_COUNT(sCases); c++)
+    {
+        u32 hits = 0, i;
+        double odds = 1.0 - __builtin_pow(1.0 - p, sCases[c].rolls), expected = n * odds, sigma = __builtin_sqrt(expected * (1.0 - odds)), diff;
+        char what[160];
+
+        ClearBag();
+        if (sCases[c].charm)
+            AddBagItem(ITEM_SHINY_CHARM, 1);
+        FlagClear(FLAG_SYS_SAFARI_MODE);
+        if (sCases[c].safari)
+            FlagSet(FLAG_SYS_SAFARI_MODE);
+        gSaveBlock2Ptr->playerTrainerId[0] = 0x39; gSaveBlock2Ptr->playerTrainerId[1] = 0x30;     // some trainer id
+        SeedRng(0x5110 + c);
+        for (i = 0; i < n; i++)
+            if (ComputePlayerShinyOdds(Random32(), 0x00123456))
+                hits++;
+        diff = (double)hits - expected;
+        printf("%s: %u rolls of 1/4096 -> %u shiny of %u (expected %.0f +- %.0f), observed 1 in %.1f, documented 1 in %.1f\n", sCases[c].name,
+               sCases[c].rolls, hits, n, expected, sigma, hits ? (double)n / hits : 0.0, 1.0 / odds);
+        snprintf(what, sizeof(what), "%s: shiny odds match %u independent rolls of 1/4096 (within 4.5 sigma)", sCases[c].name, sCases[c].rolls);
+        ExpectLeg(what, diff > -4.5 * sigma && diff < 4.5 * sigma);
+    }
+    // the Charm belongs to the bag it is in: with another save's empty bag a hunter gets the plain odds (checked above by case 1)
+    FlagClear(FLAG_SYS_SAFARI_MODE);
+    ClearBag();
+    ExpectLeg("without the Charm in the bag the Safari flag alone gives two rolls, not four",
+              (FlagSet(FLAG_SYS_SAFARI_MODE), !CheckBagHasItem(ITEM_SHINY_CHARM, 1)));
+    FlagClear(FLAG_SYS_SAFARI_MODE);
+
+    // the Charm does not touch the Legendary/Mythical probability: 6 million Route 101 encounters with the Charm
+    {
+        const struct WildPokemonInfo *info = InfoFor(MAP_ROUTE101, WILD_AREA_LAND);
+        u32 legend = 0, total = 6000000;
+        double expected = total / 6000.0, sigma = __builtin_sqrt(expected), diff;
+
+        AddBagItem(ITEM_SHINY_CHARM, 1);
+        ZeroPlayerPartyMons();
+        CreateMon(&gParties[B_TRAINER_PLAYER][0], SPECIES_TREECKO, 5, 0x12345678, OTID_STRUCT_PLAYER_ID);
+        UseMapHeader(MAP_ROUTE101);
+        SeedRng(0xC4A8);
+        for (u32 i = 0; i < total; i++)
+        {
+            ZeroEnemyPartyMons();
+            TryGenerateWildMon(info, WILD_AREA_LAND, 0);
+            MPLegend_ApplyToPendingWildBattle();
+            if (InPool(GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_SPECIES)))
+                legend++;
+        }
+        diff = (double)legend - expected;
+        printf("with the Shiny Charm in the bag: %u Legendary/Mythical in %u Route 101 encounters (expected %.0f +- %.0f)\n", legend, total, expected, sigma);
+        ExpectLeg("the Shiny Charm does not change the Legendary/Mythical probability", diff > -4.5 * sigma && diff < 4.5 * sigma);
+    }
+    ClearBag();
+
+    // stored Pokemon keep their shininess: the stored predicate and the modifier bit are unchanged
+    {
+        struct Pokemon mon;
+        u32 shiny = 1, notShiny = 0;
+
+        CreateMon(&mon, SPECIES_PIKACHU, 20, 0x11112222, OTID_STRUCT_PLAYER_ID);
+        SetMonData(&mon, MON_DATA_IS_SHINY, &shiny);
+        ExpectLeg("a stored shiny Pokemon stays shiny after being written and read", GetMonData(&mon, MON_DATA_IS_SHINY) == 1);
+        SetMonData(&mon, MON_DATA_IS_SHINY, &notShiny);
+        ExpectLeg("a stored ordinary Pokemon stays ordinary", GetMonData(&mon, MON_DATA_IS_SHINY) == 0);
+    }
+    printf("selftest-shiny: %d checks, %d failed\n", sLegChecks, sLegFailures);
     return sLegFailures ? 1 : 0;
 }

@@ -517,7 +517,7 @@ void StartWildBattleWithOWE(struct ScriptContext *ctx)
         MPLegend_NoteWildMon(MetatileBehavior_IsWaterWildEncounter(MapGridGetMetatileBehaviorAt(owe->currentCoords.x, owe->currentCoords.y))
                              ? WILD_AREA_WATER : WILD_AREA_LAND);
 #endif
-#line 512 // gba-line
+#line 486 // gba-line
     
     if (StartWildBattleWithOWE_CheckBattleFrontier(headerId))
         return;

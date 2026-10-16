@@ -907,6 +907,16 @@ bool32 ComputePlayerShinyOdds(u32 personality, u32 value)
         totalRerolls += 1;
 
     totalRerolls += CalculateChainFishingShinyRolls();
+#ifdef PORTABLE
+#ifndef MP_SAFARI_SHINY_ADDITIONAL_ROLLS
+#define MP_SAFARI_SHINY_ADDITIONAL_ROLLS 1
+#endif
+    // Update 29: the Safari Zone is the shiny hunting ground: one extra roll while inside it (two rolls = about 1/2048; with the
+    // Shiny Charm's two extra rolls four = about 1/1024). Rolls add up as independent 1/4096 rolls, so the odds stay exact.
+    if (FlagGet(FLAG_SYS_SAFARI_MODE))
+        totalRerolls += MP_SAFARI_SHINY_ADDITIONAL_ROLLS;
+#endif
+#line 910 // gba-line
 
     if (gDexNavSpecies)
         totalRerolls += CalculateDexNavShinyRolls();

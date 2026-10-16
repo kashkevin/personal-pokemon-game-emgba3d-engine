@@ -8,6 +8,8 @@
 #if defined(PLATFORM_SDL2)
 #include "field_weather.h"
 #include "constants/weather.h"
+#include "event_data.h"
+#include "constants/flags.h"
 #endif
 #line 8 // gba-line
 
@@ -114,6 +116,22 @@ static u32 GetFamilyWeight(const struct MPWildFamily *family, u32 habitat, bool3
 #define MP_WILD_WEATHER_HEAVY_RARE_BOOST 2   // x weight for rare families in heavy rain
 #endif
 
+#include "platform/mp_wild_safari.h"
+
+// Safari Zone (PC builds): the families flagged in mp_wild_safari.h (Kangaskhan, Tauros, ...) are found only inside the
+// Safari Zone, where every rare and very rare family is also MP_WILD_SAFARI_RARE_BOOST times as likely. Outside it the
+// exclusives have weight 0, so they never leave the Zone; inside it nothing is removed from the ordinary pool.
+static u32 SafariAdjust(const struct MPWildFamily *family, u32 weight)
+{
+    bool32 safari = FlagGet(FLAG_SYS_SAFARI_MODE);
+
+    if (sMPWildSafariFlags[family - sMPWildFamilies] != 0 && MP_WILD_SAFARI_EXCLUSIVE)
+        return safari ? weight * MP_WILD_SAFARI_RARE_BOOST : 0;
+    if (safari && family->tier >= MP_WILD_TIER_RARE)
+        weight *= MP_WILD_SAFARI_RARE_BOOST;
+    return weight;
+}
+
 static u32 GetWeatherWeight(const struct MPWildFamily *family, u32 weight, u8 weather)
 {
     u32 primary = 0, secondary = 0, familyTypes = TYPE_BIT(family->type1) | TYPE_BIT(family->type2);
@@ -161,7 +179,7 @@ static u32 GetWeatherWeight(const struct MPWildFamily *family, u32 weight, u8 we
         weight *= MP_WILD_WEATHER_SECONDARY_BOOST;
     if (heavy && family->tier >= MP_WILD_TIER_RARE)
         weight *= MP_WILD_WEATHER_HEAVY_RARE_BOOST;
-    return weight;
+    return SafariAdjust(family, weight);
 }
 #endif
 
@@ -302,6 +320,11 @@ const struct MPWildFamily *MPWild_TestFamily(u32 index)
 const struct MPWildMember *MPWild_TestMembers(void)
 {
     return sMPWildMembers;
+}
+
+bool32 MPWild_TestSafariOnly(u32 index)
+{
+    return index < MP_WILD_FAMILY_COUNT && MP_WILD_SAFARI_EXCLUSIVE && sMPWildSafariFlags[index] != 0;
 }
 
 u32 MPWild_TestFamilyWeight(u32 index, u32 habitat, bool32 night, u8 weather)
