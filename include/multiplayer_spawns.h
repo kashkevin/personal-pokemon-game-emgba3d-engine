@@ -124,6 +124,9 @@ bool32 MultiplayerSpawns_IsSpawnObject(const struct ObjectEvent *objectEvent);
 bool32 MultiplayerSpawns_TryClaimTalked(void); // FALSE: the talked object is no spawn
 bool32 MultiplayerSpawns_InInteraction(void);
 void MultiplayerSpawns_StartBattle(void);
+// Shiny Charm on a shared spawn (Update 29): a pure function of the spawn's id and personality (no random source).
+u32 MultiplayerSpawns_CharmHash(u32 spawnId, u32 personality);
+bool32 MultiplayerSpawns_CharmMakesShiny(u32 spawnId, u32 personality);
 u8 MultiplayerSpawns_TakeResult(void);
 bool32 MultiplayerSpawns_OnScriptedBattleEnd(void); // TRUE when it was a shared spawn's battle
 

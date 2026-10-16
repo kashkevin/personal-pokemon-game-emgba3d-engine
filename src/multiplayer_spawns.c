@@ -12,6 +12,7 @@
 #include "event_scripts.h"
 #include "field_effect.h"
 #include "field_weather.h"
+#include "item.h"
 #include "fieldmap.h"
 #include "main.h"
 #include "metatile_behavior.h"
@@ -25,6 +26,7 @@
 #include "constants/battle.h"
 #include "constants/event_objects.h"
 #include "constants/event_object_movement.h"
+#include "constants/items.h"
 #include "constants/songs.h"
 #include "constants/trainer_types.h"
 
@@ -770,6 +772,29 @@ bool32 MultiplayerSpawns_InInteraction(void)
     return sInteraction;
 }
 
+// Update 29, Shiny Charm on a shared spawn. The host rolls a shared Pokemon's shiny status once, when it appears (one
+// 1/4096 roll for everybody); the Charm is the claiming player's own, so its two extra rolls are made here from the Pokemon's
+// own numbers, not from a random source: the same Pokemon gives the same answer however often it is claimed, released and
+// claimed again, after a reconnect, and on every game, so there is nothing to reroll. A hash of (spawn id, personality) falls
+// below 8191 x 256 of 2^32 exactly as often as two independent 1/4096 rolls would hit: 1 - (4095/4096)^2 = 8191/4096^2.
+// Only the Charm's owner gets it (the bag is the player's own); nobody else's game is changed.
+#define MP_SPAWN_CHARM_THRESHOLD (8191u * 256u)
+
+u32 MultiplayerSpawns_CharmHash(u32 spawnId, u32 personality)
+{
+    u64 z = ((u64)spawnId << 32 | personality) + 0x9E3779B97F4A7C15ull;
+
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+    z ^= z >> 31;
+    return (u32)(z >> 32);
+}
+
+bool32 MultiplayerSpawns_CharmMakesShiny(u32 spawnId, u32 personality)
+{
+    return MultiplayerSpawns_CharmHash(spawnId, personality) < MP_SPAWN_CHARM_THRESHOLD;
+}
+
 void MultiplayerSpawns_StartBattle(void)
 {
     const struct MultiplayerSpawnSlot *slot = FindSlot(sClaimSpawnId);
@@ -795,6 +820,8 @@ void MultiplayerSpawns_StartBattle(void)
         level = MAX_LEVEL;
     species = SlotSpecies(slot);
     shiny = (slot->flags & MP_SPAWN_SLOT_SHINY) ? TRUE : FALSE;
+    if (!shiny && CheckBagHasItem(ITEM_SHINY_CHARM, 1))
+        shiny = MultiplayerSpawns_CharmMakesShiny(slot->spawnId, slot->personality);
     // The host's personality: every game derives the same gender, nature,
     // ability and Unown letter; the host alone decides shininess.
     ZeroEnemyPartyMons();

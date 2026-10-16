@@ -744,6 +744,50 @@ int NativeSelfTest_Legend(void)
     return sLegFailures ? 1 : 0;
 }
 
+// --dump-legend-pool FILE: the game's own Legendary/Mythical pool for every map with land encounters, every weather and both
+// times of day, so scripts/multiplayer/check_legend_pool.py can compare it with the host's port (legend_rules.py).
+//   "L group number weather night count species..."  (land encounter area of that map)
+int NativeSelfTest_DumpLegendPool(const char *outPath)
+{
+    FILE *out = fopen(outPath, "w");
+
+    if (out == NULL)
+        return 1;
+    InitHeap(gHeap, HEAP_SIZE);
+    SetSaveBlocksPointers(0);
+    memset(gSaveBlock1Ptr, 0, sizeof(*gSaveBlock1Ptr));
+    memset(gSaveBlock2Ptr, 0, sizeof(*gSaveBlock2Ptr));
+    for (u32 i = 0; gWildMonHeaders[i].mapGroup != MAP_GROUP(MAP_UNDEFINED); i++)
+    {
+        const struct MapHeader *header = Overworld_GetMapHeaderByGroupAndId(gWildMonHeaders[i].mapGroup, gWildMonHeaders[i].mapNum);
+
+        if (header == NULL)
+            continue;
+        {
+            bool32 hasLand = FALSE;
+
+            for (u32 t = 0; t < TIMES_OF_DAY_COUNT; t++)
+                if (gWildMonHeaders[i].encounterTypes[t].landMonsInfo != NULL)
+                    hasLand = TRUE;
+            if (!hasLand)
+                continue;
+        }
+        for (u32 weather = 0; weather <= WEATHER_ROUTE119_CYCLE; weather++)
+            for (u32 night = 0; night < 2; night++)
+            {
+                u32 habitats = MPLegend_AreaHabitats(WILD_AREA_LAND, header->regionMapSectionId, header->mapType, weather);
+                u32 size = MPLegend_PoolSize(habitats, night, FALSE);
+
+                fprintf(out, "L %u %u %u %u %u", gWildMonHeaders[i].mapGroup, gWildMonHeaders[i].mapNum, weather, night, size);
+                for (u32 k = 0; k < size; k++)
+                    fprintf(out, " %u", MPLegend_PoolSpecies(habitats, night, FALSE, k));
+                fputc('\n', out);
+            }
+    }
+    fclose(out);
+    return 0;
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // --selftest-shiny (Update 29): the shiny rolls of a wild Pokemon, through the game's own ComputePlayerShinyOdds.
 // Every roll is an independent 1/4096 (16/65536). The number of rolls is 1, plus 2 with the Shiny Charm, plus 1 inside the
@@ -753,6 +797,7 @@ int NativeSelfTest_Legend(void)
 // (a bag without it gets nothing), that it leaves the Legendary/Mythical share alone, and that stored Pokemon keep their status.
 // ---------------------------------------------------------------------------------------------------------------------
 #include "item.h"
+#include "multiplayer_spawns.h"
 
 int NativeSelfTest_Shiny(void)
 {
@@ -830,6 +875,32 @@ int NativeSelfTest_Shiny(void)
         ExpectLeg("the Shiny Charm does not change the Legendary/Mythical probability", diff > -4.5 * sigma && diff < 4.5 * sigma);
     }
     ClearBag();
+
+    // shared (multiplayer) spawns: the Charm's two extra rolls are a pure function of the Pokemon, so they cannot be rerolled
+    {
+        u32 hits = 0, total = 20000000, again = 0, mixed = 0;
+        double expected = total * (8191.0 / 16777216.0), sigma = __builtin_sqrt(expected), diff;
+
+        SeedRng(0x5A4ED);
+        for (u32 i = 0; i < total; i++)
+        {
+            u32 id = 1 + (SplitMix32() % 1000000), personality = SplitMix32();
+            bool32 first = MultiplayerSpawns_CharmMakesShiny(id, personality);
+
+            if (first)
+                hits++;
+            if (MultiplayerSpawns_CharmMakesShiny(id, personality) != first)
+                again++;      // a second claim of the same Pokemon must give the same answer
+            if (MultiplayerSpawns_CharmMakesShiny(id + 1, personality) != first)
+                mixed++;
+        }
+        diff = (double)hits - expected;
+        printf("shared spawns, Charm bonus: %u shiny in %u Pokemon (expected %.0f +- %.0f, 1 in %.1f); total with the host's 1/4096: 1 in %.1f\n",
+               hits, total, expected, sigma, total / (double)hits, 1.0 / (1.0 - (4095.0 / 4096.0) * (1.0 - 8191.0 / 16777216.0)));
+        ExpectLeg("(shared) the Charm bonus on a shared spawn converges to two extra 1/4096 rolls", diff > -4.5 * sigma && diff < 4.5 * sigma);
+        ExpectLeg("(shared) claiming the same Pokemon again always gives the same answer (nothing to reroll)", again == 0);
+        ExpectLeg("(shared) different Pokemon give different answers (the hash is not constant)", mixed > 0);
+    }
 
     // stored Pokemon keep their shininess: the stored predicate and the modifier bit are unchanged
     {

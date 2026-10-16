@@ -218,6 +218,7 @@ extern int NativeSelfTest_Ladder(void);
 extern int NativeSelfTest_DumpSpeciesData(const char *outPath);
 extern int NativeSelfTest_Legend(void);
 extern int NativeSelfTest_Shiny(void);
+extern int NativeSelfTest_DumpLegendPool(const char *outPath);
 extern int NativeSelfTest_Rewards(void);
 extern int NativeSelfTest_CatchReconcile(void);
 extern int NativeSelfTest_PokenavMap(void);
@@ -1150,6 +1151,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_Rewards()); // src/platform/native_selftest.c (Battle Frontier rewards over the wallet stream)
         else if (strcmp(argv[i], "--selftest-ladder") == 0)
             exit(NativeSelfTest_Ladder()); // src/platform/native_selftest.c (expansion Phases 8 and 10)
+        else if (strcmp(argv[i], "--dump-legend-pool") == 0 && i + 1 < argc)
+            exit(NativeSelfTest_DumpLegendPool(argv[++i])); // src/platform/native_selftest_u29.c (host parity)
         else if (strcmp(argv[i], "--selftest-shiny") == 0)
             exit(NativeSelfTest_Shiny()); // src/platform/native_selftest_u29.c (Update 29)
         else if (strcmp(argv[i], "--selftest-legend") == 0)

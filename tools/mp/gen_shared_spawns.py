@@ -130,6 +130,15 @@ def wild_pool() -> tuple[list[tuple[str, int, int]], list[tuple]]:
     return members, families
 
 
+def safari_only_families() -> list[int]:
+    """Indexes of the families that appear only inside the Safari Zone (src/platform/mp_wild_safari.h): the Safari is
+    never shared, so the host must not pick them for a shared map spawn (the game gives them weight 0 outside the Zone)."""
+    text = (ENGINE / "src/platform/mp_wild_safari.h").read_text(encoding="utf-8")
+    body = text[text.index("sMPWildSafariFlags["):]
+    body = body[body.index("{") + 1:body.index("};")]
+    return [index for index, flag in enumerate(re.findall(r"^\s*(0|MP_WILD_SAFARI_EXCLUSIVE),", body, re.M)) if flag != "0"]
+
+
 def map_folders() -> dict[str, str]:
     out = {}
     for path in sorted((ENGINE / "data/maps").glob("*/map.json")):
@@ -289,6 +298,7 @@ def build() -> dict:
         "member_names": [name.removeprefix("SPECIES_") for name, _, _ in members],
         "families": [[first, count, tier, habitat, time, type1, type2]
                      for first, count, tier, habitat, time, type1, type2 in families],
+        "safari_only": safari_only_families(),
         "maps": maps,
     }
 
