@@ -1133,8 +1133,12 @@ static bool8 sFarComputed;
 static struct
 {
     const struct Tileset *secondary;
-    u16 *colours;
+    const u8 *primaryTiles;
+    const u8 *secondaryTiles;
+    u16 *colours;          /* COLOUR_UNKNOWN until a metatile is asked for */
 } sColourCache[MAX_COLOUR_TILESETS];
+
+#define COLOUR_UNKNOWN 0xFFFF /* not a BGR555 colour */
 
 static u16 AverageMetatileColour(const struct Tileset *primary, const u8 *primaryTiles,
                                  const struct Tileset *secondary, const u8 *secondaryTiles,
@@ -1191,7 +1195,25 @@ static u16 AverageMetatileColour(const struct Tileset *primary, const u8 *primar
 
 /* The metatiles' average colours for a layout's tilesets (the General
  * primary and its secondary), NULL for another primary. */
-static const u16 *LayoutColours(const struct MapLayout *layout)
+static int ColourCacheIndex(const struct MapLayout *layout);
+
+/* One metatile's average colour, worked out when asked for. A tileset does not say how many metatiles it holds (a secondary
+ * holds up to 512, most far fewer), so working out all 1024 read past the end of the smaller ones' data (found with the
+ * address sanitizer); a metatile a map really uses is always inside its tilesets. */
+static u16 LayoutColour(const struct MapLayout *layout, u16 metatile)
+{
+    int i = ColourCacheIndex(layout);
+
+    if (i < 0 || metatile >= NUM_METATILES_TOTAL)
+        return COLOUR_UNKNOWN;
+    if (sColourCache[i].colours[metatile] == COLOUR_UNKNOWN)
+        sColourCache[i].colours[metatile] = AverageMetatileColour(&gTileset_General, sColourCache[i].primaryTiles,
+                                                                  layout->secondaryTileset, sColourCache[i].secondaryTiles,
+                                                                  metatile);
+    return sColourCache[i].colours[metatile];
+}
+
+static int ColourCacheIndex(const struct MapLayout *layout)
 {
     const u8 *primaryTiles;
     const u8 *secondaryTiles;
@@ -1201,26 +1223,27 @@ static const u16 *LayoutColours(const struct MapLayout *layout)
     if (layout == NULL || layout->primaryTileset != &gTileset_General || layout->isFrlg
      || layout->secondaryTileset == NULL || layout->secondaryTileset->metatiles == NULL
      || layout->secondaryTileset->palettes == NULL)
-        return NULL;
+        return -1;
     for (i = 0; i < MAX_COLOUR_TILESETS && sColourCache[i].secondary != NULL; i++)
         if (sColourCache[i].secondary == layout->secondaryTileset)
-            return sColourCache[i].colours;
+            return i;
     if (i == MAX_COLOUR_TILESETS)
-        return NULL;
+        return -1;
     primaryTiles = PagedTiles(&gTileset_General);
     secondaryTiles = PagedTiles(layout->secondaryTileset);
     colours = malloc(NUM_METATILES_TOTAL * sizeof(*colours));
     if (colours == NULL || primaryTiles == NULL || secondaryTiles == NULL)
     {
         free(colours);
-        return NULL;
+        return -1;
     }
     for (u16 metatile = 0; metatile < NUM_METATILES_TOTAL; metatile++)
-        colours[metatile] = AverageMetatileColour(&gTileset_General, primaryTiles,
-                                                  layout->secondaryTileset, secondaryTiles, metatile);
+        colours[metatile] = COLOUR_UNKNOWN;
     sColourCache[i].secondary = layout->secondaryTileset;
+    sColourCache[i].primaryTiles = primaryTiles;
+    sColourCache[i].secondaryTiles = secondaryTiles;
     sColourCache[i].colours = colours;
-    return colours;
+    return i;
 }
 
 /* Where a connection's map lies from the map it leaves, whatever the
@@ -1396,7 +1419,7 @@ static void ComputeFar(s16 cameraX, s16 cameraY)
             int left = originX + i * DIORAMA_FAR_BLOCK_CELLS;
             int top = originY + j * DIORAMA_FAR_BLOCK_CELLS;
             struct FarCell chosen;
-            const u16 *colours;
+            u16 colour;
             int k;
 
             memset(block, 0, sizeof(*block));
@@ -1416,11 +1439,11 @@ static void ComputeFar(s16 cameraX, s16 cameraY)
                 if (UNPACK_COLLISION(other.entry) != 0)
                     chosen = other;
             }
-            colours = LayoutColours(chosen.layout != NULL ? chosen.layout : gMapHeader.mapLayout);
-            if (colours == NULL || UNPACK_METATILE(chosen.entry) >= NUM_METATILES_TOTAL)
+            colour = LayoutColour(chosen.layout != NULL ? chosen.layout : gMapHeader.mapLayout, UNPACK_METATILE(chosen.entry));
+            if (colour == COLOUR_UNKNOWN)
                 continue;
             block->metatileId = UNPACK_METATILE(chosen.entry);
-            block->color = colours[block->metatileId];
+            block->color = colour;
             block->flags = DIORAMA_FAR_VALID;
             if (chosen.layout != NULL)
             {
@@ -1533,7 +1556,13 @@ void DioramaScene_PublishOverworld(void)
 
     memset(&sDraft, 0, sizeof(sDraft));
     sDraft.sceneKind = GetOverworldSceneKind(&sDraft.fallbackReasons);
-    sDraft.paletteFading = gPaletteFade.active != 0;
+    /* Not at its own colours: fading, or faded out whole and standing there (a script's fadescreen to
+     * black, Route 101's bag before the starter choice, leaves the field black with no fade running).
+     * The 3D battle stands on the last field seen with steady colours: a black one gave the first
+     * battle a black world (Update 26, bug 3). A part-way fade that has settled (time of day, a
+     * dimmed menu) is a tint of the field's own and stays steady, as native_ui.c CaptureScreenFade. */
+    sDraft.paletteFading = gPaletteFade.active != 0
+                        || (gPaletteFade.mode == 0 && gPaletteFade.y >= 16 /* palette.c NORMAL_FADE */);
     sDraft.battleTransition = gMain.callback2 == CB2_OverworldBasic && DioramaBattle_TransitionActive();
     sDraft.valid = gMapHeader.mapLayout != NULL;
     if (!sDraft.valid)

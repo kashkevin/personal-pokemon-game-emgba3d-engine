@@ -196,10 +196,27 @@ static bool Supported(void)
     return true;
 }
 
+/* The end of a battle: HandleEndTurn_FinishBattle frees the battle's data and starts the fade to black in the same step, and the
+ * engine stays in BattleMainCB2 until the fade is done. The picture still holds the battle's last frame (its message window,
+ * its healthboxes), so while this screen's detection depended on the battle's data it let go at the first frame of the fade and
+ * the original GBA windows showed over the 3D scene until the field came back. The screen now stays up through that fade, drawing
+ * nothing and hiding the GBA windows (sTeardown). */
+static bool sSeenLive;
+static bool sTeardown;
+
 static bool Detect(void)
 {
-    return gMain.callback2 == BattleMainCB2 && gBattleStruct != NULL && gBattleSpritesDataPtr != NULL
-        && gBattleResources != NULL && Supported();
+    if (gMain.callback2 == BattleMainCB2 && gBattleStruct != NULL && gBattleSpritesDataPtr != NULL
+     && gBattleResources != NULL && Supported())
+    {
+        sSeenLive = true;
+        sTeardown = false;
+        return true;
+    }
+    sTeardown = sSeenLive && gMain.callback2 == BattleMainCB2;
+    if (!sTeardown)
+        sSeenLive = false;
+    return sTeardown;
 }
 
 /* a battler's trainer's name in capitals, as the messages name them ("" wild) */
@@ -434,6 +451,19 @@ static void CmdGoalStep(void);
 static void Capture(void)
 {
     bool8 active;
+
+    if (sTeardown)
+    {
+        /* nothing of the battle is left to read; keep the screen up and empty */
+        for (u32 i = 0; i < MAX_BATTLERS_COUNT; i++)
+            sB.box[i].on = false;
+        sB.chooser = -1;
+        sB.input = NATIVE_BATTLE_INPUT_NONE;
+        sB.hasMsg = sB.hasPrompt = sB.yesNo = sB.msgWaiting = sB.msgPrinting = false;
+        sB.ready = false;
+        sB.ffa = false;
+        return;
+    }
 
     sB.safari = (gBattleTypeFlags & BATTLE_TYPE_SAFARI) != 0;
     sB.safariBalls = gNumSafariBalls;
@@ -1201,6 +1231,9 @@ static void Draw(int t)
 {
     int x0, y0, w, h, L, R, T, dyB;
 
+    if (sTeardown)
+        return;
+
     UiG_Bleed(&x0, &y0, &w, &h);
     L = x0;
     R = x0 + w;
@@ -1274,6 +1307,8 @@ static void QueueMovePath(int from, int to)
 
 static bool Click(const struct UiHit *hit, int button)
 {
+    if (sTeardown)
+        return true;
     /* Wally's choices are his controller's own: nothing to press meanwhile */
     if (NativeUi_PressesPending() || sCmdGoal >= 0 || sTargetGoal >= 0 || sB.wallyChooses)
         return true;
@@ -1352,6 +1387,8 @@ static bool Click(const struct UiHit *hit, int button)
 
 static bool Wheel(int dy)
 {
+    if (sTeardown)
+        return true;
     if (NativeUi_PressesPending() || sB.wallyChooses)
         return true;
     if (sB.input == NATIVE_BATTLE_INPUT_MOVE && !sB.descOpen)
@@ -1369,6 +1406,9 @@ static bool Wheel(int dy)
 static uint16_t FilterKeys(uint16_t keys, uint16_t newKeys)
 {
     int to = -1, at;
+
+    if (sTeardown)
+        return keys;
 
     /* not while a YES / NO box is up over it (the encounter reset), nor while R cycles the last used Ball */
     if (sB.input != NATIVE_BATTLE_INPUT_ACTION || sB.page != PAGE_ACTION || sB.yesNo || !(newKeys & DPAD_ANY)
@@ -1395,6 +1435,8 @@ static bool Ready(void)
 
 static enum UiPicture Picture(void)
 {
+    if (sTeardown)
+        return UI_PICTURE_HIDE_BG012;
     return UiResults_LevelUpActive() ? UI_PICTURE_HIDE_BG012 : UI_PICTURE_HIDE_BG0;
 }
 

@@ -35,6 +35,11 @@
 #include "string_util.h"
 #include "constants/characters.h"
 #include "rtc.h"
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_screen.h"
+#endif
+#include "script_pokemon_util.h"
+#include "event_object_movement.h"
 #include "m4a.h"
 #include <math.h>
 #include "field_screen_effect.h"
@@ -176,9 +181,111 @@ static void TraceBattlers(void)
     }
 }
 
+// PKMN_DEBUG_BATTLE=wild:species:level | trainer:id  (with the field scene): a battle from the overworld of a fresh game, started
+// when the field has settled and PKMN_DEBUG_BATTLE_AT game frames have passed; PKMN_DEBUG_BATTLE_AGAIN=n starts a second one n frames
+// after the first has ended (the first-battle checks of the battle-to-overworld transition).
+static struct { bool read, started; int kind, a, b; unsigned at, frames, again, endedFrame; int count; bool wasInBattle; } sBattleScript;
+
+static void BattleScriptTick(void)
+{
+    const char *value;
+    char kind[16] = {0};
+    int a = 0, b = 0;
+
+    if (!sBattleScript.read)
+    {
+        sBattleScript.read = true;
+        if ((value = SDL_getenv("PKMN_DEBUG_BATTLE")) != NULL && sscanf(value, "%15[a-z]:%d:%d", kind, &a, &b) >= 2)
+        {
+            sBattleScript.kind = strcmp(kind, "trainer") == 0 ? 2 : strcmp(kind, "first") == 0 ? 3 : strcmp(kind, "bag") == 0 ? 4 : 1;
+            sBattleScript.a = a;
+            sBattleScript.b = b > 0 ? b : 5;
+        }
+        sBattleScript.at = (value = SDL_getenv("PKMN_DEBUG_BATTLE_AT")) != NULL ? (unsigned)strtoul(value, NULL, 10) : 120;
+        sBattleScript.again = (value = SDL_getenv("PKMN_DEBUG_BATTLE_AGAIN")) != NULL ? (unsigned)strtoul(value, NULL, 10) : 0;
+    }
+    if (sBattleScript.kind == 0)
+        return;
+    if (gMain.inBattle)
+        sBattleScript.wasInBattle = true;
+    else if (sBattleScript.wasInBattle)
+    {
+        sBattleScript.wasInBattle = false;
+        sBattleScript.endedFrame = sKeyFrame;
+        SDL_Log("debug battle: battle %d over at frame %u (outcome %d)", sBattleScript.count, sKeyFrame, gBattleOutcome);
+    }
+    if (gMain.callback2 != CB2_Overworld || gMain.inBattle)
+        return;
+    if (ArePlayerFieldControlsLocked() || gPaletteFade.active || ScriptContext_IsEnabled())
+    {
+        sBattleScript.frames = 0;
+        return;
+    }
+    if (sBattleScript.count == 0 ? ++sBattleScript.frames < sBattleScript.at
+                                  : (sBattleScript.again == 0 || sKeyFrame < sBattleScript.endedFrame + sBattleScript.again || sBattleScript.count >= 2))
+        return;
+    sBattleScript.count++;
+    SDL_Log("debug battle: starting battle %d (%s %d) at frame %u", sBattleScript.count, sBattleScript.kind == 2 ? "trainer" : "wild",
+            sBattleScript.a, sKeyFrame);
+    if (sBattleScript.kind == 4)
+    {
+        // Birch's bag exactly as the game's script runs it (fade, starter screen, the first battle, the script's end)
+        extern const u8 Route101_EventScript_BirchsBag[];
+
+        ScriptContext_SetupScript(Route101_EventScript_BirchsBag);
+    }
+    else if (sBattleScript.kind == 3)
+    {
+        // the story's first battle: Birch's bag, the starter screen, then CB2_GiveStarter -> CB2_StartFirstBattle (blur transition)
+        gSpecialVar_Result = 0;
+        CreateScriptedWildMon(SPECIES_ZIGZAGOON, 2, ITEM_NONE); // Birch's script: setwildbattle SPECIES_ZIGZAGOON, 2
+        ChooseStarter();
+    }
+    else if (sBattleScript.kind == 1)
+    {
+        CreateScriptedWildMon((enum Species)sBattleScript.a, (u8)sBattleScript.b, ITEM_NONE);
+        BattleSetup_StartScriptedWildBattle();
+    }
+    else
+    {
+        LockPlayerFieldControls();
+        FreezeObjectEvents();
+        gBattleTypeFlags = BATTLE_TYPE_TRAINER;
+        TRAINER_BATTLE_PARAM.opponentA = (u16)sBattleScript.a;
+        TRAINER_BATTLE_PARAM.opponentB = 0xFFFF;
+        CreateNPCTrainerPartyFromTrainer(gParties[B_TRAINER_OPPONENT_A], GetTrainerStructFromId(sBattleScript.a));
+        gBattleEnvironment = BattleSetup_GetEnvironmentId();
+        CalculateEnemyPartyCount();
+        BattleSetup_StartTrainerBattle_Debug();
+    }
+}
+
 uint16_t DebugScene_FilterKeys(uint16_t keys)
 {
     sKeyFrame++;
+    BattleScriptTick();
+    if (SDL_getenv("PKMN_DEBUG_FRAMES") != NULL)
+    {
+        static const void *sPrevCb2;
+        static int sPrevFade = -1, sPrevIn = -1;
+        static const char *sPrevScreen = (const char *)1;
+#ifdef ENABLE_NATIVE_UI
+        const char *screen = NativeUi_ScreenNow();
+#else
+        const char *screen = NULL;
+#endif
+
+        if (gMain.callback2 != sPrevCb2 || gPaletteFade.active != sPrevFade || gMain.inBattle != sPrevIn || screen != sPrevScreen)
+        {
+            // tools/pc_port/battle_end_check.py reads these lines ("battleCb": the battle's own callback runs)
+            sPrevCb2 = (const void *)gMain.callback2;
+            sPrevFade = gPaletteFade.active;
+            sPrevIn = gMain.inBattle;
+            sPrevScreen = screen;
+            SDL_Log("game frame %u: callback2 %p fade %d inBattle %d battleCb %d native screen %s", sKeyFrame, (void *)gMain.callback2,
+                    gPaletteFade.active, gMain.inBattle, gMain.callback2 == BattleMainCB2, screen != NULL ? screen : "-");
+        }
+    }
     if (SDL_getenv("PKMN_DEBUG_TRACE") != NULL && sKeyFrame % 100 == 0)
         SDL_Log("callbacks: main1 %p main2 %p state %d dispcnt %04x bldy %d fade %d bgvis %d", (void *)gMain.callback1, (void *)gMain.callback2,
                 gMain.state, REG_DISPCNT, REG_BLDY, gPaletteFade.active, (int)gPaletteFade.bufferTransferDisabled);
@@ -201,10 +308,34 @@ uint16_t DebugScene_FilterKeys(uint16_t keys)
 static unsigned sGlShots[MAX_SHOTS];
 static unsigned sGlShotCount, sGlFrame;
 
+// PKMN_DEBUG_GLSHOTS_BATTLE_END=every: a window screenshot every n presented frames from the moment the battle's data is freed
+// (HandleEndTurn_FinishBattle) until the engine leaves BattleMainCB2 and then for 12 more presented frames (the battle-to-field handoff).
+static bool sEndWatching;
+static unsigned sEndCounter, sEndAfter;
+
+static bool WantEndShot(void)
+{
+    const char *value = SDL_getenv("PKMN_DEBUG_GLSHOTS_BATTLE_END");
+    unsigned every = value != NULL ? (unsigned)strtoul(value, NULL, 10) : 0;
+    bool freed = gMain.callback2 == BattleMainCB2 && gBattleStruct == NULL && gMain.inBattle;
+
+    if (every == 0)
+        return false;
+    if (freed)
+        sEndWatching = true;
+    if (!sEndWatching)
+        return false;
+    if (gMain.callback2 != BattleMainCB2 && ++sEndAfter > 60)
+        exit(0);
+    return (++sEndCounter % every) == 0;
+}
+
 bool DebugScene_WantGlShot(void)
 {
     const char *value = SDL_getenv("PKMN_DEBUG_GLSHOTS");
 
+    if (WantEndShot())
+        return true;
     if (value == NULL)
         return false;
     if (sGlShotCount == 0)
@@ -424,8 +555,14 @@ static void StartFieldScene(void)
         species = (u16)v[0];
     struct OriginalTrainerId id = {OT_ID_PRESET, 0x2222u};
 
-    CreateMonWithIVs(&gParties[B_TRAINER_PLAYER][0], species, 20, 0x1234u, id, 20);
+    CreateMonWithIVs(&gParties[B_TRAINER_PLAYER][0], species, 30, 0x1234u, id, 20);
+    SetMonMoveSlot(&gParties[B_TRAINER_PLAYER][0], MOVE_TACKLE, 0);
+    SetMonMoveSlot(&gParties[B_TRAINER_PLAYER][0], MOVE_WATER_GUN, 1);
     gPartiesCount[B_TRAINER_PLAYER] = 1;
+    for (int badge = FLAG_BADGE01_GET; badge <= FLAG_BADGE08_GET; badge++)
+        FlagSet((u16)badge); // so the level 30 Pokemon obeys
+    FlagSet(FLAG_SYS_POKEMON_GET); // the start menu lists POKéMON
+    FlagSet(FLAG_SYS_POKEDEX_GET);
     if ((value = SDL_getenv("PKMN_DEBUG_HOUR")) != NULL && Numbers(value, v, 1) >= 1)
         RtcCalcLocalTimeOffset(0, v[0], 0, 0);
     ResetInitialPlayerAvatarState();
@@ -461,6 +598,12 @@ static void CB2_DebugSceneSetup(void)
     NewGameInitData();
     FlagSet(FLAG_SYS_POKENAV_GET);
     gSaveBlock2Ptr->playerGender = MALE;
+    {
+        // a new game has no name: unterminated, so string copies of it run on
+        for (int c = 0; c < 5; c++)
+            gSaveBlock2Ptr->playerName[c] = (u8)(CHAR_A + c);
+        gSaveBlock2Ptr->playerName[5] = EOS;
+    }
     gSaveBlock1Ptr->location.mapGroup = MAP_GROUP(MAP_ROUTE104);
     gSaveBlock1Ptr->location.mapNum = MAP_NUM(MAP_ROUTE104);
     gSaveBlock1Ptr->pos.x = 12;

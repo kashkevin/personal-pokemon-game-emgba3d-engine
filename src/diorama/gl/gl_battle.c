@@ -1611,16 +1611,19 @@ static void Begin(void)
     float cameraX, cameraZ, pitch, focal, eyeHeight, eyeDistance;
     SDL_Window *window = DioramaGL_GetWindow();
 
-    if (!sBattle.ready || window == NULL
+    if (!sBattle.ready || window == NULL || SDL_getenv("PKMN_DEBUG_BATTLE_REFUSE_3D") != NULL
      || !DioramaGL_GetBattleWorld(sBattle.frame.mapGroup, sBattle.frame.mapNum, sBattle.frame.mapLayoutId,
                                   &snapshot, &resolved))
     {
         sBattle.refused = true;
-        if (sBattle.log)
-            SDL_Log("Diorama battle: drawn in 2D (no 3D field of map %u.%u to stand in)",
-                    sBattle.frame.mapGroup, sBattle.frame.mapNum);
+        /* one line a battle, always (a report of a bad battle background starts here) */
+        SDL_Log("Diorama battle: drawn in 2D (%s) on map %u.%u", !sBattle.ready ? "no battle frame yet"
+                : window == NULL ? "no window" : SDL_getenv("PKMN_DEBUG_BATTLE_REFUSE_3D") != NULL ? "refused by the test switch"
+                : "no 3D field of the map to stand in", sBattle.frame.mapGroup, sBattle.frame.mapNum);
         return;
     }
+    SDL_Log("Diorama battle: 3D on map %u.%u (%s)", sBattle.frame.mapGroup, sBattle.frame.mapNum,
+            sBattle.frame.wild ? "wild" : "trainer");
     BattleLayout(window, &layout);
     sBattle.active = true;
     sBattle.chosen = false;

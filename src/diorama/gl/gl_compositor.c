@@ -2021,6 +2021,20 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         CaptureSurveyFrame(outputWidth, outputHeight, captureSnapshot, stateMatchesPixels);
     }
     sLastFrame3D = drawTerrain;
+    if (SDL_getenv("PKMN_DEBUG_FRAMES") != NULL)
+    {
+        static int sPrevKey = -1;
+        static unsigned sPresented;
+        int key = (drawTerrain ? 1 : 0) | ((int)presentationDecision << 1) | (pictureFlags << 5) | (softFallback ? 256 : 0);
+
+        sPresented++;
+        if (key != sPrevKey)
+        {
+            sPrevKey = key;
+            SDL_Log("present %u: terrain %d decision %d pictureFlags %d soft %d battleWantsField %d", sPresented, drawTerrain,
+                    (int)presentationDecision, pictureFlags, softFallback, DioramaGLBattle_WantsField());
+        }
+    }
     if (SDL_getenv("PKMN_DEBUG_TRACE") != NULL)
     {
         static unsigned sFrames3D, sFramesAll;

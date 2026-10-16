@@ -8738,18 +8738,31 @@ bool32 PartyMenu_NativeUiState(struct NativePartyMenu *out)
     if (FuncIsActiveTask(Task_HandleSelectionMenuInput) || FuncIsActiveTask(Task_TryCreateSelectionWindow))
     {
         out->phase = NATIVE_PARTY_MENU;
-        out->numActions = sPartyMenuInternal->numActions <= 8 ? sPartyMenuInternal->numActions : 8;
+        /* The list is built by Task_TryCreateSelectionWindow (SetPartyMonSelectionActions), which has not run yet
+         * in the frame the party menu comes back from the summary screen with that task set: numActions and
+         * actions are then what the freshly allocated PartyMenuInternal held (Update 26, bug 2: a field move
+         * index far past gFieldMoveInfo, a garbage move name pointer). Shown only once the task that takes input
+         * runs, and every entry checked against its table. */
+        out->numActions = 0;
+        if (FuncIsActiveTask(Task_HandleSelectionMenuInput))
+            out->numActions = sPartyMenuInternal->numActions <= 8 ? sPartyMenuInternal->numActions : 8;
         for (i = 0; i < out->numActions; i++)
         {
             u8 action = sPartyMenuInternal->actions[i];
+            bool8 fieldMove = action >= MENU_FIELD_MOVES;
 
+            if (fieldMove ? action - MENU_FIELD_MOVES >= FIELD_MOVES_COUNT : action >= ARRAY_COUNT(sCursorOptions))
+            {
+                out->numActions = i;
+                break;
+            }
             out->actions[i] = action;
             if (action == MENU_SWITCH)
                 out->switchRow = i;
             else if (action == MENU_SUMMARY)
                 out->summaryRow = i;
-            out->actionIsFieldMove[i] = action >= MENU_FIELD_MOVES;
-            out->actionLabels[i] = action >= MENU_FIELD_MOVES
+            out->actionIsFieldMove[i] = fieldMove;
+            out->actionLabels[i] = fieldMove
                                  ? GetMoveName(FieldMove_GetMoveId(action - MENU_FIELD_MOVES))
                                  : sCursorOptions[action].text;
         }

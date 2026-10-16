@@ -29,6 +29,9 @@
 
 #include "global.h"
 #include "main.h"
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_screen.h"
+#endif
 
 #define MAX_FRAMES 48
 
@@ -53,6 +56,14 @@ static void WriteGameState(FILE *log)
     fprintf(log, "gMain.callback2 = %p\n", (void *)(uintptr_t)gMain.callback2);
     fprintf(log, "gMain.vblankCallback = %p\n", (void *)(uintptr_t)gMain.vblankCallback);
     fprintf(log, "gMain.state = %u\n", (unsigned)gMain.state);
+#ifdef ENABLE_NATIVE_UI
+    {
+        // The native screen in front when it crashed (a constant name; NULL: none).
+        const char *screen = NativeUi_ScreenNow();
+
+        fprintf(log, "native screen = %s\n", screen != NULL ? screen : "(none)");
+    }
+#endif
 }
 
 // Follows saved frame pointers (EBP chain) from the faulting frame.

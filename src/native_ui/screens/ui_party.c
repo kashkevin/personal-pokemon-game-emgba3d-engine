@@ -688,7 +688,7 @@ static void Draw(int t)
         UiG_Bleed(&bx, &by, &bw, &bh);
         UiG_Hit(HIT_BACKDROP, 0, bx, by, bw, bh);
     }
-    if (sMenu.phase == NATIVE_PARTY_MENU)
+    if (sMenu.phase == NATIVE_PARTY_MENU && sMenu.numActions > 0)
     {
         struct UiMenuItem items[8];
 

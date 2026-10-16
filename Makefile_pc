@@ -461,6 +461,15 @@ include diorama_rules.mk
 $(OBJ_DIR)/src/data/diorama/%.o: $(DIORAMA_RULE_HEADER) $(DIORAMA_TREE_HEADER) $(DIORAMA_TREES3DS_HEADER)
 $(C_OBJS): | $(DIORAMA_RULE_HEADER) $(DIORAMA_TREE_HEADER) $(DIORAMA_TREES3DS_HEADER)
 
+# Update 26 regression checks (slow: they play the 3D game headless under xvfb, minutes each; Pillow and xvfb-run needed).
+# The first two need the 3D build (DIORAMA=1), the party menu check its AddressSanitizer build (SANITIZE=address DIORAMA=1).
+.PHONY: check-update26
+check-update26:
+	python3 tools/pc_port/battle_end_check.py --kind wild
+	python3 tools/pc_port/battle_end_check.py --kind trainer --timeout 2700
+	python3 tools/pc_port/first_battle_check.py
+	python3 tools/pc_port/party_menu_check.py
+
 # The voxel project's renderer unit tests (Linux, 32-bit host gcc; no game code).
 # check-diorama-tools runs the rule compiler's own Python tests (slow: ~1 h).
 DIORAMA_TEST_DIR   := build/pc-tests/diorama

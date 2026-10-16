@@ -276,10 +276,25 @@ uint32_t gDioramaMapOam[4];
  * IsVoxelWeatherSprite), by the weather's sprite sheets here. */
 static bool IsMapSprite(const struct Sprite *sprite)
 {
+    u16 tag;
+
     if (sprite->coordOffsetEnabled)
         return TRUE;
-    return sprite->template != NULL
-        && sprite->template->tileTag >= GFXTAG_CLOUD && sprite->template->tileTag <= GFXTAG_RAIN;
+    /* Not through sprite->template: a sprite that keeps a template of a dead
+     * stack frame (a party menu's mon icons, pokemon_icon.c CreateMonIconSprite)
+     * would be read from a stack the program has left (AddressSanitizer:
+     * stack-use-after-return). The weather's sprites draw from a sprite sheet
+     * of their tag, which sprite.c CreateSprite recorded as sheetTileStart. */
+    if (!sprite->usingSheet)
+        return FALSE;
+    for (tag = GFXTAG_CLOUD; tag <= GFXTAG_RAIN; tag++)
+    {
+        u16 start = GetSpriteTileStartByTag(tag);
+
+        if (start != 0xFFFF && start == sprite->sheetTileStart)
+            return TRUE;
+    }
+    return FALSE;
 }
 
 void DioramaSprites_BeginOam(void)
