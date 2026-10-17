@@ -52,6 +52,8 @@
 #include "field_player_avatar.h"
 #include "script.h"
 #include "platform/debug_scene.h"
+#include "platform/mp_bridge.h"
+#include "item_menu.h"
 #include "pokemon_storage_system.h"
 #include <stdbool.h>
 #include "platform/png_write.h"
@@ -611,9 +613,51 @@ static void RivalLog(void)
     }
 }
 
+// PKMN_DEBUG_BAG_LOG=1: the line "bag pocket F: n" each game frame the bag's pocket changes (the pocket-switch timing check).
+static void BagLog(void)
+{
+    static int sLast = -1, sOn = -1;
+
+    if (sOn < 0)
+        sOn = SDL_getenv("PKMN_DEBUG_BAG_LOG") != NULL;
+    if (sOn && gBagPosition.pocket != sLast)
+    {
+        sLast = gBagPosition.pocket;
+        SDL_Log("bag pocket %u: %d", sKeyFrame, sLast);
+    }
+}
+
+// PKMN_DEBUG_LINK_LOG=1: the line "link state F: s role r" each game frame the pause menu's link status changes
+// (enum MpLinkState; the role from --link-role), and "clock F: hh:mm" at game frame 300 (the game's own time, as the
+// pause menu shows it): the link-status and setup-clock checks.
+static void LinkLog(void)
+{
+    static int sLast = -1, sOn = -1;
+
+    if (sOn < 0)
+        sOn = SDL_getenv("PKMN_DEBUG_LINK_LOG") != NULL;
+    if (sOn && (int)MpBridge_LinkState() != sLast)
+    {
+        sLast = (int)MpBridge_LinkState();
+        SDL_Log("link state %u: %d role %c", sKeyFrame, sLast, MpBridge_Role() != 0 ? MpBridge_Role() : '-');
+    }
+    if (sOn && sKeyFrame == 300 && gSaveBlock2Ptr != NULL)
+    {
+        RtcCalcLocalTime();
+        SDL_Log("clock %u: %02d:%02d", sKeyFrame, gLocalTime.hours, gLocalTime.minutes);
+    }
+}
+
+unsigned DebugScene_GameFrame(void)
+{
+    return sKeyFrame;
+}
+
 uint16_t DebugScene_FilterKeys(uint16_t keys)
 {
     sKeyFrame++;
+    BagLog();
+    LinkLog();
     BattleScriptTick();
     DialogTick();
     RivalThen();

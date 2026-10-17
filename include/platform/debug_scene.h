@@ -25,5 +25,6 @@ uint16_t DebugScene_FilterKeys(uint16_t keys);  /* once per game frame */
 void DebugScene_Frame(const uint16_t *pixels);  /* once per drawn frame (240x160, BGR555) */
 void DebugScene_AudioTap(const float *buffer, int count); /* the audio scene: the mixer's output of each frame */
 bool DebugScene_WantGlShot(void);               /* GL builds, once per presented frame: take the window's picture now */
+unsigned DebugScene_GameFrame(void);            /* game frames so far (the frames PKMN_DEBUG_KEYS counts) */
 
 #endif

@@ -92,6 +92,7 @@ static u32 sUiPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
  * 2026-10-12). */
 static u32 sUiScratch[DISPLAY_WIDTH * DISPLAY_HEIGHT];
 static bool sUiUploaded;
+static unsigned sUiOpaquePixels; /* of sUiPixels: what the game's window layer shows (the UI-ownership diagnostic) */
 /*
  * The game's latest 240x160 picture until it is drawn (performance work
  * 2026-10-11): in the 3D view it is hidden nearly always, so it is uploaded
@@ -1567,6 +1568,43 @@ void DioramaGL_LoadArtwork(void)
     sBorderTexture = LoadTexture("Border.bmp");
 }
 
+/* PKMN_DIORAMA_UI_OWNER=1 (developer diagnostic): one line each time the owner of what is on screen changes - the native
+ * screen in front (if any), whether the 3D view was drawn, whether the game's whole 240x160 picture was drawn over or
+ * instead of it, and whether the game's own windows (its window layer: text boxes, menus, the map's name) were drawn over
+ * the 3D view. "LEAK" marks the game's windows or picture drawn while a native screen is up. The UI-ownership sweep reads
+ * these lines (docs/windows-gameplay-repairs-20261017.md). */
+static void UiOwnerLog(bool terrain, int pictureFlags, bool picture, bool gbaWindows)
+{
+    static int sOn = -1;
+    static char sPrev[160];
+    char line[160];
+    const char *screen = NULL;
+
+    if (sOn < 0)
+        sOn = SDL_getenv("PKMN_DIORAMA_UI_OWNER") != NULL;
+    if (!sOn)
+        return;
+#ifdef ENABLE_NATIVE_UI
+    {
+        const char *NativeUi_ScreenNow(void);
+
+        screen = NativeUi_ScreenNow();
+    }
+#endif
+    snprintf(line, sizeof(line), "native %s 3d %d picture %d gbaWindows %d (%u px, uiFlags 0x%x rects %u) flags %d%s",
+             screen != NULL ? screen : "-", terrain, picture, gbaWindows, gbaWindows ? sUiOpaquePixels : 0u,
+             sHasSceneSnapshot ? (unsigned)sSceneSnapshot.uiFlags : 0u,
+             sHasSceneSnapshot ? (unsigned)sSceneSnapshot.uiRectCount : 0u, pictureFlags,
+             screen != NULL && ((gbaWindows && sUiOpaquePixels > 0) || (picture && terrain)) ? " LEAK" : "");
+    if (strcmp(line, sPrev) != 0)
+    {
+        unsigned DebugScene_GameFrame(void); /* platform/debug_scene.c */
+
+        SDL_strlcpy(sPrev, line, sizeof(sPrev));
+        SDL_Log("ui owner %u: %s", DebugScene_GameFrame(), line);
+    }
+}
+
 static void EnsureFrameTexture(void)
 {
     if (sPendingFrame == NULL)
@@ -1600,6 +1638,9 @@ void DioramaGL_UploadFrame(const u32 *argb8888)
     if (sUiUploaded && memcmp(sUiScratch, sUiPixels, sizeof(sUiPixels)) == 0)
         return;
     memcpy(sUiPixels, sUiScratch, sizeof(sUiPixels));
+    sUiOpaquePixels = 0;
+    for (unsigned i = 0; i < DISPLAY_WIDTH * DISPLAY_HEIGHT; i++)
+        sUiOpaquePixels += (sUiPixels[i] >> 24) != 0;
     glBindTexture(GL_TEXTURE_2D, sUiTexture.id);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT,
                     GL_BGRA, GL_UNSIGNED_BYTE, sUiPixels);
@@ -1623,6 +1664,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     float cameraX;
     float cameraZ;
     int pictureFlags = 0;
+    bool drewPicture = false, drewGbaWindows = false;
 
     if (sSurveyView >= 0)
         frameAlpha = 1.0f;
@@ -1987,13 +2029,17 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
             DrawTexture(&sFrameTexture, outputWidth, outputHeight,
                         gameX, gameY, gameWidth, gameHeight,
                         0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, sTwoDOpacity);
+            drewPicture = true;
         }
         if (current3D && sSceneSnapshot.uiRectCount > 0
          && DioramaCamera_GetMode() != DIORAMA_CAMERA_PHOTO
          && !(pictureFlags & (DIORAMA_PICTURE_HIDE_ALL | DIORAMA_PICTURE_HIDE_UI)))
+        {
             DrawTexture(&sUiTexture, outputWidth, outputHeight,
                         gameX, gameY, gameWidth, gameHeight,
                         0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, 1.0f);
+            drewGbaWindows = true;
+        }
     }
     else if (!(pictureFlags & DIORAMA_PICTURE_HIDE_ALL))
     {
@@ -2002,7 +2048,9 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         DrawTexture(gameTexture, outputWidth, outputHeight,
                     gameX, gameY, gameWidth, gameHeight,
                     0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, false, 1.0f);
+        drewPicture = true;
     }
+    UiOwnerLog(drawTerrain, pictureFlags, drewPicture, drewGbaWindows);
 
     sDrewField3D = drawTerrain && sSurveyView < 0;
     if (sSurveyView < 0 && !drawTerrain && border && sBorderTexture.id != 0

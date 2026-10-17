@@ -7,7 +7,12 @@
             beside the foe does not change between captures (it swayed by a running clock while the battle shows its
             world as a picture redrawn now and then, so its blades jumped);
   3. pc:    switching the Pokemon Center's PC on leaves the modelled room standing (the lit PC's metatile used to drop the
-            PC, the counter's arm and the back wall: black notches, a flickering room).
+            PC, the counter's arm and the back wall: black notches, a flickering room);
+  4. bag:   with the native bag on screen a pocket switch reaches the pocket the bag draws within 3 game frames of the
+            press (the hidden GBA list's 16-frame repaint delayed it about 0.3 s);
+  5. link:  the pause menu's link status - OFFLINE without a bridge; SETUP (and the clock at 12:00 noon) for the
+            launcher's character setup (--setup); CONNECTING, then NOT CONNECTED after 20 s, for a bridge whose
+            companion never reports a world session, with the role from --link-role.
 
     tools/pc_port/gameplay_repair_check.py [--binary ./pokeemerald-mp-diorama]
 
@@ -16,6 +21,7 @@ Needs Pillow, NumPy and an X display (xvfb-run is used when DISPLAY is not set).
 import argparse
 import glob
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -28,13 +34,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 ROUTE101_DONE = "v4060=3,f2ee=1,f2d0=1,f2bc=1"  # Route 101's rescue finished: no scene on the way
 
 
-def run(binary, work, env_extra, timeout):
+def run(binary, work, env_extra, timeout, args=()):
     os.makedirs(work, exist_ok=True)
     env = dict(os.environ, SDL_AUDIODRIVER="dummy", PKMN_GRAPHICS_NO_DIALOG="1", PKMN_DEBUG_SCENE="field",
                PKMN_DEBUG_GLSHOTS_GAME="1", **dict(dict(PKMN_DEBUG_HOUR="12"), **env_extra))
+    env = {k: v for k, v in env.items() if v is not None}
     xvfb = shutil.which("xvfb-run")
     cmd = ([xvfb, "-a", "-s", "-screen 0 1280x800x24"] if xvfb and not os.environ.get("DISPLAY") else []) + [
-        "timeout", "-k", "3", str(timeout), os.path.abspath(binary)]
+        "timeout", "-k", "3", str(timeout), os.path.abspath(binary), *args]
     out = subprocess.run(cmd, cwd=work, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                          errors="replace")
     shots = sorted(glob.glob(os.path.join(work, "screenshots", "*.png")), key=os.path.getmtime)
@@ -102,6 +109,43 @@ def check_pc(binary, work, problems):
     return changed
 
 
+def check_bag(binary, work, problems):
+    presses = (700, 800, 900)  # RIGHT, RIGHT, LEFT in the bag (START > the third row, Bag > A)
+    _, log = run(binary, os.path.join(work, "bag"), dict(
+        PKMN_DEBUG_HERE="0,9,5,9,0", PKMN_DEBUG_BAG_LOG="1", PKMN_DEBUG_GLSHOTS="980",
+        PKMN_DEBUG_KEYS="200:START,330:DOWN,400:DOWN,470:A,700:RIGHT,800:RIGHT,900:LEFT"), 300)
+    changes = [(int(f), int(p)) for f, p in re.findall(r"bag pocket (\d+): (\d+)", log) if int(f) > 600]
+    if [p for _, p in changes] != [1, 2, 1]:
+        problems.append(f"bag: pockets {changes}, expected 1, 2, 1 after the three presses\n{log[-600:]}")
+        return None
+    late = max(f - press for (f, _), press in zip(changes, presses))
+    if late > 3:
+        problems.append(f"bag: a pocket switch reached the bag {late} game frames after the press (at most 3)")
+    return late
+
+
+def check_link(binary, work, problems):
+    bridge = os.path.join(work, "bridge.txt")
+    os.makedirs(work, exist_ok=True)
+    with open(bridge, "w") as f:
+        f.write("port=1\ntoken=" + "ab" * 32 + "\n")  # no companion there: never a world session
+    cases = (("offline", (), "980", [(0, "-")], None),
+             ("setup", ("--setup",), "980", [(1, "-")], "12:0"),
+             ("host", ("--bridge", bridge, "--link-role", "host"), "1300", [(2, "h"), (3, "h")], None))
+    for name, args, end, want, clock in cases:
+        _, log = run(binary, os.path.join(work, "link-" + name), dict(
+            PKMN_DEBUG_HERE="0,9,5,9,0", PKMN_DEBUG_LINK_LOG="1", PKMN_DEBUG_GLSHOTS=end, PKMN_DEBUG_HOUR=None), 300, args)
+        states = [(int(f), int(s), r) for f, s, r in re.findall(r"link state (\d+): (\d+) role (\S)", log)]
+        if [(s, r) for _, s, r in states] != want:
+            problems.append(f"link {name}: states {states}, expected {want}\n{log[-600:]}")
+        elif name == "host" and not 1150 <= states[1][0] <= 1260:
+            problems.append(f"link host: NOT CONNECTED at game frame {states[1][0]}, expected about 1200 (20 s)")
+        seen = re.search(r"clock 300: (\d\d:\d\d)", log)
+        if clock is not None and (seen is None or not seen.group(1).startswith(clock)):
+            problems.append(f"link {name}: the clock read {seen.group(1) if seen else None}, expected {clock}x")
+    return len(cases)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", default=os.path.join(ROOT, "pokeemerald-mp-diorama"))
@@ -114,6 +158,8 @@ def main():
     dark = check_fade(args.binary, work, problems)
     grass = check_grass(args.binary, work, problems)
     pc = check_pc(args.binary, work, problems)
+    bag = check_bag(args.binary, work, problems)
+    links = check_link(args.binary, work, problems)
     if problems:
         print("gameplay_repair_check: FAILED (pictures kept in %s)" % work)
         for p in problems:
@@ -121,7 +167,8 @@ def main():
         return 1
     shutil.rmtree(work, ignore_errors=True)
     print(f"gameplay_repair_check: ok ({dark} faded-out frames black; battle grass still, at most {grass:.1%} changed; "
-          f"the room stood as the PC went on, {pc:.1%} changed)")
+          f"the room stood as the PC went on, {pc:.1%} changed; pocket switches {bag} game frames after the press; "
+          f"{links} link-status cases)")
     return 0
 
 
