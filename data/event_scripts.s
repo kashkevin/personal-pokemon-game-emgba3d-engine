@@ -5,6 +5,7 @@
 #include "constants/global.h"
 #include "constants/multiplayer_balance.h"
 #include "constants/multiplayer_coop.h"
+#include "constants/multiplayer_rival.h"
 #include "constants/apprentice.h"
 #include "constants/apricorn_tree.h"
 #include "constants/battle.h"
@@ -1745,3 +1746,6 @@ EventScript_PalletTown_PlayersHouse_2F_TurnOnPC::
 	.include "data/scripts/mp_progression.inc"
 	.include "data/scripts/mp_coop_gym.inc"
 	.include "data/scripts/mp_mega_stone_shop.inc"
+.ifdef PORTABLE
+	.include "data/scripts/mp_rival.inc" @ Update 31: multiplayer rival checkpoints, streamlined introduction
+.endif

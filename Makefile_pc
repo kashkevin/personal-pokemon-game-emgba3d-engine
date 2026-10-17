@@ -272,7 +272,7 @@ OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS) $(BFX_QJS_OBJS)
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
-.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-legend check-shiny check-coins check-breeding check-species-data check-clock check-mp-objects check-spawn-claims check-secret-base check-rewards check-catch-reconcile check-pokenav-map check-ladder check-coop-exp check-coop-controller check-keybinds check-graphics-mode
+.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-legend check-shiny check-coins check-breeding check-rival check-species-data check-clock check-mp-objects check-spawn-claims check-secret-base check-rewards check-catch-reconcile check-pokenav-map check-ladder check-coop-exp check-coop-controller check-keybinds check-graphics-mode
 .SUFFIXES:
 .SECONDARY:
 .DELETE_ON_ERROR:
@@ -397,6 +397,12 @@ check-coins: $(TARGET)
 check-breeding: $(TARGET)
 	@./$(TARGET) --selftest-breeding > $(OBJ_DIR)/selftest-breeding.log 2>&1; status=$$?; \
 	  tail -n 3 $(OBJ_DIR)/selftest-breeding.log; exit $$status
+
+# Update 31: multiplayer rival checkpoints (mode truth table against the app's gate_blocks, records, the battle's
+# preparation word and environment, original rival objects) and the streamlined introduction's save state.
+check-rival: $(TARGET)
+	@./$(TARGET) --selftest-rival > $(OBJ_DIR)/selftest-rival.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-rival.log; exit $$status
 
 # Species data, moves, abilities, trainers, wild level tables: fingerprints against the pre-update baseline.
 check-species-data: $(TARGET)

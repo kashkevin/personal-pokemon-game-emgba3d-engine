@@ -16,6 +16,7 @@
 #ifdef PORTABLE
 #include "multiplayer_spawns.h"
 #include "multiplayer_world.h"
+#include "multiplayer_rival.h"
 #endif
 #line 16 // gba-line
 #include "field_message_box.h"
@@ -183,6 +184,12 @@ int ProcessPlayerFieldInput(struct FieldInput *input)
 
     if (TryRunOnFrameMapScript() == TRUE)
         return TRUE;
+#ifdef PORTABLE
+    // Update 31: rival checkpoint scenes and the introduction's arrival start where map ON_FRAME scripts do.
+    if (MultiplayerRival_TryStartFieldScript() == TRUE)
+        return TRUE;
+#endif
+#line 181 // gba-line
 
     if (input->pressedBButton && TrySetupDiveEmergeScript() == TRUE)
         return TRUE;

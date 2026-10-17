@@ -62,6 +62,7 @@
 #include "constants/weather.h"
 #ifdef PORTABLE
 #include "character_customization.h"
+#include "multiplayer_rival.h"
 #endif
 #line 63 // gba-line
 
@@ -2907,7 +2908,15 @@ void TrySpawnObjectEvents(s16 cameraX, s16 cameraY)
             s16 npcX = template->x + MAP_OFFSET;
             s16 npcY = template->y + MAP_OFFSET;
 
+#ifdef PORTABLE
+            // Update 31: in a multiplayer world the original rival of a rival checkpoint stays away.
+            if (top <= npcY && bottom >= npcY && left <= npcX && right >= npcX && !FlagGet(template->flagId)
+             && !MultiplayerRival_HidesObject(template->localId, gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->location.mapGroup))
+#else
+#line 2906 // gba-line
             if (top <= npcY && bottom >= npcY && left <= npcX && right >= npcX && !FlagGet(template->flagId))
+#endif
+#line 2907 // gba-line
             {
                 if (template->graphicsId == OBJ_EVENT_GFX_LIGHT_SPRITE)
                     SpawnLightSprite(npcX, npcY, cameraX, cameraY, template->trainerRange_berryTreeId); // light sprite instead

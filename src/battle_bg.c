@@ -33,6 +33,9 @@
 #ifdef ENABLE_DIORAMA
 #include "diorama/battle_scene.h"
 #endif
+#ifdef PORTABLE
+#include "multiplayer_rival.h"
+#endif
 #line 33 // gba-line
 
 // .rodata
@@ -904,6 +907,15 @@ static void LoadBattleEnvironmentEntryGfx(u16 environment)
 static u8 GetBattleEnvironmentOverride(void)
 {
     u8 battleScene = GetCurrentMapBattleScene();
+#ifdef PORTABLE
+    {
+        // Update 31: a rival checkpoint battle shows the original rival battle's background, not the link arena.
+        u8 environment;
+        if (MultiplayerRival_BattleEnvironment(&environment))
+            return environment;
+    }
+#endif
+#line 899 // gba-line
 
     if (TestRunner_Battle_GetForcedEnvironment()
      && gBattleEnvironmentInfo[gBattleEnvironment].background.tilemap

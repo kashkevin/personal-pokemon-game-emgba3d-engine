@@ -3,6 +3,9 @@
 #include "diorama/scene_snapshot.h"
 #include "diorama/battle_env_test.h"
 #endif
+#ifdef PORTABLE
+#include "multiplayer_rival.h"
+#endif
 #line 2 // gba-line
 #include "overworld.h"
 #include "battle_pyramid.h"
@@ -1954,6 +1957,16 @@ void CB2_NewGame(void)
     PlayTimeCounter_Start();
     ScriptContext_Init();
     UnlockPlayerFieldControls();
+#ifdef PORTABLE
+    // Update 31: a new character goes from the name and look to the 18-starter screen and on to Littleroot
+    // at the point Birch sends the player to Route 103 (multiplayer_rival.c MultiplayerIntro_Begin).
+    if (MultiplayerIntro_IsEnabled())
+    {
+        MultiplayerIntro_Begin();
+        return;
+    }
+#endif
+#line 1943 // gba-line
     if (IS_FRLG)
         gFieldCallback = FieldCB_WarpExitFadeFromBlack;
     else

@@ -39,6 +39,10 @@ Route104_EventScript_DontSetRivalPos::
 	return
 
 Route104_EventScript_Rival::
+.ifdef PORTABLE
+	setvar VAR_0x8004, MP_RIVAL_RUSTBORO
+	call MpRival_EventScript_TalkObject
+.endif
 	lockall
 	setvar VAR_0x8008, 1
 	applymovement LOCALID_ROUTE104_RIVAL, Common_Movement_FacePlayer
@@ -46,6 +50,10 @@ Route104_EventScript_Rival::
 	goto Route104_EventScript_RivalEncounter
 
 Route104_EventScript_RivalTrigger::
+.ifdef PORTABLE
+	setvar VAR_0x8004, MP_RIVAL_RUSTBORO
+	call MpRival_EventScript_OptionalTrigger
+.endif
 	lockall
 	setflag FLAG_HIDE_RUSTBORO_CITY_RIVAL
 	setvar VAR_RUSTBORO_CITY_STATE, 8

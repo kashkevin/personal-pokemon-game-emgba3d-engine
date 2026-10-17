@@ -7,6 +7,7 @@
 #include "multiplayer_coop.h"
 #ifdef PORTABLE
 #include "multiplayer_ladder.h"
+#include "multiplayer_rival.h"
 #endif
 #line 8 // gba-line
 #include "main.h"
@@ -242,6 +243,15 @@ u32 MultiplayerBattle_GetBattlerOwner(u32 battler)
     return battler;
 }
 u32 MultiplayerBattle_GetCoopGym(void) { return MultiplayerBattle_IsCoop() ? sPreparation.flags : 0; }
+#ifdef PORTABLE
+// Update 31: the rival checkpoint word of the running native PvP battle's preparation, else 0.
+u32 MultiplayerBattle_GetRivalPreparation(void)
+{
+    return MultiplayerBattle_IsNative() && !MultiplayerBattle_IsCoop() && sPrepared
+        && MultiplayerRival_IsPreparationWord(sPreparation.flags) ? sPreparation.flags : 0;
+}
+#endif
+#line 212 // gba-line
 
 static u32 PhasePlayerCount(u32 phase)
 {
@@ -721,7 +731,15 @@ static u8 PrepareSingles(const struct MultiplayerBattleControl *c)
 #endif
 #line 606 // gba-line
     if (!preparation.checkpointRevision || preparation.checkpointRevision > 0x7FFFFFFF
+#ifdef PORTABLE
+     // Update 31: a PvP preparation may name its rival checkpoint and that checkpoint's battle environment.
+     || (MultiplayerBattle_IsCoop() ? !MultiplayerCoop_IsValidGym(preparation.flags)
+                                    : preparation.flags != 0 && !MultiplayerRival_IsPreparationWord(preparation.flags))
+#else
+#line 607 // gba-line
      || (MultiplayerBattle_IsCoop() ? !MultiplayerCoop_IsValidGym(preparation.flags) : preparation.flags != 0)
+#endif
+#line 608 // gba-line
      || Zero(preparation.rng, 16)) return MP_BATTLE_MALFORMED;
     if (preparation.nativeCounter != gSaveCounter || preparation.trainerId != READ_OTID_FROM_SAVE
      || preparation.partyCrc32 != Crc32((const u8 *)gParties[B_TRAINER_PLAYER], 600)) return MP_BATTLE_ORDER;

@@ -37,6 +37,10 @@ Route119_EventScript_RivalTrigger2::
 	end
 
 Route119_EventScript_RivalEncounter::
+.ifdef PORTABLE
+	setvar VAR_0x8004, MP_RIVAL_ROUTE119
+	call MpRival_EventScript_TriggerLine
+.endif
 	lockall
 	addobject LOCALID_ROUTE119_RIVAL_ON_BIKE
 	checkplayergender

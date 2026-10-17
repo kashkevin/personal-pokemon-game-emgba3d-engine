@@ -18,6 +18,10 @@ Route103_EventScript_OpenAlteringCave::
 	return
 
 Route103_EventScript_Rival::
+.ifdef PORTABLE
+	setvar VAR_0x8004, MP_RIVAL_ROUTE103
+	call MpRival_EventScript_TalkObject
+.endif
 	lockall
 	checkplayergender
 	goto_if_eq VAR_RESULT, MALE, Route103_EventScript_RivalMay

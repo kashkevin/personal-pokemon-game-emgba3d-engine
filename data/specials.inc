@@ -669,4 +669,9 @@ gSpecials::
 	def_special CoinWallet_Spend
 	def_special CoinWallet_HasRoom
 	def_special CoinWallet_Give
+	@ Update 31: multiplayer rival checkpoints and the streamlined introduction (src/multiplayer_rival.c).
+	def_special MultiplayerRival_ScriptMode
+	def_special MultiplayerRival_RequestMenu
+	def_special MultiplayerRival_CatchUpNotice
+	def_special MultiplayerIntro_Save
 .endif

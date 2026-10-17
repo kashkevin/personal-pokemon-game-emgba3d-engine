@@ -669,6 +669,10 @@ RustboroCity_EventScript_EmployeeFacePlayerRight::
 	return
 
 RustboroCity_EventScript_Rival::
+.ifdef PORTABLE
+	setvar VAR_0x8004, MP_RIVAL_RUSTBORO
+	call MpRival_EventScript_TalkObject
+.endif
 	lockall
 	call_if_unset FLAG_MET_RIVAL_RUSTBORO, RustboroCity_EventScript_PlayRivalMusic
 	applymovement LOCALID_RUSTBORO_RIVAL, Common_Movement_FacePlayer
@@ -690,6 +694,10 @@ RustboroCity_EventScript_PlayBrendanMusic::
 	return
 
 RustboroCity_EventScript_RivalTrigger0::
+.ifdef PORTABLE
+	setvar VAR_0x8004, MP_RIVAL_RUSTBORO
+	call MpRival_EventScript_OptionalTrigger
+.endif
 	lockall
 	call RustboroCity_EventScript_PlayRivalMusic
 	applymovement LOCALID_RUSTBORO_RIVAL, Common_Movement_WalkInPlaceFasterDown
@@ -706,6 +714,10 @@ RustboroCity_EventScript_RivalTrigger0::
 	goto RustboroCity_EventScript_RivalEncounter
 
 RustboroCity_EventScript_RivalTrigger1::
+.ifdef PORTABLE
+	setvar VAR_0x8004, MP_RIVAL_RUSTBORO
+	call MpRival_EventScript_OptionalTrigger
+.endif
 	lockall
 	call RustboroCity_EventScript_PlayRivalMusic
 	applymovement LOCALID_RUSTBORO_RIVAL, Common_Movement_WalkInPlaceFasterDown
@@ -722,6 +734,10 @@ RustboroCity_EventScript_RivalTrigger1::
 	goto RustboroCity_EventScript_RivalEncounter
 
 RustboroCity_EventScript_RivalTrigger2::
+.ifdef PORTABLE
+	setvar VAR_0x8004, MP_RIVAL_RUSTBORO
+	call MpRival_EventScript_OptionalTrigger
+.endif
 	lockall
 	call RustboroCity_EventScript_PlayRivalMusic
 	applymovement LOCALID_RUSTBORO_RIVAL, Common_Movement_WalkInPlaceFasterDown
@@ -738,6 +754,10 @@ RustboroCity_EventScript_RivalTrigger2::
 	goto RustboroCity_EventScript_RivalEncounter
 
 RustboroCity_EventScript_RivalTrigger3::
+.ifdef PORTABLE
+	setvar VAR_0x8004, MP_RIVAL_RUSTBORO
+	call MpRival_EventScript_OptionalTrigger
+.endif
 	lockall
 	call RustboroCity_EventScript_PlayRivalMusic
 	applymovement LOCALID_RUSTBORO_RIVAL, Common_Movement_WalkInPlaceFasterDown
@@ -754,6 +774,10 @@ RustboroCity_EventScript_RivalTrigger3::
 	goto RustboroCity_EventScript_RivalEncounter
 
 RustboroCity_EventScript_RivalTrigger4::
+.ifdef PORTABLE
+	setvar VAR_0x8004, MP_RIVAL_RUSTBORO
+	call MpRival_EventScript_OptionalTrigger
+.endif
 	lockall
 	call RustboroCity_EventScript_PlayRivalMusic
 	applymovement LOCALID_RUSTBORO_RIVAL, Common_Movement_WalkInPlaceFasterDown
@@ -770,6 +794,10 @@ RustboroCity_EventScript_RivalTrigger4::
 	goto RustboroCity_EventScript_RivalEncounter
 
 RustboroCity_EventScript_RivalTrigger5::
+.ifdef PORTABLE
+	setvar VAR_0x8004, MP_RIVAL_RUSTBORO
+	call MpRival_EventScript_OptionalTrigger
+.endif
 	lockall
 	call RustboroCity_EventScript_PlayRivalMusic
 	applymovement LOCALID_RUSTBORO_RIVAL, Common_Movement_WalkInPlaceFasterDown
@@ -786,6 +814,10 @@ RustboroCity_EventScript_RivalTrigger5::
 	goto RustboroCity_EventScript_RivalEncounter
 
 RustboroCity_EventScript_RivalTrigger6::
+.ifdef PORTABLE
+	setvar VAR_0x8004, MP_RIVAL_RUSTBORO
+	call MpRival_EventScript_OptionalTrigger
+.endif
 	lockall
 	call RustboroCity_EventScript_PlayRivalMusic
 	applymovement LOCALID_RUSTBORO_RIVAL, Common_Movement_WalkInPlaceFasterDown
@@ -802,6 +834,10 @@ RustboroCity_EventScript_RivalTrigger6::
 	goto RustboroCity_EventScript_RivalEncounter
 
 RustboroCity_EventScript_RivalTrigger7::
+.ifdef PORTABLE
+	setvar VAR_0x8004, MP_RIVAL_RUSTBORO
+	call MpRival_EventScript_OptionalTrigger
+.endif
 	lockall
 	call RustboroCity_EventScript_PlayRivalMusic
 	applymovement LOCALID_RUSTBORO_RIVAL, Common_Movement_WalkInPlaceFasterDown
