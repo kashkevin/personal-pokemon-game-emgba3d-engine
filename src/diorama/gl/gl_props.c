@@ -87,6 +87,7 @@ static GLuint sArtTexture;
 static GLint sCameraLocation, sCameraPitchLocation, sFocalLengthLocation, sAspectCorrectionLocation;
 static GLint sCameraHeightLocation, sCameraDistanceLocation, sScreenOffsetLocation;
 static GLint sArtLocation, sTimeLocation, sShadowPassLocation, sShadowEnabledLocation;
+static bool sStill;
 static GLint sLightMatrixLocation, sShadowMapLocation, sShadowAmbientLocation, sSaturationLocation;
 static struct DioramaLightUniforms sLightUniforms;
 static struct DioramaLampUniforms sLampUniforms;
@@ -1096,7 +1097,13 @@ static void SetUniforms(float cameraX, float cameraZ, float cameraPitch, float f
     dglUniform1f(sCameraHeightLocation, eyeHeight);
     dglUniform1f(sCameraDistanceLocation, eyeDistance);
     dglUniform1f(sScreenOffsetLocation, screenOffsetY);
-    dglUniform1f(sTimeLocation, (float)fmod(SDL_GetTicks() / 1000.0, 3600.0));
+    /* Still (the battle's world, kept as a picture between redraws): one pose, so no redraw jumps. */
+    dglUniform1f(sTimeLocation, sStill ? 0.0f : (float)fmod(SDL_GetTicks() / 1000.0, 3600.0));
+}
+
+void DioramaGLProps_SetStill(bool still)
+{
+    sStill = still;
 }
 
 void DioramaGLProps_Draw(float cameraX, float cameraZ, float cameraPitch,

@@ -2266,7 +2266,9 @@ void DioramaGL_DrawBattleWorld(float cameraX, float cameraZ, float pitch, float 
     // The world's detail objects (props.h: grass, flowers, signs, fences, lamps,
     // rocks), the field's own last sync: the terrain leaves their cells' flat
     // picture out, so without this pass a battle would show bare ground there.
+    DioramaGLProps_SetStill(true); /* the battle keeps this world as a picture (gl_battle.c KeepWorld) */
     DioramaGLProps_Draw(cameraX, cameraZ, pitch, focalLength, aspectCorrection);
+    DioramaGLProps_SetStill(false);
     DioramaGLBuildings_Draw(cameraX, cameraZ, pitch, focalLength, aspectCorrection);
     // The light in the air over it (gl_air.h: sunlit dust, rays, bloom, the
     // fog's banks), as over the field: the battle's world in the same air.

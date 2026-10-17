@@ -26,6 +26,9 @@ bool DioramaGLProps_Init(void);
 /* The props of a snapshot, on the ground its resolved cells give them. */
 void DioramaGLProps_Sync(const struct DioramaSceneSnapshot *snapshot,
                          const struct DioramaResolvedCell *resolvedCells);
+/* Grass and flowers stop swaying while set: the 3D battle keeps its world as a picture and redraws it
+ * only when animated tiles change, so a swaying blade jumped between poses a few times a second. */
+void DioramaGLProps_SetStill(bool still);
 void DioramaGLProps_Draw(float cameraX, float cameraZ, float cameraPitch,
                          float focalLength, float aspectCorrection);
 /* The slabs into the sun's depth map (gl_shadow.h), standing still. */

@@ -25,8 +25,10 @@
     .metatileId = (id), .kind = DIORAMA_PROP_KIND_##kind_, .form = DIORAMA_PROP_##form_, \
     .layer = (layer_), .ground = DIORAMA_PROP_GROUND_##ground_
 
-/* Tall grass: the blades (the grass between them left out) as two cards, a
- * little taller than drawn, so they reach a standing character's knees. */
+/* Tall grass: drawn flat, as the GBA, the 3DS port and the Classic 2D view draw it;
+ * where someone stands in it, its front blades (the art's bottom half, the grass
+ * between them left out) stand as a card in front of their feet, a little taller
+ * than drawn, so they reach a standing character's knees (DioramaProps_Build). */
 #define TALL_GRASS(id) { PROP(id, GRASS, CARDS, 0, KEEP), .keyIndex = 0xD, .depth = 1, \
                          .height16 = 20, .flags = DIORAMA_PROP_SWAY }
 
@@ -797,6 +799,7 @@ unsigned DioramaProps_Build(const struct DioramaSceneSnapshot *snapshot,
         const struct DioramaResolvedCell *ground = &resolvedCells[i];
         struct DioramaPropInstance base;
         unsigned parts;
+        bool grassAtFeet;
         unsigned p;
 
         if (prop == NULL || resolvedCells[i].pixelObjectId != 0)
@@ -855,7 +858,12 @@ unsigned DioramaProps_Build(const struct DioramaSceneSnapshot *snapshot,
         base.prop = prop;
         if (base.artSlot == DIORAMA_ATLAS_NO_SLOT)
             continue;
-        parts = prop->form == DIORAMA_PROP_CROSS || prop->form == DIORAMA_PROP_CARDS ? 2 : 1;
+        /* Tall grass stands up only round a walker (TALL_GRASS): standing cards on every cell, each
+         * over the same blades drawn flat on the ground, turned a field of it into dark stripes. */
+        grassAtFeet = prop->kind == DIORAMA_PROP_KIND_GRASS && prop->form == DIORAMA_PROP_CARDS;
+        if (grassAtFeet && base.rustle == 0.0f)
+            continue;
+        parts = grassAtFeet ? 1 : prop->form == DIORAMA_PROP_CROSS || prop->form == DIORAMA_PROP_CARDS ? 2 : 1;
         if (count + parts > capacity)
         {
             *complete = false;
@@ -875,9 +883,11 @@ unsigned DioramaProps_Build(const struct DioramaSceneSnapshot *snapshot,
                 uint8_t bottom = DioramaProps_ArtBottom(prop);
                 uint8_t middle = (uint8_t)((prop->artTop + bottom) / 2);
 
-                instance->artTop = p == 0 ? prop->artTop : middle;
-                instance->artBottom = p == 0 ? middle : bottom;
-                instance->z = base.z + (p == 0 ? 0.25f : -0.25f);
+                unsigned half = grassAtFeet ? 1 : p; /* at a walker's feet: the front half only */
+
+                instance->artTop = half == 0 ? prop->artTop : middle;
+                instance->artBottom = half == 0 ? middle : bottom;
+                instance->z = base.z + (half == 0 ? 0.25f : -0.25f);
                 instance->phase = base.phase + (float)p * 1.3f;
             }
         }
