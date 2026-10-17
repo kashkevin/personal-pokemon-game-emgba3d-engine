@@ -5,6 +5,7 @@
 #include <SDL2/SDL.h>
 
 #include "global.h"
+#include "constants/metatile_labels.h"
 #include "battle_pyramid.h"
 #include "bg.h"
 #include "decompress.h"
@@ -476,15 +477,36 @@ static bool CopyCellVisual(const struct MapLayout *layout, u16 metatileId,
 /* Whether the live map's cell (x, y) is no longer what the layout itself draws there
  * (DIORAMA_CELL_CHANGED): compared with the layout's own data, not with
  * gMapHeader.mapLayout, which a generated floor (Trainer Hill) may stand in for. */
+/* The same object in another state: a PC switched on (field_specials.c PCTurnOnEffect_SetMetatile)
+ * is still the PC its modelled room was made with. Counted as a change, using a PC dropped every
+ * modelled piece over its cells - the PC, the counter's arm, the back wall with black notches in it
+ * - and the room flickered between the two as the screen blinked on. */
+static bool SameObject(u16 original, u16 now)
+{
+    static const u16 sPairs[][2] = {
+        {METATILE_Building_PC_Off, METATILE_Building_PC_On},
+        {METATILE_BrendansMaysHouse_BrendanPC_Off, METATILE_BrendansMaysHouse_BrendanPC_On},
+        {METATILE_BrendansMaysHouse_MayPC_Off, METATILE_BrendansMaysHouse_MayPC_On},
+    };
+    unsigned i;
+
+    for (i = 0; i < ARRAY_COUNT(sPairs); i++)
+        if ((original == sPairs[i][0] && now == sPairs[i][1]) || (original == sPairs[i][1] && now == sPairs[i][0]))
+            return true;
+    return false;
+}
+
 static bool CellChanged(const struct DioramaSceneSnapshot *snapshot, int x, int y, int mapX, int mapY)
 {
     const struct MapLayout *layout = GetMapLayout(snapshot->mapLayoutId);
+    u16 original, now;
 
     if (layout == NULL || layout->map == NULL || x < 0 || y < 0
      || x >= layout->width || y >= layout->height)
         return false;
-    return (layout->map[y * layout->width + x] & MAPGRID_METATILE_ID_MASK)
-        != MapGridGetMetatileIdAt(mapX, mapY);
+    original = layout->map[y * layout->width + x] & MAPGRID_METATILE_ID_MASK;
+    now = MapGridGetMetatileIdAt(mapX, mapY);
+    return original != now && !SameObject(original, now);
 }
 
 static bool TryCopyConnectedCell(struct DioramaSceneSnapshot *snapshot,
