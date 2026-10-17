@@ -32,6 +32,9 @@
 bool NativeUi_Init(SDL_Window *window);
 void NativeUi_Shutdown(void);
 bool NativeUi_Enabled(void);
+/* Whether this battle's messages and menus are the native interface's (the GBA's text box, rows 112-159 of
+ * the picture, is not shown): decided by the battle's type, so it holds from the battle's first frame. */
+bool NativeUi_ReplacesBattleTextBox(void);
 
 /* Frame boundary (game parked): which screen is up, its state, and the
  * picture policy for the frame about to be drawn. Called before VDraw. */

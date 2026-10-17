@@ -196,6 +196,11 @@ static bool Supported(void)
     return true;
 }
 
+bool UiBattle_Supported(void)
+{
+    return Supported();
+}
+
 /* The end of a battle: HandleEndTurn_FinishBattle frees the battle's data and starts the fade to black in the same step, and the
  * engine stays in BattleMainCB2 until the fade is done. The picture still holds the battle's last frame (its message window,
  * its healthboxes), so while this screen's detection depended on the battle's data it let go at the first frame of the fade and

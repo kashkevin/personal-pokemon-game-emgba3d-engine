@@ -154,6 +154,13 @@ bool NativeUi_Enabled(void)
     return sEnabled && sInitialized;
 }
 
+bool NativeUi_ReplacesBattleTextBox(void)
+{
+    extern bool UiBattle_Supported(void);
+
+    return NativeUi_Enabled() && ScreenAllowed("battle") && UiBattle_Supported();
+}
+
 bool NativeUi_LogEnabled(void)
 {
     return sLog;

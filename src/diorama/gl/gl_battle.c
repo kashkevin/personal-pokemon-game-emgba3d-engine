@@ -50,6 +50,9 @@
 #include "diorama/tree_sprites.h"
 #include "gba/defines.h"
 #include "platform/display_settings.h"
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/native_ui.h"
+#endif
 #include "constants/battle.h"
 #include "constants/map_types.h"
 #include "constants/weather.h"
@@ -1014,6 +1017,17 @@ static void BattleLayout(SDL_Window *window, struct Layout *layout)
     layout->scale = layout->gameH / GBA_H;
     layout->gameX = floorf((layout->outW - layout->gameW) * 0.5f);
     layout->gameY = (float)layout->outH - layout->gameH;
+#ifdef ENABLE_NATIVE_UI
+    /* The GBA lays the battle out over its text box (rows 112-159): the trainer's and the Pokemon's
+     * back pictures end on its top edge, row 112, cut there in their own art. When the native
+     * interface draws the messages and menus instead, that box is gone and the picture's bottom
+     * edge on the window's left the back pictures cut off at the waist in mid-air, 48 rows above
+     * the window's bottom. Then row 112 is the window's bottom edge: the back pictures end where the
+     * window does (rows 112-159 only ever held what the opaque box covered), and the world, laid
+     * out from this layout, moves with them. */
+    if (NativeUi_ReplacesBattleTextBox())
+        layout->gameY = (float)layout->outH - 112.0f * layout->scale;
+#endif
 }
 
 /* The picture's columns and rows that the window shows above its text box. */
