@@ -1356,6 +1356,13 @@ static bool IsComposableTransition(const struct DioramaSceneSnapshot *snapshot)
         && DioramaGLBattle_CanComposeField();
 }
 
+/* How far the game has faded the screen's background colours (0-1); the
+ * renderer's own lights and shadows follow it (scene_snapshot.h screenFadeY). */
+static float ScreenFade(const struct DioramaSceneSnapshot *snapshot)
+{
+    return snapshot->screenFadeY >= 16 ? 1.0f : snapshot->screenFadeY / 16.0f;
+}
+
 static void AdoptLatestSnapshot(void)
 {
     if (!DioramaSnapshotExchange_CopyLatest(&sIncomingSceneSnapshot))
@@ -1851,7 +1858,9 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         DioramaGLLamps_SetFocus(cameraX, cameraZ);
         DioramaGLLamps_SetActive(!sTerrainDebug);
         DioramaGLLamps_SetNight(DioramaGLLamps_NightFor(sRenderedSceneSnapshot.mapType,
-                                                        sRenderedSceneSnapshot.timeOfDay));
+                                                        sRenderedSceneSnapshot.timeOfDay)
+                                * (1.0f - ScreenFade(&sRenderedSceneSnapshot)));
+        DioramaGLObjects_SetScreenFade(ScreenFade(&sRenderedSceneSnapshot));
         {
             float sky[3] = {0.035f, 0.055f, 0.07f}; /* indoors and caves: the dark */
             bool outdoors = SkyColour(&sRenderedSceneSnapshot, sky);
@@ -2235,7 +2244,8 @@ void DioramaGL_DrawBattleWorld(float cameraX, float cameraZ, float pitch, float 
     DioramaGLLamps_SetFocus(cameraX, cameraZ);
     DioramaGLLamps_SetActive(true);
     DioramaGLLamps_SetNight(DioramaGLLamps_NightFor(sRenderedSceneSnapshot.mapType,
-                                                    sRenderedSceneSnapshot.timeOfDay));
+                                                    sRenderedSceneSnapshot.timeOfDay)
+                            * (1.0f - ScreenFade(&sRenderedSceneSnapshot)));
     if (DioramaGLShadow_Begin(cameraX, cameraZ, SunStrength(&sRenderedSceneSnapshot),
                               ((uint64_t)DioramaGLBuildings_GetGeometryGeneration() << 32)
                               | (DioramaGLTerrain_GetGeometryGeneration()

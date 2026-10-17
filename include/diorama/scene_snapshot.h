@@ -300,6 +300,13 @@ struct DioramaSceneSnapshot
      * part way to their fade colour. The 3D battle stands on the field as last
      * seen with them steady (gl_compositor.c, gl_battle.c). */
     bool paletteFading;
+    /* How far the screen's background colours are faded (gPaletteFade's normal
+     * fade: 0 none, 16 whole) and towards which colour (BGR555). The renderer's
+     * own light - lit windows, the walkers' shadows, the see-through silhouette -
+     * is not in the palettes and follows this, or it would stay on a black
+     * screen through every door and warp. */
+    uint8_t screenFadeY;
+    uint16_t screenFadeColor;
     /* A battle transition is playing on the field (CB2_OverworldBasic): the
      * scene is TRANSITION, yet the 3D view can compose the transition over
      * the 3D field (gl_battle.c DioramaGLBattle_ComposeField). */

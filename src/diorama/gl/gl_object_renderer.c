@@ -93,6 +93,8 @@ static GLint sLightProbeLocation;
 static GLint sShadeLocation;
 static GLint sSaturationLocation;
 static GLint sCastStrengthLocation;
+static GLint sScreenFadeLocation;
+static float sScreenFade;
 static struct DioramaLightUniforms sLightUniforms;
 static struct DioramaLampUniforms sLampUniforms;
 /* The ground under the player, as last seen (DioramaGLObjects_GetPlayerGround). */
@@ -177,6 +179,7 @@ static const char sObjectFragmentShader[] =
     "uniform float uprightZ;\n"
     "uniform float shade;\n"
     "uniform float castStrength;\n"
+    "uniform float screenFade;\n" /* 0-1: how far the screen is faded out (scene_snapshot.h screenFadeY) */
     DIORAMA_GLSL_GRADE
     /* The card leans back to face the camera, so its top half reaches over
      * whatever stands north of the feet - a counter, a house's front wall -
@@ -230,7 +233,7 @@ static const char sObjectFragmentShader[] =
     /* The sprite's own light and dark in a cool blue, see-through: still
      * the player at a glance, plainly behind what hides them. */
     "    float luma = dot(texel.rgb, vec3(0.299, 0.587, 0.114));\n"
-    "    color = vec4(mix(vec3(0.13, 0.25, 0.52), vec3(0.66, 0.84, 1.0), luma), 0.62);\n"
+    "    color = vec4(mix(vec3(0.13, 0.25, 0.52), vec3(0.66, 0.84, 1.0), luma), 0.62 * (1.0 - screenFade));\n"
     "    return;\n"
     "  }\n"
     "  if (drawMode == 3) {\n"
@@ -241,12 +244,12 @@ static const char sObjectFragmentShader[] =
      * the walker (none in a building's shadow). */
     "    if (texture(image, uv).a < 0.5) discard;\n"
     "    float lit = shadowEnabled == 0 ? 0.0 : SunLit();\n"
-    "    color = vec4(0.031, 0.078, 0.157, castStrength * clamp(lit, 0.0, 1.0));\n"
+    "    color = vec4(0.031, 0.078, 0.157, castStrength * clamp(lit, 0.0, 1.0) * (1.0 - screenFade));\n"
     "  } else if (drawMode == 1) {\n"
     "    vec2 point = uv * 2.0 - 1.0;\n"
     "    float distanceSquared = dot(point, point);\n"
     "    if (distanceSquared >= 1.0) discard;\n"
-    "    color = vec4(0.02, 0.025, 0.03, 0.32 * (1.0 - distanceSquared));\n"
+    "    color = vec4(0.02, 0.025, 0.03, 0.32 * (1.0 - distanceSquared) * (1.0 - screenFade));\n"
     "  } else {\n"
     "    vec2 sampleUv = uv;\n"
     "    if (drawMode == 2) sampleUv.x += sin(animationTime * 5.0 + uv.y * 14.0) * 0.012;\n"
@@ -326,6 +329,7 @@ static bool CreateProgram(void)
     sShadeLocation = dglGetUniformLocation(sProgram, "shade");
     sSaturationLocation = dglGetUniformLocation(sProgram, "saturation");
     sCastStrengthLocation = dglGetUniformLocation(sProgram, "castStrength");
+    sScreenFadeLocation = dglGetUniformLocation(sProgram, "screenFade");
     lightLocated = DioramaGLLight_Locate(sProgram, &sLightUniforms);
     DioramaGLLamps_Locate(sProgram, &sLampUniforms);
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0
@@ -337,7 +341,7 @@ static bool CreateProgram(void)
         && sShadowAmbientLocation >= 0
         && sUprightZLocation >= 0 && sLightProbeLocation >= 0
         && sShadeLocation >= 0 && sSaturationLocation >= 0
-        && sCastStrengthLocation >= 0 && lightLocated;
+        && sCastStrengthLocation >= 0 && sScreenFadeLocation >= 0 && lightLocated;
 }
 
 static float ResolveDepthBias(const struct DioramaSceneSnapshot *snapshot,
@@ -984,6 +988,11 @@ static bool HasSilhouette(const struct DioramaObjectSnapshot *object)
         || (object->localId >= 241 && object->localId < 244);
 }
 
+void DioramaGLObjects_SetScreenFade(float amount)
+{
+    sScreenFade = amount < 0.0f ? 0.0f : amount > 1.0f ? 1.0f : amount;
+}
+
 void DioramaGLObjects_SetSilhouettes(bool on)
 {
     sSilhouettes = on;
@@ -1068,6 +1077,7 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
     dglUniform1f(sShadowAmbientLocation, DioramaGLShadow_Ambient());
     dglUniformMatrix4fv(sLightMatrixLocation, 1, GL_FALSE, DioramaGLShadow_LightMatrix());
     dglUniform1f(sSaturationLocation, DioramaGLGrade_Saturation());
+    dglUniform1f(sScreenFadeLocation, sScreenFade);
     DioramaGLLight_Apply(&sLightUniforms, cameraPitch);
     DioramaGLLamps_Apply(&sLampUniforms);
     dglUniform1f(sAnimationTimeLocation, (float)fmod(

@@ -28,6 +28,10 @@ const struct DioramaObjectMetrics *DioramaGLObjects_GetMetrics(void);
  * of them is drawn through it as a see-through ghost (on by default; photo
  * mode turns it off for its pictures). */
 void DioramaGLObjects_SetSilhouettes(bool on);
+/* How far the screen is faded out (0-1, the snapshot's screenFadeY / 16): the
+ * walkers' shadows and see-through silhouettes are the renderer's own colours,
+ * not the palette's, and fade with it (none on a black screen). */
+void DioramaGLObjects_SetScreenFade(float amount);
 /* The height of the ground under the player, as last seen (0 before any). */
 float DioramaGLObjects_GetPlayerGround(void);
 /* Where the player is drawn this frame: the middle of its cell in world

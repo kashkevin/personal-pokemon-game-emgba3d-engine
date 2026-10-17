@@ -1563,6 +1563,28 @@ void DioramaScene_PublishOverworld(void)
      * dimmed menu) is a tint of the field's own and stays steady, as native_ui.c CaptureScreenFade. */
     sDraft.paletteFading = gPaletteFade.active != 0
                         || (gPaletteFade.mode == 0 && gPaletteFade.y >= 16 /* palette.c NORMAL_FADE */);
+    if (gPaletteFade.mode == 0 /* NORMAL_FADE */ && (gPaletteFade.multipurpose1 & 0xFFFF) != 0 /* BG palettes */)
+    {
+        sDraft.screenFadeY = gPaletteFade.y > 16 ? 16 : gPaletteFade.y;
+        sDraft.screenFadeColor = gPaletteFade.blendColor;
+    }
+    {
+        /* Held faded out with no fade running (a warp loads the next map behind black palettes, y back at 0):
+         * every background colour is one colour and the field's own colours are not. */
+        u32 i;
+        u16 first = gPlttBufferFaded[0] & 0x7FFF;
+        bool8 uniform = TRUE, ownUniform = TRUE;
+
+        for (i = 1; i < BG_PLTT_SIZE / sizeof(u16) && uniform; i++)
+            uniform = (gPlttBufferFaded[i] & 0x7FFF) == first;
+        for (i = 1; i < BG_PLTT_SIZE / sizeof(u16) && ownUniform; i++)
+            ownUniform = (gPlttBufferUnfaded[i] & 0x7FFF) == (gPlttBufferUnfaded[0] & 0x7FFF);
+        if (uniform && !ownUniform)
+        {
+            sDraft.screenFadeY = 16;
+            sDraft.screenFadeColor = first;
+        }
+    }
     sDraft.battleTransition = gMain.callback2 == CB2_OverworldBasic && DioramaBattle_TransitionActive();
     sDraft.valid = gMapHeader.mapLayout != NULL;
     if (!sDraft.valid)
