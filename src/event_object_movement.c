@@ -2909,7 +2909,8 @@ void TrySpawnObjectEvents(s16 cameraX, s16 cameraY)
             s16 npcY = template->y + MAP_OFFSET;
 
 #ifdef PORTABLE
-            // Update 31: in a multiplayer world the original rival of a rival checkpoint stays away.
+            // Update 31: in a multiplayer world the original rival of a rival checkpoint stays away (and the Route 101
+            // Zigzagoon of an early Update 31 character is put away for good: multiplayer_rival.c).
             if (top <= npcY && bottom >= npcY && left <= npcX && right >= npcX && !FlagGet(template->flagId)
              && !MultiplayerRival_HidesObject(template->localId, gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->location.mapGroup))
 #else

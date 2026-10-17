@@ -260,6 +260,9 @@ static void TestIntroPostState(void)
         Expect(what, VarGet(VAR_BIRCH_LAB_STATE) == 3 && VarGet(VAR_LITTLEROOT_INTRO_STATE) == 7 && VarGet(VAR_LITTLEROOT_TOWN_STATE) == 2
                && VarGet(VAR_LITTLEROOT_RIVAL_STATE) == 3 && VarGet(VAR_ROUTE101_STATE) == 3 && FlagGet(FLAG_SYS_POKEMON_GET)
                && FlagGet(FLAG_RESCUED_BIRCH) && FlagGet(FLAG_SET_WALL_CLOCK) && !FlagGet(FLAG_HIDE_LITTLEROOT_TOWN_BIRCHS_LAB_BIRCH));
+        snprintf(what, sizeof(what), "%s introduction: Route 101's Birch, Zigzagoon and bag are all put away (as Birch's bag script leaves them)", gender == MALE ? "male" : "female");
+        Expect(what, FlagGet(FLAG_HIDE_ROUTE_101_BIRCH_ZIGZAGOON_BATTLE) && FlagGet(FLAG_HIDE_ROUTE_101_ZIGZAGOON)
+               && FlagGet(FLAG_HIDE_ROUTE_101_BIRCH_STARTERS_BAG));
         snprintf(what, sizeof(what), "%s introduction: the player's own house and the rival's house are set for that gender", gender == MALE ? "male" : "female");
         Expect(what, gender == MALE
             ? FlagGet(FLAG_HIDE_LITTLEROOT_TOWN_MAYS_HOUSE_MAY) && !FlagGet(FLAG_HIDE_LITTLEROOT_TOWN_BRENDANS_HOUSE_BRENDAN)
@@ -267,6 +270,33 @@ static void TestIntroPostState(void)
             : FlagGet(FLAG_HIDE_LITTLEROOT_TOWN_BRENDANS_HOUSE_BRENDAN) && !FlagGet(FLAG_HIDE_LITTLEROOT_TOWN_MAYS_HOUSE_MAY)
               && VarGet(VAR_LITTLEROOT_HOUSES_STATE_BRENDAN) == 2 && VarGet(VAR_LITTLEROOT_HOUSES_STATE_MAY) == 1);
     }
+}
+
+// Characters made before the fix: the Route 101 Zigzagoon flag is clear although Birch was rescued.
+static void TestRoute101ZigzagoonRepair(void)
+{
+    u32 state;
+    bool32 originalKept = TRUE;
+
+    for (state = 0; state <= 2; state++)
+    {
+        Setup();
+        VarSet(VAR_ROUTE101_STATE, state);
+        originalKept &= !MultiplayerRival_HidesObject(LOCALID_ROUTE101_ZIGZAGOON, MAP_NUM(MAP_ROUTE101), MAP_GROUP(MAP_ROUTE101))
+                     && !FlagGet(FLAG_HIDE_ROUTE_101_ZIGZAGOON);
+    }
+    Expect("Route 101 before the rescue (states 0-2): the Zigzagoon of the original scene stays", originalKept);
+    Setup();
+    gSaveBlock2Ptr->playerGender = MALE;
+    MultiplayerIntro_TestApplyPostState();
+    FlagClear(FLAG_HIDE_ROUTE_101_ZIGZAGOON); // what the first Update 31 introduction saved
+    Expect("an early Update 31 save: the stuck Zigzagoon is not spawned, offline, and its flag is set for good",
+           MultiplayerRival_HidesObject(LOCALID_ROUTE101_ZIGZAGOON, MAP_NUM(MAP_ROUTE101), MAP_GROUP(MAP_ROUTE101))
+           && FlagGet(FLAG_HIDE_ROUTE_101_ZIGZAGOON));
+    Expect("the repair touches no other Route 101 object (Birch's later visits, the boy, the youngster)",
+           !MultiplayerRival_HidesObject(LOCALID_ROUTE101_BIRCH, MAP_NUM(MAP_ROUTE101), MAP_GROUP(MAP_ROUTE101))
+           && !MultiplayerRival_HidesObject(1, MAP_NUM(MAP_ROUTE101), MAP_GROUP(MAP_ROUTE101))
+           && !MultiplayerRival_HidesObject(LOCALID_ROUTE101_ZIGZAGOON, MAP_NUM(MAP_ROUTE102), MAP_GROUP(MAP_ROUTE102)));
 }
 
 // A reference for the record checks of multiplayer_rival.c ValidRecord (the app's world_mailbox.RivalRecord rules).
@@ -389,6 +419,7 @@ int NativeSelfTest_Rival(void)
     TestPreparation();
     TestObjects();
     TestIntroPostState();
+    TestRoute101ZigzagoonRepair();
     TestFuzz();
     TestFollowerAnimationPosition();
     MultiplayerRival_TestSetRecord(NULL);

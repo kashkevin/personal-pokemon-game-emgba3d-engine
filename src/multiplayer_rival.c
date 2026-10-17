@@ -404,10 +404,24 @@ void MultiplayerRival_Tick(bool32 fieldReady, bool32 connected, const u8 *record
         FlushNotice();
 }
 
+// The Route 101 Zigzagoon of an early Update 31 character that a continued save brought back on the field (objects
+// restored from a save do not pass the spawn check in MultiplayerRival_HidesObject): removed as Birch's bag removes it.
+static void RemoveStaleRoute101Zigzagoon(void)
+{
+    if (gSaveBlock1Ptr->location.mapGroup != MAP_GROUP(MAP_ROUTE101) || gSaveBlock1Ptr->location.mapNum != MAP_NUM(MAP_ROUTE101)
+     || VarGet(VAR_ROUTE101_STATE) < 3)
+        return;
+    if (GetObjectEventIdByLocalIdAndMap(LOCALID_ROUTE101_ZIGZAGOON, MAP_NUM(MAP_ROUTE101), MAP_GROUP(MAP_ROUTE101)) < OBJECT_EVENTS_COUNT)
+        RemoveObjectEventByLocalIdAndMap(LOCALID_ROUTE101_ZIGZAGOON, MAP_NUM(MAP_ROUTE101), MAP_GROUP(MAP_ROUTE101)); // sets its flag
+    else if (!FlagGet(FLAG_HIDE_ROUTE_101_ZIGZAGOON))
+        FlagSet(FLAG_HIDE_ROUTE_101_ZIGZAGOON);
+}
+
 bool8 MultiplayerRival_TryStartFieldScript(void)
 {
     s32 checkpoint;
 
+    RemoveStaleRoute101Zigzagoon();
     if (sRival.introArrive)
     {
         sRival.introArrive = FALSE;
@@ -452,9 +466,17 @@ bool8 MultiplayerRival_TryStartFieldScript(void)
 
 bool32 MultiplayerRival_HidesObject(u8 localId, u8 mapNum, u8 mapGroup)
 {
+#define AT(map) (mapGroup == MAP_GROUP(map) && mapNum == MAP_NUM(map))
+    // Characters made by the first Update 31 introduction lack the flag its Zigzagoon removal sets (Birch's bag script
+    // removes it): once Birch is rescued (Route 101 state 3) that Zigzagoon is never on the field in the original game.
+    // Set the flag so the save is repaired for good, in or out of a multiplayer world.
+    if (AT(MAP_ROUTE101) && localId == LOCALID_ROUTE101_ZIGZAGOON && VarGet(VAR_ROUTE101_STATE) >= 3)
+    {
+        FlagSet(FLAG_HIDE_ROUTE_101_ZIGZAGOON);
+        return TRUE;
+    }
     if (!InMultiplayer() || sRival.legacy)
         return FALSE;
-#define AT(map) (mapGroup == MAP_GROUP(map) && mapNum == MAP_NUM(map))
     if (AT(MAP_ROUTE103))
         return localId == LOCALID_ROUTE103_RIVAL;
     if (AT(MAP_RUSTBORO_CITY))
@@ -543,6 +565,7 @@ static void ApplyIntroPostState(void)
     FlagSet(FLAG_SYS_POKEMON_GET);
     FlagSet(FLAG_RESCUED_BIRCH);
     FlagSet(FLAG_HIDE_ROUTE_101_BIRCH_ZIGZAGOON_BATTLE);
+    FlagSet(FLAG_HIDE_ROUTE_101_ZIGZAGOON); // the bag script's removeobject of the Zigzagoon
     FlagSet(FLAG_HIDE_ROUTE_101_BIRCH_STARTERS_BAG);
     FlagSet(FLAG_SET_WALL_CLOCK);
     FlagSet(FLAG_HIDE_LITTLEROOT_TOWN_PLAYERS_HOUSE_VIGOROTH_1);
