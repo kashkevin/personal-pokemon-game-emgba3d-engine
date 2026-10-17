@@ -6266,6 +6266,19 @@ static const struct StepAnimTable *GetStepAnimTable(const union AnimCmd *const *
     return NULL;
 }
 
+#ifdef PORTABLE
+// Whether index lies within an animation: up to and including its ending command (ANIMCMD_JUMP / ANIMCMD_END).
+static bool32 AnimCmdIndexInRange(const union AnimCmd *anim, u32 index)
+{
+    u32 i;
+    for (i = 0; i < index; i++)
+        if (anim[i].type == -2 || anim[i].type == -1)
+            return FALSE;
+    return TRUE;
+}
+
+#endif
+#line 6208 // gba-line
 void SetStepAnimHandleAlternation(struct ObjectEvent *objectEvent, struct Sprite *sprite, u8 animNum)
 {
     const struct StepAnimTable *stepTable;
@@ -6281,6 +6294,14 @@ void SetStepAnimHandleAlternation(struct ObjectEvent *objectEvent, struct Sprite
             else if (sprite->animCmdIndex == stepTable->animPos[1])
                 sprite->animCmdIndex = stepTable->animPos[2];
         }
+#ifdef PORTABLE
+        // The position carried over from the previous animation can lie past the end of this one: a following Pokemon's
+        // table has no step table to remap it, and a script pushing the player back into the follower read past
+        // sAnim_GoNorth2F (AddressSanitizer, also on Route 101's vanilla push-back). Such an animation starts from its first frame.
+        if (!AnimCmdIndexInRange(sprite->anims[animNum], sprite->animCmdIndex))
+            sprite->animCmdIndex = 0;
+#endif
+#line 6223 // gba-line
         SeekSpriteAnim(sprite, sprite->animCmdIndex);
     }
 }

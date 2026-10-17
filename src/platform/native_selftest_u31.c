@@ -12,6 +12,8 @@
 #include "multiplayer_rival.h"
 #include "overworld.h"
 #include "pokemon.h"
+#include "sprite.h"
+#include "event_object_movement.h"
 #include "constants/battle.h"
 #include "constants/event_object_movement.h"
 #include "constants/flags.h"
@@ -344,6 +346,41 @@ static void TestFuzz(void)
     Expect(what, mismatches == 0 && illegal == 0 && accepted > 50000 && rewards > 0 && blocks > 0);
 }
 
+extern const union AnimCmd *const sAnimTable_Following[];
+void SetStepAnimHandleAlternation(struct ObjectEvent *objectEvent, struct Sprite *sprite, u8 animNum);
+
+static u32 AnimEnd(const union AnimCmd *anim)
+{
+    u32 i = 0;
+    while (anim[i].type != -2 && anim[i].type != -1)  // ANIMCMD_JUMP, ANIMCMD_END
+        i++;
+    return i;
+}
+
+// A following Pokemon's step from a longer animation into a shorter one (a script pushing the player back into the follower):
+// the position carried over must stay inside the new animation (AddressSanitizer read past sAnim_GoNorth2F before the fix).
+static void TestFollowerAnimationPosition(void)
+{
+    struct ObjectEvent object;
+    struct Sprite sprite;
+    u32 anim, carried, outside = 0, cases = 0;
+
+    for (anim = ANIM_STD_GO_SOUTH; anim <= ANIM_STD_GO_EAST; anim++)
+        for (carried = 0; carried < 16; carried++)
+        {
+            memset(&object, 0, sizeof(object));
+            memset(&sprite, 0, sizeof(sprite));
+            sprite.anims = sAnimTable_Following;
+            sprite.usingSheet = TRUE;
+            sprite.animCmdIndex = carried;
+            SetStepAnimHandleAlternation(&object, &sprite, anim);
+            cases++;
+            if (sprite.animCmdIndex > AnimEnd(sAnimTable_Following[anim]))
+                outside++;
+        }
+    Expect("a following Pokemon's carried-over animation position stays inside the new (shorter) animation", outside == 0 && cases == 64);
+}
+
 int NativeSelfTest_Rival(void)
 {
     printf("selftest-rival: Update 31 rival checkpoints\n");
@@ -353,6 +390,7 @@ int NativeSelfTest_Rival(void)
     TestObjects();
     TestIntroPostState();
     TestFuzz();
+    TestFollowerAnimationPosition();
     MultiplayerRival_TestSetRecord(NULL);
     printf("selftest-rival: %d checks, %d failed\n", sChecks, sFailures);
     return sFailures == 0 ? 0 : 1;
