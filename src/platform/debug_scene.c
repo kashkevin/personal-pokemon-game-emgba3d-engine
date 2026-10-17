@@ -55,7 +55,6 @@
 #include <stdbool.h>
 #include "platform/png_write.h"
 #include "multiplayer_rival.h"
-#include "constants/map_groups.h"
 
 #define MAX_KEYS 64
 #define MAX_SHOTS 32
@@ -567,7 +566,7 @@ static void RivalLog(void)
     if (gPartiesCount[B_TRAINER_PLAYER] && n < (int)sizeof(line) - 40)
         n += SDL_snprintf(line + n, sizeof(line) - n, " | mon %d lv %d met %d", GetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_SPECIES),
                           GetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_LEVEL), GetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_MET_LOCATION));
-    if (strcmp(line, sPrev) != 0)
+    if (strcmp(line, sPrev) != 0 || sKeyFrame % 300 == 0) // and a heartbeat, so a check knows how far the game is
     {
         SDL_Log("rival %u: %s", sKeyFrame, line);
         SDL_strlcpy(sPrev, line, sizeof(sPrev));

@@ -337,7 +337,9 @@ def scenarios():
                     problems.append(f"{name} granted by the introduction")
             if last["balls"]:
                 problems.append("Poke Balls granted by the introduction")
-            if r.ever(lambda row: (row["group"], row["num"]) in ((25, 40), (0, 16)) or row["battle"]):
+            # NewGameInitData points the location at the truck before the introduction takes over (party 0, no field):
+            # the truck, Route 101 or the first battle would show as a row with the starter on those maps, or a battle.
+            if r.ever(lambda row: ((row["group"], row["num"]) in ((25, 40), (0, 16)) and row["party"]) or row["battle"]):
                 problems.append("the truck, Route 101 or the first battle happened")
             if not r.trace("intro: saved"):
                 problems.append("the introduction did not save")
