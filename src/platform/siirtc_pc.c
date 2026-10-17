@@ -17,10 +17,21 @@ static u8 ToBcd(u32 value)
     return ((value / 10) << 4) | (value % 10);
 }
 
+static int sStartHour = -1;
+
+// The launcher's character setup (--setup, sdl2.c): a new world's day starts at 12:00 noon (the owner, 2026-10-17; the
+// host's world clock starts there too, app balance.py), so the New Game played to make the character does as well. Only
+// this run's clock: the introduction sets the save's clock to the time it shows (offset 0 from the clock it read), so the
+// character's own clock offline is the PC's as always.
+void SiiRtcPc_StartAtHour(int hour)
+{
+    sStartHour = hour >= 0 && hour <= 23 ? hour : -1;
+}
+
 // PKMN_CLOCK_HOUR=H (0-23; development and the benchmark's night scene): the
 // clock reads so that the game's own time is H:00 when it is first read - the
 // save's clock setting accounted for - and runs on from there as usual.
-// Unset (the player's game): the host clock as it is.
+// Unset (the player's game): the host clock as it is (character setup: SiiRtcPc_StartAtHour).
 static int ClockHourOverride(void)
 {
     static int sHour = -2;
@@ -32,6 +43,8 @@ static int ClockHourOverride(void)
         sHour = value != NULL && value[0] >= '0' && value[0] <= '9' ? atoi(value) : -1;
         if (sHour > 23)
             sHour = -1;
+        if (sHour < 0)
+            sHour = sStartHour;
     }
     return sHour;
 }

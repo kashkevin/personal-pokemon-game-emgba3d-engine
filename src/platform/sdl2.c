@@ -1089,9 +1089,15 @@ static void ParseArguments(int argc, char **argv)
             if (!MpBridge_Configure(argv[++i]))
                 exit(1);
         }
-        // The launcher's character setup (draft_runtime.py): offline until the character is saved; the pause menu says so.
+        // The launcher's character setup (draft_runtime.py): offline until the character is saved; the pause menu says so,
+        // and the clock starts at 12:00 noon as a new world's does (siirtc_pc.c).
         else if (strcmp(argv[i], "--setup") == 0)
+        {
+            void SiiRtcPc_StartAtHour(int hour); // src/platform/siirtc_pc.c
+
             MpBridge_SetSetupSession();
+            SiiRtcPc_StartAtHour(12);
+        }
         // Hosting or joined (player_runtime.py), for the same link status.
         else if (strcmp(argv[i], "--link-role") == 0 && i + 1 < argc)
             MpBridge_SetRole(argv[++i]);
