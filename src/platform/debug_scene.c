@@ -56,7 +56,7 @@
 #include "platform/png_write.h"
 #include "multiplayer_rival.h"
 
-#define MAX_KEYS 64
+#define MAX_KEYS 1024 // long walks (map streaming checks) hold a direction for hundreds of frames
 #define MAX_SHOTS 32
 #define HOLD_FRAMES 4
 
@@ -757,7 +757,8 @@ bool DebugScene_WantGlShot(void)
                 sTaken |= 1u << i;
                 return true;
             }
-        if (sGlShotCount > 0 && sTaken == (1u << sGlShotCount) - 1 && ++sAfterLast > 2)
+        // (all 32 taken: 1u << 32 is undefined in C and 0 on x86, which ended the program before the first picture)
+        if (sGlShotCount > 0 && sTaken == (sGlShotCount >= 32 ? 0xFFFFFFFFu : (1u << sGlShotCount) - 1) && ++sAfterLast > 2)
             exit(0);
         return false;
     }
