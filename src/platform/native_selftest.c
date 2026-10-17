@@ -2930,6 +2930,32 @@ int NativeSelfTest_CatchReconcile(void)
         MultiplayerWorld_ApplyRewardWord(VerdictWord(MP_REWARD_CATCH_RELEASE, ((0x1000005 - 1) & 0x7FFFFF) + 1), &result) == 1
         && gPartiesCount[B_TRAINER_PLAYER] == 1);
 
+    // 7. The companion already in its world session while the game boots (the launcher connects it before the launch):
+    //    a tick before the save blocks exist reads nothing through them. It crashed here, in the catch record's re-send
+    //    (VarGet through the null save pointer: "setting up your character could not finish", 2026-10-17).
+    {
+        struct SaveBlock1 *save1 = gSaveBlock1Ptr;
+        struct SaveBlock2 *save2 = gSaveBlock2Ptr;
+        u32 frame;
+
+        MultiplayerWorld_Init();
+        gMultiplayerMailbox.connectionFlags = MULTIPLAYER_CONNECTED;
+        gMultiplayerMailbox.heartbeat = 1;
+        gMultiplayerMailbox.peerCount = 0;
+        gMultiplayerMailbox.selfSlot = 0;
+        gMultiplayerMailbox.reserved = 0;
+        gMultiplayerMailbox.inboundGeneration = 2;
+        frame = gMultiplayerMailbox.frame;
+        gSaveBlock1Ptr = NULL;
+        gSaveBlock2Ptr = NULL;
+        Multiplayer_Tick();
+        Multiplayer_Tick();
+        gSaveBlock1Ptr = save1;
+        gSaveBlock2Ptr = save2;
+        ExpectCatch("a connected tick before the save exists reads nothing from it (the boot-time crash)",
+            gMultiplayerMailbox.frame == frame + 2);
+    }
+
     printf("selftest-catch-reconcile: %d checks, %d failed\n", sCatchChecks, sCatchFailures);
     return sCatchFailures ? 1 : 0;
 }

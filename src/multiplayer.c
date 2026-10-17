@@ -493,6 +493,15 @@ void Multiplayer_Tick(void)
     u32 i;
     bool32 ready;
     gMultiplayerMailbox.frame = ++sFrame;
+#ifdef PORTABLE
+    // The companion may already be in its world session when the game starts (character setup and hosting connect it
+    // before the launch), so the world's messages can arrive while the game is still booting, before its save blocks
+    // exist: the catch record's re-send read a variable through the null save pointer and the game crashed (the owner's
+    // "setting up your character could not finish", 2026-10-17). Nothing here reads the save until it is there.
+    if (gSaveBlock1Ptr == NULL || gSaveBlock2Ptr == NULL)
+        return;
+#endif
+#line 487 // gba-line
     ready = FieldReady();
     MultiplayerRide_Tick(ready);
     MultiplayerAppearance_Tick(sConnected);
