@@ -969,6 +969,13 @@ static void BuyMenuDrawObjectEvents(void)
             gSprites[spriteId].subspriteMode = SUBSPRITES_ON;
         }
 
+#ifdef PORTABLE
+        // Update 30: an inanimate object (Birch's bag, a sign, a ball) has a one-entry animation table, so the facing animation
+        // index would run past it and crash BeginAnim when such an object stands in the clerk's viewport.
+        if (graphicsInfo->inanimate)
+            sShopData->viewportObjects[i][ANIM_NUM] = 0;
+#endif
+#line 952 // gba-line
         StartSpriteAnim(&gSprites[spriteId], sShopData->viewportObjects[i][ANIM_NUM]);
     }
 

@@ -1161,6 +1161,9 @@ int ShellMenu_Main(int argc, char **argv)
     for (int i = 1; i + 1 < argc; i++)
         if (strcmp(argv[i], "--shell-size") == 0)
             sscanf(argv[i + 1], "%dx%d", &w, &h);
+#if defined(_WIN32) && defined(SDL_HINT_WINDOWS_DPI_AWARENESS)
+    SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");   // physical pixels: sharp at any display scaling
+#endif
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
     SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMECONTROLLER) != 0)
