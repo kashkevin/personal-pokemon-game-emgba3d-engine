@@ -309,8 +309,9 @@ endif
 C_SRCS_IN := $(wildcard $(C_SUBDIR)/*.c $(C_SUBDIR)/*/*.c $(C_SUBDIR)/*/*/*.c)
 # Native PC only (Makefile_pc): src/platform/ (the platform layer), the Diorama
 # renderer, src/native_ui/ (the native PC UI), character_customization.c (the
-# character selection), multiplayer_spawns.c (shared wild Pokemon) and multiplayer_extras.c (Secret Bases) and multiplayer_ladder.c (co-op ladder battles).
-C_SRCS := $(filter-out $(C_SUBDIR)/platform/% $(C_SUBDIR)/diorama/% $(C_SUBDIR)/data/diorama/% $(C_SUBDIR)/native_ui/% $(C_SUBDIR)/character_customization.c $(C_SUBDIR)/multiplayer_spawns.c $(C_SUBDIR)/multiplayer_extras.c $(C_SUBDIR)/multiplayer_ladder.c,$(foreach src,$(C_SRCS_IN),$(if $(findstring .inc.c,$(src)),,$(src))))
+# character selection), multiplayer_spawns.c (shared wild Pokemon) and multiplayer_extras.c (Secret Bases) and multiplayer_ladder.c (co-op ladder battles)
+# and multiplayer_rival.c (Update 31 rival checkpoints and the streamlined introduction).
+C_SRCS := $(filter-out $(C_SUBDIR)/platform/% $(C_SUBDIR)/diorama/% $(C_SUBDIR)/data/diorama/% $(C_SUBDIR)/native_ui/% $(C_SUBDIR)/character_customization.c $(C_SUBDIR)/multiplayer_spawns.c $(C_SUBDIR)/multiplayer_extras.c $(C_SUBDIR)/multiplayer_ladder.c $(C_SUBDIR)/multiplayer_rival.c,$(foreach src,$(C_SRCS_IN),$(if $(findstring .inc.c,$(src)),,$(src))))
 # The four-player free-for-all rules (battle_ffa.c) exist in the PC build and the test ROM only. Even an empty object would
 # change the order the linker places its interworking veneers in, and the release ROM must stay byte-identical.
 ifneq ($(TEST),1)

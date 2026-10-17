@@ -7,6 +7,7 @@
 #ifdef PORTABLE
 #include "multiplayer_spawns.h"
 #include "multiplayer_extras.h"
+#include "multiplayer_rival.h"
 #endif
 #line 7 // gba-line
 #include "battle.h"
@@ -85,6 +86,10 @@ struct WorldInbound
     u32 walletSeq;
     s32 walletDelta;
     u32 teammateToken;
+#ifdef PORTABLE
+    u8 rival[MP_RIVAL_RECORD_BYTES]; // Update 31: the RivalRecord (reserved[8..15]), copied with the snapshot
+#endif
+#line 77 // gba-line
 };
 
 struct RemoteFollower
@@ -149,6 +154,7 @@ void MultiplayerWorld_Init(void)
 #ifdef PORTABLE
     MultiplayerSpawns_Init(); // shared wild Pokemon (native PC only)
     MultiplayerExtras_Init(); // multiplayer Secret Bases (native PC only)
+    MultiplayerRival_Init(); // Update 31: rival checkpoints (native PC only)
 #endif
 #line 138 // gba-line
 }
@@ -173,6 +179,11 @@ static void ReadInbound(void)
     copy.walletSeq = gMultiplayerWorldMailbox.walletSeq;
     copy.walletDelta = gMultiplayerWorldMailbox.walletDelta;
     copy.teammateToken = gMultiplayerWorldMailbox.teammateToken;
+#ifdef PORTABLE
+    for (i = 0; i < MP_RIVAL_RECORD_BYTES; i++)
+        copy.rival[i] = gMultiplayerWorldMailbox.reserved[MP_RIVAL_RECORD_OFFSET + i];
+#endif
+#line 160 // gba-line
     if (generation != gMultiplayerWorldMailbox.inboundGeneration)
         return;
     sSeenInboundGeneration = generation;
@@ -1437,6 +1448,10 @@ void MultiplayerWorld_Tick(bool32 fieldReady, bool32 connected)
         memset(&sInbound, 0, sizeof(sInbound));
     }
     PublishLocalState();
+#ifdef PORTABLE
+    MultiplayerRival_Tick(fieldReady, connected, sHaveInbound ? sInbound.rival : NULL); // Update 31
+#endif
+#line 1181 // gba-line
     if (connected)
     {
 #line 1182 // gba-line

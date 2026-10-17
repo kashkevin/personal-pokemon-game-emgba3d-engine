@@ -225,6 +225,10 @@ LilycoveCity_EventScript_AquaGrunt4::
 	end
 
 LilycoveCity_EventScript_Rival::
+.ifdef PORTABLE
+	setvar VAR_0x8004, MP_RIVAL_LILYCOVE
+	call MpRival_EventScript_TalkObject
+.endif
 	lock
 	faceplayer
 	checkplayergender

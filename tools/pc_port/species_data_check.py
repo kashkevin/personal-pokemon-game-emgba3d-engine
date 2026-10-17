@@ -39,6 +39,14 @@ ALLOWED = {
     # Update 29: the coin counter's 5,000-coin pack and the wallet's room check (PC branches under .ifdef PORTABLE). No encounter,
     # level, species or trainer data.
     "data/maps/MauvilleCity_GameCorner/scripts.inc": "Game Corner coin counter (coins economy)",
+    # Update 31: the five May/Brendan battle scenes ask the multiplayer layer first (two lines under .ifdef PORTABLE at the top
+    # of each scene's entry points). The scenes' trainers, parties, levels and rewards are unchanged; the GBA ROM is unchanged.
+    "data/maps/Route103/scripts.inc": "Update 31 rival checkpoint hook (Route 103 rival)",
+    "data/maps/RustboroCity/scripts.inc": "Update 31 rival checkpoint hooks (Rustboro rival and its trigger line)",
+    "data/maps/Route104/scripts.inc": "Update 31 rival checkpoint hooks (Route 104 rival and trigger)",
+    "data/maps/Route110/scripts.inc": "Update 31 rival checkpoint hook (Route 110 trigger line)",
+    "data/maps/Route119/scripts.inc": "Update 31 rival checkpoint hook (Route 119 trigger line)",
+    "data/maps/LilycoveCity/scripts.inc": "Update 31 rival checkpoint hook (Lilycove rival)",
 }
 
 

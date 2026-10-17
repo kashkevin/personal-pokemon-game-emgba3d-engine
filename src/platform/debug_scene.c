@@ -54,6 +54,7 @@
 #include "platform/debug_scene.h"
 #include <stdbool.h>
 #include "platform/png_write.h"
+#include "multiplayer_rival.h"
 
 #define MAX_KEYS 64
 #define MAX_SHOTS 32
@@ -498,11 +499,86 @@ static void TapsFrame(uint16_t keys)
     sTaps.prevA = a;
 }
 
+// Update 31 (tools/pc_port/rival_check.py), with the field scene:
+//   PKMN_DEBUG_RIVAL="flags,completed,cleared,here,state"  the host's RivalRecord as the companion would write it (as if connected)
+//   PKMN_DEBUG_RIVAL_SET="v4084=3,f1e9=1,..."               save variables / flags (hex ids) before the map loads
+//   PKMN_DEBUG_RIVAL_BATTLE=word                             a battle started here carries this preparation word (rival battle environment)
+//   PKMN_DEBUG_RIVAL_WATCH="v4084,f1e9,..."                  the line "rival F: ..." whenever the place, the battle or a watched value changes
+//   PKMN_DEBUG_RIVAL_OBJ=localId                             ... and whether that map object is on the field
+static void RivalSetup(void)
+{
+    const char *value;
+    char copy[400], *token, *save = NULL;
+
+    if ((value = SDL_getenv("PKMN_DEBUG_RIVAL_SET")) != NULL)
+    {
+        SDL_strlcpy(copy, value, sizeof(copy));
+        for (token = strtok_r(copy, ",", &save); token != NULL; token = strtok_r(NULL, ",", &save))
+        {
+            unsigned id, amount;
+            if (sscanf(token, "v%x=%u", &id, &amount) == 2)
+                VarSet((u16)id, (u16)amount);
+            else if (sscanf(token, "f%x=%u", &id, &amount) == 2)
+                amount ? FlagSet((u16)id) : FlagClear((u16)id);
+        }
+    }
+    if ((value = SDL_getenv("PKMN_DEBUG_RIVAL")) != NULL)
+    {
+        int v[5];
+        u8 record[MP_RIVAL_RECORD_BYTES] = {0};
+        if (Numbers(value, v, 5) == 5)
+        {
+            for (int i = 0; i < 5; i++)
+                record[i] = (u8)v[i];
+            MultiplayerRival_TestSetRecord(record);
+        }
+    }
+    if ((value = SDL_getenv("PKMN_DEBUG_RIVAL_BATTLE")) != NULL)
+        MultiplayerRival_TestSetPreparation((u32)strtoul(value, NULL, 0));
+    gSaveBlock2Ptr->optionsTextSpeed = OPTIONS_TEXT_SPEED_FAST; // the checks press A on a timer
+}
+
+static void RivalLog(void)
+{
+    static char sPrev[600];
+    const char *watch = SDL_getenv("PKMN_DEBUG_RIVAL_WATCH"), *obj = SDL_getenv("PKMN_DEBUG_RIVAL_OBJ");
+    char line[600], copy[300], *token, *save = NULL;
+    int n;
+
+    if (watch == NULL || gSaveBlock1Ptr == NULL)
+        return;
+    n = SDL_snprintf(line, sizeof(line), "map %d.%d %d,%d dir %d | battle %d env %d trainer %d | dowsing %d hmfly %d balls %d party %d",
+        gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->pos.x, gSaveBlock1Ptr->pos.y,
+        gObjectEvents[gPlayerAvatar.objectEventId].facingDirection, gMain.inBattle, gBattleEnvironment,
+        gMain.inBattle ? TRAINER_BATTLE_PARAM.opponentA : 0, CountTotalItemQuantityInBag(ITEM_DOWSING_MACHINE),
+        CountTotalItemQuantityInBag(ITEM_HM_FLY), CountTotalItemQuantityInBag(ITEM_POKE_BALL), gPartiesCount[B_TRAINER_PLAYER]);
+    SDL_strlcpy(copy, watch, sizeof(copy));
+    for (token = strtok_r(copy, ",", &save); token != NULL && n < (int)sizeof(line) - 24; token = strtok_r(NULL, ",", &save))
+    {
+        unsigned id;
+        if (sscanf(token, "v%x", &id) == 1)
+            n += SDL_snprintf(line + n, sizeof(line) - n, " | v%x=%u", id, VarGet((u16)id));
+        else if (sscanf(token, "f%x", &id) == 1)
+            n += SDL_snprintf(line + n, sizeof(line) - n, " | f%x=%d", id, FlagGet((u16)id) ? 1 : 0);
+    }
+    if (obj != NULL && n < (int)sizeof(line) - 24)
+        n += SDL_snprintf(line + n, sizeof(line) - n, " | obj %d %d", atoi(obj), GetObjectEventIdByLocalId((u8)atoi(obj)) < OBJECT_EVENTS_COUNT);
+    if (gPartiesCount[B_TRAINER_PLAYER] && n < (int)sizeof(line) - 40)
+        n += SDL_snprintf(line + n, sizeof(line) - n, " | mon %d lv %d met %d", GetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_SPECIES),
+                          GetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_LEVEL), GetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_MET_LOCATION));
+    if (strcmp(line, sPrev) != 0 || sKeyFrame % 300 == 0) // and a heartbeat, so a check knows how far the game is
+    {
+        SDL_Log("rival %u: %s", sKeyFrame, line);
+        SDL_strlcpy(sPrev, line, sizeof(sPrev));
+    }
+}
+
 uint16_t DebugScene_FilterKeys(uint16_t keys)
 {
     sKeyFrame++;
     BattleScriptTick();
     DialogTick();
+    RivalLog();
     if (SDL_getenv("PKMN_DEBUG_FRAMES") != NULL)
     {
         static const void *sPrevCb2;
@@ -1000,7 +1076,16 @@ static void CB2_DebugSceneSetup(void)
     else if (strcmp(scene, "ffa") == 0)
         StartFfaScene();
     else if (strcmp(scene, "field") == 0)
+    {
         StartFieldScene();
+        RivalSetup();
+    }
+    else if (strcmp(scene, "newgame") == 0)
+    {
+        // Update 31: a New Game after Birch's speech (the name and look chosen above), through the streamlined introduction.
+        gSaveBlock2Ptr->optionsTextSpeed = OPTIONS_TEXT_SPEED_FAST;
+        SetMainCallback2(CB2_NewGame);
+    }
     else if (strcmp(scene, "audio") == 0)
         StartAudioScene();
 }

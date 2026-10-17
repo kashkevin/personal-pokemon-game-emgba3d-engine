@@ -13,6 +13,9 @@
 #ifdef ENABLE_BATTLE_SPRITES
 #include "platform/battle_sprites.h"
 #endif
+#ifdef PORTABLE
+#include "multiplayer_rival.h"
+#endif
 #line 13 // gba-line
 #include "multiplayer_world.h"
 #include "battle_message.h"
@@ -587,6 +590,17 @@ static void CB2_InitBattleInternal(void)
         gBattleEnvironment = BattleSetup_GetEnvironmentId();
     if (MultiplayerBattle_IsNative())
         gBattleEnvironment = BATTLE_ENVIRONMENT_BUILDING;
+#ifdef PORTABLE
+    {
+        // Update 31: a rival checkpoint battle stands where the original rival battle stood, on every core alike
+        // (the environment the host put in the preparation), so its background and the environment-dependent
+        // moves match the original scene and never depend on the tile each player happens to stand on.
+        u8 environment;
+        if (MultiplayerRival_BattleEnvironment(&environment))
+            gBattleEnvironment = environment;
+    }
+#endif
+#line 573 // gba-line
     if (gBattleTypeFlags & BATTLE_TYPE_RECORDED)
         gBattleEnvironment = BATTLE_ENVIRONMENT_BUILDING;
     if (TestRunner_Battle_GetForcedEnvironment())

@@ -369,6 +369,10 @@ Route110_EventScript_RivalTrigger3::
 	end
 
 Route110_EventScript_RivalScene::
+.ifdef PORTABLE
+	setvar VAR_0x8004, MP_RIVAL_ROUTE110
+	call MpRival_EventScript_TriggerLine
+.endif
 	lockall
 	checkplayergender
 	call_if_eq VAR_RESULT, MALE, Route110_EventScript_PlayMayMusic
