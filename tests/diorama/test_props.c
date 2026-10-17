@@ -329,6 +329,47 @@ static void TestBuild(void)
     CHECK(DioramaProps_ForCell(&sSnapshot, &sSnapshot.cells[CellIndex(60, 61)]) != NULL);
 }
 
+/* Tall grass is drawn flat (the terrain keeps its art) unless someone stands in it: then only its
+ * front blades stand, one card a quarter tile south of the walker's cell middle. Two cards on every
+ * cell over the same blades drawn flat made a field of it dense stripes (2026-10-17). */
+static void TestTallGrass(void)
+{
+    bool complete;
+    unsigned count;
+
+    MakeSnapshot(LAYOUT_LITTLEROOT_TOWN, 0.5f);
+    Put(60, 60, TALL_GRASS);
+    Put(61, 60, TALL_GRASS);
+    Put(62, 60, FLOWERS);
+    count = DioramaProps_Build(&sSnapshot, sResolved, sInstances, 16, &complete);
+    CHECK(count == 2 && complete);                       /* the flowers' two cards, no grass card */
+    CHECK(sInstances[0].prop->metatileId == FLOWERS && sInstances[1].prop->metatileId == FLOWERS);
+    sSnapshot.objectCount = 1;
+    sSnapshot.objects[0].active = 1;
+    sSnapshot.objects[0].flags = 0;
+    sSnapshot.objects[0].currentMapX = sSnapshot.objects[0].previousMapX = 61;
+    sSnapshot.objects[0].currentMapY = sSnapshot.objects[0].previousMapY = 60;
+    count = DioramaProps_Build(&sSnapshot, sResolved, sInstances, 16, &complete);
+    CHECK(count == 3);
+    {
+        unsigned i, grass = 0;
+
+        for (i = 0; i < count; i++)
+        {
+            if (sInstances[i].prop->metatileId != TALL_GRASS)
+                continue;
+            grass++;
+            CHECK(sInstances[i].cellIndex == CellIndex(61, 60) && sInstances[i].rustle > 0.0f);
+            CHECK(Near(sInstances[i].z, -60.0f - 0.25f) && sInstances[i].artTop == 8 && sInstances[i].artBottom == 16);
+        }
+        CHECK(grass == 1);
+    }
+    sSnapshot.objects[0].flags = DIORAMA_OBJECT_INVISIBLE;   /* someone hidden: no grass at their feet */
+    count = DioramaProps_Build(&sSnapshot, sResolved, sInstances, 16, &complete);
+    CHECK(count == 2);
+    sSnapshot.objectCount = 0;
+}
+
 static void TestLampAndFences(void)
 {
     bool complete;
@@ -463,6 +504,7 @@ int main(void)
     TestFind();
     TestComposeArt();
     TestBuild();
+    TestTallGrass();
     TestLampAndFences();
     TestStall();
     TestGround();
