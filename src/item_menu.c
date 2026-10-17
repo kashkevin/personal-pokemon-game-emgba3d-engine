@@ -1459,6 +1459,29 @@ static void Task_SwitchBagPocket(u8 taskId)
             return;
         }
     }
+#ifdef ENABLE_NATIVE_UI
+    // The native bag (native_ui/screens/ui_bag.c) covers this picture and draws the pocket from gBagPosition.pocket,
+    // which changes only when this sixteen-frame repaint of the hidden list ends: every pocket switch reached the
+    // player about 0.3 s late (owner, 2026-10-17). With the native bag on screen the repaint runs at once; the same
+    // rows and pocket name are written, then the switch completes in this frame. The classic picture keeps its slide.
+    const char *NativeUi_ScreenNow(void); // native_ui/ui_screen.h
+    if (tPocketSwitchState == 0 && NativeUi_ScreenNow() != NULL && strcmp(NativeUi_ScreenNow(), "bag") == 0)
+    {
+        while (tPocketSwitchTimer < 16)
+        {
+            DrawItemListBgRow(tPocketSwitchTimer);
+            if (!(++tPocketSwitchTimer & 1))
+            {
+                if (tPocketSwitchDir == MENU_CURSOR_DELTA_RIGHT)
+                    CopyPocketNameToWindow((u8)(tPocketSwitchTimer >> 1));
+                else
+                    CopyPocketNameToWindow((u8)(8 - (tPocketSwitchTimer >> 1)));
+            }
+        }
+        tPocketSwitchState = 1;
+    }
+#endif
+#line 1462 // gba-line
     switch (tPocketSwitchState)
     {
     case 0:
