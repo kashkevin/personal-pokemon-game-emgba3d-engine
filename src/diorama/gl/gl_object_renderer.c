@@ -562,16 +562,24 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
         struct SpriteTextureCacheEntry *texture;
         struct ObjectRenderItem *item;
 
-        if (!object->active || (object->flags & (DIORAMA_OBJECT_INVISIBLE | DIORAMA_OBJECT_OFFSCREEN)))
+        /* Past the GBA's own picture (DIORAMA_OBJECT_OFFSCREEN) an object is drawn when it can be, and
+         * otherwise left out: it can never take the 3D view down, as one on the GBA's screen does. */
+        bool optional = (object->flags & DIORAMA_OBJECT_OFFSCREEN) != 0;
+
+        if (!object->active || (object->flags & DIORAMA_OBJECT_INVISIBLE))
             continue;
         if (!DioramaSprite_IsSupported(object) || nextItemCount >= DIORAMA_MAX_OBJECTS)
         {
+            if (optional)
+                continue;
             LogObjectRefusal(object, nextItemCount >= DIORAMA_MAX_OBJECTS ? "too many" : "unsupported sprite");
             return false;
         }
         texture = GetTexture(snapshot, object);
         if (texture == NULL)
         {
+            if (optional)
+                continue;
             LogObjectRefusal(object, "no texture");
             return false;
         }
@@ -592,6 +600,11 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
             texture = GetTexture(snapshot, &reflection);
             if (texture == NULL)
             {
+                if (optional)
+                {
+                    nextItemCount--;
+                    continue;
+                }
                 LogObjectRefusal(object, "no reflection texture");
                 return false;
             }
@@ -601,6 +614,11 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
                                              snapshot->visibleCellCount,
                                              object, &item->currentPose))
         {
+            if (optional)
+            {
+                nextItemCount--;
+                continue;
+            }
             LogObjectRefusal(object, "no pose");
             return false;
         }

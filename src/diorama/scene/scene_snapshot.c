@@ -1056,7 +1056,12 @@ static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
         copy->facingDirection = object->facingDirection;
         copy->movementDirection = object->movementDirection;
         copy->flags = (object->isPlayer ? DIORAMA_OBJECT_PLAYER : 0)
-                    | ((object->invisible || sprite->invisible
+                    // The GBA hides an object's sprite when it leaves the GBA's own 240x160 picture
+                    // (UpdateObjectEventSpriteVisibility: invisible || offScreen); the 3D view shows more
+                    // of the map than that, so an object hidden only for that reason stays visible here
+                    // (DIORAMA_OBJECT_OFFSCREEN tells the renderer it is optional), or people and items
+                    // popped into view six tiles ahead.
+                    | ((object->invisible || (sprite->invisible && !object->offScreen)
                      || sprite->oam.affineMode == ST_OAM_AFFINE_ERASE) ? DIORAMA_OBJECT_INVISIBLE : 0)
                     | (object->offScreen ? DIORAMA_OBJECT_OFFSCREEN : 0)
                     | (object->hasReflection ? DIORAMA_OBJECT_REFLECTION : 0)
