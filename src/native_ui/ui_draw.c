@@ -936,6 +936,50 @@ static void BuildPaint(struct UiBitmap *bm, const void *ctx)
     UiBitmap_Paint(bm, b->m, 0, 0, b->body, b->o);
 }
 
+/* A piece larger than the atlas (ATLAS_SIZE) in tiles that fit: built whole, each tile cached under its own key and
+ * drawn at its place. At a window too low for x2 (under 720 rows) the interface is drawn at x1 and its canvas is the
+ * window's own width, so a shape across the window - the battle's message plate - was wider than the atlas: it was
+ * never drawn (the battle text stood on the 3D scene with no plate). */
+struct TileBuild
+{
+    int w, h, sx, sy;
+    UiBuildFn fn;
+    const void *ctx;
+};
+
+static void BuildTile(struct UiBitmap *bm, const void *ctx)
+{
+    const struct TileBuild *t = ctx;
+    struct UiBitmap full;
+
+    UiBitmap_Init(&full, t->w, t->h);
+    t->fn(&full, t->ctx);
+    for (int y = 0; y < bm->h; y++)
+        memcpy(&bm->d[(size_t)y * bm->w * 4], &full.d[((size_t)(t->sy + y) * t->w + t->sx) * 4], (size_t)bm->w * 4);
+    UiBitmap_Free(&full);
+}
+
+static void BlitCached(const char *key, int w, int h, UiBuildFn fn, const void *ctx, int x, int y)
+{
+    char tileKey[2100];
+
+    if (w <= ATLAS_SIZE && h <= ATLAS_SIZE)
+    {
+        UiG_Blit(UiG_Cached(key, w, h, fn, ctx), x, y);
+        return;
+    }
+    for (int ty = 0; ty < h; ty += ATLAS_SIZE)
+        for (int tx = 0; tx < w; tx += ATLAS_SIZE)
+        {
+            struct TileBuild t = {w, h, tx, ty, fn, ctx};
+            int tw = w - tx < ATLAS_SIZE ? w - tx : ATLAS_SIZE;
+            int th = h - ty < ATLAS_SIZE ? h - ty : ATLAS_SIZE;
+
+            snprintf(tileKey, sizeof(tileKey), "%s#%d,%d", key, tx, ty);
+            UiG_Blit(UiG_Cached(tileKey, tw, th, BuildTile, &t), x + tx, y + ty);
+        }
+}
+
 void UiG_Mask(const struct UiMask *m, int x, int y, UiRGBA c)
 {
     char key[2048];
@@ -944,7 +988,7 @@ void UiG_Mask(const struct UiMask *m, int x, int y, UiRGBA c)
     if (m == NULL || UI_A(c) == 0)
         return;
     snprintf(key, sizeof(key), "m%s|%08x", m->key, c);
-    UiG_Blit(UiG_Cached(key, m->w, m->h, BuildMask, &b), x, y);
+    BlitCached(key, m->w, m->h, BuildMask, &b, x, y);
 }
 
 void UiG_Paint(const struct UiMask *m, int x, int y, UiRGBA body, const struct UiPaint *o)
@@ -956,7 +1000,7 @@ void UiG_Paint(const struct UiMask *m, int x, int y, UiRGBA body, const struct U
         return;
     key[0] = 'p';
     UiPaintKey(key + 1, sizeof(key) - 1, m, body, o);
-    UiG_Blit(UiG_Cached(key, m->w, m->h, BuildPaint, &b), x, y);
+    BlitCached(key, m->w, m->h, BuildPaint, &b, x, y);
 }
 
 const struct UiMask *UiG_Panel4(int x, int y, int w, int h, const struct UiRamp *r,
