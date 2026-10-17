@@ -1220,6 +1220,13 @@ u32 TryAndDespawnOldestGeneratedOWE_ToFreeObject(void)
 
 void DespawnOWEOnBattleStart(void)
 {
+#ifdef PORTABLE
+    // A battle that no visible wild Pokemon started (a coordinate trigger leaves VAR_LAST_TALKED 0): there is nothing to
+    // despawn, and gObjectEvents[OBJECT_EVENTS_COUNT] is the memory after the array (AddressSanitizer).
+    if (GetObjectEventIdByLocalId(gSpecialVar_LastTalked) >= OBJECT_EVENTS_COUNT)
+        return;
+#endif
+#line 1188 // gba-line
     struct ObjectEvent *owe = &gObjectEvents[GetObjectEventIdByLocalId(gSpecialVar_LastTalked)];
     if (!IsOverworldWildEncounter(owe, OWE_ANY))
         return;

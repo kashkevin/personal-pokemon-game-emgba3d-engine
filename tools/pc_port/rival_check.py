@@ -382,7 +382,8 @@ def scenarios():
         ("route110-reward", "a pass gives the Dowsing Machine once on the line",
          dict(route110, PKMN_DEBUG_RIVAL="1,0,4,0,0"), walk_north + hold("UP", 1700, 20), route110_reward),
         ("route110-reward-again", "walking the line again after the reward gives nothing more",
-         dict(route110, PKMN_DEBUG_RIVAL="1,4,4,0,0"), walk_north + hold("UP", 1700, 40) + hold("DOWN", 1900, 20) + hold("UP", 2100, 40),
+         dict(route110, PKMN_DEBUG_RIVAL="1,4,4,0,0"), walk_north_short + presses(900, 10, 60) + hold("UP", 1700, 40)
+         + hold("DOWN", 1900, 20) + hold("UP", 2100, 40),
          route110_again),
         ("route110-catch-up", "completed by the world, not by this player: no barrier, no reward",
          dict(route110, PKMN_DEBUG_RIVAL="1,4,0,0,0"), walk_north, catch_up),

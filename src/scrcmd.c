@@ -1283,8 +1283,18 @@ bool8 ScrCmd_applymovement(struct ScriptContext *ctx)
     Script_RequestEffects(SCREFF_V1 | SCREFF_HARDWARE);
 
     // When applying script movements to follower, it may have frozen animation that must be cleared
+#ifdef PORTABLE
+    // The object may not exist (VAR_LAST_TALKED is 0 after a coordinate trigger, e.g. every original rival battle): never read
+    // gObjectEvents[OBJECT_EVENTS_COUNT], the memory after the array (AddressSanitizer; upstream follower check).
+    if ((localId == OBJ_EVENT_ID_FOLLOWER && (objEvent = GetFollowerObject()) && objEvent->frozen)
+            || (GetObjectEventIdByLocalId(localId) < OBJECT_EVENTS_COUNT
+                && (objEvent = &gObjectEvents[GetObjectEventIdByLocalId(localId)]) && IS_OW_MON_OBJ(objEvent)))
+#else
+#line 1286 // gba-line
     if ((localId == OBJ_EVENT_ID_FOLLOWER && (objEvent = GetFollowerObject()) && objEvent->frozen)
             || ((objEvent = &gObjectEvents[GetObjectEventIdByLocalId(localId)]) && IS_OW_MON_OBJ(objEvent)))
+#endif
+#line 1288 // gba-line
     {
         ClearObjectEventMovement(objEvent, &gSprites[objEvent->spriteId]);
         gSprites[objEvent->spriteId].animCmdIndex = 0; // Reset start frame of animation
