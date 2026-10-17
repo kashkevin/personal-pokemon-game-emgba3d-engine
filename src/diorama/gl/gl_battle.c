@@ -1022,11 +1022,12 @@ static void BattleLayout(SDL_Window *window, struct Layout *layout)
      * back pictures end on its top edge, row 112, cut there in their own art. When the native
      * interface draws the messages and menus instead, that box is gone and the picture's bottom
      * edge on the window's left the back pictures cut off at the waist in mid-air, 48 rows above
-     * the window's bottom. Then row 112 is the window's bottom edge: the back pictures end where the
-     * window does (rows 112-159 only ever held what the opaque box covered), and the world, laid
-     * out from this layout, moves with them. */
+     * the window's bottom. Then row 112 is the top edge of the HUD's bottom panel (its message
+     * plate, commands and moves; NativeUi_BattlePanelTop): the back pictures end behind it as they
+     * ended behind the GBA's box, never under it, and the world, laid out from this layout, moves
+     * with them. (Rows 112-159 only ever held what the opaque box covered.) */
     if (NativeUi_ReplacesBattleTextBox())
-        layout->gameY = (float)layout->outH - 112.0f * layout->scale;
+        layout->gameY = (float)NativeUi_BattlePanelTop(layout->outW, layout->outH) - 112.0f * layout->scale;
 #endif
 }
 

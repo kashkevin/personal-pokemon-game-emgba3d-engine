@@ -161,6 +161,14 @@ bool NativeUi_ReplacesBattleTextBox(void)
     return NativeUi_Enabled() && ScreenAllowed("battle") && UiBattle_Supported();
 }
 
+int NativeUi_BattlePanelTop(int outputWidth, int outputHeight)
+{
+    struct UiView view;
+
+    UiView_Compute(&view, outputWidth, outputHeight, sSize);
+    return view.originY + (view.canvasHeight - (UI_LOGICAL_HEIGHT - NATIVE_UI_BATTLE_PANEL_Y)) * view.scale;
+}
+
 bool NativeUi_LogEnabled(void)
 {
     return sLog;

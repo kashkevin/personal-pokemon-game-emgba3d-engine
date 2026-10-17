@@ -1099,12 +1099,12 @@ static void DrawMessagePage(int L, int R, int dyB, int t)
 {
     int w = R - L;
 
-    MessagePlate(L, 284 + dyB, w, 70);
+    MessagePlate(L, NATIVE_UI_BATTLE_PANEL_Y + dyB, w, 70);
     if (sB.hasMsg)
         MessageText(L + 14, 293 + dyB, w - 40, sB.msg, sB.msgPrinting ? (int)sB.msgPrinted : -1);
     if (sB.msgWaiting)
         UiW_DownArrow(R - 24, 336 + dyB + ((t / 16) % 2), UI_HEX(0xF8F8F8), false);
-    UiG_Hit(HIT_MESSAGE, 0, L, 284 + dyB, w, 70);
+    UiG_Hit(HIT_MESSAGE, 0, L, NATIVE_UI_BATTLE_PANEL_Y + dyB, w, 70);
     if (sB.yesNo)
         UiW_YesNo(R - 8, 278 + dyB, sB.yesNoCursor, t, UI_ANCHOR_BOTTOMRIGHT, NULL);
 }
@@ -1115,7 +1115,7 @@ static void DrawActionPage(int L, int R, int dyB, int t)
     struct UiHintItem h[2] = {{UI_ACT_CONFIRM, sChoose}, {UI_ACT_CANCEL, sBack}};
     int cx = R - 260;
 
-    MessagePlate(L, 284 + dyB, cx - 8 - L, 70);
+    MessagePlate(L, NATIVE_UI_BATTLE_PANEL_Y + dyB, cx - 8 - L, 70);
     if (sB.hasPrompt)
         MessageText(L + 14, 293 + dyB, cx - 8 - L - 28, sB.prompt, -1);
     /* the prompts while the player's own choice waits (not between turns, nor Wally's) */
@@ -1145,7 +1145,7 @@ static void DrawMovePage(int L, int R, int dyB, int t)
 
     for (int i = 0; i < MAX_MON_MOVES; i++)
     {
-        int mx = L + 8 + (i % 2) * 212, my = 284 + dyB + (i / 2) * 38;
+        int mx = L + 8 + (i % 2) * 212, my = NATIVE_UI_BATTLE_PANEL_Y + dyB + (i / 2) * 38;
 
         if (sB.moves[i] == MOVE_NONE)
         {
@@ -1159,7 +1159,7 @@ static void DrawMovePage(int L, int R, int dyB, int t)
         MoveButton(mx, my, 204, 34, i, switching ? i == sB.switchCursor : i == sB.moveCursor);
         UiG_Hit(HIT_MOVE, i, mx, my, 204, 34);
     }
-    InfoCard(R - 204, 284 + dyB, 196, 72);
+    InfoCard(R - 204, NATIVE_UI_BATTLE_PANEL_Y + dyB, 196, 72);
     if (sB.chooser < 0 || sB.wallyChooses)
     {
         /* no prompts between turns, nor while Wally chooses his move himself */
@@ -1200,7 +1200,7 @@ static void DrawTargetPage(int L, int R, int dyB, int t)
     {
         u32 battler = sB.atPosition[sPos[i]];
         const struct Box *b = BoxAt(sPos[i]);
-        int px = L + 8 + (i % 2) * 208, py = 284 + dyB + (i / 2) * 38, state;
+        int px = L + 8 + (i % 2) * 208, py = NATIVE_UI_BATTLE_PANEL_Y + dyB + (i / 2) * 38, state;
         const char *role = sRoles[i];
 
         if (sB.ffa)

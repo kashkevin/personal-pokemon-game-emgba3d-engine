@@ -35,6 +35,10 @@ bool NativeUi_Enabled(void);
 /* Whether this battle's messages and menus are the native interface's (the GBA's text box, rows 112-159 of
  * the picture, is not shown): decided by the battle's type, so it holds from the battle's first frame. */
 bool NativeUi_ReplacesBattleTextBox(void);
+/* The window row (drawable pixels from the top) where the battle HUD's bottom panel (NATIVE_UI_BATTLE_PANEL_Y,
+ * ui_draw.h) begins at this window size: the 3D battle puts the GBA text box's top edge, where the back pictures end,
+ * there (diorama/gl/gl_battle.c BattleLayout). */
+int NativeUi_BattlePanelTop(int outputWidth, int outputHeight);
 
 /* Frame boundary (game parked): which screen is up, its state, and the
  * picture policy for the frame about to be drawn. Called before VDraw. */

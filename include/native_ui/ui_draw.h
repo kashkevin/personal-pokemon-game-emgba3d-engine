@@ -19,6 +19,9 @@
 
 #define UI_LOGICAL_WIDTH 640
 #define UI_LOGICAL_HEIGHT 360
+/* The battle HUD's bottom panel - the message plate, the commands, the moves - begins at this row of the 360-row
+ * design, bottom-anchored (screens/ui_battle.c; NativeUi_BattlePanelTop). */
+#define NATIVE_UI_BATTLE_PANEL_Y 284
 
 enum UiSize
 {
