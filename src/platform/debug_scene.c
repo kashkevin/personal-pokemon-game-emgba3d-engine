@@ -52,6 +52,7 @@
 #include "field_player_avatar.h"
 #include "script.h"
 #include "platform/debug_scene.h"
+#include "pokemon_storage_system.h"
 #include <stdbool.h>
 #include "platform/png_write.h"
 #include "multiplayer_rival.h"
@@ -771,8 +772,44 @@ bool DebugScene_WantGlShot(void)
     return false;
 }
 
+// PKMN_DEBUG_STORAGE_AT=frame[,frame...]: the line "storage F: party ... | box1 ..." (species numbers) at those game frames.
+static void StorageLog(void)
+{
+    static unsigned sAt[8], sCount;
+    static bool sRead;
+    const char *value;
+    char line[256];
+    int n;
+
+    if (!sRead)
+    {
+        int v[8];
+        sRead = true;
+        if ((value = SDL_getenv("PKMN_DEBUG_STORAGE_AT")) != NULL)
+        {
+            sCount = (unsigned)Numbers(value, v, 8);
+            for (unsigned i = 0; i < sCount; i++)
+                sAt[i] = (unsigned)v[i];
+        }
+    }
+    for (unsigned i = 0; i < sCount; i++)
+    {
+        if (sKeyFrame != sAt[i] || gPokemonStoragePtr == NULL)
+            continue;
+        n = snprintf(line, sizeof(line), "storage %u: party", sKeyFrame);
+        for (int p = 0; p < gPartiesCount[B_TRAINER_PLAYER] && n < 200; p++)
+            n += snprintf(line + n, sizeof(line) - n, " %u", (unsigned)GetMonData(&gParties[B_TRAINER_PLAYER][p], MON_DATA_SPECIES));
+        n += snprintf(line + n, sizeof(line) - n, " | box1");
+        for (int b = 0; b < IN_BOX_COUNT && n < 240; b++)
+            if (GetBoxMonDataAt(0, b, MON_DATA_SPECIES) != SPECIES_NONE)
+                n += snprintf(line + n, sizeof(line) - n, " %d:%u", b, (unsigned)GetBoxMonDataAt(0, b, MON_DATA_SPECIES));
+        SDL_Log("%s", line);
+    }
+}
+
 void DebugScene_Frame(const uint16_t *pixels)
 {
+    StorageLog();
     static uint8_t rgba[DISPLAY_WIDTH * DISPLAY_HEIGHT * 4];
     char path[480];
 
@@ -1022,6 +1059,15 @@ static void StartFieldScene(void)
             SetMonMoveSlot(&gParties[B_TRAINER_PLAYER][0], (u16)mv[m], (u8)m);
     }
     gPartiesCount[B_TRAINER_PLAYER] = 1;
+    // PKMN_DEBUG_PARTY=n (2-6): n Pokemon (the first, then Zigzagoon, Wurmple...) for the PC storage checks
+    if ((value = SDL_getenv("PKMN_DEBUG_PARTY")) != NULL && Numbers(value, v, 1) >= 1 && v[0] >= 2 && v[0] <= PARTY_SIZE)
+    {
+        static const u16 sMore[] = {SPECIES_ZIGZAGOON, SPECIES_WURMPLE, SPECIES_POOCHYENA, SPECIES_LOTAD, SPECIES_SEEDOT};
+
+        for (int m = 1; m < v[0]; m++)
+            CreateMonWithIVs(&gParties[B_TRAINER_PLAYER][m], sMore[m - 1], 10, 0x1234u + m, id, 20);
+        gPartiesCount[B_TRAINER_PLAYER] = (u8)v[0];
+    }
     for (int badge = FLAG_BADGE01_GET; badge <= FLAG_BADGE08_GET; badge++)
         FlagSet((u16)badge); // so the level 30 Pokemon obeys
     FlagSet(FLAG_SYS_POKEMON_GET); // the start menu lists POKéMON
