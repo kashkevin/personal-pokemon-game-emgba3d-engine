@@ -102,6 +102,11 @@ static const u8 sHelp_Events[] = _("World Events and Championships: planned, not
 
 static const u8 sText_LinkOffline[] = _("Not linked");
 static const u8 sText_LinkAlone[] = _("No one else");
+static const u8 sText_LinkWaiting[] = _("Waiting for friends");
+static const u8 sText_LinkSetup[] = _("Save, then close the game");
+static const u8 sText_LinkStarting[] = _("Starting the world…");
+static const u8 sText_LinkJoining[] = _("Joining the world…");
+static const u8 sText_LinkSeeLauncher[] = _("See the launcher window");
 static const u8 sText_Here[] = _("Here");
 static const u8 sText_Elsewhere[] = _("Elsewhere");
 static const u8 sText_Trainer[] = _("Trainer ");
@@ -134,6 +139,8 @@ static u8 sMapName[32];
 static u8 sClock[12];
 static bool sLinked;
 static bool sConnected;
+static u8 sLinkState;           /* enum MpLinkState */
+static char sLinkRole;          /* MpBridge_Role: 'h', 'j' or 0 */
 static int sPeerCount;
 static int sPeersHere;
 static u32 sPeerId[MULTIPLAYER_MAX_PEERS];
@@ -273,6 +280,8 @@ static void Capture(void)
     ClockText(sClock, sizeof(sClock), gLocalTime.hours, gLocalTime.minutes);
     sLinked = MpBridge_IsEnabled();
     sConnected = Multiplayer_IsConnected();
+    sLinkState = MpBridge_LinkState();
+    sLinkRole = MpBridge_Role();
     sPeerCount = sPeersHere = 0;
     for (u32 i = 0; i < MULTIPLAYER_MAX_PEERS; i++)
     {
@@ -403,6 +412,7 @@ static void LinkPanel(int x, int y)
     int w = 184, h = 82, yy = y + 21;
     struct UiPattern scan = UiPat_HStripe(2, 1, 0);
     char count[24];
+    const u8 *note = sText_LinkOffline;
 
     UiG_Paint(UiM_Rounded4(w, h, 5, 5, 5, 5), x, y, UI_R_FIELD_BASE,
               &(struct UiPaint){UI_P_FIELD_INK, UI_R_FIELD_HI, UI_R_FIELD_LO, 0, 2, NULL, UI_NONE});
@@ -414,17 +424,40 @@ static void LinkPanel(int x, int y)
     UiG_Paint(UiM_Rounded4(w - 20, h - 12, 2, 2, 2, 2), x + 5, y + 5, LCD_LIGHT,
               &(struct UiPaint){UI_P_FIELD_INK, UI_NONE, UI_NONE, 0, 0, &scan, LCD_SCAN});
     UiCaps_Draw(x + 10, y + 9, "LINK", LCD_DARK, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
-    if (!sConnected)
-        snprintf(count, sizeof(count), "%s", sLinked ? "CONNECTING" : "OFFLINE");
-    else
-        snprintf(count, sizeof(count), "%d NEARBY", sPeersHere);
+    /* what the launcher made of this game (MpBridge_LinkState): a host's own game says HOSTING once its world is up */
+    switch (sLinkState)
+    {
+    case MP_LINK_SETUP:
+        snprintf(count, sizeof(count), "SETUP");
+        note = sText_LinkSetup;
+        break;
+    case MP_LINK_CONNECTING:
+        snprintf(count, sizeof(count), "CONNECTING");
+        note = sLinkRole == 'h' ? sText_LinkStarting : sText_LinkJoining;
+        break;
+    case MP_LINK_NOT_CONNECTED:
+        snprintf(count, sizeof(count), "NOT CONNECTED");
+        note = sText_LinkSeeLauncher;
+        break;
+    case MP_LINK_LOST:
+        snprintf(count, sizeof(count), "LINK LOST");
+        note = sText_LinkSeeLauncher;
+        break;
+    case MP_LINK_CONNECTED:
+        if (sPeerCount > 0)
+            snprintf(count, sizeof(count), "%s%d NEARBY", sLinkRole == 'h' ? "HOST " : "", sPeersHere);
+        else
+            snprintf(count, sizeof(count), "%s", sLinkRole == 'h' ? "HOSTING" : "CONNECTED");
+        note = sLinkRole == 'h' ? sText_LinkWaiting : sText_LinkAlone;
+        break;
+    default:
+        snprintf(count, sizeof(count), "OFFLINE");
+        break;
+    }
     UiCaps_Draw(x + w - 20, y + 9, count, LCD_DARK, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_RIGHT, UI_NONE);
     UiG_HLine(x + 9, y + 18, w - 28, LCD_MID);
     if (!sConnected || sPeerCount == 0)
-    {
-        UiText_Draw(UI_FONT_NARROW, x + 12, yy - 2, sConnected ? sText_LinkAlone : sText_LinkOffline, LCD_DARK,
-                    LCD_MID, UI_ALIGN_LEFT, 0);
-    }
+        UiText_Draw(UI_FONT_NARROW, x + 12, yy - 2, note, LCD_DARK, LCD_MID, UI_ALIGN_LEFT, 0);
     for (int i = 0; i < sPeerCount && i < 3; i++)
     {
         u8 name[24];

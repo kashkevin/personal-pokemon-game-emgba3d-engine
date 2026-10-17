@@ -2123,6 +2123,21 @@ static int HexValue(char c)
     return -1;
 }
 
+static char sRole; /* 'h' host, 'j' join, 0: not said (an older launcher) */
+static uint32_t sLinkFrames; /* game frames since the bridge was configured */
+
+/* --link-role host|join (player_runtime.py): an argument rather than a bridge-file line, so that a launcher newer than
+ * the game never stops it from starting (a game ignores arguments it does not know but refuses unknown bridge lines). */
+void MpBridge_SetRole(const char *role)
+{
+    sRole = strcmp(role, "host") == 0 ? 'h' : strcmp(role, "join") == 0 ? 'j' : 0;
+}
+
+char MpBridge_Role(void)
+{
+    return MpBridge_IsEnabled() ? sRole : 0;
+}
+
 bool MpBridge_Configure(const char *path)
 {
     struct MpBridgeOps ops;
@@ -2281,10 +2296,38 @@ bool MpBridge_IsEnabled(void)
     return sEnabled;
 }
 
+/* The link status the game shows (the pause menu's LINK): see enum MpLinkState. A connection is shown only once the
+ * companion reports the world session (Multiplayer_IsConnected: its heartbeat with the CONNECTED flag); "not connected"
+ * after MP_LINK_PATIENCE_FRAMES without one, "lost" once one was had and has gone. */
+#define MP_LINK_PATIENCE_FRAMES (60 * 20)
+static bool sSetup, sLinkSeen;
+
 void MpBridge_Frame(void)
 {
     if (sEnabled)
+    {
         MpBridge_Step(&sBridge);
+        if (sLinkFrames < 0xFFFFFFFFu)
+            sLinkFrames++;
+        if (Multiplayer_IsConnected())
+            sLinkSeen = true;
+    }
+}
+
+void MpBridge_SetSetupSession(void)
+{
+    sSetup = true;
+}
+
+enum MpLinkState MpBridge_LinkState(void)
+{
+    if (!sEnabled)
+        return sSetup ? MP_LINK_SETUP : MP_LINK_OFFLINE;
+    if (Multiplayer_IsConnected())
+        return MP_LINK_CONNECTED;
+    if (sLinkSeen)
+        return MP_LINK_LOST;
+    return sLinkFrames >= MP_LINK_PATIENCE_FRAMES ? MP_LINK_NOT_CONNECTED : MP_LINK_CONNECTING;
 }
 
 bool MpBridge_SaveCommandPending(void)

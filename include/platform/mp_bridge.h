@@ -54,6 +54,19 @@
 /* Platform API (sdl2.c). */
 bool MpBridge_Configure(const char *path); /* false: refuse to start the game */
 bool MpBridge_IsEnabled(void);
+enum MpLinkState
+{
+    MP_LINK_OFFLINE,       /* started without a bridge: single play on this PC */
+    MP_LINK_SETUP,         /* the launcher's character setup (--setup): offline by design until saved and closed */
+    MP_LINK_CONNECTING,    /* the bridge is up, the world session not yet reported */
+    MP_LINK_NOT_CONNECTED, /* still no world session after a while: the launcher's window says why */
+    MP_LINK_CONNECTED,     /* the companion reports the world session (hosting or joined) */
+    MP_LINK_LOST,          /* it was connected and is not now */
+};
+void MpBridge_SetSetupSession(void);        /* --setup on the command line */
+enum MpLinkState MpBridge_LinkState(void);
+void MpBridge_SetRole(const char *role);    /* --link-role host|join on the command line */
+char MpBridge_Role(void);                   /* 'h' hosting, 'j' joined, 0 not said */
 void MpBridge_Frame(void);                  /* once per game frame, game thread parked */
 uint16_t MpBridge_FilterKeys(uint16_t keys); /* the multiplayer runtime's reset-chord guard */
 bool MpBridge_SaveCommandPending(void);     /* a save command is in the game, its reply not yet read */

@@ -1089,6 +1089,12 @@ static void ParseArguments(int argc, char **argv)
             if (!MpBridge_Configure(argv[++i]))
                 exit(1);
         }
+        // The launcher's character setup (draft_runtime.py): offline until the character is saved; the pause menu says so.
+        else if (strcmp(argv[i], "--setup") == 0)
+            MpBridge_SetSetupSession();
+        // Hosting or joined (player_runtime.py), for the same link status.
+        else if (strcmp(argv[i], "--link-role") == 0 && i + 1 < argc)
+            MpBridge_SetRole(argv[++i]);
         // A measurement of the 3D view at each resolution (include/platform/benchmark.h).
         else if (strcmp(argv[i], "--benchmark") == 0)
         {
