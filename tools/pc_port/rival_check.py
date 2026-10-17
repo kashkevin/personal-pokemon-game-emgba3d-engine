@@ -121,6 +121,8 @@ class Run:
 
 
 def run(binary, env, keys, timeout, save):
+    if len(keys) > 64:  # debug_scene.c MAX_KEYS: later entries would be dropped silently
+        raise SystemExit(f"{len(keys)} key entries; the game takes at most 64")
     xvfb = shutil.which("xvfb-run")
     full = dict(os.environ, PKMN_DEBUG_FRAMES="1", SDL_AUDIODRIVER="dummy", PKMN_DEBUG_KEYS=",".join(keys), **env)
     cmd = ([xvfb, "-a", "-s", "-screen 0 1280x800x24"] if xvfb and not os.environ.get("DISPLAY") else []) + \
@@ -166,6 +168,7 @@ def scenarios():
     route119 = dict(PKMN_DEBUG_SCENE="field", PKMN_DEBUG_HERE="0,34,25,32",
                     PKMN_DEBUG_RIVAL_WATCH=",".join(ref(n) for n in ("VAR_ROUTE119_STATE", "FLAG_RECEIVED_HM_FLY", "VAR_SCOTT_STATE")))
     walk_north = hold("UP", 300) + presses(420, 30, 40)
+    walk_north_short = hold("UP", 300) + presses(420, 10, 40)
     plain, grass = 9, 0  # BATTLE_ENVIRONMENT_PLAIN, BATTLE_ENVIRONMENT_GRASS (include/constants/battle.h)
 
     def blocked(r):
@@ -230,6 +233,27 @@ def scenarios():
                 problems.append(f"the player never reached {axis} {target}")
             return problems
         return check
+
+    def gate_then_offline(r):
+        problems = []
+        if not r.trace("checkpoint 2 mode 1") or not r.trace("host record gone"):
+            problems.append("the gate or the disconnect did not happen")
+        after = [row for row in r.rows if 600 <= row["frame"] < 1700]
+        if not after or after[-1]["y"] != 57:
+            problems.append("the gate scene did not finish (the player was not put back) after the disconnect")
+        if not r.ever(lambda row: row["frame"] >= 1700 and (row["y"] <= 56 or row["battle"])):
+            problems.append("the player was held after the disconnect")
+        if r.ever(lambda row: row["dowsing"] > 1):
+            problems.append("a reward twice")
+        return problems
+
+    def completed_while_waiting(r):
+        problems = []
+        if not r.ever(lambda row: row["frame"] >= 1700 and row["y"] <= 55):
+            problems.append("the world completion did not open the line")
+        if r.last["dowsing"] or r.watched(r.last, "VAR_ROUTE110_STATE"):
+            problems.append("a reward without the player's own pass")
+        return problems
 
     def original(r):
         problems = []
@@ -350,7 +374,7 @@ def scenarios():
         return dict(PKMN_DEBUG_SCENE="newgame", PKMN_DEBUG_HERE=f"0,9,5,9,{gender}",
                     PKMN_DEBUG_RIVAL_WATCH=",".join(ref(n) for n in intro_watch))
 
-    starter_keys = presses(500, 8, 60) + presses(1100, 60, 45)
+    starter_keys = presses(500, 8, 60) + presses(1100, 56, 45)
 
     return [
         ("route110-gate", "the armed Route 110 line stops a northbound player, no NPC battle",
@@ -385,7 +409,7 @@ def scenarios():
         ("route119-gate", "the armed Route 119 line stops a northbound player",
          dict(route119, PKMN_DEBUG_RIVAL="1,0,0,0,0"), walk_north, route119_blocked),
         ("route119-reward", "a pass gives HM02 Fly once, FLAG_RECEIVED_HM_FLY, and Scott's scene",
-         dict(route119, PKMN_DEBUG_RIVAL="1,8,8,0,0"), walk_north + presses(1700, 30, 40), route119_reward),
+         dict(route119, PKMN_DEBUG_RIVAL="1,8,8,0,0"), walk_north + presses(1700, 24, 40), route119_reward),
         ("route103-reward", "a pass on Route 103: Birch's lab state 4, no Pokedex or Poke Balls yet, no NPC rival",
          dict(route103, PKMN_DEBUG_RIVAL="1,1,1,0,0"), presses(300, 20, 40), route103_reward),
         ("route103-waiting", "Route 103 before a pass: no NPC rival, nothing changes",
@@ -398,6 +422,18 @@ def scenarios():
          dict(battle, PKMN_DEBUG_RIVAL_BATTLE=hex(0x52560000 | (3 << 8) | plain)), presses(600, 10, 60), environment(plain)),
         ("battle-ordinary-environment", "the same battle without it draws GRASS (ordinary battles unchanged)",
          dict(battle), presses(600, 10, 60), environment(grass)),
+        ("route110-reward-disconnect", "the host goes away during the reward scene: the reward still comes once, nobody is held",
+         dict(route110, PKMN_DEBUG_RIVAL="1,0,4,0,0", PKMN_DEBUG_RIVAL_THEN="430:off"), walk_north + hold("UP", 1700, 20),
+         route110_reward),
+        ("route110-gate-disconnect", "the host goes away while the gate stops the player: the scene ends, then the game is offline",
+         dict(route110, PKMN_DEBUG_RIVAL="1,0,0,0,0", PKMN_DEBUG_RIVAL_THEN="430:off"), walk_north_short + hold("UP", 1700, 20)
+         + presses(1760, 30, 40), gate_then_offline),
+        ("route110-pass-while-waiting", "a pass recorded while the player waits at the gate: the next step on the line rewards",
+         dict(route110, PKMN_DEBUG_RIVAL="1,0,0,0,0", PKMN_DEBUG_RIVAL_THEN="900:1,0,4,0,0"), walk_north_short
+         + hold("UP", 1700, 20) + presses(1760, 30, 40) + hold("UP", 3100, 20), route110_reward),
+        ("route110-completed-while-waiting", "the world completes it while the player waits: the player may pass, without a reward",
+         dict(route110, PKMN_DEBUG_RIVAL="1,0,0,0,0", PKMN_DEBUG_RIVAL_THEN="900:1,4,0,0,0"), walk_north_short
+         + hold("UP", 1700, 20) + presses(1760, 10, 40), completed_while_waiting),
         ("intro-male", "New Game: starter screen, Littleroot (5,9), lab state 3, nothing earned early, one save",
          newgame(0), starter_keys, intro(0)),
         ("intro-female", "the same for a female player: Littleroot (14,9)",

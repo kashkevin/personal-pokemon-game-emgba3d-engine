@@ -538,15 +538,52 @@ static void RivalSetup(void)
     gSaveBlock2Ptr->optionsTextSpeed = OPTIONS_TEXT_SPEED_FAST; // the checks press A on a timer
 }
 
+// PKMN_DEBUG_RIVAL_THEN="frame:flags,completed,cleared,here,state" or "frame:off": at that game frame the host's record
+// changes (a pass recorded, a world completion) or the game loses its host ("off": as a disconnect).
+static void RivalThen(void)
+{
+    static int sFrame = -1;
+    static char sRest[64];
+    const char *value;
+
+    if (sFrame == -1)
+    {
+        sFrame = -2;
+        if ((value = SDL_getenv("PKMN_DEBUG_RIVAL_THEN")) != NULL && sscanf(value, "%d:%63s", &sFrame, sRest) != 2)
+            sFrame = -2;
+    }
+    if (sFrame < 0 || sKeyFrame != (unsigned)sFrame)
+        return;
+    if (strcmp(sRest, "off") == 0)
+    {
+        MultiplayerRival_TestSetRecord(NULL);
+        SDL_Log("rival %u: host record gone (disconnect)", sKeyFrame);
+    }
+    else
+    {
+        int v[5];
+        u8 record[MP_RIVAL_RECORD_BYTES] = {0};
+        if (Numbers(sRest, v, 5) == 5)
+        {
+            for (int i = 0; i < 5; i++)
+                record[i] = (u8)v[i];
+            MultiplayerRival_TestSetRecord(record);
+            SDL_Log("rival %u: host record now %s", sKeyFrame, sRest);
+        }
+    }
+}
+
 static void RivalLog(void)
 {
     static char sPrev[600];
-    const char *watch = SDL_getenv("PKMN_DEBUG_RIVAL_WATCH"), *obj = SDL_getenv("PKMN_DEBUG_RIVAL_OBJ");
-    char line[600], copy[300], *token, *save = NULL;
+    char watch[300], obj[16], line[600], copy[300], *token, *save = NULL;
     int n;
 
-    if (watch == NULL || gSaveBlock1Ptr == NULL)
+    // Copies: on Windows each SDL_getenv call reuses one static buffer.
+    if (SDL_getenv("PKMN_DEBUG_RIVAL_WATCH") == NULL || gSaveBlock1Ptr == NULL)
         return;
+    SDL_strlcpy(watch, SDL_getenv("PKMN_DEBUG_RIVAL_WATCH"), sizeof(watch));
+    SDL_strlcpy(obj, SDL_getenv("PKMN_DEBUG_RIVAL_OBJ") != NULL ? SDL_getenv("PKMN_DEBUG_RIVAL_OBJ") : "", sizeof(obj));
     n = SDL_snprintf(line, sizeof(line), "map %d.%d %d,%d dir %d | battle %d env %d trainer %d | dowsing %d hmfly %d balls %d party %d",
         gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->pos.x, gSaveBlock1Ptr->pos.y,
         gObjectEvents[gPlayerAvatar.objectEventId].facingDirection, gMain.inBattle, gBattleEnvironment,
@@ -561,7 +598,7 @@ static void RivalLog(void)
         else if (sscanf(token, "f%x", &id) == 1)
             n += SDL_snprintf(line + n, sizeof(line) - n, " | f%x=%d", id, FlagGet((u16)id) ? 1 : 0);
     }
-    if (obj != NULL && n < (int)sizeof(line) - 24)
+    if (obj[0] != '\0' && n < (int)sizeof(line) - 24)
         n += SDL_snprintf(line + n, sizeof(line) - n, " | obj %d %d", atoi(obj), GetObjectEventIdByLocalId((u8)atoi(obj)) < OBJECT_EVENTS_COUNT);
     if (gPartiesCount[B_TRAINER_PLAYER] && n < (int)sizeof(line) - 40)
         n += SDL_snprintf(line + n, sizeof(line) - n, " | mon %d lv %d met %d", GetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_SPECIES),
@@ -578,6 +615,7 @@ uint16_t DebugScene_FilterKeys(uint16_t keys)
     sKeyFrame++;
     BattleScriptTick();
     DialogTick();
+    RivalThen();
     RivalLog();
     if (SDL_getenv("PKMN_DEBUG_FRAMES") != NULL)
     {
@@ -1001,7 +1039,13 @@ static void StartFieldScene(void)
 
 static void CB2_DebugSceneSetup(void)
 {
-    const char *scene = SDL_getenv("PKMN_DEBUG_SCENE");
+    // A copy: on Windows SDL_getenv returns one static buffer that the next SDL_getenv call overwrites, so the scene name
+    // read here would turn into PKMN_DEBUG_HERE's value below and no scene would ever start (seen under Wine).
+    char sceneName[32] = "";
+    const char *scene = SDL_getenv("PKMN_DEBUG_SCENE") != NULL ? sceneName : NULL;
+
+    if (scene != NULL)
+        SDL_strlcpy(sceneName, SDL_getenv("PKMN_DEBUG_SCENE"), sizeof(sceneName));
     const char *value;
     struct RegionMapTestMarkers test;
     int v[8];

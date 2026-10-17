@@ -267,6 +267,83 @@ static void TestIntroPostState(void)
     }
 }
 
+// A reference for the record checks of multiplayer_rival.c ValidRecord (the app's world_mailbox.RivalRecord rules).
+static bool32 ReferenceValid(const u8 *r)
+{
+    if (!(r[0] & MP_RIVAL_FLAG_VALID) || (r[0] & ~7) || (r[1] & ~0x1F) || (r[2] & ~0x1F) || r[3] > 5 || r[4] > 4 || r[5] || r[6] || r[7])
+        return FALSE;
+    if ((r[3] == 0) != (r[4] == 0))
+        return FALSE;
+    return !((r[0] & (MP_RIVAL_FLAG_PRESENT | MP_RIVAL_FLAG_MY_MATCH)) && r[3] == 0);
+}
+
+static u32 sFuzzState = 0x31A7E5u;
+
+static u32 FuzzNext(void)
+{
+    sFuzzState ^= sFuzzState << 13;
+    sFuzzState ^= sFuzzState >> 17;
+    sFuzzState ^= sFuzzState << 5;
+    return sFuzzState;
+}
+
+// 200,000 records from a host or a damaged mailbox (half fully random, half near-valid), any checkpoint, facing and save
+// state: the mode is always the reference's, a malformed record never opens, blocks or rewards anything, a reward needs
+// the player's own pass and a due save, and only a northbound player on a trigger line is ever stopped.
+static void TestFuzz(void)
+{
+    static const u8 sFacings[] = {DIR_NORTH, DIR_SOUTH, DIR_EAST, DIR_WEST};
+    u32 i, mismatches = 0, illegal = 0, accepted = 0, rewards = 0, blocks = 0;
+    char what[200];
+
+    for (i = 0; i < 200000; i++)
+    {
+        u8 r[MP_RIVAL_RECORD_BYTES], mode, expected;
+        u32 cp = FuzzNext() % MP_RIVAL_CHECKPOINT_COUNT, facing = sFacings[FuzzNext() % 4], due = FuzzNext() & 1, b;
+        bool32 valid, triggerLine = cp == MP_RIVAL_ROUTE110 || cp == MP_RIVAL_ROUTE119;
+
+        for (b = 0; b < MP_RIVAL_RECORD_BYTES; b++)
+            r[b] = FuzzNext();
+        if (i & 1)
+        {
+            // near-valid: the shapes a real companion writes, with an occasional broken byte
+            r[0] = MP_RIVAL_FLAG_VALID | (FuzzNext() & 6);
+            r[1] &= 0x1F; r[2] &= 0x1F;
+            r[3] = FuzzNext() % 6;
+            r[4] = r[3] ? 1 + FuzzNext() % 4 : 0;
+            r[5] = r[6] = r[7] = 0;
+            if ((FuzzNext() & 15) == 0)
+                r[FuzzNext() % MP_RIVAL_RECORD_BYTES] ^= 1u << (FuzzNext() % 8);
+        }
+        Setup();
+        SetSaveState(cp, due);
+        MultiplayerRival_TestSetRecord(r);
+        mode = MultiplayerRival_TestMode(cp, facing);
+        valid = ReferenceValid(r);
+        accepted += valid;
+        if (!valid)
+            expected = triggerLine && facing == DIR_NORTH ? MP_RIVAL_MODE_WAIT : MP_RIVAL_MODE_PASS;
+        else if ((r[2] >> cp) & 1)
+            expected = due ? MP_RIVAL_MODE_REWARD : MP_RIVAL_MODE_PASS;
+        else if ((r[1] >> cp) & 1)
+            expected = due ? MP_RIVAL_MODE_CATCH_UP : MP_RIVAL_MODE_PASS;
+        else
+            expected = triggerLine && facing == DIR_NORTH && due ? MP_RIVAL_MODE_BLOCK : MP_RIVAL_MODE_PASS;
+        if (mode != expected)
+            mismatches++;
+        if ((!valid && mode != MP_RIVAL_MODE_WAIT && mode != MP_RIVAL_MODE_PASS)
+         || (mode == MP_RIVAL_MODE_REWARD && !(((r[2] >> cp) & 1) && due))
+         || (mode == MP_RIVAL_MODE_BLOCK && !(triggerLine && facing == DIR_NORTH)) || mode > MP_RIVAL_MODE_PASS)
+            illegal++;
+        rewards += mode == MP_RIVAL_MODE_REWARD;
+        blocks += mode == MP_RIVAL_MODE_BLOCK;
+    }
+    MultiplayerRival_TestSetRecord(NULL);
+    snprintf(what, sizeof(what), "fuzz: 200000 records (%u valid): %u mismatches, %u illegal modes (%u rewards, %u blocks)",
+             accepted, mismatches, illegal, rewards, blocks);
+    Expect(what, mismatches == 0 && illegal == 0 && accepted > 50000 && rewards > 0 && blocks > 0);
+}
+
 int NativeSelfTest_Rival(void)
 {
     printf("selftest-rival: Update 31 rival checkpoints\n");
@@ -275,6 +352,7 @@ int NativeSelfTest_Rival(void)
     TestPreparation();
     TestObjects();
     TestIntroPostState();
+    TestFuzz();
     MultiplayerRival_TestSetRecord(NULL);
     printf("selftest-rival: %d checks, %d failed\n", sChecks, sFailures);
     return sFailures == 0 ? 0 : 1;
