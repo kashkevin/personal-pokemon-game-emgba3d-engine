@@ -63,6 +63,7 @@ static void (*sOverlay)(int outputWidth, int outputHeight);
  * replaces this frame (DIORAMA_PICTURE_*). */
 static int (*sPictureFilter)(void);
 static bool sLastFrame3D;
+static enum DioramaPresentationDecision sLastDecision = DIORAMA_PRESENT_HARD_2D;
 static GLuint sProgram;
 static GLuint sVertexArray;
 static GLuint sVertexBuffer;
@@ -1605,6 +1606,35 @@ static void UiOwnerLog(bool terrain, int pictureFlags, bool picture, bool gbaWin
     }
 }
 
+/* PKMN_DIORAMA_TRANSITION_LOG=1: what each presented frame shows, once per change - the 3D field, the GBA picture
+ * (boxed, or over the field at what opacity), the presentation decision and why the field is not ready (the
+ * area-change checks). */
+static void TransitionLog(enum DioramaPresentationDecision decision, bool current3D, bool terrain, bool picture)
+{
+    static int sOn = -1;
+    static char sPrev[200];
+    char line[200];
+
+    if (sOn < 0)
+        sOn = SDL_getenv("PKMN_DIORAMA_TRANSITION_LOG") != NULL;
+    if (!sOn)
+        return;
+    snprintf(line, sizeof(line), "decision %d ready %d field %d picture %d opacity %.1f kind %d fallback 0x%x fade %u map %d.%d gen %u",
+             (int)decision, current3D, terrain, picture, picture ? sTwoDOpacity : 0.0f,
+             sHasSceneSnapshot ? (int)sSceneSnapshot.sceneKind : -1,
+             sHasSceneSnapshot ? (unsigned)sSceneSnapshot.fallbackReasons : 0u,
+             sHasSceneSnapshot ? (unsigned)sSceneSnapshot.screenFadeY : 0u,
+             sHasSceneSnapshot ? sSceneSnapshot.mapGroup : -1, sHasSceneSnapshot ? sSceneSnapshot.mapNum : -1,
+             sHasSceneSnapshot ? (unsigned)sSceneSnapshot.mapGeneration : 0u);
+    if (strcmp(line, sPrev) != 0)
+    {
+        unsigned DebugScene_GameFrame(void); /* platform/debug_scene.c */
+
+        SDL_strlcpy(sPrev, line, sizeof(sPrev));
+        SDL_Log("transition %u: %s", DebugScene_GameFrame(), line);
+    }
+}
+
 static void EnsureFrameTexture(void)
 {
     if (sPendingFrame == NULL)
@@ -1776,12 +1806,15 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                    sizeof(sRenderedResolvedCells));
             sHasRenderedSceneSnapshot = true;
         }
-        if (newSequence)
-        {
-            if (mapDiscontinuity)
-                SnapOpacity(1.0f);
+        /* The GBA's picture is the field this view now draws, or black in a fade: it is not laid over the 3D
+         * field to fade out, boxed in the middle of the window, when an area begins (a door, a warp, walking into
+         * the next town or route) or after a stretch of 2D. That showed as a small screen for the fade's 0.12 s -
+         * a few frames in the slow software-rendered checks, which hid it, and about 7 at 60 fps on a PC. Only
+         * leaving a soft 2D fallback on the same map (a text box this view could not draw) still fades it out. */
+        if (mapDiscontinuity || (sLastDecision != DIORAMA_PRESENT_SOFT_2D && !sLastFrame3D))
+            SnapOpacity(0.0f);
+        else if (newSequence)
             SetOpacityTarget(0.0f);
-        }
         drawTerrain = true;
     }
     else if (presentationDecision == DIORAMA_PRESENT_HOLD_3D
@@ -2051,6 +2084,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         drewPicture = true;
     }
     UiOwnerLog(drawTerrain, pictureFlags, drewPicture, drewGbaWindows);
+    TransitionLog(presentationDecision, current3D, drawTerrain, drewPicture);
 
     sDrewField3D = drawTerrain && sSurveyView < 0;
     if (sSurveyView < 0 && !drawTerrain && border && sBorderTexture.id != 0
@@ -2078,6 +2112,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         CaptureSurveyFrame(outputWidth, outputHeight, captureSnapshot, stateMatchesPixels);
     }
     sLastFrame3D = drawTerrain;
+    sLastDecision = presentationDecision;
     if (SDL_getenv("PKMN_DEBUG_FRAMES") != NULL)
     {
         static int sPrevKey = -1;
