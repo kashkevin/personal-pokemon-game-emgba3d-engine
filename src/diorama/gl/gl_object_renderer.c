@@ -18,7 +18,7 @@
 #include "diorama/sprite_frame.h"
 
 #define SPRITE_TEXTURE_CACHE_SIZE 48
-#define OBJECT_RENDER_ITEM_CAPACITY (DIORAMA_MAX_OBJECTS + 1)
+#define OBJECT_RENDER_ITEM_CAPACITY (DIORAMA_MAX_OBJECTS + 1 + DIORAMA_MAX_EFFECTS)
 
 struct ObjectVertex
 {
@@ -49,7 +49,7 @@ struct ObjectRenderItem
     uint8_t width;
     uint8_t height;
     bool interpolate;
-    bool attachedToPlayer;
+    bool attached; /* to the player (the surf blob) or another walker (an icon over its head) */
     int16_t previousAttachedOffsetX;
     int16_t previousAttachedOffsetY;
     int16_t attachedOffsetX;
@@ -537,10 +537,114 @@ static void LogObjectRefusal(const struct DioramaObjectSnapshot *object, const c
     }
 }
 
+/* PKMN_DIORAMA_LOG=1: each field-effect sprite drawn, once per change (where it stands, for the visual checks). */
+static void LogEffect(int index, const struct DioramaEffectSnapshot *effect, struct DioramaSpritePose pose)
+{
+    static int sLogEnabled = -1;
+    static char sLast[DIORAMA_MAX_EFFECTS][128];
+    char line[128];
+
+    if (sLogEnabled < 0)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_LOG");
+        sLogEnabled = value != NULL && value[0] == '1';
+    }
+    if (!sLogEnabled || index >= DIORAMA_MAX_EFFECTS)
+        return;
+    SDL_snprintf(line, sizeof(line), "Diorama: effect %d %s %ux%u at x %.2f y %.2f z %.2f (ground %.2f)", index,
+                 effect->owner == DIORAMA_EFFECT_PLACED ? "placed" : "over a walker",
+                 effect->sprite.width, effect->sprite.height, pose.x, pose.y, pose.z, pose.groundY);
+    if (SDL_strcmp(line, sLast[index]) != 0)
+    {
+        SDL_strlcpy(sLast[index], line, sizeof(sLast[index]));
+        SDL_Log("%s", line);
+    }
+}
+
+#define MODEL_PUSH_HEIGHT 0.25f  /* where on a model's face the face is looked for (ModelPush, StandOnFace) */
+#define EFFECT_RAISE_MAX 4.0f    /* tiles: further up than that is not a picture on that face */
+
+/*
+ * A placed effect sprite (a healing machine's Poke Ball or monitor, scene_snapshot.h struct DioramaEffectSnapshot)
+ * on the face of the model drawn where the GBA draws it. A standing card's rows go up its face as they go north on
+ * the GBA, so the picture's bottom row (`bottom`, tiles south) lies on a face standing at z when it is z - bottom up
+ * that face. Of the faces in the picture's column, in its cell and the two south of it, the southernmost that is
+ * there at that height (FrontAt, the face found again from the picture's middle height): the front of the machine,
+ * not the wall behind it that the front hides. On the floor where no model reaches (or no models are drawn).
+ */
+static bool FaceInCell(const struct DioramaSceneSnapshot *snapshot, int mapX, int mapY, float west, float east,
+                       float bottom, float halfHeight, float *face)
+{
+    int gridX = mapX - snapshot->gridOriginX;
+    int gridY = mapY - snapshot->gridOriginY;
+    int index = gridY * DIORAMA_GRID_WIDTH + gridX;
+    const struct DioramaCellSnapshot *cell;
+    float originX;
+    float originY;
+    float front;
+    float height = MODEL_PUSH_HEIGHT;
+    int attempt;
+
+    if (gridX < 0 || gridY < 0 || gridX >= DIORAMA_GRID_WIDTH || gridY >= DIORAMA_GRID_HEIGHT
+     || index >= snapshot->visibleCellCount)
+        return false;
+    cell = &snapshot->cells[index];
+    if (cell->mapX != mapX || cell->mapY != mapY || !(cell->flags & DIORAMA_CELL_SOURCE_VALID))
+        return false;
+    /* the layout's tiles to the scene's: cell x spanning x..x+1 there, x-0.5..x+0.5 here (as ModelPush) */
+    originX = (float)(cell->mapX - cell->sourceMapX) - 0.5f;
+    originY = (float)(cell->mapY - cell->sourceMapY) - 0.5f;
+    for (attempt = 0; attempt < 3; attempt++)
+    {
+        float raise;
+
+        if (!DioramaBuildings_FrontAt(cell->sourceLayoutId, cell->sourceMapX, cell->sourceMapY,
+                                      west - originX, east - originX, height, &front))
+            return false;
+        raise = front + originY - bottom;
+        if (raise < 0.0f || raise > EFFECT_RAISE_MAX)
+            return false;
+        if (attempt > 0 && fabsf(raise + halfHeight - height) < 0.01f)
+        {
+            *face = front + originY;
+            return true;
+        }
+        height = raise + halfHeight;
+    }
+    return false;
+}
+
+static void StandOnFace(const struct DioramaSceneSnapshot *snapshot, const struct DioramaObjectSnapshot *object,
+                        struct DioramaSpritePose *pose)
+{
+    float halfWidth = object->width / 32.0f;
+    float bottom = object->currentMapY + 0.5f + object->mapPixelOffsetY / 16.0f;
+    float best = -1.0f;
+    float face;
+    bool found = false;
+    int row;
+
+    if (!DioramaBuildings_IsAvailable())
+        return;
+    for (row = 0; row < 3; row++)
+        if (FaceInCell(snapshot, object->currentMapX, object->currentMapY + row, pose->x - halfWidth,
+                       pose->x + halfWidth, bottom, object->height / 32.0f, &face)
+         && (!found || face > best))
+        {
+            best = face;
+            found = true;
+        }
+    if (!found)
+        return;
+    pose->z = -best;
+    pose->y += best - bottom;
+}
+
 bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
                            const struct DioramaResolvedCell *resolvedCells)
 {
     struct ObjectRenderItem nextItems[OBJECT_RENDER_ITEM_CAPACITY];
+    int8_t objectItems[DIORAMA_MAX_OBJECTS];
     uint8_t nextItemCount = 0;
     bool playerFound = false;
     int playerItem = -1;
@@ -555,6 +659,7 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
         ClearTextureCache();
     sMapGeneration = snapshot->mapGeneration;
 
+    memset(objectItems, -1, sizeof(objectItems));
     for (i = 0; i < snapshot->objectCount; i++)
     {
         const struct DioramaObjectSnapshot *object = &snapshot->objects[i];
@@ -640,6 +745,7 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
             playerFound = true;
             playerItem = nextItemCount - 1;
         }
+        objectItems[i] = nextItemCount - 1;
     }
     /* The player hidden (gone through a door, a cutscene): the scene is still
      * drawn, only without the player and the surf blob it would carry. */
@@ -668,7 +774,7 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
         item->interpolate = nextItems[playerItem].interpolate;
         item->depthBias = nextItems[playerItem].depthBias;
         item->drawOverPixelObjects = nextItems[playerItem].drawOverPixelObjects;
-        item->attachedToPlayer = true;
+        item->attached = true;
         item->previousAttachedOffsetX = snapshot->surfBlobOffsetX;
         item->previousAttachedOffsetY = snapshot->surfBlobOffsetY;
         item->attachedOffsetX = snapshot->surfBlobOffsetX;
@@ -679,7 +785,56 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
             item->previousAttachedOffsetY = sPreviousSnapshot.surfBlobOffsetY;
         }
     }
+    /* Field-effect sprites (scene_snapshot.h struct DioramaEffectSnapshot): drawn when they can be, never taking
+     * the view down - an icon over its walker, a healing machine's Poke Balls and monitor on the machine. */
+    sMetrics.effects = 0;
+    for (i = 0; i < snapshot->effectCount && nextItemCount < OBJECT_RENDER_ITEM_CAPACITY; i++)
+    {
+        const struct DioramaEffectSnapshot *effect = &snapshot->effects[i];
+        struct SpriteTextureCacheEntry *texture;
+        struct ObjectRenderItem *item;
+        struct DioramaSpritePose pose;
+        int owner = -1;
 
+        if (effect->owner != DIORAMA_EFFECT_PLACED)
+        {
+            if (effect->owner >= snapshot->objectCount || objectItems[effect->owner] < 0)
+                continue;
+            owner = objectItems[effect->owner];
+        }
+        else if (!DioramaSprite_BuildResolvedPose(snapshot, resolvedCells, snapshot->visibleCellCount,
+                                                  &effect->sprite, &pose))
+        {
+            continue;
+        }
+        if (!DioramaSprite_IsSupported(&effect->sprite)
+         || (texture = GetTexture(snapshot, &effect->sprite)) == NULL)
+            continue;
+        item = &nextItems[nextItemCount++];
+        memset(item, 0, sizeof(*item));
+        item->object = effect->sprite;
+        item->texture = texture->texture;
+        item->width = texture->width;
+        item->height = texture->height;
+        if (owner >= 0)
+        {
+            item->previousPose = nextItems[owner].previousPose;
+            item->currentPose = nextItems[owner].currentPose;
+            item->interpolate = nextItems[owner].interpolate;
+            item->depthBias = nextItems[owner].depthBias;
+            item->drawOverPixelObjects = nextItems[owner].drawOverPixelObjects;
+            item->attached = true;
+            item->previousAttachedOffsetX = item->attachedOffsetX = effect->offsetX;
+            item->previousAttachedOffsetY = item->attachedOffsetY = effect->offsetY;
+        }
+        else
+        {
+            StandOnFace(snapshot, &effect->sprite, &pose);
+            item->previousPose = item->currentPose = pose;
+        }
+        LogEffect(sMetrics.effects, effect, item->currentPose);
+        sMetrics.effects++;
+    }
     memcpy(sItems, nextItems, nextItemCount * sizeof(*sItems));
     sItemCount = nextItemCount;
     sPlayerItem = playerFound ? playerItem : -1;
@@ -784,7 +939,6 @@ static const struct DioramaCellSnapshot *FindCell(int mapX, int mapY)
  */
 #define CARD_CLEAR (1.0f / 16.0f)
 #define MODEL_PUSH_MAX 0.5f      /* further than that is not furniture's front */
-#define MODEL_PUSH_HEIGHT 0.25f  /* where on the card the face is looked for */
 
 static float ModelPush(struct DioramaSpritePose pose, float halfWidth)
 {
@@ -1037,7 +1191,7 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
         poses[i] = sItems[i].interpolate
             ? DioramaSprite_InterpolatePose(sItems[i].previousPose, sItems[i].currentPose, frameAlpha)
             : sItems[i].currentPose;
-        if (sItems[i].attachedToPlayer)
+        if (sItems[i].attached)
         {
             float offsetX = sItems[i].previousAttachedOffsetX
                           + (sItems[i].attachedOffsetX - sItems[i].previousAttachedOffsetX)
@@ -1136,7 +1290,7 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
     {
         int index = order[i];
         if ((sItems[index].object.flags & DIORAMA_OBJECT_SHADOW)
-         && !sItems[index].attachedToPlayer && DoorDusk(poses[index]) > 0.0f)
+         && !sItems[index].attached && DoorDusk(poses[index]) > 0.0f)
         {
             if (sunStrength > 0.0f && sItems[index].object.affineMode == 0)
             {

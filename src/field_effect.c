@@ -4633,3 +4633,16 @@ u32 FldEff_PhotoFlash(void)
 
     return 0;
 }
+
+#ifdef ENABLE_DIORAMA
+// The healing machines' sprites (the Pokemon Center's and the Hall of Fame's Poke Balls and monitors), for the
+// Diorama 3D view (src/diorama/scene/scene_snapshot.c): they are not object events, and that view drew the
+// machine empty.
+bool8 DioramaFieldEffect_IsMachineSprite(const struct Sprite *sprite)
+{
+    return sprite->callback == SpriteCB_PokeballGlow
+        || sprite->callback == SpriteCB_PokecenterMonitor
+        || sprite->callback == SpriteCB_HallOfFameMonitor
+        || sprite->callback == SpriteCB_HallOfFameMonitorFrlg;
+}
+#endif

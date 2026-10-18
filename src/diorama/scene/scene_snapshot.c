@@ -18,6 +18,7 @@
 #include "event_object_movement.h"
 #include "field_camera.h"
 #include "field_door.h"
+#include "field_effect.h"
 #include "field_effect_helpers.h"
 #include "field_message_box.h"
 #include "field_player_avatar.h"
@@ -33,6 +34,7 @@
 #include "script.h"
 #include "sprite.h"
 #include "tilesets.h"
+#include "trainer_see.h"
 #include "window.h"
 #include "constants/map_types.h"
 
@@ -402,6 +404,8 @@ static void CopyUiProfile(struct DioramaSceneSnapshot *snapshot)
         MarkOam(snapshot->fieldOamMask, snapshot->objects[i].oamOrder);
     if (snapshot->surfBlobValid)
         MarkOam(snapshot->fieldOamMask, snapshot->surfBlob.oamOrder);
+    for (i = 0; i < snapshot->effectCount; i++)
+        MarkOam(snapshot->fieldOamMask, snapshot->effects[i].sprite.oamOrder);
 
     for (i = 0; i < 128; i++)
     {
@@ -1160,6 +1164,127 @@ static void CopySurfBlob(struct DioramaSceneSnapshot *snapshot)
     snapshot->surfBlobValid = TRUE;
 }
 
+/* An effect sprite's position in the objects' coordinates (SetSpritePosToMapCoords): a sprite the camera does not
+ * move (coordOffsetEnabled clear: the healing machine's, placed in screen pixels) is where the screen puts it. */
+static void EffectPosition(const struct Sprite *sprite, s16 *x, s16 *y)
+{
+    *x = sprite->x + sprite->x2 - (sprite->coordOffsetEnabled ? 0 : gSpriteCoordOffsetX);
+    *y = sprite->y + sprite->y2 - (sprite->coordOffsetEnabled ? 0 : gSpriteCoordOffsetY);
+}
+
+static u8 FindEffectOwner(const struct DioramaSceneSnapshot *snapshot, u8 localId, u8 mapNum, u8 mapGroup)
+{
+    u8 i;
+
+    for (i = 0; i < snapshot->objectCount; i++)
+        if (snapshot->objects[i].localId == localId && snapshot->objects[i].mapNum == mapNum
+         && snapshot->objects[i].mapGroup == mapGroup)
+            return i;
+    return DIORAMA_EFFECT_PLACED;
+}
+
+/* Field-effect sprites drawn in 3D (scene_snapshot.h, struct DioramaEffectSnapshot): the healing machines' Poke
+ * Balls and monitors (field_effect.c), and the emote icons over walkers (trainer_see.c). Every other sprite the
+ * field shows is an object event, the surf blob, or part of the interface. */
+static void CopyEffects(struct DioramaSceneSnapshot *snapshot)
+{
+    const struct ObjectEvent *player;
+    s16 baseX;
+    s16 baseY;
+    int i;
+
+    if (gPlayerAvatar.objectEventId >= OBJECT_EVENTS_COUNT)
+        return;
+    player = &gObjectEvents[gPlayerAvatar.objectEventId];
+    if (!player->active)
+        return;
+    SetSpritePosToMapCoords(player->currentCoords.x, player->currentCoords.y, &baseX, &baseY);
+    for (i = 0; i < MAX_SPRITES && snapshot->effectCount < DIORAMA_MAX_EFFECTS; i++)
+    {
+        const struct Sprite *sprite = &gSprites[i];
+        struct DioramaEffectSnapshot *effect;
+        struct DioramaObjectSnapshot *copy;
+        u8 owner = DIORAMA_EFFECT_PLACED;
+        u8 localId;
+        u8 mapNum;
+        u8 mapGroup;
+        u8 width;
+        u8 height;
+        s16 x;
+        s16 y;
+
+        if (!sprite->inUse || sprite->invisible || sprite->oam.affineMode == ST_OAM_AFFINE_ERASE)
+            continue;
+        if (DioramaTrainerSee_GetIconOwner(sprite, &localId, &mapNum, &mapGroup))
+        {
+            owner = FindEffectOwner(snapshot, localId, mapNum, mapGroup);
+            if (owner == DIORAMA_EFFECT_PLACED)
+                continue;
+        }
+        else if (!DioramaFieldEffect_IsMachineSprite(sprite))
+        {
+            continue;
+        }
+        if (!DioramaSprite_GetDimensions(sprite->oam.shape, sprite->oam.size, &width, &height))
+            continue;
+        effect = &snapshot->effects[snapshot->effectCount];
+        memset(effect, 0, sizeof(*effect));
+        copy = &effect->sprite;
+        copy->active = TRUE;
+        copy->localId = 0xFF;
+        copy->spriteId = i;
+        copy->elevation = copy->previousElevation = player->currentElevation;
+        EffectPosition(sprite, &x, &y);
+        copy->screenX = x;
+        copy->screenY = y;
+        copy->width = width;
+        copy->height = height;
+        copy->affineMode = sprite->oam.affineMode;
+        CopyAffineMatrix(copy, sprite);
+        copy->objMode = sprite->oam.objMode;
+        copy->bpp = sprite->oam.bpp;
+        copy->tileNum = sprite->oam.tileNum;
+        copy->paletteNum = sprite->oam.paletteNum;
+        copy->oamShape = sprite->oam.shape;
+        copy->oamSize = sprite->oam.size;
+        copy->hFlip = sprite->oam.affineMode == ST_OAM_AFFINE_OFF
+                   && (sprite->oam.matrixNum & ST_OAM_HFLIP) != 0;
+        copy->vFlip = sprite->oam.affineMode == ST_OAM_AFFINE_OFF
+                   && (sprite->oam.matrixNum & ST_OAM_VFLIP) != 0;
+        copy->priority = sprite->oam.priority;
+        copy->subpriority = sprite->subpriority;
+        copy->oamOrder = FindOamOrder(sprite, sprite->oam.priority);
+        copy->animNum = sprite->animNum;
+        copy->animCmdIndex = sprite->animCmdIndex;
+        if (!CopyObjectFrame(copy, sprite))
+            continue;
+        effect->owner = owner;
+        if (owner != DIORAMA_EFFECT_PLACED)
+        {
+            const struct DioramaObjectSnapshot *object = &snapshot->objects[owner];
+            const struct Sprite *ownerSprite = &gSprites[object->spriteId];
+
+            /* bottom middle from the owner's feet */
+            effect->offsetX = x - (ownerSprite->x + ownerSprite->x2);
+            effect->offsetY = (y + height / 2) - (ownerSprite->y + ownerSprite->y2 + object->height / 2);
+        }
+        else
+        {
+            /* the cell under the picture's bottom middle, as an object standing there */
+            int fromX = x - (baseX + 8);
+            int fromY = y + height / 2 - (baseY + 16);
+            int cellX = fromX >= -8 ? (fromX + 8) / 16 : -((-fromX + 7) / 16);
+            int cellY = fromY > 0 ? (fromY + 15) / 16 : -((-fromY) / 16);
+
+            copy->currentMapX = copy->previousMapX = player->currentCoords.x + cellX;
+            copy->currentMapY = copy->previousMapY = player->currentCoords.y + cellY;
+            copy->mapPixelOffsetX = fromX - cellX * 16;
+            copy->mapPixelOffsetY = fromY - cellY * 16;
+        }
+        snapshot->effectCount++;
+    }
+}
+
 static s16 GetReflectionOffsetY(const struct ObjectEvent *object)
 {
     static const s16 bridgeOffsets[] = {12, 28, 44};
@@ -1274,6 +1399,7 @@ static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
             copy->flags = (copy->flags & ~DIORAMA_OBJECT_SUBSPRITES) | DIORAMA_OBJECT_COMPOSITE;
     }
     CopySurfBlob(snapshot);
+    CopyEffects(snapshot);
 }
 
 /*

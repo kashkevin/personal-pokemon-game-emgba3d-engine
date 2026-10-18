@@ -648,6 +648,33 @@ static void LinkLog(void)
     }
 }
 
+// PKMN_DEBUG_HURT=1: the party starts hurt (a quarter of its HP) and poisoned, and the line "party F: hp a/b status s"
+// is logged each game frame the party's HP or status changes (the Pokemon Center healing check).
+static void PartyLog(void)
+{
+    static int sOn = -1;
+    static char sPrev[96];
+    char line[96];
+    int hp = 0, maxHp = 0, status = 0;
+
+    if (sOn < 0)
+        sOn = SDL_getenv("PKMN_DEBUG_HURT") != NULL;
+    if (!sOn || gPartiesCount[B_TRAINER_PLAYER] == 0)
+        return;
+    for (int m = 0; m < gPartiesCount[B_TRAINER_PLAYER]; m++)
+    {
+        hp += GetMonData(&gParties[B_TRAINER_PLAYER][m], MON_DATA_HP);
+        maxHp += GetMonData(&gParties[B_TRAINER_PLAYER][m], MON_DATA_MAX_HP);
+        status |= GetMonData(&gParties[B_TRAINER_PLAYER][m], MON_DATA_STATUS);
+    }
+    SDL_snprintf(line, sizeof(line), "hp %d/%d status %d (%d Pokemon)", hp, maxHp, status, gPartiesCount[B_TRAINER_PLAYER]);
+    if (strcmp(line, sPrev) != 0)
+    {
+        SDL_Log("party %u: %s", sKeyFrame, line);
+        SDL_strlcpy(sPrev, line, sizeof(sPrev));
+    }
+}
+
 unsigned DebugScene_GameFrame(void)
 {
     return sKeyFrame;
@@ -658,6 +685,7 @@ uint16_t DebugScene_FilterKeys(uint16_t keys)
     sKeyFrame++;
     BagLog();
     LinkLog();
+    PartyLog();
     BattleScriptTick();
     DialogTick();
     RivalThen();
@@ -1111,6 +1139,19 @@ static void StartFieldScene(void)
         for (int m = 1; m < v[0]; m++)
             CreateMonWithIVs(&gParties[B_TRAINER_PLAYER][m], sMore[m - 1], 10, 0x1234u + m, id, 20);
         gPartiesCount[B_TRAINER_PLAYER] = (u8)v[0];
+    }
+    if (SDL_getenv("PKMN_DEBUG_HURT") != NULL)
+    {
+        for (int m = 0; m < gPartiesCount[B_TRAINER_PLAYER]; m++)
+        {
+            u16 hp = GetMonData(&gParties[B_TRAINER_PLAYER][m], MON_DATA_MAX_HP) / 4;
+            u32 status = STATUS1_POISON;
+
+            if (hp == 0)
+                hp = 1;
+            SetMonData(&gParties[B_TRAINER_PLAYER][m], MON_DATA_HP, &hp);
+            SetMonData(&gParties[B_TRAINER_PLAYER][m], MON_DATA_STATUS, &status);
+        }
     }
     for (int badge = FLAG_BADGE01_GET; badge <= FLAG_BADGE08_GET; badge++)
         FlagSet((u16)badge); // so the level 30 Pokemon obeys

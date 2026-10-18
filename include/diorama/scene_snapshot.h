@@ -14,6 +14,9 @@
 #define DIORAMA_GRID_HEIGHT 49
 #define DIORAMA_MAX_VISIBLE_CELLS (DIORAMA_GRID_WIDTH * DIORAMA_GRID_HEIGHT)
 #define DIORAMA_MAX_OBJECTS 16
+/* Field-effect sprites drawn in 3D (struct DioramaEffectSnapshot): six Poke Balls and a monitor, or five monitors. */
+#define DIORAMA_MAX_EFFECTS 12
+#define DIORAMA_EFFECT_PLACED 0xFF
 #define DIORAMA_FADED_PALETTE_ENTRIES 512
 #define DIORAMA_TILE_COUNT 1024
 #define DIORAMA_TILE_BYTES 32
@@ -243,6 +246,23 @@ struct DioramaObjectSnapshot
     uint8_t frameGraphics[DIORAMA_OBJ_FRAME_MAX_BYTES];
 };
 
+/*
+ * A field-effect sprite the GBA draws over the field that is not an object event (scene_snapshot.c CopyEffects): a
+ * healing machine's Poke Balls and monitor (Pokemon Center, Hall of Fame), and an emote icon over a walker's head (a
+ * trainer's "!"). The 3D view drew only object events, so the machine stayed empty while the healing jingle played
+ * and a trainer spotted the player without a "!". `owner` is the index in objects[] an icon follows, its offset the
+ * icon's bottom middle from that object's feet (GBA pixels, bounce included); a placed sprite
+ * (DIORAMA_EFFECT_PLACED) has the cell its bottom middle is over in sprite.currentMapX/Y and mapPixelOffsetX/Y
+ * (offset Y from the cell's bottom edge, -15..0), and the renderer stands it on the face of the model drawn there.
+ */
+struct DioramaEffectSnapshot
+{
+    uint8_t owner;
+    int16_t offsetX;
+    int16_t offsetY;
+    struct DioramaObjectSnapshot sprite;
+};
+
 struct DioramaSceneSnapshot
 {
     uint64_t sequence;
@@ -287,6 +307,8 @@ struct DioramaSceneSnapshot
     struct DioramaDirtyCell dirtyCells[DIORAMA_MAX_DIRTY_CELLS];
     uint8_t objectCount;
     struct DioramaObjectSnapshot objects[DIORAMA_MAX_OBJECTS];
+    uint8_t effectCount;
+    struct DioramaEffectSnapshot effects[DIORAMA_MAX_EFFECTS];
     uint8_t uiFlags;
     uint8_t uiRectCount;
     struct DioramaUiRect uiRects[DIORAMA_MAX_UI_RECTS];

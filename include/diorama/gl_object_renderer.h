@@ -14,6 +14,7 @@ struct DioramaObjectMetrics
     uint16_t cachedFrames;
     uint16_t uploadedFrames;
     uint16_t drawCalls;
+    uint16_t effects; /* field-effect sprites drawn (scene_snapshot.h struct DioramaEffectSnapshot) */
 };
 
 bool DioramaGLObjects_Init(void);

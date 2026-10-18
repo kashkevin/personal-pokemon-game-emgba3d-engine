@@ -1191,3 +1191,18 @@ void PlayerFaceTrainerAfterBattle(void)
 
     SetMovingNpcId(LOCALID_PLAYER);
 }
+
+#ifdef ENABLE_DIORAMA
+// An icon over a walker's head (a trainer's "!", "?", the heart and the other emotes), for the Diorama 3D view
+// (src/diorama/scene/scene_snapshot.c): which object event it follows. Not an object event itself, it was missing
+// from that view.
+bool8 DioramaTrainerSee_GetIconOwner(const struct Sprite *sprite, u8 *localId, u8 *mapNum, u8 *mapGroup)
+{
+    if (sprite->callback != SpriteCB_TrainerIcons)
+        return FALSE;
+    *localId = sprite->data[0];
+    *mapNum = sprite->data[1];
+    *mapGroup = sprite->data[2];
+    return TRUE;
+}
+#endif

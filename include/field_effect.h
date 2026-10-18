@@ -54,4 +54,9 @@ u8 CreateMonSprite_PicBox(enum Species species, s16 x, s16 y, u8 subpriority);
 void StartEscapeRopeFieldEffect(void);
 void FieldEffectFreeGraphicsResources(struct Sprite *sprite);
 bool8 IsRockClimbActive(void);
+
+#ifdef ENABLE_DIORAMA
+// A healing machine's Poke Ball or monitor sprite (Pokemon Center, Hall of Fame), for the Diorama 3D view.
+bool8 DioramaFieldEffect_IsMachineSprite(const struct Sprite *sprite);
+#endif
 #endif // GUARD_FIELD_EFFECTS_H

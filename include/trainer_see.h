@@ -33,4 +33,9 @@ void PlayerFaceTrainerAfterBattle(void);
 u8 FldEff_DoubleExclMarkIcon(void);
 u8 FldEff_XIcon(void);
 
+#ifdef ENABLE_DIORAMA
+// An emote icon over a walker's head (a trainer's "!"): the object event it follows, for the Diorama 3D view.
+bool8 DioramaTrainerSee_GetIconOwner(const struct Sprite *sprite, u8 *localId, u8 *mapNum, u8 *mapGroup);
+#endif
+
 #endif // GUARD_TRAINER_SEE_H
