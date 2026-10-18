@@ -871,6 +871,135 @@ static bool CopyObjectFrame(struct DioramaObjectSnapshot *copy, const struct Spr
     return true;
 }
 
+/*
+ * A sprite the GBA draws as several OAM parts that are not the frame cut in strips - the large vehicles: the moving
+ * truck (48x48), the S.S. Tidal (96x40), the submarine's shadow (88x32), and in a FRLG build the S.S. Anne (128x64)
+ * - assembled into one picture: each part's tiles (the frame's tiles from part->tileOffset, 1-D) put where
+ * AddSubspritesToOamBuffer puts the part, about the sprite's centre, the first part in front where parts overlap.
+ * The 3D view drew every object as one OAM frame and refused these, and one refused object on the GBA's screen took
+ * the whole view back to the 2D picture (KNOWN_ISSUES P7: Littleroot's moving trucks, the harbours' ferry, the
+ * submarine). Its OAM entries are marked as the field's (never the interface's under a text box).
+ */
+static bool CopyCompositeFrame(struct DioramaSceneSnapshot *snapshot, struct DioramaObjectSnapshot *copy,
+                               const struct Sprite *sprite, const struct ObjectEventGraphicsInfo *graphicsInfo)
+{
+    const struct SubspriteTable *table;
+    const u8 *source = NULL;
+    int left = 255, right = -255, top = 255, bottom = -255;
+    int width, height, tilesNeeded = 0, i;
+    u8 firstOam = 0xFF;
+    bool8 hFlip = (sprite->oam.matrixNum >> 3) & 1;
+    bool8 vFlip = (sprite->oam.matrixNum >> 4) & 1;
+
+    if (sprite->subspriteTables == NULL || graphicsInfo == NULL || sprite->oam.bpp != ST_OAM_4BPP
+     || sprite->oam.affineMode != ST_OAM_AFFINE_OFF)
+        return false;
+    table = &sprite->subspriteTables[sprite->subspriteTableNum];
+    if (table->subsprites == NULL || table->subspriteCount == 0 || table->subspriteCount > 64)
+        return false;
+    for (i = 0; i < table->subspriteCount; i++)
+    {
+        const struct Subsprite *part = &table->subsprites[i];
+        u8 w, h;
+
+        if (!DioramaSprite_GetDimensions(part->shape, part->size, &w, &h))
+            return false;
+        left = min(left, part->x);
+        right = max(right, part->x + w);
+        top = min(top, part->y);
+        bottom = max(bottom, part->y + h);
+        tilesNeeded = max(tilesNeeded, part->tileOffset + w * h / 64);
+    }
+    width = (right - left + 7) & ~7;
+    height = (bottom - top + 7) & ~7;
+    if (width <= 0 || height <= 0 || width > 255 || height > 255
+     || (size_t)width * height / 2 > sizeof(copy->frameGraphics))
+        return FrameRefused(copy, sprite, "composite too large", width * height / 2);
+    /* the frame's tiles: the current image (as CopyObjectFrame), or VRAM for a sprite sheet */
+    if (!sprite->usingSheet && sprite->images != NULL && sprite->anims != NULL)
+    {
+        const union AnimCmd *command = &sprite->anims[sprite->animNum][sprite->animCmdIndex];
+        const struct SpriteFrameImage *image;
+
+        if (command->type < 0)
+            return FrameRefused(copy, sprite, "composite anim command", command->type);
+        image = sprite->images[0].relativeFrames ? &sprite->images[0] : &sprite->images[command->frame.imageValue];
+        if (image->data == NULL || image->size < tilesNeeded * DIORAMA_TILE_BYTES)
+            return FrameRefused(copy, sprite, "composite image size", image->data == NULL ? -1 : image->size);
+        source = (const u8 *)image->data + (sprite->images[0].relativeFrames ? image->size * command->frame.imageValue : 0);
+    }
+    else
+    {
+        u32 byteOffset = sprite->oam.tileNum * DIORAMA_TILE_BYTES;
+
+        if (byteOffset + tilesNeeded * DIORAMA_TILE_BYTES > DIORAMA_TILE_GRAPHICS_SIZE)
+            return FrameRefused(copy, sprite, "composite VRAM range", byteOffset);
+        source = (const u8 *)OBJ_VRAM0 + byteOffset;
+    }
+    memset(copy->frameGraphics, 0, (size_t)width * height / 2);
+    for (i = table->subspriteCount - 1; i >= 0; i--)
+    {
+        const struct Subsprite *part = &table->subsprites[i];
+        const u8 *tiles = source + part->tileOffset * DIORAMA_TILE_BYTES;
+        u8 w, h;
+        int px, py;
+
+        DioramaSprite_GetDimensions(part->shape, part->size, &w, &h);
+        for (py = 0; py < h; py++)
+            for (px = 0; px < w; px++)
+            {
+                u8 packed = tiles[((py / 8) * (w / 8) + px / 8) * DIORAMA_TILE_BYTES + (py & 7) * 4 + (px & 7) / 2];
+                u8 colour = (px & 1) ? packed >> 4 : packed & 0x0F;
+                int x = part->x - left + px, y = part->y - top + py;
+                u8 *dest;
+
+                if (colour == 0)
+                    continue;
+                dest = &copy->frameGraphics[((y / 8) * (width / 8) + x / 8) * DIORAMA_TILE_BYTES + (y & 7) * 4 + (x & 7) / 2];
+                *dest = (x & 1) ? (u8)((*dest & 0x0F) | (colour << 4)) : (u8)((*dest & 0xF0) | colour);
+            }
+    }
+    /* the parts' own OAM entries (sprite.c AddSubspritesToOamBuffer, flips applied): the field's */
+    for (i = 0; i < table->subspriteCount; i++)
+    {
+        const struct Subsprite *part = &table->subsprites[i];
+        s16 baseX = sprite->oam.x - sprite->centerToCornerVecX;
+        s16 baseY = sprite->oam.y - sprite->centerToCornerVecY;
+        u8 w, h, o;
+        s16 x = part->x, y = part->y;
+
+        DioramaSprite_GetDimensions(part->shape, part->size, &w, &h);
+        if (hFlip)
+            x = -(x + w);
+        if (vFlip)
+            y = -(y + h);
+        for (o = 0; o < gOamLimit; o++)
+        {
+            const struct OamData *oam = &gMain.oamBuffer[o];
+
+            if (oam->x == ((baseX + x) & 0x1FF) && oam->y == ((baseY + y) & 0xFF)
+             && oam->tileNum == ((sprite->oam.tileNum + part->tileOffset) & 0x3FF)
+             && oam->shape == part->shape && oam->size == part->size)
+            {
+                MarkOam(snapshot->fieldOamMask, o);
+                if (o < firstOam)
+                    firstOam = o;
+                break;
+            }
+        }
+    }
+    copy->oamOrder = firstOam;
+    copy->compositeWidth = (u8)width;
+    copy->compositeHeight = (u8)height;
+    copy->compositeShiftX = (s8)(hFlip ? -(left + right) / 2 : (left + right) / 2);
+    copy->compositeFeetShift = (s8)((vFlip ? -top : bottom) - graphicsInfo->height / 2);
+    if (sprite->subspriteMode != SUBSPRITES_IGNORE_PRIORITY)
+        copy->priority = table->subsprites[0].priority;
+    copy->frameSize = (u16)(width * height / 2);
+    copy->frameHash = HashFrame(copy->frameGraphics, copy->frameSize);
+    return true;
+}
+
 /* Whether a sprite's subsprites draw anything but its frame whole. Drawn whole:
  * one part the size of the sprite's own OAM frame, centred (against the
  * sprite's OAM size, not its object's graphics: a follower shows its 16x32
@@ -1136,8 +1265,13 @@ static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
         copy->oamOrder = FindPartOamOrder(sprite, resolvedPriority, topPart);
         copy->animNum = sprite->animNum;
         copy->animCmdIndex = sprite->animCmdIndex;
-        if (!CopyObjectFrame(copy, sprite))
+        copy->compositeWidth = copy->compositeHeight = 0;
+        copy->compositeShiftX = copy->compositeFeetShift = 0;
+        if (!(copy->flags & DIORAMA_OBJECT_SUBSPRITES) && !CopyObjectFrame(copy, sprite))
             copy->flags |= DIORAMA_OBJECT_FRAME_INVALID;
+        else if ((copy->flags & DIORAMA_OBJECT_SUBSPRITES)
+              && CopyCompositeFrame(snapshot, copy, sprite, graphicsInfo))
+            copy->flags = (copy->flags & ~DIORAMA_OBJECT_SUBSPRITES) | DIORAMA_OBJECT_COMPOSITE;
     }
     CopySurfBlob(snapshot);
 }

@@ -66,6 +66,23 @@ bool DioramaSprite_GetDimensions(uint8_t shape, uint8_t size,
     return true;
 }
 
+bool DioramaSprite_ObjectDimensions(const struct DioramaObjectSnapshot *object, uint8_t *width, uint8_t *height)
+{
+    if (object == NULL || width == NULL || height == NULL)
+        return false;
+    if (object->flags & DIORAMA_OBJECT_COMPOSITE)
+    {
+        if (object->compositeWidth == 0 || object->compositeHeight == 0
+         || (object->compositeWidth & 7) != 0 || (object->compositeHeight & 7) != 0
+         || (size_t)object->compositeWidth * object->compositeHeight / 2 > DIORAMA_OBJ_FRAME_MAX_BYTES)
+            return false;
+        *width = object->compositeWidth;
+        *height = object->compositeHeight;
+        return true;
+    }
+    return DioramaSprite_GetDimensions(object->oamShape, object->oamSize, width, height);
+}
+
 bool DioramaSprite_IsSupported(const struct DioramaObjectSnapshot *object)
 {
     uint8_t width;
@@ -82,7 +99,7 @@ bool DioramaSprite_IsSupported(const struct DioramaObjectSnapshot *object)
         && object->objMode == 0
         && object->bpp == 0
         && !(object->flags & (DIORAMA_OBJECT_SUBSPRITES | DIORAMA_OBJECT_FRAME_INVALID))
-        && DioramaSprite_GetDimensions(object->oamShape, object->oamSize, &width, &height)
+        && DioramaSprite_ObjectDimensions(object, &width, &height)
         && object->frameSize == (uint16_t)(width * height / 2);
 }
 
@@ -93,6 +110,8 @@ void DioramaSprite_MakeFrameKey(const struct DioramaSceneSnapshot *snapshot,
     memset(key, 0, sizeof(*key));
     key->shape = object->oamShape;
     key->size = object->oamSize;
+    if (!DioramaSprite_ObjectDimensions(object, &key->width, &key->height))
+        key->width = key->height = 0;
     key->hFlip = object->hFlip;
     key->vFlip = object->vFlip;
     key->frameHash = object->frameHash;
@@ -115,7 +134,7 @@ bool DioramaSprite_DecodeFrame(const struct DioramaSceneSnapshot *snapshot,
     int widthInTiles;
 
     if (snapshot == NULL || pixels == NULL || !DioramaSprite_IsSupported(object)
-     || !DioramaSprite_GetDimensions(object->oamShape, object->oamSize, width, height)
+     || !DioramaSprite_ObjectDimensions(object, width, height)
      || pixelCapacity < (size_t)*width * *height)
         return false;
     widthInTiles = *width / 8;
@@ -214,6 +233,13 @@ static bool BuildPose(const struct DioramaSceneSnapshot *snapshot,
     pose->x = object->currentMapX
             + (object->mapPixelOffsetX + object->spriteX2) / 16.0f;
     pose->z = -(object->currentMapY + object->mapPixelOffsetY / 16.0f);
+    /* a composite's picture need not be centred on its sprite (the S.S. Anne's is not): its card stands where the
+     * picture is, its bottom row on the ground */
+    if (object->flags & DIORAMA_OBJECT_COMPOSITE)
+    {
+        pose->x += object->compositeShiftX / 16.0f;
+        pose->z -= object->compositeFeetShift / 16.0f;
+    }
     pose->groundY = previousHeight + (currentHeight - previousHeight) * moveProgress;
     pose->y = pose->groundY - object->spriteY2 / 16.0f;
     return true;

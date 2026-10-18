@@ -18,7 +18,8 @@
 #define DIORAMA_TILE_COUNT 1024
 #define DIORAMA_TILE_BYTES 32
 #define DIORAMA_TILE_GRAPHICS_SIZE (DIORAMA_TILE_COUNT * DIORAMA_TILE_BYTES)
-#define DIORAMA_OBJ_FRAME_MAX_BYTES 2048
+/* An object's frame: 64x64 at 4bpp, or a composite vehicle up to 128x64 (DIORAMA_OBJECT_COMPOSITE). */
+#define DIORAMA_OBJ_FRAME_MAX_BYTES 4096
 #define DIORAMA_METATILE_ENTRY_COUNT 8
 #define DIORAMA_MAX_DIRTY_CELLS 64
 /*
@@ -77,6 +78,10 @@ enum DioramaObjectFlags
     DIORAMA_OBJECT_SHADOW     = 1 << 4,
     DIORAMA_OBJECT_SUBSPRITES = 1 << 5,
     DIORAMA_OBJECT_FRAME_INVALID = 1 << 6,
+    /* Drawn by the GBA as several OAM parts (a subsprite table: the moving truck, the S.S. Tidal, the
+     * submarine's shadow, the 128x64 S.S. Anne): its parts assembled into one picture
+     * (compositeWidth x compositeHeight), drawn as one card. */
+    DIORAMA_OBJECT_COMPOSITE = 1 << 7,
 };
 
 enum DioramaRenderMode
@@ -228,6 +233,13 @@ struct DioramaObjectSnapshot
     uint8_t oamOrder;
     uint8_t animNum;
     uint8_t animCmdIndex;
+    /* DIORAMA_OBJECT_COMPOSITE: the assembled picture's size (frameGraphics holds it in tiles, as one OAM frame of
+     * that size), how far its centre is right of the sprite's, and how far its bottom row is below the feet the
+     * object's own height gives (both GBA pixels, flips applied). 0 otherwise. */
+    uint8_t compositeWidth;
+    uint8_t compositeHeight;
+    int8_t compositeShiftX;
+    int8_t compositeFeetShift;
     uint8_t frameGraphics[DIORAMA_OBJ_FRAME_MAX_BYTES];
 };
 

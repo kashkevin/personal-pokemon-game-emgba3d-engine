@@ -10,12 +10,15 @@
 struct DioramaResolvedCell;
 
 #define DIORAMA_SPRITE_MAX_DIMENSION 64
-#define DIORAMA_SPRITE_MAX_PIXELS (DIORAMA_SPRITE_MAX_DIMENSION * DIORAMA_SPRITE_MAX_DIMENSION)
+/* A frame's pixels: 64x64, or a composite vehicle's assembled picture (DIORAMA_OBJ_FRAME_MAX_BYTES at 4bpp). */
+#define DIORAMA_SPRITE_MAX_PIXELS (DIORAMA_OBJ_FRAME_MAX_BYTES * 2)
 
 struct DioramaSpriteFrameKey
 {
     uint8_t shape;
     uint8_t size;
+    uint8_t width;   /* the frame's own size: a composite's differs from any OAM shape */
+    uint8_t height;
     uint8_t hFlip;
     uint8_t vFlip;
     uint64_t frameHash;
@@ -38,6 +41,8 @@ void DioramaSprite_MakeFrameKey(const struct DioramaSceneSnapshot *snapshot,
                                 struct DioramaSpriteFrameKey *key);
 bool DioramaSprite_FrameKeyEqual(const struct DioramaSpriteFrameKey *left,
                                  const struct DioramaSpriteFrameKey *right);
+/* The picture's size: the OAM frame's, or a composite's assembled picture (DIORAMA_OBJECT_COMPOSITE). */
+bool DioramaSprite_ObjectDimensions(const struct DioramaObjectSnapshot *object, uint8_t *width, uint8_t *height);
 bool DioramaSprite_DecodeFrame(const struct DioramaSceneSnapshot *snapshot,
                                const struct DioramaObjectSnapshot *object,
                                uint32_t *pixels, size_t pixelCapacity,
