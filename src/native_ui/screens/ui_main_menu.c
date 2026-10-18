@@ -40,18 +40,23 @@ static const u8 sText_Choose[] = _("Choose");
 static const u8 sText_Title[] = _("Title");
 static const u8 sText_QuitAsk[] = _("Close the game? Closing doesn't save: anything since\nyour last save in the game is lost.");
 static const u8 sText_Linked[] = _("Multiplayer link on.");
-static const u8 sText_Offline[] = _("No multiplayer link.");
-static const u8 sText_Linked1[] = _("This window was opened by the launcher");
-static const u8 sText_Linked2[] = _("for a multiplayer session. Host Game and");
-static const u8 sText_Linked3[] = _("Join Game are in the launcher.");
+static const u8 sText_Offline[] = _("Not in a world session.");
+static const u8 sText_Setup[] = _("Creating your character.");
+static const u8 sText_Linked1[] = _("EmeraldTogether opened this game for");
+static const u8 sText_Linked2[] = _("a world session. Close the game to go");
+static const u8 sText_Linked3[] = _("back to the EmeraldTogether menu.");
 static const u8 sText_Offline1[] = _("This window was started on its own.");
-static const u8 sText_Offline2[] = _("Host Game and Join Game are in the");
-static const u8 sText_Offline3[] = _("EmeraldTogether launcher.");
+static const u8 sText_Offline2[] = _("To play Solo or with friends, start");
+static const u8 sText_Offline3[] = _("EmeraldTogether from its shortcut.");
+static const u8 sText_Setup1[] = _("Choose NEW GAME and play until you can");
+static const u8 sText_Setup2[] = _("save (START menu, SAVE). Then close this");
+static const u8 sText_Setup3[] = _("window: EmeraldTogether continues.");
 
 static struct NativeMainMenu sMenu;
 static struct NativeSaveSummary sSave;
 static bool sHasSave;
 static bool sLinked;
+static bool sSetup;     /* EmeraldTogether's character setup (--setup): no world session by design */
 static bool sQuitRow;   /* the PC's QUIT GAME row is selected (the engine's cursor stays on its last row) */
 static bool sAsk;       /* "Close the game?" is up */
 static int sAskSel;     /* 0 yes, 1 no */
@@ -85,6 +90,7 @@ static void Capture(void)
     if (sHasSave)
         MainMenu_NativeUiSaveSummary(&sSave);
     sLinked = MpBridge_IsEnabled();
+    sSetup = MpBridge_LinkState() == MP_LINK_SETUP;
     sMessageStart = sMessageAt = NULL;
     sMessagePrinting = false;
     if (sMenu.phase == NATIVE_MAIN_MENU_MESSAGE)
@@ -181,15 +187,16 @@ static void MultiplayerPanel(void)
     UiG_Paint(UiM_Rounded4(pw - 6, 16, 2, 2, 0, 0), px + 3, py + 3, gem.lo,
               &(struct UiPaint){UI_NONE, gem.base, UI_NONE, 0, 0, NULL, UI_NONE});
     UiCaps_Draw(px + 9, py + 8, "MULTIPLAYER", UI_P_TEXT_W, gem.ink, UI_CAPS_OUTLINE, UI_ALIGN_LEFT, UI_NONE);
-    UiCaps_Draw(px + pw - 10, py + 8, sLinked ? "LAUNCHER" : "OFFLINE", UI_HEX(0xD8F8E0), UI_NONE, UI_CAPS_PLAIN,
-                UI_ALIGN_RIGHT, UI_NONE);
-    UiG_Text(px + 9, py + 21, sLinked ? sText_Linked : sText_Offline);
-    UiText_Draw(UI_FONT_SMALL, px + 9, py + 39, sLinked ? sText_Linked1 : sText_Offline1, UI_P_TEXT, UI_P_TEXT_SH,
-                UI_ALIGN_LEFT, 0);
-    UiText_Draw(UI_FONT_SMALL, px + 9, py + 52, sLinked ? sText_Linked2 : sText_Offline2, UI_P_TEXT, UI_P_TEXT_SH,
-                UI_ALIGN_LEFT, 0);
-    UiText_Draw(UI_FONT_SMALL, px + 9, py + 65, sLinked ? sText_Linked3 : sText_Offline3, UI_P_TEXT, UI_P_TEXT_SH,
-                UI_ALIGN_LEFT, 0);
+    /* how this game was started: EmeraldTogether's character setup (--setup), a world session (--bridge) or on its own */
+    UiCaps_Draw(px + pw - 10, py + 8, sSetup ? "SETUP" : sLinked ? "WORLD" : "OFFLINE", UI_HEX(0xD8F8E0), UI_NONE,
+                UI_CAPS_PLAIN, UI_ALIGN_RIGHT, UI_NONE);
+    UiG_Text(px + 9, py + 21, sSetup ? sText_Setup : sLinked ? sText_Linked : sText_Offline);
+    UiText_Draw(UI_FONT_SMALL, px + 9, py + 39, sSetup ? sText_Setup1 : sLinked ? sText_Linked1 : sText_Offline1, UI_P_TEXT,
+                UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+    UiText_Draw(UI_FONT_SMALL, px + 9, py + 52, sSetup ? sText_Setup2 : sLinked ? sText_Linked2 : sText_Offline2, UI_P_TEXT,
+                UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+    UiText_Draw(UI_FONT_SMALL, px + 9, py + 65, sSetup ? sText_Setup3 : sLinked ? sText_Linked3 : sText_Offline3, UI_P_TEXT,
+                UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
 }
 
 /* the engine's message page being printed (after the last paragraph break before

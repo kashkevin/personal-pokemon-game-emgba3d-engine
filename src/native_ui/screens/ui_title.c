@@ -232,6 +232,7 @@ static const u8 sText_Start[] = _("Start");
 static u32 sPhase;
 static u32 sPrevPhase;
 static bool sLinked;
+static bool sSetup;     /* EmeraldTogether's character setup (--setup): no world session by design */
 
 static bool Detect(void)
 {
@@ -249,6 +250,7 @@ static void Capture(void)
     if (sPhase >= NATIVE_TITLE_PRESS_START)
         ClockSkipIntro();
     sLinked = MpBridge_IsEnabled();
+    sSetup = MpBridge_LinkState() == MP_LINK_SETUP;
 }
 
 static int Frame(void)
@@ -296,8 +298,10 @@ static void Draw(int t)
         for (char *p = corner; *p != '\0'; p++)
             *p = (char)toupper((unsigned char)*p);
         UiCaps_Draw(10, cy, corner, UI_HEX(0xE8F8EC), gem.ink, UI_CAPS_OUTLINE, UI_ALIGN_LEFT, UI_NONE);
-        UiCaps_Draw(630, cy, sLinked ? "OPENED BY THE LAUNCHER " UI_CAPS_DOT " MULTIPLAYER LINK ON"
-                                     : "NO MULTIPLAYER LINK " UI_CAPS_DOT " HOST AND JOIN ARE IN THE LAUNCHER",
+        /* how this game was started: EmeraldTogether's character setup (--setup), a world session (--bridge) or on its own */
+        UiCaps_Draw(630, cy, sSetup ? "CHARACTER SETUP " UI_CAPS_DOT " NEW GAME THEN SAVE AND CLOSE"
+                             : sLinked ? "OPENED BY EMERALDTOGETHER " UI_CAPS_DOT " MULTIPLAYER LINK ON"
+                                       : "STARTED ON ITS OWN " UI_CAPS_DOT " OPEN EMERALDTOGETHER TO PLAY",
                     UI_HEX(0xE8F8EC), gem.ink, UI_CAPS_OUTLINE, UI_ALIGN_RIGHT, UI_NONE);
         UiG_Restore();
     }
