@@ -12239,3 +12239,24 @@ const struct ObjectEventGraphicsInfo *GetVanillaObjectEventGraphicsInfo(u16 grap
     return gObjectEventGraphicsInfoPointers[graphicsId];
 }
 #endif
+
+#ifdef ENABLE_DIORAMA
+// For the Diorama 3D view's stand-ins (src/diorama/scene/scene_snapshot.c): the graphics an object not spawned yet
+// will have (after the dynamic-graphics variables, as SetObjectEventDynamicGraphicsId), and its palette's colours by
+// tag. Read only: nothing is spawned or loaded.
+u16 DioramaObjectEvent_TemplateGraphicsId(const struct ObjectEventTemplate *template)
+{
+    u16 graphicsId = template->graphicsId;
+
+    if (graphicsId >= OBJ_EVENT_GFX_VARS && graphicsId <= OBJ_EVENT_GFX_VAR_F)
+        graphicsId = VarGetObjectEventGraphicsId(graphicsId - OBJ_EVENT_GFX_VARS);
+    return graphicsId;
+}
+
+const u16 *DioramaObjectEvent_PaletteData(u16 paletteTag)
+{
+    u8 i = FindObjectEventPaletteIndexByTag(paletteTag);
+
+    return i == 0xFF ? NULL : sObjectEventSpritePalettes[i].data;
+}
+#endif

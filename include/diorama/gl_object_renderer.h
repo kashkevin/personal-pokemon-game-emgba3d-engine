@@ -15,6 +15,7 @@ struct DioramaObjectMetrics
     uint16_t uploadedFrames;
     uint16_t drawCalls;
     uint16_t effects; /* field-effect sprites drawn (scene_snapshot.h struct DioramaEffectSnapshot) */
+    uint16_t standIns; /* stand-ins for objects not spawned yet (scene_snapshot.h standIns) */
 };
 
 bool DioramaGLObjects_Init(void);

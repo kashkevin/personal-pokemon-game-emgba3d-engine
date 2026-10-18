@@ -15,6 +15,7 @@
 #include "diorama/battle_scene.h"
 #include "diorama/tree_sprites.h"
 #include "diorama/weather.h"
+#include "event_data.h"
 #include "event_object_movement.h"
 #include "field_camera.h"
 #include "field_door.h"
@@ -28,15 +29,20 @@
 #include "main.h"
 #include "menu.h"
 #include "metatile_behavior.h"
+#include "multiplayer_rival.h"
 #include "overworld.h"
 #include "palette.h"
 #include "scanline_effect.h"
 #include "script.h"
 #include "sprite.h"
 #include "tilesets.h"
+#include "trainer_hill.h"
 #include "trainer_see.h"
 #include "window.h"
 #include "constants/map_types.h"
+#include "constants/event_object_movement.h"
+#include "constants/trainer_types.h"
+#include "constants/event_objects.h"
 
 #define CELL_RADIUS (DIORAMA_GRID_WIDTH / 2)
 
@@ -1285,6 +1291,171 @@ static void CopyEffects(struct DioramaSceneSnapshot *snapshot)
     }
 }
 
+/*
+ * Stand-ins for the map's objects the GBA has not spawned (scene_snapshot.h standIns): its template as
+ * TrySpawnObjectEventTemplate would spawn it, standing and facing its movement type's first way, past the GBA's spawn
+ * window (TrySpawnObjectEvents) and inside the 3D view's cells. Read only. Left out: what the GBA keeps hidden or
+ * draws otherwise (its flag set, the multiplayer rival's checkpoint, invisible and buried trainers, disguises, berry
+ * trees, light sprites, Pokemon), compressed or large pictures, and pictures whose palette cannot be found. A palette
+ * the game has not loaded goes into a free sprite palette slot of this snapshot only (the game's own palette memory
+ * is not touched), lit for the time of day and the screen's fade as the game lights its own.
+ */
+extern const u8 gInitialMovementTypeFacingDirections[NUM_MOVEMENT_TYPES]; /* event_object_movement.c */
+
+static u8 StandInPalette(struct DioramaSceneSnapshot *snapshot, u16 tag, u16 *standInTags)
+{
+    const u16 *colours;
+    u16 tinted[16];
+    u8 slot;
+    unsigned i;
+
+    slot = IndexOfSpritePaletteTag(tag);
+    if (slot < 16)
+        return slot;
+    for (slot = 0; slot < 16; slot++)
+        if (standInTags[slot] == tag)
+            return slot;
+    colours = DioramaObjectEvent_PaletteData(tag);
+    if (colours == NULL)
+        return 0xFF;
+    for (slot = 0; slot < 16; slot++)
+        if (GetSpritePaletteTagByPaletteNum(slot) == TAG_NONE && standInTags[slot] == TAG_NONE)
+            break;
+    if (slot == 16)
+        return 0xFF;
+    memcpy(tinted, colours, sizeof(tinted));
+    if (MapHasNaturalLight(gMapHeader.mapType) && !IS_BLEND_IMMUNE_TAG(tag))
+        TimeMixPalettes(1, (u16 *)colours, tinted, &gTimeBlend.startBlend, &gTimeBlend.endBlend, gTimeBlend.weight);
+    for (i = 0; i < 16 && snapshot->screenFadeY > 0; i++)
+    {
+        u16 c = tinted[i];
+        u16 f = snapshot->screenFadeColor;
+        int r = (c & 31) + (((f & 31) - (c & 31)) * snapshot->screenFadeY >> 4);
+        int g = ((c >> 5) & 31) + ((((f >> 5) & 31) - ((c >> 5) & 31)) * snapshot->screenFadeY >> 4);
+        int b = ((c >> 10) & 31) + ((((f >> 10) & 31) - ((c >> 10) & 31)) * snapshot->screenFadeY >> 4);
+
+        tinted[i] = r | (g << 5) | (b << 10);
+    }
+    memcpy(&snapshot->fadedPalette[256 + slot * 16], tinted, sizeof(tinted));
+    memcpy(&snapshot->unfadedPalette[256 + slot * 16], colours, sizeof(tinted));
+    standInTags[slot] = tag;
+    return slot;
+}
+
+static bool CopyStandInFrame(struct DioramaObjectSnapshot *copy, const struct ObjectEventGraphicsInfo *info, u8 animNum)
+{
+    const union AnimCmd *command = &info->anims[animNum][0];
+    const struct SpriteFrameImage *image;
+    u8 width;
+    u8 height;
+    u16 size;
+
+    if (info->compressed || info->images == NULL || info->anims == NULL || info->oam == NULL || command->type < 0
+     || info->oam->bpp != ST_OAM_4BPP
+     || !DioramaSprite_GetDimensions(info->oam->shape, info->oam->size, &width, &height))
+        return false;
+    size = width * height / 2;
+    image = info->images[0].relativeFrames ? &info->images[0] : &info->images[command->frame.imageValue];
+    if (image->data == NULL || image->size < size || size > sizeof(copy->frameGraphics))
+        return false;
+    memcpy(copy->frameGraphics, (const u8 *)image->data
+           + (info->images[0].relativeFrames ? image->size * command->frame.imageValue : 0), size);
+    copy->oamShape = info->oam->shape;
+    copy->oamSize = info->oam->size;
+    copy->hFlip = command->frame.hFlip;
+    copy->vFlip = command->frame.vFlip;
+    copy->frameSize = size;
+    copy->frameHash = HashFrame(copy->frameGraphics, size);
+    return true;
+}
+
+static bool StandInHidden(const struct ObjectEventTemplate *template, u16 graphicsId)
+{
+    switch (template->movementType)
+    {
+    case MOVEMENT_TYPE_INVISIBLE:
+    case MOVEMENT_TYPE_BURIED:
+    case MOVEMENT_TYPE_TREE_DISGUISE:
+    case MOVEMENT_TYPE_MOUNTAIN_DISGUISE:
+    case MOVEMENT_TYPE_BERRY_TREE_GROWTH:
+        return true;
+    }
+    return template->trainerType == TRAINER_TYPE_BURIED || graphicsId == OBJ_EVENT_GFX_LIGHT_SPRITE
+        || (graphicsId & OBJ_EVENT_MON) || template->kind != OBJ_KIND_NORMAL
+        || FlagGet(template->flagId)
+        || MultiplayerRival_HidesObject(template->localId, gSaveBlock1Ptr->location.mapNum,
+                                        gSaveBlock1Ptr->location.mapGroup);
+}
+
+static void CopyStandIns(struct DioramaSceneSnapshot *snapshot)
+{
+    u16 standInTags[16];
+    s16 left = gSaveBlock1Ptr->pos.x - 2;      /* TrySpawnObjectEvents' window */
+    s16 right = gSaveBlock1Ptr->pos.x + MAP_OFFSET_W + 2;
+    s16 top = gSaveBlock1Ptr->pos.y;
+    s16 bottom = gSaveBlock1Ptr->pos.y + MAP_OFFSET_H + 2;
+    unsigned count;
+    unsigned i;
+
+    if (gMapHeader.events == NULL || CurrentBattlePyramidLocation() != PYRAMID_LOCATION_NONE || InTrainerHill())
+        return;
+    for (i = 0; i < 16; i++)
+        standInTags[i] = TAG_NONE;
+    count = gMapHeader.events->objectEventCount;
+    if (count > OBJECT_EVENT_TEMPLATES_COUNT)
+        count = OBJECT_EVENT_TEMPLATES_COUNT;
+    for (i = 0; i < count && snapshot->standInCount < DIORAMA_MAX_STAND_INS; i++)
+    {
+        const struct ObjectEventTemplate *template = &gSaveBlock1Ptr->objectEventTemplates[i];
+        const struct ObjectEventGraphicsInfo *info;
+        struct DioramaObjectSnapshot *copy;
+        s16 x = template->x + MAP_OFFSET;
+        s16 y = template->y + MAP_OFFSET;
+        u16 graphicsId = DioramaObjectEvent_TemplateGraphicsId(template);
+        u8 facing;
+        u8 palette;
+        u8 objectEventId;
+
+        if ((x >= left && x <= right && y >= top && y <= bottom)            /* the GBA's to spawn (or not) there */
+         || x < snapshot->gridOriginX || y < snapshot->gridOriginY
+         || x >= snapshot->gridOriginX + DIORAMA_GRID_WIDTH || y >= snapshot->gridOriginY + DIORAMA_GRID_HEIGHT
+         || template->movementType >= NUM_MOVEMENT_TYPES || StandInHidden(template, graphicsId)
+         || !TryGetObjectEventIdByLocalIdAndMap(template->localId, gSaveBlock1Ptr->location.mapNum,
+                                                gSaveBlock1Ptr->location.mapGroup, &objectEventId))
+            continue;                                                        /* (that returns FALSE when spawned) */
+        info = GetObjectEventGraphicsInfo(graphicsId);
+        if (info == NULL || info->width > 32 || info->height > 32)
+            continue;
+        copy = &snapshot->standIns[snapshot->standInCount];
+        memset(copy, 0, sizeof(*copy));
+        facing = gInitialMovementTypeFacingDirections[template->movementType];
+        if (!CopyStandInFrame(copy, info, info->inanimate ? 0 : GetFaceDirectionAnimNum(facing)))
+            continue;
+        palette = StandInPalette(snapshot, info->paletteTag, standInTags);
+        if (palette >= 16)
+            continue;
+        copy->active = TRUE;
+        copy->localId = template->localId;
+        copy->graphicsId = graphicsId;
+        copy->mapNum = gSaveBlock1Ptr->location.mapNum;
+        copy->mapGroup = gSaveBlock1Ptr->location.mapGroup;
+        copy->spriteId = MAX_SPRITES;
+        copy->elevation = copy->previousElevation = template->elevation;
+        copy->facingDirection = copy->movementDirection = facing;
+        copy->flags = DIORAMA_OBJECT_OFFSCREEN | DIORAMA_OBJECT_SHADOW;
+        copy->currentMapX = copy->previousMapX = x;
+        copy->currentMapY = copy->previousMapY = y;
+        copy->width = info->width;
+        copy->height = info->height;
+        copy->shadowSize = info->shadowSize;
+        copy->bpp = ST_OAM_4BPP;
+        copy->paletteNum = palette;
+        copy->priority = 2;
+        copy->oamOrder = 0xFF;
+        snapshot->standInCount++;
+    }
+}
+
 static s16 GetReflectionOffsetY(const struct ObjectEvent *object)
 {
     static const s16 bridgeOffsets[] = {12, 28, 44};
@@ -1400,6 +1571,7 @@ static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
     }
     CopySurfBlob(snapshot);
     CopyEffects(snapshot);
+    CopyStandIns(snapshot);
 }
 
 /*

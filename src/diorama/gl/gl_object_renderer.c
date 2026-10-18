@@ -18,7 +18,7 @@
 #include "diorama/sprite_frame.h"
 
 #define SPRITE_TEXTURE_CACHE_SIZE 48
-#define OBJECT_RENDER_ITEM_CAPACITY (DIORAMA_MAX_OBJECTS + 1 + DIORAMA_MAX_EFFECTS)
+#define OBJECT_RENDER_ITEM_CAPACITY (DIORAMA_MAX_OBJECTS + 1 + DIORAMA_MAX_EFFECTS + DIORAMA_MAX_STAND_INS)
 
 struct ObjectVertex
 {
@@ -784,6 +784,32 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
             item->previousAttachedOffsetX = sPreviousSnapshot.surfBlobOffsetX;
             item->previousAttachedOffsetY = sPreviousSnapshot.surfBlobOffsetY;
         }
+    }
+    /* Stand-ins for objects the GBA has not spawned (scene_snapshot.h standIns): drawn where they can be, standing
+     * still, never taking the view down. */
+    sMetrics.standIns = 0;
+    for (i = 0; i < snapshot->standInCount && nextItemCount < OBJECT_RENDER_ITEM_CAPACITY; i++)
+    {
+        const struct DioramaObjectSnapshot *object = &snapshot->standIns[i];
+        struct SpriteTextureCacheEntry *texture;
+        struct ObjectRenderItem *item;
+
+        if (!DioramaSprite_IsSupported(object) || (texture = GetTexture(snapshot, object)) == NULL)
+            continue;
+        item = &nextItems[nextItemCount];
+        memset(item, 0, sizeof(*item));
+        if (!DioramaSprite_BuildResolvedPose(snapshot, resolvedCells, snapshot->visibleCellCount, object,
+                                             &item->currentPose))
+            continue;
+        nextItemCount++;
+        item->object = *object;
+        item->texture = texture->texture;
+        item->width = texture->width;
+        item->height = texture->height;
+        item->previousPose = item->currentPose;
+        item->depthBias = ResolveDepthBias(snapshot, resolvedCells, object);
+        item->drawOverPixelObjects = IsInFrontOfPixelObject(snapshot, resolvedCells, object);
+        sMetrics.standIns++;
     }
     /* Field-effect sprites (scene_snapshot.h struct DioramaEffectSnapshot): drawn when they can be, never taking
      * the view down - an icon over its walker, a healing machine's Poke Balls and monitor on the machine. */

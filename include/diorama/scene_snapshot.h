@@ -17,6 +17,8 @@
 /* Field-effect sprites drawn in 3D (struct DioramaEffectSnapshot): six Poke Balls and a monitor, or five monitors. */
 #define DIORAMA_MAX_EFFECTS 12
 #define DIORAMA_EFFECT_PLACED 0xFF
+/* Stand-ins for objects the GBA has not spawned yet (scene_snapshot.c CopyStandIns). */
+#define DIORAMA_MAX_STAND_INS 24
 #define DIORAMA_FADED_PALETTE_ENTRIES 512
 #define DIORAMA_TILE_COUNT 1024
 #define DIORAMA_TILE_BYTES 32
@@ -309,6 +311,14 @@ struct DioramaSceneSnapshot
     struct DioramaObjectSnapshot objects[DIORAMA_MAX_OBJECTS];
     uint8_t effectCount;
     struct DioramaEffectSnapshot effects[DIORAMA_MAX_EFFECTS];
+    /* The map's people, item balls, rocks and trees the GBA has not spawned: it spawns an object only within two
+     * tiles of its own 240x160 picture and removes it past that, while the 3D view sees much further (north most of
+     * all, and wider in a 16:9 window), so they popped into view a few steps away. A stand-in is drawn only: the
+     * object's template as it would spawn (graphics, place, elevation, the way it faces, standing), within the
+     * view's cells and not hidden by its flag; no object is spawned, moved or seen by trainers. objects[] has the
+     * spawned ones; a stand-in gives way to its object the frame the GBA spawns it there. */
+    uint8_t standInCount;
+    struct DioramaObjectSnapshot standIns[DIORAMA_MAX_STAND_INS];
     uint8_t uiFlags;
     uint8_t uiRectCount;
     struct DioramaUiRect uiRects[DIORAMA_MAX_UI_RECTS];

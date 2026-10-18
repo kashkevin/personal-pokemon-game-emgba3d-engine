@@ -563,4 +563,10 @@ u8 MovementType_OverworldWildEncounter_Despawn_Step8(struct ObjectEvent *objectE
 u8 MovementType_OverworldWildEncounter_Despawn_Step10(struct ObjectEvent *objectEvent, struct Sprite *sprite);
 u8 MovementType_OverworldWildEncounter_Despawn_Step11(struct ObjectEvent *objectEvent, struct Sprite *sprite);
 
+#ifdef ENABLE_DIORAMA
+// For the Diorama 3D view's stand-ins of objects not spawned yet (read only).
+u16 DioramaObjectEvent_TemplateGraphicsId(const struct ObjectEventTemplate *template);
+const u16 *DioramaObjectEvent_PaletteData(u16 paletteTag);
+#endif
+
 #endif //GUARD_EVENT_OBJECT_MOVEMENT_H
