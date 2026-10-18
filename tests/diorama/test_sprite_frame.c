@@ -340,6 +340,83 @@ static void TestAttachedScreenOffset(void)
     CHECK_CLOSE(pose.groundY, 1.0f);
 }
 
+/* A composite vehicle (the moving truck, the S.S. Tidal, the submarine's shadow, the S.S. Anne): its parts assembled
+ * by the snapshot into one picture of its own size, laid out in tiles; drawn as one card, its centre and bottom row
+ * where the picture is (KNOWN_ISSUES P7: such objects were refused and the 3D view fell back to 2D). */
+static void TestCompositeVehicles(void)
+{
+    static const struct { uint8_t w, h; int8_t shiftX, feet; } sizes[] = {
+        {48, 48, 0, 0},    /* the moving truck */
+        {96, 40, 0, 0},    /* the S.S. Tidal */
+        {88, 32, 0, 0},    /* the submarine's shadow */
+        {128, 64, 32, 16}, /* the S.S. Anne (FRLG): its parts from x -32 to 96 and y -16 to 48 about the sprite */
+    };
+    struct DioramaObjectSnapshot object;
+    struct DioramaSpriteFrameKey truckKey;
+    struct DioramaSpriteFrameKey shipKey;
+    struct DioramaSpritePose plain;
+    struct DioramaSpritePose shifted;
+    uint8_t width;
+    uint8_t height;
+    size_t i;
+
+    for (i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++)
+    {
+        object = MakeObject();
+        object.oamShape = 0;
+        object.oamSize = 0; /* the sprite's own OAM: 8x8, as the S.S. Tidal's */
+        object.flags = DIORAMA_OBJECT_SUBSPRITES;
+        CHECK(!DioramaSprite_IsSupported(&object)); /* not assembled: still refused */
+        object.flags = DIORAMA_OBJECT_COMPOSITE;
+        object.compositeWidth = sizes[i].w;
+        object.compositeHeight = sizes[i].h;
+        object.compositeShiftX = sizes[i].shiftX;
+        object.compositeFeetShift = sizes[i].feet;
+        object.frameSize = (uint16_t)(sizes[i].w * sizes[i].h / 2);
+        memset(object.frameGraphics, 0, sizeof(object.frameGraphics));
+        FillTile(&object, 0, 1);                                   /* top-left tile */
+        FillTile(&object, (uint16_t)(sizes[i].w / 8 * sizes[i].h / 8 - 1), 4); /* bottom-right tile */
+        CHECK(DioramaSprite_IsSupported(&object));
+        CHECK(DioramaSprite_DecodeFrame(&sSnapshot, &object, sPixels, DIORAMA_SPRITE_MAX_PIXELS, &width, &height));
+        CHECK(width == sizes[i].w && height == sizes[i].h);
+        CHECK(sPixels[0] == 0xFFFF0000u);
+        CHECK(sPixels[(size_t)width * height - 1] == 0xFFFFFFFFu);
+        CHECK(sPixels[width - 1] == 0);
+        object.hFlip = 1; /* the whole picture mirrored, as the GBA mirrors the parts' places and the parts */
+        CHECK(DioramaSprite_DecodeFrame(&sSnapshot, &object, sPixels, DIORAMA_SPRITE_MAX_PIXELS, &width, &height));
+        CHECK(sPixels[width - 1] == 0xFFFF0000u);
+        object.hFlip = 0;
+        /* a frame size that is not the picture's is refused */
+        object.frameSize = (uint16_t)(sizes[i].w * sizes[i].h / 2 - 32);
+        CHECK(!DioramaSprite_IsSupported(&object));
+        object.frameSize = (uint16_t)(sizes[i].w * sizes[i].h / 2);
+        if (i == 0)
+            DioramaSprite_MakeFrameKey(&sSnapshot, &object, &truckKey);
+        if (i == 1)
+            DioramaSprite_MakeFrameKey(&sSnapshot, &object, &shipKey);
+        /* the card stands where the picture is */
+        object.currentMapX = object.previousMapX = 3;
+        object.currentMapY = object.previousMapY = 2;
+        CHECK(DioramaSprite_BuildPose(&sSnapshot, &object, &shifted));
+        object.flags = 0;
+        object.oamSize = 1;
+        object.frameSize = 16 * 16 / 2;
+        CHECK(DioramaSprite_BuildPose(&sSnapshot, &object, &plain));
+        CHECK_CLOSE(shifted.x - plain.x, sizes[i].shiftX / 16.0f);
+        CHECK_CLOSE(shifted.z - plain.z, -sizes[i].feet / 16.0f);
+    }
+    /* two composites with the same tiles but different sizes are different textures */
+    truckKey.frameHash = shipKey.frameHash;
+    CHECK(!DioramaSprite_FrameKeyEqual(&truckKey, &shipKey));
+    /* larger than a frame can hold: refused */
+    object = MakeObject();
+    object.flags = DIORAMA_OBJECT_COMPOSITE;
+    object.compositeWidth = 128;
+    object.compositeHeight = 128;
+    object.frameSize = 8192 / 2 * 2;
+    CHECK(!DioramaSprite_IsSupported(&object));
+}
+
 int main(void)
 {
     InitSnapshot();
@@ -353,6 +430,7 @@ int main(void)
     TestInterpolationDiscontinuities();
     TestDepthOrder();
     TestAttachedScreenOffset();
+    TestCompositeVehicles();
     puts("sprite frame tests passed");
     return EXIT_SUCCESS;
 }

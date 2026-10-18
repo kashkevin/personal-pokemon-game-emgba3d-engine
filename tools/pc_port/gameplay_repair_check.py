@@ -10,6 +10,11 @@
             PC, the counter's arm and the back wall: black notches, a flickering room);
   4. bag:   with the native bag on screen a pocket switch reaches the pocket the bag draws within 3 game frames of the
             press (the hidden GBA list's 16-frame repaint delayed it about 0.3 s);
+  6. vehicles: the large vehicles stay in the 3D view (KNOWN_ISSUES P7: a sprite drawn as several OAM parts was
+            refused and the whole view fell back to 2D): the moving trucks, the S.S. Tidal (Slateport, Lilycove,
+            Southern Island), the submarine's shadow (Slateport, the Aqua Hideout), the Cable Car, Rayquaza (Sky
+            Pillar, still and awake; Sootopolis); each on the field, no object refused, 3D throughout; and the
+            submarine's escape scene and the S.S. Tidal's departure play to their end in 3D;
   5. link:  the pause menu's link status - OFFLINE without a bridge; SETUP (and the clock at 12:00 noon) for the
             launcher's character setup (--setup); CONNECTING, then NOT CONNECTED after 20 s, for a bridge whose
             companion never reports a world session, with the role from --link-role.
@@ -82,7 +87,9 @@ def check_grass(binary, work, problems):
         problems.append(f"grass: no 3D battle or {len(shots)} of {len(frames)} pictures\n{log[-600:]}")
         return
     image = Image.open(shots[0])
-    box = (int(image.width * 0.68), int(image.height * 0.60), image.width - 4, int(image.height * 0.82))
+    # tall grass right of the foe, above the HUD's databox (since 0493b77b79 the world sits higher, with the back
+    # pictures on the HUD panel's top edge, and the old box took in the databox and the blinking command panel)
+    box = (int(image.width * 0.82), int(image.height * 0.50), image.width - 4, int(image.height * 0.70))
     changes = [float((np.abs(grey(b, box) - grey(a, box)) > 24).mean()) for a, b in zip(shots, shots[1:])]
     worst = max(changes)
     if worst > 0.03:
@@ -146,6 +153,71 @@ def check_link(binary, work, problems):
     return len(cases)
 
 
+# name, PKMN_DEBUG_HERE, flags/vars to set before the map loads, the vehicle's local id
+VEHICLES = (
+    ("truck-littleroot", "0,9,5,12", "", 5),
+    ("ss-tidal-slateport", "9,9,10,12", "f35c=0,f350=0", 5),
+    ("submarine-slateport", "9,9,10,12", "f35c=0,f350=0", 8),
+    ("ss-tidal-lilycove", "13,10,10,12", "f35d=0", 2),
+    ("ss-tidal-southern-island", "26,9,13,22", "", 2),
+    ("submarine-aqua-hideout", "24,25,17,21", "f3af=0", 4),
+    ("cable-car-route112", "19,0,6,6", "", 2),
+    ("rayquaza-still-sky-pillar", "24,85,14,11", "f50=0", 2),
+    ("rayquaza-sky-pillar", "24,85,14,11", "f305=0,f50=1", 1),
+    ("rayquaza-sootopolis", "0,7,31,45", "f3e4=0", 11),
+)
+
+
+def vehicle_run(binary, work, name, here, flags, local_id, keys="", end="200", watch="v4001"):
+    _, log = run(binary, os.path.join(work, "vehicle-" + name), dict(
+        PKMN_DEBUG_HERE=here, PKMN_DEBUG_RIVAL_SET=flags or None, PKMN_DEBUG_RIVAL_WATCH=watch,
+        PKMN_DEBUG_RIVAL_OBJ=str(local_id), PKMN_DIORAMA_LOG="1", PKMN_DEBUG_FRAMES="1", PKMN_DEBUG_KEYS=keys or None,
+        PKMN_DEBUG_GLSHOTS=end), 300)
+    return log
+
+
+def vehicle_problems(name, log, local_id, expect_present=True):
+    problems = []
+    decisions = [int(d) for d in re.findall(r"present \d+: terrain \d decision (\d)", log)]
+    if re.search(r"refused \(", log):
+        problems.append(f"vehicle {name}: an object was refused: " + re.search(r".*refused \(.*", log).group(0))
+    if 3 not in decisions:
+        problems.append(f"vehicle {name}: the 3D view never came up ({decisions})")
+    if expect_present and not re.search(rf"\| obj {local_id} 1", log):
+        problems.append(f"vehicle {name}: the vehicle (local id {local_id}) was not on the field")
+    return problems, decisions
+
+
+def check_vehicles(binary, work, problems):
+    checked = 0
+    for name, here, flags, local_id in VEHICLES:
+        log = vehicle_run(binary, work, name, here, flags, local_id)
+        found, decisions = vehicle_problems(name, log, local_id)
+        first3d = decisions.index(3) if 3 in decisions else len(decisions)
+        if any(d != 3 for d in decisions[first3d:]):
+            found.append(f"vehicle {name}: the view left 3D ({decisions})")
+        problems.extend(found)
+        checked += 1
+    # The submarine's escape (Slateport harbour, the Aqua scene): it sails off in 3D, is removed, the story goes on.
+    keys = "150:LEFT,175:LEFT," + ",".join(f"{f}:A" for f in range(400, 1700, 60))
+    log = vehicle_run(binary, work, "submarine-escape", "9,9,9,12", "v40a0=1,f350=0,f34d=0,f34e=0", 8, keys, "1700",
+                      "v40a0")
+    found, decisions = vehicle_problems("submarine-escape", log, 8)
+    if not re.search(r"v40a0=2", log):
+        found.append("vehicle submarine-escape: the scene did not end (VAR_SLATEPORT_HARBOR_STATE never 2)")
+    if any(d != 3 for d in decisions[decisions.index(3):] if 3 in decisions):
+        found.append(f"vehicle submarine-escape: the view left 3D ({decisions})")
+    problems.extend(found)
+    # The S.S. Tidal's departure from Southern Island: the player boards, the ship sails, the game warps to Lilycove.
+    keys = "150:DOWN," + ",".join(f"{f}:A" for f in range(220, 800, 60))
+    log = vehicle_run(binary, work, "ss-tidal-departure", "26,9,13,22", "", 2, keys, "1000")
+    found, _ = vehicle_problems("ss-tidal-departure", log, 2)
+    if not re.search(r"rival \d+: map 13\.10 ", log):
+        found.append("vehicle ss-tidal-departure: the ferry never reached Lilycove")
+    problems.extend(found)
+    return checked + 2
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", default=os.path.join(ROOT, "pokeemerald-mp-diorama"))
@@ -160,6 +232,7 @@ def main():
     pc = check_pc(args.binary, work, problems)
     bag = check_bag(args.binary, work, problems)
     links = check_link(args.binary, work, problems)
+    vehicles = check_vehicles(args.binary, work, problems)
     if problems:
         print("gameplay_repair_check: FAILED (pictures kept in %s)" % work)
         for p in problems:
@@ -168,7 +241,7 @@ def main():
     shutil.rmtree(work, ignore_errors=True)
     print(f"gameplay_repair_check: ok ({dark} faded-out frames black; battle grass still, at most {grass:.1%} changed; "
           f"the room stood as the PC went on, {pc:.1%} changed; pocket switches {bag} game frames after the press; "
-          f"{links} link-status cases)")
+          f"{links} link-status cases; {vehicles} vehicle scenes stayed 3D)")
     return 0
 
 
