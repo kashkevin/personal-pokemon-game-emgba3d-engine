@@ -622,7 +622,67 @@ MT_TEST(world_rival_record_accepted)
         else if (i < count - 1)
             memcpy(record + 200, bad[i - sizeof(good) / 8], 8);
         else
-            record[195] = 1; /* 192-199 stay reserved */
+            record[195] = 1; /* not an outbreak marker: data without its valid byte */
+        n = FrameOf(frame, 'N', record, sizeof(record));
+        Feed(frame, n, 200);
+        Step(2);
+        MT_CHECK(accepted ? !sNet.closed : sNet.closed);
+        if (accepted)
+            MT_CHECK(memcmp(w + 48, record, 208) == 0);
+    }
+}
+
+// Update 18's outbreak marker (192-199), as the companion packs it while the host runs a mass outbreak, reaches the
+// game; before, the first outbreak (8-15 active minutes into a world) stopped every game's bridge for good. Anything
+// else in those bytes still closes the connection.
+MT_TEST(world_outbreak_marker_accepted)
+{
+    struct MpBridgeCaps caps;
+    uint8_t record[208];
+    uint8_t frame[230];
+    uint8_t *w = sMemory[MP_REGION_WORLD];
+    static const uint8_t good[][8] = {
+        {1, 0, 29, 0, 0, 0, 0, 0},      /* world_mailbox.py: valid, group, number, 0, species 0 */
+        {1, 0, 16, 0, 0, 0, 0, 0},      /* Route 101 */
+        {1, 255, 255, 0, 0, 0, 0, 0},   /* an unknown map: the Town Map leaves it out (RegionMap_PortableLocate) */
+        {1, 0, 29, 0, 0xA4, 0x06, 0, 0}, /* a species word (1700), not read by the game */
+        {0, 0, 0, 0, 0, 0, 0, 0},       /* no outbreak */
+    };
+    static const uint8_t bad[][8] = {
+        {2, 0, 29, 0, 0, 0, 0, 0},      /* unknown valid byte */
+        {0, 0, 29, 0, 0, 0, 0, 0},      /* data without the valid byte */
+        {1, 0, 29, 1, 0, 0, 0, 0},      /* the zero byte */
+        {1, 0, 29, 0, 0xA5, 0x06, 0, 0}, /* species 1701 */
+        {1, 0, 29, 0, 0, 0, 1, 0},      /* reserved byte */
+        {1, 0, 29, 0, 0, 0, 0, 1},      /* reserved byte */
+    };
+    static const uint8_t rival[8] = {3, 0x01, 0x01, 2, 1, 0, 0, 0};
+    size_t n, i, count = sizeof(good) / 8 + sizeof(bad) / 8 + 1;
+
+    for (i = 0; i < count; i++)
+    {
+        int accepted = i < sizeof(good) / 8 || i == count - 1;
+
+        memset(&caps, 0, sizeof(caps));
+        caps.world = 1;
+        Fresh(&caps);
+        sNet.chunk = 0;
+        Ready(0);
+        PutU32(w, 0x31574D45);
+        PutU16(w + 4, 1);
+        PutU16(w + 6, 256);
+        Step(12);
+        memset(record, 0, sizeof(record));
+        PutU32(record, 1);
+        if (i < sizeof(good) / 8)
+            memcpy(record + 192, good[i], 8);
+        else if (i < count - 1)
+            memcpy(record + 192, bad[i - sizeof(good) / 8], 8);
+        else
+        {
+            memcpy(record + 192, good[0], 8); /* an outbreak and a rival record in the same frame */
+            memcpy(record + 200, rival, 8);
+        }
         n = FrameOf(frame, 'N', record, sizeof(record));
         Feed(frame, n, 200);
         Step(2);
@@ -1471,6 +1531,7 @@ int main(void)
     MT_RUN(save_command_with_bad_crc_refused);
     MT_RUN(world_inbound_validated);
     MT_RUN(world_rival_record_accepted);
+    MT_RUN(world_outbreak_marker_accepted);
     MT_RUN(world_wallet_money_and_reward_words);
     MT_RUN(slow_frame_drains_the_backlog);
     MT_RUN(clock_paces_records_by_real_time);

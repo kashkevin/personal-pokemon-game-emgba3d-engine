@@ -266,6 +266,16 @@ static bool ValidRivalRecord(const uint8_t *r)
     return !((r[0] & 6) && r[3] == 0);
 }
 
+/* Update 18's outbreak marker at 192 (all zero without one): valid 1, map group, map number, a zero byte, the species
+ * (LE16; the host sends 0 and the game does not read it), two zero bytes. region_map.c draws it on the Town Map and
+ * checks the map itself. */
+static bool ValidOutbreakMarker(const uint8_t *r)
+{
+    if (AllZero(r, 8))
+        return true;
+    return r[0] == 1 && r[3] == 0 && U16(r + 4) <= 1700 && r[6] == 0 && r[7] == 0;
+}
+
 /* validWorldInbound */
 static bool ValidWorldInbound(const uint8_t *p, size_t length)
 {
@@ -322,11 +332,12 @@ static bool ValidWorldInbound(const uint8_t *p, size_t length)
         if (k == seenCount)
             return false;
     }
-    /* Update 31's RivalRecord at 200 (eight bytes, all zero without one), the rules of multiplayer_rival.c ValidRecord.
-     * This check required all sixteen bytes to be zero, so the first rival record the companion relayed stopped the
-     * bridge for good ("invalid shared-world update"): the game lost every other player and its Players menu, while
-     * the server still listed it (the owner's report of 2026-10-19). */
-    return AllZero(p + 192, 8) && ValidRivalRecord(p + 200);
+    /* Update 18's outbreak marker at 192 and Update 31's RivalRecord at 200 (the rules of multiplayer_rival.c
+     * ValidRecord), each eight bytes and all zero without one. This check required all sixteen bytes to be zero, so
+     * the first rival record and the first outbreak the companion relayed stopped the bridge for good ("invalid
+     * shared-world update"): the game lost every other player and its Players menu, while the server still listed it
+     * (the owner's report of 2026-10-19). */
+    return ValidOutbreakMarker(p + 192) && ValidRivalRecord(p + 200);
 }
 
 static uint32_t Odd(uint32_t current)
