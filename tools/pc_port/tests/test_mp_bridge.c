@@ -539,6 +539,57 @@ MT_TEST(save_command_with_bad_crc_refused)
     MT_EQ(GetU32(sMemory[MP_REGION_SAVE] + 24), 0);
 }
 
+// A trade's private record (opcode 23) carries the resolved friendship with the Lucky Trade bit (1 << 8,
+// MP_TRADE_RESOLVED_LUCKY, multiplayer_trade_effects.c), as the companion sends it (trade_effect_session.py). The
+// bridge allowed 0-255 only, so every Lucky Trade stopped the receiving game's link in the middle of the trade.
+MT_TEST(trade_record_carries_the_lucky_bit)
+{
+    struct MpBridgeCaps caps;
+    uint8_t command[240];
+    uint8_t frame[260];
+    uint8_t *data = command + 48;
+    static const uint32_t words[][2] = {
+        {0, 70}, {5, 255}, {2, 70 | 0x100}, {3, 255 | 0x100}, {0, 0x100}, /* accepted */
+        {0, 0x200}, {0, 70 | 0x400}, {6, 70},                              /* refused */
+    };
+    size_t n, i;
+
+    for (i = 0; i < sizeof(words) / sizeof(words[0]); i++)
+    {
+        memset(&caps, 0, sizeof(caps));
+        caps.save = 1;
+        caps.trade = 1;
+        caps.menu = 2;
+        caps.tradeEffectPrepare = 1;
+        MT_CHECK(MpBridge_CheckCaps(&caps) == NULL);
+        Fresh(&caps);
+        sNet.chunk = 0;
+        Ready(0);
+        SaveReady();
+        PutU32(sMemory[MP_REGION_MENU], 0x31554D45); // the Players menu mailbox the capability needs
+        PutU16(sMemory[MP_REGION_MENU] + 4, 2);
+        PutU16(sMemory[MP_REGION_MENU] + 6, 512);
+        Step(10);
+        MakeSaveControl(command, 23);
+        PutU32(command + 32, 131072); // size
+        PutU32(command + 36, 4);      // revision
+        PutU16(command + 42, 192);
+        memset(data, 0x11, 16);       // the context key
+        memset(data + 16, 0x22, 32);
+        memset(data + 48, 0x33, 32);  // the frozen record hash
+        PutU32(data + 80, words[i][0]);
+        PutU32(data + 84, words[i][1]);
+        memset(data + 88, 0x44, 104); // the incoming record and its CRC
+        PutU32(command + 44, MpBridge_Crc32(data, 192));
+        n = FrameOf(frame, 'C', command, sizeof(command));
+        Feed(frame, n, 200);
+        Step(2);
+        MT_CHECK(i < 5 ? !sNet.closed : sNet.closed);
+        if (i < 5)
+            MT_CHECK(memcmp(sMemory[MP_REGION_SAVE] + 28, command, 240) == 0);
+    }
+}
+
 MT_TEST(world_inbound_validated)
 {
     struct MpBridgeCaps caps;
@@ -1532,6 +1583,7 @@ int main(void)
     MT_RUN(world_inbound_validated);
     MT_RUN(world_rival_record_accepted);
     MT_RUN(world_outbreak_marker_accepted);
+    MT_RUN(trade_record_carries_the_lucky_bit);
     MT_RUN(world_wallet_money_and_reward_words);
     MT_RUN(slow_frame_drains_the_backlog);
     MT_RUN(clock_paces_records_by_real_time);

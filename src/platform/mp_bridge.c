@@ -634,7 +634,9 @@ static bool SaveControl(const struct MpBridge *b, const uint8_t *p, size_t lengt
                 return false;
             if (opcode == 23)
             {
-                if (U32(data + 80) > 5 || U32(data + 84) > 255 || AllZero(data + 48, 32))
+                /* the resolved friendship (0-255) and the Lucky Trade bit (MP_TRADE_RESOLVED_LUCKY, 1 << 8), the
+                 * rules of multiplayer_trade_effects.c; 0-255 alone stopped every Lucky Trade's link mid-trade */
+                if (U32(data + 80) > 5 || (U32(data + 84) & ~0x1FFu) != 0 || AllZero(data + 48, 32))
                     return false;
             }
             else if (opcode == 24)
