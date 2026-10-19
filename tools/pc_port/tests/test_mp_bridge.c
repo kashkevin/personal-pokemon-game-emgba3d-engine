@@ -1025,7 +1025,7 @@ static void MakeBattleControl(uint8_t out[240], uint8_t opcode, uint8_t phase)
     PutU32(out + 44, MpBridge_Crc32(NULL, 0));
 }
 
-static bool BattleCommandAccepted(uint8_t phase)
+static bool BattleSlotCommandAccepted(uint8_t phase, uint8_t source, bool ffa)
 {
     uint8_t command[240];
     uint8_t frame[260];
@@ -1033,11 +1033,18 @@ static bool BattleCommandAccepted(uint8_t phase)
     size_t n;
 
     LooksBridge(false);
+    sBridge.caps.battleFfa = ffa ? 1 : 0;
     MakeBattleControl(command, 2, phase); // a native command without data
+    command[39] = source;
     n = FrameOf(frame, 'D', command, sizeof(command));
     Feed(frame, n, 200);
     Step(2);
     return !sNet.closed && GetU32(m + 24) == 2 && memcmp(m + 28, command, 240) == 0;
+}
+
+static bool BattleCommandAccepted(uint8_t phase)
+{
+    return BattleSlotCommandAccepted(phase, 0, true);
 }
 
 MT_TEST(native_battle_phases_reach_the_game)
@@ -1045,8 +1052,59 @@ MT_TEST(native_battle_phases_reach_the_game)
     MT_CHECK(BattleCommandAccepted(2)); // singles
     MT_CHECK(BattleCommandAccepted(3)); // full Multi
     MT_CHECK(BattleCommandAccepted(4)); // co-op Gym
-    MT_CHECK(!BattleCommandAccepted(5));
+    MT_CHECK(BattleCommandAccepted(5)); // the free-for-all (the game's marker)
+    MT_CHECK(!BattleCommandAccepted(6));
     MT_CHECK(sNet.closed);
+}
+
+// The free-for-all (phase 5): four trainers, so commands for all four source slots reach the game, and the
+// participant mask names the other three; without the game's marker, or for a fifth slot, the link closes as for any
+// malformed command. Before, phase 5 was refused outright: the first free-for-all command stopped all four links.
+MT_TEST(free_for_all_commands_reach_the_game)
+{
+    uint8_t command[240];
+    uint8_t frame[260];
+    uint8_t *m = sMemory[MP_REGION_BATTLE];
+    uint8_t source;
+    size_t n;
+
+    for (source = 0; source < 4; source++)
+        MT_CHECK(BattleSlotCommandAccepted(5, source, true));
+    MT_CHECK(!BattleSlotCommandAccepted(5, 0, false));
+    MT_CHECK(!BattleSlotCommandAccepted(5, 4, true));
+    MT_CHECK(MpBridge_CheckCaps(&(struct MpBridgeCaps){.save = 1, .trade = 1, .battle = 3, .battleFfa = 1}) == NULL);
+    MT_CHECK(MpBridge_CheckCaps(&(struct MpBridgeCaps){.save = 1, .trade = 1, .battle = 2, .battleFfa = 1}) != NULL);
+    MT_CHECK(MpBridge_CheckCaps(&(struct MpBridgeCaps){.save = 1, .trade = 1, .battle = 3, .battleFfa = 2}) != NULL);
+    for (source = 0; source < 4; source++)
+    {
+        uint32_t others = 0xFu ^ (1u << source);
+        uint8_t data[8] = {0};
+        int duel;
+
+        // a block's last chunk (opcode 5) names the trainers it goes to: the other three; a duel's mask is refused
+        for (duel = 0; duel < 2; duel++)
+        {
+            LooksBridge(false);
+            sBridge.caps.battleFfa = 1;
+            MakeBattleControl(command, 5, 5);
+            command[39] = source;
+            PutU32(command + 28, 1);  // block
+            PutU16(command + 32, 28); // offset = size: the last chunk
+            PutU16(command + 34, 28);
+            command[40] = 2;          // kind 2: 28 bytes
+            PutU32(data + 4, duel ? (others & 0x3u) : others);
+            memcpy(command + 48, data, 8);
+            PutU16(command + 42, 8);
+            PutU32(command + 44, MpBridge_Crc32(data, 8));
+            n = FrameOf(frame, 'D', command, sizeof(command));
+            Feed(frame, n, 200);
+            Step(2);
+            if (duel)
+                MT_CHECK(sNet.closed);
+            else
+                MT_CHECK(!sNet.closed && memcmp(m + 28, command, 240) == 0);
+        }
+    }
 }
 
 // Shared wild Pokemon (the second native extension, mp_bridge.h).
@@ -1592,6 +1650,7 @@ int main(void)
     MT_RUN(battle_looks_follow_their_announcement);
     MT_RUN(battle_looks_need_the_game);
     MT_RUN(native_battle_phases_reach_the_game);
+    MT_RUN(free_for_all_commands_reach_the_game);
     MT_RUN(spawn_capability_waits_for_its_mailbox);
     MT_RUN(spawn_record_and_inbound_round_trip);
     MT_RUN(spawn_inbound_is_validated);

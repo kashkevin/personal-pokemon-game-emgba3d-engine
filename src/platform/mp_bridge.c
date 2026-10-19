@@ -144,6 +144,8 @@ const char *MpBridge_CheckCaps(const struct MpBridgeCaps *c)
         return "invalid presence animation capability marker";
     if (c->presenceDetail > 1)
         return "invalid presence detail capability marker";
+    if (c->battleFfa && (c->battle != 3 || c->battleFfa != 1))
+        return "invalid free-for-all battle capability";
     if (c->save > 1)
         return "invalid save mailbox ABI";
     if (c->trade && (!c->save || c->trade != 1))
@@ -772,12 +774,15 @@ static bool BattleControl(const struct MpBridge *b, const uint8_t *p, size_t len
      || MpBridge_Crc32(data, dataLength) != crc)
         return false;
     /* Native phases: 2 singles, 3 full Multi (four cores), 4 co-op Gym (two
-     * cores, the master also running both AI trainers). Phase 4 was missing
-     * here (and in mgba.lua), so every co-op command stopped the bridge
-     * ("invalid battle command") and no co-op battle could start. */
+     * cores, the master also running both AI trainers), 5 the free-for-all
+     * (four cores, PC builds with its marker). Phase 4 was missing here (and in
+     * mgba.lua), so every co-op command stopped the bridge ("invalid battle
+     * command") and no co-op battle could start; phase 5 was missing the same
+     * way, so the first free-for-all command stopped all four games' links. */
     native = ((c->battle == 2 || c->battle == 3) && phase == 2)
-          || (c->battle == 3 && (phase == 3 || phase == 4));
-    count = phase == 3 ? 4 : 2;
+          || (c->battle == 3 && (phase == 3 || phase == 4))
+          || (c->battle == 3 && Enabled(c->battleFfa) && phase == 5);
+    count = phase == 3 || phase == 5 ? 4 : 2;
     if (!native && (phase != 1 || opcode > 9 || kind > 1))
         return false;
     if (native && (source >= count || opcode == 3 || opcode == 7 || opcode == 8 || kind == 1 || kind > 8))
@@ -1999,6 +2004,7 @@ typedef int MpSocket;
 #include "global.h"
 #include "multiplayer.h"
 #include "multiplayer_battle.h"
+#include "constants/battle.h"
 #include "multiplayer_local_reset.h"
 #include "multiplayer_menu.h"
 #include "multiplayer_presence.h"
@@ -2256,6 +2262,9 @@ bool MpBridge_Configure(const char *path)
     caps.battleResume = *(const volatile u32 *)&gMultiplayerBattleResumeAbiVersion;
     caps.battleAdmissionCleanup = *(const volatile u32 *)&gMultiplayerBattleAdmissionCleanupAbiVersion;
     caps.battleExecution = caps.battleAdmissionCleanup ? 1 : 0;
+#if MP_FFA_ENABLED
+    caps.battleFfa = *(const volatile u32 *)&gMultiplayerBattleFfaAbiVersion;
+#endif
     caps.saveWindow = *(const volatile u32 *)&gMultiplayerSaveWindowAbiVersion;
     caps.menu = *(const volatile u32 *)&gMultiplayerMenuAbiVersion;
     /* The trade effect transports are explicit opt-ins of the manifest, never
@@ -2317,13 +2326,13 @@ bool MpBridge_Configure(const char *path)
     memset(token, 0, sizeof(token));
     sEnabled = true;
     SDL_Log("Multiplayer bridge: companion at 127.0.0.1:%ld; save %u trade %u emergency %u battle %u/%u/%u "
-            "window %u menu %u effects %u/%u/%u reset %u/%u world %u spawns %u running %u detail %u",
+            "window %u menu %u effects %u/%u/%u reset %u/%u world %u spawns %u running %u detail %u ffa %u",
             port, (unsigned)caps.save, (unsigned)caps.trade, (unsigned)caps.emergencySave,
             (unsigned)caps.battle, (unsigned)caps.battleResume, (unsigned)caps.battleAdmissionCleanup,
             (unsigned)caps.saveWindow, (unsigned)caps.menu, (unsigned)caps.tradeEffectPrepare,
             (unsigned)caps.tradeEffectSave, (unsigned)caps.tradeEffectChoice, (unsigned)caps.reset,
             (unsigned)caps.resetInput, (unsigned)caps.world, (unsigned)caps.spawns,
-            (unsigned)caps.presenceAnimation, (unsigned)caps.presenceDetail);
+            (unsigned)caps.presenceAnimation, (unsigned)caps.presenceDetail, (unsigned)caps.battleFfa);
     return true;
 }
 
