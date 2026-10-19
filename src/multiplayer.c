@@ -19,6 +19,7 @@
 #include "constants/event_objects.h"
 #ifdef PORTABLE
 #include "character_customization.h"
+#include "multiplayer_presence.h"
 #endif
 #line 20 // gba-line
 
@@ -263,6 +264,12 @@ static void PublishLocalPose(bool32 ready)
         pose.movementMode = MovementMode();
         pose.activity = MULTIPLAYER_ACTIVITY_OVERWORLD;
     }
+#ifdef PORTABLE
+    // Why the player is off the field (in battle, a menu, changing area), for the other players' lists. The GBA
+    // build keeps this byte zero. multiplayer_presence.c
+    pose.reserved = ready ? 0 : MultiplayerPresence_Detail();
+#endif
+#line 262 // gba-line
     gMultiplayerMailbox.localGeneration = generation;
     gMultiplayerMailbox.local = pose;
     gMultiplayerMailbox.localGeneration = generation + 1;
@@ -500,6 +507,7 @@ void Multiplayer_Tick(void)
     // "setting up your character could not finish", 2026-10-17). Nothing here reads the save until it is there.
     if (gSaveBlock1Ptr == NULL || gSaveBlock2Ptr == NULL)
         return;
+    MultiplayerPresence_Tick(); // a refused PLAYERS says why (multiplayer_presence.c)
 #endif
 #line 487 // gba-line
     ready = FieldReady();

@@ -112,6 +112,7 @@ struct MpBridgeCaps
     uint32_t world;                  /* 1 */
     uint32_t spawns;                 /* 1: shared wild Pokemon (native extension, needs world) */
     uint32_t extras;                 /* 1: multiplayer Secret Bases (native extension, needs world) */
+    uint32_t presenceDetail;         /* 1: why the game is off the field, in its pose's last byte (native extension) */
 };
 
 enum

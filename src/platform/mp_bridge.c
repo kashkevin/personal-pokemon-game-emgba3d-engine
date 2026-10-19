@@ -142,6 +142,8 @@ const char *MpBridge_CheckCaps(const struct MpBridgeCaps *c)
 {
     if (c->presenceAnimation > 1)
         return "invalid presence animation capability marker";
+    if (c->presenceDetail > 1)
+        return "invalid presence detail capability marker";
     if (c->save > 1)
         return "invalid save mailbox ABI";
     if (c->trade && (!c->save || c->trade != 1))
@@ -251,6 +253,19 @@ static bool PrintableNotice(const uint8_t *text, size_t length)
     return true;
 }
 
+/* flags (valid 1, present 2, my match 4), completed and cleared masks (five checkpoints), here (0 none, 1-5),
+ * its state (0 none, 1-4), three zero bytes; present and my match need a checkpoint */
+static bool ValidRivalRecord(const uint8_t *r)
+{
+    if (AllZero(r, 8))
+        return true;
+    if (!(r[0] & 1) || (r[0] & ~7u) || (r[1] & ~0x1Fu) || (r[2] & ~0x1Fu) || r[3] > 5 || r[4] > 4 || !AllZero(r + 5, 3))
+        return false;
+    if ((r[3] == 0) != (r[4] == 0))
+        return false;
+    return !((r[0] & 6) && r[3] == 0);
+}
+
 /* validWorldInbound */
 static bool ValidWorldInbound(const uint8_t *p, size_t length)
 {
@@ -307,7 +322,11 @@ static bool ValidWorldInbound(const uint8_t *p, size_t length)
         if (k == seenCount)
             return false;
     }
-    return AllZero(p + 192, 16);
+    /* Update 31's RivalRecord at 200 (eight bytes, all zero without one), the rules of multiplayer_rival.c ValidRecord.
+     * This check required all sixteen bytes to be zero, so the first rival record the companion relayed stopped the
+     * bridge for good ("invalid shared-world update"): the game lost every other player and its Players menu, while
+     * the server still listed it (the owner's report of 2026-10-19). */
+    return AllZero(p + 192, 8) && ValidRivalRecord(p + 200);
 }
 
 static uint32_t Odd(uint32_t current)
@@ -1149,12 +1168,14 @@ static void PollReset(struct MpBridge *b)
     }
 }
 
-/* validPose */
-static bool ValidPose(const struct MpBridge *b, const uint8_t *pose)
+/* validPose; the game's own pose may say why it is off the field in its last byte (presence detail, PC only),
+ * the other players' poses never do */
+static bool ValidPose(const struct MpBridge *b, const uint8_t *pose, bool local)
 {
     return pose[14] >= 1 && pose[14] <= 4 && pose[15] <= 15
         && pose[16] <= 1 && pose[17] <= (Enabled(b->caps.presenceAnimation) ? 5 : 4)
-        && pose[18] <= 1 && pose[19] == 0;
+        && pose[18] <= 1
+        && (pose[19] == 0 || (local && Enabled(b->caps.presenceDetail) && pose[18] == 0 && pose[19] <= 3));
 }
 
 /* regressed: ROM counters wrap normally at uint32; a pause or Flash loop can stall. */
@@ -1191,7 +1212,7 @@ static bool RuntimeReady(struct MpBridge *b)
         uint8_t pose[20];
 
         ReadRange(b, MP_REGION_PRESENCE, 16, pose, sizeof(pose));
-        if (ValidPose(b, pose) && U32(pose + 4) == current
+        if (ValidPose(b, pose, true) && U32(pose + 4) == current
          && generation == R32(b, MP_REGION_PRESENCE, 12) && current == R32(b, MP_REGION_PRESENCE, 8)
          && HeaderReady(b))
         {
@@ -1343,7 +1364,7 @@ static bool ValidSnapshot(const struct MpBridge *b, const uint8_t *p, size_t len
         {
             uint32_t token = U32(o);
 
-            if (token == 0 || !ValidPose(b, o + 4))
+            if (token == 0 || !ValidPose(b, o + 4, false))
                 return false;
             for (k = 0; k < i; k++)
                 if (seen[k] == token)
@@ -1875,7 +1896,7 @@ void MpBridge_Step(struct MpBridge *b)
             uint8_t pose[20];
 
             ReadRange(b, MP_REGION_PRESENCE, 16, pose, sizeof(pose));
-            if (generation == R32(b, MP_REGION_PRESENCE, 12) && ValidPose(b, pose))
+            if (generation == R32(b, MP_REGION_PRESENCE, 12) && ValidPose(b, pose, true))
             {
                 Frame(b->latestPose, 'P', pose, sizeof(pose), NULL, 0);
                 b->hasLatestPose = true;
@@ -1967,6 +1988,7 @@ typedef int MpSocket;
 #include "multiplayer_battle.h"
 #include "multiplayer_local_reset.h"
 #include "multiplayer_menu.h"
+#include "multiplayer_presence.h"
 #include "multiplayer_reset_admission.h"
 #include "multiplayer_save.h"
 #include "multiplayer_spawns.h"
@@ -2212,6 +2234,7 @@ bool MpBridge_Configure(const char *path)
      * the ownership save profile as well as its own marker. */
     memset(&caps, 0, sizeof(caps));
     caps.presenceAnimation = *(const volatile u32 *)&gMultiplayerPresenceAnimationAbiVersion;
+    caps.presenceDetail = *(const volatile u32 *)&gMultiplayerPresenceDetailAbiVersion;
     caps.save = 1;
     caps.trade = *(const volatile u32 *)&gMultiplayerOwnershipAbi == 1
                ? *(const volatile u32 *)&gMultiplayerTradeAbiVersion : 0;
@@ -2281,13 +2304,13 @@ bool MpBridge_Configure(const char *path)
     memset(token, 0, sizeof(token));
     sEnabled = true;
     SDL_Log("Multiplayer bridge: companion at 127.0.0.1:%ld; save %u trade %u emergency %u battle %u/%u/%u "
-            "window %u menu %u effects %u/%u/%u reset %u/%u world %u spawns %u running %u",
+            "window %u menu %u effects %u/%u/%u reset %u/%u world %u spawns %u running %u detail %u",
             port, (unsigned)caps.save, (unsigned)caps.trade, (unsigned)caps.emergencySave,
             (unsigned)caps.battle, (unsigned)caps.battleResume, (unsigned)caps.battleAdmissionCleanup,
             (unsigned)caps.saveWindow, (unsigned)caps.menu, (unsigned)caps.tradeEffectPrepare,
             (unsigned)caps.tradeEffectSave, (unsigned)caps.tradeEffectChoice, (unsigned)caps.reset,
             (unsigned)caps.resetInput, (unsigned)caps.world, (unsigned)caps.spawns,
-            (unsigned)caps.presenceAnimation);
+            (unsigned)caps.presenceAnimation, (unsigned)caps.presenceDetail);
     return true;
 }
 

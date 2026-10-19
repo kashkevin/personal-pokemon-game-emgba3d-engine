@@ -134,6 +134,7 @@ static bool8 StartMenuStyleCallback(void);
 // so the GBA ROM keeps its pairing; the same fix for both builds is
 // a85ed3a47 on claude/fix-player-menu-fade.
 #define MENU_STAYS_IN_FIELD(callback) ((callback) == StartMenuStyleCallback || (callback) == StartMenuRideCallback)
+#include "multiplayer_presence.h"
 #else
 #define MENU_STAYS_IN_FIELD(callback) FALSE
 #endif
@@ -842,6 +843,13 @@ static bool8 StartMenuPlayersCallback(void)
     RemoveExtraStartMenuWindows(); HideStartMenu();
     // No native tick runs between releasing the Start menu and claiming this
     // overlay. Open refuses unbound/offline/unsafe state without sending input.
+#ifdef PORTABLE
+    // A refusal says why in a banner (not connected, link lost, not ready yet) instead of closing the menu silently.
+    if (!MultiplayerMenu_Open())
+        MultiplayerPresence_PlayersRefused();
+    return TRUE;
+#endif
+#line 835 // gba-line
     MultiplayerMenu_Open();
     return TRUE;
 }

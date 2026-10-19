@@ -305,6 +305,57 @@ MT_TEST(snapshot_commits_after_complete_frame)
     MT_EQ(sNet.errors, 0);
 }
 
+// The PC game says why it is off the field in its pose's last byte (the presence detail capability): the bridge sends
+// it with the pose only while the pose is unavailable, only up to the transition code and only with the capability.
+// The other players' poses in a snapshot keep the byte zero (the game's own check refuses anything else).
+MT_TEST(presence_detail_rides_the_local_pose_only)
+{
+    struct MpBridgeCaps caps;
+    const uint8_t *payload;
+    uint8_t snapshot[88];
+    uint8_t frame[128];
+    size_t n;
+    uint8_t *p = sMemory[MP_REGION_PRESENCE];
+    static const struct { uint8_t capability, activity, detail; bool sent; } cases[] = {
+        {1, 0, 1, true}, {1, 0, 2, true}, {1, 0, 3, true}, {1, 0, 0, true}, {1, 1, 0, true},
+        {1, 0, 4, false},  /* no such detail */
+        {1, 1, 1, false},  /* on the field there is nothing to explain */
+        {0, 0, 1, false},  /* a build without the capability */
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+    {
+        memset(&caps, 0, sizeof(caps));
+        caps.presenceDetail = cases[i].capability;
+        Fresh(&caps);
+        sNet.chunk = 0;
+        Ready(0);
+        p[16 + 18] = cases[i].activity;
+        p[16 + 19] = cases[i].detail;
+        Step(12);
+        if (cases[i].sent)
+            MT_CHECK(SentFrame('P', 0, &payload) == 20 && memcmp(payload, p + 16, 20) == 0);
+        else
+            MT_CHECK(SentFrame('P', 0, &payload) < 0);
+    }
+    for (i = 0; i < 2; i++)
+    {
+        memset(&caps, 0, sizeof(caps));
+        caps.presenceDetail = 1;
+        Fresh(&caps);
+        Ready(0);
+        Step(1);
+        MakeSnapshot(snapshot, 1, 0, 0);
+        snapshot[20 + 18] = 0;
+        snapshot[20 + 19] = i == 0 ? 1 : 0; // a peer's pose with a detail, then without
+        n = FrameOf(frame, 'S', snapshot, sizeof(snapshot));
+        Feed(frame, n, 100);
+        Step(2);
+        MT_EQ(GetU32(p + 40), i == 0 ? 0 : 1);
+    }
+}
+
 MT_TEST(malformed_length_stops_and_clears)
 {
     uint8_t snapshot[88];
@@ -521,6 +572,64 @@ MT_TEST(world_inbound_validated)
     Feed(frame, n, 200);
     Step(2);
     MT_CHECK(sNet.closed);
+}
+
+// Update 31's rival record (bytes 200-207) reaches the game: the record the companion sent in the reproduction of the
+// owner's report (only the valid flag) stopped the bridge here, so the game left the session. Malformed records and
+// anything in 192-199 still close the connection.
+MT_TEST(world_rival_record_accepted)
+{
+    struct MpBridgeCaps caps;
+    uint8_t record[208];
+    uint8_t frame[230];
+    uint8_t *w = sMemory[MP_REGION_WORLD];
+    static const uint8_t good[][8] = {
+        {1, 0, 0, 0, 0, 0, 0, 0},       /* the reproduction's record: valid, nothing done, at no checkpoint */
+        {1, 0x1F, 0x03, 0, 0, 0, 0, 0}, /* every checkpoint completed, two cleared */
+        {3, 0, 0, 1, 1, 0, 0, 0},       /* present at checkpoint 1, open */
+        {7, 0, 0, 5, 3, 0, 0, 0},       /* own match battling at checkpoint 5 */
+        {0, 0, 0, 0, 0, 0, 0, 0},       /* no record */
+    };
+    static const uint8_t bad[][8] = {
+        {0, 1, 0, 0, 0, 0, 0, 0},       /* data without the valid flag */
+        {9, 0, 0, 0, 0, 0, 0, 0},       /* unknown flag */
+        {1, 0x20, 0, 0, 0, 0, 0, 0},    /* a sixth checkpoint */
+        {1, 0, 0, 6, 1, 0, 0, 0},       /* checkpoint 6 */
+        {1, 0, 0, 1, 5, 0, 0, 0},       /* state 5 */
+        {1, 0, 0, 1, 0, 0, 0, 0},       /* a checkpoint without its state */
+        {3, 0, 0, 0, 0, 0, 0, 0},       /* present nowhere */
+        {1, 0, 0, 0, 0, 0, 0, 1},       /* reserved byte */
+    };
+    size_t n, i, count = sizeof(good) / 8 + sizeof(bad) / 8 + 1;
+
+    for (i = 0; i < count; i++)
+    {
+        int accepted = i < sizeof(good) / 8;
+
+        memset(&caps, 0, sizeof(caps));
+        caps.world = 1;
+        Fresh(&caps);
+        sNet.chunk = 0;
+        Ready(0);
+        PutU32(w, 0x31574D45);
+        PutU16(w + 4, 1);
+        PutU16(w + 6, 256);
+        Step(12);
+        memset(record, 0, sizeof(record));
+        PutU32(record, 1);
+        if (i < sizeof(good) / 8)
+            memcpy(record + 200, good[i], 8);
+        else if (i < count - 1)
+            memcpy(record + 200, bad[i - sizeof(good) / 8], 8);
+        else
+            record[195] = 1; /* 192-199 stay reserved */
+        n = FrameOf(frame, 'N', record, sizeof(record));
+        Feed(frame, n, 200);
+        Step(2);
+        MT_CHECK(accepted ? !sNet.closed : sNet.closed);
+        if (accepted)
+            MT_CHECK(memcmp(w + 48, record, 208) == 0);
+    }
 }
 
 // The wager wallet accepts money (+-999,999) and, for the Battle Frontier, reward words (bit 30, kind 1-3): anything
@@ -1352,6 +1461,7 @@ int main(void)
     MT_RUN(rom_startup_does_not_write);
     MT_RUN(hello_survives_partial_sends_then_pose);
     MT_RUN(snapshot_commits_after_complete_frame);
+    MT_RUN(presence_detail_rides_the_local_pose_only);
     MT_RUN(malformed_length_stops_and_clears);
     MT_RUN(duplicate_peer_tokens_refused);
     MT_RUN(foreign_mailbox_never_written);
@@ -1360,6 +1470,7 @@ int main(void)
     MT_RUN(save_command_and_response);
     MT_RUN(save_command_with_bad_crc_refused);
     MT_RUN(world_inbound_validated);
+    MT_RUN(world_rival_record_accepted);
     MT_RUN(world_wallet_money_and_reward_words);
     MT_RUN(slow_frame_drains_the_backlog);
     MT_RUN(clock_paces_records_by_real_time);
