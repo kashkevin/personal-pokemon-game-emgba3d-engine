@@ -229,6 +229,20 @@ static u8 MovementMode(void)
     return PLAYER_AVATAR_STATE_NORMAL;
 }
 
+#ifdef PORTABLE
+// Update 32: the player's avatar stands on the field, drawn, although the field does not take input (a dialogue, the
+// START menu, a cutscene, a save): the pose follows it and the other players keep drawing it; and this game keeps
+// drawing them (frozen with every other object while a script runs) instead of removing them for a sign read.
+bool32 Multiplayer_FieldShown(void)
+{
+    u32 id = gPlayerAvatar.objectEventId;
+    return gMain.callback2 == CB2_Overworld && !gMain.inBattle && !MultiplayerBattle_IsActive()
+        && gSaveBlock1Ptr != NULL && gMapHeader.mapLayout != NULL
+        && id < OBJECT_EVENTS_COUNT && gObjectEvents[id].active && gObjectEvents[id].isPlayer;
+}
+#endif
+
+#line 227 // gba-line
 static void PublishLocalPose(bool32 ready)
 {
     // Keep a canonical, valid pose even while unavailable. Consumers use the
@@ -251,7 +265,13 @@ static void PublishLocalPose(bool32 ready)
     pose.mapEpoch = sMapEpoch;
     pose.frame = sFrame;
     pose.activity = MULTIPLAYER_ACTIVITY_UNAVAILABLE;
+#ifdef PORTABLE
+    if (ready || Multiplayer_FieldShown())
+#else
+#line 249 // gba-line
     if (ready)
+#endif
+#line 250 // gba-line
     {
         const struct ObjectEvent *player = &gObjectEvents[gPlayerAvatar.objectEventId];
         pose.x = player->currentCoords.x - MAP_OFFSET;
@@ -262,7 +282,13 @@ static void PublishLocalPose(bool32 ready)
         pose.elevation = player->currentElevation;
         pose.gender = gPlayerAvatar.gender;
         pose.movementMode = MovementMode();
+#ifdef PORTABLE
+        pose.activity = ready ? MULTIPLAYER_ACTIVITY_OVERWORLD : MULTIPLAYER_ACTIVITY_UNAVAILABLE;
+#else
+#line 260 // gba-line
         pose.activity = MULTIPLAYER_ACTIVITY_OVERWORLD;
+#endif
+#line 261 // gba-line
     }
 #ifdef PORTABLE
     // Why the player is off the field (in battle, a menu, changing area), for the other players' lists. The GBA
@@ -520,7 +546,14 @@ void Multiplayer_Tick(void)
         sConnected = FALSE;
     if (!ready || !sConnected)
     {
+#ifdef PORTABLE
+        if (!sConnected || !Multiplayer_FieldShown())
+            Multiplayer_LeaveField();
+#else
+#line 497 // gba-line
         Multiplayer_LeaveField();
+#endif
+#line 498 // gba-line
         MultiplayerWorld_Tick(FALSE, sConnected);
         return;
     }

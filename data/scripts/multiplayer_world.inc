@@ -6,6 +6,11 @@
 EventScript_MultiplayerWorldEvent::
 	lock
 	faceplayer
+.ifdef PORTABLE
+	@ Update 32: a new character has no Pokemon until it claims its starter in Birch's lab.
+	getpartysize
+	goto_if_eq VAR_RESULT, 0, EventScript_MultiplayerWorldEventNoPokemon
+.endif
 	special MultiplayerWorld_TryClaimEvent
 	waitstate
 	goto_if_eq VAR_RESULT, 0, EventScript_MultiplayerWorldEventBusy
@@ -25,6 +30,17 @@ EventScript_MultiplayerWorldEventGone:
 	msgbox EventScript_MultiplayerWorldEvent_Text_Gone, MSGBOX_DEFAULT
 	release
 	end
+
+.ifdef PORTABLE
+EventScript_MultiplayerWorldEventNoPokemon:
+	msgbox EventScript_MultiplayerWorldEvent_Text_NoPokemon, MSGBOX_DEFAULT
+	release
+	end
+
+EventScript_MultiplayerWorldEvent_Text_NoPokemon:
+	.string "You have no POKéMON to battle with!\n"
+	.string "PROF. BIRCH's LAB has one for you.$"
+.endif
 
 EventScript_MultiplayerWorldEvent_Text_Busy:
 	.string "Another TRAINER is battling\n"

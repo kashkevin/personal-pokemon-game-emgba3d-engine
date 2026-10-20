@@ -53,7 +53,9 @@ u8 MultiplayerPresence_Detail(void)
     // A fade on the field: the screen goes dark before a warp and comes back after it.
     if (gPaletteFade.active)
         return MULTIPLAYER_DETAIL_TRANSITION;
-    return MULTIPLAYER_DETAIL_NONE;
+    // Update 32: a dialogue, a cutscene, a save on the field. The player stands there as in a menu, and the other
+    // players keep seeing them (they used to vanish for every sign read).
+    return MULTIPLAYER_DETAIL_MENU;
 }
 
 // START > PLAYER > PLAYERS could not open (MultiplayerMenu_Open refused): say why in the field's banner. It used to

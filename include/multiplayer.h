@@ -75,6 +75,8 @@ bool32 Multiplayer_IsPeerOnCurrentMap(u32 playerId);
 bool32 Multiplayer_IsRuntimeLocalId(u32 localId);
 // The pose of the i-th other player the bridge reports (any map). FALSE: nobody there.
 bool32 Multiplayer_GetRemotePose(u32 i, u32 *playerId, struct MultiplayerPose *pose);
+// Update 32: the field is on screen with the player on it, input or not (a dialogue, the START menu, a cutscene).
+bool32 Multiplayer_FieldShown(void);
 #endif
 
 #endif

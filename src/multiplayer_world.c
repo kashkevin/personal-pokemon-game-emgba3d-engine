@@ -1470,6 +1470,13 @@ void MultiplayerWorld_Tick(bool32 fieldReady, bool32 connected)
     }
     if (!fieldReady)
     {
+#ifdef PORTABLE
+        // Update 32: while the field stays on screen (a dialogue, the START menu) the other players stay drawn,
+        // frozen like every object of the map, and their Pokemon with them.
+        if (Multiplayer_FieldShown())
+            return;
+#endif
+#line 1192 // gba-line
         // A script or menu runs on the overworld: remote avatars are hidden by
         // the presence layer, so their Pokemon go too, but the World Event
         // Pokemon the player may be talking to stays where it is.
