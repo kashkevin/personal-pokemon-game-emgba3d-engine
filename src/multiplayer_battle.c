@@ -36,10 +36,15 @@
 // The free-for-all (MP_BATTLE_PHASE_FFA) exists where it can be played and tested (the PC build and the test ROM); the GBA
 // release ROM does not carry it, so the phase is never a valid one there.
 #if MP_FFA_ENABLED
-#define IS_FFA_PHASE(mode) ((mode) == MP_BATTLE_PHASE_FFA)
-#define LAST_PHASE MP_BATTLE_PHASE_FFA
+// Update 32: the three-player free-for-all (MP_BATTLE_PHASE_FFA3) is the same battle with its fourth place empty.
+#define IS_FFA_PHASE(mode) ((mode) == MP_BATTLE_PHASE_FFA || (mode) == MP_BATTLE_PHASE_FFA3)
+#define FFA_PLAYER_COUNT(mode) ((mode) == MP_BATTLE_PHASE_FFA3 ? 3 : 4)
+#define PHASE_PLAYER_COUNT(phase, count) ((phase) == MP_BATTLE_PHASE_FFA3 ? 3 : (count))
+#define LAST_PHASE MP_BATTLE_PHASE_FFA3
 #else
 #define IS_FFA_PHASE(mode) FALSE
+#define FFA_PLAYER_COUNT(mode) 4
+#define PHASE_PLAYER_COUNT(phase, count) count
 #define LAST_PHASE MP_BATTLE_PHASE_COOP
 #endif
 #line 30 // gba-line
@@ -69,6 +74,7 @@ const u32 gMultiplayerBattleAdmissionCleanupAbiVersion = MULTIPLAYER_BATTLE_ADMI
 const u32 gMultiplayerBattleCoopAbiVersion = MULTIPLAYER_BATTLE_COOP_ABI;
 #if MP_FFA_ENABLED
 const u32 gMultiplayerBattleFfaAbiVersion = MULTIPLAYER_BATTLE_FFA_ABI;
+const u32 gMultiplayerBattleFfa3AbiVersion = MULTIPLAYER_BATTLE_FFA3_ABI;
 #endif
 #line 54 // gba-line
 EWRAM_DATA volatile struct MultiplayerBattleMailbox gMultiplayerBattleMailbox = {0};
@@ -227,6 +233,21 @@ bool32 MultiplayerBattle_SkipCallbacks(void) { return MultiplayerBattle_PauseClo
 bool32 MultiplayerBattle_IsFullMulti(void) { return MultiplayerBattle_IsActive() && sState != MP_BATTLE_ADMITTING && (sBinding.mode == MP_BATTLE_PHASE_FULL_MULTI || IS_FFA_PHASE(sBinding.mode)); }
 #if MP_FFA_ENABLED
 bool32 MultiplayerBattle_IsFreeForAll(void) { return MultiplayerBattle_IsActive() && sState != MP_BATTLE_ADMITTING && IS_FFA_PHASE(sBinding.mode); }
+bool32 MultiplayerBattle_IsFreeForAll3(void) { return MultiplayerBattle_IsFreeForAll() && sBinding.mode == MP_BATTLE_PHASE_FFA3; }
+
+// The screen position of a free-for-all battler on the core playing `localSlot` (a free-for-all trainer's party slot is
+// its position too): the core's own trainer bottom left, the others counting on from it. The 1v1v1 keeps its empty place
+// in the second player position on every core and draws the two other trainers where a double battle's opponents stand.
+u32 MultiplayerBattle_GetFreeForAllPosition(u32 battler, u32 localSlot)
+{
+    static const u8 sThreePlayerPositions[3] = {B_POSITION_PLAYER_LEFT, B_POSITION_OPPONENT_LEFT, B_POSITION_OPPONENT_RIGHT};
+
+    if (sBinding.mode != MP_BATTLE_PHASE_FFA3)
+        return (battler + MAX_LINK_PLAYERS - localSlot) % MAX_LINK_PLAYERS;
+    if (battler == MP_FFA3_EMPTY_PLACE)
+        return B_POSITION_PLAYER_RIGHT;
+    return sThreePlayerPositions[(battler + 3 - localSlot) % 3];
+}
 #endif
 #line 198 // gba-line
 bool32 MultiplayerBattle_IsCoop(void) { return MultiplayerBattle_IsActive() && sState != MP_BATTLE_ADMITTING && sBinding.mode == MP_BATTLE_PHASE_COOP; }
@@ -255,7 +276,7 @@ u32 MultiplayerBattle_GetRivalPreparation(void)
 
 static u32 PhasePlayerCount(u32 phase)
 {
-    return phase == MP_BATTLE_PHASE_FULL_MULTI || IS_FFA_PHASE(phase) ? 4 : 2;
+    return PHASE_PLAYER_COUNT(phase, phase == MP_BATTLE_PHASE_FULL_MULTI || IS_FFA_PHASE(phase) ? 4 : 2);
 }
 // Four full parties keep more status sprites live than cable Multi. Delayed
 // controller delivery can overlap a later ball with the earlier ball's entire
@@ -295,7 +316,15 @@ bool8 MultiplayerBattle_IsSendFinished(void)
 {
     return !sOutPending && (sState == MP_BATTLE_CHANNEL || sState == MP_BATTLE_PREPARED || sState == MP_BATTLE_RUNNING);
 }
+#if MP_FFA_ENABLED
+// The 1v1v1's empty place sends nothing: its block always counts as received (and stays empty), so the four-trainer
+// startup's "all four blocks" checks hold. The controller relay reads only the three players' flags (GetLinkPlayerCount).
+u8 MultiplayerBattle_GetReceivedFlags(void) { return sReceiveFlags | (MultiplayerBattle_IsFreeForAll3() ? 1 << MP_FFA3_EMPTY_PLACE : 0); }
+#else
+#line 255 // gba-line
 u8 MultiplayerBattle_GetReceivedFlags(void) { return sReceiveFlags; }
+#endif
+#line 256 // gba-line
 
 void MultiplayerBattle_ResetReceivedFlag(u8 slot)
 {
@@ -416,11 +445,18 @@ static bool32 Empty(const struct MultiplayerBattleControl *c)
 static bool32 BindingValid(const struct MultiplayerBattleBinding *b, const struct MultiplayerBattleControl *c)
 {
     u32 i, j;
+#if MP_FFA_ENABLED
+    if ((b->playerCount != 2 && b->playerCount != 4 && !(b->playerCount == 3 && b->mode == MP_BATTLE_PHASE_FFA3))
+     || b->localSlot >= b->playerCount
+#else
+#line 376 // gba-line
     if ((b->playerCount != 2 && b->playerCount != 4) || b->localSlot >= b->playerCount
+#endif
+#line 377 // gba-line
      || b->localSlot != c->sourceSlot || b->mode != c->phase || b->reserved > 1 || (b->reserved && b->mode == MP_BATTLE_PHASE_DIAGNOSTIC)
      || (b->mode == MP_BATTLE_PHASE_SINGLES && b->playerCount != 2)
      || (b->mode == MP_BATTLE_PHASE_FULL_MULTI && b->playerCount != 4)
-     || (IS_FFA_PHASE(b->mode) && b->playerCount != 4)
+     || (IS_FFA_PHASE(b->mode) && b->playerCount != FFA_PLAYER_COUNT(b->mode))
 #line 380 // gba-line
      || (b->mode == MP_BATTLE_PHASE_COOP && b->playerCount != 2)
      || Zero(b->generation, 16))
@@ -581,7 +617,7 @@ static void NoteNativeController(const u8 *data, u8 source)
 #if MP_FFA_ENABLED
         // Free-for-all: the result is the winner (slot + 1) or a draw (5), the same on every core.
         if (MultiplayerBattle_IsFreeForAll())
-            sOutcome = data[10] < 4 ? data[10] + 1 : 5;
+            sOutcome = data[10] < sBinding.playerCount ? data[10] + 1 : 5;
 #endif
     }
 #line 534 // gba-line
@@ -801,6 +837,13 @@ static u8 StartSingles(void)
 #if MP_FFA_ENABLED
     if (MultiplayerBattle_IsFreeForAll())
         gBattleTypeFlags |= BATTLE_TYPE_FFA; // four sides: nobody is anybody's partner
+    if (MultiplayerBattle_IsFreeForAll3())
+    {
+        // The 1v1v1's empty place: link player 3 with no name, whom no core plays and who has no Pokemon.
+        memset(&gLinkPlayers[MP_FFA3_EMPTY_PLACE], 0, sizeof(gLinkPlayers[MP_FFA3_EMPTY_PLACE]));
+        gLinkPlayers[MP_FFA3_EMPTY_PLACE].id = MP_FFA3_EMPTY_PLACE;
+        gLinkPlayers[MP_FFA3_EMPTY_PLACE].name[0] = EOS;
+    }
 #endif
 #line 650 // gba-line
     TRAINER_BATTLE_PARAM.opponentA = TRAINER_LINK_OPPONENT;
@@ -828,6 +871,18 @@ bool8 MultiplayerBattle_SendPartyPair(u8 index)
 bool8 MultiplayerBattle_CopyFullMultiPartyPair(u8 index)
 {
     u32 source;
+#if MP_FFA_ENABLED
+    // The 1v1v1 has three players (its empty place's trainer slot keeps an empty party).
+    if (!MultiplayerBattle_IsFullMulti() || sState != MP_BATTLE_RUNNING
+     || (index != 0 && index != 2 && index != 4) || sReceiveFlags != (1u << sBinding.playerCount) - 1)
+        return FALSE;
+    for (source = 0; source < sBinding.playerCount; source++)
+        if (source != sBinding.localSlot && sReceiveKind[source] != MP_BATTLE_KIND_PARTY_0 + index / 2)
+            return FALSE;
+    for (source = 0; source < sBinding.playerCount; source++)
+    {
+#else
+#line 675 // gba-line
     if (!MultiplayerBattle_IsFullMulti() || sState != MP_BATTLE_RUNNING
      || (index != 0 && index != 2 && index != 4) || sReceiveFlags != 15)
         return FALSE;
@@ -838,12 +893,14 @@ bool8 MultiplayerBattle_CopyFullMultiPartyPair(u8 index)
     // was published. Map fixed participant IDs into native per-device parties.
     for (source = 0; source < 4; source++)
     {
+#endif
+#line 685 // gba-line
         enum BattleTrainer trainer;
         if (source == sBinding.localSlot)
             continue; // Local temporary forms were already applied at entry.
 #if MP_FFA_ENABLED
         if (MultiplayerBattle_IsFreeForAll())
-            trainer = (enum BattleTrainer)((source + 4 - sBinding.localSlot) % 4); // the trainer slot is the screen position
+            trainer = (enum BattleTrainer)MultiplayerBattle_GetFreeForAllPosition(source, sBinding.localSlot); // the trainer slot is the screen position
         else
 #endif
 #line 688 // gba-line

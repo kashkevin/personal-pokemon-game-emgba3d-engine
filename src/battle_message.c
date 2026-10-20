@@ -2527,6 +2527,13 @@ void BufferStringBattle(enum StringID stringID, enum BattlerId battler)
     case STRINGID_INTROSENDOUT: // poke first send-out
         if (IsOnPlayerSide(battler))
         {
+#if MP_FFA_ENABLED
+            // The 1v1v1: nobody stands in the second player place, so the player sends out one Pokemon alone.
+            if (IsFreeForAllBattle() && FFA_IsEmptyPlace(GetBattlerAtPosition(B_POSITION_PLAYER_RIGHT)))
+                stringPtr = sText_GoPkmn;
+            else
+#endif
+#line 2528 // gba-line
             if (IsDoubleBattle() && IsValidForBattle(GetBattlerMon(GetPartnerBattler(battler))))
             {
                 if (gBattleTypeFlags & BATTLE_TYPE_MULTI && (gBattleTypeFlags & BATTLE_TYPE_RECORDED_LINK || gBattleTypeFlags & BATTLE_TYPE_LINK))

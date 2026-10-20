@@ -11,6 +11,8 @@
 // controller layout). Parties are restored exactly afterwards, like PvP.
 #define MULTIPLAYER_BATTLE_COOP_ABI 1
 #define MULTIPLAYER_BATTLE_FFA_ABI 1
+// Update 32: the three-player free-for-all (1v1v1), MP_BATTLE_PHASE_FFA3. PC build and test ROM only.
+#define MULTIPLAYER_BATTLE_FFA3_ABI 1
 #define MULTIPLAYER_BATTLE_SIZE 512
 #define MULTIPLAYER_BATTLE_BLOCK_SIZE 256
 #define MULTIPLAYER_BATTLE_CHUNK_SIZE 128
@@ -35,6 +37,7 @@ enum MultiplayerBattlePhase {
     MP_BATTLE_PHASE_DIAGNOSTIC = 1, MP_BATTLE_PHASE_SINGLES, MP_BATTLE_PHASE_FULL_MULTI,
     MP_BATTLE_PHASE_COOP,
     MP_BATTLE_PHASE_FFA, // four independent trainers, one battle (BATTLE_TYPE_FFA); see include/battle_ffa.h
+    MP_BATTLE_PHASE_FFA3, // Update 32: three independent trainers (1v1v1): the free-for-all with its fourth place empty
 };
 enum MultiplayerBattleKind {
     MP_BATTLE_KIND_NONE, MP_BATTLE_KIND_DIAGNOSTIC, MP_BATTLE_KIND_TRAINER,
@@ -110,6 +113,7 @@ extern const u32 gMultiplayerBattleResumeAbiVersion;
 extern const u32 gMultiplayerBattleAdmissionCleanupAbiVersion;
 extern const u32 gMultiplayerBattleCoopAbiVersion;
 extern const u32 gMultiplayerBattleFfaAbiVersion; // PC build and test ROM only: four-player free-for-all
+extern const u32 gMultiplayerBattleFfa3AbiVersion; // PC build and test ROM only: three-player free-for-all
 extern volatile struct MultiplayerBattleMailbox gMultiplayerBattleMailbox;
 extern volatile u32 gMultiplayerBattleHoldFlags;
 void MultiplayerBattle_Init(void);
@@ -124,6 +128,11 @@ bool32 MultiplayerBattle_IsFullMulti(void);
 bool32 MultiplayerBattle_IsCoop(void);
 #if MP_FFA_ENABLED
 bool32 MultiplayerBattle_IsFreeForAll(void);
+// The 1v1v1's empty place: battler 3 (link player 3), which no core plays. Drawn on every core in the second player
+// position (B_POSITION_PLAYER_RIGHT), so each player sees the two others where a double battle's opponents stand.
+#define MP_FFA3_EMPTY_PLACE 3
+bool32 MultiplayerBattle_IsFreeForAll3(void);
+u32 MultiplayerBattle_GetFreeForAllPosition(u32 battler, u32 localSlot);
 #endif
 #if MP_BRING_ENABLED
 u8 MultiplayerBattle_GetBringMask(void);

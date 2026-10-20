@@ -46,6 +46,10 @@
 #include "load_save.h"
 #include "main.h"
 #include "multiplayer_battle.h"
+#if MP_FFA_ENABLED
+#include "battle_ffa.h"
+#endif
+#line 42 // gba-line
 #include "overworld.h"
 #include "malloc.h"
 #include "m4a.h"
@@ -3455,6 +3459,11 @@ static void DoBattleIntro(void)
             }
 
             // Draw sprite.
+#if MP_FFA_ENABLED
+            if (FFA_IsEmptyPlace(battler))
+                continue; // the 1v1v1's empty place: no trainer to draw
+#endif
+#line 3412 // gba-line
             switch (GetBattlerPosition(battler))
             {
             case B_POSITION_PLAYER_LEFT: // player sprite
@@ -3543,6 +3552,11 @@ static void DoBattleIntro(void)
                 if (position > B_POSITION_OPPONENT_LEFT && !BattleSideHasTwoTrainers(position & BIT_SIDE))
                     continue;
                 battler = GetBattlerAtPosition(position);
+#if MP_FFA_ENABLED
+                if (FFA_IsEmptyPlace(battler))
+                    continue;
+#endif
+#line 3500 // gba-line
                 BtlController_EmitDrawPartyStatusSummary(battler, B_COMM_TO_CONTROLLER, hpStatus[GetBattlerTrainer(battler)], PARTY_SUMM_SKIP_DRAW_DELAY);
                 MarkBattlerForControllerExec(battler);
             }
@@ -3594,8 +3608,18 @@ static void DoBattleIntro(void)
         else
             battler = GetBattlerAtPosition(B_POSITION_OPPONENT_LEFT);
 
+#if MP_FFA_ENABLED
+        if (!FFA_IsEmptyPlace(battler)) // the 1v1v1's empty place throws no Poke Ball
+        {
+            BtlController_EmitIntroTrainerBallThrow(battler, B_COMM_TO_CONTROLLER);
+            MarkBattlerForControllerExec(battler);
+        }
+#else
+#line 3551 // gba-line
         BtlController_EmitIntroTrainerBallThrow(battler, B_COMM_TO_CONTROLLER);
         MarkBattlerForControllerExec(battler);
+#endif
+#line 3553 // gba-line
         gBattleStruct->eventState.battleIntro++;
         break;
     case BATTLE_INTRO_STATE_TRAINER_2_SEND_OUT_ANIM:
@@ -3606,8 +3630,18 @@ static void DoBattleIntro(void)
             else
                 battler = GetBattlerAtPosition(B_POSITION_OPPONENT_RIGHT);
 
+#if MP_FFA_ENABLED
+            if (!FFA_IsEmptyPlace(battler))
+            {
+                BtlController_EmitIntroTrainerBallThrow(battler, B_COMM_TO_CONTROLLER);
+                MarkBattlerForControllerExec(battler);
+            }
+#else
+#line 3563 // gba-line
             BtlController_EmitIntroTrainerBallThrow(battler, B_COMM_TO_CONTROLLER);
             MarkBattlerForControllerExec(battler);
+#endif
+#line 3565 // gba-line
         }
         if (B_FAST_INTRO_PKMN_TEXT == TRUE
           && !(gBattleTypeFlags & (BATTLE_TYPE_RECORDED | BATTLE_TYPE_RECORDED_LINK | BATTLE_TYPE_RECORDED_IS_MASTER | BATTLE_TYPE_LINK)))
@@ -3681,8 +3715,18 @@ static void DoBattleIntro(void)
             else
                 battler = GetBattlerAtPosition(B_POSITION_PLAYER_RIGHT);
 
+#if MP_FFA_ENABLED
+            if (!FFA_IsEmptyPlace(battler))
+            {
+                BtlController_EmitIntroTrainerBallThrow(battler, B_COMM_TO_CONTROLLER);
+                MarkBattlerForControllerExec(battler);
+            }
+#else
+#line 3638 // gba-line
             BtlController_EmitIntroTrainerBallThrow(battler, B_COMM_TO_CONTROLLER);
             MarkBattlerForControllerExec(battler);
+#endif
+#line 3640 // gba-line
         }
         gBattleStruct->eventState.battleIntro++;
         break;

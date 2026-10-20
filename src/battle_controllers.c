@@ -420,7 +420,7 @@ static void InitBtlControllersInternal(void)
 
                 linkBtlControllerFunc = (i == multiplayerId) ? SetControllerToPlayer : SetControllerToLinkOpponent;
                 linkBtlControllerFunc(battlerId);
-                gBattlerPositions[battlerId] = (battlerId + MAX_LINK_PLAYERS - gLinkPlayers[multiplayerId].id) % MAX_LINK_PLAYERS;
+                gBattlerPositions[battlerId] = MultiplayerBattle_GetFreeForAllPosition(battlerId, gLinkPlayers[multiplayerId].id);
                 BufferBattlePartyCurrentOrderBySide(battlerId, battlerId & BIT_FLANK);
                 gBattlerPartyIndexes[battlerId] = 0;
                 continue;
@@ -555,6 +555,14 @@ static void SetBattlePartyIds(void)
             }
             if (slot == PARTY_SIZE)
             {
+#if MP_FFA_ENABLED
+                if (FFA_IsEmptyPlace(battler)) // the 1v1v1's empty place: nobody's Pokemon, absent from the start
+                {
+                    gBattlerPartyIndexes[battler] = 0;
+                    continue;
+                }
+#endif
+#line 522 // gba-line
                 MultiplayerBattle_FailNative();
                 return;
             }

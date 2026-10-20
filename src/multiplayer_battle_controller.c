@@ -223,7 +223,7 @@ static bool32 MasterDataValid(const u8 *p)
         // Free-for-all: byte 2 names the winner's battler (0xFF: a draw); every core works out its own result from it.
         if (MultiplayerBattle_IsFreeForAll())
             return (value == B_OUTCOME_WON || value == B_OUTCOME_LOST || value == B_OUTCOME_DREW)
-                && (p[2] < BattlerCount() || p[2] == 0xFF) && !p[3] && !p[4] && !p[5];
+                && (p[2] < CoreCount() || p[2] == 0xFF) && !p[3] && !p[4] && !p[5]; // the winner is a player's battler
 #endif
         return (value == B_OUTCOME_WON || value == B_OUTCOME_LOST || value == B_OUTCOME_DREW)
 #line 222 // gba-line

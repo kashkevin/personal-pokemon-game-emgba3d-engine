@@ -1025,7 +1025,7 @@ static void MakeBattleControl(uint8_t out[240], uint8_t opcode, uint8_t phase)
     PutU32(out + 44, MpBridge_Crc32(NULL, 0));
 }
 
-static bool BattleSlotCommandAccepted(uint8_t phase, uint8_t source, bool ffa)
+static bool BattleSlotCommandAcceptedWith(uint8_t phase, uint8_t source, bool ffa, bool ffa3)
 {
     uint8_t command[240];
     uint8_t frame[260];
@@ -1034,12 +1034,18 @@ static bool BattleSlotCommandAccepted(uint8_t phase, uint8_t source, bool ffa)
 
     LooksBridge(false);
     sBridge.caps.battleFfa = ffa ? 1 : 0;
+    sBridge.caps.battleFfa3 = ffa3 ? 1 : 0;
     MakeBattleControl(command, 2, phase); // a native command without data
     command[39] = source;
     n = FrameOf(frame, 'D', command, sizeof(command));
     Feed(frame, n, 200);
     Step(2);
     return !sNet.closed && GetU32(m + 24) == 2 && memcmp(m + 28, command, 240) == 0;
+}
+
+static bool BattleSlotCommandAccepted(uint8_t phase, uint8_t source, bool ffa)
+{
+    return BattleSlotCommandAcceptedWith(phase, source, ffa, false);
 }
 
 static bool BattleCommandAccepted(uint8_t phase)
@@ -1053,8 +1059,65 @@ MT_TEST(native_battle_phases_reach_the_game)
     MT_CHECK(BattleCommandAccepted(3)); // full Multi
     MT_CHECK(BattleCommandAccepted(4)); // co-op Gym
     MT_CHECK(BattleCommandAccepted(5)); // the free-for-all (the game's marker)
-    MT_CHECK(!BattleCommandAccepted(6));
+    MT_CHECK(!BattleCommandAccepted(6)); // the 1v1v1 needs its own marker (three_player_free_for_all_commands_reach_the_game)
     MT_CHECK(sNet.closed);
+    MT_CHECK(!BattleCommandAccepted(7));
+    MT_CHECK(sNet.closed);
+}
+
+// Update 32: the three-player free-for-all (phase 6, the 1v1v1): three trainers, so commands for source slots 0-2 reach
+// the game and a block's last chunk names the other two; without the game's 1v1v1 marker (or the four-player one it
+// builds on), for a fourth slot, or with a four-player mask, the link closes as for any malformed command.
+MT_TEST(three_player_free_for_all_commands_reach_the_game)
+{
+    uint8_t command[240];
+    uint8_t frame[260];
+    uint8_t *m = sMemory[MP_REGION_BATTLE];
+    uint8_t source;
+    size_t n;
+
+    for (source = 0; source < 3; source++)
+        MT_CHECK(BattleSlotCommandAcceptedWith(6, source, true, true));
+    MT_CHECK(!BattleSlotCommandAcceptedWith(6, 3, true, true));
+    MT_CHECK(!BattleSlotCommandAcceptedWith(6, 0, true, false));
+    MT_CHECK(!BattleSlotCommandAcceptedWith(6, 0, false, true));
+    MT_CHECK(BattleSlotCommandAcceptedWith(5, 3, true, true)); // the four-player free-for-all is unchanged
+    MT_CHECK(MpBridge_CheckCaps(&(struct MpBridgeCaps){.save = 1, .trade = 1, .battle = 3, .battleFfa = 1,
+                                                      .battleFfa3 = 1}) == NULL);
+    MT_CHECK(MpBridge_CheckCaps(&(struct MpBridgeCaps){.save = 1, .trade = 1, .battle = 3, .battleFfa3 = 1}) != NULL);
+    MT_CHECK(MpBridge_CheckCaps(&(struct MpBridgeCaps){.save = 1, .trade = 1, .battle = 3, .battleFfa = 1,
+                                                      .battleFfa3 = 2}) != NULL);
+    for (source = 0; source < 3; source++)
+    {
+        uint32_t others = 0x7u ^ (1u << source);
+        uint8_t data[8] = {0};
+        int four;
+
+        // a block's last chunk names the other two trainers; the four-player mask (a fourth trainer) is refused
+        for (four = 0; four < 2; four++)
+        {
+            LooksBridge(false);
+            sBridge.caps.battleFfa = 1;
+            sBridge.caps.battleFfa3 = 1;
+            MakeBattleControl(command, 5, 6);
+            command[39] = source;
+            PutU32(command + 28, 1);  // block
+            PutU16(command + 32, 28); // offset = size: the last chunk
+            PutU16(command + 34, 28);
+            command[40] = 2;          // kind 2: 28 bytes
+            PutU32(data + 4, four ? (0xFu ^ (1u << source)) : others);
+            memcpy(command + 48, data, 8);
+            PutU16(command + 42, 8);
+            PutU32(command + 44, MpBridge_Crc32(data, 8));
+            n = FrameOf(frame, 'D', command, sizeof(command));
+            Feed(frame, n, 200);
+            Step(2);
+            if (four)
+                MT_CHECK(sNet.closed);
+            else
+                MT_CHECK(!sNet.closed && memcmp(m + 28, command, 240) == 0);
+        }
+    }
 }
 
 // The free-for-all (phase 5): four trainers, so commands for all four source slots reach the game, and the
@@ -1888,6 +1951,7 @@ int main(void)
     MT_RUN(battle_looks_need_the_game);
     MT_RUN(native_battle_phases_reach_the_game);
     MT_RUN(free_for_all_commands_reach_the_game);
+    MT_RUN(three_player_free_for_all_commands_reach_the_game);
     MT_RUN(menu_release_screen_needs_its_capability);
     MT_RUN(menu_open_page_needs_the_launcher_opt_in);
     MT_RUN(save_import_window_needs_its_capability);

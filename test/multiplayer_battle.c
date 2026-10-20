@@ -570,6 +570,135 @@ TEST("Multiplayer free-for-all: four independent trainers start as one battle wi
     Free(peers); Free(original);
 }
 
+// Update 32: the 1v1v1 (MP_BATTLE_PHASE_FFA3): three cores, the free-for-all's four battlers with the fourth place empty.
+static void ThreePlayerBinding(struct ChannelFixture *f, u8 local)
+{
+    SetUp(f, 3, local);
+    for (u32 slot = 0; slot < PARTY_SIZE; slot++)
+    {
+        u32 serial = slot + 1;
+        if (slot) CreateMon(&gParties[B_TRAINER_PLAYER][slot], SPECIES_WURMPLE, 3 + slot, 0, OTID_STRUCT_PLAYER_ID);
+        SetMonData(&gParties[B_TRAINER_PLAYER][slot], MON_DATA_MULTIPLAYER_ID, &serial);
+        CalculateMonStats(&gParties[B_TRAINER_PLAYER][slot]);
+    }
+    CalculatePlayerPartyCount();
+    gSaveBlock2Ptr->playerName[0] = EOS;
+    f->binding.mode = f->command.phase = MP_BATTLE_PHASE_FFA3;
+    memcpy(f->command.data, &f->binding, sizeof(f->binding));
+    Bind(f);
+}
+
+TEST("Multiplayer 1v1v1: only the three-player free-for-all binds three players, and it binds exactly three")
+{
+    struct ChannelFixture f;
+    static const u8 phases[] = {MP_BATTLE_PHASE_SINGLES, MP_BATTLE_PHASE_FULL_MULTI, MP_BATTLE_PHASE_COOP, MP_BATTLE_PHASE_FFA};
+    for (u32 i = 0; i < ARRAY_COUNT(phases); i++)
+    {
+        SetUp(&f, 3, 0);
+        f.binding.mode = f.command.phase = phases[i];
+        memcpy(f.command.data, &f.binding, sizeof(f.binding));
+        EXPECT_NE(Submit(&f), MP_BATTLE_OK);
+        EXPECT(!MultiplayerBattle_IsActive());
+        TearDown(&f);
+    }
+    for (u32 count = 2; count <= 4; count += 2)
+    {
+        SetUp(&f, count, 0);
+        f.binding.mode = f.command.phase = MP_BATTLE_PHASE_FFA3;
+        memcpy(f.command.data, &f.binding, sizeof(f.binding));
+        EXPECT_NE(Submit(&f), MP_BATTLE_OK);
+        EXPECT(!MultiplayerBattle_IsActive());
+        TearDown(&f);
+    }
+    ThreePlayerBinding(&f, 2);
+    EXPECT(MultiplayerBattle_IsFreeForAll3()); EXPECT_EQ(MultiplayerBattle_GetPlayerCount(), 3);
+    TearDown(&f);
+}
+
+TEST("Multiplayer 1v1v1: three trainers start as one free-for-all, the empty place drawn in the second player position everywhere")
+{
+    struct ChannelFixture f;
+    struct LinkBattlerHeader header = {0};
+    struct LinkPlayer peer = {0};
+    struct Pokemon *original = Alloc(sizeof(struct Pokemon) * PARTY_SIZE);
+    struct Pokemon (*peers)[PARTY_SIZE] = Alloc(sizeof(struct Pokemon) * PARTY_SIZE * 3);
+    for (u32 local = 0; local < 3; local++)
+    {
+        u32 positions = 0;
+        ThreePlayerBinding(&f, local);
+        EXPECT(MultiplayerBattle_IsFullMulti()); EXPECT(MultiplayerBattle_IsFreeForAll()); EXPECT(MultiplayerBattle_IsFreeForAll3());
+        EXPECT(!MultiplayerBattle_IsCoop()); EXPECT_EQ(MultiplayerBattle_GetPlayerCount(), 3);
+        EXPECT_EQ(MultiplayerBattle_GetBattlerCount(), 4);
+        // Every core draws itself bottom left, the two others where a double battle's opponents stand, nobody beside it.
+        EXPECT_EQ(MultiplayerBattle_GetFreeForAllPosition(local, local), B_POSITION_PLAYER_LEFT);
+        EXPECT_EQ(MultiplayerBattle_GetFreeForAllPosition(MP_FFA3_EMPTY_PLACE, local), B_POSITION_PLAYER_RIGHT);
+        for (u32 battler = 0; battler < 4; battler++)
+            positions |= 1 << MultiplayerBattle_GetFreeForAllPosition(battler, local);
+        EXPECT_EQ(positions, 15);
+        memcpy(original, gParties[B_TRAINER_PLAYER], sizeof(struct Pokemon) * PARTY_SIZE);
+        for (u32 source = 0; source < 3; source++)
+            for (u32 slot = 0; slot < PARTY_SIZE; slot++)
+            {
+                u32 serial = 33 + source * PARTY_SIZE + slot;
+                peers[source][slot] = original[slot];
+                SetMonData(&peers[source][slot], MON_DATA_MULTIPLAYER_ID, &serial);
+            }
+        Preparation(&f); EXPECT_EQ(Submit(&f), MP_BATTLE_OK);
+        EXPECT_EQ(gLinkPlayers[local].linkType, LINKTYPE_MULTI_BATTLE);
+        AckNativeOutput(&f, FALSE);
+        EXPECT_EQ(Send(&f, MP_BATTLE_START_SINGLES), MP_BATTLE_BUSY);
+        for (u32 source = 0; source < 3; source++)
+        {
+            if (source == local) continue;
+            peer.version = VERSION_EMERALD + 0x4000; peer.id = source;
+            peer.linkType = LINKTYPE_MULTI_BATTLE; peer.language = gGameLanguage; peer.name[0] = EOS;
+            ReceiveFullBlock(&f, source, MP_BATTLE_KIND_TRAINER, 1, &peer, sizeof(peer));
+        }
+        // Nobody sends from the empty place: its block counts as received, so the four-trainer startup goes on.
+        EXPECT_EQ(GetBlockReceivedStatus(), 15);
+        EXPECT_EQ(Send(&f, MP_BATTLE_START_SINGLES), MP_BATTLE_OK);
+        EXPECT(gBattleTypeFlags & BATTLE_TYPE_FFA); EXPECT(IsFreeForAllBattle());
+        EXPECT_EQ(GetLinkPlayerCount(), 3);
+        EXPECT_EQ(gLinkPlayers[MP_FFA3_EMPTY_PLACE].id, MP_FFA3_EMPTY_PLACE);
+        EXPECT_EQ(gLinkPlayers[MP_FFA3_EMPTY_PLACE].name[0], EOS);
+        header.versionSignatureHi = 3; header.battleEnigmaBerry.name[0] = EOS;
+        EXPECT(MultiplayerBattle_SendBlock(&header, sizeof(header))); AckNativeOutput(&f, FALSE);
+        for (u32 source = 0; source < 3; source++)
+            if (source != local) ReceiveFullBlock(&f, source, MP_BATTLE_KIND_START_HEADER, 2, &header, sizeof(header));
+        EXPECT_EQ(GetBlockReceivedStatus(), 15);
+        ResetBlockReceivedFlags();
+        // As the battle's startup does before the pairs (battle_main.c): the other trainers' slots start empty.
+        ZeroEnemyPartyMons();
+        memset(gParties[B_TRAINER_PARTNER], 0, sizeof(gParties[B_TRAINER_PARTNER])); gPartiesCount[B_TRAINER_PARTNER] = 0;
+        for (u32 pair = 0; pair < 3; pair++)
+        {
+            EXPECT(MultiplayerBattle_SendPartyPair(pair * 2)); AckNativeOutput(&f, FALSE);
+            EXPECT(!MultiplayerBattle_CopyFullMultiPartyPair(pair * 2));
+            for (u32 source = 0; source < 3; source++)
+                if (source != local) ReceiveFullBlock(&f, source, MP_BATTLE_KIND_PARTY_0 + pair, 3 + pair,
+                                                     peers[source] + pair * 2, sizeof(struct Pokemon) * 2);
+            EXPECT_EQ(GetBlockReceivedStatus(), 15);
+            EXPECT(MultiplayerBattle_CopyFullMultiPartyPair(pair * 2));
+            ResetBlockReceivedFlags();
+        }
+        EXPECT(!memcmp(original, gParties[B_TRAINER_PLAYER], sizeof(struct Pokemon) * PARTY_SIZE));
+        for (u32 source = 0; source < 3; source++)
+        {
+            enum BattleTrainer trainer = (enum BattleTrainer)MultiplayerBattle_GetFreeForAllPosition(source, local);
+            if (source == local) continue;
+            EXPECT(trainer == B_TRAINER_OPPONENT_A || trainer == B_TRAINER_OPPONENT_B);
+            EXPECT_EQ(gPartiesCount[trainer], PARTY_SIZE);
+            EXPECT(!memcmp(peers[source], gParties[trainer], sizeof(struct Pokemon) * PARTY_SIZE));
+        }
+        // The empty place's trainer slot (the second player position) keeps no Pokemon.
+        EXPECT_EQ(gPartiesCount[B_TRAINER_PARTNER], 0);
+        for (u32 slot = 0; slot < PARTY_SIZE; slot++)
+            EXPECT_EQ(GetMonData(&gParties[B_TRAINER_PARTNER][slot], MON_DATA_SPECIES_OR_EGG), SPECIES_NONE);
+        TearDown(&f);
+    }
+    Free(peers); Free(original);
+}
+
 static void CoopPreparation(struct ChannelFixture *f, u8 bringByte)
 {
     struct MultiplayerBattlePreparation p = {0};

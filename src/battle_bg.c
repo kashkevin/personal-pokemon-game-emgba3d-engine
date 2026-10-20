@@ -1215,6 +1215,11 @@ void InitLinkBattleVsScreen(u8 taskId)
             {
                 name = gLinkPlayers[i].name;
                 linkPlayer = &gLinkPlayers[i];
+#if MP_FFA_ENABLED
+                if (MultiplayerBattle_IsFreeForAll3() && linkPlayer->id == MP_FFA3_EMPTY_PLACE)
+                    continue; // the 1v1v1's empty place: no name, no Poke Balls
+#endif
+#line 1198 // gba-line
 
                 switch (linkPlayer->id)
                 {

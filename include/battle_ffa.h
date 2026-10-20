@@ -25,6 +25,10 @@ enum BattlerId PickRandomAliveFoe(enum BattlerId battler);
 // A trainer is eliminated once none of their Pokemon can battle (the Pokemon on the field included).
 bool32 FFA_IsEliminated(enum BattlerId battler);
 
+// Update 32: TRUE for the 1v1v1's empty place, a free-for-all trainer slot with no Pokemon at all (no Egg either). Nobody
+// plays it and nothing of it is drawn: no trainer, no Poke Ball, no healthbox; it is absent from the first turn.
+bool32 FFA_IsEmptyPlace(enum BattlerId battler);
+
 // How many trainers can still battle, and (when exactly one can) which battler is theirs; gBattlersCount otherwise.
 u32 FFA_CountTrainersLeft(void);
 enum BattlerId FFA_GetSoleSurvivor(void);

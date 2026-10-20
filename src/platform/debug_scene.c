@@ -954,13 +954,17 @@ void DebugScene_Frame(const uint16_t *pixels)
 
 // PKMN_DEBUG_SCENE=ffa: a free-for-all battle on this screen, you and three computer trainers, for looking at the layout
 // (docs/four-player-battle-ui.md). PKMN_DEBUG_FFA="species,species,species,species" and PKMN_DEBUG_FFA_PARTY=n (Pokemon each).
+// PKMN_DEBUG_FFA_TRAINERS=3 (Update 32): three trainers, the second player place empty, as a linked 1v1v1 draws it.
 static void StartFfaScene(void)
 {
     static const char *const names[4] = {"ALICE", "BOB", "CY", "DI"};
     u16 species[4] = {SPECIES_BLAZIKEN, SPECIES_GARDEVOIR, SPECIES_PIKACHU, SPECIES_RAYQUAZA};
     const char *value;
-    int v[8], partySize = 2, i, j;
+    int v[8], partySize = 2, i, j, trainers = 4;
     bool weak = SDL_getenv("PKMN_DEBUG_FFA_WEAK") != NULL;
+
+    if ((value = SDL_getenv("PKMN_DEBUG_FFA_TRAINERS")) != NULL && Numbers(value, v, 1) >= 1 && v[0] == 3)
+        trainers = 3;
 
     if ((value = SDL_getenv("PKMN_DEBUG_FFA")) != NULL && Numbers(value, v, 4) >= 4)
         for (i = 0; i < 4; i++)
@@ -972,6 +976,14 @@ static void StartFfaScene(void)
         FlagSet((u16)i); // so the level 50 Pokemon obeys
     for (i = 0; i < 4; i++)
     {
+        if (trainers == 3 && i == B_POSITION_PLAYER_RIGHT)
+        {
+            memset(&gLinkPlayers[i], 0, sizeof(gLinkPlayers[i]));
+            gLinkPlayers[i].id = (u16)i;
+            gLinkPlayers[i].name[0] = EOS;
+            gPartiesCount[i] = 0;
+            continue;
+        }
         for (j = 0; j < partySize; j++)
         {
             struct OriginalTrainerId id = {OT_ID_PRESET, 0x1111u * (u32)(i + 1)};

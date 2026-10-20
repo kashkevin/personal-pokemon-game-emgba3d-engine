@@ -150,3 +150,20 @@ bool32 FFA_IsLocalBattler(enum BattlerId battler)
 {
     return IsFreeForAllBattle() && GetBattlerPosition(battler) == B_POSITION_PLAYER_LEFT;
 }
+
+#if MP_FFA_ENABLED
+bool32 FFA_IsEmptyPlace(enum BattlerId battler)
+{
+    struct Pokemon *party;
+
+    if (!IsFreeForAllBattle() || battler >= gBattlersCount)
+        return FALSE;
+    party = GetBattlerParty(battler);
+    for (u32 i = 0; i < PARTY_SIZE; i++)
+    {
+        if (GetMonData(&party[i], MON_DATA_SPECIES_OR_EGG) != SPECIES_NONE)
+            return FALSE;
+    }
+    return TRUE;
+}
+#endif // MP_FFA_ENABLED

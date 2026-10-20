@@ -125,6 +125,7 @@ struct MpBridgeCaps
     uint32_t extras;                 /* 1: multiplayer Secret Bases (native extension, needs world) */
     uint32_t presenceDetail;         /* 1: why the game is off the field, in its pose's last byte (native extension) */
     uint32_t battleFfa;              /* 1: the four-player free-for-all battle phase 5 (needs battle 3) */
+    uint32_t battleFfa3;             /* 1: the three-player free-for-all (1v1v1) battle phase 6 (needs battleFfa 1) */
     uint32_t menuRelease;            /* 1: a menu screen with flags 3 ends a refused Enter battle latch (needs menu 2, resume 1) */
     uint32_t saveImportWindow;       /* 1: WRITE_WINDOW, a trade's save a 4 KiB sector per 'i' frame (needs the save window) */
     uint32_t menuOpenPage;           /* 1: a menu OPEN may name a page (1: soft reset) (needs menu 2; launcher opt-in) */
