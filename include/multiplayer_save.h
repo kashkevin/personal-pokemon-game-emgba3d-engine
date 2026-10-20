@@ -18,6 +18,9 @@ enum MultiplayerSaveOpcode {
     MP_SAVE_QUERY_EFFECT_RECORD, MP_SAVE_DISCARD_EFFECT_RECORD,
     MP_SAVE_BEGIN_EFFECT_SAVE, MP_SAVE_READ_EFFECT_WINDOW,
     MP_SAVE_QUERY_EFFECT_CHOICE,
+#ifdef PORTABLE
+    MP_SAVE_WRITE_WINDOW,  // PC builds: one staged import sector, from gMultiplayerSaveImportWindow
+#endif
 };
 enum MultiplayerSaveState {
     MP_SAVE_UNBOUND, MP_SAVE_BOUND, MP_SAVE_EXPORTING, MP_SAVE_IMPORTING,
@@ -62,6 +65,12 @@ extern const u32 gMultiplayerTradeEffectPrepareAbiVersion;
 extern const u32 gMultiplayerTradeEffectSaveAbiVersion;
 extern const u32 gMultiplayerTradeEffectChoiceAbiVersion;
 extern const u32 gMultiplayerSaveWindowAbiVersion;
+#ifdef PORTABLE
+// PC builds only (the GBA ROM stays byte-identical): a trade's received save arrives one 4 KiB sector at a time.
+#define MULTIPLAYER_SAVE_IMPORT_WINDOW 4096
+extern u8 gMultiplayerSaveImportWindow[MULTIPLAYER_SAVE_IMPORT_WINDOW];
+extern const u32 gMultiplayerSaveImportWindowAbiVersion;
+#endif
 extern const u32 gMultiplayerEmergencySaveAbiVersion;
 void MultiplayerSave_Init(void);
 void MultiplayerSave_Tick(void);

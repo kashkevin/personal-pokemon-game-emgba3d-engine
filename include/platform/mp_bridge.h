@@ -8,7 +8,8 @@
  * protocol, with the same checks, so the companion and the host need no change:
  *
  *   companion <-> bridge   TCP 127.0.0.1:port, frames of a big-endian u32 length
- *                          and a payload (at most 256 bytes inbound); the first
+ *                          and a payload (at most 256 bytes inbound, but
+ *                          for 'i' below); the first
  *                          frame is "H" and the 32-byte launch token.
  *   bridge <-> game        the mailboxes' inbound halves, written odd generation
  *                          first and the even one last, as the ROM expects.
@@ -40,6 +41,14 @@
  * record (168 bytes) as 'x' whenever its number changes and after every
  * connection, and accepts one 176-byte base hand-over from the companion as 'y'
  * (only after 'e').
+ *
+ * A fourth native extension, the trade import window (PC builds only, marker
+ * gMultiplayerSaveImportWindowAbiVersion): the companion may send a save
+ * command WRITE_WINDOW (opcode 30) as 'i', the 240-byte command followed by
+ * the 4096 bytes of one received save sector; the bridge writes the sector to
+ * gMultiplayerSaveImportWindow and then the command, which names its CRC. One
+ * frame instead of 32 WRITEs per sector. The companion learns the capability
+ * from the build manifest; nothing is announced, and 'C' never carries it.
  *
  * Started with `--bridge FILE`; FILE holds `port=N` (1-65535) and `token=` 64
  * lowercase hex digits, and the manifest's explicit opt-ins it has, each on
@@ -88,6 +97,7 @@ enum MpRegion
     MP_REGION_WINDOW,   /* gSaveDataBuffer, 4096 (read only) */
     MP_REGION_SPAWN,    /* gMultiplayerSpawnMailbox, 384 (native extension) */
     MP_REGION_EXTRAS,   /* gMultiplayerExtrasMailbox, 384 (native extension) */
+    MP_REGION_IMPORT,   /* gMultiplayerSaveImportWindow, 4096 (native extension, written only by 'i') */
     MP_REGION_COUNT
 };
 
@@ -115,6 +125,7 @@ struct MpBridgeCaps
     uint32_t presenceDetail;         /* 1: why the game is off the field, in its pose's last byte (native extension) */
     uint32_t battleFfa;              /* 1: the four-player free-for-all battle phase 5 (needs battle 3) */
     uint32_t menuRelease;            /* 1: a menu screen with flags 3 ends a refused Enter battle latch (needs menu 2, resume 1) */
+    uint32_t saveImportWindow;       /* 1: WRITE_WINDOW, a trade's save a 4 KiB sector per 'i' frame (needs the save window) */
 };
 
 enum
@@ -152,6 +163,7 @@ struct MpBridgeOps
 };
 
 #define MP_BRIDGE_MAX_FRAME (4 + 1 + 240 + 4096) /* "F" response with its 4 KiB window */
+#define MP_BRIDGE_IMPORT_FRAME (1 + 240 + 4096) /* inbound 'i': a save command and its import sector */
 #define MP_BRIDGE_CONTROL_LIMIT 4
 
 struct MpBridgeSave
@@ -179,7 +191,7 @@ struct MpBridge
     bool configured;
     /* mgba.lua's locals */
     bool connected;
-    uint8_t rx[1024];
+    uint8_t rx[4 + MP_BRIDGE_IMPORT_FRAME + 256]; /* a partial 'i' frame and one more read */
     size_t rxLength;
     uint8_t tx[MP_BRIDGE_MAX_FRAME];
     size_t txLength, txSent;

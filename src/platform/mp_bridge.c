@@ -160,6 +160,8 @@ const char *MpBridge_CheckCaps(const struct MpBridgeCaps *c)
         return "invalid native battle resume capability";
     if (c->saveWindow && (!c->trade || c->saveWindow != 1))
         return "invalid read-only save window";
+    if (c->saveImportWindow && (!c->saveWindow || c->saveImportWindow != 1))
+        return "invalid save import window";
     if (c->menu > 2)
         return "invalid Players menu capability";
     if (c->tradeEffectPrepare && (!c->trade || c->menu != 2 || c->tradeEffectPrepare != 1))
@@ -569,10 +571,10 @@ static bool SaveHeaderReady(const struct MpBridge *b)
 static bool SaveControl(const struct MpBridge *b, const uint8_t *p, size_t length, bool command,
                         struct MpBridgeSave *out)
 {
-    static const uint8_t sCommandLengths[30] = {
-        0, 0, 0, 0, 0, 16, 128, 0, 0, 0, 0, 60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 192, 56, 48, 48, 88, 48, 48};
-    static const uint8_t sResponseLengths[30] = {
-        0, 0, 40, 128, 4, 8, 0, 0, 0, 48, 80, 80, 40, 48, 0, 4, 48, 48, 4, 40, 4, 48, 40, 192, 192, 192, 0, 8, 4, 84};
+    static const uint8_t sCommandLengths[31] = {
+        0, 0, 0, 0, 0, 16, 128, 0, 0, 0, 0, 60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 192, 56, 48, 48, 88, 48, 48, 4};
+    static const uint8_t sResponseLengths[31] = {
+        0, 0, 40, 128, 4, 8, 0, 0, 0, 48, 80, 80, 40, 48, 0, 4, 48, 48, 4, 40, 4, 48, 40, 192, 192, 192, 0, 8, 4, 84, 0};
     const struct MpBridgeCaps *c = &b->caps;
     uint32_t inc, epoch, seq, offset, size, revision, opcode, status, dataLength, crc;
     uint32_t maxOpcode;
@@ -593,7 +595,8 @@ static bool SaveControl(const struct MpBridge *b, const uint8_t *p, size_t lengt
     dataLength = U16(p + 42);
     crc = U32(p + 44);
     data = p + 48;
-    maxOpcode = Enabled(c->tradeEffectChoice) ? 29
+    maxOpcode = Enabled(c->saveImportWindow) ? 30
+              : Enabled(c->tradeEffectChoice) ? 29
               : Enabled(c->tradeEffectSave) ? 28
               : Enabled(c->tradeEffectPrepare) ? 26
               : Enabled(c->emergencySave) ? (c->emergencySave == 2 ? 22 : 21)
@@ -604,6 +607,7 @@ static bool SaveControl(const struct MpBridge *b, const uint8_t *p, size_t lengt
      || opcode < 1 || opcode > maxOpcode
      || ((opcode == 27 || opcode == 28) && !Enabled(c->tradeEffectSave))
      || (opcode == 29 && !Enabled(c->tradeEffectChoice))
+     || (opcode == 30 && !Enabled(c->saveImportWindow))
      || (opcode >= 19 && opcode <= 22
       && (!Enabled(c->emergencySave) || (opcode == 22 && c->emergencySave != 2)))
      || (opcode == 18 && !Enabled(c->saveWindow))
@@ -617,7 +621,7 @@ static bool SaveControl(const struct MpBridge *b, const uint8_t *p, size_t lengt
             return false;
         if (opcode >= 12 && opcode <= 17 && (size != 131072 || offset != 0))
             return false;
-        if (opcode == 18 && (size != 131072 || offset % 4096 != 0 || offset > 126976))
+        if ((opcode == 18 || opcode == 30) && (size != 131072 || offset % 4096 != 0 || offset > 126976))
             return false;
         if (opcode == 12 && (revision == 0 || revision >= 0x7FFFFFFF))
             return false;
@@ -630,7 +634,7 @@ static bool SaveControl(const struct MpBridge *b, const uint8_t *p, size_t lengt
             if (opcode != 21 && revision == 0)
                 return false;
         }
-        if (opcode >= 23)
+        if (opcode >= 23 && opcode <= 29)
         {
             if (!Enabled(c->tradeEffectPrepare) || size != 131072 || (opcode != 28 && offset != 0)
              || (opcode == 28 && (!Enabled(c->tradeEffectSave) || offset % 4096 != 0 || offset > 126976))
@@ -671,7 +675,9 @@ static bool SaveControl(const struct MpBridge *b, const uint8_t *p, size_t lengt
             return false;
         if (status == 0 && opcode == 18 && (size != 131072 || offset % 4096 != 0 || offset > 126976))
             return false;
-        if (status == 0 && opcode >= 23 && ((opcode != 28 && offset != 0) || size != 131072
+        if (status == 0 && opcode == 30 && (size != 131072 || offset % 4096 != 0 || offset < 4096 || offset > 131072))
+            return false;
+        if (status == 0 && opcode >= 23 && opcode <= 29 && ((opcode != 28 && offset != 0) || size != 131072
          || (opcode == 28 && (offset % 4096 != 0 || offset > 126976))))
             return false;
     }
@@ -1022,7 +1028,8 @@ static void PollSave(struct MpBridge *b)
     if (response.status == 0
      && ((response.opcode == 3 && response.offset != b->save.offset)
       || ((response.opcode == 18 || response.opcode == 28) && response.offset != b->save.offset)
-      || (response.opcode == 6 && response.offset != b->save.offset + 128)))
+      || (response.opcode == 6 && response.offset != b->save.offset + 128)
+      || (response.opcode == 30 && response.offset != b->save.offset + 4096)))
     {
         Stop(b, "invalid save response offset", true);
         return;
@@ -1416,7 +1423,7 @@ static bool Dispatch(struct MpBridge *b, const uint8_t *payload, size_t size)
         struct MpBridgeSave command;
         bool recovery;
 
-        if (!SaveControl(b, rest, restLength, true, &command) || !SaveHeaderReady(b))
+        if (!SaveControl(b, rest, restLength, true, &command) || command.opcode == 30 || !SaveHeaderReady(b))
         {
             Stop(b, "invalid save command", true);
             return false;
@@ -1431,6 +1438,35 @@ static bool Dispatch(struct MpBridge *b, const uint8_t *payload, size_t size)
             Stop(b, "multiple outstanding save commands", true);
             return false;
         }
+        if (CommitSave(b, command.payload))
+        {
+            b->save = command;
+            b->save.pending = true;
+        }
+    }
+    else if (payload[0] == 'i')
+    {
+        /* WRITE_WINDOW: the sector first, then the command naming its CRC, with the game parked (sdl2.c). The window
+         * is rewritten only for this command: another while one is outstanding stops the bridge as for 'C'. */
+        struct MpBridgeSave command;
+        const uint8_t *sector = rest + 240;
+        uint32_t i;
+
+        if (!Enabled(b->caps.saveImportWindow) || size != MP_BRIDGE_IMPORT_FRAME
+         || !SaveControl(b, rest, 240, true, &command) || command.opcode != 30 || !SaveHeaderReady(b)
+         || b->ops.region[MP_REGION_IMPORT] == NULL || b->ops.regionSize[MP_REGION_IMPORT] != 4096
+         || MpBridge_Crc32(sector, 4096) != U32(rest + 48))
+        {
+            Stop(b, "invalid save import window", true);
+            return false;
+        }
+        if (b->save.pending && memcmp(command.payload, b->save.payload, 240) != 0)
+        {
+            Stop(b, "multiple outstanding save commands", true);
+            return false;
+        }
+        for (i = 0; i < 4096; i++)
+            b->ops.region[MP_REGION_IMPORT][i] = sector[i];
         if (CommitSave(b, command.payload))
         {
             b->save = command;
@@ -1523,10 +1559,12 @@ static bool Dispatch(struct MpBridge *b, const uint8_t *payload, size_t size)
     return true;
 }
 
-/* receive: bounded to 1 KiB per frame; partial headers and bodies persist. */
+/* receive: bounded to RECEIVE_ROUNDS reads per frame; partial headers and bodies persist. Frames are at most 256
+ * bytes, but for an import window 'i' (exactly MP_BRIDGE_IMPORT_FRAME) once the game has the capability. */
 static void Receive(struct MpBridge *b)
 {
     int round;
+    size_t rxLimit = Enabled(b->caps.saveImportWindow) ? 4 + MP_BRIDGE_IMPORT_FRAME : RX_LIMIT;
 
     for (round = 0; round < RECEIVE_ROUNDS; round++)
     {
@@ -1549,9 +1587,10 @@ static void Receive(struct MpBridge *b)
         {
             uint32_t size = ((uint32_t)b->rx[0] << 24) | ((uint32_t)b->rx[1] << 16)
                           | ((uint32_t)b->rx[2] << 8) | b->rx[3];
-            uint8_t payload[MAX_INBOUND_FRAME];
+            static uint8_t payload[MP_BRIDGE_IMPORT_FRAME];
 
-            if (size < 1 || size > MAX_INBOUND_FRAME)
+            if (size < 1 || (size > MAX_INBOUND_FRAME
+             && !(Enabled(b->caps.saveImportWindow) && size == MP_BRIDGE_IMPORT_FRAME)))
             {
                 Stop(b, "invalid IPC frame length", true);
                 return;
@@ -1564,7 +1603,7 @@ static void Receive(struct MpBridge *b)
             if (!Dispatch(b, payload, size))
                 return;
         }
-        if (b->rxLength > RX_LIMIT)
+        if (b->rxLength > rxLimit)
         {
             Stop(b, "IPC receive buffer exceeded", true);
             return;
@@ -2269,6 +2308,7 @@ bool MpBridge_Configure(const char *path)
     caps.battleFfa = *(const volatile u32 *)&gMultiplayerBattleFfaAbiVersion;
 #endif
     caps.menuRelease = *(const volatile u32 *)&gMultiplayerMenuReleaseAbiVersion;
+    caps.saveImportWindow = *(const volatile u32 *)&gMultiplayerSaveImportWindowAbiVersion;
     caps.saveWindow = *(const volatile u32 *)&gMultiplayerSaveWindowAbiVersion;
     caps.menu = *(const volatile u32 *)&gMultiplayerMenuAbiVersion;
     /* The trade effect transports are explicit opt-ins of the manifest, never
@@ -2308,11 +2348,13 @@ bool MpBridge_Configure(const char *path)
     ops.regionSize[MP_REGION_SPAWN] = sizeof(gMultiplayerSpawnMailbox);
     ops.region[MP_REGION_EXTRAS] = (volatile uint8_t *)&gMultiplayerExtrasMailbox;
     ops.regionSize[MP_REGION_EXTRAS] = sizeof(gMultiplayerExtrasMailbox);
+    ops.region[MP_REGION_IMPORT] = (volatile uint8_t *)gMultiplayerSaveImportWindow;
+    ops.regionSize[MP_REGION_IMPORT] = sizeof(gMultiplayerSaveImportWindow);
     if (ops.regionSize[MP_REGION_PRESENCE] != 128 || ops.regionSize[MP_REGION_SAVE] != 512
      || ops.regionSize[MP_REGION_BATTLE] != 512 || ops.regionSize[MP_REGION_MENU] != 512
      || ops.regionSize[MP_REGION_RESET] != 128 || ops.regionSize[MP_REGION_WORLD] != 256
      || ops.regionSize[MP_REGION_WINDOW] != 4096 || ops.regionSize[MP_REGION_SPAWN] != 384
-     || ops.regionSize[MP_REGION_EXTRAS] != 384)
+     || ops.regionSize[MP_REGION_EXTRAS] != 384 || ops.regionSize[MP_REGION_IMPORT] != 4096)
     {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Multiplayer bridge: mailbox sizes differ from the ABI");
         return false;
@@ -2330,14 +2372,15 @@ bool MpBridge_Configure(const char *path)
     memset(token, 0, sizeof(token));
     sEnabled = true;
     SDL_Log("Multiplayer bridge: companion at 127.0.0.1:%ld; save %u trade %u emergency %u battle %u/%u/%u "
-            "window %u menu %u effects %u/%u/%u reset %u/%u world %u spawns %u running %u detail %u ffa %u release %u",
+            "window %u menu %u effects %u/%u/%u reset %u/%u world %u spawns %u running %u detail %u ffa %u release %u "
+            "import %u",
             port, (unsigned)caps.save, (unsigned)caps.trade, (unsigned)caps.emergencySave,
             (unsigned)caps.battle, (unsigned)caps.battleResume, (unsigned)caps.battleAdmissionCleanup,
             (unsigned)caps.saveWindow, (unsigned)caps.menu, (unsigned)caps.tradeEffectPrepare,
             (unsigned)caps.tradeEffectSave, (unsigned)caps.tradeEffectChoice, (unsigned)caps.reset,
             (unsigned)caps.resetInput, (unsigned)caps.world, (unsigned)caps.spawns,
             (unsigned)caps.presenceAnimation, (unsigned)caps.presenceDetail, (unsigned)caps.battleFfa,
-            (unsigned)caps.menuRelease);
+            (unsigned)caps.menuRelease, (unsigned)caps.saveImportWindow);
     return true;
 }
 

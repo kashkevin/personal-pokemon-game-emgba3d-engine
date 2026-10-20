@@ -55,6 +55,14 @@ const u32 gMultiplayerTradeEffectChoiceAbiVersion = 1;
 _Static_assert(sizeof(struct MultiplayerTradeRecordPreparation) == 192, "Trade record response ABI");
 // Optional read-only 4096-byte export window in the existing sector buffer.
 const u32 gMultiplayerSaveWindowAbiVersion = 1;
+#ifdef PORTABLE
+// A trade's received save, a 4 KiB sector at a time (WRITE_WINDOW): the bridge writes this window, then the command
+// naming its CRC. 1024 128-byte WRITEs, one or two frames each, kept the field frozen about 35 s after both players
+// confirmed a trade (2026-10-20); 32 sectors take about a second. Only the bridge writes it; the ROM reads it only
+// for that command while importing, so gSaveDataBuffer (the game's own save buffer) is never written from outside.
+EWRAM_DATA u8 gMultiplayerSaveImportWindow[MULTIPLAYER_SAVE_IMPORT_WINDOW] = {0};
+const u32 gMultiplayerSaveImportWindowAbiVersion = 1;
+#endif
 // Opt-in, immutable local preservation. This does not authorize a host commit.
 const u32 gMultiplayerEmergencySaveAbiVersion = 2;
 EWRAM_DATA volatile struct MultiplayerSaveMailbox gMultiplayerSaveMailbox = {0};
@@ -564,6 +572,9 @@ void MultiplayerSave_Init(void)
     (void)*(const volatile u32 *)&gMultiplayerTradeEffectSaveAbiVersion;
     (void)*(const volatile u32 *)&gMultiplayerTradeEffectChoiceAbiVersion;
     (void)*(const volatile u32 *)&gMultiplayerSaveWindowAbiVersion;
+#ifdef PORTABLE
+    (void)*(const volatile u32 *)&gMultiplayerSaveImportWindowAbiVersion;
+#endif
     (void)*(const volatile u32 *)&gMultiplayerEmergencySaveAbiVersion;
     MultiplayerOwnership_InvalidateGrant();
     // Retain the linker-visible ownership marker despite --gc-sections.
@@ -968,6 +979,18 @@ static void Handle(const struct MultiplayerSaveControl *command)
             if (status != MP_SAVE_OK) { Error(command, status); return; }
         }
         PublishResponse(command, MP_SAVE_OK, NULL, 0, sOffset); return;
+#ifdef PORTABLE
+    case MP_SAVE_WRITE_WINDOW:
+        // The same staging as 32 WRITEs of this sector: the same order, buffer, running CRC and sector validation.
+        if (sState != MP_SAVE_IMPORTING) { status = MP_SAVE_ORDER; break; }
+        if (command->length != 4 || command->offset != sOffset || sOffset >= 131072 || (sOffset & 4095)) { status = MP_SAVE_ORDER; break; }
+        if (Crc32(0, gMultiplayerSaveImportWindow, MULTIPLAYER_SAVE_IMPORT_WINDOW) != ReadU32(command->data)) { status = MP_SAVE_CRC; break; }
+        memcpy((u8 *)&gSaveDataBuffer, gMultiplayerSaveImportWindow, MULTIPLAYER_SAVE_IMPORT_WINDOW);
+        sCrc = Crc32(sCrc, gMultiplayerSaveImportWindow, MULTIPLAYER_SAVE_IMPORT_WINDOW); sOffset += 4096;
+        status = ValidateSector(sOffset / 4096 - 1);
+        if (status != MP_SAVE_OK) { Error(command, status); return; }
+        PublishResponse(command, MP_SAVE_OK, NULL, 0, sOffset); return;
+#endif
     case MP_SAVE_COMMIT:
         if (sState != MP_SAVE_IMPORTING || command->length || sOffset != 131072) { status = MP_SAVE_ORDER; break; }
         if (sCrc != sExpectedCrc || !ValidBanks()) { Error(command, sCrc != sExpectedCrc ? MP_SAVE_CRC : MP_SAVE_VALIDATION); return; }

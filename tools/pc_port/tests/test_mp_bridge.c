@@ -9,7 +9,7 @@
 #include "minitest.h"
 
 static uint8_t sMemory[MP_REGION_COUNT][4096];
-static const uint32_t sSizes[MP_REGION_COUNT] = {128, 512, 512, 512, 128, 256, 4096, 384, 384};
+static const uint32_t sSizes[MP_REGION_COUNT] = {128, 512, 512, 512, 128, 256, 4096, 384, 384, 4096};
 
 struct FakeTransport
 {
@@ -1504,6 +1504,133 @@ MT_TEST(spawn_record_never_overtakes_its_announcement)
     }
 }
 
+// The trade import of 2026-10-20 took about 35 s of frozen field: 1024 WRITEs of 128 bytes, a round trip each. A game
+// with the import window marker takes a sector per 'i' frame (WRITE_WINDOW, opcode 30): the bridge writes the sector to
+// the import window and then the command naming its CRC. Other games, a bad CRC and a 'C' with opcode 30 stop it.
+static void MakeImportControl(uint8_t command[240], uint32_t seq, uint32_t offset, const uint8_t *sector)
+{
+    MakeSaveControl(command, 30);
+    PutU32(command + 24, seq);
+    PutU32(command + 28, offset);
+    PutU32(command + 32, 131072);
+    PutU16(command + 42, 4);
+    PutU32(command + 48, MpBridge_Crc32(sector, 4096));
+    PutU32(command + 44, MpBridge_Crc32(command + 48, 4));
+}
+
+static size_t ImportFrame(uint8_t *frame, const uint8_t command[240], const uint8_t *sector)
+{
+    static uint8_t body[240 + 4096];
+
+    memcpy(body, command, 240);
+    memcpy(body + 240, sector, 4096);
+    return FrameOf(frame, 'i', body, sizeof(body));
+}
+
+static bool AllBytes(const uint8_t *p, size_t length, uint8_t value)
+{
+    while (length-- > 0)
+        if (*p++ != value)
+            return false;
+    return true;
+}
+
+static void ImportBridge(uint32_t window)
+{
+    struct MpBridgeCaps caps;
+
+    memset(&caps, 0, sizeof(caps));
+    caps.save = 1;
+    caps.trade = 1;
+    caps.saveWindow = 1;
+    caps.saveImportWindow = window;
+    MT_CHECK(MpBridge_CheckCaps(&caps) == NULL);
+    Fresh(&caps);
+    sNet.chunk = 0;
+    Ready(0);
+    SaveReady();
+    Step(10);
+}
+
+MT_TEST(save_import_window_needs_its_capability)
+{
+    static uint8_t sector[4096], other[4096];
+    static uint8_t frame[4 + MP_BRIDGE_IMPORT_FRAME];
+    struct MpBridgeCaps caps;
+    uint8_t command[240], response[240];
+    uint8_t small[260];
+    const uint8_t *payload;
+    uint8_t *s = sMemory[MP_REGION_SAVE];
+    uint8_t *window = sMemory[MP_REGION_IMPORT];
+    size_t n, i;
+
+    for (i = 0; i < sizeof(sector); i++)
+    {
+        sector[i] = (uint8_t)(i * 7 + 3);
+        other[i] = (uint8_t)(i * 5 + 1);
+    }
+    memset(&caps, 0, sizeof(caps));
+    caps.save = 1;
+    caps.trade = 1;
+    caps.saveImportWindow = 1;
+    MT_CHECK(MpBridge_CheckCaps(&caps) != NULL); // it needs the read window
+
+    // A game without the marker: the frame is too long, nothing reaches the game.
+    ImportBridge(0);
+    MakeImportControl(command, 1, 0, sector);
+    n = ImportFrame(frame, command, sector);
+    Feed(frame, n, 256);
+    Step(2);
+    MT_CHECK(sNet.closed);
+    MT_CHECK(AllBytes(window, 4096, 0));
+    MT_EQ(GetU32(s + 24), 0);
+
+    // With it: the sector, then the command; the game's answer goes back as 'R'.
+    ImportBridge(1);
+    Feed(frame, n, 256);
+    Step(2);
+    MT_CHECK(!sNet.closed);
+    MT_CHECK(memcmp(window, sector, 4096) == 0);
+    MT_EQ(GetU32(s + 24), 2);
+    MT_CHECK(memcmp(s + 28, command, 240) == 0);
+    memcpy(response, command, 240);
+    PutU32(response + 28, 4096);
+    PutU16(response + 42, 0);
+    memset(response + 48, 0, 4);
+    PutU32(response + 44, MpBridge_Crc32(NULL, 0));
+    memcpy(s + 272, response, 240);
+    PutU32(s + 268, 2);
+    Step(30);
+    MT_EQ(SentFrame('R', 0, &payload), 240);
+    MT_CHECK(memcmp(payload, response, 240) == 0);
+    MT_EQ(sNet.errors, 0);
+
+    // The next sector with a CRC that is not its own: refused before the window is touched.
+    MakeImportControl(command, 2, 4096, other);
+    n = ImportFrame(frame, command, sector);
+    Feed(frame, n, 256);
+    Step(2);
+    MT_CHECK(sNet.closed);
+    MT_CHECK(memcmp(window, sector, 4096) == 0);
+    MT_EQ(GetU32(s + 24), 2);
+
+    // A sector that is not 4 KiB aligned, and WRITE_WINDOW as a plain 'C' command.
+    ImportBridge(1);
+    MakeImportControl(command, 1, 128, sector);
+    n = ImportFrame(frame, command, sector);
+    Feed(frame, n, 256);
+    Step(2);
+    MT_CHECK(sNet.closed);
+    ImportBridge(1);
+    MakeImportControl(command, 1, 0, sector);
+    n = FrameOf(small, 'C', command, sizeof(command));
+    Feed(small, n, 200);
+    Step(2);
+    MT_CHECK(sNet.closed);
+    MT_CHECK(AllBytes(window, 4096, 0));
+    MT_EQ(GetU32(s + 24), 0);
+}
+
 // The owner's report of 2026-10-20: both players chose Enter battle and both games stayed on "Waiting for server..."
 // for good. The companion had refused the Enter before any ADMIT; the latched window takes no screen but a release
 // (flags 3), which the bridge passes only for a game with the menuRelease marker: older games' screens are unchanged.
@@ -1721,6 +1848,7 @@ int main(void)
     MT_RUN(native_battle_phases_reach_the_game);
     MT_RUN(free_for_all_commands_reach_the_game);
     MT_RUN(menu_release_screen_needs_its_capability);
+    MT_RUN(save_import_window_needs_its_capability);
     MT_RUN(spawn_capability_waits_for_its_mailbox);
     MT_RUN(spawn_record_and_inbound_round_trip);
     MT_RUN(spawn_inbound_is_validated);
