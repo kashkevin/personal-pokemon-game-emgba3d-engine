@@ -1,5 +1,5 @@
 #include "global.h"
-#if defined(ENABLE_DIORAMA) && defined(DIORAMA_BATTLE_ENV_TEST)
+#if defined(DIORAMA_BATTLE_ENV_TEST)
 #include "diorama/battle_env_test.h"
 #endif
 #if defined(ENABLE_DIORAMA) && defined(BATTLEFX_TEST)
@@ -244,7 +244,7 @@ static enum Item GetNextBall(enum Item ballId)
 
 static void HandleInputChooseAction(enum BattlerId battler)
 {
-#if defined(ENABLE_DIORAMA) && defined(DIORAMA_BATTLE_ENV_TEST)
+#if defined(DIORAMA_BATTLE_ENV_TEST)
     DioramaBattleEnvTest_OnActionMenu(); // test builds only: the action menu is up
 #endif
 #if defined(ENABLE_DIORAMA) && defined(BATTLEFX_TEST)

@@ -64,7 +64,8 @@ ifeq ($(DIORAMA),1)
 endif
 # BFX_TEST=1 (with DIORAMA=1): the Battle FX and battle-environment test drivers (src/diorama/battlefx/bfx_test.c,
 # src/diorama/scene/battle_env_test.c; tools/battlefx/gallery.sh). A test build, never shipped:
-# pokeemerald-mp-diorama-bfxtest, objects in build/pc-linux-diorama-bfxtest.
+# pokeemerald-mp-diorama-bfxtest, objects in build/pc-linux-diorama-bfxtest. Without DIORAMA=1, the Classic 2D game with
+# the battle-environment driver alone (tools/battle_env/mega_check.py, also on Windows): pokeemerald-mp-bfxtest.
 BFX_TEST      ?= 0
 ifeq ($(BFX_TEST),1)
   TARGET        := $(basename $(TARGET))-bfxtest$(suffix $(TARGET))
@@ -121,6 +122,8 @@ ifeq ($(DIORAMA),1)
   ifeq ($(NATIVE_UI),1)
     CPPFLAGS += -DENABLE_NATIVE_UI
   endif
+else ifeq ($(BFX_TEST),1)
+  CPPFLAGS += -DDIORAMA_BATTLE_ENV_TEST
 endif
 ifeq ($(BATTLE_SPRITES),1)
   CPPFLAGS += -DENABLE_BATTLE_SPRITES
@@ -254,6 +257,10 @@ C_SRCS_IN := $(wildcard src/*.c src/*/*.c src/*/*/*.c)
 # The Diorama renderer and its generated tables only in DIORAMA=1 builds.
 ifeq ($(DIORAMA),1)
   C_SRCS_IN := $(sort $(C_SRCS_IN) $(DIORAMA_GENERATED_C))
+else ifeq ($(BFX_TEST),1)
+  # The Classic 2D test build keeps the battle-environment driver (platform state across a soft reset, as in 3D).
+  PC_EXCLUDED_C += $(filter-out src/diorama/scene/battle_env_test.c,$(filter src/diorama/% src/data/diorama/%,$(C_SRCS_IN)))
+  PRESERVED_OBJS += $(OBJ_DIR)/src/diorama/scene/battle_env_test.o
 else
   PC_EXCLUDED_C += $(filter src/diorama/% src/data/diorama/%,$(C_SRCS_IN))
 endif

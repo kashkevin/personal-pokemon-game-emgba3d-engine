@@ -45,6 +45,9 @@
 #include "platform/memory_info.h"
 #include "platform/frame_limiter.h"
 #include "malloc.h"
+#if defined(DIORAMA_BATTLE_ENV_TEST) && !defined(ENABLE_DIORAMA)
+#include "diorama/battle_env_test.h"   // the Classic 2D test build
+#endif
 #ifdef ENABLE_DIORAMA
 #include "diorama/battle_env_test.h"
 #include "diorama/battle_scene.h"
@@ -989,7 +992,7 @@ int main(int argc, char **argv)
                         // mouse intents become the game's own button presses
                         keys = NativeUi_FilterKeys(keys);
 #endif
-#if defined(ENABLE_DIORAMA) && defined(DIORAMA_BATTLE_ENV_TEST)
+#if defined(DIORAMA_BATTLE_ENV_TEST)
                         keys = DioramaBattleEnvTest_FilterKeys(keys, SDL_GetTicks());
 #endif
                         // In multiplayer the reset chord reaches the game only when
@@ -3121,6 +3124,9 @@ void VDraw(SDL_Texture *texture)
 #endif
     DrawFrame(gbaImage);
     DebugScene_Frame(gbaImage);
+#if defined(DIORAMA_BATTLE_ENV_TEST) && !defined(ENABLE_DIORAMA)
+    DioramaBattleEnvTest_Frame2D(gbaImage);   // test builds only: the Classic 2D test build's captures
+#endif
     for (int i = 0; i < DISPLAY_WIDTH * DISPLAY_HEIGHT; i++)
     {
         uint16_t color = gbaImage[i];

@@ -1,5 +1,5 @@
 #include "global.h"
-#if defined(ENABLE_DIORAMA) && defined(DIORAMA_BATTLE_ENV_TEST)
+#if defined(DIORAMA_BATTLE_ENV_TEST)
 #include "diorama/battle_env_test.h"
 #endif
 #line 2 // gba-line
@@ -310,7 +310,7 @@ static void HandleChooseActionAfterDma3(enum BattlerId battler)
 
 static void WallyHandleChooseAction(enum BattlerId battler)
 {
-#if defined(ENABLE_DIORAMA) && defined(DIORAMA_BATTLE_ENV_TEST)
+#if defined(DIORAMA_BATTLE_ENV_TEST)
     DioramaBattleEnvTest_OnActionMenu(); // test builds only: Wally's action menu is up (he chooses by himself)
 #endif
 #line 309 // gba-line

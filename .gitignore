@@ -84,3 +84,7 @@ include/diorama/*.generated.h
 # Battle FX data (include/diorama/battle_fx.h): the animation core is shipped JavaScript
 !battlefx/*.js
 /pokeemerald-mp-diorama-bfxtest
+/pokeemerald-mp-diorama-bfxtest.exe
+# The Classic 2D test build (Makefile_pc BFX_TEST=1 without DIORAMA): the battle-environment driver in 2D
+/pokeemerald-mp-bfxtest
+/pokeemerald-mp-bfxtest.exe
