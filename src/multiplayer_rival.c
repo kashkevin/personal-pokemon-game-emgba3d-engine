@@ -771,8 +771,15 @@ void MultiplayerIntro_GiveLabStarter(void)
     FlagSet(FLAG_SYS_POKEMON_GET);
     StringCopy(gStringVar1, GetSpeciesName(species));
     gSpecialVar_Result = TRUE;
-    TestLogAlways("intro: lab starter %d (species %d, shiny %d)", choice, species,
-                  GetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_IS_SHINY, NULL));
+    {
+        struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][0];
+        // The roll itself, for a reroll check (tools/pc_port/soft_reset_check.py): a reset brings a new one.
+        TestLogAlways("intro: lab starter %d (species %d, shiny %d, personality %08x, ivs %u/%u/%u/%u/%u/%u)", choice,
+                      species, GetMonData(mon, MON_DATA_IS_SHINY, NULL), GetMonData(mon, MON_DATA_PERSONALITY, NULL),
+                      GetMonData(mon, MON_DATA_HP_IV, NULL), GetMonData(mon, MON_DATA_ATK_IV, NULL),
+                      GetMonData(mon, MON_DATA_DEF_IV, NULL), GetMonData(mon, MON_DATA_SPEED_IV, NULL),
+                      GetMonData(mon, MON_DATA_SPATK_IV, NULL), GetMonData(mon, MON_DATA_SPDEF_IV, NULL));
+    }
 }
 
 // ---------------------------------------------------------------------------

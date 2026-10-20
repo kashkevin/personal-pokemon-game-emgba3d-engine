@@ -42,6 +42,12 @@ extern volatile struct MultiplayerMenuMailbox gMultiplayerMenuMailbox;
 #define MP_MENU_RELEASE_ABI 1
 #define MP_MENU_FLAG_RELEASE 3
 extern const u32 gMultiplayerMenuReleaseAbiVersion;
+// Update 32: an OPEN may name the page the companion shows first (bridge cap menuOpenPage, the launcher's
+// menu_open_page=1): 1 the soft reset (START > PLAYER > RESET in a world).
+#define MP_MENU_OPEN_PAGE_ABI 1
+#define MP_MENU_PAGE_SOFT_RESET 1
+extern const u32 gMultiplayerMenuOpenPageAbiVersion;
+bool32 MultiplayerMenu_OpenPage(u16 page);
 #endif
 
 void MultiplayerMenu_Init(void);

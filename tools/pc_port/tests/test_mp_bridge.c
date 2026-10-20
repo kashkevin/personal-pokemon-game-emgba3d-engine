@@ -1700,6 +1700,47 @@ MT_TEST(menu_release_screen_needs_its_capability)
     MT_CHECK(MpBridge_CheckCaps(&caps) != NULL);
 }
 
+// Update 32: START > PLAYER > RESET opens the Players menu on its soft reset page: the OPEN names page 1. Only a
+// launcher that opted in (bridge.txt menu_open_page=1) is sent such an OPEN; any other's bridge stops on one, as on
+// every request the companion could not read.
+MT_TEST(menu_open_page_needs_the_launcher_opt_in)
+{
+    struct MpBridgeCaps caps;
+    uint8_t *m = sMemory[MP_REGION_MENU];
+    int page, action;
+
+    for (page = 0; page <= 1; page++)
+        for (action = 0; action <= 2; action++)
+        {
+            memset(&caps, 0, sizeof(caps));
+            caps.menu = 2;
+            caps.menuOpenPage = (uint32_t)page;
+            MT_CHECK(MpBridge_CheckCaps(&caps) == NULL);
+            Fresh(&caps);
+            sNet.chunk = 0;
+            Ready(0);
+            PutU32(m, 0x31554D45);
+            PutU16(m + 4, 2);
+            PutU16(m + 6, 512);
+            Step(10);                         // the menu capability goes out first
+            MT_EQ(CountSent('I'), 1);
+            PutU32(m + 16, 1);                // request sequence 1,
+            PutU16(m + 24, (uint16_t)action); // the page it names (0: none),
+            m[26] = 1;                        // an OPEN
+            Step(10);
+            MT_CHECK(sNet.closed == (action > page));
+            MT_EQ(CountSent('J'), (action > page ? 0 : 1));
+        }
+    memset(&caps, 0, sizeof(caps));
+    caps.menuOpenPage = 1;                    // without the Players menu ABI 2 it means nothing
+    MT_CHECK(MpBridge_CheckCaps(&caps) != NULL);
+    caps.menu = 1;
+    MT_CHECK(MpBridge_CheckCaps(&caps) != NULL);
+    caps.menu = 2;
+    caps.menuOpenPage = 2;
+    MT_CHECK(MpBridge_CheckCaps(&caps) != NULL);
+}
+
 // tests/native/windows-input-guard.c
 static uint32_t AddKeys(struct MpBridgeInput *s, uint32_t keys)
 {
@@ -1848,6 +1889,7 @@ int main(void)
     MT_RUN(native_battle_phases_reach_the_game);
     MT_RUN(free_for_all_commands_reach_the_game);
     MT_RUN(menu_release_screen_needs_its_capability);
+    MT_RUN(menu_open_page_needs_the_launcher_opt_in);
     MT_RUN(save_import_window_needs_its_capability);
     MT_RUN(spawn_capability_waits_for_its_mailbox);
     MT_RUN(spawn_record_and_inbound_round_trip);

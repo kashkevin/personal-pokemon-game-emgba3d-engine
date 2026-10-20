@@ -677,4 +677,6 @@ gSpecials::
 	@ Update 32: the short introduction's starter, claimed from the Poke Balls in Birch's lab.
 	def_special MultiplayerIntro_ChooseLabStarter, waitstate=1
 	def_special MultiplayerIntro_GiveLabStarter
+	@ Update 32: START > PLAYER > RESET without a world (src/multiplayer_soft_reset.c).
+	def_special MultiplayerSoftReset_Do
 .endif

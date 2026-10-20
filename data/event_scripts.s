@@ -1748,4 +1748,5 @@ EventScript_PalletTown_PlayersHouse_2F_TurnOnPC::
 	.include "data/scripts/mp_mega_stone_shop.inc"
 .ifdef PORTABLE
 	.include "data/scripts/mp_rival.inc" @ Update 31: multiplayer rival checkpoints, streamlined introduction
+	.include "data/scripts/mp_soft_reset.inc" @ Update 32: START > PLAYER > RESET
 .endif

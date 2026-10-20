@@ -1276,8 +1276,15 @@ static void CB2_DebugSceneSetup(void)
 
 void DebugScene_Start(void)
 {
+    static bool sBooted;
     const char *value;
 
+    // A soft reset runs AgbMain again (sdl2.c SoftReset) and keeps this file's state (Makefile_pc PRESERVED_OBJS): the
+    // scene and the scripts belong to the first boot, so the game then boots as it would, to the title screen
+    // (tools/pc_port/soft_reset_check.py).
+    if (sBooted)
+        return;
+    sBooted = true;
     TapsStart();
 
     if ((value = SDL_getenv("PKMN_DEBUG_KEYS")) != NULL)

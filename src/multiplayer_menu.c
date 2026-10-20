@@ -33,6 +33,7 @@ const u32 gMultiplayerMenuReleaseAbiVersion = MP_MENU_RELEASE_ABI;
 #else
 #define MENU_FLAGS_MAX 2
 #endif
+#line 30 // gba-line
 static EWRAM_DATA bool8 sBattleAdmissionLatched = FALSE;
 static EWRAM_DATA bool8 sAdmissionResetDisabled = FALSE;
 EWRAM_DATA volatile struct MultiplayerMenuMailbox gMultiplayerMenuMailbox = {0};
@@ -184,13 +185,25 @@ static void Close(void)
     Publish(MP_MENU_CLOSE, 0, screen);
 }
 
+#ifdef PORTABLE
+static u16 sOpenPage; // Update 32: the page the next OPEN names (MultiplayerMenu_OpenPage)
+#endif
+
+#line 181 // gba-line
 static bool32 Begin(void)
 {
     if (sMultiplayerMenuActive || sSequence >= 0xFFFFFFFEu) return FALSE;
     memset(&sMultiplayerMenuScreen, 0, sizeof(sMultiplayerMenuScreen)); sMultiplayerMenuCursor = 0;
     sSeenGeneration = gMultiplayerMenuMailbox.inboundGeneration;
     sMultiplayerMenuActive = sMultiplayerMenuWaiting = TRUE;
+#ifdef PORTABLE
+    Publish(MP_MENU_OPEN, sOpenPage, 0);
+    sOpenPage = 0;
+#else
+#line 187 // gba-line
     Publish(MP_MENU_OPEN, 0, 0);
+#endif
+#line 188 // gba-line
     return TRUE;
 }
 
@@ -241,6 +254,21 @@ bool32 MultiplayerMenu_Open(void)
 }
 
 #ifdef PORTABLE
+const u32 gMultiplayerMenuOpenPageAbiVersion = MP_MENU_OPEN_PAGE_ABI;
+
+// Update 32: the Players menu opened on a page of its own (MP_MENU_PAGE_*): the companion shows that page first.
+bool32 MultiplayerMenu_OpenPage(u16 page)
+{
+    bool32 opened;
+
+    sOpenPage = page;
+    opened = MultiplayerMenu_Open();
+    sOpenPage = 0;
+    return opened;
+}
+#endif
+
+#ifdef PORTABLE
 // The companion refused this Enter before sending any ADMIT (its own checks
 // failed; nothing durable names the battle): the one screen a latched window
 // takes. It ends the latch only while no battle or admission-cleanup hold
@@ -264,6 +292,7 @@ static bool32 ReleaseAdmission(const struct MultiplayerMenuScreen *screen)
 }
 #endif
 
+#line 237 // gba-line
 static void ReadScreen(void)
 {
     struct MultiplayerMenuScreen screen;
@@ -271,8 +300,10 @@ static void ReadScreen(void)
 #ifdef PORTABLE
     if ((generation & 1) || generation == sSeenGeneration) return;
 #else
+#line 241 // gba-line
     if (sBattleAdmissionLatched || (generation & 1) || generation == sSeenGeneration) return;
 #endif
+#line 242 // gba-line
     screen = gMultiplayerMenuMailbox.screen;
     if (generation != gMultiplayerMenuMailbox.inboundGeneration) return;
 #ifdef PORTABLE
@@ -283,6 +314,7 @@ static void ReadScreen(void)
         return;
     }
 #endif
+#line 244 // gba-line
     sSeenGeneration = generation;
     if (!MultiplayerMenu_ValidateScreen(&screen) || screen.ackRequest != sSequence
      || screen.screen < sMultiplayerMenuScreen.screen) return;
@@ -306,6 +338,7 @@ static void ReadScreen(void)
 #ifdef PORTABLE
     if (screen.flags == MP_MENU_FLAG_RELEASE) return;   // a release for a latch that has already ended
 #endif
+#line 264 // gba-line
     // A host-requested close may retain the last screen revision after an RPC
     // error. Ordinary duplicate revisions never re-enable old selections.
     if (screen.flags) { Close(); return; }

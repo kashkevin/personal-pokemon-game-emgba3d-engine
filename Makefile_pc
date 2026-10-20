@@ -176,7 +176,9 @@ endif
 # Objects whose globals survive a soft reset (window, audio device, cartridge
 # save image and clock, platform tools). Every other object's .data/.bss is moved
 # into the game sections that src/platform/game_memory.c snapshots and restores.
-PRESERVED_OBJS := $(addprefix $(OBJ_DIR)/src/platform/,sdl2.o agb_flash_pc.o siirtc_pc.o game_memory.o null_trap.o fault_compat.o crash_report.o mp_bridge.o frame_limiter.o memory_info.o)
+# debug_scene.o (the PKMN_DEBUG_* development aids) keeps its key script and frame
+# count, so a scripted check goes on after a soft reset (tools/pc_port/soft_reset_check.py).
+PRESERVED_OBJS := $(addprefix $(OBJ_DIR)/src/platform/,sdl2.o agb_flash_pc.o siirtc_pc.o game_memory.o null_trap.o fault_compat.o crash_report.o mp_bridge.o frame_limiter.o memory_info.o debug_scene.o)
 ifeq ($(DIORAMA),1)
   # The renderer (GL objects, snapshot exchange, caches) is platform state: it
   # keeps its memory across a soft reset like the window does.

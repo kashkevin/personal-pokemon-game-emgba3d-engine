@@ -18,6 +18,7 @@ extern const u32 gMultiplayerPresenceDetailAbiVersion;
 u8 MultiplayerPresence_Detail(void);
 // START > PLAYER > PLAYERS was refused: a field banner says why (not connected, link lost, not ready yet).
 void MultiplayerPresence_PlayersRefused(void);
+void MultiplayerPresence_Refuse(const char *text); // the same banner, another reason ('|' starts its second line)
 void MultiplayerPresence_Tick(void); // once a frame (Multiplayer_Tick)
 
 #endif // GUARD_MULTIPLAYER_PRESENCE_H

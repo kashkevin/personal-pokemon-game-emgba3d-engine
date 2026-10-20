@@ -75,6 +75,13 @@ void MultiplayerPresence_PlayersRefused(void)
     sRefusalFrames = 0;
 }
 
+// Update 32: a refusal of another field action, in the same banner.
+void MultiplayerPresence_Refuse(const char *text)
+{
+    sRefusal = text;
+    sRefusalFrames = 0;
+}
+
 void MultiplayerPresence_Tick(void)
 {
     if (sRefusal == NULL)

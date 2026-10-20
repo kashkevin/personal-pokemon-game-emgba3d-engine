@@ -162,6 +162,8 @@ const char *MpBridge_CheckCaps(const struct MpBridgeCaps *c)
         return "invalid read-only save window";
     if (c->saveImportWindow && (!c->saveWindow || c->saveImportWindow != 1))
         return "invalid save import window";
+    if (c->menuOpenPage && (c->menu != 2 || c->menuOpenPage != 1))
+        return "invalid menu open page capability";
     if (c->menu > 2)
         return "invalid Players menu capability";
     if (c->tradeEffectPrepare && (!c->trade || c->menu != 2 || c->tradeEffectPrepare != 1))
@@ -1110,8 +1112,10 @@ static void PollMenu(struct MpBridge *b)
     screen = U32(payload + 4);
     action = U16(payload + 8);
     kind = payload[10];
+    /* An OPEN names no action, or (menuOpenPage, Update 32) its page: 1 the soft reset. */
     if (seq == 0 || action > 7 || kind < 1 || kind > 3 || !AllZero(payload + 11, 5)
-     || (kind == 2 && (screen == 0 || action == 0)) || (kind != 2 && action != 0)
+     || (kind == 2 && (screen == 0 || action == 0)) || (kind == 3 && action != 0)
+     || (kind == 1 && action > (Enabled(b->caps.menuOpenPage) ? 1u : 0u))
      || (kind == 1 && screen != 0))
     {
         Stop(b, "invalid menu request", true);
@@ -2230,9 +2234,9 @@ bool MpBridge_Configure(const char *path)
     long port = -1;
     uint8_t token[32];
     bool haveToken = false;
-    bool optIn[3] = {false, false, false};
-    static const char *const sOptIns[3] = {
-        "trade_effect_prepare=1", "trade_effect_save=1", "trade_effect_choice=1"};
+    bool optIn[4] = {false, false, false, false};
+    static const char *const sOptIns[4] = {
+        "trade_effect_prepare=1", "trade_effect_save=1", "trade_effect_choice=1", "menu_open_page=1"};
     const char *problem;
 
     if (file == NULL)
@@ -2276,6 +2280,8 @@ bool MpBridge_Configure(const char *path)
             optIn[1] = true;
         else if (strcmp(line, sOptIns[2]) == 0 && !optIn[2])
             optIn[2] = true;
+        else if (strcmp(line, sOptIns[3]) == 0 && !optIn[3])
+            optIn[3] = true;
         else if (line[0] != '\0')
         {
             port = 0;
@@ -2309,6 +2315,9 @@ bool MpBridge_Configure(const char *path)
 #endif
     caps.menuRelease = *(const volatile u32 *)&gMultiplayerMenuReleaseAbiVersion;
     caps.saveImportWindow = *(const volatile u32 *)&gMultiplayerSaveImportWindowAbiVersion;
+    /* Update 32: the launcher opts in when its manifest has menu_open_page_abi_version 1 (an older launcher would
+     * refuse the page an OPEN names). */
+    caps.menuOpenPage = optIn[3] ? *(const volatile u32 *)&gMultiplayerMenuOpenPageAbiVersion : 0;
     caps.saveWindow = *(const volatile u32 *)&gMultiplayerSaveWindowAbiVersion;
     caps.menu = *(const volatile u32 *)&gMultiplayerMenuAbiVersion;
     /* The trade effect transports are explicit opt-ins of the manifest, never
@@ -2373,20 +2382,25 @@ bool MpBridge_Configure(const char *path)
     sEnabled = true;
     SDL_Log("Multiplayer bridge: companion at 127.0.0.1:%ld; save %u trade %u emergency %u battle %u/%u/%u "
             "window %u menu %u effects %u/%u/%u reset %u/%u world %u spawns %u running %u detail %u ffa %u release %u "
-            "import %u",
+            "import %u page %u",
             port, (unsigned)caps.save, (unsigned)caps.trade, (unsigned)caps.emergencySave,
             (unsigned)caps.battle, (unsigned)caps.battleResume, (unsigned)caps.battleAdmissionCleanup,
             (unsigned)caps.saveWindow, (unsigned)caps.menu, (unsigned)caps.tradeEffectPrepare,
             (unsigned)caps.tradeEffectSave, (unsigned)caps.tradeEffectChoice, (unsigned)caps.reset,
             (unsigned)caps.resetInput, (unsigned)caps.world, (unsigned)caps.spawns,
             (unsigned)caps.presenceAnimation, (unsigned)caps.presenceDetail, (unsigned)caps.battleFfa,
-            (unsigned)caps.menuRelease, (unsigned)caps.saveImportWindow);
+            (unsigned)caps.menuRelease, (unsigned)caps.saveImportWindow, (unsigned)caps.menuOpenPage);
     return true;
 }
 
 bool MpBridge_IsEnabled(void)
 {
     return sEnabled;
+}
+
+bool MpBridge_MenuOpenPageEnabled(void)
+{
+    return sEnabled && sBridge.caps.menuOpenPage == 1;
 }
 
 /* The link status the game shows (the pause menu's LINK): see enum MpLinkState. A connection is shown only once the

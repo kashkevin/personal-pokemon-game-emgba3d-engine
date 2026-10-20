@@ -79,6 +79,10 @@ enum
     MENU_ACTION_RIDE,
     MENU_ACTION_GET_OFF,
     MENU_ACTION_STYLE,
+#ifdef PORTABLE
+    MENU_ACTION_SOFT_RESET, // Update 32: START > PLAYER > RESET (multiplayer_soft_reset.c)
+#endif
+#line 82 // gba-line
 };
 
 // Save status
@@ -129,12 +133,15 @@ static bool8 StartMenuPlayerBackCallback(void);
 static bool8 StartMenuRideCallback(void);
 static bool8 StartMenuStyleCallback(void);
 #ifdef PORTABLE
-// STYLE (the look and character editor) and RIDE stay in the field: no fade to
-// black for them, as for PLAYERS (else the field stays black). Native build only,
-// so the GBA ROM keeps its pairing; the same fix for both builds is
-// a85ed3a47 on claude/fix-player-menu-fade.
-#define MENU_STAYS_IN_FIELD(callback) ((callback) == StartMenuStyleCallback || (callback) == StartMenuRideCallback)
+static bool8 StartMenuSoftResetCallback(void);
+// STYLE (the look and character editor), RIDE and RESET (its question, or PLAYERS
+// on its soft reset page) stay in the field: no fade to black for them, as for
+// PLAYERS (else the field stays black). Native build only, so the GBA ROM keeps
+// its pairing; the same fix for both builds is a85ed3a47 on claude/fix-player-menu-fade.
+#define MENU_STAYS_IN_FIELD(callback) ((callback) == StartMenuStyleCallback || (callback) == StartMenuRideCallback \
+                                    || (callback) == StartMenuSoftResetCallback)
 #include "multiplayer_presence.h"
+#include "multiplayer_soft_reset.h"
 #else
 #define MENU_STAYS_IN_FIELD(callback) FALSE
 #endif
@@ -222,6 +229,10 @@ static const u8 sText_PlayerBack[] = _("BACK");
 static const u8 sText_Ride[] = _("RIDE");
 static const u8 sText_GetOff[] = _("GET OFF");
 static const u8 sText_Style[] = _("STYLE");
+#ifdef PORTABLE
+static const u8 sText_SoftReset[] = _("RESET");
+#endif
+#line 214 // gba-line
 
 static const struct MenuAction sStartMenuItems[] =
 {
@@ -247,6 +258,10 @@ static const struct MenuAction sStartMenuItems[] =
     [MENU_ACTION_RIDE]            = {sText_Ride, {.u8_void = StartMenuRideCallback}},
     [MENU_ACTION_GET_OFF]         = {sText_GetOff, {.u8_void = StartMenuRideCallback}},
     [MENU_ACTION_STYLE]           = {sText_Style, {.u8_void = StartMenuStyleCallback}},
+#ifdef PORTABLE
+    [MENU_ACTION_SOFT_RESET]      = {sText_SoftReset, {.u8_void = StartMenuSoftResetCallback}},
+#endif
+#line 239 // gba-line
 };
 
 static const struct BgTemplate sBgTemplates_LinkBattleSave[] =
@@ -334,6 +349,10 @@ static void BuildStartMenuActions(void)
             AddStartMenuAction(MENU_ACTION_GET_OFF);
         else if (MultiplayerRide_CanMount())
             AddStartMenuAction(MENU_ACTION_RIDE);
+#ifdef PORTABLE
+        AddStartMenuAction(MENU_ACTION_SOFT_RESET);
+#endif
+#line 326 // gba-line
         AddStartMenuAction(MENU_ACTION_PLAYER_BACK);
         return;
     }
@@ -853,6 +872,17 @@ static bool8 StartMenuPlayersCallback(void)
     MultiplayerMenu_Open();
     return TRUE;
 }
+
+#ifdef PORTABLE
+static bool8 StartMenuSoftResetCallback(void)
+{
+    sPlayerSubmenu = FALSE; sStartMenuCursorPos = sPlayerReturnCursor;
+    RemoveExtraStartMenuWindows(); HideStartMenu();
+    MultiplayerSoftReset_Begin(); // asks (no world) or opens PLAYERS on its soft reset page (a world)
+    return TRUE;
+}
+#endif
+#line 838 // gba-line
 
 static bool8 StartMenuRideCallback(void)
 {
