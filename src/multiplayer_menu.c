@@ -27,6 +27,12 @@ _Static_assert(offsetof(struct MultiplayerMenuMailbox, screen) == 36, "Menu scre
 _Static_assert(offsetof(struct MultiplayerMenuScreen, rows) == 68, "Menu row offset");
 
 const u32 gMultiplayerMenuAbiVersion = MP_MENU_ABI;
+#ifdef PORTABLE
+const u32 gMultiplayerMenuReleaseAbiVersion = MP_MENU_RELEASE_ABI;
+#define MENU_FLAGS_MAX MP_MENU_FLAG_RELEASE
+#else
+#define MENU_FLAGS_MAX 2
+#endif
 static EWRAM_DATA bool8 sBattleAdmissionLatched = FALSE;
 static EWRAM_DATA bool8 sAdmissionResetDisabled = FALSE;
 EWRAM_DATA volatile struct MultiplayerMenuMailbox gMultiplayerMenuMailbox = {0};
@@ -63,7 +69,7 @@ static bool32 ValidText(const u8 *text, u32 size)
 bool32 MultiplayerMenu_ValidateScreen(const struct MultiplayerMenuScreen *screen)
 {
     u32 admissionAction = screen->reserved[0] | screen->reserved[1] << 8;
-    if (!screen->ackRequest || !screen->screen || screen->flags > 2 || screen->count > 6
+    if (!screen->ackRequest || !screen->screen || screen->flags > MENU_FLAGS_MAX || screen->count > 6
      || (screen->backAction != 0 && screen->backAction != 7)
      || !ValidText(screen->title, sizeof(screen->title)) || !ValidText(screen->status, sizeof(screen->status))
      || !Zero(screen->reserved + 2, 2)
@@ -234,13 +240,49 @@ bool32 MultiplayerMenu_Open(void)
     return TRUE;
 }
 
+#ifdef PORTABLE
+// The companion refused this Enter before sending any ADMIT (its own checks
+// failed; nothing durable names the battle): the one screen a latched window
+// takes. It ends the latch only while no battle or admission-cleanup hold
+// exists, so the field this window owns was never transferred; the window then
+// shows why, with its rows usable again (Cancel challenge, B: Back).
+static bool32 ReleaseAdmission(const struct MultiplayerMenuScreen *screen)
+{
+    if (screen->flags != MP_MENU_FLAG_RELEASE || !MultiplayerMenu_ValidateScreen(screen)
+     || screen->ackRequest != sSequence || screen->screen < sMultiplayerMenuScreen.screen
+     || !sMultiplayerMenuActive || !sMultiplayerMenuWaiting || sWindow == WINDOW_NONE
+     || MultiplayerBattle_IsActive() || MultiplayerBattle_IsAdmissionCleanupHeld())
+        return FALSE;
+    gSoftResetDisabled = sAdmissionResetDisabled;
+    sBattleAdmissionLatched = FALSE;
+    sMultiplayerMenuScreen = *screen;
+    sMultiplayerMenuScreen.flags = 0;
+    sMultiplayerMenuWaiting = FALSE;
+    if (sMultiplayerMenuCursor >= sMultiplayerMenuScreen.count) sMultiplayerMenuCursor = 0;
+    Render();
+    return TRUE;
+}
+#endif
+
 static void ReadScreen(void)
 {
     struct MultiplayerMenuScreen screen;
     u32 generation = gMultiplayerMenuMailbox.inboundGeneration;
+#ifdef PORTABLE
+    if ((generation & 1) || generation == sSeenGeneration) return;
+#else
     if (sBattleAdmissionLatched || (generation & 1) || generation == sSeenGeneration) return;
+#endif
     screen = gMultiplayerMenuMailbox.screen;
     if (generation != gMultiplayerMenuMailbox.inboundGeneration) return;
+#ifdef PORTABLE
+    // Latched: every other screen stays unread, as before; a release is read once.
+    if (sBattleAdmissionLatched)
+    {
+        if (ReleaseAdmission(&screen)) sSeenGeneration = generation;
+        return;
+    }
+#endif
     sSeenGeneration = generation;
     if (!MultiplayerMenu_ValidateScreen(&screen) || screen.ackRequest != sSequence
      || screen.screen < sMultiplayerMenuScreen.screen) return;
@@ -261,6 +303,9 @@ static void ReadScreen(void)
         return;
     }
     if (screen.flags == 2) return;
+#ifdef PORTABLE
+    if (screen.flags == MP_MENU_FLAG_RELEASE) return;   // a release for a latch that has already ended
+#endif
     // A host-requested close may retain the last screen revision after an RPC
     // error. Ordinary duplicate revisions never re-enable old selections.
     if (screen.flags) { Close(); return; }

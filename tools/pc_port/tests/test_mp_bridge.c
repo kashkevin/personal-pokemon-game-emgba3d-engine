@@ -1504,6 +1504,75 @@ MT_TEST(spawn_record_never_overtakes_its_announcement)
     }
 }
 
+// The owner's report of 2026-10-20: both players chose Enter battle and both games stayed on "Waiting for server..."
+// for good. The companion had refused the Enter before any ADMIT; the latched window takes no screen but a release
+// (flags 3), which the bridge passes only for a game with the menuRelease marker: older games' screens are unchanged.
+MT_TEST(menu_release_screen_needs_its_capability)
+{
+    struct MpBridgeCaps caps;
+    uint8_t screen[240];
+    uint8_t frame[260];
+    uint8_t *m = sMemory[MP_REGION_MENU];
+    size_t n;
+    int release;
+
+    for (release = 0; release <= 1; release++)
+    {
+        memset(&caps, 0, sizeof(caps));
+        caps.save = 1;
+        caps.trade = 1;
+        caps.emergencySave = 2;
+        caps.battle = 3;
+        caps.battleResume = 1;
+        caps.battleExecution = 1;
+        caps.battleAdmissionCleanup = 1;
+        caps.menu = 2;
+        caps.menuRelease = (uint32_t)release;
+        MT_CHECK(MpBridge_CheckCaps(&caps) == NULL);
+        Fresh(&caps);
+        sNet.chunk = 0;
+        Ready(0);
+        SaveReady();
+        BattleReady();
+        PutU32(m, 0x31554D45);
+        PutU16(m + 4, 2);
+        PutU16(m + 6, 512);
+        PutU32(m + 16, 9);            // the game's last request: the Enter battle choice, sequence 9,
+        PutU32(m + 20, 11);           // on screen 11,
+        PutU16(m + 24, 5);            // its fifth row,
+        m[26] = 2;                    // a choice
+        Step(10);
+        memset(screen, 0, sizeof(screen));
+        PutU32(screen, 9);            // the reply to that request
+        PutU32(screen + 4, 12);       // screen revision
+        screen[8] = 3;                // flags: release the refused Enter
+        screen[9] = 1;
+        memcpy(screen + 12, "1v1 challenge", 13);
+        memcpy(screen + 36, "Could not enter: try again", 26);
+        PutU16(screen + 68, 1);
+        memcpy(screen + 70, "Cancel challenge", 16);
+        n = FrameOf(frame, 'M', screen, sizeof(screen));
+        Feed(frame, n, 200);
+        Step(2);
+        MT_CHECK(release ? !sNet.closed : sNet.closed);
+        if (release)
+            MT_CHECK(memcmp(m + 36, screen, 240) == 0);
+        // A release can never carry an Enter row of its own.
+        if (release)
+        {
+            PutU16(screen + 236, 1);
+            n = FrameOf(frame, 'M', screen, sizeof(screen));
+            Feed(frame, n, 200);
+            Step(2);
+            MT_CHECK(sNet.closed);
+        }
+    }
+    memset(&caps, 0, sizeof(caps));
+    caps.menu = 2;
+    caps.menuRelease = 1;   // without the native battle resume it means nothing
+    MT_CHECK(MpBridge_CheckCaps(&caps) != NULL);
+}
+
 // tests/native/windows-input-guard.c
 static uint32_t AddKeys(struct MpBridgeInput *s, uint32_t keys)
 {
@@ -1651,6 +1720,7 @@ int main(void)
     MT_RUN(battle_looks_need_the_game);
     MT_RUN(native_battle_phases_reach_the_game);
     MT_RUN(free_for_all_commands_reach_the_game);
+    MT_RUN(menu_release_screen_needs_its_capability);
     MT_RUN(spawn_capability_waits_for_its_mailbox);
     MT_RUN(spawn_record_and_inbound_round_trip);
     MT_RUN(spawn_inbound_is_validated);

@@ -146,6 +146,8 @@ const char *MpBridge_CheckCaps(const struct MpBridgeCaps *c)
         return "invalid presence detail capability marker";
     if (c->battleFfa && (c->battle != 3 || c->battleFfa != 1))
         return "invalid free-for-all battle capability";
+    if (c->menuRelease && (c->menu != 2 || c->battleResume != 1 || c->menuRelease != 1))
+        return "invalid menu release capability";
     if (c->save > 1)
         return "invalid save mailbox ABI";
     if (c->trade && (!c->save || c->trade != 1))
@@ -515,7 +517,8 @@ static bool ValidMenuScreen(const struct MpBridge *b, const uint8_t *p, size_t l
     count = p[9];
     back = U16(p + 10);
     admission = U16(p + 236);
-    if (ack == 0 || revision == 0 || flags > (b->caps.menu == 2 ? 2u : 1u) || count > 6
+    /* Flags 1 close, 2 reopen a held trade, 3 release a refused Enter battle latch (menuRelease). */
+    if (ack == 0 || revision == 0 || flags > (b->caps.menu == 2 ? (Enabled(b->caps.menuRelease) ? 3u : 2u) : 1u) || count > 6
      || (back != 0 && back != 7) || !MenuText(p + 12, 24) || !MenuText(p + 36, 32)
      || !AllZero(p + 68 + count * 28, 168 - count * 28) || !AllZero(p + 238, 2))
         return false;
@@ -2265,6 +2268,7 @@ bool MpBridge_Configure(const char *path)
 #if MP_FFA_ENABLED
     caps.battleFfa = *(const volatile u32 *)&gMultiplayerBattleFfaAbiVersion;
 #endif
+    caps.menuRelease = *(const volatile u32 *)&gMultiplayerMenuReleaseAbiVersion;
     caps.saveWindow = *(const volatile u32 *)&gMultiplayerSaveWindowAbiVersion;
     caps.menu = *(const volatile u32 *)&gMultiplayerMenuAbiVersion;
     /* The trade effect transports are explicit opt-ins of the manifest, never
@@ -2326,13 +2330,14 @@ bool MpBridge_Configure(const char *path)
     memset(token, 0, sizeof(token));
     sEnabled = true;
     SDL_Log("Multiplayer bridge: companion at 127.0.0.1:%ld; save %u trade %u emergency %u battle %u/%u/%u "
-            "window %u menu %u effects %u/%u/%u reset %u/%u world %u spawns %u running %u detail %u ffa %u",
+            "window %u menu %u effects %u/%u/%u reset %u/%u world %u spawns %u running %u detail %u ffa %u release %u",
             port, (unsigned)caps.save, (unsigned)caps.trade, (unsigned)caps.emergencySave,
             (unsigned)caps.battle, (unsigned)caps.battleResume, (unsigned)caps.battleAdmissionCleanup,
             (unsigned)caps.saveWindow, (unsigned)caps.menu, (unsigned)caps.tradeEffectPrepare,
             (unsigned)caps.tradeEffectSave, (unsigned)caps.tradeEffectChoice, (unsigned)caps.reset,
             (unsigned)caps.resetInput, (unsigned)caps.world, (unsigned)caps.spawns,
-            (unsigned)caps.presenceAnimation, (unsigned)caps.presenceDetail, (unsigned)caps.battleFfa);
+            (unsigned)caps.presenceAnimation, (unsigned)caps.presenceDetail, (unsigned)caps.battleFfa,
+            (unsigned)caps.menuRelease);
     return true;
 }
 

@@ -114,6 +114,7 @@ struct MpBridgeCaps
     uint32_t extras;                 /* 1: multiplayer Secret Bases (native extension, needs world) */
     uint32_t presenceDetail;         /* 1: why the game is off the field, in its pose's last byte (native extension) */
     uint32_t battleFfa;              /* 1: the four-player free-for-all battle phase 5 (needs battle 3) */
+    uint32_t menuRelease;            /* 1: a menu screen with flags 3 ends a refused Enter battle latch (needs menu 2, resume 1) */
 };
 
 enum

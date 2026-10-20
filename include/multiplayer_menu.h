@@ -35,6 +35,14 @@ struct MultiplayerMenuMailbox {
 };
 extern const u32 gMultiplayerMenuAbiVersion;
 extern volatile struct MultiplayerMenuMailbox gMultiplayerMenuMailbox;
+#ifdef PORTABLE
+// PC builds only (the GBA ROM stays byte-identical): a screen with flags 3
+// ends the Enter battle latch when the companion refused that Enter before
+// any ADMIT, so the window never waits for an admission that cannot come.
+#define MP_MENU_RELEASE_ABI 1
+#define MP_MENU_FLAG_RELEASE 3
+extern const u32 gMultiplayerMenuReleaseAbiVersion;
+#endif
 
 void MultiplayerMenu_Init(void);
 void MultiplayerMenu_Tick(void);
