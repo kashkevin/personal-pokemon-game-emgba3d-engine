@@ -55,6 +55,9 @@
 #define AddMoneyLabelObject CoinShop_AddLabel
 #define RemoveMoneyLabelObject CoinShop_RemoveLabel
 #define gText_PokedollarVar1 CoinShop_PriceText()
+#define gText_Var1AndYouWantedVar2 CoinShop_WantedText()
+#define gText_YouWantedVar1ThatllBeVar2 CoinShop_WantedOneText()
+#define gText_YouDontHaveMoney CoinShop_NotEnoughText()
 #endif
 #line 44 // gba-line
 

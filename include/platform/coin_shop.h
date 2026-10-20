@@ -19,7 +19,10 @@ u32 CoinShop_SaleShift(u8 newsKind);          // the POKeNEWS sale never applies
 void CoinShop_PrintBoxWithBorder(u8 windowId, u16 tileStart, u8 palette, int amount);
 void CoinShop_PrintBox(u8 windowId, int amount, u8 speed);
 void CoinShop_PrintAmount(u8 windowId, u8 x, u8 y, int amount, u8 speed);
-const u8 *CoinShop_PriceText(void);           // "{STR_VAR_1} COINS" in the dealer's shop, else the yen text
+const u8 *CoinShop_PriceText(void);           // the list's price: the bare number in the dealer's shop, else the yen text
+const u8 *CoinShop_WantedText(void);          // "... That will be {STR_VAR_3} COINS." in the dealer's shop, else the yen line
+const u8 *CoinShop_WantedOneText(void);       // the same for an item bought one at a time
+const u8 *CoinShop_NotEnoughText(void);       // "You don't have enough COINS." in the dealer's shop
 void CoinShop_AddLabel(u16 x, u16 y);
 void CoinShop_RemoveLabel(void);
 

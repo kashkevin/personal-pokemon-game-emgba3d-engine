@@ -66,28 +66,44 @@ u32 CoinShop_SaleShift(u8 newsKind)
     return gCoinShopActive ? 0 : IsPokeNewsActive(newsKind);
 }
 
-// "123456 COINS" right aligned in the window (the money box and the quantity box are ten tiles wide)
-void CoinShop_PrintAmount(u8 windowId, u8 x, u8 y, int amount, u8 speed)
-{
-    u32 xAlign;
+// The dealer's lines and prices name coins. "COINS" fits in the balance box only: the list's prices stand beside the
+// longest stone names ("Charizardite X") and the quantity box's beside "x01", so there they are the bare number.
+static const u8 sText_CoinNumber[] = _("{STR_VAR_1}");
+static const u8 sText_CoinsWanted[] = _("{STR_VAR_1}? And you wanted {STR_VAR_2}?\nThat will be {STR_VAR_3} COINS.");
+static const u8 sText_CoinsWantedOne[] = _("You wanted {STR_VAR_1}?\nThat'll be {STR_VAR_2} COINS. Will that be okay?");
+static const u8 sText_NotEnoughCoins[] = _("You don't have enough COINS.{PAUSE_UNTIL_PRESS}");
 
-    if (!gCoinShopActive)
-    {
-        PrintMoneyAmount(windowId, x, y, amount, speed);
-        return;
-    }
+// The amount right aligned in a ten-tile window (the balance box and the quantity box)
+static void PrintCoinAmount(u8 windowId, u8 y, int amount, u8 speed, const u8 *text)
+{
     ConvertIntToDecimalStringN(gStringVar1, amount, STR_CONV_MODE_LEFT_ALIGN, WALLET_COIN_DIGITS);
-    StringExpandPlaceholders(gStringVar4, gText_Coins);
-    xAlign = GetStringRightAlignXOffset(FONT_NORMAL, gStringVar4, 10 * 8 - 4);
-    AddTextPrinterParameterized(windowId, FONT_NORMAL, gStringVar4, xAlign, y, speed, NULL);
+    StringExpandPlaceholders(gStringVar4, text);
+    AddTextPrinterParameterized(windowId, FONT_NORMAL, gStringVar4,
+                                GetStringRightAlignXOffset(FONT_NORMAL, gStringVar4, 10 * 8 - 4), y, speed, NULL);
 }
 
+// The quantity box's total (the box is cleared before; "x01" is printed after it, on its left)
+void CoinShop_PrintAmount(u8 windowId, u8 x, u8 y, int amount, u8 speed)
+{
+    if (!gCoinShopActive)
+        PrintMoneyAmount(windowId, x, y, amount, speed);
+    else
+        PrintCoinAmount(windowId, y, amount, speed, sText_CoinNumber);
+}
+
+// "123456 COINS". The box is cleared first: the money box pads its amount to a fixed width, a coin amount is right
+// aligned, so after a purchase the shorter balance would leave the longer one's first digits showing.
 void CoinShop_PrintBox(u8 windowId, int amount, u8 speed)
 {
     if (gCoinShopActive)
-        CoinShop_PrintAmount(windowId, 0, 1, amount, speed);
+    {
+        FillWindowPixelBuffer(windowId, PIXEL_FILL(1));
+        PrintCoinAmount(windowId, 1, amount, speed, gText_Coins);
+    }
     else
+    {
         PrintMoneyAmountInMoneyBox(windowId, amount, speed);
+    }
 }
 
 void CoinShop_PrintBoxWithBorder(u8 windowId, u16 tileStart, u8 palette, int amount)
@@ -105,7 +121,22 @@ void CoinShop_PrintBoxWithBorder(u8 windowId, u16 tileStart, u8 palette, int amo
 
 const u8 *CoinShop_PriceText(void)
 {
-    return gCoinShopActive ? gText_Coins : gText_PokedollarVar1;
+    return gCoinShopActive ? sText_CoinNumber : gText_PokedollarVar1;
+}
+
+const u8 *CoinShop_WantedText(void)
+{
+    return gCoinShopActive ? sText_CoinsWanted : gText_Var1AndYouWantedVar2;
+}
+
+const u8 *CoinShop_WantedOneText(void)
+{
+    return gCoinShopActive ? sText_CoinsWantedOne : gText_YouWantedVar1ThatllBeVar2;
+}
+
+const u8 *CoinShop_NotEnoughText(void)
+{
+    return gCoinShopActive ? sText_NotEnoughCoins : gText_YouDontHaveMoney;
 }
 
 static bool8 sLabelAdded;
