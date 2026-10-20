@@ -397,3 +397,40 @@ void CreateIndicatorSprite(enum BattlerId battler)
 #undef tLevelXDelta
 
 #undef hMain_Battler
+
+#if MP_REMOTE_GIMMICK_ENABLED
+// EmeraldTogether native multiplayer battles: only the master runs the battle, so only it works out which gimmick a
+// battler may use (AssignUsableGimmicks: its stone, its species, the trainer's one Mega). The master names it in the move
+// selection it sends; the player's own game checks its own bag for the Mega Ring, which the master cannot see. This
+// game has only Mega Evolution, so nothing else is sent.
+u32 GetRemoteGimmickMark(enum BattlerId battler)
+{
+    if ((gBattleTypeFlags & BATTLE_TYPE_LINK) && gBattleStruct->gimmick.usableGimmick[battler] == GIMMICK_MEGA)
+        return MP_REMOTE_GIMMICK_MARK | GIMMICK_MEGA;
+    return 0;
+}
+
+void ReadRemoteGimmickMark(enum BattlerId battler, u32 mark)
+{
+    if (!(gBattleTypeFlags & BATTLE_TYPE_LINK) || (gBattleTypeFlags & BATTLE_TYPE_IS_MASTER))
+        return;
+    if (mark == (MP_REMOTE_GIMMICK_MARK | GIMMICK_MEGA) && CheckBagHasItem(ITEM_MEGA_RING, 1))
+        gBattleStruct->gimmick.usableGimmick[battler] = GIMMICK_MEGA;
+    else
+        gBattleStruct->gimmick.usableGimmick[battler] = GIMMICK_NONE;
+}
+
+// The other players' games never run the battle script that marks a Mega (BattleScript_MegaEvolution), so they mark it
+// when its animation starts and redraw the healthbox when it has finished; the healthbox indicator and the PC battle
+// screen read the battler's active gimmick.
+void NoteRemoteGimmickAnimation(enum BattlerId battler, u32 animationId, bool32 finished)
+{
+    if (animationId != B_ANIM_MEGA_EVOLUTION || !(gBattleTypeFlags & BATTLE_TYPE_LINK)
+     || (gBattleTypeFlags & BATTLE_TYPE_IS_MASTER))
+        return;
+    if (!finished)
+        SetActiveGimmick(battler, GIMMICK_MEGA);
+    else
+        UpdateHealthboxAttribute(gHealthboxSpriteIds[battler], GetBattlerMon(battler), HEALTHBOX_ALL);
+}
+#endif

@@ -8640,6 +8640,13 @@ s32 GetStealthHazardDamage(enum TypeSideHazard hazardType, enum BattlerId battle
 
 bool32 IsPartnerMonFromSameTrainer(enum BattlerId battler)
 {
+#if MP_REMOTE_GIMMICK_ENABLED
+    // EmeraldTogether: in a battle of four linked players every battler is its own trainer, on both sides (the opposing
+    // pair is not TWO_OPPONENTS there, so it would share one Mega Evolution).
+    if ((gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_MULTI)) == (BATTLE_TYPE_LINK | BATTLE_TYPE_MULTI))
+        return FALSE;
+#endif
+#line 8524 // gba-line
     if (!IsOnPlayerSide(battler))
         return !(gBattleTypeFlags & BATTLE_TYPE_TWO_OPPONENTS);
     else

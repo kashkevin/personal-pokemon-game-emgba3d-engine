@@ -105,6 +105,12 @@ enum BattleSide
 // a co-op battle uses. Same rule as above: the release GBA ROM does not contain the code.
 #define MP_BRING_ENABLED MP_FFA_ENABLED
 
+// EmeraldTogether: in a native multiplayer battle every player can Mega Evolve, not only the master core's player. Only
+// the master runs the battle, so it names a battler's usable gimmick in the move selection it sends
+// (MP_REMOTE_GIMMICK_MARK | GIMMICK_MEGA in byte 3 of CONTROLLER_CHOOSEMOVE, 0 without one). Same rule as above.
+#define MP_REMOTE_GIMMICK_ENABLED MP_FFA_ENABLED
+#define MP_REMOTE_GIMMICK_MARK 0x80
+
 // Number of sides the rules can see (the arrays of side statuses, timers and hazards).
 #if MP_FFA_ENABLED
 #define NUM_BATTLE_LOGIC_SIDES 4 // one per battler (MAX_BATTLERS_COUNT)

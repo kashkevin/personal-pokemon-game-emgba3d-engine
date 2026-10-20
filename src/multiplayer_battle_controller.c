@@ -121,7 +121,15 @@ static bool32 MoveChoiceValid(const u8 *p)
     struct ChooseMoveStruct move;
     u32 i;
     memcpy(&move, p + 4, sizeof(move));
+#if MP_REMOTE_GIMMICK_ENABLED
+    // Byte 3: 0, or the battler's usable Mega Evolution (MP_REMOTE_GIMMICK_MARK | GIMMICK_MEGA, battle_gimmick.c).
+    if (p[1] != MultiplayerBattle_IsNativeDouble() || p[2] > 1 || (p[3] && p[3] != (MP_REMOTE_GIMMICK_MARK | GIMMICK_MEGA))
+     || move.species >= NUM_SPECIES || move.zmove.healReplacement > PARTY_SIZE) return FALSE;
+#else
+#line 124 // gba-line
     if (p[1] != MultiplayerBattle_IsNativeDouble() || p[2] > 1 || p[3] || move.species >= NUM_SPECIES || move.zmove.healReplacement > PARTY_SIZE) return FALSE;
+#endif
+#line 125 // gba-line
     for (i = 0; i < MAX_MON_MOVES; i++)
         if (move.moves[i] >= MOVES_COUNT_ALL || move.currentPP[i] > move.maxPP[i]
          || move.zmove.baseMoves[i] >= MOVES_COUNT_ALL || (move.zmove.possibleZMoves[i] & ~15)) return FALSE;

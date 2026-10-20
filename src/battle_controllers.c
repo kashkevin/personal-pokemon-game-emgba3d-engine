@@ -1261,7 +1261,13 @@ void BtlController_EmitChooseMove(enum BattlerId battler, u32 bufferId, bool8 is
     gBattleResources->transferBuffer[0] = CONTROLLER_CHOOSEMOVE;
     gBattleResources->transferBuffer[1] = isDoubleBattle;
     gBattleResources->transferBuffer[2] = noPPNumber;
+#if MP_REMOTE_GIMMICK_ENABLED
+    gBattleResources->transferBuffer[3] = GetRemoteGimmickMark(battler);
+#else
+#line 1220 // gba-line
     gBattleResources->transferBuffer[3] = 0;
+#endif
+#line 1221 // gba-line
     for (i = 0; i < sizeof(*movePPData); i++)
         gBattleResources->transferBuffer[4 + i] = *((u8 *)(movePPData) + i);
     PrepareBufferDataTransfer(battler, bufferId, gBattleResources->transferBuffer, sizeof(*movePPData) + 4);
@@ -2412,7 +2418,16 @@ static void Controller_WaitForBallThrow(enum BattlerId battler)
 static void Controller_WaitForBattleAnimation(enum BattlerId battler)
 {
     if (!gBattleSpritesDataPtr->healthBoxesData[battler].animFromTableActive)
+#if MP_REMOTE_GIMMICK_ENABLED
+    {
+        NoteRemoteGimmickAnimation(battler, gBattleResources->bufferA[battler][1], TRUE);
         BtlController_Complete(battler);
+    }
+#else
+#line 2366 // gba-line
+        BtlController_Complete(battler);
+#endif
+#line 2367 // gba-line
 }
 
 static void Controller_WaitForStatusAnimation(enum BattlerId battler)
@@ -3249,8 +3264,19 @@ void BtlController_HandleBattleAnimation(enum BattlerId battler)
 
         gAnimDisableStructPtr = (struct LinkBattleAnim *)&gBattleResources->bufferA[battler][4];
 
+#if MP_REMOTE_GIMMICK_ENABLED
+        NoteRemoteGimmickAnimation(battler, animationId, FALSE);
+        if (TryHandleLaunchBattleTableAnimation(battler, battler, battler, animationId, argument))
+        {
+            NoteRemoteGimmickAnimation(battler, animationId, TRUE);
+            BtlController_Complete(battler);
+        }
+#else
+#line 3195 // gba-line
         if (TryHandleLaunchBattleTableAnimation(battler, battler, battler, animationId, argument))
             BtlController_Complete(battler);
+#endif
+#line 3197 // gba-line
         else
             gBattlerControllerFuncs[battler] = Controller_WaitForBattleAnimation;
 

@@ -50,6 +50,11 @@ void UpdateIndicatorOamPriority(u32 healthboxId, u32 oamPriority);
 void UpdateIndicatorLevelData(u32 healthboxId, u32 level);
 void CreateIndicatorSprite(enum BattlerId battler);
 
+// EmeraldTogether native multiplayer battles (MP_REMOTE_GIMMICK_ENABLED).
+u32 GetRemoteGimmickMark(enum BattlerId battler);
+void ReadRemoteGimmickMark(enum BattlerId battler, u32 mark);
+void NoteRemoteGimmickAnimation(enum BattlerId battler, u32 animationId, bool32 finished);
+
 extern const struct GimmickInfo gGimmicksInfo[];
 
 #endif

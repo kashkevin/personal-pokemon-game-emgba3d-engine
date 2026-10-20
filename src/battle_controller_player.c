@@ -2190,6 +2190,10 @@ void PlayerHandleChooseMove(enum BattlerId battler)
 
         InitMoveSelectionsVarsAndStrings(battler);
         gBattleStruct->gimmick.playerSelect = FALSE;
+#if MP_REMOTE_GIMMICK_ENABLED
+        ReadRemoteGimmickMark(battler, gBattleResources->bufferA[battler][3]);
+#endif
+#line 2133 // gba-line
         TryToAddMoveInfoWindow();
 
         AssignUsableZMoves(battler, moveInfo->moves);

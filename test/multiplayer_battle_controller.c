@@ -170,3 +170,25 @@ TEST("Multiplayer native controller: forbidden setters and invalid selection met
     EXPECT(!MultiplayerBattle_ValidateController(wire, size, 0));
     MultiplayerBattle_TestSetCoreCount(0);
 }
+
+TEST("Multiplayer native controller: a move selection may name the battler's usable Mega Evolution and nothing else")
+{
+    static const u8 refused[] = {GIMMICK_MEGA, MP_REMOTE_GIMMICK_MARK, MP_REMOTE_GIMMICK_MARK | GIMMICK_DYNAMAX,
+                                 MP_REMOTE_GIMMICK_MARK | GIMMICKS_COUNT, 0xFF};
+    u8 wire[256], payload[44] = {CONTROLLER_CHOOSEMOVE};
+    struct ChooseMoveStruct moves = {0};
+    u16 size;
+    u32 i;
+    MultiplayerBattle_ResetControllerValidation(); MultiplayerBattle_TestSetCoreCount(2);
+    memcpy(payload + 4, &moves, sizeof(moves));
+    payload[3] = MP_REMOTE_GIMMICK_MARK | GIMMICK_MEGA;
+    size = Packet(wire, B_COMM_TO_CONTROLLER, 0, payload, sizeof(payload));
+    EXPECT(MultiplayerBattle_ValidateController(wire, size, 0));
+    for (i = 0; i < ARRAY_COUNT(refused); i++)
+    {
+        payload[3] = refused[i];
+        size = Packet(wire, B_COMM_TO_CONTROLLER, 0, payload, sizeof(payload));
+        EXPECT(!MultiplayerBattle_ValidateController(wire, size, 0));
+    }
+    MultiplayerBattle_TestSetCoreCount(0);
+}
