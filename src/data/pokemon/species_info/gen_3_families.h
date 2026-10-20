@@ -10321,7 +10321,15 @@ const struct SpeciesInfo gSpeciesInfoGen3[] =
 #if P_GEN_9_MEGA_EVOLUTIONS
     [SPECIES_CHIMECHO_MEGA] =
     {
+#if TESTING || defined(PORTABLE)
+        // EmeraldTogether: a Mega keeps its base form's HP, and Chimecho's follows P_UPDATED_STATS (65 at Gen 6). The
+        // release GBA ROM keeps 75.
+        .baseHP        = P_UPDATED_STATS >= GEN_7 ? 75 : 65,
+#else
+#line 10324 // gba-line
         .baseHP        = 75,
+#endif
+#line 10325 // gba-line
         .baseAttack    = 50,
         .baseDefense   = 110,
         .baseSpeed     = 65,

@@ -6417,6 +6417,14 @@ bool32 TryFormChange(struct Pokemon *mon, enum FormChanges method, enum BattleTr
         targetSpecies = battlePartyState->changedSpecies;
     }
 
+#if TESTING || defined(PORTABLE)
+    // EmeraldTogether: a Pokemon that started the battle in a form whose faint and end-of-battle changes name no
+    // species (the World Event's Zygarde-Complete, caught as the form that Mega Evolves) has no species to go back
+    // to: it keeps its form.
+    if (targetSpecies == SPECIES_NONE && (method == FORM_CHANGE_END_BATTLE || method == FORM_CHANGE_FAINT))
+        return FALSE;
+#endif
+#line 6364 // gba-line
     assertf(targetSpecies != SPECIES_NONE, "form change target returned NONE. cur:%d, method:%d", currentSpecies, method)
     {
         return FALSE;

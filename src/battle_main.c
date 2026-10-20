@@ -3390,6 +3390,13 @@ void FaintClearSetData(enum BattlerId battler)
 
     Ai_UpdateFaintData(battler);
     TryBattleFormChange(battler, FORM_CHANGE_FAINT, GetBattlerAbility(battler));
+#if TESTING || defined(PORTABLE)
+    // EmeraldTogether: a fainted Mega is its own form again, so it is no longer marked Mega Evolved (a revived one would
+    // show the healthbox indicator and the PC battle screen's mark). Its trainer has still used their Mega.
+    if (GetActiveGimmick(battler) == GIMMICK_MEGA)
+        SetActiveGimmick(battler, GIMMICK_NONE);
+#endif
+#line 3343 // gba-line
 }
 
 static void DoBattleIntro(void)
@@ -5159,6 +5166,18 @@ static bool32 TryActivateGimmick(enum BattlerId battler)
 {
     if ((gBattleStruct->gimmick.toActivate & (1u << battler)) && !(gProtectStructs[battler].noValidMoves))
     {
+#if TESTING || defined(PORTABLE)
+        // EmeraldTogether: one Mega per trainer, whatever the choice said (the move menus and the AI see to it, but a
+        // choice from another player's game is only checked here): a trainer whose other battler Mega Evolved earlier
+        // this turn has used theirs (SetGimmickAsActivated marks both).
+        if (gBattleStruct->gimmick.usableGimmick[battler] == GIMMICK_MEGA
+         && gBattleStruct->gimmick.activated[battler][GIMMICK_MEGA])
+        {
+            gBattleStruct->gimmick.toActivate &= ~(1u << battler);
+            return FALSE;
+        }
+#endif
+#line 5065 // gba-line
         if (gBattleStruct->gimmick.usableGimmick[battler] != GIMMICK_Z_MOVE && TryTrainerSlideGimmick(battler))
         {
             return TRUE;
