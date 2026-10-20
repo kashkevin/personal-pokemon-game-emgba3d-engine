@@ -821,7 +821,15 @@ static void GiveParentSharedLevelUpMoves(struct Pokemon *egg, enum Move *fatherM
     {
         if (sharedMoves[i] == MOVE_NONE)
             break;
+#ifdef PORTABLE
+        // Update 32: walk the learnset (the upstream loop advanced i, so a shared move was found only if it was the
+        // learnset's first, and the loop read past sharedMoves). The release GBA ROM keeps its line unchanged.
+        for (j = 0; levelupLearnset[j].move != LEVEL_UP_MOVE_END; j++)
+#else
+#line 820 // gba-line
         for (j = 0; levelupLearnset[j].move != LEVEL_UP_MOVE_END; i++)
+#endif
+#line 821 // gba-line
         {
             if (sharedMoves[i] == levelupLearnset[j].move)
             {

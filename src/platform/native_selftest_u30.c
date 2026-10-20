@@ -779,6 +779,34 @@ int NativeSelfTest_Breeding(void)
                     }
             }
         ExpectLeg("an Egg move known by a parent is inherited", eggMoves != NULL && eggMoves[0] != MOVE_UNAVAILABLE && eggs > 300 && moveHeld == eggs);
+        // Update 32: moves both parents know that the baby learns by level (Gen 6 rule). Two level-30 Bulbasaur know
+        // the same four level-up moves (Razor Leaf, Sweet Scent, Growth, Double-Edge), none of them the learnset's
+        // first: every Egg knows all four (the upstream loop found only a learnset's first move).
+        ClearDaycare();
+        DepositEx(0, SPECIES_BULBASAUR, MON_FEMALE, 1, NATURE_MODEST, ITEM_NONE, all31, 0, BALL_POKE, MOVE_NONE);
+        DepositEx(1, SPECIES_BULBASAUR, MON_MALE, 2, NATURE_ADAMANT, ITEM_NONE, all31, 0, BALL_POKE, MOVE_NONE);
+        GiveBoxMonInitialMoveset(&gSaveBlock1Ptr->daycare.mons[0].mon);     // CreateMon leaves the moves empty
+        GiveBoxMonInitialMoveset(&gSaveBlock1Ptr->daycare.mons[1].mon);
+        {
+            enum Move shared[MAX_MON_MOVES];
+            u32 sharedEggs = 0, allShared = 0;
+            for (u32 m = 0; m < MAX_MON_MOVES; m++)
+                shared[m] = GetBoxMonData(&gSaveBlock1Ptr->daycare.mons[0].mon, MON_DATA_MOVE1 + m);
+            for (u32 i = 0; i < 500; i++)
+                if (NextEgg(&egg))
+                {
+                    u32 known = 0;
+                    sharedEggs++;
+                    for (u32 m = 0; m < MAX_MON_MOVES; m++)
+                        for (u32 k = 0; k < MAX_MON_MOVES; k++)
+                            known += shared[m] != MOVE_NONE && GetMonData(&egg, MON_DATA_MOVE1 + k) == shared[m];
+                    allShared += known == MAX_MON_MOVES;
+                }
+            printf("two level-30 Bulbasaur (moves %u %u %u %u): %u of %u Eggs know all four\n",
+                   shared[0], shared[1], shared[2], shared[3], allShared, sharedEggs);
+            ExpectLeg("level-up moves both parents know are inherited, not only the learnset's first",
+                      sharedEggs > 50 && shared[0] != MOVE_TACKLE && shared[3] != MOVE_NONE && allShared == sharedEggs);
+        }
         // The mother's Ball (Gen 6 rule); another species' father adds nothing
         ClearDaycare();
         DepositEx(0, SPECIES_BULBASAUR, MON_FEMALE, 1, NATURE_MODEST, ITEM_NONE, all31, 0, BALL_NEST, MOVE_NONE);
