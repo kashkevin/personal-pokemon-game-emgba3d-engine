@@ -854,6 +854,14 @@ static u8 StartSingles(void)
 #endif
 #line 650 // gba-line
     TRAINER_BATTLE_PARAM.opponentA = TRAINER_LINK_OPPONENT;
+#ifdef PORTABLE
+    // EmeraldTogether: in a Multi of four players, the free-for-all and the 1v1v1 the opponent on the right is a linked
+    // player too. The battle's messages name that trainer by opponentB ("... is reacting to <trainer>'s Mega Ring!"),
+    // which was left as an earlier battle had it, an id no trainer has: the name's lookup failed its assert and that
+    // player's game stopped on the crash screen. As the link opponent the name is the linked player's.
+    TRAINER_BATTLE_PARAM.opponentB = TRAINER_LINK_OPPONENT;
+#endif
+#line 651 // gba-line
     if (MultiplayerBattle_IsCoop())
     {
         // Emerald's link Multi against two in-game trainers: the master runs
