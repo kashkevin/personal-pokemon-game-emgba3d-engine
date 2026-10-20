@@ -218,6 +218,7 @@ static void InvokeTestFunction(const struct BattleTest *test)
     case BATTLE_TEST_MULTI:
     case BATTLE_TEST_AI_MULTI:
     case BATTLE_TEST_FFA:
+    case BATTLE_TEST_FFA3:
         DATA.battlerTrainers |= (B_TRAINER_PARTNER << 4 | B_TRAINER_OPPONENT_B << 6);
         InvokeMultiTestFunctionWithStack(STATE->results, STATE->runParameter, &gBattleMons[B_POSITION_PLAYER_LEFT], &gBattleMons[B_POSITION_OPPONENT_LEFT], &gBattleMons[B_POSITION_PLAYER_RIGHT], &gBattleMons[B_POSITION_OPPONENT_RIGHT], test->function.multi, &DATA.stack[BATTLE_TEST_STACK_SIZE]);
         break;
@@ -284,6 +285,7 @@ static void InitTestBattlers(const struct BattleTest *test)
     case BATTLE_TEST_MULTI:
     case BATTLE_TEST_AI_MULTI:
     case BATTLE_TEST_FFA:
+    case BATTLE_TEST_FFA3:
     case BATTLE_TEST_TWO_VS_ONE:
     case BATTLE_TEST_AI_TWO_VS_ONE:
     case BATTLE_TEST_ONE_VS_TWO:
@@ -504,9 +506,10 @@ static void BattleTest_Run(void *data)
             DATA.currentMonIndexes[i] = i / 2;
         break;
     case BATTLE_TEST_FFA:
+    case BATTLE_TEST_FFA3:
     case BATTLE_TEST_MULTI:
         DATA.recordedBattle.battleFlags = BATTLE_TYPE_IS_MASTER | BATTLE_TYPE_RECORDED_IS_MASTER | BATTLE_TYPE_RECORDED_LINK | BATTLE_TYPE_TRAINER | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_INGAME_PARTNER | BATTLE_TYPE_MULTI | BATTLE_TYPE_TWO_OPPONENTS
-                                           | (test->type == BATTLE_TEST_FFA ? BATTLE_TYPE_FFA : 0);
+                                           | (test->type == BATTLE_TEST_FFA || test->type == BATTLE_TEST_FFA3 ? BATTLE_TYPE_FFA : 0);
         DATA.recordedBattle.partnerId = TRAINER_PARTNER(PARTNER_STEVEN_TEST);
         DATA.recordedBattle.opponentA = TRAINER_LINK_OPPONENT;
         DATA.recordedBattle.opponentB = TRAINER_LINK_OPPONENT;
@@ -560,6 +563,8 @@ static void BattleTest_Run(void *data)
     {
         requiredPartySizes[Test_GetBattlerTrainer(i)] = DATA.currentMonIndexes[i] + 1;
     }
+    if (test->type == BATTLE_TEST_FFA3)
+        requiredPartySizes[B_TRAINER_PARTNER] = 0;   // the 1v1v1's empty place has no trainer and no Pokemon
     for (enum BattleTrainer trainer = B_TRAINER_PLAYER; trainer < MAX_BATTLE_TRAINERS; trainer++)
     {
         if (DATA.partySizes[trainer] < requiredPartySizes[trainer])
@@ -2799,6 +2804,7 @@ static const char *BattlerIdentifier(enum BattlerId battlerId)
     case BATTLE_TEST_MULTI:
     case BATTLE_TEST_AI_MULTI:
     case BATTLE_TEST_FFA:
+    case BATTLE_TEST_FFA3:
     case BATTLE_TEST_TWO_VS_ONE:
     case BATTLE_TEST_AI_TWO_VS_ONE:
     case BATTLE_TEST_ONE_VS_TWO:
