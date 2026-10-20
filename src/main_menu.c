@@ -40,6 +40,10 @@
 #include "title_screen.h"
 #include "window.h"
 #include "mystery_gift_menu.h"
+#ifdef PORTABLE
+#include "multiplayer_rival.h"
+#endif
+#line 43 // gba-line
 
 /*
  * Main menu state machine
@@ -1325,6 +1329,31 @@ static void Task_NewGameBirchSpeech_Init(u8 taskId)
     PlayBGM(MUS_ROUTE122);
     ShowBg(0);
     ShowBg(1);
+#ifdef PORTABLE
+    // Update 32, the short introduction (multiplayer_rival.c): no speech. The player stands on the platform
+    // and is asked boy or girl, then the name, then the game starts and saves in Littleroot.
+    if (MultiplayerIntro_IsEnabled())
+    {
+        u8 spriteId = gTasks[taskId].tBrendanSpriteId;
+
+        LoadPalette(&sBirchSpeechBgGradientPal[1], BG_PLTT_ID(0) + 1, PLTT_SIZEOF(8));
+        gTasks[taskId].tBG1HOFS = -60;
+        SetGpuReg(REG_OFFSET_BG1HOFS, -60);
+        gSprites[spriteId].x = 180;
+        gSprites[spriteId].y = 60;
+        gSprites[spriteId].invisible = FALSE;
+        gTasks[taskId].tPlayerSpriteId = spriteId;
+        gTasks[taskId].tPlayerGender = MALE;
+        InitWindows(sNewGameBirchSpeechTextWindows);
+        LoadMainMenuWindowFrameTiles(0, 0xF3);
+        LoadMessageBoxGfx(0, BIRCH_DLG_BASE_TILE_NUM, BG_PLTT_ID(15));
+        DrawDialogFrameWithCustomTile(0, TRUE, BIRCH_DLG_BASE_TILE_NUM);
+        PutWindowTilemap(0);
+        CopyWindowToVram(0, COPYWIN_GFX);
+        gTasks[taskId].func = Task_NewGameBirchSpeech_BoyOrGirl;
+    }
+#endif
+#line 1328 // gba-line
 }
 
 static void Task_NewGameBirchSpeech_WaitToShowBirch(u8 taskId)
@@ -1607,6 +1636,16 @@ static void Task_NewGameBirchSpeech_SlideInNewGenderSprite(u8 taskId)
 
 static void Task_NewGameBirchSpeech_WhatsYourName(u8 taskId)
 {
+#ifdef PORTABLE
+    if (MultiplayerIntro_IsEnabled())
+    {
+        // The short introduction goes straight on to the naming screen.
+        BeginNormalPaletteFade(PALETTES_ALL, 0, 0, 16, RGB_BLACK);
+        gTasks[taskId].func = Task_NewGameBirchSpeech_StartNamingScreen;
+        return;
+    }
+#endif
+#line 1610 // gba-line
     NewGameBirchSpeech_ClearWindow(0);
     StringExpandPlaceholders(gStringVar4, gText_Birch_WhatsYourName);
     AddTextPrinterForMessage(TRUE);
@@ -1663,6 +1702,17 @@ static void Task_NewGameBirchSpeech_ProcessNameYesNoMenu(u8 taskId)
     {
     case 0:
         PlaySE(SE_SELECT);
+#ifdef PORTABLE
+        if (MultiplayerIntro_IsEnabled())
+        {
+            // The short introduction: the name is kept and the game starts in Littleroot (CB2_NewGame).
+            BeginNormalPaletteFade(PALETTES_ALL, 0, 0, 16, RGB_BLACK);
+            FadeOutBGM(4);
+            gTasks[taskId].func = Task_NewGameBirchSpeech_Cleanup;
+            break;
+        }
+#endif
+#line 1666 // gba-line
         gSprites[gTasks[taskId].tPlayerSpriteId].oam.objMode = ST_OAM_OBJ_BLEND;
         NewGameBirchSpeech_StartFadeOutTarget1InTarget2(taskId, 2);
         NewGameBirchSpeech_StartFadePlatformIn(taskId, 1);

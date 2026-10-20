@@ -222,6 +222,7 @@ extern int NativeSelfTest_Shiny(void);
 extern int NativeSelfTest_Coins(void);
 extern int NativeSelfTest_Breeding(void);
 extern int NativeSelfTest_Rival(void);
+extern int NativeSelfTest_Update32(void);
 extern int NativeSelfTest_DumpLegendPool(const char *outPath);
 extern int NativeSelfTest_Rewards(void);
 extern int NativeSelfTest_CatchReconcile(void);
@@ -1176,6 +1177,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_Breeding()); // src/platform/native_selftest_u30.c (Update 30)
         else if (strcmp(argv[i], "--selftest-rival") == 0)
             exit(NativeSelfTest_Rival()); // src/platform/native_selftest_u31.c (Update 31)
+        else if (strcmp(argv[i], "--selftest-update32") == 0)
+            exit(NativeSelfTest_Update32()); // src/platform/native_selftest_u32.c (Update 32)
         else if (strcmp(argv[i], "--selftest-coins") == 0)
             exit(NativeSelfTest_Coins()); // src/platform/native_selftest_u29.c (Update 29)
         else if (strcmp(argv[i], "--selftest-shiny") == 0)

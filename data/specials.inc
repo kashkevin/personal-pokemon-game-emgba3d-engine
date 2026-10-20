@@ -674,4 +674,7 @@ gSpecials::
 	def_special MultiplayerRival_RequestMenu
 	def_special MultiplayerRival_CatchUpNotice
 	def_special MultiplayerIntro_Save
+	@ Update 32: the short introduction's starter, claimed from the Poke Balls in Birch's lab.
+	def_special MultiplayerIntro_ChooseLabStarter, waitstate=1
+	def_special MultiplayerIntro_GiveLabStarter
 .endif

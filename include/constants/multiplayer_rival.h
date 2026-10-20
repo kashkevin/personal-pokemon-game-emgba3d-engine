@@ -37,4 +37,10 @@
 #define MP_RIVAL_PREP_TAG           0x52560000u
 #define MP_RIVAL_PREP_WORD(checkpoint, environment) (MP_RIVAL_PREP_TAG | ((u32)(checkpoint) << 8) | (u32)(environment))
 
+// Update 32, the short introduction: VAR_MULTIPLAYER_STARTER_CHOICE of a new character until it claims its
+// starter in Birch's lab (then 0x6100 | the starter, starter_choose.c SavePlayerStarterChoice).
+#define MP_INTRO_STARTER_PENDING    0x62FF
+// gSpecialVar_Result of the 18-starter screen opened from the lab when it is left with B.
+#define MP_INTRO_NO_STARTER         0xFFFF
+
 #endif // GUARD_CONSTANTS_MULTIPLAYER_RIVAL_H

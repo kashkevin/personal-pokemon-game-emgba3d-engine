@@ -1157,6 +1157,14 @@ static void StartFieldScene(void)
         FlagSet((u16)badge); // so the level 30 Pokemon obeys
     FlagSet(FLAG_SYS_POKEMON_GET); // the start menu lists POKéMON
     FlagSet(FLAG_SYS_POKEDEX_GET);
+    // PKMN_DEBUG_PARTY=0: no Pokemon at all (Update 32: a short-introduction character before its lab claim; the
+    // starter flag goes too, PKMN_DEBUG_RIVAL_SET sets the rest of that state)
+    if ((value = SDL_getenv("PKMN_DEBUG_PARTY")) != NULL && Numbers(value, v, 1) >= 1 && v[0] == 0)
+    {
+        ZeroPlayerPartyMons();
+        gPartiesCount[B_TRAINER_PLAYER] = 0;
+        FlagClear(FLAG_SYS_POKEMON_GET);
+    }
     if ((value = SDL_getenv("PKMN_DEBUG_HOUR")) != NULL && Numbers(value, v, 1) >= 1)
         RtcCalcLocalTimeOffset(0, v[0], 0, 0);
     ResetInitialPlayerAvatarState();

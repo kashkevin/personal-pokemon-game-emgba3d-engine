@@ -232,16 +232,15 @@ MpRival_EventScript_BrendanGoesHome::
 @ the player's own house, at the moment Birch asks the player to go to Route 103 (VAR_BIRCH_LAB_STATE 3).
 @ The Pokedex, the Poke Balls and the Running Shoes are still earned the original way.
 
+@ Update 32, the short introduction: the new character arrives in Littleroot with no Pokemon, is told where
+@ the starters are and the game is saved.
 MpIntro_EventScript_Arrive::
 	lockall
-	bufferleadmonspeciesname STR_VAR_1
 	msgbox MpIntro_Text_Welcome, MSGBOX_DEFAULT
-	msgbox MpIntro_Text_Nickname, MSGBOX_YESNO
-	call_if_eq VAR_RESULT, YES, MpIntro_EventScript_Nickname
-	msgbox MpIntro_Text_GoToRoute103, MSGBOX_DEFAULT
 	special MultiplayerIntro_Save
 	goto_if_eq VAR_RESULT, FALSE, MpIntro_EventScript_SaveFailed
 	playse SE_SAVE
+	waitse
 	msgbox MpIntro_Text_Saved, MSGBOX_DEFAULT
 	releaseall
 	end
@@ -254,6 +253,51 @@ MpIntro_EventScript_Nickname::
 MpIntro_EventScript_SaveFailed::
 	msgbox gText_SaveError, MSGBOX_DEFAULT
 	releaseall
+	end
+
+@ The path to Route 101 with no Pokemon yet (multiplayer_rival.c MultiplayerIntro_TryStartGuardScript).
+MpIntro_EventScript_NeedPokemon::
+	lockall
+	msgbox MpIntro_Text_NeedPokemon, MSGBOX_DEFAULT
+	closemessage
+	applymovement LOCALID_PLAYER, MpIntro_Movement_StepBack
+	waitmovement 0
+	releaseall
+	end
+
+MpIntro_Movement_StepBack:
+	walk_down
+	step_end
+
+@ A starter Poke Ball on the table in Birch's lab: the 18-starter screen, then the starter joins the party.
+@ Nothing is saved here: the save of the arrival (or the player's own) is the one a soft reset goes back to.
+MpIntro_EventScript_LabBall::
+	lock
+	special MultiplayerIntro_ChooseLabStarter
+	special MultiplayerIntro_GiveLabStarter
+	goto_if_eq VAR_RESULT, FALSE, MpIntro_EventScript_LabBallNotTaken
+	removeobject LOCALID_BIRCHS_LAB_CHIKORITA_BALL
+	removeobject LOCALID_BIRCHS_LAB_CYNDAQUIL_BALL
+	removeobject LOCALID_BIRCHS_LAB_TOTODILE_BALL
+	playfanfare MUS_OBTAIN_ITEM
+	message MpIntro_Text_ReceivedStarter
+	waitmessage
+	waitfanfare
+	msgbox MpIntro_Text_Nickname, MSGBOX_YESNO
+	call_if_eq VAR_RESULT, YES, MpIntro_EventScript_Nickname
+	msgbox MpIntro_Text_GoToRoute103, MSGBOX_DEFAULT
+	release
+	end
+
+MpIntro_EventScript_LabBallNotTaken::
+	release
+	end
+
+MpIntro_EventScript_LabBirch::
+	lock
+	faceplayer
+	msgbox MpIntro_Text_BirchChooseOne, MSGBOX_DEFAULT
+	release
 	end
 
 @ ---------------------------------------------------------------------------------------------------------
@@ -315,8 +359,27 @@ MpRival_Text_LilycovePassed:
 	.string "is behind you!$"
 
 MpIntro_Text_Welcome:
-	.string "{PLAYER} received the {STR_VAR_1}\n"
-	.string "from PROF. BIRCH!$"
+	.string "Welcome to LITTLEROOT TOWN, {PLAYER}!\p"
+	.string "Your first POKéMON is waiting in\n"
+	.string "PROF. BIRCH's LAB, south of here.\p"
+	.string "Choose one from the POKé BALLS\n"
+	.string "on the table there.$"
+
+MpIntro_Text_NeedPokemon:
+	.string "There are wild POKéMON in the tall\n"
+	.string "grass of ROUTE 101!\p"
+	.string "Get your first POKéMON at\n"
+	.string "PROF. BIRCH's LAB before you go.$"
+
+MpIntro_Text_ReceivedStarter:
+	.string "{PLAYER} received the {STR_VAR_1}!$"
+
+MpIntro_Text_BirchChooseOne:
+	.string "PROF. BIRCH: Welcome, {PLAYER}!\p"
+	.string "The POKé BALLS on that table hold\n"
+	.string "POKéMON from every region I know.\p"
+	.string "Choose the one you like best as your\n"
+	.string "partner. It's yours to keep!$"
 
 MpIntro_Text_Nickname:
 	.string "Give a nickname to the\n"

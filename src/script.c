@@ -14,6 +14,10 @@
 #include "field_message_box.h"
 
 #include "dexnav.h"
+#ifdef PORTABLE
+#include "multiplayer_rival.h"
+#endif
+#line 17 // gba-line
 
 #define RAM_SCRIPT_MAGIC 51
 
@@ -435,6 +439,10 @@ void RunOnLoadMapScript(void)
 void RunOnTransitionMapScript(void)
 {
     MapHeaderRunScriptType(MAP_SCRIPT_ON_TRANSITION);
+#ifdef PORTABLE
+    MultiplayerIntro_OnTransition(); // Update 32: the starter table in Birch's lab
+#endif
+#line 438 // gba-line
 }
 
 void RunOnResumeMapScript(void)

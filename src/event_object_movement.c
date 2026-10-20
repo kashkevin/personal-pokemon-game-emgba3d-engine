@@ -2911,7 +2911,10 @@ void TrySpawnObjectEvents(s16 cameraX, s16 cameraY)
 #ifdef PORTABLE
             // Update 31: in a multiplayer world the original rival of a rival checkpoint stays away (and the Route 101
             // Zigzagoon of an early Update 31 character is put away for good: multiplayer_rival.c).
-            if (top <= npcY && bottom >= npcY && left <= npcX && right >= npcX && !FlagGet(template->flagId)
+            // Update 32: the starter Poke Balls in Birch's lab show for a character still to claim one.
+            if (top <= npcY && bottom >= npcY && left <= npcX && right >= npcX
+             && (!FlagGet(template->flagId)
+              || MultiplayerIntro_ShowsObject(template->localId, gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->location.mapGroup))
              && !MultiplayerRival_HidesObject(template->localId, gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->location.mapGroup))
 #else
 #line 2906 // gba-line

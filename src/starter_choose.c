@@ -23,6 +23,10 @@
 #include "window.h"
 #include "constants/songs.h"
 #include "constants/rgb.h"
+#ifdef PORTABLE
+#include "constants/multiplayer_rival.h"
+#endif
+#line 26 // gba-line
 
 #define STARTER_PAGE_SIZE   3
 #define STARTER_PAGE_COUNT  (IS_FRLG ? 1 : 6)
@@ -53,6 +57,13 @@ static void SpriteCB_Pokeball(struct Sprite *sprite);
 static void SpriteCB_StarterPokemon(struct Sprite *sprite);
 
 static u16 sStarterLabelWindowId;
+#ifdef PORTABLE
+// Update 32: opened from a Poke Ball in Birch's lab (multiplayer_rival.c), the screen starts on that ball's
+// Hoenn starter and B leaves it with no choice (gSpecialVar_Result MP_INTRO_NO_STARTER).
+static bool8 sOpenFromLab;
+static u8 sLabSelection;
+#endif
+#line 56 // gba-line
 
 const u16 gBirchBagGrass_Pal[] = INCGFX_U16("graphics/starter_choose/tiles.png", ".gbapal");
 static const u16 sPokeballSelection_Pal[] = INCGFX_U16("graphics/starter_choose/pokeball_selection.png", ".gbapal");
@@ -406,6 +417,16 @@ static void VblankCB_StarterChoose(void)
 #define tStarterSelection   data[0]
 #define tPkmnSpriteId       data[1]
 #define tCircleSpriteId     data[2]
+#ifdef PORTABLE
+#define tFromLab            data[3]
+
+void StarterChoose_OpenFromLab(u8 selection)
+{
+    sOpenFromLab = TRUE;
+    sLabSelection = selection < STARTER_PAGE_SIZE ? selection : 1;
+}
+#endif
+#line 409 // gba-line
 
 // Data for sSpriteTemplate_Pokeball
 #define sTaskId data[0]
@@ -481,6 +502,15 @@ void CB2_ChooseStarter(void)
 
     taskId = CreateTask(Task_StarterChoose, 0);
     gTasks[taskId].tStarterSelection = 1;
+#ifdef PORTABLE
+    if (sOpenFromLab)
+    {
+        gTasks[taskId].tStarterSelection = sLabSelection;
+        gTasks[taskId].tFromLab = TRUE;
+        sOpenFromLab = FALSE;
+    }
+#endif
+#line 484 // gba-line
 
     // Create hand sprite
     spriteId = CreateSprite(&sSpriteTemplate_Hand, 120, 56, 2);
@@ -568,6 +598,17 @@ static void Task_HandleStarterChooseInput(u8 taskId)
         gTasks[taskId].tStarterSelection++;
         gTasks[taskId].func = Task_MoveStarterChooseCursor;
     }
+#ifdef PORTABLE
+    else if (JOY_NEW(B_BUTTON) && gTasks[taskId].tFromLab)
+    {
+        // From the lab: back to the field with no starter chosen.
+        PlaySE(SE_SELECT);
+        gSpecialVar_Result = MP_INTRO_NO_STARTER;
+        ResetAllPicSprites();
+        SetMainCallback2(gMain.savedCallback);
+    }
+#endif
+#line 571 // gba-line
 }
 
 static void Task_WaitForStarterSprite(u8 taskId)

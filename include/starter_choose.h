@@ -11,5 +11,8 @@ u16 GetStarterPokemon(u16 chosenStarterId);
 u16 GetPlayerStarterPokemon(void);
 void SavePlayerStarterChoice(u16 choice);
 void CB2_ChooseStarter(void);
+#ifdef PORTABLE
+void StarterChoose_OpenFromLab(u8 selection); // Update 32: the next CB2_ChooseStarter starts there; B backs out
+#endif
 
 #endif // GUARD_STARTER_CHOOSE_H

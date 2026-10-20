@@ -426,6 +426,9 @@ static const u8 *GetInteractedObjectEventScript(struct MapPosition *position, u8
     if (MultiplayerSpawns_IsSpawnObject(&gObjectEvents[objectEventId])
      || MultiplayerWorld_IsEventObject(&gObjectEvents[objectEventId]))
         return GetRamScript(gSpecialVar_LastTalked, EventScript_MultiplayerWorldEvent);
+    // Update 32: the starter Poke Balls in Birch's lab and Birch, while a starter is to be claimed.
+    if ((script = MultiplayerIntro_ObjectScript(&gObjectEvents[objectEventId])) != NULL)
+        return script;
 #endif
 #line 410 // gba-line
     if (PlayerHasFollowerNPC() && objectEventId == GetFollowerNPCObjectId())
@@ -711,6 +714,12 @@ static bool32 TrySetupDiveEmergeScript(void)
 
 bool8 TryStartStepBasedScript(struct MapPosition *position, u16 metatileBehavior, enum Direction direction)
 {
+#ifdef PORTABLE
+    // Update 32: a character with no Pokemon yet is turned back from Route 101 (multiplayer_rival.c).
+    if (MultiplayerIntro_TryStartGuardScript(position) == TRUE)
+        return TRUE;
+#endif
+#line 693 // gba-line
     if (TryStartCoordEventScript(position) == TRUE)
         return TRUE;
     if (TryStartWarpEventScript(position, metatileBehavior) == TRUE)

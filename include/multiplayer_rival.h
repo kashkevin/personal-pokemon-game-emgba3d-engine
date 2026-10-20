@@ -21,6 +21,7 @@
 
 #ifdef PORTABLE
 struct ObjectEvent;
+struct MapPosition;
 
 extern const u32 gMultiplayerRivalAbiVersion;
 
@@ -41,16 +42,25 @@ void MultiplayerRival_CatchUpNotice(void);   // the overworld banner of MP_RIVAL
 bool32 MultiplayerRival_IsPreparationWord(u32 flags);
 bool32 MultiplayerRival_BattleEnvironment(u8 *environment);
 
-// The streamlined new-character introduction (overworld.c CB2_NewGame).
+// The streamlined new-character introduction (overworld.c CB2_NewGame); Update 32 the short introduction
+// (main_menu.c) with no starter until one is claimed from the Poke Balls in Birch's lab.
 bool32 MultiplayerIntro_IsEnabled(void);
 void MultiplayerIntro_Begin(void);
 void MultiplayerIntro_Save(void);            // special: the introduction's one save
+bool32 MultiplayerIntro_StarterPending(void);
+bool8 MultiplayerIntro_TryStartGuardScript(const struct MapPosition *position); // TryStartStepBasedScript
+void MultiplayerIntro_OnTransition(void);                                        // RunOnTransitionMapScript
+bool32 MultiplayerIntro_ShowsObject(u8 localId, u8 mapNum, u8 mapGroup);         // TrySpawnObjectEvents
+const u8 *MultiplayerIntro_ObjectScript(const struct ObjectEvent *objectEvent);  // GetInteractedObjectEventScript
+void MultiplayerIntro_ChooseLabStarter(void); // special (waits): the 18-starter screen from a lab ball
+void MultiplayerIntro_GiveLabStarter(void);   // special: the chosen starter joins the party, once
 
 // --selftest-rival and the field checks (tools/pc_port/rival_check.py).
 void MultiplayerRival_TestSetRecord(const u8 *record);
 u8 MultiplayerRival_TestMode(u32 checkpoint, u8 facing);
 void MultiplayerRival_TestSetPreparation(u32 flags);
 void MultiplayerIntro_TestApplyPostState(void);
+void MultiplayerIntro_TestApplyShortIntroState(void);
 #endif
 
 #endif // GUARD_MULTIPLAYER_RIVAL_H

@@ -18,6 +18,7 @@
 #include "field_effect.h"
 #include "field_player_avatar.h"
 #include "field_screen_effect.h"
+#include "fieldmap.h"
 #include "main.h"
 #include "overworld.h"
 #include "pokemon.h"
@@ -28,6 +29,7 @@
 #include "script_pokemon_util.h"
 #include "sound.h"
 #include "starter_choose.h"
+#include "string_util.h"
 #include "task.h"
 #include "constants/battle.h"
 #include "constants/event_objects.h"
@@ -35,6 +37,7 @@
 #include "constants/flags.h"
 #include "constants/heal_locations.h"
 #include "constants/items.h"
+#include "constants/layouts.h"
 #include "constants/map_event_ids.h"
 #include "constants/maps.h"
 #include "constants/region_map_sections.h"
@@ -48,6 +51,9 @@ extern const u8 MpRival_EventScript_RewardRoute103[];
 extern const u8 MpRival_EventScript_RewardRustboro[];
 extern const u8 MpRival_EventScript_RewardLilycove[];
 extern const u8 MpIntro_EventScript_Arrive[];
+extern const u8 MpIntro_EventScript_NeedPokemon[];
+extern const u8 MpIntro_EventScript_LabBall[];
+extern const u8 MpIntro_EventScript_LabBirch[];
 extern const u8 LilycoveCity_EventScript_Rival[];
 
 // Frames a connected game waits for the host's first rival record before it
@@ -551,6 +557,11 @@ bool32 MultiplayerRival_BattleEnvironment(u8 *environment)
 
 // ---------------------------------------------------------------------------
 // The streamlined new-character introduction (docs/update31/intro-post-state.json of the app)
+//
+// Update 32, the short introduction: boy or girl and the name (main_menu.c), then the character starts in
+// Littleroot with no Pokemon and saves. VAR_MULTIPLAYER_STARTER_CHOICE holds MP_INTRO_STARTER_PENDING until
+// the starter is claimed from the Poke Balls on the table in Birch's lab; the story state is the one of a
+// character Birch has sent to Route 103, so Route 101's rescue scene (and its bag of starters) never plays.
 
 bool32 MultiplayerIntro_IsEnabled(void)
 {
@@ -558,11 +569,12 @@ bool32 MultiplayerIntro_IsEnabled(void)
     return !IS_FRLG && getenv("PKMN_ORIGINAL_INTRO") == NULL;
 }
 
-static void ApplyIntroPostState(void)
+static void ApplyIntroState(bool32 hasStarter)
 {
     bool32 male = gSaveBlock2Ptr->playerGender == MALE;
 
-    FlagSet(FLAG_SYS_POKEMON_GET);
+    if (hasStarter)
+        FlagSet(FLAG_SYS_POKEMON_GET);
     FlagSet(FLAG_RESCUED_BIRCH);
     FlagSet(FLAG_HIDE_ROUTE_101_BIRCH_ZIGZAGOON_BATTLE);
     FlagSet(FLAG_HIDE_ROUTE_101_ZIGZAGOON); // the bag script's removeobject of the Zigzagoon
@@ -614,17 +626,13 @@ static void ApplyIntroPostState(void)
     SetLastHealLocationWarp(male ? HEAL_LOCATION_LITTLEROOT_TOWN_BRENDANS_HOUSE_2F : HEAL_LOCATION_LITTLEROOT_TOWN_MAYS_HOUSE_2F);
 }
 
-static void CB2_IntroGiveStarter(void)
+void MultiplayerIntro_Begin(void)
 {
-    u8 metLocation = MAPSEC_ROUTE_101;
-    bool32 male;
+    bool32 male = gSaveBlock2Ptr->playerGender == MALE;
 
-    // The existing 18-starter screen chose; the starter is given as Birch's bag gives it (level 5, no item).
-    SavePlayerStarterChoice(gSpecialVar_Result);
-    ScriptGiveMon(GetStarterPokemon(gSpecialVar_Result), 5, ITEM_NONE);
-    SetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_MET_LOCATION, &metLocation);
-    ApplyIntroPostState();
-    male = gSaveBlock2Ptr->playerGender == MALE;
+    // From CB2_NewGame, after the gender and name (main_menu.c) and NewGameInitData: no starter yet.
+    ApplyIntroState(FALSE);
+    VarSet(VAR_MULTIPLAYER_STARTER_CHOICE, MP_INTRO_STARTER_PENDING);
     ResetTasks();
     ResetInitialPlayerAvatarState();
     ScriptContext_Init();
@@ -634,15 +642,8 @@ static void CB2_IntroGiveStarter(void)
     WarpIntoMap();
     gFieldCallback = FieldCB_WarpExitFadeFromBlack;
     gFieldCallback2 = NULL;
-    sRival.introArrive = TRUE;
+    sRival.introArrive = TRUE; // MpIntro_EventScript_Arrive: where to go, then the save
     SetMainCallback2(CB2_LoadMap);
-}
-
-void MultiplayerIntro_Begin(void)
-{
-    // After the existing gender and name choice (Birch's speech) and NewGameInitData: the existing 18-starter screen.
-    gMain.savedCallback = CB2_IntroGiveStarter;
-    SetMainCallback2(CB2_ChooseStarter);
 }
 
 void MultiplayerIntro_Save(void)
@@ -654,6 +655,124 @@ void MultiplayerIntro_Save(void)
     gDifferentSaveFile = FALSE;
     gSpecialVar_Result = status == SAVE_STATUS_OK;
     TestLogAlways("intro: saved (status %d)", status);
+}
+
+// A character of the short introduction that has not claimed its starter yet. Saves are the only source:
+// a character of the original or the Update 31 introduction never has the marker.
+bool32 MultiplayerIntro_StarterPending(void)
+{
+    return VarGet(VAR_MULTIPLAYER_STARTER_CHOICE) == MP_INTRO_STARTER_PENDING && !FlagGet(FLAG_SYS_POKEMON_GET);
+}
+
+// Route 101's tall grass needs a Pokemon: the path out of Littleroot (10,1)-(11,1) turns the character back.
+bool8 MultiplayerIntro_TryStartGuardScript(const struct MapPosition *position)
+{
+    s32 x = position->x - MAP_OFFSET, y = position->y - MAP_OFFSET;
+
+    if (gSaveBlock1Ptr->location.mapGroup != MAP_GROUP(MAP_LITTLEROOT_TOWN)
+     || gSaveBlock1Ptr->location.mapNum != MAP_NUM(MAP_LITTLEROOT_TOWN)
+     || y > 1 || x < 10 || x > 11 || !MultiplayerIntro_StarterPending())
+        return FALSE;
+    ScriptContext_SetupScript(MpIntro_EventScript_NeedPokemon);
+    return TRUE;
+}
+
+// The table of the post-game Johto starters in Birch's lab holds three Poke Balls while a starter is to be
+// claimed: the original Johto ball objects at the Johto layout's places. Their flags stay set (as a new game
+// sets them), so they show by this rule alone and never again once the starter is claimed.
+static const struct { u8 localId, x, y; } sLabBalls[] =
+{
+    {LOCALID_BIRCHS_LAB_CHIKORITA_BALL,  8, 4}, // Grass: the 18-starter screen opens on Treecko
+    {LOCALID_BIRCHS_LAB_CYNDAQUIL_BALL,  9, 4}, // Fire: Torchic
+    {LOCALID_BIRCHS_LAB_TOTODILE_BALL,  10, 4}, // Water: Mudkip
+};
+
+static bool32 IsLab(u8 mapNum, u8 mapGroup)
+{
+    return mapGroup == MAP_GROUP(MAP_LITTLEROOT_TOWN_PROFESSOR_BIRCHS_LAB) && mapNum == MAP_NUM(MAP_LITTLEROOT_TOWN_PROFESSOR_BIRCHS_LAB);
+}
+
+static s32 LabBall(u16 localId)
+{
+    u32 i;
+
+    for (i = 0; i < ARRAY_COUNT(sLabBalls); i++)
+    {
+        if (sLabBalls[i].localId == localId)
+            return i;
+    }
+    return -1;
+}
+
+// From RunOnTransitionMapScript (script.c), after the lab's own script and before the map and objects load.
+void MultiplayerIntro_OnTransition(void)
+{
+    u32 i;
+
+    if (!IsLab(gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->location.mapGroup) || !MultiplayerIntro_StarterPending())
+        return;
+    SetCurrentMapLayout(LAYOUT_LITTLEROOT_TOWN_PROFESSOR_BIRCHS_LAB_WITH_TABLE);
+    for (i = 0; i < ARRAY_COUNT(sLabBalls); i++)
+        SetObjEventTemplateCoords(sLabBalls[i].localId, sLabBalls[i].x, sLabBalls[i].y);
+}
+
+// From TrySpawnObjectEvents: the lab's balls show although their flags are set.
+bool32 MultiplayerIntro_ShowsObject(u8 localId, u8 mapNum, u8 mapGroup)
+{
+    return IsLab(mapNum, mapGroup) && LabBall(localId) >= 0 && MultiplayerIntro_StarterPending();
+}
+
+// From GetInteractedObjectEventScript: the balls and Birch while the starter is to be claimed.
+const u8 *MultiplayerIntro_ObjectScript(const struct ObjectEvent *objectEvent)
+{
+    if (!IsLab(objectEvent->mapNum, objectEvent->mapGroup) || !MultiplayerIntro_StarterPending())
+        return NULL;
+    if (LabBall(objectEvent->localId) >= 0)
+        return MpIntro_EventScript_LabBall;
+    if (objectEvent->localId == LOCALID_BIRCHS_LAB_BIRCH)
+        return MpIntro_EventScript_LabBirch;
+    return NULL;
+}
+
+static void CB2_LabStarterChosen(void)
+{
+    // gSpecialVar_Result: the starter (0-17) or MP_INTRO_NO_STARTER (backed out with B); the script goes on.
+    SetMainCallback2(CB2_ReturnToFieldContinueScriptPlayMapMusic);
+}
+
+// Special (waits): the 18-starter screen, opened on the type of the ball talked to (gSpecialVar_LastTalked).
+void MultiplayerIntro_ChooseLabStarter(void)
+{
+    s32 ball = LabBall(gSpecialVar_LastTalked);
+
+    StarterChoose_OpenFromLab(ball < 0 ? 0 : ball);
+    gMain.savedCallback = CB2_LabStarterChosen;
+    SetMainCallback2(CB2_ChooseStarter);
+}
+
+// Special: the chosen starter (gSpecialVar_Result) joins the party once. VAR_RESULT TRUE and STR_VAR_1 its
+// species name; FALSE when nothing was given (backed out, or no starter to claim any more).
+void MultiplayerIntro_GiveLabStarter(void)
+{
+    u16 choice = gSpecialVar_Result;
+    u8 metLocation = MAPSEC_LITTLEROOT_TOWN;
+    u16 species;
+
+    gSpecialVar_Result = FALSE;
+    if (choice == MP_INTRO_NO_STARTER || !MultiplayerIntro_StarterPending() || CalculatePlayerPartyCount() != 0)
+        return;
+    species = GetStarterPokemon(choice);
+    // A new Pokemon as Birch's bag gives one (level 5, no item): its personality, IVs and shininess are
+    // rolled now, from the game's random state of this moment.
+    if (ScriptGiveMon(species, 5, ITEM_NONE) != MON_GIVEN_TO_PARTY)
+        return;
+    SetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_MET_LOCATION, &metLocation);
+    SavePlayerStarterChoice(choice);
+    FlagSet(FLAG_SYS_POKEMON_GET);
+    StringCopy(gStringVar1, GetSpeciesName(species));
+    gSpecialVar_Result = TRUE;
+    TestLogAlways("intro: lab starter %d (species %d, shiny %d)", choice, species,
+                  GetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_IS_SHINY, NULL));
 }
 
 // ---------------------------------------------------------------------------
@@ -687,6 +806,12 @@ void MultiplayerRival_TestSetPreparation(u32 flags)
 
 void MultiplayerIntro_TestApplyPostState(void)
 {
-    ApplyIntroPostState();
+    ApplyIntroState(TRUE);
+}
+
+void MultiplayerIntro_TestApplyShortIntroState(void)
+{
+    ApplyIntroState(FALSE);
+    VarSet(VAR_MULTIPLAYER_STARTER_CHOICE, MP_INTRO_STARTER_PENDING);
 }
 #endif // PORTABLE

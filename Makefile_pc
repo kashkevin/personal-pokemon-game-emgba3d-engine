@@ -272,7 +272,7 @@ OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS) $(BFX_QJS_OBJS)
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
-.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-legend check-shiny check-coins check-breeding check-rival check-species-data check-clock check-mp-objects check-spawn-claims check-secret-base check-rewards check-catch-reconcile check-pokenav-map check-ladder check-coop-exp check-coop-controller check-keybinds check-graphics-mode
+.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-legend check-shiny check-coins check-breeding check-rival check-update32 check-species-data check-clock check-mp-objects check-spawn-claims check-secret-base check-rewards check-catch-reconcile check-pokenav-map check-ladder check-coop-exp check-coop-controller check-keybinds check-graphics-mode
 .SUFFIXES:
 .SECONDARY:
 .DELETE_ON_ERROR:
@@ -403,6 +403,12 @@ check-breeding: $(TARGET)
 check-rival: $(TARGET)
 	@./$(TARGET) --selftest-rival > $(OBJ_DIR)/selftest-rival.log 2>&1; status=$$?; \
 	  tail -n 3 $(OBJ_DIR)/selftest-rival.log; exit $$status
+
+# Update 32: the short introduction (no starter, the Route 101 guard), the starter claim in Birch's lab (one claim,
+# all 18 starters, the earlier introductions untouched) and 400,000 claims of the shiny-hunting loop (1/4096).
+check-update32: $(TARGET)
+	@./$(TARGET) --selftest-update32 > $(OBJ_DIR)/selftest-update32.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-update32.log; exit $$status
 
 # Species data, moves, abilities, trainers, wild level tables: fingerprints against the pre-update baseline.
 check-species-data: $(TARGET)

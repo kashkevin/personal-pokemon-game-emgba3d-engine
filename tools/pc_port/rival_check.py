@@ -17,9 +17,9 @@ must be true:
   - Lilycove: the NPC rival stays away; a pass sends the rival home (flags);
   - the battle: a battle whose preparation names a rival checkpoint takes that checkpoint's environment (PLAIN) even
     on tall grass, where an ordinary battle draws GRASS;
-  - the streamlined introduction: New Game goes to the 18-starter screen and on to Littleroot in front of the
-    player's house with a level 5 starter met on Route 101, Birch's lab state 3, no Pokedex / Poke Balls / Running
-    Shoes, and one save.
+  - the streamlined introduction (Update 32, the short introduction): New Game goes on to Littleroot in front of the
+    player's house with no Pokemon (the starter is claimed in Birch's lab: tools/pc_port/intro32_check.py), Birch's
+    lab state 3, no Pokedex / Poke Balls / Running Shoes, and one save.
 
     tools/pc_port/rival_check.py [--binary ./pokeemerald-mp] [--only name,name]
 
@@ -350,20 +350,19 @@ def scenarios():
             spawn = (5, 9) if gender == 0 else (14, 9)
             if (last["group"], last["num"]) != (0, 9) or (last["x"], last["y"]) != spawn:
                 problems.append(f"ended at map {last['group']}.{last['num']} {last['x']},{last['y']}, expected Littleroot 0.9 {spawn}")
-            mon = re.search(r"\| mon (\d+) lv (\d+) met (\d+)", last["rest"])
-            if last["party"] != 1 or not mon or int(mon.group(2)) != 5 or int(mon.group(3)) != 16:
-                problems.append(f"party {last['party']} {mon.groups() if mon else None}: expected one level 5 starter met on Route 101 (16)")
+            if last["party"] != 0:
+                problems.append(f"party {last['party']}: the short introduction gives no Pokemon (the starter waits in the lab)")
             if r.watched(last, "VAR_BIRCH_LAB_STATE") != 3 or r.watched(last, "VAR_LITTLEROOT_INTRO_STATE") != 7 \
-                    or r.watched(last, "FLAG_SYS_POKEMON_GET") != 1:
-                problems.append("the post-introduction state is not Birch's 'go to Route 103' (lab state 3)")
+                    or r.watched(last, "FLAG_SYS_POKEMON_GET") != 0:
+                problems.append("the post-introduction state is not Birch's 'go to Route 103' (lab state 3) before the claim")
             for name in ("FLAG_SYS_POKEDEX_GET", "FLAG_RECEIVED_RUNNING_SHOES", "FLAG_SYS_B_DASH", "FLAG_ADVENTURE_STARTED"):
                 if r.watched(last, name):
                     problems.append(f"{name} granted by the introduction")
             if last["balls"]:
                 problems.append("Poke Balls granted by the introduction")
-            # NewGameInitData points the location at the truck before the introduction takes over (party 0, no field):
-            # the truck, Route 101 or the first battle would show as a row with the starter on those maps, or a battle.
-            if r.ever(lambda row: ((row["group"], row["num"]) in ((25, 40), (0, 16)) and row["party"]) or row["battle"]):
+            # NewGameInitData points the location at the truck before the introduction takes over (no field): the truck,
+            # Route 101 or the first battle would show as the last row on those maps, or a battle.
+            if (last["group"], last["num"]) in ((25, 40), (0, 16)) or r.ever(lambda row: row["battle"]):
                 problems.append("the truck, Route 101 or the first battle happened")
             if not r.trace("intro: saved"):
                 problems.append("the introduction did not save")
@@ -435,7 +434,7 @@ def scenarios():
         ("route110-completed-while-waiting", "the world completes it while the player waits: the player may pass, without a reward",
          dict(route110, PKMN_DEBUG_RIVAL="1,0,0,0,0", PKMN_DEBUG_RIVAL_THEN="900:1,4,0,0,0"), walk_north_short
          + hold("UP", 1700, 20) + presses(1760, 10, 40), completed_while_waiting),
-        ("intro-male", "New Game: starter screen, Littleroot (5,9), lab state 3, nothing earned early, one save",
+        ("intro-male", "New Game: Littleroot (5,9), no Pokemon yet, lab state 3, nothing earned early, one save",
          newgame(0), starter_keys, intro(0)),
         ("intro-female", "the same for a female player: Littleroot (14,9)",
          newgame(1), starter_keys, intro(1)),
