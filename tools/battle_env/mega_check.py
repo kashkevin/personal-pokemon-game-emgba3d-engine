@@ -11,8 +11,8 @@ Cases (the default): one battle each from a save; the test party's lead holds a 
 not). At the action menu the keys a player presses: A (Fight), START (the Mega Evolution trigger), A (the first move);
 then the driver fights the battle to its end with A. Checked: the lead's move menu offered Mega Evolution (or did not)
 and the trigger turned on; the lead became the Mega form its stone makes by the species data, with that form's types and
-Ability, marked as a Mega; the Megas the battle marked; the battle's end; after it, the party's lead in its own form,
-still holding its stone. A picture of each Mega (PKMN_TEST_MEGA_SHOT) and, in 3D, a series of the battle.
+Ability, marked as a Mega, and after its animation drawn with that form's palette (the shiny one for a shiny lead); the
+Megas the battle marked; the battle's end; after it, the party's lead in its own form, still holding its stone. A picture of each Mega (PKMN_TEST_MEGA_SHOT) and, in 3D, a series of the battle.
 
 --sweep: every Mega Stone holder of the form change tables in a wild battle of its own (PKMN_TEST_MEGA_SWEEP; --jobs games
 at once), level 100, Flamethrower first: the same checks and a picture of each Mega. --shiny: the holders shiny (the
@@ -186,7 +186,7 @@ def battles_of(lines):
             species, item, shiny, mega, type1, type2, ability = numbers(line)
             current = dict(holder=holder, lead=dict(species=species, item=item, shiny=shiny, mega=mega,
                                                    types=[type1, type2], ability=ability),
-                           menus=[], battlers={}, outcome=None, after=None, shots=[])
+                           menus=[], battlers={}, outcome=None, after=None, shots=[], palette=None)
             battles.append(current)
         elif current is None:
             continue
@@ -199,6 +199,9 @@ def battles_of(lines):
                 dict(species=species, types=[type1, type2], ability=ability, gimmick=gimmick))
         elif line.startswith("battle over, outcome "):
             current["outcome"] = line.split("battle over, ", 1)[1]
+        elif line.startswith("mega palette: "):
+            battler, species, shiny, normal = numbers(line)
+            current["palette"] = dict(battler=battler, species=species, shiny=shiny, normal=normal)
         elif line.startswith("mega after: "):
             species, item, party, ring = numbers(line)
             current["after"] = dict(species=species, item=item, party=party, ring=ring)
@@ -232,6 +235,13 @@ def judge(battle, facts, mega_expected, megas, lead_species, lead_item, one_mega
             problems.append(f"the lead never showed its Mega form {want} marked as a Mega: {lead_lines[-4:]}")
         if len(marked) < megas:
             problems.append(f"the battle marked Megas on battlers {marked}, fewer than {megas}")
+        # drawn in its own colors: after the Mega animation the lead's sprite palette is the Mega form's shiny one for a
+        # shiny lead, its normal one otherwise (the species data's; every Mega form has a shiny palette of its own)
+        palette, colors = battle["palette"], "shiny" if lead["shiny"] else "normal"
+        if palette is None or palette["species"] != want["species"] or not palette[colors] or (
+                palette["shiny"] and palette["normal"]):
+            problems.append(f"after the Mega animation the lead was not drawn with the Mega form's {colors} palette: "
+                            f"{palette}")
         if one_mega and len([b for b in marked if b % 2 == 0]) != 1:
             problems.append(f"the player's side marked Megas on battlers {[b for b in marked if b % 2 == 0]}, not one")
     else:
@@ -317,10 +327,11 @@ TAKE = PARTY_ITEM + ["320:DOWN", "360:A", "460:A", "560:B", "640:B"]  # TAKE, "R
 
 
 def save_keys(start):
-    """START > SAVE > YES ("Would you like to save the game?"), YES again if it asks to overwrite the saved file,
-    then the closing message."""
+    """START > SAVE > YES ("Would you like to save the game?"), YES again if it asks to overwrite the saved file; the
+    closing message ("... saved the game.") goes by itself after a second, so no A after it (in front of a clerk it
+    would start another conversation); a B for safety."""
     return [f"{start + f}:{k}" for f, k in ((0, "START"), (50, "DOWN"), (80, "DOWN"), (110, "DOWN"), (160, "A"),
-                                            (260, "A"), (380, "A"), (600, "A"), (700, "B"))]
+                                            (260, "A"), (380, "A"), (700, "B"))]
 
 
 def reset_keys(start):
@@ -328,6 +339,23 @@ def reset_keys(start):
     question's cursor starts on NO): tools/pc_port/soft_reset_check.py's reset_keys(start, True, 2)."""
     return [f"{start + f}:{k}" for f, k in ((0, "START"), (60, "DOWN"), (100, "DOWN"), (140, "A"), (200, "UP"),
                                             (240, "UP"), (280, "A"), (400, "UP"), (440, "A"))]
+
+
+# The purchases (PKMN_TEST_WARP to the shop, the player facing down): a tap turns to face the clerk across the counter,
+# then the shop's own lines at fast text, as their pictures showed them. The Game Corner's prize counter: its welcome,
+# what the Ring does, "Trade 25,000 COINS for it?" YES, "Obtained the Mega Ring!", the KEY ITEMS POCKET, "yours to
+# keep", where the stones are sold; then the Shiny Charm's offer: NO (B), "Oh, is that so?" and its second line.
+BUY_RING = ["30:UP", "80:A", "200:A", "320:A", "560:A", "680:A", "800:A", "920:B", "1040:A", "1160:A", "1280:B",
+            "1400:A", "1520:A"]
+# The Mauville dealer (the Ring in the bag): its line and BUY, the first stone (Venusaurite), "How many?" 1, "That will be
+# 60000 COINS." YES, "Here you go!", out of the list, QUIT, "Please come again!".
+BUY_STONE = ["30:LEFT", "80:A", "200:A", "320:A", "420:A", "520:A", "620:A", "720:B", "840:B", "940:A"]
+
+
+def wallet_lines(lines):
+    """The "mega wallet" lines after the field keys began: (coins, money) each."""
+    begun = next((i for i, line in enumerate(lines) if line.startswith("field keys for ")), None)
+    return [] if begun is None else [tuple(numbers(line)) for line in lines[begun:] if line.startswith("mega wallet: ")]
 
 
 def field_lines(lines):
@@ -421,8 +449,43 @@ def run_items(args, facts):
     loaded = [tuple(numbers(line)) for line in lines if line.startswith("mega field: ")]
     if not loaded or loaded[-1][:2] != (charizard, 0) or loaded[-1][3:] != (1, 1):
         problems.append(f"load: the saved state is {loaded[-1:]}, not Charizard holding nothing, one stone, the Ring")
-    return dict(items="give, battle, battle then take then soft reset, take, load", steps=steps, problems=problems,
-                passed=not problems)
+    # 5. the Mega Ring bought at the Game Corner's prize counter for coins, saved; 6. from that save, the Mauville
+    # dealer's first Mega Stone (Venusaurite) bought for coins, saved; 7. that save loaded: the Ring, the stone, the
+    # coins left; the money never changes. The prices are the game's own (facts).
+    corner, mart, venusaurite = facts["MAP_MAUVILLE_CITY_GAME_CORNER"], facts["MAP_MAUVILLE_CITY_MART"], facts["ITEM_VENUSAURITE"]
+    ring_price, stone_price = facts["MP_MEGA_RING_COINS"], facts["PRICE_ITEM_VENUSAURITE"]
+    coins = ring_price + stone_price + 5000
+    ring_dir, lines = step("buy-ring", args.save, dict(PKMN_TEST_BATTLE="field:2500", PKMN_TEST_PARTY=f"{charizard}:50",
+                                                        PKMN_TEST_BAG=f"{facts['ITEM_COIN_CASE']}:1", PKMN_TEST_COINS=str(coins),
+                                                        PKMN_TEST_WARP=f"{corner >> 8}:{corner & 0xFF}:0:12:4",
+                                                        PKMN_TEST_FIELD_KEYS=",".join(BUY_RING + save_keys(1640)),
+                                                        PKMN_TEST_FIELD_SHOTS="250,380,620,700,1100,1220,1450,2100"))
+    seen, wallet = field_lines(lines), wallet_lines(lines)
+    money = wallet[0][1] if wallet else None
+    if not seen or seen[0][4] != 0 or seen[-1][4] != 1:
+        problems.append(f"buy-ring: the Ring before and after {seen[:1]} {seen[-1:]}, not none and then one")
+    if not wallet or wallet[0] != (coins, money) or wallet[-1] != (coins - ring_price, money):
+        problems.append(f"buy-ring: the wallet {wallet[:1]} then {wallet[-1:]}, not {coins} coins less {ring_price}, "
+                        f"the money unchanged")
+    stone_dir, lines = step("buy-stone", os.path.join(ring_dir, "test.sav"),
+                            dict(PKMN_TEST_BATTLE="field:1700", PKMN_TEST_WARP=f"{mart >> 8}:{mart & 0xFF}:0:3:2",
+                                 PKMN_TEST_FIELD_KEYS=",".join(BUY_STONE + save_keys(1060)),
+                                 PKMN_TEST_FIELD_SHOTS="260,380,480,560,640,780,1400"))
+    seen, wallet = field_lines(lines), wallet_lines(lines)
+    left = coins - ring_price - stone_price
+    if not seen or seen[0][3:] != (0, 1) or seen[-1][3:] != (1, 1):
+        problems.append(f"buy-stone: the stones and the Ring before and after {seen[:1]} {seen[-1:]}, not 0 then 1")
+    if not wallet or wallet[0] != (coins - ring_price, money) or wallet[-1] != (left, money):
+        problems.append(f"buy-stone: the wallet {wallet[:1]} then {wallet[-1:]}, not {coins - ring_price} coins less "
+                        f"{stone_price} (Venusaurite, item {venusaurite}), the money unchanged")
+    _, lines = step("bought-load", os.path.join(stone_dir, "test.sav"), dict(PKMN_TEST_BATTLE="field:60"))
+    loaded = [tuple(numbers(line)) for line in lines if line.startswith("mega field: ")]
+    wallet = [tuple(numbers(line)) for line in lines if line.startswith("mega wallet: ")]
+    if not loaded or loaded[-1][3:] != (1, 1) or not wallet or wallet[-1] != (left, money):
+        problems.append(f"bought-load: the saved state is {loaded[-1:]} {wallet[-1:]}, not the stone, the Ring and "
+                        f"{left} coins")
+    return dict(items="give, battle, battle then take then soft reset, take, load, buy the Ring, buy a stone, load",
+                steps=steps, problems=problems, passed=not problems)
 
 
 def run_parade(args, facts, holders):

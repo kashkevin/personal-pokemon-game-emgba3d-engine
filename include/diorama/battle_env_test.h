@@ -80,6 +80,9 @@
  *                            holder alone at that level (default 100) holding its stone (s:
  *                            shiny); then (PKMN_TEST_EXIT) the process ends
  *   PKMN_TEST_PARADE_MEGAS=1 the parade (above) shows the list's Mega forms instead
+ *   PKMN_TEST_COINS          n: the Game Corner coins as the test starts (the Mega Ring and
+ *                            the Mega Stones are bought with coins on PC); with
+ *                            PKMN_TEST_MEGA_LOG the coins and the money logged when they change
  *   PKMN_TEST_FIELD_AFTER    frames: after a fought battle (PKMN_TEST_FIGHT), back on the
  *                            field, PKMN_TEST_FIELD_KEYS for that many frames, not the end
  *   PKMN_TEST_SOFT_RESET     1: the field keys choose the game's own soft reset (START >

@@ -44,6 +44,11 @@
 #include "item.h"
 #include "constants/moves.h"
 #include "constants/opponents.h"
+#include "coins.h"
+#include "money.h"
+#include "constants/maps.h"
+#include "constants/multiplayer_balance.h"
+#include "platform/coin_shop.h"
 #include "diorama/battle_env_test.h"
 #ifndef ENABLE_DIORAMA
 #include "platform/png_write.h"
@@ -139,6 +144,10 @@ static struct
      * (the Classic 2D test build: the GBA frame) */
     int fieldShots[16], fieldShotCount;
     int fieldSeenSpecies, fieldSeenItem, fieldSeenStones, fieldSeenRing;
+    /* PKMN_TEST_COINS=<n>: the Game Corner coins as the test starts; with PKMN_TEST_MEGA_LOG the coins and the money
+     * logged on the field when they change (a purchase at the Mauville dealer or the Game Corner) */
+    int coins;
+    s64 fieldSeenCoins, fieldSeenMoney;
     /* PKMN_TEST_FIELD_AFTER=<frames>: after a fought battle (PKMN_TEST_FIGHT), back on the field, PKMN_TEST_FIELD_KEYS
      * for that many frames instead of the end */
     int fieldAfter;
@@ -214,6 +223,7 @@ static const struct { const char *name; int value; } sFacts[] = {
     FACT(SPECIES_CHARIZARD_MEGA_X), FACT(SPECIES_CHARIZARD_MEGA_Y), FACT(SPECIES_MEWTWO_MEGA_X),
     FACT(SPECIES_MEWTWO_MEGA_Y), FACT(SPECIES_VENUSAUR_MEGA), FACT(SPECIES_BLAZIKEN_MEGA), FACT(SPECIES_ZYGARDE_MEGA),
     FACT(MOVE_EARTHQUAKE), FACT(MOVE_FLAMETHROWER), FACT(GIMMICK_NONE), FACT(GIMMICK_MEGA), FACT(NUM_SPECIES),
+    FACT(ITEM_COIN_CASE), FACT(MAP_MAUVILLE_CITY_GAME_CORNER), FACT(MAP_MAUVILLE_CITY_MART), FACT(MP_MEGA_RING_COINS),
 };
 #undef FACT
 
@@ -221,6 +231,8 @@ static void LogFacts(void)
 {
     for (u32 i = 0; i < sizeof(sFacts) / sizeof(sFacts[0]); i++)
         TestLog("Battle env test: fact %s %d", sFacts[i].name, sFacts[i].value);
+    /* what the Mauville dealer asks for its first stone, in coins (the coin shop's own price) */
+    TestLog("Battle env test: fact PRICE_ITEM_VENUSAURITE %u", CoinShop_StonePrice(ITEM_VENUSAURITE));
     ListMegaStoneHolders();
     for (int i = 0; i < sHolderCount; i++)
         TestLog("Battle env test: fact holder %d species %u item %u mega %u", i, sHolders[i].species, sHolders[i].item,
@@ -284,6 +296,8 @@ static void Init(void)
     for (const char *p = value; p != NULL && *p != '\0' && s.fieldShotCount < 16; p = strchr(p, ','), p = p ? p + 1 : p)
         s.fieldShots[s.fieldShotCount++] = atoi(p);
     s.fieldSeenSpecies = -1;
+    s.fieldSeenCoins = s.fieldSeenMoney = -1;
+    s.coins = EnvInt("PKMN_TEST_COINS", -1);
     value = SDL_getenv("PKMN_TEST_KEYS");
     if (value != NULL)
     {
@@ -619,6 +633,20 @@ static void MegaLogLead(void)
             mega ? (unsigned)gSpeciesInfo[mega].types[1] : 0, mega ? (unsigned)gSpeciesInfo[mega].abilities[0] : 0);
 }
 
+/* PKMN_TEST_MEGA_LOG: once the lead's Mega animation ended, whether its sprite's palette (what the Mega form is drawn
+ * with) is the Mega form's shiny palette or its normal one, by the species data (both 1: the two are the same) */
+static void MegaLogPalette(u32 battler)
+{
+    const u16 *drawn = &gPlttBufferUnfaded[OBJ_PLTT_ID(battler)];
+    u32 species = gBattleMons[battler].species, personality = gBattleMons[battler].personality;
+    const u16 *shiny = GetMonSpritePalFromSpeciesAndPersonality(species, TRUE, personality);
+    const u16 *normal = GetMonSpritePalFromSpeciesAndPersonality(species, FALSE, personality);
+
+    TestLog("Battle env test: mega palette: battler %u species %u shiny %d normal %d", battler, species,
+            shiny != NULL && memcmp(drawn, shiny, PLTT_SIZE_4BPP) == 0,
+            normal != NULL && memcmp(drawn, normal, PLTT_SIZE_4BPP) == 0);
+}
+
 /* PKMN_TEST_MEGA_LOG: in a battle, each frame (the game is between frames), every change of
  *   "mega battler B: species S types T1/T2 ability A gimmick G"  (G its active gimmick: the healthbox's Mega mark)
  *   "mega menu: battler B usable U trigger T"                     (while B's move menu is up; T the trigger is on)
@@ -673,6 +701,8 @@ static void MegaLogFrame(void)
                 s.megaShotPhase = 2;
             if ((s.megaShotPhase == 2 && !playing) || ++s.megaShotWait > MEGA_SHOT_WAIT)
             {
+                if (s.megaLog)
+                    MegaLogPalette(0);
                 s.megaShotPhase = 0;
                 RequestShot(s.sweep ? s.sweepIndex : 0, s.megaShotFrames, "the Mega");
                 s.megaShotPhase = -1;   /* this battle's picture is asked for */
@@ -697,6 +727,12 @@ static void MegaLogField(void)
 
     if (!s.megaLog || gMain.inBattle || SDL_AtomicGet(&s.fieldSeen) == 0 || gSaveBlock1Ptr == NULL)
         return;
+    if (GetCoins() != s.fieldSeenCoins || GetMoney(&gSaveBlock1Ptr->money) != s.fieldSeenMoney)
+    {
+        s.fieldSeenCoins = GetCoins();
+        s.fieldSeenMoney = GetMoney(&gSaveBlock1Ptr->money);
+        TestLog("Battle env test: mega wallet: coins %u money %u", (unsigned)s.fieldSeenCoins, (unsigned)s.fieldSeenMoney);
+    }
     species = GetMonData(lead, MON_DATA_SPECIES);
     item = GetMonData(lead, MON_DATA_HELD_ITEM);
     ring = CheckBagHasItem(ITEM_MEGA_RING, 1);
@@ -777,6 +813,8 @@ static void StartFieldKeys(int frames)
     s.fieldEnd = frames;
     s.fieldKeyFrames = 0;
     s.fieldKeysActive = true;
+    s.fieldSeenSpecies = -1;    /* the field and the wallet logged again: their state as the keys start */
+    s.fieldSeenCoins = s.fieldSeenMoney = -1;
     gSaveBlock2Ptr->optionsTextSpeed = OPTIONS_TEXT_SPEED_FAST;     /* the keys come on a timer: fast text */
     TestLog("Battle env test: field keys for %d frames", frames);
 }
@@ -811,6 +849,11 @@ static void StartBattle(void)
     }
     if (!s.bagDone)
         SetUpTestBag();
+    if (s.coins >= 0)
+    {
+        SetCoins(s.coins);
+        TestLog("Battle env test: coins set to %u", GetCoins());
+    }
     s.bagDone = s.sweep;    /* a sweep's battles share the bag: its Mega Ring once */
     if (s.megaLog)
         MegaLogLead();
@@ -1168,6 +1211,7 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
         s.pressLeft = s.gapLeft = 0;
         s.fightOver = true;
         s.fieldSeenSpecies = -1;    /* the field after it is logged, whatever it shows */
+        s.fieldSeenCoins = s.fieldSeenMoney = -1;
         SDL_AtomicSet(&s.fieldSeen, 0);
         SDL_AtomicSet(&s.menuSeen, 0);
     }
