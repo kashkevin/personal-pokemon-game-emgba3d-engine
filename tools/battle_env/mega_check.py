@@ -53,26 +53,27 @@ KEYS = "30:A,70:START,110:A"
 # battle marks (at least; a Multi's in-game partner and a PKMN_TEST_MEGA trainer may add theirs), more env. one_mega: the
 # player's side marks exactly one (one Mega per trainer).
 CASES = (
-    ("wild", "wild:{SPECIES_POOCHYENA}:30", "{SPECIES_CHARIZARD}:50:i{ITEM_CHARIZARDITE_X}", "{ITEM_MEGA_RING}:1",
+    ("wild", "wild:{SPECIES_POOCHYENA}:30", "{SPECIES_CHARIZARD}:50:i{ITEM_CHARIZARDITE_X}v{MOVE_FLAMETHROWER}", "{ITEM_MEGA_RING}:1",
      True, 1, {}),
-    ("trainer", "trainer:318", "{SPECIES_CHARIZARD}:50:i{ITEM_CHARIZARDITE_Y}", "{ITEM_MEGA_RING}:1", True, 1, {}),
-    ("gym-roxanne", "trainer:265", "{SPECIES_MEWTWO}:70:i{ITEM_MEWTWONITE_X}", "{ITEM_MEGA_RING}:1", True, 1, {}),
-    ("rival-may-shiny", "trainer:532", "{SPECIES_MEWTWO}:70:si{ITEM_MEWTWONITE_Y}", "{ITEM_MEGA_RING}:1", True, 1, {}),
-    ("double-one-mega", "double:271", "{SPECIES_VENUSAUR}:50:i{ITEM_VENUSAURITE},{SPECIES_BLASTOISE}:50:i{ITEM_BLASTOISINITE}",
+    ("trainer", "trainer:318", "{SPECIES_CHARIZARD}:50:i{ITEM_CHARIZARDITE_Y}v{MOVE_FLAMETHROWER}", "{ITEM_MEGA_RING}:1", True, 1, {}),
+    ("gym-roxanne", "trainer:265", "{SPECIES_MEWTWO}:70:i{ITEM_MEWTWONITE_X}v{MOVE_FLAMETHROWER}", "{ITEM_MEGA_RING}:1", True, 1, {}),
+    ("rival-may-shiny", "trainer:532", "{SPECIES_MEWTWO}:70:si{ITEM_MEWTWONITE_Y}v{MOVE_FLAMETHROWER}", "{ITEM_MEGA_RING}:1", True, 1, {}),
+    ("double-one-mega", "double:271",
+     "{SPECIES_VENUSAUR}:50:i{ITEM_VENUSAURITE}v{MOVE_FLAMETHROWER},{SPECIES_BLASTOISE}:50:i{ITEM_BLASTOISINITE}v{MOVE_FLAMETHROWER}",
      "{ITEM_MEGA_RING}:1", True, 1, {"one_mega": True}),
-    ("partner-multi", "partner:602:597:1", "{SPECIES_CHARIZARD}:50:i{ITEM_CHARIZARDITE_X}", "{ITEM_MEGA_RING}:1",
+    ("partner-multi", "partner:602:597:1", "{SPECIES_CHARIZARD}:50:i{ITEM_CHARIZARDITE_X}v{MOVE_FLAMETHROWER}", "{ITEM_MEGA_RING}:1",
      True, 1, {}),
-    ("both-sides", "trainer:759", "{SPECIES_BLAZIKEN}:50:i{ITEM_BLAZIKENITE}", "{ITEM_MEGA_RING}:1", True, 2,
+    ("both-sides", "trainer:759", "{SPECIES_BLAZIKEN}:50:i{ITEM_BLAZIKENITE}v{MOVE_FLAMETHROWER}", "{ITEM_MEGA_RING}:1", True, 2,
      {"PKMN_TEST_MEGA": "1"}),
-    ("no-mega-ring", "wild:{SPECIES_POOCHYENA}:30", "{SPECIES_CHARIZARD}:50:i{ITEM_CHARIZARDITE_X}", "", False, 0, {}),
-    ("another-species-stone", "wild:{SPECIES_POOCHYENA}:30", "{SPECIES_CHARIZARD}:50:i{ITEM_VENUSAURITE}",
+    ("no-mega-ring", "wild:{SPECIES_POOCHYENA}:30", "{SPECIES_CHARIZARD}:50:i{ITEM_CHARIZARDITE_X}v{MOVE_FLAMETHROWER}", "", False, 0, {}),
+    ("another-species-stone", "wild:{SPECIES_POOCHYENA}:30", "{SPECIES_CHARIZARD}:50:i{ITEM_VENUSAURITE}v{MOVE_FLAMETHROWER}",
      "{ITEM_MEGA_RING}:1", False, 0, {}),
-    ("no-mega-form", "wild:{SPECIES_POOCHYENA}:30", "{SPECIES_PIKACHU}:50:i{ITEM_CHARIZARDITE_X}", "{ITEM_MEGA_RING}:1",
+    ("no-mega-form", "wild:{SPECIES_POOCHYENA}:30", "{SPECIES_PIKACHU}:50:i{ITEM_CHARIZARDITE_X}v{MOVE_FLAMETHROWER}", "{ITEM_MEGA_RING}:1",
      False, 0, {}),
     # The World Event's Mega Zygarde is caught as Zygarde-Complete (the form that Mega Evolves into it), a battle form.
     ("zygarde-complete-lead", "wild:{SPECIES_POOCHYENA}:30", "{SPECIES_ZYGARDE_COMPLETE}:50:v{MOVE_EARTHQUAKE}",
      "{ITEM_MEGA_RING}:1", False, 0, {}),
-    ("zygarde-complete-mega", "wild:{SPECIES_POOCHYENA}:30", "{SPECIES_ZYGARDE_COMPLETE}:50:i{ITEM_ZYGARDITE}",
+    ("zygarde-complete-mega", "wild:{SPECIES_POOCHYENA}:30", "{SPECIES_ZYGARDE_COMPLETE}:50:i{ITEM_ZYGARDITE}v{MOVE_FLAMETHROWER}",
      "{ITEM_MEGA_RING}:1", True, 1, {}),
 )
 CONFIG = ("borderBackground=0\nbackgroundOrder=2\nfullscreen=0\nwindowScale=2\nintegerScale=0\nvsync=0\nborder=1\n"
