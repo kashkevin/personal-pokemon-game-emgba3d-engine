@@ -10,6 +10,12 @@
 #include "multiplayer_presence.h"
 #include "platform/mp_bridge.h"
 #include "main.h"
+#include "multiplayer.h"
+#include "multiplayer_ownership.h"
+#include "multiplayer_save.h"
+#include "event_object_movement.h"
+#include "field_player_avatar.h"
+#include "palette.h"
 #include "script.h"
 
 extern const u8 EventScript_SoftResetConfirm[];
@@ -35,7 +41,17 @@ void MultiplayerSoftReset_Begin(void)
         return;
     }
     if (!MultiplayerMenu_OpenPage(MP_MENU_PAGE_SOFT_RESET))
+    {
+        u32 session, incarnation;
+
         MultiplayerPresence_PlayersRefused(); // says why (not connected, link lost, not ready yet)
+        fprintf(stderr, "soft reset: Players refused (connected %d field %d enrolled %d idle %d menu %d locked %d "
+                "script %d fade %d step %d)\n", Multiplayer_IsConnected(), MultiplayerSave_FieldReady(),
+                MultiplayerOwnership_IsEnrolled(), MultiplayerSave_GetIdleBinding(&session, &incarnation),
+                MultiplayerMenu_IsActive(), ArePlayerFieldControlsLocked(), ScriptContext_IsEnabled(),
+                gPaletteFade.active, gPlayerAvatar.tileTransitionState);
+        fflush(stderr);
+    }
     else
         Log("soft reset: Players opened on its page");
 }

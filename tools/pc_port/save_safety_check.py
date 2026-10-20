@@ -128,7 +128,7 @@ class Validator:
                 self.inspect, self.layout, self.ok = inspect_flash, LAYOUT_ID, True
             except Exception:
                 self.ok = False
-            try:  # Update 30's first-time character creation accepts a New Game save only if this succeeds
+            try:  # the app's first-time character creation accepts a New Game save only if this succeeds
                 from emerald_multiplayer.draft_runtime import extract_source_inventory
                 self.inventory = extract_source_inventory
             except Exception:
@@ -143,8 +143,10 @@ class Validator:
             self.party = snapshot.metadata.party_count
             if self.inventory is not None:
                 self.inventory(snapshot)
-            if not 1 <= self.party <= 6:
-                return f"party count {self.party}: Update 30's character creation would refuse it (starter_required)"
+            # Update 32: a new character has no Pokemon until it claims its starter in Birch's lab; the app's
+            # character creation and enrollment accept a party of 0 to 6.
+            if not 0 <= self.party <= 6:
+                return f"party count {self.party}: the app's character creation would refuse it"
             return None
         except Exception as error:  # noqa: BLE001 - any refusal is the finding
             return f"refused by the save validator: {error}"
