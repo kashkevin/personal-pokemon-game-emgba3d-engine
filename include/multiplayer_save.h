@@ -70,6 +70,9 @@ extern const u32 gMultiplayerSaveWindowAbiVersion;
 #define MULTIPLAYER_SAVE_IMPORT_WINDOW 4096
 extern u8 gMultiplayerSaveImportWindow[MULTIPLAYER_SAVE_IMPORT_WINDOW];
 extern const u32 gMultiplayerSaveImportWindowAbiVersion;
+// Update 32: TRUE while the game's save is the canonical image it imported last (a trade's post-image) and the game has
+// not saved since: that image names its own save counter, one lower than the one the game wrote it under.
+bool32 MultiplayerSave_IsImportedCounter(u32 counter);
 #endif
 extern const u32 gMultiplayerEmergencySaveAbiVersion;
 void MultiplayerSave_Init(void);

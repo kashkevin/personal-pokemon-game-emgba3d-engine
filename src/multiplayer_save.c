@@ -110,6 +110,15 @@ static EWRAM_DATA bool8 sEffectSaveActive = FALSE;
 static EWRAM_DATA bool8 sEmergencyActive = FALSE;
 static EWRAM_DATA bool8 sEmergencyValid = FALSE;
 static EWRAM_DATA u8 sEmergencyStatus = MP_SAVE_OK;
+#ifdef PORTABLE
+// Update 32: the counter the last imported canonical image names (a trade's post-image keeps its frozen export's) and
+// the counter this game wrote it under (one higher). A battle preparation built from that canonical image names the
+// first; the game is at the second until it saves again (multiplayer_battle.c PrepareSingles).
+static EWRAM_DATA u32 sImportedSourceCounter = 0;
+static EWRAM_DATA u32 sImportedTargetCounter = 0;
+static EWRAM_DATA bool8 sImportedCounterValid = FALSE;
+#endif
+#line 107 // gba-line
 static const u16 sSectionSizes[14] = {3884, 3968, 3968, 3968, 3664, 3968, 3968, 3968, 3968, 3968, 3968, 3968, 3968, 2400};
 // Bounds from this pinned build's map_groups.json and layouts.json.
 static const u8 sMapCounts[] = {57,5,5,6,7,8,9,7,7,14,8,17,10,23,13,15,15,2,2,2,3,1,1,1,108,61,89,2,1,13,1,1,3,1,5,123,60,62,4,6,8,10,6,8,20,10,8,2,10,4,2,2,1,1,1,2,2,3,2,3,2,1,1,6,5,5,8,8,5,5,1,1,1,2,1};
@@ -1237,6 +1246,11 @@ void MultiplayerSave_Tick(void)
                 }
                 else
                 {
+#ifdef PORTABLE
+                    sImportedSourceCounter = sSourceCounter; sImportedTargetCounter = gSaveCounter;
+                    sImportedCounterValid = TRUE;
+#endif
+#line 1210 // gba-line
                     sState = MP_SAVE_COMMITTED; sPending = FALSE; sOffset = 0; sCrc = 0;
                     sDeadline = sFrame + 600;
                     PublishResponse(&sLastCommand, MP_SAVE_OK, NULL, 0, 0);
@@ -1292,3 +1306,11 @@ void MultiplayerSave_Tick(void)
     }
     gMultiplayerSaveMailbox.state = sState;
 }
+
+#ifdef PORTABLE
+bool32 MultiplayerSave_IsImportedCounter(u32 counter)
+{
+    return sImportedCounterValid && counter == sImportedSourceCounter && gSaveCounter == sImportedTargetCounter
+        && sImportedTargetCounter != sImportedSourceCounter;
+}
+#endif

@@ -777,6 +777,13 @@ static u8 PrepareSingles(const struct MultiplayerBattleControl *c)
 #endif
 #line 608 // gba-line
      || Zero(preparation.rng, 16)) return MP_BATTLE_MALFORMED;
+#ifdef PORTABLE
+    // Update 32: right after a trade the game's save is the canonical post-image it imported, written one save counter
+    // higher than the image names; the party CRC below still has to match. START then checks the counter it holds now.
+    if (preparation.nativeCounter != gSaveCounter && MultiplayerSave_IsImportedCounter(preparation.nativeCounter))
+        preparation.nativeCounter = gSaveCounter;
+#endif
+#line 609 // gba-line
     if (preparation.nativeCounter != gSaveCounter || preparation.trainerId != READ_OTID_FROM_SAVE
      || preparation.partyCrc32 != Crc32((const u8 *)gParties[B_TRAINER_PLAYER], 600)) return MP_BATTLE_ORDER;
     if (MultiplayerOwnership_Query(ownership) != MP_SAVE_OK || Word(ownership + 4)
