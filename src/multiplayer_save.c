@@ -63,6 +63,7 @@ const u32 gMultiplayerSaveWindowAbiVersion = 1;
 EWRAM_DATA u8 gMultiplayerSaveImportWindow[MULTIPLAYER_SAVE_IMPORT_WINDOW] = {0};
 const u32 gMultiplayerSaveImportWindowAbiVersion = 1;
 #endif
+#line 52 // gba-line
 // Opt-in, immutable local preservation. This does not authorize a host commit.
 const u32 gMultiplayerEmergencySaveAbiVersion = 2;
 EWRAM_DATA volatile struct MultiplayerSaveMailbox gMultiplayerSaveMailbox = {0};
@@ -118,7 +119,7 @@ static EWRAM_DATA u32 sImportedSourceCounter = 0;
 static EWRAM_DATA u32 sImportedTargetCounter = 0;
 static EWRAM_DATA bool8 sImportedCounterValid = FALSE;
 #endif
-#line 107 // gba-line
+#line 99 // gba-line
 static const u16 sSectionSizes[14] = {3884, 3968, 3968, 3968, 3664, 3968, 3968, 3968, 3968, 3968, 3968, 3968, 3968, 2400};
 // Bounds from this pinned build's map_groups.json and layouts.json.
 static const u8 sMapCounts[] = {57,5,5,6,7,8,9,7,7,14,8,17,10,23,13,15,15,2,2,2,3,1,1,1,108,61,89,2,1,13,1,1,3,1,5,123,60,62,4,6,8,10,6,8,20,10,8,2,10,4,2,2,1,1,1,2,2,3,2,3,2,1,1,6,5,5,8,8,5,5,1,1,1,2,1};
@@ -584,6 +585,7 @@ void MultiplayerSave_Init(void)
 #ifdef PORTABLE
     (void)*(const volatile u32 *)&gMultiplayerSaveImportWindowAbiVersion;
 #endif
+#line 545 // gba-line
     (void)*(const volatile u32 *)&gMultiplayerEmergencySaveAbiVersion;
     MultiplayerOwnership_InvalidateGrant();
     // Retain the linker-visible ownership marker despite --gc-sections.
@@ -1000,6 +1002,7 @@ static void Handle(const struct MultiplayerSaveControl *command)
         if (status != MP_SAVE_OK) { Error(command, status); return; }
         PublishResponse(command, MP_SAVE_OK, NULL, 0, sOffset); return;
 #endif
+#line 949 // gba-line
     case MP_SAVE_COMMIT:
         if (sState != MP_SAVE_IMPORTING || command->length || sOffset != 131072) { status = MP_SAVE_ORDER; break; }
         if (sCrc != sExpectedCrc || !ValidBanks()) { Error(command, sCrc != sExpectedCrc ? MP_SAVE_CRC : MP_SAVE_VALIDATION); return; }
@@ -1250,7 +1253,7 @@ void MultiplayerSave_Tick(void)
                     sImportedSourceCounter = sSourceCounter; sImportedTargetCounter = gSaveCounter;
                     sImportedCounterValid = TRUE;
 #endif
-#line 1210 // gba-line
+#line 1195 // gba-line
                     sState = MP_SAVE_COMMITTED; sPending = FALSE; sOffset = 0; sCrc = 0;
                     sDeadline = sFrame + 600;
                     PublishResponse(&sLastCommand, MP_SAVE_OK, NULL, 0, 0);
