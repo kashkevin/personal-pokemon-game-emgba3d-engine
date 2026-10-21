@@ -1242,7 +1242,7 @@ TEST("Multiplayer native singles: running expiry remains recovery-held and canno
     u32 i;
     NativeBinding(&f); Preparation(&f); EXPECT_EQ(Submit(&f), MP_BATTLE_OK);
     TrainerAndAck(&f); EXPECT_EQ(Send(&f, MP_BATTLE_START_SINGLES), MP_BATTLE_OK);
-    for (i = 0; i < 600; i++) MultiplayerBattle_Tick();
+    for (i = 0; i < MULTIPLAYER_BATTLE_DEADLINE + MULTIPLAYER_BATTLE_GRACE; i++) MultiplayerBattle_Tick();
     EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_RECOVERY_REQUIRED);
     EXPECT(MultiplayerBattle_IsActive()); EXPECT(MultiplayerBattle_SkipCallbacks()); EXPECT(gSoftResetDisabled);
     EXPECT_EQ(Send(&f, MP_BATTLE_ABORT_PRE_START), MP_BATTLE_TIMEOUT);
@@ -1448,7 +1448,7 @@ TEST("Multiplayer battle channel: expiry keeps callbacks clocks and reset held u
     SetUp(&f, 2, 0); Bind(&f); Emit(&f, 33);
     rng = gRngValue; rng2 = gRng2Value; counter = gSaveCounter;
     party = gParties[B_TRAINER_PLAYER][0]; ownership = *gSaveBlock3Ptr;
-    for (i = 0; i < 600; i++)
+    for (i = 0; i < MULTIPLAYER_BATTLE_DEADLINE + MULTIPLAYER_BATTLE_GRACE; i++)
         MultiplayerBattle_Tick();
     EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_EXPIRED);
     EXPECT(MultiplayerBattle_IsActive()); EXPECT(MultiplayerBattle_PauseClocks());
@@ -1465,6 +1465,33 @@ TEST("Multiplayer battle channel: expiry keeps callbacks clocks and reset held u
     EXPECT_EQ(Send(&f, MP_BATTLE_CLOSE), MP_BATTLE_OK);
     EXPECT(!MultiplayerBattle_IsActive()); EXPECT(!MultiplayerBattle_PauseClocks());
     EXPECT(!gSoftResetDisabled); EXPECT(MultiplayerSave_FieldReady());
+    TearDown(&f);
+}
+
+TEST("Multiplayer battle channel: a held core waits out a grace after its deadline, and a late command still counts")
+{
+    // KNOWN_ISSUES MS-17: a host's own core expired 600 frames (10 s) after its last command while the next
+    // one was held up on its way, though the host route waits 20 s for any answer; the battle stopped.
+    struct ChannelFixture f;
+    u32 i;
+    SetUp(&f, 2, 0); Bind(&f);
+    for (i = 0; i < MULTIPLAYER_BATTLE_DEADLINE; i++)
+        MultiplayerBattle_Tick();
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_CHANNEL);
+    EXPECT_EQ(Send(&f, MP_BATTLE_QUERY), MP_BATTLE_OK);
+    EXPECT_EQ(Word(gMultiplayerBattleMailbox.response.data) & 3, 1); // held, not expired
+    EXPECT_EQ(Word(gMultiplayerBattleMailbox.response.data + 52), 0); // its deadline, so the route's KEEP pace, is unchanged
+    // QUERY did not consume the next command's sequence.
+    f.command.commandSeq--;
+    EXPECT_EQ(Send(&f, MP_BATTLE_KEEP), MP_BATTLE_OK);
+    EXPECT_EQ(Word(gMultiplayerBattleMailbox.response.data + 52), MULTIPLAYER_BATTLE_DEADLINE);
+    for (i = 0; i < MULTIPLAYER_BATTLE_DEADLINE + MULTIPLAYER_BATTLE_GRACE - 1; i++)
+        MultiplayerBattle_Tick();
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_CHANNEL);
+    MultiplayerBattle_Tick();
+    EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_EXPIRED);
+    EXPECT_EQ(Send(&f, MP_BATTLE_CLOSE), MP_BATTLE_OK);
+    EXPECT(!MultiplayerBattle_IsActive()); EXPECT(MultiplayerSave_FieldReady());
     TearDown(&f);
 }
 
@@ -1605,7 +1632,7 @@ TEST("Multiplayer resume: opt-in watchdog suspension retains preparation, cursor
     f.command.kind = MP_BATTLE_KIND_TRAINER; f.command.totalSize = sizeof(trainer);
     EXPECT_EQ(Submit(&f), MP_BATTLE_OK);
     read = f.command; memcpy(trainer, (const void *)gMultiplayerBattleMailbox.response.data, sizeof(trainer));
-    for (u32 i = 0; i < MULTIPLAYER_BATTLE_DEADLINE; i++) MultiplayerBattle_Tick();
+    for (u32 i = 0; i < MULTIPLAYER_BATTLE_DEADLINE + MULTIPLAYER_BATTLE_GRACE; i++) MultiplayerBattle_Tick();
     EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_SUSPENDED);
     EXPECT(MultiplayerBattle_IsActive()); EXPECT(MultiplayerBattle_PauseClocks());
     Next(&f, MP_BATTLE_RESUME_QUERY);
@@ -1673,7 +1700,7 @@ TEST("Multiplayer resume: replacement cores, changed parties of trainers, stale 
     Next(&f, MP_BATTLE_SUSPEND); EXPECT_EQ(SubmitResume(&f), MP_BATTLE_UNSAFE);
     TearDown(&f);
     FullMultiBinding(&f, 0);
-    for (u32 i = 0; i < MULTIPLAYER_BATTLE_DEADLINE; i++) MultiplayerBattle_Tick();
+    for (u32 i = 0; i < MULTIPLAYER_BATTLE_DEADLINE + MULTIPLAYER_BATTLE_GRACE; i++) MultiplayerBattle_Tick();
     EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_EXPIRED);
     Next(&f, MP_BATTLE_SUSPEND); EXPECT_EQ(SubmitResume(&f), MP_BATTLE_UNSAFE);
     TearDown(&f);
@@ -1687,7 +1714,7 @@ TEST("Multiplayer resume: initial opt-in binding arms suspension atomically befo
     f.binding.reserved = 1;
     memcpy(f.command.data, &f.binding, sizeof(f.binding));
     Bind(&f);
-    for (u32 i = 0; i < MULTIPLAYER_BATTLE_DEADLINE; i++) MultiplayerBattle_Tick();
+    for (u32 i = 0; i < MULTIPLAYER_BATTLE_DEADLINE + MULTIPLAYER_BATTLE_GRACE; i++) MultiplayerBattle_Tick();
     EXPECT_EQ(gMultiplayerBattleMailbox.state, MP_BATTLE_SUSPENDED);
     Next(&f, MP_BATTLE_RESUME_QUERY); EXPECT_EQ(SubmitResume(&f), MP_BATTLE_OK);
     EXPECT_EQ(Word(gMultiplayerBattleMailbox.response.data + 64), MP_BATTLE_SUSPENDED | (1 << 8) | (MP_BATTLE_CHANNEL << 16));

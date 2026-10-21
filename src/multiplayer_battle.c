@@ -1688,7 +1688,7 @@ void MultiplayerBattle_Tick(void)
     sFrame++; gMultiplayerBattleMailbox.frame = sFrame;
     FinishNativeReturn();
     if (MultiplayerBattle_IsActive() && sState != MP_BATTLE_EXPIRED && sState != MP_BATTLE_RECOVERY_REQUIRED && sState != MP_BATTLE_SUSPENDED && sState != MP_BATTLE_ADMITTING
-     && (s32)(sFrame - sDeadline) >= 0)
+     && (s32)(sFrame - sDeadline) >= MULTIPLAYER_BATTLE_GRACE)
     {
         if (sResumeArmed) SuspendNative();
         else sState = sStarted ? MP_BATTLE_RECOVERY_REQUIRED : MP_BATTLE_EXPIRED;

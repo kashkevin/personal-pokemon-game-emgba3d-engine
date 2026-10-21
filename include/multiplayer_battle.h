@@ -18,6 +18,16 @@
 #define MULTIPLAYER_BATTLE_CHUNK_SIZE 128
 #define MULTIPLAYER_BATTLE_DIAGNOSTIC_MAGIC 0x44424D45
 #define MULTIPLAYER_BATTLE_DEADLINE 600
+// PC game and test ROM (KNOWN_ISSUES MS-17): a held core gives up only this many frames after its
+// deadline. The deadline itself (the frames left a QUERY reports, so the host route's KEEP pace) is
+// unchanged; with the grace a core waits 30 s for a command, longer than the route's own 20 s wait for
+// any answer, so a command that is slow to arrive is waited out by the route, which records why,
+// instead of the core ending the battle 10 s in. 0 in the GBA ROM.
+#if TESTING || defined(PORTABLE)
+#define MULTIPLAYER_BATTLE_GRACE 1200
+#else
+#define MULTIPLAYER_BATTLE_GRACE 0
+#endif
 
 enum MultiplayerBattleOpcode {
     MP_BATTLE_BIND = 1, MP_BATTLE_QUERY, MP_BATTLE_EMIT_DIAGNOSTIC,
