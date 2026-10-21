@@ -1996,12 +1996,15 @@ void DioramaBattleEnvTest_Watchdog(unsigned int nowMs)
 {
     unsigned int last = (unsigned int)SDL_AtomicGet(&sLastFrameMs);
     int phase = sPlan.phase, next = sPlan.next;
+    // Signed: a frame stamped after nowMs was read (the game thread runs on; the stamp is odd, ms | 1) is no wait.
+    // Unsigned, that difference wrapped to about 4,294,967 s and ended healthy games at once (gameplay CI run 3).
+    int waited = (int)(nowMs - last);
 
     if (last == 0 || phase == PLAN_OFF || phase == PLAN_HANG || phase == PLAN_FINISHED || next >= sPlan.count
-     || nowMs - last < PLAN_NO_FRAME_MS)
+     || waited < PLAN_NO_FRAME_MS)
         return;
-    TestLog("Battle env test: plan target %d %s hang the game made no frame for %u s", sPlan.first + next,
-            sPlanTargets[next].key, (nowMs - last) / 1000);
+    TestLog("Battle env test: plan target %d %s hang the game made no frame for %d s", sPlan.first + next,
+            sPlanTargets[next].key, waited / 1000);
     if (sLogFile != NULL)
         fclose(sLogFile);
     fflush(NULL);
