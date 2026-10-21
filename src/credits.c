@@ -1564,6 +1564,16 @@ static void DeterminePokemonToShow(void)
 
     // Cap the number of Pokémon we care about to NUM_MON_SLIDES, the max we show in the credits scene (-1 for the starter)
     sCreditsData->numCaughtMon = j;
+#if TESTING || defined(PORTABLE)
+    // EmeraldTogether (KNOWN_ISSUES MS-44): no Pokemon registered as caught - the slides show the starter, as for one
+    // caught. The GBA ROM divides by zero below (no trap there; on PC a crash as the credits start).
+    if (j == 0)
+    {
+        sCreditsData->caughtMonIds[0] = starter;
+        sCreditsData->numCaughtMon = j = 1;
+    }
+#endif
+#line 1567 // gba-line
     if (sCreditsData->numCaughtMon < NUM_MON_SLIDES)
         sCreditsData->numMonToShow = j;
     else
