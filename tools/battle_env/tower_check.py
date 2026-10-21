@@ -17,7 +17,8 @@ every opposing Pokemon as the battle built it (species, level = the floor, held 
 the four moves); the battle ended (no freeze, no crash) with the expected outcome; the result waits in the save's Tower
 record (won 2 / lost 3) for the floor and its ticket; no money moved; the party is healed and holds its items again; a
 Mega Stone holder of the floor that came into battle Mega Evolved (PKMN_TEST_MEGA_LOG) in the won run. Exit 0 when every
-check of every run passed; the report is OUT/tower_check.json and a floor-by-floor OUT/tower_check.md.
+check of every run passed; the report is OUT/tower_check.json and a floor-by-floor OUT/tower_check.md. --caps runs the
+experience cap's cases instead (CAP_CASES; OUT/tower_caps.json).
 
     tools/battle_env/tower_check.py --exe ./pokeemerald-mp-bfxtest --save town.sav --out build/tower-check \\
         [--floors 1-100] [--runs won,lost] [--jobs 3] [--speed 4] [--display :99] [--make-save]
@@ -53,7 +54,7 @@ def floors_arg(text):
 
 def parse(lines):
     """The driver's Tower lines: the battle, the foes as built, the end, the own party, the Megas, the outcome."""
-    run = {"battle": None, "foes": [], "end": None, "own": [], "outcome": None, "megas": [], "notes": []}
+    run = {"battle": None, "foes": [], "end": None, "own": [], "outcome": None, "megas": [], "notes": [], "cap": None}
     for line in lines:
         if line.startswith("tower battle floor"):
             floor, mode, opponent, cls, pic, party = numbers(line)
@@ -72,7 +73,9 @@ def parse(lines):
                               record=int(g[4]), money=int(g[5]), was=int(g[6]), cap=int(g[7]))
         elif line.startswith("tower own "):
             n = numbers(line)
-            run["own"].append(dict(slot=n[0], species=n[1], level=n[2], item=n[3], hp=n[9], maxhp=n[10]))
+            run["own"].append(dict(slot=n[0], species=n[1], level=n[2], item=n[3], hp=n[9], maxhp=n[10], exp=n[11]))
+        elif line.startswith("tower floor ") and "cap " in line:
+            run["cap"] = numbers(line)[-1]
         elif line.startswith("battle over, outcome"):
             run["outcome"] = numbers(line)[0]
         elif line.startswith("mega battler "):
@@ -153,6 +156,57 @@ def run_one(args, data, floor, kind):
                 problems=problems, foes=len(run["foes"]), megas=[m["species"] for m in run["megas"]])
 
 
+# --caps: the Tower experience cap in real battles (design section 3), each a won run of floor 5 with one Mewtwo (Slow
+# growth: 5 n^3 / 4 experience at level n), the badges and the Hall of Fame flag set in memory (PKMN_TEST_BADGES,
+# PKMN_TEST_CHAMPION), the Mewtwo one experience point short of its next level (party flag e) unless above the cap:
+# (name, badges, champion, the Mewtwo's level, the cap, what its experience must do: capped - exactly the cap level's;
+# gained - more, below the cap; unchanged - none at all)
+CAP_FLOOR = 5
+CAP_CASES = (
+    ("cap-15-no-badges", 0, 0, 14, 15, "capped"),
+    ("cap-20-one-badge", 1, 0, 14, 20, "gained"),
+    ("cap-60-eight-badges", 8, 0, 59, 60, "capped"),
+    ("cap-100-champion", 8, 1, 59, 100, "gained"),
+    ("above-the-cap", 0, 0, 30, 15, "unchanged"),
+)
+
+
+def slow_exp(level):
+    return 5 * level ** 3 // 4
+
+
+def run_cap(args, case):
+    name, badges, champion, level, cap, expect = case
+    rundir = os.path.join(args.out, name)
+    env = {"PKMN_TEST_BATTLE": f"tower:{CAP_FLOOR}", "PKMN_TEST_AUTOPILOT": "1", "PKMN_TEST_FIGHT": "420",
+           "PKMN_TEST_TOWER_WIN": "1", "PKMN_TEST_BADGES": str(badges), "PKMN_TEST_CHAMPION": str(champion),
+           "PKMN_TEST_PARTY": f"150:{level}" + ("" if expect == "unchanged" else ":e")}
+    if args.speed > 1:
+        env["PKMN_TEST_SPEED"] = str(args.speed)
+    began = time.monotonic()
+    process, output = start(args, rundir, env)
+    code = finish(process, output, 600)
+    run = parse(driver_lines(os.path.join(rundir, "test.log")))
+    before = slow_exp(level) if expect == "unchanged" else slow_exp(level + 1) - 1
+    after = run["own"][0]["exp"] if run["own"] else None
+    problems = []
+    if run["outcome"] != 1:
+        problems.append(f"outcome {run['outcome']} (exit {code}), expected a win")
+    if run["cap"] != cap:
+        problems.append(f"the game's cap {run['cap']}, expected {cap}")
+    if after is None:
+        problems.append("no end logged")
+    elif expect == "capped" and after != slow_exp(cap):
+        problems.append(f"experience {before} -> {after}, expected exactly {slow_exp(cap)} (level {cap})")
+    elif expect == "gained" and not before < after <= slow_exp(cap):
+        problems.append(f"experience {before} -> {after}, expected a gain below {slow_exp(cap)}")
+    elif expect == "unchanged" and after != before:
+        problems.append(f"experience {before} -> {after}, expected none above the cap")
+    return dict(case=name, badges=badges, champion=champion, level=level, cap=cap, expect=expect, exp_before=before,
+                exp_after=after, level_after=run["own"][0]["level"] if run["own"] else None, exit=code,
+                seconds=round(time.monotonic() - began, 1), passed=not problems, problems=problems)
+
+
 def report(args, data, results):
     by_floor = {}
     for r in results:
@@ -185,6 +239,7 @@ def main():
     parser.add_argument("--display", default=os.environ.get("DISPLAY"))
     parser.add_argument("--make-save", action="store_true")
     parser.add_argument("--speed", type=int, default=1, help="PKMN_TEST_SPEED: the game's clock this many times as fast")
+    parser.add_argument("--caps", action="store_true", help="the experience cap's runs instead of the floors")
     args = parser.parse_args()
     args.exe = os.path.abspath(args.exe)
     os.makedirs(args.out, exist_ok=True)
@@ -195,6 +250,13 @@ def main():
     args.save = os.path.abspath(args.save)
     with open(args.data) as source:
         data = json.load(source)
+    if args.caps:
+        results = [run_cap(args, case) for case in CAP_CASES]
+        for result in results:
+            print(json.dumps(result), flush=True)
+        with open(os.path.join(args.out, "tower_caps.json"), "w") as out:
+            json.dump(results, out, indent=1)
+        return 0 if all(r["passed"] for r in results) else 1
     work = [(floor, kind) for floor in floors_arg(args.floors) for kind in args.runs.split(",")]
     results = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:

@@ -54,13 +54,18 @@
  *                            battle against the floor's trainer, its end (healed, held items back, no money, the
  *                            result in the save's Tower record); logged: "tower battle", each "tower foe" as built,
  *                            then at the end "tower end" and each "tower own" Pokemon
+ *   PKMN_TEST_BADGES=n, PKMN_TEST_CHAMPION=0/1  with tower:<floor>, the badges and the Hall of Fame
+ *                            flag in memory (the Tower experience cap's runs)
+ *   PKMN_TEST_TOWER_RECORD=H:P  with save:1, the save's Tower record as a climb that cleared floor H and goes on at
+ *                            P (a launcher proof's fixture: the host imports it on the player's first Tower action)
  *   PKMN_TEST_TOWER_WIN=1    a test advantage for the won runs: the lead's HP full again at each of its turns and its
  *                            most effective move chosen (in memory only)
  *
  * For the battle sprite tests (platform/battle_sprites.h):
  *   PKMN_TEST_PARTY          the player's party instead: species:level[:flags],...
  *                            (flags: s shiny, f female, m male, i<item id> held item,
- *                            v<move id> first move, w<n> every IV n)
+ *                            v<move id> first move, w<n> every IV n, e one experience point
+ *                            short of the next level)
  *   PKMN_TEST_FOE            flags for the foes wild/wild2/legendary make: flags,flags
  *   PKMN_TEST_BAG            items added to the bag: item:count,... (a Mega Ring...)
  *   PKMN_TEST_NAME           the player's name (A-Z a-z 0-9), as the battle starts or saved

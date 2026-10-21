@@ -454,7 +454,7 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
 {
     u32 personality = 0x13579BDF, i;
     int gender = -1, item = 0, move = 0, ivs = MAX_PER_STAT_IVS;
-    bool shiny = false;
+    bool shiny = false, nextLevelShort = false;
 
     for (; flags != NULL && *flags != '\0' && *flags != ',' && *flags != ';'; flags++)
     {
@@ -470,6 +470,8 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
             move = atoi(flags + 1);
         else if (*flags == 'w')
             ivs = atoi(flags + 1);
+        else if (*flags == 'e')
+            nextLevelShort = true;
     }
     for (i = 0; i < 4096 && gender >= 0 && GetGenderFromSpeciesAndPersonality(species, personality) != gender; i++)
         personality += 0x9E3779B1;
@@ -490,6 +492,13 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
     }
     if (move > 0)
         SetMonMoveSlot(mon, move, 0);
+    if (nextLevelShort && level > 0 && level < MAX_LEVEL)
+    {
+        /* e: one experience point short of the next level (the Tower experience cap's runs) */
+        u32 exp = gExperienceTables[gSpeciesInfo[species].growthRate][level + 1] - 1;
+
+        SetMonData(mon, MON_DATA_EXP, &exp);
+    }
     CalculateMonStats(mon);
     TestLog("Battle env test: test Pokemon %d Lv%d%s%s, item %d, first move %d", species, level,
             shiny ? " shiny" : "", gender == MON_FEMALE ? " female" : gender == MON_MALE ? " male" : "", item,
@@ -962,6 +971,27 @@ static void StartTowerFloor(int floor)
     /* The Set battle style (in memory, as PKMN_TEST_STRONG's): the Shift style's "switch?" question after each opposing
      * Pokemon falls has no answer the fight's A presses can give. */
     gSaveBlock2Ptr->optionsBattleStyle = OPTIONS_BATTLE_STYLE_SET;
+    /* PKMN_TEST_BADGES=n and PKMN_TEST_CHAMPION=0/1: the badges and the Hall of Fame flag in memory, for the Tower
+     * experience cap's runs (tools/battle_env/tower_check.py --caps) */
+    if (getenv("PKMN_TEST_BADGES") != NULL)
+    {
+        int badges = EnvInt("PKMN_TEST_BADGES", 0);
+
+        for (int i = 0; i < NUM_BADGES; i++)
+        {
+            if (i < badges)
+                FlagSet(FLAG_BADGE01_GET + i);
+            else
+                FlagClear(FLAG_BADGE01_GET + i);
+        }
+    }
+    if (getenv("PKMN_TEST_CHAMPION") != NULL)
+    {
+        if (EnvInt("PKMN_TEST_CHAMPION", 0) != 0)
+            FlagSet(FLAG_SYS_GAME_CLEAR);
+        else
+            FlagClear(FLAG_SYS_GAME_CLEAR);
+    }
     if (!TowerLegends_TestStartSolo(floor))
         TestLog("Battle env test: tower floor %d does not exist", floor);
     else
@@ -1051,7 +1081,18 @@ static void StartBattle(void)
     }
     else if (strcmp(kind, "save") == 0)
     {
-        u8 status = TrySavingData(SAVE_NORMAL);
+        u8 status;
+        int highest = 0, progress = 0;
+        const char *record = getenv("PKMN_TEST_TOWER_RECORD");
+
+        /* PKMN_TEST_TOWER_RECORD=H:P - the save's Battle Tower record as a climb that cleared floor H and goes on at P */
+        if (record != NULL && sscanf(record, "%d:%d", &highest, &progress) == 2)
+        {
+            TowerLegends_TestSetProgress(highest, progress);
+            TestLog("Battle env test: the Tower record: highest %d, progress %d (valid %d)", (int)TowerLegends_Highest(),
+                    (int)TowerLegends_Progress(), (int)TowerLegends_RecordValid());
+        }
+        status = TrySavingData(SAVE_NORMAL);
 
         TestLog("Battle env test: the test party (%d Pokemon) and bag saved, status %d",
                 gPartiesCount[B_TRAINER_PLAYER], status);
@@ -2118,8 +2159,9 @@ static void ParadeTick(void)
  * the lead's HP is full again, its Attack, Defense, Speed, Sp. Atk, Sp. Def and accuracy stages are +6 (a set-up
  * opponent such as Floor 100's Curse Snorlax cannot knock it out between two of its turns: the autopilot cannot choose
  * a replacement) and the move cursor is on its move that does most against the opposing Pokemon (type effectiveness x
- * power; immunities count as nothing). The battle itself - the AI's turns, damage, switches, Mega Evolution, the end -
- * is the game's own. */
+ * power; immunities count as nothing) - or on Protect while the opposing Pokemon holds a Mega Stone it has not used,
+ * so it acts and Mega Evolves. The battle itself - the AI's turns, damage, switches, Mega Evolution, the end - is the
+ * game's own. */
 static void TowerWinTurn(void)
 {
     static const u16 sCoverage[MAX_MON_MOVES] = {MOVE_ICE_BEAM, MOVE_FLAMETHROWER, MOVE_SHADOW_BALL, MOVE_EARTHQUAKE};
@@ -2135,6 +2177,14 @@ static void TowerWinTurn(void)
     SetMonData(&gParties[B_TRAINER_PLAYER][gBattlerPartyIndexes[player]], MON_DATA_HP, &gBattleMons[player].maxHP);
     for (i = STAT_ATK; i <= STAT_ACC; i++)
         gBattleMons[player].statStages[i] = MAX_STAT_STAGE;
+    /* An opposing Mega Stone holder that has not Mega Evolved yet: Protect this turn, so it chooses a move and Mega
+     * Evolves at the turn's start (an attack first could knock it out before it ever acts) */
+    if (CanMegaEvolve(foe))
+    {
+        gBattleMons[player].moves[MAX_MON_MOVES - 1] = MOVE_PROTECT;
+        gMoveSelectionCursor[player] = MAX_MON_MOVES - 1;
+        return;
+    }
     for (i = 0; i < MAX_MON_MOVES; i++)
     {
         enum Move move = gBattleMons[player].moves[i];

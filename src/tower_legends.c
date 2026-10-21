@@ -740,6 +740,20 @@ void TowerLegends_TestReset(void)
     memset(&sTower, 0, sizeof(sTower));
 }
 
+// A test fixture (the test build's PKMN_TEST_TOWER_RECORD with save:1): the record as a climb that cleared `highest`
+// and goes on at `progress` left it (nothing claimed, nothing waiting).
+void TowerLegends_TestSetProgress(u32 highest, u32 progress)
+{
+    struct MPTowerRecord *record = RecordForWrite();
+
+    if (record == NULL || highest > TOWER_FLOOR_COUNT || progress < 1 || progress > TOWER_FLOOR_COUNT + 1)
+        return;
+    record->highest = highest;
+    record->progress = progress;
+    BumpRevision(record);
+    RecordSeal(record);
+}
+
 void TowerLegends_TestSetPending(u32 outcome, u32 ticket, u32 floor)
 {
     struct MPTowerRecord *record = RecordForWrite();
