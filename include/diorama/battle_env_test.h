@@ -108,7 +108,8 @@
  * For the gameplay checks (tools/qa/gameplay_check.py; the final master update, phase 10):
  *   PKMN_TEST_PLAN           a file of targets, one per line: <key> <kind> <group> <num> <x> <y> <dir> <arg>
  *                            (kind talk: an object, arg its local id; sign, hidden: a background event, arg its
- *                            index; warp: arg the warp's index). For each, from wherever the player is: the target
+ *                            index; warp, trigger: arg the warp's or coordinate trigger's index; a trigger logs its
+ *                            variable's value and the one it runs on). For each, from wherever the player is: the target
  *                            object shown, every other trainer of that map counted as beaten and the target trainer
  *                            as not, a hidden item put back, the party healed; then a warp to x,y facing dir, A (a
  *                            warp: dir held), B through every line and question, A through a battle, until the field

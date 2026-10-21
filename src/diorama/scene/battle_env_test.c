@@ -1009,9 +1009,10 @@ static void StrengthenParty(void)
 /*
  * PKMN_TEST_PLAN=<file>: the gameplay checks (tools/qa/gameplay_check.py). One target per line,
  *     <key> <kind> <group> <num> <x> <y> <dir> <arg>
- * kind talk (an object event; arg its local id), sign or hidden (a background event; arg its index), warp (arg the
- * warp's index). From wherever the player is, the plan warps to x,y on that map, faces dir (U D L R) and presses A
- * (warp: holds dir, a step onto it), then answers what comes as a player would: B through the lines and every
+ * kind talk (an object event; arg its local id), sign or hidden (a background event; arg its index), warp or trigger (a
+ * warp or a coordinate trigger; arg its index). From wherever the player is, the plan warps to x,y on that map, faces
+ * dir (U D L R) and presses A (warp, trigger: holds dir, a step onto it; a trigger logs whether its variable holds the
+ * value it runs on), then answers what comes as a player would: B through the lines and every
  * question (NO), A through a battle (the first move on the first target), until the field is free again. Before
  * each: the target object shown (its hide flag cleared), every other trainer of the map counted as beaten and the
  * target trainer as not (the battle that starts is the one asked for), a hidden item put back, the party healed.
@@ -1023,7 +1024,7 @@ static void StrengthenParty(void)
  */
 #define PLAN_MAX 4096
 #define PLAN_SETTLE 30      /* free field frames that end a target */
-enum { PLAN_TALK, PLAN_SIGN, PLAN_HIDDEN, PLAN_WARP };
+enum { PLAN_TALK, PLAN_SIGN, PLAN_HIDDEN, PLAN_WARP, PLAN_TRIGGER };
 enum { PLAN_OFF, PLAN_START, PLAN_GO, PLAN_ARRIVE, PLAN_ACT, PLAN_RUN, PLAN_DONE, PLAN_HANG, PLAN_FINISHED };
 static struct PlanTarget
 {
@@ -1074,7 +1075,7 @@ static void LoadPlan(const char *path)
         if (index++ < sPlan.first)
             continue;
         t->kind = strcmp(kind, "talk") == 0 ? PLAN_TALK : strcmp(kind, "sign") == 0 ? PLAN_SIGN
-                : strcmp(kind, "hidden") == 0 ? PLAN_HIDDEN : PLAN_WARP;
+                : strcmp(kind, "hidden") == 0 ? PLAN_HIDDEN : strcmp(kind, "trigger") == 0 ? PLAN_TRIGGER : PLAN_WARP;
         t->dir = dir[0] == 'U' ? DIR_NORTH : dir[0] == 'D' ? DIR_SOUTH : dir[0] == 'L' ? DIR_WEST : DIR_EAST;
         t->group = group;
         t->num = num;
@@ -1178,6 +1179,14 @@ static void PlanArrive(void)
         FreezeObjectEventsExceptOne(player);
     }
     ObjectEventTurn(&gObjectEvents[player], t->dir);
+    if (t->kind == PLAN_TRIGGER && events != NULL && t->arg < events->coordEventCount)
+    {
+        /* a coordinate trigger runs its script when its variable holds its value (a weather one: always) */
+        const struct CoordEvent *c = &events->coordEvents[t->arg];
+
+        TestLog("Battle env test: plan target %d %s trigger var %d is %d wants %d", sPlan.first + sPlan.next, t->key,
+                c->trigger, c->trigger != 0 ? VarGet(c->trigger) : -1, c->index);
+    }
     sPlan.mapGroup = gSaveBlock1Ptr->location.mapGroup;
     sPlan.mapNum = gSaveBlock1Ptr->location.mapNum;
     TestLog("Battle env test: plan target %d %s at map %d.%d %d,%d facing %d", sPlan.first + sPlan.next, t->key,
@@ -1318,7 +1327,7 @@ static unsigned short PlanKeys(void)
                 RequestShot((sPlan.first + sPlan.next) % 98, 1, "the target faced");    /* PKMN_TEST_PLAN_SHOTS */
             return 0;
         }
-        if (t->kind == PLAN_WARP)
+        if (t->kind == PLAN_WARP || t->kind == PLAN_TRIGGER)
         {
             if (sPlan.settle < 6 + 24)
                 return t->dir == DIR_NORTH ? DPAD_UP : t->dir == DIR_SOUTH ? DPAD_DOWN

@@ -19,6 +19,8 @@ Kinds and what passes:
     sign      each sign: its script ran and gave the field back
     hidden    each hidden item: an item into the bag and its flag set
     warp      each warp: the destination map reached
+    trigger   each coordinate trigger stepped onto: its script runs exactly when its variable holds the value it runs
+              on (the save's state decides which story events are due), and gives the field back
 A target that keeps the field for longer than the plan's budget is a hang: pictured, and the game started again at the
 next target. A target with no tile to stand on is listed as blocked, with the reason. The report:
 OUT/gameplay_check.json; exit 0 when every visited target passed.
@@ -44,7 +46,7 @@ _spec = importlib.util.spec_from_file_location("qa_inventory", os.path.join(HERE
 inventory_tool = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(inventory_tool)
 
-KINDS = ("trainer", "item", "person", "sign", "hidden", "warp")
+KINDS = ("trainer", "item", "person", "sign", "hidden", "warp", "trigger")
 # Tiles a player does not stand on: waterfalls, currents (they carry the player off), ledges. A warp onto surfable
 # water puts the player on Surf (overworld.c GetAdjustedInitialTransitionFlags): a swimmer is talked to from the water.
 BLOCKED = re.compile(r"WATERFALL|^MB_JUMP_|CURRENT|NO_SURFACING")
@@ -240,10 +242,24 @@ def plan_targets(root, inventory, kinds, maps_filter=None):
             add(warp["key"], "warp", place, "warp", warp["index"],
                 dict(dest=None if dest is None else [dest["group"], dest["num"]], dest_map=warp["dest_map"],
                      behavior=behavior))
+        for trigger in m["triggers"] if "trigger" in kinds else ():
+            if trigger["type"] != "trigger":
+                blocked.append(dict(key=trigger["key"], kind="trigger", map=m["id"],
+                                    reason=f"a {trigger['type']} event (no script to run)"))
+                continue
+            place = None    # a step onto it from a tile beside it
+            if standable(tiles.at(grid, trigger["x"], trigger["y"])):
+                for direction, (dx, dy) in STEP.items():
+                    sx, sy = trigger["x"] - dx, trigger["y"] - dy
+                    if (sx, sy) not in occupied and standable(tiles.at(grid, sx, sy)):
+                        place = (sx, sy, direction)
+                        break
+            add(trigger["key"], "trigger", place, "trigger", trigger["index"],
+                dict(var=trigger["var"], value=trigger["var_value"], script=trigger["script"]))
     return targets, blocked
 
 
-EVENT = re.compile(r"^plan target (\d+) (\S+) (begin|at|battle|map now|end|hang)\b ?(.*)$")
+EVENT = re.compile(r"^plan target (\d+) (\S+) (begin|at|battle|map now|end|hang|trigger)\b ?(.*)$")
 
 
 def parse(lines):
@@ -285,6 +301,9 @@ def parse(lines):
             entry["end"] = fields
         elif what == "hang":
             entry["hang"] = rest
+        elif what == "trigger":     # "var V is X wants Y"
+            numbers = [int(n) for n in re.findall(r"-?\d+", rest)]
+            entry["trigger"] = dict(var=numbers[0], value=numbers[1], wants=numbers[2])
     return out
 
 
@@ -326,6 +345,18 @@ def judge(target, seen):
         if end["own"] == 0:
             return False, f"item {gained} found, but its flag is not set"
         return True, f"item {gained}"
+    if kind == "trigger":
+        trigger = seen.get("trigger")
+        if trigger is None:
+            return False, "its condition was not logged"
+        due = trigger["var"] == 0 or trigger["value"] == trigger["wants"]
+        ran = bool(end["script"] or end["battles"] or seen["maps"])
+        if due and not ran:
+            return False, f"due (var {trigger['var']} = {trigger['value']}) but nothing ran"
+        if not due and ran:
+            return False, f"not due (var {trigger['var']} = {trigger['value']}, runs on {trigger['wants']}) but ran"
+        return True, ("ran and ended" if due else f"not due (var {trigger['var']} = {trigger['value']}, "
+                                                    f"runs on {trigger['wants']}): nothing ran")
     if kind == "warp":
         group, num = (int(v) for v in end["map"].split("."))
         if expect["dest"] is not None and [group, num] == expect["dest"]:
