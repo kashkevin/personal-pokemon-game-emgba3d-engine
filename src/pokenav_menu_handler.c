@@ -511,3 +511,30 @@ u16 GetHelpBarTextId(void)
     struct Pokenav_Menu *menu = GetSubstructPtr(POKENAV_SUBSTRUCT_MAIN_MENU_HANDLER);
     return menu->helpBarIndex;
 }
+
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+#include "diorama/battle_env_test.h"
+
+extern struct PokenavResources *gPokenavResources;    // pokenav.c
+
+// Test builds only (tools/qa/gameplay_check.py): the key the PokéNav tutorial wants (Rustboro's scientist: "please
+// select the POKéNAV"), played as a player would: on its main menu DOWN to MATCH CALL, then A through the list, its
+// CALL and the call (calling anyone ends the tutorial's first part), then B out of the list and the PokéNav.
+// 0 when no PokéNav tutorial is open.
+int DioramaBattleEnvTest_PokenavTutorialKey(void)
+{
+    struct Pokenav_Menu *menu;
+
+    if (gPokenavResources == NULL)
+        return 0;
+    if (GetPokenavMode() == POKENAV_MODE_FORCE_CALL_EXIT)
+        return B_BUTTON;
+    if (GetPokenavMode() != POKENAV_MODE_FORCE_CALL_READY)
+        return 0;
+    menu = GetSubstructPtr(POKENAV_SUBSTRUCT_MAIN_MENU_HANDLER);
+    if (menu != NULL && menu->callback == HandleMainMenuInputTutorial
+     && sMenuItems[menu->menuType][menu->cursorPos] != POKENAV_MENUITEM_MATCH_CALL)
+        return DPAD_DOWN;
+    return A_BUTTON;
+}
+#endif

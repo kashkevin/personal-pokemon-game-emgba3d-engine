@@ -1073,7 +1073,8 @@ static struct
     int lastPhase, phaseFrames;
     int lastProgress;
     u32 progress, rng;
-    int escapeChoice, escapeDowns;
+    int escapeChoice, escapeDowns, menuUp;
+    u16 held;           /* the key of the escape's press being held (chosen once, as the press starts) */
     u32 scriptStarts;       /* gDioramaBattleEnvTestScriptStarts at the arrival */
     s16 warpX, warpY;
     bool warpPending;
@@ -1193,7 +1194,8 @@ static void PlanResetRun(void)
     sPlan.rng = (u32)(sPlan.first + sPlan.next) * 2654435761u + 1;
     sPlan.ending = false;
     sPlan.lastVblank = gMain.vblankCounter1;
-    sPlan.escapeChoice = sPlan.escapeDowns = 0;
+    sPlan.escapeChoice = sPlan.escapeDowns = sPlan.menuUp = 0;
+    sPlan.held = 0;
 }
 
 /* Game thread, the field free: the target's map set up, then the warp to its place. */
@@ -1274,19 +1276,35 @@ static void PlanArrive(void)
     {
         u8 objectId;
         u16 hideFlag = 0;
+        const struct ObjectEventTemplate *own = NULL;
 
         for (u32 i = 0; i < events->objectEventCount; i++)
             if (events->objectEvents[i].localId == t->arg && events->objectEvents[i].kind == OBJ_KIND_NORMAL)
             {
-                hideFlag = events->objectEvents[i].flagId;
-                TryMoveObjectEventToMapCoords(t->arg, t->num, t->group, events->objectEvents[i].x,
-                                              events->objectEvents[i].y);   /* it adds MAP_OFFSET itself */
+                own = &events->objectEvents[i];
+                hideFlag = own->flagId;
+                TryMoveObjectEventToMapCoords(t->arg, t->num, t->group, own->x, own->y);  /* it adds MAP_OFFSET itself */
             }
         /* Beside the player, so in view: not there with its flag set means the game hides it now (a story flag, the
-           map's script); not there with nothing hiding it is a fault of its own ("missing"). */
+           map's script); not there because its map's script put it elsewhere for this story step (setobjectxyperm on
+           the map's saved copy of its place: the Weather Institute's people while Team Aqua holds it) is "moved";
+           not there with nothing hiding or moving it is a fault of its own ("missing"). */
         if (TryGetObjectEventIdByLocalIdAndMap(t->arg, t->num, t->group, &objectId))
-            TestLog("Battle env test: plan target %d %s %s flag %d", sPlan.first + sPlan.next, t->key,
-                    hideFlag != 0 && FlagGet(hideFlag) ? "absent" : "missing", hideFlag);
+        {
+            const struct ObjectEventTemplate *saved = NULL;
+
+            for (u32 i = 0; i < ARRAY_COUNT(gSaveBlock1Ptr->objectEventTemplates); i++)
+                if (gSaveBlock1Ptr->objectEventTemplates[i].localId == t->arg)
+                    saved = &gSaveBlock1Ptr->objectEventTemplates[i];
+            if (hideFlag != 0 && FlagGet(hideFlag))
+                TestLog("Battle env test: plan target %d %s absent flag %d", sPlan.first + sPlan.next, t->key, hideFlag);
+            else if (own != NULL && saved != NULL && (saved->x != own->x || saved->y != own->y))
+                TestLog("Battle env test: plan target %d %s moved to %d,%d from %d,%d", sPlan.first + sPlan.next,
+                        t->key, saved->x, saved->y, own->x, own->y);
+            else
+                TestLog("Battle env test: plan target %d %s missing flag %d", sPlan.first + sPlan.next, t->key,
+                        hideFlag);
+        }
         FreezeObjectEventsExceptOne(player);
     }
     ObjectEventTurn(&gObjectEvents[player], t->dir);
@@ -1316,6 +1334,23 @@ static void PlanArrive(void)
 
         if (MapGridGetCollisionAt(x + MAP_OFFSET, y + MAP_OFFSET) != 0 || replaced)
             TestLog("Battle env test: plan target %d %s closed", sPlan.first + sPlan.next, t->key);
+        /* someone on the player's own tile or on the warp itself in this state (a story's guard standing where the
+           check puts the player down): logged, so a step that then fails is the story's to allow, not a fault */
+        for (u32 i = 0; i < OBJECT_EVENTS_COUNT; i++)
+        {
+            const struct ObjectEvent *o = &gObjectEvents[i];
+            const struct ObjectEvent *me = &gObjectEvents[player];
+
+            if (!o->active || i == player || o->invisible)
+                continue;
+            if ((o->currentCoords.x == me->currentCoords.x && o->currentCoords.y == me->currentCoords.y)
+             || (o->currentCoords.x == x + MAP_OFFSET && o->currentCoords.y == y + MAP_OFFSET))
+            {
+                TestLog("Battle env test: plan target %d %s guarded by object %d", sPlan.first + sPlan.next, t->key,
+                        o->localId);
+                break;
+            }
+        }
     }
     if (t->kind == PLAN_TRIGGER && events != NULL && t->arg < events->coordEventCount)
     {
@@ -1684,7 +1719,17 @@ static unsigned short PlanKeys(void)
         sPlan.settle = 0;
         /* B through the lines and questions; a trainer's YES until its battle begins (the Winstrates ask first) */
         button = t->fight && sPlan.battles == 0 && sPlan.frames <= 1800 ? A_BUTTON : B_BUTTON;
-        if (DioramaBattleEnvTest_EasyChatState() >= 0)
+        if (DioramaBattleEnvTest_PokenavTutorialKey() != 0)
+        {
+            /* the PokéNav tutorial (Rustboro's scientist once the PokéNav is given): MATCH CALL, a call, then out */
+            button = DioramaBattleEnvTest_PokenavTutorialKey();
+        }
+        else if (DioramaBattleEnvTest_ForcedStartMenuUp())
+        {
+            /* its forced START menu: POKéNAV, the fourth row (any other row, or B, asks again) */
+            button = Menu_GetCursorPos() < 3 ? DPAD_DOWN : Menu_GetCursorPos() > 3 ? DPAD_UP : A_BUTTON;
+        }
+        else if (DioramaBattleEnvTest_EasyChatState() >= 0)
         {
             /* an Easy Chat screen (an interviewer, a phrase asked for): B until "Stop giving a comment?" is up, then
                YES above the NO it starts on - a key cycle can lock into a loop between its keyboard and its buttons */
@@ -1695,15 +1740,22 @@ static unsigned short PlanKeys(void)
         {
             /* after half a minute, a script's menu: each choice in turn (DOWN to it, A), the next one the next time a
                menu is up - a menu that asks again until the right one is picked (Wallace's "Where's Rayquaza?"), a
-               YES above a NO, an EXIT at a menu's end (the info desks) */
-            if (Menu_GetCursorPos() < sPlan.escapeChoice && sPlan.escapeDowns < 8)
+               YES above a NO, an EXIT at a menu's end (the info desks). Chosen once per press, as the press starts (this
+               runs every frame: the turn moved on in the hold and the gap too), and not in the menu's first frames (a
+               YES/NO takes no input for its first 5: a press then is lost, its turn with it - the Fan Club
+               interviewer's "Have you forgotten?" answered NO again and again) */
+            if (sPlan.menuUp++ < 8)
+                button = 0;
+            else if (sPlan.pressLeft > 0 || sPlan.gapLeft > 0)
+                button = sPlan.held;
+            else if (Menu_GetCursorPos() < sPlan.escapeChoice && sPlan.escapeDowns < 8)
             {
-                button = DPAD_DOWN;
+                button = sPlan.held = DPAD_DOWN;
                 sPlan.escapeDowns++;
             }
             else
             {
-                button = A_BUTTON;
+                button = sPlan.held = A_BUTTON;
                 sPlan.escapeDowns = 0;
                 sPlan.escapeChoice = (sPlan.escapeChoice + 1) % 8;
             }
@@ -1711,12 +1763,21 @@ static unsigned short PlanKeys(void)
         else if (sPlan.frames > 1800)
         {
             /* after half a minute, otherwise keys drawn at random (seeded: the same run each time) from B, A, DOWN and
-               UP: a choice that has no NO, a list's EXIT where B does nothing - a fixed cycle can lock into a loop */
+               UP, one per press: a choice that has no NO, a list's EXIT where B does nothing - a fixed cycle can lock
+               into a loop */
             static const unsigned short sEscape[] = {B_BUTTON, B_BUTTON, B_BUTTON, A_BUTTON, A_BUTTON, DPAD_DOWN,
                 DPAD_DOWN, DPAD_UP};
-            sPlan.rng = sPlan.rng * 1103515245u + 12345u;
-            button = sEscape[(sPlan.rng >> 16) % ARRAY_COUNT(sEscape)];
+
+            if (sPlan.pressLeft > 0 || sPlan.gapLeft > 0)
+                button = sPlan.held;
+            else
+            {
+                sPlan.rng = sPlan.rng * 1103515245u + 12345u;
+                button = sPlan.held = sEscape[(sPlan.rng >> 16) % ARRAY_COUNT(sEscape)];
+            }
         }
+        if (!DioramaBattleEnvTest_ScriptMenuUp())
+            sPlan.menuUp = 0;
     }
     if (sPlan.pressLeft > 0)
     {

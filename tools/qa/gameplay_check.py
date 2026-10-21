@@ -322,8 +322,8 @@ def plan_targets(root, inventory, kinds, maps_filter=None):
     return targets, blocked
 
 
-EVENT = re.compile(r"^plan target (\d+) (\S+) (begin|at|absent|missing|closed|battle|map now|ending done|ending|end|hang|"
-                   r"trigger)\b ?(.*)$")
+EVENT = re.compile(r"^plan target (\d+) (\S+) (begin|at|absent|moved|missing|closed|guarded|battle|map now|ending done|"
+                   r"ending|end|hang|trigger)\b ?(.*)$")
 
 
 def parse(lines):
@@ -342,8 +342,12 @@ def parse(lines):
             entry["at"] = rest
         elif what == "absent":
             entry["absent"] = True
+        elif what == "moved":
+            entry["moved"] = rest
         elif what == "closed":
             entry["closed"] = True
+        elif what == "guarded":
+            entry["guarded"] = rest
         elif what == "missing":
             entry["missing"] = rest
         elif what == "ending":
@@ -461,6 +465,11 @@ def judge(target, seen):
             return True, f"reached {expect['dest_map']}"
         if expect["dest"] is None and seen["maps"]:
             return True, f"reached map {end['map']} ({expect['dest_map']})"
+        if (expect["dest"] is not None and end["script"]
+                and expect["dest"] in [[int(v) for v in m.split(".")] for m in seen["maps"]]):
+            # arrived, then a scene there took the player on (Team Magma on the Space Center's 2F once Tate and Liza
+            # are beaten: "Take us on?" answered NO sends the player back down the stairs)
+            return True, f"reached {expect['dest_map']}; a scene there then took the player to map {end['map']}"
         return False, f"on map {end['map']} at {end['pos']}, not {expect['dest_map']}"
     return False, f"unknown kind {kind}"
 
@@ -600,11 +609,20 @@ def main():
                 "its map's scene began as the check put the player down there (not through the entrance) and stopped "
                 f"({state['hang'][:80]}); the warps into the map play it from the entrance")))
             continue
-        if state.get("absent") or (state.get("closed") and not state.get("maps")):
-            # Not there in this game's state: an object a story flag or its map's own script hides, a door the map's
-            # script keeps shut (its tile solid) until the story opens it. Blocked, not judged.
+        if state.get("guarded") and not state.get("maps") and target["kind"] == "warp":
+            # someone stands where the player steps from, or on the warp, in this game's state, and the step never
+            # left the map: the story's guard (blocked, not judged)
+            blocked.append(dict(key=target["key"], kind=target["kind"], map=target["map"], runtime=True, reason=(
+                f"guarded: someone stands on its way in this state ({state['guarded']}); the story moves them")))
+            continue
+        if state.get("absent") or state.get("moved") or (state.get("closed") and not state.get("maps")):
+            # Not there in this game's state: an object a story flag or its map's own script hides, one its map's
+            # script puts elsewhere for this story step (the Weather Institute's people while Team Aqua holds it,
+            # Norman at his gym's entrance), a door the map's script keeps shut (its tile solid) until the story opens
+            # it. Blocked, not judged.
             blocked.append(dict(key=target["key"], kind=target["kind"], map=target["map"], runtime=True, reason=(
                 "absent: the game hides it in this state (a story flag or its map's script)" if state.get("absent")
+                else f"moved: its map's script puts it elsewhere in this state ({state['moved']})" if state.get("moved")
                 else "closed: its map keeps this door shut in this state (the story opens it)")))
             continue
         passed, reason = judge(target, seen.get(target["key"]))

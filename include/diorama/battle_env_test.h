@@ -144,6 +144,11 @@ const unsigned char *DioramaBattleEnvTest_TextPosition(void);
 int DioramaBattleEnvTest_ScriptMenuUp(void);
 /* easy_chat.c (read with the game thread parked): -1 no Easy Chat screen, 0 one, 1 its exit prompt up */
 int DioramaBattleEnvTest_EasyChatState(void);
+/* script_menu.c (read with the game thread parked): the PokéNav tutorial's forced START menu taking input */
+int DioramaBattleEnvTest_ForcedStartMenuUp(void);
+/* pokenav_menu_handler.c (read with the game thread parked): the key the PokéNav tutorial wants, 0 when none is
+   open */
+int DioramaBattleEnvTest_PokenavTutorialKey(void);
 /* battle_controller_player.c, HandleInputChooseAction (game thread) */
 void DioramaBattleEnvTest_OnActionMenu(void);
 /* gl_battle.c (render thread): the stem to capture this frame, or NULL */

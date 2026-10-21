@@ -13,7 +13,8 @@ Sources:
 
     tools/qa/coverage.py --plan plan.json --failed failed.txt --test-results check.txt --out build/qa/coverage
 
-Writes OUT/coverage.json (every entry) and OUT/coverage.md (the summary and every entry that did not pass).
+Writes OUT/coverage.json (every entry) and OUT/coverage.md (the summary and every entry that did not pass: failed,
+then blocked and unverified grouped by category and reason).
 """
 import argparse
 import collections
@@ -183,8 +184,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--gameplay", help="a gameplay_check.json")
     parser.add_argument("--plan", help="a plan.json (with --failed)")
-    parser.add_argument("--failed", help="the FAILED (and BLOCKED) lines of a gameplay run whose every other planned "
-                                         "target passed")
+    parser.add_argument("--failed", help="the FAILED (and BLOCKED, or BLOCKED-GROUP) lines of a gameplay run whose "
+                                         "every other planned target passed")
     parser.add_argument("--test-results", help="the test ROM's output, colors taken off")
     parser.add_argument("--known", help="the expected differences: lines 'file | test name' (KNOWN_ISSUES G10)")
     parser.add_argument("--out", required=True)
@@ -199,11 +200,19 @@ def main():
         plan = json.load(open(args.plan))
         failed, found_blocked = {}, []
         if args.failed:
+            group = None
             for line in open(args.failed, encoding="utf-8"):
                 match = re.match(r"^(FAILED|BLOCKED) (\S+): (.*)$", line.strip())
-                if match and match.group(1) == "FAILED":
+                grouped = re.match(r"^BLOCKED-GROUP (.*)$", line.strip())
+                if grouped:     # the report job's grouped form (run 6 on): a reason, then its keys on indented lines
+                    group = grouped.group(1)
+                elif group is not None and line.startswith("    ") and line.strip():
+                    found_blocked += [dict(key=key, reason=group) for key in line.split()]
+                elif match and match.group(1) == "FAILED":
+                    group = None
                     failed[match.group(2)] = match.group(3)
                 elif match:     # blocked in the game itself (a story object this save hides, an object on a trigger)
+                    group = None
                     found_blocked.append(dict(key=match.group(2), reason=match.group(3)))
             keys = {b["key"] for b in found_blocked}
             plan = dict(plan, targets=[t for t in plan["targets"] if t["key"] not in keys],
@@ -228,6 +237,15 @@ def main():
         lines.append(f"| {category} | {counts['passed']} | {counts['expected_difference']} | {counts['failed']} | "
                      f"{counts['blocked']} | {counts['unverified']} |")
     lines += ["", "## Failed", ""] + [f"- `{e['key']}`: {e['evidence']}" for e in entries if e["status"] == "failed"]
+    # blocked and unverified, each with its reason: grouped by category and reason, every key listed
+    for status in ("blocked", "unverified"):
+        groups = collections.defaultdict(list)
+        for entry in entries:
+            if entry["status"] == status:
+                groups[(entry["category"], entry["evidence"])].append(entry["key"])
+        lines += ["", f"## {status.capitalize()}", ""]
+        for (category, evidence), keys in sorted(groups.items()):
+            lines += [f"- {category}, {len(keys)}: {evidence}", "  " + ", ".join(f"`{k}`" for k in sorted(keys))]
     with open(os.path.join(args.out, "coverage.md"), "w") as out:
         out.write("\n".join(lines) + "\n")
     print(json.dumps({k: dict(v) for k, v in summary.items()}))

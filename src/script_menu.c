@@ -1411,4 +1411,13 @@ int DioramaBattleEnvTest_ScriptMenuUp(void)
 {
     return FuncIsActiveTask(Task_HandleMultichoiceInput) || FuncIsActiveTask(Task_HandleYesNoInput);
 }
+
+// The PokéNav tutorial's forced START menu (Rustboro's scientist: only POKéNAV, its fourth row, goes on; any other row
+// or B asks again) taking input. data[7] is the multichoice's id (tMultichoiceId).
+int DioramaBattleEnvTest_ForcedStartMenuUp(void)
+{
+    u8 taskId = FindTaskIdByFunc(Task_HandleMultichoiceInput);
+
+    return taskId != TASK_NONE && gTasks[taskId].data[7] == MULTI_FORCED_START_MENU;
+}
 #endif
