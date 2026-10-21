@@ -65,6 +65,10 @@
 #define MP_REWARD_BP_DEBIT          3
 #define MP_REWARD_CATCH_KEEP        4 // payload = event number (23 bits): the host confirms this save's World Event catch
 #define MP_REWARD_CATCH_RELEASE     5 // ... or says another trainer caught it first: the duplicate is released
+// Battle Tower: Legends (tower_legends.h): reward kinds 6 (the record) and 7 (a milestone Pokemon), and world action 7
+// (a Tower battle's result: eventId the ticket, species the floor).
+#define MP_WORLD_ACTION_TOWER       7
+bool32 MultiplayerWorld_PostTowerAction(u8 result, u32 ticket, u16 floor);
 bool32 MultiplayerWorld_IsRewardWord(s32 delta);
 u32 MultiplayerWorld_ApplyRewardWord(s32 delta, u8 *result);
 // --selftest-catch-reconcile

@@ -28,8 +28,10 @@ _Static_assert(offsetof(struct MultiplayerMenuScreen, rows) == 68, "Menu row off
 
 const u32 gMultiplayerMenuAbiVersion = MP_MENU_ABI;
 #ifdef PORTABLE
+#include "tower_legends.h"
 const u32 gMultiplayerMenuReleaseAbiVersion = MP_MENU_RELEASE_ABI;
-#define MENU_FLAGS_MAX MP_MENU_FLAG_RELEASE
+// Battle Tower: Legends (tower_legends.h): flags 4 start a solo floor, 5 open Hyper Training.
+#define MENU_FLAGS_MAX MP_MENU_FLAG_HYPER_TRAINING
 #else
 #define MENU_FLAGS_MAX 2
 #endif
@@ -67,13 +69,44 @@ static bool32 ValidText(const u8 *text, u32 size)
     return FALSE;
 }
 
+#ifdef PORTABLE
+// Battle Tower: Legends: a Tower screen (flags 4 or 5) has no rows; flags 4 carry the solo command in the rows' bytes.
+static bool32 ValidTowerScreen(const struct MultiplayerMenuScreen *screen)
+{
+    struct TowerLegendsCommand command;
+    const u8 *rows = (const u8 *)screen->rows;
+
+    if (screen->count != 0 || screen->reserved[0] != 0 || screen->reserved[1] != 0)
+        return FALSE;
+    if (screen->flags == MP_MENU_FLAG_HYPER_TRAINING)
+        return Zero(rows, sizeof(screen->rows));
+    memcpy(&command, rows, sizeof(command));
+    return TowerLegends_ValidCommand(&command) && Zero(rows + sizeof(command), sizeof(screen->rows) - sizeof(command));
+}
+#endif
+
+#line 63 // gba-line
 bool32 MultiplayerMenu_ValidateScreen(const struct MultiplayerMenuScreen *screen)
 {
     u32 admissionAction = screen->reserved[0] | screen->reserved[1] << 8;
+#ifdef PORTABLE
+    // Bytes 238-239: the native UI's Tower screen (style, argument); zero otherwise.
+    if (!TowerLegends_ValidStyle(screen->reserved[2], screen->reserved[3]))
+        return FALSE;
+    if (screen->flags == MP_MENU_FLAG_TOWER_SOLO || screen->flags == MP_MENU_FLAG_HYPER_TRAINING)
+        return screen->ackRequest && screen->screen && (screen->backAction == 0 || screen->backAction == 7)
+            && ValidText(screen->title, sizeof(screen->title)) && ValidText(screen->status, sizeof(screen->status))
+            && ValidTowerScreen(screen);
+#endif
+#line 66 // gba-line
     if (!screen->ackRequest || !screen->screen || screen->flags > MENU_FLAGS_MAX || screen->count > 6
      || (screen->backAction != 0 && screen->backAction != 7)
      || !ValidText(screen->title, sizeof(screen->title)) || !ValidText(screen->status, sizeof(screen->status))
+#ifndef PORTABLE // PC: the style bytes were checked above
+#line 69 // gba-line
      || !Zero(screen->reserved + 2, 2)
+#endif
+#line 70 // gba-line
      || (admissionAction && (*(const volatile u32 *)&gMultiplayerBattleResumeAbiVersion != MULTIPLAYER_BATTLE_RESUME_ABI
           || screen->flags || admissionAction > screen->count
           || screen->rows[admissionAction - 1].action != admissionAction))) return FALSE;
@@ -337,6 +370,22 @@ static void ReadScreen(void)
     if (screen.flags == 2) return;
 #ifdef PORTABLE
     if (screen.flags == MP_MENU_FLAG_RELEASE) return;   // a release for a latch that has already ended
+    // Battle Tower: Legends: the host's answer to this window's choice closes it; once the field is calm the game starts
+    // the solo floor (flags 4) or opens Hyper Training (flags 5).
+    if (screen.flags == MP_MENU_FLAG_TOWER_SOLO || screen.flags == MP_MENU_FLAG_HYPER_TRAINING)
+    {
+        struct TowerLegendsCommand command;
+
+        if (!sMultiplayerMenuWaiting || gMultiplayerMenuMailbox.request.kind != MP_MENU_CHOOSE)
+            return;
+        memcpy(&command, (const u8 *)screen.rows, sizeof(command));
+        Close();
+        if (screen.flags == MP_MENU_FLAG_TOWER_SOLO)
+            TowerLegends_QueueSolo(&command);
+        else
+            TowerLegends_QueueHyperTraining();
+        return;
+    }
 #endif
 #line 264 // gba-line
     // A host-requested close may retain the last screen revision after an RPC
@@ -441,6 +490,8 @@ bool32 MultiplayerMenu_NativeUiState(struct NativeMpMenu *out)
     memcpy(out->title, sMultiplayerMenuScreen.title, sizeof(sMultiplayerMenuScreen.title));
     memcpy(out->status, sMultiplayerMenuScreen.status, sizeof(sMultiplayerMenuScreen.status));
     admission = sMultiplayerMenuScreen.reserved[0] | sMultiplayerMenuScreen.reserved[1] << 8;
+    out->towerStyle = sMultiplayerMenuScreen.reserved[2];
+    out->towerArg = sMultiplayerMenuScreen.reserved[3];
     for (u32 row = 0; row < out->count; row++)
     {
         memcpy(out->rows[row], sMultiplayerMenuScreen.rows[row].label, sizeof(sMultiplayerMenuScreen.rows[row].label));

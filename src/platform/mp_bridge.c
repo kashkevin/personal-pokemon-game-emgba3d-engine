@@ -166,6 +166,8 @@ const char *MpBridge_CheckCaps(const struct MpBridgeCaps *c)
         return "invalid save import window";
     if (c->menuOpenPage && (c->menu != 2 || c->menuOpenPage != 1))
         return "invalid menu open page capability";
+    if (c->tower && (c->tower != 1 || c->menuOpenPage != 1 || c->world != 1))
+        return "invalid Battle Tower capability";
     if (c->menu > 2)
         return "invalid Players menu capability";
     if (c->tradeEffectPrepare && (!c->trade || c->menu != 2 || c->tradeEffectPrepare != 1))
@@ -287,7 +289,7 @@ static bool ValidOutbreakMarker(const uint8_t *r)
 }
 
 /* validWorldInbound */
-static bool ValidWorldInbound(const uint8_t *p, size_t length)
+static bool ValidWorldInbound(const struct MpBridge *b, const uint8_t *p, size_t length)
 {
     uint32_t seen[3];
     unsigned seenCount = 0;
@@ -329,10 +331,12 @@ static bool ValidWorldInbound(const uint8_t *p, size_t length)
     walletSeq = U32(p + 180);
     walletDelta = (int32_t)U32(p + 184);
     teammate = U32(p + 188);
-    /* money (+-999,999) or a Frontier reward word: bit 30, kind 1-5 in bits 24-27 (src/multiplayer_world.c) */
+    /* money (+-999,999) or a reward word: bit 30, kind 1-5 in bits 24-27 (src/multiplayer_world.c); with the Battle
+     * Tower also kinds 6 (its record) and 7 (a milestone Pokemon) */
     if (walletSeq > 0xFFFF || walletDelta < -999999
      || (walletDelta > 999999 && (((uint32_t)walletDelta & 0x70000000u) != 0x40000000u
-                                  || ((((uint32_t)walletDelta) >> 24) & 0xFu) < 1 || ((((uint32_t)walletDelta) >> 24) & 0xFu) > 5))
+                                  || ((((uint32_t)walletDelta) >> 24) & 0xFu) < 1
+                                  || ((((uint32_t)walletDelta) >> 24) & 0xFu) > (Enabled(b->caps.tower) ? 7u : 5u)))
      || (walletSeq == 0) != (walletDelta == 0))
         return false;
     if (teammate != 0)
@@ -523,10 +527,31 @@ static bool ValidMenuScreen(const struct MpBridge *b, const uint8_t *p, size_t l
     count = p[9];
     back = U16(p + 10);
     admission = U16(p + 236);
+    /* Battle Tower: Legends (tower=1, src/tower_legends.c): bytes 238-239 a Tower screen's style (0-8) and argument
+     * (a floor, 0-100; zero without a style); flags 4 a solo floor's command in the rows area (no rows), flags 5 open
+     * Hyper Training (no rows, the rows area zero). */
+    if (Enabled(b->caps.tower))
+    {
+        if (p[238] > 8 || p[239] > 100 || (p[238] == 0 && p[239] != 0))
+            return false;
+        if (flags == 4 || flags == 5)
+        {
+            const uint8_t *command = p + 68;
+
+            if (ack == 0 || revision == 0 || count != 0 || admission != 0 || (back != 0 && back != 7)
+             || !MenuText(p + 12, 24) || !MenuText(p + 36, 32))
+                return false;
+            if (flags == 5)
+                return AllZero(p + 68, 168);
+            return U32(command) == 0x31525754u /* "TWR1" */ && U32(command + 4) != 0 && command[4] != 0
+                && command[12] >= 1 && command[12] <= 100 && command[13] == 1
+                && AllZero(command + 14, 18) && AllZero(p + 100, 136);
+        }
+    }
     /* Flags 1 close, 2 reopen a held trade, 3 release a refused Enter battle latch (menuRelease). */
     if (ack == 0 || revision == 0 || flags > (b->caps.menu == 2 ? (Enabled(b->caps.menuRelease) ? 3u : 2u) : 1u) || count > 6
      || (back != 0 && back != 7) || !MenuText(p + 12, 24) || !MenuText(p + 36, 32)
-     || !AllZero(p + 68 + count * 28, 168 - count * 28) || !AllZero(p + 238, 2))
+     || !AllZero(p + 68 + count * 28, 168 - count * 28) || (!Enabled(b->caps.tower) && !AllZero(p + 238, 2)))
         return false;
     if (admission != 0 && (!Enabled(b->caps.battleResume) || b->caps.menu != 2 || flags != 0
      || admission > count || U16(p + 68 + (admission - 1) * 28) != admission))
@@ -1120,7 +1145,7 @@ static void PollMenu(struct MpBridge *b)
     /* An OPEN names no action, or (menuOpenPage, Update 32) its page: 1 the soft reset. */
     if (seq == 0 || action > 7 || kind < 1 || kind > 3 || !AllZero(payload + 11, 5)
      || (kind == 2 && (screen == 0 || action == 0)) || (kind == 3 && action != 0)
-     || (kind == 1 && action > (Enabled(b->caps.menuOpenPage) ? 1u : 0u))
+     || (kind == 1 && action > (Enabled(b->caps.tower) ? 2u : Enabled(b->caps.menuOpenPage) ? 1u : 0u))
      || (kind == 1 && screen != 0))
     {
         Stop(b, "invalid menu request", true);
@@ -1512,7 +1537,7 @@ static bool Dispatch(struct MpBridge *b, const uint8_t *payload, size_t size)
     }
     else if (payload[0] == 'N')
     {
-        if (!Enabled(b->caps.world) || !ValidWorldInbound(rest, restLength)
+        if (!Enabled(b->caps.world) || !ValidWorldInbound(b, rest, restLength)
          || !CommitWorld(b, rest, restLength))
         {
             Stop(b, "invalid shared-world update", true);
@@ -2066,6 +2091,7 @@ typedef int MpSocket;
 #include "multiplayer_world.h"
 #include "save.h"
 #include "character_customization.h"
+#include "tower_legends.h"
 
 extern const u32 gMultiplayerPresenceAnimationAbiVersion; /* multiplayer.c */
 extern const u32 gMultiplayerOwnershipAbi;                /* multiplayer_ownership.c */
@@ -2239,9 +2265,9 @@ bool MpBridge_Configure(const char *path)
     long port = -1;
     uint8_t token[32];
     bool haveToken = false;
-    bool optIn[4] = {false, false, false, false};
-    static const char *const sOptIns[4] = {
-        "trade_effect_prepare=1", "trade_effect_save=1", "trade_effect_choice=1", "menu_open_page=1"};
+    bool optIn[5] = {false, false, false, false, false};
+    static const char *const sOptIns[5] = {
+        "trade_effect_prepare=1", "trade_effect_save=1", "trade_effect_choice=1", "menu_open_page=1", "tower=1"};
     const char *problem;
 
     if (file == NULL)
@@ -2287,6 +2313,8 @@ bool MpBridge_Configure(const char *path)
             optIn[2] = true;
         else if (strcmp(line, sOptIns[3]) == 0 && !optIn[3])
             optIn[3] = true;
+        else if (strcmp(line, sOptIns[4]) == 0 && !optIn[4])
+            optIn[4] = true;
         else if (line[0] != '\0')
         {
             port = 0;
@@ -2324,6 +2352,8 @@ bool MpBridge_Configure(const char *path)
     /* Update 32: the launcher opts in when its manifest has menu_open_page_abi_version 1 (an older launcher would
      * refuse the page an OPEN names). */
     caps.menuOpenPage = optIn[3] ? *(const volatile u32 *)&gMultiplayerMenuOpenPageAbiVersion : 0;
+    /* Battle Tower: Legends: the launcher opts in (tower=1) when its manifest has tower_abi_version 1. */
+    caps.tower = optIn[4] && caps.menuOpenPage == 1 ? *(const volatile u32 *)&gMultiplayerTowerAbiVersion : 0;
     caps.saveWindow = *(const volatile u32 *)&gMultiplayerSaveWindowAbiVersion;
     caps.menu = *(const volatile u32 *)&gMultiplayerMenuAbiVersion;
     /* The trade effect transports are explicit opt-ins of the manifest, never
@@ -2388,14 +2418,15 @@ bool MpBridge_Configure(const char *path)
     sEnabled = true;
     SDL_Log("Multiplayer bridge: companion at 127.0.0.1:%ld; save %u trade %u emergency %u battle %u/%u/%u "
             "window %u menu %u effects %u/%u/%u reset %u/%u world %u spawns %u running %u detail %u ffa %u/%u release %u "
-            "import %u page %u",
+            "import %u page %u tower %u",
             port, (unsigned)caps.save, (unsigned)caps.trade, (unsigned)caps.emergencySave,
             (unsigned)caps.battle, (unsigned)caps.battleResume, (unsigned)caps.battleAdmissionCleanup,
             (unsigned)caps.saveWindow, (unsigned)caps.menu, (unsigned)caps.tradeEffectPrepare,
             (unsigned)caps.tradeEffectSave, (unsigned)caps.tradeEffectChoice, (unsigned)caps.reset,
             (unsigned)caps.resetInput, (unsigned)caps.world, (unsigned)caps.spawns,
             (unsigned)caps.presenceAnimation, (unsigned)caps.presenceDetail, (unsigned)caps.battleFfa,
-            (unsigned)caps.battleFfa3, (unsigned)caps.menuRelease, (unsigned)caps.saveImportWindow, (unsigned)caps.menuOpenPage);
+            (unsigned)caps.battleFfa3, (unsigned)caps.menuRelease, (unsigned)caps.saveImportWindow, (unsigned)caps.menuOpenPage,
+            (unsigned)caps.tower);
     return true;
 }
 
@@ -2407,6 +2438,11 @@ bool MpBridge_IsEnabled(void)
 bool MpBridge_MenuOpenPageEnabled(void)
 {
     return sEnabled && sBridge.caps.menuOpenPage == 1;
+}
+
+bool MpBridge_TowerEnabled(void)
+{
+    return sEnabled && sBridge.caps.tower == 1;
 }
 
 /* The link status the game shows (the pause menu's LINK): see enum MpLinkState. A connection is shown only once the

@@ -49,10 +49,18 @@
  *   PKMN_TEST_LEAD_ONLY=1    the party is its first Pokemon alone (in memory only): a battle
  *                            lost ends when it faints
  *
+ * For Battle Tower: Legends (tools/battle_env/tower_check.py; on Windows too):
+ *   PKMN_TEST_BATTLE=tower:<floor>  the solo floor through the game's own start (src/tower_legends.c): its intro, the
+ *                            battle against the floor's trainer, its end (healed, held items back, no money, the
+ *                            result in the save's Tower record); logged: "tower battle", each "tower foe" as built,
+ *                            then at the end "tower end" and each "tower own" Pokemon
+ *   PKMN_TEST_TOWER_WIN=1    a test advantage for the won runs: the lead's HP full again at each of its turns and its
+ *                            most effective move chosen (in memory only)
+ *
  * For the battle sprite tests (platform/battle_sprites.h):
  *   PKMN_TEST_PARTY          the player's party instead: species:level[:flags],...
  *                            (flags: s shiny, f female, m male, i<item id> held item,
- *                            v<move id> first move)
+ *                            v<move id> first move, w<n> every IV n)
  *   PKMN_TEST_FOE            flags for the foes wild/wild2/legendary make: flags,flags
  *   PKMN_TEST_BAG            items added to the bag: item:count,... (a Mega Ring...)
  *   PKMN_TEST_NAME           the player's name (A-Z a-z 0-9), as the battle starts or saved
@@ -102,6 +110,10 @@
  *                            the starter claim (VAR_MULTIPLAYER_STARTER_CHOICE) and
  *                            FLAG_SYS_POKEMON_GET - a claim in Birch's lab, a save, a load,
  *                            a soft reset that brings the claim back
+ *   PKMN_TEST_TRAIN_LOG=1    on the field, whenever one changes: the lead's species, IVs, Hyper
+ *                            Training bits and Ability (its slot), the Bag's Bottle Caps, Gold
+ *                            Bottle Caps and Ability Patches - each used in the Bag, refused, saved
+ *                            and loaded (Battle Tower: Legends' items)
  *   PKMN_TEST_MEGA_SHOT      frames: a picture that long after the lead's Mega animation, as
  *   PKMN_TEST_MEGA_SHOT_STEM <stem>-NN.png (NN the sweep's holder, or 00)
  *

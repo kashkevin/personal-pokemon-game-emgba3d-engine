@@ -5065,6 +5065,12 @@ void Task_AbilityPatch(u8 taskId)
         // Can't use.
         if (GetSpeciesAbility(tSpecies, tAbilityNum) == 0
             || !tSpecies
+#ifdef PORTABLE
+            // Battle Tower: Legends: an Egg, or a switch that changes nothing, uses no Patch.
+            || GetMonData(&gParties[B_TRAINER_PLAYER][tMonId], MON_DATA_IS_EGG)
+            || GetSpeciesAbility(tSpecies, tAbilityNum) == GetMonAbility(&gParties[B_TRAINER_PLAYER][tMonId])
+#endif
+#line 5053 // gba-line
             )
         {
             gPartyMenuUseExitCallback = FALSE;
@@ -8657,6 +8663,230 @@ s8 Test_UpdatePartySelectionSingleLayout(s8 slotId, s8 movementDir, bool8 choose
 }
 #endif
 
+#ifdef PORTABLE
+// ---------------------------------------------------------------------------------------------------------------------
+// Battle Tower: Legends: Hyper Training. A Bottle Cap trains one chosen stat, a Gold Bottle Cap all six; a stat can be
+// trained when its natural IV is below 31 and it is not trained yet (the engine's own rule, as `canhypertrain`; no
+// level requirement). The natural IVs stay as they are (breeding and the summary keep them); the trained bits make the
+// stats count as 31 and travel with the Pokemon. A cap is used only when something was trained.
+
+#define tHtState    data[0]
+#define tHtMonId    data[1]
+#define tHtStat     data[2] // STAT_*, or NUM_STATS: every trainable stat (a Gold Bottle Cap)
+#define tHtOldFunc  4
+
+// HP, Attack, Defense, Sp. Atk, Sp. Def, Speed (the summary's order); the IV and trained fields follow STAT_*.
+static const u8 sHyperTrainingOrder[NUM_STATS] = {STAT_HP, STAT_ATK, STAT_DEF, STAT_SPATK, STAT_SPDEF, STAT_SPEED};
+static const u8 sText_HtHp[] = _("HP");
+static const u8 sText_HtAttack[] = _("ATTACK");
+static const u8 sText_HtDefense[] = _("DEFENSE");
+static const u8 sText_HtSpAtk[] = _("SP. ATK");
+static const u8 sText_HtSpDef[] = _("SP. DEF");
+static const u8 sText_HtSpeed[] = _("SPEED");
+static const u8 *const sHyperTrainingStatNames[NUM_STATS] =
+{
+    [STAT_HP] = sText_HtHp, [STAT_ATK] = sText_HtAttack, [STAT_DEF] = sText_HtDefense,
+    [STAT_SPEED] = sText_HtSpeed, [STAT_SPATK] = sText_HtSpAtk, [STAT_SPDEF] = sText_HtSpDef,
+};
+static const u8 sText_HtCancel[] = _("CANCEL");
+static const u8 sText_HtMax[] = _("max");
+static const u8 sText_HtTrained[] = _("trained");
+static const u8 sText_HtWhichStat[] = _("Train which stat? IV now:");
+static const u8 sText_HtCannot[] = _("That stat can't be trained:\nits IV is already at its best.{PAUSE_UNTIL_PRESS}");
+static const u8 sText_HtAskOne[] = _("Hyper Train {STR_VAR_1}'s\n{STR_VAR_2} with the {STR_VAR_3}?");
+static const u8 sText_HtAskAll[] = _("Hyper Train all of {STR_VAR_1}'s\nstats with the {STR_VAR_3}?");
+static const u8 sText_HtDoneOne[] = _("{STR_VAR_1}'s {STR_VAR_2} was\ntrained to its best!{PAUSE_UNTIL_PRESS}");
+static const u8 sText_HtDoneAll[] = _("{STR_VAR_1}'s stats were\ntrained to their best!{PAUSE_UNTIL_PRESS}");
+
+// One row of the stat list per stat (its name and natural IV, "max" or "trained"), then CANCEL. The native PC UI's
+// party screen shows the same rows (PartyMenu_NativeUiState).
+static EWRAM_DATA u8 sHyperTrainingLabels[NUM_STATS + 1][24] = {0};
+
+static bool32 CanHyperTrainStat(struct Pokemon *mon, u32 stat)
+{
+    return !GetMonData(mon, MON_DATA_HYPER_TRAINED_HP + stat) && GetMonData(mon, MON_DATA_HP_IV + stat) < MAX_PER_STAT_IVS;
+}
+
+static u32 HyperTrainableStats(struct Pokemon *mon)
+{
+    u32 stat, mask = 0;
+
+    for (stat = 0; stat < NUM_STATS; stat++)
+        if (CanHyperTrainStat(mon, stat))
+            mask |= 1u << stat;
+    return mask;
+}
+
+static void BuildHyperTrainingLabels(struct Pokemon *mon)
+{
+    u32 row;
+
+    for (row = 0; row < NUM_STATS; row++)
+    {
+        u32 stat = sHyperTrainingOrder[row];
+        u8 *end = StringCopy(sHyperTrainingLabels[row], sHyperTrainingStatNames[stat]);
+
+        *end++ = CHAR_SPACE;
+        if (GetMonData(mon, MON_DATA_HYPER_TRAINED_HP + stat))
+            StringCopy(end, sText_HtTrained);
+        else if (GetMonData(mon, MON_DATA_HP_IV + stat) >= MAX_PER_STAT_IVS)
+            StringCopy(end, sText_HtMax);
+        else
+            ConvertIntToDecimalStringN(end, GetMonData(mon, MON_DATA_HP_IV + stat), STR_CONV_MODE_LEFT_ALIGN, 2);
+    }
+    StringCopy(sHyperTrainingLabels[NUM_STATS], sText_HtCancel);
+}
+
+static void ShowHyperTrainingStatWindow(struct Pokemon *mon)
+{
+    struct WindowTemplate window;
+    u32 row;
+
+    BuildHyperTrainingLabels(mon);
+    // Above the message box (rows 15-18), where the action menu's window goes.
+    SetWindowTemplateFields(&window, 2, 18, 1, 11, (NUM_STATS + 1) * 2, 14, 0x2E9);
+    sPartyMenuInternal->windowId[0] = AddWindow(&window);
+    DrawStdFrameWithCustomTileAndPalette(sPartyMenuInternal->windowId[0], FALSE, 0x4F, 13);
+    for (row = 0; row <= NUM_STATS; row++)
+        AddTextPrinterParameterized(sPartyMenuInternal->windowId[0], FONT_NORMAL, sHyperTrainingLabels[row], 8,
+                                    (row * 16) + 1, TEXT_SKIP_DRAW, NULL);
+    InitMenuInUpperLeftCornerNormal(sPartyMenuInternal->windowId[0], NUM_STATS + 1, 0);
+    ScheduleBgCopyTilemapToVram(2);
+}
+
+static void Task_HyperTraining(u8 taskId);
+
+static void Task_HandleHyperTrainingStatInput(u8 taskId)
+{
+    s16 *data = gTasks[taskId].data;
+    struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][tHtMonId];
+    s8 input = Menu_ProcessInput();
+
+    if (input == MENU_NOTHING_CHOSEN)
+        return;
+    PlaySE(SE_SELECT);
+    if (input == MENU_B_PRESSED || input == NUM_STATS)
+    {
+        ClearStdWindowAndFrameToTransparent(6, FALSE);
+        ClearWindowTilemap(6);
+        ReturnToUseOnWhichMon(taskId);
+        return;
+    }
+    PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[0]);
+    tHtStat = sHyperTrainingOrder[input];
+    if (!CanHyperTrainStat(mon, tHtStat))
+    {
+        DisplayPartyMenuMessage(sText_HtCannot, TRUE);
+        ScheduleBgCopyTilemapToVram(2);
+        gTasks[taskId].func = Task_ReturnToChooseMonAfterText;
+        return;
+    }
+    tHtState = 0;
+    gTasks[taskId].func = Task_HyperTraining;
+}
+
+// State 2 is the YES / NO (PartyMenu_NativeUiState's sYesNoStateTasks).
+static void Task_HyperTraining(u8 taskId)
+{
+    s16 *data = gTasks[taskId].data;
+    struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][tHtMonId];
+    u32 stat, trained = TRUE;
+
+    switch (tHtState)
+    {
+    case 0:
+        gPartyMenuUseExitCallback = TRUE;
+        GetMonNickname(mon, gStringVar1);
+        if (tHtStat < NUM_STATS)
+            StringCopy(gStringVar2, sHyperTrainingStatNames[tHtStat]);
+        CopyItemName(gSpecialVar_ItemId, gStringVar3);
+        StringExpandPlaceholders(gStringVar4, tHtStat < NUM_STATS ? sText_HtAskOne : sText_HtAskAll);
+        DisplayPartyMenuMessage(gStringVar4, TRUE);
+        ScheduleBgCopyTilemapToVram(2);
+        tHtState++;
+        break;
+    case 1:
+        if (!IsPartyMenuTextPrinterActive())
+        {
+            PartyMenuDisplayYesNoMenu();
+            tHtState++;
+        }
+        break;
+    case 2:
+        switch (Menu_ProcessInputNoWrapClearOnChoose())
+        {
+        case 0:
+            tHtState++;
+            break;
+        case 1:
+        case MENU_B_PRESSED:
+            gPartyMenuUseExitCallback = FALSE;
+            PlaySE(SE_SELECT);
+            ScheduleBgCopyTilemapToVram(2);
+            // Nothing used: back to choosing a Pokemon.
+            ClearStdWindowAndFrameToTransparent(6, 0);
+            ClearWindowTilemap(6);
+            DisplayPartyMenuStdMessage(PARTY_MSG_USE_ON_WHICH_MON);
+            gTasks[taskId].func = (void *)GetWordTaskArg(taskId, tHtOldFunc);
+            return;
+        }
+        break;
+    case 3:
+        for (stat = 0; stat < NUM_STATS; stat++)
+        {
+            if ((tHtStat == NUM_STATS || tHtStat == stat) && CanHyperTrainStat(mon, stat))
+                SetMonData(mon, MON_DATA_HYPER_TRAINED_HP + stat, &trained);
+        }
+        CalculateMonStats(mon);
+        RemoveBagItem(gSpecialVar_ItemId, 1);
+        PlaySE(SE_USE_ITEM);
+        StringExpandPlaceholders(gStringVar4, tHtStat < NUM_STATS ? sText_HtDoneOne : sText_HtDoneAll);
+        DisplayPartyMenuMessage(gStringVar4, TRUE);
+        ScheduleBgCopyTilemapToVram(2);
+        tHtState++;
+        break;
+    case 4:
+        if (!IsPartyMenuTextPrinterActive())
+            gTasks[taskId].func = Task_ClosePartyMenu;
+        break;
+    }
+}
+
+void ItemUseCB_HyperTraining(u8 taskId, TaskFunc task)
+{
+    s16 *data = gTasks[taskId].data;
+    struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][gPartyMenu.slotId];
+
+    tHtState = 0;
+    tHtMonId = gPartyMenu.slotId;
+    SetWordTaskArg(taskId, tHtOldFunc, (uintptr_t)(gTasks[taskId].func));
+    if (GetMonData(mon, MON_DATA_IS_EGG) || HyperTrainableStats(mon) == 0)
+    {
+        gPartyMenuUseExitCallback = FALSE;
+        PlaySE(SE_SELECT);
+        DisplayPartyMenuMessage(gText_WontHaveEffect, TRUE);
+        ScheduleBgCopyTilemapToVram(2);
+        gTasks[taskId].func = Task_ClosePartyMenuAfterText;
+        return;
+    }
+    if (gSpecialVar_ItemId == ITEM_GOLD_BOTTLE_CAP)
+    {
+        tHtStat = NUM_STATS;
+        gTasks[taskId].func = Task_HyperTraining;
+        return;
+    }
+    PlaySE(SE_SELECT);
+    DisplayPartyMenuMessage(sText_HtWhichStat, FALSE);
+    ShowHyperTrainingStatWindow(mon);
+    gTasks[taskId].func = Task_HandleHyperTrainingStatInput;
+}
+
+#undef tHtState
+#undef tHtMonId
+#undef tHtStat
+#undef tHtOldFunc
+#endif
+#line 8628 // gba-line
 #ifdef ENABLE_NATIVE_UI
 #include "native_ui/ui_engine.h"
 
@@ -8679,7 +8909,7 @@ bool32 PartyMenu_NativeUiState(struct NativePartyMenu *out)
         Task_HandleSwitchItemsYesNoInput, Task_HandleTossHeldItemYesNoInput,
     };
     // their YES / NO is their state 2 (data[0])
-    static const TaskFunc sYesNoStateTasks[] = {Task_AbilityCapsule, Task_AbilityPatch, Task_Mint};
+    static const TaskFunc sYesNoStateTasks[] = {Task_AbilityCapsule, Task_AbilityPatch, Task_Mint, Task_HyperTraining};
     static const TaskFunc sClosingTasks[] = {
         Task_ClosePartyMenu, Task_ClosePartyMenuAndSetCB2, Task_PartyMenuWaitForFade, Task_ExitPartyMenu,
         Task_FieldMoveWaitForFade,
@@ -8768,6 +8998,20 @@ bool32 PartyMenu_NativeUiState(struct NativePartyMenu *out)
         }
         out->menuCursor = Menu_GetCursorPos();
         out->ready = FuncIsActiveTask(Task_HandleSelectionMenuInput) && !gPaletteFade.active;
+        return TRUE;
+    }
+    if (FuncIsActiveTask(Task_HandleHyperTrainingStatInput))
+    {
+        // Battle Tower: Legends: Hyper Training's stat list, its rows as the game drew them.
+        out->phase = NATIVE_PARTY_MENU;
+        out->numActions = NUM_STATS + 1;
+        for (i = 0; i < out->numActions; i++)
+        {
+            out->actions[i] = MENU_CANCEL1;
+            out->actionLabels[i] = sHyperTrainingLabels[i];
+        }
+        out->menuCursor = Menu_GetCursorPos();
+        out->ready = !gPaletteFade.active;
         return TRUE;
     }
     if (FuncIsActiveTask(Task_HandleWhichMoveInput))

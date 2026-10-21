@@ -679,4 +679,8 @@ gSpecials::
 	def_special MultiplayerIntro_GiveLabStarter
 	@ Update 32: START > PLAYER > RESET without a world (src/multiplayer_soft_reset.c).
 	def_special MultiplayerSoftReset_Do
+	@ Battle Tower: Legends: a solo floor (src/tower_legends.c).
+	def_special TowerLegends_BufferIntro
+	def_special TowerLegends_StartSoloBattle, waitstate=1
+	def_special TowerLegends_BufferResult
 .endif

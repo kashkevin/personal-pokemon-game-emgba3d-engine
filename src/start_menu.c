@@ -81,6 +81,7 @@ enum
     MENU_ACTION_STYLE,
 #ifdef PORTABLE
     MENU_ACTION_SOFT_RESET, // Update 32: START > PLAYER > RESET (multiplayer_soft_reset.c)
+    MENU_ACTION_TOWER,      // Battle Tower: Legends: START > PLAYER > TOWER (tower_legends.c)
 #endif
 #line 82 // gba-line
 };
@@ -134,14 +135,17 @@ static bool8 StartMenuRideCallback(void);
 static bool8 StartMenuStyleCallback(void);
 #ifdef PORTABLE
 static bool8 StartMenuSoftResetCallback(void);
+static bool8 StartMenuTowerCallback(void);
 // STYLE (the look and character editor), RIDE and RESET (its question, or PLAYERS
 // on its soft reset page) stay in the field: no fade to black for them, as for
 // PLAYERS (else the field stays black). Native build only, so the GBA ROM keeps
 // its pairing; the same fix for both builds is a85ed3a47 on claude/fix-player-menu-fade.
 #define MENU_STAYS_IN_FIELD(callback) ((callback) == StartMenuStyleCallback || (callback) == StartMenuRideCallback \
-                                    || (callback) == StartMenuSoftResetCallback)
+                                    || (callback) == StartMenuSoftResetCallback || (callback) == StartMenuTowerCallback)
 #include "multiplayer_presence.h"
 #include "multiplayer_soft_reset.h"
+#include "platform/mp_bridge.h"
+#include "tower_legends.h"
 #else
 #define MENU_STAYS_IN_FIELD(callback) FALSE
 #endif
@@ -231,6 +235,7 @@ static const u8 sText_GetOff[] = _("GET OFF");
 static const u8 sText_Style[] = _("STYLE");
 #ifdef PORTABLE
 static const u8 sText_SoftReset[] = _("RESET");
+static const u8 sText_Tower[] = _("TOWER");
 #endif
 #line 214 // gba-line
 
@@ -260,6 +265,7 @@ static const struct MenuAction sStartMenuItems[] =
     [MENU_ACTION_STYLE]           = {sText_Style, {.u8_void = StartMenuStyleCallback}},
 #ifdef PORTABLE
     [MENU_ACTION_SOFT_RESET]      = {sText_SoftReset, {.u8_void = StartMenuSoftResetCallback}},
+    [MENU_ACTION_TOWER]           = {sText_Tower, {.u8_void = StartMenuTowerCallback}},
 #endif
 #line 239 // gba-line
 };
@@ -344,6 +350,11 @@ static void BuildStartMenuActions(void)
     {
         AddStartMenuAction(MENU_ACTION_TRAINER_CARD);
         AddStartMenuAction(MENU_ACTION_PLAYERS);
+#ifdef PORTABLE
+        if (MpBridge_IsEnabled())
+            AddStartMenuAction(MENU_ACTION_TOWER); // Battle Tower: Legends, in a world
+#endif
+#line 321 // gba-line
         AddStartMenuAction(MENU_ACTION_STYLE);
         if (MultiplayerRide_IsRiding())
             AddStartMenuAction(MENU_ACTION_GET_OFF);
@@ -879,6 +890,18 @@ static bool8 StartMenuSoftResetCallback(void)
     sPlayerSubmenu = FALSE; sStartMenuCursorPos = sPlayerReturnCursor;
     RemoveExtraStartMenuWindows(); HideStartMenu();
     MultiplayerSoftReset_Begin(); // asks (no world) or opens PLAYERS on its soft reset page (a world)
+    return TRUE;
+}
+
+// Battle Tower: Legends: PLAYERS opened on the Tower's home page (the host's pages; a refusal says why).
+static bool8 StartMenuTowerCallback(void)
+{
+    sPlayerSubmenu = FALSE; sStartMenuCursorPos = sPlayerReturnCursor;
+    RemoveExtraStartMenuWindows(); HideStartMenu();
+    if (!MpBridge_TowerEnabled())
+        MultiplayerPresence_Refuse("The Battle Tower needs this|game's own launcher version.");
+    else if (!MultiplayerMenu_OpenPage(MP_MENU_PAGE_TOWER))
+        MultiplayerPresence_PlayersRefused();
     return TRUE;
 }
 #endif

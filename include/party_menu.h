@@ -147,6 +147,11 @@ bool32 SetUpFieldMove_Waterfall(void);
 bool32 SetUpFieldMove_Dive(void);
 bool32 SetUpFieldMove_RockClimb(void);
 
+#ifdef PORTABLE
+// Battle Tower: Legends: a Bottle Cap or a Gold Bottle Cap used on a party Pokemon (Hyper Training).
+void ItemUseCB_HyperTraining(u8 taskId, TaskFunc task);
+#endif
+
 #if TESTING
 s8 Test_UpdatePartySelectionSingleLayout(s8 slotId, s8 movementDir, bool8 chooseHalf, u8 lastSelectedSlot);
 #endif

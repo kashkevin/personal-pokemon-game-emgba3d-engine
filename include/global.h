@@ -322,7 +322,28 @@ struct MPDaycareEggQueue
     u32 eggs[MP_DAYCARE_EGG_QUEUE_SIZE][20]; // struct BoxPokemon (80 bytes, 4-byte aligned; defined after this block)
     u32 crc32;
 };
-#define MP_SAVE_BLOCK_3_BYTES (600 + sizeof(struct MPDaycareEggQueue))
+// Battle Tower: Legends (src/tower_legends.c): the save's mirror of its trainer's Tower record, after the egg queue. The
+// host is the authority and sends every change on the wallet stream (reward kind 6); a battle's result waits here until
+// the host has settled it. A save from before has zeros here: no record, floor 1, nothing claimed.
+#define MP_TOWER_RECORD_MAGIC 0x314C5754 // "TWL1"
+#define MP_TOWER_RECORD_VERSION 1
+struct MPTowerRecord
+{
+    u32 magic;
+    u8 version;
+    u8 highest;        // the highest floor cleared, 0..100
+    u8 progress;       // the next floor of the climb, 1..101
+    u8 pendingOutcome; // 0 none, else the unsettled result (TOWER_RESULT_WON, _LOST or _DREW)
+    u32 pendingTicket;
+    u8 pendingFloor;
+    u8 reserved0;
+    u16 claims;        // the prizes claimed and the milestone Pokemon delivered
+    u16 revision;      // +1 for every Tower word applied
+    u16 reserved1;
+    u8 reserved[40];
+    u32 crc32;         // CRC-32 of the 60 bytes before
+};
+#define MP_SAVE_BLOCK_3_BYTES (600 + sizeof(struct MPDaycareEggQueue) + sizeof(struct MPTowerRecord))
 #endif
 
 struct SaveBlock3
@@ -346,6 +367,7 @@ struct SaveBlock3
     struct MultiplayerOwnershipRecord ownership;
 #ifdef PORTABLE
     struct MPDaycareEggQueue eggQueue;
+    struct MPTowerRecord tower;
 #endif
 }; /* max size 1624 bytes */
 

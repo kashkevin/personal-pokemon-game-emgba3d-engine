@@ -144,5 +144,8 @@ u8 GetRivalBattleFlags(void);
 
 void CreateNPCTrainerPartyFromTrainer(struct Pokemon *party, const struct Trainer *trainer);
 void CreateCoopTrainerParties(u16 opponentA, u16 opponentB);
+#ifdef PORTABLE
+void BattleSetup_StartTowerLegendsBattle(u16 opponent, u16 music, void (*endCallback)(void));
+#endif
 
 #endif // GUARD_BATTLE_SETUP_H

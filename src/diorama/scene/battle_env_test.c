@@ -60,6 +60,9 @@
 #include "constants/multiplayer_rival.h"
 #include "platform/coin_shop.h"
 #include "diorama/battle_env_test.h"
+#include "tower_legends.h"
+#include "battle_util.h"
+#include "move.h"
 
 extern const u8 *ScriptContext_DebugPosition(int *mode, int *status);  /* script.c (PORTABLE) */
 
@@ -185,6 +188,14 @@ static struct
     bool starterLog, starterLogged;
     int starterSeen[9];
     u32 starterSeenPersonality;
+    int towerFloor;     /* tower:<floor> - Battle Tower: Legends' solo floor (src/tower_legends.c) */
+    bool towerWin;      /* PKMN_TEST_TOWER_WIN=1: the lead's HP refilled each turn and its most effective move chosen */
+    bool towerLogged;   /* its opposing party logged at the first action menu */
+    u32 towerMoney;     /* the money as it started (a Tower battle neither pays nor takes any) */
+    /* PKMN_TEST_TRAIN_LOG=1: on the field, "train field: ..." whenever the lead's IVs, Hyper Training, Ability or the
+     * Bag's caps and patches change (TrainLogField); what was last logged */
+    bool trainLog, trainLogged;
+    int trainSeen[13];
 } s;
 
 /* PKMN_TEST_LOG=<file>: every line the driver logs is also appended to that file (a check on Windows reads it: the
@@ -369,6 +380,7 @@ static void Init(void)
     s.mega = EnvInt("PKMN_TEST_MEGA", 0) != 0;
     s.freezeField = EnvInt("PKMN_TEST_FREEZE_FIELD", 0) != 0;
     s.leadOnly = EnvInt("PKMN_TEST_LEAD_ONLY", 0) != 0;
+    s.towerWin = EnvInt("PKMN_TEST_TOWER_WIN", 0) != 0;
     s.firstMove = EnvInt("PKMN_TEST_FIRST_MOVE", 0);
     if (s.firstMove <= MOVE_NONE || s.firstMove >= MOVES_COUNT)
         s.firstMove = MOVE_FLAMETHROWER;
@@ -386,6 +398,7 @@ static void Init(void)
     s.softResets = EnvInt("PKMN_TEST_SOFT_RESET", 0);
     s.softReset = s.softResets > 0;
     s.starterLog = EnvInt("PKMN_TEST_STARTER_LOG", 0) != 0;
+    s.trainLog = EnvInt("PKMN_TEST_TRAIN_LOG", 0) != 0;
     s.fieldAfter = EnvInt("PKMN_TEST_FIELD_AFTER", 0);
     if (s.megaLog)
         ListMegaStoneHolders();     /* the stones MegaLogField counts */
@@ -440,7 +453,7 @@ static void Init(void)
 static void CreateTestMon(struct Pokemon *mon, int species, int level, const char *flags)
 {
     u32 personality = 0x13579BDF, i;
-    int gender = -1, item = 0, move = 0;
+    int gender = -1, item = 0, move = 0, ivs = MAX_PER_STAT_IVS;
     bool shiny = false;
 
     for (; flags != NULL && *flags != '\0' && *flags != ',' && *flags != ';'; flags++)
@@ -455,10 +468,13 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
             item = atoi(flags + 1);
         else if (*flags == 'v')
             move = atoi(flags + 1);
+        else if (*flags == 'w')
+            ivs = atoi(flags + 1);
     }
     for (i = 0; i < 4096 && gender >= 0 && GetGenderFromSpeciesAndPersonality(species, personality) != gender; i++)
         personality += 0x9E3779B1;
-    CreateMonWithIVs(mon, species, level > 0 ? level : 30, personality, OTID_STRUCT_PLAYER_ID, MAX_PER_STAT_IVS);
+    CreateMonWithIVs(mon, species, level > 0 ? level : 30, personality, OTID_STRUCT_PLAYER_ID,
+                     ivs >= 0 && ivs <= MAX_PER_STAT_IVS ? ivs : MAX_PER_STAT_IVS);
     GiveMonInitialMoveset(mon);
     if (shiny)
     {
@@ -834,6 +850,41 @@ static void StarterLogField(void)
             now[0], now[1], now[2], now[3], now[4], now[5], (unsigned)personality, now[6], now[7], now[8]);
 }
 
+/* PKMN_TEST_TRAIN_LOG off a battle: "train field: lead S ivs a,b,c,d,e,f trained M ability A num N caps C gold G
+ * patches P" whenever one changes (M the Hyper Training bits, HP first; N the Ability slot, 2 the Hidden Ability) - a
+ * Bottle Cap, a Gold Bottle Cap or an Ability Patch used in the Bag, refused, saved and loaded. */
+static void TrainLogField(void)
+{
+    struct Pokemon *lead = &gParties[B_TRAINER_PLAYER][0];
+    int now[13];
+    bool changed;
+
+    if (!s.trainLog || gMain.inBattle || SDL_AtomicGet(&s.fieldSeen) == 0 || gSaveBlock1Ptr == NULL)
+        return;
+    now[0] = gPartiesCount[B_TRAINER_PLAYER] > 0 ? (int)GetMonData(lead, MON_DATA_SPECIES) : 0;
+    now[7] = 0;
+    for (int stat = 0; stat < NUM_STATS; stat++)
+    {
+        now[1 + stat] = now[0] != 0 ? (int)GetMonData(lead, MON_DATA_HP_IV + stat) : 0;
+        if (now[0] != 0 && GetMonData(lead, MON_DATA_HYPER_TRAINED_HP + stat))
+            now[7] |= 1 << stat;
+    }
+    now[8] = now[0] != 0 ? (int)GetMonAbility(lead) : 0;
+    now[9] = now[0] != 0 ? (int)GetMonData(lead, MON_DATA_ABILITY_NUM) : 0;
+    now[10] = CountTotalItemQuantityInBag(ITEM_BOTTLE_CAP);
+    now[11] = CountTotalItemQuantityInBag(ITEM_GOLD_BOTTLE_CAP);
+    now[12] = CountTotalItemQuantityInBag(ITEM_ABILITY_PATCH);
+    changed = !s.trainLogged;
+    for (int i = 0; i < 13 && !changed; i++)
+        changed = now[i] != s.trainSeen[i];
+    if (!changed)
+        return;
+    s.trainLogged = true;
+    memcpy(s.trainSeen, now, sizeof(now));
+    TestLog("Battle env test: train field: lead %d ivs %d,%d,%d,%d,%d,%d trained %d ability %d num %d caps %d gold %d patches %d",
+            now[0], now[1], now[2], now[3], now[4], now[5], now[6], now[7], now[8], now[9], now[10], now[11], now[12]);
+}
+
 static void MegaLogAfter(void)
 {
     struct Pokemon *lead = &gParties[B_TRAINER_PLAYER][0];
@@ -897,6 +948,59 @@ static void StartFieldKeys(int frames)
     s.starterLogged = false;
     gSaveBlock2Ptr->optionsTextSpeed = OPTIONS_TEXT_SPEED_FAST;     /* the keys come on a timer: fast text */
     TestLog("Battle env test: field keys for %d frames", frames);
+}
+
+/* tower:<floor> - Battle Tower: Legends' solo floor through the game's own start (src/tower_legends.c: its script, the
+ * floor's intro, the battle against the floor's trainer, the end: healed, held items back, no money moved, the result in
+ * the save's Tower record), without a host (the test ticket is never sent). The opposing party is logged as the battle
+ * built it (TowerLogParty) and the end once the field is back (TowerLogEnd). */
+static void StartTowerFloor(int floor)
+{
+    s.towerFloor = floor;
+    s.towerLogged = false;
+    s.towerMoney = GetMoney(&gSaveBlock1Ptr->money);
+    if (!TowerLegends_TestStartSolo(floor))
+        TestLog("Battle env test: tower floor %d does not exist", floor);
+    else
+        TestLog("Battle env test: tower floor %d: the intro, then the battle (money %u, cap %u)", floor, s.towerMoney,
+                TowerLegends_ExpCap());
+}
+
+static void TowerLogMon(const char *side, u32 slot, struct Pokemon *mon)
+{
+    TestLog("Battle env test: tower %s %u species %u level %u item %u ability %u moves %u %u %u %u hp %u/%u exp %u",
+            side, slot, GetMonData(mon, MON_DATA_SPECIES), GetMonData(mon, MON_DATA_LEVEL),
+            GetMonData(mon, MON_DATA_HELD_ITEM), GetMonAbility(mon), GetMonData(mon, MON_DATA_MOVE1),
+            GetMonData(mon, MON_DATA_MOVE2), GetMonData(mon, MON_DATA_MOVE3), GetMonData(mon, MON_DATA_MOVE4),
+            GetMonData(mon, MON_DATA_HP), GetMonData(mon, MON_DATA_MAX_HP), GetMonData(mon, MON_DATA_EXP));
+}
+
+static void TowerLogParty(void)
+{
+    const struct Trainer *trainer = GetTrainerStructFromId(TRAINER_BATTLE_PARAM.opponentA);
+    u32 i;
+
+    s.towerLogged = true;
+    TestLog("Battle env test: tower battle floor %u mode %u opponent %u class %u pic %u party %u",
+            TowerLegends_ActiveFloor(), TowerLegends_ActiveMode(), TRAINER_BATTLE_PARAM.opponentA,
+            trainer->trainerClass, trainer->trainerPic, gPartiesCount[B_TRAINER_OPPONENT_A]);
+    for (i = 0; i < PARTY_SIZE; i++)
+        if (GetMonData(&gParties[B_TRAINER_OPPONENT_A][i], MON_DATA_SPECIES) != SPECIES_NONE)
+            TowerLogMon("foe", i, &gParties[B_TRAINER_OPPONENT_A][i]);
+}
+
+static void TowerLogEnd(void)
+{
+    const struct MPTowerRecord *record = &gSaveBlock3Ptr->tower;
+    u32 i;
+
+    TestLog("Battle env test: tower end floor %d pending %u ticket %08x floor %u record %u money %u (was %u) cap %u",
+            s.towerFloor, TowerLegends_RecordValid() ? record->pendingOutcome : 0,
+            TowerLegends_RecordValid() ? record->pendingTicket : 0, TowerLegends_RecordValid() ? record->pendingFloor : 0,
+            TowerLegends_RecordValid(), GetMoney(&gSaveBlock1Ptr->money), s.towerMoney, TowerLegends_ExpCap());
+    for (i = 0; i < PARTY_SIZE; i++)
+        if (GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_SPECIES) != SPECIES_NONE)
+            TowerLogMon("own", i, &gParties[B_TRAINER_PLAYER][i]);
 }
 
 static void StartBattle(void)
@@ -990,6 +1094,8 @@ static void StartBattle(void)
         RedoTestFoes(1);
         BattleSetup_StartLegendaryBattle();
     }
+    else if (strcmp(kind, "tower") == 0)
+        StartTowerFloor(a);
     else if (strcmp(kind, "trainer") == 0)
         StartTrainer(a, 0, false);
     else if (strcmp(kind, "double") == 0)
@@ -1836,6 +1942,8 @@ void DioramaBattleEnvTest_FieldTick(void)
                 gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum,
                 gSaveBlock1Ptr->pos.x, gSaveBlock1Ptr->pos.y);
         MegaLogAfter();
+        if (s.towerFloor > 0)
+            TowerLogEnd();
         if (s.sweep)
         {
             SweepNext();
@@ -2003,10 +2111,49 @@ static void ParadeTick(void)
     TestLog("Battle env test: parade species %u", species);
 }
 
+/* PKMN_TEST_TOWER_WIN (a test advantage, in memory only, for a Tower floor's won run): at each of the player's turns
+ * the lead's HP is full again and the move cursor is on its move that does most against the opposing Pokemon (type
+ * effectiveness x power; immunities count as nothing). The battle itself - the AI's turns, damage, switches, Mega
+ * Evolution, the end - is the game's own. */
+static void TowerWinTurn(void)
+{
+    static const u16 sCoverage[MAX_MON_MOVES] = {MOVE_ICE_BEAM, MOVE_FLAMETHROWER, MOVE_SHADOW_BALL, MOVE_EARTHQUAKE};
+    u32 player = GetBattlerAtPosition(B_POSITION_PLAYER_LEFT), foe = GetBattlerAtPosition(B_POSITION_OPPONENT_LEFT);
+    u32 i, best = 0, bestScore = 0;
+
+    for (i = 0; i < MAX_MON_MOVES; i++)
+    {
+        gBattleMons[player].moves[i] = sCoverage[i];
+        gBattleMons[player].pp[i] = 30;
+    }
+    gBattleMons[player].hp = gBattleMons[player].maxHP;
+    SetMonData(&gParties[B_TRAINER_PLAYER][gBattlerPartyIndexes[player]], MON_DATA_HP, &gBattleMons[player].maxHP);
+    for (i = 0; i < MAX_MON_MOVES; i++)
+    {
+        enum Move move = gBattleMons[player].moves[i];
+        u32 score;
+
+        if (move == MOVE_NONE || GetMoveCategory(move) == DAMAGE_CATEGORY_STATUS || gBattleMons[player].pp[i] == 0)
+            continue;
+        score = GetMovePower(move) * GetTypeModifier(GetMoveType(move), gBattleMons[foe].types[0]) / UQ_4_12(1.0)
+              * GetTypeModifier(GetMoveType(move), gBattleMons[foe].types[1]) / UQ_4_12(1.0);
+        if (score > bestScore)
+        {
+            bestScore = score;
+            best = i;
+        }
+    }
+    gMoveSelectionCursor[player] = best;
+}
+
 void DioramaBattleEnvTest_OnActionMenu(void)
 {
     if (!s.init)
         Init();
+    if (s.towerFloor > 0 && !s.towerLogged && TowerLegends_IsBattleActive())
+        TowerLogParty();
+    if (s.towerWin && TowerLegends_IsBattleActive())
+        TowerWinTurn();
     if (s.stem[0] != '\0' || s.fightSeconds > 0)
         SDL_AtomicSet(&s.menuSeen, 1);
     if (s.paradeFrames > 0)
@@ -2088,6 +2235,7 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
     MegaLogFrame();
     MegaLogField();
     StarterLogField();
+    TrainLogField();
     ShotTick();
     /* PKMN_TEST_PLAN: once the autopilot brought the field up, the plan's keys alone */
     if (sPlan.phase != PLAN_OFF && SDL_AtomicGet(&s.fieldSeen) != 0)

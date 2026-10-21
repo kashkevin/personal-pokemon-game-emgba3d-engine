@@ -13,7 +13,9 @@
  * connected players from the bridge (their slots, where they are), and your
  * Trainer Card's public facts. The design's FRIENDS and ALL tabs, friendship
  * ranks and Lucky Friends are PLANNED (not built). Keys and clicks reach the
- * engine's own menu as its own buttons. Project-owned.
+ * engine's own menu as its own buttons. On the Battle Tower's pages (the page
+ * names a Tower screen) the device shows the Tower instead (screens/ui_tower.c).
+ * Project-owned.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +36,7 @@
 #include "native_ui/ui_gfx.h"
 #include "native_ui/ui_screen.h"
 #include "native_ui/ui_text.h"
+#include "native_ui/ui_tower.h"
 #include "native_ui/ui_widgets.h"
 
 static const u8 sText_LocationHidden[] = _("Location hidden");
@@ -140,6 +143,8 @@ static void Capture(void)
 
     MultiplayerMenu_NativeUiState(&sM);
     sReady = !sM.waiting && !sM.admissionHeld && sM.revision != 0;
+    if (sM.towerStyle != 0)
+        UiTower_Capture(&sM);
     Ascii(sTitle, sizeof(sTitle), sM.title);
     Ascii(sStatus, sizeof(sStatus), sM.status);
     for (int i = 0; i < sM.count && i < MAX_ROWS; i++)
@@ -288,6 +293,15 @@ static int Chip(int x, int y, const char *label, UiRGBA colour, bool right)
 
 /* ---------------------------------------------------------------- the device pane: what this game knows */
 
+/* the session: one LED a slot, lit while that player is connected */
+static void Session(int dx, int dw)
+{
+    UiCaps_Draw(dx + 12, 133, "SESSION", UI_P_TEXT_W, UI_P_FIELD_INK, UI_CAPS_SHADOW, UI_ALIGN_LEFT, UI_NONE);
+    for (int i = 0; i <= MULTIPLAYER_MAX_PEERS && i < 4; i++)
+        Led(dx + 60 + i * 12, 132, UI_HEX(sSlotHex[i]), i == 0 ? sConnected : i <= sPeerCount);
+    Grille(dx + dw - 50, 133, 10, 3);
+}
+
 static void Device(int t)
 {
     struct UiRamp f = UiW_FieldBand();
@@ -298,6 +312,14 @@ static void Device(int t)
 
     Shell(dx, dy, dw, dh);
     Lcd(lx, ly, lw, lh);
+    if (sM.towerStyle != 0)
+    {
+        /* the Battle Tower's pages: the climb on the LCD, the page's Tower screen on the card */
+        UiTower_Lcd(t, lx, ly, lw, lh);
+        Session(dx, dw);
+        UiTower_Card(t, cx, cy, cw, ch);
+        return;
+    }
     UiCaps_Draw(lx + 6, ly + 5, "LINK", LCD_DARK, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
     UiCaps_Draw(lx + lw - 6, ly + 5, "THIS IS YOU", LCD_DARK, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_RIGHT, UI_NONE);
     UiG_HLine(lx + 4, ly + 14, lw - 8, LCD_MID);
@@ -318,11 +340,7 @@ static void Device(int t)
     snprintf(caps, sizeof(caps), "%d/%d IN THIS WORLD", sPeerCount + 1, MULTIPLAYER_MAX_PEERS + 1);
     UiCaps_Draw(lx + lw - 6, ly + lh - 12, caps, LCD_DARK, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_RIGHT, UI_NONE);
 
-    /* the session: one LED a slot, lit while that player is connected */
-    UiCaps_Draw(dx + 12, 133, "SESSION", UI_P_TEXT_W, UI_P_FIELD_INK, UI_CAPS_SHADOW, UI_ALIGN_LEFT, UI_NONE);
-    for (int i = 0; i <= MULTIPLAYER_MAX_PEERS && i < 4; i++)
-        Led(dx + 60 + i * 12, 132, UI_HEX(sSlotHex[i]), i == 0 ? sConnected : i <= sPeerCount);
-    Grille(dx + dw - 50, 133, 10, 3);
+    Session(dx, dw);
 
     /* the card: your picture and your Trainer Card's public facts */
     UiG_Paint(UiM_Rounded4(cw, ch, 3, 3, 3, 3), cx, cy, UI_P_CREAM, &(struct UiPaint){UI_P_FIELD_INK, UI_P_CREAM_HI, UI_P_CREAM_LO, 0, 0, NULL, UI_NONE});
@@ -392,7 +410,7 @@ static void Tabs(void)
         snprintf(title, sizeof(title), "PLAYERS");
     UiG_Paint(UiM_Rounded4(150, 26, 4, 4, 0, 0), SHX + 4, 6, f.base, &(struct UiPaint){UI_P_FIELD_INK, f.hi, UI_NONE, 0, 0, NULL, UI_NONE});
     UiCaps_Draw(SHX + 4 + 75, 14, title, UI_P_TEXT_W, UI_P_FIELD_INK, UI_CAPS_OUTLINE, UI_ALIGN_CENTER, UI_NONE);
-    for (int i = 0; i < 2; i++)
+    for (int i = 0; i < 2 && sM.towerStyle == 0; i++)
     {
         UiRGBA dk = UiMix(f.lo, UI_P_INK, 0.25);
         int tx = SHX + 158 + i * 104;
@@ -493,8 +511,8 @@ static void Draw(int t)
     struct UiRamp tab = {f.hi, f.lo, UI_P_FIELD_INK, UI_P_FIELD_INK};
     struct UiHintItem hints[2] = {{UI_ACT_CONFIRM, sText_Choose}, {UI_ACT_CANCEL, sM.back ? sText_Back : sText_Close}};
 
-    Background(t, sM.tradeMenu ? UI_HEX(0x4C88E0) : f.lo);
-    UiW_TitleTab(0, 8, "PLAYERS", &tab, 0, NULL);
+    Background(t, sM.tradeMenu ? UI_HEX(0x4C88E0) : sM.towerStyle != 0 ? UI_HEX(0x6A4FB0) : f.lo);
+    UiW_TitleTab(0, 8, sM.towerStyle != 0 ? "BATTLE TOWER" : "PLAYERS", &tab, 0, NULL);
     Device(t);
     Tabs();
     Sheet(t);

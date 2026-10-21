@@ -15,6 +15,7 @@
 #include "constants/songs.h"
 #include "constants/game_stat.h"
 #include "constants/trainers.h"
+#include "constants/opponents.h"
 #include "constants/species.h"
 #include "constants/config_changes.h"
 	.include "asm/macros.inc"
@@ -2870,6 +2871,10 @@ BattleScript_LocalBattleWonLoseTexts::
 	waitstate
 	printstring STRINGID_TRAINER2LOSETEXT
 BattleScript_LocalBattleWonReward::
+.ifdef PORTABLE
+	@ Battle Tower: Legends (src/tower_legends.c): the host pays the Tower's prizes, the battle none.
+	jumpifhalfword CMP_EQUAL, gTrainerBattleParameter + 2, TRAINER_RED, BattleScript_PayDayMoneyAndPickUpItems
+.endif
 	getmoneyreward
 	printstring STRINGID_PLAYERGOTMONEY
 	waitmessage B_WAIT_TIME_LONG
@@ -2892,6 +2897,10 @@ BattleScript_RivalBattleLostSkipMonRecall::
 	end
 
 BattleScript_LocalBattleLost::
+.ifdef PORTABLE
+	@ Battle Tower: Legends: no whiteout and no money lost; the floor's trainer has the last word.
+	jumpifhalfword CMP_EQUAL, gTrainerBattleParameter + 2, TRAINER_RED, BattleScript_TowerLegendsLost
+.endif
 	jumpifbattletype BATTLE_TYPE_DOME, BattleScript_CheckDomeDrew
 	jumpifbattletype BATTLE_TYPE_FRONTIER, BattleScript_LocalBattleLostPrintTrainersWinText
 	jumpifbattletype BATTLE_TYPE_TRAINER_HILL, BattleScript_LocalBattleLostPrintTrainersWinText
@@ -2921,6 +2930,17 @@ BattleScript_LocalBattleLostEnd::
 	printstring STRINGID_PLAYERWHITEOUT3
 	waitmessage B_WAIT_TIME_LONG
 BattleScript_LocalBattleLostEnd::
+	end
+.endif
+
+.ifdef PORTABLE
+BattleScript_TowerLegendsLost::
+	returnopponentmon1toball
+	waitstate
+	trainerslidein BS_OPPONENT1
+	waitstate
+	printstring STRINGID_TRAINER1WINTEXT
+	waitmessage B_WAIT_TIME_LONG
 	end
 .endif
 

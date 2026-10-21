@@ -8,6 +8,7 @@
 #include "multiplayer_spawns.h"
 #include "multiplayer_extras.h"
 #include "multiplayer_rival.h"
+#include "tower_legends.h"
 #endif
 #line 7 // gba-line
 #include "battle.h"
@@ -1321,7 +1322,24 @@ u32 MultiplayerWorld_ApplyRewardWord(s32 delta, u8 *result)
                 amount = quantity;
         }
     }
+    else if (kind == MP_REWARD_TOWER_STATE)
+    {
+        amount = TowerLegends_ApplyStateWord(payload); // the record's revision (0: refused)
+    }
+    else if (kind == MP_REWARD_TOWER_MON)
+    {
+        amount = TowerLegends_ApplyMonWord(payload); // 1 made, 2 already delivered, 0 nothing made
+    }
     return amount;
+}
+
+// Battle Tower: Legends (tower_legends.c): world action 7 once the action slot is free.
+bool32 MultiplayerWorld_PostTowerAction(u8 result, u32 ticket, u16 floor)
+{
+    if (!sConnected || !sHaveInbound || ActionPending())
+        return FALSE;
+    PostAction(MP_WORLD_ACTION_TOWER, result, ticket, floor);
+    return TRUE;
 }
 #endif
 
@@ -1458,7 +1476,9 @@ void MultiplayerWorld_Tick(bool32 fieldReady, bool32 connected)
         FlushPendingResult();
 #ifdef PORTABLE
         RepostCatchRecord();
+        TowerLegends_WorldTick(); // Battle Tower: Legends: a result or a refusal for the host
 #endif
+#line 1186 // gba-line
     }
 #line 1183 // gba-line
     if (sHiddenEventId != 0 && sHaveInbound && sInbound.event.eventId != sHiddenEventId)

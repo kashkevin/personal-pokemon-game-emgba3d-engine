@@ -21,6 +21,7 @@
 #include "constants/opponents.h"
 #ifdef PORTABLE
 #include "multiplayer_ladder.h"
+#include "tower_legends.h"
 #include "battle_controllers.h"
 #include "evolution_scene.h"
 #include "field_weather.h"
@@ -318,6 +319,7 @@ static EWRAM_DATA struct
     u8 faced[2][PARTY_SIZE];
     bool8 seen[2][PARTY_SIZE];
     bool8 fallen[2][PARTY_SIZE];
+    u8 towerCap; // a Battle Tower Duo floor: the cap of this game's badges (tower_legends.c), else 0
     struct CoopKo kos[COOP_MAX_KOS];
 } sCoopExp = {0};
 
@@ -526,6 +528,7 @@ static void CaptureCoopExpNow(u32 outcome)
     }
     sCoopExp.tracking = FALSE;
     sCoopExp.pending = sCoopExp.count != 0;
+    sCoopExp.towerCap = TowerLegends_IsValidCode(MultiplayerBattle_GetCoopGym()) ? TowerLegends_ExpCap() : 0;
     // A team selection (Battle Frontier) fought with a reduced party: the award is for the personal party, whose slots
     // are the saved ones.
     for (slot = 0; slot < sCoopExp.count; slot++)
@@ -569,6 +572,8 @@ static void ApplyCoopExp(void)
                 continue;
             }
             reward = MultiplayerCoop_ExpReward(mon, ko->species, ko->level, faced);
+            if (sCoopExp.towerCap != 0)
+                reward = TowerLegends_ClampExp(mon, reward, sCoopExp.towerCap); // this game's own badges decide
             MonGainEVs(mon, ko->species);
             if (reward == 0)
                 continue;

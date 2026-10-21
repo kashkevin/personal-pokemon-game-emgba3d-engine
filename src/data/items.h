@@ -1557,10 +1557,19 @@ const struct ItemInfo gItemsInfo[] =
         .pluralName = ITEM_PLURAL_NAME("Ability Patches"),
         .price = (I_PRICE >= GEN_9) ? 250000 : 20,
         .holdEffectParam = 0,
+#ifdef PORTABLE
+        .description = COMPOUND_STRING(
+            "Switches a regular\n"
+            "Ability and the\n"
+            "Hidden Ability."),
+#else
+#line 1560 // gba-line
         .description = COMPOUND_STRING(
             "Changes a regular\n"
             "Ability to a\n"
             "rarer Ability."),
+#endif
+#line 1564 // gba-line
         .pocket = POCKET_ITEMS,
         .sortType = ITEM_TYPE_FIELD_USE,
         .type = ITEM_USE_PARTY_MENU,
@@ -2608,6 +2617,17 @@ const struct ItemInfo gItemsInfo[] =
     {
         .name = ITEM_NAME("Bottle Cap"),
         .price = (I_PRICE >= GEN_9) ? 20000 : 5000,
+#ifdef PORTABLE
+        .description = COMPOUND_STRING(
+            "Hyper Trains one\n"
+            "stat of a POKéMON\n"
+            "to its best."),
+        .pocket = POCKET_ITEMS,
+        .sortType = ITEM_TYPE_SELLABLE,
+        .type = ITEM_USE_PARTY_MENU,
+        .fieldUseFunc = ItemUseOutOfBattle_HyperTraining, // Battle Tower: Legends (party_menu.c)
+#else
+#line 2611 // gba-line
         .description = COMPOUND_STRING(
             "A beautiful bottle\n"
             "cap that gives off\n"
@@ -2616,6 +2636,8 @@ const struct ItemInfo gItemsInfo[] =
         .sortType = ITEM_TYPE_SELLABLE,
         .type = ITEM_USE_BAG_MENU,
         .fieldUseFunc = ItemUseOutOfBattle_CannotUse,
+#endif
+#line 2619 // gba-line
         .flingPower = 30,
         .iconPic = gItemIcon_BottleCap,
         .iconPalette = gItemIconPalette_BottleCap,
@@ -2625,6 +2647,17 @@ const struct ItemInfo gItemsInfo[] =
     {
         .name = ITEM_NAME("Gold Bottle Cap"),
         .price = (I_PRICE >= GEN_9) ? 60000 : 10000,
+#ifdef PORTABLE
+        .description = COMPOUND_STRING(
+            "Hyper Trains all\n"
+            "six of a POKéMON's\n"
+            "stats to the best."),
+        .pocket = POCKET_ITEMS,
+        .sortType = ITEM_TYPE_SELLABLE,
+        .type = ITEM_USE_PARTY_MENU,
+        .fieldUseFunc = ItemUseOutOfBattle_HyperTraining, // Battle Tower: Legends (party_menu.c)
+#else
+#line 2628 // gba-line
         .description = COMPOUND_STRING(
             "A beautiful bottle\n"
             "cap that gives off\n"
@@ -2633,6 +2666,8 @@ const struct ItemInfo gItemsInfo[] =
         .sortType = ITEM_TYPE_SELLABLE,
         .type = ITEM_USE_BAG_MENU,
         .fieldUseFunc = ItemUseOutOfBattle_CannotUse,
+#endif
+#line 2636 // gba-line
         .flingPower = 30,
         .iconPic = gItemIcon_BottleCap,
         .iconPalette = gItemIconPalette_GoldBottleCap,

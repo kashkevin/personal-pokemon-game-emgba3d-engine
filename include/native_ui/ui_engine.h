@@ -940,6 +940,8 @@ struct NativeMpMenu
     u8 rows[6][27];
     bool8 enabled[6];
     bool8 admission[6];    /* the battle-entry row */
+    u8 towerStyle;         /* Battle Tower: Legends: the page's Tower screen (tower_legends.h TOWER_STYLE_*), 0: none */
+    u8 towerArg;           /* its argument (a floor) */
 };
 bool32 MultiplayerMenu_NativeUiState(struct NativeMpMenu *out);
 /* multiplayer_world.c: the notice banner up now (host notices, wallet, hints): its

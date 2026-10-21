@@ -231,6 +231,8 @@ extern int NativeSelfTest_Rewards(void);
 extern int NativeSelfTest_CatchReconcile(void);
 extern int NativeSelfTest_PokenavMap(void);
 extern int NativeSelfTest_DumpWildWeights(const char *keysPath, const char *outPath);
+extern int NativeSelfTest_DumpTowerData(const char *outPath);
+extern int NativeSelfTest_Tower(void);
 extern bool32 GameMemory_Reset(void);
 
 static jmp_buf sGameResetPoint; // where the game thread restarts after a soft reset
@@ -1203,6 +1205,10 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_Legend()); // src/platform/native_selftest_u29.c (Update 29)
         else if (strcmp(argv[i], "--dump-species-data") == 0 && i + 1 < argc)
             exit(NativeSelfTest_DumpSpeciesData(argv[++i])); // src/platform/native_selftest_u29.c (data integrity)
+        else if (strcmp(argv[i], "--dump-tower-data") == 0 && i + 1 < argc)
+            exit(NativeSelfTest_DumpTowerData(argv[++i])); // src/platform/native_selftest_tower.c (Battle Tower: Legends)
+        else if (strcmp(argv[i], "--selftest-tower") == 0)
+            exit(NativeSelfTest_Tower()); // src/platform/native_selftest_tower.c (Battle Tower: Legends)
         else if (strcmp(argv[i], "--dump-wild-weights") == 0 && i + 2 < argc)
         {
             const char *keysPath = argv[++i];

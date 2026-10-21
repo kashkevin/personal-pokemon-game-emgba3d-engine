@@ -64,6 +64,7 @@
 bool MpBridge_Configure(const char *path); /* false: refuse to start the game */
 bool MpBridge_IsEnabled(void);
 bool MpBridge_MenuOpenPageEnabled(void); /* Update 32: a Players menu OPEN may name its page (menu_open_page=1) */
+bool MpBridge_TowerEnabled(void); /* Battle Tower: Legends (tower=1) */
 enum MpLinkState
 {
     MP_LINK_OFFLINE,       /* started without a bridge: single play on this PC */
@@ -129,6 +130,8 @@ struct MpBridgeCaps
     uint32_t menuRelease;            /* 1: a menu screen with flags 3 ends a refused Enter battle latch (needs menu 2, resume 1) */
     uint32_t saveImportWindow;       /* 1: WRITE_WINDOW, a trade's save a 4 KiB sector per 'i' frame (needs the save window) */
     uint32_t menuOpenPage;           /* 1: a menu OPEN may name a page (1: soft reset) (needs menu 2; launcher opt-in) */
+    uint32_t tower;                  /* 1: Battle Tower: Legends - OPEN page 2, screen flags 4/5 and style bytes, reward
+                                        kinds 6/7 (needs menuOpenPage 1 and the world; launcher opt-in tower=1) */
 };
 
 enum

@@ -1596,3 +1596,12 @@ void ItemUseOutOfBattle_TownMap(u8 taskId)
 }
 
 #undef tUsingRegisteredKeyItem
+
+#ifdef PORTABLE
+// Battle Tower: Legends: a Bottle Cap or a Gold Bottle Cap, used on a party Pokemon (party_menu.c: Hyper Training).
+void ItemUseOutOfBattle_HyperTraining(u8 taskId)
+{
+    gItemUseCB = ItemUseCB_HyperTraining;
+    SetUpItemUseCallback(taskId);
+}
+#endif

@@ -8,6 +8,7 @@
 #ifdef PORTABLE
 #include "multiplayer_ladder.h"
 #include "multiplayer_rival.h"
+#include "tower_legends.h"
 #endif
 #line 8 // gba-line
 #include "main.h"
@@ -869,10 +870,22 @@ static u8 StartSingles(void)
         gBattleTypeFlags |= BATTLE_TYPE_DOUBLE | BATTLE_TYPE_MULTI | BATTLE_TYPE_TWO_OPPONENTS | BATTLE_TYPE_TOWER_LINK_MULTI;
         TRAINER_BATTLE_PARAM.opponentA = MultiplayerCoop_GetLeader(sPreparation.flags);
         TRAINER_BATTLE_PARAM.opponentB = MultiplayerCoop_GetTwin(sPreparation.flags);
+#ifdef PORTABLE
+        TowerLegends_PrepareCoop(sPreparation.flags); // a Battle Tower Duo floor: its two trainers (else nothing)
+#endif
+#line 658 // gba-line
     }
     CleanupOverworldWindowsAndTilemaps();
     gMain.savedCallback = CB2_ReturnToField;
+#ifdef PORTABLE
+    // A Battle Tower Duo floor plays its own music (a boss's theme).
+    PlayMapChosenOrBattleBGM(TowerLegends_CoopMusic(sPreparation.flags) != 0 ? TowerLegends_CoopMusic(sPreparation.flags)
+                             : MultiplayerBattle_IsCoop() ? MUS_VS_GYM_LEADER : MUS_VS_TRAINER);
+#else
+#line 661 // gba-line
     PlayMapChosenOrBattleBGM(MultiplayerBattle_IsCoop() ? MUS_VS_GYM_LEADER : MUS_VS_TRAINER);
+#endif
+#line 662 // gba-line
     SetMainCallback2(CB2_InitBattle);
     return MP_BATTLE_OK;
 }

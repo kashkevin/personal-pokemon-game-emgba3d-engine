@@ -69,4 +69,8 @@ enum ItemTMHMOrEvolutionStone
     ITEM_IS_EVOLUTION_STONE,
 };
 
+#ifdef PORTABLE
+void ItemUseOutOfBattle_HyperTraining(u8 taskId); // Battle Tower: Legends (Bottle Caps)
+#endif
+
 #endif // GUARD_ITEM_USE_H

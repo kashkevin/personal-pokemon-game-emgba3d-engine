@@ -36,7 +36,8 @@ _Static_assert(offsetof(struct MultiplayerSaveControl, data) == 48, "Save payloa
 _Static_assert(sizeof(struct SaveBlock1) == 15568, "Pinned SaveBlock1");
 _Static_assert(sizeof(struct SaveBlock2) == 3884, "Pinned SaveBlock2");
 #ifdef PORTABLE
-_Static_assert(sizeof(struct SaveBlock3) == 600 + sizeof(struct MPDaycareEggQueue), "Ownership SaveBlock3 plus the Day Care egg queue");
+_Static_assert(sizeof(struct SaveBlock3) == 600 + sizeof(struct MPDaycareEggQueue) + sizeof(struct MPTowerRecord),
+               "Ownership SaveBlock3, the Day Care egg queue and the Tower record");
 #else
 #line 38 // gba-line
 _Static_assert(sizeof(struct SaveBlock3) == 600, "Ownership SaveBlock3");

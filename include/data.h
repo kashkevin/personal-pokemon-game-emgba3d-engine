@@ -276,9 +276,19 @@ static inline u16 GetPartnerIdFromTrainerId(u16 trainerId)
     return (trainerId - TRAINER_PARTNER(PARTNER_NONE));
 }
 
+#ifdef PORTABLE
+// Battle Tower: Legends (src/tower_legends.c): a Tower battle's two trainers.
+const struct Trainer *TowerLegends_GetTrainer(u16 trainerId);
+#endif
+#line 279 // gba-line
 static inline const struct Trainer *GetTrainerStructFromId(u16 trainerId)
 {
     if (gIsDebugBattle) return GetDebugAiTrainer();
+#ifdef PORTABLE
+    const struct Trainer *tower = TowerLegends_GetTrainer(trainerId);
+    if (tower != NULL) return tower;
+#endif
+#line 282 // gba-line
     enum DifficultyLevel difficulty;
 
     if (IsPartnerTrainerId(trainerId))

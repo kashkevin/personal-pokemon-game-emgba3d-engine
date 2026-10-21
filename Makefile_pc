@@ -281,7 +281,7 @@ OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS) $(BFX_QJS_OBJS)
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
-.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-legend check-shiny check-coins check-breeding check-rival check-update32 check-species-data check-clock check-mp-objects check-spawn-claims check-secret-base check-rewards check-catch-reconcile check-pokenav-map check-ladder check-coop-exp check-coop-controller check-keybinds check-graphics-mode
+.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-legend check-shiny check-coins check-breeding check-rival check-update32 check-species-data check-clock check-mp-objects check-spawn-claims check-secret-base check-rewards check-catch-reconcile check-pokenav-map check-ladder check-coop-exp check-coop-controller check-tower check-keybinds check-graphics-mode
 .SUFFIXES:
 .SECONDARY:
 .DELETE_ON_ERROR:
@@ -470,6 +470,11 @@ check-coop-exp: $(TARGET)
 check-coop-controller: $(TARGET)
 	@./$(TARGET) --selftest-coop-controller > $(OBJ_DIR)/selftest-coop-controller.log 2>&1; status=$$?; \
 	  tail -n 3 $(OBJ_DIR)/selftest-coop-controller.log; exit $$status
+
+# Battle Tower: Legends: the floor table against the game's data, the parties as built, the cap, the record and its words.
+check-tower: $(TARGET)
+	@./$(TARGET) --selftest-tower > $(OBJ_DIR)/selftest-tower.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-tower.log; exit $$status
 
 # C: preprocess (same flags as the GBA build + PORTABLE), expand INCBIN/charmap
 # strings with preproc, then compile for 32-bit x86.

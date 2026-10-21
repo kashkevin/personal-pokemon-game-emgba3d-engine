@@ -2324,3 +2324,23 @@ void CreateTrainerPartyForPlayer(void)
     gPartnerTrainerId = gSpecialVar_0x8004;
     CreateNPCTrainerPartyFromTrainer(gParties[B_TRAINER_PLAYER], GetTrainerStructFromId(gSpecialVar_0x8004));
 }
+
+#ifdef PORTABLE
+// Battle Tower: Legends (tower_legends.c): a trainer battle against a Tower floor's trainer, started from the field
+// wherever the player stands. The floor's trainer answers for `opponent` (GetTrainerStructFromId); the end callback
+// heals, gives back the held items and reports the result: no whiteout, no trainer flag, no prize money.
+void BattleSetup_StartTowerLegendsBattle(u16 opponent, u16 music, void (*endCallback)(void))
+{
+    gBattleTypeFlags = BATTLE_TYPE_TRAINER;
+    gNoOfApproachingTrainers = 0;
+    sNoOfPossibleTrainerRetScripts = 0;
+    sShouldCheckTrainerBScript = FALSE;
+    gWhichTrainerToFaceAfterBattle = 0;
+    CreateNPCTrainerParty(&gParties[B_TRAINER_OPPONENT_A][0], opponent);
+    gMain.savedCallback = endCallback;
+    CreateBattleStartTask(GetTrainerBattleTransition(), music);
+    IncrementGameStat(GAME_STAT_TOTAL_BATTLES);
+    IncrementGameStat(GAME_STAT_TRAINER_BATTLES);
+    ScriptContext_Stop();
+}
+#endif

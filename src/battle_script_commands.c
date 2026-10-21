@@ -3,6 +3,7 @@
 #include "battle.h"
 #include "multiplayer_battle.h"
 #include "battle_ffa.h"
+#include "tower_legends.h"
 #line 5 // gba-line
 #include "battle_hold_effects.h"
 #include "battle_message.h"
@@ -2329,6 +2330,14 @@ static void Cmd_getexp(void)
                             gBattleStruct->battlerExpReward = gExperienceTables[growthRate][levelCap] - currentExp;
                     }
 
+#ifdef PORTABLE
+                    // Battle Tower: Legends: experience stops at the cap of this game's own badges.
+                    if (TowerLegends_IsBattleActive())
+                        gBattleStruct->battlerExpReward = TowerLegends_ClampExp(&gParties[B_TRAINER_PLAYER][*expMonId],
+                                                                                gBattleStruct->battlerExpReward,
+                                                                                TowerLegends_ExpCap());
+#endif
+#line 2319 // gba-line
                     if (IsTradedMon(&gParties[B_TRAINER_PLAYER][*expMonId]))
                     {
                         i = STRINGID_ABOOSTED;
@@ -2343,6 +2352,13 @@ static void Cmd_getexp(void)
                     PREPARE_STRING_BUFFER(gBattleTextBuff2, i);
                     PREPARE_WORD_NUMBER_BUFFER(gBattleTextBuff3, 6, gBattleStruct->battlerExpReward);
 
+#ifdef PORTABLE
+                    // A Pokemon at its Tower cap gains nothing: no "gained 0 Exp. Points!" line.
+                    if (TowerLegends_IsBattleActive() && gBattleStruct->battlerExpReward == 0)
+                        ;
+                    else
+#endif
+#line 2333 // gba-line
                     if (wasSentOut || holdEffect == HOLD_EFFECT_EXP_SHARE)
                     {
                         PrepareStringBattle(STRINGID_PKMNGAINEDEXP, 0);
@@ -4109,6 +4125,16 @@ static void Cmd_getmoneyreward(void)
     u32 money;
     u8 sPartyLevel = 1;
 
+#ifdef PORTABLE
+    // Battle Tower: Legends: the host pays the Tower's prizes; a Tower battle neither pays nor costs money.
+    if (TowerLegends_IsBattleActive())
+    {
+        PREPARE_WORD_NUMBER_BUFFER(gBattleTextBuff1, 5, 0);
+        gBattlescriptCurrInstr = cmd->nextInstr;
+        return;
+    }
+#endif
+#line 4054 // gba-line
     if (gBattleOutcome == B_OUTCOME_WON)
     {
         money = GetTrainerMoneyToGive(TRAINER_BATTLE_PARAM.opponentA);

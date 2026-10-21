@@ -2,6 +2,7 @@
 #ifdef PORTABLE
 #include "multiplayer_ladder.h"
 #include "multiplayer_battle.h"
+#include "tower_legends.h"
 #include "battle.h"
 #include "data.h"
 #include "event_data.h"
@@ -27,8 +28,9 @@ u32 MultiplayerLadder_Encode(u16 trainerA, u16 trainerB, u32 level, bool32 award
 }
 
 bool32 MultiplayerLadder_IsLadder(u32 code) { return (code & MP_LADDER_FLAG) != 0; }
-u16 MultiplayerLadder_TrainerA(u32 code) { return (code >> 20) & TRAINER_MASK; }
-u16 MultiplayerLadder_TrainerB(u32 code) { return (code >> 10) & TRAINER_MASK; }
+// A Battle Tower: Legends Duo code (family 1 in bits 7-9) names a floor: its trainers answer for the Tower's two ids.
+u16 MultiplayerLadder_TrainerA(u32 code) { return TowerLegends_IsTowerCode(code) ? TRAINER_TOWER_A : (code >> 20) & TRAINER_MASK; }
+u16 MultiplayerLadder_TrainerB(u32 code) { return TowerLegends_IsTowerCode(code) ? TRAINER_TOWER_B : (code >> 10) & TRAINER_MASK; }
 u32 MultiplayerLadder_Level(u32 code) { return code & 0x7F; }
 bool32 MultiplayerLadder_ExpAllowed(u32 code) { return (code & MP_LADDER_EXP) != 0; }
 
@@ -46,6 +48,8 @@ bool32 MultiplayerLadder_IsValid(u32 code)
 {
     u32 level = MultiplayerLadder_Level(code);
 
+    if (TowerLegends_IsTowerCode(code))
+        return TowerLegends_IsValidCode(code);
     return MultiplayerLadder_IsLadder(code) && (code & 0x380) == 0
         && level >= MP_LADDER_MIN_LEVEL && level <= MP_LADDER_MAX_LEVEL // 0: the trainers' own levels
         && MultiplayerLadder_TrainerA(code) != MultiplayerLadder_TrainerB(code)
@@ -55,7 +59,8 @@ bool32 MultiplayerLadder_IsValid(u32 code)
 void MultiplayerLadder_ScaleOpponents(u32 code)
 {
     u32 level = MultiplayerLadder_Level(code), side, slot;
-    bool32 rescale = level != 0; // level 0: the trainers keep their own levels (the Pokemon League)
+    bool32 rescale = level != 0 && !TowerLegends_IsTowerCode(code); // level 0: the trainers keep their own levels (the
+                                                                   // Pokemon League); a Tower floor is at its level
 
     for (side = B_TRAINER_OPPONENT_A; side <= B_TRAINER_OPPONENT_B; side++)
     {
@@ -84,6 +89,7 @@ void MultiplayerLadder_ScaleOpponents(u32 code)
 
 void MultiplayerLadder_OnResult(u32 code, u32 outcome)
 {
+    TowerLegends_EndCoop();
     sPendingCode = code;
     sPendingWon = outcome == B_OUTCOME_WON;
 }
@@ -92,6 +98,7 @@ void MultiplayerLadder_OnResult(u32 code, u32 outcome)
 // allowed it). Money and progress are the host's and arrive on their own.
 void MultiplayerLadder_Tick(void)
 {
+    TowerLegends_Tick(); // Battle Tower: Legends: a queued solo floor or Hyper Training, once the field is calm
     if (sPendingCode == 0)
         return;
     if (MultiplayerBattle_IsActive() || MultiplayerBattle_PauseClocks())
