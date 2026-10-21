@@ -1719,7 +1719,13 @@ static unsigned short PlanKeys(void)
         sPlan.settle = 0;
         /* B through the lines and questions; a trainer's YES until its battle begins (the Winstrates ask first) */
         button = t->fight && sPlan.battles == 0 && sPlan.frames <= 1800 ? A_BUTTON : B_BUTTON;
-        if (DioramaBattleEnvTest_PokenavTutorialKey() != 0)
+        if (DioramaBattleEnvTest_NamingScreenUp())
+        {
+            /* a naming screen (a nickname offered for a Pokemon received, the question's YES taken after half a
+               minute): the name kept - START puts the cursor on OK, then A */
+            button = sPlan.presses % 2 == 0 ? START_BUTTON : A_BUTTON;
+        }
+        else if (DioramaBattleEnvTest_PokenavTutorialKey() != 0)
         {
             /* the PokéNav tutorial (Rustboro's scientist once the PokéNav is given): MATCH CALL, a call, then out */
             button = DioramaBattleEnvTest_PokenavTutorialKey();

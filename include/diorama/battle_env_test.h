@@ -149,6 +149,8 @@ int DioramaBattleEnvTest_ForcedStartMenuUp(void);
 /* pokenav_menu_handler.c (read with the game thread parked): the key the PokéNav tutorial wants, 0 when none is
    open */
 int DioramaBattleEnvTest_PokenavTutorialKey(void);
+/* naming_screen.c (read with the game thread parked): a naming screen taking input */
+int DioramaBattleEnvTest_NamingScreenUp(void);
 /* battle_controller_player.c, HandleInputChooseAction (game thread) */
 void DioramaBattleEnvTest_OnActionMenu(void);
 /* gl_battle.c (render thread): the stem to capture this frame, or NULL */

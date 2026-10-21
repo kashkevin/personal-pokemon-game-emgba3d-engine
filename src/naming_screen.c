@@ -2721,3 +2721,15 @@ bool32 NamingScreen_NativeUiState(struct NativeNaming *out)
     return TRUE;
 }
 #endif // ENABLE_NATIVE_UI
+
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+#include "diorama/battle_env_test.h"
+
+// Test builds only (tools/qa/gameplay_check.py): a naming screen taking input (a nickname offered for a Pokemon just
+// received, a name asked for), so the plan runner can finish it as a player keeping the name would: START puts the
+// cursor on OK, then A.
+int DioramaBattleEnvTest_NamingScreenUp(void)
+{
+    return gMain.callback2 == CB2_NamingScreen && sNamingScreen != NULL;
+}
+#endif
