@@ -959,6 +959,9 @@ static void StartTowerFloor(int floor)
     s.towerFloor = floor;
     s.towerLogged = false;
     s.towerMoney = GetMoney(&gSaveBlock1Ptr->money);
+    /* The Set battle style (in memory, as PKMN_TEST_STRONG's): the Shift style's "switch?" question after each opposing
+     * Pokemon falls has no answer the fight's A presses can give. */
+    gSaveBlock2Ptr->optionsBattleStyle = OPTIONS_BATTLE_STYLE_SET;
     if (!TowerLegends_TestStartSolo(floor))
         TestLog("Battle env test: tower floor %d does not exist", floor);
     else
@@ -2112,9 +2115,11 @@ static void ParadeTick(void)
 }
 
 /* PKMN_TEST_TOWER_WIN (a test advantage, in memory only, for a Tower floor's won run): at each of the player's turns
- * the lead's HP is full again and the move cursor is on its move that does most against the opposing Pokemon (type
- * effectiveness x power; immunities count as nothing). The battle itself - the AI's turns, damage, switches, Mega
- * Evolution, the end - is the game's own. */
+ * the lead's HP is full again, its Attack, Defense, Speed, Sp. Atk, Sp. Def and accuracy stages are +6 (a set-up
+ * opponent such as Floor 100's Curse Snorlax cannot knock it out between two of its turns: the autopilot cannot choose
+ * a replacement) and the move cursor is on its move that does most against the opposing Pokemon (type effectiveness x
+ * power; immunities count as nothing). The battle itself - the AI's turns, damage, switches, Mega Evolution, the end -
+ * is the game's own. */
 static void TowerWinTurn(void)
 {
     static const u16 sCoverage[MAX_MON_MOVES] = {MOVE_ICE_BEAM, MOVE_FLAMETHROWER, MOVE_SHADOW_BALL, MOVE_EARTHQUAKE};
@@ -2128,6 +2133,8 @@ static void TowerWinTurn(void)
     }
     gBattleMons[player].hp = gBattleMons[player].maxHP;
     SetMonData(&gParties[B_TRAINER_PLAYER][gBattlerPartyIndexes[player]], MON_DATA_HP, &gBattleMons[player].maxHP);
+    for (i = STAT_ATK; i <= STAT_ACC; i++)
+        gBattleMons[player].statStages[i] = MAX_STAT_STAGE;
     for (i = 0; i < MAX_MON_MOVES; i++)
     {
         enum Move move = gBattleMons[player].moves[i];

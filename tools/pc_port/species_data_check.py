@@ -47,6 +47,13 @@ ALLOWED = {
     "data/maps/Route110/scripts.inc": "Update 31 rival checkpoint hook (Route 110 trigger line)",
     "data/maps/Route119/scripts.inc": "Update 31 rival checkpoint hook (Route 119 trigger line)",
     "data/maps/LilycoveCity/scripts.inc": "Update 31 rival checkpoint hook (Lilycove rival)",
+    # The Mega Evolution check's fix (8906fb9b): Mega Chimecho's base HP follows P_UPDATED_STATS like Chimecho's (a Mega
+    # keeps its base form's HP), in the PC build and the test ROM; the release GBA ROM keeps 75.
+    "src/data/pokemon/species_info/gen_3_families.h": "Mega Chimecho's base HP follows Chimecho's (PC build, test ROM)",
+}
+# Reviewed fingerprint changes: species whose data changed on purpose (the fingerprint the change gives, the reason).
+ALLOWED_SPECIES = {
+    "1555": ("907cd87b71f0b328", "SPECIES_CHIMECHO_MEGA: base HP 65 with P_UPDATED_STATS, as Chimecho (8906fb9b)"),
 }
 
 
@@ -83,7 +90,7 @@ def main():
     base_map = dict(line.split(" ", 1) for line in base)
     now_map = dict(line.split(" ", 1) for line in now)
     for species in sorted(set(base_map) | set(now_map), key=int):
-        if base_map.get(species) != now_map.get(species):
+        if base_map.get(species) != now_map.get(species) and ALLOWED_SPECIES.get(species, (None,))[0] != now_map.get(species):
             problems.append(f"species {species}: fingerprint {base_map.get(species)} -> {now_map.get(species)}")
     if not args.skip_git:
         diff = run(["git", "diff", "--name-only", args.base, "--"], cwd=ROOT)
@@ -99,7 +106,8 @@ def main():
         for p in problems[:40]:
             print("  " + p)
         return 1
-    print(f"species_data_check: ok ({len(base)} species fingerprints equal the pre-update baseline; no protected data file changed)")
+    print(f"species_data_check: ok ({len(base)} species fingerprints equal the pre-update baseline, {len(ALLOWED_SPECIES)} reviewed "
+          f"change; no protected data file changed but the {len(ALLOWED)} reviewed ones)")
     return 0
 
 

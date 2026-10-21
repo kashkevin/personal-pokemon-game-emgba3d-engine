@@ -28,8 +28,9 @@ import sys
 from elftools.elf.elffile import ELFFile
 
 # Types the PC game extends after the GBA's last member (value: how many members it adds). The GBA part is unchanged.
-#   SaveBlock3: the Day Care egg queue after the 600-byte ownership profile (Update 30; the sector padding rules are in flash.py).
-PC_ONLY_TAILS = {'SaveBlock3': 1}
+#   SaveBlock3: the Day Care egg queue after the 600-byte ownership profile (Update 30; the sector padding rules are in flash.py),
+#   then Battle Tower: Legends' record (64 bytes; the app's docs/battle-tower-legends.md 8.6).
+PC_ONLY_TAILS = {'SaveBlock3': 2}
 
 ENGINE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PROBE = 'tools/pc_port/abi_probe.c'

@@ -41,10 +41,14 @@
 #include "field_screen_effect.h"
 #include "field_weather.h"
 #include "event_object_lock.h"
+#include "trainer_pools.h"
+#include "constants/abilities.h"
 #include "constants/battle.h"
+#include "constants/battle_ai.h"
 #include "constants/field_weather.h"
 #include "constants/flags.h"
 #include "constants/items.h"
+#include "constants/moves.h"
 #include "constants/opponents.h"
 #include "constants/pokeball.h"
 #include "constants/region_map_sections.h"
@@ -454,8 +458,11 @@ void TowerLegends_Tick(void)
         Refuse(sTower.command.ticket, sTower.command.floor, "BATTLE TOWER: no POKeMON|can battle.");
     else
     {
+        // The floor begins here (its intro, then its battle): "started" goes to the host at once, so the host's window
+        // for an issued battle never waits on how long the player reads the intro.
         sTower.ticket = sTower.command.ticket;
         sTower.floor = sTower.command.floor;
+        sTower.startedPending = sTower.ticket != 0;
         ScriptContext_SetupScript(EventScript_TowerLegendsSolo);
     }
 }
@@ -545,7 +552,6 @@ void TowerLegends_StartSoloBattle(void)
     TRAINER_BATTLE_PARAM.opponentB = TRAINER_NONE;
     TRAINER_BATTLE_PARAM.defeatTextA = (u8 *)floor->defeatText;
     TRAINER_BATTLE_PARAM.victoryText = (u8 *)(floor->victoryText != NULL ? floor->victoryText : sText_DefaultVictory);
-    sTower.startedPending = sTower.ticket != 0;
     BattleSetup_StartTowerLegendsBattle(TRAINER_TOWER_A, floor->battleMusic, CB2_EndTowerLegendsBattle);
 }
 

@@ -6,9 +6,9 @@ src/tower_legends.c: the floor's script and intro, the battle against the floor'
 nobody at the keyboard (the battle-environment driver's autopilot, include/diorama/battle_env_test.h):
 
   won   six level-100 Mewtwo; PKMN_TEST_TOWER_WIN, a test advantage in memory only: at each of the player's turns the
-        active Pokemon's HP is full again, it knows Ice Beam, Flamethrower, Shadow Ball and Earthquake and the cursor is
-        on the one that does most against the opposing Pokemon. The opposing side is the game's own: its AI, its moves,
-        its items, its Mega Evolution.
+        active Pokemon's HP is full again, its battle stats and accuracy are +6, it knows Ice Beam, Flamethrower, Shadow
+        Ball and Earthquake and the cursor is on the one that does most against the opposing Pokemon. The opposing side
+        is the game's own: its AI, its moves, its items, its Mega Evolution.
   lost  a level-1 Magikarp alone (Splash): the floor's trainer wins.
 
 Everything is read from the game's own log (nothing reads its memory). Checked for each run, against the floor table
@@ -20,7 +20,7 @@ Mega Stone holder of the floor that came into battle Mega Evolved (PKMN_TEST_MEG
 check of every run passed; the report is OUT/tower_check.json and a floor-by-floor OUT/tower_check.md.
 
     tools/battle_env/tower_check.py --exe ./pokeemerald-mp-bfxtest --save town.sav --out build/tower-check \\
-        [--floors 1-100] [--runs won,lost] [--jobs 3] [--display :99] [--make-save]
+        [--floors 1-100] [--runs won,lost] [--jobs 3] [--speed 4] [--display :99] [--make-save]
 """
 import argparse
 import concurrent.futures
@@ -39,6 +39,8 @@ WIN_PARTY = ",".join(["150:100"] * 6)     # SPECIES_MEWTWO
 LOSE_PARTY = "129:1"                      # SPECIES_MAGIKARP: Splash
 TICKET = lambda floor: 0x01000000 | (floor << 8) | 0x7E   # TowerLegends_TestStartSolo's test ticket
 FIGHT_SECONDS = {"won": 420, "lost": 300}
+END = re.compile(r"tower end floor (\d+) pending (\d+) ticket ([0-9a-f]+) floor (\d+) record (\d+) money (\d+) "
+                 r"\(was (\d+)\) cap (\d+)")
 
 
 def floors_arg(text):
@@ -61,16 +63,24 @@ def parse(lines):
             run["foes"].append(dict(slot=n[0], species=n[1], level=n[2], item=n[3], ability=n[4], moves=n[5:9],
                                     hp=n[9], maxhp=n[10]))
         elif line.startswith("tower end floor"):
-            n = numbers(line)
-            run["end"] = dict(floor=n[0], pending=n[1], ticket=int(re.search(r"ticket ([0-9a-f]+)", line).group(1), 16),
-                              pendingFloor=n[3], record=n[4], money=n[5], was=n[6], cap=n[7])
+            m = END.match(line)
+            if m is None:
+                run["notes"].append("unreadable: " + line)
+                continue
+            g = m.groups()
+            run["end"] = dict(floor=int(g[0]), pending=int(g[1]), ticket=int(g[2], 16), pendingFloor=int(g[3]),
+                              record=int(g[4]), money=int(g[5]), was=int(g[6]), cap=int(g[7]))
         elif line.startswith("tower own "):
             n = numbers(line)
             run["own"].append(dict(slot=n[0], species=n[1], level=n[2], item=n[3], hp=n[9], maxhp=n[10]))
         elif line.startswith("battle over, outcome"):
             run["outcome"] = numbers(line)[0]
-        elif "mega" in line.lower() and ("evolv" in line.lower() or "became" in line.lower()):
-            run["megas"].append(line)
+        elif line.startswith("mega battler "):
+            # PKMN_TEST_MEGA_LOG: "mega battler B: species S types T/T ability A gimmick G" whenever a battler changes;
+            # an opposing battler (odd B) with gimmick 1 (GIMMICK_MEGA) has Mega Evolved into species S
+            n = numbers(line)
+            if n[0] % 2 == 1 and n[-1] == 1 and n[1] not in [m["species"] for m in run["megas"]]:
+                run["megas"].append(dict(battler=n[0], species=n[1]))
         elif line.startswith(("the battle did not end", "assert", "cannot read")):
             run["notes"].append(line)
     return run
@@ -119,6 +129,8 @@ def judge(floor, kind, data, run, code):
         holders = [m for m in solo["mons"] if m.get("mega")]
         if holders and not run["megas"]:
             problems.append(f"{len(holders)} Mega Stone holder(s) and no Mega Evolution logged")
+        if run["megas"] and not holders:
+            problems.append(f"a Mega Evolution without a Mega Stone holder in the table: {run['megas']}")
     return problems
 
 
@@ -126,6 +138,8 @@ def run_one(args, data, floor, kind):
     rundir = os.path.join(args.out, f"floor-{floor:03d}-{kind}")
     env = {"PKMN_TEST_BATTLE": f"tower:{floor}", "PKMN_TEST_AUTOPILOT": "1", "PKMN_TEST_FIGHT": str(FIGHT_SECONDS[kind]),
            "PKMN_TEST_MEGA_LOG": "1", "PKMN_TEST_PARTY": WIN_PARTY if kind == "won" else LOSE_PARTY}
+    if args.speed > 1:
+        env["PKMN_TEST_SPEED"] = str(args.speed)      # the game's clock that many times as fast (test builds)
     if kind == "won":
         env["PKMN_TEST_TOWER_WIN"] = "1"
     else:
@@ -136,7 +150,7 @@ def run_one(args, data, floor, kind):
     run = parse(driver_lines(os.path.join(rundir, "test.log")))
     problems = judge(floor, kind, data, run, code)
     return dict(floor=floor, run=kind, exit=code, seconds=round(time.monotonic() - began, 1), passed=not problems,
-                problems=problems, foes=len(run["foes"]), megas=len(run["megas"]))
+                problems=problems, foes=len(run["foes"]), megas=[m["species"] for m in run["megas"]])
 
 
 def report(args, data, results):
@@ -145,7 +159,7 @@ def report(args, data, results):
         by_floor.setdefault(r["floor"], {})[r["run"]] = r
     lines = ["# Battle Tower: Legends - floor-by-floor check", "",
              f"Executable: `{os.path.basename(args.exe)}`; floor table hash {data['hash']}; runs: {args.runs}.", "",
-             "| Floor | Kind | Trainer | Team | Won run | Lost run | Megas seen |", "| --- | --- | --- | --- | --- | --- | --- |"]
+             "| Floor | Kind | Trainer | Team | Won run | Lost run | Megas seen (species) |", "| --- | --- | --- | --- | --- | --- | --- |"]
     for floor in sorted(by_floor):
         f = data["floors"][floor - 1]
         cells = []
@@ -153,7 +167,7 @@ def report(args, data, results):
             r = by_floor[floor].get(kind)
             cells.append("-" if r is None else ("passed" if r["passed"] else "FAILED: " + "; ".join(r["problems"])[:200])
                          + ("" if r is None else f" ({r['seconds']} s)"))
-        megas = by_floor[floor].get("won", {}).get("megas", "-")
+        megas = ", ".join(str(m) for m in by_floor[floor].get("won", {}).get("megas", [])) or "-"
         lines.append(f"| {floor} | {f['kind']} | {f['solo']['name']} | {len(f['solo']['mons'])} | {cells[0]} | {cells[1]} | {megas} |")
     with open(os.path.join(args.out, "tower_check.md"), "w") as out:
         out.write("\n".join(lines) + "\n")
@@ -170,6 +184,7 @@ def main():
     parser.add_argument("--jobs", type=int, default=2)
     parser.add_argument("--display", default=os.environ.get("DISPLAY"))
     parser.add_argument("--make-save", action="store_true")
+    parser.add_argument("--speed", type=int, default=1, help="PKMN_TEST_SPEED: the game's clock this many times as fast")
     args = parser.parse_args()
     args.exe = os.path.abspath(args.exe)
     os.makedirs(args.out, exist_ok=True)
