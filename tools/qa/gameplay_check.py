@@ -383,7 +383,8 @@ def main():
     parser.add_argument("--make-save", metavar="PATH", help="first make the save there (the short introduction)")
     parser.add_argument("--out", required=True)
     parser.add_argument("--kinds", default=",".join(KINDS), help=f"comma-separated, of {', '.join(KINDS)}")
-    parser.add_argument("--maps", help="only maps whose name matches this regular expression")
+    parser.add_argument("--maps", help="only maps whose name matches this regular expression (with --plan: the id)")
+    parser.add_argument("--plan", help="the plan.json of an earlier --plan-only run, instead of the engine checkout")
     parser.add_argument("--limit", type=int, default=0, help="at most this many targets (0: all)")
     parser.add_argument("--shard", type=int, default=0, help="with --shards: this job's part (0-based)")
     parser.add_argument("--shards", type=int, default=1, help="the targets split this many ways (CI jobs)")
@@ -399,8 +400,13 @@ def main():
     args.exe, args.out = os.path.abspath(args.exe), os.path.abspath(args.out)
     os.makedirs(args.out, exist_ok=True)
     kinds = set(args.kinds.split(","))
-    inventory = inventory_tool.inventory(ROOT)
-    targets, blocked = plan_targets(ROOT, inventory, kinds, args.maps)
+    if args.plan:   # a plan written before (--plan-only, from an engine checkout): CI's jobs need no checkout
+        plan = json.load(open(args.plan))
+        targets = [t for t in plan["targets"] if t["kind"] in kinds and (not args.maps or re.search(
+            args.maps, t["map"]))]
+        blocked = [b for b in plan["blocked"] if b["kind"] in kinds]
+    else:
+        targets, blocked = plan_targets(ROOT, inventory_tool.inventory(ROOT), kinds, args.maps)
     if args.shards > 1:     # one CI job's part: every shards-th target from the shard-th
         targets = targets[args.shard::args.shards]
     if args.limit:
