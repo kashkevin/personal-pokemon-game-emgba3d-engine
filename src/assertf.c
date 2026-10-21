@@ -7,6 +7,10 @@
 #include "m4a.h"
 #include "constants/characters.h"
 #include "constants/rgb.h"
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+#include "diorama/battle_env_test.h"
+#endif
+#line 10 // gba-line
 
 enum Mode { MODE_ASSERTF, MODE_FATALF };
 #define MODE_COUNT 2
@@ -457,6 +461,17 @@ void AssertfCrashScreen(const void *return1, const char *fmt, ...)
 {
     va_list va;
     va_start(va, fmt);
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+    {
+        // Test builds only: the battle test driver logs the assert, and a driven game (PKMN_TEST_EXIT) ends with it
+        // instead of waiting on the crash screen for START (tools/qa/gameplay_check.py).
+        va_list copy;
+        va_copy(copy, va);
+        DioramaBattleEnvTest_OnAssert(fmt, copy);
+        va_end(copy);
+    }
+#endif
+#line 448 // gba-line
     CrashScreen(MODE_ASSERTF, return1, __builtin_return_address(0), fmt, va);
     va_end(va);
 }

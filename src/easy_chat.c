@@ -5832,3 +5832,16 @@ bool32 IsEasyChatAnswerUnlocked(int easyChatWord)
     else
         return IsEasyChatIndexAndGroupUnlocked(index, groupId & mask);
 }
+
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+#include "diorama/battle_env_test.h"
+
+// Test builds only (tools/qa/gameplay_check.py): where the plan runner stands on an Easy Chat screen, to leave it as a
+// player cancelling would (B until "Stop giving a comment?" is up, then YES): -1 no screen, 0 one, 1 that prompt up.
+int DioramaBattleEnvTest_EasyChatState(void)
+{
+    if (gMain.callback2 != CB2_EasyChatScreen || sEasyChatScreen == NULL)
+        return -1;
+    return sEasyChatScreen->inputState == INPUTSTATE_EXIT_PROMPT ? 1 : 0;
+}
+#endif

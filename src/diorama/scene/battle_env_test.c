@@ -18,14 +18,17 @@
 #include "battle.h"
 #include "battle_controllers.h"
 #include "battle_gimmick.h"
+#include "battle_main.h"
 #include "battle_partner.h"
 #include "battle_setup.h"
 #include "data.h"
 #include "event_data.h"
 #include "event_object_movement.h"
 #include "field_screen_effect.h"
+#include "field_weather.h"
 #include "load_save.h"
 #include "main.h"
+#include "menu.h"
 #include "overworld.h"
 #include "palette.h"
 #include "party_menu.h"
@@ -50,12 +53,19 @@
 #include "constants/script_commands.h"
 #include "constants/event_objects.h"
 #include "constants/trainer_types.h"
+#include "field_message_box.h"
 #include "field_player_avatar.h"
 #include "fieldmap.h"
 #include "constants/multiplayer_balance.h"
 #include "constants/multiplayer_rival.h"
 #include "platform/coin_shop.h"
 #include "diorama/battle_env_test.h"
+
+extern const u8 *ScriptContext_DebugPosition(int *mode, int *status);  /* script.c (PORTABLE) */
+
+/* script.c, ScriptContext_SetupScript (test builds): every field script started */
+u32 gDioramaBattleEnvTestScriptStarts;
+
 #ifndef ENABLE_DIORAMA
 #include "platform/png_write.h"
 #endif
@@ -122,6 +132,9 @@ static struct
     /* PKMN_TEST_FIRST_MOVE=<move number>: with PKMN_TEST_STRONG, the party's first move in place of
      * Flamethrower (a move whose animation follows a counter over turns: Fury Cutter, Rollout) */
     int firstMove;
+    /* PKMN_TEST_MORE_MOVES=<move>,<move>,<move>: with PKMN_TEST_STRONG, the party's other three moves; a plan's
+     * battles then choose the most effective of the four against the foe (PlanPickMoves) */
+    int moreMoves[MAX_MON_MOVES - 1];
     /* PKMN_TEST_LEAD_ONLY=1: the party is its first Pokemon alone (in memory only), so a battle lost ends at
      * its faint (the autopilot cannot choose the next one in the party menu) */
     bool leadOnly, trimmed;
@@ -240,6 +253,7 @@ static const struct { const char *name; int value; } sFacts[] = {
     FACT(ITEM_COIN_CASE), FACT(MAP_MAUVILLE_CITY_GAME_CORNER), FACT(MAP_MAUVILLE_CITY_MART), FACT(MP_MEGA_RING_COINS),
     FACT(SPECIES_TORCHIC), FACT(MAP_LITTLEROOT_TOWN), FACT(MAP_LITTLEROOT_TOWN_PROFESSOR_BIRCHS_LAB),
     FACT(MP_INTRO_STARTER_PENDING), FACT(MOVE_FLASH_CANNON), FACT(TRAINER_FLAGS_START), FACT(ITEMS_COUNT),
+    FACT(MOVE_THUNDERBOLT), FACT(MOVE_ICE_BEAM), FACT(MOVE_ENERGY_BALL),
 };
 #undef FACT
 
@@ -358,6 +372,16 @@ static void Init(void)
     s.firstMove = EnvInt("PKMN_TEST_FIRST_MOVE", 0);
     if (s.firstMove <= MOVE_NONE || s.firstMove >= MOVES_COUNT)
         s.firstMove = MOVE_FLAMETHROWER;
+    value = SDL_getenv("PKMN_TEST_MORE_MOVES");
+    for (u32 i = 0; value != NULL && *value != '\0' && i < ARRAY_COUNT(s.moreMoves); i++)
+    {
+        int move = atoi(value);
+
+        s.moreMoves[i] = move > MOVE_NONE && move < MOVES_COUNT ? move : MOVE_NONE;
+        value = strchr(value, ',');
+        if (value != NULL)
+            value++;
+    }
     s.megaLog = EnvInt("PKMN_TEST_MEGA_LOG", 0) != 0;
     s.softResets = EnvInt("PKMN_TEST_SOFT_RESET", 0);
     s.softReset = s.softResets > 0;
@@ -997,46 +1021,64 @@ static void StrengthenParty(void)
         SetMonData(mon, MON_DATA_EXP, &exp);
         CalculateMonStats(mon);
         SetMonMoveSlot(mon, s.firstMove, 0);
+        for (u32 j = 0; j < ARRAY_COUNT(s.moreMoves); j++)
+            if (s.moreMoves[j] != MOVE_NONE)
+                SetMonMoveSlot(mon, s.moreMoves[j], j + 1);
     }
     /* The Set battle style: in a single battle the Shift style asks whether to switch when
      * the opponent sends its next Pokemon, and A's "Yes" opens the party on the battler
      * already out ("already in battle!"), over and over. */
     gSaveBlock2Ptr->optionsBattleStyle = OPTIONS_BATTLE_STYLE_SET;
     HealPlayerParty();
-    TestLog("Battle env test: the party at level %d, healed, its first move %d", MAX_LEVEL, s.firstMove);
+    TestLog("Battle env test: the party at level %d, healed, its moves %d %d %d %d", MAX_LEVEL, s.firstMove,
+            s.moreMoves[0], s.moreMoves[1], s.moreMoves[2]);
 }
 
 /*
  * PKMN_TEST_PLAN=<file>: the gameplay checks (tools/qa/gameplay_check.py). One target per line,
  *     <key> <kind> <group> <num> <x> <y> <dir> <arg>
- * kind talk (an object event; arg its local id), sign or hidden (a background event; arg its index), warp or trigger (a
- * warp or a coordinate trigger; arg its index). From wherever the player is, the plan warps to x,y on that map, faces
- * dir (U D L R) and presses A (warp, trigger: holds dir, a step onto it; a trigger logs whether its variable holds the
- * value it runs on), then answers what comes as a player would: B through the lines and every
- * question (NO), A through a battle (the first move on the first target), until the field is free again. Before
- * each: the target object shown (its hide flag cleared), every other trainer of the map counted as beaten and the
- * target trainer as not (the battle that starts is the one asked for), a hidden item put back, the party healed.
+ * kind talk or fight (an object event, fight a trainer; arg its local id), sign or hidden (a background event; arg
+ * its index), warp or trigger (a warp or a coordinate trigger; arg its index). From wherever the player is, the plan
+ * warps to x,y on that map, faces dir (U D L R) and presses A (warp, trigger: holds dir, a step onto it; a trigger logs
+ * whether its variable holds the value it runs on), then answers what comes as a player would: B through the lines and
+ * every question (NO; a fight's YES until its battle; an Easy Chat screen left by its own CANCEL), A through a battle
+ * (the most effective of the party's moves on the first target), until the field is free again. Before each: a taken
+ * item ball or hidden item put back (any other object as the save has it: one its story hides is logged as absent),
+ * every other trainer of the map counted as beaten and the target trainer as not (the battle that starts is the one
+ * asked for), the party healed.
  * Each target logs where it began and ended, whether a script ran, its battles (trainers, outcome), the money, the
  * trainer's beaten flag, the target's own flag and the bag's changes. PKMN_TEST_PLAN_FIRST=n starts at line n (0-based;
  * comments and blank lines not counted). A target that does not give the field back within PKMN_TEST_PLAN_FRAMES
- * (default 2400; 10800 more for each battle) is logged as a hang, pictured (<PKMN_TEST_MEGA_SHOT_STEM>-99.png) and the
- * process ends with code 7: the tool starts the game again at the next target. In memory only: nothing is saved.
+ * (default 2400; 10800 more for each battle) with nothing moving on for PLAN_STALL frames (the player's place, the
+ * screen, the script, the message box), or within four times that, is logged as a hang, pictured
+ * (<PKMN_TEST_MEGA_SHOT_STEM>-99.png) and the process ends with code 7: the tool starts the game again at the next
+ * target. A target whose map's own scene ran first (it began by itself; no battle, the same map) runs once more after
+ * it. In memory only: nothing is saved.
  */
 #define PLAN_MAX 4096
 #define PLAN_SETTLE 30      /* free field frames that end a target */
+#define PLAN_STALL 600      /* frames past the budget with nothing moving on that make it a hang */
 enum { PLAN_TALK, PLAN_SIGN, PLAN_HIDDEN, PLAN_WARP, PLAN_TRIGGER };
 enum { PLAN_OFF, PLAN_START, PLAN_GO, PLAN_ARRIVE, PLAN_ACT, PLAN_RUN, PLAN_DONE, PLAN_HANG, PLAN_FINISHED };
 static struct PlanTarget
 {
     char key[80];
     u8 kind, dir, group, num;
+    bool8 fight;    /* "fight": a trainer, talked to - its questions answered YES until its battle begins */
     s16 x, y, arg;
 } sPlanTargets[PLAN_MAX];
 static struct
 {
     int count, first, next, phase, frames, budget, settle, pressLeft, gapLeft, presses, hangFrames;
     int lastPhase, phaseFrames;
-    bool shots, byItself;
+    int lastProgress;
+    u32 progress, rng;
+    int escapeChoice, escapeDowns;
+    u32 scriptStarts;       /* gDioramaBattleEnvTestScriptStarts at the arrival */
+    s16 warpX, warpY;
+    bool warpPending;
+    bool shots, byItself, again, ending;
+    u32 lastVblank;
     bool script, inBattle, mapChanged;
     int battles, outcome, trainerA, trainerB;
     u16 trainerId, ownFlag;     /* the target trainer (0: none) and the target's own flag (0: none) */
@@ -1074,7 +1116,8 @@ static void LoadPlan(const char *path)
         }
         if (index++ < sPlan.first)
             continue;
-        t->kind = strcmp(kind, "talk") == 0 ? PLAN_TALK : strcmp(kind, "sign") == 0 ? PLAN_SIGN
+        t->fight = strcmp(kind, "fight") == 0;
+        t->kind = strcmp(kind, "talk") == 0 || t->fight ? PLAN_TALK : strcmp(kind, "sign") == 0 ? PLAN_SIGN
                 : strcmp(kind, "hidden") == 0 ? PLAN_HIDDEN : strcmp(kind, "trigger") == 0 ? PLAN_TRIGGER : PLAN_WARP;
         t->dir = dir[0] == 'U' ? DIR_NORTH : dir[0] == 'D' ? DIR_SOUTH : dir[0] == 'L' ? DIR_WEST : DIR_EAST;
         t->group = group;
@@ -1108,12 +1151,57 @@ static bool PlanScriptTrainers(const u8 *script, u16 *a, u16 *b)
     return true;
 }
 
+void DioramaBattleEnvTest_OnAssert(const char *fmt, va_list va)
+{
+    char text[256];
+
+    SDL_vsnprintf(text, sizeof(text), fmt, va);
+    TestLog("Battle env test: assert %s", text);
+    if (sPlan.phase != PLAN_OFF && sPlan.phase != PLAN_FINISHED && sPlan.next < sPlan.count)
+        TestLog("Battle env test: plan target %d %s hang assert %s", sPlan.first + sPlan.next,
+                sPlanTargets[sPlan.next].key, text);
+    if (s.exitAfter)
+    {
+        /* the crash screen waits for START: a driven game ends here instead (a plan's hang: its next target goes on) */
+        if (sLogFile != NULL)
+            fclose(sLogFile);
+        fflush(NULL);
+        _exit(sPlan.phase != PLAN_OFF ? 7 : 8);
+    }
+}
+
+bool DioramaBattleEnvTest_TakeWarpCoords(s16 *x, s16 *y)
+{
+    if (!sPlan.warpPending)
+        return false;
+    sPlan.warpPending = false;
+    *x = sPlan.warpX;
+    *y = sPlan.warpY;
+    return true;
+}
+
+/* What a target's run counts, from nothing. */
+static void PlanResetRun(void)
+{
+    sPlan.frames = sPlan.settle = sPlan.pressLeft = sPlan.gapLeft = sPlan.presses = 0;
+    sPlan.script = sPlan.inBattle = sPlan.mapChanged = sPlan.byItself = false;
+    sPlan.battles = 0;
+    sPlan.outcome = sPlan.trainerA = sPlan.trainerB = -1;
+    sPlan.hangFrames = sPlan.budget;
+    sPlan.lastProgress = 0;
+    sPlan.progress = 0;
+    sPlan.rng = (u32)(sPlan.first + sPlan.next) * 2654435761u + 1;
+    sPlan.ending = false;
+    sPlan.lastVblank = gMain.vblankCounter1;
+    sPlan.escapeChoice = sPlan.escapeDowns = 0;
+}
+
 /* Game thread, the field free: the target's map set up, then the warp to its place. */
 static void PlanGo(void)
 {
     const struct PlanTarget *t = &sPlanTargets[sPlan.next];
     const struct MapEvents *events = Overworld_GetMapHeaderByGroupAndId(t->group, t->num)->events;
-    u16 a, b;
+    u16 a, b, targetA = 0, targetB = 0;
 
     sPlan.trainerId = sPlan.ownFlag = 0;
     for (u32 i = 0; events != NULL && i < events->objectEventCount; i++)
@@ -1125,22 +1213,32 @@ static void PlanGo(void)
             continue;
         if (target && o->flagId != 0)
         {
+            /* an item ball's flag is its own (taken): put back, as on a fresh save. Any other object's hide flag is
+               the story's: left as the save has it (shown out of its story step, a rival or Steven runs a script
+               for another time), a set one logged as absent */
             sPlan.ownFlag = o->flagId;
-            FlagClear(o->flagId);
+            if (o->graphicsId == OBJ_EVENT_GFX_ITEM_BALL)
+                FlagClear(o->flagId);
         }
         if (!PlanScriptTrainers(o->script, &a, &b))
             continue;
         if (target)
         {
-            sPlan.trainerId = a;
-            ClearTrainerFlag(a);
-            if (b != 0 && b != 0xFFFF)
-                ClearTrainerFlag(b);
+            targetA = a;
+            targetB = b;
         }
         else if (o->trainerType != TRAINER_TYPE_NONE)
         {
             SetTrainerFlag(a);
         }
+    }
+    /* After the others: twins (Gina and Mia) are two objects of one double battle's trainer. */
+    if (targetA != 0)
+    {
+        sPlan.trainerId = targetA;
+        ClearTrainerFlag(targetA);
+        if (targetB != 0 && targetB != 0xFFFF)
+            ClearTrainerFlag(targetB);
     }
     if (t->kind == PLAN_HIDDEN && events != NULL && t->arg < events->bgEventCount)
     {
@@ -1148,16 +1246,18 @@ static void PlanGo(void)
         FlagClear(sPlan.ownFlag);
     }
     HealPlayerParty();
+    VarSet(VAR_REPEL_STEP_COUNT, 250);  /* no wild Pokemon below the party's level 100: a step is the target's alone */
     sPlan.money = GetMoney(&gSaveBlock1Ptr->money);
     for (u32 i = 0; i < ITEMS_COUNT; i++)
         sPlan.bagBefore[i] = CountTotalItemQuantityInBag(i);
-    sPlan.frames = sPlan.settle = sPlan.pressLeft = sPlan.gapLeft = sPlan.presses = 0;
-    sPlan.script = sPlan.inBattle = sPlan.mapChanged = sPlan.byItself = false;
-    sPlan.battles = 0;
-    sPlan.outcome = sPlan.trainerA = sPlan.trainerB = -1;
-    sPlan.hangFrames = sPlan.budget;
+    PlanResetRun();
     TestLog("Battle env test: plan target %d %s begin", sPlan.first + sPlan.next, t->key);
-    SetWarpDestination(t->group, t->num, WARP_ID_NONE, t->x, t->y);
+    /* the place itself through DioramaBattleEnvTest_TakeWarpCoords: a warp's own coordinates are s8 (Route 123 is 140
+       wide, Route 119 140 high; past 127 the game put the player in the map's middle) */
+    sPlan.warpX = t->x;
+    sPlan.warpY = t->y;
+    sPlan.warpPending = true;
+    SetWarpDestination(t->group, t->num, WARP_ID_NONE, 0, 0);
     DoWarp();
     ResetInitialPlayerAvatarState();
     sPlan.phase = PLAN_ARRIVE;
@@ -1172,13 +1272,51 @@ static void PlanArrive(void)
 
     if (t->kind == PLAN_TALK && events != NULL)
     {
+        u8 objectId;
+        u16 hideFlag = 0;
+
         for (u32 i = 0; i < events->objectEventCount; i++)
             if (events->objectEvents[i].localId == t->arg && events->objectEvents[i].kind == OBJ_KIND_NORMAL)
+            {
+                hideFlag = events->objectEvents[i].flagId;
                 TryMoveObjectEventToMapCoords(t->arg, t->num, t->group, events->objectEvents[i].x,
                                               events->objectEvents[i].y);   /* it adds MAP_OFFSET itself */
+            }
+        /* Beside the player, so in view: not there with its flag set means the game hides it now (a story flag, the
+           map's script); not there with nothing hiding it is a fault of its own ("missing"). */
+        if (TryGetObjectEventIdByLocalIdAndMap(t->arg, t->num, t->group, &objectId))
+            TestLog("Battle env test: plan target %d %s %s flag %d", sPlan.first + sPlan.next, t->key,
+                    hideFlag != 0 && FlagGet(hideFlag) ? "absent" : "missing", hideFlag);
         FreezeObjectEventsExceptOne(player);
     }
     ObjectEventTurn(&gObjectEvents[player], t->dir);
+    {
+        /* the player's elevation from the tile it stands on: what A searches and a warp mat matches (the game keeps
+           the last one where its tile is a multi-level one); logged when it was another */
+        struct ObjectEvent *p = &gObjectEvents[player];
+        u8 elevation = MapGridGetElevationAt(p->currentCoords.x, p->currentCoords.y);
+
+        if (elevation != ELEVATION_MULTI_LEVEL && elevation != ELEVATION_TRANSITION && p->previousElevation != elevation)
+        {
+            TestLog("Battle env test: plan target %d %s elevation %d %d, its tile %d", sPlan.first + sPlan.next, t->key,
+                    p->currentElevation, p->previousElevation, elevation);
+            p->currentElevation = p->previousElevation = elevation;
+        }
+    }
+    if (t->kind == PLAN_WARP && events != NULL && t->arg < events->warpCount)
+    {
+        /* a door its map's script keeps shut until the story opens it (a sealed cave, Mirage Tower on another day, a
+           locked cabin): its tile solid, or not its layout's own tile now */
+        s32 x = events->warps[t->arg].x, y = events->warps[t->arg].y;
+        /* the map's own layout: a script may load another in its place (Route 111 without the Mirage Tower) */
+        const struct MapLayout *layout = Overworld_GetMapHeaderByGroupAndId(t->group, t->num)->mapLayout;
+        bool32 replaced = layout != NULL && x >= 0 && y >= 0 && x < layout->width && y < layout->height
+                       && (layout->map[x + y * layout->width] & MAPGRID_METATILE_ID_MASK)
+                          != MapGridGetMetatileIdAt(x + MAP_OFFSET, y + MAP_OFFSET);
+
+        if (MapGridGetCollisionAt(x + MAP_OFFSET, y + MAP_OFFSET) != 0 || replaced)
+            TestLog("Battle env test: plan target %d %s closed", sPlan.first + sPlan.next, t->key);
+    }
     if (t->kind == PLAN_TRIGGER && events != NULL && t->arg < events->coordEventCount)
     {
         /* a coordinate trigger runs its script when its variable holds its value (a weather one: always) */
@@ -1187,6 +1325,7 @@ static void PlanArrive(void)
         TestLog("Battle env test: plan target %d %s trigger var %d is %d wants %d", sPlan.first + sPlan.next, t->key,
                 c->trigger, c->trigger != 0 ? VarGet(c->trigger) : -1, c->index);
     }
+    sPlan.scriptStarts = gDioramaBattleEnvTestScriptStarts;
     sPlan.mapGroup = gSaveBlock1Ptr->location.mapGroup;
     sPlan.mapNum = gSaveBlock1Ptr->location.mapNum;
     TestLog("Battle env test: plan target %d %s at map %d.%d %d,%d facing %d", sPlan.first + sPlan.next, t->key,
@@ -1209,6 +1348,18 @@ static void PlanDone(void)
         if (now != sPlan.bagBefore[i])
             used += SDL_snprintf(bag + used, sizeof(bag) - used, "%s%u:%+d", used ? "," : "", i, now - sPlan.bagBefore[i]);
     }
+    /* a trigger's weather and variable after it: a TRIGGER_RUN_IMMEDIATELY one runs inside the step (its weather is
+       what shows), and a script with no effect on the screen runs to its end inside the step too
+       (RunScriptImmediatelyUntilEffect: Ever Grande's arrival trigger sets a flag and its variable) */
+    if (t->kind == PLAN_TRIGGER)
+    {
+        const struct MapEvents *events = gMapHeader.events;
+        int var = events != NULL && t->arg < events->coordEventCount && events->coordEvents[t->arg].trigger != 0
+                ? VarGet(events->coordEvents[t->arg].trigger) : -1;
+
+        used += SDL_snprintf(bag + used, sizeof(bag) - used, "%s weather %d var %d", used ? "" : "-",
+                             GetSavedWeather(), var);
+    }
     TestLog("Battle env test: plan target %d %s end frames %d script %d battles %d outcome %d trainers %d %d "
             "by_itself %d map %d.%d %d,%d money %u %u beaten %d own %d bag %s", sPlan.first + sPlan.next, t->key,
             sPlan.frames, sPlan.script, sPlan.battles, sPlan.outcome, sPlan.trainerA, sPlan.trainerB, sPlan.byItself,
@@ -1217,6 +1368,7 @@ static void PlanDone(void)
             sPlan.trainerId ? (int)FlagGet(TRAINER_FLAGS_START + sPlan.trainerId) : -1,
             sPlan.ownFlag ? (int)FlagGet(sPlan.ownFlag) : -1, used ? bag : "-");
     UnfreezeObjectEvents();
+    sPlan.again = false;
     if (++sPlan.next >= sPlan.count)
     {
         TestLog("Battle env test: plan done (%d targets)", sPlan.count);
@@ -1245,6 +1397,10 @@ static void PlanFieldTick(void)
             SetUpTestBag();
         if (s.strong)
             StrengthenParty();
+        /* a player's own options, in memory: fast text and no move animations (the long scenes and battles shorter;
+           the battle effects have checks of their own) */
+        gSaveBlock2Ptr->optionsTextSpeed = OPTIONS_TEXT_SPEED_FAST;
+        gSaveBlock2Ptr->optionsBattleSceneOff = TRUE;
         sPlan.settle = 0;
         sPlan.phase = PLAN_GO;
         break;
@@ -1262,9 +1418,73 @@ static void PlanFieldTick(void)
             PlanArrive();
         break;
     case PLAN_DONE:
-        if (PlanFieldFree())
-            PlanDone();
+        if (!PlanFieldFree())
+            break;
+        if (sPlan.byItself && !sPlan.again && sPlan.battles == 0 && !sPlan.mapChanged)
+        {
+            /* a scene of the map's own ran first (its variable said it was due) and the target never had its turn:
+               the target once more, the scene done - from where the player still stands (a scene that runs on each
+               entry: the Abandoned Ship's hidden rooms' sparkle), else from a warp there again */
+            const struct PlanTarget *t = &sPlanTargets[sPlan.next];
+            bool stays = gSaveBlock1Ptr->pos.x == t->x && gSaveBlock1Ptr->pos.y == t->y;
+
+            TestLog("Battle env test: plan target %d %s again (a scene ran first)%s", sPlan.first + sPlan.next, t->key,
+                    stays ? "" : ", warped back");
+            UnfreezeObjectEvents();
+            sPlan.again = true;
+            sPlan.settle = 0;
+            if (stays)
+            {
+                PlanResetRun();
+                sPlan.phase = PLAN_ARRIVE;
+            }
+            else
+            {
+                sPlan.phase = PLAN_GO;
+            }
+            break;
+        }
+        PlanDone();
         break;
+    }
+}
+
+/* Render thread (the game thread parked at the frame's end), in a plan's battle: each of the player's battlers' move
+   cursors on its most effective move against the first foe still standing, so the A that the move menu takes picks it
+   (one move the foe resists can be out-healed for good: Champion Wallace's Water team, Milotic's Recover). */
+static void PlanPickMoves(void)
+{
+    u32 foe = gBattleMons[B_POSITION_OPPONENT_LEFT].hp != 0 ? B_POSITION_OPPONENT_LEFT : B_POSITION_OPPONENT_RIGHT;
+
+    if (foe >= gBattlersCount || gBattleMons[foe].hp == 0)
+        return;
+    for (u32 battler = B_POSITION_PLAYER_LEFT; battler < gBattlersCount; battler += 2)
+    {
+        s32 best = -1;
+        u32 pick = 0;
+
+        for (u32 i = 0; i < MAX_MON_MOVES; i++)
+        {
+            enum Move move = gBattleMons[battler].moves[i];
+            enum Type type = GetBattleMoveType(move);
+            enum Ability ability = gBattleMons[foe].ability;
+            s32 effect;
+
+            if (move == MOVE_NONE || gBattleMons[battler].pp[i] == 0)
+                continue;
+            effect = CalcPartyMonTypeEffectivenessMultiplier(move, gBattleMons[foe].species, ability);
+            if ((type == TYPE_ELECTRIC && (ability == ABILITY_VOLT_ABSORB || ability == ABILITY_LIGHTNING_ROD
+                                           || ability == ABILITY_MOTOR_DRIVE))
+             || (type == TYPE_GRASS && ability == ABILITY_SAP_SIPPER)
+             || (type == TYPE_FIRE && ability == ABILITY_FLASH_FIRE))
+                effect = 0;     /* the foe's ability takes it in */
+            if (effect > best)
+            {
+                best = effect;
+                pick = i;
+            }
+        }
+        gMoveSelectionCursor[battler] = pick;
     }
 }
 
@@ -1309,7 +1529,9 @@ static unsigned short PlanKeys(void)
     }
     if (sPlan.phase == PLAN_HANG)
     {
-        if (++sPlan.settle >= 40)
+        /* after its picture (the render thread writes it some frames later; at most 240 frames) */
+        if (++sPlan.settle >= 240 || (sPlan.settle >= 40 && (s.megaShotStem[0] == '\0'
+                                                             || SDL_AtomicGet(&s.megaShotState) == 3)))
         {
             if (sLogFile != NULL)
                 fclose(sLogFile);
@@ -1329,7 +1551,9 @@ static unsigned short PlanKeys(void)
         }
         if (t->kind == PLAN_WARP || t->kind == PLAN_TRIGGER)
         {
-            if (sPlan.settle < 6 + 24)
+            /* a trigger: one step (a walk step is 16 frames; held longer, a second step passes a trigger that is not
+               due - Route 116's into Rusturf Tunnel) */
+            if (sPlan.settle < 6 + (t->kind == PLAN_TRIGGER ? 12 : 24))
                 return t->dir == DIR_NORTH ? DPAD_UP : t->dir == DIR_SOUTH ? DPAD_DOWN
                      : t->dir == DIR_WEST ? DPAD_LEFT : DPAD_RIGHT;
         }
@@ -1343,13 +1567,63 @@ static unsigned short PlanKeys(void)
     }
     if (sPlan.phase != PLAN_RUN)
         return 0;
-    sPlan.frames++;
-    if (sPlan.frames > sPlan.hangFrames)
+    /* The game's ending (the Champion beaten): the Hall of Fame room, its screen and the credits, which end in a reset
+       to the title - the target's last act. Logged, the time it takes allowed, and at the reset the process ends: the
+       tool goes on at the next target, which starts from the save again. */
+    if (!sPlan.ending && gSaveBlock1Ptr->location.mapGroup == MAP_GROUP(MAP_EVER_GRANDE_CITY_HALL_OF_FAME)
+     && gSaveBlock1Ptr->location.mapNum == MAP_NUM(MAP_EVER_GRANDE_CITY_HALL_OF_FAME))
     {
+        sPlan.ending = true;
+        sPlan.hangFrames += 24000;
+        TestLog("Battle env test: plan target %d %s ending (the Hall of Fame, the credits)", sPlan.first + sPlan.next,
+                t->key);
+    }
+    if (sPlan.ending && gMain.vblankCounter1 < sPlan.lastVblank)
+    {
+        TestLog("Battle env test: plan target %d %s ending done (the game reset to its title)", sPlan.first + sPlan.next,
+                t->key);
+        if (sLogFile != NULL)
+            fclose(sLogFile);
+        fflush(NULL);
+        _exit(7);
+    }
+    sPlan.lastVblank = gMain.vblankCounter1;
+    sPlan.frames++;
+    {
+        /* what a scene that goes on changes now and then: the player's place and facing, the map, the screen, the
+           script, the message box and its text, a battle's turns and HP (the Devon president's scene, Scott's
+           welcome and Steven's six run past the budget) */
+        const struct ObjectEvent *player = &gObjectEvents[gPlayerAvatar.objectEventId];
+        u32 progress = (player->currentCoords.x * 31u + player->currentCoords.y) * 31u + player->facingDirection;
+
+        progress = progress * 31u + gSaveBlock1Ptr->location.mapGroup * 257u + gSaveBlock1Ptr->location.mapNum;
+        progress = progress * 31u + (u32)(uintptr_t)gMain.callback2;
+        progress = progress * 31u + ScriptContext_IsEnabled() * 2u + IsFieldMessageBoxHidden() * 4u + gMain.inBattle;
+        progress = progress * 31u + (u32)(uintptr_t)DioramaBattleEnvTest_TextPosition();  /* a long speech printing */
+        if (gMain.inBattle)     /* a long battle: its turns and every battler's HP */
+        {
+            progress = progress * 31u + gBattleTurnCounter;
+            for (u32 i = 0; i < gBattlersCount && i < MAX_BATTLERS_COUNT; i++)
+                progress = progress * 31u + gBattleMons[i].hp;
+        }
+        if (progress != sPlan.progress)
+        {
+            sPlan.progress = progress;
+            sPlan.lastProgress = sPlan.frames;
+        }
+    }
+    /* the budget gone and nothing moving on for a while, or four budgets gone */
+    if (sPlan.frames > sPlan.hangFrames
+     && (sPlan.frames - sPlan.lastProgress > PLAN_STALL || sPlan.frames > sPlan.hangFrames + 3 * sPlan.budget))
+    {
+        int mode, status;
+        const u8 *at = ScriptContext_DebugPosition(&mode, &status);   /* where the field's script waits */
+
         TestLog("Battle env test: plan target %d %s hang frames %d script %d battles %d in battle %d map %d.%d %d,%d "
-                "callback %p", sPlan.first + sPlan.next, t->key, sPlan.frames, ScriptContext_IsEnabled(),
-                sPlan.battles, gMain.inBattle, gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum,
-                gSaveBlock1Ptr->pos.x, gSaveBlock1Ptr->pos.y, (void *)gMain.callback2);
+                "callback %p script at %p mode %d", sPlan.first + sPlan.next, t->key, sPlan.frames,
+                ScriptContext_IsEnabled(), sPlan.battles, gMain.inBattle, gSaveBlock1Ptr->location.mapGroup,
+                gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->pos.x, gSaveBlock1Ptr->pos.y,
+                (void *)gMain.callback2, (const void *)at, mode);
         RequestShot(99, 1, "a hang");
         sPlan.settle = 0;
         sPlan.phase = PLAN_HANG;
@@ -1367,7 +1641,15 @@ static unsigned short PlanKeys(void)
             TestLog("Battle env test: plan target %d %s battle %d type %08x trainers %d %d", sPlan.first + sPlan.next,
                     t->key, sPlan.battles, gBattleTypeFlags, sPlan.trainerA, sPlan.trainerB);
         }
-        button = A_BUTTON;      /* the first move on the first target, every line */
+        button = A_BUTTON;      /* the most effective move on the first target, every line */
+        PlanPickMoves();
+        /* a Pokemon fainted: the battle's party menu up (it starts on the fainted one) - DOWN while its cursor is on a
+           fainted Pokemon, then A (and A on its SHIFT); a fixed key cycle locked into a loop with the "has no energy
+           left to battle" message (Steven's six, Meteor Falls) */
+        if (gMain.callback2 != BattleMainCB2 && gPartyMenu.menuType == PARTY_MENU_TYPE_IN_BATTLE
+         && gPartyMenu.slotId >= 0 && gPartyMenu.slotId < PARTY_SIZE
+         && GetMonData(&gParties[B_TRAINER_PLAYER][gPartyMenu.slotId], MON_DATA_HP) == 0)
+            button = DPAD_DOWN;
     }
     else
     {
@@ -1379,6 +1661,10 @@ static unsigned short PlanKeys(void)
                     sPlan.battles, gBattleOutcome);
         }
         if (ScriptContext_IsEnabled())
+            sPlan.script = true;
+        /* or a script started since the arrival: a quick one starts and ends inside one frame (Ever Grande's
+           arrival trigger sets a flag and a variable) */
+        if (gDioramaBattleEnvTestScriptStarts != sPlan.scriptStarts)
             sPlan.script = true;
         if (!sPlan.mapChanged && (gSaveBlock1Ptr->location.mapGroup != sPlan.mapGroup
                                   || gSaveBlock1Ptr->location.mapNum != sPlan.mapNum))
@@ -1396,8 +1682,41 @@ static unsigned short PlanKeys(void)
             return 0;
         }
         sPlan.settle = 0;
-        /* B through the lines and questions; after half a minute every fourth press A (a choice that has no NO) */
-        button = sPlan.frames > 1800 && sPlan.presses % 4 == 3 ? A_BUTTON : B_BUTTON;
+        /* B through the lines and questions; a trainer's YES until its battle begins (the Winstrates ask first) */
+        button = t->fight && sPlan.battles == 0 && sPlan.frames <= 1800 ? A_BUTTON : B_BUTTON;
+        if (DioramaBattleEnvTest_EasyChatState() >= 0)
+        {
+            /* an Easy Chat screen (an interviewer, a phrase asked for): B until "Stop giving a comment?" is up, then
+               YES above the NO it starts on - a key cycle can lock into a loop between its keyboard and its buttons */
+            button = DioramaBattleEnvTest_EasyChatState() != 1 ? B_BUTTON
+                   : Menu_GetCursorPos() == 0 ? A_BUTTON : DPAD_UP;
+        }
+        else if (sPlan.frames > 1800 && DioramaBattleEnvTest_ScriptMenuUp())
+        {
+            /* after half a minute, a script's menu: each choice in turn (DOWN to it, A), the next one the next time a
+               menu is up - a menu that asks again until the right one is picked (Wallace's "Where's Rayquaza?"), a
+               YES above a NO, an EXIT at a menu's end (the info desks) */
+            if (Menu_GetCursorPos() < sPlan.escapeChoice && sPlan.escapeDowns < 8)
+            {
+                button = DPAD_DOWN;
+                sPlan.escapeDowns++;
+            }
+            else
+            {
+                button = A_BUTTON;
+                sPlan.escapeDowns = 0;
+                sPlan.escapeChoice = (sPlan.escapeChoice + 1) % 8;
+            }
+        }
+        else if (sPlan.frames > 1800)
+        {
+            /* after half a minute, otherwise keys drawn at random (seeded: the same run each time) from B, A, DOWN and
+               UP: a choice that has no NO, a list's EXIT where B does nothing - a fixed cycle can lock into a loop */
+            static const unsigned short sEscape[] = {B_BUTTON, B_BUTTON, B_BUTTON, A_BUTTON, A_BUTTON, DPAD_DOWN,
+                DPAD_DOWN, DPAD_UP};
+            sPlan.rng = sPlan.rng * 1103515245u + 12345u;
+            button = sEscape[(sPlan.rng >> 16) % ARRAY_COUNT(sEscape)];
+        }
     }
     if (sPlan.pressLeft > 0)
     {
@@ -1666,10 +1985,34 @@ static unsigned short ScriptKeys(void)
     return KeysAt(s.keys, s.keyFrames++);
 }
 
+/* Main thread, every turn of its loop, the game thread perhaps mid-frame: a plan whose game made no frame for a
+   minute (a loop inside one frame: a Battle Pike room picking a trainer with no challenge) ends as a hang, so the tool
+   goes on at the next target instead of waiting out its process timeout. Reads the plan without the game parked: the
+   game thread is stuck elsewhere. */
+#define PLAN_NO_FRAME_MS 60000
+static SDL_atomic_t sLastFrameMs;
+
+void DioramaBattleEnvTest_Watchdog(unsigned int nowMs)
+{
+    unsigned int last = (unsigned int)SDL_AtomicGet(&sLastFrameMs);
+    int phase = sPlan.phase, next = sPlan.next;
+
+    if (last == 0 || phase == PLAN_OFF || phase == PLAN_HANG || phase == PLAN_FINISHED || next >= sPlan.count
+     || nowMs - last < PLAN_NO_FRAME_MS)
+        return;
+    TestLog("Battle env test: plan target %d %s hang the game made no frame for %u s", sPlan.first + next,
+            sPlanTargets[next].key, (nowMs - last) / 1000);
+    if (sLogFile != NULL)
+        fclose(sLogFile);
+    fflush(NULL);
+    _exit(7);
+}
+
 unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int nowMs)
 {
     unsigned int t;
 
+    SDL_AtomicSet(&sLastFrameMs, (int)(nowMs | 1));
     if (!s.init)
         Init();
     MegaLogFrame();

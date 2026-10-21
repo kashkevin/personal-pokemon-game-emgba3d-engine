@@ -308,6 +308,11 @@ bool8 ScriptContext_RunScript(void)
 // Sets up a new script in the global context and enables the context
 void ScriptContext_SetupScript(const u8 *ptr)
 {
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+    extern u32 gDioramaBattleEnvTestScriptStarts;
+    gDioramaBattleEnvTestScriptStarts++;    // test builds only: the plan runner sees a script that ends inside a frame
+#endif
+#line 307 // gba-line
     InitScriptContext(&sGlobalScriptContext, gScriptCmdTable, gScriptCmdTableEnd);
     SetupBytecodeScript(&sGlobalScriptContext, ptr);
     LockPlayerFieldControls();

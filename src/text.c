@@ -2986,3 +2986,14 @@ bool32 TextPrinter_DebugState(u8 windowId, int *state, int *delay)
     return FALSE;
 }
 #endif // PORTABLE
+
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+#include "diorama/battle_env_test.h"
+
+// Test builds only (tools/qa/gameplay_check.py): where the first text printer stands, so the plan runner counts a long
+// message still printing as a scene that goes on.
+const u8 *DioramaBattleEnvTest_TextPosition(void)
+{
+    return sFirstTextPrinter != NULL && sFirstTextPrinter->active ? sFirstTextPrinter->printerTemplate.currentChar : NULL;
+}
+#endif

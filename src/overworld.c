@@ -691,6 +691,11 @@ static void LoadSaveblockMapHeader(void)
 
 static void SetPlayerCoordsFromWarp(void)
 {
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+    if (DioramaBattleEnvTest_TakeWarpCoords(&gSaveBlock1Ptr->pos.x, &gSaveBlock1Ptr->pos.y))
+        return; // test builds only: the gameplay check's plan runner (tools/qa/gameplay_check.py)
+#endif
+#line 686 // gba-line
     if (gSaveBlock1Ptr->location.warpId >= 0 && gSaveBlock1Ptr->location.warpId < gMapHeader.events->warpCount)
     {
         // warpId is a valid warp for this map, use the coords of that warp.

@@ -888,6 +888,9 @@ int main(int argc, char **argv)
         }
 #endif
         ProcessEvents();
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+        DioramaBattleEnvTest_Watchdog(SDL_GetTicks());  // test builds only: a plan's game stuck inside a frame
+#endif
 #ifdef _WIN32
         // A pad button pressed and released while a slow frame was drawing still reaches the game (key_queue.h)
         if (!sPcMenu.open && sPadConnected)

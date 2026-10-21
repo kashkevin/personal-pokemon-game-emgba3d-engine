@@ -128,10 +128,22 @@
 
 #if defined(DIORAMA_BATTLE_ENV_TEST)
 
+#include <stdarg.h>
 #include <stdbool.h>
 
 /* overworld.c, CB1_Overworld (game thread) */
 void DioramaBattleEnvTest_FieldTick(void);
+/* assertf.c, AssertfCrashScreen (game thread): the assert, logged; a driven game (PKMN_TEST_EXIT) ends there */
+void DioramaBattleEnvTest_OnAssert(const char *fmt, va_list va);
+/* overworld.c, SetPlayerCoordsFromWarp (game thread): the plan runner's own warp's place, once (a map's far side: the
+   warp's own coordinates are s8, to 127) */
+bool DioramaBattleEnvTest_TakeWarpCoords(s16 *x, s16 *y);
+/* text.c (read with the game thread parked): the first text printer's place in its text, NULL with none printing */
+const unsigned char *DioramaBattleEnvTest_TextPosition(void);
+/* script_menu.c (read with the game thread parked): a script's multichoice or YES/NO menu taking input */
+int DioramaBattleEnvTest_ScriptMenuUp(void);
+/* easy_chat.c (read with the game thread parked): -1 no Easy Chat screen, 0 one, 1 its exit prompt up */
+int DioramaBattleEnvTest_EasyChatState(void);
 /* battle_controller_player.c, HandleInputChooseAction (game thread) */
 void DioramaBattleEnvTest_OnActionMenu(void);
 /* gl_battle.c (render thread): the stem to capture this frame, or NULL */
@@ -139,6 +151,8 @@ const char *DioramaBattleEnvTest_CaptureStem(void);
 void DioramaBattleEnvTest_CaptureWritten(void);
 /* platform/sdl2.c, the keys read each frame (PKMN_TEST_AUTOPILOT) */
 unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int nowMs);
+/* sdl2.c main loop, every turn (the game thread perhaps mid-frame): a plan's game stuck inside a frame ends as a hang */
+void DioramaBattleEnvTest_Watchdog(unsigned int nowMs);
 #ifndef ENABLE_DIORAMA
 /* platform/sdl2.c, each presented GBA frame (the Classic 2D test build's captures) */
 void DioramaBattleEnvTest_Frame2D(const unsigned short *pixels);

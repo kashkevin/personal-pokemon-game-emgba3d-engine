@@ -36,6 +36,19 @@ SPECIAL_ENTRY = [
     (re.compile(r"^ShoalCave_HighTide"), "high tide: its layout replaces the low-tide room's (setmaplayoutindex)"),
     (re.compile(r"^InsideOfTruck$"), "truck: the original introduction's start (new_game.c); the short one skips it"),
 ]
+# Reachable maps the game enters only through a script that first sets them up (a challenge's state, a link, a contest):
+# a check that puts the player there directly skips the set-up (a Battle Pike room loops for good picking a trainer
+# with no challenge running, the GBA ROM too), so their contents are the scripts' own to test.
+SCRIPTED_ENTRY = [
+    (re.compile(r"^BattleFrontier_Battle(Tower|Dome|Palace|Arena|Factory|Pike|Pyramid)(?!Lobby)"),
+     "a Battle Frontier challenge's room: entered by its lobby's challenge script"),
+    (re.compile(r"^TrainerHill_(?!Entrance)"), "a Trainer Hill challenge floor: entered by the entrance's script"),
+    (re.compile(r"^(UnionRoom|TradeCenter|RecordCorner|BattleColosseum_)"), "a link room: entered by the cable club's link"),
+    (re.compile(r"^(LilycoveCity_)?ContestHall"), "a contest hall: entered by a contest's script"),
+    (re.compile(r"^SootopolisCity_MysteryEventsHouse_B1F$"),
+     "the visiting trainer's room: entered by the old man's script once an e-Reader trainer checks out (its stairs "
+     "blocked otherwise)"),
+]
 IDENT = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
 TERMINAL = re.compile(r"^(end|return|goto|step_end)\b")
 
@@ -122,6 +135,22 @@ class Scripts:
             seen.add(current)
             todo.extend(self.refs[current] - seen)
         return seen
+
+    def reach(self, label):
+        """Every identifier the label names, and every label it reaches names, through any file (cached)."""
+        if not hasattr(self, "_reach"):
+            self._reach = {}
+        if label not in self._reach:
+            seen, todo, named = set(), [label], set()
+            while todo:
+                current = todo.pop()
+                if current in seen or current not in self.file:
+                    continue
+                seen.add(current)
+                named |= self.refs[current]
+                todo.extend(self.refs[current] - seen)
+            self._reach[label] = named
+        return self._reach[label]
 
     def frlg(self, label):
         """A FireRed/LeafGreen script: in a *_frlg.inc file or a FireRed/LeafGreen map's folder."""
@@ -253,15 +282,19 @@ def inventory(root):
             own = scripts.local(script) if script in scripts.file else set()
             tied |= own
             fights = [fight for label in sorted(own) for fight in scripts.battles.get(label, ())]
+            reached = scripts.reach(script) if script in scripts.file else set()
+            # a ball that is no item: a Pokemon given (Birch's lab after the Hall of Fame), a wild Voltorb, a rival's
             kind = ("trainer" if obj.get("trainer_type") not in (None, "TRAINER_TYPE_NONE") or fights
-                    else "item_ball" if obj.get("graphics_id") == ITEM_BALL
+                    else "item_ball" if obj.get("graphics_id") == ITEM_BALL and "finditem" in reached
                     else "berry_tree" if obj.get("graphics_id") == "OBJ_EVENT_GFX_BERRY_TREE"
                     else "clone" if obj.get("type") == "clone"
-                    else "person" if script and script != "0x0" else "object")
+                    else "person" if script not in ("", "0x0", "NULL") else "object")
             item = dict(key=f"object:{data['id']}:{local}", local=local, local_name=obj.get("local_id"), kind=kind,
                         graphics=obj.get("graphics_id"), x=obj.get("x"), y=obj.get("y"), script=script,
                         hide_flag=obj.get("flag"), trainer_type=obj.get("trainer_type"),
                         sight=obj.get("trainer_sight_or_berry_tree_id"))
+            if any(name.startswith("MultiplayerStaticReset_Begin") for name in reached):
+                item["needs_server"] = True     # its reset admission asks the server first (static encounters)
             if fights:
                 item["battles"] = [dict(kind=k, trainer=t, partner=p) for k, t, p in fights]
                 for k, t, p in fights:
@@ -273,10 +306,16 @@ def inventory(root):
             entry["warps"].append(dict(key=f"warp:{data['id']}:{index}", index=index, x=warp.get("x"), y=warp.get("y"),
                                        dest_map=warp.get("dest_map"), dest_warp=warp.get("dest_warp_id")))
         for index, event in enumerate(data.get("coord_events", [])):
-            entry["triggers"].append(dict(key=f"trigger:{data['id']}:{index}", index=index, type=event.get("type"),
-                                          x=event.get("x"), y=event.get("y"), var=event.get("var"),
-                                          var_value=event.get("var_value"), script=event.get("script"),
-                                          weather=event.get("weather")))
+            trigger = dict(key=f"trigger:{data['id']}:{index}", index=index, type=event.get("type"),
+                           x=event.get("x"), y=event.get("y"), var=event.get("var"),
+                           var_value=event.get("var_value"), script=event.get("script"),
+                           weather=event.get("weather"))
+            if event.get("var") == "TRIGGER_RUN_IMMEDIATELY" and event.get("script") in scripts.file:
+                # runs inside the step itself (RunScriptImmediately): what it sets is all there is to see
+                weathers = sorted(n for n in scripts.reach(event["script"]) if n.startswith("WEATHER_"))
+                if len(weathers) == 1:
+                    trigger["sets_weather"] = weathers[0]
+            entry["triggers"].append(trigger)
         for index, event in enumerate(data.get("bg_events", [])):
             kind = event.get("type")
             base = dict(index=index, x=event.get("x"), y=event.get("y"))
@@ -307,6 +346,10 @@ def inventory(root):
             m["reachable"] = m["reachable"] or any(u["id"] in reached for u in users[m["name"]])
         elif not m["reachable"]:
             m["entry"] = next((why for pattern, why in SPECIAL_ENTRY if pattern.search(m["name"])), "unknown")
+        if m["reachable"]:
+            scripted_entry = next((why for pattern, why in SCRIPTED_ENTRY if pattern.search(m["name"])), None)
+            if scripted_entry:
+                m["scripted_entry"] = scripted_entry
     scripted = [dict(key=f"scripted_battle:{label}:{t}", label=label, kind=k, trainer=t, partner=p,
                      file=scripts.file[label], runs=label in run, frlg=scripts.frlg(label))
                 for label in sorted(scripts.battles) if label not in tied for k, t, p in scripts.battles[label]]

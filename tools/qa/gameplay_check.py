@@ -143,16 +143,26 @@ class Tiles:
         return collision, elevation, self.behavior_name.get(behavior, f"MB_{behavior}")
 
 
-def standable(tile, elevation=None):
+def standable(tile, elevation=None, strict=False):
+    """A tile (collision, elevation, behavior) a player can stand on; with an elevation, one from which the player
+    can also step onto or talk to something at that elevation (0 and 15 go with any: AreElevationsCompatible,
+    IsElevationMismatchAt). A Pokemon Center's escalator is elevation 4: it is stepped onto from the elevation-0
+    tile beside it, never from the floor (3) in front of it. Never a warp's own tile."""
     if tile is None:
         return False
     collision, tile_elevation, behavior = tile
     if collision != 0 or BLOCKED.search(behavior):
         return False
+    if behavior in DOORS or behavior in STEP_ON or behavior in ARROWS:
+        return False    # a warp's own tile: arriving on a door walks the player out of it, a step from it takes it
+    if strict:
+        # a background event (a sign, a hidden item) is searched at the player's tile's elevation, 0 on a tile of
+        # elevation 0 (GetInFrontOfPlayerPosition): only its own elevation finds it, or any when it is 0
+        return elevation in (None, 0) or tile_elevation == elevation
     return elevation is None or elevation in (0, 15) or tile_elevation in (0, 15) or tile_elevation == elevation
 
 
-def beside(tiles, grid, x, y, occupied, elevation=None, prefer=None, required=None):
+def beside(tiles, grid, x, y, occupied, elevation=None, prefer=None, required=None, strict=False):
     """A tile next to (x, y) to stand on, facing it: (x, y, direction), or None. A clerk behind a counter is talked
     to across it."""
     options = [("U", (x, y + 1)), ("D", (x, y - 1)), ("R", (x - 1, y)), ("L", (x + 1, y))]
@@ -161,7 +171,7 @@ def beside(tiles, grid, x, y, occupied, elevation=None, prefer=None, required=No
     for direction, (sx, sy) in options:
         if required and direction != required:
             continue
-        if (sx, sy) not in occupied and standable(tiles.at(grid, sx, sy), elevation):
+        if (sx, sy) not in occupied and standable(tiles.at(grid, sx, sy), elevation, strict):
             return sx, sy, direction
     for direction, (sx, sy) in options:
         if required and direction != required:
@@ -178,10 +188,21 @@ def plan_targets(root, inventory, kinds, maps_filter=None):
     """(targets, blocked): each target a dict with its plan line; blocked ones with the reason."""
     tiles = Tiles(root)
     trainer_ids = defines(os.path.join(root, "include", "constants", "opponents.h"), "TRAINER_")
+    weathers = enum_values(os.path.join(root, "include", "constants", "weather.h"), "WEATHER_")
     by_id = {m["id"]: m for m in inventory["maps"]}
     targets, blocked = [], []
     for m in inventory["maps"]:
         if not m["reachable"] or m["frlg"] or m.get("used_by") or (maps_filter and not re.search(maps_filter, m["name"])):
+            continue
+        if m.get("scripted_entry"):
+            for kind, items in (("object", m["objects"]), ("sign", m["signs"]), ("hidden", m["hidden_items"]),
+                                ("warp", m["warps"]), ("trigger", m["triggers"])):
+                for item in items:
+                    if kind == "object" and item["kind"] in ("object", "clone", "berry_tree"):
+                        continue
+                    blocked.append(dict(key=item["key"], map=m["id"], reason=m["scripted_entry"], kind=(
+                        kind if kind != "object" else "trainer" if item["kind"] == "trainer"
+                        else "item" if item["kind"] == "item_ball" else "person")))
             continue
         data = json.load(open(os.path.join(root, "data", "maps", m["name"], "map.json")))
         if data.get("layout") not in tiles.layouts:
@@ -189,6 +210,22 @@ def plan_targets(root, inventory, kinds, maps_filter=None):
         grid = tiles.grid(data["layout"])
         objects = data.get("object_events", [])
         occupied = {(o.get("x"), o.get("y")) for o in objects}
+        # where an object always stands (no flag hides it): a warp under it is never stepped on (Lavaridge Gym's
+        # trainers buried in the sand stand on four of its holes on each floor)
+        standing = {(o.get("x"), o.get("y")): o for o in objects if o.get("flag") in (None, "0", 0, "")}
+
+        def free_first(find):
+            # a tile no object stands on; else one where only an object the story can hide stands (the Aqua grunts
+            # in front of the Slateport museum's doors, gone in a later save): find(busy) for each
+            return find(occupied) or find(set(standing))
+
+        def step_from(x, y, elevation, busy):
+            # a step onto (x, y) from a tile beside it, at an elevation that may step there
+            for direction, (dx, dy) in STEP.items():
+                sx, sy = x - dx, y - dy
+                if (sx, sy) not in busy and standable(tiles.at(grid, sx, sy), elevation):
+                    return sx, sy, direction
+            return None
 
         def add(key, kind, place, action, arg, expect):
             if place is None:
@@ -203,37 +240,55 @@ def plan_targets(root, inventory, kinds, maps_filter=None):
             kind = {"trainer": "trainer", "item_ball": "item", "person": "person"}.get(item["kind"])
             if kind not in kinds:
                 continue
-            others = occupied - {(obj.get("x"), obj.get("y"))}
-            place = beside(tiles, grid, obj.get("x"), obj.get("y"), others, obj.get("elevation"),
-                           prefer=FACING.get(obj.get("movement_type")))
+            if item.get("needs_server"):
+                blocked.append(dict(key=item["key"], kind=kind, map=m["id"], reason=(
+                    "its script asks the multiplayer server first (a reset-guarded static encounter, "
+                    "MultiplayerStaticReset): a game with no server refuses it, as designed (every game the app "
+                    "starts has one, Solo too); the test ROM's admission tests cover the script")))
+                continue
+            own = {(obj.get("x"), obj.get("y"))}
+            # its elevation is its tile's once in the game (ObjectEventUpdateElevation), the template's only on an
+            # any-elevation tile: Route 134's Marley (template 1) stands on shallow water (3), walked to, not surfed
+            under = tiles.at(grid, obj.get("x"), obj.get("y"))
+            elevation = under[1] if under is not None and under[1] not in (0, 15) else obj.get("elevation")
+            place = free_first(lambda busy: beside(tiles, grid, obj.get("x"), obj.get("y"), busy - own, elevation,
+                                                   prefer=FACING.get(obj.get("movement_type"))))
             expect = {}
             if kind == "trainer":
                 expect["trainers"] = sorted({trainer_ids[b[w]] for b in item.get("battles", ())
                                              for w in ("trainer", "partner") if b.get(w) in trainer_ids})
-            add(item["key"], kind, place, "talk", item["local"], expect)
+            add(item["key"], kind, place, "fight" if kind == "trainer" else "talk", item["local"], expect)
         for sign in m["signs"] if "sign" in kinds else ():
             event = data["bg_events"][sign["index"]]
-            place = beside(tiles, grid, sign["x"], sign["y"], occupied,
-                           required=SIGN_FACING.get(event.get("player_facing_dir")))
+            place = free_first(lambda busy: beside(tiles, grid, sign["x"], sign["y"], busy, event.get("elevation"),
+                                                   required=SIGN_FACING.get(event.get("player_facing_dir")),
+                                                   strict=True))
             add(sign["key"], "sign", place, "sign", sign["index"], {})
         for hidden in m["hidden_items"] if "hidden" in kinds else ():
-            place = beside(tiles, grid, hidden["x"], hidden["y"], occupied)
+            elevation = data["bg_events"][hidden["index"]].get("elevation")   # found from its own elevation only
+            place = free_first(lambda busy: beside(tiles, grid, hidden["x"], hidden["y"], busy, elevation,
+                                                   strict=True))
             add(hidden["key"], "hidden", place, "hidden", hidden["index"], dict(item=hidden["item"]))
         for warp in m["warps"] if "warp" in kinds else ():
+            if (by_id.get(warp["dest_map"]) or {}).get("scripted_entry"):
+                # a door the game opens only by that script (a cable club door behind its counter, a challenge's door)
+                blocked.append(dict(key=warp["key"], kind="warp", map=m["id"],
+                                    reason="into " + by_id[warp["dest_map"]]["scripted_entry"]))
+                continue
             tile = tiles.at(grid, warp["x"], warp["y"])
             behavior = tile[2] if tile else ""
+            if behavior not in ARROWS and (warp["x"], warp["y"]) in standing:
+                blocked.append(dict(key=warp["key"], kind="warp", map=m["id"], reason=(
+                    f"an object always stands on it ({standing[(warp['x'], warp['y'])].get('graphics_id')})")))
+                continue
             if behavior in ARROWS:
                 place = (warp["x"], warp["y"], ARROWS[behavior])    # on the mat, its arrow pressed
             elif behavior in DOORS:
                 below = (warp["x"], warp["y"] + 1)
-                place = (*below, "U") if standable(tiles.at(grid, *below)) and below not in occupied else None
+                place = free_first(lambda busy: (*below, "U") if standable(tiles.at(grid, *below))
+                                   and below not in busy else None)
             elif behavior in STEP_ON:
-                place = None    # a step onto it from a tile beside it
-                for direction, (dx, dy) in STEP.items():
-                    sx, sy = warp["x"] - dx, warp["y"] - dy
-                    if (sx, sy) not in occupied and standable(tiles.at(grid, sx, sy)):
-                        place = (sx, sy, direction)
-                        break
+                place = free_first(lambda busy: step_from(warp["x"], warp["y"], tile[1], busy))
             else:
                 blocked.append(dict(key=warp["key"], kind="warp", map=m["id"], arrival_only=True,
                                     reason=f"{behavior or 'no tile'}: only an arrival point (nothing warps from it)"))
@@ -247,19 +302,28 @@ def plan_targets(root, inventory, kinds, maps_filter=None):
                 blocked.append(dict(key=trigger["key"], kind="trigger", map=m["id"],
                                     reason=f"a {trigger['type']} event (no script to run)"))
                 continue
-            place = None    # a step onto it from a tile beside it
-            if standable(tiles.at(grid, trigger["x"], trigger["y"])):
-                for direction, (dx, dy) in STEP.items():
-                    sx, sy = trigger["x"] - dx, trigger["y"] - dy
-                    if (sx, sy) not in occupied and standable(tiles.at(grid, sx, sy)):
-                        place = (sx, sy, direction)
-                        break
+            weather = None
+            if trigger["var"] == "TRIGGER_RUN_IMMEDIATELY":
+                # its script runs inside the step itself: a weather it sets is what the check sees (Route 111's
+                # sandstorm, Mt. Pyre's fog); with none, nothing to see
+                weather = weathers.get(trigger.get("sets_weather"))
+                if weather is None:
+                    blocked.append(dict(key=trigger["key"], kind="trigger", map=m["id"], reason=(
+                        "runs inside the step itself (TRIGGER_RUN_IMMEDIATELY) and sets no weather: nothing to see")))
+                    continue
+            under = tiles.at(grid, trigger["x"], trigger["y"])
+            place = None
+            if standable(under):
+                place = free_first(lambda busy: step_from(trigger["x"], trigger["y"], under[1], busy))
+            covered = [o.get("graphics_id") for o in objects if (o.get("x"), o.get("y")) == (trigger["x"], trigger["y"])]
             add(trigger["key"], "trigger", place, "trigger", trigger["index"],
-                dict(var=trigger["var"], value=trigger["var_value"], script=trigger["script"]))
+                dict(var=trigger["var"], value=trigger["var_value"], script=trigger["script"], weather=weather,
+                     weather_name=trigger.get("sets_weather"), covered=covered))
     return targets, blocked
 
 
-EVENT = re.compile(r"^plan target (\d+) (\S+) (begin|at|battle|map now|end|hang|trigger)\b ?(.*)$")
+EVENT = re.compile(r"^plan target (\d+) (\S+) (begin|at|absent|missing|closed|battle|map now|ending done|ending|end|hang|"
+                   r"trigger)\b ?(.*)$")
 
 
 def parse(lines):
@@ -276,6 +340,16 @@ def parse(lines):
             entry["begin"] = True
         elif what == "at":
             entry["at"] = rest
+        elif what == "absent":
+            entry["absent"] = True
+        elif what == "closed":
+            entry["closed"] = True
+        elif what == "missing":
+            entry["missing"] = rest
+        elif what == "ending":
+            entry["ending"] = True
+        elif what == "ending done":
+            entry["ending_done"] = True
         elif what == "battle":
             if " over outcome " in rest:
                 entry["outcomes"].append(int(rest.rsplit(" ", 1)[1]))
@@ -298,6 +372,8 @@ def parse(lines):
             fields["map"], fields["pos"] = value("map", 2)
             bag = value("bag")
             fields["bag"] = {} if bag == "-" else {int(i): int(n) for i, n in (part.split(":") for part in bag.split(","))}
+            fields["weather"] = int(value("weather")) if "weather" in words else None
+            fields["var"] = int(value("var")) if "var" in words else None
             entry["end"] = fields
         elif what == "hang":
             entry["hang"] = rest
@@ -313,19 +389,34 @@ def judge(target, seen):
         return False, "not reached (an earlier target ended the run)"
     if "hang" in seen:
         return False, f"hang: {seen['hang']}"
+    if "missing" in seen:
+        return False, f"not on its map though nothing hides it ({seen['missing']})"
+    kind, expect = target["kind"], target["expect"]
+    if seen.get("ending"):
+        # the game's ending ran from it (the Champion beaten: the Hall of Fame, the credits, the reset to the title):
+        # judged by what came before; the ending itself must run through to the reset
+        if not seen.get("ending_done"):
+            return False, "the game's ending began (Hall of Fame) but never reached the title"
+        reached = [[int(v) for v in m.split(".")] for m in seen["maps"]]
+        if kind == "warp" and expect.get("dest") is not None and expect["dest"] not in reached:
+            return False, f"the game's ending ran, but {expect['dest_map']} was never reached"
+        if kind == "trainer" and B_OUTCOME_WON not in seen["outcomes"]:
+            return False, f"the game's ending ran, but battle outcomes {seen['outcomes']}"
+        return True, "the game's ending followed (Hall of Fame, credits, back to the title)"
     end = seen.get("end")
     if end is None:
         return False, "the game stopped during it"
-    kind, expect = target["kind"], target["expect"]
     gained = {i: n for i, n in end["bag"].items() if n > 0}
     if kind == "trainer":
         fought = {t for battle in seen["battles"] for t in battle["trainers"]}
         if not seen["battles"]:
             return False, "no battle started"
-        if expect.get("trainers") and not fought & set(expect["trainers"]):
-            return False, f"battled {sorted(fought)}, not {expect['trainers']}"
         if B_OUTCOME_WON not in seen["outcomes"]:
             return False, f"battle outcomes {seen['outcomes']}, not won"
+        if expect.get("trainers") and not fought & set(expect["trainers"]):
+            # its script picks the battle by the story's state (Gabby and Ty's six objects fight their first battle
+            # until the TV crew's state moves on): won, against the trainer the state picked
+            return True, f"won against {sorted(fought)} (its script names {expect['trainers']}; the state picked)"
         if end["beaten"] == 0:
             return False, "won, but its beaten flag is not set"
         return True, "won; beaten flag set" if end["beaten"] == 1 else "won"
@@ -349,8 +440,15 @@ def judge(target, seen):
         trigger = seen.get("trigger")
         if trigger is None:
             return False, "its condition was not logged"
+        if expect.get("weather") is not None:
+            # TRIGGER_RUN_IMMEDIATELY: its script ran inside the step; the weather it sets is what there is to see
+            if end.get("weather") == expect["weather"]:
+                return True, f"ran at once inside the step: the weather is {expect['weather_name']}"
+            return False, f"stepped on, but the weather is {end.get('weather')}, not {expect['weather_name']}"
         due = trigger["var"] == 0 or trigger["value"] == trigger["wants"]
-        ran = bool(end["script"] or end["battles"] or seen["maps"])
+        # a script that only sets flags and variables runs to its end inside the step: its own variable moved
+        moved = trigger["var"] != 0 and end.get("var") is not None and end["var"] != trigger["value"]
+        ran = bool(end["script"] or end["battles"] or seen["maps"] or moved)
         if due and not ran:
             return False, f"due (var {trigger['var']} = {trigger['value']}) but nothing ran"
         if not due and ran:
@@ -379,7 +477,7 @@ def run_shard(args, shard, lines, party):
         rundir = os.path.join(shard_dir, f"run-{len(runs):03d}")
         process, output = mc.start(args, rundir, dict(
             PKMN_TEST_PLAN=plan, PKMN_TEST_PLAN_FIRST=str(first), PKMN_TEST_AUTOPILOT="1", PKMN_TEST_STRONG="1",
-            PKMN_TEST_PARTY=party, PKMN_TEST_FIRST_MOVE=str(args.move),
+            PKMN_TEST_PARTY=party, PKMN_TEST_FIRST_MOVE=str(args.move), PKMN_TEST_MORE_MOVES=args.more_moves,
             PKMN_TEST_PLAN_FRAMES=str(args.frames), PKMN_TEST_PLAN_SHOTS="1" if args.shots else "0",
             PKMN_TEST_SPEED=str(args.speed),
             PKMN_TEST_MEGA_SHOT_STEM=os.path.join(rundir, "hang")))
@@ -457,7 +555,13 @@ def main():
     args.save = os.path.abspath(args.save)
     facts, _ = mc.game_facts(args)
     args.move = facts.get("MOVE_FLASH_CANNON", facts["MOVE_FLAMETHROWER"])   # no type is immune to Steel
-    party = f"{facts['SPECIES_MEWTWO']}:100,{facts['SPECIES_CHARIZARD']}:100"
+    # and three more, the most effective of the four chosen each turn against the foe (a Water team out-heals a resisted
+    # move: Champion Wallace's Milotic): super effective against Water, Ground, Flying and Dragon between them
+    args.more_moves = ",".join(str(facts[name]) for name in ("MOVE_THUNDERBOLT", "MOVE_ICE_BEAM", "MOVE_ENERGY_BALL")
+                               if name in facts)
+    # six at level 100, so a long fight is still won when the lead faints
+    party = ",".join(f"{facts[name]}:100" for name in ("SPECIES_MEWTWO", "SPECIES_CHARIZARD", "SPECIES_BLASTOISE",
+                                                        "SPECIES_VENUSAUR", "SPECIES_BLAZIKEN", "SPECIES_PIKACHU"))
     shards = [[t["line"] for t in targets[i::args.jobs]] for i in range(args.jobs)]
     started = time.monotonic()
     seen, runs = {}, {}
@@ -469,6 +573,30 @@ def main():
             seen.update(parse(lines))
     results = []
     for target in targets:
+        state = seen.get(target["key"]) or {}
+        end, at = state.get("end"), state.get("at") or ""
+        if (target["kind"] == "trigger" and target["expect"].get("covered") and end is not None
+                and not state.get("maps") and at.startswith(f"map {end['map']} {end['pos']} ")):
+            # the step never happened: an object its flag shows in this save stands on it (New Mauville's blue
+            # button under its Voltorb until that is beaten)
+            blocked.append(dict(key=target["key"], kind="trigger", map=target["map"], reason=(
+                f"an object stands on it in this state ({', '.join(target['expect']['covered'])}): the step is "
+                "blocked until the story removes it")))
+            continue
+        if "(it began by itself)" in at and state.get("hang") and not state.get("maps"):
+            # its map's own scene began as the player was put down there, not through the map's entrance, and hung
+            # (the Devon president's walk led off the map); the warps into the map play the scene from its entrance
+            blocked.append(dict(key=target["key"], kind=target["kind"], map=target["map"], reason=(
+                "its map's scene began as the check put the player down there (not through the entrance) and stopped "
+                f"({state['hang'][:80]}); the warps into the map play it from the entrance")))
+            continue
+        if state.get("absent") or (state.get("closed") and not state.get("maps")):
+            # Not there in this game's state: an object a story flag or its map's own script hides, a door the map's
+            # script keeps shut (its tile solid) until the story opens it. Blocked, not judged.
+            blocked.append(dict(key=target["key"], kind=target["kind"], map=target["map"], reason=(
+                "absent: the game hides it in this state (a story flag or its map's script)" if state.get("absent")
+                else "closed: its map keeps this door shut in this state (the story opens it)")))
+            continue
         passed, reason = judge(target, seen.get(target["key"]))
         results.append(dict(key=target["key"], kind=target["kind"], map=target["map"], passed=passed, reason=reason,
                             seen=seen.get(target["key"])))

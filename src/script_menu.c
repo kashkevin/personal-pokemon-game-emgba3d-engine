@@ -1401,3 +1401,14 @@ u32 ScriptMenu_NativeUiList(u32 multichoiceId, const u8 **labels, u32 max)
     return i;
 }
 #endif // ENABLE_NATIVE_UI
+
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+#include "diorama/battle_env_test.h"
+
+// Test builds only (tools/qa/gameplay_check.py): a script's multichoice or YES/NO menu taking input (its cursor is
+// Menu_GetCursorPos), so the plan runner can try each of its choices in turn.
+int DioramaBattleEnvTest_ScriptMenuUp(void)
+{
+    return FuncIsActiveTask(Task_HandleMultichoiceInput) || FuncIsActiveTask(Task_HandleYesNoInput);
+}
+#endif
