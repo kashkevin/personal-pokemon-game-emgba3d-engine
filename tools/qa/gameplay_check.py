@@ -45,19 +45,21 @@ inventory_tool = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(inventory_tool)
 
 KINDS = ("trainer", "item", "person", "sign", "hidden", "warp")
-# Tiles a player does not stand on: water (needs Surf), waterfalls, ledges.
-BLOCKED = re.compile(r"WATER|WATERFALL|^MB_JUMP_|DIVE|SURF|^MB_OCEAN|^MB_POND|CURRENT")
+# Tiles a player does not stand on: waterfalls, currents (they carry the player off), ledges. A warp onto surfable
+# water puts the player on Surf (overworld.c GetAdjustedInitialTransitionFlags): a swimmer is talked to from the water.
+BLOCKED = re.compile(r"WATERFALL|^MB_JUMP_|CURRENT|NO_SURFACING")
 # How a warp tile sends the player (src/field_control_avatar.c): an arrow mat or a directional stair when the player
 # stands on it and presses its direction (TryArrowWarp); a door when the player walks north into it (TryDoorWarp);
 # the others when the player steps onto them (TryStartWarpEventScript). A warp on any other tile is only where a
 # warp from elsewhere arrives.
 ARROWS = {"MB_EAST_ARROW_WARP": "R", "MB_WEST_ARROW_WARP": "L", "MB_NORTH_ARROW_WARP": "U",
-          "MB_SOUTH_ARROW_WARP": "D", "MB_UP_RIGHT_STAIR_WARP": "R", "MB_DOWN_RIGHT_STAIR_WARP": "R",
+          "MB_SOUTH_ARROW_WARP": "D", "MB_WATER_SOUTH_ARROW_WARP": "D", "MB_SHOAL_CAVE_ENTRANCE": "D",
+          "MB_UP_RIGHT_STAIR_WARP": "R", "MB_DOWN_RIGHT_STAIR_WARP": "R",
           "MB_UP_LEFT_STAIR_WARP": "L", "MB_DOWN_LEFT_STAIR_WARP": "L"}
 DOORS = {"MB_ANIMATED_DOOR", "MB_PETALBURG_GYM_DOOR"}
 STEP_ON = {"MB_LADDER", "MB_UP_ESCALATOR", "MB_DOWN_ESCALATOR", "MB_NON_ANIMATED_DOOR", "MB_LAVARIDGE_GYM_B1F_WARP",
            "MB_LAVARIDGE_GYM_1F_WARP", "MB_AQUA_HIDEOUT_WARP", "MB_MT_PYRE_HOLE", "MB_MOSSDEEP_GYM_WARP",
-           "MB_UNION_ROOM_WARP", "MB_DEEP_SOUTH_WARP"}
+           "MB_UNION_ROOM_WARP", "MB_DEEP_SOUTH_WARP", "MB_WATER_DOOR"}
 STEP = {"U": (0, -1), "D": (0, 1), "L": (-1, 0), "R": (1, 0)}
 FACING = {"MOVEMENT_TYPE_FACE_DOWN": "U", "MOVEMENT_TYPE_FACE_UP": "D", "MOVEMENT_TYPE_FACE_LEFT": "R",
           "MOVEMENT_TYPE_FACE_RIGHT": "L"}
