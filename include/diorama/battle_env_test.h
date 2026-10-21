@@ -85,13 +85,23 @@
  *                            PKMN_TEST_MEGA_LOG the coins and the money logged when they change
  *   PKMN_TEST_FIELD_AFTER    frames: after a fought battle (PKMN_TEST_FIGHT), back on the
  *                            field, PKMN_TEST_FIELD_KEYS for that many frames, not the end
- *   PKMN_TEST_SOFT_RESET     1: the field keys choose the game's own soft reset (START >
+ *   PKMN_TEST_SOFT_RESET     n: the field keys choose the game's own soft reset (START >
  *                            PLAYER > RESET, YES; the A+B+START+SELECT chord never resets
  *                            on PC); once the game restarted, the autopilot through the
- *                            title and CONTINUE, the field logged, and (PKMN_TEST_EXIT) the
- *                            end ("soft reset: the game did not restart" if it never came)
+ *                            title and CONTINUE, the field logged, then the same field keys
+ *                            again until the game has reset n times, and (PKMN_TEST_EXIT)
+ *                            the end ("soft reset: the game did not restart" if one never
+ *                            came)
  *   PKMN_TEST_FIELD_SHOTS    frame,...: with field: pictures <PKMN_TEST_MEGA_SHOT_STEM>-NN
- *                            (NN from 50) at those field-key frames (Classic 2D build)
+ *                            (NN from 50, on after each soft reset) at those field-key
+ *                            frames (Classic 2D build)
+ *
+ * For the Update 32 starter check (tools/battle_env/feature_check.py; on Windows too):
+ *   PKMN_TEST_STARTER_LOG=1  on the field, whenever one changes: the map and the player's
+ *                            place, the party, its lead's species, personality and shininess,
+ *                            the starter claim (VAR_MULTIPLAYER_STARTER_CHOICE) and
+ *                            FLAG_SYS_POKEMON_GET - a claim in Birch's lab, a save, a load,
+ *                            a soft reset that brings the claim back
  *   PKMN_TEST_MEGA_SHOT      frames: a picture that long after the lead's Mega animation, as
  *   PKMN_TEST_MEGA_SHOT_STEM <stem>-NN.png (NN the sweep's holder, or 00)
  *

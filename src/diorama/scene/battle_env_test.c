@@ -48,6 +48,7 @@
 #include "money.h"
 #include "constants/maps.h"
 #include "constants/multiplayer_balance.h"
+#include "constants/multiplayer_rival.h"
 #include "platform/coin_shop.h"
 #include "diorama/battle_env_test.h"
 #ifndef ENABLE_DIORAMA
@@ -152,13 +153,20 @@ static struct
      * for that many frames instead of the end */
     int fieldAfter;
     bool fieldAfterPending;
-    /* PKMN_TEST_SOFT_RESET=1: the field keys choose the game's own soft reset (START > PLAYER > RESET, YES; the
+    /* PKMN_TEST_SOFT_RESET=<n>: the field keys choose the game's own soft reset (START > PLAYER > RESET, YES; the
      * A+B+START+SELECT chord never resets on PC). The restart is seen when gMain.vblankCounter1 goes back (the reset
      * restores the game's memory; this file's is kept, a platform object); then the autopilot through the title and
-     * CONTINUE, the field logged, the end */
+     * CONTINUE, the field logged, and the field keys again from their start until the game has reset n times; then
+     * the end */
     bool softReset, resetSeen;
+    int softResets, resetsDone;
     int resetFieldFrames, resetWaitFrames;
     u32 lastVblank;
+    /* PKMN_TEST_STARTER_LOG=1: on the field, "starter field: ..." whenever the place, the party, its lead or the
+     * starter claim changes (StarterLogField); what was last logged */
+    bool starterLog, starterLogged;
+    int starterSeen[9];
+    u32 starterSeenPersonality;
 } s;
 
 /* PKMN_TEST_LOG=<file>: every line the driver logs is also appended to that file (a check on Windows reads it: the
@@ -224,6 +232,8 @@ static const struct { const char *name; int value; } sFacts[] = {
     FACT(SPECIES_MEWTWO_MEGA_Y), FACT(SPECIES_VENUSAUR_MEGA), FACT(SPECIES_BLAZIKEN_MEGA), FACT(SPECIES_ZYGARDE_MEGA),
     FACT(MOVE_EARTHQUAKE), FACT(MOVE_FLAMETHROWER), FACT(GIMMICK_NONE), FACT(GIMMICK_MEGA), FACT(NUM_SPECIES),
     FACT(ITEM_COIN_CASE), FACT(MAP_MAUVILLE_CITY_GAME_CORNER), FACT(MAP_MAUVILLE_CITY_MART), FACT(MP_MEGA_RING_COINS),
+    FACT(SPECIES_TORCHIC), FACT(MAP_LITTLEROOT_TOWN), FACT(MAP_LITTLEROOT_TOWN_PROFESSOR_BIRCHS_LAB),
+    FACT(MP_INTRO_STARTER_PENDING),
 };
 #undef FACT
 
@@ -343,7 +353,9 @@ static void Init(void)
     if (s.firstMove <= MOVE_NONE || s.firstMove >= MOVES_COUNT)
         s.firstMove = MOVE_FLAMETHROWER;
     s.megaLog = EnvInt("PKMN_TEST_MEGA_LOG", 0) != 0;
-    s.softReset = EnvInt("PKMN_TEST_SOFT_RESET", 0) != 0;
+    s.softResets = EnvInt("PKMN_TEST_SOFT_RESET", 0);
+    s.softReset = s.softResets > 0;
+    s.starterLog = EnvInt("PKMN_TEST_STARTER_LOG", 0) != 0;
     s.fieldAfter = EnvInt("PKMN_TEST_FIELD_AFTER", 0);
     if (s.megaLog)
         ListMegaStoneHolders();     /* the stones MegaLogField counts */
@@ -755,6 +767,40 @@ static void MegaLogField(void)
             gPartiesCount[B_TRAINER_PLAYER], stones, ring);
 }
 
+/* PKMN_TEST_STARTER_LOG off a battle: "starter field: map G.N at X,Y party N lead S personality P shiny H choice C got F"
+ * whenever one of them changes - C the starter claim (VAR_MULTIPLAYER_STARTER_CHOICE: 0x62FF open, 0x6100 | n claimed),
+ * F FLAG_SYS_POKEMON_GET. A claim in Birch's lab, a save and a load, a soft reset that brings the claim back. */
+static void StarterLogField(void)
+{
+    struct Pokemon *lead = &gParties[B_TRAINER_PLAYER][0];
+    int now[9];
+    u32 personality;
+    bool changed;
+
+    if (!s.starterLog || gMain.inBattle || SDL_AtomicGet(&s.fieldSeen) == 0 || gSaveBlock1Ptr == NULL)
+        return;
+    now[0] = gSaveBlock1Ptr->location.mapGroup;
+    now[1] = gSaveBlock1Ptr->location.mapNum;
+    now[2] = gSaveBlock1Ptr->pos.x;
+    now[3] = gSaveBlock1Ptr->pos.y;
+    now[4] = gPartiesCount[B_TRAINER_PLAYER];
+    now[5] = now[4] > 0 ? (int)GetMonData(lead, MON_DATA_SPECIES) : 0;
+    now[6] = now[4] > 0 ? (int)GetMonData(lead, MON_DATA_IS_SHINY) : 0;
+    now[7] = VarGet(VAR_MULTIPLAYER_STARTER_CHOICE);
+    now[8] = FlagGet(FLAG_SYS_POKEMON_GET);
+    personality = now[4] > 0 ? GetMonData(lead, MON_DATA_PERSONALITY) : 0;
+    changed = !s.starterLogged || personality != s.starterSeenPersonality;
+    for (int i = 0; i < 9 && !changed; i++)
+        changed = now[i] != s.starterSeen[i];
+    if (!changed)
+        return;
+    s.starterLogged = true;
+    memcpy(s.starterSeen, now, sizeof(now));
+    s.starterSeenPersonality = personality;
+    TestLog("Battle env test: starter field: map %d.%d at %d,%d party %d lead %d personality %08x shiny %d choice %04x got %d",
+            now[0], now[1], now[2], now[3], now[4], now[5], (unsigned)personality, now[6], now[7], now[8]);
+}
+
 static void MegaLogAfter(void)
 {
     struct Pokemon *lead = &gParties[B_TRAINER_PLAYER][0];
@@ -815,6 +861,7 @@ static void StartFieldKeys(int frames)
     s.fieldKeysActive = true;
     s.fieldSeenSpecies = -1;    /* the field and the wallet logged again: their state as the keys start */
     s.fieldSeenCoins = s.fieldSeenMoney = -1;
+    s.starterLogged = false;
     gSaveBlock2Ptr->optionsTextSpeed = OPTIONS_TEXT_SPEED_FAST;     /* the keys come on a timer: fast text */
     TestLog("Battle env test: field keys for %d frames", frames);
 }
@@ -1000,7 +1047,15 @@ void DioramaBattleEnvTest_FieldTick(void)
     if (s.resetSeen && ++s.resetFieldFrames == 90)
     {
         TestLog("Battle env test: soft reset: back on the field");
-        if (s.exitAfter)
+        /* PKMN_TEST_SOFT_RESET=<n>: the same field keys again, from the field the save brought back */
+        if (++s.resetsDone < s.softResets && s.fieldKeys[0] != '\0')
+        {
+            TestLog("Battle env test: soft reset %d of %d: the field keys again", s.resetsDone + 1, s.softResets);
+            s.resetSeen = false;
+            s.resetFieldFrames = s.resetWaitFrames = 0;
+            StartFieldKeys(s.fieldEnd);
+        }
+        else if (s.exitAfter)
         {
             if (sLogFile != NULL)
                 fclose(sLogFile);
@@ -1196,6 +1251,7 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
         Init();
     MegaLogFrame();
     MegaLogField();
+    StarterLogField();
     ShotTick();
     /* PKMN_TEST_SOFT_RESET: the game started again (its frame count went back: a soft reset, not a battle's end);
      * the field keys stop and, from the title, the autopilot goes as at the start (Start, A to CONTINUE) */
@@ -1212,6 +1268,7 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
         s.fightOver = true;
         s.fieldSeenSpecies = -1;    /* the field after it is logged, whatever it shows */
         s.fieldSeenCoins = s.fieldSeenMoney = -1;
+        s.starterLogged = false;
         SDL_AtomicSet(&s.fieldSeen, 0);
         SDL_AtomicSet(&s.menuSeen, 0);
     }
@@ -1246,7 +1303,7 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
         }
         for (int i = 0; i < s.fieldShotCount; i++)
             if (s.fieldShots[i] == s.fieldKeyFrames)
-                RequestShot(50 + i, 1, "a field step");
+                RequestShot(50 + s.resetsDone * s.fieldShotCount + i, 1, "a field step");
         return keys | KeysAt(s.fieldKeys, s.fieldKeyFrames++);
     }
     if (s.startMs == 0)
