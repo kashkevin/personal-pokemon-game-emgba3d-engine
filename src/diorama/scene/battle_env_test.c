@@ -47,6 +47,11 @@
 #include "coins.h"
 #include "money.h"
 #include "constants/maps.h"
+#include "constants/script_commands.h"
+#include "constants/event_objects.h"
+#include "constants/trainer_types.h"
+#include "field_player_avatar.h"
+#include "fieldmap.h"
 #include "constants/multiplayer_balance.h"
 #include "constants/multiplayer_rival.h"
 #include "platform/coin_shop.h"
@@ -172,6 +177,7 @@ static struct
 /* PKMN_TEST_LOG=<file>: every line the driver logs is also appended to that file (a check on Windows reads it: the
  * game's own log may reach no console there). */
 static FILE *sLogFile;
+static void LoadPlan(const char *path);    /* PKMN_TEST_PLAN (below) */
 
 static void TestLog(const char *format, ...)
 {
@@ -233,7 +239,7 @@ static const struct { const char *name; int value; } sFacts[] = {
     FACT(MOVE_EARTHQUAKE), FACT(MOVE_FLAMETHROWER), FACT(GIMMICK_NONE), FACT(GIMMICK_MEGA), FACT(NUM_SPECIES),
     FACT(ITEM_COIN_CASE), FACT(MAP_MAUVILLE_CITY_GAME_CORNER), FACT(MAP_MAUVILLE_CITY_MART), FACT(MP_MEGA_RING_COINS),
     FACT(SPECIES_TORCHIC), FACT(MAP_LITTLEROOT_TOWN), FACT(MAP_LITTLEROOT_TOWN_PROFESSOR_BIRCHS_LAB),
-    FACT(MP_INTRO_STARTER_PENDING),
+    FACT(MP_INTRO_STARTER_PENDING), FACT(MOVE_FLASH_CANNON), FACT(TRAINER_FLAGS_START), FACT(ITEMS_COUNT),
 };
 #undef FACT
 
@@ -389,6 +395,9 @@ static void Init(void)
             s.paradeFrames = EnvInt("PKMN_TEST_PARADE_FRAMES", 12);
         TestLog("Battle env test: parade of the %d Mega forms, %d frames each", sHolderCount, s.paradeFrames);
     }
+    value = SDL_getenv("PKMN_TEST_PLAN");
+    if (value != NULL && value[0] != '\0')
+        LoadPlan(value);
     value = SDL_getenv("PKMN_TEST_WARP");
     s.warpX = s.warpY = -1;
     if (value != NULL && sscanf(value, "%d:%d:%d:%d:%d", &s.warpGroup, &s.warpNum, &s.warpId,
@@ -997,6 +1006,406 @@ static void StrengthenParty(void)
     TestLog("Battle env test: the party at level %d, healed, its first move %d", MAX_LEVEL, s.firstMove);
 }
 
+/*
+ * PKMN_TEST_PLAN=<file>: the gameplay checks (tools/qa/gameplay_check.py). One target per line,
+ *     <key> <kind> <group> <num> <x> <y> <dir> <arg>
+ * kind talk (an object event; arg its local id), sign or hidden (a background event; arg its index), warp (arg the
+ * warp's index). From wherever the player is, the plan warps to x,y on that map, faces dir (U D L R) and presses A
+ * (warp: holds dir, a step onto it), then answers what comes as a player would: B through the lines and every
+ * question (NO), A through a battle (the first move on the first target), until the field is free again. Before
+ * each: the target object shown (its hide flag cleared), every other trainer of the map counted as beaten and the
+ * target trainer as not (the battle that starts is the one asked for), a hidden item put back, the party healed.
+ * Each target logs where it began and ended, whether a script ran, its battles (trainers, outcome), the money, the
+ * trainer's beaten flag, the target's own flag and the bag's changes. PKMN_TEST_PLAN_FIRST=n starts at line n (0-based;
+ * comments and blank lines not counted). A target that does not give the field back within PKMN_TEST_PLAN_FRAMES
+ * (default 2400; 10800 more for each battle) is logged as a hang, pictured (<PKMN_TEST_MEGA_SHOT_STEM>-99.png) and the
+ * process ends with code 7: the tool starts the game again at the next target. In memory only: nothing is saved.
+ */
+#define PLAN_MAX 4096
+#define PLAN_SETTLE 30      /* free field frames that end a target */
+enum { PLAN_TALK, PLAN_SIGN, PLAN_HIDDEN, PLAN_WARP };
+enum { PLAN_OFF, PLAN_START, PLAN_GO, PLAN_ARRIVE, PLAN_ACT, PLAN_RUN, PLAN_DONE, PLAN_HANG, PLAN_FINISHED };
+static struct PlanTarget
+{
+    char key[80];
+    u8 kind, dir, group, num;
+    s16 x, y, arg;
+} sPlanTargets[PLAN_MAX];
+static struct
+{
+    int count, first, next, phase, frames, budget, settle, pressLeft, gapLeft, presses, hangFrames;
+    int lastPhase, phaseFrames;
+    bool shots, byItself;
+    bool script, inBattle, mapChanged;
+    int battles, outcome, trainerA, trainerB;
+    u16 trainerId, ownFlag;     /* the target trainer (0: none) and the target's own flag (0: none) */
+    u32 money;
+    u8 mapGroup, mapNum;
+    u16 bagBefore[ITEMS_COUNT];
+} sPlan;
+
+static void LoadPlan(const char *path)
+{
+    FILE *file = fopen(path, "r");
+    char line[256];
+    int index = 0;
+
+    sPlan.first = EnvInt("PKMN_TEST_PLAN_FIRST", 0);
+    sPlan.budget = EnvInt("PKMN_TEST_PLAN_FRAMES", 2400);
+    sPlan.shots = EnvInt("PKMN_TEST_PLAN_SHOTS", 0) != 0;
+    if (file == NULL)
+    {
+        TestLog("Battle env test: plan: cannot open %s", path);
+        return;
+    }
+    while (fgets(line, sizeof(line), file) != NULL && sPlan.count < PLAN_MAX)
+    {
+        struct PlanTarget *t = &sPlanTargets[sPlan.count];
+        char kind[12], dir[4];
+        int group, num, x, y, arg;
+
+        if (line[0] == '#' || line[0] == '\n' || line[0] == '\r')
+            continue;
+        if (sscanf(line, "%79s %11s %d %d %d %d %3s %d", t->key, kind, &group, &num, &x, &y, dir, &arg) != 8)
+        {
+            TestLog("Battle env test: plan: cannot read '%s'", line);
+            continue;
+        }
+        if (index++ < sPlan.first)
+            continue;
+        t->kind = strcmp(kind, "talk") == 0 ? PLAN_TALK : strcmp(kind, "sign") == 0 ? PLAN_SIGN
+                : strcmp(kind, "hidden") == 0 ? PLAN_HIDDEN : PLAN_WARP;
+        t->dir = dir[0] == 'U' ? DIR_NORTH : dir[0] == 'D' ? DIR_SOUTH : dir[0] == 'L' ? DIR_WEST : DIR_EAST;
+        t->group = group;
+        t->num = num;
+        t->x = x;
+        t->y = y;
+        t->arg = arg;
+        sPlan.count++;
+    }
+    fclose(file);
+    sPlan.phase = sPlan.count > 0 ? PLAN_START : PLAN_OFF;
+    TestLog("Battle env test: plan: %d targets from line %d of %s", sPlan.count, sPlan.first, path);
+}
+
+static bool PlanFieldFree(void)
+{
+    return gMain.callback2 == CB2_Overworld && !gMain.inBattle && !ArePlayerFieldControlsLocked()
+        && !gPaletteFade.active && !ScriptContext_IsEnabled();
+}
+
+/* The trainers a script fights if it starts with trainerbattle (as a trainer object's always does). */
+static bool PlanScriptTrainers(const u8 *script, u16 *a, u16 *b)
+{
+    const TrainerBattleParameter *params;
+
+    if (script == NULL || script[0] != SCR_OP_TRAINERBATTLE)
+        return false;
+    params = (const TrainerBattleParameter *)(script + TRAINERBATTLE_OPCODE_OFFSET);
+    *a = params->params.opponentA;
+    *b = params->params.opponentB;
+    return true;
+}
+
+/* Game thread, the field free: the target's map set up, then the warp to its place. */
+static void PlanGo(void)
+{
+    const struct PlanTarget *t = &sPlanTargets[sPlan.next];
+    const struct MapEvents *events = Overworld_GetMapHeaderByGroupAndId(t->group, t->num)->events;
+    u16 a, b;
+
+    sPlan.trainerId = sPlan.ownFlag = 0;
+    for (u32 i = 0; events != NULL && i < events->objectEventCount; i++)
+    {
+        const struct ObjectEventTemplate *o = &events->objectEvents[i];
+        bool target = t->kind == PLAN_TALK && o->localId == t->arg;
+
+        if (o->kind != OBJ_KIND_NORMAL)
+            continue;
+        if (target && o->flagId != 0)
+        {
+            sPlan.ownFlag = o->flagId;
+            FlagClear(o->flagId);
+        }
+        if (!PlanScriptTrainers(o->script, &a, &b))
+            continue;
+        if (target)
+        {
+            sPlan.trainerId = a;
+            ClearTrainerFlag(a);
+            if (b != 0 && b != 0xFFFF)
+                ClearTrainerFlag(b);
+        }
+        else if (o->trainerType != TRAINER_TYPE_NONE)
+        {
+            SetTrainerFlag(a);
+        }
+    }
+    if (t->kind == PLAN_HIDDEN && events != NULL && t->arg < events->bgEventCount)
+    {
+        sPlan.ownFlag = FLAG_HIDDEN_ITEMS_START + events->bgEvents[t->arg].bgUnion.hiddenItem.hiddenItemId;
+        FlagClear(sPlan.ownFlag);
+    }
+    HealPlayerParty();
+    sPlan.money = GetMoney(&gSaveBlock1Ptr->money);
+    for (u32 i = 0; i < ITEMS_COUNT; i++)
+        sPlan.bagBefore[i] = CountTotalItemQuantityInBag(i);
+    sPlan.frames = sPlan.settle = sPlan.pressLeft = sPlan.gapLeft = sPlan.presses = 0;
+    sPlan.script = sPlan.inBattle = sPlan.mapChanged = sPlan.byItself = false;
+    sPlan.battles = 0;
+    sPlan.outcome = sPlan.trainerA = sPlan.trainerB = -1;
+    sPlan.hangFrames = sPlan.budget;
+    TestLog("Battle env test: plan target %d %s begin", sPlan.first + sPlan.next, t->key);
+    SetWarpDestination(t->group, t->num, WARP_ID_NONE, t->x, t->y);
+    DoWarp();
+    ResetInitialPlayerAvatarState();
+    sPlan.phase = PLAN_ARRIVE;
+}
+
+/* Game thread: arrived and the field free - the target object back at its place and still, the player facing it. */
+static void PlanArrive(void)
+{
+    const struct PlanTarget *t = &sPlanTargets[sPlan.next];
+    const struct MapEvents *events = gMapHeader.events;
+    u8 player = gPlayerAvatar.objectEventId;
+
+    if (t->kind == PLAN_TALK && events != NULL)
+    {
+        for (u32 i = 0; i < events->objectEventCount; i++)
+            if (events->objectEvents[i].localId == t->arg && events->objectEvents[i].kind == OBJ_KIND_NORMAL)
+                TryMoveObjectEventToMapCoords(t->arg, t->num, t->group, events->objectEvents[i].x,
+                                              events->objectEvents[i].y);   /* it adds MAP_OFFSET itself */
+        FreezeObjectEventsExceptOne(player);
+    }
+    ObjectEventTurn(&gObjectEvents[player], t->dir);
+    sPlan.mapGroup = gSaveBlock1Ptr->location.mapGroup;
+    sPlan.mapNum = gSaveBlock1Ptr->location.mapNum;
+    TestLog("Battle env test: plan target %d %s at map %d.%d %d,%d facing %d", sPlan.first + sPlan.next, t->key,
+            sPlan.mapGroup, sPlan.mapNum, gSaveBlock1Ptr->pos.x, gSaveBlock1Ptr->pos.y, t->dir);
+    sPlan.settle = 0;
+    sPlan.phase = PLAN_ACT;
+}
+
+/* Game thread, the field free again: what the target did. */
+static void PlanDone(void)
+{
+    const struct PlanTarget *t = &sPlanTargets[sPlan.next];
+    char bag[200] = "";
+    size_t used = 0;
+
+    for (u32 i = 1; i < ITEMS_COUNT && used < sizeof(bag) - 24; i++)
+    {
+        int now = CountTotalItemQuantityInBag(i);
+
+        if (now != sPlan.bagBefore[i])
+            used += SDL_snprintf(bag + used, sizeof(bag) - used, "%s%u:%+d", used ? "," : "", i, now - sPlan.bagBefore[i]);
+    }
+    TestLog("Battle env test: plan target %d %s end frames %d script %d battles %d outcome %d trainers %d %d "
+            "by_itself %d map %d.%d %d,%d money %u %u beaten %d own %d bag %s", sPlan.first + sPlan.next, t->key,
+            sPlan.frames, sPlan.script, sPlan.battles, sPlan.outcome, sPlan.trainerA, sPlan.trainerB, sPlan.byItself,
+            gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->pos.x,
+            gSaveBlock1Ptr->pos.y, sPlan.money, GetMoney(&gSaveBlock1Ptr->money),
+            sPlan.trainerId ? (int)FlagGet(TRAINER_FLAGS_START + sPlan.trainerId) : -1,
+            sPlan.ownFlag ? (int)FlagGet(sPlan.ownFlag) : -1, used ? bag : "-");
+    UnfreezeObjectEvents();
+    if (++sPlan.next >= sPlan.count)
+    {
+        TestLog("Battle env test: plan done (%d targets)", sPlan.count);
+        sPlan.phase = PLAN_FINISHED;
+        if (s.exitAfter)
+        {
+            if (sLogFile != NULL)
+                fclose(sLogFile);
+            fflush(NULL);
+            _exit(0);
+        }
+        return;
+    }
+    sPlan.settle = 0;
+    sPlan.phase = PLAN_GO;
+}
+
+static void PlanFieldTick(void)
+{
+    switch (sPlan.phase)
+    {
+    case PLAN_START:
+        /* the test party (PKMN_TEST_PARTY; at level 100 with PKMN_TEST_STRONG) and bag, once */
+        SetUpTestParty();
+        if (!s.bagDone)
+            SetUpTestBag();
+        if (s.strong)
+            StrengthenParty();
+        sPlan.settle = 0;
+        sPlan.phase = PLAN_GO;
+        break;
+    case PLAN_GO:
+        if (!PlanFieldFree())
+            sPlan.settle = 0;
+        else if (++sPlan.settle >= 10)
+            PlanGo();
+        break;
+    case PLAN_ARRIVE:
+        if (!PlanFieldFree() || gSaveBlock1Ptr->location.mapGroup != sPlanTargets[sPlan.next].group
+         || gSaveBlock1Ptr->location.mapNum != sPlanTargets[sPlan.next].num)
+            sPlan.settle = 0;
+        else if (++sPlan.settle >= 8)
+            PlanArrive();
+        break;
+    case PLAN_DONE:
+        if (PlanFieldFree())
+            PlanDone();
+        break;
+    }
+}
+
+/* Render thread (the game thread parked at the frame's end): the keys a player would press for the target. */
+static unsigned short PlanKeys(void)
+{
+    const struct PlanTarget *t = &sPlanTargets[sPlan.next];
+    unsigned short button;
+
+    if (sPlan.phase != sPlan.lastPhase)
+    {
+        sPlan.lastPhase = sPlan.phase;
+        sPlan.phaseFrames = 0;
+    }
+    sPlan.phaseFrames++;
+    /* the warp, the arrival or the end that never comes (a map that does not load, a field never free) */
+    if ((sPlan.phase == PLAN_GO || sPlan.phase == PLAN_ARRIVE || sPlan.phase == PLAN_DONE)
+     && sPlan.phaseFrames > sPlan.budget)
+    {
+        TestLog("Battle env test: plan target %d %s hang in phase %d frames %d script %d in battle %d map %d.%d %d,%d",
+                sPlan.first + sPlan.next, t->key, sPlan.phase, sPlan.phaseFrames, ScriptContext_IsEnabled(),
+                gMain.inBattle, gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum,
+                gSaveBlock1Ptr->pos.x, gSaveBlock1Ptr->pos.y);
+        RequestShot(99, 1, "a hang");
+        sPlan.settle = 0;
+        sPlan.phase = PLAN_HANG;
+        return 0;
+    }
+    /* arrived, and something began before A: a trainer who saw the player, a map's own scene - answered as any */
+    if (sPlan.phase == PLAN_ARRIVE && sPlan.phaseFrames > 30 && (ScriptContext_IsEnabled() || gMain.inBattle)
+     && gSaveBlock1Ptr->location.mapGroup == t->group && gSaveBlock1Ptr->location.mapNum == t->num)
+    {
+        sPlan.mapGroup = t->group;
+        sPlan.mapNum = t->num;
+        sPlan.byItself = true;
+        TestLog("Battle env test: plan target %d %s at map %d.%d %d,%d facing %d (it began by itself)",
+                sPlan.first + sPlan.next, t->key, sPlan.mapGroup, sPlan.mapNum, gSaveBlock1Ptr->pos.x,
+                gSaveBlock1Ptr->pos.y, t->dir);
+        sPlan.settle = 0;
+        sPlan.phase = PLAN_RUN;
+        return 0;
+    }
+    if (sPlan.phase == PLAN_HANG)
+    {
+        if (++sPlan.settle >= 40)
+        {
+            if (sLogFile != NULL)
+                fclose(sLogFile);
+            fflush(NULL);
+            _exit(7);
+        }
+        return 0;
+    }
+    if (sPlan.phase == PLAN_ACT)
+    {
+        /* a moment for the turn to show, then A (a step onto a warp: its direction held) */
+        if (++sPlan.settle < 6)
+        {
+            if (sPlan.settle == 3 && sPlan.shots)
+                RequestShot((sPlan.first + sPlan.next) % 98, 1, "the target faced");    /* PKMN_TEST_PLAN_SHOTS */
+            return 0;
+        }
+        if (t->kind == PLAN_WARP)
+        {
+            if (sPlan.settle < 6 + 24)
+                return t->dir == DIR_NORTH ? DPAD_UP : t->dir == DIR_SOUTH ? DPAD_DOWN
+                     : t->dir == DIR_WEST ? DPAD_LEFT : DPAD_RIGHT;
+        }
+        else if (sPlan.settle < 6 + AUTOPILOT_HOLD)
+        {
+            return A_BUTTON;
+        }
+        sPlan.settle = 0;
+        sPlan.phase = PLAN_RUN;
+        return 0;
+    }
+    if (sPlan.phase != PLAN_RUN)
+        return 0;
+    sPlan.frames++;
+    if (sPlan.frames > sPlan.hangFrames)
+    {
+        TestLog("Battle env test: plan target %d %s hang frames %d script %d battles %d in battle %d map %d.%d %d,%d "
+                "callback %p", sPlan.first + sPlan.next, t->key, sPlan.frames, ScriptContext_IsEnabled(),
+                sPlan.battles, gMain.inBattle, gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum,
+                gSaveBlock1Ptr->pos.x, gSaveBlock1Ptr->pos.y, (void *)gMain.callback2);
+        RequestShot(99, 1, "a hang");
+        sPlan.settle = 0;
+        sPlan.phase = PLAN_HANG;
+        return 0;
+    }
+    if (gMain.inBattle)
+    {
+        if (!sPlan.inBattle)
+        {
+            sPlan.inBattle = true;
+            sPlan.battles++;
+            sPlan.hangFrames += 10800;
+            sPlan.trainerA = TRAINER_BATTLE_PARAM.opponentA;
+            sPlan.trainerB = TRAINER_BATTLE_PARAM.opponentB;
+            TestLog("Battle env test: plan target %d %s battle %d type %08x trainers %d %d", sPlan.first + sPlan.next,
+                    t->key, sPlan.battles, gBattleTypeFlags, sPlan.trainerA, sPlan.trainerB);
+        }
+        button = A_BUTTON;      /* the first move on the first target, every line */
+    }
+    else
+    {
+        if (sPlan.inBattle)
+        {
+            sPlan.inBattle = false;
+            sPlan.outcome = gBattleOutcome;
+            TestLog("Battle env test: plan target %d %s battle %d over outcome %d", sPlan.first + sPlan.next, t->key,
+                    sPlan.battles, gBattleOutcome);
+        }
+        if (ScriptContext_IsEnabled())
+            sPlan.script = true;
+        if (!sPlan.mapChanged && (gSaveBlock1Ptr->location.mapGroup != sPlan.mapGroup
+                                  || gSaveBlock1Ptr->location.mapNum != sPlan.mapNum))
+        {
+            sPlan.mapChanged = true;
+            TestLog("Battle env test: plan target %d %s map now %d.%d", sPlan.first + sPlan.next, t->key,
+                    gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum);
+        }
+        if (PlanFieldFree())
+        {
+            sPlan.pressLeft = sPlan.gapLeft = 0;
+            if (++sPlan.settle >= PLAN_SETTLE && (sPlan.script || sPlan.battles || sPlan.mapChanged
+                                                  || sPlan.frames > 3 * PLAN_SETTLE))
+                sPlan.phase = PLAN_DONE;
+            return 0;
+        }
+        sPlan.settle = 0;
+        /* B through the lines and questions; after half a minute every fourth press A (a choice that has no NO) */
+        button = sPlan.frames > 1800 && sPlan.presses % 4 == 3 ? A_BUTTON : B_BUTTON;
+    }
+    if (sPlan.pressLeft > 0)
+    {
+        sPlan.pressLeft--;
+        return button;
+    }
+    if (sPlan.gapLeft > 0)
+    {
+        sPlan.gapLeft--;
+        return 0;
+    }
+    sPlan.presses++;
+    sPlan.pressLeft = AUTOPILOT_HOLD - 1;
+    sPlan.gapLeft = gMain.inBattle ? AUTOPILOT_HOLD * 2 : 12;
+    return button;
+}
+
 void DioramaBattleEnvTest_FieldTick(void)
 {
     if (!s.init)
@@ -1017,6 +1426,11 @@ void DioramaBattleEnvTest_FieldTick(void)
     SDL_AtomicSet(&s.fieldSeen, 1);
     if (gMain.inBattle)
         SDL_AtomicSet(&s.battleSeen, 1);
+    if (sPlan.phase != PLAN_OFF)
+    {
+        PlanFieldTick();     /* PKMN_TEST_PLAN: the plan alone drives the field */
+        return;
+    }
     /* PKMN_TEST_FIGHT: the field is back after the fought battle - how it ended */
     if (s.fightSeconds > 0 && !s.fightOver && SDL_AtomicGet(&s.menuSeen) != 0 && !gMain.inBattle)
     {
@@ -1253,6 +1667,9 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
     MegaLogField();
     StarterLogField();
     ShotTick();
+    /* PKMN_TEST_PLAN: once the autopilot brought the field up, the plan's keys alone */
+    if (sPlan.phase != PLAN_OFF && SDL_AtomicGet(&s.fieldSeen) != 0)
+        return keys | PlanKeys();
     /* PKMN_TEST_SOFT_RESET: the game started again (its frame count went back: a soft reset, not a battle's end);
      * the field keys stop and, from the title, the autopilot goes as at the start (Start, A to CONTINUE) */
     if (s.softReset && !s.resetSeen && gMain.vblankCounter1 < s.lastVblank)

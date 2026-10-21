@@ -105,6 +105,20 @@
  *   PKMN_TEST_MEGA_SHOT      frames: a picture that long after the lead's Mega animation, as
  *   PKMN_TEST_MEGA_SHOT_STEM <stem>-NN.png (NN the sweep's holder, or 00)
  *
+ * For the gameplay checks (tools/qa/gameplay_check.py; the final master update, phase 10):
+ *   PKMN_TEST_PLAN           a file of targets, one per line: <key> <kind> <group> <num> <x> <y> <dir> <arg>
+ *                            (kind talk: an object, arg its local id; sign, hidden: a background event, arg its
+ *                            index; warp: arg the warp's index). For each, from wherever the player is: the target
+ *                            object shown, every other trainer of that map counted as beaten and the target trainer
+ *                            as not, a hidden item put back, the party healed; then a warp to x,y facing dir, A (a
+ *                            warp: dir held), B through every line and question, A through a battle, until the field
+ *                            is free; "plan target N KEY begin / at / battle / map now / end / hang" lines say what
+ *                            happened (the end: frames, script, battles, outcome, trainers, map, money, the beaten
+ *                            and own flags, the bag's changes). In memory only: nothing is saved
+ *   PKMN_TEST_PLAN_FIRST     n: start at the plan's line n (0-based, comments not counted)
+ *   PKMN_TEST_PLAN_FRAMES    frames a target may keep the field (default 2400; 10800 more per battle): then a hang,
+ *                            pictured as <PKMN_TEST_MEGA_SHOT_STEM>-99.png, and the process ends (code 7)
+ *
  * In the Classic 2D test build the pictures are the GBA frame (no .json beside them).
  *
  * Nothing here changes a battle: it starts one the way the debug menu's

@@ -861,6 +861,12 @@ int main(int argc, char **argv)
     GameMemory_Snapshot();
     mainLoopThread = SDL_CreateThread(DoMain, "AgbMain", NULL);
     PerfLog_Init();
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+    // Test builds only (never a player's): PKMN_TEST_SPEED=n runs the game's clock n times as fast, for the gameplay
+    // checks that visit every trainer, person and warp (tools/qa/gameplay_check.py). The sound is not queued then.
+    if (SDL_getenv("PKMN_TEST_SPEED") != NULL && atoi(SDL_getenv("PKMN_TEST_SPEED")) > 1)
+        timeScale = atoi(SDL_getenv("PKMN_TEST_SPEED"));
+#endif
 
     double accumulator = 0.0;
     struct FrameLimiter frameLimiter;
@@ -901,7 +907,11 @@ int main(int argc, char **argv)
 
             curGameTime = SDL_GetPerformanceCounter();
             double deltaTime = (double)((curGameTime - lastGameTime) / (double)SDL_GetPerformanceFrequency());
-            if (deltaTime > (dt * 5))
+            double longest = dt * 5;
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+            longest = fixedTimestep * 5;    // PKMN_TEST_SPEED: up to five real frames of game time per drawn frame
+#endif
+            if (deltaTime > longest)
                 deltaTime = dt;
             lastGameTime = curGameTime;
 
@@ -2245,6 +2255,10 @@ u32 Platform_GetEntropy32(void)
 void Platform_QueueAudio(float *audioBuffer, s32 samplesPerFrame)
 {
     DebugScene_AudioTap(audioBuffer, samplesPerFrame / sizeof(float));
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+    if (timeScale > 1.0)
+        return;     // PKMN_TEST_SPEED: faster than the sound card plays (the queue would only grow)
+#endif
     if (sdlAudioDevice != 0)
     {
         int floatCount = samplesPerFrame / sizeof(float);
