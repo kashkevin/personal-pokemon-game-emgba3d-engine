@@ -59,6 +59,15 @@ void SetActiveGimmick(enum BattlerId battler, enum Gimmick gimmick)
 // Returns a battler's active gimmick, if any.
 enum Gimmick GetActiveGimmick(enum BattlerId battler)
 {
+#if TESTING || defined(PORTABLE)
+    // EmeraldTogether: the Battle Dome plays its tourney's other matches outside any battle (the lobby's
+    // InitRandomTourneyTreeResults on every entry, a challenge's rounds between battles), and their type
+    // matchups reach here: no battle, no gimmick. The PC game stopped there (gBattleStruct is freed after a
+    // battle); the GBA ROM reads open bus.
+    if (gBattleStruct == NULL)
+        return GIMMICK_NONE;
+#endif
+#line 62 // gba-line
     return gBattleStruct->gimmick.activeGimmick[GetBattlerTrainer(battler)][gBattlerPartyIndexes[battler]];
 }
 
