@@ -490,6 +490,16 @@ def run_shard(args, shard, lines, party):
             break
         if not begun:
             runs[-1]["problem"] = "no target began (the game did not reach the field)"
+            # what the game itself said last (its output and the driver's log): a CI job keeps only this report
+            tail = []
+            for name in ("game.log", "test.log"):
+                path = os.path.join(rundir, name)
+                if os.path.exists(path):
+                    with open(path, encoding="utf-8", errors="replace") as text:
+                        tail += [f"{name}: {line.rstrip()}" for line in text.readlines()[-15:]]
+            runs[-1]["tail"] = tail
+            print(f"shard {shard} run {len(runs) - 1}: no target began (exit {code}); the game's last lines:",
+                  *tail, sep="\n  ", flush=True)
             break
         stopped = max(begun)
         if code != 7:   # a crash or a timeout: the target it stopped in is recorded as such
@@ -579,21 +589,21 @@ def main():
                 and not state.get("maps") and at.startswith(f"map {end['map']} {end['pos']} ")):
             # the step never happened: an object its flag shows in this save stands on it (New Mauville's blue
             # button under its Voltorb until that is beaten)
-            blocked.append(dict(key=target["key"], kind="trigger", map=target["map"], reason=(
+            blocked.append(dict(key=target["key"], kind="trigger", map=target["map"], runtime=True, reason=(
                 f"an object stands on it in this state ({', '.join(target['expect']['covered'])}): the step is "
                 "blocked until the story removes it")))
             continue
         if "(it began by itself)" in at and state.get("hang") and not state.get("maps"):
             # its map's own scene began as the player was put down there, not through the map's entrance, and hung
             # (the Devon president's walk led off the map); the warps into the map play the scene from its entrance
-            blocked.append(dict(key=target["key"], kind=target["kind"], map=target["map"], reason=(
+            blocked.append(dict(key=target["key"], kind=target["kind"], map=target["map"], runtime=True, reason=(
                 "its map's scene began as the check put the player down there (not through the entrance) and stopped "
                 f"({state['hang'][:80]}); the warps into the map play it from the entrance")))
             continue
         if state.get("absent") or (state.get("closed") and not state.get("maps")):
             # Not there in this game's state: an object a story flag or its map's own script hides, a door the map's
             # script keeps shut (its tile solid) until the story opens it. Blocked, not judged.
-            blocked.append(dict(key=target["key"], kind=target["kind"], map=target["map"], reason=(
+            blocked.append(dict(key=target["key"], kind=target["kind"], map=target["map"], runtime=True, reason=(
                 "absent: the game hides it in this state (a story flag or its map's script)" if state.get("absent")
                 else "closed: its map keeps this door shut in this state (the story opens it)")))
             continue
@@ -613,6 +623,9 @@ def main():
     for result in results:
         if not result["passed"]:
             print(f"FAILED {result['key']}: {result['reason']}", flush=True)
+    for item in blocked:    # found in the game, not in the plan: what a coverage manifest needs besides the FAILED lines
+        if item.get("runtime"):
+            print(f"BLOCKED {item['key']}: {item['reason']}", flush=True)
     return 0 if all(r["passed"] for r in results) else 1
 
 

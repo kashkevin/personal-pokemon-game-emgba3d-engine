@@ -183,7 +183,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--gameplay", help="a gameplay_check.json")
     parser.add_argument("--plan", help="a plan.json (with --failed)")
-    parser.add_argument("--failed", help="the FAILED lines of a gameplay run whose every other planned target passed")
+    parser.add_argument("--failed", help="the FAILED (and BLOCKED) lines of a gameplay run whose every other planned "
+                                         "target passed")
     parser.add_argument("--test-results", help="the test ROM's output, colors taken off")
     parser.add_argument("--known", help="the expected differences: lines 'file | test name' (KNOWN_ISSUES G10)")
     parser.add_argument("--out", required=True)
@@ -196,12 +197,17 @@ def main():
         outcomes = {r["key"]: (r["passed"], r["reason"]) for r in report["results"]}
     elif args.plan:
         plan = json.load(open(args.plan))
-        failed = {}
+        failed, found_blocked = {}, []
         if args.failed:
             for line in open(args.failed, encoding="utf-8"):
-                match = re.match(r"^FAILED (\S+): (.*)$", line.strip())
-                if match:
-                    failed[match.group(1)] = match.group(2)
+                match = re.match(r"^(FAILED|BLOCKED) (\S+): (.*)$", line.strip())
+                if match and match.group(1) == "FAILED":
+                    failed[match.group(2)] = match.group(3)
+                elif match:     # blocked in the game itself (a story object this save hides, an object on a trigger)
+                    found_blocked.append(dict(key=match.group(2), reason=match.group(3)))
+            keys = {b["key"] for b in found_blocked}
+            plan = dict(plan, targets=[t for t in plan["targets"] if t["key"] not in keys],
+                        blocked=plan.get("blocked", []) + found_blocked)
             outcomes = {t["key"]: ((t["key"] not in failed), failed.get(t["key"], "passed in the gameplay check"))
                         for t in plan["targets"]}
     known = frozenset(line.split(" | ", 1)[1].strip() for line in open(args.known, encoding="utf-8")
