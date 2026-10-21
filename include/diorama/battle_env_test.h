@@ -170,6 +170,8 @@ int DioramaBattleEnvTest_PokenavTutorialKey(void);
 int DioramaBattleEnvTest_NamingScreenUp(void);
 /* battle_controller_player.c, HandleInputChooseAction (game thread) */
 void DioramaBattleEnvTest_OnActionMenu(void);
+/* battle_util.c, GetAdjustedDamage (game thread): a hit that would knock out this battler leaves it 1 HP instead */
+bool DioramaBattleEnvTest_HoldOnForMega(unsigned battler);
 /* gl_battle.c (render thread): the stem to capture this frame, or NULL */
 const char *DioramaBattleEnvTest_CaptureStem(void);
 void DioramaBattleEnvTest_CaptureWritten(void);

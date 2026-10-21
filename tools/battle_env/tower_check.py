@@ -86,6 +86,10 @@ def parse(lines):
                 run["megas"].append(dict(battler=n[0], species=n[1]))
         elif line.startswith(("the battle did not end", "assert", "cannot read")):
             run["notes"].append(line)
+    # A Mega form is none of the opposing party's own species: the log can show a Pokemon switched in where the Mega
+    # was with the position's gimmick for a frame (floor 72: Starmie and Reuniclus where Mega Delphox had been)
+    built = {foe["species"] for foe in run["foes"]}
+    run["megas"] = [m for m in run["megas"] if m["species"] not in built]
     return run
 
 

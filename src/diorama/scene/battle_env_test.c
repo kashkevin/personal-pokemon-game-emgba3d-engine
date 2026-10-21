@@ -32,6 +32,7 @@
 #include "overworld.h"
 #include "palette.h"
 #include "party_menu.h"
+#include "constants/party_menu.h"
 #include "pokemon.h"
 #include "safari_zone.h"
 #include "save.h"
@@ -115,6 +116,8 @@ static struct
     int fightSeconds;
     unsigned int fightStartMs;
     bool fightOver;
+    unsigned short fightButton;   /* the fight's press in progress (A, or B / DOWN on a forced switch's party screen) */
+    unsigned int partySteps;      /* presses made on a forced switch's party screen */
     /* PKMN_TEST_STRONG=1: the party at level 100 and healed, once, when the field is up */
     bool strong, strengthened;
     /* PKMN_TEST_WARP=GROUP:NUM:WARP[:X:Y]: first warp there, as the debug menu's "Warp to map
@@ -2155,13 +2158,39 @@ static void ParadeTick(void)
     TestLog("Battle env test: parade species %u", species);
 }
 
-/* PKMN_TEST_TOWER_WIN (a test advantage, in memory only, for a Tower floor's won run): at each of the player's turns
- * the lead's HP is full again, its Attack, Defense, Speed, Sp. Atk, Sp. Def and accuracy stages are +6 (a set-up
- * opponent such as Floor 100's Curse Snorlax cannot knock it out between two of its turns: the autopilot cannot choose
- * a replacement) and the move cursor is on its move that does most against the opposing Pokemon (type effectiveness x
- * power; immunities count as nothing) - or on Protect while the opposing Pokemon holds a Mega Stone it has not used,
- * so it acts and Mega Evolves. The battle itself - the AI's turns, damage, switches, Mega Evolution, the end - is the
- * game's own. */
+/* What a move does against the opposing Pokemon as the battle has it (TowerWinTurn's choice): its power times the type
+ * chart's multiplier with the Pokemon's Ability and held item (Levitate or an Air Balloon against Ground, Wonder Guard:
+ * nothing; floor 88's Gengar stalled a run that chose Earthquake on the chart alone), nothing when its Ability takes the
+ * move's type (Flash Fire, Well-Baked Body, Earth Eater). Reads the battle only (no flags updated). */
+static u32 TowerWinScore(u32 player, u32 foe, enum Move move)
+{
+    struct DamageContext ctx = {0};
+    enum Ability ability = gBattleMons[foe].ability;
+
+    ctx.battlerAtk = player;
+    ctx.battlerDef = foe;
+    ctx.move = ctx.chosenMove = ctx.baseMove = move;
+    ctx.moveType = GetMoveType(move);
+    ctx.updateFlags = FALSE;
+    ctx.abilities[player] = gBattleMons[player].ability;
+    ctx.abilities[foe] = ability;
+    ctx.holdEffects[player] = GetItemHoldEffect(gBattleMons[player].item);
+    ctx.holdEffects[foe] = GetItemHoldEffect(gBattleMons[foe].item);
+    if ((ctx.moveType == TYPE_FIRE && (ability == ABILITY_FLASH_FIRE || ability == ABILITY_WELL_BAKED_BODY))
+     || (ctx.moveType == TYPE_GROUND && ability == ABILITY_EARTH_EATER))
+        return 0;
+    return GetMovePower(move) * CalcTypeEffectivenessMultiplier(&ctx) / UQ_4_12(1.0);
+}
+
+/* PKMN_TEST_TOWER_WIN (a test advantage, in memory only, for a Tower floor's won run; solo Tower battles only - a Duo
+ * is a link battle that both games must compute alike): at each of the player's turns the lead's HP is full again, its
+ * Attack, Defense, Speed, Sp. Atk, Sp. Def and accuracy stages are +6 (a set-up opponent such as Floor 100's Curse
+ * Snorlax cannot knock it out between two of its turns; one that still faints, to a critical hit, is replaced through
+ * the party screen: ForcedSwitchOnFainted) and the move cursor is on its move that does most against the opposing
+ * Pokemon (TowerWinScore) - or on Protect while the opposing
+ * Pokemon holds a Mega Stone it has not used, so it acts and Mega Evolves (DioramaBattleEnvTest_HoldOnForMega keeps
+ * one that came in during the turn from fainting first). The battle itself - the AI's turns, damage, switches, Mega
+ * Evolution, the end - is the game's own. */
 static void TowerWinTurn(void)
 {
     static const u16 sCoverage[MAX_MON_MOVES] = {MOVE_ICE_BEAM, MOVE_FLAMETHROWER, MOVE_SHADOW_BALL, MOVE_EARTHQUAKE};
@@ -2192,8 +2221,7 @@ static void TowerWinTurn(void)
 
         if (move == MOVE_NONE || GetMoveCategory(move) == DAMAGE_CATEGORY_STATUS || gBattleMons[player].pp[i] == 0)
             continue;
-        score = GetMovePower(move) * GetTypeModifier(GetMoveType(move), gBattleMons[foe].types[0]) / UQ_4_12(1.0)
-              * GetTypeModifier(GetMoveType(move), gBattleMons[foe].types[1]) / UQ_4_12(1.0);
+        score = TowerWinScore(player, foe, move);
         if (score > bestScore)
         {
             bestScore = score;
@@ -2203,13 +2231,28 @@ static void TowerWinTurn(void)
     gMoveSelectionCursor[player] = best;
 }
 
+/* PKMN_TEST_TOWER_WIN, from GetAdjustedDamage (a hit that would knock the battler out): an opposing Pokemon that can
+ * still Mega Evolve (its Mega Stone unused, its trainer's Mega Evolution not spent) holds on with 1 HP, as Endure
+ * does, so it chooses a move and Mega Evolves before it can faint - one the AI switched in just before the test
+ * Pokemon's attack fainted before it ever acted (floor 58's Absol and floor 88's Chandelure in check-full-1). Solo
+ * Tower battles only. */
+bool DioramaBattleEnvTest_HoldOnForMega(unsigned battler)
+{
+    if (!s.init || !s.towerWin || TowerLegends_ActiveMode() != TOWER_MODE_SOLO || battler >= gBattlersCount
+     || GetBattlerSide(battler) != B_SIDE_OPPONENT || !CanMegaEvolve(battler))
+        return false;
+    TestLog("Battle env test: tower win: battler %u species %u holds on to Mega Evolve", battler,
+            gBattleMons[battler].species);
+    return true;
+}
+
 void DioramaBattleEnvTest_OnActionMenu(void)
 {
     if (!s.init)
         Init();
     if (s.towerFloor > 0 && !s.towerLogged && TowerLegends_IsBattleActive())
         TowerLogParty();
-    if (s.towerWin && TowerLegends_IsBattleActive())
+    if (s.towerWin && TowerLegends_ActiveMode() == TOWER_MODE_SOLO)
         TowerWinTurn();
     if (s.stem[0] != '\0' || s.fightSeconds > 0)
         SDL_AtomicSet(&s.menuSeen, 1);
@@ -2280,6 +2323,21 @@ void DioramaBattleEnvTest_Watchdog(unsigned int nowMs)
         fclose(sLogFile);
     fflush(NULL);
     _exit(7);
+}
+
+/* The party screen of a battle's forced switch (the player's Pokemon fainted) with its cursor on a Pokemon that cannot
+ * battle: the fight's A there only says so, so the autopilot presses B (that message, or nothing: the screen cannot be
+ * left) and DOWN instead, then A on the next one that can (its SHIFT). */
+static bool ForcedSwitchOnFainted(void)
+{
+    s8 slot = gPartyMenu.slotId;
+
+    return gMain.inBattle && gMain.callback2 != BattleMainCB2
+        && gPartyMenu.exitCallback == CB2_SetUpReshowBattleScreenAfterMenu
+        && (gPartyMenu.action == PARTY_ACTION_SEND_OUT || gPartyMenu.action == PARTY_ACTION_CHOOSE_FAINTED_MON)
+        && slot >= 0 && slot < PARTY_SIZE
+        && (GetMonData(&gParties[B_TRAINER_PLAYER][slot], MON_DATA_SPECIES) == SPECIES_NONE
+         || GetMonData(&gParties[B_TRAINER_PLAYER][slot], MON_DATA_HP) == 0);
 }
 
 unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int nowMs)
@@ -2394,16 +2452,19 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
         if (s.pressLeft > 0)
         {
             s.pressLeft--;
-            return keys | A_BUTTON;
+            return keys | s.fightButton;
         }
         if (s.gapLeft > 0)
         {
             s.gapLeft--;
             return keys;
         }
+        s.fightButton = A_BUTTON;
+        if (ForcedSwitchOnFainted())
+            s.fightButton = s.partySteps++ % 2 == 0 ? B_BUTTON : DPAD_DOWN;
         s.pressLeft = AUTOPILOT_HOLD - 1;
         s.gapLeft = AUTOPILOT_HOLD * 2;
-        return keys | A_BUTTON;
+        return keys | s.fightButton;
     }
     if (!s.autopilot || SDL_AtomicGet(&s.menuSeen) != 0)
         return keys;

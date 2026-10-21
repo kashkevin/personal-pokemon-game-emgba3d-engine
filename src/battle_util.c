@@ -8,6 +8,9 @@
 #include "battle_pyramid.h"
 #include "battle_util.h"
 #include "battle_ffa.h"
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+#include "diorama/battle_env_test.h"
+#endif
 #line 10 // gba-line
 #include "battle_controllers.h"
 #include "battle_interface.h"
@@ -8206,6 +8209,12 @@ s32 GetAdjustedDamage(struct DamageContext *ctx, s32 damage)
     u32 rand = Random() % 100;
     u32 affectionScore = GetBattlerAffectionHearts(ctx->battlerDef);
 
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+    if (DioramaBattleEnvTest_HoldOnForMega(ctx->battlerDef)) // test builds only: a Tower floor's won run (battle_env_test.h)
+        enduredHit = TRUE;
+    else
+#endif
+#line 8090 // gba-line
     if (gBattleMons[ctx->battlerDef].volatiles.endured)
     {
         enduredHit = TRUE;
