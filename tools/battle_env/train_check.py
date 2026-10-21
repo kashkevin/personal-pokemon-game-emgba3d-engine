@@ -27,7 +27,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from mega_check import driver_lines, finish, make_save, numbers, save_keys, start  # noqa: E402
+from mega_check import driver_lines, finish, make_save, numbers, start  # noqa: E402
 
 SPECIES_BULBASAUR = 1
 ITEM_BOTTLE_CAP, ITEM_GOLD_BOTTLE_CAP, ITEM_ABILITY_PATCH = 133, 134, 80
@@ -54,17 +54,30 @@ PATCH = USE_THIRD + ["640:A", "800:A", "940:B", "1020:B"]
 PATCH_AFTER_GOLD = USE_SECOND + ["640:A", "800:A", "940:B", "1020:B"]   # the Gold Bottle Cap gone: the patch is second
 
 
+def save_keys(start):
+    """START > SAVE > YES (mega_check.py's save_keys), from the start menu's cursor where the Bag left it: BAG, two rows
+    above SAVE."""
+    return [f"{start + f}:{k}" for f, k in ((0, "START"), (50, "DOWN"), (80, "DOWN"), (160, "A"), (260, "A"), (380, "A"),
+                                            (700, "B"))]
+
+
 def train_lines(lines):
-    """The "train field" lines after the field keys began, each (species, ivs[6], trained, ability, num, caps, gold,
+    """The states the "train field" lines logged from the field keys' start: the last one before them (a loaded save's
+    state is logged as the field comes up), then each change; each (species, ivs[6], trained, ability, num, caps, gold,
     patches)."""
-    begun = next((i for i, line in enumerate(lines) if line.startswith("field keys for ")), None)
-    out = []
-    for line in lines[(begun or 0):]:
+    begun = next((i for i, line in enumerate(lines) if line.startswith("field keys for ")), len(lines))
+    states = []
+    for i, line in enumerate(lines):
         if line.startswith("train field: "):
             n = numbers(line)
-            out.append(dict(species=n[0], ivs=n[1:7], trained=n[7], ability=n[8], num=n[9], caps=n[10], gold=n[11],
-                            patches=n[12]))
-    return out
+            state = dict(species=n[0], ivs=n[1:7], trained=n[7], ability=n[8], num=n[9], caps=n[10], gold=n[11],
+                         patches=n[12])
+            if i < begun:
+                # only the last state before the keys, and one with a party (PKMN_TEST_PARTY's comes with the keys)
+                states[:] = [state] if state["species"] else []
+            else:
+                states.append(state)
+    return states
 
 
 def main():
