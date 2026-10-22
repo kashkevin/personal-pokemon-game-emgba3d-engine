@@ -33,6 +33,8 @@
 #include "palette.h"
 #include "party_menu.h"
 #include "daycare.h"
+#include "pokedex.h"
+#include "pokemon_storage_system.h"
 #include "constants/party_menu.h"
 #include "pokemon.h"
 #include "safari_zone.h"
@@ -207,7 +209,7 @@ static struct
     bool eggReady, breedLog, breedLogged;
     int eggCycles;
     char breedSeen[PARTY_SIZE][192];
-    int breedStateSeen[3];
+    int breedStateSeen[5];
     /* PKMN_TEST_BAG_LOG=item[,item...] (at most 4): on the field, "bag field: money M item I count C ..." whenever the
        money or one of those items' count in the Bag changes (tools/battle_env/shop_check.py: a Poke Mart's purchase and
        sale, saved and loaded); what was last logged */
@@ -1014,13 +1016,14 @@ static void BagLogField(void)
 
 /* PKMN_TEST_BREED_LOG off a battle: "breed party N: species S egg E level L ivs a,b,c,d,e,f nature T num A ball B
  * moves m1,m2,m3,m4 cycles C" for each party slot whose line changed (the nature its personality's: what an Everstone
- * passes on; cycles: an Egg's cycles left), and "breed state: party N daycare D egg waiting W" when those change.
+ * passes on; cycles: an Egg's cycles left), and "breed state: party N daycare D egg waiting W boxes B dex caught C"
+ * when those change (B: the PC's Pokemon, Eggs aside; C: the species the Pokedex counts as caught - a catch check).
  * PKMN_TEST_EGG_CYCLES=n: an Egg in the party with more cycles left has n (in memory: it hatches after n more cycles
  * of steps, the next cycle's end with 0). */
 static void BreedLogField(void)
 {
     char line[192];
-    int state[3];
+    int state[5];
 
     if (!s.breedLog || gMain.inBattle || SDL_AtomicGet(&s.fieldSeen) == 0 || gSaveBlock1Ptr == NULL)
         return;
@@ -1058,10 +1061,13 @@ static void BreedLogField(void)
     state[0] = gPartiesCount[B_TRAINER_PLAYER];
     state[1] = CountPokemonInDaycare(&gSaveBlock1Ptr->daycare);
     state[2] = FlagGet(FLAG_PENDING_DAYCARE_EGG);
+    state[3] = (int)CountStorageNonEggMons();
+    state[4] = GetNationalPokedexCount(FLAG_GET_CAUGHT);
     if (!s.breedLogged || memcmp(state, s.breedStateSeen, sizeof(state)) != 0)
     {
         memcpy(s.breedStateSeen, state, sizeof(state));
-        TestLog("Battle env test: breed state: party %d daycare %d egg waiting %d", state[0], state[1], state[2]);
+        TestLog("Battle env test: breed state: party %d daycare %d egg waiting %d boxes %d dex caught %d", state[0],
+                state[1], state[2], state[3], state[4]);
     }
     s.breedLogged = true;
 }
