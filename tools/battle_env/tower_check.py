@@ -21,7 +21,7 @@ check of every run passed; the report is OUT/tower_check.json and a floor-by-flo
 experience cap's cases instead (CAP_CASES; OUT/tower_caps.json).
 
     tools/battle_env/tower_check.py --exe ./pokeemerald-mp-bfxtest --save town.sav --out build/tower-check \\
-        [--floors 1-100] [--runs won,lost] [--jobs 3] [--speed 4] [--display :99] [--make-save]
+        [--floors 1-100] [--runs won,lost] [--jobs 3] [--speed 4] [--display :99] [--make-save [PATH]]
 """
 import argparse
 import concurrent.futures
@@ -241,14 +241,16 @@ def main():
     parser.add_argument("--runs", default="won,lost")
     parser.add_argument("--jobs", type=int, default=2)
     parser.add_argument("--display", default=os.environ.get("DISPLAY"))
-    parser.add_argument("--make-save", action="store_true")
+    parser.add_argument("--make-save", nargs="?", const="", default=None, metavar="PATH",
+                        help="first make the save (the short introduction) at PATH, or at OUT/made.sav")
     parser.add_argument("--speed", type=int, default=1, help="PKMN_TEST_SPEED: the game's clock this many times as fast")
     parser.add_argument("--caps", action="store_true", help="the experience cap's runs instead of the floors")
     args = parser.parse_args()
     args.exe = os.path.abspath(args.exe)
     os.makedirs(args.out, exist_ok=True)
-    if args.make_save:
-        args.save = make_save(args, os.path.join(args.out, "made.sav"))
+    if args.make_save is not None:
+        args.save = make_save(args, os.path.abspath(args.make_save) if args.make_save
+                              else os.path.join(args.out, "made.sav"))
     if not args.save:
         sys.exit("--save or --make-save")
     args.save = os.path.abspath(args.save)

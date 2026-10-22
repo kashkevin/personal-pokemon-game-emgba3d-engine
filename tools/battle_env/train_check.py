@@ -17,7 +17,7 @@ as the pictures each step takes showed them).
   8. patch-load  that save loaded: slot 0, every stat still trained
 
     tools/battle_env/train_check.py --exe ./pokeemerald-mp-bfxtest --save town.sav --out build/train-check \\
-        [--display :99] [--make-save]
+        [--display :99] [--make-save [PATH]]
 
 Exit 0 when every step gave what it expects; the report is OUT/train_check.json.
 """
@@ -86,12 +86,14 @@ def main():
     parser.add_argument("--save")
     parser.add_argument("--out", required=True)
     parser.add_argument("--display", default=os.environ.get("DISPLAY"))
-    parser.add_argument("--make-save", action="store_true")
+    parser.add_argument("--make-save", nargs="?", const="", default=None, metavar="PATH",
+                        help="first make the save (the short introduction) at PATH, or at OUT/made.sav")
     args = parser.parse_args()
     args.exe = os.path.abspath(args.exe)
     os.makedirs(args.out, exist_ok=True)
-    if args.make_save:
-        args.save = make_save(args, os.path.join(args.out, "made.sav"))
+    if args.make_save is not None:
+        args.save = make_save(args, os.path.abspath(args.make_save) if args.make_save
+                              else os.path.join(args.out, "made.sav"))
     if not args.save:
         sys.exit("--save or --make-save")
     args.save = os.path.abspath(args.save)
