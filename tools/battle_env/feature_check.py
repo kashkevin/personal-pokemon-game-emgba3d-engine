@@ -137,7 +137,7 @@ def main():
     _, _, rows = step("claim-load", claim_save, dict(PKMN_TEST_BATTLE="field:60"))
     if not rows or not torchic_claimed(rows[-1]) or rows[-1]["personality"] != personality or rows[-1]["map"] != lab:
         problems.append(f"claim-load: the saved state is {rows[-1:]}, not the claimed Torchic (personality {personality})")
-    # 6. rerolls: claim, START > PLAYER > RESET, YES - again and again from the lab save, in one process
+    # 6. rerolls: claim, the soft reset key (MS-61), YES - again and again from the lab save, in one process
     reset_at = AFTER_CLAIM
     _, lines, _ = step("rerolls", lab_save, dict(PKMN_TEST_BATTLE=f"field:{reset_at + 700}",
                                                  PKMN_TEST_SOFT_RESET=str(args.rerolls),

@@ -336,10 +336,9 @@ def save_keys(start):
 
 
 def reset_keys(start):
-    """START > PLAYER (the third row) > RESET (its list ends with RESET, BACK: Up twice from the top), then YES (the
-    question's cursor starts on NO): tools/pc_port/soft_reset_check.py's reset_keys(start, True, 2)."""
-    return [f"{start + f}:{k}" for f, k in ((0, "START"), (60, "DOWN"), (100, "DOWN"), (140, "A"), (200, "UP"),
-                                            (240, "UP"), (280, "A"), (400, "UP"), (440, "A"))]
+    """MS-61: the soft reset key (A+B+START+SELECT together, as Ctrl+R sends them), then YES (the question's cursor starts
+    on NO): tools/pc_port/soft_reset_check.py's reset_keys(start, True)."""
+    return [f"{start}:{k}" for k in ("A", "B", "START", "SELECT")] + [f"{start + 120}:UP", f"{start + 160}:A"]
 
 
 # The purchases (PKMN_TEST_WARP to the shop, the player facing down): a tap turns to face the clerk across the counter,
