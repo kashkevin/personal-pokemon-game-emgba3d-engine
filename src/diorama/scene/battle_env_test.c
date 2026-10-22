@@ -32,6 +32,7 @@
 #include "overworld.h"
 #include "palette.h"
 #include "party_menu.h"
+#include "daycare.h"
 #include "constants/party_menu.h"
 #include "pokemon.h"
 #include "safari_zone.h"
@@ -162,7 +163,7 @@ static struct
     int paradeHolder;
     /* PKMN_TEST_BATTLE=field:<frames> with PKMN_TEST_FIELD_KEYS: keys on the field instead of a battle, then the end;
      * with PKMN_TEST_MEGA_LOG what was last logged of the lead's item and the bag's Mega Stones */
-    char fieldKeys[512];
+    char fieldKeys[8192];     /* longer PKMN_TEST_FIELD_KEYS: refused (logged), never cut short */
     int fieldKeyFrames, fieldEnd;
     bool fieldKeysActive;
     /* PKMN_TEST_FIELD_SHOTS=frame,...: pictures <PKMN_TEST_MEGA_SHOT_STEM>-NN (NN 50 on) at those field-key frames
@@ -199,6 +200,14 @@ static struct
      * Bag's caps and patches change (TrainLogField); what was last logged */
     bool trainLog, trainLogged;
     int trainSeen[13];
+    /* PKMN_TEST_DAYCARE="spec;spec": the two Pokemon at the Day Care; PKMN_TEST_EGG_READY=1: an Egg of theirs waiting;
+       PKMN_TEST_EGG_CYCLES=n: a party Egg with more cycles left has n; PKMN_TEST_BREED_LOG=1: "breed ..." lines
+       (tools/battle_env/breed_check.py) */
+    char daycare[256];
+    bool eggReady, breedLog, breedLogged;
+    int eggCycles;
+    char breedSeen[PARTY_SIZE][192];
+    int breedStateSeen[3];
 } s;
 
 /* PKMN_TEST_LOG=<file>: every line the driver logs is also appended to that file (a check on Windows reads it: the
@@ -334,8 +343,13 @@ static void Init(void)
     if (value != NULL)
         SDL_strlcpy(s.name, value, sizeof(s.name));
     value = SDL_getenv("PKMN_TEST_FIELD_KEYS");
-    if (value != NULL)
-        SDL_strlcpy(s.fieldKeys, value, sizeof(s.fieldKeys));
+    if (value != NULL && SDL_strlcpy(s.fieldKeys, value, sizeof(s.fieldKeys)) >= sizeof(s.fieldKeys))
+    {
+        /* a script cut short would drop its last keys without a word (breed_check.py's hatch walk did) */
+        TestLog("Battle env test: cannot read PKMN_TEST_FIELD_KEYS: %u characters, at most %u",
+                (unsigned)SDL_strlen(value), (unsigned)sizeof(s.fieldKeys) - 1);
+        s.fieldKeys[0] = '\0';
+    }
     value = SDL_getenv("PKMN_TEST_FIELD_SHOTS");
     for (const char *p = value; p != NULL && *p != '\0' && s.fieldShotCount < 16; p = strchr(p, ','), p = p ? p + 1 : p)
         s.fieldShots[s.fieldShotCount++] = atoi(p);
@@ -402,6 +416,12 @@ static void Init(void)
     s.softReset = s.softResets > 0;
     s.starterLog = EnvInt("PKMN_TEST_STARTER_LOG", 0) != 0;
     s.trainLog = EnvInt("PKMN_TEST_TRAIN_LOG", 0) != 0;
+    value = SDL_getenv("PKMN_TEST_DAYCARE");
+    if (value != NULL)
+        snprintf(s.daycare, sizeof(s.daycare), "%s", value);
+    s.eggReady = EnvInt("PKMN_TEST_EGG_READY", 0) != 0;
+    s.eggCycles = EnvInt("PKMN_TEST_EGG_CYCLES", -1);
+    s.breedLog = EnvInt("PKMN_TEST_BREED_LOG", 0) != 0;
     s.fieldAfter = EnvInt("PKMN_TEST_FIELD_AFTER", 0);
     if (s.megaLog)
         ListMegaStoneHolders();     /* the stones MegaLogField counts */
@@ -452,11 +472,12 @@ static void Init(void)
  * A Pokemon for the sprite tests, with what its picture depends on chosen: flags are letters
  * after the level - s shiny, f female, m male, i<item id> held item. The personality comes from a
  * fixed search, not the random number generator. v<move id>: that move in the first slot.
+ * n<nature>: a personality of that nature too; b<ball>: caught in that ball (breed_check.py's parents).
  */
 static void CreateTestMon(struct Pokemon *mon, int species, int level, const char *flags)
 {
     u32 personality = 0x13579BDF, i;
-    int gender = -1, item = 0, move = 0, ivs = MAX_PER_STAT_IVS;
+    int gender = -1, item = 0, move = 0, ivs = MAX_PER_STAT_IVS, nature = -1, ball = 0;
     bool shiny = false, nextLevelShort = false;
 
     for (; flags != NULL && *flags != '\0' && *flags != ',' && *flags != ';'; flags++)
@@ -475,8 +496,13 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
             ivs = atoi(flags + 1);
         else if (*flags == 'e')
             nextLevelShort = true;
+        else if (*flags == 'n')
+            nature = atoi(flags + 1);
+        else if (*flags == 'b')
+            ball = atoi(flags + 1);
     }
-    for (i = 0; i < 4096 && gender >= 0 && GetGenderFromSpeciesAndPersonality(species, personality) != gender; i++)
+    for (i = 0; i < 65536 && ((gender >= 0 && GetGenderFromSpeciesAndPersonality(species, personality) != gender)
+                             || (nature >= 0 && GetNatureFromPersonality(personality) != (u32)nature)); i++)
         personality += 0x9E3779B1;
     CreateMonWithIVs(mon, species, level > 0 ? level : 30, personality, OTID_STRUCT_PLAYER_ID,
                      ivs >= 0 && ivs <= MAX_PER_STAT_IVS ? ivs : MAX_PER_STAT_IVS);
@@ -495,6 +521,12 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
     }
     if (move > 0)
         SetMonMoveSlot(mon, move, 0);
+    if (ball > 0)
+    {
+        u8 caughtIn = ball;
+
+        SetMonData(mon, MON_DATA_POKEBALL, &caughtIn);
+    }
     if (nextLevelShort && level > 0 && level < MAX_LEVEL)
     {
         /* e: one experience point short of the next level (the Tower experience cap's runs) */
@@ -535,6 +567,44 @@ static void SetUpTestParty(void)
     }
     CalculatePlayerPartyCount();
     FlagSet(FLAG_SYS_POKEMON_GET);  /* as any player with a Pokemon: the start menu offers POKeMON */
+}
+
+/* PKMN_TEST_DAYCARE="species:level[:flags];species:level[:flags]": the two Pokemon left at the Day Care (Route 117) as
+ * the Day Care lady stores them; PKMN_TEST_EGG_READY=1: an Egg of theirs made now, waiting with the Day Care man, as a
+ * step check that passed would make it (daycare.c MPDaycare_TestProduceEgg). Test builds only. */
+void MPDaycare_TestProduceEgg(void);
+
+static void SetUpTestDaycare(void)
+{
+    const char *p = s.daycare;
+    int slot = 0;
+
+    if (s.daycare[0] == '\0')
+        return;
+    while (*p != '\0' && slot < DAYCARE_MON_COUNT)
+    {
+        struct Pokemon mon;
+        int species = 0, level = 0, used = 0;
+        const char *flags = NULL;
+
+        if (sscanf(p, "%d:%d%n", &species, &level, &used) < 2)
+            break;
+        p += used;
+        if (*p == ':')
+            flags = ++p;
+        CreateTestMon(&mon, species, level, flags);
+        StorePokemonInDaycare(&mon, &gSaveBlock1Ptr->daycare.mons[slot++]);
+        while (*p != '\0' && *p != ';')
+            p++;
+        if (*p == ';')
+            p++;
+    }
+    TestLog("Battle env test: breed daycare: %d Pokemon at the Day Care", CountPokemonInDaycare(&gSaveBlock1Ptr->daycare));
+    if (s.eggReady)
+    {
+        MPDaycare_TestProduceEgg();
+        TestLog("Battle env test: breed daycare: an Egg waits %d", FlagGet(FLAG_PENDING_DAYCARE_EGG));
+    }
 }
 
 /* "item:count,..." */
@@ -897,6 +967,60 @@ static void TrainLogField(void)
             now[0], now[1], now[2], now[3], now[4], now[5], now[6], now[7], now[8], now[9], now[10], now[11], now[12]);
 }
 
+/* PKMN_TEST_BREED_LOG off a battle: "breed party N: species S egg E level L ivs a,b,c,d,e,f nature T num A ball B
+ * moves m1,m2,m3,m4 cycles C" for each party slot whose line changed (the nature its personality's: what an Everstone
+ * passes on; cycles: an Egg's cycles left), and "breed state: party N daycare D egg waiting W" when those change.
+ * PKMN_TEST_EGG_CYCLES=n: an Egg in the party with more cycles left has n (in memory: it hatches after n more cycles
+ * of steps, the next cycle's end with 0). */
+static void BreedLogField(void)
+{
+    char line[192];
+    int state[3];
+
+    if (!s.breedLog || gMain.inBattle || SDL_AtomicGet(&s.fieldSeen) == 0 || gSaveBlock1Ptr == NULL)
+        return;
+    for (int i = 0; i < PARTY_SIZE; i++)
+    {
+        struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][i];
+        int species = i < gPartiesCount[B_TRAINER_PLAYER] ? (int)GetMonData(mon, MON_DATA_SPECIES) : 0;
+        int egg = species != 0 && GetMonData(mon, MON_DATA_IS_EGG);
+        u32 cycles = species != 0 ? GetMonData(mon, MON_DATA_FRIENDSHIP) : 0;
+
+        if (egg && s.eggCycles >= 0 && cycles > (u32)s.eggCycles)
+        {
+            cycles = s.eggCycles;
+            SetMonData(mon, MON_DATA_FRIENDSHIP, &cycles);
+        }
+        if (species == 0)
+            snprintf(line, sizeof(line), "none");
+        else
+            snprintf(line, sizeof(line), "species %d egg %d level %d ivs %d,%d,%d,%d,%d,%d nature %d num %d ball %d "
+                     "moves %d,%d,%d,%d cycles %u", species, egg, (int)GetMonData(mon, MON_DATA_LEVEL),
+                     (int)GetMonData(mon, MON_DATA_HP_IV), (int)GetMonData(mon, MON_DATA_ATK_IV),
+                     (int)GetMonData(mon, MON_DATA_DEF_IV), (int)GetMonData(mon, MON_DATA_SPEED_IV),
+                     (int)GetMonData(mon, MON_DATA_SPATK_IV), (int)GetMonData(mon, MON_DATA_SPDEF_IV),
+                     (int)GetNatureFromPersonality(GetMonData(mon, MON_DATA_PERSONALITY)),
+                     (int)GetMonData(mon, MON_DATA_ABILITY_NUM), (int)GetMonData(mon, MON_DATA_POKEBALL),
+                     (int)GetMonData(mon, MON_DATA_MOVE1), (int)GetMonData(mon, MON_DATA_MOVE2),
+                     (int)GetMonData(mon, MON_DATA_MOVE3), (int)GetMonData(mon, MON_DATA_MOVE4), cycles);
+        if (!s.breedLogged || strcmp(line, s.breedSeen[i]) != 0)
+        {
+            snprintf(s.breedSeen[i], sizeof(s.breedSeen[i]), "%s", line);
+            if (species != 0 || s.breedLogged)
+                TestLog("Battle env test: breed party %d: %s", i, line);
+        }
+    }
+    state[0] = gPartiesCount[B_TRAINER_PLAYER];
+    state[1] = CountPokemonInDaycare(&gSaveBlock1Ptr->daycare);
+    state[2] = FlagGet(FLAG_PENDING_DAYCARE_EGG);
+    if (!s.breedLogged || memcmp(state, s.breedStateSeen, sizeof(state)) != 0)
+    {
+        memcpy(s.breedStateSeen, state, sizeof(state));
+        TestLog("Battle env test: breed state: party %d daycare %d egg waiting %d", state[0], state[1], state[2]);
+    }
+    s.breedLogged = true;
+}
+
 static void MegaLogAfter(void)
 {
     struct Pokemon *lead = &gParties[B_TRAINER_PLAYER][0];
@@ -1053,6 +1177,7 @@ static void StartBattle(void)
             gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum,
             gSaveBlock1Ptr->pos.x, gSaveBlock1Ptr->pos.y);
     SetUpTestParty();
+    SetUpTestDaycare();
     if (s.name[0] != '\0')
     {
         u32 i;
@@ -2351,6 +2476,7 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
     MegaLogField();
     StarterLogField();
     TrainLogField();
+    BreedLogField();
     ShotTick();
     /* PKMN_TEST_PLAN: once the autopilot brought the field up, the plan's keys alone */
     if (sPlan.phase != PLAN_OFF && SDL_AtomicGet(&s.fieldSeen) != 0)

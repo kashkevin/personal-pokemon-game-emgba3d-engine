@@ -1049,6 +1049,15 @@ static void MPDaycare_ProduceEgg(struct DayCare *daycare)
     if (MPDaycare_QueuePush(&egg))
         FlagSet(FLAG_PENDING_DAYCARE_EGG);
 }
+
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+// Test builds only (tools/battle_env/breed_check.py, PKMN_TEST_EGG_READY): an Egg of the Day Care's two Pokemon made now
+// and waiting with the Day Care man, as a step check that passed would make it.
+void MPDaycare_TestProduceEgg(void)
+{
+    MPDaycare_ProduceEgg(&gSaveBlock1Ptr->daycare);
+}
+#endif
 #endif
 #line 994 // gba-line
 static void _GiveEggFromDaycare(struct DayCare *daycare)
