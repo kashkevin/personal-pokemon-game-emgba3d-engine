@@ -23,9 +23,16 @@ must be true:
 
     tools/pc_port/rival_check.py [--binary ./pokeemerald-mp] [--only name,name]
 
-Needs xvfb-run. A simulation on a software display with a simulated host record: no real host, network or PC.
+Needs xvfb-run on Linux. A simulation with a simulated host record: no real host or network. On Windows (a Windows game
+process; the windows-package workflow's rival-check job) the game writes its output into a file (PKMN_DEBUG_LOG, as
+Windows gives a game started by a script no readable output), and the flag and variable numbers come from a facts file
+the engine job writes with this script (--write-facts; the runner has no engine headers or compiler):
+
+    python3 tools/pc_port/rival_check.py --write-facts rival-facts.json
+    python rival_check.py --binary pokeemerald-mp.exe --facts rival-facts.json --keep-logs logs
 """
 import argparse
+import json
 import os
 import re
 import shutil
@@ -33,6 +40,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 LINE = re.compile(r"rival (\d+): map (\d+)\.(\d+) (-?\d+),(-?\d+) dir (\d+) \| battle (\d+) env (\d+) trainer (\d+) \| "
@@ -64,17 +72,49 @@ def constants():
     return Lazy()
 
 
-C = constants()
-
-
 def rival_trainers():
     """The May/Brendan trainer IDs of the five rival scenes (include/constants/opponents.h)."""
     text = open(os.path.join(ROOT, "include/constants/opponents.h")).read()
     return {int(v, 0) for v in re.findall(r"#define TRAINER_(?:MAY|BRENDAN)_(?:ROUTE_103|RUSTBORO|ROUTE_110|ROUTE_119|LILYCOVE)_\w+\s+(\d+)", text)}
 
 
-RIVAL_TRAINERS = rival_trainers()
+class Recorded(dict):
+    """The engine's numbers, each remembered as the scenarios ask for it (--write-facts writes those)."""
+
+    def __init__(self, source):
+        super().__init__()
+        self.source = source
+
+    def __missing__(self, name):
+        self[name] = self.source[name]
+        return self[name]
+
+
+C, RIVAL_TRAINERS = None, None     # main(): from the engine's headers, or from a facts file
 DOWN, NORTH = 1, 2
+
+
+def load_facts(path):
+    """C and RIVAL_TRAINERS from the engine (gcc on its headers) or from a facts file of --write-facts."""
+    global C, RIVAL_TRAINERS
+    if path:
+        with open(path, encoding="utf-8") as handle:
+            facts = json.load(handle)
+        C, RIVAL_TRAINERS = dict(facts["constants"]), set(facts["rival_trainers"])
+    else:
+        C, RIVAL_TRAINERS = Recorded(constants()), rival_trainers()
+
+
+def write_facts(path):
+    """Every flag and variable number the scenarios use, and the rival trainers, as the engine compiles them."""
+    load_facts(None)
+    scenarios()                                   # asks for each number it needs
+    with open(os.path.abspath(__file__), encoding="utf-8") as handle:   # and those only the checks ask for
+        for name in re.findall(r"[\"']((?:VAR|FLAG)_[A-Z0-9_]+)[\"']", handle.read()):
+            C[name]
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump({"constants": dict(sorted(C.items())), "rival_trainers": sorted(RIVAL_TRAINERS)}, handle, indent=1)
+    print(f"rival_check: {len(C)} numbers and {len(RIVAL_TRAINERS)} rival trainers written to {path}")
 
 
 def ref(name):
@@ -120,23 +160,30 @@ class Run:
         return any(text in line for line in self.lines)
 
 
-def run(binary, env, keys, timeout, save):
+def past(line, last_key):
+    """A frame line well after the last key press: the scenario has played out."""
+    match = re.search(r"game frame (\d+):|rival (\d+):", line)
+    return bool(match) and int(match.group(1) or match.group(2)) > last_key + 240
+
+
+def run(binary, env, keys, timeout, save, log_file=False):
     if len(keys) > 64:  # debug_scene.c MAX_KEYS: later entries would be dropped silently
         raise SystemExit(f"{len(keys)} key entries; the game takes at most 64")
-    xvfb = shutil.which("xvfb-run")
     full = dict(os.environ, PKMN_DEBUG_FRAMES="1", SDL_AUDIODRIVER="dummy", PKMN_DEBUG_KEYS=",".join(keys), **env)
+    last_key = max(int(k.split(":")[0]) for k in keys) if keys else 0
+    if log_file or os.name == "nt":
+        return parse(run_logged(binary, full, last_key, timeout, save))
+    xvfb = shutil.which("xvfb-run")
     cmd = ([xvfb, "-a", "-s", "-screen 0 1280x800x24"] if xvfb and not os.environ.get("DISPLAY") else []) + \
           [os.path.abspath(binary), "--save", save]
     proc = subprocess.Popen(cmd, env=full, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
                             start_new_session=True, cwd=os.path.dirname(save))
     lines, done = [], threading.Event()
-    last_key = max(int(k.split(":")[0]) for k in keys) if keys else 0
 
     def reader():
         for line in proc.stdout:
             lines.append(line.rstrip("\n"))
-            match = re.search(r"game frame (\d+):|rival (\d+):", line)
-            if match and int(match.group(1) or match.group(2)) > last_key + 240:
+            if past(line, last_key):
                 done.set()
 
     thread = threading.Thread(target=reader, daemon=True)
@@ -151,6 +198,38 @@ def run(binary, env, keys, timeout, save):
     except subprocess.TimeoutExpired:
         os.killpg(proc.pid, 9)
     thread.join(5)
+    return parse(lines)
+
+
+def run_logged(binary, env, last_key, timeout, save):
+    """The game's output read from the file it writes it into (PKMN_DEBUG_LOG): the only way on Windows."""
+    log = os.path.join(os.path.dirname(save), "game.log")
+    proc = subprocess.Popen([os.path.abspath(binary), "--save", save], env=dict(env, PKMN_DEBUG_LOG=log),
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=os.path.dirname(save))
+    deadline, lines = time.monotonic() + timeout, []
+    while time.monotonic() < deadline and proc.poll() is None:
+        time.sleep(0.5)
+        lines = read_lines(log)
+        if any(past(line, last_key) for line in lines[-50:]):
+            break
+    proc.terminate()                              # TerminateProcess on Windows, SIGTERM elsewhere
+    try:
+        proc.wait(10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(10)
+    return read_lines(log)
+
+
+def read_lines(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            return handle.read().splitlines()
+    except OSError:
+        return []
+
+
+def parse(lines):
     rows = []
     for line in lines:
         match = LINE.search(line)
@@ -447,7 +526,15 @@ def main():
     parser.add_argument("--only", default="")
     parser.add_argument("--timeout", type=float, default=90)
     parser.add_argument("--keep-logs", default="")
+    parser.add_argument("--facts", default="", help="the engine's numbers from --write-facts (no engine headers here)")
+    parser.add_argument("--write-facts", default="", metavar="PATH", help="write the facts file and stop")
+    parser.add_argument("--log-file", action="store_true",
+                        help="read the game's output from its PKMN_DEBUG_LOG file (always so on Windows)")
     args = parser.parse_args()
+    if args.write_facts:
+        write_facts(args.write_facts)
+        return 0
+    load_facts(args.facts)
     only = set(filter(None, args.only.split(",")))
     failures = 0
     for name, what, env, keys, check in scenarios():
@@ -455,7 +542,7 @@ def main():
             continue
         with tempfile.TemporaryDirectory() as folder:
             save = os.path.join(folder, "check.sav")
-            result = run(args.binary, env, keys, args.timeout, save)
+            result = run(args.binary, env, keys, args.timeout, save, log_file=args.log_file)
             if args.keep_logs:
                 os.makedirs(args.keep_logs, exist_ok=True)
                 with open(os.path.join(args.keep_logs, name + ".log"), "w") as log:

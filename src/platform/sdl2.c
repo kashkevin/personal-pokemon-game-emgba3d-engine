@@ -7,8 +7,10 @@
 #include <time.h>
 #ifdef _WIN32
 #include <direct.h>
+#include <io.h>
 #else
 #include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 #ifdef _WIN32
@@ -578,6 +580,34 @@ static int ReportGraphicsFailure(const char *reason, const char *detail)
     return EXIT_GRAPHICS_UNAVAILABLE;
 }
 
+// A development aid (PKMN_DEBUG_LOG=FILE): the game's console output (stdout, stderr and SDL's log) goes into FILE, and on
+// Windows no console window opens. A script that started the game reads what it printed there: Windows gives a game started
+// that way no readable output (tools/pc_port/rival_check.py). Without the variable nothing changes.
+static void LogToStderr(void *userdata, int category, SDL_LogPriority priority, const char *message)
+{
+    (void)userdata;
+    (void)category;
+    (void)priority;
+    fprintf(stderr, "%s\n", message);
+}
+
+static bool OpenDebugLog(void)
+{
+    const char *path = getenv("PKMN_DEBUG_LOG");
+
+    if (path == NULL || path[0] == '\0' || freopen(path, "w", stdout) == NULL)
+        return false;
+#ifdef _WIN32
+    _dup2(_fileno(stdout), _fileno(stderr));
+#else
+    dup2(fileno(stdout), fileno(stderr));
+#endif
+    setvbuf(stdout, NULL, _IONBF, 0); // one file position for both, each line written at once
+    setvbuf(stderr, NULL, _IONBF, 0);
+    SDL_LogSetOutputFunction(LogToStderr, NULL);
+    return true;
+}
+
 int main(int argc, char **argv)
 {
     // PKMN_HIGH_ADDRESS_TEST=1 (Windows): everything after this lies above 2 GB
@@ -597,11 +627,16 @@ int main(int argc, char **argv)
             return ShellMenu_Main(argc, argv);
     }
 
-    // Open an output console on Windows
+    // Open an output console on Windows (none with PKMN_DEBUG_LOG: the output goes into that file)
 #ifdef _WIN32
-    AllocConsole() ;
-    AttachConsole( GetCurrentProcessId() ) ;
-    freopen( "CON", "w", stdout ) ;
+    if (!OpenDebugLog())
+    {
+        AllocConsole() ;
+        AttachConsole( GetCurrentProcessId() ) ;
+        freopen( "CON", "w", stdout ) ;
+    }
+#else
+    OpenDebugLog();
 #endif
 
 #ifdef _WIN32
