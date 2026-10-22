@@ -77,6 +77,9 @@ static const u8 sCheckpoints[] = {10, 20, 25, 30, 40, 50, 60, 70, 75, 80, 90, 10
 static const u8 sExpCaps[NUM_BADGES + 1] = {15, 20, 25, 30, 40, 45, 50, 55, 60};
 
 #define REPOST_FRAMES (60 * 20)
+// A solo command the field never let start is refused well before the host voids its ticket (tower_service.py
+// ISSUED_SECONDS, 120 s from issue): a battle the game began after that would not count.
+#define QUEUE_FRAMES (60 * 45)
 
 static EWRAM_DATA struct
 {
@@ -92,6 +95,7 @@ static EWRAM_DATA struct
     u8 lastHighest;      // the record before that battle
     u8 lastProgress;
     u16 repostTimer;
+    u16 queuedFrames;    // how long the queued solo command has waited for a calm field
     u32 ticket;
     u32 refusedTicket;
     struct TowerLegendsCommand command;
@@ -403,6 +407,7 @@ void TowerLegends_QueueSolo(const struct TowerLegendsCommand *command)
 {
     sTower.command = *command;
     sTower.queued = TRUE;
+    sTower.queuedFrames = 0;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -434,7 +439,7 @@ static void Refuse(u32 ticket, u32 floor, const char *why)
 static bool32 FieldCalm(void)
 {
     return gMain.callback2 == CB2_Overworld && !ScriptContext_IsEnabled() && !ArePlayerFieldControlsLocked()
-        && !gPaletteFade.active && !MultiplayerBattle_IsActive() && !MultiplayerMenu_IsActive();
+        && !gPaletteFade.active && !MultiplayerBattle_IsActive() && !MultiplayerMenu_IsActive() && !MultiplayerSave_IsHeld();
 }
 
 void TowerLegends_Tick(void)
@@ -448,8 +453,18 @@ void TowerLegends_Tick(void)
         TowerLegends_OpenHyperTraining();
         return;
     }
-    if (!sTower.queued || !FieldCalm())
+    if (!sTower.queued)
         return;
+    if (!FieldCalm())
+    {
+        // A field that stays busy (a long script, a menu, the host holding the save) never starts the floor late.
+        if (++sTower.queuedFrames >= QUEUE_FRAMES)
+        {
+            sTower.queued = FALSE;
+            Refuse(sTower.command.ticket, sTower.command.floor, "BATTLE TOWER: the floor did not|start. Choose it again.");
+        }
+        return;
+    }
     sTower.queued = FALSE;
     if (gSaveBlock3Ptr == NULL || sTower.command.tableHash != TOWER_LEGENDS_TABLE_HASH)
         Refuse(sTower.command.ticket, sTower.command.floor, "BATTLE TOWER: this game's floors|differ from the host's.");
@@ -778,6 +793,14 @@ void TowerLegends_TestSaveHeldItems(void)
 void TowerLegends_TestRestoreHeldItems(void)
 {
     RestoreHeldItems();
+}
+
+// A refusal waiting to be posted to the host (its ticket and floor).
+bool32 TowerLegends_TestRefusal(u32 *ticket, u32 *floor)
+{
+    *ticket = sTower.refusedTicket;
+    *floor = sTower.refusedFloor;
+    return sTower.refusedPending;
 }
 
 // A test fixture (the test build's PKMN_TEST_TOWER_RECORD with save:1): the record as a climb that cleared `highest`

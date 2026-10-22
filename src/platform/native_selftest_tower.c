@@ -570,6 +570,28 @@ int NativeSelfTest_Tower(void)
         ZeroPlayerPartyMons();
     }
 
+    // 9. A solo command the field never lets start waits 45 seconds, then is refused (posted to the host) instead of
+    // starting after the host voided its ticket (two minutes: review of 2026-10-21, it waited for ever).
+    {
+        MainCallback field = gMain.callback2;
+        u32 ticket = 0, refusedFloor = 0;
+
+        TowerLegends_TestReset();
+        memset(&command, 0, sizeof(command));
+        command.magic = TOWER_COMMAND_MAGIC; command.ticket = 0x00054321; command.tableHash = TOWER_LEGENDS_TABLE_HASH;
+        command.floor = 7; command.mode = TOWER_COMMAND_MODE_SOLO;
+        gMain.callback2 = NULL;                      // not the overworld: a busy field
+        TowerLegends_QueueSolo(&command);
+        for (i = 0; i < 60 * 45 - 1; i++)
+            TowerLegends_Tick();
+        ExpectTower("a busy field: the queued floor waits", !TowerLegends_TestRefusal(&ticket, &refusedFloor));
+        TowerLegends_Tick();
+        ExpectTower("after 45 seconds it is refused for its ticket and floor",
+                    TowerLegends_TestRefusal(&ticket, &refusedFloor) && ticket == 0x00054321 && refusedFloor == 7);
+        TowerLegends_TestReset();
+        gMain.callback2 = field;
+    }
+
     printf("selftest-tower: %d checks, %d failed\n", sTowerChecks, sTowerFailures);
     return sTowerFailures ? 1 : 0;
 }
