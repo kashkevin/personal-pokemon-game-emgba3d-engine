@@ -149,6 +149,8 @@ void TowerLegends_BufferResult(void);
 // The native self-tests and the test build's driver: a solo floor battle without a host (ticket 0 is never sent).
 bool32 TowerLegends_TestStartSolo(u32 floor);
 void TowerLegends_TestReset(void);
+void TowerLegends_TestSaveHeldItems(void);
+void TowerLegends_TestRestoreHeldItems(void);
 void TowerLegends_TestSetPending(u32 outcome, u32 ticket, u32 floor);
 void TowerLegends_TestSetProgress(u32 highest, u32 progress);
 #endif // PORTABLE

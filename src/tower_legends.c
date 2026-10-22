@@ -97,6 +97,7 @@ static EWRAM_DATA struct
     struct TowerLegendsCommand command;
     u16 heldItems[PARTY_SIZE];
     u32 personalities[PARTY_SIZE];
+    u16 species[PARTY_SIZE]; // before the battle: an evolution after it may have used its held item
 } sTower = {0};
 
 static u32 Crc32(const u8 *data, u32 size)
@@ -477,27 +478,55 @@ static void SaveHeldItems(void)
     {
         sTower.heldItems[i] = GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_HELD_ITEM);
         sTower.personalities[i] = GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_PERSONALITY);
+        sTower.species[i] = GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_SPECIES);
     }
 }
 
+// The evolution from `from` to `to` needs `item` held, and so took it (IF_HOLD_ITEM: Gligar's Razor Fang at night).
+static bool32 EvolutionTookItem(u32 from, u32 to, u32 item)
+{
+    const struct Evolution *evolutions = GetSpeciesEvolutions(from);
+    u32 i, j;
+
+    if (evolutions == NULL || item == ITEM_NONE)
+        return FALSE;
+    for (i = 0; evolutions[i].method != EVOLUTIONS_END; i++)
+    {
+        if (evolutions[i].targetSpecies != to || evolutions[i].params == NULL)
+            continue;
+        for (j = 0; evolutions[i].params[j].condition != CONDITIONS_END; j++)
+        {
+            if (evolutions[i].params[j].condition == IF_HOLD_ITEM && evolutions[i].params[j].arg1 == item)
+                return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+// Each saved item comes back once, to the first Pokemon in party order with its personality: a Shedinja made by the
+// battle's evolution of a Nincada shares the Nincada's personality, follows the Ninjask in the party and holds nothing.
+// An item a post-battle evolution used stays used.
 static void RestoreHeldItems(void)
 {
+    bool8 used[PARTY_SIZE] = {FALSE};
     u32 i, j;
 
     for (i = 0; i < PARTY_SIZE; i++)
     {
         struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][i];
         u32 personality = GetMonData(mon, MON_DATA_PERSONALITY);
+        u32 species = GetMonData(mon, MON_DATA_SPECIES);
 
-        if (GetMonData(mon, MON_DATA_SPECIES) == SPECIES_NONE)
+        if (species == SPECIES_NONE)
             continue;
         for (j = 0; j < PARTY_SIZE; j++)
         {
-            if (sTower.personalities[j] == personality)
-            {
+            if (used[j] || sTower.species[j] == SPECIES_NONE || sTower.personalities[j] != personality)
+                continue;
+            used[j] = TRUE;
+            if (species == sTower.species[j] || !EvolutionTookItem(sTower.species[j], species, sTower.heldItems[j]))
                 SetMonData(mon, MON_DATA_HELD_ITEM, &sTower.heldItems[j]);
-                break;
-            }
+            break;
         }
     }
 }
@@ -738,6 +767,17 @@ bool32 TowerLegends_TestStartSolo(u32 floor)
 void TowerLegends_TestReset(void)
 {
     memset(&sTower, 0, sizeof(sTower));
+}
+
+// The held items a solo floor saves before its battle and gives back after it (the native self-tests).
+void TowerLegends_TestSaveHeldItems(void)
+{
+    SaveHeldItems();
+}
+
+void TowerLegends_TestRestoreHeldItems(void)
+{
+    RestoreHeldItems();
 }
 
 // A test fixture (the test build's PKMN_TEST_TOWER_RECORD with save:1): the record as a climb that cleared `highest`

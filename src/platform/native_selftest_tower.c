@@ -524,6 +524,52 @@ int NativeSelfTest_Tower(void)
     ExpectTower("styles 0-8, arguments 0-100, none without a style", TowerLegends_ValidStyle(0, 0) && TowerLegends_ValidStyle(8, 100)
                 && !TowerLegends_ValidStyle(9, 0) && !TowerLegends_ValidStyle(3, 101) && !TowerLegends_ValidStyle(0, 4));
 
+    // 8. Held items after a solo floor: each Pokemon's own back once, none for a Shedinja the battle's evolution of a
+    // Nincada made (same personality), none an evolution used (review of 2026-10-21: both came back as copies).
+    {
+        static const u16 sItems[] = {ITEM_ORAN_BERRY, ITEM_RAZOR_FANG, ITEM_LIGHT_BALL, ITEM_LEFTOVERS};
+        static const u16 sSpecies[] = {SPECIES_NINCADA, SPECIES_GLIGAR, SPECIES_PIKACHU, SPECIES_ZIGZAGOON};
+        enum Item none = ITEM_NONE;
+        struct Pokemon swap;
+
+        ZeroPlayerPartyMons();
+        for (i = 0; i < ARRAY_COUNT(sSpecies); i++)
+        {
+            CreateMon(&gParties[B_TRAINER_PLAYER][i], sSpecies[i], 20, 0x100 + i, OTID_STRUCT_PLAYER_ID);
+            SetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_HELD_ITEM, &sItems[i]);
+        }
+        CalculatePlayerPartyCount();
+        TowerLegends_TestSaveHeldItems();
+        // The battle: the Oran Berry eaten, the Light Ball knocked off, the Leftovers' holder switched to the lead.
+        SetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_HELD_ITEM, &none);
+        SetMonData(&gParties[B_TRAINER_PLAYER][2], MON_DATA_HELD_ITEM, &none);
+        swap = gParties[B_TRAINER_PLAYER][3]; gParties[B_TRAINER_PLAYER][3] = gParties[B_TRAINER_PLAYER][0];
+        gParties[B_TRAINER_PLAYER][0] = swap;
+        // After it, the evolutions as the evolution scene does them: Nincada (now slot 3) into Ninjask with a Shedinja
+        // copy at the end, holding nothing; Gligar into Gliscor at night, the Razor Fang used.
+        i = SPECIES_NINJASK;
+        SetMonData(&gParties[B_TRAINER_PLAYER][3], MON_DATA_SPECIES, &i);
+        CopyMon(&gParties[B_TRAINER_PLAYER][4], &gParties[B_TRAINER_PLAYER][3], sizeof(struct Pokemon));
+        i = SPECIES_SHEDINJA;
+        SetMonData(&gParties[B_TRAINER_PLAYER][4], MON_DATA_SPECIES, &i);
+        SetMonData(&gParties[B_TRAINER_PLAYER][4], MON_DATA_HELD_ITEM, &none);
+        i = SPECIES_GLISCOR;
+        SetMonData(&gParties[B_TRAINER_PLAYER][1], MON_DATA_SPECIES, &i);
+        SetMonData(&gParties[B_TRAINER_PLAYER][1], MON_DATA_HELD_ITEM, &none);
+        CalculatePlayerPartyCount();
+        TowerLegends_TestRestoreHeldItems();
+        ExpectTower("held items: the Zigzagoon moved to the lead keeps its Leftovers",
+                    GetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_HELD_ITEM) == ITEM_LEFTOVERS);
+        ExpectTower("held items: the eaten Berry and the knocked-off Light Ball come back to their holders",
+                    GetMonData(&gParties[B_TRAINER_PLAYER][3], MON_DATA_HELD_ITEM) == ITEM_ORAN_BERRY
+                    && GetMonData(&gParties[B_TRAINER_PLAYER][2], MON_DATA_HELD_ITEM) == ITEM_LIGHT_BALL);
+        ExpectTower("held items: the new Shedinja (the Nincada's personality) holds nothing",
+                    GetMonData(&gParties[B_TRAINER_PLAYER][4], MON_DATA_HELD_ITEM) == ITEM_NONE);
+        ExpectTower("held items: the Razor Fang Gliscor's evolution used stays used",
+                    GetMonData(&gParties[B_TRAINER_PLAYER][1], MON_DATA_HELD_ITEM) == ITEM_NONE);
+        ZeroPlayerPartyMons();
+    }
+
     printf("selftest-tower: %d checks, %d failed\n", sTowerChecks, sTowerFailures);
     return sTowerFailures ? 1 : 0;
 }
