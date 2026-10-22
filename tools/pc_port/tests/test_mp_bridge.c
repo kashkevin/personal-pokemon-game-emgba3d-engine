@@ -516,6 +516,75 @@ MT_TEST(save_command_and_response)
     MT_CHECK(sNet.closed); // multiple outstanding save commands
 }
 
+// KNOWN_ISSUES MS-60: QUERY_PARTY (opcode 31) reaches only a game with the party query marker; its answer is the save
+// counter, the counter a battle preparation also takes after a trade's import, the trainer id, the party count and CRC.
+MT_TEST(save_party_query_needs_its_capability)
+{
+    struct MpBridgeCaps caps;
+    uint8_t command[240], response[240];
+    uint8_t frame[260];
+    const uint8_t *payload;
+    uint8_t *s = sMemory[MP_REGION_SAVE];
+    size_t n;
+    int i;
+
+    for (i = 0; i < 2; i++)
+    {
+        memset(&caps, 0, sizeof(caps));
+        caps.save = 1;
+        caps.savePartyQuery = (uint32_t)i;
+        MT_CHECK(MpBridge_CheckCaps(&caps) == NULL);
+        Fresh(&caps);
+        sNet.chunk = 0;
+        Ready(0);
+        SaveReady();
+        Step(10);
+        MakeSaveControl(command, 31);
+        PutU32(command + 32, 131072);
+        n = FrameOf(frame, 'C', command, sizeof(command));
+        Feed(frame, n, 200);
+        Step(2);
+        if (i == 0)
+        {
+            MT_CHECK(sNet.closed);          // an older game: refused before it reaches the game
+            MT_EQ(GetU32(s + 24), 0);
+            continue;
+        }
+        MT_CHECK(!sNet.closed);
+        MT_EQ(GetU32(s + 24), 2);
+        MT_CHECK(memcmp(s + 28, command, 240) == 0);
+        memcpy(response, command, 240);
+        PutU16(response + 42, 20);
+        PutU32(response + 48, 41);          // save counter
+        PutU32(response + 52, 40);          // the imported image's counter
+        PutU32(response + 56, 0x12345678);  // trainer id
+        PutU32(response + 60, 3);           // party count
+        PutU32(response + 64, 0xCAFEF00D);  // party CRC
+        PutU32(response + 44, MpBridge_Crc32(response + 48, 20));
+        memcpy(s + 272, response, 240);
+        PutU32(s + 268, 2);
+        Step(30);
+        MT_EQ(SentFrame('R', 0, &payload), 240);
+        MT_CHECK(memcmp(payload, response, 240) == 0);
+        MT_EQ(sNet.errors, 0);
+    }
+    // It names canonical Flash and nothing else: an offset or a revision is refused.
+    caps.savePartyQuery = 1;
+    Fresh(&caps);
+    sNet.chunk = 0;
+    Ready(0);
+    SaveReady();
+    Step(10);
+    MakeSaveControl(command, 31);
+    PutU32(command + 32, 131072);
+    PutU32(command + 36, 5);
+    n = FrameOf(frame, 'C', command, sizeof(command));
+    Feed(frame, n, 200);
+    Step(2);
+    MT_CHECK(sNet.closed);
+    MT_EQ(GetU32(s + 24), 0);
+}
+
 MT_TEST(save_command_with_bad_crc_refused)
 {
     struct MpBridgeCaps caps;
@@ -1938,6 +2007,7 @@ int main(void)
     MT_RUN(crc32_matches_zlib);
     MT_RUN(save_command_and_response);
     MT_RUN(save_command_with_bad_crc_refused);
+    MT_RUN(save_party_query_needs_its_capability);
     MT_RUN(world_inbound_validated);
     MT_RUN(world_rival_record_accepted);
     MT_RUN(world_outbreak_marker_accepted);

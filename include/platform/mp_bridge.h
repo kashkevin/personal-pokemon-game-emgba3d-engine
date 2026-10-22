@@ -132,6 +132,8 @@ struct MpBridgeCaps
     uint32_t menuOpenPage;           /* 1: a menu OPEN may name a page (1: soft reset) (needs menu 2; launcher opt-in) */
     uint32_t tower;                  /* 1: Battle Tower: Legends - OPEN page 2, screen flags 4/5 and style bytes, reward
                                         kinds 6/7 (needs menuOpenPage 1 and the world; launcher opt-in tower=1) */
+    uint32_t savePartyQuery;         /* 1: QUERY_PARTY (save opcode 31), what a battle preparation checks (KNOWN_ISSUES
+                                        MS-60; needs the save mailbox) */
 };
 
 enum

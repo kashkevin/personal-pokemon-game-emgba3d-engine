@@ -63,6 +63,9 @@ const u32 gMultiplayerSaveWindowAbiVersion = 1;
 // for that command while importing, so gSaveDataBuffer (the game's own save buffer) is never written from outside.
 EWRAM_DATA u8 gMultiplayerSaveImportWindow[MULTIPLAYER_SAVE_IMPORT_WINDOW] = {0};
 const u32 gMultiplayerSaveImportWindowAbiVersion = 1;
+// KNOWN_ISSUES MS-60: QUERY_PARTY answers what a battle preparation will check, so the host can turn a game away at
+// Enter, before anything is held, when its party or save counter is not the canonical save's the battle names.
+const u32 gMultiplayerSavePartyQueryAbiVersion = 1;
 #endif
 #line 52 // gba-line
 // Opt-in, immutable local preservation. This does not authorize a host commit.
@@ -585,6 +588,7 @@ void MultiplayerSave_Init(void)
     (void)*(const volatile u32 *)&gMultiplayerSaveWindowAbiVersion;
 #ifdef PORTABLE
     (void)*(const volatile u32 *)&gMultiplayerSaveImportWindowAbiVersion;
+    (void)*(const volatile u32 *)&gMultiplayerSavePartyQueryAbiVersion;
 #endif
 #line 545 // gba-line
     (void)*(const volatile u32 *)&gMultiplayerEmergencySaveAbiVersion;
@@ -626,10 +630,54 @@ static void QueryEmergencyData(u8 *data)
     PutU32(data + 36, sOffset); PutU32(data + 40, sCrc); PutU32(data + 44, sEmergencyStatus);
 }
 
+#ifdef PORTABLE
+// KNOWN_ISSUES MS-60: what PREPARE (multiplayer_battle.c) compares with a preparation the host builds from the
+// canonical save: the save counter, the counter PREPARE also takes right after a trade's import (else the same), the
+// trainer id, the party's count and CRC. An observation like QUERY_EMERGENCY: it never rebinds, consumes a sequence or
+// displaces a lost ACK, and it is answered while the Players menu holds a battle admission (the moment it is asked).
+static void QueryParty(const struct MultiplayerSaveControl *command)
+{
+    struct MultiplayerSaveControl cached = sCachedResponse;
+    u8 data[20];
+    u8 status = MP_SAVE_OK;
+
+    if (command->status || command->length || command->offset || !AllBytes(command->data, 192, 0)
+     || command->chunkCrc32 != Crc32(0, command->data, 0) || command->totalSize != MULTIPLAYER_SAVE_FLASH_SIZE
+     || !command->incarnation || !command->sessionEpoch || !command->commandSeq || AllBytes(command->requestId, 16, 0))
+        status = MP_SAVE_MALFORMED;
+    else if (sState == MP_SAVE_UNBOUND || command->incarnation != sIncarnation || command->sessionEpoch != sSession)
+        status = MP_SAVE_SESSION;
+    else if (sState != MP_SAVE_BOUND || sEmergencyActive || MultiplayerBattle_IsActive())
+        status = MP_SAVE_BUSY;
+    if (status == MP_SAVE_OK)
+    {
+        PutU32(data, gSaveCounter);
+        PutU32(data + 4, MultiplayerSave_IsImportedCounter(sImportedSourceCounter) ? sImportedSourceCounter : gSaveCounter);
+        PutU32(data + 8, READ_OTID_FROM_SAVE);
+        PutU32(data + 12, gPartiesCount[B_TRAINER_PLAYER]);
+        PutU32(data + 16, MultiplayerBattle_PartyCrc32());
+        PublishResponse(command, MP_SAVE_OK, data, 20, sOffset);
+    }
+    else
+    {
+        PublishResponse(command, status, NULL, 0, sOffset);
+    }
+    sCachedResponse = cached;
+}
+#endif
+#line 584 // gba-line
 static void Handle(const struct MultiplayerSaveControl *command)
 {
     u8 data[80];
     u8 status = MP_SAVE_OK;
+#ifdef PORTABLE
+    if (command->opcode == MP_SAVE_QUERY_PARTY)
+    {
+        QueryParty(command);
+        return;
+    }
+#endif
+#line 588 // gba-line
     // The diagnostic channel owns the field hold. Neither rebinding nor a
     // save cancellation may invalidate its ownership or release that hold.
     // Neutral cancellation keeps the field frozen through fresh-saver arm.

@@ -20,6 +20,7 @@ enum MultiplayerSaveOpcode {
     MP_SAVE_QUERY_EFFECT_CHOICE,
 #ifdef PORTABLE
     MP_SAVE_WRITE_WINDOW,  // PC builds: one staged import sector, from gMultiplayerSaveImportWindow
+    MP_SAVE_QUERY_PARTY,   // PC builds: what a battle preparation checks (KNOWN_ISSUES MS-60)
 #endif
 };
 enum MultiplayerSaveState {
@@ -70,6 +71,7 @@ extern const u32 gMultiplayerSaveWindowAbiVersion;
 #define MULTIPLAYER_SAVE_IMPORT_WINDOW 4096
 extern u8 gMultiplayerSaveImportWindow[MULTIPLAYER_SAVE_IMPORT_WINDOW];
 extern const u32 gMultiplayerSaveImportWindowAbiVersion;
+extern const u32 gMultiplayerSavePartyQueryAbiVersion;
 // Update 32: TRUE while the game's save is the canonical image it imported last (a trade's post-image) and the game has
 // not saved since: that image names its own save counter, one lower than the one the game wrote it under.
 bool32 MultiplayerSave_IsImportedCounter(u32 counter);

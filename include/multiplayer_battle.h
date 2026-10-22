@@ -153,6 +153,7 @@ u32 MultiplayerBattle_GetBattlerOwner(u32 battler);
 u32 MultiplayerBattle_GetCoopGym(void);
 #ifdef PORTABLE
 u32 MultiplayerBattle_GetRivalPreparation(void); // Update 31 (multiplayer_rival.h)
+u32 MultiplayerBattle_PartyCrc32(void); // MS-60: the party CRC a native PREPARE compares (multiplayer_save.c)
 #endif
 bool32 MultiplayerBattle_TrySendOutAnimation(u8 battler);
 bool32 MultiplayerBattle_CanReceiveControllers(void);

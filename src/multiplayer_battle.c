@@ -272,6 +272,12 @@ u32 MultiplayerBattle_GetRivalPreparation(void)
     return MultiplayerBattle_IsNative() && !MultiplayerBattle_IsCoop() && sPrepared
         && MultiplayerRival_IsPreparationWord(sPreparation.flags) ? sPreparation.flags : 0;
 }
+
+// KNOWN_ISSUES MS-60: the CRC PREPARE compares with its preparation's (the player's whole party, as the save holds it).
+u32 MultiplayerBattle_PartyCrc32(void)
+{
+    return Crc32((const u8 *)gParties[B_TRAINER_PLAYER], 600);
+}
 #endif
 #line 212 // gba-line
 

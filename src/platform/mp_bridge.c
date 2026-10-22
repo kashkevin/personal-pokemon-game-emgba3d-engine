@@ -164,6 +164,8 @@ const char *MpBridge_CheckCaps(const struct MpBridgeCaps *c)
         return "invalid read-only save window";
     if (c->saveImportWindow && (!c->saveWindow || c->saveImportWindow != 1))
         return "invalid save import window";
+    if (c->savePartyQuery && (!c->save || c->savePartyQuery != 1))
+        return "invalid party query capability";
     if (c->menuOpenPage && (c->menu != 2 || c->menuOpenPage != 1))
         return "invalid menu open page capability";
     if (c->tower && (c->tower != 1 || c->menuOpenPage != 1 || c->world != 1))
@@ -600,10 +602,11 @@ static bool SaveHeaderReady(const struct MpBridge *b)
 static bool SaveControl(const struct MpBridge *b, const uint8_t *p, size_t length, bool command,
                         struct MpBridgeSave *out)
 {
-    static const uint8_t sCommandLengths[31] = {
-        0, 0, 0, 0, 0, 16, 128, 0, 0, 0, 0, 60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 192, 56, 48, 48, 88, 48, 48, 4};
-    static const uint8_t sResponseLengths[31] = {
-        0, 0, 40, 128, 4, 8, 0, 0, 0, 48, 80, 80, 40, 48, 0, 4, 48, 48, 4, 40, 4, 48, 40, 192, 192, 192, 0, 8, 4, 84, 0};
+    static const uint8_t sCommandLengths[32] = {
+        0, 0, 0, 0, 0, 16, 128, 0, 0, 0, 0, 60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 192, 56, 48, 48, 88, 48, 48, 4, 0};
+    static const uint8_t sResponseLengths[32] = {
+        0, 0, 40, 128, 4, 8, 0, 0, 0, 48, 80, 80, 40, 48, 0, 4, 48, 48, 4, 40, 4, 48, 40, 192, 192, 192, 0, 8, 4, 84, 0,
+        20};
     const struct MpBridgeCaps *c = &b->caps;
     uint32_t inc, epoch, seq, offset, size, revision, opcode, status, dataLength, crc;
     uint32_t maxOpcode;
@@ -633,7 +636,7 @@ static bool SaveControl(const struct MpBridge *b, const uint8_t *p, size_t lengt
               : Enabled(c->trade) ? 17 : 11;
     if (inc == 0 || epoch == 0 || epoch > 0x7FFFFFFF || seq == 0 || AllZero(request, 16)
      || offset > 131072 || (size != 0 && size != 131072) || revision > 0x7FFFFFFF
-     || opcode < 1 || opcode > maxOpcode
+     || opcode < 1 || (opcode > maxOpcode && !(opcode == 31 && Enabled(c->savePartyQuery)))
      || ((opcode == 27 || opcode == 28) && !Enabled(c->tradeEffectSave))
      || (opcode == 29 && !Enabled(c->tradeEffectChoice))
      || (opcode == 30 && !Enabled(c->saveImportWindow))
@@ -655,6 +658,8 @@ static bool SaveControl(const struct MpBridge *b, const uint8_t *p, size_t lengt
         if (opcode == 12 && (revision == 0 || revision >= 0x7FFFFFFF))
             return false;
         if (opcode == 16 && seq != 1)
+            return false;
+        if (opcode == 31 && (size != 131072 || offset != 0 || revision != 0))
             return false;
         if (opcode >= 19 && opcode <= 22)
         {
@@ -703,6 +708,8 @@ static bool SaveControl(const struct MpBridge *b, const uint8_t *p, size_t lengt
         if (status == 0 && opcode == 3 && (offset % 128 != 0 || offset > 130944))
             return false;
         if (status == 0 && opcode == 18 && (size != 131072 || offset % 4096 != 0 || offset > 126976))
+            return false;
+        if (status == 0 && opcode == 31 && size != 131072)
             return false;
         if (status == 0 && opcode == 30 && (size != 131072 || offset % 4096 != 0 || offset < 4096 || offset > 131072))
             return false;
@@ -2349,6 +2356,7 @@ bool MpBridge_Configure(const char *path)
 #endif
     caps.menuRelease = *(const volatile u32 *)&gMultiplayerMenuReleaseAbiVersion;
     caps.saveImportWindow = *(const volatile u32 *)&gMultiplayerSaveImportWindowAbiVersion;
+    caps.savePartyQuery = *(const volatile u32 *)&gMultiplayerSavePartyQueryAbiVersion;
     /* Update 32: the launcher opts in when its manifest has menu_open_page_abi_version 1 (an older launcher would
      * refuse the page an OPEN names). */
     caps.menuOpenPage = optIn[3] ? *(const volatile u32 *)&gMultiplayerMenuOpenPageAbiVersion : 0;
@@ -2418,7 +2426,7 @@ bool MpBridge_Configure(const char *path)
     sEnabled = true;
     SDL_Log("Multiplayer bridge: companion at 127.0.0.1:%ld; save %u trade %u emergency %u battle %u/%u/%u "
             "window %u menu %u effects %u/%u/%u reset %u/%u world %u spawns %u running %u detail %u ffa %u/%u release %u "
-            "import %u page %u tower %u",
+            "import %u page %u tower %u party %u",
             port, (unsigned)caps.save, (unsigned)caps.trade, (unsigned)caps.emergencySave,
             (unsigned)caps.battle, (unsigned)caps.battleResume, (unsigned)caps.battleAdmissionCleanup,
             (unsigned)caps.saveWindow, (unsigned)caps.menu, (unsigned)caps.tradeEffectPrepare,
@@ -2426,7 +2434,7 @@ bool MpBridge_Configure(const char *path)
             (unsigned)caps.resetInput, (unsigned)caps.world, (unsigned)caps.spawns,
             (unsigned)caps.presenceAnimation, (unsigned)caps.presenceDetail, (unsigned)caps.battleFfa,
             (unsigned)caps.battleFfa3, (unsigned)caps.menuRelease, (unsigned)caps.saveImportWindow, (unsigned)caps.menuOpenPage,
-            (unsigned)caps.tower);
+            (unsigned)caps.tower, (unsigned)caps.savePartyQuery);
     return true;
 }
 
