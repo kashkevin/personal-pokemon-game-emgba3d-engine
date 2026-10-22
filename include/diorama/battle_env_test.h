@@ -119,6 +119,9 @@
  *                            Training bits and Ability (its slot), the Bag's Bottle Caps, Gold
  *                            Bottle Caps and Ability Patches - each used in the Bag, refused, saved
  *                            and loaded (Battle Tower: Legends' items)
+ *   PKMN_TEST_BAG_LOG        item[,item...] (at most 4): on the field, whenever one changes: the
+ *                            money and those items' counts in the Bag - a Poke Mart's purchase and
+ *                            sale, saved and loaded (tools/battle_env/shop_check.py)
  *   PKMN_TEST_MEGA_SHOT      frames: a picture that long after the lead's Mega animation, as
  *   PKMN_TEST_MEGA_SHOT_STEM <stem>-NN.png (NN the sweep's holder, or 00)
  *

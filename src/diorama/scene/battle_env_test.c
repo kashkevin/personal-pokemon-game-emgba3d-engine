@@ -208,6 +208,12 @@ static struct
     int eggCycles;
     char breedSeen[PARTY_SIZE][192];
     int breedStateSeen[3];
+    /* PKMN_TEST_BAG_LOG=item[,item...] (at most 4): on the field, "bag field: money M item I count C ..." whenever the
+       money or one of those items' count in the Bag changes (tools/battle_env/shop_check.py: a Poke Mart's purchase and
+       sale, saved and loaded); what was last logged */
+    int bagItems[4], bagItemCount;
+    bool bagLogged;
+    u32 bagSeen[5];
 } s;
 
 /* PKMN_TEST_LOG=<file>: every line the driver logs is also appended to that file (a check on Windows reads it: the
@@ -277,6 +283,7 @@ static const struct { const char *name; int value; } sFacts[] = {
     FACT(SPECIES_TORCHIC), FACT(MAP_LITTLEROOT_TOWN), FACT(MAP_LITTLEROOT_TOWN_PROFESSOR_BIRCHS_LAB),
     FACT(MP_INTRO_STARTER_PENDING), FACT(MOVE_FLASH_CANNON), FACT(TRAINER_FLAGS_START), FACT(ITEMS_COUNT),
     FACT(MOVE_THUNDERBOLT), FACT(MOVE_ICE_BEAM), FACT(MOVE_ENERGY_BALL),
+    FACT(ITEM_POTION), FACT(MAP_OLDALE_TOWN_MART),
 };
 #undef FACT
 
@@ -286,6 +293,9 @@ static void LogFacts(void)
         TestLog("Battle env test: fact %s %d", sFacts[i].name, sFacts[i].value);
     /* what the Mauville dealer asks for its first stone, in coins (the coin shop's own price) */
     TestLog("Battle env test: fact PRICE_ITEM_VENUSAURITE %u", CoinShop_StonePrice(ITEM_VENUSAURITE));
+    /* what a Poke Mart asks for a Potion and pays for one (the game's own prices) */
+    TestLog("Battle env test: fact PRICE_ITEM_POTION %u", GetItemPrice(ITEM_POTION));
+    TestLog("Battle env test: fact SELL_PRICE_ITEM_POTION %u", GetItemSellPrice(ITEM_POTION));
     ListMegaStoneHolders();
     for (int i = 0; i < sHolderCount; i++)
         TestLog("Battle env test: fact holder %d species %u item %u mega %u", i, sHolders[i].species, sHolders[i].item,
@@ -422,6 +432,14 @@ static void Init(void)
     s.eggReady = EnvInt("PKMN_TEST_EGG_READY", 0) != 0;
     s.eggCycles = EnvInt("PKMN_TEST_EGG_CYCLES", -1);
     s.breedLog = EnvInt("PKMN_TEST_BREED_LOG", 0) != 0;
+    value = SDL_getenv("PKMN_TEST_BAG_LOG");
+    for (s.bagItemCount = 0; value != NULL && *value != '\0' && s.bagItemCount < 4; )
+    {
+        s.bagItems[s.bagItemCount++] = atoi(value);
+        value = strchr(value, ',');
+        if (value != NULL)
+            value++;
+    }
     s.fieldAfter = EnvInt("PKMN_TEST_FIELD_AFTER", 0);
     if (s.megaLog)
         ListMegaStoneHolders();     /* the stones MegaLogField counts */
@@ -965,6 +983,33 @@ static void TrainLogField(void)
     memcpy(s.trainSeen, now, sizeof(now));
     TestLog("Battle env test: train field: lead %d ivs %d,%d,%d,%d,%d,%d trained %d ability %d num %d caps %d gold %d patches %d",
             now[0], now[1], now[2], now[3], now[4], now[5], now[6], now[7], now[8], now[9], now[10], now[11], now[12]);
+}
+
+/* PKMN_TEST_BAG_LOG off a battle: "bag field: money M item I count C [item I count C ...]" whenever the money or one of
+ * the named items' count in the Bag changes - a Poke Mart purchase or sale, saved and loaded. */
+static void BagLogField(void)
+{
+    u32 now[5];
+    char line[160];
+    int used;
+    bool changed;
+
+    if (s.bagItemCount == 0 || gMain.inBattle || SDL_AtomicGet(&s.fieldSeen) == 0 || gSaveBlock1Ptr == NULL)
+        return;
+    now[0] = GetMoney(&gSaveBlock1Ptr->money);
+    for (int i = 0; i < s.bagItemCount; i++)
+        now[1 + i] = CountTotalItemQuantityInBag(s.bagItems[i]);
+    changed = !s.bagLogged;
+    for (int i = 0; i <= s.bagItemCount && !changed; i++)
+        changed = now[i] != s.bagSeen[i];
+    if (!changed)
+        return;
+    s.bagLogged = true;
+    memcpy(s.bagSeen, now, sizeof(now));
+    used = snprintf(line, sizeof(line), "money %u", (unsigned)now[0]);
+    for (int i = 0; i < s.bagItemCount && used < (int)sizeof(line); i++)
+        used += snprintf(line + used, sizeof(line) - used, " item %d count %u", s.bagItems[i], (unsigned)now[1 + i]);
+    TestLog("Battle env test: bag field: %s", line);
 }
 
 /* PKMN_TEST_BREED_LOG off a battle: "breed party N: species S egg E level L ivs a,b,c,d,e,f nature T num A ball B
@@ -2477,6 +2522,7 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
     StarterLogField();
     TrainLogField();
     BreedLogField();
+    BagLogField();
     ShotTick();
     /* PKMN_TEST_PLAN: once the autopilot brought the field up, the plan's keys alone */
     if (sPlan.phase != PLAN_OFF && SDL_AtomicGet(&s.fieldSeen) != 0)
