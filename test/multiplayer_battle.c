@@ -792,6 +792,62 @@ TEST("Multiplayer co-op team selection: no selection keeps the whole party and a
     Free(original);
 }
 
+// Regression (Tower Duo in real games, 2026-10-22): the party pairs carried the whole saved party while the battle used
+// the selection, so the host refused the startup ("native startup differs from the acknowledged trainer/party") and the
+// partner's core would have fought beside Pokemon its owner left behind.
+TEST("Multiplayer co-op team selection: the partner's core receives the named Pokemon as saved originals, the other slots empty")
+{
+    struct ChannelFixture f;
+    struct LinkPlayer peer = {0};
+    struct LinkBattlerHeader header = {0};
+    struct Pokemon *original = Alloc(sizeof(struct Pokemon) * PARTY_SIZE);
+    struct Pokemon *expected = Alloc(sizeof(struct Pokemon) * PARTY_SIZE);
+    // the first three of six (a Duo's and the Frontier's default), three spread out, one, and no selection
+    static const u8 selections[] = {0x80 | 0x07, 0x80 | (1 << 1) | (1 << 3) | (1 << 5), 0x80 | (1 << 4), 0};
+
+    for (u32 test = 0; test < ARRAY_COUNT(selections); test++)
+    {
+        u32 kept = 0, hp = 1;
+
+        SetUp(&f, 2, 0);
+        SixDistinctMons();
+        gSaveBlock2Ptr->playerName[0] = EOS;
+        f.binding.mode = f.command.phase = MP_BATTLE_PHASE_COOP;
+        memcpy(f.command.data, &f.binding, sizeof(f.binding));
+        Bind(&f);
+        memcpy(original, gParties[B_TRAINER_PLAYER], sizeof(struct Pokemon) * PARTY_SIZE);
+        memset(expected, 0, sizeof(struct Pokemon) * PARTY_SIZE);
+        for (u32 slot = 0; slot < PARTY_SIZE; slot++)
+            if (!selections[test] || (selections[test] & (1 << slot)))
+                expected[kept++] = original[slot];
+        CoopPreparation(&f, selections[test]);
+        EXPECT_EQ(Submit(&f), MP_BATTLE_OK);
+        AckNativeOutput(&f, FALSE);
+        peer.version = VERSION_EMERALD + 0x4000; peer.id = 1; peer.linkType = LINKTYPE_BATTLE;
+        peer.language = gGameLanguage; peer.name[0] = EOS;
+        ReceiveFullBlock(&f, 1, MP_BATTLE_KIND_TRAINER, 1, &peer, sizeof(peer));
+        EXPECT_EQ(GetBlockReceivedStatus(), 3);
+        EXPECT_EQ(Send(&f, MP_BATTLE_START_SINGLES), MP_BATTLE_OK);
+        header.versionSignatureHi = 3; header.battleEnigmaBerry.name[0] = EOS;
+        EXPECT(MultiplayerBattle_SendBlock(&header, sizeof(header))); AckNativeOutput(&f, FALSE);
+        ReceiveFullBlock(&f, 1, MP_BATTLE_KIND_START_HEADER, 2, &header, sizeof(header));
+        EXPECT_EQ(GetBlockReceivedStatus(), 3);
+        ResetBlockReceivedFlags();
+        // The battle uses exactly what travels; a battle change to the local copy (here its HP) never travels.
+        EXPECT_EQ(gPartiesCount[B_TRAINER_PLAYER], kept);
+        EXPECT(!memcmp(expected, gParties[B_TRAINER_PLAYER], sizeof(struct Pokemon) * PARTY_SIZE));
+        SetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_HP, &hp);
+        for (u32 pair = 0; pair < 3; pair++)
+        {
+            EXPECT(MultiplayerBattle_SendPartyPair(pair * 2));
+            EXPECT(!memcmp(gBlockSendBuffer, expected + pair * 2, sizeof(struct Pokemon) * 2));
+            AckNativeOutput(&f, TRUE);
+        }
+        TearDown(&f);
+    }
+    Free(expected); Free(original);
+}
+
 TEST("Multiplayer full Multi: every device owns its controller, sixth lead and independent switch order")
 {
     struct ChannelFixture f;

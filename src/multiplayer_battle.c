@@ -893,6 +893,29 @@ static u8 StartSingles(void)
 bool8 MultiplayerBattle_SendPartyPair(u8 index)
 {
     if (index != 0 && index != 2 && index != 4) return FALSE;
+#if MP_BRING_ENABLED
+    // With a co-op team selection the battle's party is the named Pokemon in saved order, the other slots empty
+    // (ApplyBringSelection), and that is the party that travels, as the saved originals (no battle forms): the partner's
+    // core fights beside exactly these, and the host checks them against the same selection of the acknowledged save
+    // (battle_roster.py). The whole saved party went before, so a larger party never started (Tower Duo, 2026-10-22).
+    if (sBringMask)
+    {
+        struct Pokemon pair[2];
+        u32 slot, kept = 0;
+
+        memset(pair, 0, sizeof(pair));
+        for (slot = 0; slot < PARTY_SIZE; slot++)
+        {
+            if (!(sBringMask & (1u << slot)))
+                continue;
+            if (kept == index || kept == index + 1u)
+                pair[kept - index] = *GetSavedPlayerPartyMon(slot);
+            kept++;
+        }
+        return SendBlock(BitmaskAllOtherLinkPlayers(), pair, sizeof(pair));
+    }
+#endif
+#line 669 // gba-line
     return SendBlock(BitmaskAllOtherLinkPlayers(), GetSavedPlayerPartyMon(index), sizeof(struct Pokemon) * 2);
 }
 
