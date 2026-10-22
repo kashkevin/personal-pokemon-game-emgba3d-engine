@@ -12,12 +12,14 @@
 #include "platform/mp_bridge.h"
 #include "main.h"
 #include "multiplayer.h"
+#include "multiplayer_battle.h"
 #include "multiplayer_ownership.h"
 #include "multiplayer_save.h"
 #include "event_object_movement.h"
 #include "field_player_avatar.h"
 #include "overworld.h"
 #include "palette.h"
+#include "save.h"
 #include "script.h"
 
 extern const u8 EventScript_SoftResetConfirm[];
@@ -113,13 +115,15 @@ void MultiplayerSoftReset_Do(void)
 // so, and the launcher's autosave and Save now are still there.
 #define HOST_SAVE_WAIT_FRAMES (60 * 10)
 
-static u32 sHostSaveAge; // frames since the in-game SAVE, from 1; 0: none waiting
+static u32 sHostSaveAge; // frames since the in-game SAVE (or the party change), from 1; 0: none waiting
+static bool8 sHostSaveAuto; // the one waiting is the party watch's: given up silently
 
 void MultiplayerHostSave_GameSaved(void)
 {
     if (!MpBridge_HostSavePageEnabled())
         return; // no world, or a launcher without the host save page: the game's own save is all there is
     sHostSaveAge = 1;
+    sHostSaveAuto = FALSE;
     Log("host save: in-game SAVE written; asking the launcher");
 }
 
@@ -141,9 +145,55 @@ bool32 MultiplayerHostSave_TryOpen(void)
     if (++sHostSaveAge > HOST_SAVE_WAIT_FRAMES)
     {
         sHostSaveAge = 0;
+        if (sHostSaveAuto)
+        {
+            Log("host save: the world could not be reached; the party watch asks again later");
+            return FALSE;
+        }
         MultiplayerPresence_Refuse("Saved on this PC only.|See the launcher window.");
         Log("host save: the world could not be reached; saved on this PC only");
     }
     return FALSE;
+}
+
+// The owner's request (2026-10-22): no save is needed before a battle (include/multiplayer_soft_reset.h). The party
+// as of the game's last save is known from the save counter: the game's first free frame is the save it loaded (the
+// host's), and any save since (the launcher's export, an in-game SAVE, a trade's import) moves the counter. A party
+// that differs from it asks for a host save; one that is not made (refused, the world unreachable) asks again after
+// a wait that doubles each time, up to five minutes, so a failing save is never asked for every few seconds.
+#define AUTO_SAVE_GAP_FRAMES (60 * 10)
+#define AUTO_SAVE_GAP_MAX (60 * 60 * 5)
+
+static bool8 sPartyKnown;
+static u32 sPartySaveCounter, sPartyCrc, sAutoSaveWait, sAutoSaveGap;
+
+void MultiplayerHostSave_PartyWatch(void)
+{
+    u32 crc;
+
+    if (!MpBridge_HostSavePageEnabled())
+        return;
+    crc = MultiplayerBattle_PartyCrc32();
+    if (!sPartyKnown || gSaveCounter != sPartySaveCounter)
+    {
+        sPartyKnown = TRUE;
+        sPartySaveCounter = gSaveCounter;
+        sPartyCrc = crc;
+        sAutoSaveWait = 0;
+        sAutoSaveGap = AUTO_SAVE_GAP_FRAMES;
+        return;
+    }
+    if (sAutoSaveWait != 0)
+    {
+        sAutoSaveWait--;
+        return;
+    }
+    if (crc == sPartyCrc || sHostSaveAge != 0)
+        return;
+    sHostSaveAge = 1;
+    sHostSaveAuto = TRUE;
+    sAutoSaveWait = sAutoSaveGap;
+    sAutoSaveGap = sAutoSaveGap * 2 > AUTO_SAVE_GAP_MAX ? AUTO_SAVE_GAP_MAX : sAutoSaveGap * 2;
+    Log("host save: the party changed since the last save; asking the launcher");
 }
 #endif // PORTABLE

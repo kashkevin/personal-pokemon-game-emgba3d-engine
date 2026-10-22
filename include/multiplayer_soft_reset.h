@@ -20,6 +20,10 @@
 // written the game's own save, the field opens the Players menu on page 3 as soon as it is free; the companion closes
 // it at once and the launcher saves on the host, as its Save now does, then a banner says how that went. So the
 // reset key goes back to the last in-game SAVE (or a later autosave or Save now).
+//
+// The owner's request (2026-10-22): no save is needed before a battle. A native battle starts only from the party the
+// host last saved (KNOWN_ISSUES MS-60), so a party that differs from the one at the game's last save (a Pokemon
+// received or caught, a battle's HP and experience) asks for the same host save, from the free field.
 
 #ifdef PORTABLE
 bool32 MultiplayerSoftReset_Begin(void);    // the question (no world) or PLAYERS on its reset page; FALSE: refused
@@ -29,6 +33,7 @@ void MultiplayerSoftReset_KeyFrame(void);   // each frame before the callbacks: 
 bool32 MultiplayerSoftReset_TakeKey(void);  // the field or the START menu takes a waiting press (TRUE once)
 void MultiplayerHostSave_GameSaved(void);   // START > SAVE wrote the game's save: in a world the host saves next
 bool32 MultiplayerHostSave_TryOpen(void);   // the free field: PLAYERS on its host save page (TRUE: it opened)
+void MultiplayerHostSave_PartyWatch(void);  // the free field: a party changed since the last save asks for one
 #endif
 
 #endif // GUARD_MULTIPLAYER_SOFT_RESET_H
