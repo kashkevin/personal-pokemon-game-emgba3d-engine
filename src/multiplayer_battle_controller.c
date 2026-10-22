@@ -204,8 +204,19 @@ static bool32 MasterDataValid(const u8 *p)
     case CONTROLLER_MOVEANIMATION: return Half(p + 1) < MOVES_COUNT_ALL && !p[14] && !p[15] && AnimValid(p + 16);
     case CONTROLLER_PRINTSTRING: case CONTROLLER_PRINTSTRINGPLAYERONLY: return MessageValid(p);
     case CONTROLLER_CHOOSEACTION:
+#if defined(PORTABLE) || TESTING
+        // KNOWN_ISSUES MS-57: the master sends every battler's action menu with battler 0's action of the turn
+        // (battle_main.c: gChosenActionByBattler[0], as the original link battles do), and once battler 0 is out of
+        // Pokemon while the battle goes on (the host's in a free-for-all, a 2v2 or a co-op battle) that is
+        // B_ACTION_NOTHING_FAINTED. Refused, the master's own check stopped the battle for everyone.
+        return (p[1] <= B_ACTION_RUN || p[1] == B_ACTION_NOTHING_FAINTED || p[1] == B_ACTION_NONE)
+            && (p[1] == B_ACTION_USE_ITEM ? Half(p + 2) < ITEMS_COUNT : !Half(p + 2));
+#else
+#line 199 // gba-line
         return (p[1] <= B_ACTION_RUN || p[1] == B_ACTION_NONE)
             && (p[1] == B_ACTION_USE_ITEM ? Half(p + 2) < ITEMS_COUNT : !Half(p + 2));
+#endif
+#line 201 // gba-line
     case CONTROLLER_CHOOSEMOVE: return MoveChoiceValid(p);
     case CONTROLLER_CHOOSEPOKEMON:
         return p[1] <= 4 && p[2] <= PARTY_SIZE && (p[3] | p[7] << 8) < ABILITIES_COUNT

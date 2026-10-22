@@ -192,3 +192,35 @@ TEST("Multiplayer native controller: a move selection may name the battler's usa
     }
     MultiplayerBattle_TestSetCoreCount(0);
 }
+
+TEST("Multiplayer native controller: an action menu may carry battler 0's B_ACTION_NOTHING_FAINTED")
+{
+    // KNOWN_ISSUES MS-57: the master sends every battler's action menu with battler 0's action of the turn
+    // (battle_main.c gChosenActionByBattler[0]); once battler 0 is out of Pokemon and the battle goes on (the host's in a
+    // free-for-all, a 2v2, a co-op battle) that is B_ACTION_NOTHING_FAINTED, which the master's own check refused.
+    static const u8 accepted[] = {B_ACTION_USE_MOVE, B_ACTION_USE_ITEM, B_ACTION_SWITCH, B_ACTION_RUN,
+                                  B_ACTION_NOTHING_FAINTED, B_ACTION_NONE};
+    static const u8 refused[] = {B_ACTION_SAFARI_WATCH_CAREFULLY, B_ACTION_EXEC_SCRIPT, B_ACTION_CANCEL_PARTNER,
+                                 B_ACTION_UNK_14, B_ACTION_DEBUG, B_ACTION_THROW_BALL};
+    u8 wire[256], payload[4] = {CONTROLLER_CHOOSEACTION};
+    u16 size;
+    u32 i;
+    MultiplayerBattle_ResetControllerValidation(); MultiplayerBattle_TestSetCoreCount(2);
+    for (i = 0; i < ARRAY_COUNT(accepted); i++)
+    {
+        payload[1] = accepted[i];
+        size = Packet(wire, B_COMM_TO_CONTROLLER, 1, payload, sizeof(payload));
+        EXPECT(MultiplayerBattle_ValidateController(wire, size, 0));
+        EXPECT(!MultiplayerBattle_ValidateController(wire, size, 1));      // the master's alone
+    }
+    for (i = 0; i < ARRAY_COUNT(refused); i++)
+    {
+        payload[1] = refused[i];
+        size = Packet(wire, B_COMM_TO_CONTROLLER, 1, payload, sizeof(payload));
+        EXPECT(!MultiplayerBattle_ValidateController(wire, size, 0));
+    }
+    payload[1] = B_ACTION_NOTHING_FAINTED; payload[2] = 1;                 // an item only with B_ACTION_USE_ITEM
+    size = Packet(wire, B_COMM_TO_CONTROLLER, 1, payload, sizeof(payload));
+    EXPECT(!MultiplayerBattle_ValidateController(wire, size, 0));
+    MultiplayerBattle_TestSetCoreCount(0);
+}
