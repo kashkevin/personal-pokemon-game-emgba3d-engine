@@ -287,6 +287,7 @@ static void TestRerolls(void)
     Setup();
     MultiplayerIntro_TestApplyShortIntroState();
     SeedRng(0x320C1A1Du);
+    MultiplayerIntro_TestQuietClaimLog(TRUE);   // a trace line per claim: 400,000 lines
     for (i = 0; i < n; i++)
     {
         u32 personality;
@@ -301,6 +302,7 @@ static void TestRerolls(void)
         if (GetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_IS_SHINY))
             shiny++;
     }
+    MultiplayerIntro_TestQuietClaimLog(FALSE);
     diff = (double)shiny - expected;
     printf("lab starter rerolls: %u shiny of %u claims (expected %.0f +- %.0f), 1 in %.1f; %u repeated personalities\n",
            shiny, n, expected, sigma, shiny ? (double)n / shiny : 0.0, repeats);

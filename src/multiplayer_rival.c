@@ -110,6 +110,10 @@ static struct
 // ---------------------------------------------------------------------------
 // State
 
+// --selftest-update32's 400,000 starter claims without their trace lines (on Windows those took more than five minutes
+// on the game's console: windows-package run 129).
+static bool8 sQuietClaimLog;
+
 // Test trace (stderr, the game's log): only with a test record (PKMN_DEBUG_RIVAL, --selftest-rival).
 static void TestLogV(const char *format, va_list args)
 {
@@ -771,6 +775,7 @@ void MultiplayerIntro_GiveLabStarter(void)
     FlagSet(FLAG_SYS_POKEMON_GET);
     StringCopy(gStringVar1, GetSpeciesName(species));
     gSpecialVar_Result = TRUE;
+    if (!sQuietClaimLog)
     {
         struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][0];
         // The roll itself, for a reroll check (tools/pc_port/soft_reset_check.py): a reset brings a new one.
@@ -784,6 +789,11 @@ void MultiplayerIntro_GiveLabStarter(void)
 
 // ---------------------------------------------------------------------------
 // Tests
+
+void MultiplayerIntro_TestQuietClaimLog(bool8 quiet)
+{
+    sQuietClaimLog = quiet;
+}
 
 void MultiplayerRival_TestSetRecord(const u8 *record)
 {

@@ -61,6 +61,7 @@ u8 MultiplayerRival_TestMode(u32 checkpoint, u8 facing);
 void MultiplayerRival_TestSetPreparation(u32 flags);
 void MultiplayerIntro_TestApplyPostState(void);
 void MultiplayerIntro_TestApplyShortIntroState(void);
+void MultiplayerIntro_TestQuietClaimLog(bool8 quiet);
 #endif
 
 #endif // GUARD_MULTIPLAYER_RIVAL_H
