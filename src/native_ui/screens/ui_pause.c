@@ -400,6 +400,17 @@ static const char *EntryIcon(const struct Entry *e, bool *hasSel)
     }
 }
 
+// --selftest-start-menu (MS-61): the 3D menu names this row with its own words (the fallback is "Exit")
+bool32 NativeUiPause_TestNamed(u8 action)
+{
+    struct Entry e = {action, 0};
+    bool hasSel;
+
+    return action == NATIVE_START_EXIT
+        || (EntryLabel(&e) != sText_Exit && EntryHelp(&e) != sHelp_Exit && strcmp(EntryIcon(&e, &hasSel), "return") != 0)
+        || action == NATIVE_START_PLAYER_BACK;    // BACK: its own words, the return arrow
+}
+
 /* the Emerald wooden location sign (PK.locationSign) */
 static void LocationSign(int x, int y)
 {

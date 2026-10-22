@@ -595,3 +595,99 @@ int NativeSelfTest_Tower(void)
     printf("selftest-tower: %d checks, %d failed\n", sTowerChecks, sTowerFailures);
     return sTowerFailures ? 1 : 0;
 }
+
+// --selftest-start-menu (MS-61, the owner's PC: START > PLAYER showed "Exit" for TOWER and RESET in the 3D game): the
+// PLAYER list has no RESET row (the reset is a key now), every row the START menu can show has its own name in the 3D
+// menu, and the reset key is taken only in the free field, then once.
+#include "multiplayer_soft_reset.h"
+#include "overworld.h"
+#include "script.h"
+
+u32 StartMenu_TestActions(bool32 playerSubmenu, u8 *out, u32 size);
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+u8 StartMenu_TestNativeAction(u8 action);
+bool32 NativeUiPause_TestNamed(u8 action);
+#endif
+
+static int sMenuChecks, sMenuFailures;
+
+static void ExpectMenu(const char *what, bool32 ok)
+{
+    sMenuChecks++;
+    if (!ok)
+        sMenuFailures++;
+    printf("%s %s\n", ok ? "ok  " : "FAIL", what);
+}
+
+int NativeSelfTest_StartMenu(void)
+{
+    u8 rows[16];
+    u32 count, i;
+    bool32 reset = FALSE, card = FALSE, players = FALSE;
+    MainCallback field = gMain.callback2;
+
+    printf("START menu and the soft reset key (MS-61)\n");
+    InitHeap(gHeap, HEAP_SIZE);
+    SetSaveBlocksPointers(0);
+    count = StartMenu_TestActions(TRUE, rows, ARRAY_COUNT(rows));
+    for (i = 0; i < count && i < ARRAY_COUNT(rows); i++)
+    {
+        reset |= rows[i] == 22;     // MENU_ACTION_SOFT_RESET
+        card |= rows[i] == 16;      // MENU_ACTION_TRAINER_CARD
+        players |= rows[i] == 17;   // MENU_ACTION_PLAYERS
+    }
+    ExpectMenu("the PLAYER list has its rows (Trainer Card, Players)", count > 0 && card && players);
+    ExpectMenu("the PLAYER list has no RESET row (the reset is a key)", !reset);
+    count = StartMenu_TestActions(FALSE, rows, ARRAY_COUNT(rows));
+    reset = FALSE;
+    for (i = 0; i < count && i < ARRAY_COUNT(rows); i++)
+        reset |= rows[i] == 22;
+    ExpectMenu("the START menu has no RESET row", count > 0 && !reset);
+#ifdef ENABLE_NATIVE_UI
+    for (i = 0; i <= 23; i++)       // every engine row, MENU_ACTION_POKEDEX .. MENU_ACTION_TOWER
+    {
+        char what[96];
+        u8 native = StartMenu_TestNativeAction(i);
+
+        snprintf(what, sizeof(what), "3D menu: engine row %u has its own name (native %u)", (unsigned)i, (unsigned)native);
+        ExpectMenu(what, native != NATIVE_START_UNKNOWN && NativeUiPause_TestNamed(native));
+    }
+    ExpectMenu("3D menu: TOWER is the Tower row", StartMenu_TestNativeAction(23) == NATIVE_START_TOWER);
+#else
+    printf("(the Classic 2D game: no 3D menu here; the 3D game's own run checks its names)\n");
+#endif
+
+    // the key: the free field takes it once; a locked field, a disabled reset or half a second drops it
+    gMain.callback2 = CB2_Overworld;
+    UnlockPlayerFieldControls();
+    gSoftResetDisabled = FALSE;
+    MultiplayerSoftReset_KeyPressed();
+    MultiplayerSoftReset_KeyFrame();
+    ExpectMenu("key: the free field takes a press (a step may end first)", MultiplayerSoftReset_TakeKey());
+    ExpectMenu("key: taken once", !MultiplayerSoftReset_TakeKey());
+    MultiplayerSoftReset_KeyPressed();
+    LockPlayerFieldControls();                   // a menu, a script, a scene
+    MultiplayerSoftReset_KeyFrame();
+    UnlockPlayerFieldControls();
+    ExpectMenu("key: dropped when the field was locked, never taken later", !MultiplayerSoftReset_TakeKey());
+    MultiplayerSoftReset_KeyPressed();
+    gSoftResetDisabled = TRUE;                   // a save, a trade or a battle
+    ExpectMenu("key: refused while the reset is disabled", !MultiplayerSoftReset_TakeKey());
+    gSoftResetDisabled = FALSE;
+    MultiplayerSoftReset_KeyPressed();
+    for (i = 0; i < 31; i++)
+        MultiplayerSoftReset_KeyFrame();
+    ExpectMenu("key: dropped after half a second untaken", !MultiplayerSoftReset_TakeKey());
+    MultiplayerSoftReset_KeyPressed();
+    gMain.callback2 = NULL;                      // a battle or another screen
+    MultiplayerSoftReset_KeyFrame();
+    gMain.callback2 = CB2_Overworld;
+    ExpectMenu("key: dropped outside the field", !MultiplayerSoftReset_TakeKey());
+    MultiplayerHostSave_GameSaved();             // no world here: nothing to ask the launcher
+    ExpectMenu("host save: nothing without a world", !MultiplayerHostSave_TryOpen());
+    gMain.callback2 = field;
+
+    printf("selftest-start-menu: %d checks, %d failed\n", sMenuChecks, sMenuFailures);
+    return sMenuFailures ? 1 : 0;
+}

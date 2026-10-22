@@ -1709,6 +1709,20 @@ STATIC_ASSERT(NATIVE_START_STYLE == MENU_ACTION_STYLE, NativeUiStartMenuActionsM
 // The native PC UI (src/native_ui/screens/ui_pause.c) draws the start menu and
 // its save dialog in place of these windows and follows this state; the input
 // stays here.
+// MS-61: the PC build's own rows have names in the 3D menu too (TOWER and RESET showed as "Exit")
+static u8 NativeStartAction(u8 action)
+{
+    return action <= MENU_ACTION_STYLE ? action
+         : action == MENU_ACTION_TOWER ? NATIVE_START_TOWER
+         : action == MENU_ACTION_SOFT_RESET ? NATIVE_START_SOFT_RESET : NATIVE_START_UNKNOWN;
+}
+
+// --selftest-start-menu (native_selftest_tower.c): what the 3D menu makes of an engine row
+u8 StartMenu_TestNativeAction(u8 action)
+{
+    return NativeStartAction(action);
+}
+
 bool32 StartMenu_NativeUiState(struct NativeStartMenu *out)
 {
     bool32 open = FuncIsActiveTask(Task_ShowStartMenu);
@@ -1736,10 +1750,7 @@ bool32 StartMenu_NativeUiState(struct NativeStartMenu *out)
     {
         u8 action = sCurrentStartMenuActions[i];
 
-        // MS-61: the PC build's own rows have names in the 3D menu too (they showed as "Exit")
-        out->actions[i] = action <= MENU_ACTION_STYLE ? action
-                        : action == MENU_ACTION_TOWER ? NATIVE_START_TOWER
-                        : action == MENU_ACTION_SOFT_RESET ? NATIVE_START_SOFT_RESET : NATIVE_START_UNKNOWN;
+        out->actions[i] = NativeStartAction(action);
         out->labels[i] = action < ARRAY_COUNT(sStartMenuItems) ? sStartMenuItems[action].text : NULL;
     }
     out->cursor = sStartMenuCursorPos;
@@ -1780,3 +1791,20 @@ bool32 StartMenu_NativeUiState(struct NativeStartMenu *out)
     return TRUE;
 }
 #endif // ENABLE_NATIVE_UI
+
+#ifdef PORTABLE
+// --selftest-start-menu (native_selftest_tower.c, MS-61): the rows the START menu or its PLAYER list would show now.
+u32 StartMenu_TestActions(bool32 playerSubmenu, u8 *out, u32 size)
+{
+    bool8 submenu = sPlayerSubmenu;
+    u32 i, count;
+
+    sPlayerSubmenu = playerSubmenu;
+    BuildStartMenuActions();
+    count = sNumStartMenuActions;
+    for (i = 0; i < count && i < size; i++)
+        out[i] = sCurrentStartMenuActions[i];
+    sPlayerSubmenu = submenu;
+    return count;
+}
+#endif
