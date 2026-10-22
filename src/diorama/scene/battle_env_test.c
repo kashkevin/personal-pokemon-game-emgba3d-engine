@@ -1404,6 +1404,7 @@ static struct
     bool shots, byItself, again, ending;
     u32 lastVblank;
     bool script, inBattle, mapChanged;
+    bool between;           /* a scene that began by itself before this target was answered (logged once) */
     int battles, outcome, trainerA, trainerB;
     u16 trainerId, ownFlag;     /* the target trainer (0: none) and the target's own flag (0: none) */
     u32 money;
@@ -1508,7 +1509,7 @@ bool DioramaBattleEnvTest_TakeWarpCoords(s16 *x, s16 *y)
 static void PlanResetRun(void)
 {
     sPlan.frames = sPlan.settle = sPlan.pressLeft = sPlan.gapLeft = sPlan.presses = 0;
-    sPlan.script = sPlan.inBattle = sPlan.mapChanged = sPlan.byItself = false;
+    sPlan.script = sPlan.inBattle = sPlan.mapChanged = sPlan.byItself = sPlan.between = false;
     sPlan.battles = 0;
     sPlan.outcome = sPlan.trainerA = sPlan.trainerB = -1;
     sPlan.hangFrames = sPlan.budget;
@@ -1846,6 +1847,25 @@ static void PlanPickMoves(void)
     }
 }
 
+/* A press as a player makes it: held AUTOPILOT_HOLD frames, then a gap (shorter in a battle). */
+static unsigned short PlanPress(unsigned short button)
+{
+    if (sPlan.pressLeft > 0)
+    {
+        sPlan.pressLeft--;
+        return button;
+    }
+    if (sPlan.gapLeft > 0)
+    {
+        sPlan.gapLeft--;
+        return 0;
+    }
+    sPlan.presses++;
+    sPlan.pressLeft = AUTOPILOT_HOLD - 1;
+    sPlan.gapLeft = gMain.inBattle ? AUTOPILOT_HOLD * 2 : 12;
+    return button;
+}
+
 /* Render thread (the game thread parked at the frame's end): the keys a player would press for the target. */
 static unsigned short PlanKeys(void)
 {
@@ -1860,7 +1880,7 @@ static unsigned short PlanKeys(void)
     sPlan.phaseFrames++;
     /* the warp, the arrival or the end that never comes (a map that does not load, a field never free) */
     if ((sPlan.phase == PLAN_GO || sPlan.phase == PLAN_ARRIVE || sPlan.phase == PLAN_DONE)
-     && sPlan.phaseFrames > sPlan.budget)
+     && sPlan.phaseFrames > sPlan.budget * (sPlan.between ? 5 : 1))  /* a scene answered first: a battle's time too */
     {
         TestLog("Battle env test: plan target %d %s hang in phase %d frames %d script %d in battle %d map %d.%d %d,%d",
                 sPlan.first + sPlan.next, t->key, sPlan.phase, sPlan.phaseFrames, ScriptContext_IsEnabled(),
@@ -1922,6 +1942,24 @@ static unsigned short PlanKeys(void)
         sPlan.settle = 0;
         sPlan.phase = PLAN_RUN;
         return 0;
+    }
+    /* Between two targets (on the way to the next one) something began by itself where the last one left the player:
+       a trainer who looks around saw the player (an Abandoned Ship room the last target's door led into: windows-package
+       run 129's gameplay shard 3, the same on Linux in that order), a map's own scene. Answered as within a target - B
+       through its lines, A through a battle with the most effective move - or the field is never free, the next warp
+       never comes and the next target hangs. */
+    if (sPlan.phase == PLAN_GO && sPlan.phaseFrames > 30 && (ScriptContext_IsEnabled() || gMain.inBattle))
+    {
+        if (!sPlan.between)
+        {
+            sPlan.between = true;
+            TestLog("Battle env test: plan target %d %s before it: a scene began by itself on map %d.%d at %d,%d "
+                    "(answered)", sPlan.first + sPlan.next, t->key, gSaveBlock1Ptr->location.mapGroup,
+                    gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->pos.x, gSaveBlock1Ptr->pos.y);
+        }
+        if (gMain.inBattle)
+            PlanPickMoves();
+        return PlanPress(gMain.inBattle ? A_BUTTON : B_BUTTON);
     }
     if (sPlan.phase != PLAN_RUN)
         return 0;
@@ -2108,20 +2146,7 @@ static unsigned short PlanKeys(void)
         if (!DioramaBattleEnvTest_ScriptMenuUp())
             sPlan.menuUp = 0;
     }
-    if (sPlan.pressLeft > 0)
-    {
-        sPlan.pressLeft--;
-        return button;
-    }
-    if (sPlan.gapLeft > 0)
-    {
-        sPlan.gapLeft--;
-        return 0;
-    }
-    sPlan.presses++;
-    sPlan.pressLeft = AUTOPILOT_HOLD - 1;
-    sPlan.gapLeft = gMain.inBattle ? AUTOPILOT_HOLD * 2 : 12;
-    return button;
+    return PlanPress(button);
 }
 
 void DioramaBattleEnvTest_FieldTick(void)
