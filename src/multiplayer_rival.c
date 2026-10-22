@@ -36,6 +36,7 @@
 #include "constants/field_effects.h"
 #include "constants/flags.h"
 #include "constants/heal_locations.h"
+#include "item.h"
 #include "constants/items.h"
 #include "constants/layouts.h"
 #include "constants/map_event_ids.h"
@@ -636,6 +637,8 @@ void MultiplayerIntro_Begin(void)
 
     // From CB2_NewGame, after the gender and name (main_menu.c) and NewGameInitData: no starter yet.
     ApplyIntroState(FALSE);
+    // The owner's request (2026-10-22): every new character starts with 5 Poke Balls.
+    AddBagItem(ITEM_POKE_BALL, 5);
     VarSet(VAR_MULTIPLAYER_STARTER_CHOICE, MP_INTRO_STARTER_PENDING);
     ResetTasks();
     ResetInitialPlayerAvatarState();
