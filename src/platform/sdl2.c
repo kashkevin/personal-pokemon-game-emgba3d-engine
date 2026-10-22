@@ -2783,8 +2783,11 @@ void ProcessEvents(void)
             case SDLK_r:
                 // Ctrl+R: hold A+B+START+SELECT for one frame (the chord is awkward
                 // on a keyboard). The game decides what it means: this multiplayer
-                // build hands the chord to the Local Soft Reset handler
-                // (MultiplayerLocalReset_HandleChord) and never reboots from it.
+                // build hands the chord to MultiplayerLocalReset_HandleChord, which
+                // never reboots from it: in the field or the START menu it is the
+                // soft reset key (MS-61, multiplayer_soft_reset.c: the question, or
+                // the Players menu's reset page in a world); in a battle it keeps
+                // its Local Soft Reset meaning.
                 if (event.key.keysym.mod & (KMOD_LCTRL | KMOD_RCTRL))
                     sSoftResetChordFrames = 1;
                 break;

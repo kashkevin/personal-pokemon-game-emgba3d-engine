@@ -65,6 +65,7 @@ bool MpBridge_Configure(const char *path); /* false: refuse to start the game */
 bool MpBridge_IsEnabled(void);
 bool MpBridge_MenuOpenPageEnabled(void); /* Update 32: a Players menu OPEN may name its page (menu_open_page=1) */
 bool MpBridge_TowerEnabled(void); /* Battle Tower: Legends (tower=1) */
+bool MpBridge_HostSavePageEnabled(void); /* MS-61: an in-game SAVE in a world asks for the host save (host_save_page=1) */
 enum MpLinkState
 {
     MP_LINK_OFFLINE,       /* started without a bridge: single play on this PC */
@@ -134,6 +135,8 @@ struct MpBridgeCaps
                                         kinds 6/7 (needs menuOpenPage 1 and the world; launcher opt-in tower=1) */
     uint32_t savePartyQuery;         /* 1: QUERY_PARTY (save opcode 31), what a battle preparation checks (KNOWN_ISSUES
                                         MS-60; needs the save mailbox) */
+    uint32_t hostSavePage;           /* 1: OPEN page 3, the host save after an in-game SAVE (MS-61; needs menuOpenPage 1;
+                                        launcher opt-in host_save_page=1) */
 };
 
 enum

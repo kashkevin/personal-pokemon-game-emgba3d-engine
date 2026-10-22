@@ -360,10 +360,6 @@ static void BuildStartMenuActions(void)
             AddStartMenuAction(MENU_ACTION_GET_OFF);
         else if (MultiplayerRide_CanMount())
             AddStartMenuAction(MENU_ACTION_RIDE);
-#ifdef PORTABLE
-        AddStartMenuAction(MENU_ACTION_SOFT_RESET);
-#endif
-#line 326 // gba-line
         AddStartMenuAction(MENU_ACTION_PLAYER_BACK);
         return;
     }
@@ -711,6 +707,16 @@ void ShowStartMenu(void)
 
 static bool8 HandleStartMenuInput(void)
 {
+#ifdef PORTABLE
+    // MS-61: the soft reset key while this menu is open (the key replaced START > PLAYER > RESET): the menu closes and
+    // the reset asks, as it does from the field (multiplayer_soft_reset.c).
+    if (MultiplayerSoftReset_TakeKey())
+    {
+        gMenuCallback = StartMenuSoftResetCallback;
+        return FALSE;
+    }
+#endif
+#line 673 // gba-line
     if (JOY_NEW(DPAD_UP))
     {
         PlaySE(SE_SELECT);
@@ -885,9 +891,13 @@ static bool8 StartMenuPlayersCallback(void)
 }
 
 #ifdef PORTABLE
+// MS-61: the soft reset key while the START menu is open (HandleStartMenuInput); there is no RESET row any more.
 static bool8 StartMenuSoftResetCallback(void)
 {
-    sPlayerSubmenu = FALSE; sStartMenuCursorPos = sPlayerReturnCursor;
+    if (sPlayerSubmenu)
+    {
+        sPlayerSubmenu = FALSE; sStartMenuCursorPos = sPlayerReturnCursor;
+    }
     RemoveExtraStartMenuWindows(); HideStartMenu();
     MultiplayerSoftReset_Begin(); // asks (no world) or opens PLAYERS on its soft reset page (a world)
     return TRUE;
@@ -1042,7 +1052,19 @@ static bool8 SaveStartCallback(void)
 
 static bool8 SaveCallback(void)
 {
+#ifdef PORTABLE
+    u8 result = RunSaveCallback();
+
+    // MS-61: in a world an in-game SAVE is the host's save as well: the field asks the launcher once it is free
+    // (multiplayer_soft_reset.c). Without a world, or with a launcher that has no host save page, nothing changes.
+    if (result == SAVE_SUCCESS)
+        MultiplayerHostSave_GameSaved();
+    switch (result)
+#else
+#line 974 // gba-line
     switch (RunSaveCallback())
+#endif
+#line 975 // gba-line
     {
     case SAVE_IN_PROGRESS:
         return FALSE;
@@ -1714,7 +1736,10 @@ bool32 StartMenu_NativeUiState(struct NativeStartMenu *out)
     {
         u8 action = sCurrentStartMenuActions[i];
 
-        out->actions[i] = action <= MENU_ACTION_STYLE ? action : NATIVE_START_UNKNOWN;
+        // MS-61: the PC build's own rows have names in the 3D menu too (they showed as "Exit")
+        out->actions[i] = action <= MENU_ACTION_STYLE ? action
+                        : action == MENU_ACTION_TOWER ? NATIVE_START_TOWER
+                        : action == MENU_ACTION_SOFT_RESET ? NATIVE_START_SOFT_RESET : NATIVE_START_UNKNOWN;
         out->labels[i] = action < ARRAY_COUNT(sStartMenuItems) ? sStartMenuItems[action].text : NULL;
     }
     out->cursor = sStartMenuCursorPos;

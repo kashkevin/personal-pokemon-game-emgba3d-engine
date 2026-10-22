@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
-"""Field check of the Update 32 soft reset (START > PLAYER > RESET) without a world, through the game's own UI.
+"""Field check of the soft reset without a world (Update 32; MS-61: the reset key, no menu row), through the game's own UI.
 
 Runs the native game headless under xvfb with PKMN_DEBUG_KEYS (tools/pc_port/rival_check.py's runner and its
-"rival F: ..." state lines). Each scenario states what must be true:
+"rival F: ..." state lines). The key is A+B+START+SELECT pressed together, as Ctrl+R sends it (src/platform/sdl2.c).
+Each scenario states what must be true:
 
   - the starter reroll: in Birch's lab, before the claim, the player saves (START > SAVE); claims the Fire ball's
-    starter; chooses START > PLAYER > RESET and YES. The game goes back to its title screen (the real soft reset, as
-    A+B+START+SELECT), CONTINUE loads the save: no Pokemon, the claim open and the balls back on the table; the second
-    claim is a new roll (another personality), and the game keeps exactly one Pokemon;
-  - NO keeps playing: RESET and NO leave the player on the field with the starter, without a reset.
+    starter; presses the reset key and YES. The game goes back to its title screen (the real soft reset), CONTINUE
+    loads the save: no Pokemon, the claim open and the balls back on the table; the second claim is a new roll
+    (another personality), and the game keeps exactly one Pokemon;
+  - NO keeps playing: the key and NO leave the player on the field with the starter, without a reset, and the player
+    walks on afterwards (nothing left locked);
+  - with the START menu open the key closes it and asks;
+  - pressed in the middle of a step the key asks once the step ends (where START is read);
+  - pressed while another screen has the game (the starter's screen) it does nothing at all: the press is dropped and
+    the claim goes on as if it had not happened;
+  - the PLAYER list has no RESET row any more (the reset is only the key).
 
     tools/pc_port/soft_reset_check.py [--binary ./pokeemerald-mp] [--only name,name] [--keep-logs DIR]
 
@@ -44,17 +51,14 @@ def claim_keys(at):
     return [f"{at}:UP", f"{at + 60}:A", f"{at + 400}:A", f"{at + 600}:A"] + [f"{f}:B" for f in range(at + 1050, at + 1800, 50)]
 
 
-# The START menu without a Pokedex: BAG, PLAYER, SAVE, OPTION, EXIT; with the starter POKEMON comes first and the
-# remembered cursor (on SAVE, the third row) is then on PLAYER. PLAYER's own list ends with RESET, BACK: Up twice.
+# The START menu without a Pokedex: BAG, PLAYER, SAVE, OPTION, EXIT.
 SAVE_KEYS = ["300:START", "360:DOWN", "400:DOWN", "440:A", "520:A"]
+CHORD = "A+B+START+SELECT"      # the reset key: A+B+START+SELECT together, which Ctrl+R sends for one frame
 
 
-def reset_keys(at, yes, downs=0):
-    # START (to PLAYER: `downs` rows down), PLAYER, Up twice to RESET, A; the question's cursor starts on NO
-    keys = [f"{at}:START"] + [f"{at + 60 + 40 * i}:DOWN" for i in range(downs)]
-    at += 60 + 40 * downs
-    keys += [f"{at}:A", f"{at + 60}:UP", f"{at + 100}:UP", f"{at + 140}:A"]
-    return keys + ([f"{at + 260}:UP", f"{at + 300}:A"] if yes else [f"{at + 300}:A"])
+def reset_keys(at, yes):
+    # the key, then the question ("Reset the game to your last save?"): its cursor starts on NO
+    return [f"{at}:{CHORD}"] + ([f"{at + 120}:UP", f"{at + 160}:A"] if yes else [f"{at + 160}:A"])
 
 
 def reroll(sym):
@@ -90,17 +94,44 @@ def reroll(sym):
     return check
 
 
-def kept(sym):
+def kept(sym, asked=True, walked_after=None):
+    """No reset: the claim stands. `asked`: the key asked (and NO answered); else the press was dropped and nothing asked.
+    `walked_after`: a frame after which the player must have moved (the field was left free)."""
     def check(r):
         problems = []
         if len(claims(r)) != 1:
             problems.append(f"{len(claims(r))} claims logged, expected one")
-        if not r.trace("soft reset: asked (no world)"):
-            problems.append("RESET did not ask")
+        if not r.trace("soft reset: key"):
+            problems.append("the game never saw the reset key")
+        if asked and not (r.trace("soft reset: key taken") and r.trace("soft reset: asked (no world)")):
+            problems.append("the key did not ask")
+        if not asked and (r.trace("soft reset: key taken") or r.trace("soft reset: asked")):
+            problems.append("the key asked where the game was not in the field")
+        if not asked and not r.trace("soft reset: key dropped"):
+            problems.append("the key was not dropped")
         if r.trace("soft reset: resetting") or sym.get("CB2_InitTitleScreen") in ic.callbacks(r):
-            problems.append("NO reset the game")
+            problems.append("the game was reset")
         if r.last["party"] != 1 or (r.last["group"], r.last["num"]) != LAB:
             problems.append(f"party {r.last['party']} at {r.last['group']}.{r.last['num']}: expected the starter, in the lab")
+        if walked_after is not None:
+            before = [row for row in r.rows if row["frame"] <= walked_after]
+            after = [row for row in r.rows if row["frame"] > walked_after]
+            if not before or not after or all((row["x"], row["y"]) == (before[-1]["x"], before[-1]["y"]) for row in after):
+                problems.append("the player could not walk after the question (the field stayed locked)")
+        return problems
+    return check
+
+
+def walked(sym):
+    """The key pressed in the middle of a step: taken once the step ends, then NO; the player is a tile further on."""
+    inner = kept(sym, walked_after=None)
+
+    def check(r):
+        problems = inner(r)
+        start = [row for row in r.rows if row["frame"] <= 2200]
+        if not start or not any((row["x"], row["y"]) != (start[-1]["x"], start[-1]["y"]) for row in r.rows
+                                if row["frame"] > 2200):
+            problems.append("the player did not walk the step the key was pressed in")
         return problems
     return check
 
@@ -112,10 +143,17 @@ def scenarios(sym):
     lab["PKMN_DEBUG_RIVAL_SET"] += "," + rc.setup(FLAG_SYS_POKEDEX_GET=0, FLAG_SYS_POKENAV_GET=0)
     title = [f"{f}:A" for f in range(3300, 4001, 140)]     # title screen, PRESS START, CONTINUE (the first row)
     return [
-        ("reset-reroll", "save, claim, RESET and YES: the title screen, CONTINUE, the claim open again, a new roll",
+        ("reset-reroll", "save, claim, the reset key and YES: the title screen, CONTINUE, the claim open again, a new roll",
          lab, SAVE_KEYS + claim_keys(800) + reset_keys(2700, True) + title + claim_keys(4300), reroll(sym)),
-        ("reset-no", "RESET and NO: the player keeps playing with the starter, no reset",
-         lab, claim_keys(300) + reset_keys(2200, False, downs=2), kept(sym)),
+        ("reset-no", "the reset key and NO: the player keeps playing with the starter, no reset, and walks on",
+         lab, claim_keys(300) + reset_keys(2200, False) + rc.hold("DOWN", 2600, 24), kept(sym, walked_after=2560)),
+        ("reset-start-menu", "the reset key with the START menu open: the menu closes and the key asks; NO",
+         lab, claim_keys(300) + ["2200:START"] + reset_keys(2320, False) + rc.hold("DOWN", 2700, 24),
+         kept(sym, walked_after=2660)),
+        ("reset-mid-step", "the reset key in the middle of a step: asked once the step ends; NO",
+         lab, claim_keys(300) + rc.hold("DOWN", 2200, 16) + reset_keys(2206, False), walked(sym)),
+        ("reset-other-screen", "the reset key while the starter's screen has the game: dropped, the claim goes on",
+         lab, claim_keys(300)[:2] + [f"500:{CHORD}"] + claim_keys(300)[2:], kept(sym, asked=False)),
     ]
 
 
@@ -125,7 +163,9 @@ def main():
     parser.add_argument("--only", default="")
     parser.add_argument("--timeout", type=float, default=180)
     parser.add_argument("--keep-logs", default="")
+    parser.add_argument("--facts", default="", help="the engine's numbers (rival_check.py --write-facts); else its headers")
     args = parser.parse_args()
+    rc.load_facts(args.facts)
     only = set(filter(None, args.only.split(",")))
     sym = ic.symbols(os.path.abspath(args.binary))
     failures = 0

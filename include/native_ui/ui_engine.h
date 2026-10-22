@@ -111,6 +111,8 @@ enum NativeStartMenuAction
     NATIVE_START_RIDE,
     NATIVE_START_GET_OFF,
     NATIVE_START_STYLE,
+    NATIVE_START_SOFT_RESET,    /* MS-61: no menu has it now (the reset is a key); kept named all the same */
+    NATIVE_START_TOWER,         /* Battle Tower: Legends, in a world (START > PLAYER > TOWER) */
     NATIVE_START_UNKNOWN,
 };
 enum NativeSaveStep

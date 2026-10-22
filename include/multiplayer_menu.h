@@ -47,6 +47,11 @@ extern const u32 gMultiplayerMenuReleaseAbiVersion;
 #define MP_MENU_OPEN_PAGE_ABI 1
 #define MP_MENU_PAGE_SOFT_RESET 1
 extern const u32 gMultiplayerMenuOpenPageAbiVersion;
+// MS-61: page 3, the host save after an in-game SAVE in a world (bridge cap hostSavePage, the launcher's
+// host_save_page=1): the companion closes the window at once and the launcher saves on the host, as Save now does.
+#define MP_MENU_HOST_SAVE_PAGE_ABI 1
+#define MP_MENU_PAGE_HOST_SAVE 3
+extern const u32 gMultiplayerHostSavePageAbiVersion;
 bool32 MultiplayerMenu_OpenPage(u16 page);
 #endif
 

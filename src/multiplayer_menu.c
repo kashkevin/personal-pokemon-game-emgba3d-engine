@@ -288,6 +288,7 @@ bool32 MultiplayerMenu_Open(void)
 
 #ifdef PORTABLE
 const u32 gMultiplayerMenuOpenPageAbiVersion = MP_MENU_OPEN_PAGE_ABI;
+const u32 gMultiplayerHostSavePageAbiVersion = MP_MENU_HOST_SAVE_PAGE_ABI; // MS-61: page 3, the in-game SAVE's host save
 
 // Update 32: the Players menu opened on a page of its own (MP_MENU_PAGE_*): the companion shows that page first.
 bool32 MultiplayerMenu_OpenPage(u16 page)

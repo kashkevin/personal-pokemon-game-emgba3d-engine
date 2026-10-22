@@ -72,6 +72,8 @@ static const u8 sText_Back[] = _("Back");
 static const u8 sText_Ride[] = _("Ride");
 static const u8 sText_GetOff[] = _("Get off");
 static const u8 sText_Style[] = _("Style");
+static const u8 sText_Tower[] = _("Tower");
+static const u8 sText_SoftReset[] = _("Soft reset");
 static const u8 sText_Events[] = _("Events");
 static const u8 sText_Open[] = _("Open");
 static const u8 sText_Close[] = _("Close");
@@ -83,9 +85,11 @@ static const u8 sHelp_Pokedex[] = _("Look up the Pokémon you have seen and caug
 static const u8 sHelp_Pokemon[] = _("Check and organize the Pokémon in your party.");
 static const u8 sHelp_Bag[] = _("Look at the items you are carrying.");
 static const u8 sHelp_PokeNav[] = _("Open the PokéNav: map, condition and Match Call.");
-static const u8 sHelp_Player[] = _("Your Trainer Card, the other players, your style.");
+static const u8 sHelp_Player[] = _("Your Trainer Card, the other players, the Tower, your style.");
 static const u8 sHelp_Save[] = _("Save your progress on this PC.");
 static const u8 sHelp_SaveLinked[] = _("Save your progress. Your friends keep playing.");
+/* MS-61: with the launcher's host save page an in-game SAVE in a world is the host's save as well */
+static const u8 sHelp_SaveHost[] = _("Save your progress here and on the host. Friends keep playing.");
 static const u8 sHelp_Options[] = _("Text speed, battle scene, sound, buttons, frame.");
 static const u8 sHelp_Exit[] = _("Close this menu.");
 static const u8 sHelp_Retire[] = _("Leave the challenge you are taking part in.");
@@ -98,6 +102,8 @@ static const u8 sHelp_Back[] = _("Back to the menu.");
 static const u8 sHelp_Ride[] = _("Ride on your Pokémon.");
 static const u8 sHelp_GetOff[] = _("Get off your Pokémon.");
 static const u8 sHelp_Style[] = _("Change your colours: skin, hair, outfit, hat and bag.");
+static const u8 sHelp_Tower[] = _("Battle Tower: Legends. 100 floors, alone or with a friend.");
+static const u8 sHelp_SoftReset[] = _("Back to your last save (the key: Ctrl+R).");
 static const u8 sHelp_Events[] = _("World Events and Championships: planned, not in this game yet.");
 
 static const u8 sText_LinkOffline[] = _("Not linked");
@@ -117,6 +123,7 @@ static const u8 sText_JustNow[] = _("in-game save, just now");
 static const u8 sText_NotYet[] = _("not saved since the game started");
 static const u8 sText_Writing[] = _("writing…");
 static const u8 sText_HostLauncher[] = _("checkpoints are the launcher's");
+static const u8 sText_HostToo[] = _("this save goes there too");
 static const u8 sText_NoSession[] = _("not in a multiplayer session");
 static const u8 sText_AutoLauncher[] = _("set per character in the launcher");
 static const u8 sText_Dash[] = _("-");
@@ -333,6 +340,8 @@ static const u8 *EntryLabel(const struct Entry *e)
     case NATIVE_START_RIDE: return sText_Ride;
     case NATIVE_START_GET_OFF: return sText_GetOff;
     case NATIVE_START_STYLE: return sText_Style;
+    case NATIVE_START_TOWER: return sText_Tower;
+    case NATIVE_START_SOFT_RESET: return sText_SoftReset;
     case 0xFF: return sText_Events;
     default: return sText_Exit;
     }
@@ -348,7 +357,8 @@ static const u8 *EntryHelp(const struct Entry *e)
     case NATIVE_START_POKENAV: return sHelp_PokeNav;
     case NATIVE_START_PLAYER_OPTIONS: return sHelp_Player;
     case NATIVE_START_PLAYER: case NATIVE_START_PLAYER_LINK: case NATIVE_START_TRAINER_CARD: return sHelp_Card;
-    case NATIVE_START_SAVE: return sLinked ? sHelp_SaveLinked : sHelp_Save;
+    case NATIVE_START_SAVE: return !sLinked ? sHelp_Save : MpBridge_HostSavePageEnabled() ? sHelp_SaveHost
+                                                                                      : sHelp_SaveLinked;
     case NATIVE_START_OPTION: return sHelp_Options;
     case NATIVE_START_RETIRE_SAFARI: case NATIVE_START_RETIRE_FRONTIER: return sHelp_Retire;
     case NATIVE_START_REST_FRONTIER: return sHelp_Rest;
@@ -359,6 +369,8 @@ static const u8 *EntryHelp(const struct Entry *e)
     case NATIVE_START_RIDE: return sHelp_Ride;
     case NATIVE_START_GET_OFF: return sHelp_GetOff;
     case NATIVE_START_STYLE: return sHelp_Style;
+    case NATIVE_START_TOWER: return sHelp_Tower;
+    case NATIVE_START_SOFT_RESET: return sHelp_SoftReset;
     case 0xFF: return sHelp_Events;
     default: return sHelp_Exit;
     }
@@ -382,6 +394,8 @@ static const char *EntryIcon(const struct Entry *e, bool *hasSel)
     case 0xFF: return "flag";
     case NATIVE_START_DEXNAV: *hasSel = false; return "search";
     case NATIVE_START_STYLE: *hasSel = false; return "head_green";
+    case NATIVE_START_TOWER: return "burst";
+    case NATIVE_START_SOFT_RESET: *hasSel = false; return "disc_red";
     default: *hasSel = false; return "return";
     }
 }
@@ -645,8 +659,9 @@ static void Journal(int jx, int jy)
     yy = JournalRow(5, rx, vx, y0, "HOST", NULL, lc);
     UiG_TextEx(vx, yy, sLinked ? sText_Launcher : sText_Dash, UI_FONT_NORMAL, UI_P_TEXT_MUTED, UI_P_TEXT_SH,
                UI_ALIGN_RIGHT);
-    UiText_Draw(UI_FONT_SMALL, rx + 52, yy + 2, sLinked ? sText_HostLauncher : sText_NoSession, UI_P_TEXT_MUTED,
-                UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+    UiText_Draw(UI_FONT_SMALL, rx + 52, yy + 2, !sLinked ? sText_NoSession
+                                                : MpBridge_HostSavePageEnabled() ? sText_HostToo : sText_HostLauncher,
+                UI_P_TEXT_MUTED, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
     yy = JournalRow(6, rx, vx, y0, "AUTOSAVE", NULL, lc);
     UiW_Pix("sv_clock", sClockIcon, 7, clockPal, 1, pgx + 9, yy + 4, false);
     UiG_TextEx(vx, yy, sLinked ? sText_Launcher : sText_Dash, UI_FONT_NORMAL, UI_P_TEXT_MUTED, UI_P_TEXT_SH,

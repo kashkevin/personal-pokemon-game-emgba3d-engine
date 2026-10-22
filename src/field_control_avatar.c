@@ -17,6 +17,7 @@
 #include "multiplayer_spawns.h"
 #include "multiplayer_world.h"
 #include "multiplayer_rival.h"
+#include "multiplayer_soft_reset.h"
 #endif
 #line 16 // gba-line
 #include "field_message_box.h"
@@ -165,6 +166,18 @@ void FieldGetPlayerInput(struct FieldInput *input, u16 newKeys, u16 heldKeys)
     }
 }
 
+#ifdef PORTABLE
+// MS-61: the field takes the soft reset key (and the host save an in-game SAVE asked for) where FieldGetPlayerInput
+// reads START: standing, or at a tile's centre off forced movement, and not at the fastest speed.
+static bool8 SoftResetKeyHere(void)
+{
+    u8 state = gPlayerAvatar.tileTransitionState;
+    bool8 forced = MetatileBehavior_IsForcedMovementTile(GetPlayerCurMetatileBehavior(gPlayerAvatar.runningState));
+
+    return ((state == T_TILE_CENTER && !forced) || state == T_NOT_MOVING) && GetPlayerSpeed() != PLAYER_SPEED_FASTEST;
+}
+#endif
+#line 162 // gba-line
 int ProcessPlayerFieldInput(struct FieldInput *input)
 {
     struct MapPosition position;
@@ -236,6 +249,19 @@ int ProcessPlayerFieldInput(struct FieldInput *input)
     }
     if (input->pressedAButton && TrySetupDiveDownScript() == TRUE)
         return TRUE;
+#ifdef PORTABLE
+    // MS-61: where START opens the menu (standing, or at a tile's centre): first the host save an in-game SAVE in a
+    // world asked for, then the soft reset key (Ctrl+R, A+B+START+SELECT): the question, or the Players menu's
+    // reset page in a world. A refusal says why in a banner and leaves the field as it was (multiplayer_soft_reset.c).
+    if (SoftResetKeyHere())
+    {
+        if (MultiplayerHostSave_TryOpen())
+            return TRUE;
+        if (MultiplayerSoftReset_TakeKey() && MultiplayerSoftReset_Begin())
+            return TRUE;
+    }
+#endif
+#line 227 // gba-line
     if (input->pressedStartButton)
     {
         FlagSet(FLAG_OPENED_START_MENU);

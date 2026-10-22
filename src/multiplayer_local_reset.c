@@ -22,6 +22,10 @@
 #include "constants/vars.h"
 #include "constants/battle.h"
 #include "constants/battle_string_ids.h"
+#ifdef PORTABLE
+#include "multiplayer_soft_reset.h"
+#endif
+#line 25 // gba-line
 
 // Compared guards only. Never restore these as a character snapshot.
 struct LocalResetGuard {
@@ -318,6 +322,10 @@ bool32 MultiplayerLocalReset_HandleChord(void)
 {
     const u16 chord = A_BUTTON | B_BUTTON | START_BUTTON | SELECT_BUTTON;
     const u16 held = JOY_HELD_RAW(chord);
+#ifdef PORTABLE
+    MultiplayerSoftReset_KeyFrame(); // MS-61: drops a reset key press that neither the field nor the START menu took
+#endif
+#line 315 // gba-line
     if (!held)
     {
         sLocalResetChordHeld = FALSE;
@@ -329,6 +337,10 @@ bool32 MultiplayerLocalReset_HandleChord(void)
     if (sLocalResetChordHeld) return TRUE;
     if (held != chord) return FALSE;
     sLocalResetChordHeld = TRUE;
+#ifdef PORTABLE
+    MultiplayerSoftReset_KeyPressed(); // MS-61: the soft reset key (the field or the START menu takes it)
+#endif
+#line 326 // gba-line
 #if MP_LOCAL_RESET_ENABLED
     // Request rechecks the original encounter, exact live session/incarnation
     // and roster, personal-state guard and first-action window. A chord cannot

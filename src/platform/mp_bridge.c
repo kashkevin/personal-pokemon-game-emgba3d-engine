@@ -170,6 +170,8 @@ const char *MpBridge_CheckCaps(const struct MpBridgeCaps *c)
         return "invalid menu open page capability";
     if (c->tower && (c->tower != 1 || c->menuOpenPage != 1 || c->world != 1))
         return "invalid Battle Tower capability";
+    if (c->hostSavePage && (c->hostSavePage != 1 || c->menuOpenPage != 1))
+        return "invalid host save page capability";
     if (c->menu > 2)
         return "invalid Players menu capability";
     if (c->tradeEffectPrepare && (!c->trade || c->menu != 2 || c->tradeEffectPrepare != 1))
@@ -1130,6 +1132,18 @@ static void PollBattle(struct MpBridge *b)
 }
 
 /* pollMenu */
+/* The pages an OPEN may name (the game's MP_MENU_PAGE_*): each needs its own capability. */
+static bool OpenPageAllowed(const struct MpBridge *b, uint32_t page)
+{
+    switch (page)
+    {
+    case 1: return Enabled(b->caps.menuOpenPage);
+    case 2: return Enabled(b->caps.tower);
+    case 3: return Enabled(b->caps.hostSavePage);
+    default: return false;
+    }
+}
+
 static void PollMenu(struct MpBridge *b)
 {
     uint8_t payload[16];
@@ -1149,10 +1163,11 @@ static void PollMenu(struct MpBridge *b)
     screen = U32(payload + 4);
     action = U16(payload + 8);
     kind = payload[10];
-    /* An OPEN names no action, or (menuOpenPage, Update 32) its page: 1 the soft reset. */
+    /* An OPEN names no action, or (menuOpenPage, Update 32) its page: 1 the soft reset, 2 the Tower (tower), 3 the host
+     * save after an in-game SAVE (hostSavePage, MS-61). */
     if (seq == 0 || action > 7 || kind < 1 || kind > 3 || !AllZero(payload + 11, 5)
      || (kind == 2 && (screen == 0 || action == 0)) || (kind == 3 && action != 0)
-     || (kind == 1 && action > (Enabled(b->caps.tower) ? 2u : Enabled(b->caps.menuOpenPage) ? 1u : 0u))
+     || (kind == 1 && action != 0 && !OpenPageAllowed(b, action))
      || (kind == 1 && screen != 0))
     {
         Stop(b, "invalid menu request", true);
@@ -2272,9 +2287,10 @@ bool MpBridge_Configure(const char *path)
     long port = -1;
     uint8_t token[32];
     bool haveToken = false;
-    bool optIn[5] = {false, false, false, false, false};
-    static const char *const sOptIns[5] = {
-        "trade_effect_prepare=1", "trade_effect_save=1", "trade_effect_choice=1", "menu_open_page=1", "tower=1"};
+    bool optIn[6] = {false, false, false, false, false, false};
+    static const char *const sOptIns[6] = {
+        "trade_effect_prepare=1", "trade_effect_save=1", "trade_effect_choice=1", "menu_open_page=1", "tower=1",
+        "host_save_page=1"};
     const char *problem;
 
     if (file == NULL)
@@ -2322,6 +2338,8 @@ bool MpBridge_Configure(const char *path)
             optIn[3] = true;
         else if (strcmp(line, sOptIns[4]) == 0 && !optIn[4])
             optIn[4] = true;
+        else if (strcmp(line, sOptIns[5]) == 0 && !optIn[5])
+            optIn[5] = true;
         else if (line[0] != '\0')
         {
             port = 0;
@@ -2362,6 +2380,10 @@ bool MpBridge_Configure(const char *path)
     caps.menuOpenPage = optIn[3] ? *(const volatile u32 *)&gMultiplayerMenuOpenPageAbiVersion : 0;
     /* Battle Tower: Legends: the launcher opts in (tower=1) when its manifest has tower_abi_version 1. */
     caps.tower = optIn[4] && caps.menuOpenPage == 1 ? *(const volatile u32 *)&gMultiplayerTowerAbiVersion : 0;
+    /* MS-61: the launcher opts in (host_save_page=1) when its manifest has host_save_page_abi_version 1: an in-game SAVE
+     * in a world then asks it to save on the host too. */
+    caps.hostSavePage = optIn[5] && caps.menuOpenPage == 1
+                      ? *(const volatile u32 *)&gMultiplayerHostSavePageAbiVersion : 0;
     caps.saveWindow = *(const volatile u32 *)&gMultiplayerSaveWindowAbiVersion;
     caps.menu = *(const volatile u32 *)&gMultiplayerMenuAbiVersion;
     /* The trade effect transports are explicit opt-ins of the manifest, never
@@ -2426,7 +2448,7 @@ bool MpBridge_Configure(const char *path)
     sEnabled = true;
     SDL_Log("Multiplayer bridge: companion at 127.0.0.1:%ld; save %u trade %u emergency %u battle %u/%u/%u "
             "window %u menu %u effects %u/%u/%u reset %u/%u world %u spawns %u running %u detail %u ffa %u/%u release %u "
-            "import %u page %u tower %u party %u",
+            "import %u page %u tower %u party %u hostsave %u",
             port, (unsigned)caps.save, (unsigned)caps.trade, (unsigned)caps.emergencySave,
             (unsigned)caps.battle, (unsigned)caps.battleResume, (unsigned)caps.battleAdmissionCleanup,
             (unsigned)caps.saveWindow, (unsigned)caps.menu, (unsigned)caps.tradeEffectPrepare,
@@ -2434,7 +2456,7 @@ bool MpBridge_Configure(const char *path)
             (unsigned)caps.resetInput, (unsigned)caps.world, (unsigned)caps.spawns,
             (unsigned)caps.presenceAnimation, (unsigned)caps.presenceDetail, (unsigned)caps.battleFfa,
             (unsigned)caps.battleFfa3, (unsigned)caps.menuRelease, (unsigned)caps.saveImportWindow, (unsigned)caps.menuOpenPage,
-            (unsigned)caps.tower, (unsigned)caps.savePartyQuery);
+            (unsigned)caps.tower, (unsigned)caps.savePartyQuery, (unsigned)caps.hostSavePage);
     return true;
 }
 
@@ -2451,6 +2473,11 @@ bool MpBridge_MenuOpenPageEnabled(void)
 bool MpBridge_TowerEnabled(void)
 {
     return sEnabled && sBridge.caps.tower == 1;
+}
+
+bool MpBridge_HostSavePageEnabled(void)
+{
+    return sEnabled && sBridge.caps.hostSavePage == 1;
 }
 
 /* The link status the game shows (the pause menu's LINK): see enum MpLinkState. A connection is shown only once the
