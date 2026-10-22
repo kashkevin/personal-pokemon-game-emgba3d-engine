@@ -1271,6 +1271,14 @@ static void StartBattle(void)
             TestLog("Battle env test: the Tower record: highest %d, progress %d (valid %d)", (int)TowerLegends_Highest(),
                     (int)TowerLegends_Progress(), (int)TowerLegends_RecordValid());
         }
+        /* PKMN_TEST_FAST_OPTIONS=1 - the save's own options as a player sets them in OPTION: fast text, no battle
+           animations (the launcher proof's 100-floor Tower climb, an accelerated set-up) */
+        if (EnvInt("PKMN_TEST_FAST_OPTIONS", 0) != 0)
+        {
+            gSaveBlock2Ptr->optionsTextSpeed = OPTIONS_TEXT_SPEED_FAST;
+            gSaveBlock2Ptr->optionsBattleSceneOff = TRUE;
+            TestLog("Battle env test: the options: text speed fast, battle scene off");
+        }
         status = TrySavingData(SAVE_NORMAL);
 
         TestLog("Battle env test: the test party (%d Pokemon) and bag saved, status %d",

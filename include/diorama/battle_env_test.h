@@ -58,6 +58,8 @@
  *                            flag in memory (the Tower experience cap's runs)
  *   PKMN_TEST_TOWER_RECORD=H:P  with save:1, the save's Tower record as a climb that cleared floor H and goes on at
  *                            P (a launcher proof's fixture: the host imports it on the player's first Tower action)
+ *   PKMN_TEST_FAST_OPTIONS=1 with save:1, the save's options fast text and battle scene off (a player's own OPTION
+ *                            choices; the launcher proof's 100-floor climb)
  *   PKMN_TEST_TOWER_WIN=1    a test advantage for the won runs: the lead's HP full again at each of its turns and its
  *                            most effective move chosen (in memory only)
  *
