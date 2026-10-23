@@ -137,6 +137,8 @@ struct MpBridgeCaps
                                         MS-60; needs the save mailbox) */
     uint32_t hostSavePage;           /* 1: OPEN page 3, the host save after an in-game SAVE (MS-61; needs menuOpenPage 1;
                                         launcher opt-in host_save_page=1) */
+    uint32_t battlePeek;             /* 1: battle opcode 25 PEEK, a query with the outbound block's bytes, and an ACK_OUT
+                                        without READ_OUT (KNOWN_ISSUES MS-62; needs battle 3; launcher opt-in battle_peek=1) */
 };
 
 enum

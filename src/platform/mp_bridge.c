@@ -172,6 +172,8 @@ const char *MpBridge_CheckCaps(const struct MpBridgeCaps *c)
         return "invalid Battle Tower capability";
     if (c->hostSavePage && (c->hostSavePage != 1 || c->menuOpenPage != 1))
         return "invalid host save page capability";
+    if (c->battlePeek && (c->battlePeek != 1 || c->battle != 3))
+        return "invalid battle peek capability";
     if (c->menu > 2)
         return "invalid Players menu capability";
     if (c->tradeEffectPrepare && (!c->trade || c->menu != 2 || c->tradeEffectPrepare != 1))
@@ -814,6 +816,9 @@ static bool BattleControl(const struct MpBridge *b, const uint8_t *p, size_t len
     crc = U32(p + 44);
     data = p + 48;
     maxOpcode = Enabled(c->battleAdmissionCleanup) ? 24 : (Enabled(c->battleResume) ? 21 : 13);
+    /* KNOWN_ISSUES MS-62: 25 PEEK, a native query with the outbound block's bytes after its 64 (battle_peek=1). */
+    if (opcode == 25 && Enabled(c->battlePeek))
+        maxOpcode = 25;
     if (inc == 0 || epoch == 0 || epoch > 0x7FFFFFFF || AllZero(id, 16)
      || seq == 0 || size > 256 || offset > size || opcode < 1 || opcode > maxOpcode
      || status > 10 || source > 3 || reserved != 0
@@ -836,6 +841,8 @@ static bool BattleControl(const struct MpBridge *b, const uint8_t *p, size_t len
     if (!native && (phase != 1 || opcode > 9 || kind > 1))
         return false;
     if (native && (source >= count || opcode == 3 || opcode == 7 || opcode == 8 || kind == 1 || kind > 8))
+        return false;
+    if (opcode == 25 && !native)
         return false;
     if (opcode == 4 || opcode == 5 || opcode == 6)
     {
@@ -870,6 +877,8 @@ static bool BattleControl(const struct MpBridge *b, const uint8_t *p, size_t len
         return false;
     }
     expected = BattleLength(native, command, opcode, size, offset);
+    if (opcode == 25) /* PEEK: no payload; its answer the 64-byte query and up to one chunk of the outbound block */
+        expected = command ? 0 : (dataLength >= 64 && dataLength <= 192 ? (int)dataLength : -1);
     if (command)
     {
         if (status != 0 || expected < 0 || dataLength != (uint32_t)expected)
@@ -2296,10 +2305,10 @@ bool MpBridge_Configure(const char *path)
     long port = -1;
     uint8_t token[32];
     bool haveToken = false;
-    bool optIn[6] = {false, false, false, false, false, false};
-    static const char *const sOptIns[6] = {
+    bool optIn[7] = {false, false, false, false, false, false, false};
+    static const char *const sOptIns[7] = {
         "trade_effect_prepare=1", "trade_effect_save=1", "trade_effect_choice=1", "menu_open_page=1", "tower=1",
-        "host_save_page=1"};
+        "host_save_page=1", "battle_peek=1"};
     const char *problem;
 
     if (file == NULL)
@@ -2349,6 +2358,8 @@ bool MpBridge_Configure(const char *path)
             optIn[4] = true;
         else if (strcmp(line, sOptIns[5]) == 0 && !optIn[5])
             optIn[5] = true;
+        else if (strcmp(line, sOptIns[6]) == 0 && !optIn[6])
+            optIn[6] = true;
         else if (line[0] != '\0')
         {
             port = 0;
@@ -2393,6 +2404,9 @@ bool MpBridge_Configure(const char *path)
      * in a world then asks it to save on the host too. */
     caps.hostSavePage = optIn[5] && caps.menuOpenPage == 1
                       ? *(const volatile u32 *)&gMultiplayerHostSavePageAbiVersion : 0;
+    /* KNOWN_ISSUES MS-62: the launcher opts in (battle_peek=1) when its manifest has battle_peek_abi_version 1: its battle
+     * route then takes each block from a PEEK (opcode 25) and acknowledges it without READ_OUT. */
+    caps.battlePeek = optIn[6] && caps.battle == 3 ? *(const volatile u32 *)&gMultiplayerBattlePeekAbiVersion : 0;
     caps.saveWindow = *(const volatile u32 *)&gMultiplayerSaveWindowAbiVersion;
     caps.menu = *(const volatile u32 *)&gMultiplayerMenuAbiVersion;
     /* The trade effect transports are explicit opt-ins of the manifest, never
@@ -2458,7 +2472,7 @@ bool MpBridge_Configure(const char *path)
     sEnabled = true;
     SDL_Log("Multiplayer bridge: companion at 127.0.0.1:%ld; save %u trade %u emergency %u battle %u/%u/%u "
             "window %u menu %u effects %u/%u/%u reset %u/%u world %u spawns %u running %u detail %u ffa %u/%u release %u "
-            "import %u page %u tower %u party %u hostsave %u",
+            "import %u page %u tower %u party %u hostsave %u peek %u",
             port, (unsigned)caps.save, (unsigned)caps.trade, (unsigned)caps.emergencySave,
             (unsigned)caps.battle, (unsigned)caps.battleResume, (unsigned)caps.battleAdmissionCleanup,
             (unsigned)caps.saveWindow, (unsigned)caps.menu, (unsigned)caps.tradeEffectPrepare,
@@ -2466,7 +2480,7 @@ bool MpBridge_Configure(const char *path)
             (unsigned)caps.resetInput, (unsigned)caps.world, (unsigned)caps.spawns,
             (unsigned)caps.presenceAnimation, (unsigned)caps.presenceDetail, (unsigned)caps.battleFfa,
             (unsigned)caps.battleFfa3, (unsigned)caps.menuRelease, (unsigned)caps.saveImportWindow, (unsigned)caps.menuOpenPage,
-            (unsigned)caps.tower, (unsigned)caps.savePartyQuery, (unsigned)caps.hostSavePage);
+            (unsigned)caps.tower, (unsigned)caps.savePartyQuery, (unsigned)caps.hostSavePage, (unsigned)caps.battlePeek);
     return true;
 }
 

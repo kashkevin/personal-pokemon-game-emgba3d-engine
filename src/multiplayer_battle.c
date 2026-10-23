@@ -77,6 +77,9 @@ const u32 gMultiplayerBattleCoopAbiVersion = MULTIPLAYER_BATTLE_COOP_ABI;
 const u32 gMultiplayerBattleFfaAbiVersion = MULTIPLAYER_BATTLE_FFA_ABI;
 const u32 gMultiplayerBattleFfa3AbiVersion = MULTIPLAYER_BATTLE_FFA3_ABI;
 #endif
+#ifdef PORTABLE
+const u32 gMultiplayerBattlePeekAbiVersion = 1; // KNOWN_ISSUES MS-62: PEEK (HandlePeek) and an ACK_OUT after it
+#endif
 #line 54 // gba-line
 EWRAM_DATA volatile struct MultiplayerBattleMailbox gMultiplayerBattleMailbox = {0};
 // Read-only proof observation; never an authority or command input.
@@ -1411,11 +1414,53 @@ static u8 CancelAdmission(const struct MultiplayerBattleControl *c)
     return MP_BATTLE_OK;
 }
 
+#ifdef PORTABLE
+// KNOWN_ISSUES MS-62: battles over the internet were very slow. PEEK (opcode 25; the launcher opts in with bridge.txt
+// battle_peek=1) is QUERY with the outbound block's bytes after its 64: the launcher sends both to the host as soon as
+// its core has a block, so the host routes the block without a READ_OUT round trip over the network, and its ACK_OUT
+// needs no READ_OUT either (the acknowledgement's CRC names the exact bytes). Like QUERY it observes only: no sequence,
+// cache or watchdog changes. A block larger than one chunk is still read with READ_OUT (startup parties, two controller
+// commands); its bytes are not in a PEEK.
+#define MP_BATTLE_PEEK 25
+static void HandlePeek(const struct MultiplayerBattleControl *c)
+{
+    u8 data[192], status = MP_BATTLE_OK;
+    u16 length = 0;
+    if (c->status || c->reserved || c->length || !c->incarnation || !c->sessionEpoch
+     || c->sessionEpoch > 0x7FFFFFFF || !c->commandSeq || Zero(c->battleId, 16)
+     || c->phase < MP_BATTLE_PHASE_SINGLES || c->phase > LAST_PHASE || c->sourceSlot >= 4
+     || !Empty(c) || !Zero(c->data, 192) || c->chunkCrc32 != Crc32(c->data, 0))
+        status = MP_BATTLE_MALFORMED;
+    else if (sAdmissionCleanupWaiting || sState == MP_BATTLE_UNBOUND || c->incarnation != sIncarnation
+          || c->sessionEpoch < sSession || memcmp(c->battleId, sBattleId, 16)
+          || c->sourceSlot != sBinding.localSlot || c->phase != sBinding.mode)
+        status = MP_BATTLE_SESSION;
+    else
+    {
+        QueryData(data); length = 64;
+        if (sOutPending && sReadOffset == 0 && sOutSize && sOutSize <= MULTIPLAYER_BATTLE_CHUNK_SIZE
+         && !sReleasedWaiting && !sRetiredWaiting)
+        {
+            memcpy(data + 64, (const u8 *)gBlockSendBuffer, sOutSize);
+            length += sOutSize;
+        }
+    }
+    Respond(c, status, length ? data : NULL, length, FALSE);
+}
+#endif
+#line 1123 // gba-line
 static void Handle(const struct MultiplayerBattleControl *c)
 {
     u8 data[128], status = MP_BATTLE_OK;
     u16 length = 0;
     bool32 cache = TRUE;
+#ifdef PORTABLE
+    if (c->opcode == MP_BATTLE_PEEK)
+    {
+        HandlePeek(c); return;
+    }
+#endif
+#line 1128 // gba-line
     if (c->status || c->reserved || c->length > 192 || !c->incarnation || !c->sessionEpoch
      || c->sessionEpoch > 0x7FFFFFFF || !c->commandSeq || Zero(c->battleId, 16)
      || (c->phase < MP_BATTLE_PHASE_DIAGNOSTIC || c->phase > LAST_PHASE) || c->sourceSlot >= 4
@@ -1550,9 +1595,17 @@ static void Handle(const struct MultiplayerBattleControl *c)
     case MP_BATTLE_ACK_OUT:
         if (c->kind != sOutKind)
             status = MP_BATTLE_KIND;
+#ifdef PORTABLE
+        else if (c->length != 8 || !sOutPending || c->blockSeq != sOutSeq || c->totalSize != sOutSize
+              || c->offset != sOutSize || (sReadOffset != sOutSize && sReadOffset != 0))
+            status = MP_BATTLE_ORDER;
+#else
+#line 1262 // gba-line
         else if (c->length != 8 || !sOutPending || c->blockSeq != sOutSeq || c->totalSize != sOutSize
               || c->offset != sOutSize || sReadOffset != sOutSize)
             status = MP_BATTLE_ORDER;
+#endif
+#line 1265 // gba-line
         else if (Word(c->data) != sOutCrc)
             status = MP_BATTLE_CRC;
         else if (Word(c->data + 4) != (((1 << sBinding.playerCount) - 1) ^ (1 << sBinding.localSlot)))
@@ -1783,6 +1836,7 @@ void MultiplayerBattle_ServiceTransport(void)
     switch (command.opcode)
     {
     case MP_BATTLE_QUERY:
+    case MP_BATTLE_PEEK:
     case MP_BATTLE_READ_OUT:
     case MP_BATTLE_RECEIVE:
     case MP_BATTLE_ACK_OUT:
