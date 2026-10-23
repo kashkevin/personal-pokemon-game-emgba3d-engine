@@ -1762,6 +1762,41 @@ bool32 MultiplayerBattle_GetBindingGeneration(u8 *generation)
     return TRUE;
 }
 
+// KNOWN_ISSUES MS-62: battles over the internet were very slow. The bridge writes a command at the frame boundary and
+// MultiplayerBattle_Tick answers it at the start of the next game frame, so the answer reached the companion only at the
+// boundary after that: a whole frame on every native command (a battle has thousands). The bridge calls this right after
+// writing a command, at the same boundary, where the game thread is parked (src/platform/sdl2.c, as for the VBlank
+// handler, which runs the game's own code there too): the transport commands - QUERY, READ_OUT, RECEIVE, ACK_OUT and
+// KEEP, which only copy a block or a state word - are handled at once, exactly as Tick would at the frame's start, and
+// the bridge sends the answer the same moment. Every other command (BIND, PREPARE, START, RELEASE, recovery) is still
+// the game frame's own.
+void MultiplayerBattle_ServiceTransport(void)
+{
+    u32 generation = gMultiplayerBattleMailbox.commandGeneration;
+    struct MultiplayerBattleControl command;
+
+    if (generation == sSeenGeneration || (generation & 1))
+        return;
+    command = gMultiplayerBattleMailbox.command;
+    if (generation != gMultiplayerBattleMailbox.commandGeneration)
+        return;
+    switch (command.opcode)
+    {
+    case MP_BATTLE_QUERY:
+    case MP_BATTLE_READ_OUT:
+    case MP_BATTLE_RECEIVE:
+    case MP_BATTLE_ACK_OUT:
+    case MP_BATTLE_KEEP:
+        break;
+    default:
+        return;
+    }
+    sSeenGeneration = generation;
+    Handle(&command);
+    gMultiplayerBattleMailbox.state = sState;
+    ObserveHoldFlags();
+}
+
 // Native self-tests (--selftest-coop-controller): the controller validator in
 // a bound battle's shape (phase, cores) without a session; mode 0 restores.
 void MultiplayerBattle_NativeTestShape(u8 mode, u8 cores)

@@ -171,6 +171,11 @@ struct MpBridgeOps
      * and MP_BRIDGE_BATTLE_LOOKS looks of 8 bytes, by binding slot. NULL: the
      * game shows no characters, and the bridge never announces 'A'. */
     void (*battleLooks)(void *context, const uint8_t *generation, const uint8_t *looks);
+    /* KNOWN_ISSUES MS-62: called at the frame boundary while a battle command is
+     * outstanding, before its answer is polled: the game answers its transport
+     * commands at once (MultiplayerBattle_ServiceTransport). NULL: the game's next
+     * frame answers, a frame later. */
+    void (*serviceBattle)(void *context);
 };
 
 #define MP_BRIDGE_MAX_FRAME (4 + 1 + 240 + 4096) /* "F" response with its 4 KiB window */

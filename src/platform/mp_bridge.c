@@ -1929,6 +1929,8 @@ void MpBridge_Step(struct MpBridge *b)
     PollSave(b);
     if (!b->connected)
         return;
+    if (b->battle.pending && b->ops.serviceBattle != NULL)
+        b->ops.serviceBattle(b->ops.context);
     PollBattle(b);
     if (!b->connected)
         return;
@@ -2248,6 +2250,13 @@ static void GlueBattleLooks(void *context, const uint8_t *generation, const uint
     CharCustom_SetBattleLooks(generation, looks);
 }
 
+/* KNOWN_ISSUES MS-62: the transport commands, answered at this frame boundary (mp_bridge.h). */
+static void GlueServiceBattle(void *context)
+{
+    (void)context;
+    MultiplayerBattle_ServiceTransport();
+}
+
 static void GlueRouteResetChord(void *context, bool enabled)
 {
     (void)context;
@@ -2442,6 +2451,7 @@ bool MpBridge_Configure(const char *path)
     ops.routeResetChord = GlueRouteResetChord;
     ops.milliseconds = GlueMilliseconds;
     ops.battleLooks = GlueBattleLooks;
+    ops.serviceBattle = GlueServiceBattle;
     memset(&sInput, 0, sizeof(sInput));
     MpBridge_Init(&sBridge, &ops, &caps, (uint16_t)port, token);
     memset(token, 0, sizeof(token));
