@@ -15,7 +15,7 @@
  * The design's other back pages (link battle ledger, Championship, trades and
  * checkpoint, hunts) are the host's: the game reads them in PLAYERS > Your
  * Trainer Card (the Players screen), so their tabs here say where they are;
- * pair friendship is PLANNED. The game shows one card: other players' cards open
+ * the design's FRIENDS page is left out (not built). The game shows one card: other players' cards open
  * from PLAYERS > View Trainer Card. The left panes show who is in this world
  * (from the bridge) and the engine's four star rules with the ones you have met.
  *
@@ -56,7 +56,7 @@ enum
 #define CH 252
 #define FLIP_STEPS 10        /* the squash of each flip frame; the other face from step 5 */
 #define MSG_FRAMES 300       /* a tab's note stays 5 s */
-#define TAB_COUNT 6
+#define TAB_COUNT 5
 #define RECORD_ROWS 6
 
 static const double sFlip[FLIP_STEPS] = {1, 0.9, 0.75, 0.45, 0.08, 0.08, 0.45, 0.75, 0.9, 1};
@@ -69,8 +69,8 @@ static const char *const sStarRows[11] = {".....#.....", "....###....", "....###
                                           ".#########.", "..#######..", "...#####...", "..###.###..", "..##...##..",
                                           ".##.....##."};
 static const char *const sLockRows[7] = {".###.", "#...#", "#...#", "#####", "##.##", "##.##", "#####"};
-/* the back's pages: the engine's records here, the host's in PLAYERS, friendship planned */
-static const char *const sTabLabels[TAB_COUNT] = {"RECORDS", "LINK", "CHAMP", "TRADES", "HUNTS", "FRIENDS"};
+/* the back's pages: the engine's records here, the host's in PLAYERS */
+static const char *const sTabLabels[TAB_COUNT] = {"RECORDS", "LINK", "CHAMP", "TRADES", "HUNTS"};
 
 static const u8 sText_IdNo[] = _("IDNo. ");
 static const u8 sText_Seen[] = _("seen ");
@@ -89,7 +89,6 @@ static const u8 sHelp_Back[] = _("The records this save keeps, as the game print
 static const u8 sHelp_LinkFront[] = _("A Trainer Card from the link: its owner's details when it was sent.");
 static const u8 sHelp_LinkBack[] = _("The records this card brought over the link.");
 static const u8 sHelp_Host[] = _("Kept by the host, not this card: open PLAYERS, then Your Trainer Card.");
-static const u8 sHelp_Friends[] = _("Pair friendship is planned: levels, thresholds and Lucky odds are not chosen yet.");
 static const u8 sFoot_Cards1[] = _("Other players' cards and your");
 static const u8 sFoot_Cards2[] = _("world records: PLAYERS menu.");
 static const u8 sNothing1[] = _("Nothing recorded yet.");
@@ -759,7 +758,7 @@ static void Help(bool back)
     int lengths[4], b[4], n;
 
     if (sMsgTab != 0 && NativeUi_Frame() < sMsgUntil && back)
-        text = sMsgTab == TAB_COUNT - 1 ? sHelp_Friends : sHelp_Host;
+        text = sHelp_Host;
     else if (sCard.isLink)
         text = back ? sHelp_LinkBack : sHelp_LinkFront;
     else
@@ -827,7 +826,7 @@ static bool Click(const struct UiHit *hit, int button)
 
     if (hit->id == HIT_TAB && button == 1)
     {
-        /* the host's pages and the planned one: say where they are */
+        /* the host's pages: say where they are */
         sMsgTab = hit->index;
         sMsgUntil = NativeUi_Frame() + MSG_FRAMES;
         return true;

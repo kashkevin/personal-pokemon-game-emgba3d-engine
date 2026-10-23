@@ -11,9 +11,9 @@
  * The device pane beside it shows what this game itself knows: you (your field
  * sprite with your saved look, your name, where you are), the session's
  * connected players from the bridge (their slots, where they are), and your
- * Trainer Card's public facts. The design's FRIENDS and ALL tabs, friendship
- * ranks and Lucky Friends are PLANNED (not built). Keys and clicks reach the
- * engine's own menu as its own buttons. On the Battle Tower's pages (the page
+ * Trainer Card's public facts. The design's FRIENDS and ALL tabs and friendship
+ * ranks are left out (the owner's request, 2026-10-23: not built, not shown).
+ * Keys and clicks reach the engine's own menu as its own buttons. On the Battle Tower's pages (the page
  * names a Tower screen) the device shows the Tower instead (screens/ui_tower.c).
  * Project-owned.
  */
@@ -388,10 +388,6 @@ static void Device(int t)
         UiText_Draw(UI_FONT_SMALL, cx + 16, py, sPeers[i].here ? sText_HereWithYou : sPeers[i].where, UI_P_TEXT,
                     UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
     }
-    UiG_HLine(cx + 6, cy + 145, cw - 12, UI_P_CREAM_LO);
-    UiCaps_Draw(cx + 8, cy + 151, "FRIENDSHIP", UiMix(f.lo, UI_P_INK, 0.2), UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
-    UiW_Planned(tr - (UiCaps_Width("PLANNED") + 8), cy + 149, NULL);
-    UiCaps_Draw(cx + 8, cy + 166, "RANKS AND LUCKY FRIENDS", UI_P_TEXT_MUTED, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
 }
 
 /* ---------------------------------------------------------------- the host's page */
@@ -399,7 +395,6 @@ static void Device(int t)
 static void Tabs(void)
 {
     struct UiRamp f = UiW_FieldBand();
-    static const char *const planned[2] = {"FRIENDS", "ALL"};
     char title[32];
     int n = 0;
 
@@ -410,16 +405,6 @@ static void Tabs(void)
         snprintf(title, sizeof(title), "PLAYERS");
     UiG_Paint(UiM_Rounded4(150, 26, 4, 4, 0, 0), SHX + 4, 6, f.base, &(struct UiPaint){UI_P_FIELD_INK, f.hi, UI_NONE, 0, 0, NULL, UI_NONE});
     UiCaps_Draw(SHX + 4 + 75, 14, title, UI_P_TEXT_W, UI_P_FIELD_INK, UI_CAPS_OUTLINE, UI_ALIGN_CENTER, UI_NONE);
-    for (int i = 0; i < 2 && sM.towerStyle == 0; i++)
-    {
-        UiRGBA dk = UiMix(f.lo, UI_P_INK, 0.25);
-        int tx = SHX + 158 + i * 104;
-
-        UiG_Paint(UiM_Rounded4(100, 20, 4, 4, 0, 0), tx, 12, dk, &(struct UiPaint){UI_P_FIELD_INK, UiMix(dk, f.lo, 0.6), UI_NONE, 0, 0, NULL, UI_NONE});
-        UiCaps_Draw(tx + 8, 18, planned[i], UiMix(UI_P_TEXT_W, dk, 0.35), UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
-        UiW_Planned(tx + 12 + UiCaps_Width(planned[i]), 16, NULL);
-        UiG_Hit(HIT_TAB, i + 1, tx, 12, 100, 20);
-    }
 }
 
 static void Sheet(int t)
@@ -547,7 +532,7 @@ static bool Click(const struct UiHit *hit, int button)
             NativeUi_QueuePress(A_BUTTON);
         return true;
     }
-    return hit->id == HIT_TAB;
+    return false;
 }
 
 static bool Wheel(int dy)

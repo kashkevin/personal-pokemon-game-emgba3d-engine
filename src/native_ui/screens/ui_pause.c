@@ -74,7 +74,6 @@ static const u8 sText_GetOff[] = _("Get off");
 static const u8 sText_Style[] = _("Style");
 static const u8 sText_Tower[] = _("Tower");
 static const u8 sText_SoftReset[] = _("Soft reset");
-static const u8 sText_Events[] = _("Events");
 static const u8 sText_Open[] = _("Open");
 static const u8 sText_Close[] = _("Close");
 static const u8 sText_Select[] = _("Select");
@@ -104,7 +103,6 @@ static const u8 sHelp_GetOff[] = _("Get off your Pokémon.");
 static const u8 sHelp_Style[] = _("Change your colours: skin, hair, outfit, hat and bag.");
 static const u8 sHelp_Tower[] = _("Battle Tower: Legends. 100 floors, alone or with a friend.");
 static const u8 sHelp_SoftReset[] = _("Back to your last save (the key: Ctrl+R).");
-static const u8 sHelp_Events[] = _("World Events and Championships: planned, not in this game yet.");
 
 static const u8 sText_LinkOffline[] = _("Not linked");
 static const u8 sText_LinkAlone[] = _("No one else");
@@ -133,7 +131,7 @@ static const u8 sText_Launcher[] = _("launcher");
 
 struct Entry
 {
-    u8 action;          /* enum NativeStartMenuAction, or 0xFF: the planned Events row */
+    u8 action;          /* enum NativeStartMenuAction */
     s8 engineIndex;     /* the engine's row, -1 for a row of the design only */
 };
 
@@ -208,13 +206,6 @@ static void BuildEntries(void)
         sEntries[sEntryCount].action = sMenu.actions[i];
         sEntries[sEntryCount].engineIndex = (s8)i;
         sEntryCount++;
-        /* the design's Events entry follows the player's row: planned */
-        if (sMenu.actions[i] == NATIVE_START_PLAYER_OPTIONS && !sMenu.playerSubmenu)
-        {
-            sEntries[sEntryCount].action = 0xFF;
-            sEntries[sEntryCount].engineIndex = -1;
-            sEntryCount++;
-        }
     }
     sSelectedEntry = -1;
     for (int i = 0; i < sEntryCount; i++)
@@ -342,7 +333,6 @@ static const u8 *EntryLabel(const struct Entry *e)
     case NATIVE_START_STYLE: return sText_Style;
     case NATIVE_START_TOWER: return sText_Tower;
     case NATIVE_START_SOFT_RESET: return sText_SoftReset;
-    case 0xFF: return sText_Events;
     default: return sText_Exit;
     }
 }
@@ -371,7 +361,6 @@ static const u8 *EntryHelp(const struct Entry *e)
     case NATIVE_START_STYLE: return sHelp_Style;
     case NATIVE_START_TOWER: return sHelp_Tower;
     case NATIVE_START_SOFT_RESET: return sHelp_SoftReset;
-    case 0xFF: return sHelp_Events;
     default: return sHelp_Exit;
     }
 }
@@ -391,7 +380,6 @@ static const char *EntryIcon(const struct Entry *e, bool *hasSel)
     case NATIVE_START_DEBUG: return "key";
     case NATIVE_START_PLAYERS: return "players";
     case NATIVE_START_RIDE: case NATIVE_START_GET_OFF: return "shoe";
-    case 0xFF: return "flag";
     case NATIVE_START_DEXNAV: *hasSel = false; return "search";
     case NATIVE_START_STYLE: *hasSel = false; return "head_green";
     case NATIVE_START_TOWER: return "burst";
