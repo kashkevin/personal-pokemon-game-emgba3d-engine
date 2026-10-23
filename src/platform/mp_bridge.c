@@ -883,7 +883,7 @@ static bool BattleControl(const struct MpBridge *b, const uint8_t *p, size_t len
     {
         if (status != 0 || expected < 0 || dataLength != (uint32_t)expected)
             return false;
-        if (opcode >= 22)
+        if (opcode >= 22 && opcode <= 24) /* the admission cleanup commands (25 PEEK has no payload) */
         {
             uint32_t originalLease = U32(data + 48);
 

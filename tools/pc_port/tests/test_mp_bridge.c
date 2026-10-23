@@ -1122,6 +1122,43 @@ static bool BattleCommandAccepted(uint8_t phase)
     return BattleSlotCommandAccepted(phase, 0, true);
 }
 
+// KNOWN_ISSUES MS-62: PEEK (25) reaches the game only with its capability (bridge.txt battle_peek=1); its answer is the
+// 64-byte query and up to one chunk of the outbound block. The admission cleanup commands' checks (22-24) are not its.
+MT_TEST(battle_peek_needs_its_capability_and_answers_with_its_block)
+{
+    uint8_t command[240], response[240], frame[260];
+    uint8_t *m = sMemory[MP_REGION_BATTLE];
+    const uint8_t *payload = NULL;
+    size_t n;
+
+    MakeBattleControl(command, 25, 2);
+    n = FrameOf(frame, 'D', command, sizeof(command));
+    LooksBridge(false);
+    Feed(frame, n, 200);
+    Step(2);
+    MT_CHECK(sNet.closed);
+    MT_CHECK(MpBridge_CheckCaps(&(struct MpBridgeCaps){.save = 1, .trade = 1, .battle = 3, .battlePeek = 1}) == NULL);
+    MT_CHECK(MpBridge_CheckCaps(&(struct MpBridgeCaps){.save = 1, .trade = 1, .battle = 2, .battlePeek = 1}) != NULL);
+
+    LooksBridge(false);
+    sBridge.caps.battlePeek = 1;
+    Feed(frame, n, 200);
+    Step(2);
+    MT_CHECK(!sNet.closed);
+    MT_EQ(GetU32(m + 24), 2);
+    MT_CHECK(memcmp(m + 28, command, 240) == 0);
+    memcpy(response, command, 240);
+    memset(response + 48, 0x11, 80); // a query and a 16-byte block
+    PutU16(response + 42, 80);
+    PutU32(response + 44, MpBridge_Crc32(response + 48, 80));
+    memcpy(m + 272, response, 240);
+    PutU32(m + 268, 2);
+    Step(30);
+    MT_EQ(SentFrame('E', 0, &payload), 240);
+    MT_CHECK(payload != NULL && memcmp(payload, response, 240) == 0);
+    MT_CHECK(!sNet.closed);
+}
+
 MT_TEST(native_battle_phases_reach_the_game)
 {
     MT_CHECK(BattleCommandAccepted(2)); // singles
@@ -2019,6 +2056,7 @@ int main(void)
     MT_RUN(battle_capability_waits_for_its_mailbox);
     MT_RUN(battle_looks_follow_their_announcement);
     MT_RUN(battle_looks_need_the_game);
+    MT_RUN(battle_peek_needs_its_capability_and_answers_with_its_block);
     MT_RUN(native_battle_phases_reach_the_game);
     MT_RUN(free_for_all_commands_reach_the_game);
     MT_RUN(three_player_free_for_all_commands_reach_the_game);
