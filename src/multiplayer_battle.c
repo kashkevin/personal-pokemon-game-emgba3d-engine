@@ -79,6 +79,7 @@ const u32 gMultiplayerBattleFfa3AbiVersion = MULTIPLAYER_BATTLE_FFA3_ABI;
 #endif
 #ifdef PORTABLE
 const u32 gMultiplayerBattlePeekAbiVersion = 1; // KNOWN_ISSUES MS-62: PEEK (HandlePeek) and an ACK_OUT after it
+const u32 gMultiplayerBattleReceiveManyAbiVersion = 1; // MS-62: RECEIVE_MANY (HandleReceiveMany), a batch in one command
 #endif
 #line 54 // gba-line
 EWRAM_DATA volatile struct MultiplayerBattleMailbox gMultiplayerBattleMailbox = {0};
@@ -1447,6 +1448,96 @@ static void HandlePeek(const struct MultiplayerBattleControl *c)
     }
     Respond(c, status, length ? data : NULL, length, FALSE);
 }
+
+// KNOWN_ISSUES MS-62, the 2v2s: with three or four cores the host routes a batch (every core's new block) to every
+// other core before the next one, and each core took its two or three blocks one RECEIVE, one network round trip, at
+// a time. RECEIVE_MANY (opcode 26; the launcher opts in with bridge.txt battle_receive_many=1) carries a batch's whole
+// small blocks for this core in one command, in the host's order: each entry is a source slot, a kind, a size (1-128),
+// a block sequence (8 bytes) and the block's bytes, applied exactly as its own RECEIVE would be (ReceiveNative) until
+// one is refused. The answer: OK with [applied, the refusal or OK] when at least one was applied (the command is
+// consumed and cached like any other), else the first entry's refusal (BUSY leaves the sequence for the next command).
+#define MP_BATTLE_RECEIVE_MANY 26
+#define RECEIVE_MANY_HEADER 8
+
+static u8 ReceiveMany(const struct MultiplayerBattleControl *c, u8 *out)
+{
+    struct MultiplayerBattleControl part;
+    u32 at = 0, entries = 0, applied = 0;
+    u8 status = MP_BATTLE_OK;
+
+    while (at < c->length)
+    {
+        u32 size;
+        if (c->length - at < RECEIVE_MANY_HEADER + 1) return MP_BATTLE_MALFORMED;
+        size = c->data[at + 2] | (c->data[at + 3] << 8);
+        if (!size || size > MULTIPLAYER_BATTLE_CHUNK_SIZE || size > c->length - at - RECEIVE_MANY_HEADER)
+            return MP_BATTLE_MALFORMED;
+        at += RECEIVE_MANY_HEADER + size;
+        if (++entries >= sBinding.playerCount) return MP_BATTLE_MALFORMED; // at most one from each other core
+    }
+    for (at = 0; at < c->length && status == MP_BATTLE_OK; )
+    {
+        u32 size = c->data[at + 2] | (c->data[at + 3] << 8);
+        part = *c;
+        part.opcode = MP_BATTLE_RECEIVE;
+        part.sourceSlot = c->data[at]; part.kind = c->data[at + 1];
+        part.blockSeq = Word(c->data + at + 4);
+        part.offset = 0; part.totalSize = size; part.length = size;
+        memset(part.data, 0, sizeof(part.data));
+        memcpy(part.data, c->data + at + RECEIVE_MANY_HEADER, size);
+        status = ReceiveNative(&part);
+        if (status == MP_BATTLE_OK)
+            applied++;
+        at += RECEIVE_MANY_HEADER + size;
+    }
+    out[0] = applied; out[1] = status;
+    return applied ? MP_BATTLE_OK : status;
+}
+
+// Handle's own rules for an ordinary transport command (validation, CRC, the exact replay, session, sequence, role,
+// state, the watchdog and the cache), with RECEIVE_MANY between them; the GBA build never has it.
+static void HandleReceiveMany(const struct MultiplayerBattleControl *c)
+{
+    u8 data[2] = {0, 0}, status;
+    if (c->status || c->reserved || !c->length || c->length > 192 || !c->incarnation || !c->sessionEpoch
+     || c->sessionEpoch > 0x7FFFFFFF || !c->commandSeq || Zero(c->battleId, 16)
+     || c->phase < MP_BATTLE_PHASE_SINGLES || c->phase > LAST_PHASE || c->sourceSlot >= 4
+     || c->blockSeq || c->offset || c->totalSize || c->kind || !Zero(c->data + c->length, 192 - c->length))
+    {
+        Respond(c, MP_BATTLE_MALFORMED, NULL, 0, FALSE); return;
+    }
+    if (c->chunkCrc32 != Crc32(c->data, c->length))
+    {
+        Respond(c, MP_BATTLE_CRC, NULL, 0, FALSE); return;
+    }
+    if (c->commandSeq == sLastSeq && sLastSeq && !memcmp(c, &sLastCommand, sizeof(*c)))
+    {
+        Replay(); return;
+    }
+    if (sState == MP_BATTLE_UNBOUND || c->incarnation != sIncarnation || c->sessionEpoch != sSession
+     || memcmp(c->battleId, sBattleId, 16) || c->phase != sBinding.mode)
+    {
+        Respond(c, MP_BATTLE_SESSION, NULL, 0, FALSE); return;
+    }
+    if (sLastSeq == 0xFFFFFFFF || c->commandSeq != sLastSeq + 1)
+    {
+        Respond(c, MP_BATTLE_ORDER, NULL, 0, FALSE); return;
+    }
+    if (c->sourceSlot != sBinding.localSlot)
+        status = MP_BATTLE_ROLE;
+    else if (!MultiplayerBattle_IsActive())
+        status = MP_BATTLE_ORDER;
+    else if (sState == MP_BATTLE_RECOVERY_REQUIRED || sState == MP_BATTLE_SUSPENDED || sState == MP_BATTLE_ADMITTING
+          || sState == MP_BATTLE_EXPIRED)
+        status = MP_BATTLE_TIMEOUT;
+    else if (!MultiplayerBattle_IsNative())
+        status = MP_BATTLE_KIND;
+    else
+        status = ReceiveMany(c, data);
+    if (status == MP_BATTLE_OK)
+        sDeadline = sFrame + MULTIPLAYER_BATTLE_DEADLINE;
+    Respond(c, status, status == MP_BATTLE_OK ? data : NULL, status == MP_BATTLE_OK ? 2 : 0, status == MP_BATTLE_OK);
+}
 #endif
 #line 1123 // gba-line
 static void Handle(const struct MultiplayerBattleControl *c)
@@ -1458,6 +1549,10 @@ static void Handle(const struct MultiplayerBattleControl *c)
     if (c->opcode == MP_BATTLE_PEEK)
     {
         HandlePeek(c); return;
+    }
+    if (c->opcode == MP_BATTLE_RECEIVE_MANY)
+    {
+        HandleReceiveMany(c); return;
     }
 #endif
 #line 1128 // gba-line
@@ -1839,6 +1934,7 @@ void MultiplayerBattle_ServiceTransport(void)
     case MP_BATTLE_PEEK:
     case MP_BATTLE_READ_OUT:
     case MP_BATTLE_RECEIVE:
+    case MP_BATTLE_RECEIVE_MANY:
     case MP_BATTLE_ACK_OUT:
     case MP_BATTLE_KEEP:
         break;

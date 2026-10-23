@@ -1159,6 +1159,91 @@ MT_TEST(battle_peek_needs_its_capability_and_answers_with_its_block)
     MT_CHECK(!sNet.closed);
 }
 
+// MS-62, the 2v2s: RECEIVE_MANY (26) reaches the game only with its capability (bridge.txt battle_receive_many=1), in a
+// native battle, with whole blocks of one chunk each from the battle's other cores, at most one for each; its answer is
+// [applied, the first refusal]. Anything else closes the link, as for any malformed command.
+static size_t ReceiveManyEntry(uint8_t *at, uint8_t source, uint8_t kind, uint16_t size, uint32_t sequence)
+{
+    at[0] = source; at[1] = kind;
+    PutU16(at + 2, size);
+    PutU32(at + 4, sequence);
+    memset(at + 8, 0x40 + source, size);
+    return 8 + size;
+}
+
+static bool ReceiveManyAccepted(uint8_t phase, const uint8_t *entries, size_t length, bool capable)
+{
+    uint8_t command[240], frame[260];
+    uint8_t *m = sMemory[MP_REGION_BATTLE];
+    size_t n;
+
+    LooksBridge(false);
+    sBridge.caps.battleReceiveMany = capable ? 1 : 0;
+    MakeBattleControl(command, 26, phase);
+    memcpy(command + 48, entries, length);
+    PutU16(command + 42, (uint16_t)length);
+    PutU32(command + 44, MpBridge_Crc32(command + 48, length));
+    n = FrameOf(frame, 'D', command, sizeof(command));
+    Feed(frame, n, 200);
+    Step(2);
+    return !sNet.closed && GetU32(m + 24) == 2 && memcmp(m + 28, command, 240) == 0;
+}
+
+MT_TEST(battle_receive_many_needs_its_capability_and_whole_small_blocks)
+{
+    uint8_t entries[192], response[240];
+    uint8_t *m = sMemory[MP_REGION_BATTLE];
+    const uint8_t *payload = NULL;
+    size_t length = 0;
+
+    length += ReceiveManyEntry(entries + length, 1, 8, 12, 5);   // a controller block from slot 1
+    length += ReceiveManyEntry(entries + length, 2, 8, 64, 9);   // and one from slot 2
+    length += ReceiveManyEntry(entries + length, 3, 7, 16, 4);   // the RNG block from slot 3
+    MT_CHECK(!ReceiveManyAccepted(3, entries, length, false));
+    MT_CHECK(sNet.closed);
+    MT_CHECK(MpBridge_CheckCaps(&(struct MpBridgeCaps){.save = 1, .trade = 1, .battle = 3, .battleReceiveMany = 1}) == NULL);
+    MT_CHECK(MpBridge_CheckCaps(&(struct MpBridgeCaps){.save = 1, .trade = 1, .battle = 2, .battleReceiveMany = 1}) != NULL);
+    MT_CHECK(ReceiveManyAccepted(3, entries, length, true));
+
+    // Its answer: two applied, the third refused as busy; a refusal of the whole command has no data.
+    memset(response, 0, sizeof(response));
+    memcpy(response, m + 28, 240);
+    memset(response + 48, 0, 192);
+    response[48] = 2; response[49] = 1;
+    PutU16(response + 42, 2);
+    PutU32(response + 44, MpBridge_Crc32(response + 48, 2));
+    memcpy(m + 272, response, 240);
+    PutU32(m + 268, 2);
+    Step(30);
+    MT_EQ(SentFrame('E', 0, &payload), 240);
+    MT_CHECK(payload != NULL && memcmp(payload, response, 240) == 0);
+    MT_CHECK(!sNet.closed);
+
+    // Not in a two-core battle's diagnostic phase, not four entries, not a party block (200: more than one chunk), not
+    // a size its kind does not have, not a source outside the battle, not an entry cut short.
+    MT_CHECK(!ReceiveManyAccepted(1, entries, length, true));
+    {
+        uint8_t four[192];
+        size_t k = 0;
+        k += ReceiveManyEntry(four + k, 1, 8, 12, 5);
+        k += ReceiveManyEntry(four + k, 2, 8, 12, 5);
+        k += ReceiveManyEntry(four + k, 3, 8, 12, 5);
+        k += ReceiveManyEntry(four + k, 1, 8, 12, 6);
+        MT_CHECK(!ReceiveManyAccepted(3, four, k, true));
+        k = ReceiveManyEntry(four, 1, 4, 120, 2);          // a party block's kind with a chunk's size
+        MT_CHECK(!ReceiveManyAccepted(3, four, k, true));
+        k = ReceiveManyEntry(four, 1, 8, 13, 2);           // no controller block has 13 bytes
+        MT_CHECK(!ReceiveManyAccepted(3, four, k, true));
+        k = ReceiveManyEntry(four, 2, 8, 12, 2);           // a co-op battle has two cores: no slot 2
+        MT_CHECK(!ReceiveManyAccepted(4, four, k, true));
+        k = ReceiveManyEntry(four, 1, 8, 12, 2);
+        MT_CHECK(ReceiveManyAccepted(4, four, k, true));
+        MT_CHECK(!ReceiveManyAccepted(3, four, k - 1, true)); // its bytes cut short
+        k = ReceiveManyEntry(four, 1, 8, 12, 0);           // no block has sequence 0
+        MT_CHECK(!ReceiveManyAccepted(3, four, k, true));
+    }
+}
+
 MT_TEST(native_battle_phases_reach_the_game)
 {
     MT_CHECK(BattleCommandAccepted(2)); // singles
@@ -2057,6 +2142,7 @@ int main(void)
     MT_RUN(battle_looks_follow_their_announcement);
     MT_RUN(battle_looks_need_the_game);
     MT_RUN(battle_peek_needs_its_capability_and_answers_with_its_block);
+    MT_RUN(battle_receive_many_needs_its_capability_and_whole_small_blocks);
     MT_RUN(native_battle_phases_reach_the_game);
     MT_RUN(free_for_all_commands_reach_the_game);
     MT_RUN(three_player_free_for_all_commands_reach_the_game);

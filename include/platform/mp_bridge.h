@@ -139,6 +139,8 @@ struct MpBridgeCaps
                                         launcher opt-in host_save_page=1) */
     uint32_t battlePeek;             /* 1: battle opcode 25 PEEK, a query with the outbound block's bytes, and an ACK_OUT
                                         without READ_OUT (KNOWN_ISSUES MS-62; needs battle 3; launcher opt-in battle_peek=1) */
+    uint32_t battleReceiveMany;      /* 1: battle opcode 26 RECEIVE_MANY, a batch's small blocks for one core in one command
+                                        (MS-62, the 2v2s; needs battle 3; launcher opt-in battle_receive_many=1) */
 };
 
 enum

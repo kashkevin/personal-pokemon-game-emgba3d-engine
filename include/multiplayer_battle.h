@@ -156,6 +156,7 @@ u32 MultiplayerBattle_GetRivalPreparation(void); // Update 31 (multiplayer_rival
 u32 MultiplayerBattle_PartyCrc32(void); // MS-60: the party CRC a native PREPARE compares (multiplayer_save.c)
 void MultiplayerBattle_ServiceTransport(void); // MS-62: the bridge's transport commands, answered at the frame boundary
 extern const u32 gMultiplayerBattlePeekAbiVersion; // MS-62: PEEK, a query with the outbound block's bytes (bridge battle_peek=1)
+extern const u32 gMultiplayerBattleReceiveManyAbiVersion; // MS-62: RECEIVE_MANY, a batch's blocks in one command (battle_receive_many=1)
 #endif
 bool32 MultiplayerBattle_TrySendOutAnimation(u8 battler);
 bool32 MultiplayerBattle_CanReceiveControllers(void);
