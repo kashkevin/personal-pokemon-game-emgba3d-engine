@@ -120,11 +120,51 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         mountains = [record for layout in self.data["layouts"]
                      for record in layout["terrainRecords"]
                      if record["source"] == "behavior:MB_MOUNTAIN_TOP"]
-        self.assertGreater(len(mountains), 20000)
+        # (the blocked ones: about 16,600 records; the walkable ones are ground, below)
+        self.assertGreater(len(mountains), 15000)
         self.assertEqual({record["class"] for record in mountains}, {"cliff"})
         self.assertEqual({record["heightQ16"] for record in mountains}, {16})
         self.assertEqual({record["measuredFlags"] for record in mountains}, {32})
         self.assertEqual({record["artMode"] for record in mountains}, {"top"})
+        # The game tags its mountain paths MB_MOUNTAIN_TOP too (the battle background): a cell the
+        # player walks on is ground, never mountain art (Route 112's paths stood as little pyramids).
+        walkable = [record for layout in self.data["layouts"]
+                    for record in layout["terrainRecords"]
+                    if record["source"] == "behavior:MB_MOUNTAIN_TOP:walkable"]
+        self.assertGreater(len(walkable), 2000)
+        self.assertEqual({record["class"] for record in walkable}, {"ground"})
+        self.assertEqual({record["measuredFlags"] & 32 for record in walkable}, {0})
+
+    def test_repository_cave_rock_stands_and_its_exits_stay_open(self):
+        layouts = {row["symbol"]: row for row in self.data["layouts"]}
+        granite = layouts["LAYOUT_GRANITE_CAVE_1F"]
+        records = {record["cellOffset"]: record for record in granite["terrainRecords"]
+                   if record["mapGroup"] == 0xFF}
+        # Granite Cave tops its rock with the sand it also uses for floor (529): blocked in a rock
+        # mass it stands as rock cell by cell; the same sand the player walks on stays ground.
+        sand = [record for record in records.values() if record["expectedMetatile"] == 529]
+        self.assertTrue(any(record["source"] == "context:cave-rock" and record["class"] == "cliff"
+                            for record in sand))
+        self.assertTrue(any(record["class"] == "ground" for record in sand))
+        # The way out beyond Granite Cave 1F's south arrow warp (37, 12) is no rock.
+        self.assertNotEqual(records[13 * granite["width"] + 37]["class"], "cliff")
+        # A ledge the player jumps (east from the sand at (12, 10)) stays a ledge; the blocked one
+        # above it, jumped from no cell the player stands on, stands with the rock.
+        self.assertEqual(records[10 * granite["width"] + 13]["class"], "ledge")
+        self.assertEqual(records[9 * granite["width"] + 14]["source"], "context:cave-rock")
+        # Rusturf Tunnel draws its rock in tiers with blocked ledges between them: rock too, so no
+        # trench runs through the rock (a straight ledge with no take-off cell, a diagonal one).
+        rusturf = layouts["LAYOUT_RUSTURF_TUNNEL"]
+        tunnel = {record["cellOffset"]: record for record in rusturf["terrainRecords"]
+                  if record["mapGroup"] == 0xFF}
+        for x, y in ((6, 14), (5, 14), (8, 14)):
+            self.assertEqual((tunnel[y * rusturf["width"] + x]["class"],
+                              tunnel[y * rusturf["width"] + x]["source"]),
+                             ("cliff", "context:cave-rock"))
+        # Rusturf Tunnel's rock tops carry the cave's own behaviour (MB_CAVE): pinned as wall.
+        pins = {(pin["tileset"], pin["metatile"]) for pin in self.data["tilesetPins"]}
+        self.assertTrue({("gTileset_RusturfTunnel", 9), ("gTileset_RusturfTunnel", 17)} <= pins)
+        self.assertNotIn(("gTileset_RusturfTunnel", 81), pins)
 
     def test_sha256_is_canonical_and_covers_every_ir_section(self):
         canonical_keys = ("schemaVersion", "tilesets", "layouts", "pools", "profiles", "default",

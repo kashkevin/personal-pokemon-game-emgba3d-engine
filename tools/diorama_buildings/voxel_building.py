@@ -660,6 +660,13 @@ class HipRoof:
     the ridge is centred on the eave rectangle, front and back rise at `pitch`
     and the hips come in `run` pixels by the ridge. Front and back lay their
     courses along X; the hips lay the same courses along Z.
+
+    The ridge is its cap alone, a strip of the drawn ridge's top where the
+    slopes meet (project-owned, the owner's report of 2026-10-23): the 3DS
+    port stood it up as a box, its front the drawn ridge's `teeth` rows, which
+    read as a block lying on the roof. `teeth` still names those rows (a
+    spec's `end_tile` and the dimensional roofs' swatch read them); no face
+    draws them.
     """
 
     def __init__(self, name, x0, x1, zf, zb, y0, fascia, slope, teeth, cap,
@@ -676,7 +683,7 @@ class HipRoof:
         self.z_rb = self.z_rf - cd
         self.rise = math.tan(math.radians(pitch)) * (zf - self.z_rf)
         self.yr = self.ye + self.rise
-        self.yt = self.yr + (teeth[1] - teeth[0])
+        self.yt = self.yr
 
     def slope_point(self, texels):
         """(z, y) of the front slope `texels` art rows above its eave."""
@@ -728,24 +735,11 @@ class HipRoof:
             spans = [(xa, mid, lo - xa), (mid, xb, hi - xb)]
         for (sa, sb, off) in spans:
             if off is None:
-                teeth = Strip(self.teeth, wrap=self.ridge_wrap)
                 cap = Strip(self.cap, wrap=self.ridge_wrap)
             else:
-                teeth = Strip(self.teeth, offset=off)
                 cap = Strip(self.cap, offset=off)
-            strip_face(mesh, [(sa, yr, zr), (sb, yr, zr), (sb, yt, zr), (sa, yt, zr)],
-                       (0, yr, zr), (1, 0, 0), up, teeth, SHADE_ART, n + ".teeth")
             strip_face(mesh, [(sa, yt, zr), (sb, yt, zr), (sb, yt, zq), (sa, yt, zq)],
                        (0, yt, zr), (1, 0, 0), (0, 0, -1), cap, SHADE_ART, n + ".cap")
-        u0, v0, u1, v1 = self.end_tile.rect
-        w, h = zr - zq, yt - yr
-        for x, shade, flip in ((xa, SHADE_WEST, False), (xb, SHADE_EAST, True)):
-            pts = [(x, yr, zq), (x, yr, zr), (x, yt, zr), (x, yt, zq)]
-            us = [u0, u0 + w, u0 + w, u0]
-            if flip:
-                us = [u0 + w - (u - u0) for u in us]
-            vs = [v0 + h, v0 + h, v0, v0]
-            mesh.poly([p + (u, v) for p, u, v in zip(pts, us, vs)], shade, n + ".ridge_end")
 
 
 def _plan_normal(p, q):

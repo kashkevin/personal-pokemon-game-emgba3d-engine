@@ -83,8 +83,10 @@ def mountain_heightmap(rows: tuple[int, ...]) -> tuple[int, ...]:
 
 def detect_layout(cells: tuple[dict, ...], summaries: tuple[dict, ...],
                   width: int, height: int) -> frozenset[int]:
+    # Only rock the player cannot walk on stands up: the game tags its mountain
+    # paths MB_MOUNTAIN_TOP too (the battle background's mountain).
     seeds = {offset for offset, cell in enumerate(cells)
-             if cell.get("behavior") == "MB_MOUNTAIN_TOP"}
+             if cell.get("behavior") == "MB_MOUNTAIN_TOP" and cell.get("collision")}
     palette_rows: dict[int, set[int]] = defaultdict(set)
     for offset in seeds:
         for pixel in summaries[offset].get("layers", ((), (), ()))[2]:
@@ -94,7 +96,7 @@ def detect_layout(cells: tuple[dict, ...], summaries: tuple[dict, ...],
 
     eligible = set()
     for offset, (cell, summary) in enumerate(zip(cells, summaries)):
-        if cell.get("behavior") != "MB_NORMAL":
+        if cell.get("behavior") != "MB_NORMAL" or not cell.get("collision"):
             continue
         mountain_pixels = 0
         outside_family = False

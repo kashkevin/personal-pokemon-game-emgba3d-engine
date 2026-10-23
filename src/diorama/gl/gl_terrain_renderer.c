@@ -21,7 +21,9 @@
 #include "diorama/rules.generated.h"
 #include "diorama/rules.h"
 #include "diorama/terrain_mesh.h"
+#include "fieldmap.h"
 #include "metatile_behavior.h"
+#include "constants/metatile_behaviors.h"
 
 #define TERRAIN_GRID_CHUNKS 100 /* the 49 x 49 cells span up to 8 x 8 chunks */
 /*
@@ -822,6 +824,54 @@ static bool AppendPixelObjects(const struct DioramaSceneSnapshot *snapshot,
     return true;
 }
 
+/* The mask's pieces of fewer than MOUNTAIN_SPECK pixels (side by side) taken
+ * out: on their own they stood as stray pillars. */
+#define MOUNTAIN_SPECK 6
+
+static void DropMountainSpecks(uint16_t rows[DIORAMA_VOXELS_PER_CELL])
+{
+    uint16_t seen[DIORAMA_VOXELS_PER_CELL] = {0};
+    uint8_t stack[DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL];
+    uint8_t piece[DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL];
+
+    for (int start = 0; start < DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL; start++)
+    {
+        int startX = start % DIORAMA_VOXELS_PER_CELL;
+        int startY = start / DIORAMA_VOXELS_PER_CELL;
+        int top = 0;
+        int count = 0;
+
+        if (!(rows[startY] & (1u << startX)) || (seen[startY] & (1u << startX)))
+            continue;
+        seen[startY] |= 1u << startX;
+        stack[top++] = start;
+        while (top > 0)
+        {
+            int at = stack[--top];
+            int x = at % DIORAMA_VOXELS_PER_CELL;
+            int y = at / DIORAMA_VOXELS_PER_CELL;
+            static const int8_t steps[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+
+            piece[count++] = at;
+            for (int step = 0; step < 4; step++)
+            {
+                int nx = x + steps[step][0];
+                int ny = y + steps[step][1];
+
+                if (nx < 0 || ny < 0 || nx >= DIORAMA_VOXELS_PER_CELL || ny >= DIORAMA_VOXELS_PER_CELL
+                 || !(rows[ny] & (1u << nx)) || (seen[ny] & (1u << nx)))
+                    continue;
+                seen[ny] |= 1u << nx;
+                stack[top++] = ny * DIORAMA_VOXELS_PER_CELL + nx;
+            }
+        }
+        if (count < MOUNTAIN_SPECK)
+            for (int i = 0; i < count; i++)
+                rows[piece[i] / DIORAMA_VOXELS_PER_CELL] &=
+                    (uint16_t)~(1u << (piece[i] % DIORAMA_VOXELS_PER_CELL));
+    }
+}
+
 static void BuildMountainArtMask(const struct DioramaSceneSnapshot *snapshot,
                                  const struct DioramaCellSnapshot *source,
                                  uint8_t terraceProfile,
@@ -836,6 +886,8 @@ static void BuildMountainArtMask(const struct DioramaSceneSnapshot *snapshot,
     unsigned depth = 0;
     unsigned maxDepth = 0;
     int row;
+    bool rock;
+    bool rounded = false;
     struct DioramaAtlasArt art = DioramaAtlas_CellArt(snapshot, source);
 
     DioramaMetatile_ComposeLayer(art.tileGraphics, source->tileEntries,
@@ -852,7 +904,52 @@ static void BuildMountainArtMask(const struct DioramaSceneSnapshot *snapshot,
         return;
     }
 
-    if (visible == 0 || visible == DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL)
+    /* A mountain's rock (MB_MOUNTAIN_TOP, or the secondary tileset's rock the
+     * rules joined to it; only cells the player cannot walk on) stands as solid
+     * rock a cell high, so a mountain is one mass: each cell's drawing eroded
+     * into a little stepped pyramid of its own made rows of spikes (the owner's
+     * report, 2026-10-23). Something drawn over the ground on the cell's upper
+     * layer keeps its outline: rock stands straight up from it, a green thing
+     * (a mountain tree) is rounded from its edge to its middle. */
+    rock = source->metatileId >= NUM_METATILES_IN_PRIMARY || source->behavior == MB_MOUNTAIN_TOP;
+    if (rock)
+    {
+        uint32_t red = 0;
+        uint32_t green = 0;
+        uint32_t blue = 0;
+        unsigned kept = 0;
+
+        if (visible != 0 && visible != DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL)
+            DropMountainSpecks(rows);
+        for (int pixel = 0; pixel < DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL; pixel++)
+            if (rows[pixel / DIORAMA_VOXELS_PER_CELL] & (1u << (pixel % DIORAMA_VOXELS_PER_CELL)))
+            {
+                red += (pixels[pixel] >> 16) & 0xFF;
+                green += (pixels[pixel] >> 8) & 0xFF;
+                blue += pixels[pixel] & 0xFF;
+                kept++;
+            }
+        if (kept == 0 || kept == DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL)
+        {
+            for (row = 0; row < DIORAMA_VOXELS_PER_CELL; row++)
+                rows[row] = 0xFFFF;
+            memset(heights, DIORAMA_VOXELS_PER_CELL,
+                   DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL);
+            return;
+        }
+        if (green * 10 > red * 11 && green > blue)
+            rounded = true;
+        else
+        {
+            for (int pixel = 0; pixel < DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL; pixel++)
+                heights[pixel] = (rows[pixel / DIORAMA_VOXELS_PER_CELL]
+                                  & (1u << (pixel % DIORAMA_VOXELS_PER_CELL)))
+                               ? DIORAMA_VOXELS_PER_CELL : 0;
+            return;
+        }
+    }
+
+    if (!rounded && (visible == 0 || visible == DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL))
     {
         DioramaMetatile_Compose(art.tileGraphics, source->tileEntries,
                                 art.unfadedPalette, pixels);
@@ -895,6 +992,17 @@ static void BuildMountainArtMask(const struct DioramaSceneSnapshot *snapshot,
 
         if (pixelDepth == 0)
             continue;
+        if (rounded && maxDepth > 1)
+        {
+            /* a crown: 6 at the edge, rising fast and flattening to the
+             * cell's height in the middle (1 - (1 - t)^2) */
+            unsigned span = maxDepth - 1;
+            unsigned rest = span - (pixelDepth - 1);
+
+            heights[pixel] = 6 + (DIORAMA_VOXELS_PER_CELL - 6) * (span * span - rest * rest)
+                                 / (span * span);
+            continue;
+        }
         heights[pixel] = maxDepth == 1 ? DIORAMA_VOXELS_PER_CELL
             : 4 + (pixelDepth - 1) * (DIORAMA_VOXELS_PER_CELL - 4)
                 / (maxDepth - 1);
@@ -1120,6 +1228,19 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
                     cell->treeShade[pixel] = TreeShade(
                         snapshot, source, pixel % DIORAMA_VOXELS_PER_CELL,
                         pixel / DIORAMA_VOXELS_PER_CELL);
+            }
+            else if (cell->shape == DIORAMA_SHAPE_CLIFF
+                  && (cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART)
+                  && cell->terraceProfile == DIORAMA_TERRACE_NONE
+                  && (source->metatileId >= NUM_METATILES_IN_PRIMARY
+                   || source->behavior == MB_MOUNTAIN_TOP))
+            {
+                /* A mountain's rock (BuildMountainArtMask): the whole drawing on
+                 * its top and its sides, the rock as the GBA shows it from above
+                 * (its lower layer alone is the ground under it). */
+                for (face = 0; face < DIORAMA_MATERIAL_FACE_COUNT; face++)
+                    SetTerrainMaterial(&cell->materials[face], source->metatileId,
+                                       DIORAMA_MATERIAL_FULL);
             }
             else if (cell->shape == DIORAMA_SHAPE_CLIFF)
             {

@@ -8,6 +8,8 @@ Reads every layout that uses the tileset as its secondary (data/layouts/layouts.
 the tileset's own metatiles that are cave rock: placed impassable (nearly) everywhere, with no
 behaviour of their own (MB_NORMAL: not water, a ladder, a hole, a waterfall, a cracked floor),
 not named by the game's code or scripts (setmetatile could change them while the map is up),
+not the way out beyond an arrow warp (the opening the player walks into, drawn on the wall's
+foot: it stays a gap in the wall),
 not dark void (the black past a cave's edge stays a flat shadow), not a plain fill or showing
 the layouts' water or sky in a fifth of its drawing or more (the edge of a pool, the summit's
 sky), and part of a rock mass - in
@@ -44,9 +46,24 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 import voxel_building as vb          # noqa: E402
 import battle_room_auto as auto      # noqa: E402
 
-REASON = ("Cave rock (blocked, MB_NORMAL, part of a rock mass): stands as cave wall "
-          "(battle-environment overhaul).")
+REASON = ("Cave rock (blocked, no behaviour of its own or the cave's, part of a rock mass): "
+          "stands as cave wall (battle-environment overhaul).")
+# What this tool wrote before rock could carry the cave's behaviour (2026-10-23).
+OLD_REASONS = frozenset({"Cave rock (blocked, MB_NORMAL, part of a rock mass): stands as cave wall "
+                         "(battle-environment overhaul)."})
 BLOCKED_SHARE = 0.9    # of its placements impassable
+EXIT_SHARE = 0.5       # of its placements beyond an arrow warp: an exit, never rock
+# Behaviours rock may have: none of its own, the cave's (the battle background's
+# cave: blocked rock tops carry it as often as floors do) or a one-way edge.
+ROCK_BEHAVIOURS = frozenset({
+    'MB_NORMAL', 'MB_CAVE', 'MB_IMPASSABLE_NORTH', 'MB_IMPASSABLE_SOUTH', 'MB_IMPASSABLE_EAST',
+    'MB_IMPASSABLE_WEST', 'MB_IMPASSABLE_NORTHEAST', 'MB_IMPASSABLE_NORTHWEST',
+    'MB_IMPASSABLE_SOUTHEAST', 'MB_IMPASSABLE_SOUTHWEST', 'MB_IMPASSABLE_SOUTH_AND_NORTH',
+    'MB_IMPASSABLE_WEST_AND_EAST'})
+# The cell an arrow warp leads into, from the warp's cell.
+ARROW_STEPS = {'MB_SOUTH_ARROW_WARP': (0, 1), 'MB_NORTH_ARROW_WARP': (0, -1),
+               'MB_EAST_ARROW_WARP': (1, 0), 'MB_WEST_ARROW_WARP': (-1, 0),
+               'MB_WATER_SOUTH_ARROW_WARP': (0, 1)}
 MASS_SHARE = 0.5       # of its placements in a rock mass
 MASS_CELLS = 6         # impassable cells joined side by side, at least, or one at the map's edge
 
@@ -54,6 +71,31 @@ MASS_CELLS = 6         # impassable cells joined side by side, at least, or one 
 def file_name(tileset):
     name = tileset[len('gTileset_'):] if tileset.startswith('gTileset_') else tileset
     return re.sub(r'(?<=[a-z0-9])([A-Z])', r'_\1', name).lower() + '.json'
+
+
+def behaviours_of(L):
+    """Each metatile's behaviour name (primary and secondary), from the enum with its comments
+    left out: battle_room_auto._behaviours counts a name a comment mentions, so from
+    MB_INTERIOR_DEEP_WATER on its names are each one value off (an exit's MB_SOUTH_ARROW_WARP
+    read as MB_NORTH_ARROW_WARP)."""
+    import struct
+    import voxel_cells
+    names = {value: name for name, value in voxel_cells.MB.items()}
+
+    def read(symbol):
+        path = L.attrs.get(symbol)
+        if not path or not os.path.exists(path):
+            return []
+        raw = open(path, 'rb').read()
+        return [v & 0xFF for v in struct.unpack('<%dH' % (len(raw) // 2), raw[:len(raw) // 2 * 2])]
+
+    prim, sec = read(L.primary), read(L.secondary)
+
+    def of(m):
+        table, i = (prim, m) if m < 512 else (sec, m - 512)
+        b = table[i] if i < len(table) else 0
+        return names.get(b, 'MB_%d' % b)
+    return of
 
 
 def layouts_of(tileset):
@@ -65,7 +107,8 @@ def survey(tileset):
     """Per secondary metatile (local id): placements, impassable ones, rock-mass ones, its
     behaviour, and whether it is drawn as void."""
     dynamic = auto.dynamic_metatiles()
-    stats = collections.defaultdict(lambda: {'uses': 0, 'blocked': 0, 'mass': 0, 'layouts': set()})
+    stats = collections.defaultdict(lambda: {'uses': 0, 'blocked': 0, 'mass': 0, 'exit': 0,
+                                             'layouts': set()})
     behaviour = {}
     void = {}
     drawings = {}
@@ -79,7 +122,7 @@ def survey(tileset):
             print('skip %s: %s' % (lid, e), file=sys.stderr)
             continue
         sample = sample or L
-        of = auto._behaviours(L)
+        of = behaviours_of(L)
         W, H = L.w, L.h
 
         def blocked(x, y):
@@ -107,6 +150,14 @@ def survey(tileset):
                 for x, y in cells:
                     mass[y][x] = big
 
+        # the cells the arrow warps lead into: the cave's ways out
+        exits = set()
+        for y in range(H):
+            for x in range(W):
+                step = ARROW_STEPS.get(of(L.blocks[y * W + x] & 0x3FF))
+                if step and 0 <= x + step[0] < W and 0 <= y + step[1] < H:
+                    exits.add((x + step[0], y + step[1]))
+
         for y in range(H):
             for x in range(W):
                 m = L.blocks[y * W + x] & 0x3FF
@@ -119,6 +170,8 @@ def survey(tileset):
                 s = stats[m - 512]
                 s['uses'] += 1
                 s['layouts'].add(lid)
+                if (x, y) in exits:
+                    s['exit'] += 1
                 if blocked(x, y):
                     s['blocked'] += 1
                     if mass[y][x]:
@@ -167,8 +220,10 @@ def choose(stats, behaviour, void):
     rock, passed = [], []
     for m, s in sorted(stats.items()):
         why = None
-        if behaviour.get(m) != 'MB_NORMAL':
+        if behaviour.get(m) not in ROCK_BEHAVIOURS:
             why = behaviour.get(m)
+        elif s['exit'] >= EXIT_SHARE * s['uses']:
+            why = 'exit %d of %d' % (s['exit'], s['uses'])
         elif void.get(m):
             why = void[m]
         elif s['blocked'] < BLOCKED_SHARE * s['uses']:
@@ -224,8 +279,12 @@ def main():
     if args.write:
         if os.path.exists(path):
             old = json.load(open(path))
-            if any(p.get('reason') != REASON for p in old.get('pins', [])):
+            if any(p.get('reason') not in OLD_REASONS | {REASON} for p in old.get('pins', [])):
                 sys.exit('%s has pins this tool did not write; not replacing it' % path)
+            # Rock chosen before stays rock unless it is a way out: with the behaviours read
+            # right the water test also passes over Shoal Cave's icy rock, which stood as wall.
+            exits = {m for m, why in passed if why.startswith('exit')}
+            rock = sorted((set(rock) | {p['metatile'] for p in old.get('pins', [])}) - exits)
         data = {'schemaVersion': 2, 'kind': 'tileset', 'tileset': args.tileset,
                 'pins': [{'metatile': m, 'reason': REASON,
                           'action': {'archetype': 'cliff', 'pool': 'terrain', 'height': 1}}

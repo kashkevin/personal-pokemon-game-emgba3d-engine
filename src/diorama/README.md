@@ -284,3 +284,53 @@ tilesets are unchanged.
   pixel-wide cracks where a merged face's edge meets smaller faces (without
   them the sky showed there). `PKMN_DIORAMA_CHUNK_LOG=1` logs each chunk's
   cost.
+
+## Mountains, caves and houses (the owner's report, 2026-10-23)
+
+* Mountains (`compile_rules.py` `_with_mountain_art`, `mountain_art.py`
+  `detect_layout`, `gl_terrain_renderer.c` `BuildMountainArtMask`): the game
+  tags its mountain ground MB_MOUNTAIN_TOP for the battle background alone, the
+  paths the player walks on as well as the rock. The rules stood every such
+  cell up as a one-cell cliff and the renderer eroded each cell's drawing into
+  a little stepped pyramid of its own, so Route 112's paths, trees and cliffs
+  were rows of spikes. A walkable MB_MOUNTAIN_TOP cell is now ground
+  (`behavior:MB_MOUNTAIN_TOP:walkable`) and joins no rock to it; a blocked one
+  (and the secondary tileset's rock the rules join to it) is solid rock a cell
+  high with its whole drawing on its top and sides, so a mountain is one mass.
+  Something drawn on the cell's upper layer keeps its outline: rock stands
+  straight up from it, a green thing (a mountain tree) is a rounded crown;
+  pieces of the outline under six pixels are left out (they stood as stray
+  pillars). General's dense forest and terraces keep their own heightmaps.
+* Caves (`tools/battle_env/cave_pins.py`, `compile_rules.py` `_cave_rock_cells`,
+  `rules.c` `BorderRockRecord`): the cave rock picker read tile behaviours with
+  a table one value off from MB_INTERIOR_DEEP_WATER on (a comment in the enum
+  counted as a name; battle_room_auto.py's reader, which the indoor battle rooms
+  still use) and took only MB_NORMAL rock, so the rock tops that carry the
+  cave's own MB_CAVE (Rusturf Tunnel's 9 and 17, about 330 cells) lay flat and
+  read as floor. It now reads the enum without its comments, takes rock with
+  no behaviour, the cave's or a one-way edge, and leaves out the cell beyond an
+  arrow warp (the way out drawn on the wall's foot, which stood as a block with
+  the opening on every side): the exit is a gap in the wall. Rock it chose
+  before stays chosen. Cell by cell, the compiler stands up the blocked cells of
+  a cave tileset's rock masses that are drawn with a metatile the cave also
+  uses for floor (Granite Cave's sand); the black past a cave's edge and plain
+  fills stay flat. A blocked ledge the player can never jump stands with that
+  rock too (a diagonal one, which the game never jumps, or a straight one with
+  no cell to jump it from): Rusturf Tunnel draws its rock in tiers with such
+  ledges between them, which lay low and read as trenches through the rock
+  (35 cells there, 10 in Victory Road 1F, 2 in Granite Cave 1F); a ledge the
+  player jumps stays a ledge. A cave's rock beside a raised floor stands on that floor, a
+  cell over it (`lift_blocked_cells` lifts to any level other than 0). Past the
+  map's edge, an underground map's border block takes the record of the same
+  metatile standing as rock inside the map (a border no rock is drawn with -
+  Navel Rock's sky - stays flat).
+* Houses (`compile_rules.py` `STANDING_WALLS`, `voxel_building.py` `HipRoof`):
+  where the terrace solver puts a walk a level below the top, blocked cells
+  stayed on the top level: Route 116's rest house stood a tile up on its own
+  cells, their sides its facade and its sign drawn again under it, and trees
+  stood on plinths. Blocked cells outdoors now stand on the level of the ground
+  nearest them, as Mossdeep's already did, except the classes that stand
+  between two levels (cliffs, mounds, walls); a wall that touches both levels
+  keeps the top level. A hipped roof's ridge is its cap alone, a strip of the
+  drawn ridge's top where the slopes meet: the 3DS port stood it up as a box
+  whose front was the drawn ridge, which read as a block lying on the roof.

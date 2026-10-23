@@ -38,7 +38,7 @@ class MountainArtTests(unittest.TestCase):
         with self.assertRaisesRegex(MountainArtError, "non-rectangular"):
             mountain_art_mask({"resolved": True, "layers": (full, empty, full)})
         with self.assertRaisesRegex(MountainArtError, "unresolved"):
-            validate_layout(({"behavior": "MB_MOUNTAIN_TOP"},),
+            validate_layout(({"behavior": "MB_MOUNTAIN_TOP", "collision": 1},),
                             ({"resolved": False},), 1, 1)
 
     def test_heightmap_curves_from_low_edge_to_one_cell_peak(self):
@@ -63,11 +63,18 @@ class MountainArtTests(unittest.TestCase):
                           for full, composed in ((full_seed, full_seed),
                                                  (full_edge, full_edge),
                                                  (full_edge, full_edge)))
-        cells = ({"behavior": "MB_MOUNTAIN_TOP"},
-                 {"behavior": "MB_NORMAL"}, {"behavior": "MB_NORMAL"})
+        cells = ({"behavior": "MB_MOUNTAIN_TOP", "collision": 1},
+                 {"behavior": "MB_NORMAL", "collision": 1}, {"behavior": "MB_NORMAL", "collision": 1})
         self.assertEqual(detect_layout(cells, summaries, 3, 1), frozenset((0, 1, 2)))
 
-        disconnected = cells + ({"behavior": "MB_NORMAL"},)
+        # The game tags its mountain paths MB_MOUNTAIN_TOP too (the battle background):
+        # a cell the player walks on is no rock, and joins none to it.
+        walkable_seed = ({"behavior": "MB_MOUNTAIN_TOP", "collision": 0},) + cells[1:]
+        self.assertEqual(detect_layout(walkable_seed, summaries, 3, 1), frozenset())
+        walkable_edge = cells[:2] + ({"behavior": "MB_NORMAL", "collision": 0},)
+        self.assertEqual(detect_layout(walkable_edge, summaries, 3, 1), frozenset((0, 1)))
+
+        disconnected = cells + ({"behavior": "MB_NORMAL", "collision": 1},)
         unrelated = tuple(source_pixel(200) for _ in range(256))
         summaries += ({"resolved": True,
                        "layers": (unrelated, foreground, unrelated)},)

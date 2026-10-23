@@ -317,9 +317,10 @@ def lift_blocked_cells(cells: tuple[dict, ...], width: int, height: int,
     houses, trees and rocks stayed at the top level, a tile up on plinths.
     Each blocked cell `liftable(offset)` allows (all, when None; the compiler
     leaves natural cliffs out) takes the level of the walkable ground nearest
-    it, counted through such cells: when that is a solved level below the top
-    (dry land, or the sea solved with it), that level is its ground ("lift":
-    its own height stands on it). Nearest to unsolved water (the sea at its
+    it, counted through such cells: when that is a solved level other than 0
+    (outdoors one below the top: dry land, or the sea solved with it; in a cave
+    a floor over its lowest), that level is its ground ("lift": its own height
+    stands on it). Nearest to unsolved water (the sea at its
     own height), to two levels at once, or to unsolved ground, it is left as
     it was. Returns the lifted cells' entries (graphics overhaul phase 4,
     2026-10-12)."""
@@ -368,7 +369,9 @@ def lift_blocked_cells(cells: tuple[dict, ...], width: int, height: int,
         if len(offered) != 1:
             continue
         level = next(iter(offered))
-        if isinstance(level, int) and level < 0:
+        # outdoors the levels lie below the top (0); in a cave its floors over
+        # the lowest (cave_levels)
+        if isinstance(level, int) and level != 0:
             lifted[offset] = {"groundQ16": level, "topQ16": level,
                               "profile": "none", "solid": False, "lift": True}
     return lifted

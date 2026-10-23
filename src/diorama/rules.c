@@ -865,14 +865,107 @@ bool DioramaRules_StaticHeights(uint16_t layoutId, uint8_t mapGroup, uint8_t map
     return true;
 }
 
+/*
+ * Past a cave's edge (the owner's report of 2026-10-23: "it looks like u can
+ * walk through some places when u cant"): the map's border block lay as flat
+ * ground all round a cave, and most caves draw it with their own rock (Granite
+ * Cave with the sand it also tops its rock with). On an underground map a
+ * border cell takes the record of a cell inside the map with the same metatile
+ * standing as rock on the cave's lowest level (compile_rules.py: the cave's
+ * pins and its rock masses), so the cave is closed in rock; a border no rock in
+ * the map is drawn with (the black past the edge, Navel Rock's sky) stays flat.
+ */
+static const struct DioramaGeneratedTerrainV2 *BorderRockRecord(
+    const struct DioramaSceneSnapshot *snapshot, const struct DioramaCellSnapshot *cell)
+{
+    /* the last few answers (a border is one or two metatiles), as (layout << 16 | metatile) + 1 and
+     * the record's index + 1: the render thread's grid and the game thread's sprites both ask, so an
+     * entry is used only when its key reads the same before and after its record */
+    static volatile uint32_t sKey[4];
+    static volatile uint32_t sRecord[4];
+    static volatile uint8_t sNext;
+    const struct DioramaGeneratedTerrainV2 *found = NULL;
+    const struct DioramaGeneratedLayoutV2 *layout;
+    uint32_t key;
+    uint32_t i;
+
+    if (snapshot->mapType != MAP_TYPE_UNDERGROUND || !(cell->flags & DIORAMA_CELL_BORDER)
+     || (cell->flags & DIORAMA_CELL_SOURCE_VALID))
+        return NULL;
+    key = ((uint32_t)cell->sourceLayoutId << 16 | cell->metatileId) + 1;
+    for (i = 0; i < 4; i++)
+    {
+        uint32_t record;
+
+        if (sKey[i] != key)
+            continue;
+        record = sRecord[i];
+        __sync_synchronize();
+        if (sKey[i] == key)
+            return record != 0 ? &gDioramaTerrainV2[record - 1] : NULL;
+    }
+    layout = FindLayout(cell->sourceLayoutId);
+    if (layout != NULL && layout->terrainRecordOffset <= gDioramaTerrainV2Count
+     && layout->terrainRecordCount <= gDioramaTerrainV2Count - layout->terrainRecordOffset)
+        for (i = 0; i < layout->terrainRecordCount && found == NULL; i++)
+        {
+            const struct DioramaGeneratedTerrainV2 *record =
+                &gDioramaTerrainV2[layout->terrainRecordOffset + i];
+
+            if (record->expectedMetatile == cell->metatileId && record->mapGroup == UINT8_MAX
+             && record->shape == DIORAMA_SHAPE_CLIFF && record->groundQ16 == 0
+             && record->measuredBandCount == 0)
+                found = record;
+        }
+    i = sNext++ % 4;
+    sKey[i] = 0;
+    __sync_synchronize();
+    sRecord[i] = found != NULL ? (uint32_t)(found - gDioramaTerrainV2) + 1 : 0;
+    __sync_synchronize();
+    sKey[i] = key;
+    return found;
+}
+
+static void ApplyBorderRock(const struct DioramaGeneratedTerrainV2 *record,
+                            struct DioramaResolvedCell *resolved)
+{
+    resolved->shape = record->shape;
+    resolved->archetype = record->archetype;
+    resolved->terrainClass = record->terrainClass;
+    resolved->classifierClass = record->classId;
+    resolved->classifierSource = record->sourceId;
+    resolved->semanticPool = record->pool;
+    resolved->artMode = record->artMode;
+    resolved->authored = record->authored;
+    resolved->source = record->sourceKind;
+    resolved->classifierConfidence = record->confidence;
+    resolved->evidenceFlags = record->evidenceFlags;
+    resolved->groundMode = record->propGroundMode;
+    resolved->planeAxis = record->axis;
+    resolved->groundHeight = record->groundQ16 / 16.0f;
+    resolved->topHeight = record->topQ16 / 16.0f;
+    resolved->featureHeight = resolved->topHeight - resolved->groundHeight;
+    resolved->cliffEdgeMask = record->cliffEdgeMask;
+    resolved->cliffBaseMask = record->cliffBaseMask;
+    resolved->cliffTransitionMask = record->cliffTransitionMask;
+    resolved->cliffCornerMask = record->cliffCornerMask;
+    resolved->terraceProfile = record->terraceProfile;
+    resolved->measuredFlags = record->measuredFlags;
+}
+
 bool DioramaRules_ResolveCell(const struct DioramaSceneSnapshot *snapshot,
                               const struct DioramaCellSnapshot *cell,
                               struct DioramaResolvedCell *resolved)
 {
+    const struct DioramaGeneratedTerrainV2 *borderRock;
+
     if (snapshot == NULL || cell == NULL || resolved == NULL)
         return false;
     InitializeResolved(resolved);
     ApplyStaticTerrain(snapshot, cell, resolved);
+    borderRock = BorderRockRecord(snapshot, cell);
+    if (borderRock != NULL)
+        ApplyBorderRock(borderRock, resolved);
     if (cell->collision != 0)
         resolved->evidenceFlags |= DIORAMA_EVIDENCE_COLLISION;
     if (cell->elevation != 0)
@@ -897,9 +990,13 @@ void DioramaRules_ResolveGrid(const struct DioramaSceneSnapshot *snapshot,
     for (i = 0; i < count; i++)
     {
         const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
+        const struct DioramaGeneratedTerrainV2 *borderRock;
 
         InitializeResolved(&resolvedCells[i]);
         ApplyStaticTerrain(snapshot, cell, &resolvedCells[i]);
+        borderRock = BorderRockRecord(snapshot, cell);
+        if (borderRock != NULL)
+            ApplyBorderRock(borderRock, &resolvedCells[i]);
         if (cell->collision != 0)
             resolvedCells[i].evidenceFlags |= DIORAMA_EVIDENCE_COLLISION;
         if (cell->elevation != 0)

@@ -766,8 +766,118 @@ def _with_animation_provenance(shape: TileShape, cell: dict) -> TileShape:
                      shape.ambiguity, shape.prop_ground)
 
 
+# A cave's rock (the owner's report of 2026-10-23: "it looks like u can walk
+# through some places when u cant"). tools/battle_env/cave_pins.py stands up the
+# metatiles that are rock wherever they are placed; a cave also draws its rock
+# with a metatile it uses for floor elsewhere (Granite Cave's sand, 529: blocked
+# in half its cells), which stayed flat there and read as more floor. Cell by
+# cell here: blocked, a behaviour rock may have, in a mass of CAVE_ROCK_MASS
+# cells side by side or at the map's edge, not the black past the cave's edge
+# or a plain fill (a sheet of lava, the summit's sky).
+CAVE_ROCK_BEHAVIORS = frozenset({
+    "MB_NORMAL", "MB_CAVE", "MB_IMPASSABLE_NORTH", "MB_IMPASSABLE_SOUTH", "MB_IMPASSABLE_EAST",
+    "MB_IMPASSABLE_WEST", "MB_IMPASSABLE_NORTHEAST", "MB_IMPASSABLE_NORTHWEST",
+    "MB_IMPASSABLE_SOUTHEAST", "MB_IMPASSABLE_SOUTHWEST", "MB_IMPASSABLE_SOUTH_AND_NORTH",
+    "MB_IMPASSABLE_WEST_AND_EAST"})
+CAVE_EXIT_STEPS = {"MB_SOUTH_ARROW_WARP": (0, 1), "MB_NORTH_ARROW_WARP": (0, -1),
+                   "MB_EAST_ARROW_WARP": (1, 0), "MB_WEST_ARROW_WARP": (-1, 0),
+                   "MB_WATER_SOUTH_ARROW_WARP": (0, 1)}
+# A ledge the player can never jump stands with the rock round it (Rusturf
+# Tunnel's rock is drawn in tiers with blocked ledges between them; flat, they
+# read as trenches through the rock). The game jumps only the four straight
+# ledges (GetLedgeJumpDirection: the diagonal ones are unused), from the cell
+# the player stands on before it: these name that cell for each.
+CAVE_LEDGE_TAKEOFF = {"MB_JUMP_SOUTH": (0, -1), "MB_JUMP_NORTH": (0, 1),
+                      "MB_JUMP_EAST": (-1, 0), "MB_JUMP_WEST": (1, 0)}
+CAVE_ROCK_MASS = 6
+CAVE_ROCK_DARK = 40
+# The caves' own tilesets (cave_pins.py's): the hideouts, New Mauville and the
+# ship, underground too, draw walls and machines, not rock.
+CAVE_ROCK_TILESETS = frozenset({"gTileset_Cave", "gTileset_MeteorFalls", "gTileset_RusturfTunnel",
+                                "gTileset_NavelRock"})
+
+
+def _cave_rock_cells(cells: tuple[dict, ...], summaries: tuple[dict, ...],
+                     width: int, height: int) -> frozenset[int]:
+    def drawn_as_rock(summary: dict) -> bool:
+        layers = summary.get("layers")
+        if not summary.get("resolved") or not layers:
+            return False
+        pixels = layers[2]
+        dark = sum(1 for pixel in pixels if not pixel.visible
+                   or (pixel.rgba[0] <= CAVE_ROCK_DARK and pixel.rgba[1] <= CAVE_ROCK_DARK
+                       and pixel.rgba[2] <= CAVE_ROCK_DARK + 8))
+        colours = Counter(pixel.rgba[:3] for pixel in pixels if pixel.visible)
+        return (dark < 0.9 * len(pixels) and bool(colours)
+                and colours.most_common(1)[0][1] < 0.9 * sum(colours.values()))
+
+    # the way out beyond an arrow warp, drawn on the wall's foot, stays a gap in the wall
+    exits = set()
+    for offset, cell in enumerate(cells):
+        step = CAVE_EXIT_STEPS.get(cell.get("behavior"))
+        if step is not None:
+            x, y = offset % width + step[0], offset // width + step[1]
+            if 0 <= x < width and 0 <= y < height:
+                exits.add(y * width + x)
+
+    def dead_ledge(offset: int, cell: dict) -> bool:
+        behavior = cell.get("behavior") or ""
+        if not behavior.startswith("MB_JUMP_"):
+            return False
+        step = CAVE_LEDGE_TAKEOFF.get(behavior)
+        if step is None:
+            return True
+        x, y = offset % width + step[0], offset // width + step[1]
+        return not (0 <= x < width and 0 <= y < height) or bool(cells[y * width + x].get("collision"))
+
+    candidate = [bool(cell.get("collision"))
+                 and (cell.get("behavior") in CAVE_ROCK_BEHAVIORS or dead_ledge(offset, cell))
+                 and offset not in exits and drawn_as_rock(summary)
+                 for offset, (cell, summary) in enumerate(zip(cells, summaries))]
+    rock: set[int] = set()
+    seen: set[int] = set()
+    for start in range(len(cells)):
+        if not candidate[start] or start in seen:
+            continue
+        mass, pending, edge = [], [start], False
+        seen.add(start)
+        while pending:
+            offset = pending.pop()
+            mass.append(offset)
+            x, y = offset % width, offset // width
+            edge = edge or x in (0, width - 1) or y in (0, height - 1)
+            for neighbor in ((offset - 1 if x else -1), (offset + 1 if x + 1 < width else -1),
+                             (offset - width if y else -1), (offset + width if y + 1 < height else -1)):
+                if neighbor >= 0 and candidate[neighbor] and neighbor not in seen:
+                    seen.add(neighbor)
+                    pending.append(neighbor)
+        if edge or len(mass) >= CAVE_ROCK_MASS:
+            rock.update(mass)
+    return frozenset(rock)
+
+
+def _with_cave_rock(shape: TileShape, cell: dict, accepted: bool) -> TileShape:
+    if not accepted or shape.class_name not in ("ground", "ledge") or shape.authored:
+        return shape
+    return shape_from_action(
+        {"archetype": "cliff", "pool": "terrain", "height": 1},
+        source="context:cave-rock", authored=False, confidence=0.9,
+        evidence=tuple(dict.fromkeys(shape.evidence + ("collision:blocked", "context:cave-rock-mass"))))
+
+
 def _with_mountain_art(shape: TileShape, cell: dict, accepted: bool) -> TileShape:
-    if not accepted or cell.get("behavior") == "MB_MOUNTAIN_TOP":
+    if cell.get("behavior") == "MB_MOUNTAIN_TOP":
+        if not cell.get("collision") and shape.source == "behavior:MB_MOUNTAIN_TOP":
+            # The game tags its mountain ground MB_MOUNTAIN_TOP for the battle
+            # background alone: a cell the player walks on is ground, not a
+            # one-cell cliff (Route 112's paths stood as rows of little
+            # pyramids; the owner's report, 2026-10-23).
+            return shape_from_action(
+                {"archetype": "ground", "pool": "terrain"},
+                source="behavior:MB_MOUNTAIN_TOP:walkable", authored=False, confidence=0.95,
+                evidence=tuple(dict.fromkeys(shape.evidence + ("collision:walkable",))))
+        return shape
+    if not accepted:
         return shape
     evidence = tuple(dict.fromkeys(shape.evidence + (
         "pixels:mountain-art-family", "context:mountain-connected")))
@@ -1077,12 +1187,16 @@ def _terrain_record(cell_offset: int, cell: dict, shape: TileShape,
 
 
 # The layouts whose blocked cells on a lower terrace level stand on it
-# (terrace_topology.lift_blocked_cells). Opt-in, map by map, each looked at:
-# Mossdeep's town lies a level under its cliffs' tops and its houses and its
-# own trees stood a tile up on plinths. Elsewhere blocked cells by a lower
-# level are as often a wall the art draws between two levels (Ever Grande's
-# garden wall, mountain foot rocks), which the top level happens to suit.
+# (terrace_topology.lift_blocked_cells) besides every outdoor one. It began
+# opt-in, map by map (Mossdeep's town lies a level under its cliffs' tops and
+# its houses and its own trees stood a tile up on plinths); since the owner's
+# report of 2026-10-23 (Route 116's rest house a tile up, its facade drawn
+# again under it) every outdoor layout. A wall the art draws between two
+# levels touches both and keeps the top level (only a cell whose nearest
+# walkable ground is one level moves), and STANDING_WALLS never move.
 LIFT_BLOCKED_LAYOUTS = frozenset({"LAYOUT_MOSSDEEP_CITY"})
+# The classes that stand between two levels and keep the top level outdoors.
+STANDING_WALLS = frozenset({"cliff", "mound", "wall", "wall-volume"})
 
 
 def _rocks_at_sea_level(cells: tuple[dict, ...], width: int, height: int,
@@ -1220,6 +1334,7 @@ def compile_data(root: Path) -> dict:
     event_cells = _events(root, maps, cells, layouts_by_id)
     pixel_summaries = _pixel_summaries(root, layouts, cells, tilesets)
     mountain_art_cells = {}
+    cave_rock_cells = {}
     terrace_topology = {}
     for layout in layouts:
         try:
@@ -1237,6 +1352,11 @@ def compile_data(root: Path) -> dict:
         # is that map's: _script_layouts)
         rows = (maps_by_layout.get(layout["id"], ())
                 or maps_by_layout.get(script_layouts.get(layout["id"]), ()))
+        cave_rock_cells[layout["id"]] = (
+            _cave_rock_cells(cells[layout["id"]], pixel_summaries[layout["id"]],
+                             layout["width"], layout["height"])
+            if rows and all(row["mapType"] == "MAP_TYPE_UNDERGROUND" for row in rows)
+            and layout.get("secondary_tileset") in CAVE_ROCK_TILESETS else frozenset())
         if rows and all(row["mapType"] == "MAP_TYPE_UNDERGROUND" for row in rows):
             # A cave's floors at their own elevation (terrace_topology.cave_levels).
             solved = {**solved, **cave_levels(cells[layout["id"]], layout["width"],
@@ -1437,13 +1557,34 @@ def compile_data(root: Path) -> dict:
                 layout_cells, layout["width"], layout["height"])
             wildcard = tuple(_with_animation_provenance(shape, cell)
                              for shape, cell in zip(wildcard, layout_cells))
+            wildcard = tuple(_with_cave_rock(shape, cell, offset in cave_rock_cells[layout["id"]])
+                             for offset, (shape, cell) in enumerate(zip(wildcard, layout_cells)))
             rocks = _sea_rock_cells(layout)
             if terrace_topology[layout["id"]]:
-                if layout["id"] in LIFT_BLOCKED_LAYOUTS:
-                    # Houses, trees and rocks on a lower level stand on it (natural
-                    # cliffs, the walls between levels, keep their own heights).
+                layout_maps = (maps_by_layout.get(layout["id"], ())
+                               or maps_by_layout.get(script_layouts.get(layout["id"]), ()))
+                outdoor = bool(layout_maps) and all(_outdoor(row["mapType"]) for row in layout_maps)
+                cave = bool(layout_maps) and all(row["mapType"] == "MAP_TYPE_UNDERGROUND"
+                                                 for row in layout_maps)
+                if layout["id"] in LIFT_BLOCKED_LAYOUTS or outdoor:
+                    # Houses, trees, signs and rocks on a lower level stand on it (natural
+                    # cliffs, the walls between levels, keep their own heights). Outdoors
+                    # everywhere since the owner's report of 2026-10-23: Route 116's rest
+                    # house stood a tile up on its own cells, their sides its facade drawn
+                    # again under it, and its sign twice.
                     liftable = (lambda offset, shapes=wildcard, rocks=rocks: offset in rocks
-                                or shapes[offset].class_name not in ("cliff", "mound"))
+                                or shapes[offset].class_name not in STANDING_WALLS)
+                elif cave:
+                    # A cave's rock (cave_pins.py's walls) beside a raised floor stands on
+                    # that floor, a cell over it: level with the floor it read as more
+                    # floor (the owner's report, 2026-10-23); the sea's rocks and the
+                    # ledges as elsewhere.
+                    liftable = (lambda offset, rocks=rocks, cells=layout_cells, shapes=wildcard:
+                                offset in rocks
+                                or str(cells[offset].get("behavior", "")).startswith("MB_JUMP_")
+                                or (shapes[offset].class_name == "cliff"
+                                    and (shapes[offset].source.startswith("pin:")
+                                         or shapes[offset].source == "context:cave-rock")))
                 else:
                     # Elsewhere the sea's rocks and the ledges (a ledge on a
                     # lower level stood a level up, its see-through side open).
@@ -1512,6 +1653,8 @@ def compile_data(root: Path) -> dict:
                 exact_patterns = patterns + (configured["exactPatterns"] if configured else [])
                 exact = tuple(_with_animation_provenance(shape, cell)
                                for shape, cell in zip(exact, layout_cells))
+                exact = tuple(_with_cave_rock(shape, cell, offset in cave_rock_cells[layout["id"]])
+                              for offset, (shape, cell) in enumerate(zip(exact, layout_cells)))
                 exact = tuple(_with_mountain_art(
                     shape, cell, offset in mountain_art_cells[layout["id"]])
                     for offset, (shape, cell) in enumerate(zip(exact, layout_cells)))
