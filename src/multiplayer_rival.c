@@ -37,6 +37,7 @@
 #include "constants/flags.h"
 #include "constants/heal_locations.h"
 #include "item.h"
+#include "multiplayer_soft_reset.h"
 #include "constants/items.h"
 #include "constants/layouts.h"
 #include "constants/map_event_ids.h"
@@ -441,6 +442,12 @@ bool8 MultiplayerRival_TryStartFieldScript(void)
     }
     if (sRival.menuRequested)
     {
+        // A party changed since the last save is saved on the host first; PLAYERS follows (multiplayer_soft_reset.c).
+        if (MultiplayerHostSave_BeforePlayers(0))
+        {
+            sRival.menuRequested = FALSE;
+            return FALSE;
+        }
         if (MultiplayerMenu_Open())
         {
             sRival.menuRequested = FALSE;

@@ -881,7 +881,8 @@ static bool8 StartMenuPlayersCallback(void)
     // overlay. Open refuses unbound/offline/unsafe state without sending input.
 #ifdef PORTABLE
     // A refusal says why in a banner (not connected, link lost, not ready yet) instead of closing the menu silently.
-    if (!MultiplayerMenu_Open())
+    // A party changed since the last save is saved on the host first (multiplayer_soft_reset.c); the menu follows.
+    if (!MultiplayerHostSave_BeforePlayers(0) && !MultiplayerMenu_Open())
         MultiplayerPresence_PlayersRefused();
     return TRUE;
 #endif
@@ -910,7 +911,7 @@ static bool8 StartMenuTowerCallback(void)
     RemoveExtraStartMenuWindows(); HideStartMenu();
     if (!MpBridge_TowerEnabled())
         MultiplayerPresence_Refuse("The Battle Tower needs this|game's own launcher version.");
-    else if (!MultiplayerMenu_OpenPage(MP_MENU_PAGE_TOWER))
+    else if (!MultiplayerHostSave_BeforePlayers(MP_MENU_PAGE_TOWER) && !MultiplayerMenu_OpenPage(MP_MENU_PAGE_TOWER))
         MultiplayerPresence_PlayersRefused();
     return TRUE;
 }

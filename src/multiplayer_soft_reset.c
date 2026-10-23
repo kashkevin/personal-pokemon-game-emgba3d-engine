@@ -19,6 +19,7 @@
 #include "field_player_avatar.h"
 #include "overworld.h"
 #include "palette.h"
+#include "pokemon.h"
 #include "save.h"
 #include "script.h"
 
@@ -158,27 +159,49 @@ bool32 MultiplayerHostSave_TryOpen(void)
 
 // The owner's request (2026-10-22): no save is needed before a battle (include/multiplayer_soft_reset.h). The party
 // as of the game's last save is known from the save counter: the game's first free frame is the save it loaded (the
-// host's), and any save since (the launcher's export, an in-game SAVE, a trade's import) moves the counter. A party
-// that differs from it asks for a host save; one that is not made (refused, the world unreachable) asks again after
-// a wait that doubles each time, up to five minutes, so a failing save is never asked for every few seconds.
+// host's), and any save since (the launcher's export, an in-game SAVE, a trade's import) moves the counter.
+//
+// The owner's report (2026-10-23): saving whenever the party changed saved every minute or two (friendship rises every
+// 128 steps, poison, HP and experience after any battle) and showed the old window each time. Every battle, the Tower
+// and the rival gate start from the Players menu, so the host save now comes there: opening PLAYERS with a party that
+// differs from the last save's asks for the host save first (page 3, which draws nothing), and the menu opens once the
+// save is made - or after THEN_WAIT_FRAMES without one, as before (Enter then says why). Only a change of the party's
+// Pokemon themselves (one received, caught, released, traded away or evolved: rare) is saved at once, from the free
+// field, so a trainer who is challenged has the host save with that Pokemon (a challenge names the saves; a trainer
+// whose host save has no Pokemon cannot be challenged). A save that is not made is asked for again after a wait that
+// doubles each time, up to five minutes.
+#define THEN_WAIT_FRAMES (60 * 15)
 #define AUTO_SAVE_GAP_FRAMES (60 * 10)
 #define AUTO_SAVE_GAP_MAX (60 * 60 * 5)
 
-static bool8 sPartyKnown;
-static u32 sPartySaveCounter, sPartyCrc, sAutoSaveWait, sAutoSaveGap;
+static bool8 sPartyKnown, sThenPending;
+static u16 sThenPage;
+static u32 sPartySaveCounter, sPartyCrc, sPartyMons, sThenCounter, sThenAge, sAutoSaveWait, sAutoSaveGap;
+
+// The party's Pokemon as a word: each one's personality and species, and their count (HP, experience, friendship and
+// the like do not count).
+static u32 PartyMons(void)
+{
+    u32 i, sum = gPartiesCount[B_TRAINER_PLAYER];
+
+    for (i = 0; i < gPartiesCount[B_TRAINER_PLAYER] && i < PARTY_SIZE; i++)
+    {
+        sum = sum * 2654435761u + GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_PERSONALITY);
+        sum = sum * 2654435761u + GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_SPECIES);
+    }
+    return sum;
+}
 
 void MultiplayerHostSave_PartyWatch(void)
 {
-    u32 crc;
-
     if (!MpBridge_HostSavePageEnabled())
         return;
-    crc = MultiplayerBattle_PartyCrc32();
     if (!sPartyKnown || gSaveCounter != sPartySaveCounter)
     {
         sPartyKnown = TRUE;
         sPartySaveCounter = gSaveCounter;
-        sPartyCrc = crc;
+        sPartyCrc = MultiplayerBattle_PartyCrc32();
+        sPartyMons = PartyMons();
         sAutoSaveWait = 0;
         sAutoSaveGap = AUTO_SAVE_GAP_FRAMES;
         return;
@@ -188,12 +211,44 @@ void MultiplayerHostSave_PartyWatch(void)
         sAutoSaveWait--;
         return;
     }
-    if (crc == sPartyCrc || sHostSaveAge != 0)
+    if (sHostSaveAge != 0 || sThenPending || PartyMons() == sPartyMons)
         return;
     sHostSaveAge = 1;
     sHostSaveAuto = TRUE;
     sAutoSaveWait = sAutoSaveGap;
     sAutoSaveGap = sAutoSaveGap * 2 > AUTO_SAVE_GAP_MAX ? AUTO_SAVE_GAP_MAX : sAutoSaveGap * 2;
-    Log("host save: the party changed since the last save; asking the launcher");
+    Log("host save: the party's Pokemon changed since the last save; asking the launcher");
+}
+
+bool32 MultiplayerHostSave_BeforePlayers(u16 page)
+{
+    if (!MpBridge_HostSavePageEnabled() || !sPartyKnown || sThenPending || sHostSaveAge != 0
+     || gSaveCounter != sPartySaveCounter || MultiplayerBattle_PartyCrc32() == sPartyCrc)
+        return FALSE;
+    sHostSaveAge = 1;
+    sHostSaveAuto = TRUE;
+    sThenPending = TRUE;
+    sThenPage = page;
+    sThenCounter = gSaveCounter;
+    sThenAge = 0;
+    Log("host save: the party changed since the last save; saving before PLAYERS");
+    return TRUE;
+}
+
+bool32 MultiplayerHostSave_TryThen(void)
+{
+    bool32 saved;
+
+    if (!sThenPending || sHostSaveAge != 0)
+        return FALSE;               // the host save page has not opened yet
+    saved = gSaveCounter != sThenCounter;
+    if (!saved && ++sThenAge <= THEN_WAIT_FRAMES)
+        return FALSE;
+    sThenPending = FALSE;
+    Log(saved ? "host save: saved; PLAYERS opens" : "host save: no save came; PLAYERS opens anyway");
+    if (sThenPage ? MultiplayerMenu_OpenPage(sThenPage) : MultiplayerMenu_Open())
+        return TRUE;
+    MultiplayerPresence_PlayersRefused();
+    return FALSE;
 }
 #endif // PORTABLE

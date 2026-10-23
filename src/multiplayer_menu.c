@@ -70,6 +70,10 @@ static bool32 ValidText(const u8 *text, u32 size)
 }
 
 #ifdef PORTABLE
+// The owner's report (2026-10-23): the host save page (3) showed the old 2D window for a moment, also in 3D. That page
+// only asks the launcher to save (the companion closes it at once), so it draws nothing.
+static bool8 sQuiet;
+
 // Battle Tower: Legends: a Tower screen (flags 4 or 5) has no rows; flags 4 carry the solo command in the rows' bytes.
 static bool32 ValidTowerScreen(const struct MultiplayerMenuScreen *screen)
 {
@@ -170,6 +174,10 @@ static void PrintAscii(const u8 *ascii, u32 capacity, u32 x, u32 y, bool32 disab
 static void Render(void)
 {
     if (sWindow == WINDOW_NONE) return;
+#ifdef PORTABLE
+    if (sQuiet) return;
+#endif
+#line 133 // gba-line
     // Drawing the standard frame clears its pixel buffer. Do it before text.
     DrawStdWindowFrame(sWindow, FALSE);
     if (!sMultiplayerMenuScreen.screen)
@@ -230,6 +238,7 @@ static bool32 Begin(void)
     sSeenGeneration = gMultiplayerMenuMailbox.inboundGeneration;
     sMultiplayerMenuActive = sMultiplayerMenuWaiting = TRUE;
 #ifdef PORTABLE
+    sQuiet = sOpenPage == MP_MENU_PAGE_HOST_SAVE;
     Publish(MP_MENU_OPEN, sOpenPage, 0);
     sOpenPage = 0;
 #else

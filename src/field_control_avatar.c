@@ -253,10 +253,12 @@ int ProcessPlayerFieldInput(struct FieldInput *input)
     // MS-61: where START opens the menu (standing, or at a tile's centre): first the host save an in-game SAVE in a
     // world asked for, then the soft reset key (Ctrl+R, A+B+START+SELECT): the question, or the Players menu's
     // reset page in a world. A refusal says why in a banner and leaves the field as it was (multiplayer_soft_reset.c).
-    // A party changed since the last save asks for the host save too, so no battle waits on a save.
+    // PLAYERS asked for with a party changed since the last save: the host save first, then the menu.
     if (SoftResetKeyHere())
     {
         MultiplayerHostSave_PartyWatch();
+        if (MultiplayerHostSave_TryThen())
+            return TRUE;
         if (MultiplayerHostSave_TryOpen())
             return TRUE;
         if (MultiplayerSoftReset_TakeKey() && MultiplayerSoftReset_Begin())

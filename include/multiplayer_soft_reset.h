@@ -22,8 +22,11 @@
 // reset key goes back to the last in-game SAVE (or a later autosave or Save now).
 //
 // The owner's request (2026-10-22): no save is needed before a battle. A native battle starts only from the party the
-// host last saved (KNOWN_ISSUES MS-60), so a party that differs from the one at the game's last save (a Pokemon
-// received or caught, a battle's HP and experience) asks for the same host save, from the free field.
+// host last saved (KNOWN_ISSUES MS-60), so opening PLAYERS (where every battle, the Tower and the rival gate start)
+// with a party that differs from the one at the game's last save (a Pokemon received or caught, a battle's HP and
+// experience, friendship) makes the same host save first, then opens the menu (the owner's report of 2026-10-23: saving
+// on every party change saved every minute or two). Only a change of the party's Pokemon themselves (received, caught,
+// released, traded away, evolved) is saved at once, so a trainer who gets a Pokemon can be challenged.
 
 #ifdef PORTABLE
 bool32 MultiplayerSoftReset_Begin(void);    // the question (no world) or PLAYERS on its reset page; FALSE: refused
@@ -33,7 +36,9 @@ void MultiplayerSoftReset_KeyFrame(void);   // each frame before the callbacks: 
 bool32 MultiplayerSoftReset_TakeKey(void);  // the field or the START menu takes a waiting press (TRUE once)
 void MultiplayerHostSave_GameSaved(void);   // START > SAVE wrote the game's save: in a world the host saves next
 bool32 MultiplayerHostSave_TryOpen(void);   // the free field: PLAYERS on its host save page (TRUE: it opened)
-void MultiplayerHostSave_PartyWatch(void);  // the free field: a party changed since the last save asks for one
+void MultiplayerHostSave_PartyWatch(void);  // the free field: notes the party as of the game's last save
+bool32 MultiplayerHostSave_BeforePlayers(u16 page); // PLAYERS asked for: TRUE when the host save goes first
+bool32 MultiplayerHostSave_TryThen(void);   // the free field: PLAYERS once that save is made (TRUE: it opened)
 #endif
 
 #endif // GUARD_MULTIPLAYER_SOFT_RESET_H
