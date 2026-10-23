@@ -99,7 +99,7 @@ bool32 TowerLegends_IsBattleActive(void);
 u32 TowerLegends_ActiveMode(void);
 u32 TowerLegends_ActiveFloor(void);
 
-// Experience: the cap of this game's badges, and an award clamped to it (none at or above the cap).
+// Experience: the cap (MAX_LEVEL: Tower battles are uncapped since 2026-10-23), and an award clamped to it.
 u32 TowerLegends_ExpCap(void);
 u32 TowerLegends_ClampExp(struct Pokemon *mon, u32 reward, u32 cap);
 

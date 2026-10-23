@@ -573,7 +573,7 @@ static void ApplyCoopExp(void)
             }
             reward = MultiplayerCoop_ExpReward(mon, ko->species, ko->level, faced);
             if (sCoopExp.towerCap != 0)
-                reward = TowerLegends_ClampExp(mon, reward, sCoopExp.towerCap); // this game's own badges decide
+                reward = TowerLegends_ClampExp(mon, reward, sCoopExp.towerCap); // uncapped: level 100 alone
             MonGainEVs(mon, ko->species);
             if (reward == 0)
                 continue;

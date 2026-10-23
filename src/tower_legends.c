@@ -13,7 +13,8 @@
 //     wallet stream (reward kinds 6 and 7, exactly once per save), applied here;
 //   * a Duo floor is the native co-op battle with a Tower code (the ladder layout, family 1): every core builds the
 //     floor's two trainers from its own table;
-//   * experience in a Tower battle stops at the cap of this game's own badges (solo here, Duo in multiplayer_coop.c).
+//   * experience in a Tower battle is the ordinary award, uncapped (the owner's request of 2026-10-23; it stopped at a
+//     cap set by this game's badges before): solo here, Duo in multiplayer_coop.c.
 #include <stddef.h>
 #include "tower_legends.h"
 #include "battle.h"
@@ -73,8 +74,6 @@ static const u8 sText_DefaultVictory[] = _("Better luck next time!");
 
 // The checkpoints: a loss sends the climb back to the floor after the highest one reached.
 static const u8 sCheckpoints[] = {10, 20, 25, 30, 40, 50, 60, 70, 75, 80, 90, 100};
-// Badges 0..8 -> the Tower experience cap (a Champion: 100).
-static const u8 sExpCaps[NUM_BADGES + 1] = {15, 20, 25, 30, 40, 45, 50, 55, 60};
 
 #define REPOST_FRAMES (60 * 20)
 // A solo command the field never let start is refused well before the host voids its ticket (tower_service.py
@@ -170,16 +169,10 @@ u32 TowerLegends_ActiveFloor(void) { return sTower.mode != TOWER_MODE_NONE ? sTo
 // ---------------------------------------------------------------------------------------------------------------------
 // Experience
 
+// No Tower cap (2026-10-23): every badge count and the Champion alike, only the level limit itself.
 u32 TowerLegends_ExpCap(void)
 {
-    u32 i, badges = 0;
-
-    if (FlagGet(FLAG_SYS_GAME_CLEAR)) // the Champion: the Hall of Fame entered
-        return MAX_LEVEL;
-    for (i = 0; i < NUM_BADGES; i++)
-        if (FlagGet(gBadgeFlags[i]))
-            badges++;
-    return sExpCaps[badges];
+    return MAX_LEVEL;
 }
 
 // The award, clamped so the Pokemon stops exactly at the cap's level; nothing at or above it.

@@ -77,7 +77,7 @@ static struct
     u8 style, arg;
     u8 listFirst, listLast;          /* the floors the host's rows list (a floor map), 0: none */
     bool8 listed[TOWER_FLOOR_COUNT + 1];
-    u8 progress, highest, checkpoint, cap;
+    u8 progress, highest, checkpoint;
     u16 claims, bp;
     bool8 pending;
     u8 focus;                       /* the floor whose trainers the card shows, 0: none */
@@ -164,7 +164,6 @@ void UiTower_Capture(const struct NativeMpMenu *menu)
     sT.checkpoint = TowerLegends_Checkpoint();
     sT.claims = TowerLegends_Claims();
     sT.pending = TowerLegends_HasPendingResult();
-    sT.cap = TowerLegends_ExpCap();
     sT.bp = gSaveBlock2Ptr->frontier.battlePoints;
     sT.trainers[0].there = sT.trainers[1].there = FALSE;
     sT.focus = 0;
@@ -348,10 +347,7 @@ void UiTower_Lcd(int t, int x, int y, int w, int h)
         snprintf(text, sizeof(text), "NO CHECKPOINT YET");
     Caps(x + 6, y + h - 12, text, LCD_DARK, UI_ALIGN_LEFT);
     if (sT.pending)
-        snprintf(text, sizeof(text), "RESULT TO SEND");
-    else
-        snprintf(text, sizeof(text), "EXP CAP LV %u", (unsigned)sT.cap);
-    Caps(x + w - 6, y + h - 12, text, LCD_DARK, UI_ALIGN_RIGHT);
+        Caps(x + w - 6, y + h - 12, "RESULT TO SEND", LCD_DARK, UI_ALIGN_RIGHT);
 }
 
 /* ---------------------------------------------------------------- the card: one screen per style */
@@ -375,15 +371,13 @@ static void Home(int x, int y, int w)
     Row(x, y + 118, w, "PRIZES CLAIMED", value);
     snprintf(value, sizeof(value), "%u/4", (unsigned)Bits((sT.claims >> TOWER_CLAIM_MON_SHIFT) & 0xF));
     Row(x, y + 134, w, "MILESTONE POK" UI_CAPS_E_ACUTE "MON", value);
-    snprintf(value, sizeof(value), "LV %u", (unsigned)sT.cap);
-    Row(x, y + 150, w, "EXP CAP", value);
     if (sT.pending)
         snprintf(value, sizeof(value), "RESULT TO SEND");
     else if (top)
         snprintf(value, sizeof(value), "ALL 100 CLEARED");
     else
         snprintf(value, sizeof(value), "FLOOR %u NEXT", (unsigned)sT.progress);
-    Row(x, y + 166, w, "CLIMB", value);
+    Row(x, y + 150, w, "CLIMB", value);
 }
 
 static void Map(int t, int x, int y, int w, int h)

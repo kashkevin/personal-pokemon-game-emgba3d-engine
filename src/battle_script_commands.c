@@ -2331,7 +2331,7 @@ static void Cmd_getexp(void)
                     }
 
 #ifdef PORTABLE
-                    // Battle Tower: Legends: experience stops at the cap of this game's own badges.
+                    // Battle Tower: Legends: the ordinary award, uncapped (TowerLegends_ExpCap is MAX_LEVEL).
                     if (TowerLegends_IsBattleActive())
                         gBattleStruct->battlerExpReward = TowerLegends_ClampExp(&gParties[B_TRAINER_PLAYER][*expMonId],
                                                                                 gBattleStruct->battlerExpReward,
@@ -2353,7 +2353,7 @@ static void Cmd_getexp(void)
                     PREPARE_WORD_NUMBER_BUFFER(gBattleTextBuff3, 6, gBattleStruct->battlerExpReward);
 
 #ifdef PORTABLE
-                    // A Pokemon at its Tower cap gains nothing: no "gained 0 Exp. Points!" line.
+                    // A Pokemon at level 100 gains nothing: no "gained 0 Exp. Points!" line.
                     if (TowerLegends_IsBattleActive() && gBattleStruct->battlerExpReward == 0)
                         ;
                     else

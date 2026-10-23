@@ -335,7 +335,6 @@ static void SetBadges(u32 count, bool32 champion)
 
 int NativeSelfTest_Tower(void)
 {
-    static const u8 sCaps[] = {15, 20, 25, 30, 40, 45, 50, 55, 60};
     u32 floor, i, megas = 0, mons = 0, revision, amount, personality, ivs;
     struct TowerLegendsCommand command;
     struct Pokemon *mon;
@@ -399,26 +398,29 @@ int NativeSelfTest_Tower(void)
                 && !MultiplayerLadder_IsValid(TowerLegends_EncodeDuo(44, TRUE) | (1u << 8))
                 && MultiplayerLadder_IsValid(MultiplayerLadder_Encode(TRAINER_WALLACE, TRAINER_STEVEN, 30, TRUE)));
 
-    // 4. The experience cap: this game's badges, a Champion 100; nothing at or above it, and stopping exactly at it.
+    // 4. Experience: no Tower cap (the owner's request of 2026-10-23) with any badges or as the Champion; the clamp keeps
+    //    only the level limit itself (stopping exactly at it, nothing at it).
     for (i = 0; i <= NUM_BADGES; i++)
     {
         SetBadges(i, FALSE);
-        ExpectTower("the cap of 0-8 badges is 15/20/25/30/40/45/50/55/60", TowerLegends_ExpCap() == sCaps[i]);
+        ExpectTower("no cap with 0-8 badges (the level limit 100)", TowerLegends_ExpCap() == MAX_LEVEL);
     }
     SetBadges(NUM_BADGES, TRUE);
     ExpectTower("a Champion's cap is 100", TowerLegends_ExpCap() == MAX_LEVEL);
     mon = &gParties[B_TRAINER_PLAYER][0];
     CreateMon(mon, SPECIES_ZIGZAGOON, 14, 0x1234, OTID_STRUCT_PLAYER_ID);
-    {
-        u32 exp = GetMonData(mon, MON_DATA_EXP), capExp = gExperienceTables[gSpeciesInfo[SPECIES_ZIGZAGOON].growthRate][15];
-
-        ExpectTower("below the cap the award stops exactly at the cap's level", TowerLegends_ClampExp(mon, 100000, 15) == capExp - exp
-                    && TowerLegends_ClampExp(mon, 3, 15) == 3);
-    }
-    CreateMon(mon, SPECIES_ZIGZAGOON, 15, 0x1234, OTID_STRUCT_PLAYER_ID);
-    ExpectTower("at the cap nothing", TowerLegends_ClampExp(mon, 500, 15) == 0);
+    ExpectTower("a level 14 Pokemon with no badges gets the whole award (past level 15)",
+                TowerLegends_ClampExp(mon, 5000, TowerLegends_ExpCap()) == 5000);
     CreateMon(mon, SPECIES_ZIGZAGOON, 40, 0x1234, OTID_STRUCT_PLAYER_ID);
-    ExpectTower("above the cap nothing (and the level is kept)", TowerLegends_ClampExp(mon, 500, 15) == 0 && GetMonData(mon, MON_DATA_LEVEL) == 40);
+    ExpectTower("a level 40 Pokemon with no badges gets the whole award", TowerLegends_ClampExp(mon, 500, TowerLegends_ExpCap()) == 500);
+    CreateMon(mon, SPECIES_ZIGZAGOON, 99, 0x1234, OTID_STRUCT_PLAYER_ID);
+    {
+        u32 exp = GetMonData(mon, MON_DATA_EXP), maxExp = gExperienceTables[gSpeciesInfo[SPECIES_ZIGZAGOON].growthRate][MAX_LEVEL];
+
+        ExpectTower("the award stops exactly at level 100", TowerLegends_ClampExp(mon, 10000000, TowerLegends_ExpCap()) == maxExp - exp);
+    }
+    CreateMon(mon, SPECIES_ZIGZAGOON, MAX_LEVEL, 0x1234, OTID_STRUCT_PLAYER_ID);
+    ExpectTower("at level 100 nothing", TowerLegends_ClampExp(mon, 500, TowerLegends_ExpCap()) == 0);
     ZeroPlayerPartyMons();
 
     // 5. The record and the host's words.

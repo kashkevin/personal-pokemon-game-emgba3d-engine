@@ -18,7 +18,7 @@ the four moves); the battle ended (no freeze, no crash) with the expected outcom
 record (won 2 / lost 3) for the floor and its ticket; no money moved; the party is healed and holds its items again; a
 Mega Stone holder of the floor that came into battle Mega Evolved (PKMN_TEST_MEGA_LOG) in the won run. Exit 0 when every
 check of every run passed; the report is OUT/tower_check.json and a floor-by-floor OUT/tower_check.md. --caps runs the
-experience cap's cases instead (CAP_CASES; OUT/tower_caps.json).
+experience cases instead (no Tower cap; CAP_CASES; OUT/tower_caps.json).
 
     tools/battle_env/tower_check.py --exe ./pokeemerald-mp-bfxtest --save town.sav --out build/tower-check \\
         [--floors 1-100] [--runs won,lost] [--jobs 3] [--speed 4] [--display :99] [--make-save [PATH]]
@@ -160,18 +160,19 @@ def run_one(args, data, floor, kind):
                 problems=problems, foes=len(run["foes"]), megas=[m["species"] for m in run["megas"]])
 
 
-# --caps: the Tower experience cap in real battles (design section 3), each a won run of floor 5 with one Mewtwo (Slow
-# growth: 5 n^3 / 4 experience at level n), the badges and the Hall of Fame flag set in memory (PKMN_TEST_BADGES,
-# PKMN_TEST_CHAMPION), the Mewtwo one experience point short of its next level (party flag e) unless above the cap:
-# (name, badges, champion, the Mewtwo's level, the cap, what its experience must do: capped - exactly the cap level's;
-# gained - more, below the cap; unchanged - none at all)
+# --caps: Tower experience in real battles (design section 3: no cap since 2026-10-23; until then 0..8 badges capped it at
+# level 15..60), each a won run of floor 5 with one Mewtwo (Slow growth: 5 n^3 / 4 experience at level n), the badges and
+# the Hall of Fame flag set in memory (PKMN_TEST_BADGES, PKMN_TEST_CHAMPION), the Mewtwo one experience point short of its
+# next level (party flag e) unless it starts above the old cap: (name, badges, champion, the Mewtwo's level, what its
+# experience must do, the old cap: past - beyond the old cap level's, where it used to stop; gained - more than before,
+# where it used to stay). The game's cap is 100 (MAX_LEVEL) in every case.
 CAP_FLOOR = 5
+CAP = 100
 CAP_CASES = (
-    ("cap-15-no-badges", 0, 0, 14, 15, "capped"),
-    ("cap-20-one-badge", 1, 0, 14, 20, "gained"),
-    ("cap-60-eight-badges", 8, 0, 59, 60, "capped"),
-    ("cap-100-champion", 8, 1, 59, 100, "gained"),
-    ("above-the-cap", 0, 0, 30, 15, "unchanged"),
+    ("past-old-cap-15-no-badges", 0, 0, 14, "past", 15),
+    ("past-old-cap-20-one-badge", 1, 0, 19, "past", 20),
+    ("above-old-cap-15-gains", 0, 0, 30, "gained", 15),
+    ("champion-gains", 8, 1, 59, "gained", 100),
 )
 
 
@@ -180,34 +181,33 @@ def slow_exp(level):
 
 
 def run_cap(args, case):
-    name, badges, champion, level, cap, expect = case
+    name, badges, champion, level, expect, old_cap = case
     rundir = os.path.join(args.out, name)
+    short = level < old_cap            # one point short of the next level, so a gain crosses it
     env = {"PKMN_TEST_BATTLE": f"tower:{CAP_FLOOR}", "PKMN_TEST_AUTOPILOT": "1", "PKMN_TEST_FIGHT": "420",
            "PKMN_TEST_TOWER_WIN": "1", "PKMN_TEST_BADGES": str(badges), "PKMN_TEST_CHAMPION": str(champion),
-           "PKMN_TEST_PARTY": f"150:{level}" + ("" if expect == "unchanged" else ":e")}
+           "PKMN_TEST_PARTY": f"150:{level}" + (":e" if short else "")}
     if args.speed > 1:
         env["PKMN_TEST_SPEED"] = str(args.speed)
     began = time.monotonic()
     process, output = start(args, rundir, env)
     code = finish(process, output, 600)
     run = parse(driver_lines(os.path.join(rundir, "test.log")))
-    before = slow_exp(level) if expect == "unchanged" else slow_exp(level + 1) - 1
+    before = slow_exp(level + 1) - 1 if short else slow_exp(level)
     after = run["own"][0]["exp"] if run["own"] else None
     problems = []
     if run["outcome"] != 1:
         problems.append(f"outcome {run['outcome']} (exit {code}), expected a win")
-    if run["cap"] != cap:
-        problems.append(f"the game's cap {run['cap']}, expected {cap}")
+    if run["cap"] != CAP:
+        problems.append(f"the game's cap {run['cap']}, expected {CAP} (no Tower cap)")
     if after is None:
         problems.append("no end logged")
-    elif expect == "capped" and after != slow_exp(cap):
-        problems.append(f"experience {before} -> {after}, expected exactly {slow_exp(cap)} (level {cap})")
-    elif expect == "gained" and not before < after <= slow_exp(cap):
-        problems.append(f"experience {before} -> {after}, expected a gain below {slow_exp(cap)}")
-    elif expect == "unchanged" and after != before:
-        problems.append(f"experience {before} -> {after}, expected none above the cap")
-    return dict(case=name, badges=badges, champion=champion, level=level, cap=cap, expect=expect, exp_before=before,
-                exp_after=after, level_after=run["own"][0]["level"] if run["own"] else None, exit=code,
+    elif expect == "past" and not after > slow_exp(old_cap):
+        problems.append(f"experience {before} -> {after}, expected more than {slow_exp(old_cap)} (the old cap, level {old_cap})")
+    elif expect == "gained" and not after > before:
+        problems.append(f"experience {before} -> {after}, expected a gain")
+    return dict(case=name, badges=badges, champion=champion, level=level, cap=CAP, old_cap=old_cap, expect=expect,
+                exp_before=before, exp_after=after, level_after=run["own"][0]["level"] if run["own"] else None, exit=code,
                 seconds=round(time.monotonic() - began, 1), passed=not problems, problems=problems)
 
 
@@ -244,7 +244,7 @@ def main():
     parser.add_argument("--make-save", nargs="?", const="", default=None, metavar="PATH",
                         help="first make the save (the short introduction) at PATH, or at OUT/made.sav")
     parser.add_argument("--speed", type=int, default=1, help="PKMN_TEST_SPEED: the game's clock this many times as fast")
-    parser.add_argument("--caps", action="store_true", help="the experience cap's runs instead of the floors")
+    parser.add_argument("--caps", action="store_true", help="the experience runs (no Tower cap) instead of the floors")
     args = parser.parse_args()
     args.exe = os.path.abspath(args.exe)
     os.makedirs(args.out, exist_ok=True)
