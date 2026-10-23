@@ -613,3 +613,16 @@ void MultiplayerRide_Tick(bool32 fieldReady)
         mount->previousElevation = player->previousElevation;
     }
 }
+
+#ifdef PORTABLE
+// The owner's report (2026-10-23): after a battle (or any screen that rebuilds the field) the rider sat on a Surf blob
+// and the mount was gone. The field rebuilds the player's object from its graphics, and the rider's are the surfing
+// pose (RiderGraphicsId), so the player was taken for surfing (SetPlayerAvatarExtraStateTransition: the Surf blob, the
+// surfing flag, and MultiplayerRide_Tick then ended the ride, the player still in that pose). Rebuilt in the walking
+// look, the player is on foot; the mount object is rebuilt with the field and the next tick puts the rider back on it.
+void MultiplayerRide_BeforePlayerRespawn(struct ObjectEvent *player)
+{
+    if (sRide.riding && player->graphicsId == RiderGraphicsId())
+        player->graphicsId = WalkerGraphicsId();
+}
+#endif

@@ -1739,7 +1739,15 @@ static void Task_OWEApproachForBattle(u8 taskId)
         struct ObjectEvent *player = &gObjectEvents[gPlayerAvatar.objectEventId];
         struct ObjectEvent *followerMon = GetFollowerObject();
         bool32 oweNextToPlayer = IsOWENextToPlayer(OWE);
+#ifdef PORTABLE
+        // No follower (put away while riding, or none at all): GetFollowerObject() is NULL (the owner's report of
+        // 2026-10-23: riding into an approaching wild Pokemon crashed the PC game).
+        bool32 oweNextToFollowerMon = followerMon != NULL && IsOWENextToObject(OWE, followerMon);
+#else
+#line 1700 // gba-line
         bool32 oweNextToFollowerMon = IsOWENextToObject(OWE, followerMon);
+#endif
+#line 1701 // gba-line
 
         if (oweNextToPlayer || oweNextToFollowerMon)
         {
@@ -1775,7 +1783,14 @@ static void Task_OWEApproachForBattle(u8 taskId)
             MoveCoords(OWE->movementDirection, &x, &y);
             collidingObject = GetObjectObjectCollidesWith(OWE, x, y, FALSE);
 
+#ifdef PORTABLE
+            // followerMon is NULL without a follower: test it before reading it.
+            if (followerMon != NULL && collidingObject == GetObjectEventIdByLocalId(followerMon->localId) && !followerMon->invisible)
+#else
+#line 1736 // gba-line
             if (collidingObject == GetObjectEventIdByLocalId(followerMon->localId) && followerMon != NULL && !followerMon->invisible)
+#endif
+#line 1737 // gba-line
             {
                 ClearObjectEventMovement(followerMon, &gSprites[followerMon->spriteId]);
                 gSprites[followerMon->spriteId].animCmdIndex = 0;

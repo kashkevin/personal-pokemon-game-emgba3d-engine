@@ -3014,6 +3014,12 @@ static void SpawnObjectEventOnReturnToField(u8 objectEventId, s16 x, s16 y)
     }
 
     objectEvent = &gObjectEvents[objectEventId];
+#ifdef PORTABLE
+    // A rider sits in the surfing pose: rebuilt with it, the player would be taken for surfing (a Surf blob, the
+    // ride ended). The walking look here; the ride puts the rider back on its next tick (multiplayer_ride.c).
+    MultiplayerRide_BeforePlayerRespawn(objectEvent);
+#endif
+#line 3000 // gba-line
     subspriteTables = NULL;
     graphicsInfo = GetObjectEventGraphicsInfo(objectEvent->graphicsId);
     CopyObjectGraphicsInfoToSpriteTemplate_WithMovementType(objectEvent->graphicsId, objectEvent->movementType, &spriteTemplate, &subspriteTables);

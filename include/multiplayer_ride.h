@@ -23,6 +23,9 @@ void MultiplayerRide_StartFromMenu(void);
 // Hooks in field_player_avatar.c / event_object_movement.c.
 void MultiplayerRide_MirrorPlayerMovement(u8 movementActionId);
 void MultiplayerRide_BeginObjectUpdate(struct ObjectEvent *objectEvent, struct Sprite *sprite);
+#ifdef PORTABLE
+void MultiplayerRide_BeforePlayerRespawn(struct ObjectEvent *player); // the field rebuilds the player: walking look
+#endif
 void MultiplayerRide_EndObjectUpdate(struct ObjectEvent *objectEvent, struct Sprite *sprite);
 u8 MultiplayerRide_GetLiftForMount(u16 mountGraphicsId);
 
