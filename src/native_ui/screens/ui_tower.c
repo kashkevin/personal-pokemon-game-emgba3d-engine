@@ -516,10 +516,8 @@ static void Duo(int x, int y, int w)
     else
         snprintf(value, sizeof(value), "FLOOR %u", (unsigned)sT.progress);
     Row(x, y + 66, w, "YOUR CLIMB", value);
-    snprintf(value, sizeof(value), "LV %u", (unsigned)sT.cap);
-    Row(x, y + 82, w, "YOUR EXP CAP", value);
-    UiG_HLine(x + 6, y + 96, w - 12, UI_P_CREAM_LO);
-    Wrapped(x + 8, y + 101, w - 16, sText_DuoInvite, 3);
+    UiG_HLine(x + 6, y + 80, w - 12, UI_P_CREAM_LO);
+    Wrapped(x + 8, y + 85, w - 16, sText_DuoInvite, 3);
 }
 
 static void Records(int x, int y, int w)
@@ -548,11 +546,9 @@ static void Records(int x, int y, int w)
     Row(x, y + 94, w, "MILESTONE POK" UI_CAPS_E_ACUTE "MON", value);
     snprintf(value, sizeof(value), "%u", (unsigned)sT.bp);
     Row(x, y + 112, w, "BATTLE POINTS", value);
-    snprintf(value, sizeof(value), "LV %u", (unsigned)sT.cap);
-    Row(x, y + 130, w, "EXP CAP", value);
-    Row(x, y + 148, w, "LAST RESULT", sT.pending ? "WAITING FOR THE HOST" : "SETTLED");
-    UiG_HLine(x + 6, y + 162, w - 12, UI_P_CREAM_LO);
-    Caps(x + w / 2, y + 168, "KEPT IN YOUR SAVE", UI_P_TEXT_MUTED, UI_ALIGN_CENTER);
+    Row(x, y + 130, w, "LAST RESULT", sT.pending ? "WAITING FOR THE HOST" : "SETTLED");
+    UiG_HLine(x + 6, y + 144, w - 12, UI_P_CREAM_LO);
+    Caps(x + w / 2, y + 150, "KEPT IN YOUR SAVE", UI_P_TEXT_MUTED, UI_ALIGN_CENTER);
 }
 
 static void Training(int t, int x, int y, int w)
