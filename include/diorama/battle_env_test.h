@@ -185,6 +185,18 @@ bool DioramaBattleEnvTest_OweShiny(bool rolled);
    writes them; true (the world taken as connected) while there are any, with *fieldReady as the field's;
    PKMN_TEST_SPAWNS_UNTIL=<frames>: after that many, the host lists none */
 bool DioramaBattleEnvTest_FakeSpawnHost(bool *fieldReady);
+/* multiplayer_world.c, MultiplayerWorld_Tick (game thread): PKMN_TEST_WORLD_EVENT="species:x:y:flags" the World Event
+   Pokemon a world's host would show on the player's map (flags 1: shiny), written into the world mailbox as the host
+   writes it; true (the world taken as connected) while there is one, with *fieldReady as the field's */
+bool DioramaBattleEnvTest_FakeWorldEvent(bool *fieldReady);
+/* wild_encounter_ow.c (test builds): an overworld encounter's kind */
+enum { OWE_KIND_WILD = 1, OWE_KIND_ROAMER, OWE_KIND_OUTBREAK, OWE_KIND_FEEBAS };
+struct ObjectEvent;
+unsigned DioramaBattleEnvTest_OweKind(struct ObjectEvent *owe);
+/* roamer.c (test builds): the roamer stands on the player's map now; with PKMN_TEST_ROAMER it is met whenever an
+   encounter is made there (TryStartRoamerEncounter: its 1 in 4 roll still made) */
+void Roamer_TestPlaceHere(unsigned roamerIndex);
+bool DioramaBattleEnvTest_RoamerAlwaysMet(void);
 /* gl_battle.c (render thread): the stem to capture this frame, or NULL */
 const char *DioramaBattleEnvTest_CaptureStem(void);
 void DioramaBattleEnvTest_CaptureWritten(void);

@@ -260,6 +260,15 @@ static void Cash(u8 *dst, int size, u32 amount)
     UiText_AppendAscii(dst, size, " COINS");
 }
 
+/* a price tag's width: at least the design's, and wide enough for its text (a coin shop's prices run to
+ * "500,000 COINS": the Game Corner's RARE GOODS) - the tag right-aligns its text and does not clip it */
+static int TagWidth(const u8 *text, int least)
+{
+    int w = UiText_Width(UI_FONT_NORMAL, text, 0) + 18;
+
+    return w > least ? w : least;
+}
+
 /* the price an item row shows: the engine's price, or SOLD OUT */
 static const u8 *PriceText(int i, u8 *buf, int size)
 {
@@ -386,7 +395,7 @@ static void CounterScene(int x, int y, int w, int h, const struct UiRamp *m, u16
             int tx = ix + wide + 14, ty = cy - 32;
 
             UiItems_TagString(ix + wide - 8, iy + 14, tx + 9, ty + 7, m->ink);
-            UiItems_PriceTag(tx, ty, 78, tag, m->ink, dim);
+            UiItems_PriceTag(tx, ty, TagWidth(tag, 78), tag, m->ink, dim);
         }
     }
 }
@@ -445,8 +454,7 @@ static void Board(int t, const struct UiRamp *m)
             Art(item, sx + (sS.decorations ? 14 : 10), ry, 1);
             Name(name, sizeof(name), item);
             UiG_Text(sx + (sS.decorations ? 46 : 38), ry + 4, name);
-            /* wide enough for its price: a coin shop's run to "500,000 COINS" (the Game Corner's RARE GOODS) */
-            int tagW = max(74, UiText_Width(UI_FONT_NORMAL, pt, 0) + 18);
+            int tagW = TagWidth(pt, 74);
 
             UiItems_PriceTag(sx + sw - 16 - tagW, ry + 5, tagW, pt, m->lo, sS.soldOut[idx] || sS.prices[idx] > sS.money);
         }
@@ -554,7 +562,11 @@ static void Windows(int t, const struct UiRamp *m)
         UiText_AppendNumber(q, sizeof(q), sS.quantity, 2, false);
         UiG_Text(qx + 9, qy + 12, q);
         Cash(total, sizeof(total), sS.totalCost);
-        UiItems_PriceTag(qx + qw - 92, qy + 15, 84, total, m->lo, false);
+        {
+            int tagW = TagWidth(total, 84);
+
+            UiItems_PriceTag(qx + qw - 8 - tagW, qy + 15, tagW, total, m->lo, false);
+        }
         UiG_Hit(HIT_QTY_UP, 0, qx + 4, qy + 1, 30, 14);
         UiG_Hit(HIT_QTY_DOWN, 0, qx + 4, qy + 30, 30, 14);
         UiG_Hit(HIT_QTY_OK, 0, qx + 40, qy, qw - 40, qh);
@@ -644,6 +656,13 @@ static bool Click(const struct UiHit *hit, int button)
         }
         break;
     case NATIVE_SHOP_LIST:
+        if (hit->id == HIT_ROW && hit->index >= sS.count)
+        {
+            /* CANCEL: the engine's B, which leaves the list wherever its cursor is (never A on another row) */
+            sGoal = -1;
+            NativeUi_QueuePress(B_BUTTON);
+            return true;
+        }
         if (hit->id == HIT_ROW)
         {
             SetGoal(hit->index, true);

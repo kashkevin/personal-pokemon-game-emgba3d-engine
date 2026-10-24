@@ -709,8 +709,19 @@ static bool32 StartWildBattleWithOWE_CheckMassOutbreak(enum CategoryOWE category
     {
         return FALSE;
     }
+#ifdef PORTABLE
+    // The outbreak's Pokemon is made again below (with the outbreak's moves); the one StartWildBattleWithOWE made from
+    // the field's picture decides its shininess, so the battle is shiny exactly when the field showed it shiny (and
+    // twinkling: platform/ow_shiny_sparkle.c), never a new roll.
+    bool32 fieldShiny = GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_IS_SHINY);
+#endif
+#line 673 // gba-line
     ZeroEnemyPartyMons();
     SetUpMassOutbreakEncounter(0);
+#ifdef PORTABLE
+    SetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_IS_SHINY, &fieldShiny);
+#endif
+#line 675 // gba-line
     BattleSetup_StartWildBattle();
     return TRUE;
 }
@@ -985,6 +996,13 @@ static void SetSpeciesInfoForOWE(struct InfoOWE *info, u32 x, u32 y)
     info->isShiny = ComputePlayerShinyOdds(personality, READ_OTID_FROM_SAVE);
 #if defined(DIORAMA_BATTLE_ENV_TEST)
     info->isShiny = DioramaBattleEnvTest_OweShiny(info->isShiny); // test builds only: PKMN_TEST_OWE_SHINY (battle_env_test.h)
+#endif
+#ifdef PORTABLE
+    // A roamer is the same Pokemon whenever it appears (CreateRoamerMonInstance made it above, and makes it again for its
+    // battle: StartWildBattleWithOWE_CheckRoamer): drawn shiny, and twinkling, exactly when it is (ROAMER->shiny), not
+    // by a new roll.
+    if (info->category < ROAMER_COUNT)
+        info->isShiny = GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_IS_SHINY) ? TRUE : FALSE;
 #endif
 #line 947 // gba-line
     if (GetGenderFromSpeciesAndPersonality(info->speciesId, personality) == MON_FEMALE)
@@ -1954,6 +1972,22 @@ bool32 CanRemoveObjectForOWEMovement(struct ObjectEvent *objectEvent)
 
     return TRUE;
 }
+
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+// Test builds only (battle_env_test.c, PKMN_TEST_SPARKLE_LOG / PKMN_TEST_OWE_BATTLE): an overworld encounter's kind.
+unsigned DioramaBattleEnvTest_OweKind(struct ObjectEvent *owe)
+{
+    u32 category = GetOWECategory(owe);
+
+    if (category < ROAMER_COUNT)
+        return OWE_KIND_ROAMER;
+    if (category == OWE_CATEGORY_MASS_OUTBREAK)
+        return OWE_KIND_OUTBREAK;
+    if (category == OWE_CATEGORY_FEEBAS)
+        return OWE_KIND_FEEBAS;
+    return OWE_KIND_WILD;
+}
+#endif
 
 #undef sOverworldEncounterLevel
 #undef sOverworldEncounterAge

@@ -4,6 +4,10 @@
 #include "pokemon.h"
 #include "random.h"
 #include "roamer.h"
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+#include "diorama/battle_env_test.h"
+#endif
+#line 7 // gba-line
 
 // Despite having a variable to track it, the roamer is
 // hard-coded to only ever be in map group 0
@@ -266,7 +270,15 @@ bool8 TryStartRoamerEncounter(void)
 
     for (i = 0; i < ROAMER_COUNT; i++)
     {
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+        // test builds only (battle_env_test.c, PKMN_TEST_ROAMER): the roamer is met whenever it is here (the roll kept)
+        if (IsRoamerAt(i, gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum) == TRUE
+         && ((Random() % 4) == 0 || DioramaBattleEnvTest_RoamerAlwaysMet()))
+#else
+#line 269 // gba-line
         if (IsRoamerAt(i, gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum) == TRUE && (Random() % 4) == 0)
+#endif
+#line 270 // gba-line
         {
             CreateRoamerMonInstance(i);
             gEncounteredRoamerIndex = i;
@@ -297,3 +309,14 @@ void GetRoamerLocation(u32 roamerIndex, u8 *mapGroup, u8 *mapNum)
     *mapGroup = sRoamerLocation[roamerIndex][MAP_GRP];
     *mapNum = sRoamerLocation[roamerIndex][MAP_NUM];
 }
+
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+// Test builds only (battle_env_test.c, PKMN_TEST_ROAMER): the roamer stands on the player's map now.
+void Roamer_TestPlaceHere(unsigned roamerIndex)
+{
+    if (roamerIndex >= ROAMER_COUNT)
+        return;
+    sRoamerLocation[roamerIndex][MAP_GRP] = gSaveBlock1Ptr->location.mapGroup;
+    sRoamerLocation[roamerIndex][MAP_NUM] = gSaveBlock1Ptr->location.mapNum;
+}
+#endif

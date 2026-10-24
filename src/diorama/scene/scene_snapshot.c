@@ -1221,7 +1221,9 @@ static void CopyEffects(struct DioramaSceneSnapshot *snapshot)
         s16 x;
         s16 y;
 
-        if (!sprite->inUse || sprite->invisible || sprite->oam.affineMode == ST_OAM_AFFINE_ERASE)
+        /* a shiny's twinkle hidden only because its Pokemon is past the GBA's picture is drawn with that Pokemon */
+        if (!sprite->inUse || (sprite->invisible && !OwShinySparkle_HiddenOffScreen(sprite))
+         || sprite->oam.affineMode == ST_OAM_AFFINE_ERASE)
             continue;
         if (DioramaTrainerSee_GetIconOwner(sprite, &localId, &mapNum, &mapGroup)
          || OwShinySparkle_GetOwner(sprite, &localId, &mapNum, &mapGroup))

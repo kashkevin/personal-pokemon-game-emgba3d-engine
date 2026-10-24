@@ -3,13 +3,19 @@
  * the wild, it should have mini pokemon shiny sparks so user knows which pokemon is the shiny").
  *
  * Every SPARKLE_PERIOD frames each shiny wild Pokemon on the field - the game's own overworld encounters
- * (wild_encounter_ow.c) and the shared spawns of a multiplayer world (multiplayer_spawns.c) - gets one small star, an 8x8
- * sprite in the general field-effect palette, at the next of SPARKLE_SPOTS places over its picture. The star follows the
- * Pokemon, grows, shines and shrinks in SPARKLE_FRAMES frames and is gone: one sprite at a time per shiny, none for
- * any other Pokemon (a player's follower, a script's Pokemon, a non-shiny one). A star whose Pokemon is gone (despawned,
- * caught, the map left) goes with it, and none are made off the field (a battle starts from the field: its sprites are
- * reset). The 3D view draws the stars over their Pokemon (OwShinySparkle_GetOwner; diorama/scene/scene_snapshot.c),
- * Classic 2D draws the sprites. Project-owned.
+ * (wild_encounter_ow.c), the shared spawns of a multiplayer world (multiplayer_spawns.c) and its World Event Pokemon
+ * (multiplayer_world.c) - gets one small star, an 8x8 sprite in the general field-effect palette, at the next of
+ * SPARKLE_SPOTS places over its picture. The star follows the Pokemon, grows, shines and shrinks in SPARKLE_FRAMES frames
+ * and is gone: one sprite at a time per shiny, none for any other Pokemon (a player's follower, a script's Pokemon, a
+ * non-shiny one). A star whose Pokemon is gone (despawned, caught, the map left) goes with it, and none are made off the
+ * field (a battle starts from the field: its sprites are reset). The 3D view draws the stars over their Pokemon
+ * (OwShinySparkle_GetOwner; diorama/scene/scene_snapshot.c), past the GBA's 240x160 picture too (the 3D view shows more
+ * of the map: OwShinySparkle_HiddenOffScreen); Classic 2D draws the sprites.
+ *
+ * A star is never worth a crash or another object: it is skipped quietly when the field has no sprite, tile or palette
+ * to spare (CreateSpriteAtEndUnchecked; the general palette is loaded only while another slot stays free for the field's
+ * own objects and effects, so it never pushes out a Pokemon). Its palette follows the weather, the time of day and the
+ * fades as the other field effects' (FieldEffect_LoadFadedPalette). Project-owned.
  */
 #include "global.h"
 #ifdef PORTABLE
@@ -17,15 +23,19 @@
 #include "field_effect.h"
 #include "main.h"
 #include "multiplayer_spawns.h"
+#include "multiplayer_world.h"
 #include "sprite.h"
 #include "wild_encounter_ow.h"
 #include "constants/event_objects.h"
 #include "constants/field_effects.h"
+#include "constants/field_weather.h"
 #include "platform/ow_shiny_sparkle.h"
 
 #define SPARKLE_PERIOD 40           // frames from one star of a Pokemon to its next
 #define SPARKLE_FRAMES 18           // a star's life (sAnim_Sparkle)
 #define SPARKLE_SPRITE_RESERVE 12   // free sprites always left to the field (its effects, weather, the other players)
+#define SPARKLE_PALETTE_RESERVE 1   // free sprite palettes always left to the field (an object scrolling into view, a
+                                    // grass or splash effect: a full set would push out a Pokemon, sprite.c)
 #define SPARKLE_SPOTS 6
 
 // The palette's colours (graphics/field_effects/palettes/general_0.pal): 4 white, 11-14 pale to deep gold.
@@ -81,14 +91,24 @@ static const s8 sSpots[SPARKLE_SPOTS][2] = {{-5, -4}, {4, -1}, {-1, 3}, {5, -5},
 #define sObjectId   data[3]
 #define sOffsetX    data[4]
 #define sOffsetY    data[5]
+#define sOffScreen  data[6]     // hidden only because its Pokemon is past the GBA's picture (the 3D view shows it)
 
-static u32 sFrame, sMade;
+static u32 sFrame, sMade, sSkipped;
 
 static bool32 IsShinyWild(struct ObjectEvent *objectEvent)
 {
     if (!objectEvent->active || !OW_SHINY(objectEvent))
         return FALSE;
-    return IsOverworldWildEncounter(objectEvent, OWE_ANY) || MultiplayerSpawns_IsSpawnObject(objectEvent);
+    return IsOverworldWildEncounter(objectEvent, OWE_ANY) || MultiplayerSpawns_IsSpawnObject(objectEvent)
+        || MultiplayerWorld_IsEventObject(objectEvent);
+}
+
+// The Pokemon's sprite is hidden only because it stands past the GBA's 240x160 picture (UpdateObjectEventSpriteVisibility:
+// invisible || offScreen): Classic 2D shows nothing there, the 3D view shows more of the map and draws it
+// (scene_snapshot.c, DIORAMA_OBJECT_OFFSCREEN), so it twinkles there too.
+static bool32 HiddenOnlyOffScreen(const struct ObjectEvent *objectEvent, const struct Sprite *pokemon)
+{
+    return pokemon->invisible && objectEvent->offScreen && !objectEvent->invisible;
 }
 
 static bool32 SpritesToSpare(void)
@@ -115,8 +135,11 @@ static struct ObjectEvent *Owner(struct Sprite *sprite)
     return objectEvent;
 }
 
-static void Follow(struct Sprite *sprite, const struct Sprite *pokemon)
+static void Follow(struct Sprite *sprite, const struct ObjectEvent *objectEvent)
 {
+    const struct Sprite *pokemon = &gSprites[objectEvent->spriteId];
+
+    sprite->sOffScreen = HiddenOnlyOffScreen(objectEvent, pokemon);
     sprite->x = pokemon->x + sprite->sOffsetX;
     sprite->y = pokemon->y + sprite->sOffsetY;
     sprite->x2 = pokemon->x2;
@@ -136,7 +159,7 @@ static void SpriteCB_Sparkle(struct Sprite *sprite)
         FieldEffectFreeGraphicsResources(sprite);   // the palette too, when nothing else uses it
         return;
     }
-    Follow(sprite, &gSprites[objectEvent->spriteId]);
+    Follow(sprite, objectEvent);
 }
 
 static void MakeSparkle(u32 objectEventId, u32 spot)
@@ -146,19 +169,30 @@ static void MakeSparkle(u32 objectEventId, u32 spot)
     const struct ObjectEventGraphicsInfo *info = GetObjectEventGraphicsInfo(objectEvent->graphicsId);
     s32 halfWidth = (info != NULL ? info->width : 32) / 2 - 4, halfHeight = (info != NULL ? info->height : 32) / 2 - 4;
     struct Sprite *sprite;
+    bool32 loaded = FALSE;
     u32 spriteId;
 
     if (IndexOfSpritePaletteTag(FLDEFF_PAL_TAG_GENERAL_0) == 0xFF)
     {
-        if (IndexOfSpritePaletteTag(TAG_NONE) == 0xFF)
+        struct SpritePalette palette = gSpritePalette_GeneralFieldEffect0;
+
+        if (CountFreePaletteSlots() <= SPARKLE_PALETTE_RESERVE)
+        {
+            sSkipped++;
             return;                                 // no palette to spare: the Pokemon's own colours still show it
-        LoadSpritePalette(&gSpritePalette_GeneralFieldEffect0);
+        }
+        FieldEffect_LoadFadedPalette(&palette, COLOR_MAP_DARK_CONTRAST);   // as the field effects' (field_effect_scripts.s)
+        loaded = TRUE;
     }
-    // unchecked: with no sprite slot or no room in the sprite tiles left the star is skipped (the checked call stops the
-    // game on the crash screen instead)
+    // Unchecked: with the field's tiles all taken (a busy world map) there is no star, never the crash screen
     spriteId = CreateSpriteAtEndUnchecked(&sSpriteTemplate_Sparkle, pokemon->x, pokemon->y, 0);
     if (spriteId >= MAX_SPRITES)
+    {
+        if (loaded)
+            FreeSpritePaletteByTag(FLDEFF_PAL_TAG_GENERAL_0);   // loaded for this star alone
+        sSkipped++;
         return;
+    }
     sprite = &gSprites[spriteId];
     sprite->sLocalId = objectEvent->localId;
     sprite->sMapNum = objectEvent->mapNum;
@@ -166,7 +200,7 @@ static void MakeSparkle(u32 objectEventId, u32 spot)
     sprite->sObjectId = objectEventId;
     sprite->sOffsetX = sSpots[spot][0] * halfWidth / 8;
     sprite->sOffsetY = sSpots[spot][1] * halfHeight / 8;
-    Follow(sprite, pokemon);
+    Follow(sprite, objectEvent);
     sMade++;
 }
 
@@ -179,9 +213,11 @@ void OwShinySparkle_Update(void)
     {
         struct ObjectEvent *objectEvent = &gObjectEvents[i];
 
-        // each Pokemon on a beat of its own, so two shinies do not twinkle as one
+        // each Pokemon on a beat of its own, so two shinies do not twinkle as one; one past the GBA's picture too (the 3D
+        // view draws it), never a hidden one
         if ((sFrame + i * 7) % SPARKLE_PERIOD != 0 || !IsShinyWild(objectEvent) || objectEvent->invisible
-         || objectEvent->offScreen || objectEvent->spriteId >= MAX_SPRITES || gSprites[objectEvent->spriteId].invisible)
+         || objectEvent->spriteId >= MAX_SPRITES
+         || (gSprites[objectEvent->spriteId].invisible && !HiddenOnlyOffScreen(objectEvent, &gSprites[objectEvent->spriteId])))
             continue;
         if (!SpritesToSpare())
             return;
@@ -199,6 +235,11 @@ bool8 OwShinySparkle_GetOwner(const struct Sprite *sprite, u8 *localId, u8 *mapN
     return TRUE;
 }
 
+bool8 OwShinySparkle_HiddenOffScreen(const struct Sprite *sprite)
+{
+    return sprite->inUse && sprite->callback == SpriteCB_Sparkle && sprite->invisible && sprite->sOffScreen;
+}
+
 u32 OwShinySparkle_Count(void)
 {
     u32 i, count = 0;
@@ -212,5 +253,10 @@ u32 OwShinySparkle_Count(void)
 u32 OwShinySparkle_Made(void)
 {
     return sMade;
+}
+
+u32 OwShinySparkle_Skipped(void)
+{
+    return sSkipped;
 }
 #endif // PORTABLE
