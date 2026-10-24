@@ -2194,6 +2194,57 @@ static void TrackBenchmarkPhase(Uint32 now)
 }
 #endif
 
+#ifdef ENABLE_DIORAMA
+// PKMN_PERF_FRAME_LOG=path (development): a line per presented frame - the game frame (the frames PKMN_DEBUG_KEYS
+// counts), the time since the last present, the CPU time over it of the main thread and of the whole program (every
+// thread: a software renderer's own), whether the 3D field was drawn, the terrain's chunks rebuilt, vertices and tree
+// instances drawn, and with PKMN_DIORAMA_PROFILE=1 the frame's terrain, sync and air times - for the frame-time
+// percentiles of a scripted walk compared between two builds (CPU times also on a machine busy with other work).
+static void FrameLog(double frameMs)
+{
+    static int sState; // 0 unread, 1 on, -1 off
+    static FILE *sFile;
+    static double sLastCpuMs;
+    static double sLastProcessMs;
+    double cpuMs = 0.0;
+    double processMs = 0.0;
+    const struct DioramaTerrainMetrics *terrain;
+
+    if (sState == 0)
+    {
+        const char *path = SDL_getenv("PKMN_PERF_FRAME_LOG");
+
+        sFile = path != NULL && path[0] != '\0' ? fopen(path, "w") : NULL;
+        sState = sFile != NULL ? 1 : -1;
+        if (sFile != NULL)
+            fprintf(sFile, "game_frame,frame_ms,main_cpu_ms,process_cpu_ms,drew_3d,rebuilt_chunks,vertices,"
+                           "tree_instances,terrain_ms,sync_ms,air_ms\n");
+    }
+    if (sState < 0)
+        return;
+#if defined(NATIVE_LINUX) && defined(CLOCK_THREAD_CPUTIME_ID)
+    {
+        struct timespec now;
+
+        if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &now) == 0)
+            cpuMs = now.tv_sec * 1000.0 + now.tv_nsec / 1.0e6;
+        if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &now) == 0)
+            processMs = now.tv_sec * 1000.0 + now.tv_nsec / 1.0e6;
+    }
+#endif
+    terrain = DioramaGLTerrain_GetMetrics();
+    fprintf(sFile, "%u,%.3f,%.3f,%.3f,%d,%u,%u,%u,%.3f,%.3f,%.3f\n", DebugScene_GameFrame(), frameMs,
+            sLastCpuMs != 0.0 ? cpuMs - sLastCpuMs : 0.0, sLastProcessMs != 0.0 ? processMs - sLastProcessMs : 0.0,
+            DioramaGL_LastFrameWas3D() ? 1 : 0,
+            (unsigned)terrain->rebuiltChunks, (unsigned)terrain->vertices, (unsigned)terrain->visibleTreeInstances,
+            DioramaProfile_LastFrameMs(DIORAMA_PROF_TERRAIN), DioramaProfile_LastFrameMs(DIORAMA_PROF_SYNC),
+            DioramaProfile_LastFrameMs(DIORAMA_PROF_AIR));
+    fflush(sFile);
+    sLastCpuMs = cpuMs;
+    sLastProcessMs = processMs;
+}
+#endif
+
 // After every frame shown: the frame rate, the benchmark, the settings
 // menu's confirmation countdown.
 static void AfterPresent(void)
@@ -2212,6 +2263,7 @@ static void AfterPresent(void)
         sFrameRateWindowMs = now;
     }
 #ifdef ENABLE_DIORAMA
+    FrameLog(frameMs);
     // PKMN_DIORAMA_PROFILE=1: where the frame's time goes, and the memory, every 2 s.
     if (DioramaProfile_LogRequested() && !Benchmark_Active())
     {

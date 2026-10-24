@@ -1008,6 +1008,42 @@ static void SetGroupedTreeShade(struct DioramaTerrainChunkInput *input,
                  y % DIORAMA_VOXELS_PER_CELL, shade);
 }
 
+/*
+ * Performance work 2026-10-24: a chunk with trees in it goes through the
+ * compressed shell (the ground under a tree is a whole column there) and must
+ * build exactly the mesh the voxel spans build. Returns the compressed mesh.
+ */
+static struct DioramaTerrainMesh CheckSameAsVoxelBuild(const struct DioramaTerrainChunkInput *input)
+{
+    struct DioramaTerrainMesh compressed;
+    struct DioramaTerrainMesh voxel;
+    struct DioramaTerrainVertex *copy;
+
+    assert(DioramaTerrain_BuildChunk(input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &compressed));
+    assert(compressed.usedCompressedOccupancy);
+    copy = malloc((compressed.vertexCount + 1) * sizeof(*copy));
+    assert(copy != NULL);
+    memcpy(copy, sVertices, compressed.vertexCount * sizeof(*copy));
+    DioramaTerrain_SetVoxelOccupancyOnly(true);
+    assert(DioramaTerrain_BuildChunk(input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &voxel));
+    DioramaTerrain_SetVoxelOccupancyOnly(false);
+    assert(!voxel.usedCompressedOccupancy);
+    assert(voxel.vertexCount == compressed.vertexCount);
+    assert(memcmp(copy, sVertices, compressed.vertexCount * sizeof(*copy)) == 0);
+    assert(voxel.geometryHash == compressed.geometryHash);
+    assert(memcmp(&voxel.bounds, &compressed.bounds, sizeof(voxel.bounds)) == 0);
+    assert(voxel.topFaceCount == compressed.topFaceCount);
+    assert(voxel.bottomFaceCount == compressed.bottomFaceCount);
+    assert(voxel.sideFaceCount == compressed.sideFaceCount);
+    assert(voxel.featureFaceCount == compressed.featureFaceCount);
+    assert(voxel.occupancySpanCount == compressed.occupancySpanCount);
+    assert(voxel.treeInstanceCount == compressed.treeInstanceCount);
+    assert(memcmp(voxel.treeInstances, compressed.treeInstances,
+                  compressed.treeInstanceCount * sizeof(compressed.treeInstances[0])) == 0);
+    free(copy);
+    return compressed;
+}
+
 static void TestRoundHullUsesArtworkChords(void)
 {
     struct DioramaTerrainChunkInput input;
@@ -1031,9 +1067,9 @@ static void TestRoundHullUsesArtworkChords(void)
             SetTreeShade(center, x, row + 2,
                          (x + row) & 1 ? DIORAMA_TREE_SHADE_BLACK
                                        : DIORAMA_TREE_SHADE_DARK);
+    round = CheckSameAsVoxelBuild(&input);
     assert(DioramaTerrain_BuildChunk(&input, sVertices,
                                       DIORAMA_TERRAIN_MAX_VERTICES, &round));
-    assert(!round.usedCompressedOccupancy);
     assert(round.geometryHash != box.geometryHash);
     assert(round.bounds.maxY == 14.0f / 16.0f);
     assert(round.bounds.minY == -1.0f / 16.0f);
@@ -1190,9 +1226,10 @@ static void TestLargeGroupedTreeUsesAuthoredVoxelModel(void)
                 SetTreeMaterial(cell, 0.1f, 0.1f, 0.2f, 0.2f);
         }
     }
+    CheckSameAsVoxelBuild(&input);
     assert(DioramaTerrain_BuildChunk(&input, sVertices,
                                        DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
-    assert(!mesh.usedCompressedOccupancy);
+    assert(mesh.usedCompressedOccupancy);
     assert(DIORAMA_TREE_MODEL_SIZE_X == 32);
     assert(DIORAMA_TREE_MODEL_SIZE_Z == 24);
     assert(DIORAMA_TREE_MODEL_SIZE_Y == 48);
@@ -1359,6 +1396,170 @@ static void TestDenseAuthoredTreesStayWithinCapacity(void)
         assert(sVertices[vertex].textureLayer != DIORAMA_TERRAIN_TEXTURE_VERTEX_COLOR);
 }
 
+/* A 2 x 2 voxel-model tree (a GROUPED_HULL two cells wide) with its top-left
+ * cell at input cell (gridX, gridY). */
+static void PlaceAuthoredTree(struct DioramaTerrainChunkInput *input, int gridX, int gridY, int structureId)
+{
+    for (int localY = 0; localY < 2; localY++)
+        for (int localX = 0; localX < 2; localX++)
+        {
+            struct DioramaTerrainCell *cell =
+                &input->cells[(gridY + localY) * DIORAMA_TERRAIN_INPUT_SIZE + gridX + localX];
+
+            cell->shape = DIORAMA_SHAPE_EXTRUDED;
+            cell->archetype = DIORAMA_ARCHETYPE_GROUPED_HULL;
+            cell->visualHeight = cell->groundHeight + 2.0f;
+            cell->featureHeight = 2.0f;
+            cell->structureId = structureId;
+            cell->structureX = gridX - DIORAMA_TERRAIN_HALO;
+            cell->structureY = gridY - DIORAMA_TERRAIN_HALO;
+            cell->structureWidth = 2;
+            cell->structureHeight = 2;
+            cell->structureLocalX = localX;
+            cell->structureLocalY = localY;
+            cell->treeHullReady = true;
+            for (int face = 0; face < DIORAMA_MATERIAL_FACE_COUNT; face++)
+            {
+                cell->underlayMaterials[face].u0 = 0.5f;
+                cell->underlayMaterials[face].v0 = 0.6f;
+                cell->underlayMaterials[face].u1 = 0.7f;
+                cell->underlayMaterials[face].v1 = 0.8f;
+            }
+        }
+}
+
+/*
+ * Performance work 2026-10-24 (Petalburg Woods): chunks with trees build
+ * through the compressed shell - the ground under each tree a whole column on
+ * its ground, reading the ground's materials - exactly as through the voxel
+ * spans: a forest of voxel-model trees, a tree on a raised level beside lower
+ * ground and the scene's edge, round hulls beside water and a ledge.
+ */
+static void TestTreeChunksUseCompressedShell(void)
+{
+    struct DioramaTerrainChunkInput input;
+    struct DioramaTerrainMesh mesh;
+    int structureId = 1;
+
+    /* the forest: trees over the whole chunk and its halo */
+    InitInput(&input, 3, MB_NORMAL);
+    for (int gridY = 0; gridY + 1 < DIORAMA_TERRAIN_INPUT_SIZE; gridY += 2)
+        for (int gridX = 0; gridX + 1 < DIORAMA_TERRAIN_INPUT_SIZE; gridX += 2)
+            PlaceAuthoredTree(&input, gridX, gridY, structureId++);
+    mesh = CheckSameAsVoxelBuild(&input);
+    assert(mesh.topFaceCount == 64 && mesh.bottomFaceCount == 64 && mesh.sideFaceCount == 0);
+    assert(mesh.treeInstanceCount == 16);
+
+    /* paths between the trees, a tree on a raised level, a tree at the scene's edge */
+    InitInput(&input, 3, MB_NORMAL);
+    for (int i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
+        if (input.cells[i].mapX >= 4)
+            input.cells[i].groundHeight = input.cells[i].visualHeight = 1.0f;
+    PlaceAuthoredTree(&input, 1, 1, 1);
+    PlaceAuthoredTree(&input, 5, 1, 2);
+    PlaceAuthoredTree(&input, 4, 5, 3);
+    PlaceAuthoredTree(&input, 7, 7, 4);
+    for (int y = 0; y < DIORAMA_TERRAIN_INPUT_SIZE; y++)
+        input.cells[y * DIORAMA_TERRAIN_INPUT_SIZE + DIORAMA_TERRAIN_INPUT_SIZE - 1].present = false;
+    mesh = CheckSameAsVoxelBuild(&input);
+    assert(mesh.sideFaceCount > 0);
+    assert(mesh.treeInstanceCount == 4);
+
+    /* round hulls (their own hull geometry) beside lower water and a ledge */
+    InitInput(&input, 3, MB_NORMAL);
+    for (int gridX = 2; gridX <= 6; gridX += 2)
+    {
+        struct DioramaTerrainCell *tree = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + gridX];
+
+        tree->shape = DIORAMA_SHAPE_EXTRUDED;
+        tree->archetype = DIORAMA_ARCHETYPE_ROUND_HULL;
+        tree->visualHeight = 1.0f;
+        tree->featureHeight = 1.0f;
+        SetTreeMaterial(tree, 0.1f, 0.1f, 0.3f, 0.3f);
+        for (int y = 3; y <= 12; y++)
+            for (int x = 3; x <= 12; x++)
+                SetTreeShade(tree, x, y, (x + y) & 1 ? DIORAMA_TREE_SHADE_BLACK : DIORAMA_TREE_SHADE_DARK);
+    }
+    input.cells[5 * DIORAMA_TERRAIN_INPUT_SIZE + 2].shape = DIORAMA_SHAPE_WATER;
+    input.cells[5 * DIORAMA_TERRAIN_INPUT_SIZE + 2].groundHeight = -1.0f;
+    input.cells[5 * DIORAMA_TERRAIN_INPUT_SIZE + 2].visualHeight = -1.0f;
+    input.cells[3 * DIORAMA_TERRAIN_INPUT_SIZE + 4].shape = DIORAMA_SHAPE_LEDGE;
+    input.cells[3 * DIORAMA_TERRAIN_INPUT_SIZE + 4].behavior = MB_JUMP_SOUTH;
+    mesh = CheckSameAsVoxelBuild(&input);
+    assert(mesh.bounds.maxY > 0.5f);
+
+    /* anything else that needs the voxel spans still takes them */
+    input.cells[1 * DIORAMA_TERRAIN_INPUT_SIZE + 1].shape = DIORAMA_SHAPE_ROOF;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(!mesh.usedCompressedOccupancy);
+}
+
+/*
+ * The renderer draws only the voxel tree model's faces that do not look north
+ * or down when its eye is above and south of a tree (gl_terrain_renderer.c,
+ * performance work 2026-10-24): every face says which way it looks, the faces
+ * on the model's outer planes look out of it, and the model is closed (as
+ * much area looks each way along an axis as the opposite way), so a face that
+ * looks away from the eye always has the model's own faces in front of it.
+ */
+static void TestTreeModelFacesLookOutward(void)
+{
+    struct DioramaTerrainBounds bounds;
+    uint32_t vertexCount;
+    double area[6] = {0};
+    unsigned counts[6] = {0};
+    unsigned onOuterPlane = 0;
+
+    assert(DioramaTerrain_BuildTreeModel(sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &vertexCount, &bounds));
+    assert(DioramaTerrain_TreeModelFaceCount() == gDioramaTreeModelFaceCount);
+    assert(vertexCount == DioramaTerrain_TreeModelFaceCount() * 6);
+    for (uint32_t face = 0; face < DioramaTerrain_TreeModelFaceCount(); face++)
+    {
+        const struct DioramaTerrainVertex *v = &sVertices[face * 6];
+        enum DioramaTreeFacing facing = DioramaTerrain_TreeModelFacing(face);
+        float minX = v[0].x, maxX = v[0].x, minY = v[0].y, maxY = v[0].y, minZ = v[0].z, maxZ = v[0].z;
+
+        assert(facing <= DIORAMA_TREE_FACING_SOUTH);
+        for (int i = 1; i < 6; i++)
+        {
+            minX = v[i].x < minX ? v[i].x : minX; maxX = v[i].x > maxX ? v[i].x : maxX;
+            minY = v[i].y < minY ? v[i].y : minY; maxY = v[i].y > maxY ? v[i].y : maxY;
+            minZ = v[i].z < minZ ? v[i].z : minZ; maxZ = v[i].z > maxZ ? v[i].z : maxZ;
+        }
+        counts[facing]++;
+        switch (facing)
+        {
+        case DIORAMA_TREE_FACING_EAST:
+        case DIORAMA_TREE_FACING_WEST:
+            assert(minX == maxX);
+            area[facing] += (double)(maxY - minY) * (maxZ - minZ);
+            onOuterPlane += minX == bounds.maxX || minX == bounds.minX;
+            assert(minX != (facing == DIORAMA_TREE_FACING_EAST ? bounds.minX : bounds.maxX));
+            break;
+        case DIORAMA_TREE_FACING_UP:
+        case DIORAMA_TREE_FACING_DOWN:
+            assert(minY == maxY);
+            area[facing] += (double)(maxX - minX) * (maxZ - minZ);
+            onOuterPlane += minY == bounds.maxY || minY == bounds.minY;
+            assert(minY != (facing == DIORAMA_TREE_FACING_UP ? bounds.minY : bounds.maxY));
+            break;
+        default:
+            assert(minZ == maxZ);
+            area[facing] += (double)(maxX - minX) * (maxY - minY);
+            onOuterPlane += minZ == bounds.maxZ || minZ == bounds.minZ;
+            assert(minZ != (facing == DIORAMA_TREE_FACING_NORTH ? bounds.minZ : bounds.maxZ));
+            break;
+        }
+    }
+    assert(onOuterPlane > 0);
+    for (int axis = 0; axis < 3; axis++)
+        assert(area[axis * 2] > 0.0 && area[axis * 2] == area[axis * 2 + 1]);
+    /* the faces drawn from above and south: all but those looking north or down */
+    assert(counts[DIORAMA_TREE_FACING_NORTH] == 477 && counts[DIORAMA_TREE_FACING_DOWN] == 367);
+    assert(DioramaTerrain_TreeModelFaceCount() - counts[DIORAMA_TREE_FACING_NORTH]
+           - counts[DIORAMA_TREE_FACING_DOWN] == 1580);
+}
+
 int main(void)
 {
     TestFloorDiv();
@@ -1399,6 +1600,8 @@ int main(void)
     TestWideGroupedHullCentersItsDepth();
     TestDenseRoundHullsStayWithinCapacity();
     TestDenseAuthoredTreesStayWithinCapacity();
+    TestTreeChunksUseCompressedShell();
+    TestTreeModelFacesLookOutward();
     TestFrustum();
     puts("terrain mesh tests passed");
     return 0;

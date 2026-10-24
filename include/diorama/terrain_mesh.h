@@ -255,6 +255,26 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
 bool DioramaTerrain_BuildTreeModel(struct DioramaTerrainVertex *vertices,
                                    uint32_t vertexCapacity, uint32_t *vertexCount,
                                    struct DioramaTerrainBounds *bounds);
+/*
+ * Which way each face of the voxel tree model looks out, in the scene's axes
+ * (x east, y up, z north): BuildTreeModel writes face f of the model as the
+ * quad of vertices 6f to 6f + 5. The renderer can leave out the faces that
+ * look away from its eye (gl_terrain_renderer.c, performance work 2026-10-24).
+ */
+enum DioramaTreeFacing
+{
+    DIORAMA_TREE_FACING_EAST,
+    DIORAMA_TREE_FACING_WEST,
+    DIORAMA_TREE_FACING_UP,
+    DIORAMA_TREE_FACING_DOWN,
+    DIORAMA_TREE_FACING_NORTH,
+    DIORAMA_TREE_FACING_SOUTH
+};
+uint32_t DioramaTerrain_TreeModelFaceCount(void);
+enum DioramaTreeFacing DioramaTerrain_TreeModelFacing(uint32_t face);
+/* Tests and PKMN_DIORAMA_MESH_CHECK: every chunk built through the voxel
+ * spans, the compressed shell (whole cells' faces) never used. */
+void DioramaTerrain_SetVoxelOccupancyOnly(bool on);
 bool DioramaTerrain_IsBoundsVisible(const struct DioramaTerrainBounds *bounds,
                                      float cameraX, float cameraZ,
                                      float cameraPitch, float focalLength);

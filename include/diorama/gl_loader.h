@@ -24,6 +24,7 @@ extern PFNGLDELETEPROGRAMPROC dglDeleteProgram;
 extern PFNGLDELETESHADERPROC dglDeleteShader;
 extern PFNGLDELETEVERTEXARRAYSPROC dglDeleteVertexArrays;
 extern PFNGLDRAWARRAYSINSTANCEDPROC dglDrawArraysInstanced;
+extern PFNGLDRAWELEMENTSINSTANCEDPROC dglDrawElementsInstanced;
 extern PFNGLENABLEVERTEXATTRIBARRAYPROC dglEnableVertexAttribArray;
 extern PFNGLGENBUFFERSPROC dglGenBuffers;
 extern PFNGLGENVERTEXARRAYSPROC dglGenVertexArrays;

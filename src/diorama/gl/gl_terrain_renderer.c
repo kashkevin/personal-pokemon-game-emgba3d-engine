@@ -15,6 +15,7 @@
 #include "diorama/gl_light.h"
 #include "diorama/gl_quality.h"
 #include "diorama/gl_shadow.h"
+#include "diorama/gl_target.h"
 #include "diorama/gl_terrain_renderer.h"
 #include "diorama/metatile_atlas.h"
 #include "diorama/props.h"
@@ -23,6 +24,7 @@
 #include "diorama/terrain_mesh.h"
 #include "fieldmap.h"
 #include "metatile_behavior.h"
+#include "platform/png_write.h"
 #include "constants/metatile_behaviors.h"
 
 #define TERRAIN_GRID_CHUNKS 100 /* the 49 x 49 cells span up to 8 x 8 chunks */
@@ -146,10 +148,56 @@ static struct DioramaTerrainMetrics sMetrics;
 static GLuint sProgram;
 static GLuint sDebugVertexArray;
 static GLuint sDebugVertexBuffer;
+/*
+ * The voxel tree model (DioramaTerrain_BuildTreeModel), an instance per tree.
+ * Performance work 2026-10-24 (the owner's Petalburg Woods, laggy to run
+ * through): the Diorama camera has some 330 trees in its chunks there, 14,544
+ * vertices each - about 4.8 million vertices a frame for the trees alone. The
+ * model is drawn from indices, a quad's four corners shaded once
+ * (DioramaTerrain_FoldQuads: the same triangles in the same order), and the
+ * colour pass draws only the trees on screen (each tree tested, not only its
+ * chunk); the picture is the same to the pixel (PKMN_DIORAMA_TREE_CHECK). The
+ * sun's depth map draws every resident tree, as before, from the indices.
+ *
+ * A second range of indices holds the faces an eye above a tree and south of
+ * it can see - all but those looking north or down, 1580 of the 2424 faces
+ * (a third fewer triangles, and no fragments shaded for faces the model's own
+ * faces then cover). Those face away from such an eye and the model is
+ * closed, so each lies behind the model's own faces wherever it is on screen;
+ * but where a face looking away meets one looking at the eye along an edge,
+ * their depths tie at a few pixels and the later drawn wins: about 0.1% of the
+ * picture's pixels take the other face's shade there (Petalburg Woods, the
+ * Diorama camera: some 900 of 921,600 pixels a frame, by up to 12 of 255).
+ * So it is opt-in, PKMN_DIORAMA_TREE_FACES=seen; when asked for, the colour
+ * pass uses it if the eye is so for every tree it draws (the field's cameras
+ * always are).
+ */
+enum
+{
+    TREE_RANGE_ALL,
+    TREE_RANGE_VIEW,
+    TREE_RANGE_COUNT
+};
 static GLuint sTreeVertexArray;
 static GLuint sTreeVertexBuffer;
+static GLuint sTreeIndexBuffer;
 static GLuint sTreeInstanceBuffer;
-static uint32_t sTreeModelVertexCount;
+static uint32_t sTreeModelVertexCount; /* six per face, before folding */
+static GLenum sTreeIndexType;
+static uint32_t sTreeIndexSize;
+static uint32_t sTreeRangeFirst[TREE_RANGE_COUNT]; /* in indices */
+static uint32_t sTreeRangeCount[TREE_RANGE_COUNT];
+static struct DioramaTerrainBounds sTreeModelBounds; /* before an instance's offset */
+/*
+ * PKMN_DIORAMA_TREE_CHECK=1 (tests): the model is also kept as it was drawn
+ * before (six vertices a face, every tree of every chunk on screen, every
+ * face), and each frame's trees are drawn both ways over the same picture;
+ * the pixels whose colour or depth differ are counted and logged, and the
+ * first frames that differ are written out (tree-check-*.png). Slow.
+ */
+static GLuint sTreeCheckVertexArray;
+static GLuint sTreeCheckVertexBuffer;
+static struct DioramaTerrainTreeInstance sCheckTreeInstances[TERRAIN_MAX_VISIBLE_TREE_INSTANCES];
 static GLint sCameraLocation;
 static GLint sCameraPitchLocation;
 static GLint sFocalLengthLocation;
@@ -425,27 +473,190 @@ static void ConfigureVertexArray(GLuint vertexArray, GLuint vertexBuffer)
                             (void *)offsetof(struct DioramaTerrainVertex, color));
 }
 
-static bool CreateTreeBuffers(void)
+static bool TreeCheckEnabled(void)
 {
-    struct DioramaTerrainBounds bounds;
+    static int sEnabled = -1;
 
-    if (!DioramaTerrain_BuildTreeModel(sScratchVertices,
-            DIORAMA_TERRAIN_MAX_VERTICES, &sTreeModelVertexCount, &bounds)
-     || sTreeModelVertexCount == 0)
-        return false;
-    dglGenVertexArrays(1, &sTreeVertexArray);
-    dglGenBuffers(1, &sTreeVertexBuffer);
-    dglGenBuffers(1, &sTreeInstanceBuffer);
-    ConfigureVertexArray(sTreeVertexArray, sTreeVertexBuffer);
-    dglBindBuffer(GL_ARRAY_BUFFER, sTreeVertexBuffer);
-    dglBufferData(GL_ARRAY_BUFFER,
-                  sTreeModelVertexCount * sizeof(struct DioramaTerrainVertex),
-                  sScratchVertices, GL_STATIC_DRAW);
+    if (sEnabled < 0)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_TREE_CHECK");
+
+        sEnabled = value != NULL && value[0] == '1';
+    }
+    return sEnabled != 0;
+}
+
+/* PKMN_DIORAMA_TREE_FACES=seen (opt-in, see above): the trees from
+ * TREE_RANGE_VIEW where the eye allows. */
+static bool TreeFacesSeen(void)
+{
+    static int sSeen = -1;
+
+    if (sSeen < 0)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_TREE_FACES");
+
+        sSeen = value != NULL && strcmp(value, "seen") == 0;
+    }
+    return sSeen != 0;
+}
+
+/* The per-instance offset (attribute 6) of a tree vertex array, from the
+ * instance buffer. */
+static void ConfigureTreeInstances(void)
+{
     dglBindBuffer(GL_ARRAY_BUFFER, sTreeInstanceBuffer);
     dglEnableVertexAttribArray(6);
     dglVertexAttribPointer(6, 3, GL_FLOAT, GL_FALSE,
                            sizeof(struct DioramaTerrainTreeInstance), NULL);
     dglVertexAttribDivisor(6, 1);
+}
+
+static bool CreateTreeBuffers(void)
+{
+    uint32_t faceCount = DioramaTerrain_TreeModelFaceCount();
+    uint32_t *indices;
+    uint32_t indexCount = 0;
+    uint32_t viewCount = 0;
+    uint32_t vertexCount;
+    uint32_t total;
+    uint32_t i;
+
+    if (!DioramaTerrain_BuildTreeModel(sScratchVertices,
+            DIORAMA_TERRAIN_MAX_VERTICES, &sTreeModelVertexCount, &sTreeModelBounds)
+     || sTreeModelVertexCount == 0)
+        return false;
+    /* Room for every face's indices twice (both ranges). */
+    indices = malloc((size_t)sTreeModelVertexCount * 2 * sizeof(*indices));
+    if (indices == NULL)
+        return false;
+    dglGenVertexArrays(1, &sTreeVertexArray);
+    dglGenBuffers(1, &sTreeVertexBuffer);
+    dglGenBuffers(1, &sTreeIndexBuffer);
+    dglGenBuffers(1, &sTreeInstanceBuffer);
+    if (TreeCheckEnabled())
+    {
+        /* The model as it was drawn before, for the comparison. */
+        dglGenVertexArrays(1, &sTreeCheckVertexArray);
+        dglGenBuffers(1, &sTreeCheckVertexBuffer);
+        ConfigureVertexArray(sTreeCheckVertexArray, sTreeCheckVertexBuffer);
+        dglBufferData(GL_ARRAY_BUFFER, sTreeModelVertexCount * sizeof(struct DioramaTerrainVertex),
+                      sScratchVertices, GL_STATIC_DRAW);
+        ConfigureTreeInstances();
+        dglBindVertexArray(0);
+    }
+    vertexCount = DioramaTerrain_FoldQuads(sScratchVertices, sTreeModelVertexCount, indices, &indexCount);
+    sTreeRangeFirst[TREE_RANGE_ALL] = 0;
+    sTreeRangeCount[TREE_RANGE_ALL] = indexCount;
+    sTreeRangeFirst[TREE_RANGE_VIEW] = 0;
+    sTreeRangeCount[TREE_RANGE_VIEW] = indexCount;
+    /* Each face one quad (AppendPixelQuad), folded to four corners: face f
+     * is indices 6f to 6f + 5. The faces an eye above and south of a tree
+     * can see, in the model's order. */
+    if (indexCount == faceCount * 6 && vertexCount == faceCount * 4)
+    {
+        for (i = 0; i < faceCount; i++)
+        {
+            enum DioramaTreeFacing facing = DioramaTerrain_TreeModelFacing(i);
+
+            if (facing == DIORAMA_TREE_FACING_NORTH || facing == DIORAMA_TREE_FACING_DOWN)
+                continue;
+            memcpy(&indices[indexCount + viewCount], &indices[i * 6], 6 * sizeof(*indices));
+            viewCount += 6;
+        }
+        sTreeRangeFirst[TREE_RANGE_VIEW] = indexCount;
+        sTreeRangeCount[TREE_RANGE_VIEW] = viewCount;
+    }
+    total = indexCount + viewCount;
+    sTreeIndexType = GL_UNSIGNED_INT;
+    sTreeIndexSize = sizeof(uint32_t);
+    if (vertexCount <= 0x10000)
+    {
+        /* in place: the uint16_t at i ends before the uint32_t at i+1 begins */
+        uint16_t *shortIndices = (uint16_t *)(void *)indices;
+
+        for (i = 0; i < total; i++)
+            shortIndices[i] = (uint16_t)indices[i];
+        sTreeIndexType = GL_UNSIGNED_SHORT;
+        sTreeIndexSize = sizeof(uint16_t);
+    }
+    ConfigureVertexArray(sTreeVertexArray, sTreeVertexBuffer);
+    dglBufferData(GL_ARRAY_BUFFER, vertexCount * sizeof(struct DioramaTerrainVertex),
+                  sScratchVertices, GL_STATIC_DRAW);
+    /* the element buffer is the vertex array's (bound above) */
+    dglBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sTreeIndexBuffer);
+    dglBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)total * sTreeIndexSize, indices, GL_STATIC_DRAW);
+    ConfigureTreeInstances();
+    dglBindVertexArray(0);
+    free(indices);
+    SDL_Log("Diorama: tree model %u faces, %u vertices drawn from %u (%u indices; %u seen from above and south)",
+            faceCount, sTreeModelVertexCount, vertexCount, indexCount, viewCount);
+    return true;
+}
+
+/* A tree's place: the model's bounds moved by its offset. */
+static struct DioramaTerrainBounds TreeBounds(const struct DioramaTerrainTreeInstance *tree)
+{
+    struct DioramaTerrainBounds bounds = sTreeModelBounds;
+
+    bounds.minX += tree->x;
+    bounds.maxX += tree->x;
+    bounds.minY += tree->y;
+    bounds.maxY += tree->y;
+    bounds.minZ += tree->z;
+    bounds.maxZ += tree->z;
+    return bounds;
+}
+
+/* The eye of the scene's projection (the terrain vertex shader): over the
+ * target at its rig's height, its distance south of it, looking north. */
+struct TreeEye
+{
+    float x;
+    float y;
+    float z;
+    float pitchSin;
+    float pitchCos;
+    float targetZ;
+    float distance;
+};
+
+static struct TreeEye TreeEyeFor(float cameraX, float cameraZ, float cameraPitch)
+{
+    struct TreeEye eye;
+    float screenOffsetY;
+
+    DioramaCamera_GetRig(cameraPitch, &eye.y, &eye.distance, &screenOffsetY);
+    eye.x = cameraX;
+    eye.z = cameraZ - eye.distance;
+    eye.targetZ = cameraZ;
+    eye.pitchSin = sinf(cameraPitch);
+    eye.pitchCos = cosf(cameraPitch);
+    return eye;
+}
+
+/*
+ * Whether this eye sees none of a tree's faces that look north or down, so
+ * TREE_RANGE_VIEW draws it as every face would: the eye south of each such
+ * face's plane and above it (each faces away from the eye, and the closed
+ * model's own faces stand in front of it), and the whole tree past the near
+ * plane, so none of those faces in front is cut away.
+ */
+static bool TreeSeenFromAboveSouth(const struct DioramaTerrainBounds *bounds, const struct TreeEye *eye)
+{
+    int i;
+
+    if (!(eye->z < bounds->minZ && eye->y > bounds->maxY))
+        return false;
+    for (i = 0; i < 4; i++)
+    {
+        float y = (i & 1) ? bounds->maxY : bounds->minY;
+        float z = (i & 2) ? bounds->maxZ : bounds->minZ;
+        float depth = (eye->y - y) * eye->pitchSin + (z - eye->targetZ + eye->distance) * eye->pitchCos;
+
+        if (!(depth > 0.2f)) /* the shaders' near plane is at 0.1 */
+            return false;
+    }
     return true;
 }
 
@@ -1543,6 +1754,61 @@ static bool ChunkLog(void)
     return sChunkLog != 0;
 }
 
+/*
+ * PKMN_DIORAMA_MESH_CHECK=1 (tests): each chunk built again through the voxel
+ * spans alone (DioramaTerrain_SetVoxelOccupancyOnly) and compared with the
+ * build drawn: its vertices byte for byte, its bounds and its trees. Slow.
+ */
+static void CheckChunkMesh(const struct DioramaTerrainChunkInput *input, const struct DioramaTerrainMesh *mesh)
+{
+    static int sEnabled = -1;
+    static uint32_t sChecked;
+    static uint32_t sDiffering;
+    static uint32_t sCompressed;
+    struct DioramaTerrainVertex *vertices;
+    struct DioramaTerrainMesh voxel;
+    uint32_t capacity;
+    bool same;
+
+    if (sEnabled < 0)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_MESH_CHECK");
+
+        sEnabled = value != NULL && value[0] == '1';
+    }
+    if (!sEnabled)
+        return;
+    capacity = mesh->vertexCount * 2 + 4096;
+    vertices = malloc(capacity * sizeof(*vertices));
+    if (vertices == NULL)
+        return;
+    DioramaTerrain_SetVoxelOccupancyOnly(true);
+    same = DioramaTerrain_BuildChunk(input, vertices, capacity, &voxel);
+    DioramaTerrain_SetVoxelOccupancyOnly(false);
+    same = same && voxel.vertexCount == mesh->vertexCount
+        && memcmp(vertices, sScratchVertices, mesh->vertexCount * sizeof(*vertices)) == 0
+        && memcmp(&voxel.bounds, &mesh->bounds, sizeof(voxel.bounds)) == 0
+        && voxel.treeInstanceCount == mesh->treeInstanceCount
+        && memcmp(voxel.treeInstances, mesh->treeInstances,
+                  mesh->treeInstanceCount * sizeof(mesh->treeInstances[0])) == 0
+        && voxel.geometryHash == mesh->geometryHash
+        && voxel.topFaceCount == mesh->topFaceCount && voxel.bottomFaceCount == mesh->bottomFaceCount
+        && voxel.sideFaceCount == mesh->sideFaceCount && voxel.featureFaceCount == mesh->featureFaceCount;
+    free(vertices);
+    sChecked++;
+    sCompressed += mesh->usedCompressedOccupancy;
+    if (!same)
+    {
+        sDiffering++;
+        SDL_Log("Diorama: mesh check: chunk %d,%d differs from its voxel build (%u against %u vertices, "
+                "compressed %d)", input->chunkX, input->chunkY, mesh->vertexCount, voxel.vertexCount,
+                mesh->usedCompressedOccupancy);
+    }
+    if ((sChecked & 15) == 0 || !same)
+        SDL_Log("Diorama: mesh check: %u chunks checked (%u compressed), %u differ", sChecked, sCompressed,
+                sDiffering);
+}
+
 static bool UploadChunk(struct GLTerrainChunk *chunk,
                         const struct DioramaTerrainChunkInput *input,
                         uint64_t signature)
@@ -1552,6 +1818,7 @@ static bool UploadChunk(struct GLTerrainChunk *chunk,
     if (!DioramaTerrain_BuildChunk(input, sScratchVertices,
                                    DIORAMA_TERRAIN_MAX_VERTICES, &mesh))
         return false;
+    CheckChunkMesh(input, &mesh);
     {
         if (ChunkLog())
         {
@@ -1925,6 +2192,19 @@ static bool ChunkUsesDirtyTiles(const struct DioramaSceneSnapshot *snapshot,
     return false;
 }
 
+/* The tiles that changed since the chunks were built (sSyncTiles), into
+ * sSyncDirtyTiles. */
+static void FindDirtyTiles(const struct DioramaSceneSnapshot *snapshot)
+{
+    unsigned tile;
+
+    memset(sSyncDirtyTiles, 0, sizeof(sSyncDirtyTiles));
+    for (tile = 0; tile < DIORAMA_TILE_COUNT; tile++)
+        if (memcmp(snapshot->tileGraphics + tile * DIORAMA_TILE_BYTES, sSyncTiles + tile * DIORAMA_TILE_BYTES,
+                   DIORAMA_TILE_BYTES) != 0)
+            sSyncDirtyTiles[tile / 8] |= 1 << (tile % 8);
+}
+
 /* The chunks a change of the animated tiles alone can reach, built again;
  * the rest stand. */
 static bool SyncAnimatedTiles(const struct DioramaSceneSnapshot *snapshot,
@@ -1932,16 +2212,11 @@ static bool SyncAnimatedTiles(const struct DioramaSceneSnapshot *snapshot,
                               const struct TerrainSyncKey *key)
 {
     static struct DioramaTerrainChunkInput input;
-    unsigned tile;
     unsigned rebuilt = 0;
     bool prepared = false;
     int i;
 
-    memset(sSyncDirtyTiles, 0, sizeof(sSyncDirtyTiles));
-    for (tile = 0; tile < DIORAMA_TILE_COUNT; tile++)
-        if (memcmp(snapshot->tileGraphics + tile * DIORAMA_TILE_BYTES, sSyncTiles + tile * DIORAMA_TILE_BYTES,
-                   DIORAMA_TILE_BYTES) != 0)
-            sSyncDirtyTiles[tile / 8] |= 1 << (tile % 8);
+    FindDirtyTiles(snapshot);
     for (i = 0; i < (int)sChunkLimit; i++)
     {
         struct GLTerrainChunk *chunk = &sChunks[i];
@@ -2082,6 +2357,33 @@ static bool RegionUnchanged(const struct DioramaSceneSnapshot *snapshot,
     return true;
 }
 
+/* Whether any of a chunk's own cells is in the snapshot: BuildInput builds
+ * no input for one with none. */
+static bool ChunkHasInterior(const struct DioramaSceneSnapshot *snapshot, int chunkX, int chunkY)
+{
+    int x;
+    int y;
+
+    for (y = 0; y < DIORAMA_TERRAIN_CHUNK_SIZE; y++)
+        for (x = 0; x < DIORAMA_TERRAIN_CHUNK_SIZE; x++)
+        {
+            int mapX = chunkX * DIORAMA_TERRAIN_CHUNK_SIZE + x;
+            int mapY = chunkY * DIORAMA_TERRAIN_CHUNK_SIZE + y;
+            int gridX = mapX - snapshot->gridOriginX;
+            int gridY = mapY - snapshot->gridOriginY;
+            int gridIndex = gridY * DIORAMA_GRID_WIDTH + gridX;
+            const struct DioramaCellSnapshot *source;
+
+            if (gridX < 0 || gridY < 0 || gridX >= DIORAMA_GRID_WIDTH || gridY >= DIORAMA_GRID_HEIGHT
+             || gridIndex >= snapshot->visibleCellCount)
+                continue;
+            source = &snapshot->cells[gridIndex];
+            if (source->mapX == mapX && source->mapY == mapY && source->metatileId < DIORAMA_TILE_COUNT)
+                return true;
+        }
+    return false;
+}
+
 /* Builds (or checks) one chunk; false when the cache or the GL failed. */
 static bool SyncChunk(const struct DioramaSceneSnapshot *snapshot,
                       const struct DioramaResolvedCell *resolvedCells,
@@ -2095,6 +2397,38 @@ static bool SyncChunk(const struct DioramaSceneSnapshot *snapshot,
     bool forceDirty = forceAllDirty;
     uint8_t dirtyIndex;
 
+    /* A chunk off screen with the sync's allowance for them spent waits for
+     * its build whatever its input holds, so that input is not built: every
+     * waiting chunk's input was built again each frame to find two to build,
+     * a dozen a frame after each step in Petalburg Woods (performance work
+     * 2026-10-24). The decision is the one SyncChunk took below: it waits,
+     * its old mesh standing (a chunk whose input turns out the same keeps
+     * that mesh either way). */
+    if (!forceAllDirty && *offscreenBuilds >= TERRAIN_OFFSCREEN_BUILDS)
+    {
+        bool dirty = false;
+
+        chunk = FindChunk(chunkX, chunkY);
+        for (dirtyIndex = 0; !dirty && dirtyIndex < snapshot->dirtyCellCount; dirtyIndex++)
+            dirty = DioramaTerrain_DirtyCellAffectsChunk(snapshot->dirtyCells[dirtyIndex].mapX,
+                                                         snapshot->dirtyCells[dirtyIndex].mapY,
+                                                         chunkX, chunkY);
+        if (!dirty && !ChunkUrgent(snapshot, chunk, chunkX, chunkY)
+         && (chunk == NULL
+          || (chunk->mapGeneration == snapshot->mapGeneration && !chunk->hasPixelObjects
+           && ChunkHasInterior(snapshot, chunkX, chunkY))))
+        {
+            AddPending(chunkX, chunkY);
+            sDeferredBuilds++;
+            if (chunk != NULL && chunk->occupied && chunk->rulesGeneration == rulesGeneration)
+            {
+                chunk->stale = true;
+                chunk->active = true;
+                chunk->lastSeenSequence = snapshot->sequence;
+            }
+            return true;
+        }
+    }
     sCandidatePixels = 0;
     if (!BuildInput(snapshot, resolvedCells, chunkX, chunkY, &input))
         return true;
@@ -2244,6 +2578,7 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
 {
     struct TerrainSyncKey previousKey;
     bool gridMovedOnly = false;
+    bool tilesMoved = false;
     int minChunkX;
     int maxChunkX;
     int minChunkY;
@@ -2396,12 +2731,22 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
             struct TerrainSyncKey moved = key;
 
             /* Only the grid moved (the player walking)? Then a chunk whose
-             * cells are all the same cells, resolved the same, stands. */
+             * cells are all the same cells, resolved the same, stands. The
+             * animated tiles may have moved on in the same frame (they do
+             * every few frames: a step met them about every other time in
+             * Petalburg Woods, and all 49 chunks' inputs were built again
+             * for it - performance work 2026-10-24): then a chunk that reads
+             * the pixels of a tile that changed is looked at too, as
+             * SyncAnimatedTiles does. */
             moved.gridOriginX = sSyncKey.gridOriginX;
             moved.gridOriginY = sSyncKey.gridOriginY;
             moved.visibleCellCount = sSyncKey.visibleCellCount;
+            moved.tilesetAnimationGeneration = sSyncKey.tilesetAnimationGeneration;
             gridMovedOnly = sSyncKeyValid && !forceAllDirty && snapshot->dirtyCellCount == 0
                          && memcmp(&moved, &sSyncKey, sizeof(key)) == 0;
+            tilesMoved = gridMovedOnly && key.tilesetAnimationGeneration != sSyncKey.tilesetAnimationGeneration;
+            if (tilesMoved)
+                FindDirtyTiles(snapshot);
         }
         previousKey = sSyncKey;
         /* Kept only once the loop below has gone through every chunk. */
@@ -2462,6 +2807,8 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
             chunk = FindChunk(chunkX, chunkY);
             if (gridMovedOnly && chunk != NULL && chunk->occupied && !chunk->hasPixelObjects && !chunk->stale
              && chunk->mapGeneration == snapshot->mapGeneration && chunk->rulesGeneration == rulesGeneration
+             && !(tilesMoved && chunk->readsPixelCells
+               && ChunkUsesDirtyTiles(snapshot, resolvedCells, chunkX, chunkY))
              && RegionUnchanged(snapshot, resolvedCells, &previousKey, chunkX, chunkY))
             {
                 chunk->active = true;
@@ -2539,6 +2886,168 @@ static uint32_t AppendBoundsVertices(uint32_t count, const struct DioramaTerrain
     return count;
 }
 
+/* Trees, as instances of the model's faces in one range of indices. */
+static void DrawTrees(const struct DioramaTerrainTreeInstance *trees, uint32_t count, int range)
+{
+    if (count == 0)
+        return;
+    dglBindVertexArray(sTreeVertexArray);
+    dglBindBuffer(GL_ARRAY_BUFFER, sTreeInstanceBuffer);
+    dglBufferData(GL_ARRAY_BUFFER, count * sizeof(struct DioramaTerrainTreeInstance), trees, GL_STREAM_DRAW);
+    dglDrawElementsInstanced(GL_TRIANGLES, (GLsizei)sTreeRangeCount[range], sTreeIndexType,
+                             (const void *)(uintptr_t)(sTreeRangeFirst[range] * sTreeIndexSize), (GLsizei)count);
+    /* the element buffer stays the tree array's alone */
+    dglBindVertexArray(0);
+}
+
+/*
+ * PKMN_DIORAMA_TREE_CHECK=1: this frame's trees drawn as before (oldCount of
+ * sCheckTreeInstances, every face, six vertices a face) and as now
+ * (newCount of sVisibleTreeInstances in their range), each over its own copy
+ * of the picture so far (a framebuffer of its own, so both start from the
+ * same depth, whatever the window's depth format); the pixels whose colour
+ * or depth came out different are counted. Then the frame's own trees, as
+ * now.
+ */
+static void CheckTrees(uint32_t oldCount, uint32_t newCount, int range)
+{
+    static GLuint sFramebuffer;
+    static GLuint sColor;
+    static GLuint sDepthStencil;
+    static int sWidth;
+    static int sHeight;
+    static uint8_t *sPixels[2];
+    static uint32_t *sDepths[2];
+    static bool sBroken;
+    static unsigned sFrames;
+    static unsigned sFramesDiffering;
+    static unsigned sWritten;
+    static uint64_t sPixelsDiffering;
+    GLint viewport[4];
+    GLuint target = DioramaGLTarget_Framebuffer();
+    int width;
+    int height;
+    int pass;
+    uint32_t colourDiffer = 0;
+    uint32_t depthDiffer = 0;
+    size_t p;
+
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    width = viewport[2];
+    height = viewport[3];
+    if (!sBroken && width > 0 && height > 0 && (sFramebuffer == 0 || width != sWidth || height != sHeight))
+    {
+        if (sFramebuffer == 0)
+        {
+            dglGenFramebuffers(1, &sFramebuffer);
+            dglGenRenderbuffers(1, &sColor);
+            dglGenRenderbuffers(1, &sDepthStencil);
+        }
+        dglBindRenderbuffer(GL_RENDERBUFFER, sColor);
+        dglRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, width, height);
+        dglBindRenderbuffer(GL_RENDERBUFFER, sDepthStencil);
+        dglRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
+        dglBindRenderbuffer(GL_RENDERBUFFER, 0);
+        dglBindFramebuffer(GL_FRAMEBUFFER, sFramebuffer);
+        dglFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, sColor);
+        dglFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, sDepthStencil);
+        for (pass = 0; pass < 2; pass++)
+        {
+            free(sPixels[pass]);
+            free(sDepths[pass]);
+            sPixels[pass] = malloc((size_t)width * height * 4);
+            sDepths[pass] = malloc((size_t)width * height * sizeof(uint32_t));
+        }
+        sWidth = width;
+        sHeight = height;
+        if (dglCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE
+         || sPixels[0] == NULL || sPixels[1] == NULL || sDepths[0] == NULL || sDepths[1] == NULL)
+        {
+            SDL_Log("Diorama: tree check unavailable (no framebuffer for the copies)");
+            sBroken = true;
+        }
+        dglBindFramebuffer(GL_FRAMEBUFFER, target);
+    }
+    for (pass = 0; pass < 2 && !sBroken && width > 0 && height > 0; pass++)
+    {
+        while (glGetError() != GL_NO_ERROR)
+            ;
+        /* the picture so far, into the copy (the same viewport) */
+        dglBindFramebuffer(GL_READ_FRAMEBUFFER, target);
+        dglBindFramebuffer(GL_DRAW_FRAMEBUFFER, sFramebuffer);
+        dglBlitFramebuffer(viewport[0], viewport[1], viewport[0] + width, viewport[1] + height,
+                           viewport[0], viewport[1], viewport[0] + width, viewport[1] + height,
+                           GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
+        dglBindFramebuffer(GL_FRAMEBUFFER, sFramebuffer);
+        if (glGetError() != GL_NO_ERROR)
+        {
+            SDL_Log("Diorama: tree check unavailable (the picture could not be copied)");
+            sBroken = true;
+            break;
+        }
+        if (pass == 0)
+        {
+            /* as before */
+            dglBindVertexArray(sTreeCheckVertexArray);
+            dglBindBuffer(GL_ARRAY_BUFFER, sTreeInstanceBuffer);
+            dglBufferData(GL_ARRAY_BUFFER, oldCount * sizeof(struct DioramaTerrainTreeInstance),
+                          sCheckTreeInstances, GL_STREAM_DRAW);
+            if (oldCount != 0)
+                dglDrawArraysInstanced(GL_TRIANGLES, 0, sTreeModelVertexCount, oldCount);
+            dglBindVertexArray(0);
+        }
+        else
+            DrawTrees(sVisibleTreeInstances, newCount, range);
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadPixels(viewport[0], viewport[1], width, height, GL_RGBA, GL_UNSIGNED_BYTE, sPixels[pass]);
+        glReadPixels(viewport[0], viewport[1], width, height, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, sDepths[pass]);
+        glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    }
+    dglBindFramebuffer(GL_FRAMEBUFFER, target);
+    /* the frame's own trees */
+    DrawTrees(sVisibleTreeInstances, newCount, range);
+    if (sBroken || width <= 0 || height <= 0)
+        return;
+    for (p = 0; p < (size_t)width * height; p++)
+    {
+        colourDiffer += memcmp(&sPixels[0][p * 4], &sPixels[1][p * 4], 3) != 0;
+        depthDiffer += sDepths[0][p] != sDepths[1][p];
+    }
+    sFrames++;
+    sPixelsDiffering += colourDiffer;
+    if (colourDiffer != 0 || depthDiffer != 0)
+    {
+        sFramesDiffering++;
+        if (sWritten < 3)
+        {
+            char path[64];
+
+            /* where they differ, in white over the frame as now, darkened */
+            for (p = 0; p < (size_t)width * height; p++)
+            {
+                bool differs = memcmp(&sPixels[0][p * 4], &sPixels[1][p * 4], 3) != 0
+                            || sDepths[0][p] != sDepths[1][p];
+
+                sDepths[1][p] = differs ? 0xFFFFFFFFu
+                              : 0xFF000000u | (uint32_t)(sPixels[1][p * 4] / 3)
+                              | ((uint32_t)(sPixels[1][p * 4 + 1] / 3) << 8)
+                              | ((uint32_t)(sPixels[1][p * 4 + 2] / 3) << 16);
+            }
+            SDL_snprintf(path, sizeof(path), "tree-check-%u-before.png", sWritten);
+            PngWrite_RGBA(path, sPixels[0], width, height, true);
+            SDL_snprintf(path, sizeof(path), "tree-check-%u-after.png", sWritten);
+            PngWrite_RGBA(path, sPixels[1], width, height, true);
+            SDL_snprintf(path, sizeof(path), "tree-check-%u-differ.png", sWritten);
+            PngWrite_RGBA(path, (const uint8_t *)sDepths[1], width, height, true);
+            sWritten++;
+        }
+    }
+    SDL_Log("Diorama: tree check: %u trees as before, %u as now (%s faces): %u pixels differ in colour, "
+            "%u in depth; %u of %u frames differed, %llu pixels in all",
+            oldCount, newCount, range == TREE_RANGE_VIEW ? "seen" : "all", colourDiffer, depthDiffer,
+            sFramesDiffering, sFrames, (unsigned long long)sPixelsDiffering);
+}
+
 void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
                            GLuint foregroundAtlasTexture, float cameraX, float cameraZ,
                            float cameraPitch, float focalLength,
@@ -2546,6 +3055,11 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
 {
     uint32_t debugVertexCount = sClaimDebugVertexCount;
     uint32_t visibleTreeCount = 0;
+    uint32_t checkTreeCount = 0;
+    /* Every face unless asked for the seen ones alone; the terrain debug
+     * view's lines show every face. */
+    int treeRange = !debug && TreeFacesSeen() ? TREE_RANGE_VIEW : TREE_RANGE_ALL;
+    struct TreeEye eye = TreeEyeFor(cameraX, cameraZ, cameraPitch);
     int i;
 
     sDebugDrawn = debug;
@@ -2650,33 +3164,46 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
         sMetrics.drawCalls++;
         dglBindVertexArray(chunk->vertexArray);
         DrawChunk(chunk);
-        for (uint16_t tree = 0; tree < chunk->mesh.treeInstanceCount
-             && visibleTreeCount < TERRAIN_MAX_VISIBLE_TREE_INSTANCES; tree++)
-            sVisibleTreeInstances[visibleTreeCount++] = chunk->mesh.treeInstances[tree];
+        /* Its trees on screen (the chunk's bounds hold them all, but a
+         * chunk at the picture's edge has some off it). */
+        for (uint16_t tree = 0; tree < chunk->mesh.treeInstanceCount; tree++)
+        {
+            const struct DioramaTerrainTreeInstance *instance = &chunk->mesh.treeInstances[tree];
+            struct DioramaTerrainBounds bounds;
+
+            if (checkTreeCount < TERRAIN_MAX_VISIBLE_TREE_INSTANCES && TreeCheckEnabled())
+                sCheckTreeInstances[checkTreeCount++] = *instance;
+            if (visibleTreeCount >= TERRAIN_MAX_VISIBLE_TREE_INSTANCES)
+                continue;
+            bounds = TreeBounds(instance);
+            if (!DioramaTerrain_IsBoundsVisible(&bounds, cameraX, cameraZ, cameraPitch, focalLength))
+                continue;
+            if (treeRange == TREE_RANGE_VIEW && !TreeSeenFromAboveSouth(&bounds, &eye))
+                treeRange = TREE_RANGE_ALL;
+            sVisibleTreeInstances[visibleTreeCount++] = *instance;
+        }
         if (debug)
             debugVertexCount = AppendBoundsVertices(debugVertexCount, &chunk->mesh.bounds);
     }
-    if (visibleTreeCount != 0)
+    if (visibleTreeCount != 0 || checkTreeCount != 0)
     {
-        dglBindVertexArray(sTreeVertexArray);
-        dglBindBuffer(GL_ARRAY_BUFFER, sTreeInstanceBuffer);
-        dglBufferData(GL_ARRAY_BUFFER,
-                      visibleTreeCount * sizeof(struct DioramaTerrainTreeInstance),
-                      sVisibleTreeInstances, GL_STREAM_DRAW);
         if (!debug)
         {
             dglUniform3f(sPixelScaleLocation, sTreeScale[0], sTreeScale[1], sTreeScale[2]);
             dglUniform3f(sPixelOffsetLocation, sTreeOffset[0], sTreeOffset[1], sTreeOffset[2]);
         }
-        dglDrawArraysInstanced(GL_TRIANGLES, 0, sTreeModelVertexCount, visibleTreeCount);
+        if (TreeCheckEnabled())
+            CheckTrees(checkTreeCount, visibleTreeCount, treeRange);
+        else
+            DrawTrees(sVisibleTreeInstances, visibleTreeCount, treeRange);
         dglUniform3f(sPixelScaleLocation, 1.0f, 1.0f, 1.0f);
         dglUniform3f(sPixelOffsetLocation, 0.0f, 0.0f, 0.0f);
-        sMetrics.vertices += sTreeModelVertexCount * visibleTreeCount;
-        sMetrics.triangles += sTreeModelVertexCount * visibleTreeCount / 3;
+        sMetrics.vertices += sTreeRangeCount[treeRange] * visibleTreeCount;
+        sMetrics.triangles += sTreeRangeCount[treeRange] * visibleTreeCount / 3;
         sMetrics.drawCalls++;
     }
     sMetrics.visibleTreeInstances = visibleTreeCount;
-    sMetrics.treeModelVertices = sTreeModelVertexCount;
+    sMetrics.treeModelVertices = sTreeRangeCount[treeRange];
     if (debug)
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     glEnable(GL_STENCIL_TEST);
@@ -2771,15 +3298,8 @@ void DioramaGLTerrain_DrawShadow(GLuint atlasTexture, GLuint baseAtlasTexture,
              && treeCount < TERRAIN_MAX_VISIBLE_TREE_INSTANCES; tree++)
             sVisibleTreeInstances[treeCount++] = chunk->mesh.treeInstances[tree];
     }
-    if (treeCount != 0)
-    {
-        dglBindVertexArray(sTreeVertexArray);
-        dglBindBuffer(GL_ARRAY_BUFFER, sTreeInstanceBuffer);
-        dglBufferData(GL_ARRAY_BUFFER,
-                      treeCount * sizeof(struct DioramaTerrainTreeInstance),
-                      sVisibleTreeInstances, GL_STREAM_DRAW);
-        dglDrawArraysInstanced(GL_TRIANGLES, 0, sTreeModelVertexCount, treeCount);
-    }
+    /* every face: the sun sees them from another side */
+    DrawTrees(sVisibleTreeInstances, treeCount, TREE_RANGE_ALL);
     dglUniform1i(sShadowPassLocation, 0);
 }
 
@@ -2816,18 +3336,27 @@ void DioramaGLTerrain_Shutdown(void)
     sFarShown = false;
     if (sTreeInstanceBuffer != 0)
         dglDeleteBuffers(1, &sTreeInstanceBuffer);
+    if (sTreeIndexBuffer != 0)
+        dglDeleteBuffers(1, &sTreeIndexBuffer);
     if (sTreeVertexBuffer != 0)
         dglDeleteBuffers(1, &sTreeVertexBuffer);
     if (sTreeVertexArray != 0)
         dglDeleteVertexArrays(1, &sTreeVertexArray);
+    if (sTreeCheckVertexBuffer != 0)
+        dglDeleteBuffers(1, &sTreeCheckVertexBuffer);
+    if (sTreeCheckVertexArray != 0)
+        dglDeleteVertexArrays(1, &sTreeCheckVertexArray);
     if (sProgram != 0)
         dglDeleteProgram(sProgram);
     memset(sChunks, 0, sizeof(sChunks));
     sDebugVertexBuffer = 0;
     sDebugVertexArray = 0;
     sTreeInstanceBuffer = 0;
+    sTreeIndexBuffer = 0;
     sTreeVertexBuffer = 0;
     sTreeVertexArray = 0;
+    sTreeCheckVertexBuffer = 0;
+    sTreeCheckVertexArray = 0;
     sTreeModelVertexCount = 0;
     sProgram = 0;
 }

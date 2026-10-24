@@ -379,3 +379,63 @@ tilesets are unchanged.
   taken as the top of its roof, and the grass under the notches of a ridge's
   top row as the roof's own colour, so Dewford's hipped roofs had a strip of
   grass along the ridge.
+
+## Running through Petalburg Woods (the owner's report, 2026-10-24: "running in here is very laggy")
+
+Measured on the Linux 3D build under Xvfb with Mesa's software renderer
+(llvmpipe, 1280 x 720) with the voxel trees and the Diorama camera, as in the
+report's picture: standing in the woods a frame drew about 4.8 million
+vertices, nearly all of them the 332 voxel tree models in the chunks in view
+(14,544 vertices each), and running built two chunks every frame at about 15 ms
+each, a chunk with a tree in it going through a span per pixel; at about every
+other step the inputs of all 49 chunks were built again (20-30 ms). The 3DS
+trees and open routes have neither.
+
+* Trees (`gl_terrain_renderer.c` `CreateTreeBuffers`, `DrawTrees`): the model
+  is drawn from indices, a quad's four corners shaded once (the same triangles
+  in the same order, `DioramaTerrain_FoldQuads`), and the colour pass draws the
+  trees on screen, each tree tested against the view, not only its chunk (251
+  of the 332 there). `PKMN_DIORAMA_TREE_CHECK=1` draws each frame's trees both
+  ways over copies of the same picture and counts the pixels that differ: none,
+  in colour or depth, over the whole walk.
+* Opt-in, `PKMN_DIORAMA_TREE_FACES=seen`: a second range of the model's
+  indices without the faces looking north or down (1580 of the 2424), used when
+  the eye is above and south of every tree drawn (the field's cameras always
+  are): a third fewer triangles, and no fragments shaded for faces the model's
+  own faces then cover. Those faces look away from the eye and the model is
+  closed, but where one meets a face that looks at the eye along an edge their
+  depths tie and the later drawn wins: about 0.1% of the pixels take the
+  neighbouring face's shade (some 900 of 921,600 a frame, by up to 12 of 255).
+  So it is not the default.
+* Chunks with trees (`terrain_mesh.c` `BuildCompressedOccupancyShell`,
+  `CompressedColumn`): a chunk with any tree cell went through the voxel spans,
+  25,600 of them for the same 64 tops and 64 bottoms as a field. The ground
+  under a tree is a whole column for the compressed shell now, a voxel under
+  its ground and reading the ground's materials, as its spans had it: about
+  0.1 ms a chunk instead of 15. `PKMN_DIORAMA_MESH_CHECK=1` builds every chunk
+  again through the spans and compares the vertices byte for byte
+  (`DioramaTerrain_SetVoxelOccupancyOnly`): all 688 chunks of the walk the
+  same; `test_terrain_mesh.c` checks forests, levels, the scene's edge, water
+  and ledges.
+* Walking (`gl_terrain_renderer.c` `DioramaGLTerrain_Sync`, `SyncChunk`): the
+  grid moving a cell keeps the chunks whose cells did not change also when the
+  animated tiles moved on in the same frame (a chunk that reads a changed
+  tile's pixels is looked at, as `SyncAnimatedTiles` does), and a chunk off
+  screen that waits for its build because the sync's two builds are spent
+  waits without its input being built first (every waiting chunk's input was
+  built every frame). `PKMN_DIORAMA_TERRAIN_CHECK=1` finds no chunk left stale.
+* Development aids: `PKMN_PERF_FRAME_LOG=path` (a CSV line per presented frame:
+  frame time, main thread and program CPU time, chunks rebuilt, vertices,
+  trees), `PKMN_DIORAMA_PROFILE_FINISH=1` (each profiled section finishes its
+  GPU work, so a software renderer's deferred drawing is not all put under
+  "air"), `PKMN_DEBUG_RUN=1` (the field scene's player runs with B),
+  `PKMN_DEBUG_SEED=n` (its random numbers from a seed, for comparing builds'
+  pictures).
+* The same walk, before and after (main thread CPU time a frame, the median
+  of two runs each; the machine was shared, so wall-clock times varied with
+  its load): standing 358 ms before, 225 after (150 with the opt-in faces);
+  running 325 before, 192 after (131), its 95th percentile 412 and 238 (165).
+  A step's frame cost 40 ms more than the others before, 5 after.
+* Not done: the distant scenery is still built again at every step (most of
+  those 5 ms), and the trees' fragments are shaded as often as before (no
+  depth pre-pass or occlusion culling).
