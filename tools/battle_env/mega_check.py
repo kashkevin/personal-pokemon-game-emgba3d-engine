@@ -321,8 +321,9 @@ def run_sweep_job(args, facts, holders, job, first, last):
 
 # The menus at fast text, game frames from the field keys' start (60 a second), as their pictures showed them. The start
 # menu of a player with a Pokemon and no Pokedex: POKeMON, BAG, <the player>, SAVE, OPTION, EXIT (it remembers its
-# cursor); a lone Pokemon's menu: SUMMARY, ITEM, CANCEL; ITEM's: GIVE, TAKE, MOVE, CANCEL.
-PARTY_ITEM = ["30:START", "80:A", "170:A", "220:DOWN", "260:A"]                     # POKeMON > the lead > ITEM
+# cursor); a lone Pokemon's menu on the PC: SUMMARY, MOVES (move switching, 2026-10-24), ITEM, CANCEL; ITEM's: GIVE, TAKE,
+# MOVE, CANCEL.
+PARTY_ITEM = ["30:START", "80:A", "170:A", "220:DOWN", "245:DOWN", "275:A"]         # POKeMON > the lead > ITEM
 GIVE = PARTY_ITEM + ["320:A", "440:A", "560:A", "640:B", "720:B"]  # GIVE, the bag's first item, "... was given ...", out
 TAKE = PARTY_ITEM + ["320:DOWN", "360:A", "460:A", "560:B", "640:B"]  # TAKE, "Received the ... from ...", out
 
