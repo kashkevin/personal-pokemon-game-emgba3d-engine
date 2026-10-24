@@ -29,6 +29,9 @@
 #include "constants/items.h"
 #include "constants/songs.h"
 #include "constants/trainer_types.h"
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+#include "diorama/battle_env_test.h"
+#endif
 
 _Static_assert(sizeof(struct MultiplayerSpawnAction) == 16, "Spawn action ABI");
 _Static_assert(sizeof(struct MultiplayerSpawnShown) == 8, "Spawn shown ABI");
@@ -246,11 +249,21 @@ static u16 SlotSpecies(const struct MultiplayerSpawnSlot *slot)
     return slot->species;
 }
 
+// Shiny for this player: the host's roll, or this player's Shiny Charm (MultiplayerSpawns_CharmMakesShiny). The look on
+// the field, its twinkle and the battle all follow it, so a shiny is seen before it is talked to (the owner's request of
+// 2026-10-24: a Pokemon the Charm made shiny was drawn in its usual colours until the battle).
+static bool32 SlotShiny(const struct MultiplayerSpawnSlot *slot)
+{
+    if (slot->flags & MP_SPAWN_SLOT_SHINY)
+        return TRUE;
+    return CheckBagHasItem(ITEM_SHINY_CHARM, 1) && MultiplayerSpawns_CharmMakesShiny(slot->spawnId, slot->personality);
+}
+
 static u16 SlotGraphicsId(const struct MultiplayerSpawnSlot *slot)
 {
     u16 species = SlotSpecies(slot);
     bool32 female = GetGenderFromSpeciesAndPersonality(species, slot->personality) == MON_FEMALE;
-    return GetGraphicsIdForMon(species, (slot->flags & MP_SPAWN_SLOT_SHINY) ? TRUE : FALSE, female);
+    return GetGraphicsIdForMon(species, SlotShiny(slot), female);
 }
 
 static bool32 ValidSlot(const struct MultiplayerSpawnSlot *slot)
@@ -350,7 +363,7 @@ static void PlayAppearAnimation(struct ObjectEvent *objectEvent, const struct Mu
     enum SpawnDespawnTypeOWE type;
     u32 behavior;
 
-    if (slot->flags & MP_SPAWN_SLOT_SHINY)
+    if (SlotShiny(slot))
     {
         PlaySE(SE_SHINY);
         MovementAction_OverworldEncounterSpawn(OWE_SPAWN_ANIM_SHINY, objectEvent);
@@ -564,9 +577,10 @@ static void UpdateObjects(void)
             continue;
         slot = FindSlot(sObjects[i].spawnId);
         if (slot == NULL || !ObjectStillOurs(i) || slot->spawnId == sHiddenSpawnId
-         || !OnScreen(slot->x + MAP_OFFSET, slot->y + MAP_OFFSET))
+         || !OnScreen(slot->x + MAP_OFFSET, slot->y + MAP_OFFSET)
+         || (sObjects[i].spawnId != sClaimSpawnId && SlotGraphicsId(slot) != sObjects[i].graphicsId))
         {
-            RemoveSpawnObject(i);
+            RemoveSpawnObject(i);   // a changed look (a Shiny Charm just bought) is drawn again below
             continue;
         }
         UpdateSlotObject(i, slot);
@@ -819,9 +833,7 @@ void MultiplayerSpawns_StartBattle(void)
     if (level > MAX_LEVEL)
         level = MAX_LEVEL;
     species = SlotSpecies(slot);
-    shiny = (slot->flags & MP_SPAWN_SLOT_SHINY) ? TRUE : FALSE;
-    if (!shiny && CheckBagHasItem(ITEM_SHINY_CHARM, 1))
-        shiny = MultiplayerSpawns_CharmMakesShiny(slot->spawnId, slot->personality);
+    shiny = SlotShiny(slot);
     // The host's personality: every game derives the same gender, nature,
     // ability and Unown letter; the host alone decides shininess.
     ZeroEnemyPartyMons();
@@ -894,6 +906,17 @@ void MultiplayerSpawns_Tick(bool32 fieldReady, bool32 connected)
 {
     if (gMultiplayerSpawnMailbox.magic != MP_SPAWN_MAGIC)
         return;
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+    {
+        bool ready = fieldReady;
+
+        if (DioramaBattleEnvTest_FakeSpawnHost(&ready))   // test builds only: PKMN_TEST_SPAWNS plays the world's host
+        {
+            connected = TRUE;
+            fieldReady = ready;
+        }
+    }
+#endif
     sConnected = connected;
     ReadInbound();
     if (!connected)

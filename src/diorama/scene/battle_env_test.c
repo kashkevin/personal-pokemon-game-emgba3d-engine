@@ -69,6 +69,9 @@
 #include "tower_legends.h"
 #include "battle_util.h"
 #include "move.h"
+#include "multiplayer_spawns.h"
+#include "wild_encounter_ow.h"
+#include "platform/ow_shiny_sparkle.h"
 
 extern const u8 *ScriptContext_DebugPosition(int *mode, int *status);  /* script.c (PORTABLE) */
 
@@ -231,6 +234,18 @@ static struct
        moves or their PP change (tools/battle_env/move_switch_check.py: MOVES in the party menu); what was last logged */
     bool moveLog, moveLogged;
     int moveSeen[1 + MAX_MON_MOVES * 3];
+    /* PKMN_TEST_OWE_SHINY (DioramaBattleEnvTest_OweShiny): 1 every other overworld wild Pokemon shiny, 2 every one;
+       how many were made */
+    int oweShiny, oweMade;
+    /* PKMN_TEST_SPAWNS (DioramaBattleEnvTest_FakeSpawnHost): the shared spawns a world host would send */
+    struct MultiplayerSpawnSlot spawns[MP_SPAWN_MAX_SLOTS];
+    int spawnCount;
+    u32 spawnGeneration;
+    int spawnsUntil, spawnFrames;   /* PKMN_TEST_SPAWNS_UNTIL: the host lists nothing after that many field frames */
+    /* PKMN_TEST_SPARKLE_LOG=1: on the field, "sparkle field: ..." each second: the shiny twinkles (OwShinySparkle) and
+       the wild Pokemon drawn, shiny or not */
+    bool sparkleLog;
+    int sparkleFrames;
 } s;
 
 /* PKMN_TEST_LOG=<file>: every line the driver logs is also appended to that file (a check on Windows reads it: the
@@ -449,6 +464,33 @@ static void Init(void)
     s.starterLog = EnvInt("PKMN_TEST_STARTER_LOG", 0) != 0;
     s.trainLog = EnvInt("PKMN_TEST_TRAIN_LOG", 0) != 0;
     s.moveLog = EnvInt("PKMN_TEST_MOVE_LOG", 0) != 0;
+    s.oweShiny = EnvInt("PKMN_TEST_OWE_SHINY", 0);
+    s.sparkleLog = EnvInt("PKMN_TEST_SPARKLE_LOG", 0) != 0;
+    s.spawnsUntil = EnvInt("PKMN_TEST_SPAWNS_UNTIL", 0);
+    value = SDL_getenv("PKMN_TEST_SPAWNS");
+    for (s.spawnCount = 0; value != NULL && *value != '\0' && s.spawnCount < MP_SPAWN_MAX_SLOTS; )
+    {
+        struct MultiplayerSpawnSlot *slot = &s.spawns[s.spawnCount];
+        unsigned species, flags, spawnId, personality;
+        int x, y;
+
+        if (sscanf(value, "%u:%d:%d:%u:%u:%u", &species, &x, &y, &flags, &spawnId, &personality) != 6)
+            break;
+        memset(slot, 0, sizeof(*slot));
+        slot->spawnId = spawnId;
+        slot->personality = personality;
+        slot->species = species;
+        slot->level = 10;
+        slot->flags = flags;
+        slot->x = x;
+        slot->y = y;
+        slot->facing = DIR_SOUTH;
+        s.spawnCount++;
+        value = strchr(value, ';');
+        if (value == NULL)
+            break;
+        value++;
+    }
     value = SDL_getenv("PKMN_TEST_DAYCARE");
     if (value != NULL)
         snprintf(s.daycare, sizeof(s.daycare), "%s", value);
@@ -1175,6 +1217,71 @@ static void MoveLogField(void)
     memcpy(s.moveSeen, now, sizeof(now));
     TestLog("Battle env test: move field: lead %d moves %d:%d/%d,%d:%d/%d,%d:%d/%d,%d:%d/%d", now[0], now[1], now[2],
             now[3], now[4], now[5], now[6], now[7], now[8], now[9], now[10], now[11], now[12]);
+}
+
+/* PKMN_TEST_SPARKLE_LOG off a battle, once a second: the twinkles on the field now and made so far, then each wild
+ * Pokemon drawn (the game's own overworld ones and the shared spawns): "sparkle mon: local L species gfx G shiny S"
+ * (S from its picture, the shiny colours). */
+static void SparkleLogField(void)
+{
+    if (!s.sparkleLog || gMain.inBattle || SDL_AtomicGet(&s.fieldSeen) == 0 || gSaveBlock1Ptr == NULL
+     || gMain.callback2 != CB2_Overworld || ++s.sparkleFrames % 60 != 0)
+        return;
+    TestLog("Battle env test: sparkle field: live %u made %u", (unsigned)OwShinySparkle_Count(),
+            (unsigned)OwShinySparkle_Made());
+    for (int i = 0; i < OBJECT_EVENTS_COUNT; i++)
+    {
+        struct ObjectEvent *objectEvent = &gObjectEvents[i];
+
+        if (!objectEvent->active || !(IsOverworldWildEncounter(objectEvent, OWE_ANY) || MultiplayerSpawns_IsSpawnObject(objectEvent)))
+            continue;
+        TestLog("Battle env test: sparkle mon: local %u gfx %u shiny %u spawn %u at %d,%d", objectEvent->localId,
+                objectEvent->graphicsId, OW_SHINY(objectEvent) ? 1 : 0, MultiplayerSpawns_IsSpawnObject(objectEvent) ? 1 : 0,
+                objectEvent->currentCoords.x - MAP_OFFSET, objectEvent->currentCoords.y - MAP_OFFSET);
+    }
+}
+
+bool DioramaBattleEnvTest_OweShiny(bool rolled)
+{
+    if (!s.init)
+        Init();
+    if (s.oweShiny == 0)
+        return rolled;
+    rolled = s.oweShiny == 2 || (s.oweMade % 2) == 0;
+    s.oweMade++;
+    TestLog("Battle env test: owe made: number %d shiny %d", s.oweMade, rolled ? 1 : 0);
+    return rolled;
+}
+
+/* The mailbox written as the host writes it (multiplayer_spawns.c ReadInbound): an odd generation while writing. */
+bool DioramaBattleEnvTest_FakeSpawnHost(bool *fieldReady)
+{
+    if (!s.init)
+        Init();
+    if (s.spawnCount == 0 || gSaveBlock1Ptr == NULL || SDL_AtomicGet(&s.fieldSeen) == 0)
+        return false;
+    s.spawnGeneration += 2;
+    gMultiplayerSpawnMailbox.inboundGeneration = s.spawnGeneration - 1;
+    gMultiplayerSpawnMailbox.flags = MP_SPAWN_FLAG_ENABLED;
+    gMultiplayerSpawnMailbox.mapGroup = gSaveBlock1Ptr->location.mapGroup;
+    gMultiplayerSpawnMailbox.mapNum = gSaveBlock1Ptr->location.mapNum;
+    /* PKMN_TEST_SPAWNS_UNTIL: then the host's list is empty (the Pokemon gone: caught by another player, run away) */
+    int count = s.spawnsUntil > 0 && ++s.spawnFrames > s.spawnsUntil ? 0 : s.spawnCount;
+
+    if (s.spawnsUntil > 0 && s.spawnFrames == s.spawnsUntil + 1)
+        TestLog("Battle env test: spawns gone: the host lists nothing now");
+    gMultiplayerSpawnMailbox.count = count;
+    for (int i = 0; i < MP_SPAWN_MAX_SLOTS; i++)
+    {
+        struct MultiplayerSpawnSlot slot = {0};
+
+        if (i < count)
+            slot = s.spawns[i];
+        memcpy((void *)&gMultiplayerSpawnMailbox.slots[i], &slot, sizeof(slot));
+    }
+    gMultiplayerSpawnMailbox.inboundGeneration = s.spawnGeneration;
+    *fieldReady = gMain.callback2 == CB2_Overworld && !ArePlayerFieldControlsLocked();
+    return true;
 }
 
 /* PKMN_TEST_BREED_LOG off a battle: "breed party N: species S egg E level L ivs a,b,c,d,e,f nature T num A ball B
@@ -2737,6 +2844,7 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
     BagLogField();
     HmLogField();
     MoveLogField();
+    SparkleLogField();
     ShotTick();
     /* PKMN_TEST_PLAN: once the autopilot brought the field up, the plan's keys alone */
     if (sPlan.phase != PLAN_OFF && SDL_AtomicGet(&s.fieldSeen) != 0)

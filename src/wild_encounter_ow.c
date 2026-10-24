@@ -22,6 +22,10 @@
 #include "task.h"
 #include "trainer_hill.h"
 #include "wild_encounter.h"
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+#include "diorama/battle_env_test.h"
+#endif
+#line 25 // gba-line
 #include "constants/battle_frontier.h"
 #include "constants/event_objects.h"
 #include "constants/field_effects.h"
@@ -979,6 +983,10 @@ static void SetSpeciesInfoForOWE(struct InfoOWE *info, u32 x, u32 y)
         info->speciesId = GetUnownSpeciesId(personality);
 
     info->isShiny = ComputePlayerShinyOdds(personality, READ_OTID_FROM_SAVE);
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+    info->isShiny = DioramaBattleEnvTest_OweShiny(info->isShiny); // test builds only: PKMN_TEST_OWE_SHINY (battle_env_test.h)
+#endif
+#line 947 // gba-line
     if (GetGenderFromSpeciesAndPersonality(info->speciesId, personality) == MON_FEMALE)
         info->isFemale = TRUE;
     else

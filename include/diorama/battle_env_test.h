@@ -177,6 +177,14 @@ int DioramaBattleEnvTest_NamingScreenUp(void);
 void DioramaBattleEnvTest_OnActionMenu(void);
 /* battle_util.c, GetAdjustedDamage (game thread): a hit that would knock out this battler leaves it 1 HP instead */
 bool DioramaBattleEnvTest_HoldOnForMega(unsigned battler);
+/* wild_encounter_ow.c, SetSpeciesInfoForOWE (game thread): PKMN_TEST_OWE_SHINY=1 every other overworld wild Pokemon the
+   game makes is shiny (the first one is), =2 every one; otherwise the game's own roll */
+bool DioramaBattleEnvTest_OweShiny(bool rolled);
+/* multiplayer_spawns.c, MultiplayerSpawns_Tick (game thread): PKMN_TEST_SPAWNS="species:x:y:flags:spawnId:personality;..."
+   the shared spawns a world's host would send for the map the player is on, written into the spawn mailbox as the host
+   writes them; true (the world taken as connected) while there are any, with *fieldReady as the field's;
+   PKMN_TEST_SPAWNS_UNTIL=<frames>: after that many, the host lists none */
+bool DioramaBattleEnvTest_FakeSpawnHost(bool *fieldReady);
 /* gl_battle.c (render thread): the stem to capture this frame, or NULL */
 const char *DioramaBattleEnvTest_CaptureStem(void);
 void DioramaBattleEnvTest_CaptureWritten(void);

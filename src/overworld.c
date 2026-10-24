@@ -5,6 +5,7 @@
 #endif
 #ifdef PORTABLE
 #include "multiplayer_rival.h"
+#include "platform/ow_shiny_sparkle.h"
 #endif
 #line 2 // gba-line
 #include "overworld.h"
@@ -1895,6 +1896,9 @@ static void OverworldBasic(void)
         }
     }
     UpdateOverworldWildEncounter();
+#ifdef PORTABLE
+    OwShinySparkle_Update();    // a shiny wild Pokemon twinkles (src/platform/ow_shiny_sparkle.c)
+#endif
 #ifdef ENABLE_DIORAMA
     DioramaScene_PublishOverworld();
 #endif
