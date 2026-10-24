@@ -45,6 +45,189 @@ def role_for_cell(cell: dict) -> TerraceRole | None:
     return TERRACE_ROLES.get(cell.get("localMetatile", cell.get("metatile")))
 
 
+# General's terrace stairs (the transitions above).
+GENERAL_STAIRS = frozenset({175, 207})
+# A mountain's walkable top stands this much over the ground its stairs climb
+# from (mountain_ledges): one level, the height of the mountain's rock.
+MOUNTAIN_LEDGE_Q16 = 16
+
+
+def _general_stairs(cell: dict) -> bool:
+    return (cell.get("tileset") == "gTileset_General"
+            and cell.get("localMetatile", cell.get("metatile")) in GENERAL_STAIRS)
+
+
+def _neighbours(offset: int, width: int, height: int):
+    x, y = offset % width, offset // width
+    for nx, ny in ((x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y)):
+        if 0 <= nx < width and 0 <= ny < height:
+            yield ny * width + nx
+
+
+def mountain_ledges(cells: tuple[dict, ...], width: int, height: int,
+                    solved: dict[int, dict]) -> dict[int, dict]:
+    """A mountain's walkable top on the mountain: Route 112's plateau (the cable
+    car station on it, drawn with the rock's own top, MB_MOUNTAIN_TOP) lay on the
+    level of the ground round the mountain, the rock a cell high all round it,
+    so it and every path through the rock were trenches between walls (the
+    owner's report, 2026-10-24: "a maze of walls"). The game draws stairs up to
+    such a top (General's terrace stairs, 175 and 207); where no terrace solves
+    them (solve_layout), the walkable region at the stairs' top that is mostly
+    MB_MOUNTAIN_TOP stands MOUNTAIN_LEDGE_Q16 over the region at their foot (its
+    own level, 0) and the stairs rise between the two over their rows. The
+    mountain's rock, one mass a level high (compile_rules._mountain_masses),
+    then lies level with that top. A region is walkable cells side by side at
+    one elevation, a cell at elevation 0 (the game's "any level": a doorway, a
+    cave mouth) joining any; a ledge (MB_JUMP_*) bounds them. Only a mountain of
+    one walkable level: where stairs climb from one such top to another (Route
+    115's second plateau) the layout keeps its levels (the rock is one mass a
+    level high, so a second level would stand over it), and so does a raised
+    top that meets other walkable ground at its side without stairs. Returns
+    the raised cells' entries, the stairs' with their rise."""
+    def walkable(offset: int) -> bool:
+        cell = cells[offset]
+        return (cell.get("collision", 0) == 0 and offset not in solved
+                and not str(cell.get("behavior") or "").startswith("MB_JUMP_"))
+
+    stairs = {offset for offset in range(len(cells))
+              if walkable(offset) and _general_stairs(cells[offset])}
+    if not stairs:
+        return {}
+    region_of: dict[int, int] = {}
+    regions: list[list[int]] = []
+    for start in range(len(cells)):
+        if start in region_of or start in stairs or not walkable(start):
+            continue
+        index = len(regions)
+        region, pending = [], deque((start,))
+        region_of[start] = index
+        while pending:
+            offset = pending.popleft()
+            region.append(offset)
+            elevation = cells[offset].get("elevation")
+            for neighbor in _neighbours(offset, width, height):
+                other = cells[neighbor].get("elevation")
+                if (neighbor not in region_of and neighbor not in stairs and walkable(neighbor)
+                        and (other == elevation or other == 0 or elevation == 0)):
+                    region_of[neighbor] = index
+                    pending.append(neighbor)
+        regions.append(region)
+    mountain_top = [2 * sum(cells[offset].get("behavior") == "MB_MOUNTAIN_TOP" for offset in region)
+                    >= len(region) for region in regions]
+
+    raised: dict[int, list[list[int]]] = defaultdict(list)
+    seen: set[int] = set()
+    for start in sorted(stairs):
+        if start in seen:
+            continue
+        run, pending = [], [start]
+        seen.add(start)
+        while pending:
+            offset = pending.pop()
+            run.append(offset)
+            for neighbor in _neighbours(offset, width, height):
+                if neighbor in stairs and neighbor not in seen:
+                    seen.add(neighbor)
+                    pending.append(neighbor)
+        north = {region_of[offset - width] for offset in run
+                 if offset >= width and offset - width not in stairs and offset - width in region_of}
+        south = {region_of[offset + width] for offset in run
+                 if offset + width < len(cells) and offset + width not in stairs
+                 and offset + width in region_of}
+        if len(north) != 1 or len(south) != 1 or north == south:
+            continue
+        upper, lower = next(iter(north)), next(iter(south))
+        if not mountain_top[upper]:
+            continue  # stairs between ordinary ground: the terrace solver's
+        if mountain_top[lower]:
+            return {}  # a second level on the mountain
+        raised[upper].append(run)
+    if not raised:
+        return {}
+    for index in raised:
+        for offset in regions[index]:
+            for neighbor in _neighbours(offset, width, height):
+                if (neighbor in region_of and region_of[neighbor] not in raised
+                        and neighbor not in stairs):
+                    return {}  # a step between walkable cells with no stairs
+    out: dict[int, dict] = {}
+    for index, runs in raised.items():
+        for offset in regions[index]:
+            out[offset] = {"groundQ16": MOUNTAIN_LEDGE_Q16, "topQ16": MOUNTAIN_LEDGE_Q16,
+                           "profile": "none", "solid": False}
+        for run in runs:
+            rows = sorted({offset // width for offset in run}, reverse=True)  # south first
+            for offset in run:
+                step = rows.index(offset // width)
+                ground = round(MOUNTAIN_LEDGE_Q16 * step / len(rows))
+                top = round(MOUNTAIN_LEDGE_Q16 * (step + 1) / len(rows))
+                out[offset] = {"groundQ16": ground, "topQ16": top,
+                               "profile": "transition-horizontal", "solid": False,
+                               "rise": top - ground}
+    return out
+
+
+def join_level_free_cells(cells: tuple[dict, ...], width: int, height: int,
+                          solved: dict[int, dict],
+                          beside: frozenset[int] | None = None) -> dict[int, dict]:
+    """A walkable cell at elevation 0 (the game's "any level": a cave mouth, a
+    doorway) is no region of the terrace solver's, which joins only cells of one
+    elevation, so it stayed on the top level: Route 116's way into Rusturf Tunnel
+    a level over the grass it is entered from, a shelf on the rock's face. A
+    doorway or warp (the behaviour's name says DOOR or WARP) whose walkable
+    neighbours, all dry land, offer one solved whole level takes it (through
+    others like it; a mouth entered from the water keeps its place);
+    with `beside`, only one next to one of those cells (a mountain's: a mouth in
+    its face) and those joined through it. Returns the joined cells' entries."""
+    def free(offset: int) -> bool:
+        cell = cells[offset]
+        behavior = str(cell.get("behavior") or "")
+        return (cell.get("collision", 0) == 0 and cell.get("elevation") == 0
+                and offset not in solved and role_for_cell(cell) is None
+                and ("DOOR" in behavior or "WARP" in behavior))
+
+    if beside is not None:
+        # the free cells side by side with one next to `beside`
+        reach = deque(offset for offset in range(len(cells))
+                      if free(offset) and any(neighbor in beside
+                                              for neighbor in _neighbours(offset, width, height)))
+        allowed = set(reach)
+        while reach:
+            offset = reach.popleft()
+            for neighbor in _neighbours(offset, width, height):
+                if neighbor not in allowed and free(neighbor):
+                    allowed.add(neighbor)
+                    reach.append(neighbor)
+        base_free = free
+        free = lambda offset: offset in allowed and base_free(offset)  # noqa: E731
+
+    levels = dict(solved)
+    out: dict[int, dict] = {}
+    pending = [offset for offset in range(len(cells)) if free(offset)]
+    changed = True
+    while changed and pending:
+        changed = False
+        rest = []
+        for offset in pending:
+            around = [neighbor for neighbor in _neighbours(offset, width, height)
+                      if cells[neighbor].get("collision", 0) == 0]
+            offered = {levels[neighbor]["groundQ16"] for neighbor in around
+                       if neighbor in levels and levels[neighbor].get("profile", "none") == "none"}
+            if (len(offered) == 1 and next(iter(offered)) % 16 == 0
+                    and not any(cells[neighbor].get("behavior") in WATER_BEHAVIORS
+                                for neighbor in around)):
+                level = next(iter(offered))
+                levels[offset] = {"groundQ16": level, "topQ16": level,
+                                  "profile": "none", "solid": False}
+                if level != 0:  # (on the top level it lies where it was)
+                    out[offset] = levels[offset]
+                changed = True
+            else:
+                rest.append(offset)
+        pending = rest
+    return out
+
+
 def solve_layout(cells: tuple[dict, ...], width: int, height: int,
                  contradictions: list[tuple[int, ...]] | None = None,
                  conflict_edges: list[tuple[object, object, int, int]] | None = None

@@ -3,9 +3,9 @@
 import unittest
 from types import SimpleNamespace
 
-from mountain_art import (MountainArtError, detect_layout, enclosed_tops, mass_extension,
-                          mountain_art_mask, mountain_heightmap, outline_cells,
-                          validate_layout)
+from mountain_art import (MountainArtError, detect_layout, enclosed_tops,
+                          faces_between_levels, mass_extension, mountain_art_mask,
+                          mountain_heightmap, outline_cells, validate_layout)
 
 
 def pixel(color=None, visible=True):
@@ -145,6 +145,40 @@ class MountainArtTests(unittest.TestCase):
                          frozenset((0, 2, 3, 5, 6, 7, 8)))
         # the edges draw the rock over the sea: their outline is the rock
         self.assertEqual(outline_cells(summaries, frozenset((0, 1))), frozenset((0, 1)))
+
+    def test_the_face_a_ledge_path_stands_on_is_the_mountains(self):
+        # Route 116: grass (a level down) | the rock's face beside the path (blocked
+        # MB_NORMAL, the rock's palette on its upper layer) | the path (walkable
+        # MB_MOUNTAIN_TOP) | the mountain (blocked MB_MOUNTAIN_TOP).
+        def drawn(palette, upper=200):
+            lower = tuple(SimpleNamespace(rgba=(1, 1, 1, 255), visible=True,
+                                          source=SimpleNamespace(tile=1, palette=2))
+                          for _ in range(256))
+            top = tuple(SimpleNamespace(rgba=(2, 2, 2, 255), visible=index < upper,
+                                        source=SimpleNamespace(tile=2, palette=palette))
+                        for index in range(256))
+            composed = tuple(t if t.visible else b for t, b in zip(top, lower))
+            return {"resolved": True, "layers": (lower, top, composed)}
+
+        cells = ({"behavior": "MB_NORMAL", "collision": 0},
+                 {"behavior": "MB_NORMAL", "collision": 1},
+                 {"behavior": "MB_MOUNTAIN_TOP", "collision": 0},
+                 {"behavior": "MB_MOUNTAIN_TOP", "collision": 1})
+        summaries = (drawn(2, 0), drawn(3), drawn(3, 256), drawn(3, 256))
+        levels = {0: -16, 2: 0}
+        mountain = frozenset((3,))
+        self.assertEqual(faces_between_levels(cells, summaries, 4, 1, mountain, levels),
+                         frozenset((1,)))
+        # its walkable neighbours on one level; drawn in another palette; excluded: not joined
+        self.assertEqual(faces_between_levels(cells, summaries, 4, 1, mountain, {0: 0, 2: 0}),
+                         frozenset())
+        self.assertEqual(faces_between_levels(cells, (summaries[0], drawn(5)) + summaries[2:],
+                                              4, 1, mountain, levels), frozenset())
+        self.assertEqual(faces_between_levels(cells, summaries, 4, 1, mountain, levels,
+                                              exclude=frozenset((1,))), frozenset())
+        # a path that is no mountain's (no mountain beside it): not joined
+        self.assertEqual(faces_between_levels(cells, summaries, 4, 1, frozenset(), levels),
+                         frozenset())
 
 
 if __name__ == "__main__":

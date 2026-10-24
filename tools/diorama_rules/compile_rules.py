@@ -16,12 +16,14 @@ from pathlib import Path
 from catalog import CatalogError, TilesetInfo, load_tilesets, load_world
 from emerald_compositor import TilesetComposer, load_animation_slots
 from measured_volumes import apply_to_analysis, detect_layout
-from mountain_art import (MountainArtError, outline_cells as mountain_outline_cells,
+from mountain_art import (MountainArtError, faces_between_levels,
+                          outline_cells as mountain_outline_cells,
                           validate_layout as validate_mountain_art)
 from profiles import NOMINAL_HEIGHTS, TileShape, shape_from_action
 from pixel_objects import UPRIGHT_CLASSES as UPRIGHT_PIXEL_CLASSES, extract_layout
 from structures import analyze_layout
-from terrace_topology import (WATER_BEHAVIORS, cave_levels, join_water, lift_blocked_cells,
+from terrace_topology import (WATER_BEHAVIORS, cave_levels, join_level_free_cells, join_water,
+                              lift_blocked_cells, mountain_ledges,
                               solve_layout as solve_terrace_topology)
 from tile_shape import ClassificationError, TileShapeClassifier
 
@@ -1126,7 +1128,9 @@ def _terrain_record(cell_offset: int, cell: dict, shape: TileShape,
     terrace_course = terrace is not None and terrace["solid"]
     terrace_topology = terrace is not None
     lifted = terrace is not None and bool(terrace.get("lift"))
-    mountain_art = terrace_course or ((terrace is None or lifted) and (
+    # a piece of a mountain on its own level (_mountain_masses)
+    mass = terrace is not None and bool(terrace.get("mass"))
+    mountain_art = terrace_course or ((terrace is None or lifted or mass) and (
         (shape.class_name == "cliff" and (
             cell.get("behavior") == "MB_MOUNTAIN_TOP"
             or shape.source == "heuristic:mountain-art-family"
@@ -1159,16 +1163,25 @@ def _terrain_record(cell_offset: int, cell: dict, shape: TileShape,
         # A blocked cell on lower land (terrace_topology._blocked_on_lower_land):
         # its own heights, standing on that level.
         _lift_record(record, terrace["groundQ16"])
+    if mass:
+        if record["shape"] == "cliff":
+            # the mountain's rock from its piece's foot to its top (_mountain_masses)
+            record.update({"groundQ16": terrace["groundQ16"], "topQ16": terrace["topQ16"],
+                           "heightQ16": terrace["topQ16"] - terrace["groundQ16"]})
+        else:
+            _lift_record(record, terrace["groundQ16"])
     if (terrace is not None and terrace["profile"].startswith("transition-") and not lifted
             and shape.class_name in ("ground", "path", "pavement", "stairs")):
         # A terrace's stairs (General 175, 207: terrace_topology's transitions,
         # the upper level to the north): steps from the lower level up to the
         # upper. Flat on the lower level, the upper level's edge stood over them
         # as a wall where the stairs are drawn (Mossdeep, Route 104; the owner's
-        # report of 2026-10-24).
+        # report of 2026-10-24). Stairs up onto a mountain (mountain_ledges) rise
+        # the one level over all their rows: each row its share ("rise").
+        rise = terrace.get("rise", 16)
         record.update({"class": "stairs", "shape": "stairs", "archetype": "stairs-n",
-                       "terrainClass": "rock", "topQ16": terrace["groundQ16"] + 16,
-                       "heightQ16": 16})
+                       "terrainClass": "rock", "topQ16": terrace["groundQ16"] + rise,
+                       "heightQ16": rise})
     if terrace is not None and terrace.get("deck"):
         # A cave's bridge between its raised floors (terrace_topology.cave_levels):
         # a deck at their level over the floor under it.
@@ -1293,6 +1306,120 @@ def _reefs_at_sea_level(cells: tuple[dict, ...], width: int, height: int,
             for offset in piece:
                 out[offset] = {"groundQ16": ground, "topQ16": ground, "profile": "none",
                                "solid": False, "lift": True}
+    return out
+
+
+def _mountain_masses(cells: tuple[dict, ...], width: int, height: int,
+                     mountain: frozenset[int], solved: dict[int, dict],
+                     exclude: frozenset[int] = frozenset()) -> dict[int, dict]:
+    """A mountain whose walkable top is a level over the ground round it
+    stands as one mass, level with that top. Its blocked rock took the level of
+    the walkable ground nearest each cell (terrace_topology.lift_blocked_cells),
+    so where the mountain meets the ground below it and its own paths a level
+    up (Route 116; Route 112's plateau, mountain_ledges) its cells stood at both
+    levels side by side - and the terrace stones in it, and the cells beside a
+    cave mouth in its face, kept the top level - and every group was a mass of
+    its own, rounded at its edges against the next (gl_terrain_renderer.c
+    ShapeRockMasses): rows of spikes, and walls through the rock (the owner's
+    report, 2026-10-24: "a maze of terraced walls"). A piece of the mountain
+    (its cells side by side) whose walkable ground lies on one level, or on two
+    a level apart with the upper mostly its own walkable top (MB_MOUNTAIN_TOP),
+    now stands on the lower and reaches a level over it: its paths lie level
+    with its top, as the game draws them. Any other piece keeps its cells'
+    entries (Route 111's rock runs the length of the map, beside a desert on the
+    top level and lower ground far off), and so does one beside water (an
+    island, a coast: the sea's levels are its own) or on part levels.
+    Walkable ground with no level of its own lies on the top level (0); the
+    stairs and terrace stones between two levels and `exclude` (the sea's rocks
+    and reefs) are not its ground. Returns the pieces' entries."""
+    def neighbours(offset: int):
+        x, y = offset % width, offset // width
+        for nx, ny in ((x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y)):
+            if 0 <= nx < width and 0 <= ny < height:
+                yield ny * width + nx
+
+    out: dict[int, dict] = {}
+    placed: dict[int, int] = {}  # a placed piece's cells: its top
+    seen: set[int] = set()
+    for start in sorted(mountain):
+        if start in seen or start in exclude:
+            continue
+        piece, pending, touching, sea = [], [start], defaultdict(set), False
+        seen.add(start)
+        while pending:
+            offset = pending.pop()
+            piece.append(offset)
+            for neighbor in neighbours(offset):
+                if neighbor in mountain:
+                    if neighbor not in seen and neighbor not in exclude:
+                        seen.add(neighbor)
+                        pending.append(neighbor)
+                    continue
+                cell = cells[neighbor]
+                entry = solved.get(neighbor)
+                if cell.get("collision") or (entry is not None
+                                             and entry.get("profile", "none") != "none"):
+                    continue
+                if cell.get("behavior") in WATER_BEHAVIORS:
+                    sea = True
+                    continue
+                touching[entry["groundQ16"] if entry is not None else 0].add(neighbor)
+        levels = sorted(touching)
+        if sea or not levels or len(levels) > 2 or any(level % 16 for level in levels):
+            continue
+        if len(levels) == 2:
+            upper = touching[levels[1]]
+            if (levels[1] - levels[0] != 16
+                    or 2 * sum(cells[offset].get("behavior") == "MB_MOUNTAIN_TOP"
+                               for offset in upper) < len(upper)):
+                continue
+        ground = levels[0]
+        top = ground + 16
+        for offset in piece:
+            placed[offset] = top
+            # (a cell already where its record puts it - the rock a level over
+            # the top level, no entry - is left alone)
+            if offset in solved or (ground, top) != (0, 16):
+                out[offset] = {"groundQ16": ground, "topQ16": top, "profile": "none",
+                               "solid": False, "mass": True}
+    # What stands on the mountain - its trees, a boulder in its face, side by
+    # side - stands on its top when the only walkable ground beside it is that
+    # top (or none): left on the ground nearest it, it sank into the rock (Route
+    # 112's trees on the plateau, Route 116's boulders). Beside two pieces, the
+    # lower top.
+    grouped: set[int] = set()
+    for offset in sorted(placed):
+        for first in neighbours(offset):
+            if (first in mountain or first in grouped or first in exclude
+                    or not cells[first].get("collision")
+                    or solved.get(first, {}).get("profile", "none") != "none"):
+                continue
+            group, stack, tops, beside, alone = [], [first], set(), set(), True
+            grouped.add(first)
+            while stack:
+                cell_offset = stack.pop()
+                group.append(cell_offset)
+                for neighbor in neighbours(cell_offset):
+                    if neighbor in placed:
+                        tops.add(placed[neighbor])
+                        continue
+                    if neighbor in grouped:
+                        continue
+                    entry = solved.get(neighbor)
+                    if (neighbor in mountain or neighbor in exclude
+                            or (entry is not None and entry.get("profile", "none") != "none")
+                            or cells[neighbor].get("behavior") in WATER_BEHAVIORS):
+                        alone = False  # rock of no level of its own, stairs, water
+                        continue
+                    if cells[neighbor].get("collision"):
+                        grouped.add(neighbor)
+                        stack.append(neighbor)
+                        continue
+                    beside.add(entry["groundQ16"] if entry is not None else 0)
+            if alone and tops and beside <= {min(tops)}:
+                for cell_offset in group:
+                    out[cell_offset] = {"groundQ16": min(tops), "topQ16": min(tops),
+                                        "profile": "none", "solid": False, "lift": True}
     return out
 
 
@@ -1430,6 +1557,7 @@ def compile_data(root: Path) -> dict:
     layout_events = {key: frozenset(value) for key, value in layout_events.items()}
     mountain_art_cells = {}
     mountain_outlines = {}
+    level_free_cells = defaultdict(frozenset)
     cave_rock_cells = {}
     terrace_topology = {}
     for layout in layouts:
@@ -1464,6 +1592,34 @@ def compile_data(root: Path) -> dict:
             # A cave's floors at their own elevation (terrace_topology.cave_levels).
             solved = {**solved, **cave_levels(cells[layout["id"]], layout["width"],
                                               layout["height"], solved)}
+        if (rows and all(_outdoor(row["mapType"]) for row in rows)
+                and any(cell.get("behavior") == "MB_MOUNTAIN_TOP" and cell.get("collision")
+                        for cell in cells[layout["id"]])):
+            # A mountain's walkable top a level over the ground its stairs climb
+            # from (terrace_topology.mountain_ledges: Route 112's plateau), and a
+            # walkable cell of no elevation in its face (a cave mouth) on the level
+            # beside it (join_level_free_cells).
+            solved = {**solved, **mountain_ledges(cells[layout["id"]], layout["width"],
+                                                  layout["height"], solved)}
+            mouths = join_level_free_cells(cells[layout["id"]], layout["width"],
+                                           layout["height"], solved,
+                                           beside=mountain_art_cells[layout["id"]])
+            level_free_cells[layout["id"]] = frozenset(mouths)
+            solved = {**solved, **mouths}
+            if solved:
+                # The rock a ledge path stands on, drawn beside it (mountain_art.
+                # faces_between_levels: Route 116's), is the mountain's.
+                faces = faces_between_levels(
+                    cells[layout["id"]], pixel_summaries[layout["id"]],
+                    layout["width"], layout["height"], mountain_art_cells[layout["id"]],
+                    {offset: entry["groundQ16"] for offset, entry in solved.items()
+                     if entry.get("profile", "none") == "none"},
+                    exclude=_prop_cells(layout) | frozenset(
+                        offset for offset, entry in solved.items() if entry["solid"]))
+                if faces:
+                    mountain_art_cells[layout["id"]] = mountain_art_cells[layout["id"]] | faces
+                    mountain_outlines[layout["id"]] = mountain_outline_cells(
+                        pixel_summaries[layout["id"]], mountain_art_cells[layout["id"]])
         terrace_topology[layout["id"]] = solved
 
     source = load_json(rules_root / "defaults.json")
@@ -1693,10 +1849,15 @@ def compile_data(root: Path) -> dict:
                     # lower level stood a level up, its see-through side open).
                     liftable = (lambda offset, rocks=rocks, cells=layout_cells: offset in rocks
                                 or str(cells[offset].get("behavior", "")).startswith("MB_JUMP_"))
+                # (a cave mouth put on the level it is entered from lifts no rock
+                # round it: join_level_free_cells)
                 terrace_topology[layout["id"]] = {
                     **terrace_topology[layout["id"]],
                     **lift_blocked_cells(layout_cells, layout["width"], layout["height"],
-                                         terrace_topology[layout["id"]], liftable=liftable)}
+                                         {offset: entry for offset, entry
+                                          in terrace_topology[layout["id"]].items()
+                                          if offset not in level_free_cells[layout["id"]]},
+                                         liftable=liftable)}
             if rocks:
                 # The rocks the sea's own height surrounds (no terrace, or water
                 # no terrace reaches) lie at that height too: they stood a tile's
@@ -1710,6 +1871,18 @@ def compile_data(root: Path) -> dict:
                                         terrace_topology[layout["id"]])
             if reefs:
                 terrace_topology[layout["id"]] = {**terrace_topology[layout["id"]], **reefs}
+            layout_rows = (maps_by_layout.get(layout["id"], ())
+                           or maps_by_layout.get(script_layouts.get(layout["id"]), ()))
+            if (terrace_topology[layout["id"]] and layout_rows
+                    and all(_outdoor(row["mapType"]) for row in layout_rows)):
+                # The mountain one mass on one level, from the lowest ground it
+                # meets to the highest (the owner's report of 2026-10-24).
+                terrace_topology[layout["id"]] = {
+                    **terrace_topology[layout["id"]],
+                    **_mountain_masses(layout_cells, layout["width"], layout["height"],
+                                       mountain_art_cells[layout["id"]],
+                                       terrace_topology[layout["id"]],
+                                       exclude=frozenset(reefs) | rocks)}
             wildcard = tuple(_with_mountain_art(
                 shape, cell, offset in mountain_art_cells[layout["id"]],
                 offset in mountain_outlines[layout["id"]])

@@ -398,6 +398,44 @@ static float GroundHeightAt(const struct DioramaSceneSnapshot *snapshot,
     return resolvedCells[index].groundHeight;
 }
 
+/* The height a placed model stands at: the ground under its door - the
+ * highest of the walkable cells (the doorway) in its rectangle's bottom row -
+ * or, with none of them on screen, under the bottom-left cell. The bottom-left
+ * cell alone was a wall's on Route 112's cable car station: its walls are drawn
+ * with the mountain's own tiles (MB_MOUNTAIN_TOP), rock standing on the ground
+ * round the mountain, while its doors open onto the plateau a level up
+ * (compile_rules.py, the owner's report of 2026-10-24). */
+static float PlacementGround(const struct DioramaSceneSnapshot *snapshot,
+                             const struct DioramaResolvedCell *resolvedCells,
+                             const struct Instance *instance,
+                             const struct DioramaBuildingPlacementInfo *info)
+{
+    int mapY = instance->originY + info->y + info->height - 1;
+    bool found = false;
+    float best = 0.0f;
+
+    for (int x = 0; x < info->width && resolvedCells != NULL; x++)
+    {
+        int mapX = instance->originX + info->x + x;
+        int gridX = mapX - snapshot->gridOriginX;
+        int gridY = mapY - snapshot->gridOriginY;
+        int index;
+
+        if (gridX < 0 || gridY < 0 || gridX >= DIORAMA_GRID_WIDTH || gridY >= DIORAMA_GRID_HEIGHT)
+            continue;
+        index = gridY * DIORAMA_GRID_WIDTH + gridX;
+        if (index >= snapshot->visibleCellCount || snapshot->cells[index].collision != 0
+         || snapshot->cells[index].mapX != mapX || snapshot->cells[index].mapY != mapY)
+            continue;
+        if (!found || resolvedCells[index].groundHeight > best)
+            best = resolvedCells[index].groundHeight;
+        found = true;
+    }
+    if (found)
+        return best;
+    return GroundHeightAt(snapshot, resolvedCells, instance->originX + info->x, mapY);
+}
+
 /*
  * Whether any cell of a placement is in the scene as its map's: a model is
  * drawn with the ground it stands on, not out past the edge of the scene (a
@@ -456,9 +494,8 @@ static bool AppendPlacement(const struct DioramaSceneSnapshot *snapshot,
     worldX = (float)(instance->originX + info.x) - 0.5f;
     worldZ = (float)(instance->originY + info.y) - 0.5f;
     /* A building on raised ground stands on it: the height of the cell under
-     * its door, the bottom-left of its rectangle (the 3DS port's relief lift). */
-    lift = GroundHeightAt(snapshot, resolvedCells, instance->originX + info.x,
-                          instance->originY + info.y + info.height - 1);
+     * its door (the 3DS port's relief lift; PlacementGround). */
+    lift = PlacementGround(snapshot, resolvedCells, instance, &info);
     if (!Reserve(info.vertexCount + info.groundVertexCount))
         return false;
     for (i = 0; i < info.vertexCount; i++)

@@ -264,6 +264,81 @@ def mass_extension(cells: tuple[dict, ...], summaries: tuple[dict, ...],
     return frozenset(added)
 
 
+# The water a face may stand in (Sootopolis's crater): its level is the sea's,
+# no ground's (faces_between_levels).
+WATER = frozenset({
+    "MB_POND_WATER", "MB_INTERIOR_DEEP_WATER", "MB_DEEP_WATER", "MB_SOOTOPOLIS_DEEP_WATER",
+    "MB_OCEAN_WATER", "MB_SHALLOW_WATER", "MB_NO_SURFACING", "MB_SEAWEED",
+    "MB_SEAWEED_NO_SURFACING", "MB_WATERFALL", "MB_EASTWARD_CURRENT", "MB_WESTWARD_CURRENT",
+    "MB_NORTHWARD_CURRENT", "MB_SOUTHWARD_CURRENT", "MB_PUDDLE", "MB_HOT_SPRINGS"})
+
+
+def faces_between_levels(cells: tuple[dict, ...], summaries: tuple[dict, ...],
+                         width: int, height: int, mountain: frozenset[int],
+                         levels: dict[int, int],
+                         exclude: frozenset[int] = frozenset()) -> frozenset[int]:
+    """The rock a mountain's walkable top stands on, drawn beside it: a blocked
+    cell (MB_NORMAL) drawn in the mountain's palette, beside the mountain's
+    walkable top (its MB_MOUNTAIN_TOP cells joined to one beside its rock),
+    whose walkable neighbours lie on two levels or more (`levels`: a walkable cell's level, absent 0). Route
+    116's ledge path (a level over the grass) has such a face on its west side
+    (General 112): no rock beside it joined it to the mountain (mass_extension),
+    so it lay flat as ground on the path's level and its side, a level high
+    over the grass, was drawn with the grass under the rock's edge (the owner's
+    report, 2026-10-24: "the light blue emptiness"). They are the mountain's
+    rock (compile_rules._mountain_masses then stands them from the lower level
+    to the upper). Returns those cells."""
+    seeds = [offset for offset, cell in enumerate(cells)
+             if cell.get("behavior") == "MB_MOUNTAIN_TOP" and cell.get("collision")]
+    if not seeds:
+        return frozenset()
+    counts = Counter(_main_palette(summaries[offset])[0] for offset in seeds)
+    family = {palette for palette, count in counts.items()
+              if palette is not None and count >= MASS_PALETTE_SHARE * len(seeds)}
+
+    def neighbours(offset: int):
+        x, y = offset % width, offset // width
+        for nx, ny in ((x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y)):
+            if 0 <= nx < width and 0 <= ny < height:
+                yield ny * width + nx
+
+    def walkable(offset: int) -> bool:
+        return not cells[offset].get("collision")
+
+    def walkable_top(offset: int) -> bool:
+        return walkable(offset) and cells[offset].get("behavior") == "MB_MOUNTAIN_TOP"
+
+    # the mountain's walkable top: its MB_MOUNTAIN_TOP paths side by side with one
+    # beside its rock
+    tops = set()
+    pending = deque(offset for offset in range(len(cells))
+                    if walkable_top(offset)
+                    and any(neighbor in mountain for neighbor in neighbours(offset)))
+    tops.update(pending)
+    while pending:
+        offset = pending.popleft()
+        for neighbor in neighbours(offset):
+            if neighbor not in tops and walkable_top(neighbor):
+                tops.add(neighbor)
+                pending.append(neighbor)
+
+    out = set()
+    for offset, cell in enumerate(cells):
+        if (offset in mountain or offset in exclude or not cell.get("collision")
+                or cell.get("behavior") != "MB_NORMAL" or not summaries[offset].get("resolved")):
+            continue
+        palette, share = _main_palette(summaries[offset])
+        upper, drawn = _layer_palette(summaries[offset], 1)
+        if not ((palette in family and share >= 0.5) or (upper in family and drawn >= 64)):
+            continue
+        around = [neighbor for neighbor in neighbours(offset) if walkable(neighbor)
+                  and cells[neighbor].get("behavior") not in WATER]
+        if (len({levels.get(neighbor, 0) for neighbor in around}) >= 2
+                and any(neighbor in tops for neighbor in around)):
+            out.add(offset)
+    return frozenset(out)
+
+
 def validate_layout(cells: tuple[dict, ...], summaries: tuple[dict, ...],
                     width: int, height: int,
                     exclude: frozenset[int] = frozenset(),

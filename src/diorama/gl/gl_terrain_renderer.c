@@ -1200,6 +1200,13 @@ static void BuildMountainArtMask(const struct DioramaSceneSnapshot *snapshot,
         rounded = green * 10 > red * 11 && green > blue;
         if (rounded)
             *rockMass = ROCK_MASS_CROWN;
+        /* Only a crown stands up from the rock. What else the upper layer draws
+         * on it is what the game draws over a walker - the lower half of a face,
+         * a ledge's rim (Lavaridge's) - and stood up as crags it was rows of low
+         * walls along every face (Route 112's "maze of walls", the owner's
+         * report of 2026-10-24): it lies on the rock as drawn. */
+        if (!rounded)
+            return;
     }
 
     if (!rock && (visible == 0 || visible == DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL))
@@ -1269,15 +1276,28 @@ static void BuildMountainArtMask(const struct DioramaSceneSnapshot *snapshot,
 }
 
 
-static bool RockMassNeighbor(const struct DioramaTerrainChunkInput *input, int x, int y,
-                             const struct DioramaTerrainCell *cell)
+/* The foot of a rock mass's slope on one side, in voxels over the cell's own
+ * ground: the ground beside it, up to the rock's top (`rise`). A neighbour of
+ * the same mass (rock on the same ground) joins it: -1, no slope. The slope came
+ * down to the mass's own ground on every open side, so where the ground beside
+ * it stands higher - a path on the mountain level with its top, another piece
+ * of rock on a higher ground - it cut a trench a level deep along it (the
+ * owner's report of 2026-10-24); it now meets that ground. */
+static float RockMassFoot(const struct DioramaTerrainChunkInput *input, int x, int y,
+                          const struct DioramaTerrainCell *cell, float rise)
 {
     const struct DioramaTerrainCell *other;
+    float foot;
 
     if (x < 0 || y < 0 || x >= DIORAMA_TERRAIN_INPUT_SIZE || y >= DIORAMA_TERRAIN_INPUT_SIZE)
-        return false;   /* past the chunk's halo: lower is the safe guess (a face drawn twice, never a hole) */
+        return 0.0f;    /* past the chunk's halo: lower is the safe guess (a face drawn twice, never a hole) */
     other = &input->cells[y * DIORAMA_TERRAIN_INPUT_SIZE + x];
-    return other->present && other->rockMass && other->groundHeight == cell->groundHeight;
+    if (!other->present)
+        return 0.0f;
+    if (other->rockMass && other->groundHeight == cell->groundHeight)
+        return -1.0f;
+    foot = (other->groundHeight - cell->groundHeight) * DIORAMA_VOXELS_PER_CELL;
+    return foot < 0.0f ? 0.0f : foot > rise ? rise : foot;
 }
 
 static float RockMassEase(float t)
@@ -1287,37 +1307,64 @@ static float RockMassEase(float t)
     return t * t * (3.0f - 2.0f * t);
 }
 
+/* One side's (or corner's) profile: from its foot up to `top`, eased over `t`;
+ * a joined side (foot -1) or one whose ground is as high as the rock none. */
+static float RockMassSide(float level, float foot, float t, float top)
+{
+    float side;
+
+    if (foot < 0.0f || foot >= top)
+        return level;
+    side = foot + RockMassEase(t) * (top - foot);
+    return side < level ? side : level;
+}
+
 /* A mountain is one mass of rock (the owner's report of 2026-10-24: Route 106's
  * mountain a field of flat-topped cubes at uneven heights, Route 112's rock a
  * maze of walls). Each of its cells stands its record's height over its
  * ground, rising to it from the mass's foot: over the whole cell where the
  * mass ends to the south (the face the GBA draws there: the drawing lies on
  * the slope), within ROCK_MASS_EDGE pixels elsewhere, rounded at the corners;
- * inside the mass it runs on level from cell to cell. The cell's own relief
- * (BuildMountainArtMask) stands on it. A cell's heights depend only on it and
- * its eight neighbours, so a chunk's halo is all it needs. */
+ * inside the mass it runs on level from cell to cell. The foot on each side is
+ * the ground beside it (RockMassFoot): a path level with the rock's top meets
+ * it flat. The cell's own relief (BuildMountainArtMask) stands on it. A cell's
+ * heights depend only on it and its eight neighbours, so a chunk's halo is all
+ * it needs. */
 static void ShapeRockMasses(struct DioramaTerrainChunkInput *input)
 {
     for (int y = 0; y < DIORAMA_TERRAIN_INPUT_SIZE; y++)
         for (int x = 0; x < DIORAMA_TERRAIN_INPUT_SIZE; x++)
         {
             struct DioramaTerrainCell *cell = &input->cells[y * DIORAMA_TERRAIN_INPUT_SIZE + x];
-            bool north, south, east, west, northEast, northWest, southEast, southWest;
+            float north, south, east, west, northEast, northWest, southEast, southWest;
+            float outlineBase;
             float rise;
 
             if (!cell->present || !cell->rockMass)
                 continue;
-            north = RockMassNeighbor(input, x, y - 1, cell);
-            south = RockMassNeighbor(input, x, y + 1, cell);
-            east = RockMassNeighbor(input, x + 1, y, cell);
-            west = RockMassNeighbor(input, x - 1, y, cell);
-            northEast = RockMassNeighbor(input, x + 1, y - 1, cell);
-            northWest = RockMassNeighbor(input, x - 1, y - 1, cell);
-            southEast = RockMassNeighbor(input, x + 1, y + 1, cell);
-            southWest = RockMassNeighbor(input, x - 1, y + 1, cell);
             rise = (cell->visualHeight - cell->groundHeight) * DIORAMA_VOXELS_PER_CELL;
             if (rise < 1.0f)
                 rise = DIORAMA_VOXELS_PER_CELL;
+            north = RockMassFoot(input, x, y - 1, cell, rise);
+            south = RockMassFoot(input, x, y + 1, cell, rise);
+            east = RockMassFoot(input, x + 1, y, cell, rise);
+            west = RockMassFoot(input, x - 1, y, cell, rise);
+            northEast = RockMassFoot(input, x + 1, y - 1, cell, rise);
+            northWest = RockMassFoot(input, x - 1, y - 1, cell, rise);
+            southEast = RockMassFoot(input, x + 1, y + 1, cell, rise);
+            southWest = RockMassFoot(input, x - 1, y + 1, cell, rise);
+            /* the ground part of a cell whose upper layer draws the rock's edge
+             * lies on the lowest ground beside it (its open sides'), not always
+             * on its own: Route 116's rock edge (General 112) against grass a
+             * level up left that grass a groove a level deep, its side the sky's
+             * blue (the owner's report of 2026-10-24) */
+            outlineBase = -1.0f;
+            if (north >= 0.0f) outlineBase = north;
+            if (south >= 0.0f && (outlineBase < 0.0f || south < outlineBase)) outlineBase = south;
+            if (east >= 0.0f && (outlineBase < 0.0f || east < outlineBase)) outlineBase = east;
+            if (west >= 0.0f && (outlineBase < 0.0f || west < outlineBase)) outlineBase = west;
+            if (outlineBase < 0.0f)
+                outlineBase = 0.0f;
             for (int pixelY = 0; pixelY < DIORAMA_VOXELS_PER_CELL; pixelY++)
                 for (int pixelX = 0; pixelX < DIORAMA_VOXELS_PER_CELL; pixelX++)
                 {
@@ -1327,50 +1374,43 @@ static void ShapeRockMasses(struct DioramaTerrainChunkInput *input)
                     float toSouth = (DIORAMA_VOXELS_PER_CELL - pixelY - 0.5f) / ROCK_MASS_FACE;
                     float toWest = (pixelX + 0.5f) / ROCK_MASS_EDGE;
                     float toEast = (DIORAMA_VOXELS_PER_CELL - pixelX - 0.5f) / ROCK_MASS_EDGE;
-                    float t = 1.0f;
+                    float top;
                     float level;
                     int pixel = pixelY * DIORAMA_VOXELS_PER_CELL + pixelX;
 
-                    if (!north && toNorth < t) t = toNorth;
-                    if (!south && toSouth < t) t = toSouth;
-                    if (!west && toWest < t) t = toWest;
-                    if (!east && toEast < t) t = toEast;
-                    if (north && east && !northEast)
-                    {
-                        float corner = sqrtf(toNorth * toNorth + toEast * toEast);
-                        if (corner < t) t = corner;
-                    }
-                    if (north && west && !northWest)
-                    {
-                        float corner = sqrtf(toNorth * toNorth + toWest * toWest);
-                        if (corner < t) t = corner;
-                    }
-                    if (south && east && !southEast)
-                    {
-                        float corner = sqrtf(toSouth * toSouth + toEast * toEast);
-                        if (corner < t) t = corner;
-                    }
-                    if (south && west && !southWest)
-                    {
-                        float corner = sqrtf(toSouth * toSouth + toWest * toWest);
-                        if (corner < t) t = corner;
-                    }
                     if (cell->rockMass == ROCK_MASS_OUTLINE)
                     {
                         /* the ground beside the outline is the mass's foot too */
                         float inside = cell->mountainHeight[pixel] == 0 ? 0.0f
                                      : (cell->mountainHeight[pixel] - 0.5f) / ROCK_MASS_EDGE;
 
-                        if (inside < t)
-                            t = inside;
-                        level = RockMassEase(t) * rise;
+                        top = rise;
+                        level = outlineBase + RockMassEase(inside) * (rise - outlineBase);
                     }
                     else
-                        level = RockMassEase(t)
-                              * (rise + cell->mountainHeight[pixel]
-                                 * (cell->rockMass == ROCK_MASS_CROWN ? ROCK_MASS_CROWN_RELIEF
-                                                                     : ROCK_MASS_RELIEF)
-                                 / (float)DIORAMA_VOXELS_PER_CELL);
+                    {
+                        top = rise + cell->mountainHeight[pixel]
+                            * (cell->rockMass == ROCK_MASS_CROWN ? ROCK_MASS_CROWN_RELIEF
+                                                                 : ROCK_MASS_RELIEF)
+                            / (float)DIORAMA_VOXELS_PER_CELL;
+                        level = top;
+                    }
+                    level = RockMassSide(level, north, toNorth, top);
+                    level = RockMassSide(level, south, toSouth, top);
+                    level = RockMassSide(level, west, toWest, top);
+                    level = RockMassSide(level, east, toEast, top);
+                    if (north < 0.0f && east < 0.0f)
+                        level = RockMassSide(level, northEast,
+                                             sqrtf(toNorth * toNorth + toEast * toEast), top);
+                    if (north < 0.0f && west < 0.0f)
+                        level = RockMassSide(level, northWest,
+                                             sqrtf(toNorth * toNorth + toWest * toWest), top);
+                    if (south < 0.0f && east < 0.0f)
+                        level = RockMassSide(level, southEast,
+                                             sqrtf(toSouth * toSouth + toEast * toEast), top);
+                    if (south < 0.0f && west < 0.0f)
+                        level = RockMassSide(level, southWest,
+                                             sqrtf(toSouth * toSouth + toWest * toWest), top);
                     cell->mountainHeight[pixel] = level < 1.0f ? (level > 0.25f ? 1 : 0)
                                                 : level > 255.0f ? 255 : (uint8_t)(level + 0.5f);
                 }
