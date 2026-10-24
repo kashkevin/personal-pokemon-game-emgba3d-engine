@@ -194,6 +194,7 @@ static EWRAM_DATA struct PokemonSummaryScreenData
     bool8 ivEvOwnList;      // the list is the player's party or one of their boxes, not rentals
     bool8 ivEvPartnerSlots; // a multi battle's party with the partner's Pokémon at 1, 4 and 5
     u8 evTotalWindowId;     // the skills page's EV total (UpdateEvTotalWindow)
+    bool8 evTotalShown;     // its tilemap is on BG0 (cleared only then: the memo and move description share the rows)
 #endif
 #line 192 // gba-line
 } *sMonSummaryScreen = NULL;
@@ -3235,6 +3236,7 @@ static void ResetWindows(void)
         };
 
         sMonSummaryScreen->evTotalWindowId = AddWindow(&sEvTotalTemplate);
+        sMonSummaryScreen->evTotalShown = FALSE;
         if (sMonSummaryScreen->evTotalWindowId != WINDOW_NONE)
             FillWindowPixelBuffer(sMonSummaryScreen->evTotalWindowId, PIXEL_FILL(0));
     }
@@ -3924,6 +3926,10 @@ static void PrintRibbonCount(void)
     PrintTextOnWindow(AddWindowFromTemplateList(sPageSkillsTemplate, PSS_DATA_WINDOW_SKILLS_RIBBON_COUNT), text, x, 1, 0, 0);
 }
 
+#ifdef PORTABLE
+static bool32 IsSummaryStatHyperTrained(u32 stat);
+#endif
+#line 3836 // gba-line
 static void BufferStat(u8 *dst, enum Stat statIndex, u32 stat, u32 strId, u32 n)
 {
     static const u8 sTextNatureDown[] = _("{COLOR}{08}");
@@ -3931,6 +3937,14 @@ static void BufferStat(u8 *dst, enum Stat statIndex, u32 stat, u32 strId, u32 n)
     static const u8 sTextNatureNeutral[] = _("{COLOR}{01}");
     u8 *txtPtr;
 
+#ifdef PORTABLE
+    // EmeraldTogether (PC): the nature raises or lowers the stat, not its IV or EV, so only the STATS view colours the
+    // numbers by it (the panel's label reads IVs or EVs; the 3D summary colours the stat's name and says why).
+    if (sMonSummaryScreen->skillsPageMode != SUMMARY_SKILLS_MODE_STATS)
+        txtPtr = StringCopy(dst, sTextNatureNeutral);
+    else
+#endif
+#line 3843 // gba-line
     if (statIndex == 0 || !P_SUMMARY_SCREEN_NATURE_COLORS || gNaturesInfo[sMonSummaryScreen->summary.mintNature].statUp == gNaturesInfo[sMonSummaryScreen->summary.mintNature].statDown)
         txtPtr = StringCopy(dst, sTextNatureNeutral);
     else if (statIndex == gNaturesInfo[sMonSummaryScreen->summary.mintNature].statUp)
@@ -3940,11 +3954,23 @@ static void BufferStat(u8 *dst, enum Stat statIndex, u32 stat, u32 strId, u32 n)
     else
         txtPtr = StringCopy(dst, sTextNatureNeutral);
 
+#ifdef PORTABLE
+    // EmeraldTogether (PC): an IV (0-31) takes two digits, which leaves room after it in its column for a Hyper Trained
+    // stat's HT mark (left column 7 -> 5 places, right column 3 -> 2); UpdateEvTotalWindow says what HT means.
+    if (P_SUMMARY_SCREEN_IV_EV_VALUES && sMonSummaryScreen->skillsPageMode == SUMMARY_SKILLS_MODE_IVS)
+        n = (n > 3) ? 5 : 2;
+#endif
+#line 3852 // gba-line
     if (!P_SUMMARY_SCREEN_IV_EV_VALUES
         && sMonSummaryScreen->skillsPageMode == SUMMARY_SKILLS_MODE_IVS)
         StringAppend(dst, GetLetterGrade(stat));
     else
         ConvertIntToDecimalStringN(txtPtr, stat, STR_CONV_MODE_RIGHT_ALIGN, n);
+#ifdef PORTABLE
+    if (sMonSummaryScreen->skillsPageMode == SUMMARY_SKILLS_MODE_IVS && IsSummaryStatHyperTrained(statIndex))
+        StringAppend(dst, COMPOUND_STRING("{FONT_SMALL_NARROWER}HT{FONT_NORMAL}"));
+#endif
+#line 3857 // gba-line
 
     DynamicPlaceholderTextUtil_SetPlaceholderPtr(strId, dst);
 }
@@ -4873,37 +4899,71 @@ static bool32 IsSummaryMonPlayersOwn(void)
     return TRUE;
 }
 
-// The EV total under the stats while the skills page shows the EVs (the window ResetWindows adds).
+// A Hyper Trained stat's IV shows 31 (GetAdjustedIvData); the IVs view marks it HT (BufferStat), as the 3D summary does.
+static bool32 IsSummaryStatHyperTrained(u32 stat)
+{
+    return P_SUMMARY_SCREEN_IV_HYPERTRAIN && P_SUMMARY_SCREEN_IV_EV_VALUES
+        && GetMonData(&sMonSummaryScreen->currentMon, MON_DATA_HYPER_TRAINED_HP + stat);
+}
+
+// The line under the stats on the skills page (the window ResetWindows adds): the EV total while the EVs are shown,
+// and while the IVs are shown what their HT mark means, when a stat is Hyper Trained. Its rows (BG0 x10-18, y18-19)
+// also hold the INFO page's trainer memo and the moves pages' description, so its tilemap is cleared only when it
+// was put (evTotalShown); clearing it on every prompt would blank those.
 static void UpdateEvTotalWindow(void)
 {
     u8 windowId = sMonSummaryScreen->evTotalWindowId;
+    u8 text[32];
+    u32 stat;
 
     if (windowId == WINDOW_NONE)
         return;
-    FillWindowPixelBuffer(windowId, PIXEL_FILL(0));
-    if (sMonSummaryScreen->currPageIndex == PSS_PAGE_SKILLS
-     && sMonSummaryScreen->skillsPageMode == SUMMARY_SKILLS_MODE_EVS && ShouldShowIvEvPrompt())
+    text[0] = EOS;
+    if (sMonSummaryScreen->currPageIndex == PSS_PAGE_SKILLS && ShouldShowIvEvPrompt())
     {
-        u8 text[32];
-        u8 *end;
-        u32 stat, total = 0;
+        if (sMonSummaryScreen->skillsPageMode == SUMMARY_SKILLS_MODE_EVS)
+        {
+            u8 *end;
+            u32 total = 0;
 
-        for (stat = 0; stat < NUM_STATS; stat++)
-            total += GetMonData(&sMonSummaryScreen->currentMon, MON_DATA_HP_EV + stat);
-        end = StringCopy(text, COMPOUND_STRING("EV total: "));
-        end = ConvertIntToDecimalStringN(end, total, STR_CONV_MODE_LEFT_ALIGN, 3);
-        end = StringCopy(end, COMPOUND_STRING("/"));
-        ConvertIntToDecimalStringN(end, MAX_TOTAL_EVS, STR_CONV_MODE_LEFT_ALIGN, 3);
+            for (stat = 0; stat < NUM_STATS; stat++)
+                total += GetMonData(&sMonSummaryScreen->currentMon, MON_DATA_HP_EV + stat);
+            end = StringCopy(text, COMPOUND_STRING("EV total: "));
+            end = ConvertIntToDecimalStringN(end, total, STR_CONV_MODE_LEFT_ALIGN, 3);
+            end = StringCopy(end, COMPOUND_STRING("/"));
+            ConvertIntToDecimalStringN(end, MAX_TOTAL_EVS, STR_CONV_MODE_LEFT_ALIGN, 3);
+        }
+        else if (sMonSummaryScreen->skillsPageMode == SUMMARY_SKILLS_MODE_IVS)
+        {
+            for (stat = 0; stat < NUM_STATS; stat++)
+            {
+                if (IsSummaryStatHyperTrained(stat))
+                {
+                    StringCopy(text, COMPOUND_STRING("HT: Hyper Trained"));
+                    break;
+                }
+            }
+        }
+    }
+    if (text[0] != EOS)
+    {
+        FillWindowPixelBuffer(windowId, PIXEL_FILL(0));
         // white like the page's labels, in the narrower fonts when it would not fit left of the EXP bar
         PrintTextOnWindowWithFont(windowId, text, 1, 1, 0, 1, GetFontIdToFit(text, FONT_SMALL, 0, 70));
         PutWindowTilemap(windowId);
         CopyWindowToVram(windowId, COPYWIN_GFX);
+        sMonSummaryScreen->evTotalShown = TRUE;
+        ScheduleBgCopyTilemapToVram(0);
     }
-    else
+    else if (sMonSummaryScreen->evTotalShown)
     {
+        // Leaving the EVs or IVs: on a page change this runs before the new page's PutPageWindowTilemaps (the end
+        // of its scroll), and on a Pokémon change before its page text, so nothing of theirs is cleared.
+        FillWindowPixelBuffer(windowId, PIXEL_FILL(0));
         ClearWindowTilemap(windowId);
+        sMonSummaryScreen->evTotalShown = FALSE;
+        ScheduleBgCopyTilemapToVram(0);
     }
-    ScheduleBgCopyTilemapToVram(0);
 }
 #endif
 #line 4768 // gba-line
