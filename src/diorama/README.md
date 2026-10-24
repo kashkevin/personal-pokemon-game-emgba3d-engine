@@ -379,3 +379,76 @@ tilesets are unchanged.
   taken as the top of its roof, and the grass under the notches of a ridge's
   top row as the roof's own colour, so Dewford's hipped roofs had a strip of
   grass along the ridge.
+
+## A mountain on one level, its paths on it (the owner's report, 2026-10-24, evening)
+
+The owner's picture was Route 116 at Rusturf Tunnel at night (the rest house,
+the tunnel with a sign on each side, stairs up the rock): "in some aspects this
+looks better but also worse like the light blue emptiness", and the rock a maze
+of terraced walls; Route 112's rock was still a maze of walls.
+
+* The ground's teal is the game's own: General's plain grass (palette 2, colour
+  13, 115,197,164) under the night tint (x0.456, x0.456, x0.615) is 49,82,98 in
+  the GBA picture and 45,88,102 in the 3D one. What only the 3D view drew were
+  walls a level high in pale blue: blocked cells left on the top level between
+  the grass and the ledge path above it, their sides drawn with the grass under
+  the rock's edge (General 112 at 54,12-15), and the rock's outline and the sky
+  showing between pieces of rock standing at two levels side by side.
+* One level for a mountain (`compile_rules.py` `_mountain_masses`): its blocked
+  rock took the level of the walkable ground nearest each cell
+  (`terrace_topology.lift_blocked_cells`), so Route 116's mountain, between the
+  grass and its paths a level up, stood at both levels cell by cell - and the
+  terrace stones in it (General 121, 137, a cliff class that keeps the top
+  level) and the cells beside the tunnel's mouth (elevation 0, no region of the
+  solver's) at the top level - and every group was a mass of its own, rounded
+  against the next: spikes along its face, walls through it. A piece of mountain
+  whose walkable ground lies on one level, or on two a level apart with the
+  upper mostly its own walkable top (MB_MOUNTAIN_TOP), stands from the lower to
+  a level over it, its paths level with its top; what stands on it with no
+  other walkable ground beside it (trees, boulders) on its top. Other pieces
+  keep their cells' levels: one among ground on three levels, beside water (an
+  island's sea has levels of its own), on part levels, or whose upper ground is
+  no path of its own (Route 111's rock runs the length of the map beside a
+  desert on the top level).
+* The rock beside a ledge path (`mountain_art.py` `faces_between_levels`): a
+  blocked cell drawn in the mountain's palette beside its walkable top, whose
+  walkable neighbours lie on two levels, is the mountain's rock.
+* A mountain's walkable top on the mountain (`terrace_topology.py`
+  `mountain_ledges`): Route 112's plateau (the cable car station on it, drawn
+  with the rock's own top) lay on the ground's level with the rock a cell high
+  round it, a trench. Where General's terrace stairs (175, 207), unsolved by the
+  terrace solver, climb from ordinary ground to a region that is mostly
+  MB_MOUNTAIN_TOP, that region stands a level over the ground (cells of
+  elevation 0 - doorways, the Fiery Path's mouth - join a region) and the stairs
+  rise over their rows (Route 112's three: 5, 6 and 5 sixteenths). Only a
+  mountain of one walkable level: stairs from one such top to another (Routes
+  114, 115) or a raised top meeting other ground beside it without stairs keep
+  the layout's levels.
+* A cave mouth on its ground (`terrace_topology.py` `join_level_free_cells`): a
+  doorway or warp of elevation 0 in a mountain's face whose dry walkable
+  neighbours offer one whole level takes it (Rusturf Tunnel's two mouths a level
+  down, Ever Grande's Victory Road); it lifts no rock round it. One entered from
+  the water (Shoal Cave) keeps its place.
+* The slopes (`gl_terrain_renderer.c` `ShapeRockMasses`, `RockMassFoot`): a rock
+  mass's slope comes down to the ground beside it on each side, not always to
+  its own foot, so a path level with its top meets it flat instead of a groove
+  a level deep along it; a rock edge's ground part (an outline cell) lies on
+  the lowest ground beside it, not a level below the grass it belongs to.
+* Models (`gl_building_renderer.c` `PlacementGround`): a model stands on the
+  ground under its door, the highest walkable cell of its bottom row, as the
+  comment said; the bottom-left cell was a wall of Route 112's station, drawn
+  with the mountain's own tiles. Of the placements only the station and Route
+  116's two boulders stand differently.
+* Relief (`BuildMountainArtMask`): only a crown (a mountain tree, green) stands
+  up from the rock. Lavaridge draws the lower half of its faces and its ledges'
+  rims on the upper layer (what covers a walker), and as crags they stood as
+  rows of low walls along every face.
+* Not covered: Route 111's walkable rock plateau north of the desert is one
+  walkable region with the desert and the grass north of it in the game's data
+  (elevation 3, joined round the gaps between the ledges on the west path), and
+  its way up from the desert (17,36-37) is a muddy slope (MB_MUDDY_SLOPE, the
+  Mach Bike's), not stairs: it still lies at the desert's level inside its rock
+  rim. Mt. Chimney and Jagged Pass have no such stairs: their paths are still a
+  level below their rock. Where Route 112's plateau ends under the forest west
+  of the Fiery Path, with no rock drawn, the trees take the nearer of the two
+  levels: a step in the canopy, its shadow and a line of grass along it.

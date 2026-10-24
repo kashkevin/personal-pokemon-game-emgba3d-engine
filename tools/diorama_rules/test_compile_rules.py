@@ -10,6 +10,7 @@ from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 from compile_rules import (ARCHETYPES, RuleError, _action, _ground_policy, _mask,
+                              _mountain_masses,
                               _pattern_placements, _patterns, _profiles, _selector,
                               _validate_logical_ids, _validate_pattern_claim_overlaps,
                               _validate_pixel_object_catalog,
@@ -171,6 +172,88 @@ class DioramaRuleCompilerTests(unittest.TestCase):
                 if record["source"] == "context:cave-rock" and record["class"] == "cliff"]
         self.assertTrue(rock)
         self.assertTrue(all(record["measuredFlags"] & 32 for record in rock))
+
+    def test_a_mountain_whose_top_is_its_paths_is_one_mass(self):
+        # rock (M) round a boulder (B), grass a level down (L) and the mountain's own path (P,
+        # walkable MB_MOUNTAIN_TOP) on the top level: one mass from the grass to the path, the
+        # boulder on its top.
+        def make(ch):
+            return {"M": {"behavior": "MB_MOUNTAIN_TOP", "collision": 1},
+                    "B": {"behavior": "MB_NORMAL", "collision": 1},
+                    "L": {"behavior": "MB_NORMAL", "collision": 0},
+                    "P": {"behavior": "MB_MOUNTAIN_TOP", "collision": 0},
+                    "W": {"behavior": "MB_OCEAN_WATER", "collision": 0}}[ch]
+
+        def build(rows):
+            return tuple(make(ch) for row in rows for ch in row)
+
+        def level(value):
+            return {"groundQ16": value, "topQ16": value, "profile": "none", "solid": False}
+
+        rows = ["MMMMM", "MMBMM", "MMMMM", "LLLPP"]
+        cells = build(rows)
+        mountain = frozenset(index for index, ch in enumerate("".join(rows)) if ch == "M")
+        solved = {15: level(-16), 16: level(-16), 17: level(-16), 18: level(0), 19: level(0)}
+        masses = _mountain_masses(cells, 5, 4, mountain, solved)
+        self.assertEqual({(masses[offset]["groundQ16"], masses[offset]["topQ16"])
+                          for offset in mountain}, {(-16, 0)})
+        self.assertTrue(all(masses[offset]["mass"] for offset in mountain))
+        self.assertEqual((masses[7]["groundQ16"], masses[7]["lift"]), (0, True))
+        # the upper ground is no path of the mountain's (a desert beside it), the sea beside it,
+        # ground on three levels: it keeps its cells' entries
+        plain = cells[:18] + (make("L"), make("L"))
+        self.assertEqual(_mountain_masses(plain, 5, 4, mountain, solved), {})
+        wet = cells[:15] + (make("W"),) + cells[16:]
+        self.assertEqual(_mountain_masses(wet, 5, 4, mountain, solved), {})
+        self.assertEqual(_mountain_masses(cells, 5, 4, mountain, {**solved, 17: level(-32)}), {})
+        # one level all round, the top level: the rock already where its records put it, the
+        # boulder in it on its top (it sank into the rock, standing on the ground)
+        self.assertEqual(_mountain_masses(cells, 5, 4, mountain,
+                                          {offset: level(0) for offset in solved}),
+                         {7: {"groundQ16": 16, "topQ16": 16, "profile": "none", "solid": False,
+                              "lift": True}})
+
+    def test_repository_mountains_stand_on_one_level(self):
+        # The owner's report of 2026-10-24 ("a maze of terraced walls", "the light blue
+        # emptiness"): Route 116's mountain is one mass from the grass below it to the paths on
+        # it - its face no longer at both levels cell by cell; its tunnel's mouth on the grass's
+        # level; the face its ledge path stands on rock; its boulders on its top.
+        layouts = {row["symbol"]: row for row in self.data["layouts"]}
+
+        def wildcard(name):
+            layout = layouts[name]
+            return layout["width"], {record["cellOffset"]: record
+                                     for record in layout["terrainRecords"]
+                                     if record["mapGroup"] == 0xFF}
+
+        width, records = wildcard("LAYOUT_ROUTE116")
+        front = [records[8 * width + x] for x in range(43, 53) if x != 47]
+        self.assertEqual({(record["class"], record["groundQ16"], record["topQ16"])
+                          for record in front}, {("cliff", -16, 0)})
+        self.assertEqual(records[8 * width + 47]["groundQ16"], -16)
+        for y in (12, 13, 14):
+            record = records[y * width + 54]
+            self.assertEqual((record["class"], record["groundQ16"], record["topQ16"]),
+                             ("cliff", -16, 0))
+        for x, y in ((42, 4), (43, 6)):
+            self.assertEqual(records[y * width + x]["groundQ16"], 0)
+        # Route 112: its plateau a level over the ground round the mountain, the stairs rising to
+        # it over their rows, the mountain level with it.
+        width, records = wildcard("LAYOUT_ROUTE112")
+        self.assertEqual(records[33 * width + 24]["groundQ16"], 16)
+        self.assertEqual(records[45 * width + 20]["groundQ16"], 0)
+        self.assertEqual([(records[y * width + 20]["shape"], records[y * width + 20]["groundQ16"],
+                           records[y * width + 20]["topQ16"]) for y in (43, 42, 41)],
+                         [("stairs", 0, 5), ("stairs", 5, 11), ("stairs", 11, 16)])
+        for x, y in ((5, 10), (15, 42), (30, 20)):
+            record = records[y * width + x]
+            self.assertEqual((record["class"], record["groundQ16"], record["topQ16"]),
+                             ("cliff", 0, 16), (x, y))
+        # Route 111's rock runs the length of the map beside a desert on the top level: its cells
+        # keep their own levels (the rock a level over the desert).
+        width, records = wildcard("LAYOUT_ROUTE111")
+        self.assertEqual((records[30 * width + 35]["groundQ16"], records[30 * width + 35]["topQ16"]),
+                         (0, 16))
 
     def test_repository_cave_rock_stands_and_its_exits_stay_open(self):
         layouts = {row["symbol"]: row for row in self.data["layouts"]}
