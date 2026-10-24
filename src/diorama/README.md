@@ -433,7 +433,7 @@ trees and open routes have neither.
   pictures).
 * The same walk, before and after (main thread CPU time a frame, the median
   of two runs each; the machine was shared, so wall-clock times varied with
-  its load): standing 358 ms before, 225 after (146 with the opt-in faces);
+  its load): standing 358 ms before, 225 after (150 with the opt-in faces);
   running 325 before, 192 after (131), its 95th percentile 412 and 238 (165).
   A step's frame cost 40 ms more than the others before, 5 after.
 * Not done: the distant scenery is still built again at every step (most of
