@@ -648,6 +648,26 @@ int NativeSelfTest_Tower(void)
         TowerLegends_Tick();
         ExpectTower("go on: nothing unsettled: page 4 opens on the first calm frame", TowerLegends_TestQueuedAnswer() == 0);
 
+        // The player walks out while page 4 waits (review of 2026-10-24): the YES is not carried out on another map; the
+        // host save is queued instead (carried out on the next calm frame, as for NO).
+        {
+            u8 mapNum = gSaveBlock1Ptr->location.mapNum;
+
+            TowerLegends_TestSetPending(TOWER_RESULT_WON, 0x000108CA, 8);
+            TowerLegends_Continue();
+            TowerLegends_Tick();
+            ExpectTower("go on: YES with the result unsettled waits", TowerLegends_TestQueuedAnswer() == 1);
+            gMain.callback2 = NULL;                  // the warp: a busy field...
+            gSaveBlock1Ptr->location.mapNum ^= 1;    // ... onto another map
+            TowerLegends_Tick();
+            ExpectTower("go on: on another map the YES is dropped and the host save queued",
+                        TowerLegends_TestQueuedAnswer() == 2);
+            gMain.callback2 = CB2_Overworld;
+            TowerLegends_Tick();
+            ExpectTower("go on: ... and the save carried out on the calm field", TowerLegends_TestQueuedAnswer() == 0);
+            gSaveBlock1Ptr->location.mapNum = mapNum;
+        }
+
         TowerLegends_TestSetPending(TOWER_RESULT_LOST, 0x000107C9, 7);
         gSpecialVar_Result = 0;                      // NO
         TowerLegends_Continue();

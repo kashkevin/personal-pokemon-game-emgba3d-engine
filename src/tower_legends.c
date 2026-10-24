@@ -108,6 +108,8 @@ static EWRAM_DATA struct
     u16 repostTimer;
     u16 queuedFrames;    // how long the queued solo command has waited for a calm field
     u16 nextHoldFrames;  // how long page 4 has waited on a calm field for the last result to settle (NEXT_HOLD_FRAMES)
+    u8 nextMapGroup;     // where YES was answered: page 4 opens only there
+    u8 nextMapNum;
     u32 ticket;
     u32 refusedTicket;
     struct TowerLegendsCommand command;
@@ -453,6 +455,16 @@ void TowerLegends_Tick(void)
     // A Duo battle's trainers answer only while its native battle runs (an abandoned one leaves nothing behind).
     if (sTower.mode == TOWER_MODE_DUO && !MultiplayerBattle_IsActive())
         sTower.mode = TOWER_MODE_NONE;
+    // A YES the player walked away from (another map before page 4 could open, review of 2026-10-24) is not carried out
+    // there: the next floor starts only where it was asked for. The host save still runs, as for NO.
+    if (sTower.nextQueued && (gSaveBlock1Ptr->location.mapGroup != sTower.nextMapGroup
+                              || gSaveBlock1Ptr->location.mapNum != sTower.nextMapNum))
+    {
+        fprintf(stderr, "tower: go on: YES dropped: the player left the map before page 4 opened\n");
+        sTower.nextQueued = FALSE;
+        sTower.saveQueued = TRUE;
+        sTower.nextHoldFrames = 0;
+    }
     if ((sTower.nextQueued || sTower.saveQueued) && FieldCalm())
     {
         // After "go on to floor N?": the host save first when the battle changed the party (as START > PLAYER > TOWER
@@ -717,6 +729,8 @@ void TowerLegends_BufferContinue(void)
 void TowerLegends_Continue(void)
 {
     sTower.nextHoldFrames = 0;
+    sTower.nextMapGroup = gSaveBlock1Ptr->location.mapGroup;
+    sTower.nextMapNum = gSaveBlock1Ptr->location.mapNum;
     if (gSpecialVar_Result != 0)   // YES (1); NO and B are 0
         sTower.nextQueued = TRUE;
     else

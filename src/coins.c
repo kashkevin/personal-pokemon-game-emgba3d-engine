@@ -174,6 +174,8 @@ bool32 Coins_NativeUiBoxShown(void)
     if (sCoinsWindowId >= WINDOWS_MAX)
         return FALSE;
     w = &gWindows[sCoinsWindowId].window;
-    return w->bg != 0xFF && w->width == 8 && w->height == 2 && w->baseBlock == 0x141 && Window_NativeUiShown(sCoinsWindowId);
+    // COINS_BOX_WIDTH_TILES: the box is two tiles wider since Update 29 (six digits); with the old 8 the board never showed.
+    return w->bg != 0xFF && w->width == COINS_BOX_WIDTH_TILES && w->height == 2 && w->baseBlock == 0x141
+        && Window_NativeUiShown(sCoinsWindowId);
 }
 #endif // ENABLE_NATIVE_UI
