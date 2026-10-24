@@ -4948,8 +4948,9 @@ static void UpdateEvTotalWindow(void)
     if (text[0] != EOS)
     {
         FillWindowPixelBuffer(windowId, PIXEL_FILL(0));
-        // white like the page's labels, in the narrower fonts when it would not fit left of the EXP bar
-        PrintTextOnWindowWithFont(windowId, text, 1, 1, 0, 1, GetFontIdToFit(text, FONT_SMALL, 0, 70));
+        // white like the page's labels, in the narrower fonts when it would not fit left of the EXP bar; from x 3, clear
+        // of the panel's 2-pixel border
+        PrintTextOnWindowWithFont(windowId, text, 3, 1, 0, 1, GetFontIdToFit(text, FONT_SMALL, 0, 68));
         PutWindowTilemap(windowId);
         CopyWindowToVram(windowId, COPYWIN_GFX);
         sMonSummaryScreen->evTotalShown = TRUE;

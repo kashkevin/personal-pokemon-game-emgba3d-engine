@@ -104,7 +104,9 @@ static void TestNotOwn(void)
     Expect("multi battle: the partner's own party (PARTY_LAYOUT_MULTI_FULL_PARTNER)", !SummaryTest_IvEvOffered(SUMMARY_MODE_LOCK_MOVES, gParties[B_TRAINER_PARTNER], 0, 5));
 
     // a multi battle's party menu: with half teams (three each) the partner's three are at 1, 4 and 5 of the player's
-    // list (party_menu.c GetMultiPartyForSummaryScreen); with full teams the partner's are a list of their own (above)
+    // list (party_menu.c GetMultiPartyForSummaryScreen); with full teams the partner's are a list of their own (above).
+    // Slot 5 is the setup's Egg, which never shows them: a Pokemon there while these run, so slot 5 is tested for real.
+    MakeMon(&gParties[B_TRAINER_PLAYER][5], SPECIES_ZIGZAGOON, FALSE);
     for (u32 half = 0; half < 2; half++)
     {
         gMain.inBattle = TRUE;
@@ -114,10 +116,10 @@ static void TestNotOwn(void)
         fullTeams = AreMultiPartiesFullTeams();
         Expect(half ? "multi battle (Tower link multi): half teams" : "multi battle (in-game partner): full teams",
                fullTeams == !half);
-        for (u32 slot = 0; slot < 5; slot++)
+        for (u32 slot = 0; slot < PARTY_SIZE; slot++)
         {
             char what[120];
-            bool32 partner = !fullTeams && (slot == 1 || slot == 4);
+            bool32 partner = !fullTeams && (slot == 1 || slot == 4 || slot == 5);
 
             snprintf(what, sizeof(what), "multi battle, %s teams: summary slot %u is %s", fullTeams ? "full" : "half", slot,
                      partner ? "the partner's: none" : "the player's: shown");
@@ -126,6 +128,7 @@ static void TestNotOwn(void)
     }
     gMain.inBattle = FALSE;
     gBattleTypeFlags = 0;
+    MakeMon(&gParties[B_TRAINER_PLAYER][5], SPECIES_MUDKIP + 5, TRUE);
 
     // rentals
     for (u32 i = 0; i < PARTY_SIZE; i++)
