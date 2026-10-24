@@ -30,11 +30,22 @@ Info taken from https://bulbapedia.bulbagarden.net/wiki/Stats_judge.
 #define P_FLAG_SUMMARY_SCREEN_IV_EV_INFO 0      // If this flag is set, will allow player to cycle through the Stats, IVs, and EVs in the summary screen skills page. Note: if P_SUMMARY_SCREEN_IV_EV_INFO is TRUE, this flag does nothing.
 
 // Move Relearner settings
+#ifdef PORTABLE
+// PC game: move switching as in Legends Z-A (the owner's request of 2026-10-24). A Pokémon can switch to any move it has
+// learned or could have learned, whenever: its level-up moves up to its level (its pre-evolutions' too), its egg moves,
+// the game's tutor moves and the TMs / HMs in the bag it is compatible with (src/party_menu.c, MOVES).
+#define P_ENABLE_MOVE_RELEARNERS         TRUE
+#else
 #define P_ENABLE_MOVE_RELEARNERS         FALSE   // If TRUE, it enables move relearners for egg, TM and tutor. (see below for specific configs /flags)
+#endif
 #define P_SORT_MOVES                     FALSE   // If TRUE, sorts all moves alphabetically in the relearner's list.
 
 // Level up Relearner
+#ifdef PORTABLE
+#define P_PRE_EVO_MOVES                  TRUE    // PC game: what an evolved Pokémon learned before it evolved stays its own
+#else
 #define P_PRE_EVO_MOVES                  FALSE   // If TRUE, it enables the Pokémon to learn moves from it's pre evolution.
+#endif
 #define P_ENABLE_ALL_LEVEL_UP_MOVES      FALSE   // If TRUE, it enables the Pokémon to learn all level up moves, regardless of its level.
 
 // TM Relearner

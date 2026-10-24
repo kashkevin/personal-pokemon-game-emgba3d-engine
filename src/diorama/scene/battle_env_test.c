@@ -227,6 +227,10 @@ static struct
     int boxFirst[2];
     bool hmLog, hmLogged;
     int hmSeen[13], hmShots;
+    /* PKMN_TEST_MOVE_LOG=1: on the field and in its menus, "move field: lead S moves m:pp/max,..." whenever the lead's
+       moves or their PP change (tools/battle_env/move_switch_check.py: MOVES in the party menu); what was last logged */
+    bool moveLog, moveLogged;
+    int moveSeen[1 + MAX_MON_MOVES * 3];
 } s;
 
 /* PKMN_TEST_LOG=<file>: every line the driver logs is also appended to that file (a check on Windows reads it: the
@@ -444,6 +448,7 @@ static void Init(void)
     s.softReset = s.softResets > 0;
     s.starterLog = EnvInt("PKMN_TEST_STARTER_LOG", 0) != 0;
     s.trainLog = EnvInt("PKMN_TEST_TRAIN_LOG", 0) != 0;
+    s.moveLog = EnvInt("PKMN_TEST_MOVE_LOG", 0) != 0;
     value = SDL_getenv("PKMN_TEST_DAYCARE");
     if (value != NULL)
         snprintf(s.daycare, sizeof(s.daycare), "%s", value);
@@ -1139,6 +1144,37 @@ static void BagLogField(void)
     for (int i = 0; i < s.bagItemCount && used < (int)sizeof(line); i++)
         used += snprintf(line + used, sizeof(line) - used, " item %d count %u", s.bagItems[i], (unsigned)now[1 + i]);
     TestLog("Battle env test: bag field: %s", line);
+}
+
+/* PKMN_TEST_MOVE_LOG off a battle: the lead's species, and each move slot's move, PP and most PP (a move switched in
+ * through MOVES in the party menu and the relearner comes with full PP). Logged in the menus too: the relearner's
+ * changes show as they are made. */
+static void MoveLogField(void)
+{
+    struct Pokemon *lead = &gParties[B_TRAINER_PLAYER][0];
+    int now[1 + MAX_MON_MOVES * 3];
+    bool changed;
+
+    if (!s.moveLog || gMain.inBattle || SDL_AtomicGet(&s.fieldSeen) == 0 || gSaveBlock1Ptr == NULL)
+        return;
+    now[0] = gPartiesCount[B_TRAINER_PLAYER] > 0 ? (int)GetMonData(lead, MON_DATA_SPECIES) : 0;
+    for (int i = 0; i < MAX_MON_MOVES; i++)
+    {
+        int move = now[0] != 0 ? (int)GetMonData(lead, MON_DATA_MOVE1 + i) : 0;
+
+        now[1 + i * 3] = move;
+        now[2 + i * 3] = move != MOVE_NONE ? (int)GetMonData(lead, MON_DATA_PP1 + i) : 0;
+        now[3 + i * 3] = move != MOVE_NONE ? CalculatePPWithBonus(move, GetMonData(lead, MON_DATA_PP_BONUSES), i) : 0;
+    }
+    changed = !s.moveLogged;
+    for (int i = 0; i < (int)ARRAY_COUNT(now) && !changed; i++)
+        changed = now[i] != s.moveSeen[i];
+    if (!changed)
+        return;
+    s.moveLogged = true;
+    memcpy(s.moveSeen, now, sizeof(now));
+    TestLog("Battle env test: move field: lead %d moves %d:%d/%d,%d:%d/%d,%d:%d/%d,%d:%d/%d", now[0], now[1], now[2],
+            now[3], now[4], now[5], now[6], now[7], now[8], now[9], now[10], now[11], now[12]);
 }
 
 /* PKMN_TEST_BREED_LOG off a battle: "breed party N: species S egg E level L ivs a,b,c,d,e,f nature T num A ball B
@@ -2700,6 +2736,7 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
     BreedLogField();
     BagLogField();
     HmLogField();
+    MoveLogField();
     ShotTick();
     /* PKMN_TEST_PLAN: once the autopilot brought the field up, the plan's keys alone */
     if (sPlan.phase != PLAN_OFF && SDL_AtomicGet(&s.fieldSeen) != 0)

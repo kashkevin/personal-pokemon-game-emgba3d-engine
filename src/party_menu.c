@@ -8,6 +8,11 @@
 #include "battle_pike.h"
 #include "battle_pyramid.h"
 #include "battle_pyramid_bag.h"
+#ifdef PORTABLE
+#include "battle_factory.h"
+#include "battle_tent.h"
+#endif
+#line 11 // gba-line
 #include "bg.h"
 #include "contest.h"
 #include "data.h"
@@ -110,6 +115,10 @@ enum {
     MENU_CATALOG_MOWER,
     MENU_CHANGE_FORM,
     MENU_CHANGE_ABILITY,
+#ifdef PORTABLE
+    MENU_MOVES,     // move switching (the owner's request of 2026-10-24)
+#endif
+#line 113 // gba-line
     MENU_FIELD_MOVES
 };
 
@@ -185,7 +194,13 @@ struct PartyMenuInternal
     u32 spriteIdCancelPokeball:7;
     u32 messageId:14;
     u8 windowId[3];
+#ifdef PORTABLE
+    u8 actions[9];  // MOVES makes a ninth: SUMMARY, four field moves, MOVES, SWITCH, ITEM, CANCEL
+#else
+#line 188 // gba-line
     u8 actions[8];
+#endif
+#line 189 // gba-line
     u8 numActions;
     // In vanilla Emerald, only the first 0xB0 hwords (0x160 bytes) are actually used.
     // However, a full 0x100 hwords (0x200 bytes) are allocated.
@@ -489,6 +504,10 @@ static void CursorCb_CatalogFan(u8);
 static void CursorCb_CatalogMower(u8);
 static void CursorCb_ChangeForm(u8);
 static void CursorCb_ChangeAbility(u8);
+#ifdef PORTABLE
+static void CursorCb_Moves(u8);
+#endif
+#line 485 // gba-line
 void TryItemHoldFormChange(struct Pokemon *mon, s8 slotId, enum BattleTrainer trainer);
 static void ShowMoveSelectWindow(u8 slot);
 static void Task_HandleWhichMoveInput(u8 taskId);
@@ -2968,6 +2987,13 @@ static void SetPartyMonFieldSelectionActions(struct Pokemon *mons, u8 slotId)
 
     sPartyMenuInternal->numActions = 0;
     AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, MENU_SUMMARY);
+#ifdef PORTABLE
+    // Move switching, right under SUMMARY (not in the Battle Pike or with the rental Pokemon of the Battle Factory and
+    // the Slateport Battle Tent, as the summary screen's relearner)
+    if (!InBattlePike() && !InBattleFactory() && !InSlateportBattleTent())
+        AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, MENU_MOVES);
+#endif
+#line 2956 // gba-line
 
     // Add field moves to action list
     for (i = 0; i < MAX_MON_MOVES; i++)
@@ -8915,6 +8941,41 @@ void ItemUseCB_HyperTraining(u8 taskId, TaskFunc task)
 #undef tHtMonId
 #undef tHtStat
 #undef tHtOldFunc
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Move switching as in Legends Z-A (the owner's request of 2026-10-24): MOVES opens the move relearner for the Pokemon,
+// which lists every move it has learned or could have learned and does not know now (include/config/summary_screen.h:
+// level-up moves up to its level, its pre-evolutions' too, egg moves, the game's tutor moves, the TMs and HMs in the
+// bag it is compatible with). A move taken has full PP and no TM is used up; SELECT changes the list's kind, and the
+// relearner comes back here, to this Pokemon's menu. A changed moveset is a party change like any other: the host save
+// follows it (multiplayer_soft_reset.c).
+static const u8 sText_NoMovesToSwitch[] = _("{STR_VAR_1} has no other moves\nto switch to.{PAUSE_UNTIL_PRESS}");
+
+static void CursorCb_Moves(u8 taskId)
+{
+    struct BoxPokemon *boxMon = &gParties[B_TRAINER_PLAYER][gPartyMenu.slotId].box;
+    u32 state;
+
+    PlaySE(SE_SELECT);
+    for (state = 0; state < MOVE_RELEARNER_COUNT; state++)
+        if (CanBoxMonRelearnMoves(boxMon, state))
+            break;
+    if (state == MOVE_RELEARNER_COUNT)
+    {
+        PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[0]);
+        PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[1]);
+        GetMonNickname(&gParties[B_TRAINER_PLAYER][gPartyMenu.slotId], gStringVar1);
+        StringExpandPlaceholders(gStringVar4, sText_NoMovesToSwitch);
+        DisplayPartyMenuMessage(gStringVar4, TRUE);
+        gTasks[taskId].func = Task_ReturnToChooseMonAfterText;
+        return;
+    }
+    gMoveRelearnerState = state;
+    gRelearnMode = RELEARN_MODE_PARTY_MENU;
+    gSpecialVar_0x8004 = gPartyMenu.slotId;
+    sPartyMenuInternal->exitCallback = CB2_InitLearnMove;
+    Task_ClosePartyMenu(taskId);
+}
 #endif
 #line 8628 // gba-line
 #ifdef ENABLE_NATIVE_UI
@@ -9005,7 +9066,7 @@ bool32 PartyMenu_NativeUiState(struct NativePartyMenu *out)
          * runs, and every entry checked against its table. */
         out->numActions = 0;
         if (FuncIsActiveTask(Task_HandleSelectionMenuInput))
-            out->numActions = sPartyMenuInternal->numActions <= 8 ? sPartyMenuInternal->numActions : 8;
+            out->numActions = min(sPartyMenuInternal->numActions, ARRAY_COUNT(out->actions));
         for (i = 0; i < out->numActions; i++)
         {
             u8 action = sPartyMenuInternal->actions[i];

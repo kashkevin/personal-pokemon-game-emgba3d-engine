@@ -468,6 +468,12 @@ static void CB2_MoveRelearnerMain(void)
 
 static bool32 ShouldConsumeTmItem(enum Move move)
 {
+#ifdef PORTABLE
+    // PC game: move switching (include/config/summary_screen.h). A TM in the bag lists its move; teaching it from here
+    // uses nothing up, so a move switched out can be switched back while the TM is there.
+    return FALSE;
+#endif
+#line 471 // gba-line
     if (gMoveRelearnerState != MOVE_RELEARNER_TM_MOVES || gRelearnMode == RELEARN_MODE_SCRIPT)
         return FALSE;
     if (I_REUSABLE_TMS || P_ENABLE_ALL_TM_MOVES)
@@ -563,6 +569,16 @@ static void Task_MoveRelearner_Quit(u8 taskId)
     if (gPaletteFade.active)
         return;
 
+#ifdef PORTABLE
+    if (gRelearnMode == RELEARN_MODE_PARTY_MENU)
+    {
+        // MOVES in the party menu: back to this Pokemon's menu there
+        gLastViewedMonIndex = gTasks[taskId].tPartyIndex;
+        SetMainCallback2(CB2_ReturnToPartyMenuFromSummaryScreen);
+    }
+    else
+#endif
+#line 566 // gba-line
     if (gInitialSummaryScreenCallback != NULL)
     {
         if (gRelearnMode == RELEARN_MODE_PSS_PAGE_CONTEST_MOVES)

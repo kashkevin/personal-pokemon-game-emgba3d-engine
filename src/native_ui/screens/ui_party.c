@@ -690,7 +690,7 @@ static void Draw(int t)
     }
     if (sMenu.phase == NATIVE_PARTY_MENU && sMenu.numActions > 0)
     {
-        struct UiMenuItem items[8];
+        struct UiMenuItem items[ARRAY_COUNT(sMenu.actions)];
 
         for (int i = 0; i < sMenu.numActions; i++)
             items[i] = (struct UiMenuItem){sMenu.actionLabels[i], false};

@@ -171,9 +171,9 @@ struct NativePartyMenu
     bool8 chooseHalf;           /* the screen has a CONFIRM button */
     u16 item;                   /* the item being used or given (ITEM_NONE: none) */
     u8 numActions;
-    u8 actions[8];              /* MENU_* (party_menu.c) */
-    const u8 *actionLabels[8];
-    bool8 actionIsFieldMove[8];
+    u8 actions[9];              /* MENU_* (party_menu.c): SUMMARY, four field moves, MOVES, SWITCH, ITEM, CANCEL */
+    const u8 *actionLabels[9];
+    bool8 actionIsFieldMove[9];
     s8 switchRow;               /* MENU: the row of SWITCH (-1 none) */
     s8 summaryRow;              /* MENU: the row of SUMMARY (-1 none) */
     u8 menuCursor;              /* MENU, MOVES, YES_NO */
