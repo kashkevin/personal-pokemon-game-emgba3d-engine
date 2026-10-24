@@ -75,6 +75,124 @@ class SkipTests(unittest.TestCase):
         self.assertFalse(ax & bx)
 
 
+class GymTests(unittest.TestCase):
+    """The owner's report of 2026-10-24: Dewford's gym "looks sunk". Every
+    gym is the same drawing; Dewford, Fortree and Sootopolis paint its roof
+    and corners with their own metatiles round General's door, Lavaridge
+    draws its sign over a corner."""
+
+    @classmethod
+    def setUpClass(cls):
+        import expansion_assets
+        import gen_voxel_buildings as gen
+        import voxel_building as vb
+        cls.models = {m.name: m for m in gen.build_models(only="gym")}
+        layouts = expansion_assets.emerald_layouts(vb.ROOT)
+        for m in cls.models.values():
+            m._placements = gen.find_placements(m, layouts)
+        gen.drop_overlaps(list(cls.models.values()))
+
+    def where(self, name):
+        return {(p[4], p[1], p[2]) for p in self.models[name]._placements}
+
+    def test_the_gym_stands_where_a_town_paints_it_with_its_own_metatiles(self):
+        gyms = self.where("gym")
+        for place in (("LAYOUT_PETALBURG_CITY", 12, 4), ("LAYOUT_MAUVILLE_CITY", 5, 1),
+                      ("LAYOUT_MOSSDEEP_CITY", 35, 5), ("LAYOUT_DEWFORD_TOWN", 5, 13),
+                      ("LAYOUT_FORTREE_CITY", 19, 7), ("LAYOUT_SOOTOPOLIS_CITY", 28, 28),
+                      ("LAYOUT_SOOTOPOLIS_CITY_LEGENDS_BATTLE", 28, 28)):
+            self.assertIn(place, gyms)
+
+    def test_rustboros_gym_is_its_own_model_only(self):
+        # its drawing has the gym's pixels and more: the gym found there by
+        # its pixels gives way to gym_rustboro, its own reference
+        self.assertNotIn(("LAYOUT_RUSTBORO_CITY", 24, 15), self.where("gym"))
+        self.assertIn(("LAYOUT_RUSTBORO_CITY", 24, 15), self.where("gym_rustboro"))
+
+    def test_lavaridges_gym_is_read_off_its_drawing_on_its_own_cells(self):
+        # its sign over a corner: no copy of the gym's pixels, so the door
+        # search finds it, bounded by the cliff and the hot spring
+        self.assertNotIn("LAYOUT_LAVARIDGE_TOWN", {p[0] for p in self.where("gym")})
+        gym = specs_of("LavaridgeTown")["auto_lavaridgetown_5_15"]
+        self.assertEqual(gym["rect"], (2, 11, 6, 5))
+        self.assertIn((3, 4), gym["owned"])       # the door
+        self.assertIn((0, 0), gym["owned"])       # the roof's back row, General's
+
+
+class DoorSearchTests(unittest.TestCase):
+    """Buildings the door search stopped short of (the owner's report of
+    2026-10-24)."""
+
+    def test_the_contest_hall_is_found_round_generals_door(self):
+        hall = specs_of("LilycoveCity")["auto_lilycovecity_23_24"]
+        self.assertEqual(hall["rect"], (20, 18, 7, 7))
+        self.assertEqual(hall["relief"]["roof"], {"type": "flat"})
+
+    def test_a_walled_in_lintel_is_the_buildings(self):
+        house = specs_of("Route111")["auto_route111_13_113"]
+        self.assertEqual(house["rect"], (11, 109, 5, 5))
+        gates = specs_of("Route110")
+        self.assertEqual(gates["auto_route110_15_16"]["rect"], (14, 12, 6, 5))
+        self.assertEqual(gates["auto_route110_16_88"]["rect"], (15, 84, 6, 5))
+        yard = specs_of("SlateportCity")["auto_slateportcity_26_38"]
+        self.assertEqual((yard["rect"][0], yard["rect"][2]), (24, 8))
+
+    def test_a_house_in_a_cliff_is_its_own_cells(self):
+        house = specs_of("Route114")["auto_route114_29_5"]
+        self.assertEqual(house["rect"], (28, 2, 4, 4))
+
+    def test_a_house_beside_a_center_stands_on_its_own_cells(self):
+        # Fortree's Pokemon Center stands on 4..7 x 3..6: the tree house's
+        # search ran on into it and the house was dropped
+        center = {(x, y) for x in range(4, 8) for y in range(3, 7)}
+        specs = {s["name"]: s for s in
+                 auto_buildings.auto_specs({"LAYOUT_FORTREE_CITY": center}, only_map="FortreeCity")}
+        house = specs["auto_fortreecity_10_3"]
+        x, y, w, h = house["rect"]
+        cells = {(x + i, y + j) for (i, j) in house["owned"]}
+        self.assertEqual((x, y, w, h), (8, 1, 5, 3))
+        self.assertFalse(cells & center)
+
+
+class SpeckTests(unittest.TestCase):
+    """voxel_building.keep_specks: a pixel of the drawing that matches the
+    ground's colour where it stands is the drawing's when walled in by it."""
+
+    def drawing(self, holes):
+        from PIL import Image
+        img = Image.new("RGBA", (12, 10), (0, 0, 0, 0))
+        px = img.load()
+        for v in range(2, 10):
+            for u in range(1, 11):
+                if (u, v) not in holes:
+                    px[u, v] = (200, 150, 90, 255)
+        return img
+
+    def test_a_pin_hole_is_filled_and_the_ground_round_it_is_not(self):
+        import voxel_building as vb
+        holes = {(5, 5), (6, 5)}
+        img = self.drawing(holes)
+        # (0, 4): ground matched by colour too, but at the edge
+        vb.keep_specks(img, {(5, 5): (1, 2, 3), (6, 5): (4, 5, 6), (0, 4): (7, 8, 9)})
+        px = img.load()
+        self.assertEqual(px[5, 5], (1, 2, 3, 255))
+        self.assertEqual(px[6, 5], (4, 5, 6, 255))
+        self.assertEqual(px[0, 4][3], 0)
+
+    def test_a_hole_open_to_the_ground_or_too_big_stays(self):
+        import voxel_building as vb
+        # a notch from the bottom edge: ground
+        notch = {(4, 8), (4, 9)}
+        img = self.drawing(notch)
+        vb.keep_specks(img, {c: (1, 1, 1) for c in notch})
+        self.assertTrue(all(img.load()[c][3] == 0 for c in notch))
+        # a walled-in patch bigger than a pin hole: a courtyard
+        yard = {(u, v) for u in range(3, 7) for v in range(4, 7)}
+        img = self.drawing(yard)
+        vb.keep_specks(img, {c: (1, 1, 1) for c in yard})
+        self.assertTrue(all(img.load()[c][3] == 0 for c in yard))
+
+
 class RoofBandTests(unittest.TestCase):
     def test_a_shallow_roof_has_no_middle(self):
         self.assertIsNone(auto_buildings.roof_band(8))

@@ -955,6 +955,8 @@ def build_models(only=None):
                 make_model(spec, layouts, regular)
         for m in regular:
             m._placements = find_placements(m, layouts_json)
+        drop_overlaps(regular)
+        for m in regular:
             for (lid, px, py, ground, name, odd) in m._placements:
                 cells = taken.setdefault(name, set())
                 cells.update((px + i, py + j) for (i, j) in m.owned)
@@ -1190,6 +1192,7 @@ def _area_xz(poly):
 
 
 _EXISTS = {}    # blockdata path -> on disk: asked for every model
+_WHERE = {}     # blockdata path -> {metatile: [(x, y), ...]}
 _VARIANTS = None
 
 
@@ -1217,6 +1220,66 @@ def layout_variants():
     return _VARIANTS
 
 
+def drop_overlaps(models):
+    """Every building outdoors stands once. Where placements of two models
+    stand on the same cells of a layout, the one with more cells unlike its
+    own reference yields: Rustboro's gym is gym_rustboro's own drawing, and
+    the gym found there by its pixels (anchored_at) gives way to it. A room's
+    furniture is left alone: its pieces stand in the rectangle of the room's
+    walls by design. Sets each model's `_placements` (found if missing)."""
+    layouts_json = None
+    by_layout = {}
+    for k, m in enumerate(models):
+        if getattr(m, "_placements", None) is None:
+            if layouts_json is None:
+                layouts_json = expansion_assets.emerald_layouts(vb.ROOT)
+            m._placements = find_placements(m, layouts_json)
+        if "interior" in m.spec:
+            continue
+        for p in m._placements:
+            by_layout.setdefault(p[4], []).append((len(p[5]), k, p))
+    gone = set()
+    for name, items in by_layout.items():
+        items.sort(key=lambda t: (t[0], t[1]))
+        stood = set()
+        for (_, k, p) in items:
+            cells = {(p[1] + i, p[2] + j) for (i, j) in models[k].owned}
+            if cells & stood:
+                gone.add((k, p[1], p[2], name))
+                print("  %s: at %s %d,%d stands on another model's cells, left out"
+                      % (models[k].name, name, p[1], p[2]))
+                continue
+            stood |= cells
+    for k, m in enumerate(models):
+        m._placements = [p for p in m._placements if (k, p[1], p[2], p[4]) not in gone]
+
+
+def anchored_at(path, blocks, lw, lh, w, h, template, core):
+    """The places (px, py) of a layout, in reading order, where at least one
+    cell of the building's core is the reference's own metatile: the only
+    places find_placements looks at cell by cell.
+
+    Any one cell will do, the first as well as the others: a town may paint
+    any cell of a building, its first too, with its own metatile drawing the
+    same pixels on its own ground. Dewford, Fortree and Sootopolis draw the
+    gym's roof and corners with their own metatiles, its door frame with
+    General's; only the first cell was looked at, so they stood flat (the
+    owner's report of 2026-10-24: Dewford's gym "looks sunk")."""
+    where = _WHERE.get(path)
+    if where is None:
+        where = {}
+        for k, cell in enumerate(blocks):
+            where.setdefault(cell & 0x3FF, []).append((k % lw, k // lw))
+        _WHERE[path] = where
+    places = set()
+    for i, j in core:
+        for (cx, cy) in where.get(template[j * w + i], ()):
+            px, py = cx - i, cy - j
+            if 0 <= px <= lw - w and 0 <= py <= lh - h:
+                places.add((px, py))
+    return sorted(places, key=lambda p: (p[1], p[0]))
+
+
 def find_placements(model, layouts_json):
     """Every place in Hoenn the building stands, with the ground around it.
 
@@ -1230,7 +1293,10 @@ def find_placements(model, layouts_json):
 
     A core cell the map paints with another metatile still matches when it
     draws the building's own pixels: Rustboro paints the Center's and the
-    Mart's corners with its paving round them, not Petalburg's grass.
+    Mart's corners with its paving round them, not Petalburg's grass. So may
+    its first cell, as long as one cell is the reference's own (anchored_at):
+    Dewford, Fortree and Sootopolis paint the gym's roof with their own
+    metatiles round General's door frame.
 
     Each placement carries its own ground metatile: the commonest walkable
     one round it, which that map's atlas is sure to hold.
@@ -1271,54 +1337,50 @@ def find_placements(model, layouts_json):
             continue
         blocks = vb.read_u16(path)
         lw, lh = entry["width"], entry["height"]
-        i0, j0 = core[0]
-        for py in range(lh - h + 1):
-            for px in range(lw - w + 1):
-                if (blocks[(py + j0) * lw + px + i0] & 0x3FF) != template[j0 * w + i0]:
+        for (px, py) in anchored_at(path, blocks, lw, lh, w, h, template, core):
+            if not all((blocks[(py + j) * lw + px + i] & 0x3FF) == template[j * w + i]
+                       or same_building_pixels(model, entry["id"],
+                                               blocks[(py + j) * lw + px + i] & 0x3FF, i, j)
+                       for i, j in core):
+                continue
+            if "owned" in model.spec and (px, py) not in model.spec.get("repeat_at", [(x, y)]):
+                continue
+            if "interior" in model.spec:
+                # a room's piece belongs to its place in the room: a stool
+                # drawn like another stands only where it was drawn, and
+                # on the room's floor, whatever the cells round it are;
+                # and in another layout only if the room is the same room,
+                # or it would lend half a room to a different one
+                if (px, py) != (x, y):
                     continue
-                if not all((blocks[(py + j) * lw + px + i] & 0x3FF) == template[j * w + i]
-                           or same_building_pixels(model, entry["id"],
-                                                   blocks[(py + j) * lw + px + i] & 0x3FF, i, j)
-                           for i, j in core):
+                if entry["id"] != ref.id and (
+                        (lw, lh) != (ref.w, ref.h)
+                        or any((blocks[k] & 0x3FF) != (ref.blocks[k] & 0x3FF)
+                               for k in range(lw * lh))):
                     continue
-                if "owned" in model.spec and (px, py) not in model.spec.get("repeat_at", [(x, y)]):
-                    continue
-                if "interior" in model.spec:
-                    # a room's piece belongs to its place in the room: a stool
-                    # drawn like another stands only where it was drawn, and
-                    # on the room's floor, whatever the cells round it are;
-                    # and in another layout only if the room is the same room,
-                    # or it would lend half a room to a different one
-                    if (px, py) != (x, y):
+                odd = [(i, j) for j in range(h) for i in range(w)
+                       if (blocks[(py + j) * lw + px + i] & 0x3FF) != template[j * w + i]]
+                found.append((index + 1, px, py, model.ground_metatile, entry["id"], odd))
+                continue
+            ring = {}
+            for yy in range(py - 1, py + h + 1):
+                for xx in range(px - 1, px + w + 1):
+                    inside = px <= xx < px + w and py <= yy < py + h
+                    if inside or not (0 <= xx < lw and 0 <= yy < lh):
                         continue
-                    if entry["id"] != ref.id and (
-                            (lw, lh) != (ref.w, ref.h)
-                            or any((blocks[k] & 0x3FF) != (ref.blocks[k] & 0x3FF)
-                                   for k in range(lw * lh))):
+                    cell = blocks[yy * lw + xx]
+                    if cell & 0xC00:
                         continue
-                    odd = [(i, j) for j in range(h) for i in range(w)
-                           if (blocks[(py + j) * lw + px + i] & 0x3FF) != template[j * w + i]]
-                    found.append((index + 1, px, py, model.ground_metatile, entry["id"], odd))
-                    continue
-                ring = {}
-                for yy in range(py - 1, py + h + 1):
-                    for xx in range(px - 1, px + w + 1):
-                        inside = px <= xx < px + w and py <= yy < py + h
-                        if inside or not (0 <= xx < lw and 0 <= yy < lh):
-                            continue
-                        cell = blocks[yy * lw + xx]
-                        if cell & 0xC00:
-                            continue
-                        ring[cell & 0x3FF] = ring.get(cell & 0x3FF, 0) + 1
-                ground = max(ring, key=ring.get) if ring else model.ground_metatile
-                odd = [(i, j) for j in range(h) for i in range(w) if (i, j) in model.owned
-                       and (blocks[(py + j) * lw + px + i] & 0x3FF) != template[j * w + i]]
-                if model.spec.get("relief", {}).get("upper"):
-                    # only the upper layer is modelled: the map paints the
-                    # rest of every cell, its ground's edges as drawn
-                    odd = sorted(model.owned)
-                    model.spec.setdefault("patch_all", set()).add(entry["id"])
-                found.append((index + 1, px, py, ground, entry["id"], odd))
+                    ring[cell & 0x3FF] = ring.get(cell & 0x3FF, 0) + 1
+            ground = max(ring, key=ring.get) if ring else model.ground_metatile
+            odd = [(i, j) for j in range(h) for i in range(w) if (i, j) in model.owned
+                   and (blocks[(py + j) * lw + px + i] & 0x3FF) != template[j * w + i]]
+            if model.spec.get("relief", {}).get("upper"):
+                # only the upper layer is modelled: the map paints the
+                # rest of every cell, its ground's edges as drawn
+                odd = sorted(model.owned)
+                model.spec.setdefault("patch_all", set()).add(entry["id"])
+            found.append((index + 1, px, py, ground, entry["id"], odd))
     # and the rooms that repeat a piece of furniture's tiles (reuse_pieces):
     # on a modelled room's floor, or, in a room nobody modelled, on its
     # commonest floor with the rest of its cells laid over it as patches
@@ -1485,11 +1547,9 @@ def export(models, path):
     layouts_json = expansion_assets.emerald_layouts(vb.ROOT)
     layouts = {}
     found = []
+    drop_overlaps(models)
     for index, m in enumerate(models):
-        placed = getattr(m, "_placements", None)
-        if placed is None:
-            placed = find_placements(m, layouts_json)
-        for lid, px, py, ground, name, odd in placed:
+        for lid, px, py, ground, name, odd in m._placements:
             cells = placement_patches(m, name, layouts, px, py, odd)
             found.append((lid, index, px, py, ground, cells, name))
             if odd:
@@ -1652,13 +1712,13 @@ def ground_variants(models, layouts_json):
 
 def town_preview(models, layout_id, out_dir):
     """A whole layout with every model placed in it, by the console's rules."""
-    layouts_json = expansion_assets.emerald_layouts(vb.ROOT)
     layout = vb.LayoutArt(layout_id)
     override, items = {}, []
+    drop_overlaps(models)
     for m in models:
         w, h = m.cells
         tops = cell_heights(m)
-        for lid, px, py, ground, name, odd in find_placements(m, layouts_json):
+        for lid, px, py, ground, name, odd in m._placements:
             if name != layout_id:
                 continue
             for j in range(h):

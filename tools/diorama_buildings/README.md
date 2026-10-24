@@ -55,6 +55,16 @@ gradenGnostic/pokeemerald-multiplatform (MIT) for the logic it reuses.
   (behind it, seen from above) is laid with the middle of its own roof (`roof_band`):
   `voxel_building.py`'s `Relief` takes `fill`, the drawing's rows to repeat there, where
   it repeated the roof's last rows - its eave, which read as a second roof.
+* The owner's report of 2026-10-24 (project-owned; tests in `test_auto_buildings.py`
+  `GymTests`, `DoorSearchTests`, `SpeckTests`): `gen_voxel_buildings.py` `find_placements`
+  looks for a spec's copies wherever any cell of its core is the reference's own metatile
+  (`anchored_at`; it only looked where the first cell was, so the gyms Dewford, Fortree and
+  Sootopolis paint with their own roof stood flat), and `drop_overlaps` keeps one model per
+  cell outdoors. `auto_buildings.py`: General's gym pieces and the Contest Hall's door are
+  building cells, a walkable lintel walled in over a door is the building's, the search does
+  not run into a spec model's cells, and `OVERRIDES` bounds Lavaridge's gym, Route 110's
+  gatehouses, Stern's shipyard and the Fossil Maniac's house. `voxel_building.py`
+  `keep_specks`: pin holes the per-pixel ground test punched in a drawing are filled.
 * `window_glow.py` (new, project-owned; tests in `test_window_glow.py`): the windows of
   the buildings of outdoor maps, found on their pages (glass-coloured panes in a darker
   frame, on faces that stand upright, never a wall's own colour; and dark blue panes
