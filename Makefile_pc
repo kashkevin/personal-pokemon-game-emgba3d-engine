@@ -281,7 +281,7 @@ OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS) $(BFX_QJS_OBJS)
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
-.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-legend check-shiny check-coins check-breeding check-rival check-update32 check-species-data check-clock check-mp-objects check-spawn-claims check-secret-base check-rewards check-catch-reconcile check-pokenav-map check-ladder check-coop-exp check-coop-controller check-tower check-keybinds check-graphics-mode
+.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-legend check-shiny check-coins check-breeding check-rival check-update32 check-hm-box check-species-data check-clock check-mp-objects check-spawn-claims check-secret-base check-rewards check-catch-reconcile check-pokenav-map check-ladder check-coop-exp check-coop-controller check-tower check-keybinds check-graphics-mode
 .SUFFIXES:
 .SECONDARY:
 .DELETE_ON_ERROR:
@@ -421,6 +421,12 @@ check-rival: $(TARGET)
 check-update32: $(TARGET)
 	@./$(TARGET) --selftest-update32 > $(OBJ_DIR)/selftest-update32.log 2>&1; status=$$?; \
 	  tail -n 3 $(OBJ_DIR)/selftest-update32.log; exit $$status
+
+# HMs from the PC boxes (the owner's request of 2026-10-24): the box search (every box and slot, Eggs and empty slots
+# skipped), checkfieldmove's party-then-boxes user with the badges unchanged, Surf's check, the boxed user's name and cut-in.
+check-hm-box: $(TARGET)
+	@./$(TARGET) --selftest-hm-box > $(OBJ_DIR)/selftest-hm-box.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-hm-box.log; exit $$status
 
 # Species data, moves, abilities, trainers, wild level tables: fingerprints against the pre-update baseline.
 check-species-data: $(TARGET)

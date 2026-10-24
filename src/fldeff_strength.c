@@ -9,6 +9,10 @@
 #include "task.h"
 #include "constants/event_objects.h"
 #include "constants/field_effects.h"
+#ifdef PORTABLE
+#include "field_move.h" // HMs from the PC boxes
+#endif
+#line 12 // gba-line
 
 // static functions
 static void FieldCallback_Strength(void);
@@ -39,6 +43,16 @@ bool8 FldEff_UseStrength(void)
     u8 taskId = CreateFieldMoveTask();
     gTasks[taskId].data[8] = (u32)StartStrengthFieldEffect >> 16;
     gTasks[taskId].data[9] = (u32)StartStrengthFieldEffect;
+#ifdef PORTABLE
+    // HMs from the PC boxes: a boxed Pokemon's Strength (FIELD_MOVE_BOX_USER, field_move.c)
+    if (gFieldEffectArguments[0] == FIELD_MOVE_BOX_USER)
+    {
+        GetBoxMonData(FieldMove_UserBoxMon(FIELD_MOVE_BOX_USER), MON_DATA_NICKNAME, gStringVar1);
+        StringGet_Nickname(gStringVar1);
+    }
+    else
+#endif
+#line 42 // gba-line
     GetMonNickname(&gParties[B_TRAINER_PLAYER][gFieldEffectArguments[0]], gStringVar1);
     return FALSE;
 }

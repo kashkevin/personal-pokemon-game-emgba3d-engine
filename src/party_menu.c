@@ -2984,6 +2984,28 @@ static void SetPartyMonFieldSelectionActions(struct Pokemon *mons, u8 slotId)
             }
         }
     }
+#ifdef PORTABLE
+    // HMs from the PC boxes (field_move.c): Fly and Flash are used only from this list, so one that a boxed Pokemon knows
+    // and no party Pokemon does is offered on every Pokemon's list once its badge is had, while the list has room for it
+    // and the rows still to come (SWITCH, ITEM or MAIL, CANCEL). Chosen, the boxed Pokemon uses it (CursorCb_FieldMove).
+    {
+        static const u8 sBoxFieldMoves[] = {FIELD_MOVE_FLY, FIELD_MOVE_FLASH};
+        u32 rowsToCome = 1 + (InBattlePike() ? 0 : 1 + (GetMonData(&mons[1], MON_DATA_SPECIES) != SPECIES_NONE));
+
+        for (i = 0; i < ARRAY_COUNT(sBoxFieldMoves); i++)
+        {
+            enum Move move = FieldMove_GetMoveId(sBoxFieldMoves[i]);
+
+            if (sPartyMenuInternal->numActions + 1 + rowsToCome > ARRAY_COUNT(sPartyMenuInternal->actions))
+                break;
+            if (FieldMove_IsVisible(sBoxFieldMoves[i]) && IsFieldMoveUnlocked(sBoxFieldMoves[i])
+             && !FieldMove_PartyMonKnowsMove(move) && FieldMove_FindBoxMonWithMove(move, NULL, NULL))
+                AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions,
+                             sBoxFieldMoves[i] + MENU_FIELD_MOVES);
+        }
+    }
+#endif
+#line 2972 // gba-line
 
     if (!InBattlePike())
     {
@@ -4108,6 +4130,14 @@ static void CursorCb_FieldMove(u8 taskId)
     PlaySE(SE_SELECT);
     if (gFieldMoveInfo[fieldMove].fieldMoveFunc == NULL)
         return;
+#ifdef PORTABLE
+    // HMs from the PC boxes: a move the chosen Pokemon does not know was offered from the boxes
+    // (SetPartyMonFieldSelectionActions): the boxed Pokemon that knows it uses it (field_move.c)
+    FieldMove_SetPartyMenuUserBoxed(!MonKnowsMove(&gParties[B_TRAINER_PLAYER][gPartyMenu.slotId],
+                                                  FieldMove_GetMoveId(fieldMove))
+                                    && FieldMove_TakeBoxUser(FieldMove_GetMoveId(fieldMove)));
+#endif
+#line 4096 // gba-line
 
     PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[0]);
     PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[1]);

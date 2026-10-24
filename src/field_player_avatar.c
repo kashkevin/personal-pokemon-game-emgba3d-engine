@@ -36,6 +36,10 @@
 #include "constants/moves.h"
 #include "constants/songs.h"
 #include "constants/trainer_types.h"
+#ifdef PORTABLE
+#include "field_move.h" // HMs from the PC boxes
+#endif
+#line 39 // gba-line
 
 #define NUM_FORCED_MOVEMENTS 22
 #define NUM_ACRO_BIKE_COLLISIONS 5
@@ -1637,6 +1641,12 @@ bool8 PartyHasMonWithSurf(void)
             if (MonKnowsMove(&gParties[B_TRAINER_PLAYER][i], MOVE_SURF))
                 return TRUE;
         }
+#ifdef PORTABLE
+        // HMs from the PC boxes: a boxed Pokemon that knows Surf counts too (field_move.c; the callers check the badge)
+        if (FieldMove_FindBoxMonWithMove(MOVE_SURF, NULL, NULL))
+            return TRUE;
+#endif
+#line 1640 // gba-line
     }
     return FALSE;
 }

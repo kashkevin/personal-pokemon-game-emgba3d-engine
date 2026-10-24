@@ -2150,6 +2150,12 @@ bool8 ScrCmd_bufferpartymonnick(struct ScriptContext *ctx)
 
     Script_RequestEffects(SCREFF_V1);
 
+#ifdef PORTABLE
+    if (partyIndex == FIELD_MOVE_BOX_USER) // HMs from the PC boxes: a boxed Pokemon using a field move (field_move.c)
+        GetBoxMonData(FieldMove_UserBoxMon(partyIndex), MON_DATA_NICKNAME, GetStringVar(stringVarIndex));
+    else
+#endif
+#line 2143 // gba-line
     GetMonData(&gParties[B_TRAINER_PLAYER][partyIndex], MON_DATA_NICKNAME, GetStringVar(stringVarIndex));
     StringGet_Nickname(GetStringVar(stringVarIndex));
     return FALSE;
@@ -2326,6 +2332,16 @@ bool8 ScrCmd_checkfieldmove(struct ScriptContext *ctx)
             break;
         }
     }
+#ifdef PORTABLE
+    // HMs from the PC boxes (the owner's request of 2026-10-24): no party Pokemon knows the HM, a boxed one does - it
+    // uses the move from its box, as the party index FIELD_MOVE_BOX_USER (field_move.c). The badge check above stays.
+    if (gSpecialVar_Result == PARTY_SIZE && FieldMove_TakeBoxUser(move))
+    {
+        gSpecialVar_Result = FIELD_MOVE_BOX_USER;
+        gSpecialVar_0x8004 = GetBoxMonData(FieldMove_UserBoxMon(FIELD_MOVE_BOX_USER), MON_DATA_SPECIES);
+    }
+#endif
+#line 2319 // gba-line
 
     return FALSE;
 }

@@ -12,6 +12,10 @@
 #include "fieldmap.h"
 #include "party_menu.h"
 #include "fldeff.h"
+#ifdef PORTABLE
+#include "field_move.h" // HMs from the PC boxes
+#endif
+#line 15 // gba-line
 
 EWRAM_DATA static bool8 sIsRegisteelPuzzle = 0;
 
@@ -232,7 +236,14 @@ bool8 ShouldDoBrailleRegisteelEffect(void)
 
 void SetUpPuzzleEffectRegisteel(void)
 {
+#ifdef PORTABLE
+    // HMs from the PC boxes: Registeel's door opened by a boxed Pokemon's Flash chosen in the party menu (field_move.c)
+    gFieldEffectArguments[0] = FieldMove_PartyMenuUser(GetCursorSelectionMonId());
+#else
+#line 235 // gba-line
     gFieldEffectArguments[0] = GetCursorSelectionMonId();
+#endif
+#line 236 // gba-line
     FieldEffectStart(FLDEFF_USE_TOMB_PUZZLE_EFFECT);
 }
 

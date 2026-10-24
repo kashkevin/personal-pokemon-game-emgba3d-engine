@@ -62,4 +62,17 @@ static inline bool32 FieldMove_IsVisible(enum FieldMove fieldMove)
     return !gFieldMoveInfo[fieldMove].hideIfLocked || IsFieldMoveUnlocked(fieldMove);
 }
 
+#ifdef PORTABLE
+// HMs from the PC boxes (PC only, src/field_move.c): an HM is usable outside battle when a Pokemon in the party or in a
+// PC box knows it. A boxed user stays in its box; scripts and field effects carry it as this party index.
+#define FIELD_MOVE_BOX_USER (PARTY_SIZE + 1)
+struct BoxPokemon;
+bool32 FieldMove_FindBoxMonWithMove(enum Move move, u32 *boxId, u32 *position);
+bool32 FieldMove_PartyMonKnowsMove(enum Move move);
+bool32 FieldMove_TakeBoxUser(enum Move move);
+struct BoxPokemon *FieldMove_UserBoxMon(u32 slot);
+void FieldMove_SetPartyMenuUserBoxed(bool32 boxed);
+u32 FieldMove_PartyMenuUser(u32 slot);
+#endif
+
 #endif //GUARD_FIELD_MOVE_H

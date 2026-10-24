@@ -59,6 +59,8 @@
 #include "constants/trainer_types.h"
 #include "field_message_box.h"
 #include "field_player_avatar.h"
+#include "field_effect.h"
+#include "constants/field_effects.h"
 #include "fieldmap.h"
 #include "constants/multiplayer_balance.h"
 #include "constants/multiplayer_rival.h"
@@ -216,6 +218,15 @@ static struct
     int bagItems[4], bagItemCount;
     bool bagLogged;
     u32 bagSeen[5];
+    /* PKMN_TEST_BOX="box:slot:species:level[:flags];..." (HMs from the PC boxes, src/field_move.c): Pokemon put in the PC
+       boxes as the test starts, in memory (boxes and slots from 0; CreateTestMon's flags, E: an Egg); PKMN_TEST_HM_LOG=1:
+       "hm field: ..." whenever the field move's cut-in, the player's surfing, place or facing, the last object talked to
+       (its flag: hidden, e.g. a tree cut), the party or the first boxed Pokemon change; what was last logged, pictures
+       taken */
+    char box[256];
+    int boxFirst[2];
+    bool hmLog, hmLogged;
+    int hmSeen[13], hmShots;
 } s;
 
 /* PKMN_TEST_LOG=<file>: every line the driver logs is also appended to that file (a check on Windows reads it: the
@@ -345,6 +356,11 @@ static void Init(void)
     value = SDL_getenv("PKMN_TEST_PARTY");
     if (value != NULL)
         SDL_strlcpy(s.party, value, sizeof(s.party));
+    value = SDL_getenv("PKMN_TEST_BOX");
+    if (value != NULL)
+        SDL_strlcpy(s.box, value, sizeof(s.box));
+    s.boxFirst[0] = -1;
+    s.hmLog = EnvInt("PKMN_TEST_HM_LOG", 0) != 0;
     value = SDL_getenv("PKMN_TEST_FOE");
     if (value != NULL)
         SDL_strlcpy(s.foe, value, sizeof(s.foe));
@@ -587,6 +603,53 @@ static void SetUpTestParty(void)
     }
     CalculatePlayerPartyCount();
     FlagSet(FLAG_SYS_POKEMON_GET);  /* as any player with a Pokemon: the start menu offers POKeMON */
+}
+
+/* PKMN_TEST_BOX="box:slot:species:level[:flags];...": those Pokemon in the PC boxes (in memory; with save:1 in the save),
+ * each logged with its moves. Flags as CreateTestMon's (v<move>: that move in the first slot), and E: an Egg. */
+static void SetUpTestBox(void)
+{
+    const char *p = s.box;
+
+    while (*p != '\0')
+    {
+        struct Pokemon mon;
+        int box = 0, slot = 0, species = 0, level = 0, used = 0;
+        const char *flags = NULL;
+        bool egg = false;
+
+        if (sscanf(p, "%d:%d:%d:%d%n", &box, &slot, &species, &level, &used) < 4)
+            break;
+        p += used;
+        if (*p == ':')
+            flags = ++p;
+        for (const char *f = flags; f != NULL && *f != '\0' && *f != ';'; f++)
+            egg |= *f == 'E';
+        if (box >= 0 && box < TOTAL_BOXES_COUNT && slot >= 0 && slot < IN_BOX_COUNT)
+        {
+            CreateTestMon(&mon, species, level, flags);
+            if (egg)
+            {
+                bool32 isEgg = TRUE;
+
+                SetMonData(&mon, MON_DATA_IS_EGG, &isEgg);
+            }
+            SetBoxMonAt(box, slot, &mon.box);
+            if (s.boxFirst[0] < 0)
+            {
+                s.boxFirst[0] = box;
+                s.boxFirst[1] = slot;
+            }
+            TestLog("Battle env test: box %d slot %d: species %u egg %u moves %u %u %u %u", box, slot,
+                    GetBoxMonDataAt(box, slot, MON_DATA_SPECIES), GetBoxMonDataAt(box, slot, MON_DATA_IS_EGG),
+                    GetBoxMonDataAt(box, slot, MON_DATA_MOVE1), GetBoxMonDataAt(box, slot, MON_DATA_MOVE2),
+                    GetBoxMonDataAt(box, slot, MON_DATA_MOVE3), GetBoxMonDataAt(box, slot, MON_DATA_MOVE4));
+        }
+        while (*p != '\0' && *p != ';')
+            p++;
+        if (*p == ';')
+            p++;
+    }
 }
 
 /* PKMN_TEST_DAYCARE="species:level[:flags];species:level[:flags]": the two Pokemon left at the Day Care (Route 117) as
@@ -987,6 +1050,70 @@ static void TrainLogField(void)
             now[0], now[1], now[2], now[3], now[4], now[5], now[6], now[7], now[8], now[9], now[10], now[11], now[12]);
 }
 
+/* PKMN_TEST_HM_LOG (HMs from the PC boxes), while PKMN_TEST_FIELD_KEYS run: the party's moves once, then "hm field: ..."
+ * whenever one of these changes - the field move's cut-in (up: the species, shininess and personality it shows, as
+ * FldEff_FieldMoveShowMonInit set them), the player's surfing, place and facing (1 down, 2 up, 3 left, 4 right), the
+ * last object talked to and its flag (1: hidden, e.g. a tree cut down), the party's species and the first PKMN_TEST_BOX
+ * Pokemon's species (still in its box) - with the field key frame */
+static void HmLogField(void)
+{
+    int now[13], used;
+    char party[64];
+    bool showing;
+
+    if (!s.hmLog || gMain.inBattle || !s.fieldKeysActive || gSaveBlock1Ptr == NULL)
+        return;     /* from the test's set-up on (PKMN_TEST_BATTLE=field: the party, the boxes, the badges) */
+    showing = FieldEffectActiveListContains(FLDEFF_FIELD_MOVE_SHOW_MON);
+    now[0] = showing;
+    now[1] = showing ? (int)(gFieldEffectArguments[0] & 0xFFFF) : 0;
+    now[2] = showing ? (int)gFieldEffectArguments[1] : 0;
+    now[3] = showing ? (int)gFieldEffectArguments[2] : 0;
+    now[4] = TestPlayerAvatarFlags(PLAYER_AVATAR_FLAG_SURFING) != 0;
+    now[5] = gSaveBlock1Ptr->pos.x;
+    now[6] = gSaveBlock1Ptr->pos.y;
+    now[7] = gSpecialVar_LastTalked;
+    now[8] = gSpecialVar_LastTalked != 0 ? FlagGet(GetObjectEventFlagIdByLocalIdAndMap(gSpecialVar_LastTalked,
+                gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->location.mapGroup)) : -1;
+    now[9] = 0;
+    for (int i = 0; i < PARTY_SIZE; i++)
+        now[9] = now[9] * 31 + (int)GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_SPECIES);
+    now[10] = s.boxFirst[0] >= 0 ? (int)GetBoxMonDataAt(s.boxFirst[0], s.boxFirst[1], MON_DATA_SPECIES) : -1;
+    now[11] = gSaveBlock1Ptr->location.mapGroup * 256 + gSaveBlock1Ptr->location.mapNum;
+    now[12] = GetPlayerFacingDirection();
+    if (s.hmLogged && memcmp(now, s.hmSeen, sizeof(now)) == 0)
+        return;
+    if (!s.hmLogged)
+    {
+        /* once: every party Pokemon's moves (what it knows: none of the HM tried, in the tests from the boxes) */
+        for (int i = 0; i < PARTY_SIZE; i++)
+        {
+            struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][i];
+
+            if (GetMonData(mon, MON_DATA_SPECIES) != SPECIES_NONE)
+                TestLog("Battle env test: hm party %d: species %u egg %u moves %u %u %u %u", i,
+                        GetMonData(mon, MON_DATA_SPECIES), GetMonData(mon, MON_DATA_IS_EGG), GetMonData(mon, MON_DATA_MOVE1),
+                        GetMonData(mon, MON_DATA_MOVE2), GetMonData(mon, MON_DATA_MOVE3), GetMonData(mon, MON_DATA_MOVE4));
+        }
+    }
+    /* with PKMN_TEST_MEGA_SHOT_STEM: a picture <stem>-8N of the cut-in once its Pokemon is on screen, of the player on
+       the water, of the object talked to gone (a tree cut, a rock smashed) */
+    if (s.hmLogged && now[0] && !s.hmSeen[0])
+        RequestShot(80 + s.hmShots++ % 10, 40, "the field move's cut-in");
+    else if (s.hmLogged && now[4] && !s.hmSeen[4])
+        RequestShot(80 + s.hmShots++ % 10, 40, "surfing");
+    else if (s.hmLogged && now[8] == 1 && s.hmSeen[8] == 0 && now[7] == s.hmSeen[7])
+        RequestShot(80 + s.hmShots++ % 10, 20, "the object talked to is gone");
+    s.hmLogged = true;
+    memcpy(s.hmSeen, now, sizeof(now));
+    used = 0;
+    for (int i = 0; i < PARTY_SIZE && used < (int)sizeof(party); i++)
+        used += snprintf(party + used, sizeof(party) - used, "%s%u", i ? "," : "",
+                         GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_SPECIES));
+    TestLog("Battle env test: hm field: frame %d cut-in %d species %d shiny %d personality %08x surfing %d map %d.%d at "
+            "%d,%d facing %d last talked %d flag %d party %s box %d", s.fieldKeyFrames, now[0], now[1], now[2],
+            (unsigned)now[3], now[4], now[11] >> 8, now[11] & 0xFF, now[5], now[6], now[12], now[7], now[8], party, now[10]);
+}
+
 /* PKMN_TEST_BAG_LOG off a battle: "bag field: money M item I count C [item I count C ...]" whenever the money or one of
  * the named items' count in the Bag changes - a Poke Mart purchase or sale, saved and loaded. */
 static void BagLogField(void)
@@ -1141,6 +1268,8 @@ static void StartFieldKeys(int frames)
  * floor's intro, the battle against the floor's trainer, the end: healed, held items back, no money moved, the result in
  * the save's Tower record), without a host (the test ticket is never sent). The opposing party is logged as the battle
  * built it (TowerLogParty) and the end once the field is back (TowerLogEnd). */
+static void ApplyTestBadges(void);
+
 static void StartTowerFloor(int floor)
 {
     s.towerFloor = floor;
@@ -1149,8 +1278,18 @@ static void StartTowerFloor(int floor)
     /* The Set battle style (in memory, as PKMN_TEST_STRONG's): the Shift style's "switch?" question after each opposing
      * Pokemon falls has no answer the fight's A presses can give. */
     gSaveBlock2Ptr->optionsBattleStyle = OPTIONS_BATTLE_STYLE_SET;
-    /* PKMN_TEST_BADGES=n and PKMN_TEST_CHAMPION=0/1: the badges and the Hall of Fame flag in memory, for the Tower
-     * experience cap's runs (tools/battle_env/tower_check.py --caps) */
+    ApplyTestBadges();
+    if (!TowerLegends_TestStartSolo(floor))
+        TestLog("Battle env test: tower floor %d does not exist", floor);
+    else
+        TestLog("Battle env test: tower floor %d: the intro, then the battle (money %u, cap %u)", floor, s.towerMoney,
+                TowerLegends_ExpCap());
+}
+
+/* PKMN_TEST_BADGES=n and PKMN_TEST_CHAMPION=0/1: the badges and the Hall of Fame flag in memory, for the Tower experience
+ * cap's runs (tools/battle_env/tower_check.py --caps) and the field moves' badges (any test kind, StartBattle) */
+static void ApplyTestBadges(void)
+{
     if (getenv("PKMN_TEST_BADGES") != NULL)
     {
         int badges = EnvInt("PKMN_TEST_BADGES", 0);
@@ -1170,11 +1309,6 @@ static void StartTowerFloor(int floor)
         else
             FlagClear(FLAG_SYS_GAME_CLEAR);
     }
-    if (!TowerLegends_TestStartSolo(floor))
-        TestLog("Battle env test: tower floor %d does not exist", floor);
-    else
-        TestLog("Battle env test: tower floor %d: the intro, then the battle (money %u, cap %u)", floor, s.towerMoney,
-                TowerLegends_ExpCap());
 }
 
 static void TowerLogMon(const char *side, u32 slot, struct Pokemon *mon)
@@ -1228,6 +1362,9 @@ static void StartBattle(void)
             gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum,
             gSaveBlock1Ptr->pos.x, gSaveBlock1Ptr->pos.y);
     SetUpTestParty();
+    SetUpTestBox();
+    if (getenv("PKMN_TEST_BADGES") != NULL)
+        ApplyTestBadges();
     SetUpTestDaycare();
     if (s.name[0] != '\0')
     {
@@ -2562,6 +2699,7 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
     TrainLogField();
     BreedLogField();
     BagLogField();
+    HmLogField();
     ShotTick();
     /* PKMN_TEST_PLAN: once the autopilot brought the field up, the plan's keys alone */
     if (sPlan.phase != PLAN_OFF && SDL_AtomicGet(&s.fieldSeen) != 0)

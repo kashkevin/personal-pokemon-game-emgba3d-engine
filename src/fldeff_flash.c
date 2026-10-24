@@ -16,6 +16,10 @@
 #include "sprite.h"
 #include "task.h"
 #include "constants/songs.h"
+#ifdef PORTABLE
+#include "field_move.h" // HMs from the PC boxes
+#endif
+#line 19 // gba-line
 
 struct FlashStruct
 {
@@ -93,7 +97,14 @@ bool32 SetUpFieldMove_Flash(void)
 static void FieldCallback_Flash(void)
 {
     u8 taskId = CreateFieldMoveTask();
+#ifdef PORTABLE
+    // HMs from the PC boxes: Flash chosen in the party menu for a boxed Pokemon (FIELD_MOVE_BOX_USER, field_move.c)
+    gFieldEffectArguments[0] = FieldMove_PartyMenuUser(GetCursorSelectionMonId());
+#else
+#line 96 // gba-line
     gFieldEffectArguments[0] = GetCursorSelectionMonId();
+#endif
+#line 97 // gba-line
     gTasks[taskId].data[8] = (uintptr_t)FldEff_UseFlash >> 16;
     gTasks[taskId].data[9] = (uintptr_t)FldEff_UseFlash;
 }

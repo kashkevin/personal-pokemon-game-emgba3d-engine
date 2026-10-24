@@ -40,6 +40,10 @@
 #include "constants/metatile_behaviors.h"
 #include "constants/rgb.h"
 #include "constants/songs.h"
+#ifdef PORTABLE
+#include "field_move.h" // HMs from the PC boxes
+#endif
+#line 43 // gba-line
 
 #define subsprite_table(ptr) {.subsprites = ptr, .subspriteCount = (sizeof ptr) / (sizeof(struct Subsprite))}
 
@@ -1529,9 +1533,18 @@ static void Task_UseFly(u8 taskId)
             if (!IsWeatherNotFadingIn())
                 return;
 
+#ifdef PORTABLE
+            // HMs from the PC boxes: Fly chosen in the party menu for a boxed Pokemon (FIELD_MOVE_BOX_USER, field_move.c)
+            gFieldEffectArguments[0] = FieldMove_PartyMenuUser(GetCursorSelectionMonId());
+            if ((int)gFieldEffectArguments[0] > PARTY_SIZE - 1 && gFieldEffectArguments[0] != FIELD_MOVE_BOX_USER)
+                gFieldEffectArguments[0] = 0;
+#else
+#line 1532 // gba-line
             gFieldEffectArguments[0] = GetCursorSelectionMonId();
             if ((int)gFieldEffectArguments[0] > PARTY_SIZE - 1)
                 gFieldEffectArguments[0] = 0;
+#endif
+#line 1535 // gba-line
 
             FieldEffectStart(FLDEFF_USE_FLY);
             fieldEffectStarted = TRUE;
@@ -2938,10 +2951,29 @@ bool8 FldEff_FieldMoveShowMonInit(void)
 {
     struct Pokemon *pokemon;
     bool32 noDucking = gFieldEffectArguments[0] & SHOW_MON_CRY_NO_DUCKING;
+#ifdef PORTABLE
+    if ((u8)gFieldEffectArguments[0] == FIELD_MOVE_BOX_USER)
+    {
+        // HMs from the PC boxes: the boxed Pokemon that used the move as it is in its box (species and form, shininess,
+        // personality), from the copy taken when it was chosen (field_move.c); no party slot is read
+        struct BoxPokemon *boxMon = FieldMove_UserBoxMon(FIELD_MOVE_BOX_USER);
+
+        gFieldEffectArguments[0] = GetBoxMonData(boxMon, MON_DATA_SPECIES);
+        gFieldEffectArguments[1] = GetBoxMonData(boxMon, MON_DATA_IS_SHINY);
+        gFieldEffectArguments[2] = GetBoxMonData(boxMon, MON_DATA_PERSONALITY);
+    }
+    else
+    {
+#endif
+#line 2941 // gba-line
     pokemon = &gParties[B_TRAINER_PLAYER][(u8)gFieldEffectArguments[0]];
     gFieldEffectArguments[0] = GetMonData(pokemon, MON_DATA_SPECIES);
     gFieldEffectArguments[1] = GetMonData(pokemon, MON_DATA_IS_SHINY);
     gFieldEffectArguments[2] = GetMonData(pokemon, MON_DATA_PERSONALITY);
+#ifdef PORTABLE
+    }
+#endif
+#line 2945 // gba-line
     gFieldEffectArguments[0] |= noDucking;
     FieldEffectStart(FLDEFF_FIELD_MOVE_SHOW_MON);
     FieldEffectActiveListRemove(FLDEFF_FIELD_MOVE_SHOW_MON_INIT);
