@@ -315,6 +315,16 @@ MauvilleCity_GameCorner_EventScript_TMIceBeam::
 
 MauvilleCity_GameCorner_EventScript_ConfirmTMPrize::
 	special BufferTMHMMoveName
+.ifdef PORTABLE
+	@ PC game: a TM is never used up (include/config/item.h I_REUSABLE_TMS) and, an important item, can't be sold or
+	@ tossed, so a second one would be coins thrown away. One in the Bag or the PC is refused before any coins are taken,
+	@ as the shops show it sold out (shop.c). The 3D prize counter (src/native_ui/screens/ui_game_corner.c) drives this
+	@ script, so it refuses the same way.
+	checkitem VAR_0x8004
+	goto_if_eq VAR_RESULT, TRUE, MauvilleCity_GameCorner_EventScript_AlreadyHaveTM
+	checkpcitem VAR_0x8004
+	goto_if_eq VAR_RESULT, TRUE, MauvilleCity_GameCorner_EventScript_AlreadyHaveTM
+.endif
 	msgbox MauvilleCity_GameCorner_Text_SoYourChoiceIsTheTMX, MSGBOX_YESNO
 	goto_if_eq VAR_RESULT, NO, MauvilleCity_GameCorner_EventScript_CancelTMSelect
 	switch VAR_TEMP_1
@@ -399,6 +409,13 @@ MauvilleCity_GameCorner_EventScript_NoRoomForTM::
 	call Common_EventScript_BagIsFull
 	goto MauvilleCity_GameCorner_EventScript_ReturnToChooseTMPrize
 	end
+
+.ifdef PORTABLE
+MauvilleCity_GameCorner_EventScript_AlreadyHaveTM::
+	msgbox MauvilleCity_GameCorner_Text_AlreadyHaveTM, MSGBOX_DEFAULT
+	goto MauvilleCity_GameCorner_EventScript_ReturnToChooseTMPrize
+	end
+.endif
 
 MauvilleCity_GameCorner_EventScript_CancelTMSelect::
 	msgbox MauvilleCity_GameCorner_Text_OhIsThatSo, MSGBOX_DEFAULT
@@ -712,6 +729,14 @@ MauvilleCity_GameCorner_Text_SendToYourHomePC:
 
 MauvilleCity_GameCorner_Text_NotEnoughCoins:
 	.string "You don't have enough COINS.$"
+
+.ifdef PORTABLE
+MauvilleCity_GameCorner_Text_AlreadyHaveTM:
+	.string "You already have\n"
+	.string "the {STR_VAR_1} {STR_VAR_2}.\p"
+	.string "A TM is never used up, so you\n"
+	.string "won't need another one.$"
+.endif
 
 @ Unused
 MauvilleCity_GameCorner_Text_NoRoomForPlacingDecor:

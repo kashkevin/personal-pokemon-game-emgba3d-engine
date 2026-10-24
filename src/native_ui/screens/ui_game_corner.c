@@ -13,8 +13,10 @@
  * from their text); the PRIZE COUNTER also carries the Shiny Charm (the
  * owner's guaranteed prize, MP_SHINY_CHARM_COINS, refused when owned), which
  * is the next clerk's. Rows and tabs of another clerk only say so. The party
- * row under a TM is the game's own compatibility. Clicks walk the engine's
- * cursor and press A; the wheel moves it; a right click is B. Project-owned.
+ * row under a TM is the game's own compatibility; a TM the player has (Bag or
+ * PC) shows OWNED, and its clerk refuses a second (a TM is never used up).
+ * Clicks walk the engine's cursor and press A; the wheel moves it; a right
+ * click is B. Project-owned.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -761,6 +763,10 @@ static void InfoCard(int x, int y, int w, int h)
         int dy = y + 38;
         char stats[40], pw[8], ac[8];
 
+        /* a TM is never used up on PC: one in the Bag or the PC is OWNED, and the clerk's script refuses a second
+           (data/maps/MauvilleCity_GameCorner/scripts.inc, as the shops show it sold out) */
+        if (GetItemImportance(r->id) && (CheckBagHasItem(r->id, 1) || CheckPCHasItem(r->id, 1)))
+            OwnedTag(x + w - 58, y + 19);
         if (move != MOVE_NONE)
         {
             int type = UiMon_Type(GetMoveType(move));
