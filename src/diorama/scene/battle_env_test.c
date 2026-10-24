@@ -70,6 +70,8 @@
 #include "battle_util.h"
 #include "move.h"
 #include "multiplayer_spawns.h"
+#include "multiplayer_world.h"
+#include "roamer.h"
 #include "wild_encounter_ow.h"
 #include "platform/ow_shiny_sparkle.h"
 
@@ -247,6 +249,22 @@ static struct
        the wild Pokemon drawn, shiny or not */
     bool sparkleLog;
     int sparkleFrames;
+    /* PKMN_TEST_WORLD_EVENT="species:x:y:flags" (DioramaBattleEnvTest_FakeWorldEvent): the World Event Pokemon a world's
+       host would show on the player's map (flags: MP_WORLD_EVENT_SHINY 1) */
+    int worldEventSpecies, worldEventX, worldEventY, worldEventFlags;
+    u32 worldEventGeneration;
+    /* PKMN_TEST_OUTBREAK="species:level": a TV mass outbreak on the player's map, every land spawn its Pokemon;
+       PKMN_TEST_ROAMER="species:level:shiny": a roamer on the player's map, shiny or not;
+       PKMN_TEST_OWE_BATTLE=roamer|outbreak: once one of those is drawn on the GBA's picture, the player bumps into it
+       (TryTriggerOverworldWildEncounter) and its battle's Pokemon is logged at the action menu */
+    int outbreakSpecies, outbreakLevel, roamerSpecies, roamerLevel, roamerShiny;
+    int oweBattleKind;          /* OWE_KIND_ROAMER, OWE_KIND_OUTBREAK; 0 none */
+    bool oweBumped, oweBattleLogged;
+    /* PKMN_TEST_PALETTE_FREE=<n>: on the field, stand-in palettes keep exactly n sprite palettes free (a crowded world
+       map); PKMN_TEST_TILES_FULL=<frames>: that many field frames in, every free sprite tile taken (a busy map's OBJ
+       tile memory full) */
+    int paletteFree, tilesFullAt, tilesFrames;
+    bool tilesFull;
 } s;
 
 /* PKMN_TEST_LOG=<file>: every line the driver logs is also appended to that file (a check on Windows reads it: the
@@ -469,6 +487,21 @@ static void Init(void)
     s.oweShiny = EnvInt("PKMN_TEST_OWE_SHINY", 0);
     s.sparkleLog = EnvInt("PKMN_TEST_SPARKLE_LOG", 0) != 0;
     s.spawnsUntil = EnvInt("PKMN_TEST_SPAWNS_UNTIL", 0);
+    value = SDL_getenv("PKMN_TEST_WORLD_EVENT");
+    if (value == NULL || sscanf(value, "%d:%d:%d:%d", &s.worldEventSpecies, &s.worldEventX, &s.worldEventY,
+                                &s.worldEventFlags) != 4)
+        s.worldEventSpecies = 0;
+    value = SDL_getenv("PKMN_TEST_OUTBREAK");
+    if (value == NULL || sscanf(value, "%d:%d", &s.outbreakSpecies, &s.outbreakLevel) != 2)
+        s.outbreakSpecies = 0;
+    value = SDL_getenv("PKMN_TEST_ROAMER");
+    if (value == NULL || sscanf(value, "%d:%d:%d", &s.roamerSpecies, &s.roamerLevel, &s.roamerShiny) != 3)
+        s.roamerSpecies = 0;
+    s.paletteFree = EnvInt("PKMN_TEST_PALETTE_FREE", 0);
+    s.tilesFullAt = EnvInt("PKMN_TEST_TILES_FULL", 0);
+    value = SDL_getenv("PKMN_TEST_OWE_BATTLE");
+    s.oweBattleKind = value == NULL ? 0 : strcmp(value, "roamer") == 0 ? OWE_KIND_ROAMER
+                    : strcmp(value, "outbreak") == 0 ? OWE_KIND_OUTBREAK : 0;
     value = SDL_getenv("PKMN_TEST_SPAWNS");
     for (s.spawnCount = 0; value != NULL && *value != '\0' && s.spawnCount < MP_SPAWN_MAX_SLOTS; )
     {
@@ -1287,26 +1320,169 @@ static void MoveLogField(void)
             now[3], now[4], now[5], now[6], now[7], now[8], now[9], now[10], now[11], now[12]);
 }
 
-/* PKMN_TEST_SPARKLE_LOG off a battle, once a second: the twinkles on the field now and made so far, then each wild
- * Pokemon drawn (the game's own overworld ones and the shared spawns): "sparkle mon: local L species gfx G shiny S"
- * (S from its picture, the shiny colours). */
+/* PKMN_TEST_SPARKLE_LOG off a battle, once a second: the twinkles on the field now, made so far, and hidden only because
+ * their Pokemon is past the GBA's picture (the 3D view draws those), then each wild Pokemon drawn (the game's own
+ * overworld ones, the shared spawns, the World Event one): "sparkle mon: local L gfx G shiny S spawn P at X,Y kind K
+ * event E offscreen O" (S from its picture, the shiny colours; K the overworld encounter's kind, OWE_KIND_*). */
 static void SparkleLogField(void)
 {
+    unsigned hidden = 0;
+
     if (!s.sparkleLog || gMain.inBattle || SDL_AtomicGet(&s.fieldSeen) == 0 || gSaveBlock1Ptr == NULL
      || gMain.callback2 != CB2_Overworld || ++s.sparkleFrames % 60 != 0)
         return;
-    TestLog("Battle env test: sparkle field: live %u made %u", (unsigned)OwShinySparkle_Count(),
-            (unsigned)OwShinySparkle_Made());
+    for (int i = 0; i < MAX_SPRITES; i++)
+        hidden += OwShinySparkle_HiddenOffScreen(&gSprites[i]) ? 1 : 0;
+    TestLog("Battle env test: sparkle field: live %u made %u offscreen %u palettes free %u skipped %u",
+            (unsigned)OwShinySparkle_Count(), (unsigned)OwShinySparkle_Made(), hidden, (unsigned)CountFreePaletteSlots(),
+            (unsigned)OwShinySparkle_Skipped());
+    for (int i = 0; i < OBJECT_EVENTS_COUNT; i++)
+    {
+        struct ObjectEvent *objectEvent = &gObjectEvents[i];
+        bool event = MultiplayerWorld_IsEventObject(objectEvent);
+
+        if (!objectEvent->active
+         || !(IsOverworldWildEncounter(objectEvent, OWE_ANY) || MultiplayerSpawns_IsSpawnObject(objectEvent) || event))
+            continue;
+        TestLog("Battle env test: sparkle mon: local %u gfx %u shiny %u spawn %u at %d,%d kind %u event %u offscreen %u",
+                objectEvent->localId, objectEvent->graphicsId, OW_SHINY(objectEvent) ? 1 : 0,
+                MultiplayerSpawns_IsSpawnObject(objectEvent) ? 1 : 0,
+                objectEvent->currentCoords.x - MAP_OFFSET, objectEvent->currentCoords.y - MAP_OFFSET,
+                IsOverworldWildEncounter(objectEvent, OWE_ANY) ? DioramaBattleEnvTest_OweKind(objectEvent) : 0,
+                event ? 1 : 0, objectEvent->offScreen ? 1 : 0);
+    }
+}
+
+/* PKMN_TEST_PALETTE_FREE / PKMN_TEST_TILES_FULL each field frame: stand-in sprite palettes (tags DUMMY_PALETTE_TAG on)
+ * loaded or freed until exactly that many palettes are free; every sprite tile left taken (never given back: the run
+ * ends with them). */
+#define DUMMY_PALETTE_TAG 0x7E00
+static void CrowdField(void)
+{
+    static const u16 sDummyColors[16] = {0};
+
+    if (gMain.inBattle || SDL_AtomicGet(&s.fieldSeen) == 0 || gMain.callback2 != CB2_Overworld)
+        return;
+    /* the stand-ins loaded now (a warp clears every palette tag, so they are looked up, not counted) */
+    for (int tag = DUMMY_PALETTE_TAG; s.paletteFree > 0 && tag < DUMMY_PALETTE_TAG + 16; tag++)
+    {
+        bool loaded = IndexOfSpritePaletteTag(tag) != 0xFF;
+
+        if (!loaded && (int)CountFreePaletteSlots() > s.paletteFree)
+        {
+            struct SpritePalette palette = {sDummyColors, tag};
+
+            LoadSpritePalette(&palette);
+        }
+        else if (loaded && (int)CountFreePaletteSlots() < s.paletteFree)
+        {
+            FreeSpritePaletteByTag(tag);
+        }
+    }
+    if (s.tilesFullAt > 0 && (s.tilesFull || ++s.tilesFrames >= s.tilesFullAt))
+    {
+        int taken = 0;
+
+        while (AllocSpriteTiles(1) >= 0 && taken < 2048)    /* and each tile given back since, at once */
+            taken++;
+        if (!s.tilesFull)
+            TestLog("Battle env test: sprite tiles full: %d more taken", taken);
+        s.tilesFull = true;
+    }
+}
+
+/* PKMN_TEST_OUTBREAK / PKMN_TEST_ROAMER, as the field starts: a TV mass outbreak (every land spawn of the map its
+ * Pokemon: DoMassOutbreakEncounterTest) and a roamer on the player's map, in memory only */
+static void SetUpTestEncounters(void)
+{
+    if (s.outbreakSpecies > 0)
+    {
+        gSaveBlock1Ptr->outbreakPokemonSpecies = s.outbreakSpecies;
+        gSaveBlock1Ptr->outbreakPokemonLevel = s.outbreakLevel;
+        gSaveBlock1Ptr->outbreakLocationMapGroup = gSaveBlock1Ptr->location.mapGroup;
+        gSaveBlock1Ptr->outbreakLocationMapNum = gSaveBlock1Ptr->location.mapNum;
+        gSaveBlock1Ptr->outbreakPokemonProbability = 100;
+        gSaveBlock1Ptr->outbreakDaysLeft = 2;
+        for (u32 i = 0; i < MAX_MON_MOVES; i++)
+            gSaveBlock1Ptr->outbreakPokemonMoves[i] = i == 0 ? MOVE_TACKLE : MOVE_NONE;
+        TestLog("Battle env test: a mass outbreak of species %d (level %d) on map %d.%d", s.outbreakSpecies,
+                s.outbreakLevel, gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum);
+    }
+    if (s.roamerSpecies > 0)
+    {
+        DeactivateAllRoamers();
+        TryAddRoamer(s.roamerSpecies, s.roamerLevel);
+        gSaveBlock1Ptr->roamer[0].shiny = s.roamerShiny != 0;
+        Roamer_TestPlaceHere(0);
+        TestLog("Battle env test: a roamer, species %d (level %d) shiny %d, on map %d.%d (here %d)", s.roamerSpecies,
+                s.roamerLevel, gSaveBlock1Ptr->roamer[0].shiny ? 1 : 0, gSaveBlock1Ptr->location.mapGroup,
+                gSaveBlock1Ptr->location.mapNum,
+                IsRoamerAt(0, gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum) ? 1 : 0);
+    }
+}
+
+bool DioramaBattleEnvTest_RoamerAlwaysMet(void)
+{
+    if (!s.init)
+        Init();
+    return s.roamerSpecies > 0;
+}
+
+/* PKMN_TEST_OWE_BATTLE: the first overworld Pokemon of that kind drawn on the GBA's picture, the field calm - the
+ * player bumps into it, as walking into it does (TryTriggerOverworldWildEncounter); then, as its battle starts (its
+ * Pokemon made: StartWildBattleWithOWE), "owe battle: species S shiny X" - shiny or not, as the field showed it */
+static void OweBattleField(void)
+{
+    if (s.oweBumped && !s.oweBattleLogged && gMain.inBattle)
+    {
+        struct Pokemon *mon = &gParties[B_TRAINER_OPPONENT_A][0];
+
+        s.oweBattleLogged = true;
+        TestLog("Battle env test: owe battle: species %u shiny %u", (unsigned)GetMonData(mon, MON_DATA_SPECIES),
+                GetMonData(mon, MON_DATA_IS_SHINY) ? 1 : 0);
+    }
+    if (s.oweBattleKind == 0 || s.oweBumped || gMain.inBattle || SDL_AtomicGet(&s.fieldSeen) == 0
+     || gMain.callback2 != CB2_Overworld || ArePlayerFieldControlsLocked() || gPlayerAvatar.objectEventId >= OBJECT_EVENTS_COUNT)
+        return;
     for (int i = 0; i < OBJECT_EVENTS_COUNT; i++)
     {
         struct ObjectEvent *objectEvent = &gObjectEvents[i];
 
-        if (!objectEvent->active || !(IsOverworldWildEncounter(objectEvent, OWE_ANY) || MultiplayerSpawns_IsSpawnObject(objectEvent)))
+        if (!objectEvent->active || objectEvent->offScreen || !IsOverworldWildEncounter(objectEvent, OWE_ANY)
+         || DioramaBattleEnvTest_OweKind(objectEvent) != (unsigned)s.oweBattleKind)
             continue;
-        TestLog("Battle env test: sparkle mon: local %u gfx %u shiny %u spawn %u at %d,%d", objectEvent->localId,
-                objectEvent->graphicsId, OW_SHINY(objectEvent) ? 1 : 0, MultiplayerSpawns_IsSpawnObject(objectEvent) ? 1 : 0,
-                objectEvent->currentCoords.x - MAP_OFFSET, objectEvent->currentCoords.y - MAP_OFFSET);
+        s.oweBumped = true;
+        TestLog("Battle env test: owe bumped: local %u kind %u species %u field shiny %u", objectEvent->localId,
+                DioramaBattleEnvTest_OweKind(objectEvent), OW_SPECIES(objectEvent), OW_SHINY(objectEvent) ? 1 : 0);
+        TryTriggerOverworldWildEncounter(objectEvent, &gObjectEvents[gPlayerAvatar.objectEventId]);
+        return;
     }
+}
+
+/* The World Event a world's host would show (multiplayer_world.c ReadInbound): an odd generation while writing. */
+bool DioramaBattleEnvTest_FakeWorldEvent(bool *fieldReady)
+{
+    struct MultiplayerWorldEvent event = {0};
+
+    if (!s.init)
+        Init();
+    if (s.worldEventSpecies == 0 || gSaveBlock1Ptr == NULL || SDL_AtomicGet(&s.fieldSeen) == 0)
+        return false;
+    event.eventId = 1;
+    event.species = s.worldEventSpecies;
+    event.level = 40;
+    event.flags = MP_WORLD_EVENT_VISIBLE | (s.worldEventFlags & MP_WORLD_EVENT_SHINY);
+    event.mapGroup = gSaveBlock1Ptr->location.mapGroup;
+    event.mapNum = gSaveBlock1Ptr->location.mapNum;
+    event.x = s.worldEventX;
+    event.y = s.worldEventY;
+    event.secondsLeft = 600;
+    s.worldEventGeneration += 2;
+    gMultiplayerWorldMailbox.inboundGeneration = s.worldEventGeneration - 1;
+    memcpy((void *)&gMultiplayerWorldMailbox.event, &event, sizeof(event));
+    gMultiplayerWorldMailbox.inboundGeneration = s.worldEventGeneration;
+    *fieldReady = gMain.callback2 == CB2_Overworld && !ArePlayerFieldControlsLocked();
+    return true;
 }
 
 bool DioramaBattleEnvTest_OweShiny(bool rolled)
@@ -1598,6 +1774,7 @@ static void StartBattle(void)
         SetCoins(s.coins);
         TestLog("Battle env test: coins set to %u", GetCoins());
     }
+    SetUpTestEncounters();
     s.bagDone = s.sweep;    /* a sweep's battles share the bag: its Mega Ring once */
     if (s.megaLog)
         MegaLogLead();
@@ -2913,6 +3090,8 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
     HmLogField();
     MoveLogField();
     SparkleLogField();
+    OweBattleField();
+    CrowdField();
     ShotTick();
     /* PKMN_TEST_PLAN: once the autopilot brought the field up, the plan's keys alone */
     if (sPlan.phase != PLAN_OFF && SDL_AtomicGet(&s.fieldSeen) != 0)

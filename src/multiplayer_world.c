@@ -9,6 +9,9 @@
 #include "multiplayer_extras.h"
 #include "multiplayer_rival.h"
 #include "tower_legends.h"
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+#include "diorama/battle_env_test.h"
+#endif
 #endif
 #line 7 // gba-line
 #include "battle.h"
@@ -1455,6 +1458,17 @@ void MultiplayerWorld_Tick(bool32 fieldReady, bool32 connected)
 #ifdef PORTABLE
     MultiplayerSpawns_Tick(fieldReady, connected);
     MultiplayerExtras_Tick(fieldReady, connected);
+#endif
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+    {
+        bool ready = fieldReady;
+
+        if (DioramaBattleEnvTest_FakeWorldEvent(&ready))  // test builds only: PKMN_TEST_WORLD_EVENT plays the world's host
+        {
+            connected = TRUE;
+            fieldReady = ready;
+        }
+    }
 #endif
 #line 1172 // gba-line
     sConnected = connected;
