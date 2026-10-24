@@ -26,13 +26,16 @@
 #include "multiplayer_battle.h"
 #include "multiplayer_ladder.h"
 #include "multiplayer_menu.h"
+#include "multiplayer_presence.h"
 #include "multiplayer_save.h"
+#include "multiplayer_soft_reset.h"
 #include "multiplayer_world.h"
 #include "overworld.h"
 #include "palette.h"
 #include "pokeball.h"
 #include "pokemon.h"
 #include "pokemon_storage_system.h"
+#include "platform/mp_bridge.h"
 #include "script.h"
 #include "script_pokemon_util.h"
 #include "string_util.h"
@@ -59,6 +62,7 @@
 extern const u8 EventScript_TowerLegendsSolo[];
 
 const u32 gMultiplayerTowerAbiVersion = MP_TOWER_ABI;
+const u32 gMultiplayerTowerNextPageAbiVersion = MP_TOWER_NEXT_PAGE_ABI;
 
 const struct Trainer gTowerLegendsTrainers[DIFFICULTY_COUNT][TOWER_LEGENDS_TRAINER_COUNT] =
 {
@@ -93,6 +97,8 @@ static EWRAM_DATA struct
     u8 lastFloor;
     u8 lastHighest;      // the record before that battle
     u8 lastProgress;
+    u8 nextQueued;       // "go on?" answered YES: the host save, then the Players menu's page 4, once the field is calm
+    u8 saveQueued;       // ... answered NO: the host save
     u16 repostTimer;
     u16 queuedFrames;    // how long the queued solo command has waited for a calm field
     u32 ticket;
@@ -440,6 +446,19 @@ void TowerLegends_Tick(void)
     // A Duo battle's trainers answer only while its native battle runs (an abandoned one leaves nothing behind).
     if (sTower.mode == TOWER_MODE_DUO && !MultiplayerBattle_IsActive())
         sTower.mode = TOWER_MODE_NONE;
+    if ((sTower.nextQueued || sTower.saveQueued) && FieldCalm())
+    {
+        // After "go on to floor N?": the host save first when the battle changed the party (as START > PLAYER > TOWER
+        // does), so back-to-back floors are each saved; YES then opens the next floor through the host (page 4).
+        bool32 next = sTower.nextQueued;
+
+        sTower.nextQueued = sTower.saveQueued = FALSE;
+        if (!next)
+            MultiplayerHostSave_Request();
+        else if (!MultiplayerHostSave_BeforePlayers(MP_MENU_PAGE_TOWER_NEXT) && !MultiplayerMenu_OpenPage(MP_MENU_PAGE_TOWER_NEXT))
+            MultiplayerPresence_PlayersRefused();
+        return;
+    }
     if (sTower.hyperTrainingQueued && FieldCalm())
     {
         sTower.hyperTrainingQueued = FALSE;
@@ -640,6 +659,51 @@ void TowerLegends_BufferResult(void)
             end = StringCopy(end, sText_Period);
         }
     }
+}
+
+static const u8 sText_GoOn1[] = _("Go on to floor ");
+static const u8 sText_GoOnRetry[] = _("Try floor ");
+static const u8 sText_GoOn2[] = _("?");
+
+// The floor "go on?" names: after a won climb floor the next one, after a lost one the floor the climb goes on at, after
+// a replay the climb's own floor. 0 when there is none (the top cleared) or nobody to ask (no host with page 4).
+u32 TowerLegends_NextFloor(void)
+{
+    u32 next;
+
+    if (!MpBridge_TowerNextPageEnabled() || sTower.lastFloor == 0)
+        return 0;
+    if (sTower.lastFloor != sTower.lastProgress)
+        next = sTower.lastProgress;                                  // a replay: the climb is where it was
+    else if (sTower.lastOutcome == TOWER_RESULT_WON)
+        next = sTower.lastFloor + 1;
+    else
+        next = CheckpointBelow(sTower.lastHighest) + 1;
+    return next >= 1 && next <= TOWER_FLOOR_COUNT ? next : 0;
+}
+
+// Special (after the result): VAR_RESULT TRUE and the question in gStringVar4 when the game asks to go on.
+void TowerLegends_BufferContinue(void)
+{
+    u32 next = TowerLegends_NextFloor();
+    u8 *end = gStringVar4;
+
+    gSpecialVar_Result = next != 0;
+    if (next == 0)
+        return;
+    end = StringCopy(end, sTower.lastOutcome == TOWER_RESULT_WON || sTower.lastFloor != sTower.lastProgress
+                          ? sText_GoOn1 : sText_GoOnRetry);
+    end = AppendNumber(end, next);
+    StringCopy(end, sText_GoOn2);
+}
+
+// Special: the answer to "go on?" (VAR_RESULT, YES or NO), carried out once the script has ended and the field is calm.
+void TowerLegends_Continue(void)
+{
+    if (gSpecialVar_Result != 0)   // YES (1); NO and B are 0
+        sTower.nextQueued = TRUE;
+    else
+        sTower.saveQueued = TRUE;
 }
 
 // While connected: a refusal or "started" first, then the unsettled result (again every 20 s until settled).

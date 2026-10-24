@@ -683,4 +683,7 @@ gSpecials::
 	def_special TowerLegends_BufferIntro
 	def_special TowerLegends_StartSoloBattle, waitstate=1
 	def_special TowerLegends_BufferResult
+	@ The owner's request (2026-10-24): after a solo floor, "go on to floor N?".
+	def_special TowerLegends_BufferContinue
+	def_special TowerLegends_Continue
 .endif

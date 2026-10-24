@@ -66,6 +66,7 @@ bool MpBridge_IsEnabled(void);
 bool MpBridge_MenuOpenPageEnabled(void); /* Update 32: a Players menu OPEN may name its page (menu_open_page=1) */
 bool MpBridge_TowerEnabled(void); /* Battle Tower: Legends (tower=1) */
 bool MpBridge_HostSavePageEnabled(void); /* MS-61: an in-game SAVE in a world asks for the host save (host_save_page=1) */
+bool MpBridge_TowerNextPageEnabled(void); /* the Tower's "go on to floor N?": OPEN page 4 (tower_next_page=1) */
 enum MpLinkState
 {
     MP_LINK_OFFLINE,       /* started without a bridge: single play on this PC */
@@ -141,6 +142,8 @@ struct MpBridgeCaps
                                         without READ_OUT (KNOWN_ISSUES MS-62; needs battle 3; launcher opt-in battle_peek=1) */
     uint32_t battleReceiveMany;      /* 1: battle opcode 26 RECEIVE_MANY, a batch's small blocks for one core in one command
                                         (MS-62, the 2v2s; needs battle 3; launcher opt-in battle_receive_many=1) */
+    uint32_t towerNextPage;          /* 1: OPEN page 4, the Tower's next floor after "go on?", answered with flags 4 (the
+                                        owner's request of 2026-10-24; needs tower 1; launcher opt-in tower_next_page=1) */
 };
 
 enum

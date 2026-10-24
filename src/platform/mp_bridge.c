@@ -176,6 +176,8 @@ const char *MpBridge_CheckCaps(const struct MpBridgeCaps *c)
         return "invalid battle peek capability";
     if (c->battleReceiveMany && (c->battleReceiveMany != 1 || c->battle != 3))
         return "invalid battle receive-many capability";
+    if (c->towerNextPage && (c->towerNextPage != 1 || c->tower != 1))
+        return "invalid Tower next floor capability";
     if (c->menu > 2)
         return "invalid Players menu capability";
     if (c->tradeEffectPrepare && (!c->trade || c->menu != 2 || c->tradeEffectPrepare != 1))
@@ -1193,6 +1195,7 @@ static bool OpenPageAllowed(const struct MpBridge *b, uint32_t page)
     case 1: return Enabled(b->caps.menuOpenPage);
     case 2: return Enabled(b->caps.tower);
     case 3: return Enabled(b->caps.hostSavePage);
+    case 4: return Enabled(b->caps.towerNextPage);
     default: return false;
     }
 }
@@ -1217,7 +1220,7 @@ static void PollMenu(struct MpBridge *b)
     action = U16(payload + 8);
     kind = payload[10];
     /* An OPEN names no action, or (menuOpenPage, Update 32) its page: 1 the soft reset, 2 the Tower (tower), 3 the host
-     * save after an in-game SAVE (hostSavePage, MS-61). */
+     * save after an in-game SAVE (hostSavePage, MS-61), 4 the Tower's next floor after "go on?" (towerNextPage). */
     if (seq == 0 || action > 7 || kind < 1 || kind > 3 || !AllZero(payload + 11, 5)
      || (kind == 2 && (screen == 0 || action == 0)) || (kind == 3 && action != 0)
      || (kind == 1 && action != 0 && !OpenPageAllowed(b, action))
@@ -2349,10 +2352,10 @@ bool MpBridge_Configure(const char *path)
     long port = -1;
     uint8_t token[32];
     bool haveToken = false;
-    bool optIn[8] = {false, false, false, false, false, false, false, false};
-    static const char *const sOptIns[8] = {
+    bool optIn[9] = {false, false, false, false, false, false, false, false, false};
+    static const char *const sOptIns[9] = {
         "trade_effect_prepare=1", "trade_effect_save=1", "trade_effect_choice=1", "menu_open_page=1", "tower=1",
-        "host_save_page=1", "battle_peek=1", "battle_receive_many=1"};
+        "host_save_page=1", "battle_peek=1", "battle_receive_many=1", "tower_next_page=1"};
     const char *problem;
 
     if (file == NULL)
@@ -2406,6 +2409,8 @@ bool MpBridge_Configure(const char *path)
             optIn[6] = true;
         else if (strcmp(line, sOptIns[7]) == 0 && !optIn[7])
             optIn[7] = true;
+        else if (strcmp(line, sOptIns[8]) == 0 && !optIn[8])
+            optIn[8] = true;
         else if (line[0] != '\0')
         {
             port = 0;
@@ -2457,6 +2462,9 @@ bool MpBridge_Configure(const char *path)
      * then hands a core a batch's small blocks in one RECEIVE_MANY (opcode 26). */
     caps.battleReceiveMany = optIn[7] && caps.battle == 3
                            ? *(const volatile u32 *)&gMultiplayerBattleReceiveManyAbiVersion : 0;
+    /* The Tower's "go on to floor N?" (the owner's request of 2026-10-24): tower_next_page=1 when the manifest has
+     * tower_next_page_abi_version 1: YES opens page 4, which the launcher answers with the next floor's command. */
+    caps.towerNextPage = optIn[8] && caps.tower == 1 ? *(const volatile u32 *)&gMultiplayerTowerNextPageAbiVersion : 0;
     caps.saveWindow = *(const volatile u32 *)&gMultiplayerSaveWindowAbiVersion;
     caps.menu = *(const volatile u32 *)&gMultiplayerMenuAbiVersion;
     /* The trade effect transports are explicit opt-ins of the manifest, never
@@ -2522,7 +2530,7 @@ bool MpBridge_Configure(const char *path)
     sEnabled = true;
     SDL_Log("Multiplayer bridge: companion at 127.0.0.1:%ld; save %u trade %u emergency %u battle %u/%u/%u "
             "window %u menu %u effects %u/%u/%u reset %u/%u world %u spawns %u running %u detail %u ffa %u/%u release %u "
-            "import %u page %u tower %u party %u hostsave %u peek %u many %u",
+            "import %u page %u tower %u party %u hostsave %u peek %u many %u towernext %u",
             port, (unsigned)caps.save, (unsigned)caps.trade, (unsigned)caps.emergencySave,
             (unsigned)caps.battle, (unsigned)caps.battleResume, (unsigned)caps.battleAdmissionCleanup,
             (unsigned)caps.saveWindow, (unsigned)caps.menu, (unsigned)caps.tradeEffectPrepare,
@@ -2531,7 +2539,7 @@ bool MpBridge_Configure(const char *path)
             (unsigned)caps.presenceAnimation, (unsigned)caps.presenceDetail, (unsigned)caps.battleFfa,
             (unsigned)caps.battleFfa3, (unsigned)caps.menuRelease, (unsigned)caps.saveImportWindow, (unsigned)caps.menuOpenPage,
             (unsigned)caps.tower, (unsigned)caps.savePartyQuery, (unsigned)caps.hostSavePage, (unsigned)caps.battlePeek,
-            (unsigned)caps.battleReceiveMany);
+            (unsigned)caps.battleReceiveMany, (unsigned)caps.towerNextPage);
     return true;
 }
 
@@ -2553,6 +2561,11 @@ bool MpBridge_TowerEnabled(void)
 bool MpBridge_HostSavePageEnabled(void)
 {
     return sEnabled && sBridge.caps.hostSavePage == 1;
+}
+
+bool MpBridge_TowerNextPageEnabled(void)
+{
+    return sEnabled && sBridge.caps.towerNextPage == 1;
 }
 
 /* The link status the game shows (the pause menu's LINK): see enum MpLinkState. A connection is shown only once the

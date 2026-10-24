@@ -12,5 +12,12 @@ EventScript_TowerLegendsSolo::
 	special TowerLegends_StartSoloBattle @ waits for the battle (def_special waitstate=1)
 	special TowerLegends_BufferResult
 	msgbox gStringVar4, MSGBOX_DEFAULT
+	@ The owner's request (2026-10-24): "go on to floor N?" - YES saves on the host and starts that floor through the
+	@ host (the Players menu's page 4), NO saves on the host (TowerLegends_Continue, once the script has ended).
+	special TowerLegends_BufferContinue
+	goto_if_eq VAR_RESULT, FALSE, EventScript_TowerLegendsSoloEnd
+	msgbox gStringVar4, MSGBOX_YESNO
+	special TowerLegends_Continue
+EventScript_TowerLegendsSoloEnd:
 	releaseall
 	end

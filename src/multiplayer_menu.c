@@ -386,7 +386,10 @@ static void ReadScreen(void)
     {
         struct TowerLegendsCommand command;
 
-        if (!sMultiplayerMenuWaiting || gMultiplayerMenuMailbox.request.kind != MP_MENU_CHOOSE)
+        // ... or (the Tower's "go on?", page 4) the answer to this window's OPEN: the next floor's command.
+        if (!sMultiplayerMenuWaiting || (gMultiplayerMenuMailbox.request.kind != MP_MENU_CHOOSE
+         && !(screen.flags == MP_MENU_FLAG_TOWER_SOLO && gMultiplayerMenuMailbox.request.kind == MP_MENU_OPEN
+              && gMultiplayerMenuMailbox.request.action == MP_MENU_PAGE_TOWER_NEXT)))
             return;
         memcpy(&command, (const u8 *)screen.rows, sizeof(command));
         Close();

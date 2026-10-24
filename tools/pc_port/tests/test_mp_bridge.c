@@ -1995,6 +1995,48 @@ MT_TEST(menu_open_page_needs_the_launcher_opt_in)
     MT_CHECK(MpBridge_CheckCaps(&caps) != NULL);
 }
 
+// The Tower's "go on to floor N?" (the owner's request of 2026-10-24): page 4 only with towerNextPage (the launcher's
+// tower_next_page=1), which needs the Tower; an OPEN naming it without the capability stops the bridge.
+MT_TEST(tower_next_page_needs_its_capability)
+{
+    struct MpBridgeCaps caps;
+    uint8_t *m = sMemory[MP_REGION_MENU];
+    int next;
+
+    for (next = 0; next <= 1; next++)
+    {
+        memset(&caps, 0, sizeof(caps));
+        caps.menu = 2;
+        caps.menuOpenPage = 1;
+        caps.world = 1;
+        caps.tower = 1;
+        caps.towerNextPage = (uint32_t)next;
+        MT_CHECK(MpBridge_CheckCaps(&caps) == NULL);
+        Fresh(&caps);
+        sNet.chunk = 0;
+        Ready(0);
+        PutU32(m, 0x31554D45);
+        PutU16(m + 4, 2);
+        PutU16(m + 6, 512);
+        Step(10);
+        PutU32(m + 16, 1);
+        PutU16(m + 24, 4);                    // page 4
+        m[26] = 1;                            // an OPEN
+        Step(10);
+        MT_CHECK(sNet.closed == !next);
+        MT_EQ(CountSent('J'), next ? 1 : 0);
+    }
+    memset(&caps, 0, sizeof(caps));
+    caps.menu = 2;
+    caps.menuOpenPage = 1;
+    caps.towerNextPage = 1;                   // without the Tower it means nothing
+    MT_CHECK(MpBridge_CheckCaps(&caps) != NULL);
+    caps.world = 1;
+    caps.tower = 1;
+    caps.towerNextPage = 2;
+    MT_CHECK(MpBridge_CheckCaps(&caps) != NULL);
+}
+
 // tests/native/windows-input-guard.c
 static uint32_t AddKeys(struct MpBridgeInput *s, uint32_t keys)
 {
@@ -2148,6 +2190,7 @@ int main(void)
     MT_RUN(three_player_free_for_all_commands_reach_the_game);
     MT_RUN(menu_release_screen_needs_its_capability);
     MT_RUN(menu_open_page_needs_the_launcher_opt_in);
+    MT_RUN(tower_next_page_needs_its_capability);
     MT_RUN(save_import_window_needs_its_capability);
     MT_RUN(spawn_capability_waits_for_its_mailbox);
     MT_RUN(spawn_record_and_inbound_round_trip);

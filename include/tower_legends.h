@@ -35,6 +35,12 @@
 #define MP_MENU_PAGE_TOWER          2
 #define MP_MENU_FLAG_TOWER_SOLO     4
 #define MP_MENU_FLAG_HYPER_TRAINING 5
+// The owner's request (2026-10-24): after a solo floor the game asks whether to go on to the next one. YES saves on the
+// host (when the party changed: the battle's experience) and opens the Players menu on page 4, which the host answers
+// with that floor's command (flags 4, as for a choice); NO saves on the host only. Bridge cap towerNextPage: the
+// launcher's tower_next_page=1 when its manifest has tower_next_page_abi_version 1 (needs the Tower).
+#define MP_MENU_PAGE_TOWER_NEXT     4
+#define MP_TOWER_NEXT_PAGE_ABI      1
 #define TOWER_COMMAND_MAGIC         0x31525754u // "TWR1"
 #define TOWER_COMMAND_MODE_SOLO     1
 // The native UI's Tower screen (byte 238; byte 239 its argument: the map's first floor shown, the previewed floor, the
@@ -92,6 +98,7 @@ struct TowerLegendsFloor
 extern const struct TowerLegendsFloor gTowerLegendsFloors[TOWER_FLOOR_COUNT];
 extern const struct Trainer gTowerLegendsTrainers[DIFFICULTY_COUNT][TOWER_LEGENDS_TRAINER_COUNT];
 extern const u32 gMultiplayerTowerAbiVersion;
+extern const u32 gMultiplayerTowerNextPageAbiVersion;
 
 // GetTrainerStructFromId's hook: the floor's trainer for TRAINER_TOWER_A/B while a Tower battle is set up, else NULL.
 const struct Trainer *TowerLegends_GetTrainer(u16 trainerId);
@@ -145,6 +152,9 @@ void TowerLegends_WorldTick(void);
 // Specials (data/scripts/mp_tower_legends.inc).
 void TowerLegends_StartSoloBattle(void);
 void TowerLegends_BufferResult(void);
+void TowerLegends_BufferContinue(void); // VAR_RESULT: whether to ask "go on?" (its question in gStringVar4)
+void TowerLegends_Continue(void);       // the answer (VAR_RESULT): YES the next floor, NO a host save
+u32 TowerLegends_NextFloor(void);       // the floor the question names (0: none)
 
 // The native self-tests and the test build's driver: a solo floor battle without a host (ticket 0 is never sent).
 bool32 TowerLegends_TestStartSolo(u32 floor);

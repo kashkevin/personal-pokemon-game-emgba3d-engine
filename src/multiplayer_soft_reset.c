@@ -235,6 +235,18 @@ bool32 MultiplayerHostSave_BeforePlayers(u16 page)
     return TRUE;
 }
 
+// Battle Tower: Legends, "go on to floor N?" answered NO: the floor's experience is saved on the host now, as YES saves
+// it before the next floor (the owner's request of 2026-10-24: back-to-back floors are each saved).
+void MultiplayerHostSave_Request(void)
+{
+    if (!MpBridge_HostSavePageEnabled() || !sPartyKnown || sThenPending || sHostSaveAge != 0
+     || gSaveCounter != sPartySaveCounter || MultiplayerBattle_PartyCrc32() == sPartyCrc)
+        return;
+    sHostSaveAge = 1;
+    sHostSaveAuto = TRUE;
+    Log("host save: a Tower floor changed the party; asking the launcher");
+}
+
 bool32 MultiplayerHostSave_TryThen(void)
 {
     bool32 saved;
