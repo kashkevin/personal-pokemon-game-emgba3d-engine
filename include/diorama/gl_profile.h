@@ -120,6 +120,8 @@ void DioramaProfile_FormatGpuMemory(const struct DioramaGpuMemory *memory, char 
 void DioramaProfile_DrawArrays(GLenum mode, GLint first, GLsizei count);
 void DioramaProfile_DrawArraysInstanced(GLenum mode, GLint first, GLsizei count, GLsizei instances);
 void DioramaProfile_DrawElements(GLenum mode, GLsizei count, GLenum type, const void *indices);
+void DioramaProfile_DrawElementsInstanced(GLenum mode, GLsizei count, GLenum type, const void *indices,
+                                          GLsizei instances);
 /* The uploads also take their call site (DIORAMA_PROFILE_SITE), for the log's
  * list of what uploads the most. */
 void DioramaProfile_TexImage2D(GLenum target, GLint level, GLint internalFormat, GLsizei width,
@@ -152,6 +154,8 @@ void DioramaProfile_DeleteRenderbuffers(GLsizei count, const GLuint *renderbuffe
 #define dglDrawArraysInstanced(mode, first, count, instances) \
     DioramaProfile_DrawArraysInstanced(mode, first, count, instances)
 #define glDrawElements(mode, count, type, indices) DioramaProfile_DrawElements(mode, count, type, indices)
+#define dglDrawElementsInstanced(mode, count, type, indices, instances) \
+    DioramaProfile_DrawElementsInstanced(mode, count, type, indices, instances)
 #define glTexImage2D(target, level, internalFormat, width, height, border, format, type, pixels) \
     DioramaProfile_TexImage2D(target, level, internalFormat, width, height, border, format, type, pixels, \
                               DIORAMA_PROFILE_SITE)

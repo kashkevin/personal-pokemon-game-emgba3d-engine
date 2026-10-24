@@ -16,6 +16,7 @@
 
 static struct DioramaOccupancySpan sOccupancySpans[OCCUPANCY_INPUT_COLUMNS];
 static struct DioramaShellFace sShellFaces[DIORAMA_TERRAIN_MAX_FACES];
+static bool sVoxelOccupancyOnly; /* DioramaTerrain_SetVoxelOccupancyOnly */
 
 static uint64_t HashByte(uint64_t hash, uint8_t value)
 {
@@ -627,12 +628,14 @@ static bool BuildOccupancy(const struct DioramaTerrainChunkInput *input,
     return true;
 }
 
-static bool AppendCompressedFace(uint32_t *faceCount, uint32_t *rawFaceCount,
-                                 const struct DioramaTerrainCell *cell, int cellIndex,
-                                 uint8_t occupancyFace, int materialFace,
-                                 int32_t plane, int32_t uMin, int32_t uMax,
-                                 int16_t vMin, int16_t vMax, uint8_t axis, int8_t sign,
-                                 uint32_t rawWeight)
+/* A face of the compressed shell, reading the cell's materials of a surface
+ * (BuildOccupancy's spans: 0 its own, 1 the ground under a tree). */
+static bool AppendCompressedSurfaceFace(uint32_t *faceCount, uint32_t *rawFaceCount,
+                                        const struct DioramaTerrainCell *cell, int cellIndex,
+                                        int surface, int materialFace,
+                                        int32_t plane, int32_t uMin, int32_t uMax,
+                                        int16_t vMin, int16_t vMax, uint8_t axis, int8_t sign,
+                                        uint32_t rawWeight)
 {
     struct DioramaShellFace *face;
 
@@ -646,51 +649,93 @@ static bool AppendCompressedFace(uint32_t *faceCount, uint32_t *rawFaceCount,
     face->vMax = vMax;
     face->sourceCellX = cell->mapX;
     face->sourceCellY = cell->mapY;
-    face->material = MaterialId(cellIndex, 0, materialFace);
+    face->material = MaterialId(cellIndex, surface, materialFace);
     face->flags = cell->reflective;
     face->axis = axis;
     face->sign = sign;
     *rawFaceCount += rawWeight;
-    (void)occupancyFace;
     return true;
+}
+
+static bool AppendCompressedFace(uint32_t *faceCount, uint32_t *rawFaceCount,
+                                 const struct DioramaTerrainCell *cell, int cellIndex,
+                                 uint8_t occupancyFace, int materialFace,
+                                 int32_t plane, int32_t uMin, int32_t uMax,
+                                 int16_t vMin, int16_t vMax, uint8_t axis, int8_t sign,
+                                 uint32_t rawWeight)
+{
+    (void)occupancyFace;
+    return AppendCompressedSurfaceFace(faceCount, rawFaceCount, cell, cellIndex, 0, materialFace,
+                                       plane, uMin, uMax, vMin, vMax, axis, sign, rawWeight);
+}
+
+static bool IsTreeHullColumn(const struct DioramaTerrainCell *cell);
+
+/*
+ * A whole cell's column in the compressed shell: the voxels it fills,
+ * [*bottom, *top), and the surface its faces read - BuildOccupancy's span for
+ * every pixel of it. The ground under a tree (its hull or the voxel model is
+ * drawn on its own) is a voxel thick under its ground and reads the ground's
+ * materials (performance work 2026-10-24: a chunk with a tree in it went
+ * through a span per pixel - 25,600 of them for the same 64 tops and
+ * bottoms - about 15 ms a chunk, two chunks a frame while running through
+ * Petalburg Woods).
+ */
+static void CompressedColumn(const struct DioramaTerrainCell *cell, int16_t *bottom, int16_t *top,
+                             int *surface)
+{
+    if (IsTreeHullColumn(cell))
+    {
+        *top = HeightToVoxel(cell->groundHeight);
+        *bottom = *top - 1;
+        *surface = 1;
+        return;
+    }
+    *top = HeightToVoxel(cell->visualHeight);
+    *bottom = *top > 0 ? -1 : *top - 1;
+    *surface = 0;
 }
 
 static bool AppendCompressedSide(uint32_t *faceCount, uint32_t *rawFaceCount,
                                  const struct DioramaTerrainCell *cell, int cellIndex,
                                  const struct DioramaTerrainCell *neighbor,
-                                 uint8_t occupancyFace, int materialFace,
+                                 int surface, int materialFace,
                                  int32_t plane, int32_t uMin, int32_t uMax,
                                  uint8_t axis, int8_t sign,
                                  int16_t bottom, int16_t top)
 {
     int16_t neighborBottom;
     int16_t neighborTop;
+    int neighborSurface;
 
     if (!neighbor->present || neighbor->shape == DIORAMA_SHAPE_HIDDEN)
-        return AppendCompressedFace(faceCount, rawFaceCount, cell, cellIndex,
-                                    occupancyFace, materialFace, plane, uMin, uMax,
-                                    bottom, top, axis, sign, DIORAMA_VOXELS_PER_CELL);
+        return AppendCompressedSurfaceFace(faceCount, rawFaceCount, cell, cellIndex,
+                                           surface, materialFace, plane, uMin, uMax,
+                                           bottom, top, axis, sign, DIORAMA_VOXELS_PER_CELL);
     /* a ledge on the ground is ground there (its lip has faces of its own);
      * one a terrace raised or lowered is as high as its ground */
-    neighborTop = neighbor->shape == DIORAMA_SHAPE_LEDGE
-                ? (neighbor->groundHeight == 0.0f ? 0 : HeightToVoxel(neighbor->groundHeight))
-                : HeightToVoxel(neighbor->visualHeight);
-    neighborBottom = neighborTop > 0 ? -1 : neighborTop - 1;
+    if (neighbor->shape == DIORAMA_SHAPE_LEDGE && !IsTreeHullColumn(neighbor))
+    {
+        neighborTop = neighbor->groundHeight == 0.0f ? 0 : HeightToVoxel(neighbor->groundHeight);
+        neighborBottom = neighborTop > 0 ? -1 : neighborTop - 1;
+    }
+    else
+        CompressedColumn(neighbor, &neighborBottom, &neighborTop, &neighborSurface);
     if (neighborTop <= bottom || neighborBottom >= top)
-        return AppendCompressedFace(faceCount, rawFaceCount, cell, cellIndex,
-                                    occupancyFace, materialFace, plane, uMin, uMax,
-                                    bottom, top, axis, sign, DIORAMA_VOXELS_PER_CELL);
+        return AppendCompressedSurfaceFace(faceCount, rawFaceCount, cell, cellIndex,
+                                           surface, materialFace, plane, uMin, uMax,
+                                           bottom, top, axis, sign, DIORAMA_VOXELS_PER_CELL);
     if (neighborBottom > bottom
-     && !AppendCompressedFace(faceCount, rawFaceCount, cell, cellIndex,
-                              occupancyFace, materialFace, plane, uMin, uMax,
-                              bottom, neighborBottom < top ? neighborBottom : top,
-                              axis, sign, DIORAMA_VOXELS_PER_CELL))
+     && !AppendCompressedSurfaceFace(faceCount, rawFaceCount, cell, cellIndex,
+                                     surface, materialFace, plane, uMin, uMax,
+                                     bottom, neighborBottom < top ? neighborBottom : top,
+                                     axis, sign, DIORAMA_VOXELS_PER_CELL))
         return false;
     if (neighborTop < top
-     && !AppendCompressedFace(faceCount, rawFaceCount, cell, cellIndex,
-                              occupancyFace, materialFace, plane, uMin, uMax,
-                              neighborTop > bottom ? neighborTop : bottom, top,
-                              axis, sign, DIORAMA_VOXELS_PER_CELL))
+     && !AppendCompressedSurfaceFace(faceCount, rawFaceCount, cell, cellIndex,
+                                     surface, materialFace, plane, uMin, uMax,
+                                     neighborTop > bottom ? neighborTop : bottom, top,
+                                     axis, sign, DIORAMA_VOXELS_PER_CELL))
         return false;
     return true;
 }
@@ -801,6 +846,12 @@ static bool BuildCompressedOccupancyShell(const struct DioramaTerrainChunkInput 
             const struct DioramaTerrainCell *cell = GetCell(input, x, y);
             if (cell->present && cell->shape != DIORAMA_SHAPE_HIDDEN)
             {
+                /* the ground under a tree: a whole column whatever else it is */
+                if (IsTreeHullColumn(cell))
+                {
+                    spans += DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL;
+                    continue;
+                }
                 if (cell->shape == DIORAMA_SHAPE_ROOF
                  || cell->shape == DIORAMA_SHAPE_STAIRS
                  || cell->shape == DIORAMA_SHAPE_BRIDGE
@@ -821,35 +872,30 @@ static bool BuildCompressedOccupancyShell(const struct DioramaTerrainChunkInput 
              x < DIORAMA_TERRAIN_HALO + DIORAMA_TERRAIN_CHUNK_SIZE; x++)
         {
             static const int8_t offsets[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
-            static const uint8_t occupancyFaces[4] = {DIORAMA_OCCUPANCY_FACE_NORTH,
-                DIORAMA_OCCUPANCY_FACE_EAST, DIORAMA_OCCUPANCY_FACE_SOUTH,
-                DIORAMA_OCCUPANCY_FACE_WEST};
             const struct DioramaTerrainCell *cell = GetCell(input, x, y);
             int cellIndex = y * DIORAMA_TERRAIN_INPUT_SIZE + x;
             int32_t pixelX;
             int32_t pixelZ;
             int16_t top;
             int16_t bottom;
+            int surface;
             int side;
 
             if (!cell->present || cell->shape == DIORAMA_SHAPE_HIDDEN)
                 continue;
             pixelX = cell->mapX * DIORAMA_VOXELS_PER_CELL;
             pixelZ = cell->mapY * DIORAMA_VOXELS_PER_CELL;
-            top = HeightToVoxel(cell->visualHeight);
-            bottom = top > 0 ? -1 : top - 1;
-            if (!AppendCompressedFace(&faces, &rawFaces, cell, cellIndex,
-                                      DIORAMA_OCCUPANCY_FACE_TOP,
-                                      DIORAMA_MATERIAL_FACE_TOP, top,
-                                      pixelX, pixelX + DIORAMA_VOXELS_PER_CELL,
-                                      pixelZ, pixelZ + DIORAMA_VOXELS_PER_CELL,
-                                      1, 1, DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL)
-             || !AppendCompressedFace(&faces, &rawFaces, cell, cellIndex,
-                                      DIORAMA_OCCUPANCY_FACE_BOTTOM,
-                                      DIORAMA_MATERIAL_FACE_TOP, bottom,
-                                      pixelX, pixelX + DIORAMA_VOXELS_PER_CELL,
-                                      pixelZ, pixelZ + DIORAMA_VOXELS_PER_CELL,
-                                      1, -1, DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL))
+            CompressedColumn(cell, &bottom, &top, &surface);
+            if (!AppendCompressedSurfaceFace(&faces, &rawFaces, cell, cellIndex, surface,
+                                             DIORAMA_MATERIAL_FACE_TOP, top,
+                                             pixelX, pixelX + DIORAMA_VOXELS_PER_CELL,
+                                             pixelZ, pixelZ + DIORAMA_VOXELS_PER_CELL,
+                                             1, 1, DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL)
+             || !AppendCompressedSurfaceFace(&faces, &rawFaces, cell, cellIndex, surface,
+                                             DIORAMA_MATERIAL_FACE_TOP, bottom,
+                                             pixelX, pixelX + DIORAMA_VOXELS_PER_CELL,
+                                             pixelZ, pixelZ + DIORAMA_VOXELS_PER_CELL,
+                                             1, -1, DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL))
                 return false;
             for (side = 0; side < 4; side++)
             {
@@ -862,7 +908,7 @@ static bool BuildCompressedOccupancyShell(const struct DioramaTerrainChunkInput 
                 int32_t uMin = axis == 0 ? pixelZ : pixelX;
 
                 if (!AppendCompressedSide(&faces, &rawFaces, cell, cellIndex, neighbor,
-                                          occupancyFaces[side], side + 1, plane,
+                                          surface, side + 1, plane,
                                           uMin, uMin + DIORAMA_VOXELS_PER_CELL,
                                           axis, sign, bottom, top))
                     return false;
@@ -1732,6 +1778,31 @@ bool DioramaTerrain_BuildTreeModel(struct DioramaTerrainVertex *vertices,
     return true;
 }
 
+void DioramaTerrain_SetVoxelOccupancyOnly(bool on)
+{
+    sVoxelOccupancyOnly = on;
+}
+
+uint32_t DioramaTerrain_TreeModelFaceCount(void)
+{
+    return gDioramaTreeModelFaceCount;
+}
+
+/* compile_vox.py's sign is the side of its voxel a face lies on, along the
+ * face's axis: the model's x is the scene's x (VoxelX), its depth axis the
+ * scene's z reversed (VoxelZ) and its height the scene's y (VoxelY), as
+ * BuildTreeModel places them. */
+enum DioramaTreeFacing DioramaTerrain_TreeModelFacing(uint32_t face)
+{
+    const struct DioramaTreeModelFace *source = &gDioramaTreeModelFaces[face];
+
+    if (source->axis == 0)
+        return source->sign > 0 ? DIORAMA_TREE_FACING_EAST : DIORAMA_TREE_FACING_WEST;
+    if (source->axis == 1)
+        return source->sign > 0 ? DIORAMA_TREE_FACING_SOUTH : DIORAMA_TREE_FACING_NORTH;
+    return source->sign > 0 ? DIORAMA_TREE_FACING_UP : DIORAMA_TREE_FACING_DOWN;
+}
+
 static bool AppendVoxelTreeInstance(const struct DioramaTerrainChunkInput *input,
                                     const struct DioramaTerrainCell *anchor,
                                     struct DioramaTerrainMesh *mesh)
@@ -2058,7 +2129,8 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
             }
         }
 
-    if (BuildCompressedOccupancyShell(input, &spanCount, &shellFaceCount,
+    if (!sVoxelOccupancyOnly
+     && BuildCompressedOccupancyShell(input, &spanCount, &shellFaceCount,
                                       &rawShellFaceCount))
         mesh->usedCompressedOccupancy = true;
     else
