@@ -61,6 +61,9 @@ void DioramaProfile_Begin(enum DioramaProfileSection section);
 void DioramaProfile_End(enum DioramaProfileSection section);
 /* After the swap: closes this frame's counts and timers. */
 void DioramaProfile_FrameDone(void);
+/* A section's CPU time in the last frame done (0 when it did not run or
+ * timing is off): PKMN_PERF_FRAME_LOG's columns. */
+double DioramaProfile_LastFrameMs(enum DioramaProfileSection section);
 const char *DioramaProfile_SectionName(enum DioramaProfileSection section);
 
 #define DIORAMA_PROFILE_UPLOAD_SITES 5

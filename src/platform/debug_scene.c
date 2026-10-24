@@ -11,6 +11,7 @@
 #include "new_game.h"
 #include "overworld.h"
 #include "event_data.h"
+#include "random.h"
 #include "region_map.h"
 #include "pokenav.h"
 #include "load_save.h"
@@ -1169,6 +1170,13 @@ static void StartFieldScene(void)
         FlagSet((u16)badge); // so the level 30 Pokemon obeys
     FlagSet(FLAG_SYS_POKEMON_GET); // the start menu lists POKéMON
     FlagSet(FLAG_SYS_POKEDEX_GET);
+    // PKMN_DEBUG_RUN=1: the Running Shoes, so B held in PKMN_DEBUG_KEYS runs (the 3D view's frame-time walks)
+    if ((value = SDL_getenv("PKMN_DEBUG_RUN")) != NULL && value[0] == '1')
+        FlagSet(FLAG_SYS_B_DASH);
+    // PKMN_DEBUG_SEED=n: the random numbers from seed n (the boot seeds them from the clock), so two runs - two builds'
+    // pictures compared - have the same wild Pokemon in the same places
+    if ((value = SDL_getenv("PKMN_DEBUG_SEED")) != NULL && Numbers(value, v, 1) >= 1)
+        SeedRng((u32)v[0]);
     // PKMN_DEBUG_PARTY=0: no Pokemon at all (Update 32: a short-introduction character before its lab claim; the
     // starter flag goes too, PKMN_DEBUG_RIVAL_SET sets the rest of that state)
     if ((value = SDL_getenv("PKMN_DEBUG_PARTY")) != NULL && Numbers(value, v, 1) >= 1 && v[0] == 0)

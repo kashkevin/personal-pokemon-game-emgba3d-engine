@@ -54,9 +54,15 @@ static unsigned sSlot;
 
 static bool sTiming;
 static bool sLogRequested;
+/* PKMN_DIORAMA_PROFILE_FINISH=1 (development): glFinish at each section's
+ * start and end, so a section's CPU time holds its own GPU work. A software
+ * renderer (llvmpipe) defers all drawing to the first wait - the bloom's copy -
+ * and the log would put the whole scene under "air". It slows every frame. */
+static bool sFinish;
 static Uint64 sCpuBegin[DIORAMA_PROF_COUNT];
 static bool sOpen[DIORAMA_PROF_COUNT];
 static double sCpuFrame[DIORAMA_PROF_COUNT];   /* this frame */
+static double sCpuLast[DIORAMA_PROF_COUNT];    /* the last frame done */
 static bool sTouchedFrame[DIORAMA_PROF_COUNT];
 
 /* The window since the last TakeStats. */
@@ -167,9 +173,12 @@ void DioramaProfile_Init(void)
     while (glGetError() != GL_NO_ERROR)
         ;
     sLogRequested = value != NULL && value[0] == '1';
-    SDL_Log("Diorama: profiling %s; GPU timer queries %s; driver memory info %s",
+    value = SDL_getenv("PKMN_DIORAMA_PROFILE_FINISH");
+    sFinish = value != NULL && value[0] == '1';
+    SDL_Log("Diorama: profiling %s; GPU timer queries %s; driver memory info %s%s",
             sLogRequested ? "on (PKMN_DIORAMA_PROFILE=1)" : "available", sHasTimer ? "yes" : "no",
-            sHasNvx ? "NVIDIA" : sHasAti ? "AMD" : "none");
+            sHasNvx ? "NVIDIA" : sHasAti ? "AMD" : "none",
+            sFinish ? "; each section finished (PKMN_DIORAMA_PROFILE_FINISH=1)" : "");
     DioramaProfile_SetTiming(sLogRequested);
 }
 
@@ -244,6 +253,8 @@ void DioramaProfile_Begin(enum DioramaProfileSection section)
     if (!sTiming || section >= DIORAMA_PROF_COUNT || sOpen[section])
         return;
     sOpen[section] = true;
+    if (sFinish && section != DIORAMA_PROF_TICK && section != DIORAMA_PROF_SWAP)
+        glFinish();
     sCpuBegin[section] = SDL_GetPerformanceCounter();
     /* The tick and the swap run outside the frame's GL work: CPU only. */
     if (sQueriesMade && section != DIORAMA_PROF_TICK && section != DIORAMA_PROF_SWAP
@@ -261,6 +272,8 @@ void DioramaProfile_End(enum DioramaProfileSection section)
     if (!sTiming || section >= DIORAMA_PROF_COUNT || !sOpen[section])
         return;
     sOpen[section] = false;
+    if (sFinish && section != DIORAMA_PROF_TICK && section != DIORAMA_PROF_SWAP)
+        glFinish();
     ms = (double)(SDL_GetPerformanceCounter() - sCpuBegin[section]) * 1000.0
        / (double)SDL_GetPerformanceFrequency();
     sCpuFrame[section] += ms;
@@ -341,6 +354,7 @@ void DioramaProfile_FrameDone(void)
         LogSpike();
     for (section = 0; section < DIORAMA_PROF_COUNT; section++)
     {
+        sCpuLast[section] = sTouchedFrame[section] ? sCpuFrame[section] : 0.0;
         if (!sTouchedFrame[section])
             continue;
         sCpuSum[section] += sCpuFrame[section];
@@ -355,6 +369,11 @@ void DioramaProfile_FrameDone(void)
         sSlot = (sSlot + 1) % FRAMES_IN_FLIGHT;
         ReadSlot(sSlot);
     }
+}
+
+double DioramaProfile_LastFrameMs(enum DioramaProfileSection section)
+{
+    return sTiming && section < DIORAMA_PROF_COUNT ? sCpuLast[section] : 0.0;
 }
 
 void DioramaProfile_TakeStats(struct DioramaProfileStats *stats)
