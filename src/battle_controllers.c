@@ -2628,6 +2628,14 @@ void BtlController_HandleSwitchInAnim(enum BattlerId battler)
     if (isPlayerSide)
         ClearTemporarySpeciesSpriteData(battler, gBattleResources->bufferA[battler][2], gBattleResources->bufferA[battler][3]);
     gBattlerPartyIndexes[battler] = gBattleResources->bufferA[battler][1];
+#ifdef PORTABLE
+    // A link battle's other games only replay the master's: the switch-in script that forgets the last Pokemon's
+    // Illusion (SwitchInClearSetData) runs on the master alone, and a Zorua sent in after the first Pokemon showed
+    // as itself on the other screens (the owner's report of 2026-10-24). Worked out again for the one coming in.
+    if ((gBattleTypeFlags & BATTLE_TYPE_LINK) && !(gBattleTypeFlags & BATTLE_TYPE_IS_MASTER))
+        ClearIllusionMon(battler);
+#endif
+#line 2567 // gba-line
     if (isPlayerSide)
         BattleLoadMonSpriteGfx(GetBattlerMon(battler), battler);
     StartSendOutAnim(battler, gBattleResources->bufferA[battler][2], gBattleResources->bufferA[battler][3], FALSE);
