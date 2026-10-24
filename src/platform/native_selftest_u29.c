@@ -929,6 +929,10 @@ int NativeSelfTest_Shiny(void)
 #include "platform/coin_wallet.h"
 #include "platform/coin_shop.h"
 #include "mp_mega_prices.h"
+#include "mp_rare_goods_prices.h"
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+#endif
 #include "battle_util.h"
 extern bool32 DoesSpeciesUseHoldItemToChangeForm(enum Species species, enum Item heldItemId);
 
@@ -1120,6 +1124,47 @@ int NativeSelfTest_Coins(void)
                       CoinShop_ItemPrice(ITEM_ABILITY_PATCH) >= 200000 && CoinShop_ItemPrice(ITEM_ABILITY_PATCH) <= 500000
                       && CoinShop_ItemPrice(ITEM_GOLD_BOTTLE_CAP) >= 200000 && CoinShop_ItemPrice(ITEM_GOLD_BOTTLE_CAP) <= 500000);
             ExpectLeg("(RARE GOODS) an obtainable item is not for sale", CoinShop_ItemPrice(ITEM_POTION) > 999999);
+            // the review of 2026-10-24: every list whole on the native shop screen, the Mints in the owner's band, the
+            // Charms and form-change key items sold, nothing that does nothing here, Misty Seed (no one can get it) sold
+            {
+                extern const u16 MauvilleCity_GameCorner_Pokemart_RareGoodsBerries[], MauvilleCity_GameCorner_Pokemart_RareGoodsEvolution[];
+                const u16 *const lists[] = {MauvilleCity_GameCorner_Pokemart_RareGoodsHeld, MauvilleCity_GameCorner_Pokemart_RareGoodsBerries,
+                                            MauvilleCity_GameCorner_Pokemart_RareGoodsTraining, MauvilleCity_GameCorner_Pokemart_RareGoodsEvolution,
+                                            MauvilleCity_GameCorner_Pokemart_RareGoodsOther, MauvilleCity_Mart_Pokemart_MegaStones};
+                u32 longest = 0, total = 0;
+
+                priced = TRUE;
+                for (u32 l = 0; l < ARRAY_COUNT(lists); l++)
+                {
+                    u32 n = 0;
+
+                    for (const u16 *item = lists[l]; *item != ITEM_NONE; item++, n++)
+                        priced &= CoinShop_ItemPrice(*item) >= 200 && CoinShop_ItemPrice(*item) <= 500000;
+                    longest = max(longest, n);
+                    total += l < ARRAY_COUNT(lists) - 1 ? n : 0;
+                }
+                ExpectLeg("(RARE GOODS) every item of all five lists (and every stone) has a coin price", priced);
+                ExpectLeg("(RARE GOODS) the lists hold every good of the price table", total == MP_RARE_GOODS_COUNT);
+#ifdef ENABLE_NATIVE_UI
+                ExpectLeg("(RARE GOODS) every coin shop list fits the native shop screen whole (its CANCEL is CANCEL)",
+                          longest <= NATIVE_SHOP_MAX_ITEMS);
+#endif
+                ExpectLeg("(RARE GOODS) the Mints cost 200,000 to 250,000 (the owner's band for trait changers)",
+                          CoinShop_ItemPrice(ITEM_ADAMANT_MINT) >= 200000 && CoinShop_ItemPrice(ITEM_ADAMANT_MINT) <= 250000
+                          && CoinShop_ItemPrice(ITEM_SERIOUS_MINT) >= 200000 && CoinShop_ItemPrice(ITEM_SERIOUS_MINT) <= 250000);
+                ExpectLeg("(RARE GOODS) the Oval, Exp. and Catching Charms cost 100,000 (the Shiny Charm's price), one each",
+                          CoinShop_ItemPrice(ITEM_OVAL_CHARM) == MP_SHINY_CHARM_COINS && CoinShop_ItemPrice(ITEM_EXP_CHARM) == MP_SHINY_CHARM_COINS
+                          && CoinShop_ItemPrice(ITEM_CATCHING_CHARM) == MP_SHINY_CHARM_COINS && GetItemImportance(ITEM_OVAL_CHARM));
+                ExpectLeg("(RARE GOODS) Gracidea, Reveal Glass, DNA Splicers, Prison Bottle, Zygarde Cube and Rotom Catalog are sold",
+                          CoinShop_ItemPrice(ITEM_GRACIDEA) <= 500000 && CoinShop_ItemPrice(ITEM_REVEAL_GLASS) <= 500000
+                          && CoinShop_ItemPrice(ITEM_DNA_SPLICERS) <= 500000 && CoinShop_ItemPrice(ITEM_PRISON_BOTTLE) <= 500000
+                          && CoinShop_ItemPrice(ITEM_ZYGARDE_CUBE) <= 500000 && CoinShop_ItemPrice(ITEM_ROTOM_CATALOG) <= 500000);
+                ExpectLeg("(RARE GOODS) Peat Block, the Aux items and the Legends foods (no effect here) are not sold",
+                          CoinShop_ItemPrice(ITEM_PEAT_BLOCK) > 999999 && CoinShop_ItemPrice(ITEM_AUX_GUARD) > 999999
+                          && CoinShop_ItemPrice(ITEM_AUX_POWERGUARD) > 999999 && CoinShop_ItemPrice(ITEM_CHOICE_DUMPLING) > 999999
+                          && CoinShop_ItemPrice(ITEM_SWAP_SNACK) > 999999 && CoinShop_ItemPrice(ITEM_TWICE_SPICED_RADISH) > 999999);
+                ExpectLeg("(RARE GOODS) Misty Seed (only Galarian Weezing and Comfey hold it) is sold", CoinShop_ItemPrice(ITEM_MISTY_SEED) <= 500000);
+            }
             CoinShop_OnOpen(NULL);
         }
     }

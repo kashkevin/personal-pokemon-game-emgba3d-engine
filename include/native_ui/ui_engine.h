@@ -811,7 +811,7 @@ bool32 NamingScreen_NativeUiState(struct NativeNaming *out);
 
 /* ---------------------------------------------------------------- the Poké Mart (shop.c) */
 
-#define NATIVE_SHOP_MAX_ITEMS 64
+#define NATIVE_SHOP_MAX_ITEMS 128   /* the longest coin shop lists (the Game Corner's RARE GOODS, the Mega Stone dealer's) fit whole: tools/mp/gen_rare_goods.py --check */
 enum
 {
     NATIVE_SHOP_NONE,
