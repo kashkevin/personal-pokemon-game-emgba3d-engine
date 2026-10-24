@@ -190,7 +190,9 @@ int NativeSelfTest_DumpTowerData(const char *outPath)
 #include "malloc.h"
 #include "multiplayer_ladder.h"
 #include "multiplayer_world.h"
+#include "overworld.h"
 #include "pokemon_storage_system.h"
+#include "script.h"
 #include "tower_legends.h"
 #include "constants/flags.h"
 #include "constants/hold_effects.h"
@@ -590,6 +592,71 @@ int NativeSelfTest_Tower(void)
         TowerLegends_Tick();
         ExpectTower("after 45 seconds it is refused for its ticket and floor",
                     TowerLegends_TestRefusal(&ticket, &refusedFloor) && ticket == 0x00054321 && refusedFloor == 7);
+        TowerLegends_TestReset();
+        gMain.callback2 = field;
+    }
+
+    // 10. "Go on to floor N?" answered YES while the floor's result is not yet settled in the save: the host's settling
+    // word is applied only on a calm field (multiplayer.c FieldReady), never while page 4 is open, so page 4 waits on the
+    // calm field for it - at most 5 seconds of calm frames, then it opens anyway. Nothing unsettled: it opens at once;
+    // NO (the host save) never waits.
+    {
+        MainCallback field = gMain.callback2;
+
+        memset(&gSaveBlock3Ptr->tower, 0, sizeof(gSaveBlock3Ptr->tower));
+        TowerLegends_TestReset();
+        ScriptContext_Init();                        // no script running
+        UnlockPlayerFieldControls();
+        gMain.callback2 = CB2_Overworld;             // a calm field
+        MultiplayerWorld_ApplyRewardWord((s32)TowerWord(MP_REWARD_TOWER_STATE, (4 << 15) | (5 << 8)), &result);
+        TowerLegends_TestSetPending(TOWER_RESULT_WON, 0x000105C7, 5);
+        gSpecialVar_Result = 1;                      // YES
+        TowerLegends_Continue();
+        for (i = 0; i < 60 * 2; i++)
+            TowerLegends_Tick();
+        ExpectTower("go on: YES with the floor's result unsettled: page 4 waits on the calm field",
+                    TowerLegends_TestQueuedAnswer() == 1);
+        MultiplayerWorld_ApplyRewardWord((s32)TowerWord(MP_REWARD_TOWER_STATE, (5 << 15) | (6 << 8) | 0xC7), &result);
+        TowerLegends_Tick();
+        ExpectTower("go on: the settling word applied, page 4 opens on the next frame",
+                    !TowerLegends_HasPendingResult() && TowerLegends_TestQueuedAnswer() == 0);
+
+        TowerLegends_TestSetPending(TOWER_RESULT_WON, 0x000106C8, 6);
+        TowerLegends_Continue();
+        for (i = 0; i < 60 * 5; i++)
+            TowerLegends_Tick();
+        ExpectTower("go on: a result that never settles: page 4 still waits after 5 seconds",
+                    TowerLegends_TestQueuedAnswer() == 1);
+        TowerLegends_Tick();
+        ExpectTower("go on: ... then it opens anyway (the launcher asks the host again)",
+                    TowerLegends_TestQueuedAnswer() == 0 && TowerLegends_HasPendingResult());
+
+        gMain.callback2 = NULL;                      // a busy field: nothing opens and the wait does not count
+        TowerLegends_Continue();
+        for (i = 0; i < 60 * 10; i++)
+            TowerLegends_Tick();
+        gMain.callback2 = CB2_Overworld;
+        for (i = 0; i < 60 * 5; i++)
+            TowerLegends_Tick();
+        ExpectTower("go on: busy frames are not counted: still waiting after 5 calm seconds",
+                    TowerLegends_TestQueuedAnswer() == 1);
+        TowerLegends_Tick();
+        ExpectTower("go on: ... then it opens", TowerLegends_TestQueuedAnswer() == 0);
+
+        TowerLegends_TestSetPending(0, 0, 0);        // nothing unsettled
+        TowerLegends_Continue();
+        TowerLegends_Tick();
+        ExpectTower("go on: nothing unsettled: page 4 opens on the first calm frame", TowerLegends_TestQueuedAnswer() == 0);
+
+        TowerLegends_TestSetPending(TOWER_RESULT_LOST, 0x000107C9, 7);
+        gSpecialVar_Result = 0;                      // NO
+        TowerLegends_Continue();
+        ExpectTower("go on: NO queues the host save", TowerLegends_TestQueuedAnswer() == 2);
+        TowerLegends_Tick();
+        ExpectTower("go on: NO is carried out on the first calm frame, unsettled result or not",
+                    TowerLegends_TestQueuedAnswer() == 0);
+
+        memset(&gSaveBlock3Ptr->tower, 0, sizeof(gSaveBlock3Ptr->tower));
         TowerLegends_TestReset();
         gMain.callback2 = field;
     }

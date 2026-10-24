@@ -16,6 +16,7 @@
 //   * experience in a Tower battle is the ordinary award, uncapped (the owner's request of 2026-10-23; it stopped at a
 //     cap set by this game's badges before): solo here, Duo in multiplayer_coop.c.
 #include <stddef.h>
+#include <stdio.h>
 #include "tower_legends.h"
 #include "battle.h"
 #include "battle_setup.h"
@@ -83,6 +84,11 @@ static const u8 sCheckpoints[] = {10, 20, 25, 30, 40, 50, 60, 70, 75, 80, 90, 10
 // A solo command the field never let start is refused well before the host voids its ticket (tower_service.py
 // ISSUED_SECONDS, 120 s from issue): a battle the game began after that would not count.
 #define QUEUE_FRAMES (60 * 45)
+// "Go on to floor N?" answered YES while the floor's result is not yet settled in the save: the host's settling word is
+// applied only on a calm field (multiplayer.c FieldReady), never while the Players menu is open, and page 4's ask for
+// the next floor is refused ("tower_saving") until it is. So page 4 waits for it on the calm field, at most this long
+// (the word is usually there before the question is answered); then it opens anyway and the launcher asks again.
+#define NEXT_HOLD_FRAMES (60 * 5)
 
 static EWRAM_DATA struct
 {
@@ -101,6 +107,7 @@ static EWRAM_DATA struct
     u8 saveQueued;       // ... answered NO: the host save
     u16 repostTimer;
     u16 queuedFrames;    // how long the queued solo command has waited for a calm field
+    u16 nextHoldFrames;  // how long page 4 has waited on a calm field for the last result to settle (NEXT_HOLD_FRAMES)
     u32 ticket;
     u32 refusedTicket;
     struct TowerLegendsCommand command;
@@ -452,7 +459,16 @@ void TowerLegends_Tick(void)
         // does), so back-to-back floors are each saved; YES then opens the next floor through the host (page 4).
         bool32 next = sTower.nextQueued;
 
+        if (next && TowerLegends_HasPendingResult() && sTower.nextHoldFrames < NEXT_HOLD_FRAMES)
+        {
+            sTower.nextHoldFrames++;   // the field stays calm and ready: the settling word can be applied meanwhile
+            return;
+        }
+        if (next && sTower.nextHoldFrames != 0)
+            fprintf(stderr, "tower: go on: page 4 waited %u frames for the last result (%s)\n", sTower.nextHoldFrames,
+                    TowerLegends_HasPendingResult() ? "still unsettled: opens anyway" : "settled");
         sTower.nextQueued = sTower.saveQueued = FALSE;
+        sTower.nextHoldFrames = 0;
         if (!next)
             MultiplayerHostSave_Request();
         else if (!MultiplayerHostSave_BeforePlayers(MP_MENU_PAGE_TOWER_NEXT) && !MultiplayerMenu_OpenPage(MP_MENU_PAGE_TOWER_NEXT))
@@ -700,6 +716,7 @@ void TowerLegends_BufferContinue(void)
 // Special: the answer to "go on?" (VAR_RESULT, YES or NO), carried out once the script has ended and the field is calm.
 void TowerLegends_Continue(void)
 {
+    sTower.nextHoldFrames = 0;
     if (gSpecialVar_Result != 0)   // YES (1); NO and B are 0
         sTower.nextQueued = TRUE;
     else
@@ -850,6 +867,12 @@ void TowerLegends_TestSaveHeldItems(void)
 void TowerLegends_TestRestoreHeldItems(void)
 {
     RestoreHeldItems();
+}
+
+// The answer to "go on?" still waiting to be carried out: 1 YES (page 4), 2 NO (the host save), 0 none.
+u32 TowerLegends_TestQueuedAnswer(void)
+{
+    return sTower.nextQueued ? 1 : sTower.saveQueued ? 2 : 0;
 }
 
 // A refusal waiting to be posted to the host (its ticket and floor).
