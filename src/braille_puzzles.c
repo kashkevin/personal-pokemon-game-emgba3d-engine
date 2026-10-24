@@ -196,7 +196,14 @@ bool8 ShouldDoBrailleRegirockEffect(void)
 
 void SetUpPuzzleEffectRegirock(void)
 {
+#ifdef PORTABLE
+    // HMs from the PC boxes: Regirock's door opened by a boxed Pokemon's Rock Smash chosen in the party menu (field_move.c)
+    gFieldEffectArguments[0] = FieldMove_PartyMenuUser(GetCursorSelectionMonId());
+#else
+#line 195 // gba-line
     gFieldEffectArguments[0] = GetCursorSelectionMonId();
+#endif
+#line 196 // gba-line
     FieldEffectStart(FLDEFF_USE_TOMB_PUZZLE_EFFECT);
 }
 

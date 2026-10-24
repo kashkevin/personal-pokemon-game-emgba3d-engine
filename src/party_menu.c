@@ -11,6 +11,7 @@
 #ifdef PORTABLE
 #include "battle_factory.h"
 #include "battle_tent.h"
+#include "braille_puzzles.h"
 #endif
 #line 11 // gba-line
 #include "bg.h"
@@ -3011,11 +3012,13 @@ static void SetPartyMonFieldSelectionActions(struct Pokemon *mons, u8 slotId)
         }
     }
 #ifdef PORTABLE
-    // HMs from the PC boxes (field_move.c): Fly and Flash are used only from this list, so one that a boxed Pokemon knows
-    // and no party Pokemon does is offered on every Pokemon's list once its badge is had, while the list has room for it
-    // and the rows still to come (SWITCH, ITEM or MAIL, CANCEL). Chosen, the boxed Pokemon uses it (CursorCb_FieldMove).
+    // HMs from the PC boxes (field_move.c): Fly and Flash are used only from this list, and so is Rock Smash at Regirock's
+    // door in the Desert Ruins (its braille spot; rocks in the field take it from the boxes themselves), so one that a
+    // boxed Pokemon knows and no party Pokemon does is offered on every Pokemon's list once its badge is had, while the
+    // list has room for it and the rows still to come (SWITCH, ITEM or MAIL, CANCEL). Chosen, the boxed Pokemon uses it
+    // (CursorCb_FieldMove).
     {
-        static const u8 sBoxFieldMoves[] = {FIELD_MOVE_FLY, FIELD_MOVE_FLASH};
+        static const u8 sBoxFieldMoves[] = {FIELD_MOVE_FLY, FIELD_MOVE_FLASH, FIELD_MOVE_ROCK_SMASH};
         u32 rowsToCome = 1 + (InBattlePike() ? 0 : 1 + (GetMonData(&mons[1], MON_DATA_SPECIES) != SPECIES_NONE));
 
         for (i = 0; i < ARRAY_COUNT(sBoxFieldMoves); i++)
@@ -3024,6 +3027,8 @@ static void SetPartyMonFieldSelectionActions(struct Pokemon *mons, u8 slotId)
 
             if (sPartyMenuInternal->numActions + 1 + rowsToCome > ARRAY_COUNT(sPartyMenuInternal->actions))
                 break;
+            if (sBoxFieldMoves[i] == FIELD_MOVE_ROCK_SMASH && !ShouldDoBrailleRegirockEffect())
+                continue;
             if (FieldMove_IsVisible(sBoxFieldMoves[i]) && IsFieldMoveUnlocked(sBoxFieldMoves[i])
              && !FieldMove_PartyMonKnowsMove(move) && FieldMove_FindBoxMonWithMove(move, NULL, NULL))
                 AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions,
