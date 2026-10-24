@@ -271,6 +271,7 @@ static u32 GetRelearnerTutorMoves(struct BoxPokemon *mon, u16 *moves);
 #ifdef PORTABLE
 static u32 GetHatchedMonEggMoves(struct BoxPokemon *mon, u16 *moves);
 static u32 GetUsedTutorMoves(struct BoxPokemon *mon, u16 *moves);
+static u32 GetSwitchableLevelUpMoves(struct BoxPokemon *mon, u16 *moves);
 static void ShowNextListHint(void);
 #endif
 #line 271 // gba-line
@@ -959,6 +960,10 @@ static u32 GetRelearnerLevelUpMoves(struct BoxPokemon *mon, u16 *moves)
     enum Species species = GetBoxMonData(mon, MON_DATA_SPECIES);
     u32 level = (P_ENABLE_ALL_LEVEL_UP_MOVES ? MAX_LEVEL : GetLevelFromBoxMonExp(mon));
     u32 numMoves = 0;
+#ifdef PORTABLE
+    return GetSwitchableLevelUpMoves(mon, moves); // a pre-evolution's moves only up to the level it evolved at
+#endif
+#line 919 // gba-line
     do
     {
         const struct LevelUpMove *learnset = GetSpeciesLevelUpLearnset(species);
@@ -1088,6 +1093,11 @@ static bool32 HasRelearnerLevelUpMoves(struct BoxPokemon *boxMon)
 {
     enum Species species = GetBoxMonData(boxMon, MON_DATA_SPECIES);
     u32 level = (P_ENABLE_ALL_LEVEL_UP_MOVES == TRUE) ? MAX_LEVEL : GetLevelFromBoxMonExp(boxMon);
+#ifdef PORTABLE
+    u16 moves[MAX_RELEARNER_MOVES];
+    return GetSwitchableLevelUpMoves(boxMon, moves) != 0;
+#endif
+#line 1040 // gba-line
 
     do
     {
@@ -1202,10 +1212,13 @@ static bool32 IsTutorMoveRelearnerActive(void)
 }
 #ifdef PORTABLE
 #include "international_string_util.h"
+#include "region_map.h"
+#include "constants/region_map_sections.h"
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Move switching as in Legends Z-A (PC game; MOVES in the party menu and the summary screen's relearner). The lists:
-// - level-up moves up to the Pokemon's level, its pre-evolutions' too (P_PRE_EVO_MOVES);
+// - level-up moves up to the Pokemon's level, its pre-evolutions' too (P_PRE_EVO_MOVES), each pre-evolution's only up
+//   to the level at which that form evolved, when it evolves by level (GetLevelUpStages), in level order;
 // - egg moves, only for a Pokemon that hatched from an Egg (met at level 0), from every stage of its own line: an Egg
 //   made without the incense hatches as Marill or Snorlax, not Azurill or Munchlax (P_INCENSE_BREEDING < GEN_9), with
 //   that stage's own egg moves;
@@ -1219,18 +1232,19 @@ static const struct
 {
     u16 move;
     u16 flag;
+    u16 mapsec;     // where the tutor is (the details' "the tutor in ...")
 } sOneTimeTutors[] =
 {
-    {MOVE_DOUBLE_EDGE, FLAG_MOVE_TUTOR_TAUGHT_DOUBLE_EDGE},     // Sootopolis City
-    {MOVE_DYNAMIC_PUNCH, FLAG_MOVE_TUTOR_TAUGHT_DYNAMICPUNCH},  // Mossdeep City
-    {MOVE_EXPLOSION, FLAG_MOVE_TUTOR_TAUGHT_EXPLOSION},         // Pacifidlog Town
-    {MOVE_FURY_CUTTER, FLAG_MOVE_TUTOR_TAUGHT_FURY_CUTTER},     // Verdanturf Town
-    {MOVE_METRONOME, FLAG_MOVE_TUTOR_TAUGHT_METRONOME},         // Fallarbor Town
-    {MOVE_MIMIC, FLAG_MOVE_TUTOR_TAUGHT_MIMIC},                 // Lavaridge Town
-    {MOVE_ROLLOUT, FLAG_MOVE_TUTOR_TAUGHT_ROLLOUT},             // Mauville City
-    {MOVE_SLEEP_TALK, FLAG_MOVE_TUTOR_TAUGHT_SLEEP_TALK},       // Fortree City
-    {MOVE_SUBSTITUTE, FLAG_MOVE_TUTOR_TAUGHT_SUBSTITUTE},       // Lilycove City
-    {MOVE_SWAGGER, FLAG_MOVE_TUTOR_TAUGHT_SWAGGER},             // Slateport City
+    {MOVE_DOUBLE_EDGE, FLAG_MOVE_TUTOR_TAUGHT_DOUBLE_EDGE, MAPSEC_SOOTOPOLIS_CITY},
+    {MOVE_DYNAMIC_PUNCH, FLAG_MOVE_TUTOR_TAUGHT_DYNAMICPUNCH, MAPSEC_MOSSDEEP_CITY},
+    {MOVE_EXPLOSION, FLAG_MOVE_TUTOR_TAUGHT_EXPLOSION, MAPSEC_PACIFIDLOG_TOWN},
+    {MOVE_FURY_CUTTER, FLAG_MOVE_TUTOR_TAUGHT_FURY_CUTTER, MAPSEC_VERDANTURF_TOWN},
+    {MOVE_METRONOME, FLAG_MOVE_TUTOR_TAUGHT_METRONOME, MAPSEC_FALLARBOR_TOWN},
+    {MOVE_MIMIC, FLAG_MOVE_TUTOR_TAUGHT_MIMIC, MAPSEC_LAVARIDGE_TOWN},
+    {MOVE_ROLLOUT, FLAG_MOVE_TUTOR_TAUGHT_ROLLOUT, MAPSEC_MAUVILLE_CITY},
+    {MOVE_SLEEP_TALK, FLAG_MOVE_TUTOR_TAUGHT_SLEEP_TALK, MAPSEC_FORTREE_CITY},
+    {MOVE_SUBSTITUTE, FLAG_MOVE_TUTOR_TAUGHT_SUBSTITUTE, MAPSEC_LILYCOVE_CITY},
+    {MOVE_SWAGGER, FLAG_MOVE_TUTOR_TAUGHT_SWAGGER, MAPSEC_SLATEPORT_CITY},
 };
 
 static const u8 *const sRelearnerListNames[MOVE_RELEARNER_COUNT] =
@@ -1296,6 +1310,256 @@ static u32 GetUsedTutorMoves(struct BoxPokemon *mon, u16 *moves)
     return numMoves;
 }
 
+// -------------------------------------------------------------------------------- level-up moves and pre-evolutions
+// A Pokemon's level-up moves count up to its level. With P_PRE_EVO_MOVES its earlier forms' count too, but each only
+// up to the level at which that form evolved: Charmander evolves at Lv 16, so a Lv 20 Charmeleon gets Charmander's
+// moves to Lv 16 (no Scary Face: Charmander's at Lv 19, Charmeleon's own at Lv 21) - what it really could have learned
+// on the way. The rules for that cap (PreEvolutionLevelCap):
+// - an evolution by level (EVO_LEVEL or EVO_LEVEL_BATTLE_ONLY with a level; with or without other conditions): that
+//   level, and never above the next form's own cap (Charizard Lv 50: Charmeleon's moves to Lv 36, Charmander's to 16);
+// - any other evolution (a stone, a trade, friendship or another condition with no level: EVO_LEVEL with level 0) has
+//   no level of its own: the earlier form may have stayed as it was until the next form's cap, so that cap is its cap
+//   (a Lv 40 Ninetales: Vulpix's moves to Lv 40; a Lv 40 Raichu: Pikachu's and Pichu's, a friendship evolution, too);
+// - Shedinja (EVO_SPLIT_FROM_EVO) comes when Nincada evolves into Ninjask: that evolution's level (Lv 20);
+// - several evolutions into the same form (Feebas: a trade or its beauty; Nincada): the highest cap, as either may have
+//   been the one.
+// Moves above the Pokemon's own level are never offered (P_ENABLE_ALL_LEVEL_UP_MOVES lifts every cap, as it did).
+#define MAX_SWITCH_STAGES 4  // a Pokemon and its earlier forms (three at most in the game's data)
+
+static u32 PreEvolutionLevelCap(enum Species preEvo, enum Species evolved, u32 evolvedCap)
+{
+    const struct Evolution *evos = GetSpeciesEvolutions(preEvo);
+    bool32 found = FALSE;
+    u32 cap = 0;
+
+    for (u32 i = 0; evos != NULL && evos[i].method != EVOLUTIONS_END; i++)
+    {
+        u32 method = evos[i].method, level = evos[i].param, stageCap = evolvedCap;
+
+        if (!IsSpeciesEnabled(evos[i].targetSpecies) || SanitizeSpeciesId(evos[i].targetSpecies) != evolved)
+            continue;
+        if (method == EVO_SPLIT_FROM_EVO)
+        {
+            // the clone comes with the evolution into param (Ninjask): that one's method and level
+            method = EVO_NONE;
+            for (u32 j = 0; evos[j].method != EVOLUTIONS_END; j++)
+            {
+                if (evos[j].method != EVO_SPLIT_FROM_EVO && evos[j].targetSpecies == evos[i].param)
+                {
+                    method = evos[j].method;
+                    level = evos[j].param;
+                    break;
+                }
+            }
+        }
+        if ((method == EVO_LEVEL || method == EVO_LEVEL_BATTLE_ONLY) && level != 0 && level < evolvedCap)
+            stageCap = level;
+        if (stageCap > cap)
+            cap = stageCap;
+        found = TRUE;
+    }
+    return found ? cap : evolvedCap;
+}
+
+// The Pokemon's form and its earlier ones (its own first), and the level up to which each one's level-up moves count;
+// how many count (its own alone without P_PRE_EVO_MOVES). *forms: all of them (the egg moves' stages).
+static u32 GetLevelUpStages(struct BoxPokemon *mon, u16 *stages, u8 *caps, u32 *forms)
+{
+    enum Species species = GetBoxMonData(mon, MON_DATA_SPECIES);
+    u32 cap = (P_ENABLE_ALL_LEVEL_UP_MOVES ? MAX_LEVEL : GetLevelFromBoxMonExp(mon)), count = 0;
+
+    while (species != SPECIES_NONE && count < MAX_SWITCH_STAGES)
+    {
+        enum Species preEvo;
+
+        stages[count] = species;
+        caps[count++] = cap;
+        if ((preEvo = GetSpeciesPreEvolution(species)) == SPECIES_NONE)
+            break;
+        if (!P_ENABLE_ALL_LEVEL_UP_MOVES)
+            cap = PreEvolutionLevelCap(preEvo, species, cap);
+        species = preEvo;
+    }
+    if (forms != NULL)
+        *forms = count;
+    return P_PRE_EVO_MOVES ? count : min(count, 1);
+}
+
+static bool32 FindLevelUpSourceIn(const u16 *stages, const u8 *caps, u32 count, enum Move move, u8 *level, u16 *stage);
+
+// Where the level-up list has `move`: the first form (its own first) that learns it within its cap, at what level
+static bool32 FindLevelUpSource(struct BoxPokemon *mon, enum Move move, u8 *level, u16 *stage)
+{
+    u16 stages[MAX_SWITCH_STAGES];
+    u8 caps[MAX_SWITCH_STAGES];
+    u32 count = GetLevelUpStages(mon, stages, caps, NULL);
+
+    return FindLevelUpSourceIn(stages, caps, count, move, level, stage);
+}
+
+static bool32 FindLevelUpSourceIn(const u16 *stages, const u8 *caps, u32 count, enum Move move, u8 *level, u16 *stage)
+{
+    for (u32 s = 0; s < count; s++)
+    {
+        const struct LevelUpMove *learnset = GetSpeciesLevelUpLearnset(stages[s]);
+
+        for (u32 i = 0; learnset[i].move != LEVEL_UP_MOVE_END && learnset[i].level <= caps[s]; i++)
+        {
+            if (learnset[i].move != move)
+                continue;
+            if (level != NULL)
+                *level = learnset[i].level;
+            if (stage != NULL)
+                *stage = stages[s];
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+// The level-up list: every move of those forms within their caps that the Pokemon does not know, each once, in level
+// order (a pre-evolution's move among the Pokemon's own at its level; level 0, learned on evolving, first)
+static u32 GetSwitchableLevelUpMoves(struct BoxPokemon *mon, u16 *moves)
+{
+    u16 stages[MAX_SWITCH_STAGES];
+    u8 caps[MAX_SWITCH_STAGES], levels[MAX_RELEARNER_MOVES];
+    u32 count = GetLevelUpStages(mon, stages, caps, NULL), numMoves = 0;
+
+    for (u32 s = 0; s < count; s++)
+    {
+        const struct LevelUpMove *learnset = GetSpeciesLevelUpLearnset(stages[s]);
+
+        for (u32 i = 0; learnset[i].move != LEVEL_UP_MOVE_END && learnset[i].level <= caps[s]; i++)
+        {
+            u32 at = numMoves;
+
+            if (numMoves >= MAX_RELEARNER_MOVES)
+                break;
+            if (BoxMonKnowsMove(mon, learnset[i].move) || IsMoveInList(moves, numMoves, learnset[i].move))
+                continue;
+            while (at > 0 && levels[at - 1] > learnset[i].level)
+            {
+                moves[at] = moves[at - 1];
+                levels[at] = levels[at - 1];
+                at--;
+            }
+            moves[at] = learnset[i].move;
+            levels[at] = learnset[i].level;
+            numMoves++;
+        }
+    }
+    return numMoves;
+}
+
+// ------------------------------------------------------------------------------------- the lists and their sources
+u32 MoveRelearner_GetListMoves(struct BoxPokemon *boxMon, enum MoveRelearnerStates list, u16 *moves)
+{
+    if (list >= MOVE_RELEARNER_COUNT || GetBoxMonData(boxMon, MON_DATA_IS_EGG))
+        return 0;
+    if (gRelearnMode != RELEARN_MODE_SCRIPT && !sRelearnTypes[list].isActive())
+        return 0;
+    return sRelearnTypes[list].getMoves(boxMon, moves);
+}
+
+// MoveRelearner_GetSource with the Pokemon's forms already found (GetLevelUpStages: count with their caps, forms all)
+static bool32 GetSourceIn(const u16 *stages, const u8 *caps, u32 count, u32 forms, enum MoveRelearnerStates list,
+                          enum Move move, struct MoveSwitchSource *out)
+{
+    out->kind = MOVE_SOURCE_NONE;
+    out->number = 0;
+    out->species = SPECIES_NONE;
+    switch (list)
+    {
+    case MOVE_RELEARNER_LEVEL_UP_MOVES:
+        if (!FindLevelUpSourceIn(stages, caps, count, move, &out->number, &out->species))
+            return FALSE;
+        out->kind = MOVE_SOURCE_LEVEL;
+        return TRUE;
+    case MOVE_RELEARNER_EGG_MOVES:
+        out->kind = MOVE_SOURCE_EGG;
+        for (u32 n = 0; n < forms; n++)
+        {
+            const u16 *eggMoves = GetSpeciesEggMoves(stages[n]);
+
+            for (u32 i = 0; eggMoves[i] != MOVE_UNAVAILABLE; i++)
+            {
+                if (eggMoves[i] == move)
+                {
+                    out->species = stages[n];
+                    return TRUE;
+                }
+            }
+        }
+        return TRUE;
+    case MOVE_RELEARNER_TM_MOVES:
+    {
+        u32 index = GetItemTMHMIndex(GetTMHMItemIdFromMoveId(move));
+
+        if (index == 0)
+            return FALSE;
+        out->kind = index <= NUM_TECHNICAL_MACHINES ? MOVE_SOURCE_TM : MOVE_SOURCE_HM;
+        out->number = index <= NUM_TECHNICAL_MACHINES ? index : index - NUM_TECHNICAL_MACHINES;
+        return TRUE;
+    }
+    case MOVE_RELEARNER_TUTOR_MOVES:
+        out->kind = MOVE_SOURCE_TUTOR;
+        out->number = 0xFF;
+        for (u32 i = 0; i < ARRAY_COUNT(sOneTimeTutors); i++)
+        {
+            if (sOneTimeTutors[i].move == move)
+                out->number = i;
+        }
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+bool32 MoveRelearner_GetSource(struct BoxPokemon *boxMon, enum MoveRelearnerStates list, enum Move move,
+                               struct MoveSwitchSource *out)
+{
+    u16 stages[MAX_SWITCH_STAGES];
+    u8 caps[MAX_SWITCH_STAGES];
+    u32 forms = 0, count = 0;
+
+    if (list == MOVE_RELEARNER_LEVEL_UP_MOVES || list == MOVE_RELEARNER_EGG_MOVES)
+        count = GetLevelUpStages(boxMon, stages, caps, &forms);
+    return GetSourceIn(stages, caps, count, forms, list, move, out);
+}
+
+u8 *MoveRelearner_SourceText(const struct MoveSwitchSource *source, u8 *dst, bool32 compact)
+{
+    switch (source->kind)
+    {
+    case MOVE_SOURCE_LEVEL:
+        if (source->number == 0)
+            return StringCopy(dst, COMPOUND_STRING("Evo"));
+        dst = StringCopy(dst, compact ? COMPOUND_STRING("Lv") : COMPOUND_STRING("Lv "));
+        return ConvertIntToDecimalStringN(dst, source->number, STR_CONV_MODE_LEFT_ALIGN, 3);
+    case MOVE_SOURCE_TM:
+    case MOVE_SOURCE_HM:
+        dst = StringCopy(dst, source->kind == MOVE_SOURCE_TM ? COMPOUND_STRING("TM") : COMPOUND_STRING("HM"));
+        return ConvertIntToDecimalStringN(dst, source->number, STR_CONV_MODE_LEADING_ZEROS, source->number >= 100 ? 3 : 2);
+    case MOVE_SOURCE_EGG:
+        return StringCopy(dst, COMPOUND_STRING("Egg"));
+    case MOVE_SOURCE_TUTOR:
+        return StringCopy(dst, COMPOUND_STRING("Tutor"));
+    default:
+        *dst = EOS;
+        return dst;
+    }
+}
+
+u8 *MoveRelearner_TutorPlace(u32 tutor, u8 *dst)
+{
+    if (tutor >= ARRAY_COUNT(sOneTimeTutors))
+    {
+        *dst = EOS;
+        return dst;
+    }
+    return GetMapName(dst, sOneTimeTutors[tutor].mapsec, 0);
+}
+
 // Right on the message's second line, the list SELECT goes to ("SELECT TM moves"), when it goes anywhere
 static void ShowNextListHint(void)
 {
@@ -1334,23 +1598,8 @@ bool32 MoveRelearner_CanSwitchBackIn(struct BoxPokemon *boxMon, enum Move move)
 
     if (move == MOVE_NONE || GetBoxMonData(boxMon, MON_DATA_IS_EGG))
         return FALSE;
-    if (IsLevelUpMoveRelearnerActive())
-    {
-        u32 level = (P_ENABLE_ALL_LEVEL_UP_MOVES ? MAX_LEVEL : GetLevelFromBoxMonExp(boxMon));
-        enum Species stage = species;
-
-        do
-        {
-            const struct LevelUpMove *learnset = GetSpeciesLevelUpLearnset(stage);
-
-            for (u32 i = 0; learnset[i].move != LEVEL_UP_MOVE_END && learnset[i].level <= level; i++)
-            {
-                if (learnset[i].move == move)
-                    return TRUE;
-            }
-            stage = (P_PRE_EVO_MOVES ? GetSpeciesPreEvolution(stage) : SPECIES_NONE);
-        } while (stage != SPECIES_NONE);
-    }
+    if (IsLevelUpMoveRelearnerActive() && FindLevelUpSource(boxMon, move, NULL, NULL))
+        return TRUE;
     if (IsEggMoveRelearnerActive() && HatchedFromEgg(boxMon))
     {
         enum Species stage = species;

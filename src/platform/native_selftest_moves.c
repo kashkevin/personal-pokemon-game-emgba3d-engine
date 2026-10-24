@@ -15,7 +15,9 @@
 #include "item.h"
 #include "load_save.h"
 #include "malloc.h"
+#include "move.h"
 #include "move_relearner.h"
+#include "party_menu.h"
 #include "overworld.h"
 #include "pokemon.h"
 #include "pokemon_storage_system.h"
@@ -152,6 +154,306 @@ static void TestLevelUp(void)
                MoveRelearner_CanSwitchBackIn(mon, azurillOnly) && HasMoveToRelearn(mon, MOVE_RELEARNER_LEVEL_UP_MOVES));
     else
         printf("skip Azurill has no level-up move of its own by Lv 30 in this data\n");
+    gRelearnMode = RELEARN_MODE_NONE;
+}
+
+// ------------------------------------------------------------------------------- the level-up list's caps (the fix)
+
+// The relearner's own list (MoveRelearner_GetListMoves: what its screen shows) has `move`
+static bool32 ListHas(struct BoxPokemon *mon, enum MoveRelearnerStates list, enum Move move)
+{
+    u16 moves[MAX_RELEARNER_MOVES];
+    u32 count = MoveRelearner_GetListMoves(mon, list, moves);
+
+    for (u32 i = 0; i < count; i++)
+    {
+        if (moves[i] == move)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+// The Pokemon knows Splash alone (no move of the lists checked): what the lists offer is all there is to see
+static void KnowOnlySplash(struct BoxPokemon *mon)
+{
+    u16 move = MOVE_SPLASH;
+
+    SetBoxMonData(mon, MON_DATA_MOVE1, &move);
+    move = MOVE_NONE;
+    for (u32 i = 1; i < MAX_MON_MOVES; i++)
+        SetBoxMonData(mon, MON_DATA_MOVE1 + i, &move);
+}
+
+// Offered by level up: on the list and switchable back in (the warnings' rule) alike
+static bool32 LevelUpOffers(struct BoxPokemon *mon, enum Move move)
+{
+    return ListHas(mon, MOVE_RELEARNER_LEVEL_UP_MOVES, move) && MoveRelearner_CanSwitchBackIn(mon, move);
+}
+
+static bool32 LevelUpRefuses(struct BoxPokemon *mon, enum Move move)
+{
+    return !ListHas(mon, MOVE_RELEARNER_LEVEL_UP_MOVES, move) && !MoveRelearner_CanSwitchBackIn(mon, move);
+}
+
+static u32 LearnLevel(u32 species, enum Move move)
+{
+    const struct LevelUpMove *learnset = GetSpeciesLevelUpLearnset(species);
+
+    for (u32 i = 0; learnset[i].move != LEVEL_UP_MOVE_END; i++)
+    {
+        if (learnset[i].move == move)
+            return learnset[i].level;
+    }
+    return 0xFF;
+}
+
+static u32 EvolutionLevel(u32 species, u32 into)
+{
+    const struct Evolution *evos = GetSpeciesEvolutions(species);
+
+    for (u32 i = 0; evos != NULL && evos[i].method != EVOLUTIONS_END; i++)
+    {
+        if (evos[i].targetSpecies == into && evos[i].method == EVO_LEVEL)
+            return evos[i].param;
+    }
+    return 0;
+}
+
+// A Pokemon's level-up list may hold only moves one of its forms learns by its level (never above it)
+static bool32 ListWithinLevel(struct BoxPokemon *mon)
+{
+    u16 moves[MAX_RELEARNER_MOVES], chain[4];
+    u32 count = MoveRelearner_GetListMoves(mon, MOVE_RELEARNER_LEVEL_UP_MOVES, moves);
+    u32 level = GetLevelFromBoxMonExp(mon), lastLevel = 0, forms = 0;
+
+    for (u32 stage = GetBoxMonData(mon, MON_DATA_SPECIES); stage != SPECIES_NONE && forms < 4; stage = GetSpeciesPreEvolution(stage))
+        chain[forms++] = stage;
+    for (u32 i = 0; i < count; i++)
+    {
+        struct MoveSwitchSource source = {0};
+        bool32 found = FALSE;
+
+        for (u32 f = 0; f < forms && !found; f++)
+            found = LearnLevel(chain[f], moves[i]) <= level;
+        if (!found || !MoveRelearner_GetSource(mon, MOVE_RELEARNER_LEVEL_UP_MOVES, moves[i], &source)
+         || source.kind != MOVE_SOURCE_LEVEL || source.number > level || source.number < lastLevel)
+        {
+            printf("     %s:", Ascii(GetSpeciesName(GetBoxMonData(mon, MON_DATA_SPECIES))));
+            printf(" %s on the list (source level %u, the Pokemon's level %u)\n", Ascii(GetMoveName(moves[i])),
+                   (unsigned)source.number, (unsigned)level);
+            return FALSE;
+        }
+        lastLevel = source.number; // and in level order
+    }
+    return TRUE;
+}
+
+static void TestLevelUpCaps(void)
+{
+    struct BoxPokemon *mon;
+    struct MoveSwitchSource source;
+    u8 text[16];
+
+    Setup();
+    gRelearnMode = RELEARN_MODE_PARTY_MENU;
+    // the data the checks stand on (this game's level-up learnsets: P_LVL_UP_LEARNSETS, GEN_LATEST is GEN_6 here)
+    Expect("(data) Charmander evolves at Lv 16, Charmeleon at Lv 36",
+           EvolutionLevel(SPECIES_CHARMANDER, SPECIES_CHARMELEON) == 16 && EvolutionLevel(SPECIES_CHARMELEON, SPECIES_CHARIZARD) == 36);
+    Expect("(data) Scary Face: Charmander Lv 19, Charmeleon Lv 21; Dragon Rage: Charmander Lv 16, Charmeleon Lv 17",
+           LearnLevel(SPECIES_CHARMANDER, MOVE_SCARY_FACE) == 19 && LearnLevel(SPECIES_CHARMELEON, MOVE_SCARY_FACE) == 21
+           && LearnLevel(SPECIES_CHARMANDER, MOVE_DRAGON_RAGE) == 16 && LearnLevel(SPECIES_CHARMELEON, MOVE_DRAGON_RAGE) == 17);
+
+    // Charmeleon Lv 20 (the owner's case): Charmander's moves count only up to Lv 16, where it evolved
+    mon = Lead(SPECIES_CHARMELEON, 20, FALSE);
+    KnowOnlySplash(mon);
+    Expect("Charmeleon Lv 20: no Scary Face (Charmander's at Lv 19, after it evolved at 16; Charmeleon's own at Lv 21)",
+           LevelUpRefuses(mon, MOVE_SCARY_FACE));
+    Expect("Charmeleon Lv 20: Dragon Rage, Smokescreen, Ember offered", LevelUpOffers(mon, MOVE_DRAGON_RAGE)
+           && LevelUpOffers(mon, MOVE_SMOKESCREEN) && LevelUpOffers(mon, MOVE_EMBER));
+    MoveRelearner_GetSource(mon, MOVE_RELEARNER_LEVEL_UP_MOVES, MOVE_DRAGON_RAGE, &source);
+    MoveRelearner_SourceText(&source, text, FALSE);
+    Expect("... Dragon Rage's tag: \"Lv 17\", Charmeleon's own (its form first)", source.kind == MOVE_SOURCE_LEVEL
+           && source.number == 17 && source.species == SPECIES_CHARMELEON && strcmp(Ascii(text), "Lv 17") == 0);
+    Expect("Charmeleon Lv 20: every move on its list is one it could have learned by Lv 20, in level order", ListWithinLevel(mon));
+
+    // a level just below and at a learn level
+    mon = Lead(SPECIES_CHARMELEON, 21, FALSE);
+    KnowOnlySplash(mon);
+    Expect("Charmeleon Lv 21: Scary Face (its own Lv 21)", LevelUpOffers(mon, MOVE_SCARY_FACE));
+    mon = Lead(SPECIES_CHARMELEON, 16, FALSE);
+    KnowOnlySplash(mon);
+    Expect("Charmeleon Lv 16: Dragon Rage, Charmander's at Lv 16 - the level it evolved at counts",
+           LevelUpOffers(mon, MOVE_DRAGON_RAGE) && MoveRelearner_GetSource(mon, MOVE_RELEARNER_LEVEL_UP_MOVES, MOVE_DRAGON_RAGE, &source)
+           && source.species == SPECIES_CHARMANDER && source.number == 16);
+    mon = Lead(SPECIES_CHARMANDER, 15, FALSE);
+    KnowOnlySplash(mon);
+    Expect("Charmander Lv 15: no Dragon Rage yet (Lv 16)", LevelUpRefuses(mon, MOVE_DRAGON_RAGE));
+    Expect("(data) Mudkip learns Mud Sport at Lv 20", LearnLevel(SPECIES_MUDKIP, MOVE_MUD_SPORT) == 20);
+    mon = Lead(SPECIES_MUDKIP, 19, FALSE);
+    KnowOnlySplash(mon);
+    Expect("Mudkip Lv 19: no Mud Sport by level up yet", LevelUpRefuses(mon, MOVE_MUD_SPORT));
+    mon = Lead(SPECIES_MUDKIP, 20, FALSE);
+    KnowOnlySplash(mon);
+    Expect("Mudkip Lv 20: Mud Sport", LevelUpOffers(mon, MOVE_MUD_SPORT));
+
+    // two evolutions by level: each form up to its own evolution, never above the next form's cap
+    Expect("(data) Flamethrower: Charmander Lv 37, Charmeleon Lv 43, Charizard Lv 47; Slash: 34, 39, 41",
+           LearnLevel(SPECIES_CHARMANDER, MOVE_FLAMETHROWER) == 37 && LearnLevel(SPECIES_CHARMELEON, MOVE_FLAMETHROWER) == 43
+           && LearnLevel(SPECIES_CHARIZARD, MOVE_FLAMETHROWER) == 47 && LearnLevel(SPECIES_CHARMANDER, MOVE_SLASH) == 34
+           && LearnLevel(SPECIES_CHARMELEON, MOVE_SLASH) == 39 && LearnLevel(SPECIES_CHARIZARD, MOVE_SLASH) == 41);
+    mon = Lead(SPECIES_CHARIZARD, 40, FALSE);
+    KnowOnlySplash(mon);
+    Expect("Charizard Lv 40: no Flamethrower (Charmander's Lv 37 > 16, Charmeleon's Lv 43, Charizard's own Lv 47)",
+           LevelUpRefuses(mon, MOVE_FLAMETHROWER));
+    Expect("Charizard Lv 40: no Slash (Charmeleon's Lv 39 is after it evolved at 36; its own Lv 41)",
+           LevelUpRefuses(mon, MOVE_SLASH));
+    Expect("Charizard Lv 40: Flame Burst (Charmeleon's and its own Lv 32), Wing Attack (its own Lv 36)",
+           LevelUpOffers(mon, MOVE_FLAME_BURST) && LevelUpOffers(mon, MOVE_WING_ATTACK));
+    Expect("Charizard Lv 40: its list within its level, in level order", ListWithinLevel(mon));
+    mon = Lead(SPECIES_CHARIZARD, 41, FALSE);
+    KnowOnlySplash(mon);
+    Expect("Charizard Lv 41: Slash (its own Lv 41)", LevelUpOffers(mon, MOVE_SLASH));
+
+    // Shedinja comes when Nincada evolves at Lv 20 (EVO_SPLIT_FROM_EVO)
+    Expect("(data) Nincada learns Metal Claw at Lv 21 and Bide at Lv 29, Shedinja neither, Ninjask no Metal Claw; Lv 20",
+           LearnLevel(SPECIES_NINCADA, MOVE_METAL_CLAW) == 21 && LearnLevel(SPECIES_NINCADA, MOVE_BIDE) == 29
+           && LearnLevel(SPECIES_SHEDINJA, MOVE_METAL_CLAW) == 0xFF && LearnLevel(SPECIES_SHEDINJA, MOVE_BIDE) == 0xFF
+           && LearnLevel(SPECIES_NINJASK, MOVE_METAL_CLAW) == 0xFF && EvolutionLevel(SPECIES_NINCADA, SPECIES_NINJASK) == 20);
+    mon = Lead(SPECIES_SHEDINJA, 30, FALSE);
+    KnowOnlySplash(mon);
+    Expect("Shedinja Lv 30: no Metal Claw, no Bide (Nincada's, after Lv 20)",
+           LevelUpRefuses(mon, MOVE_METAL_CLAW) && LevelUpRefuses(mon, MOVE_BIDE));
+    Expect("Shedinja Lv 30: Mud-Slap (Nincada's Lv 17)", LevelUpOffers(mon, MOVE_MUD_SLAP));
+    mon = Lead(SPECIES_NINJASK, 30, FALSE);
+    KnowOnlySplash(mon);
+    Expect("Ninjask Lv 30: no Metal Claw either", LevelUpRefuses(mon, MOVE_METAL_CLAW));
+
+    // a move learned on evolving (level 0): "Evo"
+    source.kind = MOVE_SOURCE_LEVEL;
+    source.number = 0;
+    MoveRelearner_SourceText(&source, text, FALSE);
+    Expect("a move learned on evolving is tagged \"Evo\"", strcmp(Ascii(text), "Evo") == 0);
+
+    // an evolution with no level (a stone, friendship): the earlier form may have stayed so up to the Pokemon's level
+    {
+        u32 found = 0;
+
+        for (u32 species = 1; species < NUM_SPECIES && !found; species++)
+        {
+            const struct Evolution *evos;
+
+            if (!IsSpeciesEnabled(species))
+                continue;
+            evos = GetSpeciesEvolutions(species);
+            for (u32 e = 0; evos != NULL && evos[e].method != EVOLUTIONS_END && !found; e++)
+            {
+                const struct LevelUpMove *learnset = GetSpeciesLevelUpLearnset(species);
+                u32 target = evos[e].targetSpecies, below = MOVE_NONE, above = MOVE_NONE;
+
+                if (evos[e].method != EVO_ITEM || !IsSpeciesEnabled(target) || GetSpeciesPreEvolution(target) != species
+                 || GetSpeciesPreEvolution(species) != SPECIES_NONE)
+                    continue;
+                for (u32 i = 0; learnset[i].move != LEVEL_UP_MOVE_END; i++)
+                {
+                    if (LearnLevel(target, learnset[i].move) <= 60 || GetTMHMItemIdFromMoveId(learnset[i].move) != ITEM_NONE)
+                        continue;
+                    if (learnset[i].level >= 2 && learnset[i].level <= 40 && below == MOVE_NONE)
+                        below = learnset[i].move;
+                    else if (learnset[i].level > 40 && above == MOVE_NONE)
+                        above = learnset[i].move;
+                }
+                if (below == MOVE_NONE)
+                    continue;
+                found = target;
+                mon = Lead(target, 40, FALSE);
+                KnowOnlySplash(mon);
+                printf("     a stone evolution: %s", Ascii(GetSpeciesName(target)));
+                printf(" from %s at Lv 40:", Ascii(GetSpeciesName(species)));
+                printf(" %s (its earlier form's Lv %u)\n", Ascii(GetMoveName(below)), (unsigned)LearnLevel(species, below));
+                Expect("a stone evolution's Pokemon at Lv 40: its earlier form's move by Lv 40 offered (no level of its own)",
+                       LevelUpOffers(mon, below));
+                if (above != MOVE_NONE)
+                    Expect("... and one its earlier form learns after Lv 40 not", LevelUpRefuses(mon, above));
+                Expect("... its list within its level", ListWithinLevel(mon));
+            }
+        }
+        if (!found)
+            printf("skip no stone evolution with a move of its earlier form's own in this data\n");
+    }
+
+    // every Pokemon's list within its level (a sample across the species at three levels)
+    {
+        u32 bad = 0, seen = 0;
+
+        for (u32 species = 1; species < NUM_SPECIES; species += 3)
+        {
+            static const u8 sLevels[] = {5, 30, 70};
+
+            if (!IsSpeciesEnabled(species) || GetSpeciesPreEvolution(species) == SPECIES_NONE)
+                continue;
+            for (u32 l = 0; l < ARRAY_COUNT(sLevels); l++)
+            {
+                mon = Lead(species, sLevels[l], FALSE);
+                seen++;
+                if (!ListWithinLevel(mon) && ++bad > 5)
+                    break;
+            }
+            if (bad > 5)
+                break;
+        }
+        printf("     %u evolved Pokemon and levels checked\n", (unsigned)seen);
+        Expect("no evolved Pokemon is offered a level-up move above its own level (a third of the species, Lv 5/30/70)",
+               bad == 0 && seen > 100);
+    }
+    gRelearnMode = RELEARN_MODE_NONE;
+}
+
+// The other lists as the relearner builds them (what its screen shows), each source's tag
+static void TestListSources(void)
+{
+    struct BoxPokemon *mon;
+    struct MoveSwitchSource source;
+    u8 text[16];
+
+    Setup();
+    gRelearnMode = RELEARN_MODE_PARTY_MENU;
+    mon = Lead(SPECIES_TREECKO, 5, FALSE);
+    Expect("caught Treecko: its egg move list is empty (no Leaf Storm)",
+           MoveRelearner_GetListMoves(mon, MOVE_RELEARNER_EGG_MOVES, (u16[MAX_RELEARNER_MOVES]){0}) == 0
+           && !ListHas(mon, MOVE_RELEARNER_EGG_MOVES, MOVE_LEAF_STORM));
+    mon = Lead(SPECIES_TREECKO, 5, TRUE);
+    Expect("hatched Treecko: Leaf Storm on its egg move list, tagged \"Egg\"",
+           ListHas(mon, MOVE_RELEARNER_EGG_MOVES, MOVE_LEAF_STORM)
+           && MoveRelearner_GetSource(mon, MOVE_RELEARNER_EGG_MOVES, MOVE_LEAF_STORM, &source)
+           && source.kind == MOVE_SOURCE_EGG && source.species == SPECIES_TREECKO
+           && MoveRelearner_SourceText(&source, text, FALSE) != NULL && strcmp(Ascii(text), "Egg") == 0);
+    mon = Lead(SPECIES_MUDKIP, 20, FALSE);
+    Expect("no tutor used: Double-Edge not on the tutor list", !ListHas(mon, MOVE_RELEARNER_TUTOR_MOVES, MOVE_DOUBLE_EDGE));
+    FlagSet(FLAG_MOVE_TUTOR_TAUGHT_DOUBLE_EDGE);
+    Expect("the Sootopolis tutor used: Double-Edge on the tutor list, tagged \"Tutor\"",
+           ListHas(mon, MOVE_RELEARNER_TUTOR_MOVES, MOVE_DOUBLE_EDGE)
+           && MoveRelearner_GetSource(mon, MOVE_RELEARNER_TUTOR_MOVES, MOVE_DOUBLE_EDGE, &source)
+           && source.kind == MOVE_SOURCE_TUTOR && MoveRelearner_SourceText(&source, text, FALSE) != NULL && strcmp(Ascii(text), "Tutor") == 0);
+    {
+        u8 place[32];
+
+        MoveRelearner_TutorPlace(source.number, place);
+        Expect("... the details name its town: Sootopolis City", strcmp(Ascii(place), "SOOTOPOLIS CITY") == 0);
+        printf("     %s\n", Ascii(place));
+    }
+    Expect("no TM03: Water Pulse not on the TM list", !ListHas(mon, MOVE_RELEARNER_TM_MOVES, MOVE_WATER_PULSE));
+    AddBagItem(ITEM_TM_WATER_PULSE, 1);
+    AddBagItem(ITEM_HM_SURF, 1);
+    Expect("TM03 in the Bag: Water Pulse on the TM list, tagged \"TM03\"",
+           ListHas(mon, MOVE_RELEARNER_TM_MOVES, MOVE_WATER_PULSE)
+           && MoveRelearner_GetSource(mon, MOVE_RELEARNER_TM_MOVES, MOVE_WATER_PULSE, &source)
+           && source.kind == MOVE_SOURCE_TM && source.number == 3
+           && MoveRelearner_SourceText(&source, text, FALSE) != NULL && strcmp(Ascii(text), "TM03") == 0);
+    Expect("HM03 in the Bag: Surf on the TM list, tagged \"HM03\"",
+           ListHas(mon, MOVE_RELEARNER_TM_MOVES, MOVE_SURF)
+           && MoveRelearner_GetSource(mon, MOVE_RELEARNER_TM_MOVES, MOVE_SURF, &source)
+           && source.kind == MOVE_SOURCE_HM && source.number == 3
+           && MoveRelearner_SourceText(&source, text, FALSE) != NULL && strcmp(Ascii(text), "HM03") == 0);
     gRelearnMode = RELEARN_MODE_NONE;
 }
 
@@ -338,6 +640,8 @@ int NativeSelfTest_MoveSwitch(void)
     printf("selftest-move-switch: move switching as in Legends Z-A (MOVES, the summary's relearner)\n");
     TestTmsReusable();
     TestLevelUp();
+    TestLevelUpCaps();
+    TestListSources();
     TestEggMoves();
     TestTutors();
     TestTms();
