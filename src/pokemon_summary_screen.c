@@ -6,6 +6,11 @@
 #include "battle_message.h"
 #include "battle_tent.h"
 #include "battle_factory.h"
+#ifdef PORTABLE
+#include "battle_pike.h"
+#include "battle_pyramid.h"
+#endif
+#line 9 // gba-line
 #include "bg.h"
 #include "contest.h"
 #include "contest_effect.h"
@@ -2741,6 +2746,12 @@ static bool8 CanReplaceMove(void)
         || sMonSummaryScreen->newMove == MOVE_NONE
         || !CannotForgetMove(sMonSummaryScreen->summary.moves[sMonSummaryScreen->firstMoveIndex]))
         return TRUE;
+#ifdef PORTABLE
+    // Move switching (MOVES, the relearner): an HM's move can go when the HM in the Bag can switch it back in
+    else if (MoveRelearner_CanForgetHiddenMove(GetCurrentBoxmon(), sMonSummaryScreen->summary.moves[sMonSummaryScreen->firstMoveIndex]))
+        return TRUE;
+#endif
+#line 2672 // gba-line
     else
         return FALSE;
 }
@@ -4863,6 +4874,12 @@ static void KeepMoveSelectorVisible(u8 firstSpriteId)
 
 static inline bool32 ShouldShowMoveRelearner(void)
 {
+#ifdef PORTABLE
+    // As MOVES in the party menu (party_menu.c): no full-PP move switching where the challenge lets no one heal
+    if (InBattlePike() || InBattlePyramid())
+        return FALSE;
+#endif
+#line 4749 // gba-line
     return (P_SUMMARY_SCREEN_MOVE_RELEARNER
          && !sMonSummaryScreen->lockMovesFlag
          && sMonSummaryScreen->mode != SUMMARY_MODE_BOX_CURSOR
@@ -5227,6 +5244,12 @@ bool32 Summary_NativeUiState(struct NativeSummary *out)
         return TRUE; // LoadGraphics has not read the Pokémon yet
     out->canRename = ShouldShowRename();
     out->canRelearn = ShouldShowMoveRelearner();
+    for (i = 0; i < MAX_MON_MOVES; i++)
+    {
+        // an HM's move that move switching can take out (the HM in the Bag switches it back in)
+        if (IsMoveHM(sum->moves[i]) && MoveRelearner_CanForgetHiddenMove(GetCurrentBoxmon(), sum->moves[i]))
+            out->hmCanGo |= 1 << i;
+    }
     out->ivEvShown = ShouldShowIvEvPrompt();
     out->skillsMode = sMonSummaryScreen->skillsPageMode;
     out->mon = sMonSummaryScreen->currentMon;
@@ -5347,5 +5370,44 @@ bool32 SummaryTest_IvEvOffered(u8 mode, void *mons, u8 monIndex, u8 maxMonIndex)
     SetMainCallback2(callback2);
     gInitialSummaryScreenCallback = initial;
     return offered;
+}
+
+// Move switching (PC): for --selftest-move-switch (src/platform/native_selftest_moves.c), as SummaryTest_IvEvOffered
+// does. Whether the summary offers its relearner (START on a move page) for that Pokemon here and now, or (newMove not
+// MOVE_NONE: the summary choosing the move to forget for the relearner) whether the move in `slot` may be chosen.
+bool32 SummaryTest_MoveSwitching(void *mons, u8 monIndex, u8 maxMonIndex, u8 slot, u16 newMove)
+{
+    MainCallback callback2 = gMain.callback2, initial = gInitialSummaryScreenCallback;
+    enum MoveRelearnerStates relearnerState = gMoveRelearnerState;
+    bool32 answer;
+
+    ShowPokemonSummaryScreen(newMove != MOVE_NONE ? SUMMARY_MODE_SELECT_MOVE : SUMMARY_MODE_NORMAL, mons, monIndex,
+                             maxMonIndex, callback2);
+    sMonSummaryScreen->newMove = newMove;
+    CopyMonToSummaryStruct(&sMonSummaryScreen->currentMon);
+    while (!ExtractMonDataToSummaryStruct(&sMonSummaryScreen->currentMon))
+        ;
+    if (newMove != MOVE_NONE)
+    {
+        sMonSummaryScreen->firstMoveIndex = slot;
+        answer = CanReplaceMove();
+    }
+    else
+    {
+        for (u32 i = 0; i < MOVE_RELEARNER_COUNT; i++)
+        {
+            if (HasAnyRelearnableMoves(i))
+                sMonSummaryScreen->hasRelearnableMoves = TRUE;
+        }
+        answer = ShouldShowMoveRelearner();
+    }
+    if (gMonSpritesGfxPtr == NULL)
+        DestroyMonSpritesGfxManager(MON_SPR_GFX_MANAGER_A);
+    Free(sMonSummaryScreen);
+    sMonSummaryScreen = NULL;
+    SetMainCallback2(callback2);
+    gInitialSummaryScreenCallback = initial;
+    gMoveRelearnerState = relearnerState;
+    return answer;
 }
 #endif

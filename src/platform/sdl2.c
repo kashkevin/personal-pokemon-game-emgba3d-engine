@@ -237,6 +237,7 @@ extern int NativeSelfTest_Rival(void);
 extern int NativeSelfTest_Update32(void);
 extern int NativeSelfTest_HmBox(void);
 extern int NativeSelfTest_LinkReplay(void);
+extern int NativeSelfTest_MoveSwitch(void);
 extern int NativeSelfTest_DumpLegendPool(const char *outPath);
 extern int NativeSelfTest_Rewards(void);
 extern int NativeSelfTest_CatchReconcile(void);
@@ -1257,6 +1258,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_HmBox()); // src/platform/native_selftest_hm.c (HMs from the PC boxes)
         else if (strcmp(argv[i], "--selftest-link-replay") == 0)
             exit(NativeSelfTest_LinkReplay()); // src/platform/native_selftest_replay.c (a link battle's replaying game)
+        else if (strcmp(argv[i], "--selftest-move-switch") == 0)
+            exit(NativeSelfTest_MoveSwitch()); // src/platform/native_selftest_moves.c (move switching, MOVES)
         else if (strcmp(argv[i], "--selftest-coins") == 0)
             exit(NativeSelfTest_Coins()); // src/platform/native_selftest_u29.c (Update 29)
         else if (strcmp(argv[i], "--selftest-shiny") == 0)

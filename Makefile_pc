@@ -281,7 +281,7 @@ OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS) $(BFX_QJS_OBJS)
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
-.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-legend check-shiny check-coins check-breeding check-rival check-update32 check-hm-box check-species-data check-clock check-mp-objects check-spawn-claims check-secret-base check-rewards check-catch-reconcile check-pokenav-map check-ladder check-coop-exp check-coop-controller check-tower check-keybinds check-graphics-mode check-summary-ivev check-link-replay
+.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-legend check-shiny check-coins check-breeding check-rival check-update32 check-hm-box check-move-switch check-species-data check-clock check-mp-objects check-spawn-claims check-secret-base check-rewards check-catch-reconcile check-pokenav-map check-ladder check-coop-exp check-coop-controller check-tower check-keybinds check-graphics-mode check-summary-ivev check-link-replay
 .SUFFIXES:
 .SECONDARY:
 .DELETE_ON_ERROR:
@@ -427,6 +427,12 @@ check-update32: $(TARGET)
 check-hm-box: $(TARGET)
 	@./$(TARGET) --selftest-hm-box > $(OBJ_DIR)/selftest-hm-box.log 2>&1; status=$$?; \
 	  tail -n 3 $(OBJ_DIR)/selftest-hm-box.log; exit $$status
+
+# Move switching as in Legends Z-A (MOVES in the party menu, the summary's relearner): the lists' rules, TMs never used
+# up, HMs switched out only when they can come back, the warnings before a move goes, the places with no switching.
+check-move-switch: $(TARGET)
+	@./$(TARGET) --selftest-move-switch > $(OBJ_DIR)/selftest-move-switch.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-move-switch.log; exit $$status
 
 # Species data, moves, abilities, trainers, wild level tables: fingerprints against the pre-update baseline.
 check-species-data: $(TARGET)

@@ -44,9 +44,10 @@ Info taken from https://bulbapedia.bulbagarden.net/wiki/Stats_judge.
 
 // Move Relearner settings
 #ifdef PORTABLE
-// PC game: move switching as in Legends Z-A (the owner's request of 2026-10-24). A Pokémon can switch to any move it has
-// learned or could have learned, whenever: its level-up moves up to its level (its pre-evolutions' too), its egg moves,
-// the game's tutor moves and the TMs / HMs in the bag it is compatible with (src/party_menu.c, MOVES).
+// PC game: move switching as in Legends Z-A (the owner's request of 2026-10-24; src/party_menu.c, MOVES). A Pokémon can
+// switch in, whenever: its level-up moves up to its level (its pre-evolutions' too), its egg moves if it hatched from an
+// Egg, the moves of the one-time tutors the player has used, and the TMs / HMs the player has that it is compatible with
+// (TMs are never used up: include/config/item.h). The lists' rules: src/move_relearner.c, the end of the file.
 #define P_ENABLE_MOVE_RELEARNERS         TRUE
 #else
 #define P_ENABLE_MOVE_RELEARNERS         FALSE   // If TRUE, it enables move relearners for egg, TM and tutor. (see below for specific configs /flags)

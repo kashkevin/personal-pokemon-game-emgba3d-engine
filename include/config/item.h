@@ -23,7 +23,14 @@
 #define I_LAX_INCENSE_BOOST             GEN_LATEST  // In Gen4+, Lax Incense lowers accuracy by 10% instead of 5%.
 
 // TM config
+#ifdef PORTABLE
+// PC game: a TM is never used up (as in Gens 5-8), from the Bag or from move switching (MOVES in the party menu), so a
+// TM's move switched out can always be switched back in. As in those games, a TM can't be sold, tossed or held then, and
+// a shop shows a TM the player has as sold out.
+#define I_REUSABLE_TMS          TRUE
+#else
 #define I_REUSABLE_TMS          FALSE       // In Gens5-8, TMs are reusable. Setting this to TRUE will make all vanilla TMs reusable, though they can also be cherry-picked by setting their importance to 1.
+#endif
 
 // Exp. Share config
 // To use this feature, replace the 0 with the flag ID you're assigning it to.

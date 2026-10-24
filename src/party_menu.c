@@ -2989,9 +2989,10 @@ static void SetPartyMonFieldSelectionActions(struct Pokemon *mons, u8 slotId)
     sPartyMenuInternal->numActions = 0;
     AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, MENU_SUMMARY);
 #ifdef PORTABLE
-    // Move switching, right under SUMMARY (not in the Battle Pike or with the rental Pokemon of the Battle Factory and
-    // the Slateport Battle Tent, as the summary screen's relearner)
-    if (!InBattlePike() && !InBattleFactory() && !InSlateportBattleTent())
+    // Move switching, right under SUMMARY. Not where a switched-in move's full PP would heal what the challenge lets no
+    // one heal (the Battle Pike, the Battle Pyramid) or with the rental Pokemon of the Battle Factory and the Slateport
+    // Battle Tent; the summary screen's relearner keeps to the same places (pokemon_summary_screen.c)
+    if (!InBattlePike() && !InBattlePyramid() && !InBattleFactory() && !InSlateportBattleTent())
         AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, MENU_MOVES);
 #endif
 #line 2956 // gba-line
@@ -8949,11 +8950,12 @@ void ItemUseCB_HyperTraining(u8 taskId, TaskFunc task)
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Move switching as in Legends Z-A (the owner's request of 2026-10-24): MOVES opens the move relearner for the Pokemon,
-// which lists every move it has learned or could have learned and does not know now (include/config/summary_screen.h:
-// level-up moves up to its level, its pre-evolutions' too, egg moves, the game's tutor moves, the TMs and HMs in the
-// bag it is compatible with). A move taken has full PP and no TM is used up; SELECT changes the list's kind, and the
-// relearner comes back here, to this Pokemon's menu. A changed moveset is a party change like any other: the host save
-// follows it (multiplayer_soft_reset.c).
+// which lists the moves it can switch in and does not know now (src/move_relearner.c, the end of the file: level-up
+// moves up to its level, its pre-evolutions' too; egg moves if it hatched from an Egg; the moves of the one-time tutors
+// the player has used; the TMs and HMs the player has that it is compatible with). A move taken has full PP and no TM is
+// ever used up; SELECT changes the list (the message names the next one), a move that can't be switched back in later or
+// one with PP Ups goes only after a YES, and the relearner comes back here, to this Pokemon's menu. A changed moveset is
+// a party change like any other: the host save follows it (multiplayer_soft_reset.c).
 static const u8 sText_NoMovesToSwitch[] = _("{STR_VAR_1} has no other moves\nto switch to.{PAUSE_UNTIL_PRESS}");
 
 static void CursorCb_Moves(u8 taskId)
@@ -9175,3 +9177,23 @@ bool32 PartyMenu_NativeUiState(struct NativePartyMenu *out)
     return TRUE;
 }
 #endif // ENABLE_NATIVE_UI
+#ifdef PORTABLE
+// Move switching (PC): whether the field party menu offers MOVES for the Pokemon in `slot` here and now, from the list
+// SetPartyMonFieldSelectionActions builds (--selftest-move-switch, src/platform/native_selftest_moves.c)
+bool32 PartyMenuTest_OffersMoves(u8 slot)
+{
+    struct PartyMenuInternal *saved = sPartyMenuInternal;
+    bool32 offered = FALSE;
+
+    sPartyMenuInternal = AllocZeroed(sizeof(*sPartyMenuInternal));
+    SetPartyMonFieldSelectionActions(gParties[B_TRAINER_PLAYER], slot);
+    for (u32 i = 0; i < sPartyMenuInternal->numActions; i++)
+    {
+        if (sPartyMenuInternal->actions[i] == MENU_MOVES)
+            offered = TRUE;
+    }
+    Free(sPartyMenuInternal);
+    sPartyMenuInternal = saved;
+    return offered;
+}
+#endif
