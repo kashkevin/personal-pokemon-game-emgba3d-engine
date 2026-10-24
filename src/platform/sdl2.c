@@ -244,6 +244,7 @@ extern int NativeSelfTest_DumpWildWeights(const char *keysPath, const char *outP
 extern int NativeSelfTest_DumpTowerData(const char *outPath);
 extern int NativeSelfTest_Tower(void);
 extern int NativeSelfTest_StartMenu(void);
+extern int NativeSelfTest_SummaryIvEv(void);
 extern bool32 GameMemory_Reset(void);
 
 static jmp_buf sGameResetPoint; // where the game thread restarts after a soft reset
@@ -1267,6 +1268,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_Tower()); // src/platform/native_selftest_tower.c (Battle Tower: Legends)
         else if (strcmp(argv[i], "--selftest-start-menu") == 0)
             exit(NativeSelfTest_StartMenu()); // src/platform/native_selftest_tower.c (MS-61)
+        else if (strcmp(argv[i], "--selftest-summary-ivev") == 0)
+            exit(NativeSelfTest_SummaryIvEv()); // src/platform/native_selftest_summary.c (own Pokemon's IVs and EVs)
         else if (strcmp(argv[i], "--dump-wild-weights") == 0 && i + 2 < argc)
         {
             const char *keysPath = argv[++i];

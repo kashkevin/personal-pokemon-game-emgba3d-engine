@@ -189,6 +189,13 @@ static EWRAM_DATA struct PokemonSummaryScreenData
     s16 switchCounter; // Used for various switch statement cases that decompress/load graphics or Pokémon data
     u8 unk_filler4[6];
     u8 categoryIconSpriteId;
+#ifdef PORTABLE
+    // EmeraldTogether (PC): IVs and EVs for the player's own Pokémon only (IsSummaryMonPlayersOwn)
+    bool8 ivEvOwnList;      // the list is the player's party or one of their boxes, not rentals
+    bool8 ivEvPartnerSlots; // a multi battle's party with the partner's Pokémon at 1, 4 and 5
+    u8 evTotalWindowId;     // the skills page's EV total (UpdateEvTotalWindow)
+#endif
+#line 192 // gba-line
 } *sMonSummaryScreen = NULL;
 
 EWRAM_DATA u8 gLastViewedMonIndex = 0;
@@ -1222,6 +1229,20 @@ void ShowPokemonSummaryScreen(u8 mode, void *mons, u8 monIndex, u8 maxMonIndex, 
         sMonSummaryScreen->isBoxMon = TRUE;
     else
         sMonSummaryScreen->isBoxMon = FALSE;
+#ifdef PORTABLE
+    // EmeraldTogether (PC): whose Pokémon these are, for the IVs and EVs (IsSummaryMonPlayersOwn). The player's
+    // own: their party (the field, the PC, the trade menu's own side, their battle party) and their boxes (with the
+    // Pokémon held in the PC). Not theirs: a trade partner's party, a multi battle partner's (its own list, or the
+    // partner's three that the battle's party menu puts at 1, 4 and 5: party_menu.c GetMultiPartyForSummaryScreen),
+    // the Battle Factory's choices and every rental in the Battle Factory and the Slateport Battle Tent.
+    sMonSummaryScreen->ivEvOwnList = (sMonSummaryScreen->isBoxMon || mode == SUMMARY_MODE_BOX_CURSOR
+                                      || sMonSummaryScreen->monList.mons == gParties[B_TRAINER_PLAYER])
+                                  && InBattleFactory() != TRUE && InSlateportBattleTent() != TRUE;
+    sMonSummaryScreen->ivEvPartnerSlots = !sMonSummaryScreen->isBoxMon && gMain.inBattle && IsMultiBattle() == TRUE
+                                       && !AreMultiPartiesFullTeams();
+    sMonSummaryScreen->evTotalWindowId = WINDOW_NONE;
+#endif
+#line 1217 // gba-line
 
     u32 maxPageIndex = PSS_PAGE_COUNT - (C_HIDE_CONTEST_DATA ? 2 : 1);
     switch (mode)
@@ -1825,8 +1846,32 @@ static void Task_HandleInput(u8 taskId)
     }
 }
 
+#ifdef ENABLE_NATIVE_UI
+// EmeraldTogether (PC): the native summary (native_ui/screens/ui_summary.c) is drawn in place of this picture. It
+// shows the IVs and the EVs side by side, so there A turns them on and off (IncrementSkillsStatsMode) and they stay
+// on from one of the player's Pokémon to the next (Task_ChangeSummaryMon); this picture's one column of numbers
+// steps through stats, IVs and EVs and starts each Pokémon on its stats.
+static bool32 NativeUiDrawsSummary(void)
+{
+    _Bool NativeUi_Enabled(void);         // native_ui/native_ui.h
+    const char *NativeUi_ScreenNow(void); // native_ui/ui_screen.h
+    const char *screen = NativeUi_Enabled() ? NativeUi_ScreenNow() : NULL;
+
+    return screen != NULL && strcmp(screen, "summary") == 0;
+}
+#endif
+#line 1820 // gba-line
 static u8 IncrementSkillsStatsMode(u8 mode)
 {
+#ifdef ENABLE_NATIVE_UI
+    if (NativeUiDrawsSummary())
+    {
+        sMonSummaryScreen->skillsPageMode = (mode == SUMMARY_SKILLS_MODE_STATS) ? SUMMARY_SKILLS_MODE_IVS
+                                                                                 : SUMMARY_SKILLS_MODE_STATS;
+        return sMonSummaryScreen->skillsPageMode;
+    }
+#endif
+#line 1822 // gba-line
     switch (mode)
     {
     case SUMMARY_SKILLS_MODE_STATS:
@@ -2028,11 +2073,29 @@ static void Task_ChangeSummaryMon(u8 taskId)
         if (P_SUMMARY_SCREEN_RENAME && sMonSummaryScreen->currPageIndex == PSS_PAGE_INFO)
             ShowUtilityPrompt(SUMMARY_MODE_NORMAL);
 
+#ifdef PORTABLE
+        // EmeraldTogether (PC): the next Pokémon's skills page starts on its stats, with its own prompt (none for
+        // one that is not the player's: ShouldShowIvEvPrompt), whatever the last one showed. The native summary
+        // keeps its IVs and EVs on for the next of the player's own (NativeUiDrawsSummary).
+        if (sMonSummaryScreen->currPageIndex == PSS_PAGE_SKILLS)
+        {
+#ifdef ENABLE_NATIVE_UI
+            if (!NativeUiDrawsSummary() || !ShouldShowIvEvPrompt())
+#endif
+                sMonSummaryScreen->skillsPageMode = SUMMARY_SKILLS_MODE_STATS;
+            ChangeStatLabel(sMonSummaryScreen->skillsPageMode);
+            ShowUtilityPrompt(sMonSummaryScreen->skillsPageMode);
+            ScheduleBgCopyTilemapToVram(0);
+        }
+#else
+#line 2023 // gba-line
         if (ShouldShowIvEvPrompt() && sMonSummaryScreen->currPageIndex == PSS_PAGE_SKILLS)
         {
             sMonSummaryScreen->skillsPageMode = SUMMARY_SKILLS_MODE_STATS;
             ChangeStatLabel(SUMMARY_SKILLS_MODE_STATS);
         }
+#endif
+#line 2028 // gba-line
 
         if (P_SUMMARY_SCREEN_MOVE_RELEARNER && IS_MOVE_PAGE(sMonSummaryScreen->currPageIndex))
         {
@@ -3157,6 +3220,26 @@ static void ResetWindows(void)
         FillWindowPixelBuffer(i, PIXEL_FILL(0));
     for (i = 0; i < ARRAY_COUNT(sMonSummaryScreen->windowIds); i++)
         sMonSummaryScreen->windowIds[i] = WINDOW_NONE;
+#ifdef PORTABLE
+    // EmeraldTogether (PC): the skills page's EV total (UpdateEvTotalWindow), on the panel's free row left of the
+    // EXP bar. BG0's tiles from 830 are free (the label and page windows end at 822).
+    {
+        static const struct WindowTemplate sEvTotalTemplate = {
+            .bg = 0,
+            .tilemapLeft = 10,
+            .tilemapTop = 18,
+            .width = 9,
+            .height = 2,
+            .paletteNum = 6,
+            .baseBlock = 830,
+        };
+
+        sMonSummaryScreen->evTotalWindowId = AddWindow(&sEvTotalTemplate);
+        if (sMonSummaryScreen->evTotalWindowId != WINDOW_NONE)
+            FillWindowPixelBuffer(sMonSummaryScreen->evTotalWindowId, PIXEL_FILL(0));
+    }
+#endif
+#line 3152 // gba-line
 }
 
 static void PrintTextOnWindowWithFont(u8 windowId, const u8 *string, u8 x, u8 y, u8 lineSpacing, u8 colorId, u32 fontId)
@@ -4773,8 +4856,64 @@ static inline bool32 ShouldShowRename(void)
          && GetPlayerIDAsU32() == sMonSummaryScreen->summary.OTID);
 }
 
+#ifdef PORTABLE
+// EmeraldTogether (PC): IVs and EVs are shown for the player's own Pokémon only: a list ShowPokemonSummaryScreen
+// found to be theirs (ivEvOwnList), never an Egg, and in a multi battle never the partner's three. This only reads
+// the game (the native summary asks it from the render thread: Summary_NativeUiState).
+static bool32 IsSummaryMonPlayersOwn(void)
+{
+    u32 index = sMonSummaryScreen->curMonIndex;
+
+    if (!sMonSummaryScreen->ivEvOwnList)
+        return FALSE;
+    if (sMonSummaryScreen->summary.isEgg || GetMonData(&sMonSummaryScreen->currentMon, MON_DATA_IS_EGG))
+        return FALSE;
+    if (sMonSummaryScreen->ivEvPartnerSlots && (index == 1 || index == 4 || index == 5))
+        return FALSE;
+    return TRUE;
+}
+
+// The EV total under the stats while the skills page shows the EVs (the window ResetWindows adds).
+static void UpdateEvTotalWindow(void)
+{
+    u8 windowId = sMonSummaryScreen->evTotalWindowId;
+
+    if (windowId == WINDOW_NONE)
+        return;
+    FillWindowPixelBuffer(windowId, PIXEL_FILL(0));
+    if (sMonSummaryScreen->currPageIndex == PSS_PAGE_SKILLS
+     && sMonSummaryScreen->skillsPageMode == SUMMARY_SKILLS_MODE_EVS && ShouldShowIvEvPrompt())
+    {
+        u8 text[32];
+        u8 *end;
+        u32 stat, total = 0;
+
+        for (stat = 0; stat < NUM_STATS; stat++)
+            total += GetMonData(&sMonSummaryScreen->currentMon, MON_DATA_HP_EV + stat);
+        end = StringCopy(text, COMPOUND_STRING("EV total: "));
+        end = ConvertIntToDecimalStringN(end, total, STR_CONV_MODE_LEFT_ALIGN, 3);
+        end = StringCopy(end, COMPOUND_STRING("/"));
+        ConvertIntToDecimalStringN(end, MAX_TOTAL_EVS, STR_CONV_MODE_LEFT_ALIGN, 3);
+        // white like the page's labels, in the narrower fonts when it would not fit left of the EXP bar
+        PrintTextOnWindowWithFont(windowId, text, 1, 1, 0, 1, GetFontIdToFit(text, FONT_SMALL, 0, 70));
+        PutWindowTilemap(windowId);
+        CopyWindowToVram(windowId, COPYWIN_GFX);
+    }
+    else
+    {
+        ClearWindowTilemap(windowId);
+    }
+    ScheduleBgCopyTilemapToVram(0);
+}
+#endif
+#line 4768 // gba-line
 static inline bool32 ShouldShowIvEvPrompt(void)
 {
+#ifdef PORTABLE
+    if (!IsSummaryMonPlayersOwn())
+        return FALSE;
+#endif
+#line 4770 // gba-line
     if (P_SUMMARY_SCREEN_IV_EV_BOX_ONLY)
     {
         return (P_SUMMARY_SCREEN_IV_EV_INFO || FlagGet(P_FLAG_SUMMARY_SCREEN_IV_EV_INFO))
@@ -4795,6 +4934,11 @@ static inline void ShowUtilityPrompt(s16 mode)
     const u8* gText_SkillPageStats = COMPOUND_STRING("STATS");
     const u8* gText_Rename = COMPOUND_STRING("RENAME");
 
+#ifdef PORTABLE
+    // EmeraldTogether (PC): every page, mode and Pokémon change comes through here; the EV total follows them.
+    UpdateEvTotalWindow();
+#endif
+#line 4790 // gba-line
     if (sMonSummaryScreen->currPageIndex == PSS_PAGE_INFO)
     {
         if (ShouldShowRename())
@@ -5023,6 +5167,7 @@ bool32 Summary_NativeUiState(struct NativeSummary *out)
     out->canRename = ShouldShowRename();
     out->canRelearn = ShouldShowMoveRelearner();
     out->ivEvShown = ShouldShowIvEvPrompt();
+    out->skillsMode = sMonSummaryScreen->skillsPageMode;
     out->mon = sMonSummaryScreen->currentMon;
     out->isLucky = MultiplayerLucky_IsLucky(&sMonSummaryScreen->currentMon);
     StringCopyN(out->otName, sum->OTName, sizeof(out->otName) - 1);
@@ -5119,3 +5264,27 @@ bool32 Summary_NativeUiState(struct NativeSummary *out)
     return TRUE;
 }
 #endif // ENABLE_NATIVE_UI
+#ifdef PORTABLE
+// EmeraldTogether (PC): the IV/EV rule for --selftest-summary-ivev (src/platform/native_selftest_summary.c). Sets the
+// summary up as ShowPokemonSummaryScreen does for that list and Pokémon (nothing is drawn: the main loop never runs it),
+// reads the Pokémon as the screen's first frames do, answers whether its IVs and EVs are offered, and frees it all as
+// the screen's close does.
+bool32 SummaryTest_IvEvOffered(u8 mode, void *mons, u8 monIndex, u8 maxMonIndex)
+{
+    MainCallback callback2 = gMain.callback2, initial = gInitialSummaryScreenCallback;
+    bool32 offered;
+
+    ShowPokemonSummaryScreen(mode, mons, monIndex, maxMonIndex, callback2);
+    CopyMonToSummaryStruct(&sMonSummaryScreen->currentMon);
+    while (!ExtractMonDataToSummaryStruct(&sMonSummaryScreen->currentMon))
+        ;
+    offered = ShouldShowIvEvPrompt();
+    if (gMonSpritesGfxPtr == NULL)
+        DestroyMonSpritesGfxManager(MON_SPR_GFX_MANAGER_A);
+    Free(sMonSummaryScreen);
+    sMonSummaryScreen = NULL;
+    SetMainCallback2(callback2);
+    gInitialSummaryScreenCallback = initial;
+    return offered;
+}
+#endif

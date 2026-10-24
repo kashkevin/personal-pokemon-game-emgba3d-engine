@@ -7,7 +7,8 @@
  * move order, learning a move, the relearner. The game's pages are INFO,
  * SKILLS, BATTLE MOVES and CONTEST MOVES; the design's planned RIBBONS page
  * gives its tab to the game's CONTEST MOVES page (the ribbon count stays on the
- * name block). IVs and EVs show only where the game shows them (its setting).
+ * name block). IVs and EVs: A on the SKILLS page shows them beside the stats for
+ * the player's own Pokémon (the game's rule: ShouldShowIvEvPrompt).
  * Project-owned.
  */
 #include <math.h>
@@ -143,6 +144,9 @@ static const u8 sText_Done[] = _("Done");
 static const u8 sText_Forget[] = _("Forget");
 static const u8 sText_DontLearn[] = _("Don't learn");
 static const u8 sText_StateLabel[] = _("It is an Egg.");
+static const u8 sText_ShowIvEv[] = _("Show IVs/EVs");
+static const u8 sText_HideIvEv[] = _("Hide IVs/EVs");
+static const u8 sText_HyperTrained[] = _("HT: Hyper Trained, counts as 31.");
 
 /* ---------------------------------------------------------------- captured state */
 
@@ -170,7 +174,8 @@ static struct NativeSummary sS;
 static struct UiMon sMon;
 static struct MoveView sMoves[MAX_MON_MOVES + 1]; /* the four, then the move to learn */
 static u16 sStats[6];
-static u8 sIvs[6];
+static u8 sIvs[6];               /* as the game counts them: a Hyper Trained stat is 31 */
+static bool sIvTrained[6];       /* Hyper Trained */
 static u16 sEvs[6];
 static int sEvTotal;
 static u32 sExpPoints;
@@ -369,7 +374,9 @@ static void Capture(void)
     for (int i = 0; i < 6; i++)
     {
         sStats[i] = GetMonData(mon, sStatField[i]);
-        sIvs[i] = GetMonData(mon, sIvField[i]);
+        sIvTrained[i] = GetMonData(mon, MON_DATA_HYPER_TRAINED_HP + sStatOrder[i]) != 0;
+        /* the summary's own rule (pokemon_summary_screen.c GetAdjustedIvData) */
+        sIvs[i] = (P_SUMMARY_SCREEN_IV_HYPERTRAIN && sIvTrained[i]) ? MAX_PER_STAT_IVS : GetMonData(mon, sIvField[i]);
         sEvs[i] = GetMonData(mon, sEvField[i]);
     }
     sEvTotal = 0;
@@ -807,13 +814,20 @@ static void InfoPage(const struct UiRamp *pr)
     }
 }
 
+/* the IV and EV columns: the player's own Pokémon (the game's rule), turned on with A */
+static bool IvEvOn(void)
+{
+    return sS.ivEvShown && !sMon.isEgg && sS.skillsMode != SUMMARY_SKILLS_MODE_STATS;
+}
+
 static void SkillsPage(const struct UiRamp *pr)
 {
     int lx = CX + 6, cVal = CX + 196, cIv = CX + 246, cEv = CX + 300;
     u8 buf[32];
+    bool ivEv = IvEvOn(), anyTrained = false;
 
     Label(cVal - UiCaps_Width("STAT"), ROW(0), "STAT");
-    if (sS.ivEvShown)
+    if (ivEv)
     {
         Label(cIv - UiCaps_Width("IV"), ROW(0), "IV");
         Label(cEv - UiCaps_Width("EV"), ROW(0), "EV");
@@ -846,12 +860,17 @@ static void SkillsPage(const struct UiRamp *pr)
             Number(buf, sizeof(buf), sStats[i], false);
             TextR(cVal, y, buf);
         }
-        if (sS.ivEvShown)
+        if (ivEv)
         {
             int ew = (int)lrint(40.0 * (sEvs[i] < 252 ? sEvs[i] : 252) / 252.0);
 
             Number(buf, sizeof(buf), sIvs[i], false);
             TextR(cIv, y, buf);
+            if (sIvTrained[i])
+            {
+                UiCaps_Draw(cIv + 3, y + 5, "HT", UI_P_TEXT_MUTED, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
+                anyTrained = true;
+            }
             Number(buf, sizeof(buf), sEvs[i], false);
             TextR(cEv, y, buf);
             UiG_Rect(cEv + 8, y + 6, 42, 4, UiMix(UI_P_CREAM_LO, UI_P_CREAM, 0.3));
@@ -859,12 +878,14 @@ static void SkillsPage(const struct UiRamp *pr)
                 UiG_Rect(cEv + 9, y + 7, ew, 2, UiMix(pr->base, UI_P_CREAM, 0.15));
         }
     }
-    if (sS.ivEvShown)
+    if (ivEv)
     {
         char tot[32];
 
-        snprintf(tot, sizeof(tot), "EV TOTAL %d/510", sEvTotal);
+        snprintf(tot, sizeof(tot), "EV TOTAL %d/%d", sEvTotal, MAX_TOTAL_EVS);
         UiCaps_Draw(CR - 6, ROW(7) + 5, tot, UI_P_TEXT_MUTED, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_RIGHT, UI_NONE);
+        if (anyTrained)
+            Small(lx, ROW(8) + 2, sText_HyperTrained, UI_P_TEXT_MUTED);
     }
     if (sNatureUp >= 0)
     {
@@ -1259,6 +1280,8 @@ static void Hints(void)
             h[n++] = (struct UiHintItem){UI_ACT_SCROLL, sS.isBoxMon ? sText_BoxPokemon : sText_Pokemon};
         if (sS.page == PSS_PAGE_INFO && sS.canRename)
             h[n++] = (struct UiHintItem){UI_ACT_CONFIRM, sText_Rename};
+        else if (sS.page == PSS_PAGE_SKILLS && sS.ivEvShown && !sMon.isEgg)
+            h[n++] = (struct UiHintItem){UI_ACT_CONFIRM, IvEvOn() ? sText_HideIvEv : sText_ShowIvEv};
         else if (movePage && sMon.moveCount > 0)
             h[n++] = (struct UiHintItem){UI_ACT_CONFIRM, sText_CheckMoves};
         if (movePage && sS.canRelearn)

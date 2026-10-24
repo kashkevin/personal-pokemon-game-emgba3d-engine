@@ -558,12 +558,31 @@ static void Init(void)
  * after the level - s shiny, f female, m male, i<item id> held item. The personality comes from a
  * fixed search, not the random number generator. v<move id>: that move in the first slot.
  * n<nature>: a personality of that nature too; b<ball>: caught in that ball (breed_check.py's parents).
+ * I<hp>.<atk>.<def>.<spatk>.<spdef>.<speed>: each IV (the summary's order; after w), E<...>: each EV in that order,
+ * H<mask>: those stats Hyper Trained (bit 0 HP .. bit 5 Speed, the same order) - the summary's IV/EV checks.
  */
+static void TestMonStatList(const char *p, int out[NUM_STATS])
+{
+    for (int i = 0; i < NUM_STATS; i++)
+        out[i] = -1; /* a stat the list leaves out keeps its value */
+    for (int i = 0; i < NUM_STATS; i++)
+    {
+        out[i] = atoi(p);
+        while (*p >= '0' && *p <= '9')
+            p++;
+        if (*p != '.')
+            break;
+        p++;
+    }
+}
 static void CreateTestMon(struct Pokemon *mon, int species, int level, const char *flags)
 {
     u32 personality = 0x13579BDF, i;
     int gender = -1, item = 0, move = 0, ivs = MAX_PER_STAT_IVS, nature = -1, ball = 0;
-    bool shiny = false, nextLevelShort = false;
+    int statIvs[NUM_STATS], statEvs[NUM_STATS], trainedMask = 0;
+    bool shiny = false, nextLevelShort = false, ivList = false, evList = false;
+    /* the summary's order (I, E, H flags) -> MON_DATA_* field offsets (HP, Atk, Def, Speed, Sp. Atk, Sp. Def) */
+    static const u8 sSummaryStat[NUM_STATS] = {STAT_HP, STAT_ATK, STAT_DEF, STAT_SPATK, STAT_SPDEF, STAT_SPEED};
 
     for (; flags != NULL && *flags != '\0' && *flags != ',' && *flags != ';'; flags++)
     {
@@ -585,6 +604,12 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
             nature = atoi(flags + 1);
         else if (*flags == 'b')
             ball = atoi(flags + 1);
+        else if (*flags == 'I')
+            TestMonStatList(flags + 1, statIvs), ivList = true;
+        else if (*flags == 'E')
+            TestMonStatList(flags + 1, statEvs), evList = true;
+        else if (*flags == 'H')
+            trainedMask = atoi(flags + 1);
     }
     for (i = 0; i < 65536 && ((gender >= 0 && GetGenderFromSpeciesAndPersonality(species, personality) != gender)
                              || (nature >= 0 && GetNatureFromPersonality(personality) != (u32)nature)); i++)
@@ -612,6 +637,29 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
 
         SetMonData(mon, MON_DATA_POKEBALL, &caughtIn);
     }
+    for (i = 0; i < NUM_STATS; i++)
+    {
+        u32 stat = sSummaryStat[i];
+
+        if (ivList && statIvs[i] >= 0)
+        {
+            u32 iv = statIvs[i] <= MAX_PER_STAT_IVS ? statIvs[i] : MAX_PER_STAT_IVS;
+
+            SetMonData(mon, MON_DATA_HP_IV + stat, &iv);
+        }
+        if (evList && statEvs[i] >= 0)
+        {
+            u32 ev = statEvs[i] <= MAX_PER_STAT_EVS ? statEvs[i] : MAX_PER_STAT_EVS;
+
+            SetMonData(mon, MON_DATA_HP_EV + stat, &ev);
+        }
+        if (trainedMask & (1 << i))
+        {
+            bool32 trained = TRUE;
+
+            SetMonData(mon, MON_DATA_HYPER_TRAINED_HP + stat, &trained);
+        }
+    }
     if (nextLevelShort && level > 0 && level < MAX_LEVEL)
     {
         /* e: one experience point short of the next level (the Tower experience cap's runs) */
@@ -623,6 +671,21 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
     TestLog("Battle env test: test Pokemon %d Lv%d%s%s, item %d, first move %d", species, level,
             shiny ? " shiny" : "", gender == MON_FEMALE ? " female" : gender == MON_MALE ? " male" : "", item,
             GetMonData(mon, MON_DATA_MOVE1));
+    if (ivList || evList || trainedMask != 0)
+    {
+        int iv[NUM_STATS], ev[NUM_STATS], ht = 0;
+
+        for (i = 0; i < NUM_STATS; i++)
+        {
+            iv[i] = GetMonData(mon, MON_DATA_HP_IV + sSummaryStat[i]);
+            ev[i] = GetMonData(mon, MON_DATA_HP_EV + sSummaryStat[i]);
+            if (GetMonData(mon, MON_DATA_HYPER_TRAINED_HP + sSummaryStat[i]))
+                ht |= 1 << i;
+        }
+        TestLog("Battle env test: test Pokemon IVs %d/%d/%d/%d/%d/%d EVs %d/%d/%d/%d/%d/%d hyper trained 0x%x "
+                "(HP/Atk/Def/SpA/SpD/Spe)", iv[0], iv[1], iv[2], iv[3], iv[4], iv[5], ev[0], ev[1], ev[2], ev[3],
+                ev[4], ev[5], ht);
+    }
 }
 
 /* "species:level[:flags],..." */

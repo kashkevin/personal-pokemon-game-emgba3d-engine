@@ -228,7 +228,8 @@ struct NativeSummary
     bool8 lockMoves;
     bool8 canRename;            /* A on the info page renames (the game's rule) */
     bool8 canRelearn;           /* START on a move page opens the move relearner */
-    bool8 ivEvShown;            /* the game shows IVs and EVs (its setting) */
+    bool8 ivEvShown;            /* the game shows IVs and EVs: the player's own Pokémon (ShouldShowIvEvPrompt) */
+    u8 skillsMode;              /* SUMMARY_SKILLS_MODE_*: A on the skills page turns the IVs and EVs on (IVS) and off */
     bool8 isLucky;              /* a Lucky Pokémon (multiplayer trades) */
     bool8 hideOT;               /* rental Pokémon: no Trainer shown */
     struct Pokemon mon;         /* the Pokémon shown (a box Pokémon with its stats) */
