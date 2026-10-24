@@ -170,8 +170,11 @@ def main():
     if want("spawns-gone"):
         seconds = case("spawns-gone", 600, dict(PKMN_TEST_SPAWNS=SPAWNS.split(";")[0], PKMN_TEST_SPAWNS_UNTIL="300"),
                        "250,550")
-        before = [s for s in seconds if s[2]]
-        after = seconds[len(before):]
+        # The seconds that drew it need not be one run: the stand-in host lists the spawn on the save's map too, so a
+        # second during the test's warp to Route 101 can draw none. "After" starts past the last second that drew it.
+        drawn_at = [i for i, s in enumerate(seconds) if s[2]]
+        before = [seconds[i] for i in drawn_at]
+        after = seconds[drawn_at[-1] + 1:] if drawn_at else seconds
         if not before or before[-1][1] == 0:
             problems.append("spawns-gone: the shiny spawn made no twinkle while it was there")
         if not after or after[-1][0] != 0 or after[-1][2] or (len(after) > 1 and after[-1][1] != after[0][1]):
