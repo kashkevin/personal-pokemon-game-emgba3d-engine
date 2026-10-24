@@ -154,7 +154,9 @@ static void MakeSparkle(u32 objectEventId, u32 spot)
             return;                                 // no palette to spare: the Pokemon's own colours still show it
         LoadSpritePalette(&gSpritePalette_GeneralFieldEffect0);
     }
-    spriteId = CreateSpriteAtEnd(&sSpriteTemplate_Sparkle, pokemon->x, pokemon->y, 0);
+    // unchecked: with no sprite slot or no room in the sprite tiles left the star is skipped (the checked call stops the
+    // game on the crash screen instead)
+    spriteId = CreateSpriteAtEndUnchecked(&sSpriteTemplate_Sparkle, pokemon->x, pokemon->y, 0);
     if (spriteId >= MAX_SPRITES)
         return;
     sprite = &gSprites[spriteId];
