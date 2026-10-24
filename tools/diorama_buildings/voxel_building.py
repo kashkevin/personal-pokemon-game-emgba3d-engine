@@ -98,6 +98,46 @@ def _layouts_json():
     return _LAYOUTS[0]
 
 
+# A pin hole is at most this many pixels (project-owned).
+SPECK = 8
+
+
+def keep_specks(img, specks):
+    """Put back the pixels of a drawing that LayoutArt.building_art let
+    through as ground by their colour alone (`specks`: (x, y) -> rgb) where
+    they are pin holes in it: a group of at most SPECK such pixels walled in
+    by drawn pixels on every side, touching no other ground and not the
+    image's edge. The ground round a building reaches its edge; a door's
+    wood the colour of Dewford's sand at the same place in its cell does
+    not. Each pin hole split its column of a Relief in two, and the steps
+    between columns showed as thin grey lines down the door (project-owned:
+    the 3D audit of 2026-10-24)."""
+    W, H = img.size
+    px = img.load()
+    seen = set()
+    for start in specks:
+        if start in seen:
+            continue
+        seen.add(start)
+        group, todo, open_ = [], [start], False
+        while todo:
+            x, y = todo.pop()
+            group.append((x, y))
+            for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                if not (0 <= nx < W and 0 <= ny < H):
+                    open_ = True
+                elif px[nx, ny][3] >= 128:
+                    continue
+                elif (nx, ny) not in specks:
+                    open_ = True
+                elif (nx, ny) not in seen:
+                    seen.add((nx, ny))
+                    todo.append((nx, ny))
+        if not open_ and len(group) <= SPECK:
+            for (x, y) in group:
+                px[x, y] = specks[(x, y)] + (255,)
+
+
 class LayoutArt:
     """A layout's metatiles, composed the way the GBA composes them."""
 
@@ -177,9 +217,13 @@ class LayoutArt:
         of its bottom layer: the gaps are not the building's, whatever ground
         is drawn in them (Dewford's houses: the grass under a tree's foot, which
         lay along a hipped roof's ridge; the owner's report of 2026-10-24).
+        The pixel test goes by colour alone, so a few pixels of the building
+        itself can match the ground where they stand; walled in by the drawing
+        all round they are the drawing's, and are kept (`keep_specks`).
         """
         img = Image.new("RGBA", (w * 16, h * 16), (0, 0, 0, 0))
         px = img.load()
+        specks = {}
         tops = {}
         for cy in range(h):
             for cx in range(w):
@@ -207,8 +251,11 @@ class LayoutArt:
                             continue
                         elif not is_ground:
                             if ground_px and any(g[ly][lx] == rgb0 for g in ground_px):
+                                specks[(X, Y)] = rgb0
                                 continue
                             px[X, Y] = rgb0 + (255,)
+        if specks:
+            keep_specks(img, specks)
         return img
 
     def cell_image(self, m, layers=(0, 1)):

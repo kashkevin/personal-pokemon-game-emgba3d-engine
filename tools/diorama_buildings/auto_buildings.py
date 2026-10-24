@@ -16,7 +16,9 @@ stands when seen from any other angle.
 
     a building: a door on an outdoor map (MB_ANIMATED_DOOR or
         MB_NON_ANIMATED_DOOR) under blocked cells of the town's own tileset
-        or of the General tileset's house kit. Its front is the door's row,
+        or of the General tileset's building kit (or under a lintel the map
+        leaves walkable, walled in by them), cells no spec model stands on.
+        Its front is the door's row,
         as far as the cells beside the door are drawn over (a fence lets the
         ground show); its cells go up from the front and out to the sides a
         little way (wings, eaves) but not sideways into leaves (the trees
@@ -58,11 +60,17 @@ FRONT_COVER = 0.6
 # A cell this much of whose drawing is leaves is a tree, not a wall.
 LEAVES = 0.6
 # The General tileset's own house kit (walls, door frames, roofs) and the
-# Pokemon Center's and Mart's pieces: building cells though primary.
+# Pokemon Center's and Mart's pieces: building cells though primary. Also the
+# gym's (its roof, front, porch and door) and the Contest Hall's door frame
+# and door: Dewford, Fortree, Lavaridge, Sootopolis and Lilycove draw the rest
+# of those buildings with their own metatiles round General's door, and the
+# search stopped at the door frame (the owner's report of 2026-10-24).
 GENERAL_BUILDING = (set(range(0x008, 0x00D)) | set(range(0x010, 0x015)) | set(range(0x018, 0x01B))
                     | set(range(0x020, 0x023)) | set(range(0x028, 0x034)) | set(range(0x038, 0x03C))
                     | set(range(0x041, 0x044)) | set(range(0x048, 0x04C)) | set(range(0x050, 0x054))
-                    | set(range(0x058, 0x05C)) | set(range(0x060, 0x064)))
+                    | set(range(0x058, 0x05C)) | set(range(0x060, 0x064))
+                    | set(range(0x1AA, 0x1AD)) | set(range(0x1B2, 0x1B5)) | set(range(0x1B8, 0x1BD))
+                    | set(range(0x1C0, 0x1C6)) | set(range(0x1C8, 0x1CE)) | {0x1D3, 0x1DB})
 
 # Per building, by map and door: what the drawing says that the search cannot.
 #   "facade": its facade's height in pixels;
@@ -113,6 +121,18 @@ OVERRIDES = {
     ("MossdeepCity", 19, 10): {"facade": 40},
     ("MossdeepCity", 18, 16): {"facade": 40},
     ("MossdeepCity", 36, 24): {"facade": 56},
+    # Found once the search took General's gym and walled-in lintels (the
+    # owner's report of 2026-10-24); bounded where it runs on: Lavaridge's
+    # gym into the cliff and the hot spring (its sign, drawn over its corner,
+    # stands with its front), Route 110's gatehouses into the cycling road,
+    # Stern's shipyard into the boats beside it.
+    ("LavaridgeTown", 5, 15): {"top": 11, "cols": (2, 7)},
+    ("Route110", 15, 16): {"top": 12, "cols": (14, 19)},
+    ("Route110", 16, 88): {"cols": (15, 20)},
+    ("SlateportCity", 26, 38): {"cols": (24, 31)},
+    # The Fossil Maniac's house, built into the cliff: the search ran on
+    # into the rock (too big, left flat).
+    ("Route114", 29, 5): {"top": 2, "cols": (28, 31)},
     # A second storey over the first (V29): the search stopped at the eave
     # between them and laid the upper storey back as roof.
     ("LilycoveCity", 37, 24): {"facade": 64},    # the Cove Lily Motel, its lattice storey
@@ -164,10 +184,12 @@ ROOFS = {
     "LilycoveCity": {"default": "pitched",
                      (27, 6): "flat",   # the department store
                      (11, 5): "flat",   # the museum
+                     (23, 24): "flat",  # the Contest Hall: a riveted flat roof
                      (37, 24): None},   # the Cove Lily Motel
     "SlateportCity": {"default": "pitched",
                       (10, 12): TENT,
-                      (30, 26): "flat"},  # the museum
+                      (30, 26): "flat",   # the museum
+                      (26, 38): "flat"},  # Stern's shipyard: its roof's skylights kept
     "VerdanturfTown": {"default": "pitched", (3, 7): TENT},
     "FallarborTown": {"default": "pitched", (8, 7): tent(16, 6)},
     "FortreeCity": {"default": {"type": "dome", "rise": 0.7, "power": 0.8}},   # the canopies
@@ -268,16 +290,6 @@ def find(map_, door, props, names, owned):
         return None
     taken = props.get(art.secondary, set())
 
-    def part(cx, cy):
-        if not (0 <= cx < art.w and 0 <= cy < art.h):
-            return False
-        m = art.metatile(cx, cy)
-        if m in taken or (m < vb.NUM_PRIMARY and m not in GENERAL_BUILDING):
-            return False
-        return map_.blocked(cx, cy) or names.get(map_.behaviour(cx, cy)) in DOORS
-
-    if not part(x, y - 1):
-        return None
     ground = ground_of(map_, {(x, y)})
     ground_tiles = art.ground_tiles(ground)
     ground_px = art.ground_pixels(ground)
@@ -292,6 +304,33 @@ def find(map_, door, props, names, owned):
             green = sum(1 for (r, g, b, a) in drawn if g > r + 16 and g > b + 8)
             looks[(cx, cy)] = (len(drawn) / 256.0, green / float(max(1, len(drawn))))
         return looks[(cx, cy)]
+
+    def kit(cx, cy):
+        """A cell drawn with a building's metatiles, and no spec model's: a
+        house beside a Pokemon Center or a Mart is its own cells (Fortree's
+        tree house, Mauville's house: the search ran on into the Center's or
+        the Mart's and the house was dropped)."""
+        if not (0 <= cx < art.w and 0 <= cy < art.h) or (cx, cy) in owned:
+            return False
+        m = art.metatile(cx, cy)
+        return not (m in taken or (m < vb.NUM_PRIMARY and m not in GENERAL_BUILDING))
+
+    def wall(cx, cy):
+        return kit(cx, cy) and (map_.blocked(cx, cy) or names.get(map_.behaviour(cx, cy)) in DOORS)
+
+    def part(cx, cy):
+        # a door's lintel the map leaves walkable - over a door, walled in by
+        # the building left, right and above, drawn all over (Mauville's kit
+        # on Route 110's gatehouses and the Winstrate house, Stern's
+        # shipyard): the building's, or the search never started and they
+        # stood flat
+        return wall(cx, cy) or (kit(cx, cy) and art.metatile(cx, cy) >= vb.NUM_PRIMARY
+                                and cy + 1 < art.h and names.get(map_.behaviour(cx, cy + 1)) in DOORS
+                                and wall(cx - 1, cy) and wall(cx + 1, cy) and wall(cx, cy - 1)
+                                and look(cx, cy)[0] >= FRONT_COVER and look(cx, cy)[1] < LEAVES)
+
+    if not part(x, y - 1):
+        return None
 
     # Its front: the door's row, as far as the cells left and right of the
     # door are the building's - drawn over all or nearly all of the cell (a
@@ -407,7 +446,8 @@ def north_row(map_, cells, ground):
     part of its drawing, standing on nothing. Not leaves: the foot of a tree
     behind the roof (Dewford's houses) is the tree's, and as the roof's top
     rows it lay along the ridge as a strip of grass (the owner's report of
-    2026-10-24)."""
+    2026-10-24). The town's own metatiles, or General's building kit
+    (Lavaridge's gym: its roof's back row is General's)."""
     art = map_.art
     tops = {}
     for cx, cy in cells:
@@ -417,7 +457,10 @@ def north_row(map_, cells, ground):
     out = set()
     for cx, top in tops.items():
         cy = top - 1
-        if cy < 0 or map_.blocked(cx, cy) or art.metatile(cx, cy) < vb.NUM_PRIMARY:
+        if cy < 0 or map_.blocked(cx, cy):
+            continue
+        m = art.metatile(cx, cy)
+        if m < vb.NUM_PRIMARY and m not in GENERAL_BUILDING:
             continue
         img = art.building_art(cx, cy, 1, 1, ground_tiles, ground_px=ground_px)
         drawn = [p for p in img.getdata() if p[3] >= 128]

@@ -512,3 +512,38 @@ of terraced walls; Route 112's rock was still a maze of walls.
   level below their rock. Where Route 112's plateau ends under the forest west
   of the Fiery Path, with no rock drawn, the trees take the nearer of the two
   levels: a step in the canopy, its shadow and a line of grass along it.
+
+## Gyms and the buildings the door search missed (the owner's report, 2026-10-24)
+
+* Gyms (`gen_voxel_buildings.py` `anchored_at`, `drop_overlaps`): every gym
+  is the same drawing, modelled by hand once (`voxel_building_specs.py`
+  `gym`) and placed wherever a town draws it with the same pixels. Dewford,
+  Fortree and Sootopolis paint its roof and corners with their own
+  metatiles round General's door frame; the placement search only looked
+  where the gym's first cell was General's, so those three stood as low
+  blocks of the terrain ("Dewford's gym looks sunk"). It now looks wherever
+  any cell of the building is the reference's own, the other cells still
+  proved pixel by pixel; where two placements would stand on the same cells
+  the one less like its own reference yields (the gym found by its pixels on
+  Rustboro's gym gives way to `gym_rustboro`).
+* The door search (`auto_buildings.py`): General's gym pieces and the
+  Contest Hall's door frame and door are building cells (`GENERAL_BUILDING`):
+  Lilycove's Contest Hall (a flat roof) and Lavaridge's gym (its sign drawn
+  over a corner, so no copy of the gym's pixels; read off its own drawing,
+  bounded) are modelled. A door's lintel the map leaves walkable, walled in
+  by the building, is the building's (Route 110's cycling road gatehouses,
+  the Winstrate house on Route 111, Stern's shipyard in Slateport: the search
+  never started and they lay flat). A house beside a Pokemon Center or a Mart
+  is its own cells (Fortree's tree house, Mauville's house: the search ran on
+  into the Center or the Mart and dropped the house). The Fossil Maniac's
+  house on Route 114 is bounded to its cells (the search ran on into the
+  cliff). Bounds are `OVERRIDES` entries.
+* Pin holes (`voxel_building.py` `keep_specks`): the art reader lets a pixel
+  through as ground when it has the ground's colour where it stands, so a few
+  pixels of a building could vanish - Dewford's doors are the colour of its
+  sand there. Each hole split its column of the Relief in two and the steps
+  showed as thin grey lines down the door. A group of at most 8 such pixels
+  walled in by the drawing is the drawing's (21 models: Dewford's houses,
+  Fortree's tree houses, Battle Frontier lounges and the Dome, Fallarbor's
+  tent, Lilycove's museum, Route 113's glass workshop, the Safari Zone gate,
+  a Petalburg hedge).
