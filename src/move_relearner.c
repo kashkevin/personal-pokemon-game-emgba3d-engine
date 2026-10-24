@@ -268,6 +268,12 @@ static u32 GetRelearnerLevelUpMoves(struct BoxPokemon *mon, u16 *moves);
 static u32 GetRelearnerEggMoves(struct BoxPokemon *mon, u16 *moves);
 static u32 GetRelearnerTMMoves(struct BoxPokemon *mon, u16 *moves);
 static u32 GetRelearnerTutorMoves(struct BoxPokemon *mon, u16 *moves);
+#ifdef PORTABLE
+static u32 GetHatchedMonEggMoves(struct BoxPokemon *mon, u16 *moves);
+static u32 GetUsedTutorMoves(struct BoxPokemon *mon, u16 *moves);
+static void ShowNextListHint(void);
+#endif
+#line 271 // gba-line
 
 static void Task_MoveRelearner_HandleInput(u8 taskId);
 static void Task_MoveRelearner_LearnMove(u8 taskId);
@@ -468,12 +474,6 @@ static void CB2_MoveRelearnerMain(void)
 
 static bool32 ShouldConsumeTmItem(enum Move move)
 {
-#ifdef PORTABLE
-    // PC game: move switching (include/config/summary_screen.h). A TM in the bag lists its move; teaching it from here
-    // uses nothing up, so a move switched out can be switched back while the TM is there.
-    return FALSE;
-#endif
-#line 471 // gba-line
     if (gMoveRelearnerState != MOVE_RELEARNER_TM_MOVES || gRelearnMode == RELEARN_MODE_SCRIPT)
         return FALSE;
     if (I_REUSABLE_TMS || P_ENABLE_ALL_TM_MOVES)
@@ -554,6 +554,19 @@ static void UIEndTask(u8 taskId)
     gTasks[taskId].func = Task_MoveRelearner_HandleInput;
 }
 
+#ifdef PORTABLE
+// Move switching: "Forget it anyway?" with the cursor on NO (chooseboxmon.c LearnMove, the warnings before a move goes)
+static void UIAskConfirmationNoFirst(void)
+{
+    static const struct WindowTemplate sYesNoTemplate = {
+        .bg = 0, .tilemapLeft = 22, .tilemapTop = 8, .width = 5, .height = 4, .paletteNum = 15, .baseBlock = 0x25A,
+    }; // menu_specialized.c sMoveRelearnerYesNoMenuTemplate
+
+    CreateYesNoMenu(&sYesNoTemplate, 1, 0xE, 1);
+}
+#endif
+#line 550 // gba-line
+
 static const struct MoveLearnUI sMoveLearnUI =
 {
     .askConfirmation = UIAskConfirmation,
@@ -561,6 +574,10 @@ static const struct MoveLearnUI sMoveLearnUI =
     .printMessage = UIPrintMessage,
     .playFanfare = UIPlayFanfare,
     .showMoveList = UIShowMoveList,
+#ifdef PORTABLE
+    .askConfirmationNoFirst = UIAskConfirmationNoFirst,
+#endif
+#line 558 // gba-line
     .endTask = UIEndTask
 };
 
@@ -740,6 +757,10 @@ static void ShowTeachMoveText(void)
     StringExpandPlaceholders(gStringVar4, gText_TeachWhichMoveToPkmn);
     FillWindowPixelBuffer(RELEARNERWIN_MSG, 0x11);
     AddTextPrinterParameterized(RELEARNERWIN_MSG, FONT_NORMAL, gStringVar4, 0, 1, 0, NULL);
+#ifdef PORTABLE
+    ShowNextListHint(); // "SELECT: TM moves" when SELECT goes to another list
+#endif
+#line 727 // gba-line
 }
 
 static void CreateUISprites(void)
@@ -924,6 +945,12 @@ static bool32 IsTmAvailable(enum Item item)
         return TRUE;
     if (gRelearnMode == RELEARN_MODE_SCRIPT)
         return TRUE;
+#ifdef PORTABLE
+    // Move switching: a TM the player has, in the Bag or in the PC's item storage (TMs are never used up on PC:
+    // include/config/item.h I_REUSABLE_TMS)
+    return CheckBagHasItem(item, 1) || CheckPCHasItem(item, 1);
+#endif
+#line 911 // gba-line
     return CheckBagHasItem(item, 1);
 }
 
@@ -964,6 +991,10 @@ static u32 GetRelearnerEggMoves(struct BoxPokemon *mon, u16 *moves)
 {
     enum Species species = GetBoxMonData(mon, MON_DATA_SPECIES);
     u32 numMoves = 0;
+#ifdef PORTABLE
+    return GetHatchedMonEggMoves(mon, moves); // a Pokemon that hatched from an Egg: its own family's egg moves
+#endif
+#line 951 // gba-line
     while (GetSpeciesPreEvolution(species) != SPECIES_NONE)
         species = GetSpeciesPreEvolution(species);
 
@@ -1011,6 +1042,10 @@ static u32 GetRelearnerTutorMoves(struct BoxPokemon *mon, u16 *moves)
 {
     enum Species species = GetBoxMonData(mon, MON_DATA_SPECIES);
     u32 numMoves = 0;
+#ifdef PORTABLE
+    return GetUsedTutorMoves(mon, moves); // the moves of the one-time tutors the player has used
+#endif
+#line 998 // gba-line
 
     for (u32 i = 0; gTutorMoves[i] != MOVE_UNAVAILABLE; i++)
     {
@@ -1077,6 +1112,11 @@ static bool32 HasRelearnerLevelUpMoves(struct BoxPokemon *boxMon)
 static bool32 HasRelearnerEggMoves(struct BoxPokemon *boxMon)
 {
     enum Species species = GetBoxMonData(boxMon, MON_DATA_SPECIES);
+#ifdef PORTABLE
+    u16 moves[MAX_RELEARNER_MOVES];
+    return GetHatchedMonEggMoves(boxMon, moves) != 0;
+#endif
+#line 1064 // gba-line
     while (GetSpeciesPreEvolution(species) != SPECIES_NONE)
         species = GetSpeciesPreEvolution(species);
 
@@ -1122,6 +1162,11 @@ static bool32 HasRelearnerTMMoves(struct BoxPokemon *boxMon)
 static bool32 HasRelearnerTutorMoves(struct BoxPokemon *boxMon)
 {
     enum Species species = GetBoxMonData(boxMon, MON_DATA_SPECIES);
+#ifdef PORTABLE
+    u16 moves[MAX_RELEARNER_MOVES];
+    return GetUsedTutorMoves(boxMon, moves) != 0;
+#endif
+#line 1109 // gba-line
     for (u32 i = 0; gTutorMoves[i] != MOVE_UNAVAILABLE; i++)
     {
         enum Move move = gTutorMoves[i];
@@ -1155,3 +1200,218 @@ static bool32 IsTutorMoveRelearnerActive(void)
 {
     return (FlagGet(P_FLAG_TUTOR_MOVES) || P_ENABLE_MOVE_RELEARNERS);
 }
+#ifdef PORTABLE
+#include "international_string_util.h"
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Move switching as in Legends Z-A (PC game; MOVES in the party menu and the summary screen's relearner). The lists:
+// - level-up moves up to the Pokemon's level, its pre-evolutions' too (P_PRE_EVO_MOVES);
+// - egg moves, only for a Pokemon that hatched from an Egg (met at level 0), from every stage of its own line: an Egg
+//   made without the incense hatches as Marill or Snorlax, not Azurill or Munchlax (P_INCENSE_BREEDING < GEN_9), with
+//   that stage's own egg moves;
+// - the TMs and HMs the player has (a TM is never used up on PC: include/config/item.h I_REUSABLE_TMS);
+// - tutor moves only from the one-time tutors the player has used (each records it in its flag, as move_tutors.inc
+//   does); the Battle Frontier's tutors, which charge Battle Points every time, keep no record and are not offered.
+// A move that would not be on a list once switched out, or one with PP Ups, is not switched out before the player says
+// so (MoveRelearner_ForgetWarning, chooseboxmon.c LearnMove).
+
+static const struct
+{
+    u16 move;
+    u16 flag;
+} sOneTimeTutors[] =
+{
+    {MOVE_DOUBLE_EDGE, FLAG_MOVE_TUTOR_TAUGHT_DOUBLE_EDGE},     // Sootopolis City
+    {MOVE_DYNAMIC_PUNCH, FLAG_MOVE_TUTOR_TAUGHT_DYNAMICPUNCH},  // Mossdeep City
+    {MOVE_EXPLOSION, FLAG_MOVE_TUTOR_TAUGHT_EXPLOSION},         // Pacifidlog Town
+    {MOVE_FURY_CUTTER, FLAG_MOVE_TUTOR_TAUGHT_FURY_CUTTER},     // Verdanturf Town
+    {MOVE_METRONOME, FLAG_MOVE_TUTOR_TAUGHT_METRONOME},         // Fallarbor Town
+    {MOVE_MIMIC, FLAG_MOVE_TUTOR_TAUGHT_MIMIC},                 // Lavaridge Town
+    {MOVE_ROLLOUT, FLAG_MOVE_TUTOR_TAUGHT_ROLLOUT},             // Mauville City
+    {MOVE_SLEEP_TALK, FLAG_MOVE_TUTOR_TAUGHT_SLEEP_TALK},       // Fortree City
+    {MOVE_SUBSTITUTE, FLAG_MOVE_TUTOR_TAUGHT_SUBSTITUTE},       // Lilycove City
+    {MOVE_SWAGGER, FLAG_MOVE_TUTOR_TAUGHT_SWAGGER},             // Slateport City
+};
+
+static const u8 *const sRelearnerListNames[MOVE_RELEARNER_COUNT] =
+{
+    [MOVE_RELEARNER_LEVEL_UP_MOVES] = COMPOUND_STRING("Level-up moves"),
+    [MOVE_RELEARNER_EGG_MOVES]      = COMPOUND_STRING("Egg moves"),
+    [MOVE_RELEARNER_TM_MOVES]       = COMPOUND_STRING("TM moves"),
+    [MOVE_RELEARNER_TUTOR_MOVES]    = COMPOUND_STRING("Tutor moves"),
+};
+
+static const u8 sText_CantSwitchBack[] = _("{STR_VAR_2} can't be\nswitched back in later.\pForget it anyway?");
+static const u8 sText_PpUpsLost[] = _("{STR_VAR_2}'s PP Ups\nwill be lost.\pForget it anyway?");
+static const u8 sText_CantSwitchBackPpUps[] = _("{STR_VAR_2} can't be\nswitched back in later.\pIts PP Ups will be lost.\nForget it anyway?");
+
+static bool32 HatchedFromEgg(struct BoxPokemon *mon)
+{
+    return GetBoxMonData(mon, MON_DATA_MET_LEVEL) == 0;
+}
+
+static bool32 IsMoveInList(const u16 *moves, u32 numMoves, u32 move)
+{
+    for (u32 i = 0; i < numMoves; i++)
+    {
+        if (moves[i] == move)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static u32 GetHatchedMonEggMoves(struct BoxPokemon *mon, u16 *moves)
+{
+    enum Species species = GetBoxMonData(mon, MON_DATA_SPECIES);
+    u32 numMoves = 0;
+
+    if (!HatchedFromEgg(mon))
+        return 0;
+    do
+    {
+        const u16 *eggMoves = GetSpeciesEggMoves(species);
+
+        for (u32 i = 0; eggMoves[i] != MOVE_UNAVAILABLE && numMoves < MAX_RELEARNER_MOVES; i++)
+        {
+            if (!BoxMonKnowsMove(mon, eggMoves[i]) && !IsMoveInList(moves, numMoves, eggMoves[i]))
+                moves[numMoves++] = eggMoves[i];
+        }
+        species = GetSpeciesPreEvolution(species);
+    } while (species != SPECIES_NONE);
+    return numMoves;
+}
+
+static u32 GetUsedTutorMoves(struct BoxPokemon *mon, u16 *moves)
+{
+    enum Species species = GetBoxMonData(mon, MON_DATA_SPECIES);
+    u32 numMoves = 0;
+
+    for (u32 i = 0; i < ARRAY_COUNT(sOneTimeTutors); i++)
+    {
+        if (!FlagGet(sOneTimeTutors[i].flag) || !CanLearnTeachableMove(species, sOneTimeTutors[i].move))
+            continue;
+        if (!BoxMonKnowsMove(mon, sOneTimeTutors[i].move))
+            moves[numMoves++] = sOneTimeTutors[i].move;
+    }
+    return numMoves;
+}
+
+// Right on the message's second line, the list SELECT goes to ("SELECT TM moves"), when it goes anywhere
+static void ShowNextListHint(void)
+{
+    struct BoxPokemon *boxmon;
+
+    if (gRelearnMode == RELEARN_MODE_SCRIPT || !GameHasDifferentRelearners())
+        return;
+    boxmon = GetSelectedBoxMonFromPcOrParty();
+    for (u32 i = 1; i < MOVE_RELEARNER_COUNT; i++)
+    {
+        u32 state = (gMoveRelearnerState + i) % MOVE_RELEARNER_COUNT;
+
+        if (CanBoxMonRelearnMoves(boxmon, state))
+        {
+            u8 text[32];
+
+            StringCopy(StringCopy(text, COMPOUND_STRING("{SELECT_BUTTON} ")), sRelearnerListNames[state]);
+            AddTextPrinterParameterized(RELEARNERWIN_MSG, FONT_SMALL, text,
+                                        GetStringRightAlignXOffset(FONT_SMALL, text, WindowWidthPx(RELEARNERWIN_MSG) - 2),
+                                        19, 0, NULL);
+            return;
+        }
+    }
+}
+
+bool32 MoveRelearner_IsMoveSwitching(void)
+{
+    return gRelearnMode == RELEARN_MODE_PARTY_MENU || gRelearnMode == RELEARN_MODE_PSS_PAGE_BATTLE_MOVES
+        || gRelearnMode == RELEARN_MODE_PSS_PAGE_CONTEST_MOVES;
+}
+
+// Would `move` be on one of the lists for this Pokemon if it did not know it?
+bool32 MoveRelearner_CanSwitchBackIn(struct BoxPokemon *boxMon, enum Move move)
+{
+    enum Species species = GetBoxMonData(boxMon, MON_DATA_SPECIES);
+
+    if (move == MOVE_NONE || GetBoxMonData(boxMon, MON_DATA_IS_EGG))
+        return FALSE;
+    if (IsLevelUpMoveRelearnerActive())
+    {
+        u32 level = (P_ENABLE_ALL_LEVEL_UP_MOVES ? MAX_LEVEL : GetLevelFromBoxMonExp(boxMon));
+        enum Species stage = species;
+
+        do
+        {
+            const struct LevelUpMove *learnset = GetSpeciesLevelUpLearnset(stage);
+
+            for (u32 i = 0; learnset[i].move != LEVEL_UP_MOVE_END && learnset[i].level <= level; i++)
+            {
+                if (learnset[i].move == move)
+                    return TRUE;
+            }
+            stage = (P_PRE_EVO_MOVES ? GetSpeciesPreEvolution(stage) : SPECIES_NONE);
+        } while (stage != SPECIES_NONE);
+    }
+    if (IsEggMoveRelearnerActive() && HatchedFromEgg(boxMon))
+    {
+        enum Species stage = species;
+
+        do
+        {
+            const u16 *eggMoves = GetSpeciesEggMoves(stage);
+
+            for (u32 i = 0; eggMoves[i] != MOVE_UNAVAILABLE; i++)
+            {
+                if (eggMoves[i] == move)
+                    return TRUE;
+            }
+            stage = GetSpeciesPreEvolution(stage);
+        } while (stage != SPECIES_NONE);
+    }
+    if (IsTMMoveRelearnerActive())
+    {
+        enum Item item = GetTMHMItemIdFromMoveId(move);
+
+        if (item != ITEM_NONE && IsTmAvailable(item) && CanLearnTeachableMove(species, move))
+            return TRUE;
+    }
+    if (IsTutorMoveRelearnerActive())
+    {
+        for (u32 i = 0; i < ARRAY_COUNT(sOneTimeTutors); i++)
+        {
+            if (sOneTimeTutors[i].move == move && FlagGet(sOneTimeTutors[i].flag) && CanLearnTeachableMove(species, move))
+                return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+// An HM's move can be switched out (P_CAN_FORGET_HIDDEN_MOVE is FALSE) by move switching, when it can be switched back
+// in: the HM is a key item, never used up. Anywhere else it stays, as in the GBA game (an HM learned from a traded
+// Pokemon with no HM in the Bag stays too: one that dived could not come up again).
+bool32 MoveRelearner_CanForgetHiddenMove(struct BoxPokemon *boxMon, enum Move move)
+{
+    return MoveRelearner_IsMoveSwitching() && MoveRelearner_CanSwitchBackIn(boxMon, move);
+}
+
+// What the player is told before move switching takes the move in `slot` out (NULL: nothing to tell)
+const u8 *MoveRelearner_ForgetWarning(struct BoxPokemon *boxMon, u32 slot)
+{
+    enum Move move;
+    bool32 gone, ppUps;
+
+    if (!MoveRelearner_IsMoveSwitching() || slot >= MAX_MON_MOVES)
+        return NULL;
+    move = GetBoxMonData(boxMon, MON_DATA_MOVE1 + slot);
+    if (move == MOVE_NONE)
+        return NULL;
+    gone = !MoveRelearner_CanSwitchBackIn(boxMon, move);
+    ppUps = ((GetBoxMonData(boxMon, MON_DATA_PP_BONUSES) >> (2 * slot)) & 3) != 0;
+    if (gone && ppUps)
+        return sText_CantSwitchBackPpUps;
+    if (gone)
+        return sText_CantSwitchBack;
+    if (ppUps)
+        return sText_PpUpsLost;
+    return NULL;
+}
+#endif

@@ -8,6 +8,9 @@ struct MoveLearnUI {
     void (*playFanfare)(u32 songId);
     void (*showMoveList)(u8 taskId);
     void (*endTask)(u8 taskId);
+#ifdef PORTABLE
+    void (*askConfirmationNoFirst)(void); // PC game, move switching: YES/NO with the cursor on NO (NULL: no warnings)
+#endif
 };
 
 u32 IsBoxMonExcluded(struct BoxPokemon *boxmon);

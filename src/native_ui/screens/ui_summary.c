@@ -1192,7 +1192,7 @@ static void MovesPage(const struct UiRamp *pr, int t, bool contest)
         }
         UiG_HLine(cx, gy + 54, cw - 24, UI_P_PAPER_LO);
         StrongLine(cx, gy + 58, m);
-        if (m->hm && sel < MAX_MON_MOVES)
+        if (m->hm && sel < MAX_MON_MOVES && !(sS.hmCanGo & (1 << sel)))
             Small(cx, cy + ch - 17, sText_HmNote, UI_P_TEXT_MUTED);
     }
 }

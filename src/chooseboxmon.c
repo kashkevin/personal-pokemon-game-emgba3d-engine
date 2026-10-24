@@ -219,6 +219,13 @@ enum LearnMoveState
     REPLACE_MOVE_1,
 
     DID_NOT_LEARN_1,
+#ifdef PORTABLE
+    // PC game, move switching: before a move that can't be switched back in later, or one with PP Ups, goes
+    CONFIRM_FORGET_1,
+    CONFIRM_FORGET_2,
+    CONFIRM_FORGET_3,
+#endif
+#line 222 // gba-line
 };
 
 static struct BoxPokemon *LearnMove_GetBoxMonFromTaskData(u8 partyIndex)
@@ -322,6 +329,11 @@ s32 LearnMove(const struct MoveLearnUI *ui, u8 taskId)
     case WANT_REPLACE_3:
         if (GetMoveSlotToReplace() == MAX_MON_MOVES)
             return REFUSE_REPLACE_1;
+#ifdef PORTABLE
+        else if (ui->askConfirmationNoFirst != NULL && MoveRelearner_ForgetWarning(boxmon, GetMoveSlotToReplace()) != NULL)
+            return CONFIRM_FORGET_1;
+#endif
+#line 325 // gba-line
         else
             return FORGOT_MOVE_1;
     case LEARNED_MOVE_1:
@@ -359,6 +371,28 @@ s32 LearnMove(const struct MoveLearnUI *ui, u8 taskId)
         gSpecialVar_Result = FALSE;
         ui->printMessage(gText_MoveNotLearned);
         return LEARN_MOVE_END;
+#ifdef PORTABLE
+    case CONFIRM_FORGET_1:
+        // "Thunderbolt can't be switched back in later." / "Thunderbolt's PP Ups will be lost." ... "Forget it anyway?"
+        GetBoxMonNickname(boxmon, gStringVar1);
+        StringCopy(gStringVar2, GetMoveName(GetBoxMonData(boxmon, MON_DATA_MOVE1 + GetMoveSlotToReplace())));
+        ui->printMessage(MoveRelearner_ForgetWarning(boxmon, GetMoveSlotToReplace()));
+        return CONFIRM_FORGET_2;
+    case CONFIRM_FORGET_2:
+        ui->askConfirmationNoFirst();
+        return CONFIRM_FORGET_3;
+    case CONFIRM_FORGET_3:
+        switch (ui->waitConfirmation())
+        {
+        case 0: // Yes
+            return FORGOT_MOVE_1;
+        case 1: // No
+        case MENU_B_PRESSED:
+            return REFUSE_REPLACE_1; // "Stop trying to teach ...?" NO: the list of moves to forget again
+        }
+        return state;
+#endif
+#line 362 // gba-line
     default:
         errorf("Unknown LearnMove state %d\nEnding move learning ...", state);
     case LEARN_MOVE_END:

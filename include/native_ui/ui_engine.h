@@ -228,6 +228,7 @@ struct NativeSummary
     bool8 lockMoves;
     bool8 canRename;            /* A on the info page renames (the game's rule) */
     bool8 canRelearn;           /* START on a move page opens the move relearner */
+    u8 hmCanGo;                 /* bit per move slot: an HM's move that move switching may take out (the HM in the Bag) */
     bool8 ivEvShown;            /* the game shows IVs and EVs: the player's own Pokémon (ShouldShowIvEvPrompt) */
     u8 skillsMode;              /* SUMMARY_SKILLS_MODE_*: A on the skills page turns the IVs and EVs on (IVS) and off */
     bool8 isLucky;              /* a Lucky Pokémon (multiplayer trades) */

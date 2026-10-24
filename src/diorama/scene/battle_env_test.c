@@ -560,6 +560,7 @@ static void Init(void)
  * n<nature>: a personality of that nature too; b<ball>: caught in that ball (breed_check.py's parents).
  * I<hp>.<atk>.<def>.<spatk>.<spdef>.<speed>: each IV (the summary's order; after w), E<...>: each EV in that order,
  * H<mask>: those stats Hyper Trained (bit 0 HP .. bit 5 Speed, the same order) - the summary's IV/EV checks.
+ * h: hatched from an Egg (met at level 0), p<byte>: those PP bonuses (two bits a move slot, PP Ups) - move_switch_check.py.
  */
 static void TestMonStatList(const char *p, int out[NUM_STATS])
 {
@@ -580,7 +581,8 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
     u32 personality = 0x13579BDF, i;
     int gender = -1, item = 0, move = 0, ivs = MAX_PER_STAT_IVS, nature = -1, ball = 0;
     int statIvs[NUM_STATS], statEvs[NUM_STATS], trainedMask = 0;
-    bool shiny = false, nextLevelShort = false, ivList = false, evList = false;
+    bool shiny = false, nextLevelShort = false, ivList = false, evList = false, hatched = false;
+    int ppBonuses = -1;
     /* the summary's order (I, E, H flags) -> MON_DATA_* field offsets (HP, Atk, Def, Speed, Sp. Atk, Sp. Def) */
     static const u8 sSummaryStat[NUM_STATS] = {STAT_HP, STAT_ATK, STAT_DEF, STAT_SPATK, STAT_SPDEF, STAT_SPEED};
 
@@ -610,6 +612,10 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
             TestMonStatList(flags + 1, statEvs), evList = true;
         else if (*flags == 'H')
             trainedMask = atoi(flags + 1);
+        else if (*flags == 'h')
+            hatched = true;
+        else if (*flags == 'p')
+            ppBonuses = atoi(flags + 1);
     }
     for (i = 0; i < 65536 && ((gender >= 0 && GetGenderFromSpeciesAndPersonality(species, personality) != gender)
                              || (nature >= 0 && GetNatureFromPersonality(personality) != (u32)nature)); i++)
@@ -658,6 +664,24 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
             bool32 trained = TRUE;
 
             SetMonData(mon, MON_DATA_HYPER_TRAINED_HP + stat, &trained);
+        }
+    }
+    if (hatched)
+    {
+        u32 metLevel = 0;
+
+        SetMonData(mon, MON_DATA_MET_LEVEL, &metLevel);
+    }
+    if (ppBonuses >= 0)
+    {
+        u8 bonuses = ppBonuses;
+
+        SetMonData(mon, MON_DATA_PP_BONUSES, &bonuses);
+        for (i = 0; i < MAX_MON_MOVES; i++)
+        {
+            u32 pp = CalculatePPWithBonus(GetMonData(mon, MON_DATA_MOVE1 + i), bonuses, i);
+
+            SetMonData(mon, MON_DATA_PP1 + i, &pp);
         }
     }
     if (nextLevelShort && level > 0 && level < MAX_LEVEL)
@@ -1497,6 +1521,28 @@ static void StartTowerFloor(int floor)
                 TowerLegends_ExpCap());
 }
 
+/* PKMN_TEST_SET_FLAGS=<flag>,<flag>...: those event flags set in memory (decimal or 0x hex; move_switch_check.py: a
+ * one-time move tutor used) */
+static void SetUpTestFlags(void)
+{
+    const char *p = getenv("PKMN_TEST_SET_FLAGS");
+
+    while (p != NULL && *p != '\0')
+    {
+        char *end;
+        long flag = strtol(p, &end, 0);
+
+        if (end == p)
+            break;
+        if (flag > 0 && flag < FLAGS_COUNT)
+        {
+            FlagSet(flag);
+            TestLog("Battle env test: flag 0x%lX set", flag);
+        }
+        p = *end == ',' ? end + 1 : end;
+    }
+}
+
 /* PKMN_TEST_BADGES=n and PKMN_TEST_CHAMPION=0/1: the badges and the Hall of Fame flag in memory, for the Tower experience
  * cap's runs (tools/battle_env/tower_check.py --caps) and the field moves' badges (any test kind, StartBattle) */
 static void ApplyTestBadges(void)
@@ -1576,6 +1622,7 @@ static void StartBattle(void)
     SetUpTestBox();
     if (getenv("PKMN_TEST_BADGES") != NULL)
         ApplyTestBadges();
+    SetUpTestFlags();
     SetUpTestDaycare();
     if (s.name[0] != '\0')
     {
