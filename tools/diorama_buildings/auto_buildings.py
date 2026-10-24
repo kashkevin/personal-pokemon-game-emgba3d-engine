@@ -366,7 +366,7 @@ def building_art(map_, cells, ground=None):
     if ground is None:
         ground = ground_of(map_, cells)
     img = art.building_art(x0, y0, w, h, art.ground_tiles(ground), cells=owned,
-                           ground_px=art.ground_pixels(ground))
+                           ground_px=art.ground_pixels(ground), roof_notches=True)
     return (x0, y0, w, h), owned, ground, img
 
 
@@ -404,7 +404,10 @@ def facade_height(img, door_u):
 def north_row(map_, cells, ground):
     """Cells over the building's north edge that the player walks on but the
     drawing paints with the building (the top of a roof seen at 45 degrees):
-    part of its drawing, standing on nothing."""
+    part of its drawing, standing on nothing. Not leaves: the foot of a tree
+    behind the roof (Dewford's houses) is the tree's, and as the roof's top
+    rows it lay along the ridge as a strip of grass (the owner's report of
+    2026-10-24)."""
     art = map_.art
     tops = {}
     for cx, cy in cells:
@@ -417,7 +420,9 @@ def north_row(map_, cells, ground):
         if cy < 0 or map_.blocked(cx, cy) or art.metatile(cx, cy) < vb.NUM_PRIMARY:
             continue
         img = art.building_art(cx, cy, 1, 1, ground_tiles, ground_px=ground_px)
-        if sum(1 for a in img.getchannel("A").getdata() if a >= 128) >= 24:
+        drawn = [p for p in img.getdata() if p[3] >= 128]
+        green = sum(1 for (r, g, b, a) in drawn if g > r + 16 and g > b + 8)
+        if len(drawn) >= 24 and green < LEAVES * len(drawn):
             out.add((cx, cy))
     return out
 

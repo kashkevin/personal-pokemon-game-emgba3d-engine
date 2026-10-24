@@ -124,8 +124,11 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertGreater(len(mountains), 15000)
         self.assertEqual({record["class"] for record in mountains}, {"cliff"})
         self.assertEqual({record["heightQ16"] for record in mountains}, {16})
-        self.assertEqual({record["measuredFlags"] for record in mountains}, {32})
-        self.assertEqual({record["artMode"] for record in mountains}, {"top"})
+        self.assertEqual({record["measuredFlags"] & 32 for record in mountains}, {32})
+        # (a reef in the sea stands on the sea's level: a terrace entry, flag 128)
+        self.assertEqual({record["measuredFlags"] & ~(32 | 128) for record in mountains}, {0})
+        # "cutout": the cell's upper layer draws the rock's edge over ground (mountain_art.outline_cells)
+        self.assertEqual({record["artMode"] for record in mountains}, {"top", "cutout"})
         # The game tags its mountain paths MB_MOUNTAIN_TOP too (the battle background): a cell the
         # player walks on is ground, never mountain art (Route 112's paths stood as little pyramids).
         walkable = [record for layout in self.data["layouts"]
@@ -134,6 +137,40 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertGreater(len(walkable), 2000)
         self.assertEqual({record["class"] for record in walkable}, {"ground"})
         self.assertEqual({record["measuredFlags"] & 32 for record in walkable}, {0})
+
+    def test_repository_rock_masses_reefs_and_terrace_stairs(self):
+        # The owner's report of 2026-10-24. Route 106's mountain: its face and edges (blocked
+        # MB_NORMAL in the rock's palette) are rock of the same mass, not flat ground beside it.
+        layouts = {row["symbol"]: row for row in self.data["layouts"]}
+        route106 = layouts["LAYOUT_ROUTE106"]
+        records = {record["cellOffset"]: record for record in route106["terrainRecords"]
+                   if record["mapGroup"] == 0xFF}
+        width = route106["width"]
+        faces = [record for record in records.values() if record["expectedMetatile"] in (116, 124, 125)]
+        self.assertTrue(faces)
+        self.assertTrue(all(record["class"] == "cliff" and record["measuredFlags"] & 32
+                            for record in faces))
+        # A reef in the sea (9..11, 2..4): its walkable top no walk reaches and its blocked edge are
+        # one mass standing on the sea's level (-2), its edges the rock's outline.
+        reef = [records[y * width + x] for y in range(2, 5) for x in range(9, 12)]
+        self.assertTrue(all(record["class"] == "cliff" and record["measuredFlags"] & 32
+                            for record in reef))
+        self.assertEqual({record["groundQ16"] for record in reef}, {-2})
+        self.assertEqual(records[2 * width + 9]["artMode"], "cutout")
+        # General's stairs between two terrace levels are steps up from the lower level.
+        route104 = layouts["LAYOUT_ROUTE104"]
+        stairs = {record["cellOffset"]: record for record in route104["terrainRecords"]
+                  if record["mapGroup"] == 0xFF}
+        for x in (16, 17):
+            record = stairs[54 * route104["width"] + x]
+            self.assertEqual((record["shape"], record["archetype"], record["groundQ16"],
+                              record["topQ16"]), ("stairs", "stairs-n", -16, 0))
+        # A cave's rock is a mass as a mountain's is.
+        granite = layouts["LAYOUT_GRANITE_CAVE_1F"]
+        rock = [record for record in granite["terrainRecords"]
+                if record["source"] == "context:cave-rock" and record["class"] == "cliff"]
+        self.assertTrue(rock)
+        self.assertTrue(all(record["measuredFlags"] & 32 for record in rock))
 
     def test_repository_cave_rock_stands_and_its_exits_stay_open(self):
         layouts = {row["symbol"]: row for row in self.data["layouts"]}

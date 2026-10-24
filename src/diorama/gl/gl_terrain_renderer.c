@@ -872,12 +872,29 @@ static void DropMountainSpecks(uint16_t rows[DIORAMA_VOXELS_PER_CELL])
     }
 }
 
+/* How a mountain's rock rises from its foot (ShapeRockMasses), in pixels of
+ * the cell: on its south, where the GBA draws a mountain's face, over the
+ * whole cell; elsewhere, where it draws the rock's outline seen from above, a
+ * few pixels. The relief of a cell's drawing stands at most ROCK_MASS_RELIEF
+ * voxels over the rock (a crag), ROCK_MASS_CROWN_RELIEF (a tree's crown: such
+ * a cell's rockMass is ROCK_MASS_CROWN). */
+#define ROCK_MASS_FACE 16
+#define ROCK_MASS_EDGE 5
+#define ROCK_MASS_RELIEF 6
+#define ROCK_MASS_CROWN_RELIEF 12
+#define ROCK_MASS_CROWN 2
+/* A cell whose upper layer draws the rock's edge over ground (the rules' art
+ * mode "cutout"): its heights hold each pixel's distance into the outline. */
+#define ROCK_MASS_OUTLINE 3
+
 static void BuildMountainArtMask(const struct DioramaSceneSnapshot *snapshot,
                                  const struct DioramaCellSnapshot *source,
+                                 bool rock, bool outline,
                                  uint8_t terraceProfile,
                                  uint16_t rows[DIORAMA_VOXELS_PER_CELL],
                                  uint8_t heights[DIORAMA_VOXELS_PER_CELL
-                                               * DIORAMA_VOXELS_PER_CELL])
+                                               * DIORAMA_VOXELS_PER_CELL],
+                                 uint8_t *rockMass)
 {
     uint32_t pixels[DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL];
     uint16_t remaining[DIORAMA_VOXELS_PER_CELL];
@@ -886,10 +903,10 @@ static void BuildMountainArtMask(const struct DioramaSceneSnapshot *snapshot,
     unsigned depth = 0;
     unsigned maxDepth = 0;
     int row;
-    bool rock;
     bool rounded = false;
     struct DioramaAtlasArt art = DioramaAtlas_CellArt(snapshot, source);
 
+    *rockMass = false;
     DioramaMetatile_ComposeLayer(art.tileGraphics, source->tileEntries,
                                  art.unfadedPalette, 1, pixels);
     DioramaMetatile_BuildAlphaMask(pixels, rows);
@@ -904,14 +921,15 @@ static void BuildMountainArtMask(const struct DioramaSceneSnapshot *snapshot,
         return;
     }
 
-    /* A mountain's rock (MB_MOUNTAIN_TOP, or the secondary tileset's rock the
-     * rules joined to it; only cells the player cannot walk on) stands as solid
-     * rock a cell high, so a mountain is one mass: each cell's drawing eroded
-     * into a little stepped pyramid of its own made rows of spikes (the owner's
-     * report, 2026-10-23). Something drawn over the ground on the cell's upper
-     * layer keeps its outline: rock stands straight up from it, a green thing
-     * (a mountain tree) is rounded from its edge to its middle. */
-    rock = source->metatileId >= NUM_METATILES_IN_PRIMARY || source->behavior == MB_MOUNTAIN_TOP;
+    /* A mountain's rock (a cliff: MB_MOUNTAIN_TOP, or the rock the rules joined
+     * to it; only cells the player cannot walk on) is part of one mass with the rock
+     * round it (ShapeRockMasses). Here only the relief its drawing gives it, 0
+     * to a cell: what its upper layer draws over the rock (a crag, a boulder)
+     * a little pyramid from its outline in, a green thing (a mountain tree) a
+     * rounded crown; a cell drawn whole on one layer is plain rock. A cell of
+     * solid rock per pixel of the drawing made a mountain a field of flat
+     * cubes and walls (the owner's report, 2026-10-24); each cell's own
+     * pyramid before that, rows of spikes (2026-10-23). */
     if (rock)
     {
         uint32_t red = 0;
@@ -919,6 +937,7 @@ static void BuildMountainArtMask(const struct DioramaSceneSnapshot *snapshot,
         uint32_t blue = 0;
         unsigned kept = 0;
 
+        *rockMass = true;
         if (visible != 0 && visible != DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL)
             DropMountainSpecks(rows);
         for (int pixel = 0; pixel < DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL; pixel++)
@@ -929,27 +948,50 @@ static void BuildMountainArtMask(const struct DioramaSceneSnapshot *snapshot,
                 blue += pixels[pixel] & 0xFF;
                 kept++;
             }
+        memset(heights, 0, DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL);
         if (kept == 0 || kept == DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL)
+            return;
+        if (outline)
         {
-            for (row = 0; row < DIORAMA_VOXELS_PER_CELL; row++)
-                rows[row] = 0xFFFF;
-            memset(heights, DIORAMA_VOXELS_PER_CELL,
-                   DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL);
+            /* the rock's edge over the ground (Route 106's rim, a reef in the
+             * sea): each pixel of the outline its distance in from the ground
+             * beside it in the cell (a chamfer, in pixels), the ground 0 */
+            uint8_t distance[DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL];
+            int pixel;
+
+            for (pixel = 0; pixel < DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL; pixel++)
+                distance[pixel] = (rows[pixel / DIORAMA_VOXELS_PER_CELL]
+                                   & (1u << (pixel % DIORAMA_VOXELS_PER_CELL))) ? 255 : 0;
+            for (int pass = 0; pass < 2; pass++)
+                for (int step = 0; step < DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL; step++)
+                {
+                    int at = pass == 0 ? step : DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL - 1 - step;
+                    int x = at % DIORAMA_VOXELS_PER_CELL;
+                    int y = at / DIORAMA_VOXELS_PER_CELL;
+                    int dx = pass == 0 ? -1 : 1;
+                    int dy = pass == 0 ? -1 : 1;
+
+                    if (distance[at] == 0)
+                        continue;
+                    if (x + dx >= 0 && x + dx < DIORAMA_VOXELS_PER_CELL
+                     && distance[at + dx] + 1 < distance[at])
+                        distance[at] = distance[at + dx] + 1;
+                    if (y + dy >= 0 && y + dy < DIORAMA_VOXELS_PER_CELL
+                     && distance[at + dy * DIORAMA_VOXELS_PER_CELL] + 1 < distance[at])
+                        distance[at] = distance[at + dy * DIORAMA_VOXELS_PER_CELL] + 1;
+                }
+            for (pixel = 0; pixel < DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL; pixel++)
+                heights[pixel] = distance[pixel] > DIORAMA_VOXELS_PER_CELL
+                               ? DIORAMA_VOXELS_PER_CELL : distance[pixel];
+            *rockMass = ROCK_MASS_OUTLINE;
             return;
         }
-        if (green * 10 > red * 11 && green > blue)
-            rounded = true;
-        else
-        {
-            for (int pixel = 0; pixel < DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL; pixel++)
-                heights[pixel] = (rows[pixel / DIORAMA_VOXELS_PER_CELL]
-                                  & (1u << (pixel % DIORAMA_VOXELS_PER_CELL)))
-                               ? DIORAMA_VOXELS_PER_CELL : 0;
-            return;
-        }
+        rounded = green * 10 > red * 11 && green > blue;
+        if (rounded)
+            *rockMass = ROCK_MASS_CROWN;
     }
 
-    if (!rounded && (visible == 0 || visible == DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL))
+    if (!rock && (visible == 0 || visible == DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL))
     {
         DioramaMetatile_Compose(art.tileGraphics, source->tileEntries,
                                 art.unfadedPalette, pixels);
@@ -1003,10 +1045,125 @@ static void BuildMountainArtMask(const struct DioramaSceneSnapshot *snapshot,
                                  / (span * span);
             continue;
         }
+        if (rock)
+        {
+            /* a crag: from its outline up to its middle */
+            heights[pixel] = pixelDepth * DIORAMA_VOXELS_PER_CELL / maxDepth;
+            continue;
+        }
         heights[pixel] = maxDepth == 1 ? DIORAMA_VOXELS_PER_CELL
             : 4 + (pixelDepth - 1) * (DIORAMA_VOXELS_PER_CELL - 4)
                 / (maxDepth - 1);
     }
+}
+
+
+static bool RockMassNeighbor(const struct DioramaTerrainChunkInput *input, int x, int y,
+                             const struct DioramaTerrainCell *cell)
+{
+    const struct DioramaTerrainCell *other;
+
+    if (x < 0 || y < 0 || x >= DIORAMA_TERRAIN_INPUT_SIZE || y >= DIORAMA_TERRAIN_INPUT_SIZE)
+        return false;   /* past the chunk's halo: lower is the safe guess (a face drawn twice, never a hole) */
+    other = &input->cells[y * DIORAMA_TERRAIN_INPUT_SIZE + x];
+    return other->present && other->rockMass && other->groundHeight == cell->groundHeight;
+}
+
+static float RockMassEase(float t)
+{
+    if (t >= 1.0f)
+        return 1.0f;
+    return t * t * (3.0f - 2.0f * t);
+}
+
+/* A mountain is one mass of rock (the owner's report of 2026-10-24: Route 106's
+ * mountain a field of flat-topped cubes at uneven heights, Route 112's rock a
+ * maze of walls). Each of its cells stands its record's height over its
+ * ground, rising to it from the mass's foot: over the whole cell where the
+ * mass ends to the south (the face the GBA draws there: the drawing lies on
+ * the slope), within ROCK_MASS_EDGE pixels elsewhere, rounded at the corners;
+ * inside the mass it runs on level from cell to cell. The cell's own relief
+ * (BuildMountainArtMask) stands on it. A cell's heights depend only on it and
+ * its eight neighbours, so a chunk's halo is all it needs. */
+static void ShapeRockMasses(struct DioramaTerrainChunkInput *input)
+{
+    for (int y = 0; y < DIORAMA_TERRAIN_INPUT_SIZE; y++)
+        for (int x = 0; x < DIORAMA_TERRAIN_INPUT_SIZE; x++)
+        {
+            struct DioramaTerrainCell *cell = &input->cells[y * DIORAMA_TERRAIN_INPUT_SIZE + x];
+            bool north, south, east, west, northEast, northWest, southEast, southWest;
+            float rise;
+
+            if (!cell->present || !cell->rockMass)
+                continue;
+            north = RockMassNeighbor(input, x, y - 1, cell);
+            south = RockMassNeighbor(input, x, y + 1, cell);
+            east = RockMassNeighbor(input, x + 1, y, cell);
+            west = RockMassNeighbor(input, x - 1, y, cell);
+            northEast = RockMassNeighbor(input, x + 1, y - 1, cell);
+            northWest = RockMassNeighbor(input, x - 1, y - 1, cell);
+            southEast = RockMassNeighbor(input, x + 1, y + 1, cell);
+            southWest = RockMassNeighbor(input, x - 1, y + 1, cell);
+            rise = (cell->visualHeight - cell->groundHeight) * DIORAMA_VOXELS_PER_CELL;
+            if (rise < 1.0f)
+                rise = DIORAMA_VOXELS_PER_CELL;
+            for (int pixelY = 0; pixelY < DIORAMA_VOXELS_PER_CELL; pixelY++)
+                for (int pixelX = 0; pixelX < DIORAMA_VOXELS_PER_CELL; pixelX++)
+                {
+                    /* distances to the mass's foot, each as a share of how far
+                     * the rock takes to rise on that side */
+                    float toNorth = (pixelY + 0.5f) / ROCK_MASS_EDGE;
+                    float toSouth = (DIORAMA_VOXELS_PER_CELL - pixelY - 0.5f) / ROCK_MASS_FACE;
+                    float toWest = (pixelX + 0.5f) / ROCK_MASS_EDGE;
+                    float toEast = (DIORAMA_VOXELS_PER_CELL - pixelX - 0.5f) / ROCK_MASS_EDGE;
+                    float t = 1.0f;
+                    float level;
+                    int pixel = pixelY * DIORAMA_VOXELS_PER_CELL + pixelX;
+
+                    if (!north && toNorth < t) t = toNorth;
+                    if (!south && toSouth < t) t = toSouth;
+                    if (!west && toWest < t) t = toWest;
+                    if (!east && toEast < t) t = toEast;
+                    if (north && east && !northEast)
+                    {
+                        float corner = sqrtf(toNorth * toNorth + toEast * toEast);
+                        if (corner < t) t = corner;
+                    }
+                    if (north && west && !northWest)
+                    {
+                        float corner = sqrtf(toNorth * toNorth + toWest * toWest);
+                        if (corner < t) t = corner;
+                    }
+                    if (south && east && !southEast)
+                    {
+                        float corner = sqrtf(toSouth * toSouth + toEast * toEast);
+                        if (corner < t) t = corner;
+                    }
+                    if (south && west && !southWest)
+                    {
+                        float corner = sqrtf(toSouth * toSouth + toWest * toWest);
+                        if (corner < t) t = corner;
+                    }
+                    if (cell->rockMass == ROCK_MASS_OUTLINE)
+                    {
+                        /* the ground beside the outline is the mass's foot too */
+                        float inside = cell->mountainHeight[pixel] == 0 ? 0.0f
+                                     : (cell->mountainHeight[pixel] - 0.5f) / ROCK_MASS_EDGE;
+
+                        if (inside < t)
+                            t = inside;
+                        level = RockMassEase(t) * rise;
+                    }
+                    else
+                        level = RockMassEase(t)
+                              * (rise + cell->mountainHeight[pixel]
+                                 * (cell->rockMass == ROCK_MASS_CROWN ? ROCK_MASS_CROWN_RELIEF
+                                                                     : ROCK_MASS_RELIEF)
+                                 / (float)DIORAMA_VOXELS_PER_CELL);
+                    cell->mountainHeight[pixel] = level < 1.0f ? (level > 0.25f ? 1 : 0)
+                                                : level > 255.0f ? 255 : (uint8_t)(level + 0.5f);
+                }
+        }
 }
 
 static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
@@ -1194,9 +1351,11 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
                         cell->foregroundAlpha[face] = 0xFFFF;
             }
             if (cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART)
-                BuildMountainArtMask(snapshot, source, cell->terraceProfile,
+                BuildMountainArtMask(snapshot, source, cell->shape == DIORAMA_SHAPE_CLIFF,
+                                     resolvedCells[gridIndex].artMode == DIORAMA_ART_CUTOUT,
+                                     cell->terraceProfile,
                                      cell->foregroundAlpha,
-                                     cell->mountainHeight);
+                                     cell->mountainHeight, &cell->rockMass);
             if (cell->shape == DIORAMA_SHAPE_LEDGE)
             {
                 DioramaAtlas_GetForegroundAlphaMask(DioramaAtlas_CellSlot(source),
@@ -1231,13 +1390,12 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
             }
             else if (cell->shape == DIORAMA_SHAPE_CLIFF
                   && (cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART)
-                  && cell->terraceProfile == DIORAMA_TERRACE_NONE
-                  && (source->metatileId >= NUM_METATILES_IN_PRIMARY
-                   || source->behavior == MB_MOUNTAIN_TOP))
+                  && cell->terraceProfile == DIORAMA_TERRACE_NONE)
             {
-                /* A mountain's rock (BuildMountainArtMask): the whole drawing on
-                 * its top and its sides, the rock as the GBA shows it from above
-                 * (its lower layer alone is the ground under it). */
+                /* A mountain's rock (BuildMountainArtMask, ShapeRockMasses): the
+                 * whole drawing on its top and its sides, the rock as the GBA
+                 * shows it from above (its lower layer alone is the ground under
+                 * it). */
                 for (face = 0; face < DIORAMA_MATERIAL_FACE_COUNT; face++)
                     SetTerrainMaterial(&cell->materials[face], source->metatileId,
                                        DIORAMA_MATERIAL_FULL);
@@ -1294,6 +1452,7 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
                 hasInterior = true;
         }
     }
+    ShapeRockMasses(input);
     for (y = 0; y < DIORAMA_TERRAIN_INPUT_SIZE; y++)
         for (x = 0; x < DIORAMA_TERRAIN_INPUT_SIZE; x++)
         {

@@ -160,7 +160,8 @@ class LayoutArt:
             out.append(grid)
         return out
 
-    def building_art(self, x0, y0, w, h, ground, cells=None, ground_px=None, upper=False):
+    def building_art(self, x0, y0, w, h, ground, cells=None, ground_px=None, upper=False,
+                     roof_notches=False):
         """RGBA image of the cells, with every ground pixel transparent.
 
         A bottom-layer 8x8 block that is one of the ground's is ground whole.
@@ -170,10 +171,20 @@ class LayoutArt:
         the same place in its cell is ground too. `cells` limits the image to
         the (cx, cy) cells that belong to the object. With `upper`, only the
         upper layer: an object drawn whole on it (a railing) over a bottom
-        layer that is the map's ground, edges and all.
+        layer that is the map's ground, edges and all. With `roof_notches`,
+        the top half of a column's top cell that its upper layer all but
+        covers (a roof's ridge, drawn notched over the ground) shows nothing
+        of its bottom layer: the gaps are not the building's, whatever ground
+        is drawn in them (Dewford's houses: the grass under a tree's foot, which
+        lay along a hipped roof's ridge; the owner's report of 2026-10-24).
         """
         img = Image.new("RGBA", (w * 16, h * 16), (0, 0, 0, 0))
         px = img.load()
+        tops = {}
+        for cy in range(h):
+            for cx in range(w):
+                if cells is None or (cx, cy) in cells:
+                    tops.setdefault(cx, cy)
         for cy in range(h):
             for cx in range(w):
                 if cells is not None and (cx, cy) not in cells:
@@ -182,6 +193,9 @@ class LayoutArt:
                 low, high = self.subtiles(m, 0), self.subtiles(m, 1)
                 for q in range(4):
                     is_ground = tuple(rgb for rgb, _ in low[q]) in ground
+                    if (roof_notches and q < 2 and tops.get(cx) == cy
+                            and sum(1 for _, i in high[q] if i) >= 48):
+                        is_ground = True
                     for k in range(64):
                         lx, ly = (q & 1) * 8 + k % 8, (q >> 1) * 8 + k // 8
                         X, Y = cx * 16 + lx, cy * 16 + ly

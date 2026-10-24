@@ -334,3 +334,48 @@ tilesets are unchanged.
   keeps the top level. A hipped roof's ridge is its cap alone, a strip of the
   drawn ridge's top where the slopes meet: the 3DS port stood it up as a box
   whose front was the drawn ridge, which read as a block lying on the roof.
+
+## Mountains, caves, cliffs, stairs and roofs (the owner's report, 2026-10-24)
+
+* Rock masses (`gl_terrain_renderer.c` `BuildMountainArtMask`,
+  `ShapeRockMasses`): a mountain's rock stood as a column a cell high per pixel
+  of its drawing, so Route 106's mountain was a field of flat-topped cubes and
+  Route 112's rock a maze of walls. Every mountain-art cliff is now one mass
+  with the rock round it: it stands its record's height over its ground and
+  rises to it from the mass's foot - over the whole cell where the mass ends to
+  the south (the face the GBA draws there, its drawing lying on the slope), in
+  `ROCK_MASS_EDGE` pixels on the other sides, rounded at the corners. What a
+  cell's upper layer draws on the rock is relief on the mass (a crag a few
+  voxels, a mountain tree's crown more); where the upper layer draws the rock's
+  edge over ground in another palette (`mountain_art.py` `outline_cells`, art
+  mode "cutout"), the mass follows that outline. A cell's heights depend only
+  on it and its eight neighbours, the chunk's halo.
+* The rest of a mountain (`mountain_art.py` `mass_extension`): the blocked
+  MB_NORMAL cells joined to a mountain's rock and drawn in its palette (Route
+  106's face and edges, the cave mouth's top, a reef's rock round a
+  MB_MOUNTAIN_TOP cell in the sea) are rock of the same mass; they lay flat
+  beside rock a cell high. The sea's rocks and boulders (`voxel_props.py`, their
+  own models) and a terrace's course are left out (`compile_rules.py`
+  `_prop_cells`). A reef's walkable top that no walk reaches
+  (`mountain_art.py` `enclosed_tops`; none with an event on it) is its rock
+  too, and a piece of rock whose walkable neighbours are all the sea stands on
+  the sea's level (`compile_rules.py` `_reefs_at_sea_level`), lowered with the
+  sea at run time, all its cells together (`buildings.c` `LevelReefs`): Route
+  106's reefs were stacks of cubes, then a dome on a plinth of their own edge.
+* Caves: a cave tileset's rock (the pins and `_cave_rock_cells`) is a mass as a
+  mountain's is, so a raised floor's edge is a slope with the face drawn on it,
+  not a block a cell square (Granite Cave's stepped walls).
+* Faces (`terrain_mesh.c` `FaceMaterial`): on a cell drawn as a height per
+  pixel (a rock mass, a terrace's course) each column's side is its own
+  pixel's colour, and its steps are shaded nearly as its tops: the whole
+  drawing squeezed onto every step's side drew Route 104's cliffs as walls of
+  stripes.
+* Stairs (`compile_rules.py` `_terrain_record`): General's stairs between two
+  terrace levels (175, 207) lay flat on the lower level with the upper level's
+  edge standing over them as a wall (Mossdeep, Route 104, Ever Grande); they
+  are steps from the lower level up to the upper one.
+* Roofs (`auto_buildings.py` `north_row`, `voxel_building.py`
+  `building_art(roof_notches=True)`): the foot of a tree behind a house was
+  taken as the top of its roof, and the grass under the notches of a ridge's
+  top row as the roof's own colour, so Dewford's hipped roofs had a strip of
+  grass along the ridge.

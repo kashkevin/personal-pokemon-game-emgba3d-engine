@@ -825,6 +825,66 @@ static void LowerCellTo(struct DioramaResolvedCell *r, float level)
     }
 }
 
+/* A mountain's rock standing in the sea alone (compile_rules.py
+ * _reefs_at_sea_level: its ground the sea's nominal level, REEF_GROUND): each
+ * piece of it on the level of the water round it, all its cells together, so
+ * it stays one mass (gl_terrain_renderer.c ShapeRockMasses) instead of
+ * standing on a plinth of its own edge's drawing over the sea lowered past it
+ * (Route 106's reefs, the owner's report of 2026-10-24). */
+#define REEF_GROUND (-2.0f / 16.0f)
+
+static bool IsReefCell(const struct DioramaResolvedCell *r)
+{
+    return r->shape == DIORAMA_SHAPE_CLIFF && (r->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART)
+        && r->groundHeight > REEF_GROUND - 0.001f && r->groundHeight < REEF_GROUND + 0.001f;
+}
+
+static void LevelReefs(struct DioramaResolvedCell *resolved, unsigned count, const uint8_t *inWater)
+{
+    static const int step[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+    static uint8_t seen[DIORAMA_MAX_VISIBLE_CELLS];
+    static uint16_t piece[DIORAMA_MAX_VISIBLE_CELLS];
+    unsigned i;
+
+    memset(seen, 0, count < DIORAMA_MAX_VISIBLE_CELLS ? count : DIORAMA_MAX_VISIBLE_CELLS);
+    for (i = 0; i < count && i < DIORAMA_MAX_VISIBLE_CELLS; i++)
+    {
+        unsigned size = 0, read = 0;
+        float level = 1.0e9f;
+
+        if (seen[i] || !IsReefCell(&resolved[i]))
+            continue;
+        seen[i] = 1;
+        piece[size++] = (uint16_t)i;
+        while (read < size)
+        {
+            int at = piece[read++];
+            int gx = at % DIORAMA_GRID_WIDTH, gy = at / DIORAMA_GRID_WIDTH;
+
+            for (int d = 0; d < 4; d++)
+            {
+                int nx = gx + step[d][0], ny = gy + step[d][1], n;
+
+                if (nx < 0 || ny < 0 || nx >= DIORAMA_GRID_WIDTH || ny >= DIORAMA_GRID_HEIGHT)
+                    continue;
+                n = ny * DIORAMA_GRID_WIDTH + nx;
+                if ((unsigned)n >= count)
+                    continue;
+                if (inWater[n] == 1 && resolved[n].groundHeight < level)
+                    level = resolved[n].groundHeight;
+                if (!seen[n] && IsReefCell(&resolved[n]))
+                {
+                    seen[n] = 1;
+                    piece[size++] = (uint16_t)n;
+                }
+            }
+        }
+        if (level < 1.0e8f)
+            for (read = 0; read < size; read++)
+                LowerCellTo(&resolved[piece[read]], level);
+    }
+}
+
 static void LevelWaterBodies(const struct DioramaSceneSnapshot *snapshot,
                              struct DioramaResolvedCell *resolved, unsigned count,
                              const uint8_t *inWater)
@@ -863,6 +923,7 @@ static void LevelWaterBodies(const struct DioramaSceneSnapshot *snapshot,
             if (level < 1.0e8f)
                 LowerCellTo(&resolved[i], level);
         }
+    LevelReefs(resolved, count, inWater);
 }
 
 /*

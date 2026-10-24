@@ -3,8 +3,9 @@
 import unittest
 from types import SimpleNamespace
 
-from mountain_art import (MountainArtError, detect_layout, mountain_art_mask,
-                          mountain_heightmap, validate_layout)
+from mountain_art import (MountainArtError, detect_layout, enclosed_tops, mass_extension,
+                          mountain_art_mask, mountain_heightmap, outline_cells,
+                          validate_layout)
 
 
 def pixel(color=None, visible=True):
@@ -80,6 +81,70 @@ class MountainArtTests(unittest.TestCase):
                        "layers": (unrelated, foreground, unrelated)},)
         self.assertEqual(detect_layout(disconnected, summaries, 4, 1),
                          frozenset((0, 1, 2)))
+
+    def test_mass_takes_the_blocked_rock_round_a_mountain_in_its_palette(self):
+        # Route 106: the mountain's MB_MOUNTAIN_TOP rock, then its face and edges
+        # (MB_NORMAL, the same palette, other tiles) - one mass; a cell in another
+        # palette (a tree), a walkable one, one an object stands on (`exclude`)
+        # and one past them are not.
+        def drawn(palette):
+            full = tuple(SimpleNamespace(rgba=(2, 2, 2, 255), visible=True,
+                                         source=SimpleNamespace(tile=palette * 16, palette=palette))
+                         for _ in range(256))
+            return {"resolved": True, "layers": (full, tuple(pixel(visible=False)
+                                                             for _ in range(256)), full)}
+
+        cells = ({"behavior": "MB_MOUNTAIN_TOP", "collision": 1},
+                 {"behavior": "MB_NORMAL", "collision": 1},
+                 {"behavior": "MB_NORMAL", "collision": 1},
+                 {"behavior": "MB_NORMAL", "collision": 1},
+                 {"behavior": "MB_NORMAL", "collision": 1},
+                 {"behavior": "MB_NORMAL", "collision": 0},
+                 {"behavior": "MB_NORMAL", "collision": 1})
+        summaries = (drawn(3), drawn(3), drawn(3), drawn(2), drawn(3), drawn(3), drawn(3))
+        self.assertEqual(mass_extension(cells, summaries, 7, 1, frozenset((0,))),
+                         frozenset((1, 2)))
+        self.assertEqual(mass_extension(cells, summaries, 7, 1, frozenset((0,)),
+                                        exclude=frozenset((2,))), frozenset((1,)))
+        # no MB_MOUNTAIN_TOP rock, no mountain to extend
+        self.assertEqual(mass_extension(({"behavior": "MB_NORMAL", "collision": 1},) * 2,
+                                        (drawn(3),) * 2, 2, 1, frozenset((0,))), frozenset())
+
+
+    def test_a_reef_is_one_mass_with_its_closed_in_top(self):
+        # Route 106's reefs: a walkable MB_MOUNTAIN_TOP middle no walk reaches,
+        # closed in by blocked water drawn with the rock; one with an event on
+        # it, or open to the sea, is left walkable.
+        reef = ({"behavior": "MB_OCEAN_WATER", "collision": 1},
+                {"behavior": "MB_MOUNTAIN_TOP", "collision": 1},
+                {"behavior": "MB_OCEAN_WATER", "collision": 1},
+                {"behavior": "MB_NORMAL", "collision": 1},
+                {"behavior": "MB_MOUNTAIN_TOP", "collision": 0},
+                {"behavior": "MB_NORMAL", "collision": 1},
+                {"behavior": "MB_OCEAN_WATER", "collision": 1},
+                {"behavior": "MB_NORMAL", "collision": 1},
+                {"behavior": "MB_OCEAN_WATER", "collision": 1})
+        self.assertEqual(enclosed_tops(reef, 3, 3), frozenset((4,)))
+        self.assertEqual(enclosed_tops(reef, 3, 3, events=frozenset((4,))), frozenset())
+        opened = reef[:7] + ({"behavior": "MB_OCEAN_WATER", "collision": 0},) + reef[8:]
+        self.assertEqual(enclosed_tops(opened, 3, 3), frozenset())
+
+        def drawn(upper):
+            # the sea on the lower layer, the rock (palette 3) on the upper
+            lower = tuple(SimpleNamespace(rgba=(1, 1, 1, 255), visible=True,
+                                          source=SimpleNamespace(tile=1, palette=4))
+                          for _ in range(256))
+            top = tuple(SimpleNamespace(rgba=(2, 2, 2, 255), visible=index < upper,
+                                        source=SimpleNamespace(tile=2, palette=3))
+                        for index in range(256))
+            composed = tuple(t if t.visible else b for t, b in zip(top, lower))
+            return {"resolved": True, "layers": (lower, top, composed)}
+
+        summaries = tuple(drawn(120 if index % 2 == 0 else 250) for index in range(9))
+        self.assertEqual(mass_extension(reef, summaries, 3, 3, frozenset((1, 4))),
+                         frozenset((0, 2, 3, 5, 6, 7, 8)))
+        # the edges draw the rock over the sea: their outline is the rock
+        self.assertEqual(outline_cells(summaries, frozenset((0, 1))), frozenset((0, 1)))
 
 
 if __name__ == "__main__":

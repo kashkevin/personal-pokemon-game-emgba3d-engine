@@ -103,6 +103,7 @@ struct DioramaTerrainCell
     uint8_t voidKind;
     uint8_t treeHullReady;
     uint8_t treeMaskDirect;
+    uint8_t rockMass;   /* a cell of a mountain's rock (gl_terrain_renderer.c ShapeRockMasses) */
     uint8_t southFacadeCount;
     uint8_t measuredAxis;
     uint16_t measuredExtentBands;

@@ -334,6 +334,7 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
         hash = HashByte(hash, cell->structureHeight);
         hash = HashByte(hash, cell->treeHullReady);
         hash = HashByte(hash, cell->treeMaskDirect);
+        hash = HashByte(hash, cell->rockMass);
         hash = HashByte(hash, cell->structureRoofRows);
         hash = HashByte(hash, cell->structureLocalX);
         hash = HashByte(hash, cell->structureLocalY);
@@ -600,11 +601,17 @@ static bool BuildOccupancy(const struct DioramaTerrainChunkInput *input,
                     {
                         bool descending = cell->archetype >= DIORAMA_ARCHETYPE_STAIRS_DOWN_N
                                        && cell->archetype <= DIORAMA_ARCHETYPE_STAIRS_DOWN_W;
+                        int16_t stairGround = HeightToVoxel(cell->groundHeight);
+
                         top = StairTop(cell, pixelX, pixelY);
+                        /* stairs up from a terrace's lower level stand on it,
+                         * a voxel under it as the ground there is (from -1
+                         * they were no column at all: a hole where they are
+                         * drawn) */
                         bottom = descending
                                ? HeightToVoxel(cell->groundHeight -
                                      (cell->featureHeight != 0.0f ? cell->featureHeight : 1.0f)) - 1
-                               : -1;
+                               : (stairGround > 0 ? -1 : stairGround - 1);
                         if (!AppendSpan(&count, cell, cellIndex, pixelX, pixelY, 0, bottom, top))
                             return false;
                     }
@@ -1972,6 +1979,43 @@ static void FaceMaterial(const struct DioramaTerrainCell *cell, uint8_t surface,
     output->u1 = source->u0 + (source->u1 - source->u0) * (uMax - inset);
     output->v0 = source->v0 + (source->v1 - source->v0) * (vMin + inset);
     output->v1 = source->v0 + (source->v1 - source->v0) * (vMax - inset);
+    if (face->axis != 1 && (cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART)
+     && source->rotation == 0 && source->flags == 0)
+    {
+        /* A cell drawn as a height per pixel (a mountain's rock, a terrace's
+         * course): the side of each pixel's column is that pixel's colour, so
+         * a slope of such columns shows the drawing laid on it. The whole
+         * drawing squeezed onto each column's side drew a terrace's face as
+         * bands of stripes (Route 104's cliffs, the owner's report of
+         * 2026-10-24). */
+        int32_t local = face->plane - (face->axis == 0 ? sourcePixelX : sourcePixelZ);
+        int32_t column = face->sign > 0 ? local - 1 : local;
+        float fixed;
+
+        if (column < 0)
+            column = 0;
+        if (column >= DIORAMA_VOXELS_PER_CELL)
+            column = DIORAMA_VOXELS_PER_CELL - 1;
+        fixed = (column + 0.5f) / DIORAMA_VOXELS_PER_CELL;
+        if (face->axis == 2)
+        {
+            /* a north or south side: its row, the columns along it */
+            output->v0 = source->v0 + (source->v1 - source->v0) * fixed;
+            output->v1 = output->v0;
+        }
+        else
+        {
+            /* an east or west side: its column, the rows along it (turned:
+             * AppendQuad's v runs from its south end to its north end) */
+            output->rotation = 1;
+            output->u0 = source->u0 + (source->u1 - source->u0) * fixed;
+            output->u1 = output->u0;
+            output->v0 = source->v0 + (source->v1 - source->v0)
+                       * ((face->uMax - sourcePixelZ) / (float)DIORAMA_VOXELS_PER_CELL - inset);
+            output->v1 = source->v0 + (source->v1 - source->v0)
+                       * ((face->uMin - sourcePixelZ) / (float)DIORAMA_VOXELS_PER_CELL + inset);
+        }
+    }
 }
 
 bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
@@ -2123,6 +2167,11 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
             }
             shade = face->axis == 1 ? 1.0f
                   : (face->axis == 2 && face->sign < 0 ? 0.82f : 0.68f);
+            /* a height per pixel (mountain rock, a terrace's course): a slope's
+             * steps are shaded nearly as its tops, so it reads as one surface,
+             * not bands of light and dark */
+            if (face->axis != 1 && (cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART))
+                shade = face->axis == 2 && face->sign < 0 ? 0.92f : 0.86f;
             if (surface == 1 && face->axis == 1 && face->sign > 0
              && cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL
              && cell->treeHullReady && cell->structureWidth == 2
