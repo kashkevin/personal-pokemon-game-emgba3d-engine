@@ -2,6 +2,8 @@
 #define GUARD_PLATFORM_GAME_SPEED_H
 
 // Battle speed (PC only; the owner's request of 2026-10-24, "make battles as fast as possible").
+// Later the same day the owner asked for it out ("why are battles fastforwarded take that out"): battles between players
+// run at normal speed again by default (GAME_SPEED_DEFAULT 1); the mechanism stays for a settings file's battleSpeed=.
 //
 // While a battle between players is on, the window loop runs the game's frames this many times as fast. Everything the
 // battle shows (animations, HP bars, text) finishes sooner, and the game answers the host's battle commands sooner too
@@ -16,7 +18,7 @@
 #include <stddef.h>
 
 #define GAME_SPEED_MAX 4
-#define GAME_SPEED_DEFAULT 4
+#define GAME_SPEED_DEFAULT 1   // normal speed: the owner asked for no fast-forward (2026-10-24); battleSpeed= in the settings file still sets one
 #define GAME_SPEED_FADE_MAX 512   // floats of the cross-fade kept between two played frames
 
 struct GameSpeed
