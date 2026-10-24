@@ -207,6 +207,9 @@ void DioramaBattleEnvTest_Watchdog(unsigned int nowMs);
 #ifndef ENABLE_DIORAMA
 /* platform/sdl2.c, each presented GBA frame (the Classic 2D test build's captures) */
 void DioramaBattleEnvTest_Frame2D(const unsigned short *pixels);
+#else
+/* platform/sdl2.c, each presented 3D frame off a battle: a field picture's stem due now (PKMN_TEST_FIELD_SHOTS), or NULL */
+const char *DioramaBattleEnvTest_FieldShotStem(void);
 #endif
 
 #endif

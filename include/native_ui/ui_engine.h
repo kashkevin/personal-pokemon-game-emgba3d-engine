@@ -250,6 +250,80 @@ struct NativeSummary
     bool8 ready;
 };
 bool32 Summary_NativeUiState(struct NativeSummary *out);
+/* the summary is up and goes on to that main callback when it closes (the move relearner's move to forget) */
+bool32 Summary_NativeUiExitsTo(void (*callback)(void));
+
+/* ---------------------------------------------------------------- move relearner (move_relearner.c) */
+
+/* The move relearner as the engine shows it - MOVES in the party menu (move switching), the summary's relearner (START
+ * on a move page), the Move Reminder's: its lists, the list shown and its cursor, the move being taught and the step of
+ * teaching it (chooseboxmon.c LearnMove) with its message and YES / NO. The move to forget is chosen in the summary's
+ * move list (phase FORGET: Summary_NativeUiState, mode SUMMARY_MODE_SELECT_MOVE). */
+enum NativeRelearnerPhase
+{
+    NATIVE_RELEARNER_NONE,
+    NATIVE_RELEARNER_LOADING,   /* the screen is being built and fades in (returning: back from the move to forget) */
+    NATIVE_RELEARNER_BROWSE,    /* the list takes input */
+    NATIVE_RELEARNER_TEACHING,  /* teaching the move: step's message, or its YES / NO */
+    NATIVE_RELEARNER_GIVE_UP,   /* B on the list: "Stop trying to learn new moves for ...?", then YES / NO */
+    NATIVE_RELEARNER_FORGET,    /* the summary's move list chooses the move to forget (Summary_NativeUiState) */
+    NATIVE_RELEARNER_CLOSING,   /* fading out to where it came from */
+};
+enum NativeLearnStep
+{
+    NATIVE_LEARN_NONE,
+    NATIVE_LEARN_TEACH_ASK,     /* "Teach X?" */
+    NATIVE_LEARN_REPLACE_ASK,   /* "... wants to learn X. However, ... already knows four moves. Should a move be deleted?" */
+    NATIVE_LEARN_STOP_ASK,      /* "Stop trying to teach X?" */
+    NATIVE_LEARN_WHICH,         /* "Which move should be forgotten?" (then the summary's move list) */
+    NATIVE_LEARN_WARN,          /* move switching: "Y can't be switched back in later." / "Y's PP Ups will be lost." ... */
+    NATIVE_LEARN_FORGOT,        /* "1, 2, and... ... Poof! ... forgot Y. And..." */
+    NATIVE_LEARN_LEARNED,       /* "... learned X!" (into an empty slot) */
+    NATIVE_LEARN_NOT_LEARNED,   /* "... did not learn the move X." */
+    NATIVE_LEARN_DONE,          /* its last message, then the list again */
+};
+/* chooseboxmon.c: the step of LearnMove's state, whether its YES / NO is up and whether it started on NO */
+u32 LearnMove_NativeUiStep(s32 learnState, bool8 *yesNo, bool8 *noFirst);
+#define NATIVE_RELEARNER_MAX_MOVES 60   /* MAX_RELEARNER_MOVES */
+struct NativeRelearnerMove
+{
+    u16 move;
+    u8 source;                  /* enum MoveSwitchSourceKind (move_relearner.h) */
+    u8 number;                  /* the level (0: on evolving), the TM's or HM's number, the tutor */
+    u16 species;                /* the form whose learnset or egg moves have it */
+};
+struct NativeMoveRelearner
+{
+    u8 phase;
+    u8 mode;                    /* enum RelearnMode */
+    u8 step;                    /* TEACHING: enum NativeLearnStep */
+    u8 list;                    /* enum MoveRelearnerStates: the list shown */
+    bool8 switching;            /* move switching (MOVES, the summary's relearner): the lists change, warnings */
+    bool8 listOn[4];            /* the game has this list here */
+    u8 listCount[4];            /* the moves it has now (SELECT, L and R skip an empty one) */
+    bool8 contest;              /* the details show the contest data (LEFT / RIGHT) */
+    bool8 contestData;          /* the game shows contest data (!C_HIDE_CONTEST_DATA) */
+    bool8 returning;            /* LOADING: back from the summary's move list (the same screen to the player) */
+    u16 count;                  /* moves on the list (CANCEL after them) */
+    u16 cursor;                 /* the list's row (count: CANCEL) */
+    u16 scroll;                 /* the first row the game shows */
+    struct NativeRelearnerMove moves[NATIVE_RELEARNER_MAX_MOVES];
+    u16 teaching;               /* the move being taught (MOVE_NONE: none) */
+    u8 forgetSlot;              /* WARN, FORGOT: the slot of the move being forgotten (MAX_MON_MOVES: none) */
+    bool8 yesNo;                /* a YES / NO is up */
+    u8 yesNoCursor;             /* 0: YES */
+    bool8 noFirst;              /* it started on NO (the warnings) */
+    u8 msgWindow;               /* the message box's window */
+    bool8 msgStale;             /* its text is the relearner's own prompt printed again on its restart (back from the
+                                   move to forget, before the next step's message) */
+    struct Pokemon mon;         /* the Pokémon (a box Pokémon with its stats) */
+    bool8 isBoxMon;
+    bool8 canComeBack[MAX_MON_MOVES]; /* a known move a list would offer again once it is switched out */
+    bool8 ppUps[MAX_MON_MOVES];       /* that slot has PP Ups */
+    bool8 hmLocked[MAX_MON_MOVES];    /* an HM's move that can't be forgotten here */
+    bool8 ready;                /* the engine reads buttons now */
+};
+bool32 MoveRelearner_NativeUiState(struct NativeMoveRelearner *out);
 
 /* ---------------------------------------------------------------- bag (item_menu.c) */
 

@@ -273,6 +273,8 @@ static u32 GetHatchedMonEggMoves(struct BoxPokemon *mon, u16 *moves);
 static u32 GetUsedTutorMoves(struct BoxPokemon *mon, u16 *moves);
 static u32 GetSwitchableLevelUpMoves(struct BoxPokemon *mon, u16 *moves);
 static void ShowNextListHint(void);
+static bool32 SwitchList(s32 step);
+static void SetSwitchListRows(void);
 #endif
 #line 271 // gba-line
 
@@ -677,6 +679,27 @@ static void Task_MoveRelearner_HandleInput(u8 taskId)
     switch (itemId)
     {
     case LIST_NOTHING_CHOSEN:
+#ifdef PORTABLE
+        // Move switching: R goes to the next list with moves (as SELECT), L to the one before it (not with the L=A
+        // button mode: L is A then); LEFT / RIGHT keep turning the details between battle and contest data
+        if (gRelearnMode != RELEARN_MODE_SCRIPT
+         && (JOY_NEW(R_BUTTON) || (JOY_NEW(L_BUTTON) && gSaveBlock2Ptr->optionsButtonMode != OPTIONS_BUTTON_MODE_L_EQUALS_A)))
+        {
+            if (SwitchList(JOY_NEW(R_BUTTON) ? 1 : -1))
+            {
+                PlaySE(SE_SUCCESS);
+                sMoveRelearnerScrollState.listOffset = 0;
+                sMoveRelearnerScrollState.listRow = 0;
+                RedrawMoveList();
+            }
+            else if (GameHasDifferentRelearners())
+            {
+                PlaySE(SE_FAILURE);
+            }
+            break;
+        }
+#endif
+#line 646 // gba-line
         if (JOY_NEW(SELECT_BUTTON) && gRelearnMode != RELEARN_MODE_SCRIPT)
         {
             if (UpdateMoveRelearnerState())
@@ -842,6 +865,10 @@ static void CreateLearnableMovesList(void)
     sMoveRelearnerStruct->menuItems[sMoveRelearnerStruct->numMenuChoices].id = LIST_CANCEL;
     sMoveRelearnerStruct->numMenuChoices++;
     sMoveRelearnerStruct->numToShowAtOnce = LoadMoveRelearnerMovesList(sMoveRelearnerStruct->menuItems, sMoveRelearnerStruct->numMenuChoices);
+#ifdef PORTABLE
+    SetSwitchListRows(); // each row with where its move comes from ("Lv 12", "TM24")
+#endif
+#line 807 // gba-line
 }
 
 void MoveRelearnerShowHideHearts(s32 move)
@@ -1560,6 +1587,80 @@ u8 *MoveRelearner_TutorPlace(u32 tutor, u8 *dst)
     return GetMapName(dst, sOneTimeTutors[tutor].mapsec, 0);
 }
 
+bool32 MoveRelearner_ListIsEmpty(void)
+{
+    return sMoveRelearnerStruct != NULL && sMoveRelearnerStruct->numMenuChoices <= 1;
+}
+
+bool32 MoveRelearner_ShownList(u32 *list, u16 *moves, u32 max, u32 *count, u32 *cursor)
+{
+    if (sMoveRelearnerStruct == NULL || gMain.callback2 != CB2_MoveRelearnerMain || sMoveRelearnerStruct->numMenuChoices == 0)
+        return FALSE;
+    *list = gMoveRelearnerState;
+    *count = min(sMoveRelearnerStruct->numMenuChoices - 1, max);
+    for (u32 i = 0; i < *count; i++)
+        moves[i] = sMoveRelearnerStruct->menuItems[i].id;
+    *cursor = sMoveRelearnerScrollState.listOffset + sMoveRelearnerScrollState.listRow;
+    return TRUE;
+}
+
+// L / R (and SELECT, UpdateMoveRelearnerState): the next list with moves that way
+static bool32 SwitchList(s32 step)
+{
+    struct BoxPokemon *boxmon = GetSelectedBoxMonFromPcOrParty();
+
+    for (s32 i = 1; i < MOVE_RELEARNER_COUNT; i++)
+    {
+        u32 state = (gMoveRelearnerState + MOVE_RELEARNER_COUNT + step * i) % MOVE_RELEARNER_COUNT;
+
+        if (CanBoxMonRelearnMoves(boxmon, state))
+        {
+            gMoveRelearnerState = state;
+            StoreMoveText();
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+// The list's rows (the Classic 2D screen; the 3D build draws its own): on the right of the move's name, where it comes
+// from on the level-up list ("Lv12", "Evo") and the TM list ("TM24", "HM03") - the egg and tutor lists say it in their
+// message already. The names give the tag its room (a narrower font where needed, SWITCH_NAME_ROOM); a name that has
+// no room even so keeps the number alone ("12"), or no tag.
+#define SWITCH_ROW_WIDTH 72     // the list window's 80 pixels from the name's x (sMoveRelearnerMovesListTemplate.item_X)
+#define SWITCH_NAME_ROOM 54     // the name's room beside a four-character tag
+
+static void PrintSwitchListTag(u8 windowId, u32 move, u8 y)
+{
+    static const u8 sTagColors[3] = {TEXT_COLOR_WHITE, TEXT_COLOR_BLUE, TEXT_COLOR_LIGHT_BLUE};
+    struct MoveSwitchSource source;
+    const u8 *name;
+    u32 nameWidth;
+    u8 tag[12];
+
+    if ((s32)move == LIST_CANCEL || move == MOVE_NONE
+     || !MoveRelearner_GetSource(GetSelectedBoxMonFromPcOrParty(), gMoveRelearnerState, move, &source))
+        return;
+    name = GetMoveName(move);
+    nameWidth = GetStringWidth(GetFontIdToFit(name, FONT_NORMAL, 0, SWITCH_NAME_ROOM), name, 0);
+    MoveRelearner_SourceText(&source, tag, TRUE);
+    if (nameWidth + 2 + GetStringWidth(FONT_SMALL_NARROWER, tag, 0) > SWITCH_ROW_WIDTH)
+        ConvertIntToDecimalStringN(tag, source.number, STR_CONV_MODE_LEFT_ALIGN, 3);
+    if (nameWidth + 2 + GetStringWidth(FONT_SMALL_NARROWER, tag, 0) > SWITCH_ROW_WIDTH)
+        return;
+    AddTextPrinterParameterized4(windowId, FONT_SMALL_NARROWER, 8 + SWITCH_ROW_WIDTH - GetStringWidth(FONT_SMALL_NARROWER, tag, 0),
+                                 y + 1, 0, 0, sTagColors, TEXT_SKIP_DRAW, tag);
+}
+
+static void SetSwitchListRows(void)
+{
+    if (!MoveRelearner_IsMoveSwitching()
+     || (gMoveRelearnerState != MOVE_RELEARNER_LEVEL_UP_MOVES && gMoveRelearnerState != MOVE_RELEARNER_TM_MOVES))
+        return;
+    gMultiuseListMenuTemplate.itemPrintFunc = PrintSwitchListTag;
+    gMultiuseListMenuTemplate.textNarrowWidth = SWITCH_NAME_ROOM;
+}
+
 // Right on the message's second line, the list SELECT goes to ("SELECT TM moves"), when it goes anywhere
 static void ShowNextListHint(void)
 {
@@ -1664,3 +1765,153 @@ const u8 *MoveRelearner_ForgetWarning(struct BoxPokemon *boxMon, u32 slot)
     return NULL;
 }
 #endif
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_move_switch.c): the relearner as it is now, the summary's move list that
+// chooses the move to forget for it included. Read at the frame boundary; changes nothing.
+bool32 MoveRelearner_NativeUiState(struct NativeMoveRelearner *out)
+{
+    struct BoxPokemon *boxMon;
+    u16 stages[MAX_SWITCH_STAGES], moves[MAX_RELEARNER_MOVES];
+    u8 caps[MAX_SWITCH_STAGES];
+    u32 forms = 0, count;
+    struct Task *task = NULL;
+    bool32 pending = FALSE;
+
+    memset(out, 0, sizeof(*out));
+    out->forgetSlot = MAX_MON_MOVES;
+    out->msgWindow = RELEARNERWIN_MSG;
+    if (gMain.callback2 == CB2_InitLearnMove_Basic || gMain.callback2 == CB2_MoveRelearnerMain)
+    {
+        if (sMoveRelearnerStruct == NULL)
+            return FALSE;
+        task = &gTasks[sMoveRelearnerStruct->mainTask];
+    }
+    else if (gMain.callback2 == CB2_InitLearnMove || gMain.callback2 == CB2_InitLearnMoveReturnFromSelectMove)
+    {
+        // the frame before it starts (from the party menu or the summary; back from the move to forget)
+        pending = TRUE;
+    }
+    else if (gRelearnMode == RELEARN_MODE_NONE || !Summary_NativeUiExitsTo(CB2_InitLearnMoveReturnFromSelectMove))
+    {
+        return FALSE;
+    }
+    boxMon = GetSelectedBoxMonFromPcOrParty();
+    out->mode = gRelearnMode;
+    out->list = gMoveRelearnerState;
+    out->switching = MoveRelearner_IsMoveSwitching();
+    out->contestData = !C_HIDE_CONTEST_DATA;
+    for (u32 i = 0; i < MOVE_RELEARNER_COUNT; i++)
+    {
+        // the Move Reminder has its one list; elsewhere the lists the game has (SELECT, L and R go through them)
+        out->listOn[i] = gRelearnMode == RELEARN_MODE_SCRIPT ? i == gMoveRelearnerState
+                       : GameHasDifferentRelearners() ? sRelearnTypes[i].isActive() : i == MOVE_RELEARNER_LEVEL_UP_MOVES;
+        out->listCount[i] = out->listOn[i] ? MoveRelearner_GetListMoves(boxMon, i, moves) : 0;
+    }
+    if (pending)
+    {
+        out->phase = NATIVE_RELEARNER_LOADING;
+        out->returning = gMain.callback2 == CB2_InitLearnMoveReturnFromSelectMove;
+        if (out->returning)
+        {
+            out->teaching = gSpecialVar_0x8009;
+            out->contest = gSpecialVar_0x800A == CONTEST_INFO;
+            if (GetMoveSlotToReplace() < MAX_MON_MOVES)
+                out->forgetSlot = GetMoveSlotToReplace();
+        }
+    }
+    else if (task == NULL)
+    {
+        // the summary's move list (UIShowMoveList left the move and the details' kind in the special vars)
+        out->phase = NATIVE_RELEARNER_FORGET;
+        out->teaching = gSpecialVar_0x8009;
+        out->contest = gSpecialVar_0x800A == CONTEST_INFO;
+    }
+    else
+    {
+        out->contest = task->tCategory == CONTEST_INFO;
+        out->teaching = task->tMove;
+        if (gMain.callback2 == CB2_InitLearnMove_Basic)
+        {
+            out->phase = NATIVE_RELEARNER_LOADING;
+            out->returning = task->tState != 0;
+            if (out->returning && GetMoveSlotToReplace() < MAX_MON_MOVES)
+                out->forgetSlot = GetMoveSlotToReplace(); // back with the move chosen to forget
+        }
+        else if (task->func == Task_MoveRelearner_HandleInput)
+        {
+            out->phase = NATIVE_RELEARNER_BROWSE;
+            out->teaching = MOVE_NONE;
+            out->ready = !gPaletteFade.active;
+        }
+        else if (task->func == Task_MoveRelearner_LearnMove)
+        {
+            out->phase = NATIVE_RELEARNER_TEACHING;
+            out->step = LearnMove_NativeUiStep(task->tState, &out->yesNo, &out->noFirst);
+            out->msgStale = task->tState == GetLearnMoveResumeAfterSummaryScreenState();
+            if (out->step == NATIVE_LEARN_WARN || out->step == NATIVE_LEARN_FORGOT)
+                out->forgetSlot = GetMoveSlotToReplace();
+            out->ready = out->yesNo || TextPrinter_NativeUiWindowWaiting(RELEARNERWIN_MSG);
+        }
+        else if (task->func == Task_MoveRelearner_Giveup_Prompt || task->func == Task_MoveRelearner_Giveup_Answer)
+        {
+            out->phase = NATIVE_RELEARNER_GIVE_UP;
+            out->teaching = MOVE_NONE;
+            out->yesNo = task->func == Task_MoveRelearner_Giveup_Answer;
+            out->ready = out->yesNo;
+        }
+        else if (task->func == Task_MoveRelearner_Quit)
+        {
+            out->phase = NATIVE_RELEARNER_CLOSING;
+            out->teaching = MOVE_NONE;
+        }
+        else
+        {
+            out->phase = NATIVE_RELEARNER_LOADING;
+        }
+        if (out->yesNo)
+            out->yesNoCursor = Menu_GetCursorPos() != 0;
+        // the list, once CB2_InitLearnMove_Basic has built it (its step 3)
+        if ((gMain.callback2 == CB2_MoveRelearnerMain || gMain.state > 3) && sMoveRelearnerStruct->numMenuChoices > 0)
+        {
+            count = GetLevelUpStages(boxMon, stages, caps, &forms);
+            out->count = min(sMoveRelearnerStruct->numMenuChoices - 1, NATIVE_RELEARNER_MAX_MOVES);
+            for (u32 i = 0; i < out->count; i++)
+            {
+                struct MoveSwitchSource source;
+
+                out->moves[i].move = sMoveRelearnerStruct->menuItems[i].id;
+                GetSourceIn(stages, caps, count, forms, gMoveRelearnerState, out->moves[i].move, &source);
+                out->moves[i].source = source.kind;
+                out->moves[i].number = source.number;
+                out->moves[i].species = source.species;
+            }
+            out->listCount[gMoveRelearnerState] = out->count;
+            out->scroll = sMoveRelearnerScrollState.listOffset;
+            out->cursor = min(sMoveRelearnerScrollState.listOffset + sMoveRelearnerScrollState.listRow, out->count);
+        }
+    }
+    // the Pokemon, and what switching each of its moves out would cost
+    if (gSpecialVar_0x8004 == PC_MON_CHOSEN)
+    {
+        BoxMonToMon(boxMon, &out->mon);
+        out->isBoxMon = TRUE;
+    }
+    else
+    {
+        out->mon = gParties[B_TRAINER_PLAYER][gSpecialVar_0x8004 < PARTY_SIZE ? gSpecialVar_0x8004 : 0];
+    }
+    for (u32 i = 0; i < MAX_MON_MOVES; i++)
+    {
+        enum Move move = GetBoxMonData(boxMon, MON_DATA_MOVE1 + i);
+
+        if (move == MOVE_NONE)
+            continue;
+        out->canComeBack[i] = MoveRelearner_CanSwitchBackIn(boxMon, move);
+        out->ppUps[i] = ((GetBoxMonData(boxMon, MON_DATA_PP_BONUSES) >> (2 * i)) & 3) != 0;
+        out->hmLocked[i] = CannotForgetMove(move) && !MoveRelearner_CanForgetHiddenMove(boxMon, move);
+    }
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

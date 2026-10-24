@@ -34,6 +34,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_Options,
     &gUiScreen_Pause,
     &gUiScreen_Party,
+    &gUiScreen_MoveSwitch,    /* before the summary: the relearner's move to forget is its replace step */
     &gUiScreen_Summary,
     &gUiScreen_Bag,
     &gUiScreen_Pokedex,

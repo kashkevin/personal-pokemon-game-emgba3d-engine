@@ -1932,6 +1932,26 @@ static void DrawPcOverlay(int outputWidth, int outputHeight)
     }
     if (DebugScene_WantGlShot())
         sScreenshotRequested = true;
+#if defined(DIORAMA_BATTLE_ENV_TEST) && defined(ENABLE_DIORAMA)
+    // Test builds only: a PKMN_TEST_FIELD_SHOTS picture off a battle, the window as drawn (a menu's native screen too)
+    {
+        const char *stem = DioramaBattleEnvTest_FieldShotStem();
+        uint8_t *pixels = stem != NULL && outputWidth > 0 && outputHeight > 0
+                        ? malloc((size_t)outputWidth * outputHeight * 4) : NULL;
+
+        if (pixels != NULL)
+        {
+            char path[640];
+
+            SDL_snprintf(path, sizeof(path), "%s.png", stem);
+            glPixelStorei(GL_PACK_ALIGNMENT, 1);
+            glReadPixels(0, 0, outputWidth, outputHeight, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+            PngWrite_RGBA(path, pixels, outputWidth, outputHeight, true);
+            free(pixels);
+            DioramaBattleEnvTest_CaptureWritten();
+        }
+    }
+#endif
     // F12: the picture as drawn, before the PC's own interface goes over it.
     if (sScreenshotRequested)
     {

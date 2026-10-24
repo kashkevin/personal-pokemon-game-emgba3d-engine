@@ -5347,6 +5347,14 @@ bool32 Summary_NativeUiState(struct NativeSummary *out)
     }
     return TRUE;
 }
+
+// The summary is up (loading, shown or closing) and goes on to `callback` when it closes: the move relearner's choice
+// of the move to forget (ui_move_switch.c draws that step as its own)
+bool32 Summary_NativeUiExitsTo(void (*callback)(void))
+{
+    return sMonSummaryScreen != NULL && sMonSummaryScreen->callback == callback
+        && (gMain.callback2 == CB2_InitSummaryScreen || gMain.callback2 == MainCB2);
+}
 #endif // ENABLE_NATIVE_UI
 #ifdef PORTABLE
 // EmeraldTogether (PC): the IV/EV rule for --selftest-summary-ivev (src/platform/native_selftest_summary.c). Sets the

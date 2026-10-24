@@ -761,6 +761,17 @@ static void MoveRelearnerLoadBattleMoveDescription(u32 chosenMove)
     str = gText_MoveRelearnerBattleMoves;
     x = GetStringCenterAlignXOffset(FONT_NORMAL, str, 128);
     AddTextPrinterParameterized(RELEARNERWIN_DESC_BATTLE, FONT_NORMAL, str, x, 1, TEXT_SKIP_DRAW, NULL);
+#ifdef PORTABLE
+    if (chosenMove == (u32)LIST_CANCEL && MoveRelearner_ListIsEmpty())
+    {
+        // Move switching: a list with nothing left in it (its last move just taught) says so
+        AddTextPrinterParameterized(RELEARNERWIN_DESC_BATTLE, FONT_NORMAL, COMPOUND_STRING("No moves to learn here."),
+                                    4, 33, TEXT_SKIP_DRAW, NULL);
+        CopyWindowToVram(RELEARNERWIN_DESC_BATTLE, COPYWIN_GFX);
+        return;
+    }
+#endif
+#line 764 // gba-line
 
     str = gText_MoveRelearnerPP;
     AddTextPrinterParameterized(RELEARNERWIN_DESC_BATTLE, FONT_NORMAL, str, 4, 41, TEXT_SKIP_DRAW, NULL);

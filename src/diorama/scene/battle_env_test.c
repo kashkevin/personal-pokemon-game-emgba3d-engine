@@ -69,6 +69,7 @@
 #include "tower_legends.h"
 #include "battle_util.h"
 #include "move.h"
+#include "move_relearner.h"
 #include "multiplayer_spawns.h"
 #include "multiplayer_world.h"
 #include "roamer.h"
@@ -237,6 +238,9 @@ static struct
        moves or their PP change (tools/battle_env/move_switch_check.py: MOVES in the party menu); what was last logged */
     bool moveLog, moveLogged;
     int moveSeen[1 + MAX_MON_MOVES * 3];
+    /* ... and "move list: list L cursor C moves m,m,..." whenever the move relearner's list shown changes (its kind,
+       its moves in order, the cursor's row; "moves -" for an empty one): the lists' rules in a real game */
+    char moveListSeen[512];
     /* PKMN_TEST_OWE_SHINY (DioramaBattleEnvTest_OweShiny): 1 every other overworld wild Pokemon shiny, 2 every one;
        how many were made */
     int oweShiny, oweMade;
@@ -1324,6 +1328,25 @@ static void MoveLogField(void)
 
     if (!s.moveLog || gMain.inBattle || SDL_AtomicGet(&s.fieldSeen) == 0 || gSaveBlock1Ptr == NULL)
         return;
+    {
+        u16 moves[MAX_RELEARNER_MOVES];
+        u32 list, count, cursor;
+        char line[512];
+        int at;
+
+        line[0] = '\0';
+        if (MoveRelearner_ShownList(&list, moves, ARRAY_COUNT(moves), &count, &cursor))
+        {
+            at = SDL_snprintf(line, sizeof(line), "list %u cursor %u moves ", (unsigned)list, (unsigned)cursor);
+            for (u32 i = 0; i < count && at < (int)sizeof(line) - 8; i++)
+                at += SDL_snprintf(line + at, sizeof(line) - at, i > 0 ? ",%u" : "%u", (unsigned)moves[i]);
+            if (count == 0)
+                SDL_snprintf(line + at, sizeof(line) - at, "-");
+        }
+        if (line[0] != '\0' && strcmp(line, s.moveListSeen) != 0)
+            TestLog("Battle env test: move list: %s", line);
+        SDL_strlcpy(s.moveListSeen, line, sizeof(s.moveListSeen));
+    }
     now[0] = gPartiesCount[B_TRAINER_PLAYER] > 0 ? (int)GetMonData(lead, MON_DATA_SPECIES) : 0;
     for (int i = 0; i < MAX_MON_MOVES; i++)
     {
@@ -3369,6 +3392,18 @@ void DioramaBattleEnvTest_CaptureWritten(void)
         _exit(0);
     }
 }
+
+#ifdef ENABLE_DIORAMA
+/* The 3D test build off a battle (platform/sdl2.c, each presented frame once the native UI is drawn): the stem of a
+ * PKMN_TEST_FIELD_SHOTS picture due now, of the window as the player sees it (a menu's native screen included), or
+ * NULL. A battle's pictures stay gl_battle.c's. */
+const char *DioramaBattleEnvTest_FieldShotStem(void)
+{
+    if (!s.init || gMain.inBattle || !s.fieldKeysActive)
+        return NULL;
+    return DioramaBattleEnvTest_CaptureStem();
+}
+#endif
 
 #ifndef ENABLE_DIORAMA
 /* The Classic 2D test build (platform/sdl2.c, each presented frame, the game parked): the captures the 3D battle takes

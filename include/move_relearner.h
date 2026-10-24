@@ -40,6 +40,11 @@ bool32 MoveRelearner_GetSource(struct BoxPokemon *boxMon, enum MoveRelearnerStat
 u8 *MoveRelearner_SourceText(const struct MoveSwitchSource *source, u8 *dst, bool32 compact);
 // The town of a one-time tutor (MOVE_SOURCE_TUTOR's number), into dst; returns the end of dst
 u8 *MoveRelearner_TutorPlace(u32 tutor, u8 *dst);
+// The list is empty (only CANCEL): the relearner's description says so (menu_specialized.c)
+bool32 MoveRelearner_ListIsEmpty(void);
+// The list the relearner shows now, its moves in order and the cursor's row (test builds' PKMN_TEST_MOVE_LOG); FALSE
+// when the relearner's list is not up
+bool32 MoveRelearner_ShownList(u32 *list, u16 *moves, u32 max, u32 *count, u32 *cursor);
 #endif
 
 extern enum MoveRelearnerStates gMoveRelearnerState;

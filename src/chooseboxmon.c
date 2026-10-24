@@ -421,3 +421,50 @@ s32 GetLearnMoveResumeAfterSummaryScreenState(void)
 #undef state
 #undef partyIndex
 #undef move
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_move_switch.c): the step of teaching a move a LearnMove state is in, and
+// whether its YES / NO is up (it waits for the answer in that state; the warnings' starts on NO)
+u32 LearnMove_NativeUiStep(s32 learnState, bool8 *yesNo, bool8 *noFirst)
+{
+    *yesNo = learnState == PROMPT_BEFORE_LEARNING_2 || learnState == ASK_REPLACEMENT_3 || learnState == REFUSE_REPLACE_3
+          || learnState == CONFIRM_FORGET_3;
+    *noFirst = learnState == CONFIRM_FORGET_3;
+    switch (learnState)
+    {
+    case PROMPT_BEFORE_LEARNING_1:
+    case PROMPT_BEFORE_LEARNING_2:
+    case LEARN_MOVE:
+        return NATIVE_LEARN_TEACH_ASK;
+    case ASK_REPLACEMENT_1:
+    case ASK_REPLACEMENT_2:
+    case ASK_REPLACEMENT_3:
+        return NATIVE_LEARN_REPLACE_ASK;
+    case REFUSE_REPLACE_1:
+    case REFUSE_REPLACE_2:
+    case REFUSE_REPLACE_3:
+        return NATIVE_LEARN_STOP_ASK;
+    case WANT_REPLACE_1:
+    case WANT_REPLACE_2:
+    case WANT_REPLACE_3:
+        return NATIVE_LEARN_WHICH;
+    case CONFIRM_FORGET_1:
+    case CONFIRM_FORGET_2:
+    case CONFIRM_FORGET_3:
+        return NATIVE_LEARN_WARN;
+    case FORGOT_MOVE_1:
+    case REPLACE_MOVE_1:
+        return NATIVE_LEARN_FORGOT;
+    case LEARNED_MOVE_1:
+    case LEARNED_MOVE_2:
+        return NATIVE_LEARN_LEARNED;
+    case DID_NOT_LEARN_1:
+        return NATIVE_LEARN_NOT_LEARNED;
+    case LEARN_MOVE_END:
+        return NATIVE_LEARN_DONE;
+    default:
+        return NATIVE_LEARN_NONE;
+    }
+}
+#endif // ENABLE_NATIVE_UI
