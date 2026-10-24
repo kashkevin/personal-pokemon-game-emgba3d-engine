@@ -1244,6 +1244,112 @@ MT_TEST(battle_receive_many_needs_its_capability_and_whole_small_blocks)
     }
 }
 
+// MS-62, battle speed: DELIVER (27) reaches the game only with its capability (bridge.txt battle_deliver=1, beside PEEK),
+// in a native battle: an acknowledgement (ACK_OUT's block fields; its payload's CRC and the mask of every other core)
+// and/or whole blocks of one chunk from the battle's other cores, several from one core too; its answer is
+// [acknowledged, applied, the refusal that stopped the rest] with something applied. Anything else closes the link.
+static bool DeliverAccepted(uint8_t phase, uint8_t source, uint32_t ackBlock, uint8_t ackKind, uint16_t ackSize,
+                            uint32_t mask, const uint8_t *entries, size_t length, bool capable)
+{
+    uint8_t command[240], frame[260];
+    uint8_t *m = sMemory[MP_REGION_BATTLE];
+    size_t n, at = 0;
+
+    LooksBridge(false);
+    sBridge.caps.battlePeek = 1;
+    sBridge.caps.battleDeliver = capable ? 1 : 0;
+    MakeBattleControl(command, 27, phase);
+    command[39] = source;
+    if (ackBlock != 0)
+    {
+        PutU32(command + 28, ackBlock);
+        PutU16(command + 32, ackSize);   // offset: the whole block, as an ACK_OUT's
+        PutU16(command + 34, ackSize);
+        command[40] = ackKind;
+        PutU32(command + 48, 0x12345678); // its CRC (the game checks it)
+        PutU32(command + 52, mask);
+        at = 8;
+    }
+    memcpy(command + 48 + at, entries, length);
+    PutU16(command + 42, (uint16_t)(at + length));
+    PutU32(command + 44, MpBridge_Crc32(command + 48, at + length));
+    n = FrameOf(frame, 'D', command, sizeof(command));
+    Feed(frame, n, 200);
+    Step(2);
+    return !sNet.closed && GetU32(m + 24) == 2 && memcmp(m + 28, command, 240) == 0;
+}
+
+static bool DeliverAnswerSent(uint8_t acknowledged, uint8_t applied, uint8_t refusal)
+{
+    uint8_t response[240];
+    uint8_t *m = sMemory[MP_REGION_BATTLE];
+    const uint8_t *payload = NULL;
+
+    memcpy(response, m + 28, 240);
+    memset(response + 48, 0, 192);
+    response[48] = acknowledged; response[49] = applied; response[50] = refusal;
+    PutU16(response + 42, 3);
+    PutU32(response + 44, MpBridge_Crc32(response + 48, 3));
+    memcpy(m + 272, response, 240);
+    PutU32(m + 268, 2);
+    Step(30);
+    return SentFrame('E', 0, &payload) == 240 && payload != NULL && memcmp(payload, response, 240) == 0 && !sNet.closed;
+}
+
+MT_TEST(battle_deliver_needs_its_capability_an_acknowledgement_and_whole_small_blocks)
+{
+    uint8_t entries[192];
+    size_t length = 0;
+
+    length += ReceiveManyEntry(entries + length, 0, 8, 12, 5);   // slot 1's: a controller block from slot 0
+    length += ReceiveManyEntry(entries + length, 0, 8, 64, 6);   // and the next one from slot 0
+    length += ReceiveManyEntry(entries + length, 2, 8, 12, 9);   // and one from slot 2
+    MT_CHECK(!DeliverAccepted(3, 1, 7, 8, 12, 0xd, entries, length, false));
+    MT_CHECK(sNet.closed);
+    MT_CHECK(MpBridge_CheckCaps(&(struct MpBridgeCaps){.save = 1, .trade = 1, .battle = 3, .battlePeek = 1,
+                                                       .battleDeliver = 1}) == NULL);
+    MT_CHECK(MpBridge_CheckCaps(&(struct MpBridgeCaps){.save = 1, .trade = 1, .battle = 3, .battleDeliver = 1}) != NULL);
+    // An acknowledgement and three blocks; its answer: acknowledged, two applied, the third refused as busy.
+    MT_CHECK(DeliverAccepted(3, 1, 7, 8, 12, 0xd, entries, length, true));
+    MT_CHECK(DeliverAnswerSent(1, 2, 1));
+    // The blocks alone; the acknowledgement alone (of a startup block, a party block's whole 200 bytes too).
+    MT_CHECK(DeliverAccepted(3, 1, 0, 0, 0, 0, entries, length, true));
+    MT_CHECK(DeliverAnswerSent(0, 3, 0));
+    MT_CHECK(DeliverAccepted(3, 1, 7, 8, 12, 0xd, NULL, 0, true));
+    MT_CHECK(DeliverAnswerSent(1, 0, 0));
+    MT_CHECK(DeliverAccepted(2, 0, 3, 4, 200, 0x2, NULL, 0, true));
+    MT_CHECK(DeliverAccepted(4, 1, 2, 2, 28, 0x1, entries, ReceiveManyEntry(entries, 0, 2, 28, 1), true));
+    {
+        uint8_t one[192];
+        size_t k;
+        // Nothing at all; nor in the diagnostic phase; an answer that says nothing applied.
+        MT_CHECK(!DeliverAccepted(3, 1, 0, 0, 0, 0, NULL, 0, true));
+        k = ReceiveManyEntry(one, 0, 8, 12, 5);
+        MT_CHECK(!DeliverAccepted(1, 1, 0, 0, 0, 0, one, k, true));
+        MT_CHECK(DeliverAccepted(3, 1, 0, 0, 0, 0, one, k, true));
+        MT_CHECK(!DeliverAnswerSent(0, 0, 1));
+        // A block from the core itself, or from outside the battle (a co-op battle has two cores).
+        k = ReceiveManyEntry(one, 1, 8, 12, 5);
+        MT_CHECK(!DeliverAccepted(3, 1, 0, 0, 0, 0, one, k, true));
+        k = ReceiveManyEntry(one, 2, 8, 12, 5);
+        MT_CHECK(!DeliverAccepted(4, 1, 0, 0, 0, 0, one, k, true));
+        // A size its kind does not have, more than one chunk, sequence 0, its bytes cut short.
+        k = ReceiveManyEntry(one, 0, 8, 13, 5);
+        MT_CHECK(!DeliverAccepted(3, 1, 0, 0, 0, 0, one, k, true));
+        k = ReceiveManyEntry(one, 0, 4, 120, 5);
+        MT_CHECK(!DeliverAccepted(3, 1, 0, 0, 0, 0, one, k, true));
+        k = ReceiveManyEntry(one, 0, 8, 12, 0);
+        MT_CHECK(!DeliverAccepted(3, 1, 0, 0, 0, 0, one, k, true));
+        k = ReceiveManyEntry(one, 0, 8, 12, 5);
+        MT_CHECK(!DeliverAccepted(3, 1, 0, 0, 0, 0, one, k - 1, true));
+        // An acknowledgement must name every other core, a size its kind has, the whole block.
+        MT_CHECK(!DeliverAccepted(3, 1, 7, 8, 12, 0x5, one, k, true));
+        MT_CHECK(!DeliverAccepted(3, 1, 7, 8, 13, 0xd, one, k, true));
+        MT_CHECK(DeliverAccepted(2, 1, 7, 8, 12, 0x1, one, k, true));
+        MT_CHECK(DeliverAnswerSent(1, 1, 0));
+    }
+}
+
 MT_TEST(native_battle_phases_reach_the_game)
 {
     MT_CHECK(BattleCommandAccepted(2)); // singles
@@ -2185,6 +2291,7 @@ int main(void)
     MT_RUN(battle_looks_need_the_game);
     MT_RUN(battle_peek_needs_its_capability_and_answers_with_its_block);
     MT_RUN(battle_receive_many_needs_its_capability_and_whole_small_blocks);
+    MT_RUN(battle_deliver_needs_its_capability_an_acknowledgement_and_whole_small_blocks);
     MT_RUN(native_battle_phases_reach_the_game);
     MT_RUN(free_for_all_commands_reach_the_game);
     MT_RUN(three_player_free_for_all_commands_reach_the_game);

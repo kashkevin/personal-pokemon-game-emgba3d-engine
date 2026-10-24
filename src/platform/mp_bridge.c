@@ -178,6 +178,8 @@ const char *MpBridge_CheckCaps(const struct MpBridgeCaps *c)
         return "invalid battle receive-many capability";
     if (c->towerNextPage && (c->towerNextPage != 1 || c->tower != 1))
         return "invalid Tower next floor capability";
+    if (c->battleDeliver && (c->battleDeliver != 1 || c->battlePeek != 1))
+        return "invalid battle deliver capability";
     if (c->menu > 2)
         return "invalid Players menu capability";
     if (c->tradeEffectPrepare && (!c->trade || c->menu != 2 || c->tradeEffectPrepare != 1))
@@ -833,6 +835,30 @@ static bool ReceiveManyValid(const uint8_t *data, uint32_t length, uint32_t coun
     return entries > 0;
 }
 
+/* MS-62, battle speed: 27 DELIVER carries a core's acknowledgement (its block fields and the payload's first 8 bytes, as
+ * ACK_OUT's) and then whole blocks of one chunk from the battle's other cores, RECEIVE_MANY's entries, several from one
+ * core too; either part may be absent, not both. */
+static bool DeliverEntriesValid(const uint8_t *data, uint32_t length, uint32_t count, uint32_t local)
+{
+    uint32_t at = 0;
+
+    while (at < length)
+    {
+        uint32_t source, kind, size;
+
+        if (length - at < 9)
+            return false;
+        source = data[at];
+        kind = data[at + 1];
+        size = U16(data + at + 2);
+        if (source >= count || source == local || size == 0 || size > 128 || size > length - at - 8
+         || U32(data + at + 4) == 0 || !NativeBlockSize(kind, size))
+            return false;
+        at += 8 + size;
+    }
+    return true;
+}
+
 /* battleControl */
 static bool BattleControl(const struct MpBridge *b, const uint8_t *p, size_t length, bool command,
                           struct MpBridgeBattle *out)
@@ -870,6 +896,9 @@ static bool BattleControl(const struct MpBridge *b, const uint8_t *p, size_t len
     /* MS-62, the 2v2s: 26 RECEIVE_MANY, a batch's blocks for one core in one command (battle_receive_many=1). */
     if (opcode == 26 && Enabled(c->battleReceiveMany))
         maxOpcode = 26;
+    /* MS-62, battle speed: 27 DELIVER, a core's acknowledgement and its blocks in one command (battle_deliver=1). */
+    if (opcode == 27 && Enabled(c->battleDeliver))
+        maxOpcode = 27;
     if (inc == 0 || epoch == 0 || epoch > 0x7FFFFFFF || AllZero(id, 16)
      || seq == 0 || size > 256 || offset > size || opcode < 1 || opcode > maxOpcode
      || status > 10 || source > 3 || reserved != 0
@@ -893,9 +922,15 @@ static bool BattleControl(const struct MpBridge *b, const uint8_t *p, size_t len
         return false;
     if (native && (source >= count || opcode == 3 || opcode == 7 || opcode == 8 || kind == 1 || kind > 8))
         return false;
-    if ((opcode == 25 || opcode == 26) && !native)
+    if ((opcode == 25 || opcode == 26 || opcode == 27) && !native)
         return false;
-    if (opcode == 4 || opcode == 5 || opcode == 6)
+    if (opcode == 27)
+    {
+        /* DELIVER: with an acknowledgement its block fields name the outbound block (as ACK_OUT's), else none */
+        if (block != 0 ? !NativeBlockSize(kind, size) || offset != size : offset != 0 || size != 0 || kind != 0)
+            return false;
+    }
+    else if (opcode == 4 || opcode == 5 || opcode == 6)
     {
         if (block == 0)
             return false;
@@ -925,6 +960,20 @@ static bool BattleControl(const struct MpBridge *b, const uint8_t *p, size_t len
     if (opcode == 26) /* RECEIVE_MANY: its entries; the answer [applied 1-3, the first refusal or 0] */
         expected = command ? (ReceiveManyValid(data, dataLength, count) ? (int)dataLength : -1)
                            : (dataLength == 2 && data[0] >= 1 && data[0] < count && data[1] <= 10 ? 2 : -1);
+    if (opcode == 27) /* DELIVER: [CRC, mask] with an acknowledgement, then its entries; the answer [acknowledged 0/1,
+                         blocks applied, the refusal that stopped the rest or 0], something applied */
+    {
+        if (command)
+        {
+            uint32_t skip = block != 0 ? 8 : 0;
+
+            expected = dataLength >= skip && (block != 0 || dataLength > 0)
+                     && (block == 0 || U32(data + 4) == (((1u << count) - 1) ^ (1u << source)))
+                     && DeliverEntriesValid(data + skip, dataLength - skip, count, source) ? (int)dataLength : -1;
+        }
+        else
+            expected = dataLength == 3 && data[0] <= 1 && (data[0] || data[1]) && data[1] <= 21 && data[2] <= 10 ? 3 : -1;
+    }
     if (command)
     {
         if (status != 0 || expected < 0 || dataLength != (uint32_t)expected)
@@ -2352,10 +2401,10 @@ bool MpBridge_Configure(const char *path)
     long port = -1;
     uint8_t token[32];
     bool haveToken = false;
-    bool optIn[9] = {false, false, false, false, false, false, false, false, false};
-    static const char *const sOptIns[9] = {
+    bool optIn[10] = {false, false, false, false, false, false, false, false, false, false};
+    static const char *const sOptIns[10] = {
         "trade_effect_prepare=1", "trade_effect_save=1", "trade_effect_choice=1", "menu_open_page=1", "tower=1",
-        "host_save_page=1", "battle_peek=1", "battle_receive_many=1", "tower_next_page=1"};
+        "host_save_page=1", "battle_peek=1", "battle_receive_many=1", "tower_next_page=1", "battle_deliver=1"};
     const char *problem;
 
     if (file == NULL)
@@ -2411,6 +2460,8 @@ bool MpBridge_Configure(const char *path)
             optIn[7] = true;
         else if (strcmp(line, sOptIns[8]) == 0 && !optIn[8])
             optIn[8] = true;
+        else if (strcmp(line, sOptIns[9]) == 0 && !optIn[9])
+            optIn[9] = true;
         else if (line[0] != '\0')
         {
             port = 0;
@@ -2465,6 +2516,9 @@ bool MpBridge_Configure(const char *path)
     /* The Tower's "go on to floor N?" (the owner's request of 2026-10-24): tower_next_page=1 when the manifest has
      * tower_next_page_abi_version 1: YES opens page 4, which the launcher answers with the next floor's command. */
     caps.towerNextPage = optIn[8] && caps.tower == 1 ? *(const volatile u32 *)&gMultiplayerTowerNextPageAbiVersion : 0;
+    /* MS-62, battle speed: battle_deliver=1 when the manifest has battle_deliver_abi_version 1 (beside PEEK): the host's
+     * route then hands a core its acknowledgement and every block it is owed in one DELIVER (opcode 27). */
+    caps.battleDeliver = optIn[9] && caps.battlePeek == 1 ? *(const volatile u32 *)&gMultiplayerBattleDeliverAbiVersion : 0;
     caps.saveWindow = *(const volatile u32 *)&gMultiplayerSaveWindowAbiVersion;
     caps.menu = *(const volatile u32 *)&gMultiplayerMenuAbiVersion;
     /* The trade effect transports are explicit opt-ins of the manifest, never
@@ -2530,7 +2584,7 @@ bool MpBridge_Configure(const char *path)
     sEnabled = true;
     SDL_Log("Multiplayer bridge: companion at 127.0.0.1:%ld; save %u trade %u emergency %u battle %u/%u/%u "
             "window %u menu %u effects %u/%u/%u reset %u/%u world %u spawns %u running %u detail %u ffa %u/%u release %u "
-            "import %u page %u tower %u party %u hostsave %u peek %u many %u towernext %u",
+            "import %u page %u tower %u party %u hostsave %u peek %u many %u towernext %u deliver %u",
             port, (unsigned)caps.save, (unsigned)caps.trade, (unsigned)caps.emergencySave,
             (unsigned)caps.battle, (unsigned)caps.battleResume, (unsigned)caps.battleAdmissionCleanup,
             (unsigned)caps.saveWindow, (unsigned)caps.menu, (unsigned)caps.tradeEffectPrepare,
@@ -2539,7 +2593,7 @@ bool MpBridge_Configure(const char *path)
             (unsigned)caps.presenceAnimation, (unsigned)caps.presenceDetail, (unsigned)caps.battleFfa,
             (unsigned)caps.battleFfa3, (unsigned)caps.menuRelease, (unsigned)caps.saveImportWindow, (unsigned)caps.menuOpenPage,
             (unsigned)caps.tower, (unsigned)caps.savePartyQuery, (unsigned)caps.hostSavePage, (unsigned)caps.battlePeek,
-            (unsigned)caps.battleReceiveMany, (unsigned)caps.towerNextPage);
+            (unsigned)caps.battleReceiveMany, (unsigned)caps.towerNextPage, (unsigned)caps.battleDeliver);
     return true;
 }
 
