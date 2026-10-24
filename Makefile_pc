@@ -281,7 +281,7 @@ OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS) $(BFX_QJS_OBJS)
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
-.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-legend check-shiny check-coins check-breeding check-rival check-update32 check-hm-box check-species-data check-clock check-mp-objects check-spawn-claims check-secret-base check-rewards check-catch-reconcile check-pokenav-map check-ladder check-coop-exp check-coop-controller check-tower check-keybinds check-graphics-mode check-summary-ivev
+.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-legend check-shiny check-coins check-breeding check-rival check-update32 check-hm-box check-species-data check-clock check-mp-objects check-spawn-claims check-secret-base check-rewards check-catch-reconcile check-pokenav-map check-ladder check-coop-exp check-coop-controller check-tower check-keybinds check-graphics-mode check-summary-ivev check-link-replay
 .SUFFIXES:
 .SECONDARY:
 .DELETE_ON_ERROR:
@@ -490,6 +490,12 @@ check-tower: $(TARGET)
 check-summary-ivev: $(TARGET)
 	@./$(TARGET) --selftest-summary-ivev > $(OBJ_DIR)/selftest-summary-ivev.log 2>&1; status=$$?; \
 	  tail -n 3 $(OBJ_DIR)/selftest-summary-ivev.log; exit $$status
+
+# A link battle's replaying game (any game but the master): a disguised Zorua's switch-in message, a Transformed
+# Pokemon's picture reloaded (src/platform/native_selftest_replay.c).
+check-link-replay: $(TARGET)
+	@./$(TARGET) --selftest-link-replay > $(OBJ_DIR)/selftest-link-replay.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-link-replay.log; exit $$status
 
 # C: preprocess (same flags as the GBA build + PORTABLE), expand INCBIN/charmap
 # strings with preproc, then compile for 32-bit x86.

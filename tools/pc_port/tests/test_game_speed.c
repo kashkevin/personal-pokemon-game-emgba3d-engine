@@ -134,6 +134,67 @@ MT_TEST(a_small_sound_buffer_fades_whole_pairs_within_what_is_kept)
     }
 }
 
+// The window loop's timing (sdl2.c): each pass adds the time since the last present to the accumulator, runs the game
+// frames it holds (dt: one game frame at the speed) and presents. Something counted at each frame boundary runs `speed`
+// times a real frame in a battle between players; counted on the real frames only (Platform_RealFrame) it counts one
+// frame a 1/60 s, each shown by a present before the next as at normal speed. The battle effects' pace (bfx_game.c,
+// "frames the PC failed to show"), the native party screen's key repeat, the play time and the L=A hold count so.
+struct Unseen
+{
+    unsigned frames, unseen;
+};
+
+static struct Unseen CountUnseen(unsigned speed, bool realOnly, double jitterMs)
+{
+    struct GameSpeed s;
+    const double dt = 1.0 / 59.7275 / speed;
+    double acc = 0.0;
+    bool real = true, presented = true;
+    struct Unseen u = {0, 0};
+    unsigned seed = 12345;
+
+    GameSpeed_Reset(&s);
+    for (int pass = 0; pass < 6000; pass++)
+    {
+        seed = seed * 1103515245u + 12345u;   // a present a little early or late: -jitterMs..+jitterMs
+        acc += 1.0 / 60.0 + jitterMs / 1000.0 * ((double)((seed >> 16) & 0x7FFF) / 0x7FFF * 2.0 - 1.0);
+        while (acc >= dt)
+        {
+            if (real || !realOnly)            // the frame just run, at its boundary (VDraw)
+            {
+                u.frames++;
+                u.unseen += !presented;
+                presented = false;
+            }
+            GameSpeed_Frame(&s, speed);       // the coming frame's speed and place
+            real = GameSpeed_RealFrame(&s);
+            acc -= dt;
+        }
+        presented = true;                     // the present after the pass
+    }
+    return u;
+}
+
+MT_TEST(counted_on_real_frames_a_sped_up_battle_is_seen_as_at_normal_speed)
+{
+    struct Unseen normal = CountUnseen(1, false, 0.0);
+    struct Unseen every = CountUnseen(4, false, 0.0);
+    struct Unseen real = CountUnseen(4, true, 0.0);
+
+    // steady 60 Hz presents: none unseen at normal speed, nor on the real frames at 4x (but the one where the speed
+    // changed: the last normal frame and the first sped-up one end in the same pass); counting every game frame, about
+    // three in four unseen
+    MT_EQ(normal.unseen, 0);
+    MT_CHECK(real.unseen <= 1);
+    MT_CHECK(real.frames + 2 >= normal.frames && real.frames <= normal.frames + 2);
+    MT_CHECK(every.unseen * 10 >= every.frames * 7);
+    // presents a millisecond early or late: about as many real frames unseen at 4x as frames at normal speed
+    normal = CountUnseen(1, false, 1.0);
+    real = CountUnseen(4, true, 1.0);
+    MT_CHECK(normal.unseen > 0);
+    MT_CHECK(real.unseen * 2 <= normal.unseen * 3);
+}
+
 int main(void)
 {
     MT_RUN(normal_speed_changes_nothing);
@@ -142,5 +203,6 @@ int main(void)
     MT_RUN(the_sound_card_gets_one_frame_a_real_frame);
     MT_RUN(a_played_frame_fades_in_from_the_sound_after_the_one_before);
     MT_RUN(a_small_sound_buffer_fades_whole_pairs_within_what_is_kept);
+    MT_RUN(counted_on_real_frames_a_sped_up_battle_is_seen_as_at_normal_speed);
     return MT_REPORT();
 }

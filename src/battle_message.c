@@ -2670,6 +2670,15 @@ void BufferStringBattle(enum StringID stringID, enum BattlerId battler)
         }
         break;
     case STRINGID_SWITCHINMON: // switch-in msg
+#ifdef PORTABLE
+        // A link battle's replaying game (not the master) sets the place's party index only at the switch-in animation,
+        // after this message, so {B_BUFF1} read the incoming Pokemon's own name: a disguised Zorua gave itself away
+        // ("HOST sent out Zorua!" where the master says Snorlax). Named as its Illusion shows it, as on the master
+        // (IllusionNickHack picks the Pokemon SetIllusionMon picks when it comes in).
+        if ((gBattleTypeFlags & BATTLE_TYPE_LINK) && !(gBattleTypeFlags & BATTLE_TYPE_IS_MASTER))
+            gBattleScripting.illusionNickHack = TRUE;
+#endif
+#line 2664 // gba-line
         if ((GetBattlerPosition(gBattleScripting.battler) & BIT_FLANK) == B_FLANK_LEFT) // battler 0 and 1
         {
             if (BattlerIsPlayer(gBattleScripting.battler)) // Player
@@ -2833,6 +2842,12 @@ void BufferStringBattle(enum StringID stringID, enum BattlerId battler)
     }
 
     BattleStringExpandPlaceholdersToDisplayedString(stringPtr);
+#ifdef PORTABLE
+    // The Illusion name of a replaying game's switch-in message (STRINGID_SWITCHINMON) is for that message alone.
+    if ((gBattleTypeFlags & BATTLE_TYPE_LINK) && !(gBattleTypeFlags & BATTLE_TYPE_IS_MASTER))
+        gBattleScripting.illusionNickHack = 0;
+#endif
+#line 2827 // gba-line
 }
 
 u32 BattleStringExpandPlaceholdersToDisplayedString(const u8 *src)

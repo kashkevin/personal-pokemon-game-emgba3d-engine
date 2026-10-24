@@ -624,6 +624,21 @@ bool8 IsBattleSEPlaying(enum BattlerId battler)
     return TRUE;
 }
 
+#ifdef PORTABLE
+// Whether the battler's picture shows a Pokemon it Transformed into (Transform, Imposter): the copied personality and
+// shininess, and Transform's pale tint. A link battle's replaying game (not the master) never runs the battle and its
+// gBattleMons stay empty: there the picture's last species change says it (HandleSpeciesGfxDataChange). Otherwise a
+// Transformed Pokemon reloaded on that game (a menu closed, a Substitute faded) came back in its own colours, untinted.
+static bool32 IsTransformedLook(enum BattlerId battler)
+{
+    if ((gBattleTypeFlags & BATTLE_TYPE_LINK) && !(gBattleTypeFlags & BATTLE_TYPE_IS_MASTER))
+        return gBattleSpritesDataPtr->battlerData[battler].transformSpecies != SPECIES_NONE
+            && gBattleSpritesDataPtr->battlerData[battler].transformedLook;
+    return gBattleMons[battler].volatiles.transformed;
+}
+
+#endif
+#line 623 // gba-line
 void BattleLoadMonSpriteGfx(struct Pokemon *mon, enum BattlerId battler)
 {
     u32 personalityValue, paletteOffset;
@@ -649,7 +664,13 @@ void BattleLoadMonSpriteGfx(struct Pokemon *mon, enum BattlerId battler)
         if (GetActiveGimmick(battler) == GIMMICK_DYNAMAX && GetMonData(mon, MON_DATA_GIGANTAMAX_FACTOR))
             gBattleSpritesDataPtr->battlerData[battler].transformSpecies = species = GetGMaxTargetSpecies(species);
 
+#ifdef PORTABLE
+        if (IsTransformedLook(battler))
+#else
+#line 648 // gba-line
         if (gBattleMons[battler].volatiles.transformed)
+#endif
+#line 649 // gba-line
         {
             personalityValue = gTransformedPersonalities[battler];
             isShiny = gTransformedShininess[battler];
@@ -672,7 +693,13 @@ void BattleLoadMonSpriteGfx(struct Pokemon *mon, enum BattlerId battler)
     LoadPalette(paletteData, BG_PLTT_ID(8) + BG_PLTT_ID(battler), PLTT_SIZE_4BPP);
 
     // transform's pink color
+#ifdef PORTABLE
+    if (IsTransformedLook(battler))
+#else
+#line 671 // gba-line
     if (gBattleMons[battler].volatiles.transformed)
+#endif
+#line 672 // gba-line
     {
         BlendPalette(paletteOffset, 16, 6, RGB_WHITE);
         CpuCopy32(&gPlttBufferFaded[paletteOffset], &gPlttBufferUnfaded[paletteOffset], PLTT_SIZEOF(16));
@@ -937,6 +964,10 @@ void HandleSpeciesGfxDataChange(enum BattlerId battlerAtk, enum BattlerId battle
             targetSpecies = GetMonData(monAtk, MON_DATA_SPECIES);
         }
         gBattleSpritesDataPtr->battlerData[battlerAtk].transformSpecies = targetSpecies;
+#ifdef PORTABLE
+        gBattleSpritesDataPtr->battlerData[battlerAtk].transformedLook = (changeType == SPECIES_GFX_CHANGE_TRANSFORM);
+#endif
+#line 931 // gba-line
 
         if (changeType == SPECIES_GFX_CHANGE_TRANSFORM)
         {
