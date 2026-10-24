@@ -1101,6 +1101,27 @@ int NativeSelfTest_Coins(void)
         ExpectLeg("(coin shop) 30,000 coins cannot pay a 60,000-coin stone", !CoinShop_CanPay(&gSaveBlock1Ptr->money, 60000));
         CoinShop_OnOpen(NULL);
         ExpectLeg("any other shop list switches back to yen", !gCoinShopActive);
+        // The Game Corner's RARE GOODS (the owner's request of 2026-10-24): each of the clerk's lists is a coin shop, every
+        // item it sells has a coin price, the Ability Patch and the Gold Bottle Cap at 200,000-500,000
+        {
+            extern const u16 MauvilleCity_GameCorner_Pokemart_RareGoodsHeld[], MauvilleCity_GameCorner_Pokemart_RareGoodsOther[];
+            extern const u16 MauvilleCity_GameCorner_Pokemart_RareGoodsTraining[];
+            bool32 priced = TRUE;
+            u32 listed = 0;
+
+            CoinShop_OnOpen(MauvilleCity_GameCorner_Pokemart_RareGoodsOther);
+            ExpectLeg("the RARE GOODS lists switch the shop to coins", gCoinShopActive);
+            for (const u16 *item = MauvilleCity_GameCorner_Pokemart_RareGoodsHeld; *item != ITEM_NONE; item++, listed++)
+                priced &= CoinShop_ItemPrice(*item) >= 200 && CoinShop_ItemPrice(*item) <= 500000;
+            for (const u16 *item = MauvilleCity_GameCorner_Pokemart_RareGoodsTraining; *item != ITEM_NONE; item++, listed++)
+                priced &= CoinShop_ItemPrice(*item) >= 200 && CoinShop_ItemPrice(*item) <= 500000;
+            ExpectLeg("(RARE GOODS) every item listed has a coin price", priced && listed > 0);
+            ExpectLeg("(RARE GOODS) the Ability Patch and the Gold Bottle Cap cost 200,000 to 500,000",
+                      CoinShop_ItemPrice(ITEM_ABILITY_PATCH) >= 200000 && CoinShop_ItemPrice(ITEM_ABILITY_PATCH) <= 500000
+                      && CoinShop_ItemPrice(ITEM_GOLD_BOTTLE_CAP) >= 200000 && CoinShop_ItemPrice(ITEM_GOLD_BOTTLE_CAP) <= 500000);
+            ExpectLeg("(RARE GOODS) an obtainable item is not for sale", CoinShop_ItemPrice(ITEM_POTION) > 999999);
+            CoinShop_OnOpen(NULL);
+        }
     }
 
     // 5. the Game Corner clerks' specials (32-bit amounts in two script variables)

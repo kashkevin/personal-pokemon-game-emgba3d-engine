@@ -1,4 +1,5 @@
-/* The Mega Stone dealer's coin shop and the coin specials: see include/platform/coin_shop.h. Project-owned. */
+/* The coin shops - the Mega Stone dealer's and the Game Corner's RARE GOODS - and the coin specials: see
+ * include/platform/coin_shop.h. Project-owned. */
 #include "global.h"
 #ifdef PORTABLE
 #include "coins.h"
@@ -16,12 +17,26 @@
 #include "platform/coin_shop.h"
 
 #include "mp_mega_prices.h"
+#include "mp_rare_goods_prices.h"
 
 bool8 gCoinShopActive;
 
 void CoinShop_OnOpen(const u16 *itemsForSale)
 {
     gCoinShopActive = itemsForSale == MauvilleCity_Mart_Pokemart_MegaStones;
+    for (u32 i = 0; i < MP_RARE_GOODS_LIST_COUNT; i++)
+        if (itemsForSale == sMPRareGoodsLists[i])
+            gCoinShopActive = TRUE;
+}
+
+// The Game Corner's RARE GOODS (the owner's request of 2026-10-24): every item no player can get anywhere else, priced by
+// what it does (tools/mp/gen_rare_goods.py); 0 for any other item.
+u32 CoinShop_RareGoodsPrice(u16 item)
+{
+    for (u32 i = 0; i < MP_RARE_GOODS_COUNT; i++)
+        if (sMPRareGoodsPrices[i].item == item)
+            return sMPRareGoodsPrices[i].coins;
+    return 0;
 }
 
 u32 CoinShop_StonePrice(u16 item)
@@ -38,7 +53,9 @@ u32 CoinShop_ItemPrice(u16 item)
     {
         u32 coins = CoinShop_StonePrice(item);
 
-        return coins != 0 ? coins : 0xFFFFFF;   // not a priced stone: out of reach rather than free
+        if (coins == 0)
+            coins = CoinShop_RareGoodsPrice(item);
+        return coins != 0 ? coins : 0xFFFFFF;   // not a priced item: out of reach rather than free
     }
     return GetItemPrice(item);
 }

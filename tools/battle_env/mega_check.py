@@ -342,11 +342,12 @@ def reset_keys(start):
 
 
 # The purchases (PKMN_TEST_WARP to the shop, the player facing down): a tap turns to face the clerk across the counter,
-# then the shop's own lines at fast text, as their pictures showed them. The Game Corner's prize counter: its welcome,
-# what the Ring does, "Trade 25,000 COINS for it?" YES, "Obtained the Mega Ring!", the KEY ITEMS POCKET, "yours to
-# keep", where the stones are sold; then the Shiny Charm's offer: NO (B), "Oh, is that so?" and its second line.
-BUY_RING = ["30:UP", "80:A", "200:A", "320:A", "560:A", "680:A", "800:A", "920:B", "1040:A", "1160:A", "1280:B",
-            "1400:A", "1520:A"]
+# then the shop's own lines at fast text, as their pictures showed them. The Game Corner's prize counter: "What would you
+# like to see?" MAJOR PRIZES (the first of MAJOR PRIZES / RARE GOODS / EXIT, 2026-10-24), its welcome, what the Ring does,
+# "Trade 25,000 COINS for it?" YES, "Obtained the Mega Ring!", the KEY ITEMS POCKET, "yours to keep", where the stones are
+# sold; then the Shiny Charm's offer: NO (B), "Oh, is that so?" and its second line.
+BUY_RING = ["30:UP", "80:A", "200:A", "320:A", "440:A", "680:A", "800:A", "920:A", "1040:B", "1160:A", "1280:A", "1400:B",
+            "1520:A", "1640:A"]
 # The Mauville dealer (the Ring in the bag): its line and BUY, the first stone (Venusaurite), "How many?" 1, "That will be
 # 60000 COINS." YES, "Here you go!", out of the list, QUIT, "Please come again!".
 BUY_STONE = ["30:LEFT", "80:A", "200:A", "320:A", "420:A", "520:A", "620:A", "720:B", "840:B", "940:A"]
@@ -455,11 +456,11 @@ def run_items(args, facts):
     corner, mart, venusaurite = facts["MAP_MAUVILLE_CITY_GAME_CORNER"], facts["MAP_MAUVILLE_CITY_MART"], facts["ITEM_VENUSAURITE"]
     ring_price, stone_price = facts["MP_MEGA_RING_COINS"], facts["PRICE_ITEM_VENUSAURITE"]
     coins = ring_price + stone_price + 5000
-    ring_dir, lines = step("buy-ring", args.save, dict(PKMN_TEST_BATTLE="field:2500", PKMN_TEST_PARTY=f"{charizard}:50",
+    ring_dir, lines = step("buy-ring", args.save, dict(PKMN_TEST_BATTLE="field:2620", PKMN_TEST_PARTY=f"{charizard}:50",
                                                         PKMN_TEST_BAG=f"{facts['ITEM_COIN_CASE']}:1", PKMN_TEST_COINS=str(coins),
                                                         PKMN_TEST_WARP=f"{corner >> 8}:{corner & 0xFF}:0:12:4",
-                                                        PKMN_TEST_FIELD_KEYS=",".join(BUY_RING + save_keys(1640)),
-                                                        PKMN_TEST_FIELD_SHOTS="250,380,620,700,1100,1220,1450,2100"))
+                                                        PKMN_TEST_FIELD_KEYS=",".join(BUY_RING + save_keys(1760)),
+                                                        PKMN_TEST_FIELD_SHOTS="250,370,500,740,820,1220,1340,1570,2220"))
     seen, wallet = field_lines(lines), wallet_lines(lines)
     money = wallet[0][1] if wallet else None
     if not seen or seen[0][4] != 0 or seen[-1][4] != 1:

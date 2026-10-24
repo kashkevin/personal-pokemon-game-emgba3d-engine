@@ -55,12 +55,22 @@ MauvilleCity_Mart_EventScript_MegaStoneDealerEnd:
 @ Update 29 (PC game). The clerk sells the MEGA RING (25,000 coins) and the SHINY CHARM (100,000 coins) for Game Corner coins. A
 @ prize the player already has is never offered again. VAR_TEMP_2 names the prize being offered (the native Game Corner screen
 @ reads it). The prices are 32-bit: they travel in VAR_0x8004 (high) and VAR_0x8005 (low) to the CoinWallet specials.
+@ The owner's request of 2026-10-24: the counter also sells the RARE GOODS (every item no player can get anywhere else, for
+@ COINS; data/scripts/mp_rare_goods_shop.inc, tools/mp/gen_rare_goods.py). It asks first: MAJOR PRIZES (as before) or
+@ RARE GOODS, whose kinds each open the coin shop (src/platform/coin_shop.c), and back to the kinds after a purchase.
 MauvilleCity_GameCorner_EventScript_ShinyCharmClerk::
 	lock
 	faceplayer
 	setvar VAR_TEMP_2, ITEM_NONE
 	checkitem ITEM_COIN_CASE
 	goto_if_eq VAR_RESULT, FALSE, MauvilleCity_GameCorner_EventScript_ShinyCharmNoCase
+	message MauvilleCity_GameCorner_Text_PrizeCounterWhich
+	waitmessage
+	dynmultichoice 0, 0, FALSE, 3, 0, DYN_MULTICHOICE_CB_NONE, MauvilleCity_GameCorner_Text_MajorPrizes, MauvilleCity_GameCorner_Text_RareGoods, gText_Exit
+	switch VAR_RESULT
+	case 1, MauvilleCity_GameCorner_EventScript_RareGoods
+	case 2, MauvilleCity_GameCorner_EventScript_RareGoodsLeave
+	case MULTI_B_PRESSED, MauvilleCity_GameCorner_EventScript_RareGoodsLeave
 	msgbox MauvilleCity_GameCorner_Text_MajorPrizesIntro, MSGBOX_DEFAULT
 	showcoinsbox 0, 0
 	checkitem ITEM_MEGA_RING
@@ -100,6 +110,42 @@ MauvilleCity_GameCorner_EventScript_CharmOffer::
 	setvar VAR_TEMP_2, ITEM_NONE
 	release
 	end
+
+MauvilleCity_GameCorner_EventScript_RareGoods::
+	message MauvilleCity_GameCorner_Text_RareGoodsWhich
+	waitmessage
+	dynmultichoice 0, 0, FALSE, 6, 0, DYN_MULTICHOICE_CB_NONE, MauvilleCity_GameCorner_Text_RareGoodsHeld, MauvilleCity_GameCorner_Text_RareGoodsBerries, MauvilleCity_GameCorner_Text_RareGoodsTraining, MauvilleCity_GameCorner_Text_RareGoodsEvolution, MauvilleCity_GameCorner_Text_RareGoodsOther, gText_Exit
+	switch VAR_RESULT
+	case 0, MauvilleCity_GameCorner_EventScript_RareGoodsHeld
+	case 1, MauvilleCity_GameCorner_EventScript_RareGoodsBerries
+	case 2, MauvilleCity_GameCorner_EventScript_RareGoodsTraining
+	case 3, MauvilleCity_GameCorner_EventScript_RareGoodsEvolution
+	case 4, MauvilleCity_GameCorner_EventScript_RareGoodsOther
+MauvilleCity_GameCorner_EventScript_RareGoodsLeave::
+	msgbox gText_PleaseComeAgain, MSGBOX_DEFAULT
+	setvar VAR_TEMP_2, ITEM_NONE
+	release
+	end
+
+MauvilleCity_GameCorner_EventScript_RareGoodsHeld::
+	pokemart MauvilleCity_GameCorner_Pokemart_RareGoodsHeld
+	goto MauvilleCity_GameCorner_EventScript_RareGoods
+
+MauvilleCity_GameCorner_EventScript_RareGoodsBerries::
+	pokemart MauvilleCity_GameCorner_Pokemart_RareGoodsBerries
+	goto MauvilleCity_GameCorner_EventScript_RareGoods
+
+MauvilleCity_GameCorner_EventScript_RareGoodsTraining::
+	pokemart MauvilleCity_GameCorner_Pokemart_RareGoodsTraining
+	goto MauvilleCity_GameCorner_EventScript_RareGoods
+
+MauvilleCity_GameCorner_EventScript_RareGoodsEvolution::
+	pokemart MauvilleCity_GameCorner_Pokemart_RareGoodsEvolution
+	goto MauvilleCity_GameCorner_EventScript_RareGoods
+
+MauvilleCity_GameCorner_EventScript_RareGoodsOther::
+	pokemart MauvilleCity_GameCorner_Pokemart_RareGoodsOther
+	goto MauvilleCity_GameCorner_EventScript_RareGoods
 
 MauvilleCity_GameCorner_EventScript_AllPrizesOwned::
 	hidecoinsbox
@@ -268,6 +314,35 @@ MauvilleCity_GameCorner_Text_MegaRingGiven:
 	.string "The MEGA RING is yours to keep!\p"
 	.string "MEGA STONES are sold at the\n"
 	.string "MAUVILLE CITY POKé MART, for COINS.$"
+
+MauvilleCity_GameCorner_Text_PrizeCounterWhich:
+	.string "Welcome to the PRIZE COUNTER!\n"
+	.string "What would you like to see?$"
+
+MauvilleCity_GameCorner_Text_MajorPrizes:
+	.string "MAJOR PRIZES$"
+
+MauvilleCity_GameCorner_Text_RareGoods:
+	.string "RARE GOODS$"
+
+MauvilleCity_GameCorner_Text_RareGoodsWhich:
+	.string "RARE GOODS: things you won't find\n"
+	.string "anywhere else! Which kind?$"
+
+MauvilleCity_GameCorner_Text_RareGoodsHeld:
+	.string "HELD ITEMS$"
+
+MauvilleCity_GameCorner_Text_RareGoodsBerries:
+	.string "BERRIES$"
+
+MauvilleCity_GameCorner_Text_RareGoodsTraining:
+	.string "TRAINING$"
+
+MauvilleCity_GameCorner_Text_RareGoodsEvolution:
+	.string "EVOLUTION$"
+
+MauvilleCity_GameCorner_Text_RareGoodsOther:
+	.string "BALLS & OTHER$"
 
 MauvilleCity_Mart_Text_MegaStoneNoRingCoins:
 	.string "I deal in MEGA STONES, for GAME\n"

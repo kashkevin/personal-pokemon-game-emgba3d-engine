@@ -445,7 +445,10 @@ static void Board(int t, const struct UiRamp *m)
             Art(item, sx + (sS.decorations ? 14 : 10), ry, 1);
             Name(name, sizeof(name), item);
             UiG_Text(sx + (sS.decorations ? 46 : 38), ry + 4, name);
-            UiItems_PriceTag(sx + sw - 16 - 74, ry + 5, 74, pt, m->lo, sS.soldOut[idx] || sS.prices[idx] > sS.money);
+            /* wide enough for its price: a coin shop's run to "500,000 COINS" (the Game Corner's RARE GOODS) */
+            int tagW = max(74, UiText_Width(UI_FONT_NORMAL, pt, 0) + 18);
+
+            UiItems_PriceTag(sx + sw - 16 - tagW, ry + 5, tagW, pt, m->lo, sS.soldOut[idx] || sS.prices[idx] > sS.money);
         }
         if (sel && list)
             UiW_Cursor(sx + 1, ry + 7, UiW_Nudge(t), UI_NONE);

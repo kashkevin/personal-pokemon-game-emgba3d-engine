@@ -1,16 +1,19 @@
 #ifndef GUARD_PLATFORM_COIN_SHOP_H
 #define GUARD_PLATFORM_COIN_SHOP_H
-// Update 29 (PC game): the Mega Stone dealer in the Mauville Poke Mart sells for Game Corner coins. The shop menu is the game's
-// own (src/shop.c); while the dealer's list is open it asks these wrappers for prices, balance and payment instead of the
-// money functions, and shows coins where it showed yen. Every other shop is unchanged.
+// Update 29 (PC game): the Mega Stone dealer in the Mauville Poke Mart sells for Game Corner coins, and so does the Game
+// Corner's prize counter with its RARE GOODS (the owner's request of 2026-10-24: every item no player can get anywhere else;
+// data/scripts/mp_rare_goods_shop.inc, tools/mp/gen_rare_goods.py). The shop menu is the game's own (src/shop.c); while one
+// of these lists is open it asks these wrappers for prices, balance and payment instead of the money functions, and shows
+// coins where it showed yen. Every other shop is unchanged.
 #ifdef PORTABLE
 #include "global.h"
 
-extern bool8 gCoinShopActive;                 // the open shop is the Mega Stone dealer's (set by CreatePokemartMenu)
+extern bool8 gCoinShopActive;                 // the open shop is a coin shop (set by CreatePokemartMenu)
 extern const u16 MauvilleCity_Mart_Pokemart_MegaStones[];
 
 void CoinShop_OnOpen(const u16 *itemsForSale);
 u32 CoinShop_StonePrice(u16 item);            // coins for a Mega Stone the dealer sells, else 0
+u32 CoinShop_RareGoodsPrice(u16 item);        // coins for an item of the Game Corner's RARE GOODS, else 0
 u32 CoinShop_ItemPrice(u16 item);             // the coin price in the dealer's shop, else the item's yen price
 u32 CoinShop_Balance(u32 *moneyPtr);          // the wallet in the dealer's shop, else the money
 bool8 CoinShop_CanPay(u32 *moneyPtr, u32 cost);
