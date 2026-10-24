@@ -34,7 +34,8 @@ ITEM_MASTER_BALL = 4
 WILD_LEVEL = 5
 
 # At the action menu (FIGHT, BAG / POKeMON, RUN): BAG; the Bag opens on its ITEMS pocket (~110), RIGHT to POKe BALLS,
-# the Master Ball, USE. The throw, the ball's shakes, "Gotcha! ... was caught!" waits (~1100): A; "<lead> gained ... Exp.
+# the Master Ball (the only ball: PKMN_TEST_BAG_RESET empties the Bag first, as a new character starts with 5 Poke
+# Balls that would come first), USE. The throw, the ball's shakes, "Gotcha! ... was caught!" waits (~1100): A; "<lead> gained ... Exp.
 # Points!" (~1400): A; "The rest of your team gained Exp. Points thanks to the Exp. Share!" (~1760): A; "...'s data has
 # been added to the Pokedex!" (~2020): A; its Pokedex page (~2180): A; "Would you like to give ... a nickname?" with
 # YES / NO (~2540): B, NO. With a full party "... was transferred to SOMEONE'S PC." follows: the fight's A presses
@@ -121,6 +122,7 @@ def main():
         frames = SAVE_AT + 900
         return step(name, args.save, frames, dict(
             PKMN_TEST_BATTLE=f"wild:{species}:{WILD_LEVEL}", PKMN_TEST_PARTY=team, PKMN_TEST_BAG=f"{ITEM_MASTER_BALL}:1",
+            PKMN_TEST_BAG_RESET="1",
             PKMN_TEST_KEYS=",".join(KEYS), PKMN_TEST_FIGHT="120", PKMN_TEST_FIELD_AFTER=str(frames),
             PKMN_TEST_FIELD_KEYS=",".join(save_keys(SAVE_AT))), shots="100,400,800")
 

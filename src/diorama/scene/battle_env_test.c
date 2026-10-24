@@ -165,6 +165,7 @@ static struct
     /* PKMN_TEST_MEGA_SWEEP=first:last[:level[:s]]: a battle per Mega Stone holder (SweepNext), shiny with s */
     int sweepNext, sweepLast, sweepLevel, sweepIndex;
     bool sweep, sweepStarted, sweepShiny, bagDone;
+    bool bagReset;      /* PKMN_TEST_BAG_RESET=1: the Bag emptied before PKMN_TEST_BAG's items go in */
     /* PKMN_TEST_PARADE_MEGAS=1: the parade shows the Mega forms of the holder list, in its order */
     bool paradeMegas;
     int paradeHolder;
@@ -386,6 +387,7 @@ static void Init(void)
     value = SDL_getenv("PKMN_TEST_BAG");
     if (value != NULL)
         SDL_strlcpy(s.bag, value, sizeof(s.bag));
+    s.bagReset = EnvInt("PKMN_TEST_BAG_RESET", 0) != 0;
     value = SDL_getenv("PKMN_TEST_NAME");
     if (value != NULL)
         SDL_strlcpy(s.name, value, sizeof(s.name));
@@ -743,6 +745,9 @@ static void SetUpTestBag(void)
     const char *p = s.bag;
     int item, count, used;
 
+    /* a new character's own items (multiplayer_rival.c: 5 Poke Balls) would come first in their pocket */
+    if (s.bagReset)
+        ClearBag();
     while (*p != '\0' && sscanf(p, "%d:%d%n", &item, &count, &used) == 2)
     {
         AddBagItem(item, count);

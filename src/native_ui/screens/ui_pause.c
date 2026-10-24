@@ -380,6 +380,7 @@ static const char *EntryIcon(const struct Entry *e, bool *hasSel)
     case NATIVE_START_DEBUG: return "key";
     case NATIVE_START_PLAYERS: return "players";
     case NATIVE_START_RIDE: case NATIVE_START_GET_OFF: return "shoe";
+    case NATIVE_START_RETIRE_SAFARI: case NATIVE_START_RETIRE_FRONTIER: return "flag";   // giving up, as the battle's forfeit
     case NATIVE_START_DEXNAV: *hasSel = false; return "search";
     case NATIVE_START_STYLE: *hasSel = false; return "head_green";
     case NATIVE_START_TOWER: return "burst";
@@ -396,7 +397,9 @@ bool32 NativeUiPause_TestNamed(u8 action)
 
     return action == NATIVE_START_EXIT
         || (EntryLabel(&e) != sText_Exit && EntryHelp(&e) != sHelp_Exit && strcmp(EntryIcon(&e, &hasSel), "return") != 0)
-        || action == NATIVE_START_PLAYER_BACK;    // BACK: its own words, the return arrow
+        || action == NATIVE_START_PLAYER_BACK     // BACK: its own words, the return arrow
+        // POKeMON: its own words, and the lead Pokemon's icon drawn in place of one (the row is shown once there is one)
+        || (action == NATIVE_START_POKEMON && EntryLabel(&e) == sText_Pokemon && EntryHelp(&e) == sHelp_Pokemon);
 }
 
 /* the Emerald wooden location sign (PK.locationSign) */
