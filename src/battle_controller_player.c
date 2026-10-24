@@ -5,6 +5,9 @@
 #if defined(ENABLE_DIORAMA) && defined(BATTLEFX_TEST)
 #include "diorama/battle_fx_test.h"
 #endif
+#ifdef PORTABLE
+#include "platform.h"
+#endif
 #line 2 // gba-line
 #include "multiplayer_local_reset.h"
 #include "battle.h"
@@ -465,7 +468,15 @@ void HandleInputChooseTarget(enum BattlerId battler)
     }
 
     if (JOY_HELD(DPAD_ANY) && gSaveBlock2Ptr->optionsButtonMode == OPTIONS_BUTTON_MODE_L_EQUALS_A)
+#ifdef PORTABLE
+        // Battle speed (include/platform/game_speed.h): with Button mode L=A a D-pad held for 60 frames acts as B.
+        // The hold counts real 1/60 s, so the gesture keeps its second at any speed.
+        gPlayerDpadHoldFrames += Platform_RealFrame() ? 1 : 0;
+#else
+#line 443 // gba-line
         gPlayerDpadHoldFrames++;
+#endif
+#line 444 // gba-line
     else
         gPlayerDpadHoldFrames = 0;
 
@@ -624,7 +635,14 @@ static void HideAllTargets(void)
 void HandleInputShowEntireFieldTargets(enum BattlerId battler)
 {
     if (JOY_HELD(DPAD_ANY) && gSaveBlock2Ptr->optionsButtonMode == OPTIONS_BUTTON_MODE_L_EQUALS_A)
+#ifdef PORTABLE
+        // Battle speed: the L=A hold counts real 1/60 s (HandleInputChooseTarget).
+        gPlayerDpadHoldFrames += Platform_RealFrame() ? 1 : 0;
+#else
+#line 602 // gba-line
         gPlayerDpadHoldFrames++;
+#endif
+#line 603 // gba-line
     else
         gPlayerDpadHoldFrames = 0;
 
@@ -652,7 +670,14 @@ void HandleInputShowEntireFieldTargets(enum BattlerId battler)
 void HandleInputShowTargets(enum BattlerId battler)
 {
     if (JOY_HELD(DPAD_ANY) && gSaveBlock2Ptr->optionsButtonMode == OPTIONS_BUTTON_MODE_L_EQUALS_A)
+#ifdef PORTABLE
+        // Battle speed: the L=A hold counts real 1/60 s (HandleInputChooseTarget).
+        gPlayerDpadHoldFrames += Platform_RealFrame() ? 1 : 0;
+#else
+#line 630 // gba-line
         gPlayerDpadHoldFrames++;
+#endif
+#line 631 // gba-line
     else
         gPlayerDpadHoldFrames = 0;
 
@@ -714,7 +739,14 @@ void HandleInputChooseMove(enum BattlerId battler)
     struct ChooseMoveStruct *moveInfo = (struct ChooseMoveStruct *)(&gBattleResources->bufferA[battler][4]);
 
     if (JOY_HELD(DPAD_ANY) && gSaveBlock2Ptr->optionsButtonMode == OPTIONS_BUTTON_MODE_L_EQUALS_A)
+#ifdef PORTABLE
+        // Battle speed: the L=A hold counts real 1/60 s (HandleInputChooseTarget).
+        gPlayerDpadHoldFrames += Platform_RealFrame() ? 1 : 0;
+#else
+#line 692 // gba-line
         gPlayerDpadHoldFrames++;
+#endif
+#line 693 // gba-line
     else
         gPlayerDpadHoldFrames = 0;
 

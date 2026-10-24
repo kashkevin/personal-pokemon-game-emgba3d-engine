@@ -897,6 +897,10 @@ struct BattleSpriteInfo
     u16 behindSubstitute:1; // 0x4
     u16 flag_x8:1; // 0x8
     u16 hpNumbersNoBars:1; // 0x10
+#ifdef PORTABLE
+    u16 transformedLook:1; // transformSpecies is a Pokemon Transformed into (IsTransformedLook, battle_gfx_sfx_util.c)
+#endif
+#line 900 // gba-line
     enum Species transformSpecies;
 };
 

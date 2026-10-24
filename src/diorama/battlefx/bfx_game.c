@@ -35,6 +35,7 @@
 #include "main.h"
 #include "move.h"
 #include "pokeball.h"
+#include "platform.h"
 #include "pokemon.h"
 #include "random.h"
 #include "sound.h"
@@ -3047,8 +3048,12 @@ void BattleFx_FrameBoundary(bool view3d, uint32_t skipObj[4], uint8_t *hideBg)
      * frame that built it): the core's frame for that game frame goes with it */
     bool waiting;
 
-    /* the last picture's game frame, seen or not (the pace), and a battle's start (the quality) */
-    BattleFxGL_PaceBoundary(view3d);
+    /* the last picture's game frame, seen or not (the pace), and a battle's start (the quality). A battle between
+     * players running faster (include/platform/game_speed.h) runs `speed` game frames in each real 1/60 s, and the
+     * ones in between are not meant to be seen: the pace counts real frames, one unseen only when no present came in
+     * any of its game frames (otherwise a PC keeping up reads as falling behind, and the quality is lowered) */
+    if (Platform_RealFrame())
+        BattleFxGL_PaceBoundary(view3d);
     if ((bool)gMain.inBattle != sQuality.inBattle)
     {
         sQuality.inBattle = gMain.inBattle;

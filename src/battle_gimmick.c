@@ -432,10 +432,21 @@ void ReadRemoteGimmickMark(enum BattlerId battler, u32 mark)
 // The other players' games never run the battle script that marks a Mega (BattleScript_MegaEvolution), so they mark it
 // when its animation starts and redraw the healthbox when it has finished; the healthbox indicator and the PC battle
 // screen read the battler's active gimmick.
+// Illusion the same way: on the master BattleScript_IllusionOff redraws the healthbox's name after the animation
+// (updatenick); the other games only play the animation, which turns the Illusion off as it starts
+// (TryHandleLaunchBattleTableAnimation). They redraw the name and gender when it has finished, or the Classic 2D
+// healthbox kept the disguise's name after "Zorua's illusion wore off!".
 void NoteRemoteGimmickAnimation(enum BattlerId battler, u32 animationId, bool32 finished)
 {
-    if (animationId != B_ANIM_MEGA_EVOLUTION || !(gBattleTypeFlags & BATTLE_TYPE_LINK)
-     || (gBattleTypeFlags & BATTLE_TYPE_IS_MASTER))
+    if (!(gBattleTypeFlags & BATTLE_TYPE_LINK) || (gBattleTypeFlags & BATTLE_TYPE_IS_MASTER))
+        return;
+    if (animationId == B_ANIM_ILLUSION_OFF)
+    {
+        if (finished)
+            UpdateHealthboxAttribute(gHealthboxSpriteIds[battler], GetBattlerMon(battler), HEALTHBOX_NICK);
+        return;
+    }
+    if (animationId != B_ANIM_MEGA_EVOLUTION)
         return;
     if (!finished)
         SetActiveGimmick(battler, GIMMICK_MEGA);

@@ -21,6 +21,7 @@
 #include "main.h"
 #include "move.h"
 #include "party_menu.h"
+#include "platform.h"
 #include "pokemon.h"
 #include "string_util.h"
 #include "window.h"
@@ -737,9 +738,15 @@ static uint16_t FilterKeys(uint16_t keys, uint16_t newKeys)
         int start = gKeyRepeatStartDelay > 0 ? gKeyRepeatStartDelay : 40;
         int every = gKeyRepeatContinueDelay > 0 ? gKeyRepeatContinueDelay : 5;
 
-        sHeldFrames++;
-        if (sHeldFrames >= start && (sHeldFrames - start) % every == 0)
-            dir = sHeldDir;
+        /* Battle speed (include/platform/game_speed.h): in a battle between players the party screen runs at the
+         * battle's speed, and the repeat keeps its pace in real time. Counted and tested on real frames only, or one
+         * real frame would repeat once for each of its game frames. */
+        if (Platform_RealFrame())
+        {
+            sHeldFrames++;
+            if (sHeldFrames >= start && (sHeldFrames - start) % every == 0)
+                dir = sHeldDir;
+        }
     }
     else
     {

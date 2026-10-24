@@ -237,7 +237,16 @@ void AgbMainLoop(void)
             }
         }
 
+#ifdef PORTABLE
+        // Battle speed (include/platform/game_speed.h): play time counts real 1/60 s at any speed. Platform_RealFrame
+        // comes last, so the clocks' pause checks still run every game frame.
+        if (!MultiplayerSave_PauseClocks() && !MultiplayerBattle_PauseClocks() && !MultiplayerMenu_IsActive()
+         && Platform_RealFrame())
+#else
+#line 205 // gba-line
         if (!MultiplayerSave_PauseClocks() && !MultiplayerBattle_PauseClocks() && !MultiplayerMenu_IsActive())
+#endif
+#line 206 // gba-line
             PlayTimeCounter_Update();
         MapMusicMain();
         WaitForVBlank();
