@@ -958,6 +958,24 @@ static u32 Rng1PerFrame(void)
     return n ? least : 2;
 }
 
+/* The core's battler n is the one at screen position n: its side is n & 1, its place on the screen n's (the
+ * package's own model, bfx_core.js getBattlerSide / getBattlerPosition). The game's battler numbers are the
+ * positions in every battle but a link battle seen from a game that is not its master (and a free-for-all), where
+ * battler 0 is the opponent at the top: there the core drew the opponent's moves from the player's own Pokemon
+ * (the owner's report of 2026-10-24, "if my opponent does a move it looks like I'm doing the move"). Every battler
+ * the core is told about, and every battler it draws, goes through these. */
+static u32 CoreIndex(u32 battler)
+{
+    return battler < gBattlersCount && battler < MAX_BATTLERS_COUNT ? (u32)GetBattlerPosition(battler) : battler;
+}
+
+static u32 GameBattlerAt(u32 index)
+{
+    u32 b = index < gBattlersCount ? (u32)GetBattlerAtPosition(index) : index;
+
+    return b < MAX_BATTLERS_COUNT ? b : index;
+}
+
 /* The request the core needs to replay the game's own animation: the battlers
  * as the scripts see them (who is present, each sprite's picture metrics) and
  * what the battle engine handed the animation. */
@@ -966,15 +984,20 @@ static int AppendSetup(char *buf, int len, int size, u32 attacker, u32 target)
     bool doubles = IsDoubleBattle();
 
     len = Append(buf, len, size, ",\"attacker\":%u,\"target\":%u,\"double\":%s,\"present\":[",
-                 (unsigned)attacker, (unsigned)target, doubles ? "true" : "false");
-    for (u32 b = 0; b < MAX_BATTLERS_COUNT; b++)
-        len = Append(buf, len, size, "%s%s", b ? "," : "",
+                 (unsigned)CoreIndex(attacker), (unsigned)CoreIndex(target), doubles ? "true" : "false");
+    for (u32 i = 0; i < MAX_BATTLERS_COUNT; i++)
+    {
+        u32 b = GameBattlerAt(i);
+
+        len = Append(buf, len, size, "%s%s", i ? "," : "",
                      b < gBattlersCount && IsBattlerSpritePresent(b) ? "true" : "false");
+    }
     len = Append(buf, len, size, "],\"mons\":[");
-    for (u32 b = 0; b < MAX_BATTLERS_COUNT; b++)
+    for (u32 i = 0; i < MAX_BATTLERS_COUNT; i++)
     {
         int picW = 48, picH = 48, yOffset = 0, elevation = 0;
         bool shiny = false;
+        u32 b = GameBattlerAt(i);
 
         if (b < gBattlersCount)
         {
@@ -987,7 +1010,7 @@ static int AppendSetup(char *buf, int len, int size, u32 attacker, u32 target)
             shiny = IsMonShiny(GetBattlerMon(b));
         }
         len = Append(buf, len, size, "%s{\"picW\":%d,\"picH\":%d,\"yOffset\":%d,\"elevation\":%d,\"shiny\":%s}",
-                     b ? "," : "", picW, picH, yOffset, elevation, shiny ? "true" : "false");
+                     i ? "," : "", picW, picH, yOffset, elevation, shiny ? "true" : "false");
     }
     len = Append(buf, len, size, "]");
     /* The same on every client of a battle: presentation only (particle variety). */
@@ -1015,14 +1038,15 @@ static int AppendSetup(char *buf, int len, int size, u32 attacker, u32 target)
      * from the attacker's), which is not always their home (a battler a move has moved and not yet brought
      * back, a semi-invulnerable one) */
     len = Append(buf, len, size, ",\"battlerSprites\":[");
-    for (u32 b = 0; b < MAX_BATTLERS_COUNT; b++)
+    for (u32 i = 0; i < MAX_BATTLERS_COUNT; i++)
     {
+        u32 b = GameBattlerAt(i);
         const struct Sprite *sp = b < gBattlersCount && gBattlerSpriteIds[b] < MAX_SPRITES ? &gSprites[gBattlerSpriteIds[b]] : NULL;
 
         if (sp == NULL || !sp->inUse)
-            len = Append(buf, len, size, "%snull", b ? "," : "");
+            len = Append(buf, len, size, "%snull", i ? "," : "");
         else
-            len = Append(buf, len, size, "%s[%d,%d,%d,%d,%d]", b ? "," : "", sp->x, sp->y, sp->x2, sp->y2, sp->invisible ? 1 : 0);
+            len = Append(buf, len, size, "%s[%d,%d,%d,%d,%d]", i ? "," : "", sp->x, sp->y, sp->x2, sp->y2, sp->invisible ? 1 : 0);
     }
     len = Append(buf, len, size, "]");
     return len;
@@ -1125,12 +1149,17 @@ static int AppendInputs(char *buf, int len, int size, struct BfxHost *host, cons
             len = Append(buf, len, size, ",\"trapMove\":\"%s\"", trap);
     }
     len = Append(buf, len, size, ",\"substitute\":[");
-    for (u32 b = 0; b < MAX_BATTLERS_COUNT; b++)
-        len = Append(buf, len, size, "%s%s", b ? "," : "",
+    for (u32 i = 0; i < MAX_BATTLERS_COUNT; i++)
+    {
+        u32 b = GameBattlerAt(i);
+
+        len = Append(buf, len, size, "%s%s", i ? "," : "",
                      gBattleSpritesDataPtr && b < gBattlersCount && gBattleSpritesDataPtr->battlerData[b].behindSubstitute
                          ? "true" : "false");
+    }
     len = Append(buf, len, size, "],\"effectAttacker\":%u,\"effectBattler\":%u,\"effectTarget\":%u",
-                 (unsigned)gBattlerAttacker, (unsigned)gEffectBattler, (unsigned)gBattlerTarget);
+                 (unsigned)CoreIndex(gBattlerAttacker), (unsigned)CoreIndex(gEffectBattler),
+                 (unsigned)CoreIndex(gBattlerTarget));
     if (item == ITEM_RED_ORB || item == ITEM_BLUE_ORB)
         len = Append(buf, len, size, ",\"item\":\"%s\"", item == ITEM_RED_ORB ? "ITEM_RED_ORB" : "ITEM_BLUE_ORB");
     if (gBattleAnimTarget < gBattlersCount)
@@ -1995,7 +2024,7 @@ void BattleFx_OnLaunch(uint32_t animType, uint32_t animId, const void *script)
         /* the battle's target (gBattlerTarget), which Future Sight's and Doom Desire's hit take again as the
          * animation's (AnimTask_SetAnimTargetToBattlerTarget; DoMoveAnim may have changed it for a spread move) */
         if (gBattlerTarget < MAX_BATTLERS_COUNT)
-            len = Append(request, len, sizeof(request), ",\"battlerTarget\":%u", (unsigned)gBattlerTarget);
+            len = Append(request, len, sizeof(request), ",\"battlerTarget\":%u", (unsigned)CoreIndex(gBattlerTarget));
         if (gAnimDisableStructPtr != NULL)
             len = Append(request, len, sizeof(request), ",\"rolloutTimer\":%u", (unsigned)gAnimDisableStructPtr->rolloutTimer);
         if (CalledByMirrorMove(animId))
@@ -2024,7 +2053,7 @@ void BattleFx_OnLaunch(uint32_t animType, uint32_t animId, const void *script)
     /* the battle's attacker (gBattlerAttacker), which three of the game's sprite callbacks read in place of the
      * animation's (kGameHelperJs: the battle's attacker) */
     if (gBattlerAttacker < MAX_BATTLERS_COUNT)
-        len = Append(request, len, sizeof(request), ",\"battlerAttacker\":%u", (unsigned)gBattlerAttacker);
+        len = Append(request, len, sizeof(request), ",\"battlerAttacker\":%u", (unsigned)CoreIndex(gBattlerAttacker));
     /* a status, battle or special animation's script runs in a task (kGameHelperJs: which loop runs the script) */
     if (animType != ANIM_TYPE_MOVE)
         len = Append(request, len, sizeof(request), ",\"order\":\"task\"");
@@ -3043,7 +3072,14 @@ void BattleFx_FrameBoundary(bool view3d, uint32_t skipObj[4], uint8_t *hideBg)
             DecodeBattler(&sGameBattlers[b], sBattlerOam[b]);
         else
             sGameBattlers[b].shown = false;
-    BattleFxGL_TakeBattlers(sGameBattlers);
+    {
+        /* the renderer pairs them with the core's battlers: in the core's order, by screen position (CoreIndex) */
+        struct BattleFxGameBattler byPosition[MAX_BATTLERS_COUNT];
+
+        for (u32 i = 0; i < MAX_BATTLERS_COUNT; i++)
+            byPosition[i] = sGameBattlers[GameBattlerAt(i)];
+        BattleFxGL_TakeBattlers(byPosition);
+    }
     if (!BattleFxGL_Showing())
     {
         /* the core's first frame of the animation is not done yet (its begin plans the whole animation): the
