@@ -370,7 +370,15 @@ static void ReadKeys(void)
 
     if (keyInput != 0 && gMain.heldKeys == keyInput)
     {
+#ifdef PORTABLE
+        // Battle speed (include/platform/game_speed.h): a held key repeats at the same pace in real time at any speed.
+        if (Platform_RealFrame())
+            gMain.keyRepeatCounter--;
+#else
+#line 320 // gba-line
         gMain.keyRepeatCounter--;
+#endif
+#line 321 // gba-line
 
         if (gMain.keyRepeatCounter == 0)
         {

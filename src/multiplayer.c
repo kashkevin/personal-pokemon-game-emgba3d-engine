@@ -20,6 +20,7 @@
 #ifdef PORTABLE
 #include "character_customization.h"
 #include "multiplayer_presence.h"
+#include "platform.h"
 #endif
 #line 20 // gba-line
 
@@ -525,7 +526,15 @@ void Multiplayer_Tick(void)
 {
     u32 i;
     bool32 ready;
+#ifdef PORTABLE
+    // Battle speed (include/platform/game_speed.h): the heartbeat's patience counts real frames at any speed.
+    if (Platform_RealFrame())
+        sFrame++;
+    gMultiplayerMailbox.frame = sFrame;
+#else
+#line 486 // gba-line
     gMultiplayerMailbox.frame = ++sFrame;
+#endif
 #ifdef PORTABLE
     // The companion may already be in its world session when the game starts (character setup and hosting connect it
     // before the launch), so the world's messages can arrive while the game is still booting, before its save blocks

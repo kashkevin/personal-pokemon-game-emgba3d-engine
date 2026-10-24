@@ -324,6 +324,9 @@ check-native:
 	  tools/pc_port/tests/test_key_queue.c src/platform/key_queue.c -o $(NATIVE_TEST_DIR)/test_key_queue
 	@$(NATIVE_TEST_DIR)/test_key_queue
 	@gcc -m32 -std=gnu99 -Wall -Wextra -Werror -O1 -g -iquote include -iquote tools/pc_port/tests \
+	  tools/pc_port/tests/test_game_speed.c src/platform/game_speed.c -lm -o $(NATIVE_TEST_DIR)/test_game_speed
+	@$(NATIVE_TEST_DIR)/test_game_speed
+	@gcc -m32 -std=gnu99 -Wall -Wextra -Werror -O1 -g -iquote include -iquote tools/pc_port/tests \
 	  tools/pc_port/tests/test_shell_protocol.c src/platform/shell_protocol.c -o $(NATIVE_TEST_DIR)/test_shell_protocol
 	@$(NATIVE_TEST_DIR)/test_shell_protocol
 	@gcc -m32 -std=gnu99 -Wall -Wextra -Werror -O1 -g -iquote include -iquote tools/pc_port/tests \

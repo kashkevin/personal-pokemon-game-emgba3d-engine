@@ -24,6 +24,10 @@
 #include "trainer_hill.h"
 #include "battle_pyramid.h"
 #include "safari_zone.h"
+#ifdef PORTABLE
+#include "platform.h"
+#endif
+#line 27 // gba-line
 
 _Static_assert(sizeof(struct MultiplayerSaveControl) == 240, "Save control ABI");
 _Static_assert(sizeof(struct MultiplayerSaveMailbox) == 512, "Save mailbox ABI");
@@ -1273,7 +1277,16 @@ void MultiplayerSave_Tick(void)
     u32 generation;
     struct MultiplayerSaveControl command;
     u8 data[4];
+#ifdef PORTABLE
+    // Battle speed (include/platform/game_speed.h): a held save's deadline counts real frames at any speed.
+    if (Platform_RealFrame())
+        sFrame++;
+    gMultiplayerSaveMailbox.frame = sFrame;
+#else
+#line 1170 // gba-line
     sFrame++; gMultiplayerSaveMailbox.frame = sFrame;
+#endif
+#line 1171 // gba-line
     if (sState == MP_SAVE_FINALIZING)
     {
         u32 target = (sPublishId + sTargetRotation) % 14 + 14 * (sTargetCounter & 1);

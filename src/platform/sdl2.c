@@ -46,6 +46,8 @@
 #include "platform/debug_scene.h"
 #include "platform/memory_info.h"
 #include "platform/frame_limiter.h"
+#include "platform/game_speed.h"
+#include "multiplayer_battle.h"
 #include "malloc.h"
 #if defined(DIORAMA_BATTLE_ENV_TEST) && !defined(ENABLE_DIORAMA)
 #include "diorama/battle_env_test.h"   // the Classic 2D test build
@@ -95,6 +97,11 @@ double lastGameTime = 0;
 double curGameTime = 0;
 double fixedTimestep = 1.0 / 60.0; // 16.666667ms
 double timeScale = 1.0;
+// Battle speed (include/platform/game_speed.h; the owner's request of 2026-10-24): a battle between players runs this many
+// times as fast. battleSpeed= in the settings file, 1 (normal) to GAME_SPEED_MAX; PKMN_BATTLE_SPEED overrides it (tests).
+static unsigned sBattleSpeed = GAME_SPEED_DEFAULT;
+static struct GameSpeed sGameSpeed;
+static bool sTestSpeed; // PKMN_TEST_SPEED (test builds only): its own fixed speed, every frame counted as real
 
 static char sSavePath[1024] = "pokeemerald-mp.sav";
 static int sSoftResetChordFrames; // Ctrl+R holds the reset chord for the game to see
@@ -903,8 +910,14 @@ int main(int argc, char **argv)
     // Test builds only (never a player's): PKMN_TEST_SPEED=n runs the game's clock n times as fast, for the gameplay
     // checks that visit every trainer, person and warp (tools/qa/gameplay_check.py). The sound is not queued then.
     if (SDL_getenv("PKMN_TEST_SPEED") != NULL && atoi(SDL_getenv("PKMN_TEST_SPEED")) > 1)
+    {
         timeScale = atoi(SDL_getenv("PKMN_TEST_SPEED"));
+        sTestSpeed = true;
+    }
 #endif
+    GameSpeed_Reset(&sGameSpeed);
+    if (SDL_getenv("PKMN_BATTLE_SPEED") != NULL && atoi(SDL_getenv("PKMN_BATTLE_SPEED")) >= 1)
+        sBattleSpeed = atoi(SDL_getenv("PKMN_BATTLE_SPEED"));
 
     double accumulator = 0.0;
     struct FrameLimiter frameLimiter;
@@ -948,10 +961,10 @@ int main(int argc, char **argv)
 
             curGameTime = SDL_GetPerformanceCounter();
             double deltaTime = (double)((curGameTime - lastGameTime) / (double)SDL_GetPerformanceFrequency());
-            double longest = dt * 5;
-#if defined(DIORAMA_BATTLE_ENV_TEST)
-            longest = fixedTimestep * 5;    // PKMN_TEST_SPEED: up to five real frames of game time per drawn frame
-#endif
+            // Up to five real frames of game time per drawn frame, at any speed (a battle running faster, PKMN_TEST_SPEED):
+            // a slow drawn frame must not hold a sped-up game back to one frame each.
+            double longest = fixedTimestep * 5;
+
             if (deltaTime > longest)
                 deltaTime = dt;
             lastGameTime = curGameTime;
@@ -1030,6 +1043,10 @@ int main(int argc, char **argv)
                     // register are safe to touch.
                     FlushSaveIfDirty();
                     MpBridge_Frame();
+                    // Battle speed: the coming game frame's (a battle between players runs faster). The sound of the
+                    // frame just finished was made above, at its own speed.
+                    if (!sTestSpeed)
+                        timeScale = GameSpeed_Frame(&sGameSpeed, MultiplayerBattle_SpeedUp() ? sBattleSpeed : 1);
                     {
                         u16 keys = Platform_GetKeyInput();
                         if (sSoftResetChordFrames > 0)
@@ -1356,6 +1373,8 @@ static void ReadConfigFile(void)
             sPlatformSettings[PLATFORM_SETTING_VOLUME] = value;
         else if (sscanf(line, "cryVolume=%u", &value) == 1 && value <= 10)
             sPlatformSettings[PLATFORM_SETTING_CRY_VOLUME] = value;
+        else if (sscanf(line, "battleSpeed=%u", &value) == 1 && value >= 1 && value <= GAME_SPEED_MAX)
+            sBattleSpeed = value;
 #ifndef ENABLE_DIORAMA
         else if (Keep3dLine(line))
             ; // kept for the next 3D session
@@ -1425,6 +1444,8 @@ static void StoreConfigFile(void)
     fprintf(configFile, "border=%u\n", sPlatformSettings[PLATFORM_SETTING_BORDER]);
     fprintf(configFile, "volume=%u\n", sPlatformSettings[PLATFORM_SETTING_VOLUME]);
     fprintf(configFile, "cryVolume=%u\n", sPlatformSettings[PLATFORM_SETTING_CRY_VOLUME]);
+    if (sBattleSpeed != GAME_SPEED_DEFAULT)
+        fprintf(configFile, "battleSpeed=%u\n", sBattleSpeed);
 #ifdef ENABLE_DIORAMA
     if (sCameraModeKept)
         fprintf(configFile, "cameraMode=%s\n", sCameraMode == DIORAMA_CAMERA_DIORAMA ? "diorama" : "adventure");
@@ -2299,6 +2320,11 @@ u32 Platform_GetEntropy32(void)
     return (u32)(x ^ (x >> 32));
 }
 
+bool8 Platform_RealFrame(void)
+{
+    return sTestSpeed || GameSpeed_RealFrame(&sGameSpeed);
+}
+
 void Platform_QueueAudio(float *audioBuffer, s32 samplesPerFrame)
 {
     DebugScene_AudioTap(audioBuffer, samplesPerFrame / sizeof(float));
@@ -2310,6 +2336,10 @@ void Platform_QueueAudio(float *audioBuffer, s32 samplesPerFrame)
     {
         int floatCount = samplesPerFrame / sizeof(float);
         float adjustedAudio[floatCount];
+
+        // Battle speed: one game frame's sound a real frame, cross-faded (include/platform/game_speed.h).
+        if (GameSpeed_Sound(&sGameSpeed, audioBuffer, floatCount, adjustedAudio) == 0)
+            return;
         // The mixer leaves output headroom, so full volume sounds quiet. Apply a
         // make-up gain and hard-clamp to [-1,1] so loud passages can't clip. Measured with the audio audit
         // (PKMN_DEBUG_SCENE=audio, all 479 sounds): music peaks 0.06 at the median and 0.115 at most, a sound effect
@@ -2318,7 +2348,7 @@ void Platform_QueueAudio(float *audioBuffer, s32 samplesPerFrame)
         float volume = (sPlatformSettings[PLATFORM_SETTING_VOLUME] / 10.0f) * 4.0f;
         for (int i = 0; i < floatCount; i++)
         {
-            float s = audioBuffer[i] * volume;
+            float s = adjustedAudio[i] * volume;
             if (s > 1.0f) s = 1.0f;
             else if (s < -1.0f) s = -1.0f;
             adjustedAudio[i] = s;

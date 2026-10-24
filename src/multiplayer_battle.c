@@ -9,6 +9,7 @@
 #include "multiplayer_ladder.h"
 #include "multiplayer_rival.h"
 #include "tower_legends.h"
+#include "platform.h"
 #endif
 #line 8 // gba-line
 #include "main.h"
@@ -1875,7 +1876,17 @@ void MultiplayerBattle_Tick(void)
 {
     u32 generation;
     struct MultiplayerBattleControl command;
+#ifdef PORTABLE
+    // Battle speed (include/platform/game_speed.h): the deadline counts real frames, so a slow connection gets the same
+    // seconds when the battle runs faster.
+    if (Platform_RealFrame())
+        sFrame++;
+    gMultiplayerBattleMailbox.frame = sFrame;
+#else
+#line 1428 // gba-line
     sFrame++; gMultiplayerBattleMailbox.frame = sFrame;
+#endif
+#line 1429 // gba-line
     FinishNativeReturn();
     if (MultiplayerBattle_IsActive() && sState != MP_BATTLE_EXPIRED && sState != MP_BATTLE_RECOVERY_REQUIRED && sState != MP_BATTLE_SUSPENDED && sState != MP_BATTLE_ADMITTING
      && (s32)(sFrame - sDeadline) >= MULTIPLAYER_BATTLE_GRACE)
@@ -1899,6 +1910,13 @@ void MultiplayerBattle_Tick(void)
 
 #ifdef PORTABLE
 #include "character_customization.h"
+
+// Battle speed (include/platform/game_speed.h): the window loop runs a battle between players faster (src/platform/sdl2.c
+// asks at every frame boundary, where the game thread is parked).
+bool32 MultiplayerBattle_SpeedUp(void)
+{
+    return gMain.inBattle && MultiplayerBattle_IsNative();
+}
 
 // The native PC game's character selection (character_customization.c): the
 // bound battle's generation, which names the looks the companion sent for it.

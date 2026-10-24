@@ -8,6 +8,9 @@ void Platform_StoreSaveFile(void);
 void Platform_QueueAudio(float *audioBuffer, s32 samplesPerFrame);
 u16 Platform_GetKeyInput(void);
 u32 Platform_GetEntropy32(void);
+// Battle speed (include/platform/game_speed.h): whether this game frame ends a real 1/60 s. Always TRUE at normal speed;
+// while a battle between players runs faster, one game frame in the speed. Frame-counted timeouts count only these.
+bool8 Platform_RealFrame(void);
 // For game code that polls state the GBA's VBlank interrupt updates. Counts polls
 // within the current frame; once a caller is clearly spinning, waits for the next
 // VBlank (the interrupt handler runs) and returns TRUE so the caller re-checks.
