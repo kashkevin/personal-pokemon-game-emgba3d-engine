@@ -4,6 +4,9 @@
 #include "multiplayer_battle.h"
 #include "battle_ffa.h"
 #include "tower_legends.h"
+#ifdef PORTABLE
+#include "platform/battle_stat_stages.h"
+#endif
 #line 5 // gba-line
 #include "battle_hold_effects.h"
 #include "battle_message.h"
@@ -3287,6 +3290,11 @@ static void Cmd_getswitchedmondata(void)
         gBattleStruct->monToSwitchIntoId[battler] = GetArbitraryValidSwitchIn(trainer);
     }
 
+#ifdef PORTABLE
+    // The Pokemon leaving keeps its stat stages until it faints or the battle ends (platform/battle_stat_stages.c).
+    StatStages_SwitchOut(battler);
+#endif
+#line 3216 // gba-line
     gBattlerPartyIndexes[battler] = gBattleStruct->monToSwitchIntoId[battler];
 
     BtlController_EmitGetMonData(battler, B_COMM_TO_CONTROLLER, REQUEST_ALL_BATTLE, 1u << gBattlerPartyIndexes[battler]);
@@ -3350,6 +3358,11 @@ static void Cmd_switchindataupdate(void)
     }
 
     SwitchInClearSetData(battler, &oldData.volatiles);
+#ifdef PORTABLE
+    // ... and has them again when it comes back in (Baton Pass's stand as the game gave them).
+    StatStages_SwitchIn(battler);
+#endif
+#line 3279 // gba-line
 
     if (gBattleTypeFlags & BATTLE_TYPE_PALACE
         && gBattleMons[battler].maxHP / 2 >= gBattleMons[battler].hp

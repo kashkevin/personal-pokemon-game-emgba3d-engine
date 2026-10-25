@@ -47,6 +47,7 @@
 #include "platform/memory_info.h"
 #include "platform/frame_limiter.h"
 #include "platform/game_speed.h"
+#include "platform/battle_stat_stages.h"
 #include "multiplayer_battle.h"
 #include "malloc.h"
 #if defined(DIORAMA_BATTLE_ENV_TEST) && !defined(ENABLE_DIORAMA)
@@ -237,6 +238,7 @@ extern int NativeSelfTest_Rival(void);
 extern int NativeSelfTest_Update32(void);
 extern int NativeSelfTest_HmBox(void);
 extern int NativeSelfTest_LinkReplay(void);
+extern int NativeSelfTest_StatStages(void);
 extern int NativeSelfTest_MoveSwitch(void);
 extern int NativeSelfTest_DumpLegendPool(const char *outPath);
 extern int NativeSelfTest_Rewards(void);
@@ -1258,6 +1260,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_HmBox()); // src/platform/native_selftest_hm.c (HMs from the PC boxes)
         else if (strcmp(argv[i], "--selftest-link-replay") == 0)
             exit(NativeSelfTest_LinkReplay()); // src/platform/native_selftest_replay.c (a link battle's replaying game)
+        else if (strcmp(argv[i], "--selftest-stat-stages") == 0)
+            exit(NativeSelfTest_StatStages()); // src/platform/native_selftest_stages.c (stat stages kept, shown, synced)
         else if (strcmp(argv[i], "--selftest-move-switch") == 0)
             exit(NativeSelfTest_MoveSwitch()); // src/platform/native_selftest_moves.c (move switching, MOVES)
         else if (strcmp(argv[i], "--selftest-coins") == 0)
@@ -1951,6 +1955,10 @@ static void DrawPcOverlay(int outputWidth, int outputHeight)
             DioramaBattleEnvTest_CaptureWritten();
         }
     }
+#endif
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+    if (DioramaBattleEnvTest_WantWindowShot())
+        sScreenshotRequested = true; // test builds only: the stat stage checks' pictures, battle HUD and all
 #endif
     // F12: the picture as drawn, before the PC's own interface goes over it.
     if (sScreenshotRequested)
@@ -3301,6 +3309,8 @@ void VDraw(SDL_Texture *texture)
     gDioramaSceneLayers = DioramaGLBattle_BeginFrame();
 #endif
     DrawFrame(gbaImage);
+    // A battle's stat stage tags beside the healthboxes (Classic 2D, and 3D battles that keep the game's healthboxes)
+    StatStages_DrawGba(gbaImage);
     DebugScene_Frame(gbaImage);
 #if defined(DIORAMA_BATTLE_ENV_TEST) && !defined(ENABLE_DIORAMA)
     DioramaBattleEnvTest_Frame2D(gbaImage);   // test builds only: the Classic 2D test build's captures

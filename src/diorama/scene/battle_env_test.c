@@ -75,6 +75,7 @@
 #include "roamer.h"
 #include "wild_encounter_ow.h"
 #include "platform/ow_shiny_sparkle.h"
+#include "platform/battle_stat_stages.h"
 
 extern const u8 *ScriptContext_DebugPosition(int *mode, int *status);  /* script.c (PORTABLE) */
 
@@ -269,12 +270,42 @@ static struct
        tile memory full) */
     int paletteFree, tilesFullAt, tilesFrames;
     bool tilesFull;
+    /* PKMN_TEST_STAGE_LOG=1: "stages ..." lines whenever a battler's stat stages (shown and the engine's), its place's
+       Pokemon or a party member's kept stages change, and the battle's start and end (StageLogFrame); what was last
+       logged. PKMN_TEST_STAGE_SHOTS=1: a picture at an action menu once the tags changed (StageShot). */
+    bool stageLog, stageShots, stageInBattle;
+    int stageBattles, stageShotCount;
+    char stageSeen[MAX_BATTLERS_COUNT][96];
+    s8 stageStored[MAX_BATTLE_TRAINERS][PARTY_SIZE][NUM_BATTLE_STATS];
+    char stageShotTags[160];
+    SDL_atomic_t windowShot;    /* the 3D test build: a window picture (with the battle HUD) asked for */
+    /* PKMN_TEST_NEXT_BATTLE=<spec>: once a fought battle is over and the field is back, that battle (the party kept) */
+    char nextSpec[96];
+    bool keepParty;
+    u16 partySpecies[PARTY_SIZE];   /* PKMN_TEST_TURNS: the party's species in its own order (sN, pN) */
 } s;
+
+/* PKMN_TEST_TURNS (the stat stage checks, below) */
+static struct
+{
+    char plan[512];
+    const char *next;
+    int frame, hookFrame, partyFrames, battles, lastMove;
+    u16 species;            /* the party member the next party screen chooses (0: the first that can battle) */
+    unsigned short button;
+    int pressLeft, gapLeft;
+    bool active, done, inParty;
+} sTurns;
+
+static void StageShotAtMenu(void);
+static bool StageShotPending(void);
+static void TurnsActionMenu(void);
 
 /* PKMN_TEST_LOG=<file>: every line the driver logs is also appended to that file (a check on Windows reads it: the
  * game's own log may reach no console there). */
 static FILE *sLogFile;
 static void LoadPlan(const char *path);    /* PKMN_TEST_PLAN (below) */
+static void TurnsInit(void);               /* PKMN_TEST_TURNS (below) */
 
 static void TestLog(const char *format, ...)
 {
@@ -577,6 +608,12 @@ static void Init(void)
             s.paradeFrames = EnvInt("PKMN_TEST_PARADE_FRAMES", 12);
         TestLog("Battle env test: parade of the %d Mega forms, %d frames each", sHolderCount, s.paradeFrames);
     }
+    s.stageLog = EnvInt("PKMN_TEST_STAGE_LOG", 0) != 0;
+    s.stageShots = EnvInt("PKMN_TEST_STAGE_SHOTS", 0) != 0;
+    value = SDL_getenv("PKMN_TEST_NEXT_BATTLE");
+    if (value != NULL)
+        SDL_strlcpy(s.nextSpec, value, sizeof(s.nextSpec));
+    TurnsInit();
     value = SDL_getenv("PKMN_TEST_PLAN");
     if (value != NULL && value[0] != '\0')
         LoadPlan(value);
@@ -619,7 +656,8 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
     int gender = -1, item = 0, move = 0, ivs = MAX_PER_STAT_IVS, nature = -1, ball = 0;
     int statIvs[NUM_STATS], statEvs[NUM_STATS], trainedMask = 0;
     bool shiny = false, nextLevelShort = false, ivList = false, evList = false, hatched = false;
-    int ppBonuses = -1;
+    int ppBonuses = -1, moveList[MAX_MON_MOVES] = {0}, firstPp = -1;
+    bool movesSet = false;
     /* the summary's order (I, E, H flags) -> MON_DATA_* field offsets (HP, Atk, Def, Speed, Sp. Atk, Sp. Def) */
     static const u8 sSummaryStat[NUM_STATS] = {STAT_HP, STAT_ATK, STAT_DEF, STAT_SPATK, STAT_SPDEF, STAT_SPEED};
 
@@ -653,6 +691,24 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
             hatched = true;
         else if (*flags == 'p')
             ppBonuses = atoi(flags + 1);
+        else if (*flags == 'V')
+        {
+            /* V<move>.<move>.<move>.<move>: the whole moveset, in order (0 none) - the stat stage checks */
+            const char *m = flags + 1;
+
+            movesSet = true;
+            for (i = 0; i < MAX_MON_MOVES; i++)
+            {
+                moveList[i] = atoi(m);
+                while (*m >= '0' && *m <= '9')
+                    m++;
+                if (*m != '.')
+                    break;
+                m++;
+            }
+        }
+        else if (*flags == 'P')
+            firstPp = atoi(flags + 1); /* P<n>: the first move's PP left */
     }
     for (i = 0; i < 65536 && ((gender >= 0 && GetGenderFromSpeciesAndPersonality(species, personality) != gender)
                              || (nature >= 0 && GetNatureFromPersonality(personality) != (u32)nature)); i++)
@@ -674,6 +730,17 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
     }
     if (move > 0)
         SetMonMoveSlot(mon, move, 0);
+    if (movesSet)
+    {
+        for (i = 0; i < MAX_MON_MOVES; i++)
+            SetMonMoveSlot(mon, moveList[i] > MOVE_NONE && moveList[i] < MOVES_COUNT ? moveList[i] : MOVE_NONE, i);
+    }
+    if (firstPp >= 0)
+    {
+        u8 pp = firstPp;
+
+        SetMonData(mon, MON_DATA_PP1, &pp);
+    }
     if (ball > 0)
     {
         u8 caughtIn = ball;
@@ -1817,7 +1884,35 @@ static void StartBattle(void)
     TestLog("Battle env test: starting %s %d %d %d %d on map %d.%d at %d,%d", kind, a, b, c, d,
             gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum,
             gSaveBlock1Ptr->pos.x, gSaveBlock1Ptr->pos.y);
-    SetUpTestParty();
+    if (!s.keepParty)
+        SetUpTestParty();
+    for (u32 i = 0; i < PARTY_SIZE; i++)
+        s.partySpecies[i] = GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_SPECIES);
+    if (sTurns.active)
+    {
+        const char *p = sTurns.plan;
+
+        gSaveBlock2Ptr->optionsBattleStyle = OPTIONS_BATTLE_STYLE_SET; /* PKMN_TEST_TURNS: no "will you switch?" */
+        gPartyMenu.exitCallback = NULL;     /* the last battle's party screen is not this one's */
+        /* this battle's entries: the plan's segment after as many '|' as battles before it */
+        for (int k = 0; k < sTurns.battles && p != NULL; k++)
+        {
+            p = strchr(p, '|');
+            if (p != NULL)
+                p++;
+        }
+        sTurns.next = p != NULL ? p : "";
+        sTurns.battles++;
+        sTurns.done = false;
+        sTurns.lastMove = 0;
+        sTurns.species = 0;
+    }
+    if (EnvInt("PKMN_TEST_SCENE_OFF", 0) != 0)
+    {
+        /* PKMN_TEST_SCENE_OFF=1: the player's OPTION choices battle scene off and fast text (in memory): a shorter run */
+        gSaveBlock2Ptr->optionsBattleSceneOff = TRUE;
+        gSaveBlock2Ptr->optionsTextSpeed = OPTIONS_TEXT_SPEED_FAST;
+    }
     SetUpTestBox();
     if (getenv("PKMN_TEST_BADGES") != NULL)
         ApplyTestBadges();
@@ -2800,6 +2895,21 @@ void DioramaBattleEnvTest_FieldTick(void)
             SweepNext();
             return;
         }
+        if (s.nextSpec[0] != '\0')
+        {
+            /* PKMN_TEST_NEXT_BATTLE: one more battle, the party as this one left it */
+            TestLog("Battle env test: the next battle: %s", s.nextSpec);
+            SDL_strlcpy(s.spec, s.nextSpec, sizeof(s.spec));
+            s.nextSpec[0] = '\0';
+            s.keepParty = true;
+            s.started = false;
+            s.fightOver = false;
+            s.fightStartMs = 0;
+            s.fieldFrames = 0;
+            SDL_AtomicSet(&s.menuSeen, 0);
+            SDL_AtomicSet(&s.battleSeen, 0);
+            return;
+        }
         if (s.fieldAfter > 0 && s.fieldKeys[0] != '\0')
         {
             s.fieldAfterPending = true;     /* PKMN_TEST_FIELD_AFTER: the field keys (below), instead of the end */
@@ -3062,6 +3172,19 @@ void DioramaBattleEnvTest_OnActionMenu(void)
         SDL_AtomicSet(&s.menuSeen, 1);
     if (s.paradeFrames > 0)
         ParadeTick();
+    if (sTurns.active)
+    {
+        if (sTurns.hookFrame < sTurns.frame - 1)
+        {
+            StageShotAtMenu();  /* the menu just came up */
+            TurnsActionMenu();
+            if (StageShotPending())
+                gMain.newKeys &= ~A_BUTTON; /* the plan's choice once the picture is taken (TurnsKeys) */
+        }
+        sTurns.hookFrame = sTurns.frame;
+    }
+    else if (s.stageShots)
+        StageShotAtMenu();
 }
 
 /*
@@ -3144,6 +3267,331 @@ static bool ForcedSwitchOnFainted(void)
          || GetMonData(&gParties[B_TRAINER_PLAYER][slot], MON_DATA_HP) == 0);
 }
 
+
+/*
+ * The stat stage checks (tools/battle_env/stat_stages_check.py; platform/battle_stat_stages.c).
+ *
+ * PKMN_TEST_TURNS="entry,entry,...": the player's choices, one entry each time the game asks for one: mN the move in
+ * slot N (FIGHT, then that move; a target the game asks for: its first choice), sN a switch to the party's Pokemon N
+ * (the PKMN_TEST_PARTY order: POKeMON, that Pokemon, SHIFT), pN the Pokemon N where the game opens the party itself (a
+ * Baton Pass, U-turn or a fainted Pokemon's place; without a pN there: the first that can battle), r RUN. Once the
+ * entries run out, A at every question (FIGHT, the last move chosen), as PKMN_TEST_FIGHT. The cursors are set as the engine
+ * keeps them (gActionSelectionCursor, gMoveSelectionCursor, gPartyMenu.slotId), then the player's A: the same choice
+ * on the Classic 2D and the 3D game whatever their menus look like. In such a run the battle style is SET (no "will you
+ * switch?" between a trainer's Pokemon), in memory only.
+ */
+
+static void TurnsInit(void)
+{
+    const char *value = SDL_getenv("PKMN_TEST_TURNS");
+
+    if (value == NULL || value[0] == '\0')
+        return;
+    SDL_strlcpy(sTurns.plan, value, sizeof(sTurns.plan));
+    sTurns.next = sTurns.plan;
+    sTurns.active = true;
+    sTurns.hookFrame = -10;
+    TestLog("Battle env test: turns '%s'", sTurns.plan);
+}
+
+/* the next entry: its letter and number ('\0' when the plan is done) */
+static char TurnsNextEntry(int *number, bool partyOnly)
+{
+    const char *p = sTurns.next;
+    char kind;
+
+    while (p != NULL && (*p == ',' || *p == ' '))
+        p++;
+    if (p == NULL || *p == '\0' || *p == '|')
+        return '\0';   /* this battle's entries are done ('|': the next battle's follow) */
+    kind = *p;
+    if (partyOnly && kind != 'p')
+        return '\0';
+    *number = atoi(p + 1);
+    p++;
+    while (*p >= '0' && *p <= '9')
+        p++;
+    sTurns.next = p;
+    return kind;
+}
+
+static unsigned short TurnsPress(unsigned short button, int gap)
+{
+    sTurns.button = button;
+    sTurns.pressLeft = AUTOPILOT_HOLD - 1;
+    sTurns.gapLeft = gap;
+    return button;
+}
+
+/* a battle's party screen (gPartyMenu's exit is forgotten as each battle starts: StartBattle) */
+static bool TurnsPartyUp(void)
+{
+    return gMain.inBattle && gMain.callback2 != BattleMainCB2 && gMain.callback2 != CB2_SetUpReshowBattleScreenAfterMenu
+        && gPartyMenu.menuType == PARTY_MENU_TYPE_IN_BATTLE && gPartyMenu.exitCallback == CB2_SetUpReshowBattleScreenAfterMenu;
+}
+
+/* the player battler whose action the game asks for now */
+static int TurnsActionBattler(void)
+{
+    for (enum BattlerId b = 0; b < gBattlersCount; b++)
+    {
+        if (gBattlerBattleController[b] == BATTLE_CONTROLLER_PLAYER && IsBattleControllerActiveOnLocal(b)
+         && gBattleResources->bufferA[b][0] == CONTROLLER_CHOOSEACTION)
+            return b;
+    }
+    return -1;
+}
+
+/* the test parties' Pokemon are of different species: one on the player's side of the field now */
+static bool TurnsOnField(u16 species)
+{
+    for (enum BattlerId b = 0; b < gBattlersCount; b++)
+    {
+        if (GetBattlerSide(b) == B_SIDE_PLAYER && gBattleMons[b].hp != 0 && gBattleMons[b].species == species)
+            return true;
+    }
+    return false;
+}
+
+/* HandleInputChooseAction (the game thread, before it reads the buttons): an action menu that just came up takes the
+ * plan's next entry, the engine's cursors set for it, so the A pressed in this very frame already chooses it. */
+static void TurnsActionMenu(void)
+{
+    int battler = TurnsActionBattler(), number = 0;
+    char kind;
+
+    if (battler < 0)
+        return;
+    while ((kind = TurnsNextEntry(&number, false)) == 'p')
+        TestLog("Battle env test: turns: no party screen came for p%d; skipped", number);
+    gMoveSelectionCursor[battler] = 0;
+    sTurns.species = 0;
+    if (kind == '\0')
+    {
+        if (!sTurns.done)
+            TestLog("Battle env test: turns: this battle's entries are done; FIGHT and move %d from here", sTurns.lastMove);
+        sTurns.done = true;
+        gActionSelectionCursor[battler] = 0;
+        gMoveSelectionCursor[battler] = sTurns.lastMove;
+        return;
+    }
+    TestLog("Battle env test: turns: battler %d chooses %c%d", battler, kind, number);
+    if (kind == 'm' && number >= 0 && number < MAX_MON_MOVES)
+    {
+        gActionSelectionCursor[battler] = 0;
+        gMoveSelectionCursor[battler] = number;
+        sTurns.lastMove = number;
+    }
+    else if (kind == 's' && number >= 0 && number < PARTY_SIZE)
+    {
+        gActionSelectionCursor[battler] = 2;
+        sTurns.species = s.partySpecies[number];
+    }
+    else if (kind == 'r')
+        gActionSelectionCursor[battler] = 3;
+    else
+        TestLog("Battle env test: turns: cannot read entry %c%d", kind, number);
+}
+
+/* Each frame of a battle: A as a player presses it (the menus' choices are the cursors the plan set), and in a party
+ * screen the plan's Pokemon put under the cursor first. */
+static unsigned short TurnsKeys(void)
+{
+    int number = 0, slot;
+
+    sTurns.frame++;
+    if (StageShotPending())
+    {
+        /* a stage shot of the action menu first: a switch chosen now would fade the screen (and the tags) out */
+        sTurns.pressLeft = 0;
+        sTurns.gapLeft = AUTOPILOT_HOLD;
+        return 0;
+    }
+    if (sTurns.pressLeft > 0)
+    {
+        sTurns.pressLeft--;
+        return sTurns.button;
+    }
+    if (sTurns.gapLeft > 0)
+    {
+        sTurns.gapLeft--;
+        return 0;
+    }
+    if (gBattleResources == NULL || gBattleStruct == NULL)
+        return 0;
+    if (!TurnsPartyUp())
+    {
+        if (sTurns.inParty)
+            sTurns.species = 0;
+        sTurns.inParty = false;
+        return TurnsPress(A_BUTTON, AUTOPILOT_HOLD * 2);
+    }
+    if (!sTurns.inParty)
+    {
+        sTurns.inParty = true;
+        sTurns.partyFrames = 0;
+        /* a party screen the game opened itself (Baton Pass, U-turn, a fainted Pokemon's place) takes a pN */
+        if (sTurns.species == 0 && TurnsNextEntry(&number, true) == 'p' && number >= 0 && number < PARTY_SIZE)
+            sTurns.species = s.partySpecies[number];
+        TestLog("Battle env test: turns: the party screen (action %d), choosing %s", gPartyMenu.action,
+                sTurns.species != 0 ? "the plan's Pokemon" : "the first that can battle");
+    }
+    if (gPaletteFade.active || ++sTurns.partyFrames < 30)
+        return 0;
+    /* the party in the menu's own order (the battle's) */
+    for (slot = 0; slot < PARTY_SIZE; slot++)
+    {
+        struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][slot];
+        u16 species = GetMonData(mon, MON_DATA_SPECIES);
+
+        if (species == SPECIES_NONE || GetMonData(mon, MON_DATA_IS_EGG))
+            continue;
+        if (sTurns.species != 0 ? species == sTurns.species
+                                 : GetMonData(mon, MON_DATA_HP) != 0 && !TurnsOnField(species))
+            break;
+    }
+    if (slot < PARTY_SIZE && gPartyMenu.slotId != slot)
+    {
+        TestLog("Battle env test: turns: party slot %d (species %u)", slot,
+                (unsigned)GetMonData(&gParties[B_TRAINER_PLAYER][slot], MON_DATA_SPECIES));
+        gPartyMenu.slotId = slot;
+    }
+    return TurnsPress(A_BUTTON, 24);    /* the Pokemon, then SHIFT / SEND OUT */
+}
+
+/* The 3D test build (platform/sdl2.c, DrawPcOverlay): a window picture asked for, taken as F12 takes one (with the
+ * battle HUD the UI draws), into the run's screenshots folder. */
+bool DioramaBattleEnvTest_WantWindowShot(void)
+{
+    return SDL_AtomicCAS(&s.windowShot, 1, 0);
+}
+
+static void StageShot(const char *tags)
+{
+    char what[200];
+
+    SDL_snprintf(what, sizeof(what), "stage shot %02d: %s", s.stageShotCount, tags);
+#ifdef ENABLE_DIORAMA
+    SDL_AtomicSet(&s.windowShot, 1);
+    TestLog("Battle env test: %s (a window picture in screenshots/)", what);
+#else
+    RequestShot(60 + s.stageShotCount, 2, "a stage shot");
+    TestLog("Battle env test: %s (%s-%02d.png)", what, s.megaShotStem, 60 + s.stageShotCount);
+#endif
+    s.stageShotCount++;
+}
+
+/* PKMN_TEST_STAGE_LOG: what every battler shows and the engine has, and each party member's kept stages, whenever they
+ * change; the battle's start and end. "shown" is what the tags show (the order STAT_ATK..STAT_EVASION: Atk, Def, Spe,
+ * SpA, SpD, Acc, Eva), "engine" the engine's own (the master's or a single-player game's). */
+static void StageLogFrame(void)
+{
+    bool inBattle = gMain.inBattle && gBattleStruct != NULL && gBattleResources != NULL && gBattlersCount > 0;
+
+    if (!s.stageLog)
+        return;
+    if (inBattle && !s.stageInBattle)
+    {
+        s.stageInBattle = true;
+        s.stageBattles++;
+        memset(s.stageSeen, 0, sizeof(s.stageSeen));
+        memset(s.stageStored, 0, sizeof(s.stageStored));
+        s.stageShotTags[0] = '\0';
+        TestLog("Battle env test: stages battle %d start, type 0x%x, %d battlers", s.stageBattles,
+                (unsigned)gBattleTypeFlags, gBattlersCount);
+    }
+    else if (!inBattle && s.stageInBattle)
+    {
+        s.stageInBattle = false;
+        TestLog("Battle env test: stages battle %d end, outcome %d", s.stageBattles, gBattleOutcome);
+    }
+    if (!inBattle)
+        return;
+    for (enum BattlerId b = 0; b < gBattlersCount; b++)
+    {
+        struct StatStageTag tags[NUM_BATTLE_STATS];
+        s8 shown[NUM_BATTLE_STATS];
+        char line[96], text[64];
+        u32 count = StatStages_Tags(b, tags);
+
+        StatStages_Shown(b, shown);
+        text[0] = '\0';
+        for (u32 i = 0; i < count; i++)
+        {
+            SDL_strlcat(text, tags[i].text, sizeof(text));
+            if (i + 1 < count)
+                SDL_strlcat(text, " ", sizeof(text));
+        }
+        SDL_snprintf(line, sizeof(line), "%d %d %u %u %d,%d,%d,%d,%d,%d,%d %d,%d,%d,%d,%d,%d,%d", GetBattlerTrainer(b),
+                     gBattlerPartyIndexes[b], (unsigned)gBattleMons[b].species, (unsigned)gBattleMons[b].hp,
+                     shown[1], shown[2], shown[3], shown[4], shown[5], shown[6], shown[7],
+                     gBattleMons[b].statStages[1] - DEFAULT_STAT_STAGE, gBattleMons[b].statStages[2] - DEFAULT_STAT_STAGE,
+                     gBattleMons[b].statStages[3] - DEFAULT_STAT_STAGE, gBattleMons[b].statStages[4] - DEFAULT_STAT_STAGE,
+                     gBattleMons[b].statStages[5] - DEFAULT_STAT_STAGE, gBattleMons[b].statStages[6] - DEFAULT_STAT_STAGE,
+                     gBattleMons[b].statStages[7] - DEFAULT_STAT_STAGE);
+        if (strcmp(line, s.stageSeen[b]) != 0)
+        {
+            SDL_strlcpy(s.stageSeen[b], line, sizeof(s.stageSeen[b]));
+            TestLog("Battle env test: stages battler %d trainer/slot/species/hp/shown/engine %s tags \"%s\"", b, line, text);
+        }
+    }
+    for (u32 t = 0; t < MAX_BATTLE_TRAINERS; t++)
+    {
+        for (u32 slot = 0; slot < PARTY_SIZE; slot++)
+        {
+            s8 now[NUM_BATTLE_STATS];
+
+            for (u32 i = 0; i < NUM_BATTLE_STATS; i++)
+                now[i] = StatStages_Stored(t, slot, i);
+            if (memcmp(now, s.stageStored[t][slot], sizeof(now)) == 0)
+                continue;
+            memcpy(s.stageStored[t][slot], now, sizeof(now));
+            TestLog("Battle env test: stages kept trainer %u slot %u: %d,%d,%d,%d,%d,%d,%d", t, slot, now[1], now[2], now[3],
+                    now[4], now[5], now[6], now[7]);
+        }
+    }
+}
+
+/* PKMN_TEST_STAGE_SHOTS: a stage shot asked for and not taken yet */
+static bool StageShotPending(void)
+{
+    if (!s.stageShots)
+        return false;
+#ifdef ENABLE_DIORAMA
+    return SDL_AtomicGet(&s.windowShot) != 0;
+#else
+    return s.megaShotCountdown > 0 || SDL_AtomicGet(&s.megaShotState) == 1 || SDL_AtomicGet(&s.megaShotState) == 2;
+#endif
+}
+
+/* PKMN_TEST_STAGE_SHOTS: at an action menu, a picture when what the tags show changed since the last one */
+static void StageShotAtMenu(void)
+{
+    char all[160] = {0};
+
+    if (!s.stageShots || gBattleResources == NULL)
+        return;
+    for (enum BattlerId b = 0; b < gBattlersCount; b++)
+    {
+        struct StatStageTag tags[NUM_BATTLE_STATS];
+        u32 count = StatStages_Tags(b, tags);
+        char part[48];
+
+        SDL_snprintf(part, sizeof(part), "%s[%d:", b ? " " : "", b);
+        SDL_strlcat(all, part, sizeof(all));
+        for (u32 i = 0; i < count; i++)
+        {
+            SDL_strlcat(all, i ? " " : "", sizeof(all));
+            SDL_strlcat(all, tags[i].text, sizeof(all));
+        }
+        SDL_strlcat(all, "]", sizeof(all));
+    }
+    if (strcmp(all, s.stageShotTags) == 0)
+        return;
+    SDL_strlcpy(s.stageShotTags, all, sizeof(s.stageShotTags));
+    StageShot(all);
+}
+
 unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int nowMs)
 {
     unsigned int t;
@@ -3162,6 +3610,7 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
     SparkleLogField();
     OweBattleField();
     CrowdField();
+    StageLogFrame();
     ShotTick();
     /* PKMN_TEST_PLAN: once the autopilot brought the field up, the plan's keys alone */
     if (sPlan.phase != PLAN_OFF && SDL_AtomicGet(&s.fieldSeen) != 0)
@@ -3240,6 +3689,9 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
     if (SDL_AtomicGet(&s.menuSeen) != 0 && s.keys[0] != '\0'
      && (s.fightSeconds <= 0 || s.keyFrames <= s.keysLast + AUTOPILOT_HOLD))
         return keys | ScriptKeys();
+    /* PKMN_TEST_TURNS: the plan's choices in a battle (the autopilot brings the field and the battle up) */
+    if (sTurns.active && SDL_AtomicGet(&s.fieldSeen) != 0 && gMain.inBattle)
+        return keys | TurnsKeys();
     /* PKMN_TEST_FIGHT: once the picture is taken (or none was asked for), A held for
      * AUTOPILOT_HOLD frames and released for twice as long, until the field is back: the
      * first move on the first target, every line, every question's first answer */

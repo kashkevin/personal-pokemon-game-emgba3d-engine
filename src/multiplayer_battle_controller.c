@@ -10,6 +10,10 @@
 #include "constants/songs.h"
 #include "constants/battle_anim.h"
 #include "constants/characters.h"
+#ifdef PORTABLE
+#include "platform/battle_stat_stages.h"
+#endif
+#line 13 // gba-line
 
 _Static_assert(sizeof(struct BattlePokemon) == 140, "Native battle mon schema");
 _Static_assert(sizeof(struct BattleMsgData) == 76, "Native message schema");
@@ -178,6 +182,11 @@ u16 MultiplayerBattle_ControllerRawSize(u8 command, u8 request)
     case CONTROLLER_DATATRANSFER: return 144;
     case CONTROLLER_TWORETURNVALUES: return 6;
     case CONTROLLER_CHOSENMONRETURNVALUE: return 5;
+#ifdef PORTABLE
+    // the link master's stat stages for every battler (platform/battle_stat_stages.c; the app's route knows it too)
+    case CONTROLLER_PC_STAT_STAGES: return PC_STAT_STAGES_RAW_SIZE;
+#endif
+#line 173 // gba-line
     default: return 0;
     }
 }
@@ -247,6 +256,10 @@ static bool32 MasterDataValid(const u8 *p)
         return (value == B_OUTCOME_WON || value == B_OUTCOME_LOST || value == B_OUTCOME_DREW)
 #line 222 // gba-line
             && !p[2] && !p[3] && !p[4] && !p[5];
+#ifdef PORTABLE
+    case CONTROLLER_PC_STAT_STAGES: return StatStages_CommandValid(p, BattlerCount());
+#endif
+#line 223 // gba-line
     default: return TRUE;
     }
 }

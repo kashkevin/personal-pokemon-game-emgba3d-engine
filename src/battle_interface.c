@@ -3527,3 +3527,88 @@ void Battle_NativeUiHudTiles(u32 mask[32])
         NativeUiMarkTag(mask, NATIVE_UI_INDICATOR_TAG + i);
 }
 #endif // ENABLE_NATIVE_UI
+
+#ifdef PORTABLE
+#include "platform/battle_stat_stages.h"
+// PC only (platform/battle_stat_stages.c, Classic 2D's stat stage tags): where a battler's healthbox is drawn, while its
+// sprite is still that battler's healthbox (a menu's return rebuilds the sprites; the Safari Zone's box has no tags)
+// and shown. The plate is what the box's art covers: the opponent's with its tail, the player's singles box with its
+// HP numbers and Exp. bar.
+bool32 Battle_PcHealthbox(u32 battler, struct PcHealthbox *out)
+{
+    const struct Sprite *s;
+    const struct SpriteTemplate *t;
+    u8 id;
+
+    if (battler >= MAX_BATTLERS_COUNT || battler >= gBattlersCount || gBattleSpritesDataPtr == NULL)
+        return FALSE;
+    id = gHealthboxSpriteIds[battler];
+    if (id >= MAX_SPRITES)
+        return FALSE;
+    s = &gSprites[id];
+    t = s->template;
+    if (!s->inUse || s->invisible || s->hMain_Battler != (s16)battler)
+        return FALSE;
+    if (t >= &sHealthboxPlayerSpriteTemplates[0] && t < &sHealthboxPlayerSpriteTemplates[ARRAY_COUNT(sHealthboxPlayerSpriteTemplates)])
+        out->playerStyle = TRUE;
+    else if (t >= &sHealthboxOpponentSpriteTemplates[0] && t < &sHealthboxOpponentSpriteTemplates[ARRAY_COUNT(sHealthboxOpponentSpriteTemplates)])
+        out->playerStyle = FALSE;
+    else
+        return FALSE;
+    out->x = s->x + s->x2 + s->centerToCornerVecX;
+    out->y = s->y + s->y2 + s->centerToCornerVecY;
+    out->paletteNum = s->oam.paletteNum;
+    if (out->playerStyle)
+    {
+        out->plateX = out->x + 8;
+        out->plateY = out->y + 2;
+        out->plateW = 93;
+        out->plateH = IsDoubleBattle() ? 26 : 38;
+    }
+    else
+    {
+        out->plateX = out->x + 1;
+        out->plateY = out->y + 1;
+        out->plateW = 101;
+        out->plateH = 26;
+    }
+    return TRUE;
+}
+
+static bool32 PcSpriteRect(const struct Sprite *s, struct PcRect *out)
+{
+    if (!s->inUse || s->invisible || s->oam.shape > ST_OAM_V_RECTANGLE)
+        return FALSE;
+    out->x = s->x + s->x2 + s->centerToCornerVecX;
+    out->y = s->y + s->y2 + s->centerToCornerVecY;
+    out->w = gOamDimensions[s->oam.shape][s->oam.size].width;
+    out->h = gOamDimensions[s->oam.shape][s->oam.size].height;
+    return TRUE;
+}
+
+// What a stat stage tag may not cover in the GBA picture: every healthbox's plate, the ability pop-ups, the last used
+// Ball (its icon and window) and the gimmick button (Mega Evolution...). Found by what each sprite is now (its callback,
+// its tiles), never by an id remembered from before a menu rebuilt the sprites.
+u32 Battle_PcProtectedRects(struct PcRect *out, u32 max)
+{
+    struct PcHealthbox box;
+    u16 trigger = GetSpriteTileStartByTag(TAG_GIMMICK_TRIGGER_TILE);
+    u32 n = 0;
+
+    for (u32 battler = 0; battler < gBattlersCount && n < max; battler++)
+    {
+        if (Battle_PcHealthbox(battler, &box))
+            out[n++] = (struct PcRect){box.plateX, box.plateY, box.plateW, box.plateH};
+    }
+    for (u32 i = 0; i < MAX_SPRITES && n < max; i++)
+    {
+        const struct Sprite *s = &gSprites[i];
+
+        if (s->callback == SpriteCb_AbilityPopUp || s->callback == SpriteCB_LastUsedBall
+         || s->callback == SpriteCB_LastUsedBallWin || s->callback == SpriteCB_LastUsedBallBounce
+         || (trigger != 0xFFFF && s->oam.tileNum >= trigger && s->oam.tileNum < trigger + 64))
+            n += PcSpriteRect(s, &out[n]);
+    }
+    return n;
+}
+#endif // PORTABLE

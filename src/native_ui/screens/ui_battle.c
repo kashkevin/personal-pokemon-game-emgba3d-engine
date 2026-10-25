@@ -57,6 +57,7 @@
 #include "native_ui/ui_screen.h"
 #include "native_ui/ui_text.h"
 #include "native_ui/ui_widgets.h"
+#include "platform/battle_stat_stages.h"
 
 enum
 {
@@ -117,6 +118,8 @@ struct Box
     int slide;         /* the healthbox's slide (x2), GBA pixels */
     int bob;           /* its bounce (y2) */
     char owner[24];    /* its trainer's name in capitals, as the messages name them ("" wild) */
+    struct StatStageTag tags[NUM_BATTLE_STATS]; /* its stat stages not at 0 (platform/battle_stat_stages.c) */
+    u8 tagCount;
 };
 
 static struct
@@ -280,6 +283,7 @@ static void CaptureBox(u32 battler)
              && GetSetPokedexFlag(SpeciesToNationalPokedexNum(GetMonData(mon, MON_DATA_SPECIES)), FLAG_GET_CAUGHT);
     b->slide = nb.x2;
     b->bob = nb.y2;
+    b->tagCount = StatStages_Tags(battler, b->tags);
 }
 
 static void CaptureFoePips(void)
@@ -740,6 +744,27 @@ static void FfaTag(int x, int y, int w, bool right, u32 battler, bool out)
     UiCaps_Draw(x + 6, y - 9, text, UI_P_TEXT_W, UI_HEX(0x101018), UI_CAPS_SHADOW, UI_ALIGN_LEFT, UI_NONE);
 }
 
+/* The stat stage tags (platform/battle_stat_stages.c; Pokemon Showdown's): "ATK+2" in blue, "SPE-1" in red, in rows of
+ * three beside the databox, past its HP rail, on the side towards the middle of the screen: right of a box on the left
+ * (the opponents'), left of a box on the right (the player's side). */
+static void StatTags(int boxX, int boxY, int boxW, const struct Box *b, bool right)
+{
+    const int perRow = 3, rowH = 13, gap = 2;
+    int y = boxY + 2;
+
+    for (int first = 0; first < b->tagCount; first += perRow, y += rowH)
+    {
+        int last = first + perRow < b->tagCount ? first + perRow : b->tagCount, total = 0, x;
+
+        for (int i = first; i < last; i++)
+            total += UiCaps_Width(b->tags[i].text) + 10 + (i > first ? gap : 0);
+        x = right ? boxX + boxW + 24 : boxX - 24 - total;
+        for (int i = first; i < last; i++)
+            x = UiW_StatusBadge(x, y, b->tags[i].text, b->tags[i].stage > 0 ? UI_HEX(0x3C78C8) : UI_HEX(0xC85048), 0)
+              + gap;
+    }
+}
+
 static const struct Box *BoxAt(u32 position);
 
 /* the free-for-all's four boxes: the other three trainers' Pokémon and yours, each under its trainer's name tag. The
@@ -758,6 +783,7 @@ static void DrawBoxesFfa(int L, int R, int T, int dyB)
         if (b != NULL)
         {
             Databox2(x + b->slide * 2, y + b->bob, b, mine);
+            StatTags(x + b->slide * 2, y + b->bob, w, b, !right);
             if (b->slide == 0)
                 FfaTag(x, y + b->bob, w, right, battler, false);
         }
@@ -1052,6 +1078,7 @@ static void DrawBoxes(int L, int R, int T, int dyB)
         if (foe != NULL)
         {
             Databox(L + foe->slide * 2, T + 18 + foe->bob, foe);
+            StatTags(L + foe->slide * 2, T + 18 + foe->bob, 152, foe, true);
             if (sB.foePipsOn && foe->slide == 0)
                 for (int i = 0; i < PARTY_SIZE; i++)
                     if (sB.foePips[i] != 0)
@@ -1060,7 +1087,10 @@ static void DrawBoxes(int L, int R, int T, int dyB)
         if (me != NULL && sB.safari)
             SafariBox(R - 184 + me->slide * 2, 222 + dyB + me->bob);
         else if (me != NULL)
+        {
             Databox(R - 184 + me->slide * 2, 222 + dyB + me->bob, me);
+            StatTags(R - 184 + me->slide * 2, 222 + dyB + me->bob, 168, me, false);
+        }
         return;
     }
     {
@@ -1068,15 +1098,27 @@ static void DrawBoxes(int L, int R, int T, int dyB)
         const struct Box *pa = BoxAt(B_POSITION_PLAYER_LEFT), *pb = BoxAt(B_POSITION_PLAYER_RIGHT);
 
         if (fa != NULL)
+        {
             Databox2(L + fa->slide * 2, T + 22 + fa->bob, fa, false);
+            StatTags(L + fa->slide * 2, T + 22 + fa->bob, 156, fa, true);
+        }
         if (fb != NULL)
+        {
             Databox2(L + fb->slide * 2, T + 74 + fb->bob, fb, false);
+            StatTags(L + fb->slide * 2, T + 74 + fb->bob, 156, fb, true);
+        }
         if (sB.partnerIsMine)
         {
             if (pb != NULL)
+            {
                 Databox2(R - 176 + pb->slide * 2, 178 + dyB + pb->bob, pb, true);
+                StatTags(R - 176 + pb->slide * 2, 178 + dyB + pb->bob, 176, pb, false);
+            }
             if (pa != NULL)
+            {
                 Databox2(R - 176 + pa->slide * 2, 228 + dyB + pa->bob, pa, true);
+                StatTags(R - 176 + pa->slide * 2, 228 + dyB + pa->bob, 176, pa, false);
+            }
         }
         else
         {
@@ -1088,9 +1130,15 @@ static void DrawBoxes(int L, int R, int T, int dyB)
             if ((pa != NULL && !pa->mine) || (pb != NULL && pb->mine))
                 ally = pa, own = pb;
             if (ally != NULL)
+            {
                 Databox2(R - 156 + ally->slide * 2, 178 + dyB + ally->bob, ally, false);
+                StatTags(R - 156 + ally->slide * 2, 178 + dyB + ally->bob, 156, ally, false);
+            }
             if (own != NULL)
+            {
                 Databox2(R - 176 + own->slide * 2, 228 + dyB + own->bob, own, true);
+                StatTags(R - 176 + own->slide * 2, 228 + dyB + own->bob, 176, own, false);
+            }
         }
     }
 }
