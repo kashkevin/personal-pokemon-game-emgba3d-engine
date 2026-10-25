@@ -144,6 +144,8 @@ struct MpBridgeCaps
                                         (MS-62, the 2v2s; needs battle 3; launcher opt-in battle_receive_many=1) */
     uint32_t towerNextPage;          /* 1: OPEN page 4, the Tower's next floor after "go on?", answered with flags 4 (the
                                         owner's request of 2026-10-24; needs tower 1; launcher opt-in tower_next_page=1) */
+    uint32_t battleDeliver;          /* 1: battle opcode 27 DELIVER, a core's acknowledgement and its blocks in one command
+                                        (MS-62, battle speed; needs battle PEEK; launcher opt-in battle_deliver=1) */
 };
 
 enum

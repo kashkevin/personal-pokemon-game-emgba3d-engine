@@ -81,6 +81,7 @@ const u32 gMultiplayerBattleFfa3AbiVersion = MULTIPLAYER_BATTLE_FFA3_ABI;
 #ifdef PORTABLE
 const u32 gMultiplayerBattlePeekAbiVersion = 1; // KNOWN_ISSUES MS-62: PEEK (HandlePeek) and an ACK_OUT after it
 const u32 gMultiplayerBattleReceiveManyAbiVersion = 1; // MS-62: RECEIVE_MANY (HandleReceiveMany), a batch in one command
+const u32 gMultiplayerBattleDeliverAbiVersion = 1; // MS-62: DELIVER (HandleDeliver), an acknowledgement and blocks at once
 #endif
 #line 54 // gba-line
 EWRAM_DATA volatile struct MultiplayerBattleMailbox gMultiplayerBattleMailbox = {0};
@@ -1539,6 +1540,148 @@ static void HandleReceiveMany(const struct MultiplayerBattleControl *c)
         sDeadline = sFrame + MULTIPLAYER_BATTLE_DEADLINE;
     Respond(c, status, status == MP_BATTLE_OK ? data : NULL, status == MP_BATTLE_OK ? 2 : 0, status == MP_BATTLE_OK);
 }
+
+// KNOWN_ISSUES MS-62, battle speed: every command to a player across the internet costs a round trip, and a block took
+// up to three to one core (its RECEIVE, the next block's RECEIVE, then the acknowledgement of that core's own block,
+// each waiting for the one before). DELIVER (opcode 27; the launcher opts in with bridge.txt battle_deliver=1) carries
+// all of it in one command: this core's own outbound block's acknowledgement, exactly as ACK_OUT would take it (the
+// block fields name the block, the payload starts with its CRC and the mask of every other core), and then any number of
+// other cores' whole small blocks in the host's order (RECEIVE_MANY's entries: source, kind, size 1-128, block sequence,
+// then the bytes), several from one core too, in that core's order: each battle (controller) block is moved into the
+// battle's link buffer as soon as it is taken, as the VBlank handler does every frame (TryReceiveLinkBattleData), so the
+// battle reads them in the host's order and in the coming frame. Either part may be absent, not both. The answer is OK
+// with [acknowledged 0/1, blocks applied, the refusal that stopped the rest or OK] when anything applied (the command
+// is consumed, cached and refreshes the watchdog like any other); else the acknowledgement's or first block's refusal
+// (BUSY leaves the sequence for the next command).
+#define MP_BATTLE_DELIVER 27
+#define DELIVER_ACK_SIZE 8
+
+static u8 DeliverAckStatus(const struct MultiplayerBattleControl *c)
+{
+    if (c->kind != sOutKind)
+        return MP_BATTLE_KIND;
+    if (c->length < DELIVER_ACK_SIZE || !sOutPending || c->blockSeq != sOutSeq || c->totalSize != sOutSize
+     || c->offset != sOutSize || (sReadOffset != sOutSize && sReadOffset != 0))
+        return MP_BATTLE_ORDER;
+    if (Word(c->data) != sOutCrc)
+        return MP_BATTLE_CRC;
+    if (Word(c->data + 4) != (((1 << sBinding.playerCount) - 1) ^ (1 << sBinding.localSlot)))
+        return MP_BATTLE_ROLE;
+    return MP_BATTLE_OK;
+}
+
+static void DrainReceived(void)
+{
+    // The VBlank handler's own move of complete received blocks into the battle's link buffer (only while the native
+    // battle runs; a block that does not fit stays in its slot, as at VBlank).
+    if (sReceiveFlags & ~(1 << sBinding.localSlot))
+        TryReceiveLinkBattleData();
+}
+
+static u8 Deliver(const struct MultiplayerBattleControl *c, u8 *out)
+{
+    struct MultiplayerBattleControl part;
+    u32 at = c->blockSeq ? DELIVER_ACK_SIZE : 0, applied = 0;
+    u8 status = MP_BATTLE_OK;
+
+    out[0] = out[1] = 0; out[2] = MP_BATTLE_OK;
+    while (at < c->length)
+    {
+        u32 size;
+        if (c->length - at < RECEIVE_MANY_HEADER + 1) return MP_BATTLE_MALFORMED;
+        size = c->data[at + 2] | (c->data[at + 3] << 8);
+        if (!size || size > MULTIPLAYER_BATTLE_CHUNK_SIZE || size > c->length - at - RECEIVE_MANY_HEADER)
+            return MP_BATTLE_MALFORMED;
+        at += RECEIVE_MANY_HEADER + size;
+    }
+    if (c->blockSeq)
+    {
+        status = DeliverAckStatus(c);
+        if (status != MP_BATTLE_OK)
+            return status;
+        sOutPending = FALSE;
+        out[0] = 1;
+    }
+    for (at = c->blockSeq ? DELIVER_ACK_SIZE : 0; at < c->length; )
+    {
+        u32 size = c->data[at + 2] | (c->data[at + 3] << 8);
+        part = *c;
+        part.opcode = MP_BATTLE_RECEIVE;
+        part.sourceSlot = c->data[at]; part.kind = c->data[at + 1];
+        part.blockSeq = Word(c->data + at + 4);
+        part.offset = 0; part.totalSize = size; part.length = size;
+        memset(part.data, 0, sizeof(part.data));
+        memcpy(part.data, c->data + at + RECEIVE_MANY_HEADER, size);
+        if (part.sourceSlot < sBinding.playerCount && (sReceiveFlags & (1 << part.sourceSlot)))
+            DrainReceived();
+        status = ReceiveNative(&part);
+        if (status != MP_BATTLE_OK)
+            break;
+        applied++;
+        at += RECEIVE_MANY_HEADER + size;
+        if (part.kind == MP_BATTLE_KIND_CONTROLLER)
+        {
+            // Each battle block goes into the link buffer before the next is taken, so the battle reads them in the
+            // host's one order (emptying several slots at once would order them by core). A full link buffer keeps the
+            // block in its slot (the VBlank handler moves it later) and the rest wait for the next command.
+            DrainReceived();
+            if ((sReceiveFlags & (1 << part.sourceSlot)) && at < c->length)
+            {
+                status = MP_BATTLE_BUSY;
+                break;
+            }
+        }
+    }
+    out[1] = applied; out[2] = status;
+    return out[0] || applied ? MP_BATTLE_OK : status;
+}
+
+// Handle's own rules for an ordinary transport command, as for RECEIVE_MANY; the GBA build never has it.
+static void HandleDeliver(const struct MultiplayerBattleControl *c)
+{
+    u8 data[3] = {0, 0, 0}, status;
+    bool32 ack = c->blockSeq != 0;
+    if (c->status || c->reserved || c->length > 192 || !c->incarnation || !c->sessionEpoch
+     || c->sessionEpoch > 0x7FFFFFFF || !c->commandSeq || Zero(c->battleId, 16)
+     || c->phase < MP_BATTLE_PHASE_SINGLES || c->phase > LAST_PHASE || c->sourceSlot >= 4
+     || (ack ? c->totalSize > MULTIPLAYER_BATTLE_BLOCK_SIZE || c->offset != c->totalSize || c->length < DELIVER_ACK_SIZE
+             : c->offset || c->totalSize || c->kind || !c->length)
+     || !Zero(c->data + c->length, 192 - c->length))
+    {
+        Respond(c, MP_BATTLE_MALFORMED, NULL, 0, FALSE); return;
+    }
+    if (c->chunkCrc32 != Crc32(c->data, c->length))
+    {
+        Respond(c, MP_BATTLE_CRC, NULL, 0, FALSE); return;
+    }
+    if (c->commandSeq == sLastSeq && sLastSeq && !memcmp(c, &sLastCommand, sizeof(*c)))
+    {
+        Replay(); return;
+    }
+    if (sState == MP_BATTLE_UNBOUND || c->incarnation != sIncarnation || c->sessionEpoch != sSession
+     || memcmp(c->battleId, sBattleId, 16) || c->phase != sBinding.mode)
+    {
+        Respond(c, MP_BATTLE_SESSION, NULL, 0, FALSE); return;
+    }
+    if (sLastSeq == 0xFFFFFFFF || c->commandSeq != sLastSeq + 1)
+    {
+        Respond(c, MP_BATTLE_ORDER, NULL, 0, FALSE); return;
+    }
+    if (c->sourceSlot != sBinding.localSlot)
+        status = MP_BATTLE_ROLE;
+    else if (!MultiplayerBattle_IsActive())
+        status = MP_BATTLE_ORDER;
+    else if (sState == MP_BATTLE_RECOVERY_REQUIRED || sState == MP_BATTLE_SUSPENDED || sState == MP_BATTLE_ADMITTING
+          || sState == MP_BATTLE_EXPIRED)
+        status = MP_BATTLE_TIMEOUT;
+    else if (!MultiplayerBattle_IsNative())
+        status = MP_BATTLE_KIND;
+    else
+        status = Deliver(c, data);
+    if (status == MP_BATTLE_OK)
+        sDeadline = sFrame + MULTIPLAYER_BATTLE_DEADLINE;
+    Respond(c, status, status == MP_BATTLE_OK ? data : NULL, status == MP_BATTLE_OK ? 3 : 0, status == MP_BATTLE_OK);
+}
 #endif
 #line 1123 // gba-line
 static void Handle(const struct MultiplayerBattleControl *c)
@@ -1554,6 +1697,10 @@ static void Handle(const struct MultiplayerBattleControl *c)
     if (c->opcode == MP_BATTLE_RECEIVE_MANY)
     {
         HandleReceiveMany(c); return;
+    }
+    if (c->opcode == MP_BATTLE_DELIVER)
+    {
+        HandleDeliver(c); return;
     }
 #endif
 #line 1128 // gba-line
@@ -1932,10 +2079,11 @@ bool32 MultiplayerBattle_GetBindingGeneration(u8 *generation)
 // MultiplayerBattle_Tick answers it at the start of the next game frame, so the answer reached the companion only at the
 // boundary after that: a whole frame on every native command (a battle has thousands). The bridge calls this right after
 // writing a command, at the same boundary, where the game thread is parked (src/platform/sdl2.c, as for the VBlank
-// handler, which runs the game's own code there too): the transport commands - QUERY, READ_OUT, RECEIVE, ACK_OUT and
-// KEEP, which only copy a block or a state word - are handled at once, exactly as Tick would at the frame's start, and
-// the bridge sends the answer the same moment. Every other command (BIND, PREPARE, START, RELEASE, recovery) is still
-// the game frame's own.
+// handler, which runs the game's own code there too): the transport commands - QUERY, PEEK, READ_OUT, RECEIVE,
+// RECEIVE_MANY, DELIVER, ACK_OUT and KEEP, which only copy a block or a state word (DELIVER also moves received blocks
+// into the battle's link buffer, as the VBlank handler does at this boundary) - are handled at once, exactly as Tick
+// would at the frame's start, and the bridge sends the answer the same moment. Every other command (BIND, PREPARE,
+// START, RELEASE, recovery) is still the game frame's own.
 void MultiplayerBattle_ServiceTransport(void)
 {
     u32 generation = gMultiplayerBattleMailbox.commandGeneration;
@@ -1953,6 +2101,7 @@ void MultiplayerBattle_ServiceTransport(void)
     case MP_BATTLE_READ_OUT:
     case MP_BATTLE_RECEIVE:
     case MP_BATTLE_RECEIVE_MANY:
+    case MP_BATTLE_DELIVER:
     case MP_BATTLE_ACK_OUT:
     case MP_BATTLE_KEEP:
         break;

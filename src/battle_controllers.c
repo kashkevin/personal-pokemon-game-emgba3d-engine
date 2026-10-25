@@ -769,6 +769,28 @@ static void Task_HandleSendLinkBuffersData(u8 taskId)
     #define BYTE_TO_SEND(offset) \
         gLinkBattleSendBuffer[gTasks[taskId].tCurrentBlock_Start + offset]
 
+#ifdef PORTABLE
+    // KNOWN_ISSUES MS-62, battle speed (PC only): a native battle's SendBlock gives the block to the host's route at once
+    // and is finished when the route acknowledges it. No link hardware needs the frame this task waits between blocks or
+    // the frame it takes to notice the acknowledgement, so in a native battle the next block goes in the frame the
+    // acknowledgement is seen. The battle's own pace (animations, text, the controllers) is unchanged.
+    static bool8 sNativeSendNested = FALSE;
+    if (MultiplayerBattle_IsNative() && !sNativeSendNested
+     && (gTasks[taskId].tState == SENDTASK_STATE_BEGIN_SEND_BLOCK || gTasks[taskId].tState == SENDTASK_STATE_FINISH_SEND_BLOCK))
+    {
+        sNativeSendNested = TRUE;
+        gTasks[taskId].tBlockSendDelayTimer = 0;
+        Task_HandleSendLinkBuffersData(taskId);
+        if (gTasks[taskId].tState == SENDTASK_STATE_BEGIN_SEND_BLOCK)
+        {
+            gTasks[taskId].tBlockSendDelayTimer = 0;
+            Task_HandleSendLinkBuffersData(taskId);
+        }
+        sNativeSendNested = FALSE;
+        return;
+    }
+#endif
+#line 728 // gba-line
     switch (gTasks[taskId].tState)
     {
     case SENDTASK_STATE_INITIALIZE:
@@ -930,6 +952,27 @@ static void Task_HandleCopyReceivedLinkBuffersData(u8 taskId)
     #define BYTE_TO_RECEIVE(offset) \
         gLinkBattleRecvBuffer[gTasks[taskId].tCurrentBlock_Start + offset]
 
+#ifdef PORTABLE
+    // KNOWN_ISSUES MS-62, battle speed (PC only): this task takes one received block a frame, the link hardware's pace.
+    // A native battle's blocks can arrive several at once (DELIVER), so it takes every block that can go now in the same
+    // frame, in their order, and stops at the first that must wait for its battler's controller, as it always did.
+    static bool8 sNativeCopyNested = FALSE;
+    if (MultiplayerBattle_IsNative() && !sNativeCopyNested)
+    {
+        u32 i;
+        sNativeCopyNested = TRUE;
+        for (i = 0; i < 16 && gTasks[taskId].tCurrentBlock_Start != gTasks[taskId].tCurrentBlock_End; i++)
+        {
+            u16 start = gTasks[taskId].tCurrentBlock_Start, wrap = gTasks[taskId].tCurrentBlock_WrapFrom;
+            Task_HandleCopyReceivedLinkBuffersData(taskId);
+            if (gTasks[taskId].tCurrentBlock_Start == start && gTasks[taskId].tCurrentBlock_WrapFrom == wrap)
+                break; // waits for its battler's controller
+        }
+        sNativeCopyNested = FALSE;
+        return;
+    }
+#endif
+#line 889 // gba-line
     if (gTasks[taskId].tCurrentBlock_Start != gTasks[taskId].tCurrentBlock_End)
     {
         if (gTasks[taskId].tCurrentBlock_Start >  gTasks[taskId].tCurrentBlock_End

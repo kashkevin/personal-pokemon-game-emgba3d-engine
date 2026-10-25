@@ -158,6 +158,7 @@ void MultiplayerBattle_ServiceTransport(void); // MS-62: the bridge's transport 
 bool32 MultiplayerBattle_SpeedUp(void); // battle speed (platform/game_speed.h): a battle between players is on
 extern const u32 gMultiplayerBattlePeekAbiVersion; // MS-62: PEEK, a query with the outbound block's bytes (bridge battle_peek=1)
 extern const u32 gMultiplayerBattleReceiveManyAbiVersion; // MS-62: RECEIVE_MANY, a batch's blocks in one command (battle_receive_many=1)
+extern const u32 gMultiplayerBattleDeliverAbiVersion; // MS-62: DELIVER, an acknowledgement and blocks in one command (battle_deliver=1)
 #endif
 bool32 MultiplayerBattle_TrySendOutAnimation(u8 battler);
 bool32 MultiplayerBattle_CanReceiveControllers(void);
