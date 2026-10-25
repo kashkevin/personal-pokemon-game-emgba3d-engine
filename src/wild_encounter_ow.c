@@ -188,6 +188,59 @@ static bool32 IsOWENextToObject(struct ObjectEvent *owe, struct ObjectEvent *obj
 static enum Direction CheckOWEPathToPlayerFromCollision(struct ObjectEvent *owe, enum Direction newDirection);
 static void Task_OWEApproachForBattle(u8 taskId);
 static bool32 CheckValidOWESpecies(enum Species speciesId);
+#ifdef PORTABLE
+#include "mp_wild_random.h"
+
+// No repeats (the owner's report of 2026-10-25, "the same 30 pokemon are spawning"; PC builds only): a new Pokemon from
+// this spawner avoids the families of the ones it has out and of its last MPOWE_RECENT_SPAWNS spawns on this map
+// (MPWild_RandomizeSpecies rolls again a few times, then keeps what it gets). The app's shared spawns follow the same
+// rule with the same number of recent spawns (spawn_director.py, shared_spawns.RECENT_SPAWNS).
+#define MPOWE_RECENT_SPAWNS 6
+static u16 sOWERecentSpecies[MPOWE_RECENT_SPAWNS];   // the newest first
+static u8 sOWERecentCount;
+static u8 sOWERecentMapGroup, sOWERecentMapNum;
+
+static void MPOWE_ForgetOtherMaps(void)
+{
+    if (sOWERecentMapGroup != gSaveBlock1Ptr->location.mapGroup || sOWERecentMapNum != gSaveBlock1Ptr->location.mapNum)
+    {
+        sOWERecentCount = 0;
+        sOWERecentMapGroup = gSaveBlock1Ptr->location.mapGroup;
+        sOWERecentMapNum = gSaveBlock1Ptr->location.mapNum;
+    }
+}
+
+// Before a new Pokemon's species is chosen: the ones it should not repeat.
+void MPOWE_AvoidRepeats(void)
+{
+    u16 species[OWE_SPAWNS_MAX + MPOWE_RECENT_SPAWNS];
+    u32 i, count = 0;
+
+    MPOWE_ForgetOtherMaps();
+    for (i = 0; i < OBJECT_EVENTS_COUNT && count < OWE_SPAWNS_MAX; i++)
+    {
+        if (IsOverworldWildEncounter(&gObjectEvents[i], OWE_GENERATED))
+            species[count++] = OW_SPECIES(&gObjectEvents[i]);
+    }
+    for (i = 0; i < sOWERecentCount; i++)
+        species[count++] = sOWERecentSpecies[i];
+    MPWild_SetAvoidSpecies(species, count);
+}
+
+// A new Pokemon is out.
+void MPOWE_NoteSpawn(u16 species)
+{
+    u32 i;
+
+    MPOWE_ForgetOtherMaps();
+    for (i = MPOWE_RECENT_SPAWNS - 1; i > 0; i--)
+        sOWERecentSpecies[i] = sOWERecentSpecies[i - 1];
+    sOWERecentSpecies[0] = species;
+    if (sOWERecentCount < MPOWE_RECENT_SPAWNS)
+        sOWERecentCount++;
+}
+#endif
+#line 177 // gba-line
 
 static EWRAM_DATA u8 sOWESpawnCountdown = 0;
 
@@ -624,7 +677,15 @@ void UpdateOverworldWildEncounter(void)
 
     infoOWE.localId = GetLocalIdByOWESpawnSlot(spawnSlot);
     infoOWE.category = OWE_CATEGORY_UNDEFINED;
+#ifdef PORTABLE
+    MPOWE_AvoidRepeats();
     SetSpeciesInfoForOWE(&infoOWE, x, y);
+    MPWild_SetAvoidSpecies(NULL, 0);
+#else
+#line 375 // gba-line
+    SetSpeciesInfoForOWE(&infoOWE, x, y);
+#endif
+#line 376 // gba-line
 
     if (infoOWE.speciesId == SPECIES_NONE
      || (WE_OWE_SPECIAL_ONLY && infoOWE.category >= OWE_CATEGORY_WILD)
@@ -674,6 +735,10 @@ void UpdateOverworldWildEncounter(void)
     owe->disableCoveringGroundEffects = TRUE;
     owe->sOverworldEncounterLevel = infoOWE.noDespawn ? (infoOWE.level | OWE_NO_DESPAWN_FLAG) : infoOWE.level;
     owe->sOverworldEncounterCategory = infoOWE.category;
+#ifdef PORTABLE
+    MPOWE_NoteSpawn(infoOWE.speciesId);
+#endif
+#line 415 // gba-line
 
     ObjectEventTurn(owe, gStandardDirections[Random() & 3]);
     SetNewOWESpawnCountdown();

@@ -53,4 +53,10 @@ u16 MPWild_RandomizeSpecies(u16 vanillaSpecies, u8 level, enum WildPokemonArea a
 // MP_WILD_TIER_COUNT if the species is not part of the randomized pool.
 u8 MPWild_GetSpeciesTier(u16 species);
 
+#if defined(PLATFORM_SDL2)
+// PC builds: the next rolls avoid the families of these species (the visible spawner's no-repeat rule,
+// wild_encounter_ow.c); count 0 ends it.
+void MPWild_SetAvoidSpecies(const u16 *species, u32 count);
+#endif
+
 #endif // GUARD_MP_WILD_RANDOM_H

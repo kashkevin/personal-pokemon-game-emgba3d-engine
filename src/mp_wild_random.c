@@ -184,8 +184,102 @@ static u32 GetWeatherWeight(const struct MPWildFamily *family, u32 weight, u8 we
 #endif
 
 #if defined(PLATFORM_SDL2)
+// Time of day and area types (PC builds; the GBA ROM keeps GetFamilyWeight). The owner's report of 2026-10-25, "the
+// same 30 pokemon are spawning": with a family three times as likely in its time of day and the area's x3 on top, the
+// same few dozen day (or night) families held about two fifths of the spawns on every route and half of them in
+// Petalburg Woods. Now a family out of its time of day is a third as likely and one in it is as likely as any other,
+// and the time of day and the area's types together never make a family more than MP_WILD_MAX_BOOST times as likely as
+// its tier. The weather comes on top, as before. The app's shared spawns weigh the same (spawn_director.py, compared by
+// its scripts/multiplayer/check_engine_spawn_weights.py).
+#define MP_WILD_MAX_BOOST 3
+
+static u32 GetFamilyWeightPC(const struct MPWildFamily *family, u32 habitat, bool32 night, u32 typeBoost)
+{
+    u32 weight, most;
+
+    if (!(family->habitat & habitat))
+        return 0;
+    weight = sTierWeight[family->tier];
+    most = weight * MP_WILD_MAX_BOOST;
+    if ((family->time == MP_WILD_TIME_NOCTURNAL && !night) || (family->time == MP_WILD_TIME_DIURNAL && night))
+        weight /= 3;
+    if (typeBoost & (TYPE_BIT(family->type1) | TYPE_BIT(family->type2)))
+        weight *= 3;
+    if (weight > most)
+        weight = most;
+    if (weight == 0)
+        weight = 1;
+    return weight;
+}
+
 #define FAMILY_WEIGHT(family, habitat, night, typeBoost) \
-    GetWeatherWeight(family, GetFamilyWeight(family, habitat, night, typeBoost), weather)
+    GetWeatherWeight(family, GetFamilyWeightPC(family, habitat, night, typeBoost), weather)
+
+// No repeats (the same report; PC builds): before it makes a Pokemon, the game's own visible spawner
+// (wild_encounter_ow.c) names the ones it shows and its last few spawns on the map. A roll that lands on one of their
+// families is made again, MP_WILD_REPEAT_TRIES rolls in all, and the last one is kept whatever it is. Every other roll
+// (battles in the grass, fishing, Rock Smash) is unchanged. The app's shared spawns follow the same rule.
+#define MP_WILD_REPEAT_TRIES 4
+#define MP_WILD_AVOID_MAX    16
+
+static u16 sAvoidFamilies[MP_WILD_AVOID_MAX];
+static u32 sAvoidCount;
+
+// The families of these species (every family a species is listed in) are avoided until the next call; no species
+// (count 0) avoids nothing.
+void MPWild_SetAvoidSpecies(const u16 *species, u32 count)
+{
+    u32 i, f, j;
+
+    sAvoidCount = 0;
+    for (i = 0; i < count; i++)
+    {
+        for (f = 0; f < MP_WILD_FAMILY_COUNT && sAvoidCount < MP_WILD_AVOID_MAX; f++)
+        {
+            const struct MPWildFamily *family = &sMPWildFamilies[f];
+            for (j = 0; j < family->memberCount; j++)
+            {
+                if (sMPWildMembers[family->firstMember + j].species == species[i])
+                {
+                    sAvoidFamilies[sAvoidCount++] = f;
+                    break;
+                }
+            }
+        }
+    }
+}
+
+static bool32 IsAvoidedFamily(u32 index)
+{
+    u32 i;
+
+    for (i = 0; i < sAvoidCount; i++)
+    {
+        if (sAvoidFamilies[i] == index)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+// The weighted roll of MPWild_RandomizeSpecies, made again while it lands on an avoided family.
+static u32 PickFamilyAvoiding(u32 habitat, bool32 night, u32 typeBoost, u8 weather, u32 total)
+{
+    u32 tries, i, roll, weight;
+
+    for (tries = 1; ; tries++)
+    {
+        roll = Random32() % total;
+        for (i = 0; i < MP_WILD_FAMILY_COUNT - 1; i++)
+        {
+            weight = FAMILY_WEIGHT(&sMPWildFamilies[i], habitat, night, typeBoost);
+            if (roll < weight)
+                break;
+            roll -= weight;
+        }
+        if (tries >= MP_WILD_REPEAT_TRIES || !IsAvoidedFamily(i))
+            return i;
+    }
+}
 #else
 #define FAMILY_WEIGHT(family, habitat, night, typeBoost) \
     GetFamilyWeight(family, habitat, night, typeBoost)
@@ -271,6 +365,12 @@ u16 MPWild_RandomizeSpecies(u16 vanillaSpecies, u8 level, enum WildPokemonArea a
         total += FAMILY_WEIGHT(&sMPWildFamilies[i], habitat, night, typeBoost);
     if (total == 0)
         return vanillaSpecies;
+#if defined(PLATFORM_SDL2)
+    // A visible spawn avoids repeating what its spawner shows or made last (MPWild_SetAvoidSpecies).
+    if (sAvoidCount != 0)
+        return ChooseMember(&sMPWildFamilies[PickFamilyAvoiding(habitat, night, typeBoost, weather, total)], level);
+#endif
+#line 160 // gba-line
 
     roll = Random32() % total;
     for (i = 0; i < MP_WILD_FAMILY_COUNT; i++)
@@ -336,6 +436,16 @@ u32 MPWild_TestFamilyWeight(u32 index, u32 habitat, bool32 night, u8 weather)
     family = &sMPWildFamilies[index];
     if (gMapHeader.mapType == MAP_TYPE_UNDERGROUND)
         weather = WEATHER_NONE;
-    return GetWeatherWeight(family, GetFamilyWeight(family, habitat, night, GetAreaTypeBoost()), weather);
+    return GetWeatherWeight(family, GetFamilyWeightPC(family, habitat, night, GetAreaTypeBoost()), weather);
+}
+
+// The families MPWild_SetAvoidSpecies set (at most MP_WILD_AVOID_MAX), for the self-test.
+u32 MPWild_TestAvoidedFamilies(u16 *out)
+{
+    u32 i;
+
+    for (i = 0; i < sAvoidCount; i++)
+        out[i] = sAvoidFamilies[i];
+    return sAvoidCount;
 }
 #endif

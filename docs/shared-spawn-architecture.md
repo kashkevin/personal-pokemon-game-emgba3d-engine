@@ -114,6 +114,14 @@ Once per active second, for every map with at least one player standing on it:
   map's first player, else the map's default) and the 35 % lower-stage chance. Checked value for
   value against the game by the app's `scripts/multiplayer/check_engine_spawn_weights.py` (the
   game's `--dump-wild-weights`; 0 differences on 2026-10-13).
+* **Variety** (2026-10-25, the owner's report "the same 30 pokemon are spawning"): on PC builds
+  a family out of its time of day is a third as likely and one in it is as likely as any other
+  (it was ×3, so the same few dozen day or night families filled every route), and the time of
+  day and the area types together never go above ×3 (the GBA ROM keeps its weights). A new
+  Pokémon also avoids the families already on its map and those of the map's last 6 spawns
+  (`SpawnBoard.recent`): the roll is made again, 4 rolls at most, and the last one is kept. The
+  game's own visible spawner (offline, and while surfing in a world) follows the same rules
+  (`MPWild_SetAvoidSpecies`, `wild_encounter_ow.c`).
 * **Wander**: each open Pokémon has a 35 % chance per second to step to an adjacent habitat tile
   of the same elevation that holds neither a player nor another Pokémon (else it turns in place),
   and a 15 % chance to just turn. One next to a player holds still.

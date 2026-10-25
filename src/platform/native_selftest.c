@@ -734,8 +734,9 @@ int NativeSelfTest_LineBreak(void)
 // --selftest-wild-weather (EmeraldTogether expansion Phase 2): the weather table
 // of the randomized wild Pokemon (src/mp_wild_random.c, PC builds), checked
 // through the game's own code on real map headers:
-//   1. clear weather leaves the Phase 0 weights (rarity tier 10:5:2:1 x3, time
-//      of day x3 or /3, the map's area types x3, at least 1);
+//   1. clear weather leaves the weights of the rarity tiers (10:5:2:1 x3), a
+//      third out of a family's time of day (no x3 in it any more, 2026-10-25),
+//      the map's area types x3, time and area together at most x3, at least 1;
 //   2. the owner's table, written out again here: rain Water x3; heavy rain
 //      Water x3 and the rare families x2; thunder Electric x3 (Water x2); snow
 //      Ice x3; sun and drought Fire x3 (Grass x2); sandstorm Ground x3 (Rock
@@ -748,7 +749,11 @@ int NativeSelfTest_LineBreak(void)
 //   4. the game's own roll (MPWild_RandomizeSpecies, weather read from the
 //      weather engine, time of day from the clock) picks exactly the family
 //      these weights pick, for land, surfing, fishing and Rock Smash;
-//   5. the Battle Frontier's Pike and Pyramid keep their own Pokemon.
+//   5. the Battle Frontier's Pike and Pyramid keep their own Pokemon;
+//   6. no repeats (2026-10-25): with the visible spawner's avoid list the roll
+//      is made again while it lands on an avoided family (4 rolls at most, the
+//      last kept), without one it is the plain roll; the spawner names the
+//      Pokemon it has out and its last 6 spawns on the map.
 // --dump-wild-weights KEYS OUT writes the land weights of the maps listed in
 // KEYS ("group.number" per line) for both times of day and every weather, the
 // family table and the clock's time of day per hour, for the app's
@@ -761,9 +766,12 @@ int NativeSelfTest_LineBreak(void)
 #include "overworld.h"
 #include "random.h"
 #include "rtc.h"
+#include "event_object_movement.h"
+#include "constants/event_objects.h"
 #include "constants/layouts.h"
 #include "constants/map_types.h"
 #include "constants/maps.h"
+#include "constants/trainer_types.h"
 #include "constants/weather.h"
 
 extern const struct MapHeader *const *const gMapGroups[];
@@ -772,6 +780,9 @@ extern const struct MPWildFamily *MPWild_TestFamily(u32 index);
 extern const struct MPWildMember *MPWild_TestMembers(void);
 extern u32 MPWild_TestFamilyWeight(u32 index, u32 habitat, bool32 night, u8 weather);
 extern bool32 MPWild_TestSafariOnly(u32 index);
+extern u32 MPWild_TestAvoidedFamilies(u16 *out);
+extern void MPOWE_AvoidRepeats(void);
+extern void MPOWE_NoteSpawn(u16 species);
 
 #define NO_TYPE 0xFF
 
@@ -848,7 +859,8 @@ static const char *WeatherName(u8 weather)
     return weather < WEATHER_COUNT && sOther[weather] ? sOther[weather] : "?";
 }
 
-// 1. Clear weather: the Phase 0 weights (area types as the map's own boost).
+// 1. Clear weather: the tier weights, the time of day (a third out of it, the tier's own weight in it) and the map's
+// own area types (x3), time and area together never above three times the tier.
 static void CheckClearWeights(const char *mapName, u32 areaTypes)
 {
     static const u32 sTier[MP_WILD_TIER_COUNT] = {30, 15, 6, 3};
@@ -867,12 +879,13 @@ static void CheckClearWeights(const char *mapName, u32 areaTypes)
                 if (family->habitat & sHabitats[h])
                 {
                     want = sTier[family->tier];
-                    if (family->time == MP_WILD_TIME_NOCTURNAL)
-                        want = night ? want * 3 : want / 3;
-                    else if (family->time == MP_WILD_TIME_DIURNAL)
-                        want = night ? want / 3 : want * 3;
+                    if ((family->time == MP_WILD_TIME_NOCTURNAL && !night)
+                     || (family->time == MP_WILD_TIME_DIURNAL && night))
+                        want /= 3;
                     if (areaTypes & ((1u << family->type1) | (1u << family->type2)))
                         want *= 3;
+                    if (want > sTier[family->tier] * 3)
+                        want = sTier[family->tier] * 3;
                     if (want == 0)
                         want = 1;
                     if (MPWild_TestSafariOnly(i))
@@ -884,7 +897,7 @@ static void CheckClearWeights(const char *mapName, u32 areaTypes)
             }
         }
     }
-    snprintf(what, sizeof(what), "%s, clear weather: the Phase 0 weights (%u families, 4 habitats, day and night)",
+    snprintf(what, sizeof(what), "%s, clear weather: the tier, time and area weights (%u families, 4 habitats, day and night)",
              mapName, n);
     ExpectWeather(what, bad == 0);
 }
@@ -985,6 +998,118 @@ static void CheckGameRoll(const char *mapName, u8 weather, u16 hour, enum WildPo
     snprintf(what, sizeof(what), "%s, %s, %s, %s (hour %u): the game's roll follows these weights (%u draws)",
              mapName, WeatherName(weather), areaName, night ? "night" : "day", hour, draws);
     ExpectWeather(what, mismatches == 0);
+}
+
+static bool32 IsListedFamily(s32 family, const u16 *families, u32 count)
+{
+    u32 i;
+
+    for (i = 0; i < count; i++)
+    {
+        if ((s32)families[i] == family)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+// 6. No repeats: with an avoid list the game's roll against these weights, made again while it lands on an avoided
+// family (4 rolls at most, the last kept); avoided families become far rarer than in the plain roll.
+static void CheckAvoidRoll(const char *mapName, u16 hour, u32 draws)
+{
+    static const u16 sAvoid[] = {SPECIES_CATERPIE, SPECIES_WEEDLE, SPECIES_PIDGEY, SPECIES_SPEAROW, SPECIES_RATTATA,
+                                 SPECIES_EKANS, SPECIES_ZUBAT, SPECIES_ODDISH, SPECIES_POOCHYENA, SPECIES_ZIGZAGOON};
+    u16 families[16];
+    u32 i, k, t, n = MPWild_TestFamilyCount(), count, total, roll, mismatches = 0, avoided = 0, plain = 0;
+    bool32 night, named = TRUE;
+    char what[200];
+
+    SetTimeOfDay(hour);
+    night = (GetTimeOfDay() == TIME_EVENING || GetTimeOfDay() == TIME_NIGHT);
+    gWeatherPtr->currWeather = WEATHER_NONE;
+    MPWild_SetAvoidSpecies(sAvoid, ARRAY_COUNT(sAvoid));
+    count = MPWild_TestAvoidedFamilies(families);
+    for (i = 0; i < ARRAY_COUNT(sAvoid); i++)
+        named &= IsListedFamily(FamilyOfSpecies(sAvoid[i]), families, count);
+    ExpectWeather("the avoid list holds the family of every species given", named && count == ARRAY_COUNT(sAvoid));
+    total = 0;
+    for (k = 0; k < n; k++)
+        total += MPWild_TestFamilyWeight(k, MP_WILD_HABITAT_LAND, night, WEATHER_NONE);
+    for (i = 0; i < draws; i++)
+    {
+        rng_value_t saved = gRngValue;
+        s32 want = -1, got;
+
+        for (t = 0; t < 4; t++)
+        {
+            roll = Random32() % total;
+            for (k = 0; k < n; k++)
+            {
+                u32 weight = MPWild_TestFamilyWeight(k, MP_WILD_HABITAT_LAND, night, WEATHER_NONE);
+                if (roll < weight)
+                {
+                    want = k;
+                    break;
+                }
+                roll -= weight;
+            }
+            if (!IsListedFamily(want, families, count))
+                break;
+        }
+        gRngValue = saved;
+        got = FamilyOfSpecies(MPWild_RandomizeSpecies(SPECIES_ZIGZAGOON, 30, WILD_AREA_LAND));
+        if (got != want && mismatches++ == 0)
+            printf("  %s, hour %u, draw %u: the game made family %d, the rule picks %d\n", mapName, hour, i, got, want);
+        avoided += IsListedFamily(got, families, count);
+    }
+    snprintf(what, sizeof(what), "%s (hour %u): with an avoid list the game rolls again on an avoided family (%u draws)",
+             mapName, hour, draws);
+    ExpectWeather(what, mismatches == 0);
+    MPWild_SetAvoidSpecies(NULL, 0);
+    ExpectWeather("an empty avoid list avoids nothing", MPWild_TestAvoidedFamilies(families) == 0);
+    for (i = 0; i < draws; i++)
+        plain += IsListedFamily(FamilyOfSpecies(MPWild_RandomizeSpecies(SPECIES_ZIGZAGOON, 30, WILD_AREA_LAND)),
+                                families, count);
+    snprintf(what, sizeof(what), "%s (hour %u): avoided families %u of %u draws, %u without the list", mapName, hour,
+             avoided, draws, plain);
+    ExpectWeather(what, plain > 0 && avoided * 10 < plain);
+}
+
+// 6. The visible spawner names the Pokemon it has out and its last 6 spawns on this map, and forgets them on another.
+static void CheckSpawnerAvoidList(void)
+{
+    static const u16 sSpawned[] = {SPECIES_CATERPIE, SPECIES_WEEDLE, SPECIES_PIDGEY, SPECIES_RATTATA, SPECIES_SPEAROW,
+                                   SPECIES_EKANS, SPECIES_SANDSHREW};
+    u16 families[16];
+    u32 i, count;
+    bool32 recent = TRUE;
+    struct ObjectEvent *owe = &gObjectEvents[3];
+
+    memset(gObjectEvents, 0, sizeof(gObjectEvents));
+    gSaveBlock1Ptr->location.mapGroup = MAP_GROUP(MAP_ROUTE101);
+    gSaveBlock1Ptr->location.mapNum = MAP_NUM(MAP_ROUTE101);
+    for (i = 0; i < ARRAY_COUNT(sSpawned); i++)
+        MPOWE_NoteSpawn(sSpawned[i]);
+    MPOWE_AvoidRepeats();
+    count = MPWild_TestAvoidedFamilies(families);
+    for (i = 1; i < ARRAY_COUNT(sSpawned); i++)
+        recent &= IsListedFamily(FamilyOfSpecies(sSpawned[i]), families, count);
+    ExpectWeather("the spawner avoids its last 6 spawns on the map, not the 7th from last",
+                  recent && count == 6 && !IsListedFamily(FamilyOfSpecies(SPECIES_CATERPIE), families, count));
+    owe->active = TRUE;
+    owe->trainerType = TRAINER_TYPE_OW_WILD_ENCOUNTER;
+    owe->localId = LOCALID_OW_ENCOUNTER_END;
+    owe->graphicsId = OBJ_EVENT_MON + SPECIES_CATERPIE;
+    MPOWE_AvoidRepeats();
+    count = MPWild_TestAvoidedFamilies(families);
+    ExpectWeather("the spawner also avoids the Pokemon it has out",
+                  count == 7 && IsListedFamily(FamilyOfSpecies(SPECIES_CATERPIE), families, count));
+    gSaveBlock1Ptr->location.mapNum = MAP_NUM(MAP_ROUTE102);
+    MPOWE_AvoidRepeats();
+    count = MPWild_TestAvoidedFamilies(families);
+    ExpectWeather("on another map the spawner forgets the last map's spawns",
+                  count == 1 && families[0] == FamilyOfSpecies(SPECIES_CATERPIE));
+    MPWild_SetAvoidSpecies(NULL, 0);
+    memset(gObjectEvents, 0, sizeof(gObjectEvents));
 }
 
 static void RunSpecies(u16 *out, u32 count, u8 weather, u32 seed)
@@ -1096,6 +1221,15 @@ int NativeSelfTest_WildWeather(void)
     gMapHeader.mapLayoutId = LAYOUT_BATTLE_FRONTIER_BATTLE_PYRAMID_FLOOR;
     gWeatherPtr->currWeather = WEATHER_SANDSTORM;
     ExpectWeather("Battle Pyramid: its own Pokemon", MPWild_RandomizeSpecies(SPECIES_SANDSLASH, 60, WILD_AREA_LAND) == SPECIES_SANDSLASH);
+
+    // 6. No repeats.
+    UseMap(MAP_ROUTE101);
+    SeedRng(0xA401D);
+    CheckAvoidRoll("Route 101", 12, 2000);
+    CheckAvoidRoll("Route 101", 23, 2000);
+    UseMap(MAP_PETALBURG_WOODS);
+    CheckAvoidRoll("Petalburg Woods", 12, 2000);
+    CheckSpawnerAvoidList();
 
     // What a player sees on Route 101 by day (land): the share of each table's
     // types, clear weather -> that weather.
