@@ -178,6 +178,7 @@ static u8 sIvs[6];               /* as the game counts them: a Hyper Trained sta
 static bool sIvTrained[6];       /* Hyper Trained */
 static u16 sEvs[6];
 static int sEvTotal;
+static int sFriendship;
 static u32 sExpPoints;
 static u32 sExpToNext;
 static const u8 *sSpeciesName;
@@ -382,6 +383,7 @@ static void Capture(void)
     sEvTotal = 0;
     for (int i = 0; i < 6; i++)
         sEvTotal += sEvs[i];
+    sFriendship = sMon.isEgg ? -1 : (int)GetMonData(mon, MON_DATA_FRIENDSHIP);
     up = gNaturesInfo[sS.statNature].statUp;
     down = gNaturesInfo[sS.statNature].statDown;
     sNatureUp = up != down ? (s8)DisplayIndexOfStat(up) : -1;
@@ -902,6 +904,14 @@ static void SkillsPage(const struct UiRamp *pr)
         int x = Small(lx, ROW(7) + 2, sNatureName, UI_P_TEXT);
 
         Small(x, ROW(7) + 2, sText_NoChange, UI_P_TEXT);
+    }
+    if (sFriendship >= 0)
+    {
+        /* the owner (2026-10-25): the Pokemon's friendship, under its stats (the IV/EV view's HT note is on the left) */
+        char fr[32];
+
+        snprintf(fr, sizeof(fr), "FRIENDSHIP %d/%d", sFriendship, MAX_FRIENDSHIP);
+        UiCaps_Draw(CR - 6, ROW(8) + 5, fr, UI_P_TEXT_MUTED, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_RIGHT, UI_NONE);
     }
     Label(lx, ROW(9), "EXP. POINTS");
     Number(buf, sizeof(buf), sExpPoints, true);

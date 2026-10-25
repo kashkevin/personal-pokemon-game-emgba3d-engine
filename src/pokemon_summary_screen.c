@@ -4962,6 +4962,18 @@ static void UpdateEvTotalWindow(void)
             }
         }
     }
+    // The owner (2026-10-25): the Pokémon's friendship, on the skills page whenever the line is free (its stats, or
+    // its IVs with nothing Hyper Trained), for any Pokémon but an Egg.
+    if (text[0] == EOS && sMonSummaryScreen->currPageIndex == PSS_PAGE_SKILLS && !sMonSummaryScreen->summary.isEgg
+     && sMonSummaryScreen->skillsPageMode != SUMMARY_SKILLS_MODE_EVS)
+    {
+        u8 *end = StringCopy(text, COMPOUND_STRING("Friendship: "));
+
+        end = ConvertIntToDecimalStringN(end, GetMonData(&sMonSummaryScreen->currentMon, MON_DATA_FRIENDSHIP),
+                                         STR_CONV_MODE_LEFT_ALIGN, 3);
+        end = StringCopy(end, COMPOUND_STRING("/"));
+        ConvertIntToDecimalStringN(end, MAX_FRIENDSHIP, STR_CONV_MODE_LEFT_ALIGN, 3);
+    }
     if (text[0] != EOS)
     {
         FillWindowPixelBuffer(windowId, PIXEL_FILL(0));
