@@ -1797,7 +1797,9 @@ static void StartTowerFloor(int floor)
 }
 
 /* PKMN_TEST_SET_FLAGS=<flag>,<flag>...: those event flags set in memory (decimal or 0x hex; move_switch_check.py: a
- * one-time move tutor used) */
+ * one-time move tutor used), a flag with a minus before it cleared (an object a new game hides shown);
+ * PKMN_TEST_SET_VARS=<var>:<value>,...: those script variables set in memory (a scene a variable starts: Route 104's
+ * on-frame sail to Dewford with VAR_BOARD_BRINEY_BOAT_STATE 1, as Mr. Briney's house leaves it) */
 static void SetUpTestFlags(void)
 {
     const char *p = getenv("PKMN_TEST_SET_FLAGS");
@@ -1805,15 +1807,35 @@ static void SetUpTestFlags(void)
     while (p != NULL && *p != '\0')
     {
         char *end;
-        long flag = strtol(p, &end, 0);
+        bool clear = *p == '-';
+        long flag = strtol(clear ? p + 1 : p, &end, 0);
 
-        if (end == p)
+        if (end == p || end == p + 1)
             break;
         if (flag > 0 && flag < FLAGS_COUNT)
         {
-            FlagSet(flag);
-            TestLog("Battle env test: flag 0x%lX set", flag);
+            if (clear)
+                FlagClear(flag);
+            else
+                FlagSet(flag);
+            TestLog("Battle env test: flag 0x%lX %s", flag, clear ? "cleared" : "set");
         }
+        p = *end == ',' ? end + 1 : end;
+    }
+    p = getenv("PKMN_TEST_SET_VARS");
+    while (p != NULL && *p != '\0')
+    {
+        char *end;
+        long var = strtol(p, &end, 0), value;
+
+        if (end == p || *end != ':')
+            break;
+        p = end + 1;
+        value = strtol(p, &end, 0);
+        if (end == p)
+            break;
+        if (VarSet(var, value))
+            TestLog("Battle env test: var 0x%lX set to %ld", var, value);
         p = *end == ',' ? end + 1 : end;
     }
 }

@@ -127,6 +127,11 @@ static bool sDebugDrawn;        /* the last Draw was the terrain debug view */
  * the Diorama camera - change with it. Those near the player, on screen or
  * touched by a cell the game changed are built at once; the rest are built
  * TERRAIN_OFFSCREEN_BUILDS a sync, nearest first, so no frame pays for a row.
+ * A chunk on screen but far from the player that already has its mesh on this
+ * map, changed only by the grid moving (the far edge gains a row of cells a
+ * step), waits the same way, its old mesh standing: on Mr. Briney's boat the
+ * grid moves two to four times as fast as walking and every frame paid for the
+ * far row (the owner's "ship animation is very laggy", 2026-10-25).
  */
 #define TERRAIN_NEAR_CELLS 13
 #define TERRAIN_OFFSCREEN_BUILDS 2
@@ -2318,18 +2323,25 @@ static struct DioramaTerrainBounds ChunkBounds(const struct GLTerrainChunk *chun
 }
 
 /* Whether a chunk's rebuild cannot wait: near the player or on screen. */
-static bool ChunkUrgent(const struct DioramaSceneSnapshot *snapshot, const struct GLTerrainChunk *chunk,
-                        int chunkX, int chunkY)
+/* Within TERRAIN_NEAR_CELLS of the grid's middle (the player). */
+static bool ChunkNear(const struct DioramaSceneSnapshot *snapshot, int chunkX, int chunkY)
 {
     int centreX = snapshot->gridOriginX + DIORAMA_GRID_WIDTH / 2;
     int centreY = snapshot->gridOriginY + DIORAMA_GRID_HEIGHT / 2;
     int middleX = chunkX * DIORAMA_TERRAIN_CHUNK_SIZE + DIORAMA_TERRAIN_CHUNK_SIZE / 2;
     int middleY = chunkY * DIORAMA_TERRAIN_CHUNK_SIZE + DIORAMA_TERRAIN_CHUNK_SIZE / 2;
+
+    return abs(middleX - centreX) <= TERRAIN_NEAR_CELLS && abs(middleY - centreY) <= TERRAIN_NEAR_CELLS;
+}
+
+static bool ChunkUrgent(const struct DioramaSceneSnapshot *snapshot, const struct GLTerrainChunk *chunk,
+                        int chunkX, int chunkY)
+{
     struct DioramaTerrainBounds bounds;
 
     if (!sCameraKnownForSync)
         return true;
-    if (abs(middleX - centreX) <= TERRAIN_NEAR_CELLS && abs(middleY - centreY) <= TERRAIN_NEAR_CELLS)
+    if (ChunkNear(snapshot, chunkX, chunkY))
         return true;
     bounds = ChunkBounds(chunk, chunkX, chunkY);
     return DioramaTerrain_IsBoundsVisible(&bounds, sSyncCameraX, sSyncCameraZ, sSyncCameraPitch,
@@ -2491,8 +2503,13 @@ static bool SyncChunk(const struct DioramaSceneSnapshot *snapshot,
      || chunk->rulesGeneration != rulesGeneration
      || chunk->signature != signature || forceDirty)
     {
-        /* Off screen and far: it may wait (its old mesh, if any, stands meanwhile). */
-        if (!forceDirty && !ChunkUrgent(snapshot, chunk, chunkX, chunkY))
+        /* Off screen and far: it may wait (its old mesh, if any, stands meanwhile). On screen and far with its mesh on
+         * this map, only the grid moving changed: it may wait too (TERRAIN_OFFSCREEN_BUILDS above). */
+        if (!forceDirty
+         && (!ChunkUrgent(snapshot, chunk, chunkX, chunkY)
+          || (sCameraKnownForSync && !newIdentity && chunk != NULL && chunk->occupied && !chunk->hasPixelObjects
+           && chunk->mapGeneration == snapshot->mapGeneration && chunk->rulesGeneration == rulesGeneration
+           && !ChunkNear(snapshot, chunkX, chunkY))))
         {
             if (*offscreenBuilds >= TERRAIN_OFFSCREEN_BUILDS)
             {
