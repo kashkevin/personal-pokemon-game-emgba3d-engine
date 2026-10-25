@@ -142,6 +142,22 @@
  *   PKMN_TEST_PLAN_FRAMES    frames a target may keep the field (default 2400; 10800 more per battle): then a hang,
  *                            pictured as <PKMN_TEST_MEGA_SHOT_STEM>-99.png, and the process ends (code 7)
  *
+ * For the stat stage checks (tools/battle_env/stat_stages_check.py; platform/battle_stat_stages.c):
+ *   PKMN_TEST_TURNS          the player's choices, one entry each time the game asks: mN the move in slot N, sN a
+ *                            switch to the party's Pokemon N, pN the Pokemon N where the game opens the party itself
+ *                            (Baton Pass, U-turn, a fainted Pokemon's place), r RUN; '|' starts the next battle's
+ *                            entries; once a battle's are done, FIGHT and its last move. The battle style SET (in
+ *                            memory)
+ *   PKMN_TEST_STAGE_LOG=1    "stages ..." lines: each battler's shown and engine stat stages, its party member, each
+ *                            party member's kept stages, whenever they change; the battle's start and end
+ *   PKMN_TEST_STAGE_SHOTS=1  a picture at an action menu when the tags changed: <PKMN_TEST_MEGA_SHOT_STEM>-NN (NN from
+ *                            60; Classic 2D: the GBA frame), in the 3D test build the window (screenshots/, with the
+ *                            battle HUD)
+ *   PKMN_TEST_NEXT_BATTLE    after a fought battle (PKMN_TEST_FIGHT), back on the field: that battle too, the party
+ *                            as the first left it
+ *   PKMN_TEST_SCENE_OFF=1    the options battle scene off and fast text, as the battle starts (in memory)
+ *   PKMN_TEST_PARTY / _FOE flags V<move>.<move>.<move>.<move>: the whole moveset; P<n>: the first move's PP left
+ *
  * In the Classic 2D test build the pictures are the GBA frame (no .json beside them).
  *
  * Nothing here changes a battle: it starts one the way the debug menu's
@@ -208,6 +224,9 @@ void DioramaBattleEnvTest_Watchdog(unsigned int nowMs);
 /* platform/sdl2.c, each presented GBA frame (the Classic 2D test build's captures) */
 void DioramaBattleEnvTest_Frame2D(const unsigned short *pixels);
 #endif
+/* platform/sdl2.c, DrawPcOverlay: a window picture (as F12 takes it; in the 3D test build with the battle HUD) asked for
+ * (the stat stage checks' pictures; only the 3D test build asks) */
+bool DioramaBattleEnvTest_WantWindowShot(void);
 
 #endif
 

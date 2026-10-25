@@ -789,9 +789,12 @@ static int BattleLength(bool native, bool command, uint32_t opcode, uint32_t siz
     return value;
 }
 
-/* A native block's size by kind (2 trainer, 3 start header, 4-6 the party blocks, 7 RNG; 8 the controller's own sizes). */
+/* A native block's size by kind (2 trainer, 3 start header, 4-6 the party blocks, 7 RNG; 8 the controller's own sizes).
+ * 48: the PC game's stat stages command (platform/battle_stat_stages.h: 36 bytes, padded to 40, the 8-byte header), as
+ * the app's native_battle.py takes it; without it the first stat change of a battle between players stopped the
+ * replaying game's link ("invalid battle command"). */
 static const int16_t sNativeBlockSizes[9] = {-1, -1, 28, 32, 200, 200, 200, 16, -1};
-static const uint16_t sNativeControllerSizes[] = {12, 16, 20, 24, 28, 36, 56, 64, 92, 156};
+static const uint16_t sNativeControllerSizes[] = {12, 16, 20, 24, 28, 36, 48, 56, 64, 92, 156};
 
 static bool NativeBlockSize(uint32_t kind, uint32_t size)
 {

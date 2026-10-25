@@ -13,6 +13,10 @@
 #include "battle_scripts.h"
 #include "window.h"
 #include "constants/battle_string_ids.h"
+#ifdef PORTABLE
+#include "platform/battle_stat_stages.h"
+#endif
+#line 16 // gba-line
 
 void AllocateBattleGfxResources(void)
 {
@@ -60,6 +64,10 @@ void AllocateBattleResources(void)
     gLinkBattleRecvBuffer = AllocZeroed(BATTLE_BUFFER_LINK_SIZE);
 
     AllocateBattleGfxResources();
+#ifdef PORTABLE
+    StatStages_BattleStart(); // every battle starts with no stat stages kept (platform/battle_stat_stages.c)
+#endif
+#line 63 // gba-line
 
     if (gBattleTypeFlags & BATTLE_TYPE_SECRET_BASE)
     {
@@ -76,6 +84,10 @@ void FreeBattleResources(void)
         FreeTrainerHillBattleStruct();
 
     gFieldTimers.terrain = 0;
+#ifdef PORTABLE
+    StatStages_BattleEnd(); // ... and ends with none
+#endif
+#line 79 // gba-line
     if (gBattleResources != NULL)
     {
         FREE_AND_SET_NULL(gBattleStruct);

@@ -15,6 +15,7 @@
 #endif
 #ifdef PORTABLE
 #include "multiplayer_rival.h"
+#include "platform/battle_stat_stages.h"
 #endif
 #line 13 // gba-line
 #include "multiplayer_world.h"
@@ -3023,8 +3024,18 @@ void BeginBattleIntro(void)
 
 static void BattleMainCB1(void)
 {
+#ifdef PORTABLE
+    // A battle between players: the master's engine waits while every game takes in the stat stages that changed, and
+    // every game handles that command itself (platform/battle_stat_stages.c: the other games never run the engine).
+    if (!StatStages_SyncTick(gBattleMainFunc != BeginBattleIntro && gBattleMainFunc != DoBattleIntro))
+#endif
+#line 2986 // gba-line
     gBattleMainFunc();
     for (enum BattlerId battler = 0; battler < gBattlersCount; battler++)
+#ifdef PORTABLE
+        if (!StatStages_RunCommand(battler))
+#endif
+#line 2988 // gba-line
         gBattlerControllerFuncs[battler](battler);
 }
 
@@ -3354,6 +3365,10 @@ void FaintClearSetData(enum BattlerId battler)
 {
     // Data cleared both on switch and faint
     ClearSetDataOnLeave(battler);
+#ifdef PORTABLE
+    StatStages_Fainted(battler); // a fainted Pokemon's kept stat stages go (platform/battle_stat_stages.c)
+#endif
+#line 3307 // gba-line
 
     for (enum Stat i = 0; i < NUM_BATTLE_STATS; i++)
         gBattleMons[battler].statStages[i] = DEFAULT_STAT_STAGE;

@@ -281,7 +281,7 @@ OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS) $(BFX_QJS_OBJS)
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
-.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-legend check-shiny check-coins check-breeding check-rival check-update32 check-hm-box check-move-switch check-species-data check-clock check-mp-objects check-spawn-claims check-secret-base check-rewards check-catch-reconcile check-pokenav-map check-ladder check-coop-exp check-coop-controller check-tower check-keybinds check-graphics-mode check-summary-ivev check-link-replay
+.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-shake-anim check-line-break check-wild-weather check-legend check-shiny check-coins check-breeding check-rival check-update32 check-hm-box check-move-switch check-species-data check-clock check-mp-objects check-spawn-claims check-secret-base check-rewards check-catch-reconcile check-pokenav-map check-ladder check-coop-exp check-coop-controller check-tower check-keybinds check-graphics-mode check-summary-ivev check-link-replay check-stat-stages
 .SUFFIXES:
 .SECONDARY:
 .DELETE_ON_ERROR:
@@ -502,6 +502,13 @@ check-summary-ivev: $(TARGET)
 check-link-replay: $(TARGET)
 	@./$(TARGET) --selftest-link-replay > $(OBJ_DIR)/selftest-link-replay.log 2>&1; status=$$?; \
 	  tail -n 3 $(OBJ_DIR)/selftest-link-replay.log; exit $$status
+
+# Stat stages kept until a Pokemon faints or the battle ends (switches through the game's own script commands, Baton
+# Pass, a forced switch, fainting, the battle's end, each party its own), the link master's command and the replaying
+# game's tags, the tags' text (src/platform/native_selftest_stages.c, platform/battle_stat_stages.c).
+check-stat-stages: $(TARGET)
+	@./$(TARGET) --selftest-stat-stages > $(OBJ_DIR)/selftest-stat-stages.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-stat-stages.log; exit $$status
 
 # C: preprocess (same flags as the GBA build + PORTABLE), expand INCBIN/charmap
 # strings with preproc, then compile for 32-bit x86.

@@ -1244,6 +1244,21 @@ MT_TEST(battle_receive_many_needs_its_capability_and_whole_small_blocks)
     }
 }
 
+// The PC game's stat stages command (60: 36 bytes, padded to 40, and the 8-byte header; platform/battle_stat_stages.h)
+// is a 48-byte controller block: it reaches the game, and a size no controller block has still stops the link.
+MT_TEST(battle_stat_stages_block_reaches_the_game)
+{
+    uint8_t entry[64];
+    size_t k;
+
+    k = ReceiveManyEntry(entry, 1, 8, 48, 3);
+    MT_CHECK(ReceiveManyAccepted(2, entry, k, true));
+    k = ReceiveManyEntry(entry, 1, 8, 44, 3);
+    MT_CHECK(!ReceiveManyAccepted(2, entry, k, true));
+    k = ReceiveManyEntry(entry, 1, 8, 52, 3);
+    MT_CHECK(!ReceiveManyAccepted(2, entry, k, true));
+}
+
 MT_TEST(native_battle_phases_reach_the_game)
 {
     MT_CHECK(BattleCommandAccepted(2)); // singles
@@ -2185,6 +2200,7 @@ int main(void)
     MT_RUN(battle_looks_need_the_game);
     MT_RUN(battle_peek_needs_its_capability_and_answers_with_its_block);
     MT_RUN(battle_receive_many_needs_its_capability_and_whole_small_blocks);
+    MT_RUN(battle_stat_stages_block_reaches_the_game);
     MT_RUN(native_battle_phases_reach_the_game);
     MT_RUN(free_for_all_commands_reach_the_game);
     MT_RUN(three_player_free_for_all_commands_reach_the_game);
