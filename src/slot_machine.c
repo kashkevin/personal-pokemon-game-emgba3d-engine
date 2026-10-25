@@ -7916,3 +7916,123 @@ static const struct SpritePalette sSlotMachineSpritePalettes[] =
 static const u32 sReelTimeGfx[] = INCGFX_U32("graphics/slot_machine/reel_time_gfx.4bpp", ".smol"); // reel_time_machine and reel_time_pikachu
 static const u16 sReelTimeWindow_Tilemap[] = INCBIN_U16("graphics/slot_machine/reel_time_window.bin");
 static const u16 sEmptyTilemap[] =  {0};
+
+#ifdef PORTABLE
+// The native PC UI's slot machine screen (include/slot_machine.h): what the machine shows, read at the frame boundary
+// while the game is parked. It changes nothing the machine reads.
+static u8 NativeUiPhase(void)
+{
+    switch (sSlotMachine->state)
+    {
+    case SLOTTASK_ASK_INSERT_BET:
+    case SLOTTASK_BET_INPUT:
+        return SLOT_NATIVE_BET;
+    case SLOTTASK_START_SPIN:
+    case SLOTTASK_START_RT_SPIN:
+    case SLOTTASK_RESET_BIAS_FAILURE:
+    case SLOTTASK_WAIT_REEL_STOP:
+    case SLOTTASK_WAIT_ALL_REELS_STOP:
+        return SLOT_NATIVE_SPIN;
+    case SLOTTASK_CHECK_MATCHES:
+    case SLOTTASK_WAIT_PAYOUT:
+    case SLOTTASK_END_PAYOUT:
+        return SLOT_NATIVE_WIN;
+    case SLOTTASK_NO_MATCHES:
+        return SLOT_NATIVE_LOSE;
+    case SLOTTASK_READY_NEW_RT_SPIN:
+    case SLOTTASK_MATCHED_POWER:
+    case SLOTTASK_WAIT_RT_ANIM:
+        return SLOT_NATIVE_REEL_TIME;
+    case SLOTTASK_ASK_QUIT:
+    case SLOTTASK_HANDLE_QUIT_INPUT:
+        return SLOT_NATIVE_ASK_QUIT;
+    case SLOTTASK_MSG_NEED_3_COINS:
+    case SLOTTASK_WAIT_MSG_NEED_3_COINS:
+    case SLOTTASK_MSG_MAX_COINS:
+    case SLOTTASK_WAIT_MSG_MAX_COINS:
+    case SLOTTASK_MSG_NO_MORE_COINS:
+    case SLOTTASK_WAIT_MSG_NO_MORE_COINS:
+        return SLOT_NATIVE_MESSAGE;
+    case SLOTTASK_WAIT_INFO_BOX:
+        return SLOT_NATIVE_INFO;
+    default:
+        return SLOT_NATIVE_OTHER;
+    }
+}
+
+static const u8 *NativeUiMessage(void)
+{
+    switch (sSlotMachine->state)
+    {
+    case SLOTTASK_MSG_NEED_3_COINS:
+    case SLOTTASK_WAIT_MSG_NEED_3_COINS:
+        return sText_YouDontHaveThreeCoins;
+    case SLOTTASK_MSG_MAX_COINS:
+    case SLOTTASK_WAIT_MSG_MAX_COINS:
+        return sText_YouveGot9999Coins;
+    case SLOTTASK_MSG_NO_MORE_COINS:
+    case SLOTTASK_WAIT_MSG_NO_MORE_COINS:
+        return sText_YouveRunOutOfCoins;
+    default:
+        return NULL;
+    }
+}
+
+bool32 SlotMachine_NativeUiState(struct SlotMachineNativeState *out)
+{
+    // the lines a bet plays: 1 the middle row, 2 the top and bottom too, 3 the diagonals too (CheckForPayout)
+    static const s8 sLineRows[SLOT_NATIVE_LINES][NUM_REELS] = {{2, 2, 2}, {1, 1, 1}, {3, 3, 3}, {1, 2, 3}, {3, 2, 1}};
+    static const u8 sLineBet[SLOT_NATIVE_LINES] = {1, 2, 2, 3, 3};
+    u32 r, j;
+
+    memset(out, 0, sizeof(*out));
+    if (sSlotMachine == NULL || gMain.callback2 != CB2_SlotMachine)
+        return FALSE;
+    out->phase = NativeUiPhase();
+    out->machineId = sSlotMachine->machineId;
+    out->coins = sSlotMachine->coins;
+    out->payout = sSlotMachine->payout;
+    out->bet = sSlotMachine->bet;
+    out->pikaPowerBolts = sSlotMachine->pikaPowerBolts;
+    out->reelTimeSpinsLeft = sSlotMachine->reelTimeSpinsLeft;
+    out->currentReel = sSlotMachine->currentReel;
+    for (r = 0; r < NUM_REELS; r++)
+    {
+        if (IsSlotReelMoving(r))
+            out->reelsTurning |= 1 << r;
+        // as SpriteCB_ReelSymbol places each of the reel's five sprites
+        for (j = 0; j < SLOT_NATIVE_ROWS; j++)
+        {
+            s16 pos = (sSlotMachine->reelPixelOffsets[r] + j * 24) % 120;
+
+            out->symbolY[r][j] = sSlotMachine->reelShockOffsets[r] + 28 + pos;
+            out->symbol[r][j] = GetSymbolAtRest(r, pos / 24);
+        }
+    }
+    if (out->phase == SLOT_NATIVE_WIN)
+    {
+        for (j = 0; j < SLOT_NATIVE_LINES; j++)
+        {
+            if (sSlotMachine->bet >= sLineBet[j]
+             && GetMatchFromSymbols(GetSymbolAtRest(LEFT_REEL, sLineRows[j][0]), GetSymbolAtRest(MIDDLE_REEL, sLineRows[j][1]),
+                                    GetSymbolAtRest(RIGHT_REEL, sLineRows[j][2])) != MATCH_NONE)
+                out->linesLit |= 1 << j;
+        }
+    }
+    out->quitCursor = Menu_GetCursorPos();
+    out->message = NativeUiMessage();
+    for (j = 0; j < SLOT_NATIVE_PAYOUTS; j++)
+        out->payouts[j] = sSlotPayouts[j];
+    return TRUE;
+}
+
+const u8 *SlotMachine_NativeUiSymbolTiles(u8 symbol)
+{
+    return symbol < SLOT_NATIVE_SYMBOLS ? sSlotMachineSpriteSheets[GFXTAG_SYMBOLS_START + symbol].data : NULL;
+}
+
+const u16 *SlotMachine_NativeUiSymbolPalette(void)
+{
+    return gSlotMachineReelSymbols_Pal;
+}
+#endif

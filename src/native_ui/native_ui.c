@@ -51,6 +51,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_Starters,
     &gUiScreen_Evolution,
     &gUiScreen_GameCorner,
+    &gUiScreen_SlotMachine,  /* the Game Corner's slot machines (the reels' own screen) */
     &gUiScreen_FieldText, /* the field's messages the screens above do not draw */
     &gUiScreen_Notice,    /* last: only over the calm field */
 };
