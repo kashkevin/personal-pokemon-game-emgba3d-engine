@@ -39,6 +39,11 @@
 #ifdef PORTABLE
 #include "multiplayer_spawns.h"
 #include "platform/mp_legend.h"
+
+static void OWEKeep_Update(void);
+static void OWEKeep_OnBattleStart(struct ObjectEvent *owe);
+static void OWEKeep_OnBattleEnd(u32 outcome);
+static bool32 IsKeptShinyOWE(struct ObjectEvent *owe);
 #endif
 #line 35 // gba-line
 
@@ -260,6 +265,10 @@ static void TryReturnRanAwayOWE(void)
 
 void MPOWE_OnWildBattleEnd(u32 outcome)
 {
+#ifdef PORTABLE
+    OWEKeep_OnBattleEnd(outcome);
+#endif
+#line 254 // gba-line
     if (sOWERunReturn.state != 1)
         return;
     if (outcome == B_OUTCOME_RAN || outcome == B_OUTCOME_PLAYER_TELEPORTED)
@@ -267,6 +276,222 @@ void MPOWE_OnWildBattleEnd(u32 outcome)
     else
         sOWERunReturn.state = 0;
 }
+
+#ifdef PORTABLE
+// MS-79 (the owner's request of 2026-10-24: a shiny leaves only when it is caught or knocked out). A shiny the game
+// makes already stays while the player is on its map (WE_OWE_PREVENT_SHINY_DESPAWN), but it went for good when the
+// player left that map (walked or warped away, went into a town) and, in a world, when the player left the water (the
+// shared spawns take the land). Each one is remembered where it was last seen on its map and put back there when the
+// player is on that map again, until a battle with it is won or it is caught. For as long as the game runs (not saved).
+#define OWE_KEEP_COUNT  8
+#define OWE_KEEP_PERIOD 30      // frames between tries to put one back
+struct OWEKeep
+{
+    bool8 used;
+    u8 mapGroup;
+    u8 mapNum;
+    u8 localId;
+    u16 graphicsId;
+    s16 x;
+    s16 y;
+    u8 elevation;
+    u8 movementType;
+    u8 level;       // with OWE_NO_DESPAWN_FLAG
+    u8 category;
+    u32 seen;       // sOWEKeepClock when last seen: a full list forgets the longest unseen
+};
+static struct OWEKeep sOWEKeep[OWE_KEEP_COUNT];
+static u32 sOWEKeepClock;
+static s32 sOWEKeepBattle = -1;     // the one in the battle now
+
+static bool32 IsKeptShinyOWE(struct ObjectEvent *owe)
+{
+    // A roamer moves on by itself (RoamerMove) and is not kept here.
+    return IsOverworldWildEncounter(owe, OWE_GENERATED) && OW_SHINY(owe) && HasOWENoDespawnFlag(owe)
+        && GetOWECategory(owe) >= ROAMER_COUNT;
+}
+
+static bool32 IsOWEKeepHere(const struct OWEKeep *keep)
+{
+    return keep->used && keep->mapGroup == gSaveBlock1Ptr->location.mapGroup
+        && keep->mapNum == gSaveBlock1Ptr->location.mapNum;
+}
+
+// The entry of a kept shiny on the player's map (the same local id and look), its place brought up to date; a new one
+// when it has none and add.
+static s32 OWEKeep_Track(struct ObjectEvent *owe, bool32 add)
+{
+    s32 i, slot = -1, oldest = 0;
+
+    for (i = 0; i < OWE_KEEP_COUNT; i++)
+    {
+        struct OWEKeep *keep = &sOWEKeep[i];
+
+        if (IsOWEKeepHere(keep) && keep->localId == owe->localId && keep->graphicsId == owe->graphicsId)
+        {
+            slot = i;
+            break;
+        }
+        if (!keep->used && slot < 0)
+            slot = i;
+        if (sOWEKeep[i].seen < sOWEKeep[oldest].seen)
+            oldest = i;
+    }
+    if (i == OWE_KEEP_COUNT)
+    {
+        if (!add)
+            return -1;
+        if (slot < 0)
+            slot = oldest;
+        sOWEKeep[slot].used = TRUE;
+        sOWEKeep[slot].mapGroup = gSaveBlock1Ptr->location.mapGroup;
+        sOWEKeep[slot].mapNum = gSaveBlock1Ptr->location.mapNum;
+        sOWEKeep[slot].localId = owe->localId;
+        sOWEKeep[slot].graphicsId = owe->graphicsId;
+        sOWEKeep[slot].movementType = owe->movementType;
+        sOWEKeep[slot].level = owe->sOverworldEncounterLevel;
+        sOWEKeep[slot].category = GetOWECategory(owe);
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+        DioramaBattleEnvTest_OweKept("kept", owe->localId, OW_SPECIES(owe), owe->currentCoords.x, owe->currentCoords.y);
+#endif
+    }
+    sOWEKeep[slot].x = owe->currentCoords.x;
+    sOWEKeep[slot].y = owe->currentCoords.y;
+    sOWEKeep[slot].elevation = owe->currentElevation;
+    sOWEKeep[slot].seen = sOWEKeepClock;
+    return slot;
+}
+
+// A local id of the game's own spawns for a kept shiny coming back: its own when free, else a free one, else the place
+// of one the game made that is not kept; LOCALID_NONE when every one is a kept shiny.
+static u32 OWEKeep_LocalId(u32 wanted)
+{
+    u32 slot, objectEventId;
+
+    if (GetObjectEventIdByLocalId(wanted) >= OBJECT_EVENTS_COUNT)
+        return wanted;
+    for (slot = 0; slot < OWE_SPAWNS_MAX; slot++)
+    {
+        if (GetObjectEventIdByLocalId(GetLocalIdByOWESpawnSlot(slot)) >= OBJECT_EVENTS_COUNT)
+            return GetLocalIdByOWESpawnSlot(slot);
+    }
+    for (slot = 0; slot < OWE_SPAWNS_MAX; slot++)
+    {
+        objectEventId = GetObjectEventIdByLocalId(GetLocalIdByOWESpawnSlot(slot));
+        if (IsOverworldWildEncounter(&gObjectEvents[objectEventId], OWE_GENERATED)
+         && !IsKeptShinyOWE(&gObjectEvents[objectEventId]))
+        {
+            RemoveObjectEvent(&gObjectEvents[objectEventId]);
+            return GetLocalIdByOWESpawnSlot(slot);
+        }
+    }
+    return LOCALID_NONE;
+}
+
+// One kept shiny of this map that is not on it back where it was last seen: the player a few tiles away (no battle at
+// once), nothing standing there, its look loadable.
+static void OWEKeep_Return(void)
+{
+    struct ObjectEvent *player;
+
+    if (!WE_OW_ENCOUNTERS || ArePlayerFieldControlsLocked() || FlagGet(WE_OWE_FLAG_DISABLED)
+     || FlagGet(WE_FLAG_NO_ENCOUNTER) || FlagGet(DN_FLAG_SEARCHING) || InTrainerHillChallenge()
+     || gPlayerAvatar.objectEventId >= OBJECT_EVENTS_COUNT)
+        return;
+    player = &gObjectEvents[gPlayerAvatar.objectEventId];
+    if (player->currentCoords.x != player->previousCoords.x || player->currentCoords.y != player->previousCoords.y)
+        return;
+    for (s32 i = 0; i < OWE_KEEP_COUNT; i++)
+    {
+        struct OWEKeep *keep = &sOWEKeep[i];
+        u32 objectEventId, localId;
+        s32 dx, dy;
+
+        if (!IsOWEKeepHere(keep) || i == sOWEKeepBattle)
+            continue;
+        objectEventId = GetObjectEventIdByLocalIdAndMap(keep->localId, keep->mapNum, keep->mapGroup);
+        if (objectEventId < OBJECT_EVENTS_COUNT && gObjectEvents[objectEventId].graphicsId == keep->graphicsId)
+            continue;
+        dx = player->currentCoords.x - keep->x;
+        dy = player->currentCoords.y - keep->y;
+        if ((dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy) < OWE_RUN_RETURN_DISTANCE
+         || !AreCoordsInsidePlayerMap(keep->x, keep->y)
+         || GetObjectEventIdByXY(keep->x, keep->y) < OBJECT_EVENTS_COUNT
+         || !CheckCanLoadOWE(keep->graphicsId & OBJ_EVENT_MON_SPECIES_MASK, (keep->graphicsId & OBJ_EVENT_MON_FEMALE) != 0,
+                             TRUE, keep->x, keep->y))
+            continue;
+        localId = OWEKeep_LocalId(keep->localId);
+        if (localId == LOCALID_NONE)
+            continue;
+        {
+            struct ObjectEventTemplate objectEventTemplate = {
+                .localId = localId,
+                .graphicsId = keep->graphicsId,
+                .x = keep->x - MAP_OFFSET,
+                .y = keep->y - MAP_OFFSET,
+                .elevation = keep->elevation,
+                .movementType = keep->movementType,
+                .trainerType = TRAINER_TYPE_OW_WILD_ENCOUNTER,
+            };
+            objectEventId = SpawnSpecialObjectEvent(&objectEventTemplate);
+        }
+        if (objectEventId >= OBJECT_EVENTS_COUNT)
+            return;
+        gObjectEvents[objectEventId].disableCoveringGroundEffects = TRUE;
+        gObjectEvents[objectEventId].sOverworldEncounterLevel = keep->level;
+        gObjectEvents[objectEventId].sOverworldEncounterCategory = keep->category;
+        // The one the player ran from is this one: it is back (TryReturnRanAwayOWE would make a second).
+        if (sOWERunReturn.state == 2 && sOWERunReturn.localId == keep->localId
+         && sOWERunReturn.mapGroup == keep->mapGroup && sOWERunReturn.mapNum == keep->mapNum)
+            sOWERunReturn.state = 0;
+        keep->localId = localId;
+        keep->seen = sOWEKeepClock;
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+        DioramaBattleEnvTest_OweKept("back", localId, keep->graphicsId & OBJ_EVENT_MON_SPECIES_MASK, keep->x, keep->y);
+#endif
+        return;
+    }
+}
+
+static void OWEKeep_Update(void)
+{
+    if (gSaveBlock1Ptr == NULL)
+        return;
+    sOWEKeepClock++;
+    for (u32 i = 0; i < OBJECT_EVENTS_COUNT; i++)
+    {
+        struct ObjectEvent *owe = &gObjectEvents[i];
+
+        if (owe->active && IsKeptShinyOWE(owe)
+         && owe->mapGroup == gSaveBlock1Ptr->location.mapGroup && owe->mapNum == gSaveBlock1Ptr->location.mapNum
+         && AreCoordsInsidePlayerMap(owe->currentCoords.x, owe->currentCoords.y))
+            OWEKeep_Track(owe, TRUE);
+    }
+    if (sOWEKeepClock % OWE_KEEP_PERIOD == 0)
+        OWEKeep_Return();
+}
+
+static void OWEKeep_OnBattleStart(struct ObjectEvent *owe)
+{
+    sOWEKeepBattle = IsKeptShinyOWE(owe) ? OWEKeep_Track(owe, TRUE) : -1;
+}
+
+static void OWEKeep_OnBattleEnd(u32 outcome)
+{
+    outcome &= ~B_OUTCOME_LINK_BATTLE_RAN;
+    if (sOWEKeepBattle >= 0 && (outcome == B_OUTCOME_WON || outcome == B_OUTCOME_CAUGHT))
+    {
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+        DioramaBattleEnvTest_OweKept(outcome == B_OUTCOME_CAUGHT ? "caught" : "won", sOWEKeep[sOWEKeepBattle].localId,
+                                     sOWEKeep[sOWEKeepBattle].graphicsId & OBJ_EVENT_MON_SPECIES_MASK,
+                                     sOWEKeep[sOWEKeepBattle].x, sOWEKeep[sOWEKeepBattle].y);
+#endif
+        sOWEKeep[sOWEKeepBattle].used = FALSE;
+    }
+    sOWEKeepBattle = -1;
+}
+#endif
+#line 261 // gba-line
 
 struct AgeSort
 {
@@ -323,13 +548,19 @@ const struct FieldEffectInfoOWE gOverworldWildEncounterFieldEffectInfo[] =
 void UpdateOverworldWildEncounter(void)
 {
 #ifdef PORTABLE
+    OWEKeep_Update();
     // EmeraldTogether shared spawns (multiplayer_spawns.c): while connected to
     // a world, the host's visible land Pokemon replace the ones generated here.
-    // Surfing still meets its own, and offline nothing changes.
+    // Surfing still meets its own, and offline nothing changes. A kept shiny
+    // (MS-79) stays.
     if (MultiplayerSpawns_IsActive() && !ShouldSpawnWaterOWE())
     {
-        if (GetNumberOfActiveOWEs(OWE_GENERATED) != 0)
-            DespawnAllOverworldWildEncounters(OWE_GENERATED, 0);
+        for (u32 i = 0; i < OBJECT_EVENTS_COUNT; i++)
+        {
+            if (gObjectEvents[i].active && IsOverworldWildEncounter(&gObjectEvents[i], OWE_GENERATED)
+             && !IsKeptShinyOWE(&gObjectEvents[i]))
+                RemoveObjectEvent(&gObjectEvents[i]);
+        }
         return;
     }
 #endif
@@ -1203,6 +1434,11 @@ bool32 DespawnOWEDueToNPCCollision(struct ObjectEvent *obstacle, struct ObjectEv
     
     if (!IsOverworldWildEncounter(obstacle, OWE_GENERATED))
         return FALSE;
+#ifdef PORTABLE
+    if (IsKeptShinyOWE(obstacle))   // MS-79: a shiny is not pushed out of the world by a walking NPC
+        return FALSE;
+#endif
+#line 1145 // gba-line
 
     RemoveObjectEvent(obstacle);
     return TRUE;
@@ -1251,6 +1487,7 @@ void DespawnOWEOnBattleStart(void)
     // despawn, and gObjectEvents[OBJECT_EVENTS_COUNT] is the memory after the array (AddressSanitizer).
     if (GetObjectEventIdByLocalId(gSpecialVar_LastTalked) >= OBJECT_EVENTS_COUNT)
         return;
+    OWEKeep_OnBattleStart(&gObjectEvents[GetObjectEventIdByLocalId(gSpecialVar_LastTalked)]);
 #endif
 #line 1188 // gba-line
     struct ObjectEvent *owe = &gObjectEvents[GetObjectEventIdByLocalId(gSpecialVar_LastTalked)];

@@ -196,6 +196,9 @@ bool DioramaBattleEnvTest_HoldOnForMega(unsigned battler);
 /* wild_encounter_ow.c, SetSpeciesInfoForOWE (game thread): PKMN_TEST_OWE_SHINY=1 every other overworld wild Pokemon the
    game makes is shiny (the first one is), =2 every one; otherwise the game's own roll */
 bool DioramaBattleEnvTest_OweShiny(bool rolled);
+/* wild_encounter_ow.c, the kept shinies (MS-79; game thread): "owe keep: <what> local L species S x X y Y map G.N" -
+   what: kept (first seen), back (put back on its map), won or caught (gone for good) */
+void DioramaBattleEnvTest_OweKept(const char *what, unsigned localId, unsigned species, int x, int y);
 /* multiplayer_spawns.c, MultiplayerSpawns_Tick (game thread): PKMN_TEST_SPAWNS="species:x:y:flags:spawnId:personality;..."
    the shared spawns a world's host would send for the map the player is on, written into the spawn mailbox as the host
    writes them; true (the world taken as connected) while there are any, with *fieldReady as the field's;

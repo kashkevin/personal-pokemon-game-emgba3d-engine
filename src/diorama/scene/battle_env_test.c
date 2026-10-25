@@ -260,7 +260,7 @@ static struct
     u32 worldEventGeneration;
     /* PKMN_TEST_OUTBREAK="species:level": a TV mass outbreak on the player's map, every land spawn its Pokemon;
        PKMN_TEST_ROAMER="species:level:shiny": a roamer on the player's map, shiny or not;
-       PKMN_TEST_OWE_BATTLE=roamer|outbreak: once one of those is drawn on the GBA's picture, the player bumps into it
+       PKMN_TEST_OWE_BATTLE=roamer|outbreak|wild: once one of those is drawn on the GBA's picture, the player bumps into it
        (TryTriggerOverworldWildEncounter) and its battle's Pokemon is logged at the action menu */
     int outbreakSpecies, outbreakLevel, roamerSpecies, roamerLevel, roamerShiny;
     int oweBattleKind;          /* OWE_KIND_ROAMER, OWE_KIND_OUTBREAK; 0 none */
@@ -536,7 +536,7 @@ static void Init(void)
     s.tilesFullAt = EnvInt("PKMN_TEST_TILES_FULL", 0);
     value = SDL_getenv("PKMN_TEST_OWE_BATTLE");
     s.oweBattleKind = value == NULL ? 0 : strcmp(value, "roamer") == 0 ? OWE_KIND_ROAMER
-                    : strcmp(value, "outbreak") == 0 ? OWE_KIND_OUTBREAK : 0;
+                    : strcmp(value, "outbreak") == 0 ? OWE_KIND_OUTBREAK : strcmp(value, "wild") == 0 ? OWE_KIND_WILD : 0;
     value = SDL_getenv("PKMN_TEST_SPAWNS");
     for (s.spawnCount = 0; value != NULL && *value != '\0' && s.spawnCount < MP_SPAWN_MAX_SLOTS; )
     {
@@ -1540,6 +1540,15 @@ bool DioramaBattleEnvTest_RoamerAlwaysMet(void)
     if (!s.init)
         Init();
     return s.roamerSpecies > 0;
+}
+
+/* the kept shinies (wild_encounter_ow.c, MS-79), whenever one is first kept, put back or gone for good */
+void DioramaBattleEnvTest_OweKept(const char *what, unsigned localId, unsigned species, int x, int y)
+{
+    if (!s.init)
+        Init();
+    TestLog("Battle env test: owe keep: %s local %u species %u x %d y %d map %u.%u", what, localId, species, x, y,
+            gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum);
 }
 
 /* PKMN_TEST_OWE_BATTLE: the first overworld Pokemon of that kind drawn on the GBA's picture, the field calm - the

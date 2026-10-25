@@ -27,6 +27,12 @@ battle's), and in the 3D build its renderer's (PKMN_DIORAMA_LOG: each field effe
   roamer-plain   a roamer that is not shiny: drawn plain, its battle not shiny
   outbreak       a mass outbreak on the map (PKMN_TEST_OUTBREAK), every overworld Pokemon made shiny
                  (PKMN_TEST_OWE_SHINY=2): one bumped into is shiny in battle too (the battle once rolled again)
+  keep           MS-79, a shiny stays until it is caught or knocked out: the game's own overworld Pokemon on Route 101,
+                 every one shiny (each one kept: "owe keep: kept"), the player walks north into Oldale Town (a town: the
+                 game takes every overworld Pokemon away) and back: a kept one is put back where it was ("owe keep:
+                 back", the same species at the same place) and drawn shiny there
+  keep-won       one of them bumped into (PKMN_TEST_OWE_BATTLE=wild) and knocked out (A through the battle): "owe keep:
+                 won", never put back
   palette-last   a shiny shared spawn on a crowded map, one sprite palette left free (PKMN_TEST_PALETTE_FREE=1): no
                  twinkle (its palette would take the last one, which then pushes out a Pokemon), one palette still free
   palette-two    two free: twinkles, one palette still free
@@ -41,6 +47,7 @@ Exit 0 when every case gave what it expects; the report is OUT/shiny_check.json.
 import argparse
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -76,6 +83,36 @@ def mons(seconds, kind=None, event=None):
     """Every logged mon line (local, gfx, shiny, spawn, x, y, kind, event, offscreen) of that kind / the World Event."""
     return [m for second in seconds for m in second[4]
             if len(m) >= 9 and (kind is None or m[6] == kind) and (event is None or m[7] == event)]
+
+
+ROUTE_101_MAP, OLDALE = (0, 16), (0, 10)
+MOVE_X_SCISSOR = 404
+MAP_OFFSET = 7                      # "owe keep" places are the game's own (the map's 7-tile margin added)
+# From Route 101's grass (10,11): right to x 15, north past the trees to y 2, left to the gap at x 10, north into Oldale
+# Town, a few steps in; then back south onto Route 101. One step a tap (18 frames; a first tap may only turn).
+KEEP_WALK_AT = 700                  # the shinies made first
+KEEP_PATH = ["RIGHT"] * 6 + ["UP"] * 10 + ["LEFT"] * 6 + ["UP"] * 7 + ["DOWN"] * 8
+
+
+def keep_steps():
+    return [f"{KEEP_WALK_AT + 18 * i}:{key}" for i, key in enumerate(KEEP_PATH)]
+
+
+KEEP_KEYS = keep_steps()
+KEEP_FRAMES = KEEP_WALK_AT + 18 * len(KEEP_PATH) + 900
+
+
+def keep_line(line):
+    """'owe keep: back local L species S x X y Y map G.N' as a dict."""
+    what = line.split()[2]
+    local, species, x, y, group, num = numbers(line.split(what, 1)[1])[:6]
+    return dict(what=what, local=local, species=species, x=x, y=y, map=(group, num))
+
+
+def hm_place(line):
+    """'hm field: ... map G.N at X,Y ...': ((G, N), (X, Y))."""
+    m = re.search(r"map (\d+)\.(\d+) at (-?\d+),(-?\d+)", line)
+    return (int(m.group(1)), int(m.group(2))), (int(m.group(3)), int(m.group(4)))
 
 
 def main():
@@ -237,6 +274,47 @@ def main():
         case("outbreak", 4000, dict(PKMN_TEST_OUTBREAK=f"{SPECIES_SEEDOT}:5", PKMN_TEST_OWE_SHINY="2",
                                     PKMN_TEST_OWE_BATTLE="outbreak"), "")
         battle_shiny("outbreak", 1)
+
+    # MS-79: kept shinies come back after the player leaves the map, until knocked out
+    if want("keep"):
+        seconds = case("keep", KEEP_FRAMES, dict(PKMN_TEST_OWE_SHINY="2", PKMN_TEST_HM_LOG="1",
+                                                 PKMN_TEST_FIELD_KEYS=",".join(KEEP_KEYS)), "")
+        kept = [keep_line(line) for line in case.lines if line.startswith("owe keep: kept")]
+        places = [hm_place(line) for line in case.lines if line.startswith("hm field: ")]
+        oldale = next((i for i, line in enumerate(case.lines) if line.startswith("hm field: ")
+                       and hm_place(line)[0] == OLDALE), None)
+        back = [keep_line(line) for line in case.lines[oldale or len(case.lines):] if line.startswith("owe keep: back")]
+        kept_route = {(k["species"], k["x"], k["y"]) for k in kept if k["map"] == ROUTE_101_MAP}
+        if not kept_route:
+            problems.append("keep: no shiny overworld Pokemon kept on Route 101")
+        if oldale is None:
+            problems.append(f"keep: the player never reached Oldale Town (places {sorted(set(p[0] for p in places))})")
+        elif not any(b["map"] == ROUTE_101_MAP for b in back):
+            problems.append("keep: no kept shiny put back on Route 101 after Oldale Town")
+        else:
+            first = next(b for b in back if b["map"] == ROUTE_101_MAP)
+            if not any(first["species"] == k[0] for k in kept_route):
+                problems.append(f"keep: the one put back {first} is none of the kept ones {sorted(kept_route)}")
+            place = [first["x"] - MAP_OFFSET, first["y"] - MAP_OFFSET]     # the sparkle log's places are the map's own
+            drawn = [m for m in mons(seconds) if m[1] & 0xFFF == first["species"] and m[4:6] == place]
+            if not drawn or not all(m[2] == 1 for m in drawn):
+                problems.append(f"keep: the one put back {first} not drawn shiny at its place ({drawn[-1:]})")
+    if want("keep-won"):
+        # Level 100 with X-Scissor first (no type is immune to Bug, and the level gains nothing to ask about)
+        case("keep-won", 6000, dict(PKMN_TEST_OWE_SHINY="2", PKMN_TEST_OWE_BATTLE="wild", PKMN_TEST_STRONG="1",
+                                    PKMN_TEST_FIRST_MOVE=str(MOVE_X_SCISSOR),
+                                    PKMN_TEST_FIELD_KEYS=",".join(f"{f}:A" for f in range(900, 5700, 30))),
+             "900,1500,2400,3600,5000")
+        battle_shiny("keep-won", 1)
+        won = [keep_line(line) for line in case.lines if line.startswith(("owe keep: won", "owe keep: caught"))]
+        if not won:
+            problems.append(f"keep-won: the shiny knocked out or caught was not let go ({case.battle})")
+        else:
+            later = case.lines[next(i for i, line in enumerate(case.lines) if line.startswith(("owe keep: won",
+                                                                                               "owe keep: caught"))):]
+            again = [keep_line(line) for line in later if line.startswith("owe keep: back")]
+            if any(b["species"] == won[0]["species"] and (b["x"], b["y"]) == (won[0]["x"], won[0]["y"]) for b in again):
+                problems.append(f"keep-won: the one knocked out {won[0]} was put back")
 
     report = dict(cases=cases, problems=problems, passed=not problems)
     with open(os.path.join(args.out, "shiny_check.json"), "w") as out:
