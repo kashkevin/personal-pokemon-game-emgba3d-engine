@@ -1061,6 +1061,13 @@ static const struct YesNoFuncTable sYesNoTable_KeepPlaying =
 static void CB2_Roulette(void)
 {
     RunTasks();
+#ifdef PORTABLE
+    // Leaving the table frees it inside RunTasks (Task_ExitRoulette: FreeRoulette) and hands the frame back to the
+    // field; the flash below reads the table, so nothing more runs on what was freed (a PC crashed as the player left).
+    if (sRoulette == NULL)
+        return;
+#endif
+#line 1057 // gba-line
     AnimateSprites();
     BuildOamBuffer();
     if (sRoulette->flashUtil.enabled)

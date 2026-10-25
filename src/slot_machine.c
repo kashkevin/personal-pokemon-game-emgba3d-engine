@@ -1111,6 +1111,14 @@ static void CB2_SlotMachineSetup(void)
 static void CB2_SlotMachine(void)
 {
     RunTasks();
+#ifdef PORTABLE
+    // Quitting frees the machine inside RunTasks (SlotTask_FreeDataStructures) and hands the frame back to the field;
+    // its reel sprites read the machine (SpriteCB_ReelSymbol), so they must not run on what was freed (a GBA reads
+    // the BIOS there; a PC crashed as the player left the machine).
+    if (sSlotMachine == NULL)
+        return;
+#endif
+#line 1107 // gba-line
     AnimateSprites();
     BuildOamBuffer();
     UpdatePaletteFade();
@@ -1118,6 +1126,13 @@ static void CB2_SlotMachine(void)
 
 static void SlotMachine_VBlankCB(void)
 {
+#ifdef PORTABLE
+    // Still installed for the field's first frames after the machine was freed (SlotTask_FreeDataStructures): the
+    // field sets its own once it is back; until then nothing here may read the machine.
+    if (sSlotMachine == NULL)
+        return;
+#endif
+#line 1114 // gba-line
     LoadOam();
     ProcessSpriteCopyRequests();
     TransferPlttBuffer();
