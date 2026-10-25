@@ -6,12 +6,12 @@ read from the game's own log (PKMN_TEST_MEGA_LOG: the coins and the money whenev
 counts of the goods bought); the prices and the rows are the generated lists' own (data/scripts/mp_rare_goods_shop.inc,
 src/platform/mp_rare_goods_prices.h); the field keys are the presses a person makes (game frames at fast text, as the
 pictures each step takes showed them). The player stands below the prize counter's clerk (PKMN_TEST_WARP) with a Coin Case
-and 100,000 coins.
+and 20,000 coins.
 
   1. buy    UP to the clerk, A: "Welcome to the PRIZE COUNTER! What would you like to see?" RARE GOODS; "RARE GOODS:
             things you won't find anywhere else! Which kind?" TRAINING; BUY; the Ability Patch (its row in the list):
-            "How many?" 1, "That will be 75000 COINS." YES, "Here you go!"; A on it again: "You don't have enough COINS."
-            (25,000 left); out of the list, QUIT, the kinds again: B, "Please come again!"; SAVE. The coins are 75,000
+            "How many?" 1, "That will be 15000 COINS." YES, "Here you go!"; A on it again: "You don't have enough COINS."
+            (5,000 left); out of the list, QUIT, the kinds again: B, "Please come again!"; SAVE. The coins are 15,000
             less, the money the same, the Bag holds one Ability Patch
   2. load   that save loaded: the same coins and Ability Patch
   3. charm  TRAINING; the Exp. Charm (a key item: one each, at the Shiny Charm's 15,000): "You wanted Exp. Charm?
@@ -37,7 +37,7 @@ from mega_check import driver_lines, finish, numbers, save_keys, start  # noqa: 
 ENGINE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SPECIES_MUDKIP = 258
 PRIZE_COUNTER = "10:3:0:12:4"     # PKMN_TEST_WARP: the Mauville Game Corner, below the major prize clerk (12,2)
-COINS = 100_000                  # the Ability Patch is 75,000 now: one is bought, the second refused
+COINS = 20_000                   # the Ability Patch is 15,000: one is bought, the second refused (5,000 left)
 LIST_LABEL = "MauvilleCity_GameCorner_Pokemart_RareGoods"
 
 

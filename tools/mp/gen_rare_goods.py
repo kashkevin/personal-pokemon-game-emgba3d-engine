@@ -29,8 +29,8 @@ them). Every list fits the native shop screen (NATIVE_SHOP_MAX_ITEMS; --check fa
 
 Prices (coins) follow the casino's own (the Mega Stones 4,500-15,000, the Mega Ring 3,750, the Shiny Charm 15,000; the
 Game Corner's TMs 225-600; 2026-10-25: all Game Corner coin prices are 15% of what they were, the owner's "way too high"): the item's kind decides its band (BANDS below); the permanent trait changers sit in the
-owner's 30,000-75,000 band (Ability Patch 75,000, Gold Bottle Cap 60,000, the Mints 30,000); the key goods at the
-Shiny Charm's 15,000; no price is ever below a fortieth of the item's money price (coins cost 20 yen each and an item sells
+top price, 15,000 (the Ability Patch, the Gold Bottle Cap, the Mints; the owner, 2026-10-25: "nothing should be more
+than 15,000"), the same as the key goods and the Shiny Charm; no price is ever below a fortieth of the item's money price (coins cost 20 yen each and an item sells
 for half its price), so coins bought with money and spent here never buy an item that sells for more.
 
     tools/mp/gen_rare_goods.py             write data/scripts/mp_rare_goods_shop.inc and src/platform/mp_rare_goods_prices.h
@@ -73,7 +73,7 @@ TOWER_ITEMS = ("ITEM_HP_UP", "ITEM_PROTEIN", "ITEM_IRON", "ITEM_CALCIUM", "ITEM_
 # prize counter, data/scripts/mp_progression.inc, is a script and found as one).
 PC_GIFTS = ("ITEM_POKE_BALL",)
 # Sold here although obtainable (the owner's request): price fixed.
-NAMED = {"ITEM_ABILITY_PATCH": 75_000, "ITEM_GOLD_BOTTLE_CAP": 60_000}
+NAMED = {"ITEM_ABILITY_PATCH": 15_000, "ITEM_GOLD_BOTTLE_CAP": 15_000}
 # Key items that work in this engine and no one can get, sold one each (shop.c: SOLD OUT once owned, a quantity of 1), at the
 # Shiny Charm's price (the major prizes: 100,000). (list, coins, needs): needs None - always (a Charm works from the Bag:
 # daycare.c, the Oval Charm's egg rate; battle_script_commands.c, the Catching Charm's critical captures and the Exp.
@@ -412,13 +412,13 @@ LISTS = (("Held", "HELD ITEMS"), ("Berries", "BERRIES"), ("Training", "TRAINING"
 # Game Corner's TMs 225-600 (all 15% of what they were: the owner, 2026-10-25).
 BANDS = (
     # (list, coins, names or patterns)
-    # the permanent trait changers, in the owner's band ("items like ability patch and gold bottle caps ... 200k - 500k"):
+    # the permanent trait changers, at the top price (the owner had them at "200k - 500k"; since 2026-10-25 nothing costs more than 15,000):
     # a Mint rewrites a nature as a Patch rewrites an ability and a Gold Bottle Cap the IVs (the Bottle Cap and the Ability
     # Capsule come from the Tower and are not sold; priced here should they ever be)
-    ("Training", 75_000, ("^ITEM_ABILITY_PATCH$",)),
-    ("Training", 60_000, ("^ITEM_GOLD_BOTTLE_CAP$",)),
-    ("Training", 37_500, ("^ITEM_BOTTLE_CAP$",)),
-    ("Training", 30_000, ("_MINT$", "^ITEM_ABILITY_CAPSULE$")),
+    ("Training", 15_000, ("^ITEM_ABILITY_PATCH$",)),
+    ("Training", 15_000, ("^ITEM_GOLD_BOTTLE_CAP$",)),
+    ("Training", 15_000, ("^ITEM_BOTTLE_CAP$",)),
+    ("Training", 15_000, ("_MINT$", "^ITEM_ABILITY_CAPSULE$")),
     ("Evolution", 15_000, ("^ITEM_(RED|BLUE)_ORB$", "^ITEM_(ADAMANT_CRYSTAL|LUSTROUS_GLOBE|GRISEOUS_CORE)$")),
     ("Held", 13_500, ("^ITEM_(SOUL_DEW|ADAMANT_ORB|LUSTROUS_ORB|GRISEOUS_ORB)$",)),
     ("Training", 4_500, ("^ITEM_LUCKY_EGG$",)),
@@ -452,6 +452,7 @@ BANDS = (
 # Everything else sold: what heals or feeds (the regional foods, remedies, Jubilife Muffin) 500; a treasure (a thing to
 # sell) 1.5% of its money price, at least 150.
 FOOD, TREASURE = 75, 150
+PRICE_CAP = 15_000          # the owner (2026-10-25): nothing in the Game Corner costs more than this (the Shiny Charm's price)
 
 
 def unusable(name: str):
@@ -530,7 +531,7 @@ def build():
         kind, coins = band(name, item)
         coins = max(coins, -(-item["price"] // 40))     # never a cheap way to money: coins cost 20 yen each; an item sells for
         #                                                 half its price, so it never costs less than it sells for
-        goods.append((name, kind, NAMED.get(name, round_coins(coins))))
+        goods.append((name, kind, min(PRICE_CAP, NAMED.get(name, round_coins(coins)))))
     return goods, left_out, src, info
 
 

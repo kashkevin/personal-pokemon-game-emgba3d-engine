@@ -1106,7 +1106,7 @@ int NativeSelfTest_Coins(void)
         CoinShop_OnOpen(NULL);
         ExpectLeg("any other shop list switches back to yen", !gCoinShopActive);
         // The Game Corner's RARE GOODS (the owner's request of 2026-10-24): each of the clerk's lists is a coin shop, every
-        // item it sells has a coin price, the Ability Patch and the Gold Bottle Cap at 30,000-75,000
+        // item it sells has a coin price, the Ability Patch and the Gold Bottle Cap at the top price, 15,000
         {
             extern const u16 MauvilleCity_GameCorner_Pokemart_RareGoodsHeld[], MauvilleCity_GameCorner_Pokemart_RareGoodsOther[];
             extern const u16 MauvilleCity_GameCorner_Pokemart_RareGoodsTraining[];
@@ -1116,13 +1116,13 @@ int NativeSelfTest_Coins(void)
             CoinShop_OnOpen(MauvilleCity_GameCorner_Pokemart_RareGoodsOther);
             ExpectLeg("the RARE GOODS lists switch the shop to coins", gCoinShopActive);
             for (const u16 *item = MauvilleCity_GameCorner_Pokemart_RareGoodsHeld; *item != ITEM_NONE; item++, listed++)
-                priced &= CoinShop_ItemPrice(*item) >= 30 && CoinShop_ItemPrice(*item) <= 75000;
+                priced &= CoinShop_ItemPrice(*item) >= 30 && CoinShop_ItemPrice(*item) <= 15000;
             for (const u16 *item = MauvilleCity_GameCorner_Pokemart_RareGoodsTraining; *item != ITEM_NONE; item++, listed++)
-                priced &= CoinShop_ItemPrice(*item) >= 30 && CoinShop_ItemPrice(*item) <= 75000;
+                priced &= CoinShop_ItemPrice(*item) >= 30 && CoinShop_ItemPrice(*item) <= 15000;
             ExpectLeg("(RARE GOODS) every item listed has a coin price", priced && listed > 0);
-            ExpectLeg("(RARE GOODS) the Ability Patch and the Gold Bottle Cap cost 30,000 to 75,000",
-                      CoinShop_ItemPrice(ITEM_ABILITY_PATCH) >= 30000 && CoinShop_ItemPrice(ITEM_ABILITY_PATCH) <= 75000
-                      && CoinShop_ItemPrice(ITEM_GOLD_BOTTLE_CAP) >= 30000 && CoinShop_ItemPrice(ITEM_GOLD_BOTTLE_CAP) <= 75000);
+            ExpectLeg("(RARE GOODS) the Ability Patch and the Gold Bottle Cap cost 15,000 (nothing costs more)",
+                      CoinShop_ItemPrice(ITEM_ABILITY_PATCH) == 15000
+                      && CoinShop_ItemPrice(ITEM_GOLD_BOTTLE_CAP) == 15000);
             ExpectLeg("(RARE GOODS) an obtainable item is not for sale", CoinShop_ItemPrice(ITEM_POTION) > 999999);
             // the review of 2026-10-24: every list whole on the native shop screen, the Mints in the owner's band, the
             // Charms and form-change key items sold, nothing that does nothing here, Misty Seed (no one can get it) sold
@@ -1139,7 +1139,7 @@ int NativeSelfTest_Coins(void)
                     u32 n = 0;
 
                     for (const u16 *item = lists[l]; *item != ITEM_NONE; item++, n++)
-                        priced &= CoinShop_ItemPrice(*item) >= 30 && CoinShop_ItemPrice(*item) <= 75000;
+                        priced &= CoinShop_ItemPrice(*item) >= 30 && CoinShop_ItemPrice(*item) <= 15000;
                     longest = max(longest, n);
                     total += l < ARRAY_COUNT(lists) - 1 ? n : 0;
                 }
@@ -1149,21 +1149,21 @@ int NativeSelfTest_Coins(void)
                 ExpectLeg("(RARE GOODS) every coin shop list fits the native shop screen whole (its CANCEL is CANCEL)",
                           longest <= NATIVE_SHOP_MAX_ITEMS);
 #endif
-                ExpectLeg("(RARE GOODS) the Mints cost 30,000 to 37,500 (the owner's band for trait changers)",
-                          CoinShop_ItemPrice(ITEM_ADAMANT_MINT) >= 30000 && CoinShop_ItemPrice(ITEM_ADAMANT_MINT) <= 37500
-                          && CoinShop_ItemPrice(ITEM_SERIOUS_MINT) >= 30000 && CoinShop_ItemPrice(ITEM_SERIOUS_MINT) <= 37500);
+                ExpectLeg("(RARE GOODS) the Mints cost 15,000, the top price (the trait changers)",
+                          CoinShop_ItemPrice(ITEM_ADAMANT_MINT) == 15000
+                          && CoinShop_ItemPrice(ITEM_SERIOUS_MINT) == 15000);
                 ExpectLeg("(RARE GOODS) the Oval, Exp. and Catching Charms cost 15,000 (the Shiny Charm's price), one each",
                           CoinShop_ItemPrice(ITEM_OVAL_CHARM) == MP_SHINY_CHARM_COINS && CoinShop_ItemPrice(ITEM_EXP_CHARM) == MP_SHINY_CHARM_COINS
                           && CoinShop_ItemPrice(ITEM_CATCHING_CHARM) == MP_SHINY_CHARM_COINS && GetItemImportance(ITEM_OVAL_CHARM));
                 ExpectLeg("(RARE GOODS) Gracidea, Reveal Glass, DNA Splicers, Prison Bottle, Zygarde Cube and Rotom Catalog are sold",
-                          CoinShop_ItemPrice(ITEM_GRACIDEA) <= 75000 && CoinShop_ItemPrice(ITEM_REVEAL_GLASS) <= 75000
-                          && CoinShop_ItemPrice(ITEM_DNA_SPLICERS) <= 75000 && CoinShop_ItemPrice(ITEM_PRISON_BOTTLE) <= 75000
-                          && CoinShop_ItemPrice(ITEM_ZYGARDE_CUBE) <= 75000 && CoinShop_ItemPrice(ITEM_ROTOM_CATALOG) <= 75000);
+                          CoinShop_ItemPrice(ITEM_GRACIDEA) <= 15000 && CoinShop_ItemPrice(ITEM_REVEAL_GLASS) <= 15000
+                          && CoinShop_ItemPrice(ITEM_DNA_SPLICERS) <= 15000 && CoinShop_ItemPrice(ITEM_PRISON_BOTTLE) <= 15000
+                          && CoinShop_ItemPrice(ITEM_ZYGARDE_CUBE) <= 15000 && CoinShop_ItemPrice(ITEM_ROTOM_CATALOG) <= 15000);
                 ExpectLeg("(RARE GOODS) Peat Block, the Aux items and the Legends foods (no effect here) are not sold",
                           CoinShop_ItemPrice(ITEM_PEAT_BLOCK) > 999999 && CoinShop_ItemPrice(ITEM_AUX_GUARD) > 999999
                           && CoinShop_ItemPrice(ITEM_AUX_POWERGUARD) > 999999 && CoinShop_ItemPrice(ITEM_CHOICE_DUMPLING) > 999999
                           && CoinShop_ItemPrice(ITEM_SWAP_SNACK) > 999999 && CoinShop_ItemPrice(ITEM_TWICE_SPICED_RADISH) > 999999);
-                ExpectLeg("(RARE GOODS) Misty Seed (only Galarian Weezing and Comfey hold it) is sold", CoinShop_ItemPrice(ITEM_MISTY_SEED) <= 75000);
+                ExpectLeg("(RARE GOODS) Misty Seed (only Galarian Weezing and Comfey hold it) is sold", CoinShop_ItemPrice(ITEM_MISTY_SEED) <= 15000);
             }
             CoinShop_OnOpen(NULL);
         }
@@ -1172,7 +1172,7 @@ int NativeSelfTest_Coins(void)
     // 5. the Game Corner clerks' specials (32-bit amounts in two script variables)
     {
         SetCoins(130000);
-        gSpecialVar_0x8004 = 100000 >> 16;              // a price above 65,535 (the Ability Patch is 75,000 now): the high half carries it
+        gSpecialVar_0x8004 = 100000 >> 16;              // a price above 65,535 (no shop price is, since 2026-10-25): the high half still carries it
         gSpecialVar_0x8005 = 100000 & 0xFFFF;
         ExpectLeg("(specials) the 100,000-coin price splits into 1 and 34,464", gSpecialVar_0x8004 == 1 && gSpecialVar_0x8005 == 34464);
         ExpectLeg("(specials) a wallet of 130,000 has the Charm's 100,000", CoinWallet_Has() == 1);
