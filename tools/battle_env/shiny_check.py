@@ -277,8 +277,15 @@ def main():
 
     # MS-79: kept shinies come back after the player leaves the map, until knocked out
     if want("keep"):
-        seconds = case("keep", KEEP_FRAMES, dict(PKMN_TEST_OWE_SHINY="2", PKMN_TEST_HM_LOG="1",
-                                                 PKMN_TEST_FIELD_KEYS=",".join(KEEP_KEYS)), "")
+        # The walk is blind: every Pokemon made is shiny and stays, so one standing on the first tiles of the way blocks
+        # the player (or a bump starts a battle nobody presses through). That is chance, not the keeper: up to three tries.
+        for attempt in range(3):
+            name = "keep" if attempt == 0 else f"keep-try{attempt + 1}"
+            seconds = case(name, KEEP_FRAMES, dict(PKMN_TEST_OWE_SHINY="2", PKMN_TEST_HM_LOG="1",
+                                                   PKMN_TEST_FIELD_KEYS=",".join(KEEP_KEYS)), "")
+            if any(line.startswith("hm field: ") and hm_place(line)[0] == OLDALE for line in case.lines):
+                break
+            print(f"keep: try {attempt + 1} never left Route 101 (a shiny on the way); trying again", file=sys.stderr)
         kept = [keep_line(line) for line in case.lines if line.startswith("owe keep: kept")]
         places = [hm_place(line) for line in case.lines if line.startswith("hm field: ")]
         oldale = next((i for i, line in enumerate(case.lines) if line.startswith("hm field: ")

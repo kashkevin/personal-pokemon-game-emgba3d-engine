@@ -818,6 +818,8 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
     }
 }
 
+static void StrengthenParty(void);
+
 /* "species:level[:flags],..." */
 static void SetUpTestParty(void)
 {
@@ -1567,7 +1569,8 @@ static void OweBattleField(void)
                 GetMonData(mon, MON_DATA_IS_SHINY) ? 1 : 0);
     }
     if (s.oweBattleKind == 0 || s.oweBumped || gMain.inBattle || SDL_AtomicGet(&s.fieldSeen) == 0
-     || gMain.callback2 != CB2_Overworld || ArePlayerFieldControlsLocked() || gPlayerAvatar.objectEventId >= OBJECT_EVENTS_COUNT)
+     || gMain.callback2 != CB2_Overworld || ArePlayerFieldControlsLocked() || gPlayerAvatar.objectEventId >= OBJECT_EVENTS_COUNT
+     || gPartiesCount[B_TRAINER_PLAYER] == 0)    /* the test party first: a bump before it left a battle with no Pokemon of the player's */
         return;
     for (int i = 0; i < OBJECT_EVENTS_COUNT; i++)
     {
@@ -1918,7 +1921,11 @@ static void StartBattle(void)
             gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum,
             gSaveBlock1Ptr->pos.x, gSaveBlock1Ptr->pos.y);
     if (!s.keepParty)
+    {
         SetUpTestParty();
+        if (s.strong && s.party[0] != '\0')
+            StrengthenParty();      /* the test party is made after the first strengthening: level 100 and the first move too */
+    }
     for (u32 i = 0; i < PARTY_SIZE; i++)
         s.partySpecies[i] = GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_SPECIES);
     if (sTurns.active)
