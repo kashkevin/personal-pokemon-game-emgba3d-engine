@@ -274,8 +274,9 @@ static struct
        Pokemon or a party member's kept stages change, and the battle's start and end (StageLogFrame); what was last
        logged. PKMN_TEST_STAGE_SHOTS=1: a picture at an action menu once the tags changed (StageShot). */
     bool stageLog, stageShots, stageInBattle;
+    bool forceSecondary;     /* PKMN_TEST_SECONDARY */
     int stageBattles, stageShotCount;
-    char stageSeen[MAX_BATTLERS_COUNT][96];
+    char stageSeen[MAX_BATTLERS_COUNT][128];
     s8 stageStored[MAX_BATTLE_TRAINERS][PARTY_SIZE][NUM_BATTLE_STATS];
     char stageShotTags[160];
     SDL_atomic_t windowShot;    /* the 3D test build: a window picture (with the battle HUD) asked for */
@@ -609,6 +610,7 @@ static void Init(void)
         TestLog("Battle env test: parade of the %d Mega forms, %d frames each", sHolderCount, s.paradeFrames);
     }
     s.stageLog = EnvInt("PKMN_TEST_STAGE_LOG", 0) != 0;
+    s.forceSecondary = EnvInt("PKMN_TEST_SECONDARY", 0) != 0;
     s.stageShots = EnvInt("PKMN_TEST_STAGE_SHOTS", 0) != 0;
     value = SDL_getenv("PKMN_TEST_NEXT_BATTLE");
     if (value != NULL)
@@ -3191,6 +3193,12 @@ bool DioramaBattleEnvTest_HoldOnForMega(unsigned battler)
     return true;
 }
 
+/* PKMN_TEST_SECONDARY: every additional effect happens (Ominous Wind's all-stats boost on every hit). */
+bool DioramaBattleEnvTest_ForceSecondary(void)
+{
+    return s.init && s.forceSecondary;
+}
+
 void DioramaBattleEnvTest_OnActionMenu(void)
 {
     if (!s.init)
@@ -3542,7 +3550,7 @@ static void StageLogFrame(void)
     {
         struct StatStageTag tags[NUM_BATTLE_STATS];
         s8 shown[NUM_BATTLE_STATS];
-        char line[96], text[64];
+        char line[128], text[64];
         u32 count = StatStages_Tags(b, tags);
 
         StatStages_Shown(b, shown);
@@ -3553,13 +3561,13 @@ static void StageLogFrame(void)
             if (i + 1 < count)
                 SDL_strlcat(text, " ", sizeof(text));
         }
-        SDL_snprintf(line, sizeof(line), "%d %d %u %u %d,%d,%d,%d,%d,%d,%d %d,%d,%d,%d,%d,%d,%d", GetBattlerTrainer(b),
+        SDL_snprintf(line, sizeof(line), "%d %d %u %u %d,%d,%d,%d,%d,%d,%d %d,%d,%d,%d,%d,%d,%d status 0x%x", GetBattlerTrainer(b),
                      gBattlerPartyIndexes[b], (unsigned)gBattleMons[b].species, (unsigned)gBattleMons[b].hp,
                      shown[1], shown[2], shown[3], shown[4], shown[5], shown[6], shown[7],
                      gBattleMons[b].statStages[1] - DEFAULT_STAT_STAGE, gBattleMons[b].statStages[2] - DEFAULT_STAT_STAGE,
                      gBattleMons[b].statStages[3] - DEFAULT_STAT_STAGE, gBattleMons[b].statStages[4] - DEFAULT_STAT_STAGE,
                      gBattleMons[b].statStages[5] - DEFAULT_STAT_STAGE, gBattleMons[b].statStages[6] - DEFAULT_STAT_STAGE,
-                     gBattleMons[b].statStages[7] - DEFAULT_STAT_STAGE);
+                     gBattleMons[b].statStages[7] - DEFAULT_STAT_STAGE, (unsigned)gBattleMons[b].status1);
         if (strcmp(line, s.stageSeen[b]) != 0)
         {
             SDL_strlcpy(s.stageSeen[b], line, sizeof(s.stageSeen[b]));

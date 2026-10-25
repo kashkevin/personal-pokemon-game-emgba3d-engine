@@ -46,9 +46,12 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mega_check import driver_lines, finish, start  # noqa: E402
 
-SPECIES = dict(LUCARIO=448, ARCANINE=59, ZIGZAGOON=263, POOCHYENA=261)
+SPECIES = dict(LUCARIO=448, ARCANINE=59, ZIGZAGOON=263, POOCHYENA=261, WOBBUFFET=202)
 MOVE = dict(SWORDS_DANCE=14, SCARY_FACE=184, GROWL=45, TAIL_WHIP=39, BODY_SLAM=34, BATON_PASS=226, ROAR=46,
-            WHIRLWIND=18, LEER=43, AGILITY=97, SPLASH=150, MEMENTO=262, REVIVAL_BLESSING=791)
+            WHIRLWIND=18, LEER=43, AGILITY=97, SPLASH=150, MEMENTO=262, REVIVAL_BLESSING=791, OMINOUS_WIND=466,
+            DRAGON_DANCE=349, BELLY_DRUM=187, SHELL_SMASH=504)
+ITEM_FLAME_ORB = 445
+STATUS1_BURN = 1 << 4             # include/constants/battle.h
 TRAINER_ALLEN = 333            # Youngster Allen: two Pokemon (include/constants/opponents.h)
 STATS = ("ATK", "DEF", "SPE", "SPA", "SPD", "ACC", "EVA")  # the log's order: STAT_ATK .. STAT_EVASION
 SHOWDOWN = ("ATK", "DEF", "SPA", "SPD", "SPE", "ACC", "EVA")
@@ -58,8 +61,8 @@ def moves(*names):
     return "V" + ".".join(str(MOVE[n]) for n in names)
 
 
-def mon(species, *names):
-    return f"{SPECIES[species]}:100:{moves(*names)}"
+def mon(species, *names, item=None):
+    return f"{SPECIES[species]}:100:{moves(*names)}" + (f":i{item}" if item else "")
 
 
 CASES = {
@@ -89,10 +92,23 @@ CASES = {
         PKMN_TEST_PARTY=",".join((mon("LUCARIO", "SWORDS_DANCE", "MEMENTO", "BODY_SLAM"),
                                   mon("ARCANINE", "REVIVAL_BLESSING", "AGILITY", "BODY_SLAM"))),
         PKMN_TEST_TURNS="m0,m1,p1,m0,p0,s0,m2"),
+    # The owner (2026-10-25): "my previous pokemon got paralyzed and now the next pokemon i bring out is aswell".
+    "status": dict(
+        PKMN_TEST_BATTLE=f"wild:{SPECIES['ZIGZAGOON']}:30", PKMN_TEST_FOE=moves("SPLASH"),
+        PKMN_TEST_PARTY=",".join((mon("LUCARIO", "SWORDS_DANCE", "BODY_SLAM", item=ITEM_FLAME_ORB),
+                                  mon("ARCANINE", "SPLASH", "BODY_SLAM"))),
+        PKMN_TEST_TURNS="m0,s1,m0,s0,m1"),
+    # The owner (2026-10-25): "some moves dont look like they are stacking like ominous wind". Every additional effect
+    # happens (PKMN_TEST_SECONDARY): Ominous Wind's +1 to all five each time; then Dragon Dance, Belly Drum (to +6),
+    # Shell Smash (+2s and -1s) and Ominous Wind again at the caps (ATK stays +6, SPE reaches it).
+    "stack": dict(
+        PKMN_TEST_BATTLE=f"wild:{SPECIES['WOBBUFFET']}:100", PKMN_TEST_FOE=moves("SPLASH"), PKMN_TEST_SECONDARY="1",
+        PKMN_TEST_PARTY=mon("LUCARIO", "OMINOUS_WIND", "DRAGON_DANCE", "BELLY_DRUM", "SHELL_SMASH"),
+        PKMN_TEST_TURNS="m0,m0,m1,m2,m3,m0"),
 }
 
 BATTLER = re.compile(r"stages battler (\d+) trainer/slot/species/hp/shown/engine (\d+) (\d+) (\d+) (\d+) ([-\d,]+) "
-                     r"([-\d,]+) tags \"([^\"]*)\"")
+                     r"([-\d,]+)(?: status (0x[0-9a-f]+))? tags \"([^\"]*)\"")
 KEPT = re.compile(r"stages kept trainer (\d+) slot (\d+): ([-\d,]+)")
 START = re.compile(r"stages battle (\d+) start, type (0x[0-9a-f]+), (\d+) battlers")
 END = re.compile(r"stages battle (\d+) end, outcome (-?\d+)")
@@ -125,7 +141,7 @@ def battles_of(lines):
         elif m := BATTLER.search(line):
             b, t, slot, species, hp = (int(m.group(i)) for i in range(1, 6))
             current["events"].append(("battler", b, t, slot, species, hp, values(m.group(6)), values(m.group(7)),
-                                      m.group(8)))
+                                      m.group(9), int(m.group(8) or "0", 16)))
         elif m := KEPT.search(line):
             current["events"].append(("kept", int(m.group(1)), int(m.group(2)), values(m.group(3))))
         elif m := TURN.search(line):
@@ -151,7 +167,7 @@ def arrivals(battle):
             continue
         if event[0] != "battler":
             continue
-        _, b, t, slot, species, hp, shown, engine, text = event
+        _, b, t, slot, species, hp, shown, engine, text, _status = event
         if species == 0:
             continue
         if occupant.get(b) is None:
@@ -283,6 +299,41 @@ def case_checks(name, battles):
         foe = [e for e in (b1 or {}).get("events", []) if e[0] == "battler" and e[1] == 1
                and e[6] == stages(ATK=-2, SPA=-2)]
         checks.append(("faint: the foe shows ATK-2 SPA-2 after Memento", bool(foe), len(foe)))
+    elif name == "status":
+        b1 = battles[0] if battles else None
+        ev = [e for e in (b1 or {}).get("events", []) if e[0] == "battler" and e[1] == 0]
+        burned = [e for e in ev if e[4] == SPECIES["LUCARIO"] and e[9] & STATUS1_BURN]
+        checks.append(("status: Lucario is burned by its Flame Orb", bool(burned), len(burned)))
+        arc = [e for e in ev if e[4] == SPECIES["ARCANINE"]]
+        checks.append(("status: Arcanine sent in after it has no status (the burn stays Lucario's)",
+                       bool(arc) and all(e[9] == 0 for e in arc), [hex(e[9]) for e in arc[:4]]))
+        back = [e for e in ev if e[4] == SPECIES["LUCARIO"]]
+        last_luc = back[-1][9] if back else None
+        checks.append(("status: Lucario switched back in is still burned", last_luc is not None
+                       and last_luc & STATUS1_BURN != 0, None if last_luc is None else hex(last_luc)))
+        luc2 = first_on_arrival(b1, "LUCARIO", 2) if b1 else None
+        arc1 = first_on_arrival(b1, "ARCANINE", 1) if b1 else None
+        checks.append(("status: Arcanine comes in at stage 0 and Lucario back with its ATK+2",
+                       arc1 == stages() and luc2 == stages(ATK=2), dict(arcanine=arc1, lucario=luc2)))
+    elif name == "stack":
+        b1 = battles[0] if battles else None
+        seen = []
+        for e in (b1 or {}).get("events", []):
+            if e[0] == "battler" and e[1] == 0 and (not seen or seen[-1] != e[6]):
+                seen.append(e[6])
+        want = [stages(), stages(ATK=1, DEF=1, SPA=1, SPD=1, SPE=1), stages(ATK=2, DEF=2, SPA=2, SPD=2, SPE=2),
+                stages(ATK=3, DEF=2, SPA=2, SPD=2, SPE=3), stages(ATK=6, DEF=2, SPA=2, SPD=2, SPE=3),
+                stages(ATK=6, DEF=1, SPA=4, SPD=1, SPE=5), stages(ATK=6, DEF=2, SPA=5, SPD=2, SPE=6)]
+        # A move's stat changes come one stat at a time (each with its own message), so the tags pass through
+        # in-between states: every step's result must be among them, in order.
+        it = iter(seen)
+        reached = [w for w in want if any(v == w for v in it)]
+        checks.append(("stack: Ominous Wind +1 all five twice, Dragon Dance, Belly Drum to +6, Shell Smash, Ominous Wind "
+                       "at the caps: every move's result as the tags show it", reached == want and seen[-1] == want[-1],
+                       dict(reached=len(reached), of=len(want), last=seen[-1] if seen else None)))
+        top = [e for e in (b1 or {}).get("events", []) if e[0] == "battler" and e[1] == 0]
+        checks.append(("stack: never past +6 (x4 for ATK..SPE)", all(max(e[7]) <= 6 for e in top),
+                       max((max(e[7]) for e in top), default=None)))
     return checks
 
 

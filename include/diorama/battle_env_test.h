@@ -157,6 +157,8 @@
  *                            as the first left it
  *   PKMN_TEST_SCENE_OFF=1    the options battle scene off and fast text, as the battle starts (in memory)
  *   PKMN_TEST_PARTY / _FOE flags V<move>.<move>.<move>.<move>: the whole moveset; P<n>: the first move's PP left
+ *   PKMN_TEST_SECONDARY=1    every move's additional effect happens (its chance read as 100: Ominous Wind's +1 to all
+ *                            five stats each time), in memory only
  *
  * In the Classic 2D test build the pictures are the GBA frame (no .json beside them).
  *
@@ -193,6 +195,8 @@ int DioramaBattleEnvTest_NamingScreenUp(void);
 void DioramaBattleEnvTest_OnActionMenu(void);
 /* battle_util.c, GetAdjustedDamage (game thread): a hit that would knock out this battler leaves it 1 HP instead */
 bool DioramaBattleEnvTest_HoldOnForMega(unsigned battler);
+/* battle_util.c, CalcSecondaryEffectChance: PKMN_TEST_SECONDARY (every additional effect happens) */
+bool DioramaBattleEnvTest_ForceSecondary(void);
 /* wild_encounter_ow.c, SetSpeciesInfoForOWE (game thread): PKMN_TEST_OWE_SHINY=1 every other overworld wild Pokemon the
    game makes is shiny (the first one is), =2 every one; otherwise the game's own roll */
 bool DioramaBattleEnvTest_OweShiny(bool rolled);

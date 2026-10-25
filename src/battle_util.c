@@ -9758,6 +9758,11 @@ u32 CalcSecondaryEffectChance(enum BattlerId battler, enum Ability battlerAbilit
     bool8 hasRainbow = (gSideStatuses[GetBattlerSide(battler)] & SIDE_STATUS_RAINBOW) != 0;
     u16 secondaryEffectChance = additionalEffect->chance;
 
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+    if (DioramaBattleEnvTest_ForceSecondary()) // test builds only: every additional effect happens (battle_env_test.h)
+        return 100;
+#endif
+#line 9618 // gba-line
     if (hasRainbow && hasSereneGrace && additionalEffect->moveEffect == MOVE_EFFECT_FLINCH)
         return secondaryEffectChance * 2;
 
