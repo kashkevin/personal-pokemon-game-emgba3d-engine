@@ -437,8 +437,10 @@ def scenarios():
             for name in ("FLAG_SYS_POKEDEX_GET", "FLAG_RECEIVED_RUNNING_SHOES", "FLAG_SYS_B_DASH", "FLAG_ADVENTURE_STARTED"):
                 if r.watched(last, name):
                     problems.append(f"{name} granted by the introduction")
-            if last["balls"]:
-                problems.append("Poke Balls granted by the introduction")
+            # Every new character starts with 5 Poke Balls (the owner's request of 2026-10-22, multiplayer_rival.c
+            # MultiplayerIntro_Begin), and nothing else from the introduction.
+            if last["balls"] != 5:
+                problems.append(f"{last['balls']} Poke Balls after the introduction: a new character starts with 5")
             # NewGameInitData points the location at the truck before the introduction takes over (no field): the truck,
             # Route 101 or the first battle would show as the last row on those maps, or a battle.
             if (last["group"], last["num"]) in ((25, 40), (0, 16)) or r.ever(lambda row: row["battle"]):
