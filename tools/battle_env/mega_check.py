@@ -345,12 +345,12 @@ def reset_keys(start):
 # The purchases (PKMN_TEST_WARP to the shop, the player facing down): a tap turns to face the clerk across the counter,
 # then the shop's own lines at fast text, as their pictures showed them. The Game Corner's prize counter: "What would you
 # like to see?" MAJOR PRIZES (the first of MAJOR PRIZES / RARE GOODS / EXIT, 2026-10-24), its welcome, what the Ring does,
-# "Trade 25,000 COINS for it?" YES, "Obtained the Mega Ring!", the KEY ITEMS POCKET, "yours to keep", where the stones are
+# "Trade 3,750 COINS for it?" YES, "Obtained the Mega Ring!", the KEY ITEMS POCKET, "yours to keep", where the stones are
 # sold; then the Shiny Charm's offer: NO (B), "Oh, is that so?" and its second line.
 BUY_RING = ["30:UP", "80:A", "200:A", "320:A", "440:A", "680:A", "800:A", "920:A", "1040:B", "1160:A", "1280:A", "1400:B",
             "1520:A", "1640:A"]
 # The Mauville dealer (the Ring in the bag): its line and BUY, the first stone (Venusaurite), "How many?" 1, "That will be
-# 60000 COINS." YES, "Here you go!", out of the list, QUIT, "Please come again!".
+# 9000 COINS." YES, "Here you go!", out of the list, QUIT, "Please come again!".
 BUY_STONE = ["30:LEFT", "80:A", "200:A", "320:A", "420:A", "520:A", "620:A", "720:B", "840:B", "940:A"]
 
 

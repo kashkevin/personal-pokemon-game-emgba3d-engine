@@ -11,8 +11,8 @@
 // 999,999 coins. Each Mega Stone has its own price (src/platform/mp_mega_prices.h, tools/mp/gen_mega_prices.py). The scripts
 // are assembled without PORTABLE (the PC game's branches are chosen by the assembler), so these are plain constants; the GBA
 // build keeps its 9,000-coin Charm (MP_SHINY_CHARM_COINS in its scripts) and has no Mega Ring or coin pack sale.
-#define MP_SHINY_CHARM_COINS_PC 100000
-#define MP_MEGA_RING_COINS 25000
+#define MP_SHINY_CHARM_COINS_PC 15000      // 2026-10-25: every Game Corner coin price is 15% of what it was (the owner: "way too high")
+#define MP_MEGA_RING_COINS 3750
 #define MP_COINS_PACK_LARGE 5000          // the coin counter's large pack ...
 #define MP_COINS_PACK_LARGE_YEN 100000    // ... at the same 20 yen a coin as the other two
 #define MP_SHINY_CHARM_COINS_GBA 9000

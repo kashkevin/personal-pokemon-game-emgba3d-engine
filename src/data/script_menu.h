@@ -265,19 +265,37 @@ static const struct MenuAction MultichoiceList_UnusedAshVendor[] =
 
 static const struct MenuAction MultichoiceList_GameCornerDolls[] =
 {
+#ifdef PORTABLE // the owner's request of 2026-10-25: every Game Corner coin price is 15% of what it was
+    {COMPOUND_STRING("TREECKO DOLL 150 COINS")},
+    {COMPOUND_STRING("TORCHIC DOLL 150 COINS")},
+    {COMPOUND_STRING("MUDKIP DOLL   150 COINS")},
+#else
+#line 268 // gba-line
     {COMPOUND_STRING("TREECKO DOLL 1,000 COINS")},
     {COMPOUND_STRING("TORCHIC DOLL 1,000 COINS")},
     {COMPOUND_STRING("MUDKIP DOLL   1,000 COINS")},
+#endif
+#line 271 // gba-line
     {gText_Exit},
 };
 
 static const struct MenuAction MultichoiceList_GameCornerTMs[] =
 {
+#ifdef PORTABLE
+    {COMPOUND_STRING("TM32{CLEAR_TO 72}225 COINS")},
+    {COMPOUND_STRING("TM29{CLEAR_TO 72}525 COINS")},
+    {COMPOUND_STRING("TM35{CLEAR_TO 72}600 COINS")},
+    {COMPOUND_STRING("TM24{CLEAR_TO 72}600 COINS")},
+    {COMPOUND_STRING("TM13{CLEAR_TO 72}600 COINS")},
+#else
+#line 276 // gba-line
     {COMPOUND_STRING("TM32{CLEAR_TO 72}1,500 COINS")},
     {COMPOUND_STRING("TM29{CLEAR_TO 72}3,500 COINS")},
     {COMPOUND_STRING("TM35{CLEAR_TO 72}4,000 COINS")},
     {COMPOUND_STRING("TM24{CLEAR_TO 72}4,000 COINS")},
     {COMPOUND_STRING("TM13{CLEAR_TO 72}4,000 COINS")},
+#endif
+#line 281 // gba-line
     {gText_Exit},
 };
 

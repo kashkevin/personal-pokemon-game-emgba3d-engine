@@ -6,7 +6,7 @@ Runs the real prize counter, the Mega Stone dealer and the coin counter scripts 
 one every 300 ms: YES to every offer, the first row of the dealer's list every time) and reads the "econ" lines the game logs:
 coins, money, Mega Ring, Shiny Charm, Mega Stones in the bag. Each scenario states what must be true at the end:
 
-  - the prize counter sells the Mega Ring for 25,000 coins and the Shiny Charm for 100,000, only what the wallet covers, never
+  - the prize counter sells the Mega Ring for 3,750 coins and the Shiny Charm for 15,000, only what the wallet covers, never
     twice, and takes exactly the price (money untouched);
   - an owned ring or charm is not sold again and costs nothing;
   - without a Coin Case nothing is sold;
@@ -26,8 +26,8 @@ import sys
 import threading
 
 ECON = re.compile(r"econ (\d+): coins (\d+) money (\d+) ring (\d+) charm (\d+) stones (\d+)")
-RING, CHARM = 25000, 100000
-VENUSAURITE = 60000    # first row of the dealer's list
+RING, CHARM = 3750, 15000        # 15% of what they were (the owner, 2026-10-25)
+VENUSAURITE = 9000    # first row of the dealer's list
 
 
 def run(binary, script, setup, taps, timeout):
@@ -77,15 +77,15 @@ def scenarios():
 
     taps = "1500:300:100:110"
     return [
-        ("prizes: 130,000 coins buy the ring and the charm", "prizes", "case=1,coins=130000,money=500000", taps,
+        ("prizes: 30,000 coins buy the ring and the charm", "prizes", "case=1,coins=30000,money=500000", taps,
          lambda a, b: bought(a, b, 1, 1, RING + CHARM)),
-        ("prizes: 99,999 coins buy the ring only (the charm needs 100,000)", "prizes", "case=1,coins=99999,money=500000", taps,
+        ("prizes: 14,999 coins buy the ring only (the charm needs 15,000)", "prizes", "case=1,coins=14999,money=500000", taps,
          lambda a, b: bought(a, b, 1, 0, RING)),
-        ("prizes: 24,999 coins buy nothing", "prizes", "case=1,coins=24999,money=500000", taps,
+        ("prizes: 3,749 coins buy nothing", "prizes", "case=1,coins=3749,money=500000", taps,
          lambda a, b: bought(a, b, 0, 0, 0)),
-        ("prizes: 25,000 coins buy exactly the ring", "prizes", "case=1,coins=25000", taps,
+        ("prizes: 3,750 coins buy exactly the ring", "prizes", "case=1,coins=3750", taps,
          lambda a, b: bought(a, b, 1, 0, RING)),
-        ("prizes: an owned ring is not sold again; 100,000 coins buy exactly the charm", "prizes", "case=1,ring=1,coins=100000", taps,
+        ("prizes: an owned ring is not sold again; 15,000 coins buy exactly the charm", "prizes", "case=1,ring=1,coins=15000", taps,
          lambda a, b: bought(a, b, 1, 1, CHARM)),
         ("prizes: both owned, nothing is sold or charged", "prizes", "case=1,ring=1,charm=1,coins=200000", taps,
          lambda a, b: bought(a, b, 1, 1, 0)),
@@ -96,8 +96,8 @@ def scenarios():
         ("dealer: with the ring, each stone costs its coin price (no yen)", "dealer", "case=1,ring=1,coins=130000,money=700000", taps,
          lambda a, b: (None if b[5] >= 1 and a[1] - b[1] == VENUSAURITE * b[5] and b[2] == a[2] and b[0] >= 0
                        else f"stones {b[5]}, coins {a[1]} -> {b[1]}, money {a[2]} -> {b[2]}")),
-        ("dealer: 59,999 coins cannot buy a 60,000-coin stone", "dealer", "case=1,ring=1,coins=59999,money=900000", taps,
-         lambda a, b: (None if b[5] == 0 and b[1] == 59999 and b[2] == 900000 else f"stones {b[5]}, coins {b[1]}, money {b[2]}")),
+        ("dealer: 8,999 coins cannot buy a 9,000-coin stone", "dealer", "case=1,ring=1,coins=8999,money=900000", taps,
+         lambda a, b: (None if b[5] == 0 and b[1] == 8999 and b[2] == 900000 else f"stones {b[5]}, coins {b[1]}, money {b[2]}")),
         ("coin counter: the 5,000-coin pack costs 100,000 yen (the wallet passes 65,535)", "pack5000", "case=1,coins=62000,money=300000", "1500:300:100:30",
          lambda a, b: (None if b[1] == 67000 and b[2] == 200000 else f"coins {a[1]} -> {b[1]}, money {a[2]} -> {b[2]}")),
         ("coin counter: the 5,000-coin pack is refused without the money", "pack5000", "case=1,coins=1000,money=99999", "1500:300:100:30",

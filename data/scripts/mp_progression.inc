@@ -264,7 +264,7 @@ MauvilleCity_GameCorner_Text_ShinyCharmIntro:
 MauvilleCity_GameCorner_Text_ShinyCharmConfirm:
 	.string "The SHINY CHARM makes SHINY POKéMON\n"
 	.string "turn up far more often.\p"
-	.string "Trade 100,000 COINS for it?$"
+	.string "Trade 15,000 COINS for it?$"
 .else
 MauvilleCity_GameCorner_Text_ShinyCharmConfirm:
 	.string "Trade 9,000 COINS for the\n"
@@ -273,7 +273,7 @@ MauvilleCity_GameCorner_Text_ShinyCharmConfirm:
 
 .ifdef PORTABLE
 MauvilleCity_GameCorner_Text_ShinyCharmNotEnough:
-	.string "I'm sorry, you need 100,000 COINS.\n"
+	.string "I'm sorry, you need 15,000 COINS.\n"
 	.string "Good luck at the tables!$"
 .else
 MauvilleCity_GameCorner_Text_ShinyCharmNotEnough:
@@ -304,10 +304,10 @@ MauvilleCity_GameCorner_Text_MajorPrizesIntro:
 MauvilleCity_GameCorner_Text_MegaRingConfirm:
 	.string "The MEGA RING lets a POKéMON holding\n"
 	.string "its own MEGA STONE MEGA EVOLVE.\p"
-	.string "Trade 25,000 COINS for it?$"
+	.string "Trade 3,750 COINS for it?$"
 
 MauvilleCity_GameCorner_Text_MegaRingNotEnough:
-	.string "I'm sorry, you need 25,000 COINS\n"
+	.string "I'm sorry, you need 3,750 COINS\n"
 	.string "for the MEGA RING.$"
 
 MauvilleCity_GameCorner_Text_MegaRingGiven:
@@ -349,5 +349,5 @@ MauvilleCity_Mart_Text_MegaStoneNoRingCoins:
 	.string "CORNER COINS.\p"
 	.string "They're no use without a MEGA RING.\n"
 	.string "The GAME CORNER's PRIZE COUNTER\l"
-	.string "sells one for 25,000 COINS.$"
+	.string "sells one for 3,750 COINS.$"
 .endif

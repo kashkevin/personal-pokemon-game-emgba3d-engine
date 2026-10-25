@@ -27,11 +27,11 @@ a species nobody can own here, an evolution item whose evolution needs another r
 this engine), and placeholders. Ability Patch and Gold Bottle Cap are sold although the Tower gives them (the owner named
 them). Every list fits the native shop screen (NATIVE_SHOP_MAX_ITEMS; --check fails otherwise).
 
-Prices (coins) follow the casino's own (the Mega Stones 30,000-100,000, the Mega Ring 25,000, the Shiny Charm 100,000; the
-Game Corner's TMs 1,500-4,000): the item's kind decides its band (BANDS below); the permanent trait changers sit in the
-owner's 200,000-500,000 band (Ability Patch 500,000, Gold Bottle Cap 400,000, the Mints 200,000); the key goods at the
-Shiny Charm's 100,000; no price is ever below a twentieth of the item's money price, so coins bought with money and spent
-here never buy an item that sells for more.
+Prices (coins) follow the casino's own (the Mega Stones 4,500-15,000, the Mega Ring 3,750, the Shiny Charm 15,000; the
+Game Corner's TMs 225-600; 2026-10-25: all Game Corner coin prices are 15% of what they were, the owner's "way too high"): the item's kind decides its band (BANDS below); the permanent trait changers sit in the
+owner's 30,000-75,000 band (Ability Patch 75,000, Gold Bottle Cap 60,000, the Mints 30,000); the key goods at the
+Shiny Charm's 15,000; no price is ever below a fortieth of the item's money price (coins cost 20 yen each and an item sells
+for half its price), so coins bought with money and spent here never buy an item that sells for more.
 
     tools/mp/gen_rare_goods.py             write data/scripts/mp_rare_goods_shop.inc and src/platform/mp_rare_goods_prices.h
     tools/mp/gen_rare_goods.py --check     fail when they are not what the generator makes, or a list is too long
@@ -73,7 +73,7 @@ TOWER_ITEMS = ("ITEM_HP_UP", "ITEM_PROTEIN", "ITEM_IRON", "ITEM_CALCIUM", "ITEM_
 # prize counter, data/scripts/mp_progression.inc, is a script and found as one).
 PC_GIFTS = ("ITEM_POKE_BALL",)
 # Sold here although obtainable (the owner's request): price fixed.
-NAMED = {"ITEM_ABILITY_PATCH": 500_000, "ITEM_GOLD_BOTTLE_CAP": 400_000}
+NAMED = {"ITEM_ABILITY_PATCH": 75_000, "ITEM_GOLD_BOTTLE_CAP": 60_000}
 # Key items that work in this engine and no one can get, sold one each (shop.c: SOLD OUT once owned, a quantity of 1), at the
 # Shiny Charm's price (the major prizes: 100,000). (list, coins, needs): needs None - always (a Charm works from the Bag:
 # daycare.c, the Oval Charm's egg rate; battle_script_commands.c, the Catching Charm's critical captures and the Exp.
@@ -81,18 +81,18 @@ NAMED = {"ITEM_ABILITY_PATCH": 500_000, "ITEM_GOLD_BOTTLE_CAP": 400_000}
 # "fusion" - two Pokemon a player can own here fuse with it (the fusion tables). Every other key item stays out (a story
 # item, a ticket, a gimmick this game does not enable, the Pokemon it is for owned by no one here).
 KEY_GOODS = {
-    "ITEM_OVAL_CHARM": ("Other", 100_000, None),
-    "ITEM_CATCHING_CHARM": ("Other", 100_000, None),
-    "ITEM_EXP_CHARM": ("Training", 100_000, None),
-    "ITEM_ROTOM_CATALOG": ("Evolution", 100_000, "form"),
-    "ITEM_GRACIDEA": ("Evolution", 100_000, "form"),
-    "ITEM_REVEAL_GLASS": ("Evolution", 100_000, "form"),
-    "ITEM_ZYGARDE_CUBE": ("Evolution", 100_000, "form"),
-    "ITEM_PRISON_BOTTLE": ("Evolution", 100_000, "form"),
-    "ITEM_DNA_SPLICERS": ("Evolution", 100_000, "fusion"),
-    "ITEM_N_SOLARIZER": ("Evolution", 100_000, "fusion"),
-    "ITEM_N_LUNARIZER": ("Evolution", 100_000, "fusion"),
-    "ITEM_REINS_OF_UNITY": ("Evolution", 100_000, "fusion"),
+    "ITEM_OVAL_CHARM": ("Other", 15_000, None),
+    "ITEM_CATCHING_CHARM": ("Other", 15_000, None),
+    "ITEM_EXP_CHARM": ("Training", 15_000, None),
+    "ITEM_ROTOM_CATALOG": ("Evolution", 15_000, "form"),
+    "ITEM_GRACIDEA": ("Evolution", 15_000, "form"),
+    "ITEM_REVEAL_GLASS": ("Evolution", 15_000, "form"),
+    "ITEM_ZYGARDE_CUBE": ("Evolution", 15_000, "form"),
+    "ITEM_PRISON_BOTTLE": ("Evolution", 15_000, "form"),
+    "ITEM_DNA_SPLICERS": ("Evolution", 15_000, "fusion"),
+    "ITEM_N_SOLARIZER": ("Evolution", 15_000, "fusion"),
+    "ITEM_N_LUNARIZER": ("Evolution", 15_000, "fusion"),
+    "ITEM_REINS_OF_UNITY": ("Evolution", 15_000, "fusion"),
 }
 # The regions GetCurrentRegion() (include/regions.h) can name: an evolution IF_REGION another region never happens here.
 REGIONS_HERE = ("REGION_KANTO", "REGION_HOENN")
@@ -408,50 +408,50 @@ UNUSABLE = {
 LISTS = (("Held", "HELD ITEMS"), ("Berries", "BERRIES"), ("Training", "TRAINING"), ("Evolution", "EVOLUTION"),
          ("Other", "BALLS & OTHER"))
 
-# Prices in coins. The casino's own: the Mega Stones 30,000-100,000, the Mega Ring 25,000, the Shiny Charm 100,000, the
-# Game Corner's TMs 1,500-4,000.
+# Prices in coins. The casino's own: the Mega Stones 4,500-15,000, the Mega Ring 3,750, the Shiny Charm 15,000, the
+# Game Corner's TMs 225-600 (all 15% of what they were: the owner, 2026-10-25).
 BANDS = (
     # (list, coins, names or patterns)
     # the permanent trait changers, in the owner's band ("items like ability patch and gold bottle caps ... 200k - 500k"):
     # a Mint rewrites a nature as a Patch rewrites an ability and a Gold Bottle Cap the IVs (the Bottle Cap and the Ability
     # Capsule come from the Tower and are not sold; priced here should they ever be)
-    ("Training", 500_000, ("^ITEM_ABILITY_PATCH$",)),
-    ("Training", 400_000, ("^ITEM_GOLD_BOTTLE_CAP$",)),
-    ("Training", 250_000, ("^ITEM_BOTTLE_CAP$",)),
-    ("Training", 200_000, ("_MINT$", "^ITEM_ABILITY_CAPSULE$")),
-    ("Evolution", 100_000, ("^ITEM_(RED|BLUE)_ORB$", "^ITEM_(ADAMANT_CRYSTAL|LUSTROUS_GLOBE|GRISEOUS_CORE)$")),
-    ("Held", 90_000, ("^ITEM_(SOUL_DEW|ADAMANT_ORB|LUSTROUS_ORB|GRISEOUS_ORB)$",)),
-    ("Training", 30_000, ("^ITEM_LUCKY_EGG$",)),
-    ("Held", 30_000, ("^ITEM_EVIOLITE$",)),
-    ("Held", 20_000, ("^ITEM_(HEAVY_DUTY_BOOTS|COVERT_CLOAK|ABILITY_SHIELD|CLEAR_AMULET|MIRROR_HERB|LOADED_DICE)$",
+    ("Training", 75_000, ("^ITEM_ABILITY_PATCH$",)),
+    ("Training", 60_000, ("^ITEM_GOLD_BOTTLE_CAP$",)),
+    ("Training", 37_500, ("^ITEM_BOTTLE_CAP$",)),
+    ("Training", 30_000, ("_MINT$", "^ITEM_ABILITY_CAPSULE$")),
+    ("Evolution", 15_000, ("^ITEM_(RED|BLUE)_ORB$", "^ITEM_(ADAMANT_CRYSTAL|LUSTROUS_GLOBE|GRISEOUS_CORE)$")),
+    ("Held", 13_500, ("^ITEM_(SOUL_DEW|ADAMANT_ORB|LUSTROUS_ORB|GRISEOUS_ORB)$",)),
+    ("Training", 4_500, ("^ITEM_LUCKY_EGG$",)),
+    ("Held", 4_500, ("^ITEM_EVIOLITE$",)),
+    ("Held", 3_000, ("^ITEM_(HEAVY_DUTY_BOOTS|COVERT_CLOAK|ABILITY_SHIELD|CLEAR_AMULET|MIRROR_HERB|LOADED_DICE)$",
                       "^ITEM_(FLAME|TOXIC)_ORB$", "_PLATE$")),
-    ("Evolution", 15_000, ("_DRIVE$", "^ITEM_RUSTED_(SWORD|SHIELD)$")),
-    ("Held", 15_000, ("^ITEM_LUCKY_PUNCH$",)),
-    ("Evolution", 10_000, ("^ITEM_(ICE|SHINY|DUSK|DAWN)_STONE$", "^ITEM_(UPGRADE|PROTECTOR|DUBIOUS_DISC|REAPER_CLOTH|PRISM_SCALE)$",
+    ("Evolution", 2_250, ("_DRIVE$", "^ITEM_RUSTED_(SWORD|SHIELD)$")),
+    ("Held", 2_250, ("^ITEM_LUCKY_PUNCH$",)),
+    ("Evolution", 1_500, ("^ITEM_(ICE|SHINY|DUSK|DAWN)_STONE$", "^ITEM_(UPGRADE|PROTECTOR|DUBIOUS_DISC|REAPER_CLOTH|PRISM_SCALE)$",
                            "^ITEM_(WHIPPED_DREAM|SACHET|RAZOR_CLAW|RAZOR_FANG|LINKING_CORD|BLACK_AUGURITE)$",
                            "^ITEM_(SWEET_APPLE|TART_APPLE|SYRUPY_APPLE|CRACKED_POT|CHIPPED_POT|GALARICA_CUFF|GALARICA_WREATH)$",
                            "^ITEM_(UNREMARKABLE|MASTERPIECE)_TEACUP$", "^ITEM_(AUSPICIOUS|MALICIOUS)_ARMOR$",
                            "^ITEM_SCROLL_OF_", "^ITEM_METAL_ALLOY$", "^ITEM_ELECTIRIZER$", "^ITEM_MAGMARIZER$", "^ITEM_OVAL_STONE$")),
-    ("Training", 10_000, ("^ITEM_EXP_CANDY_XL$", "^ITEM_FRESH_START_MOCHI$")),
-    ("Held", 8_000, ("^ITEM_(MUSCLE_BAND|WISE_GLASSES|ZOOM_LENS|FLOAT_STONE|RING_TARGET|BINDING_BAND|ADRENALINE_ORB)$",
+    ("Training", 1_500, ("^ITEM_EXP_CANDY_XL$", "^ITEM_FRESH_START_MOCHI$")),
+    ("Held", 1_200, ("^ITEM_(MUSCLE_BAND|WISE_GLASSES|ZOOM_LENS|FLOAT_STONE|RING_TARGET|BINDING_BAND|ADRENALINE_ORB)$",
                      "^ITEM_(PROTECTIVE_PADS|UTILITY_UMBRELLA|ROOM_SERVICE|RED_CARD|EJECT_BUTTON|EJECT_PACK|THROAT_SPRAY)$",
                      "^ITEM_(BLUNDER_POLICY|AIR_BALLOON|SAFETY_GOGGLES|PUNCHING_GLOVE|TERRAIN_EXTENDER)$")),
-    ("Held", 5_000, ("^ITEM_(DAMP|HEAT|SMOOTH|ICY)_ROCK$", "_SEED$", "_INCENSE$", "^ITEM_BERSERK_GENE$")),
-    ("Training", 5_000, ("^ITEM_POWER_", "^ITEM_EXP_CANDY_L$")),
-    ("Berries", 5_000, ("^ITEM_(GANLON|SALAC|PETAYA|APICOT|MICLE|CUSTAP|JABOCA|ROWAP|KEE|MARANGA|ENIGMA|LANSAT|STARF)_BERRY$",)),
-    ("Held", 3_000, ("_GEM$", "^ITEM_FAIRY_FEATHER$")),
-    ("Berries", 2_500, ("_BERRY$",)),
-    ("Other", 2_500, ("^ITEM_(DUSK|QUICK|DREAM|BEAST)_BALL$",)),
-    ("Training", 2_000, ("_MOCHI$", "^ITEM_EXP_CANDY_M$")),
-    ("Other", 1_500, ("^ITEM_MAX_LURE$",)),
-    ("Other", 1_000, ("_BALL$", "^ITEM_SUPER_LURE$")),
-    ("Training", 500, ("^ITEM_EXP_CANDY_S$", "_FEATHER$")),
-    ("Other", 500, ("^ITEM_LURE$", "^ITEM_X_", "^ITEM_POKE_TOY$", "_MAIL$")),
-    ("Training", 200, ("^ITEM_EXP_CANDY_XS$",)),
+    ("Held", 750, ("^ITEM_(DAMP|HEAT|SMOOTH|ICY)_ROCK$", "_SEED$", "_INCENSE$", "^ITEM_BERSERK_GENE$")),
+    ("Training", 750, ("^ITEM_POWER_", "^ITEM_EXP_CANDY_L$")),
+    ("Berries", 750, ("^ITEM_(GANLON|SALAC|PETAYA|APICOT|MICLE|CUSTAP|JABOCA|ROWAP|KEE|MARANGA|ENIGMA|LANSAT|STARF)_BERRY$",)),
+    ("Held", 450, ("_GEM$", "^ITEM_FAIRY_FEATHER$")),
+    ("Berries", 375, ("_BERRY$",)),
+    ("Other", 375, ("^ITEM_(DUSK|QUICK|DREAM|BEAST)_BALL$",)),
+    ("Training", 300, ("_MOCHI$", "^ITEM_EXP_CANDY_M$")),
+    ("Other", 225, ("^ITEM_MAX_LURE$",)),
+    ("Other", 150, ("_BALL$", "^ITEM_SUPER_LURE$")),
+    ("Training", 75, ("^ITEM_EXP_CANDY_S$", "_FEATHER$")),
+    ("Other", 75, ("^ITEM_LURE$", "^ITEM_X_", "^ITEM_POKE_TOY$", "_MAIL$")),
+    ("Training", 30, ("^ITEM_EXP_CANDY_XS$",)),
 )
 # Everything else sold: what heals or feeds (the regional foods, remedies, Jubilife Muffin) 500; a treasure (a thing to
-# sell) a tenth of its money price, at least 1,000.
-FOOD, TREASURE = 500, 1_000
+# sell) 1.5% of its money price, at least 150.
+FOOD, TREASURE = 75, 150
 
 
 def unusable(name: str):
@@ -467,11 +467,11 @@ def band(name: str, item: dict):
             return kind, coins
     if item["fieldUse"] in ("ItemUseOutOfBattle_Medicine",) or "MEDICINE" in item["sortType"] or "HEALTH" in item["sortType"]:
         return "Other", FOOD
-    return "Other", max(TREASURE, -(-item["price"] // 10 // 100) * 100)
+    return "Other", max(TREASURE, -(-item["price"] * 15 // 1000))
 
 
 def round_coins(coins: int) -> int:
-    step = 1000 if coins >= 10_000 else 100
+    step = 250 if coins >= 10_000 else 25 if coins >= 1_000 else 5
     return -(-coins // step) * step
 
 
@@ -528,7 +528,8 @@ def build():
             left_out.append((name, why))
             continue
         kind, coins = band(name, item)
-        coins = max(coins, -(-item["price"] // 20))     # never a cheap way to money: coins cost money too
+        coins = max(coins, -(-item["price"] // 40))     # never a cheap way to money: coins cost 20 yen each; an item sells for
+        #                                                 half its price, so it never costs less than it sells for
         goods.append((name, kind, NAMED.get(name, round_coins(coins))))
     return goods, left_out, src, info
 

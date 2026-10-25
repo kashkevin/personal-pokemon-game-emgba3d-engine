@@ -1026,7 +1026,7 @@ int NativeSelfTest_Coins(void)
         extern const u16 MauvilleCity_Mart_Pokemart_MegaStones[];
         u32 tiers[8] = {0}, listed = 0;
         bool32 allInList = TRUE, pricesOk = TRUE, unique = TRUE, held = TRUE;
-        static const u32 sTierValues[] = {30000, 35000, 40000, 60000, 80000, 90000, 100000};
+        static const u32 sTierValues[] = {4500, 5250, 6000, 9000, 12000, 13500, 15000}; // 15% of 30,000 ... 100,000 (2026-10-25)
 
         for (u32 i = 0; MauvilleCity_Mart_Pokemart_MegaStones[i] != ITEM_NONE; i++)
         {
@@ -1053,8 +1053,8 @@ int NativeSelfTest_Coins(void)
             printf(" %u x %u coins;", tiers[t], sTierValues[t]);
         printf("\n");
         ExpectLeg("every Mega Stone the dealer sells has a coin price, and only one", listed == MP_MEGA_STONE_COUNT && allInList && unique);
-        ExpectLeg("every price is one of the seven tiers: 30,000 / 35,000 / 40,000 (common), 60,000 / 80,000 (strong), 90,000 / 100,000", pricesOk);
-        ExpectLeg("the cheapest stone costs 30,000 and the dearest 100,000", MP_MEGA_STONE_PRICE_MIN == 30000 && MP_MEGA_STONE_PRICE_MAX == 100000);
+        ExpectLeg("every price is one of the seven tiers: 4,500 / 5,250 / 6,000 (common), 9,000 / 12,000 (strong), 13,500 / 15,000", pricesOk);
+        ExpectLeg("the cheapest stone costs 4,500 and the dearest 15,000", MP_MEGA_STONE_PRICE_MIN == 4500 && MP_MEGA_STONE_PRICE_MAX == 15000);
         {
             // Mega flow: every stone sold is the one a Pokemon of the game holds to Mega Evolve (the form change table), so a
             // bought stone, held by its Pokemon with the Mega Ring in the bag, is what CanMegaEvolve looks for
@@ -1072,11 +1072,11 @@ int NativeSelfTest_Coins(void)
             ExpectLeg("every Mega Stone sold has a Pokemon that Mega Evolves with it", withUser == listed);
         }
         ExpectLeg("every priced item is a real Mega Stone (hold effect)", held);
-        ExpectLeg("Mewtwonite X and Y cost 100,000 coins; Venusaurite (a standard Mega) 60,000; Beedrillite (the lightest) 30,000",
-                  CoinShop_StonePrice(ITEM_MEWTWONITE_X) == 100000 && CoinShop_StonePrice(ITEM_MEWTWONITE_Y) == 100000
-                  && CoinShop_StonePrice(ITEM_VENUSAURITE) == 60000 && CoinShop_StonePrice(ITEM_BEEDRILLITE) == 30000);
+        ExpectLeg("Mewtwonite X and Y cost 15,000 coins; Venusaurite (a standard Mega) 9,000; Beedrillite (the lightest) 4,500",
+                  CoinShop_StonePrice(ITEM_MEWTWONITE_X) == 15000 && CoinShop_StonePrice(ITEM_MEWTWONITE_Y) == 15000
+                  && CoinShop_StonePrice(ITEM_VENUSAURITE) == 9000 && CoinShop_StonePrice(ITEM_BEEDRILLITE) == 4500);
         ExpectLeg("a stone that is not on the list has no price", CoinShop_StonePrice(ITEM_POTION) == 0);
-        ExpectLeg("the Mega Ring costs 25,000 coins and the Shiny Charm 100,000", MP_MEGA_RING_COINS == 25000 && MP_SHINY_CHARM_COINS == 100000);
+        ExpectLeg("the Mega Ring costs 3,750 coins and the Shiny Charm 15,000", MP_MEGA_RING_COINS == 3750 && MP_SHINY_CHARM_COINS == 15000);
         ExpectLeg("the large coin pack is the same 20 yen a coin as the others (5,000 for 100,000)",
                   MP_COINS_PACK_LARGE * 20 == MP_COINS_PACK_LARGE_YEN);
     }
@@ -1095,7 +1095,7 @@ int NativeSelfTest_Coins(void)
         CoinShop_OnOpen(MauvilleCity_Mart_Pokemart_MegaStones);
         ExpectLeg("the dealer's list switches the shop to coins", gCoinShopActive);
         ExpectLeg("(coin shop) the price is the stone's coin price", CoinShop_ItemPrice(ITEM_GENGARITE) == CoinShop_StonePrice(ITEM_GENGARITE)
-                  && CoinShop_ItemPrice(ITEM_GENGARITE) >= 30000);
+                  && CoinShop_ItemPrice(ITEM_GENGARITE) >= 4500);
         ExpectLeg("(coin shop) the balance is the coins; the POKeNEWS sale does not apply", CoinShop_Balance(&gSaveBlock1Ptr->money) == coins && CoinShop_SaleShift(0) == 0);
         ExpectLeg("(coin shop) an item without a coin price is out of reach, never free", CoinShop_ItemPrice(ITEM_POTION) > 999999);
         ExpectLeg("(coin shop) 90,000 coins can pay 80,000 and not 90,001",
@@ -1106,7 +1106,7 @@ int NativeSelfTest_Coins(void)
         CoinShop_OnOpen(NULL);
         ExpectLeg("any other shop list switches back to yen", !gCoinShopActive);
         // The Game Corner's RARE GOODS (the owner's request of 2026-10-24): each of the clerk's lists is a coin shop, every
-        // item it sells has a coin price, the Ability Patch and the Gold Bottle Cap at 200,000-500,000
+        // item it sells has a coin price, the Ability Patch and the Gold Bottle Cap at 30,000-75,000
         {
             extern const u16 MauvilleCity_GameCorner_Pokemart_RareGoodsHeld[], MauvilleCity_GameCorner_Pokemart_RareGoodsOther[];
             extern const u16 MauvilleCity_GameCorner_Pokemart_RareGoodsTraining[];
@@ -1116,13 +1116,13 @@ int NativeSelfTest_Coins(void)
             CoinShop_OnOpen(MauvilleCity_GameCorner_Pokemart_RareGoodsOther);
             ExpectLeg("the RARE GOODS lists switch the shop to coins", gCoinShopActive);
             for (const u16 *item = MauvilleCity_GameCorner_Pokemart_RareGoodsHeld; *item != ITEM_NONE; item++, listed++)
-                priced &= CoinShop_ItemPrice(*item) >= 200 && CoinShop_ItemPrice(*item) <= 500000;
+                priced &= CoinShop_ItemPrice(*item) >= 30 && CoinShop_ItemPrice(*item) <= 75000;
             for (const u16 *item = MauvilleCity_GameCorner_Pokemart_RareGoodsTraining; *item != ITEM_NONE; item++, listed++)
-                priced &= CoinShop_ItemPrice(*item) >= 200 && CoinShop_ItemPrice(*item) <= 500000;
+                priced &= CoinShop_ItemPrice(*item) >= 30 && CoinShop_ItemPrice(*item) <= 75000;
             ExpectLeg("(RARE GOODS) every item listed has a coin price", priced && listed > 0);
-            ExpectLeg("(RARE GOODS) the Ability Patch and the Gold Bottle Cap cost 200,000 to 500,000",
-                      CoinShop_ItemPrice(ITEM_ABILITY_PATCH) >= 200000 && CoinShop_ItemPrice(ITEM_ABILITY_PATCH) <= 500000
-                      && CoinShop_ItemPrice(ITEM_GOLD_BOTTLE_CAP) >= 200000 && CoinShop_ItemPrice(ITEM_GOLD_BOTTLE_CAP) <= 500000);
+            ExpectLeg("(RARE GOODS) the Ability Patch and the Gold Bottle Cap cost 30,000 to 75,000",
+                      CoinShop_ItemPrice(ITEM_ABILITY_PATCH) >= 30000 && CoinShop_ItemPrice(ITEM_ABILITY_PATCH) <= 75000
+                      && CoinShop_ItemPrice(ITEM_GOLD_BOTTLE_CAP) >= 30000 && CoinShop_ItemPrice(ITEM_GOLD_BOTTLE_CAP) <= 75000);
             ExpectLeg("(RARE GOODS) an obtainable item is not for sale", CoinShop_ItemPrice(ITEM_POTION) > 999999);
             // the review of 2026-10-24: every list whole on the native shop screen, the Mints in the owner's band, the
             // Charms and form-change key items sold, nothing that does nothing here, Misty Seed (no one can get it) sold
@@ -1139,7 +1139,7 @@ int NativeSelfTest_Coins(void)
                     u32 n = 0;
 
                     for (const u16 *item = lists[l]; *item != ITEM_NONE; item++, n++)
-                        priced &= CoinShop_ItemPrice(*item) >= 200 && CoinShop_ItemPrice(*item) <= 500000;
+                        priced &= CoinShop_ItemPrice(*item) >= 30 && CoinShop_ItemPrice(*item) <= 75000;
                     longest = max(longest, n);
                     total += l < ARRAY_COUNT(lists) - 1 ? n : 0;
                 }
@@ -1149,21 +1149,21 @@ int NativeSelfTest_Coins(void)
                 ExpectLeg("(RARE GOODS) every coin shop list fits the native shop screen whole (its CANCEL is CANCEL)",
                           longest <= NATIVE_SHOP_MAX_ITEMS);
 #endif
-                ExpectLeg("(RARE GOODS) the Mints cost 200,000 to 250,000 (the owner's band for trait changers)",
-                          CoinShop_ItemPrice(ITEM_ADAMANT_MINT) >= 200000 && CoinShop_ItemPrice(ITEM_ADAMANT_MINT) <= 250000
-                          && CoinShop_ItemPrice(ITEM_SERIOUS_MINT) >= 200000 && CoinShop_ItemPrice(ITEM_SERIOUS_MINT) <= 250000);
-                ExpectLeg("(RARE GOODS) the Oval, Exp. and Catching Charms cost 100,000 (the Shiny Charm's price), one each",
+                ExpectLeg("(RARE GOODS) the Mints cost 30,000 to 37,500 (the owner's band for trait changers)",
+                          CoinShop_ItemPrice(ITEM_ADAMANT_MINT) >= 30000 && CoinShop_ItemPrice(ITEM_ADAMANT_MINT) <= 37500
+                          && CoinShop_ItemPrice(ITEM_SERIOUS_MINT) >= 30000 && CoinShop_ItemPrice(ITEM_SERIOUS_MINT) <= 37500);
+                ExpectLeg("(RARE GOODS) the Oval, Exp. and Catching Charms cost 15,000 (the Shiny Charm's price), one each",
                           CoinShop_ItemPrice(ITEM_OVAL_CHARM) == MP_SHINY_CHARM_COINS && CoinShop_ItemPrice(ITEM_EXP_CHARM) == MP_SHINY_CHARM_COINS
                           && CoinShop_ItemPrice(ITEM_CATCHING_CHARM) == MP_SHINY_CHARM_COINS && GetItemImportance(ITEM_OVAL_CHARM));
                 ExpectLeg("(RARE GOODS) Gracidea, Reveal Glass, DNA Splicers, Prison Bottle, Zygarde Cube and Rotom Catalog are sold",
-                          CoinShop_ItemPrice(ITEM_GRACIDEA) <= 500000 && CoinShop_ItemPrice(ITEM_REVEAL_GLASS) <= 500000
-                          && CoinShop_ItemPrice(ITEM_DNA_SPLICERS) <= 500000 && CoinShop_ItemPrice(ITEM_PRISON_BOTTLE) <= 500000
-                          && CoinShop_ItemPrice(ITEM_ZYGARDE_CUBE) <= 500000 && CoinShop_ItemPrice(ITEM_ROTOM_CATALOG) <= 500000);
+                          CoinShop_ItemPrice(ITEM_GRACIDEA) <= 75000 && CoinShop_ItemPrice(ITEM_REVEAL_GLASS) <= 75000
+                          && CoinShop_ItemPrice(ITEM_DNA_SPLICERS) <= 75000 && CoinShop_ItemPrice(ITEM_PRISON_BOTTLE) <= 75000
+                          && CoinShop_ItemPrice(ITEM_ZYGARDE_CUBE) <= 75000 && CoinShop_ItemPrice(ITEM_ROTOM_CATALOG) <= 75000);
                 ExpectLeg("(RARE GOODS) Peat Block, the Aux items and the Legends foods (no effect here) are not sold",
                           CoinShop_ItemPrice(ITEM_PEAT_BLOCK) > 999999 && CoinShop_ItemPrice(ITEM_AUX_GUARD) > 999999
                           && CoinShop_ItemPrice(ITEM_AUX_POWERGUARD) > 999999 && CoinShop_ItemPrice(ITEM_CHOICE_DUMPLING) > 999999
                           && CoinShop_ItemPrice(ITEM_SWAP_SNACK) > 999999 && CoinShop_ItemPrice(ITEM_TWICE_SPICED_RADISH) > 999999);
-                ExpectLeg("(RARE GOODS) Misty Seed (only Galarian Weezing and Comfey hold it) is sold", CoinShop_ItemPrice(ITEM_MISTY_SEED) <= 500000);
+                ExpectLeg("(RARE GOODS) Misty Seed (only Galarian Weezing and Comfey hold it) is sold", CoinShop_ItemPrice(ITEM_MISTY_SEED) <= 75000);
             }
             CoinShop_OnOpen(NULL);
         }
@@ -1172,15 +1172,20 @@ int NativeSelfTest_Coins(void)
     // 5. the Game Corner clerks' specials (32-bit amounts in two script variables)
     {
         SetCoins(130000);
-        gSpecialVar_0x8004 = MP_SHINY_CHARM_COINS >> 16;
-        gSpecialVar_0x8005 = MP_SHINY_CHARM_COINS & 0xFFFF;
+        gSpecialVar_0x8004 = 100000 >> 16;              // a price above 65,535 (the Ability Patch is 75,000 now): the high half carries it
+        gSpecialVar_0x8005 = 100000 & 0xFFFF;
         ExpectLeg("(specials) the 100,000-coin price splits into 1 and 34,464", gSpecialVar_0x8004 == 1 && gSpecialVar_0x8005 == 34464);
         ExpectLeg("(specials) a wallet of 130,000 has the Charm's 100,000", CoinWallet_Has() == 1);
         ExpectLeg("(specials) paying takes exactly 100,000", CoinWallet_Spend() == 1 && GetCoins() == 30000);
         ExpectLeg("(specials) 30,000 no longer has it, and a failed payment takes nothing", CoinWallet_Has() == 0 && CoinWallet_Spend() == 0 && GetCoins() == 30000);
+        gSpecialVar_0x8004 = MP_SHINY_CHARM_COINS >> 16;
+        gSpecialVar_0x8005 = MP_SHINY_CHARM_COINS & 0xFFFF;
+        ExpectLeg("(specials) the Shiny Charm's 15,000 is within 30,000, and leaves 15,000", MP_SHINY_CHARM_COINS == 15000 && CoinWallet_Has() == 1
+                  && CoinWallet_Spend() == 1 && GetCoins() == 15000);
+        SetCoins(30000);
         gSpecialVar_0x8004 = MP_MEGA_RING_COINS >> 16;
         gSpecialVar_0x8005 = MP_MEGA_RING_COINS & 0xFFFF;
-        ExpectLeg("(specials) the Mega Ring's 25,000 is within 30,000, and leaves 5,000", CoinWallet_Has() == 1 && CoinWallet_Spend() == 1 && GetCoins() == 5000);
+        ExpectLeg("(specials) the Mega Ring's 3,750 is within 30,000, and leaves 26,250", CoinWallet_Has() == 1 && CoinWallet_Spend() == 1 && GetCoins() == 26250);
         SetCoins(999000);
         gSpecialVar_0x8004 = 0;
         gSpecialVar_0x8005 = 999;

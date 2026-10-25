@@ -2,12 +2,23 @@ MauvilleCity_GameCorner_MapScripts::
 	.byte 0
 
 	@ Game Corner prices
+.ifdef PORTABLE
+	@ The PC game (the owner's request of 2026-10-25: "way too high"): every Game Corner coin price is 15% of what it was
+	@ (the RARE GOODS, the Mega Stones, the Mega Ring and the Shiny Charm too); the GBA ROM keeps the original prices.
+	.set TM_DOUBLE_TEAM_COINS, 225
+	.set TM_PSYCHIC_COINS, 525
+	.set TM_FLAMETHROWER_COINS, 600
+	.set TM_THUNDERBOLT_COINS, 600
+	.set TM_ICE_BEAM_COINS, 600
+	.set DOLL_COINS, 150
+.else
 	.set TM_DOUBLE_TEAM_COINS, 1500
 	.set TM_PSYCHIC_COINS, 3500
 	.set TM_FLAMETHROWER_COINS, 4000
 	.set TM_THUNDERBOLT_COINS, 4000
 	.set TM_ICE_BEAM_COINS, 4000
 	.set DOLL_COINS, 1000
+.endif
 
 	.set COINS_PRICE_50,  1000
 	.set COINS_PRICE_500, 10000
@@ -91,7 +102,7 @@ MauvilleCity_GameCorner_EventScript_Buy500Coins::
 	end
 
 .ifdef PORTABLE
-@ Update 29 (PC game): a large pack, at the same 20 yen a coin: the 100,000-coin Shiny Charm would take 200 small packs.
+@ Update 29 (PC game): a large pack, at the same 20 yen a coin: the Shiny Charm (15,000 coins on the PC game) would take 300 small packs.
 MauvilleCity_GameCorner_EventScript_Buy5000Coins::
 	setvar VAR_0x8004, 0
 	setvar VAR_0x8005, MP_COINS_PACK_LARGE

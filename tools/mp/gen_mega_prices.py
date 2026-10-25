@@ -5,16 +5,16 @@ The price is a pure function of the stone's Mega form (no randomness, no tuning 
 checked at any time:
 
     Mega form (from src/data/pokemon/species_info, the pinned engine)            coins
-    restricted legendary (Mewtwo X/Y, Zygarde)                                    100,000
-    sub-legendary / Mythical (Latias, Latios, Heatran, Darkrai, Diancie, ...)       90,000
-    base stat total 700 (Garchomp, Salamence, Metagross, Tyranitar, Dragonite...)   80,000
-    base stat total 620-699 (Starter and pseudo-final Megas, Gyarados, ...)         60,000   <- "rare"
-    base stat total 590-619                                                         40,000   <- "common"
-    base stat total 561-589                                                         35,000
-    base stat total up to 560                                                       30,000
+    restricted legendary (Mewtwo X/Y, Zygarde)                                     15,000
+    sub-legendary / Mythical (Latias, Latios, Heatran, Darkrai, Diancie, ...)       13,500
+    base stat total 700 (Garchomp, Salamence, Metagross, Tyranitar, Dragonite...)   12,000
+    base stat total 620-699 (Starter and pseudo-final Megas, Gyarados, ...)          9,000   <- "rare"
+    base stat total 590-619                                                          6,000   <- "common"
+    base stat total 561-589                                                          5,250
+    base stat total up to 560                                                        4,500
 
-Sold as the third part of the Mega Evolution unlock: the Mega Ring (25,000 coins) first, then the stones here, all in Game
-Corner coins. The output is src/platform/mp_mega_prices.h; --markdown prints the table for the documentation.
+Sold as the third part of the Mega Evolution unlock: the Mega Ring (3,750 coins) first, then the stones here, all in Game
+Corner coins (2026-10-25: every Game Corner coin price is 15% of what it was, the owner's "way too high"). The output is src/platform/mp_mega_prices.h; --markdown prints the table for the documentation.
 """
 from __future__ import annotations
 
@@ -32,11 +32,11 @@ SHOP = ENGINE / "data/scripts/mp_mega_stone_shop.inc"
 OUTPUT = ENGINE / "src/platform/mp_mega_prices.h"
 
 # (minimum base stat total, coins), highest first; legendary classes are handled before
-BANDS = ((700, 80_000), (620, 60_000), (590, 40_000), (561, 35_000), (0, 30_000))
-PRICE_RESTRICTED = 100_000
-PRICE_SUB_LEGENDARY = 90_000
-MEGA_RING_COINS = 25_000
-SHINY_CHARM_COINS = 100_000
+BANDS = ((700, 12_000), (620, 9_000), (590, 6_000), (561, 5_250), (0, 4_500))
+PRICE_RESTRICTED = 15_000
+PRICE_SUB_LEGENDARY = 13_500
+MEGA_RING_COINS = 3_750
+SHINY_CHARM_COINS = 15_000
 
 
 def price_of(bst: int, flags: set) -> int:
