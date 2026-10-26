@@ -324,6 +324,16 @@ static void CaptureBox(u32 battler)
     b->slide = nb.x2;
     b->bob = nb.y2;
     b->tagCount = StatStages_Tags(battler, b->tags);
+    {
+        /* breadcrumb (crash.log, PKMN_LINK_TRACE): what the box shows changed (battler; the species shown and its
+         * status), the check of the owner's "the next Pokemon sent out was paralyzed too" */
+        static u32 sShown[MAX_BATTLERS_COUNT];
+        u32 shownNow = ((u32)b->mon.species << 8) | b->ailment;
+
+        if (sShown[battler] != shownNow)
+            CrashReport_Crumb(CRUMB_HUD_BOX, battler, shownNow);
+        sShown[battler] = shownNow;
+    }
 }
 
 static void CaptureFoePips(void)

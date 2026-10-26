@@ -2684,7 +2684,10 @@ void BtlController_HandleSwitchInAnim(enum BattlerId battler)
     // Illusion (SwitchInClearSetData) runs on the master alone, and a Zorua sent in after the first Pokemon showed
     // as itself on the other screens (the owner's report of 2026-10-24). Worked out again for the one coming in.
     if ((gBattleTypeFlags & BATTLE_TYPE_LINK) && !(gBattleTypeFlags & BATTLE_TYPE_IS_MASTER))
+    {
         ClearIllusionMon(battler);
+        gBattleStruct->battlerState[battler].notOnField = FALSE; // on the field again (BtlController_HandleReturnMonToBall)
+    }
 #endif
 #line 2567 // gba-line
     if (isPlayerSide)
@@ -2695,6 +2698,17 @@ void BtlController_HandleSwitchInAnim(enum BattlerId battler)
 
 void BtlController_HandleReturnMonToBall(enum BattlerId battler)
 {
+#ifdef PORTABLE
+    // A link battle's other games replay the master's: the master marks a Pokemon called back as off the field
+    // (switchoutabilities), the others never did, and a party menu that closed after a U-turn, Volt Switch, Baton
+    // Pass, Eject Button or Emergency Exit (the Pokemon already back in its ball) rebuilt its sprite and healthbox there
+    // (ReshowBattleScreen): the sprite was never freed (one more of the 64 each time) and the box showed the last
+    // Pokemon's status under the next one's name until its send-out ended (KNOWN_ISSUES MS-71, the owner's report of
+    // 2026-10-25 of a paralysis passed on). Off the field until its switch-in (BtlController_HandleSwitchInAnim).
+    if ((gBattleTypeFlags & BATTLE_TYPE_LINK) && !(gBattleTypeFlags & BATTLE_TYPE_IS_MASTER))
+        gBattleStruct->battlerState[battler].notOnField = TRUE;
+#endif
+#line 2575 // gba-line
     if (gBattleResources->bufferA[battler][1] == 0)
     {
         gBattleSpritesDataPtr->healthBoxesData[battler].animationState = 0;
