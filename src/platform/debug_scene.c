@@ -1485,7 +1485,13 @@ static void CB2_DebugSceneSetup(void)
     gSaveBlock1Ptr->location.mapNum = MAP_NUM(MAP_ROUTE104);
     gSaveBlock1Ptr->pos.x = 12;
     gSaveBlock1Ptr->pos.y = 30;
-    if ((value = SDL_getenv("PKMN_DEBUG_HERE")) != NULL && Numbers(value, v, 5) >= 4)
+    if ((value = SDL_getenv("PKMN_DEBUG_HERE")) != NULL && Numbers(value, v, 5) >= 4
+     && !RegionMap_PortableMapKnown((u8)v[0], (u8)v[1]))
+    {
+        // a map this build does not have (the Kanto groups are empty: their headers are NULL): it crashed the scene
+        SDL_Log("debug scene: PKMN_DEBUG_HERE map %d.%d is not in this build; the scene starts on Route 104", v[0], v[1]);
+    }
+    else if (value != NULL && Numbers(value, v, 5) >= 4)
     {
         gSaveBlock1Ptr->location.mapGroup = (u8)v[0];
         gSaveBlock1Ptr->location.mapNum = (u8)v[1];
