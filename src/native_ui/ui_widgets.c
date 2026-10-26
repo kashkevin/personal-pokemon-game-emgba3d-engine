@@ -515,6 +515,28 @@ void UiW_DialogBox(int x, int y, int w, int h, const struct UiRamp *band, UiRGBA
     }
 }
 
+void UiW_LocationSign(int x, int y, const uint8_t *name, const char *clock)
+{
+    /* the design's wood (pause.js) */
+    static const struct UiRamp wood = {UI_HEX(0xECC08A), UI_HEX(0xD29C62), UI_HEX(0xA8703C), UI_HEX(0x4A2A12)};
+    int w = UI_LOCATION_SIGN_W, h = UI_LOCATION_SIGN_H;
+    const int nails[4][2] = {{x + 4, y + 4}, {x + w - 6, y + 4}, {x + 4, y + h - 6}, {x + w - 6, y + h - 6}};
+
+    UiG_Paint(UiM_Rounded4(w, h, 3, 3, 3, 3), x, y, wood.base,
+              &(struct UiPaint){wood.ink, wood.hi, wood.lo, 0, 2, NULL, UI_NONE});
+    for (int i = 0; i < 4; i++)
+    {
+        UiG_Rect(nails[i][0], nails[i][1], 2, 2, wood.ink);
+        UiG_Put(nails[i][0], nails[i][1], wood.lo);
+    }
+    UiText_Draw(UI_FONT_NORMAL, x + 12, y + 8, name, UI_HEX(0x402410), UI_HEX(0xECC08A), UI_ALIGN_LEFT, 0);
+    if (clock != NULL)
+    {
+        UiGfx_Icon("sun", x + w - 64, y + 10, 0);
+        UiCaps_Draw(x + w - 10, y + 13, clock, UI_HEX(0x402410), UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_RIGHT, UI_NONE);
+    }
+}
+
 int UiW_TitleTab(int x, int y, const char *label, const struct UiRamp *r, int w, const char *icon)
 {
     static const int8_t chamfer[] = {6, 5, 4, 3, 2, 1};

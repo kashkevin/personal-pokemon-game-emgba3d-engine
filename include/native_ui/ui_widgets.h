@@ -86,6 +86,11 @@ struct UiRamp UiW_FieldBand(void);
 /* the Emerald message box; fills inner[4] = text area x, y, w, h */
 void UiW_DialogBox(int x, int y, int w, int h, const struct UiRamp *band, UiRGBA body, int inner[4]);
 int UiW_TitleTab(int x, int y, const char *label, const struct UiRamp *r, int w, const char *icon);
+/* the Emerald wooden location sign (PK.locationSign: the pause menu's, the map name pop-up's), 184 x 34: the place's
+ * name (a game string), with the time of day (clock, ASCII) at its right unless NULL */
+#define UI_LOCATION_SIGN_W 184
+#define UI_LOCATION_SIGN_H 34
+void UiW_LocationSign(int x, int y, const uint8_t *name, const char *clock);
 
 struct UiDsButtonOpt
 {

@@ -32,6 +32,8 @@
 #include "battle_anim.h"
 #include "sprite.h"
 #include "battle_setup.h"
+#include "battle_transition.h"
+#include "map_name_popup.h"
 #include "link.h"
 #include "pokemon.h"
 #include "string_util.h"
@@ -697,9 +699,40 @@ unsigned DebugScene_GameFrame(void)
     return sKeyFrame;
 }
 
+// PKMN_DEBUG_TRANSITION=id[:frame] (with the field scene): the battle transition B_TRANSITION_<id> played on the calm field
+// at that game frame (default 120), as a battle's start plays it (BattleTransition_StartOnField), without the battle: the
+// transition's pictures (PKMN_DEBUG_GLSHOTS) for the UI audit's old-look check; the screen stays black after it.
+static void TransitionTick(void)
+{
+    static int sId = -2;
+    static unsigned sAt;
+    const char *value;
+
+    if (sId == -2)
+    {
+        int id = -1, at = 120;
+
+        if ((value = SDL_getenv("PKMN_DEBUG_TRANSITION")) != NULL)
+            sscanf(value, "%d:%d", &id, &at);
+        sId = id;
+        sAt = (unsigned)at;
+    }
+    if (sId < 0 || sKeyFrame < sAt || gMain.callback2 != CB2_Overworld || ArePlayerFieldControlsLocked()
+     || gPaletteFade.active || ScriptContext_IsEnabled())
+        return;
+    SDL_Log("debug transition: B_TRANSITION %d at frame %u", sId, sKeyFrame);
+    // As the field starts a battle (overworld.c DoCB1_Overworld): the controls locked and the location pop-up put away,
+    // which would otherwise draw over the transition's BG0 picture.
+    LockPlayerFieldControls();
+    HideMapNamePopUpWindow();
+    BattleTransition_StartOnField((u8)sId);
+    sId = -1;
+}
+
 uint16_t DebugScene_FilterKeys(uint16_t keys)
 {
     sKeyFrame++;
+    TransitionTick();
     BagLog();
     LinkLog();
     PartyLog();

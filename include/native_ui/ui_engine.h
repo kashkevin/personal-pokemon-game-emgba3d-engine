@@ -1212,6 +1212,13 @@ void TextPrinter_NativeUiForgetWindow(u32 windowId);
 /* window.c: the window's tiles are on its background now (shown, not cleared) */
 bool32 Window_NativeUiShown(u8 windowId);
 
+/* battle_transition.c: the battle transition playing (B_TRANSITION_*), B_TRANSITION_COUNT with none */
+u8 BattleTransition_NativeUiPlaying(void);
+
+/* map_name_popup.c: the location pop-up sliding in, shown or sliding out: its name and how far above its place it is
+ * (0 in place, *offscreen gone) */
+bool8 MapNamePopUp_NativeUiState(u8 *name, u32 size, u16 *offset, u16 *offscreen);
+
 /* ---------------------------------------------------------------- platform (src/platform/sdl2.c) */
 
 /* the PC's F10 settings menu is open (the game gets no buttons meanwhile) */

@@ -725,3 +725,37 @@ static void LoadMapNamePopUpWindowBg(void)
         BlitBitmapToWindow(popupWindowId, sMapPopUp_Table[popUpThemeId], 0, 0, 80, 24);
     }
 }
+
+#ifdef ENABLE_NATIVE_UI
+// The native PC UI (ui_map_name.c): the location pop-up while it slides in, shows, slides out or is erased (TRUE),
+// the name it prints (as ShowMapNamePopUpWindow builds it) and how far above its place it is (0 in place, *offscreen
+// gone).
+bool8 MapNamePopUp_NativeUiState(u8 *name, u32 size, u16 *offset, u16 *offscreen)
+{
+    u8 buffer[MAP_POPUP_STRING_BUFFER_LENGTH];
+    struct Task *task;
+
+    if (OW_POPUP_GENERATION == GEN_5 || size == 0 || !FuncIsActiveTask(Task_MapNamePopUpWindow)
+     || GetMapNamePopUpWindowId() == WINDOW_NONE)
+        return FALSE;
+    task = &gTasks[gPopupTaskId];
+    if (task->tState != STATE_SLIDE_IN && task->tState != STATE_WAIT && task->tState != STATE_SLIDE_OUT
+     && task->tState != STATE_ERASE)
+        return FALSE;
+    if (CurrentBattlePyramidLocation() != PYRAMID_LOCATION_NONE)
+        StringCopy(buffer, sBattlePyramid_MapHeaderStrings[gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PYRAMID_TOP
+                                                           ? FRONTIER_STAGES_PER_CHALLENGE
+                                                           : gSaveBlock2Ptr->frontier.curChallengeBattleNum]);
+    else
+        GetPopUpMapName(buffer, &gMapHeader);
+    for (u32 i = 0; i < size; i++)
+    {
+        name[i] = i + 1 < size && i < sizeof(buffer) ? buffer[i] : EOS;
+        if (name[i] == EOS)
+            break;
+    }
+    *offset = task->tYOffset;
+    *offscreen = POPUP_OFFSCREEN_Y;
+    return TRUE;
+}
+#endif

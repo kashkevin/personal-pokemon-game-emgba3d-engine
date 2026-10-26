@@ -44,8 +44,7 @@ enum
     HIT_MESSAGE,
 };
 
-/* the design's wood and link-device colours (pause.js) */
-static const struct UiRamp sWood = {UI_HEX(0xECC08A), UI_HEX(0xD29C62), UI_HEX(0xA8703C), UI_HEX(0x4A2A12)};
+/* the design's link-device colours (pause.js; its wood: UiW_LocationSign) */
 #define LCD_LIGHT UI_HEX(0xC8E4A0)
 #define LCD_MID UI_HEX(0x9CC47C)
 #define LCD_DARK UI_HEX(0x2C4A2A)
@@ -402,24 +401,13 @@ bool32 NativeUiPause_TestNamed(u8 action)
         || (action == NATIVE_START_POKEMON && EntryLabel(&e) == sText_Pokemon && EntryHelp(&e) == sHelp_Pokemon);
 }
 
-/* the Emerald wooden location sign (PK.locationSign) */
+/* the Emerald wooden location sign (PK.locationSign), with the time */
 static void LocationSign(int x, int y)
 {
-    int w = 184, h = 34;
-    const int nails[4][2] = {{x + 4, y + 4}, {x + w - 6, y + 4}, {x + 4, y + h - 6}, {x + w - 6, y + h - 6}};
     char clock[16];
 
-    UiG_Paint(UiM_Rounded4(w, h, 3, 3, 3, 3), x, y, sWood.base,
-              &(struct UiPaint){sWood.ink, sWood.hi, sWood.lo, 0, 2, NULL, UI_NONE});
-    for (int i = 0; i < 4; i++)
-    {
-        UiG_Rect(nails[i][0], nails[i][1], 2, 2, sWood.ink);
-        UiG_Put(nails[i][0], nails[i][1], sWood.lo);
-    }
-    UiText_Draw(UI_FONT_NORMAL, x + 12, y + 8, sMapName, UI_HEX(0x402410), UI_HEX(0xECC08A), UI_ALIGN_LEFT, 0);
-    UiGfx_Icon("sun", x + w - 64, y + 10, 0);
     UiText_ToAscii(clock, sizeof(clock), sClock);
-    UiCaps_Draw(x + w - 10, y + 13, clock, UI_HEX(0x402410), UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_RIGHT, UI_NONE);
+    UiW_LocationSign(x, y, sMapName, clock);
 }
 
 /* the link device: the session's other players as the game knows them */

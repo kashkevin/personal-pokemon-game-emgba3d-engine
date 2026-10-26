@@ -4863,3 +4863,14 @@ u8 DioramaBattle_TransitionActive(void)
     return FuncIsActiveTask(Task_BattleTransition);
 }
 #endif
+
+#ifdef ENABLE_NATIVE_UI
+// The native PC UI (native_ui.c): the battle transition playing (B_TRANSITION_*: its task's data[1]), or
+// B_TRANSITION_COUNT with none.
+u8 BattleTransition_NativeUiPlaying(void)
+{
+    u8 taskId = FindTaskIdByFunc(Task_BattleTransition);
+
+    return taskId != TASK_NONE ? (u8)gTasks[taskId].data[1] : B_TRANSITION_COUNT;
+}
+#endif

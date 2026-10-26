@@ -12,8 +12,15 @@
 #include <SDL2/SDL_opengl.h>
 
 #include "global.h"
+#include "battle_main.h"
+#include "battle_transition.h"
 #include "gpu_regs.h"
+#include "main.h"
+#include "menu.h"
+#include "overworld.h"
 #include "palette.h"
+#include "script.h"
+#include "window.h"
 #include "native_ui/native_ui.h"
 #include "native_ui/ui_bench.h"
 #include "native_ui/ui_engine.h"
@@ -54,6 +61,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_SlotMachine,  /* the Game Corner's slot machines (the reels' own screen) */
     &gUiScreen_Roulette,     /* the Game Corner's roulette tables (the wheel and the board) */
     &gUiScreen_FieldText, /* the field's messages the screens above do not draw */
+    &gUiScreen_MapName,   /* the location pop-up, over the field */
     &gUiScreen_Notice,    /* last: only over the calm field */
 };
 
@@ -241,6 +249,62 @@ double NativeUi_FrameAlpha(void)
     return a < 0 ? 0 : a > 1 ? 1 : a;
 }
 
+/*
+ * PKMN_NATIVE_UI_AUDIT=1 (a test switch): what of the game's own GBA interface
+ * shows with no native screen over it, in the log when it changes ("Native UI
+ * audit: ..."): its text and menu windows on screen (id, size, place in
+ * tiles; the map name's pop-up marked), a battle transition playing
+ * (B_TRANSITION_*), the game's main callback when it is neither the field's
+ * nor a battle's (a screen of its own), and the field script last started.
+ * Addresses are the program's own (nm names them). For the UI audit's walks
+ * through the game (the owner's request of 2026-10-26: every place the old
+ * look stays).
+ */
+static void AuditUncovered(void)
+{
+    static int sOn = -1;
+    static char sLast[512];
+    char line[512];
+    size_t used = 0;
+    unsigned i;
+
+    if (sOn < 0)
+    {
+        const char *env = SDL_getenv("PKMN_NATIVE_UI_AUDIT");
+
+        sOn = env != NULL && strcmp(env, "1") == 0;
+    }
+    if (!sOn)
+        return;
+    line[0] = '\0';
+    if (sActive == NULL)
+    {
+        u8 popup = GetMapNamePopUpWindowId();
+        u8 transition = BattleTransition_NativeUiPlaying();
+
+        for (i = 0; i < WINDOWS_MAX && used + 48 < sizeof(line); i++)
+            if (gWindows[i].window.bg != 0xFF && Window_NativeUiShown(i))
+                used += (size_t)snprintf(line + used, sizeof(line) - used, " %s %u: %ux%u at %u,%u",
+                                         i == popup ? "popup" : "window", i, gWindows[i].window.width,
+                                         gWindows[i].window.height, gWindows[i].window.tilemapLeft,
+                                         gWindows[i].window.tilemapTop);
+        if (transition < B_TRANSITION_COUNT && used + 32 < sizeof(line))
+            used += (size_t)snprintf(line + used, sizeof(line) - used, " transition %u", transition);
+        if (gMain.callback2 != CB2_Overworld && gMain.callback2 != CB2_OverworldBasic
+         && gMain.callback2 != BattleMainCB2 && used + 32 < sizeof(line))
+            used += (size_t)snprintf(line + used, sizeof(line) - used, " screen %p", (void *)gMain.callback2);
+        if (used != 0 && ScriptContext_IsEnabled() && used + 32 < sizeof(line))
+            snprintf(line + used, sizeof(line) - used, " script %p", (const void *)ScriptContext_NativeUiStartedScript());
+    }
+    if (strcmp(line, sLast) == 0)
+        return;
+    if (line[0] != '\0')
+        SDL_Log("Native UI audit: frame %u, the game's own interface with no native screen:%s", sFrame, line);
+    else
+        SDL_Log("Native UI audit: frame %u, none (%s)", sFrame, sActive != NULL ? sActive->name : "nothing shown");
+    SDL_strlcpy(sLast, line, sizeof(sLast));
+}
+
 void NativeUi_CaptureFrame(void)
 {
     const struct UiScreen *found = NULL;
@@ -273,6 +337,7 @@ void NativeUi_CaptureFrame(void)
         /* a new screen starts with no queued presses from the old one */
         sPressCount = 0;
     }
+    AuditUncovered();
     if (sActive != NULL)
     {
         if (sActive->capture != NULL)
