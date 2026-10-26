@@ -55,6 +55,19 @@ bool DioramaSprite_BuildResolvedPose(const struct DioramaSceneSnapshot *snapshot
                                      uint16_t resolvedCount,
                                      const struct DioramaObjectSnapshot *object,
                                      struct DioramaSpritePose *pose);
+/*
+ * Up to this many game frames between two snapshots drawn one after the other
+ * are still drawn moving between them: a drawn frame catches up to five game
+ * frames after a slow one (sdl2.c), and the camera and the walkers snapped
+ * over any gap of more than one, a jolt after every slow frame and whenever
+ * the display's beat drifted against the game's (the owner's camera jitter
+ * when running, 2026-10-26).
+ */
+#define DIORAMA_INTERPOLATION_MAX_GAP 6
+/* How far between a drawn snapshot and the one drawn before it, gap game
+ * frames apart, a frame frameAlpha of the way past the last game frame
+ * stands: the game's states between them taken as on the line between. */
+float DioramaSprite_GapAlpha(uint64_t gap, float frameAlpha);
 bool DioramaSprite_CanInterpolate(const struct DioramaSceneSnapshot *previousSnapshot,
                                   const struct DioramaObjectSnapshot *previousObject,
                                    const struct DioramaSceneSnapshot *currentSnapshot,

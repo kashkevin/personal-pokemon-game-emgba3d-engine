@@ -33,6 +33,7 @@
 #include "diorama/props.h"
 #include "diorama/presentation_transition.h"
 #include "diorama/scene_snapshot.h"
+#include "diorama/sprite_frame.h"
 #include "diorama/terrain_mesh.h"
 #include "diorama/weather.h"
 #include "gba/defines.h"
@@ -1124,7 +1125,8 @@ static void GetCameraPosition(const struct DioramaSceneSnapshot *snapshot,
     *cameraX = currentX;
     *cameraZ = currentZ;
     if (hasPreviousSnapshot
-     && snapshot->sequence == previousSnapshot->sequence + 1
+     && snapshot->sequence > previousSnapshot->sequence
+     && snapshot->sequence - previousSnapshot->sequence <= DIORAMA_INTERPOLATION_MAX_GAP
      && snapshot->mapGeneration == previousSnapshot->mapGeneration
      && (snapshot->sceneKind == DIORAMA_SCENE_OVERWORLD_FREE
       || snapshot->sceneKind == DIORAMA_SCENE_OVERWORLD_SCRIPTED)
@@ -1143,8 +1145,11 @@ static void GetCameraPosition(const struct DioramaSceneSnapshot *snapshot,
         if (deltaX * deltaX + deltaZ * deltaZ
          <= CAMERA_TELEPORT_LIMIT * CAMERA_TELEPORT_LIMIT)
         {
-            *cameraX = previousX + deltaX * frameAlpha;
-            *cameraZ = previousZ + deltaZ * frameAlpha;
+            /* across a drawn frame's catch-up too, as the walkers (sprite_frame.h) */
+            float alpha = DioramaSprite_GapAlpha(snapshot->sequence - previousSnapshot->sequence, frameAlpha);
+
+            *cameraX = previousX + deltaX * alpha;
+            *cameraZ = previousZ + deltaZ * alpha;
         }
     }
 }

@@ -302,9 +302,23 @@ static void TestInterpolationDiscontinuities(void)
     current.mapPixelOffsetX = -15;
     CHECK(DioramaSprite_CanInterpolate(&previousSnapshot, &previous,
                                         &currentSnapshot, &current));
+    /* A drawn frame that caught up game frames still moves between them
+     * (DIORAMA_INTERPOLATION_MAX_GAP); past that, and backwards, it does not. */
     currentSnapshot.sequence = previousSnapshot.sequence + 2;
+    CHECK(DioramaSprite_CanInterpolate(&previousSnapshot, &previous,
+                                        &currentSnapshot, &current));
+    currentSnapshot.sequence = previousSnapshot.sequence + DIORAMA_INTERPOLATION_MAX_GAP + 1;
     CHECK(!DioramaSprite_CanInterpolate(&previousSnapshot, &previous,
                                          &currentSnapshot, &current));
+    currentSnapshot.sequence = previousSnapshot.sequence;
+    CHECK(!DioramaSprite_CanInterpolate(&previousSnapshot, &previous,
+                                         &currentSnapshot, &current));
+    CHECK(DioramaSprite_GapAlpha(1, 0.25f) == 0.25f);
+    CHECK(DioramaSprite_GapAlpha(2, 0.0f) == 0.5f);
+    CHECK(DioramaSprite_GapAlpha(2, 1.0f) == 1.0f);
+    CHECK(DioramaSprite_GapAlpha(4, 0.5f) == 0.875f);
+    CHECK(DioramaSprite_GapAlpha(DIORAMA_INTERPOLATION_MAX_GAP + 1, 0.25f) == 0.25f);
+    CHECK(DioramaSprite_GapAlpha(3, 2.0f) == 1.0f);
 }
 
 static void TestDepthOrder(void)

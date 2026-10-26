@@ -66,6 +66,7 @@ static uint16_t sPreviousResolvedCount;
 static uint32_t sDecodePixels[DIORAMA_SPRITE_MAX_PIXELS];
 static struct DioramaObjectMetrics sMetrics;
 static uint64_t sSequence;
+static uint64_t sDrawGap = 1; /* game frames between the last two snapshots synced (DioramaSprite_GapAlpha) */
 static uint32_t sMapGeneration;
 static uint8_t sItemCount;
 static bool sHasPreviousSnapshot;
@@ -872,6 +873,8 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
     for (i = 0; i < SPRITE_TEXTURE_CACHE_SIZE; i++)
         if (sTextureCache[i].occupied)
             sMetrics.cachedFrames++;
+    sDrawGap = sHasPreviousSnapshot && snapshot->sequence > sPreviousSnapshot.sequence
+             ? snapshot->sequence - sPreviousSnapshot.sequence : 1;
     sPreviousSnapshot = *snapshot;
     memcpy(sPreviousResolvedCells, resolvedCells,
            snapshot->visibleCellCount * sizeof(*sPreviousResolvedCells));
@@ -1210,8 +1213,7 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
 
     if (!sReady)
         return;
-    if (frameAlpha < 0.0f) frameAlpha = 0.0f;
-    if (frameAlpha > 1.0f) frameAlpha = 1.0f;
+    frameAlpha = DioramaSprite_GapAlpha(sDrawGap, frameAlpha);
     for (i = 0; i < sItemCount; i++)
     {
         poses[i] = sItems[i].interpolate
@@ -1391,8 +1393,7 @@ bool DioramaGLObjects_GetPlayerPose(float frameAlpha, float *x, float *groundY, 
 
     if (sPlayerItem < 0 || sPlayerItem >= sItemCount)
         return false;
-    if (frameAlpha < 0.0f) frameAlpha = 0.0f;
-    if (frameAlpha > 1.0f) frameAlpha = 1.0f;
+    frameAlpha = DioramaSprite_GapAlpha(sDrawGap, frameAlpha);
     pose = sItems[sPlayerItem].interpolate
          ? DioramaSprite_InterpolatePose(sItems[sPlayerItem].previousPose,
                                          sItems[sPlayerItem].currentPose, frameAlpha)

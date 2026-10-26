@@ -298,7 +298,8 @@ static bool CanInterpolate(const struct DioramaSceneSnapshot *previousSnapshot,
     if (previousSnapshot == NULL || previousObject == NULL
      || currentSnapshot == NULL || currentObject == NULL
      || previousSnapshot->mapGeneration != currentSnapshot->mapGeneration
-     || currentSnapshot->sequence != previousSnapshot->sequence + 1
+     || currentSnapshot->sequence <= previousSnapshot->sequence
+     || currentSnapshot->sequence - previousSnapshot->sequence > DIORAMA_INTERPOLATION_MAX_GAP
      || previousObject->localId != currentObject->localId
      || previousObject->mapNum != currentObject->mapNum
      || previousObject->mapGroup != currentObject->mapGroup
@@ -343,6 +344,15 @@ bool DioramaSprite_CanInterpolateResolved(
     return CanInterpolate(previousSnapshot, previousResolvedCells, previousResolvedCount,
                           previousObject, currentSnapshot, currentResolvedCells,
                           currentResolvedCount, currentObject);
+}
+
+float DioramaSprite_GapAlpha(uint64_t gap, float frameAlpha)
+{
+    if (frameAlpha < 0.0f) frameAlpha = 0.0f;
+    if (frameAlpha > 1.0f) frameAlpha = 1.0f;
+    if (gap <= 1 || gap > DIORAMA_INTERPOLATION_MAX_GAP)
+        return frameAlpha;
+    return ((float)(gap - 1) + frameAlpha) / (float)gap;
 }
 
 struct DioramaSpritePose DioramaSprite_InterpolatePose(struct DioramaSpritePose previous,
