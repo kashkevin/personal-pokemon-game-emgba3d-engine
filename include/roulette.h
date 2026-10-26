@@ -30,7 +30,8 @@ struct RouletteNativeState
     bool8 specialRate;
     bool8 waitingForKey;                       // a message waits for A or B
     u8 minBet;
-    s16 coins;
+    s16 coins;                                 // the table's credit
+    u32 wallet;                                // the Coin Case as it stands: the credit and the coins kept in reserve
     s16 payout;                                // still to count (RESULT)
     u8 ballsLeft;                              // of the round's six
     u8 cursor;                                 // the selection the cursor is on (BET)
@@ -49,6 +50,8 @@ struct RouletteNativeState
 };
 
 bool32 Roulette_NativeUiState(struct RouletteNativeState *out);
+// the table's question in the field waits for A or B on its own message (too few coins, the special rate)
+bool32 Roulette_NativeUiEntryWaits(void);
 #endif
 
 #endif // GUARD_ROULETTE_H

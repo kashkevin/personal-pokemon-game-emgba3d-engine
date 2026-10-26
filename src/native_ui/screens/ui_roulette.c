@@ -8,8 +8,9 @@
  * messages run as before, and every key reaches it unchanged; this screen
  * only draws what Roulette_NativeUiState says it shows - the wheel turning
  * with its twelve slots and the balls on it, the board with the squares hit
- * this round, the cursor or the bet, the multiplier, the balls left, CREDIT
- * and the payout counting, the table's messages and its YES / NO.
+ * this round, the cursor or the bet, the multiplier, the balls left, the
+ * player's COINS (the table's credit and the Coin Case's reserve) and the
+ * payout counting, the table's messages and its YES / NO.
  * Project-owned.
  */
 #include <math.h>
@@ -319,7 +320,9 @@ static void Board(int t)
                 snprintf(buf, sizeof(buf), "-");
             UiItems_BigCaps(GRID_X + 4, y + 14, buf, 3, UI_P_HP_YELLOW_0, UI_HEX(0x382008), UI_ALIGN_LEFT);
         }
-        Counter(GRID_X + 5 * CELL_W - 6 * 21, y, "CREDIT", sS.coins, 6);
+        /* the player's coins: the table's credit and what a big Coin Case keeps in reserve while it plays a stake (the
+         * credit alone read as lost coins: 30,000 coins showed 5,000) */
+        Counter(GRID_X + 5 * CELL_W - 6 * 21, y, "COINS", (long)sS.wallet, 6);
     }
 }
 
@@ -343,7 +346,8 @@ static void Bottom(int t)
 
         UiW_Hints(490, 309, a, 1, false, 8);
         UiW_Hints(490, 329, c, 1, false, 8);
-        UiW_YesNo(632, 296, sS.yesNoCursor, t, UI_ANCHOR_BOTTOMRIGHT, NULL);
+        /* in the panel: over the board it covered the coins */
+        UiW_YesNo(634, 352, sS.yesNoCursor, t, UI_ANCHOR_BOTTOMRIGHT, NULL);
     }
     else if (sS.phase == ROULETTE_NATIVE_BET && !sS.waitingForKey)
     {

@@ -44,6 +44,7 @@
 #define CAB_H 256
 
 static const u8 sText_Bet[] = _("Bet");
+static const u8 sText_Bet3[] = _("Bet 3");
 static const u8 sText_Spin[] = _("Spin");
 static const u8 sText_Stop[] = _("Stop");
 static const u8 sText_Quit[] = _("Quit");
@@ -56,7 +57,8 @@ static const u8 sText_Skip[] = _("Skip");
 #if CASINO_SLOT_COINS_PER_BET != 5
 #error "sText_BetLine names the bet: 5 COINS each, 15 for the three"
 #endif
-static const u8 sText_BetLine[] = _("Each bet is 5 COINS: DOWN adds up to 3, A spins.\nA with none in bets 3 (15 COINS).");
+/* the machine's controls (SlotTask_HandleBetInput): A spins only what is in; R puts in all three at once */
+static const u8 sText_BetLine[] = _("Each bet is 5 COINS: DOWN adds one, up to 3; A spins.\nR puts in all 3 at once (15 COINS).");
 static const u8 sText_SpinLine[] = _("The reels are turning. A stops them,\none after another.");
 static const u8 sText_LoseLine[] = _("No match this time.");
 static const u8 sText_QuitLine[] = _("Quit the game?");
@@ -341,7 +343,8 @@ static void Display(int t)
     UiG_Paint(UiM_Rounded4(w - 12, h - 12, 3, 3, 3, 3), x + 6, y + 6, plate,
               &(struct UiPaint){red.ink, UiMix(plate, red.base, 0.5), UI_NONE, 0, 0, NULL, UI_NONE});
     UiGfx_ItemIconScaled(ITEM_COIN_CASE, x + 14, y + 14, 1);
-    Counter(x + 48, y + 16, "CREDIT", sS.coins, 6);
+    /* the player's coins: the credit and the Coin Case's reserve while a big one plays a stake */
+    Counter(x + 48, y + 16, "COINS", (long)sS.wallet, 6);
     Counter(x + 48, y + 66, "PAYOUT", sS.payout, 6);
     /* the digital display: dark glass with lit caps */
     UiG_Paint(UiM_Rounded4(w - 28, 96, 4, 4, 4, 4), x + 14, y + 120, UI_HEX(0x181410),
@@ -471,11 +474,13 @@ static void Bottom(int t)
 
         UiW_Hints(490, 309, a, 1, false, 8);
         UiW_Hints(490, 329, c, 1, false, 8);
-        UiW_YesNo(632, 296, sS.quitCursor, t, UI_ANCHOR_BOTTOMRIGHT, NULL);
+        /* in the panel: over the cabinet it covered the machine's number */
+        UiW_YesNo(634, 352, sS.quitCursor, t, UI_ANCHOR_BOTTOMRIGHT, NULL);
     }
     else if (sS.phase == SLOT_NATIVE_BET)
     {
-        struct UiHintItem a[2] = {{UI_ACT_CONFIRM, sText_Spin}, {UI_ACT_SCROLL, sText_Bet}};
+        /* with none in, A does nothing: R bets all three */
+        struct UiHintItem a[2] = {{sS.bet != 0 ? UI_ACT_CONFIRM : UI_ACT_R, sS.bet != 0 ? sText_Spin : sText_Bet3}, {UI_ACT_SCROLL, sText_Bet}};
         struct UiHintItem c[2] = {{UI_ACT_CANCEL, sText_Quit}, {UI_ACT_SELECT, sText_Info}};
 
         UiW_Hints(490, 309, a, 2, false, 8);

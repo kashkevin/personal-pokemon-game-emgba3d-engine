@@ -8,25 +8,33 @@
  * pause menu keeps its help box. The 3D view shows the game's own message box
  * only while a line types (docs U12); this keeps every line up until the
  * script closes it. The engine keeps every line, rule and button: clicks and
- * the wheel queue its presses. Anything else on the field's window layer that
- * this does not draw (a money box, a list, a PokéNav call, rows a script
- * builds itself) keeps the game's picture. Project-owned.
+ * the wheel queue its presses. The money box and the coin box a script or a
+ * game shows with its question (a vending machine, the Safari Zone's fee, a
+ * roulette table's "Do you want to play?") are the design's money windows,
+ * with the wallet as it is now. Anything else on the field's window layer that
+ * this does not draw (a list, a PokéNav call, rows a script builds itself)
+ * keeps the game's picture. Project-owned.
  */
 #include <stdlib.h>
 #include <string.h>
 
 #include "global.h"
+#include "coins.h"
 #include "field_name_box.h"
 #include "main.h"
 #include "match_call.h"
 #include "menu.h"
+#include "money.h"
 #include "overworld.h"
+#include "palette.h"
+#include "roulette.h"
 #include "script.h"
 #include "string_util.h"
 #include "window.h"
 #include "native_ui/ui_draw.h"
 #include "native_ui/ui_engine.h"
 #include "native_ui/ui_field.h"
+#include "native_ui/ui_items.h"
 #include "native_ui/ui_screen.h"
 #include "native_ui/ui_text.h"
 #include "native_ui/ui_widgets.h"
@@ -52,6 +60,8 @@ static bool sMsgPrinting;
 static bool sWaiting;
 static bool sSign;
 static u8 sSpeaker[40];
+static bool sMoneyBox, sCoinBox;
+static u32 sMoney, sCoins;
 
 /* ---------------------------------------------------------------- shared with the PC's first menus */
 
@@ -82,17 +92,31 @@ void UiField_MessageBox(int t, int L, int R, int B, const u8 *msg, int printed, 
 
 /* ---------------------------------------------------------------- detection */
 
-/* the field's windows up besides the message box (the map's name, the name box apart) */
+/* the field's windows up besides the message box (the map's name and the name box apart, and the money and coin boxes,
+ * which this draws) */
 static int OtherWindows(void)
 {
     u8 popup = GetMapNamePopUpWindowId();
     u32 namebox = GetNameboxWindowId();
+    u8 money = Money_NativeUiBoxWindow(), coins = Coins_NativeUiBoxWindow();
     int n = 0;
 
     for (u32 i = 1; i < WINDOWS_MAX; i++)
-        if (i != popup && i != namebox && Window_NativeUiShown(i))
+        if (i != popup && i != namebox && i != money && i != coins && Window_NativeUiShown(i))
             n++;
     return n;
+}
+
+/* the script's menu up now; else the shared YES / NO a game's own question uses (DoYesNoFuncWithChoice: a roulette
+ * table's "Do you want to play?", an item's "Use it?"), which takes A, B and the cursor as a script's does */
+static void MenuState(struct NativeScriptMenu *m)
+{
+    if (ScriptMenu_NativeUiState(m) || !MenuHelpers_NativeUiYesNo())
+        return;
+    m->kind = NATIVE_SCRIPT_MENU_YES_NO;
+    m->ready = !gPaletteFade.active;
+    m->cursor = Menu_GetCursorPos();
+    m->count = 2;
 }
 
 static bool Detect(void)
@@ -101,7 +125,7 @@ static bool Detect(void)
 
     if (gMain.callback2 != CB2_Overworld || !Window_NativeUiShown(0) || IsMatchCallTaskActive())
         return false;
-    ScriptMenu_NativeUiState(&m);
+    MenuState(&m);
     /* rows a script builds itself are not listed: the game's picture */
     if (m.kind == NATIVE_SCRIPT_MENU_MULTICHOICE && m.count == 0)
         return false;
@@ -113,10 +137,11 @@ static void Capture(void)
 {
     bool8 active = FALSE;
 
-    ScriptMenu_NativeUiState(&sMenu);
+    MenuState(&sMenu);
     sHasMsg = TextPrinter_NativeUiWindowText(0, sMsg, sizeof(sMsg), &sMsgPrinted, &active);
     sMsgPrinting = sHasMsg && active;
-    sWaiting = sMenu.kind == NATIVE_SCRIPT_MENU_NONE && (Script_NativeUiWaitsForButton() || TextPrinter_NativeUiWindowWaiting(0));
+    sWaiting = sMenu.kind == NATIVE_SCRIPT_MENU_NONE
+            && (Script_NativeUiWaitsForButton() || TextPrinter_NativeUiWindowWaiting(0) || Roulette_NativeUiEntryWaits());
     sSign = gMsgIsSignPost;
     sSpeaker[0] = EOS;
     if (GetNameboxWindowId() != WINDOW_NONE && gSpeakerName != NULL)
@@ -127,6 +152,11 @@ static void Capture(void)
         StringCopyN(sSpeaker, name, sizeof(sSpeaker) - 1);
         sSpeaker[sizeof(sSpeaker) - 1] = EOS;
     }
+    /* the wallet as it is now (the game's boxes show it as last printed) */
+    sMoneyBox = Money_NativeUiBoxWindow() != WINDOW_NONE;
+    sCoinBox = Coins_NativeUiBoxWindow() != WINDOW_NONE;
+    sMoney = GetMoney(&gSaveBlock1Ptr->money);
+    sCoins = GetCoins();
 }
 
 /* ---------------------------------------------------------------- drawing */
@@ -170,6 +200,25 @@ static void Draw(int t)
     }
     UiField_MessageBox(t, L, R, B, sHasMsg ? sMsg : NULL, sMsgPrinting ? (int)sMsgPrinted : -1, sWaiting, band, h, n,
                        band->ink, HIT_MESSAGE);
+    if (sMoneyBox || sCoinBox)
+    {
+        /* the money window, then the coins under it (top left, where the game puts its boxes) */
+        u8 value[24];
+        int y = by + 8;
+
+        if (sMoneyBox)
+        {
+            UiItems_Money(value, sizeof(value), sMoney);
+            UiItems_MoneyBox(L + 8, y, 148, "MONEY", value, band->ink);
+            y += 26;
+        }
+        if (sCoinBox)
+        {
+            value[0] = EOS;
+            UiText_AppendNumber(value, sizeof(value), (long)sCoins, 1, true);
+            UiItems_MoneyBox(L + 8, y, 148, "COINS", value, band->ink);
+        }
+    }
     if (sMenu.kind == NATIVE_SCRIPT_MENU_YES_NO)
     {
         UiW_YesNo(R - 8, B - UI_FIELD_MENU_GAP, sMenu.cursor, t, UI_ANCHOR_BOTTOMRIGHT, NULL);
@@ -239,6 +288,19 @@ static enum UiPicture Picture(void)
     return UI_PICTURE_HIDE_BG0;
 }
 
+/* the money box's label sprite (the game's sign beside its box) goes with the box */
+static void HideObjects(uint32_t mask[4])
+{
+    const struct OamData *oam = (const struct OamData *)OAM;
+    u16 start, count;
+
+    if (!sMoneyBox || !Money_NativeUiLabelTiles(&start, &count))
+        return;
+    for (int i = 0; i < 128; i++)
+        if (oam[i].tileNum >= start && oam[i].tileNum < start + count)
+            mask[i >> 5] |= 1u << (i & 31);
+}
+
 const struct UiScreen gUiScreen_FieldText = {
     .name = "field_text",
     .detect = Detect,
@@ -248,5 +310,6 @@ const struct UiScreen gUiScreen_FieldText = {
     .wheel = Wheel,
     .ready = Ready,
     .picture = Picture,
+    .hideObjects = HideObjects,
 };
 #endif // ENABLE_NATIVE_UI

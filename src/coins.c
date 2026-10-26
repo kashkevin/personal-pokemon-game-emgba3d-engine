@@ -178,4 +178,11 @@ bool32 Coins_NativeUiBoxShown(void)
     return w->bg != 0xFF && w->width == COINS_BOX_WIDTH_TILES && w->height == 2 && w->baseBlock == 0x141
         && Window_NativeUiShown(sCoinsWindowId);
 }
+
+// The coin box's window while it is up (WINDOW_NONE otherwise): the field's messages (ui_field_text.c) draw the box
+// themselves and do not count its window as one they leave to the game's picture.
+u8 Coins_NativeUiBoxWindow(void)
+{
+    return Coins_NativeUiBoxShown() ? sCoinsWindowId : WINDOW_NONE;
+}
 #endif // ENABLE_NATIVE_UI

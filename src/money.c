@@ -207,3 +207,28 @@ void RemoveMoneyLabelObject(void)
 {
     DestroySpriteAndFreeResources(&gSprites[sMoneyLabelSpriteId]);
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI's field messages (src/native_ui/screens/ui_field_text.c) ask whether the money box (DrawMoneyBox,
+// showmoneybox) is up - its window still has the box's template and is on screen - and draw it themselves; the
+// label sprite's tiles let them hide the game's.
+u8 Money_NativeUiBoxWindow(void)
+{
+    const struct WindowTemplate *w;
+
+    if (sMoneyBoxWindowId >= WINDOWS_MAX)
+        return WINDOW_NONE;
+    w = &gWindows[sMoneyBoxWindowId].window;
+    if (w->bg != 0 || w->width != 10 || w->height != 2 || w->paletteNum != 15 || w->baseBlock != 8
+     || !Window_NativeUiShown(sMoneyBoxWindowId))
+        return WINDOW_NONE;
+    return sMoneyBoxWindowId;
+}
+
+bool32 Money_NativeUiLabelTiles(u16 *start, u16 *count)
+{
+    return Sprite_NativeUiTagTiles(MONEY_LABEL_TAG, start, count);
+}
+#endif // ENABLE_NATIVE_UI

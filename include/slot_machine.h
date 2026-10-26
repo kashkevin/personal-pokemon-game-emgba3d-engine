@@ -29,7 +29,8 @@ struct SlotMachineNativeState
 {
     u8 phase;
     u8 machineId;
-    s16 coins;
+    s16 coins;                                            // the machine's credit
+    u32 wallet;                                           // the Coin Case as it stands: credit and reserve
     s16 payout;
     s16 bet;
     u8 pikaPowerBolts;

@@ -8103,6 +8103,8 @@ bool32 SlotMachine_NativeUiState(struct SlotMachineNativeState *out)
     out->phase = NativeUiPhase();
     out->machineId = sSlotMachine->machineId;
     out->coins = sSlotMachine->coins;
+    // the Coin Case as it stands: the machine's credit and the coins a big Coin Case keeps in reserve (CoinWallet_BeginTable)
+    out->wallet = CoinWallet_Reserve() + (sSlotMachine->coins > 0 ? (u32)sSlotMachine->coins : 0);
     out->payout = sSlotMachine->payout;
     out->bet = sSlotMachine->bet;
     out->pikaPowerBolts = sSlotMachine->pikaPowerBolts;

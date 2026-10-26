@@ -81,6 +81,8 @@ enum
 extern const u8 MauvilleCity_GameCorner_EventScript_PrizeCornerTMs[];
 extern const u8 MauvilleCity_GameCorner_EventScript_PrizeCornerDolls[];
 extern const u8 MauvilleCity_GameCorner_EventScript_CoinsClerk[];
+extern const u8 MauvilleCity_GameCorner_EventScript_Buy500Coins[];
+extern const u8 MauvilleCity_GameCorner_EventScript_Buy5000Coins[];
 extern const u8 MauvilleCity_GameCorner_EventScript_ShinyCharmClerk[];
 
 enum
@@ -171,9 +173,29 @@ static bool OnGameCornerMap(void)
         && gSaveBlock1Ptr->location.mapNum == (MAP_MAUVILLE_CITY_GAME_CORNER & 0xFF);
 }
 
+/* the clerk whose script the field started last (its counter's own scripts count as the coin clerk's: the economy check
+ * starts them directly); CLERK_NONE for anything else - a roulette table's "Do you want to play?" shows the coin box too
+ * (PlayRoulette), and was taken for a counter: the PRIZE CORNER with an empty board, or after buying coins the COIN
+ * COUNTER, over the table's question (the owner, 2026-10-26) */
+static u8 StartedClerk(void)
+{
+    const u8 *script = ScriptContext_NativeUiStartedScript();
+
+    if (script == MauvilleCity_GameCorner_EventScript_PrizeCornerTMs)
+        return CLERK_TMS;
+    if (script == MauvilleCity_GameCorner_EventScript_PrizeCornerDolls)
+        return CLERK_DOLLS;
+    if (script == MauvilleCity_GameCorner_EventScript_CoinsClerk || script == MauvilleCity_GameCorner_EventScript_Buy500Coins
+     || script == MauvilleCity_GameCorner_EventScript_Buy5000Coins)
+        return CLERK_COINS;
+    if (script == MauvilleCity_GameCorner_EventScript_ShinyCharmClerk)
+        return CLERK_CHARM;
+    return CLERK_NONE;
+}
+
 static bool Detect(void)
 {
-    return gMain.callback2 == CB2_Overworld && OnGameCornerMap() && Coins_NativeUiBoxShown();
+    return gMain.callback2 == CB2_Overworld && OnGameCornerMap() && Coins_NativeUiBoxShown() && StartedClerk() != CLERK_NONE;
 }
 
 /* ---------------------------------------------------------------- the engine's rows */
@@ -352,24 +374,11 @@ static u8 ListClerk(u8 multichoiceId)
     return CLERK_NONE;
 }
 
-/* the clerk talked to: the selected object's script (else the list up) */
+/* the clerk talked to: the script the field started (the selected object stays the last person talked to after a sign
+ * or a table, so it is not asked) */
 static u8 TalkedClerk(void)
 {
-    const u8 *script = NULL;
-
-    if (gSelectedObjectEvent < OBJECT_EVENTS_COUNT && gObjectEvents[gSelectedObjectEvent].active)
-        script = GetObjectEventScriptPointerByObjectEventId(gSelectedObjectEvent);
-    if (script == MauvilleCity_GameCorner_EventScript_PrizeCornerTMs)
-        return CLERK_TMS;
-    if (script == MauvilleCity_GameCorner_EventScript_PrizeCornerDolls)
-        return CLERK_DOLLS;
-    if (script == MauvilleCity_GameCorner_EventScript_CoinsClerk)
-        return CLERK_COINS;
-    if (script == MauvilleCity_GameCorner_EventScript_ShinyCharmClerk)
-        return CLERK_CHARM;
-    if (sMenu.kind == NATIVE_SCRIPT_MENU_MULTICHOICE)
-        return ListClerk(sMenu.multichoiceId);
-    return sClerk;
+    return StartedClerk();
 }
 
 /* the clerk's own list is up */

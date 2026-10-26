@@ -4875,6 +4875,9 @@ bool32 Roulette_NativeUiState(struct RouletteNativeState *out)
     out->specialRate = sRoulette->isSpecialRate;
     out->minBet = sRoulette->minBet;
     out->coins = task->tCoins;
+    // the table plays with a stake of a big Coin Case (CoinWallet_BeginTable): the rest, and winnings past the credit's
+    // 9,999, wait in reserve; leaving puts both back (ExitRoulette), so the Coin Case is their sum all along
+    out->wallet = CoinWallet_Reserve() + (task->tCoins > 0 ? (u32)task->tCoins : 0);
     out->payout = task->func == Task_GivePayout ? task->data[1] : 0;
     out->ballsLeft = task->tBallNum < BALLS_PER_ROUND ? BALLS_PER_ROUND - task->tBallNum : 0;
     out->cursor = task->tSelectionId;
@@ -4903,5 +4906,12 @@ bool32 Roulette_NativeUiState(struct RouletteNativeState *out)
     out->message = sNativeMessage;
     out->yesNoCursor = Menu_GetCursorPos();
     return TRUE;
+}
+
+// The table's question in the field (PlayRoulette) waits for A or B on a message of its own task - too few coins, or the
+// special rate's notice - not a script's: the field's messages (ui_field_text.c) show it waiting.
+bool32 Roulette_NativeUiEntryWaits(void)
+{
+    return FuncIsActiveTask(Task_NotEnoughForMinBet) || FuncIsActiveTask(Task_PrintMinBet);
 }
 #endif

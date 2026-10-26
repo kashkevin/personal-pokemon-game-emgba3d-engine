@@ -312,6 +312,10 @@ void ScriptContext_SetupScript(const u8 *ptr)
     extern u32 gDioramaBattleEnvTestScriptStarts;
     gDioramaBattleEnvTestScriptStarts++;    // test builds only: the plan runner sees a script that ends inside a frame
 #endif
+#ifdef ENABLE_NATIVE_UI
+    extern const u8 *gNativeUiStartedScript;
+    gNativeUiStartedScript = ptr;   // the native PC UI: which script the field started last (ScriptContext_NativeUiStartedScript)
+#endif
 #line 307 // gba-line
     InitScriptContext(&sGlobalScriptContext, gScriptCmdTable, gScriptCmdTableEnd);
     SetupBytecodeScript(&sGlobalScriptContext, ptr);
@@ -770,6 +774,15 @@ u8 (*ScriptContext_NativeUiWaitFunc(void))(void)
     if (sGlobalScriptContextStatus == CONTEXT_SHUTDOWN || sGlobalScriptContext.mode != SCRIPT_MODE_NATIVE)
         return NULL;
     return sGlobalScriptContext.nativePtr;
+}
+
+// The script the field started last (ScriptContext_SetupScript: a person, a sign, a step on a trigger, a native caller):
+// the Game Corner's counters (ui_game_corner.c) are up only for the clerk talked to, not for every coin box on the map.
+const u8 *gNativeUiStartedScript;
+
+const u8 *ScriptContext_NativeUiStartedScript(void)
+{
+    return gNativeUiStartedScript;
 }
 #endif // ENABLE_NATIVE_UI
 

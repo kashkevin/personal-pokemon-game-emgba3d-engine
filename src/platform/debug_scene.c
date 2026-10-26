@@ -403,7 +403,23 @@ static void DialogTick(void)
         sDialog.at = at > 0 ? (unsigned)at : 0;
     }
     if (sDialog.which < 0)
+    {
+        // PKMN_DEBUG_SETUP with no script (the casino checks, 2026-10-26): the wallet and bag once the field is up, then the
+        // econ lines whenever they change (also inside the casino's games)
+        static bool sSetupDone;
+
+        if (SDL_getenv("PKMN_DEBUG_SETUP") == NULL || gSaveBlock1Ptr == NULL)
+            return;
+        if (!sSetupDone)
+        {
+            if (gMain.callback2 != CB2_Overworld)
+                return;
+            sSetupDone = true;
+            EconSetup();
+        }
+        EconLog();
         return;
+    }
     if (!sDialog.started)
     {
         static unsigned settled;

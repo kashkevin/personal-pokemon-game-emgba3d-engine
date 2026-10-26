@@ -842,8 +842,15 @@ bool32 ScriptMenu_NativeUiState(struct NativeScriptMenu *out);
 u32 ScriptMenu_NativeUiList(u32 multichoiceId, const u8 **labels, u32 max);
 /* the coin box (showcoinsbox) is up */
 bool32 Coins_NativeUiBoxShown(void);
+/* the coin box's window while it is up (WINDOW_NONE: not up) */
+u8 Coins_NativeUiBoxWindow(void);
+/* money.c: the money box's window (showmoneybox) while it is up (WINDOW_NONE: not up), and its label sprite's tiles */
+u8 Money_NativeUiBoxWindow(void);
+bool32 Money_NativeUiLabelTiles(u16 *start, u16 *count);
 /* script.c: the native function the field's script runs now (NULL: none) */
 u8 (*ScriptContext_NativeUiWaitFunc(void))(void);
+/* script.c: the script the field started last (ScriptContext_SetupScript; NULL: none yet) */
+const u8 *ScriptContext_NativeUiStartedScript(void);
 /* scrcmd.c: the field's script waits for A or B (a finished msgbox) */
 bool32 Script_NativeUiWaitsForButton(void);
 /* event_object_movement.c: a field sprite palette by its tag (NULL: none) */
