@@ -1273,6 +1273,53 @@ static void UpdateCamera(const struct DioramaSceneSnapshot *snapshot, float rawX
     sCameraLastDrawn = now;
 }
 
+/*
+ * What this player's camera sees, in runtime.log when it changes (the camera's
+ * mode, zoom or tilt, the window, going indoors): how far ahead, behind and to
+ * the sides on level ground, against the cells that hold full detail and the
+ * haze at their edge (scene_snapshot.h). The owner's render-distance report of
+ * 2026-10-26 (seen by one player only) came from these settings: the zoom and
+ * tilt are kept per player (pokeemerald.cfg), a wide window sees further to
+ * the sides, and the effects quality setting turned the distant scenery and
+ * its haze on or off.
+ */
+static void LogView(int sceneWidth, int sceneHeight, float aspectCorrection)
+{
+    static int sLogged[6] = {-1, 0, 0, 0, 0, 0};
+    enum DioramaCameraMode mode = DioramaCamera_GetMode();
+    struct DioramaCameraReach reach;
+    int zoom;
+    int tilt;
+    int key[6];
+    float ahead = DIORAMA_GRID_HEIGHT / 2 + 0.5f + DIORAMA_GRID_FORWARD;
+    float behind = DIORAMA_GRID_HEIGHT / 2 + 0.5f - DIORAMA_GRID_FORWARD;
+    float side = DIORAMA_GRID_WIDTH / 2 + 0.5f;
+    float hazeStart = DIORAMA_HAZE_END - DIORAMA_HAZE_BAND;
+
+    DioramaCamera_GetSteps(mode, &zoom, &tilt);
+    key[0] = (int)mode;
+    key[1] = zoom;
+    key[2] = tilt;
+    key[3] = sceneWidth;
+    key[4] = sceneHeight;
+    key[5] = (int)lroundf(sCameraView.extent * 8.0f) * 1000 + (int)lroundf(sCameraView.pitch * 1000.0f);
+    if (memcmp(key, sLogged, sizeof(key)) == 0)
+        return;
+    memcpy(sLogged, key, sizeof(key));
+    DioramaCamera_GroundReach(&sCameraView, DIORAMA_OVERWORLD_SCREEN_OFFSET, aspectCorrection, 0.0f, &reach);
+    SDL_Log("Diorama: view: %s camera, zoom %d, tilt %d (%.0f degrees, %.1f tiles at the player), scene %dx%d: "
+            "sees %.1f tiles ahead, %.1f behind, %.1f to the sides on level ground; full detail %.0f ahead, %.0f "
+            "behind, %.0f each side, the haze from %.1f, %.1f, %.1f%s%s",
+            mode == DIORAMA_CAMERA_ADVENTURE ? "adventure" : (mode == DIORAMA_CAMERA_DIORAMA ? "diorama" : "photo"),
+            zoom, tilt, sCameraView.pitch * 180.0f / 3.14159265f, sCameraView.extent, sceneWidth, sceneHeight,
+            reach.ahead >= DIORAMA_CAMERA_REACH_HORIZON ? 9999.0f : reach.ahead, reach.behind,
+            reach.side >= DIORAMA_CAMERA_REACH_HORIZON ? 9999.0f : reach.side, ahead, behind, side,
+            hazeStart + DIORAMA_GRID_FORWARD, hazeStart - DIORAMA_GRID_FORWARD, hazeStart,
+            DioramaGLTerrain_FarShown() ? " (distant scenery on)" : "",
+            reach.ahead > hazeStart + DIORAMA_GRID_FORWARD || reach.behind > hazeStart - DIORAMA_GRID_FORWARD
+             || reach.side > hazeStart ? "; the haze shows at the picture's edge" : "");
+}
+
 /* The field frame's eye for the shaders (terrain_mesh.h). */
 static void ApplyCameraRig(float aspectCorrection)
 {
@@ -1926,6 +1973,8 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         cameraPitch = sCameraView.pitch;
         cameraFocalLength = sCameraView.focalLength;
         ApplyCameraRig(aspectCorrection);
+        if (sSurveyView < 0)
+            LogView(sceneWidth, sceneHeight, aspectCorrection);
         // This frame's weather light (gl_light.h), the sky and the fog at the
         // scene's edge, the sun's depth map (gl_shadow.h), then the lit scene.
         DioramaGLLight_Update(&sRenderedSceneSnapshot, !sTerrainDebug);
@@ -1941,17 +1990,19 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
             bool outdoors = SkyColour(&sRenderedSceneSnapshot, sky);
 
             /* Outdoors the cells fade into the sky's haze before they end, and
-             * the picture past them is that colour: no board's edge. */
-            /* With distant scenery (far_field.h) the haze closes in at its
-             * end instead of the scene's. */
-            float fogEnd = DioramaGLTerrain_FarShown() ? DIORAMA_FAR_RADIUS - 1.0f
-                                                       : DIORAMA_GRID_WIDTH / 2 - 1.0f;
+             * the picture past them is that colour: no board's edge. Their
+             * middle stands DIORAMA_GRID_FORWARD rows north of the player, so
+             * the haze is further ahead than behind (scene_snapshot.h). */
+            /* With distant scenery (far_field.h, PKMN_DIORAMA_FAR=1) the haze
+             * closes in at its end instead of the scene's. */
+            float fogEnd = DioramaGLTerrain_FarShown() ? DIORAMA_FAR_RADIUS - 1.0f : DIORAMA_HAZE_END;
 
             DioramaGLLight_SetEdgeFog(outdoors && sSurveyView < 0,
                                       /* cell (x, y)'s centre is (x, -y) in the scene */
                                       (float)(sRenderedSceneSnapshot.gridOriginX + DIORAMA_GRID_WIDTH / 2),
                                       -(float)(sRenderedSceneSnapshot.gridOriginY + DIORAMA_GRID_HEIGHT / 2),
-                                      fogEnd - (DioramaGLTerrain_FarShown() ? 17.0f : 4.5f), fogEnd, sky);
+                                      fogEnd - (DioramaGLTerrain_FarShown() ? 17.0f : DIORAMA_HAZE_BAND), fogEnd,
+                                      sky);
             glEnable(GL_SCISSOR_TEST);
             glScissor(0, 0, sceneWidth, sceneHeight);
             glClearColor(sky[0], sky[1], sky[2], 1.0f);
@@ -2314,13 +2365,12 @@ void DioramaGL_DrawBattleWorld(float cameraX, float cameraZ, float pitch, float 
     glViewport(0, 0, outputWidth, outputHeight);
     if (outdoors)
     {
-        float fogEnd = DioramaGLTerrain_FarShown() ? DIORAMA_FAR_RADIUS - 1.0f
-                                                   : DIORAMA_GRID_WIDTH / 2 - 1.0f;
+        float fogEnd = DioramaGLTerrain_FarShown() ? DIORAMA_FAR_RADIUS - 1.0f : DIORAMA_HAZE_END;
 
         DioramaGLLight_SetEdgeFog(true,
                                   (float)(sRenderedSceneSnapshot.gridOriginX + DIORAMA_GRID_WIDTH / 2),
                                   -(float)(sRenderedSceneSnapshot.gridOriginY + DIORAMA_GRID_HEIGHT / 2),
-                                  fogEnd - (DioramaGLTerrain_FarShown() ? 17.0f : 4.5f), fogEnd, sky);
+                                  fogEnd - (DioramaGLTerrain_FarShown() ? 17.0f : DIORAMA_HAZE_BAND), fogEnd, sky);
     }
     // The street lamps and lit windows (gl_lamps.h) round the stage, as the
     // field lights them (this pass only).

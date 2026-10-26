@@ -586,7 +586,9 @@ static uint16_t CellLayoutId(const struct DioramaSceneSnapshot *snapshot,
 extern const struct MapLayout *const gMapLayouts[];
 
 #define WATER_LEVEL_NONE INT8_MIN
-#define WATER_LEVEL_CACHE 8
+/* the layouts the cells come from at once - the map, its neighbours and the
+ * maps past them (scene_snapshot.c TryCopySecondMapCell) - with room over */
+#define WATER_LEVEL_CACHE 16
 
 struct WaterLevels
 {

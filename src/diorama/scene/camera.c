@@ -217,6 +217,45 @@ float DioramaCamera_FixedEyeFocalLength(const struct DioramaCameraView *view)
     return 160.0f * depth / view->extent;
 }
 
+/* Where the picture's edge row (clipY / depth = edge) meets the ground: the
+ * shaders' depth = H sin + (z + D) cos and vertical = -H cos + (z + D) sin with
+ * vertical * 2 focal / 160 = (edge - screenOffsetY) * depth, solved for z. */
+static bool EdgeOnGround(const struct DioramaCameraView *view, float screenOffsetY, float edge, float drop,
+                         float *z, float *depth)
+{
+    float pitchSin = sinf(view->pitch);
+    float pitchCos = cosf(view->pitch);
+    float eye = view->height - view->groundY + drop; /* the eye over that ground */
+    float slope = (edge - screenOffsetY) * 80.0f / view->focalLength;
+    float lean = pitchSin - slope * pitchCos;
+    float along;
+
+    if (lean <= 1.0e-4f)
+        return false;
+    along = eye * (pitchCos + slope * pitchSin) / lean; /* z + D */
+    *z = along - view->distance;
+    *depth = eye * pitchSin + along * pitchCos;
+    return true;
+}
+
+void DioramaCamera_GroundReach(const struct DioramaCameraView *view, float screenOffsetY, float aspectCorrection,
+                               float drop, struct DioramaCameraReach *reach)
+{
+    float z;
+    float depth;
+
+    reach->ahead = reach->side = DIORAMA_CAMERA_REACH_HORIZON;
+    reach->behind = 0.0f;
+    if (EdgeOnGround(view, screenOffsetY, 1.0f, drop, &z, &depth))
+    {
+        reach->ahead = z;
+        /* the top corners: clipX = x 2 focal / 240 aspect = +-depth */
+        reach->side = depth * 120.0f / (view->focalLength * (aspectCorrection > 0.0f ? aspectCorrection : 1.0f));
+    }
+    if (EdgeOnGround(view, screenOffsetY, -1.0f, drop, &z, &depth))
+        reach->behind = -z;
+}
+
 void DioramaCamera_Update(const struct DioramaCameraInput *input, struct DioramaCameraView *view)
 {
     enum DioramaCameraMode mode = sMode;

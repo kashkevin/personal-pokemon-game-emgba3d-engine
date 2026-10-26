@@ -13,7 +13,6 @@
 #include "diorama/gl_grade.h"
 #include "diorama/gl_lamps.h"
 #include "diorama/gl_light.h"
-#include "diorama/gl_quality.h"
 #include "diorama/gl_shadow.h"
 #include "diorama/gl_target.h"
 #include "diorama/gl_terrain_renderer.h"
@@ -1988,13 +1987,15 @@ static bool FarBuildingHeight(uint16_t layoutId, int x, int y, float *top)
     return DioramaBuildings_CellAt(layoutId, x, y, &ground, &quarters, top);
 }
 
-/* The distant scenery for a snapshot: drawn with the effects quality on
- * (gl_quality.h), outdoors (the snapshot has far blocks only there). */
+/* The distant scenery for a snapshot: outdoors (the snapshot has far blocks
+ * only there) and only with PKMN_DIORAMA_FAR=1 (scene_snapshot.h). Not tied to
+ * a quality setting since 2026-10-26: the effects setting turned it off, and
+ * with it moved the haze, so players saw to different distances. */
 static void SyncFar(const struct DioramaSceneSnapshot *snapshot)
 {
     bool complete;
 
-    sFarShown = snapshot->farOn && DioramaGLQuality_Effects();
+    sFarShown = snapshot->farOn;
     if (!sFarShown)
         return;
     if (sFarBuilt && snapshot->farGeneration == sFarGeneration
@@ -2326,11 +2327,12 @@ static struct DioramaTerrainBounds ChunkBounds(const struct GLTerrainChunk *chun
 }
 
 /* Whether a chunk's rebuild cannot wait: near the player or on screen. */
-/* Within TERRAIN_NEAR_CELLS of the grid's middle (the player). */
+/* Within TERRAIN_NEAR_CELLS of the player (the camera's cell: the grid's middle
+ * stands DIORAMA_GRID_FORWARD rows north of it). */
 static bool ChunkNear(const struct DioramaSceneSnapshot *snapshot, int chunkX, int chunkY)
 {
-    int centreX = snapshot->gridOriginX + DIORAMA_GRID_WIDTH / 2;
-    int centreY = snapshot->gridOriginY + DIORAMA_GRID_HEIGHT / 2;
+    int centreX = snapshot->cameraMapX;
+    int centreY = snapshot->cameraMapY;
     int middleX = chunkX * DIORAMA_TERRAIN_CHUNK_SIZE + DIORAMA_TERRAIN_CHUNK_SIZE / 2;
     int middleY = chunkY * DIORAMA_TERRAIN_CHUNK_SIZE + DIORAMA_TERRAIN_CHUNK_SIZE / 2;
 
@@ -2835,8 +2837,8 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
         unsigned count = 0;
         unsigned offscreen = 0;
         unsigned n;
-        int centreX = snapshot->gridOriginX + DIORAMA_GRID_WIDTH / 2;
-        int centreY = snapshot->gridOriginY + DIORAMA_GRID_HEIGHT / 2;
+        int centreX = snapshot->cameraMapX;
+        int centreY = snapshot->cameraMapY;
 
         for (chunkY = minChunkY; chunkY <= maxChunkY; chunkY++)
             for (chunkX = minChunkX; chunkX <= maxChunkX && count < TERRAIN_GRID_CHUNKS; chunkX++)

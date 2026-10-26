@@ -95,4 +95,23 @@ void DioramaCamera_Frame(float pitch, float fovDegrees, float extent, float grou
  * still draws with that eye (a 3D battle's glide from the field's view). */
 float DioramaCamera_FixedEyeFocalLength(const struct DioramaCameraView *view);
 
+/*
+ * How far a view sees of level ground `drop` tiles under the target's, in the
+ * scene shaders' projection with the rig's screenOffsetY and aspectCorrection
+ * (terrain_mesh.h): tiles north of the target at the top of the picture
+ * (ahead), south of it at the bottom (behind), and east or west of it at the
+ * top corners (side). A view that sees over the horizon reaches
+ * DIORAMA_CAMERA_REACH_HORIZON. For the scene's cells (scene_snapshot.h
+ * DIORAMA_GRID_FORWARD) and the log of what a player's camera sees.
+ */
+#define DIORAMA_CAMERA_REACH_HORIZON 1.0e6f
+struct DioramaCameraReach
+{
+    float ahead;
+    float behind;
+    float side;
+};
+void DioramaCamera_GroundReach(const struct DioramaCameraView *view, float screenOffsetY, float aspectCorrection,
+                               float drop, struct DioramaCameraReach *reach);
+
 #endif

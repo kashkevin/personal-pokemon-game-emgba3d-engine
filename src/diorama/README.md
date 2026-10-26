@@ -135,8 +135,19 @@ tilesets are unchanged.
   24 tiles) and Photo (F9: the game stands still, the camera moves freely). One
   rig (`DioramaCameraRig`) feeds every scene shader. F12 writes a picture
   (`src/platform/png_write.c`).
-* `scene_snapshot.h`: the scene is 49 x 49 cells (33 x 33 before), and outdoors
-  its edge fades into the sky's colour (`gl_light.c`) instead of the dark.
+* `scene_snapshot.h`: the scene is 81 x 81 cells (49 x 49 from the graphics
+  overhaul, 33 x 33 before), and outdoors its edge fades into the sky's colour
+  (`gl_light.c`) instead of the dark. Since the owner's render-distance report
+  (2026-10-26) the cells stand `DIORAMA_GRID_FORWARD` (12) rows north of the
+  player - the camera always looks north: 28 rows behind, 52 ahead - and the
+  haze (`DIORAMA_HAZE_END`, `DIORAMA_HAZE_BAND`) is the same at every quality
+  setting. What a player's camera sees is in runtime.log ("Diorama: view: ...",
+  `gl_compositor.c` `LogView`, from `camera.c` `DioramaCamera_GroundReach`);
+  `test_camera.c` checks that every Adventure and Diorama zoom and tilt sees
+  level ground within the cells on a window up to 16:9. Cells of the next map
+  but one (Oldale seen from Littleroot) come from that map's own layout
+  (`scene_snapshot.c` `TryCopySecondMapCell`), after the map's own neighbours
+  have their tile pages; before they were the map's border block.
 * `gl/gl_object_renderer.c` (`HasSilhouette`, draw mode 5): a player (local or
   remote) or follower hidden behind a building or a tree is drawn as a
   see-through blue outline (depth test reversed, a small depth margin so the
@@ -167,17 +178,19 @@ tilesets are unchanged.
   tiles as before.
 * Distant scenery (`scene_snapshot.h` `DioramaFarBlock`, `scene_snapshot.c`
   `CopyFar`; `terrain/far_field.c`, `include/diorama/far_field.h`;
-  `rules.c` `DioramaRules_StaticHeights`): past the 49 x 49 cells, the world
-  out to 48 tiles in blocks of 2 x 2 cells on even map coordinates - the map,
+  `rules.c` `DioramaRules_StaticHeights`): past the cells, the world
+  out to 55 tiles in blocks of 2 x 2 cells on even map coordinates - the map,
   its connected maps and the maps connected to those, the border block
   beyond - each block a column as high as the rules make one of its cells (an
   obstacle's if it has one; a tree at least a canopy's height, a little
   uneven), coloured with the average of that metatile's art (worked out once
   per tileset on the game thread) and faded along the palette line like the
   voxel trees. Outdoors only (towns, cities, routes); the edge fog then closes
-  in from 30 to 47 tiles instead of 18.5-23. One vertex buffer, rebuilt when the
-  camera's cell changes. Off with the effects quality off or
-  `PKMN_DIORAMA_FAR=0`.
+  in from 37 to 54 tiles of the cells' middle instead of 34.5-39. One vertex
+  buffer, rebuilt when the camera's cell changes. Off since 2026-10-26 unless
+  `PKMN_DIORAMA_FAR=1`: its flat blocks past the full detail were the owner's
+  render-distance report, and the effects quality setting, which turned it off,
+  changed how far one player saw from another.
 * World detail objects (phase 2; `include/diorama/props.h`, `scene/props.c`,
   `gl/gl_props.c`, `include/diorama/gl_props.h`; tools in `tools/diorama_objects`):
   the small things the map art paints flat stand up in 3D from their own

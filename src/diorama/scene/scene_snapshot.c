@@ -521,6 +521,109 @@ static bool CellChanged(const struct DioramaSceneSnapshot *snapshot, int x, int 
     return original != now && !SameObject(original, now);
 }
 
+static void ToConnectedMap(const struct MapConnection *connection, const struct MapLayout *from,
+                           const struct MapLayout *to, s32 x, s32 y, s32 *toX, s32 *toY)
+{
+    switch (connection->direction)
+    {
+    case CONNECTION_NORTH: *toX = x - connection->offset; *toY = y + to->height; break;
+    case CONNECTION_SOUTH: *toX = x - connection->offset; *toY = y - from->height; break;
+    case CONNECTION_WEST: *toX = x + to->width; *toY = y - connection->offset; break;
+    case CONNECTION_EAST: *toX = x - from->width; *toY = y - connection->offset; break;
+    default: *toX = -100000; *toY = -100000; break;
+    }
+}
+
+/*
+ * A map connected to one of the map's connections - the next map but one, Oldale seen from Littleroot past Route 101 -
+ * at (x, y) of the map's own layout: its header, the connection that leads to it from the map between, and the cell's
+ * coordinates on its layout. NULL: none there.
+ */
+static const struct MapHeader *FindSecondMap(s32 x, s32 y, const struct MapConnection **via, s32 *x2, s32 *y2)
+{
+    const struct MapLayout *layout = gMapHeader.mapLayout;
+    int i;
+
+    if (gMapHeader.connections == NULL || layout == NULL)
+        return NULL;
+    for (i = 0; i < gMapHeader.connections->count; i++)
+    {
+        const struct MapConnection *first = &gMapHeader.connections->connections[i];
+        const struct MapHeader *header;
+        s32 x1;
+        s32 y1;
+        int k;
+
+        if (first->direction == CONNECTION_DIVE || first->direction == CONNECTION_EMERGE)
+            continue;
+        header = GetMapHeaderFromConnection(first);
+        if (header == NULL || header->mapLayout == NULL || header->connections == NULL)
+            continue;
+        ToConnectedMap(first, layout, header->mapLayout, x, y, &x1, &y1);
+        for (k = 0; k < header->connections->count; k++)
+        {
+            const struct MapConnection *second = &header->connections->connections[k];
+            const struct MapHeader *farHeader; /* not "far": a macro on Windows */
+
+            if (second->direction == CONNECTION_DIVE || second->direction == CONNECTION_EMERGE
+             || (second->mapGroup == gSaveBlock1Ptr->location.mapGroup
+              && second->mapNum == gSaveBlock1Ptr->location.mapNum))
+                continue;
+            farHeader = GetMapHeaderFromConnection(second);
+            if (farHeader == NULL || farHeader->mapLayout == NULL || farHeader->mapLayout->map == NULL)
+                continue;
+            ToConnectedMap(second, header->mapLayout, farHeader->mapLayout, x1, y1, x2, y2);
+            /* on the connection's side of the map (as GetMapConnectionAtPos) */
+            if ((second->direction == CONNECTION_NORTH && y1 >= 0)
+             || (second->direction == CONNECTION_SOUTH && y1 < header->mapLayout->height)
+             || (second->direction == CONNECTION_WEST && x1 >= 0)
+             || (second->direction == CONNECTION_EAST && x1 < header->mapLayout->width))
+                continue;
+            if (*x2 < 0 || *y2 < 0 || *x2 >= farHeader->mapLayout->width || *y2 >= farHeader->mapLayout->height)
+                continue;
+            *via = second;
+            return farHeader;
+        }
+    }
+    return NULL;
+}
+
+/* A neighbouring map's cell from its layout's entry: drawn with the map's own tiles, or from a page of the
+ * neighbour's (scene_snapshot.h), or not at all (false: border tiles) when its tilesets allow neither. */
+static bool CopyNeighbourCell(struct DioramaSceneSnapshot *snapshot, const struct MapHeader *header,
+                              u8 mapGroup, u8 mapNum, int16_t x, int16_t y, u16 entry,
+                              struct DioramaCellSnapshot *cell)
+{
+    const struct MapLayout *layout = header->mapLayout;
+    u8 page = 0;
+
+    if (layout->primaryTileset != gMapHeader.mapLayout->primaryTileset
+     || layout->isFrlg != gMapHeader.mapLayout->isFrlg)
+        return false;
+    /* Another secondary tileset: drawn from a page of the neighbour's own
+     * tiles (scene_snapshot.h), or not at all (border tiles) without one. */
+    if (layout->secondaryTileset != gMapHeader.mapLayout->secondaryTileset)
+    {
+        if (!PagesEnabled() || layout->isFrlg || layout->secondaryTileset == NULL)
+            return false;
+        page = NeighbourPage(snapshot, layout, header->mapLayoutId);
+        if (page == 0)
+            return false;
+    }
+    cell->sourceMapX = x;
+    cell->sourceMapY = y;
+    cell->sourceMapGroup = mapGroup;
+    cell->sourceMapNum = mapNum;
+    cell->sourceLayoutId = header->mapLayoutId;
+    cell->flags = DIORAMA_CELL_SOURCE_VALID | DIORAMA_CELL_CONNECTED;
+    cell->atlasPage = page;
+    if (CopyCellVisual(layout, UNPACK_METATILE(entry), UNPACK_COLLISION(entry), UNPACK_ELEVATION(entry), cell))
+        return true;
+    cell->atlasPage = 0;
+    cell->flags = 0;
+    return false;
+}
+
 static bool TryCopyConnectedCell(struct DioramaSceneSnapshot *snapshot,
                                  int mapX, int mapY,
                                  struct DioramaCellSnapshot *cell)
@@ -531,7 +634,6 @@ static bool TryCopyConnectedCell(struct DioramaSceneSnapshot *snapshot,
     int16_t connectedX;
     int16_t connectedY;
     u16 entry;
-    u8 page = 0;
 
     if (connection == NULL)
         return false;
@@ -540,44 +642,59 @@ static bool TryCopyConnectedCell(struct DioramaSceneSnapshot *snapshot,
         return false;
     connectedLayout = connectedHeader->mapLayout;
     if (connectedLayout->map == NULL
-     || connectedLayout->primaryTileset != gMapHeader.mapLayout->primaryTileset
-     || connectedLayout->isFrlg != gMapHeader.mapLayout->isFrlg
      || !DioramaConnection_MapCoordinates(connection->direction, connection->offset,
                                           mapX - MAP_OFFSET, mapY - MAP_OFFSET,
                                           snapshot->mapWidth, snapshot->mapHeight,
                                           connectedLayout->width, connectedLayout->height,
                                           &connectedX, &connectedY))
         return false;
-    /* Another secondary tileset: drawn from a page of the neighbour's own
-     * tiles (scene_snapshot.h), or not at all (border tiles) without one. */
-    if (connectedLayout->secondaryTileset != gMapHeader.mapLayout->secondaryTileset)
-    {
-        if (!PagesEnabled() || connectedLayout->isFrlg || connectedLayout->secondaryTileset == NULL)
-            return false;
-        page = NeighbourPage(snapshot, connectedLayout, connectedHeader->mapLayoutId);
-        if (page == 0)
-            return false;
-    }
-
     if (mapX >= 0 && mapY >= 0
      && mapX < gBackupMapLayout.width && mapY < gBackupMapLayout.height
      && gBackupMapLayout.map[mapY * gBackupMapLayout.width + mapX] != MAPGRID_UNDEFINED)
         entry = gBackupMapLayout.map[mapY * gBackupMapLayout.width + mapX];
     else
         entry = connectedLayout->map[connectedY * connectedLayout->width + connectedX];
-    cell->sourceMapX = connectedX;
-    cell->sourceMapY = connectedY;
-    cell->sourceMapGroup = connection->mapGroup;
-    cell->sourceMapNum = connection->mapNum;
-    cell->sourceLayoutId = connectedHeader->mapLayoutId;
-    cell->flags = DIORAMA_CELL_SOURCE_VALID | DIORAMA_CELL_CONNECTED;
-    cell->atlasPage = page;
-    if (CopyCellVisual(connectedLayout, UNPACK_METATILE(entry),
-                       UNPACK_COLLISION(entry), UNPACK_ELEVATION(entry), cell))
+    return CopyNeighbourCell(snapshot, connectedHeader, connection->mapGroup, connection->mapNum,
+                             connectedX, connectedY, entry, cell);
+}
+
+/* A cell of the next map but one (FindSecondMap), from its own layout: the GBA's map grid holds only the map and the
+ * edges of its neighbours. A zoomed-out camera sees that far (render distance, 2026-10-26: the map's border trees
+ * stood where Oldale is, seen from Littleroot). */
+static bool TryCopySecondMapCell(struct DioramaSceneSnapshot *snapshot, int mapX, int mapY,
+                                 struct DioramaCellSnapshot *cell)
+{
+    const struct MapConnection *via;
+    const struct MapHeader *header;
+    struct DioramaCellSnapshot outside;
+    s32 x;
+    s32 y;
+
+    header = FindSecondMap(mapX - MAP_OFFSET, mapY - MAP_OFFSET, &via, &x, &y);
+    if (header == NULL)
+        return false;
+    outside = *cell;
+    if (CopyNeighbourCell(snapshot, header, via->mapGroup, via->mapNum, (int16_t)x, (int16_t)y,
+                          header->mapLayout->map[y * header->mapLayout->width + x], cell))
         return true;
-    cell->atlasPage = 0;
-    cell->flags = 0;
+    *cell = outside; /* the border block it was */
     return false;
+}
+
+/* A cell past the map and its neighbours: the border block (DIORAMA_CELL_BORDER where no neighbour lies that way). */
+static bool CopyOutsideCell(struct DioramaSceneSnapshot *snapshot, int mapX, int mapY, struct DioramaCellSnapshot *cell)
+{
+    cell->flags = 0;
+    cell->atlasPage = 0;
+    if (GetMapConnectionAtPos(mapX, mapY) == NULL)
+    {
+        cell->sourceMapGroup = snapshot->mapGroup;
+        cell->sourceMapNum = snapshot->mapNum;
+        cell->sourceLayoutId = snapshot->mapLayoutId;
+        cell->flags = DIORAMA_CELL_BORDER;
+    }
+    return CopyCellVisual(gMapHeader.mapLayout, MapGridGetMetatileIdAt(mapX, mapY),
+                          MapGridGetCollisionAt(mapX, mapY), MapGridGetElevationAt(mapX, mapY), cell);
 }
 
 /*
@@ -631,12 +748,17 @@ static void ApplyTreeSprites(struct DioramaSceneSnapshot *snapshot)
 
 static bool CopyCells(struct DioramaSceneSnapshot *snapshot)
 {
+    /* cells that may be a second map's (TryCopySecondMapCell), tried once the rest are copied, so that the map's own
+     * neighbours have the tile pages first */
+    static u16 sOutside[DIORAMA_MAX_VISIBLE_CELLS];
+    unsigned outsideCount = 0;
+    unsigned i;
     int x;
     int y;
     int index = 0;
 
     snapshot->gridOriginX = snapshot->cameraMapX - CELL_RADIUS;
-    snapshot->gridOriginY = snapshot->cameraMapY - CELL_RADIUS;
+    snapshot->gridOriginY = snapshot->cameraMapY - CELL_RADIUS - DIORAMA_GRID_FORWARD;
     memset(sPageUsed, 0, sizeof(sPageUsed));
     memset(snapshot->neighbourPages, 0, sizeof(snapshot->neighbourPages));
     for (y = 0; y < DIORAMA_GRID_HEIGHT; y++)
@@ -667,18 +789,24 @@ static bool CopyCells(struct DioramaSceneSnapshot *snapshot)
             }
             else if (TryCopyConnectedCell(snapshot, mapX, mapY, cell))
                 continue;
-            else if (GetMapConnectionAtPos(mapX, mapY) == NULL)
+            else
             {
-                cell->sourceMapGroup = snapshot->mapGroup;
-                cell->sourceMapNum = snapshot->mapNum;
-                cell->sourceLayoutId = snapshot->mapLayoutId;
-                cell->flags = DIORAMA_CELL_BORDER;
+                if (!CopyOutsideCell(snapshot, mapX, mapY, cell))
+                    return false;
+                sOutside[outsideCount++] = (u16)index;
+                continue;
             }
             if (!CopyCellVisual(gMapHeader.mapLayout, MapGridGetMetatileIdAt(mapX, mapY),
                                 MapGridGetCollisionAt(mapX, mapY),
                                 MapGridGetElevationAt(mapX, mapY), cell))
                 return false;
         }
+    }
+    for (i = 0; i < outsideCount; i++)
+    {
+        struct DioramaCellSnapshot *cell = &snapshot->cells[sOutside[i]];
+
+        TryCopySecondMapCell(snapshot, cell->mapX, cell->mapY, cell);
     }
     snapshot->visibleCellCount = DIORAMA_MAX_VISIBLE_CELLS;
     ApplyTreeSprites(snapshot);
@@ -1714,19 +1842,6 @@ static int ColourCacheIndex(const struct MapLayout *layout)
 /* Where a connection's map lies from the map it leaves, whatever the
  * distance: the position (x, y) of the map left in the connected map's own
  * coordinates. */
-static void ToConnectedMap(const struct MapConnection *connection, const struct MapLayout *from,
-                           const struct MapLayout *to, s32 x, s32 y, s32 *toX, s32 *toY)
-{
-    switch (connection->direction)
-    {
-    case CONNECTION_NORTH: *toX = x - connection->offset; *toY = y + to->height; break;
-    case CONNECTION_SOUTH: *toX = x - connection->offset; *toY = y - from->height; break;
-    case CONNECTION_WEST: *toX = x + to->width; *toY = y - connection->offset; break;
-    case CONNECTION_EAST: *toX = x - from->width; *toY = y - connection->offset; break;
-    default: *toX = -100000; *toY = -100000; break;
-    }
-}
-
 struct FarCell
 {
     const struct MapLayout *layout; /* NULL: the map's border block */
@@ -1758,7 +1873,6 @@ static void FindFarCell(int mapX, int mapY, struct FarCell *cell)
     const struct MapConnection *connection;
     s32 x = mapX - MAP_OFFSET;
     s32 y = mapY - MAP_OFFSET;
-    int i;
 
     memset(cell, 0, sizeof(*cell));
     if (x >= 0 && y >= 0 && x < layout->width && y < layout->height)
@@ -1798,54 +1912,25 @@ static void FindFarCell(int mapX, int mapY, struct FarCell *cell)
         }
     }
     /* A map connected to one of the map's connections. */
-    if (gMapHeader.connections != NULL)
-        for (i = 0; i < gMapHeader.connections->count; i++)
+    {
+        const struct MapConnection *via;
+        const struct MapHeader *header;
+        s32 cx;
+        s32 cy;
+
+        header = FindSecondMap(x, y, &via, &cx, &cy);
+        if (header != NULL)
         {
-            const struct MapConnection *first = &gMapHeader.connections->connections[i];
-            const struct MapHeader *header;
-            s32 x1;
-            s32 y1;
-            int k;
-
-            if (first->direction == CONNECTION_DIVE || first->direction == CONNECTION_EMERGE)
-                continue;
-            header = GetMapHeaderFromConnection(first);
-            if (header == NULL || header->mapLayout == NULL || header->connections == NULL)
-                continue;
-            ToConnectedMap(first, layout, header->mapLayout, x, y, &x1, &y1);
-            for (k = 0; k < header->connections->count; k++)
-            {
-                const struct MapConnection *second = &header->connections->connections[k];
-                const struct MapHeader *farHeader; /* not "far": a macro on Windows */
-                s32 x2;
-                s32 y2;
-
-                if (second->direction == CONNECTION_DIVE || second->direction == CONNECTION_EMERGE
-                 || (second->mapGroup == gSaveBlock1Ptr->location.mapGroup
-                  && second->mapNum == gSaveBlock1Ptr->location.mapNum))
-                    continue;
-                farHeader = GetMapHeaderFromConnection(second);
-                if (farHeader == NULL || farHeader->mapLayout == NULL || farHeader->mapLayout->map == NULL)
-                    continue;
-                ToConnectedMap(second, header->mapLayout, farHeader->mapLayout, x1, y1, &x2, &y2);
-                /* on the connection's side of the map (as GetMapConnectionAtPos) */
-                if ((second->direction == CONNECTION_NORTH && y1 >= 0)
-                 || (second->direction == CONNECTION_SOUTH && y1 < header->mapLayout->height)
-                 || (second->direction == CONNECTION_WEST && x1 >= 0)
-                 || (second->direction == CONNECTION_EAST && x1 < header->mapLayout->width))
-                    continue;
-                if (x2 < 0 || y2 < 0 || x2 >= farHeader->mapLayout->width || y2 >= farHeader->mapLayout->height)
-                    continue;
-                cell->layout = farHeader->mapLayout;
-                cell->layoutId = farHeader->mapLayoutId;
-                cell->x = x2;
-                cell->y = y2;
-                cell->mapGroup = second->mapGroup;
-                cell->mapNum = second->mapNum;
-                cell->entry = farHeader->mapLayout->map[y2 * farHeader->mapLayout->width + x2];
-                return;
-            }
+            cell->layout = header->mapLayout;
+            cell->layoutId = header->mapLayoutId;
+            cell->x = cx;
+            cell->y = cy;
+            cell->mapGroup = via->mapGroup;
+            cell->mapNum = via->mapNum;
+            cell->entry = header->mapLayout->map[cy * header->mapLayout->width + cx];
+            return;
         }
+    }
     cell->entry = (u16)MapGridGetMetatileIdAt(mapX, mapY)
                 | (u16)(MapGridGetCollisionAt(mapX, mapY) << 10);
 }
@@ -1858,7 +1943,8 @@ static bool8 FarEnabled(void)
     {
         const char *value = SDL_getenv("PKMN_DIORAMA_FAR");
 
-        sEnabled = value == NULL || value[0] != '0';
+        /* off unless asked for (scene_snapshot.h): the haze ends with the cells */
+        sEnabled = value != NULL && value[0] == '1';
     }
     return sEnabled;
 }
@@ -1870,12 +1956,13 @@ static int FloorEven(int value)
 
 static bool FarIsSea(const struct MapLayout *layout, u16 metatile);
 
-static void ComputeFar(s16 cameraX, s16 cameraY)
+/* The blocks round the cells' middle (centreX, centreY): the camera's cell, DIORAMA_GRID_FORWARD rows north. */
+static void ComputeFar(s16 centreX, s16 centreY)
 {
-    int originX = FloorEven(cameraX - DIORAMA_FAR_RADIUS);
-    int originY = FloorEven(cameraY - DIORAMA_FAR_RADIUS);
-    int innerLeft = cameraX - DIORAMA_GRID_WIDTH / 2;
-    int innerTop = cameraY - DIORAMA_GRID_HEIGHT / 2;
+    int originX = FloorEven(centreX - DIORAMA_FAR_RADIUS);
+    int originY = FloorEven(centreY - DIORAMA_FAR_RADIUS);
+    int innerLeft = centreX - DIORAMA_GRID_WIDTH / 2;
+    int innerTop = centreY - DIORAMA_GRID_HEIGHT / 2;
     int i;
     int j;
 
@@ -1972,7 +2059,7 @@ static void CopyFar(struct DioramaSceneSnapshot *snapshot)
     if (!sFarComputed || sFarMapGeneration != sMapGeneration
      || sFarCameraX != snapshot->cameraMapX || sFarCameraY != snapshot->cameraMapY)
     {
-        ComputeFar(snapshot->cameraMapX, snapshot->cameraMapY);
+        ComputeFar(snapshot->cameraMapX, snapshot->cameraMapY - DIORAMA_GRID_FORWARD);
         if (LogEnabled() && (!sFarComputed || sFarMapGeneration != sMapGeneration))
         {
             int valid = 0;
@@ -1994,7 +2081,7 @@ static void CopyFar(struct DioramaSceneSnapshot *snapshot)
     snapshot->farOn = TRUE;
     snapshot->farGeneration = sFarGeneration;
     snapshot->farOriginX = (s16)FloorEven(sFarCameraX - DIORAMA_FAR_RADIUS);
-    snapshot->farOriginY = (s16)FloorEven(sFarCameraY - DIORAMA_FAR_RADIUS);
+    snapshot->farOriginY = (s16)FloorEven(sFarCameraY - DIORAMA_GRID_FORWARD - DIORAMA_FAR_RADIUS);
     memcpy(snapshot->farBlocks, sFar, sizeof(sFar));
 }
 

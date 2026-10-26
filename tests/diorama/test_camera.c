@@ -8,6 +8,8 @@
 #include <stdlib.h>
 
 #include "diorama/camera.h"
+#include "diorama/scene_snapshot.h"
+#include "diorama/terrain_mesh.h"
 
 #define DEG (3.14159265358979f / 180.0f)
 
@@ -391,6 +393,92 @@ static void FixedEyeLens(void)
     NEAR(160.0f / focal * depth, view.extent, 1e-3);
 }
 
+/* A camera settled in a mode at zoom and tilt steps (clamped to the mode's limits), its view snapped to (0, 0). */
+static struct DioramaCameraView Settled(enum DioramaCameraMode mode, int zoom, int tilt)
+{
+    struct DioramaCameraInput input = Input(0.0f, 0.0f, 0.0f);
+    struct DioramaCameraView view;
+
+    Start(mode, 0.0f, 0.0f);
+    DioramaCamera_SetSteps(mode, zoom, tilt);
+    input.snap = true;
+    DioramaCamera_Update(&input, &view);
+    return view;
+}
+
+/* DioramaCamera_GroundReach against the shaders' projection: the ground it
+ * finds ahead and behind is on the picture's top and bottom rows, the corner
+ * on its side edge. */
+static void GroundReachMatchesTheShaders(void)
+{
+    static const float sDrops[] = {0.0f, 2.0f};
+
+    for (int mode = DIORAMA_CAMERA_ADVENTURE; mode <= DIORAMA_CAMERA_DIORAMA; mode++)
+    for (int zoom = -6; zoom <= 6; zoom += 3)
+    for (int tilt = -4; tilt <= 4; tilt += 2)
+    for (unsigned d = 0; d < 2; d++)
+    {
+        struct DioramaCameraView view = Settled((enum DioramaCameraMode)mode, zoom, tilt);
+        struct DioramaCameraReach reach;
+        float aspect = 1.5f / (21.0f / 9.0f);
+        float ground = view.groundY - sDrops[d];
+        float depth;
+        float vertical;
+
+        DioramaCamera_GroundReach(&view, DIORAMA_OVERWORLD_SCREEN_OFFSET, aspect, sDrops[d], &reach);
+        CHECK(reach.ahead < DIORAMA_CAMERA_REACH_HORIZON && reach.behind > 0.0f);
+        Project(&view, reach.ahead, ground, &depth, &vertical);
+        NEAR(DIORAMA_OVERWORLD_SCREEN_OFFSET + vertical * view.focalLength * 2.0f / 160.0f / depth, 1.0f, 1e-3);
+        NEAR(reach.side * view.focalLength * 2.0f / 240.0f * aspect / depth, 1.0f, 1e-3);
+        Project(&view, -reach.behind, ground, &depth, &vertical);
+        NEAR(DIORAMA_OVERWORLD_SCREEN_OFFSET + vertical * view.focalLength * 2.0f / 160.0f / depth, -1.0f, 1e-3);
+    }
+}
+
+/*
+ * The scene's cells (scene_snapshot.h: 81 x 81, standing DIORAMA_GRID_FORWARD
+ * rows north of the player) hold what every Adventure and Diorama zoom and
+ * tilt sees of level ground on a window up to 16:9, with a tile to spare for
+ * the look-ahead and the follow: ahead and behind, short of the haze; to the
+ * sides, within the cells (the haze may show in the top corners at the widest
+ * settings). The owner's render-distance report (2026-10-26): a zoomed-out,
+ * low camera saw past the cells into the distant scenery's flat blocks. A
+ * window wider than 16:9 sees further to the sides, into the haze.
+ */
+static void EverySettingStaysInTheCells(void)
+{
+    static const float sAspects[] = {16.0f / 9.0f, 16.0f / 10.0f, 4.0f / 3.0f};
+    const float hazeStart = DIORAMA_HAZE_END - DIORAMA_HAZE_BAND;
+    const float sideCells = DIORAMA_GRID_WIDTH / 2 + 0.5f;
+    float mostAhead = 0.0f;
+    float mostBehind = 0.0f;
+    float mostSide = 0.0f;
+
+    for (int mode = DIORAMA_CAMERA_ADVENTURE; mode <= DIORAMA_CAMERA_DIORAMA; mode++)
+    for (int zoom = -12; zoom <= 12; zoom++)
+    for (int tilt = -12; tilt <= 12; tilt++)
+    for (unsigned a = 0; a < 3; a++)
+    {
+        struct DioramaCameraView view = Settled((enum DioramaCameraMode)mode, zoom, tilt);
+        struct DioramaCameraReach reach;
+
+        DioramaCamera_GroundReach(&view, DIORAMA_OVERWORLD_SCREEN_OFFSET, 1.5f / sAspects[a], 0.0f, &reach);
+        CHECK(reach.ahead + 1.0f < DIORAMA_GRID_FORWARD + hazeStart);
+        CHECK(reach.behind + 1.0f < hazeStart - DIORAMA_GRID_FORWARD);
+        CHECK(reach.side + 1.0f <= sideCells);
+        if (zoom == 0 && tilt == 0)
+            CHECK(reach.side < hazeStart); /* the default framings: no haze at all */
+        mostAhead = reach.ahead > mostAhead ? reach.ahead : mostAhead;
+        mostBehind = reach.behind > mostBehind ? reach.behind : mostBehind;
+        mostSide = reach.side > mostSide ? reach.side : mostSide;
+    }
+    /* the settings that made the report: the Adventure camera zoomed out and tilted low sees beyond the old 24
+     * tiles (and the 40 of cells centred on the player, where the land falls away), the Diorama one over 20 behind */
+    CHECK(mostAhead > 38.0f);
+    CHECK(mostBehind > 20.0f);
+    CHECK(mostSide > 38.0f);
+}
+
 int main(void)
 {
     FramingMatchesTheShaders();
@@ -404,6 +492,8 @@ int main(void)
     TheEyeRidesTheGround();
     PhotoMode();
     FixedEyeLens();
+    GroundReachMatchesTheShaders();
+    EverySettingStaysInTheCells();
     printf("camera tests passed (%d checks)\n", sChecks);
     return EXIT_SUCCESS;
 }

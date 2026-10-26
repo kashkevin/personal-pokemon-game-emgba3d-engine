@@ -14,6 +14,19 @@
 #define DIORAMA_GRID_WIDTH 81
 #define DIORAMA_GRID_HEIGHT 81
 #define DIORAMA_MAX_VISIBLE_CELLS (DIORAMA_GRID_WIDTH * DIORAMA_GRID_HEIGHT)
+/* ... standing this many rows north of the camera's cell (the player's): the
+ * 3D camera always looks north, seeing at most about 21 tiles behind the
+ * player (the Diorama camera zoomed out and tilted low) and 39 ahead on flat
+ * ground (the Adventure camera so), more where the land falls away, so the
+ * rows go where the view is: 28 behind, 52 ahead (the owner's render-distance
+ * report: a zoomed-out camera saw past 40). */
+#define DIORAMA_GRID_FORWARD 12
+/* The haze at the cells' edge (gl_compositor.c): complete DIORAMA_HAZE_END
+ * tiles from their middle each way (over the outermost ring, so the edge never
+ * shows), beginning DIORAMA_HAZE_BAND tiles nearer. The same at every quality
+ * setting: the distant scenery past it is off unless PKMN_DIORAMA_FAR=1. */
+#define DIORAMA_HAZE_END (DIORAMA_GRID_WIDTH / 2 - 1.0f)
+#define DIORAMA_HAZE_BAND 4.5f
 #define DIORAMA_MAX_OBJECTS 16
 /* Field-effect sprites drawn in 3D (struct DioramaEffectSnapshot): six Poke Balls and a monitor, or five monitors. */
 #define DIORAMA_MAX_EFFECTS 12
@@ -46,13 +59,16 @@
 #define DIORAMA_PAGE_PALETTE_COUNT 7
 /*
  * Distant scenery (graphics overhaul): past the scene's cells, the world out
- * to about DIORAMA_FAR_RADIUS tiles from the camera in blocks of 2 x 2 cells
- * on even map coordinates (so a step does not regroup them): the map, its
- * connected maps and theirs, the map's border block beyond. A block is one of
- * its cells (an obstacle if it has one: a tree, a building, a rock), with
+ * to about DIORAMA_FAR_RADIUS tiles from the cells' middle in blocks of 2 x 2
+ * cells on even map coordinates (so a step does not regroup them): the map,
+ * its connected maps and theirs, the map's border block beyond. A block is one
+ * of its cells (an obstacle if it has one: a tree, a building, a rock), with
  * where that cell comes from (for the rules' heights) and the average colour
  * of its metatile's art, unfaded. Published outdoors only (towns, cities,
- * routes); farGeneration changes when the blocks do.
+ * routes) and only with PKMN_DIORAMA_FAR=1 since 2026-10-26: its flat blocks
+ * past the full detail were the owner's render-distance report, and a quality
+ * setting (effects) that turned them off changed how far one player saw;
+ * farGeneration changes when the blocks do.
  */
 #define DIORAMA_FAR_BLOCK_CELLS 2
 #define DIORAMA_FAR_RADIUS 55 /* DIORAMA_FAR_BLOCKS a multiple of DIORAMA_FAR_SECTOR_BLOCKS (7) */
