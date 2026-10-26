@@ -814,10 +814,11 @@ bool32 Window_NativeUiShown(u8 windowId)
 }
 
 // ...and its tiles are on the screen itself: the background's map in VRAM still holds them (a battle transition
-// draws on BG0's map directly, erasing a message box the buffer still has).
+// draws on BG0's map directly, erasing a message box the buffer still has), its own first tile in its own palette
+// at its corner (the Frontier's squares fill BG0's buffer with tiles of their own, over a message box's).
 bool32 Window_NativeUiOnScreen(u8 windowId)
 {
-    u32 bg, index;
+    u32 bg, index, own;
     const u16 *tilemap, *screen;
 
     if (!Window_NativeUiShown(windowId))
@@ -830,6 +831,8 @@ bool32 Window_NativeUiOnScreen(u8 windowId)
                                       GetBgAttribute(bg, BG_ATTR_SCREENSIZE), GetBgMetricTextMode(bg, 1) * 0x20,
                                       GetBgMetricTextMode(bg, 2) * 0x20);
     screen = (const u16 *)(BG_VRAM + (((*(vu16 *)(REG_ADDR_BG0CNT + bg * 2)) >> 8 & 0x1F) << 11));
-    return screen[index] == tilemap[index];
+    own = (GetBgAttribute(bg, BG_ATTR_BASETILE) + gWindows[windowId].window.baseBlock) & 0x3FF;
+    return screen[index] == tilemap[index] && (screen[index] & 0x3FF) == own
+        && (screen[index] >> 12) == gWindows[windowId].window.paletteNum;
 }
 #endif // ENABLE_NATIVE_UI
