@@ -26,6 +26,11 @@
 #include "safari_zone.h"
 #ifdef PORTABLE
 #include "platform.h"
+// The PC game's trade hold lasts 45 s (2,700 frames) without a command, not 10 s: the trade's coordinator asks the host
+// between its commands, and over the internet a few slow replies in a row passed 10 s - the expired hold closed the
+// trade window and the trade ended (2026-10-26). The companion's loss is still seen within 3 s by the presence heartbeat
+// (multiplayer.c), which closes the window; an expired hold keeps the trade either way (KEEP or REBIND restores it).
+#define TRADE_HOLD_EXTRA_FRAMES 2100
 #endif
 #line 27 // gba-line
 
@@ -619,7 +624,13 @@ static void QueryTradeData(u8 *data)
         memset(data + 8, 0, 16);
     PutU32(data + 24, sSession); PutU32(data + 28, sIncarnation); PutU32(data + 32, sRevision);
     PutU32(data + 36, sOffset); PutU32(data + 40, sCrc);
+#ifdef PORTABLE
+    PutU32(data + 44, sTradeActive && !sTradeExpired ? max(0, (s32)(sDeadline + TRADE_HOLD_EXTRA_FRAMES - sFrame)) : 0);
+#else
+#line 569 // gba-line
     PutU32(data + 44, sTradeActive && !sTradeExpired ? max(0, (s32)(sDeadline - sFrame)) : 0);
+#endif
+#line 570 // gba-line
 }
 
 static void QueryEmergencyData(u8 *data)
@@ -1336,7 +1347,14 @@ void MultiplayerSave_Tick(void)
                             sReloadStatus == MP_SAVE_OK ? 4 : 0, sOffset);
         }
     }
+#ifdef PORTABLE
+    else if (MultiplayerSave_IsHeld() && !sEmergencyActive && sState != MP_SAVE_ERROR
+          && (s32)(sFrame - sDeadline) > (sTradeActive ? TRADE_HOLD_EXTRA_FRAMES : 0))
+#else
+#line 1215 // gba-line
     else if (MultiplayerSave_IsHeld() && !sEmergencyActive && sState != MP_SAVE_ERROR && (s32)(sFrame - sDeadline) > 0)
+#endif
+#line 1216 // gba-line
     {
         if (sTradeActive)
         {
