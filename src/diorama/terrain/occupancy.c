@@ -30,6 +30,127 @@ static bool SameProvenance(const struct DioramaOccupancySpan *left,
         && memcmp(left->material, right->material, sizeof(left->material)) == 0;
 }
 
+/*
+ * The sorts and the column lookups below were qsort and a binary search per
+ * span and neighbour: about 80% of a town chunk's build (performance work
+ * 2026-10-26, the owner's lag when running: a chunk took about 20 ms on the
+ * cloud machine, 30 of them at once at a map's edge). Spans and faces now go
+ * through counting and radix sorts into the same order, so every chunk is
+ * built the same, byte for byte; a box too big for them falls back to qsort.
+ */
+#define OCCUPANCY_MAX_COLUMNS (1u << 20)
+/* Below this many spans or faces qsort and the binary search cost less than
+ * clearing the counting sorts' tables (a room's or a forest's small chunks). */
+#define OCCUPANCY_SMALL_SORT 1536
+
+static struct DioramaOccupancySpan *sSpanScratch;
+static size_t sSpanScratchCapacity;
+static uint32_t *sColumnIndex;
+static size_t sColumnIndexCapacity;
+
+static bool Reserve(void **buffer, size_t *capacity, size_t count, size_t size)
+{
+    void *grown;
+
+    if (count <= *capacity)
+        return true;
+    grown = realloc(*buffer, count * size);
+    if (grown == NULL)
+        return false;
+    *buffer = grown;
+    *capacity = count;
+    return true;
+}
+
+/* The spans' columns, x then z (CompareSpans' first two fields): a box of
+ * them, depth its z extent; false when it is too big for the index. */
+struct ColumnBox
+{
+    int32_t minX;
+    int32_t minZ;
+    uint32_t depth;
+    uint32_t columns;
+};
+
+static bool SpanColumnBox(const struct DioramaOccupancySpan *spans, uint32_t count, int32_t margin,
+                          struct ColumnBox *box)
+{
+    int64_t minX = spans[0].x;
+    int64_t maxX = spans[0].x;
+    int64_t minZ = spans[0].z;
+    int64_t maxZ = spans[0].z;
+    uint32_t i;
+
+    for (i = 1; i < count; i++)
+    {
+        if (spans[i].x < minX) minX = spans[i].x;
+        if (spans[i].x > maxX) maxX = spans[i].x;
+        if (spans[i].z < minZ) minZ = spans[i].z;
+        if (spans[i].z > maxZ) maxZ = spans[i].z;
+    }
+    minX -= margin;
+    maxX += margin;
+    minZ -= margin;
+    maxZ += margin;
+    if (maxX - minX >= 4096 || maxZ - minZ >= 4096
+     || (uint64_t)(maxX - minX + 1) * (uint64_t)(maxZ - minZ + 1) > OCCUPANCY_MAX_COLUMNS)
+        return false;
+    box->minX = (int32_t)minX;
+    box->minZ = (int32_t)minZ;
+    box->depth = (uint32_t)(maxZ - minZ + 1);
+    box->columns = (uint32_t)(maxX - minX + 1) * box->depth;
+    return true;
+}
+
+static uint32_t ColumnOf(const struct ColumnBox *box, int32_t x, int32_t z)
+{
+    return (uint32_t)(x - box->minX) * box->depth + (uint32_t)(z - box->minZ);
+}
+
+/* The order qsort(CompareSpans) gives: a stable counting sort by column, then
+ * an insertion sort by the whole comparison (only spans of one column can be
+ * out of order). Spans that compare equal are the same span (their flags are
+ * their cell's), so this is the one order there is. */
+static bool SortSpans(struct DioramaOccupancySpan *spans, uint32_t count)
+{
+    struct ColumnBox box;
+    uint32_t column;
+    uint32_t i;
+
+    if (count < 2)
+        return true;
+    if (count < OCCUPANCY_SMALL_SORT)
+        return false;
+    if (!SpanColumnBox(spans, count, 0, &box)
+     || !Reserve((void **)&sColumnIndex, &sColumnIndexCapacity, box.columns + 1, sizeof(uint32_t))
+     || !Reserve((void **)&sSpanScratch, &sSpanScratchCapacity, count, sizeof(*spans)))
+        return false;
+    memset(sColumnIndex, 0, (box.columns + 1) * sizeof(uint32_t));
+    for (i = 0; i < count; i++)
+        sColumnIndex[ColumnOf(&box, spans[i].x, spans[i].z) + 1]++;
+    for (column = 0; column < box.columns; column++)
+        sColumnIndex[column + 1] += sColumnIndex[column];
+    for (i = 0; i < count; i++)
+        sSpanScratch[sColumnIndex[ColumnOf(&box, spans[i].x, spans[i].z)]++] = spans[i];
+    for (i = 1; i < count; i++)
+    {
+        uint32_t at = i;
+        struct DioramaOccupancySpan moving;
+
+        if (CompareSpans(&sSpanScratch[i - 1], &sSpanScratch[i]) <= 0)
+            continue;
+        moving = sSpanScratch[i];
+        while (at > 0 && CompareSpans(&sSpanScratch[at - 1], &moving) > 0)
+        {
+            sSpanScratch[at] = sSpanScratch[at - 1];
+            at--;
+        }
+        sSpanScratch[at] = moving;
+    }
+    memcpy(spans, sSpanScratch, count * sizeof(*spans));
+    return true;
+}
+
 bool DioramaOccupancy_Canonicalize(struct DioramaOccupancySpan *spans,
                                    uint32_t *spanCount)
 {
@@ -41,7 +162,8 @@ bool DioramaOccupancy_Canonicalize(struct DioramaOccupancySpan *spans,
     for (read = 0; read < *spanCount; read++)
         if (spans[read].yMin >= spans[read].yMax)
             return false;
-    qsort(spans, *spanCount, sizeof(*spans), CompareSpans);
+    if (!SortSpans(spans, *spanCount))
+        qsort(spans, *spanCount, sizeof(*spans), CompareSpans);
     for (read = 0; read < *spanCount; read++)
     {
         /* Spans of one column that only touch keep their own materials (a cell's
@@ -162,6 +284,46 @@ static bool AppendSideGaps(const struct DioramaOccupancySpan *spans,
                       cursor, span->yMax, axis, sign);
 }
 
+/* Each column's spans, begin and end, for the shell's lookups: spans sorted
+ * by column (as Canonicalize leaves them). False when they are not (the
+ * binary search then), or the box is too big. */
+static bool IndexColumns(const struct DioramaOccupancySpan *spans, uint32_t spanCount, struct ColumnBox *box)
+{
+    uint32_t i;
+
+    if (spanCount < OCCUPANCY_SMALL_SORT || !SpanColumnBox(spans, spanCount, 1, box)
+     || !Reserve((void **)&sColumnIndex, &sColumnIndexCapacity, (size_t)box->columns * 2, sizeof(uint32_t)))
+        return false;
+    for (i = 1; i < spanCount; i++)
+        if (spans[i].x < spans[i - 1].x || (spans[i].x == spans[i - 1].x && spans[i].z < spans[i - 1].z))
+            return false;
+    memset(sColumnIndex, 0, (size_t)box->columns * 2 * sizeof(uint32_t));
+    for (i = 0; i < spanCount; i++)
+    {
+        uint32_t column = ColumnOf(box, spans[i].x, spans[i].z);
+
+        if (i == 0 || spans[i].x != spans[i - 1].x || spans[i].z != spans[i - 1].z)
+            sColumnIndex[column * 2] = i;
+        sColumnIndex[column * 2 + 1] = i + 1;
+    }
+    return true;
+}
+
+static void LookUpColumn(const struct DioramaOccupancySpan *spans, uint32_t spanCount, const struct ColumnBox *box,
+                         bool indexed, int32_t x, int32_t z, uint32_t *begin, uint32_t *end)
+{
+    uint32_t column;
+
+    if (!indexed)
+    {
+        FindColumn(spans, spanCount, x, z, begin, end);
+        return;
+    }
+    column = ColumnOf(box, x, z);
+    *begin = sColumnIndex[column * 2];
+    *end = sColumnIndex[column * 2 + 1];
+}
+
 bool DioramaOccupancy_BuildShell(const struct DioramaOccupancySpan *spans,
                                  uint32_t spanCount,
                                  int32_t ownerMinX, int32_t ownerMinZ,
@@ -176,9 +338,12 @@ bool DioramaOccupancy_BuildShell(const struct DioramaOccupancySpan *spans,
                                       DIORAMA_OCCUPANCY_FACE_WEST};
     uint32_t count = 0;
     uint32_t i;
+    struct ColumnBox box;
+    bool indexed;
 
     if (spans == NULL || faces == NULL || faceCount == NULL)
         return false;
+    indexed = IndexColumns(spans, spanCount, &box);
     for (i = 0; i < spanCount; i++)
     {
         const struct DioramaOccupancySpan *span = &spans[i];
@@ -189,7 +354,7 @@ bool DioramaOccupancy_BuildShell(const struct DioramaOccupancySpan *spans,
         if (span->x < ownerMinX || span->x >= ownerMaxX
          || span->z < ownerMinZ || span->z >= ownerMaxZ)
             continue;
-        FindColumn(spans, spanCount, span->x, span->z, &begin, &end);
+        LookUpColumn(spans, spanCount, &box, indexed, span->x, span->z, &begin, &end);
         if (!IsOccupied(spans, begin, end, span->yMax)
          && !AppendFace(faces, faceCapacity, &count, span, DIORAMA_OCCUPANCY_FACE_TOP,
                         span->yMax, span->x, span->x + 1, span->z, span->z + 1, 1, 1))
@@ -207,7 +372,7 @@ bool DioramaOccupancy_BuildShell(const struct DioramaOccupancySpan *spans,
             int32_t plane = axis == 0 ? span->x + (sign > 0) : span->z + (sign > 0);
             int32_t u = axis == 0 ? span->z : span->x;
 
-            FindColumn(spans, spanCount, neighborX, neighborZ, &begin, &end);
+            LookUpColumn(spans, spanCount, &box, indexed, neighborX, neighborZ, &begin, &end);
             if (!AppendSideGaps(spans, begin, end, span, faceIds[side], plane, u,
                                 axis, sign, faces, faceCapacity, &count))
                 return false;
@@ -238,13 +403,179 @@ static int CompareFaces(const void *leftValue, const void *rightValue)
     return 0;
 }
 
+/*
+ * The order qsort(CompareFaces) gives, by a radix sort: each face's fields in
+ * CompareFaces' order packed into a 128-bit key, every field as its distance
+ * from the smallest value it takes (so wide as the chunk's range of it needs).
+ * CompareFaces compares every field, so faces with the same key are the same
+ * face and the order is the one there is.
+ */
+struct FaceKey
+{
+    uint32_t words[4]; /* the key, least significant word first */
+    uint32_t index;
+};
+
+static struct FaceKey *sFaceKeys;
+static struct FaceKey *sFaceKeysScratch;
+static size_t sFaceKeysCapacity;
+static size_t sFaceKeysScratchCapacity;
+static struct DioramaShellFace *sFaceScratch;
+static size_t sFaceScratchCapacity;
+
+enum { FACE_FIELD_COUNT = 11 };
+
+/* A face's fields in CompareFaces' order (all fit 32 bits signed). */
+static void FaceFields(const struct DioramaShellFace *face, int32_t fields[FACE_FIELD_COUNT])
+{
+    fields[0] = face->axis;
+    fields[1] = face->sign;
+    fields[2] = face->plane;
+    fields[3] = face->sourceCellX;
+    fields[4] = face->sourceCellY;
+    fields[5] = face->material;
+    fields[6] = face->flags;
+    fields[7] = face->vMin;
+    fields[8] = face->vMax;
+    fields[9] = face->uMin;
+    fields[10] = face->uMax;
+}
+
+static unsigned BitsFor(uint32_t range)
+{
+    unsigned bits = 0;
+
+    while (range != 0)
+    {
+        bits++;
+        range >>= 1;
+    }
+    return bits;
+}
+
+/* value (bits wide, at most 32) into the key at bit offset (from the least significant bit) */
+static void PutBits(struct FaceKey *key, uint32_t value, unsigned offset)
+{
+    unsigned word = offset >> 5;
+    unsigned shift = offset & 31;
+
+    key->words[word] |= value << shift;
+    if (shift != 0 && word < 3)
+        key->words[word + 1] |= value >> (32 - shift);
+}
+
+static uint32_t DigitOf(const struct FaceKey *key, unsigned offset)
+{
+    unsigned word = offset >> 5;
+    unsigned shift = offset & 31;
+    uint32_t digit = key->words[word] >> shift;
+
+    if (shift > 16 && word < 3)
+        digit |= key->words[word + 1] << (32 - shift);
+    return digit & 0xFFFF;
+}
+
+static bool SortFaces(struct DioramaShellFace *faces, uint32_t count)
+{
+    static uint32_t counts[0x10001];
+    int32_t minimum[FACE_FIELD_COUNT];
+    int32_t maximum[FACE_FIELD_COUNT];
+    int32_t fields[FACE_FIELD_COUNT];
+    unsigned offsets[FACE_FIELD_COUNT];
+    int used[FACE_FIELD_COUNT];
+    int usedCount = 0;
+    unsigned totalBits = 0;
+    uint32_t i;
+    int field;
+    int u;
+    unsigned offset;
+    struct FaceKey *keys;
+    struct FaceKey *scratch;
+
+    if (count < 2)
+        return true;
+    if (count < OCCUPANCY_SMALL_SORT)
+        return false;
+    if (!Reserve((void **)&sFaceKeys, &sFaceKeysCapacity, count, sizeof(struct FaceKey))
+     || !Reserve((void **)&sFaceKeysScratch, &sFaceKeysScratchCapacity, count, sizeof(struct FaceKey))
+     || !Reserve((void **)&sFaceScratch, &sFaceScratchCapacity, count, sizeof(*faces)))
+        return false;
+    FaceFields(&faces[0], minimum);
+    FaceFields(&faces[0], maximum);
+    for (i = 1; i < count; i++)
+    {
+        FaceFields(&faces[i], fields);
+        for (field = 0; field < FACE_FIELD_COUNT; field++)
+        {
+            if (fields[field] < minimum[field]) minimum[field] = fields[field];
+            if (fields[field] > maximum[field]) maximum[field] = fields[field];
+        }
+    }
+    /* the last field (uMax) the least significant; fields the same in every face are left out */
+    for (field = FACE_FIELD_COUNT - 1; field >= 0; field--)
+    {
+        unsigned bits = BitsFor((uint32_t)maximum[field] - (uint32_t)minimum[field]);
+
+        if (bits == 0)
+            continue;
+        offsets[field] = totalBits;
+        totalBits += bits;
+        used[usedCount++] = field;
+    }
+    if (totalBits > 128)
+        return false;
+    keys = sFaceKeys;
+    scratch = sFaceKeysScratch;
+    for (i = 0; i < count; i++)
+    {
+        memset(keys[i].words, 0, sizeof(keys[i].words));
+        keys[i].index = i;
+        FaceFields(&faces[i], fields);
+        for (u = 0; u < usedCount; u++)
+        {
+            field = used[u];
+            PutBits(&keys[i], (uint32_t)fields[field] - (uint32_t)minimum[field], offsets[field]);
+        }
+    }
+    /* sixteen bits a pass, the least significant first, each a stable
+     * counting pass; a digit the same in every key moves nothing */
+    for (offset = 0; offset < totalBits; offset += 16)
+    {
+        uint32_t digit;
+        bool spread = true;
+        struct FaceKey *swap;
+
+        memset(counts, 0, sizeof(counts));
+        for (i = 0; i < count; i++)
+            counts[DigitOf(&keys[i], offset) + 1]++;
+        for (digit = 0; digit < 0x10000; digit++)
+        {
+            if (counts[digit + 1] == count)
+                spread = false;
+            counts[digit + 1] += counts[digit];
+        }
+        if (!spread)
+            continue;
+        for (i = 0; i < count; i++)
+            scratch[counts[DigitOf(&keys[i], offset)]++] = keys[i];
+        swap = keys;
+        keys = scratch;
+        scratch = swap;
+    }
+    for (i = 0; i < count; i++)
+        sFaceScratch[i] = faces[keys[i].index];
+    memcpy(faces, sFaceScratch, count * sizeof(*faces));
+    return true;
+}
+
 uint32_t DioramaOccupancy_MergeFaces(struct DioramaShellFace *faces,
                                      uint32_t faceCount)
 {
     uint32_t read;
     uint32_t write = 0;
 
-    qsort(faces, faceCount, sizeof(*faces), CompareFaces);
+    if (!SortFaces(faces, faceCount))
+        qsort(faces, faceCount, sizeof(*faces), CompareFaces);
     for (read = 0; read < faceCount; read++)
     {
         struct DioramaShellFace *previous = write == 0 ? NULL : &faces[write - 1];

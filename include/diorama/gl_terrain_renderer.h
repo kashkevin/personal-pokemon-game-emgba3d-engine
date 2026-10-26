@@ -20,6 +20,13 @@ struct DioramaTerrainMetrics
     uint16_t drawCalls;
     uint16_t visibleTreeInstances;
     uint32_t treeModelVertices;
+    /* The last sync's work (PKMN_PERF_FRAME_LOG): chunk inputs built, and the
+     * microseconds in inputs, meshes, uploads and the sync's preparation. */
+    uint16_t inputBuilds;
+    uint32_t inputMicros;
+    uint32_t meshMicros;
+    uint32_t uploadMicros;
+    uint32_t prepareMicros;
 };
 
 bool DioramaGLTerrain_Init(void);

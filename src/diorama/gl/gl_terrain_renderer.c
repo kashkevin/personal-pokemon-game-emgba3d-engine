@@ -1424,10 +1424,16 @@ static void ShapeRockMasses(struct DioramaTerrainChunkInput *input)
         }
 }
 
-static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
-                        const struct DioramaResolvedCell *resolvedCells,
-                       int chunkX, int chunkY,
-                       struct DioramaTerrainChunkInput *input)
+/* Microseconds since 'start' (a performance counter), for the sync's work in the metrics. */
+static uint32_t MicrosSince(uint64_t start)
+{
+    return (uint32_t)((SDL_GetPerformanceCounter() - start) * 1000000u / SDL_GetPerformanceFrequency());
+}
+
+static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
+                              const struct DioramaResolvedCell *resolvedCells,
+                              int chunkX, int chunkY,
+                              struct DioramaTerrainChunkInput *input)
 {
     int originX = chunkX * DIORAMA_TERRAIN_CHUNK_SIZE;
     int originY = chunkY * DIORAMA_TERRAIN_CHUNK_SIZE;
@@ -1787,6 +1793,19 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
     return hasInterior && AppendPixelObjects(snapshot, resolvedCells, chunkX, chunkY, input);
 }
 
+static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
+                       const struct DioramaResolvedCell *resolvedCells,
+                       int chunkX, int chunkY,
+                       struct DioramaTerrainChunkInput *input)
+{
+    uint64_t start = SDL_GetPerformanceCounter();
+    bool built = BuildInputUntimed(snapshot, resolvedCells, chunkX, chunkY, input);
+
+    sMetrics.inputBuilds++;
+    sMetrics.inputMicros += MicrosSince(start);
+    return built;
+}
+
 /* PKMN_DIORAMA_CHUNK_LOG=1: what each chunk built costs (development). */
 static bool ChunkLog(void)
 {
@@ -1861,10 +1880,13 @@ static bool UploadChunk(struct GLTerrainChunk *chunk,
                         uint64_t signature)
 {
     struct DioramaTerrainMesh mesh;
+    uint64_t start = SDL_GetPerformanceCounter();
 
     if (!DioramaTerrain_BuildChunk(input, sScratchVertices,
                                    DIORAMA_TERRAIN_MAX_VERTICES, &mesh))
         return false;
+    sMetrics.meshMicros += MicrosSince(start);
+    start = SDL_GetPerformanceCounter();
     CheckChunkMesh(input, &mesh);
     {
         if (ChunkLog())
@@ -1943,6 +1965,7 @@ static bool UploadChunk(struct GLTerrainChunk *chunk,
     dglBufferData(GL_ARRAY_BUFFER,
                   chunk->drawVertices * sizeof(struct DioramaTerrainVertex),
                   sScratchVertices, GL_DYNAMIC_DRAW);
+    sMetrics.uploadMicros += MicrosSince(start);
     chunk->occupied = true;
     chunk->stale = false;
     chunk->chunkX = input->chunkX;
@@ -1957,6 +1980,7 @@ static bool UploadChunk(struct GLTerrainChunk *chunk,
 
 bool DioramaGLTerrain_Init(void)
 {
+    DioramaTerrain_SetGeometryHash(false); /* only the tests read it; the mesh check compares vertices */
     memset(sChunks, 0, sizeof(sChunks));
     memset(&sMetrics, 0, sizeof(sMetrics));
     sMapGeneration = 0;
@@ -2128,8 +2152,8 @@ static bool LogEnabledTerrain(void)
 }
 
 /* What every chunk's input shares, once per sync. */
-static void PrepareSync(const struct DioramaSceneSnapshot *snapshot,
-                        const struct DioramaResolvedCell *resolvedCells)
+static void PrepareSyncUntimed(const struct DioramaSceneSnapshot *snapshot,
+                               const struct DioramaResolvedCell *resolvedCells)
 {
     static uint16_t counts[DIORAMA_ATLAS_SLOT_COUNT];
     size_t objectCount = gDioramaPixelObjectV2Count;
@@ -2168,6 +2192,15 @@ static void PrepareSync(const struct DioramaSceneSnapshot *snapshot,
             supportActive = resolvedCells[index].structureId == object->supportStructureId;
         sSyncSupportActive[objectIndex] = supportActive;
     }
+}
+
+static void PrepareSync(const struct DioramaSceneSnapshot *snapshot,
+                        const struct DioramaResolvedCell *resolvedCells)
+{
+    uint64_t start = SDL_GetPerformanceCounter();
+
+    PrepareSyncUntimed(snapshot, resolvedCells);
+    sMetrics.prepareMicros += MicrosSince(start);
 }
 
 /* Whether a cell's input reads its tiles' pixels (BuildInput: tree shades,
@@ -2654,6 +2687,11 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
         sMapEditGeneration, snapshot->mapEditGeneration,
         snapshot->dirtyCellCount, snapshot->dirtyOverflow);
 
+    sMetrics.inputBuilds = 0;
+    sMetrics.inputMicros = 0;
+    sMetrics.meshMicros = 0;
+    sMetrics.uploadMicros = 0;
+    sMetrics.prepareMicros = 0;
     sClaimDebugVertexCount = 0;
     /* The claim outlines are drawn only by the terrain debug view. */
     for (i = 0; sDebugDrawn && i < snapshot->visibleCellCount && i < DIORAMA_MAX_VISIBLE_CELLS; i++)

@@ -17,6 +17,7 @@
 static struct DioramaOccupancySpan sOccupancySpans[OCCUPANCY_INPUT_COLUMNS];
 static struct DioramaShellFace sShellFaces[DIORAMA_TERRAIN_MAX_FACES];
 static bool sVoxelOccupancyOnly; /* DioramaTerrain_SetVoxelOccupancyOnly */
+static bool sNoGeometryHash;     /* DioramaTerrain_SetGeometryHash */
 
 static uint64_t HashByte(uint64_t hash, uint8_t value)
 {
@@ -1778,6 +1779,11 @@ bool DioramaTerrain_BuildTreeModel(struct DioramaTerrainVertex *vertices,
     return true;
 }
 
+void DioramaTerrain_SetGeometryHash(bool on)
+{
+    sNoGeometryHash = !on;
+}
+
 void DioramaTerrain_SetVoxelOccupancyOnly(bool on)
 {
     sVoxelOccupancyOnly = on;
@@ -2295,6 +2301,9 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
                     + mesh->sideFaceCount + mesh->featureFaceCount;
     if (mesh->faceCount == 0 && mesh->treeInstanceCount == 0)
         memset(&mesh->bounds, 0, sizeof(mesh->bounds));
+    mesh->geometryHash = 0;
+    if (sNoGeometryHash)
+        return true;
     mesh->geometryHash = FNV_OFFSET;
     for (uint32_t i = 0; i < vertexCount; i++)
     {

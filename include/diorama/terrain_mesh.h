@@ -275,6 +275,10 @@ enum DioramaTreeFacing DioramaTerrain_TreeModelFacing(uint32_t face);
 /* Tests and PKMN_DIORAMA_MESH_CHECK: every chunk built through the voxel
  * spans, the compressed shell (whole cells' faces) never used. */
 void DioramaTerrain_SetVoxelOccupancyOnly(bool on);
+/* Whether a mesh's geometryHash is worked out (tests compare meshes by it; on
+ * by default). The game turns it off: a byte-wise hash of every vertex was a
+ * few percent of a chunk's build, for nothing it reads. */
+void DioramaTerrain_SetGeometryHash(bool on);
 bool DioramaTerrain_IsBoundsVisible(const struct DioramaTerrainBounds *bounds,
                                      float cameraX, float cameraZ,
                                      float cameraPitch, float focalLength);

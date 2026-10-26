@@ -2241,7 +2241,9 @@ static void FrameLog(double frameMs)
         sState = sFile != NULL ? 1 : -1;
         if (sFile != NULL)
             fprintf(sFile, "game_frame,frame_ms,main_cpu_ms,process_cpu_ms,drew_3d,rebuilt_chunks,vertices,"
-                           "tree_instances,terrain_ms,sync_ms,air_ms\n");
+                           "tree_instances,terrain_ms,sync_ms,air_ms,inputs,input_ms,mesh_ms,upload_ms,prepare_ms,"
+                           "sync_atlas_ms,sync_terrain_ms,sync_objects_ms,sync_buildings_ms,sync_trees_ms,"
+                           "sync_props_ms\n");
     }
     if (sState < 0)
         return;
@@ -2256,12 +2258,18 @@ static void FrameLog(double frameMs)
     }
 #endif
     terrain = DioramaGLTerrain_GetMetrics();
-    fprintf(sFile, "%u,%.3f,%.3f,%.3f,%d,%u,%u,%u,%.3f,%.3f,%.3f\n", DebugScene_GameFrame(), frameMs,
+    fprintf(sFile, "%u,%.3f,%.3f,%.3f,%d,%u,%u,%u,%.3f,%.3f,%.3f,%u,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n",
+            DebugScene_GameFrame(), frameMs,
             sLastCpuMs != 0.0 ? cpuMs - sLastCpuMs : 0.0, sLastProcessMs != 0.0 ? processMs - sLastProcessMs : 0.0,
             DioramaGL_LastFrameWas3D() ? 1 : 0,
             (unsigned)terrain->rebuiltChunks, (unsigned)terrain->vertices, (unsigned)terrain->visibleTreeInstances,
             DioramaProfile_LastFrameMs(DIORAMA_PROF_TERRAIN), DioramaProfile_LastFrameMs(DIORAMA_PROF_SYNC),
-            DioramaProfile_LastFrameMs(DIORAMA_PROF_AIR));
+            DioramaProfile_LastFrameMs(DIORAMA_PROF_AIR), (unsigned)terrain->inputBuilds,
+            terrain->inputMicros / 1000.0, terrain->meshMicros / 1000.0, terrain->uploadMicros / 1000.0,
+            terrain->prepareMicros / 1000.0, DioramaProfile_LastFrameMs(DIORAMA_PROF_SYNC_ATLAS),
+            DioramaProfile_LastFrameMs(DIORAMA_PROF_SYNC_TERRAIN), DioramaProfile_LastFrameMs(DIORAMA_PROF_SYNC_OBJECTS),
+            DioramaProfile_LastFrameMs(DIORAMA_PROF_SYNC_BUILDINGS), DioramaProfile_LastFrameMs(DIORAMA_PROF_SYNC_TREES),
+            DioramaProfile_LastFrameMs(DIORAMA_PROF_SYNC_PROPS));
     fflush(sFile);
     sLastCpuMs = cpuMs;
     sLastProcessMs = processMs;
