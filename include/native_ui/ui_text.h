@@ -73,6 +73,8 @@ int UiText_Length(const uint8_t *s);
 void UiText_Append(uint8_t *dst, int size, const uint8_t *s);
 void UiText_AppendAscii(uint8_t *dst, int size, const char *ascii);
 void UiText_AppendNumber(uint8_t *dst, int size, long value, int minDigits, bool thousands);
+/* a place's name in title case from the game's capitals ("OF" inside it small); dropStop drops a final period */
+void UiText_TitleCase(uint8_t *dst, int size, const uint8_t *src, bool dropStop);
 
 /* Route Caps 5x7 and Micro 3x5 (pieces cached by text and colours) */
 int UiCaps_Width(const char *s);

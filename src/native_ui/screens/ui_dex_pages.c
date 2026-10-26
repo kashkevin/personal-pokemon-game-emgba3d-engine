@@ -101,64 +101,15 @@ static u8 sIconRgba[16 * 16 * 4];
 static bool sIconFemale;
 static bool sIconReady;
 
-static void TitleCase(u8 *dst, int size, const u8 *src, bool dropStop);
 
 /* ---------------------------------------------------------------- capture */
 
 static void BuildMap(u8 type)
 {
-    const struct RegionMapInfo *info = &gRegionMapInfos[type];
-    u32 gfxSize, tmSize;
-    u8 *tiles, *tm;
-    int colours;
-
     if (sMapRgba == NULL)
         sMapRgba = malloc(MAP_W * MAP_H * 4);
-    if (sMapRgba == NULL || info->dexMapGfx == NULL || info->dexMapTilemap == NULL || info->dexMapPalette == NULL)
+    if (sMapRgba == NULL || !UiGfx_RegionMapArt(type, sMapRgba))
         return;
-    gfxSize = GetDecompressedDataSize(info->dexMapGfx);
-    tmSize = GetDecompressedDataSize(info->dexMapTilemap);
-    tiles = calloc(gfxSize + 64, 1);
-    tm = calloc(tmSize + 64, 1);
-    if (tiles == NULL || tm == NULL)
-    {
-        free(tiles);
-        free(tm);
-        return;
-    }
-    DecompressDataWithHeaderWram(info->dexMapGfx, tiles);
-    DecompressDataWithHeaderWram(info->dexMapTilemap, tm);
-    colours = info->dexMapPaletteSize / 2;
-    memset(sMapRgba, 0, MAP_W * MAP_H * 4);
-    for (int r = 0; r < MAP_ROWS; r++)
-        for (int c = 0; c < MAP_COLS; c++)
-        {
-            u32 at = (u32)(r * 32 + c) * 2;
-            u16 entry = at + 1 < tmSize ? (u16)(tm[at] | (tm[at + 1] << 8)) : 0;
-            u32 tile = entry & 0x3FF;
-            bool hflip = (entry >> 10) & 1, vflip = (entry >> 11) & 1;
-
-            for (int py = 0; py < 8; py++)
-                for (int px = 0; px < 8; px++)
-                {
-                    int sx = hflip ? 7 - px : px, sy = vflip ? 7 - py : py;
-                    u32 off = tile * 64 + (u32)(sy * 8 + sx);
-                    u8 p = off < gfxSize ? tiles[off] : 0;
-                    u8 *d = &sMapRgba[((size_t)(r * 8 + py) * MAP_W + (c * 8 + px)) * 4];
-                    u16 col;
-
-                    /* 8bpp: the map's colours are BG palettes 7 onwards (index 112); 0 is clear */
-                    if (p < 112 || p - 112 >= colours)
-                        continue;
-                    col = info->dexMapPalette[p - 112];
-                    d[0] = ((col & 0x1F) << 3) | ((col & 0x1F) >> 2);
-                    d[1] = (((col >> 5) & 0x1F) << 3) | (((col >> 5) & 0x1F) >> 2);
-                    d[2] = (((col >> 10) & 0x1F) << 3) | (((col >> 10) & 0x1F) >> 2);
-                    d[3] = 255;
-                }
-        }
-    free(tiles);
-    free(tm);
     for (int r = 0; r < MAP_ROWS; r++)
         for (int c = 0; c < MAP_COLS; c++)
             sMapSections[r][c] = GetRegionMapSecIdAt(c, r);
@@ -194,7 +145,7 @@ static void CaptureAreaNames(void)
             u8 name[32];
 
             GetMapName(name, sec, 0);
-            TitleCase(sAreaNames[sAreaNameCount], sizeof(sAreaNames[0]), name, false);
+            UiText_TitleCase(sAreaNames[sAreaNameCount], sizeof(sAreaNames[0]), name, false);
         }
         /* a name repeated under another section (Route 119's two halves) */
         for (int i = 0; i < sAreaNameCount && !dup; i++)
@@ -332,27 +283,6 @@ static void Line(int x0, int y0, int x1, int y1, UiRGBA c)
 
 /* an engine string in the design's case: each word's first letter (and one after a
  * full stop: "S.S.") as it is, the rest lower case; dropStop drops a final full stop */
-static void TitleCase(u8 *dst, int size, const u8 *src, bool dropStop)
-{
-    int i = 0;
-    bool wordStart = true;
-
-    for (; src != NULL && src[i] != EOS && i < size - 1; i++)
-    {
-        u8 ch = src[i];
-        /* "OF" inside a name stays small: Cave of Origin */
-        bool of = wordStart && i > 0 && ch == CHAR_O && src[i + 1] == CHAR_F && (src[i + 2] == CHAR_SPACE || src[i + 2] == EOS);
-
-        if ((!wordStart || of) && ch >= CHAR_A && ch <= CHAR_Z)
-            ch = ch - CHAR_A + CHAR_a;
-        wordStart = ch == CHAR_SPACE || ch == CHAR_PERIOD;
-        dst[i] = ch;
-    }
-    dst[i] = EOS;
-    /* "DON'T SPECIFY." and the like */
-    if (dropStop && i > 0 && dst[i - 1] == CHAR_PERIOD)
-        dst[i - 1] = EOS;
-}
 
 /* ---------------------------------------------------------------- AREA */
 
@@ -896,7 +826,7 @@ static int DrawOption(int row, int index, const u8 *title, int x, int y, int max
         return UiG_TextEx(x, y, sText_Any, UI_FONT_NORMAL, UI_P_TEXT_MUTED, UI_P_TEXT_SH, UI_ALIGN_LEFT);
     if (row == SEARCH_NAME)
         return UiG_Text(x, y, title);
-    TitleCase(b, sizeof(b), title, true);
+    UiText_TitleCase(b, sizeof(b), title, true);
     return UiText_Draw(UiText_Width(UI_FONT_NORMAL, b, 0) > maxW ? UI_FONT_NARROW : UI_FONT_NORMAL, x, y, b, UI_P_TEXT,
                        UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
 }

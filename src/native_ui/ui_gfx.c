@@ -26,6 +26,7 @@
 #include "event_object_movement.h"
 #include "item_icon.h"
 #include "pokemon.h"
+#include "region_map.h"
 #include "constants/items.h"
 #include "constants/species.h"
 
@@ -558,6 +559,63 @@ bool UiGfx_Decor(uint16_t decor, int x, int y, int box, int scale)
     snprintf(key, sizeof(key), "decor:%u", (unsigned)decor);
     UiG_BlitPart(UiG_Cached(key, e->w, e->h, BuildArt, &c), 0, 0, e->w, e->h, x + (box - e->w * scale) / 2,
                  y + (box - e->h * scale) / 2, scale, false, 1.0);
+    return true;
+}
+
+/* The region's map as the Pokédex AREA page shows it (its own art: 30 x 19 tiles, 240 x 152), into rgba
+ * (240 x 152 x 4, clear where the art has nothing); false without the art. The Fly map and the wall map draw it too. */
+bool UiGfx_RegionMapArt(uint8_t type, uint8_t *rgba)
+{
+    const struct RegionMapInfo *info = &gRegionMapInfos[type];
+    u32 gfxSize, tmSize;
+    u8 *tiles, *tm;
+    int colours;
+
+    if (info->dexMapGfx == NULL || info->dexMapTilemap == NULL || info->dexMapPalette == NULL)
+        return false;
+    gfxSize = GetDecompressedDataSize(info->dexMapGfx);
+    tmSize = GetDecompressedDataSize(info->dexMapTilemap);
+    tiles = calloc(gfxSize + 64, 1);
+    tm = calloc(tmSize + 64, 1);
+    if (tiles == NULL || tm == NULL)
+    {
+        free(tiles);
+        free(tm);
+        return false;
+    }
+    DecompressDataWithHeaderWram(info->dexMapGfx, tiles);
+    DecompressDataWithHeaderWram(info->dexMapTilemap, tm);
+    colours = info->dexMapPaletteSize / 2;
+    memset(rgba, 0, UI_REGION_MAP_W * UI_REGION_MAP_H * 4);
+    for (int r = 0; r < UI_REGION_MAP_H / 8; r++)
+        for (int c = 0; c < UI_REGION_MAP_W / 8; c++)
+        {
+            u32 at = (u32)(r * 32 + c) * 2;
+            u16 entry = at + 1 < tmSize ? (u16)(tm[at] | (tm[at + 1] << 8)) : 0;
+            u32 tile = entry & 0x3FF;
+            bool hflip = (entry >> 10) & 1, vflip = (entry >> 11) & 1;
+
+            for (int py = 0; py < 8; py++)
+                for (int px = 0; px < 8; px++)
+                {
+                    int sx = hflip ? 7 - px : px, sy = vflip ? 7 - py : py;
+                    u32 off = tile * 64 + (u32)(sy * 8 + sx);
+                    u8 p = off < gfxSize ? tiles[off] : 0;
+                    u8 *d = &rgba[((size_t)(r * 8 + py) * UI_REGION_MAP_W + (c * 8 + px)) * 4];
+                    u16 col;
+
+                    /* 8bpp: the map's colours are BG palettes 7 onwards (index 112); 0 is clear */
+                    if (p < 112 || p - 112 >= colours)
+                        continue;
+                    col = info->dexMapPalette[p - 112];
+                    d[0] = ((col & 0x1F) << 3) | ((col & 0x1F) >> 2);
+                    d[1] = (((col >> 5) & 0x1F) << 3) | (((col >> 5) & 0x1F) >> 2);
+                    d[2] = (((col >> 10) & 0x1F) << 3) | (((col >> 10) & 0x1F) >> 2);
+                    d[3] = 255;
+                }
+        }
+    free(tiles);
+    free(tm);
     return true;
 }
 

@@ -257,3 +257,21 @@ static void PrintTitleWindowText(void)
         CopyWindowToVram(WIN_TITLE, COPYWIN_FULL);
     }
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (screens/ui_region_map.c): the wall map is open with its map set up; whether it takes input and
+// whether R flies from it (PrintTitleWindowText's own test).
+bool8 FieldRegionMap_NativeUiOpen(bool8 *input, bool8 *canFly, struct RegionMap **map)
+{
+    if (gMain.callback2 != MCB2_FieldUpdateRegionMap || sFieldRegionMapHandler == NULL
+     || sFieldRegionMapHandler->state == 0)
+        return FALSE;
+    *input = sFieldRegionMapHandler->state == 4;
+    *canFly = sFieldRegionMapHandler->regionMap.mapSecType == MAPSECTYPE_CITY_CANFLY && FlagGet(OW_FLAG_POKE_RIDER)
+           && Overworld_MapTypeAllowsTeleportAndFly(gMapHeader.mapType) == TRUE;
+    *map = &sFieldRegionMapHandler->regionMap;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

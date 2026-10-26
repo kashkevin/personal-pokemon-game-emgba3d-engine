@@ -472,6 +472,46 @@ bool32 PokedexArea_NativeUiState(struct NativeDexArea *out);
 /* the region map's player icon (16x16 4bpp) and its palette (region_map.c) */
 const u8 *RegionMap_NativeUiPlayerIcon(bool32 female, const u16 **palette);
 
+/* The Fly map (region_map.c) and the wall map (field_region_map.c) as the game has them now (screens/ui_region_map.c).
+ * Cells are the cursor's coordinates: cell (x, y) is the map art's 8x8 tile x, y. */
+#define NATIVE_REGION_FLY_MAX 24
+enum NativeRegionMapKind
+{
+    NATIVE_REGION_MAP_FLY = 1,
+    NATIVE_REGION_MAP_TOWN,
+};
+struct NativeRegionFlySpot
+{
+    u16 mapSec;
+    u8 x, y, w, h;              /* its cells */
+    bool8 visited;              /* the game's bright icon (else its dim one) */
+    bool8 outline;              /* the Battle Frontier's red outline */
+};
+struct NativeRegionMapState
+{
+    u8 kind;                    /* enum NativeRegionMapKind */
+    u8 regionMapType;
+    bool8 input;                /* the map takes input (not fading in or out) */
+    bool8 canFly;               /* A flies to the cursor's place (the Fly map); R does (the wall map, the Poke Rider) */
+    bool8 female;
+    bool8 playerShown;
+    u16 cursorX, cursorY;       /* the cursor's cell */
+    s16 cursorPixX, cursorPixY; /* its sprite's centre as it glides from cell to cell, in GBA pixels */
+    u16 playerX, playerY;       /* the player's cell */
+    u16 mapSec;
+    u8 mapSecType;
+    u8 name[24];                /* the cursor's place */
+    u8 subName[24];             /* a place with two names' second (Ever Grande City's), as the Fly map prints it */
+    u8 flyCount;
+    struct NativeRegionFlySpot fly[NATIVE_REGION_FLY_MAX];
+};
+bool8 RegionMap_NativeUiState(struct NativeRegionMapState *out);
+/* a clicked cell: the map's own input puts the cursor there next (as SELECT's jump to a trainer does) */
+void RegionMap_NativeUiMoveCursor(u16 x, u16 y);
+struct RegionMap;
+/* field_region_map.c: the wall map is open (its map set up) */
+bool8 FieldRegionMap_NativeUiOpen(bool8 *input, bool8 *canFly, struct RegionMap **map);
+
 /* the CRY page (pokedex_cry_screen.c): the waveform and the meter */
 struct NativeDexCry
 {

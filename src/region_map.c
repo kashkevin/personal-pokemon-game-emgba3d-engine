@@ -890,6 +890,14 @@ static u8 ProcessRegionMapInput_Full(void)
     RegionMap_PortableTick(); // multiplayer: keep the trainer markers current
     if (input == MAP_INPUT_NONE && JOY_NEW(SELECT_BUTTON))
         input = RegionMap_PortableJump(); // multiplayer: cursor to the next trainer or event
+#ifdef ENABLE_NATIVE_UI
+    if (input == MAP_INPUT_NONE)
+    {
+        u8 RegionMap_NativeUiTakeCursor(void);
+
+        input = RegionMap_NativeUiTakeCursor(); // the native UI: a clicked cell
+    }
+#endif
 #endif
 #line 885 // gba-line
     if (input == MAP_INPUT_MOVE_START)
@@ -3117,5 +3125,116 @@ const u8 *RegionMap_NativeUiPlayerIcon(bool32 female, const u16 **palette)
 {
     *palette = female ? sRegionMapPlayerIcon_MayPal : sRegionMapPlayerIcon_BrendanPal;
     return female ? sRegionMapPlayerIcon_MayGfx : sRegionMapPlayerIcon_BrendanGfx;
+}
+
+// The native PC UI (screens/ui_region_map.c): the Fly map or the wall map as the game has it now, read at the frame
+// boundary (changes nothing), and a clicked cell for the cursor, taken by the map's own input.
+static bool8 sNativeCursorPending;
+static u16 sNativeCursorX, sNativeCursorY;
+
+static void NativeUiFlySpot(struct NativeRegionMapState *out, mapsec_u16_t mapSec, bool8 visited, bool8 outline)
+{
+    struct NativeRegionFlySpot *spot;
+    u16 x, y, width, height;
+
+    if (out->flyCount >= NATIVE_REGION_FLY_MAX)
+        return;
+    GetMapSecDimensions(mapSec, &x, &y, &width, &height);
+    spot = &out->fly[out->flyCount++];
+    spot->mapSec = mapSec;
+    spot->x = x + MAPCURSOR_X_MIN;
+    spot->y = y + MAPCURSOR_Y_MIN;
+    spot->w = width;
+    spot->h = height;
+    spot->visited = visited;
+    spot->outline = outline;
+}
+
+bool8 RegionMap_NativeUiState(struct NativeRegionMapState *out)
+{
+    struct RegionMap *map;
+    bool8 input = FALSE, canFly = FALSE;
+    u32 i;
+
+    memset(out, 0, sizeof(*out));
+    out->name[0] = out->subName[0] = EOS;
+    if (sFlyMap != NULL && gMain.callback2 == CB2_FlyMap)
+    {
+        map = &sFlyMap->regionMap;
+        out->kind = NATIVE_REGION_MAP_FLY;
+        input = sFlyMap->callback == CB_HandleFlyMapInput;
+        canFly = map->mapSecType == MAPSECTYPE_CITY_CANFLY || map->mapSecType == MAPSECTYPE_BATTLE_FRONTIER;
+    }
+    else if (FieldRegionMap_NativeUiOpen(&input, &canFly, &map))
+        out->kind = NATIVE_REGION_MAP_TOWN;
+    else
+        return FALSE;
+    if (map->zoomed)
+        return FALSE;
+    out->regionMapType = GetRegionMapType(gMapHeader.regionMapSectionId);
+    out->input = input;
+    out->canFly = canFly;
+    out->female = gSaveBlock2Ptr->playerGender != MALE;
+    out->cursorX = map->cursorPosX;
+    out->cursorY = map->cursorPosY;
+    out->cursorPixX = map->cursorSprite != NULL ? map->cursorSprite->x + map->cursorSprite->x2 : 8 * map->cursorPosX + 4;
+    out->cursorPixY = map->cursorSprite != NULL ? map->cursorSprite->y + map->cursorSprite->y2 : 8 * map->cursorPosY + 4;
+    out->playerShown = map->playerIconSprite != NULL;
+    out->playerX = map->playerIconSpritePosX;
+    out->playerY = map->playerIconSpritePosY;
+    out->mapSec = map->mapSecId;
+    out->mapSecType = map->mapSecType;
+    StringCopyN(out->name, map->mapSecName, sizeof(out->name) - 1);
+    out->name[sizeof(out->name) - 1] = EOS;
+    if (out->kind != NATIVE_REGION_MAP_FLY)
+        return TRUE;
+    for (i = 0; i < ARRAY_COUNT(sMultiNameFlyDestinations); i++)
+        if (map->mapSecId == sMultiNameFlyDestinations[i].mapSecId && FlagGet(sMultiNameFlyDestinations[i].flag))
+        {
+            StringCopyN(out->subName, sMultiNameFlyDestinations[i].name[map->posWithinMapSec], sizeof(out->subName) - 1);
+            out->subName[sizeof(out->subName) - 1] = EOS;
+        }
+    // the game's fly icons (CreateFlyDestIcons, TryCreateRedOutlineFlyDestIcons)
+    for (i = 0; i < ARRAY_COUNT(sFlyLocations); i++)
+        if (sFlyLocations[i].regionMapType == out->regionMapType)
+            NativeUiFlySpot(out, sFlyLocations[i].mapsec, FlagGet(sFlyLocations[i].flag), FALSE);
+    for (i = 0; sRedOutlineFlyDestinations[i][1] != MAPSEC_NONE; i++)
+        if (FlagGet(sRedOutlineFlyDestinations[i][0]))
+            NativeUiFlySpot(out, sRedOutlineFlyDestinations[i][1], TRUE, TRUE);
+    return TRUE;
+}
+
+void RegionMap_NativeUiMoveCursor(u16 x, u16 y)
+{
+    if (x < MAPCURSOR_X_MIN || x > MAPCURSOR_X_MAX || y < MAPCURSOR_Y_MIN || y > MAPCURSOR_Y_MAX)
+        return;
+    sNativeCursorX = x;
+    sNativeCursorY = y;
+    sNativeCursorPending = TRUE;
+}
+
+// ProcessRegionMapInput_Full: the clicked cell, once the cursor stands still. MAP_INPUT_MOVE_END when it moved, so the
+// screen names the new place as after any move.
+u8 RegionMap_NativeUiTakeCursor(void)
+{
+    if (!sNativeCursorPending)
+        return MAP_INPUT_NONE;
+    sNativeCursorPending = FALSE;
+    if (sRegionMap == NULL || sRegionMap->zoomed
+     || (sRegionMap->cursorPosX == sNativeCursorX && sRegionMap->cursorPosY == sNativeCursorY))
+        return MAP_INPUT_NONE;
+    sRegionMap->cursorPosX = sNativeCursorX;
+    sRegionMap->cursorPosY = sNativeCursorY;
+    if (sRegionMap->cursorSprite != NULL)
+    {
+        sRegionMap->cursorSprite->x = 8 * sRegionMap->cursorPosX + 4;
+        sRegionMap->cursorSprite->y = 8 * sRegionMap->cursorPosY + 4;
+    }
+    sRegionMap->cursorMovementFrameCounter = 0;
+    sRegionMap->mapSecId = GetMapSecIdAt(sRegionMap->cursorPosX, sRegionMap->cursorPosY);
+    sRegionMap->mapSecType = GetMapsecType(sRegionMap->mapSecId);
+    GetMapName(sRegionMap->mapSecName, sRegionMap->mapSecId, MAP_NAME_LENGTH);
+    GetPositionOfCursorWithinMapSec();
+    return MAP_INPUT_MOVE_END;
 }
 #endif // ENABLE_NATIVE_UI

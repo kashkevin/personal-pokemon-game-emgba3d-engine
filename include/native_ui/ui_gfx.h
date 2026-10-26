@@ -80,6 +80,10 @@ bool UiGfx_Decor(uint16_t decor, int x, int y, int box, int scale);
 bool UiGfx_DecorSize(uint16_t decor, int *w, int *h);
 
 /* a trainer's front picture (64x64; decompressed at the frame boundary like the above) */
+/* the region's map art as the Pokédex AREA page shows it, 240 x 152 RGBA (region_map.h's gRegionMapInfos) */
+#define UI_REGION_MAP_W 240
+#define UI_REGION_MAP_H 152
+bool UiGfx_RegionMapArt(uint8_t type, uint8_t *rgba);
 bool UiGfx_PrepareTrainerPic(uint16_t picId);
 bool UiGfx_TrainerPic(uint16_t picId, int x, int y, const struct UiFilter *filter);
 /* the pictures as the GBA's affine sprites show them: scaled about the 64x64 box's

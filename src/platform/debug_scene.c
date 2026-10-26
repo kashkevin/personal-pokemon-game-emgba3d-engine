@@ -38,6 +38,8 @@
 #include "field_message_box.h"
 #include "strings.h"
 #include "map_name_popup.h"
+#include "pokedex.h"
+#include "fieldmap.h"
 #include "link.h"
 #include "pokemon.h"
 #include "string_util.h"
@@ -790,6 +792,38 @@ static void PokeNavTick(void)
     sAt = -1;
 }
 
+// PKMN_DEBUG_FLYMAP=frame (with the field scene): the Fly map opened from the calm field at that game frame, as the
+// party menu's FLY opens it (CB2_OpenFlyMap; choosing a place flies there). PKMN_DEBUG_TOWNMAP=frame: a Pokemon Center's
+// wall map instead (FieldInitRegionMap, back to the field on closing).
+static void RegionMapTick(void)
+{
+    static int sFly = -2, sTown = -2;
+    const char *value;
+
+    if (sFly == -2)
+    {
+        sFly = (value = SDL_getenv("PKMN_DEBUG_FLYMAP")) != NULL ? atoi(value) : -1;
+        sTown = (value = SDL_getenv("PKMN_DEBUG_TOWNMAP")) != NULL ? atoi(value) : -1;
+    }
+    if (gMain.callback2 != CB2_Overworld || ArePlayerFieldControlsLocked() || gPaletteFade.active
+     || ScriptContext_IsEnabled())
+        return;
+    if (sFly >= 0 && sKeyFrame >= (unsigned)sFly)
+    {
+        SDL_Log("debug Fly map: opened at frame %u", sKeyFrame);
+        HideMapNamePopUpWindow();
+        SetMainCallback2(CB2_OpenFlyMap);
+        sFly = -1;
+    }
+    else if (sTown >= 0 && sKeyFrame >= (unsigned)sTown)
+    {
+        SDL_Log("debug town map: opened at frame %u", sKeyFrame);
+        HideMapNamePopUpWindow();
+        FieldInitRegionMap(CB2_ReturnToField);
+        sTown = -1;
+    }
+}
+
 // PKMN_DEBUG_MATCHCALL=frame (with the field scene): a PokeNav call on the calm field at that game frame, as a script
 // places one (ShowPokenavFieldMessage), with any two-line message; PKMN_DEBUG_KEYS hangs up.
 static void MatchCallTick(void)
@@ -816,6 +850,7 @@ uint16_t DebugScene_FilterKeys(uint16_t keys)
     FieldMoveTick();
     PokeNavTick();
     MatchCallTick();
+    RegionMapTick();
     BagLog();
     LinkLog();
     PartyLog();
@@ -1276,6 +1311,18 @@ static void StartFieldScene(void)
             SetMonMoveSlot(&gParties[B_TRAINER_PLAYER][0], (u16)mv[m], (u8)m);
     }
     gPartiesCount[B_TRAINER_PLAYER] = 1;
+    // PKMN_DEBUG_DEX=species[,species...]: those caught in the Pokédex (its entry pages: INFO, AREA, CRY, SIZE)
+    if ((value = SDL_getenv("PKMN_DEBUG_DEX")) != NULL)
+    {
+        int dex[8], count = Numbers(value, dex, 8);
+
+        for (int k = 0; k < count; k++)
+            if (dex[k] > 0 && dex[k] < NUM_SPECIES)
+            {
+                GetSetPokedexFlag(SpeciesToNationalPokedexNum((u16)dex[k]), FLAG_SET_SEEN);
+                GetSetPokedexFlag(SpeciesToNationalPokedexNum((u16)dex[k]), FLAG_SET_CAUGHT);
+            }
+    }
     // PKMN_DEBUG_PARTY=n (2-6): n Pokemon (the first, then Zigzagoon, Wurmple...) for the PC storage checks
     if ((value = SDL_getenv("PKMN_DEBUG_PARTY")) != NULL && Numbers(value, v, 1) >= 1 && v[0] >= 2 && v[0] <= PARTY_SIZE)
     {
@@ -1406,7 +1453,16 @@ static void CB2_DebugSceneSetup(void)
     RegionMap_PortableSetTest(&sTest);
 
     if (strcmp(scene, "regionmap") == 0)
+    {
+        RivalSetup(); // PKMN_DEBUG_RIVAL_SET's flags: the towns visited (their fly spots lit)
         SetMainCallback2(CB2_OpenFlyMap);
+    }
+    else if (strcmp(scene, "townmap") == 0)
+    {
+        // a Pokemon Center's wall map (field_region_map.c), as its metatile's script opens it
+        RivalSetup();
+        FieldInitRegionMap(CB2_ReturnToField);
+    }
     else if (strcmp(scene, "pokenav") == 0)
         SetMainCallback2(CB2_InitPokeNav);
     else if (strcmp(scene, "ffa") == 0)

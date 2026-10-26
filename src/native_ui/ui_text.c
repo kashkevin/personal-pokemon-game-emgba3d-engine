@@ -14,6 +14,7 @@
 #include "gba/types.h"
 #include "fonts.h"
 #include "string_util.h"
+#include "constants/characters.h"
 #include "native_ui/ui_draw.h"
 #include "native_ui/ui_text.h"
 
@@ -609,5 +610,27 @@ int UiMicro_Draw(int x, int y, const char *s, UiRGBA fg)
 int UiG_Caps(int x, int y, const char *s, UiRGBA fg, UiRGBA ink, enum UiCapsStyle style, enum UiAlign align)
 {
     return UiCaps_Draw(x, y, s, fg, ink, style, align, UI_NONE);
+}
+
+/* A place's name in title case from the game's capitals: "PETALBURG CITY" -> "Petalburg City", "OF" inside a name
+ * small (Cave of Origin); dropStop drops a final period ("DON'T SPECIFY."). */
+void UiText_TitleCase(uint8_t *dst, int size, const uint8_t *src, bool dropStop)
+{
+    int i = 0;
+    bool wordStart = true;
+
+    for (; src != NULL && src[i] != EOS && i < size - 1; i++)
+    {
+        uint8_t ch = src[i];
+        bool of = wordStart && i > 0 && ch == CHAR_O && src[i + 1] == CHAR_F && (src[i + 2] == CHAR_SPACE || src[i + 2] == EOS);
+
+        if ((!wordStart || of) && ch >= CHAR_A && ch <= CHAR_Z)
+            ch = ch - CHAR_A + CHAR_a;
+        wordStart = ch == CHAR_SPACE || ch == CHAR_PERIOD;
+        dst[i] = ch;
+    }
+    dst[i] = EOS;
+    if (dropStop && i > 0 && dst[i - 1] == CHAR_PERIOD)
+        dst[i - 1] = EOS;
 }
 #endif // ENABLE_NATIVE_UI
