@@ -57,6 +57,13 @@ def _general_stairs(cell: dict) -> bool:
             and cell.get("localMetatile", cell.get("metatile")) in GENERAL_STAIRS)
 
 
+def _climb(cell: dict) -> bool:
+    """A way up onto a mountain's top for mountain_ledges: General's terrace
+    stairs, or a muddy slope (MB_MUDDY_SLOPE, the Mach Bike's: Route 111's rock
+    plateau north of the desert has two and no stairs)."""
+    return _general_stairs(cell) or cell.get("behavior") == "MB_MUDDY_SLOPE"
+
+
 def _neighbours(offset: int, width: int, height: int):
     x, y = offset % width, offset // width
     for nx, ny in ((x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y)):
@@ -71,8 +78,10 @@ def mountain_ledges(cells: tuple[dict, ...], width: int, height: int,
     level of the ground round the mountain, the rock a cell high all round it,
     so it and every path through the rock were trenches between walls (the
     owner's report, 2026-10-24: "a maze of walls"). The game draws stairs up to
-    such a top (General's terrace stairs, 175 and 207); where no terrace solves
-    them (solve_layout), the walkable region at the stairs' top that is mostly
+    such a top (General's terrace stairs, 175 and 207) or, for the Mach Bike, a
+    muddy slope (Route 111's rock plateau north of the desert: it has two and no
+    stairs, so it lay on the desert's level inside its rock, a pit); where no
+    terrace solves them (solve_layout), the walkable region at the stairs' top that is mostly
     MB_MOUNTAIN_TOP stands MOUNTAIN_LEDGE_Q16 over the region at their foot (its
     own level, 0) and the stairs rise between the two over their rows. The
     mountain's rock, one mass a level high (compile_rules._mountain_masses),
@@ -90,7 +99,7 @@ def mountain_ledges(cells: tuple[dict, ...], width: int, height: int,
                 and not str(cell.get("behavior") or "").startswith("MB_JUMP_"))
 
     stairs = {offset for offset in range(len(cells))
-              if walkable(offset) and _general_stairs(cells[offset])}
+              if walkable(offset) and _climb(cells[offset])}
     if not stairs:
         return {}
     region_of: dict[int, int] = {}
@@ -150,11 +159,18 @@ def mountain_ledges(cells: tuple[dict, ...], width: int, height: int,
                 if (neighbor in region_of and region_of[neighbor] not in raised
                         and neighbor not in stairs):
                     return {}  # a step between walkable cells with no stairs
+    # A pocket of the top that no one walks into (walkable cells, mostly MB_MOUNTAIN_TOP, blocked on every side: three
+    # cells south of Route 111's plateau) lies on the raised level too; on the ground's it was a pit in the rock.
+    pockets = [index for index, region in enumerate(regions)
+               if index not in raised and mountain_top[index]
+               and all(region_of.get(neighbor) == index or cells[neighbor].get("collision", 0) != 0
+                       for offset in region for neighbor in _neighbours(offset, width, height))]
     out: dict[int, dict] = {}
-    for index, runs in raised.items():
+    for index in list(raised) + pockets:
         for offset in regions[index]:
             out[offset] = {"groundQ16": MOUNTAIN_LEDGE_Q16, "topQ16": MOUNTAIN_LEDGE_Q16,
                            "profile": "none", "solid": False}
+    for index, runs in raised.items():
         for run in runs:
             rows = sorted({offset // width for offset in run}, reverse=True)  # south first
             for offset in run:
