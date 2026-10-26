@@ -772,11 +772,30 @@ static void FieldMoveTick(void)
     sAt = -1;
 }
 
+// PKMN_DEBUG_POKENAV=frame (with the field scene): the PokeNav opened on the calm field at that game frame, as its key
+// item opens it (CB2_InitPokeNav); PKMN_DEBUG_KEYS walks its menus (the condition graph's two windows, for instance).
+static void PokeNavTick(void)
+{
+    static int sAt = -2;
+    const char *value;
+
+    if (sAt == -2)
+        sAt = (value = SDL_getenv("PKMN_DEBUG_POKENAV")) != NULL ? atoi(value) : -1;
+    if (sAt < 0 || sKeyFrame < (unsigned)sAt || gMain.callback2 != CB2_Overworld || ArePlayerFieldControlsLocked()
+     || gPaletteFade.active || ScriptContext_IsEnabled())
+        return;
+    SDL_Log("debug PokeNav: opened at frame %u", sKeyFrame);
+    HideMapNamePopUpWindow();
+    SetMainCallback2(CB2_InitPokeNav);
+    sAt = -1;
+}
+
 uint16_t DebugScene_FilterKeys(uint16_t keys)
 {
     sKeyFrame++;
     TransitionTick();
     FieldMoveTick();
+    PokeNavTick();
     BagLog();
     LinkLog();
     PartyLog();
