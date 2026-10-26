@@ -2488,6 +2488,61 @@ int NativeSelfTest_CoopController(void)
     MultiplayerBattle_NativeTestShape(MP_BATTLE_PHASE_COOP, 2);
     ExpectCoopCtl("co-op: the end command keeps a zero winner byte", FfaEnd(B_OUTCOME_WON, 0, 0) && !FfaEnd(B_OUTCOME_WON, 1, 0));
     MultiplayerBattle_NativeTestShape(0, 0);
+
+    // KNOWN_ISSUES MS-96: an effect battler one past the end (2 of 2) went out with Imposter's move-selection reset and
+    // its Transform animation, and the master's own check refused it, stopping the battle for everyone. Every command
+    // now carries 0 for one off the field; one on the field goes as it is.
+    MultiplayerBattle_NativeTestShape(MP_BATTLE_PHASE_SINGLES, 2);
+    {
+        u8 wire[MULTIPLAYER_BATTLE_BLOCK_SIZE], reset[2] = {CONTROLLER_RESETACTIONMOVESELECTION, RESET_MOVE_SELECTION};
+        u8 bar[4] = {CONTROLLER_HEALTHBARUPDATE}, anim[12] = {CONTROLLER_BATTLEANIMATION};
+        u8 move[24] = {CONTROLLER_MOVEANIMATION, MOVE_TRANSFORM & 0xFF, MOVE_TRANSFORM >> 8};
+        u16 size;
+
+        MultiplayerBattle_ResetControllerValidation();
+        gBattlerAttacker = 1; gBattlerTarget = 0; gAbsentBattlerFlags = 0; gEffectBattler = 2;
+        size = MultiplayerBattle_PackController(wire, 1, B_COMM_TO_CONTROLLER, sizeof(reset), reset);
+        ExpectCoopCtl("Imposter's move-selection reset with effect battler 2 of 2 carries 0 and passes the check",
+            size == 12 && wire[7] == 0 && MultiplayerBattle_ValidateController(wire, size, 0));
+        size = MultiplayerBattle_PackController(wire, 1, B_COMM_TO_CONTROLLER, sizeof(move), move);
+        ExpectCoopCtl("... and its Transform animation",
+            size == 36 && wire[7] == 0 && MultiplayerBattle_ValidateController(wire, size, 0));
+        size = MultiplayerBattle_PackController(wire, 1, B_COMM_TO_CONTROLLER, sizeof(anim), anim);
+        ExpectCoopCtl("a general animation and a health bar likewise",
+            size == 24 && wire[7] == 0 && MultiplayerBattle_ValidateController(wire, size, 0)
+            && MultiplayerBattle_PackController(wire, 0, B_COMM_TO_CONTROLLER, sizeof(bar), bar) == 16
+            && wire[7] == 0 && MultiplayerBattle_ValidateController(wire, 16, 0));
+        gEffectBattler = 1;
+        size = MultiplayerBattle_PackController(wire, 1, B_COMM_TO_CONTROLLER, sizeof(move), move);
+        ExpectCoopCtl("an effect battler on the field is sent as it is",
+            size == 36 && wire[7] == 1 && MultiplayerBattle_ValidateController(wire, size, 0));
+        wire[7] = 2;
+        ExpectCoopCtl("the check itself still refuses one off the field", !MultiplayerBattle_ValidateController(wire, size, 0));
+        gEffectBattler = 0;
+    }
+    {
+        // Imposter's message on its switch-in: no move chosen yet (MOVE_UNAVAILABLE) goes as none.
+        u8 wire[MULTIPLAYER_BATTLE_BLOCK_SIZE], msg[80] = {CONTROLLER_PRINTSTRING, 0, STRINGID_IMPOSTERTRANSFORM & 0xFF,
+                                                         STRINGID_IMPOSTERTRANSFORM >> 8};
+        u8 *data = msg + 4, *sent = wire + 8 + 4;
+        u16 size;
+
+        MultiplayerBattle_ResetControllerValidation();
+        data[offsetof(struct BattleMsgData, currentMove)] = MOVE_TRANSFORM & 0xFF;
+        data[offsetof(struct BattleMsgData, currentMove) + 1] = MOVE_TRANSFORM >> 8;
+        data[offsetof(struct BattleMsgData, originallyUsedMove)] = data[offsetof(struct BattleMsgData, originallyUsedMove) + 1] = 0xFF;
+        data[offsetof(struct BattleMsgData, textBuffs)] = data[offsetof(struct BattleMsgData, textBuffs) + TEXT_BUFF_ARRAY_COUNT]
+            = data[offsetof(struct BattleMsgData, textBuffs) + 2 * TEXT_BUFF_ARRAY_COUNT] = EOS;
+        size = MultiplayerBattle_PackController(wire, 1, B_COMM_TO_CONTROLLER, sizeof(msg), msg);
+        ExpectCoopCtl("Imposter's message with no move chosen yet (MOVE_UNAVAILABLE) sends none and passes the check",
+            size == 92 && !sent[offsetof(struct BattleMsgData, originallyUsedMove)]
+            && !sent[offsetof(struct BattleMsgData, originallyUsedMove) + 1]
+            && sent[offsetof(struct BattleMsgData, currentMove)] == (MOVE_TRANSFORM & 0xFF)
+            && MultiplayerBattle_ValidateController(wire, size, 0));
+        sent[offsetof(struct BattleMsgData, originallyUsedMove)] = sent[offsetof(struct BattleMsgData, originallyUsedMove) + 1] = 0xFF;
+        ExpectCoopCtl("the check itself still refuses MOVE_UNAVAILABLE in a message", !MultiplayerBattle_ValidateController(wire, size, 0));
+    }
+    MultiplayerBattle_NativeTestShape(0, 0);
     MultiplayerBattle_ResetControllerValidation();
 
     printf("selftest-coop-controller: %d checks, %d failed\n", sCoopCtlChecks, sCoopCtlFailures);

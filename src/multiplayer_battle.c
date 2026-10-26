@@ -689,11 +689,23 @@ u16 MultiplayerBattle_PackController(u8 *dest, u8 battler, u8 bufferId, u16 size
     // animation metadata must still pass the strict incoming index bounds.
     if (bufferId == B_COMM_TO_ENGINE || bufferId == B_COMM_CONTROLLER_IS_DONE)
         dest[2] = dest[3] = dest[6] = dest[7] = 0;
+#ifdef PORTABLE
+    // KNOWN_ISSUES MS-96 (MS-71's mid-battle stops): an effect battler left one past the end went out with Imposter's
+    // move-selection reset, then its Transform animation, and the master's own check refused it, which stopped the
+    // battle for everyone. The other games read the effect battler only in some messages and three animations (Order
+    // Up, Item Steal, Snatch), where the master's own value off the field means nothing real either, so every command
+    // carries 0 for one off the field.
+    else if (dest[7] >= MultiplayerBattle_GetBattlerCount())
+        dest[7] = 0;
+#else
+#line 556 // gba-line
     else if (dest[7] >= MultiplayerBattle_GetBattlerCount() && (data[0] == CONTROLLER_CHOOSEACTION || data[0] == CONTROLLER_CHOOSEMOVE
           || data[0] == CONTROLLER_CHOOSEPOKEMON || ((data[0] == CONTROLLER_PRINTSTRING
           || data[0] == CONTROLLER_PRINTSTRINGPLAYERONLY) && size >= 4
           && (data[2] | data[3] << 8) == STRINGID_EMPTYSTRING3)))
         dest[7] = 0;
+#endif
+#line 561 // gba-line
     if (bufferId == B_COMM_CONTROLLER_IS_DONE)
     {
         if (size != 4 || *data != sBinding.localSlot)
@@ -727,6 +739,24 @@ u16 MultiplayerBattle_PackController(u8 *dest, u8 battler, u8 bufferId, u16 size
     }
     if (bufferId == B_COMM_TO_ENGINE && data[0] == CONTROLLER_CHOSENMONRETURNVALUE && data[1] == PARTY_SIZE)
         memset(dest + 8 + 2, 0, 3);
+#ifdef PORTABLE
+    // KNOWN_ISSUES MS-96: a message's moves can be MOVE_UNAVAILABLE, no move chosen yet (Imposter's message on its
+    // switch-in), which the checks on what arrives refuse; a message naming such a move names no real move either,
+    // so it goes as MOVE_NONE.
+    if (bufferId == B_COMM_TO_CONTROLLER && (data[0] == CONTROLLER_PRINTSTRING || data[0] == CONTROLLER_PRINTSTRINGPLAYERONLY)
+     && size >= 4 + sizeof(struct BattleMsgData))
+    {
+        static const u8 sMoveFields[] = {offsetof(struct BattleMsgData, currentMove), offsetof(struct BattleMsgData, originallyUsedMove)};
+        u32 i;
+        for (i = 0; i < ARRAY_COUNT(sMoveFields); i++)
+        {
+            u8 *move = dest + 8 + 4 + sMoveFields[i];
+            if ((move[0] | move[1] << 8) == MOVE_UNAVAILABLE)
+                move[0] = move[1] = 0;
+        }
+    }
+#endif
+#line 594 // gba-line
     return padded + 8;
 }
 
