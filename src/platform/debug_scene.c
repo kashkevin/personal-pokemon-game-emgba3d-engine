@@ -719,7 +719,7 @@ static void TransitionTick(void)
 
         if ((value = SDL_getenv("PKMN_DEBUG_TRANSITION")) != NULL)
             sscanf(value, "%d:%d:%d", &id, &at, &line);
-        sId = id;
+        sId = id < B_TRANSITION_COUNT ? id : -1;
         sAt = (unsigned)at;
         sLineState = line != 0;
     }
@@ -790,12 +790,32 @@ static void PokeNavTick(void)
     sAt = -1;
 }
 
+// PKMN_DEBUG_MATCHCALL=frame (with the field scene): a PokeNav call on the calm field at that game frame, as a script
+// places one (ShowPokenavFieldMessage), with any two-line message; PKMN_DEBUG_KEYS hangs up.
+static void MatchCallTick(void)
+{
+    static int sAt = -2;
+    const char *value;
+
+    if (sAt == -2)
+        sAt = (value = SDL_getenv("PKMN_DEBUG_MATCHCALL")) != NULL ? atoi(value) : -1;
+    if (sAt < 0 || sKeyFrame < (unsigned)sAt || gMain.callback2 != CB2_Overworld || ArePlayerFieldControlsLocked()
+     || gPaletteFade.active || ScriptContext_IsEnabled())
+        return;
+    SDL_Log("debug PokeNav call at frame %u", sKeyFrame);
+    LockPlayerFieldControls();
+    HideMapNamePopUpWindow();
+    ShowPokenavFieldMessage(gText_BirchInTrouble);
+    sAt = -1;
+}
+
 uint16_t DebugScene_FilterKeys(uint16_t keys)
 {
     sKeyFrame++;
     TransitionTick();
     FieldMoveTick();
     PokeNavTick();
+    MatchCallTick();
     BagLog();
     LinkLog();
     PartyLog();

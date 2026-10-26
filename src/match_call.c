@@ -2021,3 +2021,27 @@ void SetActiveTrainerRematches(u32 matchCallId, u32 value)
     gSaveBlock1Ptr->trainerRematches[matchCallId] = value;
 #endif
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (screens/ui_match_call.c): the PokeNav call on the field now - its window, how far its box has slid
+// (BG0's vertical offset), whether its lines have begun and whether it waits for A or B to hang up.
+bool8 MatchCall_NativeUiState(u8 *windowId, s16 *offsetY, bool8 *talking, bool8 *waiting)
+{
+    u8 taskId = FindTaskIdByFunc(ExecuteMatchCall);
+    s16 *data;
+
+    if (taskId == TASK_NONE)
+        return FALSE;
+    data = gTasks[taskId].data;
+    // its box is up from DrawWindow to SlideWindowOut (LoadGfx: not yet; EndCall: gone)
+    if (tState < 1 || tState > 6 || tWindowId == WINDOW_NONE)
+        return FALSE;
+    *windowId = tWindowId;
+    *offsetY = (s16)(GetBgY(0) / 256);
+    *talking = tState >= 4 && tState <= 5;
+    *waiting = tState == 5;
+    return TRUE;
+}
+#endif

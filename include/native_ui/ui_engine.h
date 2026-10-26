@@ -1214,6 +1214,11 @@ bool32 Window_NativeUiShown(u8 windowId);
 /* ...and its tiles are on the screen itself (VRAM), not only in the background's buffer */
 bool32 Window_NativeUiOnScreen(u8 windowId);
 
+/* match_call.c: a PokeNav call on the field: its text window, its box's vertical offset (BG0's: below its place while it
+ * slides in and out, 0 in place), whether its lines have begun, whether it is on its last step (A or B hangs up once
+ * the line is printed) */
+bool8 MatchCall_NativeUiState(u8 *windowId, s16 *offsetY, bool8 *talking, bool8 *waiting);
+
 /* battle_transition.c: the battle transition playing (B_TRANSITION_*), B_TRANSITION_COUNT with none */
 u8 BattleTransition_NativeUiPlaying(void);
 

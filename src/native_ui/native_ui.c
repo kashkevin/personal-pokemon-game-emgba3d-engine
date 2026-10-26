@@ -63,6 +63,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_Roulette,     /* the Game Corner's roulette tables (the wheel and the board) */
     &gUiScreen_Transition, /* a battle transition on the field */
     &gUiScreen_FieldMove,  /* a field move's cut-in (an HM's Pokemon on its banner) */
+    &gUiScreen_MatchCall,  /* a PokeNav call over the field */
     &gUiScreen_FieldText, /* the field's messages the screens above do not draw */
     &gUiScreen_MapName,   /* the location pop-up, over the field */
     &gUiScreen_Notice,    /* last: only over the calm field */
