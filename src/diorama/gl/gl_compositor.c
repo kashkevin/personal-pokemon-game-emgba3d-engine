@@ -116,6 +116,7 @@ static u8 sVisibleMetatiles[DIORAMA_ATLAS_PRESENT_BYTES];
 static u8 sUpdatedMetatiles[DIORAMA_ATLAS_PRESENT_BYTES];
 static u8 sAtlasTileGraphics[DIORAMA_TILE_GRAPHICS_SIZE];
 static u32 sAtlasMapGeneration;
+static const void *sAtlasTilesets[2]; /* the tilesets of the map the atlas was last drawn for (page 0) */
 static u32 sAtlasPaletteGeneration;
 static u32 sAtlasAnimationGeneration;
 static u32 sAtlasPageSignature;
@@ -940,11 +941,19 @@ static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
     /* The neighbouring maps' pages first (metatile_atlas.h): another tileset
      * on one redraws the atlas, as another map does. */
     u32 pageSignature = DioramaAtlas_SetPages(snapshot);
-    bool reset = snapshot->mapGeneration != sAtlasMapGeneration
+    /* Another map redraws the atlas only with other tiles on page 0: walking
+     * between maps of the same tilesets kept every slot as it was, yet each
+     * crossing drew and uploaded all of them again (performance work
+     * 2026-10-26, the owner's lag when running). A map change with the same
+     * tilesets compares every tile, as the animated tiles do (a map loaded
+     * again starts its animations over). */
+    bool mapChanged = snapshot->mapGeneration != sAtlasMapGeneration;
+    bool reset = (mapChanged && (snapshot->primaryTileset != sAtlasTilesets[0]
+                              || snapshot->secondaryTileset != sAtlasTilesets[1]))
               || snapshot->paletteGeneration != sAtlasPaletteGeneration
               || pageSignature != sAtlasPageSignature
               || !sHasAtlasTileGraphics;
-    bool animationChanged = snapshot->tilesetAnimationGeneration != sAtlasAnimationGeneration;
+    bool animationChanged = snapshot->tilesetAnimationGeneration != sAtlasAnimationGeneration || mapChanged;
     bool changed;
     unsigned cellCount = snapshot->visibleCellCount;
     unsigned i;
@@ -954,7 +963,8 @@ static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
         DioramaAtlas_Clear(sAtlasPixels, sPresentMetatiles);
         memset(sBaseAtlasPixels, 0, sizeof(sBaseAtlasPixels));
         memset(sForegroundAtlasPixels, 0, sizeof(sForegroundAtlasPixels));
-        sAtlasMapGeneration = snapshot->mapGeneration;
+        sAtlasTilesets[0] = snapshot->primaryTileset;
+        sAtlasTilesets[1] = snapshot->secondaryTileset;
         sAtlasPaletteGeneration = snapshot->paletteGeneration;
         sAtlasAnimationGeneration = snapshot->tilesetAnimationGeneration;
         if (pageSignature != sAtlasPageSignature && LogEnabled())
@@ -1064,6 +1074,7 @@ static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
             sPreviousCutoutBaseMetatiles[i] = sCutoutBaseMetatiles[i];
     sHasAtlasTileGraphics = true;
     sAtlasAnimationGeneration = snapshot->tilesetAnimationGeneration;
+    sAtlasMapGeneration = snapshot->mapGeneration;
     return reset || changed;
 }
 
@@ -1586,6 +1597,7 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
     memset(sBaseAtlasPixels, 0, sizeof(sBaseAtlasPixels));
     memset(sForegroundAtlasPixels, 0, sizeof(sForegroundAtlasPixels));
     sAtlasMapGeneration = 0;
+    sAtlasTilesets[0] = sAtlasTilesets[1] = NULL;
     sAtlasPaletteGeneration = 0;
     sAtlasAnimationGeneration = 0;
     sHasAtlasTileGraphics = false;

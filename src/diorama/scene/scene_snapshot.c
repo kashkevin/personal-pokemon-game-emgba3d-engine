@@ -50,6 +50,8 @@
 
 static struct DioramaSceneSnapshot sDraft;
 static u16 sPreviousPalette[DIORAMA_FADED_PALETTE_ENTRIES];
+/* The interface's background palettes (NUM_PALS_TOTAL to 15) as the last palette generation saw them. */
+static u16 sGenerationInterfacePalette[(16 - NUM_PALS_TOTAL) * 16];
 static u8 sPreviousTileGraphics[DIORAMA_TILE_GRAPHICS_SIZE];
 static u32 sMapGeneration;
 static u32 sMapEditGeneration;
@@ -2089,6 +2091,7 @@ void DioramaScene_Init(void)
 {
     memset(&sDraft, 0, sizeof(sDraft));
     memset(sPreviousPalette, 0, sizeof(sPreviousPalette));
+    memset(sGenerationInterfacePalette, 0, sizeof(sGenerationInterfacePalette));
     memset(sPreviousTileGraphics, 0, sizeof(sPreviousTileGraphics));
     sMapGeneration = 0;
     sMapEditGeneration = 0;
@@ -2136,10 +2139,26 @@ void DioramaScene_MarkCellDirty(int16_t mapX, int16_t mapY)
     sDirtyCellCount++;
 }
 
+/* Whether a cell of the snapshot draws with a palette past the map's own (NUM_PALS_TOTAL on). */
+static bool CellsUseInterfacePalettes(const struct DioramaSceneSnapshot *snapshot)
+{
+    unsigned count = snapshot->visibleCellCount < DIORAMA_MAX_VISIBLE_CELLS
+                   ? snapshot->visibleCellCount : DIORAMA_MAX_VISIBLE_CELLS;
+    unsigned i;
+    unsigned entry;
+
+    for (i = 0; i < count; i++)
+        for (entry = 0; entry < DIORAMA_METATILE_ENTRY_COUNT; entry++)
+            if ((snapshot->cells[i].tileEntries[entry] >> 12) >= NUM_PALS_TOTAL)
+                return true;
+    return false;
+}
+
 void DioramaScene_PublishOverworld(void)
 {
     u16 cameraX;
     u16 cameraY;
+    bool mapPalettesChanged;
     s8 mapGroup = gSaveBlock1Ptr->location.mapGroup;
     s8 mapNum = gSaveBlock1Ptr->location.mapNum;
 
@@ -2228,9 +2247,9 @@ void DioramaScene_PublishOverworld(void)
     sDraft.dirtyOverflow = sDirtyOverflow;
     memcpy(sDraft.dirtyCells, sDirtyCells,
            sDirtyCellCount * sizeof(*sDirtyCells));
-    if (!sHasPreviousPalette
-     || memcmp(sPreviousPalette, gPlttBufferFaded, 256 * sizeof(*sPreviousPalette)) != 0)
-        sPaletteGeneration++;
+    mapPalettesChanged = !sHasPreviousPalette
+                      || memcmp(sPreviousPalette, gPlttBufferFaded,
+                                NUM_PALS_TOTAL * 16 * sizeof(*sPreviousPalette)) != 0;
     if (!sHasPreviousPalette
      || memcmp(sPreviousPalette + 256, gPlttBufferFaded + 256,
                256 * sizeof(*sPreviousPalette)) != 0)
@@ -2239,7 +2258,6 @@ void DioramaScene_PublishOverworld(void)
     sHasPreviousPalette = true;
     memcpy(sDraft.unfadedPalette, gPlttBufferUnfaded, sizeof(sDraft.unfadedPalette));
     memcpy(sDraft.fadedPalette, gPlttBufferFaded, sizeof(sDraft.fadedPalette));
-    sDraft.paletteGeneration = sPaletteGeneration;
     sDraft.objPaletteGeneration = sObjPaletteGeneration;
 
     if (sDraft.valid)
@@ -2278,6 +2296,25 @@ void DioramaScene_PublishOverworld(void)
         CopyFieldLight(&sDraft);
         CopyUiProfile(&sDraft);
     }
+    /*
+     * The map's art is redrawn (the atlas, the terrain's chunks, the detail
+     * objects) when its palettes change, 0 to 12. The interface's (the map
+     * name's popup, message boxes) count only when a cell in view draws with
+     * one of them, as two metatiles of Littleroot Town and the Petalburg Gym
+     * do: every map crossing's popup redrew the whole atlas and looked at
+     * every terrain chunk again a frame after the crossing's own (performance
+     * work 2026-10-26, the owner's lag when running).
+     */
+    if (mapPalettesChanged
+     || (memcmp(sGenerationInterfacePalette, gPlttBufferFaded + NUM_PALS_TOTAL * 16,
+                sizeof(sGenerationInterfacePalette)) != 0
+      && CellsUseInterfacePalettes(&sDraft)))
+    {
+        sPaletteGeneration++;
+        memcpy(sGenerationInterfacePalette, gPlttBufferFaded + NUM_PALS_TOTAL * 16,
+               sizeof(sGenerationInterfacePalette));
+    }
+    sDraft.paletteGeneration = sPaletteGeneration;
     DioramaSnapshotExchange_Publish(&sDraft);
     sPublishedThisFrame = true;
     sDirtyCellCount = 0;
