@@ -1280,6 +1280,20 @@ bool32 TextPrinterWaitWithDownArrow(struct TextPrinter *textPrinter)
     bool32 result = FALSE;
     if (gTextFlags.autoScroll != 0 || AUTO_SCROLL_TEXT)
     {
+#ifdef PORTABLE
+        result = TextPrinterWaitAutoMode(textPrinter);
+
+        // PC: in a battle between players A or B goes on at once too (the owner's "slight pause when selecting
+        // almost anything", 2026-10-26): the 49-frame wait stays for a player who does not press. Each game waits
+        // for itself only; the battle's master still goes on when every game has finished its message.
+        if (AUTO_SCROLL_TEXT || (gBattleTypeFlags & BATTLE_TYPE_LINK))
+            SetResultWithButtonPress(&result);
+    }
+    else
+    {
+        TextPrinterDrawDownArrow(textPrinter);
+#else
+#line 1267 // gba-line
         result = TextPrinterWaitAutoMode(textPrinter);
 
         if (AUTO_SCROLL_TEXT)
@@ -1288,6 +1302,8 @@ bool32 TextPrinterWaitWithDownArrow(struct TextPrinter *textPrinter)
     else
     {
         TextPrinterDrawDownArrow(textPrinter);
+#endif
+#line 1275 // gba-line
         SetResultWithButtonPress(&result);
     }
     return result;
@@ -1298,6 +1314,18 @@ bool32 TextPrinterWait(struct TextPrinter *textPrinter)
     bool32 result = FALSE;
     if (gTextFlags.autoScroll != 0 || AUTO_SCROLL_TEXT)
     {
+#ifdef PORTABLE
+        result = TextPrinterWaitAutoMode(textPrinter);
+
+        // PC: A or B goes on at once in a battle between players too (TextPrinterWaitWithDownArrow)
+        if (AUTO_SCROLL_TEXT || (gBattleTypeFlags & BATTLE_TYPE_LINK))
+            SetResultWithButtonPress(&result);
+    }
+    else
+    {
+        SetResultWithButtonPress(&result);
+#else
+#line 1285 // gba-line
         result = TextPrinterWaitAutoMode(textPrinter);
 
         if (AUTO_SCROLL_TEXT)
@@ -1306,6 +1334,8 @@ bool32 TextPrinterWait(struct TextPrinter *textPrinter)
     else
     {
         SetResultWithButtonPress(&result);
+#endif
+#line 1293 // gba-line
     }
     return result;
 }

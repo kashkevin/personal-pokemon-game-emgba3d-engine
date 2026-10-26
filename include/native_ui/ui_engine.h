@@ -1153,6 +1153,8 @@ enum NativeBattleInput
     NATIVE_BATTLE_INPUT_YES_NO,         /* the controller's YES / NO (switch after a faint) */
     NATIVE_BATTLE_INPUT_PARTY,          /* the party menu opens */
     NATIVE_BATTLE_INPUT_BAG,            /* the bag opens */
+    NATIVE_BATTLE_INPUT_PREVIEW_HANDED = 254, /* breadcrumbs only: the move preview's goal handed to the engine's menu */
+    NATIVE_BATTLE_INPUT_SENT_SHOWN = 255, /* breadcrumbs only (ui_battle.c): a link battle's "choice sent" note is up */
 };
 /* battle_script_commands.c: the level-up box (Cmd_drawlvlupbox) */
 struct NativeLevelUpBox

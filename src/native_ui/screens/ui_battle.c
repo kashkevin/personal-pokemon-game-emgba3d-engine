@@ -176,7 +176,46 @@ static struct
     bool ballOn;                   /* the last used Ball (R throws it) */
     u16 ball;
     bool ready;
+    /* a link battle: the player's choice has gone to the host and the battle waits on the link (frames so far) */
+    u16 linkWaiting;
+    u8 linkChoice;     /* the choice that went (enum NativeBattleInput) */
+    s8 lastChooser;    /* the battler whose choice the player controller waited for last */
 } sB;
+
+/* A link battle's FIGHT goes to the host, whose move menu is a round trip away (the owner's "slight pause when selecting
+ * almost anything", 2026-10-26): the move page shows at once from what this game knows - the moves its last move menu
+ * showed for this same Pokemon, else its party data - and the player's keys there only set a goal. When the engine's
+ * own move menu is up, its presses carry the goal out as a click does (QueueMovePath, then A): every choice is still
+ * the engine's, made on its menu; a message or another menu instead drops the goal. */
+static struct
+{
+    bool on;           /* the page shows: FIGHT went, the move menu has not come */
+    s8 battler;
+    u8 cursor, count;
+    bool chosen;       /* A: the engine's menu presses the move */
+    bool back;         /* B: back to the commands */
+    bool gimmick;      /* START: the gimmick toggled first */
+    u16 moves[MAX_MON_MOVES];
+    u8 pp[MAX_MON_MOVES], maxPp[MAX_MON_MOVES];
+    s8 types[MAX_MON_MOVES];
+} sPre;
+/* the last move menu shown for each battler (its Pokemon's personality, moves, PP, types, usable gimmick) */
+static struct
+{
+    u32 personality;
+    bool valid;
+    u8 count, gimmick;
+    u16 moves[MAX_MON_MOVES];
+    u8 pp[MAX_MON_MOVES], maxPp[MAX_MON_MOVES];
+    s8 types[MAX_MON_MOVES];
+} sMoveCache[MAX_BATTLERS_COUNT];
+/* the goal the engine's presses carry out on its own move menu (sPre's, once the menu is up) */
+static struct
+{
+    s8 battler;        /* -1: none */
+    u8 cursor;
+    bool thenA, back, gimmick;
+} sMoveGoal = {.battler = -1};
 
 /* a mouse goal on a double battle's targets: the engine's own presses until its cursor is there */
 static s8 sTargetGoal = -1;
@@ -397,6 +436,7 @@ static void CaptureChooser(void)
     }
     if (sB.chooser < 0)
         return;
+    sB.lastChooser = sB.chooser;
     {
         u32 c = sB.chooser;
         struct ChooseMoveStruct *moveInfo = (struct ChooseMoveStruct *)(&gBattleResources->bufferA[c][4]);
@@ -428,6 +468,20 @@ static void CaptureChooser(void)
             if (sB.gimmick != GIMMICK_NONE && HasTrainerUsedGimmick(c, sB.gimmick))
                 sB.gimmick = GIMMICK_NONE;
             sB.gimmickOn = gBattleStruct->gimmick.playerSelect;
+            if (sB.input == NATIVE_BATTLE_INPUT_MOVE)
+            {
+                sMoveCache[c].valid = true;
+                sMoveCache[c].personality = sB.leadPersonality;
+                sMoveCache[c].count = sB.moveCount;
+                sMoveCache[c].gimmick = sB.gimmick;
+                for (int m = 0; m < MAX_MON_MOVES; m++)
+                {
+                    sMoveCache[c].moves[m] = sB.moves[m];
+                    sMoveCache[c].pp[m] = sB.pp[m];
+                    sMoveCache[c].maxPp[m] = sB.maxPp[m];
+                    sMoveCache[c].types[m] = sB.moveTypes[m];
+                }
+            }
         }
         for (u32 i = 0; i < MAX_BATTLERS_COUNT; i++)
             sB.shownAsTarget[i] = i < gBattlersCount && sB.input == NATIVE_BATTLE_INPUT_TARGETS_SHOWN && ShouldHideBattler(i);
@@ -440,7 +494,9 @@ static void CaptureChooser(void)
     }
 }
 
-/* the message window's text, as a number that changes when the text does */
+/* a link battle: once the player's choice leaves (a choice of the player controller gone, nothing in its place), the
+ * host's answer is at least a round trip away, so the message plate says at once that the choice went and the battle
+ * waits on the link, until the next message or choice. Display only: what the host decides is untouched. */
 static u32 MessageSum(void)
 {
     u32 sum = 2166136261u;
@@ -469,6 +525,161 @@ static void CrumbChoiceAndMessage(void)
     sInput = input;
     sMessage = message;
     sMessageState = state;
+}
+
+static void CaptureLinkWaiting(void)
+{
+    static u8 sLastChoice = NATIVE_BATTLE_INPUT_NONE;
+    static u32 sMessageAtChoice;
+    bool choosing = sB.chooser >= 0 && !sB.wallyChooses;
+    u32 message = MessageSum();
+
+    if (!sB.link || choosing || sB.yesNo || sB.msgWaiting || sB.msgPrinting)
+        sB.linkWaiting = 0;
+    else if (sLastChoice != NATIVE_BATTLE_INPUT_NONE)
+    {
+        sB.linkWaiting = 1;
+        sB.linkChoice = sLastChoice;
+        sMessageAtChoice = message;
+    }
+    else if (sB.linkWaiting != 0 && message != sMessageAtChoice)
+        sB.linkWaiting = 0;
+    else if (sB.linkWaiting != 0 && sB.linkWaiting < 0xFFFF && ++sB.linkWaiting == 2)
+        CrashReport_Crumb(CRUMB_CHOICE, NATIVE_BATTLE_INPUT_SENT_SHOWN, sB.linkChoice); /* the note is up from this frame */
+    if (NativeUi_LogEnabled() && (sB.linkWaiting == 1 || (sLastChoice == NATIVE_BATTLE_INPUT_NONE && choosing)))
+        NativeUi_Logf("battle: %s", sB.linkWaiting == 1 ? "choice sent, waiting on the link" : "choice asked");
+    sLastChoice = choosing ? sB.input : NATIVE_BATTLE_INPUT_NONE;
+}
+
+static void QueueMovePath(int from, int to);
+
+/* FIGHT has gone to the host: the move page from the last move menu of this Pokemon (else its party data) */
+static void StartMovePreview(u32 battler)
+{
+    struct Pokemon *mon = GetBattlerMon(battler);
+    u32 personality = GetMonData(mon, MON_DATA_PERSONALITY);
+
+    memset(&sPre, 0, sizeof(sPre));
+    sPre.on = true;
+    sPre.battler = battler;
+    sPre.cursor = gMoveSelectionCursor[battler] & 3;
+    if (sMoveCache[battler].valid && sMoveCache[battler].personality == personality)
+    {
+        sPre.count = sMoveCache[battler].count;
+        for (int m = 0; m < MAX_MON_MOVES; m++)
+        {
+            sPre.moves[m] = sMoveCache[battler].moves[m];
+            sPre.pp[m] = sMoveCache[battler].pp[m];
+            sPre.maxPp[m] = sMoveCache[battler].maxPp[m];
+            sPre.types[m] = sMoveCache[battler].types[m];
+        }
+    }
+    else
+    {
+        u8 bonuses = GetMonData(mon, MON_DATA_PP_BONUSES);
+
+        for (int m = 0; m < MAX_MON_MOVES; m++)
+        {
+            int ty;
+
+            sPre.moves[m] = GetMonData(mon, MON_DATA_MOVE1 + m);
+            sPre.pp[m] = GetMonData(mon, MON_DATA_PP1 + m);
+            sPre.maxPp[m] = sPre.moves[m] != MOVE_NONE ? CalculatePPWithBonus(sPre.moves[m], bonuses, m) : 0;
+            ty = UiMon_Type(GetMoveType(sPre.moves[m]));
+            sPre.types[m] = ty >= 0 ? ty : UI_TYPE_NORMAL;
+            if (sPre.moves[m] != MOVE_NONE)
+                sPre.count = m + 1;
+        }
+    }
+    if (sPre.count == 0 || sPre.moves[sPre.cursor] == MOVE_NONE)
+        sPre.cursor = 0;
+}
+
+/* Each frame: the preview while FIGHT's answer is on its way; its goal handed over when the engine's move menu is up,
+ * dropped when anything else comes instead */
+static void CaptureMovePreview(void)
+{
+    if (sTeardown || !sB.link)
+    {
+        sPre.on = false;
+        sMoveGoal.battler = -1;
+        return;
+    }
+    if (!sPre.on && sB.linkWaiting == 1 && sB.linkChoice == NATIVE_BATTLE_INPUT_ACTION
+     && sB.actionCursor == CMD_FIGHT && !sB.safari && sB.lastChooser >= 0)
+        StartMovePreview(sB.lastChooser);
+    if (sPre.on && sB.chooser >= 0)
+    {
+        /* the engine asks again: its move menu takes the goal; anything else drops it */
+        if (sB.chooser == sPre.battler && (sB.input == NATIVE_BATTLE_INPUT_MOVE || sB.input == NATIVE_BATTLE_INPUT_MOVE_WAIT))
+        {
+            sMoveGoal.battler = sPre.battler;
+            sMoveGoal.cursor = sPre.cursor;
+            sMoveGoal.thenA = sPre.chosen && !sPre.back;
+            sMoveGoal.back = sPre.back;
+            sMoveGoal.gimmick = sPre.gimmick && !sPre.back;
+            CrashReport_Crumb(CRUMB_CHOICE, NATIVE_BATTLE_INPUT_PREVIEW_HANDED, sPre.cursor | (sPre.chosen << 4) | (sPre.back << 5));
+        }
+        sPre.on = false;
+    }
+    else if (sPre.on && (sB.msgPrinting || sB.yesNo || sB.linkWaiting == 0))
+    {
+        sPre.on = false;    /* a message or a question came instead of the move menu */
+    }
+    if (sPre.on)
+    {
+        /* the move page draws the preview */
+        for (int m = 0; m < MAX_MON_MOVES; m++)
+        {
+            sB.moves[m] = sPre.moves[m];
+            sB.pp[m] = sPre.pp[m];
+            sB.maxPp[m] = sPre.maxPp[m];
+            sB.moveTypes[m] = sPre.types[m];
+        }
+        sB.moveCount = sPre.count;
+        sB.moveCursor = sPre.cursor;
+        sB.effect = 0;
+        sB.descOpen = false;
+        sB.gimmick = sMoveCache[sPre.battler].valid ? sMoveCache[sPre.battler].gimmick : GIMMICK_NONE;
+        sB.gimmickOn = sPre.gimmick;
+        if (!sPre.back)
+            sB.page = PAGE_MOVES;
+    }
+}
+
+static void MoveGoalStep(void)
+{
+    if (sMoveGoal.battler < 0)
+        return;
+    if (sB.chooser >= 0 && (sB.chooser != sMoveGoal.battler
+     || (sB.input != NATIVE_BATTLE_INPUT_MOVE && sB.input != NATIVE_BATTLE_INPUT_MOVE_WAIT)))
+    {
+        sMoveGoal.battler = -1; /* another menu came: the goal is not its */
+        return;
+    }
+    if (NativeUi_PressesPending() || sB.input != NATIVE_BATTLE_INPUT_MOVE || sB.descOpen)
+        return;
+    if (sMoveGoal.back)
+    {
+        NativeUi_QueuePress(B_BUTTON);
+        sMoveGoal.battler = -1;
+        return;
+    }
+    if (sMoveGoal.gimmick)
+    {
+        if (sB.gimmick != GIMMICK_NONE && !sB.gimmickOn)
+            NativeUi_QueuePress(START_BUTTON);
+        sMoveGoal.gimmick = false;
+        return;
+    }
+    if (sB.moveCursor != sMoveGoal.cursor && sMoveGoal.cursor < sB.moveCount && sB.moves[sMoveGoal.cursor] != MOVE_NONE)
+    {
+        QueueMovePath(sB.moveCursor, sMoveGoal.cursor);
+        return;
+    }
+    if (sMoveGoal.thenA && sB.moveCursor == sMoveGoal.cursor)
+        NativeUi_QueuePress(A_BUTTON);
+    sMoveGoal.battler = -1;
 }
 
 /* the YES / NO box the battle draws on its message page (HandleBattleWindow) and its cursor */
@@ -556,6 +767,8 @@ static void Capture(void)
     }
     UiResults_Capture();
     CrumbChoiceAndMessage();
+    CaptureLinkWaiting();
+    CaptureMovePreview();
     sB.ready = sB.msgWaiting || sB.yesNo || UiResults_LevelUpWaiting()
             || (sB.chooser >= 0 && !sB.wallyChooses && sB.input != NATIVE_BATTLE_INPUT_ACTION_WAIT
                 && sB.input != NATIVE_BATTLE_INPUT_MOVE_WAIT && sB.input != NATIVE_BATTLE_INPUT_PARTY
@@ -579,6 +792,7 @@ static void Capture(void)
         sCmdGoal = -1;
     TargetGoalStep();
     CmdGoalStep();
+    MoveGoalStep();
 }
 
 /* the interface sprites the HUD draws itself: by the OBJ tiles their sheets hold */
@@ -1176,12 +1390,41 @@ static void DrawBoxes(int L, int R, int T, int dyB)
     }
 }
 
+/* the link's wait after a choice (two frames in: not the one-frame gap of a menu handing over to the next). After
+ * an action (FIGHT, BAG, POKéMON) the host answers with the next menu; after the last choice, the turn waits for the
+ * others' choices too. */
+static bool LinkWaitingText(u8 *text, bool brief, int t)
+{
+    static const u8 sMenu[] = _("Waiting for the link"), sSent[] = _("Choice sent. "),
+                    sOne[] = _("Waiting for the other player"), sMany[] = _("Waiting for the other players");
+    u8 *end = text;
+
+    if (sB.linkWaiting < 2)
+        return false;
+    if (sB.linkChoice == NATIVE_BATTLE_INPUT_ACTION)
+        end = StringCopy(end, sMenu);
+    else
+    {
+        if (!brief)
+            end = StringCopy(end, sSent);
+        end = StringCopy(end, sB.ffa || (gBattleTypeFlags & BATTLE_TYPE_MULTI) ? sMany : sOne);
+    }
+    for (int i = 0; i < (t / 20) % 4; i++)
+        *end++ = CHAR_PERIOD;
+    *end = EOS;
+    return true;
+}
+
 static void DrawMessagePage(int L, int R, int dyB, int t)
 {
     int w = R - L;
 
+    u8 waiting[64];
+
     MessagePlate(L, NATIVE_UI_BATTLE_PANEL_Y + dyB, w, 70);
-    if (sB.hasMsg)
+    if (LinkWaitingText(waiting, false, t))
+        MessageText(L + 14, 293 + dyB, w - 40, waiting, -1);
+    else if (sB.hasMsg)
         MessageText(L + 14, 293 + dyB, w - 40, sB.msg, sB.msgPrinting ? (int)sB.msgPrinted : -1);
     if (sB.msgWaiting)
         UiW_DownArrow(R - 24, 336 + dyB + ((t / 16) % 2), UI_HEX(0xF8F8F8), false);
@@ -1195,6 +1438,9 @@ static void DrawActionPage(int L, int R, int dyB, int t)
     static const u8 sChoose[] = _("Choose"), sBack[] = _("Back"), sThrow[] = _("Throw");
     struct UiHintItem h[2] = {{UI_ACT_CONFIRM, sChoose}, {UI_ACT_CANCEL, sBack}};
     int cx = R - 260;
+    u8 waiting[64];
+    /* the command chosen stays lit while the link answers */
+    int sel = sB.input == NATIVE_BATTLE_INPUT_ACTION || sB.input == NATIVE_BATTLE_INPUT_ACTION_WAIT || sB.linkWaiting != 0 ? sB.actionCursor : -1;
 
     MessagePlate(L, NATIVE_UI_BATTLE_PANEL_Y + dyB, cx - 8 - L, 70);
     if (sB.hasPrompt)
@@ -1202,10 +1448,12 @@ static void DrawActionPage(int L, int R, int dyB, int t)
     /* the prompts while the player's own choice waits (not between turns, nor Wally's) */
     if (sB.chooser >= 0 && !sB.wallyChooses)
         UiW_Hints(L + 14, 340 + dyB, h, sB.safari ? 1 : 2, true, 8);
+    else if (LinkWaitingText(waiting, true, t))
+        UiText_Draw(UI_FONT_SMALL, L + 14, 342 + dyB, waiting, UI_P_TEXT_W, UI_HEX(0x080A10), UI_ALIGN_LEFT, 0);
     if (sB.safari)
-        SafariCommands(cx, 282 + dyB, sB.input == NATIVE_BATTLE_INPUT_ACTION || sB.input == NATIVE_BATTLE_INPUT_ACTION_WAIT ? sB.actionCursor : -1);
+        SafariCommands(cx, 282 + dyB, sel);
     else
-        Commands(cx, 282 + dyB, sB.input == NATIVE_BATTLE_INPUT_ACTION || sB.input == NATIVE_BATTLE_INPUT_ACTION_WAIT ? sB.actionCursor : -1, t);
+        Commands(cx, 282 + dyB, sel, t);
     if (sB.ballOn)
     {
         /* the last used Ball: R throws it (B_LAST_USED_BALL) */
@@ -1223,6 +1471,7 @@ static void DrawMovePage(int L, int R, int dyB, int t)
 {
     static const u8 sBack[] = _("Back"), sClose[] = _("Close"), sSwitch[] = _("Switch which?"), sInfo[] = _("Info");
     bool switching = sB.input == NATIVE_BATTLE_INPUT_MOVE_SWITCH;
+    u8 waiting[64];
 
     for (int i = 0; i < MAX_MON_MOVES; i++)
     {
@@ -1241,7 +1490,11 @@ static void DrawMovePage(int L, int R, int dyB, int t)
         UiG_Hit(HIT_MOVE, i, mx, my, 204, 34);
     }
     InfoCard(R - 204, NATIVE_UI_BATTLE_PANEL_Y + dyB, 196, 72);
-    if (sB.chooser < 0 || sB.wallyChooses)
+    if (sB.chooser < 0 && LinkWaitingText(waiting, true, t))
+    {
+        UiText_Draw(UI_FONT_SMALL, R - 198, 342 + dyB, waiting, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+    }
+    else if (sB.chooser < 0 || sB.wallyChooses)
     {
         /* no prompts between turns, nor while Wally chooses his move himself */
     }
@@ -1400,7 +1653,12 @@ static bool Click(const struct UiHit *hit, int button)
         return true;
     if (button == 3)
     {
-        if (sB.chooser >= 0 || sB.yesNo)
+        if (sPre.on)
+        {
+            sPre.back = true;
+            sPre.chosen = false;
+        }
+        else if (sB.chooser >= 0 || sB.yesNo)
             NativeUi_QueuePress(B_BUTTON);
         return true;
     }
@@ -1427,7 +1685,16 @@ static bool Click(const struct UiHit *hit, int button)
             NativeUi_QueuePress(R_BUTTON);
         return true;
     case HIT_MOVE:
-        if (sB.input == NATIVE_BATTLE_INPUT_MOVE && !sB.descOpen)
+        if (sPre.on)
+        {
+            /* the move preview: its goal (the engine's move menu presses it when it is up) */
+            if (!sPre.back && !sPre.chosen && hit->index < sPre.count && sPre.moves[hit->index] != MOVE_NONE)
+            {
+                sPre.cursor = hit->index;
+                sPre.chosen = true;
+            }
+        }
+        else if (sB.input == NATIVE_BATTLE_INPUT_MOVE && !sB.descOpen)
         {
             QueueMovePath(sB.moveCursor, hit->index);
             NativeUi_QueuePress(A_BUTTON);
@@ -1439,7 +1706,9 @@ static bool Click(const struct UiHit *hit, int button)
         }
         return true;
     case HIT_GIMMICK:
-        if (sB.input == NATIVE_BATTLE_INPUT_MOVE)
+        if (sPre.on && !sPre.chosen && !sPre.back)
+            sPre.gimmick = !sPre.gimmick;
+        else if (sB.input == NATIVE_BATTLE_INPUT_MOVE)
             NativeUi_QueuePress(START_BUTTON);
         return true;
     case HIT_TARGET:
@@ -1477,6 +1746,14 @@ static bool Wheel(int dy)
         return true;
     if (NativeUi_PressesPending() || sB.wallyChooses)
         return true;
+    if (sPre.on)
+    {
+        int next = sPre.cursor + (dy > 0 ? -1 : 1);
+
+        if (!sPre.chosen && !sPre.back && next >= 0 && next < sPre.count && sPre.moves[next] != MOVE_NONE)
+            sPre.cursor = next;
+        return true;
+    }
     if (sB.input == NATIVE_BATTLE_INPUT_MOVE && !sB.descOpen)
     {
         int next = sB.moveCursor + (dy > 0 ? -1 : 1);
@@ -1497,6 +1774,32 @@ static uint16_t FilterKeys(uint16_t keys, uint16_t newKeys)
         return keys;
     if (newKeys & (A_BUTTON | B_BUTTON))
         CrashReport_Crumb(CRUMB_KEY, newKeys & (A_BUTTON | B_BUTTON), 0);
+    if (sPre.on)
+    {
+        /* the move preview: the keys set its goal, as on the engine's own move menu (HandleInputChooseMove) */
+        int at = sPre.cursor, to = -1;
+
+        if (newKeys & DPAD_UP)
+            to = at & ~2;
+        else if (newKeys & DPAD_DOWN)
+            to = at | 2;
+        else if (newKeys & DPAD_LEFT)
+            to = at & ~1;
+        else if (newKeys & DPAD_RIGHT)
+            to = at | 1;
+        if (to >= 0 && to < sPre.count && sPre.moves[to] != MOVE_NONE && !sPre.chosen && !sPre.back)
+            sPre.cursor = to;
+        if ((newKeys & START_BUTTON) && sB.gimmick != GIMMICK_NONE && !sPre.chosen && !sPre.back)
+            sPre.gimmick = !sPre.gimmick;
+        if ((newKeys & A_BUTTON) && !sPre.back)
+            sPre.chosen = true;
+        if (newKeys & B_BUTTON)
+        {
+            sPre.back = true;
+            sPre.chosen = false;
+        }
+        return keys & ~(DPAD_ANY | A_BUTTON | B_BUTTON | START_BUTTON);
+    }
 
     /* not while a YES / NO box is up over it (the encounter reset), nor while R cycles the last used Ball */
     if (sB.input != NATIVE_BATTLE_INPUT_ACTION || sB.page != PAGE_ACTION || sB.yesNo || !(newKeys & DPAD_ANY)
