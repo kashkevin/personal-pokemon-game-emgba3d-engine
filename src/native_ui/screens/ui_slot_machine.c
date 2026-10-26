@@ -18,6 +18,7 @@
 #include "global.h"
 #include "main.h"
 #include "slot_machine.h"
+#include "platform/casino_rates.h"
 #include "string_util.h"
 #include "constants/characters.h"
 #include "constants/items.h"
@@ -50,7 +51,10 @@ static const u8 sText_Choose[] = _("Choose");
 static const u8 sText_No[] = _("No");
 static const u8 sText_Next[] = _("Next");
 static const u8 sText_Close[] = _("Close");
-static const u8 sText_BetLine[] = _("Put in up to 3 COINS with DOWN, then A to spin.\nA with none in bets 3.");
+#if CASINO_SLOT_COINS_PER_BET != 5
+#error "sText_BetLine names the bet: 5 COINS each, 15 for the three"
+#endif
+static const u8 sText_BetLine[] = _("Each bet is 5 COINS: DOWN adds up to 3, A spins.\nA with none in bets 3 (15 COINS).");
 static const u8 sText_SpinLine[] = _("The reels are turning. A stops them,\none after another.");
 static const u8 sText_LoseLine[] = _("No match this time.");
 static const u8 sText_QuitLine[] = _("Quit the game?");

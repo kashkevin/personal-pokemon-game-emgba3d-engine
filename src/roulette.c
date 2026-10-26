@@ -34,6 +34,7 @@
 #ifdef PORTABLE
 // Update 29: tables take a stake from the 32-bit wallet (include/platform/coin_wallet.h)
 #include "platform/coin_wallet.h"
+#include "platform/casino_rates.h"
 #define GetCoins CoinWallet_TableGet
 #define SetCoins CoinWallet_TableSet
 #endif
@@ -126,7 +127,13 @@
 #define F_FLASH_ICON             (1 << FLASH_ICON)
 #define F_FLASH_COLUMN           (1 << FLASH_ICON | 1 << FLASH_ICON_2 | 1 << FLASH_ICON_3)
 
+#ifdef PORTABLE
+#define MAX_MULTIPLIER CASINO_ROULETTE_MULT_4
+#else
+#line 122 // gba-line
 #define MAX_MULTIPLIER 12
+#endif
+#line 123 // gba-line
 
 #define PALTAG_SHADOW 1
 #define PALTAG_BALL 2
@@ -827,7 +834,13 @@ static const struct RouletteSlot sRouletteSlots[] =
         .flag = F_PURPLE_MAKUHITA,
     },
 };
+#ifdef PORTABLE
+static const u8 sTableMinBets[] = {CASINO_ROULETTE_BET_LEFT, CASINO_ROULETTE_BET_RIGHT, CASINO_ROULETTE_BET_LEFT_SPECIAL, CASINO_ROULETTE_BET_RIGHT_SPECIAL};
+#else
+#line 823 // gba-line
 static const u8 sTableMinBets[] = {1, 3, 1, 6};
+#endif
+#line 824 // gba-line
 
 static const struct RouletteTable sRouletteTables[] =
 {
@@ -1155,8 +1168,15 @@ static void InitRouletteTableData(void)
     sRoulette->unk1 = 1;
 
     // Left table (with min bet of 1) has red background, other table has green
+#ifdef PORTABLE
+    if (sRoulette->tableId == 0)
+        gPlttBufferUnfaded[BG_PLTT_ID(0)] = gPlttBufferUnfaded[BG_PLTT_ID(5) + 1] = gPlttBufferFaded[BG_PLTT_ID(0)] = gPlttBufferFaded[BG_PLTT_ID(5) + 1] = bgColors[0];
+#else
+#line 1144 // gba-line
     if (sRoulette->minBet == 1)
         gPlttBufferUnfaded[BG_PLTT_ID(0)] = gPlttBufferUnfaded[BG_PLTT_ID(5) + 1] = gPlttBufferFaded[BG_PLTT_ID(0)] = gPlttBufferFaded[BG_PLTT_ID(5) + 1] = bgColors[0];
+#endif
+#line 1146 // gba-line
     else
         gPlttBufferUnfaded[BG_PLTT_ID(0)] = gPlttBufferUnfaded[BG_PLTT_ID(5) + 1] = gPlttBufferFaded[BG_PLTT_ID(0)] = gPlttBufferFaded[BG_PLTT_ID(5) + 1] = bgColors[1];
 
@@ -1498,8 +1518,15 @@ static void Task_StartSpin(u8 taskId)
 {
     IncrementDailyRouletteUses();
     sRoulette->selectionRectDrawState = SELECT_STATE_ERASE;
+#ifdef PORTABLE
+    if (sRoulette->tableId == 0)
+        sRoulette->wheelDelay = 1;
+#else
+#line 1487 // gba-line
     if (sRoulette->minBet == 1)
         sRoulette->wheelDelay = 1;
+#endif
+#line 1489 // gba-line
     else
         sRoulette->wheelDelay = 0;
     sRoulette->wheelDelayTimer = 0;
@@ -1890,7 +1917,13 @@ static void Task_GivePayout(u8 taskId)
 
 static void Task_PrintPayout(u8 taskId)
 {
+#ifdef PORTABLE
+    ConvertIntToDecimalStringN(gStringVar1, (sRoulette->minBet * gTasks[taskId].tMultiplier), STR_CONV_MODE_LEFT_ALIGN, 5);
+#else
+#line 1879 // gba-line
     ConvertIntToDecimalStringN(gStringVar1, (sRoulette->minBet * gTasks[taskId].tMultiplier), STR_CONV_MODE_LEFT_ALIGN, 2);
+#endif
+#line 1880 // gba-line
     StringExpandPlaceholders(gStringVar4, Roulette_Text_YouveWonXCoins);
     DrawStdWindowFrame(sTextWindowId, FALSE);
     AddTextPrinterParameterized(sTextWindowId, FONT_NORMAL, gStringVar4, 0, 1, TEXT_SKIP_DRAW, NULL);
@@ -2303,7 +2336,13 @@ static void DrawGridBackground(u8 selectionId)
 
 static u8 GetMultiplier(u8 selectionId)
 {
+#ifdef PORTABLE
+    u8 multipliers[5] = {0, CASINO_ROULETTE_MULT_1, CASINO_ROULETTE_MULT_2, CASINO_ROULETTE_MULT_3, CASINO_ROULETTE_MULT_4};
+#else
+#line 2292 // gba-line
     u8 multipliers[5] = {0, 3, 4, 6, MAX_MULTIPLIER};
+#endif
+#line 2293 // gba-line
 
     if (selectionId > NUM_GRID_SELECTIONS)
         selectionId = 0;
@@ -3371,8 +3410,15 @@ static void Task_PrintMinBet(u8 taskId)
     if (JOY_NEW(A_BUTTON | B_BUTTON))
     {
         u32 minBet = sTableMinBets[GET_MIN_BET_ID(gSpecialVar_0x8004)];
+#ifdef PORTABLE
+        ConvertIntToDecimalStringN(gStringVar1, minBet, STR_CONV_MODE_LEFT_ALIGN, 3);
+        StringExpandPlaceholders(gStringVar4, Roulette_Text_PlayMinimumWagerIsX);
+#else
+#line 3360 // gba-line
         ConvertIntToDecimalStringN(gStringVar1, minBet, STR_CONV_MODE_LEADING_ZEROS, 1);
         StringExpandPlaceholders(gStringVar4, Roulette_Text_PlayMinimumWagerIsX);
+#endif
+#line 3362 // gba-line
         DrawStdWindowFrame(0, FALSE);
         AddTextPrinterParameterized(0, FONT_NORMAL, gStringVar4, 0, 1, TEXT_SKIP_DRAW, NULL);
         CopyWindowToVram(0, COPYWIN_FULL);
@@ -3385,9 +3431,17 @@ static void Task_PrintRouletteEntryMsg(u8 taskId)
     s32 minBet;
     PrintCoinsString(gTasks[taskId].tCoins);
     minBet = sTableMinBets[GET_MIN_BET_ID(gSpecialVar_0x8004)];
+#ifdef PORTABLE
+    ConvertIntToDecimalStringN(gStringVar1, minBet, STR_CONV_MODE_LEFT_ALIGN, 3);
+
+    if (gTasks[taskId].tCoins >= minBet)
+#else
+#line 3374 // gba-line
     ConvertIntToDecimalStringN(gStringVar1, minBet, STR_CONV_MODE_LEADING_ZEROS, 1);
 
     if (gTasks[taskId].tCoins >= minBet)
+#endif
+#line 3377 // gba-line
     {
         if ((gSpecialVar_0x8004 & ROULETTE_SPECIAL_RATE) && (gSpecialVar_0x8004 & 1))
         {
@@ -3728,8 +3782,15 @@ static void SetBallCounterNumLeft(u8 numBalls)
 {
     u8 i;
     u8 t = 0;
+#ifdef PORTABLE
+    if (sRoulette->tableId == 0)
+        t = 2;
+#else
+#line 3713 // gba-line
     if (sRoulette->minBet == 1)
         t = 2;
+#endif
+#line 3715 // gba-line
     switch (numBalls)
     {
     case 6:

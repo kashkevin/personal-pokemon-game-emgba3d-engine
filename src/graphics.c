@@ -1809,7 +1809,14 @@ const u32 gRouletteCenter_Gfx[] = INCGFX_U32("graphics/roulette/center.png", ".4
 const u32 gRouletteHeaders_Gfx[] = INCGFX_U32("graphics/roulette/headers.png", ".4bpp.smol");
 const u32 gRouletteCredit_Gfx[] = INCGFX_U32("graphics/roulette/credit.png", ".4bpp.smol");
 const u32 gRouletteNumbers_Gfx[] = INCGFX_U32("graphics/roulette/numbers.png", ".4bpp.smol");
+#ifdef PORTABLE
+// the PC game's Roulette multipliers (include/platform/casino_rates.h, tools/pc_port/gen_roulette_multiplier.py)
+const u32 gRouletteMultiplier_Gfx[] = INCGFX_U32("graphics/roulette/multiplier_pc.png", ".4bpp.smol");
+#else
+#line 1812 // gba-line
 const u32 gRouletteMultiplier_Gfx[] = INCGFX_U32("graphics/roulette/multiplier.png", ".4bpp.smol");
+#endif
+#line 1813 // gba-line
 
 #include "data/graphics/mail.h"
 

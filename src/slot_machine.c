@@ -30,6 +30,7 @@
 #ifdef PORTABLE
 // Update 29: tables take a stake from the 32-bit wallet (include/platform/coin_wallet.h)
 #include "platform/coin_wallet.h"
+#include "platform/casino_rates.h"
 #define GetCoins CoinWallet_TableGet
 #define SetCoins CoinWallet_TableSet
 #endif
@@ -660,7 +661,16 @@ static void SpriteCB_PikaPowerBolt(struct Sprite *);
 static const u8 sText_QuitTheGame[] = _("Quit the game?");
 static const u8 sText_YouveGot9999Coins[] = _("You've got 9,999 COINS.");
 static const u8 sText_YouveRunOutOfCoins[] = _("You've run out of COINS.\nGame over!");
+#ifdef PORTABLE
+#if CASINO_SLOT_COINS_PER_BET != 5
+#error "the message below names three bets at 5 COINS each"
+#endif
+static const u8 sText_YouDontHaveThreeCoins[] = _("You don't have 15 COINS.");
+#else
+#line 656 // gba-line
 static const u8 sText_YouDontHaveThreeCoins[] = _("You don't have three COINS.");
+#endif
+#line 657 // gba-line
 static const u8 sText_ReelTimeHelp[] = _("REEL TIME\nHere's your chance to take\naim and nail marks!\nReel Time continues for the\nawarded number of spins.\nIt all ends on a Big Bonus.");
 
 // Ewram variables
@@ -1344,9 +1354,17 @@ static bool8 SlotTask_ReadyNewSpin(struct Task *task)
     sSlotMachine->currentReel = LEFT_REEL;
     sSlotMachine->machineBias &= (BIAS_STRAIGHT_7 | BIAS_MIXED_7);
     sSlotMachine->state = SLOTTASK_ASK_INSERT_BET;
+#ifdef PORTABLE
+    if (sSlotMachine->coins < CASINO_SLOT_COINS_PER_BET)
+    {
+        sSlotMachine->state = SLOTTASK_MSG_NO_MORE_COINS;
+#else
+#line 1321 // gba-line
     if (sSlotMachine->coins <= 0)
     {
         sSlotMachine->state = SLOTTASK_MSG_NO_MORE_COINS;
+#endif
+#line 1324 // gba-line
     }
     else if (sSlotMachine->reelTimeSpinsLeft)
     {
@@ -1387,11 +1405,23 @@ static bool8 SlotTask_HandleBetInput(struct Task *task)
     // Try to bet the max amount
     else if (JOY_NEW(R_BUTTON))
     {
+#ifdef PORTABLE
+        if (sSlotMachine->coins - (MAX_BET - sSlotMachine->bet) * CASINO_SLOT_COINS_PER_BET >= 0)
+#else
+#line 1364 // gba-line
         if (sSlotMachine->coins - (MAX_BET - sSlotMachine->bet) >= 0)
+#endif
+#line 1365 // gba-line
         {
             for (i = sSlotMachine->bet; i < MAX_BET; i++)
                 LightenBetTiles(i);
+#ifdef PORTABLE
+            sSlotMachine->coins -= (MAX_BET - sSlotMachine->bet) * CASINO_SLOT_COINS_PER_BET;
+#else
+#line 1368 // gba-line
             sSlotMachine->coins -= (MAX_BET - sSlotMachine->bet);
+#endif
+#line 1369 // gba-line
             sSlotMachine->bet = MAX_BET;
             sSlotMachine->state = SLOTTASK_START_SPIN;
             PlaySE(SE_SHOP);
@@ -1405,12 +1435,25 @@ static bool8 SlotTask_HandleBetInput(struct Task *task)
     else
     {
         // Increase bet
+#ifdef PORTABLE
+        if (JOY_NEW(DPAD_DOWN) && sSlotMachine->coins >= CASINO_SLOT_COINS_PER_BET)
+#else
+#line 1382 // gba-line
         if (JOY_NEW(DPAD_DOWN) && sSlotMachine->coins != 0)
+#endif
+#line 1383 // gba-line
         {
             PlaySE(SE_SHOP);
             LightenBetTiles(sSlotMachine->bet);
+#ifdef PORTABLE
+            sSlotMachine->coins -= CASINO_SLOT_COINS_PER_BET;
+            sSlotMachine->bet++;
+#else
+#line 1386 // gba-line
             sSlotMachine->coins--;
             sSlotMachine->bet++;
+#endif
+#line 1388 // gba-line
         }
 
         // Maxed bet or finished betting
@@ -1710,8 +1753,15 @@ static bool8 SlotTask_HandleQuitInput(struct Task *task)
         DarkenBetTiles(0);
         DarkenBetTiles(1);
         DarkenBetTiles(2);
+#ifdef PORTABLE
+        sSlotMachine->coins += sSlotMachine->bet * CASINO_SLOT_COINS_PER_BET;
+        sSlotMachine->state = SLOTTASK_END;
+#else
+#line 1687 // gba-line
         sSlotMachine->coins += sSlotMachine->bet;
         sSlotMachine->state = SLOTTASK_END;
+#endif
+#line 1689 // gba-line
     }
     else if (input == 1 || input == MENU_B_PRESSED) // Chose not to quit
     {
@@ -5534,6 +5584,20 @@ static const u16 sSlotMatchFlags[] = {
     [MATCH_BLUE_7]        = 1 << MATCH_BLUE_7
 };
 
+#ifdef PORTABLE
+static const u16 sSlotPayouts[] = {
+    [MATCH_CHERRY]        = CASINO_SLOT_PAY_CHERRY,
+    [MATCH_TOPBOT_CHERRY] = CASINO_SLOT_PAY_CHERRY_EDGE,
+    [MATCH_REPLAY]        = 0,
+    [MATCH_LOTAD]         = CASINO_SLOT_PAY_LOTAD,
+    [MATCH_AZURILL]       = CASINO_SLOT_PAY_AZURILL,
+    [MATCH_POWER]         = CASINO_SLOT_PAY_POWER,
+    [MATCH_MIXED_7]       = CASINO_SLOT_PAY_MIXED_7,
+    [MATCH_RED_7]         = CASINO_SLOT_PAY_RED_7,
+    [MATCH_BLUE_7]        = CASINO_SLOT_PAY_BLUE_7
+};
+#else
+#line 5511 // gba-line
 static const u16 sSlotPayouts[] = {
     [MATCH_CHERRY]        = 2,
     [MATCH_TOPBOT_CHERRY] = 4,
@@ -5545,6 +5609,8 @@ static const u16 sSlotPayouts[] = {
     [MATCH_RED_7]         = 300,
     [MATCH_BLUE_7]        = 300
 };
+#endif
+#line 5522 // gba-line
 
 static const s16 sDigitalDisplay_SpriteCoords[][2] = {
     [DIG_DISPINFO_INSERT] = { 208, 56},
