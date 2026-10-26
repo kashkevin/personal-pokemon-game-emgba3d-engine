@@ -71,7 +71,7 @@
 #include "platform/png_write.h"
 #include "multiplayer_rival.h"
 
-#define MAX_KEYS 1024 // long walks (map streaming checks) hold a direction for hundreds of frames
+#define MAX_KEYS 16384 // long walks (map streaming checks, the lag checks' long sessions) hold a direction for thousands of frames
 #define MAX_SHOTS 32
 #define HOLD_FRAMES 4
 
@@ -331,6 +331,7 @@ extern bool32 TextPrinter_DebugState(u8 windowId, int *state, int *delay);
 
 // PKMN_DEBUG_SETUP="coins=130000,money=1000000,case=1,ring=0,charm=0,stone=ITEM" (Update 29): the player's wallet and bag when the
 // script starts. The line "econ F: coins C money M ring R charm H stones N" is logged whenever any of them changes.
+// repel=N: a Repel's N steps (the long walks of the lag checks, 2026-10-26: no wild battle stops them in the grass).
 static void EconSetup(void)
 {
     const char *value = SDL_getenv("PKMN_DEBUG_SETUP");
@@ -354,6 +355,8 @@ static void EconSetup(void)
             AddBagItem(ITEM_MEGA_RING, 1);
         else if (sscanf(token, "charm=%u", &amount) == 1 && amount)
             AddBagItem(ITEM_SHINY_CHARM, 1);
+        else if (sscanf(token, "repel=%u", &amount) == 1)
+            VarSet(VAR_REPEL_STEP_COUNT, (u16)(amount > 0xFFFF ? 0xFFFF : amount));
     }
 }
 
