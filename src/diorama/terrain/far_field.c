@@ -17,6 +17,10 @@
 #define SHADE_NORTH 0.72f
 /* Past the far blocks the columns' sides go down to here, under the haze. */
 #define RIM_BOTTOM (-1.0f)
+/* The open sea's level: the near sea's outdoors (buildings.c LevelWaterBodies, StaticWaterLevel). A far sea block at its
+ * rules' height (the border block's: the land's) stood a level over the near sea, a step of water where the scene's own
+ * cells end. */
+#define SEA_LEVEL (-1.0f)
 
 static DioramaFarBuildingHeight sBuildingHeight;
 
@@ -56,7 +60,9 @@ void DioramaFar_Column(const struct DioramaFarBlock *block, int blockX, int bloc
     if (!(block->flags & DIORAMA_FAR_VALID))
         return;
     column->present = true;
-    if ((block->flags & DIORAMA_FAR_SOURCE)
+    if (block->flags & DIORAMA_FAR_SEA)
+        top = SEA_LEVEL;
+    else if ((block->flags & DIORAMA_FAR_SOURCE)
      && DioramaRules_StaticHeights(block->layoutId, block->mapGroup, block->mapNum,
                                    block->sourceX, block->sourceY, block->metatileId,
                                    &ground, &top, &archetype))

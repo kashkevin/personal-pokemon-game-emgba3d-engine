@@ -62,6 +62,7 @@ enum DioramaFarBlockFlags
 {
     DIORAMA_FAR_VALID = 1 << 0,  /* the block has a metatile and a colour */
     DIORAMA_FAR_SOURCE = 1 << 1, /* ... and a map cell (layoutId, sourceX/Y, map) */
+    DIORAMA_FAR_SEA = 1 << 2,    /* the block is the open sea (far_field.c lays it at the near sea's level) */
 };
 
 enum DioramaCellFlags

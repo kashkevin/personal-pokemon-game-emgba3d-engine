@@ -24,6 +24,7 @@
 #include "field_message_box.h"
 #include "field_player_avatar.h"
 #include "fieldmap.h"
+#include "constants/metatile_behaviors.h"
 #include "field_weather.h"
 #include "gba/defines.h"
 #include "main.h"
@@ -1867,6 +1868,8 @@ static int FloorEven(int value)
     return value >= 0 ? value & ~1 : -((-value + 1) & ~1);
 }
 
+static bool FarIsSea(const struct MapLayout *layout, u16 metatile);
+
 static void ComputeFar(s16 cameraX, s16 cameraY)
 {
     int originX = FloorEven(cameraX - DIORAMA_FAR_RADIUS);
@@ -1909,6 +1912,8 @@ static void ComputeFar(s16 cameraX, s16 cameraY)
             block->metatileId = UNPACK_METATILE(chosen.entry);
             block->color = colour;
             block->flags = DIORAMA_FAR_VALID;
+            if (FarIsSea(chosen.layout != NULL ? chosen.layout : gMapHeader.mapLayout, block->metatileId))
+                block->flags |= DIORAMA_FAR_SEA;
             if (chosen.layout != NULL)
             {
                 block->flags |= DIORAMA_FAR_SOURCE;
@@ -1919,6 +1924,39 @@ static void ComputeFar(s16 cameraX, s16 cameraY)
                 block->mapNum = chosen.mapNum;
             }
         }
+}
+
+/* A far block's tile is the open sea (ocean, deep water, currents, seaweed: buildings.c IsSeaBehavior), from its
+ * layout's own tilesets. */
+static bool FarIsSea(const struct MapLayout *layout, u16 metatile)
+{
+    const u16 *attributes;
+    u32 behavior;
+
+    if (layout == NULL || layout->isFrlg)
+        return FALSE;
+    if (metatile < NUM_METATILES_IN_PRIMARY)
+        attributes = layout->primaryTileset != NULL ? layout->primaryTileset->metatileAttributes : NULL;
+    else
+        attributes = layout->secondaryTileset != NULL ? layout->secondaryTileset->metatileAttributes : NULL;
+    if (attributes == NULL || metatile >= NUM_METATILES_TOTAL)
+        return FALSE;
+    behavior = UNPACK_BEHAVIOR(attributes[metatile < NUM_METATILES_IN_PRIMARY ? metatile : metatile - NUM_METATILES_IN_PRIMARY]);
+    switch (behavior)
+    {
+    case MB_OCEAN_WATER:
+    case MB_DEEP_WATER:
+    case MB_NO_SURFACING:
+    case MB_SEAWEED:
+    case MB_SEAWEED_NO_SURFACING:
+    case MB_EASTWARD_CURRENT:
+    case MB_WESTWARD_CURRENT:
+    case MB_NORTHWARD_CURRENT:
+    case MB_SOUTHWARD_CURRENT:
+        return TRUE;
+    default:
+        return FALSE;
+    }
 }
 
 /* The distant scenery into a snapshot: outdoors only, worked out again when

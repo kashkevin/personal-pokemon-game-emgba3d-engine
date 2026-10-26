@@ -302,7 +302,7 @@ tilesets are unchanged.
   pieces of the outline under six pixels are left out (they stood as stray
   pillars). General's dense forest and terraces keep their own heightmaps.
 * Caves (`tools/battle_env/cave_pins.py`, `compile_rules.py` `_cave_rock_cells`,
-  `rules.c` `BorderRockRecord`): the cave rock picker read tile behaviours with
+  `rules.c` `BorderRecord`): the cave rock picker read tile behaviours with
   a table one value off from MB_INTERIOR_DEEP_WATER on (a comment in the enum
   counted as a name; battle_room_auto.py's reader, which the indoor battle rooms
   still use) and took only MB_NORMAL rock, so the rock tops that carry the
