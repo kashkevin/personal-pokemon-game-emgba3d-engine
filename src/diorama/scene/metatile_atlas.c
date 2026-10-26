@@ -439,16 +439,38 @@ static void BlitWithGutter(uint32_t *atlasPixels, uint16_t slot, const uint32_t 
     }
 }
 
-/* The first cell drawn in a slot. */
-static const struct DioramaCellSnapshot *FindSlotCell(const struct DioramaSceneSnapshot *snapshot,
-                                                      unsigned cellCount, uint16_t slot)
+/*
+ * Each slot's first cell (DIORAMA_ATLAS_NO_CELL: none), worked out once a
+ * pass: each cell with a cutout base looked for its base's first cell from
+ * the grid's start, and every cell of a slot that used a changed tile drew
+ * the slot again - its 1,000 to 2,000 cells of water drew the same 26 slots
+ * each time the water moved on, 10 to 15 ms every few frames on the cloud
+ * machine (performance work 2026-10-26, the owner's lag when running). A
+ * slot is one metatile of one page, so its cells draw it the same and use
+ * the same changed tiles: each slot is decided and drawn once a pass, from
+ * its first cell as before.
+ */
+#define DIORAMA_ATLAS_NO_CELL 0xFFFF
+static uint16_t sSlotFirstCell[DIORAMA_ATLAS_SLOT_COUNT];
+
+static void FindSlotCells(const struct DioramaSceneSnapshot *snapshot, unsigned cellCount)
 {
     unsigned i;
 
-    for (i = 0; i < cellCount; i++)
-        if (DioramaAtlas_CellSlot(&snapshot->cells[i]) == slot)
-            return &snapshot->cells[i];
-    return NULL;
+    memset(sSlotFirstCell, 0xFF, sizeof(sSlotFirstCell));
+    for (i = cellCount; i-- > 0;)
+    {
+        uint16_t slot = DioramaAtlas_CellSlot(&snapshot->cells[i]);
+
+        if (slot < DIORAMA_ATLAS_SLOT_COUNT)
+            sSlotFirstCell[slot] = (uint16_t)i;
+    }
+}
+
+/* The first cell drawn in a slot (FindSlotCells). */
+static const struct DioramaCellSnapshot *FindSlotCell(const struct DioramaSceneSnapshot *snapshot, uint16_t slot)
+{
+    return sSlotFirstCell[slot] == DIORAMA_ATLAS_NO_CELL ? NULL : &snapshot->cells[sSlotFirstCell[slot]];
 }
 
 bool DioramaAtlas_UpdateDirty(const struct DioramaSceneSnapshot *snapshot,
@@ -461,6 +483,7 @@ bool DioramaAtlas_UpdateDirty(const struct DioramaSceneSnapshot *snapshot,
 {
     uint32_t metatilePixels[DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE];
     uint32_t layerPixels[DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE];
+    uint8_t seen[DIORAMA_ATLAS_PRESENT_BYTES]; /* the slots this pass has decided */
     bool changed = false;
     unsigned i;
 
@@ -468,6 +491,8 @@ bool DioramaAtlas_UpdateDirty(const struct DioramaSceneSnapshot *snapshot,
 
     if (cellCount > DIORAMA_MAX_VISIBLE_CELLS)
         cellCount = DIORAMA_MAX_VISIBLE_CELLS;
+    FindSlotCells(snapshot, cellCount);
+    memset(seen, 0, sizeof(seen));
     for (i = 0; i < cellCount; i++)
     {
         const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
@@ -478,15 +503,16 @@ bool DioramaAtlas_UpdateDirty(const struct DioramaSceneSnapshot *snapshot,
         bool present;
         bool dirty;
 
-        if (slot >= DIORAMA_ATLAS_SLOT_COUNT)
+        if (slot >= DIORAMA_ATLAS_SLOT_COUNT || HasBit(seen, slot))
             continue;
+        seen[slot / 8] |= 1 << (slot % 8);
         baseSlot = cutoutBaseSlots != NULL ? cutoutBaseSlots[slot] : DIORAMA_ATLAS_NO_SLOT;
         present = HasBit(presentSlots, slot);
         dirty = EntriesUseDirtyTile(cell, dirtyTiles)
              || (forcedSlots != NULL && HasBit(forcedSlots, slot));
         if (baseSlot < DIORAMA_ATLAS_SLOT_COUNT)
         {
-            baseCell = FindSlotCell(snapshot, cellCount, baseSlot);
+            baseCell = FindSlotCell(snapshot, baseSlot);
             if (baseCell != NULL)
                 dirty |= EntriesUseDirtyTile(baseCell, dirtyTiles);
         }
