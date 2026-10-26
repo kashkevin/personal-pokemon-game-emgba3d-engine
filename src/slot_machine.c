@@ -1387,8 +1387,14 @@ static bool8 SlotTask_AskInsertBet(struct Task *task)
 {
     CreateDigitalDisplayScene(DIG_DISPLAY_INSERT_BET);
     sSlotMachine->state = SLOTTASK_BET_INPUT;
+#ifdef PORTABLE
+    // PC: never full - past MAX_COINS a win goes to the Coin Case (AddTableCoins)
+#else
+#line 1346 // gba-line
     if (sSlotMachine->coins >= MAX_COINS)
         sSlotMachine->state = SLOTTASK_MSG_MAX_COINS;
+#endif
+#line 1348 // gba-line
     return TRUE;
 }
 
@@ -2205,8 +2211,46 @@ static bool8 PayoutTask_Init(struct Task *task)
     }
     return FALSE;
 }
+#ifdef PORTABLE
+// The credit stops at MAX_COINS (four digits); what a win brings past it goes
+// to the Coin Case instead of being cut (CoinWallet_Bank: the owner's "no cap",
+// 2026-10-26).
+static void AddTableCoins(u32 coins)
+{
+    u32 room = sSlotMachine->coins < MAX_COINS ? MAX_COINS - sSlotMachine->coins : 0;
+    u32 credit = coins < room ? coins : room;
+
+    sSlotMachine->coins += credit;
+    CoinWallet_Bank(coins - credit);
+}
+#endif
+#line 2132 // gba-line
 static bool8 PayoutTask_GivePayout(struct Task *task)
 {
+#ifdef PORTABLE
+    if (!task->tTimer--)
+    {
+        if (IsFanfareTaskInactive())
+            PlaySE(SE_PIN);
+        sSlotMachine->payout--;
+        AddTableCoins(1);
+        task->tTimer = 8;
+        if (JOY_HELD(A_BUTTON))
+            task->tTimer = 4;
+    }
+    // START after the fanfare, as on the GBA, or A (the key that stopped the
+    // reels) at any time: the rest of the payout at once (the owner's request
+    // of 2026-10-26)
+    if ((IsFanfareTaskInactive() && JOY_NEW(START_BUTTON))
+     || (JOY_NEW(A_BUTTON) && sSlotMachine->payout != 0))
+    {
+        if (IsFanfareTaskInactive())
+            PlaySE(SE_PIN);
+        AddTableCoins(sSlotMachine->payout);
+        sSlotMachine->payout = 0;
+    }
+#else
+#line 2134 // gba-line
     if (!task->tTimer--)
     {
         if (IsFanfareTaskInactive())
@@ -2226,6 +2270,8 @@ static bool8 PayoutTask_GivePayout(struct Task *task)
             sSlotMachine->coins = MAX_COINS;
         sSlotMachine->payout = 0;
     }
+#endif
+#line 2153 // gba-line
     if (sSlotMachine->payout == 0)
         task->tState++; // PAYOUT_TASK_FREE
     return FALSE;

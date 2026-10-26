@@ -27,6 +27,14 @@ static void Check(bool condition, const char *expression, int line)
 #define TREE_METATILE 0x1D4
 #define GREEN 0x0300  /* BGR555: green 24 */
 
+/* The camera's cell (both ways) and the far blocks' first cell: block i
+ * covers cells BLOCK_LEFT(i) and BLOCK_LEFT(i) + 1. */
+#define CAMERA 60
+#define FAR_ORIGIN ((CAMERA - DIORAMA_FAR_RADIUS) & ~1)
+#define BLOCK_LEFT(i) (FAR_ORIGIN + DIORAMA_FAR_BLOCK_CELLS * (i))
+/* the far block just west of the grid's first column */
+#define BLOCK_WEST_OF_GRID ((CAMERA - DIORAMA_GRID_WIDTH / 2 - 2 - FAR_ORIGIN) / DIORAMA_FAR_BLOCK_CELLS)
+
 static struct DioramaSceneSnapshot sSnapshot;
 static struct DioramaTerrainVertex sVertices[DIORAMA_FAR_MAX_VERTICES];
 
@@ -42,11 +50,12 @@ static void MakeGround(void)
     memset(&sSnapshot, 0, sizeof(sSnapshot));
     sSnapshot.farOn = 1;
     sSnapshot.farGeneration = 1;
-    /* the camera at map cell (60, 60): the grid 36..84, the far blocks from 12 */
-    sSnapshot.gridOriginX = 60 - DIORAMA_GRID_WIDTH / 2;
-    sSnapshot.gridOriginY = 60 - DIORAMA_GRID_HEIGHT / 2;
-    sSnapshot.farOriginX = 12;
-    sSnapshot.farOriginY = 12;
+    /* the camera at map cell (CAMERA, CAMERA): the grid round it, the far
+     * blocks from FAR_ORIGIN (scene_snapshot.c's FloorEven) */
+    sSnapshot.gridOriginX = CAMERA - DIORAMA_GRID_WIDTH / 2;
+    sSnapshot.gridOriginY = CAMERA - DIORAMA_GRID_HEIGHT / 2;
+    sSnapshot.farOriginX = FAR_ORIGIN;
+    sSnapshot.farOriginY = FAR_ORIGIN;
     for (i = 0; i < DIORAMA_FAR_BLOCKS * DIORAMA_FAR_BLOCKS; i++)
     {
         sSnapshot.farBlocks[i].metatileId = GROUND_METATILE;
@@ -159,7 +168,8 @@ static void TestMesh(void)
         }
         CHECK(total == count);
         /* the middle sector is the scene's own: nothing there */
-        CHECK(sectors[DIORAMA_FAR_SECTORS / 2].count == 0);
+        CHECK(sectors[DIORAMA_FAR_SECTORS_ACROSS / 2 * DIORAMA_FAR_SECTORS_ACROSS
+                      + DIORAMA_FAR_SECTORS_ACROSS / 2].count == 0);
     }
 
     /* a tree block in the ring: sides down to the ground round it */
@@ -169,8 +179,9 @@ static void TestMesh(void)
     for (i = 0; i < count; i++)
     {
         const struct DioramaTerrainVertex *v = &sVertices[i];
-        /* block (2, 2) covers cells 16..17: x 15.5..17.5, z -17.5..-15.5 */
-        bool onBlock = v->x >= 15.5f && v->x <= 17.5f && v->z >= -17.5f && v->z <= -15.5f;
+        /* block (2, 2) covers cells BLOCK_LEFT(2)..+1 each way */
+        float low = BLOCK_LEFT(2) - 0.5f, high = BLOCK_LEFT(2) + 1.5f;
+        bool onBlock = v->x >= low && v->x <= high && v->z >= -high && v->z <= -low;
 
         if (onBlock && v->y == 0.0f && v->shade != 1.0f)
             treeSides++;
@@ -182,14 +193,17 @@ static void TestMesh(void)
      * cells stay outside the scene */
     MakeGround();
     {
-        /* the grid's left edge is x 36 (cells 36..84): block i = 11 covers 34..35 */
+        /* the grid's left edge is its first column; block BLOCK_WEST_OF_GRID
+         * covers the two cells west of it, on a row inside the grid */
         int found = 0;
+        float edge = BLOCK_LEFT(BLOCK_WEST_OF_GRID) + 1.5f;
 
-        Block(11, 20)->metatileId = TREE_METATILE;
+        CHECK(BLOCK_LEFT(BLOCK_WEST_OF_GRID) + 2 == sSnapshot.gridOriginX);
+        Block(BLOCK_WEST_OF_GRID, DIORAMA_FAR_BLOCKS / 2)->metatileId = TREE_METATILE;
         count = DioramaFar_BuildMesh(&sSnapshot, sVertices, DIORAMA_FAR_MAX_VERTICES, NULL, &complete);
         CHECK(complete);
         for (i = 0; i < count; i++)
-            if (sVertices[i].x == 35.5f && sVertices[i].y == 0.0f && sVertices[i].shade == 0.82f)
+            if (sVertices[i].x == edge && sVertices[i].y == 0.0f && sVertices[i].shade == 0.82f)
                 found++; /* an east-facing side's foot */
         CHECK(found == 2 * 3); /* both cells' sides towards the scene */
     }
@@ -200,8 +214,8 @@ static void TestMesh(void)
     count = DioramaFar_BuildMesh(&sSnapshot, sVertices, DIORAMA_FAR_MAX_VERTICES, NULL, &complete);
     rim = 0;
     for (i = 0; i < count; i++)
-        if (sVertices[i].y < -0.5f && sVertices[i].x > 21.0f && sVertices[i].x < 24.0f
-         && sVertices[i].z < -21.0f && sVertices[i].z > -24.0f)
+        if (sVertices[i].y < -0.5f && sVertices[i].x > BLOCK_LEFT(5) - 1.0f && sVertices[i].x < BLOCK_LEFT(5) + 2.0f
+         && sVertices[i].z < -(BLOCK_LEFT(5) - 1.0f) && sVertices[i].z > -(BLOCK_LEFT(5) + 2.0f))
             rim++;
     CHECK(rim > 0);
 

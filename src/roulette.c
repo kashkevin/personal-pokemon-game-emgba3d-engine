@@ -1890,6 +1890,28 @@ static void Task_GivePayout(u8 taskId)
     switch (gTasks[taskId].data[7])
     {
     case 0:
+#ifdef PORTABLE
+        // PC: the credit stops at MAX_COINS but nothing is cut - the rest of
+        // the payout goes to the Coin Case (CoinWallet_Bank: the owner's "no
+        // cap", 2026-10-26)
+        if (gTasks[taskId].tCoins < MAX_COINS)
+        {
+            gTasks[taskId].tCoins++;
+            gTasks[taskId].tPayout--;
+        }
+        m4aSongNumStart(SE_PIN);
+        SetCreditDigits(gTasks[taskId].tCoins);
+        if (gTasks[taskId].tCoins >= MAX_COINS)
+        {
+            CoinWallet_Bank(gTasks[taskId].tPayout);
+            gTasks[taskId].tPayout = 0;
+        }
+        else
+        {
+            gTasks[taskId].data[7]++;
+        }
+#else
+#line 1852 // gba-line
         gTasks[taskId].tCoins++;
         m4aSongNumStart(SE_PIN);
         SetCreditDigits(gTasks[taskId].tCoins);
@@ -1902,6 +1924,8 @@ static void Task_GivePayout(u8 taskId)
             gTasks[taskId].tPayout--;
             gTasks[taskId].data[7]++;
         }
+#endif
+#line 1864 // gba-line
         break;
     case 3:
         m4aSongNumStop(SE_PIN);
@@ -1911,6 +1935,24 @@ static void Task_GivePayout(u8 taskId)
         gTasks[taskId].data[7]++;
         break;
     }
+#ifdef PORTABLE
+    // PC: A skips the count: the rest of the payout at once (the owner's
+    // request of 2026-10-26); the win's message then waits for A or B as before
+    if (JOY_NEW(A_BUTTON) && gTasks[taskId].tPayout != 0)
+    {
+        s32 coins = gTasks[taskId].tCoins + gTasks[taskId].tPayout;
+
+        // past MAX_COINS the credit has no room: those go to the Coin Case
+        if (coins > MAX_COINS)
+            CoinWallet_Bank(coins - MAX_COINS);
+        gTasks[taskId].tCoins = coins > MAX_COINS ? MAX_COINS : coins;
+        SetCreditDigits(gTasks[taskId].tCoins);
+        m4aSongNumStart(SE_PIN);
+        gTasks[taskId].tPayout = 0;
+        gTasks[taskId].data[7] = 0;
+    }
+#endif
+#line 1873 // gba-line
     if (gTasks[taskId].tPayout == 0)
         StartTaskAfterDelayOrInput(taskId, Task_EndTurn, NO_DELAY, A_BUTTON | B_BUTTON);
 }
@@ -1966,7 +2008,13 @@ static void Task_TryPrintEndTurnMsg(u8 taskId)
             CopyWindowToVram(sTextWindowId, COPYWIN_FULL);
             StartTaskAfterDelayOrInput(taskId, Task_ClearBoard, NO_DELAY, A_BUTTON | B_BUTTON);
         }
+#ifdef PORTABLE
+        else if (FALSE) // PC: never full - past MAX_COINS a win goes to the Coin Case (Task_GivePayout)
+#else
+#line 1922 // gba-line
         else if (gTasks[taskId].tCoins == MAX_COINS)
+#endif
+#line 1923 // gba-line
         {
             // Player maxed out coins
             DrawStdWindowFrame(sTextWindowId, FALSE);
@@ -2006,10 +2054,19 @@ static void Task_ClearBoard(u8 taskId)
         gSprites[sRoulette->spriteIds[i + SPR_WHEEL_ICONS]].invisible = FALSE;
     }
 
+#ifdef PORTABLE
+    if (FALSE) // PC: never full - past MAX_COINS a win goes to the Coin Case (Task_GivePayout)
+    {
+        DrawStdWindowFrame(sTextWindowId, FALSE);
+        AddTextPrinterParameterized(sTextWindowId, FONT_NORMAL, Roulette_Text_CoinCaseIsFull, 0, 1, TEXT_SKIP_DRAW, NULL);
+#else
+#line 1962 // gba-line
     if (gTasks[taskId].tCoins == MAX_COINS)
     {
         DrawStdWindowFrame(sTextWindowId, FALSE);
         AddTextPrinterParameterized(sTextWindowId, FONT_NORMAL, Roulette_Text_CoinCaseIsFull, 0, 1, TEXT_SKIP_DRAW, NULL);
+#endif
+#line 1966 // gba-line
         CopyWindowToVram(sTextWindowId, COPYWIN_FULL);
         StartTaskAfterDelayOrInput(taskId, Task_AskKeepPlaying, NO_DELAY, A_BUTTON | B_BUTTON);
     }

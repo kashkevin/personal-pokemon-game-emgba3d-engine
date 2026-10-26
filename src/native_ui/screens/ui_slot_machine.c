@@ -5,7 +5,8 @@
  * chasing bulbs, reel digits): the owner's "make the HUD / screen match
  * resolution, graphics and current UI" (2026-10-25). The machine is the
  * engine's own (src/slot_machine.c): its reels, bets, payouts, Pika Power and
- * Reel Time run as before, and every key reaches it unchanged; this screen
+ * Reel Time run as before, and every key reaches it unchanged (A also skips
+ * the payout's count, as START does); this screen
  * only draws what SlotMachine_NativeUiState says it shows - the three reels
  * (the game's own symbol art, where its sprites are), the lines the bet
  * plays and those that won, CREDIT and PAYOUT, the bet lamps, the Pika Power
@@ -51,6 +52,7 @@ static const u8 sText_Choose[] = _("Choose");
 static const u8 sText_No[] = _("No");
 static const u8 sText_Next[] = _("Next");
 static const u8 sText_Close[] = _("Close");
+static const u8 sText_Skip[] = _("Skip");
 #if CASINO_SLOT_COINS_PER_BET != 5
 #error "sText_BetLine names the bet: 5 COINS each, 15 for the three"
 #endif
@@ -482,6 +484,13 @@ static void Bottom(int t)
     else if (sS.phase == SLOT_NATIVE_SPIN)
     {
         struct UiHintItem a[1] = {{UI_ACT_CONFIRM, sText_Stop}};
+
+        UiW_Hints(490, 309, a, 1, false, 8);
+    }
+    else if (sS.phase == SLOT_NATIVE_WIN && sS.payout > 0)
+    {
+        /* A adds the rest of the payout at once (slot_machine.c PayoutTask_GivePayout) */
+        struct UiHintItem a[1] = {{UI_ACT_CONFIRM, sText_Skip}};
 
         UiW_Hints(490, 309, a, 1, false, 8);
     }

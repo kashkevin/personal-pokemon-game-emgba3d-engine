@@ -7,11 +7,12 @@
 #include "diorama/ui_overlay.h"
 
 #define DIORAMA_SNAPSHOT_COUNT 3
-/* The cells round the camera the 3D view holds: 49 x 49 since the graphics
- * overhaul (33 x 33 before), so the wider cameras and the edge fog
- * (gl_light.h) never show the scene's end. */
-#define DIORAMA_GRID_WIDTH 49
-#define DIORAMA_GRID_HEIGHT 49
+/* The cells round the camera the 3D view holds: 81 x 81 since the owner's
+ * render-distance report of 2026-10-26 (49 x 49 from the graphics overhaul,
+ * 33 x 33 before), so a zoomed-out or low camera sees full detail out to
+ * the haze instead of the distant scenery's flat blocks. */
+#define DIORAMA_GRID_WIDTH 81
+#define DIORAMA_GRID_HEIGHT 81
 #define DIORAMA_MAX_VISIBLE_CELLS (DIORAMA_GRID_WIDTH * DIORAMA_GRID_HEIGHT)
 #define DIORAMA_MAX_OBJECTS 16
 /* Field-effect sprites drawn in 3D (struct DioramaEffectSnapshot): six Poke Balls and a monitor, or five monitors. */
@@ -54,7 +55,7 @@
  * routes); farGeneration changes when the blocks do.
  */
 #define DIORAMA_FAR_BLOCK_CELLS 2
-#define DIORAMA_FAR_RADIUS 48
+#define DIORAMA_FAR_RADIUS 55 /* DIORAMA_FAR_BLOCKS a multiple of DIORAMA_FAR_SECTOR_BLOCKS (7) */
 #define DIORAMA_FAR_BLOCKS (DIORAMA_FAR_RADIUS + 1)
 
 enum DioramaFarBlockFlags

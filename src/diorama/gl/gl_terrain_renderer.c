@@ -27,7 +27,10 @@
 #include "platform/png_write.h"
 #include "constants/metatile_behaviors.h"
 
-#define TERRAIN_GRID_CHUNKS 100 /* the 49 x 49 cells span up to 8 x 8 chunks */
+/* The chunks the grid's cells can span (one more each way than they fill:
+ * the 81 x 81 cells, up to 12 x 12). */
+#define TERRAIN_GRID_SPAN ((DIORAMA_GRID_WIDTH + DIORAMA_TERRAIN_CHUNK_SIZE - 1) / DIORAMA_TERRAIN_CHUNK_SIZE + 1)
+#define TERRAIN_GRID_CHUNKS (TERRAIN_GRID_SPAN * TERRAIN_GRID_SPAN)
 /*
  * The chunk cache (performance work 2026-10-11): the chunks in view, and
  * those of places seen before - other maps included - kept until the slots
@@ -35,10 +38,10 @@
  * the cache when its input's signature is the same, so walking back over a
  * map's edge or out of a house builds nothing it built before. Its size is
  * the memory budget's (DioramaGLTerrain_SetCacheChunks): at least the grid's
- * 100, at most TERRAIN_CHUNK_POOL_MAX.
+ * TERRAIN_GRID_CHUNKS, at most TERRAIN_CHUNK_POOL_MAX.
  */
 #define TERRAIN_CHUNK_POOL_MAX 1024
-#define TERRAIN_CHUNK_POOL_DEFAULT 160
+#define TERRAIN_CHUNK_POOL_DEFAULT 288
 #define TERRAIN_DEBUG_MAX_VERTICES ((TERRAIN_GRID_CHUNKS + DIORAMA_MAX_VISIBLE_CELLS) * 8)
 #define TERRAIN_MAX_VISIBLE_TREE_INSTANCES \
     (TERRAIN_GRID_CHUNKS * DIORAMA_TERRAIN_MAX_TREE_INSTANCES)

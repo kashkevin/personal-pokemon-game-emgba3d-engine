@@ -16,5 +16,8 @@ u32 CoinWallet_BeginTable(void);              // call when a table opens: rememb
 u32 CoinWallet_TableGet(void);                // the table's coins (what GetCoins is to the GBA code)
 void CoinWallet_TableSet(u32 tableCoins);     // leaving: the wallet becomes the reserve plus these coins (capped)
 u32 CoinWallet_Reserve(void);
+// Coins a table's credit has no room for (it stops at MAX_COINS): into the reserve, so they reach the Coin Case when the
+// table is left instead of being cut - the owner's "no cap" (2026-10-26). The Coin Case's own ceiling is MAX_COINS_WALLET.
+void CoinWallet_Bank(u32 coins);
 #endif
 #endif // GUARD_PLATFORM_COIN_WALLET_H

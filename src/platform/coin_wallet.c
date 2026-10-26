@@ -36,4 +36,11 @@ u32 CoinWallet_Reserve(void)
 {
     return sReserve;
 }
+
+void CoinWallet_Bank(u32 coins)
+{
+    u32 room = sReserve < MAX_COINS_WALLET ? MAX_COINS_WALLET - sReserve : 0;
+
+    sReserve += coins < room ? coins : room;
+}
 #endif
