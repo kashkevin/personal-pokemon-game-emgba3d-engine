@@ -33,6 +33,7 @@
 /* src/platform/gba_easy_draw.c: GBA background layers and OAM entries left out of the picture */
 extern uint8_t gPlatformPictureHideBgMask;
 extern uint32_t gPlatformPictureHideObj[4];
+extern uint8_t gPlatformPictureWindowAs;
 
 /* The screens in detection order (the first that detects wins). */
 static const struct UiScreen *const sScreens[] = {
@@ -60,6 +61,8 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_GameCorner,
     &gUiScreen_SlotMachine,  /* the Game Corner's slot machines (the reels' own screen) */
     &gUiScreen_Roulette,     /* the Game Corner's roulette tables (the wheel and the board) */
+    &gUiScreen_Transition, /* a battle transition on the field */
+    &gUiScreen_FieldMove,  /* a field move's cut-in (an HM's Pokemon on its banner) */
     &gUiScreen_FieldText, /* the field's messages the screens above do not draw */
     &gUiScreen_MapName,   /* the location pop-up, over the field */
     &gUiScreen_Notice,    /* last: only over the calm field */
@@ -366,6 +369,8 @@ void NativeUi_CaptureFrame(void)
     memset(gPlatformPictureHideObj, 0, 4 * sizeof(uint32_t));
     if (sActive != NULL && sActive->hideObjects != NULL && picture != UI_PICTURE_HIDE_ALL)
         sActive->hideObjects(gPlatformPictureHideObj);
+    gPlatformPictureWindowAs = sActive != NULL && sActive->windows != NULL && picture != UI_PICTURE_HIDE_ALL
+                             ? (uint8_t)sActive->windows() : UI_WINDOWS_GAME;
 }
 
 const char *NativeUi_ScreenNow(void)

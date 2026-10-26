@@ -12,6 +12,15 @@
 
 #include "native_ui/ui_draw.h"
 
+/* How the GBA picture's windows apply while a screen is up: a screen that draws a
+ * window's shape itself (a battle transition's circle) takes one region everywhere. */
+enum UiWindows
+{
+    UI_WINDOWS_GAME,       /* as the game has them */
+    UI_WINDOWS_INSIDE,     /* every pixel as inside WIN0 */
+    UI_WINDOWS_OUTSIDE,    /* every pixel as outside the windows */
+};
+
 enum UiPicture
 {
     UI_PICTURE_KEEP,       /* the GBA picture stays (overlay only) */
@@ -50,6 +59,8 @@ struct UiScreen
      * the arrows and the controller stay the game's (NULL: no typing) */
     bool (*textMode)(void);
     void (*text)(const char *utf8);
+    /* the GBA picture's windows while up (NULL: the game's) */
+    enum UiWindows (*windows)(void);
 };
 
 enum UiPcKey
@@ -111,6 +122,8 @@ extern const struct UiScreen gUiScreen_SlotMachine;
 extern const struct UiScreen gUiScreen_Roulette;
 extern const struct UiScreen gUiScreen_FieldText;
 extern const struct UiScreen gUiScreen_MapName;
+extern const struct UiScreen gUiScreen_Transition;
+extern const struct UiScreen gUiScreen_FieldMove;
 extern const struct UiScreen gUiScreen_Notice;
 
 #endif // GUARD_NATIVE_UI_SCREEN_H

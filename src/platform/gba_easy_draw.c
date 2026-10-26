@@ -29,6 +29,11 @@ uint8_t gPlatformPictureHideBgMask;
 /* ...and the OAM entries it draws itself (bit n of [n / 32]: entry n; the
  * battle's healthboxes, bars and trays). 0 outside it. */
 uint32_t gPlatformPictureHideObj[4];
+/* ...and the GBA's windows when it draws their shapes itself (a battle
+ * transition's circle or black wipes, smooth at the window's resolution):
+ * 1 every pixel as inside WIN0, 2 every pixel as outside the windows. 0 (the
+ * game's windows) outside it. */
+uint8_t gPlatformPictureWindowAs;
 /* PKMN_DEBUG_HIDEBG=mask (bit n: BG n): layers left out of every frame, to find which layer holds a picture (Update 27's
  * look at the black rectangles behind some animations' backgrounds). 0 when unset. */
 static unsigned DebugHideBg(void)
@@ -1545,6 +1550,14 @@ static void DrawScanline(uint16_t *pixels, uint16_t vcount)
                 scanline.winMask[xpos] = (REG_WININ >> 8) & 0x3F;
             else
                 scanline.winMask[xpos] = (REG_WINOUT & 0x3F) | WINMASK_WINOUT;
+        }
+        // The native UI draws the windows' shapes itself (gPlatformPictureWindowAs): one region everywhere.
+        if (gPlatformPictureWindowAs != 0)
+        {
+            uint16_t all = gPlatformPictureWindowAs == 1 ? (REG_WININ & 0x3F) : ((REG_WINOUT & 0x3F) | WINMASK_WINOUT);
+
+            for (xpos = 0; xpos < DISPLAY_WIDTH; xpos++)
+                scanline.winMask[xpos] = all;
         }
     }
 

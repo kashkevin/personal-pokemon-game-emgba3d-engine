@@ -92,6 +92,11 @@ int UiW_TitleTab(int x, int y, const char *label, const struct UiRamp *r, int w,
 #define UI_LOCATION_SIGN_H 34
 void UiW_LocationSign(int x, int y, const uint8_t *name, const char *clock);
 
+/* a Poke Ball, d pixels across, turned clockwise by turn / 64 of a full turn (a battle transition's balls): the piece
+ * (cached by size and turn), or drawn with its centre at cx, cy */
+const struct UiPiece *UiW_PokeBallPiece(int d, int turn);
+void UiW_PokeBall(int cx, int cy, int d, int turn);
+
 struct UiDsButtonOpt
 {
     const char *icon;      /* pkui icon in a chip */

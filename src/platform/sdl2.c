@@ -817,6 +817,9 @@ int main(int argc, char **argv)
     ApplyDioramaLook(); // before the game thread makes its first snapshot
     DioramaGLQuality_Set(DisplaySettings_ShadowMapSize(sDisplay.shadows), sDisplay.lighting, sDisplay.effects);
     ApplyDioramaDetails();
+    // PKMN_DEBUG_CLASSIC=1 (a test switch): start in the classic 2D view, as F4 switches to it.
+    if (SDL_getenv("PKMN_DEBUG_CLASSIC") != NULL)
+        DioramaGL_ToggleEnabled();
 #ifdef ENABLE_NATIVE_UI
     // The native PC interface (src/native_ui) over the game, then the PC
     // settings menu and the frame rate over everything.
@@ -3447,5 +3450,22 @@ void Platform_NativeUiSaveWrites(u32 *written, u32 *failed, bool8 *pending)
     *written = sSaveWritesDone;
     *failed = sSaveWritesFailed;
     *pending = gPlatformFlashDirty;
+}
+
+void Platform_NativeUiPictureRect(int outputWidth, int outputHeight, int *x, int *y, int *w, int *h,
+                                  bool8 *fieldFillsWindow)
+{
+    // As the compositor places it (DioramaGL_Present): whole-number steps, centred.
+    int scale = DisplaySettings_PixelScale(outputWidth, outputHeight, sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE]);
+
+    *w = DISPLAY_WIDTH * scale;
+    *h = DISPLAY_HEIGHT * scale;
+    *x = (outputWidth - *w) / 2;
+    *y = (outputHeight - *h) / 2;
+#ifdef ENABLE_DIORAMA
+    *fieldFillsWindow = DioramaGL_DrewField3D();
+#else
+    *fieldFillsWindow = FALSE;
+#endif
 }
 #endif

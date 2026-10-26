@@ -812,4 +812,24 @@ bool32 Window_NativeUiShown(u8 windowId)
                                       GetBgMetricTextMode(bg, 2) * 0x20);
     return (tilemap[index] & 0x3FF) != 0;
 }
+
+// ...and its tiles are on the screen itself: the background's map in VRAM still holds them (a battle transition
+// draws on BG0's map directly, erasing a message box the buffer still has).
+bool32 Window_NativeUiOnScreen(u8 windowId)
+{
+    u32 bg, index;
+    const u16 *tilemap, *screen;
+
+    if (!Window_NativeUiShown(windowId))
+        return FALSE;
+    bg = gWindows[windowId].window.bg;
+    if (!(REG_DISPCNT & (DISPCNT_BG0_ON << bg)))
+        return FALSE;
+    tilemap = GetBgTilemapBuffer(bg);
+    index = GetTileMapIndexFromCoords(gWindows[windowId].window.tilemapLeft, gWindows[windowId].window.tilemapTop,
+                                      GetBgAttribute(bg, BG_ATTR_SCREENSIZE), GetBgMetricTextMode(bg, 1) * 0x20,
+                                      GetBgMetricTextMode(bg, 2) * 0x20);
+    screen = (const u16 *)(BG_VRAM + (((*(vu16 *)(REG_ADDR_BG0CNT + bg * 2)) >> 8 & 0x1F) << 11));
+    return screen[index] == tilemap[index];
+}
 #endif // ENABLE_NATIVE_UI

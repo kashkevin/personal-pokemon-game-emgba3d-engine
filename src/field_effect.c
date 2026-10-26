@@ -2941,6 +2941,13 @@ bool8 FldEff_FieldMoveShowMon(void)
     else
         taskId = CreateTask(Task_FieldMoveShowMonIndoors, 0xff);
 
+#ifdef ENABLE_NATIVE_UI
+    // The native PC UI's cut-in (FieldEffect_NativeUiShowMon): the Pokemon shown, in fields both tasks leave free.
+    gTasks[taskId].data[7] = (u16)gFieldEffectArguments[0];
+    gTasks[taskId].data[8] = gFieldEffectArguments[1];
+    StoreWordInTwoHalfwords((u16 *)&gTasks[taskId].data[9], gFieldEffectArguments[2]);
+#endif
+#line 2931 // gba-line
     gTasks[taskId].tMonSpriteId = InitFieldMoveMonSprite(gFieldEffectArguments[0], gFieldEffectArguments[1], gFieldEffectArguments[2]);
     return FALSE;
 }
@@ -4676,5 +4683,74 @@ bool8 DioramaFieldEffect_IsMachineSprite(const struct Sprite *sprite)
         || sprite->callback == SpriteCB_PokecenterMonitor
         || sprite->callback == SpriteCB_HallOfFameMonitor
         || sprite->callback == SpriteCB_HallOfFameMonitorFrlg;
+}
+#endif
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (screens/ui_field_move.c): the field move cut-in as the game has it now - its banner's place, its
+// streaks' scroll, the Pokemon - for the UI to draw it (the 3D view shows nothing of the GBA's picture of it).
+bool8 FieldEffect_NativeUiShowMon(struct NativeFieldMoveState *state)
+{
+    u8 taskId = FindTaskIdByFunc(Task_FieldMoveShowMonOutdoors);
+    const struct Task *task;
+    const struct Sprite *mon;
+    u32 personality;
+
+    memset(state, 0, sizeof(*state));
+    if (taskId != TASK_NONE)
+    {
+        task = &gTasks[taskId];
+        state->outdoors = TRUE;
+        // its window over the field, from CreateBanner to ShrinkBanner (none before and after)
+        if (task->data[0] >= 2 && task->data[0] <= 4)
+        {
+            state->left = (u16)task->data[1] >> 8;
+            state->right = task->data[1] & 0xFF;
+            state->top = (u16)task->data[2] >> 8;
+            state->bottom = task->data[2] & 0xFF;
+        }
+        state->scroll = task->data[5];
+    }
+    else if ((taskId = FindTaskIdByFunc(Task_FieldMoveShowMonIndoors)) != TASK_NONE)
+    {
+        task = &gTasks[taskId];
+        // over rows 40 to 120, its 32 columns put on two at a time (SlideBannerOn) and taken off so (SlideBannerOff)
+        state->top = DISPLAY_HEIGHT / 4;
+        state->bottom = DISPLAY_HEIGHT - DISPLAY_HEIGHT / 4;
+        switch (task->data[0])
+        {
+        case 2:
+            state->right = DISPLAY_WIDTH * min(task->data[4], 32) / 32;
+            break;
+        case 3:
+        case 4:
+            state->right = DISPLAY_WIDTH;
+            break;
+        case 5:
+            state->left = DISPLAY_WIDTH * min(task->data[4], 32) / 32;
+            state->right = DISPLAY_WIDTH;
+            break;
+        }
+        state->scroll = task->data[1];
+    }
+    else
+    {
+        return FALSE;
+    }
+    mon = &gSprites[(u8)task->data[15]];
+    if (mon->inUse && !mon->invisible)
+    {
+        state->monShown = TRUE;
+        state->monX = mon->x + mon->x2;
+        state->monY = mon->y + mon->y2;
+        state->tileNum = mon->oam.tileNum;
+    }
+    state->species = (u16)task->data[7];
+    state->shiny = task->data[8] != 0;
+    LoadWordFromTwoHalfwords((u16 *)&task->data[9], &personality);
+    state->personality = personality;
+    return TRUE;
 }
 #endif

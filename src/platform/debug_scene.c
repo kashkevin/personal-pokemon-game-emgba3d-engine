@@ -33,6 +33,10 @@
 #include "sprite.h"
 #include "battle_setup.h"
 #include "battle_transition.h"
+#include "field_effect.h"
+#include "constants/field_effects.h"
+#include "field_message_box.h"
+#include "strings.h"
 #include "map_name_popup.h"
 #include "link.h"
 #include "pokemon.h"
@@ -699,28 +703,46 @@ unsigned DebugScene_GameFrame(void)
     return sKeyFrame;
 }
 
-// PKMN_DEBUG_TRANSITION=id[:frame] (with the field scene): the battle transition B_TRANSITION_<id> played on the calm field
-// at that game frame (default 120), as a battle's start plays it (BattleTransition_StartOnField), without the battle: the
-// transition's pictures (PKMN_DEBUG_GLSHOTS) for the UI audit's old-look check; the screen stays black after it.
+// PKMN_DEBUG_TRANSITION=id[:frame[:line]] (with the field scene): the battle transition B_TRANSITION_<id> played on the
+// calm field at that game frame (default 120), as a battle's start plays it (BattleTransition_StartOnField), without the
+// battle: the transition's pictures (PKMN_DEBUG_GLSHOTS) for the UI audit's old-look check; the screen stays black after
+// it. With line 1 a trainer's line is up first, a second, and stays up as the transition begins (as a trainer's does).
 static void TransitionTick(void)
 {
-    static int sId = -2;
+    static int sId = -2, sLineState;
     static unsigned sAt;
     const char *value;
 
     if (sId == -2)
     {
-        int id = -1, at = 120;
+        int id = -1, at = 120, line = 0;
 
         if ((value = SDL_getenv("PKMN_DEBUG_TRANSITION")) != NULL)
-            sscanf(value, "%d:%d", &id, &at);
+            sscanf(value, "%d:%d:%d", &id, &at, &line);
         sId = id;
         sAt = (unsigned)at;
+        sLineState = line != 0;
     }
-    if (sId < 0 || sKeyFrame < sAt || gMain.callback2 != CB2_Overworld || ArePlayerFieldControlsLocked()
+    if (sId >= 0 && sLineState == 2 && sKeyFrame >= sAt + 90)
+        sLineState = 3; // the line has been read: the battle begins under it
+    else if (sId < 0 || sKeyFrame < sAt || gMain.callback2 != CB2_Overworld || ArePlayerFieldControlsLocked()
      || gPaletteFade.active || ScriptContext_IsEnabled())
         return;
+    if (sLineState == 1)
+    {
+        SDL_Log("debug transition: a trainer's line at frame %u", sKeyFrame);
+        LockPlayerFieldControls();
+        HideMapNamePopUpWindow();
+        ShowFieldMessage(gText_BirchInTrouble); // any two-line message (this file cannot hold game strings)
+        sLineState = 2;
+        return;
+    }
+    if (sLineState == 2)
+        return;
     SDL_Log("debug transition: B_TRANSITION %d at frame %u", sId, sKeyFrame);
+    // the Elite Four's mugshot shows its trainer: Sidney's, as no battle chose one
+    if (sId == B_TRANSITION_MUGSHOT)
+        TRAINER_BATTLE_PARAM.opponentA = TRAINER_SIDNEY;
     // As the field starts a battle (overworld.c DoCB1_Overworld): the controls locked and the location pop-up put away,
     // which would otherwise draw over the transition's BG0 picture.
     LockPlayerFieldControls();
@@ -729,10 +751,32 @@ static void TransitionTick(void)
     sId = -1;
 }
 
+// PKMN_DEBUG_FIELDMOVE=frame (with the field scene): the field move cut-in (the party's first Pokemon shown as an HM
+// shows it, FLDEFF_FIELD_MOVE_SHOW_MON_INIT) on the calm field at that game frame, the move itself not used: its pictures
+// indoors and out (PKMN_DEBUG_GLSHOTS).
+static void FieldMoveTick(void)
+{
+    static int sAt = -2;
+    const char *value;
+
+    if (sAt == -2)
+        sAt = (value = SDL_getenv("PKMN_DEBUG_FIELDMOVE")) != NULL ? atoi(value) : -1;
+    if (sAt < 0 || sKeyFrame < (unsigned)sAt || gMain.callback2 != CB2_Overworld || ArePlayerFieldControlsLocked()
+     || gPaletteFade.active || ScriptContext_IsEnabled())
+        return;
+    SDL_Log("debug field move: cut-in at frame %u", sKeyFrame);
+    LockPlayerFieldControls();
+    HideMapNamePopUpWindow();
+    gFieldEffectArguments[0] = 0;
+    FieldEffectStart(FLDEFF_FIELD_MOVE_SHOW_MON_INIT);
+    sAt = -1;
+}
+
 uint16_t DebugScene_FilterKeys(uint16_t keys)
 {
     sKeyFrame++;
     TransitionTick();
+    FieldMoveTick();
     BagLog();
     LinkLog();
     PartyLog();

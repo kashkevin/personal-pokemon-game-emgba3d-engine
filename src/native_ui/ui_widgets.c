@@ -537,6 +537,73 @@ void UiW_LocationSign(int x, int y, const uint8_t *name, const char *clock)
     }
 }
 
+/* PokeBall: red top, white bottom, the ink band and the button, lit from the top left; turned as the GBA's affine
+ * sprite turns it (a screen offset maps to the ball by the rotation's inverse) */
+struct PokeBallSpec
+{
+    int d;
+    int turn;
+};
+
+static void BuildPokeBall(struct UiBitmap *bm, const void *ctx)
+{
+    const struct PokeBallSpec *b = ctx;
+    const double r = b->d / 2.0, a = b->turn * (6.283185307179586 / 64.0), ca = cos(a), sa = sin(a);
+    const double ink = b->d >= 96 ? b->d / 64.0 : 1.0, band = b->d >= 64 ? b->d / 64.0 : 1.0;
+    const double button = b->d * 0.19, inner = button * 0.52;
+    const UiRGBA redHi = UI_HEX(0xF89880), red = UI_P_CMD_FIGHT, redLo = UI_P_HP_RED_2, white = UI_P_PAPER,
+                 whiteLo = UI_P_PAPER_LO, inkC = UI_P_INK;
+
+    for (int py = 0; py < b->d; py++)
+        for (int px = 0; px < b->d; px++)
+        {
+            double x = px + 0.5 - r, y = py + 0.5 - r, dist = sqrt(x * x + y * y);
+            double u = ca * x + sa * y, v = -sa * x + ca * y; /* the ball's own axes: v < 0 its red half */
+            double nx = x / r, ny = y / r, sx = nx + 0.14, sy = ny + 0.18;
+            bool shade = sx * sx + sy * sy > 0.92 * 0.92; /* the rim away from the light: a crescent */
+            UiRGBA c;
+
+            if (dist > r)
+                continue;
+            if (dist > r - ink)
+                c = inkC;
+            else if (u * u + v * v < button * button)
+            {
+                double bd = sqrt(u * u + v * v);
+
+                if (bd > button - ink || (bd < inner && bd > inner - (ink > 1.5 ? ink / 2 : 1.0)))
+                    c = inkC;
+                else
+                    c = bd > inner && (u + v) / button > 0.55 ? whiteLo : white;
+            }
+            else if (fabs(v) < band)
+                c = inkC;
+            else if (v < 0)
+            {
+                double hx = nx + 0.42, hy = ny + 0.5;
+
+                c = shade ? redLo : (hx * hx / 0.03 + hy * hy / 0.012 < 1.0 ? redHi : red);
+            }
+            else
+                c = shade ? whiteLo : white;
+            UiBitmap_Put(bm, px, py, c);
+        }
+}
+
+const struct UiPiece *UiW_PokeBallPiece(int d, int turn)
+{
+    struct PokeBallSpec spec = {d < 4 ? 4 : d, ((turn % 64) + 64) % 64};
+    char key[48];
+
+    snprintf(key, sizeof(key), "pokeball:%d:%d", spec.d, spec.turn);
+    return UiG_Cached(key, spec.d, spec.d, BuildPokeBall, &spec);
+}
+
+void UiW_PokeBall(int cx, int cy, int d, int turn)
+{
+    UiG_Blit(UiW_PokeBallPiece(d, turn), cx - d / 2, cy - d / 2);
+}
+
 int UiW_TitleTab(int x, int y, const char *label, const struct UiRamp *r, int w, const char *icon)
 {
     static const int8_t chamfer[] = {6, 5, 4, 3, 2, 1};

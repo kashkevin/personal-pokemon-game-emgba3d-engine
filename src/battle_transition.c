@@ -4874,3 +4874,162 @@ u8 BattleTransition_NativeUiPlaying(void)
     return taskId != TASK_NONE ? (u8)gTasks[taskId].data[1] : B_TRANSITION_COUNT;
 }
 #endif
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (screens/ui_transition.c): what the battle transition on the field shows now, so that the UI draws
+// it at the window's resolution - the big Poke Ball, the rolling Poke Balls, the circles and the black wipes - over a
+// picture with the game's own versions left out. Read at the frame boundary; changes nothing.
+static const TransitionStateFunc *NativeUiPatternWeaveFuncs(u8 id, u32 *count)
+{
+    switch (id)
+    {
+    case B_TRANSITION_BIG_POKEBALL:
+        *count = ARRAY_COUNT(sBigPokeball_Funcs);
+        return sBigPokeball_Funcs;
+    case B_TRANSITION_AQUA:
+        *count = ARRAY_COUNT(sAqua_Funcs);
+        return sAqua_Funcs;
+    case B_TRANSITION_MAGMA:
+        *count = ARRAY_COUNT(sMagma_Funcs);
+        return sMagma_Funcs;
+    case B_TRANSITION_REGICE:
+        *count = ARRAY_COUNT(sRegice_Funcs);
+        return sRegice_Funcs;
+    case B_TRANSITION_REGISTEEL:
+        *count = ARRAY_COUNT(sRegisteel_Funcs);
+        return sRegisteel_Funcs;
+    case B_TRANSITION_REGIROCK:
+        *count = ARRAY_COUNT(sRegirock_Funcs);
+        return sRegirock_Funcs;
+    }
+    *count = 0;
+    return NULL;
+}
+
+// The clockwise wipe's line drawn this frame (each state moves its end on after drawing it).
+static void NativeUiClockwiseEnd(TransitionStateFunc func, struct NativeTransitionState *state)
+{
+    s16 endX = sTransitionData->data[4], endY = sTransitionData->data[5];
+
+    if (func == ClockwiseWipe_TopRight || (func == ClockwiseWipe_Right && endY == 0))
+        state->wipeEndX = endX - 16, state->wipeEndY = -1;
+    else if (func == ClockwiseWipe_Right || (func == ClockwiseWipe_Bottom && endX == DISPLAY_WIDTH))
+        state->wipeEndX = DISPLAY_WIDTH, state->wipeEndY = endY - 8;
+    else if (func == ClockwiseWipe_Bottom || (func == ClockwiseWipe_Left && endY == DISPLAY_HEIGHT))
+        state->wipeEndX = endX + 16, state->wipeEndY = DISPLAY_HEIGHT;
+    else if (func == ClockwiseWipe_Left || (func == ClockwiseWipe_TopLeft && endX == 0))
+        state->wipeEndX = 0, state->wipeEndY = endY + 8;
+    else if (func == ClockwiseWipe_TopLeft)
+        state->wipeEndX = endX - 16, state->wipeEndY = 0;
+    else if (func == ClockwiseWipe_End)
+        state->wipeFull = TRUE;
+    else
+        state->wipeEndX = DISPLAY_WIDTH / 2, state->wipeEndY = -1; // not begun
+    // TopLeft's last line passes twelve o'clock: the whole screen is black
+    if (func == ClockwiseWipe_TopLeft && state->wipeEndX > DISPLAY_WIDTH / 2)
+        state->wipeFull = TRUE;
+}
+
+bool8 BattleTransition_NativeUiState(struct NativeTransitionState *state)
+{
+    u8 taskId = FindTaskIdByFunc(Task_BattleTransition), mainId;
+    struct Task *main;
+    const TransitionStateFunc *funcs;
+    TransitionStateFunc func = NULL;
+    u32 count, i;
+
+    memset(state, 0, sizeof(*state));
+    if (taskId == TASK_NONE || sTransitionData == NULL)
+        return FALSE;
+    state->id = (u8)gTasks[taskId].data[1];
+    if (state->id >= B_TRANSITION_COUNT)
+        return FALSE;
+    state->done = gTasks[taskId].data[15] != 0;
+    mainId = sTasks_Main[state->id] != NULL ? FindTaskIdByFunc(sTasks_Main[state->id]) : TASK_NONE;
+    if (mainId == TASK_NONE)
+        return TRUE;
+    main = &gTasks[mainId];
+
+    funcs = NativeUiPatternWeaveFuncs(state->id, &count);
+    if (funcs != NULL)
+    {
+        if ((u16)main->tState >= count)
+            return TRUE;
+        func = funcs[main->tState];
+        state->pokeball = state->id == B_TRANSITION_BIG_POKEBALL;
+        state->eva = sTransitionData->BLDALPHA & 0x1F;
+        state->evb = (sTransitionData->BLDALPHA >> 8) & 0x1F;
+        if (func == PatternWeave_Blend1 || func == PatternWeave_Blend2 || func == PatternWeave_FinishAppear)
+        {
+            state->kind = NATIVE_TRANSITION_WEAVE;
+            for (i = 0; i < DISPLAY_HEIGHT; i++)
+                state->lineOffset[i] = (s16)gScanlineEffectRegBuffers[0][i];
+        }
+        else if (func == FramesCountdown || func == PatternWeave_CircularMask)
+        {
+            state->kind = NATIVE_TRANSITION_CIRCLE;
+            state->radius = func == FramesCountdown ? DISPLAY_HEIGHT : main->data[1];
+        }
+        return TRUE;
+    }
+    switch (state->id)
+    {
+    case B_TRANSITION_BLACKHOLE:
+    case B_TRANSITION_BLACKHOLE_PULSATE:
+        if (main->tState > 0)
+        {
+            state->kind = NATIVE_TRANSITION_BLACKHOLE;
+            state->radius = main->data[1];
+        }
+        break;
+    case B_TRANSITION_CLOCKWISE_WIPE:
+        if ((u16)main->tState < ARRAY_COUNT(sClockwiseWipe_Funcs))
+        {
+            state->kind = NATIVE_TRANSITION_CLOCKWISE;
+            NativeUiClockwiseEnd(sClockwiseWipe_Funcs[main->tState], state);
+        }
+        break;
+    case B_TRANSITION_ANGLED_WIPES:
+        if ((u16)main->tState < ARRAY_COUNT(sAngledWipes_Funcs))
+        {
+            func = sAngledWipes_Funcs[main->tState];
+            state->kind = NATIVE_TRANSITION_ANGLED;
+            // a wipe that has just finished is counted done (its task moves on next frame)
+            state->wipeId = (u8)main->data[1] + (func == AngledWipes_TryEnd ? 1 : 0);
+            state->wipeActive = func == AngledWipes_DoWipe;
+            state->wipeCurrY = sTransitionData->data[3];
+        }
+        break;
+    case B_TRANSITION_POKEBALLS_TRAIL:
+        state->kind = NATIVE_TRANSITION_TRAIL;
+        for (i = 0; i < MAX_SPRITES && state->ballCount < NATIVE_TRANSITION_BALLS; i++)
+        {
+            struct Sprite *sprite = &gSprites[i];
+            struct NativeTransitionBall *ball;
+
+            if (!sprite->inUse || sprite->callback != SpriteCB_FldEffPokeballTrail || sprite->invisible)
+                continue;
+            ball = &state->balls[state->ballCount++];
+            ball->x = sprite->x + sprite->x2;
+            ball->y = sprite->y + sprite->y2;
+            ball->matrix[0] = gOamMatrices[sprite->oam.matrixNum & 0x1F].a;
+            ball->matrix[1] = gOamMatrices[sprite->oam.matrixNum & 0x1F].b;
+            ball->matrix[2] = gOamMatrices[sprite->oam.matrixNum & 0x1F].c;
+            ball->matrix[3] = gOamMatrices[sprite->oam.matrixNum & 0x1F].d;
+            ball->tileNum = sprite->oam.tileNum;
+        }
+        break;
+    }
+    return TRUE;
+}
+
+bool8 BattleTransition_NativeUiAngledWipe(u8 index, s16 line[5])
+{
+    if (index >= NUM_ANGLED_WIPES)
+        return FALSE;
+    memcpy(line, sAngledWipes_MoveData[index], 5 * sizeof(s16));
+    return TRUE;
+}
+#endif

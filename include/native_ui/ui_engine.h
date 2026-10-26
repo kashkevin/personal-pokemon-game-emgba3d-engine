@@ -1211,9 +1211,76 @@ void TextPrinter_NativeUiForgetWindow(u32 windowId);
 
 /* window.c: the window's tiles are on its background now (shown, not cleared) */
 bool32 Window_NativeUiShown(u8 windowId);
+/* ...and its tiles are on the screen itself (VRAM), not only in the background's buffer */
+bool32 Window_NativeUiOnScreen(u8 windowId);
 
 /* battle_transition.c: the battle transition playing (B_TRANSITION_*), B_TRANSITION_COUNT with none */
 u8 BattleTransition_NativeUiPlaying(void);
+
+/* battle_transition.c: what a battle transition on the field shows now, for the native UI to draw instead of the
+ * GBA's picture of it (screens/ui_transition.c). Everything in the GBA screen's pixels (240 x 160), as the game
+ * computed it this frame (the picture shows it the next). */
+enum NativeTransitionKind
+{
+    NATIVE_TRANSITION_NONE,      /* nothing of its own the UI draws (the intro's flash, a wave of the field, ...) */
+    NATIVE_TRANSITION_WEAVE,     /* the big Poke Ball weaving in: lineOffset per line, the blend eva / evb */
+    NATIVE_TRANSITION_CIRCLE,    /* a pattern in a closing circle (radius); the big Poke Ball's own if pokeball */
+    NATIVE_TRANSITION_BLACKHOLE, /* a black circle growing or pulsing (radius) */
+    NATIVE_TRANSITION_CLOCKWISE, /* the black sweep from twelve o'clock to the line to wipeEndX, wipeEndY */
+    NATIVE_TRANSITION_ANGLED,    /* the angled black wipes: those before wipeId done, wipeId up to its row wipeCurrY */
+    NATIVE_TRANSITION_TRAIL,     /* Poke Balls rolling over the field (balls) */
+};
+#define NATIVE_TRANSITION_BALLS 5
+struct NativeTransitionBall
+{
+    s16 x;          /* centre */
+    s16 y;
+    s16 matrix[4];  /* its OAM matrix (a, b, c, d; 8.8 fixed point, 256 = 1) */
+    u16 tileNum;    /* its OAM tiles (the game's sprite, hidden while the UI draws the ball) */
+};
+struct NativeTransitionState
+{
+    u8 id;               /* B_TRANSITION_* */
+    u8 kind;             /* enum NativeTransitionKind */
+    bool8 done;          /* finished: the screen is black until the battle */
+    bool8 pokeball;      /* WEAVE, CIRCLE: the pattern is the big Poke Ball */
+    u8 eva;              /* WEAVE, CIRCLE: the pattern's blend over the field (0..16 each) */
+    u8 evb;
+    s16 radius;          /* CIRCLE, BLACKHOLE */
+    s16 wipeEndX;        /* CLOCKWISE */
+    s16 wipeEndY;
+    bool8 wipeFull;      /* CLOCKWISE: the sweep has gone round */
+    u8 wipeId;           /* ANGLED */
+    bool8 wipeActive;    /* ANGLED: wipe wipeId is moving (else it is done) */
+    s16 wipeCurrY;       /* ANGLED: the row wipe wipeId has reached */
+    u8 ballCount;        /* TRAIL */
+    struct NativeTransitionBall balls[NATIVE_TRANSITION_BALLS];
+    s16 lineOffset[160]; /* WEAVE: BG0's horizontal offset by line */
+};
+bool8 BattleTransition_NativeUiState(struct NativeTransitionState *state);
+/* field_effect.c: the field move cut-in (FLDEFF_FIELD_MOVE_SHOW_MON: a field move's Pokemon on its banner) as the game
+ * has it now, for the native UI to draw (the 3D view shows nothing of the GBA's picture of it); GBA screen pixels */
+struct NativeFieldMoveState
+{
+    bool8 outdoors;     /* the outdoor banner (a band opening from the middle) or the indoor one (put on column by column) */
+    s16 left;           /* the banner: columns [left, right), rows [top, bottom); none when empty */
+    s16 right;
+    s16 top;
+    s16 bottom;
+    s16 scroll;         /* its streaks' horizontal scroll */
+    bool8 monShown;     /* the Pokemon's picture, centred at monX, monY */
+    s16 monX;
+    s16 monY;
+    u16 tileNum;        /* its sprite's OAM tiles (hidden while the UI draws it) */
+    u16 species;
+    bool8 shiny;
+    u32 personality;
+};
+bool8 FieldEffect_NativeUiShowMon(struct NativeFieldMoveState *state);
+
+/* battle_transition.c: the angled wipes' lines in order: start x and y, end x and y, side (0: black to the left of the
+ * line, 1: to the right); FALSE past the last */
+bool8 BattleTransition_NativeUiAngledWipe(u8 index, s16 line[5]);
 
 /* map_name_popup.c: the location pop-up sliding in, shown or sliding out: its name and how far above its place it is
  * (0 in place, *offscreen gone) */
@@ -1228,5 +1295,9 @@ bool8 Platform_NativeUiPcMenuOpen(void);
 void Platform_NativeUiKeyLabel(int action, char *out, int size);
 /* save file writes since start-up: written, failed; *pending: an image waits for the next write */
 void Platform_NativeUiSaveWrites(u32 *written, u32 *failed, bool8 *pending);
+/* where the 240x160 GBA picture is in a window of outputWidth x outputHeight pixels; *fieldFillsWindow: the last
+ * frame drew the field in 3D, filling the whole window (else only the picture's rectangle is the game's) */
+void Platform_NativeUiPictureRect(int outputWidth, int outputHeight, int *x, int *y, int *w, int *h,
+                                  bool8 *fieldFillsWindow);
 
 #endif // GUARD_NATIVE_UI_ENGINE_H
