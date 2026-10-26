@@ -37,6 +37,16 @@
 #include "platform/casino_rates.h"
 #define GetCoins CoinWallet_TableGet
 #define SetCoins CoinWallet_TableSet
+// The native PC UI's roulette screen (Roulette_NativeUiState, include/roulette.h): the table's text window as the game
+// last left it - each print to it and each clear in this file passes through these - and whether its YES / NO is up.
+static const u8 *sNativeMessage;
+static bool8 sNativeAsking;
+#define AddTextPrinterParameterized(windowId, fontId, str, ...) \
+    (sNativeMessage = (windowId) == sTextWindowId ? (str) : sNativeMessage, \
+     AddTextPrinterParameterized(windowId, fontId, str, __VA_ARGS__))
+#define ClearStdWindowAndFrame(windowId, copyToVram) \
+    (sNativeMessage = NULL, sNativeAsking = FALSE, ClearStdWindowAndFrame(windowId, copyToVram))
+#define DisplayYesNoMenuDefaultYes() (sNativeAsking = TRUE, DisplayYesNoMenuDefaultYes())
 #endif
 #line 34 // gba-line
 
@@ -4819,3 +4829,79 @@ static void SpriteCB_Taillow(struct Sprite *sprite)
     gSprites[sprite->sMonSpriteId].callback = SpriteCB_Taillow_FlyIn;
     m4aSongNumStart(SE_FALL);
 }
+
+#ifdef PORTABLE
+// The native PC UI's roulette screen (include/roulette.h): what the table shows, read at the frame boundary while the
+// game is parked. It changes nothing the table reads.
+static u8 NativeUiPhase(TaskFunc func)
+{
+    if (sNativeAsking)
+        return ROULETTE_NATIVE_ASK;
+    if (func == Task_SelectFirstEmptySquare || func == Task_StartHandleBetGridInput || func == Task_HandleBetGridInput)
+        return ROULETTE_NATIVE_BET;
+    if (func == Task_PlaceBet || func == Task_StartSpin || func == Task_SlideGridOffscreen || func == Task_InitBallRoll
+     || func == Task_RollBall || func == Task_RecordBallHit || func == Task_SlideGridOnscreen)
+        return ROULETTE_NATIVE_SPIN;
+    if (func == Task_FlashBallOnWinningSquare || func == Task_TryIncrementWins || func == Task_PrintSpinResult
+     || func == Task_GivePayout || func == Task_PrintPayout || func == Task_EndTurn || func == Task_TryPrintEndTurnMsg
+     || func == Task_ClearBoard)
+        return ROULETTE_NATIVE_RESULT;
+    if (func == Task_WaitForNextTask)
+        return ROULETTE_NATIVE_WAIT;
+    return ROULETTE_NATIVE_OTHER;
+}
+
+bool32 Roulette_NativeUiState(struct RouletteNativeState *out)
+{
+    struct Task *task;
+    u32 i;
+
+    memset(out, 0, sizeof(*out));
+    if (sRoulette == NULL || gMain.callback2 != CB2_Roulette || sRoulette->playTaskId >= NUM_TASKS
+     || !gTasks[sRoulette->playTaskId].isActive)
+        return FALSE;
+    task = &gTasks[sRoulette->playTaskId];
+    out->phase = NativeUiPhase(task->func);
+    if (out->phase == ROULETTE_NATIVE_WAIT && sRoulette->nextTask != NULL)
+    {
+        // a pause or a message waiting for A or B: the step it leads to tells which part of a turn it is
+        u8 next = NativeUiPhase(sRoulette->nextTask);
+
+        if (next != ROULETTE_NATIVE_OTHER && next != ROULETTE_NATIVE_WAIT)
+            out->phase = next;
+    }
+    out->waitingForKey = task->func == Task_WaitForNextTask && sRoulette->taskWaitKey != 0;
+    out->tableId = sRoulette->tableId;
+    out->specialRate = sRoulette->isSpecialRate;
+    out->minBet = sRoulette->minBet;
+    out->coins = task->tCoins;
+    out->payout = task->func == Task_GivePayout ? task->data[1] : 0;
+    out->ballsLeft = task->tBallNum < BALLS_PER_ROUND ? BALLS_PER_ROUND - task->tBallNum : 0;
+    out->cursor = task->tSelectionId;
+    out->bet = sRoulette->betSelection[0];
+    out->multiplier = GetMultiplier(out->phase == ROULETTE_NATIVE_BET ? out->cursor : out->bet);
+    out->winningSquare = task->tWinningSquare;
+    out->won = task->tWonBet;
+    out->hitFlags = sRoulette->hitFlags;
+    out->wheelAngle = sRoulette->wheelAngle;
+    for (i = 0; i < ROULETTE_NATIVE_SQUARES; i++)
+    {
+        u8 square = (i / NUM_BOARD_POKES + 1) * (NUM_BOARD_POKES + 1) + i % NUM_BOARD_POKES + 1;
+
+        out->squareAngle[i] = gSprites[sRoulette->spriteIds[SPR_WHEEL_ICONS + sGridSelections[square].spriteIdOffset]].data[0];
+    }
+    for (i = 0; i < BALLS_PER_ROUND; i++)
+    {
+        const struct Sprite *ball = &gSprites[sRoulette->spriteIds[i]];
+
+        if (ball->invisible || !ball->inUse)
+            continue;
+        out->ballShown |= 1 << i;
+        out->ballX[i] = ball->x + ball->x2 - 116;
+        out->ballY[i] = ball->y + ball->y2 - 80;
+    }
+    out->message = sNativeMessage;
+    out->yesNoCursor = Menu_GetCursorPos();
+    return TRUE;
+}
+#endif

@@ -108,6 +108,7 @@ extern const struct UiScreen gUiScreen_Starters;
 extern const struct UiScreen gUiScreen_Evolution;
 extern const struct UiScreen gUiScreen_GameCorner;
 extern const struct UiScreen gUiScreen_SlotMachine;
+extern const struct UiScreen gUiScreen_Roulette;
 extern const struct UiScreen gUiScreen_FieldText;
 extern const struct UiScreen gUiScreen_Notice;
 
