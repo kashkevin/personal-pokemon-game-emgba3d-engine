@@ -38,6 +38,8 @@
 #include "field_message_box.h"
 #include "strings.h"
 #include "map_name_popup.h"
+#include "daycare.h"
+#include "egg_hatch.h"
 #include "pokedex.h"
 #include "fieldmap.h"
 #include "link.h"
@@ -824,6 +826,35 @@ static void RegionMapTick(void)
     }
 }
 
+// PKMN_DEBUG_HATCH=frame[:species] (with the field scene): an Egg of that species (Torchic by default) added to the party
+// and hatched on the calm field at that game frame, as the Day Care's step counter hatches one (EggHatch).
+static void HatchTick(void)
+{
+    static int sAt = -2, sSpecies = SPECIES_TORCHIC;
+    const char *value;
+    int v[2];
+
+    if (sAt == -2)
+    {
+        sAt = -1;
+        if ((value = SDL_getenv("PKMN_DEBUG_HATCH")) != NULL && Numbers(value, v, 2) >= 1)
+        {
+            sAt = v[0];
+            if (Numbers(value, v, 2) >= 2 && v[1] > 0 && v[1] < NUM_SPECIES)
+                sSpecies = v[1];
+        }
+    }
+    if (sAt < 0 || sKeyFrame < (unsigned)sAt || gMain.callback2 != CB2_Overworld || ArePlayerFieldControlsLocked()
+     || gPaletteFade.active || ScriptContext_IsEnabled() || gPartiesCount[B_TRAINER_PLAYER] >= PARTY_SIZE)
+        return;
+    SDL_Log("debug hatch: an Egg of species %d hatching at frame %u", sSpecies, sKeyFrame);
+    HideMapNamePopUpWindow();
+    CreateEgg(&gParties[B_TRAINER_PLAYER][gPartiesCount[B_TRAINER_PLAYER]], (u16)sSpecies, FALSE);
+    gSpecialVar_0x8004 = gPartiesCount[B_TRAINER_PLAYER]++;
+    EggHatch();
+    sAt = -1;
+}
+
 // PKMN_DEBUG_MATCHCALL=frame (with the field scene): a PokeNav call on the calm field at that game frame, as a script
 // places one (ShowPokenavFieldMessage), with any two-line message; PKMN_DEBUG_KEYS hangs up.
 static void MatchCallTick(void)
@@ -851,6 +882,7 @@ uint16_t DebugScene_FilterKeys(uint16_t keys)
     PokeNavTick();
     MatchCallTick();
     RegionMapTick();
+    HatchTick();
     BagLog();
     LinkLog();
     PartyLog();

@@ -126,6 +126,7 @@ extern const struct UiScreen gUiScreen_Transition;
 extern const struct UiScreen gUiScreen_FieldMove;
 extern const struct UiScreen gUiScreen_MatchCall;
 extern const struct UiScreen gUiScreen_RegionMap;
+extern const struct UiScreen gUiScreen_EggHatch;
 extern const struct UiScreen gUiScreen_Notice;
 
 #endif // GUARD_NATIVE_UI_SCREEN_H

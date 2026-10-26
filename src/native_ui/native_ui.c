@@ -58,6 +58,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_Naming,
     &gUiScreen_Starters,
     &gUiScreen_Evolution,
+    &gUiScreen_EggHatch,     /* an Egg hatching */
     &gUiScreen_GameCorner,
     &gUiScreen_SlotMachine,  /* the Game Corner's slot machines (the reels' own screen) */
     &gUiScreen_Roulette,     /* the Game Corner's roulette tables (the wheel and the board) */

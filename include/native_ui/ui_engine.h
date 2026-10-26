@@ -472,6 +472,31 @@ bool32 PokedexArea_NativeUiState(struct NativeDexArea *out);
 /* the region map's player icon (16x16 4bpp) and its palette (region_map.c) */
 const u8 *RegionMap_NativeUiPlayerIcon(bool32 female, const u16 **palette);
 
+/* egg_hatch.c: an Egg hatching (CB2_EggHatch), as the game plays it now (screens/ui_egg_hatch.c) */
+#define NATIVE_EGG_SHARDS 20
+struct NativeEggHatch
+{
+    u8 state;                   /* the scene's step (egg_hatch.c CB2_EggHatch) */
+    bool8 ready;                /* the game reads buttons (the nickname's YES / NO) */
+    u16 species;
+    u32 personality;
+    bool8 shiny;
+    u8 windowId;                /* the message's window */
+    bool8 yesNo;
+    u8 yesNoCursor;
+    bool8 monAnim;              /* the Pokemon's front animation plays */
+    bool8 eggShown;
+    s16 eggX, eggY;             /* the egg's centre, shaking, in GBA pixels */
+    u8 eggTiles[16 * 32];       /* its picture now (32x32, 4bpp sprite tiles: whole or cracked) */
+    u16 eggPalette[16];
+    bool8 monShown;
+    s16 monX, monY;             /* the Pokemon's centre as it rises */
+    u16 monAffine;              /* its OAM matrix scale (256 its size; more: smaller, as it comes out) */
+    u8 shardCount;
+    struct { s16 x, y; u8 frame; } shards[NATIVE_EGG_SHARDS];
+};
+bool8 EggHatch_NativeUiState(struct NativeEggHatch *out);
+
 /* The Fly map (region_map.c) and the wall map (field_region_map.c) as the game has them now (screens/ui_region_map.c).
  * Cells are the cursor's coordinates: cell (x, y) is the map art's 8x8 tile x, y. */
 #define NATIVE_REGION_FLY_MAX 24

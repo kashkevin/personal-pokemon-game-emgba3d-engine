@@ -896,3 +896,61 @@ u16 CountPartyAliveNonEggMons(void)
     aliveNonEggMonsCount += CountPartyAliveNonEggMonsExcept(PARTY_SIZE);
     return aliveNonEggMonsCount;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (screens/ui_egg_hatch.c): the hatching as the game plays it now, read at the frame boundary (changes
+// nothing): the egg (its picture as the game shows it, shaking and cracking), the shards in the air, the Pokemon as it
+// comes out, the message and the nickname's YES / NO.
+bool8 EggHatch_NativeUiState(struct NativeEggHatch *out)
+{
+    struct Pokemon *mon;
+    struct Sprite *egg, *pic;
+    u32 i;
+
+    memset(out, 0, sizeof(*out));
+    if (gMain.callback2 != CB2_EggHatch || sEggHatchData == NULL || sEggHatchData->eggPartyId >= PARTY_SIZE)
+        return FALSE;
+    mon = &gParties[B_TRAINER_PLAYER][sEggHatchData->eggPartyId];
+    out->state = sEggHatchData->state;
+    out->species = GetMonData(mon, MON_DATA_SPECIES);
+    out->personality = GetMonData(mon, MON_DATA_PERSONALITY);
+    out->shiny = GetMonData(mon, MON_DATA_IS_SHINY);
+    out->windowId = sEggHatchData->windowId;
+    out->yesNo = sEggHatchData->state == 10;
+    out->yesNoCursor = out->yesNo ? Menu_GetCursorPos() : 0;
+    out->ready = out->yesNo;
+    out->monAnim = sEggHatchData->state == 4;
+    // the egg: its picture as the game shows it now (its frame's tiles in VRAM and its palette)
+    egg = sEggHatchData->state > 0 && sEggHatchData->eggSpriteId < MAX_SPRITES ? &gSprites[sEggHatchData->eggSpriteId] : NULL;
+    if (egg != NULL && egg->inUse && !egg->invisible)
+    {
+        out->eggShown = TRUE;
+        out->eggX = egg->x + egg->x2;
+        out->eggY = egg->y + egg->y2;
+        memcpy(out->eggTiles, (const u8 *)(OBJ_VRAM0 + egg->oam.tileNum * TILE_SIZE_4BPP), sizeof(out->eggTiles));
+        memcpy(out->eggPalette, &gPlttBufferUnfaded[OBJ_PLTT_ID(egg->oam.paletteNum)], sizeof(out->eggPalette));
+    }
+    // the Pokemon: where the game has it, and how large its emerging makes it
+    pic = sEggHatchData->monSpriteId < MAX_SPRITES ? &gSprites[sEggHatchData->monSpriteId] : NULL;
+    if (pic != NULL && pic->inUse && !pic->invisible)
+    {
+        out->monShown = TRUE;
+        out->monX = pic->x + pic->x2;
+        out->monY = pic->y + pic->y2;
+        out->monAffine = 256;
+        if (pic->oam.affineMode != ST_OAM_AFFINE_OFF && gOamMatrices[pic->oam.matrixNum].a > 0)
+            out->monAffine = gOamMatrices[pic->oam.matrixNum].a;
+    }
+    for (i = 0; i < MAX_SPRITES && out->shardCount < NATIVE_EGG_SHARDS; i++)
+        if (gSprites[i].inUse && gSprites[i].callback == SpriteCB_EggShard)
+        {
+            out->shards[out->shardCount].x = gSprites[i].x + gSprites[i].x2;
+            out->shards[out->shardCount].y = gSprites[i].y + gSprites[i].y2;
+            out->shards[out->shardCount].frame = gSprites[i].animNum;
+            out->shardCount++;
+        }
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI
