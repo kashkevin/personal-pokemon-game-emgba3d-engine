@@ -472,6 +472,22 @@ bool32 PokedexArea_NativeUiState(struct NativeDexArea *out);
 /* the region map's player icon (16x16 4bpp) and its palette (region_map.c) */
 const u8 *RegionMap_NativeUiPlayerIcon(bool32 female, const u16 **palette);
 
+/* wallclock.c: the wall clock (setting it at the start, CB2_StartWallClock, or looking at one, CB2_ViewWallClock) */
+struct NativeWallClock
+{
+    bool8 setting;              /* the player sets it (else looks at it) */
+    bool8 viewing;
+    u8 hours, minutes;          /* the time it shows (0-23, 0-59) */
+    u16 minuteAngle, hourAngle; /* its hands as the game turns them (degrees clockwise from 12) */
+    bool8 pm;                   /* its AM / PM sign */
+    bool8 female;               /* the girl's clock (else the boy's) */
+    bool8 adjusting;            /* left and right turn the hands, A asks */
+    bool8 asking;               /* "Is this the correct time?" and its YES / NO */
+    u8 yesNoCursor;
+    bool8 input;                /* the game reads buttons */
+};
+bool8 WallClock_NativeUiState(struct NativeWallClock *out);
+
 /* egg_hatch.c: an Egg hatching (CB2_EggHatch), as the game plays it now (screens/ui_egg_hatch.c) */
 #define NATIVE_EGG_SHARDS 20
 struct NativeEggHatch

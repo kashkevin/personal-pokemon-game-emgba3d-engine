@@ -1091,3 +1091,50 @@ static void SpriteCB_AMIndicator(struct Sprite *sprite)
     sprite->x2 = Cos2(sprite->sAngle) * 30 / 0x1000;
     sprite->y2 = Sin2(sprite->sAngle) * 30 / 0x1000;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (screens/ui_wall_clock.c): the wall clock as the game has it now (setting it at the start, or looking
+// at the one on the wall), read at the frame boundary; changes nothing.
+bool8 WallClock_NativeUiState(struct NativeWallClock *out)
+{
+    static const TaskFunc sSetFuncs[] = {Task_SetClock_WaitFadeIn, Task_SetClock_HandleInput, Task_SetClock_AskConfirm,
+                                         Task_SetClock_HandleConfirmInput, Task_SetClock_Confirmed, Task_SetClock_Exit};
+    static const TaskFunc sViewFuncs[] = {Task_ViewClock_WaitFadeIn, Task_ViewClock_HandleInput, Task_ViewClock_FadeOut,
+                                          Task_ViewClock_Exit};
+    u32 i, taskId;
+    TaskFunc func;
+
+    memset(out, 0, sizeof(*out));
+    if (gMain.callback2 != CB2_WallClock)
+        return FALSE;
+    for (taskId = 0; taskId < NUM_TASKS; taskId++)
+    {
+        if (!gTasks[taskId].isActive)
+            continue;
+        func = gTasks[taskId].func;
+        for (i = 0; i < ARRAY_COUNT(sSetFuncs); i++)
+            if (func == sSetFuncs[i])
+                out->setting = TRUE;
+        for (i = 0; i < ARRAY_COUNT(sViewFuncs); i++)
+            if (func == sViewFuncs[i])
+                out->viewing = TRUE;
+        if (out->setting || out->viewing)
+            break;
+    }
+    if (taskId == NUM_TASKS)
+        return FALSE;
+    out->hours = gTasks[taskId].tHours;
+    out->minutes = gTasks[taskId].tMinutes;
+    out->minuteAngle = gTasks[taskId].tMinuteHandAngle;
+    out->hourAngle = gTasks[taskId].tHourHandAngle;
+    out->pm = gTasks[taskId].tPeriod == PERIOD_PM;
+    out->female = gSpecialVar_0x8004 != MALE;
+    out->adjusting = func == Task_SetClock_HandleInput;
+    out->asking = func == Task_SetClock_HandleConfirmInput;
+    out->yesNoCursor = out->asking ? Menu_GetCursorPos() : 0;
+    out->input = out->adjusting || out->asking || func == Task_ViewClock_HandleInput;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

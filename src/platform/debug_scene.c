@@ -38,6 +38,7 @@
 #include "field_message_box.h"
 #include "strings.h"
 #include "map_name_popup.h"
+#include "wallclock.h"
 #include "daycare.h"
 #include "egg_hatch.h"
 #include "pokedex.h"
@@ -860,6 +861,34 @@ static void HatchTick(void)
     sAt = -1;
 }
 
+// PKMN_DEBUG_CLOCK=frame[:view] (with the field scene): the wall clock opened from the calm field at that game frame,
+// setting it as a new game's bedroom clock does (CB2_StartWallClock), or looking at it (":1", CB2_ViewWallClock).
+static void ClockTick(void)
+{
+    static int sAt = -2, sView;
+    const char *value;
+    int frame, view = 0;
+
+    if (sAt == -2)
+    {
+        sAt = -1;
+        if ((value = SDL_getenv("PKMN_DEBUG_CLOCK")) != NULL && sscanf(value, "%d:%d", &frame, &view) >= 1)
+        {
+            sAt = frame;
+            sView = view;
+        }
+    }
+    if (sAt < 0 || sKeyFrame < (unsigned)sAt || gMain.callback2 != CB2_Overworld || ArePlayerFieldControlsLocked()
+     || gPaletteFade.active || ScriptContext_IsEnabled())
+        return;
+    SDL_Log("debug clock: %s at frame %u", sView ? "looking at the wall clock" : "setting the wall clock", sKeyFrame);
+    HideMapNamePopUpWindow();
+    gSpecialVar_0x8004 = gSaveBlock2Ptr->playerGender;
+    gMain.savedCallback = CB2_ReturnToField;
+    SetMainCallback2(sView ? CB2_ViewWallClock : CB2_StartWallClock);
+    sAt = -1;
+}
+
 // PKMN_DEBUG_MATCHCALL=frame (with the field scene): a PokeNav call on the calm field at that game frame, as a script
 // places one (ShowPokenavFieldMessage), with any two-line message; PKMN_DEBUG_KEYS hangs up.
 static void MatchCallTick(void)
@@ -888,6 +917,7 @@ uint16_t DebugScene_FilterKeys(uint16_t keys)
     MatchCallTick();
     RegionMapTick();
     HatchTick();
+    ClockTick();
     BagLog();
     LinkLog();
     PartyLog();
