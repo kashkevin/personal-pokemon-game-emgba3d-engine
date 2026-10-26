@@ -313,6 +313,18 @@ def scenarios():
             return problems
         return check
 
+    def entered(group, num):
+        def check(r):
+            problems = []
+            if not r.trace("checkpoint 1 mode"):
+                problems.append("the Route 104 trigger did not fire")
+            if not r.ever(lambda row: (row["group"], row["num"]) == (group, num)):
+                where = r.last
+                problems.append(f"the player never entered map {group}.{num} (ends at {where['group']}.{where['num']} "
+                                f"{where['x']},{where['y']})")
+            return problems
+        return check
+
     def gate_then_offline(r):
         problems = []
         if not r.trace("checkpoint 2 mode 1") or not r.trace("host record gone"):
@@ -481,6 +493,13 @@ def scenarios():
          dict(PKMN_DEBUG_SCENE="field", PKMN_DEBUG_HERE="0,3,11,53", PKMN_DEBUG_RIVAL="1,0,0,0,0",
               PKMN_DEBUG_RIVAL_WATCH=ref("VAR_RUSTBORO_CITY_STATE"), PKMN_DEBUG_RIVAL_SET=setup(VAR_RUSTBORO_CITY_STATE=7)),
          hold("RIGHT", 300, 200) + presses(560, 10, 40), no_loop("x", 20)),
+        # The owner's report of 2026-10-24 (KNOWN_ISSUES MS-71 (3)): connected, Mr. Briney's cottage could not be entered.
+        # Route 104's Rustboro trigger (17,51) is its doorstep, and the passing step put the player on the door tile by
+        # script, which never warps; the player now stays on the doorstep and their own step goes in.
+        ("route104-briney-door", "connected, walking up to Mr. Briney's cottage goes in (the trigger is its doorstep)",
+         dict(PKMN_DEBUG_SCENE="field", PKMN_DEBUG_HERE="0,19,17,53", PKMN_DEBUG_RIVAL="1,0,0,0,0",
+              PKMN_DEBUG_RIVAL_WATCH=ref("VAR_ROUTE104_STATE"), PKMN_DEBUG_RIVAL_SET=setup(VAR_ROUTE104_STATE=1)),
+         hold("UP", 300, 40) + hold("UP", 600, 16), entered(17, 0)),
         ("route110-hidden", "multiplayer: the NPC rival object on Route 110 stays away",
          dict(route110, PKMN_DEBUG_RIVAL="1,0,0,0,0"), presses(300, 2), hidden),
         ("route110-offline", "offline: the original scene and NPC battle are untouched",

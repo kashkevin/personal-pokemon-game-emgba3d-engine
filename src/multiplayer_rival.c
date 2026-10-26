@@ -19,6 +19,7 @@
 #include "field_player_avatar.h"
 #include "field_screen_effect.h"
 #include "fieldmap.h"
+#include "metatile_behavior.h"
 #include "main.h"
 #include "overworld.h"
 #include "pokemon.h"
@@ -520,11 +521,38 @@ bool32 MultiplayerRival_HidesObject(u8 localId, u8 mapNum, u8 mapGroup)
 // ---------------------------------------------------------------------------
 // Script specials
 
+// May MpRival_EventScript_StepOn walk the player on this way? Not onto a warp, a door or a blocked tile: Route 104's
+// trigger (17,51) is the doorstep of Mr. Briney's cottage, and a scripted step onto its door tile never warps (a door
+// warps on a step the player takes), so a connected player who walked up to the door was left standing in the doorway
+// (KNOWN_ISSUES MS-71 (3), the owner's report of 2026-10-24). There the player stays on the trigger, and their own next
+// step goes in. The Route 110 and 119 lines have open ground both ways and walk on as before.
+static bool32 CanStepOn(u32 direction)
+{
+    s16 x, y;
+    const struct MapEvents *events = gMapHeader.events;
+
+    if (direction != DIR_NORTH && direction != DIR_SOUTH)
+        return FALSE;
+    PlayerGetDestCoords(&x, &y);
+    MoveCoords(direction, &x, &y);
+    if (MapGridGetCollisionAt(x, y) != 0 || MetatileBehavior_IsDoor(MapGridGetMetatileBehaviorAt(x, y))
+     || MetatileBehavior_IsNonAnimDoor(MapGridGetMetatileBehaviorAt(x, y)))
+        return FALSE;
+    for (u32 i = 0; events != NULL && i < events->warpCount; i++)
+        if (events->warps[i].x + MAP_OFFSET == x && events->warps[i].y + MAP_OFFSET == y)
+            return FALSE;
+    return TRUE;
+}
+
 void MultiplayerRival_ScriptMode(void)
 {
-    gSpecialVar_0x8005 = GetPlayerFacingDirection(); // MpRival_EventScript_StepOn walks on this way
-    gSpecialVar_Result = Mode(gSpecialVar_0x8004, gSpecialVar_0x8005);
-    TestLog("rival: checkpoint %d mode %d (facing %d)", gSpecialVar_0x8004, gSpecialVar_Result, GetPlayerFacingDirection());
+    u32 facing = GetPlayerFacingDirection();
+
+    gSpecialVar_Result = Mode(gSpecialVar_0x8004, facing);
+    // MpRival_EventScript_StepOn walks on this way (DIR_NONE: it leaves the player where they are)
+    gSpecialVar_0x8005 = CanStepOn(facing) ? facing : DIR_NONE;
+    TestLog("rival: checkpoint %d mode %d (facing %d, step %d)", gSpecialVar_0x8004, gSpecialVar_Result, facing,
+            gSpecialVar_0x8005);
 }
 
 void MultiplayerRival_RequestMenu(void)
