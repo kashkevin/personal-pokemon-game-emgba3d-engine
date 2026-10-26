@@ -525,6 +525,14 @@ $(ROULETTE_MULTIPLIER_PC): graphics/roulette/multiplier_pc.png
 	tools/compresSmol/compresSmol -w $(@:.smol=) $@
 $(OBJ_DIR)/src/graphics.o: $(ROULETTE_MULTIPLIER_PC)
 
+# crash.log names the engine commit the game was built from (src/platform/crash_report.c, MS-71); the file is built
+# every time so the name is never an older commit's.
+ENGINE_COMMIT := $(shell git rev-parse --short=12 HEAD 2>/dev/null)
+$(OBJ_DIR)/src/platform/crash_report.o: CPPFLAGS += -DPKMN_ENGINE_COMMIT='"$(or $(ENGINE_COMMIT),unknown)"'
+$(OBJ_DIR)/src/platform/crash_report.o: FORCE_CRASH_REPORT
+.PHONY: FORCE_CRASH_REPORT
+FORCE_CRASH_REPORT:
+
 # C: preprocess (same flags as the GBA build + PORTABLE), expand INCBIN/charmap
 # strings with preproc, then compile for 32-bit x86.
 $(OBJ_DIR)/src/%.o: src/%.c $(BUILD_CONFIG_STAMP)

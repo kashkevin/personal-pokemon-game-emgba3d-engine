@@ -46,6 +46,7 @@
 #include "constants/hold_effects.h"
 #include "constants/items.h"
 #include "constants/moves.h"
+#include "platform/crash_report.h"
 #include "diorama/battle_fx.h"
 #include "diorama/battle_fx_host.h"
 #include "diorama/battle_fx_render.h"
@@ -1999,6 +2000,7 @@ static bool BeginRequest(const char *id, const char *request, int len, uint32_t 
 
 void BattleFx_OnLaunch(uint32_t animType, uint32_t animId, const void *script)
 {
+    CrashReport_Crumb(CRUMB_EFFECT, animType, animId); /* crash.log's last events (MS-71) */
     struct BfxHost *host;
     char request[BFX_REQUEST_MAX];
     int len = 0;

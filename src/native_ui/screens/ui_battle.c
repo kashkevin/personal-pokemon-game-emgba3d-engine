@@ -58,6 +58,7 @@
 #include "native_ui/ui_text.h"
 #include "native_ui/ui_widgets.h"
 #include "platform/battle_stat_stages.h"
+#include "platform/crash_report.h"
 
 enum
 {
@@ -439,6 +440,37 @@ static void CaptureChooser(void)
     }
 }
 
+/* the message window's text, as a number that changes when the text does */
+static u32 MessageSum(void)
+{
+    u32 sum = 2166136261u;
+
+    for (u32 i = 0; sB.hasMsg && i < sizeof(sB.msg) && sB.msg[i] != EOS; i++)
+        sum = (sum ^ sB.msg[i]) * 16777619u;
+    return sum;
+}
+
+/* breadcrumbs (crash.log; with PKMN_LINK_TRACE, the latency measurements' timeline): the player controller's choice
+ * changing, the message window's text starting, waiting and done */
+static void CrumbChoiceAndMessage(void)
+{
+    static u8 sInput = NATIVE_BATTLE_INPUT_NONE, sMessageState;
+    static u32 sMessage;
+    u8 input = sB.chooser >= 0 && !sB.wallyChooses ? sB.input : NATIVE_BATTLE_INPUT_NONE;
+    u32 message = MessageSum();
+    u8 state = sB.msgWaiting ? 2 : sB.msgPrinting ? 1 : 3;
+
+    if (input != sInput)
+        CrashReport_Crumb(CRUMB_CHOICE, input, sInput);
+    if (sB.msgPrinting && message != sMessage)
+        CrashReport_Crumb(CRUMB_MESSAGE, 1, sB.link);
+    else if (state != sMessageState && state != 1)
+        CrashReport_Crumb(CRUMB_MESSAGE, state, sB.link);
+    sInput = input;
+    sMessage = message;
+    sMessageState = state;
+}
+
 /* the YES / NO box the battle draws on its message page (HandleBattleWindow) and its cursor */
 static void CaptureYesNo(void)
 {
@@ -523,6 +555,7 @@ static void Capture(void)
         sB.hasPrompt = TextPrinter_NativeUiWindowText(B_WIN_ACTION_PROMPT, sB.prompt, sizeof(sB.prompt), &printed, &active);
     }
     UiResults_Capture();
+    CrumbChoiceAndMessage();
     sB.ready = sB.msgWaiting || sB.yesNo || UiResults_LevelUpWaiting()
             || (sB.chooser >= 0 && !sB.wallyChooses && sB.input != NATIVE_BATTLE_INPUT_ACTION_WAIT
                 && sB.input != NATIVE_BATTLE_INPUT_MOVE_WAIT && sB.input != NATIVE_BATTLE_INPUT_PARTY
@@ -1462,6 +1495,8 @@ static uint16_t FilterKeys(uint16_t keys, uint16_t newKeys)
 
     if (sTeardown)
         return keys;
+    if (newKeys & (A_BUTTON | B_BUTTON))
+        CrashReport_Crumb(CRUMB_KEY, newKeys & (A_BUTTON | B_BUTTON), 0);
 
     /* not while a YES / NO box is up over it (the encounter reset), nor while R cycles the last used Ball */
     if (sB.input != NATIVE_BATTLE_INPUT_ACTION || sB.page != PAGE_ACTION || sB.yesNo || !(newKeys & DPAD_ANY)

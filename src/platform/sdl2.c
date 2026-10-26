@@ -32,6 +32,7 @@
 #include "gba/m4a_internal.h"
 #include "cgb_audio.h"
 #include "gba/flash_internal.h"
+#include "platform/crash_report.h"
 #include "platform/dma.h"
 #include "platform/framedraw.h"
 #include "platform/mp_bridge.h"
@@ -910,7 +911,11 @@ int main(int argc, char **argv)
     // Everything the game can touch is now at its power-on state; remember it so
     // a soft reset can restore it (src/platform/game_memory.c).
     GameMemory_Snapshot();
-    mainLoopThread = SDL_CreateThread(DoMain, "AgbMain", NULL);
+    // The window and OpenGL are up: a driver may have put its own crash handler in by now (crash_report.c).
+    CrashReport_Reinstall();
+    // 8 MB of stack as on Linux (Windows' default is 1-2 MB; MS-71's investigation), with room kept for the report
+    // of an overflow (DoMain).
+    mainLoopThread = SDL_CreateThreadWithStackSize(DoMain, "AgbMain", 8u << 20, NULL);
     PerfLog_Init();
 #if defined(DIORAMA_BATTLE_ENV_TEST)
     // Test builds only (never a player's): PKMN_TEST_SPEED=n runs the game's clock n times as fast, for the gameplay
@@ -1049,6 +1054,7 @@ int main(int argc, char **argv)
                     // register are safe to touch.
                     FlushSaveIfDirty();
                     MpBridge_Frame();
+                    CrashReport_FrameBoundary();
                     // Battle speed: the coming game frame's (a battle between players runs faster). The sound of the
                     // frame just finished was made above, at its own speed.
                     if (!sTestSpeed)
@@ -3339,6 +3345,7 @@ void VDraw(SDL_Texture *texture)
 
 int DoMain(void *data)
 {
+    CrashReport_ThreadStarted();
     // A soft reset longjmps back here with game memory restored, like the GBA
     // jumping to the cartridge entry point after clearing work RAM.
     setjmp(sGameResetPoint);

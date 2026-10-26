@@ -7,6 +7,9 @@
 #include "battle_arena.h"
 #include "battle_controllers.h"
 #include "battle_ffa.h"
+#ifdef PORTABLE
+#include "platform/crash_report.h"
+#endif
 #line 9 // gba-line
 #include "battle_gfx_sfx_util.h"
 #include "battle_interface.h"
@@ -990,6 +993,11 @@ static void Task_HandleCopyReceivedLinkBuffersData(u8 taskId)
             if (IsBattleControllerActiveOnLocal(battler))
                 return;
 
+#ifdef PORTABLE
+            // crash.log's last events (MS-71): the command this game is about to run for that battler
+            CrashReport_Crumb(CRUMB_LINK_COMMAND, battler, BYTE_TO_RECEIVE(LINK_BUFF_DATA));
+#endif
+#line 906 // gba-line
             memcpy(gBattleResources->bufferA[battler], &BYTE_TO_RECEIVE(LINK_BUFF_DATA), blockSize);
             MarkBattlerReceivedLinkData(battler);
 

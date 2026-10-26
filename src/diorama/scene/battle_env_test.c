@@ -3638,10 +3638,39 @@ static void StageShotAtMenu(void)
     StageShot(all);
 }
 
+/* PKMN_TEST_CRASH=<frames>:<kind> (test builds; the crash report's own check, MS-71): after that many frames,
+ * segv (a write through NULL), abort, assert (errorf: the game logs it and goes on) or fatal (fatalf). */
+static void MaybeCrashForTest(void)
+{
+    static int sFrames, sAt = -1;
+    static char sKind[16];
+
+    if (sAt == -1)
+    {
+        const char *value = SDL_getenv("PKMN_TEST_CRASH");
+
+        sAt = -2;
+        if (value != NULL && sscanf(value, "%d:%15s", &sAt, sKind) != 2)
+            sAt = -2;
+    }
+    if (sAt < 0 || ++sFrames != sAt)
+        return;
+    TestLog("Battle env test: PKMN_TEST_CRASH %s now", sKind);
+    if (strcmp(sKind, "segv") == 0)
+        *(volatile int *)(uintptr_t)(SDL_GetTicks() * 0u) = 1; /* NULL, unseen by the compiler */
+    else if (strcmp(sKind, "abort") == 0)
+        abort();
+    else if (strcmp(sKind, "assert") == 0)
+        errorf("PKMN_TEST_CRASH assert %d", sAt);
+    else if (strcmp(sKind, "fatal") == 0)
+        fatalf("PKMN_TEST_CRASH fatal %d", sAt);
+}
+
 unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int nowMs)
 {
     unsigned int t;
 
+    MaybeCrashForTest();
     SDL_AtomicSet(&sLastFrameMs, (int)(nowMs | 1));
     if (!s.init)
         Init();

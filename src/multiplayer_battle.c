@@ -10,6 +10,7 @@
 #include "multiplayer_rival.h"
 #include "tower_legends.h"
 #include "platform.h"
+#include "platform/crash_report.h"
 #endif
 #line 8 // gba-line
 #include "main.h"
@@ -385,6 +386,10 @@ bool8 MultiplayerBattle_SendBlock(const void *src, u16 size)
     memcpy(gBlockRecvBuffer[local], src, size);
     sReceiveFlags |= 1 << local;
     sOutSeq++; sOutSize = size; sReadOffset = 0;
+#ifdef PORTABLE
+    CrashReport_Crumb(CRUMB_LINK_SEND, size, ((const u8 *)src)[0]); // crash.log's last events (MS-71)
+#endif
+#line 303 // gba-line
     sOutCrc = Crc32(src, size); sOutKind = kind; sOutPending = TRUE;
     if (MultiplayerBattle_IsNative())
     {
@@ -1632,6 +1637,7 @@ static u8 Deliver(const struct MultiplayerBattleControl *c, u8 *out)
             }
         }
     }
+    CrashReport_Crumb(CRUMB_LINK_DELIVER, applied, out[0]); // crash.log's last events (MS-71)
     out[1] = applied; out[2] = status;
     return out[0] || applied ? MP_BATTLE_OK : status;
 }

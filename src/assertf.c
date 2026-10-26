@@ -10,6 +10,10 @@
 #if defined(DIORAMA_BATTLE_ENV_TEST)
 #include "diorama/battle_env_test.h"
 #endif
+#ifdef PORTABLE
+#include <stdio.h>
+#include "platform/crash_report.h"
+#endif
 #line 10 // gba-line
 
 enum Mode { MODE_ASSERTF, MODE_FATALF };
@@ -472,6 +476,20 @@ void AssertfCrashScreen(const void *return1, const char *fmt, ...)
     }
 #endif
 #line 448 // gba-line
+#if defined(PORTABLE) && !defined(DIORAMA_BATTLE_ENV_TEST)
+    {
+        // A player's PC game (MS-71): the message to runtime.log and errors.log, and the game goes on with the
+        // caller's recovery, as a release build does - not the crash screen, which waits for START unseen behind
+        // the native screens (in a battle between players both games then stand still, read as a crash).
+        char message[256];
+
+        vsnprintf(message, sizeof(message), fmt, va);
+        CrashReport_Error(message);
+        va_end(va);
+        return;
+    }
+#endif
+#line 448 // gba-line
     CrashScreen(MODE_ASSERTF, return1, __builtin_return_address(0), fmt, va);
     va_end(va);
 }
@@ -480,6 +498,17 @@ _Noreturn void FatalfCrashScreen(const void *return1, const char *fmt, ...)
 {
     va_list va;
     va_start(va, fmt);
+#ifdef PORTABLE
+    {
+        // A PC game (MS-71): crash.log with the message and the process ends, instead of the GBA's endless
+        // crash screen (a frozen game the launcher never hears of).
+        char message[256];
+
+        vsnprintf(message, sizeof(message), fmt, va);
+        CrashReport_Fatal(message);
+    }
+#endif
+#line 456 // gba-line
     CrashScreen(MODE_FATALF, return1, __builtin_return_address(0), fmt, va);
     va_end(va);
 
