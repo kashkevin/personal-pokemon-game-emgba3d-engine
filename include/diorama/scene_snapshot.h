@@ -298,6 +298,10 @@ struct DioramaSceneSnapshot
     uint8_t mapGroup;
     uint8_t mapNum;
     uint16_t mapLayoutId;
+    /* The map's own tilesets (struct Tileset *), for identity only: what the
+     * atlas's page 0 draws (metatile_atlas.h). */
+    const void *primaryTileset;
+    const void *secondaryTileset;
     uint16_t mapWidth;
     uint16_t mapHeight;
     uint8_t mapCoordinateOffset;

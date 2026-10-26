@@ -2198,6 +2198,8 @@ void DioramaScene_PublishOverworld(void)
     {
         sDraft.mapWidth = gMapHeader.mapLayout->width;
         sDraft.mapHeight = gMapHeader.mapLayout->height;
+        sDraft.primaryTileset = gMapHeader.mapLayout->primaryTileset;
+        sDraft.secondaryTileset = gMapHeader.mapLayout->secondaryTileset;
     }
 
     if (sMapChanged || mapGroup != sPreviousMapGroup || mapNum != sPreviousMapNum

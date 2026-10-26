@@ -51,7 +51,7 @@ struct GLTerrainChunk
     bool active;
     int16_t chunkX;
     int16_t chunkY;
-    uint32_t mapKey;           /* the map whose coordinates chunkX and chunkY are in */
+    uint32_t frameKey;         /* the frame whose coordinates chunkX and chunkY are in (sFrameKey) */
     bool stale;                /* its build is waiting (sPending): the old mesh stands meanwhile */
     uint32_t mapGeneration;
     uint32_t rulesGeneration;
@@ -63,6 +63,11 @@ struct GLTerrainChunk
      * animated tiles do. Set when its input is built. */
     bool readsPixelCells;
     bool hasPixelObjects;
+    /* The atlas pages its input's cells are drawn from (bit p: page p), and
+     * what each held then (KeptMeshStands). */
+    uint8_t pageMask;
+    const void *pagePrimary;
+    const void *pageSecondary[1 + DIORAMA_NEIGHBOUR_PAGES];
     GLuint vertexArray;
     GLuint vertexBuffer;
     /* Its quads drawn from four corners each (DioramaTerrain_FoldQuads):
@@ -77,7 +82,32 @@ struct GLTerrainChunk
 
 static struct GLTerrainChunk sChunks[TERRAIN_CHUNK_POOL_MAX];
 static unsigned sChunkLimit = TERRAIN_CHUNK_POOL_DEFAULT;
-static uint32_t sSyncMapKey; /* the map of the chunks being synced */
+/*
+ * The frame the chunks are in (performance work 2026-10-26, the owner's lag
+ * when running): a map's coordinates plus a shift, the same frame across the
+ * maps the player walks between at their connections. A chunk by a map's edge
+ * was a chunk of the map behind and is the same chunk after the crossing, so
+ * it comes back from the cache by its signature instead of being built again:
+ * every edge built the 15 to 30 chunks on screen in one frame (65 ms on the
+ * cloud machine even after the mesh builder's speed-up). A warp starts a frame
+ * of its own, or takes up the one its map was last seen in (sFrameMaps).
+ * Snapshot cells are in map coordinates; chunk coordinates, the chunks' inputs
+ * and their meshes are in the frame's, drawn shifted back (meshShift).
+ */
+static uint32_t sFrameKey;    /* the frame of the chunks being synced: its first map's key */
+static uint32_t sFrameMapKey; /* the map the frame and shift below were worked out for */
+static bool sFrameKnown;
+static int sShiftX;           /* frame coordinates = map coordinates + the shift */
+static int sShiftY;
+#define TERRAIN_FRAME_MAPS 64
+static struct
+{
+    uint32_t mapKey;
+    uint32_t frameKey;
+    int16_t shiftX;
+    int16_t shiftY;
+    uint64_t lastSeen;
+} sFrameMaps[TERRAIN_FRAME_MAPS];
 static uint32_t sCacheHits;  /* chunks a map change found in the cache (PKMN_DIORAMA_LOG) */
 static bool sMapJustChanged;
 static uint32_t sHitsAtChange;
@@ -142,12 +172,35 @@ static int16_t sPending[TERRAIN_MAX_PENDING][2];
 static unsigned sPendingCount;
 static uint16_t sPrevGroundSlot;
 static bool sCameraKnownForSync;
-static float sSyncCameraX;
+static float sSyncCameraX; /* frame coordinates (sShiftX) */
 static float sSyncCameraZ;
 static float sSyncCameraPitch;
 static float sSyncFocalLength;
 static uint32_t sInteriorSkips;
 static uint32_t sDeferredBuilds;
+/*
+ * After a crossing (FollowMapChange) the chunks kept from the map behind are
+ * in the same frame: off screen and far, TERRAIN_KEPT_CHECKS of them a sync
+ * have their input built to see whether they came back the same (most do) or
+ * need a build, nearest first; the rest wait, their meshes standing where
+ * they belong (performance work 2026-10-26: a crossing built the inputs of
+ * all of them, 90 or so, in its one frame). Only a chunk whose atlas pages
+ * still hold what they held when it was built (KeptMeshStands): its mesh is
+ * drawn from them. The pages' tilesets this sync: page 0 the map's own, the
+ * others its neighbours' (scene_snapshot.h), all over the map's primary.
+ */
+#define TERRAIN_KEPT_CHECKS 8
+/* ... and of those that came back changed (the cells the two maps' views do
+ * not share: a band of chunks north and south of the player where one map's
+ * neighbour stood in view and the other's does not), TERRAIN_KEPT_BUILDS are
+ * built a sync, on screen or not, nearest first; the rest wait a sync or two,
+ * their meshes standing (a crossing built its 10 to 12 such chunks at once). */
+#define TERRAIN_KEPT_BUILDS 4
+static unsigned sKeptChecks;
+static unsigned sKeptBuilds;
+static uint8_t sInputPages; /* the pages of the last BuildInput's cells */
+static const void *sPagePrimary;
+static const void *sPageSecondary[1 + DIORAMA_NEIGHBOUR_PAGES];
 static struct DioramaTerrainVertex sScratchVertices[DIORAMA_TERRAIN_MAX_VERTICES];
 static struct DioramaTerrainVertex sDebugVertices[TERRAIN_DEBUG_MAX_VERTICES];
 static struct DioramaTerrainTreeInstance sVisibleTreeInstances[TERRAIN_MAX_VISIBLE_TREE_INSTANCES];
@@ -206,6 +259,7 @@ static GLuint sTreeCheckVertexArray;
 static GLuint sTreeCheckVertexBuffer;
 static struct DioramaTerrainTreeInstance sCheckTreeInstances[TERRAIN_MAX_VISIBLE_TREE_INSTANCES];
 static GLint sCameraLocation;
+static GLint sMeshShiftLocation;
 static GLint sCameraPitchLocation;
 static GLint sFocalLengthLocation;
 static GLint sAspectCorrectionLocation;
@@ -274,6 +328,8 @@ static const char sTerrainVertexShader[] =
     "uniform float screenOffsetY;\n"
     "uniform int shadowPass;\n"
     "uniform mat4 lightViewProjection;\n"
+    /* A chunk's frame coordinates back to the map's (sShiftX); zero for the rest. */
+    "uniform vec3 meshShift;\n"
     "out vec2 uv;\n"
     "out float shade;\n"
     "flat out int textureLayer;\n"
@@ -282,7 +338,7 @@ static const char sTerrainVertexShader[] =
     "out vec3 sceneWorldPosition;\n"
     "out float viewDepth;\n"
     "void main() {\n"
-    "  vec3 worldPosition = position + instanceOffset;\n"
+    "  vec3 worldPosition = position + instanceOffset + meshShift;\n"
     "  sceneWorldPosition = worldPosition;\n"
     "  const float nearDepth = 0.1;\n"
     "  const float farDepth = " DIORAMA_FAR_DEPTH_GLSL ";\n"
@@ -418,6 +474,7 @@ static bool CreateProgram(void)
         return false;
     }
     sCameraLocation = dglGetUniformLocation(sProgram, "cameraPosition");
+    sMeshShiftLocation = dglGetUniformLocation(sProgram, "meshShift");
     sCameraPitchLocation = dglGetUniformLocation(sProgram, "cameraPitch");
     sFocalLengthLocation = dglGetUniformLocation(sProgram, "focalLength");
     sAspectCorrectionLocation = dglGetUniformLocation(sProgram, "aspectCorrection");
@@ -439,7 +496,7 @@ static bool CreateProgram(void)
     sSaturationLocation = dglGetUniformLocation(sProgram, "saturation");
     lightLocated = DioramaGLLight_Locate(sProgram, &sLightUniforms);
     DioramaGLLamps_Locate(sProgram, &sLampUniforms);
-    return sCameraLocation >= 0 && sCameraPitchLocation >= 0
+    return sCameraLocation >= 0 && sMeshShiftLocation >= 0 && sCameraPitchLocation >= 0
         && sFocalLengthLocation >= 0 && sAspectCorrectionLocation >= 0
         && sImageLocation >= 0
         && sBaseImageLocation >= 0 && sForegroundImageLocation >= 0
@@ -677,7 +734,7 @@ static struct GLTerrainChunk *FindChunk(int chunkX, int chunkY)
     unsigned i;
 
     for (i = 0; i < sChunkLimit; i++)
-        if (sChunks[i].occupied && sChunks[i].mapKey == sSyncMapKey
+        if (sChunks[i].occupied && sChunks[i].frameKey == sFrameKey
          && sChunks[i].chunkX == chunkX && sChunks[i].chunkY == chunkY)
             return &sChunks[i];
     return NULL;
@@ -987,6 +1044,7 @@ static bool AppendPixelObjects(const struct DioramaSceneSnapshot *snapshot,
             continue;
         translationX = anchor->mapX - anchor->sourceMapX;
         translationY = anchor->mapY - anchor->sourceMapY;
+        /* the pixels' places in the frame, their source cells in the snapshot */
         pixels = DioramaRules_GetPixelObjectPixels(object, &pixelCount);
         if (pixels == NULL)
             return false;
@@ -999,8 +1057,8 @@ static bool AppendPixelObjects(const struct DioramaSceneSnapshot *snapshot,
                         / gDioramaLayoutsV2[object->layoutId - 1].width;
             const struct DioramaCellSnapshot *sourceCell = FindSnapshotCell(
                 snapshot, sourceX + translationX, sourceY + translationY);
-            int32_t xQ32 = sourcePixel->xQ32 + translationX * 32;
-            int32_t zQ32 = sourcePixel->zQ32 + translationY * 32;
+            int32_t xQ32 = sourcePixel->xQ32 + (translationX + sShiftX) * 32;
+            int32_t zQ32 = sourcePixel->zQ32 + (translationY + sShiftY) * 32;
             int ownerChunkX = DioramaTerrain_FloorDiv(
                 xQ32 + sourcePixel->sizeXQ32 / 2, DIORAMA_TERRAIN_CHUNK_SIZE * 32);
             int ownerChunkY = DioramaTerrain_FloorDiv(
@@ -1446,6 +1504,7 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
      * pixelCount (zero here), each written whole when appended. */
     memset(input, 0, offsetof(struct DioramaTerrainChunkInput, pixels));
     sMaterialPage = 0;
+    sInputPages = 0;
     input->chunkX = chunkX;
     input->chunkY = chunkY;
     input->mapGeneration = snapshot->mapGeneration;
@@ -1454,17 +1513,20 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
     {
         for (x = 0; x < DIORAMA_TERRAIN_INPUT_SIZE; x++)
         {
-            int mapX = originX + x - DIORAMA_TERRAIN_HALO;
-            int mapY = originY + y - DIORAMA_TERRAIN_HALO;
+            int frameX = originX + x - DIORAMA_TERRAIN_HALO;
+            int frameY = originY + y - DIORAMA_TERRAIN_HALO;
+            int mapX = frameX - sShiftX;
+            int mapY = frameY - sShiftY;
             int gridX = mapX - snapshot->gridOriginX;
             int gridY = mapY - snapshot->gridOriginY;
             int gridIndex;
             const struct DioramaCellSnapshot *source;
             struct DioramaTerrainCell *cell;
 
+            /* The input's cells in the frame's coordinates, as its chunk's. */
             cell = &input->cells[y * DIORAMA_TERRAIN_INPUT_SIZE + x];
-            cell->mapX = mapX;
-            cell->mapY = mapY;
+            cell->mapX = frameX;
+            cell->mapY = frameY;
             if (gridX < 0 || gridY < 0 || gridX >= DIORAMA_GRID_WIDTH || gridY >= DIORAMA_GRID_HEIGHT)
                 continue;
             gridIndex = gridY * DIORAMA_GRID_WIDTH + gridX;
@@ -1475,8 +1537,7 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
                 continue;
             cell->present = true;
             sMaterialPage = source->atlasPage;
-            cell->mapX = source->mapX;
-            cell->mapY = source->mapY;
+            sInputPages |= 1u << (source->atlasPage & 7);
             cell->metatileId = source->metatileId;
             cell->behavior = source->behavior;
             cell->layerType = source->layerType;
@@ -1497,9 +1558,9 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
             cell->rulePriority = resolvedCells[gridIndex].rulePriority;
             cell->structureTemplateId = resolvedCells[gridIndex].structureTemplateId;
             cell->structureX = DioramaTerrain_VisibleStructureOrigin(
-                source->mapX, resolvedCells[gridIndex].structureLocalX);
+                frameX, resolvedCells[gridIndex].structureLocalX);
             cell->structureY = DioramaTerrain_VisibleStructureOrigin(
-                source->mapY, resolvedCells[gridIndex].structureLocalY);
+                frameY, resolvedCells[gridIndex].structureLocalY);
             cell->structureWidth = resolvedCells[gridIndex].structureWidth;
             cell->structureHeight = resolvedCells[gridIndex].structureHeight;
             cell->structureRoofRows = resolvedCells[gridIndex].structureRoofRows;
@@ -1694,8 +1755,8 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
                      facadeRow++)
                 {
                     const struct DioramaCellSnapshot *facadeSource = FindSnapshotCell(
-                        snapshot, cell->structureX + cell->structureLocalX,
-                        cell->structureY + cell->structureHeight - 1 - facadeRow);
+                        snapshot, cell->structureX + cell->structureLocalX - sShiftX,
+                        cell->structureY + cell->structureHeight - 1 - facadeRow - sShiftY);
                     uint16_t materialId = resolvedCells[gridIndex]
                         .materials[DIORAMA_MATERIAL_FACE_SOUTH].metatileId;
 
@@ -1704,6 +1765,7 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
                     if (materialId == DIORAMA_MATERIAL_METATILE_SELF)
                         materialId = facadeSource->metatileId;
                     sMaterialPage = facadeSource->atlasPage;
+                    sInputPages |= 1u << (facadeSource->atlasPage & 7);
                     SetTerrainMaterial(&cell->southFacadeMaterials[facadeRow], materialId,
                         resolvedCells[gridIndex].materials[DIORAMA_MATERIAL_FACE_SOUTH].layer);
                 }
@@ -1761,8 +1823,8 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
              && !(cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL
                && cell->structureWidth == 2))
             {
-                const struct DioramaCellSnapshot *source = FindSnapshotCell(snapshot, cell->mapX,
-                                                                            cell->mapY);
+                const struct DioramaCellSnapshot *source = FindSnapshotCell(snapshot, cell->mapX - sShiftX,
+                                                                            cell->mapY - sShiftY);
 
                 sMaterialPage = source != NULL ? source->atlasPage : 0;
                 for (face = 0; face < DIORAMA_MATERIAL_FACE_COUNT; face++)
@@ -1970,7 +2032,7 @@ static bool UploadChunk(struct GLTerrainChunk *chunk,
     chunk->stale = false;
     chunk->chunkX = input->chunkX;
     chunk->chunkY = input->chunkY;
-    chunk->mapKey = sSyncMapKey;
+    chunk->frameKey = sFrameKey;
     chunk->mapGeneration = input->mapGeneration;
     chunk->rulesGeneration = input->rulesGeneration;
     chunk->signature = signature;
@@ -1983,6 +2045,10 @@ bool DioramaGLTerrain_Init(void)
     DioramaTerrain_SetGeometryHash(false); /* only the tests read it; the mesh check compares vertices */
     memset(sChunks, 0, sizeof(sChunks));
     memset(&sMetrics, 0, sizeof(sMetrics));
+    memset(sFrameMaps, 0, sizeof(sFrameMaps));
+    sFrameKnown = false;
+    sShiftX = 0;
+    sShiftY = 0;
     sMapGeneration = 0;
     sMapEditGeneration = 0;
     sRulesGeneration = 0;
@@ -2086,6 +2152,141 @@ static void LeaveMap(void)
     sPendingCount = 0;
     sMapJustChanged = true;
     sHitsAtChange = sCacheHits;
+}
+
+static bool SameSourceCell(const struct DioramaCellSnapshot *left, const struct DioramaCellSnapshot *right)
+{
+    return (left->flags & DIORAMA_CELL_SOURCE_VALID) && (right->flags & DIORAMA_CELL_SOURCE_VALID)
+        && left->sourceMapGroup == right->sourceMapGroup && left->sourceMapNum == right->sourceMapNum
+        && left->sourceLayoutId == right->sourceLayoutId
+        && left->sourceMapX == right->sourceMapX && left->sourceMapY == right->sourceMapY;
+}
+
+/*
+ * A crossing at a connection: the translation (dx, dy) that takes a cell of
+ * the new snapshot to the same cell (by its map's own coordinates) in the last
+ * sync's, found from the camera's cell and checked on cells across the grid.
+ * False when they share no cell (a warp), the last sync's cells are not whole,
+ * or any cell disagrees (the sync then starts a frame as before).
+ */
+static bool FindCrossing(const struct DioramaSceneSnapshot *snapshot, int *dx, int *dy)
+{
+    unsigned oldCount = sSyncKey.visibleCellCount;
+    unsigned newCount = snapshot->visibleCellCount < DIORAMA_MAX_VISIBLE_CELLS
+                      ? snapshot->visibleCellCount : DIORAMA_MAX_VISIBLE_CELLS;
+    int gridX = snapshot->cameraMapX - snapshot->gridOriginX;
+    int gridY = snapshot->cameraMapY - snapshot->gridOriginY;
+    const struct DioramaCellSnapshot *probe;
+    unsigned agreeing = 0;
+    unsigned i;
+
+    if (!sSyncKeyValid || oldCount == 0 || gridX < 0 || gridY < 0 || gridX >= DIORAMA_GRID_WIDTH
+     || gridY >= DIORAMA_GRID_HEIGHT || (unsigned)(gridY * DIORAMA_GRID_WIDTH + gridX) >= newCount)
+        return false;
+    probe = &snapshot->cells[gridY * DIORAMA_GRID_WIDTH + gridX];
+    for (i = 0; i < oldCount && !SameSourceCell(&sSyncCells[i], probe); i++)
+        ;
+    if (i == oldCount)
+        return false;
+    *dx = sSyncCells[i].mapX - probe->mapX;
+    *dy = sSyncCells[i].mapY - probe->mapY;
+    for (i = 0; i < newCount; i += 37)
+    {
+        const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
+        int oldX = cell->mapX + *dx - sSyncKey.gridOriginX;
+        int oldY = cell->mapY + *dy - sSyncKey.gridOriginY;
+        const struct DioramaCellSnapshot *old;
+
+        if (!(cell->flags & DIORAMA_CELL_SOURCE_VALID) || oldX < 0 || oldY < 0 || oldX >= DIORAMA_GRID_WIDTH
+         || oldY >= DIORAMA_GRID_HEIGHT || (unsigned)(oldY * DIORAMA_GRID_WIDTH + oldX) >= oldCount)
+            continue;
+        old = &sSyncCells[oldY * DIORAMA_GRID_WIDTH + oldX];
+        if (!(old->flags & DIORAMA_CELL_SOURCE_VALID)
+         || old->mapX != cell->mapX + *dx || old->mapY != cell->mapY + *dy)
+            continue; /* not in the last sync's view */
+        if (!SameSourceCell(old, cell))
+            return false;
+        agreeing++;
+    }
+    return agreeing >= 16;
+}
+
+static void NoteFrameMap(uint32_t mapKey, uint64_t sequence)
+{
+    unsigned slot = 0;
+    unsigned i;
+
+    for (i = 0; i < TERRAIN_FRAME_MAPS; i++)
+    {
+        if (sFrameMaps[i].lastSeen != 0 && sFrameMaps[i].mapKey == mapKey)
+        {
+            slot = i;
+            break;
+        }
+        if (sFrameMaps[i].lastSeen < sFrameMaps[slot].lastSeen)
+            slot = i;
+    }
+    sFrameMaps[slot].mapKey = mapKey;
+    sFrameMaps[slot].frameKey = sFrameKey;
+    sFrameMaps[slot].shiftX = (int16_t)sShiftX;
+    sFrameMaps[slot].shiftY = (int16_t)sShiftY;
+    sFrameMaps[slot].lastSeen = sequence + 1;
+}
+
+static bool RecallFrameMap(uint32_t mapKey)
+{
+    unsigned i;
+
+    for (i = 0; i < TERRAIN_FRAME_MAPS; i++)
+        if (sFrameMaps[i].lastSeen != 0 && sFrameMaps[i].mapKey == mapKey)
+        {
+            sFrameKey = sFrameMaps[i].frameKey;
+            sShiftX = sFrameMaps[i].shiftX;
+            sShiftY = sFrameMaps[i].shiftY;
+            return true;
+        }
+    return false;
+}
+
+static bool LogEnabledTerrain(void);
+
+/* Another map: the frame its chunks are in (see sFrameKey). */
+static void FollowMapChange(const struct DioramaSceneSnapshot *snapshot)
+{
+    uint32_t mapKey = MapKey(snapshot);
+    int oldShiftX = sShiftX;
+    int oldShiftY = sShiftY;
+    const char *how = "crossing";
+    int dx;
+    int dy;
+
+    if (sFrameKnown && FindCrossing(snapshot, &dx, &dy))
+    {
+        /* frame = old map coordinates + old shift = new map coordinates + d + old shift */
+        sShiftX += dx;
+        sShiftY += dy;
+    }
+    else
+    {
+        how = "seen before";
+        if (!RecallFrameMap(mapKey))
+        {
+            how = "new";
+            sFrameKey = mapKey;
+            sShiftX = 0;
+            sShiftY = 0;
+        }
+        /* The camera kept for ChunkUrgent is the last map's: its numbers as
+         * they were in map coordinates, as the sync took them before frames. */
+        sSyncCameraX += (float)(sShiftX - oldShiftX);
+        sSyncCameraZ -= (float)(sShiftY - oldShiftY);
+    }
+    sFrameKnown = true;
+    sFrameMapKey = mapKey;
+    NoteFrameMap(mapKey, snapshot->sequence);
+    if (LogEnabledTerrain())
+        SDL_Log("Diorama: map %u.%u in terrain frame %08x, shift %d,%d (%s)", snapshot->mapGroup,
+                snapshot->mapNum, sFrameKey, sShiftX, sShiftY, how);
 }
 
 /* A chunk's triangles, from its indices when UploadChunk folded its quads. */
@@ -2220,6 +2421,9 @@ static void NotePixelUse(struct GLTerrainChunk *chunk, const struct DioramaTerra
     int i;
 
     chunk->hasPixelObjects = sCandidatePixels != 0;
+    chunk->pageMask = sInputPages;
+    chunk->pagePrimary = sPagePrimary;
+    memcpy(chunk->pageSecondary, sPageSecondary, sizeof(chunk->pageSecondary));
     chunk->readsPixelCells = false;
     for (i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
     {
@@ -2243,8 +2447,8 @@ static bool ChunkUsesDirtyTiles(const struct DioramaSceneSnapshot *snapshot,
                                 const struct DioramaResolvedCell *resolvedCells,
                                 int chunkX, int chunkY)
 {
-    int originX = chunkX * DIORAMA_TERRAIN_CHUNK_SIZE - DIORAMA_TERRAIN_HALO;
-    int originY = chunkY * DIORAMA_TERRAIN_CHUNK_SIZE - DIORAMA_TERRAIN_HALO;
+    int originX = chunkX * DIORAMA_TERRAIN_CHUNK_SIZE - DIORAMA_TERRAIN_HALO - sShiftX;
+    int originY = chunkY * DIORAMA_TERRAIN_CHUNK_SIZE - DIORAMA_TERRAIN_HALO - sShiftY;
     int x;
     int y;
 
@@ -2364,8 +2568,8 @@ static struct DioramaTerrainBounds ChunkBounds(const struct GLTerrainChunk *chun
  * stands DIORAMA_GRID_FORWARD rows north of it). */
 static bool ChunkNear(const struct DioramaSceneSnapshot *snapshot, int chunkX, int chunkY)
 {
-    int centreX = snapshot->cameraMapX;
-    int centreY = snapshot->cameraMapY;
+    int centreX = snapshot->cameraMapX + sShiftX;
+    int centreY = snapshot->cameraMapY + sShiftY;
     int middleX = chunkX * DIORAMA_TERRAIN_CHUNK_SIZE + DIORAMA_TERRAIN_CHUNK_SIZE / 2;
     int middleY = chunkY * DIORAMA_TERRAIN_CHUNK_SIZE + DIORAMA_TERRAIN_CHUNK_SIZE / 2;
 
@@ -2412,8 +2616,9 @@ static bool RegionUnchanged(const struct DioramaSceneSnapshot *snapshot,
                             const struct DioramaResolvedCell *resolvedCells,
                             const struct TerrainSyncKey *previous, int chunkX, int chunkY)
 {
-    int originX = chunkX * DIORAMA_TERRAIN_CHUNK_SIZE - DIORAMA_TERRAIN_HALO;
-    int originY = chunkY * DIORAMA_TERRAIN_CHUNK_SIZE - DIORAMA_TERRAIN_HALO;
+    /* in map coordinates: only the grid moved, on the same map (the same shift) */
+    int originX = chunkX * DIORAMA_TERRAIN_CHUNK_SIZE - DIORAMA_TERRAIN_HALO - sShiftX;
+    int originY = chunkY * DIORAMA_TERRAIN_CHUNK_SIZE - DIORAMA_TERRAIN_HALO - sShiftY;
     int x;
     int y;
 
@@ -2457,8 +2662,8 @@ static bool ChunkHasInterior(const struct DioramaSceneSnapshot *snapshot, int ch
     for (y = 0; y < DIORAMA_TERRAIN_CHUNK_SIZE; y++)
         for (x = 0; x < DIORAMA_TERRAIN_CHUNK_SIZE; x++)
         {
-            int mapX = chunkX * DIORAMA_TERRAIN_CHUNK_SIZE + x;
-            int mapY = chunkY * DIORAMA_TERRAIN_CHUNK_SIZE + y;
+            int mapX = chunkX * DIORAMA_TERRAIN_CHUNK_SIZE + x - sShiftX;
+            int mapY = chunkY * DIORAMA_TERRAIN_CHUNK_SIZE + y - sShiftY;
             int gridX = mapX - snapshot->gridOriginX;
             int gridY = mapY - snapshot->gridOriginY;
             int gridIndex = gridY * DIORAMA_GRID_WIDTH + gridX;
@@ -2472,6 +2677,20 @@ static bool ChunkHasInterior(const struct DioramaSceneSnapshot *snapshot, int ch
                 return true;
         }
     return false;
+}
+
+/* Whether a chunk's mesh is drawn from atlas pages that hold what they held
+ * when its input was built (sPageSecondary). */
+static bool KeptMeshStands(const struct GLTerrainChunk *chunk)
+{
+    unsigned page;
+
+    if (chunk->pagePrimary != sPagePrimary)
+        return false;
+    for (page = 0; page <= DIORAMA_NEIGHBOUR_PAGES; page++)
+        if ((chunk->pageMask & (1u << page)) && chunk->pageSecondary[page] != sPageSecondary[page])
+            return false;
+    return true;
 }
 
 /* Builds (or checks) one chunk; false when the cache or the GL failed. */
@@ -2494,14 +2713,39 @@ static bool SyncChunk(const struct DioramaSceneSnapshot *snapshot,
      * 2026-10-24). The decision is the one SyncChunk took below: it waits,
      * its old mesh standing (a chunk whose input turns out the same keeps
      * that mesh either way). */
+    if (!forceAllDirty)
+    {
+        bool dirty = false;
+
+        chunk = FindChunk(chunkX, chunkY);
+        for (dirtyIndex = 0; !dirty && dirtyIndex < snapshot->dirtyCellCount; dirtyIndex++)
+            dirty = DioramaTerrain_DirtyCellAffectsChunk(snapshot->dirtyCells[dirtyIndex].mapX + sShiftX,
+                                                         snapshot->dirtyCells[dirtyIndex].mapY + sShiftY,
+                                                         chunkX, chunkY);
+        if (chunk != NULL && chunk->occupied && chunk->mapGeneration != snapshot->mapGeneration
+         && chunk->rulesGeneration == rulesGeneration && !chunk->hasPixelObjects && !dirty
+         && KeptMeshStands(chunk) && !ChunkUrgent(snapshot, chunk, chunkX, chunkY))
+        {
+            if (sKeptChecks >= TERRAIN_KEPT_CHECKS)
+            {
+                AddPending(chunkX, chunkY);
+                sDeferredBuilds++;
+                chunk->stale = true;
+                chunk->active = true;
+                chunk->lastSeenSequence = snapshot->sequence;
+                return true;
+            }
+            sKeptChecks++;
+        }
+    }
     if (!forceAllDirty && *offscreenBuilds >= TERRAIN_OFFSCREEN_BUILDS)
     {
         bool dirty = false;
 
         chunk = FindChunk(chunkX, chunkY);
         for (dirtyIndex = 0; !dirty && dirtyIndex < snapshot->dirtyCellCount; dirtyIndex++)
-            dirty = DioramaTerrain_DirtyCellAffectsChunk(snapshot->dirtyCells[dirtyIndex].mapX,
-                                                         snapshot->dirtyCells[dirtyIndex].mapY,
+            dirty = DioramaTerrain_DirtyCellAffectsChunk(snapshot->dirtyCells[dirtyIndex].mapX + sShiftX,
+                                                         snapshot->dirtyCells[dirtyIndex].mapY + sShiftY,
                                                          chunkX, chunkY);
         if (!dirty && !ChunkUrgent(snapshot, chunk, chunkX, chunkY)
          && (chunk == NULL
@@ -2525,14 +2769,16 @@ static bool SyncChunk(const struct DioramaSceneSnapshot *snapshot,
     signature = DioramaTerrain_ChunkSignature(&input);
     for (dirtyIndex = 0; !forceDirty && dirtyIndex < snapshot->dirtyCellCount; dirtyIndex++)
         forceDirty = DioramaTerrain_DirtyCellAffectsChunk(
-            snapshot->dirtyCells[dirtyIndex].mapX,
-            snapshot->dirtyCells[dirtyIndex].mapY,
+            snapshot->dirtyCells[dirtyIndex].mapX + sShiftX,
+            snapshot->dirtyCells[dirtyIndex].mapY + sShiftY,
             chunkX, chunkY);
     chunk = FindChunk(chunkX, chunkY);
-    if (chunk != NULL && chunk->occupied && !chunk->active && chunk->mapGeneration != snapshot->mapGeneration
+    if (chunk != NULL && chunk->occupied && (!chunk->active || chunk->stale)
+     && chunk->mapGeneration != snapshot->mapGeneration
      && chunk->rulesGeneration == rulesGeneration && chunk->signature == signature && !forceDirty)
     {
-        /* Seen before this map change, the same as then: from the cache. */
+        /* Seen before this map change, the same as then (standing meanwhile,
+         * KeptMeshStands, or not): from the cache. */
         chunk->mapGeneration = snapshot->mapGeneration;
         chunk->stale = false;
         sCacheHits++;
@@ -2563,6 +2809,20 @@ static bool SyncChunk(const struct DioramaSceneSnapshot *snapshot,
             }
             (*offscreenBuilds)++;
         }
+        else if (!forceDirty && chunk != NULL && chunk->occupied && chunk->mapGeneration != snapshot->mapGeneration
+              && chunk->rulesGeneration == rulesGeneration && !chunk->hasPixelObjects && KeptMeshStands(chunk))
+        {
+            if (sKeptBuilds >= TERRAIN_KEPT_BUILDS)
+            {
+                AddPending(chunkX, chunkY);
+                sDeferredBuilds++;
+                chunk->stale = true;
+                chunk->active = true;
+                chunk->lastSeenSequence = snapshot->sequence;
+                return true;
+            }
+            sKeptBuilds++;
+        }
         if (chunk == NULL)
         {
             chunk = AllocateChunk();
@@ -2589,16 +2849,18 @@ static bool SyncPending(const struct DioramaSceneSnapshot *snapshot,
     unsigned count = sPendingCount;
     unsigned offscreen = 0;
     unsigned p;
-    int minChunkX = DioramaTerrain_FloorDiv(snapshot->gridOriginX, DIORAMA_TERRAIN_CHUNK_SIZE);
-    int maxChunkX = DioramaTerrain_FloorDiv(snapshot->gridOriginX + DIORAMA_GRID_WIDTH - 1,
+    int minChunkX = DioramaTerrain_FloorDiv(snapshot->gridOriginX + sShiftX, DIORAMA_TERRAIN_CHUNK_SIZE);
+    int maxChunkX = DioramaTerrain_FloorDiv(snapshot->gridOriginX + sShiftX + DIORAMA_GRID_WIDTH - 1,
                                             DIORAMA_TERRAIN_CHUNK_SIZE);
-    int minChunkY = DioramaTerrain_FloorDiv(snapshot->gridOriginY, DIORAMA_TERRAIN_CHUNK_SIZE);
-    int maxChunkY = DioramaTerrain_FloorDiv(snapshot->gridOriginY + DIORAMA_GRID_HEIGHT - 1,
+    int minChunkY = DioramaTerrain_FloorDiv(snapshot->gridOriginY + sShiftY, DIORAMA_TERRAIN_CHUNK_SIZE);
+    int maxChunkY = DioramaTerrain_FloorDiv(snapshot->gridOriginY + sShiftY + DIORAMA_GRID_HEIGHT - 1,
                                             DIORAMA_TERRAIN_CHUNK_SIZE);
     uint32_t before = sMetrics.rebuiltChunks;
 
     memcpy(pending, sPending, count * sizeof(pending[0]));
     sPendingCount = 0;
+    sKeptChecks = 0;
+    sKeptBuilds = 0;
     TreeTint(snapshot);
     PrepareSync(snapshot, resolvedCells);
     for (p = 0; p < count; p++)
@@ -2692,6 +2954,10 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
     sMetrics.meshMicros = 0;
     sMetrics.uploadMicros = 0;
     sMetrics.prepareMicros = 0;
+    sPagePrimary = snapshot->primaryTileset;
+    sPageSecondary[0] = snapshot->secondaryTileset;
+    for (i = 0; i < DIORAMA_NEIGHBOUR_PAGES; i++)
+        sPageSecondary[1 + i] = snapshot->neighbourPages[i].tileset;
     sClaimDebugVertexCount = 0;
     /* The claim outlines are drawn only by the terrain debug view. */
     for (i = 0; sDebugDrawn && i < snapshot->visibleCellCount && i < DIORAMA_MAX_VISIBLE_CELLS; i++)
@@ -2760,12 +3026,13 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
         DioramaGLTerrain_Reset(); /* other rules: nothing cached holds */
         sRulesGeneration = rulesGeneration;
     }
+    if (snapshot->mapGeneration != sMapGeneration || !sFrameKnown || MapKey(snapshot) != sFrameMapKey)
+        FollowMapChange(snapshot); /* before LeaveMap: it reads the last sync's cells */
     if (snapshot->mapGeneration != sMapGeneration)
     {
         LeaveMap(); /* chunks of maps seen before come back by their signatures */
         sMapGeneration = snapshot->mapGeneration;
     }
-    sSyncMapKey = MapKey(snapshot);
     {
         struct TerrainSyncKey key;
         unsigned cellCount = snapshot->visibleCellCount < DIORAMA_MAX_VISIBLE_CELLS
@@ -2862,11 +3129,13 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
     for (i = 0; i < (int)sChunkLimit; i++)
         sChunks[i].active = false;
     sPendingCount = 0;
-    minChunkX = DioramaTerrain_FloorDiv(snapshot->gridOriginX, DIORAMA_TERRAIN_CHUNK_SIZE);
-    maxChunkX = DioramaTerrain_FloorDiv(snapshot->gridOriginX + DIORAMA_GRID_WIDTH - 1,
+    sKeptChecks = 0;
+    sKeptBuilds = 0;
+    minChunkX = DioramaTerrain_FloorDiv(snapshot->gridOriginX + sShiftX, DIORAMA_TERRAIN_CHUNK_SIZE);
+    maxChunkX = DioramaTerrain_FloorDiv(snapshot->gridOriginX + sShiftX + DIORAMA_GRID_WIDTH - 1,
                                        DIORAMA_TERRAIN_CHUNK_SIZE);
-    minChunkY = DioramaTerrain_FloorDiv(snapshot->gridOriginY, DIORAMA_TERRAIN_CHUNK_SIZE);
-    maxChunkY = DioramaTerrain_FloorDiv(snapshot->gridOriginY + DIORAMA_GRID_HEIGHT - 1,
+    minChunkY = DioramaTerrain_FloorDiv(snapshot->gridOriginY + sShiftY, DIORAMA_TERRAIN_CHUNK_SIZE);
+    maxChunkY = DioramaTerrain_FloorDiv(snapshot->gridOriginY + sShiftY + DIORAMA_GRID_HEIGHT - 1,
                                        DIORAMA_TERRAIN_CHUNK_SIZE);
     {
         /* Nearest the player first: the allowance for far chunks goes to the nearest. */
@@ -2875,8 +3144,8 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
         unsigned count = 0;
         unsigned offscreen = 0;
         unsigned n;
-        int centreX = snapshot->cameraMapX;
-        int centreY = snapshot->cameraMapY;
+        int centreX = snapshot->cameraMapX + sShiftX;
+        int centreY = snapshot->cameraMapY + sShiftY;
 
         for (chunkY = minChunkY; chunkY <= maxChunkY; chunkY++)
             for (chunkX = minChunkX; chunkX <= maxChunkX && count < TERRAIN_GRID_CHUNKS; chunkX++)
@@ -3159,13 +3428,16 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
     /* Every face unless asked for the seen ones alone; the terrain debug
      * view's lines show every face. */
     int treeRange = !debug && TreeFacesSeen() ? TREE_RANGE_VIEW : TREE_RANGE_ALL;
-    struct TreeEye eye = TreeEyeFor(cameraX, cameraZ, cameraPitch);
+    /* the camera in the chunks' frame, for culling them and their trees */
+    float viewX = cameraX + (float)sShiftX;
+    float viewZ = cameraZ - (float)sShiftY;
+    struct TreeEye eye = TreeEyeFor(viewX, viewZ, cameraPitch);
     int i;
 
     sDebugDrawn = debug;
     sCameraKnownForSync = true;
-    sSyncCameraX = cameraX;
-    sSyncCameraZ = cameraZ;
+    sSyncCameraX = viewX;
+    sSyncCameraZ = viewZ;
     sSyncCameraPitch = cameraPitch;
     sSyncFocalLength = focalLength;
     sMetrics.visibleChunks = 0;
@@ -3175,6 +3447,7 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
     sMetrics.drawCalls = 0;
     dglUseProgram(sProgram);
     dglUniform2f(sCameraLocation, cameraX, cameraZ);
+    dglUniform3f(sMeshShiftLocation, 0.0f, 0.0f, 0.0f);
     dglUniform1f(sCameraPitchLocation, cameraPitch);
     dglUniform1f(sFocalLengthLocation, focalLength);
     dglUniform1f(sAspectCorrectionLocation, aspectCorrection);
@@ -3246,13 +3519,15 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
         dglUniform3f(sPixelScaleLocation, 1.0f, 1.0f, 1.0f);
         dglUniform3f(sPixelOffsetLocation, 0.0f, 0.0f, 0.0f);
     }
+    /* The chunks and their trees, from the frame back to map coordinates. */
+    dglUniform3f(sMeshShiftLocation, -(float)sShiftX, 0.0f, (float)sShiftY);
     for (i = 0; i < (int)sChunkLimit; i++)
     {
         struct GLTerrainChunk *chunk = &sChunks[i];
 
         if (!chunk->active)
             continue;
-        if (!DioramaTerrain_IsBoundsVisible(&chunk->mesh.bounds, cameraX, cameraZ,
+        if (!DioramaTerrain_IsBoundsVisible(&chunk->mesh.bounds, viewX, viewZ,
                                              cameraPitch, focalLength))
         {
             sMetrics.culledChunks++;
@@ -3276,14 +3551,22 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
             if (visibleTreeCount >= TERRAIN_MAX_VISIBLE_TREE_INSTANCES)
                 continue;
             bounds = TreeBounds(instance);
-            if (!DioramaTerrain_IsBoundsVisible(&bounds, cameraX, cameraZ, cameraPitch, focalLength))
+            if (!DioramaTerrain_IsBoundsVisible(&bounds, viewX, viewZ, cameraPitch, focalLength))
                 continue;
             if (treeRange == TREE_RANGE_VIEW && !TreeSeenFromAboveSouth(&bounds, &eye))
                 treeRange = TREE_RANGE_ALL;
             sVisibleTreeInstances[visibleTreeCount++] = *instance;
         }
         if (debug)
-            debugVertexCount = AppendBoundsVertices(debugVertexCount, &chunk->mesh.bounds);
+        {
+            struct DioramaTerrainBounds shown = chunk->mesh.bounds; /* in map coordinates, as the claims */
+
+            shown.minX -= (float)sShiftX;
+            shown.maxX -= (float)sShiftX;
+            shown.minZ += (float)sShiftY;
+            shown.maxZ += (float)sShiftY;
+            debugVertexCount = AppendBoundsVertices(debugVertexCount, &shown);
+        }
     }
     if (visibleTreeCount != 0 || checkTreeCount != 0)
     {
@@ -3318,7 +3601,7 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
         struct GLTerrainChunk *chunk = &sChunks[i];
 
         if (!chunk->active
-         || !DioramaTerrain_IsBoundsVisible(&chunk->mesh.bounds, cameraX, cameraZ,
+         || !DioramaTerrain_IsBoundsVisible(&chunk->mesh.bounds, viewX, viewZ,
                                              cameraPitch, focalLength))
             continue;
         dglBindVertexArray(chunk->vertexArray);
@@ -3333,7 +3616,7 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
         struct GLTerrainChunk *chunk = &sChunks[i];
 
         if (!chunk->active
-         || !DioramaTerrain_IsBoundsVisible(&chunk->mesh.bounds, cameraX, cameraZ,
+         || !DioramaTerrain_IsBoundsVisible(&chunk->mesh.bounds, viewX, viewZ,
                                              cameraPitch, focalLength))
             continue;
         dglBindVertexArray(chunk->vertexArray);
@@ -3341,6 +3624,7 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
         sMetrics.drawCalls++;
     }
     dglUniform1i(sRenderPassLocation, 0);
+    dglUniform3f(sMeshShiftLocation, 0.0f, 0.0f, 0.0f);
     glDepthMask(GL_TRUE);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glStencilMask(0x00);
@@ -3375,6 +3659,7 @@ void DioramaGLTerrain_DrawShadow(GLuint atlasTexture, GLuint baseAtlasTexture,
     dglUniform1i(sRenderPassLocation, 0);
     dglUniform1i(sShadowPassLocation, 1);
     dglUniform1i(sShadowEnabledLocation, 0);
+    dglUniform3f(sMeshShiftLocation, -(float)sShiftX, 0.0f, (float)sShiftY);
     dglUniform1i(sShadowMapLocation, DIORAMA_SHADOW_TEXTURE_UNIT);
     dglUniformMatrix4fv(sLightMatrixLocation, 1, GL_FALSE, DioramaGLShadow_LightMatrix());
     dglActiveTexture(GL_TEXTURE0);
@@ -3401,6 +3686,7 @@ void DioramaGLTerrain_DrawShadow(GLuint atlasTexture, GLuint baseAtlasTexture,
     /* every face: the sun sees them from another side */
     DrawTrees(sVisibleTreeInstances, treeCount, TREE_RANGE_ALL);
     dglUniform1i(sShadowPassLocation, 0);
+    dglUniform3f(sMeshShiftLocation, 0.0f, 0.0f, 0.0f);
 }
 
 const struct DioramaTerrainMetrics *DioramaGLTerrain_GetMetrics(void)
