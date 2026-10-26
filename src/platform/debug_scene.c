@@ -832,17 +832,22 @@ static void HatchTick(void)
 {
     static int sAt = -2, sSpecies = SPECIES_TORCHIC;
     const char *value;
-    int v[2];
+    int frame, species;
 
     if (sAt == -2)
     {
         sAt = -1;
-        if ((value = SDL_getenv("PKMN_DEBUG_HATCH")) != NULL && Numbers(value, v, 2) >= 1)
-        {
-            sAt = v[0];
-            if (Numbers(value, v, 2) >= 2 && v[1] > 0 && v[1] < NUM_SPECIES)
-                sSpecies = v[1];
-        }
+        if ((value = SDL_getenv("PKMN_DEBUG_HATCH")) != NULL)
+            switch (sscanf(value, "%d:%d", &frame, &species))
+            {
+            case 2:
+                if (species > 0 && species < NUM_SPECIES)
+                    sSpecies = species;
+                // fall through
+            case 1:
+                sAt = frame;
+                break;
+            }
     }
     if (sAt < 0 || sKeyFrame < (unsigned)sAt || gMain.callback2 != CB2_Overworld || ArePlayerFieldControlsLocked()
      || gPaletteFade.active || ScriptContext_IsEnabled() || gPartiesCount[B_TRAINER_PLAYER] >= PARTY_SIZE)
