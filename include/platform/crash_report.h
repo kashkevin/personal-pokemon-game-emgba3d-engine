@@ -23,6 +23,8 @@ enum CrashCrumb
     CRUMB_MESSAGE,       /* the battle HUD: the message window (1 a new text printing, 2 waiting for a button, 3 done;
                           * whether the battle is a link battle) */
     CRUMB_KEY,           /* the battle HUD: A or B newly pressed (the keys, 0) */
+    CRUMB_HEALTHBOX_STATUS, /* a healthbox drew its status icon (battler, the party Pokemon's status it drew) */
+    CRUMB_HUD_BOX,       /* the battle HUD's box shows something else (battler, species << 8 | enum UiAilment) */
 };
 
 void CrashReport_Init(void);

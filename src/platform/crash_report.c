@@ -129,7 +129,8 @@ static const char *CrumbName(uint8_t kind)
         [CRUMB_CALLBACK2] = "callback2", [CRUMB_SCREEN] = "screen", [CRUMB_LINK_COMMAND] = "link command",
         [CRUMB_LINK_SEND] = "link send", [CRUMB_LINK_DELIVER] = "link deliver", [CRUMB_EFFECT] = "animation",
         [CRUMB_MEMORY] = "memory MB", [CRUMB_ERROR] = "assert", [CRUMB_CHOICE] = "battle choice",
-        [CRUMB_MESSAGE] = "battle text", [CRUMB_KEY] = "battle key",
+        [CRUMB_MESSAGE] = "battle text", [CRUMB_KEY] = "battle key", [CRUMB_HEALTHBOX_STATUS] = "box status",
+        [CRUMB_HUD_BOX] = "HUD box",
     };
 
     return kind < ARRAY_COUNT(sNames) && sNames[kind] != NULL ? sNames[kind] : "?";

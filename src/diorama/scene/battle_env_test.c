@@ -178,6 +178,9 @@ static struct
     char fieldKeys[8192];     /* longer PKMN_TEST_FIELD_KEYS: refused (logged), never cut short */
     int fieldKeyFrames, fieldEnd;
     bool fieldKeysActive;
+    /* PKMN_TEST_FIELD_LOOP=<frames>: the field keys again every that many frames until PKMN_TEST_BATTLE=field's end
+     * (an hour's walk for the progressive lag measurements) */
+    int fieldLoop;
     /* PKMN_TEST_FIELD_SHOTS=frame,...: pictures <PKMN_TEST_MEGA_SHOT_STEM>-NN (NN 50 on) at those field-key frames
      * (the Classic 2D test build: the GBA frame) */
     int fieldShots[16], fieldShotCount;
@@ -453,6 +456,8 @@ static void Init(void)
                 (unsigned)SDL_strlen(value), (unsigned)sizeof(s.fieldKeys) - 1);
         s.fieldKeys[0] = '\0';
     }
+    value = SDL_getenv("PKMN_TEST_FIELD_LOOP");
+    s.fieldLoop = value != NULL && atoi(value) > 0 ? atoi(value) : 0;
     value = SDL_getenv("PKMN_TEST_FIELD_SHOTS");
     for (const char *p = value; p != NULL && *p != '\0' && s.fieldShotCount < 16; p = strchr(p, ','), p = p ? p + 1 : p)
         s.fieldShots[s.fieldShotCount++] = atoi(p);
@@ -3741,7 +3746,8 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
         for (int i = 0; i < s.fieldShotCount; i++)
             if (s.fieldShots[i] == s.fieldKeyFrames)
                 RequestShot(50 + s.resetsDone * s.fieldShotCount + i, 1, "a field step");
-        return keys | KeysAt(s.fieldKeys, s.fieldKeyFrames++);
+        s.fieldKeyFrames++;
+        return keys | KeysAt(s.fieldKeys, s.fieldLoop > 0 ? (s.fieldKeyFrames - 1) % s.fieldLoop : s.fieldKeyFrames - 1);
     }
     if (s.startMs == 0)
         s.startMs = nowMs == 0 ? 1 : nowMs;

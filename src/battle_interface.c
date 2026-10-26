@@ -38,6 +38,7 @@
 #include "caps.h"
 #ifdef ENABLE_NATIVE_UI
 #include "native_ui/ui_engine.h"
+#include "platform/crash_report.h"
 // What each healthbox shows, as it is drawn (the native battle HUD draws
 // the same values; accessors at the end of the file).
 static void NativeUiNoteBar(enum BattlerId battler, u8 whichBar);
@@ -3431,6 +3432,7 @@ static void NativeUiNoteStatus(enum BattlerId battler, u32 status)
     {
         sNativeUiBoxNotes[battler].statusShown = TRUE;
         sNativeUiBoxNotes[battler].status = status;
+        CrashReport_Crumb(CRUMB_HEALTHBOX_STATUS, battler, status);
     }
 }
 
