@@ -140,8 +140,30 @@ struct TerrainSyncKey
     uint32_t tilesetAnimationGeneration;
     uint32_t rulesGeneration;
     uint32_t pageSignature;
+    uint32_t unfadedPalette; /* UnfadedPaletteHash */
 };
 static struct TerrainSyncKey sSyncKey;
+
+/*
+ * The map's own unfaded palettes (0 to 12), which tree shades and mountain art
+ * read (TreeShade, BuildMountainArtMask). The faded ones - a fade, the time of
+ * day's tint, a weather's, a palette's pulse - reach only the pixel objects'
+ * colours (PixelColor): a change of the faded palettes alone looks again at the
+ * chunks with pixel objects (SyncAnimatedTiles), not at every chunk. The Mirage
+ * Tower's shimmer on Route 111 (palette 6 pulsing every 6 frames, on the half of
+ * the visits the tower shows) built all 121 chunks' inputs each time to change
+ * none (10 to 18 ms; performance work 2026-10-26, the owner's lag when running).
+ */
+#define TERRAIN_MAP_PALETTES 13
+static uint32_t UnfadedPaletteHash(const struct DioramaSceneSnapshot *snapshot)
+{
+    uint32_t hash = 2166136261u;
+    unsigned i;
+
+    for (i = 0; i < TERRAIN_MAP_PALETTES * 16; i++)
+        hash = (hash ^ snapshot->unfadedPalette[i]) * 16777619u;
+    return hash;
+}
 static bool sSyncKeyValid;
 static struct DioramaCellSnapshot sSyncCells[DIORAMA_MAX_VISIBLE_CELLS];
 static struct DioramaResolvedCell sSyncResolved[DIORAMA_MAX_VISIBLE_CELLS];
@@ -2541,6 +2563,7 @@ static bool SyncAnimatedTiles(const struct DioramaSceneSnapshot *snapshot,
     if (rebuilt != 0)
         sGeometryGeneration++;
     sSyncKey.tilesetAnimationGeneration = key->tilesetAnimationGeneration;
+    sSyncKey.paletteGeneration = key->paletteGeneration;
     memcpy(sSyncTiles, snapshot->tileGraphics, sizeof(sSyncTiles));
     sMapEditGeneration = snapshot->mapEditGeneration;
     sLastSyncSequence = snapshot->sequence;
@@ -3050,10 +3073,13 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
         key.tilesetAnimationGeneration = snapshot->tilesetAnimationGeneration;
         key.rulesGeneration = rulesGeneration;
         key.pageSignature = DioramaAtlas_LastPageSignature();
+        key.unfadedPalette = UnfadedPaletteHash(snapshot);
         struct TerrainSyncKey animated = key;
 
-        /* The same inputs but for the animated tiles' generation? */
+        /* The same inputs but for the animated tiles' generation and the faded
+         * palettes (UnfadedPaletteHash)? */
         animated.tilesetAnimationGeneration = sSyncKey.tilesetAnimationGeneration;
+        animated.paletteGeneration = sSyncKey.paletteGeneration;
         if (sSyncKeyValid && !forceAllDirty && snapshot->dirtyCellCount == 0
          && memcmp(&animated, &sSyncKey, sizeof(key)) == 0
          && memcmp(sSyncCells, snapshot->cells, cellCount * sizeof(sSyncCells[0])) == 0
@@ -3061,7 +3087,8 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
         {
             bool ok = true;
 
-            if (key.tilesetAnimationGeneration == sSyncKey.tilesetAnimationGeneration)
+            if (key.tilesetAnimationGeneration == sSyncKey.tilesetAnimationGeneration
+             && key.paletteGeneration == sSyncKey.paletteGeneration)
             {
                 /* Nothing the chunks are built from changed: they stand as they are. */
                 sSyncSkipped++;
@@ -3073,9 +3100,10 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
             }
             else
             {
-                /* Only the animated tiles (water, flowers) moved on: only a chunk
-                 * whose input reads the pixels of a tile that changed is built
-                 * again (most read none: flat water is its atlas slot). */
+                /* Only the animated tiles (water, flowers) moved on, or the faded
+                 * palettes changed: only a chunk whose input reads the pixels of a
+                 * tile that changed, or holds pixel objects, is built again (most
+                 * read none: flat water is its atlas slot). */
                 sSyncAnimated++;
                 ok = SyncAnimatedTiles(snapshot, resolvedCells, &key);
             }
@@ -3109,6 +3137,7 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
             moved.gridOriginY = sSyncKey.gridOriginY;
             moved.visibleCellCount = sSyncKey.visibleCellCount;
             moved.tilesetAnimationGeneration = sSyncKey.tilesetAnimationGeneration;
+            moved.paletteGeneration = sSyncKey.paletteGeneration; /* pixel objects' chunks are looked at anyway */
             gridMovedOnly = sSyncKeyValid && !forceAllDirty && snapshot->dirtyCellCount == 0
                          && memcmp(&moved, &sSyncKey, sizeof(key)) == 0;
             tilesMoved = gridMovedOnly && key.tilesetAnimationGeneration != sSyncKey.tilesetAnimationGeneration;
