@@ -11,6 +11,8 @@
 #include "tower_legends.h"
 #include "platform.h"
 #include "platform/crash_report.h"
+#include <stdio.h>
+void MultiplayerBattle_DescribeController(const u8 *data, u16 size, u8 source);
 #endif
 #line 8 // gba-line
 #include "main.h"
@@ -314,8 +316,29 @@ bool32 MultiplayerBattle_TrySendOutAnimation(u8 battler)
 }
 
 bool32 MultiplayerBattle_CanReceiveControllers(void) { return MultiplayerBattle_IsNative() && sState == MP_BATTLE_RUNNING; }
+#ifdef PORTABLE
+// KNOWN_ISSUES MS-71: which check stopped a battle between players. runtime.log and errors.log (with the last events)
+// get the check's return address and its distance from this function, which the game's symbol table turns into the
+// function (nm, addr2line; the distance also where Windows moved the game), crash.log's last events a breadcrumb.
+__attribute__((noinline)) void MultiplayerBattle_FailNative(void);
+static void NoteNativeFailure(const void *at)
+{
+    char message[200];
+    snprintf(message, sizeof(message), "battle between players: the battle core stopped itself at the check returning "
+             "to %p (MultiplayerBattle_FailNative%+ld, state %u); the launcher keeps the battle for recovery (MS-71)",
+             at, (long)((uintptr_t)at - (uintptr_t)MultiplayerBattle_FailNative), (unsigned)sState);
+    CrashReport_Crumb(CRUMB_NATIVE_FAIL, (u32)(uintptr_t)at, sState);
+    CrashReport_Error(message);
+}
+#endif
+#line 239 // gba-line
 void MultiplayerBattle_FailNative(void)
 {
+#ifdef PORTABLE
+    if (MultiplayerBattle_IsNative() && sState != MP_BATTLE_RECOVERY_REQUIRED)
+        NoteNativeFailure(__builtin_return_address(0));
+#endif
+#line 241 // gba-line
     if (MultiplayerBattle_IsNative()) sState = MP_BATTLE_RECOVERY_REQUIRED;
 }
 
@@ -369,6 +392,11 @@ bool8 MultiplayerBattle_SendBlock(const void *src, u16 size)
         kind = sNextSendKind;
         if (!NativeBlockValid(src, size, kind, local))
         {
+#ifdef PORTABLE
+            if (kind == MP_BATTLE_KIND_CONTROLLER)
+                MultiplayerBattle_DescribeController(src, size, local); // the rule it broke (MS-71)
+#endif
+#line 286 // gba-line
             MultiplayerBattle_FailNative(); return FALSE;
         }
     }

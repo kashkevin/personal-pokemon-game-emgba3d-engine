@@ -25,6 +25,8 @@ enum CrashCrumb
     CRUMB_KEY,           /* the battle HUD: A or B newly pressed (the keys, 0) */
     CRUMB_HEALTHBOX_STATUS, /* a healthbox drew its status icon (battler, the party Pokemon's status it drew) */
     CRUMB_HUD_BOX,       /* the battle HUD's box shows something else (battler, species << 8 | enum UiAilment) */
+    CRUMB_NATIVE_FAIL,   /* the battle core of a battle between players stopped itself: a check failed (its return
+                          * address, the core's state before) */
 };
 
 void CrashReport_Init(void);
