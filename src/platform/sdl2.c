@@ -258,6 +258,10 @@ static jmp_buf sGameResetPoint; // where the game thread restarts after a soft r
 // presented frames per second and the average time spent drawing and presenting.
 static bool8 sPerfLog;
 static u32 sPerfGameFrames;
+// The sound queue's largest size in the log's window (bytes), and frames of sound left out or backlogs dropped
+// (Platform_QueueAudio).
+static Uint32 sAudioQueuedPeak;
+static u32 sAudioDropped, sAudioCleared;
 static u32 sPerfPresents;
 static Uint64 sPerfPresentTicks;
 static Uint64 sPerfWindowStart;
@@ -283,9 +287,11 @@ static void PerfLog_Presented(Uint64 start, Uint64 end)
     if (end - sPerfWindowStart < 5 * frequency)
         return;
     seconds = (double)(end - sPerfWindowStart) / frequency;
-    SDL_Log("perf: %.1f game fps, %.1f presented fps, %.2f ms per present",
-            sPerfGameFrames / seconds, sPerfPresents / seconds,
-            (double)sPerfPresentTicks * 1000.0 / frequency / sPerfPresents);
+    SDL_Log("perf: %.1f game fps, %.1f presented fps, %.2f ms per present; sound queued up to %.0f ms, %u frames "
+            "left out, %u backlogs dropped", sPerfGameFrames / seconds, sPerfPresents / seconds,
+            (double)sPerfPresentTicks * 1000.0 / frequency / sPerfPresents,
+            sAudioQueuedPeak * 1000.0 / (42060.0 * 2 * sizeof(float)), (unsigned)sAudioDropped, (unsigned)sAudioCleared);
+    sAudioQueuedPeak = 0;
     sPerfGameFrames = 0;
     sPerfPresents = 0;
     sPerfPresentTicks = 0;
@@ -2450,6 +2456,25 @@ void Platform_QueueAudio(float *audioBuffer, s32 samplesPerFrame)
             if (s > 1.0f) s = 1.0f;
             else if (s < -1.0f) s = -1.0f;
             adjustedAudio[i] = s;
+        }
+        // The queue never outgrows a few frames (MP+3D update 2026-10-26, progressive lag): the sound card plays on its own
+        // clock, and a game clock a little fast or a device that stopped for a moment (a headset waking, the default
+        // device changing) left sound queued that never drained, so the sound lagged further behind the longer one
+        // played. Past 8 frames a frame's sound is left out; past 30 (half a second, a stalled device) the backlog goes.
+        {
+            Uint32 queued = SDL_GetQueuedAudioSize(sdlAudioDevice);
+
+            sAudioQueuedPeak = queued > sAudioQueuedPeak ? queued : sAudioQueuedPeak;
+            if (queued > (Uint32)samplesPerFrame * 30)
+            {
+                SDL_ClearQueuedAudio(sdlAudioDevice);
+                sAudioCleared++;
+            }
+            else if (queued > (Uint32)samplesPerFrame * 8)
+            {
+                sAudioDropped++;
+                return;
+            }
         }
         if (SDL_QueueAudio(sdlAudioDevice, adjustedAudio, samplesPerFrame) < 0)
             SDL_Log("Failed to queue audio: %s", SDL_GetError());
