@@ -1701,6 +1701,32 @@ int NativeSelfTest_HeldItems(void)
         }
     }
 
+    // Luxury Ball: a friendship gain 1 more for a Pokemon caught in one (CalculateFriendshipBonuses); on a loss, MS-150
+    {
+        static const struct { u8 start; u8 plain; u8 luxury; const char *what; } sLuxury[] = {
+            {50, 55, 56, "a level up under 100: +5, in a Luxury Ball +6"},
+            {150, 153, 154, "a level up at 100-199: +3, in a Luxury Ball +4"},
+        };
+        char line[200];
+
+        for (i = 0; i < ARRAY_COUNT(sLuxury); i++)
+        {
+            u8 ball = BALL_LUXURY;
+            struct Pokemon *mon = BagMon(BAG_SPECIES, 50, MON_MALE, sLuxury[i].start);
+            u8 plain, inLuxury;
+
+            AdjustFriendship(mon, FRIENDSHIP_EVENT_GROW_LEVEL);
+            plain = GetMonData(mon, MON_DATA_FRIENDSHIP);
+            mon = BagMon(BAG_SPECIES, 50, MON_MALE, sLuxury[i].start);
+            SetMonData(mon, MON_DATA_POKEBALL, &ball);
+            AdjustFriendship(mon, FRIENDSHIP_EVENT_GROW_LEVEL);
+            inLuxury = GetMonData(mon, MON_DATA_FRIENDSHIP);
+            snprintf(line, sizeof(line), "Luxury Ball, %s: friendship %u -> %u, in it %u", sLuxury[i].what,
+                     sLuxury[i].start, plain, inLuxury);
+            Expect(line, plain == sLuxury[i].plain && inLuxury == sLuxury[i].luxury);
+        }
+    }
+
     printf("selftest-held-items: %d checks, %d failed\n", sChecks, sFailures);
     return sFailures == 0 ? 0 : 1;
 }
