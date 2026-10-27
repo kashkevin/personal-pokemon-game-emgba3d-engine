@@ -159,6 +159,9 @@
  *   PKMN_TEST_PARTY / _FOE flags V<move>.<move>.<move>.<move>: the whole moveset; P<n>: the first move's PP left
  *   PKMN_TEST_SECONDARY=1    every move's additional effect happens (its chance read as 100: Ominous Wind's +1 to all
  *                            five stats each time), in memory only
+ *   PKMN_TEST_REEL=1         fishing: "Oh! A bite!" answered at once, as a person reacting in time (the rod's own
+ *                            minigame otherwise: its dots, its rounds); "fishing: ..." lines for each answer and for the
+ *                            Pokemon hooked
  *
  * In the Classic 2D test build the pictures are the GBA frame (no .json beside them).
  *
@@ -197,6 +200,12 @@ void DioramaBattleEnvTest_OnActionMenu(void);
 bool DioramaBattleEnvTest_HoldOnForMega(unsigned battler);
 /* battle_util.c, CalcSecondaryEffectChance: PKMN_TEST_SECONDARY (every additional effect happens) */
 bool DioramaBattleEnvTest_ForceSecondary(void);
+/* fishing.c, Fishing_WaitForA (game thread): PKMN_TEST_REEL answers the bite on the first frame it waits ("fishing: reel
+   rod R") */
+bool DioramaBattleEnvTest_AutoReel(unsigned rod);
+/* fishing.c, Fishing_StartEncounter (game thread), once the rod's wild Pokemon is made: "fishing: rod R hooked species S
+   level L map G.N" */
+void DioramaBattleEnvTest_NoteFishing(unsigned rod);
 /* wild_encounter_ow.c, SetSpeciesInfoForOWE (game thread): PKMN_TEST_OWE_SHINY=1 every other overworld wild Pokemon the
    game makes is shiny (the first one is), =2 every one; otherwise the game's own roll */
 bool DioramaBattleEnvTest_OweShiny(bool rolled);

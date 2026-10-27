@@ -14,6 +14,10 @@
 #include "tv.h"
 #include "wild_encounter.h"
 #include "config/fishing.h"
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+#include "diorama/battle_env_test.h"
+#endif
+#line 17 // gba-line
 
 static void Task_Fishing(u8);
 static bool32 Fishing_Init(struct Task *);
@@ -319,6 +323,12 @@ static bool32 Fishing_WaitForA(struct Task *task)
 
     AlignFishingAnimationFrames();
     task->tFrameCounter++;
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+    if (DioramaBattleEnvTest_AutoReel(task->tFishingRod)) // test builds only: PKMN_TEST_REEL answers the bite (battle_env_test.h)
+        task->tStep = FISHING_CHECK_MORE_DOTS;
+    else
+#endif
+#line 322 // gba-line
     if (task->tFrameCounter >= reelTimeouts[task->tFishingRod])
         task->tStep = FISHING_GOT_AWAY;
     else if (JOY_NEW(A_BUTTON))
@@ -401,6 +411,10 @@ static bool32 Fishing_StartEncounter(struct Task *task)
         gPlayerAvatar.preventStep = FALSE;
         UnlockPlayerFieldControls();
         FishingWildEncounter(task->tFishingRod);
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+        DioramaBattleEnvTest_NoteFishing(task->tFishingRod); // test builds only: the Pokemon hooked, logged
+#endif
+#line 404 // gba-line
         RecordFishingAttemptForTV(TRUE);
         DestroyTask(FindTaskIdByFunc(Task_Fishing));
     }

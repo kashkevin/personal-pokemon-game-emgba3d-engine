@@ -304,6 +304,7 @@ static struct
        logged. PKMN_TEST_STAGE_SHOTS=1: a picture at an action menu once the tags changed (StageShot). */
     bool stageLog, stageShots, stageInBattle;
     bool forceSecondary;     /* PKMN_TEST_SECONDARY */
+    bool reel;               /* PKMN_TEST_REEL */
     int stageBattles, stageShotCount;
     char stageSeen[MAX_BATTLERS_COUNT][128];
     s8 stageStored[MAX_BATTLE_TRAINERS][PARTY_SIZE][NUM_BATTLE_STATS];
@@ -664,6 +665,7 @@ static void Init(void)
     }
     s.stageLog = EnvInt("PKMN_TEST_STAGE_LOG", 0) != 0;
     s.forceSecondary = EnvInt("PKMN_TEST_SECONDARY", 0) != 0;
+    s.reel = EnvInt("PKMN_TEST_REEL", 0) != 0;
     s.stageShots = EnvInt("PKMN_TEST_STAGE_SHOTS", 0) != 0;
     value = SDL_getenv("PKMN_TEST_NEXT_BATTLE");
     if (value != NULL)
@@ -3458,6 +3460,25 @@ bool DioramaBattleEnvTest_HoldOnForMega(unsigned battler)
 bool DioramaBattleEnvTest_ForceSecondary(void)
 {
     return s.init && s.forceSecondary;
+}
+
+/* PKMN_TEST_REEL: the fishing minigame's bite answered at once. */
+bool DioramaBattleEnvTest_AutoReel(unsigned rod)
+{
+    if (!s.init || !s.reel)
+        return false;
+    TestLog("fishing: reel rod %u", rod);
+    return true;
+}
+
+void DioramaBattleEnvTest_NoteFishing(unsigned rod)
+{
+    if (!s.init)
+        return;
+    TestLog("fishing: rod %u hooked species %u level %u map %u.%u", rod,
+            (unsigned)GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_SPECIES),
+            (unsigned)GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_LEVEL),
+            gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum);
 }
 
 void DioramaBattleEnvTest_OnActionMenu(void)
