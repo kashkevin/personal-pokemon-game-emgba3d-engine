@@ -36,6 +36,7 @@
 #include "pokedex.h"
 #include "pokemon_storage_system.h"
 #include "platform/mp_breeding.h"
+#include "platform/mp_legend.h"
 #include "constants/party_menu.h"
 #include "pokemon.h"
 #include "safari_zone.h"
@@ -287,6 +288,12 @@ static struct
     bool oweNoBattle;           /* PKMN_TEST_OWE_NO_BATTLE */
     int oweCountFrames;
     bool oweBumped, oweBattleLogged;
+    /* PKMN_TEST_OWE_REBUMP=<field key frame>:<kind>: from that field key frame, once the last battle is over, one more
+       bump (the kinds of PKMN_TEST_OWE_BATTLE, and legend: a Legendary or Mythical one); PKMN_TEST_LEGEND=1 (-1): every
+       random Legendary/Mythical roll hits (none does), MPLegend_TestForce; PKMN_TEST_SAFARI=1: the field in Safari Zone
+       mode once it is up (EnterSafariMode: the flag, 30 Safari Balls, 500 steps) */
+    int oweRebumpAt, oweRebumpKind;
+    bool safari, safariEntered;
     /* PKMN_TEST_PALETTE_FREE=<n>: on the field, stand-in palettes keep exactly n sprite palettes free (a crowded world
        map); PKMN_TEST_TILES_FULL=<frames>: that many field frames in, every free sprite tile taken (a busy map's OBJ
        tile memory full) */
@@ -420,6 +427,15 @@ static int EnvInt(const char *name, int fallback)
 {
     const char *value = SDL_getenv(name);
     return value != NULL && value[0] != '\0' ? atoi(value) : fallback;
+}
+
+/* PKMN_TEST_OWE_BATTLE / PKMN_TEST_OWE_REBUMP kinds: OWE_KIND_*, 0 for none */
+static int OweKindNamed(const char *value)
+{
+    if (value == NULL)
+        return 0;
+    return strcmp(value, "roamer") == 0 ? OWE_KIND_ROAMER : strcmp(value, "outbreak") == 0 ? OWE_KIND_OUTBREAK
+         : strcmp(value, "wild") == 0 ? OWE_KIND_WILD : strcmp(value, "legend") == 0 ? OWE_KIND_LEGEND : 0;
 }
 
 static void Init(void)
@@ -564,8 +580,16 @@ static void Init(void)
     s.oweCount = EnvInt("PKMN_TEST_OWE_COUNT", 0) != 0;
     s.oweNoBattle = EnvInt("PKMN_TEST_OWE_NO_BATTLE", 0) != 0;
     value = SDL_getenv("PKMN_TEST_OWE_BATTLE");
-    s.oweBattleKind = value == NULL ? 0 : strcmp(value, "roamer") == 0 ? OWE_KIND_ROAMER
-                    : strcmp(value, "outbreak") == 0 ? OWE_KIND_OUTBREAK : strcmp(value, "wild") == 0 ? OWE_KIND_WILD : 0;
+    s.oweBattleKind = OweKindNamed(value);
+    value = SDL_getenv("PKMN_TEST_OWE_REBUMP");
+    s.oweRebumpAt = value != NULL ? atoi(value) : 0;
+    s.oweRebumpKind = value != NULL && strchr(value, ':') != NULL ? OweKindNamed(strchr(value, ':') + 1) : 0;
+    if (EnvInt("PKMN_TEST_LEGEND", 0) != 0)
+    {
+        MPLegend_TestForce(EnvInt("PKMN_TEST_LEGEND", 0) > 0 ? 1 : -1);
+        TestLog("Battle env test: every random Legendary/Mythical roll %s", EnvInt("PKMN_TEST_LEGEND", 0) > 0 ? "hits" : "misses");
+    }
+    s.safari = EnvInt("PKMN_TEST_SAFARI", 0) != 0;
     value = SDL_getenv("PKMN_TEST_SPAWNS");
     for (s.spawnCount = 0; value != NULL && *value != '\0' && s.spawnCount < MP_SPAWN_MAX_SLOTS; )
     {
@@ -1669,6 +1693,21 @@ static void OweCountField(void)
  * Pokemon made: StartWildBattleWithOWE), "owe battle: species S shiny X" - shiny or not, as the field showed it */
 static void OweBattleField(void)
 {
+    if (s.safari && !s.safariEntered && SDL_AtomicGet(&s.fieldSeen) != 0 && gSaveBlock1Ptr != NULL
+     && gMain.callback2 == CB2_Overworld && !gMain.inBattle)
+    {
+        s.safariEntered = true;
+        EnterSafariMode();
+        TestLog("Battle env test: Safari Zone mode: %u Safari Balls, %u steps", gNumSafariBalls, gSafariZoneStepCounter);
+    }
+    if (s.oweRebumpKind != 0 && s.oweBattleLogged && !gMain.inBattle && s.fieldKeyFrames >= s.oweRebumpAt
+     && gMain.callback2 == CB2_Overworld)
+    {
+        TestLog("Battle env test: owe rebump: from field key frame %d, kind %d", s.fieldKeyFrames, s.oweRebumpKind);
+        s.oweBattleKind = s.oweRebumpKind;
+        s.oweRebumpKind = 0;
+        s.oweBumped = s.oweBattleLogged = false;
+    }
     if (s.oweBumped && !s.oweBattleLogged && gMain.inBattle)
     {
         struct Pokemon *mon = &gParties[B_TRAINER_OPPONENT_A][0];
@@ -3959,6 +3998,16 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
             if (s.fieldShots[i] == s.fieldKeyFrames)
                 RequestShot(50 + s.resetsDone * s.fieldShotCount + i, 1, "a field step");
         s.fieldKeyFrames++;
+        /* PKMN_TEST_TURNS in a battle the field ran into (PKMN_TEST_OWE_BATTLE): the plan's choices, not the keys; a
+           naming screen (a nickname offered for a Pokemon caught): the name kept - START puts the cursor on OK, then A */
+        if (sTurns.active && DioramaBattleEnvTest_NamingScreenUp())
+        {
+            int phase = (s.fieldKeyFrames / AUTOPILOT_HOLD) % 4;
+
+            return keys | (phase == 0 ? START_BUTTON : phase == 2 ? A_BUTTON : 0);
+        }
+        if (sTurns.active && gMain.inBattle && gMain.callback2 != CB2_Overworld)
+            return keys | TurnsKeys();
         return keys | KeysAt(s.fieldKeys, s.fieldLoop > 0 ? (s.fieldKeyFrames - 1) % s.fieldLoop : s.fieldKeyFrames - 1);
     }
     if (s.startMs == 0)

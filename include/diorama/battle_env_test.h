@@ -204,7 +204,8 @@ bool DioramaBattleEnvTest_OweShiny(bool rolled);
    Pokemon that walks into the player starts no battle (wild_items_check.py counts the spawns of a minute undisturbed) */
 bool DioramaBattleEnvTest_OweNoBattle(void);
 /* wild_encounter_ow.c, the kept shinies (MS-79; game thread): "owe keep: <what> local L species S x X y Y map G.N" -
-   what: kept (first seen), back (put back on its map), won or caught (gone for good) */
+   what: kept (first seen), back (put back on its map), won or caught (gone for good), legend (a Legendary or Mythical
+   the roll made of a visible Pokemon, kept after a battle that did not catch or knock it out) */
 void DioramaBattleEnvTest_OweKept(const char *what, unsigned localId, unsigned species, int x, int y);
 /* multiplayer_spawns.c, MultiplayerSpawns_Tick (game thread): PKMN_TEST_SPAWNS="species:x:y:flags:spawnId:personality;..."
    the shared spawns a world's host would send for the map the player is on, written into the spawn mailbox as the host
@@ -216,7 +217,7 @@ bool DioramaBattleEnvTest_FakeSpawnHost(bool *fieldReady);
    writes it; true (the world taken as connected) while there is one, with *fieldReady as the field's */
 bool DioramaBattleEnvTest_FakeWorldEvent(bool *fieldReady);
 /* wild_encounter_ow.c (test builds): an overworld encounter's kind */
-enum { OWE_KIND_WILD = 1, OWE_KIND_ROAMER, OWE_KIND_OUTBREAK, OWE_KIND_FEEBAS };
+enum { OWE_KIND_WILD = 1, OWE_KIND_ROAMER, OWE_KIND_OUTBREAK, OWE_KIND_FEEBAS, OWE_KIND_LEGEND };
 struct ObjectEvent;
 unsigned DioramaBattleEnvTest_OweKind(struct ObjectEvent *owe);
 /* roamer.c (test builds): the roamer stands on the player's map now; with PKMN_TEST_ROAMER it is met whenever an

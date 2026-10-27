@@ -43,6 +43,7 @@
 static void OWEKeep_Update(void);
 static void OWEKeep_OnBattleStart(struct ObjectEvent *owe);
 static void OWEKeep_OnBattleEnd(u32 outcome);
+static void OWELegend_OnBattleEnd(u32 outcome);
 static bool32 IsKeptShinyOWE(struct ObjectEvent *owe);
 #endif
 #line 35 // gba-line
@@ -361,6 +362,7 @@ static void TryReturnRanAwayOWE(void)
 void MPOWE_OnWildBattleEnd(u32 outcome)
 {
 #ifdef PORTABLE
+    OWELegend_OnBattleEnd(outcome);
     OWEKeep_OnBattleEnd(outcome);
 #endif
 #line 254 // gba-line
@@ -401,9 +403,10 @@ static s32 sOWEKeepBattle = -1;     // the one in the battle now
 
 static bool32 IsKeptShinyOWE(struct ObjectEvent *owe)
 {
-    // A roamer moves on by itself (RoamerMove) and is not kept here.
-    return IsOverworldWildEncounter(owe, OWE_GENERATED) && OW_SHINY(owe) && HasOWENoDespawnFlag(owe)
-        && GetOWECategory(owe) >= ROAMER_COUNT;
+    // A roamer moves on by itself (RoamerMove) and is not kept here. A Legendary or Mythical Pokemon is kept as a shiny
+    // is (the owner's request of 2026-10-27; OWELegend_OnBattleEnd).
+    return IsOverworldWildEncounter(owe, OWE_GENERATED) && (OW_SHINY(owe) || MPLegend_IsLegendSpecies(OW_SPECIES(owe)))
+        && HasOWENoDespawnFlag(owe) && GetOWECategory(owe) >= ROAMER_COUNT;
 }
 
 static bool32 IsOWEKeepHere(const struct OWEKeep *keep)
@@ -584,6 +587,58 @@ static void OWEKeep_OnBattleEnd(u32 outcome)
         sOWEKeep[sOWEKeepBattle].used = FALSE;
     }
     sOWEKeepBattle = -1;
+}
+
+// The owner's request of 2026-10-27: a Legendary or Mythical Pokemon met in the wild stays there until it is caught or
+// knocked out. The random roll (Update 29, MPLegend_ApplyToPendingWildBattle) turns the battle of a visible wild Pokemon
+// into one with a Legendary or Mythical: from then on the Pokemon standing there is that one. Run from, fled, or the
+// player's team beaten, it comes back as itself where it stood (not as the Pokemon the roll replaced), and it is kept
+// as a shiny is: put back on its map whenever the player is there again, never despawned, until a battle with it is won
+// or it is caught. For as long as the game runs (OWEKeep is not saved).
+static void OWELegend_OnBattleEnd(u32 outcome)
+{
+    u16 species;
+    bool8 shiny, female;
+    s32 slot = sOWEKeepBattle;
+
+    if (!MPLegend_TakeBattleLegend(&species, &shiny, &female) || sOWERunReturn.state != 1)
+        return;     // no roll hit, or not the battle of a visible Pokemon (fishing, an encounter in the grass)
+    sOWERunReturn.graphicsId = GetGraphicsIdForMon(species, shiny, female);
+    sOWERunReturn.movementType = OWE_GetMovementTypeFromSpecies(species);
+    sOWERunReturn.level |= OWE_NO_DESPAWN_FLAG;
+    outcome &= ~B_OUTCOME_LINK_BATTLE_RAN;
+    if (outcome == B_OUTCOME_WON || outcome == B_OUTCOME_CAUGHT)
+        return;     // gone for good (OWEKeep_OnBattleEnd lets go of the Pokemon the roll replaced when it was a kept shiny)
+    if (slot < 0)
+    {
+        // A new entry: a free one, else the one unseen the longest
+        slot = 0;
+        for (s32 i = 0; i < OWE_KEEP_COUNT; i++)
+        {
+            if (!sOWEKeep[i].used)
+            {
+                slot = i;
+                break;
+            }
+            if (sOWEKeep[i].seen < sOWEKeep[slot].seen)
+                slot = i;
+        }
+    }
+    sOWEKeep[slot].used = TRUE;
+    sOWEKeep[slot].mapGroup = sOWERunReturn.mapGroup;
+    sOWEKeep[slot].mapNum = sOWERunReturn.mapNum;
+    sOWEKeep[slot].localId = sOWERunReturn.localId;
+    sOWEKeep[slot].graphicsId = sOWERunReturn.graphicsId;
+    sOWEKeep[slot].x = sOWERunReturn.x;
+    sOWEKeep[slot].y = sOWERunReturn.y;
+    sOWEKeep[slot].elevation = sOWERunReturn.elevation;
+    sOWEKeep[slot].movementType = sOWERunReturn.movementType;
+    sOWEKeep[slot].level = sOWERunReturn.level;
+    sOWEKeep[slot].category = sOWERunReturn.category;
+    sOWEKeep[slot].seen = sOWEKeepClock;
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+    DioramaBattleEnvTest_OweKept("legend", sOWERunReturn.localId, species, sOWERunReturn.x, sOWERunReturn.y);
+#endif
 }
 #endif
 #line 261 // gba-line
@@ -869,7 +924,7 @@ void StartWildBattleWithOWE(struct ScriptContext *ctx)
 #ifdef PORTABLE
     // Update 29: a generated overworld Pokemon the player walks into is one random wild encounter (the Legendary roll is
     // made when the battle starts, not when the Pokemon appears, so a visible spawn cannot be picked for its species)
-    if (category == OWE_CATEGORY_WILD && IS_LOCALID_GENERATED_OWE(owe->localId))
+    if (category == OWE_CATEGORY_WILD && IS_LOCALID_GENERATED_OWE(owe->localId) && !MPLegend_IsLegendSpecies(speciesId))
         MPLegend_NoteWildMon(MetatileBehavior_IsWaterWildEncounter(MapGridGetMetatileBehaviorAt(owe->currentCoords.x, owe->currentCoords.y))
                              ? WILD_AREA_WATER : WILD_AREA_LAND);
 #endif
@@ -1369,6 +1424,12 @@ static void SetSpeciesInfoForOWE(struct InfoOWE *info, u32 x, u32 y)
 
     if (WE_OWE_PREVENT_SHINY_DESPAWN && info->isShiny)
         info->noDespawn = TRUE;
+#ifdef PORTABLE
+    // A Legendary or Mythical Pokemon stays until it is caught or knocked out (the owner's request of 2026-10-27)
+    if (MPLegend_IsLegendSpecies(info->speciesId))
+        info->noDespawn = TRUE;
+#endif
+#line 954 // gba-line
 
     if (info->category == OWE_CATEGORY_UNDEFINED)
         info->category = OWE_CATEGORY_WILD;
@@ -2348,6 +2409,8 @@ unsigned DioramaBattleEnvTest_OweKind(struct ObjectEvent *owe)
         return OWE_KIND_OUTBREAK;
     if (category == OWE_CATEGORY_FEEBAS)
         return OWE_KIND_FEEBAS;
+    if (MPLegend_IsLegendSpecies(OW_SPECIES(owe)))
+        return OWE_KIND_LEGEND;
     return OWE_KIND_WILD;
 }
 #endif

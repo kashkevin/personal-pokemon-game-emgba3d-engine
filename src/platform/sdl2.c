@@ -235,6 +235,7 @@ extern int NativeSelfTest_Ladder(void);
 extern int NativeSelfTest_DumpSpeciesData(const char *outPath);
 extern int NativeSelfTest_Legend(void);
 extern int NativeSelfTest_Shiny(void);
+extern int NativeSelfTest_ShinyPaths(void);
 extern int NativeSelfTest_WildItems(void);
 extern int NativeSelfTest_Ride(const char *sheetPath);
 extern int NativeSelfTest_Carriers(const char *sheetPath);
@@ -1313,6 +1314,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_Coins()); // src/platform/native_selftest_u29.c (Update 29)
         else if (strcmp(argv[i], "--selftest-shiny") == 0)
             exit(NativeSelfTest_Shiny()); // src/platform/native_selftest_u29.c (Update 29)
+        else if (strcmp(argv[i], "--selftest-shiny-paths") == 0)
+            exit(NativeSelfTest_ShinyPaths()); // src/platform/native_selftest_u29.c (the 2026-10-27 shiny odds audit)
         else if (strcmp(argv[i], "--selftest-wild-items") == 0)
             exit(NativeSelfTest_WildItems()); // src/platform/native_selftest_items.c (the 2026-10-27 wild item audit)
         else if (strcmp(argv[i], "--selftest-frontier-saves") == 0)

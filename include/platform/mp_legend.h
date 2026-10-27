@@ -54,7 +54,14 @@ void MPLegend_NoteWildMon(enum WildPokemonArea area);
 void MPLegend_ApplyToPendingWildBattle(void);
 void MPLegend_ForgetPending(void);
 
-// Test hook (the self-tests only): 1 = every roll hits, -1 = none does, 0 = the real odds.
+// A Legendary or Mythical species (the species data's flags). Such a Pokemon met in the wild stays there until it is
+// caught or knocked out (the owner's request of 2026-10-27: src/wild_encounter_ow.c), and is never rolled again.
+bool32 MPLegend_IsLegendSpecies(u16 species);
+// The Legendary or Mythical the roll made of the wild battle now ending (FALSE for none), forgotten once read: the
+// visible Pokemon the battle came from is that Pokemon from then on (MPOWE_OnWildBattleEnd).
+bool32 MPLegend_TakeBattleLegend(u16 *species, bool8 *shiny, bool8 *female);
+
+// Test hook (the self-tests and the test builds' PKMN_TEST_LEGEND): 1 = every roll hits, -1 = none does, 0 = the real odds.
 void MPLegend_TestForce(int mode);
 
 #endif // GUARD_PLATFORM_MP_LEGEND_H

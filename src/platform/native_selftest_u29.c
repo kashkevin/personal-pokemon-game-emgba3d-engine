@@ -676,6 +676,48 @@ int NativeSelfTest_Legend(void)
         MPLegend_TestForce(0);
     }
 
+    // 6b. the owner's request of 2026-10-27: a Legendary/Mythical the roll made is remembered for the end of its battle
+    //     (MPLegend_TakeBattleLegend: the visible Pokemon it came from stays as that one), once
+    {
+        const struct WildPokemonInfo *info = InfoFor(MAP_ROUTE101, WILD_AREA_LAND);
+        u32 inPool = 0, flagged = 0, shiny = 1;
+        u16 species, made;
+        bool8 isShiny, female;
+
+        for (u32 i = 0; i < MPLegend_SpeciesCount(); i++)
+        {
+            inPool++;
+            flagged += MPLegend_IsLegendSpecies(MPLegend_SpeciesAt(i)->species) ? 1 : 0;
+        }
+        ExpectLeg("every species the roll can pick is a Legendary or Mythical by the species data (kept on the field)",
+                  inPool > 0 && flagged == inPool);
+        ExpectLeg("ordinary species are not (Zigzagoon, Trubbish, Dratini, Dragonite)",
+                  !MPLegend_IsLegendSpecies(SPECIES_ZIGZAGOON) && !MPLegend_IsLegendSpecies(SPECIES_TRUBBISH)
+                  && !MPLegend_IsLegendSpecies(SPECIES_DRATINI) && !MPLegend_IsLegendSpecies(SPECIES_DRAGONITE)
+                  && !MPLegend_IsLegendSpecies(SPECIES_NONE) && !MPLegend_IsLegendSpecies(NUM_SPECIES));
+        UseMapHeader(MAP_ROUTE101);
+        FlagClear(FLAG_SYS_SAFARI_MODE);
+        MPLegend_TestForce(1);
+        ZeroEnemyPartyMons();
+        TryGenerateWildMon(info, WILD_AREA_LAND, 0);
+        SetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_IS_SHINY, &shiny);
+        MPLegend_ApplyToPendingWildBattle();
+        made = GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_SPECIES);
+        ExpectLeg("(forced roll) the battle's Legendary/Mythical is read once at the battle's end: its species, shiny, gender",
+                  MPLegend_TakeBattleLegend(&species, &isShiny, &female) && species == made && isShiny
+                  && female == (GetMonGender(&gParties[B_TRAINER_OPPONENT_A][0]) == MON_FEMALE)
+                  && !MPLegend_TakeBattleLegend(&species, &isShiny, &female));
+        TryGenerateWildMon(info, WILD_AREA_LAND, 0);     // a hit, then a new encounter noted before the battle's end
+        MPLegend_ApplyToPendingWildBattle();
+        TryGenerateWildMon(info, WILD_AREA_LAND, 0);
+        ExpectLeg("(forced roll) a new encounter forgets an earlier one's Legendary", !MPLegend_TakeBattleLegend(&species, &isShiny, &female));
+        MPLegend_TestForce(-1);
+        TryGenerateWildMon(info, WILD_AREA_LAND, 0);
+        MPLegend_ApplyToPendingWildBattle();
+        ExpectLeg("(never-hit roll) no Legendary to read at the battle's end", !MPLegend_TakeBattleLegend(&species, &isShiny, &female));
+        MPLegend_TestForce(0);
+    }
+
     // 6. Safari-only ordinary Pokemon (Kangaskhan, Tauros, Happiny, Scyther, Pinsir, Heracross, Mime Jr., Farfetch'd): weight 0
     //    outside the Zone, a normal weight inside it, found in the Zone's grass and never on an ordinary route
     {
@@ -915,6 +957,257 @@ int NativeSelfTest_Shiny(void)
         ExpectLeg("a stored ordinary Pokemon stays ordinary", GetMonData(&mon, MON_DATA_IS_SHINY) == 0);
     }
     printf("selftest-shiny: %d checks, %d failed\n", sLegChecks, sLegFailures);
+    return sLegFailures ? 1 : 0;
+}
+
+// --selftest-shiny-paths (the owner's request of 2026-10-27, the full shiny odds audit): every way the game makes a
+// Pokemon that can be shiny, through the game's own generators, millions of times each, the shiny share compared with the
+// documented odds (4.5 sigma). The paths: a hidden encounter (TryGenerateWildMon: grass, surfing, Dive, Rock Smash), a
+// visible one (the spawner's species from the same generator, then its one ComputePlayerShinyOdds: wild_encounter_ow.c
+// SetSpeciesInfoForOWE), a hooked one (CreateWildMon with gIsFishingEncounter set: GenerateFishingWildMon), a static one
+// (CreateScriptedWildMon), a gift (ScriptGiveMon), a roamer (InitRoamer), the random Legendary roll (keeps the encounter's
+// shiny status), and the modifiers: the Shiny Charm, the Safari Zone, a Lure, the DexNav chain. Inside the Safari Zone each
+// species' share is compared with the rest (Trubbish among them, the owner's report of 4 shiny Trubbish in about 10 min).
+#include "roamer.h"
+#include "script_pokemon_util.h"
+#include "constants/vars.h"
+
+extern bool8 gIsFishingEncounter;
+extern enum Species gDexNavSpecies;
+
+static double ShinyOddsOfRolls(double rolls)
+{
+    return 1.0 - __builtin_pow(1.0 - 16.0 / 65536.0, rolls);
+}
+
+// n creations by make (TRUE: shiny); the share against odds, 4.5 sigma. Returns the number of shiny ones.
+static u32 ShinyPath(const char *name, double odds, u32 n, bool32 (*make)(void))
+{
+    u32 hits = 0;
+    double expected = n * odds, sigma = __builtin_sqrt(expected * (1.0 - odds)), diff;
+    char what[200];
+
+    for (u32 i = 0; i < n; i++)
+        hits += make() ? 1 : 0;
+    diff = (double)hits - expected;
+    printf("shiny path: %-58s %8u of %9u  1 in %7.1f  documented 1 in %7.1f  (%+.1f sigma)\n", name, hits, n,
+           hits ? (double)n / hits : 0.0, 1.0 / odds, sigma > 0 ? diff / sigma : 0.0);
+    snprintf(what, sizeof(what), "%s: 1 in %.1f (within 4.5 sigma)", name, 1.0 / odds);
+    ExpectLeg(what, diff > -4.5 * sigma && diff < 4.5 * sigma);
+    return hits;
+}
+
+static const struct WildPokemonInfo *sPathInfo;
+static enum WildPokemonArea sPathArea;
+static u16 sPathSpecies;
+
+static bool32 MakeHidden(void)
+{
+    ZeroEnemyPartyMons();
+    if (!TryGenerateWildMon(sPathInfo, sPathArea, 0))
+        return FALSE;
+    sPathSpecies = GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_SPECIES);
+    return GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_IS_SHINY);
+}
+
+static bool32 MakeVisible(void)
+{
+    ZeroEnemyPartyMons();
+    if (!TryGenerateWildMon(sPathInfo, sPathArea, 0))
+        return FALSE;
+    sPathSpecies = GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_SPECIES);
+    return ComputePlayerShinyOdds(GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_PERSONALITY), READ_OTID_FROM_SAVE);
+}
+
+static bool32 MakeHooked(void)
+{
+    bool32 shiny;
+
+    gIsFishingEncounter = TRUE;
+    ZeroEnemyPartyMons();
+    CreateWildMon(SPECIES_MAGIKARP, 10);
+    shiny = GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_IS_SHINY);
+    gIsFishingEncounter = FALSE;
+    return shiny;
+}
+
+static bool32 MakeStatic(void)
+{
+    ZeroEnemyPartyMons();
+    CreateScriptedWildMon(SPECIES_KYOGRE, 70, ITEM_NONE);
+    return GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_IS_SHINY);
+}
+
+static bool32 MakeGift(void)
+{
+    ZeroPlayerPartyMons();
+    ScriptGiveMon(SPECIES_CASTFORM, 25, ITEM_NONE);
+    return GetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_IS_SHINY);
+}
+
+static bool32 MakeRoamer(void)
+{
+    DeactivateAllRoamers();     // a roamer is made only into a free slot (TryAddRoamer): each time a new one
+    InitRoamer();
+    return GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_IS_SHINY);
+}
+
+static bool32 MakeLegendRoll(void)
+{
+    bool32 before;
+
+    ZeroEnemyPartyMons();
+    TryGenerateWildMon(sPathInfo, WILD_AREA_LAND, 0);
+    before = GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_IS_SHINY);
+    MPLegend_ApplyToPendingWildBattle();
+    if (GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_IS_SHINY) != before || !InPool(GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_SPECIES)))
+        sPathSpecies = 0xFFFF;     // the roll changed the shiny status, or made no Legendary: a failure, counted below
+    return before;
+}
+
+int NativeSelfTest_ShinyPaths(void)
+{
+    const double p = 16.0 / 65536.0, f = 41848.0 / 65536.0;
+    const double charm = p + f * p * (1.0 - p);
+
+    InitHeap(gHeap, HEAP_SIZE);
+    SetSaveBlocksPointers(0);
+    memset(gSaveBlock1Ptr, 0, sizeof(*gSaveBlock1Ptr));
+    memset(gSaveBlock2Ptr, 0, sizeof(*gSaveBlock2Ptr));
+    memset(gSaveBlock3Ptr, 0, sizeof(*gSaveBlock3Ptr));
+    SetBagItemsPointers();
+    ClearBag();
+    gSaveBlock2Ptr->playerTrainerId[0] = 0x39; gSaveBlock2Ptr->playerTrainerId[1] = 0x30;
+    gSaveBlock2Ptr->playerTrainerId[2] = 0x12; gSaveBlock2Ptr->playerTrainerId[3] = 0x80;
+    ZeroPlayerPartyMons();
+    CreateMon(&gParties[B_TRAINER_PLAYER][0], SPECIES_TREECKO, 5, 0x12345678, OTID_STRUCT_PLAYER_ID);
+    gPartiesCount[B_TRAINER_PLAYER] = 1;
+    MPLegend_TestForce(-1);     // the encounters below stay what the tables made (the roll is checked on its own)
+    printf("selftest-shiny-paths: the shiny odds of every way a Pokemon is made\n");
+
+    // ordinary wild Pokemon, no modifier: hidden and visible, on land, surfing, under the water, Rock Smash; hooked
+    SeedRng(0x51A7);
+    UseMapHeader(MAP_ROUTE101);
+    FlagClear(FLAG_SYS_SAFARI_MODE);
+    sPathInfo = InfoFor(MAP_ROUTE101, WILD_AREA_LAND), sPathArea = WILD_AREA_LAND;
+    ShinyPath("grass, a hidden encounter (Route 101)", p, 4000000, MakeHidden);
+    ShinyPath("grass, a visible Pokemon (Route 101)", p, 4000000, MakeVisible);
+    UseMapHeader(MAP_ROUTE109);
+    sPathInfo = InfoFor(MAP_ROUTE109, WILD_AREA_WATER), sPathArea = WILD_AREA_WATER;
+    ShinyPath("surfing, a visible Pokemon (Route 109)", p, 2000000, MakeVisible);
+    UseMapHeader(MAP_UNDERWATER_ROUTE124);
+    sPathInfo = InfoFor(MAP_UNDERWATER_ROUTE124, WILD_AREA_WATER), sPathArea = WILD_AREA_WATER;
+    ShinyPath("under the water (Dive, Route 124)", p, 2000000, MakeVisible);
+    UseMapHeader(MAP_ROUTE111);
+    sPathInfo = InfoFor(MAP_ROUTE111, WILD_AREA_ROCKS), sPathArea = WILD_AREA_ROCKS;
+    ShinyPath("Rock Smash (Route 111)", p, 2000000, MakeHidden);
+    UseMapHeader(MAP_ROUTE109);
+    ShinyPath("fishing (no chain fishing in this game)", p, 2000000, MakeHooked);
+    ShinyPath("a static Pokemon (CreateScriptedWildMon: Kyogre)", p, 2000000, MakeStatic);
+    ShinyPath("a gift Pokemon (ScriptGiveMon: Castform)", p, 2000000, MakeGift);
+    ShinyPath("a roamer (InitRoamer: Latios or Latias)", p, 1000000, MakeRoamer);
+    ZeroPlayerPartyMons();      // the lead again (the gifts took its place)
+    CreateMon(&gParties[B_TRAINER_PLAYER][0], SPECIES_TREECKO, 5, 0x12345678, OTID_STRUCT_PLAYER_ID);
+    gPartiesCount[B_TRAINER_PLAYER] = 1;
+
+    // the Shiny Charm outside the Safari Zone
+    AddBagItem(ITEM_SHINY_CHARM, 1);
+    UseMapHeader(MAP_ROUTE101);
+    sPathInfo = InfoFor(MAP_ROUTE101, WILD_AREA_LAND), sPathArea = WILD_AREA_LAND;
+    ShinyPath("grass, a visible Pokemon, Shiny Charm", charm, 4000000, MakeVisible);
+    ShinyPath("a static Pokemon, Shiny Charm", charm, 2000000, MakeStatic);
+    ClearBag();
+
+    // a Lure (one extra roll while its steps last) and the DexNav (its chain's extra rolls, only for its own battle)
+    VarSet(VAR_REPEL_STEP_COUNT, REPEL_LURE_MASK | 100);
+    ShinyPath("grass, a visible Pokemon, a Lure on", ShinyOddsOfRolls(2), 4000000, MakeVisible);
+    VarSet(VAR_REPEL_STEP_COUNT, 0);
+    gDexNavSpecies = SPECIES_ZIGZAGOON;
+    gSaveBlock3Ptr->dexNavChain = 0;
+    ShinyPath("a DexNav battle, chain 0 (4% of them 4 extra rolls)", 0.96 * p + 0.04 * ShinyOddsOfRolls(5), 4000000, MakeVisible);
+    gSaveBlock3Ptr->dexNavChain = 50;
+    ShinyPath("a DexNav battle, chain 50 (5 extra rolls)", 0.96 * ShinyOddsOfRolls(6) + 0.04 * ShinyOddsOfRolls(10), 2000000, MakeVisible);
+    gSaveBlock3Ptr->dexNavChain = 100;
+    ShinyPath("a DexNav battle, chain 100 (10 extra rolls)", 0.96 * ShinyOddsOfRolls(11) + 0.04 * ShinyOddsOfRolls(15), 2000000, MakeVisible);
+    gDexNavSpecies = SPECIES_NONE;
+    gSaveBlock3Ptr->dexNavChain = 0;
+
+    // the random Legendary roll keeps the shiny status of the encounter it replaces
+    {
+        u32 bad = 0;
+
+        MPLegend_TestForce(1);
+        sPathInfo = InfoFor(MAP_ROUTE101, WILD_AREA_LAND);
+        for (u32 i = 0; i < 200000; i++)
+        {
+            sPathSpecies = 0;
+            MakeLegendRoll();
+            bad += sPathSpecies == 0xFFFF ? 1 : 0;
+        }
+        ExpectLeg("(forced roll) 200000 Legendary/Mythical rolls: each one keeps the shiny status of the encounter it replaces", bad == 0);
+        ShinyPath("a random Legendary/Mythical (the encounter's own roll)", p, 2000000, MakeLegendRoll);
+        MPLegend_TestForce(-1);
+    }
+
+    // the Safari Zone, with and without the Charm; each species' share against the rest
+    {
+        static u32 seen[NUM_SPECIES], shinyOf[NUM_SPECIES];
+        const u32 n = 12000000;
+        u32 total = 0, shinies = 0, worstSpecies = 0, species = 0, trubbish = 0, trubbishShiny = 0;
+        double worst = 0, odds = ShinyOddsOfRolls(4);
+
+        UseMapHeader(MAP_SAFARI_ZONE_SOUTH);
+        FlagSet(FLAG_SYS_SAFARI_MODE);
+        sPathInfo = InfoFor(MAP_SAFARI_ZONE_SOUTH, WILD_AREA_LAND), sPathArea = WILD_AREA_LAND;
+        ShinyPath("Safari Zone, a visible Pokemon", ShinyOddsOfRolls(2), 4000000, MakeVisible);
+        AddBagItem(ITEM_SHINY_CHARM, 1);
+        memset(seen, 0, sizeof(seen));
+        memset(shinyOf, 0, sizeof(shinyOf));
+        SeedRng(0x5AFA);
+        for (u32 i = 0; i < n; i++)
+        {
+            bool32 shiny = MakeVisible();
+
+            if (sPathSpecies >= NUM_SPECIES)
+                continue;
+            seen[sPathSpecies]++;
+            shinyOf[sPathSpecies] += shiny ? 1 : 0;
+            total++;
+            shinies += shiny ? 1 : 0;
+        }
+        for (u32 sp = 0; sp < NUM_SPECIES; sp++)
+        {
+            double expected, sigma, dev;
+
+            if (seen[sp] == 0)
+                continue;
+            species++;
+            expected = seen[sp] * odds;
+            sigma = __builtin_sqrt(expected * (1.0 - odds));
+            dev = sigma > 0 ? ((double)shinyOf[sp] - expected) / sigma : 0;
+            if (dev * dev > worst * worst)
+                worst = dev, worstSpecies = sp;
+            if (sp == SPECIES_TRUBBISH)
+                trubbish = seen[sp], trubbishShiny = shinyOf[sp];
+        }
+        printf("shiny path: Safari Zone + Charm: %u shiny of %u (1 in %.1f, documented 1 in %.1f) over %u species; the most "
+               "off species %u at %+.2f sigma\n", shinies, total, shinies ? (double)total / shinies : 0.0, 1.0 / odds,
+               species, worstSpecies, worst);
+        printf("shiny path: Safari Zone + Charm: Trubbish %u of the %u Pokemon made (%.2f%%), %u of them shiny (1 in %.1f)\n",
+               trubbish, total, total ? 100.0 * trubbish / total : 0.0, trubbishShiny,
+               trubbishShiny ? (double)trubbish / trubbishShiny : 0.0);
+        {
+            double expected = total * odds, sigma = __builtin_sqrt(expected * (1.0 - odds)), diff = (double)shinies - expected;
+
+            ExpectLeg("Safari Zone + Charm, a visible Pokemon: 1 in 1024.4 (within 4.5 sigma)", diff > -4.5 * sigma && diff < 4.5 * sigma);
+        }
+        // the species' shares are one experiment each: with a few dozen species the largest of them is within 4.5 sigma
+        ExpectLeg("no species' shiny share differs from the others (each within 4.5 sigma)", worst > -4.5 && worst < 4.5);
+        ClearBag();
+        FlagClear(FLAG_SYS_SAFARI_MODE);
+    }
+    MPLegend_TestForce(0);
+    printf("selftest-shiny-paths: %d checks, %d failed\n", sLegChecks, sLegFailures);
     return sLegFailures ? 1 : 0;
 }
 

@@ -11,6 +11,10 @@
 #include "tv.h"
 #include "constants/game_stat.h"
 #include "field_screen_effect.h"
+#ifdef PORTABLE
+#include "wild_encounter_ow.h"
+#endif
+#line 14 // gba-line
 
 struct PokeblockFeeder
 {
@@ -99,6 +103,13 @@ void SafariZoneRetirePrompt(void)
 
 void CB2_EndSafariBattle(void)
 {
+#ifdef PORTABLE
+    // The end of a Safari battle with a visible wild Pokemon is the end of a wild battle (CB2_EndWildBattle does the
+    // same): a kept shiny or Legendary caught here is let go of (it came back before, a second one of a caught Pokemon),
+    // and one run from comes back, as anywhere else.
+    MPOWE_OnWildBattleEnd(gBattleOutcome);
+#endif
+#line 102 // gba-line
     sSafariZonePkblkUses += gBattleResults.pokeblockThrows;
     if (gBattleOutcome == B_OUTCOME_CAUGHT)
         sSafariZoneCaughtMons++;

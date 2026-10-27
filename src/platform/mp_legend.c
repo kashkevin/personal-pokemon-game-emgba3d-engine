@@ -124,6 +124,34 @@ static struct
     u32 personality;
 } sPending;
 
+// The roll's Legendary/Mythical in the wild battle now (MPLegend_TakeBattleLegend)
+static struct
+{
+    bool8 valid;
+    bool8 shiny;
+    bool8 female;
+    u16 species;
+} sBattleLegend;
+
+bool32 MPLegend_IsLegendSpecies(u16 species)
+{
+    if (species == SPECIES_NONE || species >= NUM_SPECIES)
+        return FALSE;
+    return gSpeciesInfo[species].isRestrictedLegendary || gSpeciesInfo[species].isSubLegendary
+        || gSpeciesInfo[species].isMythical;
+}
+
+bool32 MPLegend_TakeBattleLegend(u16 *species, bool8 *shiny, bool8 *female)
+{
+    if (!sBattleLegend.valid)
+        return FALSE;
+    sBattleLegend.valid = FALSE;
+    *species = sBattleLegend.species;
+    *shiny = sBattleLegend.shiny;
+    *female = sBattleLegend.female;
+    return TRUE;
+}
+
 static bool32 IsFrontierMap(void)
 {
     return gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS
@@ -140,6 +168,7 @@ void MPLegend_NoteWildMon(enum WildPokemonArea area)
     const struct Pokemon *mon = &gParties[B_TRAINER_OPPONENT_A][0];
 
     sPending.valid = FALSE;
+    sBattleLegend.valid = FALSE;
     if (IsFrontierMap())
         return;     // the Battle Pike and Pyramid keep their own Pokemon
     sPending.species = GetMonData(mon, MON_DATA_SPECIES);
@@ -178,4 +207,8 @@ void MPLegend_ApplyToPendingWildBattle(void)
     shiny = GetMonData(mon, MON_DATA_IS_SHINY);
     CreateWildMon(species, level);          // the level is the one the map's table chose; a level-N Pokemon of the species
     SetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_IS_SHINY, &shiny);  // the shiny roll of the encounter is kept
+    sBattleLegend.valid = TRUE;
+    sBattleLegend.species = species;
+    sBattleLegend.shiny = shiny ? TRUE : FALSE;
+    sBattleLegend.female = GetMonGender(&gParties[B_TRAINER_OPPONENT_A][0]) == MON_FEMALE;
 }
