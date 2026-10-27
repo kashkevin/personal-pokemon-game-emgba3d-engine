@@ -16,6 +16,7 @@
 #include "item.h"
 #include "item_menu.h"
 #include "load_save.h"
+#include "mail.h"
 #include "malloc.h"
 #include "mp_wild_random.h"
 #include "overworld.h"
@@ -2345,5 +2346,67 @@ int NativeSelfTest_BerryWater(void)
     Expect("soil with no berry planted refuses water", !WaterTestTree());
 
     printf("selftest-berry-water: %d checks, %d failed\n", sChecks, sFailures);
+    return sFailures == 0 ? 0 : 1;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// --selftest-mail (the full item audit, the twelve Mail): what giving a Pokemon Mail and taking it back does to the
+// save's mail slots, through the game's own functions (mail_data.c: GiveMailToMonByItemId, what the party menu's GIVE
+// calls after the words are written; TakeMailFromMonAndSave, its TAKE when the Bag is full, the Mail kept in the PC):
+// for each Mail, a party slot holding that Mail, the player's name and ID and the holder's species, the holder holding
+// it; taken back, the same Mail in a PC slot and the holder empty-handed. The six party slots fill and a seventh is
+// refused; a Potion is not Mail. The words' writing (the easy chat screen) is not part of it.
+
+int NativeSelfTest_Mail(void)
+{
+    static const u16 sMail[] = {
+        ITEM_ORANGE_MAIL, ITEM_HARBOR_MAIL, ITEM_GLITTER_MAIL, ITEM_MECH_MAIL, ITEM_WOOD_MAIL, ITEM_WAVE_MAIL,
+        ITEM_BEAD_MAIL, ITEM_SHADOW_MAIL, ITEM_TROPIC_MAIL, ITEM_DREAM_MAIL, ITEM_FAB_MAIL, ITEM_RETRO_MAIL,
+    };
+    struct Pokemon *mon;
+    char line[200];
+    u32 i, slot, pcSlot;
+
+    Setup();
+    UseMap(MAP_ROUTE101);
+    printf("selftest-mail: the twelve Mail given to a Pokemon and taken back, through mail_data.c\n");
+    for (i = 0; i < ARRAY_COUNT(sMail); i++)
+    {
+        ClearAllMail();
+        mon = BagMon(SPECIES_MUDKIP, 20, MON_MALE, 70);
+        slot = GiveMailToMonByItemId(mon, sMail[i]);
+        snprintf(line, sizeof(line), "Mail %u given: party slot %u holds it, the holder holds it, its writer and species set",
+                 (unsigned)sMail[i], (unsigned)slot);
+        Expect(line, ItemIsMail(sMail[i]) && slot < PARTY_SIZE && gSaveBlock1Ptr->mail[slot].itemId == sMail[i]
+                     && GetMonData(mon, MON_DATA_HELD_ITEM) == sMail[i] && MonHasMail(mon)
+                     && gSaveBlock1Ptr->mail[slot].trainerId[0] == gSaveBlock2Ptr->playerTrainerId[0]
+                     && gSaveBlock1Ptr->mail[slot].species == SpeciesToMailSpecies(SPECIES_MUDKIP,
+                                                                                    GetMonData(mon, MON_DATA_PERSONALITY))
+                     && gSaveBlock1Ptr->mail[slot].words[0] == EC_EMPTY_WORD);
+        pcSlot = TakeMailFromMonAndSave(mon);
+        snprintf(line, sizeof(line), "  taken back into the PC: slot %u holds Mail %u, the party slot is free, the holder empty-handed",
+                 (unsigned)pcSlot, (unsigned)(pcSlot < MAIL_COUNT ? gSaveBlock1Ptr->mail[pcSlot].itemId : 0));
+        Expect(line, pcSlot >= PARTY_SIZE && pcSlot < MAIL_COUNT && gSaveBlock1Ptr->mail[pcSlot].itemId == sMail[i]
+                     && gSaveBlock1Ptr->mail[slot].itemId == ITEM_NONE
+                     && GetMonData(mon, MON_DATA_HELD_ITEM) == ITEM_NONE && !MonHasMail(mon));
+    }
+
+    ClearAllMail();
+    for (i = 0; i < PARTY_SIZE; i++)
+    {
+        mon = BagMon(SPECIES_MUDKIP, 20, MON_MALE, 70);
+        slot = GiveMailToMonByItemId(mon, ITEM_ORANGE_MAIL);
+        if (slot != i)
+            break;
+    }
+    snprintf(line, sizeof(line), "the six party mail slots fill in turn (%u filled)", (unsigned)i);
+    Expect(line, i == PARTY_SIZE);
+    mon = BagMon(SPECIES_MUDKIP, 20, MON_MALE, 70);
+    Expect("a seventh Mail is refused while the six are taken", GiveMailToMonByItemId(mon, ITEM_ORANGE_MAIL) == MAIL_NONE
+                                                                 && GetMonData(mon, MON_DATA_HELD_ITEM) == ITEM_NONE);
+    Expect("a Potion is not Mail", !ItemIsMail(ITEM_POTION));
+    ClearAllMail();
+
+    printf("selftest-mail: %d checks, %d failed\n", sChecks, sFailures);
     return sFailures == 0 ? 0 : 1;
 }
