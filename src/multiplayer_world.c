@@ -10,6 +10,7 @@
 #include "multiplayer_rival.h"
 #include "tower_legends.h"
 #include "platform/mp_breeding.h"
+#include "field_carrier.h"
 #if defined(DIORAMA_BATTLE_ENV_TEST)
 #include "diorama/battle_env_test.h"
 #endif
@@ -236,6 +237,21 @@ static void PublishLocalState(void)
     state.mountState = sLocalMount.mountState;
     state.mountSpecies = sLocalMount.mountSpecies;
     state.mountFlags = sLocalMount.mountFlags;
+#ifdef PORTABLE
+    // Surfing on the Pokemon that used Surf (its sprite under the player): every other game draws it under them
+    {
+        u16 carrierSpecies;
+        bool8 shiny, female;
+
+        if ((gPlayerAvatar.flags & PLAYER_AVATAR_FLAG_SURFING) && FieldCarrier_GetLiveWater(&carrierSpecies, &shiny, &female))
+        {
+            state.mountState = MP_WORLD_MOUNT_CARRIER;
+            state.mountSpecies = carrierSpecies;
+            state.mountFlags = (shiny ? MP_WORLD_FOLLOWER_SHINY : 0) | (female ? MP_WORLD_FOLLOWER_FEMALE : 0);
+        }
+    }
+#endif
+#line 184 // gba-line
     // The host derives this save's next wallet adjustment from it.
     if (gMain.callback2 == CB2_Overworld)
         state.walletSeqLow = VarGet(VAR_MP_WALLET_SEQ) & 0xFF;
@@ -1745,3 +1761,17 @@ bool32 MultiplayerWorld_NativeUiNotice(u8 *windowId, u16 *shownFrames, u16 *tota
     return TRUE;
 }
 #endif // ENABLE_NATIVE_UI
+
+#ifdef PORTABLE
+bool32 MultiplayerWorld_GetPeerCarrier(u32 playerId, u16 *species, u8 *flags)
+{
+    const struct MultiplayerWorldPeer *peer = FindPeer(playerId);
+
+    if (peer == NULL || peer->state.mountState != MP_WORLD_MOUNT_CARRIER || peer->state.mountSpecies == SPECIES_NONE
+     || peer->state.mountSpecies >= NUM_SPECIES)
+        return FALSE;
+    *species = peer->state.mountSpecies;
+    *flags = peer->state.mountFlags;
+    return TRUE;
+}
+#endif // PORTABLE

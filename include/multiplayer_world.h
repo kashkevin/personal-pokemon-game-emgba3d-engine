@@ -36,6 +36,10 @@
 
 #define MP_WORLD_MOUNT_NONE         0
 #define MP_WORLD_MOUNT_RIDING       1
+#ifdef PORTABLE
+// Surfing on the Pokemon that used Surf (field_carrier.c): its species and its shiny / female flags, as a mount's
+#define MP_WORLD_MOUNT_CARRIER      2
+#endif
 
 #define MP_WORLD_FLAG_CLOCK_VALID   (1 << 0)
 #define MP_WORLD_FLAG_EVENTS        (1 << 1)
@@ -58,6 +62,8 @@
 #define MP_WORLD_WALLET_CREDIT      1
 #define MP_WORLD_WALLET_DEBIT       2
 #ifdef PORTABLE
+// Another player surfing on their carrier (MP_WORLD_MOUNT_CARRIER): its species and flags. FALSE: not surfing on one.
+bool32 MultiplayerWorld_GetPeerCarrier(u32 playerId, u16 *species, u8 *flags);
 // A wallet delta above MAX_MONEY with this flag is a Frontier reward (src/multiplayer_world.c).
 #define MP_REWARD_FLAG              0x40000000
 #define MP_REWARD_BP                1

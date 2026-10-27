@@ -21,6 +21,7 @@
 #include "field_door.h"
 #include "field_effect.h"
 #include "field_effect_helpers.h"
+#include "field_carrier.h"
 #include "rotating_gate.h"
 #include "field_message_box.h"
 #include "field_player_avatar.h"
@@ -1335,8 +1336,8 @@ static u8 FindEffectOwner(const struct DioramaSceneSnapshot *snapshot, u8 localI
 
 /* Field-effect sprites drawn in 3D (scene_snapshot.h, struct DioramaEffectSnapshot): the healing machines' Poke
  * Balls and monitors (field_effect.c), the emote icons over walkers (trainer_see.c), the twinkles over shiny wild
- * Pokemon (platform/ow_shiny_sparkle.c) and the rotating gates' arms on the floor (rotating_gate.c: the Fortree Gym's
- * puzzle was invisible in 3D, the owner's report of 2026-10-27). Every other sprite the field shows is an object event,
+ * Pokemon (platform/ow_shiny_sparkle.c), the rotating gates' arms on the floor (rotating_gate.c: the Fortree Gym's
+ * puzzle was invisible in 3D, the owner's report of 2026-10-27) and the Pokemon other players surf on (field_carrier.c). Every other sprite the field shows is an object event,
  * the surf blob, or part of the interface. */
 static void CopyEffects(struct DioramaSceneSnapshot *snapshot)
 {
@@ -1373,7 +1374,8 @@ static void CopyEffects(struct DioramaSceneSnapshot *snapshot)
          || sprite->oam.affineMode == ST_OAM_AFFINE_ERASE)
             continue;
         if (DioramaTrainerSee_GetIconOwner(sprite, &localId, &mapNum, &mapGroup)
-         || OwShinySparkle_GetOwner(sprite, &localId, &mapNum, &mapGroup))
+         || OwShinySparkle_GetOwner(sprite, &localId, &mapNum, &mapGroup)
+         || FieldCarrier_GetRemoteOwner(sprite, &localId, &mapNum, &mapGroup))
         {
             owner = FindEffectOwner(snapshot, localId, mapNum, mapGroup);
             if (owner == DIORAMA_EFFECT_PLACED)

@@ -740,6 +740,48 @@ MT_TEST(world_inbound_validated)
     MT_CHECK(sNet.closed);
 }
 
+// The relay of the real carriers (2026-10-27): another player surfing on their own Pokemon (mount state 2, its species
+// and flags) reaches the game; before, the first such record stopped the bridge. A mount state above 2 still closes the
+// connection.
+MT_TEST(world_peer_carrier_accepted)
+{
+    struct MpBridgeCaps caps;
+    uint8_t record[208];
+    uint8_t frame[230];
+    uint8_t *w = sMemory[MP_REGION_WORLD];
+    const uint8_t *payload;
+    size_t n;
+    unsigned state;
+
+    for (state = 2; state <= 3; state++)
+    {
+        memset(&caps, 0, sizeof(caps));
+        caps.world = 1;
+        Fresh(&caps);
+        sNet.chunk = 0;
+        Ready(0);
+        PutU32(w, 0x31574D45);
+        PutU16(w + 4, 1);
+        PutU16(w + 6, 256);
+        memset(w + 12, 0x11, 32); // the game's outbound record
+        Step(12);
+        MT_EQ(SentFrame('G', 0, &payload), 32);
+        memset(record, 0, sizeof(record));
+        PutU32(record, 1);
+        PutU32(record + 20, 7);   // a peer: its token
+        record[27] = state;       // its mount state
+        PutU16(record + 28, 131); // Lapras
+        record[30] = 1;           // shiny
+        memcpy(record + 116, "Hello trainers", 14);
+        n = FrameOf(frame, 'N', record, sizeof(record));
+        Feed(frame, n, 200);
+        Step(2);
+        MT_CHECK(state == 2 ? !sNet.closed : sNet.closed);
+        if (state == 2)
+            MT_CHECK(memcmp(w + 48, record, 208) == 0);
+    }
+}
+
 // Update 31's rival record (bytes 200-207) reaches the game: the record the companion sent in the reproduction of the
 // owner's report (only the valid flag) stopped the bridge here, so the game left the session. Malformed records and
 // anything in 192-199 still close the connection.
@@ -2341,6 +2383,7 @@ int main(void)
     MT_RUN(save_command_with_bad_crc_refused);
     MT_RUN(save_party_query_needs_its_capability);
     MT_RUN(world_inbound_validated);
+    MT_RUN(world_peer_carrier_accepted);
     MT_RUN(world_rival_record_accepted);
     MT_RUN(world_outbreak_marker_accepted);
     MT_RUN(trade_record_carries_the_lucky_bit);

@@ -77,6 +77,8 @@ bool32 Multiplayer_IsRuntimeLocalId(u32 localId);
 bool32 Multiplayer_GetRemotePose(u32 i, u32 *playerId, struct MultiplayerPose *pose);
 // Update 32: the field is on screen with the player on it, input or not (a dialogue, the START menu, a cutscene).
 bool32 Multiplayer_FieldShown(void);
+// Each frame on the field: every other player surfing drawn on their carrier (field_carrier.c).
+void Multiplayer_UpdateRemoteCarriers(void);
 #endif
 
 #endif

@@ -57,6 +57,14 @@ void FieldCarrier_Tick(void);
 
 // For the self-test and the multiplayer record: the water's carrier now (species, shiny, female), FALSE for none.
 bool32 FieldCarrier_GetWater(u16 *species, bool8 *shiny, bool8 *female);
+// The carrier drawn under the player now (its sprite live), FALSE for none: what the multiplayer record publishes.
+bool32 FieldCarrier_GetLiveWater(u16 *species, bool8 *shiny, bool8 *female);
+// Another player surfing (slot: the multiplayer layer's remote 0-2) on their carrier (species, MP_WORLD_FOLLOWER_*
+// flags), drawn under their avatar (its object event id) as this game draws its own; SPECIES_NONE: none (removed).
+#define FIELD_CARRIER_REMOTES 3
+void FieldCarrier_SetRemote(u32 slot, u16 species, u8 flags, u32 avatarObjectEventId);
+// A remote carrier's rider (their avatar object), for the 3D view: it draws the carrier with them, as the emote icons
+bool8 FieldCarrier_GetRemoteOwner(const struct Sprite *sprite, u8 *localId, u8 *mapNum, u8 *mapGroup);
 // Where the rider sits on a carrier facing that way (multiplayer_ride.c's seat; facing the camera, low enough that the
 // rider's head and face show over it): px the carrier is drawn below the rider, px the rider sits right of its middle
 void FieldCarrier_GetSeat(u16 carrierGraphicsId, u16 riderGraphicsId, u32 facing, u8 *lift, s8 *shift);

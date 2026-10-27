@@ -328,7 +328,8 @@ static bool ValidWorldInbound(const struct MpBridge *b, const uint8_t *p, size_t
         for (k = 0; k < seenCount; k++)
             if (seen[k] == token)
                 return false;
-        if (o[6] > 7 || o[7] > 1 || o[10] > 3 || o[11] != 0 || U16(o + 4) > 1700 || U16(o + 8) > 1700)
+        /* the mount state: none, riding, or surfing on the Pokemon that used Surf (2, the 2026-10-27 carriers) */
+        if (o[6] > 7 || o[7] > 2 || o[10] > 3 || o[11] != 0 || U16(o + 4) > 1700 || U16(o + 8) > 1700)
             return false;
         seen[seenCount++] = token;
     }

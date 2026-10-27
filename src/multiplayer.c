@@ -149,6 +149,10 @@ static void RemoveRemote(u32 i)
     }
     sRemotes[i].objectEventId = OBJECT_EVENTS_COUNT;
     sRemotes[i].moving = FALSE;
+#ifdef PORTABLE
+    FieldCarrier_SetRemote(i, SPECIES_NONE, 0, OBJECT_EVENTS_COUNT);
+#endif
+#line 145 // gba-line
 }
 
 void Multiplayer_LeaveField(void)
@@ -583,6 +587,10 @@ void Multiplayer_Tick(void)
     }
     for (i = 0; i < MULTIPLAYER_MAX_PEERS; i++)
         UpdateRemote(i);
+#ifdef PORTABLE
+    Multiplayer_UpdateRemoteCarriers();
+#endif
+#line 503 // gba-line
     MultiplayerWorld_Tick(TRUE, sConnected);
 }
 
@@ -625,4 +633,26 @@ bool32 Multiplayer_GetRemotePose(u32 i, u32 *playerId, struct MultiplayerPose *p
     *pose = sRemotes[i].peer.pose;
     return TRUE;
 }
+
+// Every other player surfing on the Pokemon that used Surf (their game publishes it: multiplayer_world.c) drawn on it as
+// this game draws its own player (field_carrier.c); the 2026-10-27 relay of the real carriers
+void Multiplayer_UpdateRemoteCarriers(void)
+{
+    u32 i;
+
+    for (i = 0; i < MULTIPLAYER_MAX_PEERS; i++)
+    {
+        u32 id = sRemotes[i].objectEventId;
+        u16 species = SPECIES_NONE;
+        u8 flags = 0;
+
+        if (sRemotes[i].peer.playerId == 0 || id >= OBJECT_EVENTS_COUNT || !Multiplayer_IsRemoteObject(&gObjectEvents[id])
+         || sRemotes[i].peer.pose.movementMode != PLAYER_AVATAR_STATE_SURFING
+         || !MultiplayerWorld_GetPeerCarrier(sRemotes[i].peer.playerId, &species, &flags))
+            FieldCarrier_SetRemote(i, SPECIES_NONE, 0, OBJECT_EVENTS_COUNT);
+        else
+            FieldCarrier_SetRemote(i, species, flags, id);
+    }
+}
 #endif // PORTABLE
+

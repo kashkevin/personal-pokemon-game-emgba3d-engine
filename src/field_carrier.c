@@ -46,7 +46,8 @@ enum
 {
     OWNED_WATER,    // the surf sprite
     OWNED_FLY,      // the bird
-    OWNED_COUNT,
+    OWNED_REMOTE,   // other players' carriers, FIELD_CARRIER_REMOTES of them
+    OWNED_COUNT = OWNED_REMOTE + FIELD_CARRIER_REMOTES,
 };
 
 // A carrier sprite made here: the game destroys it as it does the original (DestroySprite), so its palette is freed
@@ -67,6 +68,9 @@ static EWRAM_DATA struct Owned sOwned[OWNED_COUNT] = {0};
 static EWRAM_DATA u16 sRiderSilhouette[16] = {0};
 static EWRAM_DATA u16 sCarrierSilhouette[16] = {0};
 static EWRAM_DATA struct ObjectEventGraphicsInfo sUnderwaterRider = {0};
+static EWRAM_DATA u8 sRemoteAvatar[FIELD_CARRIER_REMOTES] = {0};    // each remote carrier's rider (object event id)
+
+static void ReleaseIfGone(u32 which);
 
 // ---------------------------------------------------------------------------
 // Which Pokemon
@@ -162,6 +166,17 @@ static bool32 ResolveWater(struct Carrier *out, bool32 underwater)
             return FALSE;
     }
     *out = sWater;
+    return TRUE;
+}
+
+bool32 FieldCarrier_GetLiveWater(u16 *species, bool8 *shiny, bool8 *female)
+{
+    ReleaseIfGone(OWNED_WATER);
+    if (!sOwned[OWNED_WATER].live || !sWater.chosen)
+        return FALSE;
+    *species = sWater.species;
+    *shiny = sWater.shiny;
+    *female = sWater.female;
     return TRUE;
 }
 
@@ -430,33 +445,48 @@ static s16 SpriteBottom(const struct Sprite *sprite)
 // front picture standing higher than the back's seat: Wailord's body, Lapras' neck), MultiplayerRide_GetFrontClearance
 #define FACE_VISIBLE_ROWS 12
 
-static EWRAM_DATA struct { u16 carrier, rider; u8 clearance; } sFront = {0};
+#define FRONT_CACHE 4
+static EWRAM_DATA struct { u16 carrier, rider; u8 clearance; } sFront[FRONT_CACHE] = {0};
+static EWRAM_DATA u8 sFrontNext = 0;
 
 void FieldCarrier_GetSeat(u16 carrierGraphicsId, u16 riderGraphicsId, u32 facing, u8 *lift, s8 *shift)
 {
+    u32 i;
+
     MultiplayerRide_GetSeat(carrierGraphicsId, riderGraphicsId, facing, lift, shift);
-    if (facing != DIR_SOUTH)
+    if (facing != DIR_SOUTH || carrierGraphicsId == 0)
         return;
-    if (sFront.carrier != carrierGraphicsId || sFront.rider != riderGraphicsId || carrierGraphicsId == 0)
+    for (i = 0; i < FRONT_CACHE; i++)
+        if (sFront[i].carrier == carrierGraphicsId && sFront[i].rider == riderGraphicsId)
+            break;
+    if (i == FRONT_CACHE)
     {
-        sFront.carrier = carrierGraphicsId;
-        sFront.rider = riderGraphicsId;
-        sFront.clearance = MultiplayerRide_GetFrontClearance(carrierGraphicsId, riderGraphicsId, FACE_VISIBLE_ROWS);
+        i = sFrontNext;
+        sFrontNext = (sFrontNext + 1) % FRONT_CACHE;
+        sFront[i].carrier = carrierGraphicsId;
+        sFront[i].rider = riderGraphicsId;
+        sFront[i].clearance = MultiplayerRide_GetFrontClearance(carrierGraphicsId, riderGraphicsId, FACE_VISIBLE_ROWS);
     }
-    *lift = max(*lift, sFront.clearance);
+    *lift = max(*lift, sFront[i].clearance);
 }
 
 // The carrier under a rider drawn centred on riderX with its bottom row on riderBottom: as a mount seats its rider
 // (multiplayer_ride.c), drawn lower by the seat's height instead of the rider raised, so the rider stays where the
 // original's surfer sits and every jump on and off is the original's
-static void PlaceUnderRider(struct Sprite *sprite, u32 face, s16 riderX, s16 riderBottom)
+static void PlaceUnder(struct Sprite *sprite, u16 carrierGraphicsId, u16 riderGraphicsId, u32 face, s16 riderX,
+                       s16 riderBottom)
 {
     u8 lift;
     s8 shift;
 
-    FieldCarrier_GetSeat(sOwned[OWNED_WATER].graphicsId, RiderGraphicsId(), SeatFacing(face), &lift, &shift);
+    FieldCarrier_GetSeat(carrierGraphicsId, riderGraphicsId, SeatFacing(face), &lift, &shift);
     sprite->x = riderX - shift;
     sprite->y = riderBottom + lift + sprite->centerToCornerVecY;
+}
+
+static void PlaceUnderRider(struct Sprite *sprite, u32 face, s16 riderX, s16 riderBottom)
+{
+    PlaceUnder(sprite, sOwned[OWNED_WATER].graphicsId, RiderGraphicsId(), face, riderX, riderBottom);
 }
 
 u8 FieldCarrier_CreateSurfSprite(s16 x, s16 y, u8 subpriority, bool32 underwater)
@@ -520,6 +550,112 @@ bool32 FieldCarrier_UpdateSurfSprite(struct ObjectEvent *player, struct Sprite *
 bool32 FieldCarrier_IsUnderwaterAvatarGraphicsId(u16 graphicsId)
 {
     return graphicsId == FIELD_CARRIER_GFX_UNDERWATER_RIDER;
+}
+
+// ---------------------------------------------------------------------------
+// Other players on the water: the multiplayer record carries their carrier (multiplayer_world.c), drawn under their
+// avatar as the player's own is (the 2026-10-27 relay of the real carriers). On the water only: under it another
+// player keeps the original's underwater look.
+
+// After the rider has moved this frame (the carrier is made in the last free slot): under their seat, turned and
+// swimming as they move, in front of them facing the camera and behind otherwise
+static void RemoteCarrierCallback(struct Sprite *sprite)
+{
+    u32 slot = (u16)sprite->data[0], which = OWNED_REMOTE + slot, face;
+    struct ObjectEvent *avatar;
+    struct Sprite *rider;
+
+    if (slot >= FIELD_CARRIER_REMOTES || !IsOwned(which, sprite) || sRemoteAvatar[slot] >= OBJECT_EVENTS_COUNT)
+        return;
+    avatar = &gObjectEvents[sRemoteAvatar[slot]];
+    if (!avatar->active || avatar->spriteId >= MAX_SPRITES || !gSprites[avatar->spriteId].inUse)
+    {
+        sprite->invisible = TRUE;
+        return;
+    }
+    rider = &gSprites[avatar->spriteId];
+    face = FaceAnim(avatar->facingDirection);
+    StartSpriteAnimIfDifferent(sprite, face - ANIM_STD_FACE_SOUTH + (RiderMoving(rider) ? ANIM_STD_GO_FAST_SOUTH : ANIM_STD_GO_SOUTH));
+    PlaceUnder(sprite, sOwned[which].graphicsId, avatar->graphicsId, face, rider->x, SpriteBottom(rider));
+    sprite->x2 = rider->x2;
+    sprite->y2 = rider->y2;
+    sprite->invisible = rider->invisible;
+    sprite->coordOffsetEnabled = rider->coordOffsetEnabled;
+    sprite->oam.priority = rider->oam.priority;
+    if (face == ANIM_STD_FACE_SOUTH)
+        sprite->subpriority = rider->subpriority > 0 ? rider->subpriority - 1 : 0;
+    else
+        sprite->subpriority = rider->subpriority < 0xFF ? rider->subpriority + 1 : 0xFF;
+}
+
+static void RemoveRemote(u32 which)
+{
+    if (sOwned[which].live && IsOwned(which, &gSprites[sOwned[which].spriteId]))
+        DestroySprite(&gSprites[sOwned[which].spriteId]);
+    ReleaseIfGone(which);
+}
+
+bool8 FieldCarrier_GetRemoteOwner(const struct Sprite *sprite, u8 *localId, u8 *mapNum, u8 *mapGroup)
+{
+    u32 slot;
+
+    for (slot = 0; slot < FIELD_CARRIER_REMOTES; slot++)
+    {
+        const struct ObjectEvent *avatar;
+
+        if (!IsOwned(OWNED_REMOTE + slot, sprite) || sRemoteAvatar[slot] >= OBJECT_EVENTS_COUNT)
+            continue;
+        avatar = &gObjectEvents[sRemoteAvatar[slot]];
+        if (!avatar->active)
+            return FALSE;
+        *localId = avatar->localId;
+        *mapNum = avatar->mapNum;
+        *mapGroup = avatar->mapGroup;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+void FieldCarrier_SetRemote(u32 slot, u16 species, u8 flags, u32 avatarObjectEventId)
+{
+    struct Carrier carrier = {species, (flags & 1) != 0, (flags & 2) != 0, TRUE};   // MP_WORLD_FOLLOWER_SHINY, _FEMALE
+    u32 which = OWNED_REMOTE + slot;
+    const struct ObjectEventGraphicsInfo *info;
+    struct ObjectEvent *avatar;
+    u16 graphicsId = 0;
+    u8 spriteId;
+
+    if (slot >= FIELD_CARRIER_REMOTES)
+        return;
+    ReleaseIfGone(which);
+    info = species != SPECIES_NONE && avatarObjectEventId < OBJECT_EVENTS_COUNT ? CarrierInfo(&carrier, &graphicsId) : NULL;
+    if (info == NULL)
+    {
+        RemoveRemote(which);
+        return;
+    }
+    sRemoteAvatar[slot] = avatarObjectEventId;
+    if (sOwned[which].live)
+    {
+        if (sOwned[which].graphicsId == graphicsId)
+            return;     // already this one
+        RemoveRemote(which);
+    }
+    avatar = &gObjectEvents[avatarObjectEventId];
+    if (!avatar->active || avatar->spriteId >= MAX_SPRITES)
+        return;
+    // as the multiplayer layer makes other players' objects: never a palette without a free slot, and sprites left for
+    // the weather and the field's effects
+    if (IndexOfSpritePaletteTag(info->paletteTag) == 0xFF && IndexOfSpritePaletteTag(TAG_NONE) == 0xFF)
+        return;
+    if (!SpritesAvailable(8))
+        return;
+    spriteId = CreateCarrier(which, graphicsId, RemoteCarrierCallback, gSprites[avatar->spriteId].x,
+                             gSprites[avatar->spriteId].y, gSprites[avatar->spriteId].subpriority, TRUE);
+    if (spriteId >= MAX_SPRITES)
+        return;
+    gSprites[spriteId].data[0] = slot;
+    RemoteCarrierCallback(&gSprites[spriteId]);
 }
 
 // ---------------------------------------------------------------------------
