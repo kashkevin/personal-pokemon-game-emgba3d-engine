@@ -10,6 +10,7 @@
 
 #include "global.h"
 #include "battle.h"
+#include "berry.h"
 #include "daycare.h"
 #include "event_data.h"
 #include "item.h"
@@ -24,6 +25,7 @@
 #include "random.h"
 #include "wild_encounter.h"
 #include "constants/abilities.h"
+#include "constants/berry.h"
 #include "constants/flags.h"
 #include "constants/items.h"
 #include "constants/layouts.h"
@@ -2206,5 +2208,105 @@ int NativeSelfTest_FormItems(void)
     }
 
     printf("selftest-form-items: %d checks, %d failed\n", sChecks, sFailures);
+    return sFailures == 0 ? 0 : 1;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// --selftest-berry-water (the full item audit, the Wailmer Pail on a berry tree): a Pomeg Berry (Gen 3 yields, as this
+// game is set to: 2 to 6) planted as the field plants one and grown stage by stage with the game's own BerryTreeGrow,
+// watered with ObjectEventInteractionWaterBerryTree (what the tree's script and the Wailmer Pail from the Bag call, the
+// tree reached through an object event as on the field) in none to all four of its watering stages, 500 trees each:
+// the yields each number of watered stages gives (the minimum unwatered, a quarter of the range more for each stage),
+// a second watering in one stage counting once, and a tree with its berries refusing water.
+
+#define BERRY_WATER_TREE   0
+#define BERRY_WATER_OBJECT 0
+#define BERRY_WATER_TREES  500
+
+static bool32 WaterTestTree(void)
+{
+    gObjectEvents[BERRY_WATER_OBJECT].trainerRange_berryTreeId = BERRY_WATER_TREE;
+    gSelectedObjectEvent = BERRY_WATER_OBJECT;
+    return ObjectEventInteractionWaterBerryTree();
+}
+
+// A Pomeg Berry planted and grown to its berries, watered in the first `watered` of its four watering stages (twice in
+// each if `twice`): its yield (0 if it never reached its berries)
+static u32 GrowPomeg(u32 watered, bool32 twice)
+{
+    struct BerryTree *tree = GetBerryTreeInfo(BERRY_WATER_TREE);
+    u32 stage = 0;
+
+    RemoveBerryTree(BERRY_WATER_TREE);
+    PlantBerryTree(BERRY_WATER_TREE, ItemIdToBerryType(ITEM_POMEG_BERRY), BERRY_STAGE_PLANTED, TRUE);
+    while (tree->stage != BERRY_STAGE_BERRIES)
+    {
+        if (stage++ < watered)
+        {
+            WaterTestTree();
+            if (twice)
+                WaterTestTree();
+        }
+        if (!BerryTreeGrow(tree) || stage > NUM_WATER_STAGES)
+            break;
+    }
+    return tree->stage == BERRY_STAGE_BERRIES ? tree->berryYield : 0;
+}
+
+static void ExpectYields(const char *what, u32 watered, bool32 twice, u32 wantLow, u32 wantHigh)
+{
+    char line[200];
+    u32 low = 255, high = 0, sum = 0;
+
+    for (u32 i = 0; i < BERRY_WATER_TREES; i++)
+    {
+        u32 yield = GrowPomeg(watered, twice);
+
+        low = min(low, yield);
+        high = max(high, yield);
+        sum += yield;
+    }
+    snprintf(line, sizeof(line), "%s: yields %u to %u, mean %.2f (rule %u to %u)", what, (unsigned)low, (unsigned)high,
+             (double)sum / BERRY_WATER_TREES, (unsigned)wantLow, (unsigned)wantHigh);
+    Expect(line, low == wantLow && high == wantHigh);
+}
+
+int NativeSelfTest_BerryWater(void)
+{
+    const struct BerryInfo *pomeg;
+    struct BerryTree *tree;
+    char line[200];
+    u32 range;
+
+    Setup();
+    UseMap(MAP_ROUTE104);
+    pomeg = GetBerryInfo(ItemIdToBerryType(ITEM_POMEG_BERRY));
+    range = pomeg->maxYield - pomeg->minYield;
+    printf("selftest-berry-water: a Pomeg Berry (yields %u to %u) grown %u times for each number of watered stages\n",
+           (unsigned)pomeg->minYield, (unsigned)pomeg->maxYield, (unsigned)BERRY_WATER_TREES);
+    snprintf(line, sizeof(line), "the Pomeg Berry's Gen 3 yields: %u to %u", (unsigned)pomeg->minYield,
+             (unsigned)pomeg->maxYield);
+    Expect(line, pomeg->minYield == 2 && pomeg->maxYield == 6 && range == NUM_WATER_STAGES);
+
+    // Gen 3 (CalcBerryYieldInternal): w stages watered, the minimum plus a quarter of the range for each, rounded
+    ExpectYields("never watered", 0, FALSE, 2, 2);
+    ExpectYields("watered in 1 stage", 1, FALSE, 2, 3);
+    ExpectYields("watered in 2 stages", 2, FALSE, 3, 4);
+    ExpectYields("watered in 3 stages", 3, FALSE, 4, 5);
+    ExpectYields("watered in all 4 stages", 4, FALSE, 5, 6);
+    ExpectYields("watered twice in each of 2 stages (counted once each)", 2, TRUE, 3, 4);
+
+    tree = GetBerryTreeInfo(BERRY_WATER_TREE);
+    RemoveBerryTree(BERRY_WATER_TREE);
+    PlantBerryTree(BERRY_WATER_TREE, ItemIdToBerryType(ITEM_POMEG_BERRY), BERRY_STAGE_PLANTED, TRUE);
+    Expect("a planted Pomeg Berry takes water", WaterTestTree() && tree->watered == (1 << 0));
+    while (tree->stage != BERRY_STAGE_BERRIES && BerryTreeGrow(tree))
+        ;
+    tree->watered = 0;
+    Expect("a tree with its berries refuses water", !WaterTestTree() && tree->watered == 0);
+    RemoveBerryTree(BERRY_WATER_TREE);
+    Expect("soil with no berry planted refuses water", !WaterTestTree());
+
+    printf("selftest-berry-water: %d checks, %d failed\n", sChecks, sFailures);
     return sFailures == 0 ? 0 : 1;
 }
