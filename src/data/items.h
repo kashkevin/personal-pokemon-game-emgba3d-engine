@@ -14232,9 +14232,19 @@ const struct ItemInfo gItemsInfo[] =
     {
         .name = ITEM_NAME("Coin Case"),
         .price = 0,
+#ifdef PORTABLE
+        // MS-157: the PC game's wallet holds up to 999,999 coins (Update 29: MAX_COINS_WALLET, include/constants/coins.h)
+        .description = COMPOUND_STRING(
+            "A case that holds\n"
+            "up to 999,999\n"
+            "Coins."),
+#else
+#line 14200 // gba-line
         .description = COMPOUND_STRING(
             "A case that holds\n"
             "up to 9,999 Coins."),
+#endif
+#line 14203 // gba-line
         .importance = 1,
         .pocket = POCKET_KEY_ITEMS,
         .type = ITEM_USE_BAG_MENU,
