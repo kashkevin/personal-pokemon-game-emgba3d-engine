@@ -9,7 +9,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <SDL2/SDL.h>
+/* On Windows SDL_opengl.h includes windows.h, whose USER API (winuser.h) declares names the game's headers use for
+   their own functions (ScrollWindow, window.h): it is left out here, where nothing needs it. wingdi.h's TRANSPARENT
+   is gba/defines.h's to define. */
+#if defined(_WIN32) && !defined(NOUSER)
+#define NOUSER
+#endif
 #include <SDL2/SDL_opengl.h>
+#undef TRANSPARENT
 
 #include "global.h"
 #include "battle_main.h"
