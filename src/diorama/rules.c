@@ -7,6 +7,7 @@
 #include "constants/metatile_behaviors.h"
 #include "diorama/rules.generated.h"
 #include "diorama/rules.h"
+#include "diorama/terrain_mesh.h"
 
 static int FindCell(const struct DioramaSceneSnapshot *snapshot,
                     const struct DioramaCellSnapshot *origin, int dx, int dy);
@@ -1202,7 +1203,7 @@ float DioramaRules_ProfileHeight(uint8_t archetype, uint8_t behavior,
  * put on a level keeps no feature height of its own). */
 static float LedgeOwnGround(const struct DioramaResolvedCell *ledge)
 {
-    return ledge->groundHeight - (ledge->featureHeight > 0.0f ? ledge->featureHeight : 0.375f);
+    return ledge->groundHeight - (ledge->featureHeight > 0.0f ? ledge->featureHeight : DIORAMA_TERRAIN_LEDGE_HEIGHT);
 }
 
 static const struct DioramaResolvedCell *ResolvedCellAt(const struct DioramaSceneSnapshot *snapshot,
@@ -1259,6 +1260,17 @@ void DioramaRules_LedgeGrounds(const struct DioramaSceneSnapshot *snapshot,
     }
     *takeoff = LedgeNeighborGround(ResolvedCellAt(snapshot, resolvedCells, mapX - dx, mapY - dy), own);
     *landing = LedgeNeighborGround(ResolvedCellAt(snapshot, resolvedCells, mapX + dx, mapY + dy), own);
+}
+
+float DioramaRules_LedgeCrest(const struct DioramaSceneSnapshot *snapshot,
+                              const struct DioramaResolvedCell *resolvedCells, int16_t mapX, int16_t mapY)
+{
+    float takeoff;
+    float landing;
+
+    DioramaRules_LedgeGrounds(snapshot, resolvedCells, mapX, mapY, &takeoff, &landing);
+    return (takeoff > landing ? takeoff : landing)
+         + DIORAMA_TERRAIN_LEDGE_RISE / (float)DIORAMA_VOXELS_PER_CELL;
 }
 
 bool DioramaRules_CellOverWater(const struct DioramaCellSnapshot *cell, uint8_t mapType)

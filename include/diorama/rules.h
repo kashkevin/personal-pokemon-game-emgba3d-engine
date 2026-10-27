@@ -488,6 +488,11 @@ float DioramaRules_ObjectGroundHeight(const struct DioramaResolvedCell *resolved
 void DioramaRules_LedgeGrounds(const struct DioramaSceneSnapshot *snapshot,
                                const struct DioramaResolvedCell *resolvedCells,
                                int16_t mapX, int16_t mapY, float *takeoff, float *landing);
+/* A jump ledge's crest (terrain_mesh.c DioramaTerrain_LedgeTop), DIORAMA_TERRAIN_LEDGE_RISE over the higher of its
+ * grounds: what a walker on its cell stands on (another player, or their Pokemon, is replayed across a ledge a step
+ * at a time; the jump's arc is over it). Tiles. */
+float DioramaRules_LedgeCrest(const struct DioramaSceneSnapshot *snapshot,
+                              const struct DioramaResolvedCell *resolvedCells, int16_t mapX, int16_t mapY);
 /* A cell drawn over the water: its lower layer is mostly the sea's own tiles
  * (General's animated water, tiles 432 to 461) - a deck, a log walkway, a
  * pier, a rock in the shallows. Outdoors only (mapType: gMapHeader.mapType),
