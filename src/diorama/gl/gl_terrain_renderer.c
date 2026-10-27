@@ -1602,11 +1602,6 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
             cell->groundHeight = resolvedCells[gridIndex].groundHeight;
             cell->visualHeight = resolvedCells[gridIndex].topHeight;
             cell->featureHeight = resolvedCells[gridIndex].featureHeight;
-            cell->ledgeTakeoffHeight = 0.0f;
-            cell->ledgeLandingHeight = 0.0f;
-            if (cell->shape == DIORAMA_SHAPE_LEDGE)
-                DioramaRules_LedgeGrounds(snapshot, resolvedCells, mapX, mapY,
-                                          &cell->ledgeTakeoffHeight, &cell->ledgeLandingHeight);
             cell->structureBodyHeight = resolvedCells[gridIndex].structureBodyHeight;
             cell->structureRoofHeight = resolvedCells[gridIndex].structureRoofHeight;
             cell->southFacadeUnitHeight = resolvedCells[gridIndex].structureSouthFacadeUnitHeight;
@@ -1713,16 +1708,20 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
                                      cell->mountainHeight, &cell->rockMass);
             if (cell->shape == DIORAMA_SHAPE_LEDGE)
             {
-                /* A jump ledge is a bank (terrain_mesh.c DioramaTerrain_LedgeTop):
-                 * its whole drawing, grass and the lip's rock, lies on its top,
-                 * and each pixel's column's side is that pixel's colour. Its top
-                 * was the ground under the lip alone, the lip squeezed onto its
-                 * sides (the owner's Request C, 2026-10-27). Its shape reads no
-                 * pixels now: its lip stood out of its drawing's upper layer. */
-                for (face = DIORAMA_MATERIAL_FACE_TOP;
+                DioramaAtlas_GetForegroundAlphaMask(DioramaAtlas_CellSlot(source),
+                                                    cell->foregroundAlpha);
+                SetTerrainMaterial(&cell->materials[DIORAMA_MATERIAL_FACE_TOP],
+                                   source->metatileId, DIORAMA_MATERIAL_BASE);
+                /* A ledge on the ground draws its lip as faces of its own
+                 * (terrain_mesh.c); its sides are the lip alone. One a terrace
+                 * raised or lowered is a block whose sides are the whole
+                 * drawing, ground and lip: the lip alone left them see-through
+                 * (graphics overhaul, 2026-10-12). */
+                for (face = DIORAMA_MATERIAL_FACE_NORTH;
                      face <= DIORAMA_MATERIAL_FACE_WEST; face++)
                     SetTerrainMaterial(&cell->materials[face], source->metatileId,
-                                       DIORAMA_MATERIAL_FULL);
+                                        cell->groundHeight == 0.0f ? DIORAMA_MATERIAL_FOREGROUND
+                                                                   : DIORAMA_MATERIAL_FULL);
             }
             if (cell->archetype == DIORAMA_ARCHETYPE_ROUND_HULL
              || cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL)
@@ -2431,12 +2430,13 @@ static void PrepareSync(const struct DioramaSceneSnapshot *snapshot,
 }
 
 /* Whether a cell's input reads its tiles' pixels (BuildInput: tree shades,
- * mountain art, silhouette masks, cliffs). */
+ * mountain art, silhouette and foreground masks of ledges and cliffs). */
 static bool CellReadsPixels(const struct DioramaResolvedCell *resolved)
 {
     return resolved->archetype == DIORAMA_ARCHETYPE_ROUND_HULL
         || resolved->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL
         || (resolved->measuredFlags & (DIORAMA_MEASURED_SILHOUETTE | DIORAMA_MEASURED_MOUNTAIN_ART))
+        || resolved->shape == DIORAMA_SHAPE_LEDGE
         || resolved->shape == DIORAMA_SHAPE_CLIFF;
 }
 
@@ -2460,7 +2460,7 @@ static void NotePixelUse(struct GLTerrainChunk *chunk, const struct DioramaTerra
         if (cell->archetype == DIORAMA_ARCHETYPE_ROUND_HULL
          || cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL
          || (cell->measuredFlags & (DIORAMA_MEASURED_SILHOUETTE | DIORAMA_MEASURED_MOUNTAIN_ART))
-         || cell->shape == DIORAMA_SHAPE_CLIFF)
+         || cell->shape == DIORAMA_SHAPE_LEDGE || cell->shape == DIORAMA_SHAPE_CLIFF)
             chunk->readsPixelCells = true;
         /* the cells BuildInput gives the commonest ground's underlay */
         if (cell->treeHullReady

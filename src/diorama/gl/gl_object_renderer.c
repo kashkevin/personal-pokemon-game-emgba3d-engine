@@ -954,96 +954,11 @@ static void UploadAndDraw(const struct ObjectVertex vertices[6])
     sMetrics.drawCalls++;
 }
 
-/* The scene's cell at (mapX, mapY), from its grid (BuildInput's lookup). */
-static const struct DioramaCellSnapshot *GridCell(int mapX, int mapY)
-{
-    int gridX = mapX - sPreviousSnapshot.gridOriginX;
-    int gridY = mapY - sPreviousSnapshot.gridOriginY;
-    int index = gridY * DIORAMA_GRID_WIDTH + gridX;
-
-    if (gridX < 0 || gridY < 0 || gridX >= DIORAMA_GRID_WIDTH || gridY >= DIORAMA_GRID_HEIGHT
-     || index >= sPreviousSnapshot.visibleCellCount
-     || sPreviousSnapshot.cells[index].mapX != mapX || sPreviousSnapshot.cells[index].mapY != mapY)
-        return NULL;
-    return &sPreviousSnapshot.cells[index];
-}
-
-/* A jump ledge drawn as its bank (terrain_mesh.c IsLedgeBank: not the ground under a tree) */
-static const struct DioramaResolvedCell *LedgeBankCell(const struct DioramaCellSnapshot *cell)
-{
-    const struct DioramaResolvedCell *resolved;
-
-    if (cell == NULL)
-        return NULL;
-    resolved = &sPreviousResolvedCells[cell - sPreviousSnapshot.cells];
-    return resolved->shape == DIORAMA_SHAPE_LEDGE && resolved->archetype != DIORAMA_ARCHETYPE_ROUND_HULL
-        && resolved->archetype != DIORAMA_ARCHETYPE_GROUPED_HULL ? resolved : NULL;
-}
-
-/*
- * The ground a walker's shadow lies on. Jumping a ledge (the jump goes from the
- * cell before it to the ledge's, and at its halfway on to the cell beyond) its
- * ground runs from that cell's up to the ledge's lip and down again, under its
- * bank (terrain_mesh.c DioramaTerrain_LedgeTop) and off the ground on either
- * side: the shadow went under the bank and stood off the ground before it. It
- * lies on what is under it then, the bank or the cell's ground, the highest
- * under its middle and its edges; the walker's ground otherwise.
- */
-static float ShadowGround(const struct ObjectRenderItem *item, struct DioramaSpritePose pose,
-                          float radiusX, float radiusZ)
-{
-    static const float samples[5][2] = {{0, 0}, {-1, 0}, {1, 0}, {0, -1}, {0, 1}};
-    float ground = pose.groundY;
-    bool found = false;
-    int i;
-
-    if (LedgeBankCell(GridCell(item->object.currentMapX, item->object.currentMapY)) == NULL
-     && LedgeBankCell(GridCell(item->object.previousMapX, item->object.previousMapY)) == NULL)
-        return pose.groundY;
-    for (i = 0; i < 5; i++)
-    {
-        float tileX = pose.x + samples[i][0] * radiusX;
-        float south = -(pose.z + samples[i][1] * radiusZ);
-        int mapX = (int)floorf(tileX + 0.5f);
-        int mapY = (int)floorf(south + 0.5f);
-        const struct DioramaCellSnapshot *cell = GridCell(mapX, mapY);
-        const struct DioramaResolvedCell *bank = LedgeBankCell(cell);
-        int pixelX = (int)((tileX + 0.5f - mapX) * DIORAMA_VOXELS_PER_CELL);
-        int pixelZ = (int)((south + 0.5f - mapY) * DIORAMA_VOXELS_PER_CELL);
-        float top;
-
-        if (cell == NULL)
-            continue;
-        pixelX = pixelX < 0 ? 0 : pixelX >= DIORAMA_VOXELS_PER_CELL ? DIORAMA_VOXELS_PER_CELL - 1 : pixelX;
-        pixelZ = pixelZ < 0 ? 0 : pixelZ >= DIORAMA_VOXELS_PER_CELL ? DIORAMA_VOXELS_PER_CELL - 1 : pixelZ;
-        if (bank != NULL)
-        {
-            float takeoff;
-            float landing;
-
-            DioramaRules_LedgeGrounds(&sPreviousSnapshot, sPreviousResolvedCells, mapX, mapY,
-                                      &takeoff, &landing);
-            top = DioramaTerrain_LedgeTop(cell->behavior,
-                                          (int16_t)lroundf(takeoff * DIORAMA_VOXELS_PER_CELL),
-                                          (int16_t)lroundf(landing * DIORAMA_VOXELS_PER_CELL),
-                                          pixelX, pixelZ) / (float)DIORAMA_VOXELS_PER_CELL;
-        }
-        else
-            top = DioramaRules_ObjectGroundHeight(&sPreviousResolvedCells[cell - sPreviousSnapshot.cells],
-                                                  cell->elevation, item->object.elevation, cell->behavior,
-                                                  pixelX, pixelZ);
-        if (!found || top > ground)
-            ground = top;
-        found = true;
-    }
-    return ground;
-}
-
 static void DrawShadow(const struct ObjectRenderItem *item, struct DioramaSpritePose pose)
 {
     float radiusX = 0.28f + item->object.shadowSize * 0.06f;
     float radiusZ = 0.16f + item->object.shadowSize * 0.035f;
-    float y = ShadowGround(item, pose, radiusX, radiusZ) + 0.012f;
+    float y = pose.groundY + 0.012f;
     const struct ObjectVertex vertices[6] = {
         {pose.x - radiusX, y, pose.z - radiusZ, 0, 0},
         {pose.x + radiusX, y, pose.z - radiusZ, 1, 0},
@@ -1074,7 +989,7 @@ static void DrawCastShadow(const struct ObjectRenderItem *item, struct DioramaSp
 {
     float halfWidth = item->width / 32.0f;
     float height = item->height / 16.0f;
-    float y = ShadowGround(item, pose, halfWidth, 0.25f) + CAST_SHADOW_LIFT;
+    float y = pose.groundY + CAST_SHADOW_LIFT;
     float east = SUN_EAST * height;
     float south = SUN_SOUTH * height;
     const struct ObjectVertex vertices[6] = {

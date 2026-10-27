@@ -357,8 +357,6 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
         hash = HashFloat(hash, cell->groundHeight);
         hash = HashFloat(hash, cell->visualHeight);
         hash = HashFloat(hash, cell->featureHeight);
-        hash = HashFloat(hash, cell->ledgeTakeoffHeight);
-        hash = HashFloat(hash, cell->ledgeLandingHeight);
         hash = HashFloat(hash, cell->structureBodyHeight);
         hash = HashFloat(hash, cell->structureRoofHeight);
         hash = HashFloat(hash, cell->southFacadeUnitHeight);
@@ -458,97 +456,20 @@ static uint16_t MaterialId(int cellIndex, int surface, int face)
                     * DIORAMA_MATERIAL_FACE_COUNT + face + 1);
 }
 
-/*
- * A jump ledge (the owner's Request C, 2026-10-27): a bank across its cell, as
- * its drawing has it - the grass on the side it is jumped from, the rock face
- * the GBA draws over the half on the side it lands in. The grass rises from the
- * take-off ground to a crest across the middle, DIORAMA_TERRAIN_LEDGE_RISE over
- * the higher of the two grounds, and the rock face falls from it to the
- * landing ground, a voxel a pixel as stairs climb (a ledge a level over its
- * landing: more a pixel). It was a block as high as the ledge's lip all over,
- * with the drawing squeezed on its sides: from the landing side a strip, from
- * the jumping side a wall, on a lower terrace a block a level and more high.
- * `run`: pixels from the take-off edge (0-15), the pixel's centre, rounded.
- */
-static int16_t LedgeRun(int16_t takeoff, int16_t landing, int16_t crest, int run)
+static uint8_t LedgeDirection(uint8_t behavior)
 {
-    if (run < DIORAMA_VOXELS_PER_CELL / 2)
-        return takeoff + ((crest - takeoff) * (2 * run + 1) + DIORAMA_VOXELS_PER_CELL / 2)
-                       / DIORAMA_VOXELS_PER_CELL;
-    return landing + ((crest - landing) * (2 * (DIORAMA_VOXELS_PER_CELL - run) - 1)
-                      + DIORAMA_VOXELS_PER_CELL / 2) / DIORAMA_VOXELS_PER_CELL;
-}
-
-/* A diagonal ledge, a corner of a ledge's run (the game jumps only the
- * straight ones): the higher of its two straight banks, which meets each. */
-int16_t DioramaTerrain_LedgeTop(uint8_t behavior, int16_t takeoff, int16_t landing,
-                                int pixelX, int pixelZ)
-{
-    int16_t crest = (takeoff > landing ? takeoff : landing) + DIORAMA_TERRAIN_LEDGE_RISE;
-    int16_t south = LedgeRun(takeoff, landing, crest, pixelZ);
-    int16_t north = LedgeRun(takeoff, landing, crest, DIORAMA_VOXELS_PER_CELL - 1 - pixelZ);
-    int16_t east = LedgeRun(takeoff, landing, crest, pixelX);
-    int16_t west = LedgeRun(takeoff, landing, crest, DIORAMA_VOXELS_PER_CELL - 1 - pixelX);
-
     switch (behavior)
     {
-    case MB_JUMP_NORTH: return north;
-    case MB_JUMP_EAST: return east;
-    case MB_JUMP_WEST: return west;
-    case MB_JUMP_NORTHEAST: return north > east ? north : east;
-    case MB_JUMP_NORTHWEST: return north > west ? north : west;
-    case MB_JUMP_SOUTHEAST: return south > east ? south : east;
-    case MB_JUMP_SOUTHWEST: return south > west ? south : west;
-    default: return south;
+    case MB_JUMP_NORTH: return 0;
+    case MB_JUMP_NORTHEAST: return 1;
+    case MB_JUMP_EAST: return 2;
+    case MB_JUMP_SOUTHEAST: return 3;
+    case MB_JUMP_SOUTH: return 4;
+    case MB_JUMP_SOUTHWEST: return 5;
+    case MB_JUMP_WEST: return 6;
+    case MB_JUMP_NORTHWEST: return 7;
+    default: return 0;
     }
-}
-
-int16_t DioramaTerrain_LedgeBottom(int16_t takeoff, int16_t landing)
-{
-    int16_t low = takeoff < landing ? takeoff : landing;
-
-    return low > 0 ? -1 : low - 1;
-}
-
-static bool IsTreeHullColumn(const struct DioramaTerrainCell *cell);
-
-/* A jump ledge drawn as its bank (the ground under a tree is the tree's) */
-static bool IsLedgeBank(const struct DioramaTerrainCell *cell)
-{
-    return cell->present && cell->shape == DIORAMA_SHAPE_LEDGE && !IsTreeHullColumn(cell);
-}
-
-static int16_t LedgeBankTop(const struct DioramaTerrainCell *cell, int pixelX, int pixelZ)
-{
-    return DioramaTerrain_LedgeTop(cell->behavior, HeightToVoxel(cell->ledgeTakeoffHeight),
-                                   HeightToVoxel(cell->ledgeLandingHeight), pixelX, pixelZ);
-}
-
-static int16_t LedgeBankBottom(const struct DioramaTerrainCell *cell)
-{
-    return DioramaTerrain_LedgeBottom(HeightToVoxel(cell->ledgeTakeoffHeight),
-                                      HeightToVoxel(cell->ledgeLandingHeight));
-}
-
-/* Whether a side of a jump ledge's bank (axis 0: x, 2: z; sign: the way it
- * looks) looks back the way the ledge is jumped from: its grass slope's. */
-static bool LedgeSideLooksBack(uint8_t behavior, uint8_t axis, int8_t sign)
-{
-    int dx = 0;
-    int dz = 0;
-
-    switch (behavior)
-    {
-    case MB_JUMP_NORTH: dz = -1; break;
-    case MB_JUMP_NORTHEAST: dx = 1; dz = -1; break;
-    case MB_JUMP_EAST: dx = 1; break;
-    case MB_JUMP_SOUTHEAST: dx = 1; dz = 1; break;
-    case MB_JUMP_SOUTHWEST: dx = -1; dz = 1; break;
-    case MB_JUMP_WEST: dx = -1; break;
-    case MB_JUMP_NORTHWEST: dx = -1; dz = -1; break;
-    default: dz = 1; break;
-    }
-    return axis == 0 ? dx != 0 && sign == -dx : axis == 2 && dz != 0 && sign == -dz;
 }
 
 static int16_t StairTop(const struct DioramaTerrainCell *cell, int pixelX, int pixelZ)
@@ -669,9 +590,13 @@ static bool BuildOccupancy(const struct DioramaTerrainChunkInput *input,
                     }
                     else if (cell->shape == DIORAMA_SHAPE_LEDGE)
                     {
-                        /* a jump ledge's bank, from under the lower of its grounds */
-                        if (!AppendSpan(&count, cell, cellIndex, pixelX, pixelY, 0,
-                                        LedgeBankBottom(cell), LedgeBankTop(cell, pixelX, pixelY)))
+                        int16_t ledgeTop = HeightToVoxel(cell->groundHeight);
+
+                        /* a ledge on a level below the ground (a terrace's
+                         * lower level) is a voxel thick there, as the ground is:
+                         * from -1 it was no column at all */
+                        if (!AppendSpan(&count, cell, cellIndex, pixelX, pixelY,
+                                        0, ledgeTop > 0 ? -1 : ledgeTop - 1, ledgeTop))
                             return false;
                     }
                     else if (cell->shape == DIORAMA_SHAPE_STAIRS)
@@ -745,6 +670,8 @@ static bool AppendCompressedFace(uint32_t *faceCount, uint32_t *rawFaceCount,
                                        plane, uMin, uMax, vMin, vMax, axis, sign, rawWeight);
 }
 
+static bool IsTreeHullColumn(const struct DioramaTerrainCell *cell);
+
 /*
  * A whole cell's column in the compressed shell: the voxels it fills,
  * [*bottom, *top), and the surface its faces read - BuildOccupancy's span for
@@ -786,7 +713,15 @@ static bool AppendCompressedSide(uint32_t *faceCount, uint32_t *rawFaceCount,
         return AppendCompressedSurfaceFace(faceCount, rawFaceCount, cell, cellIndex,
                                            surface, materialFace, plane, uMin, uMax,
                                            bottom, top, axis, sign, DIORAMA_VOXELS_PER_CELL);
-    CompressedColumn(neighbor, &neighborBottom, &neighborTop, &neighborSurface);
+    /* a ledge on the ground is ground there (its lip has faces of its own);
+     * one a terrace raised or lowered is as high as its ground */
+    if (neighbor->shape == DIORAMA_SHAPE_LEDGE && !IsTreeHullColumn(neighbor))
+    {
+        neighborTop = neighbor->groundHeight == 0.0f ? 0 : HeightToVoxel(neighbor->groundHeight);
+        neighborBottom = neighborTop > 0 ? -1 : neighborTop - 1;
+    }
+    else
+        CompressedColumn(neighbor, &neighborBottom, &neighborTop, &neighborSurface);
     if (neighborTop <= bottom || neighborBottom >= top)
         return AppendCompressedSurfaceFace(faceCount, rawFaceCount, cell, cellIndex,
                                            surface, materialFace, plane, uMin, uMax,
@@ -806,254 +741,94 @@ static bool AppendCompressedSide(uint32_t *faceCount, uint32_t *rawFaceCount,
     return true;
 }
 
-/* A pixel's column in the compressed shell, as BuildOccupancy's span there: a
- * jump ledge's bank, or its whole cell's. */
-static void CompressedPixelColumn(const struct DioramaTerrainCell *cell, int pixelX, int pixelZ,
-                                  int16_t *bottom, int16_t *top, int *surface)
-{
-    if (IsLedgeBank(cell))
-    {
-        *bottom = LedgeBankBottom(cell);
-        *top = LedgeBankTop(cell, pixelX, pixelZ);
-        *surface = 0;
-        return;
-    }
-    CompressedColumn(cell, bottom, top, surface);
-}
-
-/* One pixel's side (0-3: north, east, south, west) of the column [bottom, top)
- * at voxel column (voxelX, voxelZ), as BuildShell's AppendSideGaps draws it:
- * where the column beside it, [neighborBottom, neighborTop) (none: `open`),
- * leaves it showing. A face a pixel wide: DioramaOccupancy_MergeFaces joins
- * them as it joins the voxel shell's. */
-static bool AppendCompressedPixelSide(uint32_t *faceCount, uint32_t *rawFaceCount,
-                                      const struct DioramaTerrainCell *cell, int cellIndex,
-                                      int surface, int side, int32_t voxelX, int32_t voxelZ,
-                                      int16_t bottom, int16_t top, bool open,
-                                      int16_t neighborBottom, int16_t neighborTop)
-{
-    uint8_t axis = side == 1 || side == 3 ? 0 : 2;
-    int8_t sign = side == 0 || side == 3 ? -1 : 1;
-    int32_t plane = axis == 0 ? voxelX + (sign > 0) : voxelZ + (sign > 0);
-    int32_t u = axis == 0 ? voxelZ : voxelX;
-
-    if (open || neighborTop <= bottom || neighborBottom >= top)
-        return AppendCompressedSurfaceFace(faceCount, rawFaceCount, cell, cellIndex, surface,
-                                           side + 1, plane, u, u + 1, bottom, top, axis, sign, 1);
-    if (neighborBottom > bottom
-     && !AppendCompressedSurfaceFace(faceCount, rawFaceCount, cell, cellIndex, surface,
-                                     side + 1, plane, u, u + 1, bottom,
-                                     neighborBottom < top ? neighborBottom : top, axis, sign, 1))
-        return false;
-    if (neighborTop < top
-     && !AppendCompressedSurfaceFace(faceCount, rawFaceCount, cell, cellIndex, surface,
-                                     side + 1, plane, u, u + 1,
-                                     neighborTop > bottom ? neighborTop : bottom, top, axis, sign, 1))
-        return false;
-    return true;
-}
-
-/* The column beside pixel (pixelX, pixelZ) of the cell at (x, y) of the input,
- * on side `side`: the cell's own or its neighbour's (false: none there). */
-static bool CompressedColumnBeside(const struct DioramaTerrainChunkInput *input, int x, int y,
-                                   int pixelX, int pixelZ, int side,
-                                   int16_t *bottom, int16_t *top)
+static bool LedgeFaceIsOccluded(const struct DioramaTerrainChunkInput *input,
+                                int gridX, int gridY, uint8_t direction, int16_t height)
 {
     static const int8_t offsets[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
-    int nextX = pixelX + offsets[side][0];
-    int nextZ = pixelZ + offsets[side][1];
-    const struct DioramaTerrainCell *cell = GetCell(input, x, y);
-    int surface;
+    const struct DioramaTerrainCell *neighbor = GetCell(input,
+        gridX + offsets[direction / 2][0], gridY + offsets[direction / 2][1]);
+    int16_t top;
+    int16_t bottom;
 
-    if (nextX < 0 || nextZ < 0 || nextX >= DIORAMA_VOXELS_PER_CELL || nextZ >= DIORAMA_VOXELS_PER_CELL)
-    {
-        cell = GetCell(input, x + offsets[side][0], y + offsets[side][1]);
-        if (!cell->present || cell->shape == DIORAMA_SHAPE_HIDDEN)
-            return false;
-        nextX = (nextX + DIORAMA_VOXELS_PER_CELL) % DIORAMA_VOXELS_PER_CELL;
-        nextZ = (nextZ + DIORAMA_VOXELS_PER_CELL) % DIORAMA_VOXELS_PER_CELL;
-    }
-    CompressedPixelColumn(cell, nextX, nextZ, bottom, top, &surface);
-    return true;
-}
-
-/* The sides of a jump ledge's bank on its cell's edges, a pixel at a time
- * (the columns beside them need not be level along them). */
-static bool AppendCompressedBankEdges(const struct DioramaTerrainChunkInput *input, int x, int y,
-                                      uint32_t *faceCount, uint32_t *rawFaceCount)
-{
-    const struct DioramaTerrainCell *cell = GetCell(input, x, y);
-    int cellIndex = y * DIORAMA_TERRAIN_INPUT_SIZE + x;
-    int16_t bottom = LedgeBankBottom(cell);
-    int along;
-    int side;
-
-    for (side = 0; side < 4; side++)
-        for (along = 0; along < DIORAMA_VOXELS_PER_CELL; along++)
-        {
-            int pixelX = side == 1 ? DIORAMA_VOXELS_PER_CELL - 1 : side == 3 ? 0 : along;
-            int pixelZ = side == 0 ? 0 : side == 2 ? DIORAMA_VOXELS_PER_CELL - 1 : along;
-            int16_t neighborBottom = 0;
-            int16_t neighborTop = 0;
-            bool open = !CompressedColumnBeside(input, x, y, pixelX, pixelZ, side,
-                                                &neighborBottom, &neighborTop);
-
-            if (!AppendCompressedPixelSide(faceCount, rawFaceCount, cell, cellIndex, 0, side,
-                                           cell->mapX * DIORAMA_VOXELS_PER_CELL + pixelX,
-                                           cell->mapY * DIORAMA_VOXELS_PER_CELL + pixelZ,
-                                           bottom, LedgeBankTop(cell, pixelX, pixelZ), open,
-                                           neighborBottom, neighborTop))
-                return false;
-        }
-    return true;
-}
-
-/*
- * A straight jump ledge's bank in the compressed shell: its height changes
- * one way only (down its rows jumped north or south, along its columns jumped
- * east or west), so between two rows or columns its side is a strip, and
- * jumped north or south each row's top is one - the faces
- * DioramaOccupancy_MergeFaces makes of its spans' (a bank a pixel at a time
- * was about 1.8 ms a chunk of ledges). Jumped east or west its tops stay a
- * pixel each: the merge joins a row's pixels first, then rows only where
- * nothing else of that height lies in them, and a column's height is the
- * same as the one across the crest from it, so it never joins them.
- */
-static bool AppendCompressedStraightBank(const struct DioramaTerrainChunkInput *input, int x, int y,
-                                         uint32_t *faceCount, uint32_t *rawFaceCount)
-{
-    const struct DioramaTerrainCell *cell = GetCell(input, x, y);
-    int cellIndex = y * DIORAMA_TERRAIN_INPUT_SIZE + x;
-    bool rows = cell->behavior == MB_JUMP_NORTH || cell->behavior == MB_JUMP_SOUTH;
-    int32_t originX = cell->mapX * DIORAMA_VOXELS_PER_CELL;
-    int32_t originZ = cell->mapY * DIORAMA_VOXELS_PER_CELL;
-    int16_t bottom = LedgeBankBottom(cell);
-    int16_t tops[DIORAMA_VOXELS_PER_CELL];
-    int i;
-
-    for (i = 0; i < DIORAMA_VOXELS_PER_CELL; i++)
-        tops[i] = rows ? LedgeBankTop(cell, 0, i) : LedgeBankTop(cell, i, 0);
-    if (!AppendCompressedSurfaceFace(faceCount, rawFaceCount, cell, cellIndex, 0,
-                                     DIORAMA_MATERIAL_FACE_TOP, bottom,
-                                     originX, originX + DIORAMA_VOXELS_PER_CELL,
-                                     originZ, originZ + DIORAMA_VOXELS_PER_CELL, 1, -1,
-                                     DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL))
+    if (!neighbor->present || neighbor->shape == DIORAMA_SHAPE_HIDDEN
+     || neighbor->shape == DIORAMA_SHAPE_STAIRS)
         return false;
-    for (i = 0; i < DIORAMA_VOXELS_PER_CELL; i++)
-    {
-        int32_t uMin = rows ? originX : originX + i;
-        int32_t uMax = rows ? originX + DIORAMA_VOXELS_PER_CELL : originX + i + 1;
-        int32_t vMin = rows ? originZ + i : originZ;
-        int32_t vMax = rows ? originZ + i + 1 : originZ + DIORAMA_VOXELS_PER_CELL;
-
-        if (rows)
-        {
-            if (!AppendCompressedSurfaceFace(faceCount, rawFaceCount, cell, cellIndex, 0,
-                                             DIORAMA_MATERIAL_FACE_TOP, tops[i], uMin, uMax,
-                                             vMin, vMax, 1, 1, DIORAMA_VOXELS_PER_CELL))
-                return false;
-        }
-        else
-        {
-            int32_t z;
-
-            for (z = vMin; z < vMax; z++)
-                if (!AppendCompressedSurfaceFace(faceCount, rawFaceCount, cell, cellIndex, 0,
-                                                 DIORAMA_MATERIAL_FACE_TOP, tops[i], uMin, uMax,
-                                                 z, z + 1, 1, 1, 1))
-                    return false;
-        }
-        if (i + 1 == DIORAMA_VOXELS_PER_CELL || tops[i] == tops[i + 1])
-            continue;
-        /* the step to the next row or column, on the higher one's side:
-         * north and south sides run along x, east and west ones along z */
-        if (!AppendCompressedSurfaceFace(faceCount, rawFaceCount, cell, cellIndex, 0,
-                                         rows ? (tops[i] > tops[i + 1] ? 3 : 1)
-                                              : (tops[i] > tops[i + 1] ? 2 : 4),
-                                         rows ? originZ + i + 1 : originX + i + 1,
-                                         rows ? originX : originZ,
-                                         (rows ? originX : originZ) + DIORAMA_VOXELS_PER_CELL,
-                                         tops[i] < tops[i + 1] ? tops[i] : tops[i + 1],
-                                         tops[i] < tops[i + 1] ? tops[i + 1] : tops[i],
-                                         rows ? 2 : 0, tops[i] > tops[i + 1] ? 1 : -1,
-                                         DIORAMA_VOXELS_PER_CELL))
-            return false;
-    }
-    return AppendCompressedBankEdges(input, x, y, faceCount, rawFaceCount);
+    top = neighbor->shape == DIORAMA_SHAPE_LEDGE ? 0 : HeightToVoxel(neighbor->visualHeight);
+    bottom = top > 0 ? -1 : top - 1;
+    return bottom <= 0 && top >= height;
 }
 
-/* A jump ledge's bank in the compressed shell: a pixel's top, underside and
- * sides at a time, the faces BuildShell draws for its spans (a diagonal one,
- * a corner, changes both ways). */
-static bool AppendCompressedLedgeBank(const struct DioramaTerrainChunkInput *input, int x, int y,
-                                      uint32_t *faceCount, uint32_t *rawFaceCount)
+static bool AppendCompressedLedgeFace(const struct DioramaTerrainChunkInput *input,
+                                       uint32_t *faceCount, uint32_t *rawFaceCount,
+                                       const struct DioramaTerrainCell *cell, int cellIndex,
+                                       int gridX, int gridY, uint8_t direction)
 {
-    const struct DioramaTerrainCell *cell = GetCell(input, x, y);
-    int cellIndex = y * DIORAMA_TERRAIN_INPUT_SIZE + x;
-    int16_t bottom = LedgeBankBottom(cell);
-    int pixelZ;
-    int pixelX;
-    int side;
+    int16_t height = HeightToVoxel(cell->featureHeight != 0.0f
+                                 ? cell->featureHeight : DIORAMA_TERRAIN_LEDGE_HEIGHT);
+    uint8_t occupancyFace = direction == 0 ? DIORAMA_OCCUPANCY_FACE_NORTH
+                           : direction == 2 ? DIORAMA_OCCUPANCY_FACE_EAST
+                           : direction == 4 ? DIORAMA_OCCUPANCY_FACE_SOUTH
+                                            : DIORAMA_OCCUPANCY_FACE_WEST;
+    int materialFace = occupancyFace == DIORAMA_OCCUPANCY_FACE_NORTH ? DIORAMA_MATERIAL_FACE_NORTH
+                     : occupancyFace == DIORAMA_OCCUPANCY_FACE_EAST ? DIORAMA_MATERIAL_FACE_EAST
+                     : occupancyFace == DIORAMA_OCCUPANCY_FACE_SOUTH ? DIORAMA_MATERIAL_FACE_SOUTH
+                                                                    : DIORAMA_MATERIAL_FACE_WEST;
+    uint8_t axis = occupancyFace == DIORAMA_OCCUPANCY_FACE_EAST
+                || occupancyFace == DIORAMA_OCCUPANCY_FACE_WEST ? 0 : 2;
+    int8_t sign = occupancyFace == DIORAMA_OCCUPANCY_FACE_NORTH
+               || occupancyFace == DIORAMA_OCCUPANCY_FACE_WEST ? -1 : 1;
+    int32_t pixelX = cell->mapX * DIORAMA_VOXELS_PER_CELL;
+    int32_t pixelZ = cell->mapY * DIORAMA_VOXELS_PER_CELL;
+    int32_t plane = axis == 0 ? pixelX + (sign > 0) * DIORAMA_VOXELS_PER_CELL
+                               : pixelZ + (sign > 0) * DIORAMA_VOXELS_PER_CELL;
+    int32_t sourceU = axis == 0 ? pixelZ : pixelX;
+    int sourceY;
 
-    if (cell->behavior == MB_JUMP_NORTH || cell->behavior == MB_JUMP_SOUTH
-     || cell->behavior == MB_JUMP_EAST || cell->behavior == MB_JUMP_WEST)
-        return AppendCompressedStraightBank(input, x, y, faceCount, rawFaceCount);
-    for (pixelZ = 0; pixelZ < DIORAMA_VOXELS_PER_CELL; pixelZ++)
-        for (pixelX = 0; pixelX < DIORAMA_VOXELS_PER_CELL; pixelX++)
+    if (LedgeFaceIsOccluded(input, gridX, gridY, direction, height))
+        return true;
+
+    for (sourceY = DIORAMA_VOXELS_PER_CELL - height;
+         sourceY < DIORAMA_VOXELS_PER_CELL; sourceY++)
+    {
+        uint16_t row = cell->foregroundAlpha[sourceY];
+        int sourceX = 0;
+
+        while (sourceX < DIORAMA_VOXELS_PER_CELL)
         {
-            int32_t voxelX = cell->mapX * DIORAMA_VOXELS_PER_CELL + pixelX;
-            int32_t voxelZ = cell->mapY * DIORAMA_VOXELS_PER_CELL + pixelZ;
-            int16_t top = LedgeBankTop(cell, pixelX, pixelZ);
+            int runStart;
 
-            if (!AppendCompressedSurfaceFace(faceCount, rawFaceCount, cell, cellIndex, 0,
-                                             DIORAMA_MATERIAL_FACE_TOP, top, voxelX, voxelX + 1,
-                                             voxelZ, voxelZ + 1, 1, 1, 1)
-             || !AppendCompressedSurfaceFace(faceCount, rawFaceCount, cell, cellIndex, 0,
-                                             DIORAMA_MATERIAL_FACE_TOP, bottom, voxelX, voxelX + 1,
-                                             voxelZ, voxelZ + 1, 1, -1, 1))
+            while (sourceX < DIORAMA_VOXELS_PER_CELL && !(row & (1u << sourceX)))
+                sourceX++;
+            runStart = sourceX;
+            while (sourceX < DIORAMA_VOXELS_PER_CELL && (row & (1u << sourceX)))
+                sourceX++;
+            if (runStart < sourceX
+             && !AppendCompressedFace(faceCount, rawFaceCount, cell, cellIndex,
+                    occupancyFace, materialFace, plane,
+                    sourceU + runStart, sourceU + sourceX,
+                    DIORAMA_VOXELS_PER_CELL - sourceY - 1,
+                    DIORAMA_VOXELS_PER_CELL - sourceY,
+                    axis, sign, sourceX - runStart))
                 return false;
-            for (side = 0; side < 4; side++)
-            {
-                int16_t neighborBottom = 0;
-                int16_t neighborTop = 0;
-                bool open = !CompressedColumnBeside(input, x, y, pixelX, pixelZ, side,
-                                                    &neighborBottom, &neighborTop);
-
-                if (!AppendCompressedPixelSide(faceCount, rawFaceCount, cell, cellIndex, 0, side,
-                                               voxelX, voxelZ, bottom, top, open,
-                                               neighborBottom, neighborTop))
-                    return false;
-            }
         }
+    }
     return true;
 }
 
-/* A whole cell's side beside a jump ledge's bank: a pixel at a time, the
- * bank's height changing along it. */
-static bool AppendCompressedSideByBank(const struct DioramaTerrainChunkInput *input, int x, int y,
-                                       int side, int surface, int16_t bottom, int16_t top,
-                                       uint32_t *faceCount, uint32_t *rawFaceCount)
+static bool AppendCompressedLedgeFaces(const struct DioramaTerrainChunkInput *input,
+                                        uint32_t *faceCount, uint32_t *rawFaceCount,
+                                        const struct DioramaTerrainCell *cell, int cellIndex,
+                                        int gridX, int gridY, uint8_t direction)
 {
-    const struct DioramaTerrainCell *cell = GetCell(input, x, y);
-    int cellIndex = y * DIORAMA_TERRAIN_INPUT_SIZE + x;
-    int along;
+    static const uint8_t first[8] = {0, 0, 2, 2, 4, 4, 6, 6};
+    static const uint8_t second[8] = {0, 2, 2, 4, 4, 6, 6, 0};
 
-    for (along = 0; along < DIORAMA_VOXELS_PER_CELL; along++)
-    {
-        int pixelX = side == 1 ? DIORAMA_VOXELS_PER_CELL - 1 : side == 3 ? 0 : along;
-        int pixelZ = side == 0 ? 0 : side == 2 ? DIORAMA_VOXELS_PER_CELL - 1 : along;
-        int16_t neighborBottom = 0;
-        int16_t neighborTop = 0;
-        bool open = !CompressedColumnBeside(input, x, y, pixelX, pixelZ, side,
-                                            &neighborBottom, &neighborTop);
-
-        if (!AppendCompressedPixelSide(faceCount, rawFaceCount, cell, cellIndex, surface, side,
-                                       cell->mapX * DIORAMA_VOXELS_PER_CELL + pixelX,
-                                       cell->mapY * DIORAMA_VOXELS_PER_CELL + pixelZ,
-                                       bottom, top, open, neighborBottom, neighborTop))
-            return false;
-    }
-    return true;
+    if (!AppendCompressedLedgeFace(input, faceCount, rawFaceCount, cell, cellIndex,
+                                   gridX, gridY, first[direction]))
+        return false;
+    return second[direction] == first[direction]
+        || AppendCompressedLedgeFace(input, faceCount, rawFaceCount, cell, cellIndex,
+                                     gridX, gridY, second[direction]);
 }
 
 static bool BuildCompressedOccupancyShell(const struct DioramaTerrainChunkInput *input,
@@ -1109,12 +884,6 @@ static bool BuildCompressedOccupancyShell(const struct DioramaTerrainChunkInput 
 
             if (!cell->present || cell->shape == DIORAMA_SHAPE_HIDDEN)
                 continue;
-            if (IsLedgeBank(cell))
-            {
-                if (!AppendCompressedLedgeBank(input, x, y, &faces, &rawFaces))
-                    return false;
-                continue;
-            }
             pixelX = cell->mapX * DIORAMA_VOXELS_PER_CELL;
             pixelZ = cell->mapY * DIORAMA_VOXELS_PER_CELL;
             CompressedColumn(cell, &bottom, &top, &surface);
@@ -1139,18 +908,17 @@ static bool BuildCompressedOccupancyShell(const struct DioramaTerrainChunkInput 
                                           : pixelZ + (sign > 0) * DIORAMA_VOXELS_PER_CELL;
                 int32_t uMin = axis == 0 ? pixelZ : pixelX;
 
-                if (IsLedgeBank(neighbor))
-                {
-                    if (!AppendCompressedSideByBank(input, x, y, side, surface, bottom, top,
-                                                    &faces, &rawFaces))
-                        return false;
-                }
-                else if (!AppendCompressedSide(&faces, &rawFaces, cell, cellIndex, neighbor,
-                                               surface, side + 1, plane,
-                                               uMin, uMin + DIORAMA_VOXELS_PER_CELL,
-                                               axis, sign, bottom, top))
+                if (!AppendCompressedSide(&faces, &rawFaces, cell, cellIndex, neighbor,
+                                          surface, side + 1, plane,
+                                          uMin, uMin + DIORAMA_VOXELS_PER_CELL,
+                                          axis, sign, bottom, top))
                     return false;
             }
+            if (cell->shape == DIORAMA_SHAPE_LEDGE && cell->groundHeight == 0.0f
+              && !AppendCompressedLedgeFaces(input, &faces, &rawFaces, cell, cellIndex,
+                                            x, y,
+                                            LedgeDirection(cell->behavior)))
+                return false;
         }
     }
     *spanCount = spans;
@@ -1214,39 +982,9 @@ static int16_t SkirtFooting(const struct DioramaTerrainCell *cell)
        && !(cell->measuredFlags & DIORAMA_MEASURED_SILHOUETTE)
        && DioramaRules_ProfileIsFullCell(cell->semanticProfile)))
         return INT16_MIN;
-    if (IsLedgeBank(cell))
-        return LedgeBankBottom(cell);
-    top = HeightToVoxel(cell->visualHeight);
+    top = cell->shape == DIORAMA_SHAPE_LEDGE ? HeightToVoxel(cell->groundHeight)
+                                             : HeightToVoxel(cell->visualHeight);
     return top > 0 ? -1 : top - 1;
-}
-
-/* A skirt over a jump ledge's bank (AppendSkirtFaces): a pixel at a time, from
- * the bank's top up to the cell's footing, of the cell's ground. */
-static bool AppendSkirtByBank(const struct DioramaTerrainChunkInput *input, int x, int y,
-                              int side, int16_t footing,
-                              uint32_t *faceCount, uint32_t *rawFaceCount)
-{
-    const struct DioramaTerrainCell *cell = GetCell(input, x, y);
-    int cellIndex = y * DIORAMA_TERRAIN_INPUT_SIZE + x;
-    int along;
-
-    for (along = 0; along < DIORAMA_VOXELS_PER_CELL; along++)
-    {
-        int pixelX = side == 1 ? DIORAMA_VOXELS_PER_CELL - 1 : side == 3 ? 0 : along;
-        int pixelZ = side == 0 ? 0 : side == 2 ? DIORAMA_VOXELS_PER_CELL - 1 : along;
-        int16_t bankBottom;
-        int16_t bankTop;
-
-        if (!CompressedColumnBeside(input, x, y, pixelX, pixelZ, side, &bankBottom, &bankTop)
-         || bankTop >= footing)
-            continue;
-        if (!AppendCompressedPixelSide(faceCount, rawFaceCount, cell, cellIndex, 1, side,
-                                       cell->mapX * DIORAMA_VOXELS_PER_CELL + pixelX,
-                                       cell->mapY * DIORAMA_VOXELS_PER_CELL + pixelZ,
-                                       bankTop, footing, true, 0, 0))
-            return false;
-    }
-    return true;
 }
 
 /*
@@ -1291,16 +1029,12 @@ static bool AppendSkirtFaces(const struct DioramaTerrainChunkInput *input,
                 int32_t uMin = axis == 0 ? pixelZ : pixelX;
                 int16_t neighborTop;
 
-                /* down to a whole cell's top, or a jump ledge's bank's (on a
-                 * lower level), a pixel at a time */
-                if (IsLedgeBank(neighbor) && neighbor->surfaceCount <= 1)
-                {
-                    if (!AppendSkirtByBank(input, x, y, side, footing, faceCount, rawFaceCount))
-                        return false;
-                    continue;
-                }
+                /* down to a whole cell's top, or a ledge's (on a lower level) */
                 if (StandsWhole(neighbor))
                     neighborTop = WholeTop(neighbor);
+                else if (neighbor->present && neighbor->shape == DIORAMA_SHAPE_LEDGE
+                      && neighbor->surfaceCount <= 1)
+                    neighborTop = HeightToVoxel(neighbor->groundHeight);
                 else
                     continue;
                 if (neighborTop >= footing)
@@ -1315,6 +1049,30 @@ static bool AppendSkirtFaces(const struct DioramaTerrainChunkInput *input,
                  * a ledge's sides, its lip on the upper layer, are see-through */
                 sShellFaces[*faceCount - 1].material = MaterialId(cellIndex, 1, side + 1);
             }
+        }
+    return true;
+}
+
+static bool AppendFallbackLedgeFaces(const struct DioramaTerrainChunkInput *input,
+                                     uint32_t *faceCount, uint32_t *rawFaceCount)
+{
+    int y;
+    int x;
+
+    for (y = DIORAMA_TERRAIN_HALO;
+         y < DIORAMA_TERRAIN_HALO + DIORAMA_TERRAIN_CHUNK_SIZE; y++)
+        for (x = DIORAMA_TERRAIN_HALO;
+             x < DIORAMA_TERRAIN_HALO + DIORAMA_TERRAIN_CHUNK_SIZE; x++)
+        {
+            const struct DioramaTerrainCell *cell = GetCell(input, x, y);
+            int cellIndex = y * DIORAMA_TERRAIN_INPUT_SIZE + x;
+
+            if (cell->present && cell->shape == DIORAMA_SHAPE_LEDGE
+             && cell->groundHeight == 0.0f
+              && !AppendCompressedLedgeFaces(input, faceCount, rawFaceCount, cell, cellIndex,
+                     x, y,
+                     LedgeDirection(cell->behavior)))
+                return false;
         }
     return true;
 }
@@ -2298,12 +2056,11 @@ static void FaceMaterial(const struct DioramaTerrainCell *cell, uint8_t surface,
     output->u1 = source->u0 + (source->u1 - source->u0) * (uMax - inset);
     output->v0 = source->v0 + (source->v1 - source->v0) * (vMin + inset);
     output->v1 = source->v0 + (source->v1 - source->v0) * (vMax - inset);
-    if (face->axis != 1 && ((cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART)
-                         || (IsLedgeBank(cell) && surface == 0))
+    if (face->axis != 1 && (cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART)
      && source->rotation == 0 && source->flags == 0)
     {
         /* A cell drawn as a height per pixel (a mountain's rock, a terrace's
-         * course, a jump ledge's bank): the side of each pixel's column is that pixel's colour, so
+         * course): the side of each pixel's column is that pixel's colour, so
          * a slope of such columns shows the drawing laid on it. The whole
          * drawing squeezed onto each column's side drew a terrace's face as
          * bands of stripes (Route 104's cliffs, the owner's report of
@@ -2392,6 +2149,8 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
                 sShellFaces, DIORAMA_TERRAIN_MAX_FACES, &shellFaceCount))
             return false;
         rawShellFaceCount = shellFaceCount;
+        if (!AppendFallbackLedgeFaces(input, &shellFaceCount, &rawShellFaceCount))
+            return false;
     }
     if (!AppendSkirtFaces(input, &shellFaceCount, &rawShellFaceCount))
         return false;
@@ -2456,20 +2215,41 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
             }
             FacePositions(&band, positions);
             FaceMaterial(cell, surface, sourceMaterial, &band, &material);
+            /* A ledge on the ground: its lip's faces stand on the cell's own
+             * drawing (the lip's rows from the bottom up). One a terrace
+             * raised or lowered has plain sides, mapped as any cell's: this
+             * mapping read rows past its drawing there (graphics overhaul,
+             * 2026-10-12). */
+            if (cell->shape == DIORAMA_SHAPE_LEDGE && cell->groundHeight == 0.0f && face->axis != 1)
+            {
+                float sourceU0 = sourceMaterial->u0;
+                float sourceV0 = sourceMaterial->v0;
+                float sourceWidth = sourceMaterial->u1 - sourceMaterial->u0;
+                float sourceHeight = sourceMaterial->v1 - sourceMaterial->v0;
+                int32_t sourcePixel = face->axis == 0
+                                    ? face->sourceCellY * DIORAMA_VOXELS_PER_CELL
+                                    : face->sourceCellX * DIORAMA_VOXELS_PER_CELL;
+                int sourceY0 = DIORAMA_VOXELS_PER_CELL - face->vMax;
+                int sourceY1 = DIORAMA_VOXELS_PER_CELL - face->vMin - 1;
+                int sourceX0 = face->uMin - sourcePixel;
+                int sourceX1 = face->uMax - sourcePixel - 1;
+
+                material.u0 = sourceU0 + sourceWidth * sourceX0
+                            / (DIORAMA_VOXELS_PER_CELL - 1);
+                material.u1 = sourceU0 + sourceWidth * sourceX1
+                            / (DIORAMA_VOXELS_PER_CELL - 1);
+                material.v0 = sourceV0 + sourceHeight * sourceY0
+                            / (DIORAMA_VOXELS_PER_CELL - 1);
+                material.v1 = sourceV0 + sourceHeight * sourceY1
+                            / (DIORAMA_VOXELS_PER_CELL - 1);
+            }
             shade = face->axis == 1 ? 1.0f
                   : (face->axis == 2 && face->sign < 0 ? 0.82f : 0.68f);
             /* a height per pixel (mountain rock, a terrace's course): a slope's
              * steps are shaded nearly as its tops, so it reads as one surface,
              * not bands of light and dark */
-            if (face->axis != 1
-             && ((cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART) || IsLedgeBank(cell)))
+            if (face->axis != 1 && (cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART))
                 shade = face->axis == 2 && face->sign < 0 ? 0.92f : 0.86f;
-            /* a jump ledge's grass slope, its steps as light as their tops: one
-             * slope up to the crest, not stripes across it (its rock face keeps
-             * the steps' shade) */
-            if (face->axis != 1 && surface == 0 && IsLedgeBank(cell)
-             && LedgeSideLooksBack(cell->behavior, face->axis, face->sign))
-                shade = 0.98f;
             if (surface == 1 && face->axis == 1 && face->sign > 0
              && cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL
              && cell->treeHullReady && cell->structureWidth == 2
