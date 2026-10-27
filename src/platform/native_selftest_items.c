@@ -1150,3 +1150,454 @@ int NativeSelfTest_Healing(void)
     printf("selftest-healing: %d checks, %d failed\n", sChecks, sFailures);
     return sFailures == 0 ? 0 : 1;
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// --selftest-bag-items (the full item audit, the other items given to a Pokemon from the bag): the berries, the
+// vitamins, the wings, PP Up and PP Max, the Rare Candy, the evolution stones, TMs and HMs, through the game's own
+// code: PokemonUseItemEffects, what the bag's USE calls (for a stone, GetEvolutionTargetSpecies: the evolution
+// PokemonUseItemEffects asks for before it starts the evolution scene; for a TM, the item's move and the teachable
+// learnsets), against the rules this build is set to (include/config, Gen 6): a vitamin raises a stat's effort values
+// by 10 up to 100 (I_VITAMIN_EV_CAP below Gen 8), a wing by 1 up to 252, never past 510 in all; an EV-lowering berry
+// lowers them by 10 (no Gen 4 drop to 100, I_BERRY_EV_JUMP) and raises friendship; the Sitrus Berry restores a quarter
+// of the maximum HP. Each item's friendship change is its own data's (src/data/pokemon/item_effects.h). Not the bag's
+// own consumption, the evolution scene or the moves learnt on a level up (party_menu.c).
+
+#define BAG_SPECIES SPECIES_SNORLAX
+
+static const u8 sEVData[NUM_STATS] = {
+    MON_DATA_HP_EV, MON_DATA_ATK_EV, MON_DATA_DEF_EV, MON_DATA_SPEED_EV, MON_DATA_SPATK_EV, MON_DATA_SPDEF_EV,
+};
+static const char *const sStatNames[NUM_STATS] = {"HP", "Attack", "Defense", "Speed", "Sp. Atk", "Sp. Def"};
+static const u16 sBagMoves[MAX_MON_MOVES] = {MOVE_TACKLE, MOVE_SURF, MOVE_HYPER_BEAM, MOVE_SKETCH}; // 35, 15, 5, 1 PP
+
+// A party Pokemon for the bag's items: `species` at `level`, no effort values, met somewhere else than here (no
+// friendship bonus, see the healing test's note), `friendship`
+static struct Pokemon *BagMon(enum Species species, u32 level, u32 gender, u8 friendship)
+{
+    struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][0];
+    u8 metLocation = MAPSEC_LITTLEROOT_TOWN;
+
+    ZeroPlayerPartyMons();
+    CreateMon(mon, species, level, GetMonPersonality(species, gender, NATURE_HARDY, 0), OTID_STRUCT_PLAYER_ID);
+    CalculateMonStats(mon);
+    gPartiesCount[B_TRAINER_PLAYER] = 1;
+    SetMonData(mon, MON_DATA_MET_LOCATION, &metLocation);
+    SetMonData(mon, MON_DATA_FRIENDSHIP, &friendship);
+    return mon;
+}
+
+// `stat` at `start` effort values, `others` more spread over the next stats (252 at most each)
+static void SetEVs(struct Pokemon *mon, u32 stat, u8 start, u16 others)
+{
+    u32 i;
+
+    for (i = 0; i < NUM_STATS; i++)
+    {
+        u8 ev = 0;
+
+        if (i == stat)
+            ev = start;
+        else if (others != 0)
+        {
+            ev = others > MAX_PER_STAT_EVS ? MAX_PER_STAT_EVS : others;
+            others -= ev;
+        }
+        SetMonData(mon, sEVData[i], &ev);
+    }
+    CalculateMonStats(mon);
+}
+
+// An EV item on one stat at `start` (the other stats holding `others` in all): the stat's effort values after it, and
+// whether it was used (an item with no effect is kept)
+static void ExpectEVs(const char *what, u16 item, u32 stat, u8 start, u16 others, u8 want, bool32 used)
+{
+    struct Pokemon *mon = BagMon(BAG_SPECIES, 50, MON_MALE, 100);
+    bool8 noEffect;
+    u8 after;
+    char line[200];
+
+    SetEVs(mon, stat, start, others);
+    noEffect = PokemonUseItemEffects(mon, item, 0, 0, FALSE);
+    after = GetMonData(mon, sEVData[stat]);
+    snprintf(line, sizeof(line), "%s: %s EVs %u -> %u (rule %u)%s", what, sStatNames[stat], start, after, want,
+             used ? "" : ", no effect, kept");
+    Expect(line, after == want && noEffect == !used);
+}
+
+// The test moves at their full PP, with no PP Up (CreateMon gives a Pokemon no moves)
+static void GiveBagMoves(struct Pokemon *mon)
+{
+    u8 bonuses = 0;
+    u32 i;
+
+    for (i = 0; i < MAX_MON_MOVES; i++)
+    {
+        u16 move = sBagMoves[i];
+        u8 pp = CalculatePPWithBonus(move, 0, i);
+
+        SetMonData(mon, MON_DATA_MOVE1 + i, &move);
+        SetMonData(mon, MON_DATA_PP1 + i, &pp);
+    }
+    SetMonData(mon, MON_DATA_PP_BONUSES, &bonuses);
+}
+
+static struct Pokemon *PPMon(void)
+{
+    struct Pokemon *mon = BagMon(BAG_SPECIES, 50, MON_MALE, 100);
+
+    GiveBagMoves(mon);
+    return mon;
+}
+
+// An item's friendship change from `start`, on a Pokemon it has an effect on (50 effort values in every stat, level 50,
+// the test moves)
+static void ExpectItemFriendship(const char *what, u16 item, u8 start, u8 want)
+{
+    struct Pokemon *mon = BagMon(BAG_SPECIES, 50, MON_MALE, start);
+    bool8 noEffect;
+    u8 after;
+    u32 i;
+    char line[200];
+
+    for (i = 0; i < NUM_STATS; i++)
+    {
+        u8 ev = 50;
+        SetMonData(mon, sEVData[i], &ev);
+    }
+    CalculateMonStats(mon);
+    GiveBagMoves(mon);
+    noEffect = PokemonUseItemEffects(mon, item, 0, 0, FALSE);
+    after = GetMonData(mon, MON_DATA_FRIENDSHIP);
+    snprintf(line, sizeof(line), "%s: friendship %u -> %u (rule %u)", what, start, after, want);
+    Expect(line, !noEffect && after == want);
+}
+
+static u8 MaxPPNow(struct Pokemon *mon, u32 i)
+{
+    return CalculatePPWithBonus(GetMonData(mon, MON_DATA_MOVE1 + i), GetMonData(mon, MON_DATA_PP_BONUSES), i);
+}
+
+// PP Up or PP Max on move `i`: its maximum PP and its PP after it
+static void ExpectPP(const char *what, struct Pokemon *mon, u16 item, u32 i, u8 wantMax, u8 wantPP, bool32 used)
+{
+    u8 maxBefore = MaxPPNow(mon, i), ppBefore = GetMonData(mon, MON_DATA_PP1 + i);
+    bool8 noEffect = PokemonUseItemEffects(mon, item, 0, i, FALSE);
+    u8 maxAfter = MaxPPNow(mon, i), ppAfter = GetMonData(mon, MON_DATA_PP1 + i);
+    char line[200];
+
+    snprintf(line, sizeof(line), "%s: maximum PP %u -> %u, PP %u -> %u (rule %u, %u)%s", what, maxBefore, maxAfter,
+             ppBefore, ppAfter, wantMax, wantPP, used ? "" : ", no effect, kept");
+    Expect(line, maxAfter == wantMax && ppAfter == wantPP && noEffect == !used);
+}
+
+// The evolution a stone starts (CHECK_EVO: the Pokemon is left as it is); SPECIES_NONE: none, the stone kept
+static void ExpectStone(const char *what, enum Species species, u32 gender, u16 item, u16 held, enum Species want)
+{
+    struct Pokemon *mon = BagMon(species, 30, gender, 100);
+    bool32 canStopEvo = TRUE;
+    enum Species target;
+    char line[200];
+
+    SetMonData(mon, MON_DATA_HELD_ITEM, &held);
+    target = GetEvolutionTargetSpecies(mon, EVO_MODE_ITEM_USE, item, NULL, &canStopEvo, CHECK_EVO);
+    snprintf(line, sizeof(line), "%s (species %u, rule %u)", what, (unsigned)target, (unsigned)want);
+    Expect(line, target == want && GetMonData(mon, MON_DATA_SPECIES) == species);
+}
+
+int NativeSelfTest_BagItems(void)
+{
+    static const struct { u16 item; const char *name; u8 stat; } sVitamins[] = {
+        {ITEM_HP_UP, "HP Up", STAT_HP}, {ITEM_PROTEIN, "Protein", STAT_ATK}, {ITEM_IRON, "Iron", STAT_DEF},
+        {ITEM_CARBOS, "Carbos", STAT_SPEED}, {ITEM_CALCIUM, "Calcium", STAT_SPATK}, {ITEM_ZINC, "Zinc", STAT_SPDEF},
+    };
+    static const struct { u16 item; const char *name; u8 stat; } sWings[] = {
+        {ITEM_HEALTH_WING, "Health Wing", STAT_HP}, {ITEM_MUSCLE_WING, "Muscle Wing", STAT_ATK},
+        {ITEM_RESIST_WING, "Resist Wing", STAT_DEF}, {ITEM_SWIFT_WING, "Swift Wing", STAT_SPEED},
+        {ITEM_GENIUS_WING, "Genius Wing", STAT_SPATK}, {ITEM_CLEVER_WING, "Clever Wing", STAT_SPDEF},
+    };
+    static const struct { u16 item; const char *name; u8 stat; } sEVBerries[] = {
+        {ITEM_POMEG_BERRY, "Pomeg Berry", STAT_HP}, {ITEM_KELPSY_BERRY, "Kelpsy Berry", STAT_ATK},
+        {ITEM_QUALOT_BERRY, "Qualot Berry", STAT_DEF}, {ITEM_TAMATO_BERRY, "Tamato Berry", STAT_SPEED},
+        {ITEM_HONDEW_BERRY, "Hondew Berry", STAT_SPATK}, {ITEM_GREPA_BERRY, "Grepa Berry", STAT_SPDEF},
+    };
+    struct Pokemon *mon;
+    u16 max;
+    u32 i;
+    char line[200];
+
+    Setup();
+    UseMap(MAP_ROUTE101);
+    printf("selftest-bag-items: berries, vitamins, wings, PP Up, PP Max, Rare Candy, evolution stones, TMs and HMs "
+           "through the game's own code, Gen 6 rules\n");
+    printf("     the rules: a vitamin +10 effort values up to %d in a stat, a wing +1 up to %d, %d in all\n",
+           EV_ITEM_RAISE_LIMIT, MAX_PER_STAT_EVS, MAX_TOTAL_EVS);
+
+    // Berries a Pokemon eats from the bag (the status-curing ones and the Lum Berry: --selftest-healing)
+    mon = BagMon(BAG_SPECIES, 50, MON_MALE, 100);
+    max = GetMonData(mon, MON_DATA_MAX_HP);
+    printf("     the test Pokemon: Snorlax level 50, %u HP\n", max);
+    {
+        u16 hp = 1;
+
+        SetMonData(mon, MON_DATA_HP, &hp);
+        snprintf(line, sizeof(line), "Oran Berry restores 10: HP 1 -> %u", 1 + 10);
+        Expect(line, !PokemonUseItemEffects(mon, ITEM_ORAN_BERRY, 0, 0, FALSE) && GetMonData(mon, MON_DATA_HP) == 11);
+        SetMonData(mon, MON_DATA_HP, &hp);
+        {
+            bool8 noEffect = PokemonUseItemEffects(mon, ITEM_SITRUS_BERRY, 0, 0, FALSE);
+            u16 after = GetMonData(mon, MON_DATA_HP);
+
+            snprintf(line, sizeof(line), "Sitrus Berry restores a quarter of the maximum: HP 1 -> %u (rule %u)", after,
+                     1 + max / 4);
+            Expect(line, !noEffect && after == 1 + max / 4);
+        }
+        SetMonData(mon, MON_DATA_HP, &max);
+        Expect("Oran Berry at full HP: no effect (kept)", PokemonUseItemEffects(mon, ITEM_ORAN_BERRY, 0, 0, FALSE));
+    }
+    mon = PPMon();
+    {
+        u8 pp = 0;
+
+        SetMonData(mon, MON_DATA_PP1, &pp);
+        Expect("Leppa Berry restores 10 PP to the move chosen (Tackle 0 -> 10)",
+               !PokemonUseItemEffects(mon, ITEM_LEPPA_BERRY, 0, 0, FALSE) && GetMonData(mon, MON_DATA_PP1) == 10
+               && GetMonData(mon, MON_DATA_PP2) == CalculatePPWithBonus(MOVE_SURF, 0, 1));
+        Expect("Leppa Berry on a move at full PP: no effect", PokemonUseItemEffects(mon, ITEM_LEPPA_BERRY, 0, 1, FALSE));
+    }
+    Expect("Persim Berry outside a battle (it cures confusion): no effect",
+           PokemonUseItemEffects(BagMon(BAG_SPECIES, 50, MON_MALE, 100), ITEM_PERSIM_BERRY, 0, 0, FALSE));
+    Expect("Figy Berry has no use from the bag (eaten only when held)", GetItemEffect(ITEM_FIGY_BERRY) == NULL
+           && PokemonUseItemEffects(BagMon(BAG_SPECIES, 50, MON_MALE, 100), ITEM_FIGY_BERRY, 0, 0, FALSE));
+
+    // Vitamins: +10, up to 100 in the stat, never past 510 in all
+    for (i = 0; i < ARRAY_COUNT(sVitamins); i++)
+        ExpectEVs(sVitamins[i].name, sVitamins[i].item, sVitamins[i].stat, 0, 0, 10, TRUE);
+    ExpectEVs("HP Up 5 short of 100: to 100, no more", ITEM_HP_UP, STAT_HP, 95, 0, 100, TRUE);
+    ExpectEVs("Protein at 100", ITEM_PROTEIN, STAT_ATK, 100, 0, 100, FALSE);
+    ExpectEVs("Carbos with 505 in the other stats: to 510 in all", ITEM_CARBOS, STAT_SPEED, 0, 505, 5, TRUE);
+    ExpectEVs("Zinc with 510 in the other stats", ITEM_ZINC, STAT_SPDEF, 0, 510, 0, FALSE);
+
+    // Wings: +1, up to 252, never past 510 in all
+    for (i = 0; i < ARRAY_COUNT(sWings); i++)
+        ExpectEVs(sWings[i].name, sWings[i].item, sWings[i].stat, 0, 0, 1, TRUE);
+    ExpectEVs("Health Wing at 100 (a vitamin's limit): on to 101", ITEM_HEALTH_WING, STAT_HP, 100, 0, 101, TRUE);
+    ExpectEVs("Muscle Wing at 251: to 252", ITEM_MUSCLE_WING, STAT_ATK, 251, 0, 252, TRUE);
+    ExpectEVs("Muscle Wing at 252", ITEM_MUSCLE_WING, STAT_ATK, 252, 0, 252, FALSE);
+    ExpectEVs("Swift Wing with 510 in the other stats", ITEM_SWIFT_WING, STAT_SPEED, 0, 510, 0, FALSE);
+    Expect("Pretty Wing: no effect", PokemonUseItemEffects(BagMon(BAG_SPECIES, 50, MON_MALE, 100), ITEM_PRETTY_WING, 0, 0, FALSE));
+
+    // EV-lowering berries: -10 (Gen 6: no drop to 100 first), not below 0; at 0 the friendship is still raised
+    for (i = 0; i < ARRAY_COUNT(sEVBerries); i++)
+        ExpectEVs(sEVBerries[i].name, sEVBerries[i].item, sEVBerries[i].stat, 100, 0, 90, TRUE);
+    ExpectEVs("Pomeg Berry at 252: to 242 (no Gen 4 drop to 100)", ITEM_POMEG_BERRY, STAT_HP, 252, 0, 242, TRUE);
+    ExpectEVs("Kelpsy Berry at 5: to 0, not below", ITEM_KELPSY_BERRY, STAT_ATK, 5, 0, 0, TRUE);
+    mon = BagMon(BAG_SPECIES, 50, MON_MALE, 150);
+    Expect("Qualot Berry at 0 effort values: used, friendship 150 -> 155",
+           !PokemonUseItemEffects(mon, ITEM_QUALOT_BERRY, 0, 0, FALSE) && GetMonData(mon, MON_DATA_DEF_EV) == 0
+           && GetMonData(mon, MON_DATA_FRIENDSHIP) == 155);
+    // At 0 effort values and the highest friendship nothing can change: PokemonUseItemEffects still reports the berry
+    // used, and the bag's own ItemUseCB_ReduceEV (party_menu.c) keeps it ("It won't have any effect") because neither
+    // value changed
+    mon = BagMon(BAG_SPECIES, 50, MON_MALE, MAX_FRIENDSHIP);
+    {
+        bool8 noEffect = PokemonUseItemEffects(mon, ITEM_TAMATO_BERRY, 0, 0, FALSE);
+
+        snprintf(line, sizeof(line), "Tamato Berry at 0 Speed effort values and friendship 255: neither changes (effort "
+                 "values %u, friendship %u; the function says %s), so the bag keeps it",
+                 (unsigned)GetMonData(mon, MON_DATA_SPEED_EV), (unsigned)GetMonData(mon, MON_DATA_FRIENDSHIP),
+                 noEffect ? "no effect" : "used");
+        Expect(line, GetMonData(mon, MON_DATA_SPEED_EV) == 0 && GetMonData(mon, MON_DATA_FRIENDSHIP) == MAX_FRIENDSHIP);
+    }
+
+    // Friendship: under 100, 100-199, 200 and over (vitamins, PP Up, PP Max, Rare Candy 5/3/2; wings 3/2/1; EV-lowering
+    // berries 10/5/2)
+    ExpectItemFriendship("HP Up", ITEM_HP_UP, 50, 55);
+    ExpectItemFriendship("HP Up", ITEM_HP_UP, 150, 153);
+    ExpectItemFriendship("HP Up", ITEM_HP_UP, 250, 252);
+    ExpectItemFriendship("Health Wing", ITEM_HEALTH_WING, 50, 53);
+    ExpectItemFriendship("Health Wing", ITEM_HEALTH_WING, 150, 152);
+    ExpectItemFriendship("Health Wing", ITEM_HEALTH_WING, 250, 251);
+    ExpectItemFriendship("Pomeg Berry", ITEM_POMEG_BERRY, 50, 60);
+    ExpectItemFriendship("Pomeg Berry", ITEM_POMEG_BERRY, 150, 155);
+    ExpectItemFriendship("Pomeg Berry", ITEM_POMEG_BERRY, 250, 252);
+    ExpectItemFriendship("PP Up", ITEM_PP_UP, 50, 55);
+    ExpectItemFriendship("PP Max", ITEM_PP_MAX, 150, 153);
+    ExpectItemFriendship("Rare Candy", ITEM_RARE_CANDY, 250, 252);
+    ExpectItemFriendship("HP Up at friendship 254: not past 255", ITEM_HP_UP, 254, 255);
+    {
+        u16 bell = ITEM_SOOTHE_BELL;
+
+        mon = BagMon(BAG_SPECIES, 50, MON_MALE, 150);
+        SetMonData(mon, MON_DATA_HELD_ITEM, &bell);
+        PokemonUseItemEffects(mon, ITEM_HP_UP, 0, 0, FALSE);
+        printf("     note: HP Up holding a Soothe Bell: friendship 150 -> %u (3 and half again, rounded down: 154)\n",
+               (unsigned)GetMonData(mon, MON_DATA_FRIENDSHIP));
+    }
+
+    // PP Up: a fifth of the move's base PP more, three times at most; PP Max: all three at once (Tackle 35, Surf 15,
+    // Hyper Beam 5, Sketch 1)
+    mon = PPMon();
+    ExpectPP("PP Up on Tackle", mon, ITEM_PP_UP, 0, 42, 42, TRUE);
+    ExpectPP("PP Up on Tackle, the second", mon, ITEM_PP_UP, 0, 49, 49, TRUE);
+    ExpectPP("PP Up on Tackle, the third", mon, ITEM_PP_UP, 0, 56, 56, TRUE);
+    ExpectPP("PP Up on Tackle, a fourth", mon, ITEM_PP_UP, 0, 56, 56, FALSE);
+    ExpectPP("PP Max on Tackle after three PP Ups", mon, ITEM_PP_MAX, 0, 56, 56, FALSE);
+    ExpectPP("PP Max on Surf", mon, ITEM_PP_MAX, 1, 24, 24, TRUE);
+    ExpectPP("PP Up on Surf after PP Max", mon, ITEM_PP_UP, 1, 24, 24, FALSE);
+    ExpectPP("PP Up on Hyper Beam", mon, ITEM_PP_UP, 2, 6, 6, TRUE);
+    ExpectPP("PP Max on Hyper Beam after one PP Up", mon, ITEM_PP_MAX, 2, 8, 8, TRUE);
+    ExpectPP("PP Up on Sketch (1 PP)", mon, ITEM_PP_UP, 3, 1, 1, FALSE);
+    ExpectPP("PP Max on Sketch", mon, ITEM_PP_MAX, 3, 1, 1, FALSE);
+    mon = PPMon();
+    {
+        u8 pp = 10;
+
+        SetMonData(mon, MON_DATA_PP1, &pp);
+        ExpectPP("PP Up on Tackle with 10 PP left: its PP rise by the same 7", mon, ITEM_PP_UP, 0, 42, 17, TRUE);
+    }
+
+    // Rare Candy: the next level's experience, the HP the level adds
+    {
+        enum Species species = BAG_SPECIES;
+        u32 growth = gSpeciesInfo[species].growthRate;
+        u16 hpBefore, maxBefore, hp = 100;
+
+        mon = BagMon(species, 50, MON_MALE, 100);
+        SetMonData(mon, MON_DATA_HP, &hp);
+        maxBefore = GetMonData(mon, MON_DATA_MAX_HP);
+        hpBefore = GetMonData(mon, MON_DATA_HP);
+        {
+            bool8 noEffect = PokemonUseItemEffects(mon, ITEM_RARE_CANDY, 0, 0, FALSE);
+            u32 level = GetMonData(mon, MON_DATA_LEVEL);
+            u16 hpAfter = GetMonData(mon, MON_DATA_HP), rise = GetMonData(mon, MON_DATA_MAX_HP) - maxBefore;
+
+            snprintf(line, sizeof(line), "Rare Candy: level 50 -> %u, experience at level 51's start, HP %u -> %u (+%u, "
+                     "the maximum's rise)", level, hpBefore, hpAfter, rise);
+            Expect(line, !noEffect && level == 51 && GetMonData(mon, MON_DATA_EXP) == gExperienceTables[growth][51]
+                   && hpAfter == hpBefore + rise);
+        }
+        mon = BagMon(species, 99, MON_MALE, 100);
+        Expect("Rare Candy at level 99: to 100", !PokemonUseItemEffects(mon, ITEM_RARE_CANDY, 0, 0, FALSE)
+               && GetMonData(mon, MON_DATA_LEVEL) == MAX_LEVEL);
+        mon = BagMon(species, MAX_LEVEL, MON_MALE, 100);
+        Expect("Rare Candy at level 100: no effect (kept), no friendship", PokemonUseItemEffects(mon, ITEM_RARE_CANDY, 0, 0, FALSE)
+               && GetMonData(mon, MON_DATA_LEVEL) == MAX_LEVEL && GetMonData(mon, MON_DATA_FRIENDSHIP) == 100);
+        // Measured, printed: on a fainted Pokemon
+        mon = BagMon(species, 50, MON_MALE, 100);
+        hp = 0;
+        SetMonData(mon, MON_DATA_HP, &hp);
+        {
+            bool8 noEffect = PokemonUseItemEffects(mon, ITEM_RARE_CANDY, 0, 0, FALSE);
+
+            printf("     note: Rare Candy on a fainted Pokemon: %s, level %u, HP 0 -> %u\n", noEffect ? "no effect" : "used",
+                   (unsigned)GetMonData(mon, MON_DATA_LEVEL), (unsigned)GetMonData(mon, MON_DATA_HP));
+        }
+    }
+
+    // Evolution stones (a Pokemon at level 30): the evolution the stone starts, none where it has no use
+    ExpectStone("Thunder Stone: Pikachu -> Raichu (Hoenn: not Alola's)", SPECIES_PIKACHU, MON_MALE, ITEM_THUNDER_STONE, ITEM_NONE, SPECIES_RAICHU);
+    ExpectStone("Thunder Stone: Eevee -> Jolteon", SPECIES_EEVEE, MON_MALE, ITEM_THUNDER_STONE, ITEM_NONE, SPECIES_JOLTEON);
+    ExpectStone("Water Stone: Eevee -> Vaporeon", SPECIES_EEVEE, MON_MALE, ITEM_WATER_STONE, ITEM_NONE, SPECIES_VAPOREON);
+    ExpectStone("Fire Stone: Eevee -> Flareon", SPECIES_EEVEE, MON_MALE, ITEM_FIRE_STONE, ITEM_NONE, SPECIES_FLAREON);
+    ExpectStone("Leaf Stone: Eevee -> Leafeon (this build's data, besides Petalburg Woods)", SPECIES_EEVEE, MON_MALE, ITEM_LEAF_STONE, ITEM_NONE, SPECIES_LEAFEON);
+    ExpectStone("Ice Stone: Eevee -> Glaceon (this build's data, besides Shoal Cave)", SPECIES_EEVEE, MON_MALE, ITEM_ICE_STONE, ITEM_NONE, SPECIES_GLACEON);
+    ExpectStone("Moon Stone: Eevee, no use", SPECIES_EEVEE, MON_MALE, ITEM_MOON_STONE, ITEM_NONE, SPECIES_NONE);
+    ExpectStone("Fire Stone: Growlithe -> Arcanine", SPECIES_GROWLITHE, MON_MALE, ITEM_FIRE_STONE, ITEM_NONE, SPECIES_ARCANINE);
+    ExpectStone("Fire Stone: Vulpix -> Ninetales", SPECIES_VULPIX, MON_FEMALE, ITEM_FIRE_STONE, ITEM_NONE, SPECIES_NINETALES);
+    ExpectStone("Water Stone: Lombre -> Ludicolo", SPECIES_LOMBRE, MON_MALE, ITEM_WATER_STONE, ITEM_NONE, SPECIES_LUDICOLO);
+    ExpectStone("Water Stone: Staryu -> Starmie", SPECIES_STARYU, MON_GENDERLESS, ITEM_WATER_STONE, ITEM_NONE, SPECIES_STARMIE);
+    ExpectStone("Leaf Stone: Nuzleaf -> Shiftry", SPECIES_NUZLEAF, MON_MALE, ITEM_LEAF_STONE, ITEM_NONE, SPECIES_SHIFTRY);
+    ExpectStone("Leaf Stone: Gloom -> Vileplume", SPECIES_GLOOM, MON_MALE, ITEM_LEAF_STONE, ITEM_NONE, SPECIES_VILEPLUME);
+    ExpectStone("Sun Stone: Gloom -> Bellossom", SPECIES_GLOOM, MON_MALE, ITEM_SUN_STONE, ITEM_NONE, SPECIES_BELLOSSOM);
+    ExpectStone("Sun Stone: Sunkern -> Sunflora", SPECIES_SUNKERN, MON_MALE, ITEM_SUN_STONE, ITEM_NONE, SPECIES_SUNFLORA);
+    ExpectStone("Moon Stone: Skitty -> Delcatty", SPECIES_SKITTY, MON_FEMALE, ITEM_MOON_STONE, ITEM_NONE, SPECIES_DELCATTY);
+    ExpectStone("Moon Stone: Clefairy -> Clefable", SPECIES_CLEFAIRY, MON_FEMALE, ITEM_MOON_STONE, ITEM_NONE, SPECIES_CLEFABLE);
+    ExpectStone("Shiny Stone: Togetic -> Togekiss", SPECIES_TOGETIC, MON_MALE, ITEM_SHINY_STONE, ITEM_NONE, SPECIES_TOGEKISS);
+    ExpectStone("Shiny Stone: Roselia -> Roserade", SPECIES_ROSELIA, MON_MALE, ITEM_SHINY_STONE, ITEM_NONE, SPECIES_ROSERADE);
+    ExpectStone("Dusk Stone: Murkrow -> Honchkrow", SPECIES_MURKROW, MON_MALE, ITEM_DUSK_STONE, ITEM_NONE, SPECIES_HONCHKROW);
+    ExpectStone("Dusk Stone: Misdreavus -> Mismagius", SPECIES_MISDREAVUS, MON_FEMALE, ITEM_DUSK_STONE, ITEM_NONE, SPECIES_MISMAGIUS);
+    ExpectStone("Dawn Stone: a male Kirlia -> Gallade", SPECIES_KIRLIA, MON_MALE, ITEM_DAWN_STONE, ITEM_NONE, SPECIES_GALLADE);
+    ExpectStone("Dawn Stone: a female Kirlia, no use", SPECIES_KIRLIA, MON_FEMALE, ITEM_DAWN_STONE, ITEM_NONE, SPECIES_NONE);
+    ExpectStone("Dawn Stone: a female Snorunt -> Froslass", SPECIES_SNORUNT, MON_FEMALE, ITEM_DAWN_STONE, ITEM_NONE, SPECIES_FROSLASS);
+    ExpectStone("Dawn Stone: a male Snorunt, no use", SPECIES_SNORUNT, MON_MALE, ITEM_DAWN_STONE, ITEM_NONE, SPECIES_NONE);
+    ExpectStone("Fire Stone: Charmander, no use", SPECIES_CHARMANDER, MON_MALE, ITEM_FIRE_STONE, ITEM_NONE, SPECIES_NONE);
+    ExpectStone("Water Stone: Pikachu, no use", SPECIES_PIKACHU, MON_MALE, ITEM_WATER_STONE, ITEM_NONE, SPECIES_NONE);
+    ExpectStone("Thunder Stone: Raichu (fully evolved), no use", SPECIES_RAICHU, MON_MALE, ITEM_THUNDER_STONE, ITEM_NONE, SPECIES_NONE);
+    ExpectStone("Thunder Stone: Pikachu holding an Everstone, none (Emerald's rule)", SPECIES_PIKACHU, MON_MALE, ITEM_THUNDER_STONE, ITEM_EVERSTONE, SPECIES_NONE);
+
+    // TMs and HMs: Emerald's numbering, each in the TM pocket, the eight HM moves, who can learn them (the game's own
+    // teachable learnsets; a TM's reuse, its sale and an HM move's forgetting: --selftest-move-switch)
+    {
+        static const u16 sEmeraldTMHMs[] = {
+            MOVE_FOCUS_PUNCH, MOVE_DRAGON_CLAW, MOVE_WATER_PULSE, MOVE_CALM_MIND, MOVE_ROAR, MOVE_TOXIC, MOVE_HAIL,
+            MOVE_BULK_UP, MOVE_BULLET_SEED, MOVE_HIDDEN_POWER, MOVE_SUNNY_DAY, MOVE_TAUNT, MOVE_ICE_BEAM, MOVE_BLIZZARD,
+            MOVE_HYPER_BEAM, MOVE_LIGHT_SCREEN, MOVE_PROTECT, MOVE_RAIN_DANCE, MOVE_GIGA_DRAIN, MOVE_SAFEGUARD,
+            MOVE_FRUSTRATION, MOVE_SOLAR_BEAM, MOVE_IRON_TAIL, MOVE_THUNDERBOLT, MOVE_THUNDER, MOVE_EARTHQUAKE,
+            MOVE_RETURN, MOVE_DIG, MOVE_PSYCHIC, MOVE_SHADOW_BALL, MOVE_BRICK_BREAK, MOVE_DOUBLE_TEAM, MOVE_REFLECT,
+            MOVE_SHOCK_WAVE, MOVE_FLAMETHROWER, MOVE_SLUDGE_BOMB, MOVE_SANDSTORM, MOVE_FIRE_BLAST, MOVE_ROCK_TOMB,
+            MOVE_AERIAL_ACE, MOVE_TORMENT, MOVE_FACADE, MOVE_SECRET_POWER, MOVE_REST, MOVE_ATTRACT, MOVE_THIEF,
+            MOVE_STEEL_WING, MOVE_SKILL_SWAP, MOVE_SNATCH, MOVE_OVERHEAT,
+            MOVE_CUT, MOVE_FLY, MOVE_SURF, MOVE_STRENGTH, MOVE_FLASH, MOVE_ROCK_SMASH, MOVE_WATERFALL, MOVE_DIVE,
+        };
+        static const u16 sNoTMs[] = {
+            SPECIES_MAGIKARP, SPECIES_DITTO, SPECIES_SMEARGLE, SPECIES_CATERPIE, SPECIES_METAPOD, SPECIES_KAKUNA,
+            SPECIES_WURMPLE, SPECIES_SILCOON, SPECIES_CASCOON, SPECIES_BELDUM,
+        };
+        static const struct { u16 species; u16 move; bool8 learns; const char *what; } sLearns[] = {
+            {SPECIES_SNORLAX, MOVE_SURF, TRUE, "Snorlax: HM03 Surf"}, {SPECIES_SNORLAX, MOVE_EARTHQUAKE, TRUE, "Snorlax: TM26 Earthquake"},
+            {SPECIES_MACHAMP, MOVE_STRENGTH, TRUE, "Machamp: HM04 Strength"}, {SPECIES_PIDGEOT, MOVE_FLY, TRUE, "Pidgeot: HM02 Fly"},
+            {SPECIES_CHARIZARD, MOVE_FLY, TRUE, "Charizard: HM02 Fly"}, {SPECIES_GYARADOS, MOVE_WATERFALL, TRUE, "Gyarados: HM07 Waterfall"},
+            {SPECIES_WAILMER, MOVE_DIVE, TRUE, "Wailmer: HM08 Dive"}, {SPECIES_GEODUDE, MOVE_ROCK_SMASH, TRUE, "Geodude: HM06 Rock Smash"},
+            {SPECIES_ZIGZAGOON, MOVE_CUT, TRUE, "Zigzagoon: HM01 Cut"}, {SPECIES_PIKACHU, MOVE_THUNDERBOLT, TRUE, "Pikachu: TM24 Thunderbolt"},
+            {SPECIES_GYARADOS, MOVE_FLY, FALSE, "Gyarados: not HM02 Fly"}, {SPECIES_BULBASAUR, MOVE_FLY, FALSE, "Bulbasaur: not HM02 Fly"},
+            {SPECIES_PIKACHU, MOVE_FLY, FALSE, "Pikachu: not HM02 Fly"},
+        };
+        u32 item, found = 0, wrong = 0, pocket = 0, mew = 0;
+
+        for (item = ITEM_NONE + 1; item < ITEMS_COUNT; item++)
+        {
+            u32 index = GetItemTMHMIndex(item);
+
+            if (index == 0)
+                continue;
+            found++;
+            if (index > ARRAY_COUNT(sEmeraldTMHMs) || GetItemTMHMMoveId(item) != sEmeraldTMHMs[index - 1])
+            {
+                wrong++;
+                printf("     TM/HM item %u (number %u) teaches move %u\n", item, index, (unsigned)GetItemTMHMMoveId(item));
+            }
+            if (GetItemPocket(item) != POCKET_TM_HM)
+                pocket++;
+        }
+        snprintf(line, sizeof(line), "TM01-TM50 and HM01-HM08: %u items, each teaching Emerald's move for its number "
+                 "(%u wrong), each in the TM pocket (%u not)", found, wrong, pocket);
+        Expect(line, found == ARRAY_COUNT(sEmeraldTMHMs) && wrong == 0 && pocket == 0);
+        for (i = 0; i < ARRAY_COUNT(sEmeraldTMHMs); i++)
+            wrong += IsMoveHM(sEmeraldTMHMs[i]) != (i >= 50);
+        Expect("HM moves: Cut, Fly, Surf, Strength, Flash, Rock Smash, Waterfall and Dive, and no TM's move", wrong == 0);
+        for (i = 0; i < ARRAY_COUNT(sEmeraldTMHMs); i++)
+            mew += CanLearnTeachableMove(SPECIES_MEW, sEmeraldTMHMs[i]);
+        snprintf(line, sizeof(line), "Mew can learn every TM and HM (%u of %u)", mew, (unsigned)ARRAY_COUNT(sEmeraldTMHMs));
+        Expect(line, mew == ARRAY_COUNT(sEmeraldTMHMs));
+        for (i = 0; i < ARRAY_COUNT(sNoTMs); i++)
+        {
+            u32 learns = 0, m;
+
+            for (m = 0; m < ARRAY_COUNT(sEmeraldTMHMs); m++)
+                learns += CanLearnTeachableMove(sNoTMs[i], sEmeraldTMHMs[m]);
+            snprintf(line, sizeof(line), "species %u (Magikarp, Ditto, Smeargle, the cocoons, Beldum...) can learn no TM "
+                     "or HM (%u)", sNoTMs[i], learns);
+            Expect(line, learns == 0);
+        }
+        for (i = 0; i < ARRAY_COUNT(sLearns); i++)
+            Expect(sLearns[i].what, CanLearnTeachableMove(sLearns[i].species, sLearns[i].move) == sLearns[i].learns);
+        // Measured, printed: the learnsets are the expansion's (the later games'), not Emerald's
+        printf("     note: from the later games' learnsets, not Emerald's: Pikachu HM03 Surf %s, Wobbuffet TM20 Safeguard %s, "
+               "Unown TM10 Hidden Power %s\n", CanLearnTeachableMove(SPECIES_PIKACHU, MOVE_SURF) ? "yes" : "no",
+               CanLearnTeachableMove(SPECIES_WOBBUFFET, MOVE_SAFEGUARD) ? "yes" : "no",
+               CanLearnTeachableMove(SPECIES_UNOWN, MOVE_HIDDEN_POWER) ? "yes" : "no");
+    }
+
+    printf("selftest-bag-items: %d checks, %d failed\n", sChecks, sFailures);
+    return sFailures == 0 ? 0 : 1;
+}

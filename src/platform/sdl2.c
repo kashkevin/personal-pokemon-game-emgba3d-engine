@@ -239,6 +239,7 @@ extern int NativeSelfTest_ShinyPaths(void);
 extern int NativeSelfTest_WildItems(void);
 extern int NativeSelfTest_Balls(void);
 extern int NativeSelfTest_Healing(void);
+extern int NativeSelfTest_BagItems(void);
 extern int NativeSelfTest_Ride(const char *sheetPath);
 extern int NativeSelfTest_Carriers(const char *sheetPath);
 extern int NativeSelfTest_FrontierSaves(void);
@@ -1322,6 +1323,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_Balls()); // src/platform/native_selftest_items.c (the 2026-10-27 item audit: Poke Balls)
         else if (strcmp(argv[i], "--selftest-healing") == 0)
             exit(NativeSelfTest_Healing()); // src/platform/native_selftest_items.c (the 2026-10-27 item audit: healing)
+        else if (strcmp(argv[i], "--selftest-bag-items") == 0)
+            exit(NativeSelfTest_BagItems()); // src/platform/native_selftest_items.c (the item audit: other bag items)
         else if (strcmp(argv[i], "--selftest-wild-items") == 0)
             exit(NativeSelfTest_WildItems()); // src/platform/native_selftest_items.c (the 2026-10-27 wild item audit)
         else if (strcmp(argv[i], "--selftest-frontier-saves") == 0)
