@@ -28,6 +28,7 @@ void MultiplayerRide_BeginObjectUpdate(struct ObjectEvent *objectEvent, struct S
 void MultiplayerRide_BeforePlayerRespawn(struct ObjectEvent *player); // the field rebuilds the player: walking look
 // Where that rider picture sits on that mount picture, facing `facing` (read from the mount's picture): px up, px right.
 void MultiplayerRide_GetSeat(u16 mountGraphicsId, u16 riderGraphicsId, u32 facing, u8 *lift, s8 *shift);
+u8 MultiplayerRide_GetFrontClearance(u16 mountGraphicsId, u16 riderGraphicsId, u8 visible); // facing the camera
 bool32 MultiplayerRide_IsRider(const struct ObjectEvent *objectEvent);   // on a mount now (its own shadow is not drawn)
 struct ObjectEvent *MultiplayerRide_GetMountOf(const struct ObjectEvent *objectEvent);   // that rider's mount, or NULL
 #endif

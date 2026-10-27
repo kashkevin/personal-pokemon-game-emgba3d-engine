@@ -235,6 +235,7 @@ extern int NativeSelfTest_Legend(void);
 extern int NativeSelfTest_Shiny(void);
 extern int NativeSelfTest_WildItems(void);
 extern int NativeSelfTest_Ride(const char *sheetPath);
+extern int NativeSelfTest_Carriers(const char *sheetPath);
 extern int NativeSelfTest_FrontierSaves(void);
 extern int NativeSelfTest_Coins(void);
 extern int NativeSelfTest_Breeding(void);
@@ -1310,6 +1311,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_FrontierSaves()); // native_selftest_frontier.c (saving during Frontier challenges)
         else if (strcmp(argv[i], "--selftest-ride") == 0)
             exit(NativeSelfTest_Ride(i + 1 < argc && argv[i + 1][0] != '-' ? argv[i + 1] : NULL)); // native_selftest_ride.c (riding seats)
+        else if (strcmp(argv[i], "--selftest-carriers") == 0)
+            exit(NativeSelfTest_Carriers(i + 1 < argc && argv[i + 1][0] != '-' ? argv[i + 1] : NULL)); // native_selftest_carriers.c (Surf, Dive, Fly)
         else if (strcmp(argv[i], "--selftest-legend") == 0)
             exit(NativeSelfTest_Legend()); // src/platform/native_selftest_u29.c (Update 29)
         else if (strcmp(argv[i], "--dump-species-data") == 0 && i + 1 < argc)

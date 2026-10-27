@@ -20,6 +20,11 @@
 #include "agb_flash.h"
 #include "event_data.h"
 #include "constants/event_objects.h"
+#ifdef PORTABLE
+#include "field_carrier.h"
+#include "field_player_avatar.h"
+#endif
+#line 23 // gba-line
 
 static void ApplyNewEncryptionKeyToAllEncryptedData(u32 encryptionKey);
 
@@ -231,6 +236,13 @@ void SaveObjectEvents(void)
         // have no map template to come back to: never saved (KNOWN_ISSUES M15).
         if (Multiplayer_IsRuntimeLocalId(gObjectEvents[i].localId))
             gSaveBlock1Ptr->objectEvents[i].active = FALSE;
+        // The player under the water on the Pokemon that dove is drawn with a picture made at run time (field_carrier.c):
+        // saved as the original's underwater look, from which the game makes it again (and an older game reads it)
+        if (FieldCarrier_IsUnderwaterAvatarGraphicsId(gObjectEvents[i].graphicsId))
+        {
+            graphicsId = GetPlayerAvatarGraphicsIdByStateId(PLAYER_AVATAR_STATE_UNDERWATER);
+            gSaveBlock1Ptr->objectEvents[i].graphicsId = (graphicsId >> 8) | (graphicsId << 8);
+        }
 #endif
 #line 228 // gba-line
     }

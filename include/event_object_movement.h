@@ -159,6 +159,10 @@ void UpdateLightSprite(struct Sprite *);
 void TrySpawnObjectEvents(s16 cameraX, s16 cameraY);
 u8 CreateObjectGraphicsSpriteWithTag(u16 graphicsId, void (*callback)(struct Sprite *), s16 x, s16 y, u8 subpriority, u16 paletteTag);
 u8 CreateObjectGraphicsSprite(u16 graphicsId, void (*callback)(struct Sprite *), s16 x, s16 y, u8 subpriority);
+#ifdef PORTABLE
+// CreateObjectGraphicsSprite in the last free sprite slot (field_carrier.c): run after the object events in each frame
+u8 CreateObjectGraphicsSpriteAtEnd(u16 graphicsId, void (*callback)(struct Sprite *), s16 x, s16 y, u8 subpriority);
+#endif
 u8 TrySpawnObjectEvent(u8 localId, u8 mapNum, u8 mapGroup);
 u8 SpawnSpecialObjectEventParameterized(u16 graphicsId, u8 movementBehavior, u8 localId, s16 x, s16 y, u8 elevation);
 u8 SpawnSpecialObjectEvent(struct ObjectEventTemplate *objectEventTemplate);

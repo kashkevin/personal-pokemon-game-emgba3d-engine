@@ -13,6 +13,7 @@
 #include "trig.h"
 #include "wild_encounter_ow.h"
 #ifdef PORTABLE
+#include "field_carrier.h"
 #include "multiplayer_ride.h"
 #endif
 #line 15 // gba-line
@@ -1206,11 +1207,37 @@ static void UpdateAshFieldEffect_End(struct Sprite *sprite)
 #define sPrevX        data[6]
 #define sPrevY        data[7]
 
+#ifdef PORTABLE
+// The carrier's sprite data as FldEff_SurfBlob sets the blob's (its palette is its own)
+static void InitSurfCarrier(struct Sprite *sprite, u8 playerObjId)
+{
+    sprite->coordOffsetEnabled = TRUE;
+    sprite->sPlayerObjId = playerObjId;
+    sprite->sVelocity = -1;
+    sprite->sPrevX = -1;
+    sprite->sPrevY = -1;
+}
+
+#endif
+#line 1199 // gba-line
 u32 FldEff_SurfBlob(void)
 {
     u8 spriteId;
 
     SetSpritePosToOffsetMapCoords((s16 *)&gFieldEffectArguments[0], (s16 *)&gFieldEffectArguments[1], 8, 8);
+#ifdef PORTABLE
+    // The player's: the Pokemon carrying them, drawn as itself (field_carrier.c); the generic blob when it has no picture.
+    // An NPC partner's (follower_npc.c) stays the original's.
+    if (gFieldEffectArguments[2] == gPlayerAvatar.objectEventId
+     && (spriteId = FieldCarrier_CreateSurfSprite(gFieldEffectArguments[0], gFieldEffectArguments[1], 150,
+                                                  (gPlayerAvatar.flags & PLAYER_AVATAR_FLAG_UNDERWATER) != 0)) != MAX_SPRITES)
+    {
+        InitSurfCarrier(&gSprites[spriteId], gFieldEffectArguments[2]);
+        FieldEffectActiveListRemove(FLDEFF_SURF_BLOB);
+        return spriteId;
+    }
+#endif
+#line 1204 // gba-line
     spriteId = CreateSpriteAtEndUnchecked(gFieldEffectObjectTemplatePointers[FLDEFFOBJ_SURF_BLOB], gFieldEffectArguments[0], gFieldEffectArguments[1], 150);
     if (spriteId != MAX_SPRITES)
     {
@@ -1264,6 +1291,20 @@ void UpdateSurfBlobFieldEffect(struct Sprite *sprite)
 {
     struct ObjectEvent *playerObj = &gObjectEvents[sprite->sPlayerObjId];
     struct Sprite *playerSprite = &gSprites[playerObj->spriteId];
+#ifdef PORTABLE
+    // The Pokemon carrying the player (field_carrier.c): the original's rules - where it sits on the water, its bobbing
+    // and the player's with it, its priority - then its own swimming animation, its place under the rider's seat and
+    // its drawing order with the rider
+    if (FieldCarrier_IsSurfSprite(sprite))
+    {
+        SynchronizeSurfPosition(playerObj, sprite);
+        UpdateBobbingEffect(playerObj, playerSprite, sprite);
+        sprite->oam.priority = playerSprite->oam.priority;
+        FieldCarrier_UpdateSurfSprite(playerObj, playerSprite, sprite, GetSurfBlob_BobState(sprite) == BOB_PLAYER_AND_MON);
+        return;
+    }
+#endif
+#line 1257 // gba-line
     SynchronizeSurfAnim(playerObj, sprite);
     SynchronizeSurfPosition(playerObj, sprite);
     UpdateBobbingEffect(playerObj, playerSprite, sprite);
@@ -1358,6 +1399,29 @@ static void UpdateBobbingEffect(struct ObjectEvent *playerObj, struct Sprite *pl
 #define sBobY     data[1]
 #define sTimer    data[2]
 
+#ifdef PORTABLE
+// Under the water with the Pokemon that dove (field_carrier.c): made as the surf blob is, on the player's tile, carrying
+// them (it bobs as the original's underwater player does, at the same pace), the player drawn in their surfing pose as
+// the silhouette. FALSE when there is no carrier to show: the original's picture, the blob drawn in, is kept.
+bool32 StartUnderwaterSurfCarrier(struct ObjectEvent *player, u8 playerObjId)
+{
+    s16 x = player->currentCoords.x, y = player->currentCoords.y;
+    u8 spriteId;
+
+    SetSpritePosToOffsetMapCoords(&x, &y, 8, 8);
+    spriteId = FieldCarrier_CreateSurfSprite(x, y, 150, TRUE);
+    if (spriteId == MAX_SPRITES)
+        return FALSE;
+    InitSurfCarrier(&gSprites[spriteId], playerObjId);
+    ObjectEventSetGraphicsId(player, FIELD_CARRIER_GFX_UNDERWATER_RIDER);
+    ObjectEventTurn(player, player->movementDirection);
+    player->fieldEffectSpriteId = spriteId;
+    SetSurfBlob_BobState(spriteId, BOB_PLAYER_AND_MON);
+    return TRUE;
+}
+
+#endif
+#line 1351 // gba-line
 u8 StartUnderwaterSurfBlobBobbing(u8 blobSpriteId)
 {
     // Create a dummy sprite with its own callback

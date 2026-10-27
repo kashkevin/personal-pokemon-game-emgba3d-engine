@@ -19,6 +19,7 @@
 #include "constants/event_objects.h"
 #ifdef PORTABLE
 #include "character_customization.h"
+#include "field_carrier.h"
 #include "multiplayer_presence.h"
 #include "platform.h"
 #endif
@@ -556,6 +557,7 @@ void Multiplayer_Tick(void)
     if (gSaveBlock1Ptr == NULL || gSaveBlock2Ptr == NULL)
         return;
     MultiplayerPresence_Tick(); // a refused PLAYERS says why (multiplayer_presence.c)
+    FieldCarrier_Tick();        // a destroyed carrier sprite's palette freed (field_carrier.c)
 #endif
 #line 487 // gba-line
     ready = FieldReady();

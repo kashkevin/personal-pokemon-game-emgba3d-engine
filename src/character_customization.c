@@ -6,6 +6,7 @@
 #include "data.h"
 #include "event_data.h"
 #include "event_object_movement.h"
+#include "field_carrier.h"
 #include "field_player_avatar.h"
 #include "graphics.h"
 #include "link.h"
@@ -250,7 +251,11 @@ static const struct ObjectEventGraphicsInfo *CharacterInfo(u32 character, u32 ge
 const struct ObjectEventGraphicsInfo *CharCustom_ResolveGraphics(u16 *graphicsId)
 {
     u32 id = *graphicsId, state, gender, character;
+    const struct ObjectEventGraphicsInfo *carrierRider = FieldCarrier_ResolveGraphics(id);
 
+    // The player under the water on their carrier (field_carrier.c): their own surfing pose as the silhouette
+    if (carrierRider != NULL)
+        return carrierRider;
     if (id >= CC_GFX_BASE && id < CC_GFX_END)
     {
         // Another player's avatar: the character is in the id.
@@ -271,6 +276,8 @@ bool32 CharCustom_GetSpritePalette(u16 tag, struct SpritePalette *out)
 {
     const struct CharCustomCharacter *ch;
 
+    if (FieldCarrier_GetSpritePalette(tag, out))   // the carrier's rider silhouette, made at run time (field_carrier.c)
+        return TRUE;
     if (tag <= CC_PAL_TAG_BASE || tag >= CC_PAL_TAG_BASE + CC_CHARACTER_COUNT)
         return FALSE;
     ch = CharCustom_Get(tag - CC_PAL_TAG_BASE);

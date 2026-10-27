@@ -14,6 +14,9 @@ enum {
 
 u8 CreateWarpArrowSprite(void);
 u8 StartUnderwaterSurfBlobBobbing(u8 blobSpriteId);
+#ifdef PORTABLE
+bool32 StartUnderwaterSurfCarrier(struct ObjectEvent *player, u8 playerObjId); // under the water on the Pokemon that dove
+#endif
 void SetSurfBlob_BobState(u8 spriteId, u8 state);
 void SetSurfBlob_DontSyncAnim(u8 spriteId, bool8 dontSync);
 void SetSurfBlob_PlayerOffset(u8 spriteId, bool8 hasOffset, s16 offset);

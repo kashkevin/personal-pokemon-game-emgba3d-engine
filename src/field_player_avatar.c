@@ -37,6 +37,7 @@
 #include "constants/songs.h"
 #include "constants/trainer_types.h"
 #ifdef PORTABLE
+#include "field_carrier.h" // the Pokemon carrying the player under the water
 #include "field_move.h" // HMs from the PC boxes
 #endif
 #line 39 // gba-line
@@ -1183,6 +1184,12 @@ static void PlayerAvatarTransition_Underwater(struct ObjectEvent *objEvent)
     ObjectEventSetGraphicsId(objEvent, GetPlayerAvatarGraphicsIdByStateId(PLAYER_AVATAR_STATE_UNDERWATER));
     ObjectEventTurn(objEvent, objEvent->movementDirection);
     SetPlayerAvatarStateMask(PLAYER_AVATAR_FLAG_UNDERWATER);
+#ifdef PORTABLE
+    // the Pokemon that dove carrying the player, drawn as itself (field_effect_helpers.c, field_carrier.c)
+    if (StartUnderwaterSurfCarrier(objEvent, gPlayerAvatar.objectEventId))
+        return;
+#endif
+#line 1182 // gba-line
     objEvent->fieldEffectSpriteId = StartUnderwaterSurfBlobBobbing(objEvent->spriteId);
 }
 
@@ -1605,6 +1612,12 @@ u16 GetPlayerAvatarGraphicsIdByStateId(u8 state)
 
 enum Gender GetPlayerAvatarGenderByGraphicsId(u16 gfxId)
 {
+#ifdef PORTABLE
+    // the player under the water on their carrier (field_carrier.c): their own picture, of their gender
+    if (FieldCarrier_IsUnderwaterAvatarGraphicsId(gfxId))
+        return gPlayerAvatar.gender;
+#endif
+#line 1604 // gba-line
     switch (gfxId)
     {
     case OBJ_EVENT_GFX_MAY_NORMAL:
@@ -1689,6 +1702,12 @@ static u8 GetPlayerAvatarStateTransitionByGraphicsId(u16 graphicsId, u8 gender)
 {
     u8 i;
 
+#ifdef PORTABLE
+    // the player under the water on their carrier (field_carrier.c): the underwater state, as its original look's
+    if (FieldCarrier_IsUnderwaterAvatarGraphicsId(graphicsId))
+        return PLAYER_AVATAR_FLAG_UNDERWATER;
+#endif
+#line 1682 // gba-line
     for (i = 0; i < ARRAY_COUNT(sPlayerAvatarGfxToStateFlag[0]); i++)
     {
         if (sPlayerAvatarGfxToStateFlag[gender][i].graphicsId == graphicsId)

@@ -416,6 +416,63 @@ void MultiplayerRide_GetSeat(u16 mountGraphicsId, u16 riderGraphicsId, u32 facin
     *shift = facing == DIR_WEST ? seat->shiftWest : facing == DIR_EAST ? seat->shiftEast : 0;
 }
 
+// Facing the camera, the mount is drawn over its rider: the least lift that still shows the rider's top `visible` rows
+// over the mount's front picture where the rider's head is (0 when the pictures cannot be read). field_carrier.c: a
+// Pokemon carrying the player whose front picture stands higher than its back seen from the side (Wailord's body,
+// Lapras' neck) hid the rider whole at the side seat's height.
+u8 MultiplayerRide_GetFrontClearance(u16 mountGraphicsId, u16 riderGraphicsId, u8 visible)
+{
+    const struct ObjectEventGraphicsInfo *mount = GetObjectEventGraphicsInfo(mountGraphicsId);
+    const struct ObjectEventGraphicsInfo *rider = GetObjectEventGraphicsInfo(riderGraphicsId);
+    u32 mountFrame, riderFrame;
+    bool32 mountFlip, riderFlip;
+    s32 x, y, riderTop = -1, headLeft, headRight, top = -1, need;
+
+    if (!FacePicture(mount, ANIM_STD_FACE_SOUTH, &mountFrame, &mountFlip)
+     || !FacePicture(rider, ANIM_STD_FACE_SOUTH, &riderFrame, &riderFlip))
+        return 0;
+    // the rider's top row, and its head: the columns drawn in its top `visible` rows
+    headLeft = rider->width;
+    headRight = -1;
+    for (y = 0; y < rider->height; y++)
+    {
+        for (x = 0; x < rider->width; x++)
+        {
+            if (!FrameOpaque(rider, riderFrame, riderFlip, x, y))
+                continue;
+            if (riderTop < 0)
+                riderTop = y;
+            if (y < riderTop + visible)
+            {
+                headLeft = min(headLeft, x);
+                headRight = max(headRight, x);
+            }
+        }
+    }
+    if (riderTop < 0)
+        return 0;
+    // the mount's top row over those columns (both pictures centred on one column)
+    for (y = 0; y < mount->height && top < 0; y++)
+    {
+        for (x = headLeft; x <= headRight; x++)
+        {
+            s32 mx = x - rider->width / 2 + mount->width / 2;
+
+            if (mx >= 0 && mx < mount->width && FrameOpaque(mount, mountFrame, mountFlip, mx, y))
+            {
+                top = y;
+                break;
+            }
+        }
+    }
+    if (top < 0)
+        return 0;
+    // both stand on their bottom rows, the rider lifted: its top (lift + its height above its bottom) clears the mount's
+    // top over its head by `visible` rows
+    need = (mount->height - 1 - top) + visible - (rider->height - 1 - riderTop);
+    return need < 0 ? 0 : need > 63 ? 63 : need;
+}
+
 // The rider (the local player on its mount, or another player's avatar on theirs): no shadow of its own (the mount's is
 // the one on the ground), field_effect_helpers.c UpdateShadowFieldEffect.
 bool32 MultiplayerRide_IsRider(const struct ObjectEvent *objectEvent)

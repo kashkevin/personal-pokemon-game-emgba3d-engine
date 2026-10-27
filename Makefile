@@ -312,9 +312,9 @@ C_SRCS_IN := $(wildcard $(C_SUBDIR)/*.c $(C_SUBDIR)/*/*.c $(C_SUBDIR)/*/*/*.c)
 # character selection), multiplayer_spawns.c (shared wild Pokemon) and multiplayer_extras.c (Secret Bases) and multiplayer_ladder.c (co-op ladder battles)
 # and multiplayer_rival.c (Update 31 rival checkpoints and the streamlined introduction) and multiplayer_presence.c (why
 # a player is off the field, for the others' Players lists) and multiplayer_soft_reset.c (Update 32 START > PLAYER >
-# RESET) and tower_legends.c (Battle Tower: Legends). Even an empty object reorders the linker's interworking stubs and
-# changes the release ROM.
-C_SRCS := $(filter-out $(C_SUBDIR)/platform/% $(C_SUBDIR)/diorama/% $(C_SUBDIR)/data/diorama/% $(C_SUBDIR)/native_ui/% $(C_SUBDIR)/character_customization.c $(C_SUBDIR)/multiplayer_spawns.c $(C_SUBDIR)/multiplayer_extras.c $(C_SUBDIR)/multiplayer_ladder.c $(C_SUBDIR)/multiplayer_rival.c $(C_SUBDIR)/multiplayer_presence.c $(C_SUBDIR)/multiplayer_soft_reset.c $(C_SUBDIR)/tower_legends.c,$(foreach src,$(C_SRCS_IN),$(if $(findstring .inc.c,$(src)),,$(src))))
+# RESET) and tower_legends.c (Battle Tower: Legends) and field_carrier.c (the Pokemon carrying the player on Surf, Dive and
+# Fly). Even an empty object reorders the linker's interworking stubs and changes the release ROM.
+C_SRCS := $(filter-out $(C_SUBDIR)/platform/% $(C_SUBDIR)/diorama/% $(C_SUBDIR)/data/diorama/% $(C_SUBDIR)/native_ui/% $(C_SUBDIR)/character_customization.c $(C_SUBDIR)/multiplayer_spawns.c $(C_SUBDIR)/multiplayer_extras.c $(C_SUBDIR)/multiplayer_ladder.c $(C_SUBDIR)/multiplayer_rival.c $(C_SUBDIR)/multiplayer_presence.c $(C_SUBDIR)/multiplayer_soft_reset.c $(C_SUBDIR)/tower_legends.c $(C_SUBDIR)/field_carrier.c,$(foreach src,$(C_SRCS_IN),$(if $(findstring .inc.c,$(src)),,$(src))))
 # The four-player free-for-all rules (battle_ffa.c) exist in the PC build and the test ROM only. Even an empty object would
 # change the order the linker places its interworking veneers in, and the release ROM must stay byte-identical.
 ifneq ($(TEST),1)

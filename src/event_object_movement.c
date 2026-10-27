@@ -2047,6 +2047,44 @@ u8 CreateObjectGraphicsSprite(u16 graphicsId, void (*callback)(struct Sprite *),
     return CreateObjectGraphicsSpriteWithTag(graphicsId, callback, x, y, subpriority, TAG_NONE);
 //CreateObjectGraphicsSprite is used in a load of places that don't handle it returning max_sprites, so this will trigger a fatal_assertf. It should be refactored to not do that!
 }
+#ifdef PORTABLE
+
+// CreateObjectGraphicsSprite, the sprite made in the last free slot as the original surf blob is (CreateSpriteAtEnd):
+// the sprites' callbacks run in slot order, so a sprite following an object event (the Pokemon carrying the player,
+// field_carrier.c) reads where that object is this frame, not where it was the frame before. MAX_SPRITES if none is free.
+u8 CreateObjectGraphicsSpriteAtEnd(u16 graphicsId, void (*callback)(struct Sprite *), s16 x, s16 y, u8 subpriority)
+{
+    struct SpriteTemplate spriteTemplate;
+    const struct SubspriteTable *subspriteTables;
+    const struct ObjectEventGraphicsInfo *graphicsInfo = GetObjectEventGraphicsInfo(graphicsId);
+    u8 spriteId;
+
+    CopyObjectGraphicsInfoToSpriteTemplate(graphicsId, callback, &spriteTemplate, &subspriteTables);
+    if (OW_GFX_COMPRESS && graphicsInfo->compressed)
+        spriteTemplate.tileTag = LoadSheetGraphicsInfo(graphicsInfo, graphicsId, NULL);
+    if (spriteTemplate.paletteTag == OBJ_EVENT_PAL_TAG_DYNAMIC)
+    {
+        u32 paletteNum = LoadDynamicFollowerPaletteFromGraphicsId(graphicsId, &spriteTemplate);
+        spriteTemplate.paletteTag = GetSpritePaletteTagByPaletteNum(paletteNum);
+    }
+    else if (spriteTemplate.paletteTag != TAG_NONE)
+    {
+        LoadObjectEventPalette(spriteTemplate.paletteTag);
+    }
+    spriteId = CreateSpriteAtEndUnchecked(&spriteTemplate, x, y, subpriority);
+    if (spriteId < MAX_SPRITES && subspriteTables != NULL)
+    {
+        struct Sprite *sprite = &gSprites[spriteId];
+
+        if (OW_GFX_COMPRESS && graphicsInfo->compressed)
+            sprite->sheetSpan = GetSpanPerImage(sprite->oam.shape, sprite->oam.size);
+        SetSubspriteTables(sprite, subspriteTables);
+        sprite->subspriteMode = SUBSPRITES_IGNORE_PRIORITY;
+    }
+    return spriteId;
+}
+#endif
+#line 2045 // gba-line
 
 #define sVirtualObjId   data[0]
 #define sVirtualObjElev data[1]

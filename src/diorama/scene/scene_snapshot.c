@@ -1299,7 +1299,17 @@ static void CopySurfBlob(struct DioramaSceneSnapshot *snapshot)
         return;
     }
     snapshot->surfBlobOffsetX = copy->screenX - (playerSprite->x + playerSprite->x2);
-    snapshot->surfBlobOffsetY = copy->screenY - (playerSprite->y + playerSprite->y2);
+    /* bottom row from the player's: the cards stand on their bottom rows (DrawBillboard), and the Pokemon carrying the
+     * player (field_carrier.c) need not be the player's height as the original blob is */
+    {
+        u8 blobWidth, blobHeight, playerWidth, playerHeight;
+
+        if (DioramaSprite_GetDimensions(sprite->oam.shape, sprite->oam.size, &blobWidth, &blobHeight)
+         && DioramaSprite_GetDimensions(playerSprite->oam.shape, playerSprite->oam.size, &playerWidth, &playerHeight))
+            snapshot->surfBlobOffsetY = (copy->screenY + blobHeight / 2) - (playerSprite->y + playerSprite->y2 + playerHeight / 2);
+        else
+            snapshot->surfBlobOffsetY = copy->screenY - (playerSprite->y + playerSprite->y2);
+    }
     snapshot->surfBlobValid = TRUE;
 }
 

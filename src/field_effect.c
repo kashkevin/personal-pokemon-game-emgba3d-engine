@@ -41,6 +41,7 @@
 #include "constants/rgb.h"
 #include "constants/songs.h"
 #ifdef PORTABLE
+#include "field_carrier.h" // the Pokemon carrying the player on Surf, Dive and Fly
 #include "field_move.h" // HMs from the PC boxes
 #endif
 #line 43 // gba-line
@@ -2146,6 +2147,10 @@ bool8 FldEff_UseDive(void)
     u8 taskId;
     taskId = CreateTask(Task_UseDive, 0xff);
     gTasks[taskId].data[15] = gFieldEffectArguments[0];
+#ifdef PORTABLE
+    FieldCarrier_SetWater(gFieldEffectArguments[0]);   // it carries the player under or back up (field_carrier.c)
+#endif
+#line 2136 // gba-line
     gTasks[taskId].data[14] = gFieldEffectArguments[1];
     Task_UseDive(taskId);
     return FALSE;
@@ -3378,6 +3383,10 @@ u8 FldEff_UseSurf(void)
 {
     u8 taskId = CreateTask(Task_SurfFieldEffect, 0xff);
     gTasks[taskId].tMonId = gFieldEffectArguments[0];
+#ifdef PORTABLE
+    FieldCarrier_SetWater(gFieldEffectArguments[0]);   // the surf sprite is this Pokemon (field_carrier.c)
+#endif
+#line 3342 // gba-line
     Overworld_ClearSavedMusic();
     Overworld_ChangeMusicTo(IS_FRLG ? MUS_RG_SURF : MUS_SURF);
     return FALSE;
@@ -3515,10 +3524,25 @@ u8 FldEff_RayquazaSpotlight(void)
 
 u8 FldEff_NPCFlyOut(void)
 {
+#ifdef PORTABLE
+    // the flier of the NPC's own team (field_carrier.c), else the original's bird
+    u8 spriteId = FieldCarrier_CreateFlySprite(FIELD_CARRIER_NPC, 0x78, 0, 1);
+    struct Sprite *sprite;
+
+    if (spriteId == MAX_SPRITES)
+    {
+        spriteId = CreateSprite(gFieldEffectObjectTemplatePointers[FLDEFFOBJ_BIRD], 0x78, 0, 1);
+        gSprites[spriteId].oam.paletteNum = LoadPlayerObjectEventPalette(gSaveBlock2Ptr->playerGender);
+    }
+    sprite = &gSprites[spriteId];
+#else
+#line 3479 // gba-line
     u8 spriteId = CreateSprite(gFieldEffectObjectTemplatePointers[FLDEFFOBJ_BIRD], 0x78, 0, 1);
     struct Sprite *sprite = &gSprites[spriteId];
 
     sprite->oam.paletteNum = LoadPlayerObjectEventPalette(gSaveBlock2Ptr->playerGender);
+#endif
+#line 3483 // gba-line
     sprite->oam.priority = 1;
     sprite->callback = SpriteCB_NPCFlyOut;
     sprite->data[1] = gFieldEffectArguments[0];
@@ -3562,6 +3586,10 @@ u8 FldEff_UseFly(void)
 {
     u8 taskId = CreateTask(Task_FlyOut, 254);
     gTasks[taskId].tMonId = gFieldEffectArguments[0];
+#ifdef PORTABLE
+    FieldCarrier_SetFlyer(gFieldEffectArguments[0]);   // the bird is this Pokemon, out and in (field_carrier.c)
+#endif
+#line 3526 // gba-line
     return 0;
 }
 
@@ -3699,6 +3727,18 @@ static u8 CreateFlyBirdSprite(void)
 {
     u8 spriteId;
     struct Sprite *sprite;
+#ifdef PORTABLE
+    // the Pokemon that used Fly, drawn as itself (field_carrier.c), else the original's bird
+    spriteId = FieldCarrier_CreateFlySprite(FIELD_CARRIER_PLAYER, 0xff, 0xb4, 0x1);
+    if (spriteId != MAX_SPRITES)
+    {
+        sprite = &gSprites[spriteId];
+        sprite->oam.priority = 1;
+        sprite->callback = SpriteCB_FlyBirdLeaveBall;
+        return spriteId;
+    }
+#endif
+#line 3663 // gba-line
     spriteId = CreateSprite(gFieldEffectObjectTemplatePointers[FLDEFFOBJ_BIRD], 0xff, 0xb4, 0x1);
     sprite = &gSprites[spriteId];
     sprite->oam.paletteNum = LoadPlayerObjectEventPalette(gSaveBlock2Ptr->playerGender);
@@ -3766,6 +3806,10 @@ static void SpriteCB_FlyBirdLeaveBall(struct Sprite *sprite)
         sprite->data[1] += (sprite->data[2] >> 8);
         sprite->x2 = Cos(sprite->data[1], 0x78);
         sprite->y2 = Sin(sprite->data[1], 0x78);
+#ifdef PORTABLE
+        FieldCarrier_ShiftFlySprite(sprite, NULL);   // its whole flight drawn where its back carries the rider (field_carrier.c)
+#endif
+#line 3730 // gba-line
         if (sprite->data[2] < 0x800)
         {
             sprite->data[2] += 0x60;
@@ -3798,6 +3842,11 @@ static void SpriteCB_FlyBirdSwoopDown(struct Sprite *sprite)
     {
         sprite->sAnimCompleted = TRUE;
     }
+#ifdef PORTABLE
+    // the rider stays on the original's path, on its back (field_carrier.c)
+    FieldCarrier_ShiftFlySprite(sprite, sprite->sPlayerSpriteId != MAX_SPRITES ? &gSprites[sprite->sPlayerSpriteId] : NULL);
+#endif
+#line 3762 // gba-line
 }
 
 static void SpriteCB_FlyBirdReturnToBall(struct Sprite *sprite)
@@ -3822,6 +3871,10 @@ static void SpriteCB_FlyBirdReturnToBall(struct Sprite *sprite)
         sprite->data[1] &= 0xff;
         sprite->x2 = Cos(sprite->data[1], 0x20);
         sprite->y2 = Sin(sprite->data[1], 0x78);
+#ifdef PORTABLE
+        FieldCarrier_ShiftFlySprite(sprite, NULL);
+#endif
+#line 3786 // gba-line
         if (sprite->data[2] > 0x100)
         {
             sprite->data[2] -= sprite->data[4];

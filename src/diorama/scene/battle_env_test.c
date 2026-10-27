@@ -68,6 +68,8 @@
 #include "constants/multiplayer_rival.h"
 #include "platform/coin_shop.h"
 #include "diorama/battle_env_test.h"
+#include "field_carrier.h"
+#include "field_effect_helpers.h"
 #include "tower_legends.h"
 #include "battle_util.h"
 #include "move.h"
@@ -250,6 +252,7 @@ static struct
     char box[256];
     int boxFirst[2];
     bool hmLog, hmLogged;
+    bool carrierLog;   /* PKMN_TEST_CARRIER_LOG=1: CarrierLogField */
     int hmSeen[13], hmShots;
     /* PKMN_TEST_MOVE_LOG=1: on the field and in its menus, "move field: lead S moves m:pp/max,..." whenever the lead's
        moves or their PP change (tools/battle_env/move_switch_check.py: MOVES in the party menu); what was last logged */
@@ -454,6 +457,7 @@ static void Init(void)
         SDL_strlcpy(s.box, value, sizeof(s.box));
     s.boxFirst[0] = -1;
     s.hmLog = EnvInt("PKMN_TEST_HM_LOG", 0) != 0;
+    s.carrierLog = EnvInt("PKMN_TEST_CARRIER_LOG", 0) != 0;
     value = SDL_getenv("PKMN_TEST_FOE");
     if (value != NULL)
         SDL_strlcpy(s.foe, value, sizeof(s.foe));
@@ -1392,6 +1396,63 @@ static void HmLogField(void)
     TestLog("Battle env test: hm field: frame %d cut-in %d species %d shiny %d personality %08x surfing %d map %d.%d at "
             "%d,%d facing %d last talked %d flag %d party %s box %d", s.fieldKeyFrames, now[0], now[1], now[2],
             (unsigned)now[3], now[4], now[11] >> 8, now[11] & 0xFF, now[5], now[6], now[12], now[7], now[8], party, now[10]);
+}
+
+/* PKMN_TEST_CARRIER_LOG=1 (the Pokemon carrying the player on Surf, Dive and Fly, field_carrier.c), while
+ * PKMN_TEST_FIELD_KEYS run: "carrier: ..." with the field key frame whenever the surf sprite or the flyer changes -
+ * whether it is the real Pokemon, its animation and the place in it, its place and the player's (x, y, y2 and the
+ * difference of their bottom rows), drawing priorities, palette tag - and "flyer: ..." the same for the bird. */
+static void CarrierLogField(void)
+{
+    static int sSeen[2][14];
+    static bool sLogged[2];
+    u8 water, fly;
+    const struct ObjectEvent *player;
+    const struct Sprite *ps;
+
+    if (!s.carrierLog || gMain.inBattle || !s.fieldKeysActive || gSaveBlock1Ptr == NULL
+     || gPlayerAvatar.objectEventId >= OBJECT_EVENTS_COUNT)
+        return;
+    player = &gObjectEvents[gPlayerAvatar.objectEventId];
+    ps = &gSprites[player->spriteId];
+    FieldCarrier_GetSpriteIds(&water, &fly);
+    for (int k = 0; k < 2; k++)
+    {
+        u8 id = k == 0 ? (player->fieldEffectSpriteId < MAX_SPRITES && gSprites[player->fieldEffectSpriteId].inUse
+                          && gSprites[player->fieldEffectSpriteId].callback == UpdateSurfBlobFieldEffect
+                          ? player->fieldEffectSpriteId : MAX_SPRITES)
+                       : fly;
+        const struct Sprite *c = &gSprites[id < MAX_SPRITES ? id : 0];
+        int now[14];
+
+        memset(now, 0, sizeof(now));
+        now[0] = id < MAX_SPRITES;
+        if (now[0])
+        {
+            now[1] = k == 0 ? id == water : 1;
+            now[2] = c->animNum;
+            now[3] = c->animCmdIndex;
+            now[4] = c->x + c->x2;
+            now[5] = c->y + c->y2;
+            now[6] = (c->y + c->y2 - c->centerToCornerVecY) - (ps->y + ps->y2 - ps->centerToCornerVecY);
+            now[7] = (c->x + c->x2) - (ps->x + ps->x2);
+            now[8] = c->oam.priority;
+            now[9] = c->subpriority;
+            now[10] = ps->subpriority;
+            now[11] = GetSpritePaletteTagByPaletteNum(c->oam.paletteNum);
+            now[12] = ps->animNum;
+            now[13] = player->graphicsId;
+        }
+        if (sLogged[k] && memcmp(now, sSeen[k], sizeof(now)) == 0)
+            continue;
+        sLogged[k] = true;
+        memcpy(sSeen[k], now, sizeof(now));
+        TestLog("Battle env test: %s: frame %d sprite %d real %d anim %d cmd %d at %d,%d bottom-from-player %+d "
+                "x-from-player %+d priority %d sub %d player sub %d palette 0x%04x player anim %d gfx 0x%04x at %d,%d",
+                k == 0 ? "carrier" : "flyer", s.fieldKeyFrames, now[0] ? id : -1, now[1], now[2], now[3], now[4], now[5],
+                now[6], now[7], now[8], now[9], now[10], (unsigned)now[11], now[12], (unsigned)now[13],
+                gSaveBlock1Ptr->pos.x, gSaveBlock1Ptr->pos.y);
+    }
 }
 
 /* PKMN_TEST_BAG_LOG off a battle: "bag field: money M item I count C [item I count C ...]" whenever the money or one of
@@ -3835,6 +3896,7 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
     BreedLogField();
     BagLogField();
     HmLogField();
+    CarrierLogField();
     MoveLogField();
     SparkleLogField();
     OweBattleField();
