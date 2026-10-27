@@ -36,6 +36,18 @@ void AssignUsableGimmicks(void)
 // Returns whether a battler is able to use a gimmick. Checks consumption and gimmick specific functions.
 bool32 CanActivateGimmick(enum BattlerId battler, enum Gimmick gimmick)
 {
+#ifdef PORTABLE
+    // EmeraldTogether is a Gen 6 game: Mega Evolution is its only battle gimmick (PROJECT_SPEC: Z-Moves, Dynamax and
+    // Terastallization are not part of it). The player can never reach the others (no Z-Power Ring, Dynamax Band or
+    // Tera Orb), but a computer trainer's Pokemon that were not made from trainer data - the Battle Frontier's and the
+    // Battle Tents' trainers, Trainer Hill's, secret bases', the Battle Pyramid's wild Pokemon - could Dynamax (and
+    // Terastallize after it). The Dynamax script reads address 0 (it names B_SHOW_DYNAMAX_MESSAGE as a byte's address),
+    // which closed the PC game in the middle of those battles (the owner's request of 2026-10-27: every building
+    // minigame playable).
+    if (gimmick != GIMMICK_MEGA)
+        return FALSE;
+#endif
+#line 39 // gba-line
     return gGimmicksInfo[gimmick].CanActivate != NULL && gGimmicksInfo[gimmick].CanActivate(battler);
 }
 
