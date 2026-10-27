@@ -1763,3 +1763,84 @@ int NativeSelfTest_Mints(void)
     printf("selftest-mints: %d checks, %d failed\n", sChecks, sFailures);
     return sFailures == 0 ? 0 : 1;
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// --selftest-evo-items (the full item audit, the items a Pokemon evolves by holding when it is traded): the evolution a
+// trade starts (GetEvolutionTargetSpecies in EVO_MODE_TRADE, what the trade's evolution asks; CHECK_EVO leaves the
+// Pokemon as it was) for the Gen 1-6 trade evolutions, with their item and without it, with another's item, with an
+// Everstone (it stops a trade evolution, but not Kadabra's from Gen 4: P_KADABRA_EVERSTONE), and the Karrablast and
+// Shelmet pair, which evolve when traded for each other. The trade itself (a link or a world's trade) is not part of it.
+
+static enum Species TradeTarget(enum Species species, u16 held, struct Pokemon *partner)
+{
+    struct Pokemon *mon = BagMon(species, 40, MON_MALE, 100);
+    bool32 canStopEvo = TRUE;
+
+    SetMonData(mon, MON_DATA_HELD_ITEM, &held);
+    return GetEvolutionTargetSpecies(mon, EVO_MODE_TRADE, ITEM_NONE, partner, &canStopEvo, CHECK_EVO);
+}
+
+int NativeSelfTest_EvoItems(void)
+{
+    static const struct { u16 species; u16 held; u16 want; const char *what; } sTrades[] = {
+        {SPECIES_KADABRA, ITEM_NONE, SPECIES_ALAKAZAM, "Kadabra -> Alakazam"},
+        {SPECIES_MACHOKE, ITEM_NONE, SPECIES_MACHAMP, "Machoke -> Machamp"},
+        {SPECIES_GRAVELER, ITEM_NONE, SPECIES_GOLEM, "Graveler -> Golem (not Alola's)"},
+        {SPECIES_HAUNTER, ITEM_NONE, SPECIES_GENGAR, "Haunter -> Gengar"},
+        {SPECIES_BOLDORE, ITEM_NONE, SPECIES_GIGALITH, "Boldore -> Gigalith"},
+        {SPECIES_GURDURR, ITEM_NONE, SPECIES_CONKELDURR, "Gurdurr -> Conkeldurr"},
+        {SPECIES_PHANTUMP, ITEM_NONE, SPECIES_TREVENANT, "Phantump -> Trevenant"},
+        {SPECIES_ONIX, ITEM_METAL_COAT, SPECIES_STEELIX, "Onix holding a Metal Coat -> Steelix"},
+        {SPECIES_SCYTHER, ITEM_METAL_COAT, SPECIES_SCIZOR, "Scyther holding a Metal Coat -> Scizor"},
+        {SPECIES_POLIWHIRL, ITEM_KINGS_ROCK, SPECIES_POLITOED, "Poliwhirl holding a King's Rock -> Politoed"},
+        {SPECIES_SLOWPOKE, ITEM_KINGS_ROCK, SPECIES_SLOWKING, "Slowpoke holding a King's Rock -> Slowking"},
+        {SPECIES_SEADRA, ITEM_DRAGON_SCALE, SPECIES_KINGDRA, "Seadra holding a Dragon Scale -> Kingdra"},
+        {SPECIES_PORYGON, ITEM_UPGRADE, SPECIES_PORYGON2, "Porygon holding an Up-Grade -> Porygon2"},
+        {SPECIES_PORYGON2, ITEM_DUBIOUS_DISC, SPECIES_PORYGON_Z, "Porygon2 holding a Dubious Disc -> Porygon-Z"},
+        {SPECIES_RHYDON, ITEM_PROTECTOR, SPECIES_RHYPERIOR, "Rhydon holding a Protector -> Rhyperior"},
+        {SPECIES_ELECTABUZZ, ITEM_ELECTIRIZER, SPECIES_ELECTIVIRE, "Electabuzz holding an Electirizer -> Electivire"},
+        {SPECIES_MAGMAR, ITEM_MAGMARIZER, SPECIES_MAGMORTAR, "Magmar holding a Magmarizer -> Magmortar"},
+        {SPECIES_DUSCLOPS, ITEM_REAPER_CLOTH, SPECIES_DUSKNOIR, "Dusclops holding a Reaper Cloth -> Dusknoir"},
+        {SPECIES_CLAMPERL, ITEM_DEEP_SEA_TOOTH, SPECIES_HUNTAIL, "Clamperl holding a Deep Sea Tooth -> Huntail"},
+        {SPECIES_CLAMPERL, ITEM_DEEP_SEA_SCALE, SPECIES_GOREBYSS, "Clamperl holding a Deep Sea Scale -> Gorebyss"},
+        {SPECIES_FEEBAS, ITEM_PRISM_SCALE, SPECIES_MILOTIC, "Feebas holding a Prism Scale -> Milotic"},
+        {SPECIES_SWIRLIX, ITEM_WHIPPED_DREAM, SPECIES_SLURPUFF, "Swirlix holding a Whipped Dream -> Slurpuff"},
+        {SPECIES_SPRITZEE, ITEM_SACHET, SPECIES_AROMATISSE, "Spritzee holding a Sachet -> Aromatisse"},
+        {SPECIES_ONIX, ITEM_NONE, SPECIES_NONE, "Onix holding nothing: no evolution"},
+        {SPECIES_CLAMPERL, ITEM_NONE, SPECIES_NONE, "Clamperl holding nothing: no evolution"},
+        {SPECIES_SEADRA, ITEM_METAL_COAT, SPECIES_NONE, "Seadra holding a Metal Coat (another's item): no evolution"},
+        {SPECIES_PORYGON, ITEM_DUBIOUS_DISC, SPECIES_NONE, "Porygon holding a Dubious Disc (Porygon2's): no evolution"},
+        {SPECIES_HAUNTER, ITEM_EVERSTONE, SPECIES_NONE, "Haunter holding an Everstone: no evolution"},
+        {SPECIES_KADABRA, ITEM_EVERSTONE, SPECIES_ALAKAZAM, "Kadabra holding an Everstone: still Alakazam (Gen 4+)"},
+        {SPECIES_PIKACHU, ITEM_NONE, SPECIES_NONE, "Pikachu: no trade evolution"},
+    };
+    struct Pokemon partner;
+    enum Species target;
+    u32 i;
+    char line[200];
+
+    Setup();
+    UseMap(MAP_ROUTE101);
+    printf("selftest-evo-items: the Gen 1-6 trade evolutions and their items through GetEvolutionTargetSpecies\n");
+    for (i = 0; i < ARRAY_COUNT(sTrades); i++)
+    {
+        target = TradeTarget(sTrades[i].species, sTrades[i].held, NULL);
+        snprintf(line, sizeof(line), "%s (species %u, rule %u)", sTrades[i].what, (unsigned)target, sTrades[i].want);
+        Expect(line, target == sTrades[i].want);
+    }
+    CreateMon(&partner, SPECIES_SHELMET, 30, GetMonPersonality(SPECIES_SHELMET, MON_MALE, NATURE_HARDY, 0), OTID_STRUCT_PLAYER_ID);
+    target = TradeTarget(SPECIES_KARRABLAST, ITEM_NONE, &partner);
+    snprintf(line, sizeof(line), "Karrablast traded for a Shelmet -> Escavalier (species %u)", (unsigned)target);
+    Expect(line, target == SPECIES_ESCAVALIER);
+    CreateMon(&partner, SPECIES_KARRABLAST, 30, GetMonPersonality(SPECIES_KARRABLAST, MON_MALE, NATURE_HARDY, 0), OTID_STRUCT_PLAYER_ID);
+    target = TradeTarget(SPECIES_SHELMET, ITEM_NONE, &partner);
+    snprintf(line, sizeof(line), "Shelmet traded for a Karrablast -> Accelgor (species %u)", (unsigned)target);
+    Expect(line, target == SPECIES_ACCELGOR);
+    CreateMon(&partner, SPECIES_PIKACHU, 30, GetMonPersonality(SPECIES_PIKACHU, MON_MALE, NATURE_HARDY, 0), OTID_STRUCT_PLAYER_ID);
+    target = TradeTarget(SPECIES_KARRABLAST, ITEM_NONE, &partner);
+    snprintf(line, sizeof(line), "Karrablast traded for a Pikachu: no evolution (species %u)", (unsigned)target);
+    Expect(line, target == SPECIES_NONE);
+
+    printf("selftest-evo-items: %d checks, %d failed\n", sChecks, sFailures);
+    return sFailures == 0 ? 0 : 1;
+}
