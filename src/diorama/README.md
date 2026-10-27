@@ -600,7 +600,10 @@ of terraced walls; Route 112's rock was still a maze of walls.
   ledge's record height and down again, and its shadow went under the bank and stood off the
   ground before it. While a walker jumps a ledge its shadow lies on what is under it, the
   bank or the cell's ground. The jump itself is the GBA's (its arc on the walker's card).
-  Ledges read no pixels for their shape now (`CellReadsPixels`).
+  A walker on a ledge's cell stands on its crest (`sprite_frame.c` `BuildPose`,
+  `DioramaRules_LedgeCrest`): another player and their Pokemon are replayed across a ledge a step
+  at a time (`multiplayer.c`, `multiplayer_world.c` `StepToward`) and stood at its record's
+  height, two voxels into the crest. Ledges read no pixels for their shape now (`CellReadsPixels`).
 * Not covered: the 37 slopes drawn flat (Jagged Pass's and the Safari Zone's bumpy slopes,
   the muddy slopes of Routes 115 and 119, Granite Cave and the Safari Zone, Sootopolis
   Gym's slides) have both ends on one level in the terrace solver's levels; they need it to
