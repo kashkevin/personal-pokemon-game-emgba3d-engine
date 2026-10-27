@@ -13,6 +13,7 @@
 #include "daycare.h"
 #include "event_data.h"
 #include "item.h"
+#include "item_menu.h"
 #include "load_save.h"
 #include "malloc.h"
 #include "mp_wild_random.h"
@@ -2086,5 +2087,124 @@ int NativeSelfTest_Rods(void)
     Expect(line, maps > 0 && badSlots == 0);
 
     printf("selftest-rods: %d checks, %d failed\n", sChecks, sFailures);
+    return sFailures == 0 ? 0 : 1;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// --selftest-form-items (the full item audit, the Gen 3-6 key items that change a Pokemon's form from the Bag): the
+// form each one gives, through TryFormChange(mon, FORM_CHANGE_ITEM_USE, ...) with the item in gSpecialVar_ItemId, the
+// call the party menu makes (party_menu.c TryItemUseFormChange) before its animation: the Meteorite cycling Deoxys's four
+// forms (ORAS), the Gracidea making Shaymin Sky by day and not at night or frozen, the Reveal Glass turning the forces of
+// nature between their Incarnate and Therian forms both ways, the Prison Bottle unbinding Hoopa, and each item doing
+// nothing for another species or an Egg. The DNA Splicers' fusion is a party-menu task of its own (two Pokemon and the
+// PC's fusion storage) and is not part of it; the time of day is set with the overworld's own override (SetTimeOfDay).
+
+static bool32 UseFormItem(struct Pokemon *mon, u16 item)
+{
+    bool32 changed;
+
+    gSpecialVar_ItemId = item;
+    changed = TryFormChange(mon, FORM_CHANGE_ITEM_USE, B_TRAINER_PLAYER);
+    gSpecialVar_ItemId = ITEM_NONE;
+    return changed;
+}
+
+static void ExpectForm(const char *what, struct Pokemon *mon, u16 item, bool32 wantChanged, enum Species want)
+{
+    char line[200];
+    bool32 changed = UseFormItem(mon, item);
+    enum Species species = GetMonData(mon, MON_DATA_SPECIES);
+
+    snprintf(line, sizeof(line), "%s: %s, species %u (rule %u)", what, changed ? "changed" : "no effect",
+             (unsigned)species, (unsigned)want);
+    Expect(line, changed == wantChanged && species == want);
+}
+
+static struct Pokemon *FormMon(enum Species species)
+{
+    return BagMon(species, 50, MON_MALE, 70);
+}
+
+int NativeSelfTest_FormItems(void)
+{
+    static const struct { u16 incarnate, therian; const char *name; } sForces[] = {
+        {SPECIES_TORNADUS_INCARNATE, SPECIES_TORNADUS_THERIAN, "Tornadus"},
+        {SPECIES_THUNDURUS_INCARNATE, SPECIES_THUNDURUS_THERIAN, "Thundurus"},
+        {SPECIES_LANDORUS_INCARNATE, SPECIES_LANDORUS_THERIAN, "Landorus"},
+    };
+    struct Pokemon *mon;
+    struct Pokemon stored;
+    char line[200];
+    u32 attack, status = STATUS1_FREEZE;
+    bool8 egg = TRUE;
+    u32 i;
+
+    Setup();
+    UseMap(MAP_ROUTE101);
+    printf("selftest-form-items: the key items that change a Pokemon's form, through TryFormChange\n");
+
+    mon = FormMon(SPECIES_DEOXYS_NORMAL);
+    attack = GetMonData(mon, MON_DATA_ATK);
+    ExpectForm("Meteorite on Deoxys (Normal)", mon, ITEM_METEORITE, TRUE, SPECIES_DEOXYS_ATTACK);
+    snprintf(line, sizeof(line), "its stats worked out again for the Attack form: Attack %u -> %u", (unsigned)attack,
+             (unsigned)GetMonData(mon, MON_DATA_ATK));
+    Expect(line, GetMonData(mon, MON_DATA_ATK) > attack);
+    BoxMonToMon(&mon->box, &stored);
+    Expect("the Attack form kept in its stored data (its box form, as saved)",
+           GetMonData(&stored, MON_DATA_SPECIES) == SPECIES_DEOXYS_ATTACK);
+    ExpectForm("again (Attack)", mon, ITEM_METEORITE, TRUE, SPECIES_DEOXYS_DEFENSE);
+    ExpectForm("again (Defense)", mon, ITEM_METEORITE, TRUE, SPECIES_DEOXYS_SPEED);
+    ExpectForm("again (Speed): back to Normal", mon, ITEM_METEORITE, TRUE, SPECIES_DEOXYS_NORMAL);
+
+    SetTimeOfDay(12);
+    mon = FormMon(SPECIES_SHAYMIN_LAND);
+    ExpectForm("Gracidea on Shaymin at noon", mon, ITEM_GRACIDEA, TRUE, SPECIES_SHAYMIN_SKY);
+    SetTimeOfDay(22);
+    mon = FormMon(SPECIES_SHAYMIN_LAND);
+    ExpectForm("Gracidea on Shaymin at 22:00 (night): no effect", mon, ITEM_GRACIDEA, FALSE, SPECIES_SHAYMIN_LAND);
+    SetTimeOfDay(12);
+    mon = FormMon(SPECIES_SHAYMIN_LAND);
+    SetMonData(mon, MON_DATA_STATUS, &status);
+    ExpectForm("Gracidea on a frozen Shaymin at noon: no effect", mon, ITEM_GRACIDEA, FALSE, SPECIES_SHAYMIN_LAND);
+    SetTimeOfDay(0);
+
+    for (i = 0; i < ARRAY_COUNT(sForces); i++)
+    {
+        char what[80];
+
+        mon = FormMon(sForces[i].incarnate);
+        snprintf(what, sizeof(what), "Reveal Glass on %s (Incarnate)", sForces[i].name);
+        ExpectForm(what, mon, ITEM_REVEAL_GLASS, TRUE, sForces[i].therian);
+        snprintf(what, sizeof(what), "Reveal Glass on %s (Therian): back", sForces[i].name);
+        ExpectForm(what, mon, ITEM_REVEAL_GLASS, TRUE, sForces[i].incarnate);
+    }
+
+    mon = FormMon(SPECIES_HOOPA_CONFINED);
+    ExpectForm("Prison Bottle on Hoopa (Confined)", mon, ITEM_PRISON_BOTTLE, TRUE, SPECIES_HOOPA_UNBOUND);
+    // ORAS: the Prison Bottle also returns Hoopa Unbound to its Confined form; reported either way.
+    {
+        bool32 back = UseFormItem(mon, ITEM_PRISON_BOTTLE);
+
+        printf("     Prison Bottle on Hoopa (Unbound): %s, species %u\n", back ? "changed" : "no effect",
+               (unsigned)GetMonData(mon, MON_DATA_SPECIES));
+    }
+
+    mon = FormMon(SPECIES_PIKACHU);
+    ExpectForm("Meteorite on Pikachu: no effect", mon, ITEM_METEORITE, FALSE, SPECIES_PIKACHU);
+    ExpectForm("Gracidea on Pikachu: no effect", mon, ITEM_GRACIDEA, FALSE, SPECIES_PIKACHU);
+    ExpectForm("Reveal Glass on Pikachu: no effect", mon, ITEM_REVEAL_GLASS, FALSE, SPECIES_PIKACHU);
+    ExpectForm("Prison Bottle on Pikachu: no effect", mon, ITEM_PRISON_BOTTLE, FALSE, SPECIES_PIKACHU);
+    ExpectForm("Reveal Glass on Shaymin: no effect", FormMon(SPECIES_SHAYMIN_LAND), ITEM_REVEAL_GLASS, FALSE,
+               SPECIES_SHAYMIN_LAND);
+    mon = FormMon(SPECIES_DEOXYS_NORMAL);
+    SetMonData(mon, MON_DATA_IS_EGG, &egg);
+    {
+        bool32 changed = UseFormItem(mon, ITEM_METEORITE);
+
+        snprintf(line, sizeof(line), "Meteorite on a Deoxys Egg: %s", changed ? "changed" : "no effect");
+        Expect(line, !changed);
+    }
+
+    printf("selftest-form-items: %d checks, %d failed\n", sChecks, sFailures);
     return sFailures == 0 ? 0 : 1;
 }
