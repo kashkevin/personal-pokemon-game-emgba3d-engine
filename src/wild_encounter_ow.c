@@ -227,11 +227,14 @@ void MPOWE_AvoidRepeats(void)
     MPWild_SetAvoidSpecies(species, count);
 }
 
+u32 gMPOWESpawnCount;   // every Pokemon this spawner made (the test builds' "owe count" log)
+
 // A new Pokemon is out.
 void MPOWE_NoteSpawn(u16 species)
 {
     u32 i;
 
+    gMPOWESpawnCount++;
     MPOWE_ForgetOtherMaps();
     for (i = MPOWE_RECENT_SPAWNS - 1; i > 0; i--)
         sOWERecentSpecies[i] = sOWERecentSpecies[i - 1];
@@ -243,6 +246,45 @@ void MPOWE_NoteSpawn(u16 species)
 #line 177 // gba-line
 
 static EWRAM_DATA u8 sOWESpawnCountdown = 0;
+#ifdef PORTABLE
+
+// The 2026-10-27 wild item audit: the flutes, the Cleanse Tag, Pure Incense and the lead's Stench, Illuminate, ... change
+// how often wild Pokemon are met (wild_encounter.c MPWild_EncounterRateFactor, the original multipliers), but visible
+// Pokemon replace random encounters here, so they changed nothing. Every wait of this spawner (until the next Pokemon,
+// until the oldest is replaced) now runs at that rate: x2 halves the wait, x0.5 doubles it; with none it is one frame a frame.
+static u32 sOWERateCredit;
+
+static void MPOWE_CountDown(void)
+{
+    u32 num, den;
+
+    MPWild_EncounterRateFactor(&num, &den);
+    sOWERateCredit += num;
+    while (sOWERateCredit >= den && sOWESpawnCountdown != 0)
+    {
+        sOWESpawnCountdown--;
+        sOWERateCredit -= den;
+    }
+    if (sOWESpawnCountdown == 0)
+        sOWERateCredit = 0;
+}
+
+// --selftest-wild-items: how many frames a wait of `frames` (at most 254) lasts at the current encounter rate
+u32 MPOWE_TestWaitFrames(u32 frames)
+{
+    u32 elapsed = 0;
+
+    sOWESpawnCountdown = frames;
+    sOWERateCredit = 0;
+    while (sOWESpawnCountdown != 0)
+    {
+        MPOWE_CountDown();
+        elapsed++;
+    }
+    return elapsed;
+}
+#endif
+#line 179 // gba-line
 
 // Project rule (owner decision Oct 9, 2026): a wild Pokemon you run away from
 // stays in the world. Its object is removed when the battle starts, so remember
@@ -650,7 +692,13 @@ void UpdateOverworldWildEncounter(void)
 
     if (sOWESpawnCountdown)
     {
+#ifdef PORTABLE
+        MPOWE_CountDown();
+#else
+#line 348 // gba-line
         sOWESpawnCountdown--;
+#endif
+#line 349 // gba-line
         return;
     }
     
@@ -806,7 +854,15 @@ void StartWildBattleWithOWE(struct ScriptContext *ctx)
     }
 
     ZeroEnemyPartyMons();
+#ifdef PORTABLE
+    // The nature as any wild encounter's (the Safari Zone's Pokeblock, the lead's Synchronize): a random one was made here,
+    // so Synchronize never worked on a visible Pokemon (the 2026-10-27 wild item audit). Gender comes from the spawn (Cute Charm).
+    personality = GetMonPersonality(speciesId, gender, MPWild_PickNature(speciesId), RANDOM_UNOWN_LETTER);
+#else
+#line 482 // gba-line
     personality = GetMonPersonality(speciesId, gender, NATURE_RANDOM, RANDOM_UNOWN_LETTER);
+#endif
+#line 483 // gba-line
     CreateMonWithIVs(&gParties[B_TRAINER_OPPONENT_A][0], speciesId, level, personality, OTID_STRUCT_PLAYER_ID, USE_RANDOM_IVS);
     GiveMonInitialMoveset(&gParties[B_TRAINER_OPPONENT_A][0]);
     SetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_IS_SHINY, &shiny);
@@ -1071,6 +1127,11 @@ void TryTriggerOverworldWildEncounter(struct ObjectEvent *obstacle, struct Objec
 {
     if (WE_OWE_NO_REPEL_DEXNAV_COLLISION && (FlagGet(DN_FLAG_SEARCHING) || REPEL_STEP_COUNT))
         return;
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+    if (DioramaBattleEnvTest_OweNoBattle())   // test builds only: PKMN_TEST_OWE_NO_BATTLE (counting spawns undisturbed)
+        return;
+#endif
+#line 728 // gba-line
 
     bool32 playerFollowerIsColliderOWE = ((collider->isPlayer || collider->localId == OBJ_EVENT_ID_FOLLOWER)
                                           && IsOverworldWildEncounter(obstacle, OWE_ANY));

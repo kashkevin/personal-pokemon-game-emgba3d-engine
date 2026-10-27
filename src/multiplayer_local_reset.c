@@ -232,8 +232,17 @@ void MultiplayerLocalReset_BeginDevelopmentHunt(void)
     gSpecialVar_Result = MultiplayerLocalReset_TryBegin(MP_LOCAL_RESET_DEVELOPMENT_ID);
 }
 
+#ifdef PORTABLE
+bool8 gMPTestLocalResetGeneration;   // --selftest-wild-items only: an authored hunt's shiny rolls without its map and binding
+#endif
+#line 225 // gba-line
 bool32 MultiplayerLocalReset_PersonalGeneration(void)
 {
+#ifdef PORTABLE
+    if (gMPTestLocalResetGeneration)
+        return TRUE;
+#endif
+#line 227 // gba-line
     // Only the explicit authored source, during native generation. Owned mons,
     // wild encounters, gifts, presets and future event sources do not opt in.
     return sLocalResetActive && !gMain.inBattle && !sLocalResetClosed

@@ -906,7 +906,16 @@ bool32 ComputePlayerShinyOdds(u32 personality, u32 value)
     // with Local Soft Reset; attempts themselves never change the odds).
     if (MultiplayerLocalReset_PersonalGeneration())
     {
+#ifdef PORTABLE
+        // The approved Charm odds, 1 in 2500 (Update 30), here too: the one extra roll made MP_CHARM_EXTRA_ROLL_CHANCE of the
+        // time, as for a wild Pokemon. Update 30 retuned only the wild Charm and left these hunts at its two extra rolls
+        // (1 in 1365.7), which no rule allowed (the 2026-10-27 wild item audit).
+        u32 charmRolls = (CheckBagHasItem(ITEM_SHINY_CHARM, 1) && (Random() & 0xFFFF) < MP_CHARM_EXTRA_ROLL_CHANCE) ? 1 : 0;
+#else
+#line 886 // gba-line
         u32 charmRolls = CheckBagHasItem(ITEM_SHINY_CHARM, 1) ? I_SHINY_CHARM_ADDITIONAL_ROLLS : 0;
+#endif
+#line 887 // gba-line
         while (GET_SHINY_VALUE(value, personality) >= MP_GEN6_SHINY_ODDS && charmRolls > 0)
         {
             personality = Random32();

@@ -52,7 +52,7 @@ MauvilleCity_Mart_EventScript_MegaStoneDealerEnd:
 
 @ Mauville City Game Corner: the major prize counter (Shiny Charm, and on the PC game the Mega Ring).
 .ifdef PORTABLE
-@ Update 29 (PC game). The clerk sells the MEGA RING (25,000 coins) and the SHINY CHARM (100,000 coins) for Game Corner coins. A
+@ Update 29 (PC game). The clerk sells the MEGA RING and the SHINY CHARM for Game Corner coins (since 2026-10-25 3,750 and 15,000: MP_MEGA_RING_COINS, MP_SHINY_CHARM_COINS). A
 @ prize the player already has is never offered again. VAR_TEMP_2 names the prize being offered (the native Game Corner screen
 @ reads it). The prices are 32-bit: they travel in VAR_0x8004 (high) and VAR_0x8005 (low) to the CoinWallet specials.
 @ The owner's request of 2026-10-24: the counter also sells the RARE GOODS (every item no player can get anywhere else, for

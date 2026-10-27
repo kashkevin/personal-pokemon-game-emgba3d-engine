@@ -522,6 +522,14 @@ void CreateWildMon(enum Species species, u8 level)
     CreateMonWithIVs(&gParties[B_TRAINER_OPPONENT_A][0], species, level, personality, OTID_STRUCT_PLAYER_ID, USE_RANDOM_IVS);
     GiveMonInitialMoveset(&gParties[B_TRAINER_OPPONENT_A][0]);
 }
+#ifdef PORTABLE
+
+u8 MPWild_PickNature(u16 species)
+{
+    return PickWildMonNature(species);
+}
+#endif
+#line 521 // gba-line
 
 #ifdef BUGFIX
 #define TRY_GET_ABILITY_INFLUENCED_WILD_MON_INDEX(wildPokemon, type, ability, ptr, count) TryGetAbilityInfluencedWildMonIndex(wildPokemon, type, ability, ptr, count)
@@ -584,9 +592,13 @@ bool8 TryGenerateWildMon(const struct WildPokemonInfo *wildMonInfo, enum WildPok
         return FALSE;
 
     // Project: randomized rarity-weighted Gen 1-6 species; the table keeps the level.
-    CreateWildMon(MPWild_RandomizeSpecies(wildMonInfo->wildPokemon[wildMonIndex].species, level, area), level);
 #ifdef PORTABLE
+    // The lead's Magnet Pull or Static picks its type among the randomized families (mp_wild_random.c)
+    CreateWildMon(MPWild_RandomizeSpeciesForLead(wildMonInfo->wildPokemon[wildMonIndex].species, level, area), level);
     MPLegend_NoteWildMon(area);
+#else
+#line 583 // gba-line
+    CreateWildMon(MPWild_RandomizeSpecies(wildMonInfo->wildPokemon[wildMonIndex].species, level, area), level);
 #endif
 #line 584 // gba-line
     return TRUE;
@@ -1206,6 +1218,50 @@ static void ApplyCleanseTagEncounterRateMod(u32 *encRate)
     if (gItemsInfo[heldItem].holdEffect == HOLD_EFFECT_REPEL)
         *encRate = *encRate * 2 / 3;
 }
+#ifdef PORTABLE
+
+// The 2026-10-27 wild item audit: how much the encounter-rate items and abilities change how often wild Pokemon are met,
+// as WildEncounterCheck applies them to a random encounter (the White Flute x1.5, the Black Flute x0.5, the Cleanse Tag and
+// Pure Incense x2/3; the lead's Stench, White Smoke and Quick Feet x0.5 (Stench x0.75 in the Battle Pyramid), Sand Veil in a
+// sandstorm and Snow Cloak in snow x0.5, Illuminate, Arena Trap and No Guard x2): *num / *den. The bike's x0.8 and the lure
+// (visible Pokemon have their own lure rule) are not part of it. The visible spawner divides its waits by it.
+void MPWild_EncounterRateFactor(u32 *num, u32 *den)
+{
+    const u32 base = 1440;   // every product of the factors above is a whole number of it
+    u32 rate = base;
+
+    ApplyFluteEncounterRateMod(&rate);
+    ApplyCleanseTagEncounterRateMod(&rate);
+    if (!GetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_SANITY_IS_EGG))
+    {
+        enum Ability ability = GetMonAbility(&gParties[B_TRAINER_PLAYER][0]);
+
+        if (ability == ABILITY_STENCH && gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PYRAMID_FLOOR)
+            rate = rate * 3 / 4;
+        else if (ability == ABILITY_STENCH)
+            rate /= 2;
+        else if (ability == ABILITY_ILLUMINATE)
+            rate *= 2;
+        else if (ability == ABILITY_WHITE_SMOKE)
+            rate /= 2;
+        else if (ability == ABILITY_ARENA_TRAP)
+            rate *= 2;
+        else if (ability == ABILITY_SAND_VEIL && gSaveBlock1Ptr->weather == WEATHER_SANDSTORM)
+            rate /= 2;
+        else if (ability == ABILITY_SNOW_CLOAK && gSaveBlock1Ptr->weather == WEATHER_SNOW)
+            rate /= 2;
+        else if (ability == ABILITY_QUICK_FEET)
+            rate /= 2;
+        else if (ability == ABILITY_INFILTRATOR && OW_INFILTRATOR >= GEN_8)
+            rate /= 2;
+        else if (ability == ABILITY_NO_GUARD)
+            rate *= 2;
+    }
+    *num = rate;
+    *den = base;
+}
+#endif
+#line 1197 // gba-line
 
 bool8 TryDoDoubleWildBattle(void)
 {

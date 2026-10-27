@@ -275,6 +275,9 @@ static struct
        (TryTriggerOverworldWildEncounter) and its battle's Pokemon is logged at the action menu */
     int outbreakSpecies, outbreakLevel, roamerSpecies, roamerLevel, roamerShiny;
     int oweBattleKind;          /* OWE_KIND_ROAMER, OWE_KIND_OUTBREAK; 0 none */
+    bool oweCount;              /* PKMN_TEST_OWE_COUNT */
+    bool oweNoBattle;           /* PKMN_TEST_OWE_NO_BATTLE */
+    int oweCountFrames;
     bool oweBumped, oweBattleLogged;
     /* PKMN_TEST_PALETTE_FREE=<n>: on the field, stand-in palettes keep exactly n sprite palettes free (a crowded world
        map); PKMN_TEST_TILES_FULL=<frames>: that many field frames in, every free sprite tile taken (a busy map's OBJ
@@ -548,6 +551,8 @@ static void Init(void)
         s.roamerSpecies = 0;
     s.paletteFree = EnvInt("PKMN_TEST_PALETTE_FREE", 0);
     s.tilesFullAt = EnvInt("PKMN_TEST_TILES_FULL", 0);
+    s.oweCount = EnvInt("PKMN_TEST_OWE_COUNT", 0) != 0;
+    s.oweNoBattle = EnvInt("PKMN_TEST_OWE_NO_BATTLE", 0) != 0;
     value = SDL_getenv("PKMN_TEST_OWE_BATTLE");
     s.oweBattleKind = value == NULL ? 0 : strcmp(value, "roamer") == 0 ? OWE_KIND_ROAMER
                     : strcmp(value, "outbreak") == 0 ? OWE_KIND_OUTBREAK : strcmp(value, "wild") == 0 ? OWE_KIND_WILD : 0;
@@ -672,7 +677,7 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
     int gender = -1, item = 0, move = 0, ivs = MAX_PER_STAT_IVS, nature = -1, ball = 0;
     int statIvs[NUM_STATS], statEvs[NUM_STATS], trainedMask = 0;
     bool shiny = false, nextLevelShort = false, ivList = false, evList = false, hatched = false;
-    int ppBonuses = -1, moveList[MAX_MON_MOVES] = {0}, firstPp = -1;
+    int ppBonuses = -1, moveList[MAX_MON_MOVES] = {0}, firstPp = -1, abilityNum = -1;
     bool movesSet = false;
     /* the summary's order (I, E, H flags) -> MON_DATA_* field offsets (HP, Atk, Def, Speed, Sp. Atk, Sp. Def) */
     static const u8 sSummaryStat[NUM_STATS] = {STAT_HP, STAT_ATK, STAT_DEF, STAT_SPATK, STAT_SPDEF, STAT_SPEED};
@@ -725,6 +730,8 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
         }
         else if (*flags == 'P')
             firstPp = atoi(flags + 1); /* P<n>: the first move's PP left */
+        else if (*flags == 'a')
+            abilityNum = atoi(flags + 1); /* a<n>: the species' ability slot n (0, 1, 2 the hidden one) */
     }
     for (i = 0; i < 65536 && ((gender >= 0 && GetGenderFromSpeciesAndPersonality(species, personality) != gender)
                              || (nature >= 0 && GetNatureFromPersonality(personality) != (u32)nature)); i++)
@@ -756,6 +763,12 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
         u8 pp = firstPp;
 
         SetMonData(mon, MON_DATA_PP1, &pp);
+    }
+    if (abilityNum >= 0 && abilityNum < NUM_ABILITY_SLOTS)
+    {
+        u32 num = abilityNum;
+
+        SetMonData(mon, MON_DATA_ABILITY_NUM, &num);
     }
     if (ball > 0)
     {
@@ -1569,6 +1582,21 @@ void DioramaBattleEnvTest_OweKept(const char *what, unsigned localId, unsigned s
             gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum);
 }
 
+/* PKMN_TEST_OWE_COUNT=1: on the field, "owe count: frames F live L made M" each second: the game's own overworld Pokemon
+ * out now and made so far (wild_encounter_ow.c gMPOWESpawnCount) - how often the visible spawner makes one */
+extern u32 gMPOWESpawnCount;
+static void OweCountField(void)
+{
+    unsigned live = 0;
+
+    if (!s.oweCount || gMain.inBattle || SDL_AtomicGet(&s.fieldSeen) == 0 || gSaveBlock1Ptr == NULL
+     || gMain.callback2 != CB2_Overworld || ++s.oweCountFrames % 60 != 0)
+        return;
+    for (int i = 0; i < OBJECT_EVENTS_COUNT; i++)
+        live += (gObjectEvents[i].active && IsOverworldWildEncounter(&gObjectEvents[i], OWE_GENERATED)) ? 1 : 0;
+    TestLog("Battle env test: owe count: frames %d live %u made %u", s.oweCountFrames, live, (unsigned)gMPOWESpawnCount);
+}
+
 /* PKMN_TEST_OWE_BATTLE: the first overworld Pokemon of that kind drawn on the GBA's picture, the field calm - the
  * player bumps into it, as walking into it does (TryTriggerOverworldWildEncounter); then, as its battle starts (its
  * Pokemon made: StartWildBattleWithOWE), "owe battle: species S shiny X" - shiny or not, as the field showed it */
@@ -1579,8 +1607,11 @@ static void OweBattleField(void)
         struct Pokemon *mon = &gParties[B_TRAINER_OPPONENT_A][0];
 
         s.oweBattleLogged = true;
-        TestLog("Battle env test: owe battle: species %u shiny %u", (unsigned)GetMonData(mon, MON_DATA_SPECIES),
-                GetMonData(mon, MON_DATA_IS_SHINY) ? 1 : 0);
+        TestLog("Battle env test: owe battle: species %u shiny %u nature %u lead ability %u nature %u",
+                (unsigned)GetMonData(mon, MON_DATA_SPECIES), GetMonData(mon, MON_DATA_IS_SHINY) ? 1 : 0,
+                (unsigned)GetNatureFromPersonality(GetMonData(mon, MON_DATA_PERSONALITY)),
+                (unsigned)GetMonAbility(&gParties[B_TRAINER_PLAYER][0]),
+                (unsigned)GetNatureFromPersonality(GetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_PERSONALITY)));
     }
     if (s.oweBattleKind == 0 || s.oweBumped || gMain.inBattle || SDL_AtomicGet(&s.fieldSeen) == 0
      || gMain.callback2 != CB2_Overworld || ArePlayerFieldControlsLocked() || gPlayerAvatar.objectEventId >= OBJECT_EVENTS_COUNT
@@ -1625,6 +1656,13 @@ bool DioramaBattleEnvTest_FakeWorldEvent(bool *fieldReady)
     gMultiplayerWorldMailbox.inboundGeneration = s.worldEventGeneration;
     *fieldReady = gMain.callback2 == CB2_Overworld && !ArePlayerFieldControlsLocked();
     return true;
+}
+
+bool DioramaBattleEnvTest_OweNoBattle(void)
+{
+    if (!s.init)
+        Init();
+    return s.oweNoBattle;
 }
 
 bool DioramaBattleEnvTest_OweShiny(bool rolled)
@@ -3784,6 +3822,7 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
     MoveLogField();
     SparkleLogField();
     OweBattleField();
+    OweCountField();
     CrowdField();
     StageLogFrame();
     ShotTick();

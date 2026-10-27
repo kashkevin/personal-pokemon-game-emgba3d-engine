@@ -57,6 +57,14 @@ u8 MPWild_GetSpeciesTier(u16 species);
 // PC builds: the next rolls avoid the families of these species (the visible spawner's no-repeat rule,
 // wild_encounter_ow.c); count 0 ends it.
 void MPWild_SetAvoidSpecies(const u16 *species, u32 count);
+// PC builds: the nature a wild Pokemon gets when it is made (wild_encounter.c PickWildMonNature: the Safari Zone's
+// Pokeblock, then the lead's Synchronize), for the visible spawns' battles that make their Pokemon again.
+u8 MPWild_PickNature(u16 species);
+// PC builds: MPWild_RandomizeSpecies with the lead's Magnet Pull or Static (half the rolls among its type's families).
+u16 MPWild_RandomizeSpeciesForLead(u16 vanillaSpecies, u8 level, enum WildPokemonArea area);
+// PC builds (wild_encounter.c): how much the encounter-rate items and abilities change how often wild Pokemon are met,
+// *num / *den, the original multipliers (the flutes, the Cleanse Tag, Pure Incense, Stench, Illuminate, ...).
+void MPWild_EncounterRateFactor(u32 *num, u32 *den);
 #endif
 
 #endif // GUARD_MP_WILD_RANDOM_H

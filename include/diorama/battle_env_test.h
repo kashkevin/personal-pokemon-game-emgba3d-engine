@@ -200,6 +200,9 @@ bool DioramaBattleEnvTest_ForceSecondary(void);
 /* wild_encounter_ow.c, SetSpeciesInfoForOWE (game thread): PKMN_TEST_OWE_SHINY=1 every other overworld wild Pokemon the
    game makes is shiny (the first one is), =2 every one; otherwise the game's own roll */
 bool DioramaBattleEnvTest_OweShiny(bool rolled);
+/* wild_encounter_ow.c, TryTriggerOverworldWildEncounter (game thread): PKMN_TEST_OWE_NO_BATTLE=1 an overworld wild
+   Pokemon that walks into the player starts no battle (wild_items_check.py counts the spawns of a minute undisturbed) */
+bool DioramaBattleEnvTest_OweNoBattle(void);
 /* wild_encounter_ow.c, the kept shinies (MS-79; game thread): "owe keep: <what> local L species S x X y Y map G.N" -
    what: kept (first seen), back (put back on its map), won or caught (gone for good) */
 void DioramaBattleEnvTest_OweKept(const char *what, unsigned localId, unsigned species, int x, int y);

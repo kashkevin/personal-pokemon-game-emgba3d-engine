@@ -233,6 +233,7 @@ extern int NativeSelfTest_Ladder(void);
 extern int NativeSelfTest_DumpSpeciesData(const char *outPath);
 extern int NativeSelfTest_Legend(void);
 extern int NativeSelfTest_Shiny(void);
+extern int NativeSelfTest_WildItems(void);
 extern int NativeSelfTest_Coins(void);
 extern int NativeSelfTest_Breeding(void);
 extern int NativeSelfTest_Rival(void);
@@ -1301,6 +1302,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_Coins()); // src/platform/native_selftest_u29.c (Update 29)
         else if (strcmp(argv[i], "--selftest-shiny") == 0)
             exit(NativeSelfTest_Shiny()); // src/platform/native_selftest_u29.c (Update 29)
+        else if (strcmp(argv[i], "--selftest-wild-items") == 0)
+            exit(NativeSelfTest_WildItems()); // src/platform/native_selftest_items.c (the 2026-10-27 wild item audit)
         else if (strcmp(argv[i], "--selftest-legend") == 0)
             exit(NativeSelfTest_Legend()); // src/platform/native_selftest_u29.c (Update 29)
         else if (strcmp(argv[i], "--dump-species-data") == 0 && i + 1 < argc)

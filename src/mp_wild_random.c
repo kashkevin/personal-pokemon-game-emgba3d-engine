@@ -10,6 +10,8 @@
 #include "constants/weather.h"
 #include "event_data.h"
 #include "constants/flags.h"
+#include "pokemon.h"
+#include "constants/abilities.h"
 #endif
 #line 8 // gba-line
 
@@ -224,6 +226,12 @@ static u32 GetFamilyWeightPC(const struct MPWildFamily *family, u32 habitat, boo
 
 static u16 sAvoidFamilies[MP_WILD_AVOID_MAX];
 static u32 sAvoidCount;
+static u8 sLeadType = TYPE_NONE;   // the type the lead's ability asks for in this roll (MPWild_RandomizeSpeciesForLead)
+
+static bool32 FamilyHasType(const struct MPWildFamily *family, u32 type)
+{
+    return family->type1 == type || family->type2 == type;
+}
 
 // The families of these species (every family a species is listed in) are avoided until the next call; no species
 // (count 0) avoids nothing.
@@ -366,6 +374,30 @@ u16 MPWild_RandomizeSpecies(u16 vanillaSpecies, u8 level, enum WildPokemonArea a
     if (total == 0)
         return vanillaSpecies;
 #if defined(PLATFORM_SDL2)
+    // The lead's Magnet Pull or Static (MPWild_RandomizeSpeciesForLead): this roll is made among the families of its type
+    if (sLeadType != TYPE_NONE)
+    {
+        u32 typed = 0;
+
+        for (i = 0; i < MP_WILD_FAMILY_COUNT; i++)
+            if (FamilyHasType(&sMPWildFamilies[i], sLeadType))
+                typed += FAMILY_WEIGHT(&sMPWildFamilies[i], habitat, night, typeBoost);
+        if (typed != 0)
+        {
+            roll = Random32() % typed;
+            for (i = 0; i < MP_WILD_FAMILY_COUNT; i++)
+            {
+                u32 weight;
+
+                if (!FamilyHasType(&sMPWildFamilies[i], sLeadType))
+                    continue;
+                weight = FAMILY_WEIGHT(&sMPWildFamilies[i], habitat, night, typeBoost);
+                if (roll < weight)
+                    return ChooseMember(&sMPWildFamilies[i], level);
+                roll -= weight;
+            }
+        }
+    }
     // A visible spawn avoids repeating what its spawner shows or made last (MPWild_SetAvoidSpecies).
     if (sAvoidCount != 0)
         return ChooseMember(&sMPWildFamilies[PickFamilyAvoiding(habitat, night, typeBoost, weather, total)], level);
@@ -382,6 +414,32 @@ u16 MPWild_RandomizeSpecies(u16 vanillaSpecies, u8 level, enum WildPokemonArea a
     }
     return vanillaSpecies;
 }
+
+#if defined(PLATFORM_SDL2)
+// The 2026-10-27 wild item audit: Magnet Pull and Static at the head of the party (Gen 6: half of the wild Pokemon met on
+// land and water are then Steel-, or Electric-type, when the area has any). The map's table picked a slot of that type
+// for it (wild_encounter.c TryGetAbilityInfluencedWildMonIndex), but its species is replaced here, so the type was lost.
+// Now half the rolls are made among the families of that type that can appear here, with their usual weights; where
+// there are none, the ordinary roll. Fishing and Rock Smash are not affected, as in the original.
+u16 MPWild_RandomizeSpeciesForLead(u16 vanillaSpecies, u8 level, enum WildPokemonArea area)
+{
+    u16 species;
+
+    sLeadType = TYPE_NONE;
+    if ((area == WILD_AREA_LAND || area == WILD_AREA_WATER)
+     && !GetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_SANITY_IS_EGG))
+    {
+        enum Ability ability = GetMonAbility(&gParties[B_TRAINER_PLAYER][0]);
+
+        if ((ability == ABILITY_MAGNET_PULL || ability == ABILITY_STATIC) && Random() % 2 == 0)
+            sLeadType = (ability == ABILITY_MAGNET_PULL) ? TYPE_STEEL : TYPE_ELECTRIC;
+    }
+    species = MPWild_RandomizeSpecies(vanillaSpecies, level, area);
+    sLeadType = TYPE_NONE;
+    return species;
+}
+#endif
+#line 171 // gba-line
 
 u8 MPWild_GetSpeciesTier(u16 species)
 {

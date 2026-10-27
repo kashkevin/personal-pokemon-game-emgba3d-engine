@@ -401,6 +401,13 @@ check-shiny: $(TARGET)
 	@./$(TARGET) --selftest-shiny > $(OBJ_DIR)/selftest-shiny.log 2>&1; status=$$?; \
 	  tail -n 3 $(OBJ_DIR)/selftest-shiny.log; exit $$status
 
+# The 2026-10-27 wild item audit: the Shiny Charm in Local Soft Reset hunts, lures, Repels, the encounter-rate items and
+# abilities on visible Pokemon, Synchronize, Cute Charm, Magnet Pull / Static, Keen Eye, Hustle, Compound Eyes, the Catching
+# and Oval Charms, all through the game's own code (about 2 min).
+check-wild-items: $(TARGET)
+	@./$(TARGET) --selftest-wild-items > $(OBJ_DIR)/selftest-wild-items.log 2>&1; status=$$?; \
+	  tail -n 3 $(OBJ_DIR)/selftest-wild-items.log; exit $$status
+
 check-coins: $(TARGET)
 	@./$(TARGET) --selftest-coins > $(OBJ_DIR)/selftest-coins.log 2>&1; status=$$?; \
 	  tail -n 3 $(OBJ_DIR)/selftest-coins.log; exit $$status

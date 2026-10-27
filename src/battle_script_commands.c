@@ -8324,6 +8324,15 @@ static bool32 CriticalCapture(u32 odds)
 
     return FALSE;
 }
+#ifdef PORTABLE
+
+// --selftest-wild-items (the 2026-10-27 wild item audit): the Catching Charm's effect, through the game's own roll
+bool32 MPTest_CriticalCapture(u32 odds)
+{
+    return CriticalCapture(odds);
+}
+#endif
+#line 8166 // gba-line
 
 static u32 ComputeBallShakeOdds(u32 odds)
 {
