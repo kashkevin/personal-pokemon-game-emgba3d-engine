@@ -28,8 +28,9 @@
 #define DIORAMA_HAZE_END (DIORAMA_GRID_WIDTH / 2 - 1.0f)
 #define DIORAMA_HAZE_BAND 4.5f
 #define DIORAMA_MAX_OBJECTS 16
-/* Field-effect sprites drawn in 3D (struct DioramaEffectSnapshot): six Poke Balls and a monitor, or five monitors. */
-#define DIORAMA_MAX_EFFECTS 12
+/* Field-effect sprites drawn in 3D (struct DioramaEffectSnapshot): six Poke Balls and a monitor, or five monitors; the
+ * Trick House's 11 rotating gates (the Fortree Gym's 8). */
+#define DIORAMA_MAX_EFFECTS 16
 #define DIORAMA_EFFECT_PLACED 0xFF
 /* Stand-ins for objects the GBA has not spawned yet (scene_snapshot.c CopyStandIns). */
 #define DIORAMA_MAX_STAND_INS 24
@@ -281,6 +282,10 @@ struct DioramaObjectSnapshot
 struct DioramaEffectSnapshot
 {
     uint8_t owner;
+    /* Laid on the ground, not standing: a rotating gate's arms (rotating_gate.c, the Fortree Gym and the Trick House),
+     * drawn from above on the GBA. Placed with its picture's centre in sprite.currentMapX/Y and mapPixelOffsetX/Y
+     * (-8..7 from the cell's centre), turned by its affine matrix. */
+    uint8_t onGround;
     int16_t offsetX;
     int16_t offsetY;
     struct DioramaObjectSnapshot sprite;

@@ -60,6 +60,7 @@ struct ObjectRenderItem
     bool hasUprightOverride;    /* set each frame for a rider: it stands just behind or in front of its mount */
     bool isMount;               /* carries a rider: shown through what hides it, as its rider is */
     float uprightZOverride;
+    bool onGround;              /* laid on the ground (a rotating gate's arms: DioramaEffectSnapshot.onGround) */
 };
 
 static struct SpriteTextureCacheEntry sTextureCache[SPRITE_TEXTURE_CACHE_SIZE];
@@ -913,7 +914,10 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
         }
         else
         {
-            StandOnFace(snapshot, &effect->sprite, &pose);
+            if (effect->onGround)
+                item->onGround = true;
+            else
+                StandOnFace(snapshot, &effect->sprite, &pose);
             item->previousPose = item->currentPose = pose;
         }
         LogEffect(sMetrics.effects, effect, item->currentPose);
@@ -1216,6 +1220,67 @@ static void DrawBillboard(const struct ObjectRenderItem *item, struct DioramaSpr
     UploadAndDraw(vertices);
 }
 
+/*
+ * A picture the GBA draws from above lying on the ground (a rotating gate's arms, scene_snapshot.c CopyEffects): its
+ * centre at the pose, the GBA's screen right and down along the ground's east and south, turned by its affine matrix
+ * as AffineCard turns a card (texture = M x screen about the centre). Stacked in thin layers up to a rail's height,
+ * darker below, so the arms stand as low rails rather than lines painted on the floor. Depth as the world's (draw
+ * mode 6): it lies in the scene, not standing at a walker's feet.
+ */
+#define GROUND_PICTURE_LIFT   0.02f
+#define GROUND_PICTURE_LAYERS 8
+#define GROUND_PICTURE_HEIGHT 0.34f
+static void DrawOnGround(const struct ObjectRenderItem *item, struct DioramaSpritePose pose)
+{
+    static const float sCorners[4][4] = { /* texture offset (halves), uv */
+        {-1.0f, 1.0f, 0, 1}, {1.0f, 1.0f, 1, 1}, {1.0f, -1.0f, 1, 0}, {-1.0f, -1.0f, 0, 0},
+    };
+    const int16_t *m = item->object.affineMatrix;
+    bool affine = item->object.affineMode != 0;
+    float a = affine ? m[0] / 256.0f : 1.0f, b = affine ? m[1] / 256.0f : 0.0f;
+    float c = affine ? m[2] / 256.0f : 0.0f, d = affine ? m[3] / 256.0f : 1.0f;
+    float det = a * d - b * c;
+    struct ObjectVertex corner[4];
+    struct ObjectVertex vertices[6];
+    int i, layer;
+
+    if (det == 0.0f)
+        return;
+    for (i = 0; i < 4; i++)
+    {
+        float tx = sCorners[i][0] * item->width * 0.5f;
+        float ty = sCorners[i][1] * item->height * 0.5f;
+        float sx = (d * tx - b * ty) / det; /* screen pixels from the centre, y down (south) */
+        float sy = (-c * tx + a * ty) / det;
+
+        corner[i].x = pose.x + sx / 16.0f;
+        corner[i].z = pose.z - sy / 16.0f;
+        corner[i].u = sCorners[i][2];
+        corner[i].v = sCorners[i][3];
+    }
+    glBindTexture(GL_TEXTURE_2D, item->texture);
+    dglUniform1i(sDrawModeLocation, 6);
+    dglUniform1f(sDepthBiasLocation, 0.0f);
+    dglUniform3f(sLightProbeLocation, pose.x, pose.groundY + 0.75f, pose.z);
+    for (layer = 0; layer < GROUND_PICTURE_LAYERS; layer++)
+    {
+        float t = (float)layer / (GROUND_PICTURE_LAYERS - 1);
+
+        for (i = 0; i < 4; i++)
+            corner[i].y = pose.groundY + GROUND_PICTURE_LIFT + t * GROUND_PICTURE_HEIGHT;
+        vertices[0] = corner[0];
+        vertices[1] = corner[1];
+        vertices[2] = corner[2];
+        vertices[3] = corner[0];
+        vertices[4] = corner[2];
+        vertices[5] = corner[3];
+        /* the rail's sides in shade, its top in the light */
+        dglUniform1f(sShadeLocation, DoorDusk(pose) * (layer == GROUND_PICTURE_LAYERS - 1 ? 1.0f : 0.55f + 0.3f * t));
+        UploadAndDraw(vertices);
+    }
+    dglUniform1i(sDrawModeLocation, 0);
+}
+
 static void DrawReflection(const struct ObjectRenderItem *item,
                            struct DioramaSpritePose pose,
                            float pitchSin, float pitchCos)
@@ -1443,7 +1508,11 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
     {
         int index = order[i];
 
-        if (DoorDusk(poses[index]) > 0.0f)
+        if (DoorDusk(poses[index]) <= 0.0f)
+            continue;
+        if (sItems[index].onGround)
+            DrawOnGround(&sItems[index], poses[index]);
+        else
             DrawBillboard(&sItems[index], poses[index], pitchSin, pitchCos);
     }
     glEnable(GL_STENCIL_TEST);

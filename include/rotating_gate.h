@@ -5,5 +5,9 @@ void RotatingGatePuzzleCameraUpdate(s16 deltaX, s16 deltaY);
 void RotatingGate_InitPuzzleAndGraphics(void);
 bool32 CheckForRotatingGatePuzzleCollision(enum Direction direction, s16 x, s16 y);
 bool32 CheckForRotatingGatePuzzleCollisionWithoutAnimation(enum Direction direction, s16 x, s16 y);
+#ifdef PORTABLE
+struct Sprite;
+bool32 RotatingGate_IsGateSprite(const struct Sprite *sprite);
+#endif
 
 #endif // GUARD_ROTATING_GATE_H

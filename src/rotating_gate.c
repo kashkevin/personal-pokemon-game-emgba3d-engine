@@ -702,6 +702,18 @@ static void RotatingGate_LoadPuzzleConfig(void)
 static void RotatingGate_CreateGatesWithinViewport(s16 deltaX, s16 deltaY)
 {
     u8 i;
+#ifdef PORTABLE
+    // The 3D view sees the whole room, not the GBA's screen and two tiles round it: every gate of the puzzle is made
+    // (the owner's report of 2026-10-27, the Fortree Gym's puzzle invisible in 3D). RotatingGate_HideGatesOutsideViewport
+    // still hides from the GBA's picture those off its screen; the 3D view draws them all (scene_snapshot.c).
+    for (i = 0; i < sRotatingGate_PuzzleCount; i++)
+    {
+        if (sRotatingGate_GateSpriteIds[i] == MAX_SPRITES)
+            sRotatingGate_GateSpriteIds[i] = RotatingGate_CreateGate(i, deltaX, deltaY);
+    }
+    return;
+#endif
+#line 705 // gba-line
 
     // Calculate the bounding box of the camera
     // Same as RotatingGate_DestroyGatesOutsideViewport
@@ -821,6 +833,10 @@ static void LoadRotatingGatePics(void)
 static void RotatingGate_DestroyGatesOutsideViewport(void)
 {
     s32 i;
+#ifdef PORTABLE
+    return;     // every gate stays (RotatingGate_CreateGatesWithinViewport)
+#endif
+#line 824 // gba-line
 
     // Same as RotatingGate_CreateGatesWithinViewport
     s16 x = gSaveBlock1Ptr->pos.x - 2;
@@ -947,6 +963,14 @@ void RotatingGatePuzzleCameraUpdate(s16 deltaX, s16 deltaY)
     }
 }
 
+#ifdef PORTABLE
+// A gate's sprite (the 3D view's snapshot draws them on the floor: scene_snapshot.c CopyEffects)
+bool32 RotatingGate_IsGateSprite(const struct Sprite *sprite)
+{
+    return sprite->inUse && sprite->callback == SpriteCallback_RotatingGate;
+}
+#endif
+#line 950 // gba-line
 void RotatingGate_InitPuzzleAndGraphics(void)
 {
     if (GetCurrentMapRotatingGatePuzzleType())
