@@ -1010,6 +1010,26 @@ static void Task_TrySetContestInterviewData(u8 taskId)
     gTasks[taskId].func = Task_EndShowContestResults;
 }
 
+#ifdef PORTABLE
+// The results screen's tasks that would run on until the field resets the tasks - the stars' and hearts' flashing, the
+// winner's icon bouncing, the confetti - end with the screen. They come after the ending task in its last frame: the
+// flashing then wrote through sContestResults, just freed (the PC game closed as every contest ended; the owner's
+// request of 2026-10-27, every building minigame playable), and the bouncing icon could write into BG1's freed tilemap.
+static void DestroyResultsScreenTasks(void)
+{
+    static const TaskFunc sResultsTasks[] = {Task_FlashStarsAndHearts, Task_BounceMonIconInBox, Task_CreateConfetti};
+    u32 i;
+    u8 taskId;
+
+    for (i = 0; i < ARRAY_COUNT(sResultsTasks); i++)
+    {
+        while ((taskId = FindTaskIdByFunc(sResultsTasks[i])) != TASK_NONE)
+            DestroyTask(taskId);
+    }
+}
+
+#endif
+#line 1013 // gba-line
 static void Task_EndShowContestResults(u8 taskId)
 {
     if (!gPaletteFade.active)
@@ -1032,6 +1052,10 @@ static void Task_EndShowContestResults(u8 taskId)
             DestroyTask(taskId);
             FreeAllWindowBuffers();
             SetMainCallback2(CB2_ReturnToFieldContinueScriptPlayMapMusic);
+#ifdef PORTABLE
+            DestroyResultsScreenTasks();
+#endif
+#line 1035 // gba-line
             FreeContestResults();
         }
     }
