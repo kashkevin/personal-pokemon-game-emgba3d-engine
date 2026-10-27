@@ -2410,3 +2410,129 @@ int NativeSelfTest_Mail(void)
     printf("selftest-mail: %d checks, %d failed\n", sChecks, sFailures);
     return sFailures == 0 ? 0 : 1;
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// --selftest-rare-goods (the full item audit, after the package: what the PC game's coin shop sells that no test checked,
+// mp_rare_goods_prices.h): the Exp. Candies' experience and the Mochi's base points (PokemonUseItemEffects, what the
+// party menu's USE calls), the Fresh-Start Mochi's reset (ExecuteTableBasedItemEffect, its ItemUseCB_ResetEVs), the
+// Linking Cord's and the Black Augurite's evolutions (EVO_MODE_ITEM_USE), and the Rotom Catalog's and the Zygarde
+// Cube's forms (TryFormChange in FORM_CHANGE_ITEM_USE_MULTICHOICE with the menu's choice in gSpecialVar_Result, as the
+// party menu's catalog and cube menus call it; Rotom's move swap and the menus themselves are not part of it).
+
+static void ExpectMultichoiceForm(const char *what, enum Species species, u16 item, u16 choice, bool32 wantChanged,
+                                  enum Species want)
+{
+    struct Pokemon *mon = BagMon(species, 50, MON_MALE, 70);
+    bool32 changed;
+    char line[200];
+
+    gSpecialVar_ItemId = item;
+    gSpecialVar_Result = choice;
+    changed = TryFormChange(mon, FORM_CHANGE_ITEM_USE_MULTICHOICE, B_TRAINER_PLAYER);
+    gSpecialVar_ItemId = ITEM_NONE;
+    snprintf(line, sizeof(line), "%s: %s, species %u (rule %u)", what, changed ? "changed" : "no change",
+             (unsigned)GetMonData(mon, MON_DATA_SPECIES), (unsigned)want);
+    Expect(line, changed == wantChanged && GetMonData(mon, MON_DATA_SPECIES) == want);
+}
+
+int NativeSelfTest_RareGoods(void)
+{
+    static const struct { u16 item; u32 exp; const char *name; } sCandies[] = {
+        {ITEM_EXP_CANDY_XS, 100, "Exp. Candy XS"}, {ITEM_EXP_CANDY_S, 800, "Exp. Candy S"},
+        {ITEM_EXP_CANDY_M, 3000, "Exp. Candy M"}, {ITEM_EXP_CANDY_L, 10000, "Exp. Candy L"},
+        {ITEM_EXP_CANDY_XL, 30000, "Exp. Candy XL"},
+    };
+    static const struct { u16 item; u8 stat; const char *name; } sMochi[] = {
+        {ITEM_HEALTH_MOCHI, STAT_HP, "Health Mochi"}, {ITEM_MUSCLE_MOCHI, STAT_ATK, "Muscle Mochi"},
+        {ITEM_RESIST_MOCHI, STAT_DEF, "Resist Mochi"}, {ITEM_SWIFT_MOCHI, STAT_SPEED, "Swift Mochi"},
+        {ITEM_GENIUS_MOCHI, STAT_SPATK, "Genius Mochi"}, {ITEM_CLEVER_MOCHI, STAT_SPDEF, "Clever Mochi"},
+    };
+    static const char *const sRotom[] = {"Rotom", "Heat", "Wash", "Frost", "Fan", "Mow"};
+    static const u16 sRotomForms[] = {SPECIES_ROTOM, SPECIES_ROTOM_HEAT, SPECIES_ROTOM_WASH, SPECIES_ROTOM_FROST,
+                                      SPECIES_ROTOM_FAN, SPECIES_ROTOM_MOW};
+    struct Pokemon *mon;
+    char line[200];
+    u32 i, before, after, max;
+
+    Setup();
+    UseMap(MAP_ROUTE101);
+    printf("selftest-rare-goods: the coin shop's Exp. Candies, Mochi, Linking Cord, Black Augurite, Rotom Catalog, Zygarde Cube\n");
+
+    for (i = 0; i < ARRAY_COUNT(sCandies); i++)
+    {
+        bool8 noEffect;
+
+        mon = BagMon(SPECIES_MUDKIP, 5, MON_MALE, 70);
+        before = GetMonData(mon, MON_DATA_EXP);
+        noEffect = PokemonUseItemEffects(mon, sCandies[i].item, 0, 0, FALSE);
+        after = GetMonData(mon, MON_DATA_EXP);
+        snprintf(line, sizeof(line), "%s on a level-5 Mudkip: experience %u -> %u (+%u, rule +%u), level %u",
+                 sCandies[i].name, (unsigned)before, (unsigned)after, (unsigned)(after - before),
+                 (unsigned)sCandies[i].exp, (unsigned)GetMonData(mon, MON_DATA_LEVEL));
+        Expect(line, !noEffect && after - before == sCandies[i].exp
+                     && GetMonData(mon, MON_DATA_LEVEL) == GetLevelFromMonExp(mon));
+    }
+    mon = BagMon(SPECIES_MUDKIP, MAX_LEVEL, MON_MALE, 70);
+    max = GetMonData(mon, MON_DATA_EXP);
+    Expect("Exp. Candy XL on a level-100 Pokemon: no effect, kept",
+           PokemonUseItemEffects(mon, ITEM_EXP_CANDY_XL, 0, 0, FALSE) && GetMonData(mon, MON_DATA_EXP) == max);
+
+    for (i = 0; i < ARRAY_COUNT(sMochi); i++)
+        ExpectEVs(sMochi[i].name, sMochi[i].item, sMochi[i].stat, 0, 0, 10, TRUE);
+    ExpectEVs("Health Mochi at 100 (a vitamin's limit): on to 110", ITEM_HEALTH_MOCHI, STAT_HP, 100, 0, 110, TRUE);
+    ExpectEVs("Muscle Mochi at 245: to 252", ITEM_MUSCLE_MOCHI, STAT_ATK, 245, 0, 252, TRUE);
+    ExpectEVs("Muscle Mochi at 252", ITEM_MUSCLE_MOCHI, STAT_ATK, 252, 0, 252, FALSE);
+    ExpectEVs("Swift Mochi with 510 in the other stats", ITEM_SWIFT_MOCHI, STAT_SPEED, 0, 510, 0, FALSE);
+
+    mon = BagMon(SPECIES_MUDKIP, 50, MON_MALE, 70);
+    SetEVs(mon, STAT_HP, 100, 300);
+    {
+        bool8 noEffect = ExecuteTableBasedItemEffect(mon, ITEM_FRESH_START_MOCHI, 0, 0);
+        u32 total = 0;
+
+        for (i = 0; i < NUM_STATS; i++)
+            total += GetMonData(mon, sEVData[i]);
+        snprintf(line, sizeof(line), "Fresh-Start Mochi with 400 base points: %u left", (unsigned)total);
+        Expect(line, !noEffect && total == 0);
+        Expect("Fresh-Start Mochi with none: no effect, kept", ExecuteTableBasedItemEffect(mon, ITEM_FRESH_START_MOCHI, 0, 0));
+    }
+
+    // The Linking Cord stands in for a trade alone (the species' data): not for a trade with a held item
+    ExpectStone("Linking Cord on Kadabra -> Alakazam", SPECIES_KADABRA, MON_MALE, ITEM_LINKING_CORD, ITEM_NONE, SPECIES_ALAKAZAM);
+    ExpectStone("Linking Cord on Machoke -> Machamp", SPECIES_MACHOKE, MON_MALE, ITEM_LINKING_CORD, ITEM_NONE, SPECIES_MACHAMP);
+    ExpectStone("Linking Cord on Graveler -> Golem", SPECIES_GRAVELER, MON_MALE, ITEM_LINKING_CORD, ITEM_NONE, SPECIES_GOLEM);
+    ExpectStone("Linking Cord on Haunter -> Gengar", SPECIES_HAUNTER, MON_MALE, ITEM_LINKING_CORD, ITEM_NONE, SPECIES_GENGAR);
+    ExpectStone("Linking Cord on Boldore -> Gigalith", SPECIES_BOLDORE, MON_MALE, ITEM_LINKING_CORD, ITEM_NONE, SPECIES_GIGALITH);
+    ExpectStone("Linking Cord on Gurdurr -> Conkeldurr", SPECIES_GURDURR, MON_MALE, ITEM_LINKING_CORD, ITEM_NONE,
+                SPECIES_CONKELDURR);
+    ExpectStone("Linking Cord on Phantump -> Trevenant", SPECIES_PHANTUMP, MON_MALE, ITEM_LINKING_CORD, ITEM_NONE,
+                SPECIES_TREVENANT);
+    ExpectStone("Linking Cord on Onix holding a Metal Coat: no evolution (a held item's trade stays a trade)", SPECIES_ONIX,
+                MON_MALE, ITEM_LINKING_CORD, ITEM_METAL_COAT, SPECIES_NONE);
+    ExpectStone("Linking Cord on Onix holding nothing: no evolution", SPECIES_ONIX, MON_MALE, ITEM_LINKING_CORD, ITEM_NONE,
+                SPECIES_NONE);
+    ExpectStone("Linking Cord on Pikachu: no evolution", SPECIES_PIKACHU, MON_MALE, ITEM_LINKING_CORD, ITEM_NONE, SPECIES_NONE);
+    ExpectStone("Black Augurite on Scyther -> Kleavor", SPECIES_SCYTHER, MON_MALE, ITEM_BLACK_AUGURITE, ITEM_NONE,
+                SPECIES_KLEAVOR);
+    ExpectStone("Black Augurite on Pikachu: no evolution", SPECIES_PIKACHU, MON_MALE, ITEM_BLACK_AUGURITE, ITEM_NONE,
+                SPECIES_NONE);
+
+    for (i = 1; i < ARRAY_COUNT(sRotomForms); i++)
+    {
+        char what[80];
+
+        snprintf(what, sizeof(what), "Rotom Catalog on Rotom, choice %u (%s)", (unsigned)i, sRotom[i]);
+        ExpectMultichoiceForm(what, SPECIES_ROTOM, ITEM_ROTOM_CATALOG, i, TRUE, sRotomForms[i]);
+    }
+    ExpectMultichoiceForm("Rotom Catalog on Rotom Heat, choice 0 (back to Rotom)", SPECIES_ROTOM_HEAT, ITEM_ROTOM_CATALOG, 0,
+                          TRUE, SPECIES_ROTOM);
+    ExpectMultichoiceForm("Rotom Catalog on Pikachu: no change", SPECIES_PIKACHU, ITEM_ROTOM_CATALOG, 1, FALSE, SPECIES_PIKACHU);
+    ExpectMultichoiceForm("Zygarde Cube on Zygarde 50% (Aura Break), choice 0 -> 10% (Aura Break)", SPECIES_ZYGARDE_50,
+                          ITEM_ZYGARDE_CUBE, 0, TRUE, SPECIES_ZYGARDE_10_AURA_BREAK);
+    ExpectMultichoiceForm("Zygarde Cube on Zygarde 50% (Aura Break), choice 1 -> 50% (Power Construct)", SPECIES_ZYGARDE_50,
+                          ITEM_ZYGARDE_CUBE, 1, TRUE, SPECIES_ZYGARDE_50_POWER_CONSTRUCT);
+    ExpectMultichoiceForm("Zygarde Cube on Pikachu: no change", SPECIES_PIKACHU, ITEM_ZYGARDE_CUBE, 0, FALSE, SPECIES_PIKACHU);
+
+    printf("selftest-rare-goods: %d checks, %d failed\n", sChecks, sFailures);
+    return sFailures == 0 ? 0 : 1;
+}
