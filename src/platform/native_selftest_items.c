@@ -2533,6 +2533,31 @@ int NativeSelfTest_RareGoods(void)
                           ITEM_ZYGARDE_CUBE, 1, TRUE, SPECIES_ZYGARDE_50_POWER_CONSTRUCT);
     ExpectMultichoiceForm("Zygarde Cube on Pikachu: no change", SPECIES_PIKACHU, ITEM_ZYGARDE_CUBE, 0, FALSE, SPECIES_PIKACHU);
 
+    // The Nectars, not sold but held by a wild Oricorio: its style, through TryFormChange as for a form item
+    {
+        static const struct { u16 from; u16 item; u16 want; bool8 changed; const char *what; } sNectars[] = {
+            {SPECIES_ORICORIO_BAILE, ITEM_YELLOW_NECTAR, SPECIES_ORICORIO_POM_POM, TRUE, "Yellow Nectar on Oricorio (Baile) -> Pom-Pom"},
+            {SPECIES_ORICORIO_BAILE, ITEM_PINK_NECTAR, SPECIES_ORICORIO_PAU, TRUE, "Pink Nectar on Oricorio (Baile) -> Pa'u"},
+            {SPECIES_ORICORIO_BAILE, ITEM_PURPLE_NECTAR, SPECIES_ORICORIO_SENSU, TRUE, "Purple Nectar on Oricorio (Baile) -> Sensu"},
+            {SPECIES_ORICORIO_SENSU, ITEM_RED_NECTAR, SPECIES_ORICORIO_BAILE, TRUE, "Red Nectar on Oricorio (Sensu) -> Baile"},
+            {SPECIES_ORICORIO_BAILE, ITEM_RED_NECTAR, SPECIES_ORICORIO_BAILE, FALSE, "Red Nectar on Oricorio (Baile): no change"},
+            {SPECIES_PIKACHU, ITEM_RED_NECTAR, SPECIES_PIKACHU, FALSE, "Red Nectar on Pikachu: no change"},
+        };
+
+        for (i = 0; i < ARRAY_COUNT(sNectars); i++)
+        {
+            bool32 changed;
+
+            mon = BagMon(sNectars[i].from, 50, MON_MALE, 70);
+            gSpecialVar_ItemId = sNectars[i].item;
+            changed = TryFormChange(mon, FORM_CHANGE_ITEM_USE, B_TRAINER_PLAYER);
+            gSpecialVar_ItemId = ITEM_NONE;
+            snprintf(line, sizeof(line), "%s: %s, species %u (rule %u)", sNectars[i].what, changed ? "changed" : "no change",
+                     (unsigned)GetMonData(mon, MON_DATA_SPECIES), (unsigned)sNectars[i].want);
+            Expect(line, changed == sNectars[i].changed && GetMonData(mon, MON_DATA_SPECIES) == sNectars[i].want);
+        }
+    }
+
     printf("selftest-rare-goods: %d checks, %d failed\n", sChecks, sFailures);
     return sFailures == 0 ? 0 : 1;
 }
