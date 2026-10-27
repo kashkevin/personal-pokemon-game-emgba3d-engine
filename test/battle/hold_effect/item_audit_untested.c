@@ -200,3 +200,140 @@ SINGLE_BATTLE_TEST("Figy Berry and the others are not eaten above half HP (Gen 6
         EXPECT_EQ(player->item, ITEM_FIGY_BERRY);
     }
 }
+
+SINGLE_BATTLE_TEST("Macho Brace and the Power items halve the holder's Speed")
+{
+    enum Item item = ITEM_NONE;
+
+    PARAMETRIZE { item = ITEM_NONE; }
+    PARAMETRIZE { item = ITEM_MACHO_BRACE; }
+    PARAMETRIZE { item = ITEM_POWER_WEIGHT; }
+    PARAMETRIZE { item = ITEM_POWER_BRACER; }
+    PARAMETRIZE { item = ITEM_POWER_BELT; }
+    PARAMETRIZE { item = ITEM_POWER_LENS; }
+    PARAMETRIZE { item = ITEM_POWER_BAND; }
+    PARAMETRIZE { item = ITEM_POWER_ANKLET; }
+
+    GIVEN {
+        if (item != ITEM_NONE)
+            ASSUME(GetItemHoldEffect(item) == HOLD_EFFECT_MACHO_BRACE || GetItemHoldEffect(item) == HOLD_EFFECT_POWER_ITEM);
+        PLAYER(SPECIES_WOBBUFFET) { Speed(100); Item(item); }
+        OPPONENT(SPECIES_WOBBUFFET) { Speed(60); }
+    } WHEN {
+        TURN { MOVE(player, MOVE_CELEBRATE); MOVE(opponent, MOVE_CELEBRATE); }
+    } SCENE {
+        if (item == ITEM_NONE) {
+            ANIMATION(ANIM_TYPE_MOVE, MOVE_CELEBRATE, player);
+            ANIMATION(ANIM_TYPE_MOVE, MOVE_CELEBRATE, opponent);
+        } else {
+            ANIMATION(ANIM_TYPE_MOVE, MOVE_CELEBRATE, opponent);
+            ANIMATION(ANIM_TYPE_MOVE, MOVE_CELEBRATE, player);
+        }
+    }
+}
+
+SINGLE_BATTLE_TEST("Focus Sash lets a holder at full HP survive a hit that would knock it out, and is used up")
+{
+    GIVEN {
+        ASSUME(GetItemHoldEffect(ITEM_FOCUS_SASH) == HOLD_EFFECT_FOCUS_SASH);
+        PLAYER(SPECIES_WOBBUFFET);
+        OPPONENT(SPECIES_WOBBUFFET) { MaxHP(10); HP(10); Item(ITEM_FOCUS_SASH); }
+    } WHEN {
+        TURN { MOVE(player, MOVE_SCRATCH); }
+    } SCENE {
+        ANIMATION(ANIM_TYPE_MOVE, MOVE_SCRATCH, player);
+        HP_BAR(opponent);
+        MESSAGE("The opposing Wobbuffet hung on using its Focus Sash!");
+    } THEN {
+        EXPECT_EQ(opponent->hp, 1);
+        EXPECT_EQ(opponent->item, ITEM_NONE);
+    }
+}
+
+SINGLE_BATTLE_TEST("Focus Sash does nothing for a holder below full HP")
+{
+    GIVEN {
+        ASSUME(GetItemHoldEffect(ITEM_FOCUS_SASH) == HOLD_EFFECT_FOCUS_SASH);
+        PLAYER(SPECIES_WOBBUFFET);
+        OPPONENT(SPECIES_WOBBUFFET) { MaxHP(10); HP(9); Item(ITEM_FOCUS_SASH); }
+        OPPONENT(SPECIES_WOBBUFFET);
+    } WHEN {
+        TURN { MOVE(player, MOVE_SCRATCH); SEND_OUT(opponent, 1); }
+    } SCENE {
+        ANIMATION(ANIM_TYPE_MOVE, MOVE_SCRATCH, player);
+        NONE_OF { MESSAGE("The opposing Wobbuffet hung on using its Focus Sash!"); }
+        MESSAGE("The opposing Wobbuffet fainted!");
+    }
+}
+
+SINGLE_BATTLE_TEST("Flame Orb burns its holder at the end of the turn and is not used up")
+{
+    GIVEN {
+        ASSUME(GetItemHoldEffect(ITEM_FLAME_ORB) == HOLD_EFFECT_FLAME_ORB);
+        PLAYER(SPECIES_WOBBUFFET) { Item(ITEM_FLAME_ORB); }
+        OPPONENT(SPECIES_WOBBUFFET);
+    } WHEN {
+        TURN { MOVE(player, MOVE_CELEBRATE); }
+    } SCENE {
+        ANIMATION(ANIM_TYPE_MOVE, MOVE_CELEBRATE, player);
+        STATUS_ICON(player, burn: TRUE);
+    } THEN {
+        EXPECT_NE(player->status1 & STATUS1_BURN, 0);
+        EXPECT_EQ(player->item, ITEM_FLAME_ORB);
+    }
+}
+
+SINGLE_BATTLE_TEST("Flame Orb does not burn a Fire-type holder")
+{
+    GIVEN {
+        ASSUME(GetItemHoldEffect(ITEM_FLAME_ORB) == HOLD_EFFECT_FLAME_ORB);
+        ASSUME(GetSpeciesType(SPECIES_CHARMANDER, 0) == TYPE_FIRE);
+        PLAYER(SPECIES_CHARMANDER) { Item(ITEM_FLAME_ORB); }
+        OPPONENT(SPECIES_WOBBUFFET);
+    } WHEN {
+        TURN { MOVE(player, MOVE_CELEBRATE); }
+    } SCENE {
+        NONE_OF { STATUS_ICON(player, burn: TRUE); }
+    } THEN {
+        EXPECT_EQ(player->status1 & STATUS1_BURN, 0);
+    }
+}
+
+SINGLE_BATTLE_TEST("Toxic Orb badly poisons its holder at the end of the turn and is not used up")
+{
+    GIVEN {
+        ASSUME(GetItemHoldEffect(ITEM_TOXIC_ORB) == HOLD_EFFECT_TOXIC_ORB);
+        PLAYER(SPECIES_WOBBUFFET) { Item(ITEM_TOXIC_ORB); }
+        OPPONENT(SPECIES_WOBBUFFET);
+    } WHEN {
+        TURN { MOVE(player, MOVE_CELEBRATE); }
+    } SCENE {
+        ANIMATION(ANIM_TYPE_MOVE, MOVE_CELEBRATE, player);
+        STATUS_ICON(player, badPoison: TRUE);
+    } THEN {
+        EXPECT_NE(player->status1 & STATUS1_TOXIC_POISON, 0);
+        EXPECT_EQ(player->item, ITEM_TOXIC_ORB);
+    }
+}
+
+SINGLE_BATTLE_TEST("Toxic Orb does not poison a Steel- or Poison-type holder")
+{
+    enum Species species = SPECIES_NONE;
+
+    PARAMETRIZE { species = SPECIES_MAGNEMITE; }
+    PARAMETRIZE { species = SPECIES_EKANS; }
+
+    GIVEN {
+        ASSUME(GetItemHoldEffect(ITEM_TOXIC_ORB) == HOLD_EFFECT_TOXIC_ORB);
+        ASSUME(GetSpeciesType(SPECIES_MAGNEMITE, 1) == TYPE_STEEL);
+        ASSUME(GetSpeciesType(SPECIES_EKANS, 0) == TYPE_POISON);
+        PLAYER(species) { Item(ITEM_TOXIC_ORB); }
+        OPPONENT(SPECIES_WOBBUFFET);
+    } WHEN {
+        TURN { MOVE(player, MOVE_CELEBRATE); }
+    } SCENE {
+        NONE_OF { STATUS_ICON(player, badPoison: TRUE); }
+    } THEN {
+        EXPECT_EQ(player->status1 & STATUS1_PSN_ANY, 0);
+    }
+}
