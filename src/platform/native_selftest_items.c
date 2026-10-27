@@ -725,6 +725,7 @@ int NativeSelfTest_Balls(void)
         {ITEM_POKE_BALL, "Poke Ball"}, {ITEM_PREMIER_BALL, "Premier Ball"}, {ITEM_LUXURY_BALL, "Luxury Ball"},
         {ITEM_HEAL_BALL, "Heal Ball"}, {ITEM_FRIEND_BALL, "Friend Ball"}, {ITEM_CHERISH_BALL, "Cherish Ball"},
         {ITEM_PARK_BALL, "Park Ball (outside the Pal Park, no effect)"}, {ITEM_DREAM_BALL, "Dream Ball (awake)"},
+        {ITEM_STRANGE_BALL, "Strange Ball (a later game's ball, x1; sold in the coin shop)"},
     };
     u32 i;
 
