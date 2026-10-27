@@ -17,6 +17,8 @@
 #include "pokemon.h"
 #include "pokemon_storage_system.h"
 #include "random.h"
+#include "string_util.h"
+#include "strings.h"
 #include "constants/abilities.h"
 #include "constants/daycare.h"
 #include "constants/flags.h"
@@ -168,6 +170,55 @@ static int StepsToHatch(u32 cycles, bool32 incubator)
         if (ShouldEggHatch())
             return steps;
     return -1;
+}
+
+// As StepsToHatch, for an Egg in the PC (the party: nothing, or the Magmar with Flame Body).
+static int BoxStepsToHatch(u32 cycles, bool32 incubator)
+{
+    struct Pokemon egg;
+    u32 isEgg = TRUE;
+
+    ResetPokemonStorageSystem();
+    ZeroPlayerPartyMons();
+    gPartiesCount[B_TRAINER_PLAYER] = 0;
+    if (incubator)
+    {
+        struct Pokemon magmar;
+
+        CreateMon(&magmar, SPECIES_MAGMAR, 20, 0x1000, OTID_STRUCT_PLAYER_ID);   // ability slot 0: Flame Body
+        gParties[B_TRAINER_PLAYER][0] = magmar;
+        gPartiesCount[B_TRAINER_PLAYER] = 1;
+    }
+    CreateMon(&egg, SPECIES_PICHU, 1, 0, OTID_STRUCT_PLAYER_ID);
+    SetMonData(&egg, MON_DATA_IS_EGG, &isEgg);
+    SetMonData(&egg, MON_DATA_FRIENDSHIP, &cycles);
+    gPokemonStoragePtr->boxes[0][0] = egg.box;
+    gSaveBlock1Ptr->daycare.stepCounter = 0;
+    for (int steps = 1; steps < 100000; steps++)
+    {
+        ShouldEggHatch();
+        if (!GetBoxMonData(&gPokemonStoragePtr->boxes[0][0], MON_DATA_IS_EGG))
+            return steps;
+    }
+    return -1;
+}
+
+static u32 CountBoxMons(void)
+{
+    u32 count = 0;
+
+    for (u32 box = 0; box < TOTAL_BOXES_COUNT; box++)
+        for (u32 slot = 0; slot < IN_BOX_COUNT; slot++)
+            count += GetBoxMonData(&gPokemonStoragePtr->boxes[box][slot], MON_DATA_SANITY_HAS_SPECIES) != 0;
+    return count;
+}
+
+static bool32 NicknameIsSpeciesName(struct Pokemon *mon)
+{
+    u8 name[POKEMON_NAME_LENGTH + 1];
+
+    GetMonData(mon, MON_DATA_NICKNAME, name);
+    return StringCompare(name, GetSpeciesName(GetMonData(mon, MON_DATA_SPECIES))) == 0;
 }
 
 int NativeSelfTest_Breeding(void)
@@ -412,30 +463,124 @@ int NativeSelfTest_Breeding(void)
         }
     }
 
-    // 5. Eggs in the PC: stay Eggs, do not hatch, keep their cycles, come back unchanged
+    // 5. Eggs in the PC (the owner's request of 2026-10-27; they used to stay as they were): they spend the egg cycles of
+    //    the player's steps as a party Egg does - the same steps, never fewer - all of them at once, and hatch in their
+    //    own slot with everything they were made with
     if (SectionWanted(5))
     {
-        struct Pokemon egg, back;
-        u32 isEgg = TRUE, cycles = 7, before, after;
-        u32 i;
+        static const u32 sCycles[] = {0, 1, 7, 20};
+        u32 c, incubator;
 
-        ZeroPlayerPartyMons();
-        CreateMon(&egg, SPECIES_TOGEPI, 1, 0x5555, OTID_STRUCT_PLAYER_ID);
-        SetMonData(&egg, MON_DATA_IS_EGG, &isEgg);
-        SetMonData(&egg, MON_DATA_FRIENDSHIP, &cycles);
-        before = GetMonData(&egg, MON_DATA_PERSONALITY);
-        ExpectLeg("an Egg can be sent to the PC", CopyMonToPC(&egg) == MON_GIVEN_TO_PC);
-        gSaveBlock1Ptr->daycare.stepCounter = 0;
-        gPartiesCount[B_TRAINER_PLAYER] = 0;
-        for (i = 0; i < 20000; i++)
-            ShouldEggHatch();
-        BoxMonToMon(&gPokemonStoragePtr->boxes[0][0], &back);
-        after = GetMonData(&back, MON_DATA_FRIENDSHIP);
-        ExpectLeg("20,000 steps do not hatch it or spend a cycle while it is in the PC",
-                  GetMonData(&back, MON_DATA_IS_EGG) == 1 && after == 7 && GetMonData(&back, MON_DATA_PERSONALITY) == before
-                  && GetMonData(&back, MON_DATA_SPECIES) == SPECIES_TOGEPI);
-        ExpectLeg("a stored Egg is still an Egg after the steps and the withdraw",
-                  GetMonData(&back, MON_DATA_IS_EGG) == 1);
+        for (c = 0; c < ARRAY_COUNT(sCycles); c++)
+        {
+            for (incubator = 0; incubator < 2; incubator++)
+            {
+                int party = StepsToHatch(sCycles[c], incubator);
+                int box = BoxStepsToHatch(sCycles[c], incubator);
+                char what[160];
+
+                snprintf(what, sizeof(what), "a PC Egg of %u cycles hatches on the step a party Egg does%s (%d, %d)",
+                         (unsigned)sCycles[c], incubator ? ", Flame Body in the party" : "", box, party);
+                ExpectLeg(what, box > 0 && box == party);
+            }
+        }
+
+        {
+            struct Pokemon egg, back;
+            struct BoxPokemon *slot;
+            u32 isEgg = TRUE, shiny = TRUE, cycles = 2, language = LANGUAGE_JAPANESE, move = MOVE_EXTRASENSORY;
+            u32 personality, otId, species, ability, gender, nature, ivs[NUM_STATS], moves[MAX_MON_MOVES], i;
+            bool32 same = TRUE, fullPp = TRUE;
+            int steps;
+
+            ResetPokemonStorageSystem();
+            ZeroPlayerPartyMons();
+            gPartiesCount[B_TRAINER_PLAYER] = 0;
+            CreateMonWithIVs(&egg, SPECIES_TOGEPI, EGG_HATCH_LEVEL, 0x4B1D5EED, OTID_STRUCT_PLAYER_ID, USE_RANDOM_IVS);
+            SetMonData(&egg, MON_DATA_IS_SHINY, &shiny);
+            SetMonData(&egg, MON_DATA_MOVE4, &move);            // an Egg move
+            SetMonData(&egg, MON_DATA_IS_EGG, &isEgg);
+            SetMonData(&egg, MON_DATA_FRIENDSHIP, &cycles);
+            SetMonData(&egg, MON_DATA_LANGUAGE, &language);     // an Egg's, as the Day Care makes it
+            SetMonData(&egg, MON_DATA_NICKNAME, gText_EggNickname);
+            personality = GetMonData(&egg, MON_DATA_PERSONALITY);
+            otId = GetMonData(&egg, MON_DATA_OT_ID);
+            species = GetMonData(&egg, MON_DATA_SPECIES);
+            ability = GetMonData(&egg, MON_DATA_ABILITY_NUM);
+            gender = GetMonGender(&egg);
+            nature = GetNature(&egg);
+            for (i = 0; i < NUM_STATS; i++)
+                ivs[i] = GetMonData(&egg, MON_DATA_HP_IV + i);
+            for (i = 0; i < MAX_MON_MOVES; i++)
+                moves[i] = GetMonData(&egg, MON_DATA_MOVE1 + i);
+            slot = &gPokemonStoragePtr->boxes[TOTAL_BOXES_COUNT - 1][IN_BOX_COUNT - 1];   // the last slot of the last box
+            *slot = egg.box;
+            gSaveBlock1Ptr->daycare.stepCounter = 0;
+            for (steps = 1; steps < 10000 && GetBoxMonData(slot, MON_DATA_IS_EGG); steps++)
+                ShouldEggHatch();
+            BoxMonToMon(slot, &back);
+            for (i = 0; i < NUM_STATS; i++)
+                same &= GetMonData(&back, MON_DATA_HP_IV + i) == ivs[i];
+            for (i = 0; i < MAX_MON_MOVES; i++)
+            {
+                same &= GetMonData(&back, MON_DATA_MOVE1 + i) == moves[i];
+                if (moves[i] != MOVE_NONE)
+                    fullPp &= GetMonData(&back, MON_DATA_PP1 + i)
+                           == CalculatePPWithBonus(moves[i], GetMonData(&back, MON_DATA_PP_BONUSES), i);
+            }
+            ExpectLeg("the last box's last slot hatches after 3 egg cycles of steps (2 cycles, then the hatch)",
+                      !GetMonData(&back, MON_DATA_IS_EGG) && steps - 1 == 3 * MP_EGG_CYCLE_STEPS);
+            ExpectLeg("it keeps its personality, nature, shininess, ability, gender, IVs, moves, species and trainer",
+                      same && GetMonData(&back, MON_DATA_PERSONALITY) == personality && GetNature(&back) == nature
+                      && GetMonData(&back, MON_DATA_IS_SHINY) && GetMonData(&back, MON_DATA_ABILITY_NUM) == ability
+                      && GetMonGender(&back) == gender && GetMonData(&back, MON_DATA_SPECIES) == species
+                      && GetMonData(&back, MON_DATA_OT_ID) == otId);
+            ExpectLeg("it is named as its species, in the game's language, friendship 120, met at level 0, PP full",
+                      GetMonData(&back, MON_DATA_LANGUAGE) == GAME_LANGUAGE
+                      && GetMonData(&back, MON_DATA_FRIENDSHIP) == 120 && GetMonData(&back, MON_DATA_MET_LEVEL) == 0
+                      && fullPp && NicknameIsSpeciesName(&back));
+            ExpectLeg("it stays in its own slot, nothing else in the boxes", CountBoxMons() == 1);
+        }
+
+        {
+            // several at once, in different boxes; a Pokemon that is no Egg and a bad Egg are left alone
+            struct Pokemon mon;
+            u32 isEgg = TRUE, zero = 0, seventy = 70, bad = TRUE, hatched = 0, i;
+            static const u8 sSlots[][2] = {{0, 0}, {5, 12}, {13, 29}};
+
+            ResetPokemonStorageSystem();
+            ZeroPlayerPartyMons();
+            gPartiesCount[B_TRAINER_PLAYER] = 0;
+            for (i = 0; i < ARRAY_COUNT(sSlots); i++)
+            {
+                CreateMon(&mon, SPECIES_PICHU + i, EGG_HATCH_LEVEL, 0x100 + i, OTID_STRUCT_PLAYER_ID);
+                SetMonData(&mon, MON_DATA_IS_EGG, &isEgg);
+                SetMonData(&mon, MON_DATA_FRIENDSHIP, &zero);
+                gPokemonStoragePtr->boxes[sSlots[i][0]][sSlots[i][1]] = mon.box;
+            }
+            CreateMon(&mon, SPECIES_ZIGZAGOON, 10, 0x200, OTID_STRUCT_PLAYER_ID);
+            SetMonData(&mon, MON_DATA_FRIENDSHIP, &seventy);
+            gPokemonStoragePtr->boxes[2][3] = mon.box;
+            CreateMon(&mon, SPECIES_TOGEPI, EGG_HATCH_LEVEL, 0x300, OTID_STRUCT_PLAYER_ID);
+            SetMonData(&mon, MON_DATA_IS_EGG, &isEgg);
+            SetMonData(&mon, MON_DATA_FRIENDSHIP, &zero);
+            SetMonData(&mon, MON_DATA_SANITY_IS_BAD_EGG, &bad);
+            gPokemonStoragePtr->boxes[2][4] = mon.box;
+            gSaveBlock1Ptr->daycare.stepCounter = 0;
+            for (i = 0; i < MP_EGG_CYCLE_STEPS; i++)
+                ShouldEggHatch();
+            for (i = 0; i < ARRAY_COUNT(sSlots); i++)
+                hatched += !GetBoxMonData(&gPokemonStoragePtr->boxes[sSlots[i][0]][sSlots[i][1]], MON_DATA_IS_EGG)
+                        && GetBoxMonData(&gPokemonStoragePtr->boxes[sSlots[i][0]][sSlots[i][1]], MON_DATA_SPECIES)
+                           == SPECIES_PICHU + i;
+            ExpectLeg("three Eggs in three boxes hatch at the same cycle's end", hatched == 3);
+            ExpectLeg("a Pokemon that is no Egg keeps its friendship",
+                      GetBoxMonData(&gPokemonStoragePtr->boxes[2][3], MON_DATA_FRIENDSHIP) == 70);
+            ExpectLeg("a bad Egg is left alone",
+                      GetBoxMonData(&gPokemonStoragePtr->boxes[2][4], MON_DATA_SANITY_IS_BAD_EGG));
+            ExpectLeg("the PC holds the same five Pokemon", CountBoxMons() == 5);
+            (void)bad;
+        }
     }
 
     // 6. Egg shiny rates through the whole Day Care (parents, Charm, Egg shiny rolls)

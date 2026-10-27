@@ -21,6 +21,15 @@ an Egg of theirs waits with the Day Care man (PKMN_TEST_EGG_READY: the step chec
   4. hatch-load   that save loaded: the hatched Pichu
   5. light-ball   as 1 with the mother holding a Light Ball instead: the Egg knows Volt Tackle (the Light Ball rule)
                   besides Fake Out
+  6. pc-egg       Eggs hatching in the PC (the owner's request of 2026-10-27): 1's save, its Egg put in the PC
+                  (PKMN_TEST_EGG_TO_PC) with 3 cycles left, 96 steps walked in Littleroot: cycles spent (fewer than 3,
+                  still an Egg); SAVE
+  7. pc-egg-load  that save loaded: the Egg in the PC with the cycles it was saved with; the party without it
+  8. pc-egg-hatch from 6's save, walked until it hatches in its PC slot: the Pichu with the Egg's IVs, nature, ball
+                  and moves, and the banner "PC EGG HATCHED!|Pichu hatched in your PC."; SAVE
+  9. pc-egg-hatch-load  that save loaded: the hatched Pichu in its PC slot
+ 10. pc-eggs      three Eggs in three boxes (PKMN_TEST_BOX) with no cycles left: all three hatch at the same cycle's
+                  end, one banner "3 PC EGGS HATCHED!|..."
 
     tools/battle_env/breed_check.py --exe ./pokeemerald-mp-bfxtest --save town.sav --out build/breed-check \\
         [--display :99] [--make-save [PATH]]
@@ -66,6 +75,37 @@ def hatch_keys():
     return keys, frame + 100
 
 
+def walk_keys(rounds):
+    """As hatch_keys' walk alone (a PC Egg hatches without a scene): `rounds` of three taps left, three right."""
+    keys, frame = [], 30
+    for _ in range(rounds):
+        for key in ("LEFT", "LEFT", "LEFT", "RIGHT", "RIGHT", "RIGHT"):
+            keys.append(f"{frame}:{key}")
+            frame += 18
+    return keys, frame + 120
+
+
+def box_lines(lines):
+    """The PC's Eggs as the log tells them: ({(box, slot): fields}, notices, moved) - the last "breed box" fields of
+    each slot that held an Egg, every "breed pc notice", and the "breed moved" count (None without the line)."""
+    boxes, notices, moved = {}, [], None
+    for line in lines:
+        if line.startswith("breed box "):
+            head, rest = line.split(":", 1)
+            box, slot = (int(x) for x in head.split()[2:4])
+            if rest.strip() == "none":
+                boxes[(box, slot)] = None
+            else:
+                v = numbers(rest)
+                boxes[(box, slot)] = dict(species=v[0], egg=v[1], level=v[2], ivs=v[3:9], nature=v[9], num=v[10],
+                                          ball=v[11], moves=v[12:16], cycles=v[16])
+        elif line.startswith("breed pc notice: "):
+            notices.append(line[len("breed pc notice: "):])
+        elif line.startswith("breed moved "):
+            moved = numbers(line)[0]
+    return boxes, notices, moved
+
+
 def breed_lines(lines):
     """The party and the Day Care as the log tells them: (slots, states) - slots[n] the last "breed party n" fields
     (a dict, or None for an empty slot), and every "breed state" (party, daycare, egg waiting), from the field keys'
@@ -83,7 +123,8 @@ def breed_lines(lines):
                              moves=v[12:16], cycles=v[16])
             (slots if i >= begun else before)[n] = value
         elif line.startswith("breed state: "):
-            states.append(dict(zip(("party", "daycare", "waiting"), numbers(line)), after_keys=i >= begun))
+            states.append(dict(zip(("party", "daycare", "waiting", "boxes", "caught"), numbers(line)),
+                               after_keys=i >= begun))
     return {**before, **slots}, before, states
 
 
@@ -121,7 +162,9 @@ def main():
             args.save = saved
         lines = driver_lines(os.path.join(rundir, "test.log"))
         slots, before, states = breed_lines(lines)
+        boxes, notices, moved = box_lines(lines)
         steps.append(dict(step=name, exit=code, before=before, after=slots, states=states,
+                          boxes={f"{b}:{s}": v for (b, s), v in boxes.items()}, notices=notices, moved=moved,
                           notes=[line for line in lines if line.startswith(("cannot", "assert"))],
                           pictures=sorted(f for f in os.listdir(rundir) if f.endswith(".png"))))
         if code != 0:
@@ -188,6 +231,73 @@ def main():
     _, slots, _, _ = step("light-ball", args.save, EGG_SAVE_AT + 100, EGG_KEYS, setup)
     check("light-ball", slots.get(1), egg=1, ball=BALL_QUICK)
     check_egg("light-ball", slots.get(1), MOVE_FAKE_OUT, MOVE_VOLT_TACKLE)
+
+    # 6. The Egg put in the PC: its cycles spent by walking, saved
+    def pc_egg():
+        """The one Egg of the last step's boxes, as (slot, fields)."""
+        boxes = steps[-1]["boxes"]
+        found = [(k, v) for k, v in boxes.items()]
+        return found[0] if len(found) == 1 else (None, None)
+
+    keys, save_at = walk_keys(24)
+    pc_dir, slots, _, states = step("pc-egg", egg_save, save_at + 900, keys + save_keys(save_at),
+                                    dict(PKMN_TEST_EGG_TO_PC="1", PKMN_TEST_EGG_CYCLES="3", PKMN_TEST_WARP=LITTLEROOT))
+    slot, pc = pc_egg()
+    if steps[-1]["moved"] != 1:
+        problems.append(f"pc-egg: {steps[-1]['moved']} Eggs put in the PC, expected 1")
+    if any(v is not None and v["egg"] for v in slots.values()):
+        problems.append("pc-egg: an Egg is still in the party")
+    if pc is None:
+        problems.append(f"pc-egg: no single Egg in the PC: {steps[-1]['boxes']}")
+    else:
+        check("pc-egg", pc, egg=1)
+        if not pc["cycles"] < 3:
+            problems.append(f"pc-egg: {pc['cycles']} cycles left after 96 steps from 3: none spent")
+        if egg is not None:
+            check("pc-egg", pc, **{k: egg[k] for k in ("species", "ivs", "nature", "ball", "moves")})
+    pc_save = os.path.join(pc_dir, "test.sav")
+
+    # 7. That save loaded: the Egg in the PC as it was saved
+    step("pc-egg-load", pc_save, 60, [])
+    loaded = steps[-1]["boxes"].get(slot) if slot else None
+    if pc is not None:
+        check("pc-egg-load", loaded, **{k: pc[k] for k in ("species", "egg", "cycles", "ivs", "nature", "ball", "moves")})
+
+    # 8. Walked until it hatches in the PC, saved
+    keys, save_at = walk_keys(60)
+    hatch_pc_dir, _, _, _ = step("pc-egg-hatch", pc_save, save_at + 900, keys + save_keys(save_at),
+                                 dict(PKMN_TEST_WARP=LITTLEROOT))
+    hatched_pc = steps[-1]["boxes"].get(slot) if slot else None
+    check("pc-egg-hatch", hatched_pc, egg=0)
+    if pc is not None:
+        check("pc-egg-hatch", hatched_pc, **{k: pc[k] for k in ("species", "ivs", "nature", "ball", "moves")})
+    want = "PC EGG HATCHED!|Pichu hatched in your PC."
+    if want not in steps[-1]["notices"]:
+        problems.append(f"pc-egg-hatch: banners {steps[-1]['notices']}, expected {want!r}")
+
+    # 9. That save loaded: the hatched Pokemon in its PC slot
+    step("pc-egg-hatch-load", os.path.join(hatch_pc_dir, "test.sav"), 60, [])
+    if hatched_pc is not None:
+        # the log tracks the PC's Eggs: none after the load; the PC's Pokemon (Eggs aside) one more than with the Egg,
+        # and the Pokedex's caught count one more (the hatch registers the Pichu)
+        state, egg_state = steps[-1]["states"][-1:], steps[-3]["states"][-1:]
+        if steps[-1]["boxes"]:
+            problems.append(f"pc-egg-hatch-load: Eggs in the PC after the load: {steps[-1]['boxes']}")
+        if not state or not egg_state:
+            problems.append("pc-egg-hatch-load: no breed state to compare")
+        elif (state[0]["boxes"], state[0]["caught"]) != (egg_state[0]["boxes"] + 1, egg_state[0]["caught"] + 1):
+            problems.append(f"pc-egg-hatch-load: PC and Pokedex {state[0]}, expected one more of each than {egg_state[0]}")
+
+    # 10. Three Eggs in three boxes hatch at once
+    eggs = f"0:5:{SPECIES_PICHU}:1:E;7:12:{SPECIES_PIKACHU}:1:E;13:29:{SPECIES_BULBASAUR}:1:E"
+    keys, end = walk_keys(12)
+    step("pc-eggs", args.save, end + 300, keys, dict(PKMN_TEST_BOX=eggs, PKMN_TEST_EGG_CYCLES="0",
+                                                       PKMN_TEST_WARP=LITTLEROOT))
+    boxes = steps[-1]["boxes"]
+    for key, species in (("0:5", SPECIES_PICHU), ("7:12", SPECIES_PIKACHU), ("13:29", SPECIES_BULBASAUR)):
+        check(f"pc-eggs {key}", boxes.get(key), egg=0, species=species)
+    if not any(n.startswith("3 PC EGGS HATCHED!|") for n in steps[-1]["notices"]):
+        problems.append(f"pc-eggs: banners {steps[-1]['notices']}, expected one for 3 Eggs")
 
     report = dict(steps=steps, problems=problems, passed=not problems)
     with open(os.path.join(args.out, "breed_check.json"), "w") as out:

@@ -35,6 +35,7 @@
 #include "daycare.h"
 #include "pokedex.h"
 #include "pokemon_storage_system.h"
+#include "platform/mp_breeding.h"
 #include "constants/party_menu.h"
 #include "pokemon.h"
 #include "safari_zone.h"
@@ -223,6 +224,13 @@ static struct
     int eggCycles;
     char breedSeen[PARTY_SIZE][192];
     int breedStateSeen[5];
+    /* PKMN_TEST_EGG_TO_PC=1: the party's Eggs put in the PC at the first field frame (Eggs hatching in the PC, the
+       owner's request of 2026-10-27); with PKMN_TEST_BREED_LOG, "breed box B S: ..." for each PC slot that held an Egg
+       (PKMN_TEST_EGG_CYCLES applies to them too) and "breed pc notice: ..." for the hatch banner */
+    bool eggToPc, eggsMoved;
+    int boxEggSlots[8][2], boxEggCount;
+    char boxEggSeen[8][192];
+    char pcNoticeSeen[80];
     /* PKMN_TEST_BAG_LOG=item[,item...] (at most 4): on the field, "bag field: money M item I count C ..." whenever the
        money or one of those items' count in the Bag changes (tools/battle_env/shop_check.py: a Poke Mart's purchase and
        sale, saved and loaded); what was last logged */
@@ -573,6 +581,7 @@ static void Init(void)
     s.eggReady = EnvInt("PKMN_TEST_EGG_READY", 0) != 0;
     s.eggCycles = EnvInt("PKMN_TEST_EGG_CYCLES", -1);
     s.breedLog = EnvInt("PKMN_TEST_BREED_LOG", 0) != 0;
+    s.eggToPc = EnvInt("PKMN_TEST_EGG_TO_PC", 0) != 0;
     value = SDL_getenv("PKMN_TEST_BAG_LOG");
     for (s.bagItemCount = 0; value != NULL && *value != '\0' && s.bagItemCount < 4; )
     {
@@ -1667,6 +1676,99 @@ bool DioramaBattleEnvTest_FakeSpawnHost(bool *fieldReady)
  * when those change (B: the PC's Pokemon, Eggs aside; C: the species the Pokedex counts as caught - a catch check).
  * PKMN_TEST_EGG_CYCLES=n: an Egg in the party with more cycles left has n (in memory: it hatches after n more cycles
  * of steps, the next cycle's end with 0). */
+/* A Pokemon's breed log fields (BreedLogField's format). */
+static void BreedLine(char *line, size_t size, struct Pokemon *mon, int species, int egg, u32 cycles)
+{
+    snprintf(line, size, "species %d egg %d level %d ivs %d,%d,%d,%d,%d,%d nature %d num %d ball %d "
+             "moves %d,%d,%d,%d cycles %u", species, egg, (int)GetMonData(mon, MON_DATA_LEVEL),
+             (int)GetMonData(mon, MON_DATA_HP_IV), (int)GetMonData(mon, MON_DATA_ATK_IV),
+             (int)GetMonData(mon, MON_DATA_DEF_IV), (int)GetMonData(mon, MON_DATA_SPEED_IV),
+             (int)GetMonData(mon, MON_DATA_SPATK_IV), (int)GetMonData(mon, MON_DATA_SPDEF_IV),
+             (int)GetNatureFromPersonality(GetMonData(mon, MON_DATA_PERSONALITY)),
+             (int)GetMonData(mon, MON_DATA_ABILITY_NUM), (int)GetMonData(mon, MON_DATA_POKEBALL),
+             (int)GetMonData(mon, MON_DATA_MOVE1), (int)GetMonData(mon, MON_DATA_MOVE2),
+             (int)GetMonData(mon, MON_DATA_MOVE3), (int)GetMonData(mon, MON_DATA_MOVE4), cycles);
+}
+
+/* PKMN_TEST_EGG_TO_PC and the PC's Eggs in the breed log (see the state's comment). */
+static void BreedLogBoxEggs(void)
+{
+    char line[192];
+    const char *notice = MPBreeding_LastBoxEggNotice();
+
+    if (s.eggToPc && !s.eggsMoved)
+    {
+        int moved = 0;
+
+        for (int i = 0; i < gPartiesCount[B_TRAINER_PLAYER]; i++)
+        {
+            struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][i];
+
+            if (GetMonData(mon, MON_DATA_IS_EGG) && CopyMonToPC(mon) == MON_GIVEN_TO_PC)
+            {
+                ZeroMonData(mon);
+                moved++;
+            }
+        }
+        CompactPartySlots();
+        CalculatePlayerPartyCount();
+        s.eggsMoved = true;
+        TestLog("Battle env test: breed moved %d party Eggs to the PC", moved);
+    }
+    for (int box = 0; box < TOTAL_BOXES_COUNT; box++)
+    {
+        for (int slot = 0; slot < IN_BOX_COUNT; slot++)
+        {
+            struct BoxPokemon *boxMon = GetBoxedMonPtr(box, slot);
+            int tracked = -1;
+
+            for (int t = 0; t < s.boxEggCount; t++)
+                if (s.boxEggSlots[t][0] == box && s.boxEggSlots[t][1] == slot)
+                    tracked = t;
+            if (tracked < 0)
+            {
+                if (!GetBoxMonData(boxMon, MON_DATA_SANITY_IS_EGG) || s.boxEggCount >= (int)ARRAY_COUNT(s.boxEggSlots))
+                    continue;
+                tracked = s.boxEggCount++;
+                s.boxEggSlots[tracked][0] = box;
+                s.boxEggSlots[tracked][1] = slot;
+                s.boxEggSeen[tracked][0] = '\0';
+            }
+            {
+                struct Pokemon mon;
+                int species = GetBoxMonData(boxMon, MON_DATA_SPECIES);
+                int egg = species != 0 && GetBoxMonData(boxMon, MON_DATA_IS_EGG);
+                u32 cycles = species != 0 ? GetBoxMonData(boxMon, MON_DATA_FRIENDSHIP) : 0;
+
+                if (egg && s.eggCycles >= 0 && cycles > (u32)s.eggCycles)
+                {
+                    cycles = s.eggCycles;
+                    SetBoxMonData(boxMon, MON_DATA_FRIENDSHIP, &cycles);
+                }
+                if (species == 0)
+                {
+                    snprintf(line, sizeof(line), "none");
+                }
+                else
+                {
+                    BoxMonToMon(boxMon, &mon);
+                    BreedLine(line, sizeof(line), &mon, species, egg, cycles);
+                }
+                if (strcmp(line, s.boxEggSeen[tracked]) != 0)
+                {
+                    snprintf(s.boxEggSeen[tracked], sizeof(s.boxEggSeen[tracked]), "%s", line);
+                    TestLog("Battle env test: breed box %d %d: %s", box, slot, line);
+                }
+            }
+        }
+    }
+    if (notice[0] != '\0' && strcmp(notice, s.pcNoticeSeen) != 0)
+    {
+        snprintf(s.pcNoticeSeen, sizeof(s.pcNoticeSeen), "%s", notice);
+        TestLog("Battle env test: breed pc notice: %s", notice);
+    }
+}
+
 static void BreedLogField(void)
 {
     char line[192];
@@ -1674,6 +1776,7 @@ static void BreedLogField(void)
 
     if (!s.breedLog || gMain.inBattle || SDL_AtomicGet(&s.fieldSeen) == 0 || gSaveBlock1Ptr == NULL)
         return;
+    BreedLogBoxEggs();
     for (int i = 0; i < PARTY_SIZE; i++)
     {
         struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][i];
@@ -1689,15 +1792,7 @@ static void BreedLogField(void)
         if (species == 0)
             snprintf(line, sizeof(line), "none");
         else
-            snprintf(line, sizeof(line), "species %d egg %d level %d ivs %d,%d,%d,%d,%d,%d nature %d num %d ball %d "
-                     "moves %d,%d,%d,%d cycles %u", species, egg, (int)GetMonData(mon, MON_DATA_LEVEL),
-                     (int)GetMonData(mon, MON_DATA_HP_IV), (int)GetMonData(mon, MON_DATA_ATK_IV),
-                     (int)GetMonData(mon, MON_DATA_DEF_IV), (int)GetMonData(mon, MON_DATA_SPEED_IV),
-                     (int)GetMonData(mon, MON_DATA_SPATK_IV), (int)GetMonData(mon, MON_DATA_SPDEF_IV),
-                     (int)GetNatureFromPersonality(GetMonData(mon, MON_DATA_PERSONALITY)),
-                     (int)GetMonData(mon, MON_DATA_ABILITY_NUM), (int)GetMonData(mon, MON_DATA_POKEBALL),
-                     (int)GetMonData(mon, MON_DATA_MOVE1), (int)GetMonData(mon, MON_DATA_MOVE2),
-                     (int)GetMonData(mon, MON_DATA_MOVE3), (int)GetMonData(mon, MON_DATA_MOVE4), cycles);
+            BreedLine(line, sizeof(line), mon, species, egg, cycles);
         if (!s.breedLogged || strcmp(line, s.breedSeen[i]) != 0)
         {
             snprintf(s.breedSeen[i], sizeof(s.breedSeen[i]), "%s", line);

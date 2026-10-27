@@ -1248,6 +1248,11 @@ static bool32 TryToHatchEgg(struct DayCare *daycare)
 
     u32 eggCycles;
     u8 toSub = GetEggCyclesToSubtract();
+#ifdef PORTABLE
+    // The PC's Eggs spend this cycle too (the owner's request of 2026-10-27), first: a party Egg's hatch ends the loop below
+    MPBreeding_AdvanceBoxEggs(toSub);
+#endif
+#line 1139 // gba-line
 
     for (u32 i = 0; i < gPartiesCount[B_TRAINER_PLAYER]; i++)
     {

@@ -9,6 +9,7 @@
 #include "multiplayer_extras.h"
 #include "multiplayer_rival.h"
 #include "tower_legends.h"
+#include "platform/mp_breeding.h"
 #if defined(DIORAMA_BATTLE_ENV_TEST)
 #include "diorama/battle_env_test.h"
 #endif
@@ -1458,7 +1459,9 @@ void MultiplayerWorld_Tick(bool32 fieldReady, bool32 connected)
 #ifdef PORTABLE
     MultiplayerSpawns_Tick(fieldReady, connected);
     MultiplayerExtras_Tick(fieldReady, connected);
+    MPBreeding_BoxEggNoticeTick();   // the PC's Eggs that hatched (mp_breeding.c), once the field is calm
 #endif
+#line 1176 // gba-line
 #if defined(DIORAMA_BATTLE_ENV_TEST)
     {
         bool ready = fieldReady;

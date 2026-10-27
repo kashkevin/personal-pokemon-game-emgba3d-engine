@@ -26,5 +26,13 @@ bool32 MPDaycare_QueuePop(struct Pokemon *egg);               // the oldest egg;
 bool32 MPDaycare_QueueDropOldest(void);                       // the egg the player turned down
 void MPDaycare_QueueClear(void);
 bool32 MPDaycare_QueueIsSane(void);                           // magic, version, count and CRC
+
+// Eggs in the PC's boxes (the owner's request of 2026-10-27): at the end of each egg cycle of the player's own steps
+// (TryToHatchEgg, the party's cadence: the same steps, the same skips), every Egg in every box spends `toSub` cycles as a
+// party Egg does (never more), and one with none left hatches in its own slot with everything it was made with; the
+// hatch is then said in a banner (MPBreeding_BoxEggNoticeTick, retried until the field is calm).
+void MPBreeding_AdvanceBoxEggs(u32 toSub);
+void MPBreeding_BoxEggNoticeTick(void);
+const char *MPBreeding_LastBoxEggNotice(void);   // the last such banner shown ("" before any)
 #endif
 #endif // GUARD_PLATFORM_MP_BREEDING_H
