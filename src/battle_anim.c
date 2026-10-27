@@ -1810,10 +1810,29 @@ void LoadMoveBg(u16 bgId)
 #line 1768 // gba-line
     if (IsContest())
     {
+#ifdef PORTABLE
+        // A contest relocates and copies a whole 32x32 screen (0x800 bytes), but 31 move backgrounds have smaller
+        // tilemaps (0x380 or 0x500 bytes: Psychic's, Hydro Pump's...): written past their exact-size buffer, the heap
+        // broke and a contest crashed (the owner's request of 2026-10-27, every minigame playable). The buffer holds a
+        // whole screen, the rows past the tilemap blank.
+        u32 size = GetDecompressedDataSize(gBattleAnimBackgroundTable[bgId].tilemap);
+        void *decompressionBuffer = AllocZeroed(size > 0x800 ? size : 0x800);
+
+        if (decompressionBuffer != NULL)
+        {
+            DecompressDataWithHeaderWram(gBattleAnimBackgroundTable[bgId].tilemap, decompressionBuffer);
+            RelocateBattleBgPal(GetBattleBgPaletteNum(), decompressionBuffer, 0x100, FALSE);
+            DmaCopy32(3, decompressionBuffer, (void *)BG_SCREEN_ADDR(26), 0x800);
+            Free(decompressionBuffer);
+        }
+#else
+#line 1770 // gba-line
         void *decompressionBuffer = malloc_and_decompress(gBattleAnimBackgroundTable[bgId].tilemap, NULL);
         RelocateBattleBgPal(GetBattleBgPaletteNum(), decompressionBuffer, 0x100, FALSE);
         DmaCopy32(3, decompressionBuffer, (void *)BG_SCREEN_ADDR(26), 0x800);
         Free(decompressionBuffer);
+#endif
+#line 1774 // gba-line
         DecompressDataWithHeaderVram(gBattleAnimBackgroundTable[bgId].image, (void *)BG_SCREEN_ADDR(4));
         LoadPalette(gBattleAnimBackgroundTable[bgId].palette, BG_PLTT_ID(GetBattleBgPaletteNum()), PLTT_SIZE_4BPP);
     }
