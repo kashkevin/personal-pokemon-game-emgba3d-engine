@@ -17,6 +17,8 @@
 #define DIORAMA_TERRAIN_MAX_TREE_INSTANCES 32
 #define DIORAMA_TERRAIN_MAX_VERTICES ((DIORAMA_TERRAIN_MAX_FACES + DIORAMA_TERRAIN_MAX_PIXEL_PRIMITIVES * 6) * 6)
 #define DIORAMA_TERRAIN_LEDGE_HEIGHT 0.375f
+/* A jump ledge's crest over the higher of its two grounds, in voxels (DioramaTerrain_LedgeTop) */
+#define DIORAMA_TERRAIN_LEDGE_RISE 8
 #define DIORAMA_TERRAIN_WATER_HEIGHT -0.125f
 #define DIORAMA_TERRAIN_TEXTURE_FULL 0.0f
 #define DIORAMA_TERRAIN_TEXTURE_BASE 1.0f
@@ -121,6 +123,10 @@ struct DioramaTerrainCell
     float groundHeight;
     float visualHeight;
     float featureHeight;
+    /* a jump ledge's: the grounds of the cells it is jumped from and lands in
+     * (DioramaRules_LedgeGrounds) */
+    float ledgeTakeoffHeight;
+    float ledgeLandingHeight;
     float structureBodyHeight;
     float structureRoofHeight;
     float southFacadeUnitHeight;
@@ -272,6 +278,17 @@ enum DioramaTreeFacing
 };
 uint32_t DioramaTerrain_TreeModelFaceCount(void);
 enum DioramaTreeFacing DioramaTerrain_TreeModelFacing(uint32_t face);
+/*
+ * A jump ledge's top at a pixel of its cell, in voxels, between the grounds of
+ * the cells it is jumped from and lands in (`takeoff`, `landing`, in voxels):
+ * a bank across the cell, its grass rising from the take-off side to a crest
+ * across the middle and its rock face, the lip the drawing has on the landing
+ * side, falling to the landing side (the owner's Request C, 2026-10-27).
+ */
+int16_t DioramaTerrain_LedgeTop(uint8_t behavior, int16_t takeoff, int16_t landing,
+                                int pixelX, int pixelZ);
+/* The voxel under a jump ledge's column, as under the ground beside it */
+int16_t DioramaTerrain_LedgeBottom(int16_t takeoff, int16_t landing);
 /* Tests and PKMN_DIORAMA_MESH_CHECK: every chunk built through the voxel
  * spans, the compressed shell (whole cells' faces) never used. */
 void DioramaTerrain_SetVoxelOccupancyOnly(bool on);

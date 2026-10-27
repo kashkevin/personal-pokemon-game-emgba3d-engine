@@ -476,6 +476,18 @@ float DioramaRules_ObjectGroundHeight(const struct DioramaResolvedCell *resolved
                                        uint8_t cellElevation, uint8_t objectElevation,
                                        uint8_t behavior,
                                        uint8_t pixelX, uint8_t pixelY);
+/*
+ * The grounds a jump ledge at (mapX, mapY) is drawn between (terrain_mesh.c
+ * DioramaTerrain_LedgeTop; the owner's Request C, 2026-10-27): the cell it is
+ * jumped from and the cell it lands in, behind and ahead of it the way it is
+ * jumped (a diagonal one, a corner of a ledge's run: its corner cells). Each
+ * is that cell's ground (another ledge's: the ground under it); one not in the
+ * scene, hidden, or more than two levels from the ledge's own ground is the
+ * ledge's own. Heights in tiles.
+ */
+void DioramaRules_LedgeGrounds(const struct DioramaSceneSnapshot *snapshot,
+                               const struct DioramaResolvedCell *resolvedCells,
+                               int16_t mapX, int16_t mapY, float *takeoff, float *landing);
 /* A cell drawn over the water: its lower layer is mostly the sea's own tiles
  * (General's animated water, tiles 432 to 461) - a deck, a log walkway, a
  * pier, a rock in the shallows. Outdoors only (mapType: gMapHeader.mapType),
