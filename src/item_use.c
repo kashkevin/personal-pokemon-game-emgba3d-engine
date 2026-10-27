@@ -233,7 +233,18 @@ u8 CheckIfItemIsTMHMOrEvolutionStone(enum Item itemId)
 // Mail in the bag menu can't have a message but it can be checked (view the mail background, no message)
 static void CB2_CheckMail(void)
 {
+#ifdef PORTABLE
+    // MS-158: ReadMail keeps a pointer to this Mail (mail.c sMailRead->mail) and reads it again as its screen draws
+    // and closes, after this callback has returned: a local is gone by then (the GBA's stack happened to keep it, the
+    // PC's does not: a stale icon species, "invalid species"). Here the Mail outlives the screen.
+    static struct Mail mail;
+
+    memset(&mail, 0, sizeof(mail));
+#else
+#line 236 // gba-line
     struct Mail mail;
+#endif
+#line 237 // gba-line
     mail.itemId = gSpecialVar_ItemId;
     mail.species = SPECIES_NONE;
     ReadMail(&mail, CB2_ReturnToBagMenuPocket, FALSE);
