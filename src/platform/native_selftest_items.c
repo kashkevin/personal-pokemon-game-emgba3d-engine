@@ -1670,3 +1670,96 @@ int NativeSelfTest_HeldItems(void)
     printf("selftest-held-items: %d checks, %d failed\n", sChecks, sFailures);
     return sFailures == 0 ? 0 : 1;
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// --selftest-mints (the full item audit, mints): each mint gives the nature it is named after (its data), and what the
+// bag's mint does (party_menu.c Task_Mint: the Pokemon's stat nature set to the mint's, its stats worked out again)
+// raises and lowers the stats that nature names by a tenth, leaves the Pokemon's own nature (its personality, which
+// Synchronize and breeding read) as it was, and stays in the Pokemon's stored data.
+
+static const u8 sNatureStats[] = {MON_DATA_MAX_HP, MON_DATA_ATK, MON_DATA_DEF, MON_DATA_SPEED, MON_DATA_SPATK, MON_DATA_SPDEF};
+
+static void ReadStats(struct Pokemon *mon, u16 *stats)
+{
+    for (u32 i = 0; i < NUM_STATS; i++)
+        stats[i] = GetMonData(mon, sNatureStats[i]);
+}
+
+// The bag's mint on `mon` (Task_Mint's last step), then each stat against the Hardy stats: x1.1 for `up`, x0.9 for
+// `down` (rounded down), the others unchanged
+static void ExpectMint(const char *what, struct Pokemon *mon, const u16 *hardy, u8 nature, u32 up, u32 down)
+{
+    u16 stats[NUM_STATS];
+    bool32 ok = TRUE;
+    char line[240];
+
+    SetMonData(mon, MON_DATA_HIDDEN_NATURE, &nature);
+    CalculateMonStats(mon);
+    ReadStats(mon, stats);
+    for (u32 i = 0; i < NUM_STATS; i++)
+    {
+        u16 want = i == up ? hardy[i] * 110 / 100 : i == down ? hardy[i] * 90 / 100 : hardy[i];
+
+        ok &= stats[i] == want;
+    }
+    snprintf(line, sizeof(line), "%s: HP %u, Attack %u -> %u, Defense %u, Speed %u -> %u, Sp. Atk %u -> %u, Sp. Def %u; "
+             "its own nature still %u", what, stats[0], hardy[1], stats[1], stats[2], hardy[3], stats[3], hardy[4], stats[4],
+             stats[5], GetNature(mon));
+    Expect(line, ok && GetNature(mon) == NATURE_HARDY && GetMonData(mon, MON_DATA_HIDDEN_NATURE) == nature);
+}
+
+int NativeSelfTest_Mints(void)
+{
+    static const struct { u16 item; u8 nature; } sMints[] = {
+        {ITEM_LONELY_MINT, NATURE_LONELY}, {ITEM_ADAMANT_MINT, NATURE_ADAMANT}, {ITEM_NAUGHTY_MINT, NATURE_NAUGHTY},
+        {ITEM_BRAVE_MINT, NATURE_BRAVE}, {ITEM_BOLD_MINT, NATURE_BOLD}, {ITEM_IMPISH_MINT, NATURE_IMPISH},
+        {ITEM_LAX_MINT, NATURE_LAX}, {ITEM_RELAXED_MINT, NATURE_RELAXED}, {ITEM_MODEST_MINT, NATURE_MODEST},
+        {ITEM_MILD_MINT, NATURE_MILD}, {ITEM_RASH_MINT, NATURE_RASH}, {ITEM_QUIET_MINT, NATURE_QUIET},
+        {ITEM_CALM_MINT, NATURE_CALM}, {ITEM_GENTLE_MINT, NATURE_GENTLE}, {ITEM_CAREFUL_MINT, NATURE_CAREFUL},
+        {ITEM_SASSY_MINT, NATURE_SASSY}, {ITEM_TIMID_MINT, NATURE_TIMID}, {ITEM_HASTY_MINT, NATURE_HASTY},
+        {ITEM_JOLLY_MINT, NATURE_JOLLY}, {ITEM_NAIVE_MINT, NATURE_NAIVE}, {ITEM_SERIOUS_MINT, NATURE_SERIOUS},
+    };
+    struct Pokemon *mon;
+    struct Pokemon stored;
+    u16 hardy[NUM_STATS];
+    u32 i, wrong = 0;
+    char line[200];
+
+    Setup();
+    UseMap(MAP_ROUTE101);
+    printf("selftest-mints: the 21 mints' natures and what a mint does to a Pokemon's stats\n");
+    for (i = 0; i < ARRAY_COUNT(sMints); i++)
+    {
+        if (GetItemSecondaryId(sMints[i].item) != sMints[i].nature)
+        {
+            wrong++;
+            printf("     item %u gives nature %u, not %u\n", sMints[i].item, (unsigned)GetItemSecondaryId(sMints[i].item),
+                   sMints[i].nature);
+        }
+    }
+    snprintf(line, sizeof(line), "21 mints, each giving the nature it is named after (%u wrong)", wrong);
+    Expect(line, wrong == 0);
+
+    // A Hardy Snorlax at level 100 (a neutral nature: its stats as they are)
+    mon = BagMon(SPECIES_SNORLAX, MAX_LEVEL, MON_MALE, 100);
+    ReadStats(mon, hardy);
+    Expect("A new Pokemon's stat nature is its own (Hardy)", GetMonData(mon, MON_DATA_HIDDEN_NATURE) == NATURE_HARDY
+           && GetNature(mon) == NATURE_HARDY);
+    ExpectMint("Adamant Mint: Attack +10%, Sp. Atk -10%", mon, hardy, NATURE_ADAMANT, STAT_ATK, STAT_SPATK);
+    ExpectMint("then a Jolly Mint: Speed +10%, Sp. Atk -10%, Attack back", mon, hardy, NATURE_JOLLY, STAT_SPEED, STAT_SPATK);
+    ExpectMint("then a Modest Mint: Sp. Atk +10%, Attack -10%", mon, hardy, NATURE_MODEST, STAT_SPATK, STAT_ATK);
+    ExpectMint("then a Serious Mint (neutral): every stat as Hardy's", mon, hardy, NATURE_SERIOUS, NUM_STATS, NUM_STATS);
+    {
+        u8 nature = NATURE_ADAMANT;
+
+        SetMonData(mon, MON_DATA_HIDDEN_NATURE, &nature);
+        CalculateMonStats(mon);
+        BoxMonToMon(&mon->box, &stored);
+        Expect("The stat nature is kept in the Pokemon's stored data (its box form, as saved): Adamant, its own nature "
+               "Hardy", GetMonData(&stored, MON_DATA_HIDDEN_NATURE) == NATURE_ADAMANT && GetNature(&stored) == NATURE_HARDY
+               && GetMonData(&stored, MON_DATA_ATK) == hardy[STAT_ATK] * 110 / 100);
+    }
+
+    printf("selftest-mints: %d checks, %d failed\n", sChecks, sFailures);
+    return sFailures == 0 ? 0 : 1;
+}
