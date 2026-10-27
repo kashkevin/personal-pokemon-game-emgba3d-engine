@@ -109,6 +109,12 @@ def keep_line(line):
     return dict(what=what, local=local, species=species, x=x, y=y, map=(group, num))
 
 
+def shiny_of(line):
+    """'owe bumped: ... field shiny X' or 'owe battle: species S shiny X nature N ...': X, read by its name (the battle's
+    line goes on with the natures wild_items_check.py reads, so its last number is not the shiny one)."""
+    return int(re.search(r"\bshiny (\d+)", line).group(1))
+
+
 def hm_place(line):
     """'hm field: ... map G.N at X,Y ...': ((G, N), (X, Y))."""
     m = re.search(r"map (\d+)\.(\d+) at (-?\d+),(-?\d+)", line)
@@ -163,12 +169,12 @@ def main():
 
     def battle_shiny(name, want):
         """The bumped Pokemon's field look and its battle's: both `want`."""
-        bumped = [numbers(line) for line in case.battle if line.startswith("owe bumped: ")]
-        fought = [numbers(line) for line in case.battle if line.startswith("owe battle: ")]
+        bumped = [shiny_of(line) for line in case.battle if line.startswith("owe bumped: ")]
+        fought = [shiny_of(line) for line in case.battle if line.startswith("owe battle: ")]
         if not bumped or not fought:
             problems.append(f"{name}: no overworld Pokemon of that kind bumped into and fought ({case.battle})")
-        elif bumped[0][-1] != want or fought[0][-1] != want:
-            problems.append(f"{name}: drawn shiny {bumped[0][-1]}, its battle shiny {fought[0][-1]}: not both {want}")
+        elif bumped[0] != want or fought[0] != want:
+            problems.append(f"{name}: drawn shiny {bumped[0]}, its battle shiny {fought[0]}: not both {want}")
 
     def want(name):
         return not args.cases or name in args.cases.split(",")
