@@ -63,6 +63,9 @@ struct GLTerrainChunk
      * animated tiles do. Set when its input is built. */
     bool readsPixelCells;
     bool hasPixelObjects;
+    /* Whether its input's tree hulls stand on the commonest ground
+     * (sSyncGroundSlot): only such chunks change when that does. */
+    bool readsGroundSlot;
     /* The atlas pages its input's cells are drawn from (bit p: page p), and
      * what each held then (KeptMeshStands). */
     uint8_t pageMask;
@@ -189,7 +192,7 @@ static bool sDebugDrawn;        /* the last Draw was the terrain debug view */
  */
 #define TERRAIN_NEAR_CELLS 13
 #define TERRAIN_OFFSCREEN_BUILDS 2
-#define TERRAIN_MAX_PENDING 128
+#define TERRAIN_MAX_PENDING TERRAIN_GRID_CHUNKS /* every chunk of the grid: none is dropped */
 static int16_t sPending[TERRAIN_MAX_PENDING][2];
 static unsigned sPendingCount;
 static uint16_t sPrevGroundSlot;
@@ -2447,19 +2450,22 @@ static void NotePixelUse(struct GLTerrainChunk *chunk, const struct DioramaTerra
     chunk->pagePrimary = sPagePrimary;
     memcpy(chunk->pageSecondary, sPageSecondary, sizeof(chunk->pageSecondary));
     chunk->readsPixelCells = false;
+    chunk->readsGroundSlot = false;
     for (i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
     {
         const struct DioramaTerrainCell *cell = &input->cells[i];
 
-        if (cell->present
-         && (cell->archetype == DIORAMA_ARCHETYPE_ROUND_HULL
-          || cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL
-          || (cell->measuredFlags & (DIORAMA_MEASURED_SILHOUETTE | DIORAMA_MEASURED_MOUNTAIN_ART))
-          || cell->shape == DIORAMA_SHAPE_LEDGE || cell->shape == DIORAMA_SHAPE_CLIFF))
-        {
+        if (!cell->present)
+            continue;
+        if (cell->archetype == DIORAMA_ARCHETYPE_ROUND_HULL
+         || cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL
+         || (cell->measuredFlags & (DIORAMA_MEASURED_SILHOUETTE | DIORAMA_MEASURED_MOUNTAIN_ART))
+         || cell->shape == DIORAMA_SHAPE_LEDGE || cell->shape == DIORAMA_SHAPE_CLIFF)
             chunk->readsPixelCells = true;
-            return;
-        }
+        /* the cells BuildInput gives the commonest ground's underlay */
+        if (cell->treeHullReady
+         || (cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL && cell->structureWidth == 2))
+            chunk->readsGroundSlot = true;
     }
 }
 
@@ -2702,6 +2708,38 @@ static bool ChunkHasInterior(const struct DioramaSceneSnapshot *snapshot, int ch
     return false;
 }
 
+/* Whether every cell of a chunk's input (the chunk and its halo) is in the grid. */
+static bool ChunkInputInGrid(const struct DioramaSceneSnapshot *snapshot, int chunkX, int chunkY)
+{
+    int gridX = chunkX * DIORAMA_TERRAIN_CHUNK_SIZE - DIORAMA_TERRAIN_HALO - sShiftX - snapshot->gridOriginX;
+    int gridY = chunkY * DIORAMA_TERRAIN_CHUNK_SIZE - DIORAMA_TERRAIN_HALO - sShiftY - snapshot->gridOriginY;
+
+    return gridX >= 0 && gridY >= 0
+        && gridX + DIORAMA_TERRAIN_INPUT_SIZE <= DIORAMA_GRID_WIDTH
+        && gridY + DIORAMA_TERRAIN_INPUT_SIZE <= DIORAMA_GRID_HEIGHT;
+}
+
+/*
+ * An off-screen chunk on the grid's edge (its input reaches past the grid)
+ * waits for its build, its old mesh standing, until it is wholly in the grid,
+ * near the player or on screen (performance work 2026-10-26, the owner's lag
+ * when running): its input changes with every step the grid takes, a row of
+ * cells more or fewer in view, so each build was thrown away a step later -
+ * 371 of the 540 chunk builds running across Granite Cave, an edge chunk built
+ * up to 17 times. The grid is 81 cells wide: such a chunk is 32 cells or more
+ * from the grid's middle, and one that comes into view is urgent (ChunkUrgent).
+ * The conditions are the waiting ones SyncChunk takes below.
+ */
+static bool EdgeChunkWaits(const struct DioramaSceneSnapshot *snapshot, const struct GLTerrainChunk *chunk,
+                           int chunkX, int chunkY)
+{
+    return !ChunkInputInGrid(snapshot, chunkX, chunkY)
+        && (chunk == NULL
+         || (chunk->mapGeneration == snapshot->mapGeneration && !chunk->hasPixelObjects
+          && ChunkHasInterior(snapshot, chunkX, chunkY)))
+        && !ChunkUrgent(snapshot, chunk, chunkX, chunkY);
+}
+
 /* Whether a chunk's mesh is drawn from atlas pages that hold what they held
  * when its input was built (sPageSecondary). */
 static bool KeptMeshStands(const struct GLTerrainChunk *chunk)
@@ -2761,6 +2799,28 @@ static bool SyncChunk(const struct DioramaSceneSnapshot *snapshot,
             sKeptChecks++;
         }
     }
+    if (!forceAllDirty && !ChunkInputInGrid(snapshot, chunkX, chunkY))
+    {
+        bool dirty = false;
+
+        chunk = FindChunk(chunkX, chunkY);
+        for (dirtyIndex = 0; !dirty && dirtyIndex < snapshot->dirtyCellCount; dirtyIndex++)
+            dirty = DioramaTerrain_DirtyCellAffectsChunk(snapshot->dirtyCells[dirtyIndex].mapX + sShiftX,
+                                                         snapshot->dirtyCells[dirtyIndex].mapY + sShiftY,
+                                                         chunkX, chunkY);
+        if (!dirty && EdgeChunkWaits(snapshot, chunk, chunkX, chunkY))
+        {
+            AddPending(chunkX, chunkY);
+            sDeferredBuilds++;
+            if (chunk != NULL && chunk->occupied && chunk->rulesGeneration == rulesGeneration)
+            {
+                chunk->stale = true;
+                chunk->active = true;
+                chunk->lastSeenSequence = snapshot->sequence;
+            }
+            return true;
+        }
+    }
     if (!forceAllDirty && *offscreenBuilds >= TERRAIN_OFFSCREEN_BUILDS)
     {
         bool dirty = false;
@@ -2805,6 +2865,13 @@ static bool SyncChunk(const struct DioramaSceneSnapshot *snapshot,
         chunk->mapGeneration = snapshot->mapGeneration;
         chunk->stale = false;
         sCacheHits++;
+    }
+    else if (chunk != NULL && chunk->occupied && chunk->stale && chunk->mapGeneration == snapshot->mapGeneration
+          && chunk->rulesGeneration == rulesGeneration && chunk->signature == signature && !forceDirty)
+    {
+        /* It waited, and its input came back to the one its mesh was built from:
+         * not stale, so it may stand as the grid moves (RegionUnchanged). */
+        chunk->stale = false;
     }
     if (newIdentity || chunk == NULL || !chunk->occupied
      || chunk->rulesGeneration != rulesGeneration
@@ -2871,6 +2938,7 @@ static bool SyncPending(const struct DioramaSceneSnapshot *snapshot,
     int16_t pending[TERRAIN_MAX_PENDING][2];
     unsigned count = sPendingCount;
     unsigned offscreen = 0;
+    unsigned waiting;
     unsigned p;
     int minChunkX = DioramaTerrain_FloorDiv(snapshot->gridOriginX + sShiftX, DIORAMA_TERRAIN_CHUNK_SIZE);
     int maxChunkX = DioramaTerrain_FloorDiv(snapshot->gridOriginX + sShiftX + DIORAMA_GRID_WIDTH - 1,
@@ -2884,13 +2952,29 @@ static bool SyncPending(const struct DioramaSceneSnapshot *snapshot,
     sPendingCount = 0;
     sKeptChecks = 0;
     sKeptBuilds = 0;
-    TreeTint(snapshot);
-    PrepareSync(snapshot, resolvedCells);
-    for (p = 0; p < count; p++)
+    /* The edge chunks that still wait (EdgeChunkWaits) wait on without the
+     * sync's preparation below: standing still, the grid's edge would prepare
+     * a sync every frame for nothing. */
+    for (p = 0, waiting = 0; p < count; p++)
     {
         if (pending[p][0] < minChunkX || pending[p][0] > maxChunkX
          || pending[p][1] < minChunkY || pending[p][1] > maxChunkY)
             continue; /* left the grid meanwhile */
+        if (EdgeChunkWaits(snapshot, FindChunk(pending[p][0], pending[p][1]), pending[p][0], pending[p][1]))
+            AddPending(pending[p][0], pending[p][1]);
+        else
+        {
+            pending[waiting][0] = pending[p][0];
+            pending[waiting][1] = pending[p][1];
+            waiting++;
+        }
+    }
+    if (waiting == 0)
+        return true;
+    TreeTint(snapshot);
+    PrepareSync(snapshot, resolvedCells);
+    for (p = 0; p < waiting; p++)
+    {
         if (!SyncChunk(snapshot, resolvedCells, pending[p][0], pending[p][1], false, rulesGeneration,
                        &offscreen))
             return false;
@@ -2959,6 +3043,7 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
     struct TerrainSyncKey previousKey;
     bool gridMovedOnly = false;
     bool tilesMoved = false;
+    bool groundChanged;
     int minChunkX;
     int maxChunkX;
     int minChunkY;
@@ -3151,9 +3236,13 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
     }
     TreeTint(snapshot);
     PrepareSync(snapshot, resolvedCells);
-    /* The commonest ground (tree hulls stand on it) is the whole grid's. */
-    if (sSyncGroundSlot != sPrevGroundSlot)
-        gridMovedOnly = false;
+    /* The commonest ground (tree hulls stand on it) is the whole grid's: when it
+     * changes, the chunks with tree hulls are looked at again (readsGroundSlot),
+     * not every chunk. On the sea round Pacifidlog Town the two kinds of water
+     * took turns as the commonest every few steps, and all 81 chunks' inputs
+     * were built again each time to change none, 8 to 12 ms (performance work
+     * 2026-10-26, the owner's lag when running). */
+    groundChanged = sSyncGroundSlot != sPrevGroundSlot;
     sPrevGroundSlot = sSyncGroundSlot;
     for (i = 0; i < (int)sChunkLimit; i++)
         sChunks[i].active = false;
@@ -3205,6 +3294,7 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
             chunk = FindChunk(chunkX, chunkY);
             if (gridMovedOnly && chunk != NULL && chunk->occupied && !chunk->hasPixelObjects && !chunk->stale
              && chunk->mapGeneration == snapshot->mapGeneration && chunk->rulesGeneration == rulesGeneration
+             && !(groundChanged && chunk->readsGroundSlot)
              && !(tilesMoved && chunk->readsPixelCells
                && ChunkUsesDirtyTiles(snapshot, resolvedCells, chunkX, chunkY))
              && RegionUnchanged(snapshot, resolvedCells, &previousKey, chunkX, chunkY))
