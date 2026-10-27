@@ -337,3 +337,18 @@ SINGLE_BATTLE_TEST("Toxic Orb does not poison a Steel- or Poison-type holder")
         EXPECT_EQ(player->status1 & STATUS1_PSN_ANY, 0);
     }
 }
+
+SINGLE_BATTLE_TEST("Bright Powder lowers the accuracy of moves against its holder by a tenth")
+{
+    PASSES_RANDOMLY(49, 100, RNG_ACCURACY); // Sing's 55 x 0.9, rounded down
+    GIVEN {
+        ASSUME(GetItemHoldEffect(ITEM_BRIGHT_POWDER) == HOLD_EFFECT_EVASION_UP);
+        ASSUME(GetMoveAccuracy(MOVE_SING) == 55);
+        PLAYER(SPECIES_WOBBUFFET);
+        OPPONENT(SPECIES_WOBBUFFET) { Item(ITEM_BRIGHT_POWDER); }
+    } WHEN {
+        TURN { MOVE(player, MOVE_SING); }
+    } SCENE {
+        STATUS_ICON(opponent, sleep: TRUE);
+    }
+}
