@@ -1802,6 +1802,9 @@ int NativeSelfTest_Mints(void)
 // Pokemon as it was) for the Gen 1-6 trade evolutions, with their item and without it, with another's item, with an
 // Everstone (it stops a trade evolution, but not Kadabra's from Gen 4: P_KADABRA_EVERSTONE), and the Karrablast and
 // Shelmet pair, which evolve when traded for each other. The trade itself (a link or a world's trade) is not part of it.
+// After the package: the Gen 4 evolutions on a level up while holding an item at a time of day (EVO_MODE_NORMAL, the
+// level up's own check, the time set with the overworld's override): Happiny's Oval Stone by day, Sneasel's Razor
+// Claw and Gligar's Razor Fang at night; none at the other time or without the item.
 
 static enum Species TradeTarget(enum Species species, u16 held, struct Pokemon *partner)
 {
@@ -1810,6 +1813,16 @@ static enum Species TradeTarget(enum Species species, u16 held, struct Pokemon *
 
     SetMonData(mon, MON_DATA_HELD_ITEM, &held);
     return GetEvolutionTargetSpecies(mon, EVO_MODE_TRADE, ITEM_NONE, partner, &canStopEvo, CHECK_EVO);
+}
+
+// A level up's evolution check for `species` at level 40 holding `held` (EVO_MODE_NORMAL)
+static enum Species LevelUpTarget(enum Species species, u16 held)
+{
+    struct Pokemon *mon = BagMon(species, 40, MON_MALE, 100);
+    bool32 canStopEvo = TRUE;
+
+    SetMonData(mon, MON_DATA_HELD_ITEM, &held);
+    return GetEvolutionTargetSpecies(mon, EVO_MODE_NORMAL, ITEM_NONE, NULL, &canStopEvo, CHECK_EVO);
 }
 
 int NativeSelfTest_EvoItems(void)
@@ -1872,6 +1885,30 @@ int NativeSelfTest_EvoItems(void)
     target = TradeTarget(SPECIES_KARRABLAST, ITEM_NONE, &partner);
     snprintf(line, sizeof(line), "Karrablast traded for a Pikachu: no evolution (species %u)", (unsigned)target);
     Expect(line, target == SPECIES_NONE);
+
+    {
+        static const struct { u16 species; u16 held; u8 hour; u16 want; const char *what; } sLevelUps[] = {
+            {SPECIES_HAPPINY, ITEM_OVAL_STONE, 12, SPECIES_CHANSEY, "Happiny holding an Oval Stone, a level up at noon -> Chansey"},
+            {SPECIES_HAPPINY, ITEM_OVAL_STONE, 22, SPECIES_NONE, "Happiny holding an Oval Stone at 22:00 (night): no evolution"},
+            {SPECIES_HAPPINY, ITEM_NONE, 12, SPECIES_NONE, "Happiny holding nothing at noon: no evolution"},
+            {SPECIES_SNEASEL, ITEM_RAZOR_CLAW, 22, SPECIES_WEAVILE, "Sneasel holding a Razor Claw, a level up at 22:00 -> Weavile"},
+            {SPECIES_SNEASEL, ITEM_RAZOR_CLAW, 12, SPECIES_NONE, "Sneasel holding a Razor Claw at noon: no evolution"},
+            {SPECIES_SNEASEL, ITEM_NONE, 22, SPECIES_NONE, "Sneasel holding nothing at 22:00: no evolution"},
+            {SPECIES_GLIGAR, ITEM_RAZOR_FANG, 22, SPECIES_GLISCOR, "Gligar holding a Razor Fang, a level up at 22:00 -> Gliscor"},
+            {SPECIES_GLIGAR, ITEM_RAZOR_FANG, 12, SPECIES_NONE, "Gligar holding a Razor Fang at noon: no evolution"},
+            {SPECIES_GLIGAR, ITEM_RAZOR_CLAW, 22, SPECIES_NONE, "Gligar holding a Razor Claw (Sneasel's) at 22:00: no evolution"},
+        };
+
+        for (i = 0; i < ARRAY_COUNT(sLevelUps); i++)
+        {
+            SetTimeOfDay(sLevelUps[i].hour);
+            target = LevelUpTarget(sLevelUps[i].species, sLevelUps[i].held);
+            snprintf(line, sizeof(line), "%s (species %u, rule %u)", sLevelUps[i].what, (unsigned)target,
+                     sLevelUps[i].want);
+            Expect(line, target == sLevelUps[i].want);
+        }
+        SetTimeOfDay(0);
+    }
 
     printf("selftest-evo-items: %d checks, %d failed\n", sChecks, sFailures);
     return sFailures == 0 ? 0 : 1;
