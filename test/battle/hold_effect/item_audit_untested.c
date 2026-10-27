@@ -266,6 +266,58 @@ SINGLE_BATTLE_TEST("Focus Sash does nothing for a holder below full HP")
     }
 }
 
+SINGLE_BATTLE_TEST("Focus Band lets its holder survive a hit that would knock it out, below full HP too, and is not used up")
+{
+    GIVEN {
+        ASSUME(GetItemHoldEffect(ITEM_FOCUS_BAND) == HOLD_EFFECT_FOCUS_BAND);
+        ASSUME(GetItemHoldEffectParam(ITEM_FOCUS_BAND) == 10); // its chance: an untagged Random() % 100 below this (battle_util.c)
+        RNGSeed(((rng_value_t){ .ctr = 1 })); // a seed whose roll succeeds, as in final_gambit.c's Focus Band test
+        PLAYER(SPECIES_WOBBUFFET);
+        OPPONENT(SPECIES_WOBBUFFET) { MaxHP(10); HP(9); Item(ITEM_FOCUS_BAND); }
+    } WHEN {
+        TURN { MOVE(player, MOVE_SCRATCH); }
+    } SCENE {
+        ANIMATION(ANIM_TYPE_MOVE, MOVE_SCRATCH, player);
+        HP_BAR(opponent, hp: 1);
+        MESSAGE("The opposing Wobbuffet hung on using its Focus Band!");
+    } THEN {
+        EXPECT_EQ(opponent->hp, 1);
+        EXPECT_EQ(opponent->item, ITEM_FOCUS_BAND);
+    }
+}
+
+SINGLE_BATTLE_TEST("On the same seed a Pokemon without a Focus Band faints")
+{
+    GIVEN {
+        RNGSeed(((rng_value_t){ .ctr = 1 }));
+        PLAYER(SPECIES_WOBBUFFET);
+        OPPONENT(SPECIES_WOBBUFFET) { MaxHP(10); HP(9); }
+        OPPONENT(SPECIES_WOBBUFFET);
+    } WHEN {
+        TURN { MOVE(player, MOVE_SCRATCH); SEND_OUT(opponent, 1); }
+    } SCENE {
+        ANIMATION(ANIM_TYPE_MOVE, MOVE_SCRATCH, player);
+        NONE_OF { MESSAGE("The opposing Wobbuffet hung on using its Focus Band!"); }
+        MESSAGE("The opposing Wobbuffet fainted!");
+    }
+}
+
+SINGLE_BATTLE_TEST("Focus Band's holder faints when its roll fails")
+{
+    GIVEN {
+        RNGSeed(((rng_value_t){ .a = 0x9E3779B9, .b = 0x7F4A7C15, .c = 0x85EBCA6B, .ctr = 1 })); // a mixed seed whose roll fails
+        PLAYER(SPECIES_WOBBUFFET);
+        OPPONENT(SPECIES_WOBBUFFET) { MaxHP(10); HP(9); Item(ITEM_FOCUS_BAND); }
+        OPPONENT(SPECIES_WOBBUFFET);
+    } WHEN {
+        TURN { MOVE(player, MOVE_SCRATCH); SEND_OUT(opponent, 1); }
+    } SCENE {
+        ANIMATION(ANIM_TYPE_MOVE, MOVE_SCRATCH, player);
+        NONE_OF { MESSAGE("The opposing Wobbuffet hung on using its Focus Band!"); }
+        MESSAGE("The opposing Wobbuffet fainted!");
+    }
+}
+
 SINGLE_BATTLE_TEST("Flame Orb burns its holder at the end of the turn and is not used up")
 {
     GIVEN {
