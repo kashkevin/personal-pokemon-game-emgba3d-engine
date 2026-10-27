@@ -27,6 +27,7 @@
 #include "constants/items.h"
 #include "constants/layouts.h"
 #include "constants/maps.h"
+#include "constants/moves.h"
 #include "constants/species.h"
 #include "constants/weather.h"
 #include "platform/mp_breeding.h"
@@ -895,5 +896,257 @@ int NativeSelfTest_WildItems(void)
     TestHeldItemsAndCapture();
     TestOvalCharm();
     printf("selftest-wild-items: %d checks, %d failed\n", sChecks, sFailures);
+    return sFailures == 0 ? 0 : 1;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// --selftest-healing (the full item audit, its healing items): each healing item used from the bag on a party Pokemon
+// through the game's own PokemonUseItemEffects (what the bag's use calls out of battle), against the Gen 6 rule this
+// build is set to (include/config/item.h I_HEALTH_RECOVERY = GEN_LATEST = GEN_6): the HP restored (never past the
+// Pokemon's maximum), the statuses cured, a revival, the PP restored, the friendship the herbal medicines cost, and no
+// effect (the item kept) where the item would do nothing. The bag's own consumption is not part of it.
+
+#define HEAL_SPECIES SPECIES_SNORLAX    // a maximum HP over 200 at level 100, so a Hyper Potion's 200 shows whole
+
+static const u16 sHealMoves[MAX_MON_MOVES] = {MOVE_TACKLE, MOVE_SURF, MOVE_THUNDER, MOVE_HYPER_BEAM}; // 35, 15, 10, 5 PP
+
+static struct Pokemon *HealMon(u16 hp, u32 status, u8 friendship)
+{
+    struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][0];
+    u32 i;
+
+    ZeroPlayerPartyMons();
+    CreateMon(mon, HEAL_SPECIES, 100, GetMonPersonality(HEAL_SPECIES, MON_MALE, NATURE_HARDY, 0), OTID_STRUCT_PLAYER_ID);
+    CalculateMonStats(mon);     // CreateMon leaves the stats to its callers
+    gPartiesCount[B_TRAINER_PLAYER] = 1;
+    {
+        // met somewhere else than here (Route 101): the friendship bonus for a Pokemon met on this map is not part
+        // of the herbal medicines' rule (see the note below)
+        u8 metLocation = MAPSEC_LITTLEROOT_TOWN;
+        SetMonData(mon, MON_DATA_MET_LOCATION, &metLocation);
+    }
+    for (i = 0; i < MAX_MON_MOVES; i++)
+    {
+        u16 move = sHealMoves[i];
+        u8 pp = 0;
+
+        SetMonData(mon, MON_DATA_MOVE1 + i, &move);
+        SetMonData(mon, MON_DATA_PP1 + i, &pp);
+    }
+    {
+        u8 bonuses = 0;
+        SetMonData(mon, MON_DATA_PP_BONUSES, &bonuses);
+    }
+    SetMonData(mon, MON_DATA_HP, &hp);
+    SetMonData(mon, MON_DATA_STATUS, &status);
+    SetMonData(mon, MON_DATA_FRIENDSHIP, &friendship);
+    return mon;
+}
+
+static u16 MaxHP(struct Pokemon *mon)
+{
+    return GetMonData(mon, MON_DATA_MAX_HP);
+}
+
+// An HP item from 1 HP: the HP after it (and whether it had an effect)
+static void ExpectHeal(const char *what, u16 item, u16 startHp, u16 wantHp)
+{
+    struct Pokemon *mon = HealMon(startHp, 0, 100);
+    bool8 noEffect = PokemonUseItemEffects(mon, item, 0, 0, FALSE);
+    u16 hp = GetMonData(mon, MON_DATA_HP);
+    char line[200];
+
+    snprintf(line, sizeof(line), "%s: HP %u -> %u (rule %u of %u)", what, startHp, hp, wantHp, MaxHP(mon));
+    Expect(line, !noEffect && hp == wantHp);
+}
+
+static void ExpectNoEffect(const char *what, u16 item, u16 startHp, u32 status, u8 moveIndex)
+{
+    struct Pokemon *mon = HealMon(startHp, status, 100);
+    bool8 noEffect;
+    u16 hp;
+    u32 statusAfter;
+
+    if (startHp == 0xFFFF)  // full HP
+    {
+        hp = MaxHP(mon);
+        SetMonData(mon, MON_DATA_HP, &hp);
+        startHp = hp;
+    }
+    noEffect = PokemonUseItemEffects(mon, item, 0, moveIndex, FALSE);
+    hp = GetMonData(mon, MON_DATA_HP);
+    statusAfter = GetMonData(mon, MON_DATA_STATUS);
+    Expect(what, noEffect && hp == startHp && statusAfter == status);
+}
+
+static void ExpectCure(const char *what, u16 item, u32 status)
+{
+    struct Pokemon *mon = HealMon(100, status, 100);
+    bool8 noEffect = PokemonUseItemEffects(mon, item, 0, 0, FALSE);
+    char line[200];
+
+    snprintf(line, sizeof(line), "%s: status %x -> %x", what, (unsigned)status, (unsigned)GetMonData(mon, MON_DATA_STATUS));
+    Expect(line, !noEffect && GetMonData(mon, MON_DATA_STATUS) == 0 && GetMonData(mon, MON_DATA_HP) == 100);
+}
+
+// A herbal medicine's friendship cost at a starting friendship
+static void ExpectFriendship(const char *what, u16 item, u16 startHp, u32 status, u8 friendship, u8 want)
+{
+    struct Pokemon *mon = HealMon(startHp, status, friendship);
+    bool8 noEffect = PokemonUseItemEffects(mon, item, 0, 0, FALSE);
+    u8 after = GetMonData(mon, MON_DATA_FRIENDSHIP);
+    char line[200];
+
+    snprintf(line, sizeof(line), "%s: friendship %u -> %u (rule %u)", what, friendship, after, want);
+    Expect(line, !noEffect && after == want);
+}
+
+static u8 PPOf(struct Pokemon *mon, u32 i)
+{
+    return GetMonData(mon, MON_DATA_PP1 + i);
+}
+
+static u8 MaxPPOf(u32 i)
+{
+    return CalculatePPWithBonus(sHealMoves[i], 0, i);
+}
+
+int NativeSelfTest_Healing(void)
+{
+    static const struct { u16 item; const char *name; u16 amount; } sAmounts[] = {
+        // Gen 6 (I_HEALTH_RECOVERY below Gen 7): Super Potion 50, Hyper Potion 200, Fresh Water 50, Soda Pop 60,
+        // Lemonade 80, Energy Powder 50, Energy Root 200; Gen 7 changed those to 60, 120, 30, 50, 70, 60, 120
+        {ITEM_POTION, "Potion", 20}, {ITEM_SUPER_POTION, "Super Potion", 50}, {ITEM_HYPER_POTION, "Hyper Potion", 200},
+        {ITEM_FRESH_WATER, "Fresh Water", 50}, {ITEM_SODA_POP, "Soda Pop", 60}, {ITEM_LEMONADE, "Lemonade", 80},
+        {ITEM_MOOMOO_MILK, "Moomoo Milk", 100}, {ITEM_ENERGY_POWDER, "Energy Powder", 50},
+        {ITEM_ENERGY_ROOT, "Energy Root", 200}, {ITEM_BERRY_JUICE, "Berry Juice", 20}, {ITEM_SWEET_HEART, "Sweet Heart", 20},
+    };
+    static const struct { u16 item; const char *name; } sFullHeals[] = {
+        {ITEM_FULL_HEAL, "Full Heal"}, {ITEM_HEAL_POWDER, "Heal Powder"}, {ITEM_LAVA_COOKIE, "Lava Cookie"},
+        {ITEM_RAGE_CANDY_BAR, "Rage Candy Bar"}, {ITEM_OLD_GATEAU, "Old Gateau"}, {ITEM_CASTELIACONE, "Casteliacone"},
+        {ITEM_LUMIOSE_GALETTE, "Lumiose Galette"}, {ITEM_SHALOUR_SABLE, "Shalour Sable"}, {ITEM_LUM_BERRY, "Lum Berry"},
+    };
+    static const u32 sStatuses[] = {STATUS1_SLEEP_TURN(3), STATUS1_POISON, STATUS1_BURN, STATUS1_FREEZE, STATUS1_PARALYSIS,
+                                    STATUS1_TOXIC_POISON};
+    struct Pokemon *mon;
+    u16 max;
+    u32 i;
+    char line[200];
+
+    Setup();
+    UseMap(MAP_ROUTE101);
+    printf("selftest-healing: every healing item through PokemonUseItemEffects, Gen 6 rules\n");
+    max = MaxHP(HealMon(1, 0, 100));
+    printf("     the test Pokemon: Snorlax level 100, %u HP\n", max);
+
+    // HP: from 1 HP, the amount restored; never past the maximum
+    for (i = 0; i < ARRAY_COUNT(sAmounts); i++)
+    {
+        snprintf(line, sizeof(line), "%s restores %u", sAmounts[i].name, sAmounts[i].amount);
+        ExpectHeal(line, sAmounts[i].item, 1, 1 + sAmounts[i].amount);
+    }
+    ExpectHeal("Max Potion restores all", ITEM_MAX_POTION, 1, max);
+    ExpectHeal("Hyper Potion 10 HP short of full: to the maximum, no more", ITEM_HYPER_POTION, max - 10, max);
+    ExpectHeal("Potion 5 HP short of full: to the maximum", ITEM_POTION, max - 5, max);
+    mon = HealMon(1, STATUS1_PARALYSIS, 100);
+    Expect("Full Restore: all HP and the status cured",
+           !PokemonUseItemEffects(mon, ITEM_FULL_RESTORE, 0, 0, FALSE) && GetMonData(mon, MON_DATA_HP) == max
+           && GetMonData(mon, MON_DATA_STATUS) == 0);
+    ExpectNoEffect("Potion at full HP: no effect (kept)", ITEM_POTION, 0xFFFF, 0, 0);
+    ExpectNoEffect("Max Potion at full HP: no effect", ITEM_MAX_POTION, 0xFFFF, 0, 0);
+    ExpectNoEffect("Potion on a fainted Pokemon: no effect", ITEM_POTION, 0, 0, 0);
+    ExpectNoEffect("Full Restore on a fainted Pokemon: no effect", ITEM_FULL_RESTORE, 0, 0, 0);
+
+    // Statuses
+    ExpectCure("Antidote cures poison", ITEM_ANTIDOTE, STATUS1_POISON);
+    ExpectCure("Antidote cures bad poison", ITEM_ANTIDOTE, STATUS1_TOXIC_POISON);
+    ExpectCure("Burn Heal cures a burn", ITEM_BURN_HEAL, STATUS1_BURN);
+    ExpectCure("Ice Heal thaws", ITEM_ICE_HEAL, STATUS1_FREEZE);
+    ExpectCure("Awakening wakes", ITEM_AWAKENING, STATUS1_SLEEP_TURN(3));
+    ExpectCure("Paralyze Heal cures paralysis", ITEM_PARALYZE_HEAL, STATUS1_PARALYSIS);
+    ExpectCure("Blue Flute wakes", ITEM_BLUE_FLUTE, STATUS1_SLEEP_TURN(2));
+    ExpectCure("Pecha Berry cures poison", ITEM_PECHA_BERRY, STATUS1_POISON);
+    ExpectCure("Rawst Berry cures a burn", ITEM_RAWST_BERRY, STATUS1_BURN);
+    ExpectCure("Aspear Berry thaws", ITEM_ASPEAR_BERRY, STATUS1_FREEZE);
+    ExpectCure("Chesto Berry wakes", ITEM_CHESTO_BERRY, STATUS1_SLEEP_TURN(3));
+    ExpectCure("Cheri Berry cures paralysis", ITEM_CHERI_BERRY, STATUS1_PARALYSIS);
+    for (i = 0; i < ARRAY_COUNT(sFullHeals); i++)
+    {
+        u32 s;
+        bool32 all = TRUE;
+
+        for (s = 0; s < ARRAY_COUNT(sStatuses); s++)
+        {
+            struct Pokemon *healed = HealMon(100, sStatuses[s], 100);
+
+            all &= !PokemonUseItemEffects(healed, sFullHeals[i].item, 0, 0, FALSE) && GetMonData(healed, MON_DATA_STATUS) == 0;
+        }
+        snprintf(line, sizeof(line), "%s cures sleep, poison, a burn, freezing, paralysis and bad poison", sFullHeals[i].name);
+        Expect(line, all);
+    }
+    ExpectNoEffect("Antidote on a burned Pokemon: no effect", ITEM_ANTIDOTE, 100, STATUS1_BURN, 0);
+    ExpectNoEffect("Burn Heal on a healthy Pokemon: no effect", ITEM_BURN_HEAL, 100, 0, 0);
+    ExpectNoEffect("Full Heal on a healthy Pokemon: no effect", ITEM_FULL_HEAL, 100, 0, 0);
+
+    // Revival
+    ExpectHeal("Revive: a fainted Pokemon back with half its HP", ITEM_REVIVE, 0, max / 2);
+    ExpectHeal("Max Revive: back with all its HP", ITEM_MAX_REVIVE, 0, max);
+    ExpectHeal("Revival Herb: back with all its HP", ITEM_REVIVAL_HERB, 0, max);
+    ExpectHeal("Sacred Ash (this Pokemon): back with all its HP", ITEM_SACRED_ASH, 0, max);
+    ExpectNoEffect("Revive on a Pokemon that has not fainted: no effect", ITEM_REVIVE, 50, 0, 0);
+    ExpectNoEffect("Max Revive at full HP: no effect", ITEM_MAX_REVIVE, 0xFFFF, 0, 0);
+
+    // Herbal medicines cost friendship: under 100, 100-199, 200 and over (Gen 3-7)
+    ExpectFriendship("Energy Powder", ITEM_ENERGY_POWDER, 1, 0, 50, 45);
+    ExpectFriendship("Energy Powder", ITEM_ENERGY_POWDER, 1, 0, 150, 145);
+    ExpectFriendship("Energy Powder", ITEM_ENERGY_POWDER, 1, 0, 250, 240);
+    ExpectFriendship("Energy Root", ITEM_ENERGY_ROOT, 1, 0, 50, 40);
+    ExpectFriendship("Energy Root", ITEM_ENERGY_ROOT, 1, 0, 150, 140);
+    ExpectFriendship("Energy Root", ITEM_ENERGY_ROOT, 1, 0, 250, 235);
+    ExpectFriendship("Heal Powder", ITEM_HEAL_POWDER, 100, STATUS1_POISON, 50, 45);
+    ExpectFriendship("Heal Powder", ITEM_HEAL_POWDER, 100, STATUS1_POISON, 150, 145);
+    ExpectFriendship("Heal Powder", ITEM_HEAL_POWDER, 100, STATUS1_POISON, 250, 240);
+    ExpectFriendship("Revival Herb", ITEM_REVIVAL_HERB, 0, 0, 50, 35);
+    ExpectFriendship("Revival Herb", ITEM_REVIVAL_HERB, 0, 0, 150, 135);
+    ExpectFriendship("Revival Herb", ITEM_REVIVAL_HERB, 0, 0, 250, 230);
+    ExpectFriendship("Energy Powder at friendship 3: not below 0", ITEM_ENERGY_POWDER, 1, 0, 3, 0);
+    ExpectFriendship("Potion: no friendship change", ITEM_POTION, 1, 0, 150, 150);
+    // A finding, measured and printed, not a check: CalculateFriendshipBonuses adds the met-here bonus (and the Luxury
+    // Ball's) to a friendship loss too, so a herbal medicine costs less for a Pokemon met on the current map; the
+    // official games add those bonuses only to a gain
+    {
+        u8 here = GetCurrentRegionMapSectionId(), friendship = 150, luxury = BALL_LUXURY;
+
+        mon = HealMon(1, 0, friendship);
+        SetMonData(mon, MON_DATA_MET_LOCATION, &here);
+        PokemonUseItemEffects(mon, ITEM_ENERGY_POWDER, 0, 0, FALSE);
+        printf("     note: Energy Powder on a Pokemon met on this map: friendship 150 -> %u (the official rule: 145)\n",
+               (unsigned)GetMonData(mon, MON_DATA_FRIENDSHIP));
+        mon = HealMon(1, 0, friendship);
+        SetMonData(mon, MON_DATA_POKEBALL, &luxury);
+        PokemonUseItemEffects(mon, ITEM_ENERGY_ROOT, 0, 0, FALSE);
+        printf("     note: Energy Root on a Pokemon in a Luxury Ball: friendship 150 -> %u (the official rule: 140)\n",
+               (unsigned)GetMonData(mon, MON_DATA_FRIENDSHIP));
+    }
+
+    // PP: Ether and Max Ether on one move, Elixir and Max Elixir on all four (from 0 PP; Tackle 35, Surf 15, Thunder 10,
+    // Hyper Beam 5)
+    mon = HealMon(100, 0, 100);
+    Expect("Ether: 10 PP to the move chosen (Tackle 0 -> 10)", !PokemonUseItemEffects(mon, ITEM_ETHER, 0, 0, FALSE)
+           && PPOf(mon, 0) == 10 && PPOf(mon, 1) == 0);
+    Expect("Ether again on Hyper Beam: to its maximum of 5, no more", !PokemonUseItemEffects(mon, ITEM_ETHER, 0, 3, FALSE)
+           && PPOf(mon, 3) == MaxPPOf(3));
+    Expect("Max Ether: all of one move's PP (Surf 0 -> 15)", !PokemonUseItemEffects(mon, ITEM_MAX_ETHER, 0, 1, FALSE)
+           && PPOf(mon, 1) == MaxPPOf(1) && PPOf(mon, 2) == 0);
+    Expect("Ether on a move at full PP: no effect", PokemonUseItemEffects(mon, ITEM_ETHER, 0, 1, FALSE) && PPOf(mon, 1) == MaxPPOf(1));
+    mon = HealMon(100, 0, 100);
+    Expect("Elixir: 10 PP to every move, each to its maximum", !PokemonUseItemEffects(mon, ITEM_ELIXIR, 0, 0, FALSE)
+           && PPOf(mon, 0) == 10 && PPOf(mon, 1) == 10 && PPOf(mon, 2) == 10 && PPOf(mon, 3) == MaxPPOf(3));
+    mon = HealMon(100, 0, 100);
+    Expect("Max Elixir: every move's PP to its maximum", !PokemonUseItemEffects(mon, ITEM_MAX_ELIXIR, 0, 0, FALSE)
+           && PPOf(mon, 0) == MaxPPOf(0) && PPOf(mon, 1) == MaxPPOf(1) && PPOf(mon, 2) == MaxPPOf(2) && PPOf(mon, 3) == MaxPPOf(3));
+    Expect("Max Elixir again at full PP: no effect", PokemonUseItemEffects(mon, ITEM_MAX_ELIXIR, 0, 0, FALSE));
+
+    printf("selftest-healing: %d checks, %d failed\n", sChecks, sFailures);
     return sFailures == 0 ? 0 : 1;
 }
