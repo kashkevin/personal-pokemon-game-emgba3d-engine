@@ -330,6 +330,13 @@ static void NoteNativeFailure(const void *at)
     CrashReport_Crumb(CRUMB_NATIVE_FAIL, (u32)(uintptr_t)at, sState);
     CrashReport_Error(message);
 }
+
+// KNOWN_ISSUES MS-125: a battle between players whose core stopped itself stands on screen until the launcher recovers
+// or abandons it; the 3D game says so over it (sdl2.c), the game itself said nothing.
+bool32 MultiplayerBattle_StoppedForRecovery(void)
+{
+    return sState == MP_BATTLE_RECOVERY_REQUIRED;
+}
 #endif
 #line 239 // gba-line
 void MultiplayerBattle_FailNative(void)

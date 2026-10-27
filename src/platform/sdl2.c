@@ -2005,6 +2005,10 @@ static void DrawPcOverlay(int outputWidth, int outputHeight)
         extras.photoHints = sPhotoMode;
         extras.notice = sScreenshotNotice[0] != '\0' && SDL_GetTicks() - sScreenshotNoticeMs < 4000
                       ? sScreenshotNotice : NULL;
+        // KNOWN_ISSUES MS-125: a battle between players that stopped itself waits for the launcher, which says so in
+        // its own window only; the frozen battle on screen said nothing.
+        if (extras.notice == NULL && MultiplayerBattle_StoppedForRecovery())
+            extras.notice = "This battle stopped. In the launcher: Recover battle, or Abandon battle.";
         DioramaPCOverlay_Draw(sPcMenu.open ? &menu : NULL, showCorner ? corner : NULL, &extras,
                               outputWidth, outputHeight);
     }
