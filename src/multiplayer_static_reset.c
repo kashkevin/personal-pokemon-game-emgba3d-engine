@@ -20,6 +20,10 @@
 #include "constants/map_groups.h"
 #include "constants/vars.h"
 #include "constants/weather.h"
+#ifdef PORTABLE
+#include "multiplayer_ownership.h"
+#endif
+#line 23 // gba-line
 
 struct StaticSource {
     u16 id, species, hide, defeated, prerequisite;
@@ -292,11 +296,38 @@ static void Begin(u32 id)
     MultiplayerResetAdmission_Begin(id);
 }
 
+#ifdef PORTABLE
+// MS-156: as MultiplayerStaticReset_BeginCurrent, a save no world has enrolled meets New Mauville's first Voltorb as
+// the ordinary encounter.
+void MultiplayerStaticReset_BeginVoltorb1(void)
+{
+    if (!MultiplayerOwnership_IsEnrolled())
+    {
+        gSpecialVar_Result = TRUE;
+        return;
+    }
+    Begin(MP_STATIC_RESET_VOLTORB_1);
+}
+#else
+#line 295 // gba-line
 void MultiplayerStaticReset_BeginVoltorb1(void) { Begin(MP_STATIC_RESET_VOLTORB_1); }
+#endif
+#line 296 // gba-line
 
 void MultiplayerStaticReset_BeginCurrent(void)
 {
     gSpecialVar_Result = FALSE;
+#ifdef PORTABLE
+    // MS-156: a save no world has enrolled has no host to admit a reset, and the authored scripts take FALSE as a refusal
+    // (no battle): offline, the Regis, the legendaries, Kecleon and the rest were never battled. Such a save's static
+    // encounter is the ordinary one (TRUE: no admission, no reset in its battle). An enrolled save keeps the admission.
+    if (!MultiplayerOwnership_IsEnrolled())
+    {
+        gSpecialVar_Result = TRUE;
+        return;
+    }
+#endif
+#line 300 // gba-line
     for (u32 i = 0; i < ARRAY_COUNT(sSources); i++)
         if (MultiplayerStaticReset_EntryReady(sSources[i].id))
         {
