@@ -608,4 +608,7 @@ of terraced walls; Route 112's rock was still a maze of walls.
   the muddy slopes of Routes 115 and 119, Granite Cave and the Safari Zone, Sootopolis
   Gym's slides) have both ends on one level in the terrace solver's levels; they need it to
   split them (Route 111's muddy slopes, on two levels, already rise as ramps). The 47
-  ledges in caves the game never jumps stand as rock as before.
+  ledges in caves the game never jumps stand as rock as before. The 48 ledges of the four
+  modelled rooms that have any (Fortree Gym 15, Lavaridge Gym 1F 7 and B1F 15, the Trick
+  House's fourth puzzle 11: `battle_room_specs.py` `AUTO_ROOMS`) are the rooms' models, cut from
+  their drawing, and keep that shape: 959 ledges in 38 layouts are banks.
