@@ -221,8 +221,6 @@ static void TestRaisedCellAndCapacity(void)
     assert(!DioramaTerrain_BuildChunk(&input, sVertices, mesh.vertexCount - 1, &mesh));
 }
 
-static struct DioramaTerrainMesh CheckSameAsVoxelBuild(const struct DioramaTerrainChunkInput *input);
-
 /* Side quads reaching down to `low` or lower and up to `high` or higher. */
 static int CountSideQuads(const struct DioramaTerrainMesh *mesh, float low, float high)
 {
@@ -290,8 +288,8 @@ static void TestStepDownClosesTheGap(void)
     assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
     assert(CountSideQuads(&mesh, -1.0f, -1.0f / 16.0f) == 3);
 
-    /* A ledge on a lower level (the terrace solver's, its lip above it): its
-     * bank on that level through the voxel spans too, not none. */
+    /* A ledge on a lower level (the terrace's level and its lip above it):
+     * a column there through the voxel spans too, not none. */
     InitInput(&input, 3, MB_NORMAL);
     for (int i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
     {
@@ -303,30 +301,27 @@ static void TestStepDownClosesTheGap(void)
     low->behavior = MB_JUMP_SOUTH;
     low->groundHeight = -0.625f;
     low->visualHeight = -0.625f;
-    low->ledgeTakeoffHeight = low->ledgeLandingHeight = -1.0f;
     input.cells[1 * DIORAMA_TERRAIN_INPUT_SIZE + 1].shape = DIORAMA_SHAPE_ROOF;
     assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
     assert(!mesh.usedCompressedOccupancy);
-    assert(mesh.bounds.maxY == -0.5f);
+    assert(mesh.bounds.maxY == -0.625f);
     /* every face, the ledge's sides too, reads its own drawing (u 0.1-0.3,
-     * v 0.2-0.4 here) */
+     * v 0.2-0.4 here): a ground ledge's lip mapping read rows past it */
     for (uint32_t i = 0; i < mesh.vertexCount; i++)
         assert(sVertices[i].u > 0.09f && sVertices[i].u < 0.31f
             && sVertices[i].v > 0.19f && sVertices[i].v < 0.41f);
 
-    /* The ground round such a ledge, a level up, hangs a skirt down to its
-     * bank, a pixel at a time: over its row on the north and south, over each
-     * row's top on the east and west (those reaching a lip's height down here) */
+    /* The ground round such a ledge, a level up, hangs a skirt down to its top. */
     InitInput(&input, 3, MB_NORMAL);
     low = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
     low->shape = DIORAMA_SHAPE_LEDGE;
     low->behavior = MB_JUMP_SOUTH;
     low->groundHeight = -0.625f;
     low->visualHeight = -0.625f;
-    low->ledgeTakeoffHeight = low->ledgeLandingHeight = -1.0f;
-    mesh = CheckSameAsVoxelBuild(&input);
-    assert(CountSideQuads(&mesh, -0.625f, -1.0f / 16.0f) == 2 + 2 * 12);
-    /* and the ground's own sides above that, its footing to its top: closed */
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.usedCompressedOccupancy);
+    assert(CountSideQuads(&mesh, -0.625f, -1.0f / 16.0f) == 4);
+    /* and its own side above that, its footing to its top: closed to the ground */
     assert(CountSideQuads(&mesh, -1.0f / 16.0f, 0.0f) == 4);
 }
 
@@ -349,173 +344,103 @@ static void TestPartialChunk(void)
     assert(mesh.bounds.maxX == 7.5f);
 }
 
-/* A jump ledge as the rules give it: on its ground, its lip's height its own
- * (rules.c ApplyStaticTerrain), between the grounds of the cells it is jumped
- * from and lands in (DioramaRules_LedgeGrounds). */
-static void MakeLedge(struct DioramaTerrainCell *cell, uint8_t behavior, float takeoff, float landing)
-{
-    cell->behavior = behavior;
-    cell->shape = DIORAMA_SHAPE_LEDGE;
-    cell->archetype = DIORAMA_ARCHETYPE_LEDGE;
-    cell->groundHeight = cell->visualHeight = DIORAMA_TERRAIN_LEDGE_HEIGHT;
-    cell->featureHeight = DIORAMA_TERRAIN_LEDGE_HEIGHT;
-    cell->ledgeTakeoffHeight = takeoff;
-    cell->ledgeLandingHeight = landing;
-}
-
-/* The highest top face over map cell (mapX, mapY)'s pixel (pixelX, pixelZ). */
-static float TopAt(const struct DioramaTerrainMesh *mesh, int mapX, int mapY, int pixelX, int pixelZ)
-{
-    float x = mapX - 0.5f + (pixelX + 0.5f) / 16.0f;
-    float z = -(mapY - 0.5f + (pixelZ + 0.5f) / 16.0f);
-    float best = -100.0f;
-
-    for (uint32_t i = 0; i + 6 <= mesh->vertexCount; i += 6)
-    {
-        float minX = sVertices[i].x, maxX = sVertices[i].x;
-        float minZ = sVertices[i].z, maxZ = sVertices[i].z;
-        bool flat = true;
-
-        for (int v = 1; v < 6; v++)
-        {
-            flat &= sVertices[i + v].y == sVertices[i].y;
-            minX = sVertices[i + v].x < minX ? sVertices[i + v].x : minX;
-            maxX = sVertices[i + v].x > maxX ? sVertices[i + v].x : maxX;
-            minZ = sVertices[i + v].z < minZ ? sVertices[i + v].z : minZ;
-            maxZ = sVertices[i + v].z > maxZ ? sVertices[i + v].z : maxZ;
-        }
-        if (flat && sVertices[i].shade >= 1.0f && x > minX && x < maxX && z > minZ && z < maxZ
-         && sVertices[i].y > best)
-            best = sVertices[i].y;
-    }
-    return best;
-}
-
-/* The owner's Request C (2026-10-27): a jump ledge is a bank, its grass rising
- * from the side it is jumped from to a crest across the middle and its rock
- * face falling to the side it lands in, a voxel a pixel. */
-static void TestLedgeProfile(void)
-{
-    static const int16_t south[16] = {1, 2, 3, 4, 5, 6, 7, 8, 8, 7, 6, 5, 4, 3, 2, 1};
-
-    for (int pixel = 0; pixel < 16; pixel++)
-    {
-        /* across the cell the way it is jumped, the same all along it */
-        assert(DioramaTerrain_LedgeTop(MB_JUMP_SOUTH, 0, 0, 3, pixel) == south[pixel]);
-        assert(DioramaTerrain_LedgeTop(MB_JUMP_SOUTH, 0, 0, 12, pixel) == south[pixel]);
-        assert(DioramaTerrain_LedgeTop(MB_JUMP_NORTH, 0, 0, 3, 15 - pixel) == south[pixel]);
-        assert(DioramaTerrain_LedgeTop(MB_JUMP_EAST, 0, 0, pixel, 3) == south[pixel]);
-        assert(DioramaTerrain_LedgeTop(MB_JUMP_WEST, 0, 0, 15 - pixel, 3) == south[pixel]);
-        /* on a lower level: the same bank on it */
-        assert(DioramaTerrain_LedgeTop(MB_JUMP_SOUTH, -16, -16, 3, pixel) == south[pixel] - 16);
-    }
-    /* a ledge a level over its landing: the grass as before, the face down a level */
-    assert(DioramaTerrain_LedgeTop(MB_JUMP_SOUTH, 0, -16, 0, 0) == 1);
-    assert(DioramaTerrain_LedgeTop(MB_JUMP_SOUTH, 0, -16, 0, 7) == 8);
-    assert(DioramaTerrain_LedgeTop(MB_JUMP_SOUTH, 0, -16, 0, 8) == 7);
-    assert(DioramaTerrain_LedgeTop(MB_JUMP_SOUTH, 0, -16, 0, 15) == -14);
-    for (int pixel = 1; pixel < 16; pixel++)
-        assert(DioramaTerrain_LedgeTop(MB_JUMP_SOUTH, 0, -16, 0, pixel)
-               <= DioramaTerrain_LedgeTop(MB_JUMP_SOUTH, 0, -16, 0, pixel - 1) + 1);
-    /* a corner (south-east): the higher of its south and east banks, meeting each */
-    for (int pixel = 0; pixel < 16; pixel++)
-    {
-        assert(DioramaTerrain_LedgeTop(MB_JUMP_SOUTHEAST, 0, 0, 0, pixel) == south[pixel]);
-        assert(DioramaTerrain_LedgeTop(MB_JUMP_SOUTHEAST, 0, 0, pixel, 0) == south[pixel]);
-        assert(DioramaTerrain_LedgeTop(MB_JUMP_SOUTHWEST, 0, 0, 15, pixel) == south[pixel]);
-    }
-    assert(DioramaTerrain_LedgeTop(MB_JUMP_SOUTHEAST, 0, 0, 15, 15) == 1);
-    assert(DioramaTerrain_LedgeTop(MB_JUMP_SOUTHEAST, 0, 0, 8, 8) == 8);
-    /* under it: a voxel under the lower ground, as under the ground */
-    assert(DioramaTerrain_LedgeBottom(0, 0) == -1);
-    assert(DioramaTerrain_LedgeBottom(0, -16) == -17);
-    assert(DioramaTerrain_LedgeBottom(-16, -16) == -17);
-    assert(DioramaTerrain_LedgeBottom(16, 16) == -1);
-}
-
 static void TestLedge(void)
 {
     struct DioramaTerrainChunkInput input;
     struct DioramaTerrainMesh mesh;
 
-    /* a run of ledges across the chunk, jumped south */
     InitInput(&input, 3, MB_NORMAL);
     for (int x = 0; x < DIORAMA_TERRAIN_INPUT_SIZE; x++)
-        MakeLedge(&input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + x], MB_JUMP_SOUTH, 0.0f, 0.0f);
-    mesh = CheckSameAsVoxelBuild(&input);
-    assert(mesh.bounds.minY == -1.0f / 16.0f);
-    assert(mesh.bounds.maxY == 0.5f);
+    {
+        struct DioramaTerrainCell *cell = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + x];
+        cell->behavior = MB_JUMP_SOUTH;
+        cell->shape = DIORAMA_SHAPE_LEDGE;
+        cell->archetype = DIORAMA_ARCHETYPE_LEDGE;
+        cell->featureHeight = DIORAMA_TERRAIN_LEDGE_HEIGHT;
+        cell->materials[DIORAMA_MATERIAL_FACE_TOP].layer = DIORAMA_MATERIAL_BASE;
+        for (int face = DIORAMA_MATERIAL_FACE_NORTH;
+             face <= DIORAMA_MATERIAL_FACE_WEST; face++)
+            cell->materials[face].layer = DIORAMA_MATERIAL_FOREGROUND;
+        for (int row = 10; row < 16; row++)
+            cell->foregroundAlpha[row] = 0xFFFF;
+    }
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.usedCompressedOccupancy);
+    assert(mesh.topFaceCount == 64);
     assert(mesh.featureFaceCount > 0);
-    /* its top follows the bank, the same all along the run */
-    for (int pixel = 0; pixel < 16; pixel++)
-    {
-        float want = DioramaTerrain_LedgeTop(MB_JUMP_SOUTH, 0, 0, 0, pixel) / 16.0f;
-
-        assert(TopAt(&mesh, 3, 3, 5, pixel) == want);
-        assert(TopAt(&mesh, 6, 3, 11, pixel) == want);
-    }
-    /* the ground on either side is the ground */
-    assert(TopAt(&mesh, 3, 2, 5, 15) == 0.0f);
-    assert(TopAt(&mesh, 3, 4, 5, 0) == 0.0f);
-    /* its whole drawing on its top and sides, each side a pixel's colour (the
-     * drawing's u 0.1-0.3, v 0.2-0.4 here): a south side's v is its row's */
-    for (uint32_t i = 0; i + 6 <= mesh.vertexCount; i += 6)
-    {
-        assert(sVertices[i].textureLayer == DIORAMA_MATERIAL_FULL);
-        assert(sVertices[i].u > 0.09f && sVertices[i].u < 0.31f
-            && sVertices[i].v > 0.19f && sVertices[i].v < 0.41f);
-    }
-
-    /* jumped east and west, and their corners: the same through both builds */
-    InitInput(&input, 3, MB_NORMAL);
-    for (int y = 0; y < DIORAMA_TERRAIN_INPUT_SIZE; y++)
-    {
-        MakeLedge(&input.cells[y * DIORAMA_TERRAIN_INPUT_SIZE + 2], MB_JUMP_WEST, 0.0f, 0.0f);
-        MakeLedge(&input.cells[y * DIORAMA_TERRAIN_INPUT_SIZE + 7], MB_JUMP_EAST, 0.0f, 0.0f);
-    }
-    MakeLedge(&input.cells[9 * DIORAMA_TERRAIN_INPUT_SIZE + 2], MB_JUMP_SOUTHWEST, 0.0f, 0.0f);
-    MakeLedge(&input.cells[9 * DIORAMA_TERRAIN_INPUT_SIZE + 7], MB_JUMP_SOUTHEAST, 0.0f, 0.0f);
-    MakeLedge(&input.cells[5 * DIORAMA_TERRAIN_INPUT_SIZE + 5], MB_JUMP_NORTH, 0.0f, 0.0f);
-    mesh = CheckSameAsVoxelBuild(&input);
-    assert(mesh.bounds.maxY == 0.5f);
-    for (int pixel = 0; pixel < 16; pixel++)
-    {
-        assert(TopAt(&mesh, 1, 2, 15 - pixel, 7) == DioramaTerrain_LedgeTop(MB_JUMP_SOUTH, 0, 0, 0, pixel) / 16.0f);
-        assert(TopAt(&mesh, 6, 2, pixel, 7) == DioramaTerrain_LedgeTop(MB_JUMP_SOUTH, 0, 0, 0, pixel) / 16.0f);
-        assert(TopAt(&mesh, 4, 4, 7, 15 - pixel) == DioramaTerrain_LedgeTop(MB_JUMP_SOUTH, 0, 0, 0, pixel) / 16.0f);
-    }
+    assert(mesh.bounds.minY == -1.0f / 16.0f);
+    assert(mesh.bounds.maxY == DIORAMA_TERRAIN_LEDGE_HEIGHT);
+    for (uint32_t vertex = 0; vertex < mesh.vertexCount; vertex++)
+        if (sVertices[vertex].y > 0.0f)
+            assert(sVertices[vertex].textureLayer == DIORAMA_MATERIAL_FOREGROUND);
 }
 
-/* A ledge a level over the cell it lands in (Route 113's ash, the terrace
- * solver's levels): its face goes down to that cell, no skirt under it; and
- * one on a lower terrace stands on that terrace, not a level and more over it
- * (Route 116's stood as walls 22 voxels high). */
-static void TestLedgeBetweenLevels(void)
+static void TestLedgeUsesForegroundRuns(void)
 {
     struct DioramaTerrainChunkInput input;
     struct DioramaTerrainMesh mesh;
+    struct DioramaTerrainCell *center;
+    bool foundTopUv = false;
 
     InitInput(&input, 3, MB_NORMAL);
-    for (int i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
-        if (input.cells[i].mapY >= 4)
-            input.cells[i].groundHeight = input.cells[i].visualHeight = -1.0f;
-    for (int x = 0; x < DIORAMA_TERRAIN_INPUT_SIZE; x++)
-        MakeLedge(&input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + x], MB_JUMP_SOUTH, 0.0f, -1.0f);
-    mesh = CheckSameAsVoxelBuild(&input);
-    assert(mesh.bounds.minY == -17.0f / 16.0f);
-    assert(mesh.bounds.maxY == 0.5f);
-    assert(TopAt(&mesh, 3, 3, 5, 0) == 1.0f / 16.0f);
-    assert(TopAt(&mesh, 3, 3, 5, 15) == -14.0f / 16.0f);
-    assert(TopAt(&mesh, 3, 4, 5, 8) == -1.0f);
+    center = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    center->behavior = MB_JUMP_SOUTH;
+    center->shape = DIORAMA_SHAPE_LEDGE;
+    center->archetype = DIORAMA_ARCHETYPE_LEDGE;
+    center->featureHeight = DIORAMA_TERRAIN_LEDGE_HEIGHT;
+    center->materials[DIORAMA_MATERIAL_FACE_TOP].layer = DIORAMA_MATERIAL_BASE;
+    for (int face = DIORAMA_MATERIAL_FACE_NORTH;
+         face <= DIORAMA_MATERIAL_FACE_WEST; face++)
+        center->materials[face].layer = DIORAMA_MATERIAL_FOREGROUND;
+    center->foregroundAlpha[10] = 0xFFFF;
+    center->foregroundAlpha[11] = 0xFFFF;
+    center->foregroundAlpha[12] = 0xFFFE;
+    center->foregroundAlpha[13] = 0xFFFE;
+    center->foregroundAlpha[14] = 0xFFFC;
+    center->foregroundAlpha[15] = 0xFFF0;
+
+    assert(DioramaTerrain_BuildChunk(&input, sVertices,
+                                     DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.usedCompressedOccupancy);
+    assert(mesh.featureFaceCount == 4);
+    for (uint32_t vertex = 0; vertex < mesh.vertexCount; vertex++)
+        if (sVertices[vertex].textureLayer == DIORAMA_MATERIAL_FOREGROUND
+         && sVertices[vertex].y == DIORAMA_TERRAIN_LEDGE_HEIGHT)
+        {
+            assert(sVertices[vertex].v > 0.33f && sVertices[vertex].v < 0.34f);
+            foundTopUv = true;
+        }
+    assert(foundTopUv);
+}
+
+static void TestDiagonalLedgeAndOcclusion(void)
+{
+    struct DioramaTerrainChunkInput input;
+    struct DioramaTerrainMesh mesh;
+    struct DioramaTerrainCell *center;
+    struct DioramaTerrainCell *south;
 
     InitInput(&input, 3, MB_NORMAL);
-    for (int i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
-        input.cells[i].groundHeight = input.cells[i].visualHeight = -1.0f;
-    for (int x = 0; x < DIORAMA_TERRAIN_INPUT_SIZE; x++)
-        MakeLedge(&input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + x], MB_JUMP_SOUTH, -1.0f, -1.0f);
-    mesh = CheckSameAsVoxelBuild(&input);
-    assert(mesh.bounds.maxY == -0.5f);
-    assert(TopAt(&mesh, 3, 3, 5, 7) == -0.5f);
+    center = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    center->behavior = MB_JUMP_SOUTHEAST;
+    center->shape = DIORAMA_SHAPE_LEDGE;
+    center->archetype = DIORAMA_ARCHETYPE_LEDGE;
+    center->featureHeight = DIORAMA_TERRAIN_LEDGE_HEIGHT;
+    for (int row = 10; row < 16; row++)
+        center->foregroundAlpha[row] = 0xFFFF;
+    for (int face = DIORAMA_MATERIAL_FACE_NORTH;
+         face <= DIORAMA_MATERIAL_FACE_WEST; face++)
+        center->materials[face].layer = DIORAMA_MATERIAL_FOREGROUND;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices,
+                                     DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.featureFaceCount == 2);
+
+    south = &input.cells[5 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    south->shape = DIORAMA_SHAPE_CLIFF;
+    south->visualHeight = 1.0f;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices,
+                                     DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.featureFaceCount == 1);
 }
 
 static void TestBridgeHasTwoSurfaces(void)
@@ -1648,9 +1573,9 @@ int main(void)
     TestRaisedCellAndCapacity();
     TestStepDownClosesTheGap();
     TestPartialChunk();
-    TestLedgeProfile();
     TestLedge();
-    TestLedgeBetweenLevels();
+    TestLedgeUsesForegroundRuns();
+    TestDiagonalLedgeAndOcclusion();
     TestBridgeHasTwoSurfaces();
     TestStairsAndDescendingStairwell();
     TestCliffFaceBandsAndRamp();

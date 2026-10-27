@@ -158,13 +158,6 @@ bool DioramaSprite_DecodeFrame(const struct DioramaSceneSnapshot *snapshot,
     return true;
 }
 
-/* A jump ledge drawn as its bank (terrain_mesh.c IsLedgeBank: not the ground under a tree) */
-static bool IsLedgeBankRule(const struct DioramaResolvedCell *rule)
-{
-    return rule->shape == DIORAMA_SHAPE_LEDGE && rule->archetype != DIORAMA_ARCHETYPE_ROUND_HULL
-        && rule->archetype != DIORAMA_ARCHETYPE_GROUPED_HULL;
-}
-
 static bool BuildPose(const struct DioramaSceneSnapshot *snapshot,
                       const struct DioramaResolvedCell *resolvedCells,
                       uint16_t resolvedCount,
@@ -176,7 +169,7 @@ static bool BuildPose(const struct DioramaSceneSnapshot *snapshot,
     struct DioramaResolvedCell currentStorage;
     struct DioramaResolvedCell previousStorage;
     const struct DioramaResolvedCell *currentRule;
-    const struct DioramaResolvedCell *previousRule = NULL;
+    const struct DioramaResolvedCell *previousRule;
     float currentHeight;
     float previousHeight;
     float moveProgress = 1.0f;
@@ -228,12 +221,6 @@ static bool BuildPose(const struct DioramaSceneSnapshot *snapshot,
                 DIORAMA_BUILDING_PIXELS_PER_CELL / 2,
                 DIORAMA_BUILDING_PIXELS_PER_CELL / 2);
     }
-    /* A jump ledge's cell: its bank's crest (a walker replayed across it steps over it, the jump's arc stays over
-     * it; its record's height was the lip's, two voxels under the crest) */
-    if (resolvedCells != NULL && IsLedgeBankRule(currentRule))
-        currentHeight = DioramaRules_LedgeCrest(snapshot, resolvedCells, object->currentMapX, object->currentMapY);
-    if (resolvedCells != NULL && previousRule != NULL && IsLedgeBankRule(previousRule))
-        previousHeight = DioramaRules_LedgeCrest(snapshot, resolvedCells, object->previousMapX, object->previousMapY);
     deltaX = object->currentMapX - object->previousMapX;
     deltaY = object->currentMapY - object->previousMapY;
     if (deltaX != 0)
