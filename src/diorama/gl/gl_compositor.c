@@ -2117,6 +2117,16 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         // picture is the frame's whole 2D picture.
         if (composing)
         {
+            /* The game has turned every colour into one (the flash's peak, the fade to black at the end): the
+             * GBA's picture is that colour whole, so the field under the transition is too, people and all - not
+             * the 3D field lit in grey (MS-107). */
+            if (sRenderedSceneSnapshot.screenFadeY >= 16)
+            {
+                uint16_t fade = sRenderedSceneSnapshot.screenFadeColor;
+
+                glClearColor((fade & 0x1F) / 31.0f, ((fade >> 5) & 0x1F) / 31.0f, ((fade >> 10) & 0x1F) / 31.0f, 1.0f);
+                glClear(GL_COLOR_BUFFER_BIT);
+            }
             DioramaGLBattle_ComposeFieldPicture(outputWidth, outputHeight, gameX, gameY,
                                                 gameWidth, gameHeight);
             dglUseProgram(sProgram);
@@ -2132,7 +2142,10 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                         0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, sTwoDOpacity);
             drewPicture = true;
         }
+        /* The picture's text box again (not over the Frontier's squares: it would bring back the picture's side
+         * margins, left to the squares; a box is in the picture already). */
         if (current3D && sSceneSnapshot.uiRectCount > 0
+         && !(composing && DioramaGLBattle_ComposingSquares())
          && DioramaCamera_GetMode() != DIORAMA_CAMERA_PHOTO
          && !(pictureFlags & (DIORAMA_PICTURE_HIDE_ALL | DIORAMA_PICTURE_HIDE_UI)))
         {

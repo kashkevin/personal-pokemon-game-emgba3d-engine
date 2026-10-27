@@ -52,6 +52,9 @@ bool DioramaGLBattle_IsActive(void);
  */
 bool DioramaGLBattle_CanComposeField(void);
 bool DioramaGLBattle_WantsField(void);
+/* The transition composed over the 3D field is one of the Frontier's squares: its picture is drawn without its side
+ * margins (DioramaGLBattle_ComposeFieldPicture), so nothing of the picture goes over it again. */
+bool DioramaGLBattle_ComposingSquares(void);
 /* ComposeFieldBands draws into the scene's framebuffer at the scene's size
  * (outW x outH; the window's, or the offscreen target's, gl_target.h), the GBA
  * picture's place given in the scene's pixels; ComposeFieldPicture draws into

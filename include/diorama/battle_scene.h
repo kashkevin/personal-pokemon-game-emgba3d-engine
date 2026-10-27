@@ -43,6 +43,7 @@ uint8_t DioramaBattle_IntroSliding(void);
 /* Whether a battle transition is playing on the field (battle_transition.c):
  * the 3D view composes it over the 3D field (gl_battle.c). */
 uint8_t DioramaBattle_TransitionActive(void);
+uint8_t DioramaBattle_TransitionIsSquares(void);
 
 /*
  * The map's sprites in OAM (sprite.c, battle_capture.c): those placed on the
@@ -103,6 +104,7 @@ struct DioramaBattleFrame
     bool forcedBlank;   /* DISPCNT forced blank */
     bool surfing;
     bool transition;    /* DioramaBattle_TransitionActive(), outside battles */
+    bool transitionSquares; /* DioramaBattle_TransitionIsSquares(): the Frontier's squares */
     /* During a transition, the mosaic on the field's layers (the Blur
      * transition's), REG_MOSAIC's BG sizes: 0 none, n blocks of n + 1. */
     uint8_t fieldMosaicH, fieldMosaicV;
@@ -177,6 +179,8 @@ extern uint32_t gDioramaSceneSkipObj[4];
 /* Per pixel row of that frame, BG1's scroll less line 0's (x, y): how far a
  * transition moves the field's layers on that line (they move together). */
 extern int16_t gDioramaSceneLineShift[160][2];
+/* That frame's BG0 scroll at line 0 (x, y): where a transition's own picture on BG0 - the Frontier's squares - lies. */
+extern uint16_t gDioramaSceneBg0Scroll[2];
 /* With gDioramaSceneArtWanted set before DrawFrame: per pixel of that frame,
  * what BG3 - the battle's scenery - would show (RGB555 | 0x8000; where it is
  * see-through, the backdrop colour) in its unfaded colours, its blending left

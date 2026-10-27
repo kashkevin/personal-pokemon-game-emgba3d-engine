@@ -3171,6 +3171,11 @@ bool DioramaGLBattle_WantsField(void)
     return sBattle.ready && sBattle.fieldCompose;
 }
 
+bool DioramaGLBattle_ComposingSquares(void)
+{
+    return sBattle.ready && sBattle.fieldCompose && sBattle.frame.transitionSquares;
+}
+
 bool DioramaGLBattle_ComposeFieldBands(int outW, int outH, float gameX, float gameY, float gameW, float gameH)
 {
     static const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -3253,10 +3258,74 @@ bool DioramaGLBattle_ComposeFieldBands(int outW, int outH, float gameX, float ga
     return true;
 }
 
+/* The Frontier's squares (battle_transition.c): squares of 32 GBA pixels on BG0, from 8 pixels in (the margins at
+ * the screen's sides, which the grid and the spiral fill solid and the scroll covers with its eighth column), moved
+ * by BG0's scroll in the scroll. The part of the picture shown as it is: whole squares only, 7 x 5 when the grid
+ * sits as drawn, else 6 or 7 across and 4 down (as many as fit in the picture from the first grid line). */
+struct SquaresWindow
+{
+    float x, y, w, h; /* GBA pixels from the picture's corner */
+};
+
+static struct SquaresWindow SquaresWindow(void)
+{
+    struct SquaresWindow window;
+    int gx = ((8 - gDioramaSceneBg0Scroll[0]) % 32 + 32) % 32;
+    int gy = ((0 - gDioramaSceneBg0Scroll[1]) % 32 + 32) % 32;
+
+    window.x = (float)gx;
+    window.y = (float)gy;
+    window.w = gx + 7 * 32 <= 240 ? 7 * 32.0f : 6 * 32.0f;
+    window.h = gy == 0 ? 5 * 32.0f : 4 * 32.0f;
+    return window;
+}
+
+/* That part again over [x0, x1) x [y0, y1) (GBA pixels from the picture's corner) at its own size, so the grid goes
+ * on unbroken: every copy holds whole squares. */
+static void PushSquaresPeriodic(const struct Layout *layout, const struct SquaresWindow *window,
+                                float x0, float y0, float x1, float y1)
+{
+    static const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    float s = layout->scale;
+
+    for (float cy = window->y + floorf((y0 - window->y) / window->h) * window->h; cy < y1; cy += window->h)
+        for (float cx = window->x + floorf((x0 - window->x) / window->w) * window->w; cx < x1; cx += window->w)
+        {
+            float a = fmaxf(cx, x0), b = fminf(cx + window->w, x1);
+            float c = fmaxf(cy, y0), d = fminf(cy + window->h, y1);
+
+            if (a >= b || c >= d)
+                continue;
+            PushQuad(layout->gameX + a * s, layout->gameY + c * s, layout->gameX + b * s, layout->gameY + d * s,
+                     (window->x + a - cx) / GBA_W, (window->y + c - cy) / GBA_H,
+                     (window->x + b - cx) / GBA_W, (window->y + d - cy) / GBA_H, white, white, white, white);
+        }
+}
+
+/* The Frontier's squares carried out as squares: the grid covers the window as it covers the GBA's screen, the
+ * field's layers see-through in it as in the picture. Each line's edge colour stretched out made the margins'
+ * solid colour a black frame round the 3D field and the scroll's squares stripes (MS-106). Round the part of the
+ * picture shown as it is (SquaresWindow), its copies, the picture's own margins included. */
+static void DrawSquaresCarriedOut(const struct Layout *layout, const struct SquaresWindow *window)
+{
+    float s = layout->scale;
+    float left = -layout->gameX / s, right = ((float)layout->outW - layout->gameX) / s;
+    float top = -layout->gameY / s, bottom = ((float)layout->outH - layout->gameY) / s;
+    float x1 = window->x + window->w, y1 = window->y + window->h;
+
+    QuadBegin();
+    PushSquaresPeriodic(layout, window, left, top, window->x, bottom);
+    PushSquaresPeriodic(layout, window, x1, top, right, bottom);
+    PushSquaresPeriodic(layout, window, window->x, top, x1, window->y);
+    PushSquaresPeriodic(layout, window, window->x, y1, x1, bottom);
+    QuadFlush(layout, DioramaGL_GetFrameTexture(), 0);
+}
+
 void DioramaGLBattle_ComposeFieldPicture(int outW, int outH, int gameX, int gameY, int gameW, int gameH)
 {
     static const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     struct Layout layout;
+    struct SquaresWindow shown = {0.0f, 0.0f, GBA_W, GBA_H};
 
     if (!sBattle.ready || !sBattle.fieldCompose || outW <= 0 || outH <= 0 || gameH <= 0)
         return;
@@ -3264,10 +3333,18 @@ void DioramaGLBattle_ComposeFieldPicture(int outW, int outH, int gameX, int game
     glViewport(0, 0, outW, outH);
     glDisable(GL_SCISSOR_TEST);
     /* The transition's own picture over it all. */
-    DrawCarriedOut(&layout);
+    if (sBattle.frame.transitionSquares)
+    {
+        shown = SquaresWindow();
+        DrawSquaresCarriedOut(&layout, &shown);
+    }
+    else
+        DrawCarriedOut(&layout);
     QuadBegin();
-    PushQuad(layout.gameX, layout.gameY, layout.gameX + layout.gameW, layout.gameY + layout.gameH,
-             0.0f, 0.0f, 1.0f, 1.0f, white, white, white, white);
+    PushQuad(layout.gameX + shown.x * layout.scale, layout.gameY + shown.y * layout.scale,
+             layout.gameX + (shown.x + shown.w) * layout.scale, layout.gameY + (shown.y + shown.h) * layout.scale,
+             shown.x / GBA_W, shown.y / GBA_H, (shown.x + shown.w) / GBA_W, (shown.y + shown.h) / GBA_H,
+             white, white, white, white);
     QuadFlush(&layout, DioramaGL_GetFrameTexture(), 0);
     glDisable(GL_BLEND);
 }

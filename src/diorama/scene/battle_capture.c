@@ -395,6 +395,7 @@ void DioramaBattle_Capture(struct DioramaBattleFrame *frame)
     {
         sBattleWeatherSeen = false;
         frame->transition = DioramaBattle_TransitionActive();
+        frame->transitionSquares = frame->transition && DioramaBattle_TransitionIsSquares();
         if (frame->transition && (REG_BG1CNT & BGCNT_MOSAIC))
         {
             frame->fieldMosaicH = REG_MOSAIC & 0xF;

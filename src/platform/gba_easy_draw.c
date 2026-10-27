@@ -86,6 +86,7 @@ struct DioramaSceneEdge gDioramaSceneEdges[DISPLAY_HEIGHT][2];
 uint32_t gDioramaSceneSkipObj[4];
 uint8_t gDioramaSceneHideBg;
 int16_t gDioramaSceneLineShift[DISPLAY_HEIGHT][2];
+uint16_t gDioramaSceneBg0Scroll[2];
 uint16_t gDioramaSceneArt[DISPLAY_HEIGHT * DISPLAY_WIDTH];
 bool gDioramaSceneArtWanted;
 bool gDioramaSceneWideWanted;
@@ -1377,6 +1378,8 @@ static void DrawScanline(uint16_t *pixels, uint16_t vcount)
         {
             sLineZeroScroll[0] = hofs;
             sLineZeroScroll[1] = vofs;
+            gDioramaSceneBg0Scroll[0] = *(uint16_t *)REG_ADDR_BG0HOFS & 0x1FF;
+            gDioramaSceneBg0Scroll[1] = *(uint16_t *)REG_ADDR_BG0VOFS & 0x1FF;
         }
         gDioramaSceneLineShift[vcount][0] = (int16_t)((((hofs - sLineZeroScroll[0]) & 0x1FF) ^ 0x100) - 0x100);
         gDioramaSceneLineShift[vcount][1] = (int16_t)((((vofs - sLineZeroScroll[1]) & 0x1FF) ^ 0x100) - 0x100);

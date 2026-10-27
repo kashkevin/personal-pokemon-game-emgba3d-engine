@@ -4862,6 +4862,17 @@ u8 DioramaBattle_TransitionActive(void)
 {
     return FuncIsActiveTask(Task_BattleTransition);
 }
+
+// Whether the transition playing is one of the Frontier's squares (the grid, its scroll, its spiral): the 3D view
+// carries their grid out past the picture's edges as squares (gl_battle.c), not as the edge's colours.
+u8 DioramaBattle_TransitionIsSquares(void)
+{
+    u8 taskId = FindTaskIdByFunc(Task_BattleTransition);
+    u8 id = taskId != TASK_NONE ? (u8)gTasks[taskId].data[1] : B_TRANSITION_COUNT;
+
+    return id == B_TRANSITION_FRONTIER_SQUARES || id == B_TRANSITION_FRONTIER_SQUARES_SCROLL
+        || id == B_TRANSITION_FRONTIER_SQUARES_SPIRAL;
+}
 #endif
 
 #ifdef ENABLE_NATIVE_UI
