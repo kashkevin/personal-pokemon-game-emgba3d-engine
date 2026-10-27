@@ -2050,7 +2050,12 @@ static void StartTowerFloor(int floor)
 /* PKMN_TEST_SET_FLAGS=<flag>,<flag>...: those event flags set in memory (decimal or 0x hex; move_switch_check.py: a
  * one-time move tutor used), a flag with a minus before it cleared (an object a new game hides shown);
  * PKMN_TEST_SET_VARS=<var>:<value>,...: those script variables set in memory (a scene a variable starts: Route 104's
- * on-frame sail to Dewford with VAR_BOARD_BRINEY_BOAT_STATE 1, as Mr. Briney's house leaves it) */
+ * on-frame sail to Dewford with VAR_BOARD_BRINEY_BOAT_STATE 1, as Mr. Briney's house leaves it). Set before
+ * PKMN_TEST_WARP's warp when there is one, so the map it loads sees them (an object a flag hides or shows, a map script
+ * reading a variable), and as the battle starts: the flags again then (the warp clears the temporary ones, the Black and
+ * White Flutes' among them), the variables only once (a map script's own change to one is not undone). */
+static bool sTestVarsSet;
+
 static void SetUpTestFlags(void)
 {
     const char *p = getenv("PKMN_TEST_SET_FLAGS");
@@ -2073,6 +2078,9 @@ static void SetUpTestFlags(void)
         }
         p = *end == ',' ? end + 1 : end;
     }
+    if (sTestVarsSet)
+        return;
+    sTestVarsSet = true;
     p = getenv("PKMN_TEST_SET_VARS");
     while (p != NULL && *p != '\0')
     {
@@ -3265,6 +3273,14 @@ void DioramaBattleEnvTest_FieldTick(void)
         TestLog("Battle env test: warping from map %d.%d to map %d.%d warp %d (%d,%d)",
                 gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum,
                 s.warpGroup, s.warpNum, s.warpId, s.warpX, s.warpY);
+        /* the flags, variables and Bag before the warp: the map it loads sees them (Jagged Pass's ON_RESUME asks for the
+           Magma Emblem as the player arrives; an object a flag shows) */
+        SetUpTestFlags();
+        if (!s.bagDone)
+        {
+            SetUpTestBag();
+            s.bagDone = true;
+        }
         if (s.warpX >= 0 && s.warpY >= 0)
             SetWarpDestination(s.warpGroup, s.warpNum, WARP_ID_NONE, s.warpX, s.warpY);
         else
