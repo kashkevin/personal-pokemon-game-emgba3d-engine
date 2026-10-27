@@ -7,6 +7,10 @@
 #include "malloc.h"
 #include "main.h"
 #include "event_data.h"
+#ifdef PORTABLE
+#include "battle_pyramid.h"
+#endif
+#line 10 // gba-line
 
 _Static_assert(sizeof(struct BoxPokemon) == 80, "Identity preserves boxed layout");
 _Static_assert(sizeof(struct Pokemon) == 100, "Identity preserves party layout");
@@ -135,6 +139,36 @@ bool32 MultiplayerOwnership_IsEnrolled(void)
     return !MultiplayerOwnership_IsLegacy((const void *)gSaveBlock3Ptr);
 }
 
+#ifdef PORTABLE
+// A Frontier or Battle Tent challenge is on: its status is set (from the lobby's start to its end), or the player is in
+// the Pyramid, which plays its floors with the status cleared. A few chosen Pokemon or rentals may be the party in play.
+bool32 MultiplayerOwnership_InFrontierChallenge(void)
+{
+    return gSaveBlock2Ptr->frontier.challengeStatus != 0 || CurrentBattlePyramidLocation() != PYRAMID_LOCATION_NONE;
+}
+
+// The party in memory is the whole party the save block keeps (the same Pokemon in the same slots): what a save writes
+// is then the player's own party, not a challenge's chosen few or rentals.
+static bool32 PartyIsWholeSavedParty(void)
+{
+    u32 i;
+
+    if (gPartiesCount[B_TRAINER_PLAYER] != *GetSavedPlayerPartyCount())
+        return FALSE;
+    for (i = 0; i < PARTY_SIZE; i++)
+    {
+        struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][i], *saved = GetSavedPlayerPartyMon(i);
+
+        if (GetMonData(mon, MON_DATA_SPECIES) != GetMonData(saved, MON_DATA_SPECIES)
+         || GetMonData(mon, MON_DATA_PERSONALITY) != GetMonData(saved, MON_DATA_PERSONALITY)
+         || GetMonData(mon, MON_DATA_OT_ID) != GetMonData(saved, MON_DATA_OT_ID))
+            return FALSE;
+    }
+    return TRUE;
+}
+
+#endif
+#line 129 // gba-line
 bool32 MultiplayerOwnership_CanSaveParty(void)
 {
     if (MultiplayerBattle_IsActive())
@@ -143,9 +177,22 @@ bool32 MultiplayerOwnership_CanSaveParty(void)
         return FALSE;
     if (!MultiplayerOwnership_IsEnrolled())
         return TRUE;
+#ifdef PORTABLE
+    // During a challenge every save of its own loads the player's whole party first (SaveGameFrontier, the lobbies'
+    // LoadPlayerParty, the Pike's and the Pyramid's pauses): it is allowed, a save while the chosen few or rentals are
+    // in play is not. The paused flag alone means nothing: every finished challenge's last save leaves it set, and it
+    // refused every save after one (the owner's request of 2026-10-27: no challenge could even start in a world, its
+    // opening save refused).
+    if (gMain.inBattle || (B_FLAG_SKY_BATTLE && FlagGet(B_FLAG_SKY_BATTLE)))
+        return FALSE;
+    return !MultiplayerOwnership_InFrontierChallenge() || PartyIsWholeSavedParty();
+#else
+#line 137 // gba-line
     return !gMain.inBattle && !gSaveBlock2Ptr->frontier.challengeStatus
         && !gSaveBlock2Ptr->frontier.challengePaused
         && (!B_FLAG_SKY_BATTLE || !FlagGet(B_FLAG_SKY_BATTLE));
+#endif
+#line 140 // gba-line
 }
 
 static struct BoxPokemon *OwnedMon(u32 slot)

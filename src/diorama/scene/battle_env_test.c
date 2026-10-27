@@ -63,6 +63,7 @@
 #include "field_effect.h"
 #include "constants/field_effects.h"
 #include "fieldmap.h"
+#include "multiplayer_ownership.h"
 #include "constants/multiplayer_balance.h"
 #include "constants/multiplayer_rival.h"
 #include "platform/coin_shop.h"
@@ -131,6 +132,10 @@ static struct
     bool fightOver;
     unsigned short fightButton;   /* the fight's press in progress (A, or B / DOWN on a forced switch's party screen) */
     unsigned int partySteps;      /* presses made on a forced switch's party screen */
+    /* PKMN_TEST_ENROLL=1: at the start, the save enrolled with a test world as a world's host enrolls it (a test grant,
+       MultiplayerOwnership_Grant with flags 1; in memory, and in the save once the game saves): the rules of a world's
+       save apply (Frontier challenges, docs/gameplay-visual-updates-20261027.md section 3); logged as "enroll: ..." */
+    bool enroll;
     /* PKMN_TEST_STRONG=1: the party at level 100 and healed, once, when the field is up */
     bool strong, strengthened;
     /* PKMN_TEST_WARP=GROUP:NUM:WARP[:X:Y]: first warp there, as the debug menu's "Warp to map
@@ -512,6 +517,7 @@ static void Init(void)
     }
     s.fightSeconds = EnvInt("PKMN_TEST_FIGHT", 0);
     s.strong = EnvInt("PKMN_TEST_STRONG", 0) != 0;
+    s.enroll = EnvInt("PKMN_TEST_ENROLL", 0) != 0;
     s.shiny = EnvInt("PKMN_TEST_SHINY", 0) != 0;
     s.mega = EnvInt("PKMN_TEST_MEGA", 0) != 0;
     s.freezeField = EnvInt("PKMN_TEST_FREEZE_FIELD", 0) != 0;
@@ -2066,6 +2072,16 @@ static void StartBattle(void)
     }
     for (u32 i = 0; i < PARTY_SIZE; i++)
         s.partySpecies[i] = GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_SPECIES);
+    if (s.enroll)
+    {
+        u8 grant[60] = {0};
+
+        grant[0] = 1; grant[16] = 2; grant[32] = 3;        /* world, player, grant ids (test values) */
+        grant[48] = 1; grant[52] = 33; grant[56] = 1;      /* serials 1 to 33; flags 1: enroll a save that has none */
+        int status = MultiplayerOwnership_Grant(grant, 1, 1);
+
+        TestLog("Battle env test: enroll: status %d enrolled %d", status, MultiplayerOwnership_IsEnrolled());
+    }
     if (sTurns.active)
     {
         const char *p = sTurns.plan;

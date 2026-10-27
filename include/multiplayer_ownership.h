@@ -13,6 +13,9 @@ void MultiplayerOwnership_InvalidateGrant(void);
 void MultiplayerOwnership_Loaded(void);
 bool32 MultiplayerOwnership_IsEnrolled(void);
 bool32 MultiplayerOwnership_CanSaveParty(void);
+#ifdef PORTABLE
+bool32 MultiplayerOwnership_InFrontierChallenge(void);   // a Frontier or Battle Tent challenge is on
+#endif
 void MultiplayerOwnership_RefreshChecksum(void);
 bool32 MultiplayerOwnership_ValidateSave(const u8 *data, bool32 allowLegacy);
 bool32 MultiplayerOwnership_IsLegacy(const u8 *data);

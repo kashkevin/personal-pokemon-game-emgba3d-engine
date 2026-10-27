@@ -257,7 +257,14 @@ static bool32 FieldReadyWithMenu(bool32 admittedMenu)
         && !gMain.inBattle && !IsNativeLinkSessionActive()
         && gTrainerHillVBlankCounter == NULL && !GetCurrentTrainerHillMapId()
         && !InBattlePyramid() && !GetSafariZoneFlag()
+#ifdef PORTABLE
+        // not during a Frontier or Tent challenge (the paused flag alone is left over from a finished one)
+        && !MultiplayerOwnership_InFrontierChallenge()
+#else
+#line 223 // gba-line
         && !gSaveBlock2Ptr->frontier.challengeStatus && !gSaveBlock2Ptr->frontier.challengePaused
+#endif
+#line 224 // gba-line
         && (!B_FLAG_SKY_BATTLE || !FlagGet(B_FLAG_SKY_BATTLE));
 }
 
