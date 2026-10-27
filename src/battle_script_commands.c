@@ -8290,13 +8290,6 @@ static u32 ComputeCaptureOdds(u32 wildMonBattler, u32 playerBattler)
     }
     if (battleMon->status1 & STATUS1_CAN_MOVE)
         odds = odds * 15 / 10;
-#ifdef PORTABLE
-    // Odds of 0 (a Beast Ball's x0.1 on a catch rate 3 Pokemon at full HP, a catch rate of 1) would divide by zero in
-    // ComputeBallShakeOdds: at least 1, as the Gen 4-6 formula keeps it (the 2026-10-27 item audit)
-    if (odds == 0)
-        odds = 1;
-#endif
-#line 8122 // gba-line
 
     return odds;
 }
@@ -8353,7 +8346,16 @@ bool32 MPTest_CriticalCapture(u32 odds)
 
 static u32 ComputeBallShakeOdds(u32 odds)
 {
+#ifdef PORTABLE
+    // Odds of 0 (a catch rate of 1, a Beast Ball's x0.1 on a catch rate 3 Pokemon at full HP) divide by zero. The GBA's
+    // division gives 0xFFFFFFFF, which the PC got only from its fault handler (fault_compat.c): written out, the same
+    // result without the undefined division (the 2026-10-27 item audit)
+    odds = Sqrt(Sqrt(odds == 0 ? 0xFFFFFFFF : 16711680 / odds));
+#else
+#line 8169 // gba-line
     odds = Sqrt(Sqrt(16711680 / odds));
+#endif
+#line 8170 // gba-line
     odds = 1048560 / odds;
     return odds;
 }

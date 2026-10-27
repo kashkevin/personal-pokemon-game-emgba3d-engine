@@ -674,7 +674,8 @@ static void SetBattle(enum Species wild, u32 wildLevel, u32 wildGender, enum Spe
     gBattleTypeFlags = 0;     // a wild battle
 }
 
-// The odds the rule gives: the game's integer steps with this multiplier / divider and flat bonus (catch rate at least 1)
+// The odds the rule gives: the game's integer steps with this multiplier / divider and flat bonus (catch rate at least 1;
+// the odds themselves can be 0)
 static u32 RuleOdds(u32 multiplier, u32 divider, s32 flatBonus)
 {
     struct BattlePokemon *mon = &gBattleMons[WILD];
@@ -689,7 +690,7 @@ static u32 RuleOdds(u32 multiplier, u32 divider, s32 flatBonus)
         odds = odds * 25 / 10;
     if (mon->status1 & STATUS1_CAN_MOVE)
         odds = odds * 15 / 10;
-    return odds == 0 ? 1 : odds;    // at least 1 (Gen 4-6; 0 would divide by zero in the shake check)
+    return odds;
 }
 
 static void ExpectBall(const char *what, u32 ball, u32 multiplier, u32 divider, s32 flatBonus)
@@ -709,8 +710,6 @@ static double CatchChance(u32 odds)
 
     if (odds == SURE_CATCH || odds > 254)
         return 1.0;
-    if (odds == 0)
-        return 0.0;
     shake = MPTest_BallShakeOdds(odds) / 65536.0;
     return shake * shake * shake;
 }
@@ -835,7 +834,7 @@ int NativeSelfTest_Balls(void)
     ExpectBall("Heavy Ball, Steelix 400 kg: +30", ITEM_HEAVY_BALL, 100, 100, 30);
     SetBattle(SPECIES_SNORLAX, 20, MON_MALE, SPECIES_TREECKO, 50, MON_MALE);
     ExpectBall("Heavy Ball, Snorlax 460 kg: +40", ITEM_HEAVY_BALL, 100, 100, 40);
-    // a light Pokemon whose catch rate is under 21: the rule's minimum of 1, never a sure catch
+    // a light Pokemon whose catch rate is under 21: the rule's minimum of 1 (odds 0 at any HP), never a sure catch
     SetBattle(SPECIES_LATIAS, 40, MON_FEMALE, SPECIES_TREECKO, 50, MON_MALE);
     ExpectBall("Heavy Ball, Latias 40 kg (catch rate 3): catch rate 1, not a sure catch", ITEM_HEAVY_BALL, 100, 100, -20);
     SetBattle(SPECIES_JIRACHI, 40, MON_GENDERLESS, SPECIES_TREECKO, 50, MON_MALE);
@@ -845,12 +844,15 @@ int NativeSelfTest_Balls(void)
     gBattleMons[WILD].hp = 1;
     ExpectBall("Heavy Ball, Uxie at 1 HP: catch rate 1, odds still small", ITEM_HEAVY_BALL, 100, 100, -20);
     gBattleMons[WILD].hp = gBattleMons[WILD].maxHP;
-    // the Beast Ball (Gen 7) on a Pokemon that is not an Ultra Beast: x410/4096, and odds of at least 1 (a catch rate 3
-    // Pokemon at full HP made 0, and the shake check divided by it)
+    // the Beast Ball (Gen 7) on a Pokemon that is not an Ultra Beast: x410/4096 (a catch rate 3 Pokemon: odds 0)
     SetBattle(SPECIES_LATIAS, 40, MON_FEMALE, SPECIES_TREECKO, 50, MON_MALE);
-    ExpectBall("Beast Ball on Latias (not an Ultra Beast): x0.1, odds at least 1", ITEM_BEAST_BALL, 410, 4096, 0);
-    Expect("a throw at the lowest odds (1) shakes with a chance above 0 (no division by zero)",
-           MPTest_BallShakeOdds(1) > 0 && CatchChance(1) > 0.0 && CatchChance(1) < 0.02);
+    ExpectBall("Beast Ball on Latias (not an Ultra Beast): x0.1", ITEM_BEAST_BALL, 410, 4096, 0);
+    // odds of 0 divide by zero in the shake check: the GBA's division gives 0xFFFFFFFF, so one shake holds with
+    // 1048560 / Sqrt(Sqrt(0xFFFFFFFF)) = 1048560 / 255 = 4112 out of 65536, the same as before the division was written out
+    Expect("a throw at odds 0: the shake chance the GBA's division gives (4112 / 65536)", MPTest_BallShakeOdds(0) == 4112);
+    Expect("a throw at odds 1: 1048560 / Sqrt(Sqrt(16711680)) = 16643 / 65536 a shake",
+           MPTest_BallShakeOdds(1) == 16643 && CatchChance(1) > CatchChance(0));
+    printf("     a throw at odds 0 catches %.3f%%, at odds 1 %.2f%%\n", 100.0 * CatchChance(0), 100.0 * CatchChance(1));
 
     // What a throw's odds mean: the chance it catches, for a catch rate 45 Pokemon at full HP and at 1 HP
     {
