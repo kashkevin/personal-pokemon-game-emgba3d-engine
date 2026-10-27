@@ -917,6 +917,13 @@ static void UpdateHitPitch(void)
 
 static void VBlankCB_BerryBlender(void)
 {
+#ifdef PORTABLE
+    // the screen was freed (a session ended) and the next screen has not set its own interrupt yet: as in
+    // CB2_CheckPlayAgainLink
+    if (sBerryBlender == NULL)
+        return;
+#endif
+#line 920 // gba-line
     SetBgPos();
     SetBgAffine(2, sBerryBlender->bgAffineSrc.texX, sBerryBlender->bgAffineSrc.texY,
                 sBerryBlender->bgAffineSrc.scrX, sBerryBlender->bgAffineSrc.scrY,
@@ -2909,6 +2916,15 @@ static void CB2_CheckPlayAgainLink(void)
         break;
     }
 
+#ifdef PORTABLE
+    // The blender's screen was just freed (the session ended, or blends again from the start): its sprites'
+    // callbacks (the players' arrows) read sBerryBlender in AnimateSprites below, which closed the PC game at the end
+    // of every blending session (the owner's request of 2026-10-27: every building minigame playable). The next
+    // screen starts on the next frame; the screen is black.
+    if (sBerryBlender == NULL)
+        return;
+#endif
+#line 2912 // gba-line
     ProcessLinkPlayerCmds();
     Blender_DummiedOutFunc(sBerryBlender->bg_X, sBerryBlender->bg_Y);
     RunTasks();
@@ -2964,6 +2980,12 @@ static void CB2_CheckPlayAgainLocal(void)
         break;
     }
 
+#ifdef PORTABLE
+    // the screen was just freed: as in CB2_CheckPlayAgainLink
+    if (sBerryBlender == NULL)
+        return;
+#endif
+#line 2967 // gba-line
     ProcessLinkPlayerCmds();
     Blender_DummiedOutFunc(sBerryBlender->bg_X, sBerryBlender->bg_Y);
     RunTasks();
