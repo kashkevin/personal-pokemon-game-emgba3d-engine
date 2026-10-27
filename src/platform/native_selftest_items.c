@@ -1607,7 +1607,7 @@ int NativeSelfTest_BagItems(void)
 // the effort values a Pokemon gains for a defeated Pokemon (MonGainEVs, what a battle calls for each Pokemon that gains
 // experience) with a Macho Brace, each Power item and Pokerus, against this build's rules (Gen 6: a Power item adds 4
 // to its stat, I_POWER_ITEM_BOOST below Gen 7; the Macho Brace and Pokerus double; 252 in a stat, 510 in all). The
-// Pokemon defeated is a Zigzagoon, which yields 1 Speed effort value.
+// Pokemon defeated is a Zigzagoon, which yields 1 Speed effort value. And the Soothe Bell's friendship (AdjustFriendship).
 
 static void ExpectGain(const char *what, u16 held, u8 pokerus, u32 stat, u8 start, u16 others, const u8 *want)
 {
@@ -1666,6 +1666,35 @@ int NativeSelfTest_HeldItems(void)
     ExpectGain("Power Anklet at 250 Speed: to 252", ITEM_POWER_ANKLET, 0, STAT_SPEED, 250, 0, (const u8[]){0, 0, 0, 252, 0, 0});
     ExpectGain("Power Anklet with 509 in all: 1 more (510)", ITEM_POWER_ANKLET, 0, STAT_SPEED, 0, 509, (const u8[]){252, 252, 5, 1, 0, 0});
     ExpectGain("Macho Brace with 510 in all: none", ITEM_MACHO_BRACE, 0, STAT_SPEED, 0, 510, (const u8[]){252, 252, 6, 0, 0, 0});
+
+    // Soothe Bell: a friendship gain half again, rounded down (Gen 4+), a loss as it is (AdjustFriendship, what a level
+    // up and a fainting call); a Pokemon met elsewhere than here, so no met-here bonus (MS-150)
+    {
+        static const struct { u8 start; u8 event; u8 plain; u8 bell; const char *what; } sBell[] = {
+            {50, FRIENDSHIP_EVENT_GROW_LEVEL, 55, 57, "a level up under 100: +5, with a Soothe Bell +7"},
+            {150, FRIENDSHIP_EVENT_GROW_LEVEL, 153, 154, "a level up at 100-199: +3, with a Soothe Bell +4"},
+            {250, FRIENDSHIP_EVENT_GROW_LEVEL, 252, 253, "a level up at 200 and over: +2, with a Soothe Bell +3"},
+            {150, FRIENDSHIP_EVENT_FAINT_SMALL, 149, 149, "fainting: -1, with a Soothe Bell still -1"},
+        };
+        char line[200];
+
+        for (i = 0; i < ARRAY_COUNT(sBell); i++)
+        {
+            u16 bell = ITEM_SOOTHE_BELL;
+            struct Pokemon *mon = BagMon(BAG_SPECIES, 50, MON_MALE, sBell[i].start);
+            u8 plain, withBell;
+
+            AdjustFriendship(mon, sBell[i].event);
+            plain = GetMonData(mon, MON_DATA_FRIENDSHIP);
+            mon = BagMon(BAG_SPECIES, 50, MON_MALE, sBell[i].start);
+            SetMonData(mon, MON_DATA_HELD_ITEM, &bell);
+            AdjustFriendship(mon, sBell[i].event);
+            withBell = GetMonData(mon, MON_DATA_FRIENDSHIP);
+            snprintf(line, sizeof(line), "Soothe Bell, %s: friendship %u -> %u, with it %u", sBell[i].what, sBell[i].start,
+                     plain, withBell);
+            Expect(line, plain == sBell[i].plain && withBell == sBell[i].bell);
+        }
+    }
 
     printf("selftest-held-items: %d checks, %d failed\n", sChecks, sFailures);
     return sFailures == 0 ? 0 : 1;

@@ -352,3 +352,51 @@ SINGLE_BATTLE_TEST("Bright Powder lowers the accuracy of moves against its holde
         STATUS_ICON(opponent, sleep: TRUE);
     }
 }
+
+SINGLE_BATTLE_TEST("Amulet Coin and Luck Incense double a trainer battle's prize money when the player's Pokemon holds one")
+{
+    enum Item item = ITEM_NONE;
+
+    PARAMETRIZE { item = ITEM_NONE; }
+    PARAMETRIZE { item = ITEM_AMULET_COIN; }
+    PARAMETRIZE { item = ITEM_LUCK_INCENSE; }
+
+    GIVEN {
+        if (item != ITEM_NONE)
+            ASSUME(GetItemHoldEffect(item) == HOLD_EFFECT_DOUBLE_PRIZE);
+        PLAYER(SPECIES_WOBBUFFET) { Item(item); }
+        OPPONENT(SPECIES_WOBBUFFET);
+    } WHEN {
+        TURN { MOVE(player, MOVE_CELEBRATE); }
+    } THEN {
+        EXPECT_EQ((u32)gBattleStruct->moneyMultiplier, item == ITEM_NONE ? 1u : 2u);
+    }
+}
+
+DOUBLE_BATTLE_TEST("Amulet Coin doubles the prize money once, however many hold one, and not for the opponent's")
+{
+    GIVEN {
+        ASSUME(GetItemHoldEffect(ITEM_AMULET_COIN) == HOLD_EFFECT_DOUBLE_PRIZE);
+        PLAYER(SPECIES_WOBBUFFET) { Item(ITEM_AMULET_COIN); }
+        PLAYER(SPECIES_WYNAUT) { Item(ITEM_AMULET_COIN); }
+        OPPONENT(SPECIES_WOBBUFFET) { Item(ITEM_AMULET_COIN); }
+        OPPONENT(SPECIES_WYNAUT);
+    } WHEN {
+        TURN { MOVE(playerLeft, MOVE_CELEBRATE); }
+    } THEN {
+        EXPECT_EQ((u32)gBattleStruct->moneyMultiplier, 2u);
+    }
+}
+
+SINGLE_BATTLE_TEST("An opponent's Amulet Coin does not double the player's prize money")
+{
+    GIVEN {
+        ASSUME(GetItemHoldEffect(ITEM_AMULET_COIN) == HOLD_EFFECT_DOUBLE_PRIZE);
+        PLAYER(SPECIES_WOBBUFFET);
+        OPPONENT(SPECIES_WOBBUFFET) { Item(ITEM_AMULET_COIN); }
+    } WHEN {
+        TURN { MOVE(player, MOVE_CELEBRATE); }
+    } THEN {
+        EXPECT_EQ((u32)gBattleStruct->moneyMultiplier, 1u);
+    }
+}
