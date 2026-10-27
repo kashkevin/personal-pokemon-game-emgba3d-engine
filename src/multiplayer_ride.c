@@ -60,6 +60,11 @@ struct RiderLift
     u8 spriteId;
     s16 clean;   // y2 as the movement code left it
     s16 written; // y2 after the lift was applied
+#ifdef PORTABLE
+    s16 cleanX;   // x2 likewise (the seat's sideways place, MultiplayerRide_GetSeat)
+    s16 writtenX;
+#endif
+#line 63 // gba-line
 };
 
 static EWRAM_DATA struct RideState sRide = {0};
@@ -67,12 +72,21 @@ static EWRAM_DATA struct RiderLift sLift[OBJECT_EVENTS_COUNT] = {0};
 
 static void Task_RideTransition(u8 taskId);
 static bool32 SpritesAvailable(u32 needed);
+#ifdef PORTABLE
+static u8 SeatLift(u16 mountGraphicsId);
+static void ResetSeatState(void);
+#endif
+#line 70 // gba-line
 
 void MultiplayerRide_Init(void)
 {
     memset(&sRide, 0, sizeof(sRide));
     memset(sLift, 0, sizeof(sLift));
     sRide.mountObjectId = OBJECT_EVENTS_COUNT;
+#ifdef PORTABLE
+    ResetSeatState();
+#endif
+#line 76 // gba-line
 }
 
 bool32 MultiplayerRide_IsSpeciesRideable(u16 species)
@@ -172,6 +186,11 @@ bool32 MultiplayerRide_CanMount(void)
 
 u8 MultiplayerRide_GetLiftForMount(u16 mountGraphicsId)
 {
+#ifdef PORTABLE
+    if (mountGraphicsId != 0)
+        return SeatLift(mountGraphicsId);
+#endif
+#line 175 // gba-line
     const struct ObjectEventGraphicsInfo *info = GetObjectEventGraphicsInfo(mountGraphicsId);
     if (info == NULL)
         return 0;
@@ -187,6 +206,235 @@ static u16 WalkerGraphicsId(void)
 {
     return GetPlayerAvatarGraphicsIdByStateId(PLAYER_AVATAR_STATE_NORMAL);
 }
+#ifdef PORTABLE
+
+// ---------------------------------------------------------------------------
+// The seat (the owner's request of 2026-10-27: riders floated over some mounts and sank into others; every mount had one
+// lift, 7 px, as their pictures are all 32x32).
+//
+// Where a rider sits is read from the mount's own picture, once per mount and rider picture: in the side picture (it
+// faces west: head on the left) the columns 45-75 % of the body's width from the head are the back; their median top row
+// is the seat (a mane, a fin or a gap moves it little). Every object's picture stands on its tile's bottom, so the seat is
+// (height - 1 - top) px above the ground line; the rider's picture (the surfing pose: a seated trainer) has its lowest
+// body pixel some px above its own bottom; the rider sits MP_RIDE_SEAT_SINK px into the back. The height is the same for
+// every facing (a back is as high seen from the front); seen from the side the rider also sits over the back, not over
+// the middle. A picture that cannot be read keeps the old lift.
+#define MP_RIDE_SEAT_SINK   3
+#define MP_RIDE_SEAT_MAX_PERCENT 68   // of the side picture's drawn height
+#define MP_RIDE_LIFT_MAX    30
+#define MP_RIDE_SEAT_SLOTS  8
+
+struct MPRideSeat
+{
+    u16 mountGraphicsId;
+    u16 riderGraphicsId;
+    u8 lift;
+    s8 shiftWest;   // px the rider sits right of the mount's middle, facing west (its back: toward the tail)
+    s8 shiftEast;
+};
+
+static EWRAM_DATA struct MPRideSeat sSeats[MP_RIDE_SEAT_SLOTS] = {0};
+static EWRAM_DATA u8 sSeatNext = 0;
+static EWRAM_DATA u8 sRamp = MP_RIDE_RAMP_FRAMES;   // frames since the local rider's lift started growing
+static EWRAM_DATA u8 sDismountLift = 0;             // the lift still shown while the local rider hops off
+static EWRAM_DATA u8 sDismountFrames = 0;
+static EWRAM_DATA s8 sDismountShift = 0;
+
+static void ResetSeatState(void)
+{
+    sRamp = MP_RIDE_RAMP_FRAMES;
+    sDismountFrames = 0;
+}
+
+// The picture an object shows standing still facing `anim` (ANIM_STD_FACE_*): its frame and whether it is mirrored, as its
+// own animation table says (a Pokemon's overworld picture uses frames 0, 2, 4 and a mirrored 4 or its own 6; a trainer's 0,
+// 1, 2 and a mirrored 2).
+static bool32 FacePicture(const struct ObjectEventGraphicsInfo *info, u32 anim, u32 *frame, bool32 *hFlip)
+{
+    const union AnimCmd *cmd;
+
+    if (info == NULL || info->compressed || info->images == NULL || info->anims == NULL
+     || info->width < 8 || info->height < 8 || info->width > 64 || info->height > 64
+     || (info->width % 8) != 0 || (info->height % 8) != 0
+     || (cmd = info->anims[anim]) == NULL || cmd->type < 0)
+        return FALSE;
+    *frame = cmd->frame.imageValue;
+    *hFlip = cmd->frame.hFlip;
+    if (info->images[0].relativeFrames)   // one sheet: frame n is n frames after the first (a Pokemon's overworld picture)
+        return info->images[0].data != NULL && info->images[0].size >= info->width * info->height / 2 && *frame < 16;
+    return info->images[*frame].data != NULL && info->images[*frame].size >= info->width * info->height / 2;
+}
+
+static const u8 *FrameTiles(const struct ObjectEventGraphicsInfo *info, u32 frame)
+{
+    if (info->images[0].relativeFrames)
+        return (const u8 *)info->images[0].data + frame * info->images[0].size;
+    return info->images[frame].data;
+}
+
+// Whether that pixel of the picture, as shown (mirrored when hFlip), is drawn
+static bool32 FrameOpaque(const struct ObjectEventGraphicsInfo *info, u32 frame, bool32 hFlip, s32 x, s32 y)
+{
+    const u8 *tiles = FrameTiles(info, frame);
+    s32 sx = hFlip ? info->width - 1 - x : x;
+    u32 tile = (y / 8) * (info->width / 8) + sx / 8;
+    u8 packed = tiles[tile * TILE_SIZE_4BPP + (y & 7) * 4 + (sx & 7) / 2];
+
+    return ((sx & 1) ? packed >> 4 : packed & 0xF) != 0;
+}
+
+// The leftmost and rightmost drawn columns and the lowest drawn row of a shown picture; FALSE if it is empty
+static bool32 PictureBounds(const struct ObjectEventGraphicsInfo *info, u32 frame, bool32 hFlip, s32 *left, s32 *right, s32 *bottom)
+{
+    s32 x, y;
+
+    *left = info->width;
+    *right = *bottom = -1;
+    for (y = 0; y < info->height; y++)
+    {
+        for (x = 0; x < info->width; x++)
+        {
+            if (FrameOpaque(info, frame, hFlip, x, y))
+            {
+                *left = min(*left, x);
+                *right = max(*right, x);
+                *bottom = y;
+            }
+        }
+    }
+    return *bottom >= 0;
+}
+
+// The seat's row among the top rows of the columns start..end of a shown picture: the lower quartile of those tops (a
+// raised wing, a neck, a mane or a fin standing above the back moves it little; the back's dip is where a rider sits)
+static s32 SeatTop(const struct ObjectEventGraphicsInfo *info, u32 frame, bool32 hFlip, s32 start, s32 end)
+{
+    s32 x, y, tops[64], count = 0;
+
+    for (x = start; x <= end && count < 64; x++)
+    {
+        for (y = 0; y < info->height; y++)
+        {
+            if (FrameOpaque(info, frame, hFlip, x, y))
+            {
+                tops[count++] = y;
+                break;
+            }
+        }
+    }
+    if (count == 0)
+        return -1;
+    for (x = 1; x < count; x++)   // insertion sort
+    {
+        s32 top = tops[x];
+
+        for (y = x - 1; y >= 0 && tops[y] > top; y--)
+            tops[y + 1] = tops[y];
+        tops[y + 1] = top;
+    }
+    return tops[count * 3 / 4];
+}
+
+static void ComputeSeat(u16 mountGraphicsId, u16 riderGraphicsId, struct MPRideSeat *seat)
+{
+    const struct ObjectEventGraphicsInfo *mount = GetObjectEventGraphicsInfo(mountGraphicsId);
+    const struct ObjectEventGraphicsInfo *rider = GetObjectEventGraphicsInfo(riderGraphicsId);
+    u32 mountWest, mountEast, riderWest, riderEast;
+    bool32 mountWestFlip, mountEastFlip, riderWestFlip, riderEastFlip;
+    s32 left, right, bottom, riderLeft, riderRight, riderBottom, start, end, top, lift;
+
+    seat->mountGraphicsId = mountGraphicsId;
+    seat->riderGraphicsId = riderGraphicsId;
+    seat->shiftWest = seat->shiftEast = 0;
+    seat->lift = mount == NULL ? 0 : mount->height >= 64 ? 14 : mount->height >= 32 ? 7 : 4;   // the old lift
+    if (!FacePicture(mount, ANIM_STD_FACE_WEST, &mountWest, &mountWestFlip)
+     || !FacePicture(mount, ANIM_STD_FACE_EAST, &mountEast, &mountEastFlip)
+     || !FacePicture(rider, ANIM_STD_FACE_WEST, &riderWest, &riderWestFlip)
+     || !FacePicture(rider, ANIM_STD_FACE_EAST, &riderEast, &riderEastFlip)
+     || !PictureBounds(rider, riderWest, riderWestFlip, &riderLeft, &riderRight, &riderBottom)
+     || !PictureBounds(mount, mountWest, mountWestFlip, &left, &right, &bottom))
+        return;
+    // facing west the head is on the left: the back is 45-75 % of the body's width from it
+    start = left + (right - left) * 45 / 100;
+    end = left + (right - left) * 75 / 100;
+    if ((top = SeatTop(mount, mountWest, mountWestFlip, start, end)) < 0)
+        return;
+    // A seat is never above 68 % of the picture's drawn height: a raised wing, a neck or antlers standing over the
+    // back of a flyer, a bird or a deer (Noivern, Dodrio, Sawsbuck) otherwise lifted the rider onto them.
+    {
+        s32 pictureTop, column = right + 1, highestSeat;
+
+        for (pictureTop = 0; pictureTop < mount->height && column > right; pictureTop++)
+        {
+            for (column = left; column <= right && !FrameOpaque(mount, mountWest, mountWestFlip, column, pictureTop); column++)
+                ;
+        }
+        pictureTop--;   // the first row with a drawn pixel
+        highestSeat = bottom - (bottom - pictureTop) * MP_RIDE_SEAT_MAX_PERCENT / 100;
+        if (top < highestSeat)
+            top = highestSeat;
+    }
+    lift = (mount->height - 1 - top) - MP_RIDE_SEAT_SINK - (rider->height - 1 - riderBottom);
+    seat->lift = lift < 0 ? 0 : lift > MP_RIDE_LIFT_MAX ? MP_RIDE_LIFT_MAX : lift;
+    seat->shiftWest = ((start + end) / 2 - mount->width / 2) - ((riderLeft + riderRight) / 2 - rider->width / 2);
+    // facing east (a mirrored or its own picture) the head is on the right
+    if (PictureBounds(mount, mountEast, mountEastFlip, &left, &right, &bottom)
+     && PictureBounds(rider, riderEast, riderEastFlip, &riderLeft, &riderRight, &riderBottom))
+    {
+        start = right - (right - left) * 75 / 100;
+        end = right - (right - left) * 45 / 100;
+        seat->shiftEast = ((start + end) / 2 - mount->width / 2) - ((riderLeft + riderRight) / 2 - rider->width / 2);
+    }
+}
+
+static const struct MPRideSeat *GetSeat(u16 mountGraphicsId, u16 riderGraphicsId)
+{
+    u32 i;
+
+    for (i = 0; i < MP_RIDE_SEAT_SLOTS; i++)
+    {
+        if (sSeats[i].mountGraphicsId == mountGraphicsId && sSeats[i].riderGraphicsId == riderGraphicsId
+         && mountGraphicsId != 0)
+            return &sSeats[i];
+    }
+    i = sSeatNext++ % MP_RIDE_SEAT_SLOTS;
+    ComputeSeat(mountGraphicsId, riderGraphicsId, &sSeats[i]);
+    return &sSeats[i];
+}
+
+static u8 SeatLift(u16 mountGraphicsId)
+{
+    return GetSeat(mountGraphicsId, RiderGraphicsId())->lift;
+}
+
+// The seat of that rider picture on that mount picture, for a rider facing `facing`: px up, px right.
+void MultiplayerRide_GetSeat(u16 mountGraphicsId, u16 riderGraphicsId, u32 facing, u8 *lift, s8 *shift)
+{
+    const struct MPRideSeat *seat = GetSeat(mountGraphicsId, riderGraphicsId);
+
+    *lift = seat->lift;
+    *shift = facing == DIR_WEST ? seat->shiftWest : facing == DIR_EAST ? seat->shiftEast : 0;
+}
+
+// The rider (the local player on its mount, or another player's avatar on theirs): no shadow of its own (the mount's is
+// the one on the ground), field_effect_helpers.c UpdateShadowFieldEffect.
+bool32 MultiplayerRide_IsRider(const struct ObjectEvent *objectEvent)
+{
+    return MultiplayerRide_GetMountOf(objectEvent) != NULL;
+}
+
+// The mount a rider sits on now (the local player's, or another player's avatar's), NULL for anybody else.
+struct ObjectEvent *MultiplayerRide_GetMountOf(const struct ObjectEvent *objectEvent)
+{
+    u8 lift;
+    struct ObjectEvent *mount = NULL;
+
+    if (objectEvent->isPlayer)
+        return sRide.riding ? GetMount() : NULL;
+    return MultiplayerWorld_GetRemoteRider(objectEvent, &lift, &mount) ? mount : NULL;
+}
+#endif
+#line 190 // gba-line
 
 static void RemoveMount(void)
 {
@@ -257,6 +505,10 @@ static void ForceDismount(bool32 restoreWalker)
     RemoveMount();
     sRide.riding = FALSE;
     sRide.busy = FALSE;
+#ifdef PORTABLE
+    sDismountFrames = 0;
+#endif
+#line 260 // gba-line
     PublishMount();
     if (restoreWalker && player->active && player->graphicsId == RiderGraphicsId() && PlayerOnFoot())
     {
@@ -289,6 +541,11 @@ void MultiplayerRide_BeginObjectUpdate(struct ObjectEvent *objectEvent, struct S
     // somebody else wrote since the last frame is kept as it is.
     if (sLift[id].spriteId == objectEvent->spriteId && sprite->y2 == sLift[id].written)
         sprite->y2 = sLift[id].clean;
+#ifdef PORTABLE
+    if (sLift[id].spriteId == objectEvent->spriteId && sprite->x2 == sLift[id].writtenX)
+        sprite->x2 = sLift[id].cleanX;
+#endif
+#line 292 // gba-line
     sLift[id].active = FALSE;
 }
 
@@ -302,6 +559,73 @@ static bool32 LocalRiderLift(u8 *lift, struct ObjectEvent **mount)
 
 void MultiplayerRide_EndObjectUpdate(struct ObjectEvent *objectEvent, struct Sprite *sprite)
 {
+#ifdef PORTABLE
+    u32 id = objectEvent - gObjectEvents;
+    struct ObjectEvent *mount = NULL;
+    u8 lift = 0;
+    s8 shift = 0;
+    bool32 hoppingOff = FALSE;
+
+    if (id >= OBJECT_EVENTS_COUNT)
+        return;
+    if (sRide.riding && MultiplayerRide_IsMountObject(objectEvent) && GetPlayer()->invisible)
+        sprite->invisible = TRUE;   // gone through a door with its rider: in the same frame (MultiplayerRide_Tick)
+    if (objectEvent->isPlayer && !sRide.riding && sDismountFrames != 0)
+    {
+        // hopping off: the seat's lift shrinks over the hop instead of dropping at once
+        sDismountFrames--;
+        lift = sDismountLift * sDismountFrames / MP_RIDE_RAMP_FRAMES;
+        shift = sDismountShift * sDismountFrames / MP_RIDE_RAMP_FRAMES;
+    }
+    else if (objectEvent->isPlayer)
+    {
+        if (!LocalRiderLift(&lift, &mount))
+            return;
+        MultiplayerRide_GetSeat(mount->graphicsId, objectEvent->graphicsId, objectEvent->facingDirection, &lift, &shift);
+        if (sRamp < MP_RIDE_RAMP_FRAMES)
+        {
+            // hopping on: the lift grows over the hop
+            sRamp++;
+            lift = lift * sRamp / MP_RIDE_RAMP_FRAMES;
+            shift = shift * sRamp / MP_RIDE_RAMP_FRAMES;
+        }
+    }
+    else
+    {
+        // another player: the seat rises after their hop on and comes down over their hop off (multiplayer_world.c)
+        u32 seat = MultiplayerWorld_GetRemoteSeat(objectEvent, &mount);
+
+        if (seat == 0)
+            return;
+        MultiplayerRide_GetSeat(mount->graphicsId, objectEvent->graphicsId, objectEvent->facingDirection, &lift, &shift);
+        lift = lift * seat / MP_RIDE_RAMP_FRAMES;
+        shift = shift * (s32)seat / MP_RIDE_RAMP_FRAMES;
+        hoppingOff = !MultiplayerRide_IsRider(objectEvent);
+    }
+    sLift[id].clean = sprite->y2;
+    sprite->y2 -= lift;
+    sLift[id].written = sprite->y2;
+    sLift[id].cleanX = sprite->x2;
+    sprite->x2 += shift;
+    sLift[id].writtenX = sprite->x2;
+    sLift[id].spriteId = objectEvent->spriteId;
+    sLift[id].active = TRUE;
+    if (mount != NULL && mount->active && mount->spriteId < MAX_SPRITES)
+    {
+        struct Sprite *mountSprite = &gSprites[mount->spriteId];
+
+        mount->fixedPriority = TRUE;
+        // Facing the camera, the rider sits behind the mount's head: the mount is drawn in front. Otherwise the rider is
+        // drawn in front (its back, or its near leg, over the mount), and always while another player hops off (their
+        // Pokemon steps back from under them).
+        if (objectEvent->facingDirection == DIR_SOUTH && !hoppingOff)
+            mountSprite->subpriority = sprite->subpriority > 0 ? sprite->subpriority - 1 : 0;
+        else
+            mountSprite->subpriority = sprite->subpriority < 0xFF ? sprite->subpriority + 1 : 0xFF;
+        mountSprite->oam.priority = sprite->oam.priority;
+    }
+#else
+#line 305 // gba-line
     u32 id = objectEvent - gObjectEvents;
     struct ObjectEvent *mount = NULL;
     u8 lift = 0;
@@ -329,6 +653,8 @@ void MultiplayerRide_EndObjectUpdate(struct ObjectEvent *objectEvent, struct Spr
         mountSprite->subpriority = sprite->subpriority < 0xFF ? sprite->subpriority + 1 : 0xFF;
         mountSprite->oam.priority = sprite->oam.priority;
     }
+#endif
+#line 332 // gba-line
 }
 
 // ---------------------------------------------------------------------------
@@ -409,6 +735,19 @@ static void Task_RideTransition(u8 taskId)
             enum Direction back = GetOppositeDirection(player->facingDirection);
             s16 x = player->currentCoords.x, y = player->currentCoords.y;
 
+#ifdef PORTABLE
+            if (mount != NULL)
+            {
+                u8 lift;
+                s8 shift;
+
+                MultiplayerRide_GetSeat(mount->graphicsId, player->graphicsId, player->facingDirection, &lift, &shift);
+                sDismountLift = lift;
+                sDismountShift = shift;
+                sDismountFrames = MP_RIDE_RAMP_FRAMES;
+            }
+#endif
+#line 412 // gba-line
             sRide.riding = FALSE;
             PublishMount();
             ObjectEventSetGraphicsId(player, WalkerGraphicsId());
@@ -437,6 +776,12 @@ static void Task_RideTransition(u8 taskId)
             return;
         ObjectEventTurn(mount, player->facingDirection);
         sRide.riding = TRUE; // the hop lands on the mount's back
+#ifdef PORTABLE
+        sRamp = 0;
+        sDismountFrames = 0;
+        PublishMount();     // the other players see the hop on as it starts (their copy walks under the rider first)
+#endif
+#line 440 // gba-line
         ObjectEventSetGraphicsId(player, RiderGraphicsId());
         ObjectEventTurn(player, player->facingDirection);
         ObjectEventForceSetHeldMovement(player, GetJumpInPlaceMovementAction(player->facingDirection));
@@ -570,6 +915,47 @@ void MultiplayerRide_Tick(bool32 fieldReady)
     u8 flags;
     u32 personality;
 
+#ifdef PORTABLE
+    // Back on the field after a battle or a warp (rebuilt in the walking look, MultiplayerRide_BeforePlayerRespawn): the
+    // rider's look and its mount come back on the first overworld frame the player is there, while the screen still
+    // fades in, not once the field is calm (that showed the trainer walking on the ground, then popping onto the mount).
+    // Not where riding is not allowed (into a building: the walking look stays, the ride ends once the field is calm).
+    if (sRide.riding && !sRide.busy && !fieldReady && gMain.callback2 == CB2_Overworld && gMapHeader.mapLayout != NULL
+     && gPlayerAvatar.objectEventId < OBJECT_EVENTS_COUNT && gObjectEvents[gPlayerAvatar.objectEventId].active
+     && gObjectEvents[gPlayerAvatar.objectEventId].isPlayer && gObjectEvents[gPlayerAvatar.objectEventId].spriteId < MAX_SPRITES
+     && gSprites[gObjectEvents[gPlayerAvatar.objectEventId].spriteId].inUse && PlayerOnFoot() && MapAllowsRiding())
+    {
+        player = GetPlayer();
+        if (!FlagGet(FLAG_TEMP_HIDE_FOLLOWER))
+            FlagSet(FLAG_TEMP_HIDE_FOLLOWER);
+        if (GetFollowerObject() != NULL)
+            RemoveFollowingPokemon();
+        if (player->graphicsId == WalkerGraphicsId())
+        {
+            ObjectEventSetGraphicsId(player, RiderGraphicsId());
+            ObjectEventTurn(player, player->facingDirection);
+        }
+        if (GetMount() == NULL)
+            SpawnMount(player->currentCoords.x, player->currentCoords.y, player->facingDirection);
+        // A script's steps (a door's step in, a cutscene's moves) are not mirrored as the player's own are: the mount
+        // takes each with its rider, from where the step starts, and hides and shows with it (gone through a door; it
+        // was left standing outside).
+        if ((mount = GetMount()) != NULL)
+        {
+            if (player->heldMovementActive && !player->heldMovementFinished
+             && (player->currentCoords.x != player->previousCoords.x || player->currentCoords.y != player->previousCoords.y)
+             && !(mount->heldMovementActive && !mount->heldMovementFinished && mount->movementActionId == player->movementActionId))
+            {
+                if (mount->currentCoords.x != player->previousCoords.x || mount->currentCoords.y != player->previousCoords.y)
+                    MoveObjectEventToMapCoords(mount, player->previousCoords.x, player->previousCoords.y);
+                ObjectEventForceSetHeldMovement(mount, player->movementActionId);
+            }
+            mount->invisible = player->invisible;
+        }
+        return;
+    }
+#endif
+#line 573 // gba-line
     if (!sRide.riding || sRide.busy || !fieldReady || gPlayerAvatar.objectEventId >= OBJECT_EVENTS_COUNT)
         return;
     player = GetPlayer();

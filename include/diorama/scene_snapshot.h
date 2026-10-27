@@ -256,6 +256,9 @@ struct DioramaObjectSnapshot
     uint8_t oamOrder;
     uint8_t animNum;
     uint8_t animCmdIndex;
+    /* A rider on a mount (multiplayer_ride.c, the 2026-10-27 riding fixes): the mount's local id (0: none). The renderer
+     * draws the rider's card on the mount's: the same pose and step, the seat as an offset along the card. */
+    uint8_t riderMount;
     /* DIORAMA_OBJECT_COMPOSITE: the assembled picture's size (frameGraphics holds it in tiles, as one OAM frame of
      * that size), how far its centre is right of the sprite's, and how far its bottom row is below the feet the
      * object's own height gives (both GBA pixels, flips applied). 0 otherwise. */

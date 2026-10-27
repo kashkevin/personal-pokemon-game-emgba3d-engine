@@ -10418,6 +10418,12 @@ void GroundEffect_JumpOnWater(struct ObjectEvent *objEvent, struct Sprite *sprit
 
 void GroundEffect_JumpLandingDust(struct ObjectEvent *objEvent, struct Sprite *sprite)
 {
+#ifdef PORTABLE
+    // a rider's hop lands on its mount's back, not on the ground: no dust there (the 2026-10-27 riding fixes)
+    if (MultiplayerRide_IsRider(objEvent))
+        return;
+#endif
+#line 10329 // gba-line
     gFieldEffectArguments[0] = objEvent->currentCoords.x;
     gFieldEffectArguments[1] = objEvent->currentCoords.y;
     gFieldEffectArguments[2] = objEvent->previousElevation;

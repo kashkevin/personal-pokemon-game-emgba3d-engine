@@ -184,7 +184,7 @@ static struct
     int fieldLoop;
     /* PKMN_TEST_FIELD_SHOTS=frame,...: pictures <PKMN_TEST_MEGA_SHOT_STEM>-NN (NN 50 on) at those field-key frames
      * (the Classic 2D test build: the GBA frame) */
-    int fieldShots[16], fieldShotCount;
+    int fieldShots[128], fieldShotCount;
     int fieldSeenSpecies, fieldSeenItem, fieldSeenStones, fieldSeenRing;
     /* PKMN_TEST_COINS=<n>: the Game Corner coins as the test starts; with PKMN_TEST_MEGA_LOG the coins and the money
      * logged on the field when they change (a purchase at the Mauville dealer or the Game Corner) */
@@ -470,7 +470,7 @@ static void Init(void)
     value = SDL_getenv("PKMN_TEST_FIELD_LOOP");
     s.fieldLoop = value != NULL && atoi(value) > 0 ? atoi(value) : 0;
     value = SDL_getenv("PKMN_TEST_FIELD_SHOTS");
-    for (const char *p = value; p != NULL && *p != '\0' && s.fieldShotCount < 16; p = strchr(p, ','), p = p ? p + 1 : p)
+    for (const char *p = value; p != NULL && *p != '\0' && s.fieldShotCount < (int)SDL_arraysize(s.fieldShots); p = strchr(p, ','), p = p ? p + 1 : p)
         s.fieldShots[s.fieldShotCount++] = atoi(p);
     s.fieldSeenSpecies = -1;
     s.fieldSeenCoins = s.fieldSeenMoney = -1;

@@ -12,6 +12,10 @@
 #include "sprite.h"
 #include "trig.h"
 #include "wild_encounter_ow.h"
+#ifdef PORTABLE
+#include "multiplayer_ride.h"
+#endif
+#line 15 // gba-line
 #include "constants/event_objects.h"
 #include "constants/field_effects.h"
 #include "constants/rgb.h"
@@ -395,6 +399,12 @@ void UpdateShadowFieldEffect(struct Sprite *sprite)
         sprite->y = linkedSprite->y + sprite->sYOffset;
         #endif
         sprite->invisible = linkedSprite->invisible;
+#ifdef PORTABLE
+        // a rider casts no shadow of its own: its mount's is the one on the ground (the 2026-10-27 riding fixes)
+        if (MultiplayerRide_IsRider(objectEvent))
+            sprite->invisible = TRUE;
+#endif
+#line 398 // gba-line
         if (objectEvent->jumpDone)
         {
             //  Ugly signaling to disable shadows after a jump

@@ -31,6 +31,7 @@
 #include "menu.h"
 #include "metatile_behavior.h"
 #include "multiplayer_rival.h"
+#include "multiplayer_ride.h"
 #include "overworld.h"
 #include "palette.h"
 #include "scanline_effect.h"
@@ -1661,6 +1662,17 @@ static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
         copy->screenY = sprite->y + sprite->y2;
         copy->spriteX2 = sprite->x2;
         copy->spriteY2 = sprite->y2;
+        copy->riderMount = 0;
+        {
+            // a rider: drawn on its mount's card; no shadow of its own (the mount's is the one on the ground)
+            struct ObjectEvent *mount = MultiplayerRide_GetMountOf(object);
+
+            if (mount != NULL && mount->localId != 0)
+            {
+                copy->riderMount = mount->localId;
+                copy->flags &= ~DIORAMA_OBJECT_SHADOW;
+            }
+        }
         copy->width = graphicsInfo != NULL ? graphicsInfo->width : 0;
         copy->height = graphicsInfo != NULL ? graphicsInfo->height : 0;
         SetSpritePosToMapCoords(object->currentCoords.x, object->currentCoords.y, &baseX, &baseY);

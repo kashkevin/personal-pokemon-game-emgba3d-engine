@@ -24,7 +24,12 @@ void MultiplayerRide_StartFromMenu(void);
 void MultiplayerRide_MirrorPlayerMovement(u8 movementActionId);
 void MultiplayerRide_BeginObjectUpdate(struct ObjectEvent *objectEvent, struct Sprite *sprite);
 #ifdef PORTABLE
+#define MP_RIDE_RAMP_FRAMES 12   // a seat rises over the hop on and comes down over the hop off: never a pop
 void MultiplayerRide_BeforePlayerRespawn(struct ObjectEvent *player); // the field rebuilds the player: walking look
+// Where that rider picture sits on that mount picture, facing `facing` (read from the mount's picture): px up, px right.
+void MultiplayerRide_GetSeat(u16 mountGraphicsId, u16 riderGraphicsId, u32 facing, u8 *lift, s8 *shift);
+bool32 MultiplayerRide_IsRider(const struct ObjectEvent *objectEvent);   // on a mount now (its own shadow is not drawn)
+struct ObjectEvent *MultiplayerRide_GetMountOf(const struct ObjectEvent *objectEvent);   // that rider's mount, or NULL
 #endif
 void MultiplayerRide_EndObjectUpdate(struct ObjectEvent *objectEvent, struct Sprite *sprite);
 u8 MultiplayerRide_GetLiftForMount(u16 mountGraphicsId);

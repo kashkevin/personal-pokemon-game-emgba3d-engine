@@ -171,6 +171,12 @@ const u8 *MultiplayerWorld_GetPeerAppearance(u32 playerId);
 void MultiplayerWorld_GetPeerMount(u32 playerId, u16 *species, u8 *flags, u8 *state);
 bool32 MultiplayerWorld_IsEventObject(const struct ObjectEvent *objectEvent);
 bool32 MultiplayerWorld_GetRemoteRider(const struct ObjectEvent *avatar, u8 *lift, struct ObjectEvent **mount);
+#ifdef PORTABLE
+// Another player's seat on their Pokemon, 0 to MP_RIDE_RAMP_FRAMES: rising after their hop on (once the Pokemon
+// stands under them), coming down over their hop off; and that Pokemon. 0 for anybody else.
+u32 MultiplayerWorld_GetRemoteSeat(const struct ObjectEvent *avatar, struct ObjectEvent **mount);
+bool32 MultiplayerWorld_IsRemoteSeated(u32 remoteIndex);   // that player sits on their Pokemon now (their look)
+#endif
 
 // Riding (field_player_avatar.c owns the local mount behaviour).
 void MultiplayerWorld_SetLocalMount(u16 species, u8 flags, bool32 riding);

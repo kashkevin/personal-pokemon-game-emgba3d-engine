@@ -56,6 +56,10 @@ struct ObjectRenderItem
     int16_t attachedOffsetY;
     float depthBias;
     bool drawOverPixelObjects;
+    int16_t riderMountItem;     /* a rider: 1 + the item of its mount (0: none); the seat is the attached offset */
+    bool hasUprightOverride;    /* set each frame for a rider: it stands just behind or in front of its mount */
+    bool isMount;               /* carries a rider: shown through what hides it, as its rider is */
+    float uprightZOverride;
 };
 
 static struct SpriteTextureCacheEntry sTextureCache[SPRITE_TEXTURE_CACHE_SIZE];
@@ -748,6 +752,59 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
         }
         objectItems[i] = nextItemCount - 1;
     }
+    /* Riders (multiplayer_ride.c; the owner's request of 2026-10-27): a rider's card is drawn on its mount's: the same
+     * pose and the same step (no drift between two separately interpolated cards), the seat (the lift up the mount's
+     * back, its sideways place, a hop's arc) as an offset along the card, so it stays on the back whatever the camera's
+     * tilt (the lift drawn as world height sank into the mount as the camera tilted down). */
+    for (i = 0; i < snapshot->objectCount; i++)
+    {
+        const struct DioramaObjectSnapshot *rider = &snapshot->objects[i];
+        const struct DioramaObjectSnapshot *mount = NULL;
+        int riderItem = objectItems[i], mountItem = -1, k;
+        struct ObjectRenderItem *item;
+
+        if (rider->riderMount == 0 || riderItem < 0 || riderItem >= nextItemCount)
+            continue;
+        for (k = 0; k < snapshot->objectCount; k++)
+        {
+            if (k != i && snapshot->objects[k].localId == rider->riderMount && objectItems[k] >= 0
+             && objectItems[k] < nextItemCount && snapshot->objects[k].mapNum == rider->mapNum
+             && snapshot->objects[k].mapGroup == rider->mapGroup)
+            {
+                mount = &snapshot->objects[k];
+                mountItem = objectItems[k];
+                break;
+            }
+        }
+        if (mount == NULL)
+            continue;
+        item = &nextItems[riderItem];
+        item->previousPose = nextItems[mountItem].previousPose;
+        item->currentPose = nextItems[mountItem].currentPose;
+        item->interpolate = nextItems[mountItem].interpolate;
+        item->depthBias = nextItems[mountItem].depthBias;
+        item->drawOverPixelObjects = nextItems[mountItem].drawOverPixelObjects;
+        item->attached = true;
+        item->riderMountItem = mountItem + 1;
+        nextItems[mountItem].isMount = true;
+        /* the rider's feet from the mount's, in GBA pixels (both stand on the same tile: the seat and a hop's arc) */
+        item->attachedOffsetX = rider->screenX - mount->screenX;
+        item->attachedOffsetY = (rider->screenY + rider->height / 2) - (mount->screenY + mount->height / 2);
+        item->previousAttachedOffsetX = item->attachedOffsetX;
+        item->previousAttachedOffsetY = item->attachedOffsetY;
+        if (item->interpolate)
+        {
+            const struct DioramaObjectSnapshot *previousRider = FindPreviousObject(rider);
+            const struct DioramaObjectSnapshot *previousMount = FindPreviousObject(mount);
+
+            if (previousRider != NULL && previousMount != NULL)
+            {
+                item->previousAttachedOffsetX = previousRider->screenX - previousMount->screenX;
+                item->previousAttachedOffsetY = (previousRider->screenY + previousRider->height / 2)
+                                              - (previousMount->screenY + previousMount->height / 2);
+            }
+        }
+    }
     /* The player hidden (gone through a door, a cutscene): the scene is still
      * drawn, only without the player and the surf blob it would carry. */
     if (playerFound
@@ -1153,7 +1210,7 @@ static void DrawBillboard(const struct ObjectRenderItem *item, struct DioramaSpr
         AffineCard(item, pose, pitchSin, pitchCos, vertices);
     glBindTexture(GL_TEXTURE_2D, item->texture);
     dglUniform1f(sDepthBiasLocation, item->depthBias);
-    dglUniform1f(sUprightZLocation, pose.z - ModelPush(pose, halfWidth));
+    dglUniform1f(sUprightZLocation, item->hasUprightOverride ? item->uprightZOverride : pose.z - ModelPush(pose, halfWidth));
     dglUniform3f(sLightProbeLocation, pose.x, pose.groundY + 0.75f, pose.z);
     dglUniform1f(sShadeLocation, DoorDusk(pose));
     UploadAndDraw(vertices);
@@ -1186,7 +1243,9 @@ static bool HasSilhouette(const struct DioramaObjectSnapshot *object)
 {
     return (object->flags & DIORAMA_OBJECT_PLAYER) != 0
         || object->localId == 0xFE /* OBJ_EVENT_ID_FOLLOWER */
-        || (object->localId >= 241 && object->localId < 244);
+        || (object->localId >= 241 && object->localId < 244)
+        || object->localId == 248;  /* the player's mount (multiplayer_ride.h MP_RIDE_LOCAL_ID_MOUNT); another player's
+                                       mount is its follower object, marked when its rider is paired (isMount) */
 }
 
 void DioramaGLObjects_SetScreenFade(float amount)
@@ -1204,6 +1263,7 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
                            float aspectCorrection)
 {
     struct DioramaSpritePose poses[OBJECT_RENDER_ITEM_CAPACITY];
+    struct DioramaSpritePose sortPoses[OBJECT_RENDER_ITEM_CAPACITY];
     uint8_t order[OBJECT_RENDER_ITEM_CAPACITY];
     float pitchSin = sinf(cameraPitch);
     float pitchCos = cosf(cameraPitch);
@@ -1233,6 +1293,27 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
         }
         order[i] = i;
     }
+    /* A rider stands, for its draw order and its depth behind walls, just in front of its mount, or just behind it when
+     * facing the camera (the rider sits behind the mount's head: the mount is drawn over it), as the 2D game draws them */
+    for (i = 0; i < sItemCount; i++)
+    {
+        sortPoses[i] = poses[i];
+        sItems[i].hasUprightOverride = false;
+    }
+    for (i = 0; i < sItemCount; i++)
+    {
+        int mount = sItems[i].riderMountItem - 1;
+
+        if (mount >= 0 && mount < sItemCount)
+        {
+            float step = sItems[i].object.facingDirection == 1 /* DIR_SOUTH */ ? 0.02f : -0.02f;
+
+            sortPoses[i] = poses[mount];
+            sortPoses[i].z += step;
+            sItems[i].hasUprightOverride = true;
+            sItems[i].uprightZOverride = poses[mount].z - ModelPush(poses[mount], sItems[mount].width / 32.0f) + step;
+        }
+    }
     for (i = 1; i < sItemCount; i++)
     {
         uint8_t value = order[i];
@@ -1242,8 +1323,8 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
         {
             const struct ObjectRenderItem *left = &sItems[order[position - 1]];
             const struct ObjectRenderItem *right = &sItems[value];
-            if (DioramaSprite_CompareDepth(&poses[order[position - 1]], left->object.priority,
-                     left->object.subpriority, left->object.oamOrder, &poses[value],
+            if (DioramaSprite_CompareDepth(&sortPoses[order[position - 1]], left->object.priority,
+                     left->object.subpriority, left->object.oamOrder, &sortPoses[value],
                      right->object.priority, right->object.subpriority,
                      right->object.oamOrder, cameraZ, cameraPitch) <= 0)
                 break;
@@ -1345,7 +1426,7 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
         {
             int index = order[i];
 
-            if (HasSilhouette(&sItems[index].object) && DoorDusk(poses[index]) > 0.0f)
+            if ((HasSilhouette(&sItems[index].object) || sItems[index].isMount) && DoorDusk(poses[index]) > 0.0f)
                 DrawBillboard(&sItems[index], poses[index], pitchSin, pitchCos);
         }
         glDepthFunc(GL_LEQUAL);

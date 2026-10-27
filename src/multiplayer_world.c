@@ -97,10 +97,24 @@ struct WorldInbound
 #line 77 // gba-line
 };
 
+#ifdef PORTABLE
+#define MP_WORLD_RIDE_ON_FOOT   0
+#define MP_WORLD_RIDE_RIDING    1
+#define MP_WORLD_RIDE_UNKNOWN   0xFF    // not seen yet (or seen again): drawn as it is, no hop
+#define MP_WORLD_RIDE_GRACE_FRAMES 90   // a hop and the network's delay: that player's own follower is hidden meanwhile
+#endif
+#line 79 // gba-line
 struct RemoteFollower
 {
     u8 objectEventId;
     u16 graphicsId;
+#ifdef PORTABLE
+    // the riding fixes of 2026-10-27: that player's hops on and off their Pokemon, drawn as the local ones
+    u8 rideState;       // MP_WORLD_RIDE_*
+    u8 seatRamp;        // 0 to MP_RIDE_RAMP_FRAMES: how far the rider sits up
+    u8 graceFrames;     // frames the Pokemon stays drawn while that player's own follower is hidden (for a hop)
+#endif
+#line 83 // gba-line
 };
 
 static EWRAM_DATA struct WorldInbound sInbound = {0};
@@ -137,7 +151,16 @@ void MultiplayerWorld_Init(void)
     memset(&sInbound, 0, sizeof(sInbound));
     memset(&sLocalMount, 0, sizeof(sLocalMount));
     for (i = 0; i < MP_WORLD_MAX_PEERS; i++)
+#ifdef PORTABLE
+    {
         sFollowers[i].objectEventId = OBJECT_EVENTS_COUNT;
+        sFollowers[i].rideState = MP_WORLD_RIDE_UNKNOWN;
+    }
+#else
+#line 119 // gba-line
+        sFollowers[i].objectEventId = OBJECT_EVENTS_COUNT;
+#endif
+#line 120 // gba-line
     sSeenInboundGeneration = 0;
     sHaveInbound = FALSE;
     sConnected = FALSE;
@@ -371,11 +394,41 @@ bool32 MultiplayerWorld_GetRemoteRider(const struct ObjectEvent *avatar, u8 *lif
     if (peer == NULL || peer->state.mountState != MP_WORLD_MOUNT_RIDING || id >= OBJECT_EVENTS_COUNT
      || !MultiplayerWorld_IsRemoteFollower(&gObjectEvents[id]))
         return FALSE;
+#ifdef PORTABLE
+    // not before its Pokemon stands under it (after the hop on it walks there first)
+    if (sFollowers[i].seatRamp == 0)
+        return FALSE;
+#endif
+#line 342 // gba-line
     *mount = &gObjectEvents[id];
     *lift = MultiplayerRide_GetLiftForMount(gObjectEvents[id].graphicsId);
     return TRUE;
 }
 
+#ifdef PORTABLE
+u32 MultiplayerWorld_GetRemoteSeat(const struct ObjectEvent *avatar, struct ObjectEvent **mount)
+{
+    u32 i, id;
+
+    if (avatar->localId < MULTIPLAYER_LOCAL_ID_BASE || avatar->localId >= MULTIPLAYER_LOCAL_ID_BASE + MP_WORLD_MAX_PEERS
+     || !Multiplayer_IsRemoteObject(avatar))
+        return 0;
+    i = avatar->localId - MULTIPLAYER_LOCAL_ID_BASE;
+    id = sFollowers[i].objectEventId;
+    if (sFollowers[i].seatRamp == 0 || id >= OBJECT_EVENTS_COUNT || !MultiplayerWorld_IsRemoteFollower(&gObjectEvents[id]))
+        return 0;
+    *mount = &gObjectEvents[id];
+    return sFollowers[i].seatRamp;
+}
+
+bool32 MultiplayerWorld_IsRemoteSeated(u32 remoteIndex)
+{
+    return remoteIndex < MP_WORLD_MAX_PEERS && sFollowers[remoteIndex].rideState == MP_WORLD_RIDE_RIDING
+        && sFollowers[remoteIndex].seatRamp > 0;
+}
+
+#endif
+#line 347 // gba-line
 bool32 MultiplayerWorld_IsEventObject(const struct ObjectEvent *objectEvent)
 {
     return sEventObjectId < OBJECT_EVENTS_COUNT && objectEvent == &gObjectEvents[sEventObjectId]
@@ -490,6 +543,118 @@ static void StepToward(struct ObjectEvent *objectEvent, s16 x, s16 y, u8 movemen
         ObjectEventSetHeldMovement(objectEvent, GetWalkNormalMovementAction(direction));
 }
 
+#ifdef PORTABLE
+// The riding fixes of 2026-10-27: another player's hops on and off their Pokemon, drawn as the local ones are. RIDING
+// arrives as their hop on starts (their Pokemon is under them by then): here it walks under them from where it followed,
+// then the seat rises (multiplayer_ride.c draws it). NONE arrives as their hop off starts: the seat comes down and the
+// Pokemon steps back off their tile. Their own follower is hidden through a hop, so the Pokemon stays drawn meanwhile
+// (MP_WORLD_RIDE_GRACE_FRAMES) instead of vanishing and coming back.
+static bool32 IsMoving(const struct ObjectEvent *objectEvent)
+{
+    return objectEvent->heldMovementActive && !objectEvent->heldMovementFinished;
+}
+
+// On its rider's tile with both standing (after a hop off): a step back, away from where the player faces, as the local
+// mount takes, when that tile is free. TRUE when it stepped.
+static bool32 StepOffRiderTile(struct ObjectEvent *follower, struct ObjectEvent *avatar)
+{
+    enum Direction back = GetOppositeDirection(avatar->facingDirection);
+    s16 x = follower->currentCoords.x, y = follower->currentCoords.y;
+
+    if (x != avatar->currentCoords.x || y != avatar->currentCoords.y || IsMoving(follower) || IsMoving(avatar))
+        return FALSE;
+    MoveCoords(back, &x, &y);
+    if (GetCollisionAtCoords(follower, x, y, back) != COLLISION_NONE)
+        return FALSE;
+    ObjectEventClearHeldMovementIfActive(follower);
+    ObjectEventSetHeldMovement(follower, GetWalkNormalMovementAction(back));
+    return TRUE;
+}
+
+// A rider whose Pokemon stands a tile off (it followed them): it walks under them. TRUE when it started.
+static bool32 RideWalkUnder(struct ObjectEvent *follower, struct ObjectEvent *avatar)
+{
+    s16 dx = avatar->currentCoords.x - follower->currentCoords.x;
+    s16 dy = avatar->currentCoords.y - follower->currentCoords.y;
+
+    if (abs(dx) + abs(dy) != 1)
+        return FALSE;
+    ObjectEventClearHeldMovementIfActive(follower);
+    ObjectEventSetHeldMovement(follower, GetWalkNormalMovementAction(dx > 0 ? DIR_EAST : dx < 0 ? DIR_WEST
+                                                                     : dy > 0 ? DIR_SOUTH : DIR_NORTH));
+    return TRUE;
+}
+
+// The seat rises once the Pokemon stands under its rider: their feet on the same pixel, or both still on one tile.
+static void RideSeatRises(u32 i, const struct ObjectEvent *follower, const struct ObjectEvent *avatar)
+{
+    const struct Sprite *mount, *rider;
+    bool32 under;
+
+    if (sFollowers[i].seatRamp >= MP_RIDE_RAMP_FRAMES || follower->spriteId >= MAX_SPRITES || avatar->spriteId >= MAX_SPRITES)
+        return;
+    mount = &gSprites[follower->spriteId];
+    rider = &gSprites[avatar->spriteId];
+    under = mount->x == rider->x && mount->y - mount->centerToCornerVecY == rider->y - rider->centerToCornerVecY;
+    if (!under)
+        under = follower->currentCoords.x == avatar->currentCoords.x && follower->currentCoords.y == avatar->currentCoords.y
+             && !IsMoving(follower) && !IsMoving(avatar);
+    if (under)
+        sFollowers[i].seatRamp++;
+}
+
+// Before the usual update: the mount state's changes (the hops), and the Pokemon kept through a hop while that player's
+// own follower is hidden. TRUE when this frame's update of it is done here.
+static bool32 RideHop(u32 i, const struct MultiplayerWorldPeer *peer, struct ObjectEvent *avatar, bool32 mounted,
+                      u16 species, u8 movementMode)
+{
+    struct RemoteFollower *remote = &sFollowers[i];
+    struct ObjectEvent *follower = NULL;
+    bool32 surfing = movementMode == PLAYER_AVATAR_STATE_SURFING || movementMode == PLAYER_AVATAR_STATE_UNDERWATER;
+    u32 state = mounted ? MP_WORLD_RIDE_RIDING : MP_WORLD_RIDE_ON_FOOT;
+    s16 dx, dy;
+
+    if (remote->rideState != state)
+    {
+        if (remote->rideState == MP_WORLD_RIDE_UNKNOWN)
+            remote->seatRamp = mounted ? MP_RIDE_RAMP_FRAMES : 0;   // first seen: seated already, or on foot
+        else if (mounted)
+            remote->seatRamp = 0;                                    // the hop on: it rises once the Pokemon is under
+        remote->rideState = state;                                   // (the hop off: it comes down from where it is)
+    }
+    if (!mounted && remote->seatRamp > 0)
+        remote->seatRamp--;
+    if (mounted || (!surfing && species != SPECIES_NONE && species < NUM_SPECIES
+                    && (peer->state.followerFlags & MP_WORLD_FOLLOWER_VISIBLE)))
+    {
+        remote->graceFrames = MP_WORLD_RIDE_GRACE_FRAMES;   // drawn: the usual update
+        return FALSE;
+    }
+    if (remote->objectEventId < OBJECT_EVENTS_COUNT && MultiplayerWorld_IsRemoteFollower(&gObjectEvents[remote->objectEventId]))
+        follower = &gObjectEvents[remote->objectEventId];
+    if (surfing || follower == NULL || remote->graceFrames == 0)
+        return FALSE;                                        // the usual update removes it
+    remote->graceFrames--;
+    // kept through the hop: off its rider's tile, then facing them
+    follower->fixedPriority = FALSE;
+    if (ObjectEventClearHeldMovementIfFinished(follower) == TRUE)
+        MoveObjectEventToMapCoords(follower, follower->currentCoords.x, follower->currentCoords.y);
+    if (ObjectEventIsHeldMovementActive(follower) || StepOffRiderTile(follower, avatar))
+        return TRUE;
+    dx = avatar->currentCoords.x - follower->currentCoords.x;
+    dy = avatar->currentCoords.y - follower->currentCoords.y;
+    if (dx != 0 || dy != 0)
+    {
+        enum Direction facing = dx > 0 ? DIR_EAST : dx < 0 ? DIR_WEST : dy > 0 ? DIR_SOUTH : DIR_NORTH;
+
+        if (follower->facingDirection != facing)
+            ObjectEventTurn(follower, facing);
+    }
+    return TRUE;
+}
+
+#endif
+#line 451 // gba-line
 static void UpdateFollower(u32 i)
 {
     const struct MultiplayerWorldPeer *peer;
@@ -505,11 +670,20 @@ static void UpdateFollower(u32 i)
     if (peer == NULL || avatarId >= OBJECT_EVENTS_COUNT || !gObjectEvents[avatarId].active)
     {
         RemoveFollower(i);
+#ifdef PORTABLE
+        sFollowers[i].rideState = MP_WORLD_RIDE_UNKNOWN;   // seen again later: as it is then, no hop drawn
+#endif
+#line 466 // gba-line
         return;
     }
     avatar = &gObjectEvents[avatarId];
     mounted = peer->state.mountState == MP_WORLD_MOUNT_RIDING && peer->state.mountSpecies != SPECIES_NONE;
     species = mounted ? peer->state.mountSpecies : peer->state.followerSpecies;
+#ifdef PORTABLE
+    if (RideHop(i, peer, avatar, mounted, species, movementMode))
+        return;
+#endif
+#line 471 // gba-line
     if (species == SPECIES_NONE || species >= NUM_SPECIES
      || (!mounted && !(peer->state.followerFlags & MP_WORLD_FOLLOWER_VISIBLE))
      || (!mounted && (movementMode == PLAYER_AVATAR_STATE_SURFING || movementMode == PLAYER_AVATAR_STATE_UNDERWATER)))
@@ -581,6 +755,10 @@ static void UpdateFollower(u32 i)
         }
         ObjectEventClearHeldMovementIfActive(follower);
         ObjectEventSetGraphicsId(follower, graphicsId);
+#ifdef PORTABLE
+        ObjectEventTurn(follower, follower->facingDirection);   // its new pictures show at once (multiplayer.c)
+#endif
+#line 542 // gba-line
         sFollowers[i].graphicsId = graphicsId;
     }
     follower->currentElevation = avatar->currentElevation;
@@ -590,6 +768,10 @@ static void UpdateFollower(u32 i)
     if (mounted)
     {
         follower->fixedPriority = TRUE;
+#ifdef PORTABLE
+        RideSeatRises(i, follower, avatar);
+#endif
+#line 551 // gba-line
         // Move in lockstep: start the rider's current step on the mount in the
         // same frame, so neither sprite trails the other.
         if (avatar->heldMovementActive && !avatar->heldMovementFinished)
@@ -597,6 +779,12 @@ static void UpdateFollower(u32 i)
             if (!(follower->heldMovementActive && !follower->heldMovementFinished)
              || follower->movementActionId != avatar->movementActionId)
             {
+#ifdef PORTABLE
+                // from where its rider's step starts (spawned, or walking under, mid-step it would end a tile off)
+                if (follower->currentCoords.x != avatar->previousCoords.x || follower->currentCoords.y != avatar->previousCoords.y)
+                    MoveObjectEventToMapCoords(follower, avatar->previousCoords.x, avatar->previousCoords.y);
+#endif
+#line 558 // gba-line
                 ObjectEventForceSetHeldMovement(follower, avatar->movementActionId);
             }
             return;
@@ -604,6 +792,12 @@ static void UpdateFollower(u32 i)
         ObjectEventClearHeldMovementIfFinished(follower);
         if (!(follower->heldMovementActive && !follower->heldMovementFinished))
         {
+#ifdef PORTABLE
+            // a tile off (it was following): it walks under its rider, as the local mount does
+            if (RideWalkUnder(follower, avatar))
+                return;
+#endif
+#line 565 // gba-line
             if (follower->currentCoords.x != avatar->currentCoords.x || follower->currentCoords.y != avatar->currentCoords.y)
                 MoveObjectEventToMapCoords(follower, avatar->currentCoords.x, avatar->currentCoords.y);
             if (follower->facingDirection != avatar->facingDirection)
@@ -617,6 +811,11 @@ static void UpdateFollower(u32 i)
         MoveObjectEventToMapCoords(follower, follower->currentCoords.x, follower->currentCoords.y);
     if (ObjectEventIsHeldMovementActive(follower))
         return;
+#ifdef PORTABLE
+    if (StepOffRiderTile(follower, avatar))
+        return;
+#endif
+#line 578 // gba-line
     if (targetX != 0x7FFF)
     {
         if (abs(avatar->currentCoords.x - follower->currentCoords.x) + abs(avatar->currentCoords.y - follower->currentCoords.y) > 3)

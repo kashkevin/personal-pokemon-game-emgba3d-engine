@@ -434,7 +434,14 @@ static void UpdateRemote(u32 i)
         // A rider sits like a surfer on the mount drawn beneath (multiplayer_world.c).
         mounted = mountState == MP_WORLD_MOUNT_RIDING && pose->movementMode != PLAYER_AVATAR_STATE_SURFING
                && pose->movementMode != PLAYER_AVATAR_STATE_UNDERWATER;
+#ifdef PORTABLE
+        // the riding fixes of 2026-10-27: the walking look until their Pokemon stands under them (their hop on)
+        if (mounted && MultiplayerWorld_IsRemoteSeated(i))
+#else
+#line 399 // gba-line
         if (mounted)
+#endif
+#line 400 // gba-line
             graphicsId = GetPlayerAvatarGraphicsIdByStateIdAndGender(PLAYER_AVATAR_STATE_SURFING, pose->gender);
         else
             graphicsId = GetPlayerAvatarGraphicsIdByStateIdAndGender(
@@ -483,6 +490,12 @@ static void UpdateRemote(u32 i)
         sRemotes[i].moving = FALSE;
         ObjectEventSetGraphicsId(objectEvent, graphicsId);
         MoveObjectEventToMapCoords(objectEvent, x, y);
+#ifdef PORTABLE
+        // The new pictures show at once: a sprite shows a frame when an animation starts, so without this turn a player
+        // who changed looks standing still (their hop onto their Pokemon) was drawn as nothing until they moved.
+        ObjectEventTurn(objectEvent, objectEvent->facingDirection);
+#endif
+#line 443 // gba-line
     }
     completed = ObjectEventClearHeldMovementIfFinished(objectEvent) == TRUE;
     if (completed)
