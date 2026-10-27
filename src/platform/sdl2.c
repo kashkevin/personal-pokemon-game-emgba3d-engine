@@ -50,6 +50,8 @@
 #include "platform/game_speed.h"
 #include "platform/battle_stat_stages.h"
 #include "multiplayer_battle.h"
+#include "fonts.h"
+#include "constants/characters.h"
 #include "multiplayer_save.h"
 #include "malloc.h"
 #if defined(DIORAMA_BATTLE_ENV_TEST) && !defined(ENABLE_DIORAMA)
@@ -302,6 +304,9 @@ static void PerfLog_Presented(Uint64 start, Uint64 end)
     sPerfWindowStart = end;
 }
 
+#ifndef ENABLE_DIORAMA
+static bool sForceStoppedNotice; // test builds: PKMN_TEST_STOPPED_NOTICE=1 draws MS-125's notice, to check its drawing
+#endif
 #ifdef ENABLE_DIORAMA
 // A live save holds the game for about 34 companion round trips of 2 frames
 // each (a recovery's or a trade's import, about 1024), so its length followed
@@ -910,6 +915,9 @@ int main(int argc, char **argv)
         return 1;
     }
     SDL_SetTextureBlendMode(sdlTexture, SDL_BLENDMODE_NONE);
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+    sForceStoppedNotice = SDL_getenv("PKMN_TEST_STOPPED_NOTICE") != NULL && SDL_atoi(SDL_getenv("PKMN_TEST_STOPPED_NOTICE")) != 0;
+#endif
 #endif
 
     simTime = curGameTime = lastGameTime = SDL_GetPerformanceCounter();
@@ -3379,6 +3387,104 @@ u16 Platform_GetKeyInput(void)
     return keyboard;
 }
 
+#ifndef ENABLE_DIORAMA
+// KNOWN_ISSUES MS-125, the Classic 2D game: a notice drawn over the GBA picture with the game's own font (the 3D game
+// has the PC overlay's notice box). A dark band across the picture's foot, the text wrapped to its width, white with a
+// shadow. Only letters, digits and . , : ! ? are drawn (the notices are written with them).
+static int NoticeCode(char c)
+{
+    if (c >= 'A' && c <= 'Z')
+        return CHAR_A + (c - 'A');
+    if (c >= 'a' && c <= 'z')
+        return CHAR_a + (c - 'a');
+    if (c >= '0' && c <= '9')
+        return CHAR_0 + (c - '0');
+    switch (c)
+    {
+    case '.': return CHAR_PERIOD;
+    case ',': return CHAR_COMMA;
+    case ':': return CHAR_COLON;
+    case '!': return CHAR_EXCL_MARK;
+    case '?': return CHAR_QUESTION_MARK;
+    default:  return CHAR_SPACE;
+    }
+}
+
+static int NoticeWidth(const char *text, int length)
+{
+    int width = 0;
+
+    for (int i = 0; i < length; i++)
+        width += gFontNormalLatinGlyphWidths[NoticeCode(text[i])];
+    return width;
+}
+
+static void DrawNoticeGlyph(uint16_t *pixels, int code, int left, int top)
+{
+    const u16 *glyph = gFontNormalLatinGlyphs + 0x20 * code;
+
+    for (int tile = 0; tile < 4; tile++)
+    {
+        for (int row = 0; row < 8; row++)
+        {
+            u16 bits = glyph[tile * 8 + row];
+
+            for (int px = 0; px < 8; px++)
+            {
+                int value = (bits >> (14 - 2 * px)) & 3;
+                int x = left + (tile & 1) * 8 + px, y = top + (tile >> 1) * 8 + row;
+
+                if (value == 0 || value == 3 || x < 0 || y < 0 || x >= DISPLAY_WIDTH || y >= DISPLAY_HEIGHT)
+                    continue;
+                pixels[y * DISPLAY_WIDTH + x] = value == 1 ? 0x7FFF : 0x2108;   // the ink white, its shadow dark grey
+            }
+        }
+    }
+}
+
+static void DrawGbaNotice(uint16_t *pixels, const char *text)
+{
+    const char *lines[4];
+    int lengths[4], count = 0, top, i;
+    const char *p = text;
+
+    // wrap at spaces to the picture's width less a margin
+    while (*p != '\0' && count < 4)
+    {
+        int length = 0, lastSpace = -1;
+
+        while (p[length] != '\0' && NoticeWidth(p, length + 1) <= DISPLAY_WIDTH - 12)
+        {
+            if (p[length] == ' ')
+                lastSpace = length;
+            length++;
+        }
+        if (p[length] != '\0' && lastSpace > 0)
+            length = lastSpace;
+        lines[count] = p;
+        lengths[count++] = length;
+        p += length;
+        while (*p == ' ')
+            p++;
+    }
+    top = DISPLAY_HEIGHT - 6 - count * 14;
+    for (i = (top - 4) * DISPLAY_WIDTH; i < DISPLAY_WIDTH * DISPLAY_HEIGHT; i++)
+        pixels[i] = (pixels[i] >> 2) & 0x1CE7;   // the band: the picture at a quarter of its brightness
+    for (i = 0; i < count; i++)
+    {
+        int x = (DISPLAY_WIDTH - NoticeWidth(lines[i], lengths[i])) / 2;
+
+        for (int c = 0; c < lengths[i]; c++)
+        {
+            int code = NoticeCode(lines[i][c]);
+
+            DrawNoticeGlyph(pixels, code, x, top + i * 14 - 2);
+            x += gFontNormalLatinGlyphWidths[code];
+        }
+    }
+}
+#endif
+
 void VDraw(SDL_Texture *texture)
 {
     static uint16_t gbaImage[DISPLAY_WIDTH * DISPLAY_HEIGHT];
@@ -3394,6 +3500,12 @@ void VDraw(SDL_Texture *texture)
     // A battle's stat stage tags beside the healthboxes (Classic 2D, and 3D battles that keep the game's healthboxes)
     StatStages_DrawGba(gbaImage);
     DebugScene_Frame(gbaImage);
+#ifndef ENABLE_DIORAMA
+    // KNOWN_ISSUES MS-125: a battle between players that stopped itself waits for the launcher; the Classic 2D game says
+    // so over it, as the 3D game's overlay does (DrawPcOverlay)
+    if (MultiplayerBattle_StoppedForRecovery() || sForceStoppedNotice)
+        DrawGbaNotice(gbaImage, "This battle stopped. In the launcher: Recover battle, or Abandon battle.");
+#endif
 #if defined(DIORAMA_BATTLE_ENV_TEST) && !defined(ENABLE_DIORAMA)
     DioramaBattleEnvTest_Frame2D(gbaImage);   // test builds only: the Classic 2D test build's captures
 #endif
