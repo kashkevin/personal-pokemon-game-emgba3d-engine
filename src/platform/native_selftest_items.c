@@ -1873,3 +1873,99 @@ int NativeSelfTest_EvoItems(void)
     printf("selftest-evo-items: %d checks, %d failed\n", sChecks, sFailures);
     return sFailures == 0 ? 0 : 1;
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// --selftest-ability-items (the full item audit, the Ability Capsule and the Ability Patch): what each does to a Pokemon's
+// ability, by the rules the party menu checks before it sets MON_DATA_ABILITY_NUM (party_menu.c ItemUseCB_AbilityCapsule
+// and Task_AbilityCapsule: the other of a species' two abilities, not where it has one or the Pokemon has its hidden
+// ability; ItemUseCB_AbilityPatch and Task_AbilityPatch: the hidden ability, or from it back to the first, not where the
+// species has none, nor on the PC for an Egg or a switch that changes nothing), against the species' data through
+// GetMonAbility, and kept in the Pokemon's stored data. The rules are the tasks' own conditions copied here (the tasks
+// ask and answer through the party menu's windows); the item leaving the bag is the menu's.
+
+// Task_AbilityCapsule's check and its last step
+static bool32 UseAbilityCapsule(struct Pokemon *mon)
+{
+    enum Species species = GetMonData(mon, MON_DATA_SPECIES);
+    u8 abilityNum = GetMonData(mon, MON_DATA_ABILITY_NUM) ^ 1;
+
+    if (GetSpeciesAbility(species, 0) == GetSpeciesAbility(species, 1) || GetSpeciesAbility(species, 1) == ABILITY_NONE
+     || abilityNum > 1 || species == SPECIES_NONE)
+        return FALSE;
+    SetMonData(mon, MON_DATA_ABILITY_NUM, &abilityNum);
+    return TRUE;
+}
+
+// Task_AbilityPatch's check (with its PC lines) and its last step
+static bool32 UseAbilityPatch(struct Pokemon *mon)
+{
+    enum Species species = GetMonData(mon, MON_DATA_SPECIES);
+    u8 abilityNum = GetMonData(mon, MON_DATA_ABILITY_NUM) == 2 ? 0 : 2;
+
+    if (GetSpeciesAbility(species, abilityNum) == ABILITY_NONE || species == SPECIES_NONE
+     || GetMonData(mon, MON_DATA_IS_EGG) || GetSpeciesAbility(species, abilityNum) == GetMonAbility(mon))
+        return FALSE;
+    SetMonData(mon, MON_DATA_ABILITY_NUM, &abilityNum);
+    return TRUE;
+}
+
+static void ExpectAbility(const char *what, struct Pokemon *mon, bool32 used, bool32 wantUsed, enum Ability want)
+{
+    char line[200];
+    enum Ability ability = GetMonAbility(mon);
+
+    snprintf(line, sizeof(line), "%s: %s, ability %u, slot %u", what, used ? "used" : "no effect", (unsigned)ability,
+             (unsigned)GetMonData(mon, MON_DATA_ABILITY_NUM));
+    Expect(line, used == wantUsed && ability == want);
+}
+
+static struct Pokemon *AbilityMon(enum Species species, u8 abilityNum)
+{
+    struct Pokemon *mon = BagMon(species, 30, MON_MALE, 70);
+
+    SetMonData(mon, MON_DATA_ABILITY_NUM, &abilityNum);
+    return mon;
+}
+
+int NativeSelfTest_AbilityItems(void)
+{
+    struct Pokemon *mon;
+    struct Pokemon stored;
+    bool8 egg = TRUE;
+
+    Setup();
+    UseMap(MAP_ROUTE101);
+    printf("selftest-ability-items: the Ability Capsule's and the Ability Patch's rules against the species' abilities\n");
+    // Geodude: Rock Head, Sturdy, its hidden Sand Veil
+    mon = AbilityMon(SPECIES_GEODUDE, 0);
+    Expect("Geodude, its first ability: Rock Head", GetMonAbility(mon) == ABILITY_ROCK_HEAD);
+    ExpectAbility("Ability Capsule: its second, Sturdy", mon, UseAbilityCapsule(mon), TRUE, ABILITY_STURDY);
+    BoxMonToMon(&mon->box, &stored);
+    Expect("Sturdy kept in its stored data (its box form, as saved)", GetMonAbility(&stored) == ABILITY_STURDY);
+    ExpectAbility("Ability Capsule again: back to Rock Head", mon, UseAbilityCapsule(mon), TRUE, ABILITY_ROCK_HEAD);
+    ExpectAbility("Ability Patch: its hidden Sand Veil", mon, UseAbilityPatch(mon), TRUE, ABILITY_SAND_VEIL);
+    ExpectAbility("Ability Capsule with its hidden ability: no effect", mon, UseAbilityCapsule(mon), FALSE, ABILITY_SAND_VEIL);
+    ExpectAbility("Ability Patch again: back to its first, Rock Head", mon, UseAbilityPatch(mon), TRUE, ABILITY_ROCK_HEAD);
+    // Magnemite: Magnet Pull, Sturdy, its hidden Analytic
+    mon = AbilityMon(SPECIES_MAGNEMITE, 1);
+    ExpectAbility("Magnemite with Sturdy: Ability Capsule, Magnet Pull", mon, UseAbilityCapsule(mon), TRUE, ABILITY_MAGNET_PULL);
+    ExpectAbility("then the Ability Patch: Analytic", mon, UseAbilityPatch(mon), TRUE, ABILITY_ANALYTIC);
+    // One ability and a hidden one: Bulbasaur (Overgrow, Chlorophyll)
+    mon = AbilityMon(SPECIES_BULBASAUR, 0);
+    ExpectAbility("Bulbasaur (one ability): Ability Capsule, no effect", mon, UseAbilityCapsule(mon), FALSE, ABILITY_OVERGROW);
+    ExpectAbility("Bulbasaur: Ability Patch, Chlorophyll", mon, UseAbilityPatch(mon), TRUE, ABILITY_CHLOROPHYLL);
+    // One ability, no hidden one: Unown (Levitate), Shedinja (Wonder Guard)
+    mon = AbilityMon(SPECIES_UNOWN, 0);
+    ExpectAbility("Unown: Ability Capsule, no effect", mon, UseAbilityCapsule(mon), FALSE, ABILITY_LEVITATE);
+    ExpectAbility("Unown (no hidden ability): Ability Patch, no effect", mon, UseAbilityPatch(mon), FALSE, ABILITY_LEVITATE);
+    mon = AbilityMon(SPECIES_SHEDINJA, 0);
+    ExpectAbility("Shedinja: Ability Capsule, no effect", mon, UseAbilityCapsule(mon), FALSE, ABILITY_WONDER_GUARD);
+    ExpectAbility("Shedinja: Ability Patch, no effect", mon, UseAbilityPatch(mon), FALSE, ABILITY_WONDER_GUARD);
+    // An Egg (the PC's rule: no Patch used on it)
+    mon = AbilityMon(SPECIES_GEODUDE, 0);
+    SetMonData(mon, MON_DATA_IS_EGG, &egg);
+    ExpectAbility("a Geodude Egg: Ability Patch, no effect", mon, UseAbilityPatch(mon), FALSE, ABILITY_ROCK_HEAD);
+
+    printf("selftest-ability-items: %d checks, %d failed\n", sChecks, sFailures);
+    return sFailures == 0 ? 0 : 1;
+}
