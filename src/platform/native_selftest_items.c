@@ -1601,3 +1601,72 @@ int NativeSelfTest_BagItems(void)
     printf("selftest-bag-items: %d checks, %d failed\n", sChecks, sFailures);
     return sFailures == 0 ? 0 : 1;
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// --selftest-held-items (the full item audit, the held items whose effect is worked out outside a battle's own scripts):
+// the effort values a Pokemon gains for a defeated Pokemon (MonGainEVs, what a battle calls for each Pokemon that gains
+// experience) with a Macho Brace, each Power item and Pokerus, against this build's rules (Gen 6: a Power item adds 4
+// to its stat, I_POWER_ITEM_BOOST below Gen 7; the Macho Brace and Pokerus double; 252 in a stat, 510 in all). The
+// Pokemon defeated is a Zigzagoon, which yields 1 Speed effort value.
+
+static void ExpectGain(const char *what, u16 held, u8 pokerus, u32 stat, u8 start, u16 others, const u8 *want)
+{
+    struct Pokemon *mon = BagMon(BAG_SPECIES, 50, MON_MALE, 100);
+    u8 got[NUM_STATS];
+    bool32 same = TRUE;
+    u32 i;
+    char line[240];
+
+    SetEVs(mon, stat, start, others);
+    SetMonData(mon, MON_DATA_HELD_ITEM, &held);
+    SetMonData(mon, MON_DATA_POKERUS, &pokerus);
+    MonGainEVs(mon, SPECIES_ZIGZAGOON);
+    for (i = 0; i < NUM_STATS; i++)
+    {
+        got[i] = GetMonData(mon, sEVData[i]);
+        same &= got[i] == want[i];
+    }
+    snprintf(line, sizeof(line), "%s: HP %u, Attack %u, Defense %u, Speed %u, Sp. Atk %u, Sp. Def %u", what, got[0],
+             got[1], got[2], got[3], got[4], got[5]);
+    Expect(line, same);
+}
+
+int NativeSelfTest_HeldItems(void)
+{
+    static const struct { u16 item; const char *name; u8 stat; } sPowerItems[] = {
+        {ITEM_POWER_WEIGHT, "Power Weight", STAT_HP}, {ITEM_POWER_BRACER, "Power Bracer", STAT_ATK},
+        {ITEM_POWER_BELT, "Power Belt", STAT_DEF}, {ITEM_POWER_ANKLET, "Power Anklet", STAT_SPEED},
+        {ITEM_POWER_LENS, "Power Lens", STAT_SPATK}, {ITEM_POWER_BAND, "Power Band", STAT_SPDEF},
+    };
+    const u8 pokerus = 0x11, cured = 0x10;    // strain 1 with a day left; strain 1, cured
+    u32 i;
+
+    Setup();
+    UseMap(MAP_ROUTE101);
+    printf("selftest-held-items: Macho Brace, the Power items and Pokerus through MonGainEVs, Gen 6 rules (a Power item "
+           "+%u)\n", (unsigned)GetItemHoldEffectParam(ITEM_POWER_ANKLET));
+
+    ExpectGain("A defeated Zigzagoon, nothing held: 1 Speed", ITEM_NONE, 0, STAT_SPEED, 0, 0, (const u8[]){0, 0, 0, 1, 0, 0});
+    ExpectGain("Macho Brace: doubled", ITEM_MACHO_BRACE, 0, STAT_SPEED, 0, 0, (const u8[]){0, 0, 0, 2, 0, 0});
+    ExpectGain("Pokerus: doubled", ITEM_NONE, pokerus, STAT_SPEED, 0, 0, (const u8[]){0, 0, 0, 2, 0, 0});
+    ExpectGain("Pokerus, cured: still doubled", ITEM_NONE, cured, STAT_SPEED, 0, 0, (const u8[]){0, 0, 0, 2, 0, 0});
+    ExpectGain("Macho Brace and Pokerus: four times", ITEM_MACHO_BRACE, pokerus, STAT_SPEED, 0, 0, (const u8[]){0, 0, 0, 4, 0, 0});
+    for (i = 0; i < ARRAY_COUNT(sPowerItems); i++)
+    {
+        u8 want[NUM_STATS] = {0, 0, 0, 1, 0, 0};
+        char what[80];
+
+        want[sPowerItems[i].stat] += 4;
+        snprintf(what, sizeof(what), "%s: 4 more in its stat", sPowerItems[i].name);
+        ExpectGain(what, sPowerItems[i].item, 0, STAT_SPEED, 0, 0, want);
+    }
+    ExpectGain("Power Anklet and Pokerus: (1 + 4) x 2", ITEM_POWER_ANKLET, pokerus, STAT_SPEED, 0, 0, (const u8[]){0, 0, 0, 10, 0, 0});
+    ExpectGain("Power Bracer and Pokerus: 4 x 2 Attack, 1 x 2 Speed", ITEM_POWER_BRACER, pokerus, STAT_SPEED, 0, 0, (const u8[]){0, 8, 0, 2, 0, 0});
+    ExpectGain("Speed at 252: no more", ITEM_NONE, 0, STAT_SPEED, 252, 0, (const u8[]){0, 0, 0, 252, 0, 0});
+    ExpectGain("Power Anklet at 250 Speed: to 252", ITEM_POWER_ANKLET, 0, STAT_SPEED, 250, 0, (const u8[]){0, 0, 0, 252, 0, 0});
+    ExpectGain("Power Anklet with 509 in all: 1 more (510)", ITEM_POWER_ANKLET, 0, STAT_SPEED, 0, 509, (const u8[]){252, 252, 5, 1, 0, 0});
+    ExpectGain("Macho Brace with 510 in all: none", ITEM_MACHO_BRACE, 0, STAT_SPEED, 0, 510, (const u8[]){252, 252, 6, 0, 0, 0});
+
+    printf("selftest-held-items: %d checks, %d failed\n", sChecks, sFailures);
+    return sFailures == 0 ? 0 : 1;
+}
