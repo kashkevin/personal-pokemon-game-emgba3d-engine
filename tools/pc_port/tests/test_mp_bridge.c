@@ -14,6 +14,7 @@ static const uint32_t sSizes[MP_REGION_COUNT] = {128, 512, 512, 512, 128, 256, 4
 struct FakeTransport
 {
     bool again;          // the next send says EAGAIN once
+    bool blocked;        // every send says EAGAIN (the companion not reading)
     size_t chunk;        // bytes a send takes at most (0: all of them)
     bool closed;
     bool hangup;         // the next receive sees the companion close (0 bytes)
@@ -45,7 +46,7 @@ static int FakeSend(void *context, const uint8_t *data, size_t length)
     size_t n = sNet.chunk != 0 && length > sNet.chunk ? sNet.chunk : length;
 
     (void)context;
-    if (sNet.again)
+    if (sNet.again || sNet.blocked)
     {
         sNet.again = false;
         return MP_IO_AGAIN;
@@ -514,6 +515,51 @@ MT_TEST(save_command_and_response)
     Feed(frame, n, 200);
     Step(2);
     MT_CHECK(sNet.closed); // multiple outstanding save commands
+}
+
+// 2026-10-26: a save response that came while the reliable queue was full (the companion not reading for a while)
+// stopped the bridge for good ("save control backpressure"), and with it the trade or battle. It now waits in the
+// game's mailbox until the queue drains, then goes out.
+MT_TEST(save_response_waits_for_a_full_queue)
+{
+    struct MpBridgeCaps caps;
+    uint8_t command[240];
+    uint8_t frame[260];
+    uint8_t filler[8] = {0};
+    const uint8_t *payload;
+    uint8_t *s = sMemory[MP_REGION_SAVE];
+    size_t n;
+    int i;
+
+    memset(&caps, 0, sizeof(caps));
+    caps.save = 1;
+    Fresh(&caps);
+    sNet.chunk = 0;
+    Ready(0);
+    SaveReady();
+    Step(10);
+    MakeSaveControl(command, 1);
+    n = FrameOf(frame, 'C', command, sizeof(command));
+    Feed(frame, n, 200);
+    Step(2);
+    MT_EQ(GetU32(s + 24), 2);
+    sNet.blocked = true;
+    for (i = 0; i < MP_BRIDGE_CONTROL_LIMIT; i++)
+        sBridge.controlLength[i] = FrameOf(sBridge.controls[i], 'q', filler, sizeof(filler));
+    sBridge.controlCount = MP_BRIDGE_CONTROL_LIMIT;
+    memcpy(s + 272, command, 240);   // the game answers while the queue is full
+    PutU32(s + 268, 2);
+    Step(30);
+    MT_CHECK(!sNet.closed);
+    MT_EQ(sNet.errors, 0);
+    MT_EQ(SentFrame('R', 0, &payload), -1);
+    sNet.blocked = false;
+    Step(30);
+    MT_EQ(SentFrame('R', 0, &payload), 240);
+    MT_CHECK(memcmp(payload, command, 240) == 0);
+    MT_EQ(SentFrame('q', MP_BRIDGE_CONTROL_LIMIT - 1, &payload), 8);   // the queue's own frames went first
+    MT_CHECK(!sNet.closed);
+    MT_EQ(sNet.errors, 0);
 }
 
 // KNOWN_ISSUES MS-60: QUERY_PARTY (opcode 31) reaches only a game with the party query marker; its answer is the save
@@ -2291,6 +2337,7 @@ int main(void)
     MT_RUN(running_needs_the_animation_capability);
     MT_RUN(crc32_matches_zlib);
     MT_RUN(save_command_and_response);
+    MT_RUN(save_response_waits_for_a_full_queue);
     MT_RUN(save_command_with_bad_crc_refused);
     MT_RUN(save_party_query_needs_its_capability);
     MT_RUN(world_inbound_validated);

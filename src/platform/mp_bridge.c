@@ -1155,6 +1155,11 @@ static void PollSave(struct MpBridge *b)
 
     if (!b->save.pending || !SaveHeaderReady(b))
         return;
+    /* A full reliable queue (the companion has not read for a while) drains first: the response waits in the game's
+     * mailbox, which the game leaves as it is until its next command. Reliable would stop the bridge for good, and
+     * with it the trade or battle (2026-10-26). */
+    if (b->controlCount >= MP_BRIDGE_CONTROL_LIMIT)
+        return;
     generation = R32(b, MP_REGION_SAVE, 268);
     if (generation % 2 != 0 || (b->hasSaveGeneration && generation == b->saveGeneration))
         return;
@@ -1219,6 +1224,8 @@ static void PollBattle(struct MpBridge *b)
 
     if (!b->battle.pending || !BattleHeaderReady(b))
         return;
+    if (b->controlCount >= MP_BRIDGE_CONTROL_LIMIT)
+        return; /* the queue drains first, as PollSave */
     generation = R32(b, MP_REGION_BATTLE, 268);
     if (generation % 2 != 0 || (b->hasBattleGeneration && generation == b->battleGeneration))
         return;

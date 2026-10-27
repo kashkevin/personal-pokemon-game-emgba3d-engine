@@ -50,6 +50,7 @@
 #include "platform/game_speed.h"
 #include "platform/battle_stat_stages.h"
 #include "multiplayer_battle.h"
+#include "multiplayer_save.h"
 #include "malloc.h"
 #if defined(DIORAMA_BATTLE_ENV_TEST) && !defined(ENABLE_DIORAMA)
 #include "diorama/battle_env_test.h"   // the Classic 2D test build
@@ -72,7 +73,6 @@
 #include "native_ui/native_ui.h"
 #endif
 #include "multiplayer_menu.h"
-#include "multiplayer_save.h"
 #endif
 
 extern void (*const gIntrTable[])(void);
@@ -405,6 +405,24 @@ static void SetPhotoMode(bool on)
     SDL_Log("3D view: photo mode %s", on ? "on" : "off");
 }
 #endif
+
+// A pause stops the game's frames, and with them the bridge to the companion (MpBridge_Frame runs at a frame's end):
+// in a link battle or a held trade the other player and the host wait on this game, and a stop long enough ended the
+// battle or the trade for both (2026-10-26, the owner's "battles freeze, stuck waiting"). Ctrl+P, the survey view (F5)
+// and photo mode (F9) are refused then; ending a pause always works.
+static bool LinkOperationActive(void)
+{
+    return MultiplayerBattle_IsActive() || MultiplayerSave_IsHeld();
+}
+
+static void RefusePause(void)
+{
+    SDL_Log("pause refused: a link battle or trade is under way");
+#ifdef ENABLE_DIORAMA
+    SDL_snprintf(sScreenshotNotice, sizeof(sScreenshotNotice), "No pausing during a link battle or trade.");
+    sScreenshotNoticeMs = SDL_GetTicks();
+#endif
+}
 
 // The game's own heap (src/malloc.c: the GBA's size, HEAP_SIZE): how much of it
 // the game uses, sampled at frame boundaries while the game thread is parked,
@@ -2959,7 +2977,9 @@ void ProcessEvents(void)
                     sSoftResetChordFrames = 1;
                 break;
             case SDLK_p:
-                if (event.key.keysym.mod & (KMOD_LCTRL | KMOD_RCTRL))
+                if ((event.key.keysym.mod & (KMOD_LCTRL | KMOD_RCTRL)) && !paused && LinkOperationActive())
+                    RefusePause();
+                else if (event.key.keysym.mod & (KMOD_LCTRL | KMOD_RCTRL))
                 {
                     paused = !paused;
 #ifdef ENABLE_DIORAMA
@@ -2990,7 +3010,9 @@ void ProcessEvents(void)
                     DioramaGL_ToggleEnabled();
                 break;
             case SDLK_F5:
-                if (event.key.repeat == 0)
+                if (event.key.repeat == 0 && !paused && LinkOperationActive())
+                    RefusePause();
+                else if (event.key.repeat == 0)
                 {
                     paused = true;
                     DioramaGL_CycleSurveyView();
@@ -3014,7 +3036,9 @@ void ProcessEvents(void)
                 break;
             case SDLK_F9:
                 // Photo mode: the game stands still and the camera moves freely.
-                if (event.key.repeat == 0 && DioramaGL_LastFrameWas3D())
+                if (event.key.repeat == 0 && !sPhotoMode && LinkOperationActive())
+                    RefusePause();
+                else if (event.key.repeat == 0 && DioramaGL_LastFrameWas3D())
                     SetPhotoMode(!sPhotoMode);
                 break;
             case SDLK_F12:
