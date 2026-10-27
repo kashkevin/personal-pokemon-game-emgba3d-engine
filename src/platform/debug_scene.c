@@ -77,6 +77,9 @@
 
 static struct { unsigned frame; uint16_t keys; } sScript[MAX_KEYS];
 static unsigned sScriptCount;
+// PKMN_DEBUG_KEYS_LOOP=n: the key script again every n game frames from its first entry (the lag checks' hour-long
+// sessions: their script would not fit an environment variable)
+static unsigned sKeysLoop;
 static unsigned sShots[MAX_SHOTS];
 static unsigned sShotCount;
 static unsigned sKeyFrame;
@@ -961,9 +964,15 @@ uint16_t DebugScene_FilterKeys(uint16_t keys)
         ParsePeers(SDL_getenv("PKMN_DEBUG_PEERS_THEN"), &sTest);
         RegionMap_PortableSetTest(&sTest);
     }
-    for (unsigned i = 0; i < sScriptCount; i++)
-        if (sKeyFrame >= sScript[i].frame && sKeyFrame < sScript[i].frame + HOLD_FRAMES)
-            keys |= sScript[i].keys;
+    {
+        unsigned frame = sKeyFrame;
+
+        if (sKeysLoop != 0 && sScriptCount != 0 && frame >= sScript[0].frame)
+            frame = sScript[0].frame + (frame - sScript[0].frame) % sKeysLoop;
+        for (unsigned i = 0; i < sScriptCount; i++)
+            if (frame >= sScript[i].frame && frame < sScript[i].frame + HOLD_FRAMES)
+                keys |= sScript[i].keys;
+    }
     if (sTaps.count != -1 || sTaps.pushed != 0)
         TapsFrame(keys);
     return keys;
@@ -1573,6 +1582,8 @@ void DebugScene_Start(void)
 
     if ((value = SDL_getenv("PKMN_DEBUG_KEYS")) != NULL)
         ParseKeys(value);
+    if ((value = SDL_getenv("PKMN_DEBUG_KEYS_LOOP")) != NULL)
+        sKeysLoop = (unsigned)strtoul(value, NULL, 10);
     if ((value = SDL_getenv("PKMN_DEBUG_SHOTS")) != NULL)
         ParseShots(value);
     if ((value = SDL_getenv("PKMN_DEBUG_STEM")) != NULL)
