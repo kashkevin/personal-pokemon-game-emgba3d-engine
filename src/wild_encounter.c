@@ -1260,6 +1260,12 @@ void MPWild_EncounterRateFactor(u32 *num, u32 *den)
     *num = rate;
     *den = base;
 }
+
+// The item audit (--selftest-rods): the encounter slot a rod's bite picks, a lure's swap included.
+u32 MPWild_TestFishingIndex(u8 rod)
+{
+    return ChooseWildMonIndex_Fishing(rod);
+}
 #endif
 #line 1197 // gba-line
 

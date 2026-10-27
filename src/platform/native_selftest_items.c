@@ -1969,3 +1969,122 @@ int NativeSelfTest_AbilityItems(void)
     printf("selftest-ability-items: %d checks, %d failed\n", sChecks, sFailures);
     return sFailures == 0 ? 0 : 1;
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// --selftest-rods (the full item audit, the Old, Good and Super Rods): a rod's chance of a bite (CalculateFishingBiteOdds,
+// as Fishing_CheckForBite rolls it: the Gen 4+ odds this game is set to, doubled by a lead with Suction Cups or Sticky Hold,
+// not by an Egg), the encounter slot each rod picks and how often (ChooseWildMonIndex_Fishing: the Old Rod slots 0-1 at
+// 70/30, the Good Rod 2-4 at 60/20/20, the Super Rod 5-9 at 40/40/15/4/1; with a lure a fifth of them are swapped end for
+// end), and every map's fishing table (each slot a Pokemon, its levels in order). Casting from the bag and the reeling
+// screen are not part of it.
+
+extern u32 MPFishing_TestBiteOdds(u32 rod);
+extern u32 MPWild_TestFishingIndex(u8 rod);
+
+static void ExpectBiteOdds(const char *who, const u32 *want)
+{
+    static const char *const sRods[] = {"Old Rod", "Good Rod", "Super Rod"};
+    char line[200];
+
+    for (u32 rod = OLD_ROD; rod <= SUPER_ROD; rod++)
+    {
+        u32 odds = MPFishing_TestBiteOdds(rod);
+
+        snprintf(line, sizeof(line), "%s: the %s bites %u%% of the time (rule %u%%)", who, sRods[rod], (unsigned)odds, (unsigned)want[rod]);
+        Expect(line, odds == want[rod]);
+    }
+}
+
+// Each rod's slots from many bites: no slot outside its own, and each of its own at its rate (percent, slot by slot).
+static void ExpectRodSlots(const char *rodName, u8 rod, u32 first, u32 count, const double *percent, bool32 lure)
+{
+    const u32 n = 200000;
+    u32 hits[NUM_FISHING_MONS_ENCOUNTER_SLOTS] = {0}, outside = 0;
+    char line[200];
+
+    VarSet(VAR_REPEL_STEP_COUNT, lure ? (100 | REPEL_LURE_MASK) : 0);
+    for (u32 i = 0; i < n; i++)
+    {
+        u32 slot = MPWild_TestFishingIndex(rod);
+
+        if (slot >= first && slot < first + count)
+            hits[slot]++;
+        else
+            outside++;
+    }
+    VarSet(VAR_REPEL_STEP_COUNT, 0);
+    snprintf(line, sizeof(line), "%s%s: every bite in its slots %u-%u (%u outside)", rodName, lure ? " with a lure" : "",
+             (unsigned)first, (unsigned)(first + count - 1), (unsigned)outside);
+    Expect(line, outside == 0);
+    for (u32 i = 0; i < count; i++)
+    {
+        snprintf(line, sizeof(line), "%s%s, slot %u", rodName, lure ? " with a lure" : "", (unsigned)(first + i));
+        ExpectRate(line, hits[first + i], n, percent[i] / 100.0);
+    }
+}
+
+int NativeSelfTest_Rods(void)
+{
+    static const double sOld[] = {70, 30}, sGood[] = {60, 20, 20}, sSuper[] = {40, 40, 15, 4, 1};
+    // A lure swaps a fifth of the bites end for end: slot i becomes (first + last - i).
+    static const double sOldLure[] = {70 * 0.8 + 30 * 0.2, 30 * 0.8 + 70 * 0.2};
+    static const double sGoodLure[] = {60 * 0.8 + 20 * 0.2, 20, 20 * 0.8 + 60 * 0.2};
+    static const double sSuperLure[] = {40 * 0.8 + 1 * 0.2, 40 * 0.8 + 4 * 0.2, 15, 4 * 0.8 + 40 * 0.2, 1 * 0.8 + 40 * 0.2};
+    static const u32 sPlain[] = {25, 50, 75}, sBoosted[] = {50, 100, 100};
+    u32 maps = 0, tables = 0, badSlots = 0;
+    char line[200];
+    bool8 egg = TRUE;
+
+    Setup();
+    UseMap(MAP_ROUTE119);
+    printf("selftest-rods: the Old, Good and Super Rods: bites, slots, every map's fishing table\n");
+    SetLead(SPECIES_ZIGZAGOON, 20, ABILITY_NONE, NATURE_HARDY, ITEM_NONE);
+    ExpectBiteOdds("a lead without Suction Cups or Sticky Hold", sPlain);
+    Expect("Lileep has Suction Cups", SetLead(SPECIES_LILEEP, 20, ABILITY_SUCTION_CUPS, NATURE_HARDY, ITEM_NONE));
+    ExpectBiteOdds("a Lileep with Suction Cups in the lead", sBoosted);
+    Expect("Gulpin has Sticky Hold", SetLead(SPECIES_GULPIN, 20, ABILITY_STICKY_HOLD, NATURE_HARDY, ITEM_NONE));
+    ExpectBiteOdds("a Gulpin with Sticky Hold in the lead", sBoosted);
+    SetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_IS_EGG, &egg);
+    ExpectBiteOdds("a Gulpin Egg in the lead", sPlain);
+
+    ExpectRodSlots("Old Rod", OLD_ROD, 0, NUM_FISHING_MONS_OLD_ROD_ENCOUNTER_SLOTS, sOld, FALSE);
+    ExpectRodSlots("Good Rod", GOOD_ROD, 2, NUM_FISHING_MONS_GOOD_ROD_ENCOUNTER_SLOTS, sGood, FALSE);
+    ExpectRodSlots("Super Rod", SUPER_ROD, 5, NUM_FISHING_MONS_SUPER_ROD_ENCOUNTER_SLOTS, sSuper, FALSE);
+    ExpectRodSlots("Old Rod", OLD_ROD, 0, NUM_FISHING_MONS_OLD_ROD_ENCOUNTER_SLOTS, sOldLure, TRUE);
+    ExpectRodSlots("Good Rod", GOOD_ROD, 2, NUM_FISHING_MONS_GOOD_ROD_ENCOUNTER_SLOTS, sGoodLure, TRUE);
+    ExpectRodSlots("Super Rod", SUPER_ROD, 5, NUM_FISHING_MONS_SUPER_ROD_ENCOUNTER_SLOTS, sSuperLure, TRUE);
+
+    for (u32 i = 0; gWildMonHeaders[i].mapGroup != MAP_GROUP(MAP_UNDEFINED); i++)
+    {
+        bool32 fishable = FALSE;
+
+        for (u32 time = 0; time < TIMES_OF_DAY_COUNT; time++)
+        {
+            const struct WildPokemonInfo *info = gWildMonHeaders[i].encounterTypes[time].fishingMonsInfo;
+
+            if (info == NULL)
+                continue;
+            fishable = TRUE;
+            tables++;
+            for (u32 slot = 0; slot < NUM_FISHING_MONS_ENCOUNTER_SLOTS; slot++)
+            {
+                const struct WildPokemon *mon = &info->wildPokemon[slot];
+
+                if (mon->species == SPECIES_NONE || mon->species >= NUM_SPECIES || mon->minLevel == 0 || mon->minLevel > mon->maxLevel)
+                {
+                    badSlots++;
+                    printf("     map %u.%u, time %u, slot %u: species %u, levels %u-%u\n", gWildMonHeaders[i].mapGroup,
+                           gWildMonHeaders[i].mapNum, (unsigned)time, (unsigned)slot, (unsigned)mon->species, mon->minLevel, mon->maxLevel);
+                }
+            }
+        }
+        if (fishable)
+            maps++;
+    }
+    snprintf(line, sizeof(line), "every map's fishing table: %u maps, %u tables, every slot a Pokemon with its levels in order (%u bad)",
+             (unsigned)maps, (unsigned)tables, (unsigned)badSlots);
+    Expect(line, maps > 0 && badSlots == 0);
+
+    printf("selftest-rods: %d checks, %d failed\n", sChecks, sFailures);
+    return sFailures == 0 ? 0 : 1;
+}

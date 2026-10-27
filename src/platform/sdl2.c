@@ -244,6 +244,7 @@ extern int NativeSelfTest_HeldItems(void);
 extern int NativeSelfTest_Mints(void);
 extern int NativeSelfTest_EvoItems(void);
 extern int NativeSelfTest_AbilityItems(void);
+extern int NativeSelfTest_Rods(void);
 extern int NativeSelfTest_Ride(const char *sheetPath);
 extern int NativeSelfTest_Carriers(const char *sheetPath);
 extern int NativeSelfTest_FrontierSaves(void);
@@ -1337,6 +1338,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_EvoItems()); // src/platform/native_selftest_items.c (the item audit: trade evolutions)
         else if (strcmp(argv[i], "--selftest-ability-items") == 0)
             exit(NativeSelfTest_AbilityItems()); // src/platform/native_selftest_items.c (the item audit: Ability Capsule, Patch)
+        else if (strcmp(argv[i], "--selftest-rods") == 0)
+            exit(NativeSelfTest_Rods()); // src/platform/native_selftest_items.c (the item audit: the fishing rods)
         else if (strcmp(argv[i], "--selftest-wild-items") == 0)
             exit(NativeSelfTest_WildItems()); // src/platform/native_selftest_items.c (the 2026-10-27 wild item audit)
         else if (strcmp(argv[i], "--selftest-frontier-saves") == 0)

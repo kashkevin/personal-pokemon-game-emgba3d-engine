@@ -652,3 +652,12 @@ bool32 ShouldUseFishingEnvironmentInBattle()
 {
     return (I_FISHING_ENVIRONMENT >= GEN_4 && gIsFishingEncounter);
 }
+
+#ifdef PORTABLE
+// The item audit (--selftest-rods): a rod's chance of a bite in percent, as Fishing_CheckForBite rolls it, with the party
+// lead's Suction Cups or Sticky Hold.
+u32 MPFishing_TestBiteOdds(u32 rod)
+{
+    return CalculateFishingBiteOdds(rod, Fishing_DoesFirstMonInPartyHaveSuctionCupsOrStickyHold());
+}
+#endif
