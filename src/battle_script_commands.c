@@ -8246,8 +8246,18 @@ static u32 ComputeCaptureOdds(u32 wildMonBattler, u32 playerBattler)
         catchRate = GetBattleMonCatchRate(battleMon);
 
     catchRate += ball.flatBonus;
+#ifdef PORTABLE
+    // The Heavy Ball's -20 on a light Pokemon leaves a catch rate of at least 1 (Gen 4-6). The original added the bonus a
+    // second time, so a light Pokemon whose catch rate is under 21 (Latias, Latios, Jirachi, Deoxys, the lake trio...)
+    // got a negative rate, which the unsigned odds below wrapped round to a sure catch (the 2026-10-27 item audit).
+    if (catchRate <= 0)
+        catchRate = 1;
+#else
+#line 8088 // gba-line
     if (catchRate <= 0)
         catchRate = catchRate + ball.flatBonus;
+#endif
+#line 8090 // gba-line
 
     odds = odds * catchRate / (battleMon->maxHP * 3);
     odds = odds * ball.multiplier / ball.divider;
@@ -8280,6 +8290,13 @@ static u32 ComputeCaptureOdds(u32 wildMonBattler, u32 playerBattler)
     }
     if (battleMon->status1 & STATUS1_CAN_MOVE)
         odds = odds * 15 / 10;
+#ifdef PORTABLE
+    // Odds of 0 (a Beast Ball's x0.1 on a catch rate 3 Pokemon at full HP, a catch rate of 1) would divide by zero in
+    // ComputeBallShakeOdds: at least 1, as the Gen 4-6 formula keeps it (the 2026-10-27 item audit)
+    if (odds == 0)
+        odds = 1;
+#endif
+#line 8122 // gba-line
 
     return odds;
 }
@@ -8340,6 +8357,21 @@ static u32 ComputeBallShakeOdds(u32 odds)
     odds = 1048560 / odds;
     return odds;
 }
+#ifdef PORTABLE
+
+// --selftest-balls (the 2026-10-27 item audit): a ball's capture odds and one shake's chance, through the game's own code
+u32 MPTest_CaptureOdds(u32 ballItem, u32 wildBattler, u32 playerBattler)
+{
+    gLastUsedItem = ballItem;
+    return ComputeCaptureOdds(wildBattler, playerBattler);
+}
+
+u32 MPTest_BallShakeOdds(u32 odds)
+{
+    return ComputeBallShakeOdds(odds);
+}
+#endif
+#line 8173 // gba-line
 
 static void SetBallThrowShakes(void)
 {

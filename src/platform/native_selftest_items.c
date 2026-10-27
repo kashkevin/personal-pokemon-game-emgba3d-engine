@@ -620,6 +620,266 @@ static void TestOvalCharm(void)
     ClearBag();
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// --selftest-balls (the owner's request of 2026-10-27, the full item audit: every Poke Ball's capture math). Each ball's
+// capture odds through the game's own ComputeCaptureOdds (battle_script_commands.c MPTest_CaptureOdds), in the
+// situations its rule names, against the Gen 6 rule this build is set to (include/config/battle.h, GEN_LATEST = GEN_6),
+// worked out here with the game's own integer steps: odds = (3 maxHP - 2 HP) x catch rate / (3 maxHP) x multiplier /
+// divider, x 2.5 asleep or frozen, x 1.5 paralysed, burned or poisoned. 255 or more catches at once; below it each of
+// three shakes holds with MPTest_BallShakeOdds(odds) / 65536. Critical captures are left out (none with an empty
+// Pokedex). A Safari Zone battle uses its own catch factor; the Safari Ball's multiplier is checked as a ball's.
+#include "battle_main.h"
+#include "constants/battle.h"
+#include "constants/pokeball.h"
+
+extern u32 MPTest_CaptureOdds(u32 ballItem, u32 wildBattler, u32 playerBattler);
+extern u32 MPTest_BallShakeOdds(u32 odds);
+extern bool8 gIsFishingEncounter, gIsSurfingEncounter;
+
+#define WILD   1
+#define PLAYER 0
+#define SURE_CATCH ((u32)-1)    // battle_script_commands.c CAPTURE_GUARANTEED
+
+// The battle: the player's Pokemon in slot 0 (battler 0), the wild one in the opponent's slot 0 (battler 1), each at
+// `level` with full HP of `maxHP`, a gender, no status; turn 0, no fishing or surfing.
+static void SetBattle(enum Species wild, u32 wildLevel, u32 wildGender, enum Species mine, u32 myLevel, u32 myGender)
+{
+    struct BattlePokemon *mon;
+    u32 i;
+
+    ZeroPlayerPartyMons();
+    ZeroEnemyPartyMons();
+    CreateMon(&gParties[B_TRAINER_PLAYER][0], mine, myLevel, GetMonPersonality(mine, myGender, NATURE_HARDY, 0), OTID_STRUCT_PLAYER_ID);
+    CreateMon(&gParties[B_TRAINER_OPPONENT_A][0], wild, wildLevel, GetMonPersonality(wild, wildGender, NATURE_HARDY, 0), OTID_STRUCT_PLAYER_ID);
+    gPartiesCount[B_TRAINER_PLAYER] = gPartiesCount[B_TRAINER_OPPONENT_A] = 1;
+    memset(gBattleMons, 0, sizeof(gBattleMons));
+    gBattlersCount = 2;
+    gBattlerPositions[PLAYER] = B_POSITION_PLAYER_LEFT;
+    gBattlerPositions[WILD] = B_POSITION_OPPONENT_LEFT;
+    gBattlerPartyIndexes[PLAYER] = gBattlerPartyIndexes[WILD] = 0;
+    for (i = 0; i < 2; i++)
+    {
+        enum Species species = i == WILD ? wild : mine;
+
+        mon = &gBattleMons[i];
+        mon->species = species;
+        mon->level = i == WILD ? wildLevel : myLevel;
+        mon->maxHP = mon->hp = 120;
+        mon->types[0] = gSpeciesInfo[species].types[0];
+        mon->types[1] = gSpeciesInfo[species].types[1];
+        mon->types[2] = TYPE_MYSTERY;
+    }
+    gBattleResults.battleTurnCounter = 0;
+    gIsFishingEncounter = gIsSurfingEncounter = FALSE;
+    gBattleTypeFlags = 0;     // a wild battle
+}
+
+// The odds the rule gives: the game's integer steps with this multiplier / divider and flat bonus (catch rate at least 1)
+static u32 RuleOdds(u32 multiplier, u32 divider, s32 flatBonus)
+{
+    struct BattlePokemon *mon = &gBattleMons[WILD];
+    s32 catchRate = gSpeciesInfo[mon->species].catchRate + flatBonus;
+    u32 odds;
+
+    if (catchRate < 1)
+        catchRate = 1;
+    odds = (mon->maxHP * 3 - mon->hp * 2) * (u32)catchRate / (mon->maxHP * 3);
+    odds = odds * multiplier / divider;
+    if (mon->status1 & STATUS1_INCAPACITATED)
+        odds = odds * 25 / 10;
+    if (mon->status1 & STATUS1_CAN_MOVE)
+        odds = odds * 15 / 10;
+    return odds == 0 ? 1 : odds;    // at least 1 (Gen 4-6; 0 would divide by zero in the shake check)
+}
+
+static void ExpectBall(const char *what, u32 ball, u32 multiplier, u32 divider, s32 flatBonus)
+{
+    u32 got = MPTest_CaptureOdds(ball, WILD, PLAYER), want = RuleOdds(multiplier, divider, flatBonus);
+    char line[200];
+
+    snprintf(line, sizeof(line), "%s: odds %u (rule %u: x%u/%u%s)", what, got, want, multiplier, divider,
+             flatBonus ? ", catch rate changed" : "");
+    Expect(line, got == want);
+}
+
+// The chance a throw catches (no critical capture): 1 at odds 255 or more, else three shakes each holding odds'/65536
+static double CatchChance(u32 odds)
+{
+    double shake;
+
+    if (odds == SURE_CATCH || odds > 254)
+        return 1.0;
+    if (odds == 0)
+        return 0.0;
+    shake = MPTest_BallShakeOdds(odds) / 65536.0;
+    return shake * shake * shake;
+}
+
+int NativeSelfTest_Balls(void)
+{
+    static const struct { u16 ball; const char *name; } sPlainBalls[] = {
+        {ITEM_POKE_BALL, "Poke Ball"}, {ITEM_PREMIER_BALL, "Premier Ball"}, {ITEM_LUXURY_BALL, "Luxury Ball"},
+        {ITEM_HEAL_BALL, "Heal Ball"}, {ITEM_FRIEND_BALL, "Friend Ball"}, {ITEM_CHERISH_BALL, "Cherish Ball"},
+        {ITEM_PARK_BALL, "Park Ball (outside the Pal Park, no effect)"}, {ITEM_DREAM_BALL, "Dream Ball (awake)"},
+    };
+    u32 i;
+
+    Setup();
+    printf("selftest-balls: every Poke Ball's capture odds, Gen 6 rules\n");
+    UseMap(MAP_ROUTE101);
+
+    // A catch rate 45 Pokemon at full HP (Bulbasaur), the player's level 50 Treecko
+    SetBattle(SPECIES_BULBASAUR, 20, MON_MALE, SPECIES_TREECKO, 50, MON_MALE);
+    for (i = 0; i < ARRAY_COUNT(sPlainBalls); i++)
+        ExpectBall(sPlainBalls[i].name, sPlainBalls[i].ball, 100, 100, 0);
+    ExpectBall("Great Ball x1.5", ITEM_GREAT_BALL, 150, 100, 0);
+    ExpectBall("Ultra Ball x2", ITEM_ULTRA_BALL, 200, 100, 0);
+    ExpectBall("Safari Ball x1.5 (Gen 2-7)", ITEM_SAFARI_BALL, 150, 100, 0);
+    ExpectBall("Sport Ball x1.5 (Gen 2-7)", ITEM_SPORT_BALL, 150, 100, 0);
+    Expect("Master Ball: a sure catch", MPTest_CaptureOdds(ITEM_MASTER_BALL, WILD, PLAYER) == SURE_CATCH);
+    gBattleMons[WILD].status1 = STATUS1_SLEEP_TURN(3);
+    ExpectBall("Dream Ball on a sleeping Pokemon: only the sleep bonus (x4 is Gen 8)", ITEM_DREAM_BALL, 100, 100, 0);
+    ExpectBall("asleep: x2.5 for any ball (Poke Ball)", ITEM_POKE_BALL, 100, 100, 0);
+    gBattleMons[WILD].status1 = STATUS1_PARALYSIS;
+    ExpectBall("paralysed: x1.5 for any ball (Great Ball)", ITEM_GREAT_BALL, 150, 100, 0);
+    gBattleMons[WILD].status1 = 0;
+    gBattleMons[WILD].hp = 1;
+    ExpectBall("1 HP left (Ultra Ball)", ITEM_ULTRA_BALL, 200, 100, 0);
+    gBattleMons[WILD].hp = gBattleMons[WILD].maxHP;
+
+    // Net Ball: Water or Bug x3 (x3.5 is Gen 7)
+    SetBattle(SPECIES_MAGIKARP, 20, MON_MALE, SPECIES_TREECKO, 50, MON_MALE);
+    ExpectBall("Net Ball on a Water type x3", ITEM_NET_BALL, 300, 100, 0);
+    SetBattle(SPECIES_CATERPIE, 20, MON_MALE, SPECIES_TREECKO, 50, MON_MALE);
+    ExpectBall("Net Ball on a Bug type x3", ITEM_NET_BALL, 300, 100, 0);
+    SetBattle(SPECIES_BULBASAUR, 20, MON_MALE, SPECIES_TREECKO, 50, MON_MALE);
+    ExpectBall("Net Ball on another type x1", ITEM_NET_BALL, 100, 100, 0);
+
+    // Nest Ball: (41 - level) / 10 below level 30 (Gen 6), else x1
+    SetBattle(SPECIES_BULBASAUR, 5, MON_MALE, SPECIES_TREECKO, 50, MON_MALE);
+    ExpectBall("Nest Ball, level 5: x3.6", ITEM_NEST_BALL, (41 - 5) * 4096 / 10, 4096, 0);
+    SetBattle(SPECIES_BULBASAUR, 29, MON_MALE, SPECIES_TREECKO, 50, MON_MALE);
+    ExpectBall("Nest Ball, level 29: x1.2", ITEM_NEST_BALL, (41 - 29) * 4096 / 10, 4096, 0);
+    SetBattle(SPECIES_BULBASAUR, 30, MON_MALE, SPECIES_TREECKO, 50, MON_MALE);
+    ExpectBall("Nest Ball, level 30: x1", ITEM_NEST_BALL, 100, 100, 0);
+
+    // Dive Ball: x3.5 under the water, surfing or fishing (Gen 4+)
+    SetBattle(SPECIES_BULBASAUR, 20, MON_MALE, SPECIES_TREECKO, 50, MON_MALE);
+    ExpectBall("Dive Ball on land x1", ITEM_DIVE_BALL, 100, 100, 0);
+    gIsSurfingEncounter = TRUE;
+    ExpectBall("Dive Ball, surfing x3.5", ITEM_DIVE_BALL, 350, 100, 0);
+    gIsSurfingEncounter = FALSE;
+    gIsFishingEncounter = TRUE;
+    ExpectBall("Dive Ball, fishing x3.5", ITEM_DIVE_BALL, 350, 100, 0);
+    ExpectBall("Lure Ball, fishing x3 (Gen 6)", ITEM_LURE_BALL, 300, 100, 0);
+    gIsFishingEncounter = FALSE;
+    ExpectBall("Lure Ball, not fishing x1", ITEM_LURE_BALL, 100, 100, 0);
+    UseMap(MAP_UNDERWATER_ROUTE124);
+    ExpectBall("Dive Ball, under the water x3.5", ITEM_DIVE_BALL, 350, 100, 0);
+
+    // Dusk Ball: x3.5 in a cave (and at night: the clock's, not checked here), x1 by day outside
+    UseMap(MAP_GRANITE_CAVE_1F);
+    ExpectBall("Dusk Ball in a cave x3.5 (x3 is Gen 7)", ITEM_DUSK_BALL, 350, 100, 0);
+    UseMap(MAP_ROUTE101);
+
+    // Timer Ball: 1 + 1229/4096 a turn, at most x4 (Gen 5+); Quick Ball x5 on the first turn (Gen 5+)
+    ExpectBall("Timer Ball, turn 0: x1", ITEM_TIMER_BALL, 4096, 4096, 0);
+    gBattleResults.battleTurnCounter = 1;
+    ExpectBall("Timer Ball, turn 1: x1.3", ITEM_TIMER_BALL, 4096 + 1229, 4096, 0);
+    ExpectBall("Quick Ball after the first turn x1", ITEM_QUICK_BALL, 100, 100, 0);
+    gBattleResults.battleTurnCounter = 5;
+    ExpectBall("Timer Ball, turn 5: x2.5", ITEM_TIMER_BALL, 4096 + 5 * 1229, 4096, 0);
+    gBattleResults.battleTurnCounter = 10;
+    ExpectBall("Timer Ball, turn 10: x4 (its cap)", ITEM_TIMER_BALL, 4 * 4096, 4096, 0);
+    gBattleResults.battleTurnCounter = 0;
+    ExpectBall("Quick Ball on the first turn x5", ITEM_QUICK_BALL, 500, 100, 0);
+
+    // Repeat Ball: x3 for a species caught before (x3.5 is Gen 7)
+    ExpectBall("Repeat Ball, never caught x1", ITEM_REPEAT_BALL, 100, 100, 0);
+    GetSetPokedexFlag(SpeciesToNationalPokedexNum(SPECIES_BULBASAUR), FLAG_SET_CAUGHT);
+    ExpectBall("Repeat Ball, caught before x3", ITEM_REPEAT_BALL, 300, 100, 0);
+
+    // Level Ball: x8 at four times the level or more, x4 over twice, x2 over it, else x1
+    SetBattle(SPECIES_BULBASAUR, 10, MON_MALE, SPECIES_TREECKO, 40, MON_MALE);
+    ExpectBall("Level Ball, 40 vs 10: x8", ITEM_LEVEL_BALL, 800, 100, 0);
+    SetBattle(SPECIES_BULBASAUR, 10, MON_MALE, SPECIES_TREECKO, 25, MON_MALE);
+    ExpectBall("Level Ball, 25 vs 10: x4", ITEM_LEVEL_BALL, 400, 100, 0);
+    SetBattle(SPECIES_BULBASAUR, 10, MON_MALE, SPECIES_TREECKO, 15, MON_MALE);
+    ExpectBall("Level Ball, 15 vs 10: x2", ITEM_LEVEL_BALL, 200, 100, 0);
+    SetBattle(SPECIES_BULBASAUR, 10, MON_MALE, SPECIES_TREECKO, 10, MON_MALE);
+    ExpectBall("Level Ball, 10 vs 10: x1", ITEM_LEVEL_BALL, 100, 100, 0);
+
+    // Moon Ball: x4 for a Pokemon that evolves with a Moon Stone; Fast Ball: x4 at base Speed 100 or more
+    SetBattle(SPECIES_NIDORINO, 20, MON_MALE, SPECIES_TREECKO, 50, MON_MALE);
+    ExpectBall("Moon Ball on Nidorino (Moon Stone) x4", ITEM_MOON_BALL, 400, 100, 0);
+    SetBattle(SPECIES_BULBASAUR, 20, MON_MALE, SPECIES_TREECKO, 50, MON_MALE);
+    ExpectBall("Moon Ball on Bulbasaur x1", ITEM_MOON_BALL, 100, 100, 0);
+    ExpectBall("Fast Ball on Bulbasaur (Speed 45) x1", ITEM_FAST_BALL, 100, 100, 0);
+    SetBattle(SPECIES_ELECTRODE, 20, MON_GENDERLESS, SPECIES_TREECKO, 50, MON_MALE);
+    ExpectBall("Fast Ball on Electrode (Speed 150) x4", ITEM_FAST_BALL, 400, 100, 0);
+
+    // Love Ball: x8 for the player's species of the other gender
+    SetBattle(SPECIES_NIDORINO, 20, MON_MALE, SPECIES_NIDORINO, 50, MON_MALE);
+    ExpectBall("Love Ball, the same species and gender x1", ITEM_LOVE_BALL, 100, 100, 0);
+    SetBattle(SPECIES_PIKACHU, 20, MON_FEMALE, SPECIES_PIKACHU, 50, MON_MALE);
+    ExpectBall("Love Ball, the same species, the other gender x8", ITEM_LOVE_BALL, 800, 100, 0);
+    SetBattle(SPECIES_PIKACHU, 20, MON_FEMALE, SPECIES_TREECKO, 50, MON_MALE);
+    ExpectBall("Love Ball, another species x1", ITEM_LOVE_BALL, 100, 100, 0);
+
+    // Heavy Ball: the catch rate -20 under 204.8 kg, +20 to 307.1, +30 to 409.5, +40 from 409.6 (Gen 4-6), at least 1
+    SetBattle(SPECIES_BULBASAUR, 20, MON_MALE, SPECIES_TREECKO, 50, MON_MALE);
+    ExpectBall("Heavy Ball, Bulbasaur 6.9 kg: catch rate -20", ITEM_HEAVY_BALL, 100, 100, -20);
+    SetBattle(SPECIES_GOLEM, 20, MON_MALE, SPECIES_TREECKO, 50, MON_MALE);
+    ExpectBall("Heavy Ball, Golem 300 kg: +20", ITEM_HEAVY_BALL, 100, 100, 20);
+    SetBattle(SPECIES_STEELIX, 20, MON_MALE, SPECIES_TREECKO, 50, MON_MALE);
+    ExpectBall("Heavy Ball, Steelix 400 kg: +30", ITEM_HEAVY_BALL, 100, 100, 30);
+    SetBattle(SPECIES_SNORLAX, 20, MON_MALE, SPECIES_TREECKO, 50, MON_MALE);
+    ExpectBall("Heavy Ball, Snorlax 460 kg: +40", ITEM_HEAVY_BALL, 100, 100, 40);
+    // a light Pokemon whose catch rate is under 21: the rule's minimum of 1, never a sure catch
+    SetBattle(SPECIES_LATIAS, 40, MON_FEMALE, SPECIES_TREECKO, 50, MON_MALE);
+    ExpectBall("Heavy Ball, Latias 40 kg (catch rate 3): catch rate 1, not a sure catch", ITEM_HEAVY_BALL, 100, 100, -20);
+    SetBattle(SPECIES_JIRACHI, 40, MON_GENDERLESS, SPECIES_TREECKO, 50, MON_MALE);
+    ExpectBall("Heavy Ball, Jirachi 1.1 kg (catch rate 3): catch rate 1", ITEM_HEAVY_BALL, 100, 100, -20);
+    SetBattle(SPECIES_UXIE, 40, MON_GENDERLESS, SPECIES_TREECKO, 50, MON_MALE);
+    ExpectBall("Heavy Ball, Uxie 0.3 kg (catch rate 3): catch rate 1", ITEM_HEAVY_BALL, 100, 100, -20);
+    gBattleMons[WILD].hp = 1;
+    ExpectBall("Heavy Ball, Uxie at 1 HP: catch rate 1, odds still small", ITEM_HEAVY_BALL, 100, 100, -20);
+    gBattleMons[WILD].hp = gBattleMons[WILD].maxHP;
+    // the Beast Ball (Gen 7) on a Pokemon that is not an Ultra Beast: x410/4096, and odds of at least 1 (a catch rate 3
+    // Pokemon at full HP made 0, and the shake check divided by it)
+    SetBattle(SPECIES_LATIAS, 40, MON_FEMALE, SPECIES_TREECKO, 50, MON_MALE);
+    ExpectBall("Beast Ball on Latias (not an Ultra Beast): x0.1, odds at least 1", ITEM_BEAST_BALL, 410, 4096, 0);
+    Expect("a throw at the lowest odds (1) shakes with a chance above 0 (no division by zero)",
+           MPTest_BallShakeOdds(1) > 0 && CatchChance(1) > 0.0 && CatchChance(1) < 0.02);
+
+    // What a throw's odds mean: the chance it catches, for a catch rate 45 Pokemon at full HP and at 1 HP
+    {
+        static const struct { u16 ball; const char *name; } sTable[] = {
+            {ITEM_POKE_BALL, "Poke Ball"}, {ITEM_GREAT_BALL, "Great Ball"}, {ITEM_ULTRA_BALL, "Ultra Ball"},
+            {ITEM_QUICK_BALL, "Quick Ball (turn 0)"}, {ITEM_NET_BALL, "Net Ball (not Water/Bug)"},
+        };
+
+        SetBattle(SPECIES_BULBASAUR, 20, MON_MALE, SPECIES_TREECKO, 50, MON_MALE);
+        for (i = 0; i < ARRAY_COUNT(sTable); i++)
+        {
+            u32 full, low;
+
+            gBattleMons[WILD].hp = gBattleMons[WILD].maxHP;
+            full = MPTest_CaptureOdds(sTable[i].ball, WILD, PLAYER);
+            gBattleMons[WILD].hp = 1;
+            low = MPTest_CaptureOdds(sTable[i].ball, WILD, PLAYER);
+            printf("     %-26s catch rate 45: full HP odds %3u, a throw catches %5.1f%%; 1 HP odds %3u, %5.1f%%\n",
+                   sTable[i].name, full, 100.0 * CatchChance(full), low, 100.0 * CatchChance(low));
+        }
+        gBattleMons[WILD].hp = gBattleMons[WILD].maxHP;
+        Expect("the shake chance rises with the odds and a throw at 255 catches at once",
+               CatchChance(10) < CatchChance(100) && CatchChance(100) < CatchChance(200) && CatchChance(255) == 1.0);
+    }
+    gBattleTypeFlags = 0;
+    printf("selftest-balls: %d checks, %d failed\n", sChecks, sFailures);
+    return sFailures == 0 ? 0 : 1;
+}
+
 int NativeSelfTest_WildItems(void)
 {
     Setup();
