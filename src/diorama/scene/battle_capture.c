@@ -26,6 +26,7 @@
 #include "metatile_behavior.h"
 #include "overworld.h"
 #include "palette.h"
+#include "scanline_effect.h"
 #include "sprite.h"
 #include "diorama/battle_scene.h"
 #include "constants/map_types.h"
@@ -412,8 +413,21 @@ void DioramaBattle_Capture(struct DioramaBattleFrame *frame)
     frame->introSliding = DioramaBattle_IntroSliding();
     frame->bg3Enabled = (REG_DISPCNT & DISPCNT_BG3_ON) != 0;
     frame->forcedBlank = (REG_DISPCNT & DISPCNT_FORCED_BLANK) != 0;
-    frame->sceneryShiftX = SceneryShift(REG_BG3HOFS);
-    frame->sceneryShiftY = SceneryShift(REG_BG3VOFS);
+    /* BG3's scroll, none while a scanline effect writes it line by line: the intro's slide scrolls BG3's two halves
+       apart, from 240 pixels each way to none, which no one shift stands for (read as one, it carried the 3D camera up
+       to four tiles aside past the scenery and then seven and a half across as it wrapped round; MS-109), and the 3D
+       battle's camera glides in instead (DioramaBattle_IntroSliding) */
+    if (gScanlineEffect.state != 0
+     && (gScanlineEffect.dmaDest == (volatile void *)&REG_BG3HOFS || gScanlineEffect.dmaDest == (volatile void *)&REG_BG3VOFS))
+    {
+        frame->sceneryShiftX = 0.0f;
+        frame->sceneryShiftY = 0.0f;
+    }
+    else
+    {
+        frame->sceneryShiftX = SceneryShift(REG_BG3HOFS);
+        frame->sceneryShiftY = SceneryShift(REG_BG3VOFS);
+    }
     SceneryFade(frame);
     Shadows(frame);
     Battlers(frame);
