@@ -1767,6 +1767,9 @@ static u32 ActionSeq(void)
     return gMultiplayerSpawnMailbox.local.action.seq;
 }
 
+#include "wild_encounter.h"
+#include "constants/item.h"
+
 int NativeSelfTest_SpawnClaims(void)
 {
     struct MultiplayerSpawnSlot slots[2];
@@ -1780,6 +1783,28 @@ int NativeSelfTest_SpawnClaims(void)
     slots[0] = SpawnSlot(101, MP_SPAWN_SLOT_BUSY);
     SpawnInbound(0, 1, slots);
     ExpectClaim("the inbound record turned shared spawns on", MultiplayerSpawns_IsActive());
+    // MS-132 (4), the owner's direction: while the host's Pokemon replace the player's own on land, a Lure's steps are not
+    // spent (UpdateRepelCounter); surfing, the player's own spawner runs and they are; a Repel counts down as before
+    {
+        u16 avatarFlags = gPlayerAvatar.flags;
+
+        VarSet(VAR_REPEL_STEP_COUNT, 100 | REPEL_LURE_MASK);
+        gPlayerAvatar.flags = PLAYER_AVATAR_FLAG_ON_FOOT;
+        for (u32 i = 0; i < 10; i++)
+            UpdateRepelCounter();
+        ExpectClaim("a Lure in a world, on land: 10 steps leave its 100 (the host's Pokemon are not the Lure's)",
+                    LURE_STEP_COUNT == 100);
+        gPlayerAvatar.flags = PLAYER_AVATAR_FLAG_SURFING;
+        for (u32 i = 0; i < 10; i++)
+            UpdateRepelCounter();
+        ExpectClaim("... surfing (the player's own spawner): 10 steps spend 10", LURE_STEP_COUNT == 90);
+        VarSet(VAR_REPEL_STEP_COUNT, 100);
+        gPlayerAvatar.flags = PLAYER_AVATAR_FLAG_ON_FOOT;
+        UpdateRepelCounter();
+        ExpectClaim("a Repel in a world, on land, counts down as before (99)", REPEL_STEP_COUNT == 99);
+        VarSet(VAR_REPEL_STEP_COUNT, 0);
+        gPlayerAvatar.flags = avatarFlags;
+    }
     MultiplayerSpawns_TestShowObject(0, 101);
     gSpecialVar_LastTalked = MP_SPAWN_LOCAL_ID_BASE;
     ExpectClaim("talking to a shared wild Pokemon starts a claim", MultiplayerSpawns_TryClaimTalked());

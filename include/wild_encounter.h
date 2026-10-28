@@ -66,6 +66,12 @@ bool8 IsAbilityAllowingEncounter(u8 level);
 bool8 TryDoDoubleWildBattle(void);
 u32 CalculateChainFishingShinyRolls(void);
 void CreateWildMon(enum Species species, u8 level);
+#ifdef PORTABLE
+// TRUE while a wild Pokemon is being made (CreateWildMon, a visible one's look): a Lure's extra shiny roll is for those only
+// (MS-132; ComputePlayerShinyOdds)
+extern bool8 gMPCreatingWildMon;
+#endif
+#line 69 // gba-line
 bool8 TryGenerateWildMon(const struct WildPokemonInfo *wildMonInfo, enum WildPokemonArea area, u8 flags);
 bool8 AreLegendariesInSootopolisPreventingEncounters(void);
 u16 GetCurrentMapWildMonHeaderId(void);

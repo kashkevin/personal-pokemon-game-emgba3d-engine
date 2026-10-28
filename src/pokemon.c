@@ -39,6 +39,10 @@
 #include "pokedex.h"
 #include "pokeblock.h"
 #include "pokemon.h"
+#ifdef PORTABLE
+#include "wild_encounter.h"
+#endif
+#line 42 // gba-line
 #include "pokemon_animation.h"
 #include "pokemon_icon.h"
 #include "pokemon_summary_screen.h"
@@ -950,7 +954,15 @@ bool32 ComputePlayerShinyOdds(u32 personality, u32 value)
 #endif
 #line 905 // gba-line
 
+#ifdef PORTABLE
+    // MS-132 (1), the owner's direction (2026-10-27): a Lure's extra roll is for the wild Pokemon it draws, not a gift, an
+    // Egg or a static encounter made while it lasts (gMPCreatingWildMon: CreateWildMon, a visible Pokemon's look)
+    if (LURE_STEP_COUNT != 0 && gMPCreatingWildMon)
+#else
+#line 906 // gba-line
     if (LURE_STEP_COUNT != 0)
+#endif
+#line 907 // gba-line
         totalRerolls += 1;
 
     totalRerolls += CalculateChainFishingShinyRolls();

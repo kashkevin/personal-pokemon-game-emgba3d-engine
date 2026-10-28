@@ -980,8 +980,49 @@ static void RemoveUsedItem(void)
     }
 }
 
+#ifdef PORTABLE
+// MS-132 (3), the owner's direction (2026-10-27): a Repel and a Lure share one count, so either used while the other is
+// active ends it; the game asks first instead of ending it silently (the Battle Pyramid has no Lures)
+static const u8 sText_RepelWouldEndLure[] = _("A Lure is still active.\nA REPEL would end it. Use it?");
+static const u8 sText_LureWouldEndRepel[] = _("A REPEL is still active.\nA Lure would end it. Use it?");
+static void Task_StartUseRepel(u8 taskId);
+static void Task_StartUseLure(u8 taskId);
+
+static void UseRepelOverLure(u8 taskId)
+{
+    gTasks[taskId].func = Task_StartUseRepel;
+}
+
+static void UseLureOverRepel(u8 taskId)
+{
+    gTasks[taskId].func = Task_StartUseLure;
+}
+
+static const struct YesNoFuncTable sRepelOverLureYesNo = {.yesFunc = UseRepelOverLure, .noFunc = CloseItemMessage};
+static const struct YesNoFuncTable sLureOverRepelYesNo = {.yesFunc = UseLureOverRepel, .noFunc = CloseItemMessage};
+
+static void AskRepelOverLure(u8 taskId)
+{
+    BagMenu_YesNo(taskId, ITEMWIN_YESNO_HIGH, &sRepelOverLureYesNo);
+}
+
+static void AskLureOverRepel(u8 taskId)
+{
+    BagMenu_YesNo(taskId, ITEMWIN_YESNO_HIGH, &sLureOverRepelYesNo);
+}
+#endif
+
+#line 966 // gba-line
 void ItemUseOutOfBattle_Repel(u8 taskId)
 {
+#ifdef PORTABLE
+    if (REPEL_STEP_COUNT == 0 && LURE_STEP_COUNT != 0 && CurrentBattlePyramidLocation() == PYRAMID_LOCATION_NONE)
+    {
+        DisplayItemMessage(taskId, FONT_NORMAL, sText_RepelWouldEndLure, AskRepelOverLure);
+        return;
+    }
+#endif
+#line 968 // gba-line
     if (REPEL_STEP_COUNT == 0)
         gTasks[taskId].func = Task_StartUseRepel;
     else if (CurrentBattlePyramidLocation() == PYRAMID_LOCATION_NONE)
@@ -1020,6 +1061,14 @@ static void Task_UseRepel(u8 taskId)
 
 void ItemUseOutOfBattle_Lure(u8 taskId)
 {
+#ifdef PORTABLE
+    if (LURE_STEP_COUNT == 0 && REPEL_STEP_COUNT != 0 && CurrentBattlePyramidLocation() == PYRAMID_LOCATION_NONE)
+    {
+        DisplayItemMessage(taskId, FONT_NORMAL, sText_LureWouldEndRepel, AskLureOverRepel);
+        return;
+    }
+#endif
+#line 1006 // gba-line
     if (LURE_STEP_COUNT == 0)
         gTasks[taskId].func = Task_StartUseLure;
     else if (CurrentBattlePyramidLocation() == PYRAMID_LOCATION_NONE)

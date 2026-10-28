@@ -1016,7 +1016,11 @@ static bool32 MakeVisible(void)
     if (!TryGenerateWildMon(sPathInfo, sPathArea, 0))
         return FALSE;
     sPathSpecies = GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_SPECIES);
-    return ComputePlayerShinyOdds(GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_PERSONALITY), READ_OTID_FROM_SAVE);
+    // the look rolled as SetSpeciesInfoForOWE rolls it: a wild Pokemon's, so a Lure's roll counts (MS-132)
+    gMPCreatingWildMon = TRUE;
+    bool32 shiny = ComputePlayerShinyOdds(GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_PERSONALITY), READ_OTID_FROM_SAVE);
+    gMPCreatingWildMon = FALSE;
+    return shiny;
 }
 
 static bool32 MakeHooked(void)
@@ -1121,6 +1125,9 @@ int NativeSelfTest_ShinyPaths(void)
     // a Lure (one extra roll while its steps last) and the DexNav (its chain's extra rolls, only for its own battle)
     VarSet(VAR_REPEL_STEP_COUNT, REPEL_LURE_MASK | 100);
     ShinyPath("grass, a visible Pokemon, a Lure on", ShinyOddsOfRolls(2), 4000000, MakeVisible);
+    // MS-132 (the owner's direction, 2026-10-27): the Lure's roll is for wild Pokemon, not a static or a gift one
+    ShinyPath("a static Pokemon, a Lure on (no Lure roll)", p, 2000000, MakeStatic);
+    ShinyPath("a gift Pokemon, a Lure on (no Lure roll)", p, 2000000, MakeGift);
     VarSet(VAR_REPEL_STEP_COUNT, 0);
     gDexNavSpecies = SPECIES_ZIGZAGOON;
     gSaveBlock3Ptr->dexNavChain = 0;

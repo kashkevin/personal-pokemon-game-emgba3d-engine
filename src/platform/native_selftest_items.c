@@ -179,7 +179,9 @@ static void TestShinyCharm(void)
     ExpectRate("Local Soft Reset hunt while a lure is active: still 1 in 4096", hits, n, p);
     gMPTestLocalResetGeneration = FALSE;
 
-    // An ordinary wild Pokemon while a lure is active: one extra roll (inherited from pokeemerald-expansion)
+    // An ordinary wild Pokemon while a lure is active: one extra roll (inherited from pokeemerald-expansion), for the wild
+    // Pokemon only (MS-132: gMPCreatingWildMon, set while CreateWildMon or a visible Pokemon's look rolls)
+    gMPCreatingWildMon = TRUE;
     for (u32 charm = 0; charm < 2; charm++)
     {
         ClearBag();
@@ -205,6 +207,15 @@ static void TestShinyCharm(void)
         if (ComputePlayerShinyOdds(Random32(), 0x00123456))
             hits++;
     ExpectRate("wild Pokemon while a Repel is active: 1 in 4096 (a Repel adds no roll)", hits, n, p);
+    gMPCreatingWildMon = FALSE;
+    // a gift, an Egg or a static encounter made while a lure is active: no lure roll (MS-132, the owner's direction)
+    VarSet(VAR_REPEL_STEP_COUNT, 100 | REPEL_LURE_MASK);
+    SeedRng(0x15B3);
+    hits = 0;
+    for (u32 i = 0; i < n; i++)
+        if (ComputePlayerShinyOdds(Random32(), 0x00123456))
+            hits++;
+    ExpectRate("a gift or static Pokemon made while a lure is active: 1 in 4096 (the lure's roll is for wild ones)", hits, n, p);
     VarSet(VAR_REPEL_STEP_COUNT, 0);
 
     // a stored shiny keeps its status: through the box copy and the PC

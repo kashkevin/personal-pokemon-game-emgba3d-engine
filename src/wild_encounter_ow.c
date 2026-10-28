@@ -1405,7 +1405,14 @@ static void SetSpeciesInfoForOWE(struct InfoOWE *info, u32 x, u32 y)
     if (info->speciesId == SPECIES_UNOWN)
         info->speciesId = GetUnownSpeciesId(personality);
 
+#ifdef PORTABLE
+    gMPCreatingWildMon = TRUE;    // a visible wild Pokemon's look: a Lure's extra roll counts (MS-132)
+#endif
+#line 946 // gba-line
     info->isShiny = ComputePlayerShinyOdds(personality, READ_OTID_FROM_SAVE);
+#ifdef PORTABLE
+    gMPCreatingWildMon = FALSE;
+#endif
 #if defined(DIORAMA_BATTLE_ENV_TEST)
     info->isShiny = DioramaBattleEnvTest_OweShiny(info->isShiny); // test builds only: PKMN_TEST_OWE_SHINY (battle_env_test.h)
 #endif
@@ -2415,6 +2422,7 @@ unsigned DioramaBattleEnvTest_OweKind(struct ObjectEvent *owe)
 }
 #endif
 
+#line 1893 // gba-line
 #undef sOverworldEncounterLevel
 #undef sOverworldEncounterAge
 #undef sOverworldEncounterCategory

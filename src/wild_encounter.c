@@ -22,6 +22,10 @@
 #include "script.h"
 #include "tv.h"
 #include "wild_encounter.h"
+#ifdef PORTABLE
+#include "multiplayer_spawns.h"
+#endif
+#line 25 // gba-line
 #include "mp_wild_random.h"
 #ifdef PORTABLE
 #include "platform/mp_legend.h"
@@ -519,10 +523,20 @@ void CreateWildMon(enum Species species, u8 level)
 {
     ZeroEnemyPartyMons();
     u32 personality = GetMonPersonality(species, GetSynchronizedGender(WILDMON_ORIGIN, species), PickWildMonNature(species), RANDOM_UNOWN_LETTER);
+#ifdef PORTABLE
+    gMPCreatingWildMon = TRUE;
+#endif
+#line 518 // gba-line
     CreateMonWithIVs(&gParties[B_TRAINER_OPPONENT_A][0], species, level, personality, OTID_STRUCT_PLAYER_ID, USE_RANDOM_IVS);
+#ifdef PORTABLE
+    gMPCreatingWildMon = FALSE;
+#endif
+#line 519 // gba-line
     GiveMonInitialMoveset(&gParties[B_TRAINER_OPPONENT_A][0]);
 }
 #ifdef PORTABLE
+
+bool8 gMPCreatingWildMon;
 
 u8 MPWild_PickNature(u16 species)
 {
@@ -1068,6 +1082,15 @@ bool8 UpdateRepelCounter(void)
     if (InUnionRoom() == TRUE)
         return FALSE;
 
+#ifdef PORTABLE
+    // MS-132 (4), the owner's direction (2026-10-27): in a world the host's Pokemon on land replace the player's own
+    // (UpdateOverworldWildEncounter), which a Lure cannot touch, so its steps are not spent there; surfing or underwater
+    // the player's own spawner still runs and the Lure counts down
+    if (isLure && MultiplayerSpawns_IsActive()
+     && !TestPlayerAvatarFlags(PLAYER_AVATAR_FLAG_SURFING | PLAYER_AVATAR_FLAG_UNDERWATER))
+        return FALSE;
+#endif
+#line 1047 // gba-line
     if (steps != 0)
     {
         steps--;
