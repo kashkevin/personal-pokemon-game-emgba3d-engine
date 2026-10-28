@@ -23,7 +23,7 @@ from profiles import NOMINAL_HEIGHTS, TileShape, shape_from_action
 from pixel_objects import UPRIGHT_CLASSES as UPRIGHT_PIXEL_CLASSES, extract_layout
 from structures import analyze_layout
 from terrace_topology import (WATER_BEHAVIORS, cave_climbs, cave_levels, join_level_free_cells, join_water,
-                              lift_blocked_cells, mountain_ledges, rock_tops, seam_shifts,
+                              lift_blocked_cells, mountain_ledges, rock_tops, seam_shifts, slope_tops,
                               solve_layout as solve_terrace_topology)
 from tile_shape import ClassificationError, TileShapeClassifier
 
@@ -1625,9 +1625,15 @@ def compile_data(root: Path) -> dict:
         mountain_outlines[layout["id"]] = mountain_outline_cells(
             pixel_summaries[layout["id"]], mountain_art_cells[layout["id"]])
         if solved:
-            # The sea's shallows on the sea's level (terrace_topology.join_water).
+            # The sea's shallows on the sea's level (terrace_topology.join_water),
+            # and a slope's top on the level of the ground round it, the
+            # mountain's rock it climbs through on its foot (slope_tops: Route
+            # 119's).
             solved = {**solved, **join_water(cells[layout["id"]], layout["width"],
                                              layout["height"], solved)}
+            solved = {**solved, **slope_tops(cells[layout["id"]], layout["width"],
+                                             layout["height"], solved,
+                                             rock=mountain_art_cells[layout["id"]])}
         # (a layout only a map's scripts switch to - Sky Pillar's clean floors -
         # is that map's: _script_layouts)
         rows = (maps_by_layout.get(layout["id"], ())

@@ -522,6 +522,17 @@ of terraced walls; Route 112's rock was still a maze of walls.
   that half stands on it (`lift_blocked_cells`); where the climbs would give a part
   two levels or a step the game draws no face for or lets one walk across, the
   cave keeps its levels, as a mountain does (`_steps_hold`).
+* A slope's top on the level round it (`terrace_topology.py` `slope_tops`;
+  KNOWN_ISSUES MS-153): Route 119's muddy slope (6,54-55) climbs to a row (5-8,53) at
+  its foot's elevation that the GBA draws on the plateau, a row of elevation 0 joining
+  it to the rest of the plateau; the solver put the row on the foot's level, a step
+  under the plateau, and the slope flat. A slope's top region apart from its foot's
+  and on its level, whose walkable cells round it all lie a level up
+  (`SLOPE_RISE_Q16`), takes that level, the slope a ramp up to it, and the mountain's
+  rock beside the slope and under the top stands on the foot (left to
+  `lift_blocked_cells`, beside two levels, it stood a tile over the plateau); a top
+  with nothing round it (Route 115's, the Safari Zone's at its map's edge) or with
+  ground round it at another level keeps its level.
 * A cave mouth on its ground (`terrace_topology.py` `join_level_free_cells`): a
   doorway or warp of elevation 0 in a mountain's face whose dry walkable
   neighbours offer one whole level takes it (Rusturf Tunnel's two mouths a level
@@ -663,11 +674,12 @@ of terraced walls; Route 112's rock was still a maze of walls.
   `DioramaRules_LedgeCrest`): another player and their Pokemon are replayed across a ledge a step
   at a time (`multiplayer.c`, `multiplayer_world.c` `StepToward`) and stood at its record's
   height, two voxels into the crest. Ledges read no pixels for their shape now (`CellReadsPixels`).
-* Not covered: the 33 slopes drawn flat (Jagged Pass's and the Safari Zone's bumpy slopes,
-  the muddy slopes of Route 119 and the Safari Zone, Sootopolis Gym's slides) have both
-  ends on one level in the terrace solver's levels; they need it to split them (Route
-  111's muddy slopes, on two levels, already rise as ramps, and Route 115's and Granite
-  Cave B1F's since MS-153's mountain and cave climbs). The 47
+* Not covered: the 19 slopes drawn flat (Jagged Pass's 14 bumpy slopes, the Safari Zone's
+  3 bumpy and 2 muddy) have both ends on one level in the terrace solver's levels; they
+  need it to split them (Route 111's muddy slopes, on two levels, already rise as ramps,
+  and Route 115's, Granite Cave B1F's and Route 119's since MS-153's mountain and cave
+  climbs and slope tops). Sootopolis Gym's 12 slides are flat ice in the GBA's own
+  drawing (one tile on both floors), in rooms modelled from it. The 47
   ledges in caves the game never jumps stand as rock as before. The 48 ledges of the four
   modelled rooms that have any (Fortree Gym 15, Lavaridge Gym 1F 7 and B1F 15, the Trick
   House's fourth puzzle 11: `battle_room_specs.py` `AUTO_ROOMS`) are the rooms' models, cut from

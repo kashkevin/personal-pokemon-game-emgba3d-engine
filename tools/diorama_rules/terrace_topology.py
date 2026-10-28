@@ -938,6 +938,114 @@ def cave_climbs(cells: tuple[dict, ...], width: int, height: int,
     return out
 
 
+# A slope's cells: the Mach Bike's muddy slopes and the Acro Bike's bumpy ones.
+SLOPES = frozenset({"MB_MUDDY_SLOPE", "MB_BUMPY_SLOPE"})
+# A slope's top stands this much over its foot (slope_tops): a level.
+SLOPE_RISE_Q16 = 16
+
+
+def slope_tops(cells: tuple[dict, ...], width: int, height: int,
+               solved: dict[int, dict], rock: frozenset[int] = frozenset()) -> dict[int, dict]:
+    """A slope's top on the level of the ground round it: Route 119's muddy
+    slope (6,54-55) climbs to a row at the elevation of its foot (the game lets
+    one ride off the slope onto it) that the GBA draws on the plateau over the
+    slope's rock, a row of elevation 0 (the game's "any level") joining it to
+    the rest of the plateau. The solver, joining cells of one elevation, put the
+    row on the foot's level, a step under the plateau beside it, and the slope
+    lay flat (KNOWN_ISSUES MS-153). The region at a slope's top (walkable cells
+    side by side at one elevation, slopes and terrace courses bounding them),
+    apart from the region at its foot and on its level, whose walkable cells
+    round it (slopes aside) all lie SLOPE_RISE_Q16 over it, takes their level,
+    the slope a ramp up to it over its rows, and the mountain's rock (`rock`)
+    beside the slope and under the top on the foot: the face it climbs, a tile
+    high. A top with nothing round it (the slope its only way, Route 115's, or a
+    map's edge, the Safari Zone's), or with ground round it at another level,
+    keeps its level. Returns the raised cells' entries, the slope's with its
+    rise, and the face's."""
+    def walkable(offset: int) -> bool:
+        cell = cells[offset]
+        return (cell.get("collision", 0) == 0 and cell.get("behavior") not in SLOPES
+                and role_for_cell(cell) is None)
+
+    def level(offset: int) -> int | None:
+        """A walkable cell's level (ground no terrace reaches: 0); None for a
+        course's cell or water no terrace reaches (the sea at its own height)."""
+        entry = solved.get(offset)
+        if entry is None:
+            return None if cells[offset].get("behavior") in WATER_BEHAVIORS else 0
+        return entry["groundQ16"] if entry.get("profile", "none") == "none" else None
+
+    slope = {offset for offset, cell in enumerate(cells)
+             if cell.get("collision", 0) == 0 and cell.get("behavior") in SLOPES}
+    if not slope:
+        return {}
+    region_of: dict[int, int] = {}
+    regions: list[list[int]] = []
+    for start in range(len(cells)):
+        if start in region_of or not walkable(start):
+            continue
+        index = len(regions)
+        region, pending = [], deque((start,))
+        region_of[start] = index
+        while pending:
+            offset = pending.popleft()
+            region.append(offset)
+            for neighbor in _neighbours(offset, width, height):
+                if (neighbor not in region_of and walkable(neighbor)
+                        and cells[neighbor].get("elevation") == cells[offset].get("elevation")):
+                    region_of[neighbor] = index
+                    pending.append(neighbor)
+        regions.append(region)
+    # each run of slope cells down a column, by the region at its top
+    climbs: dict[int, list[tuple[int, int | None, list[int]]]] = defaultdict(list)
+    for start in sorted(slope):
+        if start - width in slope or start < width:
+            continue
+        run, offset = [], start
+        while offset in slope:
+            run.append(offset)
+            offset += width
+        if start - width in region_of:
+            climbs[region_of[start - width]].append(
+                (region_of[start - width], region_of.get(offset), run))
+    out: dict[int, dict] = {}
+    for upper, runs in sorted(climbs.items()):
+        lowers = {lower for _, lower, _ in runs}
+        if len(lowers) != 1 or None in lowers or upper in lowers:
+            continue  # a foot at no region or two, or the top's own region
+        lower = next(iter(lowers))
+        tops = {level(offset) for offset in regions[upper]}
+        feet = {level(offset) for offset in regions[lower]}
+        if len(tops) != 1 or tops != feet or None in tops or next(iter(tops)) % 16:
+            continue  # not flat on one whole level
+        foot = next(iter(feet))
+        inside = set(regions[upper])
+        around = {level(neighbor) for offset in inside
+                  for neighbor in _neighbours(offset, width, height)
+                  if neighbor not in inside and neighbor not in slope
+                  and cells[neighbor].get("collision", 0) == 0}
+        if around != {foot + SLOPE_RISE_Q16}:
+            continue
+        for offset in inside:
+            out[offset] = {"groundQ16": foot + SLOPE_RISE_Q16, "topQ16": foot + SLOPE_RISE_Q16,
+                           "profile": "none", "solid": False}
+        out.update(_climb_entries(runs, {lower: foot // SLOPE_RISE_Q16,
+                                         upper: foot // SLOPE_RISE_Q16 + 1},
+                                  width, SLOPE_RISE_Q16))
+        # the face the slope climbs (the rock beside it, and under the top's
+        # south edge) stands on the foot, as it did: beside the raised top,
+        # lift_blocked_cells left it on the top level, a tile over the top
+        face = {side for _, _, run in runs for offset in run
+                for side in (offset - 1 if offset % width else None,
+                             offset + 1 if (offset + 1) % width else None)
+                if side is not None}
+        face |= {offset + width for offset in inside if offset + width < len(cells)}
+        for offset in sorted((face & rock) - slope - set(solved)):
+            out[offset] = {"groundQ16": foot, "topQ16": foot, "profile": "none",
+                           "solid": False, "lift": True}
+    return out
+
+
 def lift_blocked_cells(cells: tuple[dict, ...], width: int, height: int,
                        solved: dict[int, dict], liftable=None) -> dict[int, dict]:
     """Blocked cells that are no terrace course (a house, a tree, a rock) stand

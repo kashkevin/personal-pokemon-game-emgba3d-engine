@@ -362,6 +362,26 @@ class DioramaRuleCompilerTests(unittest.TestCase):
                     self.assertLessEqual(ground - 1, rock[neighbor][1] + 1, (offset, neighbor))
                     self.assertLessEqual(rock[neighbor][0] - 1, top + 1, (offset, neighbor))
 
+    def test_repository_slope_top_on_the_plateau(self):
+        # KNOWN_ISSUES MS-153: Route 119's muddy slope (6,54-55) climbs to a row (5-8,53) the GBA
+        # draws on the plateau, which lay a level under it, a step between them, the slope flat.
+        # The row stands on the plateau's level (terrace_topology.slope_tops), the slope a ramp,
+        # the rock beside it on its foot as before (not a tile over the plateau).
+        layout = next(row for row in self.data["layouts"] if row["symbol"] == "LAYOUT_ROUTE119")
+        width = layout["width"]
+        records = {record["cellOffset"]: record for record in layout["terrainRecords"]
+                   if record["mapGroup"] == 0xFF}
+
+        def at(x, y):
+            record = records[y * width + x]
+            return record["shape"], record["groundQ16"], record["topQ16"]
+
+        self.assertEqual([at(6, 52), at(6, 53), at(6, 54), at(6, 55), at(6, 56)],
+                         [("flat", 0, 0), ("flat", 0, 0), ("stairs", -8, 0), ("stairs", -16, -8),
+                          ("flat", -16, -16)])
+        self.assertEqual({at(x, 53) for x in range(5, 9)}, {("flat", 0, 0)})
+        self.assertEqual([at(7, 54), at(8, 54), at(7, 55)], [("cliff", -16, 0)] * 3)
+
     def test_repository_maps_meet_at_one_level(self):
         # KNOWN_ISSUES MS-162: each map's ground is solved alone, its top level 0, and Route 118 lay a level
         # under Mauville City, Route 119 and Route 123 round it, Route 116 a level under Rustboro City

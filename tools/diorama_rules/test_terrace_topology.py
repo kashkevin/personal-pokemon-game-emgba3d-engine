@@ -6,9 +6,9 @@ from pathlib import Path
 
 from catalog import load_tilesets, load_world
 from compile_rules import _load_cells, parse_behaviors
-from terrace_topology import (CAVE_RISE_Q16, LEDGE_JUMPS, MOUNTAIN_LEDGE_Q16, TERRACE_ROLES,
+from terrace_topology import (CAVE_RISE_Q16, LEDGE_JUMPS, MOUNTAIN_LEDGE_Q16, SLOPE_RISE_Q16, TERRACE_ROLES,
                               cave_climbs, cave_levels, join_level_free_cells, join_water, lift_blocked_cells,
-                              mountain_ledges, rock_tops, role_for_cell, seam_shifts, solve_layout)
+                              mountain_ledges, rock_tops, role_for_cell, seam_shifts, slope_tops, solve_layout)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -490,6 +490,66 @@ class TerraceTopologyTests(unittest.TestCase):
         self.assertEqual([(raised[y * width + 9]["groundQ16"], raised[y * width + 9]["topQ16"])
                           for y in (10, 9)], [(0, 8), (8, 16)])
         self.assertNotIn(12 * width + 9, raised)
+
+    def test_a_slopes_top_takes_the_level_of_the_ground_round_it(self):
+        # Route 119: its muddy slope climbs to a row at the elevation of its foot, which the GBA
+        # draws on the plateau, a row of elevation 0 joining it to the rest; the solver put the
+        # row on the foot's level, a step under the plateau, the slope flat. The row takes the
+        # plateau's level, the slope a ramp up to it, the mountain's rock beside the slope and
+        # under the row on the foot; a top with nothing round it, or with ground round it at
+        # another level, or one region with its foot, keeps its level.
+        def rock():
+            return {"tileset": "gTileset_Fortree", "metatile": 600, "behavior": "MB_NORMAL",
+                    "collision": 1, "elevation": 0}
+
+        def land(elevation=3):
+            return {"tileset": "gTileset_Fortree", "metatile": 601, "behavior": "MB_NORMAL",
+                    "collision": 0, "elevation": elevation}
+
+        make = {"#": rock, "p": lambda: land(4), "z": lambda: land(0), "t": land, "f": land,
+                "M": lambda: dict(land(), behavior="MB_MUDDY_SLOPE")}
+
+        def climb(rows, low="tMf", mountain=frozenset()):
+            cells = tuple(make[ch]() for row in rows for ch in row)
+            # the solver's levels: the slope, its top and foot a level under the plateau
+            solved = {offset: {"groundQ16": -SLOPE_RISE_Q16, "topQ16": -SLOPE_RISE_Q16,
+                               "profile": "none", "solid": False}
+                      for offset, ch in enumerate("".join(rows)) if ch in low}
+            return slope_tops(cells, len(rows[0]), len(rows), solved, rock=mountain)
+
+        rows = ["#####", "#ppp#", "#zzz#", "#ttt#", "##M##", "##M##", "#fff#", "#####"]
+        raised = climb(rows, mountain=frozenset({20, 21, 23, 24, 26, 28}))
+        self.assertEqual({offset for offset, entry in raised.items() if entry["profile"] == "none"
+                          and not entry.get("lift")}, {16, 17, 18})
+        self.assertEqual({raised[offset]["groundQ16"] for offset in (16, 17, 18)}, {0})
+        self.assertEqual([(raised[offset]["groundQ16"], raised[offset]["topQ16"]) for offset in (27, 22)],
+                         [(-16, -8), (-8, 0)])
+        # the face: the rock beside the slope and under the row, on the foot
+        self.assertEqual({offset: (entry["groundQ16"], entry["lift"]) for offset, entry in raised.items()
+                          if entry.get("lift")}, dict.fromkeys((21, 23, 26, 28), (-16, True)))
+        self.assertFalse(any(offset in raised for offset in (31, 32, 33)))
+        self.assertFalse(any(entry.get("lift") for entry in climb(rows).values()))
+        # nothing round the top: the slope its only way up
+        self.assertEqual(climb(["#####", "#####", "#ttt#", "##M##", "##M##", "#fff#", "#####"]), {})
+        # ground round the top on the foot's level
+        self.assertEqual(climb(rows, low="tMfz"), {})
+        # its top and foot one region (a way round at their elevation)
+        self.assertEqual(climb(["#####", "#ppp#", "#zzz#", "#ttt#", "#tM##", "#tM##", "#fff#", "#####"]), {})
+        # the repository's: Route 119's row (5-8,53) on the plateau's level, its slope (6,54-55) a ramp
+        tilesets = load_tilesets(ROOT)
+        _, layouts = load_world(ROOT)
+        names = {value: name for name, value
+                 in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
+        layout = next(row for row in layouts if row["id"] == "LAYOUT_ROUTE119")
+        route = _load_cells(ROOT, [layout], tilesets, names)[0]["LAYOUT_ROUTE119"]
+        width, height = layout["width"], layout["height"]
+        solved = solve_layout(route, width, height)
+        raised = slope_tops(route, width, height, {**solved, **join_water(route, width, height, solved)})
+        self.assertEqual({(offset % width, offset // width, entry["groundQ16"])
+                          for offset, entry in raised.items() if entry["profile"] == "none"},
+                         {(x, 53, 0) for x in range(5, 9)})
+        self.assertEqual([(raised[y * width + 6]["groundQ16"], raised[y * width + 6]["topQ16"])
+                          for y in (55, 54)], [(-16, -8), (-8, 0)])
 
     def test_rock_takes_the_top_of_the_ground_nearest_it(self):
         # A column of rock between a top three levels up (north) and ground asking the rock a
