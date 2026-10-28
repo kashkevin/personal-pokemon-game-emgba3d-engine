@@ -502,6 +502,27 @@ of terraced walls; Route 112's rock was still a maze of walls.
   neighbours offer one whole level takes it (Rusturf Tunnel's two mouths a level
   down, Ever Grande's Victory Road); it lifts no rock round it. One entered from
   the water (Shoal Cave) keeps its place.
+* Where maps meet (`terrace_topology.py` `seam_shifts`, `compile_rules.py` `_seam_pairs`;
+  KNOWN_ISSUES MS-162): each layout is solved alone, its top level 0, so a map whose
+  top is its cliffs' tops lay under its neighbours: Route 118's route a level under
+  Mauville City, Route 119 and Route 123, a step along each seam; Route 116 a level
+  under Rustboro City. The compiler solves every layout, then moves a map's ground
+  to meet the next map's where every land cell pair it has with other ground (across
+  the seams, and in its layout across an elevation change) asks the same, and solves
+  the layouts that move again. Ground moves in groups that keep their levels to each
+  other: a terrace component, the components a walkable pair or a jump ledge joins,
+  the ground round one mountain (its art: Route 116's grass, its east plateau and
+  the top of the mountain between them), water with its banks (Route 118's lake and
+  its plateau), but not the sea the next maps share (the renderer's
+  `LevelWaterBodies` lays the open sea at one level, so a seam between two seas was
+  never a step). Ground no terrace reaches is where the others move to (a town), and
+  a group that a mountain or water ties to such ground stays (Route 111's south end:
+  the lake there touches the desert, which its terrace area cannot level); a group
+  only moves if no ledge then jumps up. Doorways of elevation 0 take their level from
+  the ground they are entered from afterwards. Moved: Route 116 and Route 118 a
+  level up. The seams left a level apart: Route 111 and Mauville City, the Battle
+  Frontier's halves (its west walkway's terrace area also lies flat with the plaza
+  north of it, which meets the east half at its own level) and the Safari Zone's.
 * The slopes (`gl_terrain_renderer.c` `ShapeRockMasses`, `RockMassFoot`): a rock
   mass's slope comes down to the ground beside it on each side, not always to
   its own foot, so a path level with its top meets it flat instead of a groove
@@ -589,12 +610,14 @@ of terraced walls; Route 112's rock was still a maze of walls.
   ledges: the game jumps only straight ones) is the higher of its two straight banks and
   meets both. The grounds are the neighbours' (`rules.c` `DioramaRules_LedgeGrounds`, read
   in `gl_terrain_renderer.c` `BuildInput` from the whole scene, so a chunk's halo agrees
-  with the chunk that owns the cell): a ledge a level over its landing (24 cells: Route 118 14,
-  Route 116 5, the Frontier 3, the Safari Zone 2) has its face down to it, one on a lower
-  terrace stands on it; 19 cells land a level higher than they are jumped from (Route 118's,
-  none of which the player can jump: the cell behind each is blocked, 13 face its sea, which
-  lies a level over its land in the terrace solver's levels, and 6 rock) and keep that, the
-  bank between the two. Route 113's 9 and Route 123's 18 did too until the terrace solver put
+  with the chunk that owns the cell): a ledge a level over its landing (24 cells: Route 118 19,
+  the Frontier 3, the Safari Zone 2) has its face down to it, one on a lower terrace stands on
+  it; 6 cells land a level higher than they are jumped from (Route 118's by its lake's plateau,
+  none of which the player can jump: the cell behind each is blocked rock) and keep that, the
+  bank between the two. Route 118's 13 others faced its sea, which lay a level over its route
+  until the route met Mauville City's ground (MS-162, above), and Route 116's 5 that dropped
+  from rock to its grass are level banks since. Route 113's 9 and Route 123's 18 landed higher
+  too until the terrace solver put
   a terrace's highest walkable ground on the top level where a ledge leaves it for ground no
   terrace reaches (`terrace_topology.py` `solve_layout`; KNOWN_ISSUES MS-154): their grass
   and ash lay a level below the rest of the route, under art no one walks on.

@@ -14,7 +14,9 @@ from compile_rules import (ARCHETYPES, RuleError, _action, _ground_policy, _mask
                               _pattern_placements, _patterns, _profiles, _selector,
                               _validate_logical_ids, _validate_pattern_claim_overlaps,
                               _validate_pixel_object_catalog,
-                             compile_data, load_json, parse_camera, render_c, render_header)
+                             _load_cells, compile_data, load_json, parse_behaviors, parse_camera,
+                             render_c, render_header)
+from catalog import load_tilesets, load_world
 from migrate_v1_to_v2 import MigrationError, migrate_document
 
 
@@ -226,17 +228,18 @@ class DioramaRuleCompilerTests(unittest.TestCase):
                                      for record in layout["terrainRecords"]
                                      if record["mapGroup"] == 0xFF}
 
+        # (Route 116 a level up since MS-162: its grass meets Rustboro City's ground)
         width, records = wildcard("LAYOUT_ROUTE116")
         front = [records[8 * width + x] for x in range(43, 53) if x != 47]
         self.assertEqual({(record["class"], record["groundQ16"], record["topQ16"])
-                          for record in front}, {("cliff", -16, 0)})
-        self.assertEqual(records[8 * width + 47]["groundQ16"], -16)
+                          for record in front}, {("cliff", 0, 16)})
+        self.assertEqual(records[8 * width + 47]["groundQ16"], 0)
         for y in (12, 13, 14):
             record = records[y * width + 54]
             self.assertEqual((record["class"], record["groundQ16"], record["topQ16"]),
-                             ("cliff", -16, 0))
+                             ("cliff", 0, 16))
         for x, y in ((42, 4), (43, 6)):
-            self.assertEqual(records[y * width + x]["groundQ16"], 0)
+            self.assertEqual(records[y * width + x]["groundQ16"], 16)
         # Route 112: its plateau a level over the ground round the mountain, the stairs rising to
         # it over their rows, the mountain level with it.
         width, records = wildcard("LAYOUT_ROUTE112")
@@ -254,6 +257,49 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         width, records = wildcard("LAYOUT_ROUTE111")
         self.assertEqual((records[30 * width + 35]["groundQ16"], records[30 * width + 35]["topQ16"]),
                          (0, 16))
+
+    def test_repository_maps_meet_at_one_level(self):
+        # KNOWN_ISSUES MS-162: each map's ground is solved alone, its top level 0, and Route 118 lay a level
+        # under Mauville City, Route 119 and Route 123 round it, Route 116 a level under Rustboro City
+        # (terrace_topology.seam_shifts). Their walkable ground meets at one level, and no ledge of Route 118's
+        # jumps up.
+        layouts = {row["symbol"]: row for row in self.data["layouts"]}
+        grounds = {}
+
+        def ground(name, x, y):
+            if name not in grounds:
+                grounds[name] = {record["cellOffset"]: record["groundQ16"]
+                                 for record in layouts[name]["terrainRecords"] if record["mapGroup"] == 0xFF}
+            return grounds[name][y * layouts[name]["width"] + x]
+
+        seams = ([("LAYOUT_ROUTE118", 0, y, "LAYOUT_MAUVILLE_CITY", 39, y) for y in (7, 8, 9, 10)]
+                 + [("LAYOUT_ROUTE118", 79, y, "LAYOUT_ROUTE123", 0, y) for y in (10, 11, 12)]
+                 + [("LAYOUT_ROUTE118", x, 0, "LAYOUT_ROUTE119", x - 40, 139) for x in (57, 58, 59)]
+                 + [("LAYOUT_ROUTE116", 0, y, "LAYOUT_RUSTBORO_CITY", 39, y) for y in (8, 9, 10, 11)])
+        for a, ax, ay, b, bx, by in seams:
+            self.assertEqual(ground(a, ax, ay), ground(b, bx, by), (a, ax, ay, b, bx, by))
+        tilesets = load_tilesets(ROOT)
+        _, rows = load_world(ROOT)
+        names = {value: name for name, value
+                 in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
+        route = next(row for row in rows if row["id"] == "LAYOUT_ROUTE118")
+        cells = _load_cells(ROOT, [route], tilesets, names)[0]["LAYOUT_ROUTE118"]
+        width, height, jumps = route["width"], route["height"], 0
+        steps = {"MB_JUMP_SOUTH": (0, 1), "MB_JUMP_NORTH": (0, -1), "MB_JUMP_EAST": (1, 0),
+                 "MB_JUMP_WEST": (-1, 0)}
+        for offset, cell in enumerate(cells):
+            step = steps.get(cell.get("behavior"))
+            x, y = offset % width, offset // width
+            if step is None or not (0 <= x - step[0] < width and 0 <= y - step[1] < height
+                                    and 0 <= x + step[0] < width and 0 <= y + step[1] < height):
+                continue
+            takeoff, landing = (x - step[0], y - step[1]), (x + step[0], y + step[1])
+            if any(cells[py * width + px].get("collision", 0) for px, py in (takeoff, landing)):
+                continue
+            jumps += 1
+            self.assertLessEqual(ground("LAYOUT_ROUTE118", *landing), ground("LAYOUT_ROUTE118", *takeoff),
+                                 (x, y))
+        self.assertGreater(jumps, 30)
 
     def test_repository_cave_rock_stands_and_its_exits_stay_open(self):
         layouts = {row["symbol"]: row for row in self.data["layouts"]}

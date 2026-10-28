@@ -23,7 +23,7 @@ from profiles import NOMINAL_HEIGHTS, TileShape, shape_from_action
 from pixel_objects import UPRIGHT_CLASSES as UPRIGHT_PIXEL_CLASSES, extract_layout
 from structures import analyze_layout
 from terrace_topology import (WATER_BEHAVIORS, cave_levels, join_level_free_cells, join_water,
-                              lift_blocked_cells, mountain_ledges,
+                              lift_blocked_cells, mountain_ledges, seam_shifts,
                               solve_layout as solve_terrace_topology)
 from tile_shape import ClassificationError, TileShapeClassifier
 
@@ -1528,6 +1528,32 @@ def _script_layouts(root: Path) -> dict[str, str]:
     return out
 
 
+def _seam_pairs(maps: list[dict], layouts_by_id: dict[str, dict],
+                maps_by_symbol: dict[str, dict]) -> list[tuple[tuple[str, int], tuple[str, int]]]:
+    """The cells side by side across every map connection (north, south, east,
+    west; a dive's is not one), each pair once: ((layout, offset), (layout, offset))."""
+    pairs = set()
+    for row in maps:
+        a = layouts_by_id[row["layout"]]
+        for connection in row["connections"] or ():
+            other = maps_by_symbol.get(connection.get("map"))
+            direction = connection.get("direction")
+            if other is None or direction not in ("up", "down", "left", "right"):
+                continue
+            b = layouts_by_id[other["layout"]]
+            aw, ah, bw, bh, shift = a["width"], a["height"], b["width"], b["height"], connection["offset"]
+            if direction in ("left", "right"):
+                ax, bx = (0, bw - 1) if direction == "left" else (aw - 1, 0)
+                found = [(y * aw + ax, (y - shift) * bw + bx) for y in range(ah) if 0 <= y - shift < bh]
+            else:
+                ay, by = (0, bh - 1) if direction == "up" else (ah - 1, 0)
+                found = [(ay * aw + x, by * bw + x - shift) for x in range(aw) if 0 <= x - shift < bw]
+            for offset_a, offset_b in found:
+                pair = ((a["id"], offset_a), (b["id"], offset_b))
+                pairs.add(min(pair, pair[::-1]))
+    return sorted(pairs)
+
+
 def compile_data(root: Path) -> dict:
     root = Path(root)
     rules_root = root / "data/diorama"
@@ -1560,8 +1586,11 @@ def compile_data(root: Path) -> dict:
     level_free_cells = defaultdict(frozenset)
     cave_rock_cells = {}
     terrace_topology = {}
-    for layout in layouts:
-        solved = solve_terrace_topology(cells[layout["id"]], layout["width"], layout["height"])
+
+    def solve_terrain(layout: dict, shifts: dict[int, int] | None = None,
+                      members: dict[int, int] | None = None) -> dict[int, dict]:
+        solved = solve_terrace_topology(cells[layout["id"]], layout["width"], layout["height"],
+                                        shifts=shifts, members=members)
         try:
             # (a mountain's rock reaches no further than its own cells: the
             # sea's rocks and boulders are models, a terrace's course its own)
@@ -1620,7 +1649,25 @@ def compile_data(root: Path) -> dict:
                     mountain_art_cells[layout["id"]] = mountain_art_cells[layout["id"]] | faces
                     mountain_outlines[layout["id"]] = mountain_outline_cells(
                         pixel_summaries[layout["id"]], mountain_art_cells[layout["id"]])
-        terrace_topology[layout["id"]] = solved
+        return solved
+
+    members = {}
+    for layout in layouts:
+        members[layout["id"]] = {}
+        terrace_topology[layout["id"]] = solve_terrain(layout, members=members[layout["id"]])
+    # Where two maps meet, their ground at one level (terrace_topology.seam_shifts,
+    # KNOWN_ISSUES MS-162): each layout is solved alone with its top level 0, so a
+    # map whose top is its cliffs' tops lay under its neighbours (Route 118 a level
+    # under Mauville City, Route 119 and Route 123). The layouts whose ground moves
+    # are solved again with their shifts.
+    shifts = seam_shifts({layout["id"]: {"cells": cells[layout["id"]], "width": layout["width"],
+                                         "height": layout["height"], "members": members[layout["id"]],
+                                         "levels": {offset: entry["groundQ16"] for offset, entry
+                                                    in terrace_topology[layout["id"]].items()},
+                                         "mountains": mountain_art_cells[layout["id"]]}
+                          for layout in layouts}, _seam_pairs(maps, layouts_by_id, maps_by_symbol))
+    for layout_id, layout_shifts in sorted(shifts.items()):
+        terrace_topology[layout_id] = solve_terrain(layouts_by_id[layout_id], shifts=layout_shifts)
 
     source = load_json(rules_root / "defaults.json")
     _unknown(source, {"schemaVersion", "kind", "default", "semanticPools", "profiles",

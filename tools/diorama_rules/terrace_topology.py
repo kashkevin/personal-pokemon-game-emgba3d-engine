@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
 
 
@@ -254,9 +254,15 @@ LEDGE_JUMPS = {
 
 def solve_layout(cells: tuple[dict, ...], width: int, height: int,
                  contradictions: list[tuple[int, ...]] | None = None,
-                 conflict_edges: list[tuple[object, object, int, int]] | None = None
+                 conflict_edges: list[tuple[object, object, int, int]] | None = None,
+                 shifts: dict[int, int] | None = None,
+                 members: dict[int, int] | None = None
                  ) -> dict[int, dict]:
-    """Return solved cells; contradictory connected topology components are omitted."""
+    """Return solved cells; contradictory connected topology components are omitted.
+
+    A component's key is the lowest cell offset in it. shifts: levels a component
+    moves by, by key (seam_shifts). members: filled with each solved region cell's
+    component key."""
     if len(cells) != width * height:
         raise ValueError("terrace topology layout dimensions do not match its cells")
     cardinal = ((0, -1), (1, 0), (0, 1), (-1, 0))
@@ -403,6 +409,9 @@ def solve_layout(cells: tuple[dict, ...], width: int, height: int,
             # grass onto the route went up a level. The component's highest
             # walkable ground lies on the top level then, the art's top over it.
             anchor = max(values[node] for node in component if not isinstance(node, tuple))
+        key = min(node[0] if isinstance(node, tuple) else min(region_cells[node]) for node in component)
+        if shifts:
+            anchor -= shifts.get(key, 0)
         for node in component:
             ground = values[node] - anchor
             if isinstance(node, tuple):
@@ -418,7 +427,233 @@ def solve_layout(cells: tuple[dict, ...], width: int, height: int,
                     solved[offset] = {"groundQ16": ground * 16,
                                       "topQ16": ground * 16,
                                       "profile": "none", "solid": False}
+                    if members is not None:
+                        members[offset] = key
+    # Ground no terrace reaches lies on level 0. Its key: minus one less its
+    # lowest offset (a component's is its lowest offset). A doorway of elevation 0
+    # (the game's any level: a cave mouth) has none: it takes its level from the
+    # ground it is entered from (join_level_free_cells).
+    for node, offsets in region_cells.items():
+        if node in graph or (cells[offsets[0]].get("elevation") == 0 and any(
+                "DOOR" in str(cells[offset].get("behavior") or "")
+                or "WARP" in str(cells[offset].get("behavior") or "") for offset in offsets)):
+            continue
+        key = -min(offsets) - 1
+        if members is not None:
+            for offset in offsets:
+                members[offset] = key
+        if shifts and shifts.get(key):
+            for offset in offsets:
+                solved[offset] = {"groundQ16": shifts[key] * 16, "topQ16": shifts[key] * 16,
+                                  "profile": "none", "solid": False}
     return solved
+
+
+def seam_shifts(layouts: dict[str, dict], seams: list[tuple[tuple[str, int], tuple[str, int]]],
+                rounds: int = 8) -> dict[str, dict[int, int]]:
+    """The levels each map's ground moves by to meet the next maps' ground at its
+    level (KNOWN_ISSUES MS-162). Each layout is solved alone, its top level 0, and
+    where two maps meet their ground could lie a level or two apart: Route 118's
+    route a level under Mauville City, Route 119 and Route 123 round it (its top
+    level is its cliffs' tops), Route 111's south end two under Mauville.
+
+    The ground moves in groups that keep their levels to each other: a terrace
+    component's regions; the components a walkable cell pair or a jump ledge joins
+    in a layout; the ground round one mountain (its art cells: a mountain stands
+    between the levels it divides, Route 116's between its grass and its east
+    plateau, Route 118's cliffs under its lake's plateau); water with the ground
+    round it (a lake lies level with its banks), but for the sea the next maps
+    share. A group with a component in it that meets another map moves when every
+    land cell pair it has with other ground (across the seams, and in its layout
+    across an elevation change) says the same, and no jump ledge between it and
+    other ground then goes up. Ground no terrace reaches and nothing joins to a
+    component (a town, Route 118's corner by Mauville behind its trees) is where
+    the others move to, and what a mountain or water joins to it stays. The open sea is the renderer's (buildings.c lays it at one
+    level); ground another step gave a level (a cave mouth, a lifted cell) has no
+    say.
+
+    layouts: layout id -> {"cells", "width", "height", "members" (solve_layout's:
+    every region cell's key), "levels" (groundQ16 of each cell with a terrace
+    entry), "mountains" (the mountain art cells, optional)}. seams: the cell pairs
+    side by side across the maps' connections. Returns layout id -> {key: levels}
+    for solve_layout's shifts."""
+    free = ("free",)
+
+    def land(lid: str, offset: int) -> bool:
+        cell = layouts[lid]["cells"][offset]
+        behavior = cell.get("behavior")
+        return (cell.get("collision", 0) == 0 and behavior not in WATER_BEHAVIORS
+                and behavior not in LEDGE_JUMPS)
+
+    def unit(lid: str, offset: int):
+        """A region's (lid, key); free for ground of a layout no terrace reaches at
+        all (level 0); None for ground another step gave a level."""
+        key = layouts[lid]["members"].get(offset)
+        if key is not None:
+            return (lid, key)
+        return free if offset not in layouts[lid]["levels"] else None
+
+    def level(lid: str, offset: int) -> int:
+        return round(layouts[lid]["levels"].get(offset, 0) / 16)
+
+    parent: dict[tuple, tuple] = {}
+
+    def find(u: tuple) -> tuple:
+        parent.setdefault(u, u)
+        while parent[u] != u:
+            parent[u] = parent[parent[u]]
+            u = parent[u]
+        return u
+
+    def join(a: tuple, b: tuple) -> None:
+        parent[find(a)] = find(b)
+
+    seam_cells: dict[str, set[int]] = defaultdict(set)
+    for (lid_a, offset_a), (lid_b, offset_b) in seams:
+        seam_cells[lid_a].add(offset_a)
+        seam_cells[lid_b].add(offset_b)
+    pairs: list[tuple[tuple[str, int], tuple[str, int]]] = []
+    ledges: list[tuple[tuple[str, int], tuple[str, int]]] = []
+    # (ground a mountain or water joins to ground no terrace levels stays; ground
+    # another step gave a level follows what it was given it from)
+    pinned: set[tuple] = set()
+    for lid, info in sorted(layouts.items()):
+        cells, width, height = info["cells"], info["width"], info["height"]
+        members = info["members"]
+        for u in {(lid, key) for key in members.values()}:
+            find(u)
+        for offset, cell in enumerate(cells):
+            u = unit(lid, offset) if land(lid, offset) else None
+            if u is not None and u is not free:
+                for n in _neighbours(offset, width, height):
+                    v = unit(lid, n) if land(lid, n) else None
+                    if v is None or v == u or (v is not free and v < u):
+                        continue
+                    if v is not free and u[1] >= 0 and v[1] >= 0:
+                        join(u, v)
+                    else:
+                        pairs.append(((lid, offset), (lid, n)))
+            step = LEDGE_JUMPS.get(cell.get("behavior"))
+            if step is None:
+                continue
+            x, y = offset % width, offset // width
+            tx, ty, lx, ly = x - step[0], y - step[1], x + step[0], y + step[1]
+            if not (0 <= tx < width and 0 <= ty < height and 0 <= lx < width and 0 <= ly < height):
+                continue
+            takeoff, landing = ty * width + tx, ly * width + lx
+            if not (land(lid, takeoff) and land(lid, landing)):
+                continue
+            ut, ul = unit(lid, takeoff), unit(lid, landing)
+            if ut is None or ul is None or ut == ul or ut is free and ul is free:
+                continue
+            if ut is not free and ul is not free and ut[1] >= 0 and ul[1] >= 0:
+                join(ut, ul)
+            else:
+                ledges.append(((lid, takeoff), (lid, landing)))
+        # the ground round each mountain together
+        art = frozenset(info.get("mountains", ()))
+        seen: set[int] = set()
+        for start in sorted(art):
+            if start in seen:
+                continue
+            seen.add(start)
+            pending, around, fixed = deque((start,)), set(), False
+            while pending:
+                offset = pending.popleft()
+                for n in _neighbours(offset, width, height):
+                    if n in art:
+                        if n not in seen:
+                            seen.add(n)
+                            pending.append(n)
+                    elif land(lid, n):
+                        if unit(lid, n) is free:
+                            fixed = True
+                        elif unit(lid, n) is not None:
+                            around.add(unit(lid, n))
+            around = sorted(around)
+            for u in around[1:]:
+                join(around[0], u)
+            if fixed:
+                pinned.update(around)
+        # water with the ground round it (a lake lies level with its banks), but for
+        # the sea the next maps share (the renderer's)
+        waters = defaultdict(list)
+        for offset, key in members.items():
+            if cells[offset].get("behavior") in WATER_BEHAVIORS:
+                waters[key].append(offset)
+        for key, water in sorted(waters.items()):
+            if any(offset in seam_cells[lid] for offset in water):
+                continue
+            banks = {unit(lid, n) for offset in water for n in _neighbours(offset, width, height)
+                     if land(lid, n)}
+            for u in sorted(banks - {None, free}):
+                join((lid, key), u)
+            if free in banks:
+                pinned.update(banks - {None, free} | {(lid, key)})
+    at_seam: set[tuple] = set()
+    for a, b in seams:
+        if land(*a) and land(*b) and unit(*a) is not None and unit(*b) is not None \
+                and not (unit(*a) is free and unit(*b) is free):
+            pairs.append((a, b))
+            at_seam.update(u for u in (unit(*a), unit(*b)) if u is not free)
+
+    shift: dict[tuple, int] = defaultdict(int)
+
+    def group(cell: tuple[str, int]):
+        u = unit(*cell)
+        return None if u is free else find(u)
+
+    def now(cell: tuple[str, int], g) -> int:
+        return level(*cell) + (shift[g] if g is not None else 0)
+
+    pairs_of: dict[tuple, list] = defaultdict(list)
+    for a, b in pairs:
+        ga, gb = group(a), group(b)
+        if ga != gb:
+            for g in {ga, gb} - {None}:
+                pairs_of[g].append((a, ga, b, gb))
+    ledges_of: dict[tuple, list] = defaultdict(list)
+    for takeoff, landing in ledges:
+        gt, gl = group(takeoff), group(landing)
+        if gt != gl:
+            for g in {gt, gl} - {None}:
+                ledges_of[g].append((takeoff, gt, landing, gl))
+
+    def votes(g: tuple) -> Counter:
+        out = Counter()
+        for a, ga, b, gb in pairs_of[g]:
+            mine, other = ((a, ga), (b, gb)) if ga == g else ((b, gb), (a, ga))
+            out[now(*other) - now(*mine)] += 1
+        return out
+
+    def ledges_hold(g: tuple, move: int) -> bool:
+        for takeoff, gt, landing, gl in ledges_of[g]:
+            drop = now(takeoff, gt) - now(landing, gl)
+            after = drop + (move if gt == g else 0) - (move if gl == g else 0)
+            if drop >= 0 > after:
+                return False
+        return True
+
+    terraced = {find(u) for u in parent if u[1] >= 0}
+    groups = sorted({find(u) for u in at_seam} & terraced - {find(u) for u in pinned},
+                    key=lambda g: (-len(pairs_of[g]), str(g)))
+    for _ in range(rounds):
+        moved = False
+        for g in groups:
+            tally = votes(g)
+            if len(tally) != 1:
+                continue
+            move = next(iter(tally))
+            if move != 0 and ledges_hold(g, move):
+                shift[g] += move
+                moved = True
+        if not moved:
+            break
+    out: dict[str, dict[int, int]] = defaultdict(dict)
+    for u in list(parent):
+        if shift[find(u)]:
+            out[u[0]][u[1]] = shift[find(u)]
+    return dict(out)
 
 
 def join_water(cells: tuple[dict, ...], width: int, height: int,

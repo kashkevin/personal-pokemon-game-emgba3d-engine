@@ -8,7 +8,7 @@ from catalog import load_tilesets, load_world
 from compile_rules import _load_cells, parse_behaviors
 from terrace_topology import (CAVE_RISE_Q16, LEDGE_JUMPS, MOUNTAIN_LEDGE_Q16, TERRACE_ROLES,
                               cave_levels, join_level_free_cells, join_water, lift_blocked_cells,
-                              mountain_ledges, role_for_cell, solve_layout)
+                              mountain_ledges, role_for_cell, seam_shifts, solve_layout)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -17,6 +17,19 @@ ROOT = Path(__file__).resolve().parents[2]
 def cell(metatile=113):
     return {"tileset": "gTileset_General", "metatile": metatile,
             "localMetatile": metatile, "behavior": "MB_NORMAL", "elevation": 0}
+
+
+def ground():
+    """Walkable ground of an elevation of its own (no terrace reaches it)."""
+    return dict(cell(113), elevation=3)
+
+
+def seam_layout(cells, width, height, mountains=()):
+    members = {}
+    solved = solve_layout(cells, width, height, members=members)
+    return {"cells": cells, "width": width, "height": height, "members": members,
+            "levels": {offset: entry["groundQ16"] for offset, entry in solved.items()},
+            "mountains": frozenset(mountains)}
 
 
 class TerraceTopologyTests(unittest.TestCase):
@@ -59,6 +72,64 @@ class TerraceTopologyTests(unittest.TestCase):
         solved = solve_layout(cells, 3, 5)
         self.assertEqual([(solved[offset]["groundQ16"], solved[offset]["topQ16"])
                           for offset in (3, 6)], [(-16, 0), (-16, -16)])
+
+    def test_a_component_moves_by_its_shift_and_its_regions_are_named(self):
+        # (the course of test_horizontal_course_raises_complete_upper_region, ground
+        # no terrace reaches under a wall below it)
+        cells = (tuple(cell(113) if y != 1 else cell(121) for y in range(3) for _ in range(3))
+                 + tuple(dict(cell(500), collision=1) for _ in range(3)) + tuple(ground() for _ in range(3)))
+        members = {}
+        solved = solve_layout(cells, 3, 5, members=members)
+        self.assertEqual(members, {**{offset: 0 for offset in (0, 1, 2, 6, 7, 8)},
+                                   **{offset: -13 for offset in (12, 13, 14)}})
+        self.assertTrue(all(offset not in solved for offset in (12, 13, 14)))
+        moved = solve_layout(cells, 3, 5, shifts={0: 1, -13: 2})
+        self.assertEqual([(moved[offset]["groundQ16"], moved[offset]["topQ16"]) for offset in (0, 4, 6, 12)],
+                         [(16, 16), (0, 16), (0, 0), (32, 32)])
+
+    def test_a_maps_ground_moves_to_meet_the_next_maps(self):
+        # MS-162: a route a level under its top (cliffs' tops) meets a town's
+        # ground: the route's component moves up a level.
+        route = tuple(cell(113) if y != 1 else cell(121) for y in range(3) for _ in range(3))
+        town = tuple(ground() for _ in range(3))
+        layouts = {"route": seam_layout(route, 3, 3), "town": seam_layout(town, 3, 1),
+                   "north": seam_layout(town, 3, 1)}
+        south = [(("route", 6 + x), ("town", x)) for x in range(3)]
+        self.assertEqual(seam_shifts(layouts, south), {"route": {0: 1}})
+        # ground of the route at another seam at its level already: they disagree, nothing moves
+        north = [(("route", x), ("north", x)) for x in range(3)]
+        self.assertEqual(seam_shifts(layouts, south + north), {})
+
+    def test_a_move_that_would_make_a_ledge_jump_up_is_refused(self):
+        # ground no terrace reaches, a ledge from it onto the course's top (level
+        # with it), the course, its foot at the seam a level under the town
+        def ledge():
+            return dict(cell(500), behavior="MB_JUMP_SOUTH", collision=1)
+
+        rows = [ground, ledge, lambda: cell(113), lambda: cell(121), lambda: cell(113)]
+        route = tuple(make() for make in rows for _ in range(3))
+        town = tuple(ground() for _ in range(3))
+        south = [(("route", 12 + x), ("town", x)) for x in range(3)]
+        layouts = {"route": seam_layout(route, 3, 5), "town": seam_layout(town, 3, 1)}
+        self.assertEqual(seam_shifts(layouts, south), {})
+        walled = tuple(dict(cell(500), collision=1) if 3 <= offset < 6 else entry
+                       for offset, entry in enumerate(route))
+        layouts["route"] = seam_layout(walled, 3, 5)
+        self.assertEqual(seam_shifts(layouts, south), {"route": {6: 1}})
+
+    def test_the_ground_round_a_mountain_moves_together(self):
+        # the course (columns 0-2), a mountain (column 3), ground no terrace
+        # reaches beyond it (column 4): with the mountain's art the ground beyond
+        # moves with the course
+        route = tuple(dict(cell(500), collision=1) if x == 3 else ground() if x == 4
+                      else cell(121) if y == 1 else cell(113)
+                      for y in range(3) for x in range(5))
+        town = tuple(ground() for _ in range(3))
+        south = [(("route", 10 + x), ("town", x)) for x in range(3)]
+        layouts = {"route": seam_layout(route, 5, 3), "town": seam_layout(town, 3, 1)}
+        self.assertEqual(seam_shifts(layouts, south), {"route": {0: 1}})
+        layouts["route"] = seam_layout(route, 5, 3, mountains=(3, 8, 13))
+        self.assertEqual(seam_shifts(layouts, south), {"route": {0: 1, -5: 1}})
 
     def test_route123_and_route113_ledges_jump_down(self):
         # Route 123's tall grass under its mountain and Route 113's route under its
