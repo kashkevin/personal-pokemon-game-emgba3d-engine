@@ -397,6 +397,14 @@ const struct ItemInfo gItemsInfo[] =
     {
         .name = ITEM_NAME("Dream Ball"),
         .price = 0,
+#ifdef PORTABLE
+        // the owner's decision (2026-10-27): the Gen 8-9 rule, x4 on a sleeping Pokemon (ComputeBallData)
+        .description = COMPOUND_STRING(
+            "A Ball that works\n"
+            "better on Pokémon\n"
+            "that are asleep."),
+#else
+#line 400 // gba-line
         .description = COMPOUND_STRING(
         #if B_DREAM_BALL_MODIFIER >= GEN_8
             "A Ball that works\n"
@@ -407,6 +415,8 @@ const struct ItemInfo gItemsInfo[] =
             "appears in the\n"
             "Entree Forest."),
         #endif
+#endif
+#line 410 // gba-line
         .pocket = POCKET_POKE_BALLS,
         .type = ITEM_USE_BAG_MENU,
         .battleUsage = EFFECT_ITEM_THROW_BALL,
@@ -435,10 +445,20 @@ const struct ItemInfo gItemsInfo[] =
     {
         .name = ITEM_NAME("Sport Ball"),
         .price = (I_PRICE <= GEN_3 || I_PRICE >= GEN_9) ? 0 : 300,
+#ifdef PORTABLE
+        // the owner's decision (2026-10-27): no effect in this game, just for looks (x1 in ComputeBallData)
+        .description = COMPOUND_STRING(
+            "No special effect\n"
+            "in this game. It is\n"
+            "just for looks."),
+#else
+#line 438 // gba-line
         .description = COMPOUND_STRING(
             "A special Ball that\n"
             "is used in the Bug-\n"
             "Catching Contest."),
+#endif
+#line 442 // gba-line
         .pocket = POCKET_POKE_BALLS,
         .type = ITEM_USE_BAG_MENU,
         .battleUsage = EFFECT_ITEM_THROW_BALL,
@@ -451,9 +471,19 @@ const struct ItemInfo gItemsInfo[] =
     {
         .name = ITEM_NAME("Park Ball"),
         .price = 0,
+#ifdef PORTABLE
+        // the owner's decision (2026-10-27): no effect in this game, just for looks (x1 in ComputeBallData)
+        .description = COMPOUND_STRING(
+            "No special effect\n"
+            "in this game. It is\n"
+            "just for looks."),
+#else
+#line 454 // gba-line
         .description = COMPOUND_STRING(
             "A special Poké Ball\n"
             "for the Pal Park."),
+#endif
+#line 457 // gba-line
         .pocket = POCKET_POKE_BALLS,
         .type = ITEM_USE_BAG_MENU,
         .battleUsage = EFFECT_ITEM_THROW_BALL,
@@ -482,10 +512,20 @@ const struct ItemInfo gItemsInfo[] =
     {
         .name = ITEM_NAME("Cherish Ball"),
         .price = 0,
+#ifdef PORTABLE
+        // the owner's decision (2026-10-27): no effect in this game, just for looks (x1 in ComputeBallData)
+        .description = COMPOUND_STRING(
+            "No special effect\n"
+            "in this game. It is\n"
+            "just for looks."),
+#else
+#line 485 // gba-line
         .description = COMPOUND_STRING(
             "A rare Ball crafted\n"
             "to commemorate a\n"
             "special occasion."),
+#endif
+#line 489 // gba-line
         .pocket = POCKET_POKE_BALLS,
         .type = ITEM_USE_BAG_MENU,
         .battleUsage = EFFECT_ITEM_THROW_BALL,

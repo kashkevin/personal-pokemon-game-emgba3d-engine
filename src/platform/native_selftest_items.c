@@ -708,7 +708,8 @@ static void ExpectBall(const char *what, u32 ball, u32 multiplier, u32 divider, 
     Expect(line, got == want);
 }
 
-// The chance a throw catches (no critical capture): 1 at odds 255 or more, else three shakes each holding odds'/65536
+// The chance a throw catches (no critical capture): 1 at odds 255 or more, else four checks (Cmd_handleballthrow's loop
+// to BALL_3_SHAKES_SUCCESS, 4: the three shakes and the click) each holding odds'/65536
 static double CatchChance(u32 odds)
 {
     double shake;
@@ -716,15 +717,15 @@ static double CatchChance(u32 odds)
     if (odds == SURE_CATCH || odds > 254)
         return 1.0;
     shake = MPTest_BallShakeOdds(odds) / 65536.0;
-    return shake * shake * shake;
+    return shake * shake * shake * shake;
 }
 
 int NativeSelfTest_Balls(void)
 {
     static const struct { u16 ball; const char *name; } sPlainBalls[] = {
         {ITEM_POKE_BALL, "Poke Ball"}, {ITEM_PREMIER_BALL, "Premier Ball"}, {ITEM_LUXURY_BALL, "Luxury Ball"},
-        {ITEM_HEAL_BALL, "Heal Ball"}, {ITEM_FRIEND_BALL, "Friend Ball"}, {ITEM_CHERISH_BALL, "Cherish Ball"},
-        {ITEM_PARK_BALL, "Park Ball (outside the Pal Park, no effect)"}, {ITEM_DREAM_BALL, "Dream Ball (awake)"},
+        {ITEM_HEAL_BALL, "Heal Ball"}, {ITEM_FRIEND_BALL, "Friend Ball"}, {ITEM_CHERISH_BALL, "Cherish Ball (no effect in this game)"},
+        {ITEM_PARK_BALL, "Park Ball (no effect in this game)"}, {ITEM_DREAM_BALL, "Dream Ball (awake)"},
         {ITEM_STRANGE_BALL, "Strange Ball (a later game's ball, x1; sold in the coin shop)"},
     };
     u32 i;
@@ -732,6 +733,8 @@ int NativeSelfTest_Balls(void)
     Setup();
     printf("selftest-balls: every Poke Ball's capture odds, Gen 6 rules\n");
     UseMap(MAP_ROUTE101);
+    // the battle's state the Dream Ball's Comatose check reads through GetBattlerAbilityIgnoreMoldBreaker (a battle has it)
+    gBattleStruct = calloc(1, sizeof(*gBattleStruct));
 
     // A catch rate 45 Pokemon at full HP (Bulbasaur), the player's level 50 Treecko
     SetBattle(SPECIES_BULBASAUR, 20, MON_MALE, SPECIES_TREECKO, 50, MON_MALE);
@@ -740,10 +743,10 @@ int NativeSelfTest_Balls(void)
     ExpectBall("Great Ball x1.5", ITEM_GREAT_BALL, 150, 100, 0);
     ExpectBall("Ultra Ball x2", ITEM_ULTRA_BALL, 200, 100, 0);
     ExpectBall("Safari Ball x1.5 (Gen 2-7)", ITEM_SAFARI_BALL, 150, 100, 0);
-    ExpectBall("Sport Ball x1.5 (Gen 2-7)", ITEM_SPORT_BALL, 150, 100, 0);
+    ExpectBall("Sport Ball x1 (no effect in this game: the owner's decision, 2026-10-27)", ITEM_SPORT_BALL, 100, 100, 0);
     Expect("Master Ball: a sure catch", MPTest_CaptureOdds(ITEM_MASTER_BALL, WILD, PLAYER) == SURE_CATCH);
     gBattleMons[WILD].status1 = STATUS1_SLEEP_TURN(3);
-    ExpectBall("Dream Ball on a sleeping Pokemon: only the sleep bonus (x4 is Gen 8)", ITEM_DREAM_BALL, 100, 100, 0);
+    ExpectBall("Dream Ball on a sleeping Pokemon: x4 (the Gen 8-9 rule: the owner's decision, 2026-10-27)", ITEM_DREAM_BALL, 400, 100, 0);
     ExpectBall("asleep: x2.5 for any ball (Poke Ball)", ITEM_POKE_BALL, 100, 100, 0);
     gBattleMons[WILD].status1 = STATUS1_PARALYSIS;
     ExpectBall("paralysed: x1.5 for any ball (Great Ball)", ITEM_GREAT_BALL, 150, 100, 0);
@@ -884,6 +887,8 @@ int NativeSelfTest_Balls(void)
                CatchChance(10) < CatchChance(100) && CatchChance(100) < CatchChance(200) && CatchChance(255) == 1.0);
     }
     gBattleTypeFlags = 0;
+    free(gBattleStruct);
+    gBattleStruct = NULL;
     printf("selftest-balls: %d checks, %d failed\n", sChecks, sFailures);
     return sFailures == 0 ? 0 : 1;
 }
@@ -1116,22 +1121,22 @@ int NativeSelfTest_Healing(void)
     ExpectFriendship("Revival Herb", ITEM_REVIVAL_HERB, 0, 0, 250, 230);
     ExpectFriendship("Energy Powder at friendship 3: not below 0", ITEM_ENERGY_POWDER, 1, 0, 3, 0);
     ExpectFriendship("Potion: no friendship change", ITEM_POTION, 1, 0, 150, 150);
-    // A finding, measured and printed, not a check: CalculateFriendshipBonuses adds the met-here bonus (and the Luxury
-    // Ball's) to a friendship loss too, so a herbal medicine costs less for a Pokemon met on the current map; the
-    // official games add those bonuses only to a gain
+    // MS-150 (the owner's decision, 2026-10-27): the met-here bonus and the Luxury Ball's add to a gain only, as in the
+    // official games, so a herbal medicine costs its whole 5 or 10 for a Pokemon met on the current map or in a Luxury
+    // Ball too (CalculateFriendshipBonuses; before the fix, 146 and 141)
     {
         u8 here = GetCurrentRegionMapSectionId(), friendship = 150, luxury = BALL_LUXURY;
 
         mon = HealMon(1, 0, friendship);
         SetMonData(mon, MON_DATA_MET_LOCATION, &here);
         PokemonUseItemEffects(mon, ITEM_ENERGY_POWDER, 0, 0, FALSE);
-        printf("     note: Energy Powder on a Pokemon met on this map: friendship 150 -> %u (the official rule: 145)\n",
-               (unsigned)GetMonData(mon, MON_DATA_FRIENDSHIP));
+        Expect("Energy Powder on a Pokemon met on this map: friendship 150 -> 145 (no bonus on a loss)",
+               GetMonData(mon, MON_DATA_FRIENDSHIP) == 145);
         mon = HealMon(1, 0, friendship);
         SetMonData(mon, MON_DATA_POKEBALL, &luxury);
         PokemonUseItemEffects(mon, ITEM_ENERGY_ROOT, 0, 0, FALSE);
-        printf("     note: Energy Root on a Pokemon in a Luxury Ball: friendship 150 -> %u (the official rule: 140)\n",
-               (unsigned)GetMonData(mon, MON_DATA_FRIENDSHIP));
+        Expect("Energy Root on a Pokemon in a Luxury Ball: friendship 150 -> 140 (no bonus on a loss)",
+               GetMonData(mon, MON_DATA_FRIENDSHIP) == 140);
     }
 
     // PP: Ether and Max Ether on one move, Elixir and Max Elixir on all four (from 0 PP; Tackle 35, Surf 15, Thunder 10,

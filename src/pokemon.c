@@ -5000,6 +5000,13 @@ s32 CalculateFriendshipBonuses(struct Pokemon *mon, s32 modifier, enum HoldEffec
 
     if (modifier == 0)
         return bonus;
+#ifdef PORTABLE
+    // MS-150, the owner's decision (2026-10-27): as in the official games, the Luxury Ball's and the met location's
+    // bonuses add to a gain only, never to a loss (an herbal medicine costs its whole 5 or 10)
+    if (modifier < 0)
+        return bonus;
+#endif
+#line 4946 // gba-line
 
     if (GetMonData(mon, MON_DATA_POKEBALL) == BALL_LUXURY)
         bonus += ITEM_FRIENDSHIP_LUXURY_BONUS;

@@ -227,7 +227,6 @@ MauvilleCity_GameCorner_Pokemart_RareGoodsOther::
 	.2byte ITEM_SAFARI_BALL
 	.2byte ITEM_SPORT_BALL
 	.2byte ITEM_PARK_BALL
-	.2byte ITEM_BEAST_BALL
 	.2byte ITEM_CHERISH_BALL
 	.2byte ITEM_SWEET_HEART
 	.2byte ITEM_PEWTER_CRUNCHIES

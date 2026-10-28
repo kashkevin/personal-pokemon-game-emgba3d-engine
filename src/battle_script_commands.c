@@ -8182,8 +8182,16 @@ static void ComputeBallData(u32 wildMonBattler, u32 playerBattler, struct BallDa
         }
         break;
     case BALL_DREAM:
+#ifdef PORTABLE
+        // The owner's decision (2026-10-27): the Gen 8-9 rule on PC (this game follows Gen 6, where the ball is x1)
+        if (battleMon->status1 & STATUS1_SLEEP || GetBattlerAbilityIgnoreMoldBreaker(wildMonBattler) == ABILITY_COMATOSE)
+            ball->multiplier = 400;
+#else
+#line 8024 // gba-line
         if (B_DREAM_BALL_MODIFIER >= GEN_8 && (battleMon->status1 & STATUS1_SLEEP || (GetBattlerAbilityIgnoreMoldBreaker(wildMonBattler) == ABILITY_COMATOSE)))
             ball->multiplier = 400;
+#endif
+#line 8026 // gba-line
         break;
     case BALL_SAFARI:
         if (B_SAFARI_BALL_MODIFIER == GEN_1)
@@ -8192,8 +8200,15 @@ static void ComputeBallData(u32 wildMonBattler, u32 playerBattler, struct BallDa
             ball->multiplier = 150;
         break;
     case BALL_SPORT:
+#ifdef PORTABLE
+        // The owner's decision (2026-10-27): no effect in this game (x1), as its description says; the Park and Cherish
+        // Balls are x1 as well
+#else
+#line 8034 // gba-line
         if (B_SPORT_BALL_MODIFIER <= GEN_7)
             ball->multiplier = 150;
+#endif
+#line 8036 // gba-line
         break;
     case BALL_BEAST:
         ball->multiplier = 410;

@@ -402,6 +402,8 @@ UNUSABLE = {
     "for Pokemon no one can own here (Gen 7-9 forms)": (r"_MEMORY$", r"NECTAR$", r"_SWEET$", r"MASK$", r"^ITEM_BOOSTER_ENERGY$",
                                                         r"^ITEM_GIMMIGHOUL_COIN$"),
     "a placeholder (a TM slot that teaches nothing)": (r"^ITEM_TM(5[1-9]|[6-9]\d|100)$",),
+    # the owner, 2026-10-27: "remove beast ball" (x0.1 on anything but an Ultra Beast, which no one meets here)
+    "taken out of the shop (the owner's decision: x0.1 on every Pokemon met here)": (r"^ITEM_BEAST_BALL$",),
 }
 
 # The clerk's lists: (label suffix, its name in the clerk's menu)
@@ -441,7 +443,7 @@ BANDS = (
     ("Berries", 750, ("^ITEM_(GANLON|SALAC|PETAYA|APICOT|MICLE|CUSTAP|JABOCA|ROWAP|KEE|MARANGA|ENIGMA|LANSAT|STARF)_BERRY$",)),
     ("Held", 450, ("_GEM$", "^ITEM_FAIRY_FEATHER$")),
     ("Berries", 375, ("_BERRY$",)),
-    ("Other", 375, ("^ITEM_(DUSK|QUICK|DREAM|BEAST)_BALL$",)),
+    ("Other", 375, ("^ITEM_(DUSK|QUICK|DREAM)_BALL$",)),
     ("Training", 300, ("_MOCHI$", "^ITEM_EXP_CANDY_M$")),
     ("Other", 225, ("^ITEM_MAX_LURE$",)),
     ("Other", 150, ("_BALL$", "^ITEM_SUPER_LURE$")),
