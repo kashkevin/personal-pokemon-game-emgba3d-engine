@@ -47,8 +47,8 @@ def role_for_cell(cell: dict) -> TerraceRole | None:
 
 # General's terrace stairs (the transitions above).
 GENERAL_STAIRS = frozenset({175, 207})
-# A mountain's walkable top stands this much over the ground its stairs climb
-# from (mountain_ledges): one level, the height of the mountain's rock.
+# A mountain's walkable top stands this much over the ground or top its stairs
+# climb from (mountain_ledges): one level a climb.
 MOUNTAIN_LEDGE_Q16 = 16
 
 
@@ -71,6 +71,56 @@ def _neighbours(offset: int, width: int, height: int):
             yield ny * width + nx
 
 
+def rock_tops(rock: frozenset[int], ground: dict[int, int], width: int, height: int,
+              floor: int) -> dict[int, int]:
+    """The top of each cell of `rock` (blocked cells side by side: a mountain's),
+    in Q16, from the walkable `ground` beside it, each cell the top it asks the
+    rock beside it to have (a path on the mountain's top its own level, other
+    ground a level over it): the lowest asked by the walkable cells nearest it
+    through the rock (a mountain's top lies level with the paths it meets, as
+    the game draws it), or, where a higher top is near, that top less a level a
+    cell away from it (the game draws a cliff's face a tile a level: three rows
+    of rock under a plateau three levels up descend a level a row to the
+    ground), whichever is higher, at least `floor`. Cells the ground does not
+    reach through the rock get `floor`."""
+    def neighbours(offset: int):
+        x, y = offset % width, offset // width
+        for nx, ny in ((x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y)):
+            if 0 <= nx < width and 0 <= ny < height:
+                yield ny * width + nx
+
+    # distance through the rock to the nearest walkable cell of each level
+    distance: dict[int, dict[int, int]] = {}
+    for level in sorted(set(ground.values())):
+        seen = {}
+        frontier = sorted({neighbor for offset, value in ground.items() if value == level
+                           for neighbor in neighbours(offset) if neighbor in rock})
+        for offset in frontier:
+            seen[offset] = 1
+        step = 1
+        while frontier:
+            step += 1
+            ring = []
+            for offset in frontier:
+                for neighbor in neighbours(offset):
+                    if neighbor in rock and neighbor not in seen:
+                        seen[neighbor] = step
+                        ring.append(neighbor)
+            frontier = ring
+        distance[level] = seen
+    tops: dict[int, int] = {}
+    for offset in rock:
+        reach = {level: seen[offset] for level, seen in distance.items() if offset in seen}
+        if not reach:
+            tops[offset] = floor
+            continue
+        nearest = min(reach.values())
+        flat = min(level for level, steps in reach.items() if steps == nearest)
+        face = max(level - MOUNTAIN_LEDGE_Q16 * (steps - 1) for level, steps in reach.items())
+        tops[offset] = max(floor, flat, face)
+    return tops
+
+
 def mountain_ledges(cells: tuple[dict, ...], width: int, height: int,
                     solved: dict[int, dict]) -> dict[int, dict]:
     """A mountain's walkable top on the mountain: Route 112's plateau (the cable
@@ -82,17 +132,25 @@ def mountain_ledges(cells: tuple[dict, ...], width: int, height: int,
     muddy slope (Route 111's rock plateau north of the desert: it has two and no
     stairs, so it lay on the desert's level inside its rock, a pit); where no
     terrace solves them (solve_layout), the walkable region at the stairs' top that is mostly
-    MB_MOUNTAIN_TOP stands MOUNTAIN_LEDGE_Q16 over the region at their foot (its
-    own level, 0) and the stairs rise between the two over their rows. The
-    mountain's rock, one mass a level high (compile_rules._mountain_masses),
-    then lies level with that top. A region is walkable cells side by side at
-    one elevation, a cell at elevation 0 (the game's "any level": a doorway, a
-    cave mouth) joining any; a ledge (MB_JUMP_*) bounds them. Only a mountain of
-    one walkable level: where stairs climb from one such top to another (Route
-    115's second plateau) the layout keeps its levels (the rock is one mass a
-    level high, so a second level would stand over it), and so does a raised
-    top that meets other walkable ground at its side without stairs. Returns
-    the raised cells' entries, the stairs' with their rise."""
+    MB_MOUNTAIN_TOP stands MOUNTAIN_LEDGE_Q16 over the region at their foot and
+    the stairs rise between the two over their rows. A region is walkable cells
+    side by side at one elevation, a cell at elevation 0 (the game's "any
+    level": a doorway, a cave mouth) joining any; a ledge (MB_JUMP_*) bounds
+    them. Ground that is not mostly the mountain's top lies on its own level
+    (0), and a mountain of several tops climbs from it a level a climb: Route
+    115's stairs up to its plateau, a row of stairs down from that to a lower
+    top, a muddy slope up to a third (Route 114's five levels the same). The
+    mountain's rock (compile_rules._mountain_masses) then rises to each top.
+    Two regions side by side at two elevations (the game lets no one cross)
+    can lie at two levels where the south one is the higher: the game draws its
+    top's edge there. Where the climbs give one region two levels, or put a top
+    under the ground, or a top's south edge on lower walkable ground (no face
+    for it), or a step where the game lets one walk across (elevation 15, a
+    bridge's: Route 119's top runs onto its bridge over the forest), the layout
+    keeps its levels. (The game draws a face a tile a level, its stairs a row a
+    tile: Route 112's climb three rows, Route 115's two and one. A level a
+    climb keeps Route 111's and Route 112's plateaus a level up, as they were.)
+    Returns the raised cells' entries, the stairs' with their rise."""
     def walkable(offset: int) -> bool:
         cell = cells[offset]
         return (cell.get("collision", 0) == 0 and offset not in solved
@@ -124,7 +182,7 @@ def mountain_ledges(cells: tuple[dict, ...], width: int, height: int,
     mountain_top = [2 * sum(cells[offset].get("behavior") == "MB_MOUNTAIN_TOP" for offset in region)
                     >= len(region) for region in regions]
 
-    raised: dict[int, list[list[int]]] = defaultdict(list)
+    climbs: list[tuple[int, int, list[int]]] = []  # the region at the top, the one at the foot, the run
     seen: set[int] = set()
     for start in sorted(stairs):
         if start in seen:
@@ -148,38 +206,73 @@ def mountain_ledges(cells: tuple[dict, ...], width: int, height: int,
         upper, lower = next(iter(north)), next(iter(south))
         if not mountain_top[upper]:
             continue  # stairs between ordinary ground: the terrace solver's
-        if mountain_top[lower]:
-            return {}  # a second level on the mountain
-        raised[upper].append(run)
-    if not raised:
-        return {}
-    for index in raised:
-        for offset in regions[index]:
-            for neighbor in _neighbours(offset, width, height):
-                if (neighbor in region_of and region_of[neighbor] not in raised
-                        and neighbor not in stairs):
-                    return {}  # a step between walkable cells with no stairs
+        climbs.append((upper, lower, run))
+    # Each region's level, from the ground up a level a climb (a mountain's tops
+    # that no climb joins to the ground keep theirs)
+    steps: dict[int, list[tuple[int, int]]] = defaultdict(list)
+    for upper, lower, _ in climbs:
+        steps[lower].append((upper, 1))
+        steps[upper].append((lower, -1))
+    level = {index: 0 for index in steps if not mountain_top[index]}
+    pending = deque(sorted(level))
+    while pending:
+        index = pending.popleft()
+        for other, step in steps[index]:
+            if other not in level:
+                level[other] = level[index] + step
+                pending.append(other)
+            elif level[other] != level[index] + step:
+                return {}  # two levels for one region
+    if not any(level.values()) or min(level.values()) < 0:
+        return {}  # nothing raised, or a top under the ground
+    for offset, index in region_of.items():
+        for neighbor in ((offset + 1) if (offset + 1) % width else None,
+                         (offset + width) if offset + width < len(cells) else None):
+            if neighbor is None or region_of.get(neighbor, index) == index:
+                continue
+            mine, theirs = level.get(index, 0), level.get(region_of[neighbor], 0)
+            if mine == theirs:
+                continue
+            if 15 in (cells[offset].get("elevation"), cells[neighbor].get("elevation")):
+                return {}  # a step where the game lets one walk across (a bridge's elevation)
+            if neighbor == offset + width and mine > theirs:
+                return {}  # a top's south edge on lower walkable ground
     # A pocket of the top that no one walks into (walkable cells, mostly MB_MOUNTAIN_TOP, blocked on every side: three
-    # cells south of Route 111's plateau) lies on the raised level too; on the ground's it was a pit in the rock.
-    pockets = [index for index, region in enumerate(regions)
-               if index not in raised and mountain_top[index]
+    # cells south of Route 111's plateau) lies where the rock round it does (rock_tops, through the rock and other
+    # pockets); on the ground's level it was a pit in the rock.
+    pockets = {index for index, region in enumerate(regions)
+               if index not in level and mountain_top[index]
                and all(region_of.get(neighbor) == index or cells[neighbor].get("collision", 0) != 0
-                       for offset in region for neighbor in _neighbours(offset, width, height))]
+                       for offset in region for neighbor in _neighbours(offset, width, height))}
+    raised = {index: value for index, value in level.items() if value}
+    if pockets:
+        rock = frozenset(offset for offset in range(len(cells))
+                         if cells[offset].get("collision", 0) != 0
+                         or region_of.get(offset) in pockets)
+        tops = rock_tops(rock, {offset: MOUNTAIN_LEDGE_Q16 * level.get(index, 0)
+                                + (0 if cells[offset].get("behavior") == "MB_MOUNTAIN_TOP"
+                                   else MOUNTAIN_LEDGE_Q16)
+                                for offset, index in region_of.items() if index not in pockets},
+                         width, height, MOUNTAIN_LEDGE_Q16)
+        for index in sorted(pockets):
+            raised[index] = max(tops.get(offset, MOUNTAIN_LEDGE_Q16) for offset in regions[index]) // MOUNTAIN_LEDGE_Q16
     out: dict[int, dict] = {}
-    for index in list(raised) + pockets:
+    for index, value in raised.items():
         for offset in regions[index]:
-            out[offset] = {"groundQ16": MOUNTAIN_LEDGE_Q16, "topQ16": MOUNTAIN_LEDGE_Q16,
+            out[offset] = {"groundQ16": MOUNTAIN_LEDGE_Q16 * value, "topQ16": MOUNTAIN_LEDGE_Q16 * value,
                            "profile": "none", "solid": False}
-    for index, runs in raised.items():
-        for run in runs:
-            rows = sorted({offset // width for offset in run}, reverse=True)  # south first
-            for offset in run:
-                step = rows.index(offset // width)
-                ground = round(MOUNTAIN_LEDGE_Q16 * step / len(rows))
-                top = round(MOUNTAIN_LEDGE_Q16 * (step + 1) / len(rows))
-                out[offset] = {"groundQ16": ground, "topQ16": top,
-                               "profile": "transition-horizontal", "solid": False,
-                               "rise": top - ground}
+    for upper, lower, run in climbs:
+        if lower not in level:
+            continue
+        base = MOUNTAIN_LEDGE_Q16 * level[lower]
+        rows = sorted({offset // width for offset in run}, reverse=True)  # south first
+        for offset in run:
+            step = rows.index(offset // width)
+            ground = base + round(MOUNTAIN_LEDGE_Q16 * step / len(rows))
+            top = base + round(MOUNTAIN_LEDGE_Q16 * (step + 1) / len(rows))
+            out[offset] = {"groundQ16": ground, "topQ16": top,
+                           "profile": "transition-horizontal", "solid": False,
+                           "rise": top - ground}
     return out
 
 

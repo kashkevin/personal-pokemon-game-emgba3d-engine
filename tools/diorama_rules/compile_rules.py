@@ -23,7 +23,7 @@ from profiles import NOMINAL_HEIGHTS, TileShape, shape_from_action
 from pixel_objects import UPRIGHT_CLASSES as UPRIGHT_PIXEL_CLASSES, extract_layout
 from structures import analyze_layout
 from terrace_topology import (WATER_BEHAVIORS, cave_levels, join_level_free_cells, join_water,
-                              lift_blocked_cells, mountain_ledges, seam_shifts,
+                              lift_blocked_cells, mountain_ledges, rock_tops, seam_shifts,
                               solve_layout as solve_terrace_topology)
 from tile_shape import ClassificationError, TileShapeClassifier
 
@@ -1311,7 +1311,8 @@ def _reefs_at_sea_level(cells: tuple[dict, ...], width: int, height: int,
 
 def _mountain_masses(cells: tuple[dict, ...], width: int, height: int,
                      mountain: frozenset[int], solved: dict[int, dict],
-                     exclude: frozenset[int] = frozenset()) -> dict[int, dict]:
+                     exclude: frozenset[int] = frozenset(),
+                     climbed: frozenset[int] = frozenset()) -> dict[int, dict]:
     """A mountain whose walkable top is a level over the ground round it
     stands as one mass, level with that top. Its blocked rock took the level of
     the walkable ground nearest each cell (terrace_topology.lift_blocked_cells),
@@ -1325,10 +1326,18 @@ def _mountain_masses(cells: tuple[dict, ...], width: int, height: int,
     (its cells side by side) whose walkable ground lies on one level, or on two
     a level apart with the upper mostly its own walkable top (MB_MOUNTAIN_TOP),
     now stands on the lower and reaches a level over it: its paths lie level
-    with its top, as the game draws them. Any other piece keeps its cells'
-    entries (Route 111's rock runs the length of the map, beside a desert on the
-    top level and lower ground far off), and so does one beside water (an
-    island, a coast: the sea's levels are its own) or on part levels.
+    with its top, as the game draws them. One that meets a top two or more
+    levels up that the mountain's stairs climb to (`climbed`: mountain_ledges,
+    a level a climb: Route 115's, Route 114's) stands on its lowest ground,
+    each cell as high as the walkable ground nearest it asks - level with a
+    path on the mountain's top, a level over other ground - or on a face down
+    from a higher top (terrace_topology.rock_tops), the sea beside it or not:
+    lifted cell by cell, its rock stood with its foot a level over the rock
+    beside it, nothing under it, the sky between (Route 114's). Any other piece
+    keeps its cells' entries (Route 111's rock runs the length of the map,
+    beside a desert on the top level and lower ground far off), and so does one
+    beside water (an island, a coast: the sea's levels are its own) or on part
+    levels.
     Walkable ground with no level of its own lies on the top level (0); the
     stairs and terrace stones between two levels and `exclude` (the sea's rocks
     and reefs) are not its ground. Returns the pieces' entries."""
@@ -1365,22 +1374,32 @@ def _mountain_masses(cells: tuple[dict, ...], width: int, height: int,
                     continue
                 touching[entry["groundQ16"] if entry is not None else 0].add(neighbor)
         levels = sorted(touching)
-        if sea or not levels or len(levels) > 2 or any(level % 16 for level in levels):
+        if not levels or any(level % 16 for level in levels):
             continue
-        if len(levels) == 2:
-            upper = touching[levels[1]]
-            if (levels[1] - levels[0] != 16
-                    or 2 * sum(cells[offset].get("behavior") == "MB_MOUNTAIN_TOP"
-                               for offset in upper) < len(upper)):
-                continue
         ground = levels[0]
-        top = ground + 16
+        if levels[-1] - ground > 16 and any(level >= 32 and offsets & climbed
+                                            for level, offsets in touching.items()):
+            tops = rock_tops(frozenset(piece),
+                             {offset: level + (0 if cells[offset].get("behavior") == "MB_MOUNTAIN_TOP"
+                                               else 16)
+                              for level, offsets in touching.items() for offset in offsets},
+                             width, height, ground + 16)
+        else:
+            if sea or len(levels) > 2:
+                continue
+            if len(levels) == 2:
+                upper = touching[levels[1]]
+                if (levels[1] - levels[0] != 16
+                        or 2 * sum(cells[offset].get("behavior") == "MB_MOUNTAIN_TOP"
+                                   for offset in upper) < len(upper)):
+                    continue
+            tops = dict.fromkeys(piece, ground + 16)
         for offset in piece:
-            placed[offset] = top
+            placed[offset] = tops[offset]
             # (a cell already where its record puts it - the rock a level over
             # the top level, no entry - is left alone)
-            if offset in solved or (ground, top) != (0, 16):
-                out[offset] = {"groundQ16": ground, "topQ16": top, "profile": "none",
+            if offset in solved or (ground, tops[offset]) != (0, 16):
+                out[offset] = {"groundQ16": ground, "topQ16": tops[offset], "profile": "none",
                                "solid": False, "mass": True}
     # What stands on the mountain - its trees, a boulder in its face, side by
     # side - stands on its top when the only walkable ground beside it is that
@@ -1584,6 +1603,7 @@ def compile_data(root: Path) -> dict:
     mountain_art_cells = {}
     mountain_outlines = {}
     level_free_cells = defaultdict(frozenset)
+    mountain_climbs = defaultdict(frozenset)  # mountain_ledges' cells
     cave_rock_cells = {}
     terrace_topology = {}
 
@@ -1628,8 +1648,9 @@ def compile_data(root: Path) -> dict:
             # from (terrace_topology.mountain_ledges: Route 112's plateau), and a
             # walkable cell of no elevation in its face (a cave mouth) on the level
             # beside it (join_level_free_cells).
-            solved = {**solved, **mountain_ledges(cells[layout["id"]], layout["width"],
-                                                  layout["height"], solved)}
+            climbed = mountain_ledges(cells[layout["id"]], layout["width"], layout["height"], solved)
+            mountain_climbs[layout["id"]] = frozenset(climbed)
+            solved = {**solved, **climbed}
             mouths = join_level_free_cells(cells[layout["id"]], layout["width"],
                                            layout["height"], solved,
                                            beside=mountain_art_cells[layout["id"]])
@@ -1929,7 +1950,8 @@ def compile_data(root: Path) -> dict:
                     **_mountain_masses(layout_cells, layout["width"], layout["height"],
                                        mountain_art_cells[layout["id"]],
                                        terrace_topology[layout["id"]],
-                                       exclude=frozenset(reefs) | rocks)}
+                                       exclude=frozenset(reefs) | rocks,
+                                       climbed=mountain_climbs[layout["id"]])}
             wildcard = tuple(_with_mountain_art(
                 shape, cell, offset in mountain_art_cells[layout["id"]],
                 offset in mountain_outlines[layout["id"]])

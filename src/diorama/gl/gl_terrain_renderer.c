@@ -1391,7 +1391,17 @@ static float RockMassFoot(const struct DioramaTerrainChunkInput *input, int x, i
     if (!other->present)
         return 0.0f;
     if (other->rockMass && other->groundHeight == cell->groundHeight)
-        return -1.0f;
+    {
+        /* one mass: joined, but a mountain of several tops (Route 115's: the
+         * rules' _mountain_masses) rises from the lower rock beside it, from
+         * that rock's top, as from ground there (an outline's rock edge stays
+         * joined) */
+        if (other->rockMass == ROCK_MASS_OUTLINE || cell->rockMass == ROCK_MASS_OUTLINE
+         || other->visualHeight >= cell->visualHeight)
+            return -1.0f;
+        foot = (other->visualHeight - cell->groundHeight) * DIORAMA_VOXELS_PER_CELL;
+        return foot < 0.0f ? 0.0f : foot > rise ? rise : foot;
+    }
     foot = (other->groundHeight - cell->groundHeight) * DIORAMA_VOXELS_PER_CELL;
     return foot < 0.0f ? 0.0f : foot > rise ? rise : foot;
 }
@@ -1421,11 +1431,12 @@ static float RockMassSide(float level, float foot, float t, float top)
  * ground, rising to it from the mass's foot: over the whole cell where the
  * mass ends to the south (the face the GBA draws there: the drawing lies on
  * the slope), within ROCK_MASS_EDGE pixels elsewhere, rounded at the corners;
- * inside the mass it runs on level from cell to cell. The foot on each side is
- * the ground beside it (RockMassFoot): a path level with the rock's top meets
- * it flat. The cell's own relief (BuildMountainArtMask) stands on it. A cell's
- * heights depend only on it and its eight neighbours, so a chunk's halo is all
- * it needs. */
+ * inside the mass it runs on level from cell to cell, and where a mountain of
+ * several tops climbs from lower rock to higher the higher rises from the
+ * lower's top so. The foot on each side is the ground beside it
+ * (RockMassFoot): a path level with the rock's top meets it flat. The cell's
+ * own relief (BuildMountainArtMask) stands on it. A cell's heights depend
+ * only on it and its eight neighbours, so a chunk's halo is all it needs. */
 static void ShapeRockMasses(struct DioramaTerrainChunkInput *input)
 {
     for (int y = 0; y < DIORAMA_TERRAIN_INPUT_SIZE; y++)

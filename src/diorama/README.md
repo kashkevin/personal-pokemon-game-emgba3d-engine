@@ -478,11 +478,18 @@ of terraced walls; Route 112's rock was still a maze of walls.
   whose walkable ground lies on one level, or on two a level apart with the
   upper mostly its own walkable top (MB_MOUNTAIN_TOP), stands from the lower to
   a level over it, its paths level with its top; what stands on it with no
-  other walkable ground beside it (trees, boulders) on its top. Other pieces
-  keep their cells' levels: one among ground on three levels, beside water (an
-  island's sea has levels of its own), on part levels, or whose upper ground is
-  no path of its own (Route 111's rock runs the length of the map beside a
-  desert on the top level).
+  other walkable ground beside it (trees, boulders) on its top. A piece that
+  meets a top its stairs climb to two levels up or more (`mountain_ledges`:
+  Routes 114 and 115) stands on its lowest ground too, each cell as high as
+  the walkable ground nearest it asks - level with a path on the mountain's
+  top, a level over other ground - or on a face down from a higher top, a level
+  a cell (`terrace_topology.py` `rock_tops`), beside water or not: lifted cell
+  by cell, Route 114's rock stood with its foot a level over the rock beside
+  it, nothing under it (the mesh draws rock from a voxel under its ground: the
+  sky between). Other pieces keep their cells' levels: one among ground on three
+  levels, beside water (an island's sea has levels of its own), on part levels,
+  or whose upper ground is no path of its own (Route 111's rock runs the length
+  of the map beside a desert on the top level).
 * The rock beside a ledge path (`mountain_art.py` `faces_between_levels`): a
   blocked cell drawn in the mountain's palette beside its walkable top, whose
   walkable neighbours lie on two levels, is the mountain's rock.
@@ -493,10 +500,20 @@ of terraced walls; Route 112's rock was still a maze of walls.
   terrace solver, climb from ordinary ground to a region that is mostly
   MB_MOUNTAIN_TOP, that region stands a level over the ground (cells of
   elevation 0 - doorways, the Fiery Path's mouth - join a region) and the stairs
-  rise over their rows (Route 112's three: 5, 6 and 5 sixteenths). Only a
-  mountain of one walkable level: stairs from one such top to another (Routes
-  114, 115) or a raised top meeting other ground beside it without stairs keep
-  the layout's levels.
+  rise over their rows (Route 112's three: 5, 6 and 5 sixteenths). A mountain of
+  several tops climbs a level a climb (KNOWN_ISSUES MS-153): Route 115's plateau
+  a level up its two rows of stairs, a lower top on the grass's level a row of
+  stairs under it, the muddy slope (28,8-9) a ramp up to a top two levels up;
+  Route 114's mountain five levels. A top may meet walkable ground of another
+  elevation (which the game lets no one cross) at its north edge or side, where
+  the game draws its edge; where the climbs give a region two levels, put a top
+  under the ground, a top's south edge on lower walkable ground, or a step where
+  the game lets one walk across (elevation 15, a bridge's: Route 119's top runs
+  onto its bridge over the forest), the layout keeps its levels. A pocket of a top
+  no one walks into (blocked all round) lies where the rock round it does
+  (`rock_tops`). The game draws a face a tile a level and its stairs a row a tile
+  (Route 112's climb three rows, Route 115's two and one); a level a climb keeps
+  Route 111's and Route 112's plateaus where they were, a level up.
 * A cave mouth on its ground (`terrace_topology.py` `join_level_free_cells`): a
   doorway or warp of elevation 0 in a mountain's face whose dry walkable
   neighbours offer one whole level takes it (Rusturf Tunnel's two mouths a level
@@ -527,7 +544,10 @@ of terraced walls; Route 112's rock was still a maze of walls.
   mass's slope comes down to the ground beside it on each side, not always to
   its own foot, so a path level with its top meets it flat instead of a groove
   a level deep along it; a rock edge's ground part (an outline cell) lies on
-  the lowest ground beside it, not a level below the grass it belongs to.
+  the lowest ground beside it, not a level below the grass it belongs to. In a
+  mountain of several tops a cell of the mass rises from the lower rock beside
+  it as from ground there (from that rock's top), rounded, not a sheer wall (no
+  mass had cells of two tops before).
 * Models (`gl_building_renderer.c` `PlacementGround`): a model stands on the
   ground under its door, the highest walkable cell of its bottom row, as the
   comment said; the bottom-left cell was a wall of Route 112's station, drawn
@@ -635,10 +655,11 @@ of terraced walls; Route 112's rock was still a maze of walls.
   `DioramaRules_LedgeCrest`): another player and their Pokemon are replayed across a ledge a step
   at a time (`multiplayer.c`, `multiplayer_world.c` `StepToward`) and stood at its record's
   height, two voxels into the crest. Ledges read no pixels for their shape now (`CellReadsPixels`).
-* Not covered: the 37 slopes drawn flat (Jagged Pass's and the Safari Zone's bumpy slopes,
-  the muddy slopes of Routes 115 and 119, Granite Cave and the Safari Zone, Sootopolis
-  Gym's slides) have both ends on one level in the terrace solver's levels; they need it to
-  split them (Route 111's muddy slopes, on two levels, already rise as ramps). The 47
+* Not covered: the 35 slopes drawn flat (Jagged Pass's and the Safari Zone's bumpy slopes,
+  the muddy slopes of Route 119, Granite Cave and the Safari Zone, Sootopolis Gym's slides)
+  have both ends on one level in the terrace solver's levels; they need it to split them
+  (Route 111's muddy slopes, on two levels, already rise as ramps, and Route 115's since
+  MS-153's mountain levels). The 47
   ledges in caves the game never jumps stand as rock as before. The 48 ledges of the four
   modelled rooms that have any (Fortree Gym 15, Lavaridge Gym 1F 7 and B1F 15, the Trick
   House's fourth puzzle 11: `battle_room_specs.py` `AUTO_ROOMS`) are the rooms' models, cut from

@@ -126,7 +126,14 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         # (the blocked ones: about 16,600 records; the walkable ones are ground, below)
         self.assertGreater(len(mountains), 15000)
         self.assertEqual({record["class"] for record in mountains}, {"cliff"})
-        self.assertEqual({record["heightQ16"] for record in mountains}, {16})
+        # one block, but the rock of a mountain of several tops (Route 114's, Route 115's:
+        # _mountain_masses), from its lowest ground to the top it rises to
+        self.assertEqual({layout["symbol"] for layout in self.data["layouts"]
+                          for record in layout["terrainRecords"]
+                          if record["source"] == "behavior:MB_MOUNTAIN_TOP"
+                          and record["heightQ16"] != 16},
+                         {"LAYOUT_ROUTE114", "LAYOUT_ROUTE115"})
+        self.assertEqual({record["heightQ16"] for record in mountains}, {16, 32, 48, 64})
         self.assertEqual({record["measuredFlags"] & 32 for record in mountains}, {32})
         # (a reef in the sea stands on the sea's level: a terrace entry, flag 128)
         self.assertEqual({record["measuredFlags"] & ~(32 | 128) for record in mountains}, {0})
@@ -214,6 +221,20 @@ class DioramaRuleCompilerTests(unittest.TestCase):
                                           {offset: level(0) for offset in solved}),
                          {7: {"groundQ16": 16, "topQ16": 16, "profile": "none", "solid": False,
                               "lift": True}})
+        # A mountain whose stairs climb to a top two levels up and more (`climbed`:
+        # mountain_ledges, Route 115's) is one mass on its lowest ground, each cell as high as
+        # the ground nearest it asks (a level over the grass, level with the path) or on a face
+        # down from the higher top, a level a row; with no climb (two levels the terrace
+        # solver's) it keeps its cells' entries.
+        rows = ["PPPPP", "MMMMM", "MMMMM", "MMMMM", "LLLLL"]
+        cells = build(rows)
+        mountain = frozenset(index for index, ch in enumerate("".join(rows)) if ch == "M")
+        solved = {offset: level(48) for offset in range(5)}
+        masses = _mountain_masses(cells, 5, 5, mountain, solved, climbed=frozenset(range(5)))
+        self.assertEqual([(masses[offset]["groundQ16"], masses[offset]["topQ16"])
+                          for offset in (7, 12)], [(0, 48), (0, 32)])
+        self.assertNotIn(17, masses)  # (0, 16): where its record puts it
+        self.assertEqual(_mountain_masses(cells, 5, 5, mountain, solved), {})
 
     def test_repository_mountains_stand_on_one_level(self):
         # The owner's report of 2026-10-24 ("a maze of terraced walls", "the light blue
@@ -257,6 +278,58 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         width, records = wildcard("LAYOUT_ROUTE111")
         self.assertEqual((records[30 * width + 35]["groundQ16"], records[30 * width + 35]["topQ16"]),
                          (0, 16))
+
+    def test_repository_mountains_of_several_tops(self):
+        # KNOWN_ISSUES MS-153: Route 115's muddy slope lay flat, its mountain on one level (its
+        # stairs climb from one top to another, and the mountain's step kept the layout's
+        # levels). Its tops stand a level a climb, the slope a ramp between them, the rock level
+        # with each top and down its faces; Route 114's mountain of five levels the same (Route
+        # 119's top runs onto its bridge, which the game lets one walk across: it keeps its
+        # levels). No rock stands over the rock beside it with nothing under it (the sky
+        # between: the mesh draws rock from a voxel under its ground).
+        layouts = {row["symbol"]: row for row in self.data["layouts"]}
+
+        def wildcard(name):
+            layout = layouts[name]
+            return layout["width"], {record["cellOffset"]: record
+                                     for record in layout["terrainRecords"]
+                                     if record["mapGroup"] == 0xFF}
+
+        width, records = wildcard("LAYOUT_ROUTE115")
+
+        def at(x, y):
+            record = records[y * width + x]
+            return record["shape"], record["groundQ16"], record["topQ16"]
+
+        self.assertEqual([at(24, 10), at(32, 12), at(24, 16)],
+                         [("flat", 16, 16), ("flat", 32, 32), ("flat", 0, 0)])
+        self.assertEqual([at(28, 9), at(28, 8)], [("stairs", 16, 24), ("stairs", 24, 32)])
+        self.assertEqual([at(18, 13), at(18, 12), at(27, 12)],
+                         [("stairs", 0, 8), ("stairs", 8, 16), ("stairs", 0, 16)])
+        self.assertEqual([at(29, 8), at(29, 9), at(31, 13)],
+                         [("cliff", 0, 32), ("cliff", 0, 16), ("cliff", 0, 32)])
+        width, records = wildcard("LAYOUT_ROUTE114")
+        self.assertEqual([at(12, 36), at(6, 48), at(13, 68), at(24, 66), at(13, 67)],
+                         [("flat", 16, 16), ("flat", 32, 32), ("flat", 48, 48), ("flat", 64, 64),
+                          ("stairs", 48, 64)])
+        width, records = wildcard("LAYOUT_ROUTE119")
+        self.assertEqual([at(33, 92)[1], at(36, 85)[1]], [0, 0])
+        for name in ("LAYOUT_ROUTE114", "LAYOUT_ROUTE115"):
+            width, records = wildcard(name)
+
+            def column(record):
+                solved = record["measuredFlags"] & 128
+                return ((record["groundQ16"] if solved else 0),
+                        (record["topQ16"] if solved else record["heightQ16"]))
+
+            rock = {offset: column(record) for offset, record in records.items()
+                    if record["measuredFlags"] & 32 and record["terraceProfile"] == "none"}
+            for offset, (ground, top) in rock.items():
+                for neighbor in (offset + 1 if (offset + 1) % width else None, offset + width):
+                    if neighbor in rock:
+                        other_ground, other_top = rock[neighbor]
+                        self.assertLessEqual(ground - 1, other_top + 1, (name, offset, neighbor))
+                        self.assertLessEqual(other_ground - 1, top + 1, (name, offset, neighbor))
 
     def test_repository_maps_meet_at_one_level(self):
         # KNOWN_ISSUES MS-162: each map's ground is solved alone, its top level 0, and Route 118 lay a level

@@ -8,7 +8,7 @@ from catalog import load_tilesets, load_world
 from compile_rules import _load_cells, parse_behaviors
 from terrace_topology import (CAVE_RISE_Q16, LEDGE_JUMPS, MOUNTAIN_LEDGE_Q16, TERRACE_ROLES,
                               cave_levels, join_level_free_cells, join_water, lift_blocked_cells,
-                              mountain_ledges, role_for_cell, seam_shifts, solve_layout)
+                              mountain_ledges, rock_tops, role_for_cell, seam_shifts, solve_layout)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -332,17 +332,31 @@ class TerraceTopologyTests(unittest.TestCase):
         raised = mountain_ledges(cells, 5, 6, {})
         self.assertEqual([(raised[offset]["groundQ16"], raised[offset]["topQ16"])
                           for offset in (22, 17, 12)], [(0, 5), (5, 11), (11, 16)])
-        # A second level on the mountain (stairs from one top to another), stairs
-        # between ordinary ground, a raised top meeting other ground at its side:
-        # the layout keeps its levels.
+        # A second top up stairs from the first (Route 115's, Route 114's): a level a climb.
         rows = ["RRRRR", "RTTTR", "RRSRR", "RTTTR", "RRSRR", "GGGGG"]
         cells = tuple(make[ch]() for row in rows for ch in row)
-        self.assertEqual(mountain_ledges(cells, 5, 6, {}), {})
+        raised = mountain_ledges(cells, 5, 6, {})
+        self.assertEqual([(raised[offset]["groundQ16"], raised[offset]["topQ16"])
+                          for offset in (22, 16, 12, 6)], [(0, 16), (16, 16), (16, 32), (32, 32)])
+        # Stairs between ordinary ground: the terrace solver's.
         rows = ["GGGGG", "RRSRR", "GGGGG"]
         cells = tuple(make[ch]() for row in rows for ch in row)
         self.assertEqual(mountain_ledges(cells, 5, 3, {}), {})
-        rows = ["RRRRR", "RTTTR", "RTTTG", "RRSRG", "GGGGG"]
-        cells = tuple(dict(make[ch](), elevation=4) if (y, x) == (2, 4) else make[ch]()
+        # A top beside walkable ground of another elevation (the game lets no one cross)
+        # stands a level over it at its north edge or its side (the game draws the top's
+        # edge there); over it at its south edge, with no face drawn for it, the layout
+        # keeps its levels.
+        def other(ch):
+            return dict(make[ch](), elevation=4)
+
+        rows = ["RGGGR", "RTTTG", "RTTTR", "RRSRR", "GGGGG"]
+        cells = tuple(other(ch) if ch == "G" and (y == 0 or (y, x) == (1, 4)) else make[ch]()
+                      for y, row in enumerate(rows) for x, ch in enumerate(row))
+        raised = mountain_ledges(cells, 5, 5, {})
+        self.assertEqual(raised[6]["groundQ16"], MOUNTAIN_LEDGE_Q16)
+        self.assertFalse({1, 9} & set(raised))
+        rows = ["RRRRR", "RTTTR", "RTTTR", "RGSRR", "GGGGG"]
+        cells = tuple(other(ch) if (y, x) == (3, 1) else make[ch]()
                       for y, row in enumerate(rows) for x, ch in enumerate(row))
         self.assertEqual(mountain_ledges(cells, 5, 5, {}), {})
 
@@ -351,7 +365,8 @@ class TerraceTopologyTests(unittest.TestCase):
         _, layouts = load_world(ROOT)
         behavior_ids = parse_behaviors(ROOT / "include/constants/metatile_behaviors.h")
         behavior_names = {value: name for name, value in behavior_ids.items()}
-        wanted = {"LAYOUT_ROUTE112", "LAYOUT_ROUTE114", "LAYOUT_ROUTE115", "LAYOUT_ROUTE111"}
+        wanted = {"LAYOUT_ROUTE112", "LAYOUT_ROUTE114", "LAYOUT_ROUTE115", "LAYOUT_ROUTE111",
+                  "LAYOUT_ROUTE119"}
         rows = [row for row in layouts if row["id"] in wanted]
         cells, _, _ = _load_cells(ROOT, rows, tilesets, behavior_names)
         layout = next(row for row in rows if row["id"] == "LAYOUT_ROUTE112")
@@ -365,12 +380,36 @@ class TerraceTopologyTests(unittest.TestCase):
         # the stairs up to it (20-21, 41-43) over their three rows; the ground below stays
         self.assertEqual([raised[y * width + 20]["topQ16"] for y in (43, 42, 41)], [5, 11, 16])
         self.assertNotIn(45 * width + 20, raised)
-        # Route 114 and 115 climb to a second level on the mountain: they keep their levels.
-        for name in ("LAYOUT_ROUTE114", "LAYOUT_ROUTE115"):
-            other = next(row for row in rows if row["id"] == name)
-            self.assertEqual(mountain_ledges(cells[name], other["width"], other["height"],
-                                             solve_layout(cells[name], other["width"],
-                                                          other["height"])), {}, name)
+        # Route 115's mountain climbs to three tops, a level a climb (MS-153): its plateau up
+        # two rows of stairs, a lower top a row of stairs under it (on the grass's level), the
+        # muddy slope up to the highest, rising over its rows; the pocket of that top in the
+        # rock north of it on its level. Route 114's mountain climbs to five levels; Route 119's
+        # top runs onto its bridge (elevation 15, which the game lets one walk across): it keeps
+        # its levels.
+        def entries(name):
+            layout = next(row for row in rows if row["id"] == name)
+            raised = mountain_ledges(cells[name], layout["width"], layout["height"],
+                                     solve_layout(cells[name], layout["width"], layout["height"]))
+            return lambda x, y: (None if y * layout["width"] + x not in raised
+                                 else raised[y * layout["width"] + x])
+
+        at = entries("LAYOUT_ROUTE115")
+        for (x, y), levels in (((24, 10), (16, 16)), ((32, 12), (32, 32)), ((28, 9), (16, 24)),
+                               ((28, 8), (24, 32)), ((18, 13), (0, 8)), ((18, 12), (8, 16)),
+                               ((27, 12), (0, 16)), ((24, 42), (16, 32)), ((25, 40), (32, 32))):
+            self.assertEqual((at(x, y)["groundQ16"], at(x, y)["topQ16"]), levels, (x, y))
+        for x, y in ((24, 16), (17, 15)):
+            self.assertIsNone(at(x, y), (x, y))
+        self.assertEqual(at(33, 2)["groundQ16"], 32)
+        at = entries("LAYOUT_ROUTE114")
+        for (x, y), levels in (((12, 36), (16, 16)), ((6, 48), (32, 32)), ((13, 68), (48, 48)),
+                               ((24, 66), (64, 64)), ((14, 49), (0, 16)), ((13, 67), (48, 64))):
+            self.assertEqual((at(x, y)["groundQ16"], at(x, y)["topQ16"]), levels, (x, y))
+        self.assertIsNone(at(12, 35))
+        layout = next(row for row in rows if row["id"] == "LAYOUT_ROUTE119")
+        self.assertEqual(mountain_ledges(cells["LAYOUT_ROUTE119"], layout["width"], layout["height"],
+                                         solve_layout(cells["LAYOUT_ROUTE119"], layout["width"],
+                                                      layout["height"])), {})
 
     def test_a_muddy_slope_climbs_to_a_mountains_top_as_stairs_do(self):
         # Route 111: the rock plateau north of the desert has no stairs; the Mach Bike's muddy
@@ -407,6 +446,19 @@ class TerraceTopologyTests(unittest.TestCase):
         rows = ["RRRRRRR", "RTTTRTR", "RTTTRRR", "RRRRRRR", "GGGGGGG"]
         cells = tuple(make[ch]() for row in rows for ch in row)
         self.assertEqual(mountain_ledges(cells, 7, 5, {}), {})
+
+    def test_rock_takes_the_top_of_the_ground_nearest_it(self):
+        # A column of rock between a top three levels up (north) and ground asking the rock a
+        # level over it (south), three rows: a level a row down from the top (the game draws a
+        # face a tile a level).
+        self.assertEqual(rock_tops(frozenset({4, 7, 10}), {1: 48, 13: 16}, 3, 5, 16),
+                         {4: 48, 7: 32, 10: 16})
+        # A block of rock inside a top (its path all round): level with it, no pit in its middle.
+        rock = frozenset(y * 5 + x for x in (1, 2, 3) for y in (1, 2, 3))
+        ground = {offset: 32 for offset in range(25) if offset not in rock}
+        self.assertEqual(set(rock_tops(rock, ground, 5, 5, 16).values()), {32})
+        # Rock no ground reaches: the floor.
+        self.assertEqual(rock_tops(frozenset({0}), {}, 1, 1, 16), {0: 16})
 
     def test_route111_plateau_stands_a_level_over_the_desert(self):
         tilesets = load_tilesets(ROOT)
