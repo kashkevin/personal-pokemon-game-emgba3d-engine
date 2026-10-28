@@ -160,7 +160,21 @@ bool32 MultiplayerBattle_StoppedForRecovery(void); // MS-125: its core stopped i
 extern const u32 gMultiplayerBattlePeekAbiVersion; // MS-62: PEEK, a query with the outbound block's bytes (bridge battle_peek=1)
 extern const u32 gMultiplayerBattleReceiveManyAbiVersion; // MS-62: RECEIVE_MANY, a batch's blocks in one command (battle_receive_many=1)
 extern const u32 gMultiplayerBattleDeliverAbiVersion; // MS-62: DELIVER, an acknowledgement and blocks in one command (battle_deliver=1)
+// KNOWN_ISSUES MS-126: a player gives up a battle between players (not a free-for-all). A forfeit notice is a controller
+// block of its own role for the giver's battler; once a game holds one, every choice it is asked for is answered at once
+// with an ordinary reply that changes nothing, and the master ends the battle at its next safe point as if the giver had
+// chosen Run (the giver loses, the other side wins).
+#define B_COMM_PC_FORFEIT 3
+#define MP_FORFEIT_NOTICE 0xF0
+bool32 MultiplayerBattle_CanForfeit(void);
+bool32 MultiplayerBattle_ForfeitPending(void);
+u32 MultiplayerBattle_ForfeitBattler(void);
+void MultiplayerBattle_NoteStandby(u32 battler);
+bool32 MultiplayerBattle_WaitingOnOthers(u32 battler);
+void MultiplayerBattle_SendForfeit(u32 battler);
+bool32 PlayerController_AnswerForForfeit(u32 battler); // battle_controller_player.c
 #endif
+#line 164 // gba-line
 bool32 MultiplayerBattle_TrySendOutAnimation(u8 battler);
 bool32 MultiplayerBattle_CanReceiveControllers(void);
 bool32 MultiplayerBattle_ValidateController(const u8 *data, u16 size, u8 source);

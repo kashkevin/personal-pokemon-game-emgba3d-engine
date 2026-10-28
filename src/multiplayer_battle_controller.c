@@ -28,6 +28,19 @@ _Static_assert(CONTROLLER_ENDLINKBATTLE == 50 && CONTROLLER_DATATRANSFER == 28, 
 static EWRAM_DATA u8 sPending[MAX_BATTLERS_COUNT] = {0};
 static EWRAM_DATA u8 sDone[MAX_BATTLERS_COUNT] = {0};
 static EWRAM_DATA bool8 sReplied[MAX_BATTLERS_COUNT] = {0};
+#ifdef PORTABLE
+// KNOWN_ISSUES MS-126: the battler of the first forfeit notice this battle (0xFF: none) and the cores that sent one;
+// the master's commands counted in their order, each battler's last one, the last one of a turn being played out (not
+// a choice); the battler whose player waits on the others since its command sStandbyCommand.
+static EWRAM_DATA u8 sForfeitBattler = 0xFF;
+static EWRAM_DATA u8 sForfeitSources = 0;
+static EWRAM_DATA u32 sCommandCount = 0;
+static EWRAM_DATA u32 sLastCommand[MAX_BATTLERS_COUNT] = {0};
+static EWRAM_DATA u32 sLastTurnCommand = 0;
+static EWRAM_DATA u8 sStandbyBattler = 0xFF;
+static EWRAM_DATA u32 sStandbyCommand = 0;
+#endif
+#line 26 // gba-line
 
 // Battlers on the field and the cores exchanging controller blocks differ in
 // co-op Gym battles (four battlers, two cores; the master owns both AI foes).
@@ -281,6 +294,15 @@ bool32 MultiplayerBattle_ValidateController(const u8 *data, u16 size, u8 source)
             && (source != Owner(battler) || (sPending[battler] != CONTROLLER_GETMONDATA
                 && sPending[battler] != CONTROLLER_CHOOSEACTION && sPending[battler] != CONTROLLER_CHOOSEMOVE
                 && sPending[battler] != CONTROLLER_CHOOSEPOKEMON) || sReplied[battler]);
+#ifdef PORTABLE
+    // MS-126: a forfeit notice: its sender's own battler, once per core, no other field; it answers no request.
+    if (data[0] == B_COMM_PC_FORFEIT)
+        return padded == 8 && p[0] == MP_FORFEIT_NOTICE && Zero(p + 1, 7) && source == Owner(battler)
+            && !(MultiplayerBattle_IsCoop() && (battler & 1)) // a co-op Gym's AI foes are the master's, no player's
+            && !data[2] && !data[3] && !data[6] && !data[7] && MultiplayerBattle_CanForfeit()
+            && !(sForfeitSources & (1 << source));
+#endif
+#line 243 // gba-line
     raw = MultiplayerBattle_ControllerRawSize(command, p[1]);
     if (!raw || padded != raw - raw % 4 + 4 || !Zero(p + raw, padded - raw)) return FALSE;
     if (data[0] == B_COMM_TO_CONTROLLER)
@@ -326,6 +348,14 @@ void MultiplayerBattle_NoteController(const u8 *data, u8 source)
     if (data[0] == B_COMM_TO_CONTROLLER)
     {
         sPending[battler] = data[8]; sDone[battler] = 0; sReplied[battler] = FALSE;
+#ifdef PORTABLE
+        sLastCommand[battler] = ++sCommandCount;
+        if (data[8] != CONTROLLER_CHOOSEACTION && data[8] != CONTROLLER_CHOOSEMOVE && data[8] != CONTROLLER_CHOOSEPOKEMON
+         && data[8] != CONTROLLER_LINKSTANDBYMSG && data[8] != CONTROLLER_PRINTSTRINGPLAYERONLY
+         && data[8] != CONTROLLER_RESETACTIONMOVESELECTION)
+            sLastTurnCommand = sCommandCount;
+#endif
+#line 275 // gba-line
     }
     else if (data[0] == B_COMM_TO_ENGINE) sReplied[battler] = TRUE;
     else if (data[0] == B_COMM_CONTROLLER_IS_DONE)
@@ -333,12 +363,75 @@ void MultiplayerBattle_NoteController(const u8 *data, u8 source)
         sDone[battler] |= 1 << source;
         if (sDone[battler] == (1 << CoreCount()) - 1) sPending[battler] = 0xFF;
     }
+#ifdef PORTABLE
+    else if (data[0] == B_COMM_PC_FORFEIT)
+    {
+        sForfeitSources |= 1 << source;
+        if (sForfeitBattler == 0xFF)
+            sForfeitBattler = battler;
+    }
+#endif
+#line 282 // gba-line
 }
 
 void MultiplayerBattle_ResetControllerValidation(void)
 {
     memset(sPending, 0xFF, sizeof(sPending)); memset(sDone, 0, sizeof(sDone)); memset(sReplied, 0, sizeof(sReplied));
+#ifdef PORTABLE
+    sForfeitBattler = 0xFF; sForfeitSources = 0;
+    sCommandCount = sLastTurnCommand = sStandbyCommand = 0; memset(sLastCommand, 0, sizeof(sLastCommand));
+    sStandbyBattler = 0xFF;
+#endif
+#line 287 // gba-line
 }
+
+#ifdef PORTABLE
+// KNOWN_ISSUES MS-126 (the owner's decision of 2026-10-27: no turn timer; a player can give up a battle between players
+// whenever they wish, also while waiting on the other player, and the other side wins). Run already is the forfeit on a
+// player's own turn; a player waiting on the other one gives up with a forfeit notice (battle_controller_player.c asks
+// first). Not in a free-for-all, which nobody leaves halfway (its Run does nothing either).
+bool32 MultiplayerBattle_CanForfeit(void)
+{
+#if MP_FFA_ENABLED
+    if (MultiplayerBattle_IsFreeForAll())
+        return FALSE;
+#endif
+    return MultiplayerBattle_IsNative();
+}
+
+bool32 MultiplayerBattle_ForfeitPending(void)
+{
+    return MultiplayerBattle_IsNative() && sForfeitBattler != 0xFF;
+}
+
+u32 MultiplayerBattle_ForfeitBattler(void)
+{
+    return sForfeitBattler;
+}
+
+// This game's player has made their choice and the game shows "Link standby..." (battle_controller_player.c).
+void MultiplayerBattle_NoteStandby(u32 battler)
+{
+    sStandbyBattler = battler;
+    sStandbyCommand = sLastCommand[battler];
+}
+
+// The player still waits on the others: since its standby, no command asked this battler again and none played out a
+// turn (the commands of the others' choices may come and go). Only then may they give up from the waiting screen.
+bool32 MultiplayerBattle_WaitingOnOthers(u32 battler)
+{
+    return sStandbyBattler == battler && MultiplayerBattle_CanForfeit() && !MultiplayerBattle_ForfeitPending()
+        && sLastCommand[battler] == sStandbyCommand && sLastTurnCommand < sStandbyCommand;
+}
+
+void MultiplayerBattle_SendForfeit(u32 battler)
+{
+    u8 notice[4] = {MP_FORFEIT_NOTICE, 0, 0, 0};
+
+    if (MultiplayerBattle_CanForfeit() && !MultiplayerBattle_ForfeitPending())
+        PrepareBufferDataTransferLink(battler, B_COMM_PC_FORFEIT, sizeof(notice), notice);
+}
+#endif
 
 #ifdef PORTABLE
 // KNOWN_ISSUES MS-71: a controller block this game was about to send failed MultiplayerBattle_ValidateController.

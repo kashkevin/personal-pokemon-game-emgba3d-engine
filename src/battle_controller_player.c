@@ -192,8 +192,18 @@ void PlayerBufferExecCompleted(enum BattlerId battler)
     }
 }
 
+#ifdef PORTABLE
+static bool32 RunForfeitPrompt(enum BattlerId battler);
+#endif
+
+#line 183 // gba-line
 static void PlayerBufferRunCommand(enum BattlerId battler)
 {
+#ifdef PORTABLE
+    if (RunForfeitPrompt(battler))
+        return;
+#endif
+#line 185 // gba-line
     if (IsBattleControllerActiveOnLocal(battler))
     {
         if (gBattleResources->bufferA[battler][0] < ARRAY_COUNT(sPlayerBufferCommands))
@@ -1686,6 +1696,12 @@ static void WaitForMonSelection(enum BattlerId battler)
 
         if (gBattleResources->bufferA[battler][1] == PARTY_ACTION_SEND_OUT)
             PrintLinkStandbyMsg();
+#ifdef PORTABLE
+        if (MultiplayerBattle_IsNative() && gPartyMenuUseExitCallback == TRUE
+         && gBattleResources->bufferA[battler][1] == PARTY_ACTION_SEND_OUT)
+            MultiplayerBattle_NoteStandby(battler); // MS-126: the others may still choose theirs
+#endif
+#line 1605 // gba-line
 
         BtlController_Complete(battler);
     }
@@ -1959,6 +1975,135 @@ static void PrintLinkStandbyMsg(void)
     }
 }
 
+#ifdef PORTABLE
+// KNOWN_ISSUES MS-126 (the owner's decision of 2026-10-27): a player can give up a battle between players whenever they
+// wish, also while waiting on the other player, and the other side wins. Waiting ("Link standby..."), B asks "Give up
+// the battle?" (No first); Yes sends a forfeit notice. The question goes as soon as the battle goes on.
+static void HandleChooseActionAfterDma3(enum BattlerId battler);
+static const u8 sText_GiveUpBattle[] = _("Give up the battle?");
+// The question: not asked, its text printing (the Yes/No box waits for it, as the battle's own questions do: the box's
+// text colours would otherwise colour the rest of the question), or the box up.
+enum { FORFEIT_NOT_ASKED, FORFEIT_QUESTION_PRINTING, FORFEIT_QUESTION_UP };
+static EWRAM_DATA u8 sForfeitAsking = FORFEIT_NOT_ASKED;
+static EWRAM_DATA u8 sForfeitCursor = 1;
+
+// This game's own controllers are running a command (in a link battle every game keeps each player's flags; the
+// first ones are the master's, which IsBattleControllerActiveOnLocal reads).
+static bool32 AnyControllerActiveHere(void)
+{
+    u32 shift = GetMultiplayerId() * 4;
+
+    for (enum BattlerId battler = 0; battler < gBattlersCount; battler++)
+    {
+        if (gBattleControllerExecFlags & ((1u << battler) << shift))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static void CloseForfeitQuestion(bool32 standby)
+{
+    if (sForfeitAsking == FORFEIT_QUESTION_UP)
+        HandleBattleWindow(YESNOBOX_X_Y, WINDOW_CLEAR);
+    sForfeitAsking = FORFEIT_NOT_ASKED;
+    if (standby)
+        PrintLinkStandbyMsg();
+}
+
+// TRUE while the question is up: this battler's controller does nothing else then.
+static bool32 RunForfeitPrompt(enum BattlerId battler)
+{
+    if (!MultiplayerBattle_IsNative())
+        return FALSE;
+    if (!MultiplayerBattle_WaitingOnOthers(battler) || AnyControllerActiveHere())
+    {
+        // the battle went on, a command is being shown, or somebody gave up: no question now
+        if (sForfeitAsking)
+            CloseForfeitQuestion(FALSE);
+        return FALSE;
+    }
+    if (sForfeitAsking == FORFEIT_NOT_ASKED)
+    {
+        if (JOY_NEW(B_BUTTON))
+        {
+            PlaySE(SE_SELECT);
+            gBattle_BG0_X = 0;
+            gBattle_BG0_Y = 0;
+            BattlePutTextOnWindow(sText_GiveUpBattle, B_WIN_MSG);
+            sForfeitAsking = FORFEIT_QUESTION_PRINTING;
+        }
+        return FALSE;
+    }
+    if (sForfeitAsking == FORFEIT_QUESTION_PRINTING)
+    {
+        if (!IsTextPrinterActiveOnWindow(B_WIN_MSG))
+        {
+            HandleBattleWindow(YESNOBOX_X_Y, 0);
+            BattlePutTextOnWindow(gText_BattleYesNoChoice, B_WIN_YESNO);
+            sForfeitCursor = 1;
+            BattleCreateYesNoCursorAt(1);
+            sForfeitAsking = FORFEIT_QUESTION_UP;
+        }
+        return TRUE;
+    }
+    if (JOY_NEW(DPAD_UP) && sForfeitCursor != 0)
+    {
+        PlaySE(SE_SELECT);
+        BattleDestroyYesNoCursorAt(sForfeitCursor);
+        sForfeitCursor = 0;
+        BattleCreateYesNoCursorAt(0);
+    }
+    else if (JOY_NEW(DPAD_DOWN) && sForfeitCursor == 0)
+    {
+        PlaySE(SE_SELECT);
+        BattleDestroyYesNoCursorAt(sForfeitCursor);
+        sForfeitCursor = 1;
+        BattleCreateYesNoCursorAt(1);
+    }
+    else if (JOY_NEW(A_BUTTON | B_BUTTON))
+    {
+        bool32 yes = JOY_NEW(A_BUTTON) && sForfeitCursor == 0;
+
+        PlaySE(SE_SELECT);
+        CloseForfeitQuestion(TRUE);
+        if (yes)
+            MultiplayerBattle_SendForfeit(battler);
+    }
+    return TRUE;
+}
+
+// Once somebody gave up, the battle ends at its master's next safe point and no longer reads this player's choices:
+// every choice they are asked for is answered at once with an ordinary reply that changes nothing, and its menu closes
+// (the party menu answers for itself, party_menu.c). TRUE when this frame answered for the battler.
+bool32 PlayerController_AnswerForForfeit(u32 battler)
+{
+    void (*func)(enum BattlerId);
+
+    if (!MultiplayerBattle_ForfeitPending() || gBattlerBattleController[battler] != BATTLE_CONTROLLER_PLAYER)
+        return FALSE;
+    func = gBattlerControllerFuncs[battler];
+    if (func == HandleInputChooseAction || func == HandleChooseActionAfterDma3)
+    {
+        TryHideLastUsedBall();
+        BtlController_EmitTwoReturnValues(battler, B_COMM_TO_ENGINE, B_ACTION_NOTHING_FAINTED, 0);
+        BtlController_Complete(battler);
+        return TRUE;
+    }
+    if (func == HandleInputChooseTarget)
+        gSprites[gBattlerSpriteIds[gMultiUsePlayerCursor]].callback = SpriteCB_HideAsMoveTarget;
+    else if (func == HandleInputShowTargets || func == HandleInputShowEntireFieldTargets)
+        HideAllTargets();
+    else if (func != HandleInputChooseMove && func != HandleChooseMoveAfterDma3)
+        return FALSE;
+    BtlController_EmitTwoReturnValues(battler, B_COMM_TO_ENGINE, B_ACTION_EXEC_SCRIPT, 0xFFFF);
+    HideGimmickTriggerSprite();
+    BtlController_Complete(battler);
+    TryToHideMoveInfoWindow();
+    return TRUE;
+}
+#endif
+
+#line 1878 // gba-line
 static void PlayerHandleLoadMonSprite(enum BattlerId battler)
 {
     BattleLoadMonSpriteGfx(GetBattlerMon(battler), battler);
@@ -2408,6 +2553,11 @@ static void PlayerHandleLinkStandbyMsg(enum BattlerId battler)
     {
     case LINK_STANDBY_MSG_STOP_BOUNCE:
         PrintLinkStandbyMsg();
+#ifdef PORTABLE
+        if (MultiplayerBattle_IsNative())
+            MultiplayerBattle_NoteStandby(battler); // MS-126: they may give up while the others choose
+#endif
+#line 2315 // gba-line
         // fall through
     case LINK_STANDBY_STOP_BOUNCE_ONLY:
         EndBounceEffect(battler, BOUNCE_HEALTHBOX);
@@ -2415,6 +2565,11 @@ static void PlayerHandleLinkStandbyMsg(enum BattlerId battler)
         break;
     case LINK_STANDBY_MSG_ONLY:
         PrintLinkStandbyMsg();
+#ifdef PORTABLE
+        if (MultiplayerBattle_IsNative())
+            MultiplayerBattle_NoteStandby(battler);
+#endif
+#line 2322 // gba-line
         break;
     }
     BtlController_Complete(battler);

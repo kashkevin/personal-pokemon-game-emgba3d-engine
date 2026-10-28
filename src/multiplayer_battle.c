@@ -680,6 +680,18 @@ u16 MultiplayerBattle_PackController(u8 *dest, u8 battler, u8 bufferId, u16 size
 {
     u16 padded = size - size % 4 + 4;
     if (!MultiplayerBattle_IsNative() || sState != MP_BATTLE_RUNNING) return 0;
+#ifdef PORTABLE
+    // KNOWN_ISSUES MS-126: a forfeit notice for this core's own battler, the notice and nothing else.
+    if (bufferId == B_COMM_PC_FORFEIT)
+    {
+        if (MultiplayerBattle_GetBattlerOwner(battler) != sBinding.localSlot || size != 4 || !data || data[0] != MP_FORFEIT_NOTICE)
+            return 0;
+        memset(dest, 0, 16);
+        dest[0] = bufferId; dest[1] = battler; dest[4] = 8; dest[8] = MP_FORFEIT_NOTICE; // padded as any 4-byte payload
+        return 16;
+    }
+#endif
+#line 540 // gba-line
     // Mirrored remote controllers still render and send DONE, but only the
     // trainer owning a battler may supply engine data/choices.
     if (bufferId == B_COMM_TO_ENGINE && MultiplayerBattle_GetBattlerOwner(battler) != sBinding.localSlot) return 0;
@@ -824,8 +836,8 @@ u8 MultiplayerBattle_GetBringMask(void)
     return sBringMask;
 }
 #endif
+#line 596 // gba-line
 
-#line 597 // gba-line
 static u8 PrepareSingles(const struct MultiplayerBattleControl *c)
 {
     struct MultiplayerBattlePreparation preparation;

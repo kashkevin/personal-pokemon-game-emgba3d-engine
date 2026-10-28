@@ -32,6 +32,10 @@
 #include "move_relearner.h"
 #include "naming_screen.h"
 #include "party_menu.h"
+#ifdef PORTABLE
+#include "multiplayer_battle.h"
+#endif
+#line 30 // gba-line
 #include "palette.h"
 #include "pokeball.h"
 #include "pokemon.h"
@@ -1774,6 +1778,15 @@ static void HandleMoveRelearnerInput(u8 taskId)
 
 static void Task_HandleInput(u8 taskId)
 {
+#ifdef PORTABLE
+    // KNOWN_ISSUES MS-126: somebody gave up the battle between players: back to the party menu, which answers
+    if (gMain.inBattle && MultiplayerBattle_ForfeitPending() && !gPaletteFade.active)
+    {
+        BeginCloseSummaryScreen(taskId);
+        return;
+    }
+#endif
+#line 1742 // gba-line
     if (MenuHelpers_ShouldWaitForLinkRecv() != TRUE && !gPaletteFade.active)
     {
         if (JOY_NEW(DPAD_UP))
@@ -2401,6 +2414,14 @@ static void Task_HandleInput_MoveSelect(u8 taskId)
 {
     s16 *data = gTasks[taskId].data;
 
+#ifdef PORTABLE
+    if (gMain.inBattle && MultiplayerBattle_ForfeitPending()) // MS-126: out of the move list first (Task_HandleInput)
+    {
+        CloseMoveSelectMode(taskId);
+        return;
+    }
+#endif
+#line 2327 // gba-line
     if (MenuHelpers_ShouldWaitForLinkRecv() != TRUE)
     {
         if (JOY_NEW(DPAD_UP))

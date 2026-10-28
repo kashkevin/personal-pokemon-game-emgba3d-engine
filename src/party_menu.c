@@ -53,6 +53,10 @@
 #include "overworld.h"
 #include "palette.h"
 #include "party_menu.h"
+#ifdef PORTABLE
+#include "multiplayer_battle.h"
+#endif
+#line 50 // gba-line
 #include "player_pc.h"
 #include "pokemon.h"
 #include "pokemon_icon.h"
@@ -236,6 +240,7 @@ EWRAM_DATA bool8 gPartyMenuUseExitCallback = 0;
 static EWRAM_DATA u16 sNativeUiStdMessage = 0;
 #endif
 #line 216
+#line 216 // gba-line
 EWRAM_DATA u8 gSelectedMonPartyId = 0;
 EWRAM_DATA MainCallback gPostMenuFieldCallback = NULL;
 static EWRAM_DATA u16 *sSlot1TilemapBuffer = 0; // for switching party slots
@@ -1497,8 +1502,40 @@ u8 GetPartyMenuType(void)
     return gPartyMenu.menuType;
 }
 
+#ifdef PORTABLE
+// KNOWN_ISSUES MS-126: somebody gave up the battle between players. The battle ends at its master's next safe point and
+// no longer reads this player's choice, so the party menu answers for them: the first Pokemon the battle's own check
+// lets go in (TrySwitchInPokemon), or none, then it closes. TRUE when it did.
+static bool32 TryAnswerForForfeit(u8 taskId)
+{
+    s8 slot;
+
+    if (gPartyMenu.menuType != PARTY_MENU_TYPE_IN_BATTLE || !MultiplayerBattle_ForfeitPending())
+        return FALSE;
+    gTextFlags.autoScroll = 0;
+    for (slot = 0; slot < PARTY_SIZE; slot++)
+    {
+        gPartyMenu.slotId = slot;
+        if (TrySwitchInPokemon() == TRUE)
+        {
+            Task_ClosePartyMenu(taskId);
+            return TRUE;
+        }
+    }
+    gPartyMenuUseExitCallback = FALSE;
+    Task_ClosePartyMenu(taskId);
+    return TRUE;
+}
+#endif
+
+#line 1473 // gba-line
 void Task_HandleChooseMonInput(u8 taskId)
 {
+#ifdef PORTABLE
+    if (!gPaletteFade.active && TryAnswerForForfeit(taskId))
+        return;
+#endif
+#line 1475 // gba-line
     if (!gPaletteFade.active && MenuHelpers_ShouldWaitForLinkRecv() != TRUE)
     {
         s8 *slotPtr = GetCurrentPartySlotPtr();
@@ -2076,6 +2113,12 @@ static void Task_WaitForLinkAndReturnToChooseMon(u8 taskId)
 
 static void Task_ReturnToChooseMonAfterText(u8 taskId)
 {
+#ifdef PORTABLE
+    // MS-126: a message waiting for a press goes on by itself when somebody gave up the battle (the menu then answers).
+    if (gPartyMenu.menuType == PARTY_MENU_TYPE_IN_BATTLE && MultiplayerBattle_ForfeitPending())
+        gTextFlags.autoScroll = TRUE;
+#endif
+#line 2052 // gba-line
     if (IsPartyMenuTextPrinterActive() != TRUE)
     {
         ClearStdWindowAndFrameToTransparent(WIN_MSG, FALSE);
@@ -2814,6 +2857,7 @@ void DisplayPartyMenuStdMessage(u32 stringId)
     sNativeUiStdMessage = 0;
 #endif
 #line 2786
+#line 2786 // gba-line
 
     if (stringId != PARTY_MSG_NONE)
     {
@@ -2857,6 +2901,7 @@ void DisplayPartyMenuStdMessage(u32 stringId)
         sNativeUiStdMessage = stringId + 1;
 #endif
 #line 2825
+#line 2825 // gba-line
         DrawStdFrameWithCustomTileAndPalette(*windowPtr, FALSE, 0x4F, 13);
         StringExpandPlaceholders(gStringVar4, sActionStringTable[stringId]);
         AddTextPrinterParameterized(*windowPtr, FONT_NORMAL, gStringVar4, 0, 1, 0, 0);
@@ -3158,6 +3203,16 @@ static void Task_TryCreateSelectionWindow(u8 taskId)
 
 static void Task_HandleSelectionMenuInput(u8 taskId)
 {
+#ifdef PORTABLE
+    // MS-126: the Shift / Summary / Cancel menu goes and the party menu answers (somebody gave up the battle)
+    if (!gPaletteFade.active && gPartyMenu.menuType == PARTY_MENU_TYPE_IN_BATTLE && MultiplayerBattle_ForfeitPending())
+    {
+        PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[2]);
+        TryAnswerForForfeit(taskId);
+        return;
+    }
+#endif
+#line 3092 // gba-line
     if (!gPaletteFade.active && MenuHelpers_ShouldWaitForLinkRecv() != TRUE)
     {
         s8 input;
@@ -8984,7 +9039,6 @@ static void CursorCb_Moves(u8 taskId)
     Task_ClosePartyMenu(taskId);
 }
 #endif
-#line 8628 // gba-line
 #ifdef ENABLE_NATIVE_UI
 #include "native_ui/ui_engine.h"
 

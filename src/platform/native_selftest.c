@@ -2426,6 +2426,14 @@ static bool32 FfaEnd(u8 outcome, u8 winner, u8 source)
     return MultiplayerBattle_ValidateController(end, sizeof(end), source);
 }
 
+/* KNOWN_ISSUES MS-126: the master's command `command` for `battler`, as every game notes it. */
+static void NoteForfeitCommand(u8 command, u8 battler)
+{
+    u8 block[16] = {B_COMM_TO_CONTROLLER, 0, 0, 0, 8, 0, 0, 0};
+    block[1] = battler; block[8] = command;
+    MultiplayerBattle_NoteController(block, 0);
+}
+
 static bool32 CoopChosenMon(u8 battler, const u8 *order)
 {
     u8 party[20] = {B_COMM_TO_CONTROLLER, 0, 0, 0, 12, 0, 0, 0, CONTROLLER_CHOOSEPOKEMON, 0, 6, 0, 0x10, 0x32, 0x54, 0, 0};
@@ -2566,6 +2574,83 @@ int NativeSelfTest_CoopController(void)
             && MultiplayerBattle_ValidateController(wire, size, 0));
         sent[offsetof(struct BattleMsgData, originallyUsedMove)] = sent[offsetof(struct BattleMsgData, originallyUsedMove) + 1] = 0xFF;
         ExpectCoopCtl("the check itself still refuses MOVE_UNAVAILABLE in a message", !MultiplayerBattle_ValidateController(wire, size, 0));
+    }
+    MultiplayerBattle_NativeTestShape(0, 0);
+
+    // KNOWN_ISSUES MS-126: a player gives up with a forfeit notice for their own battler (once per game, nothing else in
+    // it); from the waiting screen only while they wait on the others (battle_controller_player.c asks then).
+    MultiplayerBattle_NativeTestShape(MP_BATTLE_PHASE_SINGLES, 2);
+    {
+        u8 wire[MULTIPLAYER_BATTLE_BLOCK_SIZE], notice[4] = {MP_FORFEIT_NOTICE};
+        u8 other[16] = {B_COMM_PC_FORFEIT, 1, 0, 0, 8, 0, 0, 0, MP_FORFEIT_NOTICE};
+        u16 size;
+
+        MultiplayerBattle_ResetControllerValidation();
+        size = MultiplayerBattle_PackController(wire, 0, B_COMM_PC_FORFEIT, sizeof(notice), notice);
+        ExpectCoopCtl("a forfeit notice for this game's own battler: its role, its battler, the notice padded to 8",
+            size == 16 && wire[0] == B_COMM_PC_FORFEIT && wire[1] == 0 && wire[4] == 8 && wire[8] == MP_FORFEIT_NOTICE
+            && MultiplayerBattle_ValidateController(wire, size, 0));
+        ExpectCoopCtl("none for another game's battler", !MultiplayerBattle_PackController(wire + 32, 1, B_COMM_PC_FORFEIT,
+                                                                                            sizeof(notice), notice));
+        ExpectCoopCtl("nobody gives up for another game's player", !MultiplayerBattle_ValidateController(other, 16, 0));
+        other[10] = 1;
+        ExpectCoopCtl("a notice with anything more in it is refused", !MultiplayerBattle_ValidateController(other, 16, 1));
+        other[10] = 0; other[2] = 1;
+        ExpectCoopCtl("a notice naming an attacker is refused", !MultiplayerBattle_ValidateController(other, 16, 1));
+        other[2] = 0;
+        ExpectCoopCtl("nobody has given up yet", !MultiplayerBattle_ForfeitPending());
+        ExpectCoopCtl("battler 1's game sends its player's notice", MultiplayerBattle_ValidateController(other, 16, 1));
+        MultiplayerBattle_NoteController(other, 1);
+        ExpectCoopCtl("battler 1's player gave up", MultiplayerBattle_ForfeitPending() && MultiplayerBattle_ForfeitBattler() == 1);
+        ExpectCoopCtl("once: a second notice from that game is refused", !MultiplayerBattle_ValidateController(other, 16, 1));
+        ExpectCoopCtl("the other player's own notice sent meanwhile still passes",
+            MultiplayerBattle_ValidateController(wire, 16, 0));
+        MultiplayerBattle_NoteController(wire, 0);
+        ExpectCoopCtl("... and the first stays the giver", MultiplayerBattle_ForfeitBattler() == 1);
+
+        MultiplayerBattle_ResetControllerValidation();
+        ExpectCoopCtl("a new battle starts with nobody given up", !MultiplayerBattle_ForfeitPending());
+        NoteForfeitCommand(CONTROLLER_PRINTSTRING, 0);
+        NoteForfeitCommand(CONTROLLER_CHOOSEACTION, 0);
+        NoteForfeitCommand(CONTROLLER_CHOOSEACTION, 1);
+        NoteForfeitCommand(CONTROLLER_CHOOSEMOVE, 0);
+        NoteForfeitCommand(CONTROLLER_LINKSTANDBYMSG, 0);
+        ExpectCoopCtl("no wait before the game shows its standby", !MultiplayerBattle_WaitingOnOthers(0));
+        MultiplayerBattle_NoteStandby(0);
+        ExpectCoopCtl("after its standby battler 0's player waits on the other",
+            MultiplayerBattle_WaitingOnOthers(0) && !MultiplayerBattle_WaitingOnOthers(1));
+        NoteForfeitCommand(CONTROLLER_CHOOSEMOVE, 1);
+        ExpectCoopCtl("... still while the other player chooses", MultiplayerBattle_WaitingOnOthers(0));
+        NoteForfeitCommand(CONTROLLER_PRINTSTRING, 1);
+        ExpectCoopCtl("no longer once the turn plays out", !MultiplayerBattle_WaitingOnOthers(0));
+        NoteForfeitCommand(CONTROLLER_LINKSTANDBYMSG, 0);
+        MultiplayerBattle_NoteStandby(0);
+        NoteForfeitCommand(CONTROLLER_CHOOSEACTION, 0);
+        ExpectCoopCtl("no longer once the player is asked again", !MultiplayerBattle_WaitingOnOthers(0));
+        NoteForfeitCommand(CONTROLLER_CHOOSEPOKEMON, 0);
+        MultiplayerBattle_NoteStandby(0);
+        ExpectCoopCtl("after choosing their next Pokemon the player waits on the other's choice",
+            MultiplayerBattle_WaitingOnOthers(0));
+        MultiplayerBattle_NoteController(other, 1);
+        ExpectCoopCtl("nobody waits to give up once somebody has", !MultiplayerBattle_WaitingOnOthers(0));
+    }
+    MultiplayerBattle_NativeTestShape(0, 0);
+    MultiplayerBattle_NativeTestShape(MP_BATTLE_PHASE_FFA, 4);
+    {
+        u8 notice[16] = {B_COMM_PC_FORFEIT, 2, 0, 0, 8, 0, 0, 0, MP_FORFEIT_NOTICE};
+        MultiplayerBattle_ResetControllerValidation();
+        ExpectCoopCtl("a free-for-all has no forfeit (nobody leaves it halfway)",
+            !MultiplayerBattle_CanForfeit() && !MultiplayerBattle_ValidateController(notice, 16, 2));
+    }
+    MultiplayerBattle_NativeTestShape(0, 0);
+    MultiplayerBattle_NativeTestShape(MP_BATTLE_PHASE_COOP, 2);
+    {
+        u8 notice[16] = {B_COMM_PC_FORFEIT, 1, 0, 0, 8, 0, 0, 0, MP_FORFEIT_NOTICE};
+        MultiplayerBattle_ResetControllerValidation();
+        ExpectCoopCtl("a co-op Gym's AI foe is no player's to give up", !MultiplayerBattle_ValidateController(notice, 16, 0));
+        notice[1] = 2;
+        ExpectCoopCtl("the second player (battler 2, the second game) gives up the team's battle",
+            MultiplayerBattle_ValidateController(notice, 16, 1));
     }
     MultiplayerBattle_NativeTestShape(0, 0);
     MultiplayerBattle_ResetControllerValidation();

@@ -3033,7 +3033,7 @@ static void BattleMainCB1(void)
     gBattleMainFunc();
     for (enum BattlerId battler = 0; battler < gBattlersCount; battler++)
 #ifdef PORTABLE
-        if (!StatStages_RunCommand(battler))
+        if (!StatStages_RunCommand(battler) && !PlayerController_AnswerForForfeit(battler)) // MS-126: answers for a forfeit
 #endif
 #line 2988 // gba-line
         gBattlerControllerFuncs[battler](battler);
@@ -4156,6 +4156,27 @@ static void HandleTurnActionSelectionState(void)
 {
     s32 i;
 
+#ifdef PORTABLE
+    // KNOWN_ISSUES MS-126: somebody gave up (a forfeit notice). Once every game has answered what it was asked (an answer
+    // given for the forfeit changes nothing), the turn is the forfeit alone: the giver runs, which ends the battle with
+    // their side the loser (HandleAction_Run).
+    if (MultiplayerBattle_ForfeitPending() && (gBattleTypeFlags & BATTLE_TYPE_IS_MASTER))
+    {
+        for (enum BattlerId battler = 0; battler < gBattlersCount; battler++)
+        {
+            if (IsBattleControllerActiveOrPendingSyncAnywhere(battler))
+                return;
+        }
+        for (enum BattlerId battler = 0; battler < gBattlersCount; battler++)
+            gChosenActionByBattler[battler] = B_ACTION_NOTHING_FAINTED;
+        gChosenActionByBattler[MultiplayerBattle_ForfeitBattler()] = B_ACTION_RUN;
+        gHitMarker |= HITMARKER_RUN; // as a chosen Run marks it: no turn-order effects (their loop leaves the
+                                     // scripting battler past the last one, which the battle's last message carries)
+        gBattleMainFunc = SetActionsAndBattlersTurnOrder;
+        return;
+    }
+#endif
+#line 4047 // gba-line
     gBattleCommunication[ACTIONS_CONFIRMED_COUNT] = 0;
     for (enum BattlerId battlerIndex = 0; battlerIndex < gBattlersCount; battlerIndex++)
     {
@@ -5406,6 +5427,17 @@ static void CheckChangingTurnOrderEffects(void)
 
 static void RunTurnActionsFunctions(void)
 {
+#ifdef PORTABLE
+    // MS-126: a forfeit that came during the turn is its next action (the giver runs; see HandleTurnActionSelectionState)
+    if (MultiplayerBattle_ForfeitPending() && (gBattleTypeFlags & BATTLE_TYPE_IS_MASTER) && gBattleOutcome == 0
+     && gCurrentActionFuncId != B_ACTION_TRY_FINISH && gCurrentActionFuncId != B_ACTION_FINISHED)
+    {
+        gChosenActionByBattler[MultiplayerBattle_ForfeitBattler()] = B_ACTION_RUN;
+        gCurrentActionFuncId = B_ACTION_RUN;
+        gBattleScripting.battler = MultiplayerBattle_ForfeitBattler(); // a battler on the field for the last message
+    }
+#endif
+#line 5278 // gba-line
     if (gBattleOutcome != 0)
         gCurrentActionFuncId = B_ACTION_FINISHED;
 
@@ -5440,6 +5472,14 @@ static void RunTurnActionsFunctions(void)
 static void HandleEndTurn_BattleWon(void)
 {
     gCurrentActionFuncId = 0;
+#ifdef PORTABLE
+    // MS-126: after a forfeit the giver's side loses, however the battle ended (it may have ended before the forfeit's
+    // run, between a switch and the next action)
+    if (MultiplayerBattle_ForfeitPending() && (gBattleTypeFlags & BATTLE_TYPE_IS_MASTER))
+        gBattleOutcome = (IsOnPlayerSide(MultiplayerBattle_ForfeitBattler()) ? B_OUTCOME_LOST : B_OUTCOME_WON)
+                       | B_OUTCOME_LINK_BATTLE_RAN;
+#endif
+#line 5312 // gba-line
 
     if (gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_RECORDED_LINK))
     {
@@ -5498,6 +5538,14 @@ static void HandleEndTurn_BattleWon(void)
 static void HandleEndTurn_BattleLost(void)
 {
     gCurrentActionFuncId = 0;
+#ifdef PORTABLE
+    // MS-126: after a forfeit the giver's side loses, however the battle ended (it may have ended before the forfeit's
+    // run, between a switch and the next action)
+    if (MultiplayerBattle_ForfeitPending() && (gBattleTypeFlags & BATTLE_TYPE_IS_MASTER))
+        gBattleOutcome = (IsOnPlayerSide(MultiplayerBattle_ForfeitBattler()) ? B_OUTCOME_LOST : B_OUTCOME_WON)
+                       | B_OUTCOME_LINK_BATTLE_RAN;
+#endif
+#line 5370 // gba-line
 
     if (gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_RECORDED_LINK))
     {
