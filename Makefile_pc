@@ -663,6 +663,15 @@ check-game-sections: $(TARGET)
 
 -include $(C_OBJS:.o=.d)
 
+# The owner's TM rule (2026-10-27): on PC a TM or a tutor teaches a move only where an official game teaches that species
+# the move by TM or tutor; the PC game's learnsets are the GBA build's teachable_learnsets.h with the rest taken out
+# (tools/learnset_helpers/make_teachables_pc.py; src/pokemon.c includes them under PORTABLE).
+TEACHABLES_PC := src/data/pokemon/teachable_learnsets_pc.h
+$(TEACHABLES_PC): src/data/pokemon/teachable_learnsets.h tools/learnset_helpers/make_teachables_pc.py \
+                  $(wildcard tools/learnset_helpers/porymoves_files/*.json)
+	python3 tools/learnset_helpers/make_teachables_pc.py $@
+$(OBJ_DIR)/src/pokemon.o: $(TEACHABLES_PC)
+
 ifeq ($(DIORAMA),1)
 # Diorama rule tables and tree model, generated from this tree's maps/tilesets.
 include diorama_rules.mk

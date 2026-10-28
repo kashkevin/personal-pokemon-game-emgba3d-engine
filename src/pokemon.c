@@ -486,7 +486,15 @@ const struct NatureInfo gNaturesInfo[NUM_NATURES] =
 #include "data/pokemon/level_up_learnsets/gen_1.h" // Yellow
 #endif
 
+#ifdef PORTABLE
+// The owner's TM rule (2026-10-27): a TM or a tutor teaches only what an official game teaches by TM or tutor
+// (tools/learnset_helpers/make_teachables_pc.py, Makefile_pc)
+#include "data/pokemon/teachable_learnsets_pc.h"
+#else
+#line 485 // gba-line
 #include "data/pokemon/teachable_learnsets.h"
+#endif
+#line 486 // gba-line
 #include "data/pokemon/egg_moves.h"
 #include "data/pokemon/form_species_tables.h"
 #include "data/pokemon/form_change_tables.h"

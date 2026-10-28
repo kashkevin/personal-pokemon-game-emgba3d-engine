@@ -8,7 +8,8 @@ Two independent checks:
   1. The built game dumps a 64-bit fingerprint of every enabled species (base stats, types, catch rate, experience, EVs,
      abilities, gender ratio, egg data, friendship, growth rate, legendary/mythical flags, level-up, teachable and egg move
      lists, evolutions with their conditions): `pokeemerald-mp --dump-species-data FILE`. It must equal the committed
-     baseline tools/pc_port/baselines/species-data.txt, taken from the engine before Update 29 (5aaf2ba2).
+     baseline tools/pc_port/baselines/species-data.txt, taken from the engine before Update 29 (5aaf2ba2), but for the
+     reviewed changes below (ALLOWED_SPECIES, and the TM rule's species in tools/pc_port/baselines/species-data-tm-rule.txt).
   2. With --base COMMIT (default: the baseline commit named in the baseline's sibling file), `git diff --name-only` between
      that commit and the working tree must not list a protected data file: species and learnset data, move data, ability
      data, trainer and party data, the maps' wild encounter tables (levels and slots), the species/move/item constants.
@@ -55,6 +56,12 @@ ALLOWED = {
 ALLOWED_SPECIES = {
     "1555": ("907cd87b71f0b328", "SPECIES_CHIMECHO_MEGA: base HP 65 with P_UPDATED_STATS, as Chimecho (8906fb9b)"),
 }
+# The TM rule (the owner's decision of 2026-10-28, PC build only): a TM or tutor teaches a move only to the species an
+# official game teaches it that way (tools/learnset_helpers/make_teachables_pc.py), so every species that lost a move from
+# its teachable list has a new fingerprint. One line per species: "id fingerprint", the fingerprint the rule gives.
+# --update-tm-rule rewrites it from a build; before committing that, check the change is the rule's alone: a build with the
+# upstream lists (teachable_learnsets.h copied over teachable_learnsets_pc.h) must fail only with "equal to the baseline".
+TM_RULE = os.path.join(ROOT, "tools", "pc_port", "baselines", "species-data-tm-rule.txt")
 
 
 def run(cmd, **kw):
@@ -66,6 +73,8 @@ def main():
     ap.add_argument("--binary", default=os.path.join(ROOT, "pokeemerald-mp"))
     ap.add_argument("--base", default=BASE_COMMIT)
     ap.add_argument("--update-baseline", action="store_true")
+    ap.add_argument("--update-tm-rule", action="store_true",
+                    help="rewrite the TM rule's list: every species whose fingerprint differs from the baseline (bar ALLOWED_SPECIES)")
     ap.add_argument("--skip-git", action="store_true")
     args = ap.parse_args()
     problems = []
@@ -89,9 +98,21 @@ def main():
         problems.append(f"species count {len(base)} -> {len(now)}")
     base_map = dict(line.split(" ", 1) for line in base)
     now_map = dict(line.split(" ", 1) for line in now)
+    if args.update_tm_rule:
+        rows = [f"{s} {now_map[s]}" for s in sorted(set(base_map) & set(now_map), key=int)
+                if base_map[s] != now_map[s] and ALLOWED_SPECIES.get(s, (None,))[0] != now_map[s]]
+        open(TM_RULE, "w").write("\n".join(rows) + "\n")
+        print(f"species_data_check: TM rule list rewritten ({len(rows)} species)")
+        return 0
+    tm_rule = dict(line.split(" ", 1) for line in open(TM_RULE).read().splitlines())
     for species in sorted(set(base_map) | set(now_map), key=int):
-        if base_map.get(species) != now_map.get(species) and ALLOWED_SPECIES.get(species, (None,))[0] != now_map.get(species):
+        if (base_map.get(species) != now_map.get(species) and ALLOWED_SPECIES.get(species, (None,))[0] != now_map.get(species)
+                and tm_rule.get(species) != now_map.get(species)):
             problems.append(f"species {species}: fingerprint {base_map.get(species)} -> {now_map.get(species)}")
+    # A listed species back at its baseline fingerprint: the list is stale (the rule no longer changes that species).
+    for species in sorted(tm_rule, key=int):
+        if now_map.get(species) != tm_rule[species] and now_map.get(species) == base_map.get(species):
+            problems.append(f"species {species}: listed by the TM rule ({tm_rule[species]}) but equal to the baseline")
     if not args.skip_git:
         diff = run(["git", "diff", "--name-only", args.base, "--"], cwd=ROOT)
         if diff.returncode != 0:
@@ -107,7 +128,7 @@ def main():
             print("  " + p)
         return 1
     print(f"species_data_check: ok ({len(base)} species fingerprints equal the pre-update baseline, {len(ALLOWED_SPECIES)} reviewed "
-          f"change; no protected data file changed but the {len(ALLOWED)} reviewed ones)")
+          f"change, {len(tm_rule)} the TM rule's; no protected data file changed but the {len(ALLOWED)} reviewed ones)")
     return 0
 
 

@@ -1572,6 +1572,13 @@ int NativeSelfTest_BagItems(void)
             {SPECIES_ZIGZAGOON, MOVE_CUT, TRUE, "Zigzagoon: HM01 Cut"}, {SPECIES_PIKACHU, MOVE_THUNDERBOLT, TRUE, "Pikachu: TM24 Thunderbolt"},
             {SPECIES_GYARADOS, MOVE_FLY, FALSE, "Gyarados: not HM02 Fly"}, {SPECIES_BULBASAUR, MOVE_FLY, FALSE, "Bulbasaur: not HM02 Fly"},
             {SPECIES_PIKACHU, MOVE_FLY, FALSE, "Pikachu: not HM02 Fly"},
+            // the owner's TM rule (2026-10-27): a TM teaches only what an official game teaches by TM or tutor
+            {SPECIES_PIKACHU, MOVE_SURF, TRUE, "Pikachu: HM03 Surf (a TM in Sword/Shield and later)"},
+            {SPECIES_WOBBUFFET, MOVE_SAFEGUARD, TRUE, "Wobbuffet: TM20 Safeguard (a TM from X/Y on)"},
+            {SPECIES_UNOWN, MOVE_HIDDEN_POWER, TRUE, "Unown: TM10 Hidden Power (a TM from X/Y on)"},
+            {SPECIES_MEOWTH_GALAR, MOVE_HIDDEN_POWER, FALSE, "Galarian Meowth: not TM10 Hidden Power (no game teaches it)"},
+            {SPECIES_RATTATA_ALOLA, MOVE_SECRET_POWER, FALSE, "Alolan Rattata: not TM43 Secret Power (no game teaches it)"},
+            {SPECIES_RATTATA_ALOLA, MOVE_COUNTER, FALSE, "Alolan Rattata: not the Counter tutor (only an Egg move)"},
         };
         u32 item, found = 0, wrong = 0, pocket = 0, mew = 0;
 
