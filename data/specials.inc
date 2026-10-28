@@ -688,4 +688,6 @@ gSpecials::
 	def_special TowerLegends_Continue
 	@ KNOWN_ISSUES MS-141: Berry Crush with computer partners (src/union_room.c); VAR_0x8005 the group's size.
 	def_special StartBerryCrushWithComputerPartners
+	@ VAR_0x8005 the game (0 Pokemon Jump, 1 Dodrio Berry Picking), VAR_0x8006 the group's size.
+	def_special StartMossdeepMinigameWithComputerPartners
 .endif

@@ -4107,3 +4107,271 @@ static inline void TruncateToFirstWordOnly(u8 *str)
         }
     }
 }
+
+#ifdef PORTABLE
+// KNOWN_ISSUES MS-141: Pokemon Jump's computer partners (include/link_rfu.h, src/link_rfu_2.c). Each plays as a
+// member's game would, on the leader's own vine (a member's game runs the same vine from the leader's seed and
+// timer): its Pokemon (a species Pokemon Jump allows), each phase the leader starts reported finished (at once
+// where the leader waits for its group, else as the leader's own part ends), one jump each swing timed so that its
+// Pokemon is in the air while the vine passes (now and then too late, more often as the vine speeds up: then it is
+// hit and the game ends, as a member reports its own hit), and "yes" to playing again. The leader's game, the local
+// player's, keeps the score, the bonuses and the prizes, as in a group of GBAs.
+
+struct JumpPartner
+{
+    u8 funcId;          // the leader's phase it answers
+    bool8 funcFinished;
+    u8 monState;
+    u8 jumpState;
+    u16 jumpTimeStart;
+    u8 jumpLength;      // frames in the air (its species' jump)
+    bool8 jumped;       // it has jumped this swing
+    bool8 sawVine;      // the vine has reached the players this swing
+    u8 aim;             // this swing's jump: when the vine is this many frames from the players
+    u8 airFrames;       // frames since its jump began, as the leader's game animates it (a frame at a time)
+    u8 finishIn;        // frames until it reports a phase that waits for the group finished
+    u16 species;
+    u32 personality;
+    u32 otId;
+};
+
+static struct JumpPartner sPartners[MAX_RFU_PLAYERS];
+static u32 sPartnerSeed;
+
+static const u16 sPartnerSpecies[] = {
+    SPECIES_PIKACHU, SPECIES_MARILL, SPECIES_SKITTY, SPECIES_SPINDA, SPECIES_PLUSLE, SPECIES_MINUN, SPECIES_AZURILL,
+    SPECIES_WOOPER,
+};
+
+static u16 PartnerRandom(void)
+{
+    sPartnerSeed = ISO_RANDOMIZE1(sPartnerSeed);
+    return sPartnerSeed >> 16;
+}
+
+// The frames its Pokemon is in the air: the jump's offsets after the 4 frames of take-off (UpdateJump).
+static u8 GetJumpLength(u16 species)
+{
+    s16 type = GetSpeciesPokemonJumpType(species);
+    u8 i = ARRAY_COUNT(sJumpOffsets[0]);
+
+    if (type == PKMN_JUMP_TYPE_NONE)
+        type = PKMN_JUMP_TYPE_NORMAL;
+    while (i > 0 && sJumpOffsets[type - 1][i - 1] == 0)
+        i--;
+    return i;
+}
+
+static bool32 IsPartnerInAir(struct JumpPartner *partner)
+{
+    return partner->monState == MONSTATE_JUMP && partner->airFrames >= 4 && partner->airFrames < 4 + partner->jumpLength;
+}
+
+// Frames until the vine reaches the players (VINE_UPSWING_LOWER), at its present speed (it only speeds up on the
+// way down, so this is never early).
+static u32 FramesToVineAtPlayers(void)
+{
+    u32 timer = sPokemonJump->vineStateTimer, target = VINE_UPSWING_LOWER << 8, dist, speed;
+
+    dist = timer < target ? target - timer : VINE_STATE_TIMER(NUM_VINESTATES - 1) - timer + target;
+    speed = sPokemonJump->vineSpeed;
+    if (timer <= VINE_STATE_TIMER(VINE_LOWEST))
+        speed += sPokemonJump->vineSpeedAccel / 256;
+    if (speed == 0)
+        return 0xFFFF;
+    return dist / speed;
+}
+
+static void PartnerSwing(struct JumpPartner *partner)
+{
+    if (partner->monState == MONSTATE_HIT || sPokemonJump->gameOver)
+        return;
+    if (sPokemonJump->vineState == VINE_UPSWING_LOWER)
+    {
+        partner->sawVine = TRUE;
+        if (!IsPartnerInAir(partner))
+        {
+            // On the ground as the vine passes: hit (a member reports its own hit).
+            partner->monState = MONSTATE_HIT;
+            partner->jumpState = JUMPSTATE_FAILURE;
+            partner->jumpTimeStart = sPokemonJump->vineTimer;
+        }
+        return;
+    }
+    if (partner->sawVine)
+    {
+        partner->jumpState = JUMPSTATE_SUCCESS; // the vine has passed under it
+        return;
+    }
+    if (!partner->jumped && partner->monState == MONSTATE_NORMAL && FramesToVineAtPlayers() <= partner->aim)
+    {
+        partner->monState = MONSTATE_JUMP;
+        partner->jumpTimeStart = sPokemonJump->vineTimer;
+        partner->airFrames = 0;
+        partner->jumped = TRUE;
+    }
+}
+
+static void PartnerStartPhase(struct JumpPartner *partner, u8 funcId)
+{
+    partner->funcId = funcId;
+    partner->funcFinished = FALSE;
+    partner->finishIn = 2 + PartnerRandom() % 4;
+    switch (funcId)
+    {
+    case FUNC_WAIT_ROUND:
+    case FUNC_RESET_GAME:
+        partner->jumpState = JUMPSTATE_NONE;
+        if (partner->monState == MONSTATE_HIT || funcId == FUNC_RESET_GAME)
+            partner->monState = MONSTATE_NORMAL;
+        break;
+    case FUNC_GAME_ROUND:
+        partner->sawVine = FALSE;
+        // In the air from 4 frames after the press for jumpLength frames; the vine stays at the players a few frames.
+        // Aim for it to pass near the jump's top, give or take 3 frames. Now and then too late (never in a game's first
+        // 10 jumps), more often as the vine gets faster (1 swing in 300 at its slowest, 1 in 75 at its fastest): then the
+        // vine hits it.
+        partner->jumped = FALSE;
+        if (sPokemonJump->comm.jumpsInRow >= 10 && PartnerRandom() % (300 / (1 + min(sPokemonJump->vineSpeedStage, 3))) == 0)
+            partner->aim = 1;
+        else
+            partner->aim = (partner->jumpLength + 2) / 2 + PartnerRandom() % 7 - 3;
+        break;
+    }
+}
+
+static void PokemonJump_ComputerPartner(u8 id)
+{
+    struct JumpPartner *partner = &sPartners[id];
+    struct MonInfoPacket monInfo;
+    struct MemberStatePacket state;
+    u8 funcId;
+
+    if (sPokemonJump == NULL || !sPokemonJump->isLeader || id == 0 || id >= sPokemonJump->numPlayers)
+        return;
+    if (FuncIsActiveTask(Task_CommunicateMonInfo))
+    {
+        memset(&monInfo, 0, sizeof(monInfo));
+        monInfo.id = PACKET_MON_INFO;
+        monInfo.species = partner->species;
+        monInfo.personality = partner->personality;
+        monInfo.otId = partner->otId;
+        LocalLink_PartnerSendPacket(id, &monInfo);
+        return;
+    }
+    if (!FuncIsActiveTask(Task_PokemonJump_Leader))
+        return;
+
+    if (partner->monState == MONSTATE_JUMP && ++partner->airFrames >= 4 + partner->jumpLength)
+        partner->monState = MONSTATE_NORMAL; // landed
+    funcId = sPokemonJump->comm.funcId;
+    if (funcId != partner->funcId)
+        PartnerStartPhase(partner, funcId);
+    if (funcId == FUNC_GAME_ROUND)
+        PartnerSwing(partner);
+    else if (funcId == FUNC_GAME_OVER && partner->jumpState == JUMPSTATE_NONE && partner->monState != MONSTATE_JUMP)
+        partner->jumpState = partner->jumped ? JUMPSTATE_SUCCESS : JUMPSTATE_FAILURE; // the vine stopped where it hit someone
+
+    // A phase the leader waits on its group to end (the next round, playing again, a new game): at once. Else as the
+    // leader's own part ends, as a member's own part would (a round: at the swing's end, or when someone is hit).
+    if (funcId == FUNC_WAIT_ROUND || funcId == FUNC_ASK_PLAY_AGAIN || funcId == FUNC_RESET_GAME)
+    {
+        if (partner->finishIn != 0 && --partner->finishIn == 0)
+            partner->funcFinished = TRUE;
+    }
+    else if (!sPokemonJump->funcActive)
+    {
+        partner->funcFinished = TRUE;
+    }
+
+    memset(&state, 0, sizeof(state));
+    state.id = PACKET_MEMBER_STATE;
+    state.monState = partner->monState;
+    state.jumpState = partner->jumpState;
+    state.funcFinished = partner->funcFinished;
+    state.jumpTimeStart = partner->jumpTimeStart;
+    state.funcId = partner->funcId;
+    state.playAgainState = PLAY_AGAIN_YES;
+    LocalLink_PartnerSendPacket(id, &state);
+}
+
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+#include <stdio.h>
+
+// Test builds only (PKMN_TEST_JUMP_AUTO in src/diorama/scene/battle_env_test.c): TRUE while the local player's Pokemon
+// should jump, timed as the computer partners time theirs (no misses), so a real-game test can play long games.
+bool32 PokemonJump_TestWantsJump(void)
+{
+    struct PokemonJump_Player *player;
+
+    if (sPokemonJump == NULL || gMain.callback2 != CB2_PokemonJump || sPokemonJump->comm.funcId != FUNC_GAME_ROUND
+     || sPokemonJump->gameOver)
+        return FALSE;
+    if (!FuncIsActiveTask(Task_PokemonJump_Leader) && !FuncIsActiveTask(Task_PokemonJump_Member))
+        return FALSE;
+    player = &sPokemonJump->players[sPokemonJump->multiplayerId];
+    return player->monState == MONSTATE_NORMAL
+        && FramesToVineAtPlayers() <= (GetJumpLength(sPokemonJump->monInfo[sPokemonJump->multiplayerId].species) + 2) / 2;
+}
+
+// Test builds only: TRUE while the game waits for the local player after a game (the points, a prize, "Want to play
+// again?"), where A goes on and answers YES: a real-game test plays game after game.
+bool32 PokemonJump_TestWaitsAfterGame(void)
+{
+    if (sPokemonJump == NULL || gMain.callback2 != CB2_PokemonJump)
+        return FALSE;
+    return sPokemonJump->comm.funcId == FUNC_GAME_OVER || sPokemonJump->comm.funcId == FUNC_ASK_PLAY_AGAIN;
+}
+
+// Test builds only: on the first frame of the leader's game over, who the vine hit and how fast it was going (the
+// test's log).
+bool32 PokemonJump_TestGameOverReport(char *buffer, u32 size)
+{
+    static bool8 sReported;
+    int i, n;
+
+    if (sPokemonJump == NULL || gMain.callback2 != CB2_PokemonJump || sPokemonJump->comm.funcId != FUNC_GAME_OVER)
+    {
+        sReported = FALSE;
+        return FALSE;
+    }
+    if (sReported)
+        return FALSE;
+    sReported = TRUE;
+    n = snprintf(buffer, size, "jump game over: %u jumps, vine speed %u stage %u, accel %u;", sPokemonJump->comm.jumpsInRow,
+                 sPokemonJump->vineSpeed, sPokemonJump->vineSpeedStage, (unsigned)sPokemonJump->vineSpeedAccel);
+    for (i = 0; i < sPokemonJump->numPlayers && n > 0 && (u32)n < size; i++)
+    {
+        if (i == 0)
+            n += snprintf(buffer + n, size - n, " leader %s offset %d;", sPokemonJump->players[0].monState == MONSTATE_HIT
+                          ? "HIT" : "ok", sPokemonJump->players[0].jumpOffset);
+        else
+            n += snprintf(buffer + n, size - n, " %d %s aim %u jumped %u air %u of %u;", i,
+                          sPartners[i].monState == MONSTATE_HIT ? "HIT" : "ok", sPartners[i].aim, sPartners[i].jumped,
+                          sPartners[i].airFrames, sPartners[i].jumpLength);
+    }
+    return TRUE;
+}
+#endif
+
+void PokemonJump_StartComputerPartners(void)
+{
+    u8 i;
+    u16 species;
+
+    memset(sPartners, 0, sizeof(sPartners));
+    sPartnerSeed = Random32();
+    for (i = 1; i < MAX_RFU_PLAYERS; i++)
+    {
+        species = sPartnerSpecies[(i - 1 + PartnerRandom()) % ARRAY_COUNT(sPartnerSpecies)];
+        if (!IsSpeciesAllowedInPokemonJump(species))
+            species = SPECIES_PIKACHU;
+        sPartners[i].species = species;
+        sPartners[i].personality = ((u32)PartnerRandom() << 16) | PartnerRandom();
+        sPartners[i].otId = ((u32)PartnerRandom() << 16) | PartnerRandom();
+        sPartners[i].jumpLength = GetJumpLength(species);
+        sPartners[i].funcId = FUNC_NONE;
+    }
+    LocalLink_SetPartnerFunc(PokemonJump_ComputerPartner);
+}
+#endif

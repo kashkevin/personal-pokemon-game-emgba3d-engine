@@ -664,6 +664,10 @@ static void (*const sMemberFuncs[])(void) =
 void StartDodrioBerryPicking(u16 partyId, MainCallback exitCallback)
 {
     sExitingGame = FALSE;
+#ifdef PORTABLE
+    sGfx = NULL; // MS-141: no screen functions until InitGameGfx (SetGfxFunc); not the last game's freed ones
+#endif
+#line 667 // gba-line
 
     if (gReceivedRemoteLinkPlayers && (sGame = AllocZeroed(sizeof(*sGame))))
     {
@@ -3113,7 +3117,16 @@ static u32 RecvPacket_ReadyToStart(u32 playerId)
 {
     struct ReadyToStartPacket *packet;
 
+#ifdef PORTABLE
+    // KNOWN_ISSUES MS-141: the member's own command, whose packet this is. With BUGFIX the leader waits for every
+    // member's "ready" (AllPlayersReadyToStart), but it sends nothing itself while it waits, so a gate on its own
+    // command (slot 0), as the original reads it, never let a "ready" through and the game never started.
+    if ((gRecvCmds[playerId][0] & RFUCMD_MASK) != RFUCMD_SEND_PACKET)
+#else
+#line 3116 // gba-line
     if ((gRecvCmds[0][0] & RFUCMD_MASK) != RFUCMD_SEND_PACKET)
+#endif
+#line 3117 // gba-line
         return FALSE;
 
     packet = (void *)&gRecvCmds[playerId][1];
@@ -5131,6 +5144,14 @@ static void GfxIdle(void)
 
 static void SetGfxFunc(void (*func)(void))
 {
+#ifdef PORTABLE
+    // KNOWN_ISSUES MS-141: Task_CommunicateMonInfo erases its message before InitGameGfx has set up the screen's
+    // functions (sGfx), on every game's first start. The GBA's write through the null pointer reaches nothing; natively
+    // it faulted.
+    if (sGfx == NULL)
+        return;
+#endif
+#line 5134 // gba-line
     sGfx->state = 0;
     sGfx->finished = FALSE;
     sGfx->func = func;
@@ -5209,3 +5230,195 @@ static bool32 LoadBgGfx(void)
     sGfx->loadState++;
     return FALSE;
 }
+
+#ifdef PORTABLE
+// KNOWN_ISSUES MS-141: Dodrio Berry Picking's computer partners (include/link_rfu.h, src/link_rfu_2.c). Each plays
+// as a member's game would: its Dodrio (never shiny), "ready" while the leader waits to start, a pick toward a Berry
+// in reach of one of its three heads (fall distance 6 or 7, as TryPickBerry takes it) a moment after it comes into
+// reach, "ready" to end once no Berry falls, its results (the leader keeps its own) and "yes" to playing again. It
+// leaves the columns it shares with the local player's Dodrio to them. The leader's game, the local player's, decides
+// every pick, miss and score, as in a group of GBAs.
+
+enum {
+    DODRIO_ANSWER_NONE,
+    DODRIO_ANSWER_MON_INFO,
+    DODRIO_ANSWER_RESULTS,
+    DODRIO_ANSWER_PLAY_AGAIN_FIRST,
+    DODRIO_ANSWER_PLAY_AGAIN,
+};
+
+struct DodrioPartner
+{
+    u8 targetColumn; // the column of the Berry it reaches for; 0xFF none
+    u8 pickIn;       // frames until its pick
+    u8 answered;     // the block exchange it answered last (DODRIO_ANSWER_*)
+};
+
+static struct DodrioPartner sPartners[MAX_RFU_PLAYERS];
+static u32 sPartnerSeed;
+
+static u16 PartnerRandom(void)
+{
+    sPartnerSeed = ISO_RANDOMIZE1(sPartnerSeed);
+    return sPartnerSeed >> 16;
+}
+
+static void PartnerAnswer(u8 id, struct DodrioPartner *partner, u8 answer, const void *block, u16 size)
+{
+    if (partner->answered != answer && LocalLink_PartnerSendBlock(id, block, size))
+        partner->answered = answer;
+}
+
+static bool32 IsLeaderColumn(u8 column)
+{
+    u8 i;
+
+    for (i = 0; i < 3; i++)
+    {
+        if (sDodrioHeadToColumnMap[sGame->numPlayers - 1][0][i] == column)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+// The head (0 left, 1 middle, 2 right) whose column holds a Berry in reach, the lowest first; 3 none.
+static u8 GetPartnerHeadInReach(u8 id)
+{
+    u8 head, column, best = 3, bestDist = 0;
+
+    for (head = 0; head < 3; head++)
+    {
+        column = sDodrioHeadToColumnMap[sGame->numPlayers - 1][id][head];
+        if (IsLeaderColumn(column) || sGame->berryState[column] != BERRYSTATE_NONE)
+            continue;
+        if (sGame->player.berries.fallDist[column] != EAT_FALL_DIST - 1 && sGame->player.berries.fallDist[column] != EAT_FALL_DIST)
+            continue;
+        if (best == 3 || sGame->player.berries.fallDist[column] > bestDist)
+        {
+            best = head;
+            bestDist = sGame->player.berries.fallDist[column];
+        }
+    }
+    return best;
+}
+
+static void PartnerPick(u8 id, struct DodrioPartner *partner)
+{
+    static const u8 sHeadPickStates[3] = {PICK_LEFT, PICK_MIDDLE, PICK_RIGHT};
+    struct PickStatePacket packet;
+    u8 head, column;
+
+    if (sGame->numGraySquares >= NUM_STATUS_SQUARES || sGame->inputState[id] != INPUTSTATE_NONE)
+    {
+        partner->targetColumn = 0xFF;
+        return;
+    }
+    head = GetPartnerHeadInReach(id);
+    if (head == 3)
+    {
+        partner->targetColumn = 0xFF;
+        return;
+    }
+    column = sDodrioHeadToColumnMap[sGame->numPlayers - 1][id][head];
+    if (partner->targetColumn != column)
+    {
+        // A Berry newly in reach: a person's reaction, sometimes too slow for the fastest Berries.
+        partner->targetColumn = column;
+        partner->pickIn = 6 + PartnerRandom() % 16;
+        return;
+    }
+    if (--partner->pickIn != 0)
+        return;
+    memset(&packet, 0, sizeof(packet));
+    packet.id = PACKET_PICK_STATE;
+    packet.pickState = sHeadPickStates[head];
+    if (!LocalLink_PartnerSendPacket(id, &packet))
+        partner->pickIn = 1;
+}
+
+static void DodrioBerryPicking_ComputerPartner(u8 id)
+{
+    struct DodrioPartner *partner = &sPartners[id];
+    struct ReadyToStartPacket readyStart;
+    struct ReadyToEndPacket readyEnd;
+    u8 block[sizeof(sGame->berryResults)];
+
+    if (sGame == NULL || sExitingGame || !sGame->isLeader || id == 0 || id >= sGame->numPlayers)
+        return;
+    memset(block, 0, sizeof(block));
+    if (FuncIsActiveTask(Task_CommunicateMonInfo))
+    {
+        PartnerAnswer(id, partner, DODRIO_ANSWER_MON_INFO, block, sizeof(struct DodrioGame_MonInfo)); // not shiny
+        return;
+    }
+    switch (sGame->funcId)
+    {
+    case FUNC_WAIT_START:
+        memset(&readyStart, 0, sizeof(readyStart));
+        readyStart.id = PACKET_READY_START;
+        readyStart.ready = TRUE;
+        LocalLink_PartnerSendPacket(id, &readyStart);
+        break;
+    case FUNC_PLAY_GAME:
+        PartnerPick(id, partner);
+        break;
+    case FUNC_WAIT_END_GAME:
+        if (!sGame->berriesFalling && !sGame->allReadyToEnd)
+        {
+            memset(&readyEnd, 0, sizeof(readyEnd));
+            readyEnd.id = PACKET_READY_END;
+            readyEnd.ready = TRUE;
+            LocalLink_PartnerSendPacket(id, &readyEnd);
+        }
+        break;
+    case FUNC_INIT_RESULTS:
+        if (sGame->state <= 2)
+            PartnerAnswer(id, partner, DODRIO_ANSWER_RESULTS, block, sizeof(sGame->berryResults)); // the leader keeps its own
+        break;
+    case FUNC_RESULTS:
+        block[0] = PLAY_AGAIN_YES;
+        if (sGame->state >= 2 && sGame->state <= 4)
+            PartnerAnswer(id, partner, DODRIO_ANSWER_PLAY_AGAIN_FIRST, block, 1);
+        break;
+    case FUNC_ASK_PLAY_AGAIN:
+        block[0] = PLAY_AGAIN_YES;
+        if (sGame->state >= 5 && sGame->state <= 7)
+            PartnerAnswer(id, partner, DODRIO_ANSWER_PLAY_AGAIN, block, 1);
+        break;
+    }
+}
+
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+// Test builds only (PKMN_TEST_DODRIO_AUTO in src/diorama/scene/battle_env_test.c): the key that picks a Berry now in
+// reach of one of the local player's Dodrio's heads (0 none), so a real-game test shows the player's own picks.
+u16 DodrioBerryPicking_TestPickKey(void)
+{
+    static const u16 sHeadKeys[3] = {DPAD_LEFT, DPAD_UP, DPAD_RIGHT};
+    u8 head, column;
+
+    if (sGame == NULL || sExitingGame || !sGame->isLeader || sGame->funcId != FUNC_PLAY_GAME
+     || sGame->numGraySquares >= NUM_STATUS_SQUARES || sGame->inputState[0] != INPUTSTATE_NONE
+     || sGame->players[0].comm.pickState != PICK_NONE)
+        return 0;
+    for (head = 0; head < 3; head++)
+    {
+        column = sDodrioHeadToColumnMap[sGame->numPlayers - 1][0][head];
+        if (sGame->berryState[column] == BERRYSTATE_NONE
+         && (sGame->player.berries.fallDist[column] == EAT_FALL_DIST - 1 || sGame->player.berries.fallDist[column] == EAT_FALL_DIST))
+            return sHeadKeys[head];
+    }
+    return 0;
+}
+#endif
+
+void DodrioBerryPicking_StartComputerPartners(void)
+{
+    u8 i;
+
+    memset(sPartners, 0, sizeof(sPartners));
+    for (i = 0; i < MAX_RFU_PLAYERS; i++)
+        sPartners[i].targetColumn = 0xFF;
+    sPartnerSeed = Random32();
+    LocalLink_SetPartnerFunc(DodrioBerryPicking_ComputerPartner);
+}
+#endif

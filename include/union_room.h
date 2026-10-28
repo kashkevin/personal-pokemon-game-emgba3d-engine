@@ -160,6 +160,7 @@ u8 CreateTask_ListenToWireless(void);
 void StartUnionRoomBattle(u16 battleFlags);
 #ifdef PORTABLE
 void StartBerryCrushWithComputerPartners(void); // KNOWN_ISSUES MS-141 (PC game only)
+void StartMossdeepMinigameWithComputerPartners(void);
 #endif
 #line 161 // gba-line
 

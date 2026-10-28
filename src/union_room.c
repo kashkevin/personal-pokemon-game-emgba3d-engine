@@ -4514,11 +4514,12 @@ static void CopyAndTranslatePlayerName(u8 *dest, struct RfuPlayer *player)
 }
 
 #ifdef PORTABLE
-// KNOWN_ISSUES MS-141 (PC game only): Berry Crush with computer partners. The Direct Corner's attendant
-// (data/scripts/cable_club.inc) starts it instead of the wireless lobby, which needs the Wireless Adapter: the
-// player leads a group of VAR_0x8005 players whose other members are computer partners (src/link_rfu_2.c,
-// src/berry_crush.c), walks into the link room as after a lobby, and the game starts as Task_StartActivity
-// starts it. The partners' names are not kept in the trainer records (SaveLinkTrainerNames is not called).
+// KNOWN_ISSUES MS-141 (PC game only): the wireless minigames with computer partners. The scripts start them instead
+// of the wireless lobby, which needs the Wireless Adapter: Berry Crush at the Direct Corner's attendant
+// (data/scripts/cable_club.inc), Pokemon Jump and Dodrio Berry Picking at Mossdeep City's minigame building. The player
+// leads a group whose other members are computer partners (src/link_rfu_2.c and each game's own file), walks into the
+// link room as after a lobby, and the game starts as Task_StartActivity starts it. The partners' names are not kept in
+// the trainer records (SaveLinkTrainerNames is not called).
 static const u8 *const sComputerPartnerNames[MAX_RFU_PLAYERS - 1] =
 {
     COMPOUND_STRING("LADDIE"),
@@ -4527,11 +4528,12 @@ static const u8 *const sComputerPartnerNames[MAX_RFU_PLAYERS - 1] =
     COMPOUND_STRING("MISS"),
 };
 
-// As Task_RunScriptAndFadeToActivity and Task_StartActivity: once the script has put the player in the link
-// room and stopped (waitstate), fade, wait for everyone, warp back into this room and start the game.
-static void Task_StartBerryCrushWithComputerPartners(u8 taskId)
+// As Task_RunScriptAndFadeToActivity and Task_StartActivity: once the script has put the player in the link room
+// and stopped (waitstate), fade, wait for everyone, warp back into this room and start the game (data[1]).
+static void Task_StartActivityWithComputerPartners(u8 taskId)
 {
     s16 *data = gTasks[taskId].data;
+    u8 activity;
 
     switch (data[0])
     {
@@ -4552,19 +4554,33 @@ static void Task_StartBerryCrushWithComputerPartners(u8 taskId)
     case 2:
         if (IsLinkTaskFinished())
         {
-            DestroyTask(taskId);
-            WarpForWirelessMinigame(USING_BERRY_CRUSH, 9, 1);
-            StartBerryCrush(CB2_LoadMap);
+            activity = data[1];
+            DestroyTask(taskId); // first: Pokemon Jump and Dodrio Berry Picking reset the tasks as they start
             gSpecialVar_Result = LINKUP_SUCCESS;
+            switch (activity)
+            {
+            case ACTIVITY_BERRY_CRUSH:
+                WarpForWirelessMinigame(USING_BERRY_CRUSH, 9, 1);
+                StartBerryCrush(CB2_LoadMap);
+                break;
+            case ACTIVITY_POKEMON_JUMP:
+                WarpForWirelessMinigame(USING_MINIGAME, 5, 1);
+                StartPokemonJump(GetCursorSelectionMonId(), CB2_LoadMap);
+                break;
+            case ACTIVITY_BERRY_PICK:
+                WarpForWirelessMinigame(USING_MINIGAME, 5, 1);
+                StartDodrioBerryPicking(GetCursorSelectionMonId(), CB2_LoadMap);
+                break;
+            }
             UnlockPlayerFieldControls();
         }
         break;
     }
 }
 
-void StartBerryCrushWithComputerPartners(void)
+static void StartComputerPartnersGroup(u8 playerCount, u8 activity)
 {
-    u8 i, playerCount = gSpecialVar_0x8005;
+    u8 i;
 
     if (playerCount < 2 || playerCount > MAX_RFU_PLAYERS)
         playerCount = MAX_RFU_PLAYERS;
@@ -4578,8 +4594,31 @@ void StartBerryCrushWithComputerPartners(void)
         gLinkPlayers[i].gender = (i & 1) ? MALE : FEMALE;
         gLinkPlayers[i].language = GAME_LANGUAGE;
     }
-    gPlayerCurrActivity = ACTIVITY_BERRY_CRUSH;
+    gPlayerCurrActivity = activity;
+    gTasks[CreateTask(Task_StartActivityWithComputerPartners, 0)].data[1] = activity;
+}
+
+// VAR_0x8005: the group's size.
+void StartBerryCrushWithComputerPartners(void)
+{
+    StartComputerPartnersGroup(gSpecialVar_0x8005, ACTIVITY_BERRY_CRUSH);
     BerryCrush_StartComputerPartners();
-    CreateTask(Task_StartBerryCrushWithComputerPartners, 0);
+}
+
+// VAR_0x8005: the game, as the old man's script sets it (0 Pokemon Jump, 1 Dodrio Berry Picking); VAR_0x8006: the
+// group's size (Dodrio Berry Picking at least 3). The Pokemon for it is the one chosen in the party menu
+// (GetCursorSelectionMonId), as after the lobby.
+void StartMossdeepMinigameWithComputerPartners(void)
+{
+    if (gSpecialVar_0x8005 == 1)
+    {
+        StartComputerPartnersGroup(max(gSpecialVar_0x8006, 3), ACTIVITY_BERRY_PICK);
+        DodrioBerryPicking_StartComputerPartners();
+    }
+    else
+    {
+        StartComputerPartnersGroup(gSpecialVar_0x8006, ACTIVITY_POKEMON_JUMP);
+        PokemonJump_StartComputerPartners();
+    }
 }
 #endif

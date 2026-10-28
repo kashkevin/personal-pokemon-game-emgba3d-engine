@@ -1314,6 +1314,9 @@ MossdeepCity_GameCorner_1F_EventScript_OldMan2::
 	faceplayer
 	message MossdeepCity_GameCorner_1F_Text_WelcomeCanYouWait
 	waitmessage
+.ifdef PORTABLE
+	goto MossdeepCity_GameCorner_1F_EventScript_ComputerPartners
+.endif
 	specialvar VAR_RESULT, IsWirelessAdapterConnected
 	goto_if_eq VAR_RESULT, FALSE, MossdeepCity_GameCorner_1F_EventScript_AdapterNotConnected
 	delay 60
@@ -1403,6 +1406,68 @@ MossdeepCity_GameCorner_1F_EventScript_EnterMinigameRoom::
 	release
 	waitstate
 	end
+
+.ifdef PORTABLE
+@ KNOWN_ISSUES MS-141 (PC game only): POKéMON JUMP and DODRIO BERRY-PICKING with computer partners. The PC has no
+@ Wireless Adapter, so the old man offers the two games with computer partners (src/union_room.c): the game, the
+@ Pokémon for it, the group's size (Dodrio Berry Picking 3 to 5, Pokémon Jump 2 to 5), then the minigame room as
+@ after the wireless lobby. No save before it (the games save as they always do).
+MossdeepCity_GameCorner_1F_EventScript_ComputerPartners::
+	delay 60
+	message MossdeepCity_GameCorner_1F_Text_PlayWithComputerPartners
+	waitmessage
+	multichoice 0, 0, MULTI_WIRELESS_MINIGAME, FALSE
+	switch VAR_RESULT
+	case 0, MossdeepCity_GameCorner_1F_EventScript_PartnersPokemonJump
+	case 1, MossdeepCity_GameCorner_1F_EventScript_PartnersDodrio
+	case 2, MossdeepCity_GameCorner_1F_EventScript_AbortMinigame
+	case MULTI_B_PRESSED, MossdeepCity_GameCorner_1F_EventScript_AbortMinigame
+	end
+
+MossdeepCity_GameCorner_1F_EventScript_PartnersPokemonJump::
+	setvar VAR_0x8005, 0
+	special IsPokemonJumpSpeciesInParty
+	goto_if_eq VAR_RESULT, FALSE, MossdeepCity_GameCorner_1F_EventScript_DontHaveRequiredMon
+	msgbox MossdeepCity_GameCorner_1F_Text_EnterWhichPokemon, MSGBOX_DEFAULT
+	fadescreen FADE_TO_BLACK
+	setvar VAR_0x8005, 0
+	special ChooseMonForWirelessMinigame
+	goto_if_ge VAR_0x8004, PARTY_SIZE, MossdeepCity_GameCorner_1F_EventScript_AbortMinigame
+	message CableClub_Text_ComputerPartnersHowMany
+	waitmessage
+	dynmultichoice 0, 0, FALSE, 4, 3, DYN_MULTICHOICE_CB_NONE, CableClub_Text_TwoPlayers, CableClub_Text_ThreePlayers, CableClub_Text_FourPlayers, CableClub_Text_FivePlayers
+	goto_if_eq VAR_RESULT, MULTI_B_PRESSED, MossdeepCity_GameCorner_1F_EventScript_AbortMinigame
+	addvar VAR_RESULT, 2
+	copyvar VAR_0x8006, VAR_RESULT
+	setvar VAR_0x8005, 0
+	special StartMossdeepMinigameWithComputerPartners
+	goto MossdeepCity_GameCorner_1F_EventScript_EnterMinigameRoom
+	end
+
+MossdeepCity_GameCorner_1F_EventScript_PartnersDodrio::
+	setvar VAR_0x8005, 1
+	special IsDodrioInParty
+	goto_if_eq VAR_RESULT, FALSE, MossdeepCity_GameCorner_1F_EventScript_DontHaveRequiredMon
+	msgbox MossdeepCity_GameCorner_1F_Text_EnterWhichPokemon, MSGBOX_DEFAULT
+	fadescreen FADE_TO_BLACK
+	setvar VAR_0x8005, 1
+	special ChooseMonForWirelessMinigame
+	goto_if_ge VAR_0x8004, PARTY_SIZE, MossdeepCity_GameCorner_1F_EventScript_AbortMinigame
+	message CableClub_Text_ComputerPartnersHowMany
+	waitmessage
+	dynmultichoice 0, 0, FALSE, 3, 2, DYN_MULTICHOICE_CB_NONE, CableClub_Text_ThreePlayers, CableClub_Text_FourPlayers, CableClub_Text_FivePlayers
+	goto_if_eq VAR_RESULT, MULTI_B_PRESSED, MossdeepCity_GameCorner_1F_EventScript_AbortMinigame
+	addvar VAR_RESULT, 3
+	copyvar VAR_0x8006, VAR_RESULT
+	setvar VAR_0x8005, 1
+	special StartMossdeepMinigameWithComputerPartners
+	goto MossdeepCity_GameCorner_1F_EventScript_EnterMinigameRoom
+	end
+
+MossdeepCity_GameCorner_1F_Text_PlayWithComputerPartners:
+	.string "You can play with computer\n"
+	.string "partners. Which game will it be?$"
+.endif
 
 MossdeepCity_GameCorner_1F_EventScript_AdapterNotConnected::
 	delay 60

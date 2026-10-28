@@ -91,6 +91,11 @@ u32 gDioramaBattleEnvTestScriptStarts;
 #include "platform/png_write.h"
 #endif
 
+bool32 PokemonJump_TestWantsJump(void); /* src/pokemon_jump.c (test builds): MS-141's PKMN_TEST_JUMP_AUTO */
+bool32 PokemonJump_TestGameOverReport(char *buffer, u32 size); /* the same: who the vine hit */
+bool32 PokemonJump_TestWaitsAfterGame(void); /* the same: A after a game, game after game */
+u16 DodrioBerryPicking_TestPickKey(void); /* src/dodrio_berry_picking.c (test builds): PKMN_TEST_DODRIO_AUTO */
+
 static struct
 {
     bool init;
@@ -139,6 +144,11 @@ static struct
        MultiplayerOwnership_Grant with flags 1; in memory, and in the save once the game saves): the rules of a world's
        save apply (Frontier challenges, docs/gameplay-visual-updates-20261027.md section 3); logged as "enroll: ..." */
     bool enroll;
+    /* PKMN_TEST_JUMP_AUTO=1: in Pokemon Jump, A on the frames the local player's Pokemon should jump (the computer
+       partners' timing, PokemonJump_TestWantsJump), added to the field keys: long games with computer partners (MS-141) */
+    bool jumpAuto;
+    int dodrioAuto; /* PKMN_TEST_DODRIO_AUTO=1: the local player's Dodrio picks each Berry that comes into reach (MS-141);
+                       a larger number: until that field-key frame, then it stops (Berries are missed and the game ends) */
     /* PKMN_TEST_STRONG=1: the party at level 100 and healed, once, when the field is up */
     bool strong, strengthened;
     /* PKMN_TEST_WARP=GROUP:NUM:WARP[:X:Y]: first warp there, as the debug menu's "Warp to map
@@ -539,6 +549,8 @@ static void Init(void)
     s.fightSeconds = EnvInt("PKMN_TEST_FIGHT", 0);
     s.strong = EnvInt("PKMN_TEST_STRONG", 0) != 0;
     s.enroll = EnvInt("PKMN_TEST_ENROLL", 0) != 0;
+    s.jumpAuto = EnvInt("PKMN_TEST_JUMP_AUTO", 0) != 0;
+    s.dodrioAuto = EnvInt("PKMN_TEST_DODRIO_AUTO", 0);
     s.shiny = EnvInt("PKMN_TEST_SHINY", 0) != 0;
     s.mega = EnvInt("PKMN_TEST_MEGA", 0) != 0;
     s.freezeField = EnvInt("PKMN_TEST_FREEZE_FIELD", 0) != 0;
@@ -4045,6 +4057,17 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
         }
         if (sTurns.active && gMain.inBattle && gMain.callback2 != CB2_Overworld)
             return keys | TurnsKeys();
+        if (s.dodrioAuto == 1 || s.fieldKeyFrames < s.dodrioAuto)
+            keys |= DodrioBerryPicking_TestPickKey();
+        if (s.jumpAuto)
+        {
+            char report[512];
+
+            if (PokemonJump_TestGameOverReport(report, sizeof(report)))
+                TestLog("Battle env test: %s", report);
+            if (PokemonJump_TestWantsJump() || (PokemonJump_TestWaitsAfterGame() && s.fieldKeyFrames % 40 == 0))
+                keys |= A_BUTTON;
+        }
         return keys | KeysAt(s.fieldKeys, s.fieldLoop > 0 ? (s.fieldKeyFrames - 1) % s.fieldLoop : s.fieldKeyFrames - 1);
     }
     if (s.startMs == 0)
