@@ -19,6 +19,9 @@
 #define DIORAMA_TERRAIN_LEDGE_HEIGHT 0.375f
 /* A jump ledge's crest over the higher of its two grounds, in voxels (DioramaTerrain_LedgeTop) */
 #define DIORAMA_TERRAIN_LEDGE_RISE 8
+/* A jump ledge bank's faces carry this as their vertices' reflection mask, under the
+ * reflection pass's 0.5: the terrain shader gives their shadow lookup a larger bias */
+#define DIORAMA_TERRAIN_BANK_MASK 0.25f
 #define DIORAMA_TERRAIN_WATER_HEIGHT -0.125f
 #define DIORAMA_TERRAIN_TEXTURE_FULL 0.0f
 #define DIORAMA_TERRAIN_TEXTURE_BASE 1.0f

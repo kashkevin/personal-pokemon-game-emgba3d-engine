@@ -420,7 +420,13 @@ static const char sTerrainFragmentShader[] =
     "  vec4 lightPosition = lightViewProjection * vec4(sceneWorldPosition, 1.0);\n"
     "  vec3 p = lightPosition.xyz / lightPosition.w * 0.5 + 0.5;\n"
     "  if (p.x <= 0.0 || p.x >= 1.0 || p.y <= 0.0 || p.y >= 1.0 || p.z >= 1.0) return 1.0;\n"
-    "  return texture(shadowMap, vec3(p.xy, p.z - 0.0015));\n"
+    /* a jump ledge's bank (its vertices' reflection mask DIORAMA_TERRAIN_BANK_MASK,
+     * terrain_mesh.h): the grass of one jumped west faces away from the sun
+     * (west-north-west, gl_shadow.c) nearly along its rays, and its own voxel
+     * steps shaded it in stripes; a bias of about 13 voxels along the sun
+     * leaves it to taller casters (trees, buildings) */
+    "  float bias = abs(reflectionMask - 0.25) < 0.125 ? 0.006 : 0.0015;\n"
+    "  return texture(shadowMap, vec3(p.xy, p.z - bias));\n"
     "}\n"
     DIORAMA_GLSL_LIGHT
     DIORAMA_GLSL_LAMPS

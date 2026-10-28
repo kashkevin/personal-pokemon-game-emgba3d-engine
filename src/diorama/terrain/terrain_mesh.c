@@ -2475,9 +2475,12 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
              && cell->treeHullReady && cell->structureWidth == 2
              && cell->structureLocalY >= cell->structureHeight - 2)
                 shade = 0.78f;
+            /* (a jump ledge's bank marked for the shader's shadow bias:
+             * DIORAMA_TERRAIN_BANK_MASK) */
             if (!AppendQuad(vertices, vertexCapacity, &vertexCount, positions, &material, shade,
-                            face->axis == 1 && face->sign > 0 && (face->flags & 1)
-                                ? 1.0f : 0.0f))
+                            face->axis == 1 && face->sign > 0 && (face->flags & 1) ? 1.0f
+                            : surface == 0 && IsLedgeBank(cell) ? DIORAMA_TERRAIN_BANK_MASK
+                            : 0.0f))
                 return false;
             if (face->axis == 1 && face->sign > 0)
                 mesh->topFaceCount++;

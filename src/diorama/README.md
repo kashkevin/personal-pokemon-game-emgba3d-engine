@@ -581,11 +581,15 @@ of terraced walls; Route 112's rock was still a maze of walls.
   `DIORAMA_TERRAIN_LEDGE_RISE` (8 voxels) over the higher of the two grounds, and the rock
   face falls from it to the landing cell's ground; the whole drawing lies on its top, each
   pixel's column's side its colour (as mountain art's), the grass side's steps lit as their
-  tops (stripes otherwise), the rock face's as a slope's. A corner (the diagonal ledges: the
-  game jumps only straight ones) is the higher of its two straight banks and meets both. The
-  grounds are the neighbours' (`rules.c` `DioramaRules_LedgeGrounds`, read in
-  `gl_terrain_renderer.c` `BuildInput` from the whole scene, so a chunk's halo agrees with
-  the chunk that owns the cell): a ledge a level over its landing (24 cells: Route 118 14,
+  tops (stripes otherwise), the rock face's as a slope's. Its faces carry
+  `DIORAMA_TERRAIN_BANK_MASK` as their reflection mask, and for those the terrain shader's
+  sun shadow takes a bias of about 13 voxels along the sun: the grass of a bank jumped west
+  faces away from the sun nearly along its rays, and its own voxel steps shaded it in
+  stripes (KNOWN_ISSUES MS-155); trees and buildings still shade it. A corner (the diagonal
+  ledges: the game jumps only straight ones) is the higher of its two straight banks and
+  meets both. The grounds are the neighbours' (`rules.c` `DioramaRules_LedgeGrounds`, read
+  in `gl_terrain_renderer.c` `BuildInput` from the whole scene, so a chunk's halo agrees
+  with the chunk that owns the cell): a ledge a level over its landing (24 cells: Route 118 14,
   Route 116 5, the Frontier 3, the Safari Zone 2) has its face down to it, one on a lower
   terrace stands on it; 19 cells land a level higher than they are jumped from (Route 118's,
   none of which the player can jump: the cell behind each is blocked, 13 face its sea, which

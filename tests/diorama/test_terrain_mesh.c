@@ -465,6 +465,19 @@ static void TestLedge(void)
         assert(sVertices[i].u > 0.09f && sVertices[i].u < 0.31f
             && sVertices[i].v > 0.19f && sVertices[i].v < 0.41f);
     }
+    /* the bank's faces carry the mark the shader's shadow bias reads
+     * (DIORAMA_TERRAIN_BANK_MASK), the ground round it none */
+    {
+        uint32_t marked = 0;
+
+        for (uint32_t i = 0; i < mesh.vertexCount; i++)
+            marked += sVertices[i].reflectionMask == DIORAMA_TERRAIN_BANK_MASK;
+        assert(marked > 0 && marked < mesh.vertexCount);
+        InitInput(&input, 3, MB_NORMAL);
+        mesh = CheckSameAsVoxelBuild(&input);
+        for (uint32_t i = 0; i < mesh.vertexCount; i++)
+            assert(sVertices[i].reflectionMask != DIORAMA_TERRAIN_BANK_MASK);
+    }
 
     /* jumped east and west, and their corners: the same through both builds */
     InitInput(&input, 3, MB_NORMAL);
