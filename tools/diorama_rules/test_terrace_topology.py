@@ -6,8 +6,8 @@ from pathlib import Path
 
 from catalog import load_tilesets, load_world
 from compile_rules import _load_cells, parse_behaviors
-from terrace_topology import (CAVE_RISE_Q16, MOUNTAIN_LEDGE_Q16, TERRACE_ROLES, cave_levels,
-                              join_level_free_cells, join_water, lift_blocked_cells,
+from terrace_topology import (CAVE_RISE_Q16, LEDGE_JUMPS, MOUNTAIN_LEDGE_Q16, TERRACE_ROLES,
+                              cave_levels, join_level_free_cells, join_water, lift_blocked_cells,
                               mountain_ledges, role_for_cell, solve_layout)
 
 
@@ -36,6 +36,69 @@ class TerraceTopologyTests(unittest.TestCase):
         self.assertEqual({solved[x]["groundQ16"] for x in range(3)}, {0})
         self.assertEqual((solved[4]["groundQ16"], solved[4]["topQ16"]), (-16, 0))
         self.assertEqual({solved[6 + x]["groundQ16"] for x in range(3)}, {-16})
+
+    def test_a_ledge_from_below_art_only_tops_lands_level(self):
+        # A course whose top no one walks on (a wall over it), its low side's
+        # ground and a ledge from that ground onto ground no terrace reaches: the
+        # walkable ground lies on the top level, the course's top a level over it.
+        def wall():
+            return dict(cell(500), collision=1)
+
+        def ledge():
+            return dict(cell(500), behavior="MB_JUMP_SOUTH", collision=1)
+
+        rows = [wall, cell, ledge, cell]
+        cells = tuple(wall() for _ in range(3)) + tuple(cell(121) for _ in range(3)) + tuple(
+            make() for make in rows[1:] for _ in range(3))
+        solved = solve_layout(cells, 3, 5)
+        self.assertEqual([(solved[offset]["groundQ16"], solved[offset]["topQ16"])
+                          for offset in (3, 6)], [(0, 16), (0, 0)])
+        self.assertTrue(all(offset not in solved for offset in range(12, 15)))
+        # Without the ledge (a wall there) the course's top stays the top level.
+        cells = cells[:9] + tuple(wall() for _ in range(3)) + cells[12:]
+        solved = solve_layout(cells, 3, 5)
+        self.assertEqual([(solved[offset]["groundQ16"], solved[offset]["topQ16"])
+                          for offset in (3, 6)], [(-16, 0), (-16, -16)])
+
+    def test_route123_and_route113_ledges_jump_down(self):
+        # Route 123's tall grass under its mountain and Route 113's route under its
+        # cliffs lay a level below the rest of the route (MS-154): every jump from
+        # them onto it went up a level. Now no ledge on either lands higher than it
+        # leaves, the grass and the route lie on the top level, Route 113's ends on
+        # Fallarbor Town's and Route 111's level, the mountain's top a level over it.
+        tilesets = load_tilesets(ROOT)
+        _, layouts = load_world(ROOT)
+        behavior_ids = parse_behaviors(ROOT / "include/constants/metatile_behaviors.h")
+        behavior_names = {value: name for name, value in behavior_ids.items()}
+        rows = [row for row in layouts if row["id"] in ("LAYOUT_ROUTE123", "LAYOUT_ROUTE113")]
+        cells, _, _ = _load_cells(ROOT, rows, tilesets, behavior_names)
+        levels = {}
+        for layout in rows:
+            width, height, route = layout["width"], layout["height"], cells[layout["id"]]
+            solved = levels[layout["id"]] = solve_layout(route, width, height)
+            jumps = 0
+            for offset, cell in enumerate(route):
+                step = LEDGE_JUMPS.get(cell.get("behavior"))
+                x, y = offset % width, offset // width
+                if step is None or not (0 <= x - step[0] < width and 0 <= y - step[1] < height
+                                        and 0 <= x + step[0] < width and 0 <= y + step[1] < height):
+                    continue
+                takeoff = (y - step[1]) * width + x - step[0]
+                landing = (y + step[1]) * width + x + step[0]
+                if route[takeoff].get("collision", 0) or route[landing].get("collision", 0):
+                    continue
+                jumps += 1
+                self.assertLessEqual(solved.get(landing, {"groundQ16": 0})["groundQ16"],
+                                     solved.get(takeoff, {"groundQ16": 0})["groundQ16"],
+                                     (layout["id"], x, y))
+            self.assertGreater(jumps, 20, layout["id"])
+        width = next(row for row in rows if row["id"] == "LAYOUT_ROUTE123")["width"]
+        self.assertEqual(levels["LAYOUT_ROUTE123"][8 * width + 52]["groundQ16"], 0)
+        self.assertEqual((levels["LAYOUT_ROUTE123"][3 * width + 50]["groundQ16"],
+                          levels["LAYOUT_ROUTE123"][3 * width + 50]["topQ16"]), (0, 16))
+        width = next(row for row in rows if row["id"] == "LAYOUT_ROUTE113")["width"]
+        for x, y in ((66, 5), (0, 8), (99, 8)):
+            self.assertEqual(levels["LAYOUT_ROUTE113"][y * width + x]["groundQ16"], 0, (x, y))
 
     def test_blocked_cells_stand_on_lower_land(self):
         # A course along row 1; below it a house (blocked, row 3, middle) in

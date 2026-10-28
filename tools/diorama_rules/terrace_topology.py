@@ -244,6 +244,14 @@ def join_level_free_cells(cells: tuple[dict, ...], width: int, height: int,
     return out
 
 
+# A jump ledge's take-off and landing cells: (x, y) steps from the ledge's own cell.
+LEDGE_JUMPS = {
+    "MB_JUMP_SOUTH": (0, 1), "MB_JUMP_NORTH": (0, -1), "MB_JUMP_EAST": (1, 0), "MB_JUMP_WEST": (-1, 0),
+    "MB_JUMP_SOUTHEAST": (1, 1), "MB_JUMP_SOUTHWEST": (-1, 1), "MB_JUMP_NORTHEAST": (1, -1),
+    "MB_JUMP_NORTHWEST": (-1, -1),
+}
+
+
 def solve_layout(cells: tuple[dict, ...], width: int, height: int,
                  contradictions: list[tuple[int, ...]] | None = None,
                  conflict_edges: list[tuple[object, object, int, int]] | None = None
@@ -340,6 +348,21 @@ def solve_layout(cells: tuple[dict, ...], width: int, height: int,
                 graph[source_node].append((target_node, 0))
                 graph[target_node].append((source_node, 0))
 
+    # The regions a jump ledge leaves for ground no terrace reaches (a region with
+    # no node in the graph: the top level).
+    onto_free: set[int] = set()
+    for offset, cell in enumerate(cells):
+        step = LEDGE_JUMPS.get(cell.get("behavior"))
+        if step is None:
+            continue
+        x, y = offset % width, offset // width
+        tx, ty, lx, ly = x - step[0], y - step[1], x + step[0], y + step[1]
+        if 0 <= tx < width and 0 <= ty < height and 0 <= lx < width and 0 <= ly < height:
+            takeoff = region_by_cell.get(ty * width + tx)
+            landing = region_by_cell.get(ly * width + lx)
+            if takeoff is not None and landing is not None and landing not in graph:
+                onto_free.add(takeoff)
+
     solved: dict[int, dict] = {}
     visited: set[object] = set()
     for seed in sorted(graph, key=str):
@@ -371,6 +394,15 @@ def solve_layout(cells: tuple[dict, ...], width: int, height: int,
                                                    if isinstance(node, tuple))))
             continue
         anchor = max(values[node] for node in component)
+        if any(values[node] < anchor for node in component if node in onto_free):
+            # A ledge is jumped down, never up (KNOWN_ISSUES MS-154). The highest
+            # node is the top level, and where that is only terrace art (a course's
+            # top no one walks on: Route 123's mountain over its tall grass, Route
+            # 113's cliffs) the walkable regions all lay below it while ground no
+            # terrace reaches, the rest of the route, lay on it: every jump from the
+            # grass onto the route went up a level. The component's highest
+            # walkable ground lies on the top level then, the art's top over it.
+            anchor = max(values[node] for node in component if not isinstance(node, tuple))
         for node in component:
             ground = values[node] - anchor
             if isinstance(node, tuple):

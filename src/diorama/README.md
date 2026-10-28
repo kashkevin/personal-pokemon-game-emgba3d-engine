@@ -585,11 +585,15 @@ of terraced walls; Route 112's rock was still a maze of walls.
   game jumps only straight ones) is the higher of its two straight banks and meets both. The
   grounds are the neighbours' (`rules.c` `DioramaRules_LedgeGrounds`, read in
   `gl_terrain_renderer.c` `BuildInput` from the whole scene, so a chunk's halo agrees with
-  the chunk that owns the cell): a ledge a level over its landing (49 cells: Route 113's ash
-  19, Route 118 14, Route 123 6, Route 116 5, the Frontier 3, the Safari Zone 2) has its face
-  down to it, one on a lower terrace stands on it; 46 cells land a level higher than they are
-  jumped from (the terrace solver's levels: Route 118 19, Route 123 18, Route 113 9) and keep
-  that, the bank between the two.
+  the chunk that owns the cell): a ledge a level over its landing (24 cells: Route 118 14,
+  Route 116 5, the Frontier 3, the Safari Zone 2) has its face down to it, one on a lower
+  terrace stands on it; 19 cells land a level higher than they are jumped from (Route 118's,
+  none of which the player can jump: the cell behind each is blocked, 13 face its sea, which
+  lies a level over its land in the terrace solver's levels, and 6 rock) and keep that, the
+  bank between the two. Route 113's 9 and Route 123's 18 did too until the terrace solver put
+  a terrace's highest walkable ground on the top level where a ledge leaves it for ground no
+  terrace reaches (`terrace_topology.py` `solve_layout`; KNOWN_ISSUES MS-154): their grass
+  and ash lay a level below the rest of the route, under art no one walks on.
 * The compressed shell draws banks (`AppendCompressedStraightBank`, a strip of top and of side
   per row or column; `AppendCompressedLedgeBank` a pixel at a time for corners) and a whole
   cell's side or skirt beside one a pixel at a time, as the voxel spans would:
