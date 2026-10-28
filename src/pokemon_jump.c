@@ -4244,7 +4244,11 @@ static void PokemonJump_ComputerPartner(u8 id)
 {
     struct JumpPartner *partner = &sPartners[id];
     struct MonInfoPacket monInfo;
-    struct MemberStatePacket state;
+    union
+    {
+        struct MemberStatePacket state;
+        u8 packet[12]; // a link packet's size (gRfu.packet), which a send copies whole: the state is 10 bytes
+    } member;
     u8 funcId;
 
     if (sPokemonJump == NULL || !sPokemonJump->isLeader || id == 0 || id >= sPokemonJump->numPlayers)
@@ -4284,15 +4288,15 @@ static void PokemonJump_ComputerPartner(u8 id)
         partner->funcFinished = TRUE;
     }
 
-    memset(&state, 0, sizeof(state));
-    state.id = PACKET_MEMBER_STATE;
-    state.monState = partner->monState;
-    state.jumpState = partner->jumpState;
-    state.funcFinished = partner->funcFinished;
-    state.jumpTimeStart = partner->jumpTimeStart;
-    state.funcId = partner->funcId;
-    state.playAgainState = PLAY_AGAIN_YES;
-    LocalLink_PartnerSendPacket(id, &state);
+    memset(&member, 0, sizeof(member));
+    member.state.id = PACKET_MEMBER_STATE;
+    member.state.monState = partner->monState;
+    member.state.jumpState = partner->jumpState;
+    member.state.funcFinished = partner->funcFinished;
+    member.state.jumpTimeStart = partner->jumpTimeStart;
+    member.state.funcId = partner->funcId;
+    member.state.playAgainState = PLAY_AGAIN_YES;
+    LocalLink_PartnerSendPacket(id, &member);
 }
 
 #if defined(DIORAMA_BATTLE_ENV_TEST)

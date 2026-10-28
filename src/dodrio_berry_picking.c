@@ -2335,7 +2335,15 @@ static u8 GetNewBerryId(u8 playerId, u8 column)
     u8 middlePlayer = sDodrioNeighborMap[numPlayersIdx][playerId][1];
     u8 rightPlayer = sDodrioNeighborMap[numPlayersIdx][playerId][2];
 
+#ifdef PORTABLE
+    // With 5 players the row is full, no 0 after it: the GBA reads on past the table into the next constant data until
+    // a 0 (a column there taken for an unshared one); here the loop ends with the row (KNOWN_ISSUES MS-163).
+    for (i = 0; i < MAX_RFU_PLAYERS && sUnsharedColumns[numPlayersIdx][i] != 0; i++)
+#else
+#line 2334 // gba-line
     for (i = 0; sUnsharedColumns[numPlayersIdx][i] != 0; i++)
+#endif
+#line 2335 // gba-line
     {
         // If only one player can use this column, just use their difficulty
         if (column == sUnsharedColumns[numPlayersIdx][i])
