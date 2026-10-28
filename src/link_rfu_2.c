@@ -1393,6 +1393,16 @@ static void RfuShutdownAfterDisconnect(void)
 
 static void DisconnectRfu(void)
 {
+#ifdef PORTABLE
+    if (LocalLink_IsActive())
+    {
+        // MS-141: computer partners' group, no adapter to disconnect; it ends as RfuShutdownAfterDisconnect ends one.
+        gRfu.isShuttingDown = TRUE;
+        LocalLink_End();
+        return;
+    }
+#endif
+#line 1396 // gba-line
     rfu_REQ_disconnect(gRfuLinkStatus->connSlotFlag | gRfuLinkStatus->linkLossSlotFlag);
     rfu_waitREQComplete();
     RfuShutdownAfterDisconnect();
@@ -3003,3 +3013,186 @@ static void Task_Idle(u8 taskId)
 {
 
 }
+
+#ifdef PORTABLE
+// KNOWN_ISSUES MS-141: computer partners for the wireless minigames (include/link_rfu.h). The local game is
+// the group's leader, player 0; players 1 to playerCount - 1 are computer partners. Each frame does what the
+// leader's RfuMain1_Parent and RfuMain2_Parent do once the adapter has exchanged the frame's data: the frame's
+// commands start empty, each partner's command arrives in its slot, the leader's own last command comes back
+// in slot 0 (MoveSendCmdToRecv), the commands are handled and the link's callback runs.
+
+#define LOCAL_BLOCK_PIECES 8 // 96 bytes: the largest block a minigame's member sends is 60
+
+struct LocalLinkPartner
+{
+    u16 cmd[CMD_LENGTH - 1]; // this frame's command; cmd[0] 0: none
+    u8 block[LOCAL_BLOCK_PIECES * 12];
+    u8 blockPieces;
+    u8 nextPiece;
+    bool8 sendingBlock;
+    bool8 blockStarted; // its start was sent; the pieces follow once the leader has taken it
+};
+
+static struct LocalLinkPartner sLocalPartners[MAX_RFU_PLAYERS];
+static struct RfuLinkStatus sLocalLinkStatus;
+static LocalLinkPartnerFunc sLocalPartnerFunc;
+static bool8 sLocalLinkActive;
+
+bool32 LocalLink_IsActive(void)
+{
+    return sLocalLinkActive;
+}
+
+void LocalLink_Start(u8 playerCount)
+{
+    if (playerCount < 2 || playerCount > MAX_RFU_PLAYERS)
+        playerCount = MAX_RFU_PLAYERS;
+    ResetLinkRfuGFLayer();
+    memset(sLocalPartners, 0, sizeof(sLocalPartners));
+    sLocalPartnerFunc = NULL;
+    // The adapter's status as a leader with every partner connected at full strength, for anything that
+    // still reads it (the library never set it up on PC).
+    memset(&sLocalLinkStatus, 0, sizeof(sLocalLinkStatus));
+    sLocalLinkStatus.parentChild = MODE_PARENT;
+    sLocalLinkStatus.connCount = playerCount - 1;
+    sLocalLinkStatus.connSlotFlag = (1 << (playerCount - 1)) - 1;
+    memset(sLocalLinkStatus.strength, 0xFF, sizeof(sLocalLinkStatus.strength));
+    gRfuLinkStatus = &sLocalLinkStatus;
+    gRfu.parentChild = MODE_PARENT;
+    gRfu.playerCount = playerCount;
+    gWirelessCommType = 1;
+    gReceivedRemoteLinkPlayers = TRUE;
+    sLocalLinkActive = TRUE;
+}
+
+void LocalLink_SetPartnerFunc(LocalLinkPartnerFunc func)
+{
+    sLocalPartnerFunc = func;
+}
+
+void LocalLink_End(void)
+{
+    if (!sLocalLinkActive)
+        return;
+    sLocalLinkActive = FALSE;
+    sLocalPartnerFunc = NULL;
+    gRfu.callback = NULL;
+    gReceivedRemoteLinkPlayers = FALSE;
+    gRfuLinkStatus = NULL;
+    gWirelessCommType = 0;
+}
+
+static bool32 IsLocalLinkInStandby(void)
+{
+    return gRfu.callback == Rfu_LinkStandby || gRfu.callback == LinkLeaderReadyToExitStandby
+        || gRfu.callback == SendReadyExitStandbyUntilAllReady;
+}
+
+static bool32 IsLocalLinkClosing(void)
+{
+    return gRfu.callback == SendReadyCloseLink || gRfu.callback == WaitAllReadyToCloseLink;
+}
+
+// A partner's block, as a member's HandleBlockSend and SendNextBlock send it: its start, sent again until the
+// leader is ready to take it (its received block of that player reset), then one 12-byte piece a frame.
+static void SendLocalPartnerBlockPart(u8 id, struct LocalLinkPartner *partner)
+{
+    s32 i;
+    const u8 *src;
+
+    if (!partner->blockStarted || gRfu.recvBlock[id].receiving != RECV_STATE_RECEIVING)
+    {
+        if (gRfu.recvBlock[id].receiving != RECV_STATE_READY)
+            return;
+        partner->cmd[0] = RFUCMD_SEND_BLOCK_INIT;
+        partner->cmd[1] = partner->blockPieces;
+        partner->cmd[2] = id + 0x80;
+        partner->blockStarted = TRUE;
+        partner->nextPiece = 0;
+        return;
+    }
+    src = &partner->block[partner->nextPiece * 12];
+    partner->cmd[0] = RFUCMD_SEND_BLOCK | partner->nextPiece;
+    for (i = 0; i < 6; i++)
+        partner->cmd[i + 1] = (src[(i << 1) + 1] << 8) | src[(i << 1) + 0];
+    if (++partner->nextPiece >= partner->blockPieces)
+        partner->sendingBlock = FALSE;
+}
+
+static void RunLocalPartner(u8 id)
+{
+    struct LocalLinkPartner *partner = &sLocalPartners[id];
+
+    // A member's link layer answers a standby and the closing of the link by itself, before its game's sends.
+    if (IsLocalLinkInStandby() && !gRfu.readyExitStandby[id])
+    {
+        partner->cmd[0] = RFUCMD_READY_EXIT_STANDBY;
+        partner->cmd[1] = gRfu.allReadyNum;
+    }
+    else if (IsLocalLinkClosing() && !gRfu.readyCloseLink[id])
+    {
+        partner->cmd[0] = RFUCMD_READY_CLOSE_LINK;
+        partner->cmd[1] = gRfu.allReadyNum;
+    }
+    else if (partner->sendingBlock)
+    {
+        SendLocalPartnerBlockPart(id, partner);
+    }
+    if (sLocalPartnerFunc != NULL)
+        sLocalPartnerFunc(id);
+    memcpy(gRecvCmds[id], partner->cmd, sizeof(partner->cmd));
+    memset(partner->cmd, 0, sizeof(partner->cmd));
+}
+
+void LocalLink_RunFrame(void)
+{
+    u8 i;
+
+    CpuFill16(0, gRecvCmds, sizeof(gRecvCmds));
+    for (i = 1; i < gRfu.playerCount; i++)
+        RunLocalPartner(i);
+    MoveSendCmdToRecv();
+    RfuHandleReceiveCommand(0);
+    CallRfuFunc();
+}
+
+// A partner's packet this frame (12 bytes, as Rfu_SendPacket): FALSE when its command is already taken this
+// frame (an answer of its link layer or a block's piece), as Rfu_SendPacket does nothing while gSendCmd is.
+bool32 LocalLink_PartnerSendPacket(u8 partnerId, const void *data)
+{
+    struct LocalLinkPartner *partner;
+
+    if (!sLocalLinkActive || partnerId == 0 || partnerId >= gRfu.playerCount)
+        return FALSE;
+    partner = &sLocalPartners[partnerId];
+    if (partner->cmd[0] != 0)
+        return FALSE;
+    partner->cmd[0] = RFUCMD_SEND_PACKET;
+    memcpy(&partner->cmd[1], data, sizeof(gRfu.packet));
+    return TRUE;
+}
+
+bool32 LocalLink_PartnerSendBlock(u8 partnerId, const void *src, u16 size)
+{
+    struct LocalLinkPartner *partner;
+
+    if (!sLocalLinkActive || partnerId == 0 || partnerId >= gRfu.playerCount
+     || size == 0 || size > sizeof(sLocalPartners[0].block))
+        return FALSE;
+    partner = &sLocalPartners[partnerId];
+    if (partner->sendingBlock)
+        return FALSE;
+    memset(partner->block, 0, sizeof(partner->block));
+    memcpy(partner->block, src, size);
+    partner->blockPieces = (size + 11) / 12;
+    partner->nextPiece = 0;
+    partner->blockStarted = FALSE;
+    partner->sendingBlock = TRUE;
+    return TRUE;
+}
+
+bool32 LocalLink_PartnerIsSendingBlock(u8 partnerId)
+{
+    return partnerId < MAX_RFU_PLAYERS && sLocalPartners[partnerId].sendingBlock;
+}
+#endif

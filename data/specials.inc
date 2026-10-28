@@ -686,4 +686,6 @@ gSpecials::
 	@ The owner's request (2026-10-24): after a solo floor, "go on to floor N?".
 	def_special TowerLegends_BufferContinue
 	def_special TowerLegends_Continue
+	@ KNOWN_ISSUES MS-141: Berry Crush with computer partners (src/union_room.c); VAR_0x8005 the group's size.
+	def_special StartBerryCrushWithComputerPartners
 .endif

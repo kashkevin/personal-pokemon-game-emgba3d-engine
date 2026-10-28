@@ -926,6 +926,10 @@ CableClub_EventScript_DirectCornerAttendant::
 	faceplayer
 	setvar VAR_FRONTIER_FACILITY, FACILITY_MULTI_OR_EREADER  @ Set preemptively for multi battles, ignored otherwise
 	goto_if_unset FLAG_SYS_POKEDEX_GET, CableClub_EventScript_WirelessClubAdjustements
+.ifdef PORTABLE
+	goto CableClub_EventScript_ComputerPartnersBerryCrush
+CableClub_EventScript_DirectCornerAttendantNoPartners::
+.endif
 	specialvar VAR_RESULT, IsBadEggInParty
 	goto_if_eq VAR_RESULT, TRUE, CableClub_EventScript_AbortLinkPlayerHasBadEgg
 	specialvar VAR_RESULT, IsWirelessAdapterConnected
@@ -935,6 +939,52 @@ CableClub_EventScript_DirectCornerAttendant::
 	delay 28
 	goto CableClub_EventScript_DirectCornerSelectService
 	end
+
+.ifdef PORTABLE
+@ KNOWN_ISSUES MS-141 (PC game only): BERRY CRUSH with computer partners. The PC has no Wireless Adapter, so with
+@ the POWDER JAR (the Direct Corner's own condition for BERRY CRUSH) the attendant first offers the game with
+@ computer partners (src/union_room.c); "no" goes on to the cable club, as before.
+CableClub_EventScript_ComputerPartnersBerryCrush::
+	checkitem ITEM_POWDER_JAR
+	goto_if_eq VAR_RESULT, FALSE, CableClub_EventScript_DirectCornerAttendantNoPartners
+	msgbox CableClub_Text_ComputerPartnersBerryCrush, MSGBOX_YESNO
+	goto_if_eq VAR_RESULT, NO, CableClub_EventScript_DirectCornerAttendantNoPartners
+	special HasAtLeastOneBerry
+	goto_if_eq VAR_RESULT, FALSE, CableClub_EventScript_ComputerPartnersNeedBerry
+	message CableClub_Text_ComputerPartnersHowMany
+	waitmessage
+	dynmultichoice 0, 0, FALSE, 4, 3, DYN_MULTICHOICE_CB_NONE, CableClub_Text_TwoPlayers, CableClub_Text_ThreePlayers, CableClub_Text_FourPlayers, CableClub_Text_FivePlayers
+	goto_if_eq VAR_RESULT, MULTI_B_PRESSED, CableClub_EventScript_AbortLink
+	addvar VAR_RESULT, 2
+	copyvar VAR_0x8005, VAR_RESULT
+	special StartBerryCrushWithComputerPartners
+	goto CableClub_EventScript_EnterWirelessLinkRoom
+	end
+
+CableClub_EventScript_ComputerPartnersNeedBerry::
+	msgbox CableClub_Text_NeedBerryForBerryCrush, MSGBOX_DEFAULT
+	release
+	end
+
+CableClub_Text_ComputerPartnersBerryCrush:
+	.string "Play BERRY CRUSH with\n"
+	.string "computer partners?$"
+
+CableClub_Text_ComputerPartnersHowMany:
+	.string "How many players in all?$"
+
+CableClub_Text_TwoPlayers:
+	.string "2 PLAYERS$"
+
+CableClub_Text_ThreePlayers:
+	.string "3 PLAYERS$"
+
+CableClub_Text_FourPlayers:
+	.string "4 PLAYERS$"
+
+CableClub_Text_FivePlayers:
+	.string "5 PLAYERS$"
+.endif
 
 CableClub_EventScript_DirectCornerSelectService::
 	checkitem ITEM_POWDER_JAR

@@ -158,5 +158,9 @@ void CreateTask_LinkMysteryGiftOverWireless(u32 activity);
 void CreateTask_SendMysteryGift(u32 activity);
 u8 CreateTask_ListenToWireless(void);
 void StartUnionRoomBattle(u16 battleFlags);
+#ifdef PORTABLE
+void StartBerryCrushWithComputerPartners(void); // KNOWN_ISSUES MS-141 (PC game only)
+#endif
+#line 161 // gba-line
 
 #endif //GUARD_UNION_ROOM_H

@@ -1136,6 +1136,13 @@ static void MainTask(u8 taskId)
     if (sGame->cmdCallback)
         sGame->cmdCallback(sGame, sGame->commandArgs);
 
+#ifdef PORTABLE
+    // KNOWN_ISSUES MS-141: Cmd_Quit freed the game just now (QuitBerryCrush). The GBA's read of the freed game
+    // below reads harmless low memory; natively it faulted at the end of every session.
+    if (sGame == NULL)
+        return;
+#endif
+#line 1139 // gba-line
     UpdateGame(sGame);
 }
 
@@ -3487,3 +3494,113 @@ static void SetPrintMessageArgs(u8 *args, u8 msgId, u8 flags, u16 waitKeys, u8 f
     args[3] = ((u8 *)&waitKeys)[1];
     args[4] = followupState;
 }
+
+#ifdef PORTABLE
+// KNOWN_ISSUES MS-141: Berry Crush's computer partners (include/link_rfu.h, src/link_rfu_2.c). Each plays as a
+// member's game would: it crushes a common berry (Cheri to Aspear), presses A at its own pace while the
+// crusher runs (a member's game sends its state only on a frame it pressed A), and answers the round's
+// blocks as a member's game does: its berry, the time it held A, and "yes" to playing again. The leader's
+// game, the local player's, counts every press and decides the rest, as in a group of GBAs.
+
+enum {
+    PARTNER_ANSWER_NONE,
+    PARTNER_ANSWER_BERRY,
+    PARTNER_ANSWER_HOLD_TIME,
+    PARTNER_ANSWER_PLAY_AGAIN,
+};
+
+struct BerryCrushPartner
+{
+    u16 nextPress; // frames until its next press; 0 before its first of the round
+    u16 timePressingA;
+    u8 berryId;
+    u8 answered; // the block exchange it answered last (PARTNER_ANSWER_*): one block for each exchange
+};
+
+static struct BerryCrushPartner sPartners[MAX_RFU_PLAYERS];
+static u32 sPartnerSeed;
+
+static u16 PartnerRandom(void)
+{
+    sPartnerSeed = ISO_RANDOMIZE1(sPartnerSeed);
+    return sPartnerSeed >> 16;
+}
+
+static void PartnerAnswer(u8 id, struct BerryCrushPartner *partner, u8 answer, u16 value)
+{
+    u16 block[1];
+
+    if (partner->answered == answer)
+        return;
+    block[0] = value;
+    if (LocalLink_PartnerSendBlock(id, block, sizeof(block)))
+        partner->answered = answer;
+}
+
+static void PartnerPressA(u8 id, struct BerryCrushPartner *partner)
+{
+    struct BerryCrushGame_LocalState state;
+
+    if (partner->nextPress == 0)
+    {
+        partner->nextPress = 10 + PartnerRandom() % 20; // its reaction to the countdown's end
+        return;
+    }
+    if (--partner->nextPress != 0)
+        return;
+    memset(&state, 0, sizeof(state));
+    state.sendFlag = SEND_GAME_STATE;
+    state.pushedAButton = TRUE;
+    if (!LocalLink_PartnerSendPacket(id, &state))
+    {
+        partner->nextPress = 1; // its command is taken this frame: press on the next
+        return;
+    }
+    partner->timePressingA += 2 + PartnerRandom() % 4;
+    partner->nextPress = 7 + PartnerRandom() % 5; // 5 to 8 presses a second
+    if (PartnerRandom() % 24 == 0)
+        partner->nextPress += 12 + PartnerRandom() % 24; // a short rest
+}
+
+static void BerryCrush_ComputerPartner(u8 id)
+{
+    struct BerryCrushGame *game = sGame;
+    struct BerryCrushPartner *partner = &sPartners[id];
+
+    if (game == NULL || game->localId != 0 || id == 0 || id >= game->playerCount)
+        return;
+    if (game->cmdCallback == Cmd_AskPickBerry)
+    {
+        partner->nextPress = 0;
+        partner->timePressingA = 0;
+        partner->berryId = BERRY_ID_CHERI + PartnerRandom() % (BERRY_ID_ASPEAR - BERRY_ID_CHERI + 1);
+    }
+    else if (game->cmdCallback == Cmd_WaitForOthersToPickBerries && game->cmdState >= 3)
+    {
+        PartnerAnswer(id, partner, PARTNER_ANSWER_BERRY, partner->berryId);
+    }
+    else if (game->cmdCallback == Cmd_PlayGame_Leader && !game->endGame)
+    {
+        PartnerPressA(id, partner);
+    }
+    else if (game->cmdCallback == Cmd_TabulateResults && game->cmdState <= 2)
+    {
+        PartnerAnswer(id, partner, PARTNER_ANSWER_HOLD_TIME, min(partner->timePressingA, game->timer));
+    }
+    else if (game->cmdCallback == Cmd_CommunicatePlayAgainResponses && game->cmdState >= 2)
+    {
+        PartnerAnswer(id, partner, PARTNER_ANSWER_PLAY_AGAIN, PLAY_AGAIN_YES);
+    }
+}
+
+void BerryCrush_StartComputerPartners(void)
+{
+    u8 i;
+
+    memset(sPartners, 0, sizeof(sPartners));
+    for (i = 0; i < MAX_RFU_PLAYERS; i++)
+        sPartners[i].berryId = BERRY_ID_CHERI;
+    sPartnerSeed = Random32();
+    LocalLink_SetPartnerFunc(BerryCrush_ComputerPartner);
+}
+#endif

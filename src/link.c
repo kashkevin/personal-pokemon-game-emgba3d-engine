@@ -393,6 +393,10 @@ void CloseLink(void)
 {
     if (MultiplayerBattle_IsActive())
         return;
+#ifdef PORTABLE
+    LocalLink_End(); // MS-141: a computer partners' group not closed by its game (no adapter to shut down)
+#endif
+#line 392 // gba-line
     gReceivedRemoteLinkPlayers = FALSE;
     if (gWirelessCommType)
         LinkRfu_Shutdown();
@@ -1791,6 +1795,15 @@ bool8 HandleLinkConnection(void)
 
     if (MultiplayerBattle_IsActive())
         return FALSE;
+#ifdef PORTABLE
+    if (LocalLink_IsActive())
+    {
+        // MS-141: computer partners' group: the frame's exchange runs in memory (src/link_rfu_2.c).
+        LocalLink_RunFrame();
+        return FALSE;
+    }
+#endif
+#line 1790 // gba-line
 
     if (gWirelessCommType == 0)
     {

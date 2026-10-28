@@ -754,6 +754,15 @@ void CreateWirelessStatusIndicatorSprite(u8 x, u8 y)
         x = 231;
         y = 8;
     }
+#ifdef PORTABLE
+    if (LocalLink_IsActive())
+    {
+        // MS-141: computer partners have no signal to show.
+        gWirelessStatusIndicatorSpriteId = SPRITE_NONE;
+        return;
+    }
+#endif
+#line 757 // gba-line
     if (gRfuLinkStatus->parentChild == MODE_PARENT)
     {
         sprId = CreateSprite(&sWirelessStatusIndicatorSpriteTemplate, x, y, 0);
@@ -773,6 +782,11 @@ void CreateWirelessStatusIndicatorSprite(u8 x, u8 y)
 
 void DestroyWirelessStatusIndicatorSprite(void)
 {
+#ifdef PORTABLE
+    if (gWirelessStatusIndicatorSpriteId == SPRITE_NONE)
+        return; // none was made (MS-141's computer partners): gSprites has no entry SPRITE_NONE
+#endif
+#line 776 // gba-line
     if (gSprites[gWirelessStatusIndicatorSpriteId].sValidator == STATUS_INDICATOR_ACTIVE)
     {
         gSprites[gWirelessStatusIndicatorSpriteId].sValidator = 0;

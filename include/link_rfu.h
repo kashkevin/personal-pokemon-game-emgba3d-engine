@@ -330,4 +330,22 @@ void CreateWirelessStatusIndicatorSprite(u8 x, u8 y);
 void DestroyWirelessStatusIndicatorSprite(void);
 void LoadWirelessStatusIndicatorSpriteGfx(void);
 
+#ifdef PORTABLE
+// KNOWN_ISSUES MS-141 (PC game only): the wireless minigames with computer partners. The PC has no
+// Wireless Adapter, so the game leads a group whose other members are computer partners, and the link's
+// exchange of each frame runs in memory (src/link_rfu_2.c): the leader's command comes back to it as
+// player 0's, as the adapter returns it, and each partner puts its own command in its slot. A partner's
+// link layer answers a standby and the closing of the link by itself; its game sends packets and blocks.
+typedef void (*LocalLinkPartnerFunc)(u8 partnerId);
+void LocalLink_Start(u8 playerCount);
+bool32 LocalLink_IsActive(void);
+void LocalLink_SetPartnerFunc(LocalLinkPartnerFunc func);
+void LocalLink_RunFrame(void);
+void LocalLink_End(void);
+bool32 LocalLink_PartnerSendPacket(u8 partnerId, const void *data);
+bool32 LocalLink_PartnerSendBlock(u8 partnerId, const void *src, u16 size);
+bool32 LocalLink_PartnerIsSendingBlock(u8 partnerId);
+#endif
+#line 332 // gba-line
+
 #endif //GUARD_LINK_RFU_H

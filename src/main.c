@@ -464,6 +464,13 @@ static void VBlankIntr(void)
         // Virtual sessions exclude hardware serial/RFU work. Native virtual
         // controller polling still runs below when the channel permits it.
     }
+#ifdef PORTABLE
+    else if (LocalLink_IsActive())
+    {
+        // MS-141: a computer partners' group has no adapter to sync.
+    }
+#endif
+#line 397 // gba-line
     else if (gWirelessCommType != 0)
         RfuVSync();
     else if (gLinkVSyncDisabled == FALSE)
@@ -536,7 +543,15 @@ static void WaitForVBlank(void)
 {
     gMain.intrCheck &= ~INTR_FLAG_VBLANK;
 
+#ifdef PORTABLE
+    // No adapter to desynchronize on PC, and the VBlank interrupt only comes in VBlankIntrWait: waiting for it in a
+    // loop would never end (MS-141's computer partners set the wireless link).
+    if (FALSE)
+#else
+#line 469 // gba-line
     if (gWirelessCommType != 0)
+#endif
+#line 470 // gba-line
     {
         // Desynchronization may occur if wireless adapter is connected
         // and we call VBlankIntrWait();

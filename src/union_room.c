@@ -4512,3 +4512,74 @@ static void CopyAndTranslatePlayerName(u8 *dest, struct RfuPlayer *player)
     StringCopy_PlayerName(dest, player->rfu.name);
     ConvertInternationalString(dest, player->rfu.data.compatibility.language);
 }
+
+#ifdef PORTABLE
+// KNOWN_ISSUES MS-141 (PC game only): Berry Crush with computer partners. The Direct Corner's attendant
+// (data/scripts/cable_club.inc) starts it instead of the wireless lobby, which needs the Wireless Adapter: the
+// player leads a group of VAR_0x8005 players whose other members are computer partners (src/link_rfu_2.c,
+// src/berry_crush.c), walks into the link room as after a lobby, and the game starts as Task_StartActivity
+// starts it. The partners' names are not kept in the trainer records (SaveLinkTrainerNames is not called).
+static const u8 *const sComputerPartnerNames[MAX_RFU_PLAYERS - 1] =
+{
+    COMPOUND_STRING("LADDIE"),
+    COMPOUND_STRING("LASSIE"),
+    COMPOUND_STRING("DUDE"),
+    COMPOUND_STRING("MISS"),
+};
+
+// As Task_RunScriptAndFadeToActivity and Task_StartActivity: once the script has put the player in the link
+// room and stopped (waitstate), fade, wait for everyone, warp back into this room and start the game.
+static void Task_StartBerryCrushWithComputerPartners(u8 taskId)
+{
+    s16 *data = gTasks[taskId].data;
+
+    switch (data[0])
+    {
+    case 0:
+        if (!ScriptContext_IsEnabled())
+        {
+            FadeScreen(FADE_TO_BLACK, 0);
+            data[0]++;
+        }
+        break;
+    case 1:
+        if (!gPaletteFade.active)
+        {
+            SetLinkStandbyCallback();
+            data[0]++;
+        }
+        break;
+    case 2:
+        if (IsLinkTaskFinished())
+        {
+            DestroyTask(taskId);
+            WarpForWirelessMinigame(USING_BERRY_CRUSH, 9, 1);
+            StartBerryCrush(CB2_LoadMap);
+            gSpecialVar_Result = LINKUP_SUCCESS;
+            UnlockPlayerFieldControls();
+        }
+        break;
+    }
+}
+
+void StartBerryCrushWithComputerPartners(void)
+{
+    u8 i, playerCount = gSpecialVar_0x8005;
+
+    if (playerCount < 2 || playerCount > MAX_RFU_PLAYERS)
+        playerCount = MAX_RFU_PLAYERS;
+    LocalLink_Start(playerCount);
+    StringCopy(gLinkPlayers[0].name, gSaveBlock2Ptr->playerName);
+    gLinkPlayers[0].gender = gSaveBlock2Ptr->playerGender;
+    gLinkPlayers[0].language = GAME_LANGUAGE;
+    for (i = 1; i < playerCount; i++)
+    {
+        StringCopy(gLinkPlayers[i].name, sComputerPartnerNames[i - 1]);
+        gLinkPlayers[i].gender = (i & 1) ? MALE : FEMALE;
+        gLinkPlayers[i].language = GAME_LANGUAGE;
+    }
+    gPlayerCurrActivity = ACTIVITY_BERRY_CRUSH;
+    BerryCrush_StartComputerPartners();
+    CreateTask(Task_StartBerryCrushWithComputerPartners, 0);
+}
+#endif
