@@ -331,6 +331,37 @@ class DioramaRuleCompilerTests(unittest.TestCase):
                         self.assertLessEqual(ground - 1, other_top + 1, (name, offset, neighbor))
                         self.assertLessEqual(other_ground - 1, top + 1, (name, offset, neighbor))
 
+    def test_repository_cave_slope_climbs(self):
+        # KNOWN_ISSUES MS-153: Granite Cave B1F's halves, at one elevation, are joined only by a
+        # muddy slope (9,9-10), which lay flat. Its north half stands a level up
+        # (terrace_topology.cave_climbs), the slope a ramp, the cave's rock round that half
+        # standing on it; no rock over the rock beside it with nothing under it.
+        layout = next(row for row in self.data["layouts"] if row["symbol"] == "LAYOUT_GRANITE_CAVE_B1F")
+        width = layout["width"]
+        records = {record["cellOffset"]: record for record in layout["terrainRecords"]
+                   if record["mapGroup"] == 0xFF}
+
+        def at(x, y):
+            record = records[y * width + x]
+            return record["shape"], record["groundQ16"], record["topQ16"]
+
+        self.assertEqual([at(9, 8), at(9, 9), at(9, 10), at(9, 12)],
+                         [("flat", 16, 16), ("stairs", 8, 16), ("stairs", 0, 8), ("flat", 0, 0)])
+        self.assertEqual([at(0, 5), at(5, 3)], [("cliff", 16, 32), ("cliff", 16, 32)])
+
+        def column(record):
+            solved = record["measuredFlags"] & 128
+            return ((record["groundQ16"] if solved else 0),
+                    (record["topQ16"] if solved else record["heightQ16"]))
+
+        rock = {offset: column(record) for offset, record in records.items()
+                if record["measuredFlags"] & 32 and record["terraceProfile"] == "none"}
+        for offset, (ground, top) in rock.items():
+            for neighbor in (offset + 1 if (offset + 1) % width else None, offset + width):
+                if neighbor in rock:
+                    self.assertLessEqual(ground - 1, rock[neighbor][1] + 1, (offset, neighbor))
+                    self.assertLessEqual(rock[neighbor][0] - 1, top + 1, (offset, neighbor))
+
     def test_repository_maps_meet_at_one_level(self):
         # KNOWN_ISSUES MS-162: each map's ground is solved alone, its top level 0, and Route 118 lay a level
         # under Mauville City, Route 119 and Route 123 round it, Route 116 a level under Rustboro City

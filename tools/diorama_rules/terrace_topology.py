@@ -71,6 +71,135 @@ def _neighbours(offset: int, width: int, height: int):
             yield ny * width + nx
 
 
+def _climb_regions(cells: tuple[dict, ...], width: int, height: int, solved: dict[int, dict],
+                   is_climb) -> tuple[set[int], dict[int, int], list[list[int]],
+                                      list[tuple[int, int, list[int]]]]:
+    """The regions of mountain_ledges and cave_climbs: walkable cells side by
+    side at one elevation, a cell at elevation 0 (the game's "any level": a
+    doorway, a cave mouth) joining any; a ledge (MB_JUMP_*), a cell another
+    solver placed and the climbs (`is_climb`: stairs, slopes) bound them. Returns
+    the climb cells, each region's cells by offset, the regions, and the runs of
+    climb cells with one region north of them and another south: (the region
+    at the top, the one at the foot, the run)."""
+    def walkable(offset: int) -> bool:
+        cell = cells[offset]
+        return (cell.get("collision", 0) == 0 and offset not in solved
+                and not str(cell.get("behavior") or "").startswith("MB_JUMP_"))
+
+    stairs = {offset for offset in range(len(cells))
+              if walkable(offset) and is_climb(cells[offset])}
+    region_of: dict[int, int] = {}
+    regions: list[list[int]] = []
+    if not stairs:
+        return stairs, region_of, regions, []
+    for start in range(len(cells)):
+        if start in region_of or start in stairs or not walkable(start):
+            continue
+        index = len(regions)
+        region, pending = [], deque((start,))
+        region_of[start] = index
+        while pending:
+            offset = pending.popleft()
+            region.append(offset)
+            elevation = cells[offset].get("elevation")
+            for neighbor in _neighbours(offset, width, height):
+                other = cells[neighbor].get("elevation")
+                if (neighbor not in region_of and neighbor not in stairs and walkable(neighbor)
+                        and (other == elevation or other == 0 or elevation == 0)):
+                    region_of[neighbor] = index
+                    pending.append(neighbor)
+        regions.append(region)
+    runs: list[tuple[int, int, list[int]]] = []
+    seen: set[int] = set()
+    for start in sorted(stairs):
+        if start in seen:
+            continue
+        run, pending = [], [start]
+        seen.add(start)
+        while pending:
+            offset = pending.pop()
+            run.append(offset)
+            for neighbor in _neighbours(offset, width, height):
+                if neighbor in stairs and neighbor not in seen:
+                    seen.add(neighbor)
+                    pending.append(neighbor)
+        north = {region_of[offset - width] for offset in run
+                 if offset >= width and offset - width not in stairs and offset - width in region_of}
+        south = {region_of[offset + width] for offset in run
+                 if offset + width < len(cells) and offset + width not in stairs
+                 and offset + width in region_of}
+        if len(north) == 1 and len(south) == 1 and north != south:
+            runs.append((next(iter(north)), next(iter(south)), run))
+    return stairs, region_of, regions, runs
+
+
+def _climb_levels(climbs: list[tuple[int, int, list[int]]], ground: set[int]) -> dict[int, int] | None:
+    """Each region's level, `ground` on level 0 and up a level a climb; None
+    where the climbs give one region two levels, raise nothing, or put a region
+    under the ground."""
+    steps: dict[int, list[tuple[int, int]]] = defaultdict(list)
+    for upper, lower, _ in climbs:
+        steps[lower].append((upper, 1))
+        steps[upper].append((lower, -1))
+    level = dict.fromkeys(sorted(ground), 0)
+    pending = deque(level)
+    while pending:
+        index = pending.popleft()
+        for other, step in steps[index]:
+            if other not in level:
+                level[other] = level[index] + step
+                pending.append(other)
+            elif level[other] != level[index] + step:
+                return None  # two levels for one region
+    if not any(level.values()) or min(level.values()) < 0:
+        return None  # nothing raised, or a region under the ground
+    return level
+
+
+def _steps_hold(cells: tuple[dict, ...], width: int, region_of: dict[int, int],
+                level: dict[int, int]) -> bool:
+    """Whether walkable cells of two regions side by side at two levels
+    (`level`, others 0) are a step the game draws: two elevations, which the game
+    lets no one cross, the south one the higher (it draws that one's top's edge
+    there), or side by side. A step where the game lets one walk across (elevation
+    15, a bridge's) or onto a top's south edge from lower walkable ground (no face
+    drawn for it) is not."""
+    for offset, index in region_of.items():
+        for neighbor in ((offset + 1) if (offset + 1) % width else None,
+                         (offset + width) if offset + width < len(cells) else None):
+            if neighbor is None or region_of.get(neighbor, index) == index:
+                continue
+            mine, theirs = level.get(index, 0), level.get(region_of[neighbor], 0)
+            if mine == theirs:
+                continue
+            if 15 in (cells[offset].get("elevation"), cells[neighbor].get("elevation")):
+                return False  # a step where the game lets one walk across (a bridge's elevation)
+            if neighbor == offset + width and mine > theirs:
+                return False  # a top's south edge on lower walkable ground
+    return True
+
+
+def _climb_entries(climbs: list[tuple[int, int, list[int]]], level: dict[int, int], width: int,
+                   rise_q16: int) -> dict[int, dict]:
+    """The climbs' cells, each run rising `rise_q16` from the level of the region
+    at its foot over its rows, south first (General's terrace stairs, a muddy
+    slope: a ramp)."""
+    out: dict[int, dict] = {}
+    for _, lower, run in climbs:
+        if lower not in level:
+            continue
+        base = rise_q16 * level[lower]
+        rows = sorted({offset // width for offset in run}, reverse=True)  # south first
+        for offset in run:
+            step = rows.index(offset // width)
+            ground = base + round(rise_q16 * step / len(rows))
+            top = base + round(rise_q16 * (step + 1) / len(rows))
+            out[offset] = {"groundQ16": ground, "topQ16": top,
+                           "profile": "transition-horizontal", "solid": False,
+                           "rise": top - ground}
+    return out
+
+
 def rock_tops(rock: frozenset[int], ground: dict[int, int], width: int, height: int,
               floor: int) -> dict[int, int]:
     """The top of each cell of `rock` (blocked cells side by side: a mountain's),
@@ -151,92 +280,17 @@ def mountain_ledges(cells: tuple[dict, ...], width: int, height: int,
     tile: Route 112's climb three rows, Route 115's two and one. A level a
     climb keeps Route 111's and Route 112's plateaus a level up, as they were.)
     Returns the raised cells' entries, the stairs' with their rise."""
-    def walkable(offset: int) -> bool:
-        cell = cells[offset]
-        return (cell.get("collision", 0) == 0 and offset not in solved
-                and not str(cell.get("behavior") or "").startswith("MB_JUMP_"))
-
-    stairs = {offset for offset in range(len(cells))
-              if walkable(offset) and _climb(cells[offset])}
-    if not stairs:
-        return {}
-    region_of: dict[int, int] = {}
-    regions: list[list[int]] = []
-    for start in range(len(cells)):
-        if start in region_of or start in stairs or not walkable(start):
-            continue
-        index = len(regions)
-        region, pending = [], deque((start,))
-        region_of[start] = index
-        while pending:
-            offset = pending.popleft()
-            region.append(offset)
-            elevation = cells[offset].get("elevation")
-            for neighbor in _neighbours(offset, width, height):
-                other = cells[neighbor].get("elevation")
-                if (neighbor not in region_of and neighbor not in stairs and walkable(neighbor)
-                        and (other == elevation or other == 0 or elevation == 0)):
-                    region_of[neighbor] = index
-                    pending.append(neighbor)
-        regions.append(region)
+    stairs, region_of, regions, runs = _climb_regions(cells, width, height, solved, _climb)
     mountain_top = [2 * sum(cells[offset].get("behavior") == "MB_MOUNTAIN_TOP" for offset in region)
                     >= len(region) for region in regions]
-
-    climbs: list[tuple[int, int, list[int]]] = []  # the region at the top, the one at the foot, the run
-    seen: set[int] = set()
-    for start in sorted(stairs):
-        if start in seen:
-            continue
-        run, pending = [], [start]
-        seen.add(start)
-        while pending:
-            offset = pending.pop()
-            run.append(offset)
-            for neighbor in _neighbours(offset, width, height):
-                if neighbor in stairs and neighbor not in seen:
-                    seen.add(neighbor)
-                    pending.append(neighbor)
-        north = {region_of[offset - width] for offset in run
-                 if offset >= width and offset - width not in stairs and offset - width in region_of}
-        south = {region_of[offset + width] for offset in run
-                 if offset + width < len(cells) and offset + width not in stairs
-                 and offset + width in region_of}
-        if len(north) != 1 or len(south) != 1 or north == south:
-            continue
-        upper, lower = next(iter(north)), next(iter(south))
-        if not mountain_top[upper]:
-            continue  # stairs between ordinary ground: the terrace solver's
-        climbs.append((upper, lower, run))
+    # (stairs between ordinary ground are the terrace solver's)
+    climbs = [(upper, lower, run) for upper, lower, run in runs if mountain_top[upper]]
     # Each region's level, from the ground up a level a climb (a mountain's tops
     # that no climb joins to the ground keep theirs)
-    steps: dict[int, list[tuple[int, int]]] = defaultdict(list)
-    for upper, lower, _ in climbs:
-        steps[lower].append((upper, 1))
-        steps[upper].append((lower, -1))
-    level = {index: 0 for index in steps if not mountain_top[index]}
-    pending = deque(sorted(level))
-    while pending:
-        index = pending.popleft()
-        for other, step in steps[index]:
-            if other not in level:
-                level[other] = level[index] + step
-                pending.append(other)
-            elif level[other] != level[index] + step:
-                return {}  # two levels for one region
-    if not any(level.values()) or min(level.values()) < 0:
-        return {}  # nothing raised, or a top under the ground
-    for offset, index in region_of.items():
-        for neighbor in ((offset + 1) if (offset + 1) % width else None,
-                         (offset + width) if offset + width < len(cells) else None):
-            if neighbor is None or region_of.get(neighbor, index) == index:
-                continue
-            mine, theirs = level.get(index, 0), level.get(region_of[neighbor], 0)
-            if mine == theirs:
-                continue
-            if 15 in (cells[offset].get("elevation"), cells[neighbor].get("elevation")):
-                return {}  # a step where the game lets one walk across (a bridge's elevation)
-            if neighbor == offset + width and mine > theirs:
-                return {}  # a top's south edge on lower walkable ground
+    level = _climb_levels(climbs, {index for upper, lower, _ in climbs for index in (upper, lower)
+                                   if not mountain_top[index]})
+    if level is None or not _steps_hold(cells, width, region_of, level):
+        return {}
     # A pocket of the top that no one walks into (walkable cells, mostly MB_MOUNTAIN_TOP, blocked on every side: three
     # cells south of Route 111's plateau) lies where the rock round it does (rock_tops, through the rock and other
     # pockets); on the ground's level it was a pit in the rock.
@@ -261,18 +315,7 @@ def mountain_ledges(cells: tuple[dict, ...], width: int, height: int,
         for offset in regions[index]:
             out[offset] = {"groundQ16": MOUNTAIN_LEDGE_Q16 * value, "topQ16": MOUNTAIN_LEDGE_Q16 * value,
                            "profile": "none", "solid": False}
-    for upper, lower, run in climbs:
-        if lower not in level:
-            continue
-        base = MOUNTAIN_LEDGE_Q16 * level[lower]
-        rows = sorted({offset // width for offset in run}, reverse=True)  # south first
-        for offset in run:
-            step = rows.index(offset // width)
-            ground = base + round(MOUNTAIN_LEDGE_Q16 * step / len(rows))
-            top = base + round(MOUNTAIN_LEDGE_Q16 * (step + 1) / len(rows))
-            out[offset] = {"groundQ16": ground, "topQ16": top,
-                           "profile": "transition-horizontal", "solid": False,
-                           "rise": top - ground}
+    out.update(_climb_entries(climbs, level, width, MOUNTAIN_LEDGE_Q16))
     return out
 
 
@@ -864,6 +907,34 @@ def cave_levels(cells: tuple[dict, ...], width: int, height: int,
                 # a deck over the floor under it, not a block of planks
                 out[offset] = {"groundQ16": level, "topQ16": level, "profile": "none",
                                "solid": False, "deck": True}
+    return out
+
+
+def cave_climbs(cells: tuple[dict, ...], width: int, height: int,
+                solved: dict[int, dict] | None = None) -> dict[int, dict]:
+    """A cave's muddy slope (MB_MUDDY_SLOPE, the Mach Bike's) between two parts
+    of one floor: Granite Cave B1F's (9,9-10), its halves at one elevation joined
+    only by it, lay flat, both ends on one level (KNOWN_ISSUES MS-153). The part
+    at its top (to its north: the GBA draws the face it climbs on the south of
+    the higher part) stands CAVE_RISE_Q16 over the part at its foot and the
+    slope rises between them over its rows, as a mountain's (mountain_ledges);
+    the cave's rock round the raised part stands on it
+    (compile_rules: lift_blocked_cells). Where the climbs give a part two levels,
+    or would make a step the game draws no face for or lets one walk across
+    (_steps_hold), the cave keeps its levels. Returns the raised cells' entries,
+    the slope's with its rise."""
+    solved = solved or {}
+    _, region_of, regions, runs = _climb_regions(
+        cells, width, height, solved, lambda cell: cell.get("behavior") == "MB_MUDDY_SLOPE")
+    tops = {upper for upper, _, _ in runs}
+    level = _climb_levels(runs, {index for upper, lower, _ in runs for index in (upper, lower)
+                                 if index not in tops})
+    if level is None or not _steps_hold(cells, width, region_of, level):
+        return {}
+    out = {offset: {"groundQ16": CAVE_RISE_Q16 * value, "topQ16": CAVE_RISE_Q16 * value,
+                    "profile": "none", "solid": False}
+           for index, value in level.items() if value for offset in regions[index]}
+    out.update(_climb_entries(runs, level, width, CAVE_RISE_Q16))
     return out
 
 

@@ -7,7 +7,7 @@ from pathlib import Path
 from catalog import load_tilesets, load_world
 from compile_rules import _load_cells, parse_behaviors
 from terrace_topology import (CAVE_RISE_Q16, LEDGE_JUMPS, MOUNTAIN_LEDGE_Q16, TERRACE_ROLES,
-                              cave_levels, join_level_free_cells, join_water, lift_blocked_cells,
+                              cave_climbs, cave_levels, join_level_free_cells, join_water, lift_blocked_cells,
                               mountain_ledges, rock_tops, role_for_cell, seam_shifts, solve_layout)
 
 
@@ -446,6 +446,50 @@ class TerraceTopologyTests(unittest.TestCase):
         rows = ["RRRRRRR", "RTTTRTR", "RTTTRRR", "RRRRRRR", "GGGGGGG"]
         cells = tuple(make[ch]() for row in rows for ch in row)
         self.assertEqual(mountain_ledges(cells, 7, 5, {}), {})
+
+    def test_a_caves_muddy_slope_climbs_from_one_part_of_its_floor_to_another(self):
+        # Granite Cave B1F: its halves, at one elevation, are joined only by a muddy slope. The
+        # part at its top (north) stands a level up, the slope rising over its rows; a cave with
+        # no such slope, or whose top would meet its foot where the game lets one walk across (a
+        # bridge's elevation, 15), keeps its levels.
+        def rock():
+            return {"tileset": "gTileset_Cave", "metatile": 1, "behavior": "MB_NORMAL",
+                    "collision": 1, "elevation": 0}
+
+        def floor(elevation=3):
+            return {"tileset": "gTileset_Cave", "metatile": 2, "behavior": "MB_NORMAL",
+                    "collision": 0, "elevation": elevation}
+
+        def slope():
+            return dict(floor(), behavior="MB_MUDDY_SLOPE")
+
+        make = {"#": rock, ".": floor, "M": slope, "B": lambda: floor(15)}
+        rows = ["#####", "#...#", "##M##", "##M##", "#...#", "#####"]
+        cells = tuple(make[ch]() for row in rows for ch in row)
+        raised = cave_climbs(cells, 5, 6)
+        self.assertEqual({offset for offset, entry in raised.items() if entry["profile"] == "none"},
+                         {6, 7, 8})
+        self.assertEqual({raised[6]["groundQ16"]}, {CAVE_RISE_Q16})
+        self.assertEqual([(raised[offset]["groundQ16"], raised[offset]["topQ16"]) for offset in (17, 12)],
+                         [(0, 8), (8, 16)])
+        self.assertFalse(any(offset in raised for offset in (21, 22, 23)))
+        rows = ["#####", "#...#", "#####", "#...#", "#####"]
+        self.assertEqual(cave_climbs(tuple(make[ch]() for row in rows for ch in row), 5, 5), {})
+        rows = ["#####", "#...#", "##MB#", "##M.#", "#...#", "#####"]
+        self.assertEqual(cave_climbs(tuple(make[ch]() for row in rows for ch in row), 5, 6), {})
+        # the repository's: Granite Cave B1F's north half a level up, its slope (9,9-10) a ramp
+        tilesets = load_tilesets(ROOT)
+        _, layouts = load_world(ROOT)
+        names = {value: name for name, value
+                 in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
+        layout = next(row for row in layouts if row["id"] == "LAYOUT_GRANITE_CAVE_B1F")
+        cave = _load_cells(ROOT, [layout], tilesets, names)[0]["LAYOUT_GRANITE_CAVE_B1F"]
+        width = layout["width"]
+        raised = cave_climbs(cave, width, layout["height"], cave_levels(cave, width, layout["height"]))
+        self.assertEqual(raised[8 * width + 9]["groundQ16"], CAVE_RISE_Q16)
+        self.assertEqual([(raised[y * width + 9]["groundQ16"], raised[y * width + 9]["topQ16"])
+                          for y in (10, 9)], [(0, 8), (8, 16)])
+        self.assertNotIn(12 * width + 9, raised)
 
     def test_rock_takes_the_top_of_the_ground_nearest_it(self):
         # A column of rock between a top three levels up (north) and ground asking the rock a

@@ -22,7 +22,7 @@ from mountain_art import (MountainArtError, faces_between_levels,
 from profiles import NOMINAL_HEIGHTS, TileShape, shape_from_action
 from pixel_objects import UPRIGHT_CLASSES as UPRIGHT_PIXEL_CLASSES, extract_layout
 from structures import analyze_layout
-from terrace_topology import (WATER_BEHAVIORS, cave_levels, join_level_free_cells, join_water,
+from terrace_topology import (WATER_BEHAVIORS, cave_climbs, cave_levels, join_level_free_cells, join_water,
                               lift_blocked_cells, mountain_ledges, rock_tops, seam_shifts,
                               solve_layout as solve_terrace_topology)
 from tile_shape import ClassificationError, TileShapeClassifier
@@ -1638,8 +1638,12 @@ def compile_data(root: Path) -> dict:
             if rows and all(row["mapType"] == "MAP_TYPE_UNDERGROUND" for row in rows)
             and layout.get("secondary_tileset") in CAVE_ROCK_TILESETS else frozenset())
         if rows and all(row["mapType"] == "MAP_TYPE_UNDERGROUND" for row in rows):
-            # A cave's floors at their own elevation (terrace_topology.cave_levels).
+            # A cave's floors at their own elevation (terrace_topology.cave_levels),
+            # and the part of one a muddy slope climbs to a level over its foot
+            # (cave_climbs: Granite Cave B1F's).
             solved = {**solved, **cave_levels(cells[layout["id"]], layout["width"],
+                                              layout["height"], solved)}
+            solved = {**solved, **cave_climbs(cells[layout["id"]], layout["width"],
                                               layout["height"], solved)}
         if (rows and all(_outdoor(row["mapType"]) for row in rows)
                 and any(cell.get("behavior") == "MB_MOUNTAIN_TOP" and cell.get("collision")
