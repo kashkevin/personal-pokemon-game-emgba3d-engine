@@ -146,6 +146,26 @@ bool8 ScrCmd_special(struct ScriptContext *ctx)
     return FALSE;
 }
 
+#ifdef PORTABLE
+#include "data/script_special_results.h"
+
+// KNOWN_ISSUES MS-166: a special declared to return an 8-bit value (bool8, u8, s8) defines only the low byte of the
+// PC's return register, read through SpecialFunc as 16 bits; the rest is whatever the function computed last. The Day
+// Care's IsEnoughForCostInVar0x8005 left the money there: its TRUE read 2,817 with 3,000 in hand, and the lady said
+// "You don't have enough money". The GBA's compiler widens the byte; so does this, from the table
+// tools/pc_port/special_results.py writes.
+static u16 ScriptSpecialResult(u16 index, u16 result)
+{
+    if (index >= SCRIPT_SPECIAL_COUNT)
+        return result;
+    if (sScriptSpecialResultBytes[index] == 1)
+        return (u8)result;
+    if (sScriptSpecialResultBytes[index] == -1)
+        return (u16)(s16)(s8)result;
+    return result;
+}
+#endif
+#line 149 // gba-line
 bool8 ScrCmd_specialvar(struct ScriptContext *ctx)
 {
     u32 varId = ScriptReadHalfword(ctx);
@@ -156,7 +176,13 @@ bool8 ScrCmd_specialvar(struct ScriptContext *ctx)
     Script_RequestWriteVar(varId);
     Script_CheckEffectInstrumentedSpecial(index);
 
+#ifdef PORTABLE
+    *ptr = ScriptSpecialResult(index, SCRIPT_FUNC_UNTAG(gSpecials[index])());
+#else
+#line 159 // gba-line
     *ptr = SCRIPT_FUNC_UNTAG(gSpecials[index])();
+#endif
+#line 160 // gba-line
     return FALSE;
 }
 

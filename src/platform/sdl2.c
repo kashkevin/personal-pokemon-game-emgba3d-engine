@@ -221,6 +221,7 @@ extern int NativeSelfTest_Decompress(const char *listPath);
 extern int NativeSelfTest_PartyOrder(void);
 extern int NativeSelfTest_BattleNames(void);
 extern int NativeSelfTest_CryStop(void);
+extern int NativeSelfTest_SpecialResults(void);
 extern int NativeSelfTest_ShakeAnim(void);
 extern int NativeSelfTest_LineBreak(void);
 extern int NativeSelfTest_WildWeather(void);
@@ -1279,6 +1280,8 @@ static void ParseArguments(int argc, char **argv)
             exit(SelfTestKeybinds()); // the keyboard bindings through the real event loop
         else if (strcmp(argv[i], "--selftest-cry-stop") == 0)
             exit(NativeSelfTest_CryStop()); // src/platform/native_selftest.c (KNOWN_ISSUES N39)
+        else if (strcmp(argv[i], "--selftest-special-results") == 0)
+            exit(NativeSelfTest_SpecialResults()); // src/platform/native_selftest.c (KNOWN_ISSUES MS-166)
         else if (strcmp(argv[i], "--selftest-shake-anim") == 0)
             exit(NativeSelfTest_ShakeAnim()); // src/platform/native_selftest.c (KNOWN_ISSUES N40)
         else if (strcmp(argv[i], "--selftest-line-break") == 0)

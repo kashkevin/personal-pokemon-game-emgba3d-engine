@@ -3344,3 +3344,99 @@ int NativeSelfTest_PokenavMap(void)
     printf("selftest-pokenav-map: %d checks, %d failed\n", sMapChecks, sMapFailures);
     return sMapFailures ? 1 : 0;
 }
+
+// ---------------------------------------------------------------------------
+//   pokeemerald-mp --selftest-special-results
+//
+// KNOWN_ISSUES MS-166: the script engine calls every special as u16 (*)(void) and
+// stores what it returns in a variable (specialvar). A special declared to return
+// an 8-bit value defines only the low byte of the PC's return register; the rest
+// is whatever the function computed last. The Day Care's
+// IsEnoughForCostInVar0x8005 read the money there, so with 3,000 in hand its TRUE
+// read 2,817 and the lady said "You don't have enough money". specialvar must
+// store each such value as the GBA does: its byte, widened (by its sign for s8).
+// ---------------------------------------------------------------------------
+
+#include "../data/script_special_results.h"
+#include "money.h"
+#include "pokeblock.h"
+#include "script.h"
+#include "constants/vars.h"
+
+typedef u16 (*SelfTestSpecialFunc)(void);
+extern const SelfTestSpecialFunc gSpecials[];
+bool8 ScrCmd_specialvar(struct ScriptContext *ctx);
+
+static int sSpecialChecks, sSpecialFailures;
+
+static void ExpectSpecial(const char *what, bool32 ok)
+{
+    sSpecialChecks++;
+    if (!ok)
+    {
+        sSpecialFailures++;
+        printf("FAIL %s\n", what);
+    }
+    else
+    {
+        printf("ok %s\n", what);
+    }
+}
+
+static u32 SpecialIndex(const void *func)
+{
+    u32 i;
+
+    for (i = 0; i < SCRIPT_SPECIAL_COUNT; i++)
+    {
+        if ((uintptr_t)SCRIPT_FUNC_UNTAG(gSpecials[i]) == (uintptr_t)func)
+            return i;
+    }
+    return SCRIPT_SPECIAL_COUNT;
+}
+
+// `specialvar VAR_RESULT, <special>` as a script runs it
+static u16 RunSpecialVar(u32 index)
+{
+    struct ScriptContext ctx;
+    u8 script[4] = {VAR_RESULT & 0xFF, VAR_RESULT >> 8, index & 0xFF, index >> 8};
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.scriptPtr = script;
+    gSpecialVar_Result = 0xBEEF;
+    ScrCmd_specialvar(&ctx);
+    return gSpecialVar_Result;
+}
+
+static u16 DayCareFee(u32 money, u16 fee)
+{
+    SetMoney(&gSaveBlock1Ptr->money, money);
+    gSpecialVar_0x8005 = fee;
+    return RunSpecialVar(SpecialIndex(IsEnoughForCostInVar0x8005));
+}
+
+int NativeSelfTest_SpecialResults(void)
+{
+    u32 money = SpecialIndex(IsEnoughForCostInVar0x8005), slot = SpecialIndex(GetFirstFreePokeblockSlot), i;
+
+    SetSaveBlocksPointers(0);
+    gSaveBlock2Ptr->encryptionKey = 0x5A3C1E0F;
+    ExpectSpecial("IsEnoughForCostInVar0x8005 is a special narrowed to its byte",
+                  money < SCRIPT_SPECIAL_COUNT && sScriptSpecialResultBytes[money] == 1);
+    ExpectSpecial("GetFirstFreePokeblockSlot is one widened by its sign",
+                  slot < SCRIPT_SPECIAL_COUNT && sScriptSpecialResultBytes[slot] == -1);
+    ExpectSpecial("the Day Care's fee: 100 with 3,000 in hand is enough (TRUE, not 2,817)", DayCareFee(3000, 100) == TRUE);
+    ExpectSpecial("3,000 with 3,000 is enough", DayCareFee(3000, 3000) == TRUE);
+    ExpectSpecial("3,001 with 3,000 is not", DayCareFee(3000, 3001) == FALSE);
+    ExpectSpecial("100 with 74,565 (0x12345) is enough", DayCareFee(0x12345, 100) == TRUE);
+    ExpectSpecial("100 with 99 is not", DayCareFee(99, 100) == FALSE);
+    ExpectSpecial("100 with 999,999 is enough", DayCareFee(999999, 100) == TRUE);
+    for (i = 0; i < POKEBLOCKS_COUNT; i++)
+        gSaveBlock1Ptr->pokeblocks[i].color = PBLOCK_CLR_NONE;
+    ExpectSpecial("the first free Pokeblock slot of an empty case is 0", RunSpecialVar(slot) == 0);
+    for (i = 0; i < POKEBLOCKS_COUNT; i++)
+        gSaveBlock1Ptr->pokeblocks[i].color = PBLOCK_CLR_RED;
+    ExpectSpecial("a full case's is -1 (0xFFFF, as the GBA stores it)", RunSpecialVar(slot) == 0xFFFF);
+    printf("selftest-special-results: %d checks, %d failed\n", sSpecialChecks, sSpecialFailures);
+    return sSpecialFailures ? 1 : 0;
+}
