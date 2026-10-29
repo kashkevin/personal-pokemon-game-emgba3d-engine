@@ -944,6 +944,28 @@ struct NativeScriptPic
     u16 tileNum;
 };
 bool32 ScriptMenu_NativeUiPokemonPic(struct NativeScriptPic *out);
+/* a Mail's letter (mail.c) while its screen is up: its stationery as the screen built it (BG1's tiles at char base 0,
+ * its 32 x 32 tilemap, the background palettes before the fade), each line of words and the signature where
+ * PrintMailText puts them (GBA pixels, the text's top left) in the Mail's ink, a Bead or Dream Mail's Pokémon icon */
+#define NATIVE_MAIL_LINES 8
+struct NativeMail
+{
+    bool8 ready;                     /* faded in: A or B closes it */
+    u8 mailType;                     /* ITEM_TO_MAIL */
+    u16 itemId;
+    const u16 *tilemap;
+    const u8 *tiles;
+    const u16 *palettes;             /* 256 colours, BGR555 */
+    u16 textColor, textShadow;
+    u8 lineCount;
+    u8 lines[NATIVE_MAIL_LINES][64];
+    s16 lineX[NATIVE_MAIL_LINES], lineY[NATIVE_MAIL_LINES];
+    u8 signature[32];                /* empty: a Mail with no words (CHECK in the Bag) */
+    s16 signatureX, signatureY;
+    u16 iconSpecies;                 /* SPECIES_NONE: no icon */
+    s16 iconX, iconY;                /* the icon's centre */
+};
+bool32 Mail_NativeUiState(struct NativeMail *out);
 /* the coin box (showcoinsbox) is up */
 bool32 Coins_NativeUiBoxShown(void);
 /* the coin box's window while it is up (WINDOW_NONE: not up) */

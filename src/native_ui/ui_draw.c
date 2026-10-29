@@ -1075,11 +1075,16 @@ void UiG_FillPattern(const struct UiPattern *p, int x, int y, int w, int h, UiRG
 
 void UiG_GlyphQuad(int x, int y, int font, int code, int w, int h, UiRGBA fg, UiRGBA sh)
 {
+    UiG_GlyphQuadScaled(x, y, font, code, w, h, 1, fg, sh);
+}
+
+void UiG_GlyphQuadScaled(int x, int y, int font, int code, int w, int h, int scale, UiRGBA fg, UiRGBA sh)
+{
     struct UiVertex *v;
     int u0;
     int v0;
 
-    if (w <= 0 || h <= 0)
+    if (w <= 0 || h <= 0 || scale <= 0)
         return;
     v = NewQuad();
     if (v == NULL)
@@ -1087,7 +1092,7 @@ void UiG_GlyphQuad(int x, int y, int font, int code, int w, int h, UiRGBA fg, Ui
     UiText_GlyphOrigin(font, code, &u0, &v0);
     x += sState.tx;
     y += sState.ty;
-    SetQuad(v, x, y, x + w, y + h, u0, v0, u0 + w, v0 + h);
+    SetQuad(v, x, y, x + w * scale, y + h * scale, u0, v0, u0 + w, v0 + h);
     SetAll(v, MODE_GLYPH, 0, WithGlobalAlpha(fg), UI_A(sh) > 0 ? WithGlobalAlpha(sh) : 0);
 }
 

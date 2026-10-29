@@ -230,6 +230,29 @@ int UiText_DrawN(int font, int x, int y, const uint8_t *s, int count, UiRGBA fg,
     return x;
 }
 
+int UiText_DrawScaled(int font, int x, int y, const uint8_t *s, UiRGBA fg, UiRGBA sh, int scale)
+{
+    int code;
+    UiRGBA fg0 = fg, sh0 = sh;
+
+    if (s == NULL)
+        return x;
+    for (;;)
+    {
+        int advance, cell;
+
+        s += ColourCodes(s, fg0, sh0, &fg, &sh);
+        if ((code = NextGlyph(&s)) < 0)
+            break;
+        advance = UiText_Advance(font, code);
+        cell = advance < CELL ? advance : CELL;
+        if (cell > 0)
+            UiG_GlyphQuadScaled(x, y, font, code, cell, CELL, scale, fg, sh);
+        x += advance * scale;
+    }
+    return x;
+}
+
 int UiText_Draw(int font, int x, int y, const uint8_t *s, UiRGBA fg, UiRGBA sh, enum UiAlign align,
                 int spacing)
 {

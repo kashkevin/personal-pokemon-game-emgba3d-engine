@@ -174,6 +174,21 @@ bool UiGfx_MonIcon(uint16_t species, uint32_t personality, bool isEgg, int frame
     return true;
 }
 
+bool UiGfx_MonIconScaled(uint16_t species, uint32_t personality, bool isEgg, int frame, int x, int y, int scale)
+{
+    struct MonIconCtx c;
+    char key[128];
+
+    PokemonIcon_NativeUiArt(species, personality, isEgg, &c.tiles, &c.palette);
+    if (c.tiles == NULL || c.palette == NULL)
+        return false;
+    c.frame = frame & 1;
+    c.filter = NULL;
+    snprintf(key, sizeof(key), "mon:%p:%p:%d", (const void *)c.tiles, (const void *)c.palette, c.frame);
+    UiG_BlitPart(UiG_Cached(key, 32, 32, BuildMonIcon, &c), 0, 0, 32, 32, x, y, scale, false, 1.0);
+    return true;
+}
+
 /* ---------------------------------------------------------------- the game's compressed art */
 
 /* Pokémon pictures and item icons are compressed in the game's data; the

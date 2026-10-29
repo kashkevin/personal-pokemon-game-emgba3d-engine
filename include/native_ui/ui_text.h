@@ -52,6 +52,8 @@ int UiText_Draw(int font, int x, int y, const uint8_t *s, UiRGBA fg, UiRGBA sh, 
 /* draws up to `count` glyphs (a typewriter's progress); count < 0: all */
 int UiText_DrawN(int font, int x, int y, const uint8_t *s, int count, UiRGBA fg, UiRGBA sh,
                  enum UiAlign align, int spacing);
+/* the text enlarged by a whole factor (its pixels kept square), its top left at x, y; returns the end's x */
+int UiText_DrawScaled(int font, int x, int y, const uint8_t *s, UiRGBA fg, UiRGBA sh, int scale);
 
 /* G.text / G.textW of the design: normal font, dark text on light, or white */
 int UiG_Text(int x, int y, const uint8_t *s);

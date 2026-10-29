@@ -34,6 +34,7 @@
 #include "party_menu.h"
 #include "daycare.h"
 #include "pokedex.h"
+#include "mail.h"
 #include "pokemon_storage_system.h"
 #include "platform/mp_breeding.h"
 #include "platform/mp_trade_evolution.h"
@@ -47,6 +48,7 @@
 #include "constants/battle.h"
 #include "constants/battle_anim.h"
 #include "constants/characters.h"
+#include "constants/easy_chat.h"
 #include "constants/flags.h"
 #include "constants/form_change_types.h"
 #include "constants/items.h"
@@ -719,7 +721,8 @@ static void Init(void)
  * h: hatched from an Egg (met at level 0), p<byte>: those PP bonuses (two bits a move slot, PP Ups) - move_switch_check.py.
  * c<cool>.<beauty>.<cute>.<smart>.<tough>.<sheen>: its contest conditions; r<cool>.<beauty>.<cute>.<smart>.<tough>.<mask>:
  * its contest ribbons' ranks (1 Normal .. 4 Master) and the others it holds (bit 0 Champion .. bit 11 World, the
- * MON_DATA order) - the PokeNav's condition and ribbon pages.
+ * MON_DATA order) - the PokeNav's condition and ribbon pages. M<item>: holding that Mail, written with nine test words
+ * and the player's name (the native mail screen's checks).
  */
 static void TestMonStatList(const char *p, int out[NUM_STATS])
 {
@@ -741,7 +744,7 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
     int gender = -1, item = 0, move = 0, ivs = MAX_PER_STAT_IVS, nature = -1, ball = 0;
     int statIvs[NUM_STATS], statEvs[NUM_STATS], trainedMask = 0;
     bool shiny = false, nextLevelShort = false, ivList = false, evList = false, hatched = false;
-    int ppBonuses = -1, moveList[MAX_MON_MOVES] = {0}, firstPp = -1, abilityNum = -1;
+    int ppBonuses = -1, moveList[MAX_MON_MOVES] = {0}, firstPp = -1, abilityNum = -1, mailItem = 0;
     int conditions[NUM_STATS], ribbons[NUM_STATS];
     bool movesSet = false, conditionList = false, ribbonList = false;
     /* the summary's order (I, E, H flags) -> MON_DATA_* field offsets (HP, Atk, Def, Speed, Sp. Atk, Sp. Def) */
@@ -801,6 +804,8 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
             TestMonStatList(flags + 1, conditions), conditionList = true;
         else if (*flags == 'r')
             TestMonStatList(flags + 1, ribbons), ribbonList = true;
+        else if (*flags == 'M')
+            mailItem = atoi(flags + 1);
     }
     for (i = 0; i < 65536 && ((gender >= 0 && GetGenderFromSpeciesAndPersonality(species, personality) != gender)
                              || (nature >= 0 && GetNatureFromPersonality(personality) != (u32)nature)); i++)
@@ -822,6 +827,18 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
     }
     if (move > 0)
         SetMonMoveSlot(mon, move, 0);
+    if (mailItem > 0)
+    {
+        static const u16 sWords[MAIL_WORDS_COUNT] = {
+            EC_WORD_HELLO, EC_WORD_FRIEND, EC_WORD_LET_S, EC_WORD_TRADE, EC_WORD_POKEMON, EC_WORD_TOGETHER,
+            EC_WORD_SEE_YA, EC_WORD_SOON, EC_WORD_AWESOME,
+        };
+        u8 id = GiveMailToMonByItemId(mon, mailItem);
+
+        if (id != MAIL_NONE)
+            for (i = 0; i < MAIL_WORDS_COUNT; i++)
+                gSaveBlock1Ptr->mail[id].words[i] = sWords[i];
+    }
     if (movesSet)
     {
         for (i = 0; i < MAX_MON_MOVES; i++)

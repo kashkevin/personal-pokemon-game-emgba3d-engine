@@ -753,3 +753,55 @@ static void CB2_ExitMailReadFreeVars(void)
         FREE_AND_SET_NULL(sMailRead);
     }
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native UI (src/native_ui/screens/ui_mail.c) reads the letter as this screen prints it: the stationery it built
+// (BG1's tiles and tilemap, the palettes), each line of words where PrintMailText puts it (window 0's top left is
+// tile 2, 3) with its signature, and a Bead or Dream Mail's icon where it stands. A or B stays this screen's.
+bool32 Mail_NativeUiState(struct NativeMail *out)
+{
+    u32 i, y = 0;
+    u8 *ptr;
+
+    if (gMain.callback2 != CB2_MailRead || sMailRead == NULL)
+        return FALSE;
+    memset(out, 0, sizeof(*out));
+    out->signature[0] = EOS;
+    out->ready = sMailRead->callback == CB2_ExitOnKeyPress;
+    out->mailType = sMailRead->mailType;
+    out->itemId = sMailRead->mail->itemId;
+    out->tilemap = (const u16 *)sMailRead->bg1TilemapBuffer;
+    out->tiles = (const u8 *)BG_CHAR_ADDR(sBgTemplates[1].charBaseIndex);
+    out->palettes = gPlttBufferUnfaded;
+    out->textColor = sMailGraphics[sMailRead->mailType].textColor;
+    out->textShadow = sMailGraphics[sMailRead->mailType].textShadow;
+    if (sMailRead->hasText)
+    {
+        for (i = 0; i < sMailRead->layout->numLines && out->lineCount < NATIVE_MAIL_LINES; i++)
+        {
+            if (sMailRead->message[i][0] == EOS || sMailRead->message[i][0] == CHAR_SPACE)
+                continue;
+            StringCopy(out->lines[out->lineCount], sMailRead->message[i]);
+            out->lineX[out->lineCount] = sWindowTemplates[0].tilemapLeft * 8 + sMailRead->layout->lines[i].xOffset
+                                       + sMailRead->layout->wordsXPos;
+            out->lineY[out->lineCount] = sWindowTemplates[0].tilemapTop * 8 + y + sMailRead->layout->wordsYPos;
+            out->lineCount++;
+            y += sMailRead->layout->lines[i].height;
+        }
+        ptr = StringCopy(out->signature, sText_FromSpace);
+        StringCopy(ptr, sMailRead->playerName);
+        out->signatureX = sWindowTemplates[0].tilemapLeft * 8
+                        + GetStringCenterAlignXOffset(FONT_NORMAL, out->signature, sMailRead->signatureWidth) + 104;
+        out->signatureY = sWindowTemplates[0].tilemapTop * 8 + sMailRead->layout->signatureYPos + 88;
+    }
+    if (sMailRead->iconType != ICON_TYPE_NONE)
+    {
+        out->iconSpecies = GetIconSpeciesNoPersonality(sMailRead->mail->species);
+        out->iconX = sMailRead->iconType == ICON_TYPE_BEAD ? 96 : 40;
+        out->iconY = 128;
+    }
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

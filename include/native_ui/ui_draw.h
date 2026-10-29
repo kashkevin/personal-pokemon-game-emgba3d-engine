@@ -112,6 +112,8 @@ const struct UiMask *UiG_Panel4(int x, int y, int w, int h, const struct UiRamp 
 void UiG_FillPattern(const struct UiPattern *p, int x, int y, int w, int h, UiRGBA c, int px, int py);
 /* one engine-font glyph cell (ui_text.c): w x h of the 16x16 cell at the font's code */
 void UiG_GlyphQuad(int x, int y, int font, int code, int w, int h, UiRGBA fg, UiRGBA sh);
+/* ... enlarged by a whole factor (the glyph's w x h cell drawn scale times as large) */
+void UiG_GlyphQuadScaled(int x, int y, int font, int code, int w, int h, int scale, UiRGBA fg, UiRGBA sh);
 /* a full-canvas colour veil (screen fades) */
 void UiG_Veil(UiRGBA c);
 /* The quads drawn since a mark (UiG_Mark) squeezed horizontally towards x = cx

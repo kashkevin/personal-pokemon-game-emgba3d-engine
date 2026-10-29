@@ -61,6 +61,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_Customize,
     &gUiScreen_Players,
     &gUiScreen_TrainerCard,
+    &gUiScreen_Mail,         /* a Mail's letter: the Bag's CHECK, a Pokemon's READ, the PC's MAILBOX */
     &gUiScreen_Shop,
     &gUiScreen_Naming,
     &gUiScreen_Starters,

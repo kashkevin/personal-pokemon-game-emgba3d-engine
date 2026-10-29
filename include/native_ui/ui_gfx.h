@@ -52,6 +52,8 @@ void UiGfx_Decode4bpp(uint8_t *rgba, int stride, const uint8_t *tiles, const uin
 /* W.monIcon: a party / box icon (32x32, frame 0 or 1) at x, y; filter may be NULL */
 bool UiGfx_MonIcon(uint16_t species, uint32_t personality, bool isEgg, int frame, int x, int y,
                    const struct UiFilter *filter);
+/* ... enlarged by a whole factor (its pixels kept square) */
+bool UiGfx_MonIconScaled(uint16_t species, uint32_t personality, bool isEgg, int frame, int x, int y, int scale);
 
 /* The game's compressed art (Pokémon front pictures, item icons). The game's
  * decompressors share its state: a screen's capture (frame boundary, game
