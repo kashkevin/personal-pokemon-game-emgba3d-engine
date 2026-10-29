@@ -590,6 +590,8 @@ bool32 CanViewRibbonsMenu(void)
 }
 
 #ifdef ENABLE_NATIVE_UI
+#include "menu_specialized.h"
+#include "string_util.h"
 #include "native_ui/ui_engine.h"
 
 // PC 3D game (screens/ui_pokenav.c): the PokéNav's page as the game has it now. Each part's state lives in its
@@ -624,7 +626,42 @@ bool8 Pokenav_NativeUiState(struct NativePokenav *out)
     case POKENAV_MATCH_CALL:
         PokenavMatchCall_NativeUiFill(out);
         break;
+    case POKENAV_CONDITION_GRAPH_PARTY:
+    case POKENAV_CONDITION_GRAPH_SEARCH:
+        PokenavCondition_NativeUiFill(out);
+        break;
+    case POKENAV_CONDITION_SEARCH_RESULTS:
+    case POKENAV_RETURN_CONDITION_SEARCH:
+        PokenavSearch_NativeUiFill(out);
+        break;
     }
     return TRUE;
+}
+
+void Pokenav_NativeUiMonRow(struct NativePokenavRow *row, u32 boxId, u32 monId)
+{
+    u8 nick[POKEMON_NAME_BUFFER_SIZE];
+
+    memset(row, 0, sizeof(*row));
+    row->species = GetBoxOrPartyMonData(boxId, monId, MON_DATA_SPECIES, NULL);
+    if (row->species == SPECIES_NONE)
+        return;
+    row->personality = GetBoxOrPartyMonData(boxId, monId, MON_DATA_PERSONALITY, NULL);
+    row->egg = GetBoxOrPartyMonData(boxId, monId, MON_DATA_IS_EGG, NULL);
+    row->shiny = GetBoxOrPartyMonData(boxId, monId, MON_DATA_IS_SHINY, NULL);
+    GetBoxOrPartyMonData(boxId, monId, MON_DATA_NICKNAME, nick);
+    StringGet_Nickname(nick);
+    StringCopyN(row->name, nick, sizeof(row->name) - 1);
+    row->name[sizeof(row->name) - 1] = EOS;
+    if (boxId == TOTAL_BOXES_COUNT)
+    {
+        row->level = GetMonData(&gParties[B_TRAINER_PLAYER][monId], MON_DATA_LEVEL);
+        row->gender = GetMonGender(&gParties[B_TRAINER_PLAYER][monId]);
+    }
+    else
+    {
+        row->level = GetLevelFromBoxMonExp(GetBoxedMonPtr(boxId, monId));
+        row->gender = GetBoxMonGender(GetBoxedMonPtr(boxId, monId));
+    }
 }
 #endif // ENABLE_NATIVE_UI

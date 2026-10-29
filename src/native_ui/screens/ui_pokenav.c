@@ -5,7 +5,8 @@
  * button does, its cursors and lists, calls, markings, flying from the map. The UI reads the page up at the frame
  * boundary (pokenav.c Pokenav_NativeUiState), draws it on the design's device and turns clicks into the game's own
  * button presses. Drawn here: the menus (the main menu, CONDITION's and its search's) and MATCH CALL (the trainers
- * registered, a trainer's menu and check page, a call). A page not drawn here keeps the game's picture.
+ * registered, a trainer's menu and check page, a call), CONDITION (a Pokemon's conditions, sheen and markings, the
+ * party's or a search's) and a search's ranked results. A page not drawn here keeps the game's picture.
  * Project-owned.
  */
 #include <math.h>
@@ -15,6 +16,7 @@
 
 #include "global.h"
 #include "main.h"
+#include "pokemon_storage_system.h"
 #include "pokenav.h"
 #include "region_map.h"
 #include "string_util.h"
@@ -23,6 +25,7 @@
 #include "native_ui/ui_draw.h"
 #include "native_ui/ui_engine.h"
 #include "native_ui/ui_gfx.h"
+#include "native_ui/ui_mon.h"
 #include "native_ui/ui_screen.h"
 #include "native_ui/ui_text.h"
 #include "native_ui/ui_widgets.h"
@@ -33,6 +36,7 @@ enum
     HIT_LIST_ROW,
     HIT_OPTION,
     HIT_MESSAGE,
+    HIT_MON_ROW,
 };
 
 /* the PokéNav's blue (the GBA's device and its screen's cyan) */
@@ -50,6 +54,12 @@ static const u8 sText_Next[] = _("NEXT");
 static const u8 sText_HangUp[] = _("HANG UP");
 static const u8 sText_Scroll[] = _("TRAINER");
 static const u8 sText_NoPlace[] = _("Somewhere in HOENN");
+static const u8 sText_Condition[] = _("CONDITION");
+static const u8 sText_Markings[] = _("MARKINGS");
+static const u8 sText_Pokemon[] = _("POKéMON");
+static const u8 sText_InParty[] = _("In your party");
+static const u8 sText_ReturnCondition[] = _("Return to the CONDITION menu.");
+static const u8 sText_Egg[] = _("EGG");
 
 static struct NativePokenav sP;
 static int sPageSince;          /* frames since the page came up (its slide) */
@@ -63,13 +73,16 @@ static u8 sMsg[UI_MESSAGE_COPY];          /* a call's words, as the game prints 
 static u32 sPrinted;
 static bool sMsgUp, sMsgPrinting, sMsgWaiting;
 static bool sPicReady;
+static bool sMonPicReady;
+static u8 sWhere[32];                     /* the cursor's Pokemon's place: the party or its box */
 
 static void Title(const char *label);
 static void Hints(const struct UiHintItem *items, int count);
 
 static bool PageDrawn(const struct NativePokenav *p)
 {
-    return p->page == NATIVE_PNAV_MENU || p->page == NATIVE_PNAV_MATCH_CALL;
+    return p->page == NATIVE_PNAV_MENU || p->page == NATIVE_PNAV_MATCH_CALL || p->page == NATIVE_PNAV_CONDITION
+        || p->page == NATIVE_PNAV_SEARCH;
 }
 
 static bool Detect(void)
@@ -96,6 +109,21 @@ static void Capture(void)
     sPrevListCursor = sP.listCursor;
     sMsgUp = sMsgPrinting = sMsgWaiting = false;
     sPicReady = false;
+    sMonPicReady = false;
+    if (sP.page == NATIVE_PNAV_CONDITION && !sP.condCancel && sP.cond.species != SPECIES_NONE)
+    {
+        sMonPicReady = UiGfx_PrepareMonPic(sP.cond.species, sP.cond.personality, sP.condShiny, sP.cond.egg);
+        if (sP.condBox >= TOTAL_BOXES_COUNT)
+            StringCopy(sWhere, sText_InParty);
+        else
+            StringCopyN(sWhere, GetBoxNamePtr(sP.condBox), sizeof(sWhere) - 1);
+    }
+    if (sP.page == NATIVE_PNAV_SEARCH && sP.listCursor >= sP.listTop && sP.listCursor - sP.listTop < sP.rowCount)
+    {
+        const struct NativePokenavRow *r = &sP.rows[sP.listCursor - sP.listTop];
+
+        sMonPicReady = UiGfx_PrepareMonPic(r->species, r->personality, r->shiny, r->egg);
+    }
     if (sP.page == NATIVE_PNAV_MATCH_CALL)
     {
         for (int i = 0; i < sP.rowCount; i++)
@@ -285,7 +313,7 @@ static void Menu(int t)
         UiCaps_Draw(rx + 46, ry + ((rowH - 6 - 7) >> 1), ItemLabel(it), on ? b.ink : UI_P_TEXT_W, on ? UI_NONE : b.ink,
                     on ? UI_CAPS_PLAIN : UI_CAPS_OUTLINE, UI_ALIGN_LEFT, UI_NONE);
         if (on)
-            UiW_Cursor(rx + w - 18, ry + ((rowH - 6 - 9) >> 1), t / 8, b.ink);
+            UiW_Cursor(rx + w - 18, ry + ((rowH - 6 - 9) >> 1), UiW_Nudge(t), b.ink);
         UiG_Hit(HIT_MENU_ITEM, i, rx, ry, w, rowH - 6);
     }
 
@@ -386,7 +414,7 @@ static void TrainerList(int t, int x, int y, int w, int rowH)
         }
         UiGfx_Icon(on ? "players_sel" : "players", x + 10, ry + ((rowH - 2 - 24) >> 1), 0);
         UiText_Draw(UI_FONT_SMALL, x + 40, ry + 1, row->sub, UI_P_TEXT_MUTED, UI_NONE, UI_ALIGN_LEFT, 0);
-        UiText_Draw(UI_FONT_NORMAL, x + 40, ry + rowH - 19, row->name, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+        UiText_Draw(UI_FONT_NORMAL, x + 40, ry + rowH - 18, row->name, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
         if (row->rematch)
             UiW_PokeBall(x + w - 22, ry + (rowH >> 1) - 1, 12, (t / 4) % 16 < 2 ? 1 : 0);
         UiG_Hit(HIT_LIST_ROW, sP.listTop + i, x + 6, ry, w - 12, rowH - 2);
@@ -470,7 +498,7 @@ static void Options(int t, int x, int y)
             UiG_Paint(UiM_Rounded4(w - 10, rowH - 2, 2, 2, 2, 2), x + 5, ry, UI_HEX(0xD8F0F8),
                       &(struct UiPaint){UI_NONE, UI_HEX(0xF0FFFF), UI_HEX(0xA8D8E8), 0, 0, NULL, UI_NONE});
         if (on)
-            UiW_Cursor(x + 9, ry + 5, t / 8, b.ink);
+            UiW_Cursor(x + 9, ry + 5, UiW_Nudge(t), b.ink);
         UiCaps_Draw(x + 24, ry + 6, OptionLabel(sP.mcOptions[i]), on ? b.ink : UI_P_TEXT, UI_NONE, UI_CAPS_PLAIN,
                     UI_ALIGN_LEFT, UI_NONE);
         UiG_Hit(HIT_OPTION, i, x + 5, ry, w - 10, rowH - 2);
@@ -479,8 +507,8 @@ static void Options(int t, int x, int y)
 
 static void MatchCall(int t)
 {
-    int lx = 24, ly = 58, lw = 276, rowH = 34;
-    int sx = 324, sy = 58, sw = 292, sh = 222;
+    int lx = 24, ly = 58, lw = 276, rowH = 28;   /* the game's eight rows above the hints */
+    int sx = 324, sy = 58, sw = 292, sh = NATIVE_PNAV_ROWS * 28 + 12;
 
     Title("MATCH CALL");
     TrainerList(t, lx, ly, lw, rowH);
@@ -524,6 +552,323 @@ static void MatchCall(int t)
     }
 }
 
+/* ---------------------------------------------------------------- CONDITION and a search's results */
+
+static const char *const sCondLabels[5] = {"COOL", "BEAUTY", "CUTE", "SMART", "TOUGH"};
+static const UiRGBA sSheen[3] = {UI_HEX(0xC08018), UI_HEX(0xF8C840), UI_HEX(0xFFFFF0)};   /* the sheen's sparkles */
+
+/* a Pokemon's row: its icon, name, level and gender (a search's rank before them) */
+static void MonRow(int t, const struct NativePokenavRow *r, int x, int y, int w, int h, bool on, int rank)
+{
+    struct UiRamp b = BlueRamp();
+    int nx = x + 40;
+
+    if (on)
+    {
+        const struct UiMask *rm = UiM_Rounded4(w, h - 2, 2, 2, 2, 2);
+
+        UiW_SelectFrame(rm, x, y, UI_NONE, UI_NONE, 2);
+        UiG_Paint(rm, x, y, UiMix(PNAV_CYAN, UI_HEX(0xFFFFFF), 0.7),
+                  &(struct UiPaint){UI_NONE, UI_HEX(0xF0FFFF), UiMix(PNAV_CYAN, b.lo, 0.3), 0, 0, NULL, UI_NONE});
+    }
+    if (rank > 0)
+    {
+        char num[8];
+
+        snprintf(num, sizeof(num), "%d", rank);
+        UiCaps_Draw(x + 16, y + (h >> 1) - 4, num, b.ink, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_RIGHT, UI_NONE);
+        x += 18;
+        nx += 18;
+    }
+    if (r->species != SPECIES_NONE)
+    {
+        UiG_Save();
+        UiG_Clip(x + 2, y, 34, h - 2);
+        UiGfx_MonIcon(r->species, r->personality, r->egg, on ? (t / 10) % 2 : 0, x + 2, y + (h >> 1) - 20 - (on ? 1 : 0), NULL);
+        UiG_Restore();
+    }
+    UiText_Draw(UI_FONT_NORMAL, nx, y + (h >> 1) - 8, r->egg ? sText_Egg : r->name, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+    if (!r->egg)
+    {
+        u8 lv[16];
+
+        UiMon_LevelText(lv, sizeof(lv), r->level);
+        UiText_Draw(UI_FONT_SMALL, x + w - 34, y + (h >> 1) - 6, lv, UI_P_TEXT_MUTED, UI_NONE, UI_ALIGN_LEFT, 0);
+        UiW_Gender(x + w - 46, y + (h >> 1) - 5, r->gender == MON_MALE ? 0 : r->gender == MON_FEMALE ? 1 : 2);
+    }
+}
+
+/* the condition graph: the five conditions' pentagon, the Pokemon's own inside it */
+static void Graph(int cx, int cy, int radius, const u8 *values)
+{
+    struct UiRamp b = BlueRamp();
+    double px[5], py[5], vx[5], vy[5];
+    int minY = cy, maxY = cy;
+
+    for (int i = 0; i < 5; i++)
+    {
+        double a = (-90 + 72 * i) * 3.14159265358979 / 180.0;
+        double v = values[i] / 255.0;
+
+        px[i] = cx + cos(a) * radius;
+        py[i] = cy + sin(a) * radius;
+        vx[i] = cx + cos(a) * radius * (0.08 + 0.92 * v);
+        vy[i] = cy + sin(a) * radius * (0.08 + 0.92 * v);
+        if (vy[i] < minY)
+            minY = (int)floor(vy[i]);
+        if (vy[i] > maxY)
+            maxY = (int)ceil(vy[i]);
+    }
+    /* the rings and the axes */
+    for (int ring = 1; ring <= 4; ring++)
+        for (int i = 0; i < 5; i++)
+        {
+            double ax = cx + (px[i] - cx) * ring / 4, ay = cy + (py[i] - cy) * ring / 4;
+            double bx = cx + (px[(i + 1) % 5] - cx) * ring / 4, by = cy + (py[(i + 1) % 5] - cy) * ring / 4;
+            int n = (int)ceil(fmax(fabs(bx - ax), fabs(by - ay)));
+
+            for (int s = 0; s <= n; s += ring == 4 ? 1 : 2)
+                UiG_Put((int)floor(ax + (bx - ax) * s / (n ? n : 1) + 0.5), (int)floor(ay + (by - ay) * s / (n ? n : 1) + 0.5),
+                        ring == 4 ? b.ink : UiMix(PNAV_CYAN, b.ink, 0.35));
+        }
+    for (int i = 0; i < 5; i++)
+    {
+        int n = (int)ceil(fmax(fabs(px[i] - cx), fabs(py[i] - cy)));
+
+        for (int s = 0; s <= n; s += 2)
+            UiG_Put((int)floor(cx + (px[i] - cx) * s / n + 0.5), (int)floor(cy + (py[i] - cy) * s / n + 0.5),
+                    UiMix(PNAV_CYAN, b.ink, 0.35));
+    }
+    /* the Pokemon's: filled row by row */
+    for (int y = minY; y <= maxY; y++)
+    {
+        double xs[5];
+        int n = 0;
+
+        for (int i = 0; i < 5; i++)
+        {
+            double y0 = vy[i], y1 = vy[(i + 1) % 5];
+
+            if ((y + 0.5 >= fmin(y0, y1)) && (y + 0.5 < fmax(y0, y1)))
+                xs[n++] = vx[i] + (y + 0.5 - y0) * (vx[(i + 1) % 5] - vx[i]) / (y1 - y0);
+        }
+        if (n >= 2)
+        {
+            double l = fmin(xs[0], xs[1]), r = fmax(xs[0], xs[1]);
+
+            UiG_HLine((int)floor(l + 0.5), y, (int)floor(r + 0.5) - (int)floor(l + 0.5) + 1, UiWithAlpha(UI_HEX(0xF07090), 178));
+        }
+    }
+    for (int i = 0; i < 5; i++)
+    {
+        double bx = vx[(i + 1) % 5], by = vy[(i + 1) % 5];
+        int n = (int)ceil(fmax(fabs(bx - vx[i]), fabs(by - vy[i])));
+
+        for (int s = 0; s <= n; s++)
+            UiG_Put((int)floor(vx[i] + (bx - vx[i]) * s / (n ? n : 1) + 0.5),
+                    (int)floor(vy[i] + (by - vy[i]) * s / (n ? n : 1) + 0.5), UI_HEX(0xC03868));
+    }
+    for (int i = 0; i < 5; i++)
+    {
+        double lx = cx + (px[i] - cx) * 1.28, ly = cy + (py[i] - cy) * 1.24;
+
+        UiCaps_Draw((int)lx, (int)ly - 3, sCondLabels[i], UiMix(UI_HEX(sContestHex[i]), b.ink, 0.25), UI_NONE,
+                    UI_CAPS_PLAIN, UI_ALIGN_CENTER, UI_NONE);
+    }
+}
+
+/* the markings menu over the device: the four marks, OK and CANCEL, the game's cursor */
+static void MarkingsMenu(int t, int x, int y)
+{
+    struct UiRamp b = BlueRamp();
+    int w = 112, h = 4 * 18 + 2 * 18 + 12;
+
+    UiG_Paint(UiM_Rounded4(w, h, 4, 4, 4, 4), x, y, UI_P_CREAM,
+              &(struct UiPaint){b.ink, UI_P_CREAM_HI, UI_P_CREAM_LO, 0, 2, NULL, UI_NONE});
+    for (int i = 0; i < 6; i++)
+    {
+        int ry = y + 6 + i * 18;
+        bool on = i == sP.condMarkCursor;
+
+        if (on)
+        {
+            UiG_Paint(UiM_Rounded4(w - 10, 16, 2, 2, 2, 2), x + 5, ry, UI_HEX(0xD8F0F8),
+                      &(struct UiPaint){UI_NONE, UI_HEX(0xF0FFFF), UI_HEX(0xA8D8E8), 0, 0, NULL, UI_NONE});
+            UiW_Cursor(x + 8, ry + 4, UiW_Nudge(t), b.ink);
+        }
+        if (i < 4)
+        {
+            /* the game's marks: circle, square, triangle, heart (bit i) */
+            bool set = (sP.condMarkEdit >> i) & 1;
+
+            UiMon_MarkGlyph(i, x + 24, ry + 5, set ? b.ink : UiMix(UI_P_CREAM_LO, b.ink, 0.25));
+            UiCaps_Draw(x + 40, ry + 5, set ? "ON" : "OFF", set ? b.ink : UI_P_TEXT_MUTED, UI_NONE, UI_CAPS_PLAIN,
+                        UI_ALIGN_LEFT, UI_NONE);
+        }
+        else
+        {
+            UiCaps_Draw(x + 24, ry + 5, i == 4 ? "OK" : "CANCEL", on ? b.ink : UI_P_TEXT, UI_NONE, UI_CAPS_PLAIN,
+                        UI_ALIGN_LEFT, UI_NONE);
+        }
+    }
+}
+
+static void MonList(int t, int x, int y, int w, int rowH, bool ranks)
+{
+    struct UiRamp b = BlueRamp();
+    int shown = sP.page == NATIVE_PNAV_SEARCH ? (sP.listShown > 0 ? sP.listShown : 7) : NATIVE_PNAV_ROWS;
+    int rows = sP.rowCount < shown ? sP.rowCount : shown;
+    bool cancelRow = sP.page == NATIVE_PNAV_CONDITION && !sP.condSearch;
+    int panelRows = NATIVE_PNAV_ROWS;   /* the game's eight; the list stands as tall as the screen beside it */
+
+    UiG_Paint(UiM_Rounded4(w, rowH * panelRows + 12, 4, 4, 4, 4), x, y, UI_P_CREAM,
+              &(struct UiPaint){b.ink, UI_P_CREAM_HI, UI_P_CREAM_LO, 0, 0, NULL, UI_NONE});
+    for (int i = 0; i < rows && i < panelRows; i++)
+    {
+        int index = sP.listTop + i;
+
+        MonRow(t, &sP.rows[i], x + 6, y + 6 + i * rowH, w - 12, rowH, index == sP.listCursor,
+               ranks ? sP.rows[i].value : 0);
+        UiG_Hit(HIT_MON_ROW, index, x + 6, y + 6 + i * rowH, w - 12, rowH - 2);
+    }
+    if (cancelRow && rows < panelRows)
+    {
+        int ry = y + 6 + rows * rowH;
+        bool on = sP.condCancel;
+
+        if (on)
+        {
+            const struct UiMask *rm = UiM_Rounded4(w - 12, rowH - 2, 2, 2, 2, 2);
+
+            UiW_SelectFrame(rm, x + 6, ry, UI_NONE, UI_NONE, 2);
+            UiG_Paint(rm, x + 6, ry, UiMix(PNAV_CYAN, UI_HEX(0xFFFFFF), 0.7),
+                      &(struct UiPaint){UI_NONE, UI_HEX(0xF0FFFF), UiMix(PNAV_CYAN, b.lo, 0.3), 0, 0, NULL, UI_NONE});
+        }
+        UiGfx_Icon(on ? "return_blue" : "return", x + 14, ry + ((rowH - 2 - 14) >> 1), 0);
+        UiText_Draw(UI_FONT_NORMAL, x + 46, ry + (rowH >> 1) - 8, sText_Cancel, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+        UiG_Hit(HIT_MON_ROW, sP.listCount - 1, x + 6, ry, w - 12, rowH - 2);
+    }
+    if (sP.page == NATIVE_PNAV_SEARCH && sP.listCount > shown)
+        UiW_Scrollbar(x + w + 4, y + 4, rowH * panelRows + 4, sP.listTop, sP.listCount, shown, &b);
+    else if (sP.page == NATIVE_PNAV_CONDITION && sP.condSearch && sP.listCount > panelRows)
+        UiW_Scrollbar(x + w + 4, y + 4, rowH * panelRows + 4, sP.listTop, sP.listCount, panelRows, &b);
+}
+
+static void Condition(int t)
+{
+    struct UiRamp b = BlueRamp();
+    int lx = 24, ly = 58, lw = 276, rowH = 26;
+    int sx = 324, sy = 58, sw = 292, sh = NATIVE_PNAV_ROWS * 26 + 12;
+
+    Title("CONDITION");
+    MonList(t, lx, ly, lw, rowH, sP.condSearch);
+    Screen(sx, sy, sw, sh);
+    if (sP.condCancel || sP.cond.species == SPECIES_NONE)
+    {
+        UiG_Save();
+        UiG_Translate(sx + (sw >> 1) - 24, sy + 60);
+        UiG_Paint(UiM_Circle(48), 0, 0, UiMix(PNAV_CYAN, UI_HEX(0xFFFFFF), 0.8),
+                  &(struct UiPaint){UiMix(b.lo, PNAV_CYAN, 0.4), UI_NONE, UI_NONE, 0, 0, NULL, UI_NONE});
+        UiGfx_Icon("return_blue", 16, 17, 0);
+        UiG_Restore();
+        UiText_Draw(UI_FONT_NORMAL, sx + (sw >> 1), sy + 124, sText_ReturnCondition, b.ink,
+                    UiMix(PNAV_CYAN, UI_HEX(0xFFFFFF), 0.3), UI_ALIGN_CENTER, 0);
+    }
+    else
+    {
+        u8 lv[16];
+        int nx = sx + 92;
+
+        /* the Pokemon: its picture, name, level, where it is, its markings and sheen */
+        UiG_Paint(UiM_Rounded4(76, 76, 3, 3, 3, 3), sx + 8, sy + 8, UiMix(PNAV_CYAN, UI_HEX(0xFFFFFF), 0.85),
+                  &(struct UiPaint){UiMix(b.lo, PNAV_CYAN, 0.4), UI_NONE, UI_NONE, 0, 0, NULL, UI_NONE});
+        if (sMonPicReady)
+        {
+            UiG_Save();
+            UiG_Clip(sx + 9, sy + 9, 74, 74);
+            UiGfx_MonPic(sP.cond.species, sP.cond.personality, sP.condShiny, sP.cond.egg, 0, sx + 46, sy + 80, NULL);
+            UiG_Restore();
+        }
+        UiText_Draw(UI_FONT_NORMAL, nx, sy + 10, sP.cond.egg ? sText_Egg : sP.cond.name, b.ink,
+                    UiMix(PNAV_CYAN, UI_HEX(0xFFFFFF), 0.3), UI_ALIGN_LEFT, 0);
+        if (!sP.cond.egg)
+        {
+            UiMon_LevelText(lv, sizeof(lv), sP.cond.level);
+            UiText_Draw(UI_FONT_SMALL, nx, sy + 28, lv, b.ink, UI_NONE, UI_ALIGN_LEFT, 0);
+            UiW_Gender(nx + 34, sy + 29, sP.cond.gender == MON_MALE ? 0 : sP.cond.gender == MON_FEMALE ? 1 : 2);
+        }
+        if (sP.condShiny)
+            UiMon_Star(nx + 50, sy + 29);
+        UiText_Draw(UI_FONT_SMALL, nx, sy + 42, sWhere, UiMix(b.ink, PNAV_CYAN, 0.25), UI_NONE, UI_ALIGN_LEFT, 0);
+        UiMon_Markings(nx, sy + 58, sP.condMarks, b.ink, UiMix(PNAV_CYAN, b.ink, 0.25));
+        UiCaps_Draw(sx + sw - 12, sy + 10, "SHEEN", UiMix(b.ink, PNAV_CYAN, 0.35), UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_RIGHT,
+                    UI_NONE);
+        for (int i = 0; i < 10; i++)
+        {
+            int kx = sx + sw - 16 - (i % 5) * 10, ky = sy + 26 + (i / 5) * 10;
+
+            if (i < sP.condSparkles)
+                UiMon_Sparkle(kx, ky, false, sSheen);
+            else
+                UiG_Put(kx, ky, UiMix(PNAV_CYAN, b.ink, 0.3));
+        }
+        Graph(sx + (sw >> 1), sy + 152, 52, sP.condValues);
+    }
+    if (sP.condMarking)
+        MarkingsMenu(t, sx + sw - 124, sy + 92);
+    {
+        struct UiHintItem party[] = {{UI_ACT_SCROLL, sText_Pokemon}, {UI_ACT_CANCEL, sText_Back}};
+        struct UiHintItem partyCancel[] = {{UI_ACT_CONFIRM, sText_Back}, {UI_ACT_SCROLL, sText_Pokemon}};
+        struct UiHintItem search[] = {{UI_ACT_CONFIRM, sText_Markings}, {UI_ACT_SCROLL, sText_Pokemon},
+                                      {UI_ACT_CANCEL, sText_Back}};
+        struct UiHintItem marking[] = {{UI_ACT_CONFIRM, sText_Select}, {UI_ACT_CANCEL, sText_Cancel}};
+
+        if (sP.condMarking)
+            Hints(marking, 2);
+        else if (sP.condSearch)
+            Hints(search, 3);
+        else if (sP.condCancel)
+            Hints(partyCancel, 2);
+        else
+            Hints(party, 2);
+    }
+}
+
+static void Search(int t)
+{
+    struct UiRamp b = BlueRamp();
+    char title[32];
+    int lx = 24, ly = 58, lw = 276, rowH = 26;
+    int sx = 324, sy = 58, sw = 292, sh = NATIVE_PNAV_ROWS * 26 + 12;
+    int i = sP.listCursor - sP.listTop;
+
+    snprintf(title, sizeof(title), "%s SEARCH", sCondLabels[sP.searchId < 5 ? sP.searchId : 0]);
+    Title(title);
+    MonList(t, lx, ly, lw, rowH, true);
+    Screen(sx, sy, sw, sh);
+    if (i >= 0 && i < sP.rowCount)
+    {
+        const struct NativePokenavRow *r = &sP.rows[i];
+        char rank[24];
+
+        UiG_Paint(UiM_Circle(120), sx + (sw >> 1) - 60, sy + 20, UiMix(PNAV_CYAN, UI_HEX(0xFFFFFF), 0.8),
+                  &(struct UiPaint){UiMix(b.lo, PNAV_CYAN, 0.4), UI_NONE, UI_NONE, 0, 0, NULL, UI_NONE});
+        if (sMonPicReady)
+            UiGfx_MonPic(r->species, r->personality, r->shiny, r->egg, 0, sx + (sw >> 1), sy + 128, NULL);
+        snprintf(rank, sizeof(rank), "RANK %d OF %d", r->value, sP.listCount);
+        UiCaps_Draw(sx + (sw >> 1), sy + 150, rank, UiMix(UI_HEX(sContestHex[sP.searchId < 5 ? sP.searchId : 0]), b.ink, 0.3),
+                    UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_CENTER, UI_NONE);
+        UiText_Draw(UI_FONT_NORMAL, sx + (sw >> 1), sy + 164, r->egg ? sText_Egg : r->name, b.ink,
+                    UiMix(PNAV_CYAN, UI_HEX(0xFFFFFF), 0.3), UI_ALIGN_CENTER, 0);
+    }
+    {
+        struct UiHintItem items[] = {{UI_ACT_CONFIRM, sText_Condition}, {UI_ACT_SCROLL, sText_Pokemon},
+                                     {UI_ACT_CANCEL, sText_Back}};
+
+        Hints(items, 3);
+    }
+}
+
 /* ---------------------------------------------------------------- the screen */
 
 static void Draw(int t)
@@ -536,6 +881,12 @@ static void Draw(int t)
         break;
     case NATIVE_PNAV_MATCH_CALL:
         MatchCall(t);
+        break;
+    case NATIVE_PNAV_CONDITION:
+        Condition(t);
+        break;
+    case NATIVE_PNAV_SEARCH:
+        Search(t);
         break;
     }
     UiG_Veil(NativeUi_ScreenFade());
@@ -588,6 +939,20 @@ static bool Click(const struct UiHit *hit, int button)
         if (hit->id == HIT_MESSAGE && sP.mcState == NATIVE_PNAV_MC_CALL && (sMsgWaiting || (!sMsgPrinting && !sP.busy)))
         {
             NativeUi_QueuePress(A_BUTTON);
+            return true;
+        }
+    }
+    if ((sP.page == NATIVE_PNAV_CONDITION && !sP.condMarking) || sP.page == NATIVE_PNAV_SEARCH)
+    {
+        if (hit->id == HIT_MON_ROW)
+        {
+            int moves = hit->index - sP.listCursor;
+
+            /* the condition page moves a Pokemon at a time (and wraps); the search list as a list */
+            if (moves != 0)
+                NativeUi_QueuePresses(moves > 0 ? DPAD_DOWN : DPAD_UP, abs(moves));
+            else if (sP.page == NATIVE_PNAV_SEARCH || sP.condSearch || sP.condCancel)
+                NativeUi_QueuePress(A_BUTTON);
             return true;
         }
     }

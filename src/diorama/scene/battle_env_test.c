@@ -717,6 +717,9 @@ static void Init(void)
  * I<hp>.<atk>.<def>.<spatk>.<spdef>.<speed>: each IV (the summary's order; after w), E<...>: each EV in that order,
  * H<mask>: those stats Hyper Trained (bit 0 HP .. bit 5 Speed, the same order) - the summary's IV/EV checks.
  * h: hatched from an Egg (met at level 0), p<byte>: those PP bonuses (two bits a move slot, PP Ups) - move_switch_check.py.
+ * c<cool>.<beauty>.<cute>.<smart>.<tough>.<sheen>: its contest conditions; r<cool>.<beauty>.<cute>.<smart>.<tough>.<mask>:
+ * its contest ribbons' ranks (1 Normal .. 4 Master) and the others it holds (bit 0 Champion .. bit 11 World, the
+ * MON_DATA order) - the PokeNav's condition and ribbon pages.
  */
 static void TestMonStatList(const char *p, int out[NUM_STATS])
 {
@@ -739,7 +742,8 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
     int statIvs[NUM_STATS], statEvs[NUM_STATS], trainedMask = 0;
     bool shiny = false, nextLevelShort = false, ivList = false, evList = false, hatched = false;
     int ppBonuses = -1, moveList[MAX_MON_MOVES] = {0}, firstPp = -1, abilityNum = -1;
-    bool movesSet = false;
+    int conditions[NUM_STATS], ribbons[NUM_STATS];
+    bool movesSet = false, conditionList = false, ribbonList = false;
     /* the summary's order (I, E, H flags) -> MON_DATA_* field offsets (HP, Atk, Def, Speed, Sp. Atk, Sp. Def) */
     static const u8 sSummaryStat[NUM_STATS] = {STAT_HP, STAT_ATK, STAT_DEF, STAT_SPATK, STAT_SPDEF, STAT_SPEED};
 
@@ -793,6 +797,10 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
             firstPp = atoi(flags + 1); /* P<n>: the first move's PP left */
         else if (*flags == 'a')
             abilityNum = atoi(flags + 1); /* a<n>: the species' ability slot n (0, 1, 2 the hidden one) */
+        else if (*flags == 'c')
+            TestMonStatList(flags + 1, conditions), conditionList = true;
+        else if (*flags == 'r')
+            TestMonStatList(flags + 1, ribbons), ribbonList = true;
     }
     for (i = 0; i < 65536 && ((gender >= 0 && GetGenderFromSpeciesAndPersonality(species, personality) != gender)
                              || (nature >= 0 && GetNatureFromPersonality(personality) != (u32)nature)); i++)
@@ -858,6 +866,36 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
             bool32 trained = TRUE;
 
             SetMonData(mon, MON_DATA_HYPER_TRAINED_HP + stat, &trained);
+        }
+    }
+    if (conditionList)
+    {
+        static const u8 sConditionData[NUM_STATS] = {MON_DATA_COOL, MON_DATA_BEAUTY, MON_DATA_CUTE, MON_DATA_SMART,
+                                                      MON_DATA_TOUGH, MON_DATA_SHEEN};
+
+        for (i = 0; i < NUM_STATS; i++)
+        {
+            u8 value = conditions[i] <= 255 ? conditions[i] : 255;
+
+            if (conditions[i] >= 0)
+                SetMonData(mon, sConditionData[i], &value);
+        }
+    }
+    if (ribbonList)
+    {
+        for (i = 0; i < CONTEST_CATEGORIES_COUNT; i++)
+        {
+            u8 rank = ribbons[i] <= 4 ? ribbons[i] : 4;
+
+            if (ribbons[i] >= 0)
+                SetMonData(mon, MON_DATA_COOL_RIBBON + i, &rank);
+        }
+        for (i = 0; ribbons[CONTEST_CATEGORIES_COUNT] > 0 && i <= MON_DATA_WORLD_RIBBON - MON_DATA_CHAMPION_RIBBON; i++)
+        {
+            u8 held = TRUE;
+
+            if (ribbons[CONTEST_CATEGORIES_COUNT] & (1 << i))
+                SetMonData(mon, MON_DATA_CHAMPION_RIBBON + i, &held);
         }
     }
     if (hatched)

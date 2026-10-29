@@ -612,3 +612,22 @@ void UpdateMonMarkingTiles(u8 markings, void *dest)
 {
     RequestDma3Copy(&sMonMarkings_Gfx[markings * 0x80], dest, 0x80, 0x10);
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// PC 3D game (screens/ui_pokenav.c): the markings menu open (its window shown), its cursor and marks
+bool8 MonMarkings_NativeUiState(s8 *cursor, u8 *markings)
+{
+    u32 i;
+
+    if (sMenu == NULL || sMenu->windowSprites[0] == NULL || sMenu->windowSprites[0]->invisible)
+        return FALSE;
+    *cursor = sMenu->cursorPos;
+    // the marks as edited so far (they go to sMenu->markings only on OK)
+    *markings = 0;
+    for (i = 0; i < NUM_MON_MARKINGS; i++)
+        *markings |= sMenu->markingsArray[i] << i;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

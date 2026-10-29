@@ -623,3 +623,60 @@ u8 GetNumConditionMonSparkles(void)
     struct Pokenav_ConditionMenu *menu = GetSubstructPtr(POKENAV_SUBSTRUCT_CONDITION_GRAPH_MENU);
     return menu->numSparkles[menu->loadId];
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "mon_markings.h"
+#include "native_ui/ui_engine.h"
+
+// PC 3D game (screens/ui_pokenav.c, pokenav.c Pokenav_NativeUiState): the condition page: the list (the party's, or
+// a search's around its cursor), the cursor's Pokemon and its conditions, the markings menu
+void PokenavCondition_NativeUiFill(struct NativePokenav *out)
+{
+    struct Pokenav_ConditionMenu *menu = GetSubstructPtr(POKENAV_SUBSTRUCT_CONDITION_GRAPH_MENU);
+    struct PokenavMonList *list = GetSubstructPtr(POKENAV_SUBSTRUCT_MON_LIST);
+    u32 i, mons, boxId, monId;
+
+    if (menu == NULL || list == NULL || list->listCount == 0)
+        return;
+    out->page = NATIVE_PNAV_CONDITION;
+    out->condSearch = menu->inSearchMode;
+    out->listCount = list->listCount;
+    out->listCursor = list->currIndex < list->listCount ? list->currIndex : 0;
+    mons = out->condSearch ? list->listCount : list->listCount - 1;    // the party's last entry is CANCEL
+    out->condCancel = out->listCursor >= mons;
+    // the rows: the party's all; a search's from a top that keeps the cursor in view
+    out->listShown = out->condSearch ? NATIVE_PNAV_ROWS : list->listCount;
+    out->listTop = 0;
+    if (out->condSearch && out->listCursor >= NATIVE_PNAV_ROWS / 2)
+        out->listTop = out->listCursor - NATIVE_PNAV_ROWS / 2;
+    if (out->condSearch && out->listTop + NATIVE_PNAV_ROWS > mons)
+        out->listTop = mons > NATIVE_PNAV_ROWS ? mons - NATIVE_PNAV_ROWS : 0;
+    for (i = 0; i < NATIVE_PNAV_ROWS && out->listTop + i < mons; i++)
+    {
+        const struct PokenavMonListItem *item = &list->monData[out->listTop + i];
+
+        Pokenav_NativeUiMonRow(&out->rows[i], item->boxId, item->monId);
+        out->rows[i].value = item->data;
+        out->rowCount = i + 1;
+    }
+    if (!out->condCancel)
+    {
+        boxId = list->monData[out->listCursor].boxId;
+        monId = list->monData[out->listCursor].monId;
+        Pokenav_NativeUiMonRow(&out->cond, boxId, monId);
+        out->condBox = boxId;
+        out->condValues[0] = GetBoxOrPartyMonData(boxId, monId, MON_DATA_COOL, NULL);
+        out->condValues[1] = GetBoxOrPartyMonData(boxId, monId, MON_DATA_BEAUTY, NULL);
+        out->condValues[2] = GetBoxOrPartyMonData(boxId, monId, MON_DATA_CUTE, NULL);
+        out->condValues[3] = GetBoxOrPartyMonData(boxId, monId, MON_DATA_SMART, NULL);
+        out->condValues[4] = GetBoxOrPartyMonData(boxId, monId, MON_DATA_TOUGH, NULL);
+        out->condSparkles = GET_NUM_CONDITION_SPARKLES(GetBoxOrPartyMonData(boxId, monId, MON_DATA_SHEEN, NULL));
+        out->condMarks = GetBoxOrPartyMonData(boxId, monId, MON_DATA_MARKINGS, NULL);
+        out->condShiny = GetBoxOrPartyMonData(boxId, monId, MON_DATA_IS_SHINY, NULL);
+    }
+    out->condMarking = menu->callback == OpenMarkingsMenu
+                    && MonMarkings_NativeUiState(&out->condMarkCursor, &out->condMarkEdit);
+    if (GetSubstructPtr(POKENAV_SUBSTRUCT_CONDITION_GRAPH_MENU_GFX) != NULL && IsConditionGraphMenuLoopedTaskActive())
+        out->busy = TRUE;
+}
+#endif // ENABLE_NATIVE_UI

@@ -749,3 +749,37 @@ static void BufferSearchMonListItem(struct PokenavMonListItem *item, u8 *dest)
     ConvertIntToDecimalStringN(s, level, STR_CONV_MODE_LEFT_ALIGN, 3);
     GetStringClearToWidth(dest, FONT_NORMAL, gStringVar1, 40);
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// PC 3D game (screens/ui_pokenav.c, pokenav.c Pokenav_NativeUiState): a condition search's results, ranked
+void PokenavSearch_NativeUiFill(struct NativePokenav *out)
+{
+    struct Pokenav_SearchResults *menu = GetSubstructPtr(POKENAV_SUBSTRUCT_CONDITION_SEARCH_RESULTS);
+    struct Pokenav_SearchResultsGfx *gfx = GetSubstructPtr(POKENAV_SUBSTRUCT_CONDITION_SEARCH_RESULTS_GFX);
+    u16 top, count, selected;
+    u8 shown;
+    u32 i;
+
+    if (menu == NULL || gfx == NULL || menu->monList == NULL || menu->callback == HandleConditionSearchInput_WaitSetup
+     || !PokenavList_NativeUiWindow(&top, &count, &selected, &shown))
+        return;
+    out->page = NATIVE_PNAV_SEARCH;
+    out->searchId = GetSelectedConditionSearch();
+    out->listCount = count < menu->monList->listCount ? count : menu->monList->listCount;
+    out->listTop = top;
+    out->listCursor = selected < out->listCount ? selected : 0;
+    out->listShown = shown;
+    for (i = 0; i < NATIVE_PNAV_ROWS && top + i < out->listCount; i++)
+    {
+        const struct PokenavMonListItem *item = &menu->monList->monData[top + i];
+
+        Pokenav_NativeUiMonRow(&out->rows[i], item->boxId, item->monId);
+        out->rows[i].value = item->data;    // its rank (ConvertConditionsToListRanks)
+        out->rowCount = i + 1;
+    }
+    if (gfx->callback != NULL && gfx->callback())
+        out->busy = TRUE;
+}
+#endif // ENABLE_NATIVE_UI

@@ -1329,6 +1329,7 @@ struct NativePokenavRow
     u8 gender;                          /* MON_MALE, MON_FEMALE, MON_GENDERLESS */
     u16 value;                          /* a search's: the condition searched for; a ribbon list's: the ribbon count */
     bool8 egg;
+    bool8 shiny;
     bool8 rematch;                      /* a trainer who wants a rematch (the game's Poke Ball icon) */
     u16 mapSec;                         /* a trainer's place */
 };
@@ -1370,6 +1371,18 @@ struct NativePokenav
     u16 mcPic;                          /* the cursor's trainer's picture (TRAINER_PIC_*; 0xFFFF: none, no check page) */
     const u8 *mcCheck[4];               /* its check page: strategy, Pokemon, two lines about them (NULL: none) */
     u8 mcMessageWindow;                 /* the call's text window (its text printer read by the UI); WINDOW_NONE */
+    /* NATIVE_PNAV_CONDITION: the cursor's Pokemon (the party's rows from 0, a search's from listTop) */
+    bool8 condSearch;                   /* a search's result (else the party's, its last row CANCEL) */
+    bool8 condCancel;                   /* the cursor on CANCEL */
+    bool8 condMarking;                  /* the markings menu open */
+    s8 condMarkCursor;                  /* its cursor: 0-3 the marks, 4 OK, 5 CANCEL */
+    u8 condMarkEdit;                    /* the marks as the menu has them */
+    u8 condValues[5];                   /* cool, beauty, cute, smart, tough */
+    u8 condSparkles;                    /* the sheen's sparkles, as the game counts them */
+    u8 condMarks;                       /* the Pokemon's markings */
+    bool8 condShiny;
+    u8 condBox;                         /* TOTAL_BOXES_COUNT: the party */
+    struct NativePokenavRow cond;       /* the cursor's Pokemon */
 };
 bool8 Pokenav_NativeUiState(struct NativePokenav *out);
 /* the parts' own (each in its file) */
@@ -1378,6 +1391,12 @@ const u8 *PokenavMenuGfx_NativeUiDescription(u32 menuItem, bool8 *noRibbons);
 void PokenavMatchCall_NativeUiFill(struct NativePokenav *out);
 /* pokenav_match_call_gfx.c: the call's text window, WINDOW_NONE when the page is not up; *busy: its tasks run */
 u8 PokenavMatchCallGfx_NativeUiWindow(bool8 *busy);
+void PokenavCondition_NativeUiFill(struct NativePokenav *out);
+void PokenavSearch_NativeUiFill(struct NativePokenav *out);
+/* pokenav.c: a row for a box's or the party's Pokemon (boxId TOTAL_BOXES_COUNT: the party) */
+void Pokenav_NativeUiMonRow(struct NativePokenavRow *row, u32 boxId, u32 monId);
+/* mon_markings.c: the markings menu open, its cursor (0-3 the marks, 4 OK, 5 CANCEL) and its marks */
+bool8 MonMarkings_NativeUiState(s8 *cursor, u8 *markings);
 /* pokenav_list.c: the list's window (FALSE with no list) */
 bool32 PokenavList_NativeUiWindow(u16 *top, u16 *count, u16 *selected, u8 *shown);
 

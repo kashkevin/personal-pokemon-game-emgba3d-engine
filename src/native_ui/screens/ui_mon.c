@@ -173,10 +173,11 @@ void UiMon_SparkleScaled(int x, int y, bool big, const UiRGBA *pal3, int scale)
     UiW_PixScaled(name, big ? sLarge : sSmall, big ? 7 : 5, pal, 3, x - half, y - half, scale);
 }
 
+/* the game's marks in its bit order (graphics/interface/mon_markings.png): circle, square, triangle, heart */
 static const char *const sMarks[4][7] = {
     {"..###..", ".#####.", "#######", "#######", "#######", ".#####.", "..###.."},
-    {"...#...", "..###..", "..###..", ".#####.", ".#####.", "#######", "#######"},
     {".......", "#######", "#######", "#######", "#######", "#######", "......."},
+    {"...#...", "..###..", "..###..", ".#####.", ".#####.", "#######", "#######"},
     {".##.##.", "#######", "#######", "#######", ".#####.", "..###..", "...#..."},
 };
 
