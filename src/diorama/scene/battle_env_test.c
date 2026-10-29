@@ -37,6 +37,7 @@
 #include "decoration_inventory.h"
 #include "constants/decorations.h"
 #include "hall_of_fame.h"
+#include "pokeblock.h"
 #include "constants/game_stat.h"
 #include "malloc.h"
 #include "mail.h"
@@ -1173,6 +1174,36 @@ static void SetUpTestDecorations(void)
         if (*p == ',')
             p++;
     }
+}
+
+/* PBLOCK: the Pokéblock case from the field, with PKMN_TEST_POKEBLOCKS' blocks first ("color:spicy:dry:sweet:bitter:
+ * sour:feel,...", into the run's own copy of the save) - the native Pokéblock case's checks */
+static void OpenTestPokeblockCase(void)
+{
+    const char *p = SDL_getenv("PKMN_TEST_POKEBLOCKS");
+    u32 n = 0;
+
+    while (p != NULL && *p != '\0' && n < POKEBLOCKS_COUNT)
+    {
+        int v[7], used = 0;
+        struct Pokeblock *b = &gSaveBlock1Ptr->pokeblocks[n];
+
+        if (sscanf(p, "%d:%d:%d:%d:%d:%d:%d%n", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &used) < 7)
+            break;
+        b->color = v[0];
+        b->spicy = v[1];
+        b->dry = v[2];
+        b->sweet = v[3];
+        b->bitter = v[4];
+        b->sour = v[5];
+        b->feel = v[6];
+        n++;
+        p += used;
+        if (*p == ',')
+            p++;
+    }
+    TestLog("Battle env test: the Pokéblock case with %u test blocks", n);
+    OpenPokeblockCase(PBLOCK_CASE_FIELD, CB2_ReturnToField);
 }
 
 /* HOFPC: the test party saved as the Hall of Fame's one record (into the run's own copy of the save), then the Hall
@@ -3832,7 +3863,7 @@ bool16 ScriptMenu_CreateStartMenuForPokenavTutorial(void);  /* script_menu.c: th
 /* a field key script's event at a frame (a name KeysAt does not know): NAVTUTOR opens the PokéNav as Rustboro's
    scientist does (its tutorial: MATCH CALL, Mr. Stone's call), NAVMENU his START menu first (only POKéNAV goes on)
    - the PokéNav tutorial's checks; HOF the Hall of Fame with the test party (not saved), HOFPC its PC with the test
-   party as its one record */
+   party as its one record; PBLOCK the Pokéblock case with PKMN_TEST_POKEBLOCKS' blocks */
 static bool FieldEventAt(const char *script, const char *event, int frame)
 {
     const char *p = script;
@@ -4350,6 +4381,8 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
         }
         if (FieldEventAt(s.fieldKeys, "HOFPC", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
             OpenTestHallOfFamePc();
+        if (FieldEventAt(s.fieldKeys, "PBLOCK", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
+            OpenTestPokeblockCase();
         if (FieldEventAt(s.fieldKeys, "HOF", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
         {
             TestLog("Battle env test: the Hall of Fame (the team not saved)");

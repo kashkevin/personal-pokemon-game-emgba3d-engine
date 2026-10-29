@@ -1456,3 +1456,75 @@ u8 GetPokeblocksFlavor(const struct Pokeblock *pokeblock)
 
     return bestFlavor;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+STATIC_ASSERT(NATIVE_PBLOCKS == POKEBLOCKS_COUNT && FLAVOR_COUNT == 5, NativeUiPokeblocks);
+
+// The Pokéblock case for the 3D UI (native_ui/screens/ui_pokeblock_case.c): its blocks, cursor and phase, as the
+// case's task has them
+bool32 Pokeblock_NativeUiCase(struct NativePokeblockCase *out)
+{
+    static const u8 *const sFlavorNames[FLAVOR_COUNT] = {
+        COMPOUND_STRING("SPICY"), COMPOUND_STRING("DRY"), COMPOUND_STRING("SWEET"), COMPOUND_STRING("BITTER"),
+        COMPOUND_STRING("SOUR"),
+    };
+    u8 taskId = TASK_NONE;
+
+    if (gMain.callback2 != CB2_PokeblockMenu || sPokeblockMenu == NULL)
+        return FALSE;
+    memset(out, 0, sizeof(*out));
+    out->title = GetItemName(ITEM_POKEBLOCK_CASE);
+    out->stow = sText_StowCase;
+    out->msgWindow = WIN_TOSS_MSG;
+    for (u32 i = 0; i < FLAVOR_COUNT; i++)
+        out->flavorNames[i] = sFlavorNames[i];
+    out->count = sPokeblockMenu->itemsNo > 0 ? sPokeblockMenu->itemsNo - 1 : 0;
+    for (u32 i = 0; i < out->count && i < POKEBLOCKS_COUNT; i++)
+    {
+        const struct Pokeblock *b = &gSaveBlock1Ptr->pokeblocks[i];
+
+        out->blocks[i].name = gPokeblockNames[b->color];
+        out->blocks[i].color = b->color;
+        out->blocks[i].level = GetHighestPokeblocksFlavorLevel(b);
+        out->blocks[i].feel = GetPokeblocksFeel(b);
+        for (u32 f = 0; f < FLAVOR_COUNT; f++)
+            out->blocks[i].flavors[f] = GetPokeblockData(b, PBLOCK_SPICY + f);
+    }
+    out->scroll = sSavedPokeblockData.scrollOffset;
+    out->cursor = sSavedPokeblockData.scrollOffset + sSavedPokeblockData.selectedRow;
+    out->shown = sPokeblockMenu->maxShowed;
+    out->actionCount = sPokeblockMenu->numActions < 4 ? sPokeblockMenu->numActions : 4;
+    for (u32 i = 0; i < out->actionCount; i++)
+        out->actions[i] = sPokeblockMenuActions[sPokeblockMenu->pokeblockActionIds[i]].text;
+    // the case's task: what it waits for
+    for (u32 i = 0; i < NUM_TASKS && taskId == TASK_NONE; i++)
+    {
+        TaskFunc f = gTasks[i].func;
+
+        if (gTasks[i].isActive && (f == Task_HandlePokeblockMenuInput || f == Task_HandlePokeblocksSwapInput
+         || f == Task_HandlePokeblockActionsInput || f == TossPokeblock || f == Task_FreeDataAndExitPokeblockCase))
+            taskId = i;
+    }
+    if (taskId == TASK_NONE)
+    {
+        // between them: the toss's message printing, then its YES / NO
+        out->phase = MenuHelpers_NativeUiYesNo() ? NATIVE_PBLOCK_YES_NO : NATIVE_PBLOCK_MESSAGE;
+        out->ready = out->phase == NATIVE_PBLOCK_YES_NO;
+        out->actionCursor = Menu_GetCursorPos();
+        return TRUE;
+    }
+    if (gTasks[taskId].func == Task_HandlePokeblockMenuInput)
+        out->phase = NATIVE_PBLOCK_LIST;
+    else if (gTasks[taskId].func == Task_HandlePokeblocksSwapInput)
+        out->phase = NATIVE_PBLOCK_SWAP, out->swapFrom = gTasks[taskId].tToSwapId;
+    else if (gTasks[taskId].func == Task_HandlePokeblockActionsInput)
+        out->phase = NATIVE_PBLOCK_ACTIONS, out->actionCursor = Menu_GetCursorPos();
+    else if (gTasks[taskId].func == TossPokeblock)
+        out->phase = NATIVE_PBLOCK_MESSAGE;
+    else
+        out->phase = NATIVE_PBLOCK_CLOSING;
+    out->ready = out->phase != NATIVE_PBLOCK_CLOSING && !gPaletteFade.active;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

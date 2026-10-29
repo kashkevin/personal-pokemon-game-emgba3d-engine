@@ -1096,6 +1096,45 @@ bool32 BerryBlender_NativeUiRecords(struct NativeBlenderRecords *out);
 /* the Battle Frontier's records windows (frontier_util.c: a facility's results, the link contests', the Ranking
  * Hall's) while one is up: its window and size in tiles; its lines are the window's transcript */
 bool32 FrontierUtil_NativeUiRecordsWindow(u8 *windowId, u8 *width, u8 *height);
+/* The Pokéblock case (pokeblock.c: from the Bag, the Safari Zone's battles and feeders, the contest lady): its blocks
+ * as its list shows them (each one's name, level, feel and the five flavours), the cursor and the first row shown,
+ * and what it waits for: the list, a block being moved (SELECT), its actions (USE / TOSS / CANCEL...), the toss's
+ * YES / NO or its messages (window msgWindow). */
+#define NATIVE_PBLOCKS 40
+enum NativePokeblockPhase
+{
+    NATIVE_PBLOCK_LIST,
+    NATIVE_PBLOCK_SWAP,
+    NATIVE_PBLOCK_ACTIONS,
+    NATIVE_PBLOCK_YES_NO,
+    NATIVE_PBLOCK_MESSAGE,
+    NATIVE_PBLOCK_CLOSING,
+};
+struct NativePokeblock
+{
+    const u8 *name;
+    u8 color;
+    u8 level;
+    u8 feel;
+    u8 flavors[5];       /* spicy, dry, sweet, bitter, sour */
+};
+struct NativePokeblockCase
+{
+    u8 phase;
+    bool8 ready;
+    u8 count;            /* the blocks (the list's last row is stow) */
+    u8 cursor;           /* the row the cursor is on (count: stow) */
+    u8 scroll, shown;
+    u8 swapFrom;         /* SWAP: the block being moved */
+    u8 msgWindow;
+    const u8 *title;     /* the case's name */
+    const u8 *stow;      /* "Stow CASE." */
+    const u8 *flavorNames[5];
+    u8 actionCount, actionCursor;
+    const u8 *actions[4];
+    struct NativePokeblock blocks[NATIVE_PBLOCKS];
+};
+bool32 Pokeblock_NativeUiCase(struct NativePokeblockCase *out);
 /* string_util.c: src with these three in its STR_VAR_1..3, the game's own string vars left as they are */
 u8 *StringUtil_NativeUiExpandVars(u8 *dst, u32 size, const u8 *src, const u8 *const vars[3]);
 /* Easy Chat (easy_chat.c) while its screen is up: the words being edited and every part of the screen as the engine
