@@ -70,6 +70,7 @@
 #include "constants/event_objects.h"
 #include "constants/contest.h"
 #include "contest.h"
+#include "battle_pyramid_bag.h"
 #include "berry_tag_screen.h"
 #include "diploma.h"
 #include "item_menu.h"
@@ -1258,6 +1259,32 @@ static void ShowTestDiploma(void)
 {
     TestLog("Battle env test: the POKéDEX diploma");
     SetMainCallback2(CB2_ShowDiploma);
+}
+
+/* PBAG: the Battle Pyramid's bag from the field (the Pyramid's START menu opens it so) with PKMN_TEST_PYRAMID_BAG's
+ * "item:count,..." as its items (at most its 10) for PKMN_TEST_PYRAMID_LEVEL's level mode (0 Lv. 50, 1 Open Level),
+ * in the run's own copy of the save - the native Pyramid bag's checks */
+static void OpenTestPyramidBag(void)
+{
+    const char *p = SDL_getenv("PKMN_TEST_PYRAMID_BAG");
+    u8 lvlMode = EnvInt("PKMN_TEST_PYRAMID_LEVEL", FRONTIER_LVL_50) == FRONTIER_LVL_OPEN ? FRONTIER_LVL_OPEN : FRONTIER_LVL_50;
+    int item, count, used, n = 0;
+
+    gSaveBlock2Ptr->frontier.lvlMode = lvlMode;
+    memset(gSaveBlock2Ptr->frontier.pyramidBag.itemId[lvlMode], 0, sizeof(gSaveBlock2Ptr->frontier.pyramidBag.itemId[lvlMode]));
+    memset(gSaveBlock2Ptr->frontier.pyramidBag.quantity[lvlMode], 0, sizeof(gSaveBlock2Ptr->frontier.pyramidBag.quantity[lvlMode]));
+    while (p != NULL && *p != '\0' && n < PYRAMID_BAG_ITEMS_COUNT && sscanf(p, "%d:%d%n", &item, &count, &used) == 2)
+    {
+        gSaveBlock2Ptr->frontier.pyramidBag.itemId[lvlMode][n] = item;
+        gSaveBlock2Ptr->frontier.pyramidBag.quantity[lvlMode][n] = count;
+        n++;
+        p += used;
+        if (*p == ',')
+            p++;
+    }
+    TestLog("Battle env test: the Battle Pyramid's bag with %d items (level mode %u)", n, lvlMode);
+    InitBattlePyramidBagCursorPosition();
+    GoToBattlePyramidBagMenu(PYRAMIDBAG_LOC_FIELD, CB2_ReturnToField);
 }
 
 void DoBerryBlending(void);           /* berry_blender.c: a script special (no header declares it) */
@@ -3933,7 +3960,7 @@ bool16 ScriptMenu_CreateStartMenuForPokenavTutorial(void);  /* script_menu.c: th
    - the PokéNav tutorial's checks; HOF the Hall of Fame with the test party (not saved), HOFPC its PC with the test
    party as its one record; PBLOCK the Pokéblock case with PKMN_TEST_POKEBLOCKS' blocks; CONTEST a Normal Rank Cool
    contest with the party's first Pokémon; BLEND the Berry Blender with a computer partner; BTAG the Bag's first
-   berry's tag; DIPLOMA the POKéDEX diploma */
+   berry's tag; DIPLOMA the POKéDEX diploma; PBAG the Battle Pyramid's bag */
 static bool FieldEventAt(const char *script, const char *event, int frame)
 {
     const char *p = script;
@@ -4464,6 +4491,8 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
             OpenTestBerryTag();
         if (FieldEventAt(s.fieldKeys, "DIPLOMA", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
             ShowTestDiploma();
+        if (FieldEventAt(s.fieldKeys, "PBAG", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
+            OpenTestPyramidBag();
         if (FieldEventAt(s.fieldKeys, "HOF", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
         {
             TestLog("Battle env test: the Hall of Fame (the team not saved)");

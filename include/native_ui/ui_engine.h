@@ -366,9 +366,15 @@ struct NativeBag
     bool8 selling;
     u8 msgWindow;               /* the message box's window when shown (WINDOW_NONE: none) */
     u8 descWindow;              /* the description line's window */
+    bool8 canMove;              /* SELECT moves an item here (the game's own rule) */
+    bool8 canSort;              /* START sorts the pocket (the Battle Pyramid's bag has no sorting) */
+    bool8 pyramid;              /* the Battle Pyramid's bag: one list (POCKET_ITEMS), its own menu */
+    u8 pyramidLevel;            /* its level mode's (FRONTIER_LVL_50, FRONTIER_LVL_OPEN) */
     bool8 ready;
 };
 bool32 Bag_NativeUiState(struct NativeBag *out);
+/* battle_pyramid_bag.c: the Battle Pyramid's bag as the same state */
+bool32 PyramidBag_NativeUiState(struct NativeBag *out);
 /* menu_helpers.c: the shared YES/NO, and the shared message (its window) */
 bool32 MenuHelpers_NativeUiYesNo(void);
 bool32 MenuHelpers_NativeUiMessage(u8 *windowId);

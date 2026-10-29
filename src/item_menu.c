@@ -3128,6 +3128,8 @@ bool32 Bag_NativeUiState(struct NativeBag *out)
     if (gBagMenu->windowIds[ITEMWIN_MESSAGE] != WINDOW_NONE && Window_NativeUiShown(gBagMenu->windowIds[ITEMWIN_MESSAGE]))
         out->msgWindow = gBagMenu->windowIds[ITEMWIN_MESSAGE];
     out->descWindow = WIN_DESCRIPTION;
+    out->canMove = CanSwapItems();
+    out->canSort = TRUE;
 
     taskId = NativeUiBagTask();
     if (MenuHelpers_NativeUiYesNo())

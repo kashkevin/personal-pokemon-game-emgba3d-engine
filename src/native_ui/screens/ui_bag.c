@@ -9,7 +9,10 @@
  * PLANNED, favourites are left out. Tab (the pad's Y, or the Details prompt)
  * opens the item details (ui_item_detail.c) over the list. Wally's catching
  * tutorial drives the bag itself (the POKé BALLS pocket, the POKé BALL's
- * menu): shown as it goes, nothing to press. Project-owned.
+ * menu): shown as it goes, nothing to press. The Battle Pyramid's bag
+ * (battle_pyramid_bag.c) is the same Bag with its one list in its level
+ * mode's colour (the game's bag: purple for Lv. 50, red for Open Level), its
+ * ten slots, its own menu (USE, GIVE, TOSS), no sorting. Project-owned.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,6 +31,7 @@
 #include "native_ui/ui_engine.h"
 #include "native_ui/ui_gfx.h"
 #include "native_ui/ui_item_detail.h"
+#include "native_ui/ui_items.h"
 #include "native_ui/ui_mon.h"
 #include "native_ui/ui_screen.h"
 #include "native_ui/ui_text.h"
@@ -63,6 +67,7 @@ static const u8 sText_TMs[] = _("TMs & HMs");
 static const u8 sText_Berries[] = _("Berries");
 static const u8 sText_Key[] = _("Key Items");
 static const u8 *const sPocketNames[POCKETS_COUNT] = {sText_Items, sText_Balls, sText_TMs, sText_Berries, sText_Key};
+static const u8 sText_PyramidBag[] = _("Pyramid Bag");
 static const u8 sText_Empty[] = _("This pocket is empty.");
 static const u8 sText_CloseBagHelp[] = _("Close the Bag.");
 static const u8 sText_Select[] = _("Select");
@@ -98,11 +103,17 @@ static bool sGoalThenA;
 static int sGoalSteps;
 static bool sDetailsWereOpen;
 
+/* the Bag's state, else the Battle Pyramid's bag's */
+static bool32 BagState(struct NativeBag *out)
+{
+    return Bag_NativeUiState(out) || PyramidBag_NativeUiState(out);
+}
+
 static bool Detect(void)
 {
     struct NativeBag b;
 
-    if (!Bag_NativeUiState(&b))
+    if (!BagState(&b))
         return false;
     return b.phase != NATIVE_BAG_NONE;
 }
@@ -138,7 +149,7 @@ static void Capture(void)
     bool8 active;
     u32 printed;
 
-    Bag_NativeUiState(&sNow);
+    BagState(&sNow);
     /* Wally's tutorial puts the player's own bag back before it fades out:
      * the tutorial's last picture fades */
     if (sNow.location == ITEMMENULOCATION_WALLY && sNow.phase == NATIVE_BAG_CLOSING
@@ -175,6 +186,11 @@ static void Capture(void)
     sMsgPrinting = sHasMsg && active;
     sMsgWaiting = sMsgPrinting && TextPrinter_NativeUiWindowWaiting(sB.msgWindow);
     sHasDesc = TextPrinter_NativeUiWindowText(sB.descWindow, sDesc, sizeof(sDesc), &printed, &active);
+    /* the description window's lines break for its narrow window (the Pyramid bag's toss question takes three): one
+     * line on in the wide message box */
+    for (u8 *c = sDesc; sHasDesc && *c != EOS; c++)
+        if (*c == CHAR_NEWLINE)
+            *c = CHAR_SPACE;
     if (UiItemDetail_IsOpen())
     {
         UiItemDetail_Capture(&sB);
@@ -254,6 +270,15 @@ static void BagArt(int x, int y, int w, int h, UiRGBA pc)
     UiG_Rect(bx + 5, by - 2 + fh - 4, 2, 4, UI_HEX(0x5A3A08));
 }
 
+/* the pocket's colour; the Battle Pyramid's bag in its level mode's (the game's bag: purple for Lv. 50, red for Open
+ * Level) */
+static UiRGBA PocketColour(void)
+{
+    if (sB.pyramid)
+        return sB.pyramidLevel == FRONTIER_LVL_50 ? UI_HEX(0x9C80F0) : UI_HEX(0xE05838);
+    return sPocketColours[sB.pocket < POCKETS_COUNT ? sB.pocket : 0];
+}
+
 static void PocketIcon(int pocket, int x, int y, const struct UiFilter *f)
 {
     switch (pocket)
@@ -315,7 +340,8 @@ static void InfoPane(int t, const struct UiRamp *pr, UiRGBA pc)
     BagArt(ix + (iw >> 1) - 52, iy + 18, 104, 92, pc);
     UiG_Paint(UiM_Rounded4(iw - 24, 20, 2, 2, 2, 2), ix + 12, iy + 120, pr->base,
               &(struct UiPaint){pr->ink, pr->hi, pr->lo, 0, 0, NULL, 0});
-    UiText_Draw(UI_FONT_NORMAL, ix + (iw >> 1), iy + 122, sPocketNames[sB.pocket], UI_P_TEXT_W, pr->ink, UI_ALIGN_CENTER, 0);
+    UiText_Draw(UI_FONT_NORMAL, ix + (iw >> 1), iy + 122, sB.pyramid ? sText_PyramidBag : sPocketNames[sB.pocket], UI_P_TEXT_W,
+                pr->ink, UI_ALIGN_CENTER, 0);
     if (!sB.pocketSwitchDisabled)
     {
         UiCaps_Draw(ix + 18, iy + 127, UI_CAPS_LEFT, UI_P_TEXT_W, pr->ink, UI_CAPS_OUTLINE, UI_ALIGN_LEFT, UI_NONE);
@@ -400,20 +426,9 @@ static void InfoPane(int t, const struct UiRamp *pr, UiRGBA pc)
     }
 }
 
-static void ListPanel(int t, const struct UiRamp *pr, UiRGBA pc)
+/* FIND: the design's search box, not in the game yet; SORT: the game's own (START) */
+static void FindAndSort(int px0, const struct UiRamp *pr)
 {
-    int px0 = 236, sx = px0 + 8, sy = 74, railH = 255, n = RowCount();
-
-    for (int i = 0; i < POCKETS_COUNT; i++)
-    {
-        bool available = !(sB.victoryCatch && i == POCKET_POKE_BALLS) && (!sB.pocketSwitchDisabled || i == sB.pocket);
-
-        PocketTab(px0 + 4 + i * 76, 6, i, i == sB.pocket, available);
-        if (available)
-            UiG_Hit(HIT_TAB, i, px0 + 4 + i * 76, 6, 70, 36);
-    }
-    UiG_Paint(UiM_Rounded4(396, 298, 3, 4, 4, 4), px0, 40, pr->base, &(struct UiPaint){pr->ink, pr->hi, pr->lo, 0, 2, NULL, 0});
-    /* FIND: the design's search box, not in the game yet */
     UiG_Paint(UiM_Rounded4(64, 20, 2, 0, 2, 0), px0 + 8, 47, pr->lo, &(struct UiPaint){pr->ink, UI_NONE, UI_NONE, 0, 0, NULL, 0});
     UiGfx_Icon("search", px0 + 12, 50, 0);
     UiCaps_Draw(px0 + 28, 54, "FIND", UI_P_TEXT_W, pr->ink, UI_CAPS_OUTLINE, UI_ALIGN_LEFT, UI_NONE);
@@ -422,13 +437,51 @@ static void ListPanel(int t, const struct UiRamp *pr, UiRGBA pc)
     for (int k = 0; k < 12; k++)
         UiG_HLine(px0 + 80 + k * 14, 62, 9, UI_HEX(0xC0C0C0));
     UiW_Planned(px0 + 80 + 6 * 14 - 24, 51, NULL);
-    /* SORT: the game's own (START) */
+    if (!sB.canSort)
+        return;
     UiG_Paint(UiM_Rounded4(104, 20, 2, 2, 2, 2), px0 + 278, 47, UiMix(pr->lo, pr->ink, 0.25),
               &(struct UiPaint){pr->ink, pr->lo, UI_NONE, 0, 0, NULL, 0});
     UiCaps_Draw(px0 + 286, 54, "SORT", pr->hi, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
     UiCaps_Draw(px0 + 312, 54, UI_CAPS_UP UI_CAPS_DOWN, UI_P_TEXT_W, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
     UiW_Hint(px0 + 330, 49, UI_ACT_START, NULL, true);
     UiG_Hit(HIT_SORT, 0, px0 + 278, 47, 104, 20);
+}
+
+/* the Battle Pyramid's bag: one tab with its level mode, the panel, and its slots in use of the ten it has */
+static void PyramidHeader(int px0, const struct UiRamp *pr)
+{
+    char slots[24];
+
+    UiG_Paint(UiM_Rounded4(300, 36, 5, 5, 0, 0), px0 + 4, 6, pr->base, &(struct UiPaint){pr->ink, pr->hi, UI_NONE, 0, 0, NULL, 0});
+    UiItems_BigCaps(px0 + 14, 14, "BATTLE PYRAMID", 2, UI_P_TEXT_W, pr->ink, UI_ALIGN_LEFT);
+    UiCaps_Draw(px0 + 292, 19, sB.pyramidLevel == FRONTIER_LVL_50 ? "LV. 50" : "OPEN LEVEL", UI_P_TEXT_W, pr->ink,
+                UI_CAPS_OUTLINE, UI_ALIGN_RIGHT, UI_NONE);
+    UiG_Paint(UiM_Rounded4(396, 298, 3, 4, 4, 4), px0, 40, pr->base, &(struct UiPaint){pr->ink, pr->hi, pr->lo, 0, 2, NULL, 0});
+    snprintf(slots, sizeof(slots), "%u OF %u SLOTS", (unsigned)sB.count, (unsigned)PYRAMID_BAG_ITEMS_COUNT);
+    UiCaps_Draw(px0 + 380, 54, slots, UI_P_TEXT_W, pr->ink, UI_CAPS_OUTLINE, UI_ALIGN_RIGHT, UI_NONE);
+}
+
+static void ListPanel(int t, const struct UiRamp *pr, UiRGBA pc)
+{
+    int px0 = 236, sx = px0 + 8, sy = 74, railH = 255, n = RowCount();
+
+    if (sB.pyramid)
+    {
+        PyramidHeader(px0, pr);
+    }
+    else
+    {
+        for (int i = 0; i < POCKETS_COUNT; i++)
+        {
+            bool available = !(sB.victoryCatch && i == POCKET_POKE_BALLS) && (!sB.pocketSwitchDisabled || i == sB.pocket);
+
+            PocketTab(px0 + 4 + i * 76, 6, i, i == sB.pocket, available);
+            if (available)
+                UiG_Hit(HIT_TAB, i, px0 + 4 + i * 76, 6, 70, 36);
+        }
+        UiG_Paint(UiM_Rounded4(396, 298, 3, 4, 4, 4), px0, 40, pr->base, &(struct UiPaint){pr->ink, pr->hi, pr->lo, 0, 2, NULL, 0});
+        FindAndSort(px0, pr);
+    }
     /* the list */
     UiG_Paint(UiM_Rounded4(368, 259, 2, 2, 2, 2), sx, sy, UI_P_CREAM, &(struct UiPaint){pr->ink, UI_P_CREAM_HI, UI_P_CREAM_LO, 0, 0, NULL, 0});
     for (int r = 0; r < VIS; r++)
@@ -520,9 +573,9 @@ static void Hints(void)
     case NATIVE_BAG_BROWSE:
         if (!sB.pocketSwitchDisabled)
             h[n++] = (struct UiHintItem){UI_ACT_MOVE, sText_Pocket};
-        if (sB.count > 1)
+        if (sB.canMove && sB.count > 1)
             h[n++] = (struct UiHintItem){UI_ACT_SELECT, sText_Move};
-        if (sB.count > 1)
+        if (sB.canSort && sB.count > 1)
             h[n++] = (struct UiHintItem){UI_ACT_START, sText_Sort};
         h[n++] = (struct UiHintItem){UI_ACT_CANCEL, sText_Back};
         break;
@@ -616,7 +669,7 @@ static void QuantityBox(void)
 static void DrawBag(int t)
 {
     int x0, y0, w, h;
-    UiRGBA pc = sPocketColours[sB.pocket < POCKETS_COUNT ? sB.pocket : 0];
+    UiRGBA pc = PocketColour();
     struct UiRamp pr = UiRampOf(pc, 0.4, 0.25, 0.62);
     struct UiRamp tab = {sTan.hi, sTan.lo, UI_HEX(0x8A5A2A), sTan.ink};
     struct UiPattern diag = UiPat_Diag(32, 16, 0, 1);
@@ -636,7 +689,7 @@ static void DrawBag(int t)
         UiG_Veil(NativeUi_ScreenFade());
         return;
     }
-    UiW_TitleTab(0, 10, "BAG", &tab, 0, NULL);
+    UiW_TitleTab(0, 10, sB.pyramid ? "PYRAMID BAG" : "BAG", &tab, 0, NULL);
     InfoPane(t, &pr, pc);
     ListPanel(t, &pr, pc);
     Hints();

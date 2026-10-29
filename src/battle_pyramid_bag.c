@@ -1624,3 +1624,153 @@ static void UpdateSwapLinePos(u8 y)
 {
     UpdateSwapLineSpritesPos(&gPyramidBagMenu->spriteIds[PBAG_SPRITE_SWAP_LINE_START], NUM_SWAP_LINE_SPRITES | SWAP_LINE_HAS_MARGIN, 120, (y + 1) * 16);
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "window.h"
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_bag.c) draws the Battle Pyramid's
+// bag as the new design's Bag - one list, the bag's own menu - and follows
+// this state; the input stays here.
+static u8 NativeUiPyramidBagTask(void)
+{
+    static const TaskFunc sTasks[] = {
+        Task_HandlePyramidBagInput, HandleMenuActionInput_SingleRow, HandleMenuActionInput_2x2,
+        Task_ChooseHowManyToToss, Task_ItemSwapHandleInput, Task_TossItem, Task_WaitCloseErrorMessage,
+        Task_ClosePyramidBag,
+    };
+    u32 i;
+
+    for (i = 0; i < ARRAY_COUNT(sTasks); i++)
+    {
+        u8 taskId = FindTaskIdByFunc(sTasks[i]);
+
+        if (taskId != TASK_NONE)
+            return taskId;
+    }
+    return TASK_NONE;
+}
+
+bool32 PyramidBag_NativeUiState(struct NativeBag *out)
+{
+    u8 lvlMode = gSaveBlock2Ptr->frontier.lvlMode;
+    u8 msgWindow;
+    u8 taskId;
+    u32 i;
+
+    memset(out, 0, sizeof(*out));
+    out->msgWindow = WINDOW_NONE;
+    out->swapFrom = 0xFFFF;
+    out->pyramid = TRUE;
+    out->pyramidLevel = lvlMode;
+    if (gMain.callback2 == CB2_LoadPyramidBagMenu)
+    {
+        out->phase = NATIVE_BAG_LOADING;
+        return TRUE;
+    }
+    if (gMain.callback2 != CB2_PyramidBag || gPyramidBagMenu == NULL || lvlMode >= FRONTIER_LVL_MODE_COUNT)
+        return FALSE;
+    switch (gPyramidBagMenuState.location)
+    {
+    case PYRAMIDBAG_LOC_BATTLE:
+        out->location = ITEMMENULOCATION_BATTLE;
+        break;
+    case PYRAMIDBAG_LOC_PARTY:
+        out->location = ITEMMENULOCATION_PARTY;
+        break;
+    default:
+        out->location = ITEMMENULOCATION_FIELD;
+        break;
+    }
+    out->pocket = POCKET_ITEMS;
+    out->pocketSwitchDisabled = TRUE;
+    out->closeRow = TRUE;
+    out->canMove = gPyramidBagMenuState.location != PYRAMIDBAG_LOC_PARTY;
+    out->count = gPyramidBagMenu->listMenuCount > 0 ? gPyramidBagMenu->listMenuCount - 1 : 0;
+    if (out->count > PYRAMID_BAG_ITEMS_COUNT)
+        out->count = PYRAMID_BAG_ITEMS_COUNT;
+    for (i = 0; i < out->count; i++)
+    {
+        out->items[i] = gSaveBlock2Ptr->frontier.pyramidBag.itemId[lvlMode][i];
+        out->quantities[i] = gSaveBlock2Ptr->frontier.pyramidBag.quantity[lvlMode][i];
+    }
+    out->cursor = gPyramidBagMenuState.scrollPosition + gPyramidBagMenuState.cursorPosition;
+    if (gPyramidBagMenu->toSwapPos != POS_NONE)
+        out->swapFrom = gPyramidBagMenu->toSwapPos;
+    // the message box and the description lines as the bag printed them
+    if (Window_NativeUiShown(WIN_MSG))
+        out->msgWindow = WIN_MSG;
+    out->descWindow = WIN_INFO;
+
+    taskId = NativeUiPyramidBagTask();
+    if (MenuHelpers_NativeUiYesNo())
+    {
+        out->phase = NATIVE_BAG_YES_NO;
+        out->menuCursor = Menu_GetCursorPos();
+        out->ready = TRUE;
+        return TRUE;
+    }
+    if (MenuHelpers_NativeUiMessage(&msgWindow))
+    {
+        out->phase = NATIVE_BAG_MESSAGE;
+        out->msgWindow = msgWindow;
+        out->ready = TRUE;
+        return TRUE;
+    }
+    if (taskId == TASK_NONE)
+    {
+        out->phase = NATIVE_BAG_MESSAGE; // an item's own message (waiting for A)
+        out->ready = TRUE;
+        return TRUE;
+    }
+    if (gTasks[taskId].func == Task_HandlePyramidBagInput)
+    {
+        out->phase = NATIVE_BAG_BROWSE;
+        out->ready = MenuHelpers_ShouldWaitForLinkRecv() != TRUE && !gPaletteFade.active;
+    }
+    else if (gTasks[taskId].func == Task_ItemSwapHandleInput)
+    {
+        out->phase = NATIVE_BAG_SWAPPING;
+        out->ready = MenuHelpers_ShouldWaitForLinkRecv() != TRUE;
+    }
+    else if (gTasks[taskId].func == HandleMenuActionInput_SingleRow || gTasks[taskId].func == HandleMenuActionInput_2x2)
+    {
+        out->phase = NATIVE_BAG_MENU;
+        out->menuGrid = gTasks[taskId].func == HandleMenuActionInput_2x2;
+        out->menuCount = gPyramidBagMenu->menuActionsCount <= 6 ? gPyramidBagMenu->menuActionsCount : 6;
+        for (i = 0; i < out->menuCount; i++)
+        {
+            u8 action = gPyramidBagMenu->menuActionIds[i];
+
+            out->menuActions[i] = action;
+            out->menuLabels[i] = action == ACTION_DUMMY ? NULL : sMenuActions[action].text;
+        }
+        out->menuCursor = Menu_GetCursorPos();
+        out->ready = MenuHelpers_ShouldWaitForLinkRecv() != TRUE;
+    }
+    else if (gTasks[taskId].func == Task_ChooseHowManyToToss)
+    {
+        out->phase = NATIVE_BAG_QUANTITY;
+        out->quantity = gTasks[taskId].tNumToToss;
+        out->maxQuantity = gTasks[taskId].tQuantity;
+        out->ready = TRUE;
+    }
+    else if (gTasks[taskId].func == Task_TossItem)
+    {
+        // "Threw away ..." on the description lines until A or B
+        out->phase = NATIVE_BAG_MESSAGE;
+        out->msgWindow = WIN_INFO;
+        out->ready = TRUE;
+    }
+    else if (gTasks[taskId].func == Task_WaitCloseErrorMessage)
+    {
+        out->phase = NATIVE_BAG_MESSAGE;
+        out->ready = TRUE;
+    }
+    else
+    {
+        out->phase = NATIVE_BAG_CLOSING;
+    }
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI
