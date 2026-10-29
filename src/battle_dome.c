@@ -160,6 +160,10 @@ static void BufferLastDomeWinnerName(void);
 static void InitRandomTourneyTreeResults(void);
 static void InitDomeTrainers(void);
 
+#ifdef ENABLE_NATIVE_UI
+void BattleDome_NativeUiNoteCard(bool8 match, u8 id, u8 flags);
+#endif
+#line 163 // gba-line
 static EWRAM_DATA struct TourneyTreeInfoCard *sInfoCard = {0};
 static EWRAM_DATA u8 *sTilemapBuffer = NULL;
 
@@ -4132,6 +4136,10 @@ static void DisplayTrainerInfoOnCard(u8 flags, u8 trainerTourneyId)
     s16 *allocatedArray = AllocZeroed(sizeof(s16) * ALLOC_ARRAY_SIZE);
     trainerId = DOME_TRAINERS[trainerTourneyId].trainerId;
 
+#ifdef ENABLE_NATIVE_UI
+    BattleDome_NativeUiNoteCard(FALSE, trainerTourneyId, flags);
+#endif
+#line 4122 // gba-line
     if (flags & CARD_ALTERNATE_SLOT)
         arrId = 2 * (FRONTIER_PARTY_SIZE + 1), windowId = WIN_TRAINER_NAME + NUM_INFO_CARD_WINDOWS, palSlot = 2;
     if (flags & MOVE_CARD_RIGHT)
@@ -4649,6 +4657,10 @@ static void DisplayMatchInfoOnCard(u8 flags, u8 matchNo)
     int x = 0, y = 0;
     u8 palSlot = 0;
 
+#ifdef ENABLE_NATIVE_UI
+    BattleDome_NativeUiNoteCard(TRUE, matchNo, flags);
+#endif
+#line 4639 // gba-line
     if (flags & CARD_ALTERNATE_SLOT)
         arrId = 2 * (FRONTIER_PARTY_SIZE + 1), windowId = NUM_INFO_CARD_WINDOWS, palSlot = 2;
     if (flags & MOVE_CARD_RIGHT)
@@ -6091,6 +6103,105 @@ bool32 DomeTree_NativeUiState(struct NativeDomeTree *out)
     }
     if (out->phase == NATIVE_DOME_BROWSE)
         out->ready = TRUE;
+    return TRUE;
+}
+
+// the card the game drew last (DisplayTrainerInfoOnCard, DisplayMatchInfoOnCard): the one up once it has slid in
+static struct
+{
+    bool8 valid;
+    bool8 match;
+    u8 id;
+    u8 flags;
+} sNativeUiCard;
+
+void BattleDome_NativeUiNoteCard(bool8 match, u8 id, u8 flags)
+{
+    sNativeUiCard.valid = TRUE;
+    sNativeUiCard.match = match;
+    sNativeUiCard.id = id;
+    sNativeUiCard.flags = flags;
+}
+
+static void NativeUiCardSide(struct NativeDomeCardSide *side, int tournamentId, bool8 matchCard)
+{
+    u16 trainerId = DOME_TRAINERS[tournamentId].trainerId;
+    int k;
+
+    side->trainerId = trainerId;
+    if (trainerId == TRAINER_PLAYER)
+        side->picId = matchCard ? PlayerGenderToFrontTrainerPicId(gSaveBlock2Ptr->playerGender)
+                                : LOCAL_PLAYER_FRONT_PIC(gSaveBlock2Ptr->playerGender);
+    else if (trainerId == TRAINER_FRONTIER_BRAIN)
+        side->picId = GetFrontierBrainTrainerPicIndex();
+    else
+        side->picId = GetFrontierTrainerFrontSpriteId(trainerId);
+    SetFacilityPtrsGetLevel();
+    for (k = 0; k < FRONTIER_PARTY_SIZE; k++)
+    {
+        if (trainerId == TRAINER_PLAYER || trainerId == TRAINER_FRONTIER_BRAIN)
+            side->species[k] = DOME_MONS[tournamentId][k];
+        else
+            side->species[k] = gFacilityTrainerMons[DOME_MONS[tournamentId][k]].species;
+    }
+}
+
+// Task_HandleInfoCardInput reads the pad in its state 2
+bool32 DomeCard_NativeUiState(struct NativeDomeCard *out)
+{
+    u8 inputTask = FindTaskIdByFunc(Task_HandleInfoCardInput);
+    u8 base;
+    int i;
+
+    memset(out, 0, sizeof(*out));
+    if (gMain.callback2 != CB2_TourneyTree || (inputTask == TASK_NONE && !FuncIsActiveTask(Task_ShowTourneyInfoCard)))
+        return FALSE;
+    out->lvlMode = gSaveBlock2Ptr->frontier.lvlMode;
+    if (inputTask == TASK_NONE || sInfoCard == NULL || !sNativeUiCard.valid)
+        return TRUE;
+    out->mode = gTasks[inputTask].data[3];
+    out->match = sNativeUiCard.match;
+    base = (sNativeUiCard.flags & CARD_ALTERNATE_SLOT) ? NUM_INFO_CARD_WINDOWS : 0;
+    out->nameWindow = WIN_TRAINER_NAME + base;
+    for (i = 0; i < FRONTIER_PARTY_SIZE; i++)
+        out->monWindows[i] = WIN_TRAINER_MON1_NAME + i + base;
+    out->flavorWindow = WIN_TRAINER_FLAVOR_TEXT + base;
+    out->numberWindow = WIN_MATCH_NUMBER + base;
+    out->leftWindow = WIN_MATCH_TRAINER_NAME_LEFT + base;
+    out->rightWindow = WIN_MATCH_TRAINER_NAME_RIGHT + base;
+    out->winWindow = WIN_MATCH_WIN_TEXT + base;
+    if (out->match)
+    {
+        for (i = 0; i < NUM_INFOCARD_TRAINERS; i++)
+        {
+            int tournamentId = sInfoCard->tournamentIds[i];
+
+            NativeUiCardSide(&out->sides[i], tournamentId, TRUE);
+            out->sides[i].lost = DOME_TRAINERS[tournamentId].isEliminated
+                              && DOME_TRAINERS[tournamentId].eliminatedAt <= sCompetitorRangeByMatch[sNativeUiCard.id][2];
+        }
+    }
+    else
+    {
+        NativeUiCardSide(&out->sides[0], sNativeUiCard.id, FALSE);
+    }
+    // the arrows as the game shows them (the card's own scroll arrows: up at the top, left at the left)
+    for (i = 0; i < MAX_SPRITES; i++)
+    {
+        const struct Sprite *sprite = &gSprites[i];
+
+        if (!sprite->inUse || sprite->invisible)
+            continue;
+        if (sprite->callback == SpriteCB_VerticalScrollArrow)
+            out->arrows[sprite->y < DISPLAY_HEIGHT / 2 ? 0 : 1] = TRUE;
+        else if (sprite->callback == SpriteCB_HorizontalScrollArrow)
+            out->arrows[sprite->x < DISPLAY_WIDTH / 2 ? 2 : 3] = TRUE;
+    }
+    if (gTasks[inputTask].tState == 2 && !gPaletteFade.active)
+    {
+        out->phase = NATIVE_DOME_BROWSE;
+        out->ready = TRUE;
+    }
     return TRUE;
 }
 

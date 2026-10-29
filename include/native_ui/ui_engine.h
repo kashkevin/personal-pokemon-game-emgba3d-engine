@@ -1346,6 +1346,29 @@ struct NativeDomeTree
 };
 bool32 DomeTree_NativeUiState(struct NativeDomeTree *out);
 u8 DomeTree_NativeUiNext(u8 from, u8 dir);
+/* The Battle Dome's info cards (battle_dome.c: a trainer's or a match's from the tree, the next opponent's before a
+ * round): the card up (the last one the game drew), its windows (the game's lines), its trainers' pictures and three
+ * (a match's loser once decided), the arrows the game shows (UP, DOWN, LEFT, RIGHT go on to another card) */
+struct NativeDomeCardSide
+{
+    u16 trainerId;
+    u16 picId;
+    u16 species[3];
+    bool8 lost;
+};
+struct NativeDomeCard
+{
+    u8 phase;                   /* NATIVE_DOME_BUSY, else NATIVE_DOME_BROWSE: A or B closes, the arrows go on */
+    u8 mode;                    /* INFOCARD_NEXT_OPPONENT, INFOCARD_TRAINER, INFOCARD_MATCH */
+    bool8 match;                /* a match's card (else a trainer's: sides[0]) */
+    u8 lvlMode;
+    struct NativeDomeCardSide sides[2];
+    u8 nameWindow, monWindows[3], flavorWindow;            /* a trainer's */
+    u8 numberWindow, leftWindow, rightWindow, winWindow;    /* a match's */
+    bool8 arrows[4];            /* up, down, left, right */
+    bool8 ready;
+};
+bool32 DomeCard_NativeUiState(struct NativeDomeCard *out);
 /* the Battle Frontier's records windows (frontier_util.c: a facility's results, the link contests', the Ranking
  * Hall's) while one is up: its window and size in tiles; its lines are the window's transcript */
 bool32 FrontierUtil_NativeUiRecordsWindow(u8 *windowId, u8 *width, u8 *height);
