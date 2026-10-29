@@ -1270,6 +1270,47 @@ bool32 BerryTag_NativeUiState(struct NativeBerryTag *out);
 /* the POKéDEX diploma (diploma.c) while up: its text is window 0's; whether it is the National POKéDEX's, whether A or
  * B closes it now */
 bool32 Diploma_NativeUiState(bool8 *national, bool8 *ready);
+/* The Battle Factory's screens (battle_factory_screen.c; the Slateport Battle Tent's too): the rental selection's six
+ * balls (three chosen in order) or a swap screen's three (the player's own, then the beaten trainer's to take one
+ * from), the cursor along the balls and the swap screen's buttons, and what it waits for: the balls, a Pokemon's menu,
+ * a YES / NO, a "can't have the same Pokemon" line. Its instruction is the window infoWindow's line. */
+enum NativeFactoryPhase
+{
+    NATIVE_FACTORY_BUSY,        /* loading, a ball opening or closing, the swap screen sliding, fading */
+    NATIVE_FACTORY_CHOOSE,      /* LEFT / RIGHT round the balls (and the swap screen's buttons), A; the swap: B */
+    NATIVE_FACTORY_MENU,        /* the Pokemon's menu (menuLabels): UP / DOWN round it, A, B */
+    NATIVE_FACTORY_YES_NO,      /* menuCursor: YES 0, NO 1 */
+    NATIVE_FACTORY_MESSAGE,     /* "can't ... the same Pokemon": A (the swap screen: or B) */
+};
+enum NativeFactoryButton
+{
+    NATIVE_FACTORY_BUTTON_FOR_SWAP,  /* PKMN FOR SWAP: back to the player's three */
+    NATIVE_FACTORY_BUTTON_CANCEL,
+};
+#define NATIVE_FACTORY_BALLS 6
+struct NativeFactory
+{
+    u8 phase;
+    bool8 swap;                 /* a swap screen (else the rental selection) */
+    bool8 enemyScreen;          /* swap: the beaten trainer's three (else the player's own) */
+    u8 lvlMode;                 /* FRONTIER_LVL_50, FRONTIER_LVL_OPEN, FRONTIER_LVL_TENT (the Slateport tent) */
+    u8 count;                   /* balls: 6 rentals, 3 on a swap screen (0 while loading) */
+    u8 buttonCount;             /* swap: the buttons after the balls on the cursor's way */
+    u8 buttons[2];              /* enum NativeFactoryButton */
+    u8 cursor;                  /* a ball, else count + a button */
+    struct Pokemon *mons[NATIVE_FACTORY_BALLS];  /* the balls' Pokemon (the game's own) */
+    u8 order[NATIVE_FACTORY_BALLS];  /* rentals: chosen 1st, 2nd, 3rd (0: not) */
+    u8 chosen;                  /* rentals: how many are chosen */
+    struct Pokemon *party[3];   /* swap: the player's three */
+    u8 swapOut;                 /* swap, the trainer's screen: the player's one that goes */
+    u8 menuCount;
+    const u8 *menuLabels[3];
+    u8 menuCursor;              /* MENU, YES_NO */
+    bool8 showChosen;           /* rentals: the three chosen up for the YES / NO */
+    u8 infoWindow;
+    bool8 ready;
+};
+bool32 Factory_NativeUiState(struct NativeFactory *out);
 /* the Battle Frontier's records windows (frontier_util.c: a facility's results, the link contests', the Ranking
  * Hall's) while one is up: its window and size in tiles; its lines are the window's transcript */
 bool32 FrontierUtil_NativeUiRecordsWindow(u8 *windowId, u8 *width, u8 *height);

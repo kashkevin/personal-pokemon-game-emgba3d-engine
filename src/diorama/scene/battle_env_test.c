@@ -70,7 +70,11 @@
 #include "constants/event_objects.h"
 #include "constants/contest.h"
 #include "contest.h"
+#include "battle_factory.h"
+#include "battle_factory_screen.h"
 #include "battle_pyramid_bag.h"
+#include "constants/battle_factory.h"
+#include "constants/battle_frontier.h"
 #include "berry_tag_screen.h"
 #include "diploma.h"
 #include "item_menu.h"
@@ -1285,6 +1289,30 @@ static void OpenTestPyramidBag(void)
     TestLog("Battle env test: the Battle Pyramid's bag with %d items (level mode %u)", n, lvlMode);
     InitBattlePyramidBagCursorPosition();
     GoToBattlePyramidBagMenu(PYRAMIDBAG_LOC_FIELD, CB2_ReturnToField);
+}
+
+/* FACTORY / FSWAP: the Battle Factory's rental selection, or a swap screen (the player's three and a beaten
+ * trainer's three, made from six rentals as the Factory makes them), single battles in PKMN_TEST_FACTORY_LEVEL's
+ * level mode (0 Lv. 50, 1 Open Level), in the run's own copy of the save - the native Factory screens' checks */
+static void OpenTestFactory(bool swap)
+{
+    gSaveBlock2Ptr->frontier.lvlMode = EnvInt("PKMN_TEST_FACTORY_LEVEL", FRONTIER_LVL_50) == FRONTIER_LVL_OPEN ? FRONTIER_LVL_OPEN
+                                                                                                           : FRONTIER_LVL_50;
+    VarSet(VAR_FRONTIER_BATTLE_MODE, FRONTIER_MODE_SINGLES);
+    gSpecialVar_0x8004 = BATTLE_FACTORY_FUNC_GENERATE_RENTAL_MONS;
+    CallBattleFactoryFunction();
+    TestLog("Battle env test: the Battle Factory's %s (level mode %u)", swap ? "swap screen" : "rental selection",
+            gSaveBlock2Ptr->frontier.lvlMode);
+    if (!swap)
+    {
+        DoBattleFactorySelectScreen();
+        return;
+    }
+    gSpecialVar_0x8004 = BATTLE_FACTORY_FUNC_SET_PARTIES;
+    gSpecialVar_0x8005 = 0;
+    CallBattleFactoryFunction();
+    CalculatePlayerPartyCount();
+    DoBattleFactorySwapScreen();
 }
 
 void DoBerryBlending(void);           /* berry_blender.c: a script special (no header declares it) */
@@ -3960,7 +3988,8 @@ bool16 ScriptMenu_CreateStartMenuForPokenavTutorial(void);  /* script_menu.c: th
    - the PokéNav tutorial's checks; HOF the Hall of Fame with the test party (not saved), HOFPC its PC with the test
    party as its one record; PBLOCK the Pokéblock case with PKMN_TEST_POKEBLOCKS' blocks; CONTEST a Normal Rank Cool
    contest with the party's first Pokémon; BLEND the Berry Blender with a computer partner; BTAG the Bag's first
-   berry's tag; DIPLOMA the POKéDEX diploma; PBAG the Battle Pyramid's bag */
+   berry's tag; DIPLOMA the POKéDEX diploma; PBAG the Battle Pyramid's bag; FACTORY the Battle Factory's rentals,
+   FSWAP its swap screen */
 static bool FieldEventAt(const char *script, const char *event, int frame)
 {
     const char *p = script;
@@ -4493,6 +4522,10 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
             ShowTestDiploma();
         if (FieldEventAt(s.fieldKeys, "PBAG", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
             OpenTestPyramidBag();
+        if (FieldEventAt(s.fieldKeys, "FACTORY", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
+            OpenTestFactory(false);
+        if (FieldEventAt(s.fieldKeys, "FSWAP", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
+            OpenTestFactory(true);
         if (FieldEventAt(s.fieldKeys, "HOF", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
         {
             TestLog("Battle env test: the Hall of Fame (the team not saved)");

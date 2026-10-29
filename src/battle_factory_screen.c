@@ -4265,3 +4265,139 @@ static void Swap_CreateMonSprite(void)
 
     sFactorySwapScreen->monPicAnimating = FALSE;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_factory.c) draws the Battle
+// Factory's rental and swap screens in the new design and follows this
+// state; the input stays here. The tasks' states as their #defines above
+// (undefined after each part): choosing 1, the menu 3, the YES/NO 5, the
+// rentals' "can't select the same" 11.
+static u8 NativeUiFactoryTask(const TaskFunc *funcs, u32 count)
+{
+    u32 i;
+
+    for (i = 0; i < count; i++)
+    {
+        u8 taskId = FindTaskIdByFunc(funcs[i]);
+
+        if (taskId != TASK_NONE)
+            return taskId;
+    }
+    return TASK_NONE;
+}
+
+static void NativeUiSelectState(struct NativeFactory *out)
+{
+    static const TaskFunc sTasks[] = {Select_Task_HandleChooseMons, Select_Task_HandleMenu, Select_Task_HandleYesNo};
+    struct FactorySelectScreen *s = sFactorySelectScreen;
+    u8 taskId = NativeUiFactoryTask(sTasks, ARRAY_COUNT(sTasks));
+    u32 i;
+
+    out->count = SELECTABLE_MONS_COUNT;
+    out->cursor = s->cursorPos;
+    for (i = 0; i < SELECTABLE_MONS_COUNT; i++)
+    {
+        out->mons[i] = &s->mons[i].monData;
+        out->order[i] = s->mons[i].selectedId;
+    }
+    out->chosen = s->selectingMonsState > 0 ? s->selectingMonsState - 1 : 0;
+    out->infoWindow = SELECT_WIN_INFO;
+    if (taskId == TASK_NONE || s->monPicAnimating == TRUE || gPaletteFade.active)
+        return;
+    if (gTasks[taskId].func == Select_Task_HandleChooseMons)
+    {
+        if (gTasks[taskId].tState == 1)
+            out->phase = NATIVE_FACTORY_CHOOSE;
+        else if (gTasks[taskId].tState == 11)
+            out->phase = NATIVE_FACTORY_MESSAGE;
+    }
+    else if (gTasks[taskId].func == Select_Task_HandleMenu && gTasks[taskId].tState == 3)
+    {
+        out->phase = NATIVE_FACTORY_MENU;
+        out->menuCount = 3;
+        out->menuLabels[0] = gText_Summary;
+        out->menuLabels[1] = s->mons[s->cursorPos].selectedId != 0 ? gText_Deselect : gText_Rent;
+        out->menuLabels[2] = gText_Others2;
+        out->menuCursor = s->menuCursorPos;
+    }
+    else if (gTasks[taskId].func == Select_Task_HandleYesNo && gTasks[taskId].tState == 5)
+    {
+        out->phase = NATIVE_FACTORY_YES_NO;
+        out->menuCursor = s->yesNoCursorPos;
+        out->showChosen = TRUE;
+    }
+    out->ready = out->phase != NATIVE_FACTORY_BUSY;
+}
+
+static void NativeUiSwapState(struct NativeFactory *out)
+{
+    static const TaskFunc sTasks[] = {Swap_Task_HandleChooseMons, Swap_Task_HandleMenu, Swap_Task_HandleYesNo,
+                                      Swap_TaskCantHaveSameMons};
+    struct FactorySwapScreen *s = sFactorySwapScreen;
+    u8 taskId = NativeUiFactoryTask(sTasks, ARRAY_COUNT(sTasks));
+    u32 i;
+
+    out->swap = TRUE;
+    out->enemyScreen = s->inEnemyScreen;
+    out->count = FRONTIER_PARTY_SIZE;
+    for (i = 0; i < FRONTIER_PARTY_SIZE; i++)
+    {
+        out->mons[i] = s->inEnemyScreen ? &gParties[B_TRAINER_OPPONENT_A][i] : &gParties[B_TRAINER_PLAYER][i];
+        out->party[i] = &gParties[B_TRAINER_PLAYER][i];
+    }
+    for (i = FRONTIER_PARTY_SIZE; i < s->actionsCount && out->buttonCount < ARRAY_COUNT(out->buttons); i++)
+        out->buttons[out->buttonCount++] = s->actionsData[i].id == SWAPACTION_PKMN_FOR_SWAP ? NATIVE_FACTORY_BUTTON_FOR_SWAP
+                                                                                            : NATIVE_FACTORY_BUTTON_CANCEL;
+    out->cursor = s->cursorPos;
+    out->swapOut = s->playerMonId;
+    out->infoWindow = SWAP_WIN_INFO;
+    if (taskId == TASK_NONE || s->monPicAnimating == TRUE || gPaletteFade.active)
+        return;
+    if (gTasks[taskId].func == Swap_Task_HandleChooseMons && gTasks[taskId].tState == 1)
+    {
+        out->phase = NATIVE_FACTORY_CHOOSE;
+    }
+    else if (gTasks[taskId].func == Swap_Task_HandleMenu && gTasks[taskId].tState == 3)
+    {
+        out->phase = NATIVE_FACTORY_MENU;
+        out->menuCount = 3;
+        out->menuLabels[0] = gText_Summary2;
+        out->menuLabels[1] = gText_Swap;
+        out->menuLabels[2] = gText_Rechoose;
+        out->menuCursor = s->menuCursorPos;
+    }
+    else if (gTasks[taskId].func == Swap_Task_HandleYesNo && gTasks[taskId].tState == 5)
+    {
+        out->phase = NATIVE_FACTORY_YES_NO;
+        out->menuCursor = s->yesNoCursorPos;
+    }
+    else if (gTasks[taskId].func == Swap_TaskCantHaveSameMons && gTasks[taskId].tState == 1)
+    {
+        out->phase = NATIVE_FACTORY_MESSAGE;
+    }
+    out->ready = out->phase != NATIVE_FACTORY_BUSY;
+}
+
+bool32 Factory_NativeUiState(struct NativeFactory *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->phase = NATIVE_FACTORY_BUSY;
+    out->lvlMode = gSaveBlock2Ptr->frontier.lvlMode;
+    if (gMain.callback2 == CB2_InitSelectScreen || gMain.callback2 == CB2_SelectScreen)
+    {
+        if (sFactorySelectScreen != NULL && gMain.callback2 == CB2_SelectScreen)
+            NativeUiSelectState(out);
+        return TRUE;
+    }
+    if (gMain.callback2 == CB2_InitSwapScreen || gMain.callback2 == Swap_CB2)
+    {
+        out->swap = TRUE;
+        if (sFactorySwapScreen != NULL && gMain.callback2 == Swap_CB2)
+            NativeUiSwapState(out);
+        return TRUE;
+    }
+    return FALSE;
+}
+#endif // ENABLE_NATIVE_UI

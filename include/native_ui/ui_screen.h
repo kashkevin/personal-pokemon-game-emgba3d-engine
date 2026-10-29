@@ -132,6 +132,7 @@ extern const struct UiScreen gUiScreen_BerryBlender;
 extern const struct UiScreen gUiScreen_ContestPainting;
 extern const struct UiScreen gUiScreen_BerryTag;
 extern const struct UiScreen gUiScreen_Diploma;
+extern const struct UiScreen gUiScreen_Factory;
 extern const struct UiScreen gUiScreen_Shop;
 extern const struct UiScreen gUiScreen_Naming;
 extern const struct UiScreen gUiScreen_Starters;
