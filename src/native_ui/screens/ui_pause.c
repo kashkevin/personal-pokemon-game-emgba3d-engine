@@ -9,6 +9,8 @@
  * menus...), the cursor, what A and B do, the save itself. The game is
  * reported as saved only once the engine says so and the save file is
  * written. Project-owned.
+ * Rustboro's PokéNav tutorial draws a START menu of its own (script_menu.c, MULTI_FORCED_START_MENU): it is shown as
+ * this menu too, its eight rows the game's (only POKéNAV goes on; the script asks again for any other row or B).
  */
 #include <math.h>
 #include <stdio.h>
@@ -30,6 +32,7 @@
 #include "platform/mp_bridge.h"
 #include "constants/characters.h"
 #include "constants/flags.h"
+#include "constants/script_menu.h"
 #include "native_ui/ui_draw.h"
 #include "native_ui/ui_engine.h"
 #include "native_ui/ui_gfx.h"
@@ -135,6 +138,7 @@ struct Entry
 };
 
 static struct NativeStartMenu sMenu;
+static bool sForced;            /* Rustboro's PokéNav tutorial: its script's START menu (no wrap) */
 static struct Entry sEntries[12];
 static int sEntryCount;
 static int sSelectedEntry;
@@ -187,12 +191,36 @@ static void ClockText(u8 *dst, int size, int hours, int minutes)
     UiText_AppendAscii(dst, size, hours < 12 ? "AM" : "PM");
 }
 
+/* Rustboro's PokéNav tutorial: its script's START menu (script_menu.c CreateStartMenuForPokenavTutorial), as the field
+ * menu: its rows the game's eight, its cursor and readiness the multichoice's */
+static bool ForcedMenu(struct NativeStartMenu *m)
+{
+    static const u8 actions[] = {NATIVE_START_POKEDEX, NATIVE_START_POKEMON, NATIVE_START_BAG, NATIVE_START_POKENAV,
+                                 NATIVE_START_PLAYER, NATIVE_START_SAVE, NATIVE_START_OPTION, NATIVE_START_EXIT};
+    struct NativeScriptMenu s;
+
+    if (gMain.callback2 != CB2_Overworld || !ScriptMenu_NativeUiState(&s) || s.kind != NATIVE_SCRIPT_MENU_MULTICHOICE
+     || s.multichoiceId != MULTI_FORCED_START_MENU)
+        return false;
+    memset(m, 0, sizeof(*m));
+    m->mode = NATIVE_START_MENU_BROWSE;
+    m->count = ARRAY_COUNT(actions);
+    for (int i = 0; i < m->count; i++)
+    {
+        m->actions[i] = actions[i];
+        m->labels[i] = i < s.count ? s.labels[i] : NULL;
+    }
+    m->cursor = s.cursor;
+    m->ready = s.ready;
+    return true;
+}
+
 static bool Detect(void)
 {
     struct NativeStartMenu m;
 
     if (!StartMenu_NativeUiState(&m))
-        return false;
+        return ForcedMenu(&m);
     /* a Battle Pyramid retire and the like keep the game's own windows */
     return m.mode != NATIVE_START_MENU_NONE && m.mode != NATIVE_START_MENU_OTHER;
 }
@@ -266,7 +294,7 @@ static void Capture(void)
     u8 prevMode = sMenu.mode;
 
     sPrevStep = sMenu.saveStep;
-    StartMenu_NativeUiState(&sMenu);
+    sForced = !StartMenu_NativeUiState(&sMenu) && ForcedMenu(&sMenu);
     if (prevMode == NATIVE_START_MENU_NONE || prevMode == NATIVE_START_MENU_OTHER)
         sOpen = 0;
     else if (sOpen < 5)
@@ -765,10 +793,10 @@ static bool Click(const struct UiHit *hit, int button)
     {
         int moves = hit->index - sMenu.cursor;
 
-        /* the engine's own menu wraps: the shorter way round */
-        if (moves > sMenu.count / 2)
+        /* the engine's own menu wraps: the shorter way round (the tutorial's does not) */
+        if (!sForced && moves > sMenu.count / 2)
             moves -= sMenu.count;
-        else if (moves < -sMenu.count / 2)
+        else if (!sForced && moves < -sMenu.count / 2)
             moves += sMenu.count;
         NativeUi_QueuePresses(moves > 0 ? DPAD_DOWN : DPAD_UP, abs(moves));
         NativeUi_QueuePress(A_BUTTON);

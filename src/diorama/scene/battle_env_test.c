@@ -3708,9 +3708,11 @@ static unsigned short ScriptKeys(void)
 }
 
 void OpenPokenavForTutorial(void);     /* pokenav.c: a script special (no header declares it) */
+bool16 ScriptMenu_CreateStartMenuForPokenavTutorial(void);  /* script_menu.c: the same */
 
 /* a field key script's event at a frame (a name KeysAt does not know): NAVTUTOR opens the PokéNav as Rustboro's
-   scientist does (its tutorial: MATCH CALL, Mr. Stone's call) - the PokéNav page's tutorial checks */
+   scientist does (its tutorial: MATCH CALL, Mr. Stone's call), NAVMENU his START menu first (only POKéNAV goes on)
+   - the PokéNav tutorial's checks */
 static bool FieldEventAt(const char *script, const char *event, int frame)
 {
     const char *p = script;
@@ -4225,6 +4227,12 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
         {
             TestLog("Battle env test: the PokéNav opened for its tutorial");
             OpenPokenavForTutorial();
+        }
+        if (FieldEventAt(s.fieldKeys, "NAVMENU", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
+        {
+            TestLog("Battle env test: the PokéNav tutorial's START menu opened");
+            LockPlayerFieldControls();
+            ScriptMenu_CreateStartMenuForPokenavTutorial();
         }
         return keys | KeysAt(s.fieldKeys, s.fieldLoop > 0 ? (s.fieldKeyFrames - 1) % s.fieldLoop : s.fieldKeyFrames - 1);
     }
