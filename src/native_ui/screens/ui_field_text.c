@@ -11,9 +11,11 @@
  * the wheel queue its presses. The money box and the coin box a script or a
  * game shows with its question (a vending machine, the Safari Zone's fee, a
  * roulette table's "Do you want to play?") are the design's money windows,
- * with the wallet as it is now. Anything else on the field's window layer that
- * this does not draw (a list, a PokéNav call, rows a script builds itself)
- * keeps the game's picture. Project-owned.
+ * with the wallet as it is now. The picture box a script shows (showmonpic: a
+ * Pokémon in a frame, Birch's Johto starters) is the design's box where the
+ * script put it, with the Pokémon's own picture. Anything else on the field's
+ * window layer that this does not draw (a list, a PokéNav call, rows a script
+ * builds itself) keeps the game's picture. Project-owned.
  */
 #include <stdlib.h>
 #include <string.h>
@@ -34,6 +36,7 @@
 #include "native_ui/ui_draw.h"
 #include "native_ui/ui_engine.h"
 #include "native_ui/ui_field.h"
+#include "native_ui/ui_gfx.h"
 #include "native_ui/ui_items.h"
 #include "native_ui/ui_screen.h"
 #include "native_ui/ui_text.h"
@@ -62,6 +65,13 @@ static bool sSign;
 static u8 sSpeaker[40];
 static bool sMoneyBox, sCoinBox;
 static u32 sMoney, sCoins;
+static bool sMsgUp;
+static struct NativeScriptPic sPic;
+static bool sPicUp;
+static uint32_t sPicAt, sPicLast;
+
+/* the picture box's Pokémon as CreateMonSprite_PicBox makes it: not shiny, this personality */
+#define PIC_PERSONALITY 0x8000
 
 /* ---------------------------------------------------------------- shared with the PC's first menus */
 
@@ -92,9 +102,9 @@ void UiField_MessageBox(int t, int L, int R, int B, const u8 *msg, int printed, 
 
 /* ---------------------------------------------------------------- detection */
 
-/* the field's windows up besides the message box (the map's name and the name box apart, and the money and coin boxes,
- * which this draws) */
-static int OtherWindows(void)
+/* the field's windows up besides the message box (the map's name and the name box apart, and the money and coin boxes
+ * and the picture box, which this draws) */
+static int OtherWindows(u8 picture)
 {
     u8 popup = GetMapNamePopUpWindowId();
     u32 namebox = GetNameboxWindowId();
@@ -102,7 +112,7 @@ static int OtherWindows(void)
     int n = 0;
 
     for (u32 i = 1; i < WINDOWS_MAX; i++)
-        if (i != popup && i != namebox && i != money && i != coins && Window_NativeUiShown(i))
+        if (i != popup && i != namebox && i != money && i != coins && i != picture && Window_NativeUiShown(i))
             n++;
     return n;
 }
@@ -122,15 +132,21 @@ static void MenuState(struct NativeScriptMenu *m)
 static bool Detect(void)
 {
     struct NativeScriptMenu m;
+    struct NativeScriptPic pic;
+    bool picUp;
 
-    if (gMain.callback2 != CB2_Overworld || !Window_NativeUiShown(0) || IsMatchCallTaskActive())
+    if (gMain.callback2 != CB2_Overworld || IsMatchCallTaskActive())
+        return false;
+    /* a message, or a picture box alone (before its question, after it) */
+    picUp = ScriptMenu_NativeUiPokemonPic(&pic);
+    if (!Window_NativeUiShown(0) && !picUp)
         return false;
     MenuState(&m);
     /* rows a script builds itself are not listed: the game's picture */
     if (m.kind == NATIVE_SCRIPT_MENU_MULTICHOICE && m.count == 0)
         return false;
     /* the menu's own window, nothing else */
-    return OtherWindows() <= (m.kind != NATIVE_SCRIPT_MENU_NONE ? 1 : 0);
+    return OtherWindows(picUp ? pic.windowId : WINDOW_NONE) <= (m.kind != NATIVE_SCRIPT_MENU_NONE ? 1 : 0);
 }
 
 static void Capture(void)
@@ -138,7 +154,8 @@ static void Capture(void)
     bool8 active = FALSE;
 
     MenuState(&sMenu);
-    sHasMsg = TextPrinter_NativeUiWindowText(0, sMsg, sizeof(sMsg), &sMsgPrinted, &active);
+    sMsgUp = Window_NativeUiShown(0);
+    sHasMsg = sMsgUp && TextPrinter_NativeUiWindowText(0, sMsg, sizeof(sMsg), &sMsgPrinted, &active);
     sMsgPrinting = sHasMsg && active;
     sWaiting = sMenu.kind == NATIVE_SCRIPT_MENU_NONE
             && (Script_NativeUiWaitsForButton() || TextPrinter_NativeUiWindowWaiting(0) || Roulette_NativeUiEntryWaits());
@@ -157,6 +174,17 @@ static void Capture(void)
     sCoinBox = Coins_NativeUiBoxWindow() != WINDOW_NONE;
     sMoney = GetMoney(&gSaveBlock1Ptr->money);
     sCoins = GetCoins();
+    sPicUp = ScriptMenu_NativeUiPokemonPic(&sPic);
+    if (sPicUp)
+    {
+        uint32_t now = NativeUi_Frame();
+
+        /* a box just shown: the Pokémon's own animation from its start */
+        if (now - sPicLast > 2)
+            sPicAt = now;
+        sPicLast = now;
+        UiGfx_PrepareMonPic(sPic.species, PIC_PERSONALITY, false, false);
+    }
 }
 
 /* ---------------------------------------------------------------- drawing */
@@ -164,6 +192,35 @@ static void Capture(void)
 static bool MenuUp(void)
 {
     return sMenu.kind == NATIVE_SCRIPT_MENU_YES_NO || (sMenu.kind == NATIVE_SCRIPT_MENU_MULTICHOICE && sMenu.count > 0);
+}
+
+/* the picture box: the design's box where the script put the game's (its middle and top on the GBA's screen; 8 x 8
+ * tiles in a frame a tile wide), above the message box, rising as it opens; the Pokémon twice the game's size */
+static void PictureBox(int bx, int by, int bw, int bh)
+{
+    static const u8 sRise[] = {16, 9, 4, 1};
+    int w = 156, h = 156, f = (int)(NativeUi_Frame() - sPicAt);
+    int x = bx + (sPic.left * 8 + 32) * bw / DISPLAY_WIDTH - (w >> 1), y = by + (sPic.top * 8 - 8) * bh / DISPLAY_HEIGHT;
+    int top = by + 8, bottom = by + bh - UI_FIELD_MSG_H - 16 - h;
+    u16 sp = sPic.species;
+
+    if (x > bx + bw - 8 - w)
+        x = bx + bw - 8 - w;
+    if (x < bx + 8)
+        x = bx + 8;
+    if (y > bottom)
+        y = bottom;
+    if (y < top)
+        y = top;
+    if (f >= 0 && f < (int)ARRAY_COUNT(sRise))
+        y += sRise[f];
+    UiW_DialogBox(x, y, w, h, NULL, UI_NONE, NULL);
+    UiG_Mask(UiM_Ellipse(76, 12), x + (w >> 1) - 38, y + h - 26, UI_P_PAPER_LO);
+    UiG_Save();
+    UiG_Clip(x + 4, y + 4, w - 8, h - 8);
+    UiGfx_MonPicEx(sp, PIC_PERSONALITY, false, false, UiGfx_MonPicFrameAt(sp, PIC_PERSONALITY, false, false, f),
+                   x + (w >> 1), y + h - 20, 2, 1.0, NULL);
+    UiG_Restore();
 }
 
 static void Draw(int t)
@@ -189,7 +246,9 @@ static void Draw(int t)
     {
         h[n++] = (struct UiHintItem){UI_ACT_CONFIRM, sText_Next};
     }
-    if (sSpeaker[0] != EOS)
+    if (sPicUp)
+        PictureBox(bx, by, bw, bh);
+    if (sMsgUp && sSpeaker[0] != EOS)
     {
         /* the name box: the speaker on a plate over the box */
         int w = UiText_Width(UI_FONT_NORMAL, sSpeaker, 0) + 16, y = B - UI_FIELD_MSG_H - 8 - 15;
@@ -198,8 +257,9 @@ static void Draw(int t)
                   &(struct UiPaint){band->ink, band->hi, band->lo, 0, 0, NULL, UI_NONE});
         UiText_Draw(UI_FONT_NORMAL, L + 24, y + 1, sSpeaker, UI_P_TEXT_W, band->ink, UI_ALIGN_LEFT, 0);
     }
-    UiField_MessageBox(t, L, R, B, sHasMsg ? sMsg : NULL, sMsgPrinting ? (int)sMsgPrinted : -1, sWaiting, band, h, n,
-                       band->ink, HIT_MESSAGE);
+    if (sMsgUp)
+        UiField_MessageBox(t, L, R, B, sHasMsg ? sMsg : NULL, sMsgPrinting ? (int)sMsgPrinted : -1, sWaiting, band, h, n,
+                           band->ink, HIT_MESSAGE);
     if (sMoneyBox || sCoinBox)
     {
         /* the money window, then the coins under it (top left, where the game puts its boxes) */
@@ -288,17 +348,25 @@ static enum UiPicture Picture(void)
     return UI_PICTURE_HIDE_BG0;
 }
 
-/* the money box's label sprite (the game's sign beside its box) goes with the box */
-static void HideObjects(uint32_t mask[4])
+static void HideTiles(uint32_t mask[4], u16 start, u16 count)
 {
     const struct OamData *oam = (const struct OamData *)OAM;
-    u16 start, count;
 
-    if (!sMoneyBox || !Money_NativeUiLabelTiles(&start, &count))
-        return;
     for (int i = 0; i < 128; i++)
         if (oam[i].tileNum >= start && oam[i].tileNum < start + count)
             mask[i >> 5] |= 1u << (i & 31);
+}
+
+/* the money box's label sprite (the game's sign beside its box) goes with the box; the picture box's Pokémon (a 64 x 64
+ * sprite) is drawn here */
+static void HideObjects(uint32_t mask[4])
+{
+    u16 start, count;
+
+    if (sMoneyBox && Money_NativeUiLabelTiles(&start, &count))
+        HideTiles(mask, start, count);
+    if (sPicUp && sPic.tileNum != 0xFFFF)
+        HideTiles(mask, sPic.tileNum, 64);
 }
 
 const struct UiScreen gUiScreen_FieldText = {

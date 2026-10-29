@@ -1400,6 +1400,24 @@ u32 ScriptMenu_NativeUiList(u32 multichoiceId, const u8 **labels, u32 max)
         labels[i] = sMultichoiceLists[multichoiceId].list[i].text;
     return i;
 }
+
+// The picture box a script shows (showmonpic) until hidemonpic starts to close it. Task_PokemonPicWindow's data:
+// 0 its state (2 and 3 close it), 1 the species, 2 the picture's sprite, 5 the window.
+bool32 ScriptMenu_NativeUiPokemonPic(struct NativeScriptPic *out)
+{
+    u8 taskId = FindTaskIdByFunc(Task_PokemonPicWindow);
+    u8 spriteId;
+
+    if (taskId == TASK_NONE || gTasks[taskId].data[0] >= 2)
+        return FALSE;
+    spriteId = gTasks[taskId].data[2];
+    out->species = gTasks[taskId].data[1];
+    out->windowId = gTasks[taskId].data[5];
+    out->left = gWindows[out->windowId].window.tilemapLeft;
+    out->top = gWindows[out->windowId].window.tilemapTop;
+    out->tileNum = spriteId < MAX_SPRITES ? gSprites[spriteId].oam.tileNum : 0xFFFF;
+    return TRUE;
+}
 #endif // ENABLE_NATIVE_UI
 
 #if defined(DIORAMA_BATTLE_ENV_TEST)

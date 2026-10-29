@@ -934,6 +934,16 @@ struct NativeScriptMenu
 bool32 ScriptMenu_NativeUiState(struct NativeScriptMenu *out);
 /* the rows of any multichoice list as the engine prints them; returns how many */
 u32 ScriptMenu_NativeUiList(u32 multichoiceId, const u8 **labels, u32 max);
+/* the picture box a script shows (showmonpic) until hidemonpic closes it: the Pokémon, its window (the frame's inside,
+ * 8 x 8 tiles from left, top) and the first tile of the picture's sprite (0xFFFF: none) */
+struct NativeScriptPic
+{
+    u16 species;
+    u8 windowId;
+    u8 left, top;
+    u16 tileNum;
+};
+bool32 ScriptMenu_NativeUiPokemonPic(struct NativeScriptPic *out);
 /* the coin box (showcoinsbox) is up */
 bool32 Coins_NativeUiBoxShown(void);
 /* the coin box's window while it is up (WINDOW_NONE: not up) */
