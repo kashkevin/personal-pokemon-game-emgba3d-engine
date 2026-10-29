@@ -14,7 +14,10 @@
  * with the wallet as it is now. The picture box a script shows (showmonpic: a
  * Pokémon in a frame, Birch's Johto starters) is the design's box where the
  * script put it, with the Pokémon's own picture; the Lilycove elevator's "Now
- * on" window beside its floors. Anything else on the field's
+ * on" window beside its floors; the records a script shows and waits on (the
+ * Pokémon Center 2F cable box's battle results, the Contest Lobby's Berry
+ * Blender record, the Battle Frontier's results and Ranking Hall boards) in
+ * the design's box. Anything else on the field's
  * window layer that this does not draw (a list, a PokéNav call, rows a script
  * builds itself) keeps the game's picture. Project-owned.
  */
@@ -52,6 +55,9 @@ static const u8 sText_Next[] = _("Next");
 static const u8 sText_OK[] = _("OK");
 static const u8 sText_No[] = _("No");
 static const u8 sText_Cancel[] = _("Cancel");
+static const u8 sText_Win[] = _("WIN");
+static const u8 sText_Lose[] = _("LOSE");
+static const u8 sText_Draw[] = _("DRAW");
 
 /* the design's wood (pause.js's location sign) for a sign's lines */
 static const struct UiRamp sWood = {UI_HEX(0xECC08A), UI_HEX(0xD29C62), UI_HEX(0xA8703C), UI_HEX(0x4A2A12)};
@@ -71,6 +77,10 @@ static struct NativeScriptPic sPic;
 static bool sPicUp;
 static bool sElevatorUp;
 static const u8 *sElevatorLines[2];
+static bool sResultsUp, sBlenderUp, sBoardUp;
+static u8 sBoardWindow, sBoardW, sBoardH;
+static struct NativeLinkResults sResults;
+static struct NativeBlenderRecords sBlender;
 static uint32_t sPicAt, sPicLast;
 
 /* the picture box's Pokémon as CreateMonSprite_PicBox makes it: not shiny, this personality */
@@ -105,19 +115,38 @@ void UiField_MessageBox(int t, int L, int R, int B, const u8 *msg, int printed, 
 
 /* ---------------------------------------------------------------- detection */
 
-/* the field's windows up besides the message box (the map's name and the name box apart, and the money and coin boxes
- * and the picture box, which this draws) */
+/* the records window a script shows (the cable box's results, the Berry Blender's record), else WINDOW_NONE */
+static u8 RecordsWindow(void)
+{
+    struct NativeLinkResults r;
+    struct NativeBlenderRecords b;
+
+    if (BattleRecords_NativeUiLinkResults(&r))
+        return r.windowId;
+    u8 id, w, h;
+
+    if (BerryBlender_NativeUiRecords(&b))
+        return b.windowId;
+    if (FrontierUtil_NativeUiRecordsWindow(&id, &w, &h))
+        return id;
+    return WINDOW_NONE;
+}
+
+/* the field's windows up besides the message box (the map's name and the name box apart, and the money and coin boxes,
+ * the picture box, the elevator's floor and the records, which this draws) */
 static int OtherWindows(u8 picture)
 {
     u8 popup = GetMapNamePopUpWindowId();
     u32 namebox = GetNameboxWindowId();
     u8 money = Money_NativeUiBoxWindow(), coins = Coins_NativeUiBoxWindow(), elevator = WINDOW_NONE;
+    u8 records = RecordsWindow();
     const u8 *lines[2];
     int n = 0;
 
     FieldSpecials_NativeUiElevatorFloor(&elevator, &lines[0], &lines[1]);
     for (u32 i = 1; i < WINDOWS_MAX; i++)
-        if (i != popup && i != namebox && i != money && i != coins && i != picture && i != elevator && Window_NativeUiShown(i))
+        if (i != popup && i != namebox && i != money && i != coins && i != picture && i != elevator && i != records
+         && Window_NativeUiShown(i))
             n++;
     return n;
 }
@@ -142,9 +171,9 @@ static bool Detect(void)
 
     if (gMain.callback2 != CB2_Overworld || IsMatchCallTaskActive())
         return false;
-    /* a message, or a picture box alone (before its question, after it) */
+    /* a message, or a picture box alone (before its question, after it), or the records a script waits on */
     picUp = ScriptMenu_NativeUiPokemonPic(&pic);
-    if (!Window_NativeUiShown(0) && !picUp)
+    if (!Window_NativeUiShown(0) && !picUp && RecordsWindow() == WINDOW_NONE)
         return false;
     MenuState(&m);
     /* rows a script builds itself are not listed: the game's picture */
@@ -159,7 +188,12 @@ static void Capture(void)
     bool8 active = FALSE;
 
     MenuState(&sMenu);
-    sMsgUp = Window_NativeUiShown(0);
+    sResultsUp = BattleRecords_NativeUiLinkResults(&sResults);
+    sBlenderUp = !sResultsUp && BerryBlender_NativeUiRecords(&sBlender);
+    sBoardUp = !sResultsUp && !sBlenderUp && FrontierUtil_NativeUiRecordsWindow(&sBoardWindow, &sBoardW, &sBoardH);
+    /* a records window over the message window's corner leaves its own tiles there: then the message window is up
+     * only while its own tiles are */
+    sMsgUp = RecordsWindow() != WINDOW_NONE ? Window_NativeUiOnScreen(0) : Window_NativeUiShown(0);
     sHasMsg = sMsgUp && TextPrinter_NativeUiWindowText(0, sMsg, sizeof(sMsg), &sMsgPrinted, &active);
     sMsgPrinting = sHasMsg && active;
     sWaiting = sMenu.kind == NATIVE_SCRIPT_MENU_NONE
@@ -233,6 +267,128 @@ static void PictureBox(int bx, int by, int bw, int bh)
     UiG_Restore();
 }
 
+/* an engine string's lines (the game's newlines), each centred on cx */
+static void CentredLines(int cx, int y, const u8 *s, int lineH)
+{
+    while (s != NULL && *s != EOS)
+    {
+        UiText_Draw(UI_FONT_NORMAL, cx, y, s, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_CENTER, 0);
+        while (*s != EOS && *s != CHAR_NEWLINE)
+            s++;
+        if (*s == CHAR_NEWLINE)
+            s++;
+        y += lineH;
+    }
+}
+
+static int Number(int xRight, int y, u32 value)
+{
+    u8 text[8];
+
+    text[0] = EOS;
+    UiText_AppendNumber(text, sizeof(text), (long)value, 1, false);
+    return UiText_Draw(UI_FONT_NORMAL, xRight, y, text, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_RIGHT, 0);
+}
+
+/* the cable box's battle results where the game puts its window (near the whole screen): the title, the totals, and
+ * a row for each of the last five players, the game's dashes for a row no one is on */
+static void LinkResults(int L, int R, int T, const struct UiRamp *band)
+{
+    int w = 448, h = 244, x = ((L + R) >> 1) - (w >> 1), y = T + 12, b[4];
+    int colW = x + 236, colL = x + 320, colD = x + 404;
+
+    UiW_DialogBox(x, y, w, h, band, UI_NONE, b);
+    UiG_Hit(HIT_MESSAGE, 0, x, y, w, h);
+    CentredLines(x + (w >> 1), y + 8, sResults.title, 18);
+    CentredLines(x + (w >> 1), y + 30, sResults.total, 18);
+    UiText_Draw(UI_FONT_NORMAL, colW, y + 62, sText_Win, UI_P_TEXT_MUTED, UI_P_TEXT_SH, UI_ALIGN_RIGHT, 0);
+    UiText_Draw(UI_FONT_NORMAL, colL, y + 62, sText_Lose, UI_P_TEXT_MUTED, UI_P_TEXT_SH, UI_ALIGN_RIGHT, 0);
+    UiText_Draw(UI_FONT_NORMAL, colD, y + 62, sText_Draw, UI_P_TEXT_MUTED, UI_P_TEXT_SH, UI_ALIGN_RIGHT, 0);
+    UiG_HLine(x + 16, y + 80, w - 32, UI_P_TEXT_MUTED);
+    for (int i = 0; i < NATIVE_LINK_RESULTS; i++)
+    {
+        int ry = y + 88 + i * 28;
+
+        if (!sResults.used[i])
+        {
+            UiText_Draw(UI_FONT_NORMAL, x + 24, ry, sResults.dashName, UI_P_TEXT_MUTED, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+            UiText_Draw(UI_FONT_NORMAL, colW, ry, sResults.dashScore, UI_P_TEXT_MUTED, UI_P_TEXT_SH, UI_ALIGN_RIGHT, 0);
+            UiText_Draw(UI_FONT_NORMAL, colL, ry, sResults.dashScore, UI_P_TEXT_MUTED, UI_P_TEXT_SH, UI_ALIGN_RIGHT, 0);
+            UiText_Draw(UI_FONT_NORMAL, colD, ry, sResults.dashScore, UI_P_TEXT_MUTED, UI_P_TEXT_SH, UI_ALIGN_RIGHT, 0);
+            continue;
+        }
+        UiText_Draw(UI_FONT_NORMAL, x + 24, ry, sResults.names[i], UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+        Number(colW, ry, sResults.wins[i]);
+        Number(colL, ry, sResults.losses[i]);
+        Number(colD, ry, sResults.draws[i]);
+    }
+}
+
+/* the Berry Blender's record where the game puts its window: the title, and each count of players with its speed */
+static void BlenderRecords(int L, int R, int T, const struct UiRamp *band)
+{
+    int w = 320, h = 156, x = ((L + R) >> 1) - (w >> 1), y = T + 56, b[4];
+    const u8 *p = sBlender.players;
+
+    UiW_DialogBox(x, y, w, h, band, UI_NONE, b);
+    UiG_Hit(HIT_MESSAGE, 0, x, y, w, h);
+    CentredLines(x + (w >> 1), y + 8, sBlender.title, 18);
+    UiG_HLine(x + 16, y + 50, w - 32, UI_P_TEXT_MUTED);
+    for (int i = 0; i < NATIVE_BLENDER_RECORDS; i++)
+    {
+        int ry = y + 60 + i * 28;
+
+        if (p != NULL && *p != EOS)
+        {
+            UiText_Draw(UI_FONT_NORMAL, x + 24, ry, p, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+            while (*p != EOS && *p != CHAR_NEWLINE)
+                p++;
+            if (*p == CHAR_NEWLINE)
+                p++;
+        }
+        UiText_Draw(UI_FONT_NORMAL, x + w - 24, ry, sBlender.speeds[i], UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_RIGHT, 0);
+    }
+}
+
+/* a line of the game's own hyphens: a rule */
+static bool IsHyphens(const u8 *s)
+{
+    if (*s != CHAR_HYPHEN)
+        return false;
+    while (*s == CHAR_HYPHEN)
+        s++;
+    return *s == EOS;
+}
+
+/* a Battle Frontier board (a facility's results, the link contests', the Ranking Hall's): the design's box where the
+ * game puts its window, twice its size, and each line the game printed on it where the game laid it out, twice as far
+ * in; a line the game centres in the window stays centred, one it ends at the right stays ending there, a row of
+ * hyphens is a rule */
+static void FrontierBoard(int L, int R, int T, const struct UiRamp *band)
+{
+    const struct NativeUiPrinted *p;
+    u32 n = TextPrinter_NativeUiTranscript(sBoardWindow, &p);
+    int gw = sBoardW * 8, gh = sBoardH * 8, w = gw * 2 + 16, h = gh * 2 + 16;
+    int x = ((L + R) >> 1) - (w >> 1), y = T + 12, b[4], ix = x + 8, iy = y + 8;
+
+    UiW_DialogBox(x, y, w, h, band, UI_NONE, b);
+    UiG_Hit(HIT_MESSAGE, 0, x, y, w, h);
+    for (u32 i = 0; i < n; i++)
+    {
+        int font = p[i].fontId == FONT_SMALL ? UI_FONT_SMALL : p[i].fontId == FONT_NARROW ? UI_FONT_NARROW : UI_FONT_NORMAL;
+        int sw = UiText_Width(font, p[i].text, 0), ty = iy + p[i].y * 2;
+
+        if (IsHyphens(p[i].text))
+            UiG_HLine(ix + p[i].x * 2, ty + 8, w - 16 - p[i].x * 4, UI_P_TEXT_MUTED);
+        else if (abs(p[i].x * 2 + sw - gw) <= 4 || abs(p[i].x * 2 + sw - (DISPLAY_WIDTH - 16)) <= 4) /* PrintAligned's */
+            UiText_Draw(font, x + (w >> 1), ty, p[i].text, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_CENTER, 0);
+        else if (p[i].x > gw / 2 && p[i].x + sw >= gw - 12)
+            UiText_Draw(font, ix + (p[i].x + sw) * 2, ty, p[i].text, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_RIGHT, 0);
+        else
+            UiText_Draw(font, ix + p[i].x * 2, ty, p[i].text, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+    }
+}
+
 static void Draw(int t)
 {
     struct UiRamp field = UiW_FieldBand();
@@ -287,6 +443,21 @@ static void Draw(int t)
             value[0] = EOS;
             UiText_AppendNumber(value, sizeof(value), (long)sCoins, 1, true);
             UiItems_MoneyBox(L + 8, y, 148, "COINS", value, band->ink);
+        }
+    }
+    if (sResultsUp || sBlenderUp || sBoardUp)
+    {
+        if (sResultsUp)
+            LinkResults(L, R, by, band);
+        else if (sBlenderUp)
+            BlenderRecords(L, R, by, band);
+        else
+            FrontierBoard(L, R, by, band);
+        if (!sMsgUp && sWaiting)
+        {
+            struct UiHintItem ok = {UI_ACT_CONFIRM, sText_OK};
+
+            UiW_Hints(R - 8 - UiW_HintsWidth(&ok, 1, 10), B - 28, &ok, 1, true, 10);
         }
     }
     if (sElevatorUp)

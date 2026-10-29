@@ -518,6 +518,10 @@ void FillWindowPixelBuffer(u32 windowId, u8 fillValue)
 {
     int fillSize = gWindows[windowId].window.width * gWindows[windowId].window.height;
     CpuFastFill8(fillValue, gWindows[windowId].tileData, 32 * fillSize);
+#ifdef ENABLE_NATIVE_UI
+    TextPrinter_NativeUiClearTranscript(windowId); // what was printed on it is gone (src/native_ui: records boards)
+#endif
+#line 496 // gba-line
 }
 
 #define MOVE_TILES_DOWN(a)                                                      \

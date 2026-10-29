@@ -1125,28 +1125,6 @@ static enum Item GetPrizeItemId(void)
 #include "native_ui/ui_engine.h"
 STATIC_ASSERT(NATIVE_HILL_MODES == NUM_TRAINER_HILL_MODES, NativeUiHillModes);
 
-// gText_XMinYDotZSec with these three in its STR_VAR_1..3 (the game's own string vars stay as they are)
-static void NativeUiExpandTime(u8 *dst, u32 size, const u8 *const vars[3])
-{
-    const u8 *src = gText_XMinYDotZSec;
-    u32 n = 0;
-
-    while (*src != EOS && n < size - 1)
-    {
-        if (src[0] == PLACEHOLDER_BEGIN && src[1] >= PLACEHOLDER_ID_STRING_VAR_1 && src[1] <= PLACEHOLDER_ID_STRING_VAR_3)
-        {
-            for (const u8 *v = vars[src[1] - PLACEHOLDER_ID_STRING_VAR_1]; *v != EOS && n < size - 1; v++)
-                dst[n++] = *v;
-            src += 2;
-        }
-        else
-        {
-            dst[n++] = *src++;
-        }
-    }
-    dst[n] = EOS;
-}
-
 // Trainer Hill's time board for the 3D UI (native_ui/screens/ui_hill_board.c): each mode's name and its line as
 // PrintOnTrainerHillRecordsWindow prints it
 void TrainerHill_NativeUiTimes(struct NativeHillBoard *out)
@@ -1168,7 +1146,7 @@ void TrainerHill_NativeUiTimes(struct NativeHillBoard *out)
         ConvertIntToDecimalStringN(v3, secondsFraction, STR_CONV_MODE_LEADING_ZEROS, 2);
         out->modes[i] = sModeStrings[i];
         end = StringCopy(out->times[i], gText_TimeCleared);
-        NativeUiExpandTime(end, sizeof(out->times[i]) - (end - out->times[i]), vars);
+        StringUtil_NativeUiExpandVars(end, sizeof(out->times[i]) - (end - out->times[i]), gText_XMinYDotZSec, vars);
     }
 }
 #endif // ENABLE_NATIVE_UI

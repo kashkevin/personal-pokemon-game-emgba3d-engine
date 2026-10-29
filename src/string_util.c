@@ -845,3 +845,30 @@ u8* const GetStringVar(u8 index)
         return gStringVar1;
     }
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+// For the 3D UI's read-outs: src with these three in its STR_VAR_1..3 (the game's own string vars stay as they are);
+// other placeholders are left out. Returns dst's end.
+u8 *StringUtil_NativeUiExpandVars(u8 *dst, u32 size, const u8 *src, const u8 *const vars[3])
+{
+    u32 n = 0;
+
+    while (*src != EOS && n + 1 < size)
+    {
+        if (src[0] == PLACEHOLDER_BEGIN)
+        {
+            if (src[1] >= PLACEHOLDER_ID_STRING_VAR_1 && src[1] <= PLACEHOLDER_ID_STRING_VAR_3)
+                for (const u8 *v = vars[src[1] - PLACEHOLDER_ID_STRING_VAR_1]; *v != EOS && n + 1 < size; v++)
+                    dst[n++] = *v;
+            src += src[1] != EOS ? 2 : 1;
+        }
+        else
+        {
+            dst[n++] = *src++;
+        }
+    }
+    dst[n] = EOS;
+    return &dst[n];
+}
+#endif // ENABLE_NATIVE_UI

@@ -557,4 +557,55 @@ bool32 BattleRecords_NativeUiHillBoard(struct NativeHillBoard *out)
     return FALSE;
 #endif
 }
+
+// The cable box's link battle results (ShowLinkBattleRecords) for the 3D UI's field text (ui_field_text.c): while
+// gRecordsWindowId is that window and up, what PrintLinkBattleWinsLossesDraws and PrintLinkBattleRecord print
+bool32 BattleRecords_NativeUiLinkResults(struct NativeLinkResults *out)
+{
+#if FREE_LINK_BATTLE_RECORDS == FALSE
+    const struct WindowTemplate *w;
+    u8 id = gRecordsWindowId, v1[8], v2[8], v3[8];
+    const u8 *const vars[3] = {v1, v2, v3};
+
+    if (id >= WINDOWS_MAX || !Window_NativeUiShown(id))
+        return FALSE;
+    w = &gWindows[id].window;
+    if (w->tilemapLeft != sLinkBattleRecordsWindow.tilemapLeft || w->tilemapTop != sLinkBattleRecordsWindow.tilemapTop
+     || w->width != sLinkBattleRecordsWindow.width || w->height != sLinkBattleRecordsWindow.height
+     || w->baseBlock != sLinkBattleRecordsWindow.baseBlock)
+        return FALSE;
+    out->windowId = id;
+    StringExpandPlaceholders(out->title, gText_PlayersBattleResults);
+    // the Ranking Hall's window (frontier_util.c) has the same place and size: this one's first line is its title
+    {
+        const struct NativeUiPrinted *printed;
+
+        if (TextPrinter_NativeUiTranscript(id, &printed) == 0 || StringCompare(printed[0].text, out->title) != 0)
+            return FALSE;
+    }
+    ConvertIntToDecimalStringN(v1, GetGameStat(GAME_STAT_LINK_BATTLE_WINS), STR_CONV_MODE_LEFT_ALIGN, 4);
+    ConvertIntToDecimalStringN(v2, GetGameStat(GAME_STAT_LINK_BATTLE_LOSSES), STR_CONV_MODE_LEFT_ALIGN, 4);
+    ConvertIntToDecimalStringN(v3, GetGameStat(GAME_STAT_LINK_BATTLE_DRAWS), STR_CONV_MODE_LEFT_ALIGN, 4);
+    StringUtil_NativeUiExpandVars(out->total, sizeof(out->total), gText_TotalRecordWLD, vars);
+    out->dashName = sText_DashesNoPlayer;
+    out->dashScore = sText_DashesNoScore;
+    for (u32 i = 0; i < LINK_B_RECORDS_COUNT && i < NATIVE_LINK_RESULTS; i++)
+    {
+        const struct LinkBattleRecord *record = &gSaveBlock1Ptr->linkBattleRecords.entries[i];
+
+        out->used[i] = record->wins != 0 || record->losses != 0 || record->draws != 0;
+        StringFillWithTerminator(out->names[i], sizeof(out->names[i]));
+        if (!out->used[i])
+            continue;
+        StringCopyN(out->names[i], record->name, sizeof(out->names[i]) - 1);
+        ConvertInternationalString(out->names[i], gSaveBlock1Ptr->linkBattleRecords.languages[i]);
+        out->wins[i] = record->wins;
+        out->losses[i] = record->losses;
+        out->draws[i] = record->draws;
+    }
+    return TRUE;
+#else
+    return FALSE;
+#endif
+}
 #endif // ENABLE_NATIVE_UI

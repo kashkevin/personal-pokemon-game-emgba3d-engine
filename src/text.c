@@ -475,6 +475,7 @@ void AddSpriteTextPrinterParameterized6(u8 spriteId, u8 fontId, u8 left, u8 top,
 static const u8 *sNativeUiPrinterStart[WINDOWS_MAX];
 static u8 sNativeUiPrinterText[WINDOWS_MAX][NATIVE_UI_TEXT_COPY];
 static void NativeUiNotePrinter(u8 windowId, const u8 *str);
+static void NativeUiNoteTranscript(const struct TextPrinterTemplate *printerTemplate);
 #endif
 #line 469
 bool32 AddTextPrinter(struct TextPrinterTemplate *printerTemplate, u8 speed, void (*callback)(struct TextPrinterTemplate *, u16))
@@ -483,7 +484,10 @@ bool32 AddTextPrinter(struct TextPrinterTemplate *printerTemplate, u8 speed, voi
         return FALSE;
 #ifdef ENABLE_NATIVE_UI
     if (printerTemplate->type == WINDOW_TEXT_PRINTER && printerTemplate->windowId < WINDOWS_MAX)
+    {
         NativeUiNotePrinter(printerTemplate->windowId, printerTemplate->currentChar);
+        NativeUiNoteTranscript(printerTemplate);
+    }
 #endif
 #line 473
 
@@ -2924,6 +2928,44 @@ void DeactivateSingleTextPrinter(u32 id, enum TextPrinterType type)
 
 _Static_assert(NATIVE_UI_TEXT_COPY == UI_MESSAGE_COPY, "a window's text copy holds what a screen's message buffer does");
 
+// Every string printed on a window since it was made or last cleared (FillWindowPixelBuffer), where it starts:
+// a records board's lines (TextPrinter_NativeUiTranscript). The first NATIVE_UI_TRANSCRIPT of them.
+static struct NativeUiPrinted sNativeUiTranscript[WINDOWS_MAX][NATIVE_UI_TRANSCRIPT];
+static u8 sNativeUiTranscriptCount[WINDOWS_MAX];
+
+static void NativeUiNoteTranscript(const struct TextPrinterTemplate *printerTemplate)
+{
+    u8 windowId = printerTemplate->windowId;
+    struct NativeUiPrinted *p;
+    const u8 *str = printerTemplate->currentChar;
+    u32 i = 0;
+
+    if (sNativeUiTranscriptCount[windowId] >= NATIVE_UI_TRANSCRIPT || str == NULL)
+        return;
+    p = &sNativeUiTranscript[windowId][sNativeUiTranscriptCount[windowId]++];
+    p->x = printerTemplate->x;
+    p->y = printerTemplate->y;
+    p->fontId = printerTemplate->fontId;
+    for (; i < sizeof(p->text) - 1 && str[i] != EOS; i++)
+        p->text[i] = str[i];
+    p->text[i] = EOS;
+}
+
+// window.c: a window's pixels cleared (FillWindowPixelBuffer): what was printed on it is gone
+void TextPrinter_NativeUiClearTranscript(u32 windowId)
+{
+    if (windowId < WINDOWS_MAX)
+        sNativeUiTranscriptCount[windowId] = 0;
+}
+
+u32 TextPrinter_NativeUiTranscript(u8 windowId, const struct NativeUiPrinted **out)
+{
+    if (windowId >= WINDOWS_MAX)
+        return 0;
+    *out = sNativeUiTranscript[windowId];
+    return sNativeUiTranscriptCount[windowId];
+}
+
 static void NativeUiNotePrinter(u8 windowId, const u8 *str)
 {
     u32 i = 0;
@@ -2948,6 +2990,7 @@ void TextPrinter_NativeUiForgetWindow(u32 windowId)
             continue;
         sNativeUiPrinterStart[i] = NULL;
         sNativeUiPrinterText[i][0] = EOS;
+        sNativeUiTranscriptCount[i] = 0;
     }
 }
 

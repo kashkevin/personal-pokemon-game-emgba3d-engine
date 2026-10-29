@@ -3440,3 +3440,36 @@ static void Task_BannedSpeciesWindowInput(u8 taskId)
 #undef tArrowTaskId
 #undef tScrollOffset
 #undef tListPointerElemId
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+// The Battle Frontier's records windows (gRecordsWindowId: a facility's results, the link contests', the Ranking
+// Hall's) for the 3D UI's field text (ui_field_text.c): which is up and its size in tiles; its lines are what was
+// printed on it (text.c's transcript)
+bool32 FrontierUtil_NativeUiRecordsWindow(u8 *windowId, u8 *width, u8 *height)
+{
+    static const struct WindowTemplate *const sTemplates[] = {
+        &sFrontierResultsWindowTemplate, &sLinkContestResultsWindowTemplate, &sRankingHallRecordsWindowTemplate,
+    };
+    const struct WindowTemplate *w;
+    u8 id = gRecordsWindowId;
+
+    if (id >= WINDOWS_MAX || !Window_NativeUiShown(id))
+        return FALSE;
+    w = &gWindows[id].window;
+    for (u32 i = 0; i < ARRAY_COUNT(sTemplates); i++)
+    {
+        const struct WindowTemplate *t = sTemplates[i];
+
+        if (w->tilemapLeft == t->tilemapLeft && w->tilemapTop == t->tilemapTop && w->width == t->width
+         && w->height == t->height && w->baseBlock == t->baseBlock)
+        {
+            *windowId = id;
+            *width = w->width;
+            *height = w->height;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+#endif // ENABLE_NATIVE_UI

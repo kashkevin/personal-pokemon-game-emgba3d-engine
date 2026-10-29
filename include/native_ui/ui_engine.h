@@ -1069,6 +1069,35 @@ struct NativeHillBoard
 };
 bool32 BattleRecords_NativeUiHillBoard(struct NativeHillBoard *out);
 void TrainerHill_NativeUiTimes(struct NativeHillBoard *out);
+/* The records windows a script shows over the field and waits for a button on (gRecordsWindowId): the Pokémon
+ * Center 2F cable box's link battle results (battle_records.c) and the Contest Lobby's Berry Blender record
+ * (berry_blender.c), as the game prints them; an unused results row prints the game's dashes */
+#define NATIVE_LINK_RESULTS 5
+struct NativeLinkResults
+{
+    u8 windowId;
+    u8 title[48];      /* "{PLAYER}'s BATTLE RESULTS" */
+    u8 total[48];      /* "TOTAL RECORD W:.. L:.. D:.." */
+    const u8 *dashName, *dashScore;
+    bool8 used[NATIVE_LINK_RESULTS];
+    u8 names[NATIVE_LINK_RESULTS][8];
+    u16 wins[NATIVE_LINK_RESULTS], losses[NATIVE_LINK_RESULTS], draws[NATIVE_LINK_RESULTS];
+};
+bool32 BattleRecords_NativeUiLinkResults(struct NativeLinkResults *out);
+#define NATIVE_BLENDER_RECORDS 3
+struct NativeBlenderRecords
+{
+    u8 windowId;
+    const u8 *title;   /* "BERRY BLENDER\nMAXIMUM SPEED RECORD!" */
+    const u8 *players; /* "2 PLAYERS\n3 PLAYERS\n4 PLAYERS" */
+    u8 speeds[NATIVE_BLENDER_RECORDS][16];
+};
+bool32 BerryBlender_NativeUiRecords(struct NativeBlenderRecords *out);
+/* the Battle Frontier's records windows (frontier_util.c: a facility's results, the link contests', the Ranking
+ * Hall's) while one is up: its window and size in tiles; its lines are the window's transcript */
+bool32 FrontierUtil_NativeUiRecordsWindow(u8 *windowId, u8 *width, u8 *height);
+/* string_util.c: src with these three in its STR_VAR_1..3, the game's own string vars left as they are */
+u8 *StringUtil_NativeUiExpandVars(u8 *dst, u32 size, const u8 *src, const u8 *const vars[3]);
 /* Easy Chat (easy_chat.c) while its screen is up: the words being edited and every part of the screen as the engine
  * has it. inputState is the screen's own (0 a word, 1 the footer, 2 the keyboard, 3 a group's words, 4 quit?,
  * 5 delete all?, 6 confirm?, 7 a quiz's question, 8 a message, 9 and 10 the Bard's lyrics) */
@@ -1524,6 +1553,18 @@ bool32 TextPrinter_NativeUiWindowWaiting(u8 windowId);
 /* window.c: a window removed forgets its last string (WINDOWS_MAX: every
  * window, as InitWindows sets them up anew) */
 void TextPrinter_NativeUiForgetWindow(u32 windowId);
+/* Every string printed on a window since it was made or last cleared (FillWindowPixelBuffer; the first
+ * NATIVE_UI_TRANSCRIPT of them): where each starts in the window (pixels), its font and its text - a records board's
+ * lines as the game lays them out. Returns how many; window.c clears a window's when its pixels are filled. */
+#define NATIVE_UI_TRANSCRIPT 24
+struct NativeUiPrinted
+{
+    s16 x, y;
+    u8 fontId;
+    u8 text[64];
+};
+u32 TextPrinter_NativeUiTranscript(u8 windowId, const struct NativeUiPrinted **out);
+void TextPrinter_NativeUiClearTranscript(u32 windowId);
 
 /* window.c: the window's tiles are on its background now (shown, not cleared) */
 bool32 Window_NativeUiShown(u8 windowId);

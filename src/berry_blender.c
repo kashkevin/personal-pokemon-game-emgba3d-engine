@@ -3900,3 +3900,36 @@ static bool32 PrintMessage(s16 *textState, const u8 *string, s32 textSpeed)
 
     return FALSE;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+// The Contest Lobby's Berry Blender record (ShowBerryBlenderRecordWindow) for the 3D UI's field text
+// (ui_field_text.c): while gRecordsWindowId is that window and up, its lines as it prints them
+bool32 BerryBlender_NativeUiRecords(struct NativeBlenderRecords *out)
+{
+    const struct WindowTemplate *w;
+    u8 id = gRecordsWindowId;
+
+    if (id >= WINDOWS_MAX || !Window_NativeUiShown(id))
+        return FALSE;
+    w = &gWindows[id].window;
+    if (w->tilemapLeft != sBlenderRecordWindowTemplate.tilemapLeft || w->tilemapTop != sBlenderRecordWindowTemplate.tilemapTop
+     || w->width != sBlenderRecordWindowTemplate.width || w->height != sBlenderRecordWindowTemplate.height
+     || w->baseBlock != sBlenderRecordWindowTemplate.baseBlock)
+        return FALSE;
+    out->windowId = id;
+    out->title = sText_BlenderMaxSpeedRecord;
+    out->players = sText_234Players;
+    for (u32 i = 0; i < NUM_SCORE_TYPES && i < NATIVE_BLENDER_RECORDS; i++)
+    {
+        u32 record = gSaveBlock1Ptr->berryBlenderRecords[i];
+        u8 *txtPtr;
+
+        txtPtr = ConvertIntToDecimalStringN(out->speeds[i], record / 100, STR_CONV_MODE_RIGHT_ALIGN, 3);
+        txtPtr = StringAppend(txtPtr, sText_Dot);
+        txtPtr = ConvertIntToDecimalStringN(txtPtr, record % 100, STR_CONV_MODE_LEADING_ZEROS, 2);
+        StringAppend(txtPtr, sText_RPM);
+    }
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI
