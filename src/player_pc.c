@@ -1477,8 +1477,9 @@ static void ItemStorage_ReturnToListInput(u8 taskId)
 
 // The native PC UI (src/native_ui/screens/ui_storage_menus.c) draws the
 // player's PC's two menus (ITEM STORAGE, MAILBOX...; WITHDRAW ITEM...) and
-// their lines; every button and rule stays here. The item lists, the mailbox
-// and the decorations keep the game's picture.
+// their lines; every button and rule stays here. The item lists and the
+// mailbox have their own screens (below); the decorations keep the game's
+// picture.
 STATIC_ASSERT(ARRAY_COUNT(sItemStorage_MenuActions) <= NATIVE_PC_MENU_MAX, NativeUiItemStorageRows);
 
 bool32 PlayerPC_NativeUiState(struct NativePcMenu *out)
@@ -1622,5 +1623,51 @@ void PlayerPC_NativeUiItemTiles(u32 mask[32])
     NativeUiMarkTag(mask, TAG_ITEM_ICON);
     NativeUiMarkTag(mask, TAG_SCROLL_ARROW);
     NativeUiMarkTag(mask, MenuHelpers_NativeUiSwapLineTag());
+}
+
+// The native MAILBOX (src/native_ui/screens/ui_pc_mailbox.c): the PC's Mail as the list shows them (the senders'
+// names, then CANCEL), the cursor, what to do with the chosen one (READ, MOVE TO BAG, GIVE, CANCEL), the YES / NO
+// before its words are lost and the lines in between. Every button stays here.
+STATIC_ASSERT(NATIVE_MAILBOX_MAX == MAIL_COUNT - PARTY_SIZE, NativeUiMailboxCount);
+STATIC_ASSERT(ARRAY_COUNT(gMailboxMailOptions) <= NATIVE_MAILBOX_OPTIONS_MAX, NativeUiMailboxOptions);
+
+bool32 PlayerPC_NativeUiMailbox(struct NativeMailbox *out)
+{
+    void (*next)(u8) = MenuHelpers_NativeUiMessageNext();
+    u32 i;
+
+    memset(out, 0, sizeof(*out));
+    if (FuncIsActiveTask(Mailbox_ProcessInput))
+        out->phase = NATIVE_MAILBOX_LIST;
+    else if (FuncIsActiveTask(Mailbox_MailOptionsProcessInput))
+        out->phase = NATIVE_MAILBOX_OPTIONS;
+    else if (FuncIsActiveTask(Mailbox_HandleConfirmMoveToBag))
+        out->phase = NATIVE_MAILBOX_CONFIRM;
+    else if (next == Mailbox_PrintMailOptions || next == Mailbox_AskConfirmMoveToBag || next == Mailbox_Cancel)
+        out->phase = NATIVE_MAILBOX_MESSAGE;
+    else if (FuncIsActiveTask(Mailbox_HandleReturnToProcessInput) || FuncIsActiveTask(Mailbox_PrintWhatToDoWithPlayerMailText)
+          || FuncIsActiveTask(Mailbox_PrintMailOptions) || FuncIsActiveTask(Mailbox_AskConfirmMoveToBag))
+        out->phase = NATIVE_MAILBOX_OPENING;
+    else
+        return FALSE;
+    out->count = min(gPlayerPCItemPageInfo.count, NATIVE_MAILBOX_MAX);
+    for (i = 0; i < out->count; i++)
+    {
+        const struct Mail *mail = &gSaveBlock1Ptr->mail[PARTY_SIZE + i];
+
+        StringCopyN(out->names[i], mail->playerName, PLAYER_NAME_LENGTH);
+        out->names[i][PLAYER_NAME_LENGTH] = EOS;
+        ConvertInternationalPlayerName(out->names[i]);
+        out->items[i] = mail->itemId;
+        memcpy(out->words[i], mail->words, sizeof(out->words[i]));
+    }
+    out->cursor = min(gPlayerPCItemPageInfo.itemsAbove + gPlayerPCItemPageInfo.cursorPos, out->count);
+    if (out->phase == NATIVE_MAILBOX_OPTIONS || out->phase == NATIVE_MAILBOX_CONFIRM)
+        out->menuCursor = Menu_GetCursorPos();
+    out->optionCount = ARRAY_COUNT(gMailboxMailOptions);
+    for (i = 0; i < out->optionCount; i++)
+        out->options[i] = gMailboxMailOptions[i].text;
+    out->ready = out->phase != NATIVE_MAILBOX_OPENING && !gPaletteFade.active;
+    return TRUE;
 }
 #endif // ENABLE_NATIVE_UI

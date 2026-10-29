@@ -35,6 +35,7 @@
 #include "daycare.h"
 #include "pokedex.h"
 #include "mail.h"
+#include "string_util.h"
 #include "pokemon_storage_system.h"
 #include "platform/mp_breeding.h"
 #include "platform/mp_trade_evolution.h"
@@ -1103,6 +1104,49 @@ static void SetUpTestDaycare(void)
             MPDaycare_TestProduceEgg();
         TestLog("Battle env test: breed daycare: an Egg waits %d (%u queued)", FlagGet(FLAG_PENDING_DAYCARE_EGG),
                 (unsigned)MPDaycare_QueueCount());
+    }
+}
+
+/* PKMN_TEST_PC_MAIL=<item>[:<name>],...: those Mail in the player's PC's MAILBOX, written with the test's nine words
+ * and from that name (the player's by default) - the native mailbox's checks */
+static void SetUpTestPcMail(void)
+{
+    static const u16 sWords[MAIL_WORDS_COUNT] = {
+        EC_WORD_HELLO, EC_WORD_FRIEND, EC_WORD_LET_S, EC_WORD_TRADE, EC_WORD_POKEMON, EC_WORD_TOGETHER,
+        EC_WORD_SEE_YA, EC_WORD_SOON, EC_WORD_AWESOME,
+    };
+    const char *p = getenv("PKMN_TEST_PC_MAIL");
+    int slot = PARTY_SIZE;
+
+    while (p != NULL && *p != '\0' && slot < MAIL_COUNT)
+    {
+        char *end;
+        long item = strtol(p, &end, 0);
+        struct Mail *mail = &gSaveBlock1Ptr->mail[slot];
+        int i;
+
+        if (end == p)
+            break;
+        p = end;
+        for (i = 0; i < MAIL_WORDS_COUNT; i++)
+            mail->words[i] = sWords[i];
+        StringCopyN(mail->playerName, gSaveBlock2Ptr->playerName, PLAYER_NAME_LENGTH);
+        mail->playerName[PLAYER_NAME_LENGTH] = EOS;
+        if (*p == ':')
+        {
+            for (i = 0, p++; i < PLAYER_NAME_LENGTH && *p != ',' && *p != '\0'; i++, p++)
+                mail->playerName[i] = *p >= 'A' && *p <= 'Z' ? CHAR_A + (*p - 'A') : *p >= 'a' && *p <= 'z' ? CHAR_a + (*p - 'a')
+                                    : CHAR_SPACE;
+            mail->playerName[i] = EOS;
+        }
+        for (i = 0; i < TRAINER_ID_LENGTH; i++)
+            mail->trainerId[i] = gSaveBlock2Ptr->playerTrainerId[i];
+        mail->species = SPECIES_BULBASAUR;
+        mail->itemId = item;
+        TestLog("Battle env test: PC mail %d: item %ld", slot - PARTY_SIZE, item);
+        slot++;
+        if (*p == ',')
+            p++;
     }
 }
 
@@ -3440,6 +3484,7 @@ void DioramaBattleEnvTest_FieldTick(void)
         if (!s.bagDone)
         {
             SetUpTestBag();
+            SetUpTestPcMail();
             s.bagDone = true;
         }
         if (s.warpX >= 0 && s.warpY >= 0)

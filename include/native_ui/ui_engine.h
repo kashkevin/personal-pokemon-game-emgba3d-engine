@@ -815,6 +815,33 @@ struct NativePcItems
 bool32 PlayerPC_NativeUiItems(struct NativePcItems *out);
 /* the sheets of the lists' own sprites (the item's icon, the scroll arrows, the move line) */
 void PlayerPC_NativeUiItemTiles(u32 mask[32]);
+/* the player's PC's MAILBOX (player_pc.c): the PC's Mail as its list shows it, what to do with one, the YES / NO
+ * before its words are lost and the lines in between */
+enum NativeMailboxPhase
+{
+    NATIVE_MAILBOX_NONE,
+    NATIVE_MAILBOX_OPENING,      /* the list is put up (again), or the chosen Mail's line is about to print */
+    NATIVE_MAILBOX_LIST,         /* the list reads buttons */
+    NATIVE_MAILBOX_MESSAGE,      /* a line: what to do with it, its words will be lost, moved to the Bag, the Bag full */
+    NATIVE_MAILBOX_OPTIONS,      /* READ, MOVE TO BAG, GIVE, CANCEL */
+    NATIVE_MAILBOX_CONFIRM,      /* the YES / NO */
+};
+#define NATIVE_MAILBOX_MAX 10    /* MAIL_COUNT - PARTY_SIZE */
+#define NATIVE_MAILBOX_OPTIONS_MAX 4
+struct NativeMailbox
+{
+    u8 phase;                    /* enum NativeMailboxPhase */
+    bool8 ready;
+    u8 count;                    /* the Mail; the list's last row (count) is CANCEL */
+    u8 cursor;
+    u8 menuCursor;               /* OPTIONS, CONFIRM */
+    u8 optionCount;
+    const u8 *options[NATIVE_MAILBOX_OPTIONS_MAX];
+    u8 names[NATIVE_MAILBOX_MAX][12];
+    u16 items[NATIVE_MAILBOX_MAX];
+    u16 words[NATIVE_MAILBOX_MAX][9];
+};
+bool32 PlayerPC_NativeUiMailbox(struct NativeMailbox *out);
 /* script_menu.c: the PC's own multichoice (MULTI_PC) as the engine prints it;
  * {PLAYER}'s PC is expanded into playersPc (32 bytes); returns how many rows */
 u32 ScriptMenu_NativeUiPcRows(const u8 **labels, u32 max, u8 *playersPc);
