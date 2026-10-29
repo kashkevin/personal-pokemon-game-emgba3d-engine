@@ -218,3 +218,28 @@ static void InitClearSaveDataScreenWindows(void)
     LoadWindowGfx(0, 0, 2, BG_PLTT_ID(14));
     LoadPalette(gStandardMenuPalette, BG_PLTT_ID(15), PLTT_SIZE_4BPP);
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_clear_save.c) draws the
+// question in the new design and follows this state; the input stays here.
+bool32 ClearSaveData_NativeUiState(u8 *phase, u8 *cursor)
+{
+    *phase = NATIVE_CLEAR_SAVE_BUSY;
+    *cursor = 1;
+    if (gMain.callback2 != MainCB && gMain.callback2 != CB2_InitClearSaveDataScreen
+     && gMain.callback2 != CB2_FadeAndDoReset)
+        return FALSE;
+    if (gMain.callback2 == MainCB && FuncIsActiveTask(Task_ClearSaveDataScreenYesNoChoice) && !gPaletteFade.active)
+    {
+        *phase = NATIVE_CLEAR_SAVE_ASKING;
+        *cursor = Menu_GetCursorPos();
+    }
+    else if (FuncIsActiveTask(Task_ClearSaveData))
+    {
+        *phase = NATIVE_CLEAR_SAVE_CLEARING;
+    }
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

@@ -1384,6 +1384,15 @@ struct NativeMysteryGift
     bool8 ready;
 };
 bool32 MysteryGift_NativeUiState(struct NativeMysteryGift *out);
+/* The title screen's clear-save question (clear_save_data_screen.c: UP, SELECT and B held at the title): its line
+ * (window 0's), the YES / NO while it waits (cursor: YES 0, NO 1; the game starts on NO), the clearing after YES */
+enum NativeClearSavePhase
+{
+    NATIVE_CLEAR_SAVE_BUSY,
+    NATIVE_CLEAR_SAVE_ASKING,
+    NATIVE_CLEAR_SAVE_CLEARING,
+};
+bool32 ClearSaveData_NativeUiState(u8 *phase, u8 *cursor);
 struct ListMenuItem;
 bool32 ListMenu_NativeUiMysteryGiftList(const struct ListMenuItem **items, u8 *count, u8 *cursor);
 /* the Battle Frontier's records windows (frontier_util.c: a facility's results, the link contests', the Ranking

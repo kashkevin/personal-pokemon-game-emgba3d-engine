@@ -1319,6 +1319,7 @@ static void OpenTestFactory(bool swap)
 void CallBattleDomeFunction(void);   /* battle_dome.c: a script special (no header declares it) */
 void CB2_InitMysteryGift(void);       /* mystery_gift_menu.c (the main menu's MYSTERY GIFT) */
 void CB2_InitEReader(void);           /* mystery_gift_menu.c (the main menu's MYSTERY EVENTS) */
+void CB2_InitClearSaveDataScreen(void); /* clear_save_data_screen.c (the title's UP + SELECT + B) */
 
 static void TestDomeFunction(u16 function)
 {
@@ -4035,7 +4036,7 @@ bool16 ScriptMenu_CreateStartMenuForPokenavTutorial(void);  /* script_menu.c: th
    berry's tag; DIPLOMA the POKéDEX diploma; PBAG the Battle Pyramid's bag; FACTORY the Battle Factory's rentals,
    FSWAP its swap screen; DOME the Battle Dome's tourney tree, DOMERES a round's results tree, DOMEPREV the last
    tourney's; MGIFT the main menu's MYSTERY GIFT, MEVENT its MYSTERY EVENTS (their flags set in the run's own copy
-   of the save) */
+   of the save); CLEARSAVE the title screen's clear-save question (only ever answered NO in the checks) */
 static bool FieldEventAt(const char *script, const char *event, int frame)
 {
     const char *p = script;
@@ -4583,6 +4584,11 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
             TestLog("Battle env test: the main menu's MYSTERY GIFT");
             FlagSet(FLAG_SYS_MYSTERY_GIFT_ENABLE);
             SetMainCallback2(CB2_InitMysteryGift);
+        }
+        if (FieldEventAt(s.fieldKeys, "CLEARSAVE", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
+        {
+            TestLog("Battle env test: the title screen's clear-save question");
+            SetMainCallback2(CB2_InitClearSaveDataScreen);
         }
         if (FieldEventAt(s.fieldKeys, "MEVENT", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
         {

@@ -136,6 +136,7 @@ extern const struct UiScreen gUiScreen_Factory;
 extern const struct UiScreen gUiScreen_DomeTree;
 extern const struct UiScreen gUiScreen_DomeCard;
 extern const struct UiScreen gUiScreen_MysteryGift;
+extern const struct UiScreen gUiScreen_ClearSave;
 extern const struct UiScreen gUiScreen_Shop;
 extern const struct UiScreen gUiScreen_Naming;
 extern const struct UiScreen gUiScreen_Starters;
