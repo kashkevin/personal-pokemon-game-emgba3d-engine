@@ -36,6 +36,7 @@
 #include "pokedex.h"
 #include "pokemon_storage_system.h"
 #include "platform/mp_breeding.h"
+#include "platform/mp_trade_evolution.h"
 #include "platform/mp_legend.h"
 #include "constants/party_menu.h"
 #include "pokemon.h"
@@ -251,6 +252,13 @@ static struct
     char boxEggSeen[8][192];
     char pcNoticeSeen[80];
     char dayCareNoticeSeen[80];   /* the Day Care's Eggs handed over: "breed day care notice: ..." for its banner */
+    /* PKMN_TEST_TRADE_RECEIVE="slot:species:level[:flags]": once the test's party is in place that party slot holds
+       that Pokemon as a world trade's loaded save would bring it (KNOWN_ISSUES MS-151: mp_trade_evolution.c sees the party before
+       and after); with PKMN_TEST_BREED_LOG, "breed trade: ..." for what it says and for the slot once it changes */
+    char tradeReceive[64];
+    bool tradeArmed, tradeReceived;   /* armed once the test's party and set-up are in place (StartBattle) */
+    int tradeSlot, tradeSpeciesSeen;
+    char tradeNoteSeen[96];
     /* PKMN_TEST_BAG_LOG=item[,item...] (at most 4): on the field, "bag field: money M item I count C ..." whenever the
        money or one of those items' count in the Bag changes (tools/battle_env/shop_check.py: a Poke Mart's purchase and
        sale, saved and loaded); what was last logged */
@@ -636,6 +644,9 @@ static void Init(void)
     s.eggCycles = EnvInt("PKMN_TEST_EGG_CYCLES", -1);
     s.breedLog = EnvInt("PKMN_TEST_BREED_LOG", 0) != 0;
     s.eggToPc = EnvInt("PKMN_TEST_EGG_TO_PC", 0) != 0;
+    value = SDL_getenv("PKMN_TEST_TRADE_RECEIVE");
+    if (value != NULL)
+        SDL_strlcpy(s.tradeReceive, value, sizeof(s.tradeReceive));
     value = SDL_getenv("PKMN_TEST_BAG_LOG");
     for (s.bagItemCount = 0; value != NULL && *value != '\0' && s.bagItemCount < 4; )
     {
@@ -1964,6 +1975,50 @@ static void BreedLogBoxEggs(void)
     }
 }
 
+/* PKMN_TEST_TRADE_RECEIVE (see the state's comment) */
+static void BreedLogTrade(void)
+{
+    const char *note = MPTradeEvolution_LastNote();
+
+    if (s.tradeReceive[0] != '\0' && s.tradeArmed && !s.tradeReceived)
+    {
+        int slot = 0, species = 0, level = 0, used = 0;
+
+        s.tradeReceived = true;
+        if (sscanf(s.tradeReceive, "%d:%d:%d%n", &slot, &species, &level, &used) >= 3 && slot >= 0 && slot < PARTY_SIZE)
+        {
+            struct Pokemon mon;
+
+            MPTradeEvolution_NoteBeforeImport();
+            CreateTestMon(&mon, species, level, s.tradeReceive[used] == ':' ? s.tradeReceive + used + 1 : NULL);
+            gParties[B_TRAINER_PLAYER][slot] = mon;
+            CalculatePlayerPartyCount();
+            MPTradeEvolution_AfterTradeLoaded();
+            s.tradeSlot = slot;
+            s.tradeSpeciesSeen = species;
+            TestLog("Battle env test: breed trade: slot %d received species %d item %u", slot, species,
+                    (unsigned)GetMonData(&mon, MON_DATA_HELD_ITEM));
+        }
+    }
+    if (note[0] != '\0' && strcmp(note, s.tradeNoteSeen) != 0)
+    {
+        snprintf(s.tradeNoteSeen, sizeof(s.tradeNoteSeen), "%s", note);
+        TestLog("Battle env test: breed trade note: %s", note);
+    }
+    if (s.tradeReceived && s.tradeSpeciesSeen != 0)
+    {
+        struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][s.tradeSlot];
+        int species = (int)GetMonData(mon, MON_DATA_SPECIES);
+
+        if (species != s.tradeSpeciesSeen)
+        {
+            s.tradeSpeciesSeen = species;
+            TestLog("Battle env test: breed trade: slot %d now species %d item %u", s.tradeSlot, species,
+                    (unsigned)GetMonData(mon, MON_DATA_HELD_ITEM));
+        }
+    }
+}
+
 static void BreedLogField(void)
 {
     char line[192];
@@ -1971,6 +2026,7 @@ static void BreedLogField(void)
 
     if (!s.breedLog || gMain.inBattle || SDL_AtomicGet(&s.fieldSeen) == 0 || gSaveBlock1Ptr == NULL)
         return;
+    BreedLogTrade();
     BreedLogBoxEggs();
     for (int i = 0; i < PARTY_SIZE; i++)
     {
@@ -2271,6 +2327,7 @@ static void StartBattle(void)
         ApplyTestBadges();
     SetUpTestFlags();
     SetUpTestDaycare();
+    s.tradeArmed = true;
     if (s.name[0] != '\0')
     {
         u32 i;

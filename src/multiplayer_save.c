@@ -26,6 +26,7 @@
 #include "safari_zone.h"
 #ifdef PORTABLE
 #include "platform.h"
+#include "platform/mp_trade_evolution.h"
 // The PC game's trade hold lasts 45 s (2,700 frames) without a command, not 10 s: the trade's coordinator asks the host
 // between its commands, and over the internet a few slow replies in a row passed 10 s - the expired hold closed the
 // trade window and the trade ended (2026-10-26). The companion's loss is still seen within 3 s by the presence heartbeat
@@ -1040,6 +1041,12 @@ static void Handle(const struct MultiplayerSaveControl *command)
         sSourceRotation = ReadU32(command->data + 8);
         if (sSourceRotation >= 14) { status = MP_SAVE_MALFORMED; break; }
         Hold(MP_SAVE_IMPORTING, command);
+#ifdef PORTABLE
+        // KNOWN_ISSUES MS-151: the party before a trade's save comes in, for the received Pokemon's trade evolution
+        if (sTradeActive && !sTradeImportStarted)
+            MPTradeEvolution_NoteBeforeImport();
+#endif
+#line 928 // gba-line
         if (sTradeActive)
             sTradeImportStarted = TRUE;
         sExpectedCrc = ReadU32(command->data); sSourceCounter = ReadU32(command->data + 4);
@@ -1300,6 +1307,8 @@ void MultiplayerSave_Tick(void)
     if (Platform_RealFrame())
         sFrame++;
     gMultiplayerSaveMailbox.frame = sFrame;
+    // KNOWN_ISSUES MS-151: a received Pokemon's trade evolution starts once the save is released and the field ready
+    MPTradeEvolution_Tick(!MultiplayerSave_IsHeld() && FieldReady());
 #else
 #line 1170 // gba-line
     sFrame++; gMultiplayerSaveMailbox.frame = sFrame;
@@ -1349,6 +1358,11 @@ void MultiplayerSave_Tick(void)
             PutU32(data, sCrc);
             if (sReloadStatus == MP_SAVE_OK && (sLastCommand.opcode == MP_SAVE_END || sLastCommand.opcode == MP_SAVE_RELEASE_TRADE))
                 MultiplayerOwnership_Acknowledge(sLastCommand.opcode == MP_SAVE_RELEASE_TRADE);
+#ifdef PORTABLE
+            if (sReloadStatus == MP_SAVE_OK && sLastCommand.opcode == MP_SAVE_RELEASE_TRADE)
+                MPTradeEvolution_AfterTradeLoaded();   // KNOWN_ISSUES MS-151: the Pokemon received evolves by trade?
+#endif
+#line 1210 // gba-line
             Release();
             PublishResponse(&sLastCommand, sReloadStatus, sReloadStatus == MP_SAVE_OK ? data : NULL,
                             sReloadStatus == MP_SAVE_OK ? 4 : 0, sOffset);
