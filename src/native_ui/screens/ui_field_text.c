@@ -17,14 +17,21 @@
  * on" window beside its floors; the records a script shows and waits on (the
  * Pokémon Center 2F cable box's battle results, the Contest Lobby's Berry
  * Blender record, the Battle Frontier's results and Ranking Hall boards) in
- * the design's box. Anything else on the field's
- * window layer that this does not draw (a list, a PokéNav call, rows a script
- * builds itself) keeps the game's picture. Project-owned.
+ * the design's box. The scrolling lists a script shows (the Battle Frontier's
+ * prize and move tutor lists, the glass workshop's, the Fan Club's rater, the
+ * Berry Powder vendor's, the Battle Tent's rules) are the design's menu box,
+ * six rows at a time scrolling as the game's do, a prize's price in its own
+ * column; beside them the Exchange Service Corner's prize in the design's box,
+ * the tutor's move in another, the Battle Points and the Berry Powder as money
+ * boxes. Anything else on the field's window layer that this does not draw (a
+ * list, a PokéNav call, rows a script builds itself) keeps the game's picture.
+ * Project-owned.
  */
 #include <stdlib.h>
 #include <string.h>
 
 #include "global.h"
+#include "berry_powder.h"
 #include "coins.h"
 #include "field_name_box.h"
 #include "main.h"
@@ -35,6 +42,7 @@
 #include "palette.h"
 #include "roulette.h"
 #include "script.h"
+#include "sprite.h"
 #include "string_util.h"
 #include "window.h"
 #include "native_ui/ui_draw.h"
@@ -45,10 +53,13 @@
 #include "native_ui/ui_screen.h"
 #include "native_ui/ui_text.h"
 #include "native_ui/ui_widgets.h"
+#include "constants/items.h"
 
 enum
 {
     HIT_MESSAGE = UI_HIT_SCREEN,
+    HIT_SCROLL_UP,
+    HIT_SCROLL_DOWN,
 };
 
 static const u8 sText_Next[] = _("Next");
@@ -82,6 +93,12 @@ static u8 sBoardWindow, sBoardW, sBoardH;
 static struct NativeLinkResults sResults;
 static struct NativeBlenderRecords sBlender;
 static uint32_t sPicAt, sPicLast;
+static struct NativeScrollMulti sScroll;
+static bool sScrollUp;
+static u8 sPointsWindow, sPrizeWindow, sTutorWindow, sPowderWindow;
+static u32 sPoints, sPowder;
+static u8 sTutorText[UI_MESSAGE_COPY];
+static bool sTutorUp;
 
 /* the picture box's Pokémon as CreateMonSprite_PicBox makes it: not shiny, this personality */
 #define PIC_PERSONALITY 0x8000
@@ -139,14 +156,18 @@ static int OtherWindows(u8 picture)
     u8 popup = GetMapNamePopUpWindowId();
     u32 namebox = GetNameboxWindowId();
     u8 money = Money_NativeUiBoxWindow(), coins = Coins_NativeUiBoxWindow(), elevator = WINDOW_NONE;
-    u8 records = RecordsWindow();
+    u8 records = RecordsWindow(), list = WINDOW_NONE, points, prize, tutor, powder = BerryPowder_NativeUiVendorWindow();
     const u8 *lines[2];
+    struct NativeScrollMulti sm;
     int n = 0;
 
     FieldSpecials_NativeUiElevatorFloor(&elevator, &lines[0], &lines[1]);
+    FieldSpecials_NativeUiFrontierWindows(&points, &prize, &tutor);
+    if (FieldSpecials_NativeUiScrollMulti(&sm))
+        list = sm.windowId;
     for (u32 i = 1; i < WINDOWS_MAX; i++)
         if (i != popup && i != namebox && i != money && i != coins && i != picture && i != elevator && i != records
-         && Window_NativeUiShown(i))
+         && i != list && i != points && i != prize && i != tutor && i != powder && Window_NativeUiShown(i))
             n++;
     return n;
 }
@@ -167,13 +188,15 @@ static bool Detect(void)
 {
     struct NativeScriptMenu m;
     struct NativeScriptPic pic;
+    struct NativeScrollMulti sm;
     bool picUp;
 
     if (gMain.callback2 != CB2_Overworld || IsMatchCallTaskActive())
         return false;
-    /* a message, or a picture box alone (before its question, after it), or the records a script waits on */
+    /* a message, or a picture box alone (before its question, after it), or the records a script waits on, or a
+     * scrolling list */
     picUp = ScriptMenu_NativeUiPokemonPic(&pic);
-    if (!Window_NativeUiShown(0) && !picUp && RecordsWindow() == WINDOW_NONE)
+    if (!Window_NativeUiShown(0) && !picUp && RecordsWindow() == WINDOW_NONE && !FieldSpecials_NativeUiScrollMulti(&sm))
         return false;
     MenuState(&m);
     /* rows a script builds itself are not listed: the game's picture */
@@ -196,7 +219,8 @@ static void Capture(void)
     sMsgUp = RecordsWindow() != WINDOW_NONE ? Window_NativeUiOnScreen(0) : Window_NativeUiShown(0);
     sHasMsg = sMsgUp && TextPrinter_NativeUiWindowText(0, sMsg, sizeof(sMsg), &sMsgPrinted, &active);
     sMsgPrinting = sHasMsg && active;
-    sWaiting = sMenu.kind == NATIVE_SCRIPT_MENU_NONE
+    sScrollUp = FieldSpecials_NativeUiScrollMulti(&sScroll);
+    sWaiting = sMenu.kind == NATIVE_SCRIPT_MENU_NONE && !sScrollUp
             && (Script_NativeUiWaitsForButton() || TextPrinter_NativeUiWindowWaiting(0) || Roulette_NativeUiEntryWaits());
     sSign = gMsgIsSignPost;
     sSpeaker[0] = EOS;
@@ -213,6 +237,25 @@ static void Capture(void)
     sCoinBox = Coins_NativeUiBoxWindow() != WINDOW_NONE;
     sMoney = GetMoney(&gSaveBlock1Ptr->money);
     sCoins = GetCoins();
+    /* a Battle Frontier counter's windows: the points as they are now, the tutor's move as last printed */
+    FieldSpecials_NativeUiFrontierWindows(&sPointsWindow, &sPrizeWindow, &sTutorWindow);
+    sPoints = gSaveBlock2Ptr->frontier.battlePoints;
+    sPowderWindow = BerryPowder_NativeUiVendorWindow();
+    sPowder = GetBerryPowder();
+    {
+        u32 printed;
+        bool8 tutorActive;
+
+        sTutorUp = sTutorWindow != WINDOW_NONE
+                && TextPrinter_NativeUiWindowText(sTutorWindow, sTutorText, sizeof(sTutorText), &printed, &tutorActive);
+    }
+    if (sScrollUp && sScroll.prize != ITEM_NONE)
+    {
+        if (sScroll.prizeIsDecor)
+            UiGfx_PrepareDecor(sScroll.prize);
+        else
+            UiGfx_PrepareItemIcon(sScroll.prize);
+    }
     {
         u8 window;
 
@@ -389,6 +432,98 @@ static void FrontierBoard(int L, int R, int T, const struct UiRamp *band)
     }
 }
 
+/* a row in two columns ({CLEAR_TO} between a prize and its price): the first copied to name, the second returned
+ * (NULL: one column) */
+static const u8 *Columns(const u8 *s, u8 *name, u32 size)
+{
+    u32 n = 0;
+
+    while (*s != EOS && !(s[0] == EXT_CTRL_CODE_BEGIN && s[1] == EXT_CTRL_CODE_CLEAR_TO && s[2] != EOS))
+    {
+        if (n < size - 1)
+            name[n++] = *s;
+        s++;
+    }
+    name[n] = EOS;
+    return *s == EOS ? NULL : s + 3;
+}
+
+#define SCROLL_ROW_H 16
+
+/* a scrolling list: the design's menu box where the script's menus go (over the message box, at the right), the rows
+ * the game shows now with the cursor's, a prize's price in a column at the right, the design's arrows while rows are
+ * above or below (a click on one scrolls a row) */
+static void ScrollList(int R, int B, int t)
+{
+    u8 name[48];
+    int nameW = 0, priceW = 0, w, h, x, y, bob = (t / 16) % 2;
+
+    for (int i = 0; i < sScroll.count; i++)
+    {
+        const u8 *price = Columns(sScroll.labels[i], name, sizeof(name));
+        int nw = UiText_Width(UI_FONT_NORMAL, name, 0), pw = price != NULL ? UiText_Width(UI_FONT_NORMAL, price, 0) : 0;
+
+        if (nw > nameW)
+            nameW = nw;
+        if (pw > priceW)
+            priceW = pw;
+    }
+    w = 18 + nameW + (priceW > 0 ? 20 + priceW : 0) + 14;
+    if (w < 96)
+        w = 96;
+    h = sScroll.shown * SCROLL_ROW_H + 14;
+    x = R - 8 - w;
+    y = B - UI_FIELD_MENU_GAP - h;
+    UiW_DialogBox(x, y, w, h, NULL, UI_NONE, NULL);
+    for (int k = 0; k < sScroll.shown && sScroll.scroll + k < sScroll.count; k++)
+    {
+        int i = sScroll.scroll + k, ry = y + 7 + k * SCROLL_ROW_H;
+        const u8 *price = Columns(sScroll.labels[i], name, sizeof(name));
+
+        UiG_Text(x + 18, ry, name);
+        if (price != NULL)
+            UiG_TextEx(x + w - 14, ry, price, UI_FONT_NORMAL, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_RIGHT);
+        if (i == sScroll.cursor)
+            UiW_Cursor(x + 9, ry + 2, UiW_Nudge(t), UI_NONE);
+        UiG_Hit(UI_HIT_MENU, i, x + 4, ry, w - 8, SCROLL_ROW_H);
+    }
+    if (sScroll.scroll > 0)
+    {
+        UiW_DownArrow(x + (w >> 1) - 3, y - 1 - bob, UI_P_CURSOR, true);
+        UiG_Hit(HIT_SCROLL_UP, 0, x + (w >> 1) - 16, y - 8, 32, 14);
+    }
+    if (sScroll.scroll + sScroll.shown < sScroll.count)
+    {
+        UiW_DownArrow(x + (w >> 1) - 3, y + h - 4 + bob, UI_P_CURSOR, false);
+        UiG_Hit(HIT_SCROLL_DOWN, 0, x + (w >> 1) - 16, y + h - 6, 32, 14);
+    }
+}
+
+/* the Exchange Service Corner's prize where the game puts its icon (at the left, over the message box): the design's
+ * box with the prize twice its size, a decoration as the decoration shops show it */
+static void PrizeBox(int L, int B)
+{
+    int size = 72, x = L + 8, y = B - UI_FIELD_MENU_GAP - size;
+
+    UiW_DialogBox(x, y, size, size, NULL, UI_NONE, NULL);
+    if (!sScrollUp || sScroll.prize == ITEM_NONE)
+        return;
+    if (sScroll.prizeIsDecor)
+        UiGfx_Decor(sScroll.prize, x + 12, y + 12, 48, 2);
+    else
+        UiGfx_ItemIconScaled(sScroll.prize, x + 12, y + 12, 2);
+}
+
+/* a move tutor's move where the game puts its window (at the left, over the message box): what the move does, as the
+ * tutor's window says it */
+static void TutorBox(int L, int B)
+{
+    int w = 216, h = 3 * 16 + 14, x = L + 8, y = B - UI_FIELD_MENU_GAP - h;
+
+    UiW_DialogBox(x, y, w, h, NULL, UI_NONE, NULL);
+    UiW_MessagePageEx(sTutorText, -1, x + 10, y + 6, w - 20, 3, 16);
+}
+
 static void Draw(int t)
 {
     struct UiRamp field = UiW_FieldBand();
@@ -400,12 +535,12 @@ static void Draw(int t)
     L = bx;
     R = bx + bw;
     B = by + bh;
-    if (MenuUp() && sMenu.ready)
+    if ((MenuUp() && sMenu.ready) || (sScrollUp && sScroll.ready))
     {
         h[n++] = (struct UiHintItem){UI_ACT_CONFIRM, sText_OK};
         if (sMenu.kind == NATIVE_SCRIPT_MENU_YES_NO)
             h[n++] = (struct UiHintItem){UI_ACT_CANCEL, sText_No};
-        else if (!sMenu.ignoreB)
+        else if (sScrollUp || !sMenu.ignoreB)
             h[n++] = (struct UiHintItem){UI_ACT_CANCEL, sText_Cancel};
     }
     else if (sWaiting)
@@ -426,9 +561,10 @@ static void Draw(int t)
     if (sMsgUp)
         UiField_MessageBox(t, L, R, B, sHasMsg ? sMsg : NULL, sMsgPrinting ? (int)sMsgPrinted : -1, sWaiting, band, h, n,
                            band->ink, HIT_MESSAGE);
-    if (sMoneyBox || sCoinBox)
+    if (sMoneyBox || sCoinBox || sPointsWindow != WINDOW_NONE || sPowderWindow != WINDOW_NONE)
     {
-        /* the money window, then the coins under it (top left, where the game puts its boxes) */
+        /* the money window, then the coins under it, the Battle Points, the Berry Powder (top left, where the game puts
+         * its boxes) */
         u8 value[24];
         int y = by + 8;
 
@@ -443,8 +579,26 @@ static void Draw(int t)
             value[0] = EOS;
             UiText_AppendNumber(value, sizeof(value), (long)sCoins, 1, true);
             UiItems_MoneyBox(L + 8, y, 148, "COINS", value, band->ink);
+            y += 26;
+        }
+        if (sPointsWindow != WINDOW_NONE)
+        {
+            value[0] = EOS;
+            UiText_AppendNumber(value, sizeof(value), (long)sPoints, 1, true);
+            UiItems_MoneyBox(L + 8, y, 148, "BATTLE POINTS", value, band->ink);
+            y += 26;
+        }
+        if (sPowderWindow != WINDOW_NONE)
+        {
+            value[0] = EOS;
+            UiText_AppendNumber(value, sizeof(value), (long)sPowder, 1, true);
+            UiItems_MoneyBox(L + 8, y, 148, "BERRY POWDER", value, band->ink);
         }
     }
+    if (sPrizeWindow != WINDOW_NONE)
+        PrizeBox(L, B);
+    if (sTutorUp)
+        TutorBox(L, B);
     if (sResultsUp || sBlenderUp || sBoardUp)
     {
         if (sResultsUp)
@@ -485,6 +639,8 @@ static void Draw(int t)
         o.minW = 96;
         UiW_MenuBox(R - 8, B - UI_FIELD_MENU_GAP, items, sMenu.count, sMenu.cursor, &o, NULL);
     }
+    if (sScrollUp)
+        ScrollList(R, B, t);
     UiG_Veil(NativeUi_ScreenFade());
 }
 
@@ -492,7 +648,17 @@ static void Draw(int t)
 
 static bool Ready(void)
 {
-    return sWaiting || (MenuUp() && sMenu.ready);
+    return sWaiting || (MenuUp() && sMenu.ready) || (sScrollUp && sScroll.ready);
+}
+
+/* the presses that scroll a scrolling list a row (the game's list menu: the cursor goes to its middle row first, then
+ * the rows move under it) */
+static int ScrollPresses(bool down)
+{
+    int row = sScroll.cursor - sScroll.scroll, shown = sScroll.shown, half = shown / 2 + shown % 2;
+    int middle = shown == 1 ? 0 : down ? half : shown - half - 1;
+
+    return (down ? (row < middle ? middle - row : 0) : (row > middle ? row - middle : 0)) + 1;
 }
 
 static bool Click(const struct UiHit *hit, int button)
@@ -501,12 +667,33 @@ static bool Click(const struct UiHit *hit, int button)
         return true;
     if (button == 3)
     {
-        if (sWaiting || (MenuUp() && sMenu.ready && (sMenu.kind == NATIVE_SCRIPT_MENU_YES_NO || !sMenu.ignoreB)))
+        if (sWaiting || (MenuUp() && sMenu.ready && (sMenu.kind == NATIVE_SCRIPT_MENU_YES_NO || !sMenu.ignoreB))
+         || (sScrollUp && sScroll.ready))
             NativeUi_QueuePress(B_BUTTON);
         return true;
     }
     if (button != 1)
         return false;
+    if (sScrollUp && sScroll.ready)
+    {
+        /* a row: the cursor there, then A; an arrow: the list a row on */
+        if (hit->id == UI_HIT_MENU && hit->index >= 0 && hit->index < sScroll.count)
+        {
+            int moves = hit->index - sScroll.cursor;
+
+            NativeUi_QueuePresses(moves > 0 ? DPAD_DOWN : DPAD_UP, abs(moves));
+            NativeUi_QueuePress(A_BUTTON);
+        }
+        else if (hit->id == HIT_SCROLL_UP && sScroll.scroll > 0)
+        {
+            NativeUi_QueuePresses(DPAD_UP, ScrollPresses(false));
+        }
+        else if (hit->id == HIT_SCROLL_DOWN && sScroll.scroll + sScroll.shown < sScroll.count)
+        {
+            NativeUi_QueuePresses(DPAD_DOWN, ScrollPresses(true));
+        }
+        return true;
+    }
     if (MenuUp() && sMenu.ready && (hit->id == UI_HIT_MENU || hit->id == UI_HIT_YESNO) && hit->index >= 0
      && hit->index < (sMenu.kind == NATIVE_SCRIPT_MENU_YES_NO ? 2 : sMenu.count))
     {
@@ -526,7 +713,7 @@ static bool Click(const struct UiHit *hit, int button)
 
 static bool Wheel(int dy)
 {
-    if (dy == 0 || NativeUi_PressesPending() || !MenuUp() || !sMenu.ready)
+    if (dy == 0 || NativeUi_PressesPending() || !((MenuUp() && sMenu.ready) || (sScrollUp && sScroll.ready)))
         return false;
     NativeUi_QueuePress(dy > 0 ? DPAD_UP : DPAD_DOWN);
     return true;
@@ -547,8 +734,16 @@ static void HideTiles(uint32_t mask[4], u16 start, u16 count)
             mask[i >> 5] |= 1u << (i & 31);
 }
 
+/* the tiles a sprite takes (its OAM shape and size) */
+static u16 SpriteTiles(const struct OamData *oam)
+{
+    static const u8 sTiles[3][4] = {{1, 4, 16, 64}, {2, 4, 8, 32}, {2, 4, 8, 32}};
+
+    return oam->shape < 3 ? sTiles[oam->shape][oam->size] : 1;
+}
+
 /* the money box's label sprite (the game's sign beside its box) goes with the box; the picture box's Pokémon (a 64 x 64
- * sprite) is drawn here */
+ * sprite), a scrolling list's arrows and the Exchange Service Corner's prize are drawn here */
 static void HideObjects(uint32_t mask[4])
 {
     u16 start, count;
@@ -557,6 +752,10 @@ static void HideObjects(uint32_t mask[4])
         HideTiles(mask, start, count);
     if (sPicUp && sPic.tileNum != 0xFFFF)
         HideTiles(mask, sPic.tileNum, 64);
+    if (sScrollUp && FieldSpecials_NativeUiScrollArrowTiles(&start, &count))
+        HideTiles(mask, start, count);
+    if (sScrollUp && sScroll.prizeSpriteId < MAX_SPRITES && gSprites[sScroll.prizeSpriteId].inUse)
+        HideTiles(mask, gSprites[sScroll.prizeSpriteId].oam.tileNum, SpriteTiles(&gSprites[sScroll.prizeSpriteId].oam));
 }
 
 const struct UiScreen gUiScreen_FieldText = {

@@ -5800,4 +5800,113 @@ bool32 FieldSpecials_NativeUiElevatorFloor(u8 *windowId, const u8 **nowOn, const
     *floor = sDeptStoreFloorNames[gSpecialVar_0x8005];
     return TRUE;
 }
+
+// The windows a Battle Frontier counter shows beside its list and its questions, while up, else WINDOW_NONE: the
+// Battle Points window (ShowBattlePointsWindow; the field text screen draws it as a money box, with the points as
+// they are now), the Exchange Service Corner's prize icon window, a move tutor's move window (shared with the
+// elevator's, so their templates tell them apart).
+static u8 NativeUiWindowIf(u8 id, u8 left, u8 top, u8 width, u8 height)
+{
+    if (id >= WINDOWS_MAX || !Window_NativeUiShown(id) || gWindows[id].window.tilemapLeft != left
+     || gWindows[id].window.tilemapTop != top || gWindows[id].window.width != width || gWindows[id].window.height != height)
+        return WINDOW_NONE;
+    return id;
+}
+
+void FieldSpecials_NativeUiFrontierWindows(u8 *points, u8 *prizeIcon, u8 *tutor)
+{
+    *points = NativeUiWindowIf(sBattlePointsWindowId, 1, 1, 6, 2);
+    *prizeIcon = NativeUiWindowIf(sFrontierExchangeCorner_ItemIconWindowId, 2, 9, 4, 4);
+    *tutor = NativeUiWindowIf(sTutorMoveAndElevatorWindowId, 1, 7, 12, 6);
+}
+
+// The Exchange Service Corner's prize on a row (FillFrontierExchangeCornerWindowAndItemIcon's): an item, or a
+// decoration; its description.
+static u16 NativeUiExchangePrize(u32 menu, u32 row, bool8 *decor, const u8 **desc)
+{
+    #include "data/battle_frontier/battle_frontier_exchange_corner.h"
+
+    *decor = FALSE;
+    *desc = NULL;
+    switch (menu)
+    {
+    case SCROLL_MULTI_BF_EXCHANGE_CORNER_DECOR_VENDOR_1:
+        if (row >= ARRAY_COUNT(sFrontierExchangeCorner_Decor1) || row >= ARRAY_COUNT(sFrontierExchangeCorner_Decor1Descriptions))
+            return ITEM_NONE;
+        *decor = sFrontierExchangeCorner_Decor1[row] != ITEM_LIST_END;
+        *desc = sFrontierExchangeCorner_Decor1Descriptions[row];
+        return sFrontierExchangeCorner_Decor1[row];
+    case SCROLL_MULTI_BF_EXCHANGE_CORNER_DECOR_VENDOR_2:
+        if (row >= ARRAY_COUNT(sFrontierExchangeCorner_Decor2) || row >= ARRAY_COUNT(sFrontierExchangeCorner_Decor2Descriptions))
+            return ITEM_NONE;
+        *decor = sFrontierExchangeCorner_Decor2[row] != ITEM_LIST_END;
+        *desc = sFrontierExchangeCorner_Decor2Descriptions[row];
+        return sFrontierExchangeCorner_Decor2[row];
+    case SCROLL_MULTI_BF_EXCHANGE_CORNER_VITAMIN_VENDOR:
+        if (row >= ARRAY_COUNT(sFrontierExchangeCorner_Vitamins) || row >= ARRAY_COUNT(sFrontierExchangeCorner_VitaminsDescriptions))
+            return ITEM_NONE;
+        *desc = sFrontierExchangeCorner_VitaminsDescriptions[row];
+        return sFrontierExchangeCorner_Vitamins[row];
+    case SCROLL_MULTI_BF_EXCHANGE_CORNER_HOLD_ITEM_VENDOR:
+        if (row >= ARRAY_COUNT(sFrontierExchangeCorner_HoldItems) || row >= ARRAY_COUNT(sFrontierExchangeCorner_HoldItemsDescriptions))
+            return ITEM_NONE;
+        *desc = sFrontierExchangeCorner_HoldItemsDescriptions[row];
+        return sFrontierExchangeCorner_HoldItems[row];
+    default:
+        return ITEM_NONE;
+    }
+}
+
+// A scrolling list a script shows (ShowScrollableMultichoice) while it reads buttons: the field text screen draws it
+// in the design's box, with the Exchange Service Corner's prize beside it.
+// The task's data as ShowScrollableMultichoice keeps it (the names are #undef'd above).
+bool32 FieldSpecials_NativeUiScrollMulti(struct NativeScrollMulti *out)
+{
+    u8 taskId = FindTaskIdByFunc(ScrollableMultichoice_ProcessInput);
+    struct Task *task;
+    u16 scroll = 0, row = 0;
+    u32 i;
+
+    if (taskId == TASK_NONE)
+        return FALSE;
+    task = &gTasks[taskId];
+    if ((u16)task->data[11] >= ARRAY_COUNT(sScrollableMultichoiceOptions) || task->data[1] <= 0
+     || task->data[1] > NATIVE_SCROLL_MULTI_MAX || task->data[1] > MAX_SCROLL_MULTI_LENGTH
+     || (u16)task->data[13] >= WINDOWS_MAX)
+        return FALSE;
+    memset(out, 0, sizeof(*out));
+    ListMenuGetScrollAndRow(task->data[14], &scroll, &row);
+    out->ready = !gPaletteFade.active;
+    out->id = task->data[11];
+    out->count = task->data[1];
+    out->shown = task->data[0];
+    out->scroll = scroll;
+    out->cursor = scroll + row;
+    out->windowId = task->data[13];
+    out->left = task->data[2];
+    out->top = task->data[3];
+    out->width = task->data[4];
+    out->height = task->data[5];
+    for (i = 0; i < out->count; i++)
+        out->labels[i] = sScrollableMultichoiceOptions[out->id][i];
+    out->prizeSpriteId = MAX_SPRITES;
+    if (out->id >= SCROLL_MULTI_BF_EXCHANGE_CORNER_DECOR_VENDOR_1 && out->id <= SCROLL_MULTI_BF_EXCHANGE_CORNER_HOLD_ITEM_VENDOR)
+    {
+        out->prize = NativeUiExchangePrize(out->id, out->cursor, &out->prizeIsDecor, &out->prizeDesc);
+        out->prizeSpriteId = sScrollableMultichoice_ItemSpriteId;
+    }
+    return TRUE;
+}
+
+// The tiles of the list's scroll arrows (AddScrollIndicatorArrowPair: 8 tiles), else FALSE.
+bool32 FieldSpecials_NativeUiScrollArrowTiles(u16 *start, u16 *count)
+{
+    u16 tile = GetSpriteTileStartByTag(GFXTAG_MULTICHOICE_SCROLL_ARROWS);
+
+    if (tile == 0xFFFF)
+        return FALSE;
+    *start = tile;
+    *count = 8;
+    return TRUE;
+}
 #endif // ENABLE_NATIVE_UI

@@ -234,3 +234,20 @@ void RemoveBerryPowderVendorMenu(void)
     ClearStdWindowAndFrameToTransparent(sBerryPowderVendorWindowId, TRUE);
     RemoveWindow(sBerryPowderVendorWindowId);
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native field text screen (src/native_ui/screens/ui_field_text.c) draws the Berry Powder vendor's window
+// (DisplayBerryPowderVendorMenu) as a money box beside its list, with the powder as it is now: its window while up
+// (its template tells it apart), else WINDOW_NONE.
+u8 BerryPowder_NativeUiVendorWindow(void)
+{
+    u8 id = sBerryPowderVendorWindowId;
+
+    if (id >= WINDOWS_MAX || !Window_NativeUiShown(id) || gWindows[id].window.tilemapLeft != 1
+     || gWindows[id].window.tilemapTop != 1 || gWindows[id].window.width != 7 || gWindows[id].window.height != 4)
+        return WINDOW_NONE;
+    return id;
+}
+#endif // ENABLE_NATIVE_UI

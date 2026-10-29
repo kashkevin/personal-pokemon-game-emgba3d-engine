@@ -973,6 +973,37 @@ struct NativeScriptPic
 bool32 ScriptMenu_NativeUiPokemonPic(struct NativeScriptPic *out);
 /* the Lilycove elevator's "Now on" window beside its floors' menu (field_specials.c): its window and its two lines */
 bool32 FieldSpecials_NativeUiElevatorFloor(u8 *windowId, const u8 **nowOn, const u8 **floor);
+/* the windows a Battle Frontier counter shows beside its list and its questions, while up, else WINDOW_NONE: the
+ * Battle Points window (ShowBattlePointsWindow), the Exchange Service Corner's prize icon window, a move tutor's move
+ * window (its move's description the last string printed on it) */
+void FieldSpecials_NativeUiFrontierWindows(u8 *points, u8 *prizeIcon, u8 *tutor);
+/* the Berry Powder vendor's window (berry_powder.c: DisplayBerryPowderVendorMenu) beside its list, else WINDOW_NONE */
+u8 BerryPowder_NativeUiVendorWindow(void);
+/* a scrolling list a script shows (ShowScrollableMultichoice: the Battle Frontier's prize and tutor lists, the glass
+ * workshop's, the Fan Club's rater, the S.S. Tidal's ports) while it reads buttons: its rows as the engine prints them
+ * (a prize's price after a {CLEAR_TO}), how many it shows at once, the first row shown and the cursor's row, the
+ * window it draws in (tiles); at the Exchange Service Corner the prize on the cursor (an item or a decoration;
+ * ITEM_LIST_END on EXIT: the game's return icon), its description and its icon's sprite */
+#define NATIVE_SCROLL_MULTI_MAX 16
+struct NativeScrollMulti
+{
+    bool8 ready;
+    u8 id;                           /* SCROLL_MULTI_* */
+    u8 count;
+    u8 shown;
+    u8 scroll;
+    u8 cursor;
+    u8 windowId;
+    u8 left, top, width, height;
+    const u8 *labels[NATIVE_SCROLL_MULTI_MAX];
+    u16 prize;
+    bool8 prizeIsDecor;
+    const u8 *prizeDesc;
+    u8 prizeSpriteId;                /* MAX_SPRITES: none */
+};
+bool32 FieldSpecials_NativeUiScrollMulti(struct NativeScrollMulti *out);
+/* the tiles of its scroll arrows' sprites while they are loaded */
+bool32 FieldSpecials_NativeUiScrollArrowTiles(u16 *start, u16 *count);
 /* a Mail's letter (mail.c) while its screen is up: its stationery as the screen built it (BG1's tiles at char base 0,
  * its 32 x 32 tilemap, the background palettes before the fade), each line of words and the signature where
  * PrintMailText puts them (GBA pixels, the text's top left) in the Mail's ink, a Bead or Dream Mail's Pokémon icon */
