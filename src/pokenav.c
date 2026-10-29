@@ -588,3 +588,43 @@ bool32 CanViewRibbonsMenu(void)
 {
     return gPokenavResources->hasAnyRibbons;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// PC 3D game (screens/ui_pokenav.c): the PokéNav's page as the game has it now. Each part's state lives in its
+// own file (its substruct, NULL while the page is being set up or put away).
+bool8 Pokenav_NativeUiState(struct NativePokenav *out)
+{
+    u32 index;
+    u8 taskId;
+
+    memset(out, 0, sizeof(*out));
+    if (gPokenavResources == NULL || gMain.callback2 != CB2_Pokenav
+     || (taskId = FindTaskIdByFunc(Task_Pokenav)) == TASK_NONE)
+        return FALSE;
+    index = gPokenavResources->currentMenuIndex;
+    out->menuId = index + POKENAV_MENU_IDS_START;
+    out->mode = gPokenavResources->mode;
+    // Task_Pokenav's state 3 runs the page's input; the others set a page up, wait for its tasks or shut down (a
+    // part's loop-task check is not set until its page is: it is not called here)
+    out->busy = gPaletteFade.active || gTasks[taskId].data[0] != 3;
+    if (gTasks[taskId].data[0] < 2)
+        return TRUE;    // the PokéNav itself being set up: no page yet
+    switch (out->menuId)
+    {
+    case POKENAV_MAIN_MENU:
+    case POKENAV_MAIN_MENU_CURSOR_ON_MAP:
+    case POKENAV_CONDITION_MENU:
+    case POKENAV_CONDITION_SEARCH_MENU:
+    case POKENAV_MAIN_MENU_CURSOR_ON_MATCH_CALL:
+    case POKENAV_MAIN_MENU_CURSOR_ON_RIBBONS:
+        PokenavMenu_NativeUiFill(out);
+        break;
+    case POKENAV_MATCH_CALL:
+        PokenavMatchCall_NativeUiFill(out);
+        break;
+    }
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

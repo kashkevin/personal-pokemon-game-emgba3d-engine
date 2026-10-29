@@ -996,3 +996,21 @@ static bool32 CopyPokenavListMenuTemplate(struct PokenavList *dest, const struct
     dest->downArrow = NULL;
     return 1;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// PC 3D game (screens/ui_pokenav.c): the list's window, as the game scrolls it
+bool32 PokenavList_NativeUiWindow(u16 *top, u16 *count, u16 *selected, u8 *shown)
+{
+    struct PokenavList *list = GetSubstructPtr(POKENAV_SUBSTRUCT_LIST);
+
+    if (list == NULL)
+        return FALSE;
+    *top = list->windowState.windowTopIndex;
+    *count = list->windowState.listLength;
+    *selected = list->windowState.windowTopIndex + list->windowState.selectedIndexOffset;
+    *shown = list->windowState.entriesOnscreen;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

@@ -1375,3 +1375,19 @@ void ResetBldCnt_(void)
 {
     ResetBldCnt();
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// PC 3D game (screens/ui_pokenav.c): a menu item's description, as its window prints it; *noRibbons: the window
+// says there are no RIBBON winners instead
+const u8 *PokenavMenuGfx_NativeUiDescription(u32 menuItem, bool8 *noRibbons)
+{
+    struct Pokenav_MenuGfx *gfx = GetSubstructPtr(POKENAV_SUBSTRUCT_MENU_GFX);
+
+    *noRibbons = gfx != NULL && FuncIsActiveLoopedTask(LoopedTask_SelectRibbonsNoWinners);
+    if (*noRibbons)
+        return gText_NoRibbonWinners;
+    return menuItem < ARRAY_COUNT(sPageDescriptions) ? sPageDescriptions[menuItem] : NULL;
+}
+#endif // ENABLE_NATIVE_UI

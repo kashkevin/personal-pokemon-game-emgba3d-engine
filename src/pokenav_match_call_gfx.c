@@ -1297,3 +1297,20 @@ static void SpriteCB_TrainerPicSlideOffscreen(struct Sprite *sprite)
         sprite->callback = SpriteCallbackDummy;
     }
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// PC 3D game (screens/ui_pokenav.c): the call's text window (WINDOW_NONE before the page is up); *busy: the page's
+// tasks run (the list scrolling, a menu or a check page opening, a call's message being set up)
+u8 PokenavMatchCallGfx_NativeUiWindow(bool8 *busy)
+{
+    struct Pokenav_MatchCallGfx *gfx = GetSubstructPtr(POKENAV_SUBSTRUCT_MATCH_CALL_OPEN);
+
+    *busy = FALSE;
+    if (gfx == NULL)
+        return WINDOW_NONE;
+    *busy = gfx->isTaskActiveCB != NULL && gfx->isTaskActiveCB();
+    return gfx->msgBoxWindowId;
+}
+#endif // ENABLE_NATIVE_UI

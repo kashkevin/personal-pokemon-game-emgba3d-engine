@@ -1304,6 +1304,83 @@ bool32 Window_NativeUiOnScreen(u8 windowId);
  * the line is printed) */
 bool8 MatchCall_NativeUiState(u8 *windowId, s16 *offsetY, bool8 *talking, bool8 *waiting);
 
+/* The PokéNav (pokenav*.c) as the game has it now (screens/ui_pokenav.c, step 13 of the owner's plan): the page up,
+ * its cursor and what it lists. The engine keeps every rule; the UI draws the pages and presses the game's buttons. */
+#define NATIVE_PNAV_ROWS 8              /* a list's rows copied: from the game's top row (it shows 6 to 8) */
+#define NATIVE_PNAV_NAME 24
+enum NativePokenavPage
+{
+    NATIVE_PNAV_NONE,
+    NATIVE_PNAV_MENU,                   /* the main menu, CONDITION's or its search's (menuType says which) */
+    NATIVE_PNAV_MAP,                    /* the region map */
+    NATIVE_PNAV_CONDITION,              /* a Pokemon's condition (the party's, or a search's result) */
+    NATIVE_PNAV_SEARCH,                 /* a condition search's results */
+    NATIVE_PNAV_MATCH_CALL,             /* the trainers registered: the list, its menu, a check page, a call */
+    NATIVE_PNAV_RIBBON_LIST,            /* the Pokemon with ribbons */
+    NATIVE_PNAV_RIBBONS,                /* a Pokemon's ribbons */
+};
+struct NativePokenavRow
+{
+    u8 name[NATIVE_PNAV_NAME];          /* a Pokemon's nickname or a trainer's name */
+    u8 sub[NATIVE_PNAV_NAME];           /* a trainer's place, as the list prints it */
+    u16 species;                        /* the Pokemon's (0: a trainer) */
+    u32 personality;
+    u8 level;
+    u8 gender;                          /* MON_MALE, MON_FEMALE, MON_GENDERLESS */
+    u16 value;                          /* a search's: the condition searched for; a ribbon list's: the ribbon count */
+    bool8 egg;
+    bool8 rematch;                      /* a trainer who wants a rematch (the game's Poke Ball icon) */
+    u16 mapSec;                         /* a trainer's place */
+};
+enum NativePokenavCallState
+{
+    NATIVE_PNAV_MC_LIST,                /* the trainers' list */
+    NATIVE_PNAV_MC_OPTIONS,             /* a trainer's menu: CALL, CHECK, CANCEL */
+    NATIVE_PNAV_MC_CHECK,               /* a trainer's check page */
+    NATIVE_PNAV_MC_CALL,                /* a call (the trainer's words, or that they are close by) */
+    NATIVE_PNAV_MC_EXIT,                /* going back to the main menu */
+};
+struct NativePokenav
+{
+    u8 page;                            /* enum NativePokenavPage */
+    u8 mode;                            /* POKENAV_MODE_* (the Rustboro tutorial's two) */
+    bool8 busy;                         /* a page sliding in or out, or the screen fading: input waits */
+    u32 menuId;                         /* POKENAV_MAIN_MENU... */
+    /* NATIVE_PNAV_MENU */
+    u8 menuType;                        /* POKENAV_MENU_TYPE_* */
+    u8 menuCursor;
+    u8 menuCount;
+    u8 menuItems[6];                    /* POKENAV_MENUITEM_* */
+    bool8 menuInput;                    /* the menu reads buttons */
+    bool8 menuNoRibbons;                /* "There are no RIBBON winners." is up */
+    const u8 *menuDesc;                 /* the cursor's item's description */
+    /* lists (NATIVE_PNAV_SEARCH, NATIVE_PNAV_MATCH_CALL, NATIVE_PNAV_RIBBON_LIST) */
+    u16 listCount;
+    u16 listTop;                        /* the index of the game's top row */
+    u16 listCursor;                     /* the cursor's index */
+    u8 listShown;                       /* rows the game shows at once */
+    u8 rowCount;                        /* rows copied, from listTop */
+    struct NativePokenavRow rows[NATIVE_PNAV_ROWS];
+    u8 searchId;                        /* a search's condition: 0 cool ... 4 tough */
+    /* NATIVE_PNAV_MATCH_CALL */
+    u8 mcState;                         /* enum NativePokenavCallState */
+    u8 mcOptionCursor;
+    u8 mcOptionCount;
+    u8 mcOptions[3];                    /* MATCH_CALL_OPTION_* */
+    u16 mcPic;                          /* the cursor's trainer's picture (TRAINER_PIC_*; 0xFFFF: none, no check page) */
+    const u8 *mcCheck[4];               /* its check page: strategy, Pokemon, two lines about them (NULL: none) */
+    u8 mcMessageWindow;                 /* the call's text window (its text printer read by the UI); WINDOW_NONE */
+};
+bool8 Pokenav_NativeUiState(struct NativePokenav *out);
+/* the parts' own (each in its file) */
+void PokenavMenu_NativeUiFill(struct NativePokenav *out);
+const u8 *PokenavMenuGfx_NativeUiDescription(u32 menuItem, bool8 *noRibbons);
+void PokenavMatchCall_NativeUiFill(struct NativePokenav *out);
+/* pokenav_match_call_gfx.c: the call's text window, WINDOW_NONE when the page is not up; *busy: its tasks run */
+u8 PokenavMatchCallGfx_NativeUiWindow(bool8 *busy);
+/* pokenav_list.c: the list's window (FALSE with no list) */
+bool32 PokenavList_NativeUiWindow(u16 *top, u16 *count, u16 *selected, u8 *shown);
+
 /* battle_transition.c: the battle transition playing (B_TRANSITION_*), B_TRANSITION_COUNT with none */
 u8 BattleTransition_NativeUiPlaying(void);
 

@@ -524,3 +524,93 @@ static bool32 ShouldDoNearbyMessage(void)
 #endif //FREE_MATCH_CALL
     return FALSE;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "region_map.h"
+#include "window.h"
+#include "native_ui/ui_engine.h"
+
+static void NativeUiCopy(u8 *dst, u32 size, const u8 *src)
+{
+    if (src == NULL)
+    {
+        dst[0] = EOS;
+        return;
+    }
+    StringCopyN(dst, src, size - 1);
+    dst[size - 1] = EOS;
+}
+
+// PC 3D game (screens/ui_pokenav.c, pokenav.c Pokenav_NativeUiState): the trainers registered, the cursor's, its menu
+// and check page, and the call's text window
+void PokenavMatchCall_NativeUiFill(struct NativePokenav *out)
+{
+    struct Pokenav_MatchCallMenu *state = GetSubstructPtr(POKENAV_SUBSTRUCT_MATCH_CALL_MAIN);
+    u16 top, count, selected;
+    u8 shown;
+    bool8 busy;
+    u32 i;
+
+    if (state == NULL || !state->initFinished || !PokenavList_NativeUiWindow(&top, &count, &selected, &shown))
+        return;
+    out->mcMessageWindow = PokenavMatchCallGfx_NativeUiWindow(&busy);
+    if (out->mcMessageWindow == WINDOW_NONE)
+        return;
+    out->page = NATIVE_PNAV_MATCH_CALL;
+    out->busy = out->busy || busy;
+    if (state->callback == CB2_HandleMatchCallOptionsInput)
+        out->mcState = NATIVE_PNAV_MC_OPTIONS;
+    else if (state->callback == CB2_HandleCheckPageInput)
+        out->mcState = NATIVE_PNAV_MC_CHECK;
+    else if (state->callback == CB2_HandleCallExitInput)
+        out->mcState = NATIVE_PNAV_MC_CALL;
+    else if (state->callback == GetExitMatchCallMenuId)
+        out->mcState = NATIVE_PNAV_MC_EXIT;
+    else
+        out->mcState = NATIVE_PNAV_MC_LIST;
+    out->listCount = count < state->numRegistered ? count : state->numRegistered;
+    out->listTop = top;
+    out->listCursor = selected < out->listCount ? selected : 0;
+    out->listShown = shown;
+    for (i = 0; i < NATIVE_PNAV_ROWS && top + i < out->listCount; i++)
+    {
+        struct PokenavMatchCallEntry *entry = &state->matchCallEntries[top + i];
+        struct NativePokenavRow *row = &out->rows[i];
+        const u8 *className = NULL, *trainerName = NULL;
+
+        if (!entry->isSpecialTrainer)
+        {
+            const struct Trainer *trainer = GetTrainerStructFromId(GetTrainerIdxByRematchIdx(entry->headerId));
+
+            className = gTrainerClasses[trainer->trainerClass].name;
+            trainerName = trainer->trainerName;
+        }
+        else
+        {
+            MatchCall_GetNameAndDesc(entry->headerId, &className, &trainerName);
+        }
+        NativeUiCopy(row->name, sizeof(row->name), trainerName);
+        NativeUiCopy(row->sub, sizeof(row->sub), className);
+        row->mapSec = entry->mapSec;
+        row->rematch = ShouldDrawRematchPokeballIcon(top + i);
+        out->rowCount = i + 1;
+    }
+    if (out->mcState == NATIVE_PNAV_MC_OPTIONS)
+    {
+        out->mcOptionCursor = state->optionCursorPos;
+        out->mcOptionCount = state->maxOptionId + 1 < 3 ? state->maxOptionId + 1 : 3;
+        for (i = 0; i < out->mcOptionCount; i++)
+            out->mcOptions[i] = state->matchCallOptions[i];
+    }
+    // the picture and words a check page shows (a contact with none - MOM, MR. STONE - has no picture in the game's
+    // tables: GetMatchCallTrainerPic reads past them)
+    out->mcPic = 0xFFFF;
+    if (!state->matchCallEntries[out->listCursor].isSpecialTrainer
+     || MatchCall_HasCheckPage(state->matchCallEntries[out->listCursor].headerId))
+    {
+        out->mcPic = GetMatchCallTrainerPic(out->listCursor);
+        for (i = 0; i < CHECK_PAGE_ENTRY_COUNT; i++)
+            out->mcCheck[i] = GetMatchCallFlavorText(out->listCursor, i);
+    }
+}
+#endif // ENABLE_NATIVE_UI

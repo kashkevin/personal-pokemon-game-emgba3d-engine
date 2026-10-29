@@ -538,3 +538,32 @@ int DioramaBattleEnvTest_PokenavTutorialKey(void)
     return A_BUTTON;
 }
 #endif
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// PC 3D game (screens/ui_pokenav.c, pokenav.c Pokenav_NativeUiState): the menu up, its items and cursor
+void PokenavMenu_NativeUiFill(struct NativePokenav *out)
+{
+    struct Pokenav_Menu *menu = GetSubstructPtr(POKENAV_SUBSTRUCT_MAIN_MENU_HANDLER);
+    u32 i;
+
+    if (menu == NULL || menu->menuType >= POKENAV_MENU_TYPE_COUNT)
+        return;
+    out->page = NATIVE_PNAV_MENU;
+    out->menuType = menu->menuType;
+    out->menuCursor = menu->cursorPos;
+    out->menuCount = sLastCursorPositions[menu->menuType] + 1;
+    for (i = 0; i < MAX_POKENAV_MENUITEMS; i++)
+        out->menuItems[i] = sMenuItems[menu->menuType][i];
+    out->menuInput = menu->callback == HandleMainMenuInput || menu->callback == HandleMainMenuInputTutorial
+                  || menu->callback == HandleMainMenuInputEndTutorial || menu->callback == HandleConditionMenuInput
+                  || menu->callback == HandleConditionSearchMenuInput || menu->callback == HandleCantOpenRibbonsInput;
+    out->menuDesc = PokenavMenuGfx_NativeUiDescription(out->menuItems[out->menuCursor < MAX_POKENAV_MENUITEMS
+                                                                      ? out->menuCursor : 0],
+                                                       &out->menuNoRibbons);
+    out->menuNoRibbons = out->menuNoRibbons || menu->callback == HandleCantOpenRibbonsInput;
+    if (GetSubstructPtr(POKENAV_SUBSTRUCT_MENU_GFX) != NULL && IsMenuHandlerLoopedTaskActive())
+        out->busy = TRUE;
+}
+#endif // ENABLE_NATIVE_UI

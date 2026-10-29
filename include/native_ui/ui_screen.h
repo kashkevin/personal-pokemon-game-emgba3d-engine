@@ -97,6 +97,7 @@ const char *NativeUi_ScreenNow(void);
  * headers (its '\\' key literal confuses tools/preproc's string scanner). */
 /* screens */
 extern const struct UiScreen gUiScreen_Title;
+extern const struct UiScreen gUiScreen_Pokenav;
 extern const struct UiScreen gUiScreen_MainMenu;
 extern const struct UiScreen gUiScreen_Pause;
 extern const struct UiScreen gUiScreen_Options;
