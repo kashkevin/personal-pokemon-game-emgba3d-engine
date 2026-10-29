@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import heapq
 from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
 
@@ -133,14 +134,17 @@ def _climb_regions(cells: tuple[dict, ...], width: int, height: int, solved: dic
     return stairs, region_of, regions, runs
 
 
-def _climb_levels(climbs: list[tuple[int, int, list[int]]], ground: set[int]) -> dict[int, int] | None:
-    """Each region's level, `ground` on level 0 and up a level a climb; None
-    where the climbs give one region two levels, raise nothing, or put a region
-    under the ground."""
+def _climb_levels(climbs: list[tuple[int, int, list[int]]], ground: set[int], width: int = 0,
+                  per_row: bool = False) -> dict[int, int] | None:
+    """Each region's level, `ground` on level 0 and up a level a climb (with
+    `per_row`, a level each row of the climb: the GBA draws a face a tile a level
+    and a staircase a row a tile); None where the climbs give one region two
+    levels, raise nothing, or put a region under the ground."""
     steps: dict[int, list[tuple[int, int]]] = defaultdict(list)
-    for upper, lower, _ in climbs:
-        steps[lower].append((upper, 1))
-        steps[upper].append((lower, -1))
+    for upper, lower, run in climbs:
+        rise = len({offset // width for offset in run}) if per_row else 1
+        steps[lower].append((upper, rise))
+        steps[upper].append((lower, -rise))
     level = dict.fromkeys(sorted(ground), 0)
     pending = deque(level)
     while pending:
@@ -180,20 +184,21 @@ def _steps_hold(cells: tuple[dict, ...], width: int, region_of: dict[int, int],
 
 
 def _climb_entries(climbs: list[tuple[int, int, list[int]]], level: dict[int, int], width: int,
-                   rise_q16: int) -> dict[int, dict]:
+                   rise_q16: int, per_row: bool = False) -> dict[int, dict]:
     """The climbs' cells, each run rising `rise_q16` from the level of the region
     at its foot over its rows, south first (General's terrace stairs, a muddy
-    slope: a ramp)."""
+    slope: a ramp); with `per_row`, `rise_q16` each row."""
     out: dict[int, dict] = {}
     for _, lower, run in climbs:
         if lower not in level:
             continue
         base = rise_q16 * level[lower]
         rows = sorted({offset // width for offset in run}, reverse=True)  # south first
+        rise = rise_q16 * (len(rows) if per_row else 1)
         for offset in run:
             step = rows.index(offset // width)
-            ground = base + round(rise_q16 * step / len(rows))
-            top = base + round(rise_q16 * (step + 1) / len(rows))
+            ground = base + round(rise * step / len(rows))
+            top = base + round(rise * (step + 1) / len(rows))
             out[offset] = {"groundQ16": ground, "topQ16": top,
                            "profile": "transition-horizontal", "solid": False,
                            "rise": top - ground}
@@ -211,7 +216,11 @@ def rock_tops(rock: frozenset[int], ground: dict[int, int], width: int, height: 
     cell away from it (the game draws a cliff's face a tile a level: three rows
     of rock under a plateau three levels up descend a level a row to the
     ground), whichever is higher, at least `floor`. Cells the ground does not
-    reach through the rock get `floor`."""
+    reach through the rock get `floor`. No cell lies two levels or more under the
+    rock beside it: it rises to a level under it, as a cell a higher top asks
+    (Route 112's mountain: level with its plateau three levels up as far as the
+    plateau's paths are its nearest ground, a level over the grass north of it
+    beyond, it stood two levels over itself across its middle, a wall)."""
     def neighbours(offset: int):
         x, y = offset % width, offset // width
         for nx, ny in ((x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y)):
@@ -247,11 +256,21 @@ def rock_tops(rock: frozenset[int], ground: dict[int, int], width: int, height: 
         flat = min(level for level, steps in reach.items() if steps == nearest)
         face = max(level - MOUNTAIN_LEDGE_Q16 * (steps - 1) for level, steps in reach.items())
         tops[offset] = max(floor, flat, face)
+    pending = [(-top, offset) for offset, top in tops.items()]
+    heapq.heapify(pending)
+    while pending:
+        top, offset = heapq.heappop(pending)
+        if -top < tops[offset]:
+            continue
+        for neighbor in neighbours(offset):
+            if neighbor in rock and tops[neighbor] < -top - MOUNTAIN_LEDGE_Q16:
+                tops[neighbor] = -top - MOUNTAIN_LEDGE_Q16
+                heapq.heappush(pending, (-tops[neighbor], neighbor))
     return tops
 
 
 def mountain_ledges(cells: tuple[dict, ...], width: int, height: int,
-                    solved: dict[int, dict]) -> dict[int, dict]:
+                    solved: dict[int, dict], per_row: bool = False) -> dict[int, dict]:
     """A mountain's walkable top on the mountain: Route 112's plateau (the cable
     car station on it, drawn with the rock's own top, MB_MOUNTAIN_TOP) lay on the
     level of the ground round the mountain, the rock a cell high all round it,
@@ -277,18 +296,22 @@ def mountain_ledges(cells: tuple[dict, ...], width: int, height: int,
     for it), or a step where the game lets one walk across (elevation 15, a
     bridge's: Route 119's top runs onto its bridge over the forest), the layout
     keeps its levels. (The game draws a face a tile a level, its stairs a row a
-    tile: Route 112's climb three rows, Route 115's two and one. A level a
-    climb keeps Route 111's and Route 112's plateaus a level up, as they were.)
-    Returns the raised cells' entries, the stairs' with their rise."""
+    tile: Route 112's climb three rows, Route 111's slopes two, Route 115's
+    climbs two and one. A level a climb kept Route 112's and Route 111's
+    plateaus a level up, under the rock the game draws round them; with
+    `per_row` each row of a climb is a level, the game's heights: Route 112's
+    plateau three levels up, Route 111's two, the owner's decision of
+    2026-10-29, compile_rules.GBA_HEIGHT_LAYOUTS.) Returns the raised cells'
+    entries, the stairs' with their rise."""
     stairs, region_of, regions, runs = _climb_regions(cells, width, height, solved, _climb)
     mountain_top = [2 * sum(cells[offset].get("behavior") == "MB_MOUNTAIN_TOP" for offset in region)
                     >= len(region) for region in regions]
     # (stairs between ordinary ground are the terrace solver's)
     climbs = [(upper, lower, run) for upper, lower, run in runs if mountain_top[upper]]
-    # Each region's level, from the ground up a level a climb (a mountain's tops
-    # that no climb joins to the ground keep theirs)
+    # Each region's level, from the ground up a level a climb, or a row of it (a
+    # mountain's tops that no climb joins to the ground keep theirs)
     level = _climb_levels(climbs, {index for upper, lower, _ in climbs for index in (upper, lower)
-                                   if not mountain_top[index]})
+                                   if not mountain_top[index]}, width, per_row)
     if level is None or not _steps_hold(cells, width, region_of, level):
         return {}
     # A pocket of the top that no one walks into (walkable cells, mostly MB_MOUNTAIN_TOP, blocked on every side: three
@@ -315,7 +338,7 @@ def mountain_ledges(cells: tuple[dict, ...], width: int, height: int,
         for offset in regions[index]:
             out[offset] = {"groundQ16": MOUNTAIN_LEDGE_Q16 * value, "topQ16": MOUNTAIN_LEDGE_Q16 * value,
                            "profile": "none", "solid": False}
-    out.update(_climb_entries(climbs, level, width, MOUNTAIN_LEDGE_Q16))
+    out.update(_climb_entries(climbs, level, width, MOUNTAIN_LEDGE_Q16, per_row))
     return out
 
 

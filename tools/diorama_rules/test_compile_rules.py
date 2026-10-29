@@ -9,7 +9,7 @@ import unittest
 from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
-from compile_rules import (ARCHETYPES, RuleError, _action, _ground_policy, _mask,
+from compile_rules import (ARCHETYPES, RuleError, _action, _ground_policy, _grounded_forests, _mask,
                               _mountain_masses,
                               _pattern_placements, _patterns, _profiles, _selector,
                               _validate_logical_ids, _validate_pattern_claim_overlaps,
@@ -127,12 +127,15 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertGreater(len(mountains), 15000)
         self.assertEqual({record["class"] for record in mountains}, {"cliff"})
         # one block, but the rock of a mountain of several tops (Route 114's, Route 115's:
-        # _mountain_masses), from its lowest ground to the top it rises to
+        # _mountain_masses), from its lowest ground to the top it rises to, and of the two that
+        # stand at the game's heights since 2026-10-29 (Route 112's plateau three levels up,
+        # Route 111's two: compile_rules.GBA_HEIGHT_LAYOUTS)
         self.assertEqual({layout["symbol"] for layout in self.data["layouts"]
                           for record in layout["terrainRecords"]
                           if record["source"] == "behavior:MB_MOUNTAIN_TOP"
                           and record["heightQ16"] != 16},
-                         {"LAYOUT_ROUTE114", "LAYOUT_ROUTE115"})
+                         {"LAYOUT_ROUTE111", "LAYOUT_ROUTE111_NO_MIRAGE_TOWER", "LAYOUT_ROUTE112",
+                          "LAYOUT_ROUTE114", "LAYOUT_ROUTE115"})
         self.assertEqual({record["heightQ16"] for record in mountains}, {16, 32, 48, 64})
         self.assertEqual({record["measuredFlags"] & 32 for record in mountains}, {32})
         # (a reef in the sea stands on the sea's level: a terrace entry, flag 128)
@@ -236,6 +239,69 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertNotIn(17, masses)  # (0, 16): where its record puts it
         self.assertEqual(_mountain_masses(cells, 5, 5, mountain, solved), {})
 
+    def test_a_forest_beside_a_raised_top_stays_on_its_ground(self):
+        # Route 112's forest west of its plateau (three levels up since 2026-10-29): trees (F) between a raised top
+        # mountain_ledges climbs to (T) and the grass under it (G) would each take the level of the walkable cell
+        # nearest it, the trees by the top three levels up and a wall of their sides between; the forest stays on
+        # its ground (_grounded_forests). Not a forest: blocked cells that are not trees, the mountain's own cells,
+        # jump ledges, or a group with no lower ground beside it.
+        def make(ch, behavior=None):
+            cell = {"T": {"behavior": "MB_MOUNTAIN_TOP", "collision": 0},
+                    "F": {"behavior": "MB_NORMAL", "collision": 1},
+                    "G": {"behavior": "MB_NORMAL", "collision": 0}}[ch]
+            return dict(cell, behavior=behavior) if behavior else cell
+
+        def level(value):
+            return {"groundQ16": value, "topQ16": value, "profile": "none", "solid": False}
+
+        rows = ["TTTT", "FFFF", "GGGG"]
+        cells = tuple(make(ch) for row in rows for ch in row)
+        solved = {offset: level(48) for offset in range(4)}
+        climbed = frozenset(range(4))
+        trees = tuple(SimpleNamespace(class_name="round-hull") for _ in cells)
+        grounds = tuple(SimpleNamespace(class_name="ground") for _ in cells)
+        anything = lambda offset: True
+        self.assertEqual(_grounded_forests(cells, 4, 3, solved, climbed, anything, trees),
+                         frozenset({4, 5, 6, 7}))
+        self.assertEqual(_grounded_forests(cells, 4, 3, solved, climbed, anything, grounds), frozenset())
+        self.assertEqual(_grounded_forests(cells, 4, 3, solved, climbed, anything, trees,
+                                           mountain=frozenset({4, 5, 6, 7})), frozenset())
+        ledges = tuple(make(ch, "MB_JUMP_SOUTH") if ch == "F" else make(ch) for row in rows for ch in row)
+        self.assertEqual(_grounded_forests(ledges, 4, 3, solved, climbed, anything, trees), frozenset())
+        self.assertEqual(_grounded_forests(cells, 4, 3, {**solved, **{offset: level(48) for offset in range(8, 12)}},
+                                           climbed, anything, trees), frozenset())
+
+    def test_rock_by_a_forest_on_its_ground_climbs_from_it(self):
+        # Rock (M) beside a top three levels up that stairs climb to (P, `climbed`), the grass below (L) and trees on
+        # the grass (F): level with the top beyond the trees, it rose three levels in its one row by them (Route
+        # 112's forest, the crowns the game draws over the rock drawn down that face in stripes). By a forest that
+        # stays on its ground (`forest`) the rock stands a level over the trees and climbs from them a level a cell.
+        def make(ch):
+            return {"M": {"behavior": "MB_MOUNTAIN_TOP", "collision": 1},
+                    "P": {"behavior": "MB_MOUNTAIN_TOP", "collision": 0},
+                    "L": {"behavior": "MB_NORMAL", "collision": 0},
+                    "F": {"behavior": "MB_NORMAL", "collision": 1}}[ch]
+
+        def level(value):
+            return {"groundQ16": value, "topQ16": value, "profile": "none", "solid": False}
+
+        rows = ["MMMPP", "MMMPP", "MMMPP", "FFLLL"]
+        flat = "".join(rows)
+        cells = tuple(make(ch) for ch in flat)
+        mountain = frozenset(index for index, ch in enumerate(flat) if ch == "M")
+        tops = frozenset(index for index, ch in enumerate(flat) if ch == "P")
+        solved = {offset: level(48) for offset in tops}
+
+        def heights(masses):
+            return [[masses[y * 5 + x]["topQ16"] if y * 5 + x in masses else 16 for x in range(3)]
+                    for y in range(3)]
+
+        self.assertEqual(heights(_mountain_masses(cells, 5, 4, mountain, solved, climbed=tops)),
+                         [[48, 48, 48], [48, 48, 48], [32, 32, 48]])
+        masses = _mountain_masses(cells, 5, 4, mountain, solved, climbed=tops, forest=frozenset({15, 16}))
+        self.assertEqual(heights(masses), [[48, 48, 48], [32, 32, 48], [16, 16, 32]])
+        self.assertFalse({10, 11, 15, 16} & set(masses))  # a level over the trees: where their records put them
+
     def test_repository_mountains_stand_on_one_level(self):
         # The owner's report of 2026-10-24 ("a maze of terraced walls", "the light blue
         # emptiness"): Route 116's mountain is one mass from the grass below it to the paths on
@@ -261,23 +327,30 @@ class DioramaRuleCompilerTests(unittest.TestCase):
                              ("cliff", 0, 16))
         for x, y in ((42, 4), (43, 6)):
             self.assertEqual(records[y * width + x]["groundQ16"], 16)
-        # Route 112: its plateau a level over the ground round the mountain, the stairs rising to
-        # it over their rows, the mountain level with it.
+        # Route 112: its plateau three levels over the ground round the mountain, the stairs rising
+        # to it a level a row (the owner's decision of 2026-10-29: "Raise to the GBA heights"); the
+        # mountain level with it, down its face a level a row ((15, 42) a row under its edge), a
+        # level over the paved ground by the cable car station ((30, 20)), and a level over the grass
+        # far north of it ((5, 10)); the forest west of the plateau on the ground ((3, 38)), the rock
+        # by it a level over it and climbing from it a level a cell.
         width, records = wildcard("LAYOUT_ROUTE112")
-        self.assertEqual(records[33 * width + 24]["groundQ16"], 16)
+        self.assertEqual(records[33 * width + 24]["groundQ16"], 48)
         self.assertEqual(records[45 * width + 20]["groundQ16"], 0)
         self.assertEqual([(records[y * width + 20]["shape"], records[y * width + 20]["groundQ16"],
                            records[y * width + 20]["topQ16"]) for y in (43, 42, 41)],
-                         [("stairs", 0, 5), ("stairs", 5, 11), ("stairs", 11, 16)])
-        for x, y in ((5, 10), (15, 42), (30, 20)):
+                         [("stairs", 0, 16), ("stairs", 16, 32), ("stairs", 32, 48)])
+        for (x, y), top in (((5, 10), 16), ((15, 42), 32), ((30, 20), 64), ((3, 37), 16), ((3, 36), 32),
+                            ((8, 37), 16), ((12, 41), 16), ((13, 41), 32)):
             record = records[y * width + x]
             self.assertEqual((record["class"], record["groundQ16"], record["topQ16"]),
-                             ("cliff", 0, 16), (x, y))
-        # Route 111's rock runs the length of the map beside a desert on the top level: its cells
-        # keep their own levels (the rock a level over the desert).
+                             ("cliff", 0, top), (x, y))
+        self.assertEqual((records[38 * width + 3]["shape"], records[38 * width + 3]["groundQ16"]), ("flat", 0))
+        # Route 111's rock runs the length of the map, beside the desert and its plateau two levels
+        # up (its slopes' two rows): one mass from the lowest ground it meets, a level over the
+        # desert, level with the plateau's paths and down its faces a level a cell ((35, 30)).
         width, records = wildcard("LAYOUT_ROUTE111")
         self.assertEqual((records[30 * width + 35]["groundQ16"], records[30 * width + 35]["topQ16"]),
-                         (0, 16))
+                         (-16, 32))
 
     def test_repository_mountains_of_several_tops(self):
         # KNOWN_ISSUES MS-153: Route 115's muddy slope lay flat, its mountain on one level (its

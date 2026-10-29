@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import heapq
 import json
 import math
 import re
@@ -1309,10 +1310,70 @@ def _reefs_at_sea_level(cells: tuple[dict, ...], width: int, height: int,
     return out
 
 
+# The mountains that stand at the game's heights, a level a row of each climb (terrace_topology.mountain_ledges):
+# Route 112's plateau three levels up, Route 111's two (the owner's decision of 2026-10-29, "Raise to the GBA
+# heights"). Route 115's tops would stand four levels up, its rock two over Route 114's across their seam.
+GBA_HEIGHT_LAYOUTS = frozenset({"LAYOUT_ROUTE112", "LAYOUT_ROUTE111", "LAYOUT_ROUTE111_NO_MIRAGE_TOWER"})
+
+# The trees of a forest (_grounded_forests): the classifier's hulls round the game's trees.
+FOREST_CLASSES = frozenset({"tree", "forest-wall", "round-hull", "grouped-hull"})
+
+
+def _grounded_forests(cells: tuple[dict, ...], width: int, height: int, solved: dict[int, dict],
+                      climbed: frozenset[int], liftable, shapes: tuple,
+                      mountain: frozenset[int] = frozenset()) -> frozenset[int]:
+    """The blocked cells (`liftable`: trees, mostly) of each group side by side that meets a mountain top
+    terrace_topology.mountain_ledges raised (`climbed`) and walkable ground lower than that top. Each would take the
+    level of the walkable ground nearest it (terrace_topology.lift_blocked_cells): the trees by the top that top's
+    level, the others the ground's, and between them a wall of the trees' own sides (Route 112's forest west of its
+    plateau, three levels up since the plateau stands at the GBA's height: the GBA draws those trees from the
+    plateau's edge down to the grass, no face between). Such a group stays on its ground: the top stands behind it.
+    The mountain's own cells (`mountain`: its rock, the crowns the game draws over it) and the jump ledges are not
+    the forest's: the mountain stands its own way (_mountain_masses), a ledge on its own ground. A group a quarter of
+    whose cells or more are trees (`shapes`, FOREST_CLASSES) is a forest; others (Route 114's rock edge east of its
+    plateau) are lifted as before."""
+    def blocked(offset: int) -> bool:
+        return (cells[offset].get("collision", 0) != 0 and offset not in solved and offset not in mountain
+                and not str(cells[offset].get("behavior", "")).startswith("MB_JUMP_") and liftable(offset))
+
+    def level(offset: int) -> int:
+        entry = solved.get(offset)
+        return entry["groundQ16"] if entry is not None else 0
+
+    def neighbours(offset: int):
+        x, y = offset % width, offset // width
+        for nx, ny in ((x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y)):
+            if 0 <= nx < width and 0 <= ny < height:
+                yield ny * width + nx
+
+    grounded: set[int] = set()
+    seen: set[int] = set()
+    for start in range(len(cells)):
+        if start in seen or not blocked(start):
+            continue
+        group, pending, tops, ground = [], [start], [], []
+        seen.add(start)
+        while pending:
+            offset = pending.pop()
+            group.append(offset)
+            for neighbor in neighbours(offset):
+                if blocked(neighbor):
+                    if neighbor not in seen:
+                        seen.add(neighbor)
+                        pending.append(neighbor)
+                elif cells[neighbor].get("collision", 0) == 0:
+                    (tops if neighbor in climbed and level(neighbor) > 0 else ground).append(level(neighbor))
+        if (tops and ground and min(ground) < max(tops)
+                and 4 * sum(shapes[offset].class_name in FOREST_CLASSES for offset in group) >= len(group)):
+            grounded.update(group)
+    return frozenset(grounded)
+
+
 def _mountain_masses(cells: tuple[dict, ...], width: int, height: int,
                      mountain: frozenset[int], solved: dict[int, dict],
                      exclude: frozenset[int] = frozenset(),
-                     climbed: frozenset[int] = frozenset()) -> dict[int, dict]:
+                     climbed: frozenset[int] = frozenset(),
+                     forest: frozenset[int] = frozenset()) -> dict[int, dict]:
     """A mountain whose walkable top is a level over the ground round it
     stands as one mass, level with that top. Its blocked rock took the level of
     the walkable ground nearest each cell (terrace_topology.lift_blocked_cells),
@@ -1333,14 +1394,20 @@ def _mountain_masses(cells: tuple[dict, ...], width: int, height: int,
     path on the mountain's top, a level over other ground - or on a face down
     from a higher top (terrace_topology.rock_tops), the sea beside it or not:
     lifted cell by cell, its rock stood with its foot a level over the rock
-    beside it, nothing under it, the sky between (Route 114's). Any other piece
-    keeps its cells' entries (Route 111's rock runs the length of the map,
-    beside a desert on the top level and lower ground far off), and so does one
-    beside water (an island, a coast: the sea's levels are its own) or on part
-    levels.
+    beside it, nothing under it, the sky between (Route 114's; Route 111's,
+    whose plateau stands two levels up since 2026-10-29). Any other piece keeps
+    its cells' entries (Route 111's rock did while its plateau stood a level up:
+    it runs the length of the map, beside a desert on the top level and lower
+    ground far off), and so does one beside water (an island, a coast: the
+    sea's levels are its own) or on part levels.
     Walkable ground with no level of its own lies on the top level (0); the
     stairs and terrace stones between two levels and `exclude` (the sea's rocks
-    and reefs) are not its ground. Returns the pieces' entries."""
+    and reefs) are not its ground. By a forest that stays on its ground
+    (`forest`: _grounded_forests, Route 112's beside its plateau) the rock
+    stands a level over the trees and climbs from them a level a cell, never
+    higher than its top: level with the top beyond the trees, it rose three
+    levels in its one row by them, its face their crowns (the game draws them
+    over the rock) drawn down it in stripes. Returns the pieces' entries."""
     def neighbours(offset: int):
         x, y = offset % width, offset // width
         for nx, ny in ((x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y)):
@@ -1394,6 +1461,25 @@ def _mountain_masses(cells: tuple[dict, ...], width: int, height: int,
                                    for offset in upper) < len(upper)):
                     continue
             tops = dict.fromkeys(piece, ground + 16)
+        if forest:
+            caps = {}
+            for offset in piece:
+                below = [solved[neighbor]["groundQ16"] if neighbor in solved else 0
+                         for neighbor in neighbours(offset) if neighbor in forest]
+                if below:
+                    caps[offset] = min(below) + 16
+            pending = sorted((cap, offset) for offset, cap in caps.items())  # (a sorted list is a heap)
+            rock = frozenset(piece)
+            while pending:
+                cap, offset = heapq.heappop(pending)
+                if cap > caps[offset]:
+                    continue
+                for neighbor in neighbours(offset):
+                    if neighbor in rock and (neighbor not in caps or cap + 16 < caps[neighbor]):
+                        caps[neighbor] = cap + 16
+                        heapq.heappush(pending, (cap + 16, neighbor))
+            for offset, cap in caps.items():
+                tops[offset] = min(tops[offset], max(ground + 16, cap))
         for offset in piece:
             placed[offset] = tops[offset]
             # (a cell already where its record puts it - the rock a level over
@@ -1658,7 +1744,8 @@ def compile_data(root: Path) -> dict:
             # from (terrace_topology.mountain_ledges: Route 112's plateau), and a
             # walkable cell of no elevation in its face (a cave mouth) on the level
             # beside it (join_level_free_cells).
-            climbed = mountain_ledges(cells[layout["id"]], layout["width"], layout["height"], solved)
+            climbed = mountain_ledges(cells[layout["id"]], layout["width"], layout["height"], solved,
+                                      per_row=layout["id"] in GBA_HEIGHT_LAYOUTS)
             mountain_climbs[layout["id"]] = frozenset(climbed)
             solved = {**solved, **climbed}
             mouths = join_level_free_cells(cells[layout["id"]], layout["width"],
@@ -1897,6 +1984,7 @@ def compile_data(root: Path) -> dict:
             wildcard = tuple(_with_cave_rock(shape, cell, offset in cave_rock_cells[layout["id"]])
                              for offset, (shape, cell) in enumerate(zip(wildcard, layout_cells)))
             rocks = _sea_rock_cells(layout)
+            grounded = frozenset()
             if terrace_topology[layout["id"]]:
                 layout_maps = (maps_by_layout.get(layout["id"], ())
                                or maps_by_layout.get(script_layouts.get(layout["id"]), ()))
@@ -1911,6 +1999,15 @@ def compile_data(root: Path) -> dict:
                     # again under it, and its sign twice.
                     liftable = (lambda offset, shapes=wildcard, rocks=rocks: offset in rocks
                                 or shapes[offset].class_name not in STANDING_WALLS)
+                    if mountain_climbs.get(layout["id"]):
+                        # A forest from a mountain's raised top down to the ground below it stays on
+                        # that ground (_grounded_forests: Route 112's beside its plateau).
+                        grounded = _grounded_forests(layout_cells, layout["width"], layout["height"],
+                                                     terrace_topology[layout["id"]],
+                                                     mountain_climbs[layout["id"]], liftable, wildcard,
+                                                     mountain_art_cells[layout["id"]])
+                        liftable = (lambda offset, inner=liftable, grounded=grounded:
+                                    offset not in grounded and inner(offset))
                 elif cave:
                     # A cave's rock (cave_pins.py's walls) beside a raised floor stands on
                     # that floor, a cell over it: level with the floor it read as more
@@ -1963,7 +2060,8 @@ def compile_data(root: Path) -> dict:
                                        mountain_art_cells[layout["id"]],
                                        terrace_topology[layout["id"]],
                                        exclude=frozenset(reefs) | rocks,
-                                       climbed=mountain_climbs[layout["id"]])}
+                                       climbed=mountain_climbs[layout["id"]],
+                                       forest=grounded)}
             wildcard = tuple(_with_mountain_art(
                 shape, cell, offset in mountain_art_cells[layout["id"]],
                 offset in mountain_outlines[layout["id"]])

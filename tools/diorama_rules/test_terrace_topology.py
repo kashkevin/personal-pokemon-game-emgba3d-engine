@@ -365,12 +365,17 @@ class TerraceTopologyTests(unittest.TestCase):
         self.assertEqual((raised[17]["groundQ16"], raised[17]["topQ16"], raised[17]["rise"],
                           raised[17]["profile"]), (0, 16, 16, "transition-horizontal"))
         self.assertFalse(any(offset in raised for offset in range(20, 25)))
-        # Stairs three rows long rise the one level over their rows.
+        # Stairs three rows long rise the one level over their rows; a level a row with `per_row` (the game's
+        # heights: the owner's decision of 2026-10-29 for Route 112's plateau and Route 111's).
         rows = ["RRRRR", "RTTTR", "RRSRR", "RRSRR", "RRSRR", "GGGGG"]
         cells = tuple(make[ch]() for row in rows for ch in row)
         raised = mountain_ledges(cells, 5, 6, {})
         self.assertEqual([(raised[offset]["groundQ16"], raised[offset]["topQ16"])
                           for offset in (22, 17, 12)], [(0, 5), (5, 11), (11, 16)])
+        raised = mountain_ledges(cells, 5, 6, {}, per_row=True)
+        self.assertEqual([(raised[offset]["groundQ16"], raised[offset]["topQ16"])
+                          for offset in (22, 17, 12)], [(0, 16), (16, 32), (32, 48)])
+        self.assertEqual({raised[offset]["groundQ16"] for offset in (6, 7, 8)}, {3 * MOUNTAIN_LEDGE_Q16})
         # A second top up stairs from the first (Route 115's, Route 114's): a level a climb.
         rows = ["RRRRR", "RTTTR", "RRSRR", "RTTTR", "RRSRR", "GGGGG"]
         cells = tuple(make[ch]() for row in rows for ch in row)
@@ -399,7 +404,7 @@ class TerraceTopologyTests(unittest.TestCase):
                       for y, row in enumerate(rows) for x, ch in enumerate(row))
         self.assertEqual(mountain_ledges(cells, 5, 5, {}), {})
 
-    def test_route112_plateau_stands_a_level_over_the_ground(self):
+    def test_route112_plateau_stands_three_levels_over_the_ground(self):
         tilesets = load_tilesets(ROOT)
         _, layouts = load_world(ROOT)
         behavior_ids = parse_behaviors(ROOT / "include/constants/metatile_behaviors.h")
@@ -412,12 +417,13 @@ class TerraceTopologyTests(unittest.TestCase):
         width = layout["width"]
         route = cells[layout["id"]]
         raised = mountain_ledges(route, width, layout["height"],
-                                 solve_layout(route, width, layout["height"]))
-        # the plateau round the cable car station, the Fiery Path's mouth on it
+                                 solve_layout(route, width, layout["height"]), per_row=True)
+        # the plateau round the cable car station, the Fiery Path's mouth on it: three levels up, a level
+        # a row of its stairs (the owner's decision of 2026-10-29: "Raise to the GBA heights")
         for x, y in ((24, 33), (12, 38), (11, 36)):
-            self.assertEqual(raised[y * width + x]["groundQ16"], MOUNTAIN_LEDGE_Q16)
-        # the stairs up to it (20-21, 41-43) over their three rows; the ground below stays
-        self.assertEqual([raised[y * width + 20]["topQ16"] for y in (43, 42, 41)], [5, 11, 16])
+            self.assertEqual(raised[y * width + x]["groundQ16"], 3 * MOUNTAIN_LEDGE_Q16)
+        # the stairs up to it (20-21, 41-43), a level each of their three rows; the ground below stays
+        self.assertEqual([raised[y * width + 20]["topQ16"] for y in (43, 42, 41)], [16, 32, 48])
         self.assertNotIn(45 * width + 20, raised)
         # Route 115's mountain climbs to three tops, a level a climb (MS-153): its plateau up
         # two rows of stairs, a lower top a row of stairs under it (on the grass's level), the
@@ -452,8 +458,8 @@ class TerraceTopologyTests(unittest.TestCase):
 
     def test_a_muddy_slope_climbs_to_a_mountains_top_as_stairs_do(self):
         # Route 111: the rock plateau north of the desert has no stairs; the Mach Bike's muddy
-        # slopes (MB_MUDDY_SLOPE) are its ways up. Its walkable top stands a level up, the slope
-        # rises over its rows, the ground below keeps its level.
+        # slopes (MB_MUDDY_SLOPE) are its ways up. Its walkable top stands a level up for each row
+        # of the slope, the slope rises over its rows, the ground below keeps its level.
         def rock():
             return {"tileset": "gTileset_Lavaridge", "metatile": 625, "localMetatile": 113,
                     "behavior": "MB_MOUNTAIN_TOP", "collision": 1, "elevation": 0}
@@ -476,12 +482,18 @@ class TerraceTopologyTests(unittest.TestCase):
         self.assertEqual([(raised[offset]["groundQ16"], raised[offset]["topQ16"])
                           for offset in (22, 17)], [(0, 8), (8, 16)])
         self.assertFalse(any(offset in raised for offset in range(25, 30)))
+        # a level a row with `per_row` (Route 111's, the game's heights)
+        raised = mountain_ledges(cells, 5, 6, {}, per_row=True)
+        self.assertEqual([(raised[offset]["groundQ16"], raised[offset]["topQ16"])
+                          for offset in (22, 17)], [(0, 16), (16, 32)])
+        self.assertEqual(raised[6]["groundQ16"], 2 * MOUNTAIN_LEDGE_Q16)
         # A pocket of the top no one walks into (blocked all round) lies on the raised level too; without a raised top
         # in the layout it keeps its level.
         rows = ["RRRRRRR", "RTTTRTR", "RTTTRRR", "RRMRRRR", "RRMRRRR", "GGGGGGG"]
         cells = tuple(make[ch]() for row in rows for ch in row)
         raised = mountain_ledges(cells, 7, 6, {})
         self.assertEqual(raised[12]["groundQ16"], MOUNTAIN_LEDGE_Q16)
+        self.assertEqual(mountain_ledges(cells, 7, 6, {}, per_row=True)[12]["groundQ16"], 2 * MOUNTAIN_LEDGE_Q16)
         rows = ["RRRRRRR", "RTTTRTR", "RTTTRRR", "RRRRRRR", "GGGGGGG"]
         cells = tuple(make[ch]() for row in rows for ch in row)
         self.assertEqual(mountain_ledges(cells, 7, 5, {}), {})
@@ -602,8 +614,13 @@ class TerraceTopologyTests(unittest.TestCase):
         self.assertEqual(set(rock_tops(rock, ground, 5, 5, 16).values()), {32})
         # Rock no ground reaches: the floor.
         self.assertEqual(rock_tops(frozenset({0}), {}, 1, 1, 16), {0: 16})
+        # A row of rock between ground asking a level (west) and a path three levels up (east): no
+        # cell two levels under the rock beside it (Route 112's mountain, its middle a wall where
+        # its rock nearest its plateau met its rock nearest the grass north of it).
+        self.assertEqual(rock_tops(frozenset(range(1, 6)), {0: 16, 6: 48}, 7, 1, 16),
+                         {1: 16, 2: 16, 3: 32, 4: 48, 5: 48})
 
-    def test_route111_plateau_stands_a_level_over_the_desert(self):
+    def test_route111_plateau_stands_two_levels_over_the_desert(self):
         tilesets = load_tilesets(ROOT)
         _, layouts = load_world(ROOT)
         behavior_ids = parse_behaviors(ROOT / "include/constants/metatile_behaviors.h")
@@ -613,19 +630,20 @@ class TerraceTopologyTests(unittest.TestCase):
         for layout in rows:
             width, route = layout["width"], cells[layout["id"]]
             raised = mountain_ledges(route, width, layout["height"],
-                                     solve_layout(route, width, layout["height"]))
-            # the plateau and its arm north to the second slope
+                                     solve_layout(route, width, layout["height"]), per_row=True)
+            # the plateau and its arm north to the second slope, two levels up (its slopes' two rows)
             for x, y in ((16, 33), (24, 30), (34, 15), (30, 4)):
-                self.assertEqual(raised[y * width + x]["groundQ16"], MOUNTAIN_LEDGE_Q16, (layout["id"], x, y))
-            # its two muddy slopes over their two rows, the desert and the grass below stay
+                self.assertEqual(raised[y * width + x]["groundQ16"], 2 * MOUNTAIN_LEDGE_Q16, (layout["id"], x, y))
+            # its two muddy slopes, a level each of their two rows; the desert and the grass below stay
             for x, south, north in ((17, 37, 36), (29, 7, 6)):
                 self.assertEqual((raised[south * width + x]["topQ16"], raised[north * width + x]["topQ16"]),
-                                 (8, 16), (layout["id"], x))
+                                 (16, 32), (layout["id"], x))
             for x, y in ((17, 38), (29, 8), (24, 40)):
                 self.assertNotIn(y * width + x, raised)
-            # the pockets of the top no one walks into: south of the plateau and in the east cliff
-            for x, y in ((20, 34), (20, 36), (38, 83)):
-                self.assertEqual(raised[y * width + x]["groundQ16"], MOUNTAIN_LEDGE_Q16, (layout["id"], x, y))
+            # the pockets of the top no one walks into: south of the plateau on its level, and in the
+            # east cliff on the level of the rock round it (a level over the desert)
+            for x, y, level in ((20, 34, 32), (20, 36, 32), (38, 83, 16)):
+                self.assertEqual(raised[y * width + x]["groundQ16"], level, (layout["id"], x, y))
 
     def test_a_cave_mouth_takes_the_level_it_is_entered_from(self):
         # Route 116's way into Rusturf Tunnel (elevation 0, a door) in the rock's
