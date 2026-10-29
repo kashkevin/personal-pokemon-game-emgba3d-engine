@@ -65,7 +65,8 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_TrainerCard,
     &gUiScreen_Mail,         /* a Mail's letter: the Bag's CHECK, a Pokemon's READ, the PC's MAILBOX */
     &gUiScreen_EasyChat,     /* Easy Chat: a Mail's words, the profile, an interview, the Bard, the quiz */
-    &gUiScreen_HallOfFame,   /* the Hall of Fame after the Champion */
+    &gUiScreen_HallOfFame,   /* the Hall of Fame after the Champion, and its PC's records */
+    &gUiScreen_Credits,      /* the credits' pages over the game's ride */
     &gUiScreen_Shop,
     &gUiScreen_Naming,
     &gUiScreen_Starters,

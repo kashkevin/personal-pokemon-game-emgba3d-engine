@@ -1634,4 +1634,40 @@ static void DeterminePokemonToShow(void)
     sCreditsData->numMonToShow = NUM_MON_SLIDES;
 }
 
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+STATIC_ASSERT(NATIVE_CREDITS_LINES == ENTRIES_PER_PAGE, NativeUiCreditsLines);
+
+// The native UI (src/native_ui/screens/ui_credits.c) prints the credits' pages over the game's own ride: the page
+// Task_UpdatePage printed last (data 0 its state, 2 the page after it) while it fades in (3), stays (4) and fades out
+// (5), and how far that fade (palettes 8 and 9) has come.
+bool32 Credits_NativeUiState(struct NativeCredits *out)
+{
+    u8 taskId = FindTaskIdByFunc(Task_UpdatePage);
+    s16 state, page;
+    u32 i;
+
+    if (gMain.callback2 != CB2_Credits || taskId == TASK_NONE)
+        return FALSE;
+    memset(out, 0, sizeof(*out));
+    state = gTasks[taskId].data[0];
+    page = gTasks[taskId].data[2] - 1;
+    if (state < 3 || state > 5 || page < 0 || page >= PAGE_COUNT)
+        return TRUE;
+    out->count = ENTRIES_PER_PAGE;
+    for (i = 0; i < ENTRIES_PER_PAGE; i++)
+    {
+        out->lines[i] = sCreditsEntryPointerTable[page][i]->text;
+        out->titles[i] = sCreditsEntryPointerTable[page][i]->isTitle;
+        out->y[i] = 5 + i * 16;
+    }
+    if (gPaletteFade.active && (gPaletteFadeSelectedPalettes & 0x300))
+        out->shown = 16 - gPaletteFade.y;
+    else
+        out->shown = state == 5 ? 0 : 16;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI
+
 #endif // !IS_FRLG

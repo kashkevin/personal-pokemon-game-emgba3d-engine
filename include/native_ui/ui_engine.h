@@ -1036,6 +1036,18 @@ struct NativeHof
     u8 teamCount;                /* PC: the Pokémon of the team shown */
 };
 bool32 HallOfFame_NativeUiState(struct NativeHof *out);
+/* the credits (credits.c): the page Task_UpdatePage printed over the game's ride (each line's text, whether it is a
+ * title, its top on the GBA's screen) and how far its fade has come (0 gone .. 16 whole) */
+#define NATIVE_CREDITS_LINES 5
+struct NativeCredits
+{
+    u8 count;
+    u8 shown;
+    const u8 *lines[NATIVE_CREDITS_LINES];
+    bool8 titles[NATIVE_CREDITS_LINES];
+    u8 y[NATIVE_CREDITS_LINES];
+};
+bool32 Credits_NativeUiState(struct NativeCredits *out);
 /* Easy Chat (easy_chat.c) while its screen is up: the words being edited and every part of the screen as the engine
  * has it. inputState is the screen's own (0 a word, 1 the footer, 2 the keyboard, 3 a group's words, 4 quit?,
  * 5 delete all?, 6 confirm?, 7 a quiz's question, 8 a message, 9 and 10 the Bard's lyrics) */
