@@ -1622,3 +1622,40 @@ static void LoadMysteryGiftTextboxBorder(u8 bgId)
 {
     DecompressAndLoadBgGfxUsingHeap(bgId, sTextboxBorder_Gfx, 0x100, 0, 0);
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "window.h"
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_mystery_gift.c) draws the
+// Mystery Gift menus in the new design and follows this state; the input
+// stays here.
+bool32 MysteryGift_NativeUiState(struct NativeMysteryGift *out)
+{
+    const struct ListMenuItem *items;
+    u8 taskId = FindTaskIdByFunc(Task_MysteryGift);
+    u8 count, cursor, state;
+    u32 i;
+
+    memset(out, 0, sizeof(*out));
+    out->msgWindow = WINDOW_NONE;
+    if (gMain.callback2 != CB2_MysteryGiftEReader || taskId == TASK_NONE)
+        return FALSE;
+    state = ((struct MysteryGiftTaskData *)gTasks[taskId].data)->state;
+    if (state > MG_STATE_CLIENT_LINK_WAIT && state != MG_STATE_EXIT)
+        return FALSE;
+    out->headerWindow = WIN_HEADER;
+    if (Window_NativeUiShown(WIN_MSG))
+        out->msgWindow = WIN_MSG;
+    if (ListMenu_NativeUiMysteryGiftList(&items, &count, &cursor))
+    {
+        out->menuUp = TRUE;
+        out->menuCount = count < ARRAY_COUNT(out->menuLabels) ? count : ARRAY_COUNT(out->menuLabels);
+        for (i = 0; i < out->menuCount; i++)
+            out->menuLabels[i] = items[i].name;
+        out->menuCursor = cursor;
+    }
+    out->ready = !gPaletteFade.active && state != MG_STATE_EXIT;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

@@ -1369,6 +1369,23 @@ struct NativeDomeCard
     bool8 ready;
 };
 bool32 DomeCard_NativeUiState(struct NativeDomeCard *out);
+/* The main menu's MYSTERY GIFT (mystery_gift_menu.c) on its menus: its header window (the title, the PICK / OK / EXIT
+ * line), its list (WONDER CARDS / WONDER NEWS / EXIT; WIRELESS COMMUNICATION / FRIEND / CANCEL) while it reads the pad,
+ * its message window while shown. Its other states (a link, a WONDER CARD or NEWS up: not on PC, which has no
+ * Wireless Adapter) stay the game's. */
+struct NativeMysteryGift
+{
+    u8 headerWindow;
+    u8 msgWindow;               /* WINDOW_NONE: no message */
+    bool8 menuUp;
+    u8 menuCount;
+    const u8 *menuLabels[4];
+    u8 menuCursor;
+    bool8 ready;
+};
+bool32 MysteryGift_NativeUiState(struct NativeMysteryGift *out);
+struct ListMenuItem;
+bool32 ListMenu_NativeUiMysteryGiftList(const struct ListMenuItem **items, u8 *count, u8 *cursor);
 /* the Battle Frontier's records windows (frontier_util.c: a facility's results, the link contests', the Ranking
  * Hall's) while one is up: its window and size in tiles; its lines are the window's transcript */
 bool32 FrontierUtil_NativeUiRecordsWindow(u8 *windowId, u8 *width, u8 *height);

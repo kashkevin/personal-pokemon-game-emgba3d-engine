@@ -1318,6 +1318,7 @@ static void OpenTestFactory(bool swap)
 
 void CallBattleDomeFunction(void);   /* battle_dome.c: a script special (no header declares it) */
 void CB2_InitMysteryGift(void);       /* mystery_gift_menu.c (the main menu's MYSTERY GIFT) */
+void CB2_InitEReader(void);           /* mystery_gift_menu.c (the main menu's MYSTERY EVENTS) */
 
 static void TestDomeFunction(u16 function)
 {
@@ -4033,7 +4034,8 @@ bool16 ScriptMenu_CreateStartMenuForPokenavTutorial(void);  /* script_menu.c: th
    contest with the party's first Pokémon; BLEND the Berry Blender with a computer partner; BTAG the Bag's first
    berry's tag; DIPLOMA the POKéDEX diploma; PBAG the Battle Pyramid's bag; FACTORY the Battle Factory's rentals,
    FSWAP its swap screen; DOME the Battle Dome's tourney tree, DOMERES a round's results tree, DOMEPREV the last
-   tourney's; MGIFT the main menu's MYSTERY GIFT (its flag set in the run's own copy of the save) */
+   tourney's; MGIFT the main menu's MYSTERY GIFT, MEVENT its MYSTERY EVENTS (their flags set in the run's own copy
+   of the save) */
 static bool FieldEventAt(const char *script, const char *event, int frame)
 {
     const char *p = script;
@@ -4581,6 +4583,12 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
             TestLog("Battle env test: the main menu's MYSTERY GIFT");
             FlagSet(FLAG_SYS_MYSTERY_GIFT_ENABLE);
             SetMainCallback2(CB2_InitMysteryGift);
+        }
+        if (FieldEventAt(s.fieldKeys, "MEVENT", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
+        {
+            TestLog("Battle env test: the main menu's MYSTERY EVENTS");
+            FlagSet(FLAG_SYS_MYSTERY_EVENT_ENABLE);
+            SetMainCallback2(CB2_InitEReader);
         }
         if (FieldEventAt(s.fieldKeys, "HOF", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
         {

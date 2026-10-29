@@ -81,6 +81,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_Factory,      /* the Battle Factory's rentals and swaps (the Slateport tent's too) */
     &gUiScreen_DomeTree,     /* the Battle Dome's tourney tree */
     &gUiScreen_DomeCard,     /* the Battle Dome's info cards (a trainer's, a match's) */
+    &gUiScreen_MysteryGift,  /* the main menu's MYSTERY GIFT on its menus */
     &gUiScreen_Shop,
     &gUiScreen_Naming,
     &gUiScreen_Starters,

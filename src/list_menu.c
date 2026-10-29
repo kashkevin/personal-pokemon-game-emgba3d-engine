@@ -1355,3 +1355,23 @@ static void ListMenuRemoveRedArrowCursorObject(u8 taskId)
     DestroySprite(&gSprites[data->spriteId]);
     DestroyTask(taskId);
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// the Mystery Gift menus' list (DoMysteryGiftListMenu) while it reads the pad (its state 1): its items and the
+// cursor (the native PC UI's Mystery Gift screen, src/native_ui/screens/ui_mystery_gift.c)
+bool32 ListMenu_NativeUiMysteryGiftList(const struct ListMenuItem **items, u8 *count, u8 *cursor)
+{
+    struct ListMenu *list;
+
+    if (sMysteryGiftLinkMenu.state != 1 || sMysteryGiftLinkMenu.listTaskId >= NUM_TASKS
+     || !gTasks[sMysteryGiftLinkMenu.listTaskId].isActive || gTasks[sMysteryGiftLinkMenu.listTaskId].func != ListMenuDummyTask)
+        return FALSE;
+    list = (void *)gTasks[sMysteryGiftLinkMenu.listTaskId].data;
+    *items = list->template.items;
+    *count = list->template.totalItems;
+    *cursor = list->scrollOffset + list->selectedRow;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI
