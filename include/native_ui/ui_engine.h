@@ -1139,6 +1139,41 @@ struct NativeDecorPicture
     u16 palette[16];
 };
 bool32 Decoration_NativeUiPicture(u16 decor, struct NativeDecorPicture *out);
+/* the decoration PC's menus (decoration.c: the player's room's PC, a secret base's PC, the Fortree trader): what to
+ * do, the categories with what is owned of each, a category's decorations with those in use, the toss's YES / NO and
+ * the lines in between. Placing and putting away on the field stay the game's. */
+enum NativeDecorMenuPhase
+{
+    NATIVE_DECOR_MENU_NONE,
+    NATIVE_DECOR_MENU_OPENING,   /* a list is put up */
+    NATIVE_DECOR_MENU_ACTIONS,   /* DECORATE, PUT AWAY, TOSS, CANCEL */
+    NATIVE_DECOR_MENU_CATEGORIES,
+    NATIVE_DECOR_MENU_ITEMS,
+    NATIVE_DECOR_MENU_MESSAGE,   /* a line (none owned, none in use, in use, thrown away, will be thrown away) */
+    NATIVE_DECOR_MENU_CONFIRM,   /* the toss's YES / NO */
+};
+#define NATIVE_DECOR_CATEGORIES 8
+#define NATIVE_DECOR_ITEMS_MAX 40
+struct NativeDecorMenu
+{
+    u8 phase;                    /* enum NativeDecorMenuPhase */
+    bool8 ready;
+    bool8 playerRoom;            /* the player's room (else a secret base) */
+    bool8 trade;                 /* the Fortree trader's choice */
+    u8 cursor;                   /* the list up now: actions, categories (NATIVE_DECOR_CATEGORIES: CANCEL), items (count: CANCEL) */
+    const u8 *actions[4];
+    const u8 *actionDescription; /* the cursor's action */
+    const u8 *categoryNames[NATIVE_DECOR_CATEGORIES];
+    u8 owned[NATIVE_DECOR_CATEGORIES], capacity[NATIVE_DECOR_CATEGORIES];
+    bool8 categoryDisabled[NATIVE_DECOR_CATEGORIES]; /* the player's room takes only dolls and cushions */
+    const u8 *categoryCancel;    /* CANCEL, or the trader's EXIT */
+    u8 category;                 /* ITEMS: the category shown */
+    u8 count;
+    u16 items[NATIVE_DECOR_ITEMS_MAX];
+    u8 inUse[NATIVE_DECOR_ITEMS_MAX]; /* 0 no, 1 in the secret base, 2 in the player's room */
+    u8 yesNoCursor;
+};
+bool32 Decoration_NativeUiMenu(struct NativeDecorMenu *out);
 
 /* ---------------------------------------------------------------- the Trainer Card (trainer_card.c) */
 

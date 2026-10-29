@@ -34,6 +34,8 @@
 #include "party_menu.h"
 #include "daycare.h"
 #include "pokedex.h"
+#include "decoration_inventory.h"
+#include "constants/decorations.h"
 #include "mail.h"
 #include "string_util.h"
 #include "pokemon_storage_system.h"
@@ -1145,6 +1147,26 @@ static void SetUpTestPcMail(void)
         mail->itemId = item;
         TestLog("Battle env test: PC mail %d: item %ld", slot - PARTY_SIZE, item);
         slot++;
+        if (*p == ',')
+            p++;
+    }
+}
+
+/* PKMN_TEST_DECOR=<decoration>,...: those decorations owned (in the PC) - the native decoration menus' checks */
+static void SetUpTestDecorations(void)
+{
+    const char *p = getenv("PKMN_TEST_DECOR");
+
+    while (p != NULL && *p != '\0')
+    {
+        char *end;
+        long decor = strtol(p, &end, 0);
+
+        if (end == p)
+            break;
+        p = end;
+        if (decor > 0 && decor < NUM_DECORATIONS + 1)
+            TestLog("Battle env test: decoration %ld owned: %d", decor, DecorationAdd(decor));
         if (*p == ',')
             p++;
     }
@@ -3485,6 +3507,7 @@ void DioramaBattleEnvTest_FieldTick(void)
         {
             SetUpTestBag();
             SetUpTestPcMail();
+            SetUpTestDecorations();
             s.bagDone = true;
         }
         if (s.warpX >= 0 && s.warpY >= 0)

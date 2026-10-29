@@ -2781,4 +2781,95 @@ bool32 Decoration_NativeUiPicture(u16 decor, struct NativeDecorPicture *out)
     memcpy(out->palette, sBuffer.palette, sizeof(out->palette));
     return TRUE;
 }
+
+// The native decoration menus (src/native_ui/screens/ui_pc_decor.c): the PC's menus as their tasks run them - what
+// to do (and its description), the categories with what is owned of each and which the player's room takes, a
+// category's decorations with those in use, the toss's YES / NO and the lines in between. Every button stays here.
+STATIC_ASSERT(NATIVE_DECOR_CATEGORIES == DECORCAT_COUNT, NativeUiDecorCategories);
+STATIC_ASSERT(ARRAY_COUNT(sDecorationMainMenuActions) == 4, NativeUiDecorActions);
+
+static u8 NativeUiDecorTask(u8 *phase)
+{
+    u8 taskId;
+    void (*next)(u8) = MenuHelpers_NativeUiMessageNext();
+
+    if ((taskId = FindTaskIdByFunc(HandleDecorationActionsMenuInput)) != TASK_NONE)
+        *phase = NATIVE_DECOR_MENU_ACTIONS;
+    else if ((taskId = FindTaskIdByFunc(HandleDecorationCategoriesMenuInput)) != TASK_NONE)
+        *phase = NATIVE_DECOR_MENU_CATEGORIES;
+    else if ((taskId = FindTaskIdByFunc(HandleDecorationItemsMenuInput)) != TASK_NONE)
+        *phase = NATIVE_DECOR_MENU_ITEMS;
+    else if ((taskId = FindTaskIdByFunc(ShowDecorationItemsWindow)) != TASK_NONE
+          || (taskId = FindTaskIdByFunc(Task_ShowDecorationItemsWindow)) != TASK_NONE)
+        *phase = NATIVE_DECOR_MENU_OPENING;
+    else if ((taskId = FindTaskIdByFunc(ReturnToDecorationItemsAfterInvalidSelection)) != TASK_NONE)
+        *phase = NATIVE_DECOR_MENU_MESSAGE;
+    else if (MenuHelpers_NativeUiYesNo() && MenuHelpers_NativeUiYesFunc() == TossDecoration)
+        *phase = NATIVE_DECOR_MENU_CONFIRM;
+    else if (next == ReturnToDecorationActionsAfterInvalidSelection || next == ReturnToDecorationCategoriesAfterInvalidSelection
+          || next == ReturnToDecorationItemsAfterInvalidSelection || next == TossDecorationPrompt)
+        *phase = NATIVE_DECOR_MENU_MESSAGE;
+    else
+        return TASK_NONE;
+    if (taskId == TASK_NONE)
+    {
+        // a line or the YES / NO: the menu's own task (the one with the decoration command) runs that helper
+        for (taskId = 0; taskId < NUM_TASKS; taskId++)
+            if (gTasks[taskId].isActive && MenuHelpers_NativeUiRunsHelper(taskId))
+                break;
+    }
+    return taskId;
+}
+
+bool32 Decoration_NativeUiMenu(struct NativeDecorMenu *out)
+{
+    u8 phase = NATIVE_DECOR_MENU_NONE;
+    u8 taskId = NativeUiDecorTask(&phase);
+    u8 command;
+    u32 i;
+
+    memset(out, 0, sizeof(*out));
+    if (phase == NATIVE_DECOR_MENU_NONE || sDecorationContext.items == NULL)
+        return FALSE;
+    command = taskId < NUM_TASKS ? gTasks[taskId].tDecorationMenuCommand : DECOR_MENU_PLACE;
+    out->phase = phase;
+    out->playerRoom = sDecorationContext.isPlayerRoom;
+    out->trade = command == DECOR_MENU_TRADE;
+    for (i = 0; i < ARRAY_COUNT(sDecorationMainMenuActions); i++)
+        out->actions[i] = sDecorationMainMenuActions[i].text;
+    out->actionDescription = sSecretBasePCMenuItemDescriptions[sDecorationActionsCursorPos];
+    for (i = 0; i < DECORCAT_COUNT; i++)
+    {
+        out->categoryNames[i] = sDecorationCategoryNames[i];
+        out->owned[i] = GetNumOwnedDecorationsInCategory(i);
+        out->capacity[i] = gDecorationInventories[i].size;
+        out->categoryDisabled[i] = out->playerRoom && command == DECOR_MENU_PLACE && i != DECORCAT_DOLL && i != DECORCAT_CUSHION;
+    }
+    out->categoryCancel = out->trade ? gText_Exit : gText_Cancel;
+    out->category = sCurDecorationCategory;
+    if (sCurDecorationCategory < DECORCAT_COUNT)
+    {
+        out->count = min(sNumOwnedDecorationsInCurCategory, NATIVE_DECOR_ITEMS_MAX);
+        for (i = 0; i < out->count; i++)
+        {
+            out->items[i] = gDecorationInventories[sCurDecorationCategory].items[i];
+            out->inUse[i] = IsDecorationIndexInSecretBase(i + 1) ? 1 : IsDecorationIndexInPlayersRoom(i + 1) ? 2 : 0;
+        }
+    }
+    switch (phase)
+    {
+    case NATIVE_DECOR_MENU_ACTIONS:
+        out->cursor = Menu_GetCursorPos();
+        break;
+    case NATIVE_DECOR_MENU_CATEGORIES:
+        out->cursor = Menu_GetCursorPos();
+        break;
+    default:
+        out->cursor = min(sDecorationsScrollOffset + sDecorationsCursorPos, out->count);
+        break;
+    }
+    out->yesNoCursor = phase == NATIVE_DECOR_MENU_CONFIRM ? Menu_GetCursorPos() : 0;
+    out->ready = phase != NATIVE_DECOR_MENU_OPENING && !gPaletteFade.active;
+    return TRUE;
+}
 #endif // ENABLE_NATIVE_UI

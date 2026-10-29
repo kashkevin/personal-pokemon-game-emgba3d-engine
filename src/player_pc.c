@@ -1478,8 +1478,8 @@ static void ItemStorage_ReturnToListInput(u8 taskId)
 // The native PC UI (src/native_ui/screens/ui_storage_menus.c) draws the
 // player's PC's two menus (ITEM STORAGE, MAILBOX...; WITHDRAW ITEM...) and
 // their lines; every button and rule stays here. The item lists and the
-// mailbox have their own screens (below); the decorations keep the game's
-// picture.
+// mailbox have their own screens (below), the decorations' menus theirs
+// (decoration.c).
 STATIC_ASSERT(ARRAY_COUNT(sItemStorage_MenuActions) <= NATIVE_PC_MENU_MAX, NativeUiItemStorageRows);
 
 bool32 PlayerPC_NativeUiState(struct NativePcMenu *out)

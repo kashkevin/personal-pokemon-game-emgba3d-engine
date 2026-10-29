@@ -10,7 +10,7 @@
  * throw away, the toss's YES / NO, and moving an item (SELECT). The engine keeps
  * every rule and button: its list's cursor moves with its own presses (clicks
  * and the wheel queue them). DEPOSIT ITEM is the bag's (screen 2), the mailbox
- * ui_pc_mailbox.c's; the decorations keep the game's picture. Project-owned.
+ * ui_pc_mailbox.c's, the decorations' menus ui_pc_decor.c's. Project-owned.
  */
 #include <stdlib.h>
 #include <string.h>

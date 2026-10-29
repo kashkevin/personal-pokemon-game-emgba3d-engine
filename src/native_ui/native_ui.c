@@ -56,6 +56,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_Storage,
     &gUiScreen_PcItems,       /* the player's PC's ITEM STORAGE lists, over the field */
     &gUiScreen_PcMailbox,     /* the player's PC's MAILBOX, over the field */
+    &gUiScreen_PcDecor,       /* the decoration PC's menus (room, secret base, the trader), over the field */
     &gUiScreen_StorageMenus,  /* the PC's first menus, over the field */
     &gUiScreen_DexNewEntry,   /* before the battle: a catch's new entry page runs inside it */
     &gUiScreen_Battle,
