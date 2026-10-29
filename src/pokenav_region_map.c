@@ -792,3 +792,42 @@ void UpdateRegionMapHelpBarText(void)
             PrintHelpBarText(HELPBAR_MAP_ZOOMED_OUT);
     }
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// PC 3D game (screens/ui_region_map.c, region_map.c RegionMap_NativeUiState): the HOENN MAP once its map is set up
+// (to its fade out): whether it reads buttons (no task of its own running), whether R flies (the Poke Rider, as
+// HandleRegionMapInput allows it), whether the player is off the map (zoom disabled: no cursor, the map dimmed)
+bool8 PokenavRegionMap_NativeUiOpen(bool8 *input, bool8 *canFly, bool8 *offMap, struct RegionMap **map)
+{
+    struct Pokenav_RegionMapMenu *menu;
+    struct Pokenav_RegionMapGfx *gfx;
+
+    if (Pokenav_NativeUiMenuId() != POKENAV_REGION_MAP)
+        return FALSE;
+    menu = GetSubstructPtr(POKENAV_SUBSTRUCT_REGION_MAP_STATE);
+    gfx = GetSubstructPtr(POKENAV_SUBSTRUCT_REGION_MAP_ZOOM);
+    *map = GetSubstructPtr(POKENAV_SUBSTRUCT_REGION_MAP);
+    if (menu == NULL || gfx == NULL || *map == NULL || (*map)->initStep < 8)
+        return FALSE;   // LoadRegionMapGfx not through yet
+    *offMap = menu->zoomDisabled;
+    *input = (menu->callback == HandleRegionMapInput || menu->callback == HandleRegionMapInputZoomDisabled)
+          && gfx->isTaskActiveCB != NULL && !gfx->isTaskActiveCB() && !gPaletteFade.active;
+    *canFly = !menu->zoomDisabled && (*map)->mapSecType == MAPSECTYPE_CITY_CANFLY && FlagGet(OW_FLAG_POKE_RIDER)
+           && Overworld_MapTypeAllowsTeleportAndFly(gMapHeader.mapType) == TRUE;
+    return TRUE;
+}
+
+const u32 *PokenavRegionMap_NativeUiTownMap(u16 mapSec, u8 posWithinMapSec, const u32 **tiles, const u16 **palette)
+{
+    u32 i;
+
+    *tiles = sRegionMapCityZoomTiles_Gfx;
+    *palette = gRegionMapCityZoomTiles_Pal;
+    for (i = 0; i < NUM_CITY_MAPS; i++)
+        if (sPokenavCityMaps[i].mapSecId == mapSec && sPokenavCityMaps[i].index == posWithinMapSec)
+            return sPokenavCityMaps[i].tilemap;
+    return NULL;
+}
+#endif // ENABLE_NATIVE_UI

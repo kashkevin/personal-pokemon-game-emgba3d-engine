@@ -70,8 +70,8 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_GameCorner,
     &gUiScreen_SlotMachine,  /* the Game Corner's slot machines (the reels' own screen) */
     &gUiScreen_Roulette,     /* the Game Corner's roulette tables (the wheel and the board) */
-    &gUiScreen_RegionMap,    /* the Fly map and a Pokemon Center's wall map */
-    &gUiScreen_Pokenav,      /* the PokéNav's pages (its menus; the rest keep the game's picture) */
+    &gUiScreen_RegionMap,    /* the Fly map, a Pokemon Center's wall map, the PokéNav's HOENN MAP */
+    &gUiScreen_Pokenav,      /* the PokéNav's other pages (after the region map: it takes the HOENN MAP) */
     &gUiScreen_Transition, /* a battle transition on the field */
     &gUiScreen_FieldMove,  /* a field move's cut-in (an HM's Pokemon on its banner) */
     &gUiScreen_MatchCall,  /* a PokeNav call over the field */

@@ -3153,7 +3153,7 @@ static void NativeUiFlySpot(struct NativeRegionMapState *out, mapsec_u16_t mapSe
 bool8 RegionMap_NativeUiState(struct NativeRegionMapState *out)
 {
     struct RegionMap *map;
-    bool8 input = FALSE, canFly = FALSE;
+    bool8 input = FALSE, canFly = FALSE, offMap = FALSE;
     u32 i;
 
     memset(out, 0, sizeof(*out));
@@ -3167,16 +3167,23 @@ bool8 RegionMap_NativeUiState(struct NativeRegionMapState *out)
     }
     else if (FieldRegionMap_NativeUiOpen(&input, &canFly, &map))
         out->kind = NATIVE_REGION_MAP_TOWN;
+    else if (PokenavRegionMap_NativeUiOpen(&input, &canFly, &offMap, &map))
+        out->kind = NATIVE_REGION_MAP_POKENAV;
     else
         return FALSE;
-    if (map->zoomed)
+    if (map->zoomed && out->kind != NATIVE_REGION_MAP_POKENAV)
         return FALSE;
     out->regionMapType = GetRegionMapType(gMapHeader.regionMapSectionId);
     out->input = input;
     out->canFly = canFly;
     out->female = gSaveBlock2Ptr->playerGender != MALE;
-    out->cursorX = map->cursorPosX;
-    out->cursorY = map->cursorPosY;
+    out->zoomed = map->zoomed;
+    out->offMap = offMap;
+    out->scrollX = map->scrollX;
+    out->scrollY = map->scrollY;
+    out->posWithinMapSec = map->posWithinMapSec;
+    out->cursorX = map->zoomed ? map->zoomedCursorPosX : map->cursorPosX;
+    out->cursorY = map->zoomed ? map->zoomedCursorPosY : map->cursorPosY;
     out->cursorPixX = map->cursorSprite != NULL ? map->cursorSprite->x + map->cursorSprite->x2 : 8 * map->cursorPosX + 4;
     out->cursorPixY = map->cursorSprite != NULL ? map->cursorSprite->y + map->cursorSprite->y2 : 8 * map->cursorPosY + 4;
     out->playerShown = map->playerIconSprite != NULL;

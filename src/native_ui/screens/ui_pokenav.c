@@ -6,8 +6,8 @@
  * boundary (pokenav.c Pokenav_NativeUiState), draws it on the design's device and turns clicks into the game's own
  * button presses. Drawn here: the menus (the main menu, CONDITION's and its search's) and MATCH CALL (the trainers
  * registered, a trainer's menu and check page, a call), CONDITION (a Pokemon's conditions, sheen and markings, the
- * party's or a search's) and a search's ranked results. A page not drawn here keeps the game's picture.
- * Project-owned.
+ * party's or a search's), a search's ranked results, and RIBBONS (the Pokemon with ribbons, a Pokemon's ribbon
+ * case). The HOENN MAP is screens/ui_region_map.c's; between pages this screen's device stays up. Project-owned.
  */
 #include <math.h>
 #include <stdio.h>
@@ -111,9 +111,9 @@ static bool Detect(void)
 {
     struct NativePokenav p;
 
-    /* every page but the HOENN map (still the game's), and between pages as they slide and fade: the game's own
-       frames never show through */
-    return Pokenav_NativeUiState(&p) && p.menuId != POKENAV_REGION_MAP;
+    /* every page, and between pages as they slide and fade: the game's own frames never show through (the HOENN
+       MAP, once its map is set up, is screens/ui_region_map.c's: that screen is asked first) */
+    return Pokenav_NativeUiState(&p);
 }
 
 static void Capture(void)

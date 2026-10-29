@@ -520,6 +520,7 @@ enum NativeRegionMapKind
 {
     NATIVE_REGION_MAP_FLY = 1,
     NATIVE_REGION_MAP_TOWN,
+    NATIVE_REGION_MAP_POKENAV,  /* the PokéNav's HOENN MAP: it zooms (A), R flies with the Poke Rider */
 };
 struct NativeRegionFlySpot
 {
@@ -545,6 +546,11 @@ struct NativeRegionMapState
     u8 subName[24];             /* a place with two names' second (Ever Grande City's), as the Fly map prints it */
     u8 flyCount;
     struct NativeRegionFlySpot fly[NATIVE_REGION_FLY_MAX];
+    /* the PokéNav's */
+    bool8 zoomed;               /* zoomed in: the map scrolls under a still cursor (cursorX, cursorY its cell) */
+    bool8 offMap;               /* the player off the map (the event islands): the map dimmed, no cursor or zoom */
+    s16 scrollX, scrollY;       /* zoomed in: the map's scroll, the art's pixel under the cursor's cell less 0x34, 0x44 */
+    u8 posWithinMapSec;         /* which of the place's landmarks and town maps (a place over several cells) */
 };
 bool8 RegionMap_NativeUiState(struct NativeRegionMapState *out);
 /* a clicked cell: the map's own input puts the cursor there next (as SELECT's jump to a trainer does) */
@@ -552,6 +558,13 @@ void RegionMap_NativeUiMoveCursor(u16 x, u16 y);
 struct RegionMap;
 /* field_region_map.c: the wall map is open (its map set up) */
 bool8 FieldRegionMap_NativeUiOpen(bool8 *input, bool8 *canFly, struct RegionMap **map);
+/* pokenav_region_map.c: the PokéNav's HOENN MAP is up (its map set up); *offMap: the player is off the map */
+bool8 PokenavRegionMap_NativeUiOpen(bool8 *input, bool8 *canFly, bool8 *offMap, struct RegionMap **map);
+/* ... a town's map as the HOENN MAP shows it zoomed in: its 10x10 tilemap (compressed) over the town map tiles
+ * (compressed, four bits a pixel) and their palette; NULL: no town map there */
+const u32 *PokenavRegionMap_NativeUiTownMap(u16 mapSec, u8 posWithinMapSec, const u32 **tiles, const u16 **palette);
+/* pokenav.c: the PokéNav's page while it runs (POKENAV_MAIN_MENU ...), else 0 */
+u32 Pokenav_NativeUiMenuId(void);
 
 /* the CRY page (pokedex_cry_screen.c): the waveform and the meter */
 struct NativeDexCry

@@ -9,6 +9,9 @@
  * cursor there (the map's own input takes it, as SELECT's jump to a trainer does); a click on the cursor's own place
  * flies there on the Fly map (A); a right click goes back (B). The owner's request of 2026-10-26: every screen in the
  * current interface. Project-owned.
+ * The PokéNav's HOENN MAP too (step 13 of the owner's plan): zoomed in (A) the map at four times the game's size
+ * scrolling under a still cursor, as the game's does; the side card shows a visited town's own map (the game's) with a
+ * key to what is in it, or a route's landmarks; off the map (the event islands) the map dims as the game's does.
  */
 #include <math.h>
 #include <stdio.h>
@@ -16,6 +19,8 @@
 #include <string.h>
 
 #include "global.h"
+#include "decompress.h"
+#include "landmark.h"
 #include "main.h"
 #include "region_map.h"
 #include "string_util.h"
@@ -44,6 +49,7 @@
 enum
 {
     HIT_CELL = UI_HIT_SCREEN,  /* index: y * 32 + x */
+    HIT_ZOOMED,                /* the zoomed map: a click zooms out (A) */
 };
 
 static const u8 sText_None[] = _("-");
@@ -61,6 +67,31 @@ static const u8 sText_You[] = _("You");
 static const u8 sText_Others[] = _("Other trainers");
 static const u8 sText_ClickHint[] = _("Click a place to move there; click it again to fly.");
 static const u8 sText_ClickHintTown[] = _("Click a place to look at it.");
+static const u8 sText_ClickHintNav[] = _("Click a place to move there; click it again to zoom in.");
+static const u8 sText_ClickHintZoomed[] = _("Click the map to zoom out.");
+static const u8 sText_ZoomIn[] = _("Zoom in");
+static const u8 sText_ZoomOut[] = _("Zoom out");
+static const u8 sText_OffMap[] = _("You are off the map.");
+static const u8 sText_Visited[] = _("Visited.");
+
+static const u8 sText_KeyCenter[] = _("POKéMON CENTER");
+static const u8 sText_KeyMart[] = _("POKéMON MART");
+static const u8 sText_KeyGym[] = _("POKéMON GYM");
+static const u8 sText_KeyTent[] = _("BATTLE TENT");
+static const u8 sText_KeyContest[] = _("POKéMON CONTEST");
+
+/* the town map's key (the game's city_zoom_text.png): its colours in the town map tiles' palette */
+static const struct
+{
+    uint32_t hex;
+    const u8 *label;
+} sTownKey[] = {
+    {0xFF4141, sText_KeyCenter},
+    {0x1010FF, sText_KeyMart},
+    {0xCD8352, sText_KeyGym},
+    {0xFF8300, sText_KeyTent},
+    {0x839CF6, sText_KeyContest},
+};
 
 /* the players' colours (the PLAYERS screen's and the Trainer Card's): player ids 1-4 */
 static const char *const sSlotHeads[4] = {"head_green", "head_blue", "head_red", "head_yellow"};
@@ -82,8 +113,90 @@ static int sIconFemale = -1;
 static u8 sName[32], sSubName[32];
 static struct Marker sMarkers[MARKERS_MAX];
 static int sMarkerCount;
+static int sViewX = MAP_X, sViewY = MAP_Y, sCell = CELL;   /* the map as drawn: 2x, or 4x zoomed in */
+static u8 sTown[80 * 80 * 4];             /* the cursor's town's map (the HOENN MAP's), 10x10 tiles */
+static int sTownKeyOf = -1;               /* its mapsec * 8 + position (-1: none) */
+static u8 sTownKeys;                      /* which of sTownKey it shows */
+static u8 *sTownTiles;                    /* the town map tiles, decompressed on first use */
+static u8 sLandmarks[4][24];
+static int sLandmarkCount;
 
 /* ---------------------------------------------------------------- capture */
+
+/* a visited town's map as the HOENN MAP shows it (the game's tiles and tilemap), and the key's colours in it */
+static void LoadTown(void)
+{
+    const u32 *tiles = NULL, *tilemap;
+    const u16 *palette = NULL;
+    int key = sR.mapSec * 8 + sR.posWithinMapSec;
+    u16 entries[100];
+
+    if (sR.mapSecType != MAPSECTYPE_CITY_CANFLY
+     || (tilemap = PokenavRegionMap_NativeUiTownMap(sR.mapSec, sR.posWithinMapSec, &tiles, &palette)) == NULL)
+    {
+        sTownKeyOf = -1;
+        return;
+    }
+    if (key == sTownKeyOf)
+        return;
+    if (sTownTiles == NULL)
+    {
+        u32 size = GetDecompressedDataSize(tiles);
+
+        if (size < 32 || (sTownTiles = calloc(size + 64, 1)) == NULL)
+            return;
+        DecompressDataWithHeaderWram(tiles, sTownTiles);
+    }
+    if (GetDecompressedDataSize(tilemap) < sizeof(entries))
+        return;
+    DecompressDataWithHeaderWram(tilemap, entries);
+    memset(sTown, 0, sizeof(sTown));
+    for (int i = 0; i < 100; i++)
+    {
+        u8 tile[8 * 8 * 4];
+        int t = entries[i] & 0x3FF, hflip = (entries[i] >> 10) & 1, vflip = (entries[i] >> 11) & 1;
+
+        if (t >= 64)
+            continue;   /* the town map tiles are 64 */
+        UiGfx_Decode4bpp(tile, 8, sTownTiles + t * 32, palette, 8, 8);
+        for (int y = 0; y < 8; y++)
+            for (int x = 0; x < 8; x++)
+            {
+                const u8 *src = &tile[((vflip ? 7 - y : y) * 8 + (hflip ? 7 - x : x)) * 4];
+
+                memcpy(&sTown[(((i / 10) * 8 + y) * 80 + (i % 10) * 8 + x) * 4], src, 4);
+            }
+    }
+    /* the key: the colours the town's map shows */
+    sTownKeys = 0;
+    for (size_t k = 0; k < ARRAY_COUNT(sTownKey); k++)
+        for (int i = 0; i < 80 * 80 && !(sTownKeys & (1 << k)); i++)
+        {
+            const u8 *px = &sTown[i * 4];
+
+            if (px[3] != 0 && abs(px[0] - (int)(sTownKey[k].hex >> 16)) < 10
+             && abs(px[1] - (int)((sTownKey[k].hex >> 8) & 0xFF)) < 10 && abs(px[2] - (int)(sTownKey[k].hex & 0xFF)) < 10)
+                sTownKeys |= 1 << k;
+        }
+    sTownKeyOf = key;
+}
+
+static void CaptureNav(void)
+{
+    LoadTown();
+    sLandmarkCount = 0;
+    if (sR.mapSecType == MAPSECTYPE_ROUTE || sR.mapSecType == MAPSECTYPE_BATTLE_FRONTIER)
+    {
+        const u8 *name;
+
+        while (sLandmarkCount < (int)ARRAY_COUNT(sLandmarks)
+            && (name = GetLandmarkName(sR.mapSec, sR.posWithinMapSec, sLandmarkCount)) != NULL)
+        {
+            UiText_TitleCase(sLandmarks[sLandmarkCount], sizeof(sLandmarks[0]), name, false);
+            sLandmarkCount++;
+        }
+    }
+}
 
 static bool Detect(void)
 {
@@ -123,6 +236,8 @@ static void Capture(void)
         if (RegionMap_PortableMarkerAt(i, &m->kind, &m->slot, &m->x, &m->y))
             sMarkerCount++;
     }
+    if (sR.kind == NATIVE_REGION_MAP_POKENAV)
+        CaptureNav();
 }
 
 /* ---------------------------------------------------------------- pieces */
@@ -149,12 +264,12 @@ static void BlitRgba2x(const char *key, const u8 *rgba, int w, int h, int x, int
 
 static int CellX(int x)
 {
-    return MAP_X + x * CELL;
+    return sViewX + x * sCell;
 }
 
 static int CellY(int y)
 {
-    return MAP_Y + y * CELL;
+    return sViewY + y * sCell;
 }
 
 static void Background(int t)
@@ -181,7 +296,7 @@ static void PlaceGlow(int t)
     for (int r = 0; r < ROWS; r++)
         for (int c = 0; c < COLS; c++)
             if (sSections[r][c] == sR.mapSec)
-                UiG_Rect(CellX(c), CellY(r), CELL, CELL, edge);
+                UiG_Rect(CellX(c), CellY(r), sCell, sCell, edge);
     UiG_Restore();
     for (int r = 0; r < ROWS; r++)
         for (int c = 0; c < COLS; c++)
@@ -191,20 +306,20 @@ static void PlaceGlow(int t)
             if (sSections[r][c] != sR.mapSec)
                 continue;
             if (r == 0 || sSections[r - 1][c] != sR.mapSec)
-                UiG_Rect(x, y, CELL, 2, edge);
+                UiG_Rect(x, y, sCell, 2, edge);
             if (r == ROWS - 1 || sSections[r + 1][c] != sR.mapSec)
-                UiG_Rect(x, y + CELL - 2, CELL, 2, edge);
+                UiG_Rect(x, y + sCell - 2, sCell, 2, edge);
             if (c == 0 || sSections[r][c - 1] != sR.mapSec)
-                UiG_Rect(x, y, 2, CELL, edge);
+                UiG_Rect(x, y, 2, sCell, edge);
             if (c == COLS - 1 || sSections[r][c + 1] != sR.mapSec)
-                UiG_Rect(x + CELL - 2, y, 2, CELL, edge);
+                UiG_Rect(x + sCell - 2, y, 2, sCell, edge);
         }
 }
 
 /* a fly spot: a red pin once visited (the game's bright icon), a small dark one before */
 static void FlySpot(const struct NativeRegionFlySpot *s, int t)
 {
-    int x = CellX(s->x), y = CellY(s->y), w = s->w * CELL, h = s->h * CELL;
+    int x = CellX(s->x), y = CellY(s->y), w = s->w * sCell, h = s->h * sCell;
     bool here = s->mapSec == sR.mapSec;
 
     if (s->outline)
@@ -236,7 +351,7 @@ static void Markers(int t)
     for (int i = 0; i < sMarkerCount; i++)
     {
         const struct Marker *m = &sMarkers[i];
-        int cx = CellX(m->x) + CELL / 2, cy = CellY(m->y) + CELL / 2;
+        int cx = CellX(m->x) + sCell / 2, cy = CellY(m->y) + sCell / 2;
 
         if (m->kind == 0 && m->slot < 4)
         {
@@ -277,8 +392,9 @@ static void Markers(int t)
 /* the cursor: a red reticle a little larger than a cell, breathing, gliding from cell to cell with the game's */
 static void Cursor(int t)
 {
-    int cx = MAP_X + sR.cursorPixX * 2, cy = MAP_Y + sR.cursorPixY * 2;
-    int half = 15 + (int)floor(1.0 + 1.0 * sin(t * 0.15)), arm = 8;
+    bool zoomed = sR.kind == NATIVE_REGION_MAP_POKENAV && sR.zoomed;
+    int cx = zoomed ? MAP_X + MAP_W / 2 : MAP_X + sR.cursorPixX * 2, cy = zoomed ? MAP_Y + MAP_H / 2 : MAP_Y + sR.cursorPixY * 2;
+    int half = (zoomed ? 30 : 15) + (int)floor(1.0 + 1.0 * sin(t * 0.15)), arm = zoomed ? 12 : 8;
 
     for (int i = 0; i < 2; i++)
     {
@@ -300,24 +416,52 @@ static void Cursor(int t)
 static void MapPanel(int t)
 {
     const struct UiHit *hover = NativeUi_MouseHover();
+    bool zoomed = sR.kind == NATIVE_REGION_MAP_POKENAV && sR.zoomed;
 
+    /* the view: the whole map at twice the game's size, or zoomed in at four times round the cursor's cell (the
+       art's pixel scrollX + 0x34, scrollY + 0x44, as the game's zoomed map scrolls) */
+    sCell = zoomed ? 2 * CELL : CELL;
+    sViewX = zoomed ? MAP_X + MAP_W / 2 - (sR.scrollX + 0x34) * 4 - sCell / 2 : MAP_X;
+    sViewY = zoomed ? MAP_Y + MAP_H / 2 - (sR.scrollY + 0x44) * 4 - sCell / 2 : MAP_Y;
     UiG_Paint(UiM_Rounded4(MAP_W + 12, MAP_H + 12, 4, 4, 4, 4), MAP_X - 6, MAP_Y - 6, UI_HEX(0x16263A),
               &(struct UiPaint){UI_P_INK, UI_HEX(0x3C5A7C), UI_NONE, 0, 0, NULL, UI_NONE});
     UiG_Rect(MAP_X, MAP_Y, MAP_W, MAP_H, UI_HEX(0x3870B8));
+    UiG_Save();
+    UiG_Clip(MAP_X, MAP_Y, MAP_W, MAP_H);
+    if (sArtType >= 0)
+    {
+        /* the art's sea, its stripes (its corner's two rows) carried on past its edges: zoomed in, the view runs
+           past them */
+        int scale = zoomed ? 4 : 2;
+
+        for (int r = (MAP_Y - sViewY) / scale - 2; sViewY + r * scale < MAP_Y + MAP_H; r++)
+        {
+            const u8 *px = &sArt[(r & 1) * UI_REGION_MAP_W * 4];
+
+            UiG_Rect(MAP_X, sViewY + r * scale, MAP_W, scale, UI_RGBA(px[0], px[1], px[2], 255));
+        }
+    }
     if (sArtType >= 0)
     {
         char key[32];
+        struct RgbaCtx c = {sArt, UI_REGION_MAP_W, UI_REGION_MAP_H};
 
         snprintf(key, sizeof(key), "regionmap:%d", sArtType);
-        BlitRgba2x(key, sArt, UI_REGION_MAP_W, UI_REGION_MAP_H, MAP_X, MAP_Y);
+        UiG_BlitPart(UiG_Cached(key, UI_REGION_MAP_W, UI_REGION_MAP_H, BuildRgba, &c), 0, 0, UI_REGION_MAP_W,
+                     UI_REGION_MAP_H, sViewX, sViewY, zoomed ? 4 : 2, false, 1.0);
     }
-    UiG_Save();
-    UiG_Clip(MAP_X, MAP_Y, MAP_W, MAP_H);
+    if (sR.offMap)
+    {
+        /* off the map (the event islands): the game dims its map and shows no cursor */
+        UiG_Rect(MAP_X, MAP_Y, MAP_W, MAP_H, UiWithAlpha(UI_HEX(0x000000), 96));
+        UiG_Restore();
+        return;
+    }
     PlaceGlow(t);
     for (int i = 0; i < sR.flyCount; i++)
         FlySpot(&sR.fly[i], t);
     /* the cell under the mouse */
-    if (hover != NULL && hover->id == HIT_CELL && sR.input)
+    if (hover != NULL && hover->id == HIT_CELL && sR.input && !zoomed)
     {
         int x = CellX(hover->index % 32), y = CellY(hover->index / 32);
 
@@ -329,10 +473,15 @@ static void MapPanel(int t)
     Markers(t);
     /* you, where the game puts you */
     if (sR.playerShown)
-        BlitRgba2x(sIconFemale ? "regionicon:f" : "regionicon:m", sIcon, 16, 16, CellX(sR.playerX) + CELL / 2 - 16,
-                   CellY(sR.playerY) + CELL / 2 - 16);
+        BlitRgba2x(sIconFemale ? "regionicon:f" : "regionicon:m", sIcon, 16, 16, CellX(sR.playerX) + sCell / 2 - 16,
+                   CellY(sR.playerY) + sCell / 2 - 16);
     Cursor(t);
     UiG_Restore();
+    if (zoomed)
+    {
+        UiG_Hit(HIT_ZOOMED, 0, MAP_X, MAP_Y, MAP_W, MAP_H);
+        return;
+    }
     /* the cells the cursor can stand on */
     for (int y = 2; y <= 16; y++)
         for (int x = 1; x <= 28; x++)
@@ -357,6 +506,58 @@ static int LegendRow(int x, int y, int kind, const u8 *label)
         UiGfx_Icon("head_blue", x - 2, y - 1, 16);
     UiText_Draw(UI_FONT_SMALL, x + 20, y + 1, label, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
     return y + 18;
+}
+
+/* the HOENN MAP's word on the cursor's place: a visited town's own map and what is in it, a route's landmarks */
+static void NavInfo(int y)
+{
+    if (sR.offMap)
+    {
+        UiText_Draw(UI_FONT_SMALL, SIDE_X + 10, y + 2, sText_OffMap, UI_P_TEXT_MUTED, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+        return;
+    }
+    switch (sR.mapSecType)
+    {
+    case MAPSECTYPE_CITY_CANFLY:
+        UiText_Draw(UI_FONT_SMALL, SIDE_X + 10, y + 2, sText_Visited, UI_P_HP_GREEN_2, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+        y += 16;
+        if (sTownKeyOf >= 0)
+        {
+            struct RgbaCtx c = {sTown, 80, 80};
+            char key[24];
+
+            UiG_Paint(UiM_Rounded4(86, 86, 3, 3, 3, 3), SIDE_X + 19, y, UI_HEX(0x16263A),
+                      &(struct UiPaint){UI_P_INK, UI_HEX(0x3C5A7C), UI_NONE, 0, 0, NULL, UI_NONE});
+            snprintf(key, sizeof(key), "navtown:%d", sTownKeyOf);
+            UiG_Blit(UiG_Cached(key, 80, 80, BuildRgba, &c), SIDE_X + 22, y + 3);
+            y += 92;
+            for (size_t k = 0; k < ARRAY_COUNT(sTownKey); k++)
+            {
+                if (!(sTownKeys & (1 << k)))
+                    continue;
+                UiG_Paint(UiM_Rounded4(7, 7, 1, 1, 1, 1), SIDE_X + 10, y + 2, UI_HEX(sTownKey[k].hex),
+                          &(struct UiPaint){UI_P_INK, UI_NONE, UI_NONE, 0, 0, NULL, UI_NONE});
+                UiText_Draw(UI_FONT_SMALL, SIDE_X + 21, y, sTownKey[k].label, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+                y += 12;
+            }
+        }
+        break;
+    case MAPSECTYPE_CITY_CANTFLY:
+        UiText_Draw(UI_FONT_SMALL, SIDE_X + 10, y + 2, sText_NotVisited, UI_P_TEXT_MUTED, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+        break;
+    case MAPSECTYPE_ROUTE:
+    case MAPSECTYPE_BATTLE_FRONTIER:
+        if (sLandmarkCount == 0)
+            UiText_Draw(UI_FONT_SMALL, SIDE_X + 10, y + 2, sText_Route, UI_P_TEXT_MUTED, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+        for (int i = 0; i < sLandmarkCount; i++)
+        {
+            UiG_Paint(UiM_Rounded4(5, 5, 2, 2, 2, 2), SIDE_X + 11, y + 5 + i * 13, UI_P_CURSOR,
+                      &(struct UiPaint){UI_P_INK, UI_NONE, UI_NONE, 0, 0, NULL, UI_NONE});
+            UiText_Draw(UI_FONT_SMALL, SIDE_X + 21, y + 2 + i * 13, sLandmarks[i], UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_LEFT,
+                        0);
+        }
+        break;
+    }
 }
 
 static void SidePanel(void)
@@ -392,7 +593,12 @@ static void SidePanel(void)
         y += 13;
     }
     /* what it is to you */
-    if (sR.kind == NATIVE_REGION_MAP_FLY)
+    if (sR.kind == NATIVE_REGION_MAP_POKENAV)
+    {
+        NavInfo(y);
+        status = NULL;
+    }
+    else if (sR.kind == NATIVE_REGION_MAP_FLY)
     {
         if (sR.canFly)
             status = sText_CanFly, statusColour = UI_P_HP_GREEN_2;
@@ -410,8 +616,9 @@ static void SidePanel(void)
     }
     /* the key */
     /* from the bottom up: how to use it, then the key */
-    n = UiText_Wrap(sR.kind == NATIVE_REGION_MAP_FLY ? sText_ClickHint : sText_ClickHintTown, SIDE_W - 20,
-                    UI_FONT_SMALL, starts, lengths, 3);
+    n = UiText_Wrap(sR.kind == NATIVE_REGION_MAP_FLY ? sText_ClickHint
+                    : sR.kind != NATIVE_REGION_MAP_POKENAV ? sText_ClickHintTown
+                    : sR.zoomed ? sText_ClickHintZoomed : sText_ClickHintNav, SIDE_W - 20, UI_FONT_SMALL, starts, lengths, 3);
     y = SIDE_Y + SIDE_H - 8 - n * 11;
     for (int i = 0; i < n; i++)
     {
@@ -442,6 +649,14 @@ static void Hints(void)
             hints[n++] = (struct UiHintItem){UI_ACT_CONFIRM, sText_Fly};
         hints[n++] = (struct UiHintItem){UI_ACT_CANCEL, sText_Cancel};
     }
+    else if (sR.kind == NATIVE_REGION_MAP_POKENAV)
+    {
+        if (!sR.offMap)
+            hints[n++] = (struct UiHintItem){UI_ACT_CONFIRM, sR.zoomed ? sText_ZoomOut : sText_ZoomIn};
+        if (sR.canFly)
+            hints[n++] = (struct UiHintItem){UI_ACT_R, sText_Fly};
+        hints[n++] = (struct UiHintItem){UI_ACT_CANCEL, sText_Close};
+    }
     else
     {
         if (sR.canFly)
@@ -458,7 +673,8 @@ static void Draw(int t)
     struct UiRamp tab = UiRampOf(UI_HEX(0x3C78C8), 0.38, 0.28, 0.62);
 
     Background(t);
-    UiW_TitleTab(0, 8, sR.kind == NATIVE_REGION_MAP_FLY ? "FLY" : "TOWN MAP", &tab, 0, "map");
+    UiW_TitleTab(0, 8, sR.kind == NATIVE_REGION_MAP_FLY ? "FLY" : sR.kind == NATIVE_REGION_MAP_POKENAV ? "HOENN MAP" : "TOWN MAP",
+                 &tab, 0, "map");
     MapPanel(t);
     SidePanel();
     Hints();
@@ -480,16 +696,23 @@ static bool Click(const struct UiHit *hit, int button)
             NativeUi_QueuePress(B_BUTTON);
         return true;
     }
+    if (button == 1 && hit->id == HIT_ZOOMED)
+    {
+        /* the HOENN MAP zoomed in: back out (A) */
+        if (sR.input)
+            NativeUi_QueuePress(A_BUTTON);
+        return true;
+    }
     if (button != 1 || hit->id != HIT_CELL)
         return false;
-    if (sR.input)
+    if (sR.input && !sR.offMap)
     {
         u16 x = hit->index % 32, y = hit->index / 32;
 
         if (x != sR.cursorX || y != sR.cursorY)
             RegionMap_NativeUiMoveCursor(x, y);
-        else if (sR.kind == NATIVE_REGION_MAP_FLY && sR.canFly)
-            NativeUi_QueuePress(A_BUTTON);
+        else if ((sR.kind == NATIVE_REGION_MAP_FLY && sR.canFly) || sR.kind == NATIVE_REGION_MAP_POKENAV)
+            NativeUi_QueuePress(A_BUTTON);   /* fly there; the HOENN MAP zooms in */
     }
     return true;
 }

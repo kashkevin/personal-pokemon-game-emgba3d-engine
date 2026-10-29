@@ -645,6 +645,13 @@ bool8 Pokenav_NativeUiState(struct NativePokenav *out)
     return TRUE;
 }
 
+u32 Pokenav_NativeUiMenuId(void)
+{
+    if (gPokenavResources == NULL || gMain.callback2 != CB2_Pokenav)
+        return 0;
+    return gPokenavResources->currentMenuIndex + POKENAV_MENU_IDS_START;
+}
+
 void Pokenav_NativeUiMonRow(struct NativePokenavRow *row, u32 boxId, u32 monId)
 {
     u8 nick[POKEMON_NAME_BUFFER_SIZE];
