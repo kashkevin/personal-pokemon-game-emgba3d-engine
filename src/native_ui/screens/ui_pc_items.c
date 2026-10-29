@@ -65,7 +65,7 @@ static const u8 sText_InBag[] = _("In the Bag");
 static const u8 sText_Empty[] = _("No items are stored in this PC.");
 
 static struct NativePcItems sI;
-static u8 sMsg[256];
+static u8 sMsg[UI_MESSAGE_COPY];
 static bool sHasMsg;
 static int sFirst;      /* the first row shown */
 

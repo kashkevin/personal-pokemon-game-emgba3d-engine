@@ -152,7 +152,7 @@ static const u8 *sNote;
 static int sFirst;
 static u32 sCoins;
 static u32 sMoney;
-static u8 sMsg[256];
+static u8 sMsg[UI_MESSAGE_COPY];
 static bool sHasMsg;
 static u32 sMsgPrinted;
 static bool sMsgPrinting;

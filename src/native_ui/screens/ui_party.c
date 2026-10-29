@@ -95,7 +95,7 @@ static int sMonCount;            /* the party's Pokémon (slots 0..sMonCount-1) 
 static s8 sFollowing;            /* the slot of the Pokémon following the player (-1 none) */
 static u8 sPrompt[256];          /* the prompt line as printed */
 static bool sHasPrompt;
-static u8 sMsg[256];             /* the message box as printed */
+static u8 sMsg[UI_MESSAGE_COPY];             /* the message box as printed */
 static bool sHasMsg;
 static u32 sMsgPrinted;
 static bool sMsgPrinting;

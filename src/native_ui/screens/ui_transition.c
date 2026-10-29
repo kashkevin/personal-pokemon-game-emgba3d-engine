@@ -36,7 +36,7 @@
 
 static struct NativeTransitionState sT;
 static bool sBox;          /* the game still shows its message box (window 0) */
-static u8 sMsg[256];
+static u8 sMsg[UI_MESSAGE_COPY];
 static UiRGBA sBoxVeil;    /* how far the game has turned the box's colours to another (its flash, its fade) */
 static UiRGBA sBackdrop;   /* the GBA's backdrop colour: what a window's empty side shows */
 

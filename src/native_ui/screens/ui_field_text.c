@@ -53,7 +53,7 @@ static const u8 sText_Cancel[] = _("Cancel");
 static const struct UiRamp sWood = {UI_HEX(0xECC08A), UI_HEX(0xD29C62), UI_HEX(0xA8703C), UI_HEX(0x4A2A12)};
 
 static struct NativeScriptMenu sMenu;
-static u8 sMsg[256];
+static u8 sMsg[UI_MESSAGE_COPY];
 static u32 sMsgPrinted;
 static bool sHasMsg;
 static bool sMsgPrinting;

@@ -39,7 +39,7 @@ enum
 static const UiRGBA sSparklePal[3] = {UI_HEX(0xF8D890), UI_HEX(0xFFF0C8), UI_HEX(0xFFFFFF)};
 
 static struct NativeEggHatch sH;
-static u8 sMsg[256];
+static u8 sMsg[UI_MESSAGE_COPY];
 static bool sHasMsg, sMsgPrinting, sMsgWaiting;
 static u32 sMsgPrinted;
 static uint32_t sLastCapture, sAnimAt, sRevealAt;

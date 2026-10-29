@@ -35,7 +35,7 @@ enum
 static const u8 sText_HangUp[] = _("Hang up");
 static const u8 sText_PokeNav[] = _("POKéNAV");
 
-static u8 sMsg[256];
+static u8 sMsg[UI_MESSAGE_COPY];
 static u32 sPrinted;
 static bool sTalking, sPrinting, sWaiting;
 static s16 sOffsetY;

@@ -157,7 +157,7 @@ static bool sSafari;
 static u8 sSafariBalls;
 
 /* the save dialog */
-static u8 sMsgText[256];        /* the engine's message as printed */
+static u8 sMsgText[UI_MESSAGE_COPY];        /* the engine's message as printed */
 static bool sHasMsg;
 static u32 sMsgPrinted;         /* its bytes on screen so far */
 static bool sMsgPrinting;

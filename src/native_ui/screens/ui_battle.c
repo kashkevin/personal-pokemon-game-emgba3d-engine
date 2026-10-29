@@ -162,7 +162,7 @@ static struct
     u16 leadSpecies;
     u32 leadPersonality;
     /* texts as the game's windows show them */
-    u8 msg[256];
+    u8 msg[UI_MESSAGE_COPY];
     u32 msgPrinted;
     bool hasMsg;
     bool msgPrinting;
@@ -1067,16 +1067,10 @@ static void MessageText(int x, int y, int width, const u8 *text, int printed)
     const u8 *starts[8];
     int lengths[8];
     u8 page[256];
-    int len = 0, n, total = 0, pageStart = 0;
+    int n;
 
-    while (text[total] != EOS && (printed < 0 || total < printed))
-        total++;
-    for (int i = 0; i < total; i++)
-        if ((text[i] == CHAR_PROMPT_SCROLL || text[i] == CHAR_PROMPT_CLEAR) && i + 1 < total)
-            pageStart = i + 1;
-    for (int i = pageStart; i < total && text[i] != CHAR_PROMPT_SCROLL && text[i] != CHAR_PROMPT_CLEAR && len < 254; i++)
-        page[len++] = text[i];
-    page[len] = EOS;
+    /* the page as the printer lays it out: a \p clears the box, a \l scrolls it a line (KNOWN_ISSUES MS-167) */
+    UiW_MessagePageText(text, printed, page, (int)sizeof(page));
     n = UiText_Wrap(page, width, UI_FONT_NORMAL, starts, lengths, 8);
     for (int i = n > 2 ? n - 2 : 0, row = 0; i < n; i++, row++)
     {

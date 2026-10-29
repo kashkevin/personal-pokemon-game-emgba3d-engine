@@ -471,7 +471,7 @@ void AddSpriteTextPrinterParameterized6(u8 spriteId, u8 fontId, u8 left, u8 top,
 // window's last string (where it starts and a copy of it as printed; see
 // TextPrinter_NativeUiWindow). The #line keeps the file's line numbers (errorf)
 // as they were: the GBA ROM stays byte-identical.
-#define NATIVE_UI_TEXT_COPY 256
+#define NATIVE_UI_TEXT_COPY 1024 // UI_MESSAGE_COPY (native_ui/ui_engine.h; KNOWN_ISSUES MS-167)
 static const u8 *sNativeUiPrinterStart[WINDOWS_MAX];
 static u8 sNativeUiPrinterText[WINDOWS_MAX][NATIVE_UI_TEXT_COPY];
 static void NativeUiNotePrinter(u8 windowId, const u8 *str);
@@ -2921,6 +2921,8 @@ void DeactivateSingleTextPrinter(u32 id, enum TextPrinterType type)
 
 #ifdef ENABLE_NATIVE_UI
 #include "native_ui/ui_engine.h"
+
+_Static_assert(NATIVE_UI_TEXT_COPY == UI_MESSAGE_COPY, "a window's text copy holds what a screen's message buffer does");
 
 static void NativeUiNotePrinter(u8 windowId, const u8 *str)
 {

@@ -1281,9 +1281,13 @@ bool32 Sprite_NativeUiTagTiles(u16 tag, u16 *start, u16 *count);
  * which string it was; its buffer may have changed since), how far the printer
  * is, whether it is still printing. FALSE when nothing was printed there. */
 bool32 TextPrinter_NativeUiWindow(u8 windowId, const u8 **start, const u8 **current, bool8 *active);
-/* ... a copy of that string as it was printed (up to 255 bytes) and how many
+/* ... a copy of that string as it was printed (up to UI_MESSAGE_COPY - 1 bytes) and how many
  * of its bytes are on screen so far */
 bool32 TextPrinter_NativeUiWindowText(u8 windowId, u8 *dst, u32 size, u32 *printed, bool8 *active);
+/* The copy's size, and every screen's buffer for a message it shows (KNOWN_ISSUES MS-167): the game's message buffer,
+ * gStringVar4, holds 1,000 bytes. At 256 a long dialogue (451 of the game's texts are longer) stopped mid-word on its
+ * last page and showed no more pages after it: Devon's rock display "From that humble start" twice. */
+#define UI_MESSAGE_COPY 1024
 /* the window's printer waits for a button (a page break or a pause) */
 bool32 TextPrinter_NativeUiWindowWaiting(u8 windowId);
 /* window.c: a window removed forgets its last string (WINDOWS_MAX: every

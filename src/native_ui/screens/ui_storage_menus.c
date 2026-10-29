@@ -60,7 +60,7 @@ static const u8 sText_Next[] = _("Next");
 static u8 sKind;
 static struct NativePcMenu sM;
 static u8 sPlayersPc[32];
-static u8 sMsg[256];
+static u8 sMsg[UI_MESSAGE_COPY];
 static u32 sMsgPrinted;
 static bool sHasMsg;
 static bool sMsgPrinting;

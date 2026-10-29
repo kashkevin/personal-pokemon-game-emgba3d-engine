@@ -459,7 +459,7 @@ static void DialogTick(void)
     waiting = printer && (state == 1 || state == 2 || state == 3);   // RENDER_STATE_WAIT, CLEAR, SCROLL_START
 #ifdef ENABLE_NATIVE_UI
     {
-        u8 text[256], page[256];
+        u8 text[UI_MESSAGE_COPY], page[256];
         u32 chars = 0;
         bool8 on = FALSE;
 

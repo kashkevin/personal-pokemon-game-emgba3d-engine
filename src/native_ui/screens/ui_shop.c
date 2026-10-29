@@ -93,7 +93,7 @@ static const char *const sRegister[13] = {
 
 static struct NativeShop sS;
 static int sFirst;
-static u8 sMsg[256];
+static u8 sMsg[UI_MESSAGE_COPY];
 static bool sHasMsg;
 static u32 sMsgPrinted;
 static bool sMsgPrinting;

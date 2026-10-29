@@ -136,7 +136,7 @@ static struct RowMove sTeach;
 static u8 sSource[NATIVE_RELEARNER_MAX_MOVES][8];  /* each row's tag (ASCII caps) */
 static u8 sSourceLine[160];                        /* the selected move's source, in a sentence (engine text) */
 static u8 sPrompt[160];                            /* the screen's own line when the engine prints none */
-static u8 sMsg[256];
+static u8 sMsg[UI_MESSAGE_COPY];
 static bool sHasMsg;
 static u32 sMsgPrinted;
 static bool sMsgPrinting;

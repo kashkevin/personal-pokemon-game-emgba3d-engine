@@ -85,7 +85,7 @@ static const u8 sText_PP[] = _("PP");
 
 static struct NativeBag sB;
 static int sFirst;               /* the first row shown */
-static u8 sMsg[256];
+static u8 sMsg[UI_MESSAGE_COPY];
 static bool sHasMsg;
 static u32 sMsgPrinted;
 static bool sMsgPrinting;

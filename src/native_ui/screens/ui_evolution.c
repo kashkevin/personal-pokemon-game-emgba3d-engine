@@ -50,7 +50,7 @@ static const u8 sText_Stop[] = _("Stop");
 /* ---------------------------------------------------------------- captured state */
 
 static struct NativeEvolution sE;
-static u8 sMsg[256];
+static u8 sMsg[UI_MESSAGE_COPY];
 static bool sHasMsg;
 static u32 sMsgPrinted;
 static bool sMsgPrinting;

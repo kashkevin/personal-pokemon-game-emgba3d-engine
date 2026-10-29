@@ -758,6 +758,9 @@ check-diorama: $(DIORAMA_TEST_GEN)
 	$(DIORAMA_TEST_CC) $(DIORAMA_TEST_FLAGS) tests/diorama/test_ui_overlay.c src/diorama/scene/ui_overlay.c \
 	  -o $(DIORAMA_TEST_DIR)/test_ui_overlay
 	$(DIORAMA_TEST_DIR)/test_ui_overlay
+	$(DIORAMA_TEST_CC) $(DIORAMA_TEST_FLAGS) -DENABLE_NATIVE_UI tests/diorama/test_message_page.c \
+	  src/native_ui/ui_message_page.c -o $(DIORAMA_TEST_DIR)/test_message_page
+	$(DIORAMA_TEST_DIR)/test_message_page
 	$(DIORAMA_TEST_CC) $(DIORAMA_TEST_FLAGS) tests/diorama/test_rules.c src/diorama/rules.c \
 	  $(DIORAMA_TEST_GEN) -lm -o $(DIORAMA_TEST_DIR)/test_rules
 	$(DIORAMA_TEST_DIR)/test_rules
