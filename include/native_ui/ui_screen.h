@@ -121,6 +121,7 @@ extern const struct UiScreen gUiScreen_PcDecor;
 extern const struct UiScreen gUiScreen_HallOfFame;
 extern const struct UiScreen gUiScreen_Credits;
 extern const struct UiScreen gUiScreen_TradeSequence;
+extern const struct UiScreen gUiScreen_HillBoard;
 extern const struct UiScreen gUiScreen_Shop;
 extern const struct UiScreen gUiScreen_Naming;
 extern const struct UiScreen gUiScreen_Starters;

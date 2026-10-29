@@ -1120,3 +1120,55 @@ static enum Item GetPrizeItemId(void)
     return prizeList[id];
 }
 #endif //FREE_TRAINER_HILL
+
+#if defined(ENABLE_NATIVE_UI) && FREE_TRAINER_HILL == FALSE
+#include "native_ui/ui_engine.h"
+STATIC_ASSERT(NATIVE_HILL_MODES == NUM_TRAINER_HILL_MODES, NativeUiHillModes);
+
+// gText_XMinYDotZSec with these three in its STR_VAR_1..3 (the game's own string vars stay as they are)
+static void NativeUiExpandTime(u8 *dst, u32 size, const u8 *const vars[3])
+{
+    const u8 *src = gText_XMinYDotZSec;
+    u32 n = 0;
+
+    while (*src != EOS && n < size - 1)
+    {
+        if (src[0] == PLACEHOLDER_BEGIN && src[1] >= PLACEHOLDER_ID_STRING_VAR_1 && src[1] <= PLACEHOLDER_ID_STRING_VAR_3)
+        {
+            for (const u8 *v = vars[src[1] - PLACEHOLDER_ID_STRING_VAR_1]; *v != EOS && n < size - 1; v++)
+                dst[n++] = *v;
+            src += 2;
+        }
+        else
+        {
+            dst[n++] = *src++;
+        }
+    }
+    dst[n] = EOS;
+}
+
+// Trainer Hill's time board for the 3D UI (native_ui/screens/ui_hill_board.c): each mode's name and its line as
+// PrintOnTrainerHillRecordsWindow prints it
+void TrainerHill_NativeUiTimes(struct NativeHillBoard *out)
+{
+    for (u32 i = 0; i < NUM_TRAINER_HILL_MODES; i++)
+    {
+        u32 total = GetTimerValue(&gSaveBlock1Ptr->trainerHillTimes[i]), minutes, secondsWhole, secondsFraction;
+        u8 v1[8], v2[8], v3[8];
+        const u8 *const vars[3] = {v1, v2, v3};
+        u8 *end;
+
+        minutes = total / (60 * 60);
+        total %= (60 * 60);
+        ConvertIntToDecimalStringN(v1, minutes, STR_CONV_MODE_RIGHT_ALIGN, 2);
+        secondsWhole = total / 60;
+        total %= 60;
+        ConvertIntToDecimalStringN(v2, secondsWhole, STR_CONV_MODE_RIGHT_ALIGN, 2);
+        secondsFraction = (total * 168) / 100;
+        ConvertIntToDecimalStringN(v3, secondsFraction, STR_CONV_MODE_LEADING_ZEROS, 2);
+        out->modes[i] = sModeStrings[i];
+        end = StringCopy(out->times[i], gText_TimeCleared);
+        NativeUiExpandTime(end, sizeof(out->times[i]) - (end - out->times[i]), vars);
+    }
+}
+#endif // ENABLE_NATIVE_UI

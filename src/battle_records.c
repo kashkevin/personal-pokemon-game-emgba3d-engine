@@ -539,3 +539,22 @@ static void CB2_ShowTrainerHillRecords(void)
         break;
     }
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+// Trainer Hill's time board for the 3D UI (native_ui/screens/ui_hill_board.c): up while its callbacks run (the
+// Trainer Tower's board, FRLG, keeps the game's picture); ready while it waits for A or B
+bool32 BattleRecords_NativeUiHillBoard(struct NativeHillBoard *out)
+{
+    if ((gMain.callback2 != MainCB2_TrainerHillRecords && gMain.callback2 != CB2_ShowTrainerHillRecords)
+     || gSpecialVar_0x8004 != 0)
+        return FALSE;
+    out->ready = FindTaskIdByFunc(Task_CloseTrainerHillRecordsOnButton) != TASK_NONE && !gPaletteFade.active;
+#if FREE_TRAINER_HILL == FALSE
+    TrainerHill_NativeUiTimes(out);
+    return TRUE;
+#else
+    return FALSE;
+#endif
+}
+#endif // ENABLE_NATIVE_UI

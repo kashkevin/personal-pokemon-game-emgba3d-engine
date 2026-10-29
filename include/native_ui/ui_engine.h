@@ -1058,6 +1058,17 @@ struct NativeTradeSequence
     bool8 waitingA;
 };
 bool32 Trade_NativeUiSequence(struct NativeTradeSequence *out);
+/* Trainer Hill's time board (battle_records.c: ShowTrainerHillRecords from the entrance's board): whether it waits for
+ * A or B, and each mode's name with its line as the game prints it (trainer_hill.c: "TIME CLEARED" and the time) */
+#define NATIVE_HILL_MODES 4
+struct NativeHillBoard
+{
+    bool8 ready;
+    const u8 *modes[NATIVE_HILL_MODES];
+    u8 times[NATIVE_HILL_MODES][48];
+};
+bool32 BattleRecords_NativeUiHillBoard(struct NativeHillBoard *out);
+void TrainerHill_NativeUiTimes(struct NativeHillBoard *out);
 /* Easy Chat (easy_chat.c) while its screen is up: the words being edited and every part of the screen as the engine
  * has it. inputState is the screen's own (0 a word, 1 the footer, 2 the keyboard, 3 a group's words, 4 quit?,
  * 5 delete all?, 6 confirm?, 7 a quiz's question, 8 a message, 9 and 10 the Bard's lyrics) */
