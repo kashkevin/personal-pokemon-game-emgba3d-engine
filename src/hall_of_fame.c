@@ -1515,3 +1515,123 @@ static void Task_DoDomeConfetti(u8 taskId)
         break;
     }
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native UI (src/native_ui/screens/ui_hall_of_fame.c) draws the induction over this screen from its main task: the
+// phase, each Pokémon's picture where its sprite is (and its scale while it steps up), the current Pokémon's line, the
+// confetti's frames, the player's picture and record. A stays this screen's. The main task's data (as above, by index:
+// those names are reused below): 1 the Pokémon shown, 3 a frame count, 4 the player's sprite, 5-10 the team's.
+STATIC_ASSERT(POKEMON_NAME_LENGTH + 1 <= sizeof(((struct NativeHof *)NULL)->nickname), NativeUiHofNickname);
+
+static const TaskFunc sNativeUiHofTasks[] = {
+    Task_Hof_InitMonData, Task_Hof_InitTeamSaveData, Task_Hof_TrySaveData, Task_Hof_WaitToDisplayMon,
+    Task_Hof_SetMonDisplayTask, Task_Hof_DisplayMon, Task_Hof_PrintMonInfoAfterAnimating, Task_Hof_TryDisplayAnotherMon,
+    Task_Hof_PaletteFadeAndPrintWelcomeText, Task_Hof_DoConfetti, Task_Hof_WaitToDisplayPlayer, Task_Hof_DisplayPlayer,
+    Task_Hof_WaitAndPrintPlayerInfo, Task_Hof_ExitOnKeyPressed, Task_Hof_HandlePaletteOnExit, Task_Hof_HandleExit,
+};
+
+bool32 HallOfFame_NativeUiState(struct NativeHof *out)
+{
+    u8 taskId = TASK_NONE;
+    TaskFunc func = NULL;
+    struct Task *task;
+    u32 i, j;
+
+    for (i = 0; i < NUM_TASKS && taskId == TASK_NONE; i++)
+        for (j = 0; j < ARRAY_COUNT(sNativeUiHofTasks); j++)
+            if (gTasks[i].isActive && gTasks[i].func == sNativeUiHofTasks[j])
+            {
+                taskId = i;
+                func = gTasks[i].func;
+                break;
+            }
+    if (taskId == TASK_NONE || sHofMonPtr == NULL)
+        return FALSE;
+    task = &gTasks[taskId];
+    memset(out, 0, sizeof(*out));
+    if (func == Task_Hof_DisplayMon || func == Task_Hof_PrintMonInfoAfterAnimating || func == Task_Hof_TryDisplayAnotherMon)
+        out->phase = NATIVE_HOF_MON;
+    else if (func == Task_Hof_PaletteFadeAndPrintWelcomeText || func == Task_Hof_DoConfetti || func == Task_Hof_WaitToDisplayPlayer)
+        out->phase = NATIVE_HOF_WELCOME;
+    else if (func == Task_Hof_DisplayPlayer || func == Task_Hof_WaitAndPrintPlayerInfo || func == Task_Hof_ExitOnKeyPressed)
+        out->phase = NATIVE_HOF_PLAYER;
+    else if (func == Task_Hof_HandlePaletteOnExit || func == Task_Hof_HandleExit)
+        out->phase = NATIVE_HOF_LEAVING;
+    else
+        out->phase = NATIVE_HOF_OPENING;
+    out->saving = func == Task_Hof_TrySaveData;
+    out->ready = func == Task_Hof_ExitOnKeyPressed && !gPaletteFade.active;
+    out->current = task->data[1];
+    out->lineShown = func == Task_Hof_TryDisplayAnotherMon;
+    out->frames = func == Task_Hof_DoConfetti ? task->data[3] : 0;
+    for (i = 0; i < PARTY_SIZE; i++)
+    {
+        struct NativeHofMon *m = &out->mons[i];
+        u8 spriteId = task->data[i + 5];
+
+        m->species = sHofMonPtr->mon[i].species;
+        m->personality = sHofMonPtr->mon[i].personality;
+        m->shiny = sHofMonPtr->mon[i].isShiny;
+        m->affine = 256;
+        if (spriteId == SPRITE_NONE || spriteId >= MAX_SPRITES || !gSprites[spriteId].inUse)
+            continue;
+        m->shown = TRUE;
+        m->x = gSprites[spriteId].x + gSprites[spriteId].x2;
+        m->y = gSprites[spriteId].y + gSprites[spriteId].y2;
+        if (gSprites[spriteId].oam.affineMode != ST_OAM_AFFINE_OFF && gOamMatrices[gSprites[spriteId].oam.matrixNum].a > 0)
+            m->affine = gOamMatrices[gSprites[spriteId].oam.matrixNum].a;
+        m->dim = out->phase != NATIVE_HOF_WELCOME && (sHofFadePalettes & (0x10000 << gSprites[spriteId].oam.paletteNum)) != 0;
+    }
+    if (out->phase == NATIVE_HOF_MON && out->current < PARTY_SIZE)
+    {
+        struct HallofFameMon *mon = &sHofMonPtr->mon[out->current];
+        u8 *p;
+
+        if (mon->species != SPECIES_EGG)
+        {
+            s32 dex = SpeciesToPokedexNum(mon->species);
+
+            p = StringCopy(out->number, gText_Number);
+            if (dex != 0xFFFF)
+                ConvertIntToDecimalStringN(p, dex, STR_CONV_MODE_LEADING_ZEROS, IsNationalPokedexEnabled() ? 4 : 3);
+            else
+                StringCopy(p, COMPOUND_STRING("???"));
+            p = StringCopy(out->species, GetSpeciesName(mon->species));
+            if (mon->species != SPECIES_NIDORAN_M && mon->species != SPECIES_NIDORAN_F)
+            {
+                switch (GetGenderFromSpeciesAndPersonality(mon->species, mon->personality))
+                {
+                case MON_MALE:
+                    *p++ = CHAR_MALE;
+                    break;
+                case MON_FEMALE:
+                    *p++ = CHAR_FEMALE;
+                    break;
+                }
+                *p = EOS;
+            }
+            p = StringCopy(out->level, gText_Level);
+            ConvertIntToDecimalStringN(p, mon->lvl, STR_CONV_MODE_LEFT_ALIGN, 3);
+            p = StringCopy(out->id, gText_IDNumber);
+            ConvertIntToDecimalStringN(p, (u16)mon->tid, STR_CONV_MODE_LEADING_ZEROS, 5);
+        }
+        memcpy(out->nickname, mon->nickname, POKEMON_NAME_LENGTH);
+        out->nickname[POKEMON_NAME_LENGTH] = EOS;
+    }
+    if (task->data[4] != SPRITE_NONE && task->data[4] < MAX_SPRITES && gSprites[task->data[4]].inUse)
+    {
+        out->playerShown = TRUE;
+        out->playerX = gSprites[task->data[4]].x + gSprites[task->data[4]].x2;
+        out->playerY = gSprites[task->data[4]].y + gSprites[task->data[4]].y2;
+    }
+    out->playerPic = LOCAL_PLAYER_HOF_PIC(gSaveBlock2Ptr->playerGender);
+    out->playerRecord = func == Task_Hof_ExitOnKeyPressed || func == Task_Hof_HandlePaletteOnExit;
+    ConvertIntToDecimalStringN(out->time, gSaveBlock2Ptr->playTimeHours, STR_CONV_MODE_LEFT_ALIGN, 3);
+    i = StringLength(out->time);
+    out->time[i++] = CHAR_COLON;
+    ConvertIntToDecimalStringN(&out->time[i], gSaveBlock2Ptr->playTimeMinutes, STR_CONV_MODE_LEADING_ZEROS, 2);
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

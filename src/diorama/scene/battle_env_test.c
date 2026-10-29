@@ -36,6 +36,7 @@
 #include "pokedex.h"
 #include "decoration_inventory.h"
 #include "constants/decorations.h"
+#include "hall_of_fame.h"
 #include "mail.h"
 #include "string_util.h"
 #include "pokemon_storage_system.h"
@@ -3797,7 +3798,7 @@ bool16 ScriptMenu_CreateStartMenuForPokenavTutorial(void);  /* script_menu.c: th
 
 /* a field key script's event at a frame (a name KeysAt does not know): NAVTUTOR opens the PokéNav as Rustboro's
    scientist does (its tutorial: MATCH CALL, Mr. Stone's call), NAVMENU his START menu first (only POKéNAV goes on)
-   - the PokéNav tutorial's checks */
+   - the PokéNav tutorial's checks; HOF the Hall of Fame with the test party (not saved) */
 static bool FieldEventAt(const char *script, const char *event, int frame)
 {
     const char *p = script;
@@ -4312,6 +4313,11 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
         {
             TestLog("Battle env test: the PokéNav opened for its tutorial");
             OpenPokenavForTutorial();
+        }
+        if (FieldEventAt(s.fieldKeys, "HOF", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
+        {
+            TestLog("Battle env test: the Hall of Fame (the team not saved)");
+            SetMainCallback2(CB2_DoHallOfFameScreenDontSaveData);
         }
         if (FieldEventAt(s.fieldKeys, "NAVMENU", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
         {

@@ -993,6 +993,43 @@ struct NativeMail
     s16 iconX, iconY;                /* the icon's centre */
 };
 bool32 Mail_NativeUiState(struct NativeMail *out);
+/* the Hall of Fame after the Champion (hall_of_fame.c): the team stepping up a Pokémon at a time (each where its picture
+ * is on the GBA's screen, its sprite's centre), its line, the welcome and the confetti, the player with their record */
+enum NativeHofPhase
+{
+    NATIVE_HOF_NONE,
+    NATIVE_HOF_OPENING,          /* fading in; saving the team */
+    NATIVE_HOF_MON,              /* a Pokémon coming up, then its line */
+    NATIVE_HOF_WELCOME,          /* "Welcome to the HALL OF FAME!" and the confetti */
+    NATIVE_HOF_PLAYER,           /* the player stepping up, then their record and LEAGUE CHAMPION (A goes on) */
+    NATIVE_HOF_LEAVING,
+};
+struct NativeHofMon
+{
+    u16 species;                 /* SPECIES_NONE: no Pokémon in that place */
+    u32 personality;
+    bool8 shiny;
+    bool8 shown;                 /* its picture is up */
+    bool8 dim;                   /* tinted while another is shown, as the game does */
+    s16 x, y;                    /* its picture's centre on the GBA's screen */
+    u16 affine;                  /* its OAM matrix's scale (256: none) */
+};
+struct NativeHof
+{
+    u8 phase;
+    bool8 ready;                 /* PLAYER: A ends it */
+    bool8 saving;
+    u8 current;                  /* MON: the Pokémon coming up */
+    bool8 lineShown;             /* MON: its line is printed */
+    u16 frames;                  /* WELCOME: the confetti's frames left (they fall for the last 110) */
+    struct NativeHofMon mons[6];
+    u8 number[12], nickname[16], species[24], level[12], id[16];  /* MON: the line, as HallOfFame_PrintMonInfo puts it */
+    bool8 playerShown, playerRecord;
+    u16 playerPic;               /* the player's front picture (a trainer picture id) */
+    s16 playerX, playerY;
+    u8 time[8];                  /* the record's play time, as the game prints it */
+};
+bool32 HallOfFame_NativeUiState(struct NativeHof *out);
 /* Easy Chat (easy_chat.c) while its screen is up: the words being edited and every part of the screen as the engine
  * has it. inputState is the screen's own (0 a word, 1 the footer, 2 the keyboard, 3 a group's words, 4 quit?,
  * 5 delete all?, 6 confirm?, 7 a quiz's question, 8 a message, 9 and 10 the Bard's lyrics) */
