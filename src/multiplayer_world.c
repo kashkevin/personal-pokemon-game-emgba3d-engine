@@ -1675,6 +1675,7 @@ void MultiplayerWorld_Tick(bool32 fieldReady, bool32 connected)
     MultiplayerSpawns_Tick(fieldReady, connected);
     MultiplayerExtras_Tick(fieldReady, connected);
     MPBreeding_BoxEggNoticeTick();   // the PC's Eggs that hatched (mp_breeding.c), once the field is calm
+    MPDaycare_DeliveryTick();        // the Day Care's Eggs handed over without the Day Care man (mp_breeding.c)
 #endif
 #line 1176 // gba-line
 #if defined(DIORAMA_BATTLE_ENV_TEST)

@@ -236,15 +236,34 @@ LavaridgeTown_EventScript_EggWoman::
 	msgbox LavaridgeTown_Text_HaveEggWillYouTakeIt, MSGBOX_YESNO
 	goto_if_eq VAR_RESULT, NO, LavaridgeTown_EventScript_DeclineEgg
 	getpartysize
+.ifdef PORTABLE
+	@ The owner's request of 2026-10-29: with the party full the Egg goes to the PC; no room only when the PC is full too
+	goto_if_ne VAR_RESULT, PARTY_SIZE, LavaridgeTown_EventScript_TakeEgg
+	specialvar VAR_RESULT, ScriptCheckFreePokemonStorageSpace
+	goto_if_eq VAR_RESULT, FALSE, LavaridgeTown_EventScript_NoRoomForEgg
+LavaridgeTown_EventScript_TakeEgg::
+.else
 	goto_if_eq VAR_RESULT, PARTY_SIZE, LavaridgeTown_EventScript_NoRoomForEgg
+.endif
 	msgbox LavaridgeTown_Text_HopeYoullWalkPlentyWithEgg, MSGBOX_DEFAULT
 	setflag FLAG_RECEIVED_LAVARIDGE_EGG
 	playfanfare MUS_OBTAIN_ITEM
 	message LavaridgeTown_Text_ReceivedTheEgg
 	waitfanfare
 	giveegg SPECIES_WYNAUT
+.ifdef PORTABLE
+	call_if_eq VAR_RESULT, MON_GIVEN_TO_PC, LavaridgeTown_EventScript_EggToPC
+.endif
 	release
 	end
+
+.ifdef PORTABLE
+LavaridgeTown_EventScript_EggToPC::
+	waitmessage
+	waitbuttonpress
+	call Common_EventScript_EggTransferredToPC
+	return
+.endif
 
 LavaridgeTown_EventScript_ReceivedEgg::
 	msgbox LavaridgeTown_Text_EverySoOftenEggFoundAtDayCare, MSGBOX_DEFAULT

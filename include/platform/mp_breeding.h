@@ -4,7 +4,8 @@
 //   * the Day Care checks for an Egg every 64 steps (the original 256), with the original compatibility chances (20/50/70 %);
 //   * an egg cycle is 32 steps instead of 128 (75 % fewer steps for every species, their own cycle counts kept); Flame Body and
 //     Magma Armor still halve it (once, however many such Pokemon are in the party);
-//   * up to five made Eggs wait at the Day Care (a queue saved in SaveBlock3), oldest first;
+//   * up to five made Eggs wait at the Day Care (a queue saved in SaveBlock3), oldest first; since 2026-10-29 they are
+//     handed over to the party or the PC without a word to the Day Care man, and wait only while both are full;
 //   * an Egg's shiny status is rolled once when it is made, from the parents and the Shiny Charm of the player who owns the Day Care.
 #ifdef PORTABLE
 #include "global.h"
@@ -34,5 +35,18 @@ bool32 MPDaycare_QueueIsSane(void);                           // magic, version,
 void MPBreeding_AdvanceBoxEggs(u32 toSub);
 void MPBreeding_BoxEggNoticeTick(void);
 const char *MPBreeding_LastBoxEggNotice(void);   // the last such banner shown ("" before any)
+
+// The Day Care's Eggs come to the player without a word to the Day Care man (the owner's request of 2026-10-29). Hands
+// the waiting Eggs over, oldest first: each to the party's first free slot as the Day Care man gives one, else to the PC
+// as a gift Pokemon goes (CopyMonToPC, from the current box on); it stops at the first that fits nowhere, which waits with
+// the Day Care man (he offers it as before). The pending flag clears with the last. Adds to *toParty and *toPc how many
+// went where; *pcBox the box of the last one sent to the PC.
+void MPDaycare_DeliverWaitingEggs(u32 *toParty, u32 *toPc, u32 *pcBox);
+// Each frame: once the field is calm (no script, menu, fade or battle), outside a Frontier or Battle Tent challenge (a
+// few chosen Pokemon or rentals may be the party), the Trainer Hill, the Union Room and link play, the waiting Eggs are
+// handed over; a banner says where they went ("DAY CARE EGG!|An Egg joined your party."), or once that one waits for
+// room. With the party and the PC full it looks again every second.
+void MPDaycare_DeliveryTick(void);
+const char *MPDaycare_LastDeliveryNotice(void);  // the last such banner shown ("" before any)
 #endif
 #endif // GUARD_PLATFORM_MP_BREEDING_H

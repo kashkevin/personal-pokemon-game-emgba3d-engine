@@ -1039,7 +1039,8 @@ static bool32 MPDaycare_MakeEgg(struct DayCare *daycare, struct Pokemon *egg)
     return TRUE;
 }
 
-// A step check passed: make an Egg and put it in the queue (up to five wait at the Day Care).
+// A step check passed: make an Egg and put it in the queue, handed over to the party or the PC from there
+// (mp_breeding.c MPDaycare_DeliveryTick); up to five wait at the Day Care while both are full.
 static void MPDaycare_ProduceEgg(struct DayCare *daycare)
 {
     struct Pokemon egg;
@@ -1052,7 +1053,7 @@ static void MPDaycare_ProduceEgg(struct DayCare *daycare)
 
 #if defined(DIORAMA_BATTLE_ENV_TEST)
 // Test builds only (tools/battle_env/breed_check.py, PKMN_TEST_EGG_READY): an Egg of the Day Care's two Pokemon made now
-// and waiting with the Day Care man, as a step check that passed would make it.
+// and queued, as a step check that passed would make it.
 void MPDaycare_TestProduceEgg(void)
 {
     MPDaycare_ProduceEgg(&gSaveBlock1Ptr->daycare);
@@ -1172,6 +1173,10 @@ static void _IncrementDaycareSteps(struct DayCare *daycare)
     }
 
 #ifdef PORTABLE
+    // A save from before Update 30 can have its Egg pending with no queue: it is made now from the parents, as the Day Care
+    // man would make it, and handed over with the others (the owner's request of 2026-10-29: no word to him needed)
+    if (daycareParentCount == DAYCARE_MON_COUNT && FlagGet(FLAG_PENDING_DAYCARE_EGG) && MPDaycare_QueueCount() == 0)
+        MPDaycare_ProduceEgg(daycare);
     // Update 30: an Egg check every 64 steps (not 256) with the original compatibility chances; a full queue (five Eggs) waits
     if (daycareParentCount != DAYCARE_MON_COUNT || MPDaycare_QueueCount() >= MP_DAYCARE_EGG_QUEUE_SIZE)
         return;

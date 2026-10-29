@@ -967,6 +967,94 @@ int NativeSelfTest_Breeding(void)
         ExpectLeg("the Egg is in the mother's Poke Ball", eggs > 300 && differentSpeciesBall == eggs);
     }
 
+    // 10. the Day Care's Eggs handed over without the Day Care man (the owner's request of 2026-10-29): to the party,
+    // else to the PC, oldest first; with both full one waits with him
+    if (SectionWanted(10))
+    {
+        static const u16 eggSpecies[3] = {SPECIES_PICHU, SPECIES_AZURILL, SPECIES_WYNAUT};
+        struct Pokemon egg, mon, made[3];
+        u32 toParty = 0, toPc = 0, box = 99, isEgg = TRUE, cycles = 7, same = TRUE;
+        struct BoxPokemon *boxed;
+
+        Setup();
+        ClearDaycare();
+        for (u32 i = 0; i < 4; i++)
+        {
+            CreateMon(&mon, SPECIES_ZIGZAGOON, 5, 0x100 + i, OTID_STRUCT_PLAYER_ID);
+            gParties[B_TRAINER_PLAYER][i] = mon;
+        }
+        CalculatePlayerPartyCount();
+        for (u32 i = 0; i < 3; i++)
+        {
+            CreateMon(&made[i], eggSpecies[i], 1, 0x5000 + i, OTID_STRUCT_PLAYER_ID);
+            SetMonData(&made[i], MON_DATA_IS_EGG, &isEgg);
+            SetMonData(&made[i], MON_DATA_FRIENDSHIP, &cycles);
+            MPDaycare_QueuePush(&made[i]);
+        }
+        FlagSet(FLAG_PENDING_DAYCARE_EGG);
+        MPDaycare_DeliverWaitingEggs(&toParty, &toPc, &box);
+        boxed = GetBoxedMonPtr(0, 0);
+        ExpectLeg("three Eggs waiting, two party slots free: two join the party oldest first, the third goes to the PC",
+                  toParty == 2 && toPc == 1 && box == 0 && gPartiesCount[B_TRAINER_PLAYER] == PARTY_SIZE
+                  && GetMonData(&gParties[B_TRAINER_PLAYER][4], MON_DATA_PERSONALITY) == 0x5000
+                  && GetMonData(&gParties[B_TRAINER_PLAYER][5], MON_DATA_PERSONALITY) == 0x5001
+                  && GetBoxMonData(boxed, MON_DATA_PERSONALITY) == 0x5002 && GetBoxMonData(boxed, MON_DATA_IS_EGG));
+        ExpectLeg("then none waits and the Day Care man has none to offer",
+                  MPDaycare_QueueCount() == 0 && !FlagGet(FLAG_PENDING_DAYCARE_EGG) && GetDaycareState() != DAYCARE_EGG_WAITING);
+        // nothing of an Egg changes on the way: species, personality, trainer, cycles, shininess, moves
+        for (u32 i = 0; i < 3; i++)
+        {
+            struct Pokemon got;
+
+            if (i < 2)
+                got = gParties[B_TRAINER_PLAYER][4 + i];
+            else
+                BoxMonToMon(boxed, &got);
+            for (u32 field = 0; field < 7; field++)
+            {
+                static const u32 fields[7] = {MON_DATA_SPECIES, MON_DATA_PERSONALITY, MON_DATA_OT_ID, MON_DATA_FRIENDSHIP,
+                                              MON_DATA_IS_SHINY, MON_DATA_MOVE1, MON_DATA_IS_EGG};
+                same = same && GetMonData(&got, fields[field]) == GetMonData(&made[i], fields[field]);
+            }
+        }
+        ExpectLeg("each arrives as it was made (species, personality, trainer, cycles, shininess, moves)", same);
+        // the party and the PC full: it waits, and the Day Care man still offers it
+        for (u32 b = 0; b < TOTAL_BOXES_COUNT; b++)
+            for (u32 slot = 0; slot < IN_BOX_COUNT; slot++)
+                if (!GetBoxMonDataAt(b, slot, MON_DATA_SANITY_HAS_SPECIES))
+                    SetBoxMonAt(b, slot, &mon.box);
+        CreateMon(&egg, SPECIES_PICHU, 1, 0x6000, OTID_STRUCT_PLAYER_ID);
+        SetMonData(&egg, MON_DATA_IS_EGG, &isEgg);
+        MPDaycare_QueuePush(&egg);
+        FlagSet(FLAG_PENDING_DAYCARE_EGG);
+        toParty = toPc = 0;
+        MPDaycare_DeliverWaitingEggs(&toParty, &toPc, &box);
+        ExpectLeg("with the party and the PC full the Egg waits; the Day Care man offers it as before",
+                  toParty == 0 && toPc == 0 && MPDaycare_QueueCount() == 1 && FlagGet(FLAG_PENDING_DAYCARE_EGG)
+                  && GetDaycareState() == DAYCARE_EGG_WAITING);
+        // a PC slot freed: it goes there
+        ZeroBoxMonAt(5, 7);
+        MPDaycare_DeliverWaitingEggs(&toParty, &toPc, &box);
+        ExpectLeg("a PC slot freed takes it", toPc == 1 && box == 5 && GetBoxMonDataAt(5, 7, MON_DATA_PERSONALITY) == 0x6000
+                  && GetBoxMonDataAt(5, 7, MON_DATA_IS_EGG) && MPDaycare_QueueCount() == 0 && !FlagGet(FLAG_PENDING_DAYCARE_EGG));
+        // a save from before Update 30: the flag set and no queue: the Egg is made at the next step and handed over
+        Setup();
+        ClearDaycare();
+        Deposit(0, SPECIES_PIKACHU, MON_FEMALE, 1, FALSE);
+        Deposit(1, SPECIES_PIKACHU, MON_MALE, 2, FALSE);
+        CreateMon(&mon, SPECIES_ZIGZAGOON, 5, 0x100, OTID_STRUCT_PLAYER_ID);
+        gParties[B_TRAINER_PLAYER][0] = mon;
+        CalculatePlayerPartyCount();
+        FlagSet(FLAG_PENDING_DAYCARE_EGG);
+        IncrementDaycareSteps();       // the first step since the deposit: no Egg check of its own
+        ExpectLeg("(a save from before Update 30) its pending Egg is made at the next step", MPDaycare_QueueCount() == 1
+                  && FlagGet(FLAG_PENDING_DAYCARE_EGG));
+        toParty = toPc = 0;
+        MPDaycare_DeliverWaitingEggs(&toParty, &toPc, &box);
+        ExpectLeg("... and handed over to the party", toParty == 1 && GetMonData(&gParties[B_TRAINER_PLAYER][1], MON_DATA_IS_EGG)
+                  && GetMonData(&gParties[B_TRAINER_PLAYER][1], MON_DATA_SPECIES) == SPECIES_PICHU && !FlagGet(FLAG_PENDING_DAYCARE_EGG));
+    }
+
     printf("selftest-breeding: %d checks, %d failed\n", sLegChecks, sLegFailures);
     return sLegFailures ? 1 : 0;
 }

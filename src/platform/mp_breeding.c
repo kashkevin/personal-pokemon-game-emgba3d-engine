@@ -4,14 +4,23 @@
 #include <stdio.h>
 #include <string.h>
 #include "event_data.h"
+#include "link.h"
 #include "main.h"
+#include "multiplayer_battle.h"
+#include "multiplayer_menu.h"
+#include "multiplayer_ownership.h"
+#include "multiplayer_save.h"
 #include "multiplayer_world.h"
 #include "overworld.h"
+#include "palette.h"
 #include "pokedex.h"
 #include "pokemon.h"
 #include "pokemon_storage_system.h"
+#include "script.h"
 #include "string_util.h"
+#include "trainer_hill.h"
 #include "constants/characters.h"
+#include "constants/flags.h"
 #include "constants/game_stat.h"
 #include "platform/mp_breeding.h"
 
@@ -185,10 +194,9 @@ void MPBreeding_AdvanceBoxEggs(u32 toSub)
     }
 }
 
-// A species' name for the banner (ASCII): letters, digits and the few marks species names use.
-static void SpeciesAscii(char *out, u32 size, enum Species species)
+// Game text for a banner (ASCII): letters, digits and the few marks species and box names use.
+static void TextAscii(char *out, u32 size, const u8 *name)
 {
-    const u8 *name = GetSpeciesName(species);
     u32 n = 0;
 
     for (; *name != EOS && n + 1 < size; name++)
@@ -210,6 +218,12 @@ static void SpeciesAscii(char *out, u32 size, enum Species species)
         out[n++] = a;
     }
     out[n] = '\0';
+}
+
+// A species' name for the banner
+static void SpeciesAscii(char *out, u32 size, enum Species species)
+{
+    TextAscii(out, size, GetSpeciesName(species));
 }
 
 // Two lines of at most 32 characters: "PC EGG HATCHED!|Togepi hatched in your PC.", "2 PC EGGS HATCHED!|Togepi, Pichu",
@@ -244,5 +258,136 @@ void MPBreeding_BoxEggNoticeTick(void)
 const char *MPBreeding_LastBoxEggNotice(void)
 {
     return sLastNotice;
+}
+
+// ---------------------------------------------------------------------------
+// The Day Care's Eggs handed over (the owner's request of 2026-10-29)
+
+#define DELIVERY_RETRY_FRAMES 60   // with the party and the PC full, how often to look again
+
+static u32 sToParty, sToPc, sPcBox;   // handed over since the last banner; the box of the last one sent to the PC
+static u32 sWaitingCount;             // how many waited for room when it was last looked at
+static bool32 sWaitingOwed;           // a banner owed for an Egg that waits for room
+static u32 sRetryFrames;
+static char sLastDelivery[80];        // the last banner shown (the test builds' breed log)
+
+// As the Day Care man hands an Egg over (daycare.c _GiveEggFromDaycare: nothing of it changed) into the party's first
+// free slot; with the party full, to the PC as a gift Pokemon goes. MON_CANT_GIVE with both full.
+static u32 GiveEgg(struct Pokemon *egg)
+{
+    u32 i;
+
+    for (i = 0; i < PARTY_SIZE; i++)
+    {
+        if (GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_SPECIES) == SPECIES_NONE)
+        {
+            gParties[B_TRAINER_PLAYER][i] = *egg;
+            CompactPartySlots();
+            CalculatePlayerPartyCount();
+            return MON_GIVEN_TO_PARTY;
+        }
+    }
+    return CopyMonToPC(egg);
+}
+
+void MPDaycare_DeliverWaitingEggs(u32 *toParty, u32 *toPc, u32 *pcBox)
+{
+    while (MPDaycare_QueueCount() != 0)
+    {
+        struct Pokemon egg;
+        u32 given;
+
+        // the oldest, out of the queue only once it has a place
+        BoxMonToMon((const struct BoxPokemon *)gSaveBlock3Ptr->eggQueue.eggs[0], &egg);
+        given = GiveEgg(&egg);
+        if (given == MON_CANT_GIVE)
+            return;
+        MPDaycare_QueueDropOldest();
+        if (given == MON_GIVEN_TO_PARTY)
+        {
+            (*toParty)++;
+        }
+        else
+        {
+            (*toPc)++;
+            *pcBox = gSpecialVar_MonBoxId;
+        }
+    }
+    FlagClear(FLAG_PENDING_DAYCARE_EGG);
+}
+
+static bool32 DeliveryCalm(void)
+{
+    return gMain.callback1 == CB1_Overworld && gMain.callback2 == CB2_Overworld && !gMain.inBattle
+        && !ScriptContext_IsEnabled() && !ArePlayerFieldControlsLocked() && !gPaletteFade.active
+        && !MultiplayerBattle_IsActive() && !MultiplayerMenu_IsActive() && !MultiplayerSave_IsHeld()
+        && !IsNativeLinkSessionActive() && !InUnionRoom() && !MultiplayerOwnership_InFrontierChallenge()
+        && !GetCurrentTrainerHillMapId();
+}
+
+// Two lines of at most 32 characters: "DAY CARE EGG!|An Egg joined your party.", "DAY CARE EGG!|Sent to your PC (BOX2).",
+// "3 DAY CARE EGGS!|2 to your party, 1 to your PC."
+static void DeliveryText(char *text, u32 size)
+{
+    char box[16];
+
+    TextAscii(box, sizeof(box), GetBoxNamePtr(sPcBox));
+    if (sToPc == 0 && sToParty == 1)
+        snprintf(text, size, "DAY CARE EGG!|An Egg joined your party.");
+    else if (sToPc == 0)
+        snprintf(text, size, "%u DAY CARE EGGS!|They joined your party.", (unsigned)sToParty);
+    else if (sToParty == 0 && sToPc == 1)
+        snprintf(text, size, "DAY CARE EGG!|Sent to your PC (%s).", box);
+    else if (sToParty == 0)
+        snprintf(text, size, "%u DAY CARE EGGS!|Sent to your PC (%s).", (unsigned)sToPc, box);
+    else
+        snprintf(text, size, "%u DAY CARE EGGS!|%u to your party, %u to your PC.", (unsigned)(sToParty + sToPc),
+                 (unsigned)sToParty, (unsigned)sToPc);
+}
+
+void MPDaycare_DeliveryTick(void)
+{
+    char text[80];
+    u32 waiting = MPDaycare_QueueCount();
+
+    if (waiting == 0)
+    {
+        sWaitingCount = sRetryFrames = 0;
+        sWaitingOwed = FALSE;
+    }
+    else if (DeliveryCalm() && (sRetryFrames == 0 || --sRetryFrames == 0))
+    {
+        MPDaycare_DeliverWaitingEggs(&sToParty, &sToPc, &sPcBox);
+        // what is left waits for room in the party or the PC: said once for each Egg more that waits, looked at again
+        // in a second
+        waiting = MPDaycare_QueueCount();
+        sRetryFrames = waiting != 0 ? DELIVERY_RETRY_FRAMES : 0;
+        sWaitingOwed = waiting > sWaitingCount || (sWaitingOwed && waiting != 0);
+        sWaitingCount = waiting;
+    }
+    if (sToParty + sToPc != 0)
+    {
+        DeliveryText(text, sizeof(text));
+        if (MultiplayerWorld_ShowLocalNotice(text))
+        {
+            sToParty = sToPc = 0;
+            snprintf(sLastDelivery, sizeof(sLastDelivery), "%s", text);
+        }
+        return;
+    }
+    if (sWaitingOwed)
+    {
+        snprintf(text, sizeof(text), "DAY CARE EGG waiting:|make room in your party or PC.");
+        if (MultiplayerWorld_ShowLocalNotice(text))
+        {
+            sWaitingOwed = FALSE;
+            snprintf(sLastDelivery, sizeof(sLastDelivery), "%s", text);
+        }
+    }
+}
+
+const char *MPDaycare_LastDeliveryNotice(void)
+{
+    return sLastDelivery;
 }
 #endif

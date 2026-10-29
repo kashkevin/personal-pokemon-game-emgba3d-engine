@@ -234,11 +234,12 @@ static struct
      * Bag's caps and patches change (TrainLogField); what was last logged */
     bool trainLog, trainLogged;
     int trainSeen[13];
-    /* PKMN_TEST_DAYCARE="spec;spec": the two Pokemon at the Day Care; PKMN_TEST_EGG_READY=1: an Egg of theirs waiting;
-       PKMN_TEST_EGG_CYCLES=n: a party Egg with more cycles left has n; PKMN_TEST_BREED_LOG=1: "breed ..." lines
-       (tools/battle_env/breed_check.py) */
+    /* PKMN_TEST_DAYCARE="spec;spec": the two Pokemon at the Day Care; PKMN_TEST_EGG_READY=n: n Eggs of theirs made (1 to
+       5; queued, then handed over to the party or the PC once the field is calm); PKMN_TEST_EGG_CYCLES=n: a party Egg with
+       more cycles left has n; PKMN_TEST_BREED_LOG=1: "breed ..." lines (tools/battle_env/breed_check.py) */
     char daycare[256];
-    bool eggReady, breedLog, breedLogged;
+    int eggsReady;
+    bool breedLog, breedLogged;
     int eggCycles;
     char breedSeen[PARTY_SIZE][192];
     int breedStateSeen[5];
@@ -249,6 +250,7 @@ static struct
     int boxEggSlots[8][2], boxEggCount;
     char boxEggSeen[8][192];
     char pcNoticeSeen[80];
+    char dayCareNoticeSeen[80];   /* the Day Care's Eggs handed over: "breed day care notice: ..." for its banner */
     /* PKMN_TEST_BAG_LOG=item[,item...] (at most 4): on the field, "bag field: money M item I count C ..." whenever the
        money or one of those items' count in the Bag changes (tools/battle_env/shop_check.py: a Poke Mart's purchase and
        sale, saved and loaded); what was last logged */
@@ -630,7 +632,7 @@ static void Init(void)
     value = SDL_getenv("PKMN_TEST_DAYCARE");
     if (value != NULL)
         snprintf(s.daycare, sizeof(s.daycare), "%s", value);
-    s.eggReady = EnvInt("PKMN_TEST_EGG_READY", 0) != 0;
+    s.eggsReady = EnvInt("PKMN_TEST_EGG_READY", 0);
     s.eggCycles = EnvInt("PKMN_TEST_EGG_CYCLES", -1);
     s.breedLog = EnvInt("PKMN_TEST_BREED_LOG", 0) != 0;
     s.eggToPc = EnvInt("PKMN_TEST_EGG_TO_PC", 0) != 0;
@@ -969,11 +971,28 @@ static void SetUpTestBox(void)
         if (*p == ';')
             p++;
     }
+    if (EnvInt("PKMN_TEST_PC_FULL", 0) != 0)
+    {
+        /* PKMN_TEST_PC_FULL=1: every empty PC slot holds a Zigzagoon (in memory): a full PC (the Day Care's Eggs that
+           wait for room; the gift Egg refused) */
+        struct Pokemon mon;
+        int filled = 0;
+
+        CreateTestMon(&mon, SPECIES_ZIGZAGOON, 2, NULL);
+        for (int box = 0; box < TOTAL_BOXES_COUNT; box++)
+            for (int slot = 0; slot < IN_BOX_COUNT; slot++)
+                if (!GetBoxMonDataAt(box, slot, MON_DATA_SANITY_HAS_SPECIES))
+                {
+                    SetBoxMonAt(box, slot, &mon.box);
+                    filled++;
+                }
+        TestLog("Battle env test: box full: %d Pokemon put in the PC", filled);
+    }
 }
 
 /* PKMN_TEST_DAYCARE="species:level[:flags];species:level[:flags]": the two Pokemon left at the Day Care (Route 117) as
- * the Day Care lady stores them; PKMN_TEST_EGG_READY=1: an Egg of theirs made now, waiting with the Day Care man, as a
- * step check that passed would make it (daycare.c MPDaycare_TestProduceEgg). Test builds only. */
+ * the Day Care lady stores them ("none": the Day Care emptied); PKMN_TEST_EGG_READY=n: n Eggs of theirs made now (1 to 5), as step checks that passed
+ * would make them (daycare.c MPDaycare_TestProduceEgg), handed over once the field is calm. Test builds only. */
 void MPDaycare_TestProduceEgg(void);
 
 static void SetUpTestDaycare(void)
@@ -983,6 +1002,16 @@ static void SetUpTestDaycare(void)
 
     if (s.daycare[0] == '\0')
         return;
+    if (strcmp(s.daycare, "none") == 0)
+    {
+        /* PKMN_TEST_DAYCARE=none: the Day Care emptied (in memory): a walk with the save's parents there makes no
+           Egg of theirs to be handed over midway */
+        memset(&gSaveBlock1Ptr->daycare, 0, sizeof(gSaveBlock1Ptr->daycare));
+        MPDaycare_QueueClear();
+        FlagClear(FLAG_PENDING_DAYCARE_EGG);
+        TestLog("Battle env test: breed daycare: emptied");
+        return;
+    }
     while (*p != '\0' && slot < DAYCARE_MON_COUNT)
     {
         struct Pokemon mon;
@@ -1002,10 +1031,12 @@ static void SetUpTestDaycare(void)
             p++;
     }
     TestLog("Battle env test: breed daycare: %d Pokemon at the Day Care", CountPokemonInDaycare(&gSaveBlock1Ptr->daycare));
-    if (s.eggReady)
+    if (s.eggsReady > 0)
     {
-        MPDaycare_TestProduceEgg();
-        TestLog("Battle env test: breed daycare: an Egg waits %d", FlagGet(FLAG_PENDING_DAYCARE_EGG));
+        for (int i = 0; i < s.eggsReady && i < MP_DAYCARE_EGG_QUEUE_SIZE; i++)
+            MPDaycare_TestProduceEgg();
+        TestLog("Battle env test: breed daycare: an Egg waits %d (%u queued)", FlagGet(FLAG_PENDING_DAYCARE_EGG),
+                (unsigned)MPDaycare_QueueCount());
     }
 }
 
@@ -1924,6 +1955,12 @@ static void BreedLogBoxEggs(void)
     {
         snprintf(s.pcNoticeSeen, sizeof(s.pcNoticeSeen), "%s", notice);
         TestLog("Battle env test: breed pc notice: %s", notice);
+    }
+    notice = MPDaycare_LastDeliveryNotice();
+    if (notice[0] != '\0' && strcmp(notice, s.dayCareNoticeSeen) != 0)
+    {
+        snprintf(s.dayCareNoticeSeen, sizeof(s.dayCareNoticeSeen), "%s", notice);
+        TestLog("Battle env test: breed day care notice: %s", notice);
     }
 }
 

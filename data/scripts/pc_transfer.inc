@@ -20,6 +20,17 @@ Common_EventScript_TransferredToPC::
 	call_if_set FLAG_SYS_PC_LANETTE, EventScript_TransferredLanettesPC
 	return
 
+.ifdef PORTABLE
+@ A gift Egg sent to the PC with the party full (the owner's request of 2026-10-29), told as a Pokemon sent there is, as
+@ "EGG": what hatches from it stays a surprise
+Common_EventScript_EggTransferredToPC::
+	bufferboxname STR_VAR_1, VAR_PC_BOX_TO_SEND_MON
+	bufferstring STR_VAR_2, gText_EggNickname
+	call_if_unset FLAG_SYS_PC_LANETTE, EventScript_TransferredSomeonesPC
+	call_if_set FLAG_SYS_PC_LANETTE, EventScript_TransferredLanettesPC
+	return
+.endif
+
 EventScript_TransferredSomeonesPC::
 	specialvar VAR_RESULT, ShouldShowBoxWasFullMessage
 	goto_if_eq VAR_RESULT, TRUE, EventScript_SomeonesPCBoxFull
