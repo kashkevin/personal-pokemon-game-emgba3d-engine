@@ -207,3 +207,21 @@ static void PrintDiplomaText(u8 *text, u8 var1, u8 var2)
 
     AddTextPrinterParameterized4(0, FONT_NORMAL, var1, var2, 0, 0, color, TEXT_SKIP_DRAW, text);
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native diploma screen (src/native_ui/screens/ui_diploma.c) draws the diploma in the new design: while it is up
+// (MainCB2), its text is window 0's (DisplayDiplomaText), whether it is the National POKéDEX's (the frame BG1 shows),
+// and whether A or B closes it now.
+bool32 Diploma_NativeUiState(bool8 *national, bool8 *ready)
+{
+    if (gMain.callback2 != MainCB2
+     || (FindTaskIdByFunc(Task_DiplomaFadeIn) == TASK_NONE && FindTaskIdByFunc(Task_DiplomaWaitForKeyPress) == TASK_NONE
+      && FindTaskIdByFunc(Task_DiplomaFadeOut) == TASK_NONE))
+        return FALSE;
+    *national = GetGpuReg(REG_OFFSET_BG1HOFS) != 0;
+    *ready = FindTaskIdByFunc(Task_DiplomaWaitForKeyPress) != TASK_NONE;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

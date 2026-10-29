@@ -3932,4 +3932,94 @@ bool32 BerryBlender_NativeUiRecords(struct NativeBlenderRecords *out)
     }
     return TRUE;
 }
+
+// The native Berry Blender screen (src/native_ui/screens/ui_berry_blender.c) draws the players' names, the messages,
+// the ranking and the results boards and the YES / NO in the new design around the game's blender: what each shows,
+// from the game's own state (CB2_EndBlenderGame's states 5 and 6 are the boards, PrintBlendingRanking's and
+// PrintBlendingResults' from state 4 on theirs up; state 10 the YES / NO).
+bool32 BerryBlender_NativeUiState(struct NativeBerryBlender *out)
+{
+    MainCallback cb = gMain.callback2;
+    u32 i, playerId = gReceivedRemoteLinkPlayers ? GetMultiplayerId() : 0;
+
+    if (sBerryBlender == NULL
+     || (cb != CB2_LoadBerryBlender && cb != CB2_StartBlenderLocal && cb != CB2_StartBlenderLink && cb != CB2_PlayBlender
+      && cb != CB2_EndBlenderGame && cb != CB2_CheckPlayAgainLocal && cb != CB2_CheckPlayAgainLink))
+        return FALSE;
+    memset(out, 0, sizeof(*out));
+    out->msgWindow = WIN_MSG;
+    out->playing = cb == CB2_PlayBlender;
+    out->namesShown = cb != CB2_LoadBerryBlender;
+    for (i = 0; i < BLENDER_MAX_PLAYERS; i++)
+    {
+        u16 id = sBerryBlender->arrowIdToPlayerId[i];
+
+        // a seat's name once the game has put its window up (PrintPlayerNames; before, the seats are not yet set)
+        if (id == NO_PLAYER || id >= BLENDER_MAX_PLAYERS || !Window_NativeUiOnScreen(i))
+            continue;
+        out->names[i] = gLinkPlayers[id].name;
+        out->isPlayer[i] = id == playerId;
+    }
+    out->numPlayers = sBerryBlender->numPlayers > BLENDER_MAX_PLAYERS ? BLENDER_MAX_PLAYERS : sBerryBlender->numPlayers;
+    // the places and their berries once the blending is over (before, the berries' names are not filled in)
+    for (i = 0; cb == CB2_EndBlenderGame && i < out->numPlayers; i++)
+    {
+        u8 place = sBerryBlender->playerPlaces[i];
+        const u8 *name = sBerryBlender->blendedBerries[place < BLENDER_MAX_PLAYERS ? place : 0].name;
+        u32 k;
+
+        if (place >= BLENDER_MAX_PLAYERS)
+            continue;
+        out->placeNames[i] = gLinkPlayers[place].name;
+        out->hits[i][0] = sBerryBlender->scores[place][SCORE_BEST];
+        out->hits[i][1] = sBerryBlender->scores[place][SCORE_GOOD];
+        out->hits[i][2] = sBerryBlender->scores[place][SCORE_MISS];
+        for (k = 0; k < BERRY_NAME_LENGTH && name[k] != EOS; k++)
+            out->berries[i][k] = name[k];
+        out->berries[i][k] = EOS;
+        StringAppend(out->berries[i], sText_SpaceBerry);
+    }
+    out->ownPlace = sBerryBlender->ownRanking;
+    out->maxRpm = sBerryBlender->maxRPM;
+    out->frames = sBerryBlender->gameFrameTime;
+    for (i = 0; i < NUM_SCORE_TYPES && i < ARRAY_COUNT(out->scoreIcons); i++)
+        out->scoreIcons[i] = MAX_SPRITES;
+    if (cb == CB2_EndBlenderGame)
+    {
+        if (sBerryBlender->gameEndState == 5 && sBerryBlender->mainState >= 4)
+        {
+            out->board = NATIVE_BLENDER_BOARD_RANKING;
+            out->boardWaits = sBerryBlender->mainState == 5;
+            for (i = 0; i < NUM_SCORE_TYPES && i < ARRAY_COUNT(out->scoreIcons); i++)
+                out->scoreIcons[i] = sBerryBlender->scoreIconIds[i];
+        }
+        else if (sBerryBlender->gameEndState == 6 && sBerryBlender->mainState == 4)
+        {
+            out->board = NATIVE_BLENDER_BOARD_RESULTS;
+            out->boardWaits = TRUE;
+        }
+        else if (sBerryBlender->gameEndState == 6 && sBerryBlender->mainState < 4)
+        {
+            // the ranking's symbols until the results replace them
+            for (i = 0; i < NUM_SCORE_TYPES && i < ARRAY_COUNT(out->scoreIcons); i++)
+                out->scoreIcons[i] = sBerryBlender->scoreIconIds[i];
+        }
+        if (sBerryBlender->gameEndState == 10)
+        {
+            out->yesNo = TRUE;
+            out->yesNoCursor = Menu_GetCursorPos();
+        }
+    }
+    return TRUE;
+}
 #endif // ENABLE_NATIVE_UI
+
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+// Test builds only (the native Berry Blender's checks): the computer partners always hit BEST (the blender's own
+// debugging switch, which the blending's start clears), so a test's blend ends in a few turns.
+void BerryBlender_TestPerfectOpponents(void)
+{
+    if (sBerryBlender != NULL && gMain.callback2 == CB2_PlayBlender)
+        sBerryBlender->perfectOpponents = TRUE;
+}
+#endif

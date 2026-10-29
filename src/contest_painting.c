@@ -496,3 +496,19 @@ static void CreateContestPaintingPicture(u8 contestWinnerId, bool8 isForArtist)
     InitPaintingMonOamData(contestWinnerId);
     LoadContestPaintingFrame(contestWinnerId, isForArtist);
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native contest painting screen (src/native_ui/screens/ui_contest_painting.c) draws the painting's caption in the
+// new design over the game's picture: while the painting is held (CB2_HoldContestPainting), its caption's window
+// (WINDOW_NONE for the artist's painting, which has none: PrintContestPaintingCaption) and whether A or B closes it now.
+bool32 ContestPainting_NativeUiState(u8 *captionWindow, bool8 *ready)
+{
+    if (gMain.callback2 != CB2_HoldContestPainting)
+        return FALSE;
+    *captionWindow = gCurContestWinnerIsForArtist == TRUE ? WINDOW_NONE : sWindowId;
+    *ready = sHoldState == 1;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

@@ -73,6 +73,11 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_UsePokeblock, /* the Pokéblock's condition menu: who gets it, what it enhanced */
     &gUiScreen_PokeblockFeed, /* a Pokémon eating a Pokéblock: the scene's line */
     &gUiScreen_Contest,      /* a contest's appeals: the panels, the announcer, the moves over the stage */
+    &gUiScreen_ContestResults, /* a contest's results: the bars, the placings, the winner's banner */
+    &gUiScreen_BerryBlender, /* the Berry Blender: the names, the lines, the ranking and results round the blender */
+    &gUiScreen_ContestPainting, /* a contest painting: its caption as a museum label */
+    &gUiScreen_BerryTag,     /* a berry's tag (the Bag's CHECK TAG) */
+    &gUiScreen_Diploma,      /* the POKéDEX diploma */
     &gUiScreen_Shop,
     &gUiScreen_Naming,
     &gUiScreen_Starters,

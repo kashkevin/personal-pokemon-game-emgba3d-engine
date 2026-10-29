@@ -701,3 +701,32 @@ static void Task_DisplayAnotherBerry(u8 taskId)
     if (tBerryY == 0)
         gTasks[taskId].func = Task_HandleInput;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native berry tag screen (src/native_ui/screens/ui_berry_tag.c) draws the tag in the new design: the berry (its
+// item, for its picture) and its five flavours, the windows the game prints the tag's lines on (the number and name,
+// the size and firmness, the description: their lines are the windows' transcripts), and whether it reads buttons now
+// (UP / DOWN: the bag's next berry; A, B: back to the bag) or slides to another berry.
+bool32 BerryTag_NativeUiState(struct NativeBerryTag *out)
+{
+    const struct BerryInfo *info;
+
+    if (gMain.callback2 != CB2_BerryTagScreen || sBerryTag == NULL)
+        return FALSE;
+    info = GetBerryInfo(sBerryTag->berryId);
+    out->item = BerryTypeToItemId(sBerryTag->berryId);
+    out->flavors[0] = info->spicy;
+    out->flavors[1] = info->dry;
+    out->flavors[2] = info->sweet;
+    out->flavors[3] = info->bitter;
+    out->flavors[4] = info->sour;
+    out->nameWindow = WIN_BERRY_NAME;
+    out->sizeWindow = WIN_SIZE_FIRM;
+    out->descWindow = WIN_DESC;
+    out->ready = FindTaskIdByFunc(Task_HandleInput) != TASK_NONE && !gPaletteFade.active;
+    out->changing = FindTaskIdByFunc(Task_DisplayAnotherBerry) != TASK_NONE;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

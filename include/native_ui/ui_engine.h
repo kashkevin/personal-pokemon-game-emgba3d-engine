@@ -989,6 +989,43 @@ struct NativeContest
     u16 hideTiles[9][2];                 /* the panel's sprites (score hearts, next turn tags, box blinks): start, count */
 };
 bool32 Contest_NativeUiState(struct NativeContest *out);
+/* a contest's results (contest_util.c: CB2_ShowContestResults): each contestant's bar as the game fills it (0..barMax:
+ * the preliminary points first, then round 2's added or taken) and its preliminary part, the stars and hearts the game
+ * has drawn so far, its placing once the game has put it up (1..4; 0: not yet); the announcer's banner while its box is
+ * out (its line, its box's middle in GBA pixels), the winner's banner as it opens (0..64 lines) with its Pokémon where it
+ * slides; whether the game waits for A at the end */
+struct NativeContestResult
+{
+    u16 species;
+    u32 personality;
+    bool8 shiny;
+    const u8 *nickname;
+    const u8 *trainerName;
+    s16 bar;
+    s16 barPreliminary;
+    bool8 lostPoints;
+    u8 stars;
+    u8 hearts;
+    u8 place;
+};
+struct NativeContestResults
+{
+    u8 category, rank, player, winner;
+    s16 barMax;
+    struct NativeContestResult mons[NATIVE_CONTESTANTS];
+    bool8 highlight;                     /* the winner's row flashing */
+    const u8 *banner;
+    s16 bannerX;
+    u8 winnerOpen;
+    bool8 winnerShown;
+    s16 winnerX;
+    u16 winnerTiles;
+    bool8 waiting;
+};
+bool32 ContestUtil_NativeUiResults(struct NativeContestResults *out);
+/* a contest painting while it is held (contest_painting.c: the lobby's and the museum's portraits, the artist's):
+ * its caption's window (WINDOW_NONE: none; its line is the window's) and whether A or B closes it now */
+bool32 ContestPainting_NativeUiState(u8 *captionWindow, bool8 *ready);
 
 /* ---------------------------------------------------------------- script menus (script_menu.c), coins (coins.c) */
 
@@ -1180,6 +1217,53 @@ struct NativeBlenderRecords
     u8 speeds[NATIVE_BLENDER_RECORDS][16];
 };
 bool32 BerryBlender_NativeUiRecords(struct NativeBlenderRecords *out);
+/* the Berry Blender (berry_blender.c) from its first screen to its last: the players around the blender (each arrow's:
+ * its name, the player's own), the message window (its line is the window's: msgWindow), the ranking board (each place:
+ * its name and its BEST / GOOD / MISS hits) or the results board (each place: its name and berry; the top speed in
+ * hundredths of a turn a minute, the time in frames) while up and whether it waits for A, the YES / NO (blend another
+ * berry?) and its cursor, the score symbols' sprites the ranking shows (drawn by the screen) */
+#define NATIVE_BLENDER_PLAYERS 4
+enum
+{
+    NATIVE_BLENDER_BOARD_NONE,
+    NATIVE_BLENDER_BOARD_RANKING,
+    NATIVE_BLENDER_BOARD_RESULTS,
+};
+struct NativeBerryBlender
+{
+    u8 msgWindow;
+    const u8 *names[NATIVE_BLENDER_PLAYERS];     /* by arrow: NULL, no player there */
+    bool8 isPlayer[NATIVE_BLENDER_PLAYERS];
+    bool8 namesShown;
+    bool8 playing;                               /* the blending itself: A at the arrow */
+    u8 board;
+    bool8 boardWaits;
+    u8 numPlayers;
+    u8 ownPlace;                                 /* the player's place on the boards (0: first) */
+    const u8 *placeNames[NATIVE_BLENDER_PLAYERS];
+    u16 hits[NATIVE_BLENDER_PLAYERS][3];         /* BEST, GOOD, MISS */
+    u8 berries[NATIVE_BLENDER_PLAYERS][24];
+    u16 maxRpm;
+    u32 frames;
+    bool8 yesNo;
+    u8 yesNoCursor;
+    u8 scoreIcons[3];                            /* sprite ids (MAX_SPRITES: none) */
+};
+bool32 BerryBlender_NativeUiState(struct NativeBerryBlender *out);
+/* a berry's tag (berry_tag_screen.c: the Bag's CHECK TAG): the berry as an item and its five flavours (spicy, dry,
+ * sweet, bitter, sour), the windows its lines are printed on, whether it reads buttons now or slides to another */
+struct NativeBerryTag
+{
+    u16 item;
+    u8 flavors[5];
+    u8 nameWindow, sizeWindow, descWindow;
+    bool8 ready;
+    bool8 changing;
+};
+bool32 BerryTag_NativeUiState(struct NativeBerryTag *out);
+/* the POKéDEX diploma (diploma.c) while up: its text is window 0's; whether it is the National POKéDEX's, whether A or
+ * B closes it now */
+bool32 Diploma_NativeUiState(bool8 *national, bool8 *ready);
 /* the Battle Frontier's records windows (frontier_util.c: a facility's results, the link contests', the Ranking
  * Hall's) while one is up: its window and size in tiles; its lines are the window's transcript */
 bool32 FrontierUtil_NativeUiRecordsWindow(u8 *windowId, u8 *width, u8 *height);

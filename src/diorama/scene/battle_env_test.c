@@ -70,6 +70,9 @@
 #include "constants/event_objects.h"
 #include "constants/contest.h"
 #include "contest.h"
+#include "berry_tag_screen.h"
+#include "diploma.h"
+#include "item_menu.h"
 #include "constants/trainer_types.h"
 #include "field_message_box.h"
 #include "field_player_avatar.h"
@@ -123,6 +126,8 @@ static struct
     SDL_atomic_t captured;
     /* PKMN_TEST_AUTOPILOT=1: the keys a person would press (FilterKeys) */
     bool autopilot;
+    /* PKMN_TEST_BLEND_PERFECT=1: the Berry Blender's partners always hit BEST */
+    bool blendPerfect;
     SDL_atomic_t fieldSeen;
     SDL_atomic_t battleSeen;
     unsigned int startMs;
@@ -496,6 +501,7 @@ static void Init(void)
     s.captureDelay = EnvInt("PKMN_TEST_CAPTURE_DELAY", 40);
     s.exitAfter = EnvInt("PKMN_TEST_EXIT", 0) != 0;
     s.autopilot = EnvInt("PKMN_TEST_AUTOPILOT", 0) != 0;
+    s.blendPerfect = EnvInt("PKMN_TEST_BLEND_PERFECT", 0) != 0;
     s.timeoutSeconds = EnvInt("PKMN_TEST_TIMEOUT", 0);
     value = SDL_getenv("PKMN_TEST_PARTY");
     if (value != NULL)
@@ -1230,6 +1236,42 @@ static void EnterTestContest(void)
     FlagSet(FLAG_ENTERED_CONTEST);
     SetWarpDestination(MAP_GROUP(MAP_CONTEST_HALL_COOL), MAP_NUM(MAP_CONTEST_HALL_COOL), WARP_ID_NONE, 7, 5);
     DoContestHallWarp();
+}
+
+/* BTAG: the Bag's CHECK TAG on the berries pocket's first berry (PKMN_TEST_BAG gives the berries), the Bag set to
+ * return to the field - the native berry tag's checks */
+static void OpenTestBerryTag(void)
+{
+    gBagPosition.exitCallback = CB2_ReturnToField;
+    gBagPosition.location = ITEMMENULOCATION_FIELD;
+    gBagPosition.pocket = POCKET_BERRIES;
+    gBagPosition.cursorPosition[POCKET_BERRIES] = 0;
+    gBagPosition.scrollPosition[POCKET_BERRIES] = 0;
+    gSpecialVar_ItemId = GetBagItemId(POCKET_BERRIES, 0);
+    TestLog("Battle env test: the berry tag of item %u", gSpecialVar_ItemId);
+    if (gSpecialVar_ItemId != ITEM_NONE)
+        DoBerryTagScreen();
+}
+
+/* DIPLOMA: the POKéDEX diploma (as the Lilycove game designer shows it) - the native diploma's checks */
+static void ShowTestDiploma(void)
+{
+    TestLog("Battle env test: the POKéDEX diploma");
+    SetMainCallback2(CB2_ShowDiploma);
+}
+
+void DoBerryBlending(void);           /* berry_blender.c: a script special (no header declares it) */
+void BerryBlender_TestPerfectOpponents(void);
+
+/* BLEND: the Berry Blender with one computer partner (the Contest Lobby's blenders call it so, gSpecialVar_0x8004 the
+ * partners), the berry chosen from the Bag as there (PKMN_TEST_BAG gives the berries) - the native Berry Blender's
+ * checks */
+static void StartTestBerryBlender(void)
+{
+    TestLog("Battle env test: the Berry Blender with one computer partner");
+    LockPlayerFieldControls();
+    gSpecialVar_0x8004 = 1;
+    DoBerryBlending();
 }
 
 /* HOFPC: the test party saved as the Hall of Fame's one record (into the run's own copy of the save), then the Hall
@@ -3890,7 +3932,8 @@ bool16 ScriptMenu_CreateStartMenuForPokenavTutorial(void);  /* script_menu.c: th
    scientist does (its tutorial: MATCH CALL, Mr. Stone's call), NAVMENU his START menu first (only POKéNAV goes on)
    - the PokéNav tutorial's checks; HOF the Hall of Fame with the test party (not saved), HOFPC its PC with the test
    party as its one record; PBLOCK the Pokéblock case with PKMN_TEST_POKEBLOCKS' blocks; CONTEST a Normal Rank Cool
-   contest with the party's first Pokémon */
+   contest with the party's first Pokémon; BLEND the Berry Blender with a computer partner; BTAG the Bag's first
+   berry's tag; DIPLOMA the POKéDEX diploma */
 static bool FieldEventAt(const char *script, const char *event, int frame)
 {
     const char *p = script;
@@ -4412,6 +4455,15 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
             OpenTestPokeblockCase();
         if (FieldEventAt(s.fieldKeys, "CONTEST", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
             EnterTestContest();
+        if (FieldEventAt(s.fieldKeys, "BLEND", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
+            StartTestBerryBlender();
+        /* PKMN_TEST_BLEND_PERFECT=1: the blender's partners always hit BEST (its own debugging switch) */
+        if (s.blendPerfect)
+            BerryBlender_TestPerfectOpponents();
+        if (FieldEventAt(s.fieldKeys, "BTAG", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
+            OpenTestBerryTag();
+        if (FieldEventAt(s.fieldKeys, "DIPLOMA", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
+            ShowTestDiploma();
         if (FieldEventAt(s.fieldKeys, "HOF", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
         {
             TestLog("Battle env test: the Hall of Fame (the team not saved)");

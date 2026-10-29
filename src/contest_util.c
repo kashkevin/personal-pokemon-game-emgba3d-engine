@@ -1166,6 +1166,14 @@ static s32 DrawResultsTextWindow(const u8 *text, u8 spriteId)
     int strWidth;
     u8 *spriteTilePtrs[4];
     u8 *dst;
+#ifdef ENABLE_NATIVE_UI
+    {
+        void ContestUtil_NativeUiNoteResultsText(const u8 *text);
+
+        ContestUtil_NativeUiNoteResultsText(text);
+    }
+#endif
+#line 1145 // gba-line
 
     struct WindowTemplate windowTemplate;
     memset(&windowTemplate, 0, sizeof(windowTemplate));
@@ -2723,6 +2731,89 @@ bool32 ContestUtil_NativeUiEntryPic(struct NativeScriptPic *out)
     out->left = gWindows[windowId].window.tilemapLeft;
     out->top = gWindows[windowId].window.tilemapTop;
     out->tileNum = spriteId < MAX_SPRITES ? gSprites[spriteId].oam.tileNum : 0xFFFF;
+    return TRUE;
+}
+// The results screen's announcer banner (DrawResultsTextWindow: "Announcing the results!", "... won!"): its line as the
+// game drew it on the sliding box's sprites.
+static u8 sNativeUiResultsText[100];
+
+void ContestUtil_NativeUiNoteResultsText(const u8 *text)
+{
+    StringCopyN(sNativeUiResultsText, text, sizeof(sNativeUiResultsText) - 1);
+    sNativeUiResultsText[sizeof(sNativeUiResultsText) - 1] = EOS;
+}
+
+// The native contest results screen (src/native_ui/screens/ui_contest_results.c) draws the results in the new design:
+// each contestant's bar as the game fills it, the stars and hearts the game has drawn on BG1 so far (from the right,
+// UpdateContestResultBars), its placing once Task_DrawFinalStandingNumber has put it on BG2, the announcer's banner
+// where its box slides, the winner's banner as it opens and its Pokémon as it slides through.
+bool32 ContestUtil_NativeUiResults(struct NativeContestResults *out)
+{
+    const u16 *bg1, *bg2;
+    u32 i, k;
+    u8 taskId;
+
+    if (gMain.callback2 != CB2_ShowContestResults || sContestResults == NULL || sContestResults->data == NULL
+     || sContestResults->monResults == NULL || sContestResults->tilemapBuffers[1] == NULL
+     || sContestResults->tilemapBuffers[2] == NULL)
+        return FALSE;
+    bg1 = (const u16 *)sContestResults->tilemapBuffers[1];
+    bg2 = (const u16 *)sContestResults->tilemapBuffers[2];
+    memset(out, 0, sizeof(*out));
+    out->category = gSpecialVar_ContestCategory;
+    out->rank = gSpecialVar_ContestRank;
+    out->player = gContestPlayerMonIndex;
+    out->barMax = MAX_BAR_LENGTH;
+    for (i = 0; i < CONTESTANT_COUNT; i++)
+    {
+        struct NativeContestResult *m = &out->mons[i];
+        const struct ContestMonResults *r = &(*sContestResults->monResults)[i];
+        u16 heart = r->lostPoints ? 0x60A5 : 0x60A3;
+
+        m->species = gContestMons[i].species;
+        m->personality = gContestMons[i].personality;
+        m->shiny = gContestMons[i].isShiny;
+        m->nickname = gContestMons[i].nickname;
+        m->trainerName = gContestMons[i].trainerName;
+        m->bar = sContestResults->data->barLength[i];
+        m->barPreliminary = r->barLengthPreliminary;
+        m->lostPoints = r->lostPoints;
+        for (k = 19; k < 32; k++)
+        {
+            if (bg1[(i * 3 + 5) * 32 + k] == 0x60B3)
+                m->stars++;
+            if (bg1[(i * 3 + 6) * 32 + k] == heart)
+                m->hearts++;
+        }
+        // the tile, whatever its palette (the winner's row is lit in another: Task_StartHighlightWinnersBox)
+        if ((bg2[(i * 3 + 5) * 32 + 1] & 0x3FF) == ((gContestFinalStandings[i] * 2 + 0x5043) & 0x3FF))
+            m->place = gContestFinalStandings[i] + 1;
+    }
+    GET_CONTEST_WINNER_ID(i);
+    out->winner = i;
+    taskId = sContestResults->data->highlightWinnerTaskId;
+    out->highlight = taskId < NUM_TASKS && gTasks[taskId].isActive && gTasks[taskId].func == Task_HighlightWinnersBox;
+    if (sContestResults->data->slidingTextBoxState != SLIDING_TEXT_OFFSCREEN
+     && sContestResults->data->slidingTextBoxSpriteId < MAX_SPRITES)
+    {
+        out->banner = sNativeUiResultsText;
+        out->bannerX = gSprites[sContestResults->data->slidingTextBoxSpriteId].x
+                     + gSprites[sContestResults->data->slidingTextBoxSpriteId].x2;
+    }
+    // the winner's banner: open as the game's window is (WIN0V, 0..64 lines), its Pokémon where its sprite is
+    if (FindTaskIdByFunc(Task_ShowWinnerMonBanner) != TASK_NONE)
+    {
+        out->winnerOpen = (gBattle_WIN0V & 0xFF) - (gBattle_WIN0V >> 8);
+        if (sContestResults->data->winnerMonSpriteId < MAX_SPRITES && gSprites[sContestResults->data->winnerMonSpriteId].inUse)
+        {
+            out->winnerShown = TRUE;
+            out->winnerX = gSprites[sContestResults->data->winnerMonSpriteId].x
+                         + gSprites[sContestResults->data->winnerMonSpriteId].x2;
+            out->winnerTiles = gSprites[sContestResults->data->winnerMonSpriteId].oam.tileNum;
+        }
+    }
+    taskId = sContestResults->data->showResultsTaskId;
+    out->waiting = taskId < NUM_TASKS && gTasks[taskId].isActive && gTasks[taskId].func == Task_SetSeenWinnerMon;
     return TRUE;
 }
 #endif // ENABLE_NATIVE_UI
