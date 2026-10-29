@@ -14,8 +14,11 @@
  * The Safari Zone: its own commands (BALL, POKéBLOCK, GO NEAR, RUN) on the same
  * grid and the Safari Balls left in the player's plate. Wally's catching
  * tutorial: his choices as his controller makes them (the cursor on FIGHT, then
- * BAG; nothing to press but the messages). Kept as the game's picture: the
- * Battle Arena (its menus differ), ability pop-ups. The level-up box and a trainer battle's rewards are screen
+ * BAG; nothing to press but the messages). The ability and item pop-ups: the
+ * game's two lines ("X's" and the ability or the item) on a plate in the
+ * databoxes' style, sliding in from the screen's edge as the game's slide in
+ * (the foe's on the right, yours on the left). Kept as the game's picture: the
+ * Battle Arena (its menus differ). The level-up box and a trainer battle's rewards are screen
  * 26's (ui_results.c).
  * Project-owned.
  */
@@ -1394,6 +1397,30 @@ static void DrawBoxes(int L, int R, int T, int dyB)
     }
 }
 
+/* the ability and item pop-ups (battle_interface.c): the game's two lines on a plate in the databoxes' style, sliding
+ * in from the screen's edge where the game's slides in and as far as it has come (the foe's on the right, yours on
+ * the left), at its height on the GBA's screen */
+static void PopUps(int L, int R, int T, int dyB)
+{
+    for (u32 i = 0; i < gBattlersCount && i < MAX_BATTLERS_COUNT; i++)
+    {
+        struct NativeBattlePopUp p;
+        const struct UiMask *m;
+        int w = 176, h = 38, x, y;
+
+        if (!Battle_NativeUiPopUp(i, &p) || p.shown == 0)
+            continue;
+        y = (p.playerSide ? dyB : T) + p.y * 9 / 4;
+        x = p.playerSide ? L - w + w * p.shown / 16 : R - w * p.shown / 16;
+        m = p.playerSide ? UiM_Rounded4(w, h, 0, 4, 0, 4) : UiM_Rounded4(w, h, 4, 0, 4, 0);
+        UiG_Paint(m, x, y, sPlateBase, &(struct UiPaint){UI_P_DATABOX_INK, sPlateHi, sPlateLo, 0, 2, NULL, 0});
+        /* the side's colour along the edge it comes from, as the stat tags' */
+        UiG_Rect(p.playerSide ? x + 2 : x + w - 6, y + 4, 4, h - 8, p.playerSide ? UI_HEX(0x3C78C8) : UI_HEX(0xC85048));
+        UiText_Draw(UI_FONT_SMALL, x + 14, y + 3, p.name, UI_P_TEXT_MUTED, UI_NONE, UI_ALIGN_LEFT, 0);
+        UiText_Draw(UI_FONT_NORMAL, x + 14, y + 17, p.what, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+    }
+}
+
 /* the link's wait after a choice (two frames in: not the one-frame gap of a menu handing over to the next). After
  * an action (FIGHT, BAG, POKéMON) the host answers with the next menu; after the last choice, the turn waits for the
  * others' choices too. */
@@ -1585,6 +1612,7 @@ static void Draw(int t)
     /* a trainer battle's end: the rewards ledger and the trainer's plate in the databoxes' place */
     if (!UiResults_LedgerShown())
         DrawBoxes(L, R, T, dyB);
+    PopUps(L, R, T, dyB);
     UiResults_Draw(L, R, T, t);
     if (sB.chooser >= 0 && (sB.input == NATIVE_BATTLE_INPUT_TARGET || sB.input == NATIVE_BATTLE_INPUT_TARGETS_SHOWN))
         DrawTargetPage(L, R, dyB, t);

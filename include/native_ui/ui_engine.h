@@ -1429,8 +1429,21 @@ struct NativeBattleBox
 bool32 Battle_NativeUiBox(u32 battler, struct NativeBattleBox *out);
 /* The OBJ tiles of the game's battle interface sprites (healthboxes, bars, the
  * party trays, the gimmick trigger and indicators, the last used Ball window,
- * the move info window, the category icon): bit n of mask[n / 32]. */
+ * the move info window, the category icon, the ability and item pop-ups): bit n
+ * of mask[n / 32]. */
 void Battle_NativeUiHudTiles(u32 mask[32]);
+/* A battler's ability or item pop-up while it is up (CreateAbilityPopUp, CreateItemPopUp): its two lines as the game
+ * printed them ("X's", then the ability's or the item's name), its top on the GBA's screen and how far it has slid
+ * out (0 hidden .. 16 all the way) */
+struct NativeBattlePopUp
+{
+    const u8 *name;
+    const u8 *what;
+    bool8 playerSide;
+    u8 shown;
+    s16 y;
+};
+bool32 Battle_NativeUiPopUp(u32 battler, struct NativeBattlePopUp *out);
 /* the party tray's 8x8 ball tile (4bpp; gBattleInterface_BallDisplayPal):
  * 0 full, 1 empty, 2 fainted, 3 statused, 4 caught */
 const u8 *Battle_NativeUiBallTile(u32 kind);

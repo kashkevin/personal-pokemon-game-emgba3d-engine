@@ -44,6 +44,7 @@
 static void NativeUiNoteBar(enum BattlerId battler, u8 whichBar);
 static void NativeUiNoteStatus(enum BattlerId battler, u32 status);
 static void NativeUiNoteLevel(enum BattlerId battler, u8 level);
+static void NativeUiNotePopUpText(u32 spriteId, const u8 *str, bool32 isName);
 #endif
 #line 37 // gba-line
 
@@ -2623,6 +2624,10 @@ static void PrintOnAbilityPopUp(const u8 *str, u32 spriteId1, u32 spriteId2, u32
         gSprites[spriteId1].data[i] = data1[i];
         gSprites[spriteId2].data[i] = data2[i];
     }
+#ifdef ENABLE_NATIVE_UI
+    NativeUiNotePopUpText(spriteId1, str, isName); // the line as printed (src/native_ui: the battle HUD's pop-up)
+#endif
+#line 2580 // gba-line
 }
 
 static void PrintBattlerOnAbilityPopUp(enum BattlerId battler, u8 spriteId1, u8 spriteId2)
@@ -3524,9 +3529,52 @@ void Battle_NativeUiHudTiles(u32 mask[32])
     memset(mask, 0, 32 * sizeof(u32));
     for (u32 i = 0; i < ARRAY_COUNT(sTags); i++)
         NativeUiMarkTag(mask, sTags[i]);
-    // the gimmick indicators (Mega, Alpha / Omega...) on the healthboxes
+    // the gimmick indicators (Mega, Alpha / Omega...) on the healthboxes, and the ability and item pop-ups
     for (u32 i = 0; i < MAX_BATTLERS_COUNT; i++)
+    {
         NativeUiMarkTag(mask, NATIVE_UI_INDICATOR_TAG + i);
+        NativeUiMarkTag(mask, TAG_ABILITY_POP_UP_PLAYER1 + i);
+    }
+}
+
+// The pop-ups' lines as PrintOnAbilityPopUp printed them, by battler (its sprites' data[4]: sBattlerId)
+static u8 sNativeUiPopUpLines[MAX_BATTLERS_COUNT][2][32];
+
+static void NativeUiNotePopUpText(u32 spriteId, const u8 *str, bool32 isName)
+{
+    u32 battler = gSprites[spriteId].data[4], i;
+    u8 *line;
+
+    if (battler >= MAX_BATTLERS_COUNT || str == NULL)
+        return;
+    line = sNativeUiPopUpLines[battler][isName ? 0 : 1];
+    for (i = 0; i < sizeof(sNativeUiPopUpLines[0][0]) - 1 && str[i] != EOS; i++)
+        line[i] = str[i];
+    line[i] = EOS;
+}
+
+bool32 Battle_NativeUiPopUp(u32 battler, struct NativeBattlePopUp *out)
+{
+    const struct Sprite *s;
+    u8 id;
+    s32 slid;
+
+    if (gBattleStruct == NULL || battler >= gBattlersCount || !gBattleStruct->battlerState[battler].activeAbilityPopUps)
+        return FALSE;
+    id = gBattleStruct->abilityPopUpSpriteIds[battler][0];
+    if (id >= MAX_SPRITES)
+        return FALSE;
+    s = &gSprites[id];
+    if (!s->inUse || s->callback != SpriteCb_AbilityPopUp || s->data[4] != (s16)battler)
+        return FALSE;
+    out->name = sNativeUiPopUpLines[battler][0];
+    out->what = sNativeUiPopUpLines[battler][1];
+    out->playerSide = IsOnPlayerSide(battler);
+    // made ABILITY_POP_UP_POS_X_SLIDE pixels out of its place, it slides in by x2 and back out
+    slid = s->x2 < 0 ? -s->x2 : s->x2;
+    out->shown = slid >= ABILITY_POP_UP_POS_X_SLIDE ? 16 : slid * 16 / ABILITY_POP_UP_POS_X_SLIDE;
+    out->y = s->y - 16;
+    return TRUE;
 }
 #endif // ENABLE_NATIVE_UI
 
