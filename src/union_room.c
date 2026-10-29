@@ -2067,11 +2067,37 @@ static void Task_SendMysteryGift(u8 taskId)
     }
 }
 
+#ifdef PORTABLE
+// EmeraldTogether: the PC has no GBA Wireless Adapter (IsWirelessAdapterConnected is FALSE) and its radio library is
+// never set up, so a Mystery Gift's search over it (from a friend or over wireless communication: both are the
+// adapter's) faulted (STWI_set_Callback_S). Say so, as the Pokemon Centers do, and the Mystery Gift menu goes back
+// to its choice of source.
+static const u8 sText_NoWirelessAdapter[] = _("The Wireless Adapter isn't connected.");
+
+static void Task_NoWirelessAdapterForMysteryGift(u8 taskId)
+{
+    if (PrintMysteryGiftMenuMessage((u8 *)&gTasks[taskId].data[0], sText_NoWirelessAdapter))
+    {
+        gSpecialVar_Result = LINKUP_FAILED;
+        DestroyTask(taskId);
+    }
+}
+#endif
+#line 2070 // gba-line
 void CreateTask_LinkMysteryGiftWithFriend(u32 activity)
 {
     u8 taskId;
     struct WirelessLink_Group *data;
 
+#ifdef PORTABLE
+    if (!IsWirelessAdapterConnected())
+    {
+        CreateTask(Task_NoWirelessAdapterForMysteryGift, 0);
+        gSpecialVar_Result = LINKUP_ONGOING;
+        return;
+    }
+#endif
+#line 2075 // gba-line
     taskId = CreateTask(Task_CardOrNewsWithFriend, 0);
     sWirelessLinkMain.group = data = (void *)(gTasks[taskId].data);
     sGroup = data;
@@ -2237,6 +2263,15 @@ void CreateTask_LinkMysteryGiftOverWireless(u32 activity)
     u8 taskId;
     struct WirelessLink_Group *data;
 
+#ifdef PORTABLE
+    if (!IsWirelessAdapterConnected())
+    {
+        CreateTask(Task_NoWirelessAdapterForMysteryGift, 0);
+        gSpecialVar_Result = LINKUP_ONGOING;
+        return;
+    }
+#endif
+#line 2240 // gba-line
     taskId = CreateTask(Task_CardOrNewsOverWireless, 0);
     sWirelessLinkMain.group = data = (void *)(gTasks[taskId].data);
     sGroup = data;
