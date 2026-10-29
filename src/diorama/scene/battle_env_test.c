@@ -37,6 +37,8 @@
 #include "decoration_inventory.h"
 #include "constants/decorations.h"
 #include "hall_of_fame.h"
+#include "constants/game_stat.h"
+#include "malloc.h"
 #include "mail.h"
 #include "string_util.h"
 #include "pokemon_storage_system.h"
@@ -1171,6 +1173,37 @@ static void SetUpTestDecorations(void)
         if (*p == ',')
             p++;
     }
+}
+
+/* HOFPC: the test party saved as the Hall of Fame's one record (into the run's own copy of the save), then the Hall
+ * of Fame PC - the native Hall of Fame's records checks */
+static void OpenTestHallOfFamePc(void)
+{
+    struct HallofFameTeam *team;
+    u32 i;
+
+    gHoFSaveBuffer = AllocZeroed(SECTOR_SIZE * NUM_HOF_SECTORS);
+    team = gHoFSaveBuffer;
+    for (i = 0; i < PARTY_SIZE; i++)
+    {
+        struct HallofFameMon *mon = &team->mon[i];
+        u8 nickname[POKEMON_NAME_LENGTH + 1];
+
+        if (!GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_SPECIES))
+            continue;
+        mon->species = GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_SPECIES_OR_EGG);
+        mon->tid = GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_OT_ID);
+        mon->isShiny = GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_IS_SHINY);
+        mon->personality = GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_PERSONALITY);
+        mon->lvl = GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_LEVEL);
+        GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_NICKNAME, nickname);
+        memcpy(mon->nickname, nickname, POKEMON_NAME_LENGTH);
+    }
+    SetGameStat(GAME_STAT_ENTERED_HOF, 1);
+    TestLog("Battle env test: the Hall of Fame's record saved (%d); its PC opens", TrySavingData(SAVE_HALL_OF_FAME));
+    Free(gHoFSaveBuffer);
+    gHoFSaveBuffer = NULL;
+    SetMainCallback2(CB2_DoHallOfFamePC);
 }
 
 /* "item:count,..." */
@@ -3798,7 +3831,8 @@ bool16 ScriptMenu_CreateStartMenuForPokenavTutorial(void);  /* script_menu.c: th
 
 /* a field key script's event at a frame (a name KeysAt does not know): NAVTUTOR opens the PokéNav as Rustboro's
    scientist does (its tutorial: MATCH CALL, Mr. Stone's call), NAVMENU his START menu first (only POKéNAV goes on)
-   - the PokéNav tutorial's checks; HOF the Hall of Fame with the test party (not saved) */
+   - the PokéNav tutorial's checks; HOF the Hall of Fame with the test party (not saved), HOFPC its PC with the test
+   party as its one record */
 static bool FieldEventAt(const char *script, const char *event, int frame)
 {
     const char *p = script;
@@ -4314,6 +4348,8 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
             TestLog("Battle env test: the PokéNav opened for its tutorial");
             OpenPokenavForTutorial();
         }
+        if (FieldEventAt(s.fieldKeys, "HOFPC", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
+            OpenTestHallOfFamePc();
         if (FieldEventAt(s.fieldKeys, "HOF", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
         {
             TestLog("Battle env test: the Hall of Fame (the team not saved)");

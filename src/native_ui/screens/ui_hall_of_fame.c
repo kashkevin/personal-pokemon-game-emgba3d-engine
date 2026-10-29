@@ -9,7 +9,10 @@
  * number, name and kind, level and ID No.); "Welcome to the HALL OF FAME!"
  * with the confetti for as long as the game throws it; the player stepping up
  * with their record (name, ID No., time) and "LEAGUE CHAMPION!". A goes on, as
- * in the game (a click too). Project-owned.
+ * in the game (a click too). The Hall of Fame PC's records in the same hall:
+ * a team with the one picked lit and its line, its HALL OF FAME No.; UP and
+ * DOWN (or a click on a Pokémon) pick, A shows the team before, B leaves.
+ * Project-owned.
  */
 #include <math.h>
 #include <string.h>
@@ -30,6 +33,7 @@
 enum
 {
     HIT_HALL = UI_HIT_SCREEN,
+    HIT_MON,
 };
 
 /* the GBA's screen twice its size, in the middle of the canvas */
@@ -42,6 +46,11 @@ static const u8 sText_Continue[] = _("Continue");
 static const u8 sText_Name[] = _("NAME");
 static const u8 sText_IdNo[] = _("IDNo.");
 static const u8 sText_Time[] = _("TIME");
+static const u8 sText_Pick[] = _("Pick");
+static const u8 sText_Next[] = _("Next");
+static const u8 sText_Done[] = _("Done");
+static const u8 sText_Cancel[] = _("Cancel");
+static const u8 sText_Exit[] = _("Exit");
 
 static struct NativeHof sH;
 static uint32_t sWelcomeAt, sLastFrame;
@@ -117,6 +126,7 @@ static void Team(void)
             continue;
         UiGfx_MonPicAffine(m->species, m->personality, m->shiny, 0, GBA_X(m->x), GBA_Y(m->y), m->affine, 2,
                            m->dim ? &dim : NULL);
+        UiG_Hit(HIT_MON, i, GBA_X(m->x) - 64, GBA_Y(m->y) - 64, 128, 128);
     }
 }
 
@@ -191,6 +201,43 @@ static void Draw(int t)
     UiG_Bleed(&bx, &by, &bw, &bh);
     Hall(t);
     UiW_TitleTab(0, 8, "HALL OF FAME", &tab, 0, NULL);
+    if (sH.pc)
+    {
+        struct UiHintItem h[3];
+        int n = 0;
+
+        if (sH.phase == NATIVE_HOF_PC_CORRUPTED)
+        {
+            h[n++] = (struct UiHintItem){UI_ACT_CONFIRM, sText_Exit};
+            UiField_MessageBox(t, bx, bx + bw, by + bh, gText_HOFCorrupted, -1, sH.ready, &sGold, h, sH.ready ? n : 0,
+                               sGold.ink, 0);
+        }
+        else
+        {
+            u8 no[24];
+
+            Team();
+            /* its number, as the game's top bar says it */
+            no[0] = EOS;
+            UiText_AppendAscii(no, sizeof(no), "No. ");
+            UiText_AppendNumber(no, sizeof(no), sH.pageNo, 1, false);
+            UiG_Paint(UiM_Rounded4(84, 18, 3, 3, 3, 3), 116, 8, sGold.base,
+                      &(struct UiPaint){sGold.ink, sGold.hi, sGold.lo, 0, 0, NULL, UI_NONE});
+            UiText_Draw(UI_FONT_NORMAL, 158, 9, no, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_CENTER, 0);
+            if (sH.lineShown)
+                Line();
+            if (sH.ready)
+            {
+                h[n++] = (struct UiHintItem){UI_ACT_SCROLL, sText_Pick};
+                h[n++] = (struct UiHintItem){UI_ACT_CONFIRM, sH.moreTeams ? sText_Next : sText_Done};
+                h[n++] = (struct UiHintItem){UI_ACT_CANCEL, sText_Cancel};
+                UiW_Hints(bx + bw - 8 - UiW_HintsWidth(h, n, 10), 12, h, n, true, 10);
+            }
+        }
+        UiG_Hit(HIT_HALL, 0, bx, by, bw, bh);
+        UiG_Veil(NativeUi_ScreenFade());
+        return;
+    }
     if (sH.phase != NATIVE_HOF_PLAYER || !sH.playerRecord)
         Team();
     if (sH.phase == NATIVE_HOF_WELCOME)
@@ -229,9 +276,32 @@ static bool Ready(void)
 
 static bool Click(const struct UiHit *hit, int button)
 {
-    (void)hit;
-    if (button == 1 && sH.ready && !NativeUi_PressesPending())
-        NativeUi_QueuePress(A_BUTTON);
+    if (!sH.ready || NativeUi_PressesPending())
+        return true;
+    if (button == 3 && sH.pc)
+    {
+        NativeUi_QueuePress(B_BUTTON);
+        return true;
+    }
+    if (button != 1)
+        return true;
+    if (sH.pc && sH.phase == NATIVE_HOF_PC_TEAM && hit->id == HIT_MON && hit->index != sH.current)
+    {
+        /* the PC picks a Pokémon with UP and DOWN, one at a time */
+        int moves = hit->index - sH.current;
+
+        NativeUi_QueuePresses(moves > 0 ? DPAD_DOWN : DPAD_UP, moves > 0 ? moves : -moves);
+        return true;
+    }
+    NativeUi_QueuePress(A_BUTTON);
+    return true;
+}
+
+static bool Wheel(int dy)
+{
+    if (dy == 0 || !sH.pc || sH.phase != NATIVE_HOF_PC_TEAM || !sH.ready || NativeUi_PressesPending())
+        return false;
+    NativeUi_QueuePress(dy > 0 ? DPAD_UP : DPAD_DOWN);
     return true;
 }
 
@@ -246,6 +316,7 @@ const struct UiScreen gUiScreen_HallOfFame = {
     .capture = Capture,
     .draw = Draw,
     .click = Click,
+    .wheel = Wheel,
     .ready = Ready,
     .picture = Picture,
 };

@@ -1003,6 +1003,8 @@ enum NativeHofPhase
     NATIVE_HOF_WELCOME,          /* "Welcome to the HALL OF FAME!" and the confetti */
     NATIVE_HOF_PLAYER,           /* the player stepping up, then their record and LEAGUE CHAMPION (A goes on) */
     NATIVE_HOF_LEAVING,
+    NATIVE_HOF_PC_TEAM,          /* the Hall of Fame PC: a team, UP and DOWN pick one, A the one before, B leaves */
+    NATIVE_HOF_PC_CORRUPTED,     /* its records cannot be read (A leaves) */
 };
 struct NativeHofMon
 {
@@ -1028,6 +1030,10 @@ struct NativeHof
     u16 playerPic;               /* the player's front picture (a trainer picture id) */
     s16 playerX, playerY;
     u8 time[8];                  /* the record's play time, as the game prints it */
+    bool8 pc;                    /* the Hall of Fame PC's records (else the induction) */
+    u16 pageNo;                  /* PC: the team's HALL OF FAME No. */
+    bool8 moreTeams;             /* PC: A shows the team before (else A leaves) */
+    u8 teamCount;                /* PC: the Pokémon of the team shown */
 };
 bool32 HallOfFame_NativeUiState(struct NativeHof *out);
 /* Easy Chat (easy_chat.c) while its screen is up: the words being edited and every part of the screen as the engine

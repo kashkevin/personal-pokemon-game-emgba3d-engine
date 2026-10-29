@@ -1530,7 +1530,96 @@ static const TaskFunc sNativeUiHofTasks[] = {
     Task_Hof_SetMonDisplayTask, Task_Hof_DisplayMon, Task_Hof_PrintMonInfoAfterAnimating, Task_Hof_TryDisplayAnotherMon,
     Task_Hof_PaletteFadeAndPrintWelcomeText, Task_Hof_DoConfetti, Task_Hof_WaitToDisplayPlayer, Task_Hof_DisplayPlayer,
     Task_Hof_WaitAndPrintPlayerInfo, Task_Hof_ExitOnKeyPressed, Task_Hof_HandlePaletteOnExit, Task_Hof_HandleExit,
+    Task_HofPC_CopySaveData, Task_HofPC_PrintDataIsCorrupted, Task_HofPC_DrawSpritesPrintText, Task_HofPC_PrintMonInfo,
+    Task_HofPC_HandleInput, Task_HofPC_HandlePaletteOnExit, Task_HofPC_HandleExit, Task_HofPC_ExitOnButtonPress,
 };
+
+// A Pokémon's line as HallOfFame_PrintMonInfo prints it
+static void NativeUiHofLine(struct NativeHof *out, const struct HallofFameMon *mon)
+{
+    u8 *p;
+
+    if (mon->species != SPECIES_EGG)
+    {
+        s32 dex = SpeciesToPokedexNum(mon->species);
+
+        p = StringCopy(out->number, gText_Number);
+        if (dex != 0xFFFF)
+            ConvertIntToDecimalStringN(p, dex, STR_CONV_MODE_LEADING_ZEROS, IsNationalPokedexEnabled() ? 4 : 3);
+        else
+            StringCopy(p, COMPOUND_STRING("???"));
+        p = StringCopy(out->species, GetSpeciesName(mon->species));
+        if (mon->species != SPECIES_NIDORAN_M && mon->species != SPECIES_NIDORAN_F)
+        {
+            switch (GetGenderFromSpeciesAndPersonality(mon->species, mon->personality))
+            {
+            case MON_MALE:
+                *p++ = CHAR_MALE;
+                break;
+            case MON_FEMALE:
+                *p++ = CHAR_FEMALE;
+                break;
+            }
+            *p = EOS;
+        }
+        p = StringCopy(out->level, gText_Level);
+        ConvertIntToDecimalStringN(p, mon->lvl, STR_CONV_MODE_LEFT_ALIGN, 3);
+        p = StringCopy(out->id, gText_IDNumber);
+        ConvertIntToDecimalStringN(p, (u16)mon->tid, STR_CONV_MODE_LEADING_ZEROS, 5);
+    }
+    memcpy(out->nickname, mon->nickname, POKEMON_NAME_LENGTH);
+    out->nickname[POKEMON_NAME_LENGTH] = EOS;
+}
+
+// The Hall of Fame PC (its main task's data: 0 the team shown, 1 its HALL OF FAME No., 2 the Pokémon picked, 4 how
+// many, 5-10 their sprites): the team as its sprites show it, the one picked lit and its line
+static bool32 NativeUiHofPc(struct NativeHof *out, struct Task *task, TaskFunc func)
+{
+    const struct HallofFameTeam *team = gHoFSaveBuffer;
+    u32 i;
+
+    out->pc = TRUE;
+    if (func == Task_HofPC_PrintDataIsCorrupted || func == Task_HofPC_ExitOnButtonPress)
+    {
+        out->phase = NATIVE_HOF_PC_CORRUPTED;
+        out->ready = func == Task_HofPC_ExitOnButtonPress && !gPaletteFade.active;
+        return TRUE;
+    }
+    if (func == Task_HofPC_HandlePaletteOnExit || func == Task_HofPC_HandleExit)
+        out->phase = NATIVE_HOF_LEAVING;
+    else if (func == Task_HofPC_CopySaveData)
+        out->phase = NATIVE_HOF_OPENING;
+    else
+        out->phase = NATIVE_HOF_PC_TEAM;
+    if (out->phase == NATIVE_HOF_OPENING || team == NULL || task->data[0] < 0 || task->data[0] >= HALL_OF_FAME_MAX_TEAMS)
+        return TRUE;
+    team += task->data[0];
+    out->ready = func == Task_HofPC_HandleInput && !gPaletteFade.active;
+    out->pageNo = task->data[1];
+    out->moreTeams = task->data[0] != 0;
+    out->current = task->data[2];
+    out->teamCount = task->data[4];
+    out->lineShown = func == Task_HofPC_HandleInput || func == Task_HofPC_PrintMonInfo;
+    for (i = 0; i < PARTY_SIZE; i++)
+    {
+        struct NativeHofMon *m = &out->mons[i];
+        u8 spriteId = task->data[i + 5];
+
+        m->species = team->mon[i].species;
+        m->personality = team->mon[i].personality;
+        m->shiny = team->mon[i].isShiny;
+        m->affine = 256;
+        if (spriteId == SPRITE_NONE || spriteId >= MAX_SPRITES || !gSprites[spriteId].inUse)
+            continue;
+        m->shown = TRUE;
+        m->x = gSprites[spriteId].x + gSprites[spriteId].x2;
+        m->y = gSprites[spriteId].y + gSprites[spriteId].y2;
+        m->dim = i != out->current;
+    }
+    if (out->current < PARTY_SIZE && team->mon[out->current].species != SPECIES_NONE)
+        NativeUiHofLine(out, &team->mon[out->current]);
+    return TRUE;
+}
 
 bool32 HallOfFame_NativeUiState(struct NativeHof *out)
 {
@@ -1547,10 +1636,15 @@ bool32 HallOfFame_NativeUiState(struct NativeHof *out)
                 func = gTasks[i].func;
                 break;
             }
-    if (taskId == TASK_NONE || sHofMonPtr == NULL)
+    if (taskId == TASK_NONE)
         return FALSE;
     task = &gTasks[taskId];
     memset(out, 0, sizeof(*out));
+    for (j = 0; j < ARRAY_COUNT(sNativeUiHofTasks); j++)
+        if (func == sNativeUiHofTasks[j] && j >= 16)
+            return NativeUiHofPc(out, task, func);
+    if (sHofMonPtr == NULL)
+        return FALSE;
     if (func == Task_Hof_DisplayMon || func == Task_Hof_PrintMonInfoAfterAnimating || func == Task_Hof_TryDisplayAnotherMon)
         out->phase = NATIVE_HOF_MON;
     else if (func == Task_Hof_PaletteFadeAndPrintWelcomeText || func == Task_Hof_DoConfetti || func == Task_Hof_WaitToDisplayPlayer)
@@ -1585,41 +1679,7 @@ bool32 HallOfFame_NativeUiState(struct NativeHof *out)
         m->dim = out->phase != NATIVE_HOF_WELCOME && (sHofFadePalettes & (0x10000 << gSprites[spriteId].oam.paletteNum)) != 0;
     }
     if (out->phase == NATIVE_HOF_MON && out->current < PARTY_SIZE)
-    {
-        struct HallofFameMon *mon = &sHofMonPtr->mon[out->current];
-        u8 *p;
-
-        if (mon->species != SPECIES_EGG)
-        {
-            s32 dex = SpeciesToPokedexNum(mon->species);
-
-            p = StringCopy(out->number, gText_Number);
-            if (dex != 0xFFFF)
-                ConvertIntToDecimalStringN(p, dex, STR_CONV_MODE_LEADING_ZEROS, IsNationalPokedexEnabled() ? 4 : 3);
-            else
-                StringCopy(p, COMPOUND_STRING("???"));
-            p = StringCopy(out->species, GetSpeciesName(mon->species));
-            if (mon->species != SPECIES_NIDORAN_M && mon->species != SPECIES_NIDORAN_F)
-            {
-                switch (GetGenderFromSpeciesAndPersonality(mon->species, mon->personality))
-                {
-                case MON_MALE:
-                    *p++ = CHAR_MALE;
-                    break;
-                case MON_FEMALE:
-                    *p++ = CHAR_FEMALE;
-                    break;
-                }
-                *p = EOS;
-            }
-            p = StringCopy(out->level, gText_Level);
-            ConvertIntToDecimalStringN(p, mon->lvl, STR_CONV_MODE_LEFT_ALIGN, 3);
-            p = StringCopy(out->id, gText_IDNumber);
-            ConvertIntToDecimalStringN(p, (u16)mon->tid, STR_CONV_MODE_LEADING_ZEROS, 5);
-        }
-        memcpy(out->nickname, mon->nickname, POKEMON_NAME_LENGTH);
-        out->nickname[POKEMON_NAME_LENGTH] = EOS;
-    }
+        NativeUiHofLine(out, &sHofMonPtr->mon[out->current]);
     if (task->data[4] != SPRITE_NONE && task->data[4] < MAX_SPRITES && gSprites[task->data[4]].inUse)
     {
         out->playerShown = TRUE;
