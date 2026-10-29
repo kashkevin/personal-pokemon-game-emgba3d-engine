@@ -3707,6 +3707,27 @@ static unsigned short ScriptKeys(void)
     return KeysAt(s.keys, s.keyFrames++);
 }
 
+void OpenPokenavForTutorial(void);     /* pokenav.c: a script special (no header declares it) */
+
+/* a field key script's event at a frame (a name KeysAt does not know): NAVTUTOR opens the PokéNav as Rustboro's
+   scientist does (its tutorial: MATCH CALL, Mr. Stone's call) - the PokéNav page's tutorial checks */
+static bool FieldEventAt(const char *script, const char *event, int frame)
+{
+    const char *p = script;
+    int at, used;
+    char name[16];
+
+    while (*p != '\0' && sscanf(p, "%d:%15[A-Z]%n", &at, name, &used) == 2)
+    {
+        if (frame == at && strcmp(name, event) == 0)
+            return true;
+        p += used;
+        if (*p == ',')
+            p++;
+    }
+    return false;
+}
+
 /* Main thread, every turn of its loop, the game thread perhaps mid-frame: a plan whose game made no frame for a
    minute (a loop inside one frame: a Battle Pike room picking a trainer with no challenge) ends as a hang, so the tool
    goes on at the next target instead of waiting out its process timeout. Reads the plan without the game parked: the
@@ -4199,6 +4220,11 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
                 TestLog("Battle env test: %s", report);
             if (PokemonJump_TestWantsJump() || (PokemonJump_TestWaitsAfterGame() && s.fieldKeyFrames % 40 == 0))
                 keys |= A_BUTTON;
+        }
+        if (FieldEventAt(s.fieldKeys, "NAVTUTOR", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
+        {
+            TestLog("Battle env test: the PokéNav opened for its tutorial");
+            OpenPokenavForTutorial();
         }
         return keys | KeysAt(s.fieldKeys, s.fieldLoop > 0 ? (s.fieldKeyFrames - 1) % s.fieldLoop : s.fieldKeyFrames - 1);
     }

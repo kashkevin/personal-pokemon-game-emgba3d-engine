@@ -105,6 +105,18 @@ static struct
 static void Title(const char *label);
 static void Hints(const struct UiHintItem *items, int count);
 
+/* the Rustboro tutorial's main menu (pokenav_menu_handler.c HandleMainMenuInput*Tutorial): what A opens there */
+static bool TutorialOpens(u8 item)
+{
+    if (sP.menuType == POKENAV_MENU_TYPE_CONDITION || sP.menuType == POKENAV_MENU_TYPE_CONDITION_SEARCH)
+        return true;
+    if (sP.mode == POKENAV_MODE_FORCE_CALL_READY)
+        return item == POKENAV_MENUITEM_MATCH_CALL;
+    if (sP.mode == POKENAV_MODE_FORCE_CALL_EXIT)
+        return item == POKENAV_MENUITEM_MATCH_CALL || item == POKENAV_MENUITEM_SWITCH_OFF;
+    return true;
+}
+
 static void StepGoal(void);
 
 static bool Detect(void)
@@ -335,7 +347,7 @@ static void Menu(int t)
     for (int i = 0; i < n; i++)
     {
         u8 it = sP.menuItems[i];
-        bool on = i == sP.menuCursor;
+        bool on = i == sP.menuCursor, shut = !TutorialOpens(it);
         int ry = y0 + i * rowH, rx = x0 - slide * (i + 1) / 2 + (on ? 6 : 0);
         const struct UiMask *m = UiM_Rounded4(w, rowH - 6, 4, 4, 4, 4);
         struct UiRamp r = on ? UiRampOf(UI_HEX(0xF8F8F0), 0.42, 0.28, 0.62) : UiRampOf(UiMix(b.base, b.hi, 0.25), 0.42, 0.28, 0.62);
@@ -346,6 +358,8 @@ static void Menu(int t)
         ItemIcon(it, rx + 10, ry + ((rowH - 6 - 24) >> 1) - (on && (t / 16) % 2 ? 1 : 0), on);
         UiCaps_Draw(rx + 46, ry + ((rowH - 6 - 7) >> 1), ItemLabel(it), on ? b.ink : UI_P_TEXT_W, on ? UI_NONE : b.ink,
                     on ? UI_CAPS_PLAIN : UI_CAPS_OUTLINE, UI_ALIGN_LEFT, UI_NONE);
+        if (shut)
+            UiG_Mask(m, rx, ry, UiWithAlpha(UiMix(b.lo, b.ink, 0.4), 120));   /* the tutorial will not open it */
         if (on)
             UiW_Cursor(rx + w - 18, ry + ((rowH - 6 - 9) >> 1), UiW_Nudge(t), b.ink);
         UiG_Hit(HIT_MENU_ITEM, i, rx, ry, w, rowH - 6);
@@ -379,7 +393,7 @@ static void Menu(int t)
         UiCaps_Draw(sx + (sw >> 1), sy + sh - 22, "NO RIBBONS YET", UiMix(b.ink, UI_HEX(0xE04040), 0.6), UI_NONE,
                     UI_CAPS_PLAIN, UI_ALIGN_CENTER, UI_NONE);
 
-    /* what the buttons do */
+    /* what the buttons do (the tutorial's first part: B does nothing, MATCH CALL alone opens) */
     {
         struct UiHintItem items[2] = {
             {UI_ACT_CONFIRM, item == POKENAV_MENUITEM_SWITCH_OFF || item == POKENAV_MENUITEM_CONDITION_CANCEL
@@ -389,7 +403,7 @@ static void Menu(int t)
         };
 
         (void)hint;
-        Hints(items, 2);
+        Hints(items, sP.mode == POKENAV_MODE_FORCE_CALL_READY ? 1 : 2);
     }
 }
 
