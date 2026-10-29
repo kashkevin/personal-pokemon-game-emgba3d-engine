@@ -1135,6 +1135,45 @@ struct NativePokeblockCase
     struct NativePokeblock blocks[NATIVE_PBLOCKS];
 };
 bool32 Pokeblock_NativeUiCase(struct NativePokeblockCase *out);
+/* pokeblock_feed.c: the scene of a Pokémon eating a Pokéblock while it runs, and whether its line (window 0) is up */
+bool32 PokeblockFeed_NativeUiState(bool8 *message);
+/* The Pokéblock's condition menu (use_pokeblock.c: which Pokémon gets it, then what it enhanced): the party as its list
+ * shows it (the list's last row is CANCEL), the chosen Pokémon's picture, nature, five conditions as they are now
+ * (cool, beauty, cute, smart, tough as the graph goes round; after the block's effect, its new ones) and sheen's
+ * sparkles, and what the menu waits for. enhanced: the conditions the block raised, once its effect is shown. */
+enum NativeUsePokeblockPhase
+{
+    NATIVE_UPB_BUSY,          /* loading, a fade, moving between the Pokémon */
+    NATIVE_UPB_CHOOSE,
+    NATIVE_UPB_ASK,           /* "X gets a POKéBLOCK?" YES / NO */
+    NATIVE_UPB_MESSAGE,       /* "It won't eat anymore…" */
+    NATIVE_UPB_RESULTS,       /* back from the scene: A or B shows what changed */
+    NATIVE_UPB_ENHANCED,      /* "X's coolness was enhanced!" and the rest, one by one */
+};
+struct NativeUsePokeblockMon
+{
+    u16 species;
+    u32 personality;
+    bool8 shiny;
+    bool8 egg;
+    u8 name[POKEMON_NAME_BUFFER_SIZE];
+};
+struct NativeUsePokeblock
+{
+    u8 phase;
+    bool8 ready;
+    u8 count;
+    u8 cursor;
+    u8 msgWindow;
+    u8 yesNoCursor;
+    struct NativeUsePokeblockMon mons[PARTY_SIZE];
+    const u8 *nature;
+    u8 values[5];             /* cool, beauty, cute, smart, tough */
+    bool8 enhanced[5];
+    u8 sparkles;
+    const u8 *conditionNames[5];
+};
+bool32 UsePokeblock_NativeUiState(struct NativeUsePokeblock *out);
 /* string_util.c: src with these three in its STR_VAR_1..3, the game's own string vars left as they are */
 u8 *StringUtil_NativeUiExpandVars(u8 *dst, u32 size, const u8 *src, const u8 *const vars[3]);
 /* Easy Chat (easy_chat.c) while its screen is up: the words being edited and every part of the screen as the engine

@@ -70,6 +70,8 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_TradeSequence, /* a trade's lines over its sequence (an in-game trade's, a link partner's) */
     &gUiScreen_HillBoard,    /* Trainer Hill's time board */
     &gUiScreen_PokeblockCase, /* the Pokéblock case */
+    &gUiScreen_UsePokeblock, /* the Pokéblock's condition menu: who gets it, what it enhanced */
+    &gUiScreen_PokeblockFeed, /* a Pokémon eating a Pokéblock: the scene's line */
     &gUiScreen_Shop,
     &gUiScreen_Naming,
     &gUiScreen_Starters,

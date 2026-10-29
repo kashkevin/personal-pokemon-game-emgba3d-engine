@@ -1121,3 +1121,16 @@ static void CalculateMonAnimMovement(void)
         pokeblockFeed->animData[ANIMDATA_TIME]--;
     }
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+// The feeding scene for the 3D UI (native_ui/screens/ui_pokeblock_feed.c): up while it runs; whether its line ("X ate
+// the POKeBLOCK.", window 0's printer's) is up
+bool32 PokeblockFeed_NativeUiState(bool8 *message)
+{
+    if (gMain.callback2 != CB2_PokeblockFeed || sPokeblockFeed == NULL)
+        return FALSE;
+    *message = FindTaskIdByFunc(Task_WaitForAtePokeblockMessage) != TASK_NONE;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

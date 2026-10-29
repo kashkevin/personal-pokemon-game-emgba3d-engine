@@ -667,8 +667,9 @@ static void MonRow(int t, const struct NativePokenavRow *r, int x, int y, int w,
     }
 }
 
-/* the condition graph: the five conditions' pentagon, the Pokemon's own inside it */
-static void Graph(int cx, int cy, int radius, const u8 *values)
+/* the condition graph: the five conditions' pentagon, the Pokemon's own inside it (ui_mon.h: also the Pokéblock
+ * menu's, ui_use_pokeblock.c) */
+void UiMon_ConditionGraph(int cx, int cy, int radius, const u8 *values)
 {
     struct UiRamp b = BlueRamp();
     double px[5], py[5], vx[5], vy[5];
@@ -883,7 +884,7 @@ static void Condition(int t)
             else
                 UiG_Put(kx, ky, UiMix(PNAV_CYAN, b.ink, 0.3));
         }
-        Graph(sx + (sw >> 1), sy + 152, 52, sP.condValues);
+        UiMon_ConditionGraph(sx + (sw >> 1), sy + 152, 52, sP.condValues);
     }
     if (sP.condMarking)
         MarkingsMenu(t, sx + sw - 124, sy + 92);

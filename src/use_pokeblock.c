@@ -1671,3 +1671,80 @@ static void SpriteCB_Condition(struct Sprite *sprite)
         sprite->callback = SpriteCallbackDummy;
     }
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+// The Pokéblock's condition menu for the 3D UI (native_ui/screens/ui_use_pokeblock.c): the party, the chosen Pokémon
+// and what the menu waits for, as its callbacks and states have them
+bool32 UsePokeblock_NativeUiState(struct NativeUsePokeblock *out)
+{
+    // the graph's order round the pentagon, as the PokéNav's (pokenav_conditions.c)
+    static const u8 sGraphOrder[5] = {CONDITION_COOL, CONDITION_BEAUTY, CONDITION_CUTE, CONDITION_SMART, CONDITION_TOUGH};
+    static const u8 *const sNames[5] = {
+        COMPOUND_STRING("COOL"), COMPOUND_STRING("BEAUTY"), COMPOUND_STRING("CUTE"), COMPOUND_STRING("SMART"),
+        COMPOUND_STRING("TOUGH"),
+    };
+    struct Pokemon *mon = NULL;
+    u32 state;
+
+    if (gMain.callback2 != CB2_UsePokeblockMenu || sMenu == NULL || sInfo == NULL)
+        return FALSE;
+    memset(out, 0, sizeof(*out));
+    state = sInfo->mainState;
+    out->msgWindow = WIN_TEXT;
+    out->count = sMenu->info.numSelections > 0 ? sMenu->info.numSelections - 1 : 0;
+    out->cursor = sMenu->info.curSelection;
+    for (u32 i = 0; i < 5; i++)
+        out->conditionNames[i] = sNames[i];
+    for (u32 i = 0; i < out->count && i < PARTY_SIZE; i++)
+    {
+        struct Pokemon *m = &gParties[B_TRAINER_PLAYER][sMenu->party[i].monId];
+        u8 name[POKEMON_NAME_BUFFER_SIZE];
+
+        out->mons[i].species = GetMonData(m, MON_DATA_SPECIES_OR_EGG);
+        out->mons[i].personality = GetMonData(m, MON_DATA_PERSONALITY);
+        out->mons[i].shiny = GetMonData(m, MON_DATA_IS_SHINY);
+        out->mons[i].egg = GetMonData(m, MON_DATA_IS_EGG);
+        GetMonData(m, MON_DATA_NICKNAME, name);
+        StringCopy_Nickname(out->mons[i].name, name);
+    }
+    if (out->cursor < out->count)
+    {
+        mon = &gParties[B_TRAINER_PLAYER][sMenu->party[out->cursor].monId];
+        out->nature = gNaturesInfo[GetNature(mon)].name;
+        // the conditions now: the block's effect is in them once the results have worked it out
+        for (u32 i = 0; i < 5; i++)
+            out->values[i] = GetMonData(mon, sConditionToMonData[sGraphOrder[i]]);
+        if (sMenu->curLoadId >= 0 && sMenu->curLoadId < NUM_SELECTIONS_LOADED)
+            out->sparkles = sMenu->numSparkles[sMenu->curLoadId];
+    }
+    if (sInfo->callback == UsePokeblockMenu)
+    {
+        if (state == STATE_HANDLE_INPUT)
+            out->phase = NATIVE_UPB_CHOOSE, out->ready = TRUE;
+        else if (state == STATE_HANDLE_CONFIRMATION)
+            out->phase = NATIVE_UPB_ASK, out->ready = TRUE, out->yesNoCursor = Menu_GetCursorPos();
+        else if (state == STATE_CONFIRM_SELECTION)
+            out->phase = NATIVE_UPB_ASK;
+        else if (state == STATE_WAIT_MSG)
+            out->phase = NATIVE_UPB_MESSAGE, out->ready = TRUE;
+        else
+            out->phase = state == STATE_UPDATE_SELECTION ? NATIVE_UPB_CHOOSE : NATIVE_UPB_BUSY;
+    }
+    else if (sInfo->callback == ShowPokeblockResults)
+    {
+        out->phase = state >= 4 ? NATIVE_UPB_ENHANCED : NATIVE_UPB_RESULTS;
+        out->ready = state == 1 || state == 5;
+        if (state >= 3)
+            for (u32 i = 0; i < 5; i++)
+                out->enhanced[i] = sInfo->enhancements[sGraphOrder[i]] != 0;
+    }
+    else
+    {
+        out->phase = NATIVE_UPB_BUSY;
+    }
+    if (gPaletteFade.active)
+        out->ready = FALSE;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

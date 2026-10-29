@@ -70,5 +70,8 @@ void UiMon_MarkGlyph(int i, int x, int y, UiRGBA colour);
 int UiMon_Markings(int x, int y, u8 marks, UiRGBA on, UiRGBA off);
 /* a photo-studio stage tinted by two types (enum UiTypeId); fills where the feet go */
 void UiMon_Stage(int x, int y, int w, int h, int type0, int type1, int floor, int shadow, int *feetY, int *cx);
+/* the PokéNav's condition graph (ui_pokenav.c): the five conditions' pentagon with their names round it and the
+ * Pokémon's own inside it, centred at cx, cy; values cool, beauty, cute, smart, tough (0-255) */
+void UiMon_ConditionGraph(int cx, int cy, int radius, const u8 *values);
 
 #endif // GUARD_NATIVE_UI_MON_H
