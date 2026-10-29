@@ -48,6 +48,9 @@ ALLOWED = {
     "data/maps/Route110/scripts.inc": "Update 31 rival checkpoint hook (Route 110 trigger line)",
     "data/maps/Route119/scripts.inc": "Update 31 rival checkpoint hook (Route 119 trigger line)",
     "data/maps/LilycoveCity/scripts.inc": "Update 31 rival checkpoint hook (Lilycove rival)",
+    # The owner's request of 2026-10-29 (4cda71a9): with the party full, Lavaridge Town's Egg goes to the PC (a branch under
+    # .ifdef PORTABLE; no room only with the PC full too). The Egg (a Wynaut), its flag and the GBA ROM are unchanged.
+    "data/maps/LavaridgeTown/scripts.inc": "Lavaridge Egg to the PC with a full party (the owner's request of 2026-10-29)",
     # The Mega Evolution check's fix (8906fb9b): Mega Chimecho's base HP follows P_UPDATED_STATS like Chimecho's (a Mega
     # keeps its base form's HP), in the PC build and the test ROM; the release GBA ROM keeps 75.
     "src/data/pokemon/species_info/gen_3_families.h": "Mega Chimecho's base HP follows Chimecho's (PC build, test ROM)",
