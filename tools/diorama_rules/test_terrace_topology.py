@@ -87,6 +87,45 @@ class TerraceTopologyTests(unittest.TestCase):
         self.assertEqual([(moved[offset]["groundQ16"], moved[offset]["topQ16"]) for offset in (0, 4, 6, 12)],
                          [(16, 16), (0, 16), (0, 0), (32, 32)])
 
+    def test_ground_no_terrace_reaches_lies_flush_with_the_ground_it_is_walked_onto_from(self):
+        # MS-162: the Battle Frontier west half's paths of elevation 3 run through its
+        # lower ground of elevation 0 (under its plaza's cliffs), walked onto from it
+        # with nothing between them; they stood on the top level, a level over it.
+        # Ground no terrace reaches beside a component's ground on one level other
+        # than the top takes that level and the component.
+        def wall():
+            return dict(cell(500), collision=1)
+
+        course = tuple(cell(113) if y != 1 else cell(121) for y in range(3) for _ in range(3))
+        members = {}
+        solved = solve_layout(course + tuple(ground() for _ in range(3)), 3, 4, members=members)
+        self.assertEqual({solved[9 + x]["groundQ16"] for x in range(3)}, {-16})
+        self.assertEqual({members[9 + x] for x in range(3)}, {0})
+        self.assertFalse(any("doorway" in solved[9 + x] for x in range(3)))
+        # Beside the top level it lies there as before, ground no terrace reaches.
+        members = {}
+        solved = solve_layout(tuple(ground() for _ in range(3)) + course, 3, 4, members=members)
+        self.assertTrue(all(x not in solved for x in range(3)))
+        self.assertEqual({members[x] for x in range(3)}, {-1})
+        # Beside the component's ground on two levels (through ground beside it of
+        # another elevation): it keeps its place.
+        high = dict(ground(), elevation=4)
+        rows = [(cell(113), cell(113), cell(113), ground(), ground()),
+                (cell(121), cell(121), cell(121), wall(), high),
+                (cell(113), cell(113), cell(113), high, high)]
+        solved = solve_layout(tuple(entry for row in rows for entry in row), 5, 3)
+        self.assertTrue(all(offset not in solved for offset in (3, 4, 9, 13, 14)))
+        # Beside water no component levels (the open sea's): it keeps its place.
+        water = dict(cell(113), behavior="MB_OCEAN_WATER", elevation=1)
+        solved = solve_layout(course + (ground(), ground(), water), 3, 4)
+        self.assertTrue(all(offset not in solved for offset in (9, 10, 11)))
+        # A doorway joined through it lies on that level too, marked so that it
+        # lifts no rock round it (a cave mouth's way).
+        door = dict(cell(113), behavior="MB_NON_ANIMATED_DOOR")
+        solved = solve_layout(course + tuple(ground() for _ in range(3)) + (wall(), door, wall()), 3, 5)
+        self.assertEqual((solved[13]["groundQ16"], solved[13].get("doorway")), (-16, True))
+        self.assertEqual(solved[10]["groundQ16"], -16)
+
     def test_a_maps_ground_moves_to_meet_the_next_maps(self):
         # MS-162: a route a level under its top (cliffs' tops) meets a town's
         # ground: the route's component moves up a level.

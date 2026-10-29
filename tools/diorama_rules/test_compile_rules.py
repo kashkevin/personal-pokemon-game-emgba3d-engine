@@ -425,6 +425,32 @@ class DioramaRuleCompilerTests(unittest.TestCase):
                                  (x, y))
         self.assertGreater(jumps, 30)
 
+    def test_repository_paths_lie_flush_with_the_ground_they_run_through(self):
+        # KNOWN_ISSUES MS-162: the Battle Frontier west half's paths of elevation 3 (the walk north from
+        # the harbour, the band along its lower ground, the cells by the Battle Pike) run through its
+        # lower ground of elevation 0, a level under its plaza's cliffs, walked onto with nothing between;
+        # they stood a level over it, every step on or off them a level up or down. Safari Zone
+        # Southeast's cells of elevation 0 in its meadow stood as pillars. They lie on the level of the
+        # ground round them (terrace_topology._flush_free_regions); the plaza and Victory Road's mouth
+        # in Ever Grande City's mountain (the rock round it) as before.
+        layouts = {row["symbol"]: row for row in self.data["layouts"]}
+
+        def ground(name):
+            records = {record["cellOffset"]: record["groundQ16"]
+                       for record in layouts[name]["terrainRecords"] if record["mapGroup"] == 0xFF}
+            return lambda x, y: records[y * layouts[name]["width"] + x]
+
+        west = ground("LAYOUT_BATTLE_FRONTIER_OUTSIDE_WEST")
+        self.assertEqual({west(x, y) for x, y in ((26, 52), (26, 58), (30, 50), (12, 50), (47, 50),
+                                                  (37, 25), (38, 28), (39, 31), (26, 61))}, {-16})
+        self.assertEqual({west(x, y) for x, y in ((26, 44), (31, 49), (10, 26))}, {-16})
+        self.assertEqual({west(x, y) for x, y in ((20, 20), (20, 23))}, {0})
+        safari = ground("LAYOUT_SAFARI_ZONE_SOUTHEAST")
+        self.assertEqual({safari(x, y) for x, y in ((16, 32), (22, 33), (31, 33), (19, 36), (21, 37))}, {-16})
+        ever = ground("LAYOUT_EVER_GRANDE_CITY")
+        self.assertEqual((ever(18, 27), ever(18, 28)), (-16, -16))
+        self.assertEqual({ever(x, y) for x, y in ((17, 26), (14, 25), (13, 27))}, {0})
+
     def test_repository_cave_rock_stands_and_its_exits_stay_open(self):
         layouts = {row["symbol"]: row for row in self.data["layouts"]}
         granite = layouts["LAYOUT_GRANITE_CAVE_1F"]

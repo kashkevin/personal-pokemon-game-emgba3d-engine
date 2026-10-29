@@ -1928,13 +1928,15 @@ def compile_data(root: Path) -> dict:
                     liftable = (lambda offset, rocks=rocks, cells=layout_cells: offset in rocks
                                 or str(cells[offset].get("behavior", "")).startswith("MB_JUMP_"))
                 # (a cave mouth put on the level it is entered from lifts no rock
-                # round it: join_level_free_cells)
+                # round it: join_level_free_cells, and a doorway solve_layout
+                # lays with the ground it is entered from)
                 terrace_topology[layout["id"]] = {
                     **terrace_topology[layout["id"]],
                     **lift_blocked_cells(layout_cells, layout["width"], layout["height"],
                                          {offset: entry for offset, entry
                                           in terrace_topology[layout["id"]].items()
-                                          if offset not in level_free_cells[layout["id"]]},
+                                          if offset not in level_free_cells[layout["id"]]
+                                          and not entry.get("doorway")},
                                          liftable=liftable)}
             if rocks:
                 # The rocks the sea's own height surrounds (no terrace, or water

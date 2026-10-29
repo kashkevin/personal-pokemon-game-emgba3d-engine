@@ -388,6 +388,83 @@ LEDGE_JUMPS = {
 }
 
 
+def _doorway(cells: tuple[dict, ...], offsets: list[int]) -> bool:
+    """A region of elevation 0 (the game's any level) with a door or warp in it."""
+    return (cells[offsets[0]].get("elevation") == 0
+            and any("DOOR" in str(cells[offset].get("behavior") or "")
+                    or "WARP" in str(cells[offset].get("behavior") or "") for offset in offsets))
+
+
+def _flush_free_regions(cells: tuple[dict, ...], width: int, height: int,
+                        region_by_cell: dict[int, int], region_cells: dict[int, list[int]],
+                        in_graph: set, region_level: dict[int, tuple[int, int]]
+                        ) -> dict[int, tuple[int, int]]:
+    """solve_layout's regions no terrace reaches that take the level of the
+    components' ground beside them: region -> (groundQ16, component key)."""
+    def land(offset: int) -> bool:
+        cell = cells[offset]
+        return (cell.get("collision", 0) == 0 and cell.get("behavior") not in WATER_BEHAVIORS
+                and cell.get("behavior") not in LEDGE_JUMPS)
+
+    def doorway_by_water(node: int) -> bool:
+        offsets = region_cells[node]
+        return (_doorway(cells, offsets)
+                and any(cells[neighbor].get("behavior") in WATER_BEHAVIORS
+                        for offset in offsets for neighbor in _neighbours(offset, width, height)))
+
+    free = {node for node in region_cells if node not in in_graph and not doorway_by_water(node)}
+    beside: dict[int, set[int]] = defaultdict(set)
+    # (ground beside water no component levels lies with it on the top level, the
+    # open sea's: Navel Rock's pier stood under the sea round it)
+    by_open_water: set[int] = set()
+    water_beside: dict[int, set[tuple[int, int]]] = defaultdict(set)
+    for offset, node in region_by_cell.items():
+        if node not in free:
+            continue
+        if not land(offset):
+            if cells[offset].get("behavior") in WATER_BEHAVIORS:
+                by_open_water.add(node)
+            continue
+        for neighbor in _neighbours(offset, width, height):
+            other = region_by_cell.get(neighbor)
+            if other is not None and other != node and land(neighbor):
+                beside[node].add(other)
+            elif cells[neighbor].get("behavior") in WATER_BEHAVIORS:
+                if other in region_level:
+                    water_beside[node].add(region_level[other])
+                else:
+                    by_open_water.add(node)
+    out: dict[int, tuple[int, int]] = {}
+    seen: set[int] = set()
+    for start in sorted(beside):
+        if start in seen:
+            continue
+        seen.add(start)
+        body, offered, pending = [], set(), deque((start,))
+        while pending:
+            node = pending.popleft()
+            body.append(node)
+            if node in by_open_water:
+                offered.add((0, None))
+            offered |= water_beside[node]
+            for other in beside[node]:
+                if other in free:
+                    if other not in seen:
+                        seen.add(other)
+                        pending.append(other)
+                else:
+                    # (a contradictory component's ground, or a doorway beside
+                    # water, lies on the top level)
+                    offered.add(region_level.get(other, (0, None)))
+        levels = {ground for ground, _ in offered}
+        if len(levels) == 1 and next(iter(levels)) != 0:
+            level = next(iter(levels))
+            key = min(key for _, key in offered)
+            for node in body:
+                out[node] = (level, key)
+    return out
+
+
 def solve_layout(cells: tuple[dict, ...], width: int, height: int,
                  contradictions: list[tuple[int, ...]] | None = None,
                  conflict_edges: list[tuple[object, object, int, int]] | None = None,
@@ -506,6 +583,7 @@ def solve_layout(cells: tuple[dict, ...], width: int, height: int,
                 onto_free.add(takeoff)
 
     solved: dict[int, dict] = {}
+    region_level: dict[int, tuple[int, int]] = {}  # a solved region's groundQ16 and component key
     visited: set[object] = set()
     for seed in sorted(graph, key=str):
         if seed in visited:
@@ -559,20 +637,41 @@ def solve_layout(cells: tuple[dict, ...], width: int, height: int,
                                   "topQ16": (ground + (1 if role.solid else 0)) * 16,
                                   "profile": role.profile, "solid": role.solid}
             else:
+                region_level[node] = (ground * 16, key)
                 for offset in region_cells[node]:
                     solved[offset] = {"groundQ16": ground * 16,
                                       "topQ16": ground * 16,
                                       "profile": "none", "solid": False}
                     if members is not None:
                         members[offset] = key
+    # Ground no terrace reaches that the game walks onto from a component's
+    # ground, across an elevation change (its elevation 0 is any level) with no
+    # art between them, lies flush with it (KNOWN_ISSUES MS-162: the Battle
+    # Frontier west half's paths of elevation 3 stood a level over the lower
+    # ground of elevation 0 they run through, every step on or off them a level
+    # up or down). Such ground side by side is one body; a body whose components'
+    # ground beside it is all on one level other than the top takes that level
+    # and the component (the lowest key of those). Water and jump ledges join
+    # nothing; a doorway beside water keeps its place (join_level_free_cells).
+    flushed = _flush_free_regions(cells, width, height, region_by_cell, region_cells,
+                                  set(graph), region_level)
+    for node, (ground, key) in flushed.items():
+        # (a doorway, like a cave mouth join_level_free_cells levels, lifts no
+        # rock round it: Victory Road's mouth in Ever Grande City's mountain)
+        doorway = _doorway(cells, region_cells[node])
+        for offset in region_cells[node]:
+            solved[offset] = {"groundQ16": ground, "topQ16": ground,
+                              "profile": "none", "solid": False}
+            if doorway:
+                solved[offset]["doorway"] = True
+            if members is not None:
+                members[offset] = key
     # Ground no terrace reaches lies on level 0. Its key: minus one less its
     # lowest offset (a component's is its lowest offset). A doorway of elevation 0
     # (the game's any level: a cave mouth) has none: it takes its level from the
     # ground it is entered from (join_level_free_cells).
     for node, offsets in region_cells.items():
-        if node in graph or (cells[offsets[0]].get("elevation") == 0 and any(
-                "DOOR" in str(cells[offset].get("behavior") or "")
-                or "WARP" in str(cells[offset].get("behavior") or "") for offset in offsets)):
+        if node in graph or node in flushed or _doorway(cells, offsets):
             continue
         key = -min(offsets) - 1
         if members is not None:
