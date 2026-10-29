@@ -5777,3 +5777,27 @@ bool8 CheckAddCoins(void)
     else
         return TRUE;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native field text screen (src/native_ui/screens/ui_field_text.c) draws the Lilycove elevator's "Now on" window
+// (ShowDeptStoreElevatorFloorSelect) beside the floors' menu: its window while up (the window is shared with the move
+// tutors', so its template tells them apart) and the floor it names.
+bool32 FieldSpecials_NativeUiElevatorFloor(u8 *windowId, const u8 **nowOn, const u8 **floor)
+{
+    u8 id = sTutorMoveAndElevatorWindowId;
+
+    if (id >= WINDOWS_MAX || !Window_NativeUiShown(id)
+     || gWindows[id].window.tilemapLeft != sWindowTemplate_ElevatorFloor.tilemapLeft
+     || gWindows[id].window.tilemapTop != sWindowTemplate_ElevatorFloor.tilemapTop
+     || gWindows[id].window.width != sWindowTemplate_ElevatorFloor.width
+     || gWindows[id].window.height != sWindowTemplate_ElevatorFloor.height
+     || gSpecialVar_0x8005 >= ARRAY_COUNT(sDeptStoreFloorNames))
+        return FALSE;
+    *windowId = id;
+    *nowOn = gText_ElevatorNowOn;
+    *floor = sDeptStoreFloorNames[gSpecialVar_0x8005];
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

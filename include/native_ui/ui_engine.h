@@ -971,6 +971,8 @@ struct NativeScriptPic
     u16 tileNum;
 };
 bool32 ScriptMenu_NativeUiPokemonPic(struct NativeScriptPic *out);
+/* the Lilycove elevator's "Now on" window beside its floors' menu (field_specials.c): its window and its two lines */
+bool32 FieldSpecials_NativeUiElevatorFloor(u8 *windowId, const u8 **nowOn, const u8 **floor);
 /* a Mail's letter (mail.c) while its screen is up: its stationery as the screen built it (BG1's tiles at char base 0,
  * its 32 x 32 tilemap, the background palettes before the fade), each line of words and the signature where
  * PrintMailText puts them (GBA pixels, the text's top left) in the Mail's ink, a Bead or Dream Mail's Pokémon icon */

@@ -13,7 +13,8 @@
  * roulette table's "Do you want to play?") are the design's money windows,
  * with the wallet as it is now. The picture box a script shows (showmonpic: a
  * Pokémon in a frame, Birch's Johto starters) is the design's box where the
- * script put it, with the Pokémon's own picture. Anything else on the field's
+ * script put it, with the Pokémon's own picture; the Lilycove elevator's "Now
+ * on" window beside its floors. Anything else on the field's
  * window layer that this does not draw (a list, a PokéNav call, rows a script
  * builds itself) keeps the game's picture. Project-owned.
  */
@@ -68,6 +69,8 @@ static u32 sMoney, sCoins;
 static bool sMsgUp;
 static struct NativeScriptPic sPic;
 static bool sPicUp;
+static bool sElevatorUp;
+static const u8 *sElevatorLines[2];
 static uint32_t sPicAt, sPicLast;
 
 /* the picture box's Pokémon as CreateMonSprite_PicBox makes it: not shiny, this personality */
@@ -108,11 +111,13 @@ static int OtherWindows(u8 picture)
 {
     u8 popup = GetMapNamePopUpWindowId();
     u32 namebox = GetNameboxWindowId();
-    u8 money = Money_NativeUiBoxWindow(), coins = Coins_NativeUiBoxWindow();
+    u8 money = Money_NativeUiBoxWindow(), coins = Coins_NativeUiBoxWindow(), elevator = WINDOW_NONE;
+    const u8 *lines[2];
     int n = 0;
 
+    FieldSpecials_NativeUiElevatorFloor(&elevator, &lines[0], &lines[1]);
     for (u32 i = 1; i < WINDOWS_MAX; i++)
-        if (i != popup && i != namebox && i != money && i != coins && i != picture && Window_NativeUiShown(i))
+        if (i != popup && i != namebox && i != money && i != coins && i != picture && i != elevator && Window_NativeUiShown(i))
             n++;
     return n;
 }
@@ -174,6 +179,11 @@ static void Capture(void)
     sCoinBox = Coins_NativeUiBoxWindow() != WINDOW_NONE;
     sMoney = GetMoney(&gSaveBlock1Ptr->money);
     sCoins = GetCoins();
+    {
+        u8 window;
+
+        sElevatorUp = FieldSpecials_NativeUiElevatorFloor(&window, &sElevatorLines[0], &sElevatorLines[1]);
+    }
     sPicUp = ScriptMenu_NativeUiPokemonPic(&sPic);
     if (sPicUp)
     {
@@ -278,6 +288,15 @@ static void Draw(int t)
             UiText_AppendNumber(value, sizeof(value), (long)sCoins, 1, true);
             UiItems_MoneyBox(L + 8, y, 148, "COINS", value, band->ink);
         }
+    }
+    if (sElevatorUp)
+    {
+        /* the elevator's "Now on" window where the game puts its own (top right): the floor the car is on */
+        int w = 132, x = R - 8 - w, y = by + 8, b[4];
+
+        UiW_DialogBox(x, y, w, 50, band, UI_NONE, b);
+        UiText_Draw(UI_FONT_NORMAL, x + (w >> 1), y + 8, sElevatorLines[0], UI_P_TEXT_MUTED, UI_P_TEXT_SH, UI_ALIGN_CENTER, 0);
+        UiText_Draw(UI_FONT_NORMAL, x + (w >> 1), y + 26, sElevatorLines[1], UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_CENTER, 0);
     }
     if (sMenu.kind == NATIVE_SCRIPT_MENU_YES_NO)
     {
