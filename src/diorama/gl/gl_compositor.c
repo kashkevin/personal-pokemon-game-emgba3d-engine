@@ -17,6 +17,9 @@
 #include "diorama/gl_field_light.h"
 #include "diorama/gl_building_renderer.h"
 #include "diorama/gl_compositor.h"
+#ifdef DIORAMA_BATTLE_ENV_TEST
+#include "diorama/geometry_probe.h"
+#endif
 #include "diorama/gl_light.h"
 #include "diorama/gl_loader.h"
 #include "diorama/gl_pc_overlay.h"
@@ -1254,6 +1257,15 @@ static void UpdateCamera(const struct DioramaSceneSnapshot *snapshot, float rawX
         sCameraClock = now;
         return;
     }
+#ifdef DIORAMA_BATTLE_ENV_TEST
+    /* the geometry probe's cameras (test builds: diorama/geometry_probe.h), framed on the player */
+    if (DioramaGeoProbe_CameraView(rawX, rawZ, DioramaGLObjects_GetPlayerGround(), CameraPlace(snapshot->mapType),
+                                   &sCameraView))
+    {
+        sCameraClock = now;
+        return;
+    }
+#endif
     memset(&input, 0, sizeof(input));
     input.targetX = rawX;
     input.targetZ = rawZ;
@@ -1846,6 +1858,10 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
           && sHasSceneSnapshot
           && DioramaSnapshot_CanRenderGrid(&sSceneSnapshot))
         gameTexture = &sDebugTexture;
+#ifdef DIORAMA_BATTLE_ENV_TEST
+    /* the geometry probe (test builds): the cells and the pictures of a place, once its scene is built */
+    DioramaGeoProbe_RenderFrame(sHasSceneSnapshot ? &sSceneSnapshot : NULL, sAtlasResolvedCells, current3D);
+#endif
 
     presentationDecision = DioramaTransition_Classify(
         sHasSceneSnapshot ? &sSceneSnapshot : NULL, current3D,
@@ -2020,6 +2036,9 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                                       -(float)(sRenderedSceneSnapshot.gridOriginY + DIORAMA_GRID_HEIGHT / 2),
                                       fogEnd - (DioramaGLTerrain_FarShown() ? 17.0f : DIORAMA_HAZE_BAND), fogEnd,
                                       sky);
+#ifdef DIORAMA_BATTLE_ENV_TEST
+            DioramaGeoProbe_SkyColour(sky); /* the geometry probe's pictures: a sky the game never draws */
+#endif
             glEnable(GL_SCISSOR_TEST);
             glScissor(0, 0, sceneWidth, sceneHeight);
             glClearColor(sky[0], sky[1], sky[2], 1.0f);

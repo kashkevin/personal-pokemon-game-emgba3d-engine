@@ -3830,6 +3830,92 @@ const struct DioramaTerrainMetrics *DioramaGLTerrain_GetMetrics(void)
     return &sMetrics;
 }
 
+#ifdef DIORAMA_BATTLE_ENV_TEST
+/* The geometry probe (diorama/geometry_probe.h): the last sync's chunks all built, none waiting but those at the
+ * grid's edge that wait by design (EdgeChunkWaits). */
+bool DioramaGLTerrain_TestSettled(const struct DioramaSceneSnapshot *snapshot)
+{
+    if (!sSyncKeyValid || sMetrics.activeChunks == 0)
+        return false;
+    for (unsigned p = 0; p < sPendingCount; p++)
+        if (!EdgeChunkWaits(snapshot, FindChunk(sPending[p][0], sPending[p][1]), sPending[p][0], sPending[p][1]))
+            return false;
+    return true;
+}
+
+/* The geometry probe: each cell of the scene as the terrain mesh is built from it (BuildInputUntimed, the chunks'
+ * own inputs, after ShapeRockMasses), a line each; the columns are the file's first line. Nothing cached changes. */
+unsigned DioramaGLTerrain_TestDumpCells(const struct DioramaSceneSnapshot *snapshot,
+                                        const struct DioramaResolvedCell *resolvedCells, FILE *file)
+{
+    struct DioramaTerrainChunkInput *input = malloc(sizeof(*input));
+    int minChunkX = DioramaTerrain_FloorDiv(snapshot->gridOriginX + sShiftX, DIORAMA_TERRAIN_CHUNK_SIZE);
+    int maxChunkX = DioramaTerrain_FloorDiv(snapshot->gridOriginX + sShiftX + DIORAMA_GRID_WIDTH - 1,
+                                            DIORAMA_TERRAIN_CHUNK_SIZE);
+    int minChunkY = DioramaTerrain_FloorDiv(snapshot->gridOriginY + sShiftY, DIORAMA_TERRAIN_CHUNK_SIZE);
+    int maxChunkY = DioramaTerrain_FloorDiv(snapshot->gridOriginY + sShiftY + DIORAMA_GRID_HEIGHT - 1,
+                                            DIORAMA_TERRAIN_CHUNK_SIZE);
+    unsigned rows = 0;
+
+    if (input == NULL)
+        return 0;
+    fprintf(file, "x\ty\tflags\tlayout\tgroup\tnum\tsx\tsy\tmetatile\tbehavior\tcollision\televation\tlayer\t"
+                  "shape\tarchetype\tclass\tmeasured\tterrace\trock\tground\ttop\tfeature\tpixmin\tpixmax\t"
+                  "hull\tstructure\tclaim\tvoid\tmodel\ttakeoff\tlanding\ttree\n");
+    for (int chunkY = minChunkY; chunkY <= maxChunkY; chunkY++)
+        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++)
+        {
+            BuildInputUntimed(snapshot, resolvedCells, chunkX, chunkY, input);
+            for (int y = DIORAMA_TERRAIN_HALO; y < DIORAMA_TERRAIN_HALO + DIORAMA_TERRAIN_CHUNK_SIZE; y++)
+                for (int x = DIORAMA_TERRAIN_HALO; x < DIORAMA_TERRAIN_HALO + DIORAMA_TERRAIN_CHUNK_SIZE; x++)
+                {
+                    const struct DioramaTerrainCell *cell = &input->cells[y * DIORAMA_TERRAIN_INPUT_SIZE + x];
+                    int mapX = cell->mapX - sShiftX;
+                    int mapY = cell->mapY - sShiftY;
+                    int gridIndex = (mapY - snapshot->gridOriginY) * DIORAMA_GRID_WIDTH
+                                  + (mapX - snapshot->gridOriginX);
+                    const struct DioramaCellSnapshot *source;
+                    int pixelMin = 0, pixelMax = 0;
+                    bool model;
+
+                    if (!cell->present || gridIndex < 0 || gridIndex >= (int)snapshot->visibleCellCount)
+                        continue;
+                    source = &snapshot->cells[gridIndex];
+                    if (cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART)
+                    {
+                        pixelMin = 255;
+                        for (int pixel = 0; pixel < DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL; pixel++)
+                        {
+                            if (cell->mountainHeight[pixel] < pixelMin)
+                                pixelMin = cell->mountainHeight[pixel];
+                            if (cell->mountainHeight[pixel] > pixelMax)
+                                pixelMax = cell->mountainHeight[pixel];
+                        }
+                    }
+                    model = (source->flags & DIORAMA_CELL_SOURCE_VALID)
+                         && DioramaBuildings_CellAt(source->sourceLayoutId, source->sourceMapX,
+                                                    source->sourceMapY, NULL, NULL, NULL);
+                    fprintf(file, "%d\t%d\t%u\t%u\t%u\t%u\t%d\t%d\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t"
+                                  "%.4f\t%.4f\t%.4f\t%d\t%d\t%u\t%u\t%u\t%u\t%d\t%.4f\t%.4f\t%u\n",
+                            mapX, mapY, (unsigned)source->flags, (unsigned)source->sourceLayoutId,
+                            (unsigned)source->sourceMapGroup, (unsigned)source->sourceMapNum,
+                            source->sourceMapX, source->sourceMapY, (unsigned)cell->metatileId,
+                            (unsigned)cell->behavior, (unsigned)cell->collision, (unsigned)cell->rawElevation,
+                            (unsigned)cell->layerType, (unsigned)cell->shape, (unsigned)cell->archetype,
+                            (unsigned)cell->terrainClass, (unsigned)cell->measuredFlags,
+                            (unsigned)cell->terraceProfile, (unsigned)cell->rockMass, cell->groundHeight,
+                            cell->visualHeight, cell->featureHeight, pixelMin, pixelMax,
+                            (unsigned)cell->treeHullReady, (unsigned)cell->structureId,
+                            (unsigned)cell->claimOwner, (unsigned)cell->voidKind, model ? 1 : 0,
+                            cell->ledgeTakeoffHeight, cell->ledgeLandingHeight, (unsigned)source->treeSprite);
+                    rows++;
+                }
+        }
+    free(input);
+    return rows;
+}
+#endif
+
 void DioramaGLTerrain_Shutdown(void)
 {
     int i;

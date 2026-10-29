@@ -60,6 +60,7 @@
 #ifdef ENABLE_DIORAMA
 #include "diorama/battle_env_test.h"
 #include "diorama/battle_scene.h"
+#include "diorama/geometry_probe.h"
 #include "diorama/camera.h"
 #include "diorama/gl_battle.h"
 #include "diorama/gl_compositor.h"
@@ -2054,6 +2055,24 @@ static void DrawPcOverlay(int outputWidth, int outputHeight)
             PngWrite_RGBA(path, pixels, outputWidth, outputHeight, true);
             free(pixels);
             DioramaBattleEnvTest_CaptureWritten();
+        }
+    }
+    // Test builds only: the geometry probe's pictures (diorama/geometry_probe.h), the window as drawn
+    {
+        const char *stem = DioramaGeoProbe_CaptureStem();
+        uint8_t *pixels = stem != NULL && outputWidth > 0 && outputHeight > 0
+                        ? malloc((size_t)outputWidth * outputHeight * 4) : NULL;
+
+        if (pixels != NULL)
+        {
+            char path[640];
+
+            SDL_snprintf(path, sizeof(path), "%s.png", stem);
+            glPixelStorei(GL_PACK_ALIGNMENT, 1);
+            glReadPixels(0, 0, outputWidth, outputHeight, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+            PngWrite_RGBA(path, pixels, outputWidth, outputHeight, true);
+            free(pixels);
+            DioramaGeoProbe_CaptureWritten();
         }
     }
 #endif

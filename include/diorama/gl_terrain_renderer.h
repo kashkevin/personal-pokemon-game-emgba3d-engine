@@ -54,6 +54,14 @@ void DioramaGLTerrain_GetPaletteLine(float scale[3], float offset[3]);
 /* Whether this frame draws distant scenery (diorama/far_field.h) past the
  * scene's cells. */
 bool DioramaGLTerrain_FarShown(void);
+#ifdef DIORAMA_BATTLE_ENV_TEST
+#include <stdio.h>
+/* The geometry probe (diorama/geometry_probe.h), test builds only: every chunk the last sync asked for built, and
+ * each cell of the scene as the terrain mesh is built from it, a line each (the columns: the first line). */
+bool DioramaGLTerrain_TestSettled(const struct DioramaSceneSnapshot *snapshot);
+unsigned DioramaGLTerrain_TestDumpCells(const struct DioramaSceneSnapshot *snapshot,
+                                        const struct DioramaResolvedCell *resolvedCells, FILE *file);
+#endif
 void DioramaGLTerrain_Shutdown(void);
 
 #endif

@@ -15,6 +15,9 @@
 #include <SDL2/SDL.h>
 
 #include "global.h"
+#ifdef ENABLE_DIORAMA
+#include "diorama/geometry_probe.h"
+#endif
 #include "battle.h"
 #include "battle_controllers.h"
 #include "battle_gimmick.h"
@@ -2965,6 +2968,10 @@ void DioramaBattleEnvTest_OnAssert(const char *fmt, va_list va)
 
 bool DioramaBattleEnvTest_TakeWarpCoords(s16 *x, s16 *y)
 {
+#ifdef ENABLE_DIORAMA
+    if (DioramaGeoProbe_TakeWarpCoords(x, y))
+        return true;
+#endif
     if (!sPlan.warpPending)
         return false;
     sPlan.warpPending = false;
@@ -3637,6 +3644,10 @@ void DioramaBattleEnvTest_FieldTick(void)
     SDL_AtomicSet(&s.fieldSeen, 1);
     if (gMain.inBattle)
         SDL_AtomicSet(&s.battleSeen, 1);
+#ifdef ENABLE_DIORAMA
+    if (DioramaGeoProbe_FieldTick())
+        return;             /* PKMN_TEST_GEO_TOUR: the geometry probe alone drives the field */
+#endif
     if (sPlan.phase != PLAN_OFF)
     {
         PlanFieldTick();     /* PKMN_TEST_PLAN: the plan alone drives the field */
@@ -4558,6 +4569,15 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
             OpenTestPokeblockCase();
         if (FieldEventAt(s.fieldKeys, "CONTEST", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
             EnterTestContest();
+        /* SAFARI: the Safari Zone's game afresh (30 balls, 500 steps), at that frame of every loop of the keys: a stay
+           in the Safari Zone as long as the run (the owner's crash report of 2026-10-29) */
+        if (FieldEventAt(s.fieldKeys, "SAFARI", s.fieldLoop > 0 ? (s.fieldKeyFrames - 1) % s.fieldLoop
+                                                                 : s.fieldKeyFrames - 1)
+         && gMain.callback2 == CB2_Overworld)
+        {
+            EnterSafariMode();
+            TestLog("Battle env test: the Safari Zone's game afresh at field frame %d", s.fieldKeyFrames);
+        }
         if (FieldEventAt(s.fieldKeys, "BLEND", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
             StartTestBerryBlender();
         /* PKMN_TEST_BLEND_PERFECT=1: the blender's partners always hit BEST (its own debugging switch) */
