@@ -1050,6 +1050,14 @@ struct NativeCredits
     u8 y[NATIVE_CREDITS_LINES];
 };
 bool32 Credits_NativeUiState(struct NativeCredits *out);
+/* the trade's sequence (trade.c: an in-game trade's, a link partner's): whether its message window (window 0) shows
+ * its last line now (the line is the window's printer's), and whether an in-game trade's end waits for A */
+struct NativeTradeSequence
+{
+    bool8 message;
+    bool8 waitingA;
+};
+bool32 Trade_NativeUiSequence(struct NativeTradeSequence *out);
 /* Easy Chat (easy_chat.c) while its screen is up: the words being edited and every part of the screen as the engine
  * has it. inputState is the screen's own (0 a word, 1 the footer, 2 the keyboard, 3 a group's words, 4 quit?,
  * 5 delete all?, 6 confirm?, 7 a quiz's question, 8 a message, 9 and 10 the Bard's lyrics) */

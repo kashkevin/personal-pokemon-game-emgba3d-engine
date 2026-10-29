@@ -67,6 +67,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_EasyChat,     /* Easy Chat: a Mail's words, the profile, an interview, the Bard, the quiz */
     &gUiScreen_HallOfFame,   /* the Hall of Fame after the Champion, and its PC's records */
     &gUiScreen_Credits,      /* the credits' pages over the game's ride */
+    &gUiScreen_TradeSequence, /* a trade's lines over its sequence (an in-game trade's, a link partner's) */
     &gUiScreen_Shop,
     &gUiScreen_Naming,
     &gUiScreen_Starters,

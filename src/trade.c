@@ -5130,3 +5130,22 @@ static void CB2_SaveAndEndWirelessTrade(void)
     BuildOamBuffer();
     UpdatePaletteFade();
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+// The trade's sequence for the 3D UI (native_ui/screens/ui_trade_sequence.c). Its window shows the line printed
+// last from "X will be sent to Y." until it is cleared for the link, and again from "Y sent over X." to the end.
+bool32 Trade_NativeUiSequence(struct NativeTradeSequence *out)
+{
+    u32 state;
+
+    if (sTradeAnim == NULL || (gMain.callback2 != CB2_InGameTrade && gMain.callback2 != CB2_UpdateLinkTrade))
+        return FALSE;
+    state = sTradeAnim->state;
+    out->message = (state >= STATE_BYE_BYE && state <= STATE_WAIT_FADE_OUT_TO_GBA_SEND)
+                || (state >= STATE_TAKE_CARE_OF_MON && state <= STATE_WAIT_FADE_OUT_END)
+                || state == STATE_DELAY_FOR_MON_ANIM || state == STATE_WAIT_FOR_MON_CRY;
+    out->waitingA = !sTradeAnim->isLinkTrade && state == STATE_END_LINK_TRADE;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI
