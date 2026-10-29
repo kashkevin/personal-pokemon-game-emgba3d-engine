@@ -1382,7 +1382,18 @@ struct NativePokenav
     u8 condMarks;                       /* the Pokemon's markings */
     bool8 condShiny;
     u8 condBox;                         /* TOTAL_BOXES_COUNT: the party */
-    struct NativePokenavRow cond;       /* the cursor's Pokemon */
+    struct NativePokenavRow cond;       /* the cursor's Pokemon (NATIVE_PNAV_RIBBONS' too) */
+    /* NATIVE_PNAV_RIBBONS: the cursor's Pokemon's ribbon case (listCursor of listCount Pokemon with ribbons) */
+    u8 ribbonNormal;                    /* its ribbons, packed from the case's first position */
+    u8 ribbonGift;                      /* its gift ribbons, on a row of their own */
+    u8 ribbonIds[FIRST_GIFT_RIBBON];    /* the normal ribbons in the case's order (CHAMPION_RIBBON ...) */
+    u8 giftIds[NUM_GIFT_RIBBONS];       /* the gift ribbons (MARINE_RIBBON ...) */
+    u8 ribbonPerRow;                    /* the case's rows: RIBBONS_PER_ROW (the game's cursor moves by them) */
+    u8 ribbonGiftStart;                 /* the gift row's first position */
+    u8 ribbonPos;                       /* the cursor's position in the case */
+    bool8 ribbonExpanded;               /* a ribbon chosen (A): the cursor moves over the case */
+    u8 ribbonTotal;                     /* the ribbons it holds, as the game counts them */
+    const u8 *ribbonDesc[2];            /* the cursor's ribbon's name and words (NULL: an empty gift slot) */
 };
 bool8 Pokenav_NativeUiState(struct NativePokenav *out);
 /* the parts' own (each in its file) */
@@ -1393,6 +1404,11 @@ void PokenavMatchCall_NativeUiFill(struct NativePokenav *out);
 u8 PokenavMatchCallGfx_NativeUiWindow(bool8 *busy);
 void PokenavCondition_NativeUiFill(struct NativePokenav *out);
 void PokenavSearch_NativeUiFill(struct NativePokenav *out);
+void PokenavRibbonsList_NativeUiFill(struct NativePokenav *out);
+void PokenavRibbons_NativeUiFill(struct NativePokenav *out);
+/* pokenav_ribbons_summary.c: a ribbon's big icon - the game's compressed sheet of twelve 32x32 icons (four bits a
+ * pixel), the icon's index in it and its palette (NULL: no such ribbon) */
+const u32 *PokenavRibbons_NativeUiIconArt(u32 ribbonId, u32 *index, const u16 **palette);
 /* pokenav.c: a row for a box's or the party's Pokemon (boxId TOTAL_BOXES_COUNT: the party) */
 void Pokenav_NativeUiMonRow(struct NativePokenavRow *row, u32 boxId, u32 monId);
 /* mon_markings.c: the markings menu open, its cursor (0-3 the marks, 4 OK, 5 CANCEL) and its marks */

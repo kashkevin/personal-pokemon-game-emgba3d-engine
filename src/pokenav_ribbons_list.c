@@ -746,3 +746,36 @@ static void BufferRibbonMonInfoText(struct PokenavListItem *listItem, u8 *dest)
     dest = GetStringClearToWidth(dest, FONT_NORMAL, gStringVar1, 54);
     ConvertIntToDecimalStringN(dest, item->data, STR_CONV_MODE_RIGHT_ALIGN, 2);
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// PC 3D game (screens/ui_pokenav.c, pokenav.c Pokenav_NativeUiState): the Pokemon with ribbons, the most first
+void PokenavRibbonsList_NativeUiFill(struct NativePokenav *out)
+{
+    struct Pokenav_RibbonsMonList *list = GetSubstructPtr(POKENAV_SUBSTRUCT_RIBBONS_MON_LIST);
+    struct Pokenav_RibbonsMonMenu *menu = GetSubstructPtr(POKENAV_SUBSTRUCT_RIBBONS_MON_MENU);
+    u16 top, count, selected;
+    u8 shown;
+    u32 i;
+
+    if (list == NULL || menu == NULL || list->monList == NULL || list->callback == HandleRibbonsMonListInput_WaitListInit
+     || !PokenavList_NativeUiWindow(&top, &count, &selected, &shown))
+        return;
+    out->page = NATIVE_PNAV_RIBBON_LIST;
+    out->listCount = count < list->monList->listCount ? count : list->monList->listCount;
+    out->listTop = top;
+    out->listCursor = selected < out->listCount ? selected : 0;
+    out->listShown = shown;
+    for (i = 0; i < NATIVE_PNAV_ROWS && top + i < out->listCount; i++)
+    {
+        const struct PokenavMonListItem *item = &list->monList->monData[top + i];
+
+        Pokenav_NativeUiMonRow(&out->rows[i], item->boxId, item->monId);
+        out->rows[i].value = item->data;    // its ribbon count
+        out->rowCount = i + 1;
+    }
+    if (menu->callback != NULL && menu->callback())
+        out->busy = TRUE;
+}
+#endif // ENABLE_NATIVE_UI

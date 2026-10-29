@@ -634,6 +634,13 @@ bool8 Pokenav_NativeUiState(struct NativePokenav *out)
     case POKENAV_RETURN_CONDITION_SEARCH:
         PokenavSearch_NativeUiFill(out);
         break;
+    case POKENAV_RIBBONS_MON_LIST:
+    case POKENAV_RIBBONS_RETURN_TO_MON_LIST:
+        PokenavRibbonsList_NativeUiFill(out);
+        break;
+    case POKENAV_RIBBONS_SUMMARY_SCREEN:
+        PokenavRibbons_NativeUiFill(out);
+        break;
     }
     return TRUE;
 }

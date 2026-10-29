@@ -1275,3 +1275,65 @@ static void SpriteCB_WaitForRibbonAnimation(struct Sprite *sprite)
         sprite->callback = SpriteCallbackDummy;
     }
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// PC 3D game (screens/ui_pokenav.c, pokenav.c Pokenav_NativeUiState): a Pokemon's ribbons as the case lays them out
+// (RIBBONS_PER_ROW to a row, the gift ribbons on a row of their own), the cursor and the cursor's ribbon's words
+void PokenavRibbons_NativeUiFill(struct NativePokenav *out)
+{
+    struct Pokenav_RibbonsSummaryList *list = GetSubstructPtr(POKENAV_SUBSTRUCT_RIBBONS_SUMMARY_LIST);
+    struct Pokenav_RibbonsSummaryMenu *menu = GetSubstructPtr(POKENAV_SUBSTRUCT_RIBBONS_SUMMARY_MENU);
+    struct PokenavMonListItem *item;
+    u32 i, ribbonId, gift;
+
+    if (list == NULL || menu == NULL || list->monList == NULL || list->monList->currIndex >= list->monList->listCount)
+        return;
+    out->page = NATIVE_PNAV_RIBBONS;
+    out->listCount = list->monList->listCount;
+    out->listCursor = list->monList->currIndex;
+    item = &list->monList->monData[out->listCursor];
+    Pokenav_NativeUiMonRow(&out->cond, item->boxId, item->monId);
+    out->condBox = item->boxId;
+    out->condShiny = out->cond.shiny;
+    out->ribbonTotal = GetCurrMonRibbonCount();
+    out->ribbonNormal = min(list->numNormalRibbons, FIRST_GIFT_RIBBON);
+    out->ribbonGift = min(list->numGiftRibbons, NUM_GIFT_RIBBONS);
+    for (i = 0; i < out->ribbonNormal; i++)
+        out->ribbonIds[i] = list->ribbonIds[i];
+    for (i = 0; i < out->ribbonGift; i++)
+        out->giftIds[i] = list->giftRibbonIds[i];
+    out->ribbonPerRow = RIBBONS_PER_ROW;
+    out->ribbonGiftStart = GIFT_RIBBON_START_POS;
+    out->ribbonPos = list->selectedPos;
+    out->ribbonExpanded = list->callback == HandleExpandedRibbonInput;
+    // as PrintRibbonNameAndDescription: a gift ribbon's words are the gift's the save holds for that slot
+    ribbonId = GetRibbonId();
+    if (ribbonId < FIRST_GIFT_RIBBON)
+    {
+        out->ribbonDesc[0] = gRibbonDescriptionPointers[ribbonId][0];
+        out->ribbonDesc[1] = gRibbonDescriptionPointers[ribbonId][1];
+    }
+    else if (ribbonId <= LAST_GIFT_RIBBON && (gift = gSaveBlock1Ptr->giftRibbons[ribbonId - FIRST_GIFT_RIBBON]) != 0
+          && gift <= MAX_GIFT_RIBBON)
+    {
+        out->ribbonDesc[0] = gGiftRibbonDescriptionPointers[gift - 1][0];
+        out->ribbonDesc[1] = gGiftRibbonDescriptionPointers[gift - 1][1];
+    }
+    if (menu->callback != NULL && menu->callback())
+        out->busy = TRUE;
+}
+
+const u32 *PokenavRibbons_NativeUiIconArt(u32 ribbonId, u32 *index, const u16 **palette)
+{
+    static const u16 *const palettes[] = {sRibbonIcons1_Pal, sRibbonIcons2_Pal, sRibbonIcons3_Pal, sRibbonIcons4_Pal,
+                                          sRibbonIcons5_Pal};
+
+    if (ribbonId >= ARRAY_COUNT(sRibbonGfxData) || sRibbonGfxData[ribbonId].palNumOffset >= ARRAY_COUNT(palettes))
+        return NULL;
+    *index = sRibbonGfxData[ribbonId].tileNumOffset;
+    *palette = palettes[sRibbonGfxData[ribbonId].palNumOffset];
+    return sRibbonIconsBig_Gfx;
+}
+#endif // ENABLE_NATIVE_UI

@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "global.h"
+#include "decompress.h"
 #include "main.h"
 #include "pokemon_storage_system.h"
 #include "pokenav.h"
@@ -37,6 +38,9 @@ enum
     HIT_OPTION,
     HIT_MESSAGE,
     HIT_MON_ROW,
+    HIT_MARK,
+    HIT_RIBBON,
+    HIT_MON_STEP,
 };
 
 /* the PokéNav's blue (the GBA's device and its screen's cyan) */
@@ -60,6 +64,8 @@ static const u8 sText_Pokemon[] = _("POKéMON");
 static const u8 sText_InParty[] = _("In your party");
 static const u8 sText_ReturnCondition[] = _("Return to the CONDITION menu.");
 static const u8 sText_Egg[] = _("EGG");
+static const u8 sText_Ribbons[] = _("RIBBONS");
+static const u8 sText_Ribbon[] = _("RIBBON");
 
 static struct NativePokenav sP;
 static int sPageSince;          /* frames since the page came up (its slide) */
@@ -76,20 +82,38 @@ static bool sPicReady;
 static bool sMonPicReady;
 static u8 sWhere[32];                     /* the cursor's Pokemon's place: the party or its box */
 
+/* a click's goal, reached a press at a time as the game takes them: it reads no buttons while a page animates, so
+ * presses queued all at once would be lost */
+enum
+{
+    GOAL_NONE,
+    GOAL_MENU,                            /* a menu item (the menu wraps) */
+    GOAL_LIST,                            /* a list's row: the trainers, a search's, the party's, the ribbon list's */
+    GOAL_OPTION,                          /* a trainer's menu item */
+    GOAL_MARK,                            /* a markings menu row (it wraps) */
+    GOAL_RIBBON,                          /* a ribbon in the case */
+};
+static struct
+{
+    u8 kind;
+    u8 page;
+    bool thenA;                           /* A once there */
+    int target;
+    int presses;
+} sGoal;
+
 static void Title(const char *label);
 static void Hints(const struct UiHintItem *items, int count);
 
-static bool PageDrawn(const struct NativePokenav *p)
-{
-    return p->page == NATIVE_PNAV_MENU || p->page == NATIVE_PNAV_MATCH_CALL || p->page == NATIVE_PNAV_CONDITION
-        || p->page == NATIVE_PNAV_SEARCH;
-}
+static void StepGoal(void);
 
 static bool Detect(void)
 {
     struct NativePokenav p;
 
-    return Pokenav_NativeUiState(&p) && PageDrawn(&p);
+    /* every page but the HOENN map (still the game's), and between pages as they slide and fade: the game's own
+       frames never show through */
+    return Pokenav_NativeUiState(&p) && p.menuId != POKENAV_REGION_MAP;
 }
 
 static void Capture(void)
@@ -118,11 +142,20 @@ static void Capture(void)
         else
             StringCopyN(sWhere, GetBoxNamePtr(sP.condBox), sizeof(sWhere) - 1);
     }
-    if (sP.page == NATIVE_PNAV_SEARCH && sP.listCursor >= sP.listTop && sP.listCursor - sP.listTop < sP.rowCount)
+    if ((sP.page == NATIVE_PNAV_SEARCH || sP.page == NATIVE_PNAV_RIBBON_LIST) && sP.listCursor >= sP.listTop
+     && sP.listCursor - sP.listTop < sP.rowCount)
     {
         const struct NativePokenavRow *r = &sP.rows[sP.listCursor - sP.listTop];
 
         sMonPicReady = UiGfx_PrepareMonPic(r->species, r->personality, r->shiny, r->egg);
+    }
+    if (sP.page == NATIVE_PNAV_RIBBONS && sP.cond.species != SPECIES_NONE)
+    {
+        sMonPicReady = UiGfx_PrepareMonPic(sP.cond.species, sP.cond.personality, sP.condShiny, sP.cond.egg);
+        if (sP.condBox >= TOTAL_BOXES_COUNT)
+            StringCopy(sWhere, sText_InParty);
+        else
+            StringCopyN(sWhere, GetBoxNamePtr(sP.condBox), sizeof(sWhere) - 1);
     }
     if (sP.page == NATIVE_PNAV_MATCH_CALL)
     {
@@ -141,6 +174,7 @@ static void Capture(void)
             sMsgPrinting = sMsgUp && active && !sMsgWaiting;
         }
     }
+    StepGoal();
 }
 
 /* ---------------------------------------------------------------- the device */
@@ -413,8 +447,10 @@ static void TrainerList(int t, int x, int y, int w, int rowH)
                       &(struct UiPaint){UI_NONE, UI_HEX(0xF0FFFF), UiMix(PNAV_CYAN, b.lo, 0.3), 0, 0, NULL, UI_NONE});
         }
         UiGfx_Icon(on ? "players_sel" : "players", x + 10, ry + ((rowH - 2 - 24) >> 1), 0);
-        UiText_Draw(UI_FONT_SMALL, x + 40, ry + 1, row->sub, UI_P_TEXT_MUTED, UI_NONE, UI_ALIGN_LEFT, 0);
-        UiText_Draw(UI_FONT_NORMAL, x + 40, ry + rowH - 18, row->name, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+        /* the name, the trainer's class at the row's end (before a rematch's Poke Ball) */
+        UiText_Draw(UI_FONT_NORMAL, x + 40, ry + (rowH >> 1) - 9, row->name, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+        UiText_Draw(UI_FONT_SMALL, x + w - 34, ry + (rowH >> 1) - 7, row->sub, UI_P_TEXT_MUTED, UI_NONE, UI_ALIGN_RIGHT,
+                    0);
         if (row->rematch)
             UiW_PokeBall(x + w - 22, ry + (rowH >> 1) - 1, 12, (t / 4) % 16 < 2 ? 1 : 0);
         UiG_Hit(HIT_LIST_ROW, sP.listTop + i, x + 6, ry, w - 12, rowH - 2);
@@ -557,8 +593,19 @@ static void MatchCall(int t)
 static const char *const sCondLabels[5] = {"COOL", "BEAUTY", "CUTE", "SMART", "TOUGH"};
 static const UiRGBA sSheen[3] = {UI_HEX(0xC08018), UI_HEX(0xF8C840), UI_HEX(0xFFFFF0)};   /* the sheen's sparkles */
 
-/* a Pokemon's row: its icon, name, level and gender (a search's rank before them) */
-static void MonRow(int t, const struct NativePokenavRow *r, int x, int y, int w, int h, bool on, int rank)
+/* a ribbon's rosette, small (the ribbon list's counts) */
+static void Rosette(int x, int y)
+{
+    static const char *const rows[] = {"..aaa..", ".abbba.", "abbcbba", "abcccba", "abbcbba", ".abbba.", "..aaa..",
+                                       ".dd.dd.", ".dd.dd.", "dd...dd"};
+    static const struct UiPixPal pal[4] = {{'a', UI_HEX(0xB07010)}, {'b', UI_HEX(0xF0C030)}, {'c', UI_HEX(0xFFF0A0)},
+                                           {'d', UI_HEX(0xD04848)}};
+
+    UiW_Pix("pnrosette", rows, 10, pal, 4, x, y, false);
+}
+
+/* a Pokemon's row: its icon, name, level and gender (a search's rank before them, a ribbon count after) */
+static void MonRow(int t, const struct NativePokenavRow *r, int x, int y, int w, int h, bool on, int rank, int ribbons)
 {
     struct UiRamp b = BlueRamp();
     int nx = x + 40;
@@ -595,6 +642,14 @@ static void MonRow(int t, const struct NativePokenavRow *r, int x, int y, int w,
         UiMon_LevelText(lv, sizeof(lv), r->level);
         UiText_Draw(UI_FONT_SMALL, x + w - 34, y + (h >> 1) - 6, lv, UI_P_TEXT_MUTED, UI_NONE, UI_ALIGN_LEFT, 0);
         UiW_Gender(x + w - 46, y + (h >> 1) - 5, r->gender == MON_MALE ? 0 : r->gender == MON_FEMALE ? 1 : 2);
+    }
+    if (ribbons > 0)
+    {
+        char num[8];
+
+        snprintf(num, sizeof(num), "%d", ribbons);
+        Rosette(x + w - 84, y + (h >> 1) - 5);
+        UiCaps_Draw(x + w - 74, y + (h >> 1) - 3, num, UI_P_TEXT, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
     }
 }
 
@@ -710,13 +765,15 @@ static void MarkingsMenu(int t, int x, int y)
             UiCaps_Draw(x + 24, ry + 5, i == 4 ? "OK" : "CANCEL", on ? b.ink : UI_P_TEXT, UI_NONE, UI_CAPS_PLAIN,
                         UI_ALIGN_LEFT, UI_NONE);
         }
+        UiG_Hit(HIT_MARK, i, x + 5, ry, w - 10, 16);
     }
 }
 
 static void MonList(int t, int x, int y, int w, int rowH, bool ranks)
 {
     struct UiRamp b = BlueRamp();
-    int shown = sP.page == NATIVE_PNAV_SEARCH ? (sP.listShown > 0 ? sP.listShown : 7) : NATIVE_PNAV_ROWS;
+    bool list = sP.page == NATIVE_PNAV_SEARCH || sP.page == NATIVE_PNAV_RIBBON_LIST;   /* the game's list */
+    int shown = list ? (sP.listShown > 0 ? sP.listShown : 7) : NATIVE_PNAV_ROWS;
     int rows = sP.rowCount < shown ? sP.rowCount : shown;
     bool cancelRow = sP.page == NATIVE_PNAV_CONDITION && !sP.condSearch;
     int panelRows = NATIVE_PNAV_ROWS;   /* the game's eight; the list stands as tall as the screen beside it */
@@ -728,7 +785,7 @@ static void MonList(int t, int x, int y, int w, int rowH, bool ranks)
         int index = sP.listTop + i;
 
         MonRow(t, &sP.rows[i], x + 6, y + 6 + i * rowH, w - 12, rowH, index == sP.listCursor,
-               ranks ? sP.rows[i].value : 0);
+               ranks ? sP.rows[i].value : 0, sP.page == NATIVE_PNAV_RIBBON_LIST ? sP.rows[i].value : 0);
         UiG_Hit(HIT_MON_ROW, index, x + 6, y + 6 + i * rowH, w - 12, rowH - 2);
     }
     if (cancelRow && rows < panelRows)
@@ -748,7 +805,7 @@ static void MonList(int t, int x, int y, int w, int rowH, bool ranks)
         UiText_Draw(UI_FONT_NORMAL, x + 46, ry + (rowH >> 1) - 8, sText_Cancel, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
         UiG_Hit(HIT_MON_ROW, sP.listCount - 1, x + 6, ry, w - 12, rowH - 2);
     }
-    if (sP.page == NATIVE_PNAV_SEARCH && sP.listCount > shown)
+    if (list && sP.listCount > shown)
         UiW_Scrollbar(x + w + 4, y + 4, rowH * panelRows + 4, sP.listTop, sP.listCount, shown, &b);
     else if (sP.page == NATIVE_PNAV_CONDITION && sP.condSearch && sP.listCount > panelRows)
         UiW_Scrollbar(x + w + 4, y + 4, rowH * panelRows + 4, sP.listTop, sP.listCount, panelRows, &b);
@@ -869,6 +926,213 @@ static void Search(int t)
     }
 }
 
+/* ---------------------------------------------------------------- RIBBONS */
+
+static u8 *sRibbonArt;                    /* the game's big ribbon icons, decompressed on first use */
+
+struct RibbonBuild
+{
+    const u8 *tiles;
+    const u16 *palette;
+};
+
+static void BuildRibbon(struct UiBitmap *bm, const void *ctx)
+{
+    const struct RibbonBuild *r = ctx;
+
+    UiGfx_Decode4bpp(bm->d, bm->w, r->tiles, r->palette, 32, 32);
+}
+
+/* a ribbon: the game's own 32x32 icon (scale 2: the chosen one, on the screen) */
+static void RibbonIcon(u32 ribbonId, int x, int y, int scale)
+{
+    struct RibbonBuild r;
+    const u32 *art;
+    u32 index;
+    char key[24];
+
+    art = PokenavRibbons_NativeUiIconArt(ribbonId, &index, &r.palette);
+    if (art == NULL || index >= 12)
+        return;
+    if (sRibbonArt == NULL)
+    {
+        u32 size = GetDecompressedDataSize(art);
+
+        if (size < 12 * 512 || (sRibbonArt = calloc(size + 64, 1)) == NULL)
+            return;
+        DecompressDataWithHeaderWram(art, sRibbonArt);
+    }
+    r.tiles = sRibbonArt + index * 512;
+    snprintf(key, sizeof(key), "pnrib:%u", (unsigned)ribbonId);
+    UiG_BlitPart(UiG_Cached(key, 32, 32, BuildRibbon, &r), 0, 0, 32, 32, x, y, scale, false, 1.0);
+}
+
+/* the case's ribbon at a position (0: none there) */
+static int RibbonAt(int pos, bool *gift)
+{
+    *gift = pos >= sP.ribbonGiftStart;
+    if (!*gift)
+        return pos < sP.ribbonNormal ? sP.ribbonIds[pos] + 1 : 0;
+    return pos - sP.ribbonGiftStart < sP.ribbonGift ? sP.giftIds[pos - sP.ribbonGiftStart] + 1 : 0;
+}
+
+static void RibbonList(int t)
+{
+    struct UiRamp b = BlueRamp();
+    int lx = 24, ly = 58, lw = 276, rowH = 26;
+    int sx = 324, sy = 58, sw = 292, sh = NATIVE_PNAV_ROWS * 26 + 12;
+    int i = sP.listCursor - sP.listTop;
+
+    Title("RIBBONS");
+    MonList(t, lx, ly, lw, rowH, false);
+    Screen(sx, sy, sw, sh);
+    if (i >= 0 && i < sP.rowCount)
+    {
+        const struct NativePokenavRow *r = &sP.rows[i];
+        char line[24];
+
+        snprintf(line, sizeof(line), "%d / %d", sP.listCursor + 1, sP.listCount);
+        UiCaps_Draw(sx + sw - 12, sy + 10, line, UiMix(b.ink, PNAV_CYAN, 0.35), UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_RIGHT,
+                    UI_NONE);
+        UiG_Paint(UiM_Circle(120), sx + (sw >> 1) - 60, sy + 20, UiMix(PNAV_CYAN, UI_HEX(0xFFFFFF), 0.8),
+                  &(struct UiPaint){UiMix(b.lo, PNAV_CYAN, 0.4), UI_NONE, UI_NONE, 0, 0, NULL, UI_NONE});
+        if (sMonPicReady)
+            UiGfx_MonPic(r->species, r->personality, r->shiny, r->egg, 0, sx + (sw >> 1), sy + 128, NULL);
+        UiText_Draw(UI_FONT_NORMAL, sx + (sw >> 1), sy + 148, r->name, b.ink, UiMix(PNAV_CYAN, UI_HEX(0xFFFFFF), 0.3),
+                    UI_ALIGN_CENTER, 0);
+        snprintf(line, sizeof(line), "RIBBONS %d", r->value);
+        Rosette(sx + (sw >> 1) - 36, sy + 170);
+        UiCaps_Draw(sx + (sw >> 1) - 24, sy + 172, line, b.ink, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
+    }
+    {
+        struct UiHintItem items[] = {{UI_ACT_CONFIRM, sText_Ribbons}, {UI_ACT_SCROLL, sText_Pokemon},
+                                     {UI_ACT_CANCEL, sText_Back}};
+
+        Hints(items, 3);
+    }
+}
+
+/* a Pokemon's ribbons: its card, the chosen ribbon on the screen, the case (the game's rows, its gift row apart) */
+static void Ribbons(int t)
+{
+    struct UiRamp b = BlueRamp();
+    int cx = 24, cy = 58, cw = 276, ch = 84;
+    int sx = 324, sy = 58, sw = 292, sh = 84;
+    int kx = 24, ky = 150, kw = 592, kh = 144;
+    int per = sP.ribbonPerRow > 0 ? sP.ribbonPerRow : 9, pitch = 64, x0 = kx + ((kw - per * pitch) >> 1);
+    int giftRow = sP.ribbonGiftStart / per;
+    char line[32];
+    bool gift;
+    int chosen = RibbonAt(sP.ribbonPos, &gift);
+
+    Title("RIBBONS");
+    /* the Pokemon: its picture, name, level, where it is, its ribbons; which of the list it is */
+    UiG_Paint(UiM_Rounded4(cw, ch, 4, 4, 4, 4), cx, cy, UI_P_CREAM,
+              &(struct UiPaint){b.ink, UI_P_CREAM_HI, UI_P_CREAM_LO, 0, 0, NULL, UI_NONE});
+    UiG_Paint(UiM_Rounded4(72, 72, 3, 3, 3, 3), cx + 6, cy + 6, UiMix(PNAV_CYAN, UI_HEX(0xFFFFFF), 0.85),
+              &(struct UiPaint){UiMix(b.lo, PNAV_CYAN, 0.4), UI_NONE, UI_NONE, 0, 0, NULL, UI_NONE});
+    if (sMonPicReady)
+    {
+        UiG_Save();
+        UiG_Clip(cx + 7, cy + 7, 70, 70);
+        UiGfx_MonPic(sP.cond.species, sP.cond.personality, sP.condShiny, sP.cond.egg, 0, cx + 42, cy + 76, NULL);
+        UiG_Restore();
+    }
+    UiText_Draw(UI_FONT_NORMAL, cx + 88, cy + 8, sP.cond.name, UI_P_TEXT, UI_P_TEXT_SH, UI_ALIGN_LEFT, 0);
+    {
+        u8 lv[16];
+
+        UiMon_LevelText(lv, sizeof(lv), sP.cond.level);
+        UiText_Draw(UI_FONT_SMALL, cx + 88, cy + 27, lv, UI_P_TEXT_MUTED, UI_NONE, UI_ALIGN_LEFT, 0);
+        UiW_Gender(cx + 122, cy + 28, sP.cond.gender == MON_MALE ? 0 : sP.cond.gender == MON_FEMALE ? 1 : 2);
+        if (sP.condShiny)
+            UiMon_Star(cx + 138, cy + 28);
+    }
+    UiText_Draw(UI_FONT_SMALL, cx + 88, cy + 41, sWhere, UI_P_TEXT_MUTED, UI_NONE, UI_ALIGN_LEFT, 0);
+    snprintf(line, sizeof(line), "RIBBONS %d", sP.ribbonTotal);
+    Rosette(cx + 88, cy + 60);
+    UiCaps_Draw(cx + 100, cy + 62, line, UI_P_TEXT, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_LEFT, UI_NONE);
+    snprintf(line, sizeof(line), "%d / %d", sP.listCursor + 1, sP.listCount);
+    UiCaps_Draw(cx + cw - 12, cy + 10, line, UI_P_TEXT_MUTED, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_RIGHT, UI_NONE);
+    if (sP.listCount > 1 && !sP.ribbonExpanded)
+    {
+        /* the game's UP and DOWN: the list's Pokemon before and after */
+        if (sP.listCursor > 0)
+        {
+            UiW_DownArrow(cx + cw - 22, cy + 30 - ((t / 16) % 2), UI_P_TEXT, true);
+            UiG_Hit(HIT_MON_STEP, 0, cx + cw - 30, cy + 24, 24, 18);
+        }
+        if (sP.listCursor + 1 < sP.listCount)
+        {
+            UiW_DownArrow(cx + cw - 22, cy + 62 + ((t / 16) % 2), UI_P_TEXT, false);
+            UiG_Hit(HIT_MON_STEP, 1, cx + cw - 30, cy + 56, 24, 18);
+        }
+    }
+    /* the chosen ribbon, larger, and its words (the case's count until one is chosen) */
+    Screen(sx, sy, sw, sh);
+    if (sP.ribbonExpanded && chosen > 0)
+    {
+        RibbonIcon(chosen - 1, sx + 10, sy + 10, 2);
+        for (int k = 0; k < 2; k++)
+            if (sP.ribbonDesc[k] != NULL)
+                UiText_Draw(UI_FONT_NORMAL, sx + 84, sy + 20 + k * 20, sP.ribbonDesc[k], b.ink,
+                            UiMix(PNAV_CYAN, UI_HEX(0xFFFFFF), 0.3), UI_ALIGN_LEFT, 0);
+    }
+    else
+    {
+        snprintf(line, sizeof(line), "RIBBONS %d", sP.ribbonTotal);
+        UiCaps_Draw(sx + (sw >> 1), sy + 26, line, b.ink, UI_NONE, UI_CAPS_PLAIN, UI_ALIGN_CENTER, UI_NONE);
+        UiCaps_Draw(sx + (sw >> 1), sy + 48, "CHOOSE ONE TO READ ABOUT IT", UiMix(b.ink, PNAV_CYAN, 0.35), UI_NONE,
+                    UI_CAPS_PLAIN, UI_ALIGN_CENTER, UI_NONE);
+    }
+    /* the case: its slots, the ribbons in them, the cursor while one is chosen */
+    UiG_Paint(UiM_Rounded4(kw, kh, 4, 4, 4, 4), kx, ky, UI_P_CREAM,
+              &(struct UiPaint){b.ink, UI_P_CREAM_HI, UI_P_CREAM_LO, 0, 0, NULL, UI_NONE});
+    UiG_HLine(kx + 10, ky + 6 + giftRow * 34 - 2, kw - 20, UiMix(UI_P_CREAM_LO, b.ink, 0.2));
+    for (int pos = 0; pos < sP.ribbonGiftStart + NUM_GIFT_RIBBONS; pos++)
+    {
+        int row = pos / per, col = pos % per;
+        int px = x0 + col * pitch + ((pitch - 40) >> 1), py = ky + 6 + row * 34;
+        int ribbon;
+        bool on = sP.ribbonExpanded && pos == sP.ribbonPos;
+        const struct UiMask *slot = UiM_Rounded4(40, 32, 3, 3, 3, 3);
+
+        if (pos >= FIRST_GIFT_RIBBON && pos < sP.ribbonGiftStart)
+            continue;   /* the last normal row's end: the game has no slots there */
+        ribbon = RibbonAt(pos, &gift);
+        if (on)
+        {
+            UiW_SelectFrame(slot, px, py, UI_NONE, UI_NONE, 2);
+            UiG_Paint(slot, px, py, UiMix(PNAV_CYAN, UI_HEX(0xFFFFFF), 0.7),
+                      &(struct UiPaint){UI_NONE, UI_HEX(0xF0FFFF), UiMix(PNAV_CYAN, b.lo, 0.3), 0, 0, NULL, UI_NONE});
+        }
+        else
+        {
+            UiG_Mask(slot, px, py, UiMix(UI_P_CREAM, UI_P_CREAM_LO, ribbon > 0 ? 0.35 : 0.6));
+        }
+        if (ribbon > 0)
+        {
+            RibbonIcon(ribbon - 1, px + 4, py + (on && (t / 16) % 2 ? -1 : 0), 1);
+            UiG_Hit(HIT_RIBBON, pos, px, py, 40, 32);
+        }
+    }
+    {
+        struct UiHintItem browse[] = {{UI_ACT_CONFIRM, sText_Ribbon}, {UI_ACT_SCROLL, sText_Pokemon},
+                                      {UI_ACT_CANCEL, sText_Back}};
+        struct UiHintItem chosenHints[] = {{UI_ACT_MOVE, sText_Ribbon}, {UI_ACT_CANCEL, sText_Back}};
+
+        if (sP.ribbonExpanded)
+            Hints(chosenHints, 2);
+        else if (sP.listCount > 1)
+            Hints(browse, 3);
+        else
+        {
+            browse[1] = browse[2];
+            Hints(browse, 2);
+        }
+    }
+}
+
 /* ---------------------------------------------------------------- the screen */
 
 static void Draw(int t)
@@ -888,52 +1152,166 @@ static void Draw(int t)
     case NATIVE_PNAV_SEARCH:
         Search(t);
         break;
+    case NATIVE_PNAV_RIBBON_LIST:
+        RibbonList(t);
+        break;
+    case NATIVE_PNAV_RIBBONS:
+        Ribbons(t);
+        break;
     }
     UiG_Veil(NativeUi_ScreenFade());
+}
+
+/* the game's ribbon cursor (pokenav_ribbons_summary.c TrySelectRibbon*): where a press takes it */
+static int RibbonMove(int pos, uint16_t key)
+{
+    int per = sP.ribbonPerRow > 0 ? sP.ribbonPerRow : 9, normal = sP.ribbonNormal, gifts = sP.ribbonGift;
+    int lastRowStart = normal > 0 ? ((normal - 1) / per) * per : 0, col = pos % per;
+
+    switch (key)
+    {
+    case DPAD_UP:
+        if (pos < FIRST_GIFT_RIBBON)
+            return pos < per ? pos : pos - per;
+        if (normal == 0)
+            return pos;
+        pos = pos - sP.ribbonGiftStart + lastRowStart;
+        return pos >= normal ? normal - 1 : pos;
+    case DPAD_DOWN:
+        if (pos >= FIRST_GIFT_RIBBON)
+            return pos;
+        if (pos < lastRowStart)
+            return pos + per >= normal ? normal - 1 : pos + per;
+        if (gifts == 0)
+            return pos;
+        return (pos - lastRowStart >= gifts ? gifts - 1 : pos - lastRowStart) + sP.ribbonGiftStart;
+    case DPAD_LEFT:
+        return col != 0 ? pos - 1 : pos;
+    case DPAD_RIGHT:
+        if (col >= per - 1)
+            return pos;
+        if (pos < sP.ribbonGiftStart)
+            return pos < normal - 1 ? pos + 1 : pos;
+        return col < gifts - 1 ? pos + 1 : pos;
+    }
+    return pos;
+}
+
+/* the press that takes the ribbon cursor toward a position: rows first, then along the row (0: there, or stuck) */
+static uint16_t RibbonKey(int from, int to)
+{
+    int per = sP.ribbonPerRow > 0 ? sP.ribbonPerRow : 9;
+    int fromRow = from >= FIRST_GIFT_RIBBON ? 100 : from / per, toRow = to >= FIRST_GIFT_RIBBON ? 100 : to / per;
+    uint16_t key;
+
+    if (toRow != fromRow)
+        key = toRow > fromRow ? DPAD_DOWN : DPAD_UP;
+    else if (to % per != from % per)
+        key = to % per > from % per ? DPAD_RIGHT : DPAD_LEFT;
+    else
+        return 0;
+    return RibbonMove(from, key) != from ? key : 0;
+}
+
+/* the goal's next press, once the game reads buttons again */
+static void StepGoal(void)
+{
+    int cursor = 0, count = 0, moves;
+    uint16_t key = 0;
+
+    if (sGoal.kind == GOAL_NONE)
+        return;
+    if (sP.page != sGoal.page || sGoal.presses > 48
+     || (sGoal.kind == GOAL_LIST && sP.page == NATIVE_PNAV_MATCH_CALL && sP.mcState != NATIVE_PNAV_MC_LIST)
+     || (sGoal.kind == GOAL_OPTION && sP.mcState != NATIVE_PNAV_MC_OPTIONS)
+     || (sGoal.kind == GOAL_MARK && !sP.condMarking))
+    {
+        sGoal.kind = GOAL_NONE;
+        return;
+    }
+    if (sP.busy || NativeUi_PressesPending() || (sGoal.kind == GOAL_MENU && !sP.menuInput))
+        return;
+    switch (sGoal.kind)
+    {
+    case GOAL_MENU:
+        cursor = sP.menuCursor;
+        count = sP.menuCount;
+        break;
+    case GOAL_LIST:
+        cursor = sP.listCursor;
+        break;
+    case GOAL_OPTION:
+        cursor = sP.mcOptionCursor;
+        break;
+    case GOAL_MARK:
+        cursor = sP.condMarkCursor;
+        count = 6;
+        break;
+    case GOAL_RIBBON:
+        /* A chooses a ribbon first; then the cursor moves over the case */
+        if (!sP.ribbonExpanded)
+            key = A_BUTTON;
+        else if ((key = RibbonKey(sP.ribbonPos, sGoal.target)) == 0)
+        {
+            sGoal.kind = GOAL_NONE;
+            return;
+        }
+        NativeUi_QueuePress(key);
+        sGoal.presses++;
+        return;
+    }
+    moves = sGoal.target - cursor;
+    /* a menu that wraps: the shorter way round */
+    if (count > 0 && moves > count / 2)
+        moves -= count;
+    else if (count > 0 && moves < -count / 2)
+        moves += count;
+    if (moves == 0)
+    {
+        if (sGoal.thenA)
+            NativeUi_QueuePress(A_BUTTON);
+        sGoal.kind = GOAL_NONE;
+        return;
+    }
+    NativeUi_QueuePress(moves > 0 ? DPAD_DOWN : DPAD_UP);
+    sGoal.presses++;
+}
+
+static void SetGoal(int kind, int target, bool thenA)
+{
+    sGoal.kind = kind;
+    sGoal.page = sP.page;
+    sGoal.target = target;
+    sGoal.thenA = thenA;
+    sGoal.presses = 0;
+    StepGoal();
 }
 
 static bool Click(const struct UiHit *hit, int button)
 {
     if (button == 3)
     {
+        sGoal.kind = GOAL_NONE;
         NativeUi_QueuePress(B_BUTTON);
         return true;
     }
-    if (button != 1 || NativeUi_PressesPending() || sP.busy)
+    if (button != 1 || NativeUi_PressesPending() || sP.busy || sGoal.kind != GOAL_NONE)
         return button == 1;
     if (sP.page == NATIVE_PNAV_MENU && hit->id == HIT_MENU_ITEM && sP.menuInput)
     {
-        int moves = hit->index - sP.menuCursor;
-
-        /* the game's menu wraps: the shorter way round */
-        if (moves > sP.menuCount / 2)
-            moves -= sP.menuCount;
-        else if (moves < -sP.menuCount / 2)
-            moves += sP.menuCount;
-        if (moves != 0)
-            NativeUi_QueuePresses(moves > 0 ? DPAD_DOWN : DPAD_UP, abs(moves));
-        NativeUi_QueuePress(A_BUTTON);
+        SetGoal(GOAL_MENU, hit->index, true);
         return true;
     }
     if (sP.page == NATIVE_PNAV_MATCH_CALL)
     {
         if (hit->id == HIT_LIST_ROW && sP.mcState == NATIVE_PNAV_MC_LIST)
         {
-            int moves = hit->index - sP.listCursor;
-
-            if (moves != 0)
-                NativeUi_QueuePresses(moves > 0 ? DPAD_DOWN : DPAD_UP, abs(moves));
-            else
-                NativeUi_QueuePress(A_BUTTON);
+            SetGoal(GOAL_LIST, hit->index, hit->index == sP.listCursor);
             return true;
         }
         if (hit->id == HIT_OPTION && sP.mcState == NATIVE_PNAV_MC_OPTIONS)
         {
-            int moves = hit->index - sP.mcOptionCursor;
-
-            if (moves != 0)
-                NativeUi_QueuePresses(moves > 0 ? DPAD_DOWN : DPAD_UP, abs(moves));
-            NativeUi_QueuePress(A_BUTTON);
+            SetGoal(GOAL_OPTION, hit->index, true);
             return true;
         }
         if (hit->id == HIT_MESSAGE && sP.mcState == NATIVE_PNAV_MC_CALL && (sMsgWaiting || (!sMsgPrinting && !sP.busy)))
@@ -942,17 +1320,29 @@ static bool Click(const struct UiHit *hit, int button)
             return true;
         }
     }
-    if ((sP.page == NATIVE_PNAV_CONDITION && !sP.condMarking) || sP.page == NATIVE_PNAV_SEARCH)
+    if (sP.page == NATIVE_PNAV_CONDITION && sP.condMarking && hit->id == HIT_MARK)
     {
-        if (hit->id == HIT_MON_ROW)
+        SetGoal(GOAL_MARK, hit->index, true);
+        return true;
+    }
+    if (((sP.page == NATIVE_PNAV_CONDITION && !sP.condMarking) || sP.page == NATIVE_PNAV_SEARCH
+         || sP.page == NATIVE_PNAV_RIBBON_LIST) && hit->id == HIT_MON_ROW)
+    {
+        /* the cursor to the row; on it, what A does there (the party's condition page reads A only on CANCEL) */
+        SetGoal(GOAL_LIST, hit->index,
+                hit->index == sP.listCursor && (sP.page != NATIVE_PNAV_CONDITION || sP.condSearch || sP.condCancel));
+        return true;
+    }
+    if (sP.page == NATIVE_PNAV_RIBBONS)
+    {
+        if (hit->id == HIT_RIBBON)
         {
-            int moves = hit->index - sP.listCursor;
-
-            /* the condition page moves a Pokemon at a time (and wraps); the search list as a list */
-            if (moves != 0)
-                NativeUi_QueuePresses(moves > 0 ? DPAD_DOWN : DPAD_UP, abs(moves));
-            else if (sP.page == NATIVE_PNAV_SEARCH || sP.condSearch || sP.condCancel)
-                NativeUi_QueuePress(A_BUTTON);
+            SetGoal(GOAL_RIBBON, hit->index, false);
+            return true;
+        }
+        if (hit->id == HIT_MON_STEP && !sP.ribbonExpanded)
+        {
+            NativeUi_QueuePress(hit->index == 0 ? DPAD_UP : DPAD_DOWN);
             return true;
         }
     }
