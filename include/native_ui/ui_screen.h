@@ -115,6 +115,7 @@ extern const struct UiScreen gUiScreen_Customize;
 extern const struct UiScreen gUiScreen_Players;
 extern const struct UiScreen gUiScreen_TrainerCard;
 extern const struct UiScreen gUiScreen_Mail;
+extern const struct UiScreen gUiScreen_EasyChat;
 extern const struct UiScreen gUiScreen_Shop;
 extern const struct UiScreen gUiScreen_Naming;
 extern const struct UiScreen gUiScreen_Starters;

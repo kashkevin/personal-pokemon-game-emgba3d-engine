@@ -5845,3 +5845,118 @@ int DioramaBattleEnvTest_EasyChatState(void)
     return sEasyChatScreen->inputState == INPUTSTATE_EXIT_PROMPT ? 1 : 0;
 }
 #endif
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+_Static_assert(NATIVE_EC_GROUPS == EC_NUM_GROUPS, "the native UI keeps every unlocked group");
+_Static_assert(NATIVE_EC_PHRASE_MAX == ARRAY_COUNT(((struct EasyChatScreen *)NULL)->currentPhrase), "the phrase");
+_Static_assert(NATIVE_EC_SHOWN_WORDS == NUM_WORD_SELECT_ROWS * NUM_WORD_SELECT_COLUMNS, "the word list shown");
+
+// The native UI (src/native_ui/screens/ui_easy_chat.c) draws Easy Chat over this screen from what it holds: the words
+// being edited and the main cursor, the footer, the message PrintEasyChatStdMessage shows now and its YES / NO, the
+// keyboard (the unlocked groups or A-Z) and a group's words with their cursors and scroll, and whether the main task
+// reads buttons. Every button stays here.
+bool32 EasyChat_NativeUiState(struct NativeEasyChat *out)
+{
+    u8 taskId = FindTaskIdByFunc(Task_EasyChatScreen);
+    u32 i, footerId;
+    const u8 *text1 = NULL, *text2 = NULL;
+
+    if (gMain.callback2 != CB2_EasyChatScreen || sEasyChatScreen == NULL || sScreenControl == NULL
+     || sWordData == NULL || taskId == TASK_NONE)
+        return FALSE;
+    memset(out, 0, sizeof(*out));
+    out->ready = gTasks[taskId].data[0] == MAINSTATE_HANDLE_INPUT && !gPaletteFade.active;
+    out->inputState = sEasyChatScreen->inputState;
+    out->type = sEasyChatScreen->type;
+    out->frameId = GetEasyChatScreenFrameId();
+    out->numColumns = sEasyChatScreen->numColumns;
+    out->numRows = sEasyChatScreen->numRows;
+    out->cursorColumn = sEasyChatScreen->mainCursorColumn;
+    out->cursorRow = sEasyChatScreen->mainCursorRow;
+    footerId = sPhraseFrameDimensions[out->frameId].footerId;
+    if (footerId < NUM_FOOTER_TYPES)
+    {
+        out->footerCount = FooterHasFourOptions() ? 4 : 3;
+        for (i = 0; i < out->footerCount; i++)
+            out->footer[i] = sFooterTextOptions[footerId][i];
+    }
+    out->wordCount = sEasyChatScreen->maxWords;
+    for (i = 0; i < out->wordCount && i < NATIVE_EC_PHRASE_MAX; i++)
+        out->words[i] = sEasyChatScreen->currentPhrase[i];
+    out->title = GetTitleText();
+
+    // the message as PrintEasyChatStdMessage printed it last
+    switch (sEasyChatScreen->inputState)
+    {
+    case INPUTSTATE_EXIT_PROMPT:
+        GetEasyChatConfirmExitText(&text1, &text2);
+        break;
+    case INPUTSTATE_CONFIRM_WORDS_YES_NO:
+        GetEasyChatConfirmText(&text1, &text2);
+        break;
+    case INPUTSTATE_DELETE_ALL_YES_NO:
+        GetEasyChatConfirmDeletionText(&text1, &text2);
+        break;
+    case INPUTSTATE_WAIT_FOR_MSG:
+        switch (sScreenControl->currentFuncId)
+        {
+        case ECFUNC_MSG_CREATE_QUIZ:
+            text1 = gText_CreateAQuiz;
+            break;
+        case ECFUNC_MSG_SELECT_ANSWER:
+            text1 = gText_SelectTheAnswer;
+            break;
+        case ECFUNC_MSG_SONG_TOO_SHORT:
+            text1 = gText_OnlyOnePhrase;
+            text2 = gText_OriginalSongWillBeUsed;
+            break;
+        case ECFUNC_MSG_CANT_DELETE_LYRICS:
+            text1 = gText_LyricsCantBeDeleted;
+            break;
+        case ECFUNC_MSG_COMBINE_TWO_WORDS:
+            text1 = gText_CombineTwoWordsOrPhrases3;
+            break;
+        case ECFUNC_MSG_CANT_EXIT:
+            text1 = gText_YouCannotQuitHere;
+            text2 = gText_SectionMustBeCompleted;
+            break;
+        default:
+            GetEasyChatInstructionsText(&text1, &text2);
+            break;
+        }
+        break;
+    default:
+        GetEasyChatInstructionsText(&text1, &text2);
+        break;
+    }
+    out->message[0] = text1;
+    out->message[1] = text2;
+    out->yesNo = sEasyChatScreen->inputState == INPUTSTATE_EXIT_PROMPT
+              || sEasyChatScreen->inputState == INPUTSTATE_CONFIRM_WORDS_YES_NO
+              || sEasyChatScreen->inputState == INPUTSTATE_DELETE_ALL_YES_NO
+              || sEasyChatScreen->inputState == INPUTSTATE_CONFIRM_LYRICS_YES_NO;
+    if (out->yesNo)
+        out->yesNoCursor = Menu_GetCursorPos();
+
+    out->alphabet = sEasyChatScreen->inAlphabetMode;
+    out->keyboardColumn = sEasyChatScreen->keyboardColumn;
+    out->keyboardRow = sEasyChatScreen->keyboardRow;
+    out->keyboardScroll = sEasyChatScreen->keyboardScrollOffset;
+    out->groupCount = sWordData->numUnlockedGroups;
+    for (i = 0; i < out->groupCount && i < NATIVE_EC_GROUPS; i++)
+    {
+        out->groups[i] = sWordData->unlockedGroupIds[i];
+        out->groupNames[i] = GetEasyChatWordGroupName(out->groups[i]);
+    }
+    out->groupWordCount = sWordData->numSelectedGroupWords;
+    out->wordScroll = sEasyChatScreen->wordSelectScrollOffset;
+    out->wordLastRow = sEasyChatScreen->wordSelectLastRow;
+    out->wordColumn = sEasyChatScreen->wordSelectColumn;
+    out->wordRow = sEasyChatScreen->wordSelectRow;
+    for (i = 0; i < NATIVE_EC_SHOWN_WORDS; i++)
+        out->shownWords[i] = GetWordFromSelectedGroup(out->wordScroll * NUM_WORD_SELECT_COLUMNS + i);
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

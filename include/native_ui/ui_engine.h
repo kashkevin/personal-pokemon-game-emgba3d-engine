@@ -966,6 +966,41 @@ struct NativeMail
     s16 iconX, iconY;                /* the icon's centre */
 };
 bool32 Mail_NativeUiState(struct NativeMail *out);
+/* Easy Chat (easy_chat.c) while its screen is up: the words being edited and every part of the screen as the engine
+ * has it. inputState is the screen's own (0 a word, 1 the footer, 2 the keyboard, 3 a group's words, 4 quit?,
+ * 5 delete all?, 6 confirm?, 7 a quiz's question, 8 a message, 9 and 10 the Bard's lyrics) */
+#define NATIVE_EC_PHRASE_MAX 9
+#define NATIVE_EC_GROUPS 22
+#define NATIVE_EC_SHOWN_WORDS 8
+struct NativeEasyChat
+{
+    bool8 ready;                     /* the engine reads buttons now (no window moving, no fade) */
+    u8 inputState;
+    u8 type;                         /* EASY_CHAT_TYPE_* */
+    u8 frameId;
+    u8 numColumns, numRows;
+    s8 cursorColumn, cursorRow;      /* the main cursor; cursorRow == numRows: the footer */
+    u8 footerCount;
+    const u8 *footer[4];             /* DEL. ALL, CANCEL, OK and a quiz's QUIZ or ANSWER */
+    u8 wordCount;
+    u16 words[NATIVE_EC_PHRASE_MAX]; /* EC_EMPTY_WORD: a blank */
+    const u8 *title;
+    const u8 *message[2];
+    bool8 yesNo;                     /* a question's YES / NO is up */
+    u8 yesNoCursor;
+    /* the lower window: the keyboard (the unlocked groups, or A-Z) or a group's words */
+    bool8 alphabet;
+    s8 keyboardColumn, keyboardRow;  /* column -1: the buttons (0 the mode, 1 DEL., 2 CANCEL); the row on screen */
+    u8 keyboardScroll;               /* the group names' first row shown */
+    u8 groupCount;
+    u8 groups[NATIVE_EC_GROUPS];
+    const u8 *groupNames[NATIVE_EC_GROUPS];
+    u16 groupWordCount;
+    u8 wordScroll, wordLastRow;      /* a group's words: the first row shown, the last row */
+    s8 wordColumn, wordRow;          /* the cursor, its row on screen */
+    u16 shownWords[NATIVE_EC_SHOWN_WORDS]; /* the four rows shown, two a row (EC_EMPTY_WORD: none) */
+};
+bool32 EasyChat_NativeUiState(struct NativeEasyChat *out);
 /* the coin box (showcoinsbox) is up */
 bool32 Coins_NativeUiBoxShown(void);
 /* the coin box's window while it is up (WINDOW_NONE: not up) */
