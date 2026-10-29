@@ -72,6 +72,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_PokeblockCase, /* the Pokéblock case */
     &gUiScreen_UsePokeblock, /* the Pokéblock's condition menu: who gets it, what it enhanced */
     &gUiScreen_PokeblockFeed, /* a Pokémon eating a Pokéblock: the scene's line */
+    &gUiScreen_Contest,      /* a contest's appeals: the panels, the announcer, the moves over the stage */
     &gUiScreen_Shop,
     &gUiScreen_Naming,
     &gUiScreen_Starters,
@@ -383,6 +384,10 @@ void NativeUi_CaptureFrame(void)
     case UI_PICTURE_HIDE_BG012:
         sPictureFlags = NATIVE_UI_HIDE_UI_LAYER;
         gPlatformPictureHideBgMask = (1 << 0) | (1 << 1) | (1 << 2);
+        break;
+    case UI_PICTURE_HIDE_BG02:
+        sPictureFlags = NATIVE_UI_HIDE_UI_LAYER;
+        gPlatformPictureHideBgMask = (1 << 0) | (1 << 2);
         break;
     default:
         sPictureFlags = 0;

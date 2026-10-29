@@ -68,6 +68,8 @@
 #include "constants/maps.h"
 #include "constants/script_commands.h"
 #include "constants/event_objects.h"
+#include "constants/contest.h"
+#include "contest.h"
 #include "constants/trainer_types.h"
 #include "field_message_box.h"
 #include "field_player_avatar.h"
@@ -1204,6 +1206,30 @@ static void OpenTestPokeblockCase(void)
     }
     TestLog("Battle env test: the Pokéblock case with %u test blocks", n);
     OpenPokeblockCase(PBLOCK_CASE_FIELD, CB2_ReturnToField);
+}
+
+void TryEnterContestMon(void);        /* contest_util.c: script specials (no header declares them) */
+void SetContestTrainerGfxIds(void);
+
+/* CONTEST: a Normal Rank Cool contest entered with the party's first Pokémon as the Contest Lobby's receptionist
+ * enters one (TryEnterContestMon: the other contestants and round one), then into the Cool contest hall as the walk
+ * from the lobby ends (the contestants' and the player's pictures, VAR_CONTEST_HALL_STATE 1: the hall runs the whole
+ * contest - the appeals, the results) - the native contest screens' checks */
+static void EnterTestContest(void)
+{
+    gSpecialVar_ContestCategory = CONTEST_CATEGORY_COOL;
+    gSpecialVar_ContestRank = CONTEST_RANK_NORMAL;
+    VarSet(VAR_CONTEST_TYPE, CONTEST_TYPE_NPC_NORMAL);
+    gContestMonPartyIndex = 0;
+    TryEnterContestMon();
+    TestLog("Battle env test: a Normal Rank Cool contest entered (eligibility %u)", gSpecialVar_Result);
+    SetContestTrainerGfxIds();
+    VarSet(VAR_OBJ_GFX_ID_3, gSaveBlock2Ptr->playerGender == MALE ? OBJ_EVENT_GFX_RIVAL_BRENDAN_NORMAL
+                                                                   : OBJ_EVENT_GFX_RIVAL_MAY_NORMAL);
+    VarSet(VAR_CONTEST_HALL_STATE, 1);
+    FlagSet(FLAG_ENTERED_CONTEST);
+    SetWarpDestination(MAP_GROUP(MAP_CONTEST_HALL_COOL), MAP_NUM(MAP_CONTEST_HALL_COOL), WARP_ID_NONE, 7, 5);
+    DoContestHallWarp();
 }
 
 /* HOFPC: the test party saved as the Hall of Fame's one record (into the run's own copy of the save), then the Hall
@@ -3863,7 +3889,8 @@ bool16 ScriptMenu_CreateStartMenuForPokenavTutorial(void);  /* script_menu.c: th
 /* a field key script's event at a frame (a name KeysAt does not know): NAVTUTOR opens the PokéNav as Rustboro's
    scientist does (its tutorial: MATCH CALL, Mr. Stone's call), NAVMENU his START menu first (only POKéNAV goes on)
    - the PokéNav tutorial's checks; HOF the Hall of Fame with the test party (not saved), HOFPC its PC with the test
-   party as its one record; PBLOCK the Pokéblock case with PKMN_TEST_POKEBLOCKS' blocks */
+   party as its one record; PBLOCK the Pokéblock case with PKMN_TEST_POKEBLOCKS' blocks; CONTEST a Normal Rank Cool
+   contest with the party's first Pokémon */
 static bool FieldEventAt(const char *script, const char *event, int frame)
 {
     const char *p = script;
@@ -4383,6 +4410,8 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
             OpenTestHallOfFamePc();
         if (FieldEventAt(s.fieldKeys, "PBLOCK", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
             OpenTestPokeblockCase();
+        if (FieldEventAt(s.fieldKeys, "CONTEST", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
+            EnterTestContest();
         if (FieldEventAt(s.fieldKeys, "HOF", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
         {
             TestLog("Battle env test: the Hall of Fame (the team not saved)");

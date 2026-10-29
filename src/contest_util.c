@@ -2686,3 +2686,43 @@ bool8 IsWirelessContest(void)
     else
         return FALSE;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native field text screen (src/native_ui/screens/ui_field_text.c) draws the contest hall's entry picture
+// (ShowContestEntryMonPic: "Entry No. 1! ...") as it draws a script's picture box: while its window is up (the task's
+// state 2; 3 and 4 take it down), the contestant's Pokémon as its picture shows it.
+bool32 ContestUtil_NativeUiEntryPic(struct NativeScriptPic *out)
+{
+    u8 taskId = FindTaskIdByFunc(Task_ShowContestEntryMonPic);
+    u8 spriteId, windowId;
+    u32 i;
+
+    if (taskId == TASK_NONE || gTasks[taskId].data[0] != 2)
+        return FALSE;
+    spriteId = gTasks[taskId].data[2];
+    windowId = gTasks[taskId].data[5];
+    if (windowId >= WINDOWS_MAX)
+        return FALSE;
+    out->species = gTasks[taskId].data[1];
+    out->personality = 0;
+    out->shiny = FALSE;
+    // the contestant ShowContestEntryMonPic showed (gSpecialVar_0x8006 until the script moves on), else the first
+    // with this species
+    i = gSpecialVar_0x8006;
+    if (i >= CONTESTANT_COUNT || gContestMons[i].species != out->species)
+        for (i = 0; i < CONTESTANT_COUNT && gContestMons[i].species != out->species; i++)
+            ;
+    if (i < CONTESTANT_COUNT)
+    {
+        out->personality = gContestMons[i].personality;
+        out->shiny = gContestMons[i].isShiny;
+    }
+    out->windowId = windowId;
+    out->left = gWindows[windowId].window.tilemapLeft;
+    out->top = gWindows[windowId].window.tilemapTop;
+    out->tileNum = spriteId < MAX_SPRITES ? gSprites[spriteId].oam.tileNum : 0xFFFF;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

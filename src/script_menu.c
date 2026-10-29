@@ -1412,6 +1412,8 @@ bool32 ScriptMenu_NativeUiPokemonPic(struct NativeScriptPic *out)
         return FALSE;
     spriteId = gTasks[taskId].data[2];
     out->species = gTasks[taskId].data[1];
+    out->personality = 0x8000; // as CreateMonSprite_PicBox makes it: not shiny
+    out->shiny = FALSE;
     out->windowId = gTasks[taskId].data[5];
     out->left = gWindows[out->windowId].window.tilemapLeft;
     out->top = gWindows[out->windowId].window.tilemapTop;

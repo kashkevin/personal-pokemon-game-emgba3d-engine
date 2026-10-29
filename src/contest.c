@@ -6146,3 +6146,107 @@ void StripPlayerAndMonNamesForLinkContest(struct ContestPokemon *mon, enum Langu
         name[PLAYER_NAME_LENGTH] = EOS;
     }
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native contest screen (src/native_ui/screens/ui_contest.c) draws the appeals' panels, the announcer's lines and
+// the move list in the new design over the game's stage. What each contestant's panel shows is read from the panel
+// itself, BG0's tilemap as DrawConditionStars, DrawStatusSymbol and Task_UpdateAppealHearts write it (a heart at a
+// time, as the game shows them), and its slider heart's place.
+bool32 Contest_NativeUiState(struct NativeContest *out)
+{
+    const u16 *map;
+    u32 i, k;
+
+    if (gMain.callback2 != CB2_ContestMain || gContestResources == NULL || gContestResources->contestBgTilemaps[0] == NULL)
+        return FALSE;
+    map = (const u16 *)gContestResources->contestBgTilemaps[0];
+    memset(out, 0, sizeof(*out));
+    out->appealNumber = eContest.appealNumber;
+    out->player = gContestPlayerMonIndex;
+    out->textWindow = WIN_GENERAL_TEXT;
+    for (i = 0; i < CONTESTANT_COUNT; i++)
+    {
+        struct NativeContestant *c = &out->mons[i];
+        u32 row = gContestantTurnOrder[i], base = row * 5 + 2;
+        u16 red = GetAppealHeartTileOffset(i), symbol;
+        u8 slider = eContestGfxState[i].sliderHeartSpriteId, tag = eContestGfxState[i].nextTurnSpriteId;
+
+        if (row >= CONTESTANT_COUNT)
+            return FALSE;
+        out->order[row] = i;
+        c->species = gContestMons[i].species;
+        c->nickname = gContestMons[i].nickname;
+        c->trainerName = gContestMons[i].trainerName;
+        // hearts: two lines of eight from column 22 (screen size 2: 32 tiles a row)
+        for (k = 0; k < 16; k++)
+        {
+            u16 tile = map[(base + k / 8) * 32 + 22 + k % 8];
+
+            if (tile == red)
+                c->hearts++;
+            else if (tile == red + 2)
+                c->hearts--;
+        }
+        for (k = 0; k < 3; k++)
+        {
+            if (map[(base + k) * 32 + 19] == GetStarTileOffset())
+                c->stars++;
+        }
+        symbol = map[base * 32 + 20];
+        if (symbol == GetStatusSymbolTileOffset(STAT_SYMBOL_CIRCLE))
+            c->status = NATIVE_CONTEST_STATUS_RESISTANT;
+        else if (symbol == GetStatusSymbolTileOffset(STAT_SYMBOL_WAVE))
+            c->status = NATIVE_CONTEST_STATUS_NERVOUS;
+        else if (symbol == GetStatusSymbolTileOffset(STAT_SYMBOL_X))
+            c->status = NATIVE_CONTEST_STATUS_SKIPPED;
+        else if (symbol == GetStatusSymbolTileOffset(STAT_SYMBOL_SWIRL))
+            c->status = NATIVE_CONTEST_STATUS_UNNERVED;
+        if (slider < MAX_SPRITES && gSprites[slider].inUse && !gSprites[slider].invisible)
+        {
+            c->sliderShown = TRUE;
+            c->slider = gSprites[slider].x2 < 0 ? 0 : gSprites[slider].x2 > 56 ? 56 : gSprites[slider].x2;
+        }
+        if (tag < MAX_SPRITES && gSprites[tag].inUse && !gSprites[tag].invisible)
+            c->nextTurn = eContestantStatus[i].turnOrderMod != 1 ? 5 : eContestantStatus[i].nextTurnOrder + 1;
+        c->attention = eContestantStatus[i].hasJudgesAttention;
+    }
+    // the player's move list (Task_ShowMoveSelectScreen's), or the question before it
+    if (eContest.mainTaskId < NUM_TASKS && gTasks[eContest.mainTaskId].isActive)
+    {
+        out->choosing = gTasks[eContest.mainTaskId].func == Task_HandleMoveSelectInput;
+        out->askMove = gTasks[eContest.mainTaskId].func == Task_TryShowMoveSelectScreen;
+    }
+    out->moveCursor = eContest.playerMoveChoice;
+    for (k = 0; k < MAX_MON_MOVES; k++)
+    {
+        enum Move move = gContestMons[gContestPlayerMonIndex].moves[k];
+
+        out->moves[k] = move;
+        if (move == MOVE_NONE)
+            continue;
+        out->moveCount++;
+        if (eContestantStatus[gContestPlayerMonIndex].prevMove != MOVE_NONE
+         && IsContestantAllowedToCombo(gContestPlayerMonIndex)
+         && AreMovesContestCombo(eContestantStatus[gContestPlayerMonIndex].prevMove, move)
+         && eContestantStatus[gContestPlayerMonIndex].hasJudgesAttention)
+            out->moveStyle[k] = NATIVE_CONTEST_MOVE_COMBO;
+        else if (eContestantStatus[gContestPlayerMonIndex].prevMove == move
+              && GetMoveContestEffect(move) != CONTEST_EFFECT_REPETITION_NOT_BORING)
+            out->moveStyle[k] = NATIVE_CONTEST_MOVE_REPEATED;
+    }
+    // the sheets as they are loaded (0xFFFF: not), each tag's own: the slider heart's (one tile), the next turn tags'
+    // (eight each) and the box blinks' (128 each)
+    out->hideTiles[0][0] = GetSpriteTileStartByTag(TAG_SLIDER_HEART);
+    out->hideTiles[0][1] = 1;
+    for (i = 0; i < CONTESTANT_COUNT; i++)
+    {
+        out->hideTiles[1 + i][0] = GetSpriteTileStartByTag(TAG_NEXT_TURN_1_GFX + i);
+        out->hideTiles[1 + i][1] = 8;
+        out->hideTiles[5 + i][0] = GetSpriteTileStartByTag(TAG_BLINK_EFFECT_CONTESTANT0 + i);
+        out->hideTiles[5 + i][1] = 128;
+    }
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

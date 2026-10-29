@@ -939,6 +939,57 @@ struct NativeEvolution
 };
 bool32 Evolution_NativeUiState(struct NativeEvolution *out);
 
+/* ---------------------------------------------------------------- contests (contest.c) */
+
+/* a contest's appeals (CB2_ContestMain): the contestants on the panel top to bottom (the turn order), and what each one's
+ * panel shows now, read from the panel itself (the game's own tilemap: this round's hearts as many as are drawn, red
+ * or black; the condition's stars; the status symbol), its score slider's place (0..56) and its next turn's tag; the
+ * announcer's window; the player's move list while it is up or the question before it */
+#define NATIVE_CONTESTANTS 4
+enum
+{
+    NATIVE_CONTEST_STATUS_NONE,
+    NATIVE_CONTEST_STATUS_RESISTANT,     /* the circle: not startled */
+    NATIVE_CONTEST_STATUS_NERVOUS,       /* the wave */
+    NATIVE_CONTEST_STATUS_SKIPPED,       /* the X: no turn */
+    NATIVE_CONTEST_STATUS_UNNERVED,      /* the swirl */
+};
+enum
+{
+    NATIVE_CONTEST_MOVE_PLAIN,
+    NATIVE_CONTEST_MOVE_COMBO,           /* it would make a combo: the game lightens it */
+    NATIVE_CONTEST_MOVE_REPEATED,        /* used last turn: the game greys it (the audience is bored by it) */
+};
+struct NativeContestant
+{
+    u16 species;
+    const u8 *nickname;
+    const u8 *trainerName;
+    s8 hearts;                           /* < 0: black hearts */
+    u8 stars;
+    u8 status;                           /* NATIVE_CONTEST_STATUS_* */
+    bool8 sliderShown;
+    u8 slider;
+    u8 nextTurn;                         /* 0: no tag; 1..4; 5: random ("?") */
+    bool8 attention;                     /* the judge's eye on it */
+};
+struct NativeContest
+{
+    u8 appealNumber;                     /* the round, 0..4 */
+    u8 player;
+    u8 order[NATIVE_CONTESTANTS];        /* the contestant on each panel row */
+    struct NativeContestant mons[NATIVE_CONTESTANTS];
+    u8 textWindow;
+    bool8 askMove;                       /* "Appeal no. N! Which move will be played?" waits for A */
+    bool8 choosing;                      /* the move list reads buttons */
+    u8 moveCursor;
+    u8 moveCount;
+    u16 moves[MAX_MON_MOVES];
+    u8 moveStyle[MAX_MON_MOVES];         /* NATIVE_CONTEST_MOVE_* */
+    u16 hideTiles[9][2];                 /* the panel's sprites (score hearts, next turn tags, box blinks): start, count */
+};
+bool32 Contest_NativeUiState(struct NativeContest *out);
+
 /* ---------------------------------------------------------------- script menus (script_menu.c), coins (coins.c) */
 
 #define NATIVE_SCRIPT_MENU_MAX 12
@@ -961,16 +1012,21 @@ struct NativeScriptMenu
 bool32 ScriptMenu_NativeUiState(struct NativeScriptMenu *out);
 /* the rows of any multichoice list as the engine prints them; returns how many */
 u32 ScriptMenu_NativeUiList(u32 multichoiceId, const u8 **labels, u32 max);
-/* the picture box a script shows (showmonpic) until hidemonpic closes it: the Pokémon, its window (the frame's inside,
- * 8 x 8 tiles from left, top) and the first tile of the picture's sprite (0xFFFF: none) */
+/* the picture box a script shows (showmonpic) until hidemonpic closes it: the Pokémon (its personality and whether
+ * shiny, as the picture shows it), its window (the frame's inside, 8 x 8 tiles from left, top) and the first tile of
+ * the picture's sprite (0xFFFF: none) */
 struct NativeScriptPic
 {
     u16 species;
+    u32 personality;
+    bool8 shiny;
     u8 windowId;
     u8 left, top;
     u16 tileNum;
 };
 bool32 ScriptMenu_NativeUiPokemonPic(struct NativeScriptPic *out);
+/* the contest hall's entry picture (contest_util.c: ShowContestEntryMonPic, "Entry No. 1!") while up, the same way */
+bool32 ContestUtil_NativeUiEntryPic(struct NativeScriptPic *out);
 /* the Lilycove elevator's "Now on" window beside its floors' menu (field_specials.c): its window and its two lines */
 bool32 FieldSpecials_NativeUiElevatorFloor(u8 *windowId, const u8 **nowOn, const u8 **floor);
 /* the windows a Battle Frontier counter shows beside its list and its questions, while up, else WINDOW_NONE: the

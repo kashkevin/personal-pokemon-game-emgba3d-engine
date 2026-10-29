@@ -12,8 +12,9 @@
  * game shows with its question (a vending machine, the Safari Zone's fee, a
  * roulette table's "Do you want to play?") are the design's money windows,
  * with the wallet as it is now. The picture box a script shows (showmonpic: a
- * Pokémon in a frame, Birch's Johto starters) is the design's box where the
- * script put it, with the Pokémon's own picture; the Lilycove elevator's "Now
+ * Pokémon in a frame, Birch's Johto starters) and the contest hall's entry
+ * pictures are the design's box where the game puts it, with the Pokémon's own
+ * picture; the Lilycove elevator's "Now
  * on" window beside its floors; the records a script shows and waits on (the
  * Pokémon Center 2F cable box's battle results, the Contest Lobby's Berry
  * Blender record, the Battle Frontier's results and Ranking Hall boards) in
@@ -100,9 +101,6 @@ static u32 sPoints, sPowder;
 static u8 sTutorText[UI_MESSAGE_COPY];
 static bool sTutorUp;
 
-/* the picture box's Pokémon as CreateMonSprite_PicBox makes it: not shiny, this personality */
-#define PIC_PERSONALITY 0x8000
-
 /* ---------------------------------------------------------------- shared with the PC's first menus */
 
 void UiField_MessageBox(int t, int L, int R, int B, const u8 *msg, int printed, bool waiting,
@@ -172,6 +170,12 @@ static int OtherWindows(u8 picture)
     return n;
 }
 
+/* the picture box a script shows, or the contest hall's entry picture */
+static bool PictureState(struct NativeScriptPic *pic)
+{
+    return ScriptMenu_NativeUiPokemonPic(pic) || ContestUtil_NativeUiEntryPic(pic);
+}
+
 /* the script's menu up now; else the shared YES / NO a game's own question uses (DoYesNoFuncWithChoice: a roulette
  * table's "Do you want to play?", an item's "Use it?"), which takes A, B and the cursor as a script's does */
 static void MenuState(struct NativeScriptMenu *m)
@@ -195,7 +199,7 @@ static bool Detect(void)
         return false;
     /* a message, or a picture box alone (before its question, after it), or the records a script waits on, or a
      * scrolling list */
-    picUp = ScriptMenu_NativeUiPokemonPic(&pic);
+    picUp = PictureState(&pic);
     if (!Window_NativeUiShown(0) && !picUp && RecordsWindow() == WINDOW_NONE && !FieldSpecials_NativeUiScrollMulti(&sm))
         return false;
     MenuState(&m);
@@ -261,7 +265,7 @@ static void Capture(void)
 
         sElevatorUp = FieldSpecials_NativeUiElevatorFloor(&window, &sElevatorLines[0], &sElevatorLines[1]);
     }
-    sPicUp = ScriptMenu_NativeUiPokemonPic(&sPic);
+    sPicUp = PictureState(&sPic);
     if (sPicUp)
     {
         uint32_t now = NativeUi_Frame();
@@ -270,7 +274,7 @@ static void Capture(void)
         if (now - sPicLast > 2)
             sPicAt = now;
         sPicLast = now;
-        UiGfx_PrepareMonPic(sPic.species, PIC_PERSONALITY, false, false);
+        UiGfx_PrepareMonPic(sPic.species, sPic.personality, sPic.shiny, false);
     }
 }
 
@@ -290,6 +294,7 @@ static void PictureBox(int bx, int by, int bw, int bh)
     int x = bx + (sPic.left * 8 + 32) * bw / DISPLAY_WIDTH - (w >> 1), y = by + (sPic.top * 8 - 8) * bh / DISPLAY_HEIGHT;
     int top = by + 8, bottom = by + bh - UI_FIELD_MSG_H - 16 - h;
     u16 sp = sPic.species;
+    u32 pid = sPic.personality;
 
     if (x > bx + bw - 8 - w)
         x = bx + bw - 8 - w;
@@ -305,8 +310,8 @@ static void PictureBox(int bx, int by, int bw, int bh)
     UiG_Mask(UiM_Ellipse(76, 12), x + (w >> 1) - 38, y + h - 26, UI_P_PAPER_LO);
     UiG_Save();
     UiG_Clip(x + 4, y + 4, w - 8, h - 8);
-    UiGfx_MonPicEx(sp, PIC_PERSONALITY, false, false, UiGfx_MonPicFrameAt(sp, PIC_PERSONALITY, false, false, f),
-                   x + (w >> 1), y + h - 20, 2, 1.0, NULL);
+    UiGfx_MonPicEx(sp, pid, sPic.shiny, false, UiGfx_MonPicFrameAt(sp, pid, sPic.shiny, false, f), x + (w >> 1), y + h - 20,
+                   2, 1.0, NULL);
     UiG_Restore();
 }
 

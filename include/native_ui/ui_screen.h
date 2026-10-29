@@ -27,6 +27,7 @@ enum UiPicture
     UI_PICTURE_HIDE_BG0,   /* the GBA window layer is hidden (field menus) */
     UI_PICTURE_HIDE_ALL,   /* the whole GBA picture is hidden (full screens) */
     UI_PICTURE_HIDE_BG012, /* BG0 to BG2 hidden: the battle's level-up box and banner too */
+    UI_PICTURE_HIDE_BG02,  /* BG0 and BG2 hidden: a contest's text and panels (BG1 keeps the moves' effects) */
 };
 
 struct UiScreen
@@ -125,6 +126,7 @@ extern const struct UiScreen gUiScreen_HillBoard;
 extern const struct UiScreen gUiScreen_PokeblockCase;
 extern const struct UiScreen gUiScreen_UsePokeblock;
 extern const struct UiScreen gUiScreen_PokeblockFeed;
+extern const struct UiScreen gUiScreen_Contest;
 extern const struct UiScreen gUiScreen_Shop;
 extern const struct UiScreen gUiScreen_Naming;
 extern const struct UiScreen gUiScreen_Starters;
