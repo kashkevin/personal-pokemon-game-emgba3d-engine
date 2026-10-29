@@ -2919,6 +2919,13 @@ static void SpriteCB_HorizontalScrollArrow(struct Sprite *sprite)
     int tournmanetTrainerId = sTourneyTreeTrainerIds[arrId];
     int roundId = gSaveBlock2Ptr->frontier.curChallengeBattleNum;
 
+#ifdef PORTABLE
+    // EmeraldTogether: the info card's arrows animate once more after the card has closed and freed sInfoCard (the
+    // tree set up again ends them). On the GBA that NULL reads the BIOS harmlessly; natively it faulted.
+    if (sInfoCard == NULL)
+        return;
+#endif
+#line 2922 // gba-line
     if (gTasks[taskId1].data[3] == 1)
     {
         if (sprite->data[1])
@@ -2985,6 +2992,12 @@ static void SpriteCB_VerticalScrollArrow(struct Sprite *sprite)
 {
     int taskId1 = sprite->data[0];
 
+#ifdef PORTABLE
+    // EmeraldTogether: as the horizontal arrows above (sInfoCard freed with the card)
+    if (sInfoCard == NULL)
+        return;
+#endif
+#line 2988 // gba-line
     if (gTasks[taskId1].data[3] == 1)
     {
         if (sInfoCard->pos != 0)
@@ -4919,7 +4932,16 @@ static void Task_HandleTourneyTreeInput(u8 taskId)
             gTasks[newTaskId].tPrevTaskId = taskId;
 
             gTasks[taskId].tState = STATE_SHOW_INFOCARD_TRAINER + 1;
+#ifdef PORTABLE
+            // EmeraldTogether: the card allocates sInfoCard (zeroed) once its task runs; until then it is NULL (or
+            // freed with the last card). On the GBA this write lands in the BIOS harmlessly; natively it faulted.
+            if (sInfoCard != NULL)
+                sInfoCard->pos = 0;
+#else
+#line 4922 // gba-line
             sInfoCard->pos = 0;
+#endif
+#line 4923 // gba-line
         }
         break;
     case STATE_SHOW_INFOCARD_TRAINER + 1:
@@ -5996,3 +6018,88 @@ static void CopyDomeTrainerName(u8 *str, u16 trainerId)
         str[i] = EOS;
     }
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_dome_tree.c) draws the tourney
+// tree in the new design and follows this state; the input stays here.
+// Task_HandleTourneyTreeInput reads the pad in its state 2,
+// Task_HandleStaticTourneyTreeInput shows the round's results from its
+// state 1 and waits for A or B in its state 3.
+bool32 DomeTree_NativeUiState(struct NativeDomeTree *out)
+{
+    u8 inputTask, staticTask;
+    int roundId, i, k;
+
+    memset(out, 0, sizeof(*out));
+    out->justDecided = 0xFF;
+    if (gMain.callback2 != CB2_TourneyTree
+     || FuncIsActiveTask(Task_ShowTourneyInfoCard) || FuncIsActiveTask(Task_HandleInfoCardInput))
+        return FALSE;
+    inputTask = FindTaskIdByFunc(Task_HandleTourneyTreeInput);
+    staticTask = FindTaskIdByFunc(Task_HandleStaticTourneyTreeInput);
+    out->lvlMode = gSaveBlock2Ptr->frontier.lvlMode;
+    if (inputTask != TASK_NONE)
+    {
+        out->previous = gTasks[inputTask].data[6];
+        roundId = out->previous ? gSaveBlock2Ptr->frontier.curChallengeBattleNum
+                                : gSaveBlock2Ptr->frontier.curChallengeBattleNum - 1;
+        out->cursor = gTasks[inputTask].data[1];
+        if (gTasks[inputTask].tState == 2 && !gPaletteFade.active)
+            out->phase = NATIVE_DOME_BROWSE;
+    }
+    else if (staticTask != TASK_NONE)
+    {
+        // the round just fought shows decided once its results are drawn (state 2 on)
+        roundId = gSaveBlock2Ptr->frontier.curChallengeBattleNum - 1;
+        if (gTasks[staticTask].tState < 2)
+            roundId--;
+        else
+            out->justDecided = roundId;
+        if (gTasks[staticTask].tState == 2 || gTasks[staticTask].tState == 3)
+        {
+            out->phase = NATIVE_DOME_RESULTS;
+            out->ready = gTasks[staticTask].tState == 3;
+        }
+    }
+    else
+    {
+        // the tree still being set up: nothing to read yet
+        return TRUE;
+    }
+    out->shown = roundId + 1 > 0 ? roundId + 1 : 0;
+    for (i = 0; i < DOME_TOURNAMENT_TRAINERS_COUNT; i++)
+    {
+        struct NativeDomeEntrant *e = &out->entrants[i];
+        int tournamentId = sTourneyTreeTrainerIds[i];
+        u16 trainerId = DOME_TRAINERS[tournamentId].trainerId;
+
+        e->trainerId = trainerId;
+        CopyDomeTrainerName(e->name, trainerId);
+        e->out = DOME_TRAINERS[tournamentId].isEliminated && DOME_TRAINERS[tournamentId].eliminatedAt <= roundId;
+        e->wins = DOME_TRAINERS[tournamentId].isEliminated ? DOME_TRAINERS[tournamentId].eliminatedAt : DOME_ROUNDS_COUNT;
+        if (e->wins > out->shown)
+            e->wins = out->shown;
+        for (k = 0; k < FRONTIER_PARTY_SIZE; k++)
+        {
+            if (trainerId == TRAINER_PLAYER || trainerId == TRAINER_FRONTIER_BRAIN)
+                e->species[k] = DOME_MONS[tournamentId][k];
+            else
+                e->species[k] = gFacilityTrainerMons[DOME_MONS[tournamentId][k]].species;
+        }
+    }
+    if (out->phase == NATIVE_DOME_BROWSE)
+        out->ready = TRUE;
+    return TRUE;
+}
+
+u8 DomeTree_NativeUiNext(u8 from, u8 dir)
+{
+    int roundId = gSaveBlock2Ptr->frontier.curChallengeBattleNum;
+
+    if (from > TOURNEY_TREE_CLOSE_BUTTON || dir > 3 || roundId < 0 || roundId > DOME_ROUNDS_COUNT)
+        return 0xFF;
+    return sTourneyTreeCursorMovementMap[from][roundId][dir];
+}
+#endif // ENABLE_NATIVE_UI

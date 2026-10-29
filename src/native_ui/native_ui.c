@@ -79,6 +79,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_BerryTag,     /* a berry's tag (the Bag's CHECK TAG) */
     &gUiScreen_Diploma,      /* the POKéDEX diploma */
     &gUiScreen_Factory,      /* the Battle Factory's rentals and swaps (the Slateport tent's too) */
+    &gUiScreen_DomeTree,     /* the Battle Dome's tourney tree */
     &gUiScreen_Shop,
     &gUiScreen_Naming,
     &gUiScreen_Starters,

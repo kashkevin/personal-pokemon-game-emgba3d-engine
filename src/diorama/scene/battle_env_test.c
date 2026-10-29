@@ -70,6 +70,7 @@
 #include "constants/event_objects.h"
 #include "constants/contest.h"
 #include "contest.h"
+#include "battle_dome.h"
 #include "battle_factory.h"
 #include "battle_factory_screen.h"
 #include "battle_pyramid_bag.h"
@@ -1313,6 +1314,47 @@ static void OpenTestFactory(bool swap)
     CallBattleFactoryFunction();
     CalculatePlayerPartyCount();
     DoBattleFactorySwapScreen();
+}
+
+void CallBattleDomeFunction(void);   /* battle_dome.c: a script special (no header declares it) */
+
+static void TestDomeFunction(u16 function)
+{
+    gSpecialVar_0x8004 = function;
+    CallBattleDomeFunction();
+}
+
+/* DOME / DOMERES / DOMEPREV: the Battle Dome's tourney tree (the test party's first three as the player's, the
+ * sixteen seeded as the Dome seeds them, PKMN_TEST_DOME_ROUND rounds already fought with the player winning each), the
+ * last of those rounds' results tree (as after a battle), or the lobby's record of a last tourney (the game's own
+ * random one), single battles at Lv. 50, in the run's own copy of the save - the native tree's checks */
+static void OpenTestDome(int kind)
+{
+    int rounds = EnvInt("PKMN_TEST_DOME_ROUND", 0), r;
+
+    gSaveBlock2Ptr->frontier.lvlMode = FRONTIER_LVL_50;
+    VarSet(VAR_FRONTIER_BATTLE_MODE, FRONTIER_MODE_SINGLES);
+    VarSet(VAR_FRONTIER_FACILITY, FRONTIER_FACILITY_DOME);
+    TestLog("Battle env test: the Battle Dome's %s after %d rounds", kind == 0 ? "tourney tree" : kind == 1 ? "results tree"
+                                                                   : "last tourney", rounds);
+    if (kind == 2)
+    {
+        TestDomeFunction(BATTLE_DOME_FUNC_INIT_RESULTS_TREE);
+        TestDomeFunction(BATTLE_DOME_FUNC_SHOW_PREV_TOURNEY_TREE);
+        return;
+    }
+    for (r = 0; r < FRONTIER_PARTY_SIZE; r++)
+        gSaveBlock2Ptr->frontier.selectedPartyMons[r] = r + 1;
+    TestDomeFunction(BATTLE_DOME_FUNC_INIT_TRAINERS);
+    for (r = 0; r < rounds && r < DOME_ROUNDS_COUNT; r++)
+    {
+        gSaveBlock2Ptr->frontier.curChallengeBattleNum = r;
+        TestDomeFunction(BATTLE_DOME_FUNC_SET_OPPONENT_ID);
+        gSpecialVar_0x8005 = DOME_PLAYER_WON_MATCH;
+        TestDomeFunction(BATTLE_DOME_FUNC_RESOLVE_WINNERS);
+    }
+    gSaveBlock2Ptr->frontier.curChallengeBattleNum = rounds;
+    TestDomeFunction(kind == 1 ? BATTLE_DOME_FUNC_SHOW_STATIC_TOURNEY_TREE : BATTLE_DOME_FUNC_SHOW_TOURNEY_TREE);
 }
 
 void DoBerryBlending(void);           /* berry_blender.c: a script special (no header declares it) */
@@ -3989,7 +4031,8 @@ bool16 ScriptMenu_CreateStartMenuForPokenavTutorial(void);  /* script_menu.c: th
    party as its one record; PBLOCK the Pokéblock case with PKMN_TEST_POKEBLOCKS' blocks; CONTEST a Normal Rank Cool
    contest with the party's first Pokémon; BLEND the Berry Blender with a computer partner; BTAG the Bag's first
    berry's tag; DIPLOMA the POKéDEX diploma; PBAG the Battle Pyramid's bag; FACTORY the Battle Factory's rentals,
-   FSWAP its swap screen */
+   FSWAP its swap screen; DOME the Battle Dome's tourney tree, DOMERES a round's results tree, DOMEPREV the last
+   tourney's */
 static bool FieldEventAt(const char *script, const char *event, int frame)
 {
     const char *p = script;
@@ -4526,6 +4569,12 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
             OpenTestFactory(false);
         if (FieldEventAt(s.fieldKeys, "FSWAP", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
             OpenTestFactory(true);
+        if (FieldEventAt(s.fieldKeys, "DOME", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
+            OpenTestDome(0);
+        if (FieldEventAt(s.fieldKeys, "DOMERES", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
+            OpenTestDome(1);
+        if (FieldEventAt(s.fieldKeys, "DOMEPREV", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
+            OpenTestDome(2);
         if (FieldEventAt(s.fieldKeys, "HOF", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
         {
             TestLog("Battle env test: the Hall of Fame (the team not saved)");

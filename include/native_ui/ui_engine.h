@@ -1311,6 +1311,41 @@ struct NativeFactory
     bool8 ready;
 };
 bool32 Factory_NativeUiState(struct NativeFactory *out);
+/* The Battle Dome's tourney tree (battle_dome.c: the interactive tree, the lobby's record of the last tourney, a
+ * round's results between battles): the sixteen in the tree's order (the left side top to bottom, then the right;
+ * round one's pairs side by side), how far each has come and who is out as the tree shows it now, and the cursor on
+ * a trainer (0-15: a tree position), a match (16-30: match 0-14, round one's eight, round two's four, the semifinals,
+ * the final) or the close button (31). DomeTree_NativeUiNext is the game's own cursor move (dir: up, down, left,
+ * right; 0xFF: none). */
+enum NativeDomePhase
+{
+    NATIVE_DOME_BUSY,           /* loading, fading, an info card opening */
+    NATIVE_DOME_BROWSE,         /* the interactive tree: the pad moves the cursor, A opens a card, B closes */
+    NATIVE_DOME_RESULTS,        /* a round's results: A or B goes on once ready */
+};
+#define NATIVE_DOME_ENTRANTS 16
+#define NATIVE_DOME_CLOSE 31
+struct NativeDomeEntrant
+{
+    u16 trainerId;              /* TRAINER_PLAYER, TRAINER_FRONTIER_BRAIN, else a Frontier trainer */
+    u8 name[PLAYER_NAME_LENGTH + 4];
+    u8 wins;                    /* rounds won as the tree shows them */
+    bool8 out;                  /* eliminated as the tree shows it */
+    u16 species[3];
+};
+struct NativeDomeTree
+{
+    u8 phase;
+    bool8 previous;             /* the lobby's record of the last tourney (its button EXIT, else CANCEL) */
+    u8 lvlMode;
+    u8 shown;                   /* rounds decided on the tree */
+    u8 justDecided;             /* RESULTS: the round whose winners just went on (0xFF: none) */
+    u8 cursor;
+    struct NativeDomeEntrant entrants[NATIVE_DOME_ENTRANTS];
+    bool8 ready;
+};
+bool32 DomeTree_NativeUiState(struct NativeDomeTree *out);
+u8 DomeTree_NativeUiNext(u8 from, u8 dir);
 /* the Battle Frontier's records windows (frontier_util.c: a facility's results, the link contests', the Ranking
  * Hall's) while one is up: its window and size in tiles; its lines are the window's transcript */
 bool32 FrontierUtil_NativeUiRecordsWindow(u8 *windowId, u8 *width, u8 *height);
