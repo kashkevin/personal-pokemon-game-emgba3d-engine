@@ -17,6 +17,7 @@ from pathlib import Path
 from catalog import CatalogError, TilesetInfo, load_tilesets, load_world
 from emerald_compositor import TilesetComposer, load_animation_slots
 from measured_volumes import apply_to_analysis, detect_layout
+from rock_bands import band_surfaces, rock_cells
 from mountain_art import (MountainArtError, faces_between_levels,
                           outline_cells as mountain_outline_cells,
                           validate_layout as validate_mountain_art)
@@ -1246,6 +1247,11 @@ def _terrain_record(cell_offset: int, cell: dict, shape: TileShape,
 LIFT_BLOCKED_LAYOUTS = frozenset({"LAYOUT_MOSSDEEP_CITY"})
 # The classes that stand between two levels and keep the top level outdoors.
 STANDING_WALLS = frozenset({"cliff", "mound", "wall", "wall-volume"})
+# The open sea outdoors (buildings.c IsSeaBehavior): the renderer lays it a level under the land whatever its solved
+# level (rock_bands' boundary there).
+SEA_BEHAVIORS = frozenset({"MB_OCEAN_WATER", "MB_DEEP_WATER", "MB_NO_SURFACING", "MB_SEAWEED",
+                           "MB_SEAWEED_NO_SURFACING", "MB_EASTWARD_CURRENT", "MB_WESTWARD_CURRENT",
+                           "MB_NORTHWARD_CURRENT", "MB_SOUTHWARD_CURRENT"})
 
 
 def _rocks_at_sea_level(cells: tuple[dict, ...], width: int, height: int,
@@ -1373,7 +1379,8 @@ def _mountain_masses(cells: tuple[dict, ...], width: int, height: int,
                      mountain: frozenset[int], solved: dict[int, dict],
                      exclude: frozenset[int] = frozenset(),
                      climbed: frozenset[int] = frozenset(),
-                     forest: frozenset[int] = frozenset()) -> dict[int, dict]:
+                     forest: frozenset[int] = frozenset(),
+                     placed_tops: dict[int, int] | None = None) -> dict[int, dict]:
     """A mountain whose walkable top is a level over the ground round it
     stands as one mass, level with that top. Its blocked rock took the level of
     the walkable ground nearest each cell (terrace_topology.lift_blocked_cells),
@@ -1407,7 +1414,8 @@ def _mountain_masses(cells: tuple[dict, ...], width: int, height: int,
     stands a level over the trees and climbs from them a level a cell, never
     higher than its top: level with the top beyond the trees, it rose three
     levels in its one row by them, its face their crowns (the game draws them
-    over the rock) drawn down it in stripes. Returns the pieces' entries."""
+    over the rock) drawn down it in stripes. Returns the pieces' entries; `placed_tops`, when given, gets every
+    piece's cell and its top, those left as their records put them too (rock_bands.py keeps them)."""
     def neighbours(offset: int):
         x, y = offset % width, offset // width
         for nx, ny in ((x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y)):
@@ -1482,6 +1490,8 @@ def _mountain_masses(cells: tuple[dict, ...], width: int, height: int,
                 tops[offset] = min(tops[offset], max(ground + 16, cap))
         for offset in piece:
             placed[offset] = tops[offset]
+            if placed_tops is not None:
+                placed_tops[offset] = tops[offset]
             # (a cell already where its record puts it - the rock a level over
             # the top level, no entry - is left alone)
             if offset in solved or (ground, tops[offset]) != (0, 16):
@@ -2048,6 +2058,7 @@ def compile_data(root: Path) -> dict:
                                         terrace_topology[layout["id"]])
             if reefs:
                 terrace_topology[layout["id"]] = {**terrace_topology[layout["id"]], **reefs}
+            mass_tops: dict[int, int] = {}      # the mountains _mountain_masses stands (rock_bands keeps them)
             layout_rows = (maps_by_layout.get(layout["id"], ())
                            or maps_by_layout.get(script_layouts.get(layout["id"]), ()))
             if (terrace_topology[layout["id"]] and layout_rows
@@ -2061,7 +2072,42 @@ def compile_data(root: Path) -> dict:
                                        terrace_topology[layout["id"]],
                                        exclude=frozenset(reefs) | rocks,
                                        climbed=mountain_climbs[layout["id"]],
-                                       forest=grounded)}
+                                       forest=grounded, placed_tops=mass_tops)}
+            if layout_rows and all(_outdoor(row["mapType"]) for row in layout_rows):
+                # Every band of rock one surface over the ground round it (rock_bands.py; step 16):
+                # its pieces stood a tile over their own ground (Mossdeep's pillars) or lay flat
+                # (the Safari Zone's mountain, Route 120's cliff).
+                solved = terrace_topology[layout["id"]]
+                courses = {offset: entry["topQ16"] for offset, entry in solved.items()
+                           if entry.get("solid") or entry.get("profile", "none") != "none"}
+                # a mountain's walkable art is no band's (the player walks on it): the rock meets it where it is
+                # drawn, its top (_mountain_masses), else a tile over its ground (the renderer's rock of no height)
+                walked = {offset: solved[offset].get("topQ16", solved[offset]["groundQ16"] + 16)
+                          if offset in solved else 16
+                          for offset in mountain_art_cells[layout["id"]]
+                          if not layout_cells[offset].get("collision") and offset not in courses}
+                # and a mountain of several tops _mountain_masses stood (Routes 111, 112, 114, 115: the rock of
+                # their walkable tops, as the owner's reports of 2026-10-24 settled it) keeps its heights too
+                masses = {offset: top for offset, top in mass_tops.items() if offset not in courses}
+                band = rock_cells(layout_cells, tuple(shape.class_name for shape in wildcard),
+                                  tuple(shape.source for shape in wildcard), pixel_summaries[layout["id"]],
+                                  layout["width"], layout["height"], mountain=mountain_art_cells[layout["id"]],
+                                  exclude=frozenset(reefs) | rocks | _prop_cells(layout) | frozenset(courses)
+                                  | frozenset(masses))
+                # the ground's levels, and the open sea's where the renderer lays it, a level under the land
+                # (buildings.c WaterLevelsFor): rock beside it rises from it, not from the deeper sea the solver
+                # gave a map's foot of its cliffs (Ever Grande's below its waterfall, -2), under the water
+                levels = {offset: entry["groundQ16"] for offset, entry in solved.items()}
+                levels.update({offset: -16 for offset, cell in enumerate(layout_cells)
+                               if cell.get("behavior") in SEA_BEHAVIORS})
+                surfaces = band_surfaces(layout_cells, layout["width"], layout["height"], band, levels,
+                                         tops={**courses, **walked, **masses})
+                if surfaces:
+                    terrace_topology[layout["id"]] = {
+                        **solved, **{offset: {"groundQ16": ground, "topQ16": top, "profile": "none",
+                                              "solid": False, "mass": True}
+                                     for offset, (ground, top) in surfaces.items()}}
+                    mountain_art_cells[layout["id"]] = mountain_art_cells[layout["id"]] | frozenset(surfaces)
             wildcard = tuple(_with_mountain_art(
                 shape, cell, offset in mountain_art_cells[layout["id"]],
                 offset in mountain_outlines[layout["id"]])

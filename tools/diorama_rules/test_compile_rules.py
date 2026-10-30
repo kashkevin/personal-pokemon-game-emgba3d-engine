@@ -129,15 +129,20 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         # one block, but the rock of a mountain of several tops (Route 114's, Route 115's:
         # _mountain_masses), from its lowest ground to the top it rises to, and of the two that
         # stand at the game's heights since 2026-10-29 (Route 112's plateau three levels up,
-        # Route 111's two: compile_rules.GBA_HEIGHT_LAYOUTS)
-        self.assertEqual({layout["symbol"] for layout in self.data["layouts"]
-                          for record in layout["terrainRecords"]
-                          if record["source"] == "behavior:MB_MOUNTAIN_TOP"
-                          and record["heightQ16"] != 16},
-                         {"LAYOUT_ROUTE111", "LAYOUT_ROUTE111_NO_MIRAGE_TOWER", "LAYOUT_ROUTE112",
-                          "LAYOUT_ROUTE114", "LAYOUT_ROUTE115"})
-        self.assertEqual({record["heightQ16"] for record in mountains}, {16, 32, 48, 64})
+        # Route 111's two: compile_rules.GBA_HEIGHT_LAYOUTS) - whole levels; and since step 16 every
+        # other band of rock one surface (rock_bands.py): a face from the lower level it parts to the
+        # higher and over it inward, a ridge a tile and more inward, never more than two tiles over
+        # the highest ground it meets
+        self.assertTrue({16, 32, 48, 64} <= {record["heightQ16"] for record in mountains})
+        self.assertTrue(all(1 <= record["heightQ16"] <= 80 for record in mountains))
         self.assertEqual({record["measuredFlags"] & 32 for record in mountains}, {32})
+        # Mossdeep's cliff (the owner's "tall, narrow, rectangular cliffs"): its corner pieces stood
+        # a tile over the plateau whose face they are, two over the street; they are that face now
+        mossdeep = next(row for row in self.data["layouts"] if row["symbol"] == "LAYOUT_MOSSDEEP_CITY")
+        corners = [(record["groundQ16"], record["topQ16"]) for record in mossdeep["terrainRecords"]
+                   if record["mapGroup"] == 0xFF and record["expectedMetatile"] == 0x89]
+        self.assertGreaterEqual(corners.count((-16, 0)), 30)
+        self.assertTrue(all(top - ground <= 32 for ground, top in corners))
         # (a reef in the sea stands on the sea's level: a terrace entry, flag 128)
         self.assertEqual({record["measuredFlags"] & ~(32 | 128) for record in mountains}, {0})
         # "cutout": the cell's upper layer draws the rock's edge over ground (mountain_art.outline_cells)
@@ -522,7 +527,16 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertEqual({safari(x, y) for x, y in ((16, 32), (22, 33), (31, 33), (19, 36), (21, 37))}, {-16})
         ever = ground("LAYOUT_EVER_GRANDE_CITY")
         self.assertEqual((ever(18, 27), ever(18, 28)), (-16, -16))
-        self.assertEqual({ever(x, y) for x, y in ((17, 26), (14, 25), (13, 27))}, {0})
+        # the rock round Victory Road's mouth: the mountain's one band (rock_bands.py), from the
+        # mouth's level to the plateau's and over it, the mouth in its face
+        ever_records = {record["cellOffset"]: record
+                        for record in layouts["LAYOUT_EVER_GRANDE_CITY"]["terrainRecords"]
+                        if record["mapGroup"] == 0xFF}
+        width = layouts["LAYOUT_EVER_GRANDE_CITY"]["width"]
+        for x, y in ((17, 26), (14, 25), (13, 27)):
+            record = ever_records[y * width + x]
+            self.assertEqual(record["groundQ16"], -16)
+            self.assertGreaterEqual(record["topQ16"], 0)
 
     def test_repository_cave_rock_stands_and_its_exits_stay_open(self):
         layouts = {row["symbol"]: row for row in self.data["layouts"]}

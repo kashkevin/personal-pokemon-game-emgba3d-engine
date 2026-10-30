@@ -783,7 +783,7 @@ check-diorama: $(DIORAMA_TEST_GEN)
 	python3 tools/diorama_rules/validate_rules.py
 	python3 tools/diorama_rules/compile_rules.py --check
 check-diorama-tools:
-	@for t in compile_rules tile_shape structures measured_volumes mountain_art terrace_topology \
+	@for t in compile_rules tile_shape structures measured_volumes mountain_art rock_bands terrace_topology \
 	          pixel_objects rules_parity catalog occupancy_model; do \
 	  echo "test_$$t"; python3 tools/diorama_rules/test_$$t.py || exit 1; done
 	python3 tools/diorama_buildings/test_window_glow.py

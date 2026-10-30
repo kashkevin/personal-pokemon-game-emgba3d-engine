@@ -1249,6 +1249,43 @@ static bool AppendSkirtByBank(const struct DioramaTerrainChunkInput *input, int 
     return true;
 }
 
+/* A skirt over a mountain's rock (AppendSkirtFaces): a pixel at a time, from the top of the rock's column across the
+ * edge up to the cell's footing, of the cell's ground. The rock's columns draw their sides only where they stand over
+ * what is beside them, and the cell's own sides reach down only to its footing, so where the rock lay lower than the
+ * cell the sky showed between them: the faces of the rock bands, a little under the plateaus they are the faces of at
+ * their rounded corners (step 16, the world geometry overhaul: rock_bands.py). */
+static bool AppendSkirtByRock(const struct DioramaTerrainChunkInput *input, int x, int y,
+                              int side, int16_t footing,
+                              uint32_t *faceCount, uint32_t *rawFaceCount)
+{
+    static const int8_t offsets[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+    const struct DioramaTerrainCell *cell = GetCell(input, x, y);
+    const struct DioramaTerrainCell *rock = GetCell(input, x + offsets[side][0], y + offsets[side][1]);
+    int cellIndex = y * DIORAMA_TERRAIN_INPUT_SIZE + x;
+    int16_t ground = HeightToVoxel(rock->groundHeight);
+    int along;
+
+    for (along = 0; along < DIORAMA_VOXELS_PER_CELL; along++)
+    {
+        int pixelX = side == 1 ? DIORAMA_VOXELS_PER_CELL - 1 : side == 3 ? 0 : along;
+        int pixelZ = side == 0 ? 0 : side == 2 ? DIORAMA_VOXELS_PER_CELL - 1 : along;
+        /* the rock's pixel across the edge */
+        int rockX = side == 1 ? 0 : side == 3 ? DIORAMA_VOXELS_PER_CELL - 1 : along;
+        int rockZ = side == 0 ? DIORAMA_VOXELS_PER_CELL - 1 : side == 2 ? 0 : along;
+        uint8_t height = rock->mountainHeight[rockZ * DIORAMA_VOXELS_PER_CELL + rockX];
+        int16_t rockTop = height != 0 ? ground + height : ground;
+
+        if (rockTop >= footing)
+            continue;
+        if (!AppendCompressedPixelSide(faceCount, rawFaceCount, cell, cellIndex, 1, side,
+                                       cell->mapX * DIORAMA_VOXELS_PER_CELL + pixelX,
+                                       cell->mapY * DIORAMA_VOXELS_PER_CELL + pixelZ,
+                                       rockTop, footing, true, 0, 0))
+            return false;
+    }
+    return true;
+}
+
 /*
  * Skirts: a cell beside a lower whole cell gets a side from that cell's
  * top up to its own footing (SkirtFooting), closing the step between them. The
@@ -1296,6 +1333,16 @@ static bool AppendSkirtFaces(const struct DioramaTerrainChunkInput *input,
                 if (IsLedgeBank(neighbor) && neighbor->surfaceCount <= 1)
                 {
                     if (!AppendSkirtByBank(input, x, y, side, footing, faceCount, rawFaceCount))
+                        return false;
+                    continue;
+                }
+                /* down to a mountain's rock, a pixel at a time (the rock's own cells: one mass, their sides
+                   their own) */
+                if (neighbor->present && neighbor->shape != DIORAMA_SHAPE_HIDDEN
+                 && (neighbor->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART) && !IsTreeHullColumn(neighbor)
+                 && !(cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART))
+                {
+                    if (!AppendSkirtByRock(input, x, y, side, footing, faceCount, rawFaceCount))
                         return false;
                     continue;
                 }

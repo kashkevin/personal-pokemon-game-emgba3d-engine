@@ -430,8 +430,10 @@ def picture_holes(path, steep):
     height, width = sky.shape
     if steep:
         return int(sky[height // 10:height - height // 10, width // 10:width - width // 10].sum())
-    mask = Image.fromarray(sky.astype(numpy.uint8) * 255)
-    edge = [(x, y) for x in range(width) for y in (0, height - 1)] + \
+    mask = Image.fromarray(sky.astype(numpy.uint8) * 255).copy()   # (fromarray's image is read-only: no fill)
+    # the open sky: what reaches the picture's edge, or its top quarter (a low view's horizon: the window's own top
+    # rows are the game's, not the sky)
+    edge = [(x, y) for x in range(width) for y in list(range(0, height // 4)) + [height - 1]] + \
            [(x, y) for y in range(height) for x in (0, width - 1)]
     for xy in edge:
         if mask.getpixel(xy) == 255:

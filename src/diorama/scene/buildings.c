@@ -752,6 +752,19 @@ static const struct WaterLevels *WaterLevelsFor(uint16_t layoutId, bool outdoor)
                 if (nx < 0 || ny < 0 || nx >= layout->width || ny >= layout->height)
                     continue;
                 n = ny * layout->width + nx;
+                /* Its banks too, the land one walks on beside it (step 16, the world geometry overhaul): the
+                 * water lies no higher than the lowest of them. Water the terrace solver left on the level it
+                 * gives ground of no level of its own (0), beside banks a level lower, stood over them as a
+                 * box of water (the Safari Zone's north-west pond at the foot of its rock: the owner's "large
+                 * featureless blue rectangles"). */
+                if (!IsWaterBehavior(behavior[n]) && behavior[n] != MB_WATERFALL
+                 && !(layout->map[n] & MAPGRID_COLLISION_MASK))
+                {
+                    int16_t bank = DioramaRules_StaticGroundQ16(layoutId, (uint32_t)n);
+
+                    if (bank < lowest)
+                        lowest = bank;
+                }
                 if (entry->level[n] != WATER_LEVEL_NONE || !IsWaterBehavior(behavior[n]))
                     continue;
                 if (elevation[n] != elevation[cell] && behavior[n] != MB_SHALLOW_WATER
