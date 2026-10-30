@@ -80,7 +80,8 @@ static const struct DioramaProp sGeneral[] = {
      * own stand is 0x2D4), the shadow round the stand left out. */
     { PROP(0x130, SIGN, SLAB, 1, LOWER), .depth = 2, .standOn = 1 },
     { PROP(0x131, SIGN, SLAB, 1, LOWER), .shadowIndex = 6, .shadowFromRow = 11, .depth = 2 },
-    /* The low white walls: on the grass (0x03D-0x04F), on the paving (0x055-0x067). */
+    /* The low white walls: on the grass (0x03D-0x04F), on the paving (0x055-0x067). Not the Frontier's
+     * half wall, half planter (0x005-0x006): a block hid the planter's bushes. */
     WHITE_WALL(0x03D), WHITE_WALL(0x03E), WHITE_WALL(0x03F), WHITE_WALL(0x045), WHITE_WALL(0x047),
     WHITE_WALL(0x04D), WHITE_WALL(0x04E), WHITE_WALL(0x04F), WHITE_WALL(0x055), WHITE_WALL(0x056),
     WHITE_WALL(0x057), WHITE_WALL(0x05D), WHITE_WALL(0x05F), WHITE_WALL(0x065), WHITE_WALL(0x066),
@@ -128,6 +129,10 @@ static const struct DioramaProp sRustboro[] = {
      * neighbours'. Added by the battle environments' work
      * (docs/battle-environments.md): flat in that battle. */
     { PROP(0x2C1, ROCK, RELIEF, 0, NEIGHBOUR), .keyIndex = 0xF, .depth = 12 },
+    /* the low white walls of Southern Island's and Faraway Island's docks (the General tileset's stones;
+     * their walked cells stay paint) */
+    WHITE_WALL(0x285), WHITE_WALL(0x353), WHITE_WALL(0x354), WHITE_WALL(0x355), WHITE_WALL(0x356),
+    WHITE_WALL(0x357),
 };
 
 /* Slateport: the market's baskets, pots and crates, the round bushes by the
@@ -246,6 +251,11 @@ static const struct DioramaProp sSlateport[] = {
     { PROP(0x33E, DECOR, BLOCK, 1, LOWER), .shadowIndex = 4, .shadowFromRow = 4, .height16 = 9 },
     { PROP(0x33F, DECOR, BLOCK, 1, LOWER), .shadowIndex = 4, .shadowFromRow = 4, .height16 = 9 },
     { PROP(0x344, FLOWERS, CROSS, 1, LOWER), .depth = 6 },
+    /* the low white walls of the harbour and the beach (the General tileset's stones) */
+    WHITE_WALL(0x234), WHITE_WALL(0x23C), WHITE_WALL(0x245), WHITE_WALL(0x24D), WHITE_WALL(0x255),
+    WHITE_WALL(0x25D), WHITE_WALL(0x27E), WHITE_WALL(0x2BB), WHITE_WALL(0x2C7), WHITE_WALL(0x2CF),
+    WHITE_WALL(0x2FE), WHITE_WALL(0x2FF), WHITE_WALL(0x308), WHITE_WALL(0x309), WHITE_WALL(0x30A),
+    WHITE_WALL(0x30B), WHITE_WALL(0x30C),
 };
 
 /* Mauville (and Verdanturf, Routes 110, 111, 117, 118): rows of wooden posts.
@@ -274,6 +284,8 @@ static const struct DioramaProp sMauville[] = {
     WOOD_POSTS_EW(0x291),
     WOOD_POSTS_EW(0x292),
     WOOD_POSTS_NS(0x2B1, 4),
+    /* Route 110's low white walls by the water (the General tileset's stones) */
+    WHITE_WALL(0x355), WHITE_WALL(0x356), WHITE_WALL(0x357), WHITE_WALL(0x367),
 };
 
 /* Petalburg City's hedges: the cells that block the way stand as blocks with
@@ -403,6 +415,27 @@ static const struct DioramaProp sTrainerHill[] = {
 static const struct DioramaProp sBattleFrontierOutsideEast[] = {
     { PROP(0x202, BUSH, MOUND, 1, LOWER), .height16 = 11 },
     { PROP(0x203, BUSH, MOUND, 1, LOWER), .height16 = 11 },
+    /* the low white walls round its plazas, the sand and the pools (the General tileset's stones) */
+    WHITE_WALL(0x398), WHITE_WALL(0x3A0), WHITE_WALL(0x3A1), WHITE_WALL(0x3AF), WHITE_WALL(0x3B1),
+    WHITE_WALL(0x3B3), WHITE_WALL(0x3B7), WHITE_WALL(0x3BB), WHITE_WALL(0x3BC), WHITE_WALL(0x3BF),
+    WHITE_WALL(0x3C0), WHITE_WALL(0x3C1), WHITE_WALL(0x3C2), WHITE_WALL(0x3C3), WHITE_WALL(0x3C7),
+    WHITE_WALL(0x3C8), WHITE_WALL(0x3C9), WHITE_WALL(0x3CA), WHITE_WALL(0x3CB), WHITE_WALL(0x3CC),
+    WHITE_WALL(0x3CF), WHITE_WALL(0x3D0), WHITE_WALL(0x3D1), WHITE_WALL(0x3D2), WHITE_WALL(0x3DF),
+    WHITE_WALL(0x3F5), WHITE_WALL(0x3F6), WHITE_WALL(0x3F9), WHITE_WALL(0x3FD),
+};
+
+/* The Battle Frontier's west half: its low white walls (the General tileset's stones) round the plazas,
+ * the pools and the paths. */
+static const struct DioramaProp sBattleFrontierOutsideWest[] = {
+    WHITE_WALL(0x21B), WHITE_WALL(0x21C), WHITE_WALL(0x21D), WHITE_WALL(0x22A), WHITE_WALL(0x22B),
+    WHITE_WALL(0x240), WHITE_WALL(0x241), WHITE_WALL(0x242), WHITE_WALL(0x243), WHITE_WALL(0x24A),
+    WHITE_WALL(0x251), WHITE_WALL(0x252), WHITE_WALL(0x257), WHITE_WALL(0x259), WHITE_WALL(0x25A),
+    WHITE_WALL(0x25F), WHITE_WALL(0x261), WHITE_WALL(0x262), WHITE_WALL(0x265), WHITE_WALL(0x266),
+    WHITE_WALL(0x267), WHITE_WALL(0x26C), WHITE_WALL(0x26D), WHITE_WALL(0x26F), WHITE_WALL(0x274),
+    WHITE_WALL(0x275), WHITE_WALL(0x2E4), WHITE_WALL(0x2EC), WHITE_WALL(0x2F7), WHITE_WALL(0x328),
+    WHITE_WALL(0x329), WHITE_WALL(0x32A), WHITE_WALL(0x32B), WHITE_WALL(0x32C), WHITE_WALL(0x32D),
+    WHITE_WALL(0x32E), WHITE_WALL(0x32F), WHITE_WALL(0x3CD), WHITE_WALL(0x3D6), WHITE_WALL(0x3D7),
+    WHITE_WALL(0x3F5), WHITE_WALL(0x3F6), WHITE_WALL(0x3FD),
 };
 
 /* The Battle Pyramid's maze walls (MB_SECRET_BASE_WALL in this tileset): each
@@ -469,6 +502,7 @@ static const struct DioramaPropTileset sTilesets[] = {
     TILESET("gTileset_Facility", sFacility),
     TILESET("gTileset_TrainerHill", sTrainerHill),
     TILESET("gTileset_BattleFrontierOutsideEast", sBattleFrontierOutsideEast),
+    TILESET("gTileset_BattleFrontierOutsideWest", sBattleFrontierOutsideWest),
     TILESET("gTileset_BattlePyramid", sBattlePyramid),
     TILESET("gTileset_Dewford", sDewford),
 };
