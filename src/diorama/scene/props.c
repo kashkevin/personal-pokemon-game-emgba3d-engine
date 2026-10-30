@@ -32,6 +32,14 @@
 #define TALL_GRASS(id) { PROP(id, GRASS, CARDS, 0, KEEP), .keyIndex = 0xD, .depth = 1, \
                          .height16 = 20, .flags = DIORAMA_PROP_SWAY }
 
+/* The low white walls along Route 110's cycling road, Route 123, the Battle
+ * Frontier and Slateport (step 16, phase C4): their stones (palette 3) stand
+ * a little over the grass or the paving drawn beside them on the same layer,
+ * which stays flat; only where the cell is blocked (walked, as on Southern
+ * Island, the same art is paint). */
+#define WHITE_WALL(id) { PROP(id, FENCE, BLOCK, 0, KEEP), .height16 = 7, .onlyPalette = 3 + 1, \
+                         .flags = DIORAMA_PROP_BLOCKED }
+
 static const struct DioramaProp sGeneral[] = {
     /* The metal sign (towns, routes): drawn alone on its layer, filling the
      * cell, so the ground under it is its neighbours'. */
@@ -72,6 +80,11 @@ static const struct DioramaProp sGeneral[] = {
      * own stand is 0x2D4), the shadow round the stand left out. */
     { PROP(0x130, SIGN, SLAB, 1, LOWER), .depth = 2, .standOn = 1 },
     { PROP(0x131, SIGN, SLAB, 1, LOWER), .shadowIndex = 6, .shadowFromRow = 11, .depth = 2 },
+    /* The low white walls: on the grass (0x03D-0x04F), on the paving (0x055-0x067). */
+    WHITE_WALL(0x03D), WHITE_WALL(0x03E), WHITE_WALL(0x03F), WHITE_WALL(0x045), WHITE_WALL(0x047),
+    WHITE_WALL(0x04D), WHITE_WALL(0x04E), WHITE_WALL(0x04F), WHITE_WALL(0x055), WHITE_WALL(0x056),
+    WHITE_WALL(0x057), WHITE_WALL(0x05D), WHITE_WALL(0x05F), WHITE_WALL(0x065), WHITE_WALL(0x066),
+    WHITE_WALL(0x067),
 };
 
 /* An iron fence running north-south (a line in the art): the east-west
@@ -584,9 +597,14 @@ static uint16_t CellLayout(const struct DioramaSceneSnapshot *snapshot,
 const struct DioramaProp *DioramaProps_ForCell(const struct DioramaSceneSnapshot *snapshot,
                                                const struct DioramaCellSnapshot *cell)
 {
+    const struct DioramaProp *prop;
+
     if (!DioramaProps_Enabled() || snapshot == NULL || cell == NULL)
         return NULL;
-    return DioramaProps_Find(CellLayout(snapshot, cell), cell->metatileId);
+    prop = DioramaProps_Find(CellLayout(snapshot, cell), cell->metatileId);
+    if (prop != NULL && (prop->flags & DIORAMA_PROP_BLOCKED) && cell->collision == 0)
+        return NULL;
+    return prop;
 }
 
 static const struct DioramaCellSnapshot *GridCell(const struct DioramaSceneSnapshot *snapshot,
@@ -697,6 +715,8 @@ void DioramaProps_ComposeArt(const struct DioramaProp *prop, const uint8_t *tile
         unsigned x;
         unsigned y;
 
+        if (prop->onlyPalette != 0 && paletteId != prop->onlyPalette - 1u)
+            continue;
         for (y = 0; y < 8; y++)
         {
             unsigned row = y0 + y;

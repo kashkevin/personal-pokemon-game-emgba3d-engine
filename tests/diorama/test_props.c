@@ -29,6 +29,7 @@ static void Check(bool condition, const char *expression, int line)
 #define LAYOUT_SLATEPORT_CITY 2
 #define LAYOUT_RUSTBORO_CITY 4
 #define LAYOUT_LITTLEROOT_TOWN 10
+#define LAYOUT_ROUTE110 26
 
 #define GRASS 0x001
 #define FLOWERS 0x004
@@ -124,6 +125,10 @@ static void TestFind(void)
     CHECK(DioramaProps_Find(LAYOUT_RUSTBORO_CITY, FLOWERS) == DioramaProps_Find(LAYOUT_LITTLEROOT_TOWN, FLOWERS));
     CHECK(DioramaProps_Find(0, FLOWERS) == NULL);
     CHECK(DioramaProps_Find(LAYOUT_LITTLEROOT_TOWN, 1024) == NULL);
+    /* Route 110's low white wall: its stones (palette 3) stand, blocked cells only. */
+    prop = DioramaProps_Find(LAYOUT_ROUTE110, 0x045);
+    CHECK(prop != NULL && prop->form == DIORAMA_PROP_BLOCK && prop->onlyPalette == 4
+       && (prop->flags & DIORAMA_PROP_BLOCKED) && prop->ground == DIORAMA_PROP_GROUND_KEEP);
 }
 
 /* Tile graphics: tile 1 has colour index (x + y) % 16 at each pixel, tile 2
@@ -194,6 +199,13 @@ static void TestComposeArt(void)
     memset(&prop, 0, sizeof(prop));
     DioramaProps_ComposeArt(&prop, sTiles, sPalette, entries, pixels);
     CHECK(pixels[0] == DioramaMetatile_ConvertColor(sPalette[5], false) && pixels[255] == pixels[0]);
+    /* Only the tiles of one palette: the upper right quarter in palette 4, the rest in 3. */
+    entries[5] = (uint16_t)(1 | (4 << 12));
+    prop.layer = 1;
+    prop.onlyPalette = 4 + 1;
+    DioramaProps_ComposeArt(&prop, sTiles, sPalette, entries, pixels);
+    CHECK(pixels[1 * 16 + 1] == 0 && pixels[9 * 16 + 9] == 0);
+    CHECK(pixels[1 * 16 + 9] == DioramaMetatile_ConvertColor(sPalette[4 * 16 + 2], false));
 }
 
 /* A snapshot of Littleroot's (or Rustboro's) tiles round map cell (60, 60):
@@ -326,6 +338,12 @@ static void TestBuild(void)
     CHECK(DioramaProps_Build(&sSnapshot, sResolved, sInstances, 16, &complete) == 0);
     CHECK(DioramaProps_ForCell(&sSnapshot, &sSnapshot.cells[CellIndex(60, 61)]) == NULL);
     DioramaProps_SetEnabled(true);
+    CHECK(DioramaProps_ForCell(&sSnapshot, &sSnapshot.cells[CellIndex(60, 61)]) != NULL);
+    /* A wall stands only where its cell is blocked. */
+    MakeSnapshot(LAYOUT_ROUTE110, 0.0f);
+    Put(60, 61, 0x045);
+    CHECK(DioramaProps_ForCell(&sSnapshot, &sSnapshot.cells[CellIndex(60, 61)]) == NULL);
+    sSnapshot.cells[CellIndex(60, 61)].collision = 1;
     CHECK(DioramaProps_ForCell(&sSnapshot, &sSnapshot.cells[CellIndex(60, 61)]) != NULL);
 }
 

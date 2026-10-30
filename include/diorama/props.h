@@ -77,6 +77,7 @@ enum DioramaPropFlags
     DIORAMA_PROP_LIGHT = 1 << 1,  /* gives light at night (a lamp's head) */
     DIORAMA_PROP_JOINED = 1 << 2, /* a mound going on past the cell's edges (a rock of 2 x 2
                                    * cells): its rim is only where its art ends inside */
+    DIORAMA_PROP_BLOCKED = 1 << 3, /* only where the cell is blocked (a wall: walked, its art is paint) */
 };
 
 #define DIORAMA_PROP_OWN_ART 0
@@ -108,6 +109,8 @@ struct DioramaProp
                             * object floats there, nothing under it */
     uint8_t rise16;        /* a block's north edge this many sixteenths higher than its south
                             * edge (a canopy's slope); 0: level */
+    uint8_t onlyPalette;   /* only the art's tiles drawn with palette onlyPalette - 1 (0: all): a
+                            * wall's stones among the ground drawn on the same layer */
 };
 
 /* The props a tileset's metatiles hold (props.c). */
