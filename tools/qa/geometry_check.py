@@ -222,6 +222,9 @@ def run_chunk(args, places, first, last, index):
                PKMN_TEST_GEO_OUT=os.path.abspath(args.out), PKMN_TEST_GEO_CAMERAS=args.cameras,
                PKMN_TEST_GEO_FIRST=str(first), PKMN_TEST_GEO_LAST=str(last), SDL_AUDIODRIVER="dummy",
                PKMN_NOSCENE="1", PKMN_TEST_EXIT="1", PKMN_TEST_LOG=os.path.join(rundir, "test.log"))
+    # the air's dust, rays and gloom (gl_air.c) are drawn over the scene, not part of it: off unless asked for (the
+    # dust reads as stars in a cave's void, the rays lift its black, and neither is geometry)
+    env.setdefault("PKMN_DIORAMA_AIR", "0")
     prefix = ["xvfb-run", "-a", "-s", "-screen 0 1280x720x24 -nolisten tcp"] if args.xvfb else []
     shutil.rmtree(rundir, ignore_errors=True)
     os.makedirs(rundir)
@@ -419,9 +422,10 @@ def cell_checks(cells, group, num, kind):
     return found
 
 
-def picture_holes(path, steep):
+def picture_holes(path, steep, dark_open=False):
     """Pixels of the probe's magenta sky the scene encloses (not reaching the picture's edge), or, in the steep view
-    (the scene fills the picture), any inside a tenth's margin."""
+    (the scene fills the picture), any inside a tenth's margin. `dark_open`: a room's or a cave's black backdrop is
+    open too (the void it stands in: the game's own clear colour there is near-black, not a hole in play)."""
     import numpy  # noqa: E402
     from PIL import Image, ImageDraw  # noqa: E402
 
@@ -430,7 +434,10 @@ def picture_holes(path, steep):
     height, width = sky.shape
     if steep:
         return int(sky[height // 10:height - height // 10, width // 10:width - width // 10].sum())
-    mask = Image.fromarray(sky.astype(numpy.uint8) * 255).copy()   # (fromarray's image is read-only: no fill)
+    # (the probe's sky and the void's black meet in a pixel of both, r = b with no green: open too)
+    blend = (rgb[:, :, 1] <= 2) & (numpy.abs(rgb[:, :, 0].astype(int) - rgb[:, :, 2].astype(int)) <= 3)
+    passable = sky | (rgb.max(axis=2) == 0) | blend if dark_open else sky
+    mask = Image.fromarray(passable.astype(numpy.uint8) * 255).copy()   # (fromarray's image is read-only: no fill)
     # the open sky: what reaches the picture's edge, or its top quarter (a low view's horizon: the window's own top
     # rows are the game's, not the sky)
     edge = [(x, y) for x in range(width) for y in list(range(0, height // 4)) + [height - 1]] + \
@@ -438,7 +445,7 @@ def picture_holes(path, steep):
     for xy in edge:
         if mask.getpixel(xy) == 255:
             ImageDraw.floodfill(mask, xy, 128)      # the open sky: reaches the picture's edge
-    return int((numpy.asarray(mask) == 255).sum())
+    return int(((numpy.asarray(mask) == 255) & sky).sum())
 
 
 def check(args):
@@ -488,7 +495,10 @@ def check(args):
             shot = os.path.join(out, "shots", f"{key}-{camera}.png")
             if os.path.exists(shot):
                 entry["shots"].append(os.path.relpath(shot, out))
-                holes = picture_holes(shot, steep=camera.startswith("s") and int(camera[1:] or 0) >= 60)
+                # (the steep view fills the picture outdoors; a room or a cave, smaller than the view, lies in the
+                # void round it, the picture's edges open sky as in the other views)
+                holes = picture_holes(shot, steep=camera.startswith("s") and int(camera[1:] or 0) >= 60
+                                      and m["kind"] == "outdoor", dark_open=m["kind"] != "outdoor")
                 entry["holes"][camera] = holes
                 if holes >= args.hole_pixels:
                     m["defects"]["hole"].add((place["x"], place["y"]))

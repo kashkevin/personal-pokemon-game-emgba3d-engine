@@ -1120,6 +1120,69 @@ static void SinkCavePools(const struct DioramaSceneSnapshot *snapshot,
     }
 }
 
+/*
+ * The water under a bridge (its lower surface, rules.c FinalizeSurfaces: the
+ * water's nominal level) lies at the level of the water beside it. The passes
+ * above move the water and left the bridge's where it was, with a step between
+ * them that nothing drew: Meteor Falls' bridge kept its water CAVE_POOL_DEPTH
+ * over the sunken river round it, the sky showing through under its deck (step
+ * 16, the world geometry overhaul). The water beside it, the lowest there;
+ * else, with nothing but water and bridge beside it (the middle of a bridge
+ * three wide), a bridge's cell levelled beside it; never up to the deck. A
+ * bridge's cell over the bank keeps its own.
+ */
+static void LevelUnderBridges(const struct DioramaSceneSnapshot *snapshot,
+                              struct DioramaResolvedCell *resolved, unsigned count,
+                              const uint8_t *inWater)
+{
+    static const int step[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+    static uint8_t levelled[DIORAMA_MAX_VISIBLE_CELLS];
+    unsigned i;
+    int pass;
+
+    memset(levelled, 0, count < DIORAMA_MAX_VISIBLE_CELLS ? count : DIORAMA_MAX_VISIBLE_CELLS);
+    for (pass = 0; pass < 3; pass++)
+        for (i = 0; i < count; i++)
+        {
+            struct DioramaResolvedCell *r = &resolved[i];
+            int gx = (int)i % DIORAMA_GRID_WIDTH, gy = (int)i / DIORAMA_GRID_WIDTH;
+            float level = 1.0e9f, bridged = 1.0e9f;
+            bool land = false;
+
+            if (levelled[i] || r->shape != DIORAMA_SHAPE_BRIDGE || r->surfaceCount < 2
+             || !(snapshot->cells[i].flags & DIORAMA_CELL_SOURCE_VALID))
+                continue;
+            for (int d = 0; d < 4; d++)
+            {
+                int nx = gx + step[d][0], ny = gy + step[d][1], n;
+
+                if (nx < 0 || ny < 0 || nx >= DIORAMA_GRID_WIDTH || ny >= DIORAMA_GRID_HEIGHT)
+                    continue;
+                n = ny * DIORAMA_GRID_WIDTH + nx;
+                if ((unsigned)n >= count || !(snapshot->cells[n].flags & DIORAMA_CELL_SOURCE_VALID))
+                    continue;
+                if (inWater[n] == 1)
+                {
+                    if (resolved[n].topHeight < level)
+                        level = resolved[n].topHeight;
+                }
+                else if (resolved[n].shape != DIORAMA_SHAPE_BRIDGE)
+                    land = true;
+                else if (levelled[n] && resolved[n].surfaces[1].topHeight < bridged)
+                    bridged = resolved[n].surfaces[1].topHeight;
+            }
+            if (level > 1.0e8f && !land)
+                level = bridged;
+            if (level > 1.0e8f)
+                continue;
+            if (level > r->groundHeight - 2.0f / 16.0f)
+                level = r->groundHeight - 2.0f / 16.0f;
+            r->surfaces[1].bottomHeight = level - (r->surfaces[1].topHeight - r->surfaces[1].bottomHeight);
+            r->surfaces[1].topHeight = level;
+            levelled[i] = 1;
+        }
+}
+
 
 /*
  * Mt Chimney's crater: its lava lake, which the GBA draws flat at the summit's
@@ -1429,6 +1492,7 @@ void DioramaBuildings_FlattenResolvedCells(const struct DioramaSceneSnapshot *sn
     MarkRocksInWater(snapshot, resolved, count, inWater);
     LevelWaterBodies(snapshot, resolved, count, inWater);
     SinkCavePools(snapshot, resolved, count, inWater);
+    LevelUnderBridges(snapshot, resolved, count, inWater);
     RaiseDunes(snapshot, resolved, count);
     SinkLava(snapshot, resolved, count);
 }

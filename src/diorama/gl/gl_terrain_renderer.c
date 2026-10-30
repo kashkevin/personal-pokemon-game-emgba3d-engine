@@ -9,6 +9,7 @@
 #include "global.h"
 #include "diorama/buildings.h"
 #include "diorama/far_field.h"
+#include "diorama/geometry_probe.h"
 #include "diorama/gl_loader.h"
 #include "diorama/gl_grade.h"
 #include "diorama/gl_lamps.h"
@@ -1611,6 +1612,15 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
             cell->structureOwnerKind = resolvedCells[gridIndex].structureOwnerKind;
             cell->doorFold = resolvedCells[gridIndex].doorFold;
             cell->voidKind = resolvedCells[gridIndex].voidKind;
+#ifdef DIORAMA_BATTLE_ENV_TEST
+            /* the geometry probe's pictures: a room's black void as the black floor it is (geometry_probe.h) */
+            if (cell->shape == DIORAMA_SHAPE_HIDDEN && cell->voidKind == 2
+             && DioramaGeoProbe_VoidFloor(snapshot->mapType))
+            {
+                cell->shape = DIORAMA_SHAPE_FLAT;
+                cell->surfaceCount = 1;
+            }
+#endif
             cell->cliffEdgeMask = resolvedCells[gridIndex].cliffEdgeMask;
             cell->cliffBaseMask = resolvedCells[gridIndex].cliffBaseMask;
             cell->cliffTransitionMask = resolvedCells[gridIndex].cliffTransitionMask;

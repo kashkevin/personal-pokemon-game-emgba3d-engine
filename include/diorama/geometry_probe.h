@@ -36,6 +36,10 @@ bool DioramaGeoProbe_CameraView(float targetX, float targetZ, float groundY, int
                                 struct DioramaCameraView *view);
 /* Render thread (gl_compositor.c SkyColour): the sky the pictures are taken against. */
 bool DioramaGeoProbe_SkyColour(float rgb[3]);
+/* Render thread (gl_terrain_renderer.c, a chunk's cells): true on a tour with the magenta sky in a room or a cave
+ * (map type mapType), whose black void - the GBA's black cells, drawn as nothing, the room's dark showing there - is
+ * then drawn as the black floor the GBA shows, so what shows the sky there is a hole in the scene, not the void. */
+bool DioramaGeoProbe_VoidFloor(uint8_t mapType);
 /* Render thread (platform/sdl2.c, the frame presented): the stem of the picture due now, or NULL; then written. */
 const char *DioramaGeoProbe_CaptureStem(void);
 void DioramaGeoProbe_CaptureWritten(void);

@@ -276,8 +276,8 @@ static void TestStepDownClosesTheGap(void)
     assert(!mesh.usedCompressedOccupancy);
     assert(CountSideQuads(&mesh, -1.0f, -1.0f / 16.0f) == 4);
 
-    /* A ledge or a cliff above it hangs one too; stairs draw their own way
-     * down: no skirt from them. */
+    /* A ledge, a cliff or stairs up above it hang one too (the stairs from
+     * their column's foot, a voxel under their ground). */
     input.cells[1 * DIORAMA_TERRAIN_INPUT_SIZE + 1].shape = DIORAMA_SHAPE_FLAT;
     input.cells[3 * DIORAMA_TERRAIN_INPUT_SIZE + 4].shape = DIORAMA_SHAPE_LEDGE;
     input.cells[3 * DIORAMA_TERRAIN_INPUT_SIZE + 4].behavior = MB_JUMP_SOUTH;
@@ -288,7 +288,7 @@ static void TestStepDownClosesTheGap(void)
     input.cells[5 * DIORAMA_TERRAIN_INPUT_SIZE + 4].shape = DIORAMA_SHAPE_STAIRS;
     input.cells[5 * DIORAMA_TERRAIN_INPUT_SIZE + 4].archetype = DIORAMA_ARCHETYPE_STAIRS_N;
     assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
-    assert(CountSideQuads(&mesh, -1.0f, -1.0f / 16.0f) == 3);
+    assert(CountSideQuads(&mesh, -1.0f, -1.0f / 16.0f) == 4);
 
     /* A ledge on a lower level (the terrace solver's, its lip above it): its
      * bank on that level through the voxel spans too, not none. */
@@ -555,9 +555,18 @@ static void TestBridgeHasTwoSurfaces(void)
     assert(!mesh.usedCompressedOccupancy);
     assert(mesh.topFaceCount == 65);
     assert(mesh.bottomFaceCount == 65);
-    assert(mesh.sideFaceCount == 12);
+    /* the deck's and the water's own, and the ground round it hanging a side
+     * down to the water under it (a voxel here) */
+    assert(mesh.sideFaceCount == 16);
     assert(mesh.bounds.minY == -3.0f / 16.0f);
     assert(mesh.bounds.maxY == 1.75f);
+
+    /* The water under it laid lower, with a cave's sunken pool (buildings.c
+     * LevelUnderBridges): the ground's sides reach down to it. */
+    center->surfaces[1].bottomHeight = -0.5625f;
+    center->surfaces[1].topHeight = -0.5f;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(CountSideQuads(&mesh, -0.5f, -1.0f / 16.0f) == 4);
 }
 
 static void TestStairsAndDescendingStairwell(void)

@@ -18,6 +18,7 @@
 #include "diorama/gl_terrain_renderer.h"
 #include "diorama/scene_snapshot.h"
 #include "geometry_probe_shared.h"
+#include "constants/map_types.h"
 
 #define GEO_MAX_CAMERAS 8
 #define GEO_SETTLE_FRAMES 8         /* presented frames after the scene is first complete */
@@ -234,6 +235,22 @@ bool DioramaGeoProbe_SkyColour(float rgb[3])
     rgb[1] = 0.0f;
     rgb[2] = 1.0f;
     return true;
+}
+
+bool DioramaGeoProbe_VoidFloor(uint8_t mapType)
+{
+    /* read once, before the tour's first place has its first frame (Init): its chunks are built before it */
+    static int sVoidFloor = -1;
+
+    if (sVoidFloor < 0)
+    {
+        const char *tour = SDL_getenv("PKMN_TEST_GEO_TOUR");
+        const char *sky = SDL_getenv("PKMN_TEST_GEO_SKY");
+
+        sVoidFloor = tour != NULL && tour[0] != '\0' && !(sky != NULL && sky[0] == '0');
+    }
+    return sVoidFloor && (mapType == MAP_TYPE_INDOOR || mapType == MAP_TYPE_UNDERGROUND
+                       || mapType == MAP_TYPE_SECRET_BASE);
 }
 
 const char *DioramaGeoProbe_CaptureStem(void)

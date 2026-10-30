@@ -1195,8 +1195,11 @@ static int16_t WholeTop(const struct DioramaTerrainCell *cell)
  * a whole cell, or one standing on its whole cell with sides of its own (a
  * cliff, a ledge, a roof, mountain art) - a slab under anything at or above
  * the ground (under a tree or mountain art: under its ground), a voxel under
- * a cell below it. Anything else (stairs, a bridge, a part of a cell): no
- * skirt (INT16_MIN). */
+ * a cell below it; stairs up, as their column (BuildOccupancy) - the Abandoned
+ * Ship's on Route 108, their ground its deck's, a level over the sea round
+ * them, stood on nothing with the sky under them (step 16, the world geometry
+ * overhaul). Anything else (stairs down, a bridge, a part of a cell): no skirt
+ * (INT16_MIN). */
 static int16_t SkirtFooting(const struct DioramaTerrainCell *cell)
 {
     int16_t top;
@@ -1207,6 +1210,14 @@ static int16_t SkirtFooting(const struct DioramaTerrainCell *cell)
         return HeightToVoxel(cell->groundHeight) - 1;
     if (cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART)
         return HeightToVoxel(cell->groundHeight) - 1;
+    if (cell->shape == DIORAMA_SHAPE_STAIRS)
+    {
+        if (cell->archetype >= DIORAMA_ARCHETYPE_STAIRS_DOWN_N
+         && cell->archetype <= DIORAMA_ARCHETYPE_STAIRS_DOWN_W)
+            return INT16_MIN;
+        top = HeightToVoxel(cell->groundHeight);
+        return top > 0 ? -1 : top - 1;
+    }
     if (!StandsWhole(cell)
      && !((cell->shape == DIORAMA_SHAPE_CLIFF || cell->shape == DIORAMA_SHAPE_LEDGE
         || cell->shape == DIORAMA_SHAPE_ROOF)
@@ -1350,6 +1361,10 @@ static bool AppendSkirtFaces(const struct DioramaTerrainChunkInput *input,
                 }
                 if (StandsWhole(neighbor))
                     neighborTop = WholeTop(neighbor);
+                /* the water under a bridge, its lower surface (buildings.c LevelUnderBridges lays it with the water
+                   round it, which can lie lower than the bank: Meteor Falls' bridge, its cave pool sunk) */
+                else if (neighbor->present && neighbor->shape == DIORAMA_SHAPE_BRIDGE && neighbor->surfaceCount > 1)
+                    neighborTop = HeightToVoxel(neighbor->surfaces[1].topHeight);
                 else
                     continue;
                 if (neighborTop >= footing)
