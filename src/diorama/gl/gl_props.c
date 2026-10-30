@@ -757,6 +757,101 @@ static void MoundHeights(unsigned entry, uint8_t heights[16 * 16])
     }
 }
 
+/* A mound's height at a pixel of its art, 0 past the art's edge. */
+static uint8_t MoundAt(const uint8_t heights[16 * 16], int x, int y)
+{
+    return x < 0 || y < 0 || x > 15 || y > 15 ? 0 : heights[y * 16 + x];
+}
+
+/*
+ * A mound's sides (a block's, its pixels 16 high or nothing): where a pixel's
+ * neighbour is lower (or past the art's edge), down to it, each taking the
+ * colour of the pixel further in (the art's dark outline stays on the top's
+ * edge, the sides show the body); a run of them along a row (north, south) or
+ * a column (east, west) with one height, one neighbour's height and the same
+ * way of taking its colour one quad, showing its pixels in turn.
+ */
+static struct MeshVertex *MoundSides(const uint8_t heights[16 * 16], struct MeshVertex *out)
+{
+    static const int8_t sSides[4][2] = {{0, -1}, {0, 1}, {1, 0}, {-1, 0}}; /* north, south, east, west */
+    /* Lying (a mound) the rows run north-south; standing (a relief) the
+     * row above faces up and the row below down. */
+    static const float sShades[4] = {SHADE_FLAT_NORTH, SHADE_FLAT_SOUTH, SHADE_EAST, SHADE_WEST};
+    static const float sStandingShades[4] = {SHADE_TOP, SHADE_BOTTOM, SHADE_EAST, SHADE_WEST};
+
+    for (int side = 0; side < 4; side++)
+    {
+        int dx = sSides[side][0];
+        int dy = sSides[side][1];
+
+        for (int line = 0; line < 16; line++)
+        {
+            int along = 0;
+
+            while (along < 16)
+            {
+                int x = side < 2 ? along : line;
+                int y = side < 2 ? line : along;
+                uint8_t h = heights[y * 16 + x];
+                uint8_t below = MoundAt(heights, x + dx, y + dy);
+                bool inner = MoundAt(heights, x - dx, y - dy) != 0;
+                int end = along + 1;
+
+                if (h == 0 || below >= h)
+                {
+                    along++;
+                    continue;
+                }
+                while (end < 16)
+                {
+                    int ex = side < 2 ? end : line;
+                    int ey = side < 2 ? line : end;
+
+                    if (heights[ey * 16 + ex] != h || MoundAt(heights, ex + dx, ey + dy) != below
+                     || (MoundAt(heights, ex - dx, ey - dy) != 0) != inner)
+                        break;
+                    end++;
+                }
+                {
+                    /* the line the side stands on, and the art's pixels it shows */
+                    float a[2];
+                    float b[2];
+                    float sa, sb, ta, tb;
+
+                    if (side < 2)
+                    {
+                        float edge = 1.0f - (y + (side == 1)) / 16.0f;
+
+                        a[0] = along / 16.0f; a[1] = edge;
+                        b[0] = end / 16.0f;   b[1] = edge;
+                        sa = a[0]; sb = b[0];
+                        ta = tb = ((inner ? y - dy : y) + 0.5f) / 16.0f;
+                    }
+                    else
+                    {
+                        float edge = (x + (side == 2)) / 16.0f;
+
+                        a[0] = edge; a[1] = 1.0f - along / 16.0f;
+                        b[0] = edge; b[1] = 1.0f - end / 16.0f;
+                        sa = sb = ((inner ? x - dx : x) + 0.5f) / 16.0f;
+                        ta = along / 16.0f; tb = end / 16.0f;
+                    }
+                    {
+                        const float wall[4][5] = {
+                            {a[0], a[1], 0.5f - below / 16.0f, sa, ta}, {b[0], b[1], 0.5f - below / 16.0f, sb, tb},
+                            {b[0], b[1], 0.5f - h / 16.0f, sb, tb}, {a[0], a[1], 0.5f - h / 16.0f, sa, ta},
+                        };
+
+                        out = Quad(out, wall, sStandingShades[side], sShades[side]);
+                    }
+                }
+                along = end;
+            }
+        }
+    }
+    return out;
+}
+
 /*
  * A block's mesh (a hedge, a planter, a wall), in the lying slab's terms as a
  * mound's: its art on top, one quad over its opaque pixels (the shader leaves
@@ -769,20 +864,17 @@ static void MoundHeights(unsigned entry, uint8_t heights[16 * 16])
  */
 static uint32_t BuildBlock(unsigned entry, struct MeshVertex *out)
 {
-    static const float sStandingShades[4] = {SHADE_TOP, SHADE_BOTTOM, SHADE_EAST, SHADE_WEST};
-    static const float sShades[4] = {SHADE_FLAT_NORTH, SHADE_FLAT_SOUTH, SHADE_EAST, SHADE_WEST};
     unsigned originX = (entry % ENTRY_COLUMNS) * ENTRY_STRIDE + 1;
     unsigned originY = (entry / ENTRY_COLUMNS) * ENTRY_STRIDE + 1;
     struct MeshVertex *start = out;
-    bool opaque[16][16];
+    uint8_t heights[16 * 16];
     int minX = 16, minY = 16, maxX = -1, maxY = -1;
-    int side;
 
     for (int y = 0; y < 16; y++)
         for (int x = 0; x < 16; x++)
         {
-            opaque[y][x] = (sArtPixels[(originY + y) * ART_WIDTH + originX + x] >> 24) != 0;
-            if (opaque[y][x])
+            heights[y * 16 + x] = (sArtPixels[(originY + y) * ART_WIDTH + originX + x] >> 24) != 0 ? 16 : 0;
+            if (heights[y * 16 + x] != 0)
             {
                 minX = x < minX ? x : minX;
                 maxX = x > maxX ? x : maxX;
@@ -804,84 +896,7 @@ static uint32_t BuildBlock(unsigned entry, struct MeshVertex *out)
 
         out = Quad(out, top, SHADE_FRONT, SHADE_FLAT_TOP);
     }
-    /* north, south, east, west: along a row for the first two, a column for the others */
-    for (side = 0; side < 4; side++)
-    {
-        static const int8_t sSides[4][2] = {{0, -1}, {0, 1}, {1, 0}, {-1, 0}};
-        int dx = sSides[side][0];
-        int dy = sSides[side][1];
-
-        for (int line = 0; line < 16; line++)
-        {
-            int along = 0;
-
-            while (along < 16)
-            {
-                int x = side < 2 ? along : line;
-                int y = side < 2 ? line : along;
-                int nx = x + dx;
-                int ny = y + dy;
-                bool needed = opaque[y][x] && (nx < 0 || ny < 0 || nx > 15 || ny > 15 || !opaque[ny][nx]);
-                bool inner = x - dx >= 0 && y - dy >= 0 && x - dx <= 15 && y - dy <= 15 && opaque[y - dy][x - dx];
-                int end = along + 1;
-
-                if (!needed)
-                {
-                    along++;
-                    continue;
-                }
-                /* the run: the same side wanted, sampled the same way */
-                while (end < 16)
-                {
-                    int ex = side < 2 ? end : line;
-                    int ey = side < 2 ? line : end;
-                    int enx = ex + dx;
-                    int eny = ey + dy;
-
-                    if (!opaque[ey][ex]
-                     || !(enx < 0 || eny < 0 || enx > 15 || eny > 15 || !opaque[eny][enx])
-                     || inner != (ex - dx >= 0 && ey - dy >= 0 && ex - dx <= 15 && ey - dy <= 15
-                                  && opaque[ey - dy][ex - dx]))
-                        break;
-                    end++;
-                }
-                {
-                    /* the line the side stands on, and the art's pixels it shows */
-                    float a[2];
-                    float b[2];
-                    float sa, sb, ta, tb;
-
-                    if (side < 2)
-                    {
-                        float edge = 1.0f - (y + (side == 1)) / 16.0f;
-                        float t = ((inner ? y - dy : y) + 0.5f) / 16.0f;
-
-                        a[0] = along / 16.0f; a[1] = edge;
-                        b[0] = end / 16.0f;   b[1] = edge;
-                        sa = a[0]; sb = b[0]; ta = tb = t;
-                    }
-                    else
-                    {
-                        float edge = (x + (side == 2)) / 16.0f;
-                        float s = ((inner ? x - dx : x) + 0.5f) / 16.0f;
-
-                        a[0] = edge; a[1] = 1.0f - along / 16.0f;
-                        b[0] = edge; b[1] = 1.0f - end / 16.0f;
-                        sa = sb = s; ta = along / 16.0f; tb = end / 16.0f;
-                    }
-                    {
-                        const float wall[4][5] = {
-                            {a[0], a[1], 0.5f, sa, ta}, {b[0], b[1], 0.5f, sb, tb},
-                            {b[0], b[1], -0.5f, sb, tb}, {a[0], a[1], -0.5f, sa, ta},
-                        };
-
-                        out = Quad(out, wall, sStandingShades[side], sShades[side]);
-                    }
-                }
-                along = end;
-            }
-        }
-    }
+    out = MoundSides(heights, out);
     return (uint32_t)(out - start);
 }
 
@@ -889,70 +904,42 @@ static uint32_t BuildBlock(unsigned entry, struct MeshVertex *out)
  * first row north -, z 0.5 at the ground, -0.5 at the full height). */
 static uint32_t BuildMound(unsigned entry, struct MeshVertex *out)
 {
-    static const int8_t sSides[4][2] = {{0, -1}, {0, 1}, {1, 0}, {-1, 0}}; /* north, south, east, west */
-    /* Lying (a mound) the rows run north-south; standing (a relief) the
-     * row above faces up and the row below down. */
-    static const float sShades[4] = {SHADE_FLAT_NORTH, SHADE_FLAT_SOUTH, SHADE_EAST, SHADE_WEST};
-    static const float sStandingShades[4] = {SHADE_TOP, SHADE_BOTTOM, SHADE_EAST, SHADE_WEST};
     uint8_t heights[16 * 16];
     struct MeshVertex *start = out;
-    int i;
 
     if (sEntryProp[entry] != NULL && sEntryProp[entry]->form == DIORAMA_PROP_BLOCK)
         return BuildBlock(entry, out);
     MoundHeights(entry, heights);
-    for (i = 0; i < 16 * 16; i++)
-    {
-        int x = i % 16;
-        int y = i / 16;
-        float h = heights[i] / 16.0f;
-        float x0 = x / 16.0f;
-        float x1 = (x + 1) / 16.0f;
-        float north = 1.0f - y / 16.0f;
-        float south = 1.0f - (y + 1) / 16.0f;
-        int side;
-
-        if (heights[i] == 0)
-            continue;
+    /* The tops: a run of a row's pixels at one height one quad (step 16, phase D: with a quad a pixel and a wall a
+     * pixel's side the round bushes by the Battle Tower were 1,932 vertices each, 66k a frame; in runs 1,284). */
+    for (int y = 0; y < 16; y++)
+        for (int x = 0; x < 16;)
         {
-            const float top[4][5] = {
-                {x0, north, 0.5f - h, x0, y / 16.0f}, {x1, north, 0.5f - h, x1, y / 16.0f},
-                {x1, south, 0.5f - h, x1, (y + 1) / 16.0f}, {x0, south, 0.5f - h, x0, (y + 1) / 16.0f},
-            };
+            int end = x + 1;
+            float h = heights[y * 16 + x] / 16.0f;
 
-            out = Quad(out, top, SHADE_FRONT, SHADE_FLAT_TOP);
-        }
-        for (side = 0; side < 4; side++)
-        {
-            int nx = x + sSides[side][0];
-            int ny = y + sSides[side][1];
-            /* A wall takes the colour a pixel further in: the art's dark
-             * outline stays on the top's edge, the sides show the body. */
-            int ix = x - sSides[side][0];
-            int iy = y - sSides[side][1];
-            bool inner = ix >= 0 && iy >= 0 && ix <= 15 && iy <= 15 && heights[iy * 16 + ix] != 0;
-            float s = ((inner ? ix : x) + 0.5f) / 16.0f;
-            float t = ((inner ? iy : y) + 0.5f) / 16.0f;
-            float below = nx < 0 || ny < 0 || nx > 15 || ny > 15 ? 0.0f : heights[ny * 16 + nx] / 16.0f;
-            float a[2];
-            float b[2];
-
-            if (below >= h)
-                continue;
-            if (side == 0)      { a[0] = x0; a[1] = north; b[0] = x1; b[1] = north; }
-            else if (side == 1) { a[0] = x0; a[1] = south; b[0] = x1; b[1] = south; }
-            else if (side == 2) { a[0] = x1; a[1] = north; b[0] = x1; b[1] = south; }
-            else                { a[0] = x0; a[1] = north; b[0] = x0; b[1] = south; }
+            if (heights[y * 16 + x] == 0)
             {
-                const float wall[4][5] = {
-                    {a[0], a[1], 0.5f - below, s, t}, {b[0], b[1], 0.5f - below, s, t},
-                    {b[0], b[1], 0.5f - h, s, t}, {a[0], a[1], 0.5f - h, s, t},
+                x++;
+                continue;
+            }
+            while (end < 16 && heights[y * 16 + end] == heights[y * 16 + x])
+                end++;
+            {
+                float x0 = x / 16.0f;
+                float x1 = end / 16.0f;
+                float north = 1.0f - y / 16.0f;
+                float south = 1.0f - (y + 1) / 16.0f;
+                const float top[4][5] = {
+                    {x0, north, 0.5f - h, x0, y / 16.0f}, {x1, north, 0.5f - h, x1, y / 16.0f},
+                    {x1, south, 0.5f - h, x1, (y + 1) / 16.0f}, {x0, south, 0.5f - h, x0, (y + 1) / 16.0f},
                 };
 
-                out = Quad(out, wall, sStandingShades[side], sShades[side]);
+                out = Quad(out, top, SHADE_FRONT, SHADE_FLAT_TOP);
             }
+            x = end;
         }
-    }
+    out = MoundSides(heights, out);
     return (uint32_t)(out - start);
 }
 
@@ -1168,6 +1155,15 @@ void DioramaGLProps_Sync(const struct DioramaSceneSnapshot *snapshot,
             SDL_Log("Diorama: props: %u slabs, %u mounds (%u kinds), %u cards, %u art pieces%s", sSlabCount,
                     sMoundCount, sMoundGroupCount, sCardCount, sEntryCount,
                     complete ? "" : " (more did not fit)");
+            /* each mound or block piece: its metatile, its form, how many stand, its mesh's vertices */
+            for (unsigned g = 0; g < sMoundGroupCount; g++)
+            {
+                const struct DioramaProp *piece = sEntryProp[sMoundGroups[g].entry];
+
+                SDL_Log("Diorama: props: piece 0x%03X form %u x%u, %u vertices each",
+                        piece != NULL ? piece->metatileId : 0u, piece != NULL ? (unsigned)piece->form : 0u,
+                        (unsigned)sMoundGroups[g].instanceCount, (unsigned)sMoundVertexCount[sMoundGroups[g].entry]);
+            }
             sLogged = sSlabCount << 20 ^ sMoundCount << 10 ^ sCardCount;
         }
     }
