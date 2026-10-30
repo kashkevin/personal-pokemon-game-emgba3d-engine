@@ -51,8 +51,22 @@
  * a face's edge never takes the transparent texel beside it. */
 #define TEXEL_INSET 0.01f
 /* What a tree cell is (DioramaCellSnapshot.treeSprite - 1): a large tree's four
- * quarters, the small tree, Dewford Town's small tree. */
-#define PART_COUNT 6
+ * quarters, the small tree, Dewford Town's small tree, an ash-covered large
+ * tree's four quarters (the Fallarbor tileset's). */
+#define PART_COUNT 10
+#define ASH_PART (DIORAMA_TREE_SPRITE_ASH_QUARTER - 1)
+/*
+ * A large tree's quarter whose neighbour in its row (the other half of the
+ * tree) or in its column (the other row) is not a tree cell - a wood's edge
+ * cut by a cliff, a house or a map's border, some 2% of tree cells - stands
+ * rounded off where that half would be, as at the outline, not cut flat:
+ * each part's model in four kinds (a model slot: part * KINDS + kind, kind's
+ * HALF_ALONE and ROW_ALONE bits). The small trees have one.
+ */
+#define KINDS 4
+#define HALF_ALONE 1
+#define ROW_ALONE 2
+#define SLOT_COUNT (PART_COUNT * KINDS)
 #define MAX_MODEL_VERTICES 32768
 #define MAX_MODEL_INDICES (MAX_MODEL_VERTICES / 4 * 6)
 #define MAX_CROWN_WIDTH 32
@@ -117,13 +131,15 @@ struct CrownArt
     uint8_t barkX, barkY;
 };
 
-static const struct CrownArt sCrownArt[3] = {
+static const struct CrownArt sCrownArt[4] = {
     /* the large tree: its crown at 0,0, its trunk's art at 32,0 (a row of the stump's bark) */
     {0, 0, 32, 36, 36, 2, 2, 1.35f, 10.0f, 12.0f, 6, 32 + 7, 18},
     /* the small tree at 32,32, the trunk its art draws from row 24 */
     {32, 32, 16, 32, 24, 1, 1, 0.825f, 6.0f, 7.0f, 4, 32 + 4, 32 + 27},
     /* Dewford Town's at 64,0, from row 23 */
     {64, 0, 16, 32, 23, 1, 1, 0.975f, 6.0f, 7.0f, 4, 64 + 4, 26},
+    /* the ash-covered large tree: the large crown in the ash trees' colours at 0,64, the same bark */
+    {0, 64, 32, 36, 36, 2, 2, 1.35f, 10.0f, 12.0f, 6, 32 + 7, 18},
 };
 
 static bool sReady;
@@ -157,7 +173,7 @@ static uint16_t sModelIndices[MAX_MODEL_INDICES];
 static uint32_t sModelVertexCount;
 static uint32_t sModelIndexCount;
 static bool sModelFull;
-static struct PartModel sParts[PART_COUNT];
+static struct PartModel sParts[SLOT_COUNT];
 /* Each pixel's level while a crown is made: how many CROWN_STEPs it stands out
  * of its plane past its middle voxel, NO_LEAF where there is no leaf. */
 static uint8_t sLevels[MAX_CROWN_HEIGHT][MAX_CROWN_WIDTH];
@@ -167,13 +183,13 @@ static int8_t sMask[MAX_CROWN_HEIGHT * MAX_CROWN_WIDTH];
  * the camera or the trees change; a solid crown is a few hundred faces, and
  * the snapshot holds some thousands of tree cells round a wood). */
 static struct TreeInstance sInstances[DIORAMA_MAX_VISIBLE_CELLS];
-static uint32_t sPartInstanceFirst[PART_COUNT];
-static uint32_t sPartInstanceCount[PART_COUNT];
+static uint32_t sPartInstanceFirst[SLOT_COUNT];
+static uint32_t sPartInstanceCount[SLOT_COUNT];
 static uint32_t sInstanceCount;
 static GLuint sVisibleBuffer;
 static struct TreeInstance sVisible[DIORAMA_MAX_VISIBLE_CELLS];
-static uint32_t sPartVisibleFirst[PART_COUNT];
-static uint32_t sPartVisibleCount[PART_COUNT];
+static uint32_t sPartVisibleFirst[SLOT_COUNT];
+static uint32_t sPartVisibleCount[SLOT_COUNT];
 static bool sVisibleSeen;
 static float sVisibleCamera[4];
 static uint32_t sVisibleGeneration;
@@ -190,7 +206,7 @@ struct TreeKey
 {
     int16_t mapX;
     int16_t mapY;
-    uint8_t sprite;
+    uint8_t slot;
     uint8_t pad[3];
     float ground;
 };
@@ -438,14 +454,14 @@ static void TrunkArt(int texelX, int texelY)
  * transparent bottom margin sunk 0.10 into the ground so the leaves overlap the
  * trunk; each quarter carries its column and row of it.
  */
-static void LargeCrownCard(int part)
+static void LargeCrownCard(const struct CrownArt *art, int part)
 {
     const float rise = 1.723600f;
     const float run = 1.446272f;
     const float baseHeight = -CROWN_SINK;
     int col = part & 1;
     int row = part >> 1;
-    float baseZ = sCrownArt[0].baseZ - (float)row;
+    float baseZ = art->baseZ - (float)row;
     float top = 1.0f - (float)row * 0.5f;
     float bottom = top - 0.5f;
     const float corners[4][3] = {
@@ -455,8 +471,8 @@ static void LargeCrownCard(int part)
         {0.0f, baseHeight + bottom * rise, baseZ - bottom * run},
     };
 
-    ArtQuad(corners, col * 16 * TEXEL, row * 18 * TEXEL, (col * 16 + 16) * TEXEL, (row * 18 + 18) * TEXEL,
-            TILT_COS, TILT_SIN);
+    ArtQuad(corners, (art->x + col * 16) * TEXEL, (art->y + row * 18) * TEXEL, (art->x + col * 16 + 16) * TEXEL,
+            (art->y + row * 18 + 18) * TEXEL, TILT_COS, TILT_SIN);
 }
 
 /*
@@ -488,6 +504,26 @@ static bool Leaf(const struct CrownArt *art, int x, int y)
     return gDioramaTrees3dsRgba[((art->y + y) * DIORAMA_TREES_3DS_DIM + art->x + x) * 4 + 3] >= 128;
 }
 
+/* While a model is made: its part's columns and rows of the art, and which of
+ * its sides face a missing half or row (the crown rounds off there: no leaf
+ * past them, CrownLevels). */
+static int sPartLeft;
+static int sPartTop;
+static int sPartRight;
+static int sPartBottom;
+static bool sCutLeft;
+static bool sCutRight;
+static bool sCutTop;
+static bool sCutBottom;
+
+static bool CrownLeaf(const struct CrownArt *art, int x, int y)
+{
+    if ((sCutLeft && x < sPartLeft) || (sCutRight && x >= sPartRight) || (sCutTop && y < sPartTop)
+     || (sCutBottom && y >= sPartBottom))
+        return false;
+    return Leaf(art, x, y);
+}
+
 /* Each leaf's level (sLevels) from its distance to the outline; the most. */
 static int CrownLevels(const struct CrownArt *art)
 {
@@ -505,14 +541,14 @@ static int CrownLevels(const struct CrownArt *art)
             float e;
             int level;
 
-            if (!Leaf(art, x, y))
+            if (!CrownLeaf(art, x, y))
             {
                 sLevels[y][x] = NO_LEAF;
                 continue;
             }
             for (ey = -1; ey <= art->height; ey++)
                 for (ex = -1; ex <= art->width; ex++)
-                    if (!Leaf(art, ex, ey))
+                    if (!CrownLeaf(art, ex, ey))
                     {
                         int d = (ex - x) * (ex - x) + (ey - y) * (ey - y);
 
@@ -817,36 +853,58 @@ static void Trunk(const struct CrownArt *art, int col, int row)
 static bool BuildModels(void)
 {
     const char *cards = SDL_getenv("PKMN_DIORAMA_TREE_CARDS");
-    int part;
+    int slot;
 
     sVolumes = !(cards != NULL && cards[0] == '1');
     sModelVertexCount = sModelIndexCount = 0;
     sModelFull = false;
-    for (part = 0; part < PART_COUNT; part++)
+    for (slot = 0; slot < SLOT_COUNT; slot++)
     {
-        const struct CrownArt *art = &sCrownArt[part < 4 ? 0 : part - 3];
-        int col = part < 4 ? (part & 1) : 0;
-        int row = part < 4 ? (part >> 1) : 0;
+        int part = slot / KINDS;
+        int kind = slot % KINDS;
+        bool ash = part >= ASH_PART;
+        bool large = part < 4 || ash;
+        const struct CrownArt *art = &sCrownArt[ash ? 3 : large ? 0 : part - 3];
+        int quarter = ash ? part - ASH_PART : part;
+        int col = large ? (quarter & 1) : 0;
+        int row = large ? (quarter >> 1) : 0;
         int columns = art->width / art->columns;
         int rows = art->height / art->rows;
-        int levels = sVolumes ? CrownLevels(art) : 0;
-        struct PartModel *model = &sParts[part];
+        int levels;
+        struct PartModel *model = &sParts[slot];
         uint32_t firstVertex = sModelVertexCount;
         uint32_t i;
         int axis;
 
+        if (kind != 0 && (!large || !sVolumes))
+        {
+            /* one kind of small tree, of cut-out */
+            sParts[slot] = sParts[slot - kind];
+            continue;
+        }
+        sPartLeft = col * columns;
+        sPartRight = sPartLeft + columns;
+        sPartTop = row * rows;
+        sPartBottom = sPartTop + rows;
+        sCutLeft = (kind & HALF_ALONE) && col == 1;
+        sCutRight = (kind & HALF_ALONE) && col == 0;
+        sCutTop = (kind & ROW_ALONE) && row == 1;
+        sCutBottom = (kind & ROW_ALONE) && row == 0;
+        levels = sVolumes ? CrownLevels(art) : 0;
+
         model->shadowFirst = sModelIndexCount;
-        if (part < 4)
-            LargeCrownCard(part);
+        if (large)
+            LargeCrownCard(art, quarter);
         else
             SmallCrownCard(art);
         model->first = sVolumes ? sModelIndexCount : model->shadowFirst;
         if (sVolumes)
             Trunk(art, col, row);
         model->shadowCount = sModelIndexCount - model->shadowFirst;
+        /* the trunk's art on the ground (an ash tree's cell shows its own ash or sand: the 3DS art is grass) */
         if (part < 4)
             TrunkArt(32 + col * 16, row * 16);
-        else
+        else if (!ash)
             TrunkArt(part == 4 ? 48 : 80, part == 4 ? 32 : 0);
         if (sVolumes)
             CrownFaces(art, col * columns, row * rows, columns, rows, col, row, levels, false);
@@ -880,11 +938,11 @@ static bool BuildModels(void)
     SDL_Log("Diorama: trees as %s, %u vertices, %u indices (a large tree's quarters %u %u %u %u, the small trees %u %u;"
             " seen from above and south %u %u %u %u, %u %u)",
             sVolumes ? "solid crowns and trunks" : "cut-outs", (unsigned)sModelVertexCount,
-            (unsigned)sModelIndexCount, (unsigned)sParts[0].count, (unsigned)sParts[1].count,
-            (unsigned)sParts[2].count, (unsigned)sParts[3].count, (unsigned)sParts[4].count,
-            (unsigned)sParts[5].count, (unsigned)sParts[0].seenCount, (unsigned)sParts[1].seenCount,
-            (unsigned)sParts[2].seenCount, (unsigned)sParts[3].seenCount, (unsigned)sParts[4].seenCount,
-            (unsigned)sParts[5].seenCount);
+            (unsigned)sModelIndexCount, (unsigned)sParts[0].count, (unsigned)sParts[KINDS].count,
+            (unsigned)sParts[2 * KINDS].count, (unsigned)sParts[3 * KINDS].count, (unsigned)sParts[4 * KINDS].count,
+            (unsigned)sParts[5 * KINDS].count, (unsigned)sParts[0].seenCount, (unsigned)sParts[KINDS].seenCount,
+            (unsigned)sParts[2 * KINDS].seenCount, (unsigned)sParts[3 * KINDS].seenCount,
+            (unsigned)sParts[4 * KINDS].seenCount, (unsigned)sParts[5 * KINDS].seenCount);
     return true;
 }
 
@@ -942,13 +1000,56 @@ bool DioramaGLTreeSprites_Volumes(void)
     return sReady && sVolumes;
 }
 
+/* Whether the tree cell at (mapX, mapY) holds the sprite given (a quarter's
+ * partner); a cell past the snapshot's grid counts as holding it, so a tree at
+ * the scene's edge does not change as the grid moves. */
+static bool CellHolds(const struct DioramaSceneSnapshot *snapshot, int mapX, int mapY, uint8_t sprite)
+{
+    int gridX = mapX - snapshot->gridOriginX;
+    int gridY = mapY - snapshot->gridOriginY;
+    int index = gridY * DIORAMA_GRID_WIDTH + gridX;
+
+    if (gridX < 0 || gridY < 0 || gridX >= DIORAMA_GRID_WIDTH || gridY >= DIORAMA_GRID_HEIGHT
+     || index >= (int)snapshot->visibleCellCount)
+        return true;
+    return snapshot->cells[index].treeSprite == sprite;
+}
+
+/* A tree cell's model slot: its part, and for a large tree's quarter whether
+ * the other half of its row and the other row of its column are there. */
+static int CellSlot(const struct DioramaSceneSnapshot *snapshot, const struct DioramaCellSnapshot *cell)
+{
+    int part = cell->treeSprite - 1;
+    int first;
+    int quarter;
+    int col;
+    int row;
+    int kind = 0;
+
+    if (part >= ASH_PART)
+        first = DIORAMA_TREE_SPRITE_ASH_QUARTER;
+    else if (part < 4)
+        first = DIORAMA_TREE_SPRITE_QUARTER;
+    else
+        return part * KINDS;
+    quarter = cell->treeSprite - first;
+    col = quarter & 1;
+    row = quarter >> 1;
+    if (!CellHolds(snapshot, cell->mapX + (col == 0 ? 1 : -1), cell->mapY,
+                   (uint8_t)(first + (quarter ^ 1))))
+        kind |= HALF_ALONE;
+    if (!CellHolds(snapshot, cell->mapX, cell->mapY + (row == 0 ? 1 : -1), (uint8_t)(first + (quarter ^ 2))))
+        kind |= ROW_ALONE;
+    return part * KINDS + kind;
+}
+
 void DioramaGLTreeSprites_Sync(const struct DioramaSceneSnapshot *snapshot,
                                const struct DioramaResolvedCell *resolvedCells)
 {
-    uint32_t filled[PART_COUNT];
+    uint32_t filled[SLOT_COUNT];
     unsigned count = 0;
     unsigned i;
-    int part;
+    int slot;
 
     if (!sReady || snapshot == NULL || snapshot->sequence == sSequence)
         return;
@@ -964,7 +1065,7 @@ void DioramaGLTreeSprites_Sync(const struct DioramaSceneSnapshot *snapshot,
         memset(key, 0, sizeof(*key));
         key->mapX = cell->mapX;
         key->mapY = cell->mapY;
-        key->sprite = cell->treeSprite;
+        key->slot = (uint8_t)CellSlot(snapshot, cell);
         key->ground = resolvedCells[i].topHeight;
     }
     if (sKeysValid && count == sKeyCount
@@ -973,21 +1074,20 @@ void DioramaGLTreeSprites_Sync(const struct DioramaSceneSnapshot *snapshot,
     memcpy(sKeys, sNewKeys, count * sizeof(struct TreeKey));
     sKeyCount = count;
     sKeysValid = true;
-    /* each part's instances together, in the snapshot's order */
+    /* each slot's instances together, in the snapshot's order */
     memset(sPartInstanceCount, 0, sizeof(sPartInstanceCount));
     for (i = 0; i < count; i++)
-        sPartInstanceCount[sKeys[i].sprite - 1]++;
-    for (part = 0, sInstanceCount = 0; part < PART_COUNT; part++)
+        sPartInstanceCount[sKeys[i].slot]++;
+    for (slot = 0, sInstanceCount = 0; slot < SLOT_COUNT; slot++)
     {
-        sPartInstanceFirst[part] = sInstanceCount;
-        filled[part] = 0;
-        sInstanceCount += sPartInstanceCount[part];
+        sPartInstanceFirst[slot] = sInstanceCount;
+        filled[slot] = 0;
+        sInstanceCount += sPartInstanceCount[slot];
     }
     for (i = 0; i < count; i++)
     {
         const struct TreeKey *key = &sKeys[i];
-        int index = key->sprite - 1;
-        struct TreeInstance *instance = &sInstances[sPartInstanceFirst[index] + filled[index]++];
+        struct TreeInstance *instance = &sInstances[sPartInstanceFirst[key->slot] + filled[key->slot]++];
 
         instance->x = (float)key->mapX - 0.5f;
         instance->y = key->ground;
@@ -1009,7 +1109,7 @@ static void DrawParts(bool shadow)
 
     dglBindVertexArray(sVertexArray);
     dglBindBuffer(GL_ARRAY_BUFFER, shadow ? sInstanceBuffer : sVisibleBuffer);
-    for (part = 0; part < PART_COUNT; part++)
+    for (part = 0; part < SLOT_COUNT; part++)
     {
         const struct PartModel *model = &sParts[part];
         uint32_t first = shadow ? model->shadowFirst : model->first;
@@ -1051,7 +1151,7 @@ static void ChooseVisible(float cameraX, float cameraZ, float cameraPitch, float
     sVisibleValid = true;
     sVisibleSeen = true;
     DioramaTerrain_PrepareView(&view, cameraX, cameraZ, cameraPitch, focalLength);
-    for (part = 0; part < PART_COUNT; part++)
+    for (part = 0; part < SLOT_COUNT; part++)
     {
         const struct PartModel *model = &sParts[part];
         uint32_t i;

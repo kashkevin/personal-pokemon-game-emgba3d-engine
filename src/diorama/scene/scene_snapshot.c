@@ -707,7 +707,8 @@ static bool CopyOutsideCell(struct DioramaSceneSnapshot *snapshot, int mapX, int
  * tileset a tree's cells are published as ground (its trunk's art covers
  * them), remembering what part of the tree each was, and the cells its old
  * canopy covered get their ground back (VoxelWorld_UsesTreeSprites and the
- * classification of voxel_world.c). Connected maps share the map's tilesets
+ * classification of voxel_world.c). The Fallarbor tileset's ash-covered trees
+ * too (step 16), each cell's ground the ash or the sand under it. Connected maps share the map's tilesets
  * (TryCopyConnectedCell), the border cells too, but for those on a page: they
  * share its primary (General) and have their own secondary.
  */
@@ -728,9 +729,19 @@ static void ApplyTreeSprites(struct DioramaSceneSnapshot *snapshot)
         const struct MapLayout *layout = cell->atlasPage != 0 ? sPageLayouts[cell->atlasPage - 1]
                                                               : mapLayout;
         bool dewford = layout->secondaryTileset == &gTileset_Dewford;
-        int part = DioramaTreeSprites_Part(dewford, cell->metatileId);
+        int part = layout->secondaryTileset == &gTileset_Fallarbor ? DioramaTreeSprites_AshPart(cell->metatileId)
+                                                                   : DIORAMA_TREE_PART_NONE;
         uint16_t ground;
 
+        /* an ash-covered tree: its cell's own ground under the solid tree */
+        if (part != DIORAMA_TREE_PART_NONE)
+        {
+            if (CopyCellVisual(layout, DioramaTreeSprites_AshGround(cell->metatileId), cell->collision,
+                               cell->elevation, cell))
+                cell->treeSprite = DIORAMA_TREE_SPRITE_ASH_QUARTER + part;
+            continue;
+        }
+        part = DioramaTreeSprites_Part(dewford, cell->metatileId);
         if (part != DIORAMA_TREE_PART_NONE)
         {
             bool secondary = cell->metatileId >= NUM_METATILES_IN_PRIMARY;

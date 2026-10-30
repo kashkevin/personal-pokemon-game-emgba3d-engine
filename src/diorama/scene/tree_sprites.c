@@ -85,4 +85,32 @@ uint16_t DioramaTreeSprites_TrunkGround(bool dewford)
     return dewford ? 0x124 : 0x001; /* sand, grass */
 }
 
+int DioramaTreeSprites_AshPart(uint16_t metatileId)
+{
+    /* The 2x2 tree on the ash (Route 113), then on the volcanic sand (Route
+     * 114, Fallarbor Town): its quarters inside a wood, its upper row beside
+     * open ground (0x204-0x207) and its lower row at a wood's foot
+     * (0x20C-0x20F), as the metatiles lie beside and over one another on the
+     * three maps. */
+    switch (metatileId)
+    {
+    case 0x26E: case 0x205: case 0x26C: case 0x207: return 0;
+    case 0x26D: case 0x204: case 0x26B: case 0x206: return 1;
+    case 0x276: case 0x20D: case 0x274: case 0x20F: return 2;
+    case 0x275: case 0x20C: case 0x273: case 0x20E: return 3;
+    default: return DIORAMA_TREE_PART_NONE;
+    }
+}
+
+uint16_t DioramaTreeSprites_AshGround(uint16_t metatileId)
+{
+    switch (metatileId)
+    {
+    case 0x26C: case 0x207: case 0x26B: case 0x206: case 0x274: case 0x20F: case 0x273: case 0x20E:
+        return 0x279; /* volcanic sand */
+    default:
+        return 0x218; /* ash */
+    }
+}
+
 #endif // ENABLE_DIORAMA

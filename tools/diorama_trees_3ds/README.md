@@ -20,7 +20,9 @@ During a `DIORAMA=1` build `diorama_rules.mk` runs
         --source src/data/diorama/trees_3ds.generated.c \
         --header include/diorama/trees_3ds.generated.h
 
-which packs `art/*.png` into one 128x128 RGBA texture (layout in `pack_trees.py`).
+which packs `art/*.png` into one 128x128 RGBA texture (layout in `pack_trees.py`),
+with the large crown again at 0,64 in the colours of the Fallarbor tileset's
+ash-covered trees (step 16: Routes 113 and 114 and Fallarbor Town stand theirs with it).
 It needs Pillow, as the building generator does.
 
 ## Provenance

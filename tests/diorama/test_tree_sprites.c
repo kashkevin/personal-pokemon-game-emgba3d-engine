@@ -52,6 +52,26 @@ int main(void)
     CHECK(DioramaTreeSprites_GroundMetatile(false, 0x1CE) == 0x001);
     CHECK(DioramaTreeSprites_TrunkGround(false) == 0x001);
     CHECK(DioramaTreeSprites_TrunkGround(true) == 0x124);
+    /* The Fallarbor tileset's ash-covered trees (step 16): Route 113's wood, the same tree beside open ash, at a
+     * wood's foot, on Route 114's volcanic sand; each cell's ground the ash or the sand. */
+    {
+        static const uint16_t sAsh[][4] = {
+            {0x26E, 0x26D, 0x276, 0x275}, {0x205, 0x204, 0x20D, 0x20C},
+            {0x26C, 0x26B, 0x274, 0x273}, {0x207, 0x206, 0x20F, 0x20E},
+        };
+        unsigned j;
+
+        for (i = 0; i < sizeof(sAsh) / sizeof(sAsh[0]); i++)
+            for (j = 0; j < 4; j++)
+            {
+                CHECK(DioramaTreeSprites_AshPart(sAsh[i][j]) == (int)j);
+                CHECK(DioramaTreeSprites_AshGround(sAsh[i][j]) == (i < 2 ? 0x218 : 0x279));
+            }
+        /* the ash itself, the ash grass, a rock: not trees */
+        CHECK(DioramaTreeSprites_AshPart(0x218) == DIORAMA_TREE_PART_NONE);
+        CHECK(DioramaTreeSprites_AshPart(0x20A) == DIORAMA_TREE_PART_NONE);
+        CHECK(DioramaTreeSprites_AshPart(0x269) == DIORAMA_TREE_PART_NONE);
+    }
     puts("tree sprite tests passed");
     return EXIT_SUCCESS;
 }

@@ -23,6 +23,7 @@
 #define DIORAMA_TREE_SPRITE_QUARTER 1       /* 1-4: a large tree's 2x2 quarter, 1 + row * 2 + column */
 #define DIORAMA_TREE_SPRITE_SMALL 5         /* the General tileset's small tree */
 #define DIORAMA_TREE_SPRITE_SMALL_DEWFORD 6 /* Dewford Town's small tree */
+#define DIORAMA_TREE_SPRITE_ASH_QUARTER 7   /* 7-10: an ash-covered large tree's quarter (the Fallarbor tileset's) */
 
 /* DioramaTreeSprites_Part's answers, the 3DS port's VoxelTree_Part. */
 #define DIORAMA_TREE_PART_NONE (-1)
@@ -40,5 +41,15 @@ int DioramaTreeSprites_Part(bool dewford, uint16_t metatileId);
 uint16_t DioramaTreeSprites_GroundMetatile(bool dewford, uint16_t metatileId);
 /* The ground under a tree's own cells (the trunk art covers it all). */
 uint16_t DioramaTreeSprites_TrunkGround(bool dewford);
+/*
+ * The Fallarbor tileset's ash-covered trees (Routes 113 and 114, Fallarbor
+ * Town; step 16, the project's own, not the 3DS port's), laid out as the
+ * General tileset's dense forest: a large tree's quarter (0-3, row * 2 +
+ * column) or DIORAMA_TREE_PART_NONE, and the ground its cell shows under the
+ * solid tree (the ash, or the volcanic sand of the sandy variants: no trunk's
+ * art is laid on it).
+ */
+int DioramaTreeSprites_AshPart(uint16_t metatileId);
+uint16_t DioramaTreeSprites_AshGround(uint16_t metatileId);
 
 #endif

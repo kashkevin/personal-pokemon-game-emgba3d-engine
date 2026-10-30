@@ -4,7 +4,8 @@
 Port of ZallaxDev/pokeemerald-3Ds-dualscreen `3ds_port/scripts/gen_voxel_trees.py`
 (commit 4a699e3, MIT; see README.md here): the same 128x128 layout - large crown at
 0,0, large trunk at 32,0, small crown at 32,32, small trunk at 48,32, Dewford's small
-crown at 64,0 and its trunk at 80,0 - with the same one-bit alpha (opaque from 128),
+crown at 64,0 and its trunk at 80,0; the project's own ash-covered large crown at 0,64 -
+with the same one-bit alpha (opaque from 128),
 the same 5 bits a channel (RGBA5551), and the crowns 1.12 times as bright, as
 `3ds_port/src/voxel/ctr_voxel.c` BrightenCrowns makes them when the texture loads
 ("dense woods read as dark masses in 3D"), but as RGBA8 rows from the top, the way
@@ -23,10 +24,18 @@ SOURCES = (("tree_crown.png", (32, 36), (0, 0)),
            ("tree_small_trunk.png", (16, 16), (48, 32)),
            ("tree_2_small_crown.png", (16, 32), (64, 0)),
            ("tree_2_small_trunk.png", (16, 16), (80, 0)))
+# The Fallarbor tileset's ash-covered trees (Routes 113 and 114, Fallarbor Town; step 16 of
+# the project's own work, not the 3DS port's): the large crown again at 0,64 in their
+# colours, each of its four - outline, shade, leaf, light - as the GBA's ash tree draws
+# that part (Route 113's 0x26E and the metatiles round it).
+ASH_CROWN = (0, 64)
+ASH_COLOURS = {(56, 80, 0): (74, 82, 33), (56, 136, 48): (115, 132, 49),
+               (128, 192, 96): (156, 189, 99), (176, 248, 128): (198, 255, 156)}
 # ctr_voxel.c: VOXEL_TREE_BRIGHTNESS and BrightenCrowns' rectangles (x, y, w, h),
-# the crowns only: the trunks' ground is the tileset's own and must match the grass.
+# the crowns only (the ash crown too): the trunks' ground is the tileset's own and must
+# match the grass.
 CROWN_BRIGHTNESS = 1.12
-CROWNS = ((0, 0, 32, 36), (32, 32, 16, 32), (64, 0, 16, 32))
+CROWNS = ((0, 0, 32, 36), (32, 32, 16, 32), (64, 0, 16, 32), (0, 64, 32, 36))
 
 
 def channel(value):
@@ -51,6 +60,17 @@ def pack(art):
             if source.size != size:
                 raise ValueError(f"{name}: expected {size}, got {source.size}")
             atlas.paste(source.convert("RGBA"), origin)
+    with Image.open(art / "tree_crown.png") as source:
+        ash = source.convert("RGBA")
+    pixels = ash.load()
+    for y in range(ash.height):
+        for x in range(ash.width):
+            r, g, b, a = pixels[x, y]
+            if a >= 128:
+                if (r, g, b) not in ASH_COLOURS:
+                    raise ValueError(f"tree_crown.png: colour {(r, g, b)} has no ash colour")
+                pixels[x, y] = ASH_COLOURS[(r, g, b)] + (a,)
+    atlas.paste(ash, ASH_CROWN)
     pixels = bytearray(atlas.tobytes())
     for i in range(0, len(pixels), 4):
         if pixels[i + 3] >= 128:
