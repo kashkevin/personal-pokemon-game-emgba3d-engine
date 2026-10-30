@@ -1753,6 +1753,78 @@ void DioramaGL_UploadFrame(const u32 *argb8888)
     sUiUploaded = true;
 }
 
+/*
+ * The 3D field's frame times on each map, a line in the log when the map changes and when the game closes (step 16,
+ * phase E): the time from one presented 3D frame to the next - its median, the time 95 in 100 frames came within,
+ * the slowest - with the renderer's name. What a player's own log can tell of the 3D view's speed on their graphics
+ * card and over a long session, without the profile (PKMN_DIORAMA_PROFILE=1) and its cost. In 1 ms steps to 250 ms;
+ * a frame's own clock read is all it costs. Frames of menus, battles and the 2D view are not counted, and the next
+ * 3D frame after them starts afresh.
+ */
+#define FRAME_SUMMARY_STEPS 251
+static uint32_t sFrameSteps[FRAME_SUMMARY_STEPS];
+static uint32_t sFrameCount;
+static int sFrameMap = -1;
+static uint64_t sFrameLast;
+static double sFrameSlowest;
+
+static void LogFrameSummary(void)
+{
+    uint32_t seen = 0;
+    int median = -1;
+    int within = -1;
+    int step;
+    char renderer[256];
+
+    if (sFrameMap >= 0 && sFrameCount >= 60)
+    {
+        for (step = 0; step < FRAME_SUMMARY_STEPS && within < 0; step++)
+        {
+            seen += sFrameSteps[step];
+            if (median < 0 && (uint64_t)seen * 2 >= sFrameCount)
+                median = step;
+            if ((uint64_t)seen * 100 >= (uint64_t)sFrameCount * 95)
+                within = step;
+        }
+        DioramaGL_DescribeRenderer(renderer, sizeof(renderer));
+        SDL_Log("Diorama: frame times on map %d.%d: %u frames in 3D, median %d ms, 95%% within %d%s ms, slowest %.0f ms "
+                "(%s)", sFrameMap >> 8, sFrameMap & 0xFF, (unsigned)sFrameCount, median,
+                within, within == FRAME_SUMMARY_STEPS - 1 ? "+" : "", sFrameSlowest, renderer);
+    }
+    memset(sFrameSteps, 0, sizeof(sFrameSteps));
+    sFrameCount = 0;
+    sFrameSlowest = 0.0;
+}
+
+static void CountFrame(bool field3D)
+{
+    uint64_t now = SDL_GetPerformanceCounter();
+    int map = sRenderedSceneSnapshot.mapGroup << 8 | sRenderedSceneSnapshot.mapNum;
+    double ms;
+
+    if (!field3D || !sHasRenderedSceneSnapshot)
+    {
+        sFrameLast = 0;
+        return;
+    }
+    if (map != sFrameMap)
+    {
+        LogFrameSummary();
+        sFrameMap = map;
+        sFrameLast = now;
+        return;
+    }
+    if (sFrameLast != 0)
+    {
+        ms = (double)(now - sFrameLast) * 1000.0 / (double)SDL_GetPerformanceFrequency();
+        sFrameSteps[ms >= FRAME_SUMMARY_STEPS - 1 ? FRAME_SUMMARY_STEPS - 1 : (int)(ms + 0.5)]++;
+        sFrameCount++;
+        if (ms > sFrameSlowest)
+            sFrameSlowest = ms;
+    }
+    sFrameLast = now;
+}
+
 void DioramaGL_Present(u8 background, bool border, bool integerScale, float frameAlpha)
 {
     int outputWidth;
@@ -2248,6 +2320,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     SDL_GL_SwapWindow(sWindow);
     DioramaProfile_End(DIORAMA_PROF_SWAP);
     DioramaProfile_FrameDone();
+    CountFrame(drawTerrain);
 }
 
 void DioramaGL_SetOverlay(void (*overlay)(int outputWidth, int outputHeight))
@@ -2595,6 +2668,7 @@ void DioramaGL_PhotoPan(int dx, int dz)
 
 void DioramaGL_Shutdown(void)
 {
+    LogFrameSummary();
     DioramaPCOverlay_Shutdown();
     DioramaGLTarget_Shutdown();
     DioramaGLBattle_Shutdown();
