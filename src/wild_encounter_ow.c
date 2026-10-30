@@ -883,7 +883,16 @@ void StartWildBattleWithOWE(struct ScriptContext *ctx)
     u32 objEventId = GetObjectEventIdByLocalId(localId);
     u32 headerId = GetCurrentMapWildMonHeaderId();
     struct ObjectEvent *owe = &gObjectEvents[objEventId];
+#ifdef PORTABLE
+    // The Pokemon may be gone (the field's palettes running out removes the oldest: sprite.c LoadSpritePalette), and
+    // gObjectEvents[OBJECT_EVENTS_COUNT] is the memory after the array (upstream bug; AddressSanitizer): its category
+    // is read once it is known to be there (the check below).
+    enum CategoryOWE category = objEventId < OBJECT_EVENTS_COUNT ? GetOWECategory(owe) : OWE_CATEGORY_UNDEFINED;
+#else
+#line 456 // gba-line
     enum CategoryOWE category = GetOWECategory(owe);
+#endif
+#line 457 // gba-line
 
     Script_RequestEffects(SCREFF_V1 | SCREFF_HARDWARE);
 
@@ -1264,6 +1273,15 @@ static u32 GetOldestActiveOWESlot(bool32 forceRemove)
 
     for (spawnSlot = 0; spawnSlot < OWE_SPAWNS_MAX; spawnSlot++)
     {
+#ifdef PORTABLE
+        // A slot with no Pokemon has no object: GetObjectEventIdByLocalId returns OBJECT_EVENTS_COUNT, and
+        // gObjectEvents[OBJECT_EVENTS_COUNT] is the memory after the array, read as a Pokemon whose local id
+        // would name the object to remove (upstream bug). The field's palettes running out removes them one
+        // by one with others' slots empty (sprite.c LoadSpritePalette, RemoveOldestGeneratedOWE).
+        if (GetObjectEventIdByLocalId(GetLocalIdByOWESpawnSlot(spawnSlot)) >= OBJECT_EVENTS_COUNT)
+            continue;
+#endif
+#line 805 // gba-line
         slotMon = &gObjectEvents[GetObjectEventIdByLocalId(GetLocalIdByOWESpawnSlot(spawnSlot))];
         if (OW_SPECIES(slotMon) != SPECIES_NONE && (!HasOWENoDespawnFlag(slotMon) || forceRemove == TRUE))
         {
@@ -1277,6 +1295,11 @@ static u32 GetOldestActiveOWESlot(bool32 forceRemove)
 
     for (u32 i = spawnSlot; i < OWE_SPAWNS_MAX; i++)
     {
+#ifdef PORTABLE
+        if (GetObjectEventIdByLocalId(GetLocalIdByOWESpawnSlot(i)) >= OBJECT_EVENTS_COUNT)
+            continue;   // an empty slot (above)
+#endif
+#line 818 // gba-line
         slotMon = &gObjectEvents[GetObjectEventIdByLocalId(GetLocalIdByOWESpawnSlot(i))];
         if (OW_SPECIES(slotMon) != SPECIES_NONE && (!HasOWENoDespawnFlag(slotMon) || forceRemove == TRUE))
         {
@@ -1543,6 +1566,13 @@ static void SortOWEAges(void)
 
     for (i = 0; i < OWE_SPAWNS_MAX; i++)
     {
+#ifdef PORTABLE
+        // An empty slot below the one just filled has no object: gObjectEvents[OBJECT_EVENTS_COUNT] is the memory
+        // after the array (upstream bug; GetOldestActiveOWESlot).
+        if (GetObjectEventIdByLocalId(GetLocalIdByOWESpawnSlot(i)) >= OBJECT_EVENTS_COUNT)
+            continue;
+#endif
+#line 1060 // gba-line
         slotMon = &gObjectEvents[GetObjectEventIdByLocalId(GetLocalIdByOWESpawnSlot(i))];
         // OWE_ANY can be used here as localId is guarenteed to be in the OWE_GENERATED range by GetLocalIdByOWESpawnSlot.
         if (IsOverworldWildEncounter(slotMon, OWE_ANY) && OW_SPECIES(slotMon) != SPECIES_NONE)
@@ -1555,6 +1585,12 @@ static void SortOWEAges(void)
             break;
     }
 
+#ifdef PORTABLE
+    // Only the slots found are sorted: the rest of the array was never written, and an age written through one of its
+    // slots went past the object array.
+    numActive = count;
+#endif
+#line 1072 // gba-line
     for (i = 1; i < numActive; i++)
     {
         current = array[i];

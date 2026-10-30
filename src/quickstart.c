@@ -18,13 +18,21 @@
 
 #define TAG_SKIP_INTRO 2000
 
+#ifdef PORTABLE
+// LoadSpritePalette copies a whole palette, 16 colours, and these have 6: the title screen read the 20 bytes after
+// them (AddressSanitizer)
+#define QUICKSTART_HUD_PAL_COLORS 16
+#else
+#define QUICKSTART_HUD_PAL_COLORS
+#endif
+#line 21 // gba-line
 static const u32 gQuickstartHudGfx[] = INCGFX_U32("graphics/quickstart/quickstart_hud.png", ".4bpp.smol");
 #if FIRERED
-static const u16 gQuickstartHudPal[] = INCGFX_U16("graphics/quickstart/firered.pal", ".gbapal");
+static const u16 gQuickstartHudPal[QUICKSTART_HUD_PAL_COLORS] = INCGFX_U16("graphics/quickstart/firered.pal", ".gbapal");
 #elif LEAFGREEN
-static const u16 gQuickstartHudPal[] = INCGFX_U16("graphics/quickstart/leafgreen.pal", ".gbapal");
+static const u16 gQuickstartHudPal[QUICKSTART_HUD_PAL_COLORS] = INCGFX_U16("graphics/quickstart/leafgreen.pal", ".gbapal");
 #else
-static const u16 gQuickstartHudPal[] = INCGFX_U16("graphics/quickstart/emerald.pal", ".gbapal");
+static const u16 gQuickstartHudPal[QUICKSTART_HUD_PAL_COLORS] = INCGFX_U16("graphics/quickstart/emerald.pal", ".gbapal");
 #endif
 
 static const struct OamData sQuickstartHudOam = {

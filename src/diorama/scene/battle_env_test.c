@@ -37,6 +37,7 @@
 #include "party_menu.h"
 #include "daycare.h"
 #include "pokedex.h"
+#include "rtc.h"
 #include "decoration_inventory.h"
 #include "constants/decorations.h"
 #include "hall_of_fame.h"
@@ -344,6 +345,16 @@ static struct
        tile memory full) */
     int paletteFree, tilesFullAt, tilesFrames;
     bool tilesFull;
+    /* PKMN_TEST_PALETTE_SQUEEZE=<frames>: every that many field frames, stand-in palettes loaded until none loads (the
+       field's oldest visible wild Pokemon removed one by one to make room: sprite.c LoadSpritePalette), then freed */
+    int paletteSqueeze, squeezeFrames;
+    /* PKMN_TEST_CLOCK=HH:MM: the game's clock set to that time once the field is up (a long stay past an hour's or a
+       day's end: DoTimeBasedEvents), then "clock: day D HH:MM" every ten seconds of field */
+    int clockHour, clockMinute, clockFrames;
+    bool clockSet;
+    /* PKMN_TEST_SAFARI_LIMITS=<balls>:<steps>: each Safari game a test starts (PKMN_TEST_SAFARI, SAFARI) with only
+       that many Safari Balls and steps left, so its end (out of balls, the PA's "Time's up!") comes soon */
+    int safariBalls, safariSteps;
     /* PKMN_TEST_STAGE_LOG=1: "stages ..." lines whenever a battler's stat stages (shown and the engine's), its place's
        Pokemon or a party member's kept stages change, and the battle's start and end (StageLogFrame); what was last
        logged. PKMN_TEST_STAGE_SHOTS=1: a picture at an action menu once the tags changed (StageShot). */
@@ -625,6 +636,13 @@ static void Init(void)
     if (value == NULL || sscanf(value, "%d:%d:%d", &s.roamerSpecies, &s.roamerLevel, &s.roamerShiny) != 3)
         s.roamerSpecies = 0;
     s.paletteFree = EnvInt("PKMN_TEST_PALETTE_FREE", 0);
+    s.paletteSqueeze = EnvInt("PKMN_TEST_PALETTE_SQUEEZE", 0);
+    value = SDL_getenv("PKMN_TEST_SAFARI_LIMITS");
+    if (value == NULL || sscanf(value, "%d:%d", &s.safariBalls, &s.safariSteps) != 2)
+        s.safariBalls = s.safariSteps = 0;
+    value = SDL_getenv("PKMN_TEST_CLOCK");
+    if (value == NULL || sscanf(value, "%d:%d", &s.clockHour, &s.clockMinute) != 2)
+        s.clockHour = -1;
     s.tilesFullAt = EnvInt("PKMN_TEST_TILES_FULL", 0);
     s.oweCount = EnvInt("PKMN_TEST_OWE_COUNT", 0) != 0;
     s.oweNoBattle = EnvInt("PKMN_TEST_OWE_NO_BATTLE", 0) != 0;
@@ -2028,6 +2046,26 @@ static void CrowdField(void)
             FreeSpritePaletteByTag(tag);
         }
     }
+    if (s.paletteSqueeze > 0 && ++s.squeezeFrames % s.paletteSqueeze == 0)
+    {
+        int before = (int)GetNumberOfActiveOWEs(OWE_GENERATED), loaded = 0;
+
+        for (int tag = DUMMY_PALETTE_TAG; tag < DUMMY_PALETTE_TAG + 16; tag++)
+        {
+            struct SpritePalette palette = {sDummyColors, tag};
+
+            if (IndexOfSpritePaletteTag(tag) != 0xFF)
+                continue;
+            if (LoadSpritePalette(&palette) == 0xFF)
+                break;
+            loaded++;
+        }
+        TestLog("Battle env test: palette squeeze: %d stand-ins, visible wild Pokemon %d -> %d", loaded, before,
+                (int)GetNumberOfActiveOWEs(OWE_GENERATED));
+        for (int tag = DUMMY_PALETTE_TAG; tag < DUMMY_PALETTE_TAG + 16; tag++)
+            if (IndexOfSpritePaletteTag(tag) != 0xFF)
+                FreeSpritePaletteByTag(tag);
+    }
     if (s.tilesFullAt > 0 && (s.tilesFull || ++s.tilesFrames >= s.tilesFullAt))
     {
         int taken = 0;
@@ -2038,6 +2076,32 @@ static void CrowdField(void)
             TestLog("Battle env test: sprite tiles full: %d more taken", taken);
         s.tilesFull = true;
     }
+}
+
+static void EnterTestSafari(void)
+{
+    EnterSafariMode();
+    if (s.safariBalls > 0)
+        gNumSafariBalls = (u8)s.safariBalls;
+    if (s.safariSteps > 0)
+        gSafariZoneStepCounter = (u16)s.safariSteps;
+}
+
+static void ClockField(void)
+{
+    if (s.clockHour < 0 || gMain.inBattle || SDL_AtomicGet(&s.fieldSeen) == 0 || gSaveBlock1Ptr == NULL
+     || gMain.callback2 != CB2_Overworld)
+        return;
+    if (!s.clockSet)
+    {
+        s.clockSet = true;
+        RtcCalcLocalTimeOffset(0, s.clockHour, s.clockMinute, 0);
+    }
+    if (s.clockFrames++ % 600 != 0)
+        return;
+    RtcCalcLocalTime();
+    TestLog("Battle env test: clock: day %d %02d:%02d:%02d", gLocalTime.days, gLocalTime.hours, gLocalTime.minutes,
+            gLocalTime.seconds);
 }
 
 /* PKMN_TEST_OUTBREAK / PKMN_TEST_ROAMER, as the field starts: a TV mass outbreak (every land spawn of the map its
@@ -2110,7 +2174,7 @@ static void OweBattleField(void)
      && gMain.callback2 == CB2_Overworld && !gMain.inBattle)
     {
         s.safariEntered = true;
-        EnterSafariMode();
+        EnterTestSafari();
         TestLog("Battle env test: Safari Zone mode: %u Safari Balls, %u steps", gNumSafariBalls, gSafariZoneStepCounter);
     }
     if (s.oweRebumpKind != 0 && s.oweBattleLogged && !gMain.inBattle && s.fieldKeyFrames >= s.oweRebumpAt
@@ -4480,6 +4544,7 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
     OweBattleField();
     OweCountField();
     CrowdField();
+    ClockField();
     StageLogFrame();
     ShotTick();
     /* PKMN_TEST_PLAN: once the autopilot brought the field up, the plan's keys alone */
@@ -4575,7 +4640,7 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
                                                                  : s.fieldKeyFrames - 1)
          && gMain.callback2 == CB2_Overworld)
         {
-            EnterSafariMode();
+            EnterTestSafari();
             TestLog("Battle env test: the Safari Zone's game afresh at field frame %d", s.fieldKeyFrames);
         }
         if (FieldEventAt(s.fieldKeys, "BLEND", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
