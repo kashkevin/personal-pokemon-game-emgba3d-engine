@@ -3872,7 +3872,7 @@ unsigned DioramaGLTerrain_TestDumpCells(const struct DioramaSceneSnapshot *snaps
         return 0;
     fprintf(file, "x\ty\tflags\tlayout\tgroup\tnum\tsx\tsy\tmetatile\tbehavior\tcollision\televation\tlayer\t"
                   "shape\tarchetype\tclass\tmeasured\tterrace\trock\tground\ttop\tfeature\tpixmin\tpixmax\t"
-                  "hull\tstructure\tclaim\tvoid\tmodel\ttakeoff\tlanding\ttree\tcrown\n");
+                  "hull\tstructure\tclaim\tvoid\tmodel\ttakeoff\tlanding\ttree\tcrown\tprop\n");
     for (int chunkY = minChunkY; chunkY <= maxChunkY; chunkY++)
         for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++)
         {
@@ -3886,6 +3886,7 @@ unsigned DioramaGLTerrain_TestDumpCells(const struct DioramaSceneSnapshot *snaps
                     int gridIndex = (mapY - snapshot->gridOriginY) * DIORAMA_GRID_WIDTH
                                   + (mapX - snapshot->gridOriginX);
                     const struct DioramaCellSnapshot *source;
+                    const struct DioramaProp *prop;
                     int pixelMin = 0, pixelMax = 0;
                     bool model;
 
@@ -3906,8 +3907,9 @@ unsigned DioramaGLTerrain_TestDumpCells(const struct DioramaSceneSnapshot *snaps
                     model = (source->flags & DIORAMA_CELL_SOURCE_VALID)
                          && DioramaBuildings_CellAt(source->sourceLayoutId, source->sourceMapX,
                                                     source->sourceMapY, NULL, NULL, NULL);
+                    prop = DioramaProps_ForCell(snapshot, source);
                     fprintf(file, "%d\t%d\t%u\t%u\t%u\t%u\t%d\t%d\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t"
-                                  "%.4f\t%.4f\t%.4f\t%d\t%d\t%u\t%u\t%u\t%u\t%d\t%.4f\t%.4f\t%u\t%u\n",
+                                  "%.4f\t%.4f\t%.4f\t%d\t%d\t%u\t%u\t%u\t%u\t%d\t%.4f\t%.4f\t%u\t%u\t%u\n",
                             mapX, mapY, (unsigned)source->flags, (unsigned)source->sourceLayoutId,
                             (unsigned)source->sourceMapGroup, (unsigned)source->sourceMapNum,
                             source->sourceMapX, source->sourceMapY, (unsigned)cell->metatileId,
@@ -3920,7 +3922,9 @@ unsigned DioramaGLTerrain_TestDumpCells(const struct DioramaSceneSnapshot *snaps
                             (unsigned)cell->claimOwner, (unsigned)cell->voidKind, model ? 1 : 0,
                             cell->ledgeTakeoffHeight, cell->ledgeLandingHeight, (unsigned)source->treeSprite,
                             /* how a tree cell's crown stands: 1 a cut-out, 2 a solid */
-                            source->treeSprite == 0 ? 0u : DioramaGLTreeSprites_Volumes() ? 2u : 1u);
+                            source->treeSprite == 0 ? 0u : DioramaGLTreeSprites_Volumes() ? 2u : 1u,
+                            /* a detail object standing on the cell (props.h): its kind + 1 */
+                            prop != NULL ? 1u + prop->kind : 0u);
                     rows++;
                 }
         }

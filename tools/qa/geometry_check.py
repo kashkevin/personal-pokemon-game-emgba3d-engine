@@ -18,16 +18,16 @@ per place and per map, in OUT/manifest.json and OUT/report.md:
     fin          terrain standing three quarters of a tile or more over both its neighbours on a side, in a run of
                  three cells or more (outdoors, caves): the owner's "tall, narrow, rectangular cliffs"
     spike        the same, one or two cells alone (a rock, or a broken piece of cliff)
-    flat-blocked a cell no one walks on, drawn flat on the ground (not water, a model, a tree or the void): a rock,
-                 a fence, a counter... lying as a picture (outdoors, caves and rooms)
+    flat-blocked a cell no one walks on, drawn flat on the ground (not water, a model, a tree, a detail object or the
+                 void): a rock, a fence, a counter... lying as a picture (outdoors, caves and rooms)
     card-tree    a tree cell whose crown is the 3DS project's flat cut-out (a solid crown and trunk since step 16)
     walk-step    two cells the player walks between, their ground a third of a tile or more apart (no ramp, no
                  stairs, no ledge): a step the player climbs as if it were not there; "seam" when the two belong to
                  two maps
     water-wall   water standing a fifth of a tile or more over the land beside it (the blue box)
     water-drop   walkable land three quarters of a tile or more over the water beside it
-    hole         pixels of the probe's magenta sky enclosed by the scene, or anywhere in the steep view: the scene has
-                 a gap
+    hole         pixels of the probe's magenta sky enclosed by the scene (not pockets that open onto its far edge,
+                 drawn in the edge fog's colour), or anywhere in the steep view: the scene has a gap
     not-3d       the place was drawn in 2D, or its scene never completed
 A map is covered when every one of its cells was in some place's scene.
 """
@@ -347,7 +347,9 @@ def read_cells(path):
 
 
 def is_object(c):
-    return c["model"] or c["archetype_name"] in OBJECT_ARCHETYPES or c["shape_name"] in OBJECT_SHAPES or c["void"]
+    # c["prop"]: a detail object (props.c: a fence, a sign, a lamp, a rock...) stands on the cell's ground
+    return (c["model"] or c["archetype_name"] in OBJECT_ARCHETYPES or c["shape_name"] in OBJECT_SHAPES or c["void"]
+            or c.get("prop", 0))
 
 
 def is_water(c):
@@ -439,6 +441,17 @@ def picture_holes(path, steep, dark_open=False):
     # (the probe's sky and the void's black meet in a pixel of both, r = b with no green: open too)
     blend = (rgb[:, :, 1] <= 2) & (numpy.abs(rgb[:, :, 0].astype(int) - rgb[:, :, 2].astype(int)) <= 3)
     passable = sky | (rgb.max(axis=2) == 0) | blend if dark_open else sky
+    # the scene's far edge, drawn wholly in the edge fog's colour (the light's: the day's, the evening's, the rain's):
+    # the sky in pockets along it is past the loaded scene, not a gap in it (step 16: the solid trees on the far
+    # skyline). The fog's colour is the one most of the scene's topmost pixels have.
+    scene = ~sky
+    top = numpy.where(scene.any(axis=0), scene.argmax(axis=0), height)
+    samples = [tuple(int(v) for v in rgb[y, x]) for x in range(0, width, 2) if top[x] < height - 3
+               for y in range(top[x], top[x] + 3)]
+    if samples:
+        fog, count = collections.Counter(samples).most_common(1)[0]
+        if count * 3 >= len(samples):
+            passable = passable | numpy.all(rgb == numpy.array(fog, dtype=rgb.dtype), axis=2)
     mask = Image.fromarray(passable.astype(numpy.uint8) * 255).copy()   # (fromarray's image is read-only: no fill)
     # the open sky: what reaches the picture's edge, or its top quarter (a low view's horizon: the window's own top
     # rows are the game's, not the sky)
