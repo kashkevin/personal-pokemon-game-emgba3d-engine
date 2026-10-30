@@ -2316,6 +2316,9 @@ static bool AppendPixelPrimitives(const struct DioramaTerrainChunkInput *input,
     return true;
 }
 
+/* A side this tall shows its cell's drawing, however the cell's top is drawn (FaceMaterial). */
+#define TALL_SIDE_VOXELS (DIORAMA_VOXELS_PER_CELL * 3 / 4)
+
 static void FaceMaterial(const struct DioramaTerrainCell *cell, uint8_t surface,
                           const struct DioramaTerrainMaterial *source,
                           const struct DioramaShellFace *face,
@@ -2364,14 +2367,18 @@ static void FaceMaterial(const struct DioramaTerrainCell *cell, uint8_t surface,
     output->v1 = source->v0 + (source->v1 - source->v0) * (vMax - inset);
     if (face->axis != 1 && ((cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART)
                          || (IsLedgeBank(cell) && surface == 0))
-     && source->rotation == 0 && source->flags == 0)
+     && source->rotation == 0 && source->flags == 0
+     && face->vMax - face->vMin < TALL_SIDE_VOXELS)
     {
         /* A cell drawn as a height per pixel (a mountain's rock, a terrace's
          * course, a jump ledge's bank): the side of each pixel's column is that pixel's colour, so
          * a slope of such columns shows the drawing laid on it. The whole
          * drawing squeezed onto each column's side drew a terrace's face as
          * bands of stripes (Route 104's cliffs, the owner's report of
-         * 2026-10-24). */
+         * 2026-10-24). A side as tall as most of a tile (a rock band's face
+         * down to the ground round it) shows the drawing itself, as a cliff's
+         * does: one pixel's colour drawn down a whole face was a stripe
+         * (step 16, the world geometry overhaul: every rock band's face). */
         int32_t local = face->plane - (face->axis == 0 ? sourcePixelX : sourcePixelZ);
         int32_t column = face->sign > 0 ? local - 1 : local;
         float fixed;
