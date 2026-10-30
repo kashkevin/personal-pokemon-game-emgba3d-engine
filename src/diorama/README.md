@@ -542,6 +542,23 @@ of terraced walls; Route 112's rock was still a maze of walls.
   neighbours offer one whole level takes it (Rusturf Tunnel's two mouths a level
   down, Ever Grande's Victory Road); it lifts no rock round it. One entered from
   the water (Shoal Cave) keeps its place.
+* A cave's tunnel (`gl_terrain_renderer.c` `FindCaveTunnels`, step 16): the GBA
+  draws a cave mouth's dark arch over the mouth's cell (a door walked into,
+  MB_NON_ANIMATED_DOOR) and the bottom of the rock's cell north of it. The
+  mouth's cell stays the ground the player stands on, a gap in the face; the
+  rock over it stands as an upright face instead of a slope down to that
+  ground, the tunnel cut `DIORAMA_CAVE_TUNNEL_DEPTH` voxels into it
+  (`terrain_mesh.c`: the floor and the rock over the opening as two spans of a
+  column, the inside's faces darkened), as wide as the arch where it meets the
+  mouth's cell and as high as the arch's colour reaches up the rock's drawing.
+  The arch's colour is the one the mouth's drawing has most of. Doors into
+  buildings and the gaps between trees stand in no rock and are not touched.
+* A cell a script redrew into a mountain's face (`rules.c` `FillRedrawnRock`):
+  the Regi tombs' doors (Routes 105, 111, 120) are rock walls until the Sealed
+  Chamber is solved, drawn by `setmetatile` with collision on; the record was
+  made for the open door, so the cell lay flat, a notch through the rock with
+  the wall's picture on its floor. One the game blocks, with the rock on both
+  sides at its ground, takes the west side's record and its own picture.
 * Where maps meet (`terrace_topology.py` `seam_shifts`, `compile_rules.py` `_seam_pairs`;
   KNOWN_ISSUES MS-162): each layout is solved alone, its top level 0, so a map whose
   top is its cliffs' tops lay under its neighbours: Route 118's route a level under

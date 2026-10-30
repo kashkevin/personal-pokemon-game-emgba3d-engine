@@ -23,6 +23,8 @@
  * reflection pass's 0.5: the terrain shader gives their shadow lookup a larger bias */
 #define DIORAMA_TERRAIN_BANK_MASK 0.25f
 #define DIORAMA_TERRAIN_WATER_HEIGHT -0.125f
+/* How far a cave's tunnel goes into the rock's face over its mouth, in voxels (DioramaTerrainCell caveTunnel) */
+#define DIORAMA_CAVE_TUNNEL_DEPTH 8
 #define DIORAMA_TERRAIN_TEXTURE_FULL 0.0f
 #define DIORAMA_TERRAIN_TEXTURE_BASE 1.0f
 #define DIORAMA_TERRAIN_TEXTURE_FOREGROUND 2.0f
@@ -109,6 +111,12 @@ struct DioramaTerrainCell
     uint8_t treeHullReady;
     uint8_t treeMaskDirect;
     uint8_t rockMass;   /* a cell of a mountain's rock (gl_terrain_renderer.c ShapeRockMasses) */
+    /* the rock over a cave's mouth (gl_terrain_renderer.c FindCaveTunnels): a face to its south, the tunnel cut
+     * DIORAMA_CAVE_TUNNEL_DEPTH voxels into it from the mouth's ground (tunnelFloor, in voxels), each pixel
+     * column's opening that many voxels high (0: rock) */
+    uint8_t caveTunnel;
+    uint8_t tunnelOpening[DIORAMA_VOXELS_PER_CELL];
+    int16_t tunnelFloor;
     uint8_t southFacadeCount;
     uint8_t measuredAxis;
     uint16_t measuredExtentBands;

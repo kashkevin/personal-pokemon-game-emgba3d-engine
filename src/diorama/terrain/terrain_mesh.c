@@ -392,6 +392,13 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
             for (unsigned pixel = 0;
                  pixel < DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL; pixel++)
                 hash = HashByte(hash, cell->mountainHeight[pixel]);
+        hash = HashByte(hash, cell->caveTunnel);
+        if (cell->caveTunnel)
+        {
+            hash = HashU16(hash, (uint16_t)cell->tunnelFloor);
+            for (unsigned column = 0; column < DIORAMA_VOXELS_PER_CELL; column++)
+                hash = HashByte(hash, cell->tunnelOpening[column]);
+        }
         if (cell->archetype == DIORAMA_ARCHETYPE_ROUND_HULL
          || cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL)
         {
@@ -558,6 +565,52 @@ static int16_t StairTop(const struct DioramaTerrainCell *cell, int pixelX, int p
         pixelX, pixelZ));
 }
 
+/* How high a cave's tunnel is at a pixel of the rock over its mouth (gl_terrain_renderer.c FindCaveTunnels), 0
+ * outside it: the south DIORAMA_CAVE_TUNNEL_DEPTH rows of the arch's columns. */
+static uint8_t TunnelOpening(const struct DioramaTerrainCell *cell, int pixelX, int pixelZ)
+{
+    if (!cell->caveTunnel || pixelZ < DIORAMA_VOXELS_PER_CELL - DIORAMA_CAVE_TUNNEL_DEPTH)
+        return 0;
+    return cell->tunnelOpening[pixelX];
+}
+
+/* A face of the inside of a cave's tunnel (wholly within it: the face over its opening is the rock's). */
+static bool InCaveTunnel(const struct DioramaTerrainCell *cell, const struct DioramaShellFace *face)
+{
+    int32_t west = cell->mapX * DIORAMA_VOXELS_PER_CELL;
+    int32_t south = cell->mapY * DIORAMA_VOXELS_PER_CELL + DIORAMA_VOXELS_PER_CELL;
+    int32_t north = south - DIORAMA_CAVE_TUNNEL_DEPTH;
+    int32_t floor = cell->tunnelFloor;
+    int32_t ceiling = floor;
+    int32_t xMin = 0;
+    int32_t xMax = -1;
+    int x;
+
+    if (!cell->caveTunnel)
+        return false;
+    for (x = 0; x < DIORAMA_VOXELS_PER_CELL; x++)
+        if (cell->tunnelOpening[x] != 0)
+        {
+            if (xMax < xMin)
+                xMin = x;
+            xMax = x + 1;
+            if (floor + cell->tunnelOpening[x] > ceiling)
+                ceiling = floor + cell->tunnelOpening[x];
+        }
+    if (xMax < xMin)
+        return false;
+    xMin += west;
+    xMax += west;
+    if (face->axis == 1)
+        return face->plane >= floor && face->plane <= ceiling && face->uMin >= xMin && face->uMax <= xMax
+            && face->vMin >= north && face->vMax <= south;
+    if (face->vMin < floor - 1 || face->vMax > ceiling)
+        return false;
+    if (face->axis == 0)
+        return face->plane >= xMin && face->plane <= xMax && face->uMin >= north && face->uMax <= south;
+    return face->plane >= north && face->plane <= south && face->uMin >= xMin && face->uMax <= xMax;
+}
+
 static bool AppendSpan(uint32_t *count, const struct DioramaTerrainCell *cell,
                        int cellIndex, int pixelX, int pixelZ, int surface,
                        int16_t bottom, int16_t top)
@@ -632,7 +685,18 @@ static bool BuildOccupancy(const struct DioramaTerrainChunkInput *input,
                             pixelY * DIORAMA_VOXELS_PER_CELL + pixelX];
                         bool raised = mountainHeight != 0;
                         int16_t mountainTop = ground + mountainHeight;
+                        uint8_t opening = TunnelOpening(cell, pixelX, pixelY);
 
+                        if (raised && opening != 0)
+                        {
+                            /* a cave's tunnel: the rock under its floor (the mouth's ground), and over it */
+                            if (!AppendSpan(&count, cell, cellIndex, pixelX, pixelY, 0, ground - 1, cell->tunnelFloor)
+                             || (mountainTop > cell->tunnelFloor + opening
+                              && !AppendSpan(&count, cell, cellIndex, pixelX, pixelY, 0,
+                                             cell->tunnelFloor + opening, mountainTop)))
+                                return false;
+                            continue;
+                        }
                         if (!AppendSpan(&count, cell, cellIndex, pixelX, pixelY,
                                         raised ? 0 : 1,
                                         ground - 1,
@@ -2546,6 +2610,9 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
              && cell->treeHullReady && cell->structureWidth == 2
              && cell->structureLocalY >= cell->structureHeight - 2)
                 shade = 0.78f;
+            /* a cave's tunnel is dark inside, as the arch the GBA draws */
+            if (InCaveTunnel(cell, &band))
+                shade *= 0.3f;
             /* (a jump ledge's bank marked for the shader's shadow bias:
              * DIORAMA_TERRAIN_BANK_MASK) */
             if (!AppendQuad(vertices, vertexCapacity, &vertexCount, positions, &material, shade,

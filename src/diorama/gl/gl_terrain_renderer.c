@@ -1475,7 +1475,8 @@ static void ShapeRockMasses(struct DioramaTerrainChunkInput *input)
             if (rise < 1.0f)
                 rise = DIORAMA_VOXELS_PER_CELL;
             north = RockMassFoot(input, x, y - 1, cell, rise);
-            south = RockMassFoot(input, x, y + 1, cell, rise);
+            /* over a cave's mouth the face stands upright, the tunnel cut into it (FindCaveTunnels) */
+            south = cell->caveTunnel ? -1.0f : RockMassFoot(input, x, y + 1, cell, rise);
             east = RockMassFoot(input, x + 1, y, cell, rise);
             west = RockMassFoot(input, x - 1, y, cell, rise);
             northEast = RockMassFoot(input, x + 1, y - 1, cell, rise);
@@ -1545,6 +1546,128 @@ static void ShapeRockMasses(struct DioramaTerrainChunkInput *input)
                     cell->mountainHeight[pixel] = level < 1.0f ? (level > 0.25f ? 1 : 0)
                                                 : level > 255.0f ? 255 : (uint8_t)(level + 0.5f);
                 }
+        }
+}
+
+/*
+ * A cave's mouth in a mountain's face (step 16, phase C4). The GBA draws its dark arch over two cells: the mouth's
+ * own (a door the player walks into, MB_NON_ANIMATED_DOOR) and the bottom of the rock's over it. The mouth's cell is
+ * the ground the player stands on, a gap in the face; the rock north of it was a slope down to that ground with the
+ * arch painted on it. That rock stands as an upright face instead (ShapeRockMasses), the tunnel cut into it
+ * (terrain_mesh.c, dark inside): as wide as the arch where it meets the mouth's cell, as high as the arch's colour
+ * reaches up the rock's drawing. The arch's colour is the one the mouth's drawing has most of: a threshold would
+ * not do, Lavaridge's red rock is darker than its arch. Doors into buildings and gaps between trees stand in no
+ * rock, and are left as they are.
+ */
+#define CAVE_TUNNEL_LOW 8     /* voxels: the tunnel where the rock's drawing shows none of the arch */
+#define CAVE_TUNNEL_HIGH 12   /* its highest, the face over it the rest of the rock */
+#define CAVE_MOUTH_MIN_COLUMNS 6
+
+static bool CaveMouthArch(const struct DioramaSceneSnapshot *snapshot, const struct DioramaCellSnapshot *mouth,
+                          const struct DioramaCellSnapshot *rock, uint8_t opening[DIORAMA_VOXELS_PER_CELL])
+{
+    uint32_t pixels[DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL];
+    uint32_t colours[DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL];
+    uint16_t counts[DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL];
+    struct DioramaAtlasArt art = DioramaAtlas_CellArt(snapshot, mouth);
+    unsigned colourCount = 0;
+    unsigned best = 0;
+    unsigned columns = 0;
+    uint32_t arch;
+    int x;
+
+    DioramaMetatile_Compose(art.tileGraphics, mouth->tileEntries, art.unfadedPalette, pixels);
+    for (int pixel = 0; pixel < DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL; pixel++)
+    {
+        unsigned i;
+
+        if ((pixels[pixel] >> 24) == 0)
+            continue;
+        for (i = 0; i < colourCount && colours[i] != pixels[pixel]; i++)
+            ;
+        if (i == colourCount)
+        {
+            colours[colourCount] = pixels[pixel];
+            counts[colourCount++] = 0;
+        }
+        if (++counts[i] > counts[best])
+            best = i;
+    }
+    if (colourCount == 0)
+        return false;
+    arch = colours[best];
+    /* the arch's colour, darker than the drawing's average (not a light wall's door) */
+    {
+        unsigned archLight = ((arch >> 16) & 0xFF) + ((arch >> 8) & 0xFF) + (arch & 0xFF);
+        unsigned total = 0;
+        unsigned opaque = 0;
+
+        for (int pixel = 0; pixel < DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL; pixel++)
+            if ((pixels[pixel] >> 24) != 0)
+            {
+                total += ((pixels[pixel] >> 16) & 0xFF) + ((pixels[pixel] >> 8) & 0xFF) + (pixels[pixel] & 0xFF);
+                opaque++;
+            }
+        if (archLight * opaque >= total)
+            return false;
+    }
+    for (x = 0; x < DIORAMA_VOXELS_PER_CELL; x++)
+    {
+        opening[x] = pixels[x] == arch ? CAVE_TUNNEL_LOW : 0;
+        columns += opening[x] != 0;
+    }
+    if (columns < CAVE_MOUTH_MIN_COLUMNS)
+        return false;
+    /* how far up the rock's drawing the arch comes, each column: the tunnel's top follows it, rounded as the arch */
+    art = DioramaAtlas_CellArt(snapshot, rock);
+    DioramaMetatile_Compose(art.tileGraphics, rock->tileEntries, art.unfadedPalette, pixels);
+    {
+        uint8_t rows[DIORAMA_VOXELS_PER_CELL] = {0};
+        uint8_t most = 0;
+
+        for (x = 0; x < DIORAMA_VOXELS_PER_CELL; x++)
+        {
+            int row;
+
+            for (row = DIORAMA_VOXELS_PER_CELL - 1;
+                 opening[x] != 0 && row >= 0 && pixels[row * DIORAMA_VOXELS_PER_CELL + x] == arch; row--)
+                rows[x]++;
+            most = rows[x] > most ? rows[x] : most;
+        }
+        for (x = 0; most != 0 && x < DIORAMA_VOXELS_PER_CELL; x++)
+            if (opening[x] != 0)
+                opening[x] = (uint8_t)(CAVE_TUNNEL_LOW
+                                       + (rows[x] * (CAVE_TUNNEL_HIGH - CAVE_TUNNEL_LOW) + most / 2) / most);
+    }
+    return true;
+}
+
+static void FindCaveTunnels(const struct DioramaSceneSnapshot *snapshot, struct DioramaTerrainChunkInput *input)
+{
+    for (int y = 0; y + 1 < DIORAMA_TERRAIN_INPUT_SIZE; y++)
+        for (int x = 1; x + 1 < DIORAMA_TERRAIN_INPUT_SIZE; x++)
+        {
+            struct DioramaTerrainCell *rock = &input->cells[y * DIORAMA_TERRAIN_INPUT_SIZE + x];
+            const struct DioramaTerrainCell *mouth = rock + DIORAMA_TERRAIN_INPUT_SIZE;
+            const struct DioramaTerrainCell *west = mouth - 1;
+            const struct DioramaTerrainCell *east = mouth + 1;
+            const struct DioramaCellSnapshot *mouthSource;
+            const struct DioramaCellSnapshot *rockSource;
+
+            /* (the rock's own ground may lie under the mouth's: Meteor Falls' face rises from two levels lower) */
+            if (!rock->present || !rock->rockMass || rock->rockMass == ROCK_MASS_OUTLINE
+             || !mouth->present || mouth->behavior != MB_NON_ANIMATED_DOOR
+             || !west->present || !west->rockMass || !east->present || !east->rockMass
+             || rock->groundHeight > mouth->groundHeight || rock->visualHeight - mouth->groundHeight < 0.97f)
+                continue;
+            mouthSource = FindSnapshotCell(snapshot, mouth->mapX - sShiftX, mouth->mapY - sShiftY);
+            rockSource = FindSnapshotCell(snapshot, rock->mapX - sShiftX, rock->mapY - sShiftY);
+            if (mouthSource != NULL && rockSource != NULL
+             && CaveMouthArch(snapshot, mouthSource, rockSource, rock->tunnelOpening))
+            {
+                rock->caveTunnel = true;
+                rock->tunnelFloor = (int16_t)floorf(mouth->groundHeight * DIORAMA_VOXELS_PER_CELL + 0.5f);
+            }
         }
 }
 
@@ -1854,6 +1977,7 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
                 hasInterior = true;
         }
     }
+    FindCaveTunnels(snapshot, input);
     ShapeRockMasses(input);
     for (y = 0; y < DIORAMA_TERRAIN_INPUT_SIZE; y++)
         for (x = 0; x < DIORAMA_TERRAIN_INPUT_SIZE; x++)

@@ -242,7 +242,8 @@ static void InitializeResolved(struct DioramaResolvedCell *resolved)
     }
 }
 
-static void ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
+/* Returns whether a script redrew the cell (its record made for another picture). */
+static bool ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
                                const struct DioramaCellSnapshot *cell,
                                struct DioramaResolvedCell *resolved)
 {
@@ -254,14 +255,14 @@ static void ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
 
     if (!(cell->flags & DIORAMA_CELL_SOURCE_VALID) || cell->sourceMapX < 0
      || cell->sourceMapY < 0)
-        return;
+        return false;
     layout = FindLayout(cell->sourceLayoutId);
     if (layout == NULL || cell->sourceMapX >= layout->width || cell->sourceMapY >= layout->height)
-        return;
+        return false;
     cellOffset = (uint32_t)cell->sourceMapY * layout->width + cell->sourceMapX;
     record = FindStaticTerrain(layout, cellOffset, cell->sourceMapGroup, cell->sourceMapNum);
     if (record == NULL)
-        return;
+        return false;
     /* A crown's top over its ground (the Lavaridge tileset's solid trees) is
      * the place the record was made for, drawn without the crown. */
     if (record->expectedMetatile != cell->metatileId && !(cell->flags & DIORAMA_CELL_TREE_CANOPY))
@@ -277,12 +278,12 @@ static void ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
             resolved->groundHeight = record->groundQ16 / 16.0f;
             resolved->topHeight = resolved->groundHeight;
         }
-        return;
+        return true;
     }
     if (record->measuredBandCount > DIORAMA_MAX_MEASURED_BANDS
      || record->measuredBandOffset > gDioramaMeasuredBandV2Count
      || record->measuredBandCount > gDioramaMeasuredBandV2Count - record->measuredBandOffset)
-        return;
+        return false;
     for (uint8_t bandIndex = 0; bandIndex < record->measuredBandCount; bandIndex++)
     {
         const struct DioramaGeneratedMeasuredBandV2 *band =
@@ -292,7 +293,7 @@ static void ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
             band->sourceCellOffset / layout->width);
 
         if (sourceCell != NULL && sourceCell->metatileId != band->expectedMetatile)
-            return;
+            return false;
     }
     resolved->shape = record->shape;
     resolved->archetype = record->archetype;
@@ -362,7 +363,7 @@ static void ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
     {
         if (record->measuredBandCount != 0)
             DisableMeasuredVolume(resolved);
-        return;
+        return false;
     }
     resolved->voidKind = structureCell->voidKind;
     if (!StructureIsDirty(snapshot, cell,
@@ -456,6 +457,7 @@ static void ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
     {
         DisableMeasuredVolume(resolved);
     }
+    return false;
 }
 
 static const struct DioramaGeneratedMapV2 *FindMap(uint8_t mapGroup, uint8_t mapNum,
@@ -1054,9 +1056,55 @@ bool DioramaRules_ResolveCell(const struct DioramaSceneSnapshot *snapshot,
     return true;
 }
 
+/* A side of a cell a script redrew that is a mountain's rock at that cell's ground (FillRedrawnRock). */
+static bool IsRockBeside(const struct DioramaResolvedCell *side, const struct DioramaResolvedCell *cell)
+{
+    return side->shape == DIORAMA_SHAPE_CLIFF && (side->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART)
+        && side->groundHeight == cell->groundHeight && side->topHeight > cell->groundHeight;
+}
+
+/*
+ * A cell a script redrew into a mountain's face: the Regi tombs' doors, rock walls until the Sealed Chamber is
+ * solved (Routes 105, 111 and 120: setmetatile on a map's load, collision on). The record was made for the open door,
+ * so the cell lay flat at its ground - a notch through the rock, the wall's picture on its floor (step 16). One the
+ * game blocks, with the rock on both sides at its ground, is that rock: the west side's record, its own picture.
+ */
+static void FillRedrawnRock(const struct DioramaSceneSnapshot *snapshot, struct DioramaResolvedCell *resolvedCells,
+                            const bool *redrawn, uint16_t count)
+{
+    uint16_t i;
+
+    for (i = 0; i < count; i++)
+    {
+        int west;
+        int east;
+        int face;
+
+        if (!redrawn[i] || snapshot->cells[i].collision == 0)
+            continue;
+        west = FindCell(snapshot, &snapshot->cells[i], -1, 0);
+        east = FindCell(snapshot, &snapshot->cells[i], 1, 0);
+        if (west < 0 || east < 0 || redrawn[west] || redrawn[east]
+         || !IsRockBeside(&resolvedCells[west], &resolvedCells[i])
+         || !IsRockBeside(&resolvedCells[east], &resolvedCells[i]))
+            continue;
+        {
+            uint16_t evidence = resolvedCells[i].evidenceFlags;
+
+            resolvedCells[i] = resolvedCells[west];
+            resolvedCells[i].evidenceFlags = evidence;
+            resolvedCells[i].pixelObjectId = 0;
+            resolvedCells[i].baseMetatileId = DIORAMA_MATERIAL_METATILE_SELF;
+            for (face = 0; face < DIORAMA_MATERIAL_FACE_COUNT; face++)
+                resolvedCells[i].materials[face].metatileId = DIORAMA_MATERIAL_METATILE_SELF;
+        }
+    }
+}
+
 void DioramaRules_ResolveGrid(const struct DioramaSceneSnapshot *snapshot,
                               struct DioramaResolvedCell *resolvedCells)
 {
+    static bool sRedrawn[DIORAMA_MAX_VISIBLE_CELLS];
     uint16_t count;
     uint16_t i;
 
@@ -1071,7 +1119,7 @@ void DioramaRules_ResolveGrid(const struct DioramaSceneSnapshot *snapshot,
         const struct DioramaGeneratedTerrainV2 *border;
 
         InitializeResolved(&resolvedCells[i]);
-        ApplyStaticTerrain(snapshot, cell, &resolvedCells[i]);
+        sRedrawn[i] = ApplyStaticTerrain(snapshot, cell, &resolvedCells[i]);
         border = BorderRecord(snapshot, cell);
         if (border != NULL)
             ApplyBorderRecord(border, &resolvedCells[i]);
@@ -1083,6 +1131,7 @@ void DioramaRules_ResolveGrid(const struct DioramaSceneSnapshot *snapshot,
             resolvedCells[i].evidenceFlags |= DIORAMA_EVIDENCE_LAYER;
     }
     ClaimBorderTrees(snapshot, resolvedCells, count);
+    FillRedrawnRock(snapshot, resolvedCells, sRedrawn, count);
     for (i = 0; i < count; i++)
     {
         const struct DioramaGeneratedPixelObjectV2 *object =
