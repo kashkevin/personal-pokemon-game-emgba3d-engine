@@ -16,6 +16,7 @@
 #include "diorama/rules.h"
 #include "diorama/buildings.h"
 #include "diorama/sprite_frame.h"
+#include "constants/event_objects.h"
 
 #define SPRITE_TEXTURE_CACHE_SIZE 48
 #define OBJECT_RENDER_ITEM_CAPACITY (DIORAMA_MAX_OBJECTS + 1 + DIORAMA_MAX_EFFECTS + DIORAMA_MAX_STAND_INS)
@@ -36,6 +37,7 @@ struct SpriteTextureCacheEntry
     GLuint texture;
     uint8_t width;
     uint8_t height;
+    uint8_t solid; /* 1 + its picture's solid (sSolids), 0 for none */
     uint64_t lastUsedSequence;
 };
 
@@ -61,6 +63,7 @@ struct ObjectRenderItem
     bool isMount;               /* carries a rider: shown through what hides it, as its rider is */
     float uprightZOverride;
     bool onGround;              /* laid on the ground (a rotating gate's arms: DioramaEffectSnapshot.onGround) */
+    uint8_t solid;              /* 1 + the solid it stands as (a boulder, a rock, a Cut tree: sSolids), 0: a card */
 };
 
 static struct SpriteTextureCacheEntry sTextureCache[SPRITE_TEXTURE_CACHE_SIZE];
@@ -382,6 +385,8 @@ static bool IsInFrontOfPixelObject(const struct DioramaSceneSnapshot *snapshot,
     return false;
 }
 
+static void FreeSolid(uint8_t solid);
+
 static void ClearTextureCache(void)
 {
     int i;
@@ -390,6 +395,7 @@ static void ClearTextureCache(void)
     {
         if (sTextureCache[i].texture != 0)
             glDeleteTextures(1, &sTextureCache[i].texture);
+        FreeSolid(sTextureCache[i].solid);
         memset(&sTextureCache[i], 0, sizeof(sTextureCache[i]));
     }
 }
@@ -419,6 +425,7 @@ static struct SpriteTextureCacheEntry *AllocateTexture(void)
     }
     if (oldest->texture != 0)
         glDeleteTextures(1, &oldest->texture);
+    FreeSolid(oldest->solid);
     memset(oldest, 0, sizeof(*oldest));
     return oldest;
 }
@@ -460,6 +467,287 @@ static struct SpriteTextureCacheEntry *GetTexture(const struct DioramaSceneSnaps
     entry->lastUsedSequence = snapshot->sequence;
     sMetrics.uploadedFrames++;
     return entry;
+}
+
+/*
+ * The boulders Strength pushes, the rocks Rock Smash breaks and the trees Cut fells (step 16): map objects the GBA
+ * draws as sprites, which stood as upright cards like the people. Each picture of one stands as a solid of voxels
+ * made from it, as the trees' crowns are (gl_tree_sprites.c): as deep as a ball where it is SOLID_ROUND pixels or more
+ * inside its outline (a quarter circle in between), its art on its front and back and down its sides; leaning back as
+ * the crowns do, out of its plane toward the eye and away from it, so that from the field's camera it is its picture.
+ * Its outline (dark on every sprite) is a pixel thin: as deep as the rest it stood as a dark rim round the picture, and
+ * its foot stays on the ground. Made once for each picture (a rock breaking and a tree being cut are a picture a
+ * frame), from the frame as decoded.
+ */
+#define SOLID_MESHES 8
+#define SOLID_MAX_SIZE 32           /* pictures larger than this stay cards */
+#define SOLID_MAX_VERTICES 6144
+#define SOLID_DEPTH 7               /* pixels each way out of the picture's plane at most */
+#define SOLID_ROUND 7.0f
+#define SOLID_LEAN_SIN 0.766044f    /* 50 degrees, as the crowns */
+#define SOLID_LEAN_COS 0.642788f
+#define SOLID_SINK 0.02f            /* its foot a little into the ground */
+#define SOLID_INSET 0.01f           /* a face's texels a little inside its edge */
+
+enum SolidFace { SOLID_FRONT, SOLID_BACK, SOLID_SIDE, SOLID_TOP, SOLID_BOTTOM, SOLID_FACES };
+static const float sSolidShade[SOLID_FACES] = {1.0f, 0.72f, 0.82f, 1.06f, 0.6f};
+
+struct SolidMesh
+{
+    bool used;
+    uint16_t first[SOLID_FACES];
+    uint16_t count[SOLID_FACES];
+    uint16_t total;
+    /* x east of the picture's middle, y up its plane from its foot, z out of it toward the eye: pixels; u, v the
+     * texture's */
+    struct ObjectVertex vertices[SOLID_MAX_VERTICES];
+};
+
+static struct SolidMesh sSolids[SOLID_MESHES];
+static struct ObjectVertex sSolidFaces[SOLID_FACES][SOLID_MAX_VERTICES];
+static uint16_t sSolidFaceCount[SOLID_FACES];
+static struct ObjectVertex sSolidScratch[SOLID_MAX_VERTICES];
+static int8_t sSolidDepth[SOLID_MAX_SIZE][SOLID_MAX_SIZE]; /* -1: no pixel */
+static bool sSolidFull;
+
+static bool IsSolidObject(const struct DioramaObjectSnapshot *object)
+{
+    return object->graphicsId == OBJ_EVENT_GFX_PUSHABLE_BOULDER || object->graphicsId == OBJ_EVENT_GFX_BREAKABLE_ROCK
+        || object->graphicsId == OBJ_EVENT_GFX_CUTTABLE_TREE;
+}
+
+static void FreeSolid(uint8_t solid)
+{
+    if (solid != 0 && solid <= SOLID_MESHES)
+        sSolids[solid - 1].used = false;
+}
+
+/* A quad of a solid, its corners (x, y, z) in pixels going round, its texture's corners (u, v). */
+static void SolidQuad(enum SolidFace face, const float corners[4][3], const float uv[4][2])
+{
+    static const uint8_t sOrder[6] = {0, 1, 2, 0, 2, 3};
+    int i;
+
+    if (sSolidFaceCount[face] + 6 > SOLID_MAX_VERTICES)
+    {
+        sSolidFull = true;
+        return;
+    }
+    for (i = 0; i < 6; i++)
+    {
+        struct ObjectVertex *v = &sSolidFaces[face][sSolidFaceCount[face]++];
+
+        v->x = corners[sOrder[i]][0];
+        v->y = corners[sOrder[i]][1];
+        v->z = corners[sOrder[i]][2];
+        v->u = uv[sOrder[i]][0];
+        v->v = uv[sOrder[i]][1];
+    }
+}
+
+/* How far out of the plane pixel (x, y) stands each way (its depth + 0.5), or none. */
+static float SolidOut(int x, int y, int width, int height)
+{
+    if (x < 0 || y < 0 || x >= width || y >= height || sSolidDepth[y][x] < 0)
+        return 0.0f;
+    return (float)sSolidDepth[y][x] + 0.5f;
+}
+
+/*
+ * The faces down one side of a run of pixels (a column's left or right side, a row's top or bottom), each where the
+ * pixel beside it stands less far out: two strips, in front of and behind that pixel's, or the whole depth where
+ * there is none. Runs of pixels with the same strips are one face, the texture's column (row) down it.
+ */
+static void SolidSides(int width, int height, bool columns, int side)
+{
+    int line;
+    int lines = columns ? width : height;
+    int length = columns ? height : width;
+
+    for (line = 0; line < lines; line++)
+    {
+        int start = 0;
+
+        while (start < length)
+        {
+            int x = columns ? line : start;
+            int y = columns ? start : line;
+            float own = SolidOut(x, y, width, height);
+            float beside = columns ? SolidOut(x + side, y, width, height) : SolidOut(x, y + side, width, height);
+            int end = start + 1;
+            int strip;
+
+            if (own <= beside)
+            {
+                start++;
+                continue;
+            }
+            while (end < length)
+            {
+                int nx = columns ? line : end;
+                int ny = columns ? end : line;
+                float nextOwn = SolidOut(nx, ny, width, height);
+                float nextBeside = columns ? SolidOut(nx + side, ny, width, height) : SolidOut(nx, ny + side, width, height);
+
+                if (nextOwn != own || nextBeside != beside)
+                    break;
+                end++;
+            }
+            for (strip = 0; strip < (beside > 0.0f ? 2 : 1); strip++)
+            {
+                /* out of the plane from z0 to z1 */
+                float z0 = beside > 0.0f ? (strip == 0 ? beside : -own) : -own;
+                float z1 = beside > 0.0f ? (strip == 0 ? own : -beside) : own;
+                float corners[4][3];
+                float uv[4][2];
+                int i;
+
+                for (i = 0; i < 4; i++)
+                {
+                    int along = (i == 0 || i == 3) ? start : end;
+                    float z = (i < 2) ? z0 : z1;
+
+                    if (columns)
+                    {
+                        /* x the column's left or right edge; y down the run (rows from the picture's top) */
+                        corners[i][0] = (float)(line + (side > 0 ? 1 : 0)) - width * 0.5f;
+                        corners[i][1] = (float)(height - along);
+                        uv[i][0] = (line + 0.5f) / width;
+                        uv[i][1] = (along + (along == start ? SOLID_INSET : -SOLID_INSET)) / height;
+                    }
+                    else
+                    {
+                        corners[i][0] = (float)along - width * 0.5f;
+                        corners[i][1] = (float)(height - line - (side > 0 ? 1 : 0));
+                        uv[i][0] = (along + (along == start ? SOLID_INSET : -SOLID_INSET)) / width;
+                        uv[i][1] = (line + 0.5f) / height;
+                    }
+                    corners[i][2] = z;
+                }
+                SolidQuad(columns ? SOLID_SIDE : (side < 0 ? SOLID_TOP : SOLID_BOTTOM), corners, uv);
+            }
+            start = end;
+        }
+    }
+}
+
+/* The solid of a decoded picture (BGRA, rows from the top): 1 + its slot in sSolids, or 0. */
+static uint8_t BuildSolid(const uint32_t *pixels, int width, int height)
+{
+    int slot;
+    int x;
+    int y;
+    int face;
+    uint16_t total = 0;
+
+    if (width > SOLID_MAX_SIZE || height > SOLID_MAX_SIZE)
+        return 0;
+    for (slot = 0; slot < SOLID_MESHES && sSolids[slot].used; slot++)
+        ;
+    if (slot == SOLID_MESHES)
+        return 0;
+    for (y = 0; y < height; y++)
+    {
+        for (x = 0; x < width; x++)
+        {
+            int nearest = 1 << 30;
+            int ex;
+            int ey;
+            float e;
+
+            sSolidDepth[y][x] = -1;
+            if ((pixels[y * width + x] >> 24) < 128)
+                continue;
+            for (ey = -1; ey <= height; ey++)
+                for (ex = -1; ex <= width; ex++)
+                    if (ex < 0 || ey < 0 || ex >= width || ey >= height || (pixels[ey * width + ex] >> 24) < 128)
+                    {
+                        int d = (ex - x) * (ex - x) + (ey - y) * (ey - y);
+
+                        if (d < nearest)
+                            nearest = d;
+                    }
+            /* the outline a pixel thin */
+            e = (sqrtf((float)nearest) - 1.0f) / SOLID_ROUND;
+            if (e > 1.0f)
+                e = 1.0f;
+            sSolidDepth[y][x] = (int8_t)lroundf(SOLID_DEPTH * sqrtf(1.0f - (1.0f - e) * (1.0f - e)));
+        }
+    }
+    memset(sSolidFaceCount, 0, sizeof(sSolidFaceCount));
+    sSolidFull = false;
+    /* the picture on its front and its back: each row's runs of pixels standing as far out */
+    for (y = 0; y < height; y++)
+    {
+        x = 0;
+        while (x < width)
+        {
+            float out = SolidOut(x, y, width, height);
+            int end = x + 1;
+            int back;
+
+            if (out == 0.0f)
+            {
+                x++;
+                continue;
+            }
+            while (end < width && SolidOut(end, y, width, height) == out)
+                end++;
+            for (back = 0; back < 2; back++)
+            {
+                float z = back ? -out : out;
+                float left = (float)x - width * 0.5f;
+                float right = (float)end - width * 0.5f;
+                float top = (float)(height - y);
+                float u0 = (x + SOLID_INSET) / width;
+                float u1 = (end - SOLID_INSET) / width;
+                float v0 = (y + SOLID_INSET) / height;
+                float v1 = (y + 1 - SOLID_INSET) / height;
+                const float corners[4][3] = {
+                    {left, top, z}, {right, top, z}, {right, top - 1.0f, z}, {left, top - 1.0f, z},
+                };
+                const float uv[4][2] = {{u0, v0}, {u1, v0}, {u1, v1}, {u0, v1}};
+
+                SolidQuad(back ? SOLID_BACK : SOLID_FRONT, corners, uv);
+            }
+            x = end;
+        }
+    }
+    SolidSides(width, height, true, -1);
+    SolidSides(width, height, true, 1);
+    SolidSides(width, height, false, -1);
+    SolidSides(width, height, false, 1);
+    for (face = 0; face < SOLID_FACES; face++)
+        if (total + sSolidFaceCount[face] > SOLID_MAX_VERTICES)
+            sSolidFull = true;
+        else
+            total += sSolidFaceCount[face];
+    if (sSolidFull)
+        return 0;
+    total = 0;
+    for (face = 0; face < SOLID_FACES; face++)
+    {
+        sSolids[slot].first[face] = total;
+        sSolids[slot].count[face] = sSolidFaceCount[face];
+        memcpy(&sSolids[slot].vertices[total], sSolidFaces[face], sSolidFaceCount[face] * sizeof(struct ObjectVertex));
+        total += sSolidFaceCount[face];
+    }
+    sSolids[slot].total = total;
+    sSolids[slot].used = true;
+    return (uint8_t)(slot + 1);
+}
+
+/* The solid an object's picture stands as (decoded again the first time: its texture may be an old one). */
+static uint8_t SolidFor(const struct DioramaSceneSnapshot *snapshot, const struct DioramaObjectSnapshot *object,
+                        struct SpriteTextureCacheEntry *entry)
+{
+    uint8_t width;
+    uint8_t height;
+
+    if (entry->solid == 0 && DioramaSprite_DecodeFrame(snapshot, object, sDecodePixels, DIORAMA_SPRITE_MAX_PIXELS,
+                                                       &width, &height))
+        entry->solid = BuildSolid(sDecodePixels, width, height);
+    return entry->solid;
 }
 
 static const struct DioramaObjectSnapshot *FindPreviousObject(
@@ -700,6 +988,7 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
         item->texture = texture->texture;
         item->width = texture->width;
         item->height = texture->height;
+        item->solid = IsSolidObject(object) && object->affineMode == 0 ? SolidFor(snapshot, object, texture) : 0;
         item->depthBias = ResolveDepthBias(snapshot, resolvedCells, object);
         item->drawOverPixelObjects = IsInFrontOfPixelObject(snapshot, resolvedCells, object);
         if ((object->flags & DIORAMA_OBJECT_REFLECTION) && !object->reflectionHidden)
@@ -1366,6 +1655,43 @@ static void DrawOnGround(const struct ObjectRenderItem *item, struct DioramaSpri
     dglUniform1i(sDrawModeLocation, 0);
 }
 
+/* A boulder's, a rock's or a Cut tree's solid at its pose (draw mode 6: depth as the world's), lit as a card is. */
+static void DrawSolid(const struct ObjectRenderItem *item, struct DioramaSpritePose pose)
+{
+    const struct SolidMesh *mesh = &sSolids[item->solid - 1];
+    float dusk = DoorDusk(pose);
+    int face;
+    uint16_t i;
+
+    for (i = 0; i < mesh->total; i++)
+    {
+        const struct ObjectVertex *v = &mesh->vertices[i];
+        float along = v->y / 16.0f;
+        float out = v->z / 16.0f;
+
+        sSolidScratch[i].x = pose.x + v->x / 16.0f;
+        sSolidScratch[i].y = pose.y - SOLID_SINK + along * SOLID_LEAN_SIN + out * SOLID_LEAN_COS;
+        sSolidScratch[i].z = pose.z + along * SOLID_LEAN_COS - out * SOLID_LEAN_SIN;
+        sSolidScratch[i].u = v->u;
+        sSolidScratch[i].v = v->v;
+    }
+    glBindTexture(GL_TEXTURE_2D, item->texture);
+    dglUniform1i(sDrawModeLocation, 6);
+    dglUniform1f(sDepthBiasLocation, 0.0f);
+    dglUniform3f(sLightProbeLocation, pose.x, pose.groundY + 0.75f, pose.z);
+    dglBindBuffer(GL_ARRAY_BUFFER, sVertexBuffer);
+    dglBufferData(GL_ARRAY_BUFFER, mesh->total * sizeof(*sSolidScratch), sSolidScratch, GL_STREAM_DRAW);
+    for (face = 0; face < SOLID_FACES; face++)
+    {
+        if (mesh->count[face] == 0)
+            continue;
+        dglUniform1f(sShadeLocation, dusk * sSolidShade[face]);
+        glDrawArrays(GL_TRIANGLES, mesh->first[face], mesh->count[face]);
+        sMetrics.drawCalls++;
+    }
+    dglUniform1i(sDrawModeLocation, 0);
+}
+
 static void DrawReflection(const struct ObjectRenderItem *item,
                            struct DioramaSpritePose pose,
                            float pitchSin, float pitchCos)
@@ -1597,6 +1923,8 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
             continue;
         if (sItems[index].onGround)
             DrawOnGround(&sItems[index], poses[index]);
+        else if (sItems[index].solid != 0)
+            DrawSolid(&sItems[index], poses[index]);
         else
             DrawBillboard(&sItems[index], poses[index], pitchSin, pitchCos);
     }
