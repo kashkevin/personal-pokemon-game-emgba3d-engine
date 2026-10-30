@@ -491,6 +491,20 @@ static const struct DioramaProp sDewford[] = {
     BIRTH_CROWN_SIDE(0x340), BIRTH_CROWN(0x348),
 };
 
+/* Fortree City's palms (step 16): the fronds over the forest - the middle row's upper layer, three cells - a heap
+ * lifted on the trunk, and the frond tips the row north of them draws its back; the trunk's cell (its lower layer,
+ * nothing over it) standing up under them. Under it all the cells' own forest. They lay flat among the solid
+ * trees (5 palms; the tree houses' crowns are their buildings'). */
+#define FORTREE_FRONDS(id) { PROP(id, BUSH, MOUND, 1, LOWER), .height16 = 8, .lift16 = 18, \
+                             .flags = DIORAMA_PROP_JOINED }
+#define FORTREE_FROND_TIPS(id) { PROP(id, BUSH, MOUND, 1, LOWER), .height16 = 4, .lift16 = 18, \
+                                 .flags = DIORAMA_PROP_JOINED }
+static const struct DioramaProp sFortree[] = {
+    FORTREE_FROND_TIPS(0x248), FORTREE_FROND_TIPS(0x249), FORTREE_FROND_TIPS(0x24A),
+    FORTREE_FRONDS(0x250), FORTREE_FRONDS(0x251), FORTREE_FRONDS(0x252),
+    { PROP(0x241, BUSH, SLAB, 0, NEIGHBOUR), .depth = 4, .height16 = 18 },
+};
+
 /* Caves: heaps of rocks on the floor. */
 static const struct DioramaProp sCave[] = {
     { PROP(0x202, ROCK, MOUND, 1, LOWER), .height16 = 10 },
@@ -522,6 +536,7 @@ static const struct DioramaPropTileset sTilesets[] = {
     TILESET("gTileset_BattlePyramid", sBattlePyramid),
     TILESET("gTileset_EverGrande", sEverGrande),
     TILESET("gTileset_Dewford", sDewford),
+    TILESET("gTileset_Fortree", sFortree),
 };
 
 #define TILESET_COUNT (sizeof(sTilesets) / sizeof(sTilesets[0]))
