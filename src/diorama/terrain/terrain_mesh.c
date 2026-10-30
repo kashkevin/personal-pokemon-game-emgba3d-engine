@@ -1336,11 +1336,13 @@ static bool AppendSkirtFaces(const struct DioramaTerrainChunkInput *input,
                         return false;
                     continue;
                 }
-                /* down to a mountain's rock, a pixel at a time (the rock's own cells: one mass, their sides
-                   their own) */
+                /* down to a mountain's rock, a pixel at a time (the rock's own cells on its ground: one mass,
+                   their sides their own; rock on a lower ground is another, the walls of a pit beside it - Mt
+                   Pyre's summit, its west side, showed the sky between them) */
                 if (neighbor->present && neighbor->shape != DIORAMA_SHAPE_HIDDEN
                  && (neighbor->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART) && !IsTreeHullColumn(neighbor)
-                 && !(cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART))
+                 && (!(cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART)
+                     || neighbor->groundHeight < cell->groundHeight))
                 {
                     if (!AppendSkirtByRock(input, x, y, side, footing, faceCount, rawFaceCount))
                         return false;
