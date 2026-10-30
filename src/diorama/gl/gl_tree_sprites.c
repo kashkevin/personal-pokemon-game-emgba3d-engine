@@ -1169,18 +1169,18 @@ static void DrawParts(bool shadow)
     for (part = 0; part < SLOT_COUNT; part++)
     {
         const struct PartModel *model = &sParts[part];
-        int far;
+        int distant; /* not 'far': Windows' headers define far (and near) as nothing */
 
         /* in the colour pass the near trees' solids, then the far ones' cut-outs (ChooseVisible) */
-        for (far = 0; far < (shadow ? 1 : 2); far++)
+        for (distant = 0; distant < (shadow ? 1 : 2); distant++)
         {
-            uint32_t first = shadow ? model->shadowFirst : far ? model->farFirst : model->first;
-            uint32_t indexCount = shadow ? model->shadowCount : far ? model->farCount
+            uint32_t first = shadow ? model->shadowFirst : distant ? model->farFirst : model->first;
+            uint32_t indexCount = shadow ? model->shadowCount : distant ? model->farCount
                                 : sVisibleSeen ? model->seenCount : model->count;
             uint32_t instanceFirst = shadow ? sPartInstanceFirst[part]
-                                   : sPartVisibleFirst[part] + (far ? sPartVisibleNear[part] : 0);
+                                   : sPartVisibleFirst[part] + (distant ? sPartVisibleNear[part] : 0);
             uint32_t instanceCount = shadow ? sPartInstanceCount[part]
-                                   : far ? sPartVisibleCount[part] - sPartVisibleNear[part] : sPartVisibleNear[part];
+                                   : distant ? sPartVisibleCount[part] - sPartVisibleNear[part] : sPartVisibleNear[part];
 
             if (instanceCount == 0 || indexCount == 0)
                 continue;
