@@ -66,11 +66,16 @@ $(DIORAMA_TREES3DS_SOURCE) $(DIORAMA_TREES3DS_HEADER) &: $(DIORAMA_TREES3DS_ART)
 # (window_glow.py is the generator's too: dimensional.py sets the windows it
 # finds back into their walls. dimensional.py also reads the doors' opening
 # animations, field_door.c and graphics/door_anims.)
+# (auto_buildings.py reads props.c - a detail object beside a building is not
+# the building's cell - and the metatile behaviours: a change to either models
+# the buildings again. Step 16: without them, Ever Grande's stone wall became a
+# prop and the incremental build kept the League claiming its cells.)
 DIORAMA_BUILDINGS_EXPORT := tools/diorama_buildings/export_gl.py tools/diorama_buildings/window_glow.py
 DIORAMA_BUILDINGS_TOOLS := $(filter-out tools/diorama_buildings/export_gl.py tools/diorama_buildings/test_%.py, \
 	$(sort $(wildcard tools/diorama_buildings/*.py))) \
 	tools/diorama_buildings/relief_fixes.json tools/diorama_rules/emerald_compositor.py \
-	src/field_door.c include/constants/metatile_labels.h $(wildcard graphics/door_anims/*.png)
+	src/field_door.c include/constants/metatile_labels.h $(wildcard graphics/door_anims/*.png) \
+	src/diorama/scene/props.c include/constants/metatile_behaviors.h
 DIORAMA_BUILDINGS_BIN := build/diorama/buildings.bin
 DIORAMA_BUILDINGS_SOURCE := src/data/diorama/buildings.generated.c
 
