@@ -337,18 +337,21 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         # mountain level with it, down its face a level a row ((15, 42) a row under its edge), a
         # level over the paved ground by the cable car station ((30, 20)), and a level over the grass
         # far north of it ((5, 10)); the forest west of the plateau on the ground ((3, 38)), the rock
-        # by it a level over it and climbing from it a level a cell.
+        # by it a level over it and climbing from it a level a cell, and the tree in that rock (a small
+        # tree's trunk, (3, 36)) on the ground it grows from, the rock's top beside it, not at the rock's
+        # foot (rock_bands.tree_grounds: the renderer stands it as a solid).
         width, records = wildcard("LAYOUT_ROUTE112")
         self.assertEqual(records[33 * width + 24]["groundQ16"], 48)
         self.assertEqual(records[45 * width + 20]["groundQ16"], 0)
         self.assertEqual([(records[y * width + 20]["shape"], records[y * width + 20]["groundQ16"],
                            records[y * width + 20]["topQ16"]) for y in (43, 42, 41)],
                          [("stairs", 0, 16), ("stairs", 16, 32), ("stairs", 32, 48)])
-        for (x, y), top in (((5, 10), 16), ((15, 42), 32), ((30, 20), 64), ((3, 37), 16), ((3, 36), 32),
+        for (x, y), top in (((5, 10), 16), ((15, 42), 32), ((30, 20), 64), ((3, 37), 16),
                             ((8, 37), 16), ((12, 41), 16), ((13, 41), 32)):
             record = records[y * width + x]
             self.assertEqual((record["class"], record["groundQ16"], record["topQ16"]),
                              ("cliff", 0, top), (x, y))
+        self.assertEqual(records[36 * width + 3]["groundQ16"], 32)
         self.assertEqual((records[38 * width + 3]["shape"], records[38 * width + 3]["groundQ16"]), ("flat", 0))
         # Route 111's rock runs the length of the map, beside the desert and its plateau two levels
         # up (its slopes' two rows): one mass from the lowest ground it meets, a level over the

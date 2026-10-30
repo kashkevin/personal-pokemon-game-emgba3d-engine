@@ -113,4 +113,52 @@ uint16_t DioramaTreeSprites_AshGround(uint16_t metatileId)
     }
 }
 
+int DioramaTreeSprites_LavaridgePart(uint16_t metatileId)
+{
+    /* Jagged Pass's large tree on the pink rock, its lower row also under the
+     * next tree's crown (0x2D6-0x2D7); the small tree's trunk on Route 112's
+     * terraces (0x218-0x219), on the forest floor (0x201), and inside a wood
+     * under the next crown (0x203, 0x21A, 0x3B8: the General tileset's
+     * 0x0C6-0x0C7 on the rock). */
+    switch (metatileId)
+    {
+    case 0x2D8: return 0;
+    case 0x2D9: return 1;
+    case 0x2E2: case 0x2D6: return 2;
+    case 0x2E3: case 0x2D7: return 3;
+    case 0x201: case 0x203: case 0x218: case 0x219: case 0x21A: case 0x3B8:
+        return DIORAMA_TREE_PART_SMALL;
+    default:
+        return DIORAMA_TREE_PART_NONE;
+    }
+}
+
+uint16_t DioramaTreeSprites_LavaridgeGround(uint16_t metatileId)
+{
+    switch (metatileId)
+    {
+    /* the pink ground: the trees' cells (Jagged Pass's drawn with their
+     * shadow, which the solid casts now) and the crowns' tops over it */
+    case 0x2D8: case 0x2D9: case 0x2E2: case 0x2E3: case 0x2D6: case 0x2D7:
+    case 0x218: case 0x219: case 0x21A: case 0x3B8:
+    case 0x210: case 0x3B0: case 0x2DE: case 0x2DF:
+        return 0x271;
+    /* the cliff's red rock a crown's top overlaps, which no metatile draws on
+     * its own: the face's foot beside it */
+    case 0x203: case 0x211: case 0x212:
+        return 0x274;
+    /* the rock's darker edge over the pink ground */
+    case 0x20B: case 0x3B1:
+        return 0x27A;
+    /* the forest floor (Route 112's foot), and the grass's edge under a
+     * General small tree's crown */
+    case 0x201:
+        return 0x209;
+    case 0x2FB:
+        return 0x2EE;
+    default:
+        return metatileId;
+    }
+}
+
 #endif // ENABLE_DIORAMA

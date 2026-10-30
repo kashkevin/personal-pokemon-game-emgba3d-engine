@@ -267,3 +267,55 @@ def _levels_near(band: list[int], members: set[int], boundary: dict[int, int], w
                 near[neighbor] = near[offset]
                 pending.append(neighbor)
     return near
+
+
+# a tree the runtime stands as a solid stands on the walkable ground within this many cells of it (tree_grounds)
+TREE_REACH = 2
+
+
+def tree_grounds(cells: tuple[dict, ...], width: int, height: int, trees: dict[int, int | None],
+                 solved: dict[int, dict]) -> dict[int, dict]:
+    """Where each tree the runtime stands as a solid (`trees`: {offset: a large tree's quarter 0-3, row * 2 +
+    column, or None for a small tree}: the tileset files' solidTrees, tree_sprites.c's DioramaTreeSprites_
+    LavaridgePart) whose cells joined the rock round them (`solved`'s "mass" entries: a band's, a mountain's) stands:
+    on the walkable ground it grows from - the level most of the walkable cells within TREE_REACH of it meet, the
+    lower of two met as often (a tree at a cliff's foot) - else, a tree deep in the rock, on the rock's top. Drawn as
+    rock (Route 112's terraces, Jagged Pass's ledges), each was a column painted with the tree from the rock's foot to
+    its top, and a solid on the foot a pit a level or three under the terrace beside it (step 16). A tree on its
+    ground already (the solver's) keeps it; a large tree's quarters stand on one ground. Returns {offset: entry},
+    "lift": the voxel trees' style keeps the cell's own height on that ground."""
+    groups: dict[int, list[int]] = {}
+    for offset, quarter in trees.items():
+        anchor = offset if quarter is None else offset - (quarter >> 1) * width - (quarter & 1)
+        groups.setdefault(anchor, []).append(offset)
+    out: dict[int, dict] = {}
+    for _anchor, members in sorted(groups.items()):
+        rock = [solved[offset]["topQ16"] for offset in members if solved.get(offset, {}).get("mass")]
+        if not rock:
+            continue
+        seen = set(members)
+        frontier = list(members)
+        met: Counter = Counter()
+        for _step in range(TREE_REACH):
+            following = []
+            for offset in frontier:
+                for neighbor in _neighbours(offset, width, height):
+                    if neighbor in seen:
+                        continue
+                    seen.add(neighbor)
+                    if cells[neighbor].get("collision"):
+                        following.append(neighbor)
+                    elif neighbor in solved:
+                        entry = solved[neighbor]
+                        met[entry.get("topQ16", entry["groundQ16"])] += 1
+            if met:
+                break
+            frontier = following
+        if met:
+            most = max(met.values())
+            level = min(level for level, count in met.items() if count == most)
+        else:
+            level = min(rock)
+        for offset in members:
+            out[offset] = {"groundQ16": level, "topQ16": level, "profile": "none", "solid": False, "lift": True}
+    return out

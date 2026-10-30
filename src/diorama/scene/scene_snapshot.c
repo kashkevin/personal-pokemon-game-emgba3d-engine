@@ -74,6 +74,9 @@ static bool sDirtyOverflow;
 /* The tree style this frame's snapshot applies (-1 before the first): read
  * once per snapshot, since the main thread may switch it at any time (F8). */
 static s8 sTreeStyle = -1;
+/* Its trees stand as solids too (ApplyTreeSprites); tilesets.h declares only
+ * some tilesets. */
+extern const struct Tileset gTileset_Lavaridge;
 
 /*
  * Neighbouring maps with other tiles (scene_snapshot.h, atlasPage). The
@@ -708,7 +711,9 @@ static bool CopyOutsideCell(struct DioramaSceneSnapshot *snapshot, int mapX, int
  * them), remembering what part of the tree each was, and the cells its old
  * canopy covered get their ground back (VoxelWorld_UsesTreeSprites and the
  * classification of voxel_world.c). The Fallarbor tileset's ash-covered trees
- * too (step 16), each cell's ground the ash or the sand under it. Connected maps share the map's tilesets
+ * too (step 16), each cell's ground the ash or the sand under it, and the
+ * Lavaridge tileset's trees, their crowns' tops keeping their place's heights
+ * (DIORAMA_CELL_TREE_CANOPY). Connected maps share the map's tilesets
  * (TryCopyConnectedCell), the border cells too, but for those on a page: they
  * share its primary (General) and have their own secondary.
  */
@@ -739,6 +744,22 @@ static void ApplyTreeSprites(struct DioramaSceneSnapshot *snapshot)
             if (CopyCellVisual(layout, DioramaTreeSprites_AshGround(cell->metatileId), cell->collision,
                                cell->elevation, cell))
                 cell->treeSprite = DIORAMA_TREE_SPRITE_ASH_QUARTER + part;
+            continue;
+        }
+        /* the Lavaridge tileset's tree, or a crown's top over its ground (the
+         * General tileset's trees on its maps go on below) */
+        if (layout->secondaryTileset == &gTileset_Lavaridge
+         && (ground = DioramaTreeSprites_LavaridgeGround(cell->metatileId)) != cell->metatileId)
+        {
+            part = DioramaTreeSprites_LavaridgePart(cell->metatileId);
+            if (!CopyCellVisual(layout, ground, cell->collision, cell->elevation, cell))
+                continue;
+            if (part == DIORAMA_TREE_PART_SMALL)
+                cell->treeSprite = DIORAMA_TREE_SPRITE_LAVARIDGE_SMALL;
+            else if (part != DIORAMA_TREE_PART_NONE)
+                cell->treeSprite = DIORAMA_TREE_SPRITE_LAVARIDGE_QUARTER + part;
+            else
+                cell->flags |= DIORAMA_CELL_TREE_CANOPY;
             continue;
         }
         part = DioramaTreeSprites_Part(dewford, cell->metatileId);

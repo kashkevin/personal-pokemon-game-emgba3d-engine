@@ -72,6 +72,40 @@ int main(void)
         CHECK(DioramaTreeSprites_AshPart(0x20A) == DIORAMA_TREE_PART_NONE);
         CHECK(DioramaTreeSprites_AshPart(0x269) == DIORAMA_TREE_PART_NONE);
     }
+    /* The Lavaridge tileset's trees (step 16): Jagged Pass's large tree, its lower row under the next crown too;
+     * the small tree's trunk on Route 112's terraces and inside its woods; each cell's ground, and a crown's top's,
+     * the pink ground, the cliff's red rock or the forest floor. */
+    {
+        static const uint16_t sLarge[][4] = {{0x2D8, 0x2D9, 0x2E2, 0x2E3}, {0x2D8, 0x2D9, 0x2D6, 0x2D7}};
+        static const uint16_t sSmall[] = {0x218, 0x219, 0x201, 0x203, 0x21A, 0x3B8};
+        static const uint16_t sTops[][2] = {
+            {0x210, 0x271}, {0x3B0, 0x271}, {0x2DE, 0x271}, {0x2DF, 0x271}, {0x211, 0x274}, {0x212, 0x274},
+            {0x20B, 0x27A}, {0x3B1, 0x27A}, {0x2FB, 0x2EE},
+        };
+        unsigned j;
+
+        for (i = 0; i < sizeof(sLarge) / sizeof(sLarge[0]); i++)
+            for (j = 0; j < 4; j++)
+            {
+                CHECK(DioramaTreeSprites_LavaridgePart(sLarge[i][j]) == (int)j);
+                CHECK(DioramaTreeSprites_LavaridgeGround(sLarge[i][j]) == 0x271);
+            }
+        for (i = 0; i < sizeof(sSmall) / sizeof(sSmall[0]); i++)
+        {
+            CHECK(DioramaTreeSprites_LavaridgePart(sSmall[i]) == DIORAMA_TREE_PART_SMALL);
+            CHECK(DioramaTreeSprites_LavaridgeGround(sSmall[i]) != sSmall[i]);
+        }
+        for (i = 0; i < sizeof(sTops) / sizeof(sTops[0]); i++)
+        {
+            CHECK(DioramaTreeSprites_LavaridgePart(sTops[i][0]) == DIORAMA_TREE_PART_NONE);
+            CHECK(DioramaTreeSprites_LavaridgeGround(sTops[i][0]) == sTops[i][1]);
+        }
+        /* the pink ground, the cliff, Mt Chimney's rock: themselves */
+        CHECK(DioramaTreeSprites_LavaridgePart(0x271) == DIORAMA_TREE_PART_NONE);
+        CHECK(DioramaTreeSprites_LavaridgeGround(0x271) == 0x271);
+        CHECK(DioramaTreeSprites_LavaridgeGround(0x274) == 0x274);
+        CHECK(DioramaTreeSprites_LavaridgeGround(0x2CD) == 0x2CD);
+    }
     puts("tree sprite tests passed");
     return EXIT_SUCCESS;
 }

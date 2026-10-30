@@ -52,9 +52,10 @@
 #define TEXEL_INSET 0.01f
 /* What a tree cell is (DioramaCellSnapshot.treeSprite - 1): a large tree's four
  * quarters, the small tree, Dewford Town's small tree, an ash-covered large
- * tree's four quarters (the Fallarbor tileset's). */
-#define PART_COUNT 10
-#define ASH_PART (DIORAMA_TREE_SPRITE_ASH_QUARTER - 1)
+ * tree's four quarters (the Fallarbor tileset's), the Lavaridge tileset's large
+ * tree's four quarters and its small tree (the General tileset's on the
+ * volcano's ground: QuarterFirst). */
+#define PART_COUNT 15
 /*
  * A large tree's quarter whose neighbour in its row (the other half of the
  * tree) or in its column (the other row) is not a tree cell - a wood's edge
@@ -849,7 +850,23 @@ static void Trunk(const struct CrownArt *art, int col, int row)
     }
 }
 
-/* The models of the six parts (PartModel's order), and their bounds. */
+/* The sprite of the quarter 0 of the large tree a part is a quarter of
+ * (DIORAMA_TREE_SPRITE_NONE: a small tree). */
+static int QuarterFirst(int part)
+{
+    static const uint8_t firsts[] = {
+        DIORAMA_TREE_SPRITE_QUARTER, DIORAMA_TREE_SPRITE_ASH_QUARTER, DIORAMA_TREE_SPRITE_LAVARIDGE_QUARTER,
+    };
+    int sprite = part + 1;
+    size_t i;
+
+    for (i = 0; i < sizeof(firsts); i++)
+        if (sprite >= firsts[i] && sprite < firsts[i] + 4)
+            return firsts[i];
+    return DIORAMA_TREE_SPRITE_NONE;
+}
+
+/* The models of the parts (PartModel's order), and their bounds. */
 static bool BuildModels(void)
 {
     const char *cards = SDL_getenv("PKMN_DIORAMA_TREE_CARDS");
@@ -862,10 +879,11 @@ static bool BuildModels(void)
     {
         int part = slot / KINDS;
         int kind = slot % KINDS;
-        bool ash = part >= ASH_PART;
-        bool large = part < 4 || ash;
-        const struct CrownArt *art = &sCrownArt[ash ? 3 : large ? 0 : part - 3];
-        int quarter = ash ? part - ASH_PART : part;
+        int first = QuarterFirst(part);
+        bool large = first != DIORAMA_TREE_SPRITE_NONE;
+        const struct CrownArt *art = &sCrownArt[first == DIORAMA_TREE_SPRITE_ASH_QUARTER ? 3 : large ? 0
+                                                : part + 1 == DIORAMA_TREE_SPRITE_SMALL_DEWFORD ? 2 : 1];
+        int quarter = large ? part + 1 - first : 0;
         int col = large ? (quarter & 1) : 0;
         int row = large ? (quarter >> 1) : 0;
         int columns = art->width / art->columns;
@@ -901,11 +919,14 @@ static bool BuildModels(void)
         if (sVolumes)
             Trunk(art, col, row);
         model->shadowCount = sModelIndexCount - model->shadowFirst;
-        /* the trunk's art on the ground (an ash tree's cell shows its own ash or sand: the 3DS art is grass) */
-        if (part < 4)
+        /* the trunk's art on the ground (an ash or a Lavaridge tree's cell shows its own ground: the 3DS art is
+         * grass) */
+        if (first == DIORAMA_TREE_SPRITE_QUARTER)
             TrunkArt(32 + col * 16, row * 16);
-        else if (!ash)
-            TrunkArt(part == 4 ? 48 : 80, part == 4 ? 32 : 0);
+        else if (part + 1 == DIORAMA_TREE_SPRITE_SMALL)
+            TrunkArt(48, 32);
+        else if (part + 1 == DIORAMA_TREE_SPRITE_SMALL_DEWFORD)
+            TrunkArt(80, 0);
         if (sVolumes)
             CrownFaces(art, col * columns, row * rows, columns, rows, col, row, levels, false);
         model->seenCount = sModelIndexCount - model->first;
@@ -1020,17 +1041,13 @@ static bool CellHolds(const struct DioramaSceneSnapshot *snapshot, int mapX, int
 static int CellSlot(const struct DioramaSceneSnapshot *snapshot, const struct DioramaCellSnapshot *cell)
 {
     int part = cell->treeSprite - 1;
-    int first;
+    int first = QuarterFirst(part);
     int quarter;
     int col;
     int row;
     int kind = 0;
 
-    if (part >= ASH_PART)
-        first = DIORAMA_TREE_SPRITE_ASH_QUARTER;
-    else if (part < 4)
-        first = DIORAMA_TREE_SPRITE_QUARTER;
-    else
+    if (first == DIORAMA_TREE_SPRITE_NONE)
         return part * KINDS;
     quarter = cell->treeSprite - first;
     col = quarter & 1;

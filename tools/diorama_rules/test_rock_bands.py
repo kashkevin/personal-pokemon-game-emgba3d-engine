@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 
+import json
+import re
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
-from rock_bands import CAP_Q16, RIDGE_Q16, RIDGE_STEP_Q16, band_surfaces, rock_cells
+from rock_bands import CAP_Q16, RIDGE_Q16, RIDGE_STEP_Q16, band_surfaces, rock_cells, tree_grounds
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def summary(palette, visible=256):
@@ -152,6 +157,52 @@ class RockBandTests(unittest.TestCase):
         self.assertEqual(out[1 * width + 1][1], -16 + RIDGE_Q16)          # its edge a tile, as before
         self.assertEqual(out[5 * width + 6][1], -16 + RIDGE_Q16 + 4 * RIDGE_STEP_Q16)   # five cells in
         self.assertLessEqual(max(top for _ground, top in out.values()), -16 + 64)
+
+    def test_a_solid_tree_stands_on_the_ground_it_grows_from(self):
+        # a small tree's trunk on a terrace (32) between the cliff over it and the one down to the street (0); its
+        # cell joined the rock, which stood it from 0 to 48
+        rock = {"groundQ16": 0, "topQ16": 48, "profile": "none", "solid": False, "mass": True}
+        cells, width, height = layout(["####", ".T.#", "####", "...."])
+        solved = {4: {"groundQ16": 32, "topQ16": 32}, 6: {"groundQ16": 32, "topQ16": 32}, 5: rock,
+                  **{offset: {"groundQ16": 0, "topQ16": 0} for offset in range(12, 16)}}
+        out = tree_grounds(cells, width, height, {5: None}, solved)
+        self.assertEqual(out, {5: {"groundQ16": 32, "topQ16": 32, "profile": "none", "solid": False,
+                                   "lift": True}})
+        # a large tree's four quarters stand on one ground, the level most walkable cells round it meet
+        cells, width, height = layout(["....", ".TT#", ".TT#", "...."])
+        solved = {offset: {"groundQ16": 16, "topQ16": 16} for offset in (0, 1, 2, 3, 4, 8, 12, 13, 14)}
+        solved.update({15: {"groundQ16": 0, "topQ16": 0}, 5: rock, 6: rock, 9: rock, 10: rock})
+        out = tree_grounds(cells, width, height, {5: 0, 6: 1, 9: 2, 10: 3}, solved)
+        self.assertEqual({offset: entry["groundQ16"] for offset, entry in out.items()},
+                         {5: 16, 6: 16, 9: 16, 10: 16})
+        # met as often, the lower level (a tree at a cliff's foot)
+        cells, width, height = layout([".T."])
+        out = tree_grounds(cells, width, height, {1: None},
+                           {0: {"groundQ16": 16, "topQ16": 16}, 2: {"groundQ16": -16, "topQ16": -16}, 1: rock})
+        self.assertEqual(out[1]["groundQ16"], -16)
+        # deep in the rock, on its top; a tree on its own ground keeps it
+        cells, width, height = layout(["#####", "#####", "##T##", "#####", "#####"])
+        self.assertEqual(tree_grounds(cells, width, height, {12: None}, {12: rock})[12]["groundQ16"], 48)
+        self.assertEqual(tree_grounds(cells, width, height, {12: None},
+                                      {12: {"groundQ16": 16, "topQ16": 16, "profile": "none", "solid": False}}), {})
+        self.assertEqual(tree_grounds(cells, width, height, {12: None}, {}), {})
+
+    def test_the_solid_trees_are_the_runtimes(self):
+        # lavaridge.json's solidTrees is tree_sprites.c's DioramaTreeSprites_LavaridgePart
+        trees = json.loads((ROOT / "data/diorama/tilesets/lavaridge.json").read_text())["solidTrees"]
+        listed = {0x200 + value: str(quarter) for quarter, values in enumerate(trees["large"]) for value in values}
+        listed.update({0x200 + value: "DIORAMA_TREE_PART_SMALL" for value in trees["small"]})
+        source = (ROOT / "src/diorama/scene/tree_sprites.c").read_text()
+        body = source[source.index("int DioramaTreeSprites_LavaridgePart"):]
+        body = body[:body.index("\n}\n")]
+        parts, pending = {}, []
+        for line in body.splitlines():
+            pending += [int(value, 16) for value in re.findall(r"case (0x[0-9A-Fa-f]+):", line)]
+            answer = re.search(r"return (\d+|DIORAMA_TREE_PART_SMALL);", line)
+            if answer:
+                parts.update(dict.fromkeys(pending, answer.group(1)))
+                pending = []
+        self.assertEqual(parts, listed)
 
 
 if __name__ == "__main__":

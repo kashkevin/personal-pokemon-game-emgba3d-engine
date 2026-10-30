@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 2,
+  "kind": "tileset",
+  "tileset": "gTileset_Fallarbor",
+  "pins": [],
+  "rockArt": {
+    "reason": "The Fallarbor tileset's brown volcanic rock (Routes 113 and 114, Fallarbor Town), Route 115's rock of 2 x 2 cells in the sea and the ash-covered boulder - every one of these metatiles a blocked cell drew flat in the sweep of 2026-10-30; not its trees, its sand or the rock with the hole. Blocked, it stands as a rock band; walked, it stays ground. Local metatile ids.",
+    "metatiles": [42, 104, 105, 106, 112, 120, 122, 328, 329, 336, 337]
+  }
+}

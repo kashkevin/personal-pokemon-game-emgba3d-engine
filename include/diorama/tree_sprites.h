@@ -24,6 +24,8 @@
 #define DIORAMA_TREE_SPRITE_SMALL 5         /* the General tileset's small tree */
 #define DIORAMA_TREE_SPRITE_SMALL_DEWFORD 6 /* Dewford Town's small tree */
 #define DIORAMA_TREE_SPRITE_ASH_QUARTER 7   /* 7-10: an ash-covered large tree's quarter (the Fallarbor tileset's) */
+#define DIORAMA_TREE_SPRITE_LAVARIDGE_QUARTER 11 /* 11-14: a large tree's quarter on the Lavaridge tileset's rock */
+#define DIORAMA_TREE_SPRITE_LAVARIDGE_SMALL 15   /* the Lavaridge tileset's small tree */
 
 /* DioramaTreeSprites_Part's answers, the 3DS port's VoxelTree_Part. */
 #define DIORAMA_TREE_PART_NONE (-1)
@@ -51,5 +53,19 @@ uint16_t DioramaTreeSprites_TrunkGround(bool dewford);
  */
 int DioramaTreeSprites_AshPart(uint16_t metatileId);
 uint16_t DioramaTreeSprites_AshGround(uint16_t metatileId);
+/*
+ * The Lavaridge tileset's trees (Route 112, Jagged Pass, Lavaridge Town; step
+ * 16, the project's own): the General tileset's trees, drawn with its own
+ * tiles on the volcano's rock and terraces - Jagged Pass's large trees, the
+ * small trees of Route 112's terraces with their crowns' tops over the cliff
+ * above. A large tree's quarter (0-3, row * 2 + column), DIORAMA_TREE_PART_SMALL
+ * or DIORAMA_TREE_PART_NONE (tools/diorama_rules: lavaridge.json's solidTrees,
+ * which stand these cells on the ground they grow from, are this list); and
+ * the ground a tree's cell, or a crown's top, shows instead (itself when it is
+ * neither). A crown's top keeps its place's heights (DIORAMA_CELL_TREE_CANOPY):
+ * the cliff it overlaps stays a cliff.
+ */
+int DioramaTreeSprites_LavaridgePart(uint16_t metatileId);
+uint16_t DioramaTreeSprites_LavaridgeGround(uint16_t metatileId);
 
 #endif

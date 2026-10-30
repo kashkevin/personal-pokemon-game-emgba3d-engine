@@ -17,7 +17,7 @@ from pathlib import Path
 from catalog import CatalogError, TilesetInfo, load_tilesets, load_world
 from emerald_compositor import TilesetComposer, load_animation_slots
 from measured_volumes import apply_to_analysis, detect_layout
-from rock_bands import CAP_Q16, band_surfaces, rock_cells
+from rock_bands import CAP_Q16, band_surfaces, rock_cells, tree_grounds
 from mountain_art import (MountainArtError, faces_between_levels,
                           outline_cells as mountain_outline_cells,
                           validate_layout as validate_mountain_art)
@@ -727,7 +727,7 @@ def _parse_pin_files(root: Path, tilesets: dict[str, TilesetInfo], pools: set[st
     output, seen = [], set()
     for path in sorted((root / "data/diorama/tilesets").glob("*.json")):
         data = load_json(path)
-        _unknown(data, {"schemaVersion", "kind", "tileset", "pins", "rockArt"}, str(path))
+        _unknown(data, {"schemaVersion", "kind", "tileset", "pins", "rockArt", "solidTrees"}, str(path))
         if data.get("kind") != "tileset":
             raise RuleError(f"{path}.kind: must be 'tileset'")
         symbol = data.get("tileset")
@@ -781,6 +781,39 @@ def _parse_rock_art(root: Path, tilesets: dict[str, TilesetInfo]) -> dict[str, d
                          for index, value in enumerate(array(item.get("pits", []), f"{item_path}.pits")))
         cap = _integer(item.get("capTiles", CAP_Q16 // 16), f"{item_path}.capTiles", 1, 8)
         output[symbol] = {"metatiles": metatiles | pits, "pits": pits, "capQ16": cap * 16}
+    return output
+
+
+def _parse_solid_trees(root: Path, tilesets: dict[str, TilesetInfo]) -> dict[str, dict[int, int | None]]:
+    """{tileset: {metatile: a large tree's quarter 0-3 (row * 2 + column), None for a small tree's trunk}} from the
+    tileset files' solidTrees: the trees the runtime stands as solids on their cells' ground (tree_sprites.c, whose
+    list for the tileset this is), each standing on the walkable ground it grows from (rock_bands.tree_grounds)."""
+    output = {}
+    for path in sorted((root / "data/diorama/tilesets").glob("*.json")):
+        data = load_json(path)
+        if "solidTrees" not in data:
+            continue
+        item_path = f"{path}.solidTrees"
+        item = _object(data["solidTrees"], item_path)
+        _unknown(item, {"large", "small", "reason"}, item_path)
+        reason = item.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            raise RuleError(f"{item_path}.reason: must be a non-empty string")
+        symbol = data.get("tileset")
+        last = tilesets[symbol].metatile_count - 1
+        quarters = array(item.get("large", []), f"{item_path}.large")
+        if quarters and len(quarters) != 4:
+            raise RuleError(f"{item_path}.large: expected the four quarters' metatiles")
+        trees: dict[int, int | None] = {}
+        for quarter, values in enumerate(quarters):
+            for index, value in enumerate(array(values, f"{item_path}.large[{quarter}]")):
+                trees[_integer(value, f"{item_path}.large[{quarter}][{index}]", 0, last)] = quarter
+        for index, value in enumerate(array(item.get("small", []), f"{item_path}.small")):
+            metatile = _integer(value, f"{item_path}.small[{index}]", 0, last)
+            if metatile in trees:
+                raise RuleError(f"{item_path}.small[{index}]: metatile {metatile} is a large tree's quarter too")
+            trees[metatile] = None
+        output[symbol] = trees
     return output
 
 
@@ -1881,6 +1914,7 @@ def compile_data(root: Path) -> dict:
             raise RuleError(f"exact pattern {pattern['id']}: no placements; add structured allowedNoPlacements")
     pins = _parse_pin_files(root, tilesets, set(pool_ids), profiles_by_id, pin_counts)
     rock_art = _parse_rock_art(root, tilesets)
+    solid_trees = _parse_solid_trees(root, tilesets)
 
     map_default = _object(source.get("mapDefault"), "defaults.mapDefault")
     _unknown(map_default, {"supported", "reason", "groundPolicy", "camera"},
@@ -2149,6 +2183,17 @@ def compile_data(root: Path) -> dict:
                                      for offset, (ground, top) in surfaces.items()}}
                     mountain_art_cells[layout["id"]] = (mountain_art_cells[layout["id"]]
                                                         | frozenset(surfaces).difference(pits))
+                # the trees the runtime stands as solids stand on the ground they grow from, not at the foot
+                # of the rock their cells joined (rock_bands.tree_grounds; Route 112, Jagged Pass)
+                trees = {offset: solid_trees[cell["tileset"]][cell.get("localMetatile")]
+                         for offset, cell in enumerate(layout_cells)
+                         if cell.get("tileset") in solid_trees
+                         and cell.get("localMetatile") in solid_trees[cell["tileset"]]}
+                if trees:
+                    terrace_topology[layout["id"]] = {
+                        **terrace_topology[layout["id"]],
+                        **tree_grounds(layout_cells, layout["width"], layout["height"], trees,
+                                       terrace_topology[layout["id"]])}
             wildcard = tuple(_with_mountain_art(
                 shape, cell, offset in mountain_art_cells[layout["id"]],
                 offset in mountain_outlines[layout["id"]])

@@ -262,7 +262,9 @@ static void ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
     record = FindStaticTerrain(layout, cellOffset, cell->sourceMapGroup, cell->sourceMapNum);
     if (record == NULL)
         return;
-    if (record->expectedMetatile != cell->metatileId)
+    /* A crown's top over its ground (the Lavaridge tileset's solid trees) is
+     * the place the record was made for, drawn without the crown. */
+    if (record->expectedMetatile != cell->metatileId && !(cell->flags & DIORAMA_CELL_TREE_CANOPY))
     {
         /* A cell a script redrew (Route 113's ash brushed off the grass the player
          * walks through, a barrier gone): the new picture is not the one this record
