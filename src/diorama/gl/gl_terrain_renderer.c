@@ -1408,6 +1408,26 @@ static float RockMassFoot(const struct DioramaTerrainChunkInput *input, int x, i
     return foot < 0.0f ? 0.0f : foot > rise ? rise : foot;
 }
 
+/*
+ * A mountain's slopes rise in steps of this many voxels, its top as it is (step 16, phase D): in steps of one, the
+ * rock that stands since step 16 cost Sootopolis's crater 422k vertices of terrain, 370k in steps of two, and the
+ * probe's pictures of the two look the same. PKMN_DIORAMA_ROCK_STEP sets it for one run (1: a step a voxel).
+ */
+#define ROCK_STEP 2
+
+static float RockStep(void)
+{
+    static float sStep = 0.0f;
+
+    if (sStep == 0.0f)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_ROCK_STEP");
+
+        sStep = value != NULL && SDL_atoi(value) >= 1 ? (float)SDL_atoi(value) : ROCK_STEP;
+    }
+    return sStep;
+}
+
 static float RockMassEase(float t)
 {
     if (t >= 1.0f)
@@ -1520,6 +1540,8 @@ static void ShapeRockMasses(struct DioramaTerrainChunkInput *input)
                     if (south < 0.0f && west < 0.0f)
                         level = RockMassSide(level, southWest,
                                              sqrtf(toSouth * toSouth + toWest * toWest), top);
+                    if (RockStep() > 1 && level >= 1.0f && level < top - 0.5f)
+                        level = floorf(level / RockStep() + 0.5f) * RockStep();
                     cell->mountainHeight[pixel] = level < 1.0f ? (level > 0.25f ? 1 : 0)
                                                 : level > 255.0f ? 255 : (uint8_t)(level + 0.5f);
                 }
