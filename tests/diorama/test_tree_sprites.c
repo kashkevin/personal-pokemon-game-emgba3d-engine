@@ -106,6 +106,33 @@ int main(void)
         CHECK(DioramaTreeSprites_LavaridgeGround(0x274) == 0x274);
         CHECK(DioramaTreeSprites_LavaridgeGround(0x2CD) == 0x2CD);
     }
+    /* The Mossdeep tileset's round trees (step 16): on grass, over rock, over a ledge, on the shallows; where two
+     * overlap, the lower tree's upper quarter; each cell's own lower layer its ground. */
+    {
+        static const uint16_t sQuarters[][4] = {
+            {0x31A, 0x31B, 0x322, 0x323}, {0x2F0, 0x2F1, 0x2F8, 0x2F9}, {0x31C, 0x31D, 0x322, 0x323},
+            {0x31E, 0x31F, 0x322, 0x323}, {0x325, 0x324, 0x2F8, 0x2F9}, {0x356, 0x355, 0x322, 0x323},
+        };
+        unsigned j;
+
+        for (i = 0; i < sizeof(sQuarters) / sizeof(sQuarters[0]); i++)
+            for (j = 0; j < 4; j++)
+                CHECK(DioramaTreeSprites_MossdeepPart(sQuarters[i][j]) == (int)j);
+        CHECK(DioramaTreeSprites_MossdeepGround(0x31A, 0x322) == 0x001);
+        CHECK(DioramaTreeSprites_MossdeepGround(0x356, 0x323) == 0x001);
+        CHECK(DioramaTreeSprites_MossdeepGround(0x31C, 0x322) == 0x07C);
+        CHECK(DioramaTreeSprites_MossdeepGround(0x31F, 0x323) == 0x002);
+        CHECK(DioramaTreeSprites_MossdeepGround(0x2F9, 0x19E) == 0x19E);
+        /* an overlap cell: the shallows in a grove, grass over the lower tree's trunk in the town */
+        CHECK(DioramaTreeSprites_MossdeepGround(0x324, 0x325) == 0x19E);
+        CHECK(DioramaTreeSprites_MossdeepGround(0x325, 0x2F8) == 0x19E);
+        CHECK(DioramaTreeSprites_MossdeepGround(0x325, 0x322) == 0x001);
+        CHECK(DioramaTreeSprites_MossdeepGround(0x324, 0) == 0x19E);
+        /* the large three-wide tree, the shallows, grass: not these trees */
+        CHECK(DioramaTreeSprites_MossdeepPart(0x30B) == DIORAMA_TREE_PART_NONE);
+        CHECK(DioramaTreeSprites_MossdeepPart(0x19E) == DIORAMA_TREE_PART_NONE);
+        CHECK(DioramaTreeSprites_MossdeepPart(0x001) == DIORAMA_TREE_PART_NONE);
+    }
     puts("tree sprite tests passed");
     return EXIT_SUCCESS;
 }

@@ -47,8 +47,13 @@ DIORAMA_TREES3DS_ART := $(sort $(wildcard tools/diorama_trees_3ds/art/*.png))
 
 AUTO_GEN_TARGETS += $(DIORAMA_TREES3DS_SOURCE) $(DIORAMA_TREES3DS_HEADER)
 
-$(DIORAMA_TREES3DS_SOURCE) $(DIORAMA_TREES3DS_HEADER) &: $(DIORAMA_TREES3DS_ART) \
-	 tools/diorama_trees_3ds/pack_trees.py
+# (the Mossdeep tileset's round tree is cut from its tileset: pack_trees.py MOSSDEEP_TREE)
+DIORAMA_TREES3DS_TILESETS := data/tilesets/primary/general/metatiles.bin data/tilesets/primary/general/tiles.png \
+	$(wildcard data/tilesets/primary/general/palettes/*.pal) data/tilesets/secondary/mossdeep/metatiles.bin \
+	data/tilesets/secondary/mossdeep/tiles.png $(wildcard data/tilesets/secondary/mossdeep/palettes/*.pal)
+
+$(DIORAMA_TREES3DS_SOURCE) $(DIORAMA_TREES3DS_HEADER) &: $(DIORAMA_TREES3DS_ART) $(DIORAMA_TREES3DS_TILESETS) \
+	 tools/diorama_trees_3ds/pack_trees.py tools/diorama_rules/emerald_compositor.py
 	python3 tools/diorama_trees_3ds/pack_trees.py --source $(DIORAMA_TREES3DS_SOURCE) \
 	  --header $(DIORAMA_TREES3DS_HEADER)
 

@@ -25,7 +25,10 @@ with the large crown again at 0,64 in the colours of the Fallarbor tileset's
 ash-covered trees (step 16: Routes 113 and 114 and Fallarbor Town stand theirs with it).
 The Lavaridge tileset's trees, the General tileset's drawn on the volcano's rock
 (Route 112, Jagged Pass, Lavaridge Town), stand with the large and small crowns
-as they are, without the trunk's grass art under them.
+as they are, without the trunk's grass art under them. The Mossdeep tileset's round
+tree (Mossdeep City, Route 127's grove) is not the 3DS project's: it is cut from the
+game's own tileset when the texture is packed (its 2x2 metatiles' upper layer without
+the grass, at 96,0) and stands as a solid made the same way.
 It needs Pillow, as the building generator does.
 
 ## Provenance

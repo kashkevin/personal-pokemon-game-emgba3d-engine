@@ -133,6 +133,34 @@ int DioramaTreeSprites_LavaridgePart(uint16_t metatileId)
     }
 }
 
+int DioramaTreeSprites_MossdeepPart(uint16_t metatileId)
+{
+    switch (metatileId)
+    {
+    /* on grass, over rock (31C-31D), over a ledge (31E-31F), on the shallows (2F0-2F9); the lower tree's upper
+     * quarter over the next tree's lower one: on the shallows (324-325), on grass (355-356) */
+    case 0x31A: case 0x31C: case 0x31E: case 0x2F0: case 0x325: case 0x356: return 0;
+    case 0x31B: case 0x31D: case 0x31F: case 0x2F1: case 0x324: case 0x355: return 1;
+    case 0x322: case 0x2F8: return 2;
+    case 0x323: case 0x2F9: return 3;
+    default: return DIORAMA_TREE_PART_NONE;
+    }
+}
+
+uint16_t DioramaTreeSprites_MossdeepGround(uint16_t metatileId, uint16_t below)
+{
+    /* the metatile with the tree's cell's lower layer and nothing over it */
+    switch (metatileId)
+    {
+    case 0x31C: case 0x31D: return 0x07C; /* rock */
+    case 0x31E: case 0x31F: return 0x002; /* grass under a ledge */
+    case 0x324: case 0x325: /* the shallows' art, also where its tree stands on grass in the town */
+        return below == 0x322 || below == 0x323 || below == 0x355 || below == 0x356 ? 0x001 : 0x19E;
+    case 0x2F0: case 0x2F1: case 0x2F8: case 0x2F9: return 0x19E; /* the shallows */
+    default: return 0x001; /* grass */
+    }
+}
+
 uint16_t DioramaTreeSprites_LavaridgeGround(uint16_t metatileId)
 {
     switch (metatileId)

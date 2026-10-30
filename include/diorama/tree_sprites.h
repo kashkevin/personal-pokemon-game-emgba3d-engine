@@ -26,6 +26,7 @@
 #define DIORAMA_TREE_SPRITE_ASH_QUARTER 7   /* 7-10: an ash-covered large tree's quarter (the Fallarbor tileset's) */
 #define DIORAMA_TREE_SPRITE_LAVARIDGE_QUARTER 11 /* 11-14: a large tree's quarter on the Lavaridge tileset's rock */
 #define DIORAMA_TREE_SPRITE_LAVARIDGE_SMALL 15   /* the Lavaridge tileset's small tree */
+#define DIORAMA_TREE_SPRITE_MOSSDEEP_QUARTER 16  /* 16-19: the Mossdeep tileset's round tree's quarter */
 
 /* DioramaTreeSprites_Part's answers, the 3DS port's VoxelTree_Part. */
 #define DIORAMA_TREE_PART_NONE (-1)
@@ -67,5 +68,19 @@ uint16_t DioramaTreeSprites_AshGround(uint16_t metatileId);
  */
 int DioramaTreeSprites_LavaridgePart(uint16_t metatileId);
 uint16_t DioramaTreeSprites_LavaridgeGround(uint16_t metatileId);
+/*
+ * The Mossdeep tileset's round trees (Mossdeep City, Route 127's grove on the
+ * shallows; step 16, the project's own): a 2x2 tree on grass, on the shallows,
+ * its upper row over rock or a ledge; where two overlap (a grove's rows stand a
+ * column apart), the cell is the lower tree's upper quarter, as the GBA draws
+ * that tree's crown over the other's trunk. A quarter (0-3, row * 2 + column)
+ * or DIORAMA_TREE_PART_NONE; and the ground the cell shows under the solid tree
+ * (its own lower layer: the grass, the shallows, the rock; an overlap cell's
+ * is the shallows' art, also in the town, so its tree's below decides).
+ */
+int DioramaTreeSprites_MossdeepPart(uint16_t metatileId);
+/* `below`: the metatile of the cell south of it (0 for none): an overlap cell is the upper quarter of the tree whose
+ * lower row that is, on grass in the town, on the shallows in a grove. */
+uint16_t DioramaTreeSprites_MossdeepGround(uint16_t metatileId, uint16_t below);
 
 #endif

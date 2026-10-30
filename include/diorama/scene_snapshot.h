@@ -92,9 +92,11 @@ enum DioramaCellFlags
      * a modelled building drawn from the layout does not stand on it (buildings.c). */
     DIORAMA_CELL_CHANGED = 1 << 3,
     /* The ground a solid tree's crown top stands over (tree_sprites.h: the
-     * Lavaridge tileset's): drawn as that ground, it keeps the heights the
-     * rules made for its place's own picture (a cliff the crown overlaps stays
-     * a cliff, not a pit cut to the foot of the rock round it). */
+     * Lavaridge tileset's), or a Mossdeep tileset's tree's own cell: drawn as
+     * that ground, it keeps the heights the rules made for its place's own
+     * picture (a cliff the crown overlaps stays a cliff, not a pit cut to the
+     * foot of the rock round it; a tree in the shallows stays at their level,
+     * not a level over them as their art drawn as ground would be). */
     DIORAMA_CELL_TREE_CANOPY = 1 << 4,
 };
 

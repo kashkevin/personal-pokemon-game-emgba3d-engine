@@ -13,9 +13,14 @@ OpenGL takes them, written as C source for `src/diorama/gl/gl_tree_sprites.c`.
 """
 
 import argparse
+import sys
 from pathlib import Path
 
 from PIL import Image
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools" / "diorama_rules"))
+from emerald_compositor import TilesetComposer  # noqa: E402
 
 DIM = 128
 SOURCES = (("tree_crown.png", (32, 36), (0, 0)),
@@ -31,11 +36,20 @@ SOURCES = (("tree_crown.png", (32, 36), (0, 0)),
 ASH_CROWN = (0, 64)
 ASH_COLOURS = {(56, 80, 0): (74, 82, 33), (56, 136, 48): (115, 132, 49),
                (128, 192, 96): (156, 189, 99), (176, 248, 128): (198, 255, 156)}
+# The Mossdeep tileset's round tree (Mossdeep City, Route 127's grove; step 16, the
+# project's own): its 2x2 metatiles' upper layer (upper left, upper right, lower left,
+# lower right) at 96,0, the grass it is drawn on (the colours of the grass metatile
+# beside it) cut out. Rows 0-21 are its leaves, 22-31 its trunk and the shadow round it.
+MOSSDEEP_CROWN = (96, 0)
+MOSSDEEP_TREE = (0x31A, 0x31B, 0x322, 0x323)
+MOSSDEEP_GRASS = 0x001
+MOSSDEEP_LEAF_ROWS = 22
 # ctr_voxel.c: VOXEL_TREE_BRIGHTNESS and BrightenCrowns' rectangles (x, y, w, h),
-# the crowns only (the ash crown too): the trunks' ground is the tileset's own and must
-# match the grass.
+# the crowns only (the ash crown and the Mossdeep tree's leaves too): the trunks' ground
+# is the tileset's own and must match the grass.
 CROWN_BRIGHTNESS = 1.12
-CROWNS = ((0, 0, 32, 36), (32, 32, 16, 32), (64, 0, 16, 32), (0, 64, 32, 36))
+CROWNS = ((0, 0, 32, 36), (32, 32, 16, 32), (64, 0, 16, 32), (0, 64, 32, 36),
+          (96, 0, 32, MOSSDEEP_LEAF_ROWS))
 
 
 def channel(value):
@@ -53,7 +67,21 @@ def in_crown(x, y):
     return any(cx <= x < cx + w and cy <= y < cy + h for cx, cy, w, h in CROWNS)
 
 
-def pack(art):
+def mossdeep_tree(root):
+    """The Mossdeep tree as the GBA draws it, without its grass: 32x32 RGBA."""
+    composer = TilesetComposer(root / "data/tilesets/primary/general", root / "data/tilesets/secondary/mossdeep")
+    # compose_metatile: the lower layer, the upper one, both
+    grass = {pixel.rgba[:3] for pixel in composer.compose_metatile(MOSSDEEP_GRASS)[2] if pixel.visible}
+    tree = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
+    for quarter, metatile in enumerate(MOSSDEEP_TREE):
+        left, top = (quarter & 1) * 16, (quarter >> 1) * 16
+        for index, pixel in enumerate(composer.compose_metatile(metatile)[1]):
+            if pixel.visible and pixel.rgba[:3] not in grass:
+                tree.putpixel((left + index % 16, top + index // 16), pixel.rgba[:3] + (255,))
+    return tree
+
+
+def pack(art, root=ROOT):
     atlas = Image.new("RGBA", (DIM, DIM), (0, 0, 0, 0))
     for name, size, origin in SOURCES:
         with Image.open(art / name) as source:
@@ -71,6 +99,7 @@ def pack(art):
                     raise ValueError(f"tree_crown.png: colour {(r, g, b)} has no ash colour")
                 pixels[x, y] = ASH_COLOURS[(r, g, b)] + (a,)
     atlas.paste(ash, ASH_CROWN)
+    atlas.paste(mossdeep_tree(root), MOSSDEEP_CROWN)
     pixels = bytearray(atlas.tobytes())
     for i in range(0, len(pixels), 4):
         if pixels[i + 3] >= 128:

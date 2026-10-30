@@ -54,8 +54,9 @@
  * quarters, the small tree, Dewford Town's small tree, an ash-covered large
  * tree's four quarters (the Fallarbor tileset's), the Lavaridge tileset's large
  * tree's four quarters and its small tree (the General tileset's on the
- * volcano's ground: QuarterFirst). */
-#define PART_COUNT 15
+ * volcano's ground: QuarterFirst), the Mossdeep tileset's round tree's four
+ * quarters. */
+#define PART_COUNT 19
 /*
  * A large tree's quarter whose neighbour in its row (the other half of the
  * tree) or in its column (the other row) is not a tree cell - a wood's edge
@@ -68,7 +69,7 @@
 #define HALF_ALONE 1
 #define ROW_ALONE 2
 #define SLOT_COUNT (PART_COUNT * KINDS)
-#define MAX_MODEL_VERTICES 32768
+#define MAX_MODEL_VERTICES 49152
 #define MAX_MODEL_INDICES (MAX_MODEL_VERTICES / 4 * 6)
 #define MAX_CROWN_WIDTH 32
 #define MAX_CROWN_HEIGHT 36
@@ -132,7 +133,7 @@ struct CrownArt
     uint8_t barkX, barkY;
 };
 
-static const struct CrownArt sCrownArt[4] = {
+static const struct CrownArt sCrownArt[5] = {
     /* the large tree: its crown at 0,0, its trunk's art at 32,0 (a row of the stump's bark) */
     {0, 0, 32, 36, 36, 2, 2, 1.35f, 10.0f, 12.0f, 6, 32 + 7, 18},
     /* the small tree at 32,32, the trunk its art draws from row 24 */
@@ -141,6 +142,8 @@ static const struct CrownArt sCrownArt[4] = {
     {64, 0, 16, 32, 23, 1, 1, 0.975f, 6.0f, 7.0f, 4, 64 + 4, 26},
     /* the ash-covered large tree: the large crown in the ash trees' colours at 0,64, the same bark */
     {0, 64, 32, 36, 36, 2, 2, 1.35f, 10.0f, 12.0f, 6, 32 + 7, 18},
+    /* the Mossdeep tileset's round tree at 96,0 (its own art), its trunk from row 22, the bark its row 26 */
+    {96, 0, 32, 32, 22, 2, 2, 1.40f, 10.0f, 11.0f, 8, 96 + 12, 26},
 };
 
 static bool sReady;
@@ -450,16 +453,17 @@ static void TrunkArt(int texelX, int texelY)
 }
 
 /*
- * EmitCell's cut-out: a large tree's quarter. The crown keeps its 32:36 aspect
- * ratio, 2 tiles wide and 2.25 long, at 50 degrees (sin and cos), its
- * transparent bottom margin sunk 0.10 into the ground so the leaves overlap the
- * trunk; each quarter carries its column and row of it.
+ * EmitCell's cut-out: a large tree's quarter. The crown keeps its aspect ratio
+ * (the 3DS art's 32:36: 2 tiles wide and 2.25 long), at 50 degrees (sin and
+ * cos), its transparent bottom margin sunk 0.10 into the ground so the leaves
+ * overlap the trunk; each quarter carries its column and row of it.
  */
 static void LargeCrownCard(const struct CrownArt *art, int part)
 {
-    const float rise = 1.723600f;
-    const float run = 1.446272f;
+    const float rise = (float)art->height / PIXELS_PER_TILE * TILT_SIN;
+    const float run = (float)art->height / PIXELS_PER_TILE * TILT_COS;
     const float baseHeight = -CROWN_SINK;
+    int rowPixels = art->height / 2;
     int col = part & 1;
     int row = part >> 1;
     float baseZ = art->baseZ - (float)row;
@@ -472,8 +476,8 @@ static void LargeCrownCard(const struct CrownArt *art, int part)
         {0.0f, baseHeight + bottom * rise, baseZ - bottom * run},
     };
 
-    ArtQuad(corners, (art->x + col * 16) * TEXEL, (art->y + row * 18) * TEXEL, (art->x + col * 16 + 16) * TEXEL,
-            (art->y + row * 18 + 18) * TEXEL, TILT_COS, TILT_SIN);
+    ArtQuad(corners, (art->x + col * 16) * TEXEL, (art->y + row * rowPixels) * TEXEL,
+            (art->x + col * 16 + 16) * TEXEL, (art->y + (row + 1) * rowPixels) * TEXEL, TILT_COS, TILT_SIN);
 }
 
 /*
@@ -856,6 +860,7 @@ static int QuarterFirst(int part)
 {
     static const uint8_t firsts[] = {
         DIORAMA_TREE_SPRITE_QUARTER, DIORAMA_TREE_SPRITE_ASH_QUARTER, DIORAMA_TREE_SPRITE_LAVARIDGE_QUARTER,
+        DIORAMA_TREE_SPRITE_MOSSDEEP_QUARTER,
     };
     int sprite = part + 1;
     size_t i;
@@ -881,7 +886,8 @@ static bool BuildModels(void)
         int kind = slot % KINDS;
         int first = QuarterFirst(part);
         bool large = first != DIORAMA_TREE_SPRITE_NONE;
-        const struct CrownArt *art = &sCrownArt[first == DIORAMA_TREE_SPRITE_ASH_QUARTER ? 3 : large ? 0
+        const struct CrownArt *art = &sCrownArt[first == DIORAMA_TREE_SPRITE_ASH_QUARTER ? 3
+                                                : first == DIORAMA_TREE_SPRITE_MOSSDEEP_QUARTER ? 4 : large ? 0
                                                 : part + 1 == DIORAMA_TREE_SPRITE_SMALL_DEWFORD ? 2 : 1];
         int quarter = large ? part + 1 - first : 0;
         int col = large ? (quarter & 1) : 0;

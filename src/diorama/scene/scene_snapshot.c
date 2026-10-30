@@ -77,6 +77,7 @@ static s8 sTreeStyle = -1;
 /* Its trees stand as solids too (ApplyTreeSprites); tilesets.h declares only
  * some tilesets. */
 extern const struct Tileset gTileset_Lavaridge;
+extern const struct Tileset gTileset_Mossdeep;
 
 /*
  * Neighbouring maps with other tiles (scene_snapshot.h, atlasPage). The
@@ -760,6 +761,25 @@ static void ApplyTreeSprites(struct DioramaSceneSnapshot *snapshot)
                 cell->treeSprite = DIORAMA_TREE_SPRITE_LAVARIDGE_QUARTER + part;
             else
                 cell->flags |= DIORAMA_CELL_TREE_CANOPY;
+            continue;
+        }
+        /* the Mossdeep tileset's round tree: its cell's own ground under the solid tree */
+        if (layout->secondaryTileset == &gTileset_Mossdeep
+         && (part = DioramaTreeSprites_MossdeepPart(cell->metatileId)) != DIORAMA_TREE_PART_NONE)
+        {
+            /* the cell south of it, not changed yet (the cells go from the north), on the same map */
+            const struct DioramaCellSnapshot *below = i + DIORAMA_GRID_WIDTH < snapshot->visibleCellCount
+                                                   && snapshot->cells[i + DIORAMA_GRID_WIDTH].atlasPage
+                                                      == cell->atlasPage
+                                                    ? &snapshot->cells[i + DIORAMA_GRID_WIDTH] : NULL;
+
+            if (CopyCellVisual(layout, DioramaTreeSprites_MossdeepGround(cell->metatileId,
+                                                                         below != NULL ? below->metatileId : 0),
+                               cell->collision, cell->elevation, cell))
+            {
+                cell->treeSprite = DIORAMA_TREE_SPRITE_MOSSDEEP_QUARTER + part;
+                cell->flags |= DIORAMA_CELL_TREE_CANOPY;
+            }
             continue;
         }
         part = DioramaTreeSprites_Part(dewford, cell->metatileId);
