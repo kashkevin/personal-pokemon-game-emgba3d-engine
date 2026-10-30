@@ -300,6 +300,10 @@ static struct
     int boxFirst[2];
     bool hmLog, hmLogged;
     bool carrierLog;   /* PKMN_TEST_CARRIER_LOG=1: CarrierLogField */
+    /* PKMN_TEST_BIKE_LOG=1: BikeLogField; PKMN_TEST_REGISTER=<item>: that item on SELECT with the test's Bag (the
+       Acro Bike's checks: on it with one press) */
+    bool bikeLog;
+    int bikeSeen[7], registerItem;
     int hmSeen[13], hmShots;
     /* PKMN_TEST_MOVE_LOG=1: on the field and in its menus, "move field: lead S moves m:pp/max,..." whenever the lead's
        moves or their PP change (tools/battle_env/move_switch_check.py: MOVES in the party menu); what was last logged */
@@ -532,6 +536,9 @@ static void Init(void)
     s.boxFirst[0] = -1;
     s.hmLog = EnvInt("PKMN_TEST_HM_LOG", 0) != 0;
     s.carrierLog = EnvInt("PKMN_TEST_CARRIER_LOG", 0) != 0;
+    s.bikeLog = EnvInt("PKMN_TEST_BIKE_LOG", 0) != 0;
+    s.bikeSeen[0] = -1;
+    s.registerItem = EnvInt("PKMN_TEST_REGISTER", 0);
     value = SDL_getenv("PKMN_TEST_FOE");
     if (value != NULL)
         SDL_strlcpy(s.foe, value, sizeof(s.foe));
@@ -1442,6 +1449,8 @@ static void SetUpTestBag(void)
         if (*p == ',')
             p++;
     }
+    if (s.registerItem > 0)
+        gSaveBlock1Ptr->registeredItem = s.registerItem;
 }
 
 /* The foes made by wild/wild2/legendary again with PKMN_TEST_FOE's flags ("flags,flags"). */
@@ -1851,6 +1860,32 @@ static void HmLogField(void)
     TestLog("Battle env test: hm field: frame %d cut-in %d species %d shiny %d personality %08x surfing %d map %d.%d at "
             "%d,%d facing %d last talked %d flag %d party %s box %d", s.fieldKeyFrames, now[0], now[1], now[2],
             (unsigned)now[3], now[4], now[11] >> 8, now[11] & 0xFF, now[5], now[6], now[12], now[7], now[8], party, now[10]);
+}
+
+/* PKMN_TEST_BIKE_LOG=1, while PKMN_TEST_FIELD_KEYS run: "bike: ..." with the field key frame whenever the player's
+ * place, avatar flags (PLAYER_AVATAR_FLAG_*), Acro Bike state (BIKE_STATE_* / ACRO_STATE_*), facing, the behaviour of the
+ * metatile under them or the held keys change - the Acro Bike's wheelie, bunny hop and rails. */
+static void BikeLogField(void)
+{
+    struct ObjectEvent *player;
+    int now[7];
+
+    if (!s.bikeLog || gMain.inBattle || !s.fieldKeysActive || gSaveBlock1Ptr == NULL)
+        return;
+    player = &gObjectEvents[gPlayerAvatar.objectEventId];
+    now[0] = player->currentCoords.x - MAP_OFFSET;
+    now[1] = player->currentCoords.y - MAP_OFFSET;
+    now[2] = gPlayerAvatar.flags;
+    now[3] = gPlayerAvatar.acroBikeState;
+    now[4] = player->facingDirection;
+    now[5] = MapGridGetMetatileBehaviorAt(player->currentCoords.x, player->currentCoords.y);
+    now[6] = gMain.heldKeys;
+    if (memcmp(now, s.bikeSeen, sizeof(now)) == 0)
+        return;
+    memcpy(s.bikeSeen, now, sizeof(now));
+    TestLog("Battle env test: bike: frame %d at %d,%d flags 0x%02x acro state %d facing %d behavior 0x%02x keys 0x%03x "
+            "elevation %d", s.fieldKeyFrames, now[0], now[1], now[2], now[3], now[4], now[5], now[6],
+            player->currentElevation);
 }
 
 /* PKMN_TEST_CARRIER_LOG=1 (the Pokemon carrying the player on Surf, Dive and Fly, field_carrier.c), while
@@ -4539,6 +4574,7 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
     BagLogField();
     HmLogField();
     CarrierLogField();
+    BikeLogField();
     MoveLogField();
     SparkleLogField();
     OweBattleField();
