@@ -81,6 +81,9 @@ struct DioramaProfileStats
     double drawsPerFrame;
     double verticesPerFrame;
     double instancesPerFrame;
+    /* the draws and their vertices in each section (the innermost open one when drawn) */
+    double sectionDrawsPerFrame[DIORAMA_PROF_COUNT];
+    double sectionVerticesPerFrame[DIORAMA_PROF_COUNT];
     double textureUploadKBPerFrame;
     double bufferUploadKBPerFrame;
     /* The call sites that uploaded the most, largest first ("file.c:line"). */

@@ -182,6 +182,13 @@ void DioramaProfile_Init(void)
     DioramaProfile_SetTiming(sLogRequested);
 }
 
+/* The draws and vertices of each section (step 16, phase D: which pass the vertices went to), counted against the
+ * innermost section open when they are drawn. */
+static uint64_t sSectionDraws[DIORAMA_PROF_COUNT];
+static uint64_t sSectionVertices[DIORAMA_PROF_COUNT];
+static int sDrawSections[DIORAMA_PROF_COUNT];
+static int sDrawDepth;
+
 static void ResetWindow(void)
 {
     sFrames = 0;
@@ -194,6 +201,8 @@ static void ResetWindow(void)
     sSyncs = 0;
     sTicks = 0;
     sDraws = sVertices = sInstances = 0;
+    memset(sSectionDraws, 0, sizeof(sSectionDraws));
+    memset(sSectionVertices, 0, sizeof(sSectionVertices));
     sTextureUploadBytes = sBufferUploadBytes = 0;
     sUploadSiteCount = 0;
 }
@@ -248,11 +257,21 @@ bool DioramaProfile_LogRequested(void)
     return sLogRequested;
 }
 
+static void CountDraw(uint64_t vertices)
+{
+    int section = sDrawDepth > 0 ? sDrawSections[sDrawDepth - 1] : DIORAMA_PROF_FRAME;
+
+    sSectionDraws[section]++;
+    sSectionVertices[section] += vertices;
+}
+
 void DioramaProfile_Begin(enum DioramaProfileSection section)
 {
     if (!sTiming || section >= DIORAMA_PROF_COUNT || sOpen[section])
         return;
     sOpen[section] = true;
+    if (sDrawDepth < DIORAMA_PROF_COUNT)
+        sDrawSections[sDrawDepth++] = section;
     if (sFinish && section != DIORAMA_PROF_TICK && section != DIORAMA_PROF_SWAP)
         glFinish();
     sCpuBegin[section] = SDL_GetPerformanceCounter();
@@ -272,6 +291,14 @@ void DioramaProfile_End(enum DioramaProfileSection section)
     if (!sTiming || section >= DIORAMA_PROF_COUNT || !sOpen[section])
         return;
     sOpen[section] = false;
+    for (int depth = sDrawDepth - 1; depth >= 0; depth--)
+        if (sDrawSections[depth] == (int)section)
+        {
+            memmove(&sDrawSections[depth], &sDrawSections[depth + 1],
+                    (size_t)(sDrawDepth - 1 - depth) * sizeof(sDrawSections[0]));
+            sDrawDepth--;
+            break;
+        }
     if (sFinish && section != DIORAMA_PROF_TICK && section != DIORAMA_PROF_SWAP)
         glFinish();
     ms = (double)(SDL_GetPerformanceCounter() - sCpuBegin[section]) * 1000.0
@@ -397,6 +424,11 @@ void DioramaProfile_TakeStats(struct DioramaProfileStats *stats)
     stats->drawsPerFrame = sDraws / frames;
     stats->verticesPerFrame = sVertices / frames;
     stats->instancesPerFrame = sInstances / frames;
+    for (section = 0; section < DIORAMA_PROF_COUNT; section++)
+    {
+        stats->sectionDrawsPerFrame[section] = sSectionDraws[section] / frames;
+        stats->sectionVerticesPerFrame[section] = sSectionVertices[section] / frames;
+    }
     stats->textureUploadKBPerFrame = sTextureUploadBytes / 1024.0 / frames;
     stats->bufferUploadKBPerFrame = sBufferUploadBytes / 1024.0 / frames;
     {
@@ -451,6 +483,19 @@ void DioramaProfile_FormatStats(const struct DioramaProfileStats *stats, char *b
                      "; per frame %.0f draws, %.0fk vertices, %.0f instances, uploads %.1f KB textures %.1f KB buffers",
                      stats->drawsPerFrame, stats->verticesPerFrame / 1000.0, stats->instancesPerFrame,
                      stats->textureUploadKBPerFrame, stats->bufferUploadKBPerFrame);
+    {
+        bool first = true;
+
+        for (section = 0; section < DIORAMA_PROF_COUNT && used < size; section++)
+            if (stats->sectionDrawsPerFrame[section] >= 0.5)
+            {
+                used += (size_t)SDL_snprintf(buffer + used, size - used, "%s %s %.0f/%.0fk",
+                                             first ? "; by pass draws/vertices" : ",", sSectionNames[section],
+                                             stats->sectionDrawsPerFrame[section],
+                                             stats->sectionVerticesPerFrame[section] / 1000.0);
+                first = false;
+            }
+    }
     for (section = 0; section < (int)stats->uploadSiteCount && used < size; section++)
     {
         const char *site = stats->uploadSites[section].site;
@@ -638,6 +683,7 @@ void DioramaProfile_DrawArrays(GLenum mode, GLint first, GLsizei count)
 {
     sDraws++;
     sVertices += (uint64_t)(count > 0 ? count : 0);
+    CountDraw((uint64_t)(count > 0 ? count : 0));
     sInstances++;
     glDrawArrays(mode, first, count);
 }
@@ -646,6 +692,7 @@ void DioramaProfile_DrawElements(GLenum mode, GLsizei count, GLenum type, const 
 {
     sDraws++;
     sVertices += (uint64_t)(count > 0 ? count : 0);
+    CountDraw((uint64_t)(count > 0 ? count : 0));
     sInstances++;
     glDrawElements(mode, count, type, indices);
 }
@@ -654,6 +701,7 @@ void DioramaProfile_DrawElementsInstanced(GLenum mode, GLsizei count, GLenum typ
                                           GLsizei instances)
 {
     sDraws++;
+    CountDraw(count > 0 && instances > 0 ? (uint64_t)count * (uint64_t)instances : 0);
     if (count > 0 && instances > 0)
     {
         sVertices += (uint64_t)count * (uint64_t)instances;
@@ -665,6 +713,7 @@ void DioramaProfile_DrawElementsInstanced(GLenum mode, GLsizei count, GLenum typ
 void DioramaProfile_DrawArraysInstanced(GLenum mode, GLint first, GLsizei count, GLsizei instances)
 {
     sDraws++;
+    CountDraw(count > 0 && instances > 0 ? (uint64_t)count * (uint64_t)instances : 0);
     if (count > 0 && instances > 0)
     {
         sVertices += (uint64_t)count * (uint64_t)instances;
