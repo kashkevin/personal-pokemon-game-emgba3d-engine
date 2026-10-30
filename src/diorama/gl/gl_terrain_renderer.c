@@ -82,6 +82,12 @@ struct GLTerrainChunk
     GLenum indexType;
     uint32_t indexCount;
     uint32_t drawVertices;
+    /* The marking passes' triangles (MarkedTriangles), after its indices in
+     * the index buffer: reflectingCount indices, then colouredCount; without
+     * them (marked false) those passes draw the whole chunk. */
+    bool marked;
+    uint32_t reflectingCount;
+    uint32_t colouredCount;
     struct DioramaTerrainMesh mesh;
 };
 
@@ -2137,6 +2143,52 @@ static void CheckChunkMesh(const struct DioramaTerrainChunkInput *input, const s
                 sDiffering);
 }
 
+/*
+ * The triangles the terrain's marking passes can mark (DioramaGLTerrain_Draw:
+ * the stencil's reflections, then its pixel colours), each list written after
+ * the chunk's indices: those with a corner of reflecting surface, then those
+ * with a corner of pixel colour (layer 3). The shader leaves every other
+ * triangle out whole in those passes (a mask under a half at all three
+ * corners is under it all across; the layer is the provoking corner's), and
+ * they drew every triangle (step 16, phase D: three times the terrain's
+ * vertices a frame). False when the lists do not fit in `room` indices.
+ */
+static bool MarkedTriangles(const struct DioramaTerrainVertex *vertices, uint32_t *indices,
+                            uint32_t indexCount, uint32_t room, uint32_t *reflecting,
+                            uint32_t *coloured)
+{
+    uint32_t out = indexCount;
+    int list;
+
+    for (list = 0; list < 2; list++)
+    {
+        uint32_t first = out;
+        uint32_t i;
+
+        for (i = 0; i + 3 <= indexCount; i += 3)
+        {
+            bool wanted = false;
+            int corner;
+
+            for (corner = 0; corner < 3; corner++)
+            {
+                const struct DioramaTerrainVertex *vertex = &vertices[indices[i + corner]];
+
+                wanted |= list == 0 ? vertex->reflectionMask >= 0.5f : (int)vertex->textureLayer == 3;
+            }
+            if (!wanted)
+                continue;
+            if (out - indexCount + 3 > room)
+                return false;
+            indices[out++] = indices[i];
+            indices[out++] = indices[i + 1];
+            indices[out++] = indices[i + 2];
+        }
+        *(list == 0 ? reflecting : coloured) = out - first;
+    }
+    return true;
+}
+
 static bool UploadChunk(struct GLTerrainChunk *chunk,
                         const struct DioramaTerrainChunkInput *input,
                         uint64_t signature)
@@ -2187,16 +2239,27 @@ static bool UploadChunk(struct GLTerrainChunk *chunk,
      * into the scratch's unused tail - no memory of their own; a chunk too
      * big to leave room for them is drawn as before. */
     chunk->indexCount = 0;
+    chunk->marked = false;
+    chunk->reflectingCount = 0;
+    chunk->colouredCount = 0;
     chunk->drawVertices = mesh.vertexCount;
     if ((uint64_t)(DIORAMA_TERRAIN_MAX_VERTICES - mesh.vertexCount) * sizeof(struct DioramaTerrainVertex)
         >= (uint64_t)mesh.vertexCount * sizeof(uint32_t))
     {
         uint32_t *indices = (uint32_t *)(void *)(sScratchVertices + mesh.vertexCount);
+        uint32_t room = (uint32_t)((uint64_t)(DIORAMA_TERRAIN_MAX_VERTICES - mesh.vertexCount)
+                                   * sizeof(struct DioramaTerrainVertex) / sizeof(uint32_t));
         uint32_t indexCount;
         uint32_t vertices = DioramaTerrain_FoldQuads(sScratchVertices, mesh.vertexCount,
                                                      indices, &indexCount);
+        uint32_t total;
         size_t indexSize = sizeof(uint32_t);
 
+        chunk->marked = MarkedTriangles(sScratchVertices, indices, indexCount, room - indexCount,
+                                        &chunk->reflectingCount, &chunk->colouredCount);
+        if (!chunk->marked)
+            chunk->reflectingCount = chunk->colouredCount = 0;
+        total = indexCount + chunk->reflectingCount + chunk->colouredCount;
         chunk->indexType = GL_UNSIGNED_INT;
         if (vertices <= 0x10000)
         {
@@ -2204,7 +2267,7 @@ static bool UploadChunk(struct GLTerrainChunk *chunk,
             uint16_t *shortIndices = (uint16_t *)(void *)indices;
             uint32_t i;
 
-            for (i = 0; i < indexCount; i++)
+            for (i = 0; i < total; i++)
                 shortIndices[i] = (uint16_t)indices[i];
             chunk->indexType = GL_UNSIGNED_SHORT;
             indexSize = sizeof(uint16_t);
@@ -2214,15 +2277,16 @@ static bool UploadChunk(struct GLTerrainChunk *chunk,
         /* the element buffer is the vertex array's: bind that first */
         dglBindVertexArray(chunk->vertexArray);
         dglBindBuffer(GL_ELEMENT_ARRAY_BUFFER, chunk->indexBuffer);
-        dglBufferData(GL_ELEMENT_ARRAY_BUFFER, indexCount * indexSize, indices, GL_DYNAMIC_DRAW);
+        dglBufferData(GL_ELEMENT_ARRAY_BUFFER, total * indexSize, indices, GL_DYNAMIC_DRAW);
         chunk->indexCount = indexCount;
         chunk->drawVertices = vertices;
     }
     if (ChunkLog())
-        SDL_Log("Diorama: chunk %d,%d: drawn from %u vertices, %u indices (%s)",
+        SDL_Log("Diorama: chunk %d,%d: drawn from %u vertices, %u indices (%s), marking %s %u + %u",
                 input->chunkX, input->chunkY, chunk->drawVertices, chunk->indexCount,
                 chunk->indexCount == 0 ? "none"
-                : chunk->indexType == GL_UNSIGNED_SHORT ? "16-bit" : "32-bit");
+                : chunk->indexType == GL_UNSIGNED_SHORT ? "16-bit" : "32-bit",
+                chunk->marked ? "lists" : "whole", chunk->reflectingCount, chunk->colouredCount);
     dglBindBuffer(GL_ARRAY_BUFFER, chunk->vertexBuffer);
     dglBufferData(GL_ARRAY_BUFFER,
                   chunk->drawVertices * sizeof(struct DioramaTerrainVertex),
@@ -2496,6 +2560,26 @@ static void DrawChunk(const struct GLTerrainChunk *chunk)
         glDrawElements(GL_TRIANGLES, (GLsizei)chunk->indexCount, chunk->indexType, NULL);
     else
         glDrawArrays(GL_TRIANGLES, 0, (GLsizei)chunk->drawVertices);
+}
+
+/* A chunk's triangles for a marking pass (list 0 the reflections, 1 the pixel
+ * colours): its list when UploadChunk made them, else the whole chunk. False
+ * when it has none to draw. */
+static bool DrawMarking(const struct GLTerrainChunk *chunk, int list)
+{
+    size_t indexSize = chunk->indexType == GL_UNSIGNED_SHORT ? sizeof(uint16_t) : sizeof(uint32_t);
+    uint32_t first = chunk->indexCount + (list == 1 ? chunk->reflectingCount : 0);
+    uint32_t count = list == 0 ? chunk->reflectingCount : chunk->colouredCount;
+
+    if (!chunk->marked)
+    {
+        DrawChunk(chunk);
+        return true;
+    }
+    if (count == 0)
+        return false;
+    glDrawElements(GL_TRIANGLES, (GLsizei)count, chunk->indexType, (const void *)(uintptr_t)(first * indexSize));
+    return true;
 }
 
 static void ReleaseChunk(struct GLTerrainChunk *chunk)
@@ -3888,33 +3972,26 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
     glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
     glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
     glDepthMask(GL_FALSE);
-    dglUniform1i(sRenderPassLocation, 1);
-    for (i = 0; i < (int)sChunkLimit; i++)
+    for (int list = 0; list < 2; list++)
     {
-        struct GLTerrainChunk *chunk = &sChunks[i];
+        if (list == 1)
+        {
+            glStencilMask(0x02);
+            glStencilFunc(GL_ALWAYS, 2, 0x02);
+        }
+        dglUniform1i(sRenderPassLocation, 1 + list);
+        for (i = 0; i < (int)sChunkLimit; i++)
+        {
+            struct GLTerrainChunk *chunk = &sChunks[i];
 
-        if (!chunk->active
-         || !DioramaTerrain_IsBoundsVisible(&chunk->mesh.bounds, viewX, viewZ,
-                                             cameraPitch, focalLength))
-            continue;
-        dglBindVertexArray(chunk->vertexArray);
-        DrawChunk(chunk);
-        sMetrics.drawCalls++;
-    }
-    glStencilMask(0x02);
-    glStencilFunc(GL_ALWAYS, 2, 0x02);
-    dglUniform1i(sRenderPassLocation, 2);
-    for (i = 0; i < (int)sChunkLimit; i++)
-    {
-        struct GLTerrainChunk *chunk = &sChunks[i];
-
-        if (!chunk->active
-         || !DioramaTerrain_IsBoundsVisible(&chunk->mesh.bounds, viewX, viewZ,
-                                             cameraPitch, focalLength))
-            continue;
-        dglBindVertexArray(chunk->vertexArray);
-        DrawChunk(chunk);
-        sMetrics.drawCalls++;
+            if (!chunk->active || (chunk->marked && (list == 0 ? chunk->reflectingCount : chunk->colouredCount) == 0)
+             || !DioramaTerrain_IsBoundsVisible(&chunk->mesh.bounds, viewX, viewZ,
+                                                 cameraPitch, focalLength))
+                continue;
+            dglBindVertexArray(chunk->vertexArray);
+            if (DrawMarking(chunk, list))
+                sMetrics.drawCalls++;
+        }
     }
     dglUniform1i(sRenderPassLocation, 0);
     dglUniform3f(sMeshShiftLocation, 0.0f, 0.0f, 0.0f);
