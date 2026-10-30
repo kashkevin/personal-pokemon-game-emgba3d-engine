@@ -753,7 +753,11 @@ static const u8 *const sActionStringTable[] =
     [PARTY_MSG_DO_WHAT_WITH_ITEM]      = gText_DoWhatWithItem,
     [PARTY_MSG_DO_WHAT_WITH_MAIL]      = gText_DoWhatWithMail,
     [PARTY_MSG_ALREADY_HOLDING_ONE]    = gText_AlreadyHoldingOne,
+#ifdef PORTABLE
+    [PARTY_MSG_WHICH_APPLIANCE]        = COMPOUND_STRING("Change to\nwhich form?"),   // the Rotom Catalog's six forms
+#else
     [PARTY_MSG_WHICH_APPLIANCE]        = gText_WhichAppliance,
+#endif
     [PARTY_MSG_CHOOSE_SECOND_FUSION]   = gText_NextFusionMon,
     [PARTY_MSG_NO_POKEMON]             = COMPOUND_STRING("You have no POKéMON."),
     [PARTY_MSG_CHOOSE_MON_FOR_BOX]     = gText_SendWhichMonToPC,
@@ -813,12 +817,22 @@ struct
     [MENU_TRADE1]          = {sText_Trade4,                       CursorCb_Trade1},
     [MENU_TRADE2]          = {sText_Trade4,                       CursorCb_Trade2},
     [MENU_TOSS]            = {gMenuText_Toss,                     CursorCb_Toss},
+#ifdef PORTABLE
+    // the Rotom Catalog's list names Rotom's six forms (the owner's request of 2026-10-30; RotomCatalog_FormName)
+    [MENU_CATALOG_BULB]    = {COMPOUND_STRING("Normal Rotom"),    CursorCb_CatalogBulb},
+    [MENU_CATALOG_OVEN]    = {COMPOUND_STRING("Heat Rotom"),      CursorCb_CatalogOven},
+    [MENU_CATALOG_WASHING] = {COMPOUND_STRING("Wash Rotom"),      CursorCb_CatalogWashing},
+    [MENU_CATALOG_FRIDGE]  = {COMPOUND_STRING("Frost Rotom"),     CursorCb_CatalogFridge},
+    [MENU_CATALOG_FAN]     = {COMPOUND_STRING("Fan Rotom"),       CursorCb_CatalogFan},
+    [MENU_CATALOG_MOWER]   = {COMPOUND_STRING("Mow Rotom"),       CursorCb_CatalogMower},
+#else
     [MENU_CATALOG_BULB]    = {COMPOUND_STRING("Light bulb"),      CursorCb_CatalogBulb},
     [MENU_CATALOG_OVEN]    = {COMPOUND_STRING("Microwave oven"),  CursorCb_CatalogOven},
     [MENU_CATALOG_WASHING] = {COMPOUND_STRING("Washing machine"), CursorCb_CatalogWashing},
     [MENU_CATALOG_FRIDGE]  = {COMPOUND_STRING("Refrigerator"),    CursorCb_CatalogFridge},
     [MENU_CATALOG_FAN]     = {COMPOUND_STRING("Electric fan"),    CursorCb_CatalogFan},
     [MENU_CATALOG_MOWER]   = {COMPOUND_STRING("Lawn mower"),      CursorCb_CatalogMower},
+#endif
     [MENU_CHANGE_FORM]     = {COMPOUND_STRING("Change form"),     CursorCb_ChangeForm},
     [MENU_CHANGE_ABILITY]  = {COMPOUND_STRING("Change Ability"),  CursorCb_ChangeAbility},
 #ifdef PORTABLE

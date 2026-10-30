@@ -281,7 +281,7 @@ OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS) $(BFX_QJS_OBJS)
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
-.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-special-results check-trade-evolution check-shake-anim check-line-break check-wild-weather check-legend check-shiny check-shiny-paths check-balls check-healing check-bag-items check-held-items check-mints check-evo-items check-ability-items check-rods check-form-items check-berry-water check-mail check-rare-goods check-coins check-breeding check-rival check-update32 check-hm-box check-move-switch check-species-data check-clock check-mp-objects check-spawn-claims check-secret-base check-rewards check-catch-reconcile check-pokenav-map check-ladder check-coop-exp check-coop-controller check-tower check-keybinds check-graphics-mode check-summary-ivev check-link-replay check-stat-stages check-casino check-wild-items check-ride check-carriers check-frontier-saves check-minigame-partners
+.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-special-results check-trade-evolution check-shake-anim check-line-break check-wild-weather check-legend check-shiny check-shiny-paths check-balls check-healing check-bag-items check-held-items check-mints check-evo-items check-ability-items check-rods check-form-items check-berry-water check-mail check-rare-goods check-rotom-catalog check-coins check-breeding check-rival check-update32 check-hm-box check-move-switch check-species-data check-clock check-mp-objects check-spawn-claims check-secret-base check-rewards check-catch-reconcile check-pokenav-map check-ladder check-coop-exp check-coop-controller check-tower check-keybinds check-graphics-mode check-summary-ivev check-link-replay check-stat-stages check-casino check-wild-items check-ride check-carriers check-frontier-saves check-minigame-partners
 .SUFFIXES:
 .SECONDARY:
 .DELETE_ON_ERROR:
@@ -482,6 +482,13 @@ check-mail: $(TARGET)
 check-rare-goods: $(TARGET)
 	@./$(TARGET) --selftest-rare-goods > $(OBJ_DIR)/selftest-rare-goods.log 2>&1; status=$$?; \
 	  grep -E "^(ok|FAIL)" $(OBJ_DIR)/selftest-rare-goods.log; tail -n 1 $(OBJ_DIR)/selftest-rare-goods.log; exit $$status
+
+# The Rotom Catalog (the owner's request of 2026-10-30): RARE GOODS' price and SOLD OUT, every form to every form, each
+# form's data, a long chain of changes, the PC (src/platform/native_selftest_rotom.c). The party menu's own steps, in a
+# real game: tools/battle_env/rotom_check.py.
+check-rotom-catalog: $(TARGET)
+	@./$(TARGET) --selftest-rotom-catalog > $(OBJ_DIR)/selftest-rotom-catalog.log 2>&1; status=$$?; \
+	  grep -E "^(ok|FAIL)" $(OBJ_DIR)/selftest-rotom-catalog.log; tail -n 1 $(OBJ_DIR)/selftest-rotom-catalog.log; exit $$status
 
 # The 2026-10-27 wild item audit: the Shiny Charm in Local Soft Reset hunts, lures, Repels, the encounter-rate items and
 # abilities on visible Pokemon, Synchronize, Cute Charm, Magnet Pull / Static, Keen Eye, Hustle, Compound Eyes, the Catching

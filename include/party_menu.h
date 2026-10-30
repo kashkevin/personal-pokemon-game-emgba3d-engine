@@ -150,6 +150,13 @@ bool32 SetUpFieldMove_RockClimb(void);
 #ifdef PORTABLE
 // Battle Tower: Legends: a Bottle Cap or a Gold Bottle Cap used on a party Pokemon (Hyper Training).
 void ItemUseCB_HyperTraining(u8 taskId, TaskFunc task);
+// The Rotom Catalog (src/party_menu.c): whether it opens for a Pokemon, the question naming the form chosen and its
+// type before it changes, and the names the list and the question use (--selftest-rotom-catalog).
+bool32 RotomCatalog_IsRotom(struct Pokemon *mon);
+bool32 RotomCatalog_Ask(u8 taskId);
+bool32 RotomCatalog_TakeConfirmed(void);
+const u8 *RotomCatalog_FormName(u32 choice);
+void RotomCatalog_TypeText(enum Species species, u8 *dest);
 #endif
 
 #if TESTING

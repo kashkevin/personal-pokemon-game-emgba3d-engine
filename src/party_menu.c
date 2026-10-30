@@ -7001,6 +7001,20 @@ void ItemUseCB_FormChange_ConsumedOnUse(u8 taskId, TaskFunc task)
 
 void ItemUseCB_RotomCatalog(u8 taskId, TaskFunc task)
 {
+#ifdef PORTABLE
+    // EmeraldTogether (the owner's Rotom Catalog, 2026-10-30): the catalog opens for a Rotom only; anything else, an Egg
+    // among them, has no effect, before the list of forms.
+    if (!RotomCatalog_IsRotom(&gParties[B_TRAINER_PLAYER][gPartyMenu.slotId]))
+    {
+        gPartyMenuUseExitCallback = FALSE;
+        PlaySE(SE_SELECT);
+        DisplayPartyMenuMessage(gText_WontHaveEffect, TRUE);
+        ScheduleBgCopyTilemapToVram(2);
+        gTasks[taskId].func = task;
+        return;
+    }
+#endif
+#line 6866 // gba-line
     PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[0]);
     PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[1]);
     SetPartyMonSelectionActions(gParties[B_TRAINER_PLAYER], gPartyMenu.slotId, ACTIONS_ROTOM_CATALOG);
@@ -7014,6 +7028,12 @@ bool32 TryMultichoiceFormChange(u8 taskId)
 {
     struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][gPartyMenu.slotId];
 
+#ifdef PORTABLE
+    // The Rotom Catalog asks first, naming the form and its type (RotomCatalog_Ask), and comes back here on YES.
+    if (gSpecialVar_ItemId == ITEM_ROTOM_CATALOG && !RotomCatalog_TakeConfirmed())
+        return RotomCatalog_Ask(taskId);
+#endif
+#line 6879 // gba-line
     PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[0]);
     PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[1]);
 
@@ -9042,6 +9062,8 @@ static void CursorCb_Moves(u8 taskId)
 #ifdef ENABLE_NATIVE_UI
 #include "native_ui/ui_engine.h"
 
+static void Task_RotomCatalogAsk(u8 taskId);
+
 // The native PC UI (src/native_ui/screens/ui_party.c) draws this screen in
 // place of its windows and follows this state; the input stays here.
 static bool32 NativeUiTaskStateIs(TaskFunc func, s16 state)
@@ -9061,7 +9083,8 @@ bool32 PartyMenu_NativeUiState(struct NativePartyMenu *out)
         Task_HandleSwitchItemsYesNoInput, Task_HandleTossHeldItemYesNoInput,
     };
     // their YES / NO is their state 2 (data[0])
-    static const TaskFunc sYesNoStateTasks[] = {Task_AbilityCapsule, Task_AbilityPatch, Task_Mint, Task_HyperTraining};
+    static const TaskFunc sYesNoStateTasks[] = {Task_AbilityCapsule, Task_AbilityPatch, Task_Mint, Task_HyperTraining,
+                                                Task_RotomCatalogAsk};
     static const TaskFunc sClosingTasks[] = {
         Task_ClosePartyMenu, Task_ClosePartyMenuAndSetCB2, Task_PartyMenuWaitForFade, Task_ExitPartyMenu,
         Task_FieldMoveWaitForFade,
@@ -9250,4 +9273,141 @@ bool32 PartyMenuTest_OffersMoves(u8 slot)
     sPartyMenuInternal = saved;
     return offered;
 }
+#endif
+
+#ifdef PORTABLE
+// The Rotom Catalog (the owner's request of 2026-10-30): the list names Rotom's six forms (src/data/party_menu.h); the
+// form chosen is named with its type and the player says YES before it changes, through the catalog's own form change
+// (TryMultichoiceFormChange: the form table, the cry, the signature moves). NO, or a form Rotom already has, goes back
+// to the list. The catalog is a Key Item and is never used up. Not in battle: a Key Item the bag lets the field use only.
+static const u8 sText_RotomCatalogAsk[] = _("Turn {STR_VAR_1} into {STR_VAR_2}?\nIts type will be {STR_VAR_3}.");
+static const u8 sText_RotomCatalogAlready[] = _("{STR_VAR_1} is already\n{STR_VAR_2}!{PAUSE_UNTIL_PRESS}");
+static const u8 *const sRotomCatalogFormNames[] = {
+    COMPOUND_STRING("Normal Rotom"), COMPOUND_STRING("Heat Rotom"), COMPOUND_STRING("Wash Rotom"),
+    COMPOUND_STRING("Frost Rotom"), COMPOUND_STRING("Fan Rotom"), COMPOUND_STRING("Mow Rotom"),
+};
+static EWRAM_DATA bool8 sRotomCatalogConfirmed = FALSE;
+
+enum Species GetFormChangeTargetSpecies(struct Pokemon *mon, enum FormChanges method);   // src/pokemon.c
+static void Task_RotomCatalogAsk(u8 taskId);
+
+#define tRcState data[0]
+
+bool32 RotomCatalog_IsRotom(struct Pokemon *mon)
+{
+    return GetMonData(mon, MON_DATA_SPECIES_OR_EGG) != SPECIES_EGG
+        && GET_BASE_SPECIES_ID(GetMonData(mon, MON_DATA_SPECIES)) == SPECIES_ROTOM;
+}
+
+// The catalog's choice (gSpecialVar_Result, 0 to 5) as the form's name
+const u8 *RotomCatalog_FormName(u32 choice)
+{
+    return choice < ARRAY_COUNT(sRotomCatalogFormNames) ? sRotomCatalogFormNames[choice] : gText_EmptyString2;
+}
+
+// "Electric/Fire": a species' types as the summary names them, one when both are the same
+void RotomCatalog_TypeText(enum Species species, u8 *dest)
+{
+    enum Type first = GetSpeciesType(species, 0), second = GetSpeciesType(species, 1);
+
+    dest = StringCopy(dest, gTypesInfo[first].name);
+    if (second != first)
+    {
+        *dest++ = CHAR_SLASH;
+        StringCopy(dest, gTypesInfo[second].name);
+    }
+}
+
+// Whether YES was said for the form change TryMultichoiceFormChange is about to make (once)
+bool32 RotomCatalog_TakeConfirmed(void)
+{
+    bool32 confirmed = sRotomCatalogConfirmed;
+
+    sRotomCatalogConfirmed = FALSE;
+    return confirmed;
+}
+
+// The form chosen from the list (gSpecialVar_Result): its question, or that Rotom already has it. FALSE: no change yet.
+bool32 RotomCatalog_Ask(u8 taskId)
+{
+    struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][gPartyMenu.slotId];
+    enum Species target = GetFormChangeTargetSpecies(mon, FORM_CHANGE_ITEM_USE_MULTICHOICE);
+    s16 *data = gTasks[taskId].data;
+
+    PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[0]);
+    PartyMenuRemoveWindow(&sPartyMenuInternal->windowId[1]);
+    gPartyMenuUseExitCallback = FALSE;
+    PlaySE(SE_SELECT);
+    GetMonNickname(mon, gStringVar1);
+    StringCopy(gStringVar2, RotomCatalog_FormName(gSpecialVar_Result));
+    if (target == GetMonData(mon, MON_DATA_SPECIES))
+    {
+        StringExpandPlaceholders(gStringVar4, sText_RotomCatalogAlready);
+        tRcState = 3;
+    }
+    else
+    {
+        RotomCatalog_TypeText(target, gStringVar3);
+        StringExpandPlaceholders(gStringVar4, sText_RotomCatalogAsk);
+        tRcState = 0;
+    }
+    DisplayPartyMenuMessage(gStringVar4, TRUE);
+    ScheduleBgCopyTilemapToVram(2);
+    gTasks[taskId].func = Task_RotomCatalogAsk;
+    return FALSE;
+}
+
+static void RotomCatalog_BackToForms(u8 taskId)
+{
+    ClearStdWindowAndFrameToTransparent(WIN_MSG, FALSE);
+    ClearWindowTilemap(WIN_MSG);
+#ifdef ENABLE_NATIVE_UI
+    // the PC's party screen shows the message window's last words while tiles stand where it starts (the list's own
+    // prompt window does): the question goes, "Change to which form?" shows again
+    TextPrinter_NativeUiForgetWindow(WIN_MSG);
+#endif
+    ItemUseCB_RotomCatalog(taskId, Task_ClosePartyMenuAfterText);
+}
+
+// State 2 is the YES / NO (PartyMenu_NativeUiState's sYesNoStateTasks); 3 waits on "already" and goes back.
+static void Task_RotomCatalogAsk(u8 taskId)
+{
+    s16 *data = gTasks[taskId].data;
+
+    switch (tRcState)
+    {
+    case 0:
+        tRcState++;
+        break;
+    case 1:
+        if (!IsPartyMenuTextPrinterActive())
+        {
+            PartyMenuDisplayYesNoMenu();
+            tRcState++;
+        }
+        break;
+    case 2:
+        switch (Menu_ProcessInputNoWrapClearOnChoose())
+        {
+        case 0:
+            ClearStdWindowAndFrameToTransparent(WIN_MSG, FALSE);
+            ClearWindowTilemap(WIN_MSG);
+            sRotomCatalogConfirmed = TRUE;
+            TryMultichoiceFormChange(taskId);
+            break;
+        case 1:
+        case MENU_B_PRESSED:
+            PlaySE(SE_SELECT);
+            RotomCatalog_BackToForms(taskId);
+            break;
+        }
+        break;
+    case 3:
+        if (!IsPartyMenuTextPrinterActive())
+            RotomCatalog_BackToForms(taskId);
+        break;
+    }
+}
+
+#undef tRcState
 #endif
