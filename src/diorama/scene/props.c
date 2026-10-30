@@ -438,6 +438,22 @@ static const struct DioramaProp sBattleFrontierOutsideWest[] = {
     WHITE_WALL(0x3F5), WHITE_WALL(0x3F6), WHITE_WALL(0x3FD),
 };
 
+/* Ever Grande City (step 16): the round bushes beside the League's path (the General tileset's bush on its
+ * ground), and its garden's stone wall - the cobbled top a block a tile high, the dark front standing at that
+ * block's foot, as the GBA draws the wall from above and the south. Only on blocked cells. */
+#define STONE_WALL_TOP(id) { PROP(id, FENCE, BLOCK, 1, LOWER), .height16 = 16, .onlyPalette = 8 + 1, \
+                             .flags = DIORAMA_PROP_BLOCKED }
+#define STONE_WALL_FRONT(id) { PROP(id, FENCE, RELIEF, 1, LOWER), .depth = 2, .onlyPalette = 8 + 1, \
+                               .flags = DIORAMA_PROP_BLOCKED }
+static const struct DioramaProp sEverGrande[] = {
+    { PROP(0x220, BUSH, MOUND, 1, LOWER), .height16 = 11 },
+    { PROP(0x23B, BUSH, MOUND, 1, LOWER), .height16 = 11 },
+    { PROP(0x23F, BUSH, MOUND, 1, LOWER), .height16 = 11 },
+    STONE_WALL_TOP(0x232), STONE_WALL_TOP(0x236), STONE_WALL_TOP(0x237), STONE_WALL_TOP(0x263),
+    STONE_WALL_TOP(0x273),
+    STONE_WALL_FRONT(0x233), STONE_WALL_FRONT(0x234), STONE_WALL_FRONT(0x235), STONE_WALL_FRONT(0x23A),
+};
+
 /* The Battle Pyramid's maze walls (MB_SECRET_BASE_WALL in this tileset): each
  * floor is put together from its squares at run time, so the walls are found by
  * their metatile, not by the floor's layout; they stand as blocks with their top
@@ -504,6 +520,7 @@ static const struct DioramaPropTileset sTilesets[] = {
     TILESET("gTileset_BattleFrontierOutsideEast", sBattleFrontierOutsideEast),
     TILESET("gTileset_BattleFrontierOutsideWest", sBattleFrontierOutsideWest),
     TILESET("gTileset_BattlePyramid", sBattlePyramid),
+    TILESET("gTileset_EverGrande", sEverGrande),
     TILESET("gTileset_Dewford", sDewford),
 };
 
