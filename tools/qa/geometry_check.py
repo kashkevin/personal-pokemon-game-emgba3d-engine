@@ -265,9 +265,12 @@ def run_chunk(args, places, first, last, index):
 
 
 def compress_cells(out):
+    """The finished places' dumps (a place's result line is written after its dump is closed): another game still
+    running may be writing its own, which compressed then would be cut short."""
     folder = os.path.join(out, "cells")
+    done = finished_keys(out)
     for name in os.listdir(folder) if os.path.isdir(folder) else []:
-        if name.endswith(".tsv"):
+        if name.endswith(".tsv") and name[:-4] in done:
             path = os.path.join(folder, name)
             with open(path, "rb") as source, gzip.open(path + ".gz", "wb") as target:
                 shutil.copyfileobj(source, target)

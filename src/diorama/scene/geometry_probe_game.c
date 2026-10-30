@@ -22,6 +22,7 @@
 #include "rtc.h"
 #include "script.h"
 #include "constants/flags.h"
+#include "constants/map_groups.h"
 #include "constants/weather.h"
 #include "diorama/geometry_probe.h"
 #include "geometry_probe_shared.h"
@@ -138,6 +139,11 @@ bool DioramaGeoProbe_FieldTick(void)
             /* noon, the cave lit as with Flash: the shapes, not the hour (in memory only) */
             RtcCalcLocalTimeOffset(0, sHour, 0, 0);
             FlagSet(FLAG_SYS_USE_FLASH);
+            /* the Battle Pike's room picks its trainer from the challenge's battle number when entered, which the
+             * game sets before it lets the player in (battle_pike.c PrepareOneTrainer loops for ever on none) */
+            if ((p->num | (p->group << 8)) == MAP_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_NORMAL
+             && gSaveBlock2Ptr->frontier.curChallengeBattleNum == 0)
+                gSaveBlock2Ptr->frontier.curChallengeBattleNum = 1;
             sWarpPending = true;
             SetWarpDestination(p->group, p->num, WARP_ID_NONE, 0, 0);
             DoWarp();
