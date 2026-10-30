@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 2,
+  "kind": "tileset",
+  "tileset": "gTileset_Mossdeep",
+  "pins": [],
+  "rockArt": {
+    "reason": "Mossdeep's white rock, its tops and faces, and the shore rock on the water's edge (not its trees or the brown rocks in the sea): blocked, it stands as rock bands (Mossdeep City, Routes 124-129; Route 126's crater round Sootopolis lay flat). The crater's dark mouth (pits) lies on the rock's foot, the rim rising to it; this rock stands up to four tiles over the sea (capTiles). Local metatile ids.",
+    "metatiles": [
+      164,
+      168,
+      169,
+      170,
+      171,
+      172,
+      173,
+      176,
+      177,
+      178,
+      180,
+      181,
+      184,
+      185,
+      186,
+      312,
+      313,
+      314,
+      320,
+      321,
+      322,
+      324,
+      327,
+      328,
+      329,
+      330,
+      331,
+      333,
+      336,
+      337,
+      338
+    ],
+    "pits": [
+      319
+    ],
+    "capTiles": 4
+  }
+}

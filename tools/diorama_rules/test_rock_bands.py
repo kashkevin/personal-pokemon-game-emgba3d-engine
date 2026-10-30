@@ -124,6 +124,35 @@ class RockBandTests(unittest.TestCase):
                           exclude=frozenset({9}))
         self.assertEqual(rock, frozenset({5, 6}))
 
+    def test_rock_art_is_rock_where_it_is_blocked(self):
+        # Sootopolis: its white rock no class of its own stands, drawn in the palette of the streets it paves where
+        # they are walked - the art's blocked cells are rock (5, 6), its walked one (9, the street) is not
+        cells, width, height = layout(["....", ".##.", "....", "...."])
+        classes = ("ground",) * len(cells)
+        sources = ("fallback:flat",) * len(cells)
+        summaries = (summary(2),) * len(cells)
+        self.assertEqual(rock_cells(cells, classes, sources, summaries, width, height), frozenset())
+        rock = rock_cells(cells, classes, sources, summaries, width, height, art=frozenset({5, 6, 9}))
+        self.assertEqual(rock, frozenset({5, 6}))
+
+    def test_a_craters_mouth_lies_on_its_foot_and_its_rim_rises_to_it(self):
+        # a crater in the sea (-16): a ring of rock five cells thick round a mouth of two cells
+        rows = ["~" * 14] + ["~" + "#" * 12 + "~"] * 12 + ["~" * 14]
+        cells, width, height = layout(rows)
+        rock = frozenset(offset for offset, cell in enumerate(cells) if cell["collision"])
+        levels = {offset: -16 for offset, cell in enumerate(cells) if not cell["collision"]}
+        mouth = frozenset({6 * width + 6, 6 * width + 7})
+        out = band_surfaces(cells, width, height, rock, levels, pits=mouth)
+        self.assertEqual({out[offset] for offset in mouth}, {(-16, -16)})     # on the rock's foot, no height
+        # the rim beside it as high as the cells as far from the sea, not a tile as at an edge
+        self.assertEqual(out[5 * width + 6][1], -16 + CAP_Q16)
+        # a cap of the art's own: the rock rises on inward, four tiles over the sea at the most
+        caps = {offset: 64 for offset in rock}
+        out = band_surfaces(cells, width, height, rock, levels, pits=mouth, caps=caps)
+        self.assertEqual(out[1 * width + 1][1], -16 + RIDGE_Q16)          # its edge a tile, as before
+        self.assertEqual(out[5 * width + 6][1], -16 + RIDGE_Q16 + 4 * RIDGE_STEP_Q16)   # five cells in
+        self.assertLessEqual(max(top for _ground, top in out.values()), -16 + 64)
+
 
 if __name__ == "__main__":
     unittest.main()

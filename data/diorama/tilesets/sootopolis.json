@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 2,
+  "kind": "tileset",
+  "tileset": "gTileset_Sootopolis",
+  "pins": [],
+  "rockArt": {
+    "reason": "Sootopolis's crater, its white rock and faces (not its carved houses or striped walls): blocked, it stands as rock bands, up to four tiles over the city (capTiles); walked, the same art is the city's paving and stays ground. Local metatile ids.",
+    "metatiles": [
+      57,
+      94,
+      208,
+      209,
+      210,
+      211,
+      212,
+      216,
+      217,
+      218,
+      219,
+      220,
+      224,
+      225,
+      226,
+      236,
+      243
+    ],
+    "capTiles": 4
+  }
+}

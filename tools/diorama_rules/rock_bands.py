@@ -75,15 +75,18 @@ def _neighbours(offset: int, width: int, height: int):
 
 def rock_cells(cells: tuple[dict, ...], class_names: tuple[str, ...], sources: tuple[str, ...],
                summaries: tuple[dict, ...], width: int, height: int,
-               mountain: frozenset[int] = frozenset(), exclude: frozenset[int] = frozenset()) -> frozenset[int]:
-    """A layout's rock: the blocked cells of the standing classes and of the mountains' art (`mountain`), and the
-    blocked plain cells (the classifier's flat fallback, MB_NORMAL or MB_MOUNTAIN_TOP) joined to them and drawn mostly
-    in a palette the rock is drawn in - not the main palette of most of the walkable ground (grass, sand, a town's
-    paving: a blocked cell drawn with it is an invisible wall, not rock). `exclude`: cells something else stands
-    (props, the sea's rocks, a terrace's courses)."""
+               mountain: frozenset[int] = frozenset(), exclude: frozenset[int] = frozenset(),
+               art: frozenset[int] = frozenset()) -> frozenset[int]:
+    """A layout's rock: the blocked cells of the standing classes, of the mountains' art (`mountain`) and drawn with
+    a tileset's rock art (`art`: the tileset files' rockArt - Sootopolis's crater, its white rock no class of its own
+    stands, the same art the city's streets are paved with where they are walked), and the blocked plain cells (the
+    classifier's flat fallback, MB_NORMAL or MB_MOUNTAIN_TOP) joined to them and drawn mostly in a palette the rock is
+    drawn in - not the main palette of most of the walkable ground (grass, sand, a town's paving: a blocked cell drawn
+    with it is an invisible wall, not rock). `exclude`: cells something else stands (props, the sea's rocks, a
+    terrace's courses)."""
     seeds = {offset for offset, cell in enumerate(cells)
              if offset not in exclude and cell.get("collision")
-             and (class_names[offset] in ROCK_CLASSES or offset in mountain)}
+             and (class_names[offset] in ROCK_CLASSES or offset in mountain or offset in art)}
     if not seeds:
         return frozenset()
     counts = Counter(_main_palette(summaries[offset])[0] for offset in seeds)
@@ -113,13 +116,18 @@ def rock_cells(cells: tuple[dict, ...], class_names: tuple[str, ...], sources: t
 
 def band_surfaces(cells: tuple[dict, ...], width: int, height: int, rock: frozenset[int],
                   levels: dict[int, int], tops: dict[int, int] | None = None,
-                  ridge: int = RIDGE_Q16, cap: int = CAP_Q16) -> dict[int, tuple[int, int]]:
+                  ridge: int = RIDGE_Q16, cap: int = CAP_Q16, caps: dict[int, int] | None = None,
+                  pits: frozenset[int] = frozenset()) -> dict[int, tuple[int, int]]:
     """{offset: (groundQ16, topQ16)} for the rock's cells. `levels`: the walkable ground's and the water's levels
     (absent: 0, the level the terrace solver gives ground of no level of its own) - every cell beside the rock that
     is not rock: walkable ground, water, and what stands on the ground (a tree, a house, a fence, at its ground's
     level); `tops`: such cells that meet it at a height of their own (a terrace's course: its top). Only the map's
-    edge says nothing. A band that meets nothing keeps no entry."""
+    edge says nothing. A band that meets nothing keeps no entry. `caps`: cells whose rock may stand higher than
+    `cap` over its ground (a band takes the largest of its cells'); `pits`: rock cells that shape their band (its
+    cells are as far from the ground as they are from the band's edge, not from them) but lie on its ground,
+    (ground, ground) - a crater's mouth, its rim rising to it."""
     tops = tops or {}
+    caps = caps or {}
     out: dict[int, tuple[int, int]] = {}
     seen: set[int] = set()
     for start in sorted(rock):
@@ -154,17 +162,23 @@ def band_surfaces(cells: tuple[dict, ...], width: int, height: int, rock: frozen
                    if count >= LEVEL_SHARE * len(boundary) or level == common]
         low, high = min(counted), max(boundary.values())
         members = set(band)
+        band_cap = max([cap] + [caps[offset] for offset in band if offset in caps])
+        for offset in band:
+            if offset in pits:
+                out[offset] = (low, low)
         if max(counted) - low < 16:
             # a ridge on one level: as high as the cell is far from the ground round it
             depth = _depths(band, members, width, height)
             for offset in band:
+                if offset in pits:
+                    continue
                 beside = [boundary[neighbor] for neighbor in _neighbours(offset, width, height)
                           if neighbor in boundary]
-                top = max([low + min(cap, ridge + RIDGE_STEP_Q16 * (depth[offset] - 1))] + beside)
-                out[offset] = (low, min(top, high + cap))
+                top = max([low + min(band_cap, ridge + RIDGE_STEP_Q16 * (depth[offset] - 1))] + beside)
+                out[offset] = (low, min(top, high + band_cap))
             continue
-        height_of = {offset: (low + high) / 2.0 for offset in band}
-        order = sorted(band)
+        height_of = {offset: (low if offset in pits else (low + high) / 2.0) for offset in band}
+        order = [offset for offset in sorted(band) if offset not in pits]     # a pit stays on the ground
         for _sweep in range(MAX_SWEEPS):
             largest = 0.0
             for offset in order:
@@ -180,7 +194,7 @@ def band_surfaces(cells: tuple[dict, ...], width: int, height: int, rock: frozen
                     continue
                 target = total / count
                 value = height_of[offset] + RELAXATION * (target - height_of[offset])
-                value = min(max(value, low), high + cap)    # within its bounds as it settles (a mesa's top)
+                value = min(max(value, low), high + band_cap)   # within its bounds as it settles (a mesa's top)
                 largest = max(largest, abs(value - height_of[offset]))
                 height_of[offset] = value
             if largest < TOLERANCE_Q16:
@@ -188,6 +202,8 @@ def band_surfaces(cells: tuple[dict, ...], width: int, height: int, rock: frozen
         near = _levels_near(band, members, boundary, width, height)
         upper = max(counted)
         for offset in band:
+            if offset in pits:
+                continue
             # at least as high as the highest ground beside it (a top a little under it left a sliver of sky
             # between them) and as the higher of the levels near it, or a tile over the one level near it; and at
             # least a sixteenth over its ground (rock of no height the renderer stands a whole tile up:
@@ -198,7 +214,7 @@ def band_surfaces(cells: tuple[dict, ...], width: int, height: int, rock: frozen
                 top = max([int(round(height_of[offset])), low + 1, max(levels_near)] + beside)
             else:
                 top = max([min(upper, min(levels_near) + ridge), low + 1] + beside)
-            out[offset] = (low, min(top, high + cap))
+            out[offset] = (low, min(top, high + band_cap))
     return out
 
 

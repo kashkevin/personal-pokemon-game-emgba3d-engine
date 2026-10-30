@@ -17,7 +17,7 @@ from pathlib import Path
 from catalog import CatalogError, TilesetInfo, load_tilesets, load_world
 from emerald_compositor import TilesetComposer, load_animation_slots
 from measured_volumes import apply_to_analysis, detect_layout
-from rock_bands import band_surfaces, rock_cells
+from rock_bands import CAP_Q16, band_surfaces, rock_cells
 from mountain_art import (MountainArtError, faces_between_levels,
                           outline_cells as mountain_outline_cells,
                           validate_layout as validate_mountain_art)
@@ -727,7 +727,7 @@ def _parse_pin_files(root: Path, tilesets: dict[str, TilesetInfo], pools: set[st
     output, seen = [], set()
     for path in sorted((root / "data/diorama/tilesets").glob("*.json")):
         data = load_json(path)
-        _unknown(data, {"schemaVersion", "kind", "tileset", "pins"}, str(path))
+        _unknown(data, {"schemaVersion", "kind", "tileset", "pins", "rockArt"}, str(path))
         if data.get("kind") != "tileset":
             raise RuleError(f"{path}.kind: must be 'tileset'")
         symbol = data.get("tileset")
@@ -755,6 +755,33 @@ def _parse_pin_files(root: Path, tilesets: dict[str, TilesetInfo], pools: set[st
                             "placementCount": count, "reason": reason,
                             "allowedUnused": allowance})
     return sorted(output, key=lambda item: (item["tileset"], item["metatile"]))
+
+
+def _parse_rock_art(root: Path, tilesets: dict[str, TilesetInfo]) -> dict[str, dict]:
+    """{tileset: {"metatiles": rock wherever a cell drawn with them is blocked, "pits": those of them that lie on
+    their band's ground (a crater's mouth), "capQ16": how high over its ground such rock may stand}} from the tileset
+    files' rockArt (rock_bands.rock_cells' `art`, band_surfaces' `pits` and `caps`): rock no class of its own stands,
+    drawn with art the walkable ground uses too (Sootopolis's crater and its streets)."""
+    output = {}
+    for path in sorted((root / "data/diorama/tilesets").glob("*.json")):
+        data = load_json(path)
+        if "rockArt" not in data:
+            continue
+        item_path = f"{path}.rockArt"
+        item = _object(data["rockArt"], item_path)
+        _unknown(item, {"metatiles", "pits", "capTiles", "reason"}, item_path)
+        reason = item.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            raise RuleError(f"{item_path}.reason: must be a non-empty string")
+        symbol = data.get("tileset")
+        last = tilesets[symbol].metatile_count - 1
+        metatiles = frozenset(_integer(value, f"{item_path}.metatiles[{index}]", 0, last)
+                              for index, value in enumerate(array(item.get("metatiles"), f"{item_path}.metatiles")))
+        pits = frozenset(_integer(value, f"{item_path}.pits[{index}]", 0, last)
+                         for index, value in enumerate(array(item.get("pits", []), f"{item_path}.pits")))
+        cap = _integer(item.get("capTiles", CAP_Q16 // 16), f"{item_path}.capTiles", 1, 8)
+        output[symbol] = {"metatiles": metatiles | pits, "pits": pits, "capQ16": cap * 16}
+    return output
 
 
 def _with_animation_provenance(shape: TileShape, cell: dict) -> TileShape:
@@ -1853,6 +1880,7 @@ def compile_data(root: Path) -> dict:
         if not pattern["placementCount"] and pattern["allowedNoPlacements"] is None:
             raise RuleError(f"exact pattern {pattern['id']}: no placements; add structured allowedNoPlacements")
     pins = _parse_pin_files(root, tilesets, set(pool_ids), profiles_by_id, pin_counts)
+    rock_art = _parse_rock_art(root, tilesets)
 
     map_default = _object(source.get("mapDefault"), "defaults.mapDefault")
     _unknown(map_default, {"supported", "reason", "groundPolicy", "camera"},
@@ -2089,11 +2117,17 @@ def compile_data(root: Path) -> dict:
                 # and a mountain of several tops _mountain_masses stood (Routes 111, 112, 114, 115: the rock of
                 # their walkable tops, as the owner's reports of 2026-10-24 settled it) keeps its heights too
                 masses = {offset: top for offset, top in mass_tops.items() if offset not in courses}
+                art_of = {offset: rock_art[cell.get("tileset")] for offset, cell in enumerate(layout_cells)
+                          if cell.get("tileset") in rock_art
+                          and cell.get("localMetatile") in rock_art[cell.get("tileset")]["metatiles"]}
+                art = frozenset(art_of)
+                pits = frozenset(offset for offset, entry in art_of.items()
+                                 if layout_cells[offset].get("localMetatile") in entry["pits"])
                 band = rock_cells(layout_cells, tuple(shape.class_name for shape in wildcard),
                                   tuple(shape.source for shape in wildcard), pixel_summaries[layout["id"]],
                                   layout["width"], layout["height"], mountain=mountain_art_cells[layout["id"]],
                                   exclude=frozenset(reefs) | rocks | _prop_cells(layout) | frozenset(courses)
-                                  | frozenset(masses))
+                                  | frozenset(masses), art=art)
                 # the ground's levels, and the open sea's where the renderer lays it, a level under the land
                 # (buildings.c WaterLevelsFor): rock beside it rises from it, not from the deeper sea the solver
                 # gave a map's foot of its cliffs (Ever Grande's below its waterfall, -2), under the water
@@ -2101,13 +2135,20 @@ def compile_data(root: Path) -> dict:
                 levels.update({offset: -16 for offset, cell in enumerate(layout_cells)
                                if cell.get("behavior") in SEA_BEHAVIORS})
                 surfaces = band_surfaces(layout_cells, layout["width"], layout["height"], band, levels,
-                                         tops={**courses, **walked, **masses})
+                                         tops={**courses, **walked, **masses},
+                                         caps={offset: entry["capQ16"] for offset, entry in art_of.items()},
+                                         pits=pits & band)
                 if surfaces:
+                    # a pit (a crater's mouth) is ground on its band's ground, not rock: rock of no height the
+                    # renderer stands a whole tile up (gl_terrain_renderer.c ShapeRockMasses)
                     terrace_topology[layout["id"]] = {
-                        **solved, **{offset: {"groundQ16": ground, "topQ16": top, "profile": "none",
-                                              "solid": False, "mass": True}
+                        **solved, **{offset: ({"groundQ16": ground, "topQ16": top, "profile": "none",
+                                               "solid": False} if offset in pits else
+                                              {"groundQ16": ground, "topQ16": top, "profile": "none",
+                                               "solid": False, "mass": True})
                                      for offset, (ground, top) in surfaces.items()}}
-                    mountain_art_cells[layout["id"]] = mountain_art_cells[layout["id"]] | frozenset(surfaces)
+                    mountain_art_cells[layout["id"]] = (mountain_art_cells[layout["id"]]
+                                                        | frozenset(surfaces).difference(pits))
             wildcard = tuple(_with_mountain_art(
                 shape, cell, offset in mountain_art_cells[layout["id"]],
                 offset in mountain_outlines[layout["id"]])
