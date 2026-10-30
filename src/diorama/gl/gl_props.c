@@ -102,7 +102,7 @@ static unsigned sSlabCount, sMoundCount, sCardCount;
  * its pixels - each opaque one a column, the taller the further it is from
  * the art's edge - the pieces' meshes one after the other in sMoundBuffer, and
  * the mound instances in runs of one piece each. */
-#define MAX_MOUND_GROUPS 64
+#define MAX_MOUND_GROUPS 128 /* the pieces in use, mounds and blocks: a draw each */
 struct MoundGroup
 {
     uint8_t entry;
@@ -757,6 +757,134 @@ static void MoundHeights(unsigned entry, uint8_t heights[16 * 16])
     }
 }
 
+/*
+ * A block's mesh (a hedge, a planter, a wall), in the lying slab's terms as a
+ * mound's: its art on top, one quad over its opaque pixels (the shader leaves
+ * the transparent ones out), and its sides down to the ground where an opaque
+ * pixel meets a transparent one or the art's edge, each run of them along a
+ * row or a column one quad showing its pixels in turn (each side a pixel
+ * further in where that one is opaque, as a mound's). Blocks were drawn with
+ * the slab, 66 quads whatever their art: a town's walls were hundreds of
+ * thousands of vertices a frame (step 16, phase D).
+ */
+static uint32_t BuildBlock(unsigned entry, struct MeshVertex *out)
+{
+    static const float sStandingShades[4] = {SHADE_TOP, SHADE_BOTTOM, SHADE_EAST, SHADE_WEST};
+    static const float sShades[4] = {SHADE_FLAT_NORTH, SHADE_FLAT_SOUTH, SHADE_EAST, SHADE_WEST};
+    unsigned originX = (entry % ENTRY_COLUMNS) * ENTRY_STRIDE + 1;
+    unsigned originY = (entry / ENTRY_COLUMNS) * ENTRY_STRIDE + 1;
+    struct MeshVertex *start = out;
+    bool opaque[16][16];
+    int minX = 16, minY = 16, maxX = -1, maxY = -1;
+    int side;
+
+    for (int y = 0; y < 16; y++)
+        for (int x = 0; x < 16; x++)
+        {
+            opaque[y][x] = (sArtPixels[(originY + y) * ART_WIDTH + originX + x] >> 24) != 0;
+            if (opaque[y][x])
+            {
+                minX = x < minX ? x : minX;
+                maxX = x > maxX ? x : maxX;
+                minY = y < minY ? y : minY;
+                maxY = y > maxY ? y : maxY;
+            }
+        }
+    if (maxX < 0)
+        return 0;
+    {
+        float x0 = minX / 16.0f;
+        float x1 = (maxX + 1) / 16.0f;
+        float t0 = minY / 16.0f;
+        float t1 = (maxY + 1) / 16.0f;
+        const float top[4][5] = {
+            {x0, 1.0f - t0, -0.5f, x0, t0}, {x1, 1.0f - t0, -0.5f, x1, t0},
+            {x1, 1.0f - t1, -0.5f, x1, t1}, {x0, 1.0f - t1, -0.5f, x0, t1},
+        };
+
+        out = Quad(out, top, SHADE_FRONT, SHADE_FLAT_TOP);
+    }
+    /* north, south, east, west: along a row for the first two, a column for the others */
+    for (side = 0; side < 4; side++)
+    {
+        static const int8_t sSides[4][2] = {{0, -1}, {0, 1}, {1, 0}, {-1, 0}};
+        int dx = sSides[side][0];
+        int dy = sSides[side][1];
+
+        for (int line = 0; line < 16; line++)
+        {
+            int along = 0;
+
+            while (along < 16)
+            {
+                int x = side < 2 ? along : line;
+                int y = side < 2 ? line : along;
+                int nx = x + dx;
+                int ny = y + dy;
+                bool needed = opaque[y][x] && (nx < 0 || ny < 0 || nx > 15 || ny > 15 || !opaque[ny][nx]);
+                bool inner = x - dx >= 0 && y - dy >= 0 && x - dx <= 15 && y - dy <= 15 && opaque[y - dy][x - dx];
+                int end = along + 1;
+
+                if (!needed)
+                {
+                    along++;
+                    continue;
+                }
+                /* the run: the same side wanted, sampled the same way */
+                while (end < 16)
+                {
+                    int ex = side < 2 ? end : line;
+                    int ey = side < 2 ? line : end;
+                    int enx = ex + dx;
+                    int eny = ey + dy;
+
+                    if (!opaque[ey][ex]
+                     || !(enx < 0 || eny < 0 || enx > 15 || eny > 15 || !opaque[eny][enx])
+                     || inner != (ex - dx >= 0 && ey - dy >= 0 && ex - dx <= 15 && ey - dy <= 15
+                                  && opaque[ey - dy][ex - dx]))
+                        break;
+                    end++;
+                }
+                {
+                    /* the line the side stands on, and the art's pixels it shows */
+                    float a[2];
+                    float b[2];
+                    float sa, sb, ta, tb;
+
+                    if (side < 2)
+                    {
+                        float edge = 1.0f - (y + (side == 1)) / 16.0f;
+                        float t = ((inner ? y - dy : y) + 0.5f) / 16.0f;
+
+                        a[0] = along / 16.0f; a[1] = edge;
+                        b[0] = end / 16.0f;   b[1] = edge;
+                        sa = a[0]; sb = b[0]; ta = tb = t;
+                    }
+                    else
+                    {
+                        float edge = (x + (side == 2)) / 16.0f;
+                        float s = ((inner ? x - dx : x) + 0.5f) / 16.0f;
+
+                        a[0] = edge; a[1] = 1.0f - along / 16.0f;
+                        b[0] = edge; b[1] = 1.0f - end / 16.0f;
+                        sa = sb = s; ta = along / 16.0f; tb = end / 16.0f;
+                    }
+                    {
+                        const float wall[4][5] = {
+                            {a[0], a[1], 0.5f, sa, ta}, {b[0], b[1], 0.5f, sb, tb},
+                            {b[0], b[1], -0.5f, sb, tb}, {a[0], a[1], -0.5f, sa, ta},
+                        };
+
+                        out = Quad(out, wall, sStandingShades[side], sShades[side]);
+                    }
+                }
+                along = end;
+            }
+        }
+    }
+    return (uint32_t)(out - start);
+}
+
 /* A mound's mesh, in the lying slab's terms (x across the art, y up it - its
  * first row north -, z 0.5 at the ground, -0.5 at the full height). */
 static uint32_t BuildMound(unsigned entry, struct MeshVertex *out)
@@ -770,6 +898,8 @@ static uint32_t BuildMound(unsigned entry, struct MeshVertex *out)
     struct MeshVertex *start = out;
     int i;
 
+    if (sEntryProp[entry] != NULL && sEntryProp[entry]->form == DIORAMA_PROP_BLOCK)
+        return BuildBlock(entry, out);
     MoundHeights(entry, heights);
     for (i = 0; i < 16 * 16; i++)
     {
@@ -911,14 +1041,15 @@ void DioramaGLProps_Sync(const struct DioramaSceneSnapshot *snapshot,
         return;
     sSequence = snapshot->sequence;
     count = DioramaProps_Build(snapshot, resolvedCells, sBuilt, MAX_INSTANCES, &complete);
-    /* Slabs first, then mounds, then cards. */
+    /* Slabs first, then mounds (and blocks: each piece its own mesh, BuildBlock), then cards. */
     for (i = 0; i < count; i++)
         if (sBuilt[i].prop->form != DIORAMA_PROP_CARDS && sBuilt[i].prop->form != DIORAMA_PROP_MOUND
-         && sBuilt[i].prop->form != DIORAMA_PROP_RELIEF)
+         && sBuilt[i].prop->form != DIORAMA_PROP_RELIEF && sBuilt[i].prop->form != DIORAMA_PROP_BLOCK)
             sProps[out++] = sBuilt[i];
     sSlabCount = out;
     for (i = 0; i < count; i++)
-        if (sBuilt[i].prop->form == DIORAMA_PROP_MOUND || sBuilt[i].prop->form == DIORAMA_PROP_RELIEF)
+        if (sBuilt[i].prop->form == DIORAMA_PROP_MOUND || sBuilt[i].prop->form == DIORAMA_PROP_RELIEF
+         || sBuilt[i].prop->form == DIORAMA_PROP_BLOCK)
             sProps[out++] = sBuilt[i];
     sMoundCount = out - sSlabCount;
     for (i = 0; i < count; i++)

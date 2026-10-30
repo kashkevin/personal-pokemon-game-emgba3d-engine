@@ -219,7 +219,11 @@ tilesets are unchanged.
   its own (recomposed when the palettes fade or the tiles animate), draws
   every slab with one instanced mesh whose sides are cut per pixel by the
   art's transparency (so any art becomes little blocks with no geometry of its
-  own), the cards with another, and each mound with a mesh made from its art.
+  own), the cards with another, and each mound and each block with a mesh made
+  from its art (a block's: its top one quad, its sides only along its art's
+  outline, a run of pixels a quad - `BuildBlock`; drawn with the slab, 66 quads
+  each whatever the art, a town's walls were hundreds of thousands of vertices a
+  frame: step 16, phase D).
   Lit like the terrain (grade, weather light, dapples, shadow map, haze); slabs
   and mounds cast shadows. The swaying ones sway harder in rain, a storm or a
   sandstorm and less in fog (`DioramaProps_Wind`), and the grass someone
