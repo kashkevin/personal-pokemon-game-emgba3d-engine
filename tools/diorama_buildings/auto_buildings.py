@@ -193,7 +193,10 @@ ROOFS = {
     "VerdanturfTown": {"default": "pitched", (3, 7): TENT},
     "FallarborTown": {"default": "pitched", (8, 7): tent(16, 6)},
     "FortreeCity": {"default": {"type": "dome", "rise": 0.7, "power": 0.8}},   # the canopies
-    "Route110": {(11, 66): "pitched"},      # the Trick House
+    "Route110": {(11, 66): "pitched",       # the Trick House
+                 (15, 16): "flat", (16, 88): "flat"},     # the Cycling Road's gatehouses: parapets
+    "Route113": {(33, 5): "flat"},          # the glass workshop
+    "Route114": {(29, 5): "flat"},          # Lanette's house
     "Route112": {(28, 27): "pitched"},      # the cable car station
     "MtChimney": {(17, 36): "pitched"},
     "MossdeepCity": {"default": {"type": "flat", "rise": 6}, (64, 15): "flat"},
@@ -201,7 +204,8 @@ ROOFS = {
     "Route121": {(37, 5): "flat"},          # the Safari Zone's gate
     "SafariZone_South": {(32, 33): "flat"},
     "PacifidlogTown": {"default": {"type": "cone", "rise": 0.9}},
-    "Route111": {(19, 58): {"type": "dome", "rise": 0.8}},     # the Mirage Tower (a domed hut)
+    "Route111": {(19, 58): {"type": "dome", "rise": 0.8},      # the Mirage Tower (a domed hut)
+                 (13, 113): "flat"},                        # the gatehouse to Route 112
     "MauvilleCity": {(35, 5): "pitched",
                      (8, 13): "flat",          # the Game Corner
                      # the bike shop and its neighbour, drawn as one
