@@ -17,6 +17,7 @@
 #include "diorama/gl_shadow.h"
 #include "diorama/gl_target.h"
 #include "diorama/gl_terrain_renderer.h"
+#include "diorama/gl_tree_sprites.h"
 #include "diorama/metatile_atlas.h"
 #include "diorama/props.h"
 #include "diorama/rules.generated.h"
@@ -3871,7 +3872,7 @@ unsigned DioramaGLTerrain_TestDumpCells(const struct DioramaSceneSnapshot *snaps
         return 0;
     fprintf(file, "x\ty\tflags\tlayout\tgroup\tnum\tsx\tsy\tmetatile\tbehavior\tcollision\televation\tlayer\t"
                   "shape\tarchetype\tclass\tmeasured\tterrace\trock\tground\ttop\tfeature\tpixmin\tpixmax\t"
-                  "hull\tstructure\tclaim\tvoid\tmodel\ttakeoff\tlanding\ttree\n");
+                  "hull\tstructure\tclaim\tvoid\tmodel\ttakeoff\tlanding\ttree\tcrown\n");
     for (int chunkY = minChunkY; chunkY <= maxChunkY; chunkY++)
         for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++)
         {
@@ -3906,7 +3907,7 @@ unsigned DioramaGLTerrain_TestDumpCells(const struct DioramaSceneSnapshot *snaps
                          && DioramaBuildings_CellAt(source->sourceLayoutId, source->sourceMapX,
                                                     source->sourceMapY, NULL, NULL, NULL);
                     fprintf(file, "%d\t%d\t%u\t%u\t%u\t%u\t%d\t%d\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t"
-                                  "%.4f\t%.4f\t%.4f\t%d\t%d\t%u\t%u\t%u\t%u\t%d\t%.4f\t%.4f\t%u\n",
+                                  "%.4f\t%.4f\t%.4f\t%d\t%d\t%u\t%u\t%u\t%u\t%d\t%.4f\t%.4f\t%u\t%u\n",
                             mapX, mapY, (unsigned)source->flags, (unsigned)source->sourceLayoutId,
                             (unsigned)source->sourceMapGroup, (unsigned)source->sourceMapNum,
                             source->sourceMapX, source->sourceMapY, (unsigned)cell->metatileId,
@@ -3917,7 +3918,9 @@ unsigned DioramaGLTerrain_TestDumpCells(const struct DioramaSceneSnapshot *snaps
                             cell->visualHeight, cell->featureHeight, pixelMin, pixelMax,
                             (unsigned)cell->treeHullReady, (unsigned)cell->structureId,
                             (unsigned)cell->claimOwner, (unsigned)cell->voidKind, model ? 1 : 0,
-                            cell->ledgeTakeoffHeight, cell->ledgeLandingHeight, (unsigned)source->treeSprite);
+                            cell->ledgeTakeoffHeight, cell->ledgeLandingHeight, (unsigned)source->treeSprite,
+                            /* how a tree cell's crown stands: 1 a cut-out, 2 a solid */
+                            source->treeSprite == 0 ? 0u : DioramaGLTreeSprites_Volumes() ? 2u : 1u);
                     rows++;
                 }
         }

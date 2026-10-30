@@ -2678,33 +2678,47 @@ uint32_t DioramaTerrain_FoldQuads(struct DioramaTerrainVertex *vertices, uint32_
     return write;
 }
 
+void DioramaTerrain_PrepareView(struct DioramaTerrainView *view, float cameraX, float cameraZ,
+                                float cameraPitch, float focalLength)
+{
+    view->cameraX = cameraX;
+    view->cameraZ = cameraZ;
+    view->pitchSin = sinf(cameraPitch);
+    view->pitchCos = cosf(cameraPitch);
+    view->focalLength = focalLength;
+    view->aspectCorrection = gDioramaCameraRig.active ? gDioramaCameraRig.aspectCorrection : 1.0f;
+    DioramaCamera_GetRig(cameraPitch, &view->cameraHeight, &view->cameraDistance, &view->screenOffsetY);
+}
+
 bool DioramaTerrain_IsBoundsVisible(const struct DioramaTerrainBounds *bounds,
                                     float cameraX, float cameraZ,
                                     float cameraPitch, float focalLength)
 {
-    float cameraHeight;
-    float cameraDistance;
-    float screenOffsetY;
-    const float pitchSin = sinf(cameraPitch);
-    const float pitchCos = cosf(cameraPitch);
+    struct DioramaTerrainView view;
+
+    DioramaTerrain_PrepareView(&view, cameraX, cameraZ, cameraPitch, focalLength);
+    return DioramaTerrain_IsBoundsInView(&view, bounds);
+}
+
+bool DioramaTerrain_IsBoundsInView(const struct DioramaTerrainView *view, const struct DioramaTerrainBounds *bounds)
+{
     const float nearDepth = 0.1f;
     const float farDepth = DIORAMA_FAR_DEPTH;
     bool outside[6] = {true, true, true, true, true, true};
     int i;
 
-    DioramaCamera_GetRig(cameraPitch, &cameraHeight, &cameraDistance, &screenOffsetY);
     for (i = 0; i < 8; i++)
     {
         float x = (i & 1) ? bounds->maxX : bounds->minX;
         float y = (i & 2) ? bounds->maxY : bounds->minY;
         float z = (i & 4) ? bounds->maxZ : bounds->minZ;
-        float relativeX = x - cameraX;
-        float relativeZ = z - cameraZ;
-        float depth = (cameraHeight - y) * pitchSin + (relativeZ + cameraDistance) * pitchCos;
-        float vertical = -(cameraHeight - y) * pitchCos + (relativeZ + cameraDistance) * pitchSin;
-        float clipX = relativeX * focalLength * 2.0f / 240.0f
-                    * (gDioramaCameraRig.active ? gDioramaCameraRig.aspectCorrection : 1.0f);
-        float clipY = screenOffsetY * depth + vertical * focalLength * 2.0f / 160.0f;
+        float relativeX = x - view->cameraX;
+        float relativeZ = z - view->cameraZ;
+        float depth = (view->cameraHeight - y) * view->pitchSin + (relativeZ + view->cameraDistance) * view->pitchCos;
+        float vertical = -(view->cameraHeight - y) * view->pitchCos
+                       + (relativeZ + view->cameraDistance) * view->pitchSin;
+        float clipX = relativeX * view->focalLength * 2.0f / 240.0f * view->aspectCorrection;
+        float clipY = view->screenOffsetY * depth + vertical * view->focalLength * 2.0f / 160.0f;
 
         if (depth >= nearDepth) outside[0] = false;
         if (depth <= farDepth) outside[1] = false;

@@ -20,6 +20,7 @@ per place and per map, in OUT/manifest.json and OUT/report.md:
     spike        the same, one or two cells alone (a rock, or a broken piece of cliff)
     flat-blocked a cell no one walks on, drawn flat on the ground (not water, a model, a tree or the void): a rock,
                  a fence, a counter... lying as a picture (outdoors, caves and rooms)
+    card-tree    a tree cell whose crown is the 3DS project's flat cut-out (a solid crown and trunk since step 16)
     walk-step    two cells the player walks between, their ground a third of a tile or more apart (no ramp, no
                  stairs, no ledge): a step the player climbs as if it were not there; "seam" when the two belong to
                  two maps
@@ -391,7 +392,8 @@ def cell_checks(cells, group, num, kind):
             found["fin" if len(run) >= 3 else "spike"].update((own[xy]["sx"], own[xy]["sy"]) for xy in run)
     for xy, c in own.items():
         if c.get("tree"):
-            found["card-tree"].add((c["sx"], c["sy"]))      # the 3DS project's cut-out (the default trees)
+            if c.get("crown", 1) != 2:      # the 3DS project's cut-out (the default trees), not a solid crown (C3)
+                found["card-tree"].add((c["sx"], c["sy"]))
         elif c["collision"] and not is_object(c) and not is_water(c) and c["shape_name"] == "FLAT" \
                 and c["surface"] - c["ground"] < 0.06 and c["metatile"] != 0:
             found["flat-blocked"].add((c["sx"], c["sy"]))

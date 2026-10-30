@@ -302,6 +302,23 @@ void DioramaTerrain_SetGeometryHash(bool on);
 bool DioramaTerrain_IsBoundsVisible(const struct DioramaTerrainBounds *bounds,
                                      float cameraX, float cameraZ,
                                      float cameraPitch, float focalLength);
+/* The same test with the camera worked out once, for many bounds a frame (the
+ * trees: gl_tree_sprites.c). */
+struct DioramaTerrainView
+{
+    float cameraX;
+    float cameraZ;
+    float pitchSin;
+    float pitchCos;
+    float focalLength;
+    float aspectCorrection;
+    float cameraHeight;
+    float cameraDistance;
+    float screenOffsetY;
+};
+void DioramaTerrain_PrepareView(struct DioramaTerrainView *view, float cameraX, float cameraZ,
+                                float cameraPitch, float focalLength);
+bool DioramaTerrain_IsBoundsInView(const struct DioramaTerrainView *view, const struct DioramaTerrainBounds *bounds);
 /*
  * A chunk's mesh drawn from indices (performance, 2026-10-12): a quad is two
  * triangles, six vertices of which two repeat its corners 0 and 2. Folds the

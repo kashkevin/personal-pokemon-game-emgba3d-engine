@@ -8,6 +8,12 @@ project's own tree art. Turned on with F8 in the game (kept in `pokeemerald.cfg`
 `PKMN_DIORAMA_TREES=3ds` for one run (see
 `src/diorama/gl/gl_tree_sprites.c` and `src/diorama/scene/tree_sprites.c`).
 
+Since step 16 (the world geometry overhaul, 2026-10-30) each crown stands as a solid
+of voxels made from this art where the cut-out stood - thickest where it is furthest
+inside the outline, the art on its front and back - with a trunk of bark under it
+(`gl_tree_sprites.c` BuildModels, from the packed texture when the game starts);
+`PKMN_DIORAMA_TREE_CARDS=1` draws the cut-outs instead, for comparisons.
+
 During a `DIORAMA=1` build `diorama_rules.mk` runs
 
     python3 tools/diorama_trees_3ds/pack_trees.py \

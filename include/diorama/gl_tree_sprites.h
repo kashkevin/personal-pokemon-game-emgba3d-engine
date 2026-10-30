@@ -11,14 +11,18 @@ struct DioramaResolvedCell;
 /*
  * The 3DS project's trees (tree_sprites.h; pokeemerald-3Ds-dualscreen
  * voxel_tree.c EmitCell and EmitSmallCell, MIT): for each cell the snapshot
- * published as part of a tree, the trunk's art laid on the ground and a part
- * of the crown, a cut-out tilted 50 degrees with its high end to the north,
- * fixed in the world. Lit like the terrain (grade, weather light, dapples,
- * shadow map, haze), casting shadows, following the palette's fades and night
- * tint as the voxel trees do. Nothing to draw unless the snapshot has them
- * (DioramaTreeSprites_Enabled).
+ * published as part of a tree, the trunk's art laid on the ground and its part
+ * of the tree standing where the 3DS port stands its crown, a cut-out tilted
+ * 50 degrees with its high end to the north: since step 16 a solid crown of
+ * voxels made from that art and a trunk under it (gl_tree_sprites.c; the
+ * cut-outs with PKMN_DIORAMA_TREE_CARDS=1). Lit like the terrain (grade, weather
+ * light, dapples, shadow map, haze), casting shadows, following the palette's
+ * fades and night tint as the voxel trees do. Nothing to draw unless the
+ * snapshot has them (DioramaTreeSprites_Enabled).
  */
 bool DioramaGLTreeSprites_Init(void);
+/* Whether the trees stand as solids (not the cut-outs): the geometry probe's record. */
+bool DioramaGLTreeSprites_Volumes(void);
 /* The trees of a snapshot, on the ground its resolved cells give them. */
 void DioramaGLTreeSprites_Sync(const struct DioramaSceneSnapshot *snapshot,
                                const struct DioramaResolvedCell *resolvedCells);
