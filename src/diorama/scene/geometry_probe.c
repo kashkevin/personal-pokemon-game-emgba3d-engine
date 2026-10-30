@@ -11,6 +11,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <direct.h>
+#endif
 #include <SDL2/SDL.h>
 
 #include "diorama/camera.h"
@@ -53,7 +56,14 @@ static unsigned sSettleWaited;
 
 static void MakeFolder(const char *path)
 {
-    if (mkdir(path, 0777) != 0 && errno != EEXIST)
+    /* MinGW's mkdir takes no mode (the Windows package's graphics job runs the probe) */
+#ifdef _WIN32
+    int made = _mkdir(path);
+#else
+    int made = mkdir(path, 0777);
+#endif
+
+    if (made != 0 && errno != EEXIST)
         SDL_Log("Geometry probe: cannot make %s", path);
 }
 
