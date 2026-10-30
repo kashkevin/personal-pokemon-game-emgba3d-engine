@@ -737,15 +737,33 @@ static uint8_t BuildSolid(const uint32_t *pixels, int width, int height)
     return (uint8_t)(slot + 1);
 }
 
-/* The solid an object's picture stands as (decoded again the first time: its texture may be an old one). */
+/* The solid an object's picture stands as (decoded again the first time: its texture may be an old one). When every
+ * solid is taken, the one whose picture was shown longest ago gives its place up - never one shown this frame, which
+ * an object already queued draws (this picture then stands flat). */
 static uint8_t SolidFor(const struct DioramaSceneSnapshot *snapshot, const struct DioramaObjectSnapshot *object,
                         struct SpriteTextureCacheEntry *entry)
 {
+    struct SpriteTextureCacheEntry *oldest = NULL;
     uint8_t width;
     uint8_t height;
+    int i;
 
-    if (entry->solid == 0 && DioramaSprite_DecodeFrame(snapshot, object, sDecodePixels, DIORAMA_SPRITE_MAX_PIXELS,
-                                                       &width, &height))
+    if (entry->solid != 0)
+        return entry->solid;
+    for (i = 0; i < SOLID_MESHES && sSolids[i].used; i++)
+        ;
+    if (i == SOLID_MESHES)
+    {
+        for (i = 0; i < SPRITE_TEXTURE_CACHE_SIZE; i++)
+            if (sTextureCache[i].solid != 0 && sTextureCache[i].lastUsedSequence != snapshot->sequence
+             && (oldest == NULL || sTextureCache[i].lastUsedSequence < oldest->lastUsedSequence))
+                oldest = &sTextureCache[i];
+        if (oldest == NULL)
+            return 0;
+        FreeSolid(oldest->solid);
+        oldest->solid = 0;
+    }
+    if (DioramaSprite_DecodeFrame(snapshot, object, sDecodePixels, DIORAMA_SPRITE_MAX_PIXELS, &width, &height))
         entry->solid = BuildSolid(sDecodePixels, width, height);
     return entry->solid;
 }

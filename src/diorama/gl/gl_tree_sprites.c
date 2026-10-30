@@ -70,6 +70,14 @@
 #define ROW_ALONE 2
 #define SLOT_COUNT (PART_COUNT * KINDS)
 #define MAX_MODEL_VERTICES 49152
+/*
+ * How far from where the camera looks a tree stands as its solid (tiles); past it, its cut-out with its trunk, a
+ * fraction of the vertices (step 16, phase D: with every tree solid, Petalburg Woods cost Mesa's software renderer
+ * 230k vertices a frame against 132k before, 30.7 frames a second against 43.8; within 6 tiles, 109k and 41.1;
+ * within 9, 149k and 36.4). From the field's cameras the cut-out is the solid's front: the probe's pictures of the
+ * woods at 6 tiles and 9 look the same. PKMN_DIORAMA_TREE_REACH sets it for one run (0: every tree its solid).
+ */
+#define TREE_SOLID_REACH 6.0f
 #define MAX_MODEL_INDICES (MAX_MODEL_VERTICES / 4 * 6)
 #define MAX_CROWN_WIDTH 32
 #define MAX_CROWN_HEIGHT 36
@@ -107,6 +115,8 @@ struct PartModel
     uint32_t count;
     uint32_t shadowFirst;
     uint32_t shadowCount;
+    uint32_t farFirst; /* a far tree's model (TREE_SOLID_REACH): the cut-out, the trunk, the trunk's art */
+    uint32_t farCount;
     float minimum[3];
     float maximum[3];
 };
@@ -194,6 +204,9 @@ static GLuint sVisibleBuffer;
 static struct TreeInstance sVisible[DIORAMA_MAX_VISIBLE_CELLS];
 static uint32_t sPartVisibleFirst[SLOT_COUNT];
 static uint32_t sPartVisibleCount[SLOT_COUNT];
+static uint32_t sPartVisibleNear[SLOT_COUNT]; /* the first of them, within TREE_SOLID_REACH */
+static struct TreeInstance sFarScratch[DIORAMA_MAX_VISIBLE_CELLS];
+static float sSolidReach;
 static bool sVisibleSeen;
 static float sVisibleCamera[4];
 static uint32_t sVisibleGeneration;
@@ -875,9 +888,11 @@ static int QuarterFirst(int part)
 static bool BuildModels(void)
 {
     const char *cards = SDL_getenv("PKMN_DIORAMA_TREE_CARDS");
+    const char *reach = SDL_getenv("PKMN_DIORAMA_TREE_REACH");
     int slot;
 
     sVolumes = !(cards != NULL && cards[0] == '1');
+    sSolidReach = reach != NULL && reach[0] != '\0' ? (float)SDL_atof(reach) : TREE_SOLID_REACH;
     sModelVertexCount = sModelIndexCount = 0;
     sModelFull = false;
     for (slot = 0; slot < SLOT_COUNT; slot++)
@@ -897,6 +912,8 @@ static bool BuildModels(void)
         int levels;
         struct PartModel *model = &sParts[slot];
         uint32_t firstVertex = sModelVertexCount;
+        uint32_t artFirst;
+        uint32_t artCount;
         uint32_t i;
         int axis;
 
@@ -925,6 +942,7 @@ static bool BuildModels(void)
         if (sVolumes)
             Trunk(art, col, row);
         model->shadowCount = sModelIndexCount - model->shadowFirst;
+        artFirst = sModelIndexCount;
         /* the trunk's art on the ground (an ash or a Lavaridge tree's cell shows its own ground: the 3DS art is
          * grass) */
         if (first == DIORAMA_TREE_SPRITE_QUARTER)
@@ -933,12 +951,28 @@ static bool BuildModels(void)
             TrunkArt(48, 32);
         else if (part + 1 == DIORAMA_TREE_SPRITE_SMALL_DEWFORD)
             TrunkArt(80, 0);
+        artCount = sModelIndexCount - artFirst;
         if (sVolumes)
             CrownFaces(art, col * columns, row * rows, columns, rows, col, row, levels, false);
         model->seenCount = sModelIndexCount - model->first;
         if (sVolumes)
             CrownFaces(art, col * columns, row * rows, columns, rows, col, row, levels, true);
         model->count = sModelIndexCount - model->first;
+        /* far away, the cut-out with its trunk and the trunk's art on the ground: the same indices again, after the
+         * model (the cut-outs: the model itself) */
+        model->farFirst = sModelIndexCount;
+        if (sVolumes && sModelIndexCount + model->shadowCount + artCount <= MAX_MODEL_INDICES)
+        {
+            for (i = 0; i < model->shadowCount; i++)
+                sModelIndices[sModelIndexCount++] = sModelIndices[model->shadowFirst + i];
+            for (i = 0; i < artCount; i++)
+                sModelIndices[sModelIndexCount++] = sModelIndices[artFirst + i];
+        }
+        else if (sVolumes)
+            sModelFull = true;
+        model->farCount = sVolumes ? sModelIndexCount - model->farFirst : model->count;
+        if (!sVolumes)
+            model->farFirst = model->first;
         for (axis = 0; axis < 3; axis++)
         {
             model->minimum[axis] = 1.0e9f;
@@ -1135,17 +1169,26 @@ static void DrawParts(bool shadow)
     for (part = 0; part < SLOT_COUNT; part++)
     {
         const struct PartModel *model = &sParts[part];
-        uint32_t first = shadow ? model->shadowFirst : model->first;
-        uint32_t indexCount = shadow ? model->shadowCount : sVisibleSeen ? model->seenCount : model->count;
-        uint32_t instanceFirst = shadow ? sPartInstanceFirst[part] : sPartVisibleFirst[part];
-        uint32_t instanceCount = shadow ? sPartInstanceCount[part] : sPartVisibleCount[part];
+        int far;
 
-        if (instanceCount == 0 || indexCount == 0)
-            continue;
-        dglVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(struct TreeInstance),
-                               (const void *)(instanceFirst * sizeof(struct TreeInstance)));
-        dglDrawElementsInstanced(GL_TRIANGLES, (GLsizei)indexCount, GL_UNSIGNED_SHORT,
-                                 (const void *)(first * sizeof(uint16_t)), (GLsizei)instanceCount);
+        /* in the colour pass the near trees' solids, then the far ones' cut-outs (ChooseVisible) */
+        for (far = 0; far < (shadow ? 1 : 2); far++)
+        {
+            uint32_t first = shadow ? model->shadowFirst : far ? model->farFirst : model->first;
+            uint32_t indexCount = shadow ? model->shadowCount : far ? model->farCount
+                                : sVisibleSeen ? model->seenCount : model->count;
+            uint32_t instanceFirst = shadow ? sPartInstanceFirst[part]
+                                   : sPartVisibleFirst[part] + (far ? sPartVisibleNear[part] : 0);
+            uint32_t instanceCount = shadow ? sPartInstanceCount[part]
+                                   : far ? sPartVisibleCount[part] - sPartVisibleNear[part] : sPartVisibleNear[part];
+
+            if (instanceCount == 0 || indexCount == 0)
+                continue;
+            dglVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(struct TreeInstance),
+                                   (const void *)(instanceFirst * sizeof(struct TreeInstance)));
+            dglDrawElementsInstanced(GL_TRIANGLES, (GLsizei)indexCount, GL_UNSIGNED_SHORT,
+                                     (const void *)(first * sizeof(uint16_t)), (GLsizei)instanceCount);
+        }
     }
     dglBindBuffer(GL_ARRAY_BUFFER, 0);
     dglBindVertexArray(0);
@@ -1177,6 +1220,7 @@ static void ChooseVisible(float cameraX, float cameraZ, float cameraPitch, float
     for (part = 0; part < SLOT_COUNT; part++)
     {
         const struct PartModel *model = &sParts[part];
+        uint32_t farCount = 0;
         uint32_t i;
 
         sPartVisibleFirst[part] = count;
@@ -1195,6 +1239,14 @@ static void ChooseVisible(float cameraX, float cameraZ, float cameraPitch, float
             bounds.maxZ = instance->z - model->minimum[2];
             if (!DioramaTerrain_IsBoundsInView(&view, &bounds))
                 continue;
+            /* past the reach from where the camera looks: the cut-out (its back faces need no test) */
+            if (sSolidReach > 0.0f
+             && (instance->x + 0.5f - cameraX) * (instance->x + 0.5f - cameraX)
+                + (instance->z - 0.5f - cameraZ) * (instance->z - 0.5f - cameraZ) > sSolidReach * sSolidReach)
+            {
+                sFarScratch[farCount++] = *instance;
+                continue;
+            }
             sVisible[count++] = *instance;
             if (!(cameraZ - view.cameraDistance < bounds.minZ && view.cameraHeight > bounds.maxY))
                 sVisibleSeen = false;
@@ -1209,6 +1261,9 @@ static void ChooseVisible(float cameraX, float cameraZ, float cameraPitch, float
                     sVisibleSeen = false;
             }
         }
+        sPartVisibleNear[part] = count - sPartVisibleFirst[part];
+        memcpy(&sVisible[count], sFarScratch, farCount * sizeof(*sFarScratch));
+        count += farCount;
         sPartVisibleCount[part] = count - sPartVisibleFirst[part];
     }
     dglBindBuffer(GL_ARRAY_BUFFER, sVisibleBuffer);
@@ -1317,6 +1372,7 @@ void DioramaGLTreeSprites_Shutdown(void)
     sInstanceCount = 0;
     memset(sPartInstanceCount, 0, sizeof(sPartInstanceCount));
     memset(sPartVisibleCount, 0, sizeof(sPartVisibleCount));
+    memset(sPartVisibleNear, 0, sizeof(sPartVisibleNear));
     sVisibleValid = false;
     sSequence = 0;
     sKeysValid = false;
