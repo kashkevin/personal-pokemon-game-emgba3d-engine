@@ -2168,10 +2168,12 @@ def compile_data(root: Path) -> dict:
                 levels = {offset: entry["groundQ16"] for offset, entry in solved.items()}
                 levels.update({offset: -16 for offset, cell in enumerate(layout_cells)
                                if cell.get("behavior") in SEA_BEHAVIORS})
+                # thin cliffs painted on level ground lie as drawn (rock_bands.band_surfaces' `painted`): stood as
+                # ridges they were walls (Lilycove, the owner's report of 2026-10-31)
                 surfaces = band_surfaces(layout_cells, layout["width"], layout["height"], band, levels,
                                          tops={**courses, **walked, **masses},
                                          caps={offset: entry["capQ16"] for offset, entry in art_of.items()},
-                                         pits=pits & band)
+                                         pits=pits & band, painted=True)
                 if surfaces:
                     # a pit (a crater's mouth) is ground on its band's ground, not rock: rock of no height the
                     # renderer stands a whole tile up (gl_terrain_renderer.c ShapeRockMasses)

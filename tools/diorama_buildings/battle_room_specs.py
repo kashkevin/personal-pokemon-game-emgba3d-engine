@@ -244,30 +244,6 @@ AUTO_ROOMS = [
     # proved with its sand ridges' cross pieces left out (AUTO_DROP): the back wall and the
     # long ridges running from it stand
     "LAYOUT_LAVARIDGE_TOWN_GYM_B1F",
-    # Rooms no battle takes place in, modelled for the field's 3D view (step 16, phase C5: the
-    # rooms the 2026-10-28 depth audit found with their furniture drawn on the floor, MS-164),
-    # proved the same way (auto_rooms.py --repair 3) and looked at in the game from the field's
-    # cameras. Not listed: the Battle Dome's lobby, the Exchange Service Corner and Devon Corp's
-    # 1F (not proved); the Battle Arena's and the Battle Palace's lobbies (proved, but from the
-    # field's cameras the Arena's stage edge stood as tall walls and the Palace's back wall broke
-    # into slabs); the two lounge layouts (only their walls stood: the sofas stay pictures); the
-    # reception gate (its stools stood as glass boxes, a counter cell drew a Factory piece's art);
-    # the Sootopolis Mystery Events house (its table stood as a cabinet); the Factory's lobby, Scott's
-    # house, the Pike's three-path room, Mossdeep's Game Corner B1F and the diving treasure hunters'
-    # house (they proved only with pieces of the rooms above that are not listed: a room's pieces
-    # stand in the other listed rooms that repeat them, so the list is proved as a whole)
-    "LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_LOBBY",
-    "LAYOUT_BATTLE_FRONTIER_BATTLE_PYRAMID_LOBBY",
-    "LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_CORRIDOR",
-    "LAYOUT_BATTLE_FRONTIER_RANKING_HALL",
-    "LAYOUT_EVER_GRANDE_CITY_HALL_OF_FAME",
-    "LAYOUT_LILYCOVE_CITY_DEPARTMENT_STORE_ROOFTOP",
-    "LAYOUT_MAUVILLE_CITY_BIKE_SHOP",
-    "LAYOUT_MAUVILLE_CITY_GAME_CORNER",
-    "LAYOUT_MOSSDEEP_CITY_GAME_CORNER_1F",
-    "LAYOUT_SAFARI_ZONE_REST_HOUSE",
-    "LAYOUT_EVER_GRANDE_CITY_SHORT_HALL",
-    "LAYOUT_EVER_GRANDE_CITY_HALL4",
 ]
 
 
@@ -337,12 +313,6 @@ AUTO_DROP = {
     # floor it is; the pillars at its back go with it.
     "LAYOUT_BATTLE_FRONTIER_BATTLE_PALACE_BATTLE_ROOM": ["thing_4_4", "thing_6_3", "thing_9_3",
                                                          "wall_5_0", "wall_8_0"],
-    # Step 16's rooms (auto_rooms.py --repair 3): the pieces whose cells differed - a chair's or
-    # a plant's few pixels of the floor under it, a side wall cut by the room's black.
-    "LAYOUT_EVER_GRANDE_CITY_HALL4": ["thing_1_10", "thing_1_12", "thing_1_15", "thing_1_19", "thing_1_5",
-                                      "thing_1_8", "thing_9_10", "thing_9_12", "thing_9_15", "thing_9_19",
-                                      "thing_9_5", "thing_9_8"],
-    "LAYOUT_SAFARI_ZONE_REST_HOUSE": ["thing_3_5"],
     "LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE1": [
         "thing_10_10", "thing_11_13", "thing_11_17", "thing_11_9", "thing_12_14", "thing_12_18",
         "thing_12_6", "thing_14_18", "thing_14_6", "thing_1_6", "thing_1_8", "thing_2_10",

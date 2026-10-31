@@ -46,6 +46,9 @@ RIDGE_Q16 = 16
 RIDGE_STEP_Q16 = 8
 # ... and no higher than this over the highest ground it meets
 CAP_Q16 = 32
+# a band no cell of which is farther in from its edge than this, parting no levels, is a cliff painted on level ground
+# (band_surfaces' `painted`): Lilycove's, three cells thick, two in
+PAINTED_DEPTH = 2
 # a plain blocked cell joins the rock when at least this share of its pixels are in one of the rock's palettes
 PALETTE_SHARE = 0.5
 # a palette is the rock's when it is the main palette of at least this share of the seeds (and of two of them)
@@ -117,7 +120,8 @@ def rock_cells(cells: tuple[dict, ...], class_names: tuple[str, ...], sources: t
 def band_surfaces(cells: tuple[dict, ...], width: int, height: int, rock: frozenset[int],
                   levels: dict[int, int], tops: dict[int, int] | None = None,
                   ridge: int = RIDGE_Q16, cap: int = CAP_Q16, caps: dict[int, int] | None = None,
-                  pits: frozenset[int] = frozenset()) -> dict[int, tuple[int, int]]:
+                  pits: frozenset[int] = frozenset(),
+                  painted: bool = False) -> dict[int, tuple[int, int]]:
     """{offset: (groundQ16, topQ16)} for the rock's cells. `levels`: the walkable ground's and the water's levels
     (absent: 0, the level the terrace solver gives ground of no level of its own) - every cell beside the rock that
     is not rock: walkable ground, water, and what stands on the ground (a tree, a house, a fence, at its ground's
@@ -125,7 +129,11 @@ def band_surfaces(cells: tuple[dict, ...], width: int, height: int, rock: frozen
     edge says nothing. A band that meets nothing keeps no entry. `caps`: cells whose rock may stand higher than
     `cap` over its ground (a band takes the largest of its cells'); `pits`: rock cells that shape their band (its
     cells are as far from the ground as they are from the band's edge, not from them) but lie on its ground,
-    (ground, ground) - a crater's mouth, its rim rising to it."""
+    (ground, ground) - a crater's mouth, its rim rising to it. `painted`: a thin band (no cell more than
+    PAINTED_DEPTH cells in from its edge) that parts no levels, on land more than in water - a cliff the GBA paints on
+    level ground - keeps no entry, its pieces drawn as their own shapes as before step 16: risen a tile as a ridge,
+    Lilycove's, Fallarbor's, Route 120's and the Safari Zone's cliffs stood as walls on the ground both sides of them
+    (the owner's report of 2026-10-31). A wide mass (a mountain) still rises."""
     tops = tops or {}
     caps = caps or {}
     out: dict[int, tuple[int, int]] = {}
@@ -169,6 +177,10 @@ def band_surfaces(cells: tuple[dict, ...], width: int, height: int, rock: frozen
         if max(counted) - low < 16:
             # a ridge on one level: as high as the cell is far from the ground round it
             depth = _depths(band, members, width, height)
+            if (painted and max(depth.values()) <= PAINTED_DEPTH
+                    and 2 * sum(cells[neighbor].get("behavior") in WATER for neighbor in boundary) < len(boundary)):
+                continue    # a cliff painted on level ground: its pieces as they are drawn, not a wall (a rock in
+                            # the sea, water most of the way round it, still rises as a mound)
             for offset in band:
                 if offset in pits:
                     continue
