@@ -254,6 +254,7 @@ extern int NativeSelfTest_Mail(void);
 extern int NativeSelfTest_RareGoods(void);
 extern int NativeSelfTest_RotomCatalog(void);
 extern int NativeSelfTest_TmCatalogue(void);
+extern int NativeSelfTest_ItemHub(void);
 extern int NativeSelfTest_Ride(const char *sheetPath);
 extern int NativeSelfTest_Carriers(const char *sheetPath);
 extern int NativeSelfTest_FrontierSaves(void);
@@ -1366,6 +1367,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_RotomCatalog()); // src/platform/native_selftest_rotom.c (the owner's Rotom Catalog)
         else if (strcmp(argv[i], "--selftest-tm-catalogue") == 0)
             exit(NativeSelfTest_TmCatalogue()); // src/platform/native_selftest_tm.c (the owner's TM catalogue)
+        else if (strcmp(argv[i], "--selftest-item-hub") == 0)
+            exit(NativeSelfTest_ItemHub()); // src/platform/native_selftest_hub.c (the owner's Game Corner item hub)
         else if (strcmp(argv[i], "--selftest-wild-items") == 0)
             exit(NativeSelfTest_WildItems()); // src/platform/native_selftest_items.c (the 2026-10-27 wild item audit)
         else if (strcmp(argv[i], "--selftest-frontier-saves") == 0)

@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
-"""The Game Corner's RARE GOODS (the owner's request of 2026-10-24) in real game processes (test builds; Linux and Windows
-alike; the Classic 2D one and the 3D one, whose native shop screen draws the lists): every item no player can get anywhere
-else, sold for coins at the prize counter (data/scripts/mp_progression.inc, tools/mp/gen_rare_goods.py). Everything is
-read from the game's own log (PKMN_TEST_MEGA_LOG: the coins and the money whenever they change; PKMN_TEST_BAG_LOG: the
-counts of the goods bought); the prices and the rows are the generated lists' own (data/scripts/mp_rare_goods_shop.inc,
-src/platform/mp_rare_goods_prices.h); the field keys are the presses a person makes (game frames at fast text, as the
-pictures each step takes showed them). The player stands below the prize counter's clerk (PKMN_TEST_WARP) with a Coin Case
-and 20,000 coins.
+"""The Game Corner's RARE GOODS (the owner's request of 2026-10-24), since 2026-10-31 inside the item hub (the prize
+counter's ITEMS, the owner's ten kinds), in real game processes (test builds; Linux and Windows alike; the Classic 2D one
+and the 3D one, whose native shop screen draws the lists): the goods sold for coins at the prize counter
+(data/scripts/mp_progression.inc, data/scripts/mp_item_hub.inc, tools/mp/gen_rare_goods.py, tools/mp/gen_item_hub.py).
+Everything is read from the game's own log (PKMN_TEST_MEGA_LOG: the coins and the money whenever they change;
+PKMN_TEST_BAG_LOG: the counts of the goods bought); the prices and the rows are the generated lists' own
+(data/scripts/mp_item_hub_lists.inc, src/platform/mp_rare_goods_prices.h, src/platform/mp_item_hub.h); the field keys
+are the presses a person makes (game frames at fast text, as the pictures each step takes showed them). The player stands
+below the prize counter's clerk (PKMN_TEST_WARP) with a Coin Case and 20,000 coins.
 
-  1. buy    UP to the clerk, A: "Welcome to the PRIZE COUNTER! What would you like to see?" RARE GOODS; "RARE GOODS:
-            things you won't find anywhere else! Which kind?" TRAINING; BUY; the Ability Patch (its row in the list):
-            "How many?" 1, "That will be 15000 COINS." YES, "Here you go!"; A on it again: "You don't have enough COINS."
-            (5,000 left); out of the list, QUIT, the kinds again: B, "Please come again!"; SAVE. The coins are 15,000
-            less, the money the same, the Bag holds one Ability Patch
+  1. buy    UP to the clerk, A: "Welcome to the PRIZE COUNTER! What would you like to see?" ITEMS; "ITEMS for COINS:
+            the RARE GOODS and much more! Which kind?" TRAINING (the eighth); BUY; the Ability Patch (its row in the
+            list): "How many?" 1, "That will be 15000 COINS." YES, "Here you go!"; A on it again: "You don't have enough
+            COINS." (5,000 left); out of the list, QUIT, the kinds again: B, "Please come again!"; SAVE. The coins are
+            15,000 less, the money the same, the Bag holds one Ability Patch
   2. load   that save loaded: the same coins and Ability Patch
   3. charm  TRAINING; the Exp. Charm (a key item: one each, at the Shiny Charm's 15,000): "You wanted Exp. Charm?
             That'll be 15000 COINS." YES, "Here you go!"; A on it again: "That item is sold out." The coins are 15,000
             less, the Bag holds one Exp. Charm
-  4. long   HELD ITEMS, the longest list (more goods than the native shop screen once showed: 64): down to its last good,
-            bought (1, YES); one row further is CANCEL, and A there leaves the list - nothing else bought. The coins are
-            that good's price less, the Bag holds one
+  4. long   the hub's longest list (BATTLE ITEMS, 96: more goods than the native shop screen once showed, 64): down to
+            its last good, bought (1, YES); one row further is CANCEL, and A there leaves the list - nothing else bought.
+            The coins are that good's price less, the Bag holds one
 
     tools/battle_env/casino_check.py --exe ./pokeemerald-mp-bfxtest --save town.sav --out build/casino-check
 
@@ -38,7 +39,8 @@ ENGINE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 SPECIES_MUDKIP = 258
 PRIZE_COUNTER = "10:3:0:12:4"     # PKMN_TEST_WARP: the Mauville Game Corner, below the major prize clerk (12,2)
 COINS = 20_000                   # the Ability Patch is 15,000: one is bought, the second refused (5,000 left)
-LIST_LABEL = "MauvilleCity_GameCorner_Pokemart_RareGoods"
+LIST_LABEL = "MauvilleCity_GameCorner_Pokemart_Hub"   # the item hub's lists (2026-10-31), the RARE GOODS among them
+KINDS = ["Held", "Battle", "Mega", "Evolution", "Balls", "Healing", "Berries", "Training", "Tms", "Other"]   # the menu's order
 
 
 def item_id(name):
@@ -47,14 +49,19 @@ def item_id(name):
 
 
 def price_of(name):
-    """The generated table's coins for an item (src/platform/mp_rare_goods_prices.h)."""
-    text = open(os.path.join(ENGINE, "src/platform/mp_rare_goods_prices.h"), encoding="utf-8").read()
-    return int(re.search(r"\{" + name + r", (\d+)\}", text).group(1))
+    """The generated tables' coins for an item (src/platform/mp_rare_goods_prices.h: the RARE GOODS; mp_item_hub.h: the
+    items the hub adds)."""
+    for table in ("src/platform/mp_rare_goods_prices.h", "src/platform/mp_item_hub.h"):
+        text = open(os.path.join(ENGINE, table), encoding="utf-8").read()
+        found = re.search(r"\{" + name + r", (\d+)\}", text)
+        if found:
+            return int(found.group(1))
+    raise KeyError(name)
 
 
 def goods(suffix):
-    """The items of one of the clerk's lists, in the order the shop shows them (data/scripts/mp_rare_goods_shop.inc)."""
-    text = open(os.path.join(ENGINE, "data/scripts/mp_rare_goods_shop.inc"), encoding="utf-8").read()
+    """The items of one of the hub's lists, in the order the shop shows them (data/scripts/mp_item_hub_lists.inc)."""
+    text = open(os.path.join(ENGINE, "data/scripts/mp_item_hub_lists.inc"), encoding="utf-8").read()
     body = re.search(LIST_LABEL + suffix + r"::(.*?)pokemartlistend", text, re.S).group(1)
     return re.findall(r"\.2byte (ITEM_\w+)", body)
 
@@ -63,11 +70,13 @@ def downs(start, count, gap=10):
     return [f"{start + gap * i}:DOWN" for i in range(count)]
 
 
-def to_kind(kind_downs):
-    """Talk to the clerk, RARE GOODS, the kind (that many rows down), BUY: the list is up at frame 700."""
-    return (["30:UP", "80:A", "200:DOWN", "260:A"]                       # talk; RARE GOODS
-            + downs(380, kind_downs, 40) + [f"{380 + 40 * kind_downs + 60}:A"]   # the kind
-            + ["600:A"])                                                  # BUY
+def to_kind(kind):
+    """Talk to the clerk, ITEMS, the kind (its row of the hub's ten), BUY. Returns the keys and the frame the list is up."""
+    kind_downs = KINDS.index(kind)
+    chosen = 380 + 40 * kind_downs + 60
+    return (["30:UP", "80:A", "200:DOWN", "260:A"]                       # talk; ITEMS
+            + downs(380, kind_downs, 40) + [f"{chosen}:A"]                # the kind
+            + [f"{chosen + 140}:A"]), chosen + 300                        # BUY
 
 
 def main():
@@ -81,7 +90,9 @@ def main():
     args.exe, args.save = os.path.abspath(args.exe), os.path.abspath(args.save)
     os.makedirs(args.out, exist_ok=True)
     wanted = set(args.steps.split(","))
-    training, held = goods("Training"), goods("Held")
+    training = goods("Training")
+    longest = max((k for k in KINDS if k not in ("Mega", "Tms")), key=lambda k: len(goods(k)))
+    held = goods(longest)
     patch, charm, last = "ITEM_ABILITY_PATCH", "ITEM_EXP_CHARM", held[-1]
     prices = {name: price_of(name) for name in (patch, charm, last)}
     ids = {name: item_id(name) for name in (patch, "ITEM_GOLD_BOTTLE_CAP", charm, last, "ITEM_COIN_CASE")}
@@ -122,16 +133,18 @@ def main():
             problems.append(f"{name}: the wallet {wallet[:1]} then {wallet[-1:]}, not {COINS} coins less {cost}, the money unchanged")
         return money
 
-    # 1. the Ability Patch, its row in TRAINING (the third kind)
+    # 1. the Ability Patch, its row in TRAINING (the hub's eighth kind)
     row = training.index(patch)
     if "buy" in wanted:
-        keys = (to_kind(2) + downs(760, row)
-                + [f"{f + 10 * row}:A" for f in (860, 980, 1100, 1220)]          # how many 1, YES, "Here you go!"
-                + [f"{f + 10 * row}:A" for f in (1340, 1460)]                    # again: not enough coins
-                + [f"{f + 10 * row}:B" for f in (1560, 1680, 1800)] + [f"{1920 + 10 * row}:A"])
-        save_at = 2100 + 10 * row
+        keys, up = to_kind("Training")
+        o = up - 760                                                     # the frames below are from a list up at 760
+        keys += (downs(up, row)
+                 + [f"{o + f + 10 * row}:A" for f in (860, 980, 1100, 1220)]      # how many 1, YES, "Here you go!"
+                 + [f"{o + f + 10 * row}:A" for f in (1340, 1460)]                # again: not enough coins
+                 + [f"{o + f + 10 * row}:B" for f in (1560, 1680, 1800)] + [f"{o + 1920 + 10 * row}:B"])
+        save_at = o + 2100 + 10 * row
         rundir, wallet, bag = step("buy", args.save, save_at + 900, keys + save_keys(save_at), dict(base),
-                                   shots=",".join(str(f + 10 * row) for f in (150, 320, 460, 700, 850, 1040, 1160, 1400, 1980, 2300)))
+                                   shots=",".join(str(o + f + 10 * row) for f in (150, 320, 460, 700, 850, 1040, 1160, 1400, 1980, 2300)))
         money = spent("buy", wallet, prices[patch])
         if not bag or bag[-1][:2] != (1, 0):
             problems.append(f"buy: the Bag's Ability Patches and Gold Bottle Caps {bag[-1:]}, not one Patch (and the second refused)")
@@ -143,32 +156,35 @@ def main():
     # 3. the Exp. Charm: a key item, one each (shop.c: "You wanted ...?" with no quantity; SOLD OUT once owned)
     if "charm" in wanted:
         row = training.index(charm)
-        keys = (to_kind(2) + downs(760, row)
-                + [f"{f + 10 * row}:A" for f in (860, 980, 1100)]                # "You wanted ...?" YES, "Here you go!"
-                + [f"{f + 10 * row}:A" for f in (1220, 1340)]                    # again: "That item is sold out."
-                + [f"{f + 10 * row}:B" for f in (1440, 1560, 1680)] + [f"{1800 + 10 * row}:A"])
-        _, wallet, bag = step("charm", args.save, 2100 + 10 * row, keys, dict(base),
-                              shots=",".join(str(f + 10 * row) for f in (750, 850, 1000, 1160, 1280)))
+        keys, up = to_kind("Training")
+        o = up - 760
+        keys += (downs(up, row)
+                 + [f"{o + f + 10 * row}:A" for f in (860, 980, 1100)]            # "You wanted ...?" YES, "Here you go!"
+                 + [f"{o + f + 10 * row}:A" for f in (1220, 1340)]                # again: "That item is sold out."
+                 + [f"{o + f + 10 * row}:B" for f in (1440, 1560, 1680)] + [f"{o + 1800 + 10 * row}:B"])
+        _, wallet, bag = step("charm", args.save, o + 2100 + 10 * row, keys, dict(base),
+                              shots=",".join(str(o + f + 10 * row) for f in (750, 850, 1000, 1160, 1280)))
         spent("charm", wallet, prices[charm])
         if not bag or bag[-1][2] != 1:
             problems.append(f"charm: the Bag's Exp. Charms {bag[-1:]}, not one (and the second refused)")
 
-    # 4. the last good of HELD ITEMS (the first kind), then CANCEL one row further
+    # 4. the last good of the hub's longest list (BATTLE ITEMS, 96), then CANCEL one row further
     if "long" in wanted:
         row = len(held) - 1
         gap = 8
-        end = 760 + gap * row
-        keys = (to_kind(0) + downs(760, row, gap)
+        keys, up = to_kind(longest)
+        end = up + gap * row
+        keys = (keys + downs(up, row, gap)
                 + [f"{end + f}:A" for f in (100, 220, 340, 460)]                 # how many 1, YES, "Here you go!"
                 + [f"{end + 560}:DOWN", f"{end + 620}:A"]                        # CANCEL: out of the list
-                + [f"{end + f}:B" for f in (740, 860)] + [f"{end + 980}:A"])     # QUIT, the kinds: B, "Please come again!"
+                + [f"{end + f}:B" for f in (740, 860)] + [f"{end + 980}:B"])     # QUIT, the kinds: B, "Please come again!"
         _, wallet, bag = step("long", args.save, end + 1300, keys, dict(base),
                               shots=",".join(str(end + f) for f in (40, 160, 400, 590, 700)))
         spent("long", wallet, prices[last])
         if not bag or bag[-1][3] != 1:
             problems.append(f"long: the Bag's {last} {bag[-1:]}, not one")
 
-    report = dict(price={k.lower(): v for k, v in prices.items()}, rows=dict(training=len(training), held=len(held)),
+    report = dict(price={k.lower(): v for k, v in prices.items()}, rows=dict(training=len(training), longest=len(held)),
                   steps=steps, problems=problems, passed=not problems)
     with open(os.path.join(args.out, "casino_check.json"), "w") as out:
         json.dump(report, out, indent=1)

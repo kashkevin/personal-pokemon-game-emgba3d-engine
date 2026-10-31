@@ -112,6 +112,8 @@ MauvilleCity_GameCorner_EventScript_CharmOffer::
 	end
 
 MauvilleCity_GameCorner_EventScript_RareGoods::
+	@ 2026-10-31: the item hub (data/scripts/mp_item_hub.inc): the RARE GOODS and every other item, in the owner's ten kinds
+	goto MauvilleCity_GameCorner_EventScript_ItemHub
 	message MauvilleCity_GameCorner_Text_RareGoodsWhich
 	waitmessage
 	dynmultichoice 0, 0, FALSE, 6, 0, DYN_MULTICHOICE_CB_NONE, MauvilleCity_GameCorner_Text_RareGoodsHeld, MauvilleCity_GameCorner_Text_RareGoodsBerries, MauvilleCity_GameCorner_Text_RareGoodsTraining, MauvilleCity_GameCorner_Text_RareGoodsEvolution, MauvilleCity_GameCorner_Text_RareGoodsOther, gText_Exit
@@ -323,7 +325,7 @@ MauvilleCity_GameCorner_Text_MajorPrizes:
 	.string "MAJOR PRIZES$"
 
 MauvilleCity_GameCorner_Text_RareGoods:
-	.string "RARE GOODS$"
+	.string "ITEMS$"
 
 MauvilleCity_GameCorner_Text_RareGoodsWhich:
 	.string "RARE GOODS: things you won't find\n"

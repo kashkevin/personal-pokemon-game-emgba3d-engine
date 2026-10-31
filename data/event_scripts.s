@@ -1749,6 +1749,7 @@ EventScript_PalletTown_PlayersHouse_2F_TurnOnPC::
 .ifdef PORTABLE
 	.include "data/scripts/mp_rare_goods_shop.inc" @ the Game Corner's RARE GOODS (tools/mp/gen_rare_goods.py)
 	.include "data/scripts/mp_tm_catalogue.inc" @ the Game Corner's TM CATALOGUE (tools/mp/gen_tm_catalogue.py)
+	.include "data/scripts/mp_item_hub.inc" @ the Game Corner's item hub, the owner's ten kinds (tools/mp/gen_item_hub.py)
 	.include "data/scripts/mp_rival.inc" @ Update 31: multiplayer rival checkpoints, streamlined introduction
 	.include "data/scripts/mp_soft_reset.inc" @ Update 32: START > PLAYER > RESET
 	.include "data/scripts/mp_tower_legends.inc" @ Battle Tower: Legends

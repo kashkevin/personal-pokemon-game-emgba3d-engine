@@ -15,6 +15,7 @@ void CoinShop_OnOpen(const u16 *itemsForSale);
 u32 CoinShop_StonePrice(u16 item);            // coins for a Mega Stone the dealer sells, else 0
 u32 CoinShop_RareGoodsPrice(u16 item);        // coins for an item of the Game Corner's RARE GOODS, else 0
 u32 CoinShop_TmPrice(u16 item);                // coins for a TM of the Game Corner's TM CATALOGUE, else 0
+u32 CoinShop_HubPrice(u16 item);               // coins for an item the Game Corner's item hub adds to the RARE GOODS, else 0
 u32 CoinShop_ItemPrice(u16 item);             // the coin price in the dealer's shop, else the item's yen price
 u32 CoinShop_Balance(u32 *moneyPtr);          // the wallet in the dealer's shop, else the money
 bool8 CoinShop_CanPay(u32 *moneyPtr, u32 cost);

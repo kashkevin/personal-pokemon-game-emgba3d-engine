@@ -1,0 +1,1691 @@
+{
+ "about": "The Game Corner's item hub (the owner's request of 2026-10-31; docs/owner-decisions.md 30-31): every item of the RARE GOODS at its price, unchanged (tools/mp/gen_rare_goods.py), and the items found elsewhere in the game at the owner's approved prices (2026-10-31, \"yes approve\"). One row per item: its kind and, for a new item, its coins. tools/mp/gen_item_hub.py writes the lists and the price table.",
+ "kinds": [
+  {
+   "key": "Held",
+   "label": "HELD ITEMS"
+  },
+  {
+   "key": "Battle",
+   "label": "BATTLE ITEMS"
+  },
+  {
+   "key": "Mega",
+   "label": "MEGA STONES"
+  },
+  {
+   "key": "Evolution",
+   "label": "EVOLUTION & FORMS"
+  },
+  {
+   "key": "Balls",
+   "label": "POKé BALLS"
+  },
+  {
+   "key": "Healing",
+   "label": "HEALING"
+  },
+  {
+   "key": "Berries",
+   "label": "BERRIES"
+  },
+  {
+   "key": "Training",
+   "label": "TRAINING"
+  },
+  {
+   "key": "Tms",
+   "label": "TMs"
+  },
+  {
+   "key": "Other",
+   "label": "OTHER"
+  }
+ ],
+ "rare_goods": {
+  "ITEM_FLAME_PLATE": "Held",
+  "ITEM_SPLASH_PLATE": "Held",
+  "ITEM_ZAP_PLATE": "Held",
+  "ITEM_MEADOW_PLATE": "Held",
+  "ITEM_ICICLE_PLATE": "Held",
+  "ITEM_FIST_PLATE": "Held",
+  "ITEM_TOXIC_PLATE": "Held",
+  "ITEM_EARTH_PLATE": "Held",
+  "ITEM_SKY_PLATE": "Held",
+  "ITEM_MIND_PLATE": "Held",
+  "ITEM_INSECT_PLATE": "Held",
+  "ITEM_STONE_PLATE": "Held",
+  "ITEM_SPOOKY_PLATE": "Held",
+  "ITEM_DRACO_PLATE": "Held",
+  "ITEM_DREAD_PLATE": "Held",
+  "ITEM_IRON_PLATE": "Held",
+  "ITEM_PIXIE_PLATE": "Held",
+  "ITEM_NORMAL_GEM": "Battle",
+  "ITEM_FIRE_GEM": "Battle",
+  "ITEM_WATER_GEM": "Battle",
+  "ITEM_ELECTRIC_GEM": "Battle",
+  "ITEM_GRASS_GEM": "Battle",
+  "ITEM_ICE_GEM": "Battle",
+  "ITEM_FIGHTING_GEM": "Battle",
+  "ITEM_POISON_GEM": "Battle",
+  "ITEM_GROUND_GEM": "Battle",
+  "ITEM_FLYING_GEM": "Battle",
+  "ITEM_PSYCHIC_GEM": "Battle",
+  "ITEM_BUG_GEM": "Battle",
+  "ITEM_ROCK_GEM": "Battle",
+  "ITEM_GHOST_GEM": "Battle",
+  "ITEM_DRAGON_GEM": "Battle",
+  "ITEM_DARK_GEM": "Battle",
+  "ITEM_STEEL_GEM": "Battle",
+  "ITEM_FAIRY_GEM": "Battle",
+  "ITEM_LUCKY_PUNCH": "Held",
+  "ITEM_SOUL_DEW": "Held",
+  "ITEM_ADAMANT_ORB": "Held",
+  "ITEM_LUSTROUS_ORB": "Held",
+  "ITEM_GRISEOUS_ORB": "Held",
+  "ITEM_SEA_INCENSE": "Held",
+  "ITEM_LAX_INCENSE": "Held",
+  "ITEM_ODD_INCENSE": "Held",
+  "ITEM_ROCK_INCENSE": "Held",
+  "ITEM_FULL_INCENSE": "Held",
+  "ITEM_WAVE_INCENSE": "Held",
+  "ITEM_ROSE_INCENSE": "Held",
+  "ITEM_LUCK_INCENSE": "Held",
+  "ITEM_PURE_INCENSE": "Held",
+  "ITEM_FLAME_ORB": "Battle",
+  "ITEM_TOXIC_ORB": "Battle",
+  "ITEM_DAMP_ROCK": "Battle",
+  "ITEM_HEAT_ROCK": "Battle",
+  "ITEM_SMOOTH_ROCK": "Battle",
+  "ITEM_ICY_ROCK": "Battle",
+  "ITEM_ELECTRIC_SEED": "Battle",
+  "ITEM_MISTY_SEED": "Battle",
+  "ITEM_GRASSY_SEED": "Battle",
+  "ITEM_MUSCLE_BAND": "Battle",
+  "ITEM_WISE_GLASSES": "Battle",
+  "ITEM_ZOOM_LENS": "Battle",
+  "ITEM_EVIOLITE": "Battle",
+  "ITEM_FLOAT_STONE": "Battle",
+  "ITEM_AIR_BALLOON": "Battle",
+  "ITEM_RED_CARD": "Battle",
+  "ITEM_RING_TARGET": "Battle",
+  "ITEM_BINDING_BAND": "Battle",
+  "ITEM_EJECT_BUTTON": "Battle",
+  "ITEM_SAFETY_GOGGLES": "Battle",
+  "ITEM_ADRENALINE_ORB": "Battle",
+  "ITEM_TERRAIN_EXTENDER": "Battle",
+  "ITEM_PROTECTIVE_PADS": "Battle",
+  "ITEM_THROAT_SPRAY": "Battle",
+  "ITEM_EJECT_PACK": "Battle",
+  "ITEM_HEAVY_DUTY_BOOTS": "Battle",
+  "ITEM_BLUNDER_POLICY": "Battle",
+  "ITEM_ROOM_SERVICE": "Battle",
+  "ITEM_UTILITY_UMBRELLA": "Battle",
+  "ITEM_ABILITY_SHIELD": "Battle",
+  "ITEM_CLEAR_AMULET": "Battle",
+  "ITEM_PUNCHING_GLOVE": "Battle",
+  "ITEM_COVERT_CLOAK": "Battle",
+  "ITEM_LOADED_DICE": "Battle",
+  "ITEM_MIRROR_HERB": "Battle",
+  "ITEM_BERSERK_GENE": "Battle",
+  "ITEM_FAIRY_FEATHER": "Held",
+  "ITEM_CHILAN_BERRY": "Berries",
+  "ITEM_OCCA_BERRY": "Berries",
+  "ITEM_PASSHO_BERRY": "Berries",
+  "ITEM_WACAN_BERRY": "Berries",
+  "ITEM_RINDO_BERRY": "Berries",
+  "ITEM_YACHE_BERRY": "Berries",
+  "ITEM_CHOPLE_BERRY": "Berries",
+  "ITEM_KEBIA_BERRY": "Berries",
+  "ITEM_SHUCA_BERRY": "Berries",
+  "ITEM_COBA_BERRY": "Berries",
+  "ITEM_PAYAPA_BERRY": "Berries",
+  "ITEM_TANGA_BERRY": "Berries",
+  "ITEM_CHARTI_BERRY": "Berries",
+  "ITEM_KASIB_BERRY": "Berries",
+  "ITEM_HABAN_BERRY": "Berries",
+  "ITEM_COLBUR_BERRY": "Berries",
+  "ITEM_BABIRI_BERRY": "Berries",
+  "ITEM_ROSELI_BERRY": "Berries",
+  "ITEM_GANLON_BERRY": "Berries",
+  "ITEM_SALAC_BERRY": "Berries",
+  "ITEM_PETAYA_BERRY": "Berries",
+  "ITEM_APICOT_BERRY": "Berries",
+  "ITEM_ENIGMA_BERRY": "Berries",
+  "ITEM_MICLE_BERRY": "Berries",
+  "ITEM_CUSTAP_BERRY": "Berries",
+  "ITEM_JABOCA_BERRY": "Berries",
+  "ITEM_ROWAP_BERRY": "Berries",
+  "ITEM_KEE_BERRY": "Berries",
+  "ITEM_MARANGA_BERRY": "Berries",
+  "ITEM_HEALTH_FEATHER": "Training",
+  "ITEM_MUSCLE_FEATHER": "Training",
+  "ITEM_RESIST_FEATHER": "Training",
+  "ITEM_GENIUS_FEATHER": "Training",
+  "ITEM_CLEVER_FEATHER": "Training",
+  "ITEM_SWIFT_FEATHER": "Training",
+  "ITEM_ABILITY_PATCH": "Training",
+  "ITEM_LONELY_MINT": "Training",
+  "ITEM_ADAMANT_MINT": "Training",
+  "ITEM_NAUGHTY_MINT": "Training",
+  "ITEM_BRAVE_MINT": "Training",
+  "ITEM_BOLD_MINT": "Training",
+  "ITEM_IMPISH_MINT": "Training",
+  "ITEM_LAX_MINT": "Training",
+  "ITEM_RELAXED_MINT": "Training",
+  "ITEM_MODEST_MINT": "Training",
+  "ITEM_MILD_MINT": "Training",
+  "ITEM_RASH_MINT": "Training",
+  "ITEM_QUIET_MINT": "Training",
+  "ITEM_CALM_MINT": "Training",
+  "ITEM_GENTLE_MINT": "Training",
+  "ITEM_CAREFUL_MINT": "Training",
+  "ITEM_SASSY_MINT": "Training",
+  "ITEM_TIMID_MINT": "Training",
+  "ITEM_HASTY_MINT": "Training",
+  "ITEM_JOLLY_MINT": "Training",
+  "ITEM_NAIVE_MINT": "Training",
+  "ITEM_SERIOUS_MINT": "Training",
+  "ITEM_EXP_CANDY_XS": "Training",
+  "ITEM_EXP_CANDY_S": "Training",
+  "ITEM_EXP_CANDY_M": "Training",
+  "ITEM_EXP_CANDY_L": "Training",
+  "ITEM_EXP_CANDY_XL": "Training",
+  "ITEM_GOLD_BOTTLE_CAP": "Training",
+  "ITEM_POWER_WEIGHT": "Training",
+  "ITEM_POWER_BRACER": "Training",
+  "ITEM_POWER_BELT": "Training",
+  "ITEM_POWER_LENS": "Training",
+  "ITEM_POWER_BAND": "Training",
+  "ITEM_POWER_ANKLET": "Training",
+  "ITEM_LUCKY_EGG": "Training",
+  "ITEM_EXP_CHARM": "Training",
+  "ITEM_HEALTH_MOCHI": "Training",
+  "ITEM_MUSCLE_MOCHI": "Training",
+  "ITEM_RESIST_MOCHI": "Training",
+  "ITEM_GENIUS_MOCHI": "Training",
+  "ITEM_CLEVER_MOCHI": "Training",
+  "ITEM_SWIFT_MOCHI": "Training",
+  "ITEM_FRESH_START_MOCHI": "Training",
+  "ITEM_ICE_STONE": "Evolution",
+  "ITEM_SHINY_STONE": "Evolution",
+  "ITEM_DUSK_STONE": "Evolution",
+  "ITEM_DAWN_STONE": "Evolution",
+  "ITEM_UPGRADE": "Evolution",
+  "ITEM_PROTECTOR": "Evolution",
+  "ITEM_DUBIOUS_DISC": "Evolution",
+  "ITEM_REAPER_CLOTH": "Evolution",
+  "ITEM_PRISM_SCALE": "Evolution",
+  "ITEM_WHIPPED_DREAM": "Evolution",
+  "ITEM_SACHET": "Evolution",
+  "ITEM_DOUSE_DRIVE": "Evolution",
+  "ITEM_SHOCK_DRIVE": "Evolution",
+  "ITEM_BURN_DRIVE": "Evolution",
+  "ITEM_CHILL_DRIVE": "Evolution",
+  "ITEM_RED_ORB": "Evolution",
+  "ITEM_BLUE_ORB": "Evolution",
+  "ITEM_RAZOR_CLAW": "Evolution",
+  "ITEM_RAZOR_FANG": "Evolution",
+  "ITEM_ROTOM_CATALOG": "Evolution",
+  "ITEM_GRACIDEA": "Evolution",
+  "ITEM_REVEAL_GLASS": "Evolution",
+  "ITEM_DNA_SPLICERS": "Evolution",
+  "ITEM_ZYGARDE_CUBE": "Evolution",
+  "ITEM_PRISON_BOTTLE": "Evolution",
+  "ITEM_ADAMANT_CRYSTAL": "Evolution",
+  "ITEM_GRISEOUS_CORE": "Evolution",
+  "ITEM_LUSTROUS_GLOBE": "Evolution",
+  "ITEM_BLACK_AUGURITE": "Evolution",
+  "ITEM_LINKING_CORD": "Evolution",
+  "ITEM_HEAL_BALL": "Balls",
+  "ITEM_DUSK_BALL": "Balls",
+  "ITEM_QUICK_BALL": "Balls",
+  "ITEM_LEVEL_BALL": "Balls",
+  "ITEM_LURE_BALL": "Balls",
+  "ITEM_MOON_BALL": "Balls",
+  "ITEM_FRIEND_BALL": "Balls",
+  "ITEM_LOVE_BALL": "Balls",
+  "ITEM_FAST_BALL": "Balls",
+  "ITEM_HEAVY_BALL": "Balls",
+  "ITEM_DREAM_BALL": "Balls",
+  "ITEM_SAFARI_BALL": "Balls",
+  "ITEM_SPORT_BALL": "Balls",
+  "ITEM_PARK_BALL": "Balls",
+  "ITEM_CHERISH_BALL": "Balls",
+  "ITEM_SWEET_HEART": "Healing",
+  "ITEM_PEWTER_CRUNCHIES": "Healing",
+  "ITEM_RAGE_CANDY_BAR": "Healing",
+  "ITEM_OLD_GATEAU": "Healing",
+  "ITEM_CASTELIACONE": "Healing",
+  "ITEM_LUMIOSE_GALETTE": "Healing",
+  "ITEM_SHALOUR_SABLE": "Healing",
+  "ITEM_BIG_MALASADA": "Healing",
+  "ITEM_LURE": "Other",
+  "ITEM_SUPER_LURE": "Other",
+  "ITEM_MAX_LURE": "Other",
+  "ITEM_X_SP_DEF": "Battle",
+  "ITEM_POKE_TOY": "Other",
+  "ITEM_PEARL_STRING": "Other",
+  "ITEM_COMET_SHARD": "Other",
+  "ITEM_RARE_BONE": "Other",
+  "ITEM_ODD_KEYSTONE": "Other",
+  "ITEM_RELIC_COPPER": "Other",
+  "ITEM_RELIC_SILVER": "Other",
+  "ITEM_RELIC_GOLD": "Other",
+  "ITEM_RELIC_VASE": "Other",
+  "ITEM_RELIC_BAND": "Other",
+  "ITEM_RELIC_STATUE": "Other",
+  "ITEM_RELIC_CROWN": "Other",
+  "ITEM_STRANGE_SOUVENIR": "Other",
+  "ITEM_GLITTER_MAIL": "Other",
+  "ITEM_BEAD_MAIL": "Other",
+  "ITEM_TROPIC_MAIL": "Other",
+  "ITEM_DREAM_MAIL": "Other",
+  "ITEM_FAB_MAIL": "Other",
+  "ITEM_OVAL_CHARM": "Other",
+  "ITEM_CATCHING_CHARM": "Other",
+  "ITEM_BIG_BAMBOO_SHOOT": "Other",
+  "ITEM_TINY_BAMBOO_SHOOT": "Other",
+  "ITEM_JUBILIFE_MUFFIN": "Healing",
+  "ITEM_REMEDY": "Healing",
+  "ITEM_FINE_REMEDY": "Healing",
+  "ITEM_SUPERB_REMEDY": "Healing",
+  "ITEM_POKESHI_DOLL": "Other",
+  "ITEM_STRANGE_BALL": "Balls"
+ },
+ "new": [
+  {
+   "item": "ITEM_LIGHT_BALL",
+   "name": "Light Ball",
+   "kind": "Held",
+   "coins": 5000,
+   "why": "strong, but for one species: doubles its attack"
+  },
+  {
+   "item": "ITEM_THICK_CLUB",
+   "name": "Thick Club",
+   "kind": "Held",
+   "coins": 5000,
+   "why": "strong, but for one species: doubles its attack"
+  },
+  {
+   "item": "ITEM_BLACK_BELT",
+   "name": "Black Belt",
+   "kind": "Held",
+   "coins": 3000,
+   "why": "= the Plate of its type (the same x1.2 boost)"
+  },
+  {
+   "item": "ITEM_BLACK_GLASSES",
+   "name": "Black Glasses",
+   "kind": "Held",
+   "coins": 3000,
+   "why": "= the Plate of its type (the same x1.2 boost)"
+  },
+  {
+   "item": "ITEM_CHARCOAL",
+   "name": "Charcoal",
+   "kind": "Held",
+   "coins": 3000,
+   "why": "= the Plate of its type (the same x1.2 boost)"
+  },
+  {
+   "item": "ITEM_DRAGON_FANG",
+   "name": "Dragon Fang",
+   "kind": "Held",
+   "coins": 3000,
+   "why": "= the Plate of its type (the same x1.2 boost)"
+  },
+  {
+   "item": "ITEM_HARD_STONE",
+   "name": "Hard Stone",
+   "kind": "Held",
+   "coins": 3000,
+   "why": "= the Plate of its type (the same x1.2 boost)"
+  },
+  {
+   "item": "ITEM_MAGNET",
+   "name": "Magnet",
+   "kind": "Held",
+   "coins": 3000,
+   "why": "= the Plate of its type (the same x1.2 boost)"
+  },
+  {
+   "item": "ITEM_METAL_COAT",
+   "name": "Metal Coat",
+   "kind": "Held",
+   "coins": 3000,
+   "why": "= the Plate of its type (the same x1.2 boost)"
+  },
+  {
+   "item": "ITEM_MIRACLE_SEED",
+   "name": "Miracle Seed",
+   "kind": "Held",
+   "coins": 3000,
+   "why": "= the Plate of its type (the same x1.2 boost)"
+  },
+  {
+   "item": "ITEM_MYSTIC_WATER",
+   "name": "Mystic Water",
+   "kind": "Held",
+   "coins": 3000,
+   "why": "= the Plate of its type (the same x1.2 boost)"
+  },
+  {
+   "item": "ITEM_NEVER_MELT_ICE",
+   "name": "Never-Melt Ice",
+   "kind": "Held",
+   "coins": 3000,
+   "why": "= the Plate of its type (the same x1.2 boost)"
+  },
+  {
+   "item": "ITEM_POISON_BARB",
+   "name": "Poison Barb",
+   "kind": "Held",
+   "coins": 3000,
+   "why": "= the Plate of its type (the same x1.2 boost)"
+  },
+  {
+   "item": "ITEM_SHARP_BEAK",
+   "name": "Sharp Beak",
+   "kind": "Held",
+   "coins": 3000,
+   "why": "= the Plate of its type (the same x1.2 boost)"
+  },
+  {
+   "item": "ITEM_SILK_SCARF",
+   "name": "Silk Scarf",
+   "kind": "Held",
+   "coins": 3000,
+   "why": "= the Plate of its type (the same x1.2 boost)"
+  },
+  {
+   "item": "ITEM_SILVER_POWDER",
+   "name": "Silver Powder",
+   "kind": "Held",
+   "coins": 3000,
+   "why": "= the Plate of its type (the same x1.2 boost)"
+  },
+  {
+   "item": "ITEM_SOFT_SAND",
+   "name": "Soft Sand",
+   "kind": "Held",
+   "coins": 3000,
+   "why": "= the Plate of its type (the same x1.2 boost)"
+  },
+  {
+   "item": "ITEM_SPELL_TAG",
+   "name": "Spell Tag",
+   "kind": "Held",
+   "coins": 3000,
+   "why": "= the Plate of its type (the same x1.2 boost)"
+  },
+  {
+   "item": "ITEM_TWISTED_SPOON",
+   "name": "Twisted Spoon",
+   "kind": "Held",
+   "coins": 3000,
+   "why": "= the Plate of its type (the same x1.2 boost)"
+  },
+  {
+   "item": "ITEM_LEEK",
+   "name": "Leek",
+   "kind": "Held",
+   "coins": 2250,
+   "why": "= Lucky Punch (the same +2 critical-hit stages, for Farfetch'd)"
+  },
+  {
+   "item": "ITEM_BLUE_SCARF",
+   "name": "Blue Scarf",
+   "kind": "Held",
+   "coins": 1000,
+   "why": "niche: Contests only (scarves), Ditto before it transforms (powders), fleeing wild Pokemon (Smoke Ball)"
+  },
+  {
+   "item": "ITEM_GREEN_SCARF",
+   "name": "Green Scarf",
+   "kind": "Held",
+   "coins": 1000,
+   "why": "niche: Contests only (scarves), Ditto before it transforms (powders), fleeing wild Pokemon (Smoke Ball)"
+  },
+  {
+   "item": "ITEM_METAL_POWDER",
+   "name": "Metal Powder",
+   "kind": "Held",
+   "coins": 1000,
+   "why": "niche: Contests only (scarves), Ditto before it transforms (powders), fleeing wild Pokemon (Smoke Ball)"
+  },
+  {
+   "item": "ITEM_PINK_SCARF",
+   "name": "Pink Scarf",
+   "kind": "Held",
+   "coins": 1000,
+   "why": "niche: Contests only (scarves), Ditto before it transforms (powders), fleeing wild Pokemon (Smoke Ball)"
+  },
+  {
+   "item": "ITEM_QUICK_POWDER",
+   "name": "Quick Powder",
+   "kind": "Held",
+   "coins": 1000,
+   "why": "niche: Contests only (scarves), Ditto before it transforms (powders), fleeing wild Pokemon (Smoke Ball)"
+  },
+  {
+   "item": "ITEM_RED_SCARF",
+   "name": "Red Scarf",
+   "kind": "Held",
+   "coins": 1000,
+   "why": "niche: Contests only (scarves), Ditto before it transforms (powders), fleeing wild Pokemon (Smoke Ball)"
+  },
+  {
+   "item": "ITEM_SMOKE_BALL",
+   "name": "Smoke Ball",
+   "kind": "Held",
+   "coins": 1000,
+   "why": "niche: Contests only (scarves), Ditto before it transforms (powders), fleeing wild Pokemon (Smoke Ball)"
+  },
+  {
+   "item": "ITEM_YELLOW_SCARF",
+   "name": "Yellow Scarf",
+   "kind": "Held",
+   "coins": 1000,
+   "why": "niche: Contests only (scarves), Ditto before it transforms (powders), fleeing wild Pokemon (Smoke Ball)"
+  },
+  {
+   "item": "ITEM_AMULET_COIN",
+   "name": "Amulet Coin",
+   "kind": "Held",
+   "coins": 750,
+   "why": "= its Incense twin (the same effect)"
+  },
+  {
+   "item": "ITEM_CLEANSE_TAG",
+   "name": "Cleanse Tag",
+   "kind": "Held",
+   "coins": 750,
+   "why": "= its Incense twin (the same effect)"
+  },
+  {
+   "item": "ITEM_ASSAULT_VEST",
+   "name": "Assault Vest",
+   "kind": "Battle",
+   "coins": 10000,
+   "why": "competitive staples"
+  },
+  {
+   "item": "ITEM_CHOICE_BAND",
+   "name": "Choice Band",
+   "kind": "Battle",
+   "coins": 10000,
+   "why": "competitive staples"
+  },
+  {
+   "item": "ITEM_CHOICE_SCARF",
+   "name": "Choice Scarf",
+   "kind": "Battle",
+   "coins": 10000,
+   "why": "competitive staples"
+  },
+  {
+   "item": "ITEM_CHOICE_SPECS",
+   "name": "Choice Specs",
+   "kind": "Battle",
+   "coins": 10000,
+   "why": "competitive staples"
+  },
+  {
+   "item": "ITEM_LEFTOVERS",
+   "name": "Leftovers",
+   "kind": "Battle",
+   "coins": 10000,
+   "why": "competitive staples"
+  },
+  {
+   "item": "ITEM_LIFE_ORB",
+   "name": "Life Orb",
+   "kind": "Battle",
+   "coins": 10000,
+   "why": "competitive staples"
+  },
+  {
+   "item": "ITEM_BLACK_SLUDGE",
+   "name": "Black Sludge",
+   "kind": "Battle",
+   "coins": 7500,
+   "why": "Leftovers for Poison types (hurts the rest)"
+  },
+  {
+   "item": "ITEM_EXPERT_BELT",
+   "name": "Expert Belt",
+   "kind": "Battle",
+   "coins": 7500,
+   "why": "strong, lasting"
+  },
+  {
+   "item": "ITEM_FOCUS_SASH",
+   "name": "Focus Sash",
+   "kind": "Battle",
+   "coins": 7500,
+   "why": "a staple, used up when it works: one tier down"
+  },
+  {
+   "item": "ITEM_ROCKY_HELMET",
+   "name": "Rocky Helmet",
+   "kind": "Battle",
+   "coins": 7500,
+   "why": "strong, lasting"
+  },
+  {
+   "item": "ITEM_WEAKNESS_POLICY",
+   "name": "Weakness Policy",
+   "kind": "Battle",
+   "coins": 5000,
+   "why": "strong, used up: one tier down"
+  },
+  {
+   "item": "ITEM_LIGHT_CLAY",
+   "name": "Light Clay",
+   "kind": "Battle",
+   "coins": 2500,
+   "why": "situational: screens last 8 turns, moves first 20% of the time, always switches out, heals 1/8 of the damage dealt"
+  },
+  {
+   "item": "ITEM_QUICK_CLAW",
+   "name": "Quick Claw",
+   "kind": "Battle",
+   "coins": 2500,
+   "why": "situational: screens last 8 turns, moves first 20% of the time, always switches out, heals 1/8 of the damage dealt"
+  },
+  {
+   "item": "ITEM_SHED_SHELL",
+   "name": "Shed Shell",
+   "kind": "Battle",
+   "coins": 2500,
+   "why": "situational: screens last 8 turns, moves first 20% of the time, always switches out, heals 1/8 of the damage dealt"
+  },
+  {
+   "item": "ITEM_SHELL_BELL",
+   "name": "Shell Bell",
+   "kind": "Battle",
+   "coins": 2500,
+   "why": "situational: screens last 8 turns, moves first 20% of the time, always switches out, heals 1/8 of the damage dealt"
+  },
+  {
+   "item": "ITEM_WHITE_HERB",
+   "name": "White Herb",
+   "kind": "Battle",
+   "coins": 2500,
+   "why": "good, used up: one tier down (Shell Smash, Overheat)"
+  },
+  {
+   "item": "ITEM_SCOPE_LENS",
+   "name": "Scope Lens",
+   "kind": "Battle",
+   "coins": 1500,
+   "why": "= Razor Claw (the same +1 critical-hit stage)"
+  },
+  {
+   "item": "ITEM_BIG_ROOT",
+   "name": "Big Root",
+   "kind": "Battle",
+   "coins": 1000,
+   "why": "niche: a 10% chance (Focus Band), small boosts, handicaps to Trick onto a foe"
+  },
+  {
+   "item": "ITEM_FOCUS_BAND",
+   "name": "Focus Band",
+   "kind": "Battle",
+   "coins": 1000,
+   "why": "niche: a 10% chance (Focus Band), small boosts, handicaps to Trick onto a foe"
+  },
+  {
+   "item": "ITEM_GRIP_CLAW",
+   "name": "Grip Claw",
+   "kind": "Battle",
+   "coins": 1000,
+   "why": "niche: a 10% chance (Focus Band), small boosts, handicaps to Trick onto a foe"
+  },
+  {
+   "item": "ITEM_IRON_BALL",
+   "name": "Iron Ball",
+   "kind": "Battle",
+   "coins": 1000,
+   "why": "niche: a 10% chance (Focus Band), small boosts, handicaps to Trick onto a foe"
+  },
+  {
+   "item": "ITEM_LAGGING_TAIL",
+   "name": "Lagging Tail",
+   "kind": "Battle",
+   "coins": 1000,
+   "why": "niche: a 10% chance (Focus Band), small boosts, handicaps to Trick onto a foe"
+  },
+  {
+   "item": "ITEM_MENTAL_HERB",
+   "name": "Mental Herb",
+   "kind": "Battle",
+   "coins": 1000,
+   "why": "situational, used up: one tier down (skip a charge turn; cure Taunt or Encore)"
+  },
+  {
+   "item": "ITEM_METRONOME",
+   "name": "Metronome",
+   "kind": "Battle",
+   "coins": 1000,
+   "why": "niche: a 10% chance (Focus Band), small boosts, handicaps to Trick onto a foe"
+  },
+  {
+   "item": "ITEM_POWER_HERB",
+   "name": "Power Herb",
+   "kind": "Battle",
+   "coins": 1000,
+   "why": "situational, used up: one tier down (skip a charge turn; cure Taunt or Encore)"
+  },
+  {
+   "item": "ITEM_STICKY_BARB",
+   "name": "Sticky Barb",
+   "kind": "Battle",
+   "coins": 1000,
+   "why": "niche: a 10% chance (Focus Band), small boosts, handicaps to Trick onto a foe"
+  },
+  {
+   "item": "ITEM_WIDE_LENS",
+   "name": "Wide Lens",
+   "kind": "Battle",
+   "coins": 1000,
+   "why": "niche: a 10% chance (Focus Band), small boosts, handicaps to Trick onto a foe"
+  },
+  {
+   "item": "ITEM_ABSORB_BULB",
+   "name": "Absorb Bulb",
+   "kind": "Battle",
+   "coins": 750,
+   "why": "= the terrain Seeds 750 (the same used-up +1 stat on a trigger)"
+  },
+  {
+   "item": "ITEM_BRIGHT_POWDER",
+   "name": "Bright Powder",
+   "kind": "Battle",
+   "coins": 750,
+   "why": "= Lax Incense (the same x0.9 accuracy against the holder)"
+  },
+  {
+   "item": "ITEM_CELL_BATTERY",
+   "name": "Cell Battery",
+   "kind": "Battle",
+   "coins": 750,
+   "why": "= the terrain Seeds 750 (the same used-up +1 stat on a trigger)"
+  },
+  {
+   "item": "ITEM_LUMINOUS_MOSS",
+   "name": "Luminous Moss",
+   "kind": "Battle",
+   "coins": 750,
+   "why": "= the terrain Seeds 750 (the same used-up +1 stat on a trigger)"
+  },
+  {
+   "item": "ITEM_PSYCHIC_SEED",
+   "name": "Psychic Seed",
+   "kind": "Battle",
+   "coins": 750,
+   "why": "= the terrain Seeds 750 (the same used-up +1 stat on a trigger)"
+  },
+  {
+   "item": "ITEM_SNOWBALL",
+   "name": "Snowball",
+   "kind": "Battle",
+   "coins": 750,
+   "why": "= the terrain Seeds 750 (the same used-up +1 stat on a trigger)"
+  },
+  {
+   "item": "ITEM_MAX_MUSHROOMS",
+   "name": "Max Mushrooms",
+   "kind": "Battle",
+   "coins": 400,
+   "why": "money / 20 (no source today)"
+  },
+  {
+   "item": "ITEM_X_ACCURACY",
+   "name": "X Accuracy",
+   "kind": "Battle",
+   "coins": 50,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_DIRE_HIT",
+   "name": "Dire Hit",
+   "kind": "Battle",
+   "coins": 35,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_GUARD_SPEC",
+   "name": "Guard Spec.",
+   "kind": "Battle",
+   "coins": 35,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_X_DEFENSE",
+   "name": "X Defense",
+   "kind": "Battle",
+   "coins": 30,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_X_ATTACK",
+   "name": "X Attack",
+   "kind": "Battle",
+   "coins": 25,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_X_SP_ATK",
+   "name": "X Sp. Atk",
+   "kind": "Battle",
+   "coins": 20,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_X_SPEED",
+   "name": "X Speed",
+   "kind": "Battle",
+   "coins": 20,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_EVERSTONE",
+   "name": "Everstone",
+   "kind": "Evolution",
+   "coins": 2500,
+   "why": "situational: stops evolution; passes its holder's nature to eggs"
+  },
+  {
+   "item": "ITEM_DEEP_SEA_SCALE",
+   "name": "Deep Sea Scale",
+   "kind": "Evolution",
+   "coins": 1500,
+   "why": "= the trade evolution items (Up-Grade, Protector...)"
+  },
+  {
+   "item": "ITEM_DEEP_SEA_TOOTH",
+   "name": "Deep Sea Tooth",
+   "kind": "Evolution",
+   "coins": 1500,
+   "why": "= the trade evolution items (Up-Grade, Protector...)"
+  },
+  {
+   "item": "ITEM_DRAGON_SCALE",
+   "name": "Dragon Scale",
+   "kind": "Evolution",
+   "coins": 1500,
+   "why": "= the trade evolution items (Up-Grade, Protector...)"
+  },
+  {
+   "item": "ITEM_ELECTIRIZER",
+   "name": "Electirizer",
+   "kind": "Evolution",
+   "coins": 1500,
+   "why": "= the trade evolution items (Up-Grade, Protector...)"
+  },
+  {
+   "item": "ITEM_FIRE_STONE",
+   "name": "Fire Stone",
+   "kind": "Evolution",
+   "coins": 1500,
+   "why": "= Ice / Shiny / Dusk / Dawn Stone"
+  },
+  {
+   "item": "ITEM_KINGS_ROCK",
+   "name": "King's Rock",
+   "kind": "Evolution",
+   "coins": 1500,
+   "why": "= Razor Claw / Razor Fang (held evolution items)"
+  },
+  {
+   "item": "ITEM_LEAF_STONE",
+   "name": "Leaf Stone",
+   "kind": "Evolution",
+   "coins": 1500,
+   "why": "= Ice / Shiny / Dusk / Dawn Stone"
+  },
+  {
+   "item": "ITEM_MAGMARIZER",
+   "name": "Magmarizer",
+   "kind": "Evolution",
+   "coins": 1500,
+   "why": "= the trade evolution items (Up-Grade, Protector...)"
+  },
+  {
+   "item": "ITEM_MOON_STONE",
+   "name": "Moon Stone",
+   "kind": "Evolution",
+   "coins": 1500,
+   "why": "= Ice / Shiny / Dusk / Dawn Stone"
+  },
+  {
+   "item": "ITEM_OVAL_STONE",
+   "name": "Oval Stone",
+   "kind": "Evolution",
+   "coins": 1500,
+   "why": "= Razor Claw / Razor Fang (held evolution items)"
+  },
+  {
+   "item": "ITEM_SUN_STONE",
+   "name": "Sun Stone",
+   "kind": "Evolution",
+   "coins": 1500,
+   "why": "= Ice / Shiny / Dusk / Dawn Stone"
+  },
+  {
+   "item": "ITEM_THUNDER_STONE",
+   "name": "Thunder Stone",
+   "kind": "Evolution",
+   "coins": 1500,
+   "why": "= Ice / Shiny / Dusk / Dawn Stone"
+  },
+  {
+   "item": "ITEM_WATER_STONE",
+   "name": "Water Stone",
+   "kind": "Evolution",
+   "coins": 1500,
+   "why": "= Ice / Shiny / Dusk / Dawn Stone"
+  },
+  {
+   "item": "ITEM_MASTER_BALL",
+   "name": "Master Ball",
+   "kind": "Balls",
+   "coins": 200000,
+   "why": "your price; buy as many as you like"
+  },
+  {
+   "item": "ITEM_TIMER_BALL",
+   "name": "Timer Ball",
+   "kind": "Balls",
+   "coins": 375,
+   "why": "= Quick / Dusk / Dream Ball (the strong special balls)"
+  },
+  {
+   "item": "ITEM_DIVE_BALL",
+   "name": "Dive Ball",
+   "kind": "Balls",
+   "coins": 150,
+   "why": "= the corner's situational balls (Level, Lure, Moon...)"
+  },
+  {
+   "item": "ITEM_LUXURY_BALL",
+   "name": "Luxury Ball",
+   "kind": "Balls",
+   "coins": 150,
+   "why": "= Friend / Heal Ball"
+  },
+  {
+   "item": "ITEM_NEST_BALL",
+   "name": "Nest Ball",
+   "kind": "Balls",
+   "coins": 150,
+   "why": "= the corner's situational balls (Level, Lure, Moon...)"
+  },
+  {
+   "item": "ITEM_NET_BALL",
+   "name": "Net Ball",
+   "kind": "Balls",
+   "coins": 150,
+   "why": "= the corner's situational balls (Level, Lure, Moon...)"
+  },
+  {
+   "item": "ITEM_REPEAT_BALL",
+   "name": "Repeat Ball",
+   "kind": "Balls",
+   "coins": 150,
+   "why": "= the corner's situational balls (Level, Lure, Moon...)"
+  },
+  {
+   "item": "ITEM_ULTRA_BALL",
+   "name": "Ultra Ball",
+   "kind": "Balls",
+   "coins": 150,
+   "why": "the best everyday ball: no cheaper than the special balls (150)"
+  },
+  {
+   "item": "ITEM_GREAT_BALL",
+   "name": "Great Ball",
+   "kind": "Balls",
+   "coins": 30,
+   "why": "mart price / 20 (the basic balls)"
+  },
+  {
+   "item": "ITEM_POKE_BALL",
+   "name": "Poké Ball",
+   "kind": "Balls",
+   "coins": 10,
+   "why": "mart price / 20 (the basic balls)"
+  },
+  {
+   "item": "ITEM_PREMIER_BALL",
+   "name": "Premier Ball",
+   "kind": "Balls",
+   "coins": 10,
+   "why": "mart price / 20 (the basic balls)"
+  },
+  {
+   "item": "ITEM_SACRED_ASH",
+   "name": "Sacred Ash",
+   "kind": "Healing",
+   "coins": 1200,
+   "why": "= 6 Max Revives (revives the whole party)"
+  },
+  {
+   "item": "ITEM_MAX_ELIXIR",
+   "name": "Max Elixir",
+   "kind": "Healing",
+   "coins": 225,
+   "why": "money / 20 (in no mart list)"
+  },
+  {
+   "item": "ITEM_MAX_HONEY",
+   "name": "Max Honey",
+   "kind": "Healing",
+   "coins": 200,
+   "why": "= Max Revive (the same full revive; no source today)"
+  },
+  {
+   "item": "ITEM_MAX_REVIVE",
+   "name": "Max Revive",
+   "kind": "Healing",
+   "coins": 200,
+   "why": "money / 20 (in no mart list)"
+  },
+  {
+   "item": "ITEM_ELIXIR",
+   "name": "Elixir",
+   "kind": "Healing",
+   "coins": 150,
+   "why": "money / 20 (in no mart list)"
+  },
+  {
+   "item": "ITEM_FULL_RESTORE",
+   "name": "Full Restore",
+   "kind": "Healing",
+   "coins": 150,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_REVIVAL_HERB",
+   "name": "Revival Herb",
+   "kind": "Healing",
+   "coins": 140,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_MAX_POTION",
+   "name": "Max Potion",
+   "kind": "Healing",
+   "coins": 125,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_MAX_ETHER",
+   "name": "Max Ether",
+   "kind": "Healing",
+   "coins": 100,
+   "why": "money / 20 (in no mart list)"
+  },
+  {
+   "item": "ITEM_REVIVE",
+   "name": "Revive",
+   "kind": "Healing",
+   "coins": 75,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_ETHER",
+   "name": "Ether",
+   "kind": "Healing",
+   "coins": 60,
+   "why": "money / 20 (in no mart list)"
+  },
+  {
+   "item": "ITEM_HYPER_POTION",
+   "name": "Hyper Potion",
+   "kind": "Healing",
+   "coins": 60,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_ENERGY_ROOT",
+   "name": "Energy Root",
+   "kind": "Healing",
+   "coins": 40,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_SUPER_POTION",
+   "name": "Super Potion",
+   "kind": "Healing",
+   "coins": 35,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_FULL_HEAL",
+   "name": "Full Heal",
+   "kind": "Healing",
+   "coins": 30,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_ENERGY_POWDER",
+   "name": "Energy Powder",
+   "kind": "Healing",
+   "coins": 25,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_HEAL_POWDER",
+   "name": "Heal Powder",
+   "kind": "Healing",
+   "coins": 25,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_MOOMOO_MILK",
+   "name": "Moomoo Milk",
+   "kind": "Healing",
+   "coins": 25,
+   "why": "money / 20 (in no mart list)"
+  },
+  {
+   "item": "ITEM_LEMONADE",
+   "name": "Lemonade",
+   "kind": "Healing",
+   "coins": 20,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_AWAKENING",
+   "name": "Awakening",
+   "kind": "Healing",
+   "coins": 15,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_BURN_HEAL",
+   "name": "Burn Heal",
+   "kind": "Healing",
+   "coins": 15,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_ICE_HEAL",
+   "name": "Ice Heal",
+   "kind": "Healing",
+   "coins": 15,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_POTION",
+   "name": "Potion",
+   "kind": "Healing",
+   "coins": 15,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_SODA_POP",
+   "name": "Soda Pop",
+   "kind": "Healing",
+   "coins": 15,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_YELLOW_FLUTE",
+   "name": "Yellow Flute",
+   "kind": "Healing",
+   "coins": 15,
+   "why": "money / 20 (in no mart list)"
+  },
+  {
+   "item": "ITEM_FRESH_WATER",
+   "name": "Fresh Water",
+   "kind": "Healing",
+   "coins": 10,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_LAVA_COOKIE",
+   "name": "Lava Cookie",
+   "kind": "Healing",
+   "coins": 10,
+   "why": "money / 20 (in no mart list)"
+  },
+  {
+   "item": "ITEM_PARALYZE_HEAL",
+   "name": "Paralyze Heal",
+   "kind": "Healing",
+   "coins": 10,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_RED_FLUTE",
+   "name": "Red Flute",
+   "kind": "Healing",
+   "coins": 10,
+   "why": "money / 20 (in no mart list)"
+  },
+  {
+   "item": "ITEM_ANTIDOTE",
+   "name": "Antidote",
+   "kind": "Healing",
+   "coins": 5,
+   "why": "mart price / 20"
+  },
+  {
+   "item": "ITEM_BERRY_JUICE",
+   "name": "Berry Juice",
+   "kind": "Healing",
+   "coins": 5,
+   "why": "money / 20 (in no mart list)"
+  },
+  {
+   "item": "ITEM_BLUE_FLUTE",
+   "name": "Blue Flute",
+   "kind": "Healing",
+   "coins": 5,
+   "why": "money / 20 (in no mart list)"
+  },
+  {
+   "item": "ITEM_LUM_BERRY",
+   "name": "Lum Berry",
+   "kind": "Berries",
+   "coins": 5000,
+   "why": "strong, used up: rule 5, one tier down (cures any status)"
+  },
+  {
+   "item": "ITEM_SITRUS_BERRY",
+   "name": "Sitrus Berry",
+   "kind": "Berries",
+   "coins": 2500,
+   "why": "good, used up: rule 5, one tier down (25% HP at half HP)"
+  },
+  {
+   "item": "ITEM_LANSAT_BERRY",
+   "name": "Lansat Berry",
+   "kind": "Berries",
+   "coins": 750,
+   "why": "= the pinch berries (Ganlon, Salac...)"
+  },
+  {
+   "item": "ITEM_LIECHI_BERRY",
+   "name": "Liechi Berry",
+   "kind": "Berries",
+   "coins": 750,
+   "why": "= the pinch berries (Ganlon, Salac...)"
+  },
+  {
+   "item": "ITEM_STARF_BERRY",
+   "name": "Starf Berry",
+   "kind": "Berries",
+   "coins": 750,
+   "why": "= the pinch berries (Ganlon, Salac...)"
+  },
+  {
+   "item": "ITEM_AGUAV_BERRY",
+   "name": "Aguav Berry",
+   "kind": "Berries",
+   "coins": 375,
+   "why": "= the corner's other battle berries (heal 1/8 HP at half HP here, may confuse)"
+  },
+  {
+   "item": "ITEM_FIGY_BERRY",
+   "name": "Figy Berry",
+   "kind": "Berries",
+   "coins": 375,
+   "why": "= the corner's other battle berries (heal 1/8 HP at half HP here, may confuse)"
+  },
+  {
+   "item": "ITEM_IAPAPA_BERRY",
+   "name": "Iapapa Berry",
+   "kind": "Berries",
+   "coins": 375,
+   "why": "= the corner's other battle berries (heal 1/8 HP at half HP here, may confuse)"
+  },
+  {
+   "item": "ITEM_MAGO_BERRY",
+   "name": "Mago Berry",
+   "kind": "Berries",
+   "coins": 375,
+   "why": "= the corner's other battle berries (heal 1/8 HP at half HP here, may confuse)"
+  },
+  {
+   "item": "ITEM_WIKI_BERRY",
+   "name": "Wiki Berry",
+   "kind": "Berries",
+   "coins": 375,
+   "why": "= the corner's other battle berries (heal 1/8 HP at half HP here, may confuse)"
+  },
+  {
+   "item": "ITEM_ASPEAR_BERRY",
+   "name": "Aspear Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_BELUE_BERRY",
+   "name": "Belue Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_BLUK_BERRY",
+   "name": "Bluk Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_CHERI_BERRY",
+   "name": "Cheri Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_CHESTO_BERRY",
+   "name": "Chesto Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_CORNN_BERRY",
+   "name": "Cornn Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_DURIN_BERRY",
+   "name": "Durin Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_GREPA_BERRY",
+   "name": "Grepa Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_HONDEW_BERRY",
+   "name": "Hondew Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_KELPSY_BERRY",
+   "name": "Kelpsy Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_LEPPA_BERRY",
+   "name": "Leppa Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_MAGOST_BERRY",
+   "name": "Magost Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_NANAB_BERRY",
+   "name": "Nanab Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_NOMEL_BERRY",
+   "name": "Nomel Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_ORAN_BERRY",
+   "name": "Oran Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_PAMTRE_BERRY",
+   "name": "Pamtre Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_PECHA_BERRY",
+   "name": "Pecha Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_PERSIM_BERRY",
+   "name": "Persim Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_PINAP_BERRY",
+   "name": "Pinap Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_POMEG_BERRY",
+   "name": "Pomeg Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_QUALOT_BERRY",
+   "name": "Qualot Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_RABUTA_BERRY",
+   "name": "Rabuta Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_RAWST_BERRY",
+   "name": "Rawst Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_RAZZ_BERRY",
+   "name": "Razz Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_SPELON_BERRY",
+   "name": "Spelon Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_TAMATO_BERRY",
+   "name": "Tamato Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_WATMEL_BERRY",
+   "name": "Watmel Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_WEPEAR_BERRY",
+   "name": "Wepear Berry",
+   "kind": "Berries",
+   "coins": 75,
+   "why": "everyday berries: status cures, small heals, EV and Pokeblock berries"
+  },
+  {
+   "item": "ITEM_ABILITY_CAPSULE",
+   "name": "Ability Capsule",
+   "kind": "Training",
+   "coins": 5000,
+   "why": "your price"
+  },
+  {
+   "item": "ITEM_DESTINY_KNOT",
+   "name": "Destiny Knot",
+   "kind": "Training",
+   "coins": 5000,
+   "why": "breeding: eggs inherit 5 IVs instead of 3"
+  },
+  {
+   "item": "ITEM_RARE_CANDY",
+   "name": "Rare Candy",
+   "kind": "Training",
+   "coins": 5000,
+   "why": "your price"
+  },
+  {
+   "item": "ITEM_BOTTLE_CAP",
+   "name": "Bottle Cap",
+   "kind": "Training",
+   "coins": 2500,
+   "why": "your price (6 Bottle Caps = a Gold Bottle Cap, 15,000)"
+  },
+  {
+   "item": "ITEM_PP_MAX",
+   "name": "PP Max",
+   "kind": "Training",
+   "coins": 1475,
+   "why": "= 3 PP Ups"
+  },
+  {
+   "item": "ITEM_SOOTHE_BELL",
+   "name": "Soothe Bell",
+   "kind": "Training",
+   "coins": 1000,
+   "why": "niche: friendship grows faster"
+  },
+  {
+   "item": "ITEM_MACHO_BRACE",
+   "name": "Macho Brace",
+   "kind": "Training",
+   "coins": 750,
+   "why": "= the Power items (EV training, halves Speed; they do it better)"
+  },
+  {
+   "item": "ITEM_PP_UP",
+   "name": "PP Up",
+   "kind": "Training",
+   "coins": 490,
+   "why": "money 9,800 / 20"
+  },
+  {
+   "item": "ITEM_CALCIUM",
+   "name": "Calcium",
+   "kind": "Training",
+   "coins": 300,
+   "why": "= the Mochi (the same +10 EVs; mart price / 20 would be 490)"
+  },
+  {
+   "item": "ITEM_CARBOS",
+   "name": "Carbos",
+   "kind": "Training",
+   "coins": 300,
+   "why": "= the Mochi (the same +10 EVs; mart price / 20 would be 490)"
+  },
+  {
+   "item": "ITEM_HP_UP",
+   "name": "HP Up",
+   "kind": "Training",
+   "coins": 300,
+   "why": "= the Mochi (the same +10 EVs; mart price / 20 would be 490)"
+  },
+  {
+   "item": "ITEM_IRON",
+   "name": "Iron",
+   "kind": "Training",
+   "coins": 300,
+   "why": "= the Mochi (the same +10 EVs; mart price / 20 would be 490)"
+  },
+  {
+   "item": "ITEM_PROTEIN",
+   "name": "Protein",
+   "kind": "Training",
+   "coins": 300,
+   "why": "= the Mochi (the same +10 EVs; mart price / 20 would be 490)"
+  },
+  {
+   "item": "ITEM_ZINC",
+   "name": "Zinc",
+   "kind": "Training",
+   "coins": 300,
+   "why": "= the Mochi (the same +10 EVs; mart price / 20 would be 490)"
+  },
+  {
+   "item": "ITEM_CLAW_FOSSIL",
+   "name": "Claw Fossil",
+   "kind": "Other",
+   "coins": 2500,
+   "why": "a second fossil Pokemon (the desert gives one of the two)"
+  },
+  {
+   "item": "ITEM_ROOT_FOSSIL",
+   "name": "Root Fossil",
+   "kind": "Other",
+   "coins": 2500,
+   "why": "a second fossil Pokemon (the desert gives one of the two)"
+  },
+  {
+   "item": "ITEM_BLUE_SHARD",
+   "name": "Blue Shard",
+   "kind": "Other",
+   "coins": 1500,
+   "why": "= the stone it trades for (Route 124, one for one)"
+  },
+  {
+   "item": "ITEM_GREEN_SHARD",
+   "name": "Green Shard",
+   "kind": "Other",
+   "coins": 1500,
+   "why": "= the stone it trades for (Route 124, one for one)"
+  },
+  {
+   "item": "ITEM_RED_SHARD",
+   "name": "Red Shard",
+   "kind": "Other",
+   "coins": 1500,
+   "why": "= the stone it trades for (Route 124, one for one)"
+  },
+  {
+   "item": "ITEM_YELLOW_SHARD",
+   "name": "Yellow Shard",
+   "kind": "Other",
+   "coins": 1500,
+   "why": "= the stone it trades for (Route 124, one for one)"
+  },
+  {
+   "item": "ITEM_HEART_SCALE",
+   "name": "Heart Scale",
+   "kind": "Other",
+   "coins": 1000,
+   "why": "one relearned move = the cheapest TM tier"
+  },
+  {
+   "item": "ITEM_TOWN_MAP",
+   "name": "Town Map",
+   "kind": "Other",
+   "coins": 1000,
+   "why": "one per save; opens the Fly map (the PokeNav map flies too)"
+  },
+  {
+   "item": "ITEM_BLACK_FLUTE",
+   "name": "Black Flute",
+   "kind": "Other",
+   "coins": 750,
+   "why": "= Pure Incense (a lasting encounter-rate tool; not used up here)"
+  },
+  {
+   "item": "ITEM_WHITE_FLUTE",
+   "name": "White Flute",
+   "kind": "Other",
+   "coins": 750,
+   "why": "= Pure Incense (a lasting encounter-rate tool; not used up here)"
+  },
+  {
+   "item": "ITEM_SHOAL_SALT",
+   "name": "Shoal Salt",
+   "kind": "Other",
+   "coins": 315,
+   "why": "4 of each make a Shell Bell (2,500)"
+  },
+  {
+   "item": "ITEM_SHOAL_SHELL",
+   "name": "Shoal Shell",
+   "kind": "Other",
+   "coins": 315,
+   "why": "4 of each make a Shell Bell (2,500)"
+  },
+  {
+   "item": "ITEM_FLUFFY_TAIL",
+   "name": "Fluffy Tail",
+   "kind": "Other",
+   "coins": 50,
+   "why": "money / 20 (mart price where a mart sells it)"
+  },
+  {
+   "item": "ITEM_POKE_DOLL",
+   "name": "Poké Doll",
+   "kind": "Other",
+   "coins": 50,
+   "why": "money / 20 (mart price where a mart sells it)"
+  },
+  {
+   "item": "ITEM_MAX_REPEL",
+   "name": "Max Repel",
+   "kind": "Other",
+   "coins": 35,
+   "why": "money / 20 (mart price where a mart sells it)"
+  },
+  {
+   "item": "ITEM_ESCAPE_ROPE",
+   "name": "Escape Rope",
+   "kind": "Other",
+   "coins": 30,
+   "why": "money / 20 (mart price where a mart sells it)"
+  },
+  {
+   "item": "ITEM_SUPER_REPEL",
+   "name": "Super Repel",
+   "kind": "Other",
+   "coins": 25,
+   "why": "money / 20 (mart price where a mart sells it)"
+  },
+  {
+   "item": "ITEM_REPEL",
+   "name": "Repel",
+   "kind": "Other",
+   "coins": 20,
+   "why": "money / 20 (mart price where a mart sells it)"
+  },
+  {
+   "item": "ITEM_HONEY",
+   "name": "Honey",
+   "kind": "Other",
+   "coins": 5,
+   "why": "money / 20 (mart price where a mart sells it)"
+  }
+ ]
+}

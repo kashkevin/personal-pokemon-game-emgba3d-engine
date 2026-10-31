@@ -8,7 +8,8 @@ the catalogs in the Bag); the field keys are the presses a person makes (game fr
 step takes showed them). src/platform/native_selftest_rotom.c (--selftest-rotom-catalog) checks every form against every
 other, the forms' data, the PC's storage and the price beside these.
 
-  1. buy         below the prize counter's clerk with a Coin Case and 20,000 coins: RARE GOODS, EVOLUTION, BUY, the
+  1. buy         below the prize counter's clerk with a Coin Case and 20,000 coins: ITEMS (the item hub of 2026-10-31,
+                 the RARE GOODS inside it), EVOLUTION & FORMS, BUY, the
                  Rotom Catalog's row: "You wanted Rotom Catalog? That'll be 15000 COINS." YES, "Here you go!"; A on it
                  again: "That item is sold out." (a Key Item, one each); out of the list; SAVE. 5,000 coins left, one
                  Rotom Catalog in the Bag
@@ -52,7 +53,7 @@ FORMS = [("normal", 479, 84), ("heat", 1064, 315), ("wash", 1065, 56), ("frost",
 MOVE_THUNDER_SHOCK, MOVE_THUNDER_WAVE, MOVE_CONFUSE_RAY, MOVE_SHOCK_WAVE = 84, 86, 109, 351
 PRIZE_COUNTER = "10:3:0:12:4"     # PKMN_TEST_WARP: the Mauville Game Corner, below the major prize clerk (12,2)
 COINS = 20_000
-LIST_LABEL = "MauvilleCity_GameCorner_Pokemart_RareGoods"
+LIST_LABEL = "MauvilleCity_GameCorner_Pokemart_Hub"   # the item hub (2026-10-31): EVOLUTION & FORMS is its fourth kind
 ROTOM = f"{SPECIES_ROTOM}:30:V{MOVE_THUNDER_SHOCK}.{MOVE_THUNDER_WAVE}.0.0"
 PARTY = f"{SPECIES_PIKACHU}:20,{ROTOM},{ROTOM}"
 
@@ -67,7 +68,7 @@ def item_id(name):
 
 
 def goods(suffix):
-    text = open(os.path.join(ENGINE, "data/scripts/mp_rare_goods_shop.inc"), encoding="utf-8").read()
+    text = open(os.path.join(ENGINE, "data/scripts/mp_item_hub_lists.inc"), encoding="utf-8").read()
     body = re.search(LIST_LABEL + suffix + r"::(.*?)pokemartlistend", text, re.S).group(1)
     return re.findall(r"\.2byte (ITEM_\w+)", body)
 
@@ -175,7 +176,7 @@ def main():
 
     forms_bag = dict(PKMN_TEST_PARTY=PARTY, PKMN_TEST_BAG=f"{catalog}:1", PKMN_TEST_BAG_RESET="1")
 
-    # 1-2. Bought at RARE GOODS > EVOLUTION (the fourth kind), sold out once owned; saved and loaded
+    # 1-2. Bought at ITEMS > EVOLUTION & FORMS (the hub's fourth kind), sold out once owned; saved and loaded
     if "buy" in wanted:
         row = goods("Evolution").index("ITEM_ROTOM_CATALOG")
         base = dict(PKMN_TEST_PARTY=f"{SPECIES_PIKACHU}:20", PKMN_TEST_BAG=f"{coin_case}:1", PKMN_TEST_COINS=str(COINS),

@@ -1397,7 +1397,8 @@ int NativeSelfTest_Coins(void)
         ExpectLeg("(coin shop) the price is the stone's coin price", CoinShop_ItemPrice(ITEM_GENGARITE) == CoinShop_StonePrice(ITEM_GENGARITE)
                   && CoinShop_ItemPrice(ITEM_GENGARITE) >= 4500);
         ExpectLeg("(coin shop) the balance is the coins; the POKeNEWS sale does not apply", CoinShop_Balance(&gSaveBlock1Ptr->money) == coins && CoinShop_SaleShift(0) == 0);
-        ExpectLeg("(coin shop) an item without a coin price is out of reach, never free", CoinShop_ItemPrice(ITEM_POTION) > 999999);
+        // (a story item: since the item hub of 2026-10-31 the coin counters sell the Potion too, for 15 coins)
+        ExpectLeg("(coin shop) an item without a coin price is out of reach, never free", CoinShop_ItemPrice(ITEM_DEVON_PARTS) > 999999);
         ExpectLeg("(coin shop) 90,000 coins can pay 80,000 and not 90,001",
                   CoinShop_CanPay(&gSaveBlock1Ptr->money, 80000) && CoinShop_CanPay(&gSaveBlock1Ptr->money, 90000) && !CoinShop_CanPay(&gSaveBlock1Ptr->money, 90001));
         CoinShop_Pay(&gSaveBlock1Ptr->money, 60000);
@@ -1423,7 +1424,8 @@ int NativeSelfTest_Coins(void)
             ExpectLeg("(RARE GOODS) the Ability Patch and the Gold Bottle Cap cost 15,000 (nothing costs more)",
                       CoinShop_ItemPrice(ITEM_ABILITY_PATCH) == 15000
                       && CoinShop_ItemPrice(ITEM_GOLD_BOTTLE_CAP) == 15000);
-            ExpectLeg("(RARE GOODS) an obtainable item is not for sale", CoinShop_ItemPrice(ITEM_POTION) > 999999);
+            // 2026-10-31: the item hub sells the items found elsewhere too (--selftest-item-hub); a story item is sold nowhere
+            ExpectLeg("(RARE GOODS) a story item (the Devon Parts) is not for sale", CoinShop_ItemPrice(ITEM_DEVON_PARTS) > 999999);
             // the review of 2026-10-24: every list whole on the native shop screen, the Mints in the owner's band, the
             // Charms and form-change key items sold, nothing that does nothing here, Misty Seed (no one can get it) sold
             {
