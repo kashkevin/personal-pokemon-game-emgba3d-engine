@@ -258,6 +258,10 @@ void CompactItemsInBagPocket(enum Pocket pocketId);
 void MoveItemSlotInPocket(enum Pocket pocketId, u32 from, u32 to);
 void MoveItemSlotInPC(struct ItemSlot *itemSlots, u32 from, u32 to);
 void ClearBag(void);
+#ifdef PORTABLE
+void TmCase_LoadFromSave(void);   // the TM case (src/item.c): after a save is loaded
+void TmCase_WriteToSave(void);    // before a save is written
+#endif
 u16 CountTotalItemQuantityInBag(enum Item itemId);
 bool32 AddPyramidBagItem(enum Item itemId, u16 count);
 bool32 RemovePyramidBagItem(enum Item itemId, u16 count);

@@ -46,8 +46,8 @@ _Static_assert(offsetof(struct MultiplayerSaveControl, data) == 48, "Save payloa
 _Static_assert(sizeof(struct SaveBlock1) == 15568, "Pinned SaveBlock1");
 _Static_assert(sizeof(struct SaveBlock2) == 3884, "Pinned SaveBlock2");
 #ifdef PORTABLE
-_Static_assert(sizeof(struct SaveBlock3) == 600 + sizeof(struct MPDaycareEggQueue) + sizeof(struct MPTowerRecord),
-               "Ownership SaveBlock3, the Day Care egg queue and the Tower record");
+_Static_assert(sizeof(struct SaveBlock3) == 600 + sizeof(struct MPDaycareEggQueue) + sizeof(struct MPTowerRecord)
+               + sizeof(struct MPTmRecord), "Ownership SaveBlock3, the Day Care egg queue, the Tower record, the TM record");
 #else
 #line 38 // gba-line
 _Static_assert(sizeof(struct SaveBlock3) == 600, "Ownership SaveBlock3");
@@ -472,7 +472,8 @@ static bool32 ValidPlayerSector(const u8 *raw)
 }
 
 #ifdef PORTABLE
-// SaveBlock3 bytes a sector's 116-byte chunk may carry: the 600-byte ownership profile plus the Day Care egg queue (Update 30)
+// SaveBlock3 bytes a sector's 116-byte chunk may carry: the 600-byte ownership profile plus the Day Care egg queue (Update 30),
+// the Tower record and the TM record
 static u32 Block3Used(u32 id)
 {
     s32 used = (s32)MP_SAVE_BLOCK_3_BYTES - (s32)(id * 116);

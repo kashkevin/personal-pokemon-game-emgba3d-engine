@@ -1546,8 +1546,10 @@ int NativeSelfTest_BagItems(void)
     ExpectStone("Thunder Stone: Raichu (fully evolved), no use", SPECIES_RAICHU, MON_MALE, ITEM_THUNDER_STONE, ITEM_NONE, SPECIES_NONE);
     ExpectStone("Thunder Stone: Pikachu holding an Everstone, none (Emerald's rule)", SPECIES_PIKACHU, MON_MALE, ITEM_THUNDER_STONE, ITEM_EVERSTONE, SPECIES_NONE);
 
-    // TMs and HMs: Emerald's numbering, each in the TM pocket, the eight HM moves, who can learn them (the game's own
-    // teachable learnsets; a TM's reuse, its sale and an HM move's forgetting: --selftest-move-switch)
+    // TMs and HMs: Emerald's numbering, each in the TM pocket, the eight HM moves, who can learn them (CanLearnTmMove:
+    // the owner's Gen 1-6 TM rule of 2026-10-31 for the TMs, the game's own teachable learnsets for the HMs; a TM's reuse,
+    // its sale and an HM move's forgetting: --selftest-move-switch). The TM catalogue's TM51-TM168 (machines 51-168, the
+    // HMs 169-176 after them): --selftest-tm-catalogue.
     {
         static const u16 sEmeraldTMHMs[] = {
             MOVE_FOCUS_PUNCH, MOVE_DRAGON_CLAW, MOVE_WATER_PULSE, MOVE_CALM_MIND, MOVE_ROAR, MOVE_TOXIC, MOVE_HAIL,
@@ -1578,7 +1580,7 @@ int NativeSelfTest_BagItems(void)
             {SPECIES_UNOWN, MOVE_HIDDEN_POWER, TRUE, "Unown: TM10 Hidden Power (a TM from X/Y on)"},
             {SPECIES_MEOWTH_GALAR, MOVE_HIDDEN_POWER, FALSE, "Galarian Meowth: not TM10 Hidden Power (no game teaches it)"},
             {SPECIES_RATTATA_ALOLA, MOVE_SECRET_POWER, FALSE, "Alolan Rattata: not TM43 Secret Power (no game teaches it)"},
-            {SPECIES_RATTATA_ALOLA, MOVE_COUNTER, FALSE, "Alolan Rattata: not the Counter tutor (only an Egg move)"},
+            {SPECIES_RATTATA_ALOLA, MOVE_COUNTER, FALSE, "Alolan Rattata: not Counter (a TM here, an Egg move only for it)"},
         };
         u32 item, found = 0, wrong = 0, pocket = 0, mew = 0;
 
@@ -1589,7 +1591,14 @@ int NativeSelfTest_BagItems(void)
             if (index == 0)
                 continue;
             found++;
-            if (index > ARRAY_COUNT(sEmeraldTMHMs) || GetItemTMHMMoveId(item) != sEmeraldTMHMs[index - 1])
+            if (index > 50 && index <= NUM_TECHNICAL_MACHINES)
+            {
+                // TM51-TM168: the TM catalogue's (--selftest-tm-catalogue)
+                if (GetItemPocket(item) != POCKET_TM_HM)
+                    pocket++;
+                continue;
+            }
+            if (GetItemTMHMMoveId(item) != sEmeraldTMHMs[index <= 50 ? index - 1 : 50 + index - NUM_TECHNICAL_MACHINES - 1])
             {
                 wrong++;
                 printf("     TM/HM item %u (number %u) teaches move %u\n", item, index, (unsigned)GetItemTMHMMoveId(item));
@@ -1597,14 +1606,14 @@ int NativeSelfTest_BagItems(void)
             if (GetItemPocket(item) != POCKET_TM_HM)
                 pocket++;
         }
-        snprintf(line, sizeof(line), "TM01-TM50 and HM01-HM08: %u items, each teaching Emerald's move for its number "
-                 "(%u wrong), each in the TM pocket (%u not)", found, wrong, pocket);
-        Expect(line, found == ARRAY_COUNT(sEmeraldTMHMs) && wrong == 0 && pocket == 0);
+        snprintf(line, sizeof(line), "TM01-TM168 and HM01-HM08: %u items, TM01-TM50 and the HMs each teaching Emerald's "
+                 "move for its number (%u wrong), each in the TM pocket (%u not)", found, wrong, pocket);
+        Expect(line, found == NUM_ALL_MACHINES && NUM_ALL_MACHINES == 176 && wrong == 0 && pocket == 0);
         for (i = 0; i < ARRAY_COUNT(sEmeraldTMHMs); i++)
             wrong += IsMoveHM(sEmeraldTMHMs[i]) != (i >= 50);
         Expect("HM moves: Cut, Fly, Surf, Strength, Flash, Rock Smash, Waterfall and Dive, and no TM's move", wrong == 0);
         for (i = 0; i < ARRAY_COUNT(sEmeraldTMHMs); i++)
-            mew += CanLearnTeachableMove(SPECIES_MEW, sEmeraldTMHMs[i]);
+            mew += CanLearnTmMove(SPECIES_MEW, sEmeraldTMHMs[i]);
         snprintf(line, sizeof(line), "Mew can learn every TM and HM (%u of %u)", mew, (unsigned)ARRAY_COUNT(sEmeraldTMHMs));
         Expect(line, mew == ARRAY_COUNT(sEmeraldTMHMs));
         for (i = 0; i < ARRAY_COUNT(sNoTMs); i++)
@@ -1612,13 +1621,13 @@ int NativeSelfTest_BagItems(void)
             u32 learns = 0, m;
 
             for (m = 0; m < ARRAY_COUNT(sEmeraldTMHMs); m++)
-                learns += CanLearnTeachableMove(sNoTMs[i], sEmeraldTMHMs[m]);
+                learns += CanLearnTmMove(sNoTMs[i], sEmeraldTMHMs[m]);
             snprintf(line, sizeof(line), "species %u (Magikarp, Ditto, Smeargle, the cocoons, Beldum...) can learn no TM "
                      "or HM (%u)", sNoTMs[i], learns);
             Expect(line, learns == 0);
         }
         for (i = 0; i < ARRAY_COUNT(sLearns); i++)
-            Expect(sLearns[i].what, CanLearnTeachableMove(sLearns[i].species, sLearns[i].move) == sLearns[i].learns);
+            Expect(sLearns[i].what, CanLearnTmMove(sLearns[i].species, sLearns[i].move) == sLearns[i].learns);
         // Measured, printed: the learnsets are the expansion's (the later games'), not Emerald's
         printf("     note: from the later games' learnsets, not Emerald's: Pikachu HM03 Surf %s, Wobbuffet TM20 Safeguard %s, "
                "Unown TM10 Hidden Power %s\n", CanLearnTeachableMove(SPECIES_PIKACHU, MOVE_SURF) ? "yes" : "no",

@@ -2425,8 +2425,18 @@ static enum CanMoveBeLearned CanTeachMove(struct Pokemon *mon, enum Move move)
 {
     if (GetMonData(mon, MON_DATA_IS_EGG))
         return CANNOT_LEARN_MOVE_IS_EGG;
+#ifdef PORTABLE
+    // PC: a TM or an HM from the Bag teaches by the owner's TM rule (pokemon.c CanLearnTmMove), a tutor by its own lists
+    else if (gPartyMenu.action != PARTY_ACTION_MOVE_TUTOR && !CanLearnTmMove(GetMonData(mon, MON_DATA_SPECIES_OR_EGG), move))
+        return CANNOT_LEARN_MOVE;
+    else if (gPartyMenu.action == PARTY_ACTION_MOVE_TUTOR && !CanLearnTeachableMove(GetMonData(mon, MON_DATA_SPECIES_OR_EGG), move))
+        return CANNOT_LEARN_MOVE;
+#else
+#line 2358 // gba-line
     else if (!CanLearnTeachableMove(GetMonData(mon, MON_DATA_SPECIES_OR_EGG), move))
         return CANNOT_LEARN_MOVE;
+#endif
+#line 2360 // gba-line
     else if (MonKnowsMove(mon, move) == TRUE)
         return ALREADY_KNOWS_MOVE;
     else

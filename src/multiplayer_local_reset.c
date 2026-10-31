@@ -24,6 +24,7 @@
 #include "constants/battle_string_ids.h"
 #ifdef PORTABLE
 #include "multiplayer_soft_reset.h"
+#include "item.h"
 #endif
 #line 25 // gba-line
 
@@ -41,6 +42,10 @@ struct LocalResetGuard {
 #line 32 // gba-line
     u8 partyCount;
     u8 dexCaught[NUM_DEX_FLAG_BYTES];
+#ifdef PORTABLE
+    struct ItemSlot tmCase[NUM_ALL_MACHINES];   // the TM pocket is the TM case in memory (item.c)
+#endif
+#line 34 // gba-line
 };
 static EWRAM_DATA struct LocalResetGuard sLocalResetGuard;
 static EWRAM_DATA u32 sLocalResetSession, sLocalResetIncarnation, sLocalResetRosterEpoch;
@@ -106,6 +111,12 @@ static bool32 PocketMatches(const struct ItemSlot *guard, const struct ItemSlot 
 static bool32 BagMatches(void)
 {
     const struct Bag *bag = &gSaveBlock1Ptr->bag;
+#ifdef PORTABLE
+    // PC: the TM pocket is the TM case in memory (item.c); the save's 64 slots catch up with it only when saving
+    if (!PocketMatches(sLocalResetGuard.tmCase, gBagPockets[POCKET_TM_HM].itemSlots, NUM_ALL_MACHINES))
+        return FALSE;
+#endif
+#line 99 // gba-line
     return PocketMatches(sLocalResetGuard.bag.items, bag->items, BAG_ITEMS_COUNT)
         && PocketMatches(sLocalResetGuard.bag.keyItems, bag->keyItems, BAG_KEYITEMS_COUNT)
         && PocketMatches(sLocalResetGuard.bag.pokeBalls, bag->pokeBalls, BAG_POKEBALLS_COUNT)
@@ -213,6 +224,10 @@ bool32 MultiplayerLocalReset_TryBegin(u32 encounterId)
     CopyPocket(sLocalResetGuard.bag.pokeBalls, gSaveBlock1Ptr->bag.pokeBalls, BAG_POKEBALLS_COUNT);
     CopyPocket(sLocalResetGuard.bag.TMsHMs, gSaveBlock1Ptr->bag.TMsHMs, BAG_TMHM_COUNT);
     CopyPocket(sLocalResetGuard.bag.berries, gSaveBlock1Ptr->bag.berries, BAG_BERRIES_COUNT);
+#ifdef PORTABLE
+    CopyPocket(sLocalResetGuard.tmCase, gBagPockets[POCKET_TM_HM].itemSlots, NUM_ALL_MACHINES);
+#endif
+#line 206 // gba-line
     memcpy(sLocalResetGuard.dexCaught, gSaveBlock1Ptr->dexCaught, sizeof(sLocalResetGuard.dexCaught));
     sLocalResetGuard.partyCount = gPartiesCount[B_TRAINER_PLAYER];
     sLocalResetGuard.money = GetMoney(&gSaveBlock1Ptr->money); sLocalResetGuard.coins = GetCoins();

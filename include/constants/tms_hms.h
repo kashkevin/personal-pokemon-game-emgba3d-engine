@@ -1,7 +1,7 @@
 #ifndef GUARD_CONSTANTS_TMS_HMS_H
 #define GUARD_CONSTANTS_TMS_HMS_H
 
-#define FOREACH_TM(F) \
+#define FOREACH_TM_GBA(F) \
     F(FOCUS_PUNCH) \
     F(DRAGON_CLAW) \
     F(WATER_PULSE) \
@@ -62,6 +62,13 @@
     F(ROCK_SMASH) \
     F(WATERFALL) \
     F(DIVE)
+
+#ifdef PORTABLE
+#include "constants/tms_hms_pc.h"
+#define FOREACH_TM(F) FOREACH_TM_GBA(F) FOREACH_TM_PC(F)
+#else
+#define FOREACH_TM(F) FOREACH_TM_GBA(F)
+#endif
 
 #define FOREACH_TMHM(F) \
     FOREACH_TM(F) \

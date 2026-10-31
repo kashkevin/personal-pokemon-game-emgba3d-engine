@@ -488,8 +488,11 @@ const struct NatureInfo gNaturesInfo[NUM_NATURES] =
 
 #ifdef PORTABLE
 // The owner's TM rule (2026-10-27): a TM or a tutor teaches only what an official game teaches by TM or tutor
-// (tools/learnset_helpers/make_teachables_pc.py, Makefile_pc)
+// (tools/learnset_helpers/make_teachables_pc.py, Makefile_pc). For TMs it became, on 2026-10-31, the owner's Gen 1-6 rule:
+// a TM teaches a species what it learned by TM in any Gen 1-6 game (tools/learnset_helpers/make_tm_learnsets_pc.py;
+// CanLearnTmMove below); tutors keep these lists.
 #include "data/pokemon/teachable_learnsets_pc.h"
+#include "data/pokemon/tm_learnsets_pc.h"
 #else
 #line 485 // gba-line
 #include "data/pokemon/teachable_learnsets.h"
@@ -5165,6 +5168,25 @@ bool8 TryIncrementMonLevel(struct Pokemon *mon)
     }
 }
 
+#ifdef PORTABLE
+// PC: what a TM teaches (the owner's rule of 2026-10-31, docs/owner-decisions.md 27): a TM's move to a species that learned
+// it by TM in any Gen 1-6 game, with the owner's documented extensions (data/pokemon/tm_learnsets_pc.h, generated); an
+// HM's move and any other move by the teachable lists, as before.
+bool32 CanLearnTmMove(enum Species species, enum Move move)
+{
+    enum Item item = GetTMHMItemIdFromMoveId(move);
+    enum TMHMIndex tm = GetItemTMHMIndex(item);
+
+    if (species == SPECIES_EGG)
+        return FALSE;
+    if (item == ITEM_NONE || tm == 0 || tm > NUM_TECHNICAL_MACHINES)
+        return CanLearnTeachableMove(species, move);
+    if (species >= ARRAY_COUNT(gTmCompatPc))
+        return FALSE;
+    return (gTmCompatPc[species][(tm - 1) / 8] >> ((tm - 1) % 8)) & 1;
+}
+#endif
+#line 5084 // gba-line
 bool32 CanLearnTeachableMove(enum Species species, enum Move move)
 {
     const u16 *teachableLearnset = GetSpeciesTeachableLearnset(species);

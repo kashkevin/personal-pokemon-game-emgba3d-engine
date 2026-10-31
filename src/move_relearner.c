@@ -1060,8 +1060,16 @@ static u32 GetRelearnerTMMoves(struct BoxPokemon *mon, u16 *moves)
         if (!IsTmAvailable(item))
             continue;
 
+#ifdef PORTABLE
+        // PC: the owner's TM rule (pokemon.c CanLearnTmMove); 168 TMs and 8 HMs, so the list's end is checked
+        if (!CanLearnTmMove(species, move) || numMoves >= MAX_RELEARNER_MOVES)
+            continue;
+#else
+#line 984 // gba-line
         if (!CanLearnTeachableMove(species, move))
             continue;
+#endif
+#line 986 // gba-line
 
         if (!BoxMonKnowsMove(mon, move))
             moves[numMoves++] = move;
@@ -1186,8 +1194,15 @@ static bool32 HasRelearnerTMMoves(struct BoxPokemon *boxMon)
         if (!tmAvailable)
             continue;
 
+#ifdef PORTABLE
+        if (!CanLearnTmMove(species, move))   // PC: the owner's TM rule (pokemon.c)
+            continue;
+#else
+#line 1096 // gba-line
         if (!CanLearnTeachableMove(species, move))
             continue;
+#endif
+#line 1098 // gba-line
 
         if (!BoxMonKnowsMove(boxMon, move))
             return TRUE;
@@ -1764,7 +1779,7 @@ bool32 MoveRelearner_CanSwitchBackIn(struct BoxPokemon *boxMon, enum Move move)
     {
         enum Item item = GetTMHMItemIdFromMoveId(move);
 
-        if (item != ITEM_NONE && IsTmAvailable(item) && CanLearnTeachableMove(species, move))
+        if (item != ITEM_NONE && IsTmAvailable(item) && CanLearnTmMove(species, move))   // the owner's TM rule
             return TRUE;
     }
     if (IsTutorMoveRelearnerActive())

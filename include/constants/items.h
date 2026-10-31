@@ -812,6 +812,79 @@ enum __attribute__((packed)) Item
     ITEM_TM98 = 679,
     ITEM_TM99 = 680,
     ITEM_TM100 = 681,
+#ifdef PORTABLE
+    // PC: TM101-TM168 (the owner's TM catalogue of 2026-10-31, include/constants/tms_hms_pc.h) are items 874-941,
+    // after every item of the expansion. Macros, so the TM aliases below can name them; ITEM_PC_TM168 (before
+    // ITEMS_COUNT) makes the item count follow them.
+#define ITEM_TM101 874
+#define ITEM_TM102 875
+#define ITEM_TM103 876
+#define ITEM_TM104 877
+#define ITEM_TM105 878
+#define ITEM_TM106 879
+#define ITEM_TM107 880
+#define ITEM_TM108 881
+#define ITEM_TM109 882
+#define ITEM_TM110 883
+#define ITEM_TM111 884
+#define ITEM_TM112 885
+#define ITEM_TM113 886
+#define ITEM_TM114 887
+#define ITEM_TM115 888
+#define ITEM_TM116 889
+#define ITEM_TM117 890
+#define ITEM_TM118 891
+#define ITEM_TM119 892
+#define ITEM_TM120 893
+#define ITEM_TM121 894
+#define ITEM_TM122 895
+#define ITEM_TM123 896
+#define ITEM_TM124 897
+#define ITEM_TM125 898
+#define ITEM_TM126 899
+#define ITEM_TM127 900
+#define ITEM_TM128 901
+#define ITEM_TM129 902
+#define ITEM_TM130 903
+#define ITEM_TM131 904
+#define ITEM_TM132 905
+#define ITEM_TM133 906
+#define ITEM_TM134 907
+#define ITEM_TM135 908
+#define ITEM_TM136 909
+#define ITEM_TM137 910
+#define ITEM_TM138 911
+#define ITEM_TM139 912
+#define ITEM_TM140 913
+#define ITEM_TM141 914
+#define ITEM_TM142 915
+#define ITEM_TM143 916
+#define ITEM_TM144 917
+#define ITEM_TM145 918
+#define ITEM_TM146 919
+#define ITEM_TM147 920
+#define ITEM_TM148 921
+#define ITEM_TM149 922
+#define ITEM_TM150 923
+#define ITEM_TM151 924
+#define ITEM_TM152 925
+#define ITEM_TM153 926
+#define ITEM_TM154 927
+#define ITEM_TM155 928
+#define ITEM_TM156 929
+#define ITEM_TM157 930
+#define ITEM_TM158 931
+#define ITEM_TM159 932
+#define ITEM_TM160 933
+#define ITEM_TM161 934
+#define ITEM_TM162 935
+#define ITEM_TM163 936
+#define ITEM_TM164 937
+#define ITEM_TM165 938
+#define ITEM_TM166 939
+#define ITEM_TM167 940
+#define ITEM_TM168 941
+#endif
 
     ITEM_HM01 = 682,
     ITEM_HM02 = 683,
@@ -1052,6 +1125,9 @@ enum __attribute__((packed)) Item
     ITEM_TATSUGIRINITE = 872,
     ITEM_GLIMMORANITE = 873,
 
+#ifdef PORTABLE
+    ITEM_PC_TM168 = ITEM_TM168,
+#endif
     ITEMS_COUNT,
     ITEM_FIELD_ARROW = ITEMS_COUNT,
 };

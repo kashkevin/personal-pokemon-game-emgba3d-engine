@@ -21,6 +21,10 @@
 #include "constants/moves.h"
 #include "constants/item_effects.h"
 #include "constants/hold_effects.h"
+#ifdef PORTABLE
+#include "move.h"   // GetMoveDescription: TM51-TM168 are described by their moves (GetItemDescription)
+#endif
+#line 24 // gba-line
 
 #define DUMMY_PC_BAG_POCKET                 \
 {                                           \
@@ -142,6 +146,107 @@ void ApplyNewEncryptionKeyToBagItems(u32 newKey)
     }
 }
 
+#ifdef PORTABLE
+// PC: the TM case holds every TM and HM (the owner's TM catalogue of 2026-10-31: 168 TMs and 8 HMs). The save's TM pocket
+// has 64 slots (SaveBlock1, pinned), so the pocket the game uses is this one, in memory. TM01-TM50 and the HMs are kept in
+// the save's 64 slots as before; TM51 and up are one bit each in SaveBlock3's TM record (TMs are never used up on PC).
+// The save's slots are copied raw (each quantity stays encrypted with the save's own key).
+static struct ItemSlot sTmCase[NUM_ALL_MACHINES];
+
+static u32 TmRecordCrc(const struct MPTmRecord *record)
+{
+    const u8 *data = (const u8 *)record;
+    u32 size = offsetof(struct MPTmRecord, crc32), crc = 0xFFFFFFFF;
+
+    while (size--)
+    {
+        crc ^= *data++;
+        for (u32 i = 0; i < 8; i++)
+            crc = (crc >> 1) ^ (0xEDB88320 & -(crc & 1));
+    }
+    return crc ^ 0xFFFFFFFF;
+}
+
+static bool32 TmRecordValid(const struct MPTmRecord *record)
+{
+    return record->magic == MP_TM_RECORD_MAGIC && record->version == MP_TM_RECORD_VERSION
+        && record->crc32 == TmRecordCrc(record);
+}
+
+// After a save is loaded (load_save.c CopyPartyAndObjectsFromSave): the save's 64 slots, then each TM of the record
+void TmCase_LoadFromSave(void)
+{
+    const struct MPTmRecord *record = &gSaveBlock3Ptr->tmRecord;
+    u32 count = 0;
+
+    memset(sTmCase, 0, sizeof(sTmCase));
+    for (u32 i = 0; i < BAG_TMHM_COUNT && count < NUM_ALL_MACHINES; i++)
+    {
+        if (gSaveBlock1Ptr->bag.TMsHMs[i].itemId != ITEM_NONE)
+            sTmCase[count++] = gSaveBlock1Ptr->bag.TMsHMs[i];
+    }
+    if (!TmRecordValid(record))
+        return;
+    for (u32 tm = MP_TM_RECORD_FIRST; tm <= NUM_TECHNICAL_MACHINES && count < NUM_ALL_MACHINES; tm++)
+    {
+        u32 bit = tm - MP_TM_RECORD_FIRST;
+        enum Item item = gTMHMItemMoveIds[tm].itemId;
+        bool32 there = FALSE;
+
+        if (bit >= MP_TM_RECORD_BITS || !((record->owned[bit / 8] >> (bit % 8)) & 1))
+            continue;
+        for (u32 i = 0; i < count && !there; i++)
+            there = sTmCase[i].itemId == item;
+        if (there)
+            continue;
+        sTmCase[count].itemId = item;
+        sTmCase[count].quantity = 1 ^ gSaveBlock2Ptr->encryptionKey;
+        count++;
+    }
+}
+
+// Before a save is written (load_save.c CopyPartyAndObjectsToSave): TM01-TM50, the HMs and anything else into the 64 slots
+// in the case's order, TM51 and up into the record (all zeros when there are none, as in a save from before)
+void TmCase_WriteToSave(void)
+{
+    struct MPTmRecord *record = &gSaveBlock3Ptr->tmRecord;
+    u32 slot = 0;
+
+    memset(gSaveBlock1Ptr->bag.TMsHMs, 0, sizeof(gSaveBlock1Ptr->bag.TMsHMs));
+    memset(record, 0, sizeof(*record));
+    for (u32 i = 0; i < NUM_ALL_MACHINES; i++)
+    {
+        enum TMHMIndex tm = GetItemTMHMIndex(sTmCase[i].itemId);
+        u32 bit = tm - MP_TM_RECORD_FIRST;
+
+        if (sTmCase[i].itemId == ITEM_NONE)
+            continue;
+        if (tm >= MP_TM_RECORD_FIRST && tm <= NUM_TECHNICAL_MACHINES && bit < MP_TM_RECORD_BITS)
+        {
+            if (!((record->owned[bit / 8] >> (bit % 8)) & 1))
+                record->count++;
+            record->owned[bit / 8] |= 1 << (bit % 8);
+        }
+        else if (slot < BAG_TMHM_COUNT)
+        {
+            gSaveBlock1Ptr->bag.TMsHMs[slot++] = sTmCase[i];
+        }
+    }
+    if (record->count == 0)
+        return;
+    record->magic = MP_TM_RECORD_MAGIC;
+    record->version = MP_TM_RECORD_VERSION;
+    record->crc32 = TmRecordCrc(record);
+}
+
+// A new game's bag (ClearBag): the case and the record empty
+static void TmCase_Clear(void)
+{
+    memset(sTmCase, 0, sizeof(sTmCase));
+    memset(&gSaveBlock3Ptr->tmRecord, 0, sizeof(gSaveBlock3Ptr->tmRecord));
+}
+#endif
+#line 145 // gba-line
 void SetBagItemsPointers(void)
 {
     gBagPockets[POCKET_ITEMS].itemSlots = gSaveBlock1Ptr->bag.items;
@@ -159,6 +264,11 @@ void SetBagItemsPointers(void)
     gBagPockets[POCKET_TM_HM].itemSlots = gSaveBlock1Ptr->bag.TMsHMs;
     gBagPockets[POCKET_TM_HM].capacity = BAG_TMHM_COUNT;
     gBagPockets[POCKET_TM_HM].id = POCKET_TM_HM;
+#ifdef PORTABLE
+    gBagPockets[POCKET_TM_HM].itemSlots = sTmCase;   // PC: the TM case (above)
+    gBagPockets[POCKET_TM_HM].capacity = NUM_ALL_MACHINES;
+#endif
+#line 162 // gba-line
 
     gBagPockets[POCKET_BERRIES].itemSlots = gSaveBlock1Ptr->bag.berries;
     gBagPockets[POCKET_BERRIES].capacity = BAG_BERRIES_COUNT;
@@ -560,6 +670,10 @@ void MoveItemSlotInPC(struct ItemSlot *itemSlots, u32 from, u32 to)
 void ClearBag(void)
 {
     CpuFastFill(0, &gSaveBlock1Ptr->bag, sizeof(struct Bag));
+#ifdef PORTABLE
+    TmCase_Clear();
+#endif
+#line 563 // gba-line
 }
 
 static inline u16 NONNULL BagPocket_CountTotalItemQuantity(struct BagPocket *pocket, enum Item itemId)
@@ -863,6 +977,14 @@ u32 GetItemHoldEffectParam(enum Item itemId)
 
 const u8 *GetItemDescription(enum Item itemId)
 {
+#ifdef PORTABLE
+    // PC: TM51-TM168 (the owner's TM catalogue of 2026-10-31) are described by their moves
+    enum TMHMIndex tm = GetItemTMHMIndex(itemId);
+
+    if (tm > 50 && tm <= NUM_TECHNICAL_MACHINES)
+        return GetMoveDescription(GetItemTMHMMoveId(itemId));
+#endif
+#line 866 // gba-line
     return gItemsInfo[SanitizeItemId(itemId)].description;
 }
 

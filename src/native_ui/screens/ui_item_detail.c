@@ -263,7 +263,7 @@ void UiItemDetail_Capture(const struct NativeBag *bag)
             for (int m = 0; m < sParty[i].moveCount; m++)
                 if (sParty[i].moves[m] == sMove)
                     sTeach[i] = 2;
-            if (sTeach[i] == 0 && CanLearnTeachableMove(sParty[i].species, sMove))
+            if (sTeach[i] == 0 && CanLearnTmMove(sParty[i].species, sMove))
                 sTeach[i] = 1;
         }
     }

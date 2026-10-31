@@ -37,6 +37,7 @@
 #include "native_ui/ui_engine.h"
 #include "native_ui/ui_gfx.h"
 #include "native_ui/ui_items.h"
+#include "native_ui/ui_mon.h"
 #include "native_ui/ui_screen.h"
 #include "native_ui/ui_text.h"
 #include "native_ui/ui_widgets.h"
@@ -457,6 +458,14 @@ static void Board(int t, const struct UiRamp *m)
             int tagW = TagWidth(pt, 74);
 
             UiItems_PriceTag(sx + sw - 16 - tagW, ry + 5, tagW, pt, m->lo, sS.soldOut[idx] || sS.prices[idx] > sS.money);
+            if (!sS.decorations && GetItemPocket(item) == POCKET_TM_HM)
+            {
+                /* a TM's or HM's type beside its price, as the Bag shows it (the TM catalogue of 2026-10-31: number,
+                   move, type and price on each row) */
+                int ty = UiMon_Type(GetMoveType(GetItemTMHMMoveId(item)));
+
+                UiW_TypeBadge(sx + sw - 16 - tagW - 46, ry + 6, ty >= 0 ? ty : UI_TYPE_NORMAL, 0);
+            }
         }
         if (sel && list)
             UiW_Cursor(sx + 1, ry + 7, UiW_Nudge(t), UI_NONE);

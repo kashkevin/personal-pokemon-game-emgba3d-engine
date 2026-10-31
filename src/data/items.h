@@ -16185,6 +16185,91 @@ const struct ItemInfo gItemsInfo[] =
         .iconPic = gItemIcon_PokeshiDoll,
         .iconPalette = gItemIconPalette_PokeshiDoll,
     },
+
+#ifdef PORTABLE
+    // PC: TM101-TM168, the owner's TM catalogue of 2026-10-31 (include/constants/tms_hms_pc.h), made like TM51-TM100
+    // above; each is described by its move (item.c GetItemDescription), its icon is the TM disc in its move's colours.
+#define PC_TM_ITEM(n)                                         \
+    [ITEM_TM##n] =                                            \
+    {                                                         \
+        .name = ITEM_NAME("TM" #n),                           \
+        .price = 3000,                                        \
+        .description = COMPOUND_STRING("?????"),              \
+        .importance = I_REUSABLE_TMS,                         \
+        .pocket = POCKET_TM_HM,                               \
+        .type = ITEM_USE_PARTY_MENU,                          \
+        .fieldUseFunc = ItemUseOutOfBattle_TMHM,              \
+    },
+    PC_TM_ITEM(101)
+    PC_TM_ITEM(102)
+    PC_TM_ITEM(103)
+    PC_TM_ITEM(104)
+    PC_TM_ITEM(105)
+    PC_TM_ITEM(106)
+    PC_TM_ITEM(107)
+    PC_TM_ITEM(108)
+    PC_TM_ITEM(109)
+    PC_TM_ITEM(110)
+    PC_TM_ITEM(111)
+    PC_TM_ITEM(112)
+    PC_TM_ITEM(113)
+    PC_TM_ITEM(114)
+    PC_TM_ITEM(115)
+    PC_TM_ITEM(116)
+    PC_TM_ITEM(117)
+    PC_TM_ITEM(118)
+    PC_TM_ITEM(119)
+    PC_TM_ITEM(120)
+    PC_TM_ITEM(121)
+    PC_TM_ITEM(122)
+    PC_TM_ITEM(123)
+    PC_TM_ITEM(124)
+    PC_TM_ITEM(125)
+    PC_TM_ITEM(126)
+    PC_TM_ITEM(127)
+    PC_TM_ITEM(128)
+    PC_TM_ITEM(129)
+    PC_TM_ITEM(130)
+    PC_TM_ITEM(131)
+    PC_TM_ITEM(132)
+    PC_TM_ITEM(133)
+    PC_TM_ITEM(134)
+    PC_TM_ITEM(135)
+    PC_TM_ITEM(136)
+    PC_TM_ITEM(137)
+    PC_TM_ITEM(138)
+    PC_TM_ITEM(139)
+    PC_TM_ITEM(140)
+    PC_TM_ITEM(141)
+    PC_TM_ITEM(142)
+    PC_TM_ITEM(143)
+    PC_TM_ITEM(144)
+    PC_TM_ITEM(145)
+    PC_TM_ITEM(146)
+    PC_TM_ITEM(147)
+    PC_TM_ITEM(148)
+    PC_TM_ITEM(149)
+    PC_TM_ITEM(150)
+    PC_TM_ITEM(151)
+    PC_TM_ITEM(152)
+    PC_TM_ITEM(153)
+    PC_TM_ITEM(154)
+    PC_TM_ITEM(155)
+    PC_TM_ITEM(156)
+    PC_TM_ITEM(157)
+    PC_TM_ITEM(158)
+    PC_TM_ITEM(159)
+    PC_TM_ITEM(160)
+    PC_TM_ITEM(161)
+    PC_TM_ITEM(162)
+    PC_TM_ITEM(163)
+    PC_TM_ITEM(164)
+    PC_TM_ITEM(165)
+    PC_TM_ITEM(166)
+    PC_TM_ITEM(167)
+    PC_TM_ITEM(168)
+#undef PC_TM_ITEM
+#endif
 };
 
 #undef ITEM_NAME

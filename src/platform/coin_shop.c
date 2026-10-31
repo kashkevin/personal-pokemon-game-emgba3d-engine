@@ -18,6 +18,7 @@
 
 #include "mp_mega_prices.h"
 #include "mp_rare_goods_prices.h"
+#include "mp_tm_catalogue.h"
 
 bool8 gCoinShopActive;
 
@@ -27,6 +28,19 @@ void CoinShop_OnOpen(const u16 *itemsForSale)
     for (u32 i = 0; i < MP_RARE_GOODS_LIST_COUNT; i++)
         if (itemsForSale == sMPRareGoodsLists[i])
             gCoinShopActive = TRUE;
+    for (u32 i = 0; i < MP_TM_CATALOGUE_LIST_COUNT; i++)
+        if (itemsForSale == sMPTmCatalogueLists[i])
+            gCoinShopActive = TRUE;
+}
+
+// The Game Corner's TM CATALOGUE (the owner's TM catalogue of 2026-10-31): every TM at the owner's prices
+// (tools/mp/gen_tm_catalogue.py); 0 for any other item.
+u32 CoinShop_TmPrice(u16 item)
+{
+    for (u32 i = 0; i < MP_TM_CATALOGUE_COUNT; i++)
+        if (sMPTmCataloguePrices[i].item == item)
+            return sMPTmCataloguePrices[i].coins;
+    return 0;
 }
 
 // The Game Corner's RARE GOODS (the owner's request of 2026-10-24): every item no player can get anywhere else, priced by
@@ -55,6 +69,8 @@ u32 CoinShop_ItemPrice(u16 item)
 
         if (coins == 0)
             coins = CoinShop_RareGoodsPrice(item);
+        if (coins == 0)
+            coins = CoinShop_TmPrice(item);
         return coins != 0 ? coins : 0xFFFFFF;   // not a priced item: out of reach rather than free
     }
     return GetItemPrice(item);

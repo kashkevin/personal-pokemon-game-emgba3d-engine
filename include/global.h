@@ -343,7 +343,23 @@ struct MPTowerRecord
     u8 reserved[40];
     u32 crc32;         // CRC-32 of the 60 bytes before
 };
-#define MP_SAVE_BLOCK_3_BYTES (600 + sizeof(struct MPDaycareEggQueue) + sizeof(struct MPTowerRecord))
+// The TM case's record (the owner's TM catalogue of 2026-10-31, src/item.c): the save's TM pocket has 64 slots (SaveBlock1,
+// pinned), so TM01-TM50 and the HMs stay there and TM51 and up are one bit each here (TMs are never used up on PC), after
+// the Tower record. A save from before has zeros here: no TM past TM50.
+#define MP_TM_RECORD_MAGIC 0x314D5450 // "PTM1"
+#define MP_TM_RECORD_VERSION 1
+#define MP_TM_RECORD_FIRST 51        // the TM of bit 0
+#define MP_TM_RECORD_BITS 192         // TM51-TM242
+struct MPTmRecord
+{
+    u32 magic;
+    u8 version;
+    u8 count;                          // the bits set below
+    u16 reserved;
+    u8 owned[MP_TM_RECORD_BITS / 8];   // bit (n - 51) of the array: TMn in the TM case
+    u32 crc32;                         // CRC-32 of the 32 bytes before
+};
+#define MP_SAVE_BLOCK_3_BYTES (600 + sizeof(struct MPDaycareEggQueue) + sizeof(struct MPTowerRecord) + sizeof(struct MPTmRecord))
 #endif
 
 struct SaveBlock3
@@ -368,6 +384,7 @@ struct SaveBlock3
 #ifdef PORTABLE
     struct MPDaycareEggQueue eggQueue;
     struct MPTowerRecord tower;
+    struct MPTmRecord tmRecord;
 #endif
 }; /* max size 1624 bytes */
 

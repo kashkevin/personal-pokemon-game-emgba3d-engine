@@ -1,0 +1,1514 @@
+[
+ {
+  "tm": 1,
+  "move": "MOVE_FOCUS_PUNCH",
+  "name": "Focus Punch",
+  "type": "Fighting",
+  "category": "Physical Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 2,
+  "move": "MOVE_DRAGON_CLAW",
+  "name": "Dragon Claw",
+  "type": "Dragon",
+  "category": "Physical Attack",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 3,
+  "move": "MOVE_WATER_PULSE",
+  "name": "Water Pulse",
+  "type": "Water",
+  "category": "Special Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 4,
+  "move": "MOVE_CALM_MIND",
+  "name": "Calm Mind",
+  "type": "Psychic",
+  "category": "Status and Setup",
+  "coins": 10000,
+  "price_note": "High-value competitive"
+ },
+ {
+  "tm": 5,
+  "move": "MOVE_ROAR",
+  "name": "Roar",
+  "type": "Normal",
+  "category": "Defensive and Utility",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 6,
+  "move": "MOVE_TOXIC",
+  "name": "Toxic",
+  "type": "Poison",
+  "category": "Status and Setup",
+  "coins": 10000,
+  "price_note": "High-value competitive"
+ },
+ {
+  "tm": 7,
+  "move": "MOVE_HAIL",
+  "name": "Hail",
+  "type": "Ice",
+  "category": "Status and Setup",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 8,
+  "move": "MOVE_BULK_UP",
+  "name": "Bulk Up",
+  "type": "Fighting",
+  "category": "Status and Setup",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 9,
+  "move": "MOVE_BULLET_SEED",
+  "name": "Bullet Seed",
+  "type": "Grass",
+  "category": "Physical Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 10,
+  "move": "MOVE_HIDDEN_POWER",
+  "name": "Hidden Power",
+  "type": "Normal",
+  "category": "Special Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 11,
+  "move": "MOVE_SUNNY_DAY",
+  "name": "Sunny Day",
+  "type": "Fire",
+  "category": "Status and Setup",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 12,
+  "move": "MOVE_TAUNT",
+  "name": "Taunt",
+  "type": "Dark",
+  "category": "Status and Setup",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 13,
+  "move": "MOVE_ICE_BEAM",
+  "name": "Ice Beam",
+  "type": "Ice",
+  "category": "Special Attack",
+  "coins": 600,
+  "price_note": "existing Game Corner prize price kept (PC); by the tiers it would be 10,000"
+ },
+ {
+  "tm": 14,
+  "move": "MOVE_BLIZZARD",
+  "name": "Blizzard",
+  "type": "Ice",
+  "category": "Special Attack",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 15,
+  "move": "MOVE_HYPER_BEAM",
+  "name": "Hyper Beam",
+  "type": "Normal",
+  "category": "Special Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 16,
+  "move": "MOVE_LIGHT_SCREEN",
+  "name": "Light Screen",
+  "type": "Psychic",
+  "category": "Defensive and Utility",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 17,
+  "move": "MOVE_PROTECT",
+  "name": "Protect",
+  "type": "Normal",
+  "category": "Defensive and Utility",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 18,
+  "move": "MOVE_RAIN_DANCE",
+  "name": "Rain Dance",
+  "type": "Water",
+  "category": "Status and Setup",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 19,
+  "move": "MOVE_GIGA_DRAIN",
+  "name": "Giga Drain",
+  "type": "Grass",
+  "category": "Special Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 20,
+  "move": "MOVE_SAFEGUARD",
+  "name": "Safeguard",
+  "type": "Normal",
+  "category": "Defensive and Utility",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 21,
+  "move": "MOVE_FRUSTRATION",
+  "name": "Frustration",
+  "type": "Normal",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 22,
+  "move": "MOVE_SOLAR_BEAM",
+  "name": "Solar Beam",
+  "type": "Grass",
+  "category": "Special Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 23,
+  "move": "MOVE_IRON_TAIL",
+  "name": "Iron Tail",
+  "type": "Steel",
+  "category": "Physical Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 24,
+  "move": "MOVE_THUNDERBOLT",
+  "name": "Thunderbolt",
+  "type": "Electric",
+  "category": "Special Attack",
+  "coins": 600,
+  "price_note": "existing Game Corner prize price kept (PC); by the tiers it would be 10,000"
+ },
+ {
+  "tm": 25,
+  "move": "MOVE_THUNDER",
+  "name": "Thunder",
+  "type": "Electric",
+  "category": "Special Attack",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 26,
+  "move": "MOVE_EARTHQUAKE",
+  "name": "Earthquake",
+  "type": "Ground",
+  "category": "Physical Attack",
+  "coins": 10000,
+  "price_note": "High-value competitive"
+ },
+ {
+  "tm": 27,
+  "move": "MOVE_RETURN",
+  "name": "Return",
+  "type": "Normal",
+  "category": "Physical Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 28,
+  "move": "MOVE_DIG",
+  "name": "Dig",
+  "type": "Ground",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 29,
+  "move": "MOVE_PSYCHIC",
+  "name": "Psychic",
+  "type": "Psychic",
+  "category": "Special Attack",
+  "coins": 525,
+  "price_note": "existing Game Corner prize price kept (PC); by the tiers it would be 7,500"
+ },
+ {
+  "tm": 30,
+  "move": "MOVE_SHADOW_BALL",
+  "name": "Shadow Ball",
+  "type": "Ghost",
+  "category": "Special Attack",
+  "coins": 10000,
+  "price_note": "High-value competitive"
+ },
+ {
+  "tm": 31,
+  "move": "MOVE_BRICK_BREAK",
+  "name": "Brick Break",
+  "type": "Fighting",
+  "category": "Physical Attack",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 32,
+  "move": "MOVE_DOUBLE_TEAM",
+  "name": "Double Team",
+  "type": "Normal",
+  "category": "Status and Setup",
+  "coins": 225,
+  "price_note": "existing Game Corner prize price kept (PC); by the tiers it would be 2,500"
+ },
+ {
+  "tm": 33,
+  "move": "MOVE_REFLECT",
+  "name": "Reflect",
+  "type": "Psychic",
+  "category": "Defensive and Utility",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 34,
+  "move": "MOVE_SHOCK_WAVE",
+  "name": "Shock Wave",
+  "type": "Electric",
+  "category": "Special Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 35,
+  "move": "MOVE_FLAMETHROWER",
+  "name": "Flamethrower",
+  "type": "Fire",
+  "category": "Special Attack",
+  "coins": 600,
+  "price_note": "existing Game Corner prize price kept (PC); by the tiers it would be 10,000"
+ },
+ {
+  "tm": 36,
+  "move": "MOVE_SLUDGE_BOMB",
+  "name": "Sludge Bomb",
+  "type": "Poison",
+  "category": "Special Attack",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 37,
+  "move": "MOVE_SANDSTORM",
+  "name": "Sandstorm",
+  "type": "Rock",
+  "category": "Status and Setup",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 38,
+  "move": "MOVE_FIRE_BLAST",
+  "name": "Fire Blast",
+  "type": "Fire",
+  "category": "Special Attack",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 39,
+  "move": "MOVE_ROCK_TOMB",
+  "name": "Rock Tomb",
+  "type": "Rock",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 40,
+  "move": "MOVE_AERIAL_ACE",
+  "name": "Aerial Ace",
+  "type": "Flying",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 41,
+  "move": "MOVE_TORMENT",
+  "name": "Torment",
+  "type": "Dark",
+  "category": "Status and Setup",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 42,
+  "move": "MOVE_FACADE",
+  "name": "Facade",
+  "type": "Normal",
+  "category": "Physical Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 43,
+  "move": "MOVE_SECRET_POWER",
+  "name": "Secret Power",
+  "type": "Normal",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 44,
+  "move": "MOVE_REST",
+  "name": "Rest",
+  "type": "Psychic",
+  "category": "Defensive and Utility",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 45,
+  "move": "MOVE_ATTRACT",
+  "name": "Attract",
+  "type": "Normal",
+  "category": "Status and Setup",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 46,
+  "move": "MOVE_THIEF",
+  "name": "Thief",
+  "type": "Dark",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 47,
+  "move": "MOVE_STEEL_WING",
+  "name": "Steel Wing",
+  "type": "Steel",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 48,
+  "move": "MOVE_SKILL_SWAP",
+  "name": "Skill Swap",
+  "type": "Psychic",
+  "category": "Defensive and Utility",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 49,
+  "move": "MOVE_SNATCH",
+  "name": "Snatch",
+  "type": "Dark",
+  "category": "Defensive and Utility",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 50,
+  "move": "MOVE_OVERHEAT",
+  "name": "Overheat",
+  "type": "Fire",
+  "category": "Special Attack",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 51,
+  "move": "MOVE_ROOST",
+  "name": "Roost",
+  "type": "Flying",
+  "category": "Defensive and Utility",
+  "coins": 10000,
+  "price_note": "High-value competitive"
+ },
+ {
+  "tm": 52,
+  "move": "MOVE_FOCUS_BLAST",
+  "name": "Focus Blast",
+  "type": "Fighting",
+  "category": "Special Attack",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 53,
+  "move": "MOVE_ENERGY_BALL",
+  "name": "Energy Ball",
+  "type": "Grass",
+  "category": "Special Attack",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 54,
+  "move": "MOVE_FALSE_SWIPE",
+  "name": "False Swipe",
+  "type": "Normal",
+  "category": "Physical Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 55,
+  "move": "MOVE_BRINE",
+  "name": "Brine",
+  "type": "Water",
+  "category": "Special Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 56,
+  "move": "MOVE_FLING",
+  "name": "Fling",
+  "type": "Dark",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 57,
+  "move": "MOVE_CHARGE_BEAM",
+  "name": "Charge Beam",
+  "type": "Electric",
+  "category": "Special Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 58,
+  "move": "MOVE_ENDURE",
+  "name": "Endure",
+  "type": "Normal",
+  "category": "Defensive and Utility",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 59,
+  "move": "MOVE_DRAGON_PULSE",
+  "name": "Dragon Pulse",
+  "type": "Dragon",
+  "category": "Special Attack",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 60,
+  "move": "MOVE_DRAIN_PUNCH",
+  "name": "Drain Punch",
+  "type": "Fighting",
+  "category": "Physical Attack",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 61,
+  "move": "MOVE_WILL_O_WISP",
+  "name": "Will-O-Wisp",
+  "type": "Fire",
+  "category": "Status and Setup",
+  "coins": 10000,
+  "price_note": "High-value competitive"
+ },
+ {
+  "tm": 62,
+  "move": "MOVE_SILVER_WIND",
+  "name": "Silver Wind",
+  "type": "Bug",
+  "category": "Special Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 63,
+  "move": "MOVE_EMBARGO",
+  "name": "Embargo",
+  "type": "Dark",
+  "category": "Status and Setup",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 64,
+  "move": "MOVE_EXPLOSION",
+  "name": "Explosion",
+  "type": "Normal",
+  "category": "Physical Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 65,
+  "move": "MOVE_SHADOW_CLAW",
+  "name": "Shadow Claw",
+  "type": "Ghost",
+  "category": "Physical Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 66,
+  "move": "MOVE_PAYBACK",
+  "name": "Payback",
+  "type": "Dark",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 67,
+  "move": "MOVE_RECYCLE",
+  "name": "Recycle",
+  "type": "Normal",
+  "category": "Defensive and Utility",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 68,
+  "move": "MOVE_GIGA_IMPACT",
+  "name": "Giga Impact",
+  "type": "Normal",
+  "category": "Physical Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 69,
+  "move": "MOVE_ROCK_POLISH",
+  "name": "Rock Polish",
+  "type": "Rock",
+  "category": "Status and Setup",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 70,
+  "move": "MOVE_HONE_CLAWS",
+  "name": "Hone Claws",
+  "type": "Dark",
+  "category": "Status and Setup",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 71,
+  "move": "MOVE_STONE_EDGE",
+  "name": "Stone Edge",
+  "type": "Rock",
+  "category": "Physical Attack",
+  "coins": 10000,
+  "price_note": "High-value competitive"
+ },
+ {
+  "tm": 72,
+  "move": "MOVE_AVALANCHE",
+  "name": "Avalanche",
+  "type": "Ice",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 73,
+  "move": "MOVE_THUNDER_WAVE",
+  "name": "Thunder Wave",
+  "type": "Electric",
+  "category": "Status and Setup",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 74,
+  "move": "MOVE_GYRO_BALL",
+  "name": "Gyro Ball",
+  "type": "Steel",
+  "category": "Physical Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 75,
+  "move": "MOVE_SWORDS_DANCE",
+  "name": "Swords Dance",
+  "type": "Normal",
+  "category": "Status and Setup",
+  "coins": 10000,
+  "price_note": "High-value competitive"
+ },
+ {
+  "tm": 76,
+  "move": "MOVE_STEALTH_ROCK",
+  "name": "Stealth Rock",
+  "type": "Rock",
+  "category": "Defensive and Utility",
+  "coins": 10000,
+  "price_note": "High-value competitive"
+ },
+ {
+  "tm": 77,
+  "move": "MOVE_PSYCH_UP",
+  "name": "Psych Up",
+  "type": "Normal",
+  "category": "Status and Setup",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 78,
+  "move": "MOVE_CAPTIVATE",
+  "name": "Captivate",
+  "type": "Normal",
+  "category": "Status and Setup",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 79,
+  "move": "MOVE_DARK_PULSE",
+  "name": "Dark Pulse",
+  "type": "Dark",
+  "category": "Special Attack",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 80,
+  "move": "MOVE_ROCK_SLIDE",
+  "name": "Rock Slide",
+  "type": "Rock",
+  "category": "Physical Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 81,
+  "move": "MOVE_X_SCISSOR",
+  "name": "X-Scissor",
+  "type": "Bug",
+  "category": "Physical Attack",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 82,
+  "move": "MOVE_SLEEP_TALK",
+  "name": "Sleep Talk",
+  "type": "Normal",
+  "category": "Defensive and Utility",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 83,
+  "move": "MOVE_NATURAL_GIFT",
+  "name": "Natural Gift",
+  "type": "Normal",
+  "category": "Physical Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 84,
+  "move": "MOVE_POISON_JAB",
+  "name": "Poison Jab",
+  "type": "Poison",
+  "category": "Physical Attack",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 85,
+  "move": "MOVE_DREAM_EATER",
+  "name": "Dream Eater",
+  "type": "Psychic",
+  "category": "Special Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 86,
+  "move": "MOVE_GRASS_KNOT",
+  "name": "Grass Knot",
+  "type": "Grass",
+  "category": "Special Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 87,
+  "move": "MOVE_SWAGGER",
+  "name": "Swagger",
+  "type": "Normal",
+  "category": "Status and Setup",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 88,
+  "move": "MOVE_PLUCK",
+  "name": "Pluck",
+  "type": "Flying",
+  "category": "Physical Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 89,
+  "move": "MOVE_U_TURN",
+  "name": "U-turn",
+  "type": "Bug",
+  "category": "Physical Attack",
+  "coins": 10000,
+  "price_note": "High-value competitive"
+ },
+ {
+  "tm": 90,
+  "move": "MOVE_SUBSTITUTE",
+  "name": "Substitute",
+  "type": "Normal",
+  "category": "Defensive and Utility",
+  "coins": 10000,
+  "price_note": "High-value competitive"
+ },
+ {
+  "tm": 91,
+  "move": "MOVE_FLASH_CANNON",
+  "name": "Flash Cannon",
+  "type": "Steel",
+  "category": "Special Attack",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 92,
+  "move": "MOVE_TRICK_ROOM",
+  "name": "Trick Room",
+  "type": "Psychic",
+  "category": "Status and Setup",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 93,
+  "move": "MOVE_PSYSHOCK",
+  "name": "Psyshock",
+  "type": "Psychic",
+  "category": "Special Attack",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 94,
+  "move": "MOVE_VENOSHOCK",
+  "name": "Venoshock",
+  "type": "Poison",
+  "category": "Special Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 95,
+  "move": "MOVE_TELEKINESIS",
+  "name": "Telekinesis",
+  "type": "Psychic",
+  "category": "Status and Setup",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 96,
+  "move": "MOVE_SMACK_DOWN",
+  "name": "Smack Down",
+  "type": "Rock",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 97,
+  "move": "MOVE_SLUDGE_WAVE",
+  "name": "Sludge Wave",
+  "type": "Poison",
+  "category": "Special Attack",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 98,
+  "move": "MOVE_FLAME_CHARGE",
+  "name": "Flame Charge",
+  "type": "Fire",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 99,
+  "move": "MOVE_LOW_SWEEP",
+  "name": "Low Sweep",
+  "type": "Fighting",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 100,
+  "move": "MOVE_ROUND",
+  "name": "Round",
+  "type": "Normal",
+  "category": "Special Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 101,
+  "move": "MOVE_ECHOED_VOICE",
+  "name": "Echoed Voice",
+  "type": "Normal",
+  "category": "Special Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 102,
+  "move": "MOVE_ALLY_SWITCH",
+  "name": "Ally Switch",
+  "type": "Psychic",
+  "category": "Defensive and Utility",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 103,
+  "move": "MOVE_SCALD",
+  "name": "Scald",
+  "type": "Water",
+  "category": "Special Attack",
+  "coins": 10000,
+  "price_note": "High-value competitive"
+ },
+ {
+  "tm": 104,
+  "move": "MOVE_SKY_DROP",
+  "name": "Sky Drop",
+  "type": "Flying",
+  "category": "Physical Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 105,
+  "move": "MOVE_INCINERATE",
+  "name": "Incinerate",
+  "type": "Fire",
+  "category": "Special Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 106,
+  "move": "MOVE_QUASH",
+  "name": "Quash",
+  "type": "Dark",
+  "category": "Status and Setup",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 107,
+  "move": "MOVE_ACROBATICS",
+  "name": "Acrobatics",
+  "type": "Flying",
+  "category": "Physical Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 108,
+  "move": "MOVE_RETALIATE",
+  "name": "Retaliate",
+  "type": "Normal",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 109,
+  "move": "MOVE_VOLT_SWITCH",
+  "name": "Volt Switch",
+  "type": "Electric",
+  "category": "Special Attack",
+  "coins": 10000,
+  "price_note": "High-value competitive"
+ },
+ {
+  "tm": 110,
+  "move": "MOVE_STRUGGLE_BUG",
+  "name": "Struggle Bug",
+  "type": "Bug",
+  "category": "Special Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 111,
+  "move": "MOVE_BULLDOZE",
+  "name": "Bulldoze",
+  "type": "Ground",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 112,
+  "move": "MOVE_FROST_BREATH",
+  "name": "Frost Breath",
+  "type": "Ice",
+  "category": "Special Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 113,
+  "move": "MOVE_DRAGON_TAIL",
+  "name": "Dragon Tail",
+  "type": "Dragon",
+  "category": "Physical Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 114,
+  "move": "MOVE_WORK_UP",
+  "name": "Work Up",
+  "type": "Normal",
+  "category": "Status and Setup",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 115,
+  "move": "MOVE_WILD_CHARGE",
+  "name": "Wild Charge",
+  "type": "Electric",
+  "category": "Physical Attack",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 116,
+  "move": "MOVE_SNARL",
+  "name": "Snarl",
+  "type": "Dark",
+  "category": "Special Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 117,
+  "move": "MOVE_INFESTATION",
+  "name": "Infestation",
+  "type": "Bug",
+  "category": "Special Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 118,
+  "move": "MOVE_NATURE_POWER",
+  "name": "Nature Power",
+  "type": "Normal",
+  "category": "Defensive and Utility",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 119,
+  "move": "MOVE_POWER_UP_PUNCH",
+  "name": "Power-Up Punch",
+  "type": "Fighting",
+  "category": "Physical Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 120,
+  "move": "MOVE_DAZZLING_GLEAM",
+  "name": "Dazzling Gleam",
+  "type": "Fairy",
+  "category": "Special Attack",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 121,
+  "move": "MOVE_CONFIDE",
+  "name": "Confide",
+  "type": "Normal",
+  "category": "Status and Setup",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 122,
+  "move": "MOVE_MEGA_PUNCH",
+  "name": "Mega Punch",
+  "type": "Normal",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 123,
+  "move": "MOVE_RAZOR_WIND",
+  "name": "Razor Wind",
+  "type": "Normal",
+  "category": "Special Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 124,
+  "move": "MOVE_WHIRLWIND",
+  "name": "Whirlwind",
+  "type": "Normal",
+  "category": "Defensive and Utility",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 125,
+  "move": "MOVE_MEGA_KICK",
+  "name": "Mega Kick",
+  "type": "Normal",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 126,
+  "move": "MOVE_HORN_DRILL",
+  "name": "Horn Drill",
+  "type": "Normal",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 127,
+  "move": "MOVE_BODY_SLAM",
+  "name": "Body Slam",
+  "type": "Normal",
+  "category": "Physical Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 128,
+  "move": "MOVE_TAKE_DOWN",
+  "name": "Take Down",
+  "type": "Normal",
+  "category": "Physical Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 129,
+  "move": "MOVE_DOUBLE_EDGE",
+  "name": "Double-Edge",
+  "type": "Normal",
+  "category": "Physical Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 130,
+  "move": "MOVE_BUBBLE_BEAM",
+  "name": "Bubble Beam",
+  "type": "Water",
+  "category": "Special Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 131,
+  "move": "MOVE_WATER_GUN",
+  "name": "Water Gun",
+  "type": "Water",
+  "category": "Special Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 132,
+  "move": "MOVE_PAY_DAY",
+  "name": "Pay Day",
+  "type": "Normal",
+  "category": "Physical Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 133,
+  "move": "MOVE_SUBMISSION",
+  "name": "Submission",
+  "type": "Fighting",
+  "category": "Physical Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 134,
+  "move": "MOVE_COUNTER",
+  "name": "Counter",
+  "type": "Fighting",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 135,
+  "move": "MOVE_SEISMIC_TOSS",
+  "name": "Seismic Toss",
+  "type": "Fighting",
+  "category": "Physical Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 136,
+  "move": "MOVE_RAGE",
+  "name": "Rage",
+  "type": "Normal",
+  "category": "Physical Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 137,
+  "move": "MOVE_MEGA_DRAIN",
+  "name": "Mega Drain",
+  "type": "Grass",
+  "category": "Special Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 138,
+  "move": "MOVE_DRAGON_RAGE",
+  "name": "Dragon Rage",
+  "type": "Dragon",
+  "category": "Special Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 139,
+  "move": "MOVE_FISSURE",
+  "name": "Fissure",
+  "type": "Ground",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 140,
+  "move": "MOVE_TELEPORT",
+  "name": "Teleport",
+  "type": "Psychic",
+  "category": "Defensive and Utility",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 141,
+  "move": "MOVE_MIMIC",
+  "name": "Mimic",
+  "type": "Normal",
+  "category": "Defensive and Utility",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 142,
+  "move": "MOVE_BIDE",
+  "name": "Bide",
+  "type": "Normal",
+  "category": "Physical Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 143,
+  "move": "MOVE_METRONOME",
+  "name": "Metronome",
+  "type": "Normal",
+  "category": "Defensive and Utility",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 144,
+  "move": "MOVE_SELF_DESTRUCT",
+  "name": "Self-Destruct",
+  "type": "Normal",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 145,
+  "move": "MOVE_EGG_BOMB",
+  "name": "Egg Bomb",
+  "type": "Normal",
+  "category": "Physical Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 146,
+  "move": "MOVE_SWIFT",
+  "name": "Swift",
+  "type": "Normal",
+  "category": "Special Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 147,
+  "move": "MOVE_SKULL_BASH",
+  "name": "Skull Bash",
+  "type": "Normal",
+  "category": "Physical Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 148,
+  "move": "MOVE_SOFT_BOILED",
+  "name": "Soft-Boiled",
+  "type": "Normal",
+  "category": "Defensive and Utility",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 149,
+  "move": "MOVE_SKY_ATTACK",
+  "name": "Sky Attack",
+  "type": "Flying",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 150,
+  "move": "MOVE_PSYWAVE",
+  "name": "Psywave",
+  "type": "Psychic",
+  "category": "Special Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 151,
+  "move": "MOVE_TRI_ATTACK",
+  "name": "Tri Attack",
+  "type": "Normal",
+  "category": "Special Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 152,
+  "move": "MOVE_DYNAMIC_PUNCH",
+  "name": "Dynamic Punch",
+  "type": "Fighting",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 153,
+  "move": "MOVE_HEADBUTT",
+  "name": "Headbutt",
+  "type": "Normal",
+  "category": "Physical Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 154,
+  "move": "MOVE_CURSE",
+  "name": "Curse",
+  "type": "Ghost",
+  "category": "Status and Setup",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 155,
+  "move": "MOVE_ROLLOUT",
+  "name": "Rollout",
+  "type": "Rock",
+  "category": "Physical Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 156,
+  "move": "MOVE_ZAP_CANNON",
+  "name": "Zap Cannon",
+  "type": "Electric",
+  "category": "Special Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 157,
+  "move": "MOVE_SWEET_SCENT",
+  "name": "Sweet Scent",
+  "type": "Normal",
+  "category": "Defensive and Utility",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 158,
+  "move": "MOVE_SNORE",
+  "name": "Snore",
+  "type": "Normal",
+  "category": "Special Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 159,
+  "move": "MOVE_ICY_WIND",
+  "name": "Icy Wind",
+  "type": "Ice",
+  "category": "Special Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 160,
+  "move": "MOVE_DRAGON_BREATH",
+  "name": "Dragon Breath",
+  "type": "Dragon",
+  "category": "Special Attack",
+  "coins": 2500,
+  "price_note": "Standard"
+ },
+ {
+  "tm": 161,
+  "move": "MOVE_MUD_SLAP",
+  "name": "Mud-Slap",
+  "type": "Ground",
+  "category": "Special Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 162,
+  "move": "MOVE_ICE_PUNCH",
+  "name": "Ice Punch",
+  "type": "Ice",
+  "category": "Physical Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 163,
+  "move": "MOVE_DEFENSE_CURL",
+  "name": "Defense Curl",
+  "type": "Normal",
+  "category": "Status and Setup",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 164,
+  "move": "MOVE_THUNDER_PUNCH",
+  "name": "Thunder Punch",
+  "type": "Electric",
+  "category": "Physical Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 165,
+  "move": "MOVE_DETECT",
+  "name": "Detect",
+  "type": "Fighting",
+  "category": "Defensive and Utility",
+  "coins": 7500,
+  "price_note": "Premium"
+ },
+ {
+  "tm": 166,
+  "move": "MOVE_FIRE_PUNCH",
+  "name": "Fire Punch",
+  "type": "Fire",
+  "category": "Physical Attack",
+  "coins": 5000,
+  "price_note": "Strong"
+ },
+ {
+  "tm": 167,
+  "move": "MOVE_FURY_CUTTER",
+  "name": "Fury Cutter",
+  "type": "Bug",
+  "category": "Physical Attack",
+  "coins": 1000,
+  "price_note": "Basic"
+ },
+ {
+  "tm": 168,
+  "move": "MOVE_NIGHTMARE",
+  "name": "Nightmare",
+  "type": "Ghost",
+  "category": "Status and Setup",
+  "coins": 1000,
+  "price_note": "Basic"
+ }
+]

@@ -271,6 +271,9 @@ MauvilleCity_GameCorner_EventScript_PrizeCornerTMs::
 	end
 
 MauvilleCity_GameCorner_EventScript_ChooseTMPrizeMessage::
+.ifdef PORTABLE
+	goto MauvilleCity_GameCorner_EventScript_TmCounterWhich   @ the TM PRIZES or the TM CATALOGUE (data/scripts/mp_tm_catalogue.inc)
+.endif
 	message MauvilleCity_GameCorner_Text_WhichPrize
 	waitmessage
 	setvar VAR_TEMP_1, 0

@@ -284,7 +284,7 @@ enum NativeLearnStep
 };
 /* chooseboxmon.c: the step of LearnMove's state, whether its YES / NO is up and whether it started on NO */
 u32 LearnMove_NativeUiStep(s32 learnState, bool8 *yesNo, bool8 *noFirst);
-#define NATIVE_RELEARNER_MAX_MOVES 60   /* MAX_RELEARNER_MOVES */
+#define NATIVE_RELEARNER_MAX_MOVES 200  /* MAX_RELEARNER_MOVES (PC) */
 struct NativeRelearnerMove
 {
     u16 move;
@@ -341,7 +341,7 @@ enum NativeBagPhase
     NATIVE_BAG_TUTORIAL,        /* Wally's catching tutorial drives the bag */
     NATIVE_BAG_CLOSING,
 };
-#define NATIVE_BAG_MAX_ITEMS 100
+#define NATIVE_BAG_MAX_ITEMS 200   /* the TM case holds 176 (item.c) */
 struct NativeBag
 {
     u8 phase;

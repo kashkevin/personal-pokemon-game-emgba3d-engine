@@ -907,6 +907,9 @@ void MonGainEVs(struct Pokemon *mon, enum Species defeatedSpecies);
 u16 GetMonEVCount(struct Pokemon *mon);
 bool8 TryIncrementMonLevel(struct Pokemon *mon);
 bool32 CanLearnTeachableMove(enum Species species, enum Move move);
+#ifdef PORTABLE
+bool32 CanLearnTmMove(enum Species species, enum Move move);   // the owner's TM rule of 2026-10-31 (pokemon.c)
+#endif
 u16 SpeciesToPokedexNum(enum Species species);
 bool32 IsSpeciesInRegionalDex(enum Species species);
 bool32 IsSpeciesInKantoDex(enum Species species);

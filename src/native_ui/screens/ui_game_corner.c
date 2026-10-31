@@ -502,7 +502,7 @@ static void Capture(void)
             for (int m = 0; m < sParty[i].moveCount; m++)
                 if (sParty[i].moves[m] == move)
                     sTeach[i] = 2;
-            if (sTeach[i] == 0 && CanLearnTeachableMove(sParty[i].species, move))
+            if (sTeach[i] == 0 && CanLearnTmMove(sParty[i].species, move))
                 sTeach[i] = 1;
         }
     }

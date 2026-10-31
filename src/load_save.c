@@ -284,12 +284,20 @@ void CopyPartyAndObjectsToSave(void)
 {
     SavePlayerParty();
     SaveObjectEvents();
+#ifdef PORTABLE
+    TmCase_WriteToSave();   // PC: the TM case into the save's TM pocket and TM record (item.c)
+#endif
+#line 260 // gba-line
 }
 
 void CopyPartyAndObjectsFromSave(void)
 {
     LoadPlayerParty();
     LoadObjectEvents();
+#ifdef PORTABLE
+    TmCase_LoadFromSave();  // PC: the TM case from the save's TM pocket and TM record (item.c)
+#endif
+#line 266 // gba-line
 }
 
 void LoadPlayerBag(void)

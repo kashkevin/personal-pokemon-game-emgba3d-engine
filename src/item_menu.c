@@ -63,6 +63,11 @@
                             max(BAG_ITEMS_COUNT,             \
                             max(BAG_KEYITEMS_COUNT,          \
                                 BAG_POKEBALLS_COUNT))))) + 1)
+#ifdef PORTABLE
+#undef MAX_POCKET_ITEMS
+#define MAX_POCKET_ITEMS (NUM_ALL_MACHINES + 1)   // PC: the TM case holds every TM and HM (item.c), the largest pocket
+#endif
+#line 66 // gba-line
 
 // Up to 8 item slots can be visible at a time
 #define MAX_ITEMS_SHOWN 8
