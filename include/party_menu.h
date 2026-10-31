@@ -157,6 +157,9 @@ bool32 RotomCatalog_Ask(u8 taskId);
 bool32 RotomCatalog_TakeConfirmed(void);
 const u8 *RotomCatalog_FormName(u32 choice);
 void RotomCatalog_TypeText(enum Species species, u8 *dest);
+// The form's own move as the catalog changes the form (the owner's report of 2026-10-31): the other forms' moves go,
+// the new form's takes the replaced one's slot; returns the move for the game to teach (FormChangeTeachMove) or none.
+enum Move RotomCatalog_UpdateFormMove(struct Pokemon *mon);
 #endif
 
 #if TESTING

@@ -25,7 +25,11 @@ enum MoveSwitchSourceKind
     MOVE_SOURCE_TM,         // number: the TM's
     MOVE_SOURCE_HM,         // number: the HM's
     MOVE_SOURCE_TUTOR,      // number: the one-time tutor (MoveRelearner_TutorPlace)
+    MOVE_SOURCE_FORM,       // species: the form whose own move it is (Rotom-Wash's Hydro Pump)
 };
+// The move a form has for being that form (Rotom's appliances: Rotom-Wash's Hydro Pump ...); MOVE_NONE for any other
+// species (Rotom itself among them). On the level-up list of a Pokemon in that form that does not know it.
+enum Move MoveRelearner_FormMove(enum Species species);
 struct MoveSwitchSource
 {
     u8 kind;                // enum MoveSwitchSourceKind
@@ -36,7 +40,7 @@ struct MoveSwitchSource
 u32 MoveRelearner_GetListMoves(struct BoxPokemon *boxMon, enum MoveRelearnerStates list, u16 *moves);
 bool32 MoveRelearner_GetSource(struct BoxPokemon *boxMon, enum MoveRelearnerStates list, enum Move move,
                                struct MoveSwitchSource *out);
-// "Lv 12", "Evo", "TM24", "HM03", "Egg", "Tutor" (compact: "Lv12"); returns the end of dst
+// "Lv 12", "Evo", "TM24", "HM03", "Egg", "Tutor", "Form" (compact: "Lv12"); returns the end of dst
 u8 *MoveRelearner_SourceText(const struct MoveSwitchSource *source, u8 *dst, bool32 compact);
 // The town of a one-time tutor (MOVE_SOURCE_TUTOR's number), into dst; returns the end of dst
 u8 *MoveRelearner_TutorPlace(u32 tutor, u8 *dst);

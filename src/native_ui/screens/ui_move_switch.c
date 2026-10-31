@@ -97,6 +97,7 @@ static const u8 sText_EggLine1[] = _("Egg move");
 static const u8 sText_EggLine2[] = _(": it hatched from an Egg.");
 static const u8 sText_TutorLine[] = _("Taught by the tutor in ");
 static const u8 sText_TutorAny[] = _("A tutor's move.");
+static const u8 sText_FormLine[] = _(" learns it in this form.");
 static const u8 sText_ComesBack[] = _("It can be switched back in later.");
 static const u8 sText_GoneLine[] = _("It can't be switched back in later.");
 static const u8 sText_PpUpsLine[] = _("Its PP Ups will be lost.");
@@ -198,6 +199,7 @@ static void TagText(char *dst, int size, const struct NativeRelearnerMove *m)
     case MOVE_SOURCE_HM: snprintf(dst, size, "HM%02u", (unsigned)m->number); break;
     case MOVE_SOURCE_EGG: snprintf(dst, size, "EGG"); break;
     case MOVE_SOURCE_TUTOR: snprintf(dst, size, "TUTOR"); break;
+    case MOVE_SOURCE_FORM: snprintf(dst, size, "FORM"); break;
     default: dst[0] = '\0'; break;
     }
 }
@@ -252,6 +254,10 @@ static void SourceLine(const struct NativeRelearnerMove *m)
             UiText_Append(sSourceLine, sizeof(sSourceLine), place);
         }
         UiText_Append(sSourceLine, sizeof(sSourceLine), sText_Period);
+        break;
+    case MOVE_SOURCE_FORM:
+        UiText_Append(sSourceLine, sizeof(sSourceLine), GetSpeciesName(m->species));
+        UiText_Append(sSourceLine, sizeof(sSourceLine), sText_FormLine);
         break;
     }
 }

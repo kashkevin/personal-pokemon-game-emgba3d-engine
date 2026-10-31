@@ -635,6 +635,361 @@ static void TestPlaces(void)
            PartyMenuTest_OffersMoves(0));
 }
 
+// ------------------------------------------------------------- a form's own move (the owner's report of 2026-10-31)
+
+static const u16 sRotomForms[][2] =
+{
+    {SPECIES_ROTOM_HEAT, MOVE_OVERHEAT}, {SPECIES_ROTOM_WASH, MOVE_HYDRO_PUMP}, {SPECIES_ROTOM_FROST, MOVE_BLIZZARD},
+    {SPECIES_ROTOM_FAN, MOVE_AIR_SLASH}, {SPECIES_ROTOM_MOW, MOVE_LEAF_STORM},
+};
+static const char *const sRotomFormNames[] = {"Rotom-Heat", "Rotom-Wash", "Rotom-Frost", "Rotom-Fan", "Rotom-Mow"};
+
+static void SetMoves(struct Pokemon *mon, u16 a, u16 b, u16 c, u16 d)
+{
+    u16 moves[MAX_MON_MOVES] = {a, b, c, d};
+
+    for (u32 i = 0; i < MAX_MON_MOVES; i++)
+        SetMonMoveSlot(mon, moves[i], i);
+}
+
+static bool32 MovesAre(struct Pokemon *mon, u16 a, u16 b, u16 c, u16 d)
+{
+    u16 moves[MAX_MON_MOVES] = {a, b, c, d};
+
+    for (u32 i = 0; i < MAX_MON_MOVES; i++)
+    {
+        if (GetMonData(mon, MON_DATA_MOVE1 + i) != moves[i])
+            return FALSE;
+    }
+    return TRUE;
+}
+
+// The catalog's change on its own: the species set, the other forms' moves gone, the move the game then teaches given
+// as the party menu gives it (FormChangeTeachMove: into the first free slot; knowing four moves, the question to make
+// room, answered NO here: nothing learned). Returns that move.
+static u16 CatalogChange(struct Pokemon *mon, u16 to)
+{
+    u16 move;
+
+    SetMonData(mon, MON_DATA_SPECIES, &to);
+    move = RotomCatalog_UpdateFormMove(mon);
+    if (move != MOVE_NONE)
+        GiveMoveToMon(mon, move);
+    return move;
+}
+
+static void TestFormMoves(void)
+{
+    struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][0];
+    struct BoxPokemon *box;
+    struct MoveSwitchSource source;
+    u16 list[MAX_RELEARNER_MOVES];
+    char what[160];
+
+    Setup();
+    gRelearnMode = RELEARN_MODE_PARTY_MENU;
+    box = Lead(SPECIES_ROTOM, 50, FALSE);
+    KnowOnlySplash(box);
+    for (u32 f = 0; f < ARRAY_COUNT(sRotomForms); f++)
+    {
+        snprintf(what, sizeof(what), "Rotom (Normal): %s not on its level-up list", Ascii(GetMoveName(sRotomForms[f][1])));
+        Expect(what, !ListHas(box, MOVE_RELEARNER_LEVEL_UP_MOVES, sRotomForms[f][1]));
+    }
+    for (u32 f = 0; f < ARRAY_COUNT(sRotomForms); f++)
+    {
+        u32 count;
+        bool32 others = FALSE;
+
+        box = Lead(sRotomForms[f][0], 50, FALSE);
+        KnowOnlySplash(box);
+        count = MoveRelearner_GetListMoves(box, MOVE_RELEARNER_LEVEL_UP_MOVES, list);
+        for (u32 g = 0; g < ARRAY_COUNT(sRotomForms); g++)
+        {
+            if (g != f && ListHas(box, MOVE_RELEARNER_LEVEL_UP_MOVES, sRotomForms[g][1]))
+                others = TRUE;
+        }
+        snprintf(what, sizeof(what), "%s: %s first on the level-up list, tagged as its form's, switchable back in",
+                 sRotomFormNames[f], Ascii(GetMoveName(sRotomForms[f][1])));
+        Expect(what, count > 0 && list[0] == sRotomForms[f][1]
+               && MoveRelearner_GetSource(box, MOVE_RELEARNER_LEVEL_UP_MOVES, list[0], &source)
+               && source.kind == MOVE_SOURCE_FORM && source.species == sRotomForms[f][0]
+               && MoveRelearner_CanSwitchBackIn(box, sRotomForms[f][1]));
+        snprintf(what, sizeof(what), "%s: no other form's move on its level-up list", sRotomFormNames[f]);
+        Expect(what, !others);
+        SetMoves(mon, MOVE_SPLASH, sRotomForms[f][1], MOVE_NONE, MOVE_NONE);
+        snprintf(what, sizeof(what), "%s knowing its move: not on the list again", sRotomFormNames[f]);
+        Expect(what, !ListHas(box, MOVE_RELEARNER_LEVEL_UP_MOVES, sRotomForms[f][1]));
+    }
+
+    // The catalog's changes (party_menu.c RotomCatalog_UpdateFormMove)
+    Lead(SPECIES_ROTOM_HEAT, 50, FALSE);
+    SetMoves(mon, MOVE_THUNDER_SHOCK, MOVE_THUNDER_WAVE, MOVE_OVERHEAT, MOVE_CONFUSE_RAY);
+    CatalogChange(mon, SPECIES_ROTOM_WASH);
+    Expect("Heat > Wash with Overheat in the third slot: Hydro Pump in its place, the other three as they were",
+           MovesAre(mon, MOVE_THUNDER_SHOCK, MOVE_THUNDER_WAVE, MOVE_HYDRO_PUMP, MOVE_CONFUSE_RAY)
+           && GetMonData(mon, MON_DATA_PP3) == GetMovePP(MOVE_HYDRO_PUMP));
+    Lead(SPECIES_ROTOM, 50, FALSE);
+    SetMoves(mon, MOVE_THUNDER_SHOCK, MOVE_THUNDER_WAVE, MOVE_NONE, MOVE_NONE);
+    CatalogChange(mon, SPECIES_ROTOM_FROST);
+    Expect("Normal > Frost with two moves: Blizzard into the free slot",
+           MovesAre(mon, MOVE_THUNDER_SHOCK, MOVE_THUNDER_WAVE, MOVE_BLIZZARD, MOVE_NONE));
+    Lead(SPECIES_ROTOM_FROST, 50, FALSE);
+    SetMoves(mon, MOVE_THUNDER_SHOCK, MOVE_THUNDER_WAVE, MOVE_CONFUSE_RAY, MOVE_SHOCK_WAVE);
+    Expect("Frost > Mow knowing four moves, none a form's: asked to make room (NO): no move goes; Leaf Storm on the list",
+           CatalogChange(mon, SPECIES_ROTOM_MOW) == MOVE_LEAF_STORM
+           && MovesAre(mon, MOVE_THUNDER_SHOCK, MOVE_THUNDER_WAVE, MOVE_CONFUSE_RAY, MOVE_SHOCK_WAVE)
+           && LevelUpOffers(&mon->box, MOVE_LEAF_STORM) && !ListHas(&mon->box, MOVE_RELEARNER_LEVEL_UP_MOVES, MOVE_BLIZZARD));
+    {
+        // its bytes copied, as a save or a trade copies them: the list is the form's (nothing else is kept for it)
+        struct BoxPokemon copy = mon->box;
+
+        Expect("... its bytes copied (a save's, a trade's): Leaf Storm still on the list",
+               LevelUpOffers(&copy, MOVE_LEAF_STORM) && MoveRelearner_CanSwitchBackIn(&copy, MOVE_LEAF_STORM));
+    }
+    Lead(SPECIES_ROTOM_HEAT, 50, FALSE);
+    SetMoves(mon, MOVE_THUNDER_SHOCK, MOVE_OVERHEAT, MOVE_AIR_SLASH, MOVE_CONFUSE_RAY);
+    CatalogChange(mon, SPECIES_ROTOM_WASH);
+    Expect("Heat > Wash knowing Air Slash too (not a Heat Rotom's move): Hydro Pump in Overheat's place, Air Slash gone",
+           MovesAre(mon, MOVE_THUNDER_SHOCK, MOVE_HYDRO_PUMP, MOVE_CONFUSE_RAY, MOVE_NONE));
+    Lead(SPECIES_ROTOM_FAN, 50, FALSE);
+    SetMoves(mon, MOVE_AIR_SLASH, MOVE_THUNDER_WAVE, MOVE_CONFUSE_RAY, MOVE_NONE);
+    CatalogChange(mon, SPECIES_ROTOM);
+    Expect("Fan > Normal with Air Slash first: Air Slash gone, the others moved up, no appliance move on the list",
+           MovesAre(mon, MOVE_THUNDER_WAVE, MOVE_CONFUSE_RAY, MOVE_NONE, MOVE_NONE)
+           && !ListHas(&mon->box, MOVE_RELEARNER_LEVEL_UP_MOVES, MOVE_AIR_SLASH));
+    Lead(SPECIES_ROTOM_WASH, 50, FALSE);
+    SetMoves(mon, MOVE_HYDRO_PUMP, MOVE_NONE, MOVE_NONE, MOVE_NONE);
+    CatalogChange(mon, SPECIES_ROTOM);
+    Expect("Wash > Normal knowing Hydro Pump alone: Thunder Shock (Rotom knows a move)",
+           MovesAre(mon, MOVE_THUNDER_SHOCK, MOVE_NONE, MOVE_NONE, MOVE_NONE));
+    Lead(SPECIES_ROTOM_HEAT, 50, FALSE);
+    SetMoves(mon, MOVE_OVERHEAT, MOVE_BLIZZARD, MOVE_THUNDER_WAVE, MOVE_NONE);
+    CatalogChange(mon, SPECIES_ROTOM_FROST);
+    Expect("Heat > Frost already knowing Blizzard (a TM's): Overheat gone, Blizzard kept once",
+           MovesAre(mon, MOVE_BLIZZARD, MOVE_THUNDER_WAVE, MOVE_NONE, MOVE_NONE));
+    // every form in turn, the move equipped all the way: each in the same slot, the other three untouched
+    Lead(SPECIES_ROTOM, 50, FALSE);
+    SetMoves(mon, MOVE_THUNDER_SHOCK, MOVE_THUNDER_WAVE, MOVE_CONFUSE_RAY, MOVE_NONE);
+    {
+        bool32 ok = TRUE;
+
+        for (u32 round = 0; round < 2; round++)
+        {
+            for (u32 f = 0; f < ARRAY_COUNT(sRotomForms); f++)
+            {
+                CatalogChange(mon, sRotomForms[f][0]);
+                ok = ok && MovesAre(mon, MOVE_THUNDER_SHOCK, MOVE_THUNDER_WAVE, MOVE_CONFUSE_RAY, sRotomForms[f][1]);
+            }
+        }
+        CatalogChange(mon, SPECIES_ROTOM);
+        ok = ok && MovesAre(mon, MOVE_THUNDER_SHOCK, MOVE_THUNDER_WAVE, MOVE_CONFUSE_RAY, MOVE_NONE);
+        Expect("Heat > Wash > Frost > Fan > Mow, twice, then Normal: each form's move in the fourth slot, then none", ok);
+    }
+    gRelearnMode = RELEARN_MODE_NONE;
+}
+
+// Every move a form change teaches (the catalog's, the fusions'; src/data/pokemon/form_change_tables.h): on that
+// form's level-up list at Lv 100 and switchable back in, so none is lost for good once switched out
+static const u16 sFormChangeMoves[][2] =
+{
+    {SPECIES_ROTOM_HEAT, MOVE_OVERHEAT}, {SPECIES_ROTOM_WASH, MOVE_HYDRO_PUMP}, {SPECIES_ROTOM_FROST, MOVE_BLIZZARD},
+    {SPECIES_ROTOM_FAN, MOVE_AIR_SLASH}, {SPECIES_ROTOM_MOW, MOVE_LEAF_STORM},
+    {SPECIES_NECROZMA_DUSK_MANE, MOVE_SUNSTEEL_STRIKE}, {SPECIES_NECROZMA_DAWN_WINGS, MOVE_MOONGEIST_BEAM},
+    {SPECIES_CALYREX_ICE, MOVE_GLACIAL_LANCE}, {SPECIES_CALYREX_SHADOW, MOVE_ASTRAL_BARRAGE},
+    {SPECIES_KYUREM_BLACK, MOVE_FUSION_BOLT}, {SPECIES_KYUREM_BLACK, MOVE_FREEZE_SHOCK},
+    {SPECIES_KYUREM_WHITE, MOVE_FUSION_FLARE}, {SPECIES_KYUREM_WHITE, MOVE_ICE_BURN},
+};
+
+// The moves' battle data, as Gen 6 has them (this game's moves): type, category, power, accuracy, PP
+static const struct { u16 move; u8 type, category, power, accuracy, pp; } sFormMoveData[] =
+{
+    {MOVE_OVERHEAT,        TYPE_FIRE,   DAMAGE_CATEGORY_SPECIAL,  130, 90,  5},
+    {MOVE_HYDRO_PUMP,      TYPE_WATER,  DAMAGE_CATEGORY_SPECIAL,  110, 80,  5},
+    {MOVE_BLIZZARD,        TYPE_ICE,    DAMAGE_CATEGORY_SPECIAL,  110, 70,  5},
+    {MOVE_AIR_SLASH,       TYPE_FLYING, DAMAGE_CATEGORY_SPECIAL,   75, 95, 15},
+    {MOVE_LEAF_STORM,      TYPE_GRASS,  DAMAGE_CATEGORY_SPECIAL,  130, 90,  5},
+    {MOVE_SUNSTEEL_STRIKE, TYPE_STEEL,  DAMAGE_CATEGORY_PHYSICAL, 100, 100, 5},
+    {MOVE_MOONGEIST_BEAM,  TYPE_GHOST,  DAMAGE_CATEGORY_SPECIAL,  100, 100, 5},
+};
+
+static void TestFormChangeMoves(void)
+{
+    u32 checked = 0, missing = 0, wrong = 0;
+
+    for (u32 i = 0; i < ARRAY_COUNT(sFormMoveData); i++)
+    {
+        u16 move = sFormMoveData[i].move;
+
+        if (GetMoveType(move) != sFormMoveData[i].type || GetMoveCategory(move) != sFormMoveData[i].category
+         || GetMovePower(move) != sFormMoveData[i].power || GetMoveAccuracy(move) != sFormMoveData[i].accuracy
+         || GetMovePP(move) != sFormMoveData[i].pp)
+        {
+            wrong++;
+            printf("     %s: type %u category %u power %u accuracy %u PP %u\n", Ascii(GetMoveName(move)),
+                   (unsigned)GetMoveType(move), (unsigned)GetMoveCategory(move), (unsigned)GetMovePower(move),
+                   (unsigned)GetMoveAccuracy(move), (unsigned)GetMovePP(move));
+        }
+    }
+    Expect("the forms' moves' battle data as Gen 6's (Overheat 130/90/5 Fire, Hydro Pump 110/80/5 Water, Blizzard "
+           "110/70/5 Ice, Air Slash 75/95/15 Flying, Leaf Storm 130/90/5 Grass; Sunsteel Strike, Moongeist Beam)",
+           wrong == 0);
+
+    Setup();
+    gRelearnMode = RELEARN_MODE_PARTY_MENU;
+    for (u32 i = 0; i < ARRAY_COUNT(sFormChangeMoves); i++)
+    {
+        struct BoxPokemon *box;
+
+        if (!IsSpeciesEnabled(sFormChangeMoves[i][0]))
+            continue;
+        box = Lead(sFormChangeMoves[i][0], 100, FALSE);
+        KnowOnlySplash(box);
+        checked++;
+        if (!LevelUpOffers(box, sFormChangeMoves[i][1]))
+        {
+            missing++;
+            printf("     %s:", Ascii(GetSpeciesName(sFormChangeMoves[i][0])));
+            printf(" %s not on its level-up list\n", Ascii(GetMoveName(sFormChangeMoves[i][1])));
+        }
+    }
+    printf("     %u moves of form changes checked\n", (unsigned)checked);
+    Expect("every move a form change teaches (Rotom, Necrozma, Calyrex, Kyurem): on that form's level-up list",
+           checked > 0 && missing == 0);
+    gRelearnMode = RELEARN_MODE_NONE;
+}
+
+// ------------------------------------------- Mewtwo (the owner's case) and every species and form (the audit)
+
+static void TestMewtwo(void)
+{
+    struct BoxPokemon *mon;
+
+    Setup();
+    gRelearnMode = RELEARN_MODE_PARTY_MENU;
+    mon = Lead(SPECIES_MEWTWO, 70, FALSE);
+    KnowOnlySplash(mon);
+    Expect("Mewtwo Lv 70 (this game's learnset, Gen 6): Recover (Lv 50), Barrier (Lv 64), Aura Sphere (Lv 70) offered",
+           LevelUpOffers(mon, MOVE_RECOVER) && LevelUpOffers(mon, MOVE_BARRIER) && LevelUpOffers(mon, MOVE_AURA_SPHERE));
+    Expect("Mewtwo Lv 70: Mist (Lv 86) and Psystrike (Lv 100) not yet",
+           !ListHas(mon, MOVE_RELEARNER_LEVEL_UP_MOVES, MOVE_MIST) && !ListHas(mon, MOVE_RELEARNER_LEVEL_UP_MOVES, MOVE_PSYSTRIKE));
+    Expect("Mewtwo Lv 70: Calm Mind is no level-up move of it (TM04 only)",
+           !ListHas(mon, MOVE_RELEARNER_LEVEL_UP_MOVES, MOVE_CALM_MIND));
+    Expect("... and without TM04 not on the TM list", !ListHas(mon, MOVE_RELEARNER_TM_MOVES, MOVE_CALM_MIND));
+    AddBagItem(ITEM_TM_CALM_MIND, 1);
+    Expect("... with TM04 in the Bag: on the TM list", ListHas(mon, MOVE_RELEARNER_TM_MOVES, MOVE_CALM_MIND));
+    mon = Lead(SPECIES_MEWTWO, 86, FALSE);
+    KnowOnlySplash(mon);
+    Expect("Mewtwo Lv 86: Mist offered", LevelUpOffers(mon, MOVE_MIST));
+    gRelearnMode = RELEARN_MODE_NONE;
+}
+
+static bool32 LearnsByLevelUpTo(u32 species, enum Move move, u32 level)
+{
+    const struct LevelUpMove *learnset = GetSpeciesLevelUpLearnset(species);
+
+    for (u32 i = 0; learnset[i].move != LEVEL_UP_MOVE_END; i++)
+    {
+        if (learnset[i].move == move && learnset[i].level <= level)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+// Every enabled species and form at levels 1, 5, 50 and 100, knowing Splash alone: its learnset in level order with
+// real moves; the level-up list never full (nothing cut off), with real moves each once, every move of its own learnset
+// to its level on it, and nothing on it that neither it nor an earlier form learns by that level (or its form's move)
+static void TestAllSpecies(void)
+{
+    static const u8 sLevels[] = {1, 5, 50, 100};
+    u32 audited = 0, unsorted = 0, badData = 0, full = 0, missing = 0, early = 0, invalid = 0, longest = 0;
+    u32 longestSpecies = SPECIES_NONE;
+    u16 list[MAX_RELEARNER_MOVES];
+
+    Setup();
+    gRelearnMode = RELEARN_MODE_PARTY_MENU;
+    for (u32 species = 1; species < NUM_SPECIES; species++)
+    {
+        const struct LevelUpMove *learnset;
+        u32 last = 0;
+
+        if (!IsSpeciesEnabled(species) || species == SPECIES_EGG)
+            continue;
+        learnset = GetSpeciesLevelUpLearnset(species);
+        audited++;
+        for (u32 i = 0; learnset[i].move != LEVEL_UP_MOVE_END; i++)
+        {
+            if (learnset[i].move == MOVE_NONE || learnset[i].move >= MOVES_COUNT || learnset[i].level > MAX_LEVEL)
+            {
+                if (badData++ < 5)
+                    printf("note %s: learnset entry %u move %u level %u\n", Ascii(GetSpeciesName(species)), i,
+                           learnset[i].move, learnset[i].level);
+            }
+            if (learnset[i].level < last && unsorted++ < 5)
+                printf("note %s: learnset entry %u (move %u) at Lv %u after Lv %u\n", Ascii(GetSpeciesName(species)), i,
+                       learnset[i].move, learnset[i].level, last);
+            last = max(last, learnset[i].level);
+        }
+        for (u32 l = 0; l < ARRAY_COUNT(sLevels); l++)
+        {
+            struct BoxPokemon *mon = Lead(species, sLevels[l], FALSE);
+            u32 count;
+            enum Move formMove = MoveRelearner_FormMove(species);
+
+            KnowOnlySplash(mon);
+            count = MoveRelearner_GetListMoves(mon, MOVE_RELEARNER_LEVEL_UP_MOVES, list);
+            if (count > longest)
+            {
+                longest = count;
+                longestSpecies = species;
+            }
+            if (count >= MAX_RELEARNER_MOVES && full++ < 5)
+                printf("note %s Lv %u: the level-up list is full (%u): moves cut off\n", Ascii(GetSpeciesName(species)),
+                       sLevels[l], count);
+            for (u32 i = 0; i < count; i++)
+            {
+                bool32 earned = list[i] == formMove;
+
+                for (u32 j = 0; j < i; j++)
+                {
+                    if (list[j] == list[i])
+                        earned = FALSE, invalid++;
+                }
+                if (list[i] == MOVE_NONE || list[i] >= MOVES_COUNT)
+                {
+                    invalid++;
+                    continue;
+                }
+                for (u32 stage = species; !earned && stage != SPECIES_NONE; stage = GetSpeciesPreEvolution(stage))
+                    earned = LearnsByLevelUpTo(stage, list[i], sLevels[l]);
+                if (!earned && early++ < 5)
+                    printf("note %s Lv %u: move %u on the list, learned later than that\n", Ascii(GetSpeciesName(species)),
+                           sLevels[l], list[i]);
+            }
+            for (u32 i = 0; learnset[i].move != LEVEL_UP_MOVE_END; i++)
+            {
+                bool32 there = learnset[i].move == MOVE_SPLASH;
+
+                if (learnset[i].level > sLevels[l])
+                    continue;
+                for (u32 j = 0; j < count && !there; j++)
+                    there = list[j] == learnset[i].move;
+                if (!there && missing++ < 5)
+                    printf("note %s Lv %u: its Lv %u move %u missing from the list\n", Ascii(GetSpeciesName(species)),
+                           sLevels[l], learnset[i].level, learnset[i].move);
+            }
+        }
+    }
+    printf("audit: %u species and forms at 4 levels; the longest level-up list %u moves (%s), the limit %u\n", audited,
+           longest, Ascii(GetSpeciesName(longestSpecies)), MAX_RELEARNER_MOVES);
+    Expect("every species and form: its learnset's moves real, levels 0 to 100", badData == 0);
+    Expect("every species and form: its learnset in level order", unsorted == 0);
+    Expect("every species and form at Lv 1, 5, 50, 100: the level-up list never full (no move cut off)", full == 0);
+    Expect("... every move of its own learnset to its level on the list", missing == 0);
+    Expect("... nothing on it learned only later (by it or an earlier form), but its form's move", early == 0);
+    Expect("... real moves, each once", invalid == 0);
+    gRelearnMode = RELEARN_MODE_NONE;
+}
+
 int NativeSelfTest_MoveSwitch(void)
 {
     printf("selftest-move-switch: move switching as in Legends Z-A (MOVES, the summary's relearner)\n");
@@ -648,6 +1003,10 @@ int NativeSelfTest_MoveSwitch(void)
     TestHms();
     TestWarnings();
     TestPlaces();
+    TestFormMoves();
+    TestFormChangeMoves();
+    TestMewtwo();
+    TestAllSpecies();
     printf("selftest-move-switch: %d checks, %d failed\n", sChecks, sFailures);
     return sFailures == 0 ? 0 : 1;
 }

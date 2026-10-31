@@ -41,6 +41,13 @@ level-up moves it learned before), caught (not hatched) unless a step says other
  10. lists-lr   TM03 in the Bag and the Sootopolis tutor used: R, R, L, L go level-up > TM > tutor > TM > level-up
  11. charmeleon a caught level-20 Charmeleon: its level-up list has Scratch but no Scary Face (Charmander learns it at
                 Lv 19, after it evolved at Lv 16; Charmeleon's own is Lv 21) - the pre-evolution cap
+ 12. rotom-wash a level-50 Rotom-Wash knowing Thunder Shock, Thunder Wave, Confuse Ray and Shock Wave, no Hydro Pump (the
+                owner's report of 2026-10-31): its level-up list has Hydro Pump first (its form's move) and none of the
+                other forms' moves; Hydro Pump taught over Thunder Shock: Hydro Pump at 5/5
+ 13. mewtwo     a caught level-70 Mewtwo knowing only Confusion (the owner's case; this game's learnsets are Gen 6's): its
+                level-up list has Recover (Lv 50), Barrier (Lv 64) and Aura Sphere (Lv 70), not Mist (Lv 86) or
+                Psystrike (Lv 100); no Calm Mind (TM04 only, not in the Bag)
+ 14. mewtwo-tm  the same Mewtwo with TM04 (Calm Mind) in the Bag: SELECT goes to the TM moves, Calm Mind among them
 
     tools/battle_env/move_switch_check.py --exe ./pokeemerald-mp-bfxtest --save town.sav --out build/move-switch-check
 
@@ -60,6 +67,12 @@ ITEM_TM03, ITEM_HM03 = 584, 684             # Water Pulse, Surf (include/constan
 MOVE_TACKLE, MOVE_MUD_SLAP, MOVE_WATER_PULSE = 33, 189, 352
 MOVE_DOUBLE_EDGE, MOVE_SURF, MOVE_SNORE, MOVE_REFRESH = 38, 57, 173, 287
 MOVE_SCRATCH, MOVE_SCARY_FACE = 10, 184
+SPECIES_ROTOM_WASH, SPECIES_MEWTWO = 1065, 150
+MOVE_THUNDER_SHOCK, MOVE_THUNDER_WAVE, MOVE_CONFUSE_RAY, MOVE_SHOCK_WAVE, MOVE_HYDRO_PUMP = 84, 86, 109, 351, 56
+FORM_MOVES = {315: "Overheat", 59: "Blizzard", 403: "Air Slash", 437: "Leaf Storm"}   # the other Rotom forms' moves
+MOVE_CONFUSION, MOVE_RECOVER, MOVE_BARRIER, MOVE_AURA_SPHERE, MOVE_MIST, MOVE_PSYSTRIKE = 93, 105, 112, 396, 54, 540
+MOVE_CALM_MIND, ITEM_TM04 = 347, 585
+HYDRO_PUMP_PP = 5
 LIST_LEVEL_UP, LIST_EGG, LIST_TM, LIST_TUTOR = 0, 1, 2, 3   # enum MoveRelearnerStates
 TACKLE_PP, WATER_PULSE_PP, DOUBLE_EDGE_PP, REFRESH_PP = 35, 20, 15, 20
 SNORE_PP_MAX = 24                           # 15 with a PP Max (p3: the first slot's two bits)
@@ -277,6 +290,36 @@ def main():
     lists = steps[-1]["lists"]
     if not lists or lists[0][0] != LIST_LEVEL_UP or MOVE_SCRATCH not in lists[0][2] or MOVE_SCARY_FACE in lists[0][2]:
         problems.append(f"charmeleon: its level-up list {lists[:1]}: not Scratch without Scary Face")
+    # 12. a Rotom-Wash without Hydro Pump: its form's move first on the level-up list, taught over Thunder Shock
+    rotom = ".".join(str(m) for m in (MOVE_THUNDER_SHOCK, MOVE_THUNDER_WAVE, MOVE_CONFUSE_RAY, MOVE_SHOCK_WAVE))
+    _, moves, _ = step("rotom-wash", args.save, 1900, OPEN + TEACH,
+                       dict(PKMN_TEST_PARTY=f"{SPECIES_ROTOM_WASH}:50:V{rotom}"), shots="450,1010,1100,1700")
+    lists = steps[-1]["lists"]
+    if not lists or lists[0][0] != LIST_LEVEL_UP or lists[0][2][:1] != [MOVE_HYDRO_PUMP]:
+        problems.append(f"rotom-wash: its level-up list {lists[:1]}: not Hydro Pump first")
+    others = sorted({FORM_MOVES[m] for _, _, shown in lists for m in shown if m in FORM_MOVES})
+    if others:
+        problems.append(f"rotom-wash: other forms' moves on its lists: {others}")
+    if not moves or moves[0][1][0][0] != MOVE_THUNDER_SHOCK:
+        problems.append(f"rotom-wash: the lead's moves before the keys {moves[:1]}, not Thunder Shock first")
+    first_slot("rotom-wash", moves, (MOVE_HYDRO_PUMP, HYDRO_PUMP_PP, HYDRO_PUMP_PP))
+    # 13. a level-70 Mewtwo knowing Confusion alone: the moves of its learnset to Lv 70, none later
+    mewtwo = dict(PKMN_TEST_PARTY=f"{SPECIES_MEWTWO}:70:V{MOVE_CONFUSION}.0.0.0")
+    step("mewtwo", args.save, 900, OPEN + OUT, mewtwo, shots="450", forgets=False, leaves=True)
+    lists = steps[-1]["lists"]
+    shown = lists[0][2] if lists and lists[0][0] == LIST_LEVEL_UP else []
+    missing = [m for m in (MOVE_RECOVER, MOVE_BARRIER, MOVE_AURA_SPHERE) if m not in shown]
+    early = [m for m in (MOVE_MIST, MOVE_PSYSTRIKE, MOVE_CALM_MIND) if m in shown]
+    if not shown or missing or early:
+        problems.append(f"mewtwo: its level-up list {lists[:1]}: missing {missing}, too early {early}")
+    if any(MOVE_CALM_MIND in moves_shown for _, _, moves_shown in lists):
+        problems.append(f"mewtwo: Calm Mind offered without TM04: {lists}")
+    # 14. TM04 in the Bag: SELECT to the TM moves, Calm Mind there
+    step("mewtwo-tm", args.save, 1000, OPEN + ["480:SELECT", "600:B", "700:A"],
+         dict(mewtwo, PKMN_TEST_BAG=f"{ITEM_TM04}:1"), shots="450,560", forgets=False, leaves=True)
+    lists = steps[-1]["lists"]
+    if not any(kind == LIST_TM and MOVE_CALM_MIND in shown for kind, _, shown in lists):
+        problems.append(f"mewtwo-tm: no TM list with Calm Mind: {lists}")
 
     report = dict(steps=steps, problems=problems, passed=not problems)
     with open(os.path.join(args.out, "move_switch_check.json"), "w") as out:

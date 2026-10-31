@@ -1444,13 +1444,47 @@ static bool32 FindLevelUpSourceIn(const u16 *stages, const u8 *caps, u32 count, 
     return FALSE;
 }
 
-// The level-up list: every move of those forms within their caps that the Pokemon does not know, each once, in level
-// order (a pre-evolution's move among the Pokemon's own at its level; level 0, learned on evolving, first)
+// A form's own move (the owner's report of 2026-10-31: Rotom-Wash had no Hydro Pump to take): these forms share their
+// base form's learnset, and the game teaches their moves only as the form changes (Rotom's appliances by the catalog,
+// party_menu.c; Necrozma's fusions by the N-Solarizer and N-Lunarizer), so one that did not learn it then, or let it
+// go, had no way back to it. Each is on the level-up list of that form, never another's. (Kyurem's and Calyrex's fused
+// forms have the moves their fusions teach in learnsets of their own.)
+static const u16 sFormMoves[][2] =
+{
+    {SPECIES_ROTOM_HEAT,  MOVE_OVERHEAT},
+    {SPECIES_ROTOM_WASH,  MOVE_HYDRO_PUMP},
+    {SPECIES_ROTOM_FROST, MOVE_BLIZZARD},
+    {SPECIES_ROTOM_FAN,   MOVE_AIR_SLASH},
+    {SPECIES_ROTOM_MOW,   MOVE_LEAF_STORM},
+    {SPECIES_NECROZMA_DUSK_MANE,  MOVE_SUNSTEEL_STRIKE},
+    {SPECIES_NECROZMA_DAWN_WINGS, MOVE_MOONGEIST_BEAM},
+};
+
+enum Move MoveRelearner_FormMove(enum Species species)
+{
+    for (u32 i = 0; i < ARRAY_COUNT(sFormMoves); i++)
+    {
+        if (sFormMoves[i][0] == species)
+            return sFormMoves[i][1];
+    }
+    return MOVE_NONE;
+}
+
+// The level-up list: the form's own move (first, as a move learned on evolving), then every move of those forms within
+// their caps that the Pokemon does not know, each once, in level order (a pre-evolution's move among the Pokemon's own
+// at its level; level 0, learned on evolving, first)
 static u32 GetSwitchableLevelUpMoves(struct BoxPokemon *mon, u16 *moves)
 {
     u16 stages[MAX_SWITCH_STAGES];
     u8 caps[MAX_SWITCH_STAGES], levels[MAX_RELEARNER_MOVES];
     u32 count = GetLevelUpStages(mon, stages, caps, NULL), numMoves = 0;
+    enum Move formMove = MoveRelearner_FormMove(GetBoxMonData(mon, MON_DATA_SPECIES));
+
+    if (formMove != MOVE_NONE && !BoxMonKnowsMove(mon, formMove))
+    {
+        moves[numMoves] = formMove;
+        levels[numMoves++] = 0;
+    }
 
     for (u32 s = 0; s < count; s++)
     {
@@ -1498,6 +1532,12 @@ static bool32 GetSourceIn(const u16 *stages, const u8 *caps, u32 count, u32 form
     switch (list)
     {
     case MOVE_RELEARNER_LEVEL_UP_MOVES:
+        if (count > 0 && move != MOVE_NONE && MoveRelearner_FormMove(stages[0]) == move)
+        {
+            out->kind = MOVE_SOURCE_FORM;
+            out->species = stages[0];
+            return TRUE;
+        }
         if (!FindLevelUpSourceIn(stages, caps, count, move, &out->number, &out->species))
             return FALSE;
         out->kind = MOVE_SOURCE_LEVEL;
@@ -1571,6 +1611,8 @@ u8 *MoveRelearner_SourceText(const struct MoveSwitchSource *source, u8 *dst, boo
         return StringCopy(dst, COMPOUND_STRING("Egg"));
     case MOVE_SOURCE_TUTOR:
         return StringCopy(dst, COMPOUND_STRING("Tutor"));
+    case MOVE_SOURCE_FORM:
+        return StringCopy(dst, COMPOUND_STRING("Form"));
     default:
         *dst = EOS;
         return dst;
@@ -1699,7 +1741,8 @@ bool32 MoveRelearner_CanSwitchBackIn(struct BoxPokemon *boxMon, enum Move move)
 
     if (move == MOVE_NONE || GetBoxMonData(boxMon, MON_DATA_IS_EGG))
         return FALSE;
-    if (IsLevelUpMoveRelearnerActive() && FindLevelUpSource(boxMon, move, NULL, NULL))
+    if (IsLevelUpMoveRelearnerActive()
+     && (MoveRelearner_FormMove(species) == move || FindLevelUpSource(boxMon, move, NULL, NULL)))
         return TRUE;
     if (IsEggMoveRelearnerActive() && HatchedFromEgg(boxMon))
     {

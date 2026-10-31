@@ -6939,6 +6939,19 @@ static void Task_TryItemUseFormChange(u8 taskId)
     case 4:
         if (!IsPartyMenuTextPrinterActive())
         {
+#ifdef PORTABLE
+            // PC (the owner's report of 2026-10-31): the new form's move takes the slot of the form's move it replaces
+            // and stays on the Switch Moves list whatever the player answers (RotomCatalog_UpdateFormMove)
+            if (gSpecialVar_ItemId == ITEM_ROTOM_CATALOG)
+            {
+                enum Move move = RotomCatalog_UpdateFormMove(mon);
+
+                if (move != MOVE_NONE)
+                    FormChangeTeachMove(taskId, move, gPartyMenu.slotId);
+            }
+            else
+#endif
+#line 6804 // gba-line
             if (gSpecialVar_ItemId == ITEM_ROTOM_CATALOG) //only for Rotom currently
             {
                 u32 i;
@@ -9297,6 +9310,53 @@ bool32 RotomCatalog_IsRotom(struct Pokemon *mon)
 {
     return GetMonData(mon, MON_DATA_SPECIES_OR_EGG) != SPECIES_EGG
         && GET_BASE_SPECIES_ID(GetMonData(mon, MON_DATA_SPECIES)) == SPECIES_ROTOM;
+}
+
+// The form's own move by the Switch Moves rules (the owner's report of 2026-10-31: no Hydro Pump to take for a
+// Rotom-Wash). As the game does, every other form's move goes and the new form's is taught with the party menu's own
+// lines ("Rotom learned Hydro Pump!"; knowing four moves, none of them a form's, the question to make room). On PC the
+// new move takes the slot of the form's move it replaces (the game put it last), and a form's move known already stays
+// where it is (the game deleted it and taught it again). Whatever the player answers, the move is on the Switch Moves
+// level-up list whenever Rotom is in that form (move_relearner.c MoveRelearner_FormMove). Back to Rotom, Thunder Shock
+// as the game does it (before Gen 9 only when Rotom would know no move). Returns the move to teach, or MOVE_NONE.
+enum Move RotomCatalog_UpdateFormMove(struct Pokemon *mon)
+{
+    enum Move own = MoveRelearner_FormMove(GetMonData(mon, MON_DATA_SPECIES));
+    enum Move teach = own, replaced = MOVE_NONE;
+    u32 i, j, slot = 0;
+
+    // the first other form's move known (as a rule, the one of the form left) is the one the new move replaces
+    for (i = 0; i < MAX_MON_MOVES && replaced == MOVE_NONE; i++)
+    {
+        for (j = 0; j < ARRAY_COUNT(sRotomFormChangeMoves); j++)
+        {
+            if (GetMonData(mon, MON_DATA_MOVE1 + i) == sRotomFormChangeMoves[j] && sRotomFormChangeMoves[j] != own)
+            {
+                replaced = sRotomFormChangeMoves[j];
+                slot = i;
+            }
+        }
+    }
+    for (j = 0; j < ARRAY_COUNT(sRotomFormChangeMoves); j++)
+    {
+        if (sRotomFormChangeMoves[j] != own && sRotomFormChangeMoves[j] != replaced)
+            DeleteMove(mon, sRotomFormChangeMoves[j]);
+    }
+    if (teach != MOVE_NONE && MonKnowsMove(mon, teach))
+        teach = MOVE_NONE;      // known already (a TM's Blizzard): it stays where it is
+    if (replaced != MOVE_NONE && teach != MOVE_NONE)
+    {
+        // cleared where it is (the moves before it filled): the new move is taught into this, the first free slot
+        RemoveMonPPBonus(mon, slot);
+        SetMonMoveSlot(mon, MOVE_NONE, slot);
+    }
+    else if (replaced != MOVE_NONE)
+    {
+        DeleteMove(mon, replaced);
+    }
+    if (own == MOVE_NONE && (I_ROTOM_CATALOG_THUNDER_SHOCK >= GEN_9 || !DoesMonHaveAnyMoves(mon)))
+        teach = ROTOM_BASE_MOVE;
+    return teach;
 }
 
 // The catalog's choice (gSpecialVar_Result, 0 to 5) as the form's name
