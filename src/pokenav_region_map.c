@@ -16,6 +16,10 @@
 #include "task.h"
 #include "text_window.h"
 #include "window.h"
+#ifdef PORTABLE
+#include "item_use.h"
+#endif
+#line 19 // gba-line
 #include "constants/rgb.h"
 #include "constants/songs.h"
 #include "constants/region_map_sections.h"
@@ -503,6 +507,10 @@ static u32 LoopedTask_TreatAsPokeNavFlyMap(s32 taskState)
     case 0:
         PlaySE(SE_SELECT);
         struct RegionMap* regionMap = GetSubstructPtr(POKENAV_SUBSTRUCT_REGION_MAP);
+#ifdef PORTABLE
+        FlyFromMap_SetUpUser();   // PC: the party's first Pokemon that knows Fly, else the PC boxes' (item_use.c)
+#endif
+#line 502 // gba-line
         SetFlyDestination(regionMap);
         gSkipShowMonAnim = TRUE;
         ReturnToFieldFromFlyMapSelect();

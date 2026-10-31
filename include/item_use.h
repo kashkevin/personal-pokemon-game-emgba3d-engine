@@ -71,6 +71,10 @@ enum ItemTMHMOrEvolutionStone
 
 #ifdef PORTABLE
 void ItemUseOutOfBattle_HyperTraining(u8 taskId); // Battle Tower: Legends (Bottle Caps)
+// Fly from the maps (the owner's request of 2026-10-31): whether Fly could be used here and now (its badge, a place it can
+// be used from, a Pokemon that knows it in the party or the PC boxes), and that Pokemon set up as Fly's user
+bool32 FlyFromMap_CanFly(void);
+bool32 FlyFromMap_SetUpUser(void);
 #endif
 
 #endif // GUARD_ITEM_USE_H

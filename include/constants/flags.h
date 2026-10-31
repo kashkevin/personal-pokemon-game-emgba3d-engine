@@ -1654,6 +1654,12 @@
 #define SPECIAL_FLAGS_END                       (SPECIAL_FLAGS_START + 0x7F)
 #define NUM_SPECIAL_FLAGS                       (SPECIAL_FLAGS_END - SPECIAL_FLAGS_START + 1)
 
+#ifdef PORTABLE
+// PC: the expansion's Poke Rider (config/overworld.h OW_FLAG_POKE_RIDER), never set or cleared: FlagGet answers it from
+// whether Fly could be used here and now (item_use.c FlyFromMap_CanFly)
+#define FLAG_PC_POKE_RIDER                      SPECIAL_FLAGS_END
+#endif
+
 // Temp flag aliases
 #define FLAG_TEMP_SKIP_GABBY_INTERVIEW          FLAG_TEMP_1
 #define FLAG_TEMP_REGICE_PUZZLE_STARTED         FLAG_TEMP_2

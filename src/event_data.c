@@ -1,6 +1,10 @@
 #include "global.h"
 #include "event_data.h"
 #include "pokedex.h"
+#ifdef PORTABLE
+#include "item_use.h"
+#endif
+#line 4 // gba-line
 
 #define SPECIAL_FLAGS_SIZE  (NUM_SPECIAL_FLAGS / 8)  // 8 flags per byte
 #define TEMP_FLAGS_SIZE     (NUM_TEMP_FLAGS / 8)
@@ -244,6 +248,12 @@ u8 FlagClear(u16 id)
 
 bool8 FlagGet(u16 id)
 {
+#ifdef PORTABLE
+    // PC: the Poke Rider (R on the PokeNav's HOENN MAP flies there) whenever Fly could be used here and now
+    if (id == FLAG_PC_POKE_RIDER)
+        return FlyFromMap_CanFly();
+#endif
+#line 247 // gba-line
     u8 *ptr = GetFlagPointer(id);
 
     if (!ptr)

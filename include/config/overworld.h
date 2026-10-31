@@ -110,7 +110,12 @@
 #define OW_FLAG_PAUSE_TIME          0  // If this flag is set and OW_USE_FAKE_RTC is enabled, seconds on the in-game clock will not advance.
 #define OW_FLAG_NO_TRAINER_SEE      0  // If this flag is set, trainers will not battle the player unless they're talked to.
 #define OW_FLAG_NO_COLLISION        0  // If this flag is set, the player will be able to walk over tiles with collision. Mainly intended for debugging purposes.
+#ifdef PORTABLE
+// PC (the owner's request of 2026-10-31, "let the map be used for fly"): on whenever Fly could be used here and now
+#define OW_FLAG_POKE_RIDER          FLAG_PC_POKE_RIDER
+#else
 #define OW_FLAG_POKE_RIDER          0  // If this flag is set, the player will be able to use fly from the Pokenav Region Map and the Town Map key item by pressing 'R' on a city/location they are able to fly to.
+#endif
 
 #define BATTLE_PYRAMID_RANDOM_ENCOUNTERS    FALSE    // If set to TRUE, battle pyramid Pokemon will be generated randomly based on the round's challenge instead of hardcoded in src/data/battle_frontier/battle_pyramid_level_50_wild_mons.h (or open_level_wild_mons.h)
 

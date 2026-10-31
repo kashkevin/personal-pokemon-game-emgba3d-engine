@@ -1650,7 +1650,27 @@ static void ItemUseOnFieldCB_TownMap(u8 taskId)
 
 static bool8 sTownMapFly;   // the Fly map open was the Town Map's (region_map.c CB_ExitFlyMap asks)
 
-static bool32 TownMap_SetUpFly(void)
+// Changing nothing (the PokeNav's HOENN MAP asks it as it draws: FlagGet's Poke Rider). The PC boxes are searched at
+// most twice a second; nothing in them changes while a map is open.
+bool32 FlyFromMap_CanFly(void)
+{
+    static u32 sBoxCheckFrame = 0;
+    static bool8 sBoxFlyer = FALSE, sBoxChecked = FALSE;
+
+    if (!IsFieldMoveUnlocked(FIELD_MOVE_FLY) || !SetUpFieldMove_Fly())
+        return FALSE;
+    if (FieldMove_PartyMonKnowsMove(MOVE_FLY))
+        return TRUE;
+    if (!sBoxChecked || gMain.vblankCounter1 - sBoxCheckFrame >= 30)
+    {
+        sBoxFlyer = FieldMove_FindBoxMonWithMove(MOVE_FLY, NULL, NULL);
+        sBoxCheckFrame = gMain.vblankCounter1;
+        sBoxChecked = TRUE;
+    }
+    return sBoxFlyer;
+}
+
+bool32 FlyFromMap_SetUpUser(void)
 {
     u32 i;
 
@@ -1707,7 +1727,7 @@ bool32 TownMap_TakeFlyMapExit(void)
 void ItemUseOutOfBattle_TownMap(u8 taskId)
 {
 #ifdef PORTABLE
-    if (TownMap_SetUpFly())
+    if (FlyFromMap_SetUpUser())
     {
         if (!gTasks[taskId].tUsingRegisteredKeyItem)
         {
