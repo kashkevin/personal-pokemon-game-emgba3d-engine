@@ -58,6 +58,9 @@
 #define gText_Var1AndYouWantedVar2 CoinShop_WantedText()
 #define gText_YouWantedVar1ThatllBeVar2 CoinShop_WantedOneText()
 #define gText_YouDontHaveMoney CoinShop_NotEnoughText()
+// The TM catalogue (2026-10-31): a TM's box in the Classic 2D shop names its move and type (BuyMenuPrintTmDescription)
+#include "battle_main.h"
+#include "line_break.h"
 #endif
 #line 44 // gba-line
 
@@ -628,6 +631,48 @@ static void BuyMenuSetListEntry(struct ListMenuItem *menuItem, enum Item item, u
     menuItem->id = item;
 }
 
+#ifdef PORTABLE
+// PC (the TM catalogue of 2026-10-31: each TM's number, move, type and price): the Classic 2D shop's box for a TM or
+// an HM - the move's name and, at the box's right, its type on the first line; the move's words below in the narrow
+// font, wrapped to the box (they are written for wider boxes than this one), in the narrower one when two lines of the
+// narrow are not enough, and cut at two lines. The list shows the number and the price; the 3D shop shows all four.
+#define TM_BOX_WIDTH (14 * 8 - 3 - 4)   // WIN_ITEM_DESCRIPTION's width less its margins
+
+static void BuyMenuPrintTmDescription(enum Item item)
+{
+    enum Move move = GetItemTMHMMoveId(item);
+    const u8 *name = GetMoveName(move), *type = gTypesInfo[GetMoveType(move)].name, *src = GetMoveDescription(move);
+    u32 typeWidth = GetStringWidth(FONT_NARROW, type, 0), font = FONT_NARROW, i, breaks;
+    u8 words[192];
+
+    AddTextPrinterParameterized4(WIN_ITEM_DESCRIPTION,
+                                 GetStringWidth(FONT_NORMAL, name, 0) + typeWidth + 4 > TM_BOX_WIDTH ? FONT_NARROW : FONT_NORMAL,
+                                 3, 1, 0, 0, sShopBuyMenuTextColors[COLORID_NORMAL], 0, name);
+    AddTextPrinterParameterized4(WIN_ITEM_DESCRIPTION, FONT_NARROW, 3 + TM_BOX_WIDTH - typeWidth, 1, 0, 0,
+                                 sShopBuyMenuTextColors[COLORID_NORMAL], 0, type);
+    for (;;)
+    {
+        for (i = 0; src[i] != EOS && i < sizeof(words) - 1; i++)
+            words[i] = src[i];
+        words[i] = EOS;
+        StripLineBreaks(words);
+        BreakStringAutomatic(words, TM_BOX_WIDTH, 10, font, HIDE_SCROLL_PROMPT);
+        if (CountLineBreaks(words) <= 1 || font == FONT_NARROWER)
+            break;
+        font = FONT_NARROWER;
+    }
+    for (i = 0, breaks = 0; words[i] != EOS; i++)
+    {
+        if ((words[i] == CHAR_NEWLINE || words[i] == CHAR_PROMPT_SCROLL) && ++breaks == 2)
+        {
+            words[i] = EOS;
+            break;
+        }
+    }
+    AddTextPrinterParameterized4(WIN_ITEM_DESCRIPTION, font, 3, 17, 0, 0, sShopBuyMenuTextColors[COLORID_NORMAL], 0, words);
+}
+#endif
+#line 608 // gba-line
 static void BuyMenuPrintItemDescriptionAndShowItemIcon(s32 item, bool8 onInit, struct ListMenu *list)
 {
     const u8 *description;
@@ -654,6 +699,14 @@ static void BuyMenuPrintItemDescriptionAndShowItemIcon(s32 item, bool8 onInit, s
     }
 
     FillWindowPixelBuffer(WIN_ITEM_DESCRIPTION, PIXEL_FILL(0));
+#ifdef PORTABLE
+    if (item != LIST_CANCEL && sMartInfo.martType == MART_TYPE_NORMAL && GetItemPocket(item) == POCKET_TM_HM)
+    {
+        BuyMenuPrintTmDescription(item);   // PC: the move's name, type and words (above)
+        return;
+    }
+#endif
+#line 634 // gba-line
     BuyMenuPrint(WIN_ITEM_DESCRIPTION, description, 3, 1, 0, COLORID_NORMAL);
 }
 
@@ -1062,6 +1115,15 @@ static void Task_BuyMenu(u8 taskId)
                 if (sMartInfo.martType == MART_TYPE_NORMAL)
                 {
                     CopyItemName(itemId, gStringVar1);
+#ifdef PORTABLE
+                    // PC: "You wanted TM165 Detect?" - a TM or HM named with its move (the TM catalogue of 2026-10-31)
+                    if (GetItemPocket(itemId) == POCKET_TM_HM)
+                    {
+                        StringAppend(gStringVar1, gText_Space);
+                        StringAppend(gStringVar1, GetMoveName(GetItemTMHMMoveId(itemId)));
+                    }
+#endif
+#line 1035 // gba-line
                     if (GetItemImportance(itemId))
                     {
                         ConvertIntToDecimalStringN(gStringVar2, sShopData->totalCost, STR_CONV_MODE_LEFT_ALIGN, 6);
