@@ -66,6 +66,20 @@ static u8 GetStandardBikeTransitionId(u8 *, u16, u16);
 static u8 StandardBikeInputHandler_Normal(u8 *, u16, u16);
 static u8 StandardBikeInputHandler_Turning(u8 *, u16, u16);
 static u8 StandardBikeInputHandler_Slope(u8 *, u16, u16);
+#ifdef PORTABLE
+// PC: the Acro Bike's rails made easier (the owner's choice, 2026-10-31; KNOWN_ISSUES MS-171) - hopping on a rail, the
+// way across it toward a rail beside it jumps there and the hop goes on; an arrow pressed during a hop counts at the
+// hop's end (the original reads the arrows only there); the jump's way and B up to 6 frames (0.1 s) apart, in either
+// order (the original: the way, then B within 3 frames)
+static enum AcroTransition AcroBike_EasyJump(enum Direction *, bool8);
+static u8 AcroBike_GetEasyJumpDirection(void);
+static bool8 AcroBike_CanHopJumpOnto(enum Direction);
+static void AcroBike_AfterHistoryUpdate(u16);
+static bool8 sAcroHopJump;              // the jump was taken from a bunny hop
+static enum Direction sAcroHopTap;      // the newest arrow pressed during a hop (or a jump from one)
+static enum Direction sAcroPendingJump; // B, then the way across within 6 frames while the wheelie rises
+#endif
+#line 69 // gba-line
 
 // const rom data
 
@@ -584,6 +598,12 @@ static enum AcroTransition AcroBikeHandleInputTurning(enum Direction *newDirecti
     *newDirection = gPlayerAvatar.newDirBackup;
     gPlayerAvatar.bikeFrameCounter++;
 
+#ifdef PORTABLE
+    // PC: the jump with B up to 6 frames after the way (the original: 3), looked for before the turn
+    if (*newDirection != DIR_NONE && *newDirection == AcroBike_GetEasyJumpDirection())
+        return AcroBike_EasyJump(newDirection, FALSE);
+#endif
+#line 587 // gba-line
     // Wait 6 frames before actually changing direction
     if (gPlayerAvatar.bikeFrameCounter > 6) // ... because it takes 6 frames to advance 1 tile.
     {
@@ -626,6 +646,22 @@ static enum AcroTransition AcroBikeHandleInputWheelieStanding(enum Direction *ne
     playerObjEvent = &gObjectEvents[gPlayerAvatar.objectEventId];
     gPlayerAvatar.runningState = NOT_MOVING;
 
+#ifdef PORTABLE
+    // PC: B, then the way across up to 6 frames after it while the wheelie rose - the jump (the original: a wheelie
+    // turning that way); not on a bumpy slope
+    if (sAcroPendingJump != DIR_NONE)
+    {
+        enum Direction way = sAcroPendingJump;
+
+        sAcroPendingJump = DIR_NONE;
+        if (way != direction && !MetatileBehavior_IsBumpySlope(playerObjEvent->currentMetatileBehavior))
+        {
+            *newDirection = way;
+            return AcroBike_EasyJump(newDirection, FALSE);
+        }
+    }
+#endif
+#line 629 // gba-line
     if (heldKeys & B_BUTTON)
     {
         gPlayerAvatar.bikeFrameCounter++;
@@ -695,6 +731,16 @@ static enum AcroTransition AcroBikeHandleInputBunnyHop(enum Direction *newDirect
 
     // B Button is still held
 
+#ifdef PORTABLE
+    // PC: the newest arrow pressed during the hop counts at its end, held or not; the way across a rail toward a rail
+    // beside it - the jump there
+    if (sAcroHopTap != DIR_NONE)
+        *newDirection = sAcroHopTap;
+    sAcroHopTap = DIR_NONE;
+    if (*newDirection != DIR_NONE && *newDirection != direction && AcroBike_CanHopJumpOnto(*newDirection))
+        return AcroBike_EasyJump(newDirection, TRUE);
+#endif
+#line 698 // gba-line
     if (*newDirection == DIR_NONE)
     {
         // we did not move, so keep hopping in place without moving.
@@ -775,6 +821,13 @@ static enum AcroTransition AcroBikeHandleInputSidewaysJump(enum Direction *ptr, 
     playerObjEvent->facingDirectionLocked = 0;
     SetObjectEventDirection(playerObjEvent, playerObjEvent->facingDirection);
     gPlayerAvatar.acroBikeState = ACRO_STATE_NORMAL;
+#ifdef PORTABLE
+    // PC: after a jump from a bunny hop, B still held - the hop goes on
+    if (sAcroHopJump && (heldKeys & B_BUTTON))
+        gPlayerAvatar.acroBikeState = ACRO_STATE_BUNNY_HOP;
+    sAcroHopJump = FALSE;
+#endif
+#line 778 // gba-line
     return CheckMovementInputAcroBike(ptr, newKeys, heldKeys);
 }
 
@@ -1089,6 +1142,10 @@ static void AcroBike_TryHistoryUpdate(u16 newKeys, u16 heldKeys) // newKeys is u
         Bike_UpdateABStartSelectHistory(direction);
         gPlayerAvatar.bikeSpeed = PLAYER_SPEED_STANDING;
     }
+#ifdef PORTABLE
+    AcroBike_AfterHistoryUpdate(newKeys);
+#endif
+#line 1092 // gba-line
 }
 
 static bool8 HasPlayerInputTakenLongerThanList(const u8 *dirTimerList, const u8 *abStartSelectTimerList)
@@ -1366,3 +1423,74 @@ bool32 IsRunningDisallowed(u8 metatile)
 
     return FALSE;
 }
+
+#ifdef PORTABLE
+// PC (MS-171): the sideways jump as the original's turning state starts it - or, the way back from a standing start,
+// the turn jump; from a bunny hop always sideways, and the hop goes on after it while B is held
+static enum AcroTransition AcroBike_EasyJump(enum Direction *newDirection, bool8 fromHop)
+{
+    sAcroHopJump = fromHop;
+    Bike_SetBikeStill();
+    gPlayerAvatar.bikeSpeed = PLAYER_SPEED_NORMAL;
+    if (!fromHop && *newDirection == GetOppositeDirection(GetPlayerMovementDirection()))
+    {
+        gPlayerAvatar.acroBikeState = ACRO_STATE_TURN_JUMP;
+        return ACRO_TRANS_TURN_JUMP;
+    }
+    gPlayerAvatar.runningState = MOVING;
+    gPlayerAvatar.acroBikeState = ACRO_STATE_SIDE_JUMP;
+    return ACRO_TRANS_SIDE_JUMP;
+}
+
+// PC (MS-171): the jump's way when the newest way and B (alone) are held, pressed up to 6 frames apart in either
+// order, the later of them in the last 7 frames
+static u8 AcroBike_GetEasyJumpDirection(void)
+{
+    u8 way = gPlayerAvatar.directionHistory & 0xF;
+    s32 wayFrames = gPlayerAvatar.dirTimerHistory[0];
+    s32 bFrames = gPlayerAvatar.abStartSelectTimerHistory[0];
+
+    if (way == DIR_NONE || (gPlayerAvatar.abStartSelectHistory & 0xF) != B_BUTTON)
+        return DIR_NONE;
+    if (wayFrames - bFrames > 6 || bFrames - wayFrames > 6 || min(wayFrames, bFrames) > 7)
+        return DIR_NONE;
+    return way;
+}
+
+// PC (MS-171): across the rail the bike hops on (it cannot face that way there), toward a rail it can land on
+static bool8 AcroBike_CanHopJumpOnto(enum Direction way)
+{
+    struct ObjectEvent *playerObjEvent = &gObjectEvents[gPlayerAvatar.objectEventId];
+    s16 x = playerObjEvent->currentCoords.x;
+    s16 y = playerObjEvent->currentCoords.y;
+    u8 behavior;
+
+    if (CanBikeFaceDirOnMetatile(way, playerObjEvent->currentMetatileBehavior))
+        return FALSE;
+    MoveCoords(way, &x, &y);
+    behavior = MapGridGetMetatileBehaviorAt(x, y);
+    if (way == DIR_NORTH || way == DIR_SOUTH)
+        return MetatileBehavior_IsHorizontalRail(behavior) || MetatileBehavior_IsIsolatedHorizontalRail(behavior);
+    return MetatileBehavior_IsVerticalRail(behavior) || MetatileBehavior_IsIsolatedVerticalRail(behavior);
+}
+
+// PC (MS-171), every frame after the history: the newest arrow pressed during a bunny hop (or a jump from one), for the
+// hop's end; B, then the way across within 6 frames while the wheelie rises (the bike reads no keys then), for the
+// wheelie's first frame up
+static void AcroBike_AfterHistoryUpdate(u16 newKeys)
+{
+    enum Direction pressed = Bike_DPadToDirection(newKeys);
+    u8 way = gPlayerAvatar.directionHistory & 0xF;
+
+    if (gPlayerAvatar.acroBikeState != ACRO_STATE_BUNNY_HOP
+     && !(gPlayerAvatar.acroBikeState == ACRO_STATE_SIDE_JUMP && sAcroHopJump))
+        sAcroHopTap = DIR_NONE;
+    else if (pressed != DIR_NONE)
+        sAcroHopTap = pressed;
+
+    if (gPlayerAvatar.acroBikeState != ACRO_STATE_WHEELIE_STANDING)
+        sAcroPendingJump = DIR_NONE;
+    else if (pressed != DIR_NONE && pressed == way && AcroBike_GetEasyJumpDirection() == way)
+        sAcroPendingJump = way;
+}
+#endif
