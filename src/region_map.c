@@ -116,6 +116,10 @@ static void SpriteCB_FlyDestIcon(struct Sprite *sprite);
 static void CB_FadeInFlyMap(void);
 static void CB_HandleFlyMapInput(void);
 static void CB_ExitFlyMap(void);
+#ifdef PORTABLE
+bool32 TownMap_TakeFlyMapExit(void);    // item_use.c: whether the Fly map closing was the Town Map's
+#endif
+#line 119 // gba-line
 
 static const u16 sRegionMapCursorPal[] = INCGFX_U16("graphics/pokenav/region_map/cursor.pal", ".gbapal");
 static const u32 sRegionMapCursorSmallGfxLZ[] = INCGFX_U32("graphics/pokenav/region_map/cursor_small.png", ".4bpp.smol");
@@ -2527,10 +2531,21 @@ static void CB_ExitFlyMap(void)
                 struct RegionMap* tempRegionMap = &sFlyMap->regionMap;
 
                 SetFlyDestination(tempRegionMap);
+#ifdef PORTABLE
+                TownMap_TakeFlyMapExit();   // PC: a place chosen on the Town Map's Fly map flies as from the party menu
+#endif
+#line 2489 // gba-line
                 ReturnToFieldFromFlyMapSelect();
             }
             else
             {
+#ifdef PORTABLE
+                // PC: the Fly map the Town Map opened (item_use.c) goes back to the field, not to a party menu
+                if (TownMap_TakeFlyMapExit())
+                    SetMainCallback2(CB2_ReturnToField);
+                else
+#endif
+#line 2493 // gba-line
                 SetMainCallback2(CB2_ReturnToPartyMenuFromFlyMap);
             }
             TRY_FREE_AND_SET_NULL(sFlyMap);

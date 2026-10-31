@@ -1640,8 +1640,89 @@ static void ItemUseOnFieldCB_TownMap(u8 taskId)
     DestroyTask(taskId);
 }
 
+#ifdef PORTABLE
+// PC (the owner's request of 2026-10-31): the Town Map flies too. When Fly could be used here and now - its badge, a
+// place it can be used from, a Pokemon that knows it in the party or the PC boxes (HMs from the PC boxes, field_move.c)
+// - the Town Map is the Fly map: a place chosen there is flown to with that Pokemon, as from the party menu's FLY, and
+// B goes back to the field. Otherwise it is the map to look at, as before.
+#include "field_move.h"
+#include "region_map.h"
+
+static bool8 sTownMapFly;   // the Fly map open was the Town Map's (region_map.c CB_ExitFlyMap asks)
+
+static bool32 TownMap_SetUpFly(void)
+{
+    u32 i;
+
+    if (!IsFieldMoveUnlocked(FIELD_MOVE_FLY) || !SetUpFieldMove_Fly())
+        return FALSE;
+    // the flyer: the first party Pokemon that knows Fly, else the first in the PC boxes that does
+    for (i = 0; i < PARTY_SIZE; i++)
+    {
+        struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][i];
+
+        if (GetMonData(mon, MON_DATA_SPECIES) == SPECIES_NONE)
+            break;
+        if (!GetMonData(mon, MON_DATA_IS_EGG) && MonKnowsMove(mon, MOVE_FLY))
+        {
+            gPartyMenu.slotId = i;
+            FieldMove_SetPartyMenuUserBoxed(FALSE);
+            return TRUE;
+        }
+    }
+    if (!FieldMove_TakeBoxUser(MOVE_FLY))
+        return FALSE;
+    gPartyMenu.slotId = 0;
+    FieldMove_SetPartyMenuUserBoxed(TRUE);
+    return TRUE;
+}
+
+static void CB2_OpenFlyMapFromTownMap(void)
+{
+    sTownMapFly = TRUE;
+    SetMainCallback2(CB2_OpenFlyMap);
+}
+
+// the Town Map registered on SELECT: from the field, once it has faded out
+static void Task_OpenFlyMapFromField(u8 taskId)
+{
+    if (!gPaletteFade.active)
+    {
+        CleanupOverworldWindowsAndTilemaps();
+        CB2_OpenFlyMapFromTownMap();
+        DestroyTask(taskId);
+    }
+}
+
+// Whether the Fly map closing was opened by the Town Map (and no longer): its B goes back to the field.
+bool32 TownMap_TakeFlyMapExit(void)
+{
+    bool32 fromTownMap = sTownMapFly;
+
+    sTownMapFly = FALSE;
+    return fromTownMap;
+}
+#endif
+#line 1568 // gba-line
 void ItemUseOutOfBattle_TownMap(u8 taskId)
 {
+#ifdef PORTABLE
+    if (TownMap_SetUpFly())
+    {
+        if (!gTasks[taskId].tUsingRegisteredKeyItem)
+        {
+            gBagMenu->newScreenCallback = CB2_OpenFlyMapFromTownMap;
+            Task_FadeAndCloseBagMenu(taskId);
+        }
+        else
+        {
+            FadeScreen(FADE_TO_BLACK, 0);
+            gTasks[taskId].func = Task_OpenFlyMapFromField;
+        }
+        return;
+    }
+#endif
+#line 1570 // gba-line
     if (!gTasks[taskId].tUsingRegisteredKeyItem)
     {
         sItemUseOnFieldCB = ItemUseOnFieldCB_TownMap;
