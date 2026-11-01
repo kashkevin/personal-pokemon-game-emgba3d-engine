@@ -2873,3 +2873,58 @@ bool32 Decoration_NativeUiMenu(struct NativeDecorMenu *out)
     return TRUE;
 }
 #endif // ENABLE_NATIVE_UI
+
+#ifdef PORTABLE
+// The 3D view (diorama/scene/scene_snapshot.c): the decoration being placed and the putting-away cursor are the field
+// camera's own sprite, the decorating player another sprite - none an object event, so the 3D view drew neither and
+// placing a decoration showed only the room. While one of them runs (the sprite's own callbacks: placing, putting
+// away), the decoration (and the cursor) is laid on the floor where the game draws it over the map - a doll or a
+// cushion stands there - and the player stands by it.
+u32 Decoration_NativeFieldSprite(const struct Sprite *sprite)
+{
+    const struct Sprite *ghost = &gSprites[sDecor_CameraSpriteObjectIdx1];
+    bool32 placing = ghost->inUse && (ghost->callback == InitializePuttingAwayCursorSprite
+                                    || ghost->callback == InitializePuttingAwayCursorSprite2);
+    bool32 puttingAway = ghost->inUse && ghost->callback == InitializeCameraSprite1;
+
+    if (!placing && !puttingAway)
+        return DECOR_FIELD_SPRITE_NONE;
+    if (sprite == ghost)
+    {
+        if (placing && gCurDecorationItems != NULL
+         && gDecorations[gCurDecorationItems[gCurDecorationIndex]].permission == DECORPERM_SPRITE)
+            return DECOR_FIELD_SPRITE_STANDING;
+        return DECOR_FIELD_SPRITE_ON_FLOOR;
+    }
+    if (sprite == &gSprites[sDecor_CameraSpriteObjectIdx2] && sprite->inUse)
+        return DECOR_FIELD_SPRITE_STANDING;
+    return DECOR_FIELD_SPRITE_NONE;
+}
+#endif // PORTABLE
+
+#ifdef ENABLE_NATIVE_UI
+// The 3D UI's placing plate (src/native_ui/screens/ui_decor_place.c): while the game reads the cursor's keys
+// (Task_SelectLocation), placing or putting away; placing: the decoration and whether it can stand where the cursor is,
+// by the game's own check (CanPlaceDecoration: it only reads the map, the objects and the flags).
+bool32 Decoration_NativeUiPlacing(struct NativeDecorPlacing *out)
+{
+    u8 taskId = FindTaskIdByFunc(Task_SelectLocation);
+
+    memset(out, 0, sizeof(*out));
+    if (taskId == TASK_NONE)
+        return FALSE;
+    out->putAway = gTasks[taskId].tDecorationItemsMenuCommand == DECOR_ITEMS_MENU_PUT_AWAY;
+    if (!out->putAway && gCurDecorationItems != NULL)
+    {
+        out->decoration = gCurDecorationItems[gCurDecorationIndex];
+        if (out->decoration != DECOR_NONE && out->decoration < NUM_DECORATIONS)
+        {
+            out->name = gDecorations[out->decoration].name;
+            out->canPlace = CanPlaceDecoration(taskId, &gDecorations[out->decoration]);
+            out->playerRoom = sDecorationContext.isPlayerRoom;
+        }
+    }
+    out->ready = !gPaletteFade.active;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

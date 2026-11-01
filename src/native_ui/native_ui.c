@@ -80,6 +80,7 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_Diploma,      /* the POKéDEX diploma */
     &gUiScreen_Factory,      /* the Battle Factory's rentals and swaps (the Slateport tent's too) */
     &gUiScreen_FrontierPass, /* the FRONTIER PASS and the Battle Frontier's map */
+    &gUiScreen_DecorPlace,   /* placing a decoration, putting one away (the field's plate) */
     &gUiScreen_DomeTree,     /* the Battle Dome's tourney tree */
     &gUiScreen_DomeCard,     /* the Battle Dome's info cards (a trainer's, a match's) */
     &gUiScreen_MysteryGift,  /* the main menu's MYSTERY GIFT on its menus */

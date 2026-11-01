@@ -1381,6 +1381,18 @@ struct NativeFrontierPass
     u8 gender;
 };
 bool32 FrontierPass_NativeUiState(struct NativeFrontierPass *out);
+/* Placing a decoration or putting one away on the field (decoration.c), while the game reads the cursor's keys: placing,
+ * the decoration and whether it can stand where the cursor is (the game's own check, as A would answer). */
+struct NativeDecorPlacing
+{
+    bool8 putAway;              /* putting decorations away (else placing one) */
+    u8 decoration;              /* placing: the decoration */
+    const u8 *name;
+    bool8 canPlace;             /* placing: it can stand where the cursor is */
+    bool8 playerRoom;           /* the player's room (dolls and cushions only), else a secret base */
+    bool8 ready;
+};
+bool32 Decoration_NativeUiPlacing(struct NativeDecorPlacing *out);
 /* The Battle Dome's tourney tree (battle_dome.c: the interactive tree, the lobby's record of the last tourney, a
  * round's results between battles): the sixteen in the tree's order (the left side top to bottom, then the right;
  * round one's pairs side by side), how far each has come and who is out as the tree shows it now, and the cursor on

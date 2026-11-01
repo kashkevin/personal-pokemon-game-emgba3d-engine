@@ -29,6 +29,7 @@
 #include "constants/metatile_behaviors.h"
 #include "field_weather.h"
 #include "gba/defines.h"
+#include "decoration.h"
 #include "main.h"
 #include "menu.h"
 #include "metatile_behavior.h"
@@ -1389,8 +1390,9 @@ static u8 FindEffectOwner(const struct DioramaSceneSnapshot *snapshot, u8 localI
 /* Field-effect sprites drawn in 3D (scene_snapshot.h, struct DioramaEffectSnapshot): the healing machines' Poke
  * Balls and monitors (field_effect.c), the emote icons over walkers (trainer_see.c), the twinkles over shiny wild
  * Pokemon (platform/ow_shiny_sparkle.c), the rotating gates' arms on the floor (rotating_gate.c: the Fortree Gym's
- * puzzle was invisible in 3D, the owner's report of 2026-10-27) and the Pokemon other players surf on (field_carrier.c). Every other sprite the field shows is an object event,
- * the surf blob, or part of the interface. */
+ * puzzle was invisible in 3D, the owner's report of 2026-10-27), the Pokemon other players surf on (field_carrier.c)
+ * and, placing a decoration, the decoration on the floor and the decorating player (decoration.c: placing one showed
+ * only the room). Every other sprite the field shows is an object event, the surf blob, or part of the interface. */
 static void CopyEffects(struct DioramaSceneSnapshot *snapshot)
 {
     const struct ObjectEvent *player;
@@ -1419,6 +1421,9 @@ static void CopyEffects(struct DioramaSceneSnapshot *snapshot)
         s16 y;
 
         bool8 gate = RotatingGate_IsGateSprite(sprite);
+        /* placing a decoration: the decoration (laid on the floor, as the gates are; a doll or cushion standing) and the
+         * decorating player (decoration.c) */
+        u32 decor = Decoration_NativeFieldSprite(sprite);
 
         /* a shiny's twinkle hidden only because its Pokemon is past the GBA's picture is drawn with that Pokemon; a
          * gate is hidden only for being off the GBA's screen (RotatingGate_HideGatesOutsideViewport) */
@@ -1433,7 +1438,7 @@ static void CopyEffects(struct DioramaSceneSnapshot *snapshot)
             if (owner == DIORAMA_EFFECT_PLACED)
                 continue;
         }
-        else if (!gate && !DioramaFieldEffect_IsMachineSprite(sprite))
+        else if (!gate && decor == DECOR_FIELD_SPRITE_NONE && !DioramaFieldEffect_IsMachineSprite(sprite))
         {
             continue;
         }
@@ -1480,9 +1485,10 @@ static void CopyEffects(struct DioramaSceneSnapshot *snapshot)
             effect->offsetX = x - (ownerSprite->x + ownerSprite->x2);
             effect->offsetY = (y + height / 2) - (ownerSprite->y + ownerSprite->y2 + object->height / 2);
         }
-        else if (gate)
+        else if (gate || decor == DECOR_FIELD_SPRITE_ON_FLOOR)
         {
-            /* the cell under the picture's centre (the gate's pivot, a corner between four cells), laid there */
+            /* the cell under the picture's centre (the gate's pivot, a corner between four cells; the decoration's
+             * middle), laid there */
             int fromX = x - (baseX + 8);
             int fromY = y - (baseY + 8);
             int cellX = fromX >= -8 ? (fromX + 8) / 16 : -((-fromX + 7) / 16);

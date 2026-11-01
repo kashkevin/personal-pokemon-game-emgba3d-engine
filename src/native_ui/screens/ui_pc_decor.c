@@ -8,7 +8,7 @@
  * the player's room takes, a category's decorations with those in use (in the
  * secret base, in the room) and the chosen one's picture as the shops show it,
  * the toss's YES / NO and the engine's lines. Placing a decoration and putting
- * one away on the field keep the game's picture. The engine keeps every rule
+ * one away on the field: ui_decor_place.c. The engine keeps every rule
  * and button: clicks and the wheel queue its own presses. Project-owned.
  */
 #include <stdlib.h>

@@ -72,4 +72,16 @@ void CopyDecorationCategoryName(u8 *dest, u8 category);
 bool8 IsSelectedDecorInThePC(void);
 u8 AddDecorationIconObject(u8 decor, s16 x, s16 y, u8 priority, u16 tilesTag, u16 paletteTag);
 
+#ifdef PORTABLE
+// The decoration being placed, the putting-away cursor and the decorating player for the 3D view (decoration.c)
+enum
+{
+    DECOR_FIELD_SPRITE_NONE,
+    DECOR_FIELD_SPRITE_ON_FLOOR,    // laid on the floor where the game draws it
+    DECOR_FIELD_SPRITE_STANDING,    // standing there, as an object
+};
+struct Sprite;
+u32 Decoration_NativeFieldSprite(const struct Sprite *sprite);
+#endif
+
 #endif //GUARD_DECORATION_H
