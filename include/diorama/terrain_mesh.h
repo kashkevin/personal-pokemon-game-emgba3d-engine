@@ -188,6 +188,10 @@ struct DioramaTerrainChunkInput
     uint32_t mapGeneration;
     uint32_t rulesGeneration;
     uint32_t pixelCount;
+    /* the face a side of plain ground a level or more tall shows (terrain_mesh.c GroundSideShowsRock): the map's
+     * rock wall, where rockFaces is set (outdoors, gl_terrain_renderer.c; the owner's choice of 2026-11-01) */
+    uint8_t rockFaces;
+    struct DioramaTerrainMaterial rockFace;
     struct DioramaTerrainCell cells[DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE];
     struct DioramaTerrainPixelPrimitive pixels[DIORAMA_TERRAIN_MAX_PIXEL_PRIMITIVES];
 };

@@ -41,6 +41,9 @@
 /* An object's frame: 64x64 at 4bpp, or a composite vehicle up to 128x64 (DIORAMA_OBJECT_COMPOSITE). */
 #define DIORAMA_OBJ_FRAME_MAX_BYTES 4096
 #define DIORAMA_METATILE_ENTRY_COUNT 8
+/* General's rock wall over rock (METATILE_General_RockWall_RockBase): the face a tall side of plain ground shows
+* (scene snapshot rockFaceEntries). */
+#define DIORAMA_ROCK_FACE_METATILE 0x07C
 #define DIORAMA_MAX_DIRTY_CELLS 64
 /*
  * Neighbouring maps drawn with their own tiles: a connected map whose
@@ -317,6 +320,12 @@ struct DioramaSceneSnapshot
      * atlas's page 0 draws (metatile_atlas.h). */
     const void *primaryTileset;
     const void *secondaryTileset;
+    /* General's rock wall (DIORAMA_ROCK_FACE_METATILE) as the map draws it, outdoors where the primary tileset is
+     * General's: the face a side of plain ground a level or more tall shows (terrain_mesh.c GroundSideShowsRock;
+     * the owner's choice of 2026-11-01, "Rock faces"), drawn into the atlas whether or not a cell in view uses it
+     * (metatile_atlas.c). rockFaceValid 0 elsewhere. */
+    uint8_t rockFaceValid;
+    uint16_t rockFaceEntries[DIORAMA_METATILE_ENTRY_COUNT];
     uint16_t mapWidth;
     uint16_t mapHeight;
     uint8_t mapCoordinateOffset;

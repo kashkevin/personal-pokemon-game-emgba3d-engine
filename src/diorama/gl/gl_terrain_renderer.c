@@ -1704,6 +1704,13 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
     input->chunkY = chunkY;
     input->mapGeneration = snapshot->mapGeneration;
     input->rulesGeneration = DioramaRules_GetGeneration();
+    /* the rock wall a tall side of plain ground shows (terrain_mesh.c GroundSideShowsRock): the map's own
+     * metatile, its slot the same on every page (a primary metatile; metatile_atlas.c draws it) */
+    if (snapshot->rockFaceValid)
+    {
+        input->rockFaces = 1;
+        SetTerrainMaterialSlot(&input->rockFace, DIORAMA_ROCK_FACE_METATILE, DIORAMA_MATERIAL_FULL);
+    }
     for (y = 0; y < DIORAMA_TERRAIN_INPUT_SIZE; y++)
     {
         for (x = 0; x < DIORAMA_TERRAIN_INPUT_SIZE; x++)

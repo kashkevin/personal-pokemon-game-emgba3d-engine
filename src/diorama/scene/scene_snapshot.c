@@ -2321,6 +2321,16 @@ void DioramaScene_PublishOverworld(void)
         sDraft.primaryTileset = gMapHeader.mapLayout->primaryTileset;
         sDraft.secondaryTileset = gMapHeader.mapLayout->secondaryTileset;
     }
+    /* the rock wall a tall side of plain ground shows, outdoors (scene_snapshot.h rockFaceEntries) */
+    sDraft.rockFaceValid = sDraft.valid
+                        && gMapHeader.mapLayout->primaryTileset == &gTileset_General
+                        && gTileset_General.metatiles != NULL
+                        && (sDraft.mapType == MAP_TYPE_TOWN || sDraft.mapType == MAP_TYPE_CITY
+                         || sDraft.mapType == MAP_TYPE_ROUTE || sDraft.mapType == MAP_TYPE_OCEAN_ROUTE);
+    if (sDraft.rockFaceValid)
+        memcpy(sDraft.rockFaceEntries,
+               gTileset_General.metatiles + DIORAMA_ROCK_FACE_METATILE * DIORAMA_METATILE_ENTRY_COUNT,
+               sizeof(sDraft.rockFaceEntries));
 
     if (sMapChanged || mapGroup != sPreviousMapGroup || mapNum != sPreviousMapNum
      || sDraft.mapLayoutId != sPreviousMapLayoutId)

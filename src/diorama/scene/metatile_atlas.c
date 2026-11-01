@@ -551,6 +551,36 @@ bool DioramaAtlas_UpdateDirty(const struct DioramaSceneSnapshot *snapshot,
             updatedSlots[slot / 8] |= 1 << (slot % 8);
         changed = true;
     }
+    /* General's rock wall, the face a tall side of plain ground shows (scene_snapshot.h rockFaceEntries,
+     * terrain_mesh.c GroundSideShowsRock), whether or not a cell in view uses it: the map's own metatile,
+     * drawn as a cell of it would be. */
+    if (snapshot->rockFaceValid && !HasBit(seen, DIORAMA_ROCK_FACE_METATILE))
+    {
+        struct DioramaCellSnapshot rock;
+        uint16_t slot = DIORAMA_ROCK_FACE_METATILE;
+
+        memset(&rock, 0, sizeof(rock));
+        rock.metatileId = DIORAMA_ROCK_FACE_METATILE;
+        memcpy(rock.tileEntries, snapshot->rockFaceEntries, sizeof(rock.tileEntries));
+        if (!HasBit(presentSlots, slot) || EntriesUseDirtyTile(&rock, dirtyTiles)
+         || (forcedSlots != NULL && HasBit(forcedSlots, slot)))
+        {
+            struct DioramaAtlasArt art = DioramaAtlas_CellArt(snapshot, &rock);
+
+            DioramaMetatile_Compose(art.tileGraphics, rock.tileEntries, art.fadedPalette, metatilePixels);
+            DioramaMetatile_BuildSilhouetteMask(metatilePixels, sSilhouetteAlpha[slot]);
+            BlitWithGutter(atlasPixels, slot, metatilePixels);
+            DioramaMetatile_ComposeLayer(art.tileGraphics, rock.tileEntries, art.fadedPalette, 0, layerPixels);
+            BlitWithGutter(baseAtlasPixels, slot, layerPixels);
+            DioramaMetatile_ComposeLayer(art.tileGraphics, rock.tileEntries, art.fadedPalette, 1, layerPixels);
+            BlitWithGutter(foregroundAtlasPixels, slot, layerPixels);
+            DioramaMetatile_BuildAlphaMask(layerPixels, sForegroundAlpha[slot]);
+            presentSlots[slot / 8] |= 1 << (slot % 8);
+            if (updatedSlots != NULL)
+                updatedSlots[slot / 8] |= 1 << (slot % 8);
+            changed = true;
+        }
+    }
     return changed;
 }
 

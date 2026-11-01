@@ -330,6 +330,134 @@ static void TestStepDownClosesTheGap(void)
     assert(CountSideQuads(&mesh, -1.0f / 16.0f, 0.0f) == 4);
 }
 
+/* Side quads reaching down to `low` or lower and up to `high` or higher whose every corner reads the drawing
+ * at u u0-u1, v v0-v1. */
+static int CountSideQuadsReading(const struct DioramaTerrainMesh *mesh, float low, float high,
+                                 float u0, float u1, float v0, float v1)
+{
+    uint32_t i;
+    int count = 0;
+
+    for (i = 0; i + 6 <= mesh->vertexCount; i += 6)
+    {
+        float minY = sVertices[i].y;
+        float maxY = sVertices[i].y;
+        bool reads = true;
+        int v;
+
+        if (sVertices[i].shade >= 1.0f)
+            continue;
+        for (v = 0; v < 6; v++)
+        {
+            minY = sVertices[i + v].y < minY ? sVertices[i + v].y : minY;
+            maxY = sVertices[i + v].y > maxY ? sVertices[i + v].y : maxY;
+            reads &= sVertices[i + v].u >= u0 && sVertices[i + v].u <= u1
+                  && sVertices[i + v].v >= v0 && sVertices[i + v].v <= v1;
+        }
+        count += minY <= low && maxY >= high && reads;
+    }
+    return count;
+}
+
+/* A side of plain ground a level or more tall shows the map's rock wall (the owner's choice of 2026-11-01, "Rock
+ * faces": the Safari Zone's north-east, its plain green walls); a lower side, a bank down to the water, and every
+ * side where the map has no rock wall (indoors) read the ground's own drawing (u 0.1-0.3, v 0.2-0.4 here). */
+static void TestTallGroundSideShowsRock(void)
+{
+    struct DioramaTerrainChunkInput input;
+    struct DioramaTerrainMesh mesh;
+    struct DioramaTerrainCell *low;
+    int i;
+
+    InitInput(&input, 3, MB_NORMAL);
+    for (i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
+        input.cells[i].terrainClass = DIORAMA_TERRAIN_CLASS_GROUND;
+    input.rockFace = input.cells[0].materials[DIORAMA_MATERIAL_FACE_NORTH];
+    input.rockFace.u0 = input.rockFace.v0 = 0.6f;
+    input.rockFace.u1 = input.rockFace.v1 = 0.7f;
+    low = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    low->groundHeight = -1.0f;
+    low->visualHeight = -1.0f;
+    /* no rock wall: the four neighbours' sides down to it read their own drawing */
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(CountSideQuadsReading(&mesh, -1.0f, -1.0f / 16.0f, 0.09f, 0.31f, 0.19f, 0.41f) == 4);
+    /* the rock wall: each a level tall, each reads it */
+    input.rockFaces = 1;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(CountSideQuadsReading(&mesh, -1.0f, -1.0f / 16.0f, 0.59f, 0.71f, 0.59f, 0.71f) == 4);
+    assert(CountSideQuadsReading(&mesh, -1.0f, -1.0f / 16.0f, 0.09f, 0.31f, 0.19f, 0.41f) == 0);
+    /* the same through the voxel spans (a roof elsewhere in the chunk) */
+    input.cells[1 * DIORAMA_TERRAIN_INPUT_SIZE + 1].shape = DIORAMA_SHAPE_ROOF;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(!mesh.usedCompressedOccupancy);
+    assert(CountSideQuadsReading(&mesh, -1.0f, -1.0f / 16.0f, 0.59f, 0.71f, 0.59f, 0.71f) == 4);
+    input.cells[1 * DIORAMA_TERRAIN_INPUT_SIZE + 1].shape = DIORAMA_SHAPE_FLAT;
+    /* ground of a region (its structure id) shows it too; a cell a structure claims (a building's) keeps its
+     * drawing */
+    for (i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
+        input.cells[i].structureId = 7;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(CountSideQuadsReading(&mesh, -1.0f, -1.0f / 16.0f, 0.59f, 0.71f, 0.59f, 0.71f) == 4);
+    input.cells[3 * DIORAMA_TERRAIN_INPUT_SIZE + 4].claimOwner = 7;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(CountSideQuadsReading(&mesh, -1.0f, -1.0f / 16.0f, 0.59f, 0.71f, 0.59f, 0.71f) == 3);
+    input.cells[3 * DIORAMA_TERRAIN_INPUT_SIZE + 4].claimOwner = 0;
+    /* half a level: the ground's own drawing */
+    low->groundHeight = -0.5f;
+    low->visualHeight = -0.5f;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(CountSideQuadsReading(&mesh, -0.5f, -1.0f / 16.0f, 0.09f, 0.31f, 0.19f, 0.41f) == 4);
+    assert(CountSideQuadsReading(&mesh, -0.5f, -1.0f / 16.0f, 0.59f, 0.71f, 0.59f, 0.71f) == 0);
+    /* a bank of grass down to the water a level below shows it too ("Grass banks rock"); a beach's sand keeps
+     * its own drawing */
+    low->shape = DIORAMA_SHAPE_WATER;
+    low->terrainClass = DIORAMA_TERRAIN_CLASS_WATER;
+    low->groundHeight = -1.0f;
+    low->visualHeight = -1.0f;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(CountSideQuadsReading(&mesh, -1.0f, -1.0f / 16.0f, 0.59f, 0.71f, 0.59f, 0.71f) == 4);
+    for (i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
+        if (&input.cells[i] != low)
+            input.cells[i].terrainClass = DIORAMA_TERRAIN_CLASS_SAND;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(CountSideQuadsReading(&mesh, -1.0f, -1.0f / 16.0f, 0.09f, 0.31f, 0.19f, 0.41f) == 4);
+    /* sand a level over land shows it */
+    low->shape = DIORAMA_SHAPE_FLAT;
+    low->terrainClass = DIORAMA_TERRAIN_CLASS_GROUND;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(CountSideQuadsReading(&mesh, -1.0f, -1.0f / 16.0f, 0.59f, 0.71f, 0.59f, 0.71f) == 4);
+    for (i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
+        input.cells[i].terrainClass = DIORAMA_TERRAIN_CLASS_GROUND;
+    /* a mountain's rock keeps its drawing */
+    low->shape = DIORAMA_SHAPE_FLAT;
+    low->terrainClass = DIORAMA_TERRAIN_CLASS_GROUND;
+    for (i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
+        if (&input.cells[i] != low)
+            input.cells[i].measuredFlags = DIORAMA_MEASURED_MOUNTAIN_ART;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(CountSideQuadsReading(&mesh, -1.0f, -1.0f / 16.0f, 0.59f, 0.71f, 0.59f, 0.71f) == 0);
+    for (i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
+        input.cells[i].measuredFlags = 0;
+    /* a jump ledge over ground a level and more below: the skirt under its bank shows the rock */
+    {
+        struct DioramaTerrainCell *ledge = &input.cells[3 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+
+        ledge->shape = DIORAMA_SHAPE_LEDGE;
+        ledge->behavior = MB_JUMP_EAST;
+        ledge->terrainClass = DIORAMA_TERRAIN_CLASS_ROCK;
+        ledge->groundHeight = 0.375f;
+        ledge->visualHeight = 0.375f;
+        ledge->ledgeTakeoffHeight = ledge->ledgeLandingHeight = 0.0f;
+        low->groundHeight = -1.5f;
+        low->visualHeight = -1.5f;
+        assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+        assert(CountSideQuadsReading(&mesh, -1.5f, -0.5f, 0.59f, 0.71f, 0.59f, 0.71f) >= 1);
+        input.rockFaces = 0;
+        assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+        assert(CountSideQuadsReading(&mesh, -1.5f, -0.5f, 0.59f, 0.71f, 0.59f, 0.71f) == 0);
+    }
+}
+
 static void TestPartialChunk(void)
 {
     struct DioramaTerrainChunkInput input;
@@ -1669,6 +1797,7 @@ int main(void)
     TestGameplayElevationDoesNotCreateVisualHeight();
     TestRaisedCellAndCapacity();
     TestStepDownClosesTheGap();
+    TestTallGroundSideShowsRock();
     TestPartialChunk();
     TestLedgeProfile();
     TestLedge();

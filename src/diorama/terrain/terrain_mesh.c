@@ -308,6 +308,7 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
     hash = HashU16(hash, input->chunkX);
     hash = HashU16(hash, input->chunkY);
     hash = HashU32(hash, input->rulesGeneration);
+    hash = HashByte(hash, input->rockFaces);
     for (i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
     {
         const struct DioramaTerrainCell *cell = &input->cells[i];
@@ -2473,6 +2474,65 @@ static void FaceMaterial(const struct DioramaTerrainCell *cell, uint8_t surface,
     }
 }
 
+/*
+ * A side of plain ground (grass, sand, a path, ash) a level or more tall shows rock: the map's rock wall (the
+ * owner's choice of 2026-11-01, "Rock faces"). Its own drawing, laid down it a tile at a time, was a plain green
+ * wall (the Safari Zone's north-east: its forest strips over its lowered ground, its terraces' grassy rims). The
+ * side under the ground's top (its skirt, AppendSkirtFaces; the whole side through the voxel spans) when it is
+ * that tall: the top's own voxel keeps its drawing, a lip of grass over the rock. So does the skirt a jump ledge or
+ * a rock edge hangs down to ground that far below (its drawing's lower layer, grass: the ring of ledges round the
+ * pit in the Safari Zone's north); their own faces keep their drawing. A bank of grass or a path down to the water
+ * a level below shows rock too (the owner's choice of 2026-11-01, "Grass banks rock": Route 119's river); a beach's
+ * sand keeps its drawing, and a mountain's rock, trees, buildings, stairs and the rest draw their own sides.
+ */
+static bool NaturalGround(uint8_t terrainClass)
+{
+    return terrainClass == DIORAMA_TERRAIN_CLASS_GROUND || terrainClass == DIORAMA_TERRAIN_CLASS_PATH
+        || terrainClass == DIORAMA_TERRAIN_CLASS_SAND || terrainClass == DIORAMA_TERRAIN_CLASS_ASH;
+}
+
+static bool GroundSideShowsRock(const struct DioramaTerrainChunkInput *input,
+                                const struct DioramaTerrainCell *cell, unsigned surface,
+                                unsigned materialFace, const struct DioramaShellFace *face)
+{
+    /* the cell beside each side: north, east, south, west (DIORAMA_MATERIAL_FACE_NORTH on) */
+    static const int8_t step[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+    const struct DioramaTerrainCell *beside;
+    int index;
+    int x;
+    int y;
+
+    if (!input->rockFaces || face->axis == 1 || surface > 1
+     || materialFace < DIORAMA_MATERIAL_FACE_NORTH || materialFace > DIORAMA_MATERIAL_FACE_WEST
+     || face->vMax - face->vMin < DIORAMA_VOXELS_PER_CELL - 1
+     || cell->claimOwner != 0 || IsTreeHullColumn(cell)
+     || (cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART))
+        return false;
+    if (cell->shape == DIORAMA_SHAPE_FLAT)
+    {
+        if (!NaturalGround(cell->terrainClass))
+            return false;
+    }
+    else if (cell->shape == DIORAMA_SHAPE_LEDGE || cell->shape == DIORAMA_SHAPE_CLIFF)
+    {
+        /* only the skirt under it */
+        if (surface != 1 || !(NaturalGround(cell->terrainClass) || cell->terrainClass == DIORAMA_TERRAIN_CLASS_ROCK))
+            return false;
+    }
+    else
+        return false;
+    index = (int)(cell - input->cells);
+    x = index % DIORAMA_TERRAIN_INPUT_SIZE + step[materialFace - DIORAMA_MATERIAL_FACE_NORTH][0];
+    y = index / DIORAMA_TERRAIN_INPUT_SIZE + step[materialFace - DIORAMA_MATERIAL_FACE_NORTH][1];
+    if (x < 0 || y < 0 || x >= DIORAMA_TERRAIN_INPUT_SIZE || y >= DIORAMA_TERRAIN_INPUT_SIZE)
+        return false;
+    beside = GetCell(input, x, y);
+    if (!beside->present)
+        return false;
+    return cell->terrainClass != DIORAMA_TERRAIN_CLASS_SAND
+        || (beside->shape != DIORAMA_SHAPE_WATER && beside->terrainClass != DIORAMA_TERRAIN_CLASS_WATER);
+}
+
 bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
                                struct DioramaTerrainVertex *vertices,
                                uint32_t vertexCapacity,
@@ -2589,6 +2649,8 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
                 band.vMin = band.vMax;
                 continue;
             }
+            if (GroundSideShowsRock(input, cell, surface, materialFace, face))
+                sourceMaterial = &input->rockFace;
             FacePositions(&band, positions);
             FaceMaterial(cell, surface, sourceMaterial, &band, &material);
             shade = face->axis == 1 ? 1.0f
