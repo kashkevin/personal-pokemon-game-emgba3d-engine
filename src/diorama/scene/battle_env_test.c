@@ -1535,6 +1535,16 @@ static void StartTrainer(int a, int b, bool doubles)
     BattleSetup_StartTrainerBattle_Debug();
 }
 
+/* arena:<trainer> - a Battle Arena battle (the 3D UI's Arena pieces, ui_battle.c): the trainer's party as trainer:'s, the
+ * battle typed as the Arena's (battle_frontier.c's FACILITY_BATTLE_ARENA), so the Arena's own rules run - three turns
+ * each, then the referee's judgment - in the run's copy of the save, in memory. */
+static void StartArenaBattle(int a)
+{
+    StartTrainer(a, 0, false);
+    gBattleTypeFlags |= BATTLE_TYPE_ARENA;
+    TestLog("Battle env test: a Battle Arena battle against trainer %d", a);
+}
+
 /* A Multi battle with an in-game partner, as the debug menu's "Try battle" with a
  * partner sets one up (and a 2-vs-2 script such as Mossdeep's Space Center does):
  * the player's three, the partner's party, one or two opponent trainers. */
@@ -2885,6 +2895,8 @@ static void StartBattle(void)
         StartTowerFloor(a);
     else if (strcmp(kind, "trainer") == 0)
         StartTrainer(a, 0, false);
+    else if (strcmp(kind, "arena") == 0)
+        StartArenaBattle(a);
     else if (strcmp(kind, "double") == 0)
         StartTrainer(a, 0, true);
     else if (strcmp(kind, "two") == 0)

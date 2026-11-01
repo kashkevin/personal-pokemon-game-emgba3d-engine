@@ -1311,6 +1311,42 @@ struct NativeFactory
     bool8 ready;
 };
 bool32 Factory_NativeUiState(struct NativeFactory *out);
+/* The Battle Arena's own pieces in its battles (battle_arena.c): the referee's box (the call at the battle's start and the
+ * judgment's lines; its text is the window ARENA_WIN_JUDGMENT_TEXT's) and the judgment after the third turn - the two
+ * Pokemon, the rows called so far (MIND, SKILL, BODY) with each side's mark, the points, and the result once called.
+ * The marks are what the game's judgment sprites show (their tiles: markTiles, markTileCount). */
+enum NativeArenaMark
+{
+    NATIVE_ARENA_MARK_LOSS,     /* the game's X */
+    NATIVE_ARENA_MARK_TIE,      /* the triangle: 1 point */
+    NATIVE_ARENA_MARK_WIN,      /* the circle: 2 points */
+};
+enum NativeArenaResult
+{
+    NATIVE_ARENA_RESULT_NONE,   /* not called yet */
+    NATIVE_ARENA_RESULT_PLAYER,
+    NATIVE_ARENA_RESULT_OPPONENT,
+    NATIVE_ARENA_RESULT_TIE,
+};
+struct NativeArena
+{
+    bool8 refereeBox;           /* the referee's box is up */
+    bool8 judgment;             /* the judgment's panel is up */
+    u8 rows;                    /* rows called: 0 to 3 (MIND, SKILL, BODY) */
+    u8 player[3];               /* enum NativeArenaMark, by row */
+    u8 opponent[3];
+    u8 playerPoints;            /* the totals the game keeps as it calls the rows */
+    u8 opponentPoints;
+    u8 result;                  /* enum NativeArenaResult */
+    u16 playerSpecies;
+    u16 opponentSpecies;
+    u8 playerName[POKEMON_NAME_LENGTH + 1];
+    u8 opponentName[POKEMON_NAME_LENGTH + 1];
+    u8 lostOpponent;            /* the opponent's party members lost by a referee's decision (bits) */
+    u16 markTiles;              /* the judgment marks' first sprite tile (0xFFFF: not loaded) */
+    u16 markTileCount;
+};
+bool32 BattleArena_NativeUiState(struct NativeArena *out);
 /* The Battle Dome's tourney tree (battle_dome.c: the interactive tree, the lobby's record of the last tourney, a
  * round's results between battles): the sixteen in the tree's order (the left side top to bottom, then the right;
  * round one's pairs side by side), how far each has come and who is out as the tree shows it now, and the cursor on

@@ -178,6 +178,10 @@ u8 BattleArena_ShowJudgmentWindow(u8 *state)
     case 2:
         if (!IsDma3ManagerBusyWithBgCopy())
         {
+#ifdef ENABLE_NATIVE_UI
+            BattleArena_NativeUiNote(NATIVE_ARENA_JUDGMENT, TRUE);
+#endif
+#line 181 // gba-line
             gBattleTextBuff1[0] = CHAR_0;
             gBattleTextBuff1[1] = EOS;
             gBattleTextBuff2[0] = CHAR_0;
@@ -260,6 +264,10 @@ u8 BattleArena_ShowJudgmentWindow(u8 *state)
         (*state)++;
         break;
     case JUDGMENT_STATE_FINISHED + 1:
+#ifdef ENABLE_NATIVE_UI
+        BattleArena_NativeUiNote(NATIVE_ARENA_JUDGMENT, FALSE);
+#endif
+#line 263 // gba-line
         SetGpuReg(REG_OFFSET_WININ, (WININ_WIN0_ALL & ~WININ_WIN0_BG0) | WININ_WIN1_ALL);
         HandleBattleWindow(5, 0, 24, 13, WINDOW_CLEAR);
         CopyBgTilemapBufferToVram(0);
@@ -583,6 +591,10 @@ void DrawArenaRefereeTextBox(void)
     FillBgTilemapBufferRect(0, 0x834, 2,  19, width - 2, 1, palNum);
     FillBgTilemapBufferRect(0, 0x835, 28, 19, 1,  1, palNum);
     FillBgTilemapBufferRect(0, 0x836, 29, 19, 1,  1, palNum);
+#ifdef ENABLE_NATIVE_UI
+    BattleArena_NativeUiNote(NATIVE_ARENA_REFEREE_BOX, TRUE);
+#endif
+#line 586 // gba-line
 }
 
 void EraseArenaRefereeTextBox(void)
@@ -608,4 +620,89 @@ void EraseArenaRefereeTextBox(void)
     FillBgTilemapBufferRect(0, 0xF, 2, 19, width, 1, palNum);
     FillBgTilemapBufferRect(0, 0x10, 28, 19, 1, 1, palNum);
     FillBgTilemapBufferRect(0, 0x11, 29, 19, 1, 1, palNum);
+#ifdef ENABLE_NATIVE_UI
+    BattleArena_NativeUiNote(NATIVE_ARENA_REFEREE_BOX, FALSE);
+#endif
+#line 611 // gba-line
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "party_menu.h"
+#include "native_ui/ui_engine.h"
+// The 3D UI (src/native_ui/screens/ui_battle.c) draws the Battle Arena's referee box and judgment in the battle HUD's
+// design and follows this state; the game keeps every rule. The pieces as the game shows them (DrawArenaRefereeTextBox
+// / EraseArenaRefereeTextBox; the judgment's window from its texts until it is cleared).
+static bool8 sNativeArenaShown[2];
+
+void BattleArena_NativeUiNote(u32 piece, bool32 shown)
+{
+    if (piece < ARRAY_COUNT(sNativeArenaShown))
+        sNativeArenaShown[piece] = shown;
+}
+
+// a row's mark for the player's side, as ShowJudgmentSprite decides it
+static u8 NativeArenaMark(u8 category, enum BattlerId battler)
+{
+    enum BattlerId foe = GetOppositeBattler(battler);
+    int mine = 0, theirs = 0;
+
+    switch (category)
+    {
+    case ARENA_CATEGORY_MIND:
+        mine = gBattleStruct->arenaMindPoints[battler];
+        theirs = gBattleStruct->arenaMindPoints[foe];
+        break;
+    case ARENA_CATEGORY_SKILL:
+        mine = gBattleStruct->arenaSkillPoints[battler];
+        theirs = gBattleStruct->arenaSkillPoints[foe];
+        break;
+    case ARENA_CATEGORY_BODY:
+        if (gBattleStruct->arenaStartHp[battler] == 0 || gBattleStruct->arenaStartHp[foe] == 0)
+            return NATIVE_ARENA_MARK_TIE;
+        mine = (gBattleMons[battler].hp * 100) / gBattleStruct->arenaStartHp[battler];
+        theirs = (gBattleMons[foe].hp * 100) / gBattleStruct->arenaStartHp[foe];
+        break;
+    }
+    return mine > theirs ? NATIVE_ARENA_MARK_WIN : mine == theirs ? NATIVE_ARENA_MARK_TIE : NATIVE_ARENA_MARK_LOSS;
+}
+
+bool32 BattleArena_NativeUiState(struct NativeArena *out)
+{
+    static const u8 sCategories[] = {ARENA_CATEGORY_MIND, ARENA_CATEGORY_SKILL, ARENA_CATEGORY_BODY};
+    enum BattlerId player = GetBattlerAtPosition(B_POSITION_PLAYER_LEFT);
+    enum BattlerId opponent = GetBattlerAtPosition(B_POSITION_OPPONENT_LEFT);
+    u8 state;
+
+    memset(out, 0, sizeof(*out));
+    out->markTiles = 0xFFFF;
+    if (!(gBattleTypeFlags & BATTLE_TYPE_ARENA) || gBattleStruct == NULL || player >= gBattlersCount
+     || opponent >= gBattlersCount)
+        return FALSE;
+    out->refereeBox = sNativeArenaShown[NATIVE_ARENA_REFEREE_BOX];
+    out->judgment = sNativeArenaShown[NATIVE_ARENA_JUDGMENT];
+    out->lostOpponent = gBattleStruct->arenaLostOpponentMons;
+    out->playerSpecies = gBattleMons[player].species;
+    out->opponentSpecies = gBattleMons[opponent].species;
+    GetMonNickname(GetBattlerMon(player), out->playerName);
+    GetMonNickname(GetBattlerMon(opponent), out->opponentName);
+    if (out->judgment)
+    {
+        // the judgment's state (gBattleCommunication[0]): each of 4, 5 and 6 calls a row and moves on; 7 calls the result
+        state = gBattleCommunication[0];
+        out->rows = state <= 4 ? 0 : state >= 7 ? 3 : state - 4;
+        for (u32 i = 0; i < out->rows; i++)
+        {
+            out->player[i] = NativeArenaMark(sCategories[i], player);
+            out->opponent[i] = NativeArenaMark(sCategories[i], opponent);
+        }
+        out->playerPoints = gBattleTextBuff1[0] >= CHAR_0 ? gBattleTextBuff1[0] - CHAR_0 : 0;
+        out->opponentPoints = gBattleTextBuff2[0] >= CHAR_0 ? gBattleTextBuff2[0] - CHAR_0 : 0;
+        if (state >= JUDGMENT_STATE_FINISHED)
+            out->result = out->playerPoints > out->opponentPoints ? NATIVE_ARENA_RESULT_PLAYER
+                        : out->playerPoints < out->opponentPoints ? NATIVE_ARENA_RESULT_OPPONENT : NATIVE_ARENA_RESULT_TIE;
+        out->markTiles = GetSpriteTileStartByTag(TAG_JUDGMENT_ICON);
+        out->markTileCount = 0x200 / TILE_SIZE_4BPP;
+    }
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

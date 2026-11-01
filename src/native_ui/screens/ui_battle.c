@@ -17,9 +17,11 @@
  * BAG; nothing to press but the messages). The ability and item pop-ups: the
  * game's two lines ("X's" and the ability or the item) on a plate in the
  * databoxes' style, sliding in from the screen's edge as the game's slide in
- * (the foe's on the right, yours on the left). Kept as the game's picture: the
- * Battle Arena (its menus differ). The level-up box and a trainer battle's rewards are screen
- * 26's (ui_results.c).
+ * (the foe's on the right, yours on the left). The Battle Arena: the referee's lines on the
+ * message plate under a REFEREE tag, and the judgment after the third turn as a card over the
+ * battle the game darkens - the two Pokemon, MIND, SKILL and BODY as the referee calls them with
+ * each side's mark, the points (battle_arena.c). The level-up box and a trainer battle's rewards
+ * are screen 26's (ui_results.c).
  * Project-owned.
  */
 #include <ctype.h>
@@ -37,6 +39,7 @@
 #include "battle_util.h"
 #include "battle_message.h"
 #include "bg.h"
+#include "battle_arena.h"
 #include "graphics.h"
 #include "item.h"
 #include "main.h"
@@ -55,6 +58,8 @@
 #include "native_ui/ui_draw.h"
 #include "native_ui/ui_engine.h"
 #include "native_ui/ui_gfx.h"
+#include "native_ui/ui_items.h"
+#include "native_ui/ui_kit.h"
 #include "native_ui/ui_mon.h"
 #include "native_ui/ui_results.h"
 #include "native_ui/ui_screen.h"
@@ -183,6 +188,11 @@ static struct
     u16 linkWaiting;
     u8 linkChoice;     /* the choice that went (enum NativeBattleInput) */
     s8 lastChooser;    /* the battler whose choice the player controller waited for last */
+    /* the Battle Arena: the referee's box and the judgment (battle_arena.c) */
+    struct NativeArena arena;
+    u8 ref[UI_MESSAGE_COPY];
+    u32 refPrinted;
+    bool refPrinting;
 } sB;
 
 /* A link battle's FIGHT goes to the host, whose move menu is a round trip away (the owner's "slight pause when selecting
@@ -233,7 +243,7 @@ static bool Supported(void)
 {
     u32 player = GetBattlerAtPosition(B_POSITION_PLAYER_LEFT);
 
-    if (gBattleTypeFlags & (BATTLE_TYPE_ARENA | BATTLE_TYPE_POKEDUDE))
+    if (gBattleTypeFlags & BATTLE_TYPE_POKEDUDE)
         return false;
     /* the catching tutorial: Wally's (his controller on the player's side) */
     if ((gBattleTypeFlags & BATTLE_TYPE_CATCH_TUTORIAL)
@@ -357,7 +367,9 @@ static void CaptureFoePips(void)
 
         if (species == SPECIES_NONE || species == SPECIES_EGG)
             sB.foePips[i] = 0;
-        else if (GetMonData(&party[i], MON_DATA_HP) == 0)
+        else if (GetMonData(&party[i], MON_DATA_HP) == 0
+              || ((gBattleTypeFlags & BATTLE_TYPE_ARENA) && gBattleStruct != NULL
+                  && (gBattleStruct->arenaLostOpponentMons & (1u << i))))
             sB.foePips[i] = 2;
         else if (GetMonData(&party[i], MON_DATA_STATUS) != 0)
             sB.foePips[i] = 3;
@@ -778,6 +790,20 @@ static void Capture(void)
 
         sB.hasPrompt = TextPrinter_NativeUiWindowText(B_WIN_ACTION_PROMPT, sB.prompt, sizeof(sB.prompt), &printed, &active);
     }
+    sB.ref[0] = EOS;
+    sB.refPrinting = false;
+    if (!(gBattleTypeFlags & BATTLE_TYPE_ARENA) || !BattleArena_NativeUiState(&sB.arena))
+    {
+        memset(&sB.arena, 0, sizeof(sB.arena));
+        sB.arena.markTiles = 0xFFFF;
+    }
+    else if (sB.arena.refereeBox)
+    {
+        if (TextPrinter_NativeUiWindowText(ARENA_WIN_JUDGMENT_TEXT, sB.ref, sizeof(sB.ref), &sB.refPrinted, &active))
+            sB.refPrinting = active;
+        else
+            sB.ref[0] = EOS;
+    }
     UiResults_Capture();
     CrumbChoiceAndMessage();
     CaptureLinkWaiting();
@@ -819,7 +845,8 @@ static void HideObjects(uint32_t mask[4])
     {
         u32 t = oam[i].tileNum;
 
-        if ((tiles[t >> 5] >> (t & 31)) & 1)
+        if (((tiles[t >> 5] >> (t & 31)) & 1)
+         || (sB.arena.markTiles != 0xFFFF && t >= sB.arena.markTiles && t < sB.arena.markTiles + sB.arena.markTileCount))
             mask[i >> 5] |= 1u << (i & 31);
     }
 }
@@ -1453,6 +1480,21 @@ static void DrawMessagePage(int L, int R, int dyB, int t)
     u8 waiting[64];
 
     MessagePlate(L, NATIVE_UI_BATTLE_PANEL_Y + dyB, w, 70);
+    if (sB.arena.refereeBox)
+    {
+        /* the Battle Arena's referee: his lines in his own box (the game's window over the message box) */
+        static const u8 sReferee[] = _("REFEREE");
+        int tw = UiText_Width(UI_FONT_NORMAL, sReferee, 0) + 20;
+
+        UiG_Paint(UiM_Rounded4(tw, 20, 4, 4, 4, 4), L + 10, NATIVE_UI_BATTLE_PANEL_Y + dyB - 12, UI_HEX(0xC86830),
+                  &(struct UiPaint){UI_HEX(0x401808), UI_HEX(0xF0A060), UI_HEX(0x803818), 0, 0, NULL, UI_NONE});
+        UiText_Draw(UI_FONT_NORMAL, L + 10 + tw / 2, NATIVE_UI_BATTLE_PANEL_Y + dyB - 10, sReferee, UI_P_TEXT_W,
+                    UI_HEX(0x401808), UI_ALIGN_CENTER, 0);
+        if (sB.ref[0] != EOS)
+            MessageText(L + 14, 293 + dyB, w - 40, sB.ref, sB.refPrinting ? (int)sB.refPrinted : -1);
+        UiG_Hit(HIT_MESSAGE, 0, L, NATIVE_UI_BATTLE_PANEL_Y + dyB, w, 70);
+        return;
+    }
     if (LinkWaitingText(waiting, false, t))
         MessageText(L + 14, 293 + dyB, w - 40, waiting, -1);
     else if (sB.hasMsg)
@@ -1597,6 +1639,82 @@ static void DrawTargetPage(int L, int R, int dyB, int t)
     }
 }
 
+/* one of the judgment's marks, as the game's sprites: the circle (won the row), the triangle (even), the X (lost) */
+static void ArenaMark(int cx, int cy, u8 mark)
+{
+    static const int sTri[] = {12, 0, 24, 21, 0, 21};
+    static const int sX[] = {0, 4, 4, 0, 11, 7, 18, 0, 22, 4, 15, 11, 22, 18, 18, 22, 11, 15, 4, 22, 0, 18, 7, 11};
+    const struct UiMask *m;
+
+    switch (mark)
+    {
+    case NATIVE_ARENA_MARK_WIN:
+        m = UiM_Ellipse(24, 24);
+        UiG_Mask(UiM_Sub(m, UiM_Erode4(UiM_Erode4(UiM_Erode4(UiM_Erode4(m))))), cx - 12, cy - 12, UI_HEX(0xE84838));
+        break;
+    case NATIVE_ARENA_MARK_TIE:
+        m = UiM_Poly(25, 22, sTri, 3);
+        UiG_Mask(UiM_Sub(m, UiM_Erode4(UiM_Erode4(UiM_Erode4(m)))), cx - 12, cy - 12, UI_HEX(0xD89828));
+        break;
+    default:
+        UiG_Mask(UiM_Poly(23, 23, sX, 12), cx - 11, cy - 11, UI_HEX(0x5868A0));
+        break;
+    }
+}
+
+/* The Battle Arena's judgment (battle_arena.c): the two Pokemon, MIND, SKILL and BODY as the referee calls them with each
+ * side's mark, the points as the game counts them; the winner's side lit once called. The game darkens the battle behind. */
+static void DrawArenaJudgment(int L, int R, int T, int t)
+{
+    static const u8 sTitle[] = _("JUDGMENT");
+    const u8 *const rows[3] = {gText_Mind, gText_Skill, gText_Body};
+    const struct NativeArena *a = &sB.arena;
+    int w = 460, h = 196, x = (L + R) / 2 - w / 2, y = T + 12;
+    struct UiRamp band = UiRampDefault(UI_HEX(0xC86830));
+    const u8 *names[2] = {a->playerName, a->opponentName};
+    u16 species[2] = {a->playerSpecies, a->opponentSpecies};
+    u8 points[2][4];
+
+    UiG_Paint(UiM_Rounded4(w, h, 8, 8, 8, 8), x, y, UI_P_CREAM,
+              &(struct UiPaint){UI_HEX(0x101420), UI_P_CREAM_HI, UI_P_CREAM_LO, 0, 2, NULL, UI_NONE});
+    UiG_Paint(UiM_Rounded4(w - 16, 26, 5, 5, 5, 5), x + 8, y + 8, band.base,
+              &(struct UiPaint){band.ink, band.hi, band.lo, 0, 0, NULL, UI_NONE});
+    UiText_Draw(UI_FONT_NORMAL, x + w / 2, y + 12, sTitle, UI_P_TEXT_W, band.ink, UI_ALIGN_CENTER, 0);
+    ConvertIntToDecimalStringN(points[0], a->playerPoints, STR_CONV_MODE_LEFT_ALIGN, 2);
+    ConvertIntToDecimalStringN(points[1], a->opponentPoints, STR_CONV_MODE_LEFT_ALIGN, 2);
+    for (int k = 0; k < 2; k++)
+    {
+        int cx = k == 0 ? x + 104 : x + w - 104;
+        bool won = (k == 0 && a->result == NATIVE_ARENA_RESULT_PLAYER) || (k == 1 && a->result == NATIVE_ARENA_RESULT_OPPONENT);
+        bool lost = (k == 0 && a->result == NATIVE_ARENA_RESULT_OPPONENT) || (k == 1 && a->result == NATIVE_ARENA_RESULT_PLAYER);
+
+        /* the points in the band, on each side's end */
+        UiText_Draw(UI_FONT_NORMAL, k == 0 ? x + 28 : x + w - 28, y + 12, points[k], UI_P_TEXT_W, band.ink,
+                    k == 0 ? UI_ALIGN_LEFT : UI_ALIGN_RIGHT, 0);
+        /* the Pokemon: its icon on a plate, its name; the winner's plate lit */
+        UiG_Paint(UiM_Rounded4(176, 38, 4, 4, 4, 4), cx - 88, y + 42,
+                  won ? UI_HEX(0xF8D878) : UiMix(UI_P_CREAM, UI_P_CREAM_LO, 0.4),
+                  &(struct UiPaint){won ? UI_HEX(0xB07818) : UI_P_CREAM_LO, UI_NONE, UI_NONE, 0, 0, NULL, UI_NONE});
+        UiGfx_MonIcon(species[k], 0, false, lost ? 0 : (t / 16) % 2, cx - 84, y + 46, NULL);
+        UiText_Draw(UI_FONT_NORMAL, cx - 44, y + 53, names[k], lost ? UI_P_TEXT_MUTED : UI_P_TEXT, UI_NONE, UI_ALIGN_LEFT, 0);
+    }
+    UiItems_BigCaps(x + w / 2, y + 51, "VS", 2, UI_HEX(0xE84838), UI_HEX(0x581010), UI_ALIGN_CENTER);
+    for (int r = 0; r < 3; r++)
+    {
+        int ry = y + 90 + r * 34;
+
+        UiG_Paint(UiM_Rounded4(w - 48, 28, 4, 4, 4, 4), x + 24, ry, UI_P_PAPER,
+                  &(struct UiPaint){UI_P_CREAM_LO, UI_HEX(0xFFFFFF), UI_P_PAPER_LO, 0, 0, NULL, UI_NONE});
+        UiText_Draw(UI_FONT_NORMAL, x + w / 2, ry + 6, rows[r], r < a->rows ? UI_P_TEXT : UI_P_TEXT_MUTED, UI_NONE,
+                    UI_ALIGN_CENTER, 0);
+        if (r < a->rows)
+        {
+            ArenaMark(x + 104, ry + 14, a->player[r]);
+            ArenaMark(x + w - 104, ry + 14, a->opponent[r]);
+        }
+    }
+}
+
 static void Draw(int t)
 {
     int x0, y0, w, h, L, R, T, dyB;
@@ -1613,6 +1731,8 @@ static void Draw(int t)
     if (!UiResults_LedgerShown())
         DrawBoxes(L, R, T, dyB);
     PopUps(L, R, T, dyB);
+    if (sB.arena.judgment)
+        DrawArenaJudgment(L, R, T, t);
     UiResults_Draw(L, R, T, t);
     if (sB.chooser >= 0 && (sB.input == NATIVE_BATTLE_INPUT_TARGET || sB.input == NATIVE_BATTLE_INPUT_TARGETS_SHOWN))
         DrawTargetPage(L, R, dyB, t);
