@@ -2529,8 +2529,11 @@ static bool GroundSideShowsRock(const struct DioramaTerrainChunkInput *input,
     beside = GetCell(input, x, y);
     if (!beside->present)
         return false;
-    return cell->terrainClass != DIORAMA_TERRAIN_CLASS_SAND
-        || (beside->shape != DIORAMA_SHAPE_WATER && beside->terrainClass != DIORAMA_TERRAIN_CLASS_WATER);
+    /* a beach: sand by its class or by the game's behaviour (Route 115's, MB_SAND, is ground to the rules) */
+    if (cell->terrainClass == DIORAMA_TERRAIN_CLASS_SAND || cell->behavior == MB_SAND
+     || cell->behavior == MB_DEEP_SAND)
+        return beside->shape != DIORAMA_SHAPE_WATER && beside->terrainClass != DIORAMA_TERRAIN_CLASS_WATER;
+    return true;
 }
 
 bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,

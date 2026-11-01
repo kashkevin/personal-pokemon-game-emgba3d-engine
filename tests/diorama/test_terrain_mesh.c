@@ -421,6 +421,17 @@ static void TestTallGroundSideShowsRock(void)
             input.cells[i].terrainClass = DIORAMA_TERRAIN_CLASS_SAND;
     assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
     assert(CountSideQuadsReading(&mesh, -1.0f, -1.0f / 16.0f, 0.09f, 0.31f, 0.19f, 0.41f) == 4);
+    /* sand by the game's behaviour (MB_SAND) though the rules call it ground, as Route 115's beach */
+    for (i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
+        if (&input.cells[i] != low)
+        {
+            input.cells[i].terrainClass = DIORAMA_TERRAIN_CLASS_GROUND;
+            input.cells[i].behavior = MB_SAND;
+        }
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(CountSideQuadsReading(&mesh, -1.0f, -1.0f / 16.0f, 0.09f, 0.31f, 0.19f, 0.41f) == 4);
+    for (i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
+        input.cells[i].behavior = MB_NORMAL;
     /* sand a level over land shows it */
     low->shape = DIORAMA_SHAPE_FLAT;
     low->terrainClass = DIORAMA_TERRAIN_CLASS_GROUND;
