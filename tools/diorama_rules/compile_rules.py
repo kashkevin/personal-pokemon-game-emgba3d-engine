@@ -25,7 +25,8 @@ from profiles import NOMINAL_HEIGHTS, TileShape, shape_from_action
 from pixel_objects import UPRIGHT_CLASSES as UPRIGHT_PIXEL_CLASSES, extract_layout
 from structures import analyze_layout
 from terrace_topology import (WATER_BEHAVIORS, cave_climbs, cave_levels, join_level_free_cells, join_water,
-                              lift_blocked_cells, mountain_ledges, rock_tops, seam_shifts, slope_tops,
+                              lift_blocked_cells, mountain_ledges, pass_levels, rock_tops, seam_shifts,
+                              slope_tops,
                               solve_layout as solve_terrace_topology)
 from tile_shape import ClassificationError, TileShapeClassifier
 
@@ -1380,6 +1381,11 @@ def _reefs_at_sea_level(cells: tuple[dict, ...], width: int, height: int,
 # Route 112's plateau three levels up, Route 111's two (the owner's decision of 2026-10-29, "Raise to the GBA
 # heights"). Route 115's tops would stand four levels up, its rock two over Route 114's across their seam.
 GBA_HEIGHT_LAYOUTS = frozenset({"LAYOUT_ROUTE112", "LAYOUT_ROUTE111", "LAYOUT_ROUTE111_NO_MIRAGE_TOWER"})
+# The mountain passes whose paths stand at the heights their ledges and slopes give them (terrace_topology.pass_levels;
+# KNOWN_ISSUES MS-153). None yet: Jagged Pass ("LAYOUT_JAGGED_PASS", reached only by warps, no seam to meet) solves
+# to nine levels from the Mt. Chimney end down, but its rock does not yet stand with its paths (the first try,
+# 2026-11-01: the probe found more fins and rock lying flat than before), so it stays as it was until that is done.
+PASS_LAYOUTS: frozenset[str] = frozenset()
 
 # The trees of a forest (_grounded_forests): the classifier's hulls round the game's trees.
 FOREST_CLASSES = frozenset({"tree", "forest-wall", "round-hull", "grouped-hull"})
@@ -1837,6 +1843,12 @@ def compile_data(root: Path) -> dict:
                     mountain_art_cells[layout["id"]] = mountain_art_cells[layout["id"]] | faces
                     mountain_outlines[layout["id"]] = mountain_outline_cells(
                         pixel_summaries[layout["id"]], mountain_art_cells[layout["id"]])
+        if layout["id"] in PASS_LAYOUTS:
+            # A mountain pass's paths at the heights its ledges and slopes give them, a level a
+            # ledge (terrace_topology.pass_levels: Jagged Pass lay on one level, KNOWN_ISSUES
+            # MS-153); its rock is the rock bands' over the ground round it (rock_bands.py: the
+            # lifts and the mountain's masses leave it alone, below).
+            solved = {**solved, **pass_levels(cells[layout["id"]], layout["width"], layout["height"], solved)}
         return solved
 
     members = {}
@@ -2099,14 +2111,15 @@ def compile_data(root: Path) -> dict:
                 # (a cave mouth put on the level it is entered from lifts no rock
                 # round it: join_level_free_cells, and a doorway solve_layout
                 # lays with the ground it is entered from)
-                terrace_topology[layout["id"]] = {
-                    **terrace_topology[layout["id"]],
-                    **lift_blocked_cells(layout_cells, layout["width"], layout["height"],
-                                         {offset: entry for offset, entry
-                                          in terrace_topology[layout["id"]].items()
-                                          if offset not in level_free_cells[layout["id"]]
-                                          and not entry.get("doorway")},
-                                         liftable=liftable)}
+                if layout["id"] not in PASS_LAYOUTS:  # (a pass's rock: the rock bands', below)
+                    terrace_topology[layout["id"]] = {
+                        **terrace_topology[layout["id"]],
+                        **lift_blocked_cells(layout_cells, layout["width"], layout["height"],
+                                             {offset: entry for offset, entry
+                                              in terrace_topology[layout["id"]].items()
+                                              if offset not in level_free_cells[layout["id"]]
+                                              and not entry.get("doorway")},
+                                             liftable=liftable)}
             if rocks:
                 # The rocks the sea's own height surrounds (no terrace, or water
                 # no terrace reaches) lie at that height too: they stood a tile's
@@ -2123,7 +2136,7 @@ def compile_data(root: Path) -> dict:
             mass_tops: dict[int, int] = {}      # the mountains _mountain_masses stands (rock_bands keeps them)
             layout_rows = (maps_by_layout.get(layout["id"], ())
                            or maps_by_layout.get(script_layouts.get(layout["id"]), ()))
-            if (terrace_topology[layout["id"]] and layout_rows
+            if (terrace_topology[layout["id"]] and layout_rows and layout["id"] not in PASS_LAYOUTS
                     and all(_outdoor(row["mapType"]) for row in layout_rows)):
                 # The mountain one mass on one level, from the lowest ground it
                 # meets to the highest (the owner's report of 2026-10-24).

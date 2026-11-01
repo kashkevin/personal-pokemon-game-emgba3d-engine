@@ -8,7 +8,8 @@ from catalog import load_tilesets, load_world
 from compile_rules import _load_cells, parse_behaviors
 from terrace_topology import (CAVE_RISE_Q16, LEDGE_JUMPS, MOUNTAIN_LEDGE_Q16, SLOPE_RISE_Q16, TERRACE_ROLES,
                               cave_climbs, cave_levels, join_level_free_cells, join_water, lift_blocked_cells,
-                              mountain_ledges, rock_tops, role_for_cell, seam_shifts, slope_tops, solve_layout)
+                              mountain_ledges, pass_levels, rock_tops, role_for_cell, seam_shifts, slope_tops,
+                              solve_layout)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -644,6 +645,75 @@ class TerraceTopologyTests(unittest.TestCase):
             # east cliff on the level of the rock round it (a level over the desert)
             for x, y, level in ((20, 34, 32), (20, 36, 32), (38, 83, 16)):
                 self.assertEqual(raised[y * width + x]["groundQ16"], level, (layout["id"], x, y))
+
+    def test_a_passs_paths_stand_a_level_a_ledge_apart(self):
+        # A pass whose paths are all at one elevation (Jagged Pass): the top path H jumps south into an island I,
+        # which jumps east into a way W that runs down from H beside it, and both jump south into the bottom L.
+        # H > I > W asks a ramp in the way (its narrow row (5,2)); the pocket P behind the rock lies with the rock.
+        def rock():
+            return dict(cell(1), collision=1, elevation=0)
+
+        def path():
+            return dict(cell(1), collision=0, elevation=3)
+
+        def ledge(behavior):
+            return dict(cell(1), behavior=behavior, collision=0, elevation=3)
+
+        rows = ["#########",
+                "#HHHHH###",
+                "#vvv#W###",
+                "#III>W#P#",
+                "#vvv#v###",
+                "#LLLLL###",
+                "#########"]
+        make = {"#": rock, "H": path, "I": path, "W": path, "L": path, "P": path,
+                "v": lambda: ledge("MB_JUMP_SOUTH"), ">": lambda: ledge("MB_JUMP_EAST")}
+        cells = tuple(make[ch]() for row in rows for ch in row)
+        out = pass_levels(cells, 9, 7)
+
+        def at(x, y):
+            return out.get(y * 9 + x, {"groundQ16": 0, "topQ16": 0, "profile": "none"})
+
+        self.assertEqual({at(x, 1)["groundQ16"] for x in range(1, 6)}, {48})       # H
+        self.assertEqual({at(x, 3)["groundQ16"] for x in range(1, 4)}, {32})       # I, a ledge under H
+        self.assertEqual(at(5, 3)["groundQ16"], 16)                                # W's foot, a ledge under I
+        self.assertEqual({at(x, 5)["groundQ16"] for x in range(1, 6)}, {0})        # L
+        self.assertEqual((at(5, 2)["profile"], at(5, 2)["groundQ16"], at(5, 2)["topQ16"]),
+                         ("transition-horizontal", 16, 48))                       # the ramp from W up to H
+        self.assertEqual(at(7, 3)["groundQ16"], 32)                                # the pocket with the rock round it
+        # every straight ledge drops from where it is jumped to where it lands
+        for offset, ch in enumerate("".join(rows)):
+            if ch in "v>":
+                step = 9 if ch == "v" else 1
+                self.assertGreater(at((offset - step) % 9, (offset - step) // 9)["groundQ16"],
+                                   at((offset + step) % 9, (offset + step) // 9)["groundQ16"])
+        # the same pass upside down (jumped north): the way would rise to the south, which no ramp does, so the
+        # island's asks still contradict and nothing changes
+        make["^"] = lambda: ledge("MB_JUMP_NORTH")
+        flipped = [row.replace("v", "^") for row in reversed(rows)]
+        cells = tuple(make[ch]() for row in flipped for ch in row)
+        self.assertEqual(pass_levels(cells, 9, 7), {})
+        # the repository's Jagged Pass: nine levels from the Mt. Chimney end down, every ledge a drop
+        tilesets = load_tilesets(ROOT)
+        _, layouts = load_world(ROOT)
+        names = {value: name for name, value
+                 in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
+        layout = next(row for row in layouts if row["id"] == "LAYOUT_JAGGED_PASS")
+        jagged = _load_cells(ROOT, [layout], tilesets, names)[0]["LAYOUT_JAGGED_PASS"]
+        width = layout["width"]
+        out = pass_levels(jagged, width, layout["height"], solve_layout(jagged, width, layout["height"]))
+
+        def level(x, y):
+            return out.get(y * width + x, {"groundQ16": 0})["groundQ16"]
+
+        self.assertEqual((level(14, 7), level(15, 22), level(14, 24), level(20, 24), level(14, 39)),
+                         (144, 80, 64, 48, 0))
+        self.assertEqual({out[y * width + 21]["profile"] for y in (21, 22, 23)}, {"transition-horizontal"})
+        for offset, entry in enumerate(jagged):
+            step = {"MB_JUMP_SOUTH": width, "MB_JUMP_EAST": 1, "MB_JUMP_WEST": -1}.get(entry.get("behavior"))
+            takeoff, landing = (offset - step, offset + step) if step else (None, None)
+            if step and jagged[takeoff].get("collision", 0) == 0 and jagged[landing].get("collision", 0) == 0:
+                self.assertGreater(level(takeoff % width, takeoff // width), level(landing % width, landing // width))
 
     def test_a_cave_mouth_takes_the_level_it_is_entered_from(self):
         # Route 116's way into Rusturf Tunnel (elevation 0, a door) in the rock's

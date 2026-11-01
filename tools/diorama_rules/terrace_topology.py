@@ -1168,6 +1168,323 @@ def slope_tops(cells: tuple[dict, ...], width: int, height: int,
     return out
 
 
+# A pass's paths stand this much apart a ledge or a slope (pass_levels): a level.
+PASS_RISE_Q16 = 16
+
+
+def _pass_ramp(region: list[int], high: set[int], low: set[int],
+               width: int) -> tuple[set[int], list[int], set[int]] | None:
+    """`region` (walkable cells side by side) parted where a narrow way runs
+    north to south between `high` (cells to stay up) and `low` (cells to go
+    down): the narrowest run of the region's cells across one row (from rock
+    to rock) that parts them, with every row next to it parted by as narrow a
+    run over it, those rows a ramp down to the south. Returns (the upper part,
+    the ramp's cells, the lower part), or None where nothing a row wide parts
+    them, or the upper part is not north of the way and the lower south."""
+    cells = set(region)
+
+    def parted(cut: set[int]) -> bool:
+        seen = set(high - cut)
+        pending = list(seen)
+        while pending:
+            offset = pending.pop()
+            for neighbor in (offset - width, offset + width,
+                             offset - 1 if offset % width else None,
+                             offset + 1 if (offset + 1) % width else None):
+                if neighbor in cells and neighbor not in cut and neighbor not in seen:
+                    seen.add(neighbor)
+                    pending.append(neighbor)
+        return not seen & low
+
+    runs: dict[int, list[set[int]]] = defaultdict(list)  # row: its runs that part high from low
+    for row in sorted({offset // width for offset in cells}):
+        line = sorted(offset for offset in cells if offset // width == row)
+        start = 0
+        for index in range(1, len(line) + 1):
+            if index == len(line) or line[index] != line[index - 1] + 1:
+                run = set(line[start:index])
+                if not run & (high | low) and parted(run):
+                    runs[row].append(run)
+                start = index
+    if not runs:
+        return None
+    narrowest = min(len(run) for row_runs in runs.values() for run in row_runs)
+    row, run = min((row, run) for row, row_runs in runs.items() for run in row_runs
+                   if len(run) == narrowest)
+    ramp = [run]
+    for step in (-1, 1):  # the rows next to it, as narrow, over it
+        while True:
+            edge = ramp[0] if step < 0 else ramp[-1]
+            nearby = [other for other in runs.get((min(edge) // width) + step, ())
+                      if len(other) == narrowest
+                      and {offset % width for offset in other} & {offset % width for offset in edge}]
+            if len(nearby) != 1:
+                break
+            if step < 0:
+                ramp.insert(0, nearby[0])
+            else:
+                ramp.append(nearby[0])
+    way = set().union(*ramp)
+    upper, pending = set(high), list(high)
+    while pending:
+        offset = pending.pop()
+        for neighbor in (offset - width, offset + width,
+                         offset - 1 if offset % width else None,
+                         offset + 1 if (offset + 1) % width else None):
+            if neighbor in cells and neighbor not in way and neighbor not in upper:
+                upper.add(neighbor)
+                pending.append(neighbor)
+    lower = cells - way - upper
+    if not lower >= low:
+        return None
+    # the upper part only north of the way, the lower only south (the ramp rises north)
+    if any(offset - width in lower for offset in ramp[0]) or any(offset + width in upper for offset in ramp[-1]):
+        return None
+    if not any(offset - width in upper for offset in ramp[0]) or not any(offset + width in lower
+                                                                         for offset in ramp[-1]):
+        return None
+    return upper, sorted(way), lower
+
+
+def pass_levels(cells: tuple[dict, ...], width: int, height: int,
+                solved: dict[int, dict] | None = None) -> dict[int, dict]:
+    """A mountain pass's paths at the heights its ledges and slopes give them:
+    Jagged Pass (KNOWN_ISSUES MS-153), the way down from Mt. Chimney, lay on
+    one level - all its walkable ground at one elevation, the GBA draws the
+    descent with ledges (jumped south, west and east) and the Acro Bike's
+    bumpy slopes - so the 3D view drew a flat maze with banks across it. A
+    region is walkable cells side by side at one elevation (0 and 15 joining
+    any); a ledge, a slope and rock bound them. Each ledge jumped straight asks
+    the region it is jumped from to stand at least a level over the one it
+    lands in, each slope (a run down a column) its top over its foot. Where two
+    regions ask it of each other (a ledge ring's island jumped into from the
+    north and out of to the east, back down to the path it was jumped from),
+    the region whose cells the asks meet is parted where a narrow way runs
+    south (_pass_ramp: Jagged Pass's east way beside the island at (14-18,
+    24-25)), the way a ramp down from the upper part to the lower. The levels:
+    the least that keep every ask, then each region moved within what its
+    neighbours allow toward the side most of its ledges are on (a region
+    jumped into from above and out of nowhere sits a level under the lowest
+    region it is jumped into from, not in a pit), the lowest at 0. Regions no
+    ask reaches (pockets the GBA draws behind the rock, or a group of them
+    apart from the pass) lie where the rock round them does (rock_tops: the
+    mountain's top). Slopes and the ramp rise between their regions over their
+    rows. Returns the cells' entries (the regions, the pockets, the slopes and
+    the ramp), or nothing where asks still contradict or a ramp cannot be
+    made."""
+    solved = solved or {}
+
+    def walkable(offset: int) -> bool:
+        cell = cells[offset]
+        behavior = cell.get("behavior")
+        return (cell.get("collision", 0) == 0 and offset not in solved
+                and behavior not in SLOPES and behavior not in WATER_BEHAVIORS
+                and not str(behavior or "").startswith("MB_JUMP_"))
+
+    region_of: dict[int, int] = {}
+    regions: list[list[int]] = []
+    for start in range(len(cells)):
+        if start in region_of or not walkable(start):
+            continue
+        index = len(regions)
+        region, pending = [], deque((start,))
+        region_of[start] = index
+        while pending:
+            offset = pending.popleft()
+            region.append(offset)
+            elevation = cells[offset].get("elevation")
+            for neighbor in _neighbours(offset, width, height):
+                other = cells[neighbor].get("elevation")
+                if (neighbor not in region_of and walkable(neighbor)
+                        and (other == elevation or other in (0, 15) or elevation in (0, 15))):
+                    region_of[neighbor] = index
+                    pending.append(neighbor)
+        regions.append(region)
+    slope = {offset for offset, cell in enumerate(cells)
+             if cell.get("collision", 0) == 0 and cell.get("behavior") in SLOPES}
+    slope_runs: list[list[int]] = []
+    for start in sorted(slope):
+        if start - width in slope:
+            continue
+        run, offset = [], start
+        while offset in slope:
+            run.append(offset)
+            offset += width
+        slope_runs.append(run)
+
+    def ends(run: list[int]) -> tuple[int, int] | None:
+        """A slope run's top and foot: the cells north and south of it, or, where rock is there (Jagged Pass's
+        (21,10-11), climbed onto from the west), the one walkable cell beside its end."""
+        found = []
+        for end, step in ((run[0], -width), (run[-1], width)):
+            if 0 <= end + step < len(cells) and end + step in region_of:
+                found.append(end + step)
+                continue
+            beside = [end + side for side in (-1, 1)
+                      if (end % width) + side in range(width) and end + side in region_of]
+            if len(beside) != 1:
+                return None
+            found.append(beside[0])
+        return found[0], found[1]
+
+    def asks_of() -> list[tuple[int, int, int, int]]:
+        """(upper region, lower region, the cell above, the cell below) for each ledge and slope run."""
+        asks = []
+        for offset, cell in enumerate(cells):
+            dx, dy = LEDGE_JUMPS.get(cell.get("behavior"), (0, 0))
+            if bool(dx) == bool(dy):
+                continue  # not a ledge, or a corner (the game jumps only the straight ones)
+            x, y = offset % width, offset // width
+            if not (0 <= x - dx < width and 0 <= x + dx < width and 0 <= y - dy < height and 0 <= y + dy < height):
+                continue
+            takeoff, landing = offset - dy * width - dx, offset + dy * width + dx
+            if takeoff in region_of and landing in region_of and region_of[takeoff] != region_of[landing]:
+                asks.append((region_of[takeoff], region_of[landing], takeoff, landing))
+        for run in slope_runs:
+            found = ends(run)
+            if found and region_of[found[0]] != region_of[found[1]]:
+                asks.append((region_of[found[0]], region_of[found[1]], found[0], found[1]))
+        return asks
+
+    asks = asks_of()
+    if not asks:
+        return {}
+    ramps: list[tuple[int, int, list[int]]] = []  # (upper region, lower region, the ramp's cells)
+    for _ in range(len(regions)):
+        pairs = {(a, b) for a, b, _, _ in asks}
+        pair = next((pair for pair in sorted(pairs) if (pair[1], pair[0]) in pairs), None)
+        if pair is None:
+            break
+        upper_index, lower_index = pair
+        # two regions over each other: part the one the asks meet in
+        for split, other in ((upper_index, lower_index), (lower_index, upper_index)):
+            high = {top for a, b, top, _ in asks if a == split and b == other}
+            low = {foot for a, b, _, foot in asks if a == other and b == split}
+            parted = _pass_ramp(regions[split], high, low, width)
+            if parted is None:
+                continue
+            upper, way, lower = parted
+            if any(top in way or foot in way for _, _, top, foot in asks):
+                return {}
+            new = len(regions)
+            regions[split] = sorted(upper)
+            regions.append(sorted(lower))
+            for offset in way:
+                del region_of[offset]
+            for offset in lower:
+                region_of[offset] = new
+            ramps.append((split, new, way))
+            break
+        else:
+            return {}
+        asks = asks_of()
+    below: dict[int, set[int]] = defaultdict(set)
+    weight: dict[tuple[int, int], int] = defaultdict(int)
+    for a, b, _, _ in asks:
+        below[a].add(b)
+        weight[a, b] += 1
+    for a, b, _ in ramps:
+        below[a].add(b)
+        weight[a, b] += 1
+    # the regions the asks join to the pass (the group of most cells); the rest are pockets
+    links: dict[int, set[int]] = defaultdict(set)
+    for a, others in below.items():
+        for b in others:
+            links[a].add(b)
+            links[b].add(a)
+    groups, grouped = [], set()
+    for start in sorted(links):
+        if start in grouped:
+            continue
+        group, pending = set(), [start]
+        grouped.add(start)
+        while pending:
+            index = pending.pop()
+            group.add(index)
+            for other in links[index]:
+                if other not in grouped:
+                    grouped.add(other)
+                    pending.append(other)
+        groups.append(group)
+    path = max(groups, key=lambda group: sum(len(regions[index]) for index in group))
+    # the least levels that keep every ask (a region a level over each it is jumped down into)
+    level: dict[int, int] = {}
+    state: dict[int, int] = {}
+
+    def least(index: int) -> bool:
+        if state.get(index) == 1:
+            return False  # still two regions over each other
+        if index in level:
+            return True
+        state[index] = 1
+        value = 0
+        for other in below[index]:
+            if not least(other):
+                return False
+            value = max(value, level[other] + 1)
+        state[index] = 2
+        level[index] = value
+        return True
+
+    if not all(least(index) for index in sorted(path)):
+        return {}
+    above: dict[int, set[int]] = defaultdict(set)
+    for a in path:
+        for b in below[a]:
+            above[b].add(a)
+    for _ in range(64):  # each region toward the side most of its ledges are on, within its neighbours
+        moved = False
+        for index in sorted(path):
+            lowest = max((level[other] + 1 for other in below[index]), default=None)
+            highest = min((level[other] - 1 for other in above[index]), default=None)
+            pull = (sum(weight[other, index] for other in above[index])
+                    - sum(weight[index, other] for other in below[index]))
+            if pull > 0 and highest is not None and highest > level[index]:
+                level[index], moved = highest, True
+            elif pull < 0 and lowest is not None and lowest < level[index]:
+                level[index], moved = lowest, True
+        if not moved:
+            break
+    base = min(level.values())
+    level = {index: value - base for index, value in level.items()}
+    out: dict[int, dict] = {}
+    for index, value in level.items():
+        if value:
+            for offset in regions[index]:
+                out[offset] = {"groundQ16": PASS_RISE_Q16 * value, "topQ16": PASS_RISE_Q16 * value,
+                               "profile": "none", "solid": False}
+    # the pockets: where the rock round them is (a level over the paths nearest them, down a level a cell)
+    pockets = {index for index in range(len(regions)) if index not in level}
+    if pockets:
+        rock = frozenset(offset for offset in range(len(cells))
+                         if (cells[offset].get("collision", 0) != 0 and offset not in solved
+                             and cells[offset].get("behavior") not in WATER_BEHAVIORS)
+                         or region_of.get(offset) in pockets)
+        tops = rock_tops(rock, {offset: PASS_RISE_Q16 * (level[index] + 1)
+                                for offset, index in region_of.items() if index in level},
+                         width, height, PASS_RISE_Q16)
+        for index in sorted(pockets):
+            value = max(tops.get(offset, PASS_RISE_Q16) for offset in regions[index])
+            for offset in regions[index]:
+                out[offset] = {"groundQ16": value, "topQ16": value, "profile": "none", "solid": False}
+    # the slopes and the ramps between their regions, rising north over their rows
+    climbs = [(region_of[found[0]], region_of[found[1]], run) for run, found
+              in ((run, ends(run)) for run in slope_runs)
+              if found and region_of[found[0]] in level and region_of[found[1]] in level
+              and level[region_of[found[0]]] > level[region_of[found[1]]]]
+    climbs += [(a, b, way) for a, b, way in ramps if a in level and b in level]
+    for upper, lower, run in climbs:
+        base, rise = PASS_RISE_Q16 * level[lower], PASS_RISE_Q16 * (level[upper] - level[lower])
+        rows = sorted({offset // width for offset in run}, reverse=True)  # south first
+        for offset in run:
+            step = rows.index(offset // width)
+            ground = base + round(rise * step / len(rows))
+            top = base + round(rise * (step + 1) / len(rows))
+            out[offset] = {"groundQ16": ground, "topQ16": top, "profile": "transition-horizontal",
+                           "solid": False, "rise": top - ground}
+    return out
+
+
 def lift_blocked_cells(cells: tuple[dict, ...], width: int, height: int,
                        solved: dict[int, dict], liftable=None) -> dict[int, dict]:
     """Blocked cells that are no terrace course (a house, a tree, a rock) stand
