@@ -39,6 +39,7 @@
 #include "pokedex.h"
 #include "rtc.h"
 #include "decoration_inventory.h"
+#include "frontier_pass.h"
 #include "constants/decorations.h"
 #include "hall_of_fame.h"
 #include "pokeblock.h"
@@ -1318,6 +1319,15 @@ static void OpenTestPyramidBag(void)
     TestLog("Battle env test: the Battle Pyramid's bag with %d items (level mode %u)", n, lvlMode);
     InitBattlePyramidBagCursorPosition();
     GoToBattlePyramidBagMenu(PYRAMIDBAG_LOC_FIELD, CB2_ReturnToField);
+}
+
+/* FPASS: the FRONTIER PASS as the START menu opens it, with PKMN_TEST_BP battle points (in memory; its symbols are the
+ * save's flags: PKMN_TEST_SET_FLAGS sets FLAG_SYS_TOWER_SILVER and the others) */
+static void OpenTestFrontierPass(void)
+{
+    gSaveBlock2Ptr->frontier.battlePoints = EnvInt("PKMN_TEST_BP", gSaveBlock2Ptr->frontier.battlePoints);
+    TestLog("Battle env test: the FRONTIER PASS with %u battle points", gSaveBlock2Ptr->frontier.battlePoints);
+    ShowFrontierPass(CB2_ReturnToFieldWithOpenMenu);
 }
 
 /* FACTORY / FSWAP: the Battle Factory's rental selection, or a swap screen (the player's three and a beaten
@@ -4156,7 +4166,7 @@ bool16 ScriptMenu_CreateStartMenuForPokenavTutorial(void);  /* script_menu.c: th
    party as its one record; PBLOCK the Pokéblock case with PKMN_TEST_POKEBLOCKS' blocks; CONTEST a Normal Rank Cool
    contest with the party's first Pokémon; BLEND the Berry Blender with a computer partner; BTAG the Bag's first
    berry's tag; DIPLOMA the POKéDEX diploma; PBAG the Battle Pyramid's bag; FACTORY the Battle Factory's rentals,
-   FSWAP its swap screen; DOME the Battle Dome's tourney tree, DOMERES a round's results tree, DOMEPREV the last
+   FSWAP its swap screen; FPASS the FRONTIER PASS; DOME the Battle Dome's tourney tree, DOMERES a round's results tree, DOMEPREV the last
    tourney's; MGIFT the main menu's MYSTERY GIFT, MEVENT its MYSTERY EVENTS (their flags set in the run's own copy
    of the save); CLEARSAVE the title screen's clear-save question (only ever answered NO in the checks) */
 static bool FieldEventAt(const char *script, const char *event, int frame)
@@ -4704,6 +4714,8 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
             OpenTestPyramidBag();
         if (FieldEventAt(s.fieldKeys, "FACTORY", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
             OpenTestFactory(false);
+        if (FieldEventAt(s.fieldKeys, "FPASS", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
+            OpenTestFrontierPass();
         if (FieldEventAt(s.fieldKeys, "FSWAP", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
             OpenTestFactory(true);
         if (FieldEventAt(s.fieldKeys, "DOME", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)

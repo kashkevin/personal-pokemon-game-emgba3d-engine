@@ -1347,6 +1347,40 @@ struct NativeArena
     u16 markTileCount;
 };
 bool32 BattleArena_NativeUiState(struct NativeArena *out);
+/* The FRONTIER PASS (frontier_pass.c; the START menu's pass once the player has it): the pass - the player's battle
+ * points, the seven facilities' symbols (0 none, 1 silver, 2 gold), whether a battle record is saved, the trainer card's
+ * stars, the game's free cursor (its sprite) and the area it is over with that area's line - or the Battle Frontier's map
+ * - the facility it points at, the player's head on it (in the frontier). The areas are the game's own rectangles
+ * (GBA pixels: x0, y0, x1, y1, index area - 1), where a click walks the cursor with the game's presses. */
+enum NativeFrontierPassPage
+{
+    NATIVE_PASS_CARD,           /* the pass */
+    NATIVE_PASS_MAP,            /* the Battle Frontier's map */
+};
+#define NATIVE_PASS_AREAS 13    /* MAP, CARD, RECORD, CANCEL, POINTS, the symbols' title, the seven symbols */
+#define NATIVE_PASS_FACILITIES 7
+struct NativeFrontierPass
+{
+    u8 page;                    /* enum NativeFrontierPassPage */
+    bool8 ready;                /* the game reads the keys now (else it zooms, fades or moves the map's cursor) */
+    u16 battlePoints;
+    u8 symbols[NATIVE_PASS_FACILITIES];
+    bool8 hasRecord;
+    u8 stars;
+    u8 area;                    /* the cursor's area (1-13, 0: none) */
+    s16 cursorX, cursorY;       /* the cursor's point that picks the area (GBA pixels) */
+    s16 rects[NATIVE_PASS_AREAS][4];
+    const u8 *line;             /* the area's line the game prints (NULL: none) */
+    /* the map */
+    u8 mapCursor;               /* the facility it points at */
+    const u8 *names[NATIVE_PASS_FACILITIES];
+    const u8 *description;      /* the facility's lines */
+    s16 marks[NATIVE_PASS_FACILITIES][2];  /* each facility on the map (GBA pixels) */
+    bool8 head;                 /* the player's head on the map (in the frontier) */
+    s16 headX, headY;
+    u8 gender;
+};
+bool32 FrontierPass_NativeUiState(struct NativeFrontierPass *out);
 /* The Battle Dome's tourney tree (battle_dome.c: the interactive tree, the lobby's record of the last tourney, a
  * round's results between battles): the sixteen in the tree's order (the left side top to bottom, then the right;
  * round one's pairs side by side), how far each has come and who is out as the tree shows it now, and the cursor on

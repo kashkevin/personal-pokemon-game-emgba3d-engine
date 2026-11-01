@@ -677,7 +677,15 @@ static u32 FreeFrontierPassGfx(void)
 
 static void VBlankCB_FrontierPass(void)
 {
+#ifdef PORTABLE
+    // The Battle Frontier's map keeps this VBlank callback while the pass's graphics are freed (sPassGfx is NULL from
+    // HideFrontierPass until the pass is shown again): the GBA reads its BIOS there, the PC crashed on opening the map.
+    if (sPassGfx != NULL && sPassGfx->zooming)
+#else
+#line 680 // gba-line
     if (sPassGfx->zooming)
+#endif
+#line 681 // gba-line
     {
         SetBgAffine(2,
                     sBgAffineCoords[sPassData->areaToShow - 1][0] << 8,
@@ -1761,3 +1769,78 @@ static void HandleFrontierMapCursorMove(u8 direction)
     CopyBgTilemapBufferToVram(0);
     PlaySE(SE_DEX_SCROLL);
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+// The 3D UI (src/native_ui/screens/ui_frontier_pass.c) draws the FRONTIER PASS and the Battle Frontier's map in the
+// new design and follows this state; the game keeps the input. The pass is up while its input or zoom task runs, the
+// map while its task does; the cursor's picking point is the sprite's (x - 5, y + 5), as GetCursorAreaFromCoords takes it.
+bool32 FrontierPass_NativeUiState(struct NativeFrontierPass *out)
+{
+    MainCallback cb = gMain.callback2;
+    u8 taskId;
+
+    memset(out, 0, sizeof(*out));
+    // the pass's own callbacks, from its first frame to its fade out (the map runs in CB2_FrontierPass too): not the
+    // trainer card or the recorded battle it opens, while its data waits for the return
+    if (cb != CB2_InitFrontierPass && cb != CB2_FrontierPass && cb != CB2_HideFrontierPass
+     && cb != CB2_ShowFrontierPassFeature && cb != CB2_ReshowFrontierPass && cb != CB2_ReturnFromRecord)
+        return FALSE;
+    if (sMapData != NULL)
+    {
+        taskId = FindTaskIdByFunc(Task_HandleFrontierMap);
+        out->page = NATIVE_PASS_MAP;
+        out->ready = taskId != TASK_NONE && gTasks[taskId].data[0] == 1 && !gPaletteFade.active;  // its tState 1: the keys
+        out->mapCursor = sMapData->cursorPos;
+        for (u32 i = 0; i < NUM_FRONTIER_FACILITIES && i < NATIVE_PASS_FACILITIES; i++)
+        {
+            out->names[i] = sMapLandmarks[i].name;
+            out->marks[i][0] = sMapLandmarks[i].x;
+            out->marks[i][1] = sMapLandmarks[i].y;
+        }
+        if (sMapData->cursorPos < NUM_FRONTIER_FACILITIES)
+            out->description = sMapLandmarks[sMapData->cursorPos].description;
+        if (sMapData->playerHeadSprite != NULL)
+        {
+            out->head = TRUE;
+            out->headX = sMapData->playerHeadSprite->x;
+            out->headY = sMapData->playerHeadSprite->y;
+        }
+        out->gender = gSaveBlock2Ptr->playerGender;
+        return TRUE;
+    }
+    if (sPassData == NULL)
+        return FALSE;
+    out->ready = FindTaskIdByFunc(Task_HandleFrontierPassInput) != TASK_NONE && !gPaletteFade.active;
+    out->page = NATIVE_PASS_CARD;
+    out->battlePoints = sPassData->battlePoints;
+    for (u32 i = 0; i < NUM_FRONTIER_FACILITIES && i < NATIVE_PASS_FACILITIES; i++)
+        out->symbols[i] = sPassData->facilitySymbols[i];
+    out->hasRecord = sPassData->hasBattleRecord;
+    out->stars = sPassData->trainerStars;
+    out->area = sPassData->cursorArea;
+    // the cursor's sprite while the pass is drawn, else where the pass keeps it (its first frames, the zoom's return)
+    if (sPassGfx != NULL && sPassGfx->cursorSprite != NULL)
+    {
+        out->cursorX = sPassGfx->cursorSprite->x - 5;
+        out->cursorY = sPassGfx->cursorSprite->y + 5;
+    }
+    else
+    {
+        out->cursorX = sPassData->cursorX - 5;
+        out->cursorY = sPassData->cursorY + 5;
+    }
+    for (u32 i = 0; i < CURSOR_AREA_COUNT - 1 && i < NATIVE_PASS_AREAS; i++)
+    {
+        out->rects[i][0] = sPassAreasLayout[i].xStart;
+        out->rects[i][1] = sPassAreasLayout[i].yStart;
+        out->rects[i][2] = sPassAreasLayout[i].xEnd;
+        out->rects[i][3] = sPassAreasLayout[i].yEnd;
+    }
+    if (out->area == CURSOR_AREA_RECORD && !sPassData->hasBattleRecord)
+        out->line = sPassAreaDescriptions[CURSOR_AREA_NOTHING];
+    else if (out->area != CURSOR_AREA_NOTHING && out->area < CURSOR_AREA_COUNT)
+        out->line = sPassAreaDescriptions[out->area];
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI
