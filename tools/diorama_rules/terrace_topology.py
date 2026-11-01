@@ -503,14 +503,19 @@ def solve_layout(cells: tuple[dict, ...], width: int, height: int,
                  conflict_edges: list[tuple[object, object, int, int]] | None = None,
                  shifts: dict[int, int] | None = None,
                  members: dict[int, int] | None = None,
-                 ramps: dict[int, str] | None = None
+                 ramps: dict[int, str] | None = None,
+                 open_ends: bool = False
                  ) -> dict[int, dict]:
     """Return solved cells; contradictory connected topology components are omitted.
 
     A component's key is the lowest cell offset in it. shifts: levels a component
     moves by, by key (seam_shifts). members: filled with each solved region cell's
     component key. ramps: walkable cells laid as ramps a level up toward their
-    direction, "n", "s", "e" or "w" (contradiction_ramps)."""
+    direction, "n", "s", "e" or "w" (contradiction_ramps). open_ends: walkable
+    ground beside a course's end (a side of it half high, half low: Safari Zone
+    South's wall at (18-25, 2), open grass at (26, 2)) meets only its low half,
+    the face's foot; joined to both halves it was both levels at once, and the
+    whole component was dropped."""
     if len(cells) != width * height:
         raise ValueError("terrace topology layout dimensions do not match its cells")
     cardinal = ((0, -1), (1, 0), (0, 1), (-1, 0))
@@ -596,11 +601,15 @@ def solve_layout(cells: tuple[dict, ...], width: int, height: int,
                 continue
             source_quadrants = ((0, 1), (1, 2), (3, 2), (0, 3))[direction]
             target_quadrants = ((3, 2), (0, 3), (0, 1), (1, 2))[direction]
+            open_end = (open_ends and neighbor not in roles
+                        and len({role.quadrants[quadrant] for quadrant in source_quadrants}) == 2)
             for source_quadrant, target_quadrant in zip(source_quadrants, target_quadrants):
                 source_node = node_for(offset, source_quadrant)
                 target_node = node_for(neighbor, target_quadrant)
                 if source_node is None or target_node is None:
                     continue
+                if open_end and role.quadrants[source_quadrant] == 1:
+                    continue  # the ground beside a course's end meets its foot
                 graph[source_node].append((target_node, 0))
                 graph[target_node].append((source_node, 0))
 
@@ -721,12 +730,100 @@ def solve_layout(cells: tuple[dict, ...], width: int, height: int,
     return solved
 
 
+# A ramp laid across a way round (_ramp_cuts) is at most this many cells across; a way round takes at most this
+# many of them.
+RAMP_MAX_RUN = 4
+RAMP_MAX_CUTS = 3
+
+
+def _ramp_cuts(region: set[int], high: set[int], low: set[int], width: int,
+               avoid: set[int]) -> dict[int, str] | None:
+    """The ramps that part `region` (walkable cells side by side) between `high` and `low` (its cells beside a
+    course's high side and its low side): each way from one to the other is cut where it is narrowest - at the
+    cell of the way whose run across it, along its row or its column from what bounds the region to what bounds
+    it, is shortest (Safari Zone South's enclosure: its one-cell opening at (17, 7)) - until no way is left; each
+    run a ramp a level up toward the side `high` is on (a row's run climbs north or south, a column's east or
+    west). None where a way cannot be cut (every run across it wider than RAMP_MAX_RUN, or taking in `high`, `low`
+    or `avoid`: a door, a ledge's take-off or landing), where it takes more than RAMP_MAX_CUTS runs, or where a
+    run has the high side on both sides of it or on neither."""
+    def neighbours(offset: int):
+        x = offset % width
+        return [n for n in (offset - width, offset + width,
+                            offset - 1 if x else None, offset + 1 if x + 1 < width else None)
+                if n is not None and n in region]
+
+    def run_through(offset: int, step: int) -> list[int]:
+        run = [offset]
+        while run[0] - step in region and (step == width or (run[0] - step) // width == offset // width):
+            run.insert(0, run[0] - step)
+        while run[-1] + step in region and (step == width or (run[-1] + step) // width == offset // width):
+            run.append(run[-1] + step)
+        return run
+
+    cut: set[int] = set()
+    runs: list[tuple[list[int], int]] = []
+    for _ in range(RAMP_MAX_CUTS + 1):
+        parent = dict.fromkeys(high - cut)
+        pending = deque(sorted(high - cut))
+        end = None
+        while pending and end is None:
+            offset = pending.popleft()
+            for neighbor in neighbours(offset):
+                if neighbor in cut or neighbor in parent:
+                    continue
+                parent[neighbor] = offset
+                if neighbor in low:
+                    end = neighbor
+                    break
+                pending.append(neighbor)
+        if end is None:
+            break
+        if len(runs) == RAMP_MAX_CUTS:
+            return None
+        way = []
+        while end is not None:
+            way.append(end)
+            end = parent[end]
+        best = None
+        for offset in way:
+            for step in (1, width):
+                run = run_through(offset, step)
+                if (len(run) > RAMP_MAX_RUN or cut.intersection(run)
+                        or high.intersection(run) or low.intersection(run) or avoid.intersection(run)):
+                    continue
+                key = (len(run), run[0], step)
+                if best is None or key < best[0]:
+                    best = (key, run, step)
+        if best is None:
+            return None
+        _, run, step = best
+        cut.update(run)
+        runs.append((run, step))
+    reach = set(high - cut)
+    pending = deque(sorted(reach))
+    while pending:
+        offset = pending.popleft()
+        for neighbor in neighbours(offset):
+            if neighbor not in cut and neighbor not in reach:
+                reach.add(neighbor)
+                pending.append(neighbor)
+    out: dict[int, str] = {}
+    for run, step in runs:
+        across = width if step == 1 else 1
+        before = any(offset - across in reach for offset in run)
+        after = any(offset + across in reach for offset in run)
+        if before == after:
+            return None
+        out.update(dict.fromkeys(run, ("n" if before else "s") if step == 1 else ("w" if before else "e")))
+    return out
+
+
 # How far from a component's courses its stairs are looked for (contradiction_ramps), in cells.
 STAIRS_REACH = 10
 
 
 def contradiction_ramps(cells: tuple[dict, ...], width: int, height: int,
-                        shifts: dict[int, int] | None = None) -> dict[int, str]:
+                        shifts: dict[int, int] | None = None, open_ends: bool = False) -> dict[int, str]:
     """Steps that let solve_layout solve what it gave up on (the owner's report of 2026-11-01: "some hills are
     blocks"). The game's stairs (General 175, 207) count as a step only where they join a course (their ports);
     stairs cut through rock beside no course (Route 121's at (30-31, 10-11), Lilycove's, the Battle Frontier's)
@@ -742,7 +839,7 @@ def contradiction_ramps(cells: tuple[dict, ...], width: int, height: int,
         contradictions: list[tuple[int, ...]] = []
         conflicts: list[tuple[object, object, int, int]] = []
         solve_layout(cells, width, height, contradictions=contradictions, conflict_edges=conflicts,
-                     shifts=shifts, ramps=trial)
+                     shifts=shifts, ramps=trial, open_ends=open_ends)
         return {offset for component in contradictions for offset in component}, len(conflicts)
 
     left, disagreeing = dropped({})
@@ -782,7 +879,8 @@ def contradiction_ramps(cells: tuple[dict, ...], width: int, height: int,
                     break
     # a component several groups of stairs solve only together (Route 121's): all the stairs near its courses
     contradictions: list[tuple[int, ...]] = []
-    solve_layout(cells, width, height, contradictions=contradictions, shifts=shifts, ramps=ramps)
+    solve_layout(cells, width, height, contradictions=contradictions, shifts=shifts, ramps=ramps,
+                 open_ends=open_ends)
     for component in contradictions:
         xs = [offset % width for offset in component]
         ys = [offset // width for offset in component]
@@ -796,6 +894,61 @@ def contradiction_ramps(cells: tuple[dict, ...], width: int, height: int,
         remaining, still = dropped(trial)
         if remaining <= left and len(remaining) < len(left):
             ramps, left, disagreeing = trial, remaining, still
+    # a way round a course from its high side to its low side with no stairs on it (Safari Zone South's enclosure,
+    # open to the east at (17, 7)): cut where it is narrowest, the cut a ramp (_ramp_cuts)
+    avoid = {offset for offset, cell in enumerate(cells)
+             if "DOOR" in str(cell.get("behavior") or "") or "WARP" in str(cell.get("behavior") or "")
+             or cell.get("behavior") in WATER_BEHAVIORS or cell.get("elevation") in (0, 15)}
+    for offset, cell in enumerate(cells):
+        step = LEDGE_JUMPS.get(cell.get("behavior"))
+        if step:
+            avoid.update((offset, offset - step[1] * width - step[0], offset + step[1] * width + step[0]))
+    for _ in range(len(groups) + 4):
+        if not left:
+            break
+        conflicts: list[tuple[object, object, int, int]] = []
+        solve_layout(cells, width, height, conflict_edges=conflicts, shifts=shifts, ramps=ramps,
+                     open_ends=open_ends)
+        taken = False
+        for node, other, _, _ in conflicts:
+            course = node[0] if isinstance(node, tuple) else other[0] if isinstance(other, tuple) else None
+            if course is None or course in ramps or (role := role_for_cell(cells[course])) is None:
+                continue
+            x, y = course % width, course // width
+            sides = {}
+            for (dx, dy), quadrants in (((0, -1), (0, 1)), ((1, 0), (1, 2)), ((0, 1), (3, 2)), ((-1, 0), (0, 3))):
+                levels = {role.quadrants[quadrant] for quadrant in quadrants}
+                if 0 <= x + dx < width and 0 <= y + dy < height and len(levels) == 1:
+                    sides[(y + dy) * width + x + dx] = levels.pop()
+            walk = sorted(n for n in sides if cells[n].get("collision", 0) == 0
+                          and role_for_cell(cells[n]) is None and n not in ramps)
+            if not walk:
+                continue
+            elevation = cells[walk[0]].get("elevation")
+            region, pending = {walk[0]}, [walk[0]]
+            while pending:
+                offset = pending.pop()
+                for neighbor in _neighbours(offset, width, height):
+                    if (neighbor not in region and neighbor not in ramps
+                            and role_for_cell(cells[neighbor]) is None
+                            and cells[neighbor].get("collision", 0) == 0
+                            and cells[neighbor].get("elevation") == elevation):
+                        region.add(neighbor)
+                        pending.append(neighbor)
+            high = {n for n in walk if n in region and sides[n] == 1}
+            low = {n for n in walk if n in region and sides[n] == 0}
+            if not high or not low:
+                continue
+            found = _ramp_cuts(region, high, low, width, avoid)
+            if not found:
+                continue
+            trial = {**ramps, **found}
+            remaining, still = dropped(trial)
+            if remaining <= left and (len(remaining), still) < (len(left), disagreeing):
+                ramps, left, disagreeing, taken = trial, remaining, still, True
+                break
+        if not taken:
+            break
     if len(left) == len(unsolved_before):
         return {}
     # a group that solves nothing on its own account is taken back (its stairs stay as they were)
@@ -806,6 +959,28 @@ def contradiction_ramps(cells: tuple[dict, ...], width: int, height: int,
         if dropped(trial)[0] <= left:
             ramps = trial
     return ramps
+
+
+def course_ridges(cells: tuple[dict, ...], width: int, height: int,
+                  dropped: list[tuple[int, ...]], solved: dict[int, dict]) -> dict[int, dict]:
+    """The courses of the components solve_layout dropped (`dropped`, its contradictions) as faces on the ground
+    round them: each its own profile (a horizontal course rising north over the cell, a vertical one east, the
+    corners theirs) from the ground beside it - the lowest level of the walkable cells round it, 0 where none has
+    one - a level up to its top edge. Dropped, they had no entry and stood as blocks a tile high (the owner's
+    report of 2026-11-01, Safari Zone South's walls: "some hills are blocks"); a terrace's stairs among them lie
+    on that ground as before. Returns their entries."""
+    out: dict[int, dict] = {}
+    for component in dropped:
+        for offset in component:
+            role = role_for_cell(cells[offset])
+            if role is None or not role.solid or offset in solved or offset in out:
+                continue
+            around = [solved[neighbor]["groundQ16"] if neighbor in solved else 0
+                      for neighbor in _neighbours(offset, width, height)
+                      if cells[neighbor].get("collision", 0) == 0 and role_for_cell(cells[neighbor]) is None]
+            ground = min(around) if around else 0
+            out[offset] = {"groundQ16": ground, "topQ16": ground + 16, "profile": role.profile, "solid": True}
+    return out
 
 
 def seam_shifts(layouts: dict[str, dict], seams: list[tuple[tuple[str, int], tuple[str, int]]],

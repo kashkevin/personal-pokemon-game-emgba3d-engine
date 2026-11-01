@@ -7,7 +7,7 @@ from pathlib import Path
 from catalog import load_tilesets, load_world
 from compile_rules import _load_cells, parse_behaviors
 from terrace_topology import (CAVE_RISE_Q16, LEDGE_JUMPS, MOUNTAIN_LEDGE_Q16, SLOPE_RISE_Q16, TERRACE_ROLES,
-                              contradiction_ramps, cave_climbs, cave_levels, join_level_free_cells, join_water, lift_blocked_cells,
+                              contradiction_ramps, course_ridges, cave_climbs, cave_levels, join_level_free_cells, join_water, lift_blocked_cells,
                               mountain_ledges, pass_levels, rock_tops, role_for_cell, seam_shifts, slope_tops,
                               solve_layout)
 
@@ -677,6 +677,72 @@ class TerraceTopologyTests(unittest.TestCase):
         rows[2] = "#TTTT####"
         cells = tuple(make[ch]() for row in rows for ch in row)
         self.assertEqual(contradiction_ramps(cells, 9, 5), {})
+
+    def test_the_ground_beside_a_courses_open_end_meets_its_foot(self):
+        # A terrace course (General 121) with rock behind it (its top no one walks on) whose run ends in open
+        # grass at its east (Safari Zone South's wall at (18-25, 2)): the grass beside its end met both its halves,
+        # a level apart, and the component was dropped (its course a block). With open_ends it meets the course's
+        # foot, the ground before it: one level for the ground, the course standing a level over it.
+        def rock():
+            return dict(cell(1), collision=1)
+
+        rows = ["#######",
+                "#######",
+                "#TTT..#",
+                "#.....#",
+                "#######"]
+        make = {"#": rock, ".": ground, "T": lambda: dict(cell(121), collision=1)}
+        cells = tuple(make[ch]() for row in rows for ch in row)
+        contradictions = []
+        solve_layout(cells, 7, 5, contradictions=contradictions)
+        self.assertTrue(contradictions)
+        contradictions = []
+        solved = solve_layout(cells, 7, 5, contradictions=contradictions, open_ends=True)
+        self.assertEqual(contradictions, [])
+        grass = (18, 19, 22, 23, 24, 25, 26)
+        self.assertEqual(len({solved[o]["groundQ16"] for o in grass}), 1)
+        self.assertEqual(solved[15]["groundQ16"], solved[22]["groundQ16"])
+        self.assertEqual(solved[15]["topQ16"] - solved[15]["groundQ16"], 16)
+        # a run whose grass goes round its end, from its top to its foot, still contradicts: that is a ramp's
+        rows[1] = "#.....#"
+        cells = tuple(make[ch]() for row in rows for ch in row)
+        contradictions = []
+        solve_layout(cells, 7, 5, contradictions=contradictions, open_ends=True)
+        self.assertTrue(contradictions)
+
+    def test_a_course_the_solver_cannot_place_is_a_face_on_the_ground_before_it(self):
+        # course_ridges: a dropped component's courses (or scenery's) stand on the lowest ground round them, a level
+        # up to their top edge in their own profile, not as blocks with no entry
+        rows = ["#####", "#...#", "#TTT#", "#...#", "#####"]
+        make = {"#": lambda: dict(cell(1), collision=1), ".": ground, "T": lambda: dict(cell(121), collision=1)}
+        cells = tuple(make[ch]() for row in rows for ch in row)
+        solved = {o: {"groundQ16": -16, "topQ16": -16, "profile": "none", "solid": False} for o in (16, 17, 18)}
+        out = course_ridges(cells, 5, 5, [(11, 12, 13)], solved)
+        self.assertEqual({o: (e["groundQ16"], e["topQ16"], e["profile"]) for o, e in out.items()},
+                         dict.fromkeys((11, 12, 13), (-16, 0, "horizontal")))
+
+    def test_the_safari_zones_entrance_stands_its_enclosure_a_level_up(self):
+        # The owner's report of 2026-11-01 ("some hills are blocks, some hills are 2d"): with compile_rules'
+        # hints for the Safari Zone's entrance (its two walls scenery, a ramp at the enclosure's opening, the
+        # ground before its stairs where the next maps meet it) the enclosure stands a level over the ground before
+        # its stairs, nothing dropped.
+        from compile_rules import RAMP_HINTS, SCENERY_COURSES
+        tilesets = load_tilesets(ROOT)
+        _, layouts = load_world(ROOT)
+        names = {value: name for name, value
+                 in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
+        lid = "LAYOUT_SAFARI_ZONE_SOUTH"
+        layout = next(row for row in layouts if row["id"] == lid)
+        width, height = layout["width"], layout["height"]
+        cells = _load_cells(ROOT, [layout], tilesets, names)[0][lid]
+        scenery = {y * width + x for x, y in SCENERY_COURSES[lid]}
+        cells = tuple(dict(c, metatile=0, localMetatile=0) if o in scenery else c for o, c in enumerate(cells))
+        ramps = {y * width + x: d for (x, y), d in RAMP_HINTS[lid].items()}
+        contradictions = []
+        solved = solve_layout(cells, width, height, contradictions=contradictions, ramps=ramps, open_ends=True)
+        self.assertEqual(contradictions, [])
+        self.assertEqual(solved[7 * width + 13]["groundQ16"] - solved[10 * width + 13]["groundQ16"], 16)
+        self.assertEqual(solved[9 * width + 13]["profile"], "transition-horizontal")   # its stairs climb
 
     def test_a_passs_paths_stand_a_level_a_ledge_apart(self):
         # A pass whose paths are all at one elevation (Jagged Pass): the top path H jumps south into an island I,

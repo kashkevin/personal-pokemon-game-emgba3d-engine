@@ -24,7 +24,8 @@ from mountain_art import (MountainArtError, faces_between_levels,
 from profiles import NOMINAL_HEIGHTS, TileShape, shape_from_action
 from pixel_objects import UPRIGHT_CLASSES as UPRIGHT_PIXEL_CLASSES, extract_layout
 from structures import analyze_layout
-from terrace_topology import (WATER_BEHAVIORS, cave_climbs, cave_levels, contradiction_ramps, join_level_free_cells,
+from terrace_topology import (WATER_BEHAVIORS, cave_climbs, cave_levels, contradiction_ramps, course_ridges,
+                              join_level_free_cells,
                               join_water,
                               lift_blocked_cells, mountain_ledges, pass_levels, rock_tops, seam_shifts,
                               slope_tops,
@@ -1392,6 +1393,27 @@ GBA_HEIGHT_LAYOUTS = frozenset({"LAYOUT_ROUTE112", "LAYOUT_ROUTE111", "LAYOUT_RO
 # walks across, water standing over land, Route 118's seams a level apart and more fins (Route 121's rock as
 # pillars), so it waits for those.
 STAIRS_STEP_LAYOUTS: frozenset[str] = frozenset()
+# The layouts whose ground beside a course's end meets only its foot (terrace_topology.solve_layout `open_ends`).
+OPEN_END_LAYOUTS: frozenset[str] = frozenset({"LAYOUT_SAFARI_ZONE_SOUTH"})
+# The layouts whose courses no level solves stand as faces on the ground round them (terrace_topology.course_ridges).
+RIDGE_LAYOUTS: frozenset[str] = frozenset()
+# The Safari Zone's entrance (the owner's report of 2026-11-01, "some hills are blocks, some hills are 2d"): its
+# wall along (18-25, 2) ends in open grass that its corner puts on the wall's top, the short wall at (35-36, 7)
+# stands between grass the next maps meet at one level, and its enclosure at (9-16, 3-8) is open to the east at
+# (17, 7), so the solver dropped the whole terrace: every wall a block, the enclosure's sides flat. Those two walls
+# are scenery to the solver (SCENERY_COURSES: faces on the ground before them, course_ridges), a ramp at the
+# enclosure's opening climbs west into it (RAMP_HINTS, (x, y): the way each climbs), and the ground before its
+# stairs stays where the next maps meet it (LEVEL_ANCHORS, (x, y) and its groundQ16): the enclosure stands a level
+# over the ground round it, its stairs climb to it, its walls are faces.
+SCENERY_COURSES: dict[str, tuple[tuple[int, int], ...]] = {
+    "LAYOUT_SAFARI_ZONE_SOUTH": tuple((x, 2) for x in range(18, 26)) + ((35, 7), (36, 7)),
+}
+RAMP_HINTS: dict[str, dict[tuple[int, int], str]] = {
+    "LAYOUT_SAFARI_ZONE_SOUTH": {(17, 7): "w"},
+}
+LEVEL_ANCHORS: dict[str, tuple[tuple[int, int], int]] = {
+    "LAYOUT_SAFARI_ZONE_SOUTH": ((13, 10), 0),
+}
 # The mountain passes whose paths stand at the heights their ledges and slopes give them (terrace_topology.pass_levels;
 # KNOWN_ISSUES MS-153). None yet: Jagged Pass ("LAYOUT_JAGGED_PASS", reached only by warps, no seam to meet) solves
 # to nine levels from the Mt. Chimney end down, but its rock does not yet stand with its paths (the first try,
@@ -1784,13 +1806,50 @@ def compile_data(root: Path) -> dict:
 
     def solve_terrain(layout: dict, shifts: dict[int, int] | None = None,
                       members: dict[int, int] | None = None) -> dict[int, dict]:
+        # the courses that are scenery to the solver (SCENERY_COURSES: their terrace art decides no level)
+        scenery = frozenset(y * layout["width"] + x for x, y in SCENERY_COURSES.get(layout["id"], ()))
+        solve_cells = (tuple(dict(cell, metatile=0, localMetatile=0) if offset in scenery else cell
+                             for offset, cell in enumerate(cells[layout["id"]]))
+                       if scenery else cells[layout["id"]])
         # the stairs that let a component solve (terrace_topology.contradiction_ramps: stairs cut through rock
         # beside no course; the owner's report of 2026-11-01, "some hills are blocks")
         if layout["id"] not in ramps_of:
-            ramps_of[layout["id"]] = (contradiction_ramps(cells[layout["id"]], layout["width"], layout["height"])
+            ramps_of[layout["id"]] = (contradiction_ramps(solve_cells, layout["width"], layout["height"],
+                                                          open_ends=layout["id"] in OPEN_END_LAYOUTS)
                                       if layout["id"] in STAIRS_STEP_LAYOUTS else {})
-        solved = solve_terrace_topology(cells[layout["id"]], layout["width"], layout["height"],
-                                        shifts=shifts, members=members, ramps=ramps_of[layout["id"]])
+            # and the ramps laid by hand where the GBA's drawing gives no single answer (RAMP_HINTS)
+            ramps_of[layout["id"]].update({y * layout["width"] + x: direction for (x, y), direction
+                                           in RAMP_HINTS.get(layout["id"], {}).items()})
+        dropped_components: list[tuple[int, ...]] = []
+        solved = solve_terrace_topology(solve_cells, layout["width"], layout["height"],
+                                        shifts=shifts, members=members, ramps=ramps_of[layout["id"]],
+                                        contradictions=dropped_components,
+                                        open_ends=layout["id"] in OPEN_END_LAYOUTS)
+        anchor = LEVEL_ANCHORS.get(layout["id"])
+        if anchor is not None:
+            # the ground at the anchor's cell where the next maps meet it (LEVEL_ANCHORS): its component moves there
+            (x, y), wanted = anchor
+            offset = y * layout["width"] + x
+            local_members = members if members is not None else {}
+            if members is None:
+                solve_terrace_topology(solve_cells, layout["width"], layout["height"], shifts=shifts,
+                                       members=local_members, ramps=ramps_of[layout["id"]],
+                                       open_ends=layout["id"] in OPEN_END_LAYOUTS)
+            have = solved.get(offset, {}).get("groundQ16", 0)
+            if have != wanted and offset in local_members:
+                moved = {**(shifts or {}), local_members[offset]:
+                         (shifts or {}).get(local_members[offset], 0) + (wanted - have) // 16}
+                dropped_components = []
+                solved = solve_terrace_topology(solve_cells, layout["width"], layout["height"], shifts=moved,
+                                                members=members, ramps=ramps_of[layout["id"]],
+                                                contradictions=dropped_components,
+                                                open_ends=layout["id"] in OPEN_END_LAYOUTS)
+        if layout["id"] in RIDGE_LAYOUTS or scenery:
+            # A course the solver could not give a level (its component contradicts), or one that is scenery to
+            # it, is a face on the ground round it, its own profile rising a level to its top edge, not a block.
+            solved = {**solved, **course_ridges(cells[layout["id"]], layout["width"], layout["height"],
+                                                (dropped_components if layout["id"] in RIDGE_LAYOUTS else [])
+                                                + ([tuple(sorted(scenery))] if scenery else []), solved)}
         try:
             # (a mountain's rock reaches no further than its own cells: the
             # sea's rocks and boulders are models, a terrace's course its own)
