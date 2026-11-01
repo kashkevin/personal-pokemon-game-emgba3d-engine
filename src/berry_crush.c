@@ -3604,3 +3604,34 @@ void BerryCrush_StartComputerPartners(void)
     LocalLink_SetPartnerFunc(BerryCrush_ComputerPartner);
 }
 #endif
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native minigame screen (src/native_ui/screens/ui_minigame.c, step 15c): the players' names (their windows are
+// their plates), the message box (window 0, the dialogue frame), the shared YES / NO, whether the crushing goes on
+bool32 BerryCrush_NativeUiState(struct NativeMinigame *out)
+{
+    u32 i;
+    u8 windowId;
+
+    if (sGame == NULL || gMain.callback2 != MainCB)
+        return FALSE;
+    memset(out, 0, sizeof(*out));
+    out->kind = NATIVE_MINIGAME_BERRY_CRUSH;
+    out->numPlayers = sGame->playerCount > NATIVE_MINIGAME_PLAYERS ? NATIVE_MINIGAME_PLAYERS : sGame->playerCount;
+    for (i = 0; i < out->numPlayers; i++)
+        out->names[i] = sGame->players[i].name;
+    out->ownId = sGame->localId;
+    out->msgWindow = 0;
+    out->yesNoWindow = NATIVE_MINIGAME_NO_WINDOW;
+    if (Menu_NativeUiYesNo(&windowId))
+    {
+        out->yesNo = TRUE;
+        out->yesNoWindow = windowId;
+        out->yesNoCursor = Menu_GetCursorPos();
+    }
+    out->playing = sGame->gameState == STATE_PLAYING;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

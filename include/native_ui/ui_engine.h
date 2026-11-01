@@ -1084,14 +1084,16 @@ u8 BerryPowder_NativeUiVendorWindow(void);
  * window it draws in (tiles); at the Exchange Service Corner the prize on the cursor (an item or a decoration;
  * ITEM_LIST_END on EXIT: the game's return icon), its description and its icon's sprite */
 #define NATIVE_SCROLL_MULTI_MAX 16
+#define NATIVE_SCROLL_MULTI_DYNAMIC 0xFF /* id: a script's dynmultichoice (ScriptMenu_NativeUiDynamicList) */
 struct NativeScrollMulti
 {
     bool8 ready;
-    u8 id;                           /* SCROLL_MULTI_* */
+    u8 id;                           /* SCROLL_MULTI_*, or NATIVE_SCROLL_MULTI_DYNAMIC */
     u8 count;
     u8 shown;
     u8 scroll;
     u8 cursor;
+    bool8 ignoreB;                   /* B does nothing (a dynmultichoice may say so) */
     u8 windowId;
     u8 left, top, width, height;
     const u8 *labels[NATIVE_SCROLL_MULTI_MAX];
@@ -1101,6 +1103,10 @@ struct NativeScrollMulti
     u8 prizeSpriteId;                /* MAX_SPRITES: none */
 };
 bool32 FieldSpecials_NativeUiScrollMulti(struct NativeScrollMulti *out);
+/* a script's dynamic multichoice (dynmultichoice: the cable club's "How many players in all?", the Game Corner's
+ * counters' kinds) while it reads buttons, as a scrolling list: its rows as the engine printed them, how many it shows
+ * at once, the first row shown, the cursor's row, whether B does nothing, its window (tiles) */
+bool32 ScriptMenu_NativeUiDynamicList(struct NativeScrollMulti *out);
 /* the tiles of its scroll arrows' sprites while they are loaded */
 bool32 FieldSpecials_NativeUiScrollArrowTiles(u16 *start, u16 *count);
 /* a Mail's letter (mail.c) while its screen is up: its stationery as the screen built it (BG1's tiles at char base 0,
@@ -1256,6 +1262,50 @@ struct NativeBerryBlender
     u8 scoreIcons[3];                            /* sprite ids (MAX_SPRITES: none) */
 };
 bool32 BerryBlender_NativeUiState(struct NativeBerryBlender *out);
+/* The three wireless minigames with computer partners (MS-141: berry_crush.c, pokemon_jump.c, dodrio_berry_picking.c)
+ * as the game has them now (screens/ui_minigame.c, step 15c): the game's own picture stays; its windows on BG0 are the
+ * design's - the players' names its plates (the player's lit), its boards and lines its boxes (their lines as the game
+ * printed them, in its colours: TextPrinter_NativeUiTranscript), its message box the field's, its YES / NO the
+ * design's. */
+enum NativeMinigameKind
+{
+    NATIVE_MINIGAME_NONE,
+    NATIVE_MINIGAME_BERRY_CRUSH,
+    NATIVE_MINIGAME_POKEMON_JUMP,
+    NATIVE_MINIGAME_DODRIO,
+};
+#define NATIVE_MINIGAME_PLAYERS 5
+#define NATIVE_MINIGAME_NO_WINDOW 0xFF
+#define NATIVE_MINIGAME_ICONS 4
+/* a 16 x 16 sprite the game shows over one of its windows (Dodrio Berry Picking's results: the Berries over their
+ * columns), drawn again over the design's box: its top left on the GBA screen, its tiles and palette as loaded */
+struct NativeMinigameIcon
+{
+    s16 x, y;
+    u16 tileNum;
+    u8 paletteNum;
+};
+struct NativeMinigame
+{
+    u8 kind;
+    u8 numPlayers;
+    const u8 *names[NATIVE_MINIGAME_PLAYERS];   /* the players' names: a window showing one alone is its plate */
+    u8 ownId;                                    /* the player's (an index into names) */
+    u8 msgWindow;                                /* the game's message box, drawn as the field's (NO_WINDOW: none) */
+    bool8 yesNo;                                 /* its YES / NO up, drawn as the design's */
+    u8 yesNoWindow;                              /* ... its window, not drawn as a box (NO_WINDOW: none) */
+    u8 yesNoCursor;                              /* 0 YES, 1 NO */
+    bool8 playing;                               /* in play: a click is A (a Berry Crush press, a Pokemon Jump jump) */
+    u8 iconCount;
+    struct NativeMinigameIcon icons[NATIVE_MINIGAME_ICONS];
+};
+bool32 BerryCrush_NativeUiState(struct NativeMinigame *out);
+bool32 PokemonJump_NativeUiState(struct NativeMinigame *out);
+bool32 DodrioBerryPicking_NativeUiState(struct NativeMinigame *out);
+/* cable_car.c: the cable car's ride on (screens/ui_cable_car.c), and whether it goes down to Route 112 */
+bool32 CableCar_NativeUiState(bool8 *goingDown);
+/* menu.c: the shared YES / NO (CreateYesNoMenu, DisplayYesNoMenu*) while up: its window */
+bool32 Menu_NativeUiYesNo(u8 *windowId);
 /* a berry's tag (berry_tag_screen.c: the Bag's CHECK TAG): the berry as an item and its five flavours (spicy, dry,
  * sweet, bitter, sour), the windows its lines are printed on, whether it reads buttons now or slides to another */
 struct NativeBerryTag
@@ -2023,6 +2073,7 @@ struct NativeUiPrinted
 {
     s16 x, y;
     u8 fontId;
+    u8 fgColor, shadowColor;    /* its colours: indexes into its window's palette */
     u8 text[64];
 };
 u32 TextPrinter_NativeUiTranscript(u8 windowId, const struct NativeUiPrinted **out);

@@ -129,6 +129,8 @@ extern const struct UiScreen gUiScreen_PokeblockFeed;
 extern const struct UiScreen gUiScreen_Contest;
 extern const struct UiScreen gUiScreen_ContestResults;
 extern const struct UiScreen gUiScreen_BerryBlender;
+extern const struct UiScreen gUiScreen_Minigame;
+extern const struct UiScreen gUiScreen_CableCar;
 extern const struct UiScreen gUiScreen_ContestPainting;
 extern const struct UiScreen gUiScreen_BerryTag;
 extern const struct UiScreen gUiScreen_Diploma;

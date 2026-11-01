@@ -20,7 +20,9 @@
  * Blender record, the Battle Frontier's results and Ranking Hall boards) in
  * the design's box. The scrolling lists a script shows (the Battle Frontier's
  * prize and move tutor lists, the glass workshop's, the Fan Club's rater, the
- * Berry Powder vendor's, the Battle Tent's rules) are the design's menu box,
+ * Berry Powder vendor's, the Battle Tent's rules, and the dynmultichoice
+ * menus: the cable club's "How many players in all?", the Game Corner's
+ * MAJOR PRIZES / RARE GOODS, its TM and item kinds) are the design's menu box,
  * six rows at a time scrolling as the game's do, a prize's price in its own
  * column; beside them the Exchange Service Corner's prize in the design's box,
  * the tutor's move in another, the Battle Points and the Berry Powder as money
@@ -147,6 +149,13 @@ static u8 RecordsWindow(void)
     return WINDOW_NONE;
 }
 
+/* a scrolling list a script shows: the Battle Frontier's and the other ShowScrollableMultichoice lists, or a
+ * dynmultichoice (the cable club's "How many players in all?", the Game Corner's counters' kinds) */
+static bool ScrollState(struct NativeScrollMulti *sm)
+{
+    return FieldSpecials_NativeUiScrollMulti(sm) || ScriptMenu_NativeUiDynamicList(sm);
+}
+
 /* the field's windows up besides the message box (the map's name and the name box apart, and the money and coin boxes,
  * the picture box, the elevator's floor and the records, which this draws) */
 static int OtherWindows(u8 picture)
@@ -161,7 +170,7 @@ static int OtherWindows(u8 picture)
 
     FieldSpecials_NativeUiElevatorFloor(&elevator, &lines[0], &lines[1]);
     FieldSpecials_NativeUiFrontierWindows(&points, &prize, &tutor);
-    if (FieldSpecials_NativeUiScrollMulti(&sm))
+    if (ScrollState(&sm))
         list = sm.windowId;
     for (u32 i = 1; i < WINDOWS_MAX; i++)
         if (i != popup && i != namebox && i != money && i != coins && i != picture && i != elevator && i != records
@@ -200,7 +209,7 @@ static bool Detect(void)
     /* a message, or a picture box alone (before its question, after it), or the records a script waits on, or a
      * scrolling list */
     picUp = PictureState(&pic);
-    if (!Window_NativeUiShown(0) && !picUp && RecordsWindow() == WINDOW_NONE && !FieldSpecials_NativeUiScrollMulti(&sm))
+    if (!Window_NativeUiShown(0) && !picUp && RecordsWindow() == WINDOW_NONE && !ScrollState(&sm))
         return false;
     MenuState(&m);
     /* rows a script builds itself are not listed: the game's picture */
@@ -223,7 +232,7 @@ static void Capture(void)
     sMsgUp = RecordsWindow() != WINDOW_NONE ? Window_NativeUiOnScreen(0) : Window_NativeUiShown(0);
     sHasMsg = sMsgUp && TextPrinter_NativeUiWindowText(0, sMsg, sizeof(sMsg), &sMsgPrinted, &active);
     sMsgPrinting = sHasMsg && active;
-    sScrollUp = FieldSpecials_NativeUiScrollMulti(&sScroll);
+    sScrollUp = ScrollState(&sScroll);
     sWaiting = sMenu.kind == NATIVE_SCRIPT_MENU_NONE && !sScrollUp
             && (Script_NativeUiWaitsForButton() || TextPrinter_NativeUiWindowWaiting(0) || Roulette_NativeUiEntryWaits());
     sSign = gMsgIsSignPost;
@@ -545,7 +554,7 @@ static void Draw(int t)
         h[n++] = (struct UiHintItem){UI_ACT_CONFIRM, sText_OK};
         if (sMenu.kind == NATIVE_SCRIPT_MENU_YES_NO)
             h[n++] = (struct UiHintItem){UI_ACT_CANCEL, sText_No};
-        else if (sScrollUp || !sMenu.ignoreB)
+        else if (sScrollUp ? !sScroll.ignoreB : !sMenu.ignoreB)
             h[n++] = (struct UiHintItem){UI_ACT_CANCEL, sText_Cancel};
     }
     else if (sWaiting)
@@ -673,7 +682,7 @@ static bool Click(const struct UiHit *hit, int button)
     if (button == 3)
     {
         if (sWaiting || (MenuUp() && sMenu.ready && (sMenu.kind == NATIVE_SCRIPT_MENU_YES_NO || !sMenu.ignoreB))
-         || (sScrollUp && sScroll.ready))
+         || (sScrollUp && sScroll.ready && !sScroll.ignoreB))
             NativeUi_QueuePress(B_BUTTON);
         return true;
     }

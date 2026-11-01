@@ -1971,3 +1971,21 @@ static void Task_SmoothBlendLayers(u8 taskId)
 #undef tEvBDelta
 #undef tEvWhich
 #undef tEvStepCount
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The shared YES / NO while up (screens/ui_minigame.c: Berry Crush's and Pokemon Jump's "play again?"): its window on
+// the screen showing the YES / NO it printed (not a later window given the same id)
+bool32 Menu_NativeUiYesNo(u8 *windowId)
+{
+    const struct NativeUiPrinted *printed;
+
+    if (sYesNoWindowId >= WINDOWS_MAX || !Window_NativeUiOnScreen(sYesNoWindowId)
+     || TextPrinter_NativeUiTranscript(sYesNoWindowId, &printed) == 0
+     || StringCompareN(printed[0].text, gText_YesNo, sizeof(printed[0].text) - 1) != 0)
+        return FALSE;
+    *windowId = sYesNoWindowId;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

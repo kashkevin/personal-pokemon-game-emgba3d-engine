@@ -4379,3 +4379,34 @@ void PokemonJump_StartComputerPartners(void)
     LocalLink_SetPartnerFunc(PokemonJump_ComputerPartner);
 }
 #endif
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native minigame screen (src/native_ui/screens/ui_minigame.c, step 15c): the players' names (their windows are
+// their plates), the shared YES / NO of "play again?", whether a round goes on (its lines are its own windows, boxes)
+bool32 PokemonJump_NativeUiState(struct NativeMinigame *out)
+{
+    u32 i;
+    u8 windowId;
+
+    if (sPokemonJump == NULL || sPokemonJumpGfx == NULL || gMain.callback2 != CB2_PokemonJump)
+        return FALSE;
+    memset(out, 0, sizeof(*out));
+    out->kind = NATIVE_MINIGAME_POKEMON_JUMP;
+    out->numPlayers = GetNumPokeJumpPlayers() > NATIVE_MINIGAME_PLAYERS ? NATIVE_MINIGAME_PLAYERS : GetNumPokeJumpPlayers();
+    for (i = 0; i < out->numPlayers; i++)
+        out->names[i] = GetPokeJumpPlayerName(i);
+    out->ownId = sPokemonJump->multiplayerId;
+    out->msgWindow = NATIVE_MINIGAME_NO_WINDOW;
+    out->yesNoWindow = NATIVE_MINIGAME_NO_WINDOW;
+    if (Menu_NativeUiYesNo(&windowId))
+    {
+        out->yesNo = TRUE;
+        out->yesNoWindow = windowId;
+        out->yesNoCursor = Menu_GetCursorPos();
+    }
+    out->playing = sPokemonJump->comm.funcId == FUNC_GAME_ROUND;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

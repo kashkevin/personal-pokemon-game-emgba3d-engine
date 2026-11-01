@@ -2946,6 +2946,8 @@ static void NativeUiNoteTranscript(const struct TextPrinterTemplate *printerTemp
     p->x = printerTemplate->x;
     p->y = printerTemplate->y;
     p->fontId = printerTemplate->fontId;
+    p->fgColor = printerTemplate->color.foreground;
+    p->shadowColor = printerTemplate->color.shadow;
     for (; i < sizeof(p->text) - 1 && str[i] != EOS; i++)
         p->text[i] = str[i];
     p->text[i] = EOS;

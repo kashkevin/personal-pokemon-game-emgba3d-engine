@@ -75,6 +75,8 @@ static const struct UiScreen *const sScreens[] = {
     &gUiScreen_Contest,      /* a contest's appeals: the panels, the announcer, the moves over the stage */
     &gUiScreen_ContestResults, /* a contest's results: the bars, the placings, the winner's banner */
     &gUiScreen_BerryBlender, /* the Berry Blender: the names, the lines, the ranking and results round the blender */
+    &gUiScreen_Minigame,     /* the wireless minigames with computer partners: their plates, boxes and YES / NO */
+    &gUiScreen_CableCar,     /* the cable car's ride: where it goes, on the location sign */
     &gUiScreen_ContestPainting, /* a contest painting: its caption as a museum label */
     &gUiScreen_BerryTag,     /* a berry's tag (the Bag's CHECK TAG) */
     &gUiScreen_Diploma,      /* the POKéDEX diploma */

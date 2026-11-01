@@ -5430,3 +5430,50 @@ void DodrioBerryPicking_StartComputerPartners(void)
     LocalLink_SetPartnerFunc(DodrioBerryPicking_ComputerPartner);
 }
 #endif
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native minigame screen (src/native_ui/screens/ui_minigame.c, step 15c): the players' names (their windows are
+// their plates), its own YES / NO of "play again?" (Msg_WantToPlayAgain reading the buttons, its arrow at
+// cursorSelection), whether the picking goes on (its lines are its own windows, boxes)
+bool32 DodrioBerryPicking_NativeUiState(struct NativeMinigame *out)
+{
+    u32 i;
+
+    if (sGame == NULL || gMain.callback2 != CB2_DodrioGame)
+        return FALSE;
+    memset(out, 0, sizeof(*out));
+    out->kind = NATIVE_MINIGAME_DODRIO;
+    out->numPlayers = GetNumPlayers() > NATIVE_MINIGAME_PLAYERS ? NATIVE_MINIGAME_PLAYERS : GetNumPlayers();
+    for (i = 0; i < out->numPlayers; i++)
+        out->names[i] = GetPlayerName(i);
+    out->ownId = sGame->multiplayerId;
+    out->msgWindow = NATIVE_MINIGAME_NO_WINDOW;
+    out->yesNoWindow = NATIVE_MINIGAME_NO_WINDOW;
+    if (sGfx != NULL && sGfx->func == Msg_WantToPlayAgain && sGfx->state == 3)
+    {
+        out->yesNo = TRUE;
+        out->yesNoWindow = sGfx->windowIds[WIN_YES_NO];
+        out->yesNoCursor = sGfx->cursorSelection == PLAY_AGAIN_NO ? 1 : 0;
+    }
+    out->playing = sGame->funcId == FUNC_PLAY_GAME;
+    // the results' Berries over their columns (16 x 16 sprites, CreateBerrySprites)
+    for (i = 0; i < NUM_BERRY_TYPES && out->iconCount < NATIVE_MINIGAME_ICONS; i++)
+    {
+        struct Sprite *sprite;
+
+        if (sBerryIconSpriteIds[i] == NULL || *sBerryIconSpriteIds[i] >= MAX_SPRITES)
+            continue;
+        sprite = &gSprites[*sBerryIconSpriteIds[i]];
+        if (!sprite->inUse || sprite->invisible)
+            continue;
+        out->icons[out->iconCount].x = sprite->x + sprite->x2 + sprite->centerToCornerVecX;
+        out->icons[out->iconCount].y = sprite->y + sprite->y2 + sprite->centerToCornerVecY;
+        out->icons[out->iconCount].tileNum = sprite->oam.tileNum;
+        out->icons[out->iconCount].paletteNum = sprite->oam.paletteNum;
+        out->iconCount++;
+    }
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

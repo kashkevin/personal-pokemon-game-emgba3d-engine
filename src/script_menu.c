@@ -1368,6 +1368,48 @@ bool32 ScriptMenu_NativeUiState(struct NativeScriptMenu *out)
     return FALSE;
 }
 
+// A script's dynamic multichoice (dynmultichoice: DrawMultichoiceMenuDynamic's list menu) as the field text screen
+// draws a scrolling list. Every button stays here. Task_HandleScrollingMultichoiceInput's data: 0 the list menu's
+// task, 1 B ignored, 2 the window, 3 and 4 the rows (the task frees them, and itself, in the frame a row is chosen),
+// 5 how many, 7 how many at once.
+bool32 ScriptMenu_NativeUiDynamicList(struct NativeScrollMulti *out)
+{
+    u8 taskId = FindTaskIdByFunc(Task_HandleScrollingMultichoiceInput);
+    struct ListMenuItem *items = NULL;
+    u16 scroll = 0, row = 0;
+    u32 i, count, shown;
+    u8 windowId;
+
+    if (taskId == TASK_NONE)
+        return FALSE;
+    count = (u16)gTasks[taskId].data[5];
+    shown = (u16)gTasks[taskId].data[7];
+    windowId = gTasks[taskId].data[2];
+    if (count == 0 || count > NATIVE_SCROLL_MULTI_MAX || windowId >= WINDOWS_MAX)
+        return FALSE;
+    LoadWordFromTwoHalfwords((u16 *)&gTasks[taskId].data[3], (u32 *)&items);
+    if (items == NULL)
+        return FALSE;
+    memset(out, 0, sizeof(*out));
+    ListMenuGetScrollAndRow(gTasks[taskId].data[0], &scroll, &row);
+    out->ready = !gPaletteFade.active;
+    out->id = NATIVE_SCROLL_MULTI_DYNAMIC;
+    out->count = count;
+    out->shown = (shown == 0 || shown > count) ? count : shown;
+    out->scroll = scroll;
+    out->cursor = scroll + row;
+    out->ignoreB = gTasks[taskId].data[1] != 0;
+    out->windowId = windowId;
+    out->left = gWindows[windowId].window.tilemapLeft;
+    out->top = gWindows[windowId].window.tilemapTop;
+    out->width = gWindows[windowId].window.width;
+    out->height = gWindows[windowId].window.height;
+    for (i = 0; i < count; i++)
+        out->labels[i] = items[i].name;
+    out->prizeSpriteId = MAX_SPRITES;
+    return TRUE;
+}
+
 // The PC's own multichoice (MULTI_PC), as ScriptMenu_CreatePCMultichoice prints
 // it: whose PC the storage is, the player's, the Hall of Fame once the game is
 // clear, LOG OFF.

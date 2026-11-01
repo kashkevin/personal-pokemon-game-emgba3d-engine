@@ -1049,3 +1049,17 @@ static void InitGroundTilemapData(bool8 goingDown)
 
     sCableCar->groundTimer = 0;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native cable car screen (src/native_ui/screens/ui_cable_car.c, step 15c): whether the ride is on (its scene is
+// the game's), and which way it goes (GOING_DOWN: to Route 112's station, else up to Mt. Chimney's)
+bool32 CableCar_NativeUiState(bool8 *goingDown)
+{
+    if (sCableCar == NULL || gMain.callback2 != CB2_CableCar)
+        return FALSE;
+    *goingDown = GOING_DOWN != 0;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI
