@@ -261,6 +261,47 @@ class TerraceTopologyTests(unittest.TestCase):
         self.assertEqual({result[3 * 3 + x]["groundQ16"] for x in range(3)}, {-16})
         self.assertFalse(any(4 * 3 + x in result for x in range(3)))
 
+    def test_a_blocked_cell_between_two_levels_stands_on_the_one_asked(self):
+        # A rock between ground a level down and ground two levels down: left as it was, unless `between` names
+        # the lower (the Safari Zone's north-east) or the higher (its north, the rock edge its raised sand's rim).
+        def walk():
+            return dict(cell(113), collision=0)
+
+        rock = dict(cell(500), collision=1)
+        cells = (walk(), rock, walk())
+        solved = {0: {"groundQ16": -16}, 2: {"groundQ16": -32}}
+        self.assertEqual(lift_blocked_cells(cells, 3, 1, solved), {})
+        self.assertEqual(lift_blocked_cells(cells, 3, 1, solved, between="lowest")[1]["groundQ16"], -32)
+        self.assertEqual(lift_blocked_cells(cells, 3, 1, solved, between="highest")[1]["groundQ16"], -16)
+        # A jump ledge drawn with a terrace course's piece (General 135) the solver left unplaced lifts only with
+        # `ledges` (the Safari Zone's north: its ring of ledges stood a level over the sand round it).
+        ledge = dict(cell(135), collision=1, behavior="MB_JUMP_SOUTH")
+        cells = (walk(), ledge, walk())
+        solved = {0: {"groundQ16": -16}, 2: {"groundQ16": -16}}
+        self.assertEqual(lift_blocked_cells(cells, 3, 1, solved), {})
+        self.assertEqual(lift_blocked_cells(cells, 3, 1, solved, ledges=True)[1]["groundQ16"], -16)
+
+    def test_the_safari_zones_north_climbs_its_bumpy_slope(self):
+        # The Safari Zone's north: its bumpy slope at (22, 23), of elevation 0 between its raised sand and the grass
+        # south of it, a ramp up from the grass to the sand (compile_rules' RAMP_HINTS), nothing dropped.
+        from compile_rules import RAMP_HINTS
+        tilesets = load_tilesets(ROOT)
+        _, layouts = load_world(ROOT)
+        names = {value: name for name, value
+                 in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
+        lid = "LAYOUT_SAFARI_ZONE_NORTH"
+        layout = next(row for row in layouts if row["id"] == lid)
+        width, height = layout["width"], layout["height"]
+        cells = _load_cells(ROOT, [layout], tilesets, names)[0][lid]
+        ramps = {y * width + x: d for (x, y), d in RAMP_HINTS[lid].items()}
+        contradictions = []
+        solved = solve_layout(cells, width, height, contradictions=contradictions, ramps=ramps)
+        self.assertEqual(contradictions, [])
+        slope = solved[23 * width + 22]
+        self.assertEqual((slope["profile"], slope["groundQ16"]), ("transition-horizontal", -32))
+        self.assertEqual(solved[22 * width + 22]["groundQ16"], -16)     # the sand it climbs to
+        self.assertEqual(solved[24 * width + 22]["groundQ16"], -32)     # the grass it climbs from
+
     def test_shallows_join_the_solved_sea(self):
         # A course along row 1; below it the sea (same elevation: solved a level
         # down), and shallows at another elevation joining it on row 4: they

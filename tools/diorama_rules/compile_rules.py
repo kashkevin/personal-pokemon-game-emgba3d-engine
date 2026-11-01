@@ -1413,14 +1413,24 @@ SCENERY_COURSES: dict[str, tuple[tuple[int, int], ...]] = {
 # step down three levels from the north to its south edge, where the south-east meets it at the level the rest of
 # the Safari Zone is on; its stairs at (20-22, 22) climb north, and three rows of ramp at its south edge, in its west
 # and east ways out, climb the three levels back to the south-east's ground; the halves of two stairs whose other
-# half meets a course (30, 9) and (26, 13) climb with it.
+# half meets a course (30, 9) and (26, 13) climb with it. The Safari Zone's north: its bumpy slope at (22, 23), of
+# elevation 0 (the game's any level) between its raised sand and the grass south of it, stayed on the top level, a
+# step a level over both; it climbs north from the grass to the sand.
 RAMP_HINTS: dict[str, dict[tuple[int, int], str]] = {
     "LAYOUT_SAFARI_ZONE_SOUTH": {(17, 7): "w"},
+    "LAYOUT_SAFARI_ZONE_NORTH": {(22, 23): "n"},
     "LAYOUT_SAFARI_ZONE_NORTHEAST": {**{(x, 22): "n" for x in (20, 21, 22)}, (30, 9): "n", (26, 13): "n",
                                      **{(x, y): "s" for y in (37, 38, 39) for x in (*range(6, 9), *range(27, 33), 34)}},
 }
-# The layouts whose blocked cells between two solved levels stand on the lower (lift_blocked_cells `lowest`).
-LOWEST_LIFT_LAYOUTS: frozenset[str] = frozenset({"LAYOUT_SAFARI_ZONE_NORTHEAST"})
+# The layouts whose blocked cells between two solved levels stand on the lower or the higher of them
+# (lift_blocked_cells `between`): the Safari Zone's north-east its lowered ground's, its north and north-west their
+# raised ground's (the rock edges round it its rim, a face down to the ground below; left on the top level, they
+# stood as fins and pillars a level over both).
+LIFT_BETWEEN: dict[str, str] = {"LAYOUT_SAFARI_ZONE_NORTHEAST": "lowest", "LAYOUT_SAFARI_ZONE_NORTH": "highest",
+                                "LAYOUT_SAFARI_ZONE_NORTHWEST": "highest"}
+# The layouts whose jump ledges drawn with a terrace course's piece the solver left unplaced lift with the blocked
+# cells (lift_blocked_cells `ledges`): the Safari Zone's north, its ring of ledges round a pit in its raised sand.
+LEDGE_LIFT_LAYOUTS: frozenset[str] = frozenset({"LAYOUT_SAFARI_ZONE_NORTH"})
 LEVEL_ANCHORS: dict[str, tuple[tuple[int, int], int]] = {
     "LAYOUT_SAFARI_ZONE_SOUTH": ((13, 10), 0),
 }
@@ -2207,7 +2217,8 @@ def compile_data(root: Path) -> dict:
                                               if offset not in level_free_cells[layout["id"]]
                                               and not entry.get("doorway")},
                                              liftable=liftable,
-                                             lowest=layout["id"] in LOWEST_LIFT_LAYOUTS)}
+                                             between=LIFT_BETWEEN.get(layout["id"]),
+                                             ledges=layout["id"] in LEDGE_LIFT_LAYOUTS)}
             if rocks:
                 # The rocks the sea's own height surrounds (no terrace, or water
                 # no terrace reaches) lie at that height too: they stood a tile's

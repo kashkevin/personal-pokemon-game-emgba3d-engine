@@ -1762,7 +1762,8 @@ def pass_levels(cells: tuple[dict, ...], width: int, height: int,
 
 
 def lift_blocked_cells(cells: tuple[dict, ...], width: int, height: int,
-                       solved: dict[int, dict], liftable=None, lowest: bool = False) -> dict[int, dict]:
+                       solved: dict[int, dict], liftable=None, between: str | None = None,
+                       ledges: bool = False) -> dict[int, dict]:
     """Blocked cells that are no terrace course (a house, a tree, a rock) stand
     on the ground nearest them. solve_layout gives levels to walkable regions
     only, so on a level below the highest (Mossdeep's town under its cliffs'
@@ -1774,12 +1775,17 @@ def lift_blocked_cells(cells: tuple[dict, ...], width: int, height: int,
     (outdoors one below the top: dry land, or the sea solved with it; in a cave
     a floor over its lowest), that level is its ground ("lift": its own height
     stands on it). Nearest to unsolved water (the sea at its
-    own height), to two levels at once (with `lowest`, it stands on the lower
-    of them), or to unsolved ground, it is left as it was. Returns the lifted
-    cells' entries (graphics overhaul phase 4, 2026-10-12)."""
+    own height), to two levels at once (with `between` "lowest" or "highest",
+    it stands on that of them), or to unsolved ground, it is left as it was.
+    With `ledges`, a jump ledge drawn with a terrace course's piece the
+    solver left unplaced lifts with them (the Safari Zone's north: the ring
+    of ledges round a pit in its raised sand stood a level over it).
+    Returns the lifted cells' entries (graphics overhaul phase 4,
+    2026-10-12)."""
     def blocked(offset: int) -> bool:
         return (cells[offset].get("collision", 0) != 0 and offset not in solved
-                and role_for_cell(cells[offset]) is None
+                and (role_for_cell(cells[offset]) is None
+                     or (ledges and str(cells[offset].get("behavior") or "").startswith("MB_JUMP_")))
                 and (liftable is None or liftable(offset)))
 
     def neighbours(offset: int):
@@ -1819,11 +1825,12 @@ def lift_blocked_cells(cells: tuple[dict, ...], width: int, height: int,
         frontier = list(reached)
     lifted: dict[int, dict] = {}
     for offset, offered in labels.items():
-        if lowest and len(offered) > 1 and all(isinstance(value, int) for value in offered):
-            # (`lowest`: a cell between two solved levels stands on the lower - the Safari Zone's north-east,
+        if between and len(offered) > 1 and all(isinstance(value, int) for value in offered):
+            # ("lowest": a cell between two solved levels stands on the lower - the Safari Zone's north-east,
             # its trees and rock between its lowered ground and the ramps up from it, left on the top level, stood
-            # as walls three levels high)
-            offered = {min(offered)}
+            # as walls three levels high; "highest": on the higher - the Safari Zone's north, the rock edges of
+            # its raised sand, left on the top level, stood as fins a level over it)
+            offered = {min(offered) if between == "lowest" else max(offered)}
         if len(offered) != 1:
             continue
         level = next(iter(offered))
