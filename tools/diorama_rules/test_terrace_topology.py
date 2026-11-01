@@ -744,6 +744,32 @@ class TerraceTopologyTests(unittest.TestCase):
         self.assertEqual(solved[7 * width + 13]["groundQ16"] - solved[10 * width + 13]["groundQ16"], 16)
         self.assertEqual(solved[9 * width + 13]["profile"], "transition-horizontal")   # its stairs climb
 
+    def test_the_safari_zones_north_east_steps_down_to_ramps_at_its_south_edge(self):
+        # The owner's choice of 2026-11-01 ("Real terraces + slope at edge"): with compile_rules' hints for the
+        # Safari Zone's north-east (the ground beside a course's end meets its foot, its stairs' halves climb with
+        # them, three rows of ramp at its south edge) nothing is dropped, its terraces step down three levels to the
+        # south, and the ramps climb those three levels back to the top, where the south-east meets it.
+        from compile_rules import OPEN_END_LAYOUTS, RAMP_HINTS
+        tilesets = load_tilesets(ROOT)
+        _, layouts = load_world(ROOT)
+        names = {value: name for name, value
+                 in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
+        lid = "LAYOUT_SAFARI_ZONE_NORTHEAST"
+        self.assertIn(lid, OPEN_END_LAYOUTS)
+        layout = next(row for row in layouts if row["id"] == lid)
+        width, height = layout["width"], layout["height"]
+        cells = _load_cells(ROOT, [layout], tilesets, names)[0][lid]
+        ramps = {y * width + x: d for (x, y), d in RAMP_HINTS[lid].items()}
+        contradictions = []
+        solved = solve_layout(cells, width, height, contradictions=contradictions, ramps=ramps, open_ends=True)
+        self.assertEqual(contradictions, [])
+        self.assertEqual(solved[35 * width + 7]["groundQ16"], -48)      # the lowest terrace, three levels down
+        for x in (7, 30, 34):
+            for row, ground in ((37, -48), (38, -32), (39, -16)):
+                entry = solved[row * width + x]
+                self.assertEqual((entry["profile"], entry["groundQ16"]), ("transition-south", ground))
+        self.assertEqual(solved[22 * width + 21]["profile"], "transition-horizontal")  # its stairs climb north
+
     def test_a_passs_paths_stand_a_level_a_ledge_apart(self):
         # A pass whose paths are all at one elevation (Jagged Pass): the top path H jumps south into an island I,
         # which jumps east into a way W that runs down from H beside it, and both jump south into the bottom L.

@@ -1394,7 +1394,8 @@ GBA_HEIGHT_LAYOUTS = frozenset({"LAYOUT_ROUTE112", "LAYOUT_ROUTE111", "LAYOUT_RO
 # pillars), so it waits for those.
 STAIRS_STEP_LAYOUTS: frozenset[str] = frozenset()
 # The layouts whose ground beside a course's end meets only its foot (terrace_topology.solve_layout `open_ends`).
-OPEN_END_LAYOUTS: frozenset[str] = frozenset({"LAYOUT_SAFARI_ZONE_SOUTH"})
+OPEN_END_LAYOUTS: frozenset[str] = frozenset({"LAYOUT_SAFARI_ZONE_SOUTH", "LAYOUT_SAFARI_ZONE_NORTHEAST",
+                                             "LAYOUT_SAFARI_ZONE_SOUTHEAST"})
 # The layouts whose courses no level solves stand as faces on the ground round them (terrace_topology.course_ridges).
 RIDGE_LAYOUTS: frozenset[str] = frozenset()
 # The Safari Zone's entrance (the owner's report of 2026-11-01, "some hills are blocks, some hills are 2d"): its
@@ -1408,9 +1409,18 @@ RIDGE_LAYOUTS: frozenset[str] = frozenset()
 SCENERY_COURSES: dict[str, tuple[tuple[int, int], ...]] = {
     "LAYOUT_SAFARI_ZONE_SOUTH": tuple((x, 2) for x in range(18, 26)) + ((35, 7), (36, 7)),
 }
+# The Safari Zone's north-east (the owner's choice of 2026-11-01: "Real terraces + slope at edge"): its terraces
+# step down three levels from the north to its south edge, where the south-east meets it at the level the rest of
+# the Safari Zone is on; its stairs at (20-22, 22) climb north, and three rows of ramp at its south edge, in its west
+# and east ways out, climb the three levels back to the south-east's ground; the halves of two stairs whose other
+# half meets a course (30, 9) and (26, 13) climb with it.
 RAMP_HINTS: dict[str, dict[tuple[int, int], str]] = {
     "LAYOUT_SAFARI_ZONE_SOUTH": {(17, 7): "w"},
+    "LAYOUT_SAFARI_ZONE_NORTHEAST": {**{(x, 22): "n" for x in (20, 21, 22)}, (30, 9): "n", (26, 13): "n",
+                                     **{(x, y): "s" for y in (37, 38, 39) for x in (*range(6, 9), *range(27, 33), 34)}},
 }
+# The layouts whose blocked cells between two solved levels stand on the lower (lift_blocked_cells `lowest`).
+LOWEST_LIFT_LAYOUTS: frozenset[str] = frozenset({"LAYOUT_SAFARI_ZONE_NORTHEAST"})
 LEVEL_ANCHORS: dict[str, tuple[tuple[int, int], int]] = {
     "LAYOUT_SAFARI_ZONE_SOUTH": ((13, 10), 0),
 }
@@ -2196,7 +2206,8 @@ def compile_data(root: Path) -> dict:
                                               in terrace_topology[layout["id"]].items()
                                               if offset not in level_free_cells[layout["id"]]
                                               and not entry.get("doorway")},
-                                             liftable=liftable)}
+                                             liftable=liftable,
+                                             lowest=layout["id"] in LOWEST_LIFT_LAYOUTS)}
             if rocks:
                 # The rocks the sea's own height surrounds (no terrace, or water
                 # no terrace reaches) lie at that height too: they stood a tile's
