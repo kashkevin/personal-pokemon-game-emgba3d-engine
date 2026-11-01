@@ -24,7 +24,8 @@ from mountain_art import (MountainArtError, faces_between_levels,
 from profiles import NOMINAL_HEIGHTS, TileShape, shape_from_action
 from pixel_objects import UPRIGHT_CLASSES as UPRIGHT_PIXEL_CLASSES, extract_layout
 from structures import analyze_layout
-from terrace_topology import (WATER_BEHAVIORS, cave_climbs, cave_levels, join_level_free_cells, join_water,
+from terrace_topology import (WATER_BEHAVIORS, cave_climbs, cave_levels, contradiction_ramps, join_level_free_cells,
+                              join_water,
                               lift_blocked_cells, mountain_ledges, pass_levels, rock_tops, seam_shifts,
                               slope_tops,
                               solve_layout as solve_terrace_topology)
@@ -1242,7 +1243,10 @@ def _terrain_record(cell_offset: int, cell: dict, shape: TileShape,
         # report of 2026-10-24). Stairs up onto a mountain (mountain_ledges) rise
         # the one level over all their rows: each row its share ("rise").
         rise = terrace.get("rise", 16)
-        record.update({"class": "stairs", "shape": "stairs", "archetype": "stairs-n",
+        # (a step contradiction_ramps lays climbs the way its profile says; the game's terrace stairs north)
+        archetype = {"transition-south": "stairs-s", "transition-east": "stairs-e",
+                     "transition-west": "stairs-w"}.get(terrace["profile"], "stairs-n")
+        record.update({"class": "stairs", "shape": "stairs", "archetype": archetype,
                        "terrainClass": "rock", "topQ16": terrace["groundQ16"] + rise,
                        "heightQ16": rise})
     if terrace is not None and terrace.get("deck"):
@@ -1381,6 +1385,13 @@ def _reefs_at_sea_level(cells: tuple[dict, ...], width: int, height: int,
 # Route 112's plateau three levels up, Route 111's two (the owner's decision of 2026-10-29, "Raise to the GBA
 # heights"). Route 115's tops would stand four levels up, its rock two over Route 114's across their seam.
 GBA_HEIGHT_LAYOUTS = frozenset({"LAYOUT_ROUTE112", "LAYOUT_ROUTE111", "LAYOUT_ROUTE111_NO_MIRAGE_TOWER"})
+# The layouts whose stairs cut through rock count as steps where they let a terrace solve
+# (terrace_topology.contradiction_ramps; the owner's report of 2026-11-01, "some hills are blocks"). None yet: on
+# the six it solves (Lilycove, Routes 119 and 121, Southern Island, the Battle Frontier's east half, the Safari
+# Zone's north-east) the terraces stood at their levels and their stairs climbed, but the probe found new steps one
+# walks across, water standing over land, Route 118's seams a level apart and more fins (Route 121's rock as
+# pillars), so it waits for those.
+STAIRS_STEP_LAYOUTS: frozenset[str] = frozenset()
 # The mountain passes whose paths stand at the heights their ledges and slopes give them (terrace_topology.pass_levels;
 # KNOWN_ISSUES MS-153). None yet: Jagged Pass ("LAYOUT_JAGGED_PASS", reached only by warps, no seam to meet) solves
 # to nine levels from the Mt. Chimney end down, but its rock does not yet stand with its paths (the first try,
@@ -1769,10 +1780,17 @@ def compile_data(root: Path) -> dict:
     cave_rock_cells = {}
     terrace_topology = {}
 
+    ramps_of: dict[str, dict[int, str]] = {}
+
     def solve_terrain(layout: dict, shifts: dict[int, int] | None = None,
                       members: dict[int, int] | None = None) -> dict[int, dict]:
+        # the stairs that let a component solve (terrace_topology.contradiction_ramps: stairs cut through rock
+        # beside no course; the owner's report of 2026-11-01, "some hills are blocks")
+        if layout["id"] not in ramps_of:
+            ramps_of[layout["id"]] = (contradiction_ramps(cells[layout["id"]], layout["width"], layout["height"])
+                                      if layout["id"] in STAIRS_STEP_LAYOUTS else {})
         solved = solve_terrace_topology(cells[layout["id"]], layout["width"], layout["height"],
-                                        shifts=shifts, members=members)
+                                        shifts=shifts, members=members, ramps=ramps_of[layout["id"]])
         try:
             # (a mountain's rock reaches no further than its own cells: the
             # sea's rocks and boulders are models, a terrace's course its own)
@@ -2483,7 +2501,8 @@ def render_c(data: dict) -> str:
     axes = {"x": 0, "z": 1, "cross": 2}
     terrace_profiles = {"none": 0, "horizontal": 1, "vertical": 2,
                         "outer": 3, "inner": 4,
-                        "transition-horizontal": 5}
+                        "transition-horizontal": 5, "transition-south": 5,
+                        "transition-east": 5, "transition-west": 5}
     owner_kinds = {"none": 0, "template": 1, "authored-special": 2,
                    "prop-candidate": 3, "generic-volume": 4, "region": 5}
     void_kinds = {"none": 0, "transparent": 1, "black": 2}

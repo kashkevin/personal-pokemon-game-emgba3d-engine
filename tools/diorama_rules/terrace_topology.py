@@ -40,6 +40,16 @@ WATER_BEHAVIORS = frozenset({
 })
 
 
+# A ramp the solver lays across a way the game walks from a course's low side round to its high side
+# (contradiction_ramps): a level up over the cell toward its direction, joined to its neighbours as a course is.
+RAMP_ROLES = {
+    "n": TerraceRole("transition-horizontal", (1, 1, 0, 0), False, (1, 3)),
+    "s": TerraceRole("transition-south", (0, 0, 1, 1), False, (1, 3)),
+    "e": TerraceRole("transition-east", (0, 1, 1, 0), False, (0, 2)),
+    "w": TerraceRole("transition-west", (1, 0, 0, 1), False, (0, 2)),
+}
+
+
 def role_for_cell(cell: dict) -> TerraceRole | None:
     if cell.get("tileset") != "gTileset_General":
         return None
@@ -492,13 +502,15 @@ def solve_layout(cells: tuple[dict, ...], width: int, height: int,
                  contradictions: list[tuple[int, ...]] | None = None,
                  conflict_edges: list[tuple[object, object, int, int]] | None = None,
                  shifts: dict[int, int] | None = None,
-                 members: dict[int, int] | None = None
+                 members: dict[int, int] | None = None,
+                 ramps: dict[int, str] | None = None
                  ) -> dict[int, dict]:
     """Return solved cells; contradictory connected topology components are omitted.
 
     A component's key is the lowest cell offset in it. shifts: levels a component
     moves by, by key (seam_shifts). members: filled with each solved region cell's
-    component key."""
+    component key. ramps: walkable cells laid as ramps a level up toward their
+    direction, "n", "s", "e" or "w" (contradiction_ramps)."""
     if len(cells) != width * height:
         raise ValueError("terrace topology layout dimensions do not match its cells")
     cardinal = ((0, -1), (1, 0), (0, 1), (-1, 0))
@@ -528,6 +540,8 @@ def solve_layout(cells: tuple[dict, ...], width: int, height: int,
             if neighbor_role is not None and (direction + 2) % 4 in neighbor_role.ports:
                 roles[offset] = role
                 break
+    for offset, direction in (ramps or {}).items():
+        roles[offset] = RAMP_ROLES[direction]
     if not roles:
         return {}
 
@@ -705,6 +719,93 @@ def solve_layout(cells: tuple[dict, ...], width: int, height: int,
                 solved[offset] = {"groundQ16": shifts[key] * 16, "topQ16": shifts[key] * 16,
                                   "profile": "none", "solid": False}
     return solved
+
+
+# How far from a component's courses its stairs are looked for (contradiction_ramps), in cells.
+STAIRS_REACH = 10
+
+
+def contradiction_ramps(cells: tuple[dict, ...], width: int, height: int,
+                        shifts: dict[int, int] | None = None) -> dict[int, str]:
+    """Steps that let solve_layout solve what it gave up on (the owner's report of 2026-11-01: "some hills are
+    blocks"). The game's stairs (General 175, 207) count as a step only where they join a course (their ports);
+    stairs cut through rock beside no course (Route 121's at (30-31, 10-11), Lilycove's, the Battle Frontier's)
+    were ground of their region, so the ground at their foot and at their top was one region, every terrace that
+    region met on both sides contradicted, and solve_layout dropped the whole component: its courses stood as
+    blocks on level ground. Here each group of such stairs (side by side) is tried as a step up to the north, then
+    to the south, and kept where it leaves fewer courses unsolved and none unsolved that were solved (stairs that
+    go nowhere new, or that a mountain's own solver climbs - Route 111's, Route 115's - stay as they were). Returns
+    {offset: direction} for solve_layout's `ramps`."""
+    def dropped(trial: dict[int, str]) -> tuple[set[int], int]:
+        """The courses still unsolved, and how many of the solver's steps still disagree (a component with
+        several such stairs has a disagreement for each: one group of them alone solves nothing yet)."""
+        contradictions: list[tuple[int, ...]] = []
+        conflicts: list[tuple[object, object, int, int]] = []
+        solve_layout(cells, width, height, contradictions=contradictions, conflict_edges=conflicts,
+                     shifts=shifts, ramps=trial)
+        return {offset for component in contradictions for offset in component}, len(conflicts)
+
+    left, disagreeing = dropped({})
+    if not left:
+        return {}
+    unsolved_before = left
+    stairs = {offset for offset, cell in enumerate(cells)
+              if cell.get("collision", 0) == 0 and (role := role_for_cell(cell)) is not None
+              and role.profile.startswith("transition-")}
+    groups: list[list[int]] = []
+    seen: set[int] = set()
+    for start in sorted(stairs):
+        if start in seen:
+            continue
+        group, pending = [], [start]
+        seen.add(start)
+        while pending:
+            offset = pending.pop()
+            group.append(offset)
+            for neighbor in _neighbours(offset, width, height):
+                if neighbor in stairs and neighbor not in seen:
+                    seen.add(neighbor)
+                    pending.append(neighbor)
+        groups.append(sorted(group))
+    ramps: dict[int, str] = {}
+    improved = True
+    while improved and left:
+        improved = False
+        for group in groups:
+            if group[0] in ramps:
+                continue
+            for direction in ("n", "s"):
+                trial = {**ramps, **dict.fromkeys(group, direction)}
+                remaining, still = dropped(trial)
+                if remaining <= left and (len(remaining), still) < (len(left), disagreeing):
+                    ramps, left, disagreeing, improved = trial, remaining, still, True
+                    break
+    # a component several groups of stairs solve only together (Route 121's): all the stairs near its courses
+    contradictions: list[tuple[int, ...]] = []
+    solve_layout(cells, width, height, contradictions=contradictions, shifts=shifts, ramps=ramps)
+    for component in contradictions:
+        xs = [offset % width for offset in component]
+        ys = [offset // width for offset in component]
+        near = [group for group in groups if group[0] not in ramps
+                and any(min(xs) - STAIRS_REACH <= offset % width <= max(xs) + STAIRS_REACH
+                        and min(ys) - STAIRS_REACH <= offset // width <= max(ys) + STAIRS_REACH
+                        for offset in group)]
+        if not near:
+            continue
+        trial = {**ramps, **{offset: "n" for group in near for offset in group}}
+        remaining, still = dropped(trial)
+        if remaining <= left and len(remaining) < len(left):
+            ramps, left, disagreeing = trial, remaining, still
+    if len(left) == len(unsolved_before):
+        return {}
+    # a group that solves nothing on its own account is taken back (its stairs stay as they were)
+    for group in groups:
+        if group[0] not in ramps:
+            continue
+        trial = {offset: direction for offset, direction in ramps.items() if offset not in group}
+        if dropped(trial)[0] <= left:
+            ramps = trial
+    return ramps
 
 
 def seam_shifts(layouts: dict[str, dict], seams: list[tuple[tuple[str, int], tuple[str, int]]],

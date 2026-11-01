@@ -7,7 +7,7 @@ from pathlib import Path
 from catalog import load_tilesets, load_world
 from compile_rules import _load_cells, parse_behaviors
 from terrace_topology import (CAVE_RISE_Q16, LEDGE_JUMPS, MOUNTAIN_LEDGE_Q16, SLOPE_RISE_Q16, TERRACE_ROLES,
-                              cave_climbs, cave_levels, join_level_free_cells, join_water, lift_blocked_cells,
+                              contradiction_ramps, cave_climbs, cave_levels, join_level_free_cells, join_water, lift_blocked_cells,
                               mountain_ledges, pass_levels, rock_tops, role_for_cell, seam_shifts, slope_tops,
                               solve_layout)
 
@@ -645,6 +645,38 @@ class TerraceTopologyTests(unittest.TestCase):
             # east cliff on the level of the rock round it (a level over the desert)
             for x, y, level in ((20, 34, 32), (20, 36, 32), (38, 83, 16)):
                 self.assertEqual(raised[y * width + x]["groundQ16"], level, (layout["id"], x, y))
+
+    def test_stairs_cut_through_rock_are_a_step_where_they_let_a_terrace_solve(self):
+        # A terrace's course (General 121) parts the upper ground H from the lower L; stairs (General 175) cut
+        # through rock beside no course join them. As ground of their region the stairs made H and L one region,
+        # the course contradicted and the component was dropped (its course a block on level ground); counted as a
+        # step up to the north they let it solve, H a level over L.
+        def rock():
+            return dict(cell(1), collision=1)
+
+        rows = ["#########",
+                "#.......#",
+                "#TTTT#S##",
+                "#.......#",
+                "#########"]
+        make = {"#": rock, ".": ground, "T": lambda: dict(cell(121), collision=1),
+                "S": lambda: dict(cell(175), elevation=3)}
+        cells = tuple(make[ch]() for row in rows for ch in row)
+        contradictions = []
+        solve_layout(cells, 9, 5, contradictions=contradictions)
+        self.assertTrue(contradictions)
+        ramps = contradiction_ramps(cells, 9, 5)
+        self.assertEqual(ramps, {2 * 9 + 6: "n"})
+        contradictions = []
+        solved = solve_layout(cells, 9, 5, contradictions=contradictions, ramps=ramps)
+        self.assertEqual(contradictions, [])
+        self.assertEqual({solved[9 + x]["groundQ16"] for x in range(1, 8)}, {0})
+        self.assertEqual({solved[27 + x]["groundQ16"] for x in range(1, 8)}, {-16})
+        self.assertEqual(solved[2 * 9 + 6]["profile"], "transition-horizontal")
+        # nothing to solve, nothing laid
+        rows[2] = "#TTTT####"
+        cells = tuple(make[ch]() for row in rows for ch in row)
+        self.assertEqual(contradiction_ramps(cells, 9, 5), {})
 
     def test_a_passs_paths_stand_a_level_a_ledge_apart(self):
         # A pass whose paths are all at one elevation (Jagged Pass): the top path H jumps south into an island I,
