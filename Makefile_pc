@@ -820,6 +820,7 @@ check-diorama-tools:
 	python3 tools/diorama_buildings/test_window_glow.py
 	python3 -W ignore tools/diorama_buildings/test_auto_buildings.py
 	python3 -W ignore tools/diorama_buildings/test_dimensional.py
+	python3 -W ignore tools/diorama_buildings/test_page_crop.py
 endif
 
 # Assembler data includes (.include/.incbin/#include), scanned like the GBA build.

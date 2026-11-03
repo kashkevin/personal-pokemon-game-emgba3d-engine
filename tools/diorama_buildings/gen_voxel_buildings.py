@@ -893,8 +893,8 @@ def interior_specs(spec):
             parts.append(vb.PlainWall("%s_side%d%s" % (pc["name"], n, behind),
                                       (wa[0] - ox, wa[1] - oz),
                                       (wb[0] - ox, wb[1] - oz), -1, tall, side))
-        # only the cells with a mark: a quad over nothing but floor would sample
-        # outside the drawing once the export crops it to what is opaque
+        # only the cells with a mark: a quad over nothing but floor draws nothing
+        # (its page keeps every texel a quad reads: page_crop)
         local = [(cx - x0, cy - y0) for (cx, cy) in cells
                  if art.crop(((cx - x0) * 16, (cy - y0) * 16 + h * 16,
                               (cx - x0) * 16 + 16, (cy - y0) * 16 + h * 16 + 16)).getbbox()]
@@ -1428,6 +1428,23 @@ def same_building_pixels(model, layout_id, metatile, i, j):
     return owned > 0
 
 
+def page_crop(model):
+    """The part of a model's art its page keeps: what is opaque and every texel its
+    triangles read. The pages set their images edge to edge, so a quad reaching past
+    what is opaque read the next image on the page: a floor decal over a cell its marks
+    only half fill (MS-164: under the bike shop's beds, a flat copy of the other bed's
+    top on the floor in front of them; the preview, reading the whole art, never showed
+    it). What the quad reads there now is the art's own transparent texels."""
+    w, h = model.art.size
+    box = model.art.getbbox() or (0, 0, 1, 1)
+    us = [u for tri, _, _ in model.mesh.tris for (_, _, _, u, _) in tri]
+    vs = [v for tri, _, _ in model.mesh.tris for (_, _, _, _, v) in tri]
+    if not us:
+        return box
+    return (min(box[0], max(0, math.floor(min(us)))), min(box[1], max(0, math.floor(min(vs)))),
+            max(box[2], min(w, math.ceil(max(us)))), max(box[3], min(h, math.ceil(max(vs)))))
+
+
 def pack_atlas(images):
     """Pack (key, image) pairs, tallest first, into the smallest power-of-two
     texture: each goes where its top edge lands lowest on the skyline of
@@ -1555,7 +1572,7 @@ def export(models, path):
             if odd:
                 print("  %s: %s at %d,%d differs in %d cell(s), %d patched from the map"
                       % (m.name, name, px, py, len(odd), len(cells)))
-    crops = {m.name: (m.art.getbbox() or (0, 0, 1, 1)) for m in models}
+    crops = {m.name: page_crop(m) for m in models}
 
     # models: geometry once, uv in the model's own art pixels
     records, verts, heights, quarters = [], [], bytearray(), bytearray()

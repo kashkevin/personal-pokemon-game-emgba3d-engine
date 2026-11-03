@@ -501,6 +501,46 @@ def devon_lobby():
     ])
 
 
+# ── Mauville City's bike shop ─────────────────────────────────────────────
+#
+# 12 x 9 cells. The shop (x 0-96): its back wall (rows 0-32, bike parts hung on it), a shelf of
+# parts against it (x 0-32), the counter (x 32-96: its orange top rows 38-58, its blue front
+# rows 58-70) with the till on its west end; down the west side a rack of six bikes (x 0-24,
+# rows 40-138), each a card standing where it is parked, and the rack's white frame behind them.
+# A partition (x 96-104, drawn as its top) parts it from the owner's room behind (x 104-192:
+# its wall rows 0-24 with two windows, two beds against it), whose south wall stands either side
+# of its doorway (x 96-128, x 160-192, rows 60-88); three more bikes down the east wall.
+
+BIKE_FLOOR = ("83948b", "acbdac", "cdcdcd", "d5ded5")
+BIKE_WALL = ("acac8b", "eeeede", "cdcdb4", "dedebd", "947b6a", "000000")
+BIKE_WALL_SIDE = (48, 4, 64, 32)
+
+
+def bike_shop():
+    facet, own_shell, piece = _helpers()
+    bikes = [piece("bike_w%d" % i, [(0, 42 + 16 * i, 24, 58 + 16 * i)], 16, leave=BIKE_FLOOR,
+                   card=True) for i in range(6)]
+    bikes += [piece("bike_e%d" % i, [(160, 80 + 16 * i, 192, 96 + 16 * i)], 16, leave=BIKE_FLOOR,
+                    card=True) for i in range(3)]
+    return own_shell(bikes + [
+        piece("rack", [(16, 44, 32, 142)], 4, leave=BIKE_FLOOR),
+        piece("counter", [(32, 38, 96, 70)], 12, leave=BIKE_FLOOR),
+        piece("till", [(32, 22, 48, 40)], 12, base=12, leave=BIKE_WALL + BIKE_FLOOR),
+        piece("shelf", [(0, 8, 32, 40)], 24, back=24, leave=BIKE_WALL + BIKE_FLOOR),
+        # the beds from their frames' top (rows 19-39): the windows above them are the wall's
+        piece("bed_w", [(112, 19, 144, 40)], 8, leave=BIKE_WALL + BIKE_FLOOR),
+        piece("bed_e", [(160, 19, 192, 40)], 8, leave=BIKE_WALL + BIKE_FLOOR),
+        # the partition's top: it runs from the back wall to the room's south wall (foot 84)
+        piece("edge_partition", [(96, 8, 104, 60)], 24, solid=True, side=BIKE_WALL_SIDE,
+              foot=84, cells=[(6, 5)]),
+        piece("wall_room_w", [(96, 60, 128, 88)], 24, fill=16, side=BIKE_WALL_SIDE),
+        piece("wall_room_e", [(160, 60, 192, 88)], 24, fill=16, side=BIKE_WALL_SIDE),
+        piece("wall_room", [(104, 0, 192, 24)], 18, fill=16, side=BIKE_WALL_SIDE),
+        piece("wall", [(0, 0, 96, 32)], 24, fill=16, side=BIKE_WALL_SIDE),
+        piece("side_e", [], 18, side=BIKE_WALL_SIDE, walls=[((192, 24), (192, 64))]),
+    ])
+
+
 # ── The Battle Frontier's Ranking Hall ────────────────────────────────────
 #
 # 53 x 15 cells: a hall (x 304-544) with a room either side (x 48-224, x 624-800) joined by
@@ -620,6 +660,11 @@ def furnished_room_specs():
             "name": "devon_lobby",
             "interior": {"layout": "LAYOUT_RUSTBORO_CITY_DEVON_CORP_1F", "ground": [0x380],
                          "reuse_in": frozenset(), "pieces": devon_lobby()},
+        },
+        {
+            "name": "bike_shop",
+            "interior": {"layout": "LAYOUT_MAUVILLE_CITY_BIKE_SHOP", "ground": [0x23F],
+                         "reuse_in": frozenset(), "pieces": bike_shop()},
         },
         {
             "name": "frontier_ranking_hall",
