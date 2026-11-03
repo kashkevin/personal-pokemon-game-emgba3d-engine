@@ -2336,6 +2336,14 @@ void DioramaScene_PublishOverworld(void)
     }
     sDraft.battleTransition = gMain.callback2 == CB2_OverworldBasic && DioramaBattle_TransitionActive();
     sDraft.valid = gMapHeader.mapLayout != NULL;
+    /* A warp's last frame on the field: its task has loaded the next map's header and tilesets (WarpIntoMap) and
+     * handed the next frame to the map's loading, but the grid is the old map's until that load - its cells read with
+     * the next map's tilesets, past the end of a smaller secondary tileset's tables (KNOWN_ISSUES MS-182, found by
+     * AddressSanitizer). The screen has faded out; nothing of the map is copied, and the next map's own snapshot
+     * follows its load (InitMap marks it a new map). */
+    if (gMain.callback2 == CB2_LoadMap || gMain.callback2 == CB2_ReturnToFieldCableClub
+     || gMain.callback2 == CB2_ReturnToFieldContestHall)
+        sDraft.valid = false;
     if (!sDraft.valid)
         sDraft.fallbackReasons |= DIORAMA_FALLBACK_MAP_UNAVAILABLE;
 
