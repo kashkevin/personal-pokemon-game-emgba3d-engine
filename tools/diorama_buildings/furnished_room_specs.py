@@ -572,6 +572,63 @@ def ranking_hall():
     ] + walls)
 
 
+
+# ── The Battle Factory's lobby ────────────────────────────────────────────
+#
+# 19 x 12 cells. From the top of the drawing:
+#
+#     rows  0- 72  the back wall, drawn to the map's top: white panels with vents over a dark
+#                  band, a red baseboard (rows 65-72); four pillars standing out of it (x 32-48,
+#                  96-112, 192-208, 256-272); two doorways (x 48-96, x 208-256: jambs either side
+#                  of a dark opening) whose middle cell (4,4 and 14,4) the attendants walk into
+#                  with the player: the doorway stands no wall; between the middle pillars a
+#                  yellow-striped shutter (x 112-192, rows 40-60) over cells no one walks
+#     rows 66- 90  a notice board on legs (x 136-168) before the shutter: left as drawn (its
+#                  legs stand in the row the player reads it from)
+#     rows 72-128  four desks, each an L: a long orange-framed top from the wall (x 32-48,
+#                  112-128, 176-192, 256-272) and a bar across its front (x 32-64, 80-128,
+#                  176-224, 240-272; its top rows 108-120, its front rows 120-128 - 8 rows); a
+#                  monitor on the outer desks' long tops (x 32-48, 176-192, rows 100-120), flat
+#                  on them
+#     plants     five potted plants (x 16-32 and x 272-304, rows 66-96; x 128-144 and x 160-176,
+#                  rows 99-127): cards; a PC (x 0-16, rows 72-104)
+#     rows 160-192 two bins (x 240-256, x 272-288); the red runner down the east edge (x 288-304,
+#                  walkable) and the mats are the floor's
+#
+# Its floor is two tiles in turn (0x201, 0x202): the second's pixels that are not the first's are
+# marks, laid flat by the pieces whose cells hold them.
+
+FAC_FLOOR = ("ffffff", "d5d5c5", "acac8b")
+FAC_WALL = ("ffffff", "d5d5c5", "52526a", "9494a4", "ff6231", "bd2910", "de4a20", "ac5a31",
+            "cdbdc5", "62627b")
+FAC_WALL_SIDE = (0, 0, 16, 72)      # a panel of the wall west of the first pillar, top to foot
+
+
+def factory_lobby():
+    facet, own_shell, piece = _helpers()
+    desks = [piece("desk_%d" % x0, [(arm, 72, arm + 16, 128), (x0, 108, x1, 128)], 8,
+                   leave=FAC_FLOOR)
+             for (arm, x0, x1) in ((32, 32, 64), (112, 80, 128), (176, 176, 224), (256, 240, 272))]
+    plants = [piece("plant_%d_%d" % (x0 // 16, z1 // 16), [(x0, z0, x0 + 16, z1)], 28,
+                    leave=FAC_FLOOR + FAC_WALL, card=True)
+              for (x0, z0, z1) in ((16, 64, 96), (272, 64, 96), (288, 64, 96), (128, 96, 128),
+                                   (160, 96, 128))]
+    bins = [piece("bin_%d" % x0, [(x0, 164, x0 + 16, 192)], 16, leave=FAC_FLOOR)
+            for x0 in (240, 272)]
+    return own_shell(desks + plants + bins + [
+        piece("pc", [(0, 72, 16, 104)], 24, back=72, leave=FAC_WALL + FAC_FLOOR),
+        # the doorways' cells (x 64-80, x 224-240) cut out of the walls under their lintels
+        # (rows 0-50), each wall standing on its foot (row 72)
+        piece("wall_w", [(0, 0, 64, 72), (64, 0, 80, 50)], 72, fill=16, foot=72,
+              side=FAC_WALL_SIDE),
+        piece("wall_mid", [(80, 0, 224, 72), (224, 0, 240, 50)], 72, fill=16, foot=72,
+              side=FAC_WALL_SIDE),
+        piece("wall_e", [(240, 0, 304, 72)], 72, fill=16, side=FAC_WALL_SIDE),
+        piece("side_w", [], 72, side=FAC_WALL_SIDE, walls=[((0, 192), (0, 72))]),
+        piece("side_e", [], 72, side=FAC_WALL_SIDE, walls=[((304, 72), (304, 192))]),
+    ])
+
+
 def furnished_room_specs():
     """The specs, made when voxel_building_specs asks for them (its SPECS end with them)."""
     return [
@@ -665,6 +722,12 @@ def furnished_room_specs():
             "name": "bike_shop",
             "interior": {"layout": "LAYOUT_MAUVILLE_CITY_BIKE_SHOP", "ground": [0x23F],
                          "reuse_in": frozenset(), "pieces": bike_shop()},
+        },
+        {
+            "name": "frontier_factory_lobby",
+            "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_BATTLE_FACTORY_LOBBY",
+                         "ground": [0x201], "shade": [0x203, 0x204],
+                         "reuse_in": frozenset(), "pieces": factory_lobby()},
         },
         {
             "name": "frontier_ranking_hall",
