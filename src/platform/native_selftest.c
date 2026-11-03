@@ -1562,6 +1562,36 @@ int NativeSelfTest_Clock(void)
     WorldConnect(FALSE, 0);
     snprintf(what, sizeof(what), "the tree is still growing (%u minutes to its next stage)", TreeMinutes());
     ExpectClock(what, tree->berry == 1 && tree->stage != BERRY_STAGE_NO_BERRY);
+
+    // KNOWN_ISSUES M21: a game process's first World Event action is not number 1 (as the shared spawns', M19), so a
+    // companion that served the game before it and acknowledged that game's number 1 does not skip it; the next one
+    // numbers on from it.
+    {
+        u32 first, second;
+
+        MultiplayerWorld_Init();             // a new game process: its mailbox zeroed
+        WorldConnect(TRUE, world);
+        gMain.vblankCounter1 = 4321;
+        ExpectClock("M21: a new game's first action is posted", MultiplayerWorld_PostAppearanceSaved());
+        first = gMultiplayerWorldMailbox.action.seq;
+        snprintf(what, sizeof(what), "M21: a new game's first action is not number 1 (it is %u)", first);
+        ExpectClock(what, first != 0 && first != 1);
+        gMultiplayerWorldMailbox.actionAck = first;   // the host received it
+        WorldConnect(TRUE, world);
+        ExpectClock("M21: the next action is posted once the first is acknowledged",
+                    MultiplayerWorld_PostAppearanceSaved());
+        second = gMultiplayerWorldMailbox.action.seq;
+        snprintf(what, sizeof(what), "M21: the next action numbers on from it (%u after %u)", second, first);
+        ExpectClock(what, second == first + 1 || (first == 0xFFFFFFFFu && second == 1));
+        MultiplayerWorld_Init();             // another game process, started at another frame
+        WorldConnect(TRUE, world);
+        gMain.vblankCounter1 = 98765;
+        MultiplayerWorld_PostAppearanceSaved();
+        snprintf(what, sizeof(what), "M21: another game's first action has a number of its own (%u, %u before)",
+                 gMultiplayerWorldMailbox.action.seq, first);
+        ExpectClock(what, gMultiplayerWorldMailbox.action.seq != first && gMultiplayerWorldMailbox.action.seq != 1);
+        MultiplayerWorld_Init();
+    }
     printf("selftest-clock: %d checks, %d failed\n", sClockChecks, sClockFailures);
     return sClockFailures ? 1 : 0;
 }

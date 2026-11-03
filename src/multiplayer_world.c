@@ -280,6 +280,14 @@ static void PostActionWithAmount(u8 kind, u8 result, u32 eventId, u16 species, u
     u32 generation = (gMultiplayerWorldMailbox.localGeneration + 1) | 1;
 
     action.seq = gMultiplayerWorldMailbox.action.seq + 1;
+#ifdef PORTABLE
+    // The first action of a game process starts at a number of its own, as the shared spawns' do (M19): a companion
+    // that served the game before it - a launcher session restarts its game - and acknowledged that game's first
+    // action as 1 must not take this one for it and skip it (KNOWN_ISSUES M21).
+    if (gMultiplayerWorldMailbox.action.seq == 0)
+        action.seq = (gMain.vblankCounter1 * 2654435761u) ^ 0x5EED0002u;
+#endif
+#line 212 // gba-line
     if (action.seq == 0)
         action.seq = 1;
     action.kind = kind;
