@@ -1435,10 +1435,11 @@ LEVEL_ANCHORS: dict[str, tuple[tuple[int, int], int]] = {
     "LAYOUT_SAFARI_ZONE_SOUTH": ((13, 10), 0),
 }
 # The mountain passes whose paths stand at the heights their ledges and slopes give them (terrace_topology.pass_levels;
-# KNOWN_ISSUES MS-153). None yet: Jagged Pass ("LAYOUT_JAGGED_PASS", reached only by warps, no seam to meet) solves
-# to nine levels from the Mt. Chimney end down, but its rock does not yet stand with its paths (the first try,
-# 2026-11-01: the probe found more fins and rock lying flat than before), so it stays as it was until that is done.
-PASS_LAYOUTS: frozenset[str] = frozenset()
+# KNOWN_ISSUES MS-153): Jagged Pass (reached only by warps, no seam to meet), the way down from Mt. Chimney to
+# Lavaridge Town, a staircase of levels. Its rock is the rock bands' over the ground round it; its jump ledges and
+# the corner pieces of their rings stand on the path they are jumped from (lift_blocked_cells, the higher level):
+# left at the pass's foot - the first try, 2026-11-01 - they cut trenches and pits down to it between its levels.
+PASS_LAYOUTS: frozenset[str] = frozenset({"LAYOUT_JAGGED_PASS"})
 
 # The trees of a forest (_grounded_forests): the classifier's hulls round the game's trees.
 FOREST_CLASSES = frozenset({"tree", "forest-wall", "round-hull", "grouped-hull"})
@@ -2208,17 +2209,20 @@ def compile_data(root: Path) -> dict:
                 # (a cave mouth put on the level it is entered from lifts no rock
                 # round it: join_level_free_cells, and a doorway solve_layout
                 # lays with the ground it is entered from)
-                if layout["id"] not in PASS_LAYOUTS:  # (a pass's rock: the rock bands', below)
-                    terrace_topology[layout["id"]] = {
-                        **terrace_topology[layout["id"]],
-                        **lift_blocked_cells(layout_cells, layout["width"], layout["height"],
-                                             {offset: entry for offset, entry
-                                              in terrace_topology[layout["id"]].items()
-                                              if offset not in level_free_cells[layout["id"]]
-                                              and not entry.get("doorway")},
-                                             liftable=liftable,
-                                             between=LIFT_BETWEEN.get(layout["id"]),
-                                             ledges=layout["id"] in LEDGE_LIFT_LAYOUTS)}
+                # (on a pass, its jump ledges and the corner pieces of their rings stand on the path they are
+                # jumped from, the higher of the two they part: left at the pass's foot they cut trenches and
+                # pits down to it between its levels; its rock is the rock bands', below)
+                terrace_topology[layout["id"]] = {
+                    **terrace_topology[layout["id"]],
+                    **lift_blocked_cells(layout_cells, layout["width"], layout["height"],
+                                         {offset: entry for offset, entry
+                                          in terrace_topology[layout["id"]].items()
+                                          if offset not in level_free_cells[layout["id"]]
+                                          and not entry.get("doorway")},
+                                         liftable=liftable,
+                                         between=("highest" if layout["id"] in PASS_LAYOUTS
+                                                  else LIFT_BETWEEN.get(layout["id"])),
+                                         ledges=layout["id"] in LEDGE_LIFT_LAYOUTS | PASS_LAYOUTS)}
             if rocks:
                 # The rocks the sea's own height surrounds (no terrace, or water
                 # no terrace reaches) lie at that height too: they stood a tile's

@@ -9,7 +9,7 @@ import unittest
 from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
-from compile_rules import (ARCHETYPES, RuleError, _action, _ground_policy, _grounded_forests, _mask,
+from compile_rules import (ARCHETYPES, PASS_LAYOUTS, RuleError, _action, _ground_policy, _grounded_forests, _mask,
                               _mountain_masses,
                               _pattern_placements, _patterns, _profiles, _selector,
                               _validate_logical_ids, _validate_pattern_claim_overlaps,
@@ -134,7 +134,20 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         # higher and over it inward, a ridge a tile and more inward, never more than two tiles over
         # the highest ground it meets
         self.assertTrue({16, 32, 48, 64} <= {record["heightQ16"] for record in mountains})
-        self.assertTrue(all(1 <= record["heightQ16"] <= 80 for record in mountains))
+        self.assertTrue(all(1 <= record["heightQ16"] <= 80 for layout in self.data["layouts"]
+                            if layout["symbol"] not in PASS_LAYOUTS for record in layout["terrainRecords"]
+                            if record["source"] == "behavior:MB_MOUNTAIN_TOP"))
+        # a mountain pass's rock (PASS_LAYOUTS: Jagged Pass) is one band round all its levels, so it stands from
+        # the pass's foot; it never stands more than two tiles over the pass's highest ground
+        for layout in self.data["layouts"]:
+            if layout["symbol"] in PASS_LAYOUTS:
+                rock = [record for record in layout["terrainRecords"]
+                        if record["source"] == "behavior:MB_MOUNTAIN_TOP"]
+                highest = max(record["groundQ16"] for record in layout["terrainRecords"]
+                              if record["class"] == "ground")
+                self.assertTrue(rock)
+                self.assertTrue(all(record["heightQ16"] >= 1 and record["topQ16"] <= highest + 32
+                                    for record in rock))
         self.assertEqual({record["measuredFlags"] & 32 for record in mountains}, {32})
         # Mossdeep's cliff (the owner's "tall, narrow, rectangular cliffs"): its corner pieces stood
         # a tile over the plateau whose face they are, two over the street; they are that face now
@@ -153,7 +166,11 @@ class DioramaRuleCompilerTests(unittest.TestCase):
                     for record in layout["terrainRecords"]
                     if record["source"] == "behavior:MB_MOUNTAIN_TOP:walkable"]
         self.assertGreater(len(walkable), 2000)
-        self.assertEqual({record["class"] for record in walkable}, {"ground"})
+        self.assertEqual({record["class"] for layout in self.data["layouts"] if layout["symbol"] not in PASS_LAYOUTS
+                          for record in layout["terrainRecords"]
+                          if record["source"] == "behavior:MB_MOUNTAIN_TOP:walkable"}, {"ground"})
+        # (on a pass, also the ramp its solver lays between an island's levels: terrace_topology._pass_ramp)
+        self.assertTrue({record["class"] for record in walkable} <= {"ground", "stairs"})
         self.assertEqual({record["measuredFlags"] & 32 for record in walkable}, {0})
 
     def test_repository_rock_masses_reefs_and_terrace_stairs(self):
