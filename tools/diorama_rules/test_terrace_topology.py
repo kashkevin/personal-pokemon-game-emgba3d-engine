@@ -9,6 +9,7 @@ from compile_rules import _load_cells, parse_behaviors
 from terrace_topology import (CAVE_RISE_Q16, LEDGE_JUMPS, MOUNTAIN_LEDGE_Q16, SLOPE_RISE_Q16, TERRACE_ROLES,
                               contradiction_ramps, course_ridges, cave_climbs, cave_levels, join_level_free_cells, join_water, lift_blocked_cells,
                               hall_stairs, hand_banks, hand_floors, hand_slopes, indoor_levels,
+                              mountain_by_hand,
                               mountain_ledges, pass_levels, rock_tops, role_for_cell, seam_shifts, slope_tops,
                               solve_layout)
 
@@ -1037,6 +1038,39 @@ class TerraceTopologyTests(unittest.TestCase):
             else:
                 # the south's path runs on south from the ramp
                 self.assertTrue(all(cells[(y1 + 1) * width + x]["collision"] == 0 for x in range(x0, x1 + 1)))
+
+    def test_route119s_mountain_and_bridge_given_by_hand(self):
+        # Route 119's two tops and the bridge between them stand a level up; the bridge's cells (elevation 15, over
+        # two paths and the river) and the walkway over the forest are decks; the stairs climb to the tops.
+        from compile_rules import MOUNTAIN_LEVELS
+        tilesets = load_tilesets(ROOT)
+        _, layouts = load_world(ROOT)
+        names = {value: name for name, value
+                 in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
+        lid = "LAYOUT_ROUTE119"
+        layout = next(row for row in layouts if row["id"] == lid)
+        width, height = layout["width"], layout["height"]
+        cells = _load_cells(ROOT, [layout], tilesets, names)[0][lid]
+        ground = mountain_by_hand(cells, width, height, MOUNTAIN_LEVELS[lid])
+        decks = mountain_by_hand(cells, width, height, MOUNTAIN_LEVELS[lid], decks=True)
+        self.assertFalse(set(ground) & set(decks))
+        self.assertTrue(all(entry["deck"] for entry in decks.values()))
+        self.assertFalse(any(entry.get("deck") for entry in ground.values()))
+        out = {**ground, **decks}
+        at = lambda x, y: out.get(y * width + x)
+        for x, y in ((5, 83), (36, 85), (34, 92), (35, 89)):            # the tops, the east tiers' stairs flat
+            self.assertEqual((at(x, y)["groundQ16"], at(x, y)["topQ16"], at(x, y).get("deck")), (16, 16, None))
+        for x in (7, 13, 18, 21, 22, 23, 25, 26, 27, 33):                 # the bridge, end to end
+            for y in (84, 85):
+                self.assertEqual((at(x, y)["groundQ16"], at(x, y)["deck"]), (16, True))
+        for x, y in ((13, 83), (13, 86), (26, 86), (21, 83), (1, 84)):    # the paths and the river under it, the strip
+            self.assertIsNone(at(x, y))
+        # the west stairs climb from the grass north of them over two rows, the east ones from the ground
+        self.assertEqual([(at(5, y)["groundQ16"], at(5, y)["topQ16"], at(5, y)["profile"]) for y in (79, 80)],
+                         [(-16, 0, "transition-south"), (0, 16, "transition-south")])
+        self.assertEqual((at(30, 97)["groundQ16"], at(30, 97)["topQ16"], at(30, 97)["profile"]),
+                         (0, 16, "transition-horizontal"))
+        self.assertFalse(any(cells[offset]["collision"] for offset in out))
 
 if __name__ == "__main__":
     unittest.main()

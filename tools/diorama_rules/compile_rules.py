@@ -26,6 +26,7 @@ from pixel_objects import UPRIGHT_CLASSES as UPRIGHT_PIXEL_CLASSES, extract_layo
 from structures import analyze_layout
 from terrace_topology import (WATER_BEHAVIORS, cave_climbs, cave_levels, contradiction_ramps, course_ridges,
                               hall_stairs, hand_banks, hand_floors, hand_slopes, indoor_levels,
+                              mountain_by_hand,
                               join_level_free_cells,
                               join_water,
                               lift_blocked_cells, mountain_ledges, pass_levels, rock_tops, seam_shifts,
@@ -1459,6 +1460,19 @@ SEAM_RAMPS: dict[str, dict] = {
                                  "slopes": (((29, 1, 30, 1), "s", -16, 0),),
                                  "banks": (((17, 0, 39, 1), -16),)},
 }
+# Mountains given by hand (terrace_topology.mountain_by_hand; KNOWN_ISSUES MS-153): "top", a seed cell (x, y) and the
+# level (Q16) its top and everything joined to it stand on; "decks", rectangles of it that are a bridge; "climbs", its
+# stairs (hand_slopes). Route 119's two tops - the west one (3-6, 81-85) and the east one's two tiers (30-38, 83-96) -
+# are joined by a bridge (84-85) over the forest, two paths (13, 26-27) and the river (21-23): the climbs give the east
+# one two levels and the west one one, so mountain_ledges left them all on the ground, the rock round them a level over
+# them (pits) and the bridge on the ground, the paths through it. All of it stands a level up, level with that rock,
+# the bridge a deck the paths and the river run under; the east tiers' stairs between them (35-36, 89) lie flat; the
+# west stairs (5-6, 80) climb from the grass north of them (a level under the ground, as the terrace solver lays it)
+# over their row and the grass row before them, the east ones (30-31, 97) from the ground.
+MOUNTAIN_LEVELS: dict[str, dict] = {
+    "LAYOUT_ROUTE119": {"top": ((5, 83), 16), "decks": ((7, 84, 33, 85),),
+                        "climbs": (((5, 79, 6, 80), "s", -16, 16), ((30, 97, 31, 97), "n", 0, 16))},
+}
 # The rooms whose stage or upper floor the GBA draws at the elevation of the floor round it, given by hand
 # (terrace_topology.indoor_levels; KNOWN_ISSUES MS-164): "rise" in Q16 (16 a level), "raised" rectangles (x0, y0,
 # x1, y1) on that level, "ramps" of steps climbing north to it, "rails" beside the steps on their ground. The Battle
@@ -1977,6 +1991,10 @@ def compile_data(root: Path) -> dict:
             # beside it (join_level_free_cells).
             climbed = mountain_ledges(cells[layout["id"]], layout["width"], layout["height"], solved,
                                       per_row=layout["id"] in GBA_HEIGHT_LAYOUTS)
+            if layout["id"] in MOUNTAIN_LEVELS:
+                # (a mountain the climbs do not solve, given by hand: Route 119's)
+                climbed = {**climbed, **mountain_by_hand(cells[layout["id"]], layout["width"], layout["height"],
+                                                         MOUNTAIN_LEVELS[layout["id"]])}
             mountain_climbs[layout["id"]] = frozenset(climbed)
             solved = {**solved, **climbed}
             mouths = join_level_free_cells(cells[layout["id"]], layout["width"],
@@ -2377,6 +2395,13 @@ def compile_data(root: Path) -> dict:
                         **terrace_topology[layout["id"]],
                         **tree_grounds(layout_cells, layout["width"], layout["height"], trees,
                                        terrace_topology[layout["id"]])}
+            if layout["id"] in MOUNTAIN_LEVELS:
+                # the bridge of a mountain given by hand, laid last: no ground to the water, rock and trees beside it
+                # (terrace_topology.mountain_by_hand)
+                terrace_topology[layout["id"]] = {
+                    **terrace_topology[layout["id"]],
+                    **mountain_by_hand(layout_cells, layout["width"], layout["height"],
+                                       MOUNTAIN_LEVELS[layout["id"]], decks=True)}
             wildcard = tuple(_with_mountain_art(
                 shape, cell, offset in mountain_art_cells[layout["id"]],
                 offset in mountain_outlines[layout["id"]])
