@@ -918,6 +918,35 @@ static u8 PrepareSingles(const struct MultiplayerBattleControl *c)
     return MP_BATTLE_OK;
 }
 
+#ifdef PORTABLE
+// KNOWN_ISSUES MS-180 (StartSingles): the battle text buffers and the item effect's battler zeroed, as a fresh game's;
+// what an earlier battle left in them goes to runtime.log first, so what would have been sent is known.
+static void StartWithFreshMessageState(void)
+{
+    u8 *const buffers[3] = {gBattleTextBuff1, gBattleTextBuff2, gBattleTextBuff3};
+    u32 i, j;
+
+    for (i = 0; i < 3; i++)
+    {
+        for (j = 0; j < TEXT_BUFF_ARRAY_COUNT && !buffers[i][j]; j++);
+        if (j < TEXT_BUFF_ARRAY_COUNT)
+        {
+            char bytes[3 * TEXT_BUFF_ARRAY_COUNT + 1] = "";
+            for (j = 0; j < TEXT_BUFF_ARRAY_COUNT; j++)
+                snprintf(bytes + 3 * j, sizeof(bytes) - 3 * j, "%02x ", buffers[i][j]);
+            fprintf(stderr, "battle between players: the battle text buffer %u an earlier battle left cleared: %s\n",
+                    (unsigned)i + 1, bytes);
+        }
+        memset(buffers[i], 0, TEXT_BUFF_ARRAY_COUNT);
+    }
+    if (gPotentialItemEffectBattler)
+        fprintf(stderr, "battle between players: the item effect's battler an earlier battle left (%u) cleared\n",
+                (unsigned)gPotentialItemEffectBattler);
+    gPotentialItemEffectBattler = 0;
+}
+#endif
+#line 638 // gba-line
+
 static u8 StartSingles(void)
 {
     if (sState != MP_BATTLE_PREPARED || !sPrepared || sStarted || sOutPending || sReceiveFlags != (1 << sBinding.playerCount) - 1) return MP_BATTLE_BUSY;
@@ -955,6 +984,12 @@ static u8 StartSingles(void)
     // which was left as an earlier battle had it, an id no trainer has: the name's lookup failed its assert and that
     // player's game stopped on the crash screen. As the link opponent the name is the linked player's.
     TRAINER_BATTLE_PARAM.opponentB = TRAINER_LINK_OPPONENT;
+    // KNOWN_ISSUES MS-180: every battle message carries the three battle text buffers and the item effect's battler
+    // as the last battle left them: no battle clears them (each message prepares what it names). The master's first
+    // message of a battle between players (its intro) sent an earlier battle's buffers to the other cores, and those
+    // broke the link's message check: the battle stopped at its intro for both players (the Championship's final, after
+    // each player's computer matches). A battle between players starts with them as a fresh game has them.
+    StartWithFreshMessageState();
 #endif
 #line 651 // gba-line
     if (MultiplayerBattle_IsCoop())

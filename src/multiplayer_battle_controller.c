@@ -435,16 +435,16 @@ void MultiplayerBattle_SendForfeit(u32 battler)
 
 #ifdef PORTABLE
 // KNOWN_ISSUES MS-71: a controller block this game was about to send failed MultiplayerBattle_ValidateController.
-// Its head, its first payload bytes, what this core's checks hold for its battler and the payload checks' own answers
-// go to runtime.log, so the rule it broke is known.
+// Its head, its payload (up to 128 bytes: a move animation's checks read past its first 16), what this core's checks
+// hold for its battler and the payload checks' own answers go to runtime.log, so the rule it broke is known.
 void MultiplayerBattle_DescribeController(const u8 *data, u16 size, u8 source)
 {
     u32 battler = size >= 2 ? data[1] : MAX_BATTLERS_COUNT, i;
     bool32 known = battler < MAX_BATTLERS_COUNT;
-    char payload[3 * 16 + 1] = "";
+    char payload[3 * 128 + 1] = "";
     u16 raw = size >= 10 ? MultiplayerBattle_ControllerRawSize(data[8], data[9]) : 0;
 
-    for (i = 0; i < 16 && 8 + i < size; i++)
+    for (i = 0; i < 128 && 8 + i < size; i++)
         snprintf(payload + 3 * i, sizeof(payload) - 3 * i, "%02x ", data[8 + i]);
     fprintf(stderr, "[game ERROR] battle between players: a controller block this game sends breaks a rule (MS-71): "
             "buffer %u battler %u size %u padded %u from slot %u (of %u battlers); attacker %u target %u absent %#x "
