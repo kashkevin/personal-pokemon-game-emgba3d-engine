@@ -517,6 +517,139 @@ MT_TEST(save_command_and_response)
     MT_CHECK(sNet.closed); // multiple outstanding save commands
 }
 
+// What a payload pointer reads before a frame is found (a failing check goes on to the next).
+static const uint8_t sNoPayload[240];
+
+// A bridge with the save mailbox, ready: BEGIN_EXPORT (sequence 1) and the frames given after it, read in one step.
+static void SaveCommandsInOneStep(const uint8_t (*after)[240], int count)
+{
+    struct MpBridgeCaps caps;
+    uint8_t command[240];
+    uint8_t frame[260];
+    size_t n;
+    int i;
+
+    memset(&caps, 0, sizeof(caps));
+    caps.save = 1;
+    Fresh(&caps);
+    sNet.chunk = 0;
+    Ready(0);
+    SaveReady();
+    Step(10);
+    MakeSaveControl(command, 2);
+    n = FrameOf(frame, 'C', command, sizeof(command));
+    Feed(frame, n, 200);
+    for (i = 0; i < count; i++)
+    {
+        n = FrameOf(frame, 'C', after[i], 240);
+        Feed(frame, n, 200);
+    }
+    Step(2);
+}
+
+// KNOWN_ISSUES MS-12: the companion gives a save command 12 s (20 s for COMMIT and END), then cancels its operation. A
+// game that ran no frames that long (a stall, a pause) had not answered the command, so the CANCEL found it outstanding
+// and the bridge stopped for good ("multiple outstanding save commands"): the game out of the world until restarted.
+// The operation's own CANCEL now waits in the bridge for the command's answer, then goes to the game.
+MT_TEST(save_cancel_waits_for_the_outstanding_command)
+{
+    uint8_t command[240];
+    uint8_t answer[240];
+    uint8_t cancel[1][240];
+    const uint8_t *payload = sNoPayload;
+    uint8_t *s = sMemory[MP_REGION_SAVE];
+    int i;
+
+    MakeSaveControl(command, 2);
+    MakeSaveControl(cancel[0], 8);
+    cancel[0][24] = 2;
+    SaveCommandsInOneStep(cancel, 1);
+    MT_CHECK(!sNet.closed);
+    MT_EQ(sNet.errors, 0);
+    MT_EQ(GetU32(s + 24), 2); // the game has the first command only
+    MT_CHECK(memcmp(s + 28, command, 240) == 0);
+    Step(30);
+    MT_EQ(GetU32(s + 24), 2); // the CANCEL waits while the game has not answered
+    // the game answers (BEGIN_EXPORT's 40 bytes of the frozen save): that answer goes out, then the CANCEL goes in
+    memcpy(answer, command, 240);
+    for (i = 0; i < 40; i++)
+        answer[48 + i] = (uint8_t)(0x11 + i);
+    PutU16(answer + 42, 40);
+    PutU32(answer + 44, MpBridge_Crc32(answer + 48, 40));
+    memcpy(s + 272, answer, 240);
+    PutU32(s + 268, 2);
+    Step(30);
+    MT_EQ(SentFrame('R', 0, &payload), 240);
+    MT_CHECK(memcmp(payload, answer, 240) == 0);
+    MT_EQ(GetU32(s + 24), 4);
+    MT_CHECK(memcmp(s + 28, cancel[0], 240) == 0);
+    // and its answer goes out as any other
+    memcpy(s + 272, cancel[0], 240);
+    s[272 + 41] = 11; // MP_SAVE_CANCELED
+    PutU32(s + 268, 4);
+    Step(30);
+    MT_EQ(SentFrame('R', 1, &payload), 240);
+    MT_EQ(GetU32(payload + 24), 2);
+    MT_EQ(payload[40], 8);
+    MT_EQ(payload[41], 11);
+    MT_CHECK(!sNet.closed);
+    MT_EQ(sNet.errors, 0);
+}
+
+// Only that operation's CANCEL waits, and only one: another operation's CANCEL, or any other command behind the
+// waiting CANCEL, still stops the bridge as before.
+MT_TEST(save_cancel_of_another_operation_or_a_command_behind_it_stops)
+{
+    uint8_t after[2][240];
+
+    MakeSaveControl(after[0], 8);
+    after[0][24] = 2;
+    after[0][8] = 0x5b; // another operation
+    SaveCommandsInOneStep(after, 1);
+    MT_CHECK(sNet.closed);
+
+    MakeSaveControl(after[0], 8);
+    after[0][24] = 2;
+    MakeSaveControl(after[1], 3); // READ
+    after[1][24] = 3;
+    SaveCommandsInOneStep(after, 2);
+    MT_CHECK(sNet.closed);
+
+    MakeSaveControl(after[0], 8);
+    after[0][24] = 2;
+    MakeSaveControl(after[1], 8); // a second CANCEL
+    after[1][24] = 3;
+    SaveCommandsInOneStep(after, 2);
+    MT_CHECK(sNet.closed);
+}
+
+// A recovery control (BIND here) replaces the outstanding command as before; the CANCEL waiting for that command goes
+// with it (the game never saw the command; the companion asks again with the control).
+MT_TEST(save_recovery_control_takes_a_waiting_cancel_with_it)
+{
+    uint8_t after[2][240];
+    const uint8_t *payload = sNoPayload;
+    uint8_t *s = sMemory[MP_REGION_SAVE];
+
+    MakeSaveControl(after[0], 8);
+    after[0][24] = 2;
+    MakeSaveControl(after[1], 1); // BIND
+    after[1][24] = 3;
+    memset(after[1] + 8, 0x77, 16);
+    SaveCommandsInOneStep(after, 2);
+    MT_CHECK(!sNet.closed);
+    MT_EQ(GetU32(s + 24), 4); // BEGIN_EXPORT, then BIND in its place
+    MT_CHECK(memcmp(s + 28, after[1], 240) == 0);
+    memcpy(s + 272, after[1], 240);
+    PutU32(s + 268, 2);
+    Step(30);
+    MT_EQ(SentFrame('R', 0, &payload), 240);
+    MT_CHECK(memcmp(payload, after[1], 240) == 0);
+    MT_EQ(GetU32(s + 24), 4); // no CANCEL after it
+    MT_EQ(SentFrame('R', 1, &payload), -1);
+    MT_CHECK(!sNet.closed);
+}
+
 // 2026-10-26: a save response that came while the reliable queue was full (the companion not reading for a while)
 // stopped the bridge for good ("save control backpressure"), and with it the trade or battle. It now waits in the
 // game's mailbox until the queue drains, then goes out.
@@ -2379,6 +2512,9 @@ int main(void)
     MT_RUN(running_needs_the_animation_capability);
     MT_RUN(crc32_matches_zlib);
     MT_RUN(save_command_and_response);
+    MT_RUN(save_cancel_waits_for_the_outstanding_command);
+    MT_RUN(save_cancel_of_another_operation_or_a_command_behind_it_stops);
+    MT_RUN(save_recovery_control_takes_a_waiting_cancel_with_it);
     MT_RUN(save_response_waits_for_a_full_queue);
     MT_RUN(save_command_with_bad_crc_refused);
     MT_RUN(save_party_query_needs_its_capability);

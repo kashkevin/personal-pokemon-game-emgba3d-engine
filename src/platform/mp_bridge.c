@@ -1080,6 +1080,7 @@ static void ForgetConnection(struct MpBridge *b)
     b->hasLatestExtras = b->extrasCapabilitySent = b->extrasSentValid = false;
     b->controlCount = b->controlBurst = 0;
     b->save.pending = false;
+    b->saveCancel.pending = false;
     b->hasSaveGeneration = false;
     b->capabilitySent = false;
     b->windowCapabilitySent = false;
@@ -1154,6 +1155,22 @@ static bool Same(const struct MpBridgeSave *a, const struct MpBridgeSave *b)
         && a->opcode == b->opcode && a->revision == b->revision && a->size == b->size;
 }
 
+/* The outstanding save command's answer has gone out. KNOWN_ISSUES MS-12: a CANCEL of its operation that came meanwhile
+ * goes to the game now. */
+static void SaveAnswered(struct MpBridge *b)
+{
+    b->save.pending = false;
+    if (b->saveCancel.pending)
+    {
+        b->saveCancel.pending = false;
+        if (CommitSave(b, b->saveCancel.payload))
+        {
+            b->save = b->saveCancel;
+            b->save.pending = true;
+        }
+    }
+}
+
 /* pollSave */
 static void PollSave(struct MpBridge *b)
 {
@@ -1215,11 +1232,11 @@ static void PollSave(struct MpBridge *b)
             return;
         }
         if (Reliable(b, 'F', payload, sizeof(payload), sWindow, sizeof(sWindow)))
-            b->save.pending = false;
+            SaveAnswered(b);
     }
     else if (Reliable(b, 'R', payload, sizeof(payload), NULL, 0))
     {
-        b->save.pending = false;
+        SaveAnswered(b);
     }
 }
 
@@ -1614,11 +1631,24 @@ static bool Dispatch(struct MpBridge *b, const uint8_t *payload, size_t size)
                 || command.opcode == 21 || command.opcode == 22 || command.opcode == 25;
         if (b->save.pending && !recovery && memcmp(command.payload, b->save.payload, 240) != 0)
         {
+            /* KNOWN_ISSUES MS-12: the companion gives a command 12 s (20 s for COMMIT and END), then cancels its
+             * operation; a game that ran no frames that long (a stall, a pause) has not answered it yet. That
+             * operation's CANCEL waits here for the answer, then goes to the game (PollSave); anything else still
+             * stops the bridge. */
+            if (command.opcode == 8 && !b->saveCancel.pending && command.incarnation == b->save.incarnation
+             && command.epoch == b->save.epoch && memcmp(command.request, b->save.request, 16) == 0)
+            {
+                b->saveCancel = command;
+                b->saveCancel.pending = true;
+                return true;
+            }
             Stop(b, "multiple outstanding save commands", true);
             return false;
         }
         if (CommitSave(b, command.payload))
         {
+            if (recovery)
+                b->saveCancel.pending = false; /* it replaced the outstanding command: that one's CANCEL goes too */
             b->save = command;
             b->save.pending = true;
         }

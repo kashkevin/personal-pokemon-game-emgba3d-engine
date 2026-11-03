@@ -236,6 +236,7 @@ struct MpBridge
     bool hasLatestExtras, extrasPublished, extrasCapabilitySent, extrasSentValid;
     uint32_t extrasAt, extrasSentSeq;
     struct MpBridgeSave save;
+    struct MpBridgeSave saveCancel; /* KNOWN_ISSUES MS-12: the outstanding command's operation's CANCEL, waiting */
     bool hasSaveGeneration;
     uint32_t saveGeneration;
     bool capabilitySent, windowCapabilitySent, emergencyCapabilitySent;
