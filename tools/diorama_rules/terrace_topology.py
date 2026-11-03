@@ -2078,3 +2078,73 @@ def mountain_by_hand(cells: tuple[dict, ...], width: int, height: int, spec: dic
     if not decks:
         out.update(hand_slopes(width, spec.get("climbs", ())))
     return out
+
+
+GENERAL_STAIRS = frozenset({175, 207})  # General's terrace stairs: their top row, their foot
+
+
+def stair_runs_between(cells: tuple[dict, ...], width: int, height: int,
+                       solved: dict[int, dict]) -> dict[int, dict]:
+    """General's terrace stairs whose ends do not meet the ground they join (KNOWN_ISSUES MS-172's walk-steps):
+    a run of them down a column, walkable ground north and south of it, its cells left where no pass put them -
+    a cell of elevation 0 (the game's "any level") on the top level, a half of it a level from the other - so
+    the player walked a level up or down at an end (Mossdeep City's three stairs between the town and the
+    water and between its two terraces; the Battle Frontier's east half's down to the beach). Such a run lies
+    flat on the ground's level when its two ends' ground is one level, else climbs from the lower to the higher
+    a share a row (hand_slopes). A run whose ends already meet (a ramp either way, or flat) is left. `solved`:
+    the layout's entries (a cell without one lies on level 0). Returns the changed runs' entries."""
+    def ground(offset: int) -> int:
+        return solved.get(offset, {}).get("groundQ16", 0)
+
+    def top(offset: int) -> int:
+        # a ramp's entry carries its rise (compile_rules builds its record's top from it, 16 if none)
+        entry = solved.get(offset, {})
+        if str(entry.get("profile", "")).startswith("transition"):
+            return ground(offset) + entry.get("rise", 16)
+        return entry.get("topQ16", ground(offset))
+
+    def stair(offset: int) -> bool:
+        cell = cells[offset]
+        return (cell.get("collision", 0) == 0 and cell.get("tileset") == "gTileset_General"
+                and cell.get("localMetatile") in GENERAL_STAIRS)
+
+    def meet(a: int, b: int) -> bool:
+        return abs(a - b) < 6
+
+    def south_edge(offset: int) -> int:
+        # a ramp climbing south (transition-south) is highest at its south edge
+        profile = solved.get(offset, {}).get("profile")
+        return top(offset) if profile == "transition-south" else ground(offset)
+
+    def north_edge(offset: int) -> int:
+        # one climbing north (the game's terrace stairs: transition-horizontal) at its north edge
+        profile = solved.get(offset, {}).get("profile")
+        return top(offset) if profile == "transition-horizontal" else ground(offset)
+
+    out: dict[int, dict] = {}
+    for start in range(width, len(cells) - width):
+        if not stair(start) or stair(start - width):
+            continue
+        run = [start]
+        while run[-1] + width < len(cells) and stair(run[-1] + width):
+            run.append(run[-1] + width)
+        north, south = start - width, run[-1] + width
+        if (south >= len(cells) or cells[north].get("collision", 0) != 0
+                or cells[south].get("collision", 0) != 0):
+            continue
+        gn, gs = south_edge(north), north_edge(south)
+        high_north = (meet(top(run[0]), gn) and meet(ground(run[-1]), gs)
+                      and all(meet(ground(run[k]), top(run[k + 1])) for k in range(len(run) - 1)))
+        high_south = (meet(ground(run[0]), gn) and meet(top(run[-1]), gs)
+                      and all(meet(top(run[k]), ground(run[k + 1])) for k in range(len(run) - 1)))
+        if high_north or high_south:
+            continue
+        x, y0, y1 = start % width, start // width, run[-1] // width
+        if meet(gn, gs):
+            for offset in run:
+                out[offset] = {"groundQ16": gn, "topQ16": gn, "profile": "none", "solid": False}
+        elif gn > gs:
+            out.update(hand_slopes(width, (((x, y0, x, y1), "n", gs, gn),)))
+        else:
+            out.update(hand_slopes(width, (((x, y0, x, y1), "s", gn, gs),)))
+    return out

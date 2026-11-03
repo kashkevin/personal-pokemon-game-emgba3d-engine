@@ -26,7 +26,7 @@ from pixel_objects import UPRIGHT_CLASSES as UPRIGHT_PIXEL_CLASSES, extract_layo
 from structures import analyze_layout
 from terrace_topology import (WATER_BEHAVIORS, cave_climbs, cave_levels, contradiction_ramps, course_ridges,
                               hall_stairs, hand_banks, hand_floors, hand_slopes, indoor_levels,
-                              mountain_by_hand,
+                              mountain_by_hand, stair_runs_between,
                               join_level_free_cells,
                               join_water,
                               lift_blocked_cells, mountain_ledges, pass_levels, rock_tops, seam_shifts,
@@ -2402,6 +2402,14 @@ def compile_data(root: Path) -> dict:
                     **terrace_topology[layout["id"]],
                     **mountain_by_hand(layout_cells, layout["width"], layout["height"],
                                        MOUNTAIN_LEVELS[layout["id"]], decks=True)}
+            if (maps_by_layout.get(layout["id"])
+                    and all(_outdoor(row["mapType"]) for row in maps_by_layout[layout["id"]])):
+                # General's terrace stairs whose ends do not meet the ground they join lie between its levels
+                # (terrace_topology.stair_runs_between: Mossdeep City's, the Battle Frontier's east half's)
+                terrace_topology[layout["id"]] = {
+                    **terrace_topology[layout["id"]],
+                    **stair_runs_between(layout_cells, layout["width"], layout["height"],
+                                         terrace_topology[layout["id"]])}
             wildcard = tuple(_with_mountain_art(
                 shape, cell, offset in mountain_art_cells[layout["id"]],
                 offset in mountain_outlines[layout["id"]])

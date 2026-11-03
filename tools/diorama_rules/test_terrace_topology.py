@@ -9,7 +9,7 @@ from compile_rules import _load_cells, parse_behaviors
 from terrace_topology import (CAVE_RISE_Q16, LEDGE_JUMPS, MOUNTAIN_LEDGE_Q16, SLOPE_RISE_Q16, TERRACE_ROLES,
                               contradiction_ramps, course_ridges, cave_climbs, cave_levels, join_level_free_cells, join_water, lift_blocked_cells,
                               hall_stairs, hand_banks, hand_floors, hand_slopes, indoor_levels,
-                              mountain_by_hand,
+                              mountain_by_hand, stair_runs_between,
                               mountain_ledges, pass_levels, rock_tops, role_for_cell, seam_shifts, slope_tops,
                               solve_layout)
 
@@ -1071,6 +1071,35 @@ class TerraceTopologyTests(unittest.TestCase):
         self.assertEqual((at(30, 97)["groundQ16"], at(30, 97)["topQ16"], at(30, 97)["profile"]),
                          (0, 16, "transition-horizontal"))
         self.assertFalse(any(cells[offset]["collision"] for offset in out))
+
+    def test_stairs_whose_ends_do_not_meet_the_ground_lie_between_its_levels(self):
+        # A column: ground, General's terrace stairs (175 over 207), ground. Mossdeep City's: the stairs' cells left
+        # where no pass put them (the top level 0) between ground on one level - they lie flat on it; between two
+        # levels - they climb from the lower to the higher a share a row; already meeting both ends - left alone.
+        def column(kinds):
+            return tuple({"collision": 0, "tileset": "gTileset_General", "elevation": 3,
+                          "localMetatile": {"g": 1, "t": 175, "b": 207}[kind]} for kind in kinds)
+        cells = column("gtbg")
+        flat = {0: {"groundQ16": -16, "topQ16": -16, "profile": "none"},
+                3: {"groundQ16": -16, "topQ16": -16, "profile": "none"}}
+        out = stair_runs_between(cells, 1, 4, flat)
+        self.assertEqual({o: (e["groundQ16"], e["topQ16"]) for o, e in out.items()}, {1: (-16, -16), 2: (-16, -16)})
+        two = {0: {"groundQ16": 0, "topQ16": 0, "profile": "none"}, 2: {"groundQ16": -16, "topQ16": -16, "profile": "none"},
+               3: {"groundQ16": -16, "topQ16": -16, "profile": "none"}}
+        out = stair_runs_between(cells, 1, 4, two)
+        self.assertEqual({o: (e["groundQ16"], e["topQ16"], e["profile"]) for o, e in out.items()},
+                         {1: (-8, 0, "transition-horizontal"), 2: (-16, -8, "transition-horizontal")})
+        # the Battle Frontier's: the top row on the upper level, the foot a ramp (its rise in its entry) - they meet
+        met = {0: {"groundQ16": 0, "topQ16": 0, "profile": "none"},
+               2: {"groundQ16": -16, "topQ16": -16, "profile": "transition-horizontal", "rise": 16},
+               3: {"groundQ16": -16, "topQ16": -16, "profile": "none"}}
+        self.assertEqual(stair_runs_between(cells, 1, 4, met), {})
+        # Route 119's west stairs climb south from a ramp of grass: they meet it
+        cells = column("ggtg")
+        south = {1: {"groundQ16": -16, "topQ16": -16, "profile": "transition-south", "rise": 16},
+                 2: {"groundQ16": 0, "topQ16": 0, "profile": "transition-south", "rise": 16},
+                 3: {"groundQ16": 16, "topQ16": 16, "profile": "none"}}
+        self.assertEqual(stair_runs_between(cells, 1, 4, south), {})
 
 if __name__ == "__main__":
     unittest.main()
