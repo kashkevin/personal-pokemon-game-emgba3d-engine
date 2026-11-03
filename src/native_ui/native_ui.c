@@ -226,6 +226,20 @@ bool NativeUi_LogEnabled(void)
     return sLog;
 }
 
+void NativeUi_CopyString(u8 *dst, u32 size, const u8 *src)
+{
+    u32 i = 0;
+
+    if (size == 0)
+        return;
+    while (src != NULL && i < size - 1 && src[i] != EOS)
+    {
+        dst[i] = src[i];
+        i++;
+    }
+    dst[i] = EOS;
+}
+
 void NativeUi_Logf(const char *fmt, ...)
 {
     char line[256];

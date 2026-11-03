@@ -665,8 +665,7 @@ void Pokenav_NativeUiMonRow(struct NativePokenavRow *row, u32 boxId, u32 monId)
     row->shiny = GetBoxOrPartyMonData(boxId, monId, MON_DATA_IS_SHINY, NULL);
     GetBoxOrPartyMonData(boxId, monId, MON_DATA_NICKNAME, nick);
     StringGet_Nickname(nick);
-    StringCopyN(row->name, nick, sizeof(row->name) - 1);
-    row->name[sizeof(row->name) - 1] = EOS;
+    NativeUi_CopyString(row->name, sizeof(row->name), nick); // not 23 bytes from the 20 of nick (MS-185)
     if (boxId == TOTAL_BOXES_COUNT)
     {
         row->level = GetMonData(&gParties[B_TRAINER_PLAYER][monId], MON_DATA_LEVEL);

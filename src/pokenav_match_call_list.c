@@ -532,13 +532,7 @@ static bool32 ShouldDoNearbyMessage(void)
 
 static void NativeUiCopy(u8 *dst, u32 size, const u8 *src)
 {
-    if (src == NULL)
-    {
-        dst[0] = EOS;
-        return;
-    }
-    StringCopyN(dst, src, size - 1);
-    dst[size - 1] = EOS;
+    NativeUi_CopyString(dst, size, src); // up to the name's end, not size - 1 bytes past a short one (MS-185)
 }
 
 // PC 3D game (screens/ui_pokenav.c, pokenav.c Pokenav_NativeUiState): the trainers registered, the cursor's, its menu

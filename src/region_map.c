@@ -3206,15 +3206,13 @@ bool8 RegionMap_NativeUiState(struct NativeRegionMapState *out)
     out->playerY = map->playerIconSpritePosY;
     out->mapSec = map->mapSecId;
     out->mapSecType = map->mapSecType;
-    StringCopyN(out->name, map->mapSecName, sizeof(out->name) - 1);
-    out->name[sizeof(out->name) - 1] = EOS;
+    NativeUi_CopyString(out->name, sizeof(out->name), map->mapSecName);
     if (out->kind != NATIVE_REGION_MAP_FLY)
         return TRUE;
     for (i = 0; i < ARRAY_COUNT(sMultiNameFlyDestinations); i++)
         if (map->mapSecId == sMultiNameFlyDestinations[i].mapSecId && FlagGet(sMultiNameFlyDestinations[i].flag))
         {
-            StringCopyN(out->subName, sMultiNameFlyDestinations[i].name[map->posWithinMapSec], sizeof(out->subName) - 1);
-            out->subName[sizeof(out->subName) - 1] = EOS;
+            NativeUi_CopyString(out->subName, sizeof(out->subName), sMultiNameFlyDestinations[i].name[map->posWithinMapSec]);
         }
     // the game's fly icons (CreateFlyDestIcons, TryCreateRedOutlineFlyDestIcons)
     for (i = 0; i < ARRAY_COUNT(sFlyLocations); i++)

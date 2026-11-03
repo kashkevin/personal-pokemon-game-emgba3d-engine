@@ -2739,8 +2739,7 @@ static u8 sNativeUiResultsText[100];
 
 void ContestUtil_NativeUiNoteResultsText(const u8 *text)
 {
-    StringCopyN(sNativeUiResultsText, text, sizeof(sNativeUiResultsText) - 1);
-    sNativeUiResultsText[sizeof(sNativeUiResultsText) - 1] = EOS;
+    NativeUi_CopyString(sNativeUiResultsText, sizeof(sNativeUiResultsText), text);
 }
 
 // The native contest results screen (src/native_ui/screens/ui_contest_results.c) draws the results in the new design:

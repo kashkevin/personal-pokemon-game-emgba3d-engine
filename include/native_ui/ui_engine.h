@@ -2047,6 +2047,10 @@ u32 Battle_NativeUiWallyInput(u32 battler, u8 *actionCursor);
 /* sprite.c: the OBJ tiles a sheet tag holds */
 bool32 Sprite_NativeUiTagTiles(u16 tag, u16 *start, u16 *count);
 
+/* A game string into a screen's buffer of `size` bytes: up to its end (EOS) and at most size - 1 bytes, then EOS; an
+ * empty string for NULL. The game's StringCopyN copies all n bytes, past a shorter string's end (KNOWN_ISSUES MS-185). */
+void NativeUi_CopyString(u8 *dst, u32 size, const u8 *src);
+
 /* ---------------------------------------------------------------- text printers (text.c) */
 
 /* The last string printed on a window: the engine's pointer to it (to tell
