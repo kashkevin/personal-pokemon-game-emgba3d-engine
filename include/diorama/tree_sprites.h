@@ -25,7 +25,9 @@
 #define DIORAMA_TREE_SPRITE_SMALL_DEWFORD 6 /* Dewford Town's small tree */
 #define DIORAMA_TREE_SPRITE_ASH_QUARTER 7   /* 7-10: an ash-covered large tree's quarter (the Fallarbor tileset's) */
 #define DIORAMA_TREE_SPRITE_LAVARIDGE_QUARTER 11 /* 11-14: a large tree's quarter on the Lavaridge tileset's rock */
-#define DIORAMA_TREE_SPRITE_LAVARIDGE_SMALL 15   /* the Lavaridge tileset's small tree */
+#define DIORAMA_TREE_SPRITE_LAVARIDGE_SMALL 15   /* the General small tree on its cell's own ground, no trunk's art
+                                                  * laid on it: the Lavaridge tileset's, and the Fortree tileset's at
+                                                  * a wood's edge */
 #define DIORAMA_TREE_SPRITE_MOSSDEEP_QUARTER 16  /* 16-19: the Mossdeep tileset's round tree's quarter */
 
 /* DioramaTreeSprites_Part's answers, the 3DS port's VoxelTree_Part. */
@@ -82,5 +84,19 @@ int DioramaTreeSprites_MossdeepPart(uint16_t metatileId);
 /* `below`: the metatile of the cell south of it (0 for none): an overlap cell is the upper quarter of the tree whose
  * lower row that is, on grass in the town, on the shallows in a grove. */
 uint16_t DioramaTreeSprites_MossdeepGround(uint16_t metatileId, uint16_t below);
+/*
+ * The Fortree tileset's copies of the General tileset's small tree (Fortree City; MS-172, they lay flat): a trunk's
+ * cell inside a wood and at a wood's edge on the town's ground - DIORAMA_TREE_PART_SMALL or DIORAMA_TREE_PART_NONE
+ * (the shadowed copies under the tree houses' decks, the rope bridges and the palms' fronds stay as drawn); and the
+ * ground the cell shows under the solid tree: the General trunks' (DioramaTreeSprites_TrunkGround, the trunk's art
+ * laid on it, as their neighbours') inside a wood, the town's own ground at its edge.
+ */
+int DioramaTreeSprites_FortreePart(uint16_t metatileId);
+uint16_t DioramaTreeSprites_FortreeGround(uint16_t metatileId);
+/* The tileset's copies of that tree's crown top over other ground (the town's, a palm's trunk, Route 119's rock and
+ * river, Route 120's rock and grass): the ground alone, which the cell shows when the tree south of it stands as a
+ * solid (its crown covers the cell), keeping its place's heights (DIORAMA_CELL_TREE_CANOPY); itself for any other
+ * cell, and for the crown tops no metatile shows the ground of without them. */
+uint16_t DioramaTreeSprites_FortreeCrownGround(uint16_t metatileId);
 
 #endif

@@ -133,6 +133,47 @@ int main(void)
         CHECK(DioramaTreeSprites_MossdeepPart(0x19E) == DIORAMA_TREE_PART_NONE);
         CHECK(DioramaTreeSprites_MossdeepPart(0x001) == DIORAMA_TREE_PART_NONE);
     }
+    /* The Fortree tileset's copies of the General small tree (MS-172): the trunks inside a wood on the General
+     * trunks' ground, at a wood's edge on the town's; the shadowed ones under the decks, the bridges and the palms'
+     * fronds stay as drawn; the crown tops over other ground give that ground back. */
+    {
+        static const uint16_t sWood[] = {0x22A};
+        static const uint16_t sShadowed[] = {0x243, 0x244, 0x245, 0x246, 0x247};
+        static const uint16_t sCrowns[][2] = {
+            {0x24B, 0x261}, {0x24C, 0x261}, {0x25C, 0x241}, {0x207, 0x206}, {0x222, 0x240}, {0x2DC, 0x240},
+            {0x223, 0x242}, {0x2DE, 0x242}, {0x2DD, 0x079}, {0x2E6, 0x113}, {0x227, 0x23A}, {0x276, 0x1D9},
+            {0x316, 0x001}, {0x317, 0x001},
+        };
+
+        for (i = 0; i < sizeof(sWood) / sizeof(sWood[0]); i++)
+        {
+            CHECK(DioramaTreeSprites_FortreePart(sWood[i]) == DIORAMA_TREE_PART_SMALL);
+            CHECK(DioramaTreeSprites_FortreeGround(sWood[i]) == DioramaTreeSprites_TrunkGround(false));
+            CHECK(DioramaTreeSprites_FortreeCrownGround(sWood[i]) == sWood[i]);
+        }
+        for (i = 0; i < sizeof(sShadowed) / sizeof(sShadowed[0]); i++)
+        {
+            CHECK(DioramaTreeSprites_FortreePart(sShadowed[i]) == DIORAMA_TREE_PART_NONE);
+            CHECK(DioramaTreeSprites_FortreeCrownGround(sShadowed[i]) == sShadowed[i]);
+        }
+        CHECK(DioramaTreeSprites_FortreePart(0x253) == DIORAMA_TREE_PART_SMALL);
+        CHECK(DioramaTreeSprites_FortreePart(0x254) == DIORAMA_TREE_PART_SMALL);
+        CHECK(DioramaTreeSprites_FortreeGround(0x253) == 0x261);
+        CHECK(DioramaTreeSprites_FortreeGround(0x254) == 0x261);
+        for (i = 0; i < sizeof(sCrowns) / sizeof(sCrowns[0]); i++)
+        {
+            CHECK(DioramaTreeSprites_FortreePart(sCrowns[i][0]) == DIORAMA_TREE_PART_NONE);
+            CHECK(DioramaTreeSprites_FortreeCrownGround(sCrowns[i][0]) == sCrowns[i][1]);
+        }
+        /* the palm's lower trunk (no metatile draws it without the crown top), its fronds, the bridge over the wood,
+         * the town's ground, a tree house: none of these */
+        CHECK(DioramaTreeSprites_FortreeCrownGround(0x273) == 0x273);
+        CHECK(DioramaTreeSprites_FortreePart(0x250) == DIORAMA_TREE_PART_NONE);
+        CHECK(DioramaTreeSprites_FortreePart(0x256) == DIORAMA_TREE_PART_NONE);
+        CHECK(DioramaTreeSprites_FortreePart(0x261) == DIORAMA_TREE_PART_NONE);
+        CHECK(DioramaTreeSprites_FortreeCrownGround(0x261) == 0x261);
+        CHECK(DioramaTreeSprites_FortreePart(0x224) == DIORAMA_TREE_PART_NONE);
+    }
     puts("tree sprite tests passed");
     return EXIT_SUCCESS;
 }

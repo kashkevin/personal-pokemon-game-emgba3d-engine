@@ -79,6 +79,7 @@ static s8 sTreeStyle = -1;
  * some tilesets. */
 extern const struct Tileset gTileset_Lavaridge;
 extern const struct Tileset gTileset_Mossdeep;
+extern const struct Tileset gTileset_Fortree;
 
 /*
  * Neighbouring maps with other tiles (scene_snapshot.h, atlasPage). The
@@ -707,6 +708,16 @@ static bool CopyOutsideCell(struct DioramaSceneSnapshot *snapshot, int mapX, int
                           MapGridGetCollisionAt(mapX, mapY), MapGridGetElevationAt(mapX, mapY), cell);
 }
 
+/* Whether a cell is a General small tree's trunk that ApplyTreeSprites stands as a solid on a map of these tilesets. */
+static bool SolidSmallTrunk(const struct MapLayout *layout, u16 metatileId)
+{
+    if (layout->secondaryTileset == &gTileset_Fortree
+     && DioramaTreeSprites_FortreePart(metatileId) == DIORAMA_TREE_PART_SMALL)
+        return true;
+    return DioramaTreeSprites_Part(layout->secondaryTileset == &gTileset_Dewford, metatileId)
+        == DIORAMA_TREE_PART_SMALL;
+}
+
 /*
  * The 3DS project's trees (tree_sprites.h): on an outdoor map of the General
  * tileset a tree's cells are published as ground (its trunk's art covers
@@ -782,6 +793,35 @@ static void ApplyTreeSprites(struct DioramaSceneSnapshot *snapshot)
                 cell->flags |= DIORAMA_CELL_TREE_CANOPY;
             }
             continue;
+        }
+        /* the Fortree tileset's copies of the General small tree: a trunk stands as the same solid tree, its trunk's
+         * art on the General trunks' ground inside a wood (as its neighbours'), on the town's own ground at a wood's
+         * edge; a crown top over other ground, whose tree south of it stands so, gives that ground back and keeps its
+         * place's heights (the solid crown covers it: it lay painted behind the solid) */
+        if (layout->secondaryTileset == &gTileset_Fortree)
+        {
+            if (DioramaTreeSprites_FortreePart(cell->metatileId) == DIORAMA_TREE_PART_SMALL)
+            {
+                ground = DioramaTreeSprites_FortreeGround(cell->metatileId);
+                if (CopyCellVisual(layout, ground, cell->collision, cell->elevation, cell))
+                    cell->treeSprite = ground == DioramaTreeSprites_TrunkGround(false)
+                                     ? DIORAMA_TREE_SPRITE_SMALL : DIORAMA_TREE_SPRITE_LAVARIDGE_SMALL;
+                continue;
+            }
+            ground = DioramaTreeSprites_FortreeCrownGround(cell->metatileId);
+            if (ground != cell->metatileId)
+            {
+                /* the cell south of it, not changed yet (the cells go from the north), on the same map */
+                const struct DioramaCellSnapshot *below = i + DIORAMA_GRID_WIDTH < snapshot->visibleCellCount
+                                                       && snapshot->cells[i + DIORAMA_GRID_WIDTH].atlasPage
+                                                          == cell->atlasPage
+                                                        ? &snapshot->cells[i + DIORAMA_GRID_WIDTH] : NULL;
+
+                if (below != NULL && SolidSmallTrunk(layout, below->metatileId)
+                 && CopyCellVisual(layout, ground, cell->collision, cell->elevation, cell))
+                    cell->flags |= DIORAMA_CELL_TREE_CANOPY;
+                continue;
+            }
         }
         part = DioramaTreeSprites_Part(dewford, cell->metatileId);
         if (part != DIORAMA_TREE_PART_NONE)

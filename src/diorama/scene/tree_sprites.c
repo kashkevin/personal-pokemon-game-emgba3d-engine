@@ -165,6 +165,47 @@ uint16_t DioramaTreeSprites_MossdeepGround(uint16_t metatileId, uint16_t below)
     }
 }
 
+int DioramaTreeSprites_FortreePart(uint16_t metatileId)
+{
+    switch (metatileId)
+    {
+    /* the trunk's cell inside a wood (22A: the General 0C6's tree on both layers) and at a wood's edge on the town's
+     * ground (253-254: the General 016's trunk over it). Not the trees in the shadow of a tree house's deck, a rope
+     * bridge or a palm's fronds (243-247): they lie under those, which a solid tree would stand through and hide. */
+    case 0x22A: case 0x253: case 0x254:
+        return DIORAMA_TREE_PART_SMALL;
+    default:
+        return DIORAMA_TREE_PART_NONE;
+    }
+}
+
+uint16_t DioramaTreeSprites_FortreeGround(uint16_t metatileId)
+{
+    /* the town's ground: 261 has the edge trunk's lower layer's tiles (the same four, laid out the other way) */
+    if (metatileId == 0x253 || metatileId == 0x254)
+        return 0x261;
+    return DioramaTreeSprites_TrunkGround(false);
+}
+
+uint16_t DioramaTreeSprites_FortreeCrownGround(uint16_t metatileId)
+{
+    /* the General small tree's crown top over each - the metatile with the same lower layer and nothing over it */
+    switch (metatileId)
+    {
+    case 0x24B: case 0x24C: return 0x261; /* the town's ground (its four tiles laid out the other way) */
+    case 0x25C: return 0x241;             /* a palm's trunk, which stands (props.c) */
+    case 0x207: return 0x206;             /* Route 119's river */
+    case 0x222: case 0x2DC: return 0x240; /* Route 119's rock */
+    case 0x223: case 0x2DE: return 0x242;
+    case 0x2DD: return 0x079;
+    case 0x2E6: return 0x113;
+    case 0x227: return 0x23A;             /* Route 120's rock and grass */
+    case 0x276: return 0x1D9;
+    case 0x316: case 0x317: return 0x001; /* Faraway Island's grass */
+    default: return metatileId;
+    }
+}
+
 uint16_t DioramaTreeSprites_LavaridgeGround(uint16_t metatileId)
 {
     switch (metatileId)

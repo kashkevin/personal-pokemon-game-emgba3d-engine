@@ -6,6 +6,7 @@
 #include <string.h>
 #include <SDL2/SDL.h>
 
+#include "diorama/buildings.h"
 #include "diorama/gl_grade.h"
 #include "diorama/gl_lamps.h"
 #include "diorama/gl_light.h"
@@ -1117,6 +1118,11 @@ void DioramaGLTreeSprites_Sync(const struct DioramaSceneSnapshot *snapshot,
         struct TreeKey *key;
 
         if (cell->treeSprite < DIORAMA_TREE_SPRITE_QUARTER || cell->treeSprite > PART_COUNT)
+            continue;
+        /* a modelled building's own cell: the model draws what stands there (Fortree City's tree houses own a
+         * few of the wood's cells round them) */
+        if ((cell->flags & DIORAMA_CELL_SOURCE_VALID)
+         && DioramaBuildings_CellAt(cell->sourceLayoutId, cell->sourceMapX, cell->sourceMapY, NULL, NULL, NULL))
             continue;
         key = &sNewKeys[count++];
         memset(key, 0, sizeof(*key));
