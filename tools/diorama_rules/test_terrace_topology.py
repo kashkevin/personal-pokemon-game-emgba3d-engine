@@ -8,6 +8,7 @@ from catalog import load_tilesets, load_world
 from compile_rules import _load_cells, parse_behaviors
 from terrace_topology import (CAVE_RISE_Q16, LEDGE_JUMPS, MOUNTAIN_LEDGE_Q16, SLOPE_RISE_Q16, TERRACE_ROLES,
                               contradiction_ramps, course_ridges, cave_climbs, cave_levels, join_level_free_cells, join_water, lift_blocked_cells,
+                              hall_stairs, indoor_levels,
                               mountain_ledges, pass_levels, rock_tops, role_for_cell, seam_shifts, slope_tops,
                               solve_layout)
 
@@ -908,6 +909,63 @@ class TerraceTopologyTests(unittest.TestCase):
         self.assertEqual(join_level_free_cells(wet, 3, 2, solved), {})
         plain = cells[:1] + (dict(cells[1], behavior="MB_NORMAL"),) + cells[2:]
         self.assertEqual(join_level_free_cells(plain, 3, 2, solved), {})
+
+    def test_ever_grandes_halls_climb_to_their_landings(self):
+        # KNOWN_ISSUES MS-164: the halls between the Elite Four's rooms lay flat, their staircases
+        # pictures of steps. A short hall's eight rows of steps rise two levels to its landing, Hall 4's
+        # 29 seven; the landing, the door and the wall behind them on that top level; the railings on
+        # the steps' ground row by row; the dark floor either side where it was.
+        tilesets = load_tilesets(ROOT)
+        _, layouts = load_world(ROOT)
+        names = {value: name for name, value
+                 in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
+        wanted = ("LAYOUT_EVER_GRANDE_CITY_SHORT_HALL", "LAYOUT_EVER_GRANDE_CITY_HALL4",
+                  "LAYOUT_EVER_GRANDE_CITY_CHAMPIONS_ROOM")
+        rows = {row["id"]: row for row in layouts if row["id"] in wanted}
+        loaded = _load_cells(ROOT, list(rows.values()), tilesets, names)[0]
+        for layout_id, foot, rise in (("LAYOUT_EVER_GRANDE_CITY_SHORT_HALL", 12, 32),
+                                      ("LAYOUT_EVER_GRANDE_CITY_HALL4", 33, 112)):
+            layout, cells = rows[layout_id], loaded[layout_id]
+            width = layout["width"]
+            raised = hall_stairs(cells, width, layout["height"])
+            steps = [raised[y * width + 5] for y in range(foot, 4, -1)]
+            self.assertEqual((steps[0]["groundQ16"], steps[-1]["topQ16"]), (0, rise))
+            self.assertTrue(all(entry["profile"] == "transition-horizontal"
+                                and entry["topQ16"] == entry["groundQ16"] + entry["rise"] for entry in steps))
+            self.assertTrue(all(lower["topQ16"] == upper["groundQ16"] for lower, upper in zip(steps, steps[1:])))
+            # the landing (4), the door (2) and the wall (0) on the top level, the blocked ones standing on it
+            self.assertEqual({raised[y * width + 5]["groundQ16"] for y in (0, 2, 4)}, {rise})
+            self.assertTrue(raised[0]["lift"] and "lift" not in raised[4 * width])
+            # a railing on its row's ground; the railings at the foot and the dark floor stay
+            self.assertEqual(raised[6 * width + 3]["groundQ16"], steps[foot - 6]["groundQ16"])
+            self.assertTrue(raised[6 * width + 3]["lift"])
+            self.assertNotIn(foot * width + 3, raised)
+            self.assertFalse(any(y * width + x in raised for y in range(6, foot + 1) for x in (0, 1, 2, 8, 9, 10)))
+        # the Champion's room's two rows of steps up to its door: no landing, nothing raised
+        champion = rows["LAYOUT_EVER_GRANDE_CITY_CHAMPIONS_ROOM"]
+        self.assertEqual(hall_stairs(loaded["LAYOUT_EVER_GRANDE_CITY_CHAMPIONS_ROOM"], champion["width"],
+                                     champion["height"]), {})
+
+    def test_a_rooms_raised_floor_given_by_hand(self):
+        # KNOWN_ISSUES MS-164: a lobby's upper floor the GBA draws at the floor's elevation (the Battle
+        # Pyramid's): a raised rectangle on the given level, a blocked cell on it standing its own height,
+        # steps climbing north to it a share a row, a rail beside them on their ground row by row.
+        floor = lambda: dict(cell(1), collision=0, elevation=4)
+        wall = lambda: dict(cell(1), collision=1, elevation=4)
+        rows = ["####", "....", "#..#", "#..#", "...."]
+        make = {".": floor, "#": wall}
+        cells = tuple(make[ch]() for row in rows for ch in row)
+        spec = {"rise": 32, "raised": ((0, 0, 3, 1),), "ramps": ((1, 2, 1, 3),), "rails": ((0, 2, 0, 3),)}
+        out = indoor_levels(cells, 4, 5, spec)
+        self.assertEqual({out[offset]["groundQ16"] for offset in range(8)}, {32})
+        self.assertTrue(out[0]["lift"] and "lift" not in out[4])
+        self.assertEqual([(out[o]["groundQ16"], out[o]["topQ16"], out[o]["rise"]) for o in (13, 9)],
+                         [(0, 16, 16), (16, 32, 16)])
+        self.assertEqual(out[8]["groundQ16"], 16)        # the rail beside the steps' upper row
+        self.assertNotIn(12, out)                        # the rail at the steps' foot stays on the floor
+        self.assertFalse(any(o in out for o in (10, 11, 14, 15, 16, 17, 18, 19)))
+        # a cell another solver placed keeps its entry
+        self.assertNotIn(5, indoor_levels(cells, 4, 5, spec, {5: {"groundQ16": 0}}))
 
 if __name__ == "__main__":
     unittest.main()

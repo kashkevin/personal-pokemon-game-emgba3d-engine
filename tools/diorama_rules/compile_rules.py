@@ -25,6 +25,7 @@ from profiles import NOMINAL_HEIGHTS, TileShape, shape_from_action
 from pixel_objects import UPRIGHT_CLASSES as UPRIGHT_PIXEL_CLASSES, extract_layout
 from structures import analyze_layout
 from terrace_topology import (WATER_BEHAVIORS, cave_climbs, cave_levels, contradiction_ramps, course_ridges,
+                              hall_stairs, indoor_levels,
                               join_level_free_cells,
                               join_water,
                               lift_blocked_cells, mountain_ledges, pass_levels, rock_tops, seam_shifts,
@@ -1440,6 +1441,20 @@ LEVEL_ANCHORS: dict[str, tuple[tuple[int, int], int]] = {
 # the corner pieces of their rings stand on the path they are jumped from (lift_blocked_cells, the higher level):
 # left at the pass's foot - the first try, 2026-11-01 - they cut trenches and pits down to it between its levels.
 PASS_LAYOUTS: frozenset[str] = frozenset({"LAYOUT_JAGGED_PASS"})
+# The rooms whose stage or upper floor the GBA draws at the elevation of the floor round it, given by hand
+# (terrace_topology.indoor_levels; KNOWN_ISSUES MS-164): "rise" in Q16 (16 a level), "raised" rectangles (x0, y0,
+# x1, y1) on that level, "ramps" of steps climbing north to it, "rails" beside the steps on their ground. The Battle
+# Pyramid's lobby: its upper floor (the Pyramid's door, the braziers, the rims of the two pits and the alcoves
+# either side) two levels over the floor its attendant waits on, the steps between the pits (7, 8-12) climbing to
+# it between their balustrades; the pits stay on the lower floor. The Battle Arena's lobby: its tatami stage (its
+# attendant on it, the doors behind it) a level up, the stone step before the attendant (7, 8-9) climbing to it.
+INDOOR_LEVELS: dict[str, dict] = {
+    "LAYOUT_BATTLE_FRONTIER_BATTLE_PYRAMID_LOBBY": {
+        "rise": 32, "raised": ((0, 0, 14, 9), (0, 10, 2, 11), (12, 10, 14, 10)),
+        "ramps": ((7, 8, 7, 12),), "rails": ((6, 8, 6, 12), (8, 8, 8, 12))},
+    "LAYOUT_BATTLE_FRONTIER_BATTLE_ARENA_LOBBY": {
+        "rise": 16, "raised": ((0, 0, 15, 5), (4, 6, 10, 7)), "ramps": ((7, 8, 7, 9),)},
+}
 
 # The trees of a forest (_grounded_forests): the classifier's hulls round the game's trees.
 FOREST_CLASSES = frozenset({"tree", "forest-wall", "round-hull", "grouped-hull"})
@@ -1911,6 +1926,14 @@ def compile_data(root: Path) -> dict:
                                               layout["height"], solved)}
             solved = {**solved, **cave_climbs(cells[layout["id"]], layout["width"],
                                               layout["height"], solved)}
+        if rows and all(row["mapType"] == "MAP_TYPE_INDOOR" for row in rows):
+            # Ever Grande's halls' staircases up to their landings (terrace_topology.hall_stairs).
+            solved = {**solved, **hall_stairs(cells[layout["id"]], layout["width"],
+                                              layout["height"], solved)}
+            if layout["id"] in INDOOR_LEVELS:
+                # A lobby's stage or upper floor, given by hand (terrace_topology.indoor_levels).
+                solved = {**solved, **indoor_levels(cells[layout["id"]], layout["width"], layout["height"],
+                                                    INDOOR_LEVELS[layout["id"]], solved)}
         if (rows and all(_outdoor(row["mapType"]) for row in rows)
                 and any(cell.get("behavior") == "MB_MOUNTAIN_TOP" and cell.get("collision")
                         for cell in cells[layout["id"]])):

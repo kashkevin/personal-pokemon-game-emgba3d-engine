@@ -1840,3 +1840,119 @@ def lift_blocked_cells(cells: tuple[dict, ...], width: int, height: int,
             lifted[offset] = {"groundQ16": level, "topQ16": level,
                               "profile": "none", "solid": False, "lift": True}
     return lifted
+
+
+# Ever Grande's halls between the Elite Four's rooms (gTileset_EliteFour): a staircase from the hall's
+# south end up to a landing before the next room's door, the railings beside it, the dark floor either side.
+HALL_TILESET = "gTileset_EliteFour"
+HALL_STAIRS = frozenset({217, 218, 225, 226})       # its top row's pieces, the steps (local metatiles)
+HALL_RAILINGS = frozenset({216, 219, 224, 227})     # their tops, the railings
+HALL_LANDING = frozenset({208, 209})
+# the staircase rises a level every this many rows: a short hall's eight rows two levels, Hall 4's 29 seven
+HALL_ROWS_PER_LEVEL = 4
+
+
+def hall_stairs(cells: tuple[dict, ...], width: int, height: int,
+                solved: dict[int, dict] | None = None) -> dict[int, dict]:
+    """Ever Grande's halls (KNOWN_ISSUES MS-164): the staircase lay flat on the
+    floor, a picture of steps. Its steps rise from its foot, the hall's south end,
+    up to the landing north of them, a level every HALL_ROWS_PER_LEVEL rows (a
+    ramp, as a mountain's stairs: _climb_entries); the landing, the door and the
+    wall behind them stand on that top level; the railings beside the steps stand
+    on the steps' ground row by row; the dark floor either side stays where it
+    was, the staircase over it. Returns nothing for any other layout (the
+    Champion's room's two rows of steps up to its door have no landing)."""
+    solved = solved or {}
+
+    def local(offset: int):
+        cell = cells[offset]
+        if cell.get("tileset") != HALL_TILESET:
+            return None
+        return cell.get("localMetatile", cell.get("metatile"))
+
+    stairs = [offset for offset in range(len(cells))
+              if local(offset) in HALL_STAIRS and not cells[offset].get("collision")
+              and offset not in solved]
+    if not stairs:
+        return {}
+    rows = sorted({offset // width for offset in stairs})
+    top_row, foot_row = rows[0], rows[-1]
+    landing = [offset for offset in range((top_row - 1) * width, top_row * width)
+               if offset >= 0 and local(offset) in HALL_LANDING]
+    if (rows != list(range(top_row, foot_row + 1)) or len(rows) < HALL_ROWS_PER_LEVEL
+            or not landing):
+        return {}
+    count = len(rows)
+    rise = 16 * max(1, round(count / HALL_ROWS_PER_LEVEL))
+    out: dict[int, dict] = {}
+    for offset in stairs:
+        step = foot_row - offset // width
+        ground = round(rise * step / count)
+        top = round(rise * (step + 1) / count)
+        out[offset] = {"groundQ16": ground, "topQ16": top, "profile": "transition-horizontal",
+                       "solid": False, "rise": top - ground}
+    for offset in range(top_row * width):
+        if offset in solved:
+            continue
+        # the landing, the door, the wall behind them (their own heights on the top level)
+        out[offset] = {"groundQ16": rise, "topQ16": rise, "profile": "none", "solid": False,
+                       **({"lift": True} if cells[offset].get("collision") else {})}
+    for offset in range(top_row * width, len(cells)):
+        if offset in solved or offset in out:
+            continue
+        row = offset // width
+        if local(offset) in HALL_RAILINGS:
+            ground = round(rise * (foot_row - row) / count)
+            if ground:
+                out[offset] = {"groundQ16": ground, "topQ16": ground, "profile": "none",
+                               "solid": False, "lift": True}
+        elif row == top_row and cells[offset].get("collision"):
+            # the landing's lip either side of the steps' top (local 220): the landing's
+            out[offset] = {"groundQ16": rise, "topQ16": rise, "profile": "none", "solid": False,
+                           "lift": True}
+    return out
+
+
+def indoor_levels(cells: tuple[dict, ...], width: int, height: int, spec: dict,
+                  solved: dict[int, dict] | None = None) -> dict[int, dict]:
+    """A room's raised floor, given by hand (compile_rules INDOOR_LEVELS: the Battle
+    Frontier's lobbies, KNOWN_ISSUES MS-164). The GBA draws a stage or an upper
+    floor at the elevation of the floor round it, so nothing in its data says what
+    stands higher; `spec` names it: "raised", rectangles (x0, y0, x1, y1, both
+    corners in) on the level `spec["rise"]` (Q16); "ramps", rectangles of steps
+    climbing north from the floor at their south row to that level at their north
+    edge, each row its share (as hall_stairs); "rails", rectangles of blocked
+    cells beside the steps that stand on the steps' ground row by row. A blocked
+    cell on the raised level stands its own height on it ("lift"). Returns the
+    entries; cells another solver placed keep theirs."""
+    solved = solved or {}
+    rise = spec["rise"]
+    out: dict[int, dict] = {}
+
+    def cells_of(rectangles):
+        for x0, y0, x1, y1 in rectangles:
+            for y in range(y0, y1 + 1):
+                for x in range(x0, x1 + 1):
+                    offset = y * width + x
+                    if 0 <= x < width and 0 <= y < height and offset not in solved:
+                        yield offset, y, y0, y1
+
+    def row_ground(y, y0, y1):
+        # (a rail beside steps from row y0 to row y1: the steps' ground on its row)
+        return round(rise * (y1 - y) / (y1 - y0 + 1))
+
+    for offset, y, y0, y1 in cells_of(spec.get("ramps", ())):
+        ground = row_ground(y, y0, y1)
+        top = round(rise * (y1 - y + 1) / (y1 - y0 + 1))
+        out[offset] = {"groundQ16": ground, "topQ16": top, "profile": "transition-horizontal",
+                       "solid": False, "rise": top - ground}
+    for offset, y, y0, y1 in cells_of(spec.get("rails", ())):
+        ground = row_ground(y, y0, y1)
+        if ground and offset not in out:
+            out[offset] = {"groundQ16": ground, "topQ16": ground, "profile": "none",
+                           "solid": False, "lift": True}
+    for offset, _, _, _ in cells_of(spec.get("raised", ())):
+        if offset not in out:
+            out[offset] = {"groundQ16": rise, "topQ16": rise, "profile": "none", "solid": False,
+                           **({"lift": True} if cells[offset].get("collision") else {})}
+    return out
