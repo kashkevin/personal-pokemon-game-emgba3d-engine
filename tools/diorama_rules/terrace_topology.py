@@ -1996,3 +1996,35 @@ def _indoor_steps(cells: tuple[dict, ...], width: int, height: int, spec: dict,
                            "solid": False, "rise": top - ground}
     return out
 
+
+def hand_slopes(width: int, slopes) -> dict[int, dict]:
+    """Ramps given by hand (compile_rules SEAM_RAMPS): for each (rectangle, direction, low, high) -
+    the rectangle (x0, y0, x1, y1, both corners in), "n" or "s" - its cells climb from `low` at the
+    edge it starts from to `high` at the far one, each row its share (as a mountain's stairs)."""
+    out: dict[int, dict] = {}
+    for (x0, y0, x1, y1), direction, low, high in slopes:
+        rows = y1 - y0 + 1
+        for y in range(y0, y1 + 1):
+            step = (y - y0) if direction == "s" else (y1 - y)
+            ground = low + round((high - low) * step / rows)
+            top = low + round((high - low) * (step + 1) / rows)
+            for x in range(x0, x1 + 1):
+                out[y * width + x] = {"groundQ16": ground, "topQ16": top, "solid": False,
+                                      "profile": "transition-south" if direction == "s" else "transition-horizontal",
+                                      "rise": top - ground}
+    return out
+
+
+def hand_banks(cells: tuple[dict, ...], width: int, banks) -> dict[int, dict]:
+    """The blocked cells (trees, rock) of rectangles given by hand (compile_rules SEAM_RAMPS): for each
+    (rectangle, level) - the rectangle (x0, y0, x1, y1, both corners in) - its blocked cells stand on that
+    level, their own height on it (as lift_blocked_cells' lifted cells); its walkable cells are left alone."""
+    out: dict[int, dict] = {}
+    for (x0, y0, x1, y1), level in banks:
+        for y in range(y0, y1 + 1):
+            for x in range(x0, x1 + 1):
+                offset = y * width + x
+                if cells[offset].get("collision", 0) != 0:
+                    out[offset] = {"groundQ16": level, "topQ16": level, "profile": "none",
+                                   "solid": False, "lift": True}
+    return out

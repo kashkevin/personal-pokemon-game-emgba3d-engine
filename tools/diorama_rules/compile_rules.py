@@ -25,7 +25,7 @@ from profiles import NOMINAL_HEIGHTS, TileShape, shape_from_action
 from pixel_objects import UPRIGHT_CLASSES as UPRIGHT_PIXEL_CLASSES, extract_layout
 from structures import analyze_layout
 from terrace_topology import (WATER_BEHAVIORS, cave_climbs, cave_levels, contradiction_ramps, course_ridges,
-                              hall_stairs, indoor_levels,
+                              hall_stairs, hand_banks, hand_slopes, indoor_levels,
                               join_level_free_cells,
                               join_water,
                               lift_blocked_cells, mountain_ledges, pass_levels, rock_tops, seam_shifts,
@@ -1441,6 +1441,18 @@ LEVEL_ANCHORS: dict[str, tuple[tuple[int, int], int]] = {
 # the corner pieces of their rings stand on the path they are jumped from (lift_blocked_cells, the higher level):
 # left at the pass's foot - the first try, 2026-11-01 - they cut trenches and pits down to it between its levels.
 PASS_LAYOUTS: frozenset[str] = frozenset({"LAYOUT_JAGGED_PASS"})
+# Ramps given by hand where two maps meet a level apart (KNOWN_ISSUES MS-162): "slopes" (terrace_topology.hand_slopes)
+# and "banks", the blocked cells of a rectangle on one level (hand_banks). The Safari Zone's south-west has a pocket
+# of grass at (19-23, 0-1) that only the north-west walks into, its south side jump ledges down into the south-west.
+# The north-west's low ground (and its trees) meets it two levels under the south-west's: a step of two levels where
+# the player walked from one map into the other. Its two rows climb south from the north-west's level to the
+# south-west's, the ledges at its south side jumped level; the trees along the seam over the north-west's low ground
+# (two rows, each tree two by two) stand half way, a level down, whole (a level a row split them). (The game's ledges
+# say the north-west stands over the south-west; standing it so moves every Safari map's levels: MS-162's open part.)
+SEAM_RAMPS: dict[str, dict] = {
+    "LAYOUT_SAFARI_ZONE_SOUTHWEST": {"slopes": (((19, 0, 23, 1), "s", -32, 0),),
+                                     "banks": (((13, 0, 39, 1), -16),)},
+}
 # The rooms whose stage or upper floor the GBA draws at the elevation of the floor round it, given by hand
 # (terrace_topology.indoor_levels; KNOWN_ISSUES MS-164): "rise" in Q16 (16 a level), "raised" rectangles (x0, y0,
 # x1, y1) on that level, "ramps" of steps climbing north to it, "rails" beside the steps on their ground. The Battle
@@ -2005,6 +2017,13 @@ def compile_data(root: Path) -> dict:
                           for layout in layouts}, _seam_pairs(maps, layouts_by_id, maps_by_symbol))
     for layout_id, layout_shifts in sorted(shifts.items()):
         terrace_topology[layout_id] = solve_terrain(layouts_by_id[layout_id], shifts=layout_shifts)
+    for layout_id, ramp in SEAM_RAMPS.items():
+        # A pocket of one map entered only from the next, lying on the next map's ground at the seam, the trees
+        # beside it with it (terrace_topology.hand_slopes, hand_banks; SEAM_RAMPS).
+        ramp_width = layouts_by_id[layout_id]["width"]
+        terrace_topology[layout_id] = {**terrace_topology[layout_id],
+                                       **hand_banks(cells[layout_id], ramp_width, ramp.get("banks", ())),
+                                       **hand_slopes(ramp_width, ramp.get("slopes", ()))}
 
     source = load_json(rules_root / "defaults.json")
     _unknown(source, {"schemaVersion", "kind", "default", "semanticPools", "profiles",

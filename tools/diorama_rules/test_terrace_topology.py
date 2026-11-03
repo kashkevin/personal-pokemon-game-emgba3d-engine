@@ -8,7 +8,7 @@ from catalog import load_tilesets, load_world
 from compile_rules import _load_cells, parse_behaviors
 from terrace_topology import (CAVE_RISE_Q16, LEDGE_JUMPS, MOUNTAIN_LEDGE_Q16, SLOPE_RISE_Q16, TERRACE_ROLES,
                               contradiction_ramps, course_ridges, cave_climbs, cave_levels, join_level_free_cells, join_water, lift_blocked_cells,
-                              hall_stairs, indoor_levels,
+                              hall_stairs, hand_banks, hand_slopes, indoor_levels,
                               mountain_ledges, pass_levels, rock_tops, role_for_cell, seam_shifts, slope_tops,
                               solve_layout)
 
@@ -985,6 +985,44 @@ class TerraceTopologyTests(unittest.TestCase):
         self.assertEqual((out[13]["groundQ16"], out[13]["topQ16"]), (0, 16))
         self.assertEqual((out[12]["groundQ16"], out[12]["lift"]), (16, True))
         self.assertFalse(any(offset in out for offset in range(16, 20)))
+
+    def test_a_seam_ramp_given_by_hand(self):
+        # A rectangle's rows climb from its low level at the edge it starts from to its high one, a share a row;
+        # the Safari Zone's south-west's pocket of grass (only the north-west walks into it) climbs south from the
+        # north-west's level at the seam to the south-west's, the ledges at its south side jumped into the
+        # south-west (compile_rules SEAM_RAMPS).
+        from compile_rules import SEAM_RAMPS
+        out = hand_slopes(5, (((1, 0, 3, 1), "s", -32, 0), ((0, 2, 0, 3), "n", 0, 16)))
+        self.assertEqual({(out[x]["groundQ16"], out[x]["topQ16"], out[x]["rise"], out[x]["profile"], out[x]["solid"])
+                          for x in (1, 2, 3)}, {(-32, -16, 16, "transition-south", False)})
+        self.assertEqual((out[5 + 2]["groundQ16"], out[5 + 2]["topQ16"]), (-16, 0))
+        self.assertEqual((out[15]["groundQ16"], out[15]["topQ16"], out[15]["profile"]), (0, 8, "transition-horizontal"))
+        self.assertEqual((out[10]["groundQ16"], out[10]["topQ16"]), (8, 16))
+        self.assertEqual(sorted(out), [1, 2, 3, 6, 7, 8, 10, 15])
+
+        tilesets = load_tilesets(ROOT)
+        _, layouts = load_world(ROOT)
+        names = {value: name for name, value
+                 in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
+        lid = "LAYOUT_SAFARI_ZONE_SOUTHWEST"
+        layout = next(row for row in layouts if row["id"] == lid)
+        width = layout["width"]
+        cells = _load_cells(ROOT, [layout], tilesets, names)[0][lid]
+        ((x0, y0, x1, y1), direction, low, high), = SEAM_RAMPS[lid]["slopes"]
+        self.assertEqual((y0, direction, high), (0, "s", 0))     # from the map's north edge to its own ground
+        self.assertLess(low, high)
+        for x in range(x0, x1 + 1):
+            self.assertTrue(all(cells[y * width + x]["collision"] == 0 for y in range(y0, y1 + 1)))
+            self.assertEqual(cells[(y1 + 1) * width + x]["behavior"], "MB_JUMP_SOUTH")
+        # the trees beside it: their two rows on one level, between the ramp's ends; the ramp's cells left alone
+        ((bx0, by0, bx1, by1), level), = SEAM_RAMPS[lid]["banks"]
+        self.assertEqual((by0, by1), (y0, y1))
+        self.assertTrue(low < level < high)
+        banks = hand_banks(cells, width, SEAM_RAMPS[lid]["banks"])
+        self.assertTrue(banks)
+        self.assertEqual({(entry["groundQ16"], entry["lift"]) for entry in banks.values()}, {(level, True)})
+        self.assertFalse(any(cells[offset]["collision"] == 0 for offset in banks))
+        self.assertFalse(any(x0 <= offset % width <= x1 for offset in banks))
 
 if __name__ == "__main__":
     unittest.main()
