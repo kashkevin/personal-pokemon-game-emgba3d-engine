@@ -629,6 +629,46 @@ def factory_lobby():
     ])
 
 
+
+# ── The Battle Palace's lobby ─────────────────────────────────────────────
+#
+# 25 x 12 cells. From the top of the drawing:
+#
+#     rows  0- 80  the back wall, drawn to the map's top: a gold cornice, red panels under gold
+#                  arches between gold pillars, a dark red and gold baseboard (rows 64-80); the
+#                  door to the Palace (x 72-104, its cell 5,4 walked into: painted on the wall,
+#                  as the Pike's doorways), a second door's frame (x 296-328) and an arch round a
+#                  PC (x 214-248) - the PC (x 224-240, rows 56-88) stands before the wall
+#     rows 64- 90  a notice board on legs (x 152-184): left as drawn, its legs in the row the
+#                  player reads it from
+#     rows 80-120  four white tables with gold legs either side of the attendants, each an L of
+#                  three panels (x 32-80, 96-144, 256-304, 320-368; the deep panel two cells, rows
+#                  80-112), a grey apron and the legs their front, rows 112-120 - 8 rows
+#     rows 108-136 a glass sign on a stand before each outer table (x 32-48, x 256-272): cards
+#     below       the pink floor, the mats (the floor's)
+
+PAL_FLOOR = ("bd8ba4", "a46283", "944162")
+PAL_WALL = ("cd4a20", "cdb429", "ffde83", "e6c552", "7b2910", "a43918")
+PAL_WALL_SIDE = (32, 0, 48, 80)     # a red panel and its baseboard, cornice to foot
+
+
+def palace_lobby():
+    facet, own_shell, piece = _helpers()
+    signs = [piece("sign_%d" % x0, [(x0, 108, x0 + 16, 136)], 28, leave=PAL_FLOOR, card=True)
+             for x0 in (32, 256)]
+    tables = [piece("table_%d" % x0, [(deep, 80, deep + 24, 120), (x0, 96, x0 + 48, 120)], 8,
+                    leave=PAL_FLOOR)
+              for (deep, x0) in ((32, 32), (120, 96), (256, 256), (344, 320))]
+    return own_shell(signs + tables + [
+        piece("pc", [(224, 56, 240, 88)], 24, back=80, leave=PAL_WALL + PAL_FLOOR),
+        piece("wall_w", [(0, 0, 128, 80)], 80, fill=16, side=PAL_WALL_SIDE),
+        piece("wall_mid", [(128, 0, 272, 80)], 80, fill=16, side=PAL_WALL_SIDE),
+        piece("wall_e", [(272, 0, 400, 80)], 80, fill=16, side=PAL_WALL_SIDE),
+        piece("side_w", [], 80, side=PAL_WALL_SIDE, walls=[((0, 192), (0, 80))]),
+        piece("side_e", [], 80, side=PAL_WALL_SIDE, walls=[((400, 80), (400, 192))]),
+    ])
+
+
 def furnished_room_specs():
     """The specs, made when voxel_building_specs asks for them (its SPECS end with them)."""
     return [
@@ -728,6 +768,12 @@ def furnished_room_specs():
             "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_BATTLE_FACTORY_LOBBY",
                          "ground": [0x201], "shade": [0x203, 0x204],
                          "reuse_in": frozenset(), "pieces": factory_lobby()},
+        },
+        {
+            "name": "frontier_palace_lobby",
+            "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_BATTLE_PALACE_LOBBY",
+                         "ground": [0x201], "shade": [0x203, 0x207, 0x20f],
+                         "reuse_in": frozenset(), "pieces": palace_lobby()},
         },
         {
             "name": "frontier_ranking_hall",
