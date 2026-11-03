@@ -1,0 +1,629 @@
+#!/usr/bin/env python3
+"""Furnished rooms modelled piece by piece (project-owned; KNOWN_ISSUES MS-164).
+
+The depth audit of 2026-10-28 listed 35 rooms whose furniture the generic 3D rules leave as a
+picture on the floor. A first try read their pieces off their cells (battle_room_auto.py, engine
+131de763): it proved against the drawing, but from the game's camera the pieces were boxes with
+their drawing run down them, a counter stood as tall as the walls and hid the clerks behind it,
+and it was reverted (MS-173). The GBA's projection cannot tell a tall front from a deep top (at 45
+degrees both are the same rows of the drawing), so a piece's height has to be chosen, and the
+game's camera, which looks down at 42 degrees with perspective (about 25 degrees at the back of a
+room), shows a wrong choice at once.
+
+These rooms are cut by hand as the 3DS project cut its rooms (voxel_building_specs.py, the
+Pokemon Center, the Mart): each piece as tall as its drawn front, a counter or a table low enough
+that whoever stands behind it is seen over it, a stool 6 rows, a plant a card; walls stand their
+drawn face. Every piece and every room still reproduces the drawing pixel for pixel in the GBA's
+projection (gen_voxel_buildings.py --verify), and each room is looked at from the game's camera
+before it is listed. Their pieces stand in their own room only (`reuse_in`: none), so a tile
+they share with another room does not stand them there.
+
+Conventions as in voxel_building_specs.py: shapes are pixels of the room's drawing; `height` is
+the rows of a piece's front, standing at its drawn foot, the rest of what it claims above that
+its top, laid back at 45 degrees; `back` the Z its top runs back to; `leave` the colours it does
+not claim where they run on out of its shape (the floor round a stool, the wall round a plant);
+`fill` P fills what pieces in front hide of a wall from its own pixels P columns away; `side` the
+stretch of drawing that dresses the faces the drawing never shows; side walls run ((x, z), (x, z))
+facing into the room (west walls front to back, east walls back to front). Front (south) walls are
+never stood up.
+"""
+
+
+def _helpers():
+    """voxel_building_specs' piece helpers, imported when the specs are made (that module takes
+    this one's specs at its end: importing it at the top would be circular)."""
+    import voxel_building_specs as v
+    return v.facet, v.own_shell, v.piece
+
+
+# ── Mauville City's Game Corner ───────────────────────────────────────────
+#
+# 22 x 11 cells. From the top of the drawing:
+#
+#     rows  0-  8  the back wall's top band; east of x 288 the wall stands a cell further
+#                  forward, its top rows 0-24 (white, then the band), its face rows 24-48
+#     rows  8- 32  the wall's face: sky panels over a teal baseboard; behind the counter a shelf
+#                  and the counter's back corners are drawn on it
+#     rows 16- 48  two coin machines (x 0-32) against the wall, a vase (x 32-48), three potted
+#                  plants (x 80-128)
+#     rows 32- 72  the prize counter, a U round the clerks' floor (x 144-256): its arms x 144-159
+#                  and 241-256, its bar's top rows 46-58, its front rows 58-72 - 14 rows, so the
+#                  clerks behind it are seen over it from the game's camera
+#     rows 47- 64  two benches against the wall that stands forward (x 288-352); a vase at 21,4
+#     rows 80-152  two banks of slot machines back to back (x 32-64, x 112-144), their screens
+#                  down their sides, facing the stools either side (walkable, as the Center's);
+#                  the shadow under them, rows 152-158, is the floor's
+#     rows 92-142  two roulette tables (x 224-256, x 288-320): the felt their top, a band and
+#                  legs their front, rows 134-142
+#     rows 160-176 the doormat (the floor's)
+
+GC_WALL = ("62accd", "eee6f6", "31839c", "52526a", "7b7b8b", "cdcdc5", "bdcde6", "ffffff")
+GC_FLOOR = ("d55231", "a44a41", "ac625a", "f65252")
+GC_WALL_SIDE = (48, 8, 64, 32)     # one sky panel and its baseboard
+
+
+def mauville_game_corner():
+    facet, own_shell, piece = _helpers()
+    stools = [piece("stool_%d_%d" % (cx, cy), [(cx * 16, cy * 16, cx * 16 + 16, cy * 16 + 16)],
+                    6, leave=GC_FLOOR)
+              for cy in range(6, 10) for cx in (1, 4, 6, 9)]
+    return own_shell([
+        # the tables only as deep as their drawn top: run back to their collision, the felt's
+        # rows laid over again showed a second strip of felt behind the wheel
+        piece("roulette_w", [(224, 92, 256, 142)], 8, leave=GC_FLOOR),
+        piece("roulette_e", [(288, 92, 320, 142)], 8, leave=GC_FLOOR),
+        piece("slots_w", [(32, 80, 64, 152)], 14, back=96, leave=GC_FLOOR),
+        piece("slots_e", [(112, 80, 144, 152)], 14, back=96, leave=GC_FLOOR),
+        piece("vase_e", [(336, 64, 352, 80)], 12, leave=GC_FLOOR),
+    ] + stools + [
+        piece("bench_w", [(288, 47, 320, 64)], 6, back=48, leave=GC_FLOOR + GC_WALL),
+        piece("bench_e", [(320, 47, 352, 64)], 6, back=48, leave=GC_FLOOR + GC_WALL),
+        # the counter: its bar and its arms one piece, its front as drawn
+        piece("counter", [(144, 32, 159, 72), (241, 32, 256, 72), (144, 46, 256, 72)], 14),
+        piece("machines", [(0, 16, 32, 48)], 22, back=32, leave=GC_WALL),
+        piece("vase_w", [(32, 32, 48, 48)], 12, leave=GC_FLOOR),
+        piece("plant_1", [(80, 16, 96, 48)], 28, leave=GC_WALL, card=True),
+        piece("plant_2", [(96, 16, 112, 48)], 28, leave=GC_WALL, card=True),
+        piece("plant_3", [(112, 16, 128, 48)], 28, leave=GC_WALL, card=True),
+        # the walls: the back one, its face 24 rows standing on row 32; east of x 288 a cell
+        # forward, on row 48; the room's sides where the floor reaches the map's edges
+        piece("wall_e", [(288, 0, 352, 48)], 24, fill=16, side=GC_WALL_SIDE,
+              walls=[((352, 48), (352, 176))]),
+        piece("wall", [(0, 0, 288, 32)], 24, fill=16, side=GC_WALL_SIDE,
+              walls=[((0, 176), (0, 48))]),
+    ])
+
+
+# ── Mossdeep City's Game Corner, ground floor ─────────────────────────────
+#
+# 12 x 10 cells. From the top of the drawing:
+#
+#     rows  0- 10  the back wall's top; rows 10-32 its face: a yellow band between wooden
+#                  posts, a notice board (x 2-30), the doorway down (x 80-96)
+#     rows  8- 40  a PC (x 160-176), its foot on the floor in front of the wall
+#     rows 20- 62  two wooden benches (x 32-80, x 96-144), each with a tall end against the wall
+#                  (x 32-48, x 128-144); between them a low yellow gate (x 80-96, rows 46-60)
+#     rows 80-126  two glass tables (x 32-64, x 112-144), the stools round them (walkable)
+#     rows 144-160 the doormat (the floor's)
+#
+# Its floor's shaded cells are drawn in the benches' own colours, so the room names no shade:
+# each piece leaves the floor round it by its own colours.
+
+MG_FLOOR = ("bda462", "d5b473", "eecda4", "a48b52")
+MG_WALL_ONLY = ("ffe64a", "dec541", "836a52", "7b839c")
+MG_WALL = MG_WALL_ONLY + ("d59c62", "eecda4", "a48b52", "d5b473", "bda462")
+MG_WALL_SIDE = (176, 0, 192, 32)
+
+
+def mossdeep_game_corner_1f():
+    facet, own_shell, piece = _helpers()
+    stools = [piece("stool_%d_%d" % (cx, cy), [(cx * 16, cy * 16, cx * 16 + 16, cy * 16 + 16)],
+                    6, leave=MG_FLOOR)
+              for (cx, cy) in ((2, 5), (3, 5), (1, 6), (1, 7), (7, 5), (8, 5), (9, 6), (9, 7))]
+    return own_shell([
+        piece("table_w", [(32, 92, 64, 126)], 8, leave=MG_FLOOR),
+        piece("table_e", [(112, 92, 144, 126)], 8, leave=MG_FLOOR),
+    ] + stools + [
+        piece("bench_w", [(32, 44, 80, 62)], 8, back=48, leave=MG_FLOOR),
+        piece("bench_e", [(96, 44, 144, 62)], 8, back=48, leave=MG_FLOOR),
+        piece("gate", [(80, 46, 96, 60)], 4, leave=MG_FLOOR),
+        piece("bench_w_end", [(32, 20, 48, 44)], 20, back=32, leave=MG_WALL_ONLY),
+        piece("bench_e_end", [(128, 20, 144, 44)], 20, back=32, leave=MG_WALL_ONLY),
+        piece("pc", [(160, 8, 176, 40)], 24, back=32, leave=MG_WALL),
+        piece("wall", [(0, 0, 192, 32)], 22, fill=16, side=MG_WALL_SIDE,
+              walls=[((0, 160), (0, 32)), ((192, 32), (192, 160))]),
+    ])
+
+
+# ── The Battle Frontier's lounges ─────────────────────────────────────────
+#
+# Two layouts for the nine lounges (LOUNGE1 13 x 8 cells, LOUNGE2 9 x 10), one kit:
+#
+#     rows  0- 32  the back wall: its white top and grey band, its face orange to yellow down to
+#                  a chequered trim
+#     rows 18- 46  a potted plant on every cell of the row in front of the wall but one, where a
+#                  drinks machine stands (LOUNGE1 x 96-112, rows 13-40; LOUNGE2 x 64-80, rows
+#                  29-55), its foot on the floor in front of it, its shadow below that the
+#                  floor's; LOUNGE2's stands a cell out from the wall, its depth back to the
+#                  wall laid with its grey, not its drawn top's rows over again
+#     below        armchairs, walkable as the Center's stools, their backs drawn on their sides;
+#                  LOUNGE1 two more plants down the middle (x 96-112), the mat at the front
+#
+# The black front corners are floor (`open`), the side walls run on to the front.
+
+LOUNGE_FLOOR = ("0073ff", "00b4ff", "73deff")
+LOUNGE_WALL = ("ffd573", "ffffff", "9494a4", "cdbdc5", "b46218", "e69441", "e6ac5a")
+LOUNGE_WALL_SIDE = (0, 0, 16, 32)
+
+
+def _lounge(w, h, plants, machine, chairs, extra=()):
+    facet, own_shell, piece = _helpers()
+    W, H = w * 16, h * 16
+    pieces = [piece("chair_%d_%d" % (cx, cy), [(cx * 16, cy * 16, cx * 16 + 16, cy * 16 + 16)], 6,
+                    leave=LOUNGE_FLOOR)
+              for (cx, cy) in chairs]
+    pieces += [piece("plant_%d_%d" % (x0 // 16, z1 // 16), [(x0, z0, x0 + 16, z1)], 28,
+                     leave=LOUNGE_FLOOR + LOUNGE_WALL, card=True)
+               for (x0, z0, z1) in plants + list(extra)]
+    mx, mz0, mz1, lid = machine
+    pieces += [
+        piece("machine", [(mx, mz0, mx + 16, mz1)], 22, back=32, top=lid,
+              leave=LOUNGE_WALL + LOUNGE_FLOOR),
+        piece("wall", [(0, 0, W, 32)], 24, fill=16, side=LOUNGE_WALL_SIDE),
+        # the side walls pieces of their own, drawn nowhere: a piece answers for the floor of
+        # every cell its rectangle spans, and the chequered floor is two tiles
+        piece("side_w", [], 24, side=LOUNGE_WALL_SIDE, walls=[((0, H), (0, 32))]),
+        piece("side_e", [], 24, side=LOUNGE_WALL_SIDE, walls=[((W, 32), (W, H))]),
+    ]
+    return own_shell(pieces)
+
+
+def lounge1():
+    plants = [(x, 16, 48) for x in (16, 32, 48, 64, 80, 112, 128, 144, 160, 176)]
+    chairs = [(0, 3), (2, 3), (4, 3), (10, 3), (12, 3), (0, 4), (2, 4), (4, 4), (8, 4), (10, 4),
+              (12, 4), (0, 5), (8, 5), (10, 5), (12, 5), (8, 6), (10, 6)]
+    return _lounge(13, 8, plants, (96, 13, 40, None), chairs,
+                   extra=[(96, 48, 80), (96, 80, 112)])
+
+
+def lounge2():
+    plants = [(x, 16, 48) for x in (0, 16, 32, 48, 80, 96, 112, 128)]
+    chairs = [(0, 3), (8, 3)] + [(cx, cy) for cy in range(4, 8) for cx in (0, 2, 6, 8)]
+    return _lounge(9, 10, plants, (64, 29, 55, (67, 35, 77, 36)), chairs)
+
+
+# ── The Battle Frontier's Exchange Service Corner ─────────────────────────
+#
+# 15 x 11 cells. From the top of the drawing:
+#
+#     rows  0- 32  the back wall: its grey top, its face orange with three emblems, a red
+#                  baseboard (rows 24-32)
+#     rows  8- 40  a PC (x 224-240), its foot on the floor in front of the wall
+#     rows 16- 64  the prize shelves behind the counter: a tall one along the wall (x 64-176,
+#                  its top rows 16-22), lower ones in front of it either side (x 64-96,
+#                  x 144-176, rows 38-64)
+#     rows 24-112  the counter, a U round the clerks' floor: its arms x 48-64 and 176-192 from
+#                  the wall, its bar across the front, its red top rows 92-102 and its grey front
+#                  rows 102-112 - 10 rows
+#     rows 48- 96  two benches down the west wall (x 0-16, rows 48-96 and 112-144), walkable
+#     rows 144-176 the mat; the black front corners are floor (`open`)
+
+EX_FLOOR = ("0073ff", "00b4ff", "73deff", "0052de", "0039b4")
+EX_WALL = ("ffd573", "e69441", "e6ac5a", "b46218", "bd2910", "ff6231", "de4a20", "52526a")
+EX_WALL_SIDE = (16, 0, 32, 32)
+
+
+def exchange_service_corner():
+    facet, own_shell, piece = _helpers()
+    return own_shell([
+        piece("bench_n", [(0, 48, 16, 96)], 6, leave=EX_FLOOR),
+        piece("bench_s", [(0, 112, 16, 144)], 6, leave=EX_FLOOR),
+        piece("counter", [(48, 24, 64, 112), (176, 24, 192, 112), (48, 92, 192, 112)], 10),
+        piece("shelf_w", [(64, 38, 96, 64)], 14, leave=EX_FLOOR),
+        piece("shelf_e", [(144, 38, 176, 64)], 14, leave=EX_FLOOR),
+        piece("shelf_back", [(64, 16, 176, 48)], 24, back=32, leave=EX_FLOOR + EX_WALL),
+        piece("pc", [(224, 8, 240, 40)], 24, back=32, leave=EX_WALL + EX_FLOOR),
+        piece("wall", [(0, 0, 240, 32)], 24, fill=16, side=EX_WALL_SIDE),
+        # the side walls answer for the black front corners, which are floor
+        piece("side_w", [], 24, side=EX_WALL_SIDE, walls=[((0, 176), (0, 32))], cells=[(1, 10)]),
+        piece("side_e", [], 24, side=EX_WALL_SIDE, walls=[((240, 32), (240, 176))],
+              cells=[(13, 10)]),
+    ])
+
+
+# ── The Battle Pike's lobby ───────────────────────────────────────────────
+#
+# 11 x 13 cells. From the top of the drawing:
+#
+#     rows  0- 64  the back wall, a red stage curtain to the floor, a pink cushion drawn on it
+#     rows 40- 72  in front of it a television (x 8-40), a monitor (x 128-144) and a PC
+#                  (x 160-176), their feet on the floor
+#     below        fourteen copper lanterns on posts, each a cell of base (blocked) under a cell
+#                  of lamp: cards, as a plant is; the mat at the front
+#
+# The floor's lantern cells and shaded cells are not its tile (0x2C2): pixels of theirs that
+# are not the tile's are marks, laid flat by the pieces that cover them.
+
+PIKE_FLOOR = ("a48b31", "cdac31", "7b6a31")
+PIKE_CURTAIN = ("c50000", "7b3100", "ff0000", "523131", "9c8b31", "ff9462", "ffd531", "b45241")
+PIKE_LANTERNS = [(3, 4), (7, 4), (4, 5), (6, 5), (1, 7), (9, 7), (0, 8), (3, 8), (7, 8), (10, 8),
+                 (1, 10), (9, 10), (3, 12), (7, 12)]
+PIKE_SIDE = (16, 0, 32, 44)       # plain curtain (lower, the lobby's TV and the cushions)
+
+
+def pike_lobby():
+    facet, own_shell, piece = _helpers()
+    lanterns = [piece("lantern_%d_%d" % (cx, cy),
+                      [(cx * 16, cy * 16 - 16, cx * 16 + 16, cy * 16 + 16)], 28,
+                      leave=PIKE_FLOOR, card=True)
+                for (cx, cy) in PIKE_LANTERNS]
+    return own_shell(lanterns + [
+        piece("tv", [(8, 46, 40, 72)], 16, back=64, leave=PIKE_CURTAIN + PIKE_FLOOR),
+        piece("monitor", [(128, 42, 144, 72)], 20, back=64, leave=PIKE_CURTAIN + PIKE_FLOOR),
+        piece("pc", [(160, 38, 176, 72)], 24, back=64, leave=PIKE_CURTAIN + PIKE_FLOOR),
+        piece("wall", [(0, 0, 176, 64)], 48, fill=16, side=PIKE_SIDE),
+        piece("side_w", [], 48, side=PIKE_SIDE, walls=[((0, 208), (0, 64))]),
+        piece("side_e", [], 48, side=PIKE_SIDE, walls=[((176, 64), (176, 208))]),
+    ])
+
+
+# ── Scott's house at the Battle Frontier ──────────────────────────────────
+#
+# 6 x 8 cells, the lounges' kit: the back wall rows 0-32; an armchair (5, 3), walkable; a
+# potted plant (x 80-96, rows 64-96); the mat at the front, black front corners.
+
+def scotts_house():
+    facet, own_shell, piece = _helpers()
+    return own_shell([
+        piece("chair", [(80, 48, 96, 64)], 6, leave=LOUNGE_FLOOR),
+        piece("plant", [(80, 64, 96, 96)], 28, leave=LOUNGE_FLOOR + LOUNGE_WALL, card=True),
+        piece("wall", [(0, 0, 96, 32)], 24, fill=16, side=LOUNGE_WALL_SIDE),
+        piece("side_w", [], 24, side=LOUNGE_WALL_SIDE, walls=[((0, 128), (0, 32))]),
+        piece("side_e", [], 24, side=LOUNGE_WALL_SIDE, walls=[((96, 32), (96, 128))]),
+    ])
+
+
+# ── The Battle Frontier's reception gate ──────────────────────────────────
+#
+# 9 x 14 cells, a hall the red carpet runs down (x 48-96). From the top of the drawing:
+#
+#     rows  0- 32  the back wall either side of the way out (x 48-96, the doorway drawn dark):
+#                  the doorway stands no wall, the player walks into it
+#     rows 40- 96  and 152-208: a reception desk either side of the carpet, a U opening to the
+#                  room's side, its top pale yellow and its fronts grey (x 0-32, x 112-144);
+#                  two lamp posts beside each (x 32-48, x 96-112), a cell of base under a cell
+#                  of lamp: cards
+#     rows 96-144  potted plants (x 16-48, rows 104-144; x 96-144, rows 88-128), armchairs
+#                  (walkable) down the walls
+#
+# Its floor is three tiles and the carpet: pixels not the first tile's are marks.
+
+GATE_FLOOR = ("bdcde6", "dee6ee")
+GATE_WALL = ("ffd573", "9494a4", "ffffff", "e69441", "cdbdc5", "e6ac5a", "ff6231", "de4a20",
+             "b46218", "bd2910")
+GATE_WALL_SIDE = (0, 0, 16, 32)
+
+
+def reception_gate():
+    facet, own_shell, piece = _helpers()
+    # each post its base cell and the cell above (a box reaching higher took the bottom of the
+    # pot north of the posts at 2,10 onto the post's card)
+    posts = [piece("post_%d_%d" % (cx, cy), [(cx * 16, cy * 16 - 16, cx * 16 + 16, cy * 16 + 16)],
+                   24, leave=GATE_FLOOR, card=True)
+             for (cx, cy) in ((2, 3), (2, 5), (6, 3), (6, 5), (2, 10), (2, 12), (6, 10), (6, 12))]
+    chairs = [piece("chair_%d_%d" % (cx, cy), [(cx * 16, cy * 16, cx * 16 + 16, cy * 16 + 16)], 6,
+                    leave=GATE_FLOOR)
+              for (cx, cy) in ((0, 6), (0, 7), (0, 8), (8, 8))]
+    return own_shell(posts + chairs + [
+        piece("desk_nw", [(0, 40, 32, 96)], 10, leave=GATE_FLOOR),
+        piece("desk_ne", [(112, 40, 144, 96)], 10, leave=GATE_FLOOR),
+        piece("desk_sw", [(0, 152, 32, 208)], 10, leave=GATE_FLOOR),
+        piece("desk_se", [(112, 152, 144, 208)], 10, leave=GATE_FLOOR),
+        piece("plant_w", [(16, 104, 48, 144)], 28, leave=GATE_FLOOR, card=True),
+        piece("plant_e", [(96, 88, 144, 128)], 28, leave=GATE_FLOOR, card=True),
+        piece("wall_w", [(0, 0, 48, 32)], 24, fill=16, side=GATE_WALL_SIDE),
+        piece("wall_e", [(96, 0, 144, 32)], 24, fill=16, side=GATE_WALL_SIDE),
+        piece("side_w", [], 24, side=GATE_WALL_SIDE, walls=[((0, 224), (0, 32))]),
+        piece("side_e", [], 24, side=GATE_WALL_SIDE, walls=[((144, 32), (144, 224))]),
+    ])
+
+
+# ── Ever Grande City's Hall of Fame ───────────────────────────────────────
+#
+# 15 x 17 cells, a dark hall in the black. From the top of the drawing:
+#
+#     rows  0- 32  the back wall, green screens on it, either side of an alcove (x 88-152)
+#                  whose back wall, a cell deeper in the drawing, holds the big screen (rows
+#                  26-40); a ledge along the wall's foot (rows 32-44) runs on down both sides of
+#                  the room as its pale border - the floor's
+#     rows 40- 58  a low step across the alcove's mouth (x 80-160)
+#     rows 56- 88  the recording machine (x 98-142): its screen and its two striped posts its
+#                  top, its keyboard and base its front
+
+HOF_WALL_SIDE = (32, 8, 48, 32)
+
+
+def hall_of_fame():
+    facet, own_shell, piece = _helpers()
+    return own_shell([
+        piece("machine", [(98, 56, 142, 88)], 14),
+        piece("step", [(80, 40, 160, 58)], 8),
+        piece("wall_alcove", [(88, 0, 152, 40)], 32, fill=16, side=HOF_WALL_SIDE),
+        piece("wall_w", [(8, 0, 88, 32)], 24, fill=16, side=HOF_WALL_SIDE),
+        piece("wall_e", [(152, 0, 232, 32)], 24, fill=16, side=HOF_WALL_SIDE),
+    ])
+
+
+# ── Lilycove Department Store's rooftop ───────────────────────────────────
+#
+# 18 x 12 cells, open to the sky, a railing round it (left drawn on the floor, as thin as it is).
+# Two drinks machines (x 144-176, rows 0-30) against the north railing, the stairwell's hut
+# (x 192-240, rows 16-64: its white roof, its front with the dark way down), two planters down
+# the west railing (x 16-48), two benches (x 80-112, x 144-176, rows 80-96) and two chairs
+# (x 256-272) - nothing walked on but the floor.
+
+ROOF_FLOOR = ("8b8b8b", "b4b4a4", "b4de8b", "d5ded5", "9cd57b")
+
+
+def rooftop():
+    facet, own_shell, piece = _helpers()
+    return own_shell([
+        piece("bench_w", [(80, 80, 112, 96)], 6, leave=ROOF_FLOOR),
+        piece("bench_e", [(144, 80, 176, 96)], 6, leave=ROOF_FLOOR),
+        piece("chair_n", [(256, 64, 272, 80)], 6, leave=ROOF_FLOOR),
+        piece("chair_s", [(256, 80, 272, 96)], 6, leave=ROOF_FLOOR),
+        piece("planter_n", [(16, 40, 48, 64)], 10, leave=ROOF_FLOOR),
+        piece("planter_s", [(16, 72, 48, 96)], 10, leave=ROOF_FLOOR),
+        piece("machines", [(144, 0, 176, 30)], 22),
+        piece("hut", [(192, 16, 240, 64)], 24),
+    ])
+
+
+# ── Three small houses on the generic building tiles ──────────────────────
+#
+# The Safari Zone's rest house (10 x 9 cells: the black outside over the wall rows 0-32, the
+# wall's face rows 32-64 with two pictures, the floor below) and the Sootopolis Mystery Events
+# house (the wall's face rows 0-32): a table with its cloth, chairs either side of it (walkable,
+# their backs drawn on their outer sides), cabinets and plants against the wall. Each table is
+# as low as a table, each chair 6 rows. (The diving treasure hunters' house on Route 124 repeats
+# the tiles of voxel_building_specs' house kit, whose table, chairs, plants and cabinets stand in
+# it already.)
+
+HOUSE_FLOOR = ("8b8b8b", "bdb431", "ded552", "9c9410")
+HOUSE_WALL = ("d5d5b4", "d5d5ac", "b4b4a4", "629c8b", "ffffff")
+
+
+def _chairs(piece, cells, floor):
+    return [piece("chair_%d_%d" % (cx, cy), [(cx * 16, cy * 16, cx * 16 + 16, cy * 16 + 16)], 6,
+                  leave=floor)
+            for (cx, cy) in cells]
+
+
+def safari_rest_house():
+    facet, own_shell, piece = _helpers()
+    side = (0, 32, 16, 64)
+    return own_shell(_chairs(piece, [(2, 5), (2, 6), (5, 5), (5, 6)], HOUSE_FLOOR) + [
+        piece("table", [(48, 80, 80, 106)], 10, leave=HOUSE_FLOOR),
+        piece("wall", [(0, 32, 160, 64)], 32, fill=16, side=side),
+        piece("side_w", [], 32, side=side, walls=[((0, 144), (0, 64))]),
+        piece("side_e", [], 32, side=side, walls=[((160, 64), (160, 144))]),
+    ])
+
+
+SOOT_FLOOR = ("8b8b8b", "b4b4a4", "73738b")
+
+
+def sootopolis_house():
+    facet, own_shell, piece = _helpers()
+    side = (80, 0, 96, 32)      # a stretch of plain wall (the corner's is a round window)
+    return own_shell(_chairs(piece, [(6, 4), (6, 5), (9, 4), (9, 5)], SOOT_FLOOR) + [
+        piece("table", [(112, 64, 144, 96)], 10, leave=SOOT_FLOOR),
+    ] + [piece("plant_%d" % cx, [(cx * 16, 16, cx * 16 + 16, 48)], 28,
+               leave=SOOT_FLOOR + HOUSE_WALL, card=True) for cx in (2, 3, 4)] + [
+        piece("stove", [(112, 14, 128, 40)], 20, back=32, leave=HOUSE_WALL + SOOT_FLOOR),
+        piece("cabinet", [(128, 14, 144, 40)], 20, back=32, leave=HOUSE_WALL + SOOT_FLOOR),
+        piece("sink", [(144, 14, 176, 40)], 20, back=32, leave=HOUSE_WALL + SOOT_FLOOR),
+        piece("wall", [(0, 0, 176, 32)], 24, fill=16, side=side),
+        piece("side_w", [], 24, side=side, walls=[((0, 128), (0, 32))]),
+        piece("side_e", [], 24, side=side, walls=[((176, 32), (176, 128))]),
+    ])
+
+
+# ── The Battle Pike's corridor and its room of three paths ────────────────
+#
+# The lobby's kit on a pink floor: the curtain to the floor (rows 0-64), its pink cushions over
+# the doorways the player is walked through (a cell of floor at row 3, in front of the curtain's
+# foot); blue pedestals with a gold ball and copper lanterns, each a cell of base under a cell of
+# top: cards. The red carpet and the mats are the floor's.
+
+PIKE_PINK = ("e6737b", "ff9ca4", "b45241")
+
+
+def _pike_room(w, h, posts):
+    facet, own_shell, piece = _helpers()
+    W, H = w * 16, h * 16
+    cards = [piece("post_%d_%d" % (cx, cy), [(cx * 16, cy * 16 - 16, cx * 16 + 16, cy * 16 + 16)],
+                   28, leave=PIKE_PINK, card=True)
+             for (cx, cy) in posts]
+    return own_shell(cards + [
+        piece("wall", [(0, 0, W, 64)], 48, fill=16, side=PIKE_SIDE),
+        piece("side_w", [], 48, side=PIKE_SIDE, walls=[((0, H), (0, 64))]),
+        piece("side_e", [], 48, side=PIKE_SIDE, walls=[((W, 64), (W, H))]),
+    ])
+
+
+def pike_corridor():
+    return _pike_room(14, 8, [(3, 4), (9, 4), (4, 6), (8, 6), (2, 7), (10, 7)])
+
+
+def pike_three_paths():
+    return _pike_room(13, 11, [(0, 4), (4, 4), (8, 4), (12, 4), (3, 10), (8, 10)])
+
+
+# ── Devon Corporation's lobby (Rustboro City, 1F) ─────────────────────────
+#
+# 19 x 9 cells. The lobby (rows 80-144) runs the width of the map; its back wall (rows 48-80:
+# an orange top band, a tan face with windows over a red baseboard) is broken by two alcoves
+# that go back to the map's top, the black outside between them:
+#
+#     x 48-144   the reception: its back wall (rows 2-32), two glass display jars against it
+#                (x 48-64, x 128-144), the counter across its mouth (rows 62-80: a white top,
+#                its front 8 rows on legs)
+#     x 208-256  the way up: a door in its back wall (rows 8-32), the warp at 14,1
+#
+# The alcoves' side walls are drawn as their tops, orange strips 4 pixels wide (x 44-48,
+# 144-148, 204-208, 256-260): they stand as tall as the walls.
+
+DEVON_FLOOR = ("cd837b", "deaca4", "bd6252")
+DEVON_WALL = ("acb494", "9c9c9c", "835a31", "e69c62", "6a7b41", "839473", "414a6a", "c55a41")
+DEVON_WALL_SIDE = (64, 4, 80, 32)
+
+
+def devon_lobby():
+    facet, own_shell, piece = _helpers()
+    # a strip is a side wall's top: at 30 rows it runs from the alcove's back wall to the lobby's
+    # (foot 78, behind the lobby wall's face; the cell below holds that foot)
+    strips = [piece("edge_%d" % x0, [(x0, 0, x0 + 4, 48)], 30, solid=True, side=DEVON_WALL_SIDE,
+                    foot=78, cells=[(x0 // 16, 4)])
+              for x0 in (44, 144, 204, 256)]
+    return own_shell([
+        piece("counter", [(48, 62, 128, 80)], 8, leave=DEVON_FLOOR),
+        piece("jar_w", [(48, 22, 64, 48)], 16, back=32, leave=DEVON_WALL + DEVON_FLOOR),
+        piece("jar_e", [(128, 22, 144, 48)], 16, back=32, leave=DEVON_WALL + DEVON_FLOOR),
+    ] + strips + [
+        piece("wall_reception", [(48, 0, 144, 32)], 30, fill=16, side=DEVON_WALL_SIDE),
+        piece("wall_door", [(208, 0, 256, 32)], 30, fill=16, side=DEVON_WALL_SIDE),
+        piece("wall_w", [(0, 48, 44, 80)], 28, fill=16, side=DEVON_WALL_SIDE),
+        piece("wall_mid", [(148, 48, 204, 80)], 28, fill=16, side=DEVON_WALL_SIDE),
+        piece("wall_e", [(260, 48, 304, 80)], 28, fill=16, side=DEVON_WALL_SIDE),
+        piece("side_w", [], 28, side=DEVON_WALL_SIDE, walls=[((0, 144), (0, 80))]),
+        piece("side_e", [], 28, side=DEVON_WALL_SIDE, walls=[((304, 80), (304, 144))]),
+    ])
+
+
+# ── The Battle Frontier's Ranking Hall ────────────────────────────────────
+#
+# 53 x 15 cells: a hall (x 304-544) with a room either side (x 48-224, x 624-800) joined by
+# corridors (rows 144-176), every wall a brown face over the black outside, at five depths.
+# The walls are read off the cells as the room tool reads them (battle_room_auto: a run of
+# blocked cells from the black to the floor is a wall's face, standing its drawn height); the
+# furniture is cut by hand: nine record kiosks (grey cabinets, a blue screen on their front),
+# the hall's display case (x 400-448, rows 128-170), and eleven green seats, walkable.
+
+RANK_FLOOR = ("bdc5cd", "d5d5de", "e6eeee", "f6ffff")
+RANK_KIOSKS = [(26, 4), (8, 6), (44, 6), (23, 7), (29, 7), (6, 8), (10, 8), (42, 8), (46, 8)]
+RANK_SEATS = [(3, 7), (3, 9), (5, 12), (6, 12), (10, 12), (11, 12), (21, 4), (31, 4), (42, 12),
+              (44, 12), (46, 12)]
+
+
+def ranking_hall():
+    facet, own_shell, piece = _helpers()
+    import battle_room_auto
+    walls = [pc for pc in battle_room_auto.analyse("LAYOUT_BATTLE_FRONTIER_RANKING_HALL")[1]
+             if pc["name"].startswith(("wall_", "side_"))]
+    kiosks = [piece("kiosk_%d_%d" % (cx, cy), [(cx * 16, cy * 16, cx * 16 + 16, cy * 16 + 32)], 20,
+                    leave=RANK_FLOOR)
+              for (cx, cy) in RANK_KIOSKS]
+    seats = [piece("seat_%d_%d" % (cx, cy), [(cx * 16, cy * 16, cx * 16 + 16, cy * 16 + 32)], 12,
+                   leave=RANK_FLOOR)
+             for (cx, cy) in RANK_SEATS]
+    return own_shell(seats + kiosks + [
+        piece("display", [(400, 128, 448, 170)], 12, leave=RANK_FLOOR),
+    ] + walls)
+
+
+def furnished_room_specs():
+    """The specs, made when voxel_building_specs asks for them (its SPECS end with them)."""
+    return [
+        {
+            "name": "mauville_game_corner",
+            "interior": {"layout": "LAYOUT_MAUVILLE_CITY_GAME_CORNER", "ground": [0x202],
+                         "shade": [0x203, 0x204, 0x205, 0x20C, 0x20D, 0x214, 0x215],
+                         "reuse_in": frozenset(),
+                         "pieces": mauville_game_corner()},
+        },
+        {
+            "name": "mossdeep_game_corner_1f",
+            "interior": {"layout": "LAYOUT_MOSSDEEP_CITY_GAME_CORNER_1F", "ground": [0x20A],
+                         "shade": [], "reuse_in": frozenset(),
+                         "pieces": mossdeep_game_corner_1f()},
+        },
+        {
+            "name": "frontier_lounge1",
+            "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_LOUNGE1", "ground": [0x3C8],
+                         "open": [(0, 112, 16, 128), (192, 112, 208, 128)],
+                         "reuse_in": frozenset(), "pieces": lounge1()},
+        },
+        {
+            "name": "frontier_lounge2",
+            "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_LOUNGE2", "ground": [0x3C8],
+                         "open": [(0, 144, 16, 160), (128, 144, 144, 160)],
+                         "reuse_in": frozenset(), "pieces": lounge2()},
+        },
+        {
+            "name": "frontier_exchange",
+            "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_EXCHANGE_SERVICE_CORNER",
+                         "ground": [0x3B8],
+                         "open": [(0, 144, 16, 176), (16, 160, 32, 176), (224, 144, 240, 176),
+                                  (208, 160, 224, 176)],
+                         "reuse_in": frozenset(), "pieces": exchange_service_corner()},
+        },
+        {
+            "name": "frontier_pike_lobby",
+            "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_LOBBY", "ground": [0x2C2],
+                         "reuse_in": frozenset(), "pieces": pike_lobby()},
+        },
+        {
+            "name": "frontier_scotts_house",
+            "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_SCOTTS_HOUSE", "ground": [0x3C8],
+                         "open": [(0, 112, 16, 128), (80, 112, 96, 128)],
+                         "reuse_in": frozenset(), "pieces": scotts_house()},
+        },
+        {
+            "name": "frontier_reception_gate",
+            "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_RECEPTION_GATE", "ground": [0x05E],
+                         "reuse_in": frozenset(), "pieces": reception_gate()},
+        },
+        {
+            "name": "hall_of_fame",
+            "interior": {"layout": "LAYOUT_EVER_GRANDE_CITY_HALL_OF_FAME", "ground": [0x2F6],
+                         "reuse_in": frozenset(), "pieces": hall_of_fame()},
+        },
+        {
+            "name": "store_rooftop",
+            "interior": {"layout": "LAYOUT_LILYCOVE_CITY_DEPARTMENT_STORE_ROOFTOP",
+                         "ground": [0x24A], "reuse_in": frozenset(), "pieces": rooftop()},
+        },
+        {
+            "name": "safari_rest_house",
+            "interior": {"layout": "LAYOUT_SAFARI_ZONE_REST_HOUSE", "ground": [0x223],
+                         "reuse_in": frozenset(), "pieces": safari_rest_house()},
+        },
+        {
+            "name": "sootopolis_events_house",
+            "interior": {"layout": "LAYOUT_SOOTOPOLIS_CITY_MYSTERY_EVENTS_HOUSE_1F",
+                         "ground": [0x235], "reuse_in": frozenset(),
+                         "pieces": sootopolis_house()},
+        },
+        {
+            "name": "frontier_pike_corridor",
+            "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_CORRIDOR",
+                         "ground": [0x2C1], "reuse_in": frozenset(), "pieces": pike_corridor()},
+        },
+        {
+            "name": "frontier_pike_three_paths",
+            "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_THREE_PATH_ROOM",
+                         "ground": [0x2C1], "reuse_in": frozenset(),
+                         "pieces": pike_three_paths()},
+        },
+        {
+            "name": "devon_lobby",
+            "interior": {"layout": "LAYOUT_RUSTBORO_CITY_DEVON_CORP_1F", "ground": [0x380],
+                         "reuse_in": frozenset(), "pieces": devon_lobby()},
+        },
+        {
+            "name": "frontier_ranking_hall",
+            "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_RANKING_HALL", "ground": [0x20A],
+                         "reuse_in": frozenset(), "pieces": ranking_hall()},
+        },
+    ]

@@ -1694,3 +1694,8 @@ SPECS = [
 # so that they stand the pieces of every room modelled before them (reuse_pieces).
 from battle_room_specs import battle_room_specs  # noqa: E402
 SPECS = SPECS + battle_room_specs()
+
+# The furnished rooms cut by hand (furnished_room_specs.py, MS-164), last: their pieces stand in
+# their own room only, and the pieces of every room before them stand in them as anywhere.
+from furnished_room_specs import furnished_room_specs  # noqa: E402
+SPECS = SPECS + furnished_room_specs()
