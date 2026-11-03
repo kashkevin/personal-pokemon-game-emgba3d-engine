@@ -556,9 +556,16 @@ static bool ValidMenuScreen(const struct MpBridge *b, const uint8_t *p, size_t l
                 return false;
             if (flags == 5)
                 return AllZero(p + 68, 168);
+            /* Mode 1 a Tower floor (its 18 reserved bytes zero); mode 2 (step 18) a Championship match against a
+             * computer trainer: byte 14 its round (1-3), byte 15 its flags (bit 0 only), the other 16 zero. The game's
+             * own check is TowerLegends_ValidCommand; the launcher sends mode 2 only to a game whose manifest has
+             * championship_abi_version 1, and this bridge is that game's. */
             return U32(command) == 0x31525754u /* "TWR1" */ && U32(command + 4) != 0 && command[4] != 0
-                && command[12] >= 1 && command[12] <= 100 && command[13] == 1
-                && AllZero(command + 14, 18) && AllZero(p + 100, 136);
+                && command[12] >= 1 && command[12] <= 100
+                && ((command[13] == 1 && AllZero(command + 14, 18))
+                    || (command[13] == 2 && command[14] >= 1 && command[14] <= 3 && (command[15] & ~1u) == 0
+                        && AllZero(command + 16, 16)))
+                && AllZero(p + 100, 136);
         }
     }
     /* Flags 1 close, 2 reopen a held trade, 3 release a refused Enter battle latch (menuRelease). */
