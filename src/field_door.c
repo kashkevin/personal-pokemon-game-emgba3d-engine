@@ -1055,11 +1055,20 @@ static void BuildDoorTiles(u16 *tiles, u16 tileNum, const u8 *paletteNums)
     }
 
     // The remaining layers are left as tile 0 (with the same palette)
+#ifdef PORTABLE
+    // tile 0 is blank, so its palette shows nothing: the bottom layer's. The original reads the next four numbers,
+    // which for a door's last metatile are past its palette list (KNOWN_ISSUES MS-183, found by AddressSanitizer).
+    for (; i < 8; i++)
+        tiles[i] = tiles[i - 4] & 0xF000;
+#else
+#line 1058 // gba-line
     for (; i < 8; i++)
     {
         tile = *(paletteNums++) << 12;
         tiles[i] = tile;
     }
+#endif
+#line 1063 // gba-line
 }
 
 static void DrawCurrentDoorAnimFrame(const struct DoorGraphics *gfx, u32 x, u32 y, const u8 *paletteNums)
