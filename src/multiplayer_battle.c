@@ -920,8 +920,9 @@ static u8 PrepareSingles(const struct MultiplayerBattleControl *c)
 
 #ifdef PORTABLE
 // KNOWN_ISSUES MS-180 (StartSingles): the battle text buffers and the item effect's battler zeroed, as a fresh game's;
-// what an earlier battle left in them goes to runtime.log first, so what would have been sent is known.
-static void StartWithFreshMessageState(void)
+// what an earlier battle left in them goes to runtime.log first, so what would have been sent is known. Not static:
+// --selftest-coop-controller checks it against the link's message check.
+void MultiplayerBattle_FreshMessageState(void)
 {
     u8 *const buffers[3] = {gBattleTextBuff1, gBattleTextBuff2, gBattleTextBuff3};
     u32 i, j;
@@ -989,7 +990,7 @@ static u8 StartSingles(void)
     // message of a battle between players (its intro) sent an earlier battle's buffers to the other cores, and those
     // broke the link's message check: the battle stopped at its intro for both players (the Championship's final, after
     // each player's computer matches). A battle between players starts with them as a fresh game has them.
-    StartWithFreshMessageState();
+    MultiplayerBattle_FreshMessageState();
 #endif
 #line 651 // gba-line
     if (MultiplayerBattle_IsCoop())

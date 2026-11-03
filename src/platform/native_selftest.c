@@ -2394,6 +2394,7 @@ int NativeSelfTest_CoopExp(void)
 #include "multiplayer_battle_schema.h"
 
 void MultiplayerBattle_NativeTestShape(u8 mode, u8 cores);
+void MultiplayerBattle_FreshMessageState(void);
 static int sCoopCtlChecks, sCoopCtlFailures;
 
 static void ExpectCoopCtl(const char *what, bool32 ok)
@@ -2415,6 +2416,31 @@ static bool32 CoopActionReply(u8 battler, u8 source, u8 action, u16 choice)
     MultiplayerBattle_NoteController(request, 0);
     reply[9] = action; reply[10] = choice; reply[11] = choice >> 8;
     return MultiplayerBattle_ValidateController(reply, sizeof(reply), source);
+}
+
+/* KNOWN_ISSUES MS-180: the master's intro (PRINTSTRING, string 0) as BtlController_EmitPrintString builds it in a
+ * battle between players - its message data zeroed, the battle text buffers and the item effect's battler copied in
+ * (an all-zero buffer sent as an empty string) - and whether the link's message check passes it. */
+static bool32 IntroMessageValid(void)
+{
+    u8 block[8 + 84] = {B_COMM_TO_CONTROLLER, 0, 0, 0, 84, 0, 0, 0, CONTROLLER_PRINTSTRING, 0, STRINGID_INTROMSG, 0};
+    struct BattleMsgData msg;
+    u32 i, j;
+
+    memset(&msg, 0, sizeof(msg));
+    msg.itemEffectBattler = gPotentialItemEffectBattler;
+    memcpy(msg.textBuffs[0], gBattleTextBuff1, TEXT_BUFF_ARRAY_COUNT);
+    memcpy(msg.textBuffs[1], gBattleTextBuff2, TEXT_BUFF_ARRAY_COUNT);
+    memcpy(msg.textBuffs[2], gBattleTextBuff3, TEXT_BUFF_ARRAY_COUNT);
+    for (i = 0; i < 3; i++)
+    {
+        for (j = 0; j < TEXT_BUFF_ARRAY_COUNT && !msg.textBuffs[i][j]; j++);
+        if (j == TEXT_BUFF_ARRAY_COUNT)
+            msg.textBuffs[i][0] = EOS;
+    }
+    memcpy(block + 12, &msg, sizeof(msg));
+    MultiplayerBattle_ResetControllerValidation();
+    return MultiplayerBattle_ValidateController(block, sizeof(block), 0);
 }
 
 /* The master's end-of-battle block: `outcome` for the master's own side and, in a free-for-all, the winner's battler. */
@@ -2651,6 +2677,28 @@ int NativeSelfTest_CoopController(void)
         notice[1] = 2;
         ExpectCoopCtl("the second player (battler 2, the second game) gives up the team's battle",
             MultiplayerBattle_ValidateController(notice, 16, 1));
+    }
+    MultiplayerBattle_NativeTestShape(0, 0);
+    // KNOWN_ISSUES MS-180: a battle between players starts with a fresh game's battle text buffers and item effect's
+    // battler. The Championship's final stopped at its intro: the host's buffer 2 still held what an earlier battle's
+    // switch had left there, a Pokemon's name for party slot 6 (the party screen left without a choice).
+    MultiplayerBattle_NativeTestShape(MP_BATTLE_PHASE_SINGLES, 2);
+    {
+        static const u8 slotSix[] = {B_BUFF_PLACEHOLDER_BEGIN, B_BUFF_MON_NICK, 0, PARTY_SIZE, B_BUFF_EOS};
+
+        MultiplayerBattle_FreshMessageState();
+        ExpectCoopCtl("MS-180: a fresh game's intro passes the link's message check",
+            IntroMessageValid() && !gBattleTextBuff1[0] && !gBattleTextBuff2[0] && !gBattleTextBuff3[0]);
+        memcpy(gBattleTextBuff2, slotSix, sizeof(slotSix));
+        ExpectCoopCtl("MS-180: an earlier battle's Pokemon name for party slot 6 is refused (the final's stop)",
+            !IntroMessageValid());
+        MultiplayerBattle_FreshMessageState();
+        ExpectCoopCtl("MS-180: the start of a battle between players clears it, and the intro passes",
+            IntroMessageValid() && !gBattleTextBuff2[0]);
+        gPotentialItemEffectBattler = 3;
+        ExpectCoopCtl("MS-180: an earlier double battle's item effect battler 3 is refused in a 1v1", !IntroMessageValid());
+        MultiplayerBattle_FreshMessageState();
+        ExpectCoopCtl("MS-180: ... and cleared at the start", IntroMessageValid() && !gPotentialItemEffectBattler);
     }
     MultiplayerBattle_NativeTestShape(0, 0);
     MultiplayerBattle_ResetControllerValidation();
