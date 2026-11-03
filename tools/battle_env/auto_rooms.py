@@ -149,7 +149,10 @@ def raised_floor(models, layout_id):
         if not (0 <= cx < layout.w and 0 <= cy < layout.h):
             continue
         cell = layout.blocks[cy * layout.w + cx]
-        if (cell >> 10) & 3 == 0 and not battle_room_auto.LEVEL.match(of(cell & 0x3FF)):
+        behaviour = of(cell & 0x3FF)
+        # walked on, and not water (a level surface over it is its own): an ice floor is a floor
+        if (cell >> 10) & 3 == 0 and (not battle_room_auto.LEVEL.match(behaviour)
+                                      or battle_room_auto.ICE_FLOOR.match(behaviour)):
             out.append((cx, cy, round(h, 2)))
     return out
 

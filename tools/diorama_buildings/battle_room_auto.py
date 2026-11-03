@@ -52,6 +52,10 @@ def _behaviour_names():
         text = open(os.path.join(vb.ROOT, "include/constants/metatile_behaviors.h")).read()
         body = text[text.index("MB_NORMAL"):]
         body = body[:body.index("}")]
+        # A name a comment mentions is no value of its own (KNOWN_ISSUES MS-66: MB_INTERIOR_DEEP_WATER's comment names
+        # MB_DEEP_WATER, and every behaviour from MB_WATERFALL on read as the one before it - ice as a Mart's sign, sand
+        # as ice).
+        body = re.sub(r"/\*.*?\*/", "", re.sub(r"//[^\n]*", "", body), flags=re.S)
         _BEHAVIOURS = [n.split("=")[0].strip() for n in re.findall(r"(MB_\w+[^,\n]*)", body)]
     return _BEHAVIOURS
 
@@ -61,6 +65,9 @@ def _behaviour_names():
 LEVEL = re.compile(r"MB_(POND_WATER|INTERIOR_DEEP_WATER|DEEP_WATER|OCEAN_WATER|SOOTOPOLIS_DEEP_WATER|"
                    r"WATERFALL|NO_SURFACING|SEAWEED\w*|\w+_CURRENT|SHALLOW_WATER|PUDDLE|"
                    r"CRACKED_FLOOR_HOLE|LAVARIDGE_GYM_B1F_WARP|HOT_SPRINGS|ICE|THIN_ICE|CRACKED_ICE)$")
+# Of those, ice is a floor the room is walked on (the Sootopolis Gym's), not a surface under it: its cells are the
+# room's ground, as water's are not.
+ICE_FLOOR = re.compile(r"MB_(ICE|THIN_ICE|CRACKED_ICE)$")
 
 
 def _behaviours(layout):
@@ -156,7 +163,7 @@ def analyse(layout_id, taken=(), drop=()):
               and not changes(meta(x, y)) for x in range(W)] for y in range(H)]
 
     counts = collections.Counter(meta(x, y) for y in range(H) for x in range(W)
-                                 if floor[y][x] and not level[y][x])
+                                 if floor[y][x] and (not level[y][x] or ICE_FLOOR.match(behaviour(meta(x, y)))))
     if not counts:
         return [], [], ["no floor"]
     total = sum(counts.values())
