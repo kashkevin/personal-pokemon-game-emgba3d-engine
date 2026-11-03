@@ -334,6 +334,17 @@ static const struct DioramaProp sLavaridge[] = {
 /* Mossdeep and the seas round it: tall rocks standing in the water, each two
  * cells wide (a relief joined across the two). */
 #define SEA_ROCK(id) { PROP(id, ROCK, RELIEF, 1, LOWER), .depth = 14, .flags = DIORAMA_PROP_JOINED }
+/* Mossdeep City's four large round trees (MS-172; no other map draws these cells): three cells wide, the crown
+ * two rows and the top of the third, the trunk under it. They lay flat among the city's solid trees; they stand
+ * as Birth Island's do (sDewford below): each crown cell a heap of leaves lifted on the trunk, the few leaves at
+ * the top row's sides lower, the top of the third row the crown's hem; the trunk standing a row north under the
+ * crown; its roots on the ground, the dark ring drawn round them (colour 4, from row 12) left out for the real
+ * shadow. Under it all the cells' own ground (grass, the shallows, rock). */
+#define MOSSDEEP_CROWN(id) { PROP(id, BUSH, MOUND, 1, LOWER), .height16 = 10, .lift16 = 12 }
+#define MOSSDEEP_CROWN_SIDE(id) { PROP(id, BUSH, MOUND, 1, LOWER), .height16 = 5, .lift16 = 12 }
+#define MOSSDEEP_CROWN_HEM(id) { PROP(id, BUSH, MOUND, 1, LOWER), .artBottom = 4, .height16 = 6, .lift16 = 12 }
+#define MOSSDEEP_TRUNK(id) { PROP(id, BUSH, SLAB, 1, LOWER), .artBottom = 12, .shadowIndex = 4, \
+                             .shadowFromRow = 12, .depth = 3, .height16 = 21, .offsetZ = -16 }
 static const struct DioramaProp sMossdeep[] = {
     SEA_ROCK(0x202),
     SEA_ROCK(0x203),
@@ -341,6 +352,15 @@ static const struct DioramaProp sMossdeep[] = {
     SEA_ROCK(0x33A),
     SEA_ROCK(0x33B),
     SEA_ROCK(0x33D),
+    /* the crown's top row: by the sea (2F2-2F4), by the rock (2FA-2FB, with 304), on grass (302-304) */
+    MOSSDEEP_CROWN_SIDE(0x2F2), MOSSDEEP_CROWN(0x2F3), MOSSDEEP_CROWN_SIDE(0x2F4),
+    MOSSDEEP_CROWN_SIDE(0x2FA), MOSSDEEP_CROWN(0x2FB),
+    MOSSDEEP_CROWN_SIDE(0x302), MOSSDEEP_CROWN(0x303), MOSSDEEP_CROWN_SIDE(0x304),
+    /* its middle row: by the sea (301, 30B, 305), elsewhere (30A-30C) */
+    MOSSDEEP_CROWN(0x301), MOSSDEEP_CROWN(0x305),
+    MOSSDEEP_CROWN(0x30A), MOSSDEEP_CROWN(0x30B), MOSSDEEP_CROWN(0x30C),
+    /* the third row: the hem either side of the trunk */
+    MOSSDEEP_CROWN_HEM(0x312), MOSSDEEP_TRUNK(0x313), MOSSDEEP_CROWN_HEM(0x314),
 };
 
 /* Fallarbor and the ashen routes (113, 114): round boulders under the ash,

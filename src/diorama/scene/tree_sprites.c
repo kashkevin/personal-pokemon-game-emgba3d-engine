@@ -137,12 +137,13 @@ int DioramaTreeSprites_MossdeepPart(uint16_t metatileId)
 {
     switch (metatileId)
     {
-    /* on grass, over rock (31C-31D), over a ledge (31E-31F), on the shallows (2F0-2F9); the lower tree's upper
-     * quarter over the next tree's lower one: on the shallows (324-325), on grass (355-356) */
-    case 0x31A: case 0x31C: case 0x31E: case 0x2F0: case 0x325: case 0x356: return 0;
-    case 0x31B: case 0x31D: case 0x31F: case 0x2F1: case 0x324: case 0x355: return 1;
-    case 0x322: case 0x2F8: return 2;
-    case 0x323: case 0x2F9: return 3;
+    /* on grass, over rock (31C-31D), over a ledge (31E-31F), on the shallows (2F0-2F9), on the beach (308-311,
+     * Mossdeep City's three by the sea: MS-172, they lay flat); the lower tree's upper quarter over the next
+     * tree's lower one: on the shallows (324-325), on grass or the beach (355-356) */
+    case 0x31A: case 0x31C: case 0x31E: case 0x2F0: case 0x308: case 0x325: case 0x356: return 0;
+    case 0x31B: case 0x31D: case 0x31F: case 0x2F1: case 0x309: case 0x324: case 0x355: return 1;
+    case 0x322: case 0x2F8: case 0x310: return 2;
+    case 0x323: case 0x2F9: case 0x311: return 3;
     default: return DIORAMA_TREE_PART_NONE;
     }
 }
@@ -157,6 +158,9 @@ uint16_t DioramaTreeSprites_MossdeepGround(uint16_t metatileId, uint16_t below)
     case 0x324: case 0x325: /* the shallows' art, also where its tree stands on grass in the town */
         return below == 0x322 || below == 0x323 || below == 0x355 || below == 0x356 ? 0x001 : 0x19E;
     case 0x2F0: case 0x2F1: case 0x2F8: case 0x2F9: return 0x19E; /* the shallows */
+    case 0x308: case 0x309: case 0x310: case 0x311: return 0x124; /* the beach */
+    /* an overlap on the beach (Mossdeep City's two by the sea): the tree below it is the beach's */
+    case 0x355: case 0x356: return below == 0x310 || below == 0x311 ? 0x124 : 0x001;
     default: return 0x001; /* grass */
     }
 }
