@@ -8,7 +8,7 @@ from catalog import load_tilesets, load_world
 from compile_rules import _load_cells, parse_behaviors
 from terrace_topology import (CAVE_RISE_Q16, LEDGE_JUMPS, MOUNTAIN_LEDGE_Q16, SLOPE_RISE_Q16, TERRACE_ROLES,
                               contradiction_ramps, course_ridges, cave_climbs, cave_levels, join_level_free_cells, join_water, lift_blocked_cells,
-                              hall_stairs, hand_banks, hand_slopes, indoor_levels,
+                              hall_stairs, hand_banks, hand_floors, hand_slopes, indoor_levels,
                               mountain_ledges, pass_levels, rock_tops, role_for_cell, seam_shifts, slope_tops,
                               solve_layout)
 
@@ -1004,25 +1004,39 @@ class TerraceTopologyTests(unittest.TestCase):
         _, layouts = load_world(ROOT)
         names = {value: name for name, value
                  in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
-        lid = "LAYOUT_SAFARI_ZONE_SOUTHWEST"
-        layout = next(row for row in layouts if row["id"] == lid)
-        width = layout["width"]
-        cells = _load_cells(ROOT, [layout], tilesets, names)[0][lid]
-        ((x0, y0, x1, y1), direction, low, high), = SEAM_RAMPS[lid]["slopes"]
-        self.assertEqual((y0, direction, high), (0, "s", 0))     # from the map's north edge to its own ground
-        self.assertLess(low, high)
-        for x in range(x0, x1 + 1):
-            self.assertTrue(all(cells[y * width + x]["collision"] == 0 for y in range(y0, y1 + 1)))
-            self.assertEqual(cells[(y1 + 1) * width + x]["behavior"], "MB_JUMP_SOUTH")
-        # the trees beside it: their two rows on one level, between the ramp's ends; the ramp's cells left alone
-        ((bx0, by0, bx1, by1), level), = SEAM_RAMPS[lid]["banks"]
-        self.assertEqual((by0, by1), (y0, y1))
-        self.assertTrue(low < level < high)
-        banks = hand_banks(cells, width, SEAM_RAMPS[lid]["banks"])
-        self.assertTrue(banks)
-        self.assertEqual({(entry["groundQ16"], entry["lift"]) for entry in banks.values()}, {(level, True)})
-        self.assertFalse(any(cells[offset]["collision"] == 0 for offset in banks))
-        self.assertFalse(any(x0 <= offset % width <= x1 for offset in banks))
+        self.assertEqual(set(SEAM_RAMPS), {"LAYOUT_SAFARI_ZONE_SOUTHWEST", "LAYOUT_SAFARI_ZONE_SOUTH"})
+        for lid, ramp in SEAM_RAMPS.items():
+            layout = next(row for row in layouts if row["id"] == lid)
+            width = layout["width"]
+            cells = _load_cells(ROOT, [layout], tilesets, names)[0][lid]
+            ((x0, sy0, x1, y1), direction, low, high), = ramp["slopes"]
+            floors = ramp.get("floors", ())
+            y0 = min([sy0] + [rect[1] for rect, _ in floors])
+            self.assertEqual((y0, direction, high), (0, "s", 0))     # from the map's north edge to its own ground
+            self.assertLess(low, high)
+            # a floor before the slope lies on its low level, flat, its walkable cells only
+            self.assertTrue(all(level == low and rect[3] < sy0 for rect, level in floors))
+            flat = hand_floors(cells, width, floors)
+            self.assertTrue(all(entry["profile"] == "none" and entry["groundQ16"] == low for entry in flat.values()))
+            self.assertEqual(len(flat), sum((r[2] - r[0] + 1) * (r[3] - r[1] + 1) for r, _ in floors))
+            for x in range(x0, x1 + 1):
+                self.assertTrue(all(cells[y * width + x]["collision"] == 0 for y in range(y0, y1 + 1)))
+            # the trees beside it: their two rows on one level, from the ramp's low end; the ramp's cells left alone
+            ((bx0, by0, bx1, by1), level), = ramp["banks"]
+            self.assertEqual((by0, by1), (y0, y1))
+            self.assertTrue(low <= level < high)
+            banks = hand_banks(cells, width, ramp["banks"])
+            self.assertTrue(banks)
+            self.assertEqual({(entry["groundQ16"], entry["lift"]) for entry in banks.values()}, {(level, True)})
+            self.assertFalse(any(cells[offset]["collision"] == 0 for offset in banks))
+            self.assertFalse(any(x0 <= offset % width <= x1 for offset in banks))
+            if lid == "LAYOUT_SAFARI_ZONE_SOUTHWEST":
+                # the pocket's south side: the ledges down into the south-west
+                for x in range(x0, x1 + 1):
+                    self.assertEqual(cells[(y1 + 1) * width + x]["behavior"], "MB_JUMP_SOUTH")
+            else:
+                # the south's path runs on south from the ramp
+                self.assertTrue(all(cells[(y1 + 1) * width + x]["collision"] == 0 for x in range(x0, x1 + 1)))
 
 if __name__ == "__main__":
     unittest.main()

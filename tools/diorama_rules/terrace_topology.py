@@ -2028,3 +2028,17 @@ def hand_banks(cells: tuple[dict, ...], width: int, banks) -> dict[int, dict]:
                     out[offset] = {"groundQ16": level, "topQ16": level, "profile": "none",
                                    "solid": False, "lift": True}
     return out
+
+
+def hand_floors(cells: tuple[dict, ...], width: int, floors) -> dict[int, dict]:
+    """The walkable cells of rectangles given by hand (compile_rules SEAM_RAMPS): for each (rectangle, level) -
+    the rectangle (x0, y0, x1, y1, both corners in) - its walkable cells lie flat on that level; its blocked
+    cells are left alone (hand_banks)."""
+    out: dict[int, dict] = {}
+    for (x0, y0, x1, y1), level in floors:
+        for y in range(y0, y1 + 1):
+            for x in range(x0, x1 + 1):
+                offset = y * width + x
+                if cells[offset].get("collision", 0) == 0:
+                    out[offset] = {"groundQ16": level, "topQ16": level, "profile": "none", "solid": False}
+    return out
