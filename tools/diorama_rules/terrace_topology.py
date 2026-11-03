@@ -1926,6 +1926,8 @@ def indoor_levels(cells: tuple[dict, ...], width: int, height: int, spec: dict,
     cell on the raised level stands its own height on it ("lift"). Returns the
     entries; cells another solver placed keep theirs."""
     solved = solved or {}
+    if "steps" in spec:
+        return _indoor_steps(cells, width, height, spec, solved)
     rise = spec["rise"]
     out: dict[int, dict] = {}
 
@@ -1956,3 +1958,41 @@ def indoor_levels(cells: tuple[dict, ...], width: int, height: int, spec: dict,
             out[offset] = {"groundQ16": rise, "topQ16": rise, "profile": "none", "solid": False,
                            **({"lift": True} if cells[offset].get("collision") else {})}
     return out
+
+
+def _indoor_steps(cells: tuple[dict, ...], width: int, height: int, spec: dict,
+                  solved: dict[int, dict]) -> dict[int, dict]:
+    """indoor_levels for a room of several levels (the Battle Pyramid's top, its tiers):
+    "steps", (Q16 level, rectangle) pairs in order, each cell on the level of the last
+    rectangle holding it (a blocked cell standing its own height on it); "slopes",
+    (rectangle, low, high): the walkable cells in it climb north from `low` at their
+    south row to `high` at their north edge, each row its share (its blocked cells keep
+    their step)."""
+    out: dict[int, dict] = {}
+
+    def offsets(rectangle):
+        x0, y0, x1, y1 = rectangle
+        for y in range(max(0, y0), min(height - 1, y1) + 1):
+            for x in range(max(0, x0), min(width - 1, x1) + 1):
+                if y * width + x not in solved:
+                    yield y * width + x
+
+    for level, rectangle in spec["steps"]:
+        for offset in offsets(rectangle):
+            if level:
+                out[offset] = {"groundQ16": level, "topQ16": level, "profile": "none", "solid": False,
+                               **({"lift": True} if cells[offset].get("collision") else {})}
+            else:
+                out.pop(offset, None)
+    for rectangle, low, high in spec.get("slopes", ()):
+        y0, y1 = rectangle[1], rectangle[3]
+        for offset in offsets(rectangle):
+            if cells[offset].get("collision"):
+                continue
+            step = y1 - offset // width
+            ground = low + round((high - low) * step / (y1 - y0 + 1))
+            top = low + round((high - low) * (step + 1) / (y1 - y0 + 1))
+            out[offset] = {"groundQ16": ground, "topQ16": top, "profile": "transition-horizontal",
+                           "solid": False, "rise": top - ground}
+    return out
+

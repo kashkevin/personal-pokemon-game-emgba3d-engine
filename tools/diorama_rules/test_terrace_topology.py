@@ -967,5 +967,24 @@ class TerraceTopologyTests(unittest.TestCase):
         # a cell another solver placed keeps its entry
         self.assertNotIn(5, indoor_levels(cells, 4, 5, spec, {5: {"groundQ16": 0}}))
 
+    def test_a_rooms_several_levels_given_by_hand(self):
+        # The Battle Pyramid's top: rows on levels in order, the walkable cells of a slope's rows
+        # climbing north from its low level to its high one, its blocked cells keeping their step.
+        floor = lambda: dict(cell(1), collision=0, elevation=4)
+        wall = lambda: dict(cell(1), collision=1, elevation=4)
+        rows = ["....", "#.##", "....", "#.##", "...."]
+        make = {".": floor, "#": wall}
+        cells = tuple(make[ch]() for row in rows for ch in row)
+        spec = {"steps": ((32, (0, 0, 3, 1)), (16, (0, 2, 3, 3))),
+                "slopes": (((0, 1, 3, 1), 16, 32), ((0, 3, 3, 3), 0, 16))}
+        out = indoor_levels(cells, 4, 5, spec)
+        self.assertEqual({out[offset]["groundQ16"] for offset in range(4)}, {32})
+        self.assertEqual((out[5]["groundQ16"], out[5]["topQ16"], out[5]["rise"]), (16, 32, 16))
+        self.assertEqual((out[4]["groundQ16"], out[4]["lift"]), (32, True))
+        self.assertEqual({out[offset]["groundQ16"] for offset in range(8, 12)}, {16})
+        self.assertEqual((out[13]["groundQ16"], out[13]["topQ16"]), (0, 16))
+        self.assertEqual((out[12]["groundQ16"], out[12]["lift"]), (16, True))
+        self.assertFalse(any(offset in out for offset in range(16, 20)))
+
 if __name__ == "__main__":
     unittest.main()

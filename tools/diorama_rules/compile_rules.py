@@ -1454,6 +1454,16 @@ INDOOR_LEVELS: dict[str, dict] = {
         "ramps": ((7, 8, 7, 12),), "rails": ((6, 8, 6, 12), (8, 8, 8, 12))},
     "LAYOUT_BATTLE_FRONTIER_BATTLE_ARENA_LOBBY": {
         "rise": 16, "raised": ((0, 0, 15, 5), (4, 6, 10, 7)), "ramps": ((7, 8, 7, 9),)},
+    # The Battle Pyramid's top: a stepped pyramid drawn from the front, a tier every two rows - its
+    # face (rows 10, 12, ..., 22) under the band of its top - each tier a level over the one below,
+    # the sky behind on the top level; the steps up its middle (17, 10-16) and the walkable cells at
+    # the ends of the faces climb a level each, the player from where the Pyramid's last floor puts
+    # them (17, 17) to the top where its master waits (17, 7).
+    "LAYOUT_BATTLE_FRONTIER_BATTLE_PYRAMID_TOP": {
+        "steps": ((96, (0, 0, 33, 10)), (80, (0, 11, 33, 12)), (64, (0, 13, 33, 14)),
+                  (48, (0, 15, 33, 16)), (32, (0, 17, 33, 18)), (16, (0, 19, 33, 20))),
+        "slopes": (((0, 10, 33, 10), 80, 96), ((0, 12, 33, 12), 64, 80), ((0, 14, 33, 14), 48, 64),
+                   ((0, 16, 33, 16), 32, 48))},
 }
 
 # The trees of a forest (_grounded_forests): the classifier's hulls round the game's trees.
