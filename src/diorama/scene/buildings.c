@@ -1183,6 +1183,85 @@ static void LevelUnderBridges(const struct DioramaSceneSnapshot *snapshot,
         }
 }
 
+/*
+ * A deck over walkable ground (Victory Road 1F's bridges over its lower floor, raised with the floors they join by
+ * the rules' cave_levels): the ground under it, its lower surface, at the level of the ground it crosses, with that
+ * ground's elevation. rules.c FinalizeSurfaces gives a bridge's lower surface the water's elevation and level, and the
+ * deck an elevation from the cells round it - the floor's, where the floor is all that touches it - so the player
+ * walking under the deck at the floor's elevation stood on the deck (found 2026-11-03). The walkable ground beside it
+ * (not water, not a bridge) DECK_OVER_GROUND or more under its deck, the lowest such, gives the lower surface its level
+ * and elevation; with only bridges beside it, a bridge cell so set beside it. The deck then never answers to that
+ * elevation: the walkway at its level beside it gives it its own, else none (an object of any other elevation on it
+ * stands on the deck, ObjectGroundHeight's fallback). A deck less than that over the ground (Shoal Cave's at low tide,
+ * half a level) keeps its own: a person under it would stand through it.
+ */
+#define DECK_OVER_GROUND 0.75f
+static void GroundUnderBridges(const struct DioramaSceneSnapshot *snapshot,
+                               struct DioramaResolvedCell *resolved, unsigned count,
+                               const uint8_t *inWater)
+{
+    static const int step[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+    static uint8_t grounded[DIORAMA_MAX_VISIBLE_CELLS];
+    unsigned i;
+    int pass;
+
+    memset(grounded, 0, count < DIORAMA_MAX_VISIBLE_CELLS ? count : DIORAMA_MAX_VISIBLE_CELLS);
+    for (pass = 0; pass < 3; pass++)
+        for (i = 0; i < count; i++)
+        {
+            struct DioramaResolvedCell *r = &resolved[i];
+            int gx = (int)i % DIORAMA_GRID_WIDTH, gy = (int)i / DIORAMA_GRID_WIDTH;
+            float under = 1.0e9f;
+            uint8_t underElevation = 0, deckElevation = 0;
+
+            if (grounded[i] || inWater[i] || r->shape != DIORAMA_SHAPE_BRIDGE || r->surfaceCount < 2
+             || !(snapshot->cells[i].flags & DIORAMA_CELL_SOURCE_VALID))
+                continue;
+            for (int d = 0; d < 4; d++)
+            {
+                int nx = gx + step[d][0], ny = gy + step[d][1], n;
+                const struct DioramaCellSnapshot *c;
+
+                if (nx < 0 || ny < 0 || nx >= DIORAMA_GRID_WIDTH || ny >= DIORAMA_GRID_HEIGHT)
+                    continue;
+                n = ny * DIORAMA_GRID_WIDTH + nx;
+                if ((unsigned)n >= count || !(snapshot->cells[n].flags & DIORAMA_CELL_SOURCE_VALID) || inWater[n])
+                    continue;
+                c = &snapshot->cells[n];
+                if (resolved[n].shape == DIORAMA_SHAPE_BRIDGE)
+                {
+                    if (grounded[n] && resolved[n].surfaces[1].topHeight < under)
+                    {
+                        under = resolved[n].surfaces[1].topHeight;
+                        underElevation = resolved[n].surfaces[1].gameplayElevation;
+                    }
+                    continue;
+                }
+                if (c->collision != 0 || c->elevation == 0 || c->elevation == 15)
+                    continue;
+                if (resolved[n].groundHeight <= r->groundHeight - DECK_OVER_GROUND)
+                {
+                    if (resolved[n].groundHeight < under)
+                    {
+                        under = resolved[n].groundHeight;
+                        underElevation = c->elevation;
+                    }
+                }
+                else if (resolved[n].groundHeight > r->groundHeight - 1.0f / 16.0f
+                      && resolved[n].groundHeight < r->groundHeight + 1.0f / 16.0f)
+                    deckElevation = c->elevation;
+            }
+            if (under > 1.0e8f)
+                continue;
+            r->surfaces[1].bottomHeight = under - (r->surfaces[1].topHeight - r->surfaces[1].bottomHeight);
+            r->surfaces[1].topHeight = under;
+            r->surfaces[1].gameplayElevation = underElevation;
+            if (r->surfaces[0].gameplayElevation == underElevation)
+                r->surfaces[0].gameplayElevation = deckElevation != underElevation ? deckElevation : 0;
+            grounded[i] = 1;
+        }
+}
+
 
 /*
  * Mt Chimney's crater: its lava lake, which the GBA draws flat at the summit's
@@ -1493,6 +1572,7 @@ void DioramaBuildings_FlattenResolvedCells(const struct DioramaSceneSnapshot *sn
     LevelWaterBodies(snapshot, resolved, count, inWater);
     SinkCavePools(snapshot, resolved, count, inWater);
     LevelUnderBridges(snapshot, resolved, count, inWater);
+    GroundUnderBridges(snapshot, resolved, count, inWater);
     RaiseDunes(snapshot, resolved, count);
     SinkLava(snapshot, resolved, count);
 }
