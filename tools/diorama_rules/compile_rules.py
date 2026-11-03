@@ -1459,6 +1459,12 @@ INDOOR_LEVELS: dict[str, dict] = {
     # the sky behind on the top level; the steps up its middle (17, 10-16) and the walkable cells at
     # the ends of the faces climb a level each, the player from where the Pyramid's last floor puts
     # them (17, 17) to the top where its master waits (17, 7).
+    # Lilycove's Contest Hall: its three stages (a grey platform round a fenced green floor, its front
+    # a striped band) a level over the hall's floor, the steps at each front (the middle one's 24-26,
+    # 16; the others' 12-14 and 36-38, 28) climbing to it.
+    "LAYOUT_LILYCOVE_CITY_CONTEST_HALL": {
+        "rise": 16, "raised": ((18, 7, 32, 16), (6, 19, 20, 28), (30, 19, 44, 28)),
+        "ramps": ((24, 16, 26, 16), (12, 28, 14, 28), (36, 28, 38, 28))},
     "LAYOUT_BATTLE_FRONTIER_BATTLE_PYRAMID_TOP": {
         "steps": ((96, (0, 0, 33, 10)), (80, (0, 11, 33, 12)), (64, (0, 13, 33, 14)),
                   (48, (0, 15, 33, 16)), (32, (0, 17, 33, 18)), (16, (0, 19, 33, 20))),
