@@ -1,7 +1,9 @@
 @ Battle Tower: Legends (PC game only; src/tower_legends.c). A solo floor: the host answered the Players menu's choice
 @ with the floor's command and the field is calm. The floor's intro, the battle against its trainer (no whiteout, no
 @ money; the party is healed and its held items restored afterwards), then the result. The host settles the result,
-@ confirms the progress and pays the prizes on its own (the wallet stream).
+@ confirms the progress and pays the prizes on its own (the wallet stream). A Championship match against a computer
+@ trainer (step 18, command mode 2) runs the same script: the round's intro and result, and no "go on?" (the host save
+@ runs instead, as after NO).
 EventScript_TowerLegendsSolo::
 	lockall
 	special TowerLegends_BufferIntro

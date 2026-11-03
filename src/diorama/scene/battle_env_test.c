@@ -257,6 +257,10 @@ static struct
     int towerFloor;     /* tower:<floor> - Battle Tower: Legends' solo floor (src/tower_legends.c) */
     bool towerWin;      /* PKMN_TEST_TOWER_WIN=1: the lead's HP refilled each turn and its most effective move chosen */
     bool towerLogged;   /* its opposing party logged at the first action menu */
+    int towerRound;     /* PKMN_TEST_CHAMPIONSHIP_ROUND=1..3: the floor as a Championship match (step 18) */
+    bool towerRoundExp; /* PKMN_TEST_CHAMPIONSHIP_EXP=1: ... whose command asks for experience */
+    char towerText[160];/* the last field message of the floor's script, logged when it changes */
+    int towerExitFrames;/* PKMN_TEST_EXIT after a Tower floor: the end waits this long for the script's result message */
     u32 towerMoney;     /* the money as it started (a Tower battle neither pays nor takes any) */
     /* PKMN_TEST_TRAIN_LOG=1: on the field, "train field: ..." whenever the lead's IVs, Hyper Training, Ability or the
      * Bag's caps and patches change (TrainLogField); what was last logged */
@@ -611,6 +615,8 @@ static void Init(void)
     s.freezeField = EnvInt("PKMN_TEST_FREEZE_FIELD", 0) != 0;
     s.leadOnly = EnvInt("PKMN_TEST_LEAD_ONLY", 0) != 0;
     s.towerWin = EnvInt("PKMN_TEST_TOWER_WIN", 0) != 0;
+    s.towerRound = EnvInt("PKMN_TEST_CHAMPIONSHIP_ROUND", 0);
+    s.towerRoundExp = EnvInt("PKMN_TEST_CHAMPIONSHIP_EXP", 0) != 0;
     s.firstMove = EnvInt("PKMN_TEST_FIRST_MOVE", 0);
     if (s.firstMove <= MOVE_NONE || s.firstMove >= MOVES_COUNT)
         s.firstMove = MOVE_FLAMETHROWER;
@@ -2621,11 +2627,59 @@ static void StartTowerFloor(int floor)
      * Pokemon falls has no answer the fight's A presses can give. */
     gSaveBlock2Ptr->optionsBattleStyle = OPTIONS_BATTLE_STYLE_SET;
     ApplyTestBadges();
+    if (s.towerRound != 0)
+    {
+        /* Step 18: the floor's solo trainer as a Championship match (command mode 2): the round's intro and result, no
+         * "go on?", no experience unless PKMN_TEST_CHAMPIONSHIP_EXP=1. */
+        if (!TowerLegends_TestStartChampionship(floor, s.towerRound, s.towerRoundExp))
+            TestLog("Battle env test: tower floor %d round %d cannot start", floor, s.towerRound);
+        else
+            TestLog("Battle env test: tower championship round %d exp %d floor %d (money %u)", s.towerRound,
+                    s.towerRoundExp, floor, s.towerMoney);
+        return;
+    }
     if (!TowerLegends_TestStartSolo(floor))
         TestLog("Battle env test: tower floor %d does not exist", floor);
     else
         TestLog("Battle env test: tower floor %d: the intro, then the battle (money %u, cap %u)", floor, s.towerMoney,
                 TowerLegends_ExpCap());
+}
+
+/* The field message the floor's script shows (its intro, its result, "go on?"), as ASCII, logged once each time it
+ * changes ("tower text: ..."): what the player reads is checked from the log. */
+static void TowerLogText(void)
+{
+    char out[sizeof(s.towerText)];
+    u32 n = 0;
+    const u8 *text = gStringVar4;
+
+    for (; *text != EOS && n < sizeof(out) - 1; text++)
+    {
+        u8 c = *text;
+
+        if (c >= CHAR_A && c <= CHAR_Z)
+            out[n++] = 'A' + (c - CHAR_A);
+        else if (c >= CHAR_a && c <= CHAR_z)
+            out[n++] = 'a' + (c - CHAR_a);
+        else if (c >= CHAR_0 && c <= CHAR_9)
+            out[n++] = '0' + (c - CHAR_0);
+        else if (c == CHAR_NEWLINE)
+            out[n++] = '|';
+        else if (c == CHAR_EXCL_MARK)
+            out[n++] = '!';
+        else if (c == CHAR_PERIOD)
+            out[n++] = '.';
+        else if (c == CHAR_QUESTION_MARK)
+            out[n++] = '?';
+        else
+            out[n++] = ' ';
+    }
+    out[n] = 0;
+    if (n != 0 && strcmp(out, s.towerText) != 0)
+    {
+        memcpy(s.towerText, out, sizeof(out));
+        TestLog("Battle env test: tower text: %s", out);
+    }
 }
 
 /* PKMN_TEST_SET_FLAGS=<flag>,<flag>...: those event flags set in memory (decimal or 0x hex; move_switch_check.py: a
@@ -2707,11 +2761,13 @@ static void ApplyTestBadges(void)
 
 static void TowerLogMon(const char *side, u32 slot, struct Pokemon *mon)
 {
-    TestLog("Battle env test: tower %s %u species %u level %u item %u ability %u moves %u %u %u %u hp %u/%u exp %u",
+    TestLog("Battle env test: tower %s %u species %u level %u item %u ability %u moves %u %u %u %u hp %u/%u exp %u evs %u",
             side, slot, GetMonData(mon, MON_DATA_SPECIES), GetMonData(mon, MON_DATA_LEVEL),
             GetMonData(mon, MON_DATA_HELD_ITEM), GetMonAbility(mon), GetMonData(mon, MON_DATA_MOVE1),
             GetMonData(mon, MON_DATA_MOVE2), GetMonData(mon, MON_DATA_MOVE3), GetMonData(mon, MON_DATA_MOVE4),
-            GetMonData(mon, MON_DATA_HP), GetMonData(mon, MON_DATA_MAX_HP), GetMonData(mon, MON_DATA_EXP));
+            GetMonData(mon, MON_DATA_HP), GetMonData(mon, MON_DATA_MAX_HP), GetMonData(mon, MON_DATA_EXP),
+            GetMonData(mon, MON_DATA_HP_EV) + GetMonData(mon, MON_DATA_ATK_EV) + GetMonData(mon, MON_DATA_DEF_EV)
+            + GetMonData(mon, MON_DATA_SPEED_EV) + GetMonData(mon, MON_DATA_SPATK_EV) + GetMonData(mon, MON_DATA_SPDEF_EV));
 }
 
 static void TowerLogParty(void)
@@ -3749,6 +3805,8 @@ void DioramaBattleEnvTest_FieldTick(void)
 {
     if (!s.init)
         Init();
+    if (s.towerFloor > 0)
+        TowerLogText();
     if (s.strong && !s.strengthened)
     {
         s.strengthened = true;
@@ -3811,12 +3869,23 @@ void DioramaBattleEnvTest_FieldTick(void)
             s.fieldAfterPending = true;     /* PKMN_TEST_FIELD_AFTER: the field keys (below), instead of the end */
             return;
         }
+        if (s.exitAfter && s.towerFloor > 0)
+        {
+            s.towerExitFrames = 180;    /* the floor's script shows its result first (logged as "tower text") */
+            return;
+        }
         if (s.exitAfter)
         {
             fflush(stdout);
             fflush(stderr);
             _exit(gBattleOutcome == B_OUTCOME_WON ? 0 : 4);
         }
+    }
+    if (s.towerExitFrames > 0 && --s.towerExitFrames == 0)
+    {
+        fflush(stdout);
+        fflush(stderr);
+        _exit(gBattleOutcome == B_OUTCOME_WON ? 0 : 4);
     }
     if (s.resetSeen && ++s.resetFieldFrames == 90)
     {

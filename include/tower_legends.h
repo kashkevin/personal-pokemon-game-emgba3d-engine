@@ -43,6 +43,18 @@
 #define MP_TOWER_NEXT_PAGE_ABI      1
 #define TOWER_COMMAND_MAGIC         0x31525754u // "TWR1"
 #define TOWER_COMMAND_MODE_SOLO     1
+// A Championship match against a computer trainer (step 18; the app's docs/championships-eight.md): the floor's solo
+// trainer is one of the Championship's eight places, fought exactly as a solo floor (healed, held items back, no money,
+// no whiteout; the result kept in the save's Tower record and posted as world action 7 until the host settles it) but
+// with its own intro and result, no "go on?" and no experience unless the host asks for it. reserved[0] is the round
+// (TOWER_ROUND_*), reserved[1] the flags (bit 0: award experience), the other 16 bytes zero. A mode 1 command keeps all
+// 18 zero. Manifest championship_abi_version 1 (beside the Tower).
+#define TOWER_COMMAND_MODE_CHAMPIONSHIP 2
+#define TOWER_ROUND_QUARTERFINAL    1
+#define TOWER_ROUND_SEMIFINAL       2
+#define TOWER_ROUND_FINAL           3
+#define TOWER_CHAMPIONSHIP_FLAG_EXP 1
+#define MP_CHAMPIONSHIP_ABI         1
 // The native UI's Tower screen (byte 238; byte 239 its argument: the map's first floor shown, the previewed floor, the
 // Duo's floor).
 #define TOWER_STYLE_NONE     0
@@ -99,16 +111,20 @@ extern const struct TowerLegendsFloor gTowerLegendsFloors[TOWER_FLOOR_COUNT];
 extern const struct Trainer gTowerLegendsTrainers[DIFFICULTY_COUNT][TOWER_LEGENDS_TRAINER_COUNT];
 extern const u32 gMultiplayerTowerAbiVersion;
 extern const u32 gMultiplayerTowerNextPageAbiVersion;
+extern const u32 gMultiplayerChampionshipAbiVersion;
 
 // GetTrainerStructFromId's hook: the floor's trainer for TRAINER_TOWER_A/B while a Tower battle is set up, else NULL.
 const struct Trainer *TowerLegends_GetTrainer(u16 trainerId);
 bool32 TowerLegends_IsBattleActive(void);
 u32 TowerLegends_ActiveMode(void);
 u32 TowerLegends_ActiveFloor(void);
+u32 TowerLegends_ActiveRound(void);   // the Championship round of the solo battle set up or running (0: a Tower floor)
 
 // Experience: the cap (MAX_LEVEL: Tower battles are uncapped since 2026-10-23), and an award clamped to it.
 u32 TowerLegends_ExpCap(void);
 u32 TowerLegends_ClampExp(struct Pokemon *mon, u32 reward, u32 cap);
+// FALSE only while a Championship match runs whose command did not ask for experience (BattleTypeAllowsExp's hook).
+bool32 TowerLegends_AwardsExp(void);
 
 // The save's record (SaveBlock3).
 bool32 TowerLegends_RecordValid(void);
@@ -158,6 +174,7 @@ u32 TowerLegends_NextFloor(void);       // the floor the question names (0: none
 
 // The native self-tests and the test build's driver: a solo floor battle without a host (ticket 0 is never sent).
 bool32 TowerLegends_TestStartSolo(u32 floor);
+bool32 TowerLegends_TestStartChampionship(u32 floor, u32 round, bool32 awardExp);
 void TowerLegends_TestReset(void);
 void TowerLegends_TestSaveHeldItems(void);
 void TowerLegends_TestRestoreHeldItems(void);

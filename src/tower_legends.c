@@ -14,7 +14,9 @@
 //   * a Duo floor is the native co-op battle with a Tower code (the ladder layout, family 1): every core builds the
 //     floor's two trainers from its own table;
 //   * experience in a Tower battle is the ordinary award, uncapped (the owner's request of 2026-10-23; it stopped at a
-//     cap set by this game's badges before): solo here, Duo in multiplayer_coop.c.
+//     cap set by this game's badges before): solo here, Duo in multiplayer_coop.c;
+//   * a Championship match against a computer trainer (step 18, command mode 2) is a solo floor with its round's own
+//     intro and result, no "go on?" and no experience unless the host's command asks for it.
 #include <stddef.h>
 #include <stdio.h>
 #include "tower_legends.h"
@@ -64,6 +66,7 @@ extern const u8 EventScript_TowerLegendsSolo[];
 
 const u32 gMultiplayerTowerAbiVersion = MP_TOWER_ABI;
 const u32 gMultiplayerTowerNextPageAbiVersion = MP_TOWER_NEXT_PAGE_ABI;
+const u32 gMultiplayerChampionshipAbiVersion = MP_CHAMPIONSHIP_ABI;
 
 const struct Trainer gTowerLegendsTrainers[DIFFICULTY_COUNT][TOWER_LEGENDS_TRAINER_COUNT] =
 {
@@ -110,6 +113,9 @@ static EWRAM_DATA struct
     u16 nextHoldFrames;  // how long page 4 has waited on a calm field for the last result to settle (NEXT_HOLD_FRAMES)
     u8 nextMapGroup;     // where YES was answered: page 4 opens only there
     u8 nextMapNum;
+    u8 round;            // the Championship round of the solo battle starting or running (TOWER_ROUND_*; 0: a floor)
+    u8 awardExp;         // ... and whether its command asked for experience (a Tower floor always gives it)
+    u8 lastRound;        // the round of the last solo battle, for its result on the field
     u32 ticket;
     u32 refusedTicket;
     struct TowerLegendsCommand command;
@@ -180,6 +186,14 @@ const struct Trainer *TowerLegends_FloorTrainer(u32 floor, u32 which)
 bool32 TowerLegends_IsBattleActive(void) { return sTower.mode != TOWER_MODE_NONE; }
 u32 TowerLegends_ActiveMode(void) { return sTower.mode; }
 u32 TowerLegends_ActiveFloor(void) { return sTower.mode != TOWER_MODE_NONE ? sTower.floor : 0; }
+u32 TowerLegends_ActiveRound(void) { return sTower.mode == TOWER_MODE_SOLO ? sTower.round : 0; }
+
+// A Championship match gives no experience unless its command asked for it (the host's choice; a link battle between two
+// players gives none either). Every Tower floor, solo or Duo, gives the ordinary award.
+bool32 TowerLegends_AwardsExp(void)
+{
+    return sTower.mode != TOWER_MODE_SOLO || sTower.round == 0 || sTower.awardExp;
+}
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Experience
@@ -401,9 +415,16 @@ u32 TowerLegends_ApplyMonWord(u32 payload)
 
 bool32 TowerLegends_ValidCommand(const struct TowerLegendsCommand *command)
 {
-    return command->magic == TOWER_COMMAND_MAGIC && command->ticket != 0 && (command->ticket & 0xFF) != 0
-        && command->floor >= 1 && command->floor <= TOWER_FLOOR_COUNT && command->mode == TOWER_COMMAND_MODE_SOLO
-        && Zero(command->reserved, sizeof(command->reserved));
+    if (command->magic != TOWER_COMMAND_MAGIC || command->ticket == 0 || (command->ticket & 0xFF) == 0
+     || command->floor < 1 || command->floor > TOWER_FLOOR_COUNT)
+        return FALSE;
+    if (command->mode == TOWER_COMMAND_MODE_SOLO)
+        return Zero(command->reserved, sizeof(command->reserved));
+    // A Championship match: its round, its flags (bit 0 only), the other 16 bytes zero.
+    return command->mode == TOWER_COMMAND_MODE_CHAMPIONSHIP
+        && command->reserved[0] >= TOWER_ROUND_QUARTERFINAL && command->reserved[0] <= TOWER_ROUND_FINAL
+        && (command->reserved[1] & ~TOWER_CHAMPIONSHIP_FLAG_EXP) == 0
+        && Zero(command->reserved + 2, sizeof(command->reserved) - 2);
 }
 
 bool32 TowerLegends_ValidStyle(u32 style, u32 arg)
@@ -452,6 +473,8 @@ static bool32 FieldCalm(void)
 
 void TowerLegends_Tick(void)
 {
+    bool32 championship;
+
     // A Duo battle's trainers answer only while its native battle runs (an abandoned one leaves nothing behind).
     if (sTower.mode == TOWER_MODE_DUO && !MultiplayerBattle_IsActive())
         sTower.mode = TOWER_MODE_NONE;
@@ -495,29 +518,40 @@ void TowerLegends_Tick(void)
     }
     if (!sTower.queued)
         return;
+    championship = sTower.command.mode == TOWER_COMMAND_MODE_CHAMPIONSHIP;
     if (!FieldCalm())
     {
         // A field that stays busy (a long script, a menu, the host holding the save) never starts the floor late.
         if (++sTower.queuedFrames >= QUEUE_FRAMES)
         {
             sTower.queued = FALSE;
-            Refuse(sTower.command.ticket, sTower.command.floor, "BATTLE TOWER: the floor did not|start. Choose it again.");
+            Refuse(sTower.command.ticket, sTower.command.floor, championship
+                   ? "CHAMPIONSHIP: the match did not|start. Ask for it again."
+                   : "BATTLE TOWER: the floor did not|start. Choose it again.");
         }
         return;
     }
     sTower.queued = FALSE;
     if (gSaveBlock3Ptr == NULL || sTower.command.tableHash != TOWER_LEGENDS_TABLE_HASH)
-        Refuse(sTower.command.ticket, sTower.command.floor, "BATTLE TOWER: this game's floors|differ from the host's.");
+        Refuse(sTower.command.ticket, sTower.command.floor, championship
+               ? "CHAMPIONSHIP: this game's trainers|differ from the host's."
+               : "BATTLE TOWER: this game's floors|differ from the host's.");
     else if (TowerLegends_HasPendingResult())
-        Refuse(sTower.command.ticket, sTower.command.floor, "BATTLE TOWER: your last result|is still being sent.");
+        Refuse(sTower.command.ticket, sTower.command.floor, championship
+               ? "CHAMPIONSHIP: your last result|is still being sent."
+               : "BATTLE TOWER: your last result|is still being sent.");
     else if (!HasAbleMon())
-        Refuse(sTower.command.ticket, sTower.command.floor, "BATTLE TOWER: no POKeMON|can battle.");
+        Refuse(sTower.command.ticket, sTower.command.floor, championship
+               ? "CHAMPIONSHIP: no POKeMON|can battle."
+               : "BATTLE TOWER: no POKeMON|can battle.");
     else
     {
         // The floor begins here (its intro, then its battle): "started" goes to the host at once, so the host's window
         // for an issued battle never waits on how long the player reads the intro.
         sTower.ticket = sTower.command.ticket;
         sTower.floor = sTower.command.floor;
+        sTower.round = championship ? sTower.command.reserved[0] : 0;
+        sTower.awardExp = !championship || (sTower.command.reserved[1] & TOWER_CHAMPIONSHIP_FLAG_EXP) != 0;
         sTower.startedPending = sTower.ticket != 0;
         ScriptContext_SetupScript(EventScript_TowerLegendsSolo);
     }
@@ -596,6 +630,7 @@ static void CB2_EndTowerLegendsBattle(void)
     HealPlayerParty();
     sTower.lastOutcome = outcome;
     sTower.lastFloor = sTower.floor;
+    sTower.lastRound = sTower.round;
     sTower.lastHighest = TowerLegends_Highest();
     sTower.lastProgress = TowerLegends_Progress();
     if (sTower.ticket != 0 && (record = RecordForWrite()) != NULL)
@@ -607,15 +642,43 @@ static void CB2_EndTowerLegendsBattle(void)
         sTower.repostTimer = 0; // sent at once
     }
     sTower.mode = TOWER_MODE_NONE;
+    sTower.round = 0;
+    sTower.awardExp = FALSE;
     gIsDebugBattle = FALSE;
     SetMainCallback2(CB2_ReturnToFieldContinueScriptPlayMapMusic);
 }
 
-// Special (EventScript_TowerLegendsSolo): the floor's intro in gStringVar4.
+static const u8 sText_RoundQuarterfinal[] = _("QUARTERFINAL");
+static const u8 sText_RoundSemifinal[] = _("SEMIFINAL");
+static const u8 sText_RoundFinal[] = _("FINAL");
+static const u8 sText_RoundIntro1[] = _("! ");
+static const u8 sText_RoundIntro2[] = _(" wants to battle!");
+static const u8 sText_NewLine[] = _("\n");
+
+static const u8 *RoundName(u32 round)
+{
+    return round == TOWER_ROUND_FINAL ? sText_RoundFinal
+         : round == TOWER_ROUND_SEMIFINAL ? sText_RoundSemifinal : sText_RoundQuarterfinal;
+}
+
+// Special (EventScript_TowerLegendsSolo): the floor's intro in gStringVar4; a Championship match's names its round and
+// the trainer ("QUARTERFINAL! TUBER\nLARRY wants to battle!", as the floors' own intros are laid out).
 void TowerLegends_BufferIntro(void)
 {
     const struct TowerLegendsFloor *floor = Floor(sTower.floor);
 
+    if (sTower.round != 0 && floor != NULL)
+    {
+        const struct Trainer *trainer = &gTowerLegendsTrainers[DIFFICULTY_NORMAL][floor->solo];
+        u8 *end = StringCopy(gStringVar4, RoundName(sTower.round));
+
+        end = StringCopy(end, sText_RoundIntro1);
+        end = StringCopy(end, gTrainerClasses[trainer->trainerClass].name);
+        end = StringCopy(end, sText_NewLine);
+        end = StringCopy(end, trainer->trainerName);
+        StringCopy(end, sText_RoundIntro2);
+        return;
+    }
     StringExpandPlaceholders(gStringVar4, floor != NULL && floor->introText != NULL ? floor->introText : gText_EmptyString2);
 }
 
@@ -653,12 +716,37 @@ static const u8 sText_FloorLost2[] = _(".\nYour climb goes on at floor ");
 static const u8 sText_ReplayLost[] = _(".\nA replay: your climb is unchanged.");
 static const u8 sText_Period[] = _(".");
 
-// Special: the last solo battle's result in gStringVar4 (the host's word confirms the progress and pays the prizes).
+static const u8 sText_RoundWon[] = _("You won the ");
+static const u8 sText_RoundLost[] = _("You lost the ");
+static const u8 sText_RoundDrew1[] = _("The ");
+static const u8 sText_RoundDrew2[] = _(" was a draw.");
+static const u8 sText_Exclamation[] = _("!");
+static const u8 sText_RoundTail[] = _("\nThe host records it in PLAYER.");
+
+// Special: the last solo battle's result in gStringVar4 (the host's word confirms the progress and pays the prizes; a
+// Championship match's result moves the bracket on the host).
 void TowerLegends_BufferResult(void)
 {
     u8 *end = gStringVar4;
     bool32 progress = sTower.lastFloor == sTower.lastProgress;
 
+    if (sTower.lastRound != 0)
+    {
+        if (sTower.lastOutcome == TOWER_RESULT_WON || sTower.lastOutcome == TOWER_RESULT_LOST)
+        {
+            end = StringCopy(end, sTower.lastOutcome == TOWER_RESULT_WON ? sText_RoundWon : sText_RoundLost);
+            end = StringCopy(end, RoundName(sTower.lastRound));
+            end = StringCopy(end, sTower.lastOutcome == TOWER_RESULT_WON ? sText_Exclamation : sText_Period);
+        }
+        else
+        {
+            end = StringCopy(end, sText_RoundDrew1);
+            end = StringCopy(end, RoundName(sTower.lastRound));
+            end = StringCopy(end, sText_RoundDrew2);
+        }
+        StringCopy(end, sText_RoundTail);
+        return;
+    }
     if (sTower.lastOutcome == TOWER_RESULT_WON)
     {
         end = StringCopy(end, sText_FloorWon1);
@@ -710,12 +798,18 @@ u32 TowerLegends_NextFloor(void)
     return next >= 1 && next <= TOWER_FLOOR_COUNT ? next : 0;
 }
 
-// Special (after the result): VAR_RESULT TRUE and the question in gStringVar4 when the game asks to go on.
+// Special (after the result): VAR_RESULT TRUE and the question in gStringVar4 when the game asks to go on. After a
+// Championship match nothing is asked: the host save runs, as after NO (it keeps the result and the healed party).
 void TowerLegends_BufferContinue(void)
 {
-    u32 next = TowerLegends_NextFloor();
+    u32 next = sTower.lastRound != 0 ? 0 : TowerLegends_NextFloor();
     u8 *end = gStringVar4;
 
+    if (sTower.lastRound != 0)
+    {
+        sTower.lastRound = 0;
+        sTower.saveQueued = TRUE;
+    }
     gSpecialVar_Result = next != 0;
     if (next == 0)
         return;
@@ -863,7 +957,19 @@ bool32 TowerLegends_TestStartSolo(u32 floor)
     }
     sTower.ticket = 0x01000000u | (floor << 8) | 0x7E; // never sent: no world in a test
     sTower.floor = floor;
+    sTower.round = 0;
+    sTower.awardExp = TRUE;
     ScriptContext_SetupScript(EventScript_TowerLegendsSolo);
+    return TRUE;
+}
+
+// A Championship match without a host (ticket never sent): the round's intro and result, no experience unless asked.
+bool32 TowerLegends_TestStartChampionship(u32 floor, u32 round, bool32 awardExp)
+{
+    if (round < TOWER_ROUND_QUARTERFINAL || round > TOWER_ROUND_FINAL || !TowerLegends_TestStartSolo(floor))
+        return FALSE;
+    sTower.round = round;
+    sTower.awardExp = awardExp != FALSE;
     return TRUE;
 }
 

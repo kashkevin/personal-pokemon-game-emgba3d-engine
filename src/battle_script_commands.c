@@ -2117,6 +2117,12 @@ FEATURE_FLAG_ASSERT(I_EXP_SHARE_FLAG, YouNeedToSetTheExpShareFlagToAnUnusedFlag)
 
 static bool32 BattleTypeAllowsExp(void)
 {
+#ifdef PORTABLE
+    // Step 18: a Championship match against a computer trainer gives no experience unless the host asked for it.
+    if (!TowerLegends_AwardsExp())
+        return FALSE;
+#endif
+#line 2110 // gba-line
     if (RECORDED_WILD_BATTLE)
         return TRUE;
     else if (gBattleTypeFlags &

@@ -525,6 +525,25 @@ int NativeSelfTest_Tower(void)
     ExpectTower("floor 101 is refused", !TowerLegends_ValidCommand(&command));
     command.floor = 12; command.reserved[17] = 1;
     ExpectTower("a reserved byte is refused", !TowerLegends_ValidCommand(&command));
+    // Step 18: a Championship match (mode 2) carries its round in byte 0 and its flags in byte 1; a solo floor neither.
+    memset(command.reserved, 0, sizeof(command.reserved));
+    command.reserved[0] = TOWER_ROUND_QUARTERFINAL;
+    ExpectTower("a solo command with a round is refused", !TowerLegends_ValidCommand(&command));
+    command.mode = TOWER_COMMAND_MODE_CHAMPIONSHIP;
+    ExpectTower("a Championship quarterfinal is valid", TowerLegends_ValidCommand(&command));
+    command.reserved[0] = TOWER_ROUND_FINAL; command.reserved[1] = TOWER_CHAMPIONSHIP_FLAG_EXP;
+    ExpectTower("a final that gives experience is valid", TowerLegends_ValidCommand(&command));
+    command.reserved[0] = 0;
+    ExpectTower("a Championship match without a round is refused", !TowerLegends_ValidCommand(&command));
+    command.reserved[0] = TOWER_ROUND_FINAL + 1;
+    ExpectTower("round 4 is refused", !TowerLegends_ValidCommand(&command));
+    command.reserved[0] = TOWER_ROUND_SEMIFINAL; command.reserved[1] = 2;
+    ExpectTower("an unknown flag is refused", !TowerLegends_ValidCommand(&command));
+    command.reserved[1] = 0; command.reserved[2] = 1;
+    ExpectTower("a Championship reserved byte is refused", !TowerLegends_ValidCommand(&command));
+    command.reserved[2] = 0; command.mode = 3;
+    ExpectTower("mode 3 is refused", !TowerLegends_ValidCommand(&command));
+    ExpectTower("no battle: experience as always", TowerLegends_AwardsExp() && TowerLegends_ActiveRound() == 0);
     ExpectTower("styles 0-8, arguments 0-100, none without a style", TowerLegends_ValidStyle(0, 0) && TowerLegends_ValidStyle(8, 100)
                 && !TowerLegends_ValidStyle(9, 0) && !TowerLegends_ValidStyle(3, 101) && !TowerLegends_ValidStyle(0, 4));
 
