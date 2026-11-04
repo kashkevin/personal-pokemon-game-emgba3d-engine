@@ -9837,6 +9837,13 @@ static const struct LevelUpMove sGroudonLevelUpLearnset[] = {
 
 #if P_FAMILY_RAYQUAZA
 static const struct LevelUpMove sRayquazaLevelUpLearnset[] = {
+#ifdef PORTABLE
+    // KNOWN_ISSUES MS-39 (PC game): Mega Rayquaza needs Dragon Ascent, and no Gen 6 learnset, tutor or event teaches it
+    // here. Rayquaza learns it at level 1 in the Gen 8 and Gen 9 learnsets (gen_8.h, gen_9.h), so any Rayquaza can
+    // relearn it (the summary screen's move relearner, Fallarbor's Move Relearner); the wild Rayquaza's moves are its
+    // latest four, unchanged.
+    LEVEL_UP_MOVE( 1, MOVE_DRAGON_ASCENT),
+#endif
     LEVEL_UP_MOVE( 1, MOVE_TWISTER),
     LEVEL_UP_MOVE( 5, MOVE_SCARY_FACE),
     LEVEL_UP_MOVE(15, MOVE_ANCIENT_POWER),

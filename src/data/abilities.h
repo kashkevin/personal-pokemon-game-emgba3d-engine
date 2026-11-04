@@ -2554,6 +2554,15 @@ const struct AbilityInfo gAbilitiesInfo[ABILITIES_COUNT] =
     [ABILITY_AURA_GUARD] =
     {
         .name = _("Aura Guard"),
+#ifdef PORTABLE
+        // KNOWN_ISSUES MS-38 (PC game): Mega Lucario Z's Ability. Moves that make contact deal half damage to it, and
+        // Mold Breaker and its like ignore it (Serebii's, Rotom Labs' and Pokebase's descriptions agree; Fluffy's own
+        // contact rule, battle_util.c).
+        .description = COMPOUND_STRING("Halves contact damage."),
+        .aiRating = 5,
+        .breakable = TRUE,
+#else
         .description = COMPOUND_STRING("Unimplemented."),
+#endif
     },
 };

@@ -7675,6 +7675,18 @@ static inline uq4_12_t GetDefenderAbilitiesModifier(struct DamageContext *ctx)
             recordAbility = TRUE;
         }
         break;
+#ifdef PORTABLE
+    case ABILITY_AURA_GUARD:
+        // KNOWN_ISSUES MS-38: Mega Lucario Z's Aura Guard halves the damage of moves that make contact, physical or special
+        // (Fluffy's contact rule: Long Reach, or a Punching Glove on a punch, is no contact; Mold Breaker ignores it).
+        if (IsMoveMakingContact(ctx->battlerAtk, ctx->battlerDef, ctx->abilities[ctx->battlerAtk], ctx->holdEffects[ctx->battlerAtk], ctx->move))
+        {
+            modifier = UQ_4_12(0.5);
+            recordAbility = TRUE;
+        }
+        break;
+#endif
+#line 7556 // gba-line
     case ABILITY_ICE_SCALES:
         if (IsBattleMoveSpecial(ctx->move))
         {

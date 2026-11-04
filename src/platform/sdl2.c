@@ -249,6 +249,7 @@ extern int NativeSelfTest_EvoItems(void);
 extern int NativeSelfTest_AbilityItems(void);
 extern int NativeSelfTest_Rods(void);
 extern int NativeSelfTest_FormItems(void);
+extern int NativeSelfTest_Megas(void);
 extern int NativeSelfTest_BerryWater(void);
 extern int NativeSelfTest_Mail(void);
 extern int NativeSelfTest_RareGoods(void);
@@ -1358,6 +1359,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_Rods()); // src/platform/native_selftest_items.c (the item audit: the fishing rods)
         else if (strcmp(argv[i], "--selftest-form-items") == 0)
             exit(NativeSelfTest_FormItems()); // src/platform/native_selftest_items.c (the item audit: form-change key items)
+        else if (strcmp(argv[i], "--selftest-megas") == 0)
+            exit(NativeSelfTest_Megas()); // src/platform/native_selftest_megas.c (MS-39 Mega Rayquaza, MS-38 Aura Guard)
         else if (strcmp(argv[i], "--selftest-berry-water") == 0)
             exit(NativeSelfTest_BerryWater()); // src/platform/native_selftest_items.c (the item audit: the Wailmer Pail)
         else if (strcmp(argv[i], "--selftest-mail") == 0)
