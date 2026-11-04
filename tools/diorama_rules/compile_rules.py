@@ -1468,7 +1468,16 @@ SEAM_RAMPS: dict[str, dict] = {
                                             "slopes": (((54, 40, 54, 41), "e", -16, 0),
                                                        ((54, 45, 54, 49), "e", -16, 0),
                                                        ((54, 52, 54, 54), "e", -16, 0))},
+    # Mauville City's flower garden behind its Gym runs on north over the seam into Route 111's south-west corner, to
+    # its fence and rocks (0-11, 137-139), walled off from both (no one walks into it). Route 111's corner steps two
+    # levels down to it from its plateau (its cliffs face the seam), so the garden lay cut in two at the seam by a
+    # trench two levels deep, its fence posts in it (MS-162). Route 111's part of it - its walkable cells, its fence and
+    # rocks - lies on the town's level; the corner's scraps of ground beyond the fence stay as they are. Both of Route
+    # 111's layouts (before and after the Mirage Tower falls: they differ only at the tower, rows 53-58).
+    "LAYOUT_ROUTE111": {"floors": (((0, 137, 11, 139), 0),),
+                        "banks": (((0, 137, 12, 139), 0),)},
 }
+SEAM_RAMPS["LAYOUT_ROUTE111_NO_MIRAGE_TOWER"] = SEAM_RAMPS["LAYOUT_ROUTE111"]
 # Mountains given by hand (terrace_topology.mountain_by_hand; KNOWN_ISSUES MS-153): "top", a seed cell (x, y) and the
 # level (Q16) its top and everything joined to it stand on; "decks", rectangles of it that are a bridge; "climbs", its
 # stairs (hand_slopes). Route 119's two tops - the west one (3-6, 81-85) and the east one's two tiers (30-38, 83-96) -

@@ -1006,7 +1006,8 @@ class TerraceTopologyTests(unittest.TestCase):
         names = {value: name for name, value
                  in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
         self.assertEqual(set(SEAM_RAMPS), {"LAYOUT_SAFARI_ZONE_SOUTHWEST", "LAYOUT_SAFARI_ZONE_SOUTH",
-                                           "LAYOUT_BATTLE_FRONTIER_OUTSIDE_WEST"})
+                                           "LAYOUT_BATTLE_FRONTIER_OUTSIDE_WEST", "LAYOUT_ROUTE111",
+                                           "LAYOUT_ROUTE111_NO_MIRAGE_TOWER"})
         for lid, ramp in SEAM_RAMPS.items():
             if not lid.startswith("LAYOUT_SAFARI_ZONE_"):
                 continue
@@ -1087,6 +1088,47 @@ class TerraceTopologyTests(unittest.TestCase):
         self.assertFalse(set(banks) & set(flat))
         # the column's blocked cells (the building's and the Mart's corners) are banked
         self.assertTrue(all((y * width + width - 2) in banks for y in range(fy0, fy1 + 1) if not walk(width - 2, y)))
+
+    def test_mauvilles_garden_given_by_hand(self):
+        # Route 111's part of Mauville City's garden (the rows at the seam, to its fence and rocks) lies on the town's
+        # level, flat, its fence and rocks with it: a pocket walled off from the rest of Route 111, whose own ground
+        # meets Mauville on that level at the road.
+        from compile_rules import SEAM_RAMPS
+        tilesets = load_tilesets(ROOT)
+        _, layouts = load_world(ROOT)
+        names = {value: name for name, value
+                 in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
+        lid = "LAYOUT_ROUTE111"
+        ramp = SEAM_RAMPS[lid]
+        self.assertNotIn("slopes", ramp)
+        # the route's layout after the Mirage Tower falls: the same corner, the same entry
+        self.assertEqual(SEAM_RAMPS["LAYOUT_ROUTE111_NO_MIRAGE_TOWER"], ramp)
+        layout = next(row for row in layouts if row["id"] == lid)
+        width, height = layout["width"], layout["height"]
+        cells = _load_cells(ROOT, [layout], tilesets, names)[0][lid]
+        fallen = next(row for row in layouts if row["id"] == "LAYOUT_ROUTE111_NO_MIRAGE_TOWER")
+        fallen_cells = _load_cells(ROOT, [fallen], tilesets, names)[0][fallen["id"]]
+        self.assertEqual([(cell["metatile"], cell["collision"]) for cell in cells[130 * width:]],
+                         [(cell["metatile"], cell["collision"]) for cell in fallen_cells[130 * width:]])
+        walk = lambda offset: cells[offset]["collision"] == 0
+        flat = hand_floors(cells, width, ramp["floors"])
+        banks = hand_banks(cells, width, ramp["banks"])
+        self.assertEqual({entry["groundQ16"] for entry in flat.values()}, {0})
+        self.assertEqual({(entry["groundQ16"], entry["lift"]) for entry in banks.values()}, {(0, True)})
+        ((x0, y0, x1, y1), _), = ramp["floors"]
+        self.assertEqual(y1, height - 1)                                      # it reaches the seam
+        # the floors' cells are one pocket the rest of the route does not reach, its last row the seam's
+        pocket, queue = set(flat), list(flat)
+        while queue:
+            offset = queue.pop()
+            x, y = offset % width, offset // width
+            for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                if 0 <= nx < width and 0 <= ny < height and walk(ny * width + nx):
+                    self.assertIn(ny * width + nx, pocket)                    # nothing walkable beyond it
+        self.assertTrue(all((height - 1) * width + x in flat for x in range(x0, x1 + 1)))
+        # the fence and rocks round it on its level, none of the route's walkable ground
+        self.assertFalse(any(walk(offset) for offset in banks))
+        self.assertTrue(all(offset // width >= y0 for offset in banks))
 
     def test_a_town_of_stair_terraces(self):
         # Streets a flight of stairs climbs between: the street by the water on level 0, the one at the flight's top
