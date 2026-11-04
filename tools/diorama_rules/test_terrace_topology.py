@@ -1006,16 +1006,20 @@ class TerraceTopologyTests(unittest.TestCase):
         names = {value: name for name, value
                  in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
         self.assertEqual(set(SEAM_RAMPS), {"LAYOUT_SAFARI_ZONE_SOUTHWEST", "LAYOUT_SAFARI_ZONE_SOUTH",
+                                           "LAYOUT_SAFARI_ZONE_NORTHWEST",
                                            "LAYOUT_BATTLE_FRONTIER_OUTSIDE_WEST", "LAYOUT_ROUTE111",
                                            "LAYOUT_ROUTE111_NO_MIRAGE_TOWER"})
         for lid, ramp in SEAM_RAMPS.items():
-            if not lid.startswith("LAYOUT_SAFARI_ZONE_"):
-                continue
+            if lid not in ("LAYOUT_SAFARI_ZONE_SOUTHWEST", "LAYOUT_SAFARI_ZONE_SOUTH"):
+                continue                                  # (the north-west's plateau: the test below)
             layout = next(row for row in layouts if row["id"] == lid)
             width = layout["width"]
             cells = _load_cells(ROOT, [layout], tilesets, names)[0][lid]
-            ((x0, sy0, x1, y1), direction, low, high), = ramp["slopes"]
-            floors = ramp.get("floors", ())
+            # the seam's pocket: the ramp down from the map's north edge (the south-west's muddy slope and the
+            # plateau's rows over it are the test below's)
+            ((x0, sy0, x1, y1), direction, low, high), = [slope for slope in ramp["slopes"] if slope[1] == "s"]
+            floors = tuple((rect, level) for rect, level in ramp.get("floors", ())
+                           if rect[0] <= x1 and rect[2] >= x0)
             y0 = min([sy0] + [rect[1] for rect, _ in floors])
             self.assertEqual((y0, direction, high), (0, "s", 0))     # from the map's north edge to its own ground
             self.assertLess(low, high)
@@ -1027,10 +1031,11 @@ class TerraceTopologyTests(unittest.TestCase):
             for x in range(x0, x1 + 1):
                 self.assertTrue(all(cells[y * width + x]["collision"] == 0 for y in range(y0, y1 + 1)))
             # the trees beside it: their two rows on one level, from the ramp's low end; the ramp's cells left alone
-            ((bx0, by0, bx1, by1), level), = ramp["banks"]
+            seam_banks = tuple((rect, lvl) for rect, lvl in ramp["banks"] if rect[0] <= x1 and rect[2] >= x0)
+            ((bx0, by0, bx1, by1), level), = seam_banks
             self.assertEqual((by0, by1), (y0, y1))
             self.assertTrue(low <= level < high)
-            banks = hand_banks(cells, width, ramp["banks"])
+            banks = hand_banks(cells, width, seam_banks)
             self.assertTrue(banks)
             self.assertEqual({(entry["groundQ16"], entry["lift"]) for entry in banks.values()}, {(level, True)})
             self.assertFalse(any(cells[offset]["collision"] == 0 for offset in banks))
@@ -1042,6 +1047,53 @@ class TerraceTopologyTests(unittest.TestCase):
             else:
                 # the south's path runs on south from the ramp
                 self.assertTrue(all(cells[(y1 + 1) * width + x]["collision"] == 0 for x in range(x0, x1 + 1)))
+
+    def test_the_safari_zones_plateau_given_by_hand(self):
+        # The south-west's muddy slope (8, 2-3) climbs through the rock of its face to the north-west's plateau (its
+        # elevation 7), which lay on the slope's foot's level (KNOWN_ISSUES MS-153): the plateau, the slope's top
+        # rows and the trees on them stand a level up, the slope climbs north over its two rows, the plateau's
+        # stairs down into the north-west's lower ground climb the two levels over their row and the row over them,
+        # and where the two maps meet (7-10) both lie on the plateau's level.
+        from compile_rules import SEAM_RAMPS
+        tilesets = load_tilesets(ROOT)
+        _, layouts = load_world(ROOT)
+        names = {value: name for name, value
+                 in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
+        loaded = {}
+        for lid in ("LAYOUT_SAFARI_ZONE_NORTHWEST", "LAYOUT_SAFARI_ZONE_SOUTHWEST"):
+            layout = next(row for row in layouts if row["id"] == lid)
+            loaded[lid] = (layout["width"], _load_cells(ROOT, [layout], tilesets, names)[0][lid])
+        nw_width, nw = loaded["LAYOUT_SAFARI_ZONE_NORTHWEST"]
+        sw_width, sw = loaded["LAYOUT_SAFARI_ZONE_SOUTHWEST"]
+        north, south = SEAM_RAMPS["LAYOUT_SAFARI_ZONE_NORTHWEST"], SEAM_RAMPS["LAYOUT_SAFARI_ZONE_SOUTHWEST"]
+        # the plateau's floors: its own walkable cells (elevation 7), every one of them, on one level
+        plateau = hand_floors(nw, nw_width, north["floors"])
+        self.assertEqual({entry["groundQ16"] for entry in plateau.values()}, {16})
+        self.assertEqual({nw[offset]["elevation"] for offset in plateau}, {7})
+        joined = {offset for offset in range(len(nw)) if nw[offset]["collision"] == 0 and nw[offset]["elevation"] == 7
+                  and offset // nw_width >= 27}
+        self.assertEqual(set(plateau) - {30 * nw_width + 13, 30 * nw_width + 14}, joined - {30 * nw_width + 13,
+                                                                                          30 * nw_width + 14})
+        # its stairs: elevation 0 at the plateau's edge (31), climbing north from the lower ground to the plateau
+        stairs = hand_slopes(nw_width, north["slopes"])
+        self.assertEqual({nw[31 * nw_width + x]["elevation"] for x in (13, 14)}, {0})
+        self.assertEqual([(stairs[y * nw_width + 13]["groundQ16"], stairs[y * nw_width + 13]["topQ16"]) for y in (31, 30)],
+                         [(-16, 0), (0, 16)])
+        self.assertTrue(all(nw[32 * nw_width + x]["collision"] == 0 for x in (13, 14)))
+        # the south-west: the slope climbs north from its foot's level to the plateau's over its two rows
+        slope = hand_slopes(sw_width, [s for s in south["slopes"] if s[1] == "n"])
+        self.assertEqual({sw[y * sw_width + 8]["behavior"] for y in (2, 3)}, {"MB_MUDDY_SLOPE"})
+        self.assertEqual([(slope[y * sw_width + 8]["groundQ16"], slope[y * sw_width + 8]["topQ16"]) for y in (3, 2)],
+                         [(0, 8), (8, 16)])
+        top = hand_floors(sw, sw_width, south["floors"])
+        self.assertTrue(all(top[x]["groundQ16"] == 16 for x in (7, 8, 9, 10)))
+        # where the maps meet the plateau's way, both on its level (north-west row 39, south-west row 0)
+        self.assertTrue(all(plateau[39 * nw_width + x]["groundQ16"] == top[x]["groundQ16"] == 16 for x in (7, 8, 9, 10)))
+        # the trees on the plateau and the face's top row stand on it, blocked cells only
+        banks = hand_banks(sw, sw_width, [(rect, level) for rect, level in south["banks"] if level == 16])
+        self.assertTrue(banks and all(sw[offset]["collision"] != 0 for offset in banks))
+        self.assertTrue(all(sw[2 * sw_width + x]["collision"] != 0 and 2 * sw_width + x in banks
+                            for x in range(0, 13) if x != 8))
 
     def test_ramps_given_by_hand_climb_east_and_west(self):
         # An east ramp's columns climb from its west edge, a west one's from its east edge, a share a column; a

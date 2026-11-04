@@ -1454,8 +1454,24 @@ PASS_LAYOUTS: frozenset[str] = frozenset({"LAYOUT_JAGGED_PASS"})
 # lies a level under it; its first row lies on the north's level, its second climbs the level, the trees beside them
 # (two by two) on the north's level. (Half a level a row, the first try, left hairline cracks where it met the trees.)
 SEAM_RAMPS: dict[str, dict] = {
-    "LAYOUT_SAFARI_ZONE_SOUTHWEST": {"slopes": (((19, 0, 23, 1), "s", -32, 0),),
-                                     "banks": (((13, 0, 39, 1), -16),)},
+    # The Safari Zone's north-west plateau (its elevation 7, rows 27-39, west of x 16), which the south-west's muddy
+    # slope (8, 2-3) climbs to through the rock of its face (rows 2-3) and its two rows over the face (7-10, 0-1),
+    # lay on the level of the south-west's ground at the slope's foot: the slope flat, the face a band of rock painted
+    # on the ground (KNOWN_ISSUES MS-153). The plateau, those two rows and the trees on them stand a level up; the
+    # slope climbs to them over its two rows; the plateau's one other way, its stairs down into the north-west's
+    # lower ground (13-14, 31: a level under the plateau before), climbs the two levels over their row and the row
+    # over them. The seams stay as they were (the plateau meets the south-west only in those rows).
+    "LAYOUT_SAFARI_ZONE_NORTHWEST": {"floors": (((0, 27, 15, 30), 16), ((0, 31, 10, 31), 16), ((4, 32, 10, 35), 16),
+                                                ((7, 36, 10, 39), 16), ((0, 36, 0, 39), 16)),
+                                     "banks": (((0, 25, 6, 26), 16), ((0, 27, 15, 30), 16), ((0, 31, 12, 31), 16),
+                                               ((0, 32, 10, 35), 16), ((0, 36, 6, 39), 16), ((11, 36, 12, 39), 16)),
+                                     "slopes": (((13, 30, 14, 31), "n", -16, 16),)},
+    # (the plateau's west-edge strip, 0, and the top row of the slope's rock, 2, with it: a row of the face's rock on
+    # the plateau's level, the next at the foot)
+    "LAYOUT_SAFARI_ZONE_SOUTHWEST": {"slopes": (((19, 0, 23, 1), "s", -32, 0), ((8, 2, 8, 3), "n", 0, 16)),
+                                     "floors": (((7, 0, 10, 1), 16), ((0, 0, 0, 1), 16)),
+                                     "banks": (((13, 0, 39, 1), -16), ((1, 0, 6, 1), 16), ((11, 0, 12, 1), 16),
+                                               ((0, 2, 7, 2), 16), ((9, 2, 12, 2), 16))},
     "LAYOUT_SAFARI_ZONE_SOUTH": {"floors": (((29, 0, 30, 0), -16),),
                                  "slopes": (((29, 1, 30, 1), "s", -16, 0),),
                                  "banks": (((17, 0, 39, 1), -16),)},
