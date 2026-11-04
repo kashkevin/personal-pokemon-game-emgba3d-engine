@@ -742,9 +742,13 @@ int NativeSelfTest_Tower(void)
 // --selftest-start-menu (MS-61, the owner's PC: START > PLAYER showed "Exit" for TOWER and RESET in the 3D game): the
 // PLAYER list has no RESET row (the reset is a key now), every row the START menu can show has its own name in the 3D
 // menu, and the reset key is taken only in the free field, then once.
+#include "event_object_movement.h"
+#include "field_player_avatar.h"
 #include "multiplayer_soft_reset.h"
 #include "overworld.h"
 #include "script.h"
+#include "start_menu.h"
+#include "task.h"
 
 u32 StartMenu_TestActions(bool32 playerSubmenu, u8 *out, u32 size);
 #ifdef ENABLE_NATIVE_UI
@@ -829,6 +833,29 @@ int NativeSelfTest_StartMenu(void)
     ExpectMenu("key: dropped outside the field", !MultiplayerSoftReset_TakeKey());
     MultiplayerHostSave_GameSaved();             // no world here: nothing to ask the launcher
     ExpectMenu("host save: nothing without a world", !MultiplayerHostSave_TryOpen());
+
+    // KNOWN_ISSUES MS-29: START right after a turn in place (a direction tapped) opened the menu with runningState still
+    // TURN_DIRECTION, and START > PLAYER > RESET and PLAYERS found the field not ready. The menu ends the turn.
+    ResetTasks();
+    memset(&gObjectEvents[0], 0, sizeof(gObjectEvents[0]));
+    gObjectEvents[0].active = TRUE;
+    gObjectEvents[0].isPlayer = TRUE;
+    gObjectEvents[0].facingDirection = DIR_SOUTH;
+    gPlayerAvatar.objectEventId = 0;
+    gPlayerAvatar.flags = PLAYER_AVATAR_FLAG_ON_FOOT;
+    gPlayerAvatar.tileTransitionState = T_NOT_MOVING;
+    gPlayerAvatar.runningState = TURN_DIRECTION;
+    ShowStartMenu();
+    ExpectMenu("MS-29: the START menu opened after a turn in place leaves the avatar at rest (runningState 0)",
+               gPlayerAvatar.runningState == NOT_MOVING);
+    ResetTasks();
+    UnlockPlayerFieldControls();
+    gPlayerAvatar.runningState = NOT_MOVING;
+    ShowStartMenu();
+    ExpectMenu("MS-29: ... and an avatar already at rest stays so", gPlayerAvatar.runningState == NOT_MOVING);
+    ResetTasks();
+    UnlockPlayerFieldControls();
+    memset(&gObjectEvents[0], 0, sizeof(gObjectEvents[0]));
     gMain.callback2 = field;
 
     printf("selftest-start-menu: %d checks, %d failed\n", sMenuChecks, sMenuFailures);

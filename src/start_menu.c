@@ -700,6 +700,15 @@ void ShowStartMenu(void)
         FreezeObjectEvents();
         PlayerFreeze();
         StopPlayerAvatar();
+#ifdef PORTABLE
+        // KNOWN_ISSUES MS-29: a turn in place (a direction tapped) leaves runningState at TURN_DIRECTION until the next
+        // field step, which the frozen field under this menu never takes, so START > PLAYER > RESET and PLAYERS found
+        // the field not ready (the multiplayer check wants the avatar at rest) and asked the player to try again. The
+        // menu has stopped the avatar: the turn is over, as the next step would end it.
+        if (gPlayerAvatar.runningState == TURN_DIRECTION && gPlayerAvatar.tileTransitionState == T_NOT_MOVING)
+            gPlayerAvatar.runningState = NOT_MOVING;
+#endif
+#line 666 // gba-line
     }
     CreateStartMenuTask(Task_ShowStartMenu);
     LockPlayerFieldControls();
