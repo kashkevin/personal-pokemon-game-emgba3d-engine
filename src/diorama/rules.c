@@ -1237,7 +1237,10 @@ float DioramaRules_ProfileHeight(uint8_t archetype, uint8_t behavior,
     direction = descending ? archetype - DIORAMA_ARCHETYPE_STAIRS_DOWN_N
                            : archetype - DIORAMA_ARCHETYPE_STAIRS_N;
     coordinate = direction <= 1 ? pixelY : pixelX;
-    if (direction == 0 || direction == 2)
+    /* climbing north (direction 0) the rows count up from the south edge; climbing west (3) the columns from the east
+     * edge. (West was east here: a ramp climbing east stood high on its west side, the compiler's terrace roles say
+     * east is high on the east - terrace_topology RAMP_ROLES; KNOWN_ISSUES MS-162.) */
+    if (direction == 0 || direction == 3)
         coordinate = DIORAMA_BUILDING_PIXELS_PER_CELL - 1 - coordinate;
     if (behavior == MB_MUDDY_SLOPE || behavior == MB_BUMPY_SLOPE)
         step = coordinate + 1;

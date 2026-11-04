@@ -170,7 +170,7 @@ def editor_geometry(cells: list[dict], resolved: list[dict], profiles: list[dict
                           "stairs-down-w": 3}
             direction = directions.get(archetype, 0)
             coordinate = pixel_z if direction in (0, 1) else pixel_x
-            if direction in (0, 2):
+            if direction in (0, 3):  # as rules.c: the letter names the high side
                 coordinate = 15 - coordinate
             if cell["behavior"] in (0xD0, 0xD1):
                 step = coordinate + 1

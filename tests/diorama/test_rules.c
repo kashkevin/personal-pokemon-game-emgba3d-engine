@@ -571,10 +571,15 @@ static void TestGenericMesherUtilities(void)
     assert(northLow == 0.25f);
     assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_S,
         MB_NORMAL, 0.0f, 1.0f, 8, 15) == 1.0f);
+    /* the letter names the high side, as north and south (terrace_topology RAMP_ROLES; MS-162) */
     assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_E,
+        MB_NORMAL, 0.0f, 1.0f, 15, 8) == 1.0f);
+    assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_E,
+        MB_NORMAL, 0.0f, 1.0f, 0, 8) == 0.25f);
+    assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_W,
         MB_NORMAL, 0.0f, 1.0f, 0, 8) == 1.0f);
     assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_W,
-        MB_NORMAL, 0.0f, 1.0f, 15, 8) == 1.0f);
+        MB_NORMAL, 0.0f, 1.0f, 15, 8) == 0.25f);
     assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_DOWN_N,
         MB_NORMAL, 0.0f, 1.0f, 8, 0) == -1.0f);
     assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_N,

@@ -1371,6 +1371,40 @@ static bool AppendSkirtByRock(const struct DioramaTerrainChunkInput *input, int 
  * cell's footing showed the sky (graphics overhaul, 2026-10-12). The side is
  * the higher cell's ground (the lower layer of its drawing).
  */
+/* A skirt over stairs up (AppendSkirtFaces): a pixel at a time, from the top of the stairs' column across the edge up
+ * to the cell's footing, of the cell's ground. A flight climbing along the cell's side stands lower at its foot than at
+ * its head, and the cell's own sides reach down only to its footing: the sky showed over the flight's foot between them
+ * (the Battle Frontier's seam ramp under the sea wall; KNOWN_ISSUES MS-162). */
+static bool AppendSkirtByStairs(const struct DioramaTerrainChunkInput *input, int x, int y,
+                                int side, int16_t footing,
+                                uint32_t *faceCount, uint32_t *rawFaceCount)
+{
+    static const int8_t offsets[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+    const struct DioramaTerrainCell *cell = GetCell(input, x, y);
+    const struct DioramaTerrainCell *stairs = GetCell(input, x + offsets[side][0], y + offsets[side][1]);
+    int cellIndex = y * DIORAMA_TERRAIN_INPUT_SIZE + x;
+    int along;
+
+    for (along = 0; along < DIORAMA_VOXELS_PER_CELL; along++)
+    {
+        int pixelX = side == 1 ? DIORAMA_VOXELS_PER_CELL - 1 : side == 3 ? 0 : along;
+        int pixelZ = side == 0 ? 0 : side == 2 ? DIORAMA_VOXELS_PER_CELL - 1 : along;
+        /* the stairs' pixel across the edge */
+        int stairsX = side == 1 ? 0 : side == 3 ? DIORAMA_VOXELS_PER_CELL - 1 : along;
+        int stairsZ = side == 0 ? DIORAMA_VOXELS_PER_CELL - 1 : side == 2 ? 0 : along;
+        int16_t stairsTop = StairTop(stairs, stairsX, stairsZ);
+
+        if (stairsTop >= footing)
+            continue;
+        if (!AppendCompressedPixelSide(faceCount, rawFaceCount, cell, cellIndex, 1, side,
+                                       cell->mapX * DIORAMA_VOXELS_PER_CELL + pixelX,
+                                       cell->mapY * DIORAMA_VOXELS_PER_CELL + pixelZ,
+                                       stairsTop, footing, true, 0, 0))
+            return false;
+    }
+    return true;
+}
+
 static bool AppendSkirtFaces(const struct DioramaTerrainChunkInput *input,
                              uint32_t *faceCount, uint32_t *rawFaceCount)
 {
@@ -1421,6 +1455,15 @@ static bool AppendSkirtFaces(const struct DioramaTerrainChunkInput *input,
                      || neighbor->groundHeight < cell->groundHeight))
                 {
                     if (!AppendSkirtByRock(input, x, y, side, footing, faceCount, rawFaceCount))
+                        return false;
+                    continue;
+                }
+                /* down to stairs up, a pixel at a time (they climb along the side: their foot lower than their head) */
+                if (neighbor->present && neighbor->shape == DIORAMA_SHAPE_STAIRS
+                 && !(neighbor->archetype >= DIORAMA_ARCHETYPE_STAIRS_DOWN_N
+                      && neighbor->archetype <= DIORAMA_ARCHETYPE_STAIRS_DOWN_W))
+                {
+                    if (!AppendSkirtByStairs(input, x, y, side, footing, faceCount, rawFaceCount))
                         return false;
                     continue;
                 }
