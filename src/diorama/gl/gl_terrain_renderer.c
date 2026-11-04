@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <SDL2/SDL.h>
@@ -55,6 +56,7 @@ struct GLTerrainChunk
     int16_t chunkY;
     uint32_t frameKey;         /* the frame whose coordinates chunkX and chunkY are in (sFrameKey) */
     bool stale;                /* its build is waiting (sPending): the old mesh stands meanwhile */
+    bool superseded;           /* an earlier version of its chunk (TERRAIN_SUPERSEDED_VERSIONS): never drawn */
     uint32_t mapGeneration;
     uint32_t rulesGeneration;
     uint64_t signature;
@@ -231,6 +233,21 @@ static uint32_t sDeferredBuilds;
 #define TERRAIN_KEPT_BUILDS 4
 static unsigned sKeptChecks;
 static unsigned sKeptBuilds;
+/*
+ * A chunk's earlier versions (KNOWN_ISSUES MS-118): when a chunk's input
+ * changes, the version it had stays in the cache as well, superseded (never
+ * drawn, FindChunk passes it by), up to TERRAIN_SUPERSEDED_VERSIONS of them,
+ * in slots no chunk seen since needs (SlotForNextVersion). When its input
+ * comes back to one of them (the same signature, the atlas pages holding what
+ * they held, KeptMeshStands), that version is the chunk again and nothing is
+ * built. Walking to and fro across a map's seam turns the atlas pages round
+ * (page 0 is the map the player is on), and with them the inputs of the
+ * chunks by the seam: on Route 117 by Mauville a third of the builds were of
+ * an input the chunk had had one or two versions before.
+ */
+#define TERRAIN_SUPERSEDED_VERSIONS 2
+static uint32_t sSupersededHits; /* chunks brought back from an earlier version (PKMN_DIORAMA_LOG) */
+static bool sNoSuperseded;       /* PKMN_DIORAMA_SUPERSEDED=0 (development): none kept, as before, to compare */
 static uint8_t sInputPages; /* the pages of the last BuildInput's cells */
 static const void *sPagePrimary;
 static const void *sPageSecondary[1 + DIORAMA_NEIGHBOUR_PAGES];
@@ -773,7 +790,7 @@ static struct GLTerrainChunk *FindChunk(int chunkX, int chunkY)
     unsigned i;
 
     for (i = 0; i < sChunkLimit; i++)
-        if (sChunks[i].occupied && sChunks[i].frameKey == sFrameKey
+        if (sChunks[i].occupied && !sChunks[i].superseded && sChunks[i].frameKey == sFrameKey
          && sChunks[i].chunkX == chunkX && sChunks[i].chunkY == chunkY)
             return &sChunks[i];
     return NULL;
@@ -2196,6 +2213,58 @@ static bool MarkedTriangles(const struct DioramaTerrainVertex *vertices, uint32_
     return true;
 }
 
+/* PKMN_DIORAMA_TERRAIN_CHECK=1 (tests): CheckSkippedSync, CheckSuperseded. */
+static bool TerrainCheckEnabled(void)
+{
+    static int sEnabled = -1;
+
+    if (sEnabled < 0)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_TERRAIN_CHECK");
+
+        sEnabled = value != NULL && value[0] == '1';
+    }
+    return sEnabled != 0;
+}
+
+/*
+ * PKMN_DIORAMA_DUMP_CHUNKS=dir (development, KNOWN_ISSUES MS-118): each chunk input built written to dir as it was
+ * given to DioramaTerrain_BuildChunk (the struct's bytes, plain data), with its build time and vertex count in
+ * dir/index.txt, so the mesher can be measured and compared on its own (the same inputs, before and after a change).
+ */
+static void DumpChunkInput(const struct DioramaTerrainChunkInput *input, const struct DioramaTerrainMesh *mesh,
+                           uint64_t micros)
+{
+    static int sEnabled = -1;
+    static const char *sDirectory;
+    static unsigned sCount;
+    char path[1024];
+    FILE *file;
+
+    if (sEnabled < 0)
+    {
+        sDirectory = SDL_getenv("PKMN_DIORAMA_DUMP_CHUNKS");
+        sEnabled = sDirectory != NULL && sDirectory[0] != '\0';
+    }
+    if (!sEnabled || sCount >= 100000)
+        return;
+    snprintf(path, sizeof(path), "%s/chunk-%05u.bin", sDirectory, sCount);
+    file = fopen(path, "wb");
+    if (file == NULL)
+        return;
+    fwrite(input, sizeof(*input), 1, file);
+    fclose(file);
+    snprintf(path, sizeof(path), "%s/index.txt", sDirectory);
+    file = fopen(path, "a");
+    if (file != NULL)
+    {
+        fprintf(file, "%05u %d %d %u %llu\n", sCount, input->chunkX, input->chunkY, mesh->vertexCount,
+                (unsigned long long)micros);
+        fclose(file);
+    }
+    sCount++;
+}
+
 static bool UploadChunk(struct GLTerrainChunk *chunk,
                         const struct DioramaTerrainChunkInput *input,
                         uint64_t signature)
@@ -2207,6 +2276,7 @@ static bool UploadChunk(struct GLTerrainChunk *chunk,
                                    DIORAMA_TERRAIN_MAX_VERTICES, &mesh))
         return false;
     sMetrics.meshMicros += MicrosSince(start);
+    DumpChunkInput(input, &mesh, MicrosSince(start));
     start = SDL_GetPerformanceCounter();
     CheckChunkMesh(input, &mesh);
     {
@@ -2301,6 +2371,7 @@ static bool UploadChunk(struct GLTerrainChunk *chunk,
     sMetrics.uploadMicros += MicrosSince(start);
     chunk->occupied = true;
     chunk->stale = false;
+    chunk->superseded = false;
     chunk->chunkX = input->chunkX;
     chunk->chunkY = input->chunkY;
     chunk->frameKey = sFrameKey;
@@ -2313,7 +2384,13 @@ static bool UploadChunk(struct GLTerrainChunk *chunk,
 
 bool DioramaGLTerrain_Init(void)
 {
-    DioramaTerrain_SetGeometryHash(false); /* only the tests read it; the mesh check compares vertices */
+    /* only the tests and the terrain check (CheckSuperseded) read it; the mesh check compares vertices */
+    DioramaTerrain_SetGeometryHash(TerrainCheckEnabled());
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_SUPERSEDED");
+
+        sNoSuperseded = value != NULL && value[0] == '0';
+    }
     memset(sChunks, 0, sizeof(sChunks));
     memset(&sMetrics, 0, sizeof(sMetrics));
     memset(sFrameMaps, 0, sizeof(sFrameMaps));
@@ -2403,6 +2480,7 @@ void DioramaGLTerrain_Reset(void)
     {
         sChunks[i].occupied = false;
         sChunks[i].active = false;
+        sChunks[i].superseded = false;
         sChunks[i].signature = 0;
     }
     memset(&sMetrics, 0, sizeof(sMetrics));
@@ -3019,6 +3097,87 @@ static bool KeptMeshStands(const struct GLTerrainChunk *chunk)
     return true;
 }
 
+/* The earlier version of chunk (chunkX, chunkY) built from an input of this
+ * signature whose mesh may be drawn again (KeptMeshStands), or NULL. */
+static struct GLTerrainChunk *FindSuperseded(int chunkX, int chunkY, uint64_t signature, uint32_t rulesGeneration)
+{
+    unsigned i;
+
+    if (sNoSuperseded)
+        return NULL;
+    for (i = 0; i < sChunkLimit; i++)
+        if (sChunks[i].occupied && sChunks[i].superseded && sChunks[i].frameKey == sFrameKey
+         && sChunks[i].chunkX == chunkX && sChunks[i].chunkY == chunkY
+         && sChunks[i].signature == signature && sChunks[i].rulesGeneration == rulesGeneration
+         && KeptMeshStands(&sChunks[i]))
+            return &sChunks[i];
+    return NULL;
+}
+
+/* A chunk's current version kept as an earlier one: not drawn, not found by FindChunk. */
+static void Supersede(struct GLTerrainChunk *chunk)
+{
+    chunk->superseded = true;
+    chunk->active = false;
+    chunk->stale = false;
+}
+
+/* The slot a chunk's next version is built in, so that the version it has can
+ * be kept (Supersede): its oldest earlier version when it has
+ * TERRAIN_SUPERSEDED_VERSIONS, else a free slot or one last seen before the
+ * chunk was; else the chunk's own, its version given up as before. */
+static struct GLTerrainChunk *SlotForNextVersion(struct GLTerrainChunk *chunk)
+{
+    struct GLTerrainChunk *oldest = NULL;
+    struct GLTerrainChunk *slot;
+    unsigned versions = 0;
+    unsigned i;
+
+    if (sNoSuperseded)
+        return chunk;
+    for (i = 0; i < sChunkLimit; i++)
+        if (sChunks[i].occupied && sChunks[i].superseded && sChunks[i].frameKey == chunk->frameKey
+         && sChunks[i].chunkX == chunk->chunkX && sChunks[i].chunkY == chunk->chunkY)
+        {
+            versions++;
+            if (oldest == NULL || sChunks[i].lastSeenSequence < oldest->lastSeenSequence)
+                oldest = &sChunks[i];
+        }
+    if (versions >= TERRAIN_SUPERSEDED_VERSIONS)
+        return oldest;
+    slot = AllocateChunk();
+    if (slot == NULL || (slot->occupied && slot->lastSeenSequence >= chunk->lastSeenSequence))
+        return chunk;
+    return slot;
+}
+
+/*
+ * PKMN_DIORAMA_TERRAIN_CHECK=1 (tests): a chunk brought back from an earlier
+ * version is built anyway and the two meshes compared (vertex count, bounds,
+ * and the geometry hash of the vertices and trees, which the check turns on,
+ * DioramaGLTerrain_Init); logs each mismatch and a running count.
+ */
+static void CheckSuperseded(const struct GLTerrainChunk *chunk, const struct DioramaTerrainChunkInput *input)
+{
+    static uint32_t sChecked;
+    static uint32_t sDiffering;
+    struct DioramaTerrainMesh mesh;
+
+    if (!TerrainCheckEnabled())
+        return;
+    sChecked++;
+    if (!DioramaTerrain_BuildChunk(input, sScratchVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh)
+     || mesh.vertexCount != chunk->mesh.vertexCount || mesh.geometryHash != chunk->mesh.geometryHash
+     || mesh.treeInstanceCount != chunk->mesh.treeInstanceCount
+     || memcmp(&mesh.bounds, &chunk->mesh.bounds, sizeof(mesh.bounds)) != 0)
+    {
+        sDiffering++;
+        SDL_Log("Diorama: terrain check: chunk %d,%d from an earlier version differs from its build "
+                "(%u vertices, built %u)", chunk->chunkX, chunk->chunkY, chunk->mesh.vertexCount, mesh.vertexCount);
+    }
+    SDL_Log("Diorama: terrain check: %u chunks from an earlier version checked, %u differed", sChecked, sDiffering);
+}
+
 /* Builds (or checks) one chunk; false when the cache or the GL failed. */
 static bool SyncChunk(const struct DioramaSceneSnapshot *snapshot,
                       const struct DioramaResolvedCell *resolvedCells,
@@ -3027,6 +3186,7 @@ static bool SyncChunk(const struct DioramaSceneSnapshot *snapshot,
 {
     static struct DioramaTerrainChunkInput input;
     struct GLTerrainChunk *chunk;
+    struct GLTerrainChunk *slot;
     uint64_t signature;
     bool newIdentity = false;
     bool forceDirty = forceAllDirty;
@@ -3138,6 +3298,25 @@ static bool SyncChunk(const struct DioramaSceneSnapshot *snapshot,
          * not stale, so it may stand as the grid moves (RegionUnchanged). */
         chunk->stale = false;
     }
+    if (!forceDirty && (chunk == NULL || chunk->rulesGeneration != rulesGeneration || chunk->signature != signature))
+    {
+        struct GLTerrainChunk *earlier = FindSuperseded(chunkX, chunkY, signature, rulesGeneration);
+
+        if (earlier != NULL)
+        {
+            /* Its input came back to an earlier version's (TERRAIN_SUPERSEDED_VERSIONS):
+             * that version is the chunk again, the one it had kept; nothing is built. */
+            if (chunk != NULL)
+                Supersede(chunk);
+            earlier->superseded = false;
+            earlier->stale = false;
+            earlier->mapGeneration = snapshot->mapGeneration;
+            chunk = earlier;
+            sSupersededHits++;
+            sGeometryGeneration++;
+            CheckSuperseded(chunk, &input);
+        }
+    }
     if (newIdentity || chunk == NULL || !chunk->occupied
      || chunk->rulesGeneration != rulesGeneration
      || chunk->signature != signature || forceDirty)
@@ -3185,8 +3364,17 @@ static bool SyncChunk(const struct DioramaSceneSnapshot *snapshot,
         }
         if (chunk == NULL)
             return false;
-        if (!UploadChunk(chunk, &input, signature))
+        /* the version it had kept, where the cache has room (not one a changed
+         * cell touched, forceDirty: its signature might not say so) */
+        slot = newIdentity || forceDirty || chunk->rulesGeneration != rulesGeneration
+             ? chunk : SlotForNextVersion(chunk);
+        if (!UploadChunk(slot, &input, signature))
             return false;
+        if (slot != chunk)
+        {
+            Supersede(chunk);
+            chunk = slot;
+        }
         sMetrics.rebuiltChunks++;
     }
     chunk->active = true;
@@ -3258,19 +3446,12 @@ static bool SyncPending(const struct DioramaSceneSnapshot *snapshot,
 static void CheckSkippedSync(const struct DioramaSceneSnapshot *snapshot,
                              const struct DioramaResolvedCell *resolvedCells)
 {
-    static int sEnabled = -1;
     static struct DioramaTerrainChunkInput input;
     static uint32_t sChecked;
     static uint32_t sStale;
     int i;
 
-    if (sEnabled < 0)
-    {
-        const char *value = SDL_getenv("PKMN_DIORAMA_TERRAIN_CHECK");
-
-        sEnabled = value != NULL && value[0] == '1';
-    }
-    if (!sEnabled)
+    if (!TerrainCheckEnabled())
         return;
     TreeTint(snapshot);
     PrepareSync(snapshot, resolvedCells);
@@ -3469,9 +3650,9 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
         if ((sSyncRun & 127) == 0 && LogEnabledTerrain())
             SDL_Log("Diorama: terrain syncs: %u ran the chunk loop, %u only animated tiles, "
                     "%u had nothing to do; %u chunks stood as the grid moved, %u builds waited, "
-                    "%u came back from the cache (%u chunks)",
+                    "%u came back from the cache (%u chunks), %u from an earlier version",
                     sSyncRun, sSyncAnimated, sSyncSkipped, sInteriorSkips, sDeferredBuilds,
-                    sCacheHits, sChunkLimit);
+                    sCacheHits, sChunkLimit, sSupersededHits);
         {
             struct TerrainSyncKey moved = key;
 

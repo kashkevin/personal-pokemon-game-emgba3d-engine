@@ -309,11 +309,25 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
     hash = HashU16(hash, input->chunkY);
     hash = HashU32(hash, input->rulesGeneration);
     hash = HashByte(hash, input->rockFaces);
+    /* The rock wall a side of plain ground shows, and each cell's claimOwner (GroundSideShowsRock reads both): a mesh
+     * stands for any input of its signature, the renderer's cache and earlier versions (KNOWN_ISSUES MS-118). */
+    if (input->rockFaces)
+    {
+        hash = HashU16(hash, input->rockFace.metatileId);
+        hash = HashByte(hash, input->rockFace.layer);
+        hash = HashByte(hash, input->rockFace.rotation);
+        hash = HashByte(hash, input->rockFace.flags);
+        hash = HashFloat(hash, input->rockFace.u0);
+        hash = HashFloat(hash, input->rockFace.v0);
+        hash = HashFloat(hash, input->rockFace.u1);
+        hash = HashFloat(hash, input->rockFace.v1);
+    }
     for (i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
     {
         const struct DioramaTerrainCell *cell = &input->cells[i];
 
         hash = HashByte(hash, cell->present);
+        hash = HashU16(hash, cell->claimOwner);
         hash = HashU16(hash, cell->mapX);
         hash = HashU16(hash, cell->mapY);
         hash = HashU16(hash, cell->metatileId);
