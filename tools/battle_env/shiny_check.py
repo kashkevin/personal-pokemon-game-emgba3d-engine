@@ -33,6 +33,10 @@ battle's), and in the 3D build its renderer's (PKMN_DIORAMA_LOG: each field effe
                  back", the same species at the same place) and drawn shiny there
   keep-won       one of them bumped into (PKMN_TEST_OWE_BATTLE=wild) and knocked out (A through the battle): "owe keep:
                  won", never put back
+  keep-restart   MS-145, a kept shiny outlives the game: as keep, every one shiny and kept on Route 101, the player in
+                 Oldale Town saves the game (the field key event SAVE) and the game ends; a second game Continues from that
+                 save (nothing made shiny), walks back south onto Route 101: a kept one is put back where it was, from the
+                 save's own record ("owe keep: back"), drawn shiny there
   palette-last   a shiny shared spawn on a crowded map, one sprite palette left free (PKMN_TEST_PALETTE_FREE=1): no
                  twinkle (its palette would take the last one, which then pushes out a Pokemon), one palette still free
   palette-two    two free: twinkles, one palette still free
@@ -328,6 +332,52 @@ def main():
             again = [keep_line(line) for line in later if line.startswith("owe keep: back")]
             if any(b["species"] == won[0]["species"] and (b["x"], b["y"]) == (won[0]["x"], won[0]["y"]) for b in again):
                 problems.append(f"keep-won: the one knocked out {won[0]} was put back")
+
+    if want("keep-restart"):
+        # The first game: every overworld Pokemon shiny and kept, north into Oldale Town (as keep, not back), saved there.
+        to_oldale = KEEP_PATH[:-8]
+        steps = [f"{KEEP_WALK_AT + 18 * i}:{key}" for i, key in enumerate(to_oldale)]
+        save_at = KEEP_WALK_AT + 18 * len(to_oldale) + 180
+        for attempt in range(3):
+            first = "keep-restart-1" if attempt == 0 else f"keep-restart-1-try{attempt + 1}"
+            case(first, save_at + 240, dict(PKMN_TEST_OWE_SHINY="2", PKMN_TEST_HM_LOG="1",
+                                            PKMN_TEST_FIELD_KEYS=",".join(steps + [f"{save_at}:SAVE"])), "")
+            if any(line.startswith("hm field: ") and hm_place(line)[0] == OLDALE for line in case.lines):
+                break
+            print(f"keep-restart: try {attempt + 1} never left Route 101 (a shiny on the way); trying again",
+                  file=sys.stderr)
+        kept = [keep_line(line) for line in case.lines if line.startswith("owe keep: kept")]
+        kept_route = {(k["species"], k["x"], k["y"]) for k in kept if k["map"] == ROUTE_101_MAP}
+        saved = [numbers(line) for line in case.lines if line.startswith("saved at field frame")]
+        if not kept_route:
+            problems.append("keep-restart: no shiny overworld Pokemon kept on Route 101")
+        if not saved or tuple(saved[-1][1:3]) != OLDALE or saved[-1][-1] != 1:
+            problems.append(f"keep-restart: not saved in Oldale Town with status 1 ({saved})")
+        else:
+            # The second game, from that save: nothing made shiny, south onto Route 101.
+            source, args.save = args.save, os.path.join(args.out, first, "test.sav")
+            back_at = 400
+            try:
+                seconds = case("keep-restart-2", back_at + 18 * 8 + 900,
+                               dict(PKMN_TEST_WARP="", PKMN_TEST_HM_LOG="1",
+                                    PKMN_TEST_FIELD_KEYS=",".join(f"{back_at + 18 * i}:DOWN" for i in range(8))), "")
+            finally:
+                args.save = source
+            places = [hm_place(line) for line in case.lines if line.startswith("hm field: ")]
+            back = [keep_line(line) for line in case.lines if line.startswith("owe keep: back")]
+            if not places or places[0][0] != OLDALE:
+                problems.append(f"keep-restart: the second game did not start in Oldale Town ({places[:1]})")
+            if not any(b["map"] == ROUTE_101_MAP for b in back):
+                problems.append(f"keep-restart: no kept shiny put back on Route 101 after the restart "
+                                f"(kept {sorted(kept_route)}; places {sorted(set(p[0] for p in places))})")
+            else:
+                one = next(b for b in back if b["map"] == ROUTE_101_MAP)
+                if not any(one["species"] == k[0] and (one["x"], one["y"]) == (k[1], k[2]) for k in kept_route):
+                    problems.append(f"keep-restart: the one put back {one} is none of the kept ones {sorted(kept_route)}")
+                place = [one["x"] - MAP_OFFSET, one["y"] - MAP_OFFSET]
+                drawn = [m for m in mons(seconds) if m[1] & 0xFFF == one["species"] and m[4:6] == place]
+                if not drawn or not all(m[2] == 1 for m in drawn):
+                    problems.append(f"keep-restart: the one put back {one} not drawn shiny at its place ({drawn[-1:]})")
 
     report = dict(cases=cases, problems=problems, passed=not problems)
     with open(os.path.join(args.out, "shiny_check.json"), "w") as out:

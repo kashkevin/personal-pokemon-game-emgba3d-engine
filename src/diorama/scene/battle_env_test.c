@@ -4237,7 +4237,8 @@ bool16 ScriptMenu_CreateStartMenuForPokenavTutorial(void);  /* script_menu.c: th
    berry's tag; DIPLOMA the POKéDEX diploma; PBAG the Battle Pyramid's bag; FACTORY the Battle Factory's rentals,
    FSWAP its swap screen; FPASS the FRONTIER PASS; DOME the Battle Dome's tourney tree, DOMERES a round's results tree, DOMEPREV the last
    tourney's; MGIFT the main menu's MYSTERY GIFT, MEVENT its MYSTERY EVENTS (their flags set in the run's own copy
-   of the save); CLEARSAVE the title screen's clear-save question (only ever answered NO in the checks) */
+   of the save); CLEARSAVE the title screen's clear-save question (only ever answered NO in the checks); SAVE the
+   game saved there, as the START menu's SAVE (the run's own copy of the save: a later run Continues from it) */
 static bool FieldEventAt(const char *script, const char *event, int frame)
 {
     const char *p = script;
@@ -4754,6 +4755,16 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
         {
             TestLog("Battle env test: the PokéNav opened for its tutorial");
             OpenPokenavForTutorial();
+        }
+        /* SAVE: the game saved there as the START menu's SAVE saves it (KNOWN_ISSUES MS-145: a field run that ends in a
+           save another run Continues from: shiny_check.py's keep-restart) */
+        if (FieldEventAt(s.fieldKeys, "SAVE", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
+        {
+            u8 status = TrySavingData(SAVE_NORMAL);
+
+            TestLog("Battle env test: saved at field frame %d, map %d.%d at %d,%d, status %d", s.fieldKeyFrames,
+                    gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->pos.x,
+                    gSaveBlock1Ptr->pos.y, status);
         }
         if (FieldEventAt(s.fieldKeys, "HOFPC", s.fieldKeyFrames - 1) && gMain.callback2 == CB2_Overworld)
             OpenTestHallOfFamePc();
