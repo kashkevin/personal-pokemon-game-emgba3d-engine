@@ -2369,9 +2369,12 @@ void DioramaScene_PublishOverworld(void)
         sDraft.primaryTileset = gMapHeader.mapLayout->primaryTileset;
         sDraft.secondaryTileset = gMapHeader.mapLayout->secondaryTileset;
     }
-    /* the rock wall a tall side of plain ground shows, outdoors (scene_snapshot.h rockFaceEntries) */
+    /* the rock wall a tall side of plain ground shows, outdoors (scene_snapshot.h rockFaceEntries); not in Sootopolis,
+     * whose terraces of white stone show their own streets down their sides (KNOWN_ISSUES MS-172: General's brown rock
+     * stood in strips between them) */
     sDraft.rockFaceValid = sDraft.valid
                         && gMapHeader.mapLayout->primaryTileset == &gTileset_General
+                        && gMapHeader.mapLayout->secondaryTileset != &gTileset_Sootopolis
                         && gTileset_General.metatiles != NULL
                         && (sDraft.mapType == MAP_TYPE_TOWN || sDraft.mapType == MAP_TYPE_CITY
                          || sDraft.mapType == MAP_TYPE_ROUTE || sDraft.mapType == MAP_TYPE_OCEAN_ROUTE);

@@ -382,9 +382,10 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         # stairs climb from one top to another, and the mountain's step kept the layout's
         # levels). Its tops stand a level a climb, the slope a ramp between them, the rock level
         # with each top and down its faces; Route 114's mountain of five levels the same (Route
-        # 119's top runs onto its bridge, which the game lets one walk across: it keeps its
-        # levels). No rock stands over the rock beside it with nothing under it (the sky
-        # between: the mesh draws rock from a voxel under its ground).
+        # 119's tops, joined by the bridge the game lets one walk across, stand a level up as
+        # given by hand: compile_rules MOUNTAIN_LEVELS). No rock stands over the rock beside it
+        # with nothing under it (the sky between: the mesh draws rock from a voxel under its
+        # ground).
         layouts = {row["symbol"]: row for row in self.data["layouts"]}
 
         def wildcard(name):
@@ -411,7 +412,7 @@ class DioramaRuleCompilerTests(unittest.TestCase):
                          [("flat", 16, 16), ("flat", 32, 32), ("flat", 48, 48), ("flat", 64, 64),
                           ("stairs", 48, 64)])
         width, records = wildcard("LAYOUT_ROUTE119")
-        self.assertEqual([at(33, 92)[1], at(36, 85)[1]], [0, 0])
+        self.assertEqual([at(33, 92)[1], at(36, 85)[1]], [16, 16])
         for name in ("LAYOUT_ROUTE114", "LAYOUT_ROUTE115"):
             width, records = wildcard(name)
 

@@ -1997,21 +1997,28 @@ def _indoor_steps(cells: tuple[dict, ...], width: int, height: int, spec: dict,
     return out
 
 
+_SLOPE_PROFILES = {"n": "transition-horizontal", "s": "transition-south", "e": "transition-east",
+                   "w": "transition-west"}
+
+
 def hand_slopes(width: int, slopes) -> dict[int, dict]:
     """Ramps given by hand (compile_rules SEAM_RAMPS): for each (rectangle, direction, low, high) -
-    the rectangle (x0, y0, x1, y1, both corners in), "n" or "s" - its cells climb from `low` at the
-    edge it starts from to `high` at the far one, each row its share (as a mountain's stairs)."""
+    the rectangle (x0, y0, x1, y1, both corners in), "n", "s", "e" or "w", the way it climbs - its cells
+    climb from `low` at the edge it starts from to `high` at the far one, each row (each column, east or
+    west) its share (as a mountain's stairs)."""
     out: dict[int, dict] = {}
     for (x0, y0, x1, y1), direction, low, high in slopes:
-        rows = y1 - y0 + 1
+        if direction not in _SLOPE_PROFILES:
+            raise ValueError(f"a hand slope climbs n, s, e or w, not {direction!r}")
+        across = direction in ("e", "w")
+        span = (x1 - x0 + 1) if across else (y1 - y0 + 1)
         for y in range(y0, y1 + 1):
-            step = (y - y0) if direction == "s" else (y1 - y)
-            ground = low + round((high - low) * step / rows)
-            top = low + round((high - low) * (step + 1) / rows)
             for x in range(x0, x1 + 1):
+                step = {"s": y - y0, "n": y1 - y, "e": x - x0, "w": x1 - x}[direction]
+                ground = low + round((high - low) * step / span)
+                top = low + round((high - low) * (step + 1) / span)
                 out[y * width + x] = {"groundQ16": ground, "topQ16": top, "solid": False,
-                                      "profile": "transition-south" if direction == "s" else "transition-horizontal",
-                                      "rise": top - ground}
+                                      "profile": _SLOPE_PROFILES[direction], "rise": top - ground}
     return out
 
 
@@ -2147,4 +2154,136 @@ def stair_runs_between(cells: tuple[dict, ...], width: int, height: int,
             out.update(hand_slopes(width, (((x, y0, x, y1), "n", gs, gn),)))
         else:
             out.update(hand_slopes(width, (((x, y0, x, y1), "s", gn, gs),)))
+    return out
+
+
+def stair_terraces(cells: tuple[dict, ...], width: int, height: int, stairs, rails=frozenset()) -> dict[int, dict]:
+    """A town of terraces whose streets the GBA gives one elevation, the stairs between them its only sign of
+    their levels (compile_rules STAIR_TERRACES; KNOWN_ISSUES MS-172: Sootopolis City, a crater of terraces round
+    its lake, lay flat, its rock walls standing one to three levels over every street). Its streets - walkable cells
+    side by side, not water, not `stairs` ({(tileset, local metatile)}) - are regions; a flight of stairs (its cells
+    side by side) climbs north, the region at its top a level over the one at its foot; the regions beside the water
+    lie on level 0 and the rest a level a climb from them. A region no flight reaches (a scrap of street no one walks
+    into) lies on the level of the nearest region one does. Where two climbs give a region two levels, nothing is
+    returned (the town lies as before). The flights climb from their foot's level to their top's a share a row
+    (hand_slopes). What stands on the streets (blocked cells: houses, doors, signs) stands on the level of the
+    street it faces (the first south of it), else the nearest street's; a rail (`rails`, {(tileset, local
+    metatile)}: a terrace's parapet, a flight's side rails) on the highest street beside it - the terrace whose edge
+    it is - not on the street below its wall. Returns the streets', the flights' and those cells' entries; the rock among them is the rock bands' (they
+    lay theirs over these: a band between two levels a face from the lower to the higher)."""
+    stairs = frozenset(stairs)
+    rails = frozenset(rails)
+
+    def rail(offset: int) -> bool:
+        cell = cells[offset]
+        return (cell.get("tileset"), cell.get("localMetatile")) in rails
+
+    def stair(offset: int) -> bool:
+        cell = cells[offset]
+        return cell.get("collision", 0) == 0 and (cell.get("tileset"), cell.get("localMetatile")) in stairs
+
+    def water(offset: int) -> bool:
+        return cells[offset].get("behavior") in WATER_BEHAVIORS
+
+    def street(offset: int) -> bool:
+        return cells[offset].get("collision", 0) == 0 and not stair(offset) and not water(offset)
+
+    def groups(pred) -> tuple[dict[int, int], list[list[int]]]:
+        of: dict[int, int] = {}
+        out: list[list[int]] = []
+        for start in range(len(cells)):
+            if start in of or not pred(start):
+                continue
+            of[start] = len(out)
+            members, queue = [start], deque([start])
+            while queue:
+                offset = queue.popleft()
+                for neighbor in _neighbours(offset, width, height):
+                    if neighbor not in of and pred(neighbor):
+                        of[neighbor] = len(out)
+                        members.append(neighbor)
+                        queue.append(neighbor)
+            out.append(members)
+        return of, out
+
+    region_of, regions = groups(street)
+    _, flights = groups(stair)
+    climbs: dict[int, list[tuple[int, int]]] = defaultdict(list)
+    spans = []
+    for flight in flights:
+        rows = sorted({offset // width for offset in flight})
+        columns = sorted({offset % width for offset in flight})
+        tops = {region_of.get((rows[0] - 1) * width + x) for x in columns if rows[0] > 0} - {None}
+        feet = {region_of.get((rows[-1] + 1) * width + x) for x in columns if rows[-1] + 1 < height} - {None}
+        if len(tops) != 1 or len(feet) != 1:
+            continue
+        upper, lower = next(iter(tops)), next(iter(feet))
+        climbs[upper].append((lower, -1))
+        climbs[lower].append((upper, 1))
+        spans.append((flight, upper, lower))
+    level: dict[int, int] = {}
+    shore = sorted({index for offset, index in region_of.items()
+                    if any(water(neighbor) for neighbor in _neighbours(offset, width, height))})
+    for root in shore:
+        if root in level:
+            continue
+        level[root] = 0
+        queue = deque([root])
+        while queue:
+            index = queue.popleft()
+            for other, step in climbs[index]:
+                if other not in level:
+                    level[other] = level[index] + step
+                    queue.append(other)
+                elif level[other] != level[index] + step:
+                    return {}
+    if not level:
+        return {}
+    # the scraps no flight reaches: the level of the nearest street one does, through anything
+    found: dict[int, int] = {offset: level[index] for offset, index in region_of.items() if index in level}
+    queue = deque(found)
+    while queue:
+        offset = queue.popleft()
+        for neighbor in _neighbours(offset, width, height):
+            if neighbor not in found:
+                found[neighbor] = found[offset]
+                queue.append(neighbor)
+    for index, members in enumerate(regions):
+        if index not in level:
+            level[index] = found[members[0]]
+    out: dict[int, dict] = {}
+    # what stands on the streets - houses, the Cave of Origin's door frame, signs - on the level of the street it
+    # faces, the first south of it (the GBA's houses face south), else the nearest street's (its own height on it,
+    # as lift_blocked_cells' cells); the rock's cells the rock bands lay over these entries
+    for offset, value in found.items():
+        if cells[offset].get("collision", 0) == 0 or water(offset):
+            continue
+        x, y = offset % width, offset // width
+        beside = [level[region_of[(y + dy) * width + x + dx]] for dy in (-1, 0, 1) for dx in (-1, 0, 1)
+                  if (dx or dy) and 0 <= x + dx < width and 0 <= y + dy < height
+                  and (y + dy) * width + x + dx in region_of]
+        if rail(offset) and beside:
+            out[offset] = {"groundQ16": 16 * max(beside), "topQ16": 16 * max(beside), "profile": "none",
+                           "solid": False, "lift": True}
+            continue
+        below = offset + width
+        while below < len(cells) and cells[below].get("collision", 0) != 0 and not water(below):
+            below += width
+        if below < len(cells) and below in region_of:
+            value = level[region_of[below]]
+        out[offset] = {"groundQ16": 16 * value, "topQ16": 16 * value, "profile": "none", "solid": False,
+                       "lift": True}
+    for offset, index in region_of.items():
+        out[offset] = {"groundQ16": 16 * level[index], "topQ16": 16 * level[index], "profile": "none",
+                       "solid": False}
+    # a stair tile that joins no two streets (a house's doorstep drawn as one, a door above it) lies flat on its
+    # street's level
+    for offset in range(len(cells)):
+        if stair(offset) and offset in found:
+            out[offset] = {"groundQ16": 16 * found[offset], "topQ16": 16 * found[offset], "profile": "none",
+                           "solid": False}
+    for flight, upper, lower in spans:
+        rows = sorted({offset // width for offset in flight})
+        for x in sorted({offset % width for offset in flight}):
+            out.update(hand_slopes(width, (((x, rows[0], x, rows[-1]), "n", 16 * level[lower], 16 * level[upper]),)))
     return out

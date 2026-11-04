@@ -9,7 +9,7 @@ from compile_rules import _load_cells, parse_behaviors
 from terrace_topology import (CAVE_RISE_Q16, LEDGE_JUMPS, MOUNTAIN_LEDGE_Q16, SLOPE_RISE_Q16, TERRACE_ROLES,
                               contradiction_ramps, course_ridges, cave_climbs, cave_levels, join_level_free_cells, join_water, lift_blocked_cells,
                               hall_stairs, hand_banks, hand_floors, hand_slopes, indoor_levels,
-                              mountain_by_hand, stair_runs_between,
+                              mountain_by_hand, stair_runs_between, stair_terraces,
                               mountain_ledges, pass_levels, rock_tops, role_for_cell, seam_shifts, slope_tops,
                               solve_layout)
 
@@ -1005,8 +1005,11 @@ class TerraceTopologyTests(unittest.TestCase):
         _, layouts = load_world(ROOT)
         names = {value: name for name, value
                  in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
-        self.assertEqual(set(SEAM_RAMPS), {"LAYOUT_SAFARI_ZONE_SOUTHWEST", "LAYOUT_SAFARI_ZONE_SOUTH"})
+        self.assertEqual(set(SEAM_RAMPS), {"LAYOUT_SAFARI_ZONE_SOUTHWEST", "LAYOUT_SAFARI_ZONE_SOUTH",
+                                           "LAYOUT_BATTLE_FRONTIER_OUTSIDE_WEST"})
         for lid, ramp in SEAM_RAMPS.items():
+            if not lid.startswith("LAYOUT_SAFARI_ZONE_"):
+                continue
             layout = next(row for row in layouts if row["id"] == lid)
             width = layout["width"]
             cells = _load_cells(ROOT, [layout], tilesets, names)[0][lid]
@@ -1038,6 +1041,103 @@ class TerraceTopologyTests(unittest.TestCase):
             else:
                 # the south's path runs on south from the ramp
                 self.assertTrue(all(cells[(y1 + 1) * width + x]["collision"] == 0 for x in range(x0, x1 + 1)))
+
+    def test_ramps_given_by_hand_climb_east_and_west(self):
+        # An east ramp's columns climb from its west edge, a west one's from its east edge, a share a column; a
+        # direction other than n, s, e or w is refused.
+        out = hand_slopes(4, (((0, 0, 1, 0), "e", -16, 0), ((2, 1, 3, 1), "w", 0, 16)))
+        self.assertEqual([(out[x]["groundQ16"], out[x]["topQ16"], out[x]["rise"], out[x]["profile"]) for x in (0, 1)],
+                         [(-16, -8, 8, "transition-east"), (-8, 0, 8, "transition-east")])
+        self.assertEqual([(out[4 + x]["groundQ16"], out[4 + x]["topQ16"], out[4 + x]["profile"]) for x in (3, 2)],
+                         [(0, 8, "transition-west"), (8, 16, "transition-west")])
+        self.assertEqual(sorted(out), [0, 1, 6, 7])
+        with self.assertRaises(ValueError):
+            hand_slopes(4, (((0, 0, 0, 0), "up", 0, 16),))
+
+    def test_the_battle_frontiers_seam_given_by_hand(self):
+        # The west half's south plaza lies a level under the east half's (MS-162): the west half's last column lies
+        # flat on the east half's level, the column before it climbs east to it where it is walked, and the
+        # building and the Mart beside it stand on the plaza's level, whole.
+        from compile_rules import SEAM_RAMPS
+        tilesets = load_tilesets(ROOT)
+        _, layouts = load_world(ROOT)
+        names = {value: name for name, value
+                 in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
+        lid = "LAYOUT_BATTLE_FRONTIER_OUTSIDE_WEST"
+        ramp = SEAM_RAMPS[lid]
+        layout = next(row for row in layouts if row["id"] == lid)
+        width = layout["width"]
+        cells = _load_cells(ROOT, [layout], tilesets, names)[0][lid]
+        walk = lambda x, y: cells[y * width + x]["collision"] == 0
+        ((fx0, fy0, fx1, fy1), floor_level), = ramp["floors"]
+        self.assertEqual((fx0, fx1, floor_level), (width - 1, width - 1, 0))       # the seam column, the east level
+        flat = hand_floors(cells, width, ramp["floors"])
+        self.assertEqual(len(flat), fy1 - fy0 + 1)                                  # walked end to end
+        slopes = hand_slopes(width, ramp["slopes"])
+        rows = set()
+        for (x0, y0, x1, y1), direction, low, high in ramp["slopes"]:
+            self.assertEqual((x0, x1, direction, low, high), (width - 2, width - 2, "e", -16, 0))
+            rows |= set(range(y0, y1 + 1))
+        # every walkable cell of the column before the seam's, and only those, climbs
+        self.assertEqual(rows, {y for y in range(fy0, fy1 + 1) if walk(width - 2, y)})
+        self.assertTrue(all(entry["groundQ16"] == -16 and entry["topQ16"] == 0 for entry in slopes.values()))
+        banks = hand_banks(cells, width, ramp["banks"])
+        self.assertEqual({(entry["groundQ16"], entry["lift"]) for entry in banks.values()}, {(-16, True)})
+        self.assertFalse(set(banks) & set(slopes))
+        self.assertFalse(set(banks) & set(flat))
+        # the column's blocked cells (the building's and the Mart's corners) are banked
+        self.assertTrue(all((y * width + width - 2) in banks for y in range(fy0, fy1 + 1) if not walk(width - 2, y)))
+
+    def test_a_town_of_stair_terraces(self):
+        # Streets a flight of stairs climbs between: the street by the water on level 0, the one at the flight's top
+        # a level up; the flight climbs a share a row; the rails at the upper street's edge stand on it, the rock
+        # and the house on the street south of them; a stair tile joining no two streets (a doorstep) lies flat.
+        #   y0  U U U U U U
+        #   y1  R R T T R H      U, L streets; T the flight; R rails; B rock; H a house; D a doorstep
+        #   y2  B B T T B H
+        #   y3  L L L L L L
+        #   y4  L L D L L L
+        #   y5  W W W W W W
+        def tile(kind):
+            base = {"tileset": "gTileset_Sootopolis", "localMetatile": 1, "metatile": 513,
+                    "behavior": "MB_NORMAL", "collision": 0, "elevation": 3}
+            if kind in "TD":
+                base["localMetatile"] = 68
+            elif kind == "R":
+                base.update(localMetatile=0x41, collision=1)
+            elif kind in "BH":
+                base.update(localMetatile=2, collision=1)
+            elif kind == "W":
+                base.update(behavior="MB_DEEP_WATER", elevation=1)
+            return base
+        rows = ("UUUUUU", "RRTTRH", "BBTTBH", "LLLLLL", "LLDLLL", "WWWWWW")
+        width, height = 6, len(rows)
+        cells = tuple(tile(kind) for row in rows for kind in row)
+        stairs = {("gTileset_Sootopolis", 68)}
+        out = stair_terraces(cells, width, height, stairs, {("gTileset_Sootopolis", 0x41)})
+        at = lambda x, y: out[y * width + x]
+        self.assertTrue(all((at(x, 0)["groundQ16"], at(x, 0)["topQ16"], at(x, 0)["profile"]) == (16, 16, "none")
+                            for x in range(width)))
+        self.assertTrue(all(at(x, 3)["groundQ16"] == 0 for x in range(width)))
+        for x in (2, 3):                                     # the flight, from the lower street up to the upper
+            self.assertEqual([(at(x, y)["groundQ16"], at(x, y)["topQ16"], at(x, y)["profile"]) for y in (2, 1)],
+                             [(0, 8, "transition-horizontal"), (8, 16, "transition-horizontal")])
+        for x in (0, 1, 4):                                  # the rails on the upper street, the rock on the lower
+            self.assertEqual((at(x, 1)["groundQ16"], at(x, 1)["lift"]), (16, True))
+            self.assertEqual((at(x, 2)["groundQ16"], at(x, 2)["lift"]), (0, True))
+        for y in (1, 2):                                     # the house faces the lower street
+            self.assertEqual((at(5, y)["groundQ16"], at(5, y)["lift"]), (0, True))
+        self.assertEqual((at(2, 4)["groundQ16"], at(2, 4)["topQ16"], at(2, 4)["profile"]), (0, 0, "none"))
+        self.assertFalse(any(y * width + x in out for y in (5,) for x in range(width)))     # the water left alone
+
+        # a flight whose top and foot are one street (the street round its wall) gives it two levels: nothing
+        rows = ("UUUU", "UBTB", "UBTB", "UUUU", "WWWW")
+        cells = tuple(tile(kind) for row in rows for kind in row)
+        self.assertEqual(stair_terraces(cells, 4, len(rows), stairs), {})
+        # no street by the water: nothing to start the levels from
+        rows = ("UUUU", "BBTB", "LLLL")
+        cells = tuple(tile(kind) for row in rows for kind in row)
+        self.assertEqual(stair_terraces(cells, 4, len(rows), stairs), {})
 
     def test_route119s_mountain_and_bridge_given_by_hand(self):
         # Route 119's two tops and the bridge between them stand a level up; the bridge's cells (elevation 15, over

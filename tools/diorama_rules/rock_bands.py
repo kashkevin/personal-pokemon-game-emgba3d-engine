@@ -121,7 +121,7 @@ def band_surfaces(cells: tuple[dict, ...], width: int, height: int, rock: frozen
                   levels: dict[int, int], tops: dict[int, int] | None = None,
                   ridge: int = RIDGE_Q16, cap: int = CAP_Q16, caps: dict[int, int] | None = None,
                   pits: frozenset[int] = frozenset(),
-                  painted: bool = False) -> dict[int, tuple[int, int]]:
+                  painted: bool = False, foot_lowest: bool = False) -> dict[int, tuple[int, int]]:
     """{offset: (groundQ16, topQ16)} for the rock's cells. `levels`: the walkable ground's and the water's levels
     (absent: 0, the level the terrace solver gives ground of no level of its own) - every cell beside the rock that
     is not rock: walkable ground, water, and what stands on the ground (a tree, a house, a fence, at its ground's
@@ -133,7 +133,9 @@ def band_surfaces(cells: tuple[dict, ...], width: int, height: int, rock: frozen
     PAINTED_DEPTH cells in from its edge) that parts no levels, on land more than in water - a cliff the GBA paints on
     level ground - keeps no entry, its pieces drawn as their own shapes as before step 16: risen a tile as a ridge,
     Lilycove's, Fallarbor's, Route 120's and the Safari Zone's cliffs stood as walls on the ground both sides of them
-    (the owner's report of 2026-10-31). A wide mass (a mountain) still rises."""
+    (the owner's report of 2026-10-31). A wide mass (a mountain) still rises. `foot_lowest`: a band stands on the
+    lowest ground beside it, however little of it there is (a town of terraces, compile_rules STAIR_TERRACES: a
+    band whose foot was its streets' most common level stood over a lower street beside it, its underside open)."""
     tops = tops or {}
     caps = caps or {}
     out: dict[int, tuple[int, int]] = {}
@@ -168,7 +170,7 @@ def band_surfaces(cells: tuple[dict, ...], width: int, height: int, rock: frozen
         common = shares.most_common(1)[0][0]
         counted = [level for level, count in shares.items()
                    if count >= LEVEL_SHARE * len(boundary) or level == common]
-        low, high = min(counted), max(boundary.values())
+        low, high = (min(boundary.values()) if foot_lowest else min(counted)), max(boundary.values())
         members = set(band)
         band_cap = max([cap] + [caps[offset] for offset in band if offset in caps])
         for offset in band:

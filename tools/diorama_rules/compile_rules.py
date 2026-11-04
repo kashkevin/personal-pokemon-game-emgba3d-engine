@@ -26,7 +26,7 @@ from pixel_objects import UPRIGHT_CLASSES as UPRIGHT_PIXEL_CLASSES, extract_layo
 from structures import analyze_layout
 from terrace_topology import (WATER_BEHAVIORS, cave_climbs, cave_levels, contradiction_ramps, course_ridges,
                               hall_stairs, hand_banks, hand_floors, hand_slopes, indoor_levels,
-                              mountain_by_hand, stair_runs_between,
+                              mountain_by_hand, stair_runs_between, stair_terraces,
                               join_level_free_cells,
                               join_water,
                               lift_blocked_cells, mountain_ledges, pass_levels, rock_tops, seam_shifts,
@@ -1459,6 +1459,15 @@ SEAM_RAMPS: dict[str, dict] = {
     "LAYOUT_SAFARI_ZONE_SOUTH": {"floors": (((29, 0, 30, 0), -16),),
                                  "slopes": (((29, 1, 30, 1), "s", -16, 0),),
                                  "banks": (((17, 0, 39, 1), -16),)},
+    # The Battle Frontier's two halves: the west half's south plaza (rows 40-54 along the seam) lies a level under the
+    # east half's (MS-162). Its last column lies on the east half's level and the one before it climbs east to it
+    # where it is walked; the building and the Mart beside it (its flower boxes) stay on the plaza, whole. The seam
+    # itself lies flat on both sides (a ramp in the last column left a crack along the seam).
+    "LAYOUT_BATTLE_FRONTIER_OUTSIDE_WEST": {"banks": (((52, 41, 54, 44), -16), ((50, 48, 54, 51), -16)),
+                                            "floors": (((55, 40, 55, 54), 0),),
+                                            "slopes": (((54, 40, 54, 41), "e", -16, 0),
+                                                       ((54, 45, 54, 49), "e", -16, 0),
+                                                       ((54, 52, 54, 54), "e", -16, 0))},
 }
 # Mountains given by hand (terrace_topology.mountain_by_hand; KNOWN_ISSUES MS-153): "top", a seed cell (x, y) and the
 # level (Q16) its top and everything joined to it stand on; "decks", rectangles of it that are a bridge; "climbs", its
@@ -1472,6 +1481,18 @@ SEAM_RAMPS: dict[str, dict] = {
 MOUNTAIN_LEVELS: dict[str, dict] = {
     "LAYOUT_ROUTE119": {"top": ((5, 83), 16), "decks": ((7, 84, 33, 85),),
                         "climbs": (((5, 79, 6, 80), "s", -16, 16), ((30, 97, 31, 97), "n", 0, 16))},
+}
+# Towns of terraces whose streets the GBA gives one elevation, their stairs the only sign of their levels
+# (terrace_topology.stair_terraces; KNOWN_ISSUES MS-172): Sootopolis City's crater of terraces round its lake lay flat,
+# its white rock walls standing one to three levels over every street. Its streets now climb a level a flight of its
+# stairs (the Sootopolis tileset's, 68 and 69, the two halves of a flight two cells wide) from the lake's shore.
+# Its rails (the terraces' parapets and the flights' side rails) stand on the street whose edge they are.
+STAIR_TERRACES: dict[str, dict] = {
+    "LAYOUT_SOOTOPOLIS_CITY": {
+        "stairs": frozenset({("gTileset_Sootopolis", 68), ("gTileset_Sootopolis", 69)}),
+        "rails": frozenset(("gTileset_Sootopolis", local)
+                           for local in (0x41, 0x42, 0x46, 0x47, 0x4E, 0x56, 0x62, 0x63, 0x6E, 0x6F)),
+    },
 }
 # The rooms whose stage or upper floor the GBA draws at the elevation of the floor round it, given by hand
 # (terrace_topology.indoor_levels; KNOWN_ISSUES MS-164): "rise" in Q16 (16 a level), "raised" rectangles (x0, y0,
@@ -1995,6 +2016,11 @@ def compile_data(root: Path) -> dict:
                 # (a mountain the climbs do not solve, given by hand: Route 119's)
                 climbed = {**climbed, **mountain_by_hand(cells[layout["id"]], layout["width"], layout["height"],
                                                          MOUNTAIN_LEVELS[layout["id"]])}
+            if layout["id"] in STAIR_TERRACES:
+                # (a town of terraces climbing its stairs: Sootopolis's)
+                climbed = {**climbed, **stair_terraces(cells[layout["id"]], layout["width"], layout["height"],
+                                                       STAIR_TERRACES[layout["id"]]["stairs"],
+                                                       STAIR_TERRACES[layout["id"]]["rails"])}
             mountain_climbs[layout["id"]] = frozenset(climbed)
             solved = {**solved, **climbed}
             mouths = join_level_free_cells(cells[layout["id"]], layout["width"],
@@ -2372,7 +2398,8 @@ def compile_data(root: Path) -> dict:
                 surfaces = band_surfaces(layout_cells, layout["width"], layout["height"], band, levels,
                                          tops={**courses, **walked, **masses},
                                          caps={offset: entry["capQ16"] for offset, entry in art_of.items()},
-                                         pits=pits & band, painted=True)
+                                         pits=pits & band, painted=True,
+                                         foot_lowest=layout["id"] in STAIR_TERRACES)
                 if surfaces:
                     # a pit (a crater's mouth) is ground on its band's ground, not rock: rock of no height the
                     # renderer stands a whole tile up (gl_terrain_renderer.c ShapeRockMasses)
