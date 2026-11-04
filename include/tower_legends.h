@@ -87,6 +87,7 @@ struct TowerLegendsCommand
 // Claim bits (the save record's claims, the host's CLAIMS word): the first-clear prize of each checkpoint floor, then
 // the milestone Pokemon of 25, 50, 75 and 100 delivered.
 #define TOWER_CLAIM_MON_SHIFT 12
+#define TOWER_CLAIM_MON_MASK  (0xFu << TOWER_CLAIM_MON_SHIFT) // the milestone Pokemon delivered to this save
 #define TOWER_MILESTONE_COUNT 4
 
 // The Duo battle code (the native co-op preparation's flags): the ladder layout with family 1 in bits 7-9.

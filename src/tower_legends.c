@@ -315,7 +315,11 @@ u32 TowerLegends_ApplyStateWord(u32 payload)
     {
         if ((payload & 0x3F0000) != 0 || (record = RecordForWrite()) == NULL)
             return 0;
-        record->claims |= payload & 0xFFFF;
+        // The prize floors only (bits 0-11). A milestone Pokemon's bit (12-15) is this save's own: set with the Pokemon
+        // (MarkDelivered), never from the host's word. A save from before the delivery (the game closed before saving)
+        // replays the host's words: with that bit taken from a claims word it would answer "already delivered" (2) to
+        // the Pokemon it never kept, and the host would count it delivered (KNOWN_ISSUES MS-51).
+        record->claims |= payload & ~TOWER_CLAIM_MON_MASK & 0xFFFF;
     }
     else
     {

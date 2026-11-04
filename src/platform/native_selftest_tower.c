@@ -448,7 +448,8 @@ int NativeSelfTest_Tower(void)
                 && amount == revision + 1 && gSaveBlock3Ptr->tower.revision == revision + 1);
     MultiplayerWorld_ApplyRewardWord((s32)TowerWord(MP_REWARD_TOWER_STATE, (1u << 22) | 0x0005), &result);
     MultiplayerWorld_ApplyRewardWord((s32)TowerWord(MP_REWARD_TOWER_STATE, (1u << 22) | 0x1002), &result);
-    ExpectTower("CLAIMS are OR-ed and never cleared", TowerLegends_Claims() == 0x1007);
+    ExpectTower("CLAIMS are OR-ed and never cleared; a milestone Pokemon's bit is not taken from them (MS-51)",
+                TowerLegends_Claims() == 0x0007);
     ok = TRUE;
     {
         u32 bad[] = {(101 << 15) | (13 << 8), (12 << 15) | (0 << 8), (12 << 15) | (102 << 8), (1u << 22) | (1 << 16), (2u << 22), (3u << 22)};
@@ -456,7 +457,7 @@ int NativeSelfTest_Tower(void)
             if (MultiplayerWorld_ApplyRewardWord((s32)TowerWord(MP_REWARD_TOWER_STATE, bad[i]), &result) != 0)
                 ok = FALSE;
     }
-    ExpectTower("malformed Tower words change nothing (receipt 0)", ok && TowerLegends_Claims() == 0x1007 && TowerLegends_Progress() == 11);
+    ExpectTower("malformed Tower words change nothing (receipt 0)", ok && TowerLegends_Claims() == 0x0007 && TowerLegends_Progress() == 11);
 
     // 6. The milestone Pokemon: made from the word and the trainer's ID, the same each time; party, then PC.
     gSaveBlock3Ptr->tower.claims = 0; gSaveBlock3Ptr->tower.crc32 = 0; // a fresh record below
@@ -494,16 +495,50 @@ int NativeSelfTest_Tower(void)
             ok = FALSE;
     ExpectTower("floor 50's prize: every IV 31, shiny only by the odds", ok && GetMonData(mon, MON_DATA_IS_SHINY)
                 == (GET_SHINY_VALUE(READ_OTID_FROM_SAVE, GetMonData(mon, MON_DATA_PERSONALITY)) < MP_GEN6_SHINY_ODDS));
+    // KNOWN_ISSUES MS-51: the host's claims word (an older world's, with the milestone's bit) does not mark it delivered:
+    // a save that never kept the Pokemon still gets it; the Pokemon made, its own bit answers 2 to the word again.
     MultiplayerWorld_ApplyRewardWord((s32)TowerWord(MP_REWARD_TOWER_STATE, (1u << 22) | (1u << (TOWER_CLAIM_MON_SHIFT + 3))), &result);
+    ExpectTower("a claims word with a milestone's bit leaves it undelivered", !(TowerLegends_Claims() & (1u << (TOWER_CLAIM_MON_SHIFT + 3))));
+    amount = MultiplayerWorld_ApplyRewardWord((s32)TowerWord(MP_REWARD_TOWER_MON, (3u << 22) | (SPECIES_RAYQUAZA << 11) | (70 << 4)), &result);
+    ExpectTower("so its Pokemon is made (1) and marked delivered with it", amount == 1
+                && GetMonData(&gParties[B_TRAINER_PLAYER][1], MON_DATA_SPECIES) == SPECIES_RAYQUAZA
+                && (TowerLegends_Claims() & (1u << (TOWER_CLAIM_MON_SHIFT + 3))));
     ExpectTower("a delivered milestone answers 2 and makes nothing", MultiplayerWorld_ApplyRewardWord(
                 (s32)TowerWord(MP_REWARD_TOWER_MON, (3u << 22) | (SPECIES_RAYQUAZA << 11) | (70 << 4)), &result) == 2
-                && GetMonData(&gParties[B_TRAINER_PLAYER][1], MON_DATA_SPECIES) == SPECIES_NONE);
+                && GetMonData(&gParties[B_TRAINER_PLAYER][2], MON_DATA_SPECIES) == SPECIES_NONE);
     for (i = 0; i < PARTY_SIZE; i++)
         CreateMon(&gParties[B_TRAINER_PLAYER][i], SPECIES_ZIGZAGOON, 5, i, OTID_STRUCT_PLAYER_ID);
     CalculatePlayerPartyCount();
     memset(&gSaveBlock3Ptr->tower, 0, sizeof(gSaveBlock3Ptr->tower));
     amount = MultiplayerWorld_ApplyRewardWord((s32)TowerWord(MP_REWARD_TOWER_MON, (0u << 22) | (SPECIES_LAPRAS << 11) | (25 << 4)), &result);
     ExpectTower("a full party sends it to the PC", amount == 1 && GetBoxMonDataAt(0, 0, MON_DATA_SPECIES) == SPECIES_LAPRAS);
+    // KNOWN_ISSUES MS-51: a save from before the delivery with a full party and a full PC (the game closed before the
+    // player saved): the replayed word makes nothing and says so (0), the record stays undelivered, so the host's
+    // resend makes the Pokemon once there is room.
+    {
+        u32 box, slot;
+        struct BoxPokemon *boxMon;
+
+        for (box = 0; box < TOTAL_BOXES_COUNT; box++)
+            for (slot = 0; slot < IN_BOX_COUNT; slot++)
+            {
+                boxMon = &gPokemonStoragePtr->boxes[box][slot];
+                CreateBoxMon(boxMon, SPECIES_ZIGZAGOON, 5, box * IN_BOX_COUNT + slot, (struct OriginalTrainerId) {0});
+            }
+        memset(&gSaveBlock3Ptr->tower, 0, sizeof(gSaveBlock3Ptr->tower));
+        amount = MultiplayerWorld_ApplyRewardWord((s32)TowerWord(MP_REWARD_TOWER_MON, (0u << 22) | (SPECIES_LAPRAS << 11) | (25 << 4)), &result);
+        ExpectTower("a full party and PC: nothing made (0), the record not marked", amount == 0
+                    && !(TowerLegends_Claims() & (1u << TOWER_CLAIM_MON_SHIFT)));
+        MultiplayerWorld_ApplyRewardWord((s32)TowerWord(MP_REWARD_TOWER_STATE, (1u << 22) | (1u << TOWER_CLAIM_MON_SHIFT)), &result);
+        ZeroBoxMonData(&gPokemonStoragePtr->boxes[3][7]);                 // the player makes room
+        amount = MultiplayerWorld_ApplyRewardWord((s32)TowerWord(MP_REWARD_TOWER_MON, (0u << 22) | (SPECIES_LAPRAS << 11) | (25 << 4)), &result);
+        ExpectTower("the host's claims replayed after it change nothing; with room the resend makes it (1)", amount == 1
+                    && (TowerLegends_Claims() & (1u << TOWER_CLAIM_MON_SHIFT))
+                    && GetBoxMonDataAt(3, 7, MON_DATA_SPECIES) == SPECIES_LAPRAS);
+        for (box = 0; box < TOTAL_BOXES_COUNT; box++)
+            for (slot = 0; slot < IN_BOX_COUNT; slot++)
+                ZeroBoxMonData(&gPokemonStoragePtr->boxes[box][slot]);
+    }
     ok = TRUE;
     {
         u32 bad[] = {(0u << 22) | (SPECIES_LAPRAS << 11) | (25 << 4) | 1, (0u << 22) | (0 << 11) | (25 << 4),
