@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include "multiplayer_ladder.h"
 #include "multiplayer_soft_reset.h"
+#include "platform/mp_bridge.h"
 #include "tower_legends.h"
 #include "battle_controllers.h"
 #include "evolution_scene.h"
@@ -863,20 +864,23 @@ void MultiplayerCoop_ExpEvolve(void)
 // ---------------------------------------------------------------------------
 // A co-op battle's result survives a closed game (the owner's instruction of 2026-11-04: pending experience must not be
 // lost to a reset). The result waits for its script in the save's co-op record (include/global.h MPCoopResultRecord):
-// every save made meanwhile carries it, and a save loaded with one waiting runs its script, once. When the battle has
-// released the field, the host save is asked for first (as after an in-game SAVE in a world, multiplayer_soft_reset.c)
-// and the script runs once it is made (or after RESULT_SAVE_WAIT_FRAMES without it); when the script has ended (the badge,
-// prize and experience given), the host save is asked for again. The script takes the result as it starts and no save is
-// made while a script runs (MultiplayerSave_FieldReady), so a save never has both the result waiting and its effects.
+// every save made meanwhile carries it, and a save loaded with one waiting runs its script, once. In a world the
+// launcher saves on the host as soon as a co-op battle has fully ended (launcher_session.py), and the script runs once
+// that save is made (or after RESULT_SAVE_WAIT_FRAMES without it). The game does not ask for that save itself: the
+// launcher is still finishing the battle when the field comes back, and a Players page opened then broke that (the first
+// launcher run of this change). When the script has ended (the badge, prize and experience given), the game asks for the
+// host save (page 3, as after an in-game SAVE in a world: multiplayer_soft_reset.c). The script takes the result as it
+// starts and no save is made while a script holds the field (MultiplayerSave_FieldReady), so a save never has both the
+// result waiting and its effects.
 #define RESULT_SAVE_WAIT_FRAMES (60 * 15)
 
 static EWRAM_DATA struct
 {
-    bool8 waiting;  // a result waits for the host save that carries it
-    bool8 asked;    // that save was asked for
-    bool8 after;    // a result script started: the host save once it has ended
-    u32 counter;    // gSaveCounter when the result came
-    u32 age;        // calm frames since that save was asked for
+    bool8 waiting;    // a result waits for the host save that carries it
+    bool8 savedFirst; // the result was in a host save before its script (or came from a loaded save)
+    bool8 after;      // a result script started: the host save once it has ended
+    u32 counter;      // gSaveCounter when the result came
+    u32 age;          // calm frames waited for that save
 } sResultSave = {0};
 
 static void ResultLog(const char *text)
@@ -895,13 +899,14 @@ static bool32 ResultWaiting(void)
 static void ArmResultSave(void)
 {
     sResultSave.waiting = TRUE;
-    sResultSave.asked = FALSE;
+    sResultSave.savedFirst = FALSE;
     sResultSave.counter = gSaveCounter;
     sResultSave.age = 0;
 }
 
-// The field is calm with a result waiting: TRUE when its script may run (the host save that carries it is made, or there
-// is no world's host save to ask for, or it did not come in time: the result is then in this game's memory only).
+// The field is calm with a result waiting: TRUE when its script may run (the host save that carries it is made, or the
+// game is in no world whose launcher saves, or the save did not come in time: the result is then in this game's memory
+// only).
 bool32 MultiplayerCoop_ResultSaved(void)
 {
     if (!sResultSave.waiting)
@@ -909,21 +914,19 @@ bool32 MultiplayerCoop_ResultSaved(void)
     if (gSaveCounter != sResultSave.counter)
     {
         sResultSave.waiting = FALSE;
+        sResultSave.savedFirst = TRUE;
         ResultLog("saved with the result waiting; its script runs");
         return TRUE;
     }
-    if (!sResultSave.asked)
+    if (!MpBridge_HostSavePageEnabled())
     {
-        sResultSave.asked = TRUE;
-        if (!MultiplayerHostSave_RequestNow())
-        {
-            sResultSave.waiting = FALSE;
-            ResultLog("no host save to ask for; its script runs");
-            return TRUE;
-        }
-        ResultLog("the host save first");
+        sResultSave.waiting = FALSE;
+        ResultLog("no world's host save; its script runs");
+        return TRUE;
     }
-    if (++sResultSave.age > RESULT_SAVE_WAIT_FRAMES)
+    if (sResultSave.age++ == 0)
+        ResultLog("waiting for the launcher's host save");
+    if (sResultSave.age > RESULT_SAVE_WAIT_FRAMES)
     {
         sResultSave.waiting = FALSE;
         ResultLog("no host save came in time; its script runs (the result was in this game's memory only)");
@@ -954,7 +957,9 @@ static void CoopResultTick(void)
      || ArePlayerFieldControlsLocked() || gPaletteFade.active)
         return;
     sResultSave.after = FALSE;
-    if (MultiplayerHostSave_RequestNow())
+    // Only after a result that a host save carried (the launcher is long done with the battle by then); otherwise the
+    // launcher's autosave and the party watch save it.
+    if (sResultSave.savedFirst && MultiplayerHostSave_RequestNow())
         ResultLog("the script has ended; the host save");
 }
 
@@ -1015,6 +1020,7 @@ void MultiplayerCoop_LoadFromSave(void)
     memset(&sResultSave, 0, sizeof(sResultSave));
     if (!CoopResultValid(record))
         return;
+    sResultSave.savedFirst = TRUE;  // it came from a save: its script runs at once
     if (MultiplayerLadder_IsLadder(record->code))
         MultiplayerLadder_SetPending(record->code, record->outcome);
     else
