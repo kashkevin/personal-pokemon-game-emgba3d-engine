@@ -379,7 +379,8 @@ void MPOWE_OnWildBattleEnd(u32 outcome)
 // makes already stays while the player is on its map (WE_OWE_PREVENT_SHINY_DESPAWN), but it went for good when the
 // player left that map (walked or warped away, went into a town) and, in a world, when the player left the water (the
 // shared spawns take the land). Each one is remembered where it was last seen on its map and put back there when the
-// player is on that map again, until a battle with it is won or it is caught. For as long as the game runs (not saved).
+// player is on that map again, until a battle with it is won or it is caught. Since MS-145 the list is in the save
+// too (OWEKeep_WriteToSave below), so closing the game no longer forgets one.
 #define OWE_KEEP_COUNT  8
 #define OWE_KEEP_PERIOD 30      // frames between tries to put one back
 struct OWEKeep
@@ -594,7 +595,7 @@ static void OWEKeep_OnBattleEnd(u32 outcome)
 // into one with a Legendary or Mythical: from then on the Pokemon standing there is that one. Run from, fled, or the
 // player's team beaten, it comes back as itself where it stood (not as the Pokemon the roll replaced), and it is kept
 // as a shiny is: put back on its map whenever the player is there again, never despawned, until a battle with it is won
-// or it is caught. For as long as the game runs (OWEKeep is not saved).
+// or it is caught. In the save too since MS-145 (OWEKeep_WriteToSave).
 static void OWELegend_OnBattleEnd(u32 outcome)
 {
     u16 species;
@@ -639,6 +640,177 @@ static void OWELegend_OnBattleEnd(u32 outcome)
 #if defined(DIORAMA_BATTLE_ENV_TEST)
     DioramaBattleEnvTest_OweKept("legend", sOWERunReturn.localId, species, sOWERunReturn.x, sOWERunReturn.y);
 #endif
+}
+
+// KNOWN_ISSUES MS-145: the list is in every save (written before a save, read back when one is loaded: load_save.c), so a
+// kept shiny or Legendary is put back after the game was closed too, as after leaving its map. Each entry keeps its age
+// in the list (the full list forgets the one unseen the longest); a damaged or unknown record is read as none kept, and
+// an entry is taken only with every value the game uses within its bounds.
+static u32 OWEKeepRecordCrc(const struct MPOweKeepRecord *record)
+{
+    return Crc32B((const u8 *)record, offsetof(struct MPOweKeepRecord, crc32));
+}
+
+void OWEKeep_WriteToSave(void)
+{
+    struct MPOweKeepRecord *record = &gSaveBlock3Ptr->oweKeep;
+    u32 i, j, count = 0;
+
+    memset(record, 0, sizeof(*record));
+    for (i = 0; i < OWE_KEEP_COUNT && count < MP_OWE_KEEP_COUNT; i++)
+    {
+        const struct OWEKeep *keep = &sOWEKeep[i];
+        struct MPOweKeepEntry *entry;
+        u32 age = 0;
+
+        if (!keep->used)
+            continue;
+        for (j = 0; j < OWE_KEEP_COUNT; j++)
+        {
+            if (sOWEKeep[j].used && sOWEKeep[j].seen > keep->seen)
+                age++;
+        }
+        entry = &record->entries[count++];
+        entry->graphicsId = keep->graphicsId;
+        entry->x = keep->x;
+        entry->y = keep->y;
+        entry->mapGroup = keep->mapGroup;
+        entry->mapNum = keep->mapNum;
+        entry->localId = keep->localId;
+        entry->elevation = keep->elevation;
+        entry->movementType = keep->movementType;
+        entry->level = keep->level;
+        entry->category = keep->category;
+        entry->age = age;
+    }
+    if (count == 0)
+        return;
+    record->magic = MP_OWE_KEEP_MAGIC;
+    record->version = MP_OWE_KEEP_VERSION;
+    record->count = count;
+    record->crc32 = OWEKeepRecordCrc(record);
+}
+
+static bool32 OWEKeepEntryValid(const struct MPOweKeepEntry *entry)
+{
+    u32 species = entry->graphicsId & OBJ_EVENT_MON_SPECIES_MASK;
+
+    return (entry->graphicsId & OBJ_EVENT_MON) && species != SPECIES_NONE && species < NUM_SPECIES
+        && entry->mapGroup < MAP_GROUPS_COUNT && entry->elevation < 16 && entry->movementType < NUM_MOVEMENT_TYPES
+        && entry->age < MP_OWE_KEEP_COUNT && entry->reserved == 0;
+}
+
+static bool32 OWEKeepRecordValid(const struct MPOweKeepRecord *record)
+{
+    static const struct MPOweKeepEntry sEmpty = {0};
+    u32 i;
+
+    if (record->magic != MP_OWE_KEEP_MAGIC || record->version != MP_OWE_KEEP_VERSION || record->reserved != 0
+     || record->count == 0 || record->count > MP_OWE_KEEP_COUNT || record->crc32 != OWEKeepRecordCrc(record))
+        return FALSE;
+    for (i = 0; i < MP_OWE_KEEP_COUNT; i++)
+    {
+        if (i < record->count ? !OWEKeepEntryValid(&record->entries[i])
+                              : memcmp(&record->entries[i], &sEmpty, sizeof(sEmpty)) != 0)
+            return FALSE;
+    }
+    return TRUE;
+}
+
+void OWEKeep_LoadFromSave(void)
+{
+    const struct MPOweKeepRecord *record = &gSaveBlock3Ptr->oweKeep;
+    u32 i;
+
+    memset(sOWEKeep, 0, sizeof(sOWEKeep));
+    sOWEKeepBattle = -1;
+    sOWEKeepClock = MP_OWE_KEEP_COUNT;   // above every loaded entry's: one seen from now on is the newest
+    if (!OWEKeepRecordValid(record))
+        return;
+    for (i = 0; i < record->count && i < OWE_KEEP_COUNT; i++)
+    {
+        const struct MPOweKeepEntry *entry = &record->entries[i];
+        struct OWEKeep *keep = &sOWEKeep[i];
+
+        keep->used = TRUE;
+        keep->mapGroup = entry->mapGroup;
+        keep->mapNum = entry->mapNum;
+        keep->localId = entry->localId;
+        keep->graphicsId = entry->graphicsId;
+        keep->x = entry->x;
+        keep->y = entry->y;
+        keep->elevation = entry->elevation;
+        keep->movementType = entry->movementType;
+        keep->level = entry->level;
+        keep->category = entry->category;
+        keep->seen = MP_OWE_KEEP_COUNT - 1 - entry->age;
+    }
+}
+
+// --selftest-shiny (src/platform/native_selftest_u29.c): the list as the game keeps it.
+u32 OWEKeep_TestCount(void)
+{
+    u32 i, count = 0;
+
+    for (i = 0; i < OWE_KEEP_COUNT; i++)
+        count += sOWEKeep[i].used;
+    return count;
+}
+
+// Entry `slot` as a record entry (age: its rank by when it was seen); FALSE when that entry is not in use.
+bool32 OWEKeep_TestGet(u32 slot, struct MPOweKeepEntry *entry)
+{
+    const struct OWEKeep *keep;
+    u32 j;
+
+    if (slot >= OWE_KEEP_COUNT || !sOWEKeep[slot].used)
+        return FALSE;
+    keep = &sOWEKeep[slot];
+    memset(entry, 0, sizeof(*entry));
+    entry->graphicsId = keep->graphicsId;
+    entry->x = keep->x;
+    entry->y = keep->y;
+    entry->mapGroup = keep->mapGroup;
+    entry->mapNum = keep->mapNum;
+    entry->localId = keep->localId;
+    entry->elevation = keep->elevation;
+    entry->movementType = keep->movementType;
+    entry->level = keep->level;
+    entry->category = keep->category;
+    for (j = 0; j < OWE_KEEP_COUNT; j++)
+    {
+        if (sOWEKeep[j].used && sOWEKeep[j].seen > keep->seen)
+            entry->age++;
+    }
+    return TRUE;
+}
+
+// Sets entry `slot` (seen at `seen` on the list's clock), or clears it with NULL; no entry: the whole list cleared.
+void OWEKeep_TestSet(u32 slot, const struct MPOweKeepEntry *entry, u32 seen)
+{
+    struct OWEKeep *keep;
+
+    if (slot >= OWE_KEEP_COUNT)
+    {
+        memset(sOWEKeep, 0, sizeof(sOWEKeep));
+        return;
+    }
+    keep = &sOWEKeep[slot];
+    memset(keep, 0, sizeof(*keep));
+    if (entry == NULL)
+        return;
+    keep->used = TRUE;
+    keep->graphicsId = entry->graphicsId;
+    keep->x = entry->x;
+    keep->y = entry->y;
+    keep->mapGroup = entry->mapGroup;
+    keep->mapNum = entry->mapNum;
+    keep->localId = entry->localId;
+    keep->elevation = entry->elevation;
+    keep->movementType = entry->movementType;
+    keep->level = entry->level;
+    keep->category = entry->category;
+    keep->seen = seen;
 }
 #endif
 #line 261 // gba-line

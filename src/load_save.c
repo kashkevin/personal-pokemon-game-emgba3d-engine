@@ -288,6 +288,7 @@ void CopyPartyAndObjectsToSave(void)
 #ifdef PORTABLE
     TmCase_WriteToSave();   // PC: the TM case into the save's TM pocket and TM record (item.c)
     MultiplayerCoop_WriteToSave(); // PC: a co-op battle's result waiting for its script (multiplayer_coop.c)
+    OWEKeep_WriteToSave();  // PC: the kept shiny and Legendary wild Pokemon (wild_encounter_ow.c, MS-145)
 #endif
 #line 260 // gba-line
 }
@@ -299,6 +300,7 @@ void CopyPartyAndObjectsFromSave(void)
 #ifdef PORTABLE
     TmCase_LoadFromSave();  // PC: the TM case from the save's TM pocket and TM record (item.c)
     MultiplayerCoop_LoadFromSave(); // PC: a co-op battle's result the save has waiting (multiplayer_coop.c)
+    OWEKeep_LoadFromSave(); // PC: the kept shiny and Legendary wild Pokemon (wild_encounter_ow.c, MS-145)
 #endif
 #line 266 // gba-line
 }

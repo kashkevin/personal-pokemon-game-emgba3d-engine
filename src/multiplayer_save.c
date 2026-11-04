@@ -47,8 +47,8 @@ _Static_assert(sizeof(struct SaveBlock1) == 15568, "Pinned SaveBlock1");
 _Static_assert(sizeof(struct SaveBlock2) == 3884, "Pinned SaveBlock2");
 #ifdef PORTABLE
 _Static_assert(sizeof(struct SaveBlock3) == 600 + sizeof(struct MPDaycareEggQueue) + sizeof(struct MPTowerRecord)
-               + sizeof(struct MPTmRecord) + sizeof(struct MPCoopResultRecord),
-               "Ownership SaveBlock3, the Day Care egg queue, the Tower record, the TM record, the co-op result");
+               + sizeof(struct MPTmRecord) + sizeof(struct MPCoopResultRecord) + sizeof(struct MPOweKeepRecord),
+               "Ownership SaveBlock3, the Day Care egg queue, the Tower, TM, co-op result and kept wild Pokemon records");
 #else
 #line 38 // gba-line
 _Static_assert(sizeof(struct SaveBlock3) == 600, "Ownership SaveBlock3");

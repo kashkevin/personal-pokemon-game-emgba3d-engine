@@ -381,8 +381,39 @@ struct MPCoopResultRecord
     u8 alive[MP_COOP_RESULT_KOS];      // the party slots that could still battle when it fell
     u32 crc32;                         // CRC-32 of the 72 bytes before
 };
+// KNOWN_ISSUES MS-145: the shiny and Legendary wild Pokemon the player's own game keeps on their maps until they are caught
+// or knocked out (src/wild_encounter_ow.c, MS-79 and MS-144), after the co-op result record: each one's map, where it was
+// last seen, its look (species, shiny, female) and level, so one the player walked away from is put back after the game
+// was closed too. Written into every save; read back when a save is loaded. A save from before has zeros here: none kept.
+#define MP_OWE_KEEP_MAGIC 0x3150454B // "KEP1"
+#define MP_OWE_KEEP_VERSION 1
+#define MP_OWE_KEEP_COUNT 8            // the game's list (OWE_KEEP_COUNT)
+struct MPOweKeepEntry
+{
+    u16 graphicsId;                    // OBJ_EVENT_MON with the species and its shiny and female bits
+    s16 x;                             // where it was last seen (map coordinates, MAP_OFFSET included)
+    s16 y;
+    u8 mapGroup;
+    u8 mapNum;
+    u8 localId;
+    u8 elevation;
+    u8 movementType;
+    u8 level;                          // with OWE_NO_DESPAWN_FLAG
+    u8 category;
+    u8 age;                            // 0 the one seen last; the list forgets the oldest when full
+    u16 reserved;
+};
+struct MPOweKeepRecord
+{
+    u32 magic;
+    u8 version;
+    u8 count;                          // the entries below in use, first
+    u16 reserved;
+    struct MPOweKeepEntry entries[MP_OWE_KEEP_COUNT];
+    u32 crc32;                         // CRC-32 of the 136 bytes before
+};
 #define MP_SAVE_BLOCK_3_BYTES (600 + sizeof(struct MPDaycareEggQueue) + sizeof(struct MPTowerRecord) + sizeof(struct MPTmRecord) \
-                               + sizeof(struct MPCoopResultRecord))
+                               + sizeof(struct MPCoopResultRecord) + sizeof(struct MPOweKeepRecord))
 #endif
 
 struct SaveBlock3
@@ -409,6 +440,7 @@ struct SaveBlock3
     struct MPTowerRecord tower;
     struct MPTmRecord tmRecord;
     struct MPCoopResultRecord coopResult;
+    struct MPOweKeepRecord oweKeep;
 #endif
 }; /* max size 1624 bytes */
 

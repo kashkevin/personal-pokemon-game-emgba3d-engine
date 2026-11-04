@@ -107,4 +107,15 @@ bool32 CanRemoveObjectForOWEMovement(struct ObjectEvent *objectEvent);
 
 extern const u8 InteractWithOverworldWildEncounter[];
 
+#ifdef PORTABLE
+// KNOWN_ISSUES MS-145: the kept shiny and Legendary wild Pokemon in the save (load_save.c's party copies).
+void OWEKeep_WriteToSave(void);
+void OWEKeep_LoadFromSave(void);
+// --selftest-shiny
+u32 OWEKeep_TestCount(void);
+bool32 OWEKeep_TestGet(u32 slot, struct MPOweKeepEntry *entry);
+void OWEKeep_TestSet(u32 slot, const struct MPOweKeepEntry *entry, u32 seen);
+#define OWE_KEEP_TEST_ALL 0xFF  // OWEKeep_TestSet's slot: the whole list cleared
+#endif
+
 #endif // GUARD_WILD_ENCOUNTER_OW_H

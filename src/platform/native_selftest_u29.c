@@ -840,6 +840,114 @@ int NativeSelfTest_DumpLegendPool(const char *outPath)
 // ---------------------------------------------------------------------------------------------------------------------
 #include "item.h"
 #include "multiplayer_spawns.h"
+#include "wild_encounter_ow.h"
+#include "constants/event_object_movement.h"
+#include "constants/event_objects.h"
+
+static struct MPOweKeepEntry KeptMon(u16 species, u16 bits, u16 map, s16 x, s16 y, u8 level)
+{
+    struct MPOweKeepEntry entry = {0};
+
+    entry.graphicsId = OBJ_EVENT_MON | bits | species;
+    entry.x = x;
+    entry.y = y;
+    entry.mapGroup = MAP_GROUP(map);
+    entry.mapNum = MAP_NUM(map);
+    entry.localId = 7;
+    entry.elevation = 3;
+    entry.movementType = MOVEMENT_TYPE_WANDER_AROUND;
+    entry.level = level;
+    entry.category = 4;
+    return entry;
+}
+
+static bool32 SameKept(const struct MPOweKeepEntry *a, const struct MPOweKeepEntry *b)
+{
+    return a->graphicsId == b->graphicsId && a->x == b->x && a->y == b->y && a->mapGroup == b->mapGroup
+        && a->mapNum == b->mapNum && a->localId == b->localId && a->elevation == b->elevation
+        && a->movementType == b->movementType && a->level == b->level && a->category == b->category;
+}
+
+// KNOWN_ISSUES MS-145: the kept shiny and Legendary wild Pokemon go into the save and come back from it.
+static void KeepListSaveChecks(void)
+{
+    struct MPOweKeepRecord *record = &gSaveBlock3Ptr->oweKeep;
+    struct MPOweKeepEntry kept[3], got, full[MP_OWE_KEEP_COUNT];
+    u8 bytes[sizeof(struct MPOweKeepRecord)];
+    u32 i, ages[3] = {1, 0, 2}, found;
+    bool32 same;
+
+    printf("selftest-shiny: MS-145, the kept list in the save\n");
+    kept[0] = KeptMon(SPECIES_ZIGZAGOON, OBJ_EVENT_MON_SHINY, MAP_ROUTE101, 17, 20, 5 | 0x80);
+    kept[1] = KeptMon(SPECIES_LATIAS, 0, MAP_ROUTE120, 30, 41, 40 | 0x80);
+    kept[2] = KeptMon(SPECIES_ZIGZAGOON, OBJ_EVENT_MON_SHINY | OBJ_EVENT_MON_FEMALE, MAP_ROUTE102, 9, 12, 4 | 0x80);
+    OWEKeep_TestSet(OWE_KEEP_TEST_ALL, NULL, 0);
+    OWEKeep_WriteToSave();
+    ExpectLeg("none kept: the record is all zeros (as in a save from before)", record->magic == 0 && record->count == 0
+              && record->crc32 == 0);
+    OWEKeep_TestSet(0, &kept[0], 7);
+    OWEKeep_TestSet(2, &kept[1], 9);
+    OWEKeep_TestSet(5, &kept[2], 2);
+    CopyPartyAndObjectsToSave();    // the save's own path (load_save.c)
+    ExpectLeg("three kept: the save's record holds them, sealed",
+              record->magic == MP_OWE_KEEP_MAGIC && record->version == MP_OWE_KEEP_VERSION && record->count == 3
+              && record->crc32 == Crc32B((const u8 *)record, offsetof(struct MPOweKeepRecord, crc32)));
+    same = TRUE;
+    for (i = 0; i < 3; i++)
+        same = same && SameKept(&record->entries[i], &kept[i]) && record->entries[i].age == ages[i];
+    ExpectLeg("... each where it was last seen, with its look, level and age (the one seen last: age 0)", same);
+    memcpy(bytes, record, sizeof(bytes));
+    OWEKeep_TestSet(OWE_KEEP_TEST_ALL, NULL, 0);
+    ExpectLeg("a closed game's memory keeps none", OWEKeep_TestCount() == 0);
+    CopyPartyAndObjectsFromSave();  // the save's own load (load_save.c)
+    same = OWEKeep_TestCount() == 3;
+    for (i = 0; i < 3 && same; i++)
+        same = OWEKeep_TestGet(i, &got) && SameKept(&got, &kept[i]) && got.age == ages[i];
+    ExpectLeg("loading the save keeps the three again, in the same order of age", same);
+    OWEKeep_WriteToSave();
+    ExpectLeg("saved again, the record is the same bytes", memcmp(bytes, record, sizeof(bytes)) == 0);
+    record->entries[1].x ^= 1;
+    OWEKeep_LoadFromSave();
+    ExpectLeg("a damaged record (CRC) keeps none", OWEKeep_TestCount() == 0);
+    memcpy(record, bytes, sizeof(bytes));
+    record->entries[0].graphicsId &= ~OBJ_EVENT_MON;
+    record->crc32 = Crc32B((const u8 *)record, offsetof(struct MPOweKeepRecord, crc32));
+    OWEKeep_LoadFromSave();
+    ExpectLeg("an entry that is no Pokemon is refused with its record", OWEKeep_TestCount() == 0);
+    memcpy(record, bytes, sizeof(bytes));
+    record->entries[2].movementType = NUM_MOVEMENT_TYPES;
+    record->crc32 = Crc32B((const u8 *)record, offsetof(struct MPOweKeepRecord, crc32));
+    OWEKeep_LoadFromSave();
+    ExpectLeg("... and one whose movement the game has not", OWEKeep_TestCount() == 0);
+    memcpy(record, bytes, sizeof(bytes));
+    record->entries[3].level = 1;
+    record->crc32 = Crc32B((const u8 *)record, offsetof(struct MPOweKeepRecord, crc32));
+    OWEKeep_LoadFromSave();
+    ExpectLeg("... and a stray byte after the last entry", OWEKeep_TestCount() == 0);
+    memset(record, 0, sizeof(*record));
+    OWEKeep_LoadFromSave();
+    ExpectLeg("a save from before (zeros) keeps none", OWEKeep_TestCount() == 0);
+    // A full list: every age kept, so the one unseen the longest is still the one a ninth forgets.
+    OWEKeep_TestSet(OWE_KEEP_TEST_ALL, NULL, 0);
+    for (i = 0; i < MP_OWE_KEEP_COUNT; i++)
+    {
+        full[i] = KeptMon(SPECIES_POOCHYENA + i, OBJ_EVENT_MON_SHINY, MAP_ROUTE101, 10 + i, 20, 5 | 0x80);
+        OWEKeep_TestSet(i, &full[i], 100 + (i * 37) % MP_OWE_KEEP_COUNT);
+    }
+    OWEKeep_WriteToSave();
+    OWEKeep_TestSet(OWE_KEEP_TEST_ALL, NULL, 0);
+    OWEKeep_LoadFromSave();
+    found = 0;
+    for (i = 0; i < MP_OWE_KEEP_COUNT; i++)
+    {
+        if (OWEKeep_TestGet(i, &got) && SameKept(&got, &full[i])
+         && got.age == MP_OWE_KEEP_COUNT - 1 - (i * 37) % MP_OWE_KEEP_COUNT)
+            found++;
+    }
+    ExpectLeg("a full list of eight comes back whole, every age as it was", found == MP_OWE_KEEP_COUNT);
+    OWEKeep_TestSet(OWE_KEEP_TEST_ALL, NULL, 0);
+    memset(record, 0, sizeof(*record));
+}
 
 int NativeSelfTest_Shiny(void)
 {
@@ -860,6 +968,7 @@ int NativeSelfTest_Shiny(void)
     memset(gSaveBlock2Ptr, 0, sizeof(*gSaveBlock2Ptr));
     SetBagItemsPointers();
     ClearBag();
+    KeepListSaveChecks();
     printf("selftest-shiny: Update 29 shiny rolls\n");
     ExpectLeg("the Shiny Charm is a Key Item the bag can hold and the game's shiny code reads from the hunter's own bag",
               AddBagItem(ITEM_SHINY_CHARM, 1) && CheckBagHasItem(ITEM_SHINY_CHARM, 1));
