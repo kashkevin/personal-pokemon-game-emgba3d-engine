@@ -9,6 +9,38 @@ from compile_rules import ARCHETYPES, CLASS_NAMES, TERRAIN_CLASSES, compile_data
 
 
 ROOT = Path(__file__).resolve().parents[2]
+TERRACE_TOPOLOGY = 128   # DIORAMA_MEASURED_TERRACE_TOPOLOGY (include/diorama/rules.h)
+
+
+def grouped_hull(record, structure_classes):
+    """Whether the resolver's structure step makes a record's cell the body of a grouped hull (a 2-wide tree of one to
+    three rows, its template's cell: shape extruded, archetype grouped-hull, its body rows tall; rules.c
+    ApplyStaticTerrain). The classifier's record keeps the ground it stands on."""
+    return (record["structureId"] != 0 and record["ownerKind"] == "template"
+            and structure_classes.get(record["structureId"]) == "grouped-hull"
+            and record["structureWidth"] == 2 and 1 <= record["structureHeight"] <= 3)
+
+
+def resolved_height_q16(record, structure_classes):
+    """The height the driver prints for a record (its ground when below 0, else its feature), as
+    DioramaRules_ResolveCell works it out on one cell (src/diorama/rules.c ApplyStaticTerrain): the terrace
+    solver's levels (groundQ16, topQ16) for a record it placed, else the record's heightQ16 (a ledge stands on its
+    feature); no feature for measured bands without a structure (DisableMeasuredVolume); a 2-wide grouped hull's
+    body rows (1 or 2) for a cell of one. KNOWN_ISSUES MS-170, MS-189: the test compared heightQ16 alone, from
+    before the terraces and grouped hulls, and failed on 77,325 rows of 73 layouts (and the grouped hulls' shape and
+    archetype on 8,340)."""
+    if record["measuredFlags"] & TERRACE_TOPOLOGY:
+        ground, feature = record["groundQ16"], record["topQ16"] - record["groundQ16"]
+    else:
+        ground, feature = min(record["heightQ16"], 0), max(record["heightQ16"], 0)
+        if record["shape"] == "ledge":
+            ground = feature
+    if record["structureId"] == 0:
+        if record["measuredBands"]:
+            feature = 0
+    elif grouped_hull(record, structure_classes):
+        feature = 16 * (2 if record["structureHeight"] >= 2 else 1)
+    return ground if ground < 0 else feature
 
 
 def assert_generated_parity(testcase: unittest.TestCase, data=None):
@@ -28,7 +60,9 @@ def assert_generated_parity(testcase: unittest.TestCase, data=None):
 
     expected = [(layout["id"], record) for layout in data["layouts"]
                 for record in layout["terrainRecords"]]
-    terrain_output = output[:len(expected)]
+    terrain_output = [line for line in output if not line.startswith(("O\t", "P\t"))]
+    testcase.assertEqual(len(terrain_output), len(expected))
+    structure_classes = {row["id"]: row["class"] for row in data["structureCandidates"]}
     shape_ids = {name: index for index, name in enumerate(
         ("flat", "extruded", "cliff", "ledge", "stairs", "water", "bridge",
          "billboard", "cutout", "roof", "building-part", "hidden"))}
@@ -39,12 +73,13 @@ def assert_generated_parity(testcase: unittest.TestCase, data=None):
     for line, (layout_id, record) in zip(terrain_output, expected):
         fields = line.split("\t")
         testcase.assertEqual(len(fields), 41)
+        hull = grouped_hull(record, structure_classes)
         source_kind = next((value for prefix, value in source_kinds.items()
                             if record["source"].startswith(prefix)), 6)
         exact = [
             layout_id, record["cellOffset"], record["expectedMetatile"],
             record["mapGroup"], record["mapNumber"], record["class"],
-            record["heightQ16"], record["artMode"], record["pool"],
+            resolved_height_q16(record, structure_classes), record["artMode"], record["pool"],
             int(record["authored"]), record["source"],
         ]
         testcase.assertEqual(fields[:11], [str(value) for value in exact])
@@ -62,7 +97,8 @@ def assert_generated_parity(testcase: unittest.TestCase, data=None):
              if pixel_object is not None else int(record["propGroundMode"] == "manual")),
             (pixel_object["groundMetatile"] if pixel_object is not None
              else record["propGroundMetatile"]),
-            shape_ids[record["shape"]], archetype_ids[record["archetype"]],
+            shape_ids["extruded" if hull else record["shape"]],
+            archetype_ids["grouped-hull" if hull else record["archetype"]],
             terrain_ids[record["terrainClass"]], source_kind,
             {"x": 0, "z": 1, "cross": 2}[record["axis"]],
             record["cliffEdgeMask"], record["cliffBaseMask"],
