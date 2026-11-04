@@ -422,10 +422,29 @@ static size_t sFaceKeysCapacity;
 static size_t sFaceKeysScratchCapacity;
 static struct DioramaShellFace *sFaceScratch;
 static size_t sFaceScratchCapacity;
+/* A key of 64 bits or fewer (most chunks'): 12 bytes to move a pass, not 20. */
+struct FaceKey64
+{
+    uint64_t key;
+    uint32_t index;
+};
+
+static struct FaceKey64 *sFaceKeys64;
+static struct FaceKey64 *sFaceKeys64Scratch;
+static size_t sFaceKeys64Capacity;
+static size_t sFaceKeys64ScratchCapacity;
+static uint32_t sDigitCounts[0x10001];
 
 enum { FACE_FIELD_COUNT = 11 };
 
-/* A face's fields in CompareFaces' order (all fit 32 bits signed). */
+/*
+ * A face's fields in CompareFaces' order (all fit 32 bits signed), each end
+ * as its distance from its start: the start is the field before it, so faces
+ * with the same start are ordered by their ends as by their lengths, and the
+ * lengths take fewer bits (every face the shell builds is one unit wide in u:
+ * no bits at all). With them most chunks' keys fit 64 bits (KNOWN_ISSUES
+ * MS-118).
+ */
 static void FaceFields(const struct DioramaShellFace *face, int32_t fields[FACE_FIELD_COUNT])
 {
     fields[0] = face->axis;
@@ -436,9 +455,9 @@ static void FaceFields(const struct DioramaShellFace *face, int32_t fields[FACE_
     fields[5] = face->material;
     fields[6] = face->flags;
     fields[7] = face->vMin;
-    fields[8] = face->vMax;
+    fields[8] = face->vMax - face->vMin;
     fields[9] = face->uMin;
-    fields[10] = face->uMax;
+    fields[10] = face->uMax - face->uMin;
 }
 
 static unsigned BitsFor(uint32_t range)
@@ -475,9 +494,69 @@ static uint32_t DigitOf(const struct FaceKey *key, unsigned offset)
     return digit & 0xFFFF;
 }
 
+/* SortFaces with keys of 64 bits or fewer: the same passes over a word. */
+static bool SortFaceKeys64(struct DioramaShellFace *faces, uint32_t count, const int32_t *minimum,
+                           const unsigned *offsets, const int *used, int usedCount, unsigned totalBits)
+{
+    uint32_t *counts = sDigitCounts;
+    int32_t fields[FACE_FIELD_COUNT];
+    struct FaceKey64 *keys;
+    struct FaceKey64 *scratch;
+    unsigned offset;
+    uint32_t i;
+    int u;
+
+    if (!Reserve((void **)&sFaceKeys64, &sFaceKeys64Capacity, count, sizeof(struct FaceKey64))
+     || !Reserve((void **)&sFaceKeys64Scratch, &sFaceKeys64ScratchCapacity, count, sizeof(struct FaceKey64)))
+        return false;
+    keys = sFaceKeys64;
+    scratch = sFaceKeys64Scratch;
+    for (i = 0; i < count; i++)
+    {
+        uint64_t key = 0;
+
+        FaceFields(&faces[i], fields);
+        for (u = 0; u < usedCount; u++)
+        {
+            int field = used[u];
+
+            key |= (uint64_t)((uint32_t)fields[field] - (uint32_t)minimum[field]) << offsets[field];
+        }
+        keys[i].key = key;
+        keys[i].index = i;
+    }
+    for (offset = 0; offset < totalBits; offset += 16)
+    {
+        uint32_t digit;
+        bool spread = true;
+        struct FaceKey64 *swap;
+
+        memset(sDigitCounts, 0, sizeof(sDigitCounts));
+        for (i = 0; i < count; i++)
+            counts[((uint32_t)(keys[i].key >> offset) & 0xFFFF) + 1]++;
+        for (digit = 0; digit < 0x10000; digit++)
+        {
+            if (counts[digit + 1] == count)
+                spread = false;
+            counts[digit + 1] += counts[digit];
+        }
+        if (!spread)
+            continue;
+        for (i = 0; i < count; i++)
+            scratch[counts[(uint32_t)(keys[i].key >> offset) & 0xFFFF]++] = keys[i];
+        swap = keys;
+        keys = scratch;
+        scratch = swap;
+    }
+    for (i = 0; i < count; i++)
+        sFaceScratch[i] = faces[keys[i].index];
+    memcpy(faces, sFaceScratch, count * sizeof(*faces));
+    return true;
+}
+
 static bool SortFaces(struct DioramaShellFace *faces, uint32_t count)
 {
-    static uint32_t counts[0x10001];
+    uint32_t *counts = sDigitCounts;
     int32_t minimum[FACE_FIELD_COUNT];
     int32_t maximum[FACE_FIELD_COUNT];
     int32_t fields[FACE_FIELD_COUNT];
@@ -524,6 +603,8 @@ static bool SortFaces(struct DioramaShellFace *faces, uint32_t count)
     }
     if (totalBits > 128)
         return false;
+    if (totalBits <= 64)
+        return SortFaceKeys64(faces, count, minimum, offsets, used, usedCount, totalBits);
     keys = sFaceKeys;
     scratch = sFaceKeysScratch;
     for (i = 0; i < count; i++)
@@ -545,7 +626,7 @@ static bool SortFaces(struct DioramaShellFace *faces, uint32_t count)
         bool spread = true;
         struct FaceKey *swap;
 
-        memset(counts, 0, sizeof(counts));
+        memset(sDigitCounts, 0, sizeof(sDigitCounts));
         for (i = 0; i < count; i++)
             counts[DigitOf(&keys[i], offset) + 1]++;
         for (digit = 0; digit < 0x10000; digit++)
