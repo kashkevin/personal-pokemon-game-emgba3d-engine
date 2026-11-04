@@ -2226,6 +2226,161 @@ static void CoopExpParity(void)
     RemoveBagItem(ITEM_EXP_CHARM, 1);
 }
 
+#include "multiplayer_ladder.h"
+#include "load_save.h"
+#include "constants/vars.h"
+// The real battle's end of a co-op battle in which the lead knocked out one Geodude, Nosepass and Makuhita seen standing:
+// the defeated Pokemon it recorded (a win counts all three, a loss the one that fell).
+static u32 CoopExpBattleEnd(u32 gym, u32 outcome)
+{
+    struct Pokemon *a = gParties[B_TRAINER_OPPONENT_A], *b = gParties[B_TRAINER_OPPONENT_B];
+
+    MultiplayerCoop_TestReset();
+    CoopMon(&a[0], SPECIES_GEODUDE, 12);
+    CoopMon(&a[1], SPECIES_NOSEPASS, 15);
+    CoopMon(&b[0], SPECIES_MAKUHITA, 14);
+    CoopBattleState();
+    MultiplayerCoop_TestTrackFrame();
+    SetCoopHp(&a[0], 0);
+    MultiplayerCoop_TestTrackFrame();
+    MultiplayerCoop_TestNativeResult(gym, outcome);
+    return MultiplayerCoop_TestKoCount();
+}
+
+static bool32 CoopRecordZero(void)
+{
+    const u8 *bytes = (const u8 *)&gSaveBlock3Ptr->coopResult;
+
+    for (u32 i = 0; i < sizeof(gSaveBlock3Ptr->coopResult); i++)
+    {
+        if (bytes[i])
+            return FALSE;
+    }
+    return TRUE;
+}
+
+// The owner's instruction of 2026-11-04: no co-op Gym experience farmed by losing again or by helping again; a pending
+// award survives the game closing before its script (the save's co-op result record).
+static void CoopExpFirstWinAndRecord(struct Pokemon *before)
+{
+    struct Pokemon *own = gParties[B_TRAINER_PLAYER], once[PARTY_SIZE];
+    struct MPCoopResultRecord *record = &gSaveBlock3Ptr->coopResult;
+    u32 ladder = MultiplayerLadder_Encode(TRAINER_WALLACE, TRAINER_STEVEN, 30, TRUE), count, code, outcome;
+    char what[200];
+
+    printf("co-op experience: the first win only, and the waiting result in the save\n");
+    ClearTrainerFlag(TRAINER_ROXANNE_1);
+    ClearTrainerFlag(TRAINER_NORMAN_1);
+    count = CoopExpBattleEnd(MP_COOP_GYM_RUSTBORO, B_OUTCOME_WON);
+    snprintf(what, sizeof(what), "the win that earns the badge awards the experience (%u defeated)", count);
+    ExpectCoop(what, count == 3 && MultiplayerCoop_TestPendingGym() == MP_COOP_GYM_RUSTBORO);
+    count = CoopExpBattleEnd(MP_COOP_GYM_RUSTBORO, B_OUTCOME_LOST);
+    ExpectCoop("a lost Gym battle awards none (no farming by losing again)",
+               count == 0 && MultiplayerCoop_TestPendingGym() == MP_COOP_GYM_RUSTBORO);
+    count = CoopExpBattleEnd(MP_COOP_GYM_RUSTBORO, B_OUTCOME_DREW);
+    ExpectCoop("nor does a draw", count == 0);
+    SetTrainerFlag(TRAINER_ROXANNE_1);
+    count = CoopExpBattleEnd(MP_COOP_GYM_RUSTBORO, B_OUTCOME_WON);
+    ExpectCoop("a helper who already beat the Leader gets none (the prize money still comes: the victory script waits)",
+               count == 0 && MultiplayerCoop_TestPendingGym() == MP_COOP_GYM_RUSTBORO);
+    ClearTrainerFlag(TRAINER_ROXANNE_1);
+    VarSet(VAR_PETALBURG_GYM_STATE, 5);
+    count = CoopExpBattleEnd(MP_COOP_GYM_PETALBURG, B_OUTCOME_WON);
+    ExpectCoop("a helper who cannot yet challenge Norman alone gets none", count == 0);
+    VarSet(VAR_PETALBURG_GYM_STATE, 6);
+    count = CoopExpBattleEnd(MP_COOP_GYM_PETALBURG, B_OUTCOME_WON);
+    ExpectCoop("... and the challenger who can does", count == 3);
+    VarSet(VAR_PETALBURG_GYM_STATE, 0);
+    count = CoopExpBattleEnd(ladder, B_OUTCOME_LOST);
+    ExpectCoop("a ladder battle the host allowed experience for keeps it, lost too (the host's rule, unchanged)",
+               count == 1 && MultiplayerLadder_GetPending(&code, &outcome) && code == ladder && outcome == B_OUTCOME_LOST);
+    MultiplayerCoop_Init();
+    MultiplayerLadder_SetPending(0, 0);
+
+    // The result waiting for its script goes into every save made meanwhile...
+    memset(record, 0xA5, sizeof(*record));
+    MultiplayerCoop_WriteToSave();
+    ExpectCoop("nothing waiting: the record is all zeros (as in a save from before)", CoopRecordZero());
+    memcpy(own, before, sizeof(struct Pokemon) * PARTY_SIZE);
+    count = CoopExpBattleEnd(MP_COOP_GYM_RUSTBORO, B_OUTCOME_WON);
+    CopyPartyAndObjectsToSave();
+    snprintf(what, sizeof(what), "a save made with the victory waiting carries it (magic %08X, Gym %u, %u defeated)",
+             (unsigned)record->magic, (unsigned)record->code, record->count);
+    ExpectCoop(what, record->magic == MP_COOP_RESULT_MAGIC && record->version == MP_COOP_RESULT_VERSION
+               && record->code == MP_COOP_GYM_RUSTBORO && record->outcome == B_OUTCOME_WON && record->count == 3
+               && record->species[0] == SPECIES_GEODUDE && record->level[0] == 12 && record->faced[0] == 1
+               && record->crc32 == Crc32B((const u8 *)record, offsetof(struct MPCoopResultRecord, crc32)));
+    // ... what it awards, without a reset
+    MultiplayerCoop_ExpBegin();
+    memcpy(once, own, sizeof(once));
+    ExpectCoop("the award without a reset", gSpecialVar_Result == TRUE
+               && GetMonData(&once[0], MON_DATA_EXP) > GetMonData(&before[0], MON_DATA_EXP));
+    // ... and the same after the game closed before the script and loaded that save (the load's own path first)
+    MultiplayerCoop_Init();
+    ExpectCoop("a closed game's memory has nothing waiting", MultiplayerCoop_TestKoCount() == 0
+               && MultiplayerCoop_TestPendingGym() == 0);
+    CopyPartyAndObjectsFromSave();
+    ExpectCoop("loading the save brings the victory back (load_save.c)",
+               MultiplayerCoop_TestPendingGym() == MP_COOP_GYM_RUSTBORO && MultiplayerCoop_TestKoCount() == 3);
+    MultiplayerCoop_Init();
+    memcpy(own, before, sizeof(struct Pokemon) * PARTY_SIZE);
+    MultiplayerCoop_LoadFromSave();
+    ExpectCoop("the loaded save's victory waits again, its experience with it",
+               MultiplayerCoop_TestPendingGym() == MP_COOP_GYM_RUSTBORO && MultiplayerCoop_TestKoCount() == 3);
+    ExpectCoop("its script runs at once, with no new host save first", MultiplayerCoop_ResultSaved());
+    MultiplayerCoop_ExpBegin();
+    ExpectCoop("the award after the reload is the same, once",
+               gSpecialVar_Result == TRUE && memcmp(once, own, sizeof(once)) == 0);
+    ExpectCoop("the script took the result", MultiplayerCoop_TestTakeResult() == MP_COOP_GYM_RUSTBORO);
+    CopyPartyAndObjectsToSave();
+    ExpectCoop("a save after the script has no result waiting (its effects are in the party)", CoopRecordZero());
+    MultiplayerCoop_LoadFromSave();
+    MultiplayerCoop_ExpBegin();
+    ExpectCoop("so loading that save awards nothing again", gSpecialVar_Result == FALSE
+               && MultiplayerCoop_TestPendingGym() == 0 && memcmp(once, own, sizeof(once)) == 0);
+
+    // A loss waits too (its script says so), with no experience.
+    count = CoopExpBattleEnd(MP_COOP_GYM_DEWFORD, B_OUTCOME_LOST);
+    MultiplayerCoop_WriteToSave();
+    ExpectCoop("a waiting loss is saved with no experience", record->magic == MP_COOP_RESULT_MAGIC
+               && record->code == MP_COOP_GYM_DEWFORD && record->outcome == B_OUTCOME_LOST && record->count == 0);
+    // A ladder's result (the host allowed its experience).
+    MultiplayerCoop_Init();         // the loss above was taken by its script meanwhile
+    MultiplayerLadder_SetPending(0, 0);
+    count = CoopExpBattleEnd(ladder, B_OUTCOME_WON);
+    MultiplayerCoop_WriteToSave();
+    MultiplayerCoop_Init();
+    MultiplayerLadder_SetPending(0, 0);
+    MultiplayerCoop_LoadFromSave();
+    ExpectCoop("a ladder's result comes back to the ladder, its experience with it",
+               MultiplayerLadder_GetPending(&code, &outcome) && code == ladder && outcome == B_OUTCOME_WON
+               && MultiplayerCoop_TestPendingGym() == 0 && MultiplayerCoop_TestKoCount() == 3);
+    // Damaged records are refused, never repaired.
+    record->level[0] ^= 1;
+    MultiplayerCoop_LoadFromSave();
+    ExpectCoop("a damaged record (CRC) gives nothing", MultiplayerCoop_TestKoCount() == 0
+               && !MultiplayerLadder_GetPending(&code, &outcome));
+    record->level[0] ^= 1;
+    record->code = 77;
+    record->crc32 = Crc32B((const u8 *)record, offsetof(struct MPCoopResultRecord, crc32));
+    MultiplayerCoop_LoadFromSave();
+    ExpectCoop("a record naming no Gym or ladder gives nothing", MultiplayerCoop_TestKoCount() == 0
+               && MultiplayerCoop_TestPendingGym() == 0 && !MultiplayerLadder_GetPending(&code, &outcome));
+    memset(record, 0, sizeof(*record));
+    MultiplayerCoop_LoadFromSave();
+    ExpectCoop("a save from before (zeros) has nothing waiting", MultiplayerCoop_TestKoCount() == 0
+               && MultiplayerCoop_TestPendingGym() == 0);
+
+    // The soft reset key waits while a result waits for its first host save; with no world's host save to ask for, the
+    // script runs at once.
+    count = CoopExpBattleEnd(MP_COOP_GYM_MAUVILLE, B_OUTCOME_WON);
+    ExpectCoop("a result waiting for its first host save holds the soft reset", MultiplayerCoop_ResultUnsaved());
+    ExpectCoop("no world (no host save page): its script may run at once", MultiplayerCoop_ResultSaved()
+               && !MultiplayerCoop_ResultUnsaved());
+    MultiplayerCoop_Init();
+    memcpy(own, before, sizeof(struct Pokemon) * PARTY_SIZE);
+}
+
 int NativeSelfTest_CoopExp(void)
 {
     struct Pokemon before[PARTY_SIZE], partner;
@@ -2388,7 +2543,7 @@ int NativeSelfTest_CoopExp(void)
     ExpectCoop(what, MultiplayerCoop_TestKoCount() == 1);
     memcpy(own, before, sizeof(before));
     MultiplayerCoop_ExpBegin();
-    ExpectCoop("... and awards it", gSpecialVar_Result == TRUE && GetMonData(&own[0], MON_DATA_EXP) > GetMonData(&before[0], MON_DATA_EXP));
+    ExpectCoop("... and awards it (as a ladder battle the host allowed experience for does)", gSpecialVar_Result == TRUE && GetMonData(&own[0], MON_DATA_EXP) > GetMonData(&before[0], MON_DATA_EXP));
     RunCoopAward(&messages, &moveFull, &evolveSlot, &evolveTo, FALSE);
 
     // No co-op battle (PvP, or no battle): the battle's end records nothing.
@@ -2400,6 +2555,8 @@ int NativeSelfTest_CoopExp(void)
     ExpectCoop("without a co-op battle (PvP) nothing is recorded or awarded", MultiplayerCoop_TestKoCount() == 0
                && gSpecialVar_Result == FALSE && memcmp(before, own, sizeof(before)) == 0);
     MultiplayerCoop_Init();
+
+    CoopExpFirstWinAndRecord(before);
 
     CoopExpParity();
 

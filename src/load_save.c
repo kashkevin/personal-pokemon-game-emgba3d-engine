@@ -23,6 +23,7 @@
 #ifdef PORTABLE
 #include "field_carrier.h"
 #include "field_player_avatar.h"
+#include "multiplayer_coop.h"
 #endif
 #line 23 // gba-line
 
@@ -286,6 +287,7 @@ void CopyPartyAndObjectsToSave(void)
     SaveObjectEvents();
 #ifdef PORTABLE
     TmCase_WriteToSave();   // PC: the TM case into the save's TM pocket and TM record (item.c)
+    MultiplayerCoop_WriteToSave(); // PC: a co-op battle's result waiting for its script (multiplayer_coop.c)
 #endif
 #line 260 // gba-line
 }
@@ -296,6 +298,7 @@ void CopyPartyAndObjectsFromSave(void)
     LoadObjectEvents();
 #ifdef PORTABLE
     TmCase_LoadFromSave();  // PC: the TM case from the save's TM pocket and TM record (item.c)
+    MultiplayerCoop_LoadFromSave(); // PC: a co-op battle's result the save has waiting (multiplayer_coop.c)
 #endif
 #line 266 // gba-line
 }

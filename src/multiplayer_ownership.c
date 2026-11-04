@@ -16,10 +16,13 @@ _Static_assert(sizeof(struct BoxPokemon) == 80, "Identity preserves boxed layout
 _Static_assert(sizeof(struct Pokemon) == 100, "Identity preserves party layout");
 #ifdef PORTABLE
 _Static_assert(sizeof(struct SaveBlock3) == 600 + sizeof(struct MPDaycareEggQueue) + sizeof(struct MPTowerRecord)
-               + sizeof(struct MPTmRecord), "Ownership save profile, the Day Care egg queue, the Tower record, the TM record");
+               + sizeof(struct MPTmRecord) + sizeof(struct MPCoopResultRecord),
+               "Ownership save profile, the Day Care egg queue, the Tower record, the TM record, the co-op result");
 _Static_assert(offsetof(struct SaveBlock3, eggQueue) == 600, "Egg queue follows the ownership profile");
 _Static_assert(sizeof(struct MPTowerRecord) == 64 && offsetof(struct SaveBlock3, tower) == 1012, "Tower record after the egg queue");
 _Static_assert(sizeof(struct MPTmRecord) == 36 && offsetof(struct SaveBlock3, tmRecord) == 1076, "TM record after the Tower record");
+_Static_assert(sizeof(struct MPCoopResultRecord) == 76 && offsetof(struct SaveBlock3, coopResult) == 1112,
+               "Co-op result after the TM record");
 #else
 #line 13 // gba-line
 _Static_assert(sizeof(struct SaveBlock3) == 600, "Ownership save profile");

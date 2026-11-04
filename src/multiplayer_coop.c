@@ -20,7 +20,9 @@
 #include "constants/maps.h"
 #include "constants/opponents.h"
 #ifdef PORTABLE
+#include <stdio.h>
 #include "multiplayer_ladder.h"
+#include "multiplayer_soft_reset.h"
 #include "tower_legends.h"
 #include "battle_controllers.h"
 #include "evolution_scene.h"
@@ -28,11 +30,18 @@
 #include "move.h"
 #include "pokemon.h"
 #include "pokemon_summary_screen.h"
+#include "random.h"
+#include "save.h"
 #include "constants/characters.h"
 #include "constants/pokemon.h"
+#include "constants/vars.h"
 static void ResetCoopExp(void);
 static void TrackCoopBattle(void);
 static void CaptureCoopExp(u32 outcome);
+static void DropCoopExp(void);
+static bool32 CoopGymFirstWin(u32 gym, u32 outcome);
+static void ArmResultSave(void);
+static void CoopResultTick(void);
 #endif
 #line 22 // gba-line
 
@@ -221,8 +230,10 @@ void MultiplayerCoop_BufferPartnerName(void)
 void MultiplayerCoop_OnNativeResult(u32 gym, u32 outcome)
 {
 #ifdef PORTABLE
-    // Co-op experience: kept before the party is restored (below).
+    // Co-op experience: kept before the party is restored (below). The result waits for its script in the save's co-op
+    // record, saved on the host before the script runs (MultiplayerCoop_ResultSaved).
     CaptureCoopExp(outcome);
+    ArmResultSave();
     if (MultiplayerLadder_IsLadder(gym))
     {
         // A ladder battle (Frontier, League): the host keeps the rewards and the progress. The game shows the result,
@@ -232,6 +243,10 @@ void MultiplayerCoop_OnNativeResult(u32 gym, u32 outcome)
         MultiplayerLadder_OnResult(gym, outcome);
         return;
     }
+    // A co-op Gym's experience comes with the win that earns this player the Gym's badge, and with no other battle (the
+    // owner's instruction of 2026-11-04 to end the farming: none for losing again, none for helping again after the badge).
+    if (!MultiplayerCoop_IsValidGym(gym) || !CoopGymFirstWin(gym, outcome))
+        DropCoopExp();
 #endif
 #line 188 // gba-line
     if (!MultiplayerCoop_IsValidGym(gym))
@@ -247,6 +262,7 @@ void MultiplayerCoop_Tick(void)
 #ifdef PORTABLE
     TrackCoopBattle();
     MultiplayerLadder_Tick();
+    CoopResultTick();
 #endif
 #line 198 // gba-line
     if (sPendingGym == 0)
@@ -256,6 +272,12 @@ void MultiplayerCoop_Tick(void)
     if (gMain.callback2 != CB2_Overworld || ScriptContext_IsEnabled() || ArePlayerFieldControlsLocked()
      || gPaletteFade.active)
         return;
+#ifdef PORTABLE
+    if (!MultiplayerCoop_ResultSaved())
+        return;     // the host save that carries the waiting result first
+    MultiplayerCoop_ResultScriptStarted();
+#endif
+#line 205 // gba-line
     gSpecialVar_0x8004 = sPendingGym;
     if (sPendingOutcome == B_OUTCOME_WON)
         ScriptContext_SetupScript(EventScript_MultiplayerCoopVictory);
@@ -287,9 +309,12 @@ void MultiplayerCoop_Tick(void)
 //      or Eggs; the battle's own formula (MultiplayerCoop_ExpReward), EVs,
 //      friendship, level-ups, moves learned on level-up (with the usual "forget
 //      a move?" choice) and evolutions.
-// Nothing is sent to the host or the teammate: the next checkpoint carries the
-// new experience like a wild battle's. The list is consumed once; a reset
-// before the award loses it and never doubles it.
+// Nothing is sent to the host or the teammate. The list is consumed once and
+// waits in the save until then (the co-op result record, below), so a reset
+// before the award neither loses it nor doubles it.
+// A co-op Gym battle awards it only with the win that earns this player the
+// badge (CoopGymFirstWin): the owner's instruction of 2026-11-04 to end the
+// farming (losing again and again, or helping again after the badge).
 
 #define COOP_MAX_KOS (2 * PARTY_SIZE)
 
@@ -356,6 +381,22 @@ static void ResetCoopExp(void)
 {
     memset(&sCoopExp, 0, sizeof(sCoopExp));
     memset(&sCoopAward, 0, sizeof(sCoopAward));
+}
+
+// The battle that just ended awards no experience.
+static void DropCoopExp(void)
+{
+    sCoopExp.pending = FALSE;
+    sCoopExp.count = 0;
+}
+
+// The win that earns this player the Gym's badge: the victory script's own test (data/scripts/mp_coop_gym.inc): a trainer
+// who had already beaten the Leader, or for Norman could not yet challenge him alone, only helped.
+static bool32 CoopGymFirstWin(u32 gym, u32 outcome)
+{
+    if (outcome != B_OUTCOME_WON || HasTrainerBeenFought(sCoopGyms[gym].leader))
+        return FALSE;
+    return gym != MP_COOP_GYM_PETALBURG || VarGet(VAR_PETALBURG_GYM_STATE) == 6;
 }
 
 // A Pokemon (not an Egg, not an empty slot), standing or fainted.
@@ -538,9 +579,11 @@ static void CaptureCoopExpNow(u32 outcome)
     }
 }
 
+static EWRAM_DATA bool8 sTestCoopBattle = FALSE; // --selftest-coop-exp: the battle's end as a co-op battle's
+
 static void CaptureCoopExp(u32 outcome)
 {
-    if (MultiplayerBattle_IsCoop())
+    if (MultiplayerBattle_IsCoop() || sTestCoopBattle)
         CaptureCoopExpNow(outcome);
 }
 
@@ -817,6 +860,181 @@ void MultiplayerCoop_ExpEvolve(void)
     CreateTask(Task_CoopExpEvolve, 10);
 }
 
+// ---------------------------------------------------------------------------
+// A co-op battle's result survives a closed game (the owner's instruction of 2026-11-04: pending experience must not be
+// lost to a reset). The result waits for its script in the save's co-op record (include/global.h MPCoopResultRecord):
+// every save made meanwhile carries it, and a save loaded with one waiting runs its script, once. When the battle has
+// released the field, the host save is asked for first (as after an in-game SAVE in a world, multiplayer_soft_reset.c)
+// and the script runs once it is made (or after RESULT_SAVE_WAIT_FRAMES without it); when the script has ended (the badge,
+// prize and experience given), the host save is asked for again. The script takes the result as it starts and no save is
+// made while a script runs (MultiplayerSave_FieldReady), so a save never has both the result waiting and its effects.
+#define RESULT_SAVE_WAIT_FRAMES (60 * 15)
+
+static EWRAM_DATA struct
+{
+    bool8 waiting;  // a result waits for the host save that carries it
+    bool8 asked;    // that save was asked for
+    bool8 after;    // a result script started: the host save once it has ended
+    u32 counter;    // gSaveCounter when the result came
+    u32 age;        // calm frames since that save was asked for
+} sResultSave = {0};
+
+static void ResultLog(const char *text)
+{
+    fprintf(stderr, "co-op result: %s\n", text);
+    fflush(stderr);
+}
+
+static bool32 ResultWaiting(void)
+{
+    u32 code, outcome;
+
+    return sPendingGym != 0 || MultiplayerLadder_GetPending(&code, &outcome);
+}
+
+static void ArmResultSave(void)
+{
+    sResultSave.waiting = TRUE;
+    sResultSave.asked = FALSE;
+    sResultSave.counter = gSaveCounter;
+    sResultSave.age = 0;
+}
+
+// The field is calm with a result waiting: TRUE when its script may run (the host save that carries it is made, or there
+// is no world's host save to ask for, or it did not come in time: the result is then in this game's memory only).
+bool32 MultiplayerCoop_ResultSaved(void)
+{
+    if (!sResultSave.waiting)
+        return TRUE;
+    if (gSaveCounter != sResultSave.counter)
+    {
+        sResultSave.waiting = FALSE;
+        ResultLog("saved with the result waiting; its script runs");
+        return TRUE;
+    }
+    if (!sResultSave.asked)
+    {
+        sResultSave.asked = TRUE;
+        if (!MultiplayerHostSave_RequestNow())
+        {
+            sResultSave.waiting = FALSE;
+            ResultLog("no host save to ask for; its script runs");
+            return TRUE;
+        }
+        ResultLog("the host save first");
+    }
+    if (++sResultSave.age > RESULT_SAVE_WAIT_FRAMES)
+    {
+        sResultSave.waiting = FALSE;
+        ResultLog("no host save came in time; its script runs (the result was in this game's memory only)");
+        return TRUE;
+    }
+    return FALSE;
+}
+
+void MultiplayerCoop_ResultScriptStarted(void)
+{
+    sResultSave.waiting = FALSE;
+    sResultSave.after = TRUE;
+}
+
+// A result waits for its first host save: the soft reset key waits too (multiplayer_soft_reset.c), so the reset cannot go
+// back to a host save from before the battle and lose it.
+bool32 MultiplayerCoop_ResultUnsaved(void)
+{
+    return sResultSave.waiting && ResultWaiting();
+}
+
+// Every frame: once a result script has ended, the host save (the result taken, its effects made).
+static void CoopResultTick(void)
+{
+    if (sResultSave.waiting && !ResultWaiting())
+        sResultSave.waiting = FALSE;
+    if (!sResultSave.after || MultiplayerBattle_IsActive() || gMain.callback2 != CB2_Overworld || ScriptContext_IsEnabled()
+     || ArePlayerFieldControlsLocked() || gPaletteFade.active)
+        return;
+    sResultSave.after = FALSE;
+    if (MultiplayerHostSave_RequestNow())
+        ResultLog("the script has ended; the host save");
+}
+
+static u32 CoopResultCrc(const struct MPCoopResultRecord *record)
+{
+    return Crc32B((const u8 *)record, offsetof(struct MPCoopResultRecord, crc32));
+}
+
+static bool32 CoopResultValid(const struct MPCoopResultRecord *record)
+{
+    if (record->magic != MP_COOP_RESULT_MAGIC || record->version != MP_COOP_RESULT_VERSION || record->outcome == 0
+     || record->count > MP_COOP_RESULT_KOS || record->crc32 != CoopResultCrc(record))
+        return FALSE;
+    return MultiplayerLadder_IsLadder(record->code) ? MultiplayerLadder_IsValid(record->code)
+                                                     : MultiplayerCoop_IsValidGym(record->code);
+}
+
+// Before a save is written (load_save.c CopyPartyAndObjectsToSave): the result waiting for its script, with the
+// experience it awards, into the save's co-op record (all zeros when none waits, as in a save from before).
+void MultiplayerCoop_WriteToSave(void)
+{
+    struct MPCoopResultRecord *record = &gSaveBlock3Ptr->coopResult;
+    u32 code = sPendingGym, outcome = sPendingOutcome, i;
+
+    memset(record, 0, sizeof(*record));
+    if (code == 0 && !MultiplayerLadder_GetPending(&code, &outcome))
+        return;
+    record->magic = MP_COOP_RESULT_MAGIC;
+    record->version = MP_COOP_RESULT_VERSION;
+    record->outcome = outcome;
+    record->code = code;
+    if (sCoopExp.pending)
+    {
+        record->count = min(sCoopExp.count, MP_COOP_RESULT_KOS);
+        record->towerCap = sCoopExp.towerCap;
+        for (i = 0; i < record->count; i++)
+        {
+            record->species[i] = sCoopExp.kos[i].species;
+            record->level[i] = sCoopExp.kos[i].level;
+            record->faced[i] = sCoopExp.kos[i].faced;
+            record->alive[i] = sCoopExp.kos[i].alive;
+        }
+    }
+    record->crc32 = CoopResultCrc(record);
+}
+
+// After a save is loaded (load_save.c CopyPartyAndObjectsFromSave): the result its co-op record has waiting, if any. Its
+// script runs once the field is calm, with no new host save first (it came from one).
+void MultiplayerCoop_LoadFromSave(void)
+{
+    const struct MPCoopResultRecord *record = &gSaveBlock3Ptr->coopResult;
+    u32 i;
+
+    sPendingGym = 0;
+    sPendingOutcome = 0;
+    MultiplayerLadder_SetPending(0, 0);
+    ResetCoopExp();
+    memset(&sResultSave, 0, sizeof(sResultSave));
+    if (!CoopResultValid(record))
+        return;
+    if (MultiplayerLadder_IsLadder(record->code))
+        MultiplayerLadder_SetPending(record->code, record->outcome);
+    else
+    {
+        sPendingGym = record->code;
+        sPendingOutcome = record->outcome;
+    }
+    sCoopExp.count = record->count;
+    sCoopExp.towerCap = record->towerCap;
+    for (i = 0; i < record->count; i++)
+    {
+        sCoopExp.kos[i].species = record->species[i];
+        sCoopExp.kos[i].level = record->level[i];
+        sCoopExp.kos[i].faced = record->faced[i];
+        sCoopExp.kos[i].alive = record->alive[i];
+    }
+    sCoopExp.pending = record->count != 0;
+    ResultLog("the loaded save has a result waiting; its script runs");
+}
+
 // --selftest-coop-exp (src/platform/native_selftest.c) drives these.
 void MultiplayerCoop_TestTrackFrame(void)
 {
@@ -841,5 +1059,32 @@ u32 MultiplayerCoop_TestKoCount(void)
 void MultiplayerCoop_TestReset(void)
 {
     ResetCoopExp();
+}
+
+// The real battle's end (MultiplayerCoop_OnNativeResult) of a co-op battle the test tracked.
+void MultiplayerCoop_TestNativeResult(u32 gym, u32 outcome)
+{
+    sTestCoopBattle = TRUE;
+    MultiplayerCoop_OnNativeResult(gym, outcome);
+    sTestCoopBattle = FALSE;
+}
+
+// The result scripts' start as MultiplayerCoop_Tick and MultiplayerLadder_Tick make it (the field calm): the waiting
+// result taken. Returns the Gym or ladder code taken, 0 when none waited.
+u32 MultiplayerCoop_TestTakeResult(void)
+{
+    u32 code = sPendingGym, outcome;
+
+    if (code == 0 && MultiplayerLadder_GetPending(&code, &outcome))
+        MultiplayerLadder_SetPending(0, 0);
+    MultiplayerCoop_ResultScriptStarted();
+    sPendingGym = 0;
+    sPendingOutcome = 0;
+    return code;
+}
+
+u32 MultiplayerCoop_TestPendingGym(void)
+{
+    return sPendingGym;
 }
 #endif // PORTABLE

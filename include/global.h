@@ -359,7 +359,30 @@ struct MPTmRecord
     u8 owned[MP_TM_RECORD_BITS / 8];   // bit (n - 51) of the array: TMn in the TM case
     u32 crc32;                         // CRC-32 of the 32 bytes before
 };
-#define MP_SAVE_BLOCK_3_BYTES (600 + sizeof(struct MPDaycareEggQueue) + sizeof(struct MPTowerRecord) + sizeof(struct MPTmRecord))
+// A co-op battle's result waiting for this game's own result script (src/multiplayer_coop.c), after the TM record: the Gym
+// or ladder code, the outcome and the experience it awards (the Pokemon defeated, and for each which of this game's party
+// faced it and which could still battle). Written into each save while the result waits; the result script takes it, and
+// no save is made while a script runs, so a save has the result waiting here or its effects, never both: a game that
+// closes before the script has run runs it after the reload, once. A save from before has zeros here: nothing waiting.
+#define MP_COOP_RESULT_MAGIC 0x31524F43 // "COR1"
+#define MP_COOP_RESULT_VERSION 1
+#define MP_COOP_RESULT_KOS 12          // two trainers' six Pokemon
+struct MPCoopResultRecord
+{
+    u32 magic;
+    u8 version;
+    u8 outcome;                        // B_OUTCOME_WON, _LOST or _DREW
+    u8 count;                          // the defeated Pokemon below (0: no experience)
+    u8 towerCap;                       // a Battle Tower Duo floor's level cap (tower_legends.c), else 0
+    u32 code;                          // MP_COOP_GYM_* or a ladder code (multiplayer_ladder.c)
+    u16 species[MP_COOP_RESULT_KOS];
+    u8 level[MP_COOP_RESULT_KOS];
+    u8 faced[MP_COOP_RESULT_KOS];      // the party slots that were on the field with it
+    u8 alive[MP_COOP_RESULT_KOS];      // the party slots that could still battle when it fell
+    u32 crc32;                         // CRC-32 of the 72 bytes before
+};
+#define MP_SAVE_BLOCK_3_BYTES (600 + sizeof(struct MPDaycareEggQueue) + sizeof(struct MPTowerRecord) + sizeof(struct MPTmRecord) \
+                               + sizeof(struct MPCoopResultRecord))
 #endif
 
 struct SaveBlock3
@@ -385,6 +408,7 @@ struct SaveBlock3
     struct MPDaycareEggQueue eggQueue;
     struct MPTowerRecord tower;
     struct MPTmRecord tmRecord;
+    struct MPCoopResultRecord coopResult;
 #endif
 }; /* max size 1624 bytes */
 

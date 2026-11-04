@@ -39,6 +39,7 @@ bool32 MultiplayerHostSave_TryOpen(void);   // the free field: PLAYERS on its ho
 void MultiplayerHostSave_PartyWatch(void);  // the free field: notes the party as of the game's last save
 bool32 MultiplayerHostSave_BeforePlayers(u16 page); // PLAYERS asked for: TRUE when the host save goes first
 void MultiplayerHostSave_Request(void);      // the host save when the party changed since the last save (the Tower's "go on?" NO)
+bool32 MultiplayerHostSave_RequestNow(void); // the host save whatever the party (a co-op result, multiplayer_coop.c): TRUE: asked
 bool32 MultiplayerHostSave_TryThen(void);   // the free field: PLAYERS once that save is made (TRUE: it opened)
 #endif
 

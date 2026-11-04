@@ -13,6 +13,7 @@
 #include "main.h"
 #include "multiplayer.h"
 #include "multiplayer_battle.h"
+#include "multiplayer_coop.h"
 #include "multiplayer_ownership.h"
 #include "multiplayer_save.h"
 #include "event_object_movement.h"
@@ -67,6 +68,12 @@ bool32 MultiplayerSoftReset_TakeKey(void)
     if (gSoftResetDisabled)
     {
         Log("soft reset: key dropped (reset disabled here)");
+        return FALSE;
+    }
+    if (MultiplayerCoop_ResultUnsaved())
+    {
+        // The reset goes back to the host's save: one from before the co-op battle would lose its result.
+        Log("soft reset: key dropped (a co-op battle's result is being saved)");
         return FALSE;
     }
     Log("soft reset: key taken");
@@ -245,6 +252,21 @@ void MultiplayerHostSave_Request(void)
     sHostSaveAge = 1;
     sHostSaveAuto = TRUE;
     Log("host save: a Tower floor changed the party; asking the launcher");
+}
+
+// A co-op battle's result waits in the save for its script, or its script has ended (multiplayer_coop.c): the host save
+// whatever the party. TRUE when a host save is coming (asked now or already waiting to open its page); FALSE without a
+// world's host save page.
+bool32 MultiplayerHostSave_RequestNow(void)
+{
+    if (!MpBridge_HostSavePageEnabled())
+        return FALSE;
+    if (sHostSaveAge == 0)
+    {
+        sHostSaveAge = 1;
+        sHostSaveAuto = TRUE;
+    }
+    return TRUE;
 }
 
 bool32 MultiplayerHostSave_TryThen(void)

@@ -2,6 +2,7 @@
 #ifdef PORTABLE
 #include "multiplayer_ladder.h"
 #include "multiplayer_battle.h"
+#include "multiplayer_coop.h"
 #include "tower_legends.h"
 #include "battle.h"
 #include "data.h"
@@ -17,7 +18,7 @@
 extern const u8 EventScript_MultiplayerLadderResult[];
 
 static EWRAM_DATA u32 sPendingCode = 0;
-static EWRAM_DATA u8 sPendingWon = 0;
+static EWRAM_DATA u8 sPendingOutcome = 0;
 
 #define TRAINER_MASK 0x3FF
 
@@ -91,7 +92,20 @@ void MultiplayerLadder_OnResult(u32 code, u32 outcome)
 {
     TowerLegends_EndCoop();
     sPendingCode = code;
-    sPendingWon = outcome == B_OUTCOME_WON;
+    sPendingOutcome = outcome;
+}
+
+bool32 MultiplayerLadder_GetPending(u32 *code, u32 *outcome)
+{
+    *code = sPendingCode;
+    *outcome = sPendingOutcome;
+    return sPendingCode != 0;
+}
+
+void MultiplayerLadder_SetPending(u32 code, u32 outcome)
+{
+    sPendingCode = code;
+    sPendingOutcome = code != 0 ? outcome : 0;
 }
 
 // Once the battle has released the party and the field is calm: show the result (and award the experience when the host
@@ -106,9 +120,13 @@ void MultiplayerLadder_Tick(void)
     if (gMain.callback2 != CB2_Overworld || ScriptContext_IsEnabled() || ArePlayerFieldControlsLocked()
      || gPaletteFade.active)
         return;
-    gSpecialVar_0x8004 = sPendingWon;
+    if (!MultiplayerCoop_ResultSaved())
+        return;     // the host save that carries the waiting result first (multiplayer_coop.c)
+    gSpecialVar_0x8004 = sPendingOutcome == B_OUTCOME_WON;
     gSpecialVar_0x8005 = MultiplayerLadder_ExpAllowed(sPendingCode);
     sPendingCode = 0;
+    sPendingOutcome = 0;
+    MultiplayerCoop_ResultScriptStarted();
     ScriptContext_SetupScript(EventScript_MultiplayerLadderResult);
 }
 #endif // PORTABLE

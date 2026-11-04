@@ -38,6 +38,9 @@ void MultiplayerLadder_ScaleOpponents(u32 code);
 // Called when the battle ends (before the party is restored) and every frame by the co-op tick.
 void MultiplayerLadder_OnResult(u32 code, u32 outcome);
 void MultiplayerLadder_Tick(void);
+// The result waiting for its script (the co-op result's save record, multiplayer_coop.c): FALSE when none waits.
+bool32 MultiplayerLadder_GetPending(u32 *code, u32 *outcome);
+void MultiplayerLadder_SetPending(u32 code, u32 outcome); // a code of 0: none
 
 #endif // PORTABLE
 #endif // GUARD_MULTIPLAYER_LADDER_H

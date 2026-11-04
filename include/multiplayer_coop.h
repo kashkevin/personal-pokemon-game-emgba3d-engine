@@ -34,12 +34,21 @@ void MultiplayerCoop_ExpForgetResult(void);
 void MultiplayerCoop_ExpSkipMove(void);
 void MultiplayerCoop_ExpEvolve(void);
 u32 MultiplayerCoop_ExpReward(struct Pokemon *mon, enum Species faintedSpecies, u32 faintedLevel, bool32 faced);
+// A co-op battle's result waits for its script in the save's co-op record (include/global.h MPCoopResultRecord).
+bool32 MultiplayerCoop_ResultSaved(void);       // the field is calm with a result waiting: TRUE when its script may run
+void MultiplayerCoop_ResultScriptStarted(void); // a result script took the waiting result
+bool32 MultiplayerCoop_ResultUnsaved(void);     // a result waits for its first host save (the soft reset key waits)
+void MultiplayerCoop_WriteToSave(void);         // load_save.c: before a save is written
+void MultiplayerCoop_LoadFromSave(void);        // load_save.c: after a save is loaded
 // --selftest-coop-exp
 void MultiplayerCoop_TestTrackFrame(void);
 void MultiplayerCoop_TestCapture(u32 outcome);
 bool32 MultiplayerCoop_TestForget(u32 moveSlot);
 u32 MultiplayerCoop_TestKoCount(void);
 void MultiplayerCoop_TestReset(void);
+void MultiplayerCoop_TestNativeResult(u32 gym, u32 outcome);
+u32 MultiplayerCoop_TestTakeResult(void);
+u32 MultiplayerCoop_TestPendingGym(void);
 void MultiplayerCoop_TestArmAward(void); // --test-coop-exp-award
 #endif
 
