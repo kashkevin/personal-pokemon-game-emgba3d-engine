@@ -1581,6 +1581,11 @@ void CB2_LinkError(void)
 {
     u8 *tilemapBuffer;
 
+#ifdef PORTABLE
+    fprintf(stderr, "link error screen: status %08x, disconnected %d, wireless %d\n", (unsigned)sLinkErrorBuffer.status,
+            sLinkErrorBuffer.disconnected, gWirelessCommType);
+#endif
+#line 1576 // gba-line
     SetGpuReg(REG_OFFSET_DISPCNT, 0);
     m4aMPlayStop(&gMPlayInfo_SE1);
     m4aMPlayStop(&gMPlayInfo_SE2);
@@ -1802,6 +1807,8 @@ bool8 HandleLinkConnection(void)
         LocalLink_RunFrame();
         return FALSE;
     }
+    if (NetLink_ErrorShowing())
+        return FALSE; // MS-141c: a lost world group's communication error: no adapter to run
 #endif
 #line 1790 // gba-line
 

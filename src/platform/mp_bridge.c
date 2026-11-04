@@ -1078,6 +1078,8 @@ static void ForgetConnection(struct MpBridge *b)
     b->hasLatestSpawn = b->spawnTurn = false;
     b->spawnCapabilitySent = false;
     b->hasLatestExtras = b->extrasCapabilitySent = b->extrasSentValid = false;
+    b->minigameCapabilitySent = false;
+    b->minigameOutHead = b->minigameOutCount = 0;
     b->controlCount = b->controlBurst = 0;
     b->save.pending = false;
     b->saveCancel.pending = false;
@@ -1280,6 +1282,9 @@ static bool OpenPageAllowed(const struct MpBridge *b, uint32_t page)
     case 2: return Enabled(b->caps.tower);
     case 3: return Enabled(b->caps.hostSavePage);
     case 4: return Enabled(b->caps.towerNextPage);
+    case 5: /* MS-141c: a wireless minigame's lobby (Berry Crush, Pokemon Jump, Dodrio Berry Picking), only with the */
+    case 6: /* minigame channel announced ('u'): the companion draws these pages only for a game that announced it */
+    case 7: return Enabled(b->caps.menuOpenPage) && b->minigameCapabilitySent;
     default: return false;
     }
 }
@@ -1304,7 +1309,8 @@ static void PollMenu(struct MpBridge *b)
     action = U16(payload + 8);
     kind = payload[10];
     /* An OPEN names no action, or (menuOpenPage, Update 32) its page: 1 the soft reset, 2 the Tower (tower), 3 the host
-     * save after an in-game SAVE (hostSavePage, MS-61), 4 the Tower's next floor after "go on?" (towerNextPage). */
+     * save after an in-game SAVE (hostSavePage, MS-61), 4 the Tower's next floor after "go on?" (towerNextPage), 5-7 a
+     * wireless minigame's lobby (the minigame channel, MS-141c). */
     if (seq == 0 || action > 7 || kind < 1 || kind > 3 || !AllZero(payload + 11, 5)
      || (kind == 2 && (screen == 0 || action == 0)) || (kind == 3 && action != 0)
      || (kind == 1 && action != 0 && !OpenPageAllowed(b, action))
@@ -1749,6 +1755,18 @@ static bool Dispatch(struct MpBridge *b, const uint8_t *payload, size_t size)
             return false;
         }
     }
+    else if (payload[0] == 'm')
+    {
+        /* The fifth extension (mp_bridge.h, MS-141c): a minigame frame from the companion, only after the 'u'
+         * announcement; its layout is the game's. */
+        if (!b->minigameCapabilitySent || b->ops.minigameDeliver == NULL || restLength < 1
+         || restLength > MP_BRIDGE_MINIGAME_BYTES)
+        {
+            Stop(b, "invalid minigame frame", true);
+            return false;
+        }
+        b->ops.minigameDeliver(b->ops.context, rest, restLength);
+    }
     else if (payload[0] == 'B')
     {
         /* The extension (mp_bridge.h): a bound battle's generation and a look
@@ -1847,6 +1865,16 @@ static bool FlushOne(struct MpBridge *b)
             memmove(b->controls[0], b->controls[1], b->controlCount * sizeof(b->controls[0]));
             memmove(b->controlLength, b->controlLength + 1, b->controlCount * sizeof(b->controlLength[0]));
             b->controlBurst++;
+        }
+        else if (b->minigameOutCount > 0 && !ControlQueued(b, 'u'))
+        {
+            /* A minigame frame (MS-141c): a group's link runs a frame at a time, so its frames go before the records,
+             * which only ever carry the latest state; never before the 'u' announcement has left. */
+            memcpy(b->tx, b->minigameOut[b->minigameOutHead], b->minigameOutLength[b->minigameOutHead]);
+            b->txLength = b->minigameOutLength[b->minigameOutHead];
+            b->minigameOutHead = (b->minigameOutHead + 1) % MP_BRIDGE_MINIGAME_QUEUE;
+            b->minigameOutCount--;
+            b->controlBurst = 0;
         }
         else if (b->hasLatestSpawn && !ControlQueued(b, 'w')
               && (b->spawnTurn || !(b->hasLatestPose || b->hasLatestWorld)))
@@ -2076,6 +2104,18 @@ void MpBridge_Step(struct MpBridge *b)
             return;
         b->extrasCapabilitySent = true;
     }
+    /* The fifth extension: the wireless minigames with the world's players, once the world mailbox is up. */
+    if (b->ops.minigameTake != NULL && WorldHeaderReady(b) && !b->minigameCapabilitySent
+     && b->controlCount < MP_BRIDGE_CONTROL_LIMIT)
+    {
+        PutU16(cap, 1);
+        PutU16(cap + 2, 5);
+        PutU16(cap + 4, 14);
+        PutU16(cap + 6, 70);
+        if (!Reliable(b, 'u', cap, 8, NULL, 0))
+            return;
+        b->minigameCapabilitySent = true;
+    }
     Receive(b);
     if (!b->connected)
         return;
@@ -2174,6 +2214,25 @@ void MpBridge_Step(struct MpBridge *b)
             }
         }
     }
+    /* The game's minigame frames (MS-141c): what its queue holds, as far as this one has room. */
+    if (b->minigameCapabilitySent && b->ops.minigameTake != NULL)
+    {
+        uint8_t data[MP_BRIDGE_MINIGAME_BYTES];
+        size_t length;
+
+        while (b->minigameOutCount < MP_BRIDGE_MINIGAME_QUEUE)
+        {
+            unsigned slot = (b->minigameOutHead + b->minigameOutCount) % MP_BRIDGE_MINIGAME_QUEUE;
+
+            length = 0;
+            if (!b->ops.minigameTake(b->ops.context, data, &length))
+                break;
+            if (length < 1 || length > MP_BRIDGE_MINIGAME_BYTES)
+                continue;
+            b->minigameOutLength[slot] = Frame(b->minigameOut[slot], 'm', data, length, NULL, 0);
+            b->minigameOutCount++;
+        }
+    }
     Flush(b);
 }
 
@@ -2269,6 +2328,7 @@ typedef int MpSocket;
 #include "save.h"
 #include "character_customization.h"
 #include "tower_legends.h"
+#include "platform/mp_minigames.h"
 
 extern const u32 gMultiplayerPresenceAnimationAbiVersion; /* multiplayer.c */
 extern const u32 gMultiplayerOwnershipAbi;                /* multiplayer_ownership.c */
@@ -2408,6 +2468,19 @@ static void GlueServiceBattle(void *context)
 {
     (void)context;
     MultiplayerBattle_ServiceTransport();
+}
+
+/* KNOWN_ISSUES MS-141c: the wireless minigames with the world's players (src/platform/mp_minigames.c). */
+static bool GlueMinigameTake(void *context, uint8_t *data, size_t *length)
+{
+    (void)context;
+    return MpMinigames_Take(data, length);
+}
+
+static void GlueMinigameDeliver(void *context, const uint8_t *data, size_t length)
+{
+    (void)context;
+    MpMinigames_Deliver(data, length);
 }
 
 static void GlueRouteResetChord(void *context, bool enabled)
@@ -2626,6 +2699,12 @@ bool MpBridge_Configure(const char *path)
     ops.milliseconds = GlueMilliseconds;
     ops.battleLooks = GlueBattleLooks;
     ops.serviceBattle = GlueServiceBattle;
+    /* The minigames with the world's players need the menu's pages (their lobby is one). */
+    if (caps.menuOpenPage == 1)
+    {
+        ops.minigameTake = GlueMinigameTake;
+        ops.minigameDeliver = GlueMinigameDeliver;
+    }
     memset(&sInput, 0, sizeof(sInput));
     MpBridge_Init(&sBridge, &ops, &caps, (uint16_t)port, token);
     memset(token, 0, sizeof(token));

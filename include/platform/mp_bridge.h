@@ -50,6 +50,12 @@
  * frame instead of 32 WRITEs per sector. The companion learns the capability
  * from the build manifest; nothing is announced, and 'C' never carries it.
  *
+ * A fifth native extension, the wireless minigames with the world's players (KNOWN_ISSUES MS-141c): once the world
+ * mailbox is ready the bridge announces 'u' (version 1, 5 players, a player's command of 14 bytes, a frame of every
+ * player's of 70), then carries 'm' frames both ways: the game's lobby requests and its group's link frames out, the
+ * lobby's state and the link's frames in (at most MP_BRIDGE_MINIGAME_BYTES each; their layout is the game's and the
+ * companion's: src/multiplayer_minigames.c, the app's minigame_link.py). The bridge only carries them.
+ *
  * Started with `--bridge FILE`; FILE holds `port=N` (1-65535) and `token=` 64
  * lowercase hex digits, and the manifest's explicit opt-ins it has, each on
  * its own line: `trade_effect_prepare=1`, `trade_effect_save=1`,
@@ -185,11 +191,19 @@ struct MpBridgeOps
      * commands at once (MultiplayerBattle_ServiceTransport). NULL: the game's next
      * frame answers, a frame later. */
     void (*serviceBattle)(void *context);
+    /* KNOWN_ISSUES MS-141c: the wireless minigames with the world's players. minigameTake: the game's next frame for
+     * the companion (a lobby request or a frame of its group's link), at most MP_BRIDGE_MINIGAME_BYTES; false when it
+     * has none. minigameDeliver: a frame from the companion (the lobby's state, the link's frames). NULL: no minigames
+     * with the world's players, and the bridge never announces 'u'. */
+    bool (*minigameTake)(void *context, uint8_t *data, size_t *length);
+    void (*minigameDeliver)(void *context, const uint8_t *data, size_t length);
 };
 
 #define MP_BRIDGE_MAX_FRAME (4 + 1 + 240 + 4096) /* "F" response with its 4 KiB window */
 #define MP_BRIDGE_IMPORT_FRAME (1 + 240 + 4096) /* inbound 'i': a save command and its import sector */
 #define MP_BRIDGE_CONTROL_LIMIT 4
+#define MP_BRIDGE_MINIGAME_BYTES 200 /* an 'm' frame's payload, either way (MS-141c) */
+#define MP_BRIDGE_MINIGAME_QUEUE 16  /* 'm' frames waiting for the socket */
 
 struct MpBridgeSave
 {
@@ -262,6 +276,11 @@ struct MpBridge
     uint32_t previousSaveFrame, previousSaveState;
     int64_t tick, lastConnect;
     bool stopped;
+    /* MS-141c: the minigame channel ('u' announced once the world mailbox is up; 'm' frames both ways) */
+    bool minigameCapabilitySent;
+    uint8_t minigameOut[MP_BRIDGE_MINIGAME_QUEUE][4 + 1 + MP_BRIDGE_MINIGAME_BYTES];
+    size_t minigameOutLength[MP_BRIDGE_MINIGAME_QUEUE];
+    unsigned minigameOutHead, minigameOutCount;
 };
 
 /* Checks the capability set as mgba.lua's start-up asserts do; NULL when

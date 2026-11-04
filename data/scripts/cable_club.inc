@@ -947,8 +947,11 @@ CableClub_EventScript_DirectCornerAttendantNoPartners::
 CableClub_EventScript_ComputerPartnersBerryCrush::
 	checkitem ITEM_POWDER_JAR
 	goto_if_eq VAR_RESULT, FALSE, CableClub_EventScript_DirectCornerAttendantNoPartners
+	special IsWorldMinigameAvailable
+	goto_if_eq VAR_RESULT, TRUE, CableClub_EventScript_WorldBerryCrush
 	msgbox CableClub_Text_ComputerPartnersBerryCrush, MSGBOX_YESNO
 	goto_if_eq VAR_RESULT, NO, CableClub_EventScript_DirectCornerAttendantNoPartners
+CableClub_EventScript_ComputerPartnersBerryCrushCount::
 	special HasAtLeastOneBerry
 	goto_if_eq VAR_RESULT, FALSE, CableClub_EventScript_ComputerPartnersNeedBerry
 	message CableClub_Text_ComputerPartnersHowMany
@@ -965,6 +968,51 @@ CableClub_EventScript_ComputerPartnersNeedBerry::
 	msgbox CableClub_Text_NeedBerryForBerryCrush, MSGBOX_DEFAULT
 	release
 	end
+
+@ KNOWN_ISSUES MS-141c (PC game only): in a world, BERRY CRUSH with the world's players too. Saved first, as the
+@ wireless lobby saves; the lobby (lead a group or join one) is a page of the PLAYERS menu (src/platform/mp_minigames.c);
+@ when the group starts, the room as after the wireless lobby.
+CableClub_EventScript_WorldBerryCrush::
+	message CableClub_Text_WorldBerryCrush
+	waitmessage
+	dynmultichoice 0, 0, FALSE, 3, 0, DYN_MULTICHOICE_CB_NONE, CableClub_Text_WorldPlayers, CableClub_Text_Computers, CableClub_Text_NotNow
+	switch VAR_RESULT
+	case 0, CableClub_EventScript_WorldBerryCrushPlayers
+	case 1, CableClub_EventScript_ComputerPartnersBerryCrushCount
+	goto CableClub_EventScript_DirectCornerAttendantNoPartners
+	end
+
+CableClub_EventScript_WorldBerryCrushPlayers::
+	special HasAtLeastOneBerry
+	goto_if_eq VAR_RESULT, FALSE, CableClub_EventScript_ComputerPartnersNeedBerry
+	call Common_EventScript_SaveGame
+	goto_if_eq VAR_RESULT, 0, CableClub_EventScript_AbortLink
+	closemessage
+	setvar VAR_0x8005, 0
+	release
+	special OpenWorldMinigameLobby
+	goto_if_eq VAR_RESULT, FALSE, CableClub_EventScript_WorldLobbyLeft
+	goto CableClub_EventScript_EnterWirelessLinkRoom
+	end
+
+CableClub_EventScript_WorldLobbyLeft::
+	lock
+	msgbox CableClub_Text_HopeYouEnjoyWirelessSystem, MSGBOX_DEFAULT
+	release
+	end
+
+CableClub_Text_WorldBerryCrush:
+	.string "Play BERRY CRUSH with players in\n"
+	.string "this world, or with computers?$"
+
+CableClub_Text_WorldPlayers:
+	.string "WORLD PLAYERS$"
+
+CableClub_Text_Computers:
+	.string "COMPUTERS$"
+
+CableClub_Text_NotNow:
+	.string "NOT NOW$"
 
 CableClub_Text_ComputerPartnersBerryCrush:
 	.string "Play BERRY CRUSH with\n"
@@ -1433,6 +1481,9 @@ MossdeepCity_GameCorner_1F_EventScript_PartnersPokemonJump::
 	setvar VAR_0x8005, 0
 	special ChooseMonForWirelessMinigame
 	goto_if_ge VAR_0x8004, PARTY_SIZE, MossdeepCity_GameCorner_1F_EventScript_AbortMinigame
+	special IsWorldMinigameAvailable
+	goto_if_eq VAR_RESULT, TRUE, MossdeepCity_GameCorner_1F_EventScript_WorldPokemonJump
+MossdeepCity_GameCorner_1F_EventScript_PartnersPokemonJumpCount::
 	message CableClub_Text_ComputerPartnersHowMany
 	waitmessage
 	dynmultichoice 0, 0, FALSE, 4, 3, DYN_MULTICHOICE_CB_NONE, CableClub_Text_TwoPlayers, CableClub_Text_ThreePlayers, CableClub_Text_FourPlayers, CableClub_Text_FivePlayers
@@ -1453,6 +1504,9 @@ MossdeepCity_GameCorner_1F_EventScript_PartnersDodrio::
 	setvar VAR_0x8005, 1
 	special ChooseMonForWirelessMinigame
 	goto_if_ge VAR_0x8004, PARTY_SIZE, MossdeepCity_GameCorner_1F_EventScript_AbortMinigame
+	special IsWorldMinigameAvailable
+	goto_if_eq VAR_RESULT, TRUE, MossdeepCity_GameCorner_1F_EventScript_WorldDodrio
+MossdeepCity_GameCorner_1F_EventScript_PartnersDodrioCount::
 	message CableClub_Text_ComputerPartnersHowMany
 	waitmessage
 	dynmultichoice 0, 0, FALSE, 3, 2, DYN_MULTICHOICE_CB_NONE, CableClub_Text_ThreePlayers, CableClub_Text_FourPlayers, CableClub_Text_FivePlayers
@@ -1467,6 +1521,52 @@ MossdeepCity_GameCorner_1F_EventScript_PartnersDodrio::
 MossdeepCity_GameCorner_1F_Text_PlayWithComputerPartners:
 	.string "You can play with computer\n"
 	.string "partners. Which game will it be?$"
+
+@ KNOWN_ISSUES MS-141c (PC game only): in a world, the two games with the world's players too: saved first, as the
+@ wireless lobby saves, then the PLAYERS menu's lobby (src/platform/mp_minigames.c); when the group starts, the room.
+MossdeepCity_GameCorner_1F_EventScript_WorldPokemonJump::
+	message MossdeepCity_GameCorner_1F_Text_WorldOrComputers
+	waitmessage
+	dynmultichoice 0, 0, FALSE, 3, 0, DYN_MULTICHOICE_CB_NONE, CableClub_Text_WorldPlayers, CableClub_Text_Computers, CableClub_Text_NotNow
+	switch VAR_RESULT
+	case 1, MossdeepCity_GameCorner_1F_EventScript_PartnersPokemonJumpCount
+	goto_if_ne VAR_RESULT, 0, MossdeepCity_GameCorner_1F_EventScript_AbortMinigame
+	setvar VAR_0x8005, 1
+	goto MossdeepCity_GameCorner_1F_EventScript_WorldLobby
+	end
+
+MossdeepCity_GameCorner_1F_EventScript_WorldDodrio::
+	message MossdeepCity_GameCorner_1F_Text_WorldOrComputers
+	waitmessage
+	dynmultichoice 0, 0, FALSE, 3, 0, DYN_MULTICHOICE_CB_NONE, CableClub_Text_WorldPlayers, CableClub_Text_Computers, CableClub_Text_NotNow
+	switch VAR_RESULT
+	case 1, MossdeepCity_GameCorner_1F_EventScript_PartnersDodrioCount
+	goto_if_ne VAR_RESULT, 0, MossdeepCity_GameCorner_1F_EventScript_AbortMinigame
+	setvar VAR_0x8005, 2
+	goto MossdeepCity_GameCorner_1F_EventScript_WorldLobby
+	end
+
+@ VAR_0x8005: the game for the lobby (1 Pokemon Jump, 2 Dodrio Berry Picking).
+MossdeepCity_GameCorner_1F_EventScript_WorldLobby::
+	copyvar VAR_0x8006, VAR_0x8005
+	call Common_EventScript_SaveGame
+	goto_if_eq VAR_RESULT, 0, MossdeepCity_GameCorner_1F_EventScript_AbortMinigame
+	copyvar VAR_0x8005, VAR_0x8006
+	closemessage
+	release
+	special OpenWorldMinigameLobby
+	goto_if_eq VAR_RESULT, FALSE, MossdeepCity_GameCorner_1F_EventScript_WorldLobbyLeft
+	goto MossdeepCity_GameCorner_1F_EventScript_EnterMinigameRoom
+	end
+
+MossdeepCity_GameCorner_1F_EventScript_WorldLobbyLeft::
+	lock
+	goto MossdeepCity_GameCorner_1F_EventScript_AbortMinigame
+	end
+
+MossdeepCity_GameCorner_1F_Text_WorldOrComputers:
+	.string "Play with players in this world,\n"
+	.string "or with computer partners?$"
 .endif
 
 MossdeepCity_GameCorner_1F_EventScript_AdapterNotConnected::

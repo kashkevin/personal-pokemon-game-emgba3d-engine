@@ -1410,6 +1410,21 @@ static void DisconnectRfu(void)
 
 static void TryDisconnectRfu(void)
 {
+#ifdef PORTABLE
+    if (LocalLink_IsActive())
+    {
+        // MS-141c: a world group's member ends its link here, at once: on the GBA a child hands the disconnect to the
+        // adapter's link manager, which the PC does not have, and a member handles a frame only when one of the
+        // leader's comes - after the leader's last there is none. Its link never ended, and 10 s later it showed the
+        // communication error. The leader (and computer partners' group) ends on the next frame, as before.
+        if (gRfu.parentChild == MODE_CHILD)
+            DisconnectRfu();
+        else
+            gRfu.callback = DisconnectRfu;
+        return;
+    }
+#endif
+#line 1403 // gba-line
     if (gRfu.parentChild == MODE_CHILD)
     {
         rfu_LMAN_requestChangeAgbClockMaster();
@@ -3038,6 +3053,19 @@ static struct RfuLinkStatus sLocalLinkStatus;
 static LocalLinkPartnerFunc sLocalPartnerFunc;
 static bool8 sLocalLinkActive;
 
+// KNOWN_ISSUES MS-141c: the same group with the world's players instead of computer partners (NetLink, below).
+enum
+{
+    LOCAL_LINK_PARTNERS,   // computer partners: the frame's exchange in memory
+    LOCAL_LINK_NET_LEADER, // this game leads a world group: the members' commands come over the network
+    LOCAL_LINK_NET_MEMBER, // this game is a member of a world group: the leader's frames come over the network
+};
+static u8 sLocalLinkMode;
+static void NetLink_Reset(void);
+static void NetLink_FlushLeaderFrame(void);
+static void NetLeaderFrame(void);
+static void NetMemberFrame(void);
+
 bool32 LocalLink_IsActive(void)
 {
     return sLocalLinkActive;
@@ -3063,6 +3091,8 @@ void LocalLink_Start(u8 playerCount)
     gWirelessCommType = 1;
     gReceivedRemoteLinkPlayers = TRUE;
     sLocalLinkActive = TRUE;
+    sLocalLinkMode = LOCAL_LINK_PARTNERS;
+    NetLink_Reset();
 }
 
 void LocalLink_SetPartnerFunc(LocalLinkPartnerFunc func)
@@ -3074,7 +3104,14 @@ void LocalLink_End(void)
 {
     if (!sLocalLinkActive)
         return;
+    // a world group's leader: its last frame (the closing of the link) still goes out to the members
+    if (sLocalLinkMode == LOCAL_LINK_NET_LEADER)
+        NetLink_FlushLeaderFrame();
+    if (sLocalLinkMode != LOCAL_LINK_PARTNERS)
+        fprintf(stderr, "netlink: the game closed the group's link (%s)\n",
+                sLocalLinkMode == LOCAL_LINK_NET_LEADER ? "leader" : "member");
     sLocalLinkActive = FALSE;
+    sLocalLinkMode = LOCAL_LINK_PARTNERS;
     sLocalPartnerFunc = NULL;
     gRfu.callback = NULL;
     gReceivedRemoteLinkPlayers = FALSE;
@@ -3148,6 +3185,16 @@ void LocalLink_RunFrame(void)
 {
     u8 i;
 
+    if (sLocalLinkMode == LOCAL_LINK_NET_LEADER)
+    {
+        NetLeaderFrame();
+        return;
+    }
+    if (sLocalLinkMode == LOCAL_LINK_NET_MEMBER)
+    {
+        NetMemberFrame();
+        return;
+    }
     CpuFill16(0, gRecvCmds, sizeof(gRecvCmds));
     for (i = 1; i < gRfu.playerCount; i++)
         RunLocalPartner(i);
@@ -3194,5 +3241,324 @@ bool32 LocalLink_PartnerSendBlock(u8 partnerId, const void *src, u16 size)
 bool32 LocalLink_PartnerIsSendingBlock(u8 partnerId)
 {
     return partnerId < MAX_RFU_PLAYERS && sLocalPartners[partnerId].sendingBlock;
+}
+
+// KNOWN_ISSUES MS-141c: the wireless minigames with the world's players. The group is a virtual wireless group over
+// the world server - the bridge (src/platform/mp_bridge.c) carries its frames to and from the companion, which sends
+// them to the world server and back - the leader's game the parent (player 0), each member's a child. Each frame does
+// what the adapter's exchange does:
+// - the leader: the commands of every player as it handled them the frame before go out to the members (the parent's
+//   ReadAllPlayerRecvCmds: sent every frame, as the parent sends every frame - a member answers only the frames it
+//   gets); one waiting command of each member goes into its slot; its own command comes back in slot 0
+//   (MoveSendCmdToRecv); the commands are handled and the link's callback runs (RfuMain2_Parent);
+// - a member: on a frame with a leader's frame waiting, its commands are handled, the link's callback runs and the
+//   member's own command, if it has one, goes out (RfuMain1_Child once the parent's frame has come); on a frame
+//   without one nothing is handled and nothing goes out (its command waits in gSendCmd: Rfu_SendPacket and the link
+//   layer do nothing while it is taken).
+// The transport loses no frame and keeps their order. A member that falls behind (its game slower, or frames arriving
+// in a burst) handles two frames a frame until it is near the leader again; the games' packets are sent again and
+// again, so the state a skipped packet carried comes in the next one.
+#define NET_MEMBER_QUEUE 32 // a member's commands waiting at the leader
+#define NET_LEADER_QUEUE 64 // the leader's frames waiting at a member
+#define NET_OUT_QUEUE    64 // frames for the network until the bridge takes them (it takes them every frame)
+#define NET_CATCH_UP      6 // a member with more of the leader's frames than this waiting handles two a frame
+#define NET_STALL_FRAMES 600 // a member without a leader's frame for this long (10 s) has lost its group
+
+static u16 sNetMemberCmds[MAX_RFU_PLAYERS][NET_MEMBER_QUEUE][CMD_LENGTH - 1];
+static u8 sNetMemberHead[MAX_RFU_PLAYERS];
+static u8 sNetMemberCount[MAX_RFU_PLAYERS];
+static u16 sNetLeaderFrames[NET_LEADER_QUEUE][MAX_RFU_PLAYERS][CMD_LENGTH - 1];
+static u8 sNetLeaderHead;
+static u8 sNetLeaderCount;
+static u8 sNetOut[NET_OUT_QUEUE][NETLINK_FRAME_BYTES];
+static u8 sNetOutLength[NET_OUT_QUEUE];
+static u8 sNetOutHead;
+static u8 sNetOutCount;
+static bool8 sNetLeaderHandled; // the leader handled a frame whose commands have not gone out yet
+static u32 sNetDropped;         // frames or commands dropped because a queue was full (none in a working group)
+static u16 sNetStall;           // a member's frames since the leader's last frame
+static bool8 sNetLost;          // the last group's link was lost (NetLink_LinkLost), not closed by its game
+
+// A new link: nothing of an earlier group's is left (its frames the bridge never took are not this group's).
+static void NetLink_Reset(void)
+{
+    memset(sNetMemberHead, 0, sizeof(sNetMemberHead));
+    memset(sNetMemberCount, 0, sizeof(sNetMemberCount));
+    sNetLeaderHead = sNetLeaderCount = 0;
+    sNetOutHead = sNetOutCount = 0;
+    sNetLeaderHandled = FALSE;
+    sNetStall = 0;
+    sNetLost = FALSE;
+}
+
+// A command or frame that only carries a game's packet (or nothing): another one will carry the same state.
+static bool32 NetLink_IsPacketOnly(u16 command)
+{
+    u16 kind = command & RFUCMD_MASK;
+
+    return kind == 0 || kind == RFUCMD_SEND_PACKET || kind == RFUCMD_SEND_HELD_KEYS || kind == RFUCMD_BLENDER_SEND_KEYS;
+}
+
+static void NetOut_Push(const u16 *words, u8 wordCount, bool32 keepEmpty)
+{
+    u8 slot;
+    u8 i;
+    bool32 any = FALSE;
+
+    for (i = 0; i < wordCount; i++)
+        any |= words[i] != 0;
+    if (!any && !keepEmpty)
+        return;
+    if (sNetOutCount >= NET_OUT_QUEUE)
+    {
+        // the bridge takes the queue every frame: full only without a bridge, when the group is gone anyway
+        sNetDropped++;
+        return;
+    }
+    slot = (sNetOutHead + sNetOutCount) % NET_OUT_QUEUE;
+    for (i = 0; i < wordCount; i++)
+    {
+        sNetOut[slot][i * 2] = words[i];
+        sNetOut[slot][i * 2 + 1] = words[i] >> 8;
+    }
+    sNetOutLength[slot] = any ? wordCount * 2 : 0; // an empty frame goes out as nothing (a member handles it as one)
+    sNetOutCount++;
+}
+
+static void NetLink_FlushLeaderFrame(void)
+{
+    u16 words[MAX_RFU_PLAYERS * (CMD_LENGTH - 1)];
+    u8 i;
+
+    if (!sNetLeaderHandled)
+        return;
+    for (i = 0; i < MAX_RFU_PLAYERS; i++)
+        memcpy(&words[i * (CMD_LENGTH - 1)], gRecvCmds[i], (CMD_LENGTH - 1) * sizeof(u16));
+    NetOut_Push(words, ARRAY_COUNT(words), TRUE);
+    sNetLeaderHandled = FALSE;
+}
+
+static void NetLeaderFrame(void)
+{
+    u8 i;
+
+    NetLink_FlushLeaderFrame();
+    CpuFill16(0, gRecvCmds, sizeof(gRecvCmds));
+    for (i = 1; i < gRfu.playerCount; i++)
+    {
+        if (sNetMemberCount[i] == 0)
+            continue;
+        memcpy(gRecvCmds[i], sNetMemberCmds[i][sNetMemberHead[i]], (CMD_LENGTH - 1) * sizeof(u16));
+        sNetMemberHead[i] = (sNetMemberHead[i] + 1) % NET_MEMBER_QUEUE;
+        sNetMemberCount[i]--;
+    }
+    MoveSendCmdToRecv();
+    RfuHandleReceiveCommand(0);
+    CallRfuFunc();
+    sNetLeaderHandled = TRUE;
+}
+
+static void NetMemberFrame(void)
+{
+    u8 frames = sNetLeaderCount > NET_CATCH_UP ? 2 : 1;
+    bool32 handled = FALSE;
+    u8 i;
+
+    while (frames-- != 0 && sNetLeaderCount != 0)
+    {
+        CpuFill16(0, gRecvCmds, sizeof(gRecvCmds));
+        for (i = 0; i < MAX_RFU_PLAYERS; i++)
+            memcpy(gRecvCmds[i], sNetLeaderFrames[sNetLeaderHead][i], (CMD_LENGTH - 1) * sizeof(u16));
+        sNetLeaderHead = (sNetLeaderHead + 1) % NET_LEADER_QUEUE;
+        sNetLeaderCount--;
+        RfuHandleReceiveCommand(0);
+        CallRfuFunc();
+        if (!sLocalLinkActive)
+            return; // the link closed in this frame (every player ready): nothing more is handled or sent
+        NetOut_Push(gSendCmd, CMD_LENGTH - 1, FALSE);
+        CpuFill16(0, gSendCmd, sizeof(gSendCmd));
+        handled = TRUE;
+    }
+    if (handled)
+    {
+        sNetStall = 0;
+        return;
+    }
+    CpuFill16(0, gRecvCmds, sizeof(gRecvCmds));
+    // The leader sends a frame every frame: none for 10 s, and its game, or the way to it, is gone - as the adapter
+    // loses a parent that stops answering (the host would end the group for a player who lost the connection; this
+    // also ends it for one whose game stopped with the connection up).
+    if (++sNetStall >= NET_STALL_FRAMES)
+    {
+        fprintf(stderr, "netlink: no frame from the group's leader for %u frames: the group is lost\n", sNetStall);
+        NetLink_LinkLost();
+    }
+}
+
+// The leader of a world group of playerCount: as LocalLink_Start, the members' commands from the network.
+void NetLink_StartLeader(u8 playerCount)
+{
+    LocalLink_Start(playerCount);
+    sLocalLinkMode = LOCAL_LINK_NET_LEADER;
+    fprintf(stderr, "netlink: leading a world group of %u\n", playerCount);
+}
+
+// A member of a world group of playerCount, its player number multiplayerId (1 to playerCount - 1): a child whose
+// leader's frames come from the network.
+void NetLink_StartMember(u8 playerCount, u8 multiplayerId)
+{
+    if (playerCount < 2 || playerCount > MAX_RFU_PLAYERS)
+        playerCount = MAX_RFU_PLAYERS;
+    ResetLinkRfuGFLayer();
+    memset(sLocalPartners, 0, sizeof(sLocalPartners));
+    sLocalPartnerFunc = NULL;
+    memset(&sLocalLinkStatus, 0, sizeof(sLocalLinkStatus));
+    sLocalLinkStatus.parentChild = MODE_CHILD;
+    sLocalLinkStatus.connCount = 1;
+    sLocalLinkStatus.connSlotFlag = 1;
+    memset(sLocalLinkStatus.strength, 0xFF, sizeof(sLocalLinkStatus.strength));
+    gRfuLinkStatus = &sLocalLinkStatus;
+    gRfu.parentChild = MODE_CHILD;
+    gRfu.playerCount = playerCount;
+    gRfu.multiplayerId = multiplayerId;
+    gWirelessCommType = 1;
+    gReceivedRemoteLinkPlayers = TRUE;
+    sLocalLinkActive = TRUE;
+    sLocalLinkMode = LOCAL_LINK_NET_MEMBER;
+    NetLink_Reset();
+    fprintf(stderr, "netlink: player %u of a world group of %u\n", multiplayerId, playerCount);
+}
+
+bool32 NetLink_IsActive(void)
+{
+    return sLocalLinkActive && sLocalLinkMode != LOCAL_LINK_PARTNERS;
+}
+
+bool32 NetLink_IsLeader(void)
+{
+    return sLocalLinkActive && sLocalLinkMode == LOCAL_LINK_NET_LEADER;
+}
+
+// The bridge's side: the next frame for the network (the leader's frame, 0 or NETLINK_FRAME_BYTES, or a member's
+// command, NETLINK_CMD_BYTES). Taken also after the link has ended: its last frame goes out.
+bool32 NetLink_TakeOutbound(u8 *dst, u8 *length)
+{
+    if (sNetOutCount == 0)
+        return FALSE;
+    *length = sNetOutLength[sNetOutHead];
+    memcpy(dst, sNetOut[sNetOutHead], *length);
+    sNetOutHead = (sNetOutHead + 1) % NET_OUT_QUEUE;
+    sNetOutCount--;
+    return TRUE;
+}
+
+// A frame from the network: at the leader, member `source`'s command (NETLINK_CMD_BYTES); at a member, the leader's
+// frame (source 0; 0 or NETLINK_FRAME_BYTES). A full queue drops its oldest packet-only entry for the new one.
+bool32 NetLink_PutInbound(u8 source, const u8 *src, u8 length)
+{
+    u8 i;
+    u8 j;
+
+    if (!NetLink_IsActive())
+        return FALSE;
+    if (sLocalLinkMode == LOCAL_LINK_NET_LEADER)
+    {
+        u8 slot;
+
+        if (source == 0 || source >= gRfu.playerCount || length != NETLINK_CMD_BYTES)
+            return FALSE;
+        if (sNetMemberCount[source] >= NET_MEMBER_QUEUE)
+        {
+            for (i = 0; i < NET_MEMBER_QUEUE; i++)
+                if (NetLink_IsPacketOnly(sNetMemberCmds[source][(sNetMemberHead[source] + i) % NET_MEMBER_QUEUE][0]))
+                    break;
+            sNetDropped++;
+            if (i == NET_MEMBER_QUEUE)
+                return FALSE;
+            for (; i > 0; i--)
+                memcpy(sNetMemberCmds[source][(sNetMemberHead[source] + i) % NET_MEMBER_QUEUE],
+                       sNetMemberCmds[source][(sNetMemberHead[source] + i - 1) % NET_MEMBER_QUEUE],
+                       sizeof(sNetMemberCmds[0][0]));
+            sNetMemberHead[source] = (sNetMemberHead[source] + 1) % NET_MEMBER_QUEUE;
+            sNetMemberCount[source]--;
+        }
+        slot = (sNetMemberHead[source] + sNetMemberCount[source]) % NET_MEMBER_QUEUE;
+        for (i = 0; i < CMD_LENGTH - 1; i++)
+            sNetMemberCmds[source][slot][i] = src[i * 2] | (src[i * 2 + 1] << 8);
+        sNetMemberCount[source]++;
+        return TRUE;
+    }
+    else
+    {
+        u8 slot;
+
+        if (source != 0 || (length != 0 && length != NETLINK_FRAME_BYTES))
+            return FALSE;
+        if (sNetLeaderCount >= NET_LEADER_QUEUE)
+        {
+            for (i = 0; i < NET_LEADER_QUEUE; i++)
+            {
+                u16 (*frame)[CMD_LENGTH - 1] = sNetLeaderFrames[(sNetLeaderHead + i) % NET_LEADER_QUEUE];
+
+                for (j = 0; j < MAX_RFU_PLAYERS && NetLink_IsPacketOnly(frame[j][0]); j++)
+                    ;
+                if (j == MAX_RFU_PLAYERS)
+                    break;
+            }
+            sNetDropped++;
+            if (i == NET_LEADER_QUEUE)
+                return FALSE;
+            for (; i > 0; i--)
+                memcpy(sNetLeaderFrames[(sNetLeaderHead + i) % NET_LEADER_QUEUE],
+                       sNetLeaderFrames[(sNetLeaderHead + i - 1) % NET_LEADER_QUEUE], sizeof(sNetLeaderFrames[0]));
+            sNetLeaderHead = (sNetLeaderHead + 1) % NET_LEADER_QUEUE;
+            sNetLeaderCount--;
+        }
+        slot = (sNetLeaderHead + sNetLeaderCount) % NET_LEADER_QUEUE;
+        memset(sNetLeaderFrames[slot], 0, sizeof(sNetLeaderFrames[slot]));
+        for (i = 0; i < MAX_RFU_PLAYERS && length != 0; i++)
+            for (j = 0; j < CMD_LENGTH - 1; j++)
+                sNetLeaderFrames[slot][i][j] = src[(i * (CMD_LENGTH - 1) + j) * 2]
+                                             | (src[(i * (CMD_LENGTH - 1) + j) * 2 + 1] << 8);
+        sNetLeaderCount++;
+        return TRUE;
+    }
+}
+
+u32 NetLink_DroppedCount(void)
+{
+    return sNetDropped;
+}
+
+// Whether the last world group's link was lost (the communication error) rather than closed by its game.
+bool32 NetLink_WasLost(void)
+{
+    return sNetLost;
+}
+
+// The communication error of a lost world group is on screen (until A returns to the last save, which ends the wireless
+// mode): the frame's adapter work (RfuVSync, the RFU link's main functions) has no adapter on PC and is skipped.
+bool32 NetLink_ErrorShowing(void)
+{
+    return sNetLost && gWirelessCommType != 0;
+}
+
+// The world group closed under the link (a player left or lost their connection, the host stopped): as when the
+// adapter loses the group, the game's communication error ("Move closer to your link partner"), then A goes back to
+// the registration counter (the last save, as on the GBA).
+void NetLink_LinkLost(void)
+{
+    if (!NetLink_IsActive())
+        return;
+    fprintf(stderr, "netlink: the world group is lost (%s): the communication error\n",
+            sLocalLinkMode == LOCAL_LINK_NET_LEADER ? "leader" : "member");
+    sNetLost = TRUE;
+    sLocalLinkActive = FALSE;
+    sLocalLinkMode = LOCAL_LINK_PARTNERS;
+    gRfu.callback = NULL;
+    gReceivedRemoteLinkPlayers = FALSE;
+    SetLinkErrorBuffer(0, 0, 0, TRUE);
+    SetMainCallback2(CB2_LinkError);
+    gMain.savedCallback = CB2_LinkError;
 }
 #endif

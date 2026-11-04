@@ -465,9 +465,10 @@ static void VBlankIntr(void)
         // controller polling still runs below when the channel permits it.
     }
 #ifdef PORTABLE
-    else if (LocalLink_IsActive())
+    else if (LocalLink_IsActive() || NetLink_ErrorShowing())
     {
-        // MS-141: a computer partners' group has no adapter to sync.
+        // MS-141: a computer partners' group has no adapter to sync (MS-141c: nor a world group's, nor its
+        // communication error once it was lost).
     }
 #endif
 #line 397 // gba-line

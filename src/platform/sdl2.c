@@ -259,6 +259,7 @@ extern int NativeSelfTest_Ride(const char *sheetPath);
 extern int NativeSelfTest_Carriers(const char *sheetPath);
 extern int NativeSelfTest_FrontierSaves(void);
 extern int NativeSelfTest_MinigamePartners(void);
+extern int NativeSelfTest_NetLink(void);
 extern int NativeSelfTest_Coins(void);
 extern int NativeSelfTest_Breeding(void);
 extern int NativeSelfTest_Rival(void);
@@ -1375,6 +1376,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_FrontierSaves()); // native_selftest_frontier.c (saving during Frontier challenges)
         else if (strcmp(argv[i], "--selftest-minigame-partners") == 0)
             exit(NativeSelfTest_MinigamePartners()); // native_selftest_minigames.c (MS-141's computer partners)
+        else if (strcmp(argv[i], "--selftest-netlink") == 0)
+            exit(NativeSelfTest_NetLink()); // native_selftest_minigames.c (MS-141c: the minigames with the world's players)
         else if (strcmp(argv[i], "--selftest-ride") == 0)
             exit(NativeSelfTest_Ride(i + 1 < argc && argv[i + 1][0] != '-' ? argv[i + 1] : NULL)); // native_selftest_ride.c (riding seats)
         else if (strcmp(argv[i], "--selftest-carriers") == 0)

@@ -161,6 +161,7 @@ void StartUnionRoomBattle(u16 battleFlags);
 #ifdef PORTABLE
 void StartBerryCrushWithComputerPartners(void); // KNOWN_ISSUES MS-141 (PC game only)
 void StartMossdeepMinigameWithComputerPartners(void);
+void StartWirelessMinigameTask(u8 activity); // KNOWN_ISSUES MS-141c: a world group's game
 #endif
 #line 161 // gba-line
 

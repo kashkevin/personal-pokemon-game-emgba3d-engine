@@ -345,6 +345,22 @@ void LocalLink_End(void);
 bool32 LocalLink_PartnerSendPacket(u8 partnerId, const void *data);
 bool32 LocalLink_PartnerSendBlock(u8 partnerId, const void *src, u16 size);
 bool32 LocalLink_PartnerIsSendingBlock(u8 partnerId);
+
+// KNOWN_ISSUES MS-141c: the same games with the world's players - a group over the world server whose frames the
+// bridge carries (src/link_rfu_2.c NetLink, src/platform/mp_bridge.c). The leader's game is the group's parent, each
+// member's a child; each frame does what the adapter's exchange does.
+#define NETLINK_CMD_BYTES ((CMD_LENGTH - 1) * 2)                  // a player's command of a frame
+#define NETLINK_FRAME_BYTES (MAX_RFU_PLAYERS * NETLINK_CMD_BYTES) // every player's command of a frame
+void NetLink_StartLeader(u8 playerCount);
+void NetLink_StartMember(u8 playerCount, u8 multiplayerId);
+bool32 NetLink_IsActive(void);
+bool32 NetLink_IsLeader(void);
+bool32 NetLink_TakeOutbound(u8 *dst, u8 *length);
+bool32 NetLink_PutInbound(u8 source, const u8 *src, u8 length);
+u32 NetLink_DroppedCount(void);
+bool32 NetLink_WasLost(void);
+bool32 NetLink_ErrorShowing(void);
+void NetLink_LinkLost(void);
 #endif
 #line 332 // gba-line
 

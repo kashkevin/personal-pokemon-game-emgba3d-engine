@@ -4633,6 +4633,15 @@ static void StartComputerPartnersGroup(u8 playerCount, u8 activity)
     gTasks[CreateTask(Task_StartActivityWithComputerPartners, 0)].data[1] = activity;
 }
 
+// KNOWN_ISSUES MS-141c: a group of the world's players starts as a computer partners' one does
+// (src/platform/mp_minigames.c has set up its link and its players' names): the walk into the room, the standby and the
+// game.
+void StartWirelessMinigameTask(u8 activity)
+{
+    gPlayerCurrActivity = activity;
+    gTasks[CreateTask(Task_StartActivityWithComputerPartners, 0)].data[1] = activity;
+}
+
 // VAR_0x8005: the group's size.
 void StartBerryCrushWithComputerPartners(void)
 {

@@ -690,4 +690,8 @@ gSpecials::
 	def_special StartBerryCrushWithComputerPartners
 	@ VAR_0x8005 the game (0 Pokemon Jump, 1 Dodrio Berry Picking), VAR_0x8006 the group's size.
 	def_special StartMossdeepMinigameWithComputerPartners
+	@ KNOWN_ISSUES MS-141c: the same games with the world's players (src/platform/mp_minigames.c); VAR_0x8005 the game
+	@ (0 Berry Crush, 1 Pokemon Jump, 2 Dodrio Berry Picking), VAR_RESULT whether the group started.
+	def_special IsWorldMinigameAvailable
+	def_special OpenWorldMinigameLobby, waitstate=1
 .endif

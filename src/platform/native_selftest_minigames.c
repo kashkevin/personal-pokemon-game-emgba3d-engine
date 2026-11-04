@@ -251,3 +251,363 @@ int NativeSelfTest_MinigamePartners(void)
     printf("selftest-minigame-partners: %d checks, %d failed\n", sChecks, sFailures);
     return sFailures ? 1 : 0;
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// KNOWN_ISSUES MS-141c: the same group with the world's players (src/link_rfu_2.c NetLink). One game is either the
+// leader or a member, so each side is checked against peers played here: as the leader, members whose commands are put
+// in as the network would deliver them; as a member, a leader whose frames are put in, echoing the member's own
+// commands back in its slot as the leader's frames do. What goes out to the network is read as the bridge reads it.
+//   --selftest-netlink
+
+static u8 sNetOut[NETLINK_FRAME_BYTES];
+static u8 sNetOutLength;
+
+static bool32 TakeNetOut(void)
+{
+    return NetLink_TakeOutbound(sNetOut, &sNetOutLength);
+}
+
+static u16 NetOutWord(u8 player, u8 word)
+{
+    u16 index = (player * (CMD_LENGTH - 1) + word) * 2;
+
+    return sNetOut[index] | (sNetOut[index + 1] << 8);
+}
+
+static void DrainNetOut(void)
+{
+    while (TakeNetOut())
+        ;
+}
+
+static void PutMemberCommand(u8 member, const u16 *words)
+{
+    u8 bytes[NETLINK_CMD_BYTES];
+    u8 i;
+
+    for (i = 0; i < CMD_LENGTH - 1; i++)
+    {
+        bytes[i * 2] = words[i];
+        bytes[i * 2 + 1] = words[i] >> 8;
+    }
+    NetLink_PutInbound(member, bytes, sizeof(bytes));
+}
+
+// A leader's frame for a member test: every player's command (rows of CMD_LENGTH - 1 words; NULL: an empty frame).
+static void PutLeaderFrame(const u16 (*cmds)[CMD_LENGTH - 1])
+{
+    u8 bytes[NETLINK_FRAME_BYTES];
+    u8 i;
+    u8 j;
+
+    if (cmds == NULL)
+    {
+        NetLink_PutInbound(0, bytes, 0);
+        return;
+    }
+    for (i = 0; i < MAX_RFU_PLAYERS; i++)
+        for (j = 0; j < CMD_LENGTH - 1; j++)
+        {
+            bytes[(i * (CMD_LENGTH - 1) + j) * 2] = cmds[i][j];
+            bytes[(i * (CMD_LENGTH - 1) + j) * 2 + 1] = cmds[i][j] >> 8;
+        }
+    NetLink_PutInbound(0, bytes, sizeof(bytes));
+}
+
+// The member under test is player sEchoId: a leader frame echoing the member's last command (what the leader handled).
+static u8 sEchoId;
+static u16 sEcho[CMD_LENGTH - 1];
+static u16 sLeaderOwn[CMD_LENGTH - 1];
+
+static void RunMemberFrameWithEcho(void)
+{
+    u16 frame[MAX_RFU_PLAYERS][CMD_LENGTH - 1];
+    u8 i;
+
+    memset(frame, 0, sizeof(frame));
+    memcpy(frame[0], sLeaderOwn, sizeof(sLeaderOwn));
+    memcpy(frame[sEchoId], sEcho, sizeof(sEcho));
+    PutLeaderFrame((const u16 (*)[CMD_LENGTH - 1])frame);
+    RunFrame();
+    memset(sEcho, 0, sizeof(sEcho));
+    if (TakeNetOut() && sNetOutLength == NETLINK_CMD_BYTES)
+        for (i = 0; i < CMD_LENGTH - 1; i++)
+            sEcho[i] = sNetOut[i * 2] | (sNetOut[i * 2 + 1] << 8);
+    DrainNetOut();
+}
+
+int NativeSelfTest_NetLink(void)
+{
+    static const u16 memberPacket[CMD_LENGTH - 1] = {RFUCMD_SEND_PACKET, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6};
+    static const u16 memberPacket2[CMD_LENGTH - 1] = {RFUCMD_SEND_PACKET, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6};
+    u16 command[CMD_LENGTH - 1];
+    u16 frame[MAX_RFU_PLAYERS][CMD_LENGTH - 1];
+    u8 block[24];
+    u32 frames, i, sent;
+    u16 readyNum;
+    bool32 ok;
+
+    printf("selftest-netlink: the wireless minigames with the world's players (src/link_rfu_2.c NetLink)\n");
+    ResetTasks();
+
+    // ---- The leader of a world group of 3.
+    NetLink_StartLeader(3);
+    DrainNetOut();
+    Expect("leader: a world group is active", NetLink_IsActive() && NetLink_IsLeader() && LocalLink_IsActive());
+    Expect("leader: 3 players, the local game player 0", GetLinkPlayerCount() == 3 && GetMultiplayerId() == 0);
+    Expect("leader: the wireless link, the others received", gWirelessCommType == 1 && gReceivedRemoteLinkPlayers);
+
+    // Its own packet comes back as player 0's, and the frame it handled goes out at the next frame.
+    Rfu_SendPacket((void *)sPacket);
+    RunFrame();
+    Expect("leader: its packet is player 0's command",
+           gRecvCmds[0][0] == RFUCMD_SEND_PACKET && memcmp(&gRecvCmds[0][1], sPacket, sizeof(sPacket)) == 0);
+    Expect("leader: nothing goes out before the frame is over", !TakeNetOut());
+    RunFrame();
+    ok = TakeNetOut() && sNetOutLength == NETLINK_FRAME_BYTES && NetOutWord(0, 0) == RFUCMD_SEND_PACKET
+      && NetOutWord(0, 1) == sPacket[0] && NetOutWord(1, 0) == 0;
+    Expect("leader: then the frame goes out, its packet in player 0's slot", ok);
+    RunFrame();
+    Expect("leader: an empty frame goes out too (as nothing)", TakeNetOut() && sNetOutLength == 0);
+    DrainNetOut();
+
+    // Members' commands go into their slots, one a frame each, in order.
+    PutMemberCommand(1, memberPacket);
+    PutMemberCommand(1, memberPacket2);
+    PutMemberCommand(2, memberPacket2);
+    RunFrame();
+    Expect("leader: member 1's first command in slot 1, member 2's in slot 2",
+           gRecvCmds[1][0] == RFUCMD_SEND_PACKET && gRecvCmds[1][1] == 0xA1 && gRecvCmds[2][1] == 0xB1);
+    RunFrame();
+    Expect("leader: member 1's second the next frame, member 2 nothing",
+           gRecvCmds[1][1] == 0xB1 && gRecvCmds[2][0] == 0);
+    // (the queue: the frame handled before these commands, then the one with them)
+    ok = TakeNetOut() && sNetOutLength == 0 && TakeNetOut() && sNetOutLength == NETLINK_FRAME_BYTES
+      && NetOutWord(1, 1) == 0xA1 && NetOutWord(2, 1) == 0xB1;
+    Expect("leader: the members get the frame as the leader handled it", ok);
+    Expect("leader: a command from a player outside the group is refused",
+           !NetLink_PutInbound(3, (const u8 *)memberPacket, NETLINK_CMD_BYTES)
+           && !NetLink_PutInbound(0, (const u8 *)memberPacket, NETLINK_CMD_BYTES));
+    DrainNetOut();
+    RunFrame();
+    DrainNetOut();
+
+    // A standby: the members answer as their link layer does; the leader's answer goes out to them.
+    readyNum = gRfu.allReadyNum;
+    SetLinkStandbyCallback();
+    memset(command, 0, sizeof(command));
+    command[0] = RFUCMD_READY_EXIT_STANDBY;
+    command[1] = readyNum;
+    PutMemberCommand(1, command);
+    PutMemberCommand(2, command);
+    frames = RunUntil(LinkTaskFinished, 60);
+    printf("     leader standby: %u frames\n", frames);
+    Expect("leader: the standby ends once both members are ready", frames <= 4 && gRfu.allReadyNum == readyNum + 1);
+    RunFrame();
+    for (ok = FALSE; TakeNetOut();)
+        ok |= sNetOutLength && (NetOutWord(0, 0) & RFUCMD_MASK) == RFUCMD_READY_EXIT_STANDBY;
+    Expect("leader: its own READY_EXIT_STANDBY went out to the members", ok);
+
+    // A member's block (24 bytes, 2 pieces): its start, then its pieces.
+    for (i = 0; i < sizeof(block); i++)
+        block[i] = 0x40 + i;
+    memset(command, 0, sizeof(command));
+    command[0] = RFUCMD_SEND_BLOCK_INIT;
+    command[1] = 2;
+    command[2] = 0x81;
+    PutMemberCommand(1, command);
+    for (i = 0; i < 2; i++)
+    {
+        u8 j;
+
+        memset(command, 0, sizeof(command));
+        command[0] = RFUCMD_SEND_BLOCK | i;
+        for (j = 0; j < 6; j++)
+            command[j + 1] = block[i * 12 + j * 2] | (block[i * 12 + j * 2 + 1] << 8);
+        PutMemberCommand(1, command);
+    }
+    sWantedBlocks = 1 << 1;
+    frames = RunUntil(BlocksArrived, 30);
+    Expect("leader: member 1's block arrives, whole", frames <= 6 && memcmp(gBlockRecvBuffer[1], block, 24) == 0);
+    ResetBlockReceivedFlags();
+    DrainNetOut();
+
+    // The leader's block goes out in its slot: its start (three times, as a parent sends it), then its pieces.
+    Expect("leader: its block starts", SendBlock(0, block, sizeof(block)));
+    for (i = 0, sent = 0; i < 12; i++)
+    {
+        RunFrame();
+        while (TakeNetOut())
+            if (sNetOutLength && (NetOutWord(0, 0) & RFUCMD_MASK) == RFUCMD_SEND_BLOCK && NetOutWord(0, 1) != 0)
+                sent |= 1 << (NetOutWord(0, 0) & 0xFF);
+    }
+    Expect("leader: both pieces of its block went out", sent == 3);
+    ResetBlockReceivedFlags();
+
+    // A member's commands queue at most half a second: the oldest packet makes room, a handshake stays.
+    for (i = 0; i < 40; i++)
+        PutMemberCommand(2, memberPacket);
+    memset(command, 0, sizeof(command));
+    command[0] = RFUCMD_READY_CLOSE_LINK;
+    PutMemberCommand(2, command);
+    for (i = 0, ok = FALSE; i < 40; i++)
+    {
+        RunFrame();
+        ok |= (gRecvCmds[2][0] & RFUCMD_MASK) == RFUCMD_READY_CLOSE_LINK;
+    }
+    Expect("leader: a full queue drops its oldest packets, never the handshake after them",
+           ok && NetLink_DroppedCount() > 0);
+    DrainNetOut();
+    gRfu.readyCloseLink[2] = FALSE;
+
+    // Closing the link: the members answer, the group ends, and the leader's last frame still goes out.
+    SetCloseLinkCallback();
+    memset(command, 0, sizeof(command));
+    command[0] = RFUCMD_READY_CLOSE_LINK;
+    PutMemberCommand(1, command);
+    PutMemberCommand(2, command);
+    frames = RunUntil(LinkClosed, 120);
+    printf("     leader close: %u frames\n", frames);
+    Expect("leader: the link closes", frames <= 12 && !NetLink_IsActive() && gWirelessCommType == 0);
+    for (ok = FALSE; TakeNetOut();)
+        ok |= sNetOutLength && (NetOutWord(0, 0) & RFUCMD_MASK) == RFUCMD_READY_CLOSE_LINK;
+    Expect("leader: its READY_CLOSE_LINK went out to the members", ok);
+    Expect("leader: a link its game closed is not a lost one (its LEAVE says so)", !NetLink_WasLost());
+
+    // ---- A member of a world group of 3: player 2.
+    NetLink_StartMember(3, 2);
+    DrainNetOut();
+    Expect("member: a world group is active, not its leader", NetLink_IsActive() && !NetLink_IsLeader());
+    Expect("member: 3 players, the local game player 2", GetLinkPlayerCount() == 3 && GetMultiplayerId() == 2);
+
+    // Without the leader's frame nothing is handled and nothing goes out; its packet waits.
+    Rfu_SendPacket((void *)sPacket);
+    RunFrame();
+    Expect("member: without a leader's frame nothing goes out", !TakeNetOut() && gSendCmd[0] == RFUCMD_SEND_PACKET);
+    Expect("member: and nothing is received", gRecvCmds[0][0] == 0 && gRecvCmds[2][0] == 0);
+    PutLeaderFrame(NULL);
+    RunFrame();
+    ok = TakeNetOut() && sNetOutLength == NETLINK_CMD_BYTES && (sNetOut[0] | (sNetOut[1] << 8)) == RFUCMD_SEND_PACKET
+      && (sNetOut[2] | (sNetOut[3] << 8)) == sPacket[0];
+    Expect("member: a leader's frame (empty) is answered with its packet", ok && gSendCmd[0] == 0);
+    PutLeaderFrame(NULL);
+    RunFrame();
+    Expect("member: with nothing to send it sends nothing", !TakeNetOut());
+
+    // The leader's frame is every player's command.
+    memset(frame, 0, sizeof(frame));
+    memcpy(frame[0], memberPacket, sizeof(memberPacket));
+    memcpy(frame[1], memberPacket2, sizeof(memberPacket2));
+    PutLeaderFrame((const u16 (*)[CMD_LENGTH - 1])frame);
+    RunFrame();
+    Expect("member: the leader's and member 1's packets are players 0's and 1's",
+           gRecvCmds[0][1] == 0xA1 && gRecvCmds[1][1] == 0xB1 && gRecvCmds[2][0] == 0);
+    RunFrame();
+    Expect("member: for that frame only", gRecvCmds[0][0] == 0);
+    Expect("member: a frame from a member, or of the wrong size, is refused",
+           !NetLink_PutInbound(1, (const u8 *)frame, NETLINK_FRAME_BYTES)
+           && !NetLink_PutInbound(0, (const u8 *)frame, NETLINK_CMD_BYTES));
+
+    // Behind by 10 frames (the leader's packet numbering them): two a frame until 6 or fewer wait, then one.
+    for (i = 1; i <= 10; i++)
+    {
+        memset(frame, 0, sizeof(frame));
+        frame[0][0] = RFUCMD_SEND_PACKET;
+        frame[0][1] = i;
+        PutLeaderFrame((const u16 (*)[CMD_LENGTH - 1])frame);
+    }
+    RunFrame();
+    ok = gRecvCmds[0][1] == 2;
+    RunFrame();
+    ok = ok && gRecvCmds[0][1] == 4;
+    RunFrame();
+    ok = ok && gRecvCmds[0][1] == 5;
+    for (i = 0; i < 5; i++)
+        RunFrame();
+    Expect("member: 10 frames behind it handles two a frame, then one at 6 behind", ok && gRecvCmds[0][1] == 10);
+    RunFrame();
+    Expect("member: and is level with the leader again", gRecvCmds[0][0] == 0);
+    DrainNetOut();
+
+    // A standby: it answers when it handles the leader's frames; it ends when the leader's frame says all are ready.
+    readyNum = gRfu.allReadyNum;
+    sEchoId = 2;
+    memset(sEcho, 0, sizeof(sEcho));
+    memset(sLeaderOwn, 0, sizeof(sLeaderOwn));
+    SetLinkStandbyCallback();
+    RunMemberFrameWithEcho();
+    Expect("member: it answers the standby", (sEcho[0] & RFUCMD_MASK) == RFUCMD_READY_EXIT_STANDBY);
+    memset(frame, 0, sizeof(frame));
+    for (i = 0; i < 3; i++)
+    {
+        frame[i][0] = RFUCMD_READY_EXIT_STANDBY;
+        frame[i][1] = readyNum;
+    }
+    PutLeaderFrame((const u16 (*)[CMD_LENGTH - 1])frame);
+    frames = RunUntil(LinkTaskFinished, 30);
+    Expect("member: the standby ends when everyone's ready", frames <= 4 && gRfu.allReadyNum == readyNum + 1);
+    DrainNetOut();
+
+    // Its block: the start until it sees it echoed in its slot, then the pieces, then the last until echoed.
+    for (i = 0; i < sizeof(block); i++)
+        block[i] = 0x60 + i;
+    Expect("member: its block starts", SendBlock(0, block, sizeof(block)));
+    memset(sEcho, 0, sizeof(sEcho));
+    for (i = 0, sent = 0; i < 30 && !IsLinkTaskFinished(); i++)
+    {
+        RunMemberFrameWithEcho();
+        if ((sEcho[0] & RFUCMD_MASK) == RFUCMD_SEND_BLOCK)
+            sent |= 1 << (sEcho[0] & 0xFF);
+    }
+    printf("     member block: %u frames\n", i);
+    Expect("member: both pieces went out and its sending ended", sent == 3 && IsLinkTaskFinished());
+    ResetBlockReceivedFlags();
+
+    // The group closed under it: the game's communication error, the group gone.
+    NetLink_LinkLost();
+    Expect("member: a lost group ends the link with the game's communication error",
+           !NetLink_IsActive() && NetLink_WasLost() && gMain.callback2 == CB2_LinkError);
+    SetMainCallback2(NULL);
+    gWirelessCommType = 0;
+
+    // A new group starts clean; then its leader's frames stop: 10 s (600 frames) without one and the group is lost, as
+    // the adapter loses a parent that stops answering.
+    NetLink_StartMember(2, 1);
+    Expect("member: a new group keeps nothing of the last one's", NetLink_IsActive() && !NetLink_WasLost() && !TakeNetOut());
+    PutLeaderFrame(NULL);
+    RunFrame();
+    for (i = 0; i < 599 && NetLink_IsActive(); i++)
+        RunFrame();
+    ok = NetLink_IsActive();
+    RunFrame();
+    Expect("member: 10 s without a leader's frame loses the group (the communication error)",
+           ok && !NetLink_IsActive() && NetLink_WasLost() && gMain.callback2 == CB2_LinkError);
+    SetMainCallback2(NULL);
+    gWirelessCommType = 0;
+
+    // Closing the link as a member: its READY_CLOSE_LINK goes out; the leader's last frame says every player is ready;
+    // the member's link then ends as the leader's does (a GBA child leaves that to its adapter, which the PC lacks:
+    // the member waited for frames that never came and showed the communication error - the launcher proof's run 11).
+    NetLink_StartMember(2, 1);
+    sEchoId = 1;
+    memset(sEcho, 0, sizeof(sEcho));
+    memset(sLeaderOwn, 0, sizeof(sLeaderOwn));
+    SetCloseLinkCallback();
+    for (i = 0, ok = FALSE; i < 10 && !ok; i++)
+    {
+        RunMemberFrameWithEcho();
+        ok = (sEcho[0] & RFUCMD_MASK) == RFUCMD_READY_CLOSE_LINK;
+    }
+    Expect("member: its READY_CLOSE_LINK goes out", ok);
+    memset(frame, 0, sizeof(frame));
+    frame[0][0] = frame[1][0] = RFUCMD_READY_CLOSE_LINK;
+    PutLeaderFrame((const u16 (*)[CMD_LENGTH - 1])frame);
+    frames = RunUntil(LinkClosed, 60);
+    printf("     member close: %u frames\n", frames);
+    Expect("member: every player ready, its link ends (not lost, no communication error)",
+           frames <= 10 && !NetLink_IsActive() && !NetLink_WasLost() && gWirelessCommType == 0
+           && gMain.callback2 != CB2_LinkError);
+
+    printf("selftest-netlink: %d checks, %d failed\n", sChecks, sFailures);
+    return sFailures ? 1 : 0;
+}
