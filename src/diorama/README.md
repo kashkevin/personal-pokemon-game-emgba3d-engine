@@ -718,3 +718,33 @@ of terraced walls; Route 112's rock was still a maze of walls.
   modelled rooms that have any (Fortree Gym 15, Lavaridge Gym 1F 7 and B1F 15, the Trick
   House's fourth puzzle 11: `battle_room_specs.py` `AUTO_ROOMS`) are the rooms' models, cut from
   their drawing, and keep that shape: 959 ledges in 38 layouts are banks.
+
+## Vehicles and their scenes (the owner's decision 44, 2026-11-05)
+
+"Keep trucks, ferries, cable cars and vehicle scenes in 3D; no needless fallback to 2D; transitions and
+navigation kept." Each vehicle and the scenes it is in, as the 3D view draws them now:
+
+* The vehicles the GBA draws as several OAM parts - the moving truck (48x48 in 12 parts), the S.S. Tidal (96x40 in
+  15), the submarine's shadow, a FRLG build's S.S. Anne - are assembled into one picture from the current frame's
+  tiles and stand as one card (`scene_snapshot.c` `CopyCompositeFrame`, KNOWN_ISSUES P7); the cable car,
+  Rayquaza and a FRLG build's Seagallop are one centred 64x64 part, drawn as any object. In 3D throughout: the
+  truck's ride at the start and the step out into Littleroot by its parked trucks (the original introduction,
+  `PKMN_ORIGINAL_INTRO=1`: the short one starts in Littleroot without them); both cable car stations, the walk
+  into the car and the walk out of it; the S.S. Tidal at Slateport's, Lilycove's and Southern Island's harbours,
+  its departures and arrivals, the Battle Frontier's ferry (Emerald's is the S.S. Tidal: the Seagallop is FRLG's),
+  its corridor and cabins; Rayquaza waking on Sky Pillar and flying off, the legendaries' fight and Rayquaza's
+  arrival in Sootopolis on its water.
+* The S.S. Tidal sailing past the porthole (`field_special_scene.c` `FieldCB_ShowPortholeView`): looking out of
+  the corridor's porthole warps to the route the voyage crosses, hides the player and walks it along the current
+  while a sprite of the ship made from its object graphics stays in the middle of the screen. That sprite is no
+  object event, so the 3D view showed the sea going by and no ship. It is drawn as the harbours' ship
+  (`CopyPortholeShip`): an object of its own, its picture assembled as above (its palette, east or west), standing
+  where the GBA shows it from the hidden player and carried by the player's step, so it moves with the camera.
+  `PKMN_DIORAMA_LOG=1` names it; `tools/pc_port/gameplay_repair_check.py` checks it.
+* Left as the GBA draws them: the cable car's ride (`cable_car.c`) and Rayquaza's scenes in Sootopolis
+  (`rayquaza_scene.c`: the legendaries' fight in the storm, Rayquaza taking flight, descending, charging, chasing
+  them off). Each is a screen of its own with its own backgrounds and sprites and no map: the ride's mountainside,
+  trees, pylon and hikers scroll past a fixed side view; the storm and Rayquaza are drawn art of no place. The 3D
+  view draws maps and the objects on them, and would have to invent a world for these; they play as they always
+  have, the 240x160 picture at a whole scale in the window (the ride with the design's location sign), and the
+  field before and after them - the stations, Sootopolis - is 3D.

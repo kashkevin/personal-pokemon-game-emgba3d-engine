@@ -1961,6 +1961,128 @@ static s16 GetReflectionOffsetY(const struct ObjectEvent *object)
     return -2;
 }
 
+/*
+ * The S.S. Tidal sailing past the porthole (field_special_scene.c FieldCB_ShowPortholeView, owner decision 44: the
+ * vehicle scenes in 3D). Looking out of the corridor's porthole warps to the route the ship is crossing, hides the
+ * player and walks it along the current while a sprite made from the ship's object graphics stays in the middle of
+ * the screen (ShowSSTidalWhileSailing: CreateObjectGraphicsSprite, the camera's offset off) until the warp back has
+ * faded out. That sprite is no object event and none of the field effects above, so the 3D view showed the sea going
+ * by and no ship. While the player is hidden, a sprite with the ship's subsprite table that the camera does not move
+ * (the harbours' ships are object events, moved with the camera) is drawn as the harbours' ship is: its 15 OAM parts
+ * assembled into one picture (CopyCompositeFrame, the frame the sprite shows: its palette, east or west), standing
+ * where the GBA shows it - an object of its own carried by the hidden player (the player's cell, step and level, the
+ * ship's offset from it in pixels), so it moves with the camera between frames as the player would. Its local id is
+ * one no map object uses. A picture that cannot be assembled is refused as any vehicle's (DIORAMA_OBJECT_SUBSPRITES:
+ * the view shows the GBA's picture) rather than left out.
+ */
+#define PORTHOLE_SHIP_LOCAL_ID 200
+
+/* PKMN_DIORAMA_LOG=1: the porthole's ship, once per change of its picture (tools/pc_port/gameplay_repair_check.py). */
+static void LogPortholeShip(const struct DioramaObjectSnapshot *copy)
+{
+    static int sLogEnabled = -1;
+    static char sLast[128];
+    char line[128];
+
+    if (sLogEnabled < 0)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_LOG");
+        sLogEnabled = value != NULL && value[0] == '1';
+    }
+    if (!sLogEnabled)
+        return;
+    SDL_snprintf(line, sizeof(line), "Diorama: the S.S. Tidal past the porthole: %s %ux%u, anim %u%s",
+                 (copy->flags & DIORAMA_OBJECT_COMPOSITE) ? "one picture" : "refused", copy->compositeWidth,
+                 copy->compositeHeight, copy->animNum, copy->hFlip ? " mirrored" : "");
+    if (SDL_strcmp(line, sLast) != 0)
+    {
+        SDL_strlcpy(sLast, line, sizeof(sLast));
+        SDL_Log("%s", line);
+    }
+}
+
+static void CopyPortholeShip(struct DioramaSceneSnapshot *snapshot)
+{
+    const struct ObjectEventGraphicsInfo *info = GetObjectEventGraphicsInfo(OBJ_EVENT_GFX_SS_TIDAL);
+    const struct ObjectEvent *player;
+    s16 baseX;
+    s16 baseY;
+    int i;
+
+    if (snapshot->objectCount >= DIORAMA_MAX_OBJECTS || gPlayerAvatar.objectEventId >= OBJECT_EVENTS_COUNT
+     || info == NULL || info->subspriteTables == NULL)
+        return;
+    player = &gObjectEvents[gPlayerAvatar.objectEventId];
+    if (!player->active || !player->invisible)
+        return;
+    SetSpritePosToMapCoords(player->currentCoords.x, player->currentCoords.y, &baseX, &baseY);
+    for (i = 0; i < MAX_SPRITES; i++)
+    {
+        const struct Sprite *sprite = &gSprites[i];
+        struct DioramaObjectSnapshot *copy;
+        s16 x;
+        s16 y;
+
+        if (!sprite->inUse || sprite->invisible || sprite->coordOffsetEnabled
+         || sprite->subspriteTables != info->subspriteTables)
+            continue;
+        copy = &snapshot->objects[snapshot->objectCount++];
+        memset(copy, 0, sizeof(*copy));
+        copy->active = TRUE;
+        copy->localId = PORTHOLE_SHIP_LOCAL_ID;
+        copy->graphicsId = OBJ_EVENT_GFX_SS_TIDAL;
+        copy->mapNum = player->mapNum;
+        copy->mapGroup = player->mapGroup;
+        copy->spriteId = i;
+        copy->elevation = player->currentElevation;
+        copy->previousElevation = player->previousElevation;
+        copy->facingDirection = player->facingDirection;
+        copy->movementDirection = player->movementDirection;
+        copy->flags = DIORAMA_OBJECT_SHADOW; /* as the harbours' ship (an object event, its shadow on) */
+        copy->currentMapX = player->currentCoords.x;
+        copy->currentMapY = player->currentCoords.y;
+        copy->previousMapX = player->previousCoords.x;
+        copy->previousMapY = player->previousCoords.y;
+        /* where the screen shows it, in the objects' coordinates (EffectPosition) */
+        x = sprite->x - gSpriteCoordOffsetX;
+        y = sprite->y - gSpriteCoordOffsetY;
+        copy->screenX = sprite->x + sprite->x2;
+        copy->screenY = sprite->y + sprite->y2;
+        copy->spriteX2 = sprite->x2;
+        copy->spriteY2 = sprite->y2;
+        copy->width = info->width;
+        copy->height = info->height;
+        copy->mapPixelOffsetX = x - (baseX + 8);
+        copy->mapPixelOffsetY = y + copy->height / 2 - (baseY + 16);
+        copy->centerToCornerX = sprite->centerToCornerVecX;
+        copy->centerToCornerY = sprite->centerToCornerVecY;
+        copy->shadowSize = info->shadowSize;
+        copy->affineMode = sprite->oam.affineMode;
+        CopyAffineMatrix(copy, sprite);
+        copy->objMode = sprite->oam.objMode;
+        copy->bpp = sprite->oam.bpp;
+        copy->tileNum = sprite->oam.tileNum;
+        copy->paletteNum = sprite->oam.paletteNum;
+        copy->oamShape = sprite->oam.shape;
+        copy->oamSize = sprite->oam.size;
+        copy->hFlip = sprite->oam.affineMode == ST_OAM_AFFINE_OFF
+                   && (sprite->oam.matrixNum & ST_OAM_HFLIP) != 0;
+        copy->vFlip = sprite->oam.affineMode == ST_OAM_AFFINE_OFF
+                   && (sprite->oam.matrixNum & ST_OAM_VFLIP) != 0;
+        copy->priority = sprite->oam.priority;
+        copy->subpriority = sprite->subpriority;
+        copy->oamOrder = 0xFF;
+        copy->animNum = sprite->animNum;
+        copy->animCmdIndex = sprite->animCmdIndex;
+        if (CopyCompositeFrame(snapshot, copy, sprite, info))
+            copy->flags |= DIORAMA_OBJECT_COMPOSITE;
+        else
+            copy->flags |= DIORAMA_OBJECT_SUBSPRITES;
+        LogPortholeShip(copy);
+        return;
+    }
+}
+
 static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
 {
     int i;
@@ -2073,6 +2195,7 @@ static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
               && CopyCompositeFrame(snapshot, copy, sprite, graphicsInfo))
             copy->flags = (copy->flags & ~DIORAMA_OBJECT_SUBSPRITES) | DIORAMA_OBJECT_COMPOSITE;
     }
+    CopyPortholeShip(snapshot);
     CopySurfBlob(snapshot);
     CopyEffects(snapshot);
     CopyStandIns(snapshot);

@@ -14,7 +14,9 @@
             refused and the whole view fell back to 2D): the moving trucks, the S.S. Tidal (Slateport, Lilycove,
             Southern Island), the submarine's shadow (Slateport, the Aqua Hideout), the Cable Car, Rayquaza (Sky
             Pillar, still and awake; Sootopolis); each on the field, no object refused, 3D throughout; and the
-            submarine's escape scene and the S.S. Tidal's departure play to their end in 3D;
+            submarine's escape scene and the S.S. Tidal's departure play to their end in 3D; the S.S. Tidal sails
+            past the corridor's porthole in 3D, drawn as one picture (owner decision 44: it was missing), and A takes
+            the player back to the corridor;
   5. link:  the pause menu's link status - OFFLINE without a bridge; SETUP (and the clock at 12:00 noon) for the
             launcher's character setup (--setup); CONNECTING, then NOT CONNECTED after 20 s, for a bridge whose
             companion never reports a world session, with the role from --link-role.
@@ -215,7 +217,19 @@ def check_vehicles(binary, work, problems):
     if not re.search(r"rival \d+: map 13\.10 ", log):
         found.append("vehicle ss-tidal-departure: the ferry never reached Lilycove")
     problems.extend(found)
-    return checked + 2
+    # The S.S. Tidal past the porthole (owner decision 44): the corridor's porthole shows the ship sailing along the
+    # current on Route 134 - a sprite made from its object graphics, no object event - drawn in 3D as one picture; A
+    # takes the player back to the corridor.
+    log = vehicle_run(binary, work, "ss-tidal-porthole", "25,41,2,2", "v40b4=2,v40d4=1,v404a=20,f32a=1", 0,
+                      "150:UP,175:A,700:A", "1000", "v40b4")
+    found, _ = vehicle_problems("ss-tidal-porthole", log, 0, expect_present=False)
+    if not re.search(r"the S\.S\. Tidal past the porthole: one picture 96x40", log):
+        found.append("vehicle ss-tidal-porthole: the ship past the porthole was not drawn as one picture")
+    view = re.search(r"rival \d+: map 0\.49 ", log)
+    if view is None or not re.search(r"rival \d+: map 25\.41 ", log[view.end():]):
+        found.append("vehicle ss-tidal-porthole: no view from the porthole (Route 134) and back to the corridor")
+    problems.extend(found)
+    return checked + 3
 
 
 def main():

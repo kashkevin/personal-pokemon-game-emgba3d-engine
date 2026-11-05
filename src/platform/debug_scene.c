@@ -1412,6 +1412,16 @@ static void StartFieldScene(void)
                 GetSetPokedexFlag(SpeciesToNationalPokedexNum((u16)dex[k]), FLAG_SET_CAUGHT);
             }
     }
+    // PKMN_DEBUG_BAG=item,count[,item,count...]: those items in the Bag by number (the S.S. Ticket a ferry's
+    // attendant asks for: the vehicle scenes of owner decision 44)
+    if ((value = SDL_getenv("PKMN_DEBUG_BAG")) != NULL)
+    {
+        int bag[16], count = Numbers(value, bag, 16);
+
+        for (int k = 0; k + 1 < count; k += 2)
+            if (bag[k] > 0 && bag[k + 1] > 0)
+                AddBagItem((u16)bag[k], (u16)bag[k + 1]);
+    }
     // PKMN_DEBUG_PARTY=n (2-6): n Pokemon (the first, then Zigzagoon, Wurmple...) for the PC storage checks
     if ((value = SDL_getenv("PKMN_DEBUG_PARTY")) != NULL && Numbers(value, v, 1) >= 1 && v[0] >= 2 && v[0] <= PARTY_SIZE)
     {
