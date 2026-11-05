@@ -300,171 +300,362 @@ void DioramaTerrain_BuildTerraceHeightmap(uint8_t profile,
     }
 }
 
+/*
+ * The chunk signature's hash (KNOWN_ISSUES MS-118): the same bytes DioramaTerrain_ChunkSignature fed FNV-1a one at a
+ * time before (each field little-endian, in the same order, the same fields), now gathered and hashed by
+ * MurmurHash3's x86 128-bit function, 16 bytes a step in 32-bit arithmetic. The game is a 32-bit program, where
+ * FNV-1a's 64-bit multiply for every byte made the signature cost as much as building the input it signs (about
+ * 0.1 ms an input, 30-35 inputs at a map crossing; now a quarter of that). Two inputs have the same signature when,
+ * and only when, they had the same before, but for a collision of either hash; nothing keeps a signature beyond
+ * the game's run. The bytes are written through a cursor of its own (stores through a byte pointer could change any
+ * count kept in memory, so one in the stream was read again after every byte), with room made before each part.
+ */
+#define SIGNATURE_BUFFER 4096 /* hashed when this full: a multiple of the 16-byte block */
+#define SIGNATURE_SLACK 512   /* what a part may write past it, after SigRoom */
+
+struct SignatureStream
+{
+    uint32_t h1;
+    uint32_t h2;
+    uint32_t h3;
+    uint32_t h4;
+    uint32_t hashed; /* bytes */
+    uint8_t bytes[SIGNATURE_BUFFER + SIGNATURE_SLACK];
+};
+
+static uint32_t Rotl32(uint32_t value, int shift)
+{
+    return (value << shift) | (value >> (32 - shift));
+}
+
+static uint32_t FinalMix32(uint32_t value)
+{
+    value ^= value >> 16;
+    value *= 0x85EBCA6Bu;
+    value ^= value >> 13;
+    value *= 0xC2B2AE35u;
+    value ^= value >> 16;
+    return value;
+}
+
+#define SIG_C1 0x239B961Bu
+#define SIG_C2 0xAB0E9789u
+#define SIG_C3 0x38B34AE5u
+#define SIG_C4 0xA1E38B93u
+
+static uint32_t SigWord(const uint8_t *bytes)
+{
+    return (uint32_t)bytes[0] | ((uint32_t)bytes[1] << 8) | ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[3] << 24);
+}
+
+/* The whole 16-byte blocks written (up to at) hashed, the rest moved to the front; returns where writing goes on. */
+static uint8_t *SigBlocks(struct SignatureStream *stream, uint8_t *at)
+{
+    uint32_t h1 = stream->h1, h2 = stream->h2, h3 = stream->h3, h4 = stream->h4;
+    unsigned used = (unsigned)(at - stream->bytes);
+    unsigned blocks = used / 16;
+    unsigned b;
+
+    for (b = 0; b < blocks; b++)
+    {
+        const uint8_t *block = stream->bytes + b * 16;
+        uint32_t k1 = SigWord(block), k2 = SigWord(block + 4), k3 = SigWord(block + 8), k4 = SigWord(block + 12);
+
+        k1 *= SIG_C1; k1 = Rotl32(k1, 15); k1 *= SIG_C2; h1 ^= k1;
+        h1 = Rotl32(h1, 19); h1 += h2; h1 = h1 * 5 + 0x561CCD1Bu;
+        k2 *= SIG_C2; k2 = Rotl32(k2, 16); k2 *= SIG_C3; h2 ^= k2;
+        h2 = Rotl32(h2, 17); h2 += h3; h2 = h2 * 5 + 0x0BCAA747u;
+        k3 *= SIG_C3; k3 = Rotl32(k3, 17); k3 *= SIG_C4; h3 ^= k3;
+        h3 = Rotl32(h3, 15); h3 += h4; h3 = h3 * 5 + 0x96CD1C35u;
+        k4 *= SIG_C4; k4 = Rotl32(k4, 18); k4 *= SIG_C1; h4 ^= k4;
+        h4 = Rotl32(h4, 13); h4 += h1; h4 = h4 * 5 + 0x32AC3B17u;
+    }
+    stream->h1 = h1;
+    stream->h2 = h2;
+    stream->h3 = h3;
+    stream->h4 = h4;
+    stream->hashed += blocks * 16;
+    memmove(stream->bytes, stream->bytes + blocks * 16, used - blocks * 16);
+    return stream->bytes + (used - blocks * 16);
+}
+
+static uint8_t *SigStart(struct SignatureStream *stream)
+{
+    stream->h1 = stream->h2 = stream->h3 = stream->h4 = 0;
+    stream->hashed = 0;
+    return stream->bytes;
+}
+
+/* Room for SIGNATURE_SLACK bytes from the returned place on. */
+static uint8_t *SigRoom(struct SignatureStream *stream, uint8_t *at)
+{
+    return at >= stream->bytes + SIGNATURE_BUFFER ? SigBlocks(stream, at) : at;
+}
+
+static uint8_t *PutByte(uint8_t *at, uint8_t value)
+{
+    at[0] = value;
+    return at + 1;
+}
+
+static uint8_t *PutU16(uint8_t *at, uint16_t value)
+{
+    at[0] = (uint8_t)(value & 0xFF);
+    at[1] = (uint8_t)(value >> 8);
+    return at + 2;
+}
+
+static uint8_t *PutU32(uint8_t *at, uint32_t value)
+{
+    at[0] = (uint8_t)(value & 0xFF);
+    at[1] = (uint8_t)((value >> 8) & 0xFF);
+    at[2] = (uint8_t)((value >> 16) & 0xFF);
+    at[3] = (uint8_t)(value >> 24);
+    return at + 4;
+}
+
+static uint8_t *PutFloat(uint8_t *at, float value)
+{
+    uint32_t bits;
+
+    memcpy(&bits, &value, sizeof(bits));
+    return PutU32(at, bits);
+}
+
+static uint64_t SigFinish(struct SignatureStream *stream, uint8_t *at)
+{
+    uint32_t k1 = 0, k2 = 0, k3 = 0, k4 = 0;
+    uint32_t h1, h2, h3, h4, length;
+    const uint8_t *tail = stream->bytes;
+    unsigned rest;
+
+    at = SigBlocks(stream, at); /* fewer than 16 bytes left */
+    rest = (unsigned)(at - stream->bytes);
+    length = stream->hashed + rest;
+    h1 = stream->h1;
+    h2 = stream->h2;
+    h3 = stream->h3;
+    h4 = stream->h4;
+    switch (rest)
+    {
+    case 15: k4 ^= (uint32_t)tail[14] << 16; /* fall through */
+    case 14: k4 ^= (uint32_t)tail[13] << 8;  /* fall through */
+    case 13: k4 ^= (uint32_t)tail[12];
+             k4 *= SIG_C4; k4 = Rotl32(k4, 18); k4 *= SIG_C1; h4 ^= k4; /* fall through */
+    case 12: k3 ^= (uint32_t)tail[11] << 24; /* fall through */
+    case 11: k3 ^= (uint32_t)tail[10] << 16; /* fall through */
+    case 10: k3 ^= (uint32_t)tail[9] << 8;   /* fall through */
+    case 9:  k3 ^= (uint32_t)tail[8];
+             k3 *= SIG_C3; k3 = Rotl32(k3, 17); k3 *= SIG_C4; h3 ^= k3; /* fall through */
+    case 8:  k2 ^= (uint32_t)tail[7] << 24;  /* fall through */
+    case 7:  k2 ^= (uint32_t)tail[6] << 16;  /* fall through */
+    case 6:  k2 ^= (uint32_t)tail[5] << 8;   /* fall through */
+    case 5:  k2 ^= (uint32_t)tail[4];
+             k2 *= SIG_C2; k2 = Rotl32(k2, 16); k2 *= SIG_C3; h2 ^= k2; /* fall through */
+    case 4:  k1 ^= (uint32_t)tail[3] << 24;  /* fall through */
+    case 3:  k1 ^= (uint32_t)tail[2] << 16;  /* fall through */
+    case 2:  k1 ^= (uint32_t)tail[1] << 8;   /* fall through */
+    case 1:  k1 ^= (uint32_t)tail[0];
+             k1 *= SIG_C1; k1 = Rotl32(k1, 15); k1 *= SIG_C2; h1 ^= k1;
+    default: break;
+    }
+    h1 ^= length;
+    h2 ^= length;
+    h3 ^= length;
+    h4 ^= length;
+    h1 += h2; h1 += h3; h1 += h4;
+    h2 += h1; h3 += h1; h4 += h1;
+    h1 = FinalMix32(h1);
+    h2 = FinalMix32(h2);
+    h3 = FinalMix32(h3);
+    h4 = FinalMix32(h4);
+    h1 += h2; h1 += h3; h1 += h4;
+    h2 += h1;
+    return ((uint64_t)h2 << 32) | h1;
+}
+
 uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *input)
 {
-    uint64_t hash = FNV_OFFSET;
+    struct SignatureStream stream;
+    uint8_t *at;
     unsigned i;
 
-    hash = HashU16(hash, input->chunkX);
-    hash = HashU16(hash, input->chunkY);
-    hash = HashU32(hash, input->rulesGeneration);
-    hash = HashByte(hash, input->rockFaces);
+    /* Each part below writes at most SIGNATURE_SLACK bytes after the room is made for it (the most, a tree hull's
+     * shading: 275 bytes). */
+    at = SigStart(&stream);
+    at = PutU16(at, input->chunkX);
+    at = PutU16(at, input->chunkY);
+    at = PutU32(at, input->rulesGeneration);
+    at = PutByte(at, input->rockFaces);
     /* The rock wall a side of plain ground shows, and each cell's claimOwner (GroundSideShowsRock reads both): a mesh
      * stands for any input of its signature, the renderer's cache and earlier versions (KNOWN_ISSUES MS-118). */
     if (input->rockFaces)
     {
-        hash = HashU16(hash, input->rockFace.metatileId);
-        hash = HashByte(hash, input->rockFace.layer);
-        hash = HashByte(hash, input->rockFace.rotation);
-        hash = HashByte(hash, input->rockFace.flags);
-        hash = HashFloat(hash, input->rockFace.u0);
-        hash = HashFloat(hash, input->rockFace.v0);
-        hash = HashFloat(hash, input->rockFace.u1);
-        hash = HashFloat(hash, input->rockFace.v1);
+        at = PutU16(at, input->rockFace.metatileId);
+        at = PutByte(at, input->rockFace.layer);
+        at = PutByte(at, input->rockFace.rotation);
+        at = PutByte(at, input->rockFace.flags);
+        at = PutFloat(at, input->rockFace.u0);
+        at = PutFloat(at, input->rockFace.v0);
+        at = PutFloat(at, input->rockFace.u1);
+        at = PutFloat(at, input->rockFace.v1);
     }
     for (i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
     {
         const struct DioramaTerrainCell *cell = &input->cells[i];
 
-        hash = HashByte(hash, cell->present);
-        hash = HashU16(hash, cell->claimOwner);
-        hash = HashU16(hash, cell->mapX);
-        hash = HashU16(hash, cell->mapY);
-        hash = HashU16(hash, cell->metatileId);
-        hash = HashByte(hash, cell->behavior);
-        hash = HashByte(hash, cell->layerType);
-        hash = HashByte(hash, cell->reflective);
-        hash = HashByte(hash, cell->shape);
-        hash = HashByte(hash, cell->archetype);
-        hash = HashByte(hash, cell->terrainClass);
-        hash = HashByte(hash, cell->semanticProfile);
-        hash = HashByte(hash, cell->profile);
-        hash = HashByte(hash, cell->planeAxis);
-        hash = HashByte(hash, cell->effectiveElevation);
-        hash = HashByte(hash, cell->surfaceCount);
-        hash = HashU16(hash, cell->structureId);
-        hash = HashU16(hash, cell->rulePriority);
-        hash = HashU16(hash, cell->structureTemplateId);
-        hash = HashU16(hash, cell->structureX);
-        hash = HashU16(hash, cell->structureY);
-        hash = HashByte(hash, cell->structureWidth);
-        hash = HashByte(hash, cell->structureHeight);
-        hash = HashByte(hash, cell->treeHullReady);
-        hash = HashByte(hash, cell->treeMaskDirect);
-        hash = HashByte(hash, cell->rockMass);
-        hash = HashByte(hash, cell->structureRoofRows);
-        hash = HashByte(hash, cell->structureLocalX);
-        hash = HashByte(hash, cell->structureLocalY);
-        hash = HashByte(hash, cell->southFacadeCount);
-        hash = HashByte(hash, cell->measuredAxis);
-        hash = HashU16(hash, cell->measuredExtentBands);
-        hash = HashByte(hash, cell->measuredPeriodBands);
-        hash = HashByte(hash, cell->measuredRoofBands);
-        hash = HashU16(hash, cell->measuredRunLocal);
-        hash = HashU16(hash, cell->measuredRunLength);
-        hash = HashByte(hash, cell->measuredFlags);
-        hash = HashByte(hash, cell->measuredBandCount);
-        hash = HashByte(hash, cell->cliffEdgeMask);
-        hash = HashByte(hash, cell->cliffBaseMask);
-        hash = HashByte(hash, cell->cliffTransitionMask);
-        hash = HashByte(hash, cell->cliffCornerMask);
-        hash = HashByte(hash, cell->terraceProfile);
-        hash = HashFloat(hash, cell->groundHeight);
-        hash = HashFloat(hash, cell->visualHeight);
-        hash = HashFloat(hash, cell->featureHeight);
-        hash = HashFloat(hash, cell->ledgeTakeoffHeight);
-        hash = HashFloat(hash, cell->ledgeLandingHeight);
-        hash = HashFloat(hash, cell->structureBodyHeight);
-        hash = HashFloat(hash, cell->structureRoofHeight);
-        hash = HashFloat(hash, cell->southFacadeUnitHeight);
-        hash = HashFloat(hash, cell->measuredConfidence);
+        at = SigRoom(&stream, at); /* 91 bytes, to measuredConfidence */
+        at = PutByte(at, cell->present);
+        at = PutU16(at, cell->claimOwner);
+        at = PutU16(at, cell->mapX);
+        at = PutU16(at, cell->mapY);
+        at = PutU16(at, cell->metatileId);
+        at = PutByte(at, cell->behavior);
+        at = PutByte(at, cell->layerType);
+        at = PutByte(at, cell->reflective);
+        at = PutByte(at, cell->shape);
+        at = PutByte(at, cell->archetype);
+        at = PutByte(at, cell->terrainClass);
+        at = PutByte(at, cell->semanticProfile);
+        at = PutByte(at, cell->profile);
+        at = PutByte(at, cell->planeAxis);
+        at = PutByte(at, cell->effectiveElevation);
+        at = PutByte(at, cell->surfaceCount);
+        at = PutU16(at, cell->structureId);
+        at = PutU16(at, cell->rulePriority);
+        at = PutU16(at, cell->structureTemplateId);
+        at = PutU16(at, cell->structureX);
+        at = PutU16(at, cell->structureY);
+        at = PutByte(at, cell->structureWidth);
+        at = PutByte(at, cell->structureHeight);
+        at = PutByte(at, cell->treeHullReady);
+        at = PutByte(at, cell->treeMaskDirect);
+        at = PutByte(at, cell->rockMass);
+        at = PutByte(at, cell->structureRoofRows);
+        at = PutByte(at, cell->structureLocalX);
+        at = PutByte(at, cell->structureLocalY);
+        at = PutByte(at, cell->southFacadeCount);
+        at = PutByte(at, cell->measuredAxis);
+        at = PutU16(at, cell->measuredExtentBands);
+        at = PutByte(at, cell->measuredPeriodBands);
+        at = PutByte(at, cell->measuredRoofBands);
+        at = PutU16(at, cell->measuredRunLocal);
+        at = PutU16(at, cell->measuredRunLength);
+        at = PutByte(at, cell->measuredFlags);
+        at = PutByte(at, cell->measuredBandCount);
+        at = PutByte(at, cell->cliffEdgeMask);
+        at = PutByte(at, cell->cliffBaseMask);
+        at = PutByte(at, cell->cliffTransitionMask);
+        at = PutByte(at, cell->cliffCornerMask);
+        at = PutByte(at, cell->terraceProfile);
+        at = PutFloat(at, cell->groundHeight);
+        at = PutFloat(at, cell->visualHeight);
+        at = PutFloat(at, cell->featureHeight);
+        at = PutFloat(at, cell->ledgeTakeoffHeight);
+        at = PutFloat(at, cell->ledgeLandingHeight);
+        at = PutFloat(at, cell->structureBodyHeight);
+        at = PutFloat(at, cell->structureRoofHeight);
+        at = PutFloat(at, cell->southFacadeUnitHeight);
+        at = PutFloat(at, cell->measuredConfidence);
         for (unsigned surface = 0; surface < cell->surfaceCount; surface++)
         {
-            hash = HashFloat(hash, cell->surfaces[surface].bottomHeight);
-            hash = HashFloat(hash, cell->surfaces[surface].topHeight);
-            hash = HashByte(hash, cell->surfaces[surface].gameplayElevation);
+            at = SigRoom(&stream, at); /* 9 */
+            at = PutFloat(at, cell->surfaces[surface].bottomHeight);
+            at = PutFloat(at, cell->surfaces[surface].topHeight);
+            at = PutByte(at, cell->surfaces[surface].gameplayElevation);
         }
         for (unsigned face = 0; face < DIORAMA_MATERIAL_FACE_COUNT; face++)
         {
-            hash = HashU16(hash, cell->materials[face].metatileId);
-            hash = HashByte(hash, cell->materials[face].layer);
-            hash = HashByte(hash, cell->materials[face].rotation);
-            hash = HashByte(hash, cell->materials[face].flags);
-            hash = HashFloat(hash, cell->materials[face].u0);
-            hash = HashFloat(hash, cell->materials[face].v0);
-            hash = HashFloat(hash, cell->materials[face].u1);
-            hash = HashFloat(hash, cell->materials[face].v1);
-            hash = HashU16(hash, cell->underlayMaterials[face].metatileId);
-            hash = HashByte(hash, cell->underlayMaterials[face].layer);
-            hash = HashFloat(hash, cell->underlayMaterials[face].u0);
-            hash = HashFloat(hash, cell->underlayMaterials[face].v0);
-            hash = HashFloat(hash, cell->underlayMaterials[face].u1);
-            hash = HashFloat(hash, cell->underlayMaterials[face].v1);
+            at = SigRoom(&stream, at); /* 40 */
+            at = PutU16(at, cell->materials[face].metatileId);
+            at = PutByte(at, cell->materials[face].layer);
+            at = PutByte(at, cell->materials[face].rotation);
+            at = PutByte(at, cell->materials[face].flags);
+            at = PutFloat(at, cell->materials[face].u0);
+            at = PutFloat(at, cell->materials[face].v0);
+            at = PutFloat(at, cell->materials[face].u1);
+            at = PutFloat(at, cell->materials[face].v1);
+            at = PutU16(at, cell->underlayMaterials[face].metatileId);
+            at = PutByte(at, cell->underlayMaterials[face].layer);
+            at = PutFloat(at, cell->underlayMaterials[face].u0);
+            at = PutFloat(at, cell->underlayMaterials[face].v0);
+            at = PutFloat(at, cell->underlayMaterials[face].u1);
+            at = PutFloat(at, cell->underlayMaterials[face].v1);
         }
+        at = SigRoom(&stream, at); /* 32 */
         for (unsigned row = 0; row < DIORAMA_VOXELS_PER_CELL; row++)
-            hash = HashU16(hash, cell->foregroundAlpha[row]);
+            at = PutU16(at, cell->foregroundAlpha[row]);
         if (cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART)
+        {
+            at = SigRoom(&stream, at); /* 256 */
             for (unsigned pixel = 0;
                  pixel < DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL; pixel++)
-                hash = HashByte(hash, cell->mountainHeight[pixel]);
-        hash = HashByte(hash, cell->caveTunnel);
+                at = PutByte(at, cell->mountainHeight[pixel]);
+        }
+        at = SigRoom(&stream, at); /* 19 */
+        at = PutByte(at, cell->caveTunnel);
         if (cell->caveTunnel)
         {
-            hash = HashU16(hash, (uint16_t)cell->tunnelFloor);
+            at = PutU16(at, (uint16_t)cell->tunnelFloor);
             for (unsigned column = 0; column < DIORAMA_VOXELS_PER_CELL; column++)
-                hash = HashByte(hash, cell->tunnelOpening[column]);
+                at = PutByte(at, cell->tunnelOpening[column]);
         }
         if (cell->archetype == DIORAMA_ARCHETYPE_ROUND_HULL
          || cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL)
         {
-            hash = HashU16(hash, cell->treeMaterial.metatileId);
-            hash = HashByte(hash, cell->treeMaterial.layer);
-            hash = HashFloat(hash, cell->treeMaterial.u0);
-            hash = HashFloat(hash, cell->treeMaterial.v0);
-            hash = HashFloat(hash, cell->treeMaterial.u1);
-            hash = HashFloat(hash, cell->treeMaterial.v1);
+            at = SigRoom(&stream, at); /* 275 */
+            at = PutU16(at, cell->treeMaterial.metatileId);
+            at = PutByte(at, cell->treeMaterial.layer);
+            at = PutFloat(at, cell->treeMaterial.u0);
+            at = PutFloat(at, cell->treeMaterial.v0);
+            at = PutFloat(at, cell->treeMaterial.u1);
+            at = PutFloat(at, cell->treeMaterial.v1);
             for (unsigned pixel = 0;
                  pixel < DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL; pixel++)
-                hash = HashByte(hash, cell->treeShade[pixel]);
+                at = PutByte(at, cell->treeShade[pixel]);
         }
         for (unsigned row = 0; row < cell->southFacadeCount; row++)
         {
-            hash = HashU16(hash, cell->southFacadeMaterials[row].metatileId);
-            hash = HashByte(hash, cell->southFacadeMaterials[row].layer);
+            at = SigRoom(&stream, at); /* 3 */
+            at = PutU16(at, cell->southFacadeMaterials[row].metatileId);
+            at = PutByte(at, cell->southFacadeMaterials[row].layer);
         }
         for (unsigned band = 0; band < cell->measuredBandCount; band++)
         {
-            hash = HashU16(hash, cell->measuredBands[band].metatileId);
-            hash = HashByte(hash, cell->measuredBands[band].layer);
-            hash = HashFloat(hash, cell->measuredBands[band].u0);
-            hash = HashFloat(hash, cell->measuredBands[band].v0);
-            hash = HashFloat(hash, cell->measuredBands[band].u1);
-            hash = HashFloat(hash, cell->measuredBands[band].v1);
+            at = SigRoom(&stream, at); /* 19 */
+            at = PutU16(at, cell->measuredBands[band].metatileId);
+            at = PutByte(at, cell->measuredBands[band].layer);
+            at = PutFloat(at, cell->measuredBands[band].u0);
+            at = PutFloat(at, cell->measuredBands[band].v0);
+            at = PutFloat(at, cell->measuredBands[band].u1);
+            at = PutFloat(at, cell->measuredBands[band].v1);
         }
     }
-    hash = HashU32(hash, input->pixelCount);
+    at = SigRoom(&stream, at); /* 4 */
+    at = PutU32(at, input->pixelCount);
     for (i = 0; i < input->pixelCount && i < DIORAMA_TERRAIN_MAX_PIXEL_PRIMITIVES; i++)
     {
         const struct DioramaTerrainPixelPrimitive *pixel = &input->pixels[i];
 
-        hash = HashU32(hash, pixel->xQ32);
-        hash = HashU32(hash, pixel->yQ32);
-        hash = HashU32(hash, pixel->zQ32);
-        hash = HashU32(hash, pixel->rgba);
-        hash = HashU32(hash, pixel->sourceCellOffset);
-        hash = HashU16(hash, pixel->objectId);
-        hash = HashU16(hash, pixel->structureId);
-        hash = HashU16(hash, pixel->expectedMetatile);
-        hash = HashU16(hash, pixel->expectedTileEntry);
-        hash = HashByte(hash, pixel->sizeXQ32);
-        hash = HashByte(hash, pixel->sizeYQ32);
-        hash = HashByte(hash, pixel->sizeZQ32);
-        hash = HashByte(hash, pixel->sourceLayer);
-        hash = HashByte(hash, pixel->sourceX);
-        hash = HashByte(hash, pixel->sourceY);
-        hash = HashByte(hash, pixel->kind);
+        at = SigRoom(&stream, at); /* 35 */
+        at = PutU32(at, pixel->xQ32);
+        at = PutU32(at, pixel->yQ32);
+        at = PutU32(at, pixel->zQ32);
+        at = PutU32(at, pixel->rgba);
+        at = PutU32(at, pixel->sourceCellOffset);
+        at = PutU16(at, pixel->objectId);
+        at = PutU16(at, pixel->structureId);
+        at = PutU16(at, pixel->expectedMetatile);
+        at = PutU16(at, pixel->expectedTileEntry);
+        at = PutByte(at, pixel->sizeXQ32);
+        at = PutByte(at, pixel->sizeYQ32);
+        at = PutByte(at, pixel->sizeZQ32);
+        at = PutByte(at, pixel->sourceLayer);
+        at = PutByte(at, pixel->sourceX);
+        at = PutByte(at, pixel->sourceY);
+        at = PutByte(at, pixel->kind);
     }
-    return hash;
+    return SigFinish(&stream, at);
 }
 
 static int16_t HeightToVoxel(float height)
