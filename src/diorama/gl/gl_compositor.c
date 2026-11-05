@@ -942,6 +942,8 @@ static bool LogEnabled(void)
 /* Returns true when the atlases changed (rebuilt, or slots updated). */
 static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
 {
+    /* A redraw's time, from here (PKMN_DIORAMA_LOG=1; KNOWN_ISSUES MS-118). */
+    Uint64 started = SDL_GetPerformanceCounter();
     /* The neighbouring maps' pages first (metatile_atlas.h): another tileset
      * on one redraws the atlas, as another map does. */
     u32 pageSignature = DioramaAtlas_SetPages(snapshot);
@@ -961,6 +963,7 @@ static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
     bool changed;
     unsigned cellCount = snapshot->visibleCellCount;
     unsigned i;
+    Uint64 cleared, resolved;
 
     if (reset)
     {
@@ -990,6 +993,7 @@ static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
     }
     if (cellCount > DIORAMA_MAX_VISIBLE_CELLS)
         cellCount = DIORAMA_MAX_VISIBLE_CELLS;
+    cleared = SDL_GetPerformanceCounter();
     {
         struct ResolveKey key;
 
@@ -1015,6 +1019,7 @@ static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
             memcpy(sResolveCells, snapshot->cells, cellCount * sizeof(sResolveCells[0]));
         }
     }
+    resolved = SDL_GetPerformanceCounter();
     for (i = 0; i < DIORAMA_ATLAS_SLOT_COUNT; i++)
     {
         sCutoutBaseMetatiles[i] = 0xFFFF;
@@ -1053,6 +1058,7 @@ static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
         /* The map's rows and those of the pages in use: the rest is unused. */
         int height = (DIORAMA_ATLAS_MAP_ROWS + DioramaAtlas_HighestPage() * DIORAMA_ATLAS_PAGE_ROWS)
                    * DIORAMA_ATLAS_STRIDE;
+        Uint64 drawn = SDL_GetPerformanceCounter();
 
         glBindTexture(GL_TEXTURE_2D, sAtlasTexture.id);
         glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
@@ -1064,6 +1070,17 @@ static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
         glBindTexture(GL_TEXTURE_2D, sForegroundAtlasTexture.id);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DIORAMA_ATLAS_WIDTH, height,
                         GL_BGRA, GL_UNSIGNED_BYTE, sForegroundAtlasPixels);
+        if (LogEnabled())
+        {
+            double unit = 1000.0 / (double)SDL_GetPerformanceFrequency();
+            unsigned slots = 0;
+
+            for (i = 0; i < DIORAMA_ATLAS_PRESENT_BYTES; i++)
+                slots += (unsigned)__builtin_popcount(sUpdatedMetatiles[i]);
+            SDL_Log("Diorama: atlas redrawn: %u slots; ms: pages and clearing %.2f, cells resolved %.2f, drawn %.2f, "
+                    "uploaded %.2f", slots, (double)(cleared - started) * unit, (double)(resolved - cleared) * unit,
+                    (double)(drawn - resolved) * unit, (double)(SDL_GetPerformanceCounter() - drawn) * unit);
+        }
     }
     else if (changed)
     {

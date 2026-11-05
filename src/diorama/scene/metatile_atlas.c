@@ -44,71 +44,127 @@ uint32_t DioramaMetatile_ConvertColor(uint16_t bgr555, bool transparent)
          | ((uint32_t)red << 16) | ((uint32_t)green << 8) | blue;
 }
 
+/*
+ * KNOWN_ISSUES MS-118 (the atlas redrawn at a crossing): the pixels as DioramaMetatile_DecodePixel and
+ * DioramaMetatile_ConvertColor give them, a tile's row at a time and each palette's colours converted once (the
+ * per-pixel calls were two thirds of a redraw).
+ */
+struct ConvertedPalettes
+{
+    const uint16_t *palette;  /* the 16 palettes' raw colours, NULL: none yet */
+    uint16_t converted;       /* bit p: colors[p] holds palette p's */
+    uint32_t colors[16][16];  /* colour 0: 0 (transparent) */
+};
+
+static void ConvertedPalettes_Start(struct ConvertedPalettes *cache, const uint16_t *palette)
+{
+    cache->palette = palette;
+    cache->converted = 0;
+}
+
+static const uint32_t *ConvertedPalettes_Get(struct ConvertedPalettes *cache, unsigned paletteId)
+{
+    if (!(cache->converted & (1u << paletteId)))
+    {
+        const uint16_t *source = cache->palette + paletteId * 16;
+        unsigned i;
+
+        cache->colors[paletteId][0] = 0;
+        for (i = 1; i < 16; i++)
+            cache->colors[paletteId][i] = DioramaMetatile_ConvertColor(source[i], false);
+        cache->converted |= (uint16_t)(1u << paletteId);
+    }
+    return cache->colors[paletteId];
+}
+
+/* One tile (an entry: its tile, flips and palette) into quarter `tile` (0-3) of a metatile's pixels: `over` another
+ * layer, colour 0 leaves the pixel as it was; else the quarter is written whole, colour 0 transparent (0). */
+static void DrawTile(const uint8_t *tileGraphics, uint16_t entry, struct ConvertedPalettes *palettes,
+                     uint32_t *pixels, int tile, bool over)
+{
+    const uint8_t *source = tileGraphics + (entry & TILE_ID_MASK) * DIORAMA_TILE_BYTES;
+    const uint32_t *colors = ConvertedPalettes_Get(palettes, entry >> TILE_PALETTE_SHIFT);
+    uint32_t *out = pixels + (tile >> 1) * 8 * DIORAMA_METATILE_SIZE + (tile & 1) * 8;
+    int y;
+
+    for (y = 0; y < 8; y++, out += DIORAMA_METATILE_SIZE)
+    {
+        const uint8_t *row = source + (entry & TILE_VFLIP ? 7 - y : y) * 4;
+        uint8_t ids[8];
+        int x;
+
+        for (x = 0; x < 4; x++)
+        {
+            ids[x * 2] = row[x] & 0x0F;
+            ids[x * 2 + 1] = row[x] >> 4;
+        }
+        if (!over && (entry & TILE_HFLIP))
+        {
+            for (x = 0; x < 8; x++)
+                out[x] = colors[ids[7 - x]];
+        }
+        else if (!over)
+        {
+            for (x = 0; x < 8; x++)
+                out[x] = colors[ids[x]];
+        }
+        else if (entry & TILE_HFLIP)
+        {
+            for (x = 0; x < 8; x++)
+                if (ids[7 - x] != 0)
+                    out[x] = colors[ids[7 - x]];
+        }
+        else
+        {
+            for (x = 0; x < 8; x++)
+                if (ids[x] != 0)
+                    out[x] = colors[ids[x]];
+        }
+    }
+}
+
+/* A metatile's layer (0 lower, 1 upper; another: nothing drawn): its four tiles write every pixel. */
+static void ComposeLayerWith(const uint8_t *tileGraphics, const uint16_t *tileEntries,
+                             struct ConvertedPalettes *palettes, uint8_t layer, uint32_t *pixels)
+{
+    int tile;
+
+    if (layer > 1)
+    {
+        memset(pixels, 0, DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE * sizeof(*pixels));
+        return;
+    }
+    for (tile = 0; tile < 4; tile++)
+        DrawTile(tileGraphics, tileEntries[layer * 4 + tile], palettes, pixels, tile, false);
+}
+
+/* Both layers, the upper over the lower. */
+static void ComposeWith(const uint8_t *tileGraphics, const uint16_t *tileEntries,
+                        struct ConvertedPalettes *palettes, uint32_t *pixels)
+{
+    int tile;
+
+    for (tile = 0; tile < 8; tile++)
+        DrawTile(tileGraphics, tileEntries[tile], palettes, pixels, tile & 3, tile >= 4);
+}
+
 void DioramaMetatile_Compose(const uint8_t *tileGraphics, const uint16_t *tileEntries,
                              const uint16_t *palette, uint32_t *pixels)
 {
-    int layer;
-    int tile;
+    struct ConvertedPalettes palettes;
 
-    memset(pixels, 0, DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE * sizeof(*pixels));
-    for (layer = 0; layer < 2; layer++)
-    {
-        for (tile = 0; tile < 4; tile++)
-        {
-            uint16_t entry = tileEntries[layer * 4 + tile];
-            uint8_t paletteId = entry >> TILE_PALETTE_SHIFT;
-            int tileX = (tile & 1) * 8;
-            int tileY = (tile >> 1) * 8;
-            int y;
-            int x;
-
-            for (y = 0; y < 8; y++)
-            {
-                for (x = 0; x < 8; x++)
-                {
-                    uint8_t colorId = DioramaMetatile_DecodePixel(tileGraphics, entry, x, y);
-
-                    if (colorId != 0)
-                    {
-                        pixels[(tileY + y) * DIORAMA_METATILE_SIZE + tileX + x]
-                            = DioramaMetatile_ConvertColor(palette[paletteId * 16 + colorId], false);
-                    }
-                }
-            }
-        }
-    }
+    ConvertedPalettes_Start(&palettes, palette);
+    ComposeWith(tileGraphics, tileEntries, &palettes, pixels);
 }
 
 void DioramaMetatile_ComposeLayer(const uint8_t *tileGraphics, const uint16_t *tileEntries,
                                   const uint16_t *palette, uint8_t layer,
                                   uint32_t *pixels)
 {
-    int tile;
+    struct ConvertedPalettes palettes;
 
-    memset(pixels, 0, DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE * sizeof(*pixels));
-    if (layer > 1)
-        return;
-    for (tile = 0; tile < 4; tile++)
-    {
-        uint16_t entry = tileEntries[layer * 4 + tile];
-        uint8_t paletteId = entry >> TILE_PALETTE_SHIFT;
-        int tileX = (tile & 1) * 8;
-        int tileY = (tile >> 1) * 8;
-        int y;
-        int x;
-
-        for (y = 0; y < 8; y++)
-        {
-            for (x = 0; x < 8; x++)
-            {
-                uint8_t colorId = DioramaMetatile_DecodePixel(tileGraphics, entry, x, y);
-
-                if (colorId != 0)
-                    pixels[(tileY + y) * DIORAMA_METATILE_SIZE + tileX + x]
-                        = DioramaMetatile_ConvertColor(palette[paletteId * 16 + colorId], false);
-            }
-        }
-    }
+    ConvertedPalettes_Start(&palettes, palette);
+    ComposeLayerWith(tileGraphics, tileEntries, &palettes, layer, pixels);
 }
 
 void DioramaMetatile_BuildAlphaMask(const uint32_t *pixels,
@@ -118,12 +174,13 @@ void DioramaMetatile_BuildAlphaMask(const uint32_t *pixels,
 
     for (y = 0; y < DIORAMA_METATILE_SIZE; y++)
     {
+        const uint32_t *row = pixels + y * DIORAMA_METATILE_SIZE;
+        unsigned bits = 0;  /* the row's in a register (MS-118) */
         int x;
 
-        rows[y] = 0;
         for (x = 0; x < DIORAMA_METATILE_SIZE; x++)
-            if (pixels[y * DIORAMA_METATILE_SIZE + x] >> 24)
-                rows[y] |= (uint16_t)1 << x;
+            bits |= (unsigned)((row[x] >> 24) != 0) << x;
+        rows[y] = (uint16_t)bits;
     }
 }
 
@@ -418,24 +475,25 @@ static bool EntriesUseDirtyTile(const struct DioramaCellSnapshot *cell, const ui
     return false;
 }
 
+/* The slot's box: the metatile, its edge pixels repeated in the gutter around it (a row at a time, MS-118). */
 static void BlitWithGutter(uint32_t *atlasPixels, uint16_t slot, const uint32_t *pixels)
 {
-    int atlasX = (slot % DIORAMA_ATLAS_COLUMNS) * DIORAMA_ATLAS_STRIDE + DIORAMA_ATLAS_GUTTER;
-    int atlasY = (slot / DIORAMA_ATLAS_COLUMNS) * DIORAMA_ATLAS_STRIDE + DIORAMA_ATLAS_GUTTER;
+    uint32_t *out = atlasPixels + (slot / DIORAMA_ATLAS_COLUMNS) * DIORAMA_ATLAS_STRIDE * DIORAMA_ATLAS_WIDTH
+                  + (slot % DIORAMA_ATLAS_COLUMNS) * DIORAMA_ATLAS_STRIDE;
     int y;
-    int x;
 
-    for (y = -DIORAMA_ATLAS_GUTTER; y < DIORAMA_METATILE_SIZE + DIORAMA_ATLAS_GUTTER; y++)
+    for (y = -DIORAMA_ATLAS_GUTTER; y < DIORAMA_METATILE_SIZE + DIORAMA_ATLAS_GUTTER; y++, out += DIORAMA_ATLAS_WIDTH)
     {
         int sourceY = y < 0 ? 0 : (y >= DIORAMA_METATILE_SIZE ? DIORAMA_METATILE_SIZE - 1 : y);
+        const uint32_t *row = pixels + sourceY * DIORAMA_METATILE_SIZE;
+        int x;
 
-        for (x = -DIORAMA_ATLAS_GUTTER; x < DIORAMA_METATILE_SIZE + DIORAMA_ATLAS_GUTTER; x++)
+        for (x = 0; x < DIORAMA_ATLAS_GUTTER; x++)
         {
-            int sourceX = x < 0 ? 0 : (x >= DIORAMA_METATILE_SIZE ? DIORAMA_METATILE_SIZE - 1 : x);
-
-            atlasPixels[(atlasY + y) * DIORAMA_ATLAS_WIDTH + atlasX + x]
-                = pixels[sourceY * DIORAMA_METATILE_SIZE + sourceX];
+            out[x] = row[0];
+            out[DIORAMA_ATLAS_GUTTER + DIORAMA_METATILE_SIZE + x] = row[DIORAMA_METATILE_SIZE - 1];
         }
+        memcpy(out + DIORAMA_ATLAS_GUTTER, row, DIORAMA_METATILE_SIZE * sizeof(*row));
     }
 }
 
@@ -473,6 +531,49 @@ static const struct DioramaCellSnapshot *FindSlotCell(const struct DioramaSceneS
     return sSlotFirstCell[slot] == DIORAMA_ATLAS_NO_CELL ? NULL : &snapshot->cells[sSlotFirstCell[slot]];
 }
 
+/* A pass's converted palettes, one set for each art's faded palette (the map's and up to DIORAMA_NEIGHBOUR_PAGES
+ * pages', each fixed for the pass): a palette's colours converted once a pass (MS-118). */
+struct PassPalettes
+{
+    unsigned count;
+    struct ConvertedPalettes sets[DIORAMA_NEIGHBOUR_PAGES + 1];
+};
+
+static struct ConvertedPalettes *PassPalettes_For(struct PassPalettes *pass, const uint16_t *palette)
+{
+    unsigned i;
+
+    for (i = 0; i < pass->count; i++)
+        if (pass->sets[i].palette == palette)
+            return &pass->sets[i];
+    if (pass->count == DIORAMA_NEIGHBOUR_PAGES + 1)
+        pass->count = 0;                /* never: a pass's arts are the map's and its pages' */
+    ConvertedPalettes_Start(&pass->sets[pass->count], palette);
+    return &pass->sets[pass->count++];
+}
+
+/* A slot drawn from its cell alone: the whole metatile (the upper layer over the lower, as DioramaMetatile_Compose
+ * draws it: a drawn colour is never 0), its silhouette, the lower layer, the upper and its alpha. */
+static void DrawSlotLayers(uint16_t slot, const struct DioramaAtlasArt *art, const uint16_t *tileEntries,
+                           struct ConvertedPalettes *palettes, uint32_t *atlasPixels, uint32_t *baseAtlasPixels,
+                           uint32_t *foregroundAtlasPixels)
+{
+    uint32_t metatilePixels[DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE];
+    uint32_t lowerPixels[DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE];
+    uint32_t upperPixels[DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE];
+    unsigned pixel;
+
+    ComposeLayerWith(art->tileGraphics, tileEntries, palettes, 0, lowerPixels);
+    ComposeLayerWith(art->tileGraphics, tileEntries, palettes, 1, upperPixels);
+    for (pixel = 0; pixel < DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE; pixel++)
+        metatilePixels[pixel] = upperPixels[pixel] != 0 ? upperPixels[pixel] : lowerPixels[pixel];
+    DioramaMetatile_BuildSilhouetteMask(metatilePixels, sSilhouetteAlpha[slot]);
+    BlitWithGutter(atlasPixels, slot, metatilePixels);
+    BlitWithGutter(baseAtlasPixels, slot, lowerPixels);
+    BlitWithGutter(foregroundAtlasPixels, slot, upperPixels);
+    DioramaMetatile_BuildAlphaMask(upperPixels, sForegroundAlpha[slot]);
+}
+
 bool DioramaAtlas_UpdateDirty(const struct DioramaSceneSnapshot *snapshot,
                               const uint16_t *cutoutBaseSlots,
                               const uint8_t *dirtyTiles,
@@ -484,6 +585,7 @@ bool DioramaAtlas_UpdateDirty(const struct DioramaSceneSnapshot *snapshot,
     uint32_t metatilePixels[DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE];
     uint32_t layerPixels[DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE];
     uint8_t seen[DIORAMA_ATLAS_PRESENT_BYTES]; /* the slots this pass has decided */
+    struct PassPalettes palettes;
     bool changed = false;
     unsigned i;
 
@@ -493,6 +595,7 @@ bool DioramaAtlas_UpdateDirty(const struct DioramaSceneSnapshot *snapshot,
         cellCount = DIORAMA_MAX_VISIBLE_CELLS;
     FindSlotCells(snapshot, cellCount);
     memset(seen, 0, sizeof(seen));
+    palettes.count = 0;
     for (i = 0; i < cellCount; i++)
     {
         const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
@@ -519,16 +622,17 @@ bool DioramaAtlas_UpdateDirty(const struct DioramaSceneSnapshot *snapshot,
         if (present && !dirty)
             continue;
         art = DioramaAtlas_CellArt(snapshot, cell);
-        DioramaMetatile_Compose(art.tileGraphics, cell->tileEntries, art.fadedPalette, metatilePixels);
-        DioramaMetatile_BuildSilhouetteMask(metatilePixels, sSilhouetteAlpha[slot]);
-        BlitWithGutter(atlasPixels, slot, metatilePixels);
         if (baseSlot < DIORAMA_ATLAS_SLOT_COUNT && baseCell != NULL)
         {
             struct DioramaAtlasArt baseArt = DioramaAtlas_CellArt(snapshot, baseCell);
             unsigned pixel;
 
-            DioramaMetatile_Compose(baseArt.tileGraphics, baseCell->tileEntries,
-                                    baseArt.fadedPalette, layerPixels);
+            ComposeWith(art.tileGraphics, cell->tileEntries, PassPalettes_For(&palettes, art.fadedPalette),
+                        metatilePixels);
+            DioramaMetatile_BuildSilhouetteMask(metatilePixels, sSilhouetteAlpha[slot]);
+            BlitWithGutter(atlasPixels, slot, metatilePixels);
+            ComposeWith(baseArt.tileGraphics, baseCell->tileEntries, PassPalettes_For(&palettes, baseArt.fadedPalette),
+                        layerPixels);
             BlitWithGutter(baseAtlasPixels, slot, layerPixels);
             for (pixel = 0; pixel < DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE; pixel++)
                 if (metatilePixels[pixel] == layerPixels[pixel])
@@ -538,13 +642,8 @@ bool DioramaAtlas_UpdateDirty(const struct DioramaSceneSnapshot *snapshot,
         }
         else
         {
-            DioramaMetatile_ComposeLayer(art.tileGraphics, cell->tileEntries,
-                                         art.fadedPalette, 0, layerPixels);
-            BlitWithGutter(baseAtlasPixels, slot, layerPixels);
-            DioramaMetatile_ComposeLayer(art.tileGraphics, cell->tileEntries,
-                                         art.fadedPalette, 1, layerPixels);
-            BlitWithGutter(foregroundAtlasPixels, slot, layerPixels);
-            DioramaMetatile_BuildAlphaMask(layerPixels, sForegroundAlpha[slot]);
+            DrawSlotLayers(slot, &art, cell->tileEntries, PassPalettes_For(&palettes, art.fadedPalette),
+                           atlasPixels, baseAtlasPixels, foregroundAtlasPixels);
         }
         presentSlots[slot / 8] |= 1 << (slot % 8);
         if (updatedSlots != NULL)
@@ -567,14 +666,8 @@ bool DioramaAtlas_UpdateDirty(const struct DioramaSceneSnapshot *snapshot,
         {
             struct DioramaAtlasArt art = DioramaAtlas_CellArt(snapshot, &rock);
 
-            DioramaMetatile_Compose(art.tileGraphics, rock.tileEntries, art.fadedPalette, metatilePixels);
-            DioramaMetatile_BuildSilhouetteMask(metatilePixels, sSilhouetteAlpha[slot]);
-            BlitWithGutter(atlasPixels, slot, metatilePixels);
-            DioramaMetatile_ComposeLayer(art.tileGraphics, rock.tileEntries, art.fadedPalette, 0, layerPixels);
-            BlitWithGutter(baseAtlasPixels, slot, layerPixels);
-            DioramaMetatile_ComposeLayer(art.tileGraphics, rock.tileEntries, art.fadedPalette, 1, layerPixels);
-            BlitWithGutter(foregroundAtlasPixels, slot, layerPixels);
-            DioramaMetatile_BuildAlphaMask(layerPixels, sForegroundAlpha[slot]);
+            DrawSlotLayers(slot, &art, rock.tileEntries, PassPalettes_For(&palettes, art.fadedPalette),
+                           atlasPixels, baseAtlasPixels, foregroundAtlasPixels);
             presentSlots[slot / 8] |= 1 << (slot % 8);
             if (updatedSlots != NULL)
                 updatedSlots[slot / 8] |= 1 << (slot % 8);

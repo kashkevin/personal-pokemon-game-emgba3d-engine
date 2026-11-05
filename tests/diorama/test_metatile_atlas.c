@@ -522,8 +522,239 @@ static void TestNeighbourPages(void)
     CHECK(art.tileGraphics == snapshot.tileGraphics);
 }
 
+/*
+ * KNOWN_ISSUES MS-118: the atlas draws a tile's row at a time with each palette's colours converted once; what it
+ * draws must stay what the per-pixel functions give (DioramaMetatile_DecodePixel, DioramaMetatile_ConvertColor).
+ */
+static uint32_t sRandom = 0x2545F491u;
+
+static uint32_t Random(void)
+{
+    sRandom ^= sRandom << 13;
+    sRandom ^= sRandom >> 17;
+    sRandom ^= sRandom << 5;
+    return sRandom;
+}
+
+static void RandomBytes(uint8_t *bytes, size_t count)
+{
+    size_t i;
+
+    for (i = 0; i < count; i++)
+    {
+        bytes[i] = (uint8_t)Random();
+        if (Random() % 3 == 0)
+            bytes[i] &= 0xF0; /* transparent pixels too */
+    }
+}
+
+/* layers: bit 0 the lower, bit 1 the upper (over it). */
+static void ReferenceCompose(const uint8_t *graphics, const uint16_t *entries, const uint16_t *palette,
+                             unsigned layers, uint32_t *pixels)
+{
+    unsigned layer, tile, x, y;
+
+    memset(pixels, 0, DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE * sizeof(*pixels));
+    for (layer = 0; layer < 2; layer++)
+        for (tile = 0; (layers & (1u << layer)) && tile < 4; tile++)
+            for (y = 0; y < 8; y++)
+                for (x = 0; x < 8; x++)
+                {
+                    uint16_t entry = entries[layer * 4 + tile];
+                    uint8_t color = DioramaMetatile_DecodePixel(graphics, entry, (uint8_t)x, (uint8_t)y);
+
+                    if (color != 0)
+                        pixels[((tile >> 1) * 8 + y) * DIORAMA_METATILE_SIZE + (tile & 1) * 8 + x]
+                            = DioramaMetatile_ConvertColor(palette[(entry >> 12) * 16 + color], false);
+                }
+}
+
+static void ReferenceMask(const uint32_t *pixels, uint16_t rows[DIORAMA_METATILE_SIZE])
+{
+    unsigned x, y;
+
+    for (y = 0; y < DIORAMA_METATILE_SIZE; y++)
+    {
+        rows[y] = 0;
+        for (x = 0; x < DIORAMA_METATILE_SIZE; x++)
+            if (pixels[y * DIORAMA_METATILE_SIZE + x] >> 24)
+                rows[y] |= (uint16_t)(1u << x);
+    }
+}
+
+static void TestDrawingMatchesPerPixelReference(void)
+{
+    static uint8_t graphics[DIORAMA_TILE_GRAPHICS_SIZE];
+    static uint16_t palette[DIORAMA_FADED_PALETTE_ENTRIES];
+    uint32_t expected[DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE];
+    uint32_t actual[DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE];
+    uint16_t expectedRows[DIORAMA_METATILE_SIZE], actualRows[DIORAMA_METATILE_SIZE];
+    unsigned round, i;
+
+    for (round = 0; round < 3000; round++)
+    {
+        uint16_t entries[DIORAMA_METATILE_ENTRY_COUNT];
+        uint8_t layer;
+
+        if (round % 300 == 0)
+        {
+            RandomBytes(graphics, sizeof(graphics));
+            for (i = 0; i < DIORAMA_FADED_PALETTE_ENTRIES; i++)
+                palette[i] = (uint16_t)Random();
+        }
+        for (i = 0; i < DIORAMA_METATILE_ENTRY_COUNT; i++)
+            entries[i] = (uint16_t)Random(); /* every tile, flip and palette */
+        ReferenceCompose(graphics, entries, palette, 3, expected);
+        memset(actual, 0xA5, sizeof(actual));
+        DioramaMetatile_Compose(graphics, entries, palette, actual);
+        CHECK(memcmp(expected, actual, sizeof(expected)) == 0);
+        ReferenceMask(expected, expectedRows);
+        DioramaMetatile_BuildAlphaMask(actual, actualRows);
+        CHECK(memcmp(expectedRows, actualRows, sizeof(expectedRows)) == 0);
+        for (layer = 0; layer < 3; layer++)
+        {
+            ReferenceCompose(graphics, entries, palette, layer < 2 ? 1u << layer : 0, expected);
+            memset(actual, 0x5A, sizeof(actual));
+            DioramaMetatile_ComposeLayer(graphics, entries, palette, layer, actual);
+            CHECK(memcmp(expected, actual, sizeof(expected)) == 0);
+        }
+    }
+}
+
+/* The slot's box in an atlas against a metatile's pixels, the gutter repeating its edge. */
+static bool BoxMatches(const uint32_t *atlas, uint16_t slot, const uint32_t *pixels)
+{
+    int originX = (slot % DIORAMA_ATLAS_COLUMNS) * DIORAMA_ATLAS_STRIDE + DIORAMA_ATLAS_GUTTER;
+    int originY = (slot / DIORAMA_ATLAS_COLUMNS) * DIORAMA_ATLAS_STRIDE + DIORAMA_ATLAS_GUTTER;
+    int x, y;
+
+    for (y = -DIORAMA_ATLAS_GUTTER; y < DIORAMA_METATILE_SIZE + DIORAMA_ATLAS_GUTTER; y++)
+        for (x = -DIORAMA_ATLAS_GUTTER; x < DIORAMA_METATILE_SIZE + DIORAMA_ATLAS_GUTTER; x++)
+        {
+            int sourceX = x < 0 ? 0 : x >= DIORAMA_METATILE_SIZE ? DIORAMA_METATILE_SIZE - 1 : x;
+            int sourceY = y < 0 ? 0 : y >= DIORAMA_METATILE_SIZE ? DIORAMA_METATILE_SIZE - 1 : y;
+
+            if (atlas[(originY + y) * DIORAMA_ATLAS_WIDTH + originX + x]
+                != pixels[sourceY * DIORAMA_METATILE_SIZE + sourceX])
+                return false;
+        }
+    return true;
+}
+
+static void TestPassMatchesPerPixelReference(void)
+{
+    static struct DioramaSceneSnapshot snapshot;
+    static uint8_t pageTiles[DIORAMA_PAGE_TILE_BYTES];
+    static uint32_t atlas[DIORAMA_ATLAS_PIXEL_COUNT];
+    static uint32_t baseAtlas[DIORAMA_ATLAS_PIXEL_COUNT];
+    static uint32_t foregroundAtlas[DIORAMA_ATLAS_PIXEL_COUNT];
+    static uint16_t cutoutBases[DIORAMA_ATLAS_SLOT_COUNT];
+    static uint16_t firstCell[DIORAMA_ATLAS_SLOT_COUNT];
+    uint8_t present[DIORAMA_ATLAS_PRESENT_BYTES];
+    uint32_t whole[DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE];
+    uint32_t lower[DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE];
+    uint32_t upper[DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE];
+    uint16_t expectedRows[DIORAMA_METATILE_SIZE], actualRows[DIORAMA_METATILE_SIZE];
+    unsigned i, e, checked = 0, cutouts = 0;
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    RandomBytes(snapshot.tileGraphics, sizeof(snapshot.tileGraphics));
+    RandomBytes(pageTiles, sizeof(pageTiles));
+    for (i = 0; i < DIORAMA_FADED_PALETTE_ENTRIES; i++)
+    {
+        snapshot.unfadedPalette[i] = (uint16_t)(Random() & 0x7FFF);
+        snapshot.fadedPalette[i] = (uint16_t)(Random() & 0x7FFF);
+    }
+    snapshot.neighbourPages[0].tileset = pageTiles; /* its identity only */
+    snapshot.neighbourPages[0].tiles = pageTiles;
+    for (i = 0; i < DIORAMA_PAGE_PALETTE_COUNT * 16; i++)
+        snapshot.neighbourPages[0].palettes[i] = (uint16_t)(Random() & 0x7FFF);
+    snapshot.visibleCellCount = 600;
+    for (i = 0; i < snapshot.visibleCellCount; i++)
+    {
+        struct DioramaCellSnapshot *cell = &snapshot.cells[i];
+
+        cell->atlasPage = (uint8_t)(Random() % 2);
+        cell->metatileId = (uint16_t)(Random() % 160 + (cell->atlasPage ? 480 : 0));
+        for (e = 0; e < DIORAMA_METATILE_ENTRY_COUNT; e++) /* a slot's cells draw the same, as in the game */
+            cell->tileEntries[e] = (uint16_t)((cell->metatileId * 2654435761u + cell->atlasPage * 40503u + e * 977u) >> 7);
+    }
+    snapshot.rockFaceValid = 1;
+    for (e = 0; e < DIORAMA_METATILE_ENTRY_COUNT; e++)
+        snapshot.rockFaceEntries[e] = (uint16_t)Random();
+    for (i = 0; i < DIORAMA_ATLAS_SLOT_COUNT; i++)
+        cutoutBases[i] = firstCell[i] = 0xFFFF;
+    for (i = 0; i < snapshot.visibleCellCount; i++)
+    {
+        uint16_t slot = DioramaAtlas_CellSlot(&snapshot.cells[i]);
+
+        if (firstCell[slot] == 0xFFFF)
+            firstCell[slot] = (uint16_t)i;
+        if (Random() % 4 == 0)
+            cutoutBases[slot] = DioramaAtlas_CellSlot(&snapshot.cells[Random() % snapshot.visibleCellCount]);
+    }
+    DioramaAtlas_SetPages(&snapshot);
+    DioramaAtlas_Clear(atlas, present);
+    memset(baseAtlas, 0, sizeof(baseAtlas));
+    memset(foregroundAtlas, 0, sizeof(foregroundAtlas));
+    CHECK(DioramaAtlas_UpdateDirty(&snapshot, cutoutBases, NULL, NULL, atlas, baseAtlas, foregroundAtlas, present,
+                                   NULL));
+    for (i = 0; i < DIORAMA_ATLAS_SLOT_COUNT; i++)
+    {
+        const struct DioramaCellSnapshot *cell = firstCell[i] != 0xFFFF ? &snapshot.cells[firstCell[i]] : NULL;
+        const struct DioramaCellSnapshot *baseCell = NULL;
+        struct DioramaCellSnapshot rock;
+        struct DioramaAtlasArt art;
+        unsigned pixel;
+
+        if (cell == NULL && i == DIORAMA_ROCK_FACE_METATILE)
+        {
+            memset(&rock, 0, sizeof(rock));
+            rock.metatileId = DIORAMA_ROCK_FACE_METATILE;
+            memcpy(rock.tileEntries, snapshot.rockFaceEntries, sizeof(rock.tileEntries));
+            cell = &rock;
+        }
+        else if (cutoutBases[i] < DIORAMA_ATLAS_SLOT_COUNT && firstCell[cutoutBases[i]] != 0xFFFF)
+        {
+            baseCell = &snapshot.cells[firstCell[cutoutBases[i]]];
+        }
+        CHECK(((present[i / 8] >> (i % 8)) & 1) == (cell != NULL));
+        if (cell == NULL)
+            continue;
+        art = DioramaAtlas_CellArt(&snapshot, cell);
+        ReferenceCompose(art.tileGraphics, cell->tileEntries, art.fadedPalette, 3, whole);
+        if (baseCell != NULL)
+        {
+            struct DioramaAtlasArt baseArt = DioramaAtlas_CellArt(&snapshot, baseCell);
+
+            ReferenceCompose(baseArt.tileGraphics, baseCell->tileEntries, baseArt.fadedPalette, 3, lower);
+            for (pixel = 0; pixel < DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE; pixel++)
+                upper[pixel] = whole[pixel] == lower[pixel] ? 0 : whole[pixel];
+            cutouts++;
+        }
+        else
+        {
+            ReferenceCompose(art.tileGraphics, cell->tileEntries, art.fadedPalette, 1, lower);
+            ReferenceCompose(art.tileGraphics, cell->tileEntries, art.fadedPalette, 2, upper);
+        }
+        CHECK(BoxMatches(atlas, (uint16_t)i, whole));
+        CHECK(BoxMatches(baseAtlas, (uint16_t)i, lower));
+        CHECK(BoxMatches(foregroundAtlas, (uint16_t)i, upper));
+        ReferenceMask(upper, expectedRows);
+        DioramaAtlas_GetForegroundAlphaMask((uint16_t)i, actualRows);
+        CHECK(memcmp(expectedRows, actualRows, sizeof(expectedRows)) == 0);
+        DioramaMetatile_BuildSilhouetteMask(whole, expectedRows);
+        DioramaAtlas_GetSilhouetteAlphaMask((uint16_t)i, actualRows);
+        CHECK(memcmp(expectedRows, actualRows, sizeof(expectedRows)) == 0);
+        checked++;
+    }
+    CHECK(checked > 200 && cutouts > 20);
+}
+
 int main(void)
 {
+    TestDrawingMatchesPerPixelReference();
+    TestPassMatchesPerPixelReference();
     TestDecodeAndFlips();
     TestColorAndComposition();
     TestAlphaMask();
