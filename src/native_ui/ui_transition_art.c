@@ -6,10 +6,14 @@
  * the GBA moves each line; up and down, from one line's middle to the next where neighbouring lines differ by a few
  * pixels, so a wave that stretches the art shows the GBA's rows at the lines' middles without a saw-tooth between
  * them), the weights of the 4 x 4 art pixels round it (each pixel a square blurred by a Gaussian of SIGMA art pixels:
- * per axis the difference of two normal distribution values), the weight of each palette slot among them (thin
- * strokes' slots weighing more, BOOST at most: a slot's mean width over the art, twice its area over its outline, of
- * 1.5 pixels or less weighs BOOST, of 3.5 or more 1), then the two strongest slots coloured from the frame's palette
- * and blended across half a window pixel either side of their edge, and the GBA's blend with what is under it. Past
+ * per axis the difference of two normal distribution values; a background's pixels off the GBA screen take the
+ * screen's edge pixel), the weight of each palette slot among them; then the art's background colours (colour 0, or
+ * one covering a tenth of the art) compete one by one with the rest of the art taken as one shape - the union of its
+ * colours' weights, so a stroke made of several colours keeps one outline - the strongest two blended over one window
+ * pixel, and inside the shape its strongest colour blended with the next. Thin strokes weigh more, BOOST at most (a
+ * slot's mean width, twice its area over its outline: against the background colours for the shape's outline, a
+ * stroke 1.2 pixels wide or less at full weight; against any colour for a rim between two colours, 1.5 pixels or
+ * less), so lines and rims one pixel wide stay whole. Last the GBA's blend with what is under it. Past
  * the picture's edges over the 3D field a background is carried out as the compositor carries the picture out. Test
  * switches: PKMN_TRANSITION_ART=0 (the GBA picture of the art instead), PKMN_TRANSITION_ART_SIGMA (the Gaussian's
  * width), PKMN_TRANSITION_ART_BOOST (the strokes' weight). Project-owned.
@@ -60,7 +64,9 @@ static const char sFragmentShader[] =
     "uniform vec2 uOrigin;\n"        /* the art's (0, 0) on the GBA screen */
     "uniform int uPalBase;\n"
     "uniform vec4 uLines[80];\n"     /* the scroll by GBA line: x, y of an even line, then of the odd one */
-    "uniform vec4 uBoost[64];\n"     /* each slot's weight */
+    "uniform sampler2D uWeights;\n"  /* 256 x 1, each slot's: r its weight among slots (a rim), g its weight in the shape's
+                                     * outline (a stroke against the background), b 1 for a background colour */
+    "uniform float uBoost;\n"        /* the most a thin stroke weighs */
     "uniform int uMode;\n"           /* 0 as it is, 1 alpha blend, 2 lighten, 3 darken */
     "uniform vec3 uEffect;\n"        /* eva, evb, y (0..1) */
     "uniform float uSigma;\n"
@@ -152,27 +158,46 @@ static const char sFragmentShader[] =
     "            }\n"
     "            field[k] += wx[i] * wy[j];\n"
     "        }\n"
-    "    int a = -1, b = -1;\n"
-    "    float fa = -1.0, fb = -1.0;\n"
+    /* the background colours compete one by one; the others are one shape, its outline the union of their weights, the
+     * colour inside it the strongest of them blended with the next (a stroke of several colours keeps one outline) */
+    "    int a = -1, b = -1, ba = -1, bb = -1;\n"
+    "    float fa = -1.0, fb = -1.0, ga = -1.0, gb = -1.0, shape = 0.0;\n"
     "    for (int k = 0; k < n; k++)\n"
     "    {\n"
-    "        float f = field[k] * uBoost[int(slots[k]) >> 2][int(slots[k]) & 3];\n"
-    "        if (f > fa)\n"
+    "        vec4 w = texelFetch(uWeights, ivec2(int(slots[k]), 0), 0);\n"
+    "        float f = field[k] * (1.0 + (uBoost - 1.0) * w.r);\n"
+    "        if (w.b > 0.5)\n"
     "        {\n"
-    "            b = a;\n"
-    "            fb = fa;\n"
-    "            a = k;\n"
-    "            fa = f;\n"
+    "            if (f > ga) { gb = ga; bb = ba; ga = f; ba = k; }\n"
+    "            else if (f > gb) { gb = f; bb = k; }\n"
     "        }\n"
-    "        else if (f > fb)\n"
+    "        else\n"
     "        {\n"
-    "            b = k;\n"
-    "            fb = f;\n"
+    "            shape += field[k] * (1.0 + (uBoost - 1.0) * w.g);\n"
+    "            if (f > fa) { fb = fa; b = a; fa = f; a = k; }\n"
+    "            else if (f > fb) { fb = f; b = k; }\n"
     "        }\n"
     "    }\n"
-    "    vec4 col = Colour(slots[a]);\n"
-    "    if (b >= 0)\n"
-    "        col = mix(Colour(slots[b]), col, 0.5 + 0.5 * clamp((fa - fb) * uBand, 0.0, 1.0));\n"
+    "    vec4 inside = vec4(0.0);\n"
+    "    if (a >= 0)\n"
+    "        inside = b >= 0 ? mix(Colour(slots[b]), Colour(slots[a]), 0.5 + 0.5 * clamp((fa - fb) * uBand, 0.0, 1.0))\n"
+    "                        : Colour(slots[a]);\n"
+    /* the two strongest of the shape and the background colours */
+    "    float f1 = shape, f2 = -1.0;\n"
+    "    vec4 c1 = inside, c2 = vec4(0.0);\n"
+    "    if (a < 0)\n"
+    "        f1 = -1.0;\n"
+    "    if (ba >= 0)\n"
+    "    {\n"
+    "        if (ga > f1) { f2 = f1; c2 = c1; f1 = ga; c1 = Colour(slots[ba]); }\n"
+    "        else { f2 = ga; c2 = Colour(slots[ba]); }\n"
+    "    }\n"
+    "    if (bb >= 0 && gb > f2)\n"
+    "    {\n"
+    "        f2 = gb;\n"
+    "        c2 = Colour(slots[bb]);\n"
+    "    }\n"
+    "    vec4 col = f2 >= 0.0 ? mix(c2, c1, 0.5 + 0.5 * clamp((f1 - f2) * uBand, 0.0, 1.0)) : c1;\n"
     "    if (uMode == 1)\n"
     "        col = vec4(col.rgb * uEffect.x, col.a * (1.0 - uEffect.y));\n"
     "    else if (uMode == 2)\n"
@@ -186,12 +211,12 @@ static const char sFragmentShader[] =
 
 enum
 {
-    U_SLOTS, U_PAL, U_SCREEN_H, U_PIC, U_BACKGROUND, U_CARRY, U_SIZE, U_ORIGIN, U_PAL_BASE, U_LINES, U_BOOST, U_MODE,
-    U_EFFECT, U_SIGMA, U_BAND, U_COUNT
+    U_SLOTS, U_PAL, U_SCREEN_H, U_PIC, U_BACKGROUND, U_CARRY, U_SIZE, U_ORIGIN, U_PAL_BASE, U_LINES, U_WEIGHTS,
+    U_BOOST, U_MODE, U_EFFECT, U_SIGMA, U_BAND, U_COUNT
 };
 static const char *const sUniformNames[U_COUNT] = {
     "uSlots", "uPal", "uScreenH", "uPic", "uBackground", "uCarry", "uSize", "uOrigin", "uPalBase", "uLines[0]",
-    "uBoost[0]", "uMode", "uEffect", "uSigma", "uBand",
+    "uWeights", "uBoost", "uMode", "uEffect", "uSigma", "uBand",
 };
 
 typedef void (APIENTRY *PfnUniform2i)(GLint location, GLint v0, GLint v1);
@@ -199,10 +224,10 @@ typedef void (APIENTRY *PfnUniform2i)(GLint location, GLint v0, GLint v1);
 struct Layer
 {
     GLuint texture;
+    GLuint weights;         /* 256 x 1: each slot's weights and kind (Weights) */
     int w, h;
     bool background;
     uint8_t *pixels;        /* the art last uploaded (to see a change) */
-    float boost[256];
 };
 
 static bool sTried, sReady, sOff;
@@ -321,40 +346,83 @@ void UiArt_SetPalette(const uint16_t *colours)
     }
 }
 
-/* Each slot's weight from its mean width over the art: twice its pixels over its outline's edges. */
-static void Boosts(struct Layer *layer)
+/* Each slot's kind and weights, from the art (not its colours: they cycle). A background colour is colour 0 of a
+ * palette or one covering a tenth of the art or more; the others make up the shape. A slot's mean width is twice its
+ * pixels over its outline's edges: against any other slot it weighs the slot among its neighbours (a rim one pixel
+ * wide between two colours: full weight at 1.5 pixels or less, none from 3.5), against the background colours alone
+ * it weighs the slot in the shape's outline (a stroke one pixel wide: full weight at 1.2 pixels or less, none from
+ * 2.4, so that a wider stroke made of several colours keeps its own width). */
+static void Weights(struct Layer *layer)
 {
-    static uint32_t area[256], edges[256];
+    static uint32_t area[256], edgesAny[256], edgesBg[256];
+    static uint8_t texels[256 * 4];
+    bool background[256];
     const uint8_t *px = layer->pixels;
     int w = layer->w, h = layer->h;
+    GLint unpack = 4;
 
     memset(area, 0, sizeof(area));
-    memset(edges, 0, sizeof(edges));
+    memset(edgesAny, 0, sizeof(edgesAny));
+    memset(edgesBg, 0, sizeof(edgesBg));
+    for (int i = 0; i < w * h; i++)
+        area[px[i]]++;
+    for (int k = 0; k < 256; k++)
+        background[k] = (k & 15) == 0 || (uint64_t)area[k] * 10 >= (uint64_t)w * (uint64_t)h;
     for (int y = 0; y < h; y++)
         for (int x = 0; x < w; x++)
         {
-            uint8_t s = px[y * w + x], right, down;
-
-            area[s]++;
             /* a background repeats; outside a sprite is see-through (slot 0) */
-            right = x + 1 < w ? px[y * w + x + 1] : layer->background ? px[y * w] : 0;
-            down = y + 1 < h ? px[(y + 1) * w + x] : layer->background ? px[x] : 0;
-            if (right != s)
-                edges[s]++, edges[right]++;
-            if (down != s)
-                edges[s]++, edges[down]++;
-            if (!layer->background && x == 0 && s != 0)
-                edges[s]++;
-            if (!layer->background && y == 0 && s != 0)
-                edges[s]++;
-        }
-    for (int s = 0; s < 256; s++)
-    {
-        double width = edges[s] != 0 ? 2.0 * area[s] / edges[s] : 1e9, k = (3.5 - width) / 2.0;
+            uint8_t s = px[y * w + x];
+            uint8_t next[4] = {
+                x + 1 < w ? px[y * w + x + 1] : layer->background ? px[y * w] : 0,
+                y + 1 < h ? px[(y + 1) * w + x] : layer->background ? px[x] : 0,
+                x > 0 || layer->background ? s : 0, /* a sprite's left and top edges, against nothing */
+                y > 0 || layer->background ? s : 0,
+            };
 
-        k = k < 0.0 ? 0.0 : k > 1.0 ? 1.0 : k;
-        layer->boost[s] = (s & 15) == 0 ? 1.0f : (float)(1.0 + (sBoost - 1.0) * k);
+            for (int d = 0; d < 4; d++)
+            {
+                uint8_t t = next[d];
+
+                if (t == s)
+                    continue;
+                edgesAny[s]++;
+                edgesBg[s] += background[t];
+                if (d < 2) /* the pair's other side (the left and top edges have none) */
+                {
+                    edgesAny[t]++;
+                    edgesBg[t] += background[s];
+                }
+            }
+        }
+    for (int k = 0; k < 256; k++)
+    {
+        double any = edgesAny[k] != 0 ? 2.0 * area[k] / edgesAny[k] : 1e9;
+        double bg = edgesBg[k] != 0 ? 2.0 * area[k] / edgesBg[k] : 1e9;
+        double inner = (3.5 - any) / 2.0, outer = (2.4 - bg) / 1.2;
+
+        inner = (k & 15) == 0 ? 0.0 : inner < 0.0 ? 0.0 : inner > 1.0 ? 1.0 : inner;
+        outer = background[k] ? 0.0 : outer < 0.0 ? 0.0 : outer > 1.0 ? 1.0 : outer;
+        texels[k * 4 + 0] = (uint8_t)(inner * 255.0 + 0.5);
+        texels[k * 4 + 1] = (uint8_t)(outer * 255.0 + 0.5);
+        texels[k * 4 + 2] = background[k] ? 255 : 0;
+        texels[k * 4 + 3] = 255;
     }
+    if (layer->weights == 0)
+    {
+        glGenTextures(1, &layer->weights);
+        glBindTexture(GL_TEXTURE_2D, layer->weights);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
+    else
+        glBindTexture(GL_TEXTURE_2D, layer->weights);
+    glGetIntegerv(GL_UNPACK_ALIGNMENT, &unpack);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 256, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, texels);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, unpack);
 }
 
 /* the layer's art on the GPU (again only when it changed) */
@@ -380,7 +448,7 @@ static bool Upload(struct Layer *layer, const struct UiArtLayer *art)
     layer->w = art->w;
     layer->h = art->h;
     layer->background = art->background;
-    Boosts(layer);
+    Weights(layer);
     if (layer->texture == 0)
     {
         glGenTextures(1, &layer->texture);
@@ -408,8 +476,9 @@ bool UiArt_Draw(int id, const struct UiArtLayer *art, int outputWidth, int outpu
                 bool carry)
 {
     struct Layer *layer;
-    float lines[80 * 4], boost[256];
-    GLint program = 0, vertexArray = 0, activeTexture = 0, texture0 = 0, texture1 = 0, viewport[4], scissorBox[4];
+    float lines[80 * 4];
+    GLint program = 0, vertexArray = 0, activeTexture = 0, texture0 = 0, texture1 = 0, texture2 = 0;
+    GLint viewport[4], scissorBox[4];
     GLint srcRgb = GL_ONE, dstRgb = GL_ZERO;
     GLboolean blend, scissor, depth, cull, stencil;
     int x0, y0, x1, y1;
@@ -451,6 +520,8 @@ bool UiArt_Draw(int id, const struct UiArtLayer *art, int outputWidth, int outpu
     depth = glIsEnabled(GL_DEPTH_TEST);
     cull = glIsEnabled(GL_CULL_FACE);
     stencil = glIsEnabled(GL_STENCIL_TEST);
+    dglActiveTexture(GL_TEXTURE2);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture2);
     dglActiveTexture(GL_TEXTURE1);
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture1);
     dglActiveTexture(GL_TEXTURE0);
@@ -474,7 +545,6 @@ bool UiArt_Draw(int id, const struct UiArtLayer *art, int outputWidth, int outpu
         lines[i * 2] = art->scrollX != NULL ? (float)art->scrollX[i] : 0.0f;
         lines[i * 2 + 1] = art->scrollY != NULL ? (float)art->scrollY[i] : 0.0f;
     }
-    memcpy(boost, layer->boost, sizeof(boost));
 
     glViewport(0, 0, outputWidth, outputHeight);
     glDisable(GL_DEPTH_TEST);
@@ -488,6 +558,8 @@ bool UiArt_Draw(int id, const struct UiArtLayer *art, int outputWidth, int outpu
     dglBindVertexArray(sVertexArray);
     dglActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, layer->texture);
+    dglActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, layer->weights);
     dglActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, sPalTexture);
     dglUniform1i(sUniforms[U_SLOTS], 0);
@@ -500,7 +572,8 @@ bool UiArt_Draw(int id, const struct UiArtLayer *art, int outputWidth, int outpu
     dglUniform2f(sUniforms[U_ORIGIN], (float)art->originX, (float)art->originY);
     dglUniform1i(sUniforms[U_PAL_BASE], art->palBase);
     dglUniform4fv(sUniforms[U_LINES], 80, lines);
-    dglUniform4fv(sUniforms[U_BOOST], 64, boost);
+    dglUniform1i(sUniforms[U_WEIGHTS], 2);
+    dglUniform1f(sUniforms[U_BOOST], sBoost);
     dglUniform1i(sUniforms[U_MODE], (int)art->blend);
     dglUniform3f(sUniforms[U_EFFECT], SDL_min(art->eva, 16) / 16.0f, SDL_min(art->evb, 16) / 16.0f,
                  SDL_min(art->y, 16) / 16.0f);
@@ -512,6 +585,8 @@ bool UiArt_Draw(int id, const struct UiArtLayer *art, int outputWidth, int outpu
 
     dglBindVertexArray((GLuint)vertexArray);
     glBindTexture(GL_TEXTURE_2D, (GLuint)texture1);
+    dglActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, (GLuint)texture2);
     dglActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, (GLuint)texture0);
     dglActiveTexture((GLenum)activeTexture);
@@ -538,6 +613,8 @@ void UiArt_Shutdown(void)
     {
         if (sLayers[i].texture != 0)
             glDeleteTextures(1, &sLayers[i].texture);
+        if (sLayers[i].weights != 0)
+            glDeleteTextures(1, &sLayers[i].weights);
         free(sLayers[i].pixels);
         memset(&sLayers[i], 0, sizeof(sLayers[i]));
     }

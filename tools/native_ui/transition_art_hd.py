@@ -16,10 +16,12 @@ shapes, proportions and colours stay the GBA's. Written per picture:
   NAME.preview.png  the same coloured with the picture's own palette file, beside the GBA picture at the same size, for
                     a look by eye.
 
-Only reads graphics/battle_transitions/. The game does the same at run time and needs nothing from here: the native
-UI (src/native_ui/ui_transition_art.c) computes these fields in a shader at every window pixel straight from the art in
+Only reads graphics/battle_transitions/. The game needs nothing from here: the native UI
+(src/native_ui/ui_transition_art.c) computes such fields in a shader at every window pixel straight from the art in
 VRAM, with the game's palette of the frame and BG0's scroll by line (the same SIGMA and BOOST; its blur is exact where
-this one is PIL's). This tool shows the look offline (the app's docs, battle-fx-past-package-20261105.md, MS-108).
+this one is PIL's; it also takes the art's minor colours as one shape against its background colours, so a stroke made
+of several colours keeps one outline, and weighs a stroke's width against the background for that outline). This tool
+shows the look offline, close to the game's (the app's docs, battle-fx-past-package-20261105.md, MS-108).
 """
 import argparse
 import os
