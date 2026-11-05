@@ -643,7 +643,7 @@ check-link-replay: $(TARGET)
 
 # The Game Corner's rates (include/platform/casino_rates.h): the Slot Machine's own code and the Roulette's rules simulated, the
 # earnings of the reference players checked against the 15,000 coins a half hour the owner asked for, and the multiplier picture
-# checked against the rates (tools/pc_port/casino_econ.py).
+# checked against the rates, the classic 2D Slot Machine's payout table too (tools/pc_port/casino_econ.py).
 check-casino:
 	@python3 tools/pc_port/casino_econ.py --check --spins 400000 --rounds 12000
 
@@ -662,6 +662,15 @@ $(ROULETTE_MULTIPLIER_PC): graphics/roulette/multiplier_pc.png
 	tools/gbagfx/gbagfx $< $(@:.smol=)
 	tools/compresSmol/compresSmol -w $(@:.smol=) $@
 $(OBJ_DIR)/src/graphics.o: $(ROULETTE_MULTIPLIER_PC)
+
+# PC-only picture: the classic 2D Slot Machine's payout table (include/platform/casino_rates.h;
+# tools/pc_port/gen_slot_info_box.py, KNOWN_ISSUES MS-84), made as the Roulette's above.
+SLOT_MENU_PC := $(ASSETS_DIR)/graphics/slot_machine/menu_pc.png.4bpp.smol
+$(SLOT_MENU_PC): graphics/slot_machine/menu_pc.png
+	@mkdir -p $(dir $@)
+	tools/gbagfx/gbagfx $< $(@:.smol=)
+	tools/compresSmol/compresSmol -w $(@:.smol=) $@
+$(OBJ_DIR)/src/graphics.o: $(SLOT_MENU_PC) graphics/slot_machine/info_box_pc.bin
 
 # crash.log names the engine commit the game was built from (src/platform/crash_report.c, MS-71); the file is built
 # every time so the name is never an older commit's.

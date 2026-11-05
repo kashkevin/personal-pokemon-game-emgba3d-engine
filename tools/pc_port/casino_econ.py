@@ -298,7 +298,8 @@ def main():
               f"({'ok' if ok_slot else 'OUT OF RANGE'}); roulette, left table, any bet each ball: {new_roul:,.0f} "
               f"({'ok' if ok_roul else 'OUT OF RANGE'}); the target is {TARGET_30:,} within {int(TOLERANCE * 100)}%")
         mult_ok = subprocess.run([sys.executable, os.path.join(ROOT, "tools/pc_port/gen_roulette_multiplier.py"), "--check"]).returncode == 0
-        return 0 if ok_slot and ok_roul and mult_ok else 1
+        table_ok = subprocess.run([sys.executable, os.path.join(ROOT, "tools/pc_port/gen_slot_info_box.py"), "--check"]).returncode == 0
+        return 0 if ok_slot and ok_roul and mult_ok and table_ok else 1
     print_report(result, rates)
     return 0
 

@@ -1,8 +1,23 @@
 const u16 gSlotMachineMenu_Pal[] = INCGFX_U16("graphics/slot_machine/menu.png", ".gbapal");
+#ifdef PORTABLE
+// the PC game's payout table (SELECT) shows include/platform/casino_rates.h's payouts: menu_pc.png is menu.png with
+// the new numbers' tiles in unused tile slots, info_box_pc.bin points the table at them
+// (tools/pc_port/gen_slot_info_box.py; KNOWN_ISSUES MS-84)
+const u32 gSlotMachineMenu_Gfx[] = INCGFX_U32("graphics/slot_machine/menu_pc.png", ".4bpp.smol");
+#else
+#line 2 // gba-line
 const u32 gSlotMachineMenu_Gfx[] = INCGFX_U32("graphics/slot_machine/menu.png", ".4bpp.smol");
+#endif
+#line 3 // gba-line
 const u16 gSlotMachineMenu_Tilemap[] = INCBIN_U16("graphics/slot_machine/menu.bin");
 
+#ifdef PORTABLE
+const u16 gSlotMachineInfoBox_Tilemap[] = INCBIN_U16("graphics/slot_machine/info_box_pc.bin");
+#else
+#line 5 // gba-line
 const u16 gSlotMachineInfoBox_Tilemap[] = INCBIN_U16("graphics/slot_machine/info_box.bin");
+#endif
+#line 6 // gba-line
 
 const u16 gSlotMachineReelSymbols_Pal[] = INCGFX_U16("graphics/slot_machine/reel_symbols/1.png", ".gbapal");
 const u16 gSlotMachineReelTimePikachu_Pal[] = INCGFX_U16("graphics/slot_machine/reel_time_pikachu.png", ".gbapal");
