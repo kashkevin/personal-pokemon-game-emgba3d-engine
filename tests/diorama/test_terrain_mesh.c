@@ -984,9 +984,11 @@ static void TestSignaturesAndHashes(void)
     struct DioramaTerrainMesh first;
     struct DioramaTerrainMesh second;
     uint64_t signature;
+    uint64_t elevation;
 
     InitInput(&input, 3, MB_NORMAL);
     signature = DioramaTerrain_ChunkSignature(&input);
+    elevation = DioramaTerrain_ElevationSignature(&input);
     assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &first));
     assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &second));
     assert(first.geometryHash == second.geometryHash);
@@ -994,6 +996,15 @@ static void TestSignaturesAndHashes(void)
     assert(DioramaTerrain_ChunkSignature(&input) == signature);
     input.cells[0].rawElevation = 4;
     assert(DioramaTerrain_ChunkSignature(&input) == signature);
+    /* the cells' gameplay elevation: the mesher never reads it, so the signature leaves it out (KNOWN_ISSUES MS-118) */
+    input.cells[0].effectiveElevation = 7;
+    input.cells[0].surfaces[0].gameplayElevation = 7;
+    input.cells[37].effectiveElevation = 1;
+    assert(DioramaTerrain_ChunkSignature(&input) == signature);
+    assert(DioramaTerrain_ElevationSignature(&input) != elevation);
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &second));
+    assert(second.geometryHash == first.geometryHash && second.vertexCount == first.vertexCount
+        && memcmp(&second.bounds, &first.bounds, sizeof(first.bounds)) == 0);
     input.cells[0].shape = DIORAMA_SHAPE_EXTRUDED;
     assert(DioramaTerrain_ChunkSignature(&input) != signature);
     input.cells[0].shape = DIORAMA_SHAPE_FLAT;

@@ -268,7 +268,12 @@ void DioramaTerrain_BuildTerraceHeightmap(uint8_t profile,
                                           uint16_t rows[DIORAMA_VOXELS_PER_CELL],
                                           uint8_t heights[DIORAMA_VOXELS_PER_CELL
                                                           * DIORAMA_VOXELS_PER_CELL]);
+/* A key for every field of an input DioramaTerrain_BuildChunk reads: a mesh stands for any input of its signature.
+ * Not the cells' gameplay elevation, which the mesher never reads (KNOWN_ISSUES MS-118). */
 uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *input);
+/* Only the cells' gameplay elevation (effectiveElevation, the surfaces' gameplayElevation), which the signature leaves
+ * out: the terrain check (PKMN_DIORAMA_TERRAIN_CHECK) builds again a chunk kept though it changed. */
+uint64_t DioramaTerrain_ElevationSignature(const struct DioramaTerrainChunkInput *input);
 bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
                                struct DioramaTerrainVertex *vertices,
                                uint32_t vertexCapacity,

@@ -504,7 +504,11 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
     {
         const struct DioramaTerrainCell *cell = &input->cells[i];
 
-        at = SigRoom(&stream, at); /* 91 bytes, to measuredConfidence */
+        /* Not a cell's gameplay elevation (effectiveElevation, its surfaces' gameplayElevation): the mesher reads
+         * neither, and the rules give an elevation-0 cell its neighbours' (rules.c), which change as the grid moves,
+         * so it rebuilt the same mesh (a walk's recorded chunks: 72 of 557 builds, a quarter of their time;
+         * KNOWN_ISSUES MS-118). A field the mesher reads must be hashed here. */
+        at = SigRoom(&stream, at); /* 90 bytes, to measuredConfidence */
         at = PutByte(at, cell->present);
         at = PutU16(at, cell->claimOwner);
         at = PutU16(at, cell->mapX);
@@ -519,7 +523,6 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
         at = PutByte(at, cell->semanticProfile);
         at = PutByte(at, cell->profile);
         at = PutByte(at, cell->planeAxis);
-        at = PutByte(at, cell->effectiveElevation);
         at = PutByte(at, cell->surfaceCount);
         at = PutU16(at, cell->structureId);
         at = PutU16(at, cell->rulePriority);
@@ -559,10 +562,9 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
         at = PutFloat(at, cell->measuredConfidence);
         for (unsigned surface = 0; surface < cell->surfaceCount; surface++)
         {
-            at = SigRoom(&stream, at); /* 9 */
+            at = SigRoom(&stream, at); /* 8 */
             at = PutFloat(at, cell->surfaces[surface].bottomHeight);
             at = PutFloat(at, cell->surfaces[surface].topHeight);
-            at = PutByte(at, cell->surfaces[surface].gameplayElevation);
         }
         for (unsigned face = 0; face < DIORAMA_MATERIAL_FACE_COUNT; face++)
         {
@@ -654,6 +656,24 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
         at = PutByte(at, pixel->sourceX);
         at = PutByte(at, pixel->sourceY);
         at = PutByte(at, pixel->kind);
+    }
+    return SigFinish(&stream, at);
+}
+
+uint64_t DioramaTerrain_ElevationSignature(const struct DioramaTerrainChunkInput *input)
+{
+    struct SignatureStream stream;
+    uint8_t *at = SigStart(&stream);
+    unsigned i;
+
+    for (i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
+    {
+        const struct DioramaTerrainCell *cell = &input->cells[i];
+
+        at = SigRoom(&stream, at); /* 1 + DIORAMA_TERRAIN_MAX_SURFACES */
+        at = PutByte(at, cell->effectiveElevation);
+        for (unsigned surface = 0; surface < cell->surfaceCount && surface < DIORAMA_TERRAIN_MAX_SURFACES; surface++)
+            at = PutByte(at, cell->surfaces[surface].gameplayElevation);
     }
     return SigFinish(&stream, at);
 }

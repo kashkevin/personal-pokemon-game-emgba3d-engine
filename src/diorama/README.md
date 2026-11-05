@@ -446,6 +446,14 @@ trees and open routes have neither.
   uploaded (not a byte-wise hash), uploads nothing and keeps the sun's depth
   map. `PKMN_DIORAMA_TERRAIN_CHECK=1` also reads the vertex buffer back after
   each rebuild (`buildings check: N rebuilds checked, M differed`).
+* A chunk's signature (`terrain_mesh.c` `DioramaTerrain_ChunkSignature`)
+  hashes every input field the mesher reads, and not the cells' gameplay
+  elevation, which it never reads: an elevation-0 cell takes its neighbours'
+  (`rules.c`), which changes as the grid moves, and the same mesh was built
+  again (a recorded walk: 72 of 557 builds). `PKMN_DIORAMA_TERRAIN_CHECK=1`
+  builds again each chunk kept though its gameplay elevation changed
+  (`DioramaTerrain_ElevationSignature`) and compares it with the mesh kept
+  (`N chunks kept with another gameplay elevation checked, M differed`).
 * Development aids: `PKMN_PERF_FRAME_LOG=path` (a CSV line per presented frame:
   frame time, main thread and program CPU time, chunks rebuilt, vertices,
   trees), `PKMN_DIORAMA_PROFILE_FINISH=1` (each profiled section finishes its

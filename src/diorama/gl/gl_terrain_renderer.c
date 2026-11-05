@@ -60,6 +60,8 @@ struct GLTerrainChunk
     uint32_t mapGeneration;
     uint32_t rulesGeneration;
     uint64_t signature;
+    /* the terrain check's (CheckKeptElevation): its input's DioramaTerrain_ElevationSignature when built */
+    uint64_t elevationSignature;
     uint64_t lastSeenSequence;
     /* Whether its input reads tile pixels (trees, mountain art, silhouettes,
      * ledges, cliffs), and whether pixel objects (coloured from cells
@@ -2378,13 +2380,47 @@ static bool UploadChunk(struct GLTerrainChunk *chunk,
     chunk->mapGeneration = input->mapGeneration;
     chunk->rulesGeneration = input->rulesGeneration;
     chunk->signature = signature;
+    chunk->elevationSignature = TerrainCheckEnabled() ? DioramaTerrain_ElevationSignature(input) : 0;
     chunk->mesh = mesh;
     return true;
 }
 
+/*
+ * PKMN_DIORAMA_TERRAIN_CHECK=1: a chunk kept by its signature though its cells' gameplay elevation changed (the
+ * signature leaves it out: the mesher never reads it, DioramaTerrain_ChunkSignature) is built again and compared with
+ * the mesh it kept, so a mesher that came to read it would show here (KNOWN_ISSUES MS-118).
+ */
+static void CheckKeptElevation(struct GLTerrainChunk *chunk, const struct DioramaTerrainChunkInput *input)
+{
+    static uint32_t sChecked;
+    static uint32_t sDiffering;
+    struct DioramaTerrainMesh mesh;
+    uint64_t elevation;
+
+    if (!TerrainCheckEnabled())
+        return;
+    elevation = DioramaTerrain_ElevationSignature(input);
+    if (elevation == chunk->elevationSignature)
+        return;
+    chunk->elevationSignature = elevation;
+    sChecked++;
+    if (!DioramaTerrain_BuildChunk(input, sScratchVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh)
+     || mesh.vertexCount != chunk->mesh.vertexCount || mesh.geometryHash != chunk->mesh.geometryHash
+     || mesh.treeInstanceCount != chunk->mesh.treeInstanceCount
+     || memcmp(&mesh.bounds, &chunk->mesh.bounds, sizeof(mesh.bounds)) != 0)
+    {
+        sDiffering++;
+        SDL_Log("Diorama: terrain check: chunk %d,%d kept with another gameplay elevation differs from its build "
+                "(%u vertices, built %u)", chunk->chunkX, chunk->chunkY, chunk->mesh.vertexCount, mesh.vertexCount);
+    }
+    SDL_Log("Diorama: terrain check: %u chunks kept with another gameplay elevation checked, %u differed",
+            sChecked, sDiffering);
+}
+
 bool DioramaGLTerrain_Init(void)
 {
-    /* only the tests and the terrain check (CheckSuperseded) read it; the mesh check compares vertices */
+    /* only the tests and the terrain check (CheckSuperseded, CheckKeptElevation) read it; the mesh check compares
+     * vertices */
     DioramaTerrain_SetGeometryHash(TerrainCheckEnabled());
     {
         const char *value = SDL_getenv("PKMN_DIORAMA_SUPERSEDED");
@@ -2906,6 +2942,8 @@ static bool SyncAnimatedTiles(const struct DioramaSceneSnapshot *snapshot,
             }
             rebuilt++;
         }
+        else
+            CheckKeptElevation(chunk, &input);
         NotePixelUse(chunk, &input);
     }
     sMetrics.rebuiltChunks = rebuilt;
@@ -3377,6 +3415,8 @@ static bool SyncChunk(const struct DioramaSceneSnapshot *snapshot,
         }
         sMetrics.rebuiltChunks++;
     }
+    else
+        CheckKeptElevation(chunk, &input);
     chunk->active = true;
     chunk->lastSeenSequence = snapshot->sequence;
     NotePixelUse(chunk, &input);
