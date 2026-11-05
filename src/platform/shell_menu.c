@@ -1044,6 +1044,14 @@ static void HandleEvent(const SDL_Event *e)
         UpdateScale();
         EnsureVisible();
     }
+    else if (e->type == SDL_WINDOWEVENT && (e->window.event == SDL_WINDOWEVENT_ENTER || e->window.event == SDL_WINDOWEVENT_LEAVE))
+    {
+        // KNOWN_ISSUES P14: the pointer crossed the window's edge, as it also does when the window opens (or another
+        // closes) over a mouse at rest. SDL follows an enter with a motion event at the pointer, which only says where
+        // the pointer is: the row under a resting mouse must not take the focus from the screen's own row (Enter would
+        // then choose it). Hover takes the focus once the mouse moves.
+        sMouseX = sMouseY = -1;
+    }
     else if (e->type == SDL_KEYDOWN)
         OnKey(e->key.keysym.sym, e->key.keysym.mod);
     else if (e->type == SDL_TEXTINPUT)
@@ -1056,10 +1064,11 @@ static void HandleEvent(const SDL_Event *e)
     else if (e->type == SDL_MOUSEMOTION)
     {
         int i = ItemAt(e->motion.x, e->motion.y);
+        bool moved = sMouseX >= 0 && (e->motion.x != sMouseX || e->motion.y != sMouseY);
 
         sMouseX = e->motion.x;
         sMouseY = e->motion.y;
-        if (i >= 0 && Focusable(&sScreen.items[i]) && i != sFocus && !sLocked)
+        if (moved && i >= 0 && Focusable(&sScreen.items[i]) && i != sFocus && !sLocked)
             sFocus = i;
     }
     else if (e->type == SDL_MOUSEBUTTONDOWN && e->button.button == SDL_BUTTON_LEFT)
