@@ -414,7 +414,21 @@ def run(args):
             last += 1
         ranges.append((first, last))
         first = last
-    ranges = [r for r in ranges if any(places[i][0] not in done for i in range(*r))]
+    # a run into an --out with results goes on with the places that have none (each run of them), not whole chunks
+    # again
+    pending = []
+    for first, last in ranges:
+        i = first
+        while i < last:
+            if places[i][0] in done:
+                i += 1
+                continue
+            j = i
+            while j < last and places[j][0] not in done:
+                j += 1
+            pending.append((i, j))
+            i = j
+    ranges = pending
     given_up, index = [], len(os.listdir(os.path.join(args.out, "runs"))) \
         if os.path.isdir(os.path.join(args.out, "runs")) else 0
     # --minutes: no game process started after that (the one running finishes its places); the rest left for a
