@@ -2473,13 +2473,38 @@ static void AfterPresent(void)
 #endif
 }
 
-// Writes the whole flash image to a temporary file and renames it over the save,
-// so a crash or power cut never leaves a half-written file behind.
+// Puts the file's data on the disk itself. A rename can reach the disk before the data of the file it names (NTFS and
+// ext4 journal their own records, not the data), so without this a power cut soon after a save could leave an empty
+// or garbage file where the save was. Best effort: a disk that cannot do it (some network shares) still gets the
+// save, as before, and the log says so once.
+static void SyncSaveFile(FILE *file, const char *path)
+{
+    static bool sWarned;
+    bool synced;
+
+#ifdef _WIN32
+    HANDLE handle = (HANDLE)_get_osfhandle(_fileno(file));
+
+    synced = handle != INVALID_HANDLE_VALUE && FlushFileBuffers(handle);
+#else
+    synced = fsync(fileno(file)) == 0;
+#endif
+    if (!synced && !sWarned)
+    {
+        sWarned = true;
+        SDL_Log("Could not flush %s to the disk; saving without it", path);
+    }
+}
+
+// Writes the whole flash image to a temporary file, puts it on the disk and renames it over the save, so a crash or
+// power cut never leaves a half-written file behind (the old save or the new one, whole).
 static bool WriteSaveImage(void)
 {
     char tempPath[sizeof(sSavePath) + 8];
     FILE *saveFile;
     size_t written;
+    Uint64 start = SDL_GetPerformanceCounter();
+    Uint32 elapsedMs;
 
     SDL_snprintf(tempPath, sizeof(tempPath), "%s.tmp", sSavePath);
     saveFile = fopen(tempPath, "wb");
@@ -2495,7 +2520,11 @@ static bool WriteSaveImage(void)
         SDL_Log("Short write to %s", tempPath);
         return false;
     }
+    SyncSaveFile(saveFile, tempPath);
     fclose(saveFile);
+    elapsedMs = (Uint32)((SDL_GetPerformanceCounter() - start) * 1000 / SDL_GetPerformanceFrequency());
+    if (elapsedMs >= 100)
+        SDL_Log("Save file written and flushed in %u ms (a slow disk)", (unsigned)elapsedMs);
 #ifdef _WIN32
     if (!MoveFileExA(tempPath, sSavePath, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
     {
