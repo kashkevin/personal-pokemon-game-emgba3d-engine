@@ -30,6 +30,13 @@ per place and per map, in OUT/manifest.json and OUT/report.md:
                  drawn in the edge fog's colour), or anywhere in the steep view: the scene has a gap
     not-3d       the place was drawn in 2D, or its scene never completed
 A map is covered when every one of its cells was in some place's scene.
+
+The tour leaves out the maps no player reaches on PC (NOT_REACHED: the Union Room and the link rooms - no Wireless
+Adapter or link cable -, the e-Reader trainer's room, the original introduction's truck, the contest halls' shared
+events map; --with-unreachable, or naming them in --maps, puts them back as warps), and enters the rooms a warp cannot
+show as play does through their facilities (FACILITY_ENTRIES, KNOWN_ISSUES MS-98: the Battle Tower's multi partner
+room and the Battle Pike's room, each in a game process of its own with FACILITY_PARTY; diorama/geometry_probe.h).
+tools/qa/map_coverage.py turns the check's manifest into the coverage of every map of the game's map list.
 """
 import argparse
 import collections
@@ -39,6 +46,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import struct
 import subprocess
 import sys
@@ -62,6 +70,68 @@ CHECKS = ("fin", "spike", "flat-blocked", "card-tree", "walk-step", "seam", "wat
           "not-3d")
 WATER_BEHAVIOR = re.compile(r"WATER|SEAWEED|CURRENT|NO_SURFACING|WATERFALL|PUDDLE|HOT_SPRINGS")
 UNSTANDABLE = re.compile(r"WATERFALL|CURRENT|NO_SURFACING|^MB_JUMP_")     # gameplay_check.py's BLOCKED
+
+# The maps of the game the sweep leaves out: no player reaches them on PC - "pc": the PC lacks what the GBA's way in
+# needs; "never": nothing leads there on any machine. Read from the engine's code; each reason names it, and its label
+# is the coverage report's short form (tools/qa/map_coverage.py).
+_LINK_ROOM = ("a link room: entered only after a link-up with another GBA over the link cable (data/scripts/"
+              "cable_club.inc: TryBattleLinkup, TryTradeLinkup or TryRecordMixLinkup has to succeed; src/cable_club.c "
+              "Task_LinkupAwaitConnection waits for a second linked player) or from the Union Room (src/union_room.c "
+              "WarpForCableClubActivity). The PC has no link cable and no Wireless Adapter; its own trades and battles "
+              "between players never use this room")
+NOT_REACHED = {
+    "UnionRoom": dict(
+        kind="pc", label="no Wireless Adapter on PC",
+        reason="the Union Room attendant (data/scripts/cable_club.inc CableClub_EventScript_UnionRoomAttendant) lets a "
+               "player in only when IsWirelessAdapterConnected, which is FALSE on PC (src/link.c: no GBA Wireless "
+               "Adapter): \"The Wireless Adapter isn't connected\". Her warpspinenter is the room's only way in (the "
+               "Pokemon Centers' Union Room scan is off on PC too: src/link.c ShouldCheckForUnionRoom). Warped in "
+               "directly, the room's wireless partner search faults (KNOWN_ISSUES MS-98)"),
+    "TradeCenter": dict(kind="pc", label="no link cable on PC", reason=_LINK_ROOM),
+    "RecordCorner": dict(kind="pc", label="no link cable on PC", reason=_LINK_ROOM),
+    "BattleColosseum_2P": dict(kind="pc", label="no link cable on PC", reason=_LINK_ROOM),
+    "BattleColosseum_4P": dict(kind="pc", label="no link cable on PC", reason=_LINK_ROOM),
+    "SootopolisCity_MysteryEventsHouse_B1F": dict(
+        kind="pc", label="no e-Reader trainer on PC",
+        reason="its stairs open only while an e-Reader trainer is stored (SootopolisCity_MysteryEventsHouse_1F's "
+               "OnTransition: frontier_checkvisittrainer, then setmaplayoutindex ..._STAIRS_UNBLOCKED), and that "
+               "trainer comes only from an e-Reader card over the link cable (src/mystery_event_script.c) or a Mystery "
+               "Gift over wireless (src/mystery_gift_client.c): a PC receives neither (no link cable; the Mystery "
+               "Gift's wireless search says the Wireless Adapter isn't connected, src/union_room.c)"),
+    "InsideOfTruck": dict(
+        kind="pc", label="the PC's short introduction",
+        reason="the original introduction's first room: the PC game starts a new character in Littleroot Town through "
+               "its short introduction (src/multiplayer_rival.c MultiplayerIntro_IsEnabled: the truck only with "
+               "PKMN_ORIGINAL_INTRO=1, a development switch)"),
+    "ContestHall": dict(
+        kind="never", label="nothing leads there",
+        reason="no warp, script or C code leads to MAP_CONTEST_HALL: it holds the events and scripts the five contest "
+               "halls of each category share (their map.json shared_events_map), and those are the halls a contest "
+               "enters (LilycoveCity_ContestLobby: setwarp MAP_CONTEST_HALL_COOL and the others)"),
+}
+
+# The rooms a warp cannot show as play does (KNOWN_ISSUES MS-98): each entered through its facility instead, in a
+# game process of its own (the challenge's state and its save stay there). The probe starts at `start` facing the
+# attendant; A through every line, question (its first choice: CHALLENGE, LV. 50, YES) and battle; the frontier's
+# party screen takes the party's first Pokemon; on the field of a map of `steps`, that map's action (A: talk, U/D/L/R:
+# walk, pike: the room of three paths' door by its hint). `at` is where the facility leaves the player; the cells and
+# pictures are taken on the first frame the field is free there, as for a warp.
+FACILITY_PARTY = "6:50,9:50,3:50"     # Charizard, Blastoise, Venusaur at level 50: Lv. 50 challenges, none banned
+FACILITY_SECONDS = 900                # a facility's way in (its talk, menus, save, rooms, a battle) at most
+FACILITY_ENTRIES = {
+    "BattleFrontier_BattleTowerMultiPartnerRoom": dict(
+        at=(10, 2), start=("BattleFrontier_BattleTowerLobby", 14, 6, "U"),
+        steps=[("BattleFrontier_BattleTowerLobby", "A")],
+        how="a Battle Tower multi battle challenge (Lv. 50, two Pokemon) from the lobby's multi battle attendant: her "
+            "questions, the party screen, the save, the elevator, then the partner room's welcome"),
+    "BattleFrontier_BattlePikeRoomNormal": dict(
+        at=(4, 7), start=("BattleFrontier_BattlePikeLobby", 5, 6, "U"),
+        steps=[("BattleFrontier_BattlePikeLobby", "A"), ("BattleFrontier_BattlePikeThreePathRoom", "pike")],
+        how="a Battle Pike challenge (Lv. 50, three Pokemon) from its attendant: her questions, the party screen, the "
+            "save, the corridor, the room of three paths and the door its hint points to (another one when the hinted "
+            "room is the wild Pokemon's, a map of its own); the pictures as the player steps in, before the room's "
+            "event (a trainer, a healer, a Pokemon's status move) starts"),
+}
 
 
 def enum_values(path, name):
@@ -166,12 +236,37 @@ def places_for(root, row, behaviours):
     return chosen, len(left)
 
 
+def facility_place(root, row, numbers):
+    """A room's place entered through its facility (FACILITY_ENTRIES): its tour line, and the cells of the map the
+    scene's window round the place does not reach."""
+    entry = FACILITY_ENTRIES[row["name"]]
+    group, num = numbers[row["name"]]
+    x, y = entry["at"]
+    start, sx, sy, facing = entry["start"]
+    steps = ",".join(f"{numbers[name][0]}.{numbers[name][1]}={action}" for name, action in entry["steps"])
+    width, height, _ = layout_cells(root, row["layout"])
+    seen = sum(1 for cy in range(max(0, y - AHEAD), min(height, y + BEHIND + 1))
+               for cx in range(max(0, x - SIDE), min(width, x + SIDE + 1)))
+    line = (f"{row['name']}_{x}_{y} {group} {num} {x} {y} enter {numbers[start][0]}.{numbers[start][1]}:{sx},{sy}:"
+            f"{facing} {steps}")
+    return line, width * height - seen
+
+
+def is_facility(place):
+    """A tour line (split) entered through its facility."""
+    return len(place) > 5 and place[5] == "enter"
+
+
 def tour(args):
     root = args.root
     maps = [m for m in geometry_inventory.geometry_inventory(root) if m["in_game"]]
+    left_out = []
     if args.maps:
         wanted = set(args.maps.split(","))
         maps = [m for m in maps if m["name"] in wanted]
+    elif not args.with_unreachable:
+        left_out = sorted(m["name"] for m in maps if m["name"] in NOT_REACHED)
+        maps = [m for m in maps if m["name"] not in NOT_REACHED]
     if args.kinds:
         maps = [m for m in maps if m["kind"] in args.kinds.split(",")]
     numbers = map_numbers(root)
@@ -184,21 +279,30 @@ def tour(args):
         index = metatile if metatile < 512 else metatile - 512
         return names.get(table[index] & 0xFF, "?") if index < len(table) else "?"
 
-    lines, uncovered = [], {}
-    # the maps a script sets up last: a hang there costs only the places after it
-    maps.sort(key=lambda m: (m["entry"].startswith("scripted"), m["kind"] == "secret_base", numbers[m["name"]]))
+    lines, uncovered, entered = [], {}, 0
+    # the maps a script sets up last: a hang there costs only the places after it (the facilities' rooms the very
+    # last: each a game process of its own)
+    maps.sort(key=lambda m: (m["name"] in FACILITY_ENTRIES, m["entry"].startswith("scripted"),
+                             m["kind"] == "secret_base", numbers[m["name"]]))
     for m in maps:
         group, num = numbers[m["name"]]
-        spots, left = places_for(root, m, behaviours)
+        if m["name"] in FACILITY_ENTRIES:
+            line, left = facility_place(root, m, numbers)
+            lines.append(line)
+            entered += 1
+        else:
+            spots, left = places_for(root, m, behaviours)
+            for x, y in spots:
+                lines.append(f"{m['name']}_{x}_{y} {group} {num} {x} {y}")
         if left:
             uncovered[m["name"]] = left
-        for x, y in spots:
-            lines.append(f"{m['name']}_{x}_{y} {group} {num} {x} {y}")
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     with open(args.out, "w") as out:
-        out.write("# key group num x y (tools/qa/geometry_check.py tour)\n" + "\n".join(lines) + "\n")
-    print(f"{len(lines)} places for {len(maps)} maps; cells no place reaches: {sum(uncovered.values())} "
-          f"in {len(uncovered)} maps {sorted(uncovered)[:10]}")
+        out.write("# key group num x y [enter <g>.<n>:<x>,<y>:<facing> <steps>] (tools/qa/geometry_check.py tour)\n"
+                  + "\n".join(lines) + "\n")
+    print(f"{len(lines)} places for {len(maps)} maps ({entered} entered through their facilities); cells no place "
+          f"reaches: {sum(uncovered.values())} in {len(uncovered)} maps {sorted(uncovered)[:10]}; left out, as no "
+          f"player reaches them on PC: {len(left_out)} {left_out}")
     return 0
 
 
@@ -215,14 +319,21 @@ def finished_keys(out):
 
 def run_chunk(args, places, first, last, index):
     """One game process for tour lines first..last-1: until it ends or stops. Returns its exit code, the place it
-    stopped at (when it did not end by itself) and the places it did not finish."""
+    stopped at (when it did not end by itself) and the places it did not finish. A place entered through its facility
+    runs alone, with the party its challenge takes (FACILITY_PARTY, as PKMN_TEST_GEO_PARTY) and its way in's time
+    (FACILITY_SECONDS)."""
     rundir = os.path.join(args.out, "runs", f"{index:03d}")
+    facility = any(is_facility(places[i]) for i in range(first, last))
     env = dict(os.environ, PKMN_TEST_BATTLE="field:100000000", PKMN_TEST_AUTOPILOT="1",
                PKMN_TEST_BATTLE_DELAY="100", PKMN_TEST_PARTY="280:50", PKMN_TEST_FIELD_KEYS="",
                PKMN_TEST_OWE_NO_BATTLE="1", PKMN_TEST_BADGES="8", PKMN_TEST_GEO_TOUR=os.path.abspath(args.tour),
                PKMN_TEST_GEO_OUT=os.path.abspath(args.out), PKMN_TEST_GEO_CAMERAS=args.cameras,
                PKMN_TEST_GEO_FIRST=str(first), PKMN_TEST_GEO_LAST=str(last), SDL_AUDIODRIVER="dummy",
                PKMN_NOSCENE="1", PKMN_TEST_EXIT="1", PKMN_TEST_LOG=os.path.join(rundir, "test.log"))
+    if facility:
+        # the party the challenge takes, given as the probe starts the way in (a tour's places never reach the battle
+        # set-up that would apply PKMN_TEST_PARTY: the save's new character has no Pokemon)
+        env["PKMN_TEST_GEO_PARTY"] = FACILITY_PARTY
     # the air's dust, rays and gloom (gl_air.c) are drawn over the scene, not part of it: off unless asked for (the
     # dust reads as stars in a cave's void, the rays lift its black, and neither is geometry)
     env.setdefault("PKMN_DIORAMA_AIR", "0")
@@ -233,10 +344,12 @@ def run_chunk(args, places, first, last, index):
     with open(os.path.join(rundir, "pokeemerald.cfg"), "w") as cfg:
         cfg.write(mc.CONFIG)
     with open(os.path.join(rundir, "game.log"), "w") as output:
+        # a session of its own: stopped, the process and what it started (xvfb-run's server) go together, and only they
         process = subprocess.Popen(prefix + [os.path.abspath(args.exe), "--save", "test.sav"], cwd=rundir, env=env,
-                                   stdout=output, stderr=subprocess.STDOUT)
+                                   stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
         # stopped when it ends, runs past its places' share, or goes STALL_SECONDS without finishing a place
-        deadline = time.monotonic() + 120 + SECONDS_PER_PLACE * (last - first)
+        deadline = time.monotonic() + 120 + (FACILITY_SECONDS if facility else SECONDS_PER_PLACE * (last - first))
+        stall = FACILITY_SECONDS if facility else STALL_SECONDS
         mine = {places[i][0] for i in range(first, last)}
         done_before, progress = len(mine & finished_keys(args.out)), time.monotonic()
         code = None
@@ -249,10 +362,11 @@ def run_chunk(args, places, first, last, index):
             done_now = len(mine & finished_keys(args.out))
             if done_now != done_before:
                 done_before, progress = done_now, time.monotonic()
-            if time.monotonic() > deadline or time.monotonic() - progress > STALL_SECONDS:
-                if prefix:
-                    subprocess.run(["pkill", "-P", str(process.pid)], check=False)
-                process.kill()
+            if time.monotonic() > deadline or time.monotonic() - progress > stall:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
                 process.wait()
                 code = None
                 break
@@ -287,9 +401,18 @@ def run(args):
         sys.exit("--save or --make-save")
     args.save = os.path.abspath(args.save)
     done = finished_keys(args.out)
-    ranges = [(first, min(first + args.chunk, len(places))) for first in range(0, len(places), args.chunk)]
+    # --chunk places a process; a place entered through its facility alone in one
+    ranges, first = [], 0
+    while first < len(places):
+        last = first + 1
+        while not is_facility(places[first]) and last < len(places) and last - first < args.chunk \
+                and not is_facility(places[last]):
+            last += 1
+        ranges.append((first, last))
+        first = last
     ranges = [r for r in ranges if any(places[i][0] not in done for i in range(*r))]
-    given_up, index = [], 0
+    given_up, index = [], len(os.listdir(os.path.join(args.out, "runs"))) \
+        if os.path.isdir(os.path.join(args.out, "runs")) else 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
         running = {}
         while ranges or running:
@@ -317,10 +440,47 @@ def run(args):
                     given_up.extend(places[i][0] for i in left)
                 print(f"places {first}-{last - 1}: exit {code}{note}", flush=True)
             compress_cells(args.out)
+    # a facility's way in that did not get there (a challenge's battle lost, its time gone) is tried again in a fresh
+    # game process (its draws are the clock's), alone: no other process writes the results meanwhile
+    for i, place in enumerate(places):
+        tries = 1
+        while is_facility(place) and tries < args.facility_tries and result_status(args.out, place[0]) in (
+                None, "not-reached"):
+            drop_result(args.out, place[0])
+            code, stopped_at, left = run_chunk(args, places, i, i + 1, index)
+            index += 1
+            tries += 1
+            print(f"place {i} ({place[0]}), try {tries}: exit {code}, {result_status(args.out, place[0])}", flush=True)
+            compress_cells(args.out)
+    done = finished_keys(args.out)
+    given_up = [key for key in dict.fromkeys(given_up) if key not in done]
     with open(os.path.join(args.out, "stopped.txt"), "w") as out:
         out.write("\n".join(given_up) + ("\n" if given_up else ""))
     print(f"done: {len(finished_keys(args.out))} of {len(places)} places; not finished: {len(given_up)}")
     return 0
+
+
+def result_status(out, key):
+    """The status of a place's result line (ok, unsettled, not-3d, other-map, not-reached), or None without one."""
+    path = os.path.join(out, "results.tsv")
+    status = None
+    for line in open(path) if os.path.exists(path) else ():
+        fields = line.rstrip("\n").split("\t")
+        if fields[0] == key and len(fields) > 9:
+            status = fields[9]
+    return status
+
+
+def drop_result(out, key):
+    """A place's result line, cells and pictures taken away (it is run again)."""
+    path = os.path.join(out, "results.tsv")
+    if os.path.exists(path):
+        lines = [line for line in open(path) if line.split("\t", 1)[0] != key]
+        with open(path, "w") as handle:
+            handle.writelines(lines)
+    for name in (os.path.join(out, "cells", key + ".tsv"), os.path.join(out, "cells", key + ".tsv.gz")):
+        if os.path.exists(name):
+            os.remove(name)
 
 
 # --- the check ---------------------------------------------------------------------------------------------------
@@ -478,7 +638,10 @@ def check(args):
             fields = line.rstrip("\n").split("\t")
             results[fields[0]] = dict(group=int(fields[1]), num=int(fields[2]), x=int(fields[3]), y=int(fields[4]),
                                       arrived=(int(fields[5]), int(fields[6])), cells=int(fields[8]),
-                                      status=fields[9], shots=int(fields[10]), failure=fields[13])
+                                      status=fields[9], shots=int(fields[10]), failure=fields[13],
+                                      # (since MS-98's sweep) where the player stood, and how the place was reached
+                                      stood=(int(fields[14]), int(fields[15])) if len(fields) > 15 else None,
+                                      entry=fields[16] if len(fields) > 16 else "warp")
     stopped = set(open(os.path.join(out, "stopped.txt")).read().split()) if os.path.exists(
         os.path.join(out, "stopped.txt")) else set()
     maps = collections.OrderedDict()
@@ -492,8 +655,12 @@ def check(args):
             continue
         m = maps[name]
         entry = dict(key=key, x=place["x"], y=place["y"], status=place["status"], failure=place["failure"],
-                     shots=[], holes={})
+                     stood=place["stood"], entry=place["entry"], shots=[], holes={})
         m["places"].append(entry)
+        if place["status"] == "not-reached":
+            # its facility did not take the player there: nothing drawn to judge (not a defect of the 3D view)
+            m["notes"].append(f"{key}: not reached through its facility: {place['failure']}")
+            continue
         if place["status"] in ("not-3d", "other-map") or place["failure"] != "-":
             m["defects"]["not-3d"].add((place["x"], place["y"]))
             m["notes"].append(f"{key}: {place['status']} {place['failure']}")
@@ -528,11 +695,18 @@ def check(args):
     manifest = []
     for name, m in maps.items():
         planned = [p for p in tour_places if p[0].rsplit("_", 2)[0] == name]
+        reached = [p for p in m["places"] if p["status"] != "not-reached"]
+        unreachable = NOT_REACHED.get(name)
         manifest.append(dict(
             map=name, kind=m["kind"], cells=m["cells"], covered=len(m["seen"]),
-            places_planned=len(planned), places_done=len(m["places"]),
-            status=("not inspected" if not m["places"] else
+            places_planned=len(planned), places_done=len(reached),
+            status=("not reachable on PC" if unreachable and not reached else
+                    "not inspected" if not reached else
                     "inspected" if len(m["seen"]) >= m["cells"] else "partly inspected"),
+            # how its places were reached: through its facility (FACILITY_ENTRIES) or a warp
+            entry=("facility" if any(p["entry"] == "facility" for p in reached) else "warp" if reached else None),
+            unreachable=unreachable,
+            facility=FACILITY_ENTRIES[name]["how"] if name in FACILITY_ENTRIES else None,
             defects={k: len(v) for k, v in m["defects"].items() if v},
             examples={k: sorted(v)[:12] for k, v in m["defects"].items() if v},
             flat_blocked_metatiles={f"0x{k:03x}": n for k, n in m["flat_metatiles"].most_common(12)},
@@ -546,8 +720,11 @@ def check(args):
     for row in manifest:
         totals.update(row["defects"])
     print(json.dumps(dict(maps=len(manifest), inspected=sum(r["status"] == "inspected" for r in manifest),
+                          through_facility=sum(r["status"] == "inspected" and r["entry"] == "facility"
+                                               for r in manifest),
                           partly=sum(r["status"] == "partly inspected" for r in manifest),
                           not_inspected=sum(r["status"] == "not inspected" for r in manifest),
+                          not_reachable_on_pc=sum(r["status"] == "not reachable on PC" for r in manifest),
                           defects=dict(totals))))
     return 0
 
@@ -563,13 +740,24 @@ def write_report(out, manifest):
         for r in rows:
             totals.update(r["defects"])
         lines += [f"## {kind}: {len(rows)} maps, {sum(r['status'] == 'inspected' for r in rows)} wholly inspected",
-                  "", "Totals: " + ", ".join(f"{k} {totals[k]}" for k in CHECKS if totals[k]) or "none", "",
+                  "", "Totals: " + (", ".join(f"{k} {totals[k]}" for k in CHECKS if totals[k]) or "none"), "",
                   "| Map | Status | Cells seen | " + " | ".join(CHECKS) + " |",
                   "|---|---|---|" + "---|" * len(CHECKS)]
         for r in rows:
-            lines.append(f"| {r['map']} | {r['status']} | {r['covered']}/{r['cells']} | "
+            status = r["status"] + (" (through its facility)" if r["entry"] == "facility" else "")
+            seen = "-" if r["status"] == "not reachable on PC" else f"{r['covered']}/{r['cells']}"
+            lines.append(f"| {r['map']} | {status} | {seen} | "
                          + " | ".join(str(r["defects"].get(k, "")) for k in CHECKS) + " |")
         lines.append("")
+    entered = [r for r in manifest if r["facility"]]
+    if entered:
+        lines += ["## Entered through their facilities", ""]
+        lines += [f"* {r['map']}: {r['status']}, {r['covered']}/{r['cells']} cells - {r['facility']}"
+                  + "".join(f"; {note}" for note in r["notes"]) for r in entered] + [""]
+    unreachable = [r for r in manifest if r["status"] == "not reachable on PC"]
+    if unreachable:
+        lines += ["## Not reachable on PC (left out of the tour)", ""]
+        lines += [f"* {r['map']}: {r['unreachable']['reason']}" for r in unreachable] + [""]
     with open(os.path.join(out, "report.md"), "w") as handle:
         handle.write("\n".join(lines))
 
@@ -601,8 +789,11 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("tour")
     p.add_argument("--out", required=True)
-    p.add_argument("--maps")
+    p.add_argument("--maps", help="only these maps (comma-separated names; a map of NOT_REACHED named here is warped "
+                                  "to)")
     p.add_argument("--kinds")
+    p.add_argument("--with-unreachable", action="store_true",
+                   help="the maps no player reaches on PC (NOT_REACHED) too, warped to")
     p = sub.add_parser("run")
     p.add_argument("--exe", required=True)
     p.add_argument("--save")
@@ -613,6 +804,8 @@ def main():
     p.add_argument("--chunk", type=int, default=40)
     p.add_argument("--cameras", default=CAMERAS)
     p.add_argument("--xvfb", action="store_true", help="each process on a display of its own (xvfb-run)")
+    p.add_argument("--facility-tries", type=int, default=3,
+                   help="game processes a place entered through its facility may take (a lost battle, its time gone)")
     p = sub.add_parser("check")
     p.add_argument("--out", required=True)
     p.add_argument("--tour")

@@ -181,6 +181,9 @@ void DioramaBattleEnvTest_OnAssert(const char *fmt, va_list va);
 /* overworld.c, SetPlayerCoordsFromWarp (game thread): the plan runner's own warp's place, once (a map's far side: the
    warp's own coordinates are s8, to 127) */
 bool DioramaBattleEnvTest_TakeWarpCoords(s16 *x, s16 *y);
+/* geometry_probe_game.c (game thread): the party "species:level[:flags],..." (PKMN_TEST_PARTY's form, in memory) for a
+   place the probe enters through its facility - a tour never reaches the battle set-up that applies PKMN_TEST_PARTY */
+void DioramaBattleEnvTest_SetUpParty(const char *spec);
 /* text.c (read with the game thread parked): the first text printer's place in its text, NULL with none printing */
 const unsigned char *DioramaBattleEnvTest_TextPosition(void);
 /* script_menu.c (read with the game thread parked): a script's multichoice or YES/NO menu taking input */

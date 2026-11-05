@@ -14,6 +14,7 @@ enum
     GEO_ARRIVED,    /* render side: the cells and the pictures */
     GEO_DONE,       /* game side: on to the next place */
     GEO_FINISHED,
+    GEO_ENTERING,   /* game side: on the way in through the place's facility (its talk, its menus, its rooms) */
 };
 
 struct GeoProbeShared
@@ -23,7 +24,9 @@ struct GeoProbeShared
     char key[96];
     int index, group, num, x, y;
     int arrivedGroup, arrivedNum, arrivedX, arrivedY;
-    char failure[96];           /* why the field is not the place asked for, or empty */
+    char failure[160];          /* why the field is not the place asked for, or empty */
+    int entered;                /* 1: the place was entered through its facility, not warped to */
+    int noScene;                /* 1: the place was never reached (failure says why): no cells, no pictures */
 };
 
 extern struct GeoProbeShared gGeoProbe;

@@ -131,10 +131,12 @@ static void WriteResult(const struct DioramaSceneSnapshot *snapshot)
     file = fopen(path, "a");
     if (file == NULL)
         return;
-    fprintf(file, "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\t%d\t%d\t%u\t%s\n", gGeoProbe.key, gGeoProbe.group,
-            gGeoProbe.num, gGeoProbe.x, gGeoProbe.y, gGeoProbe.arrivedGroup, gGeoProbe.arrivedNum,
+    /* after the failure: where the player stood, and how the place was reached (a warp, or through its facility) */
+    fprintf(file, "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\t%d\t%d\t%u\t%s\t%d\t%d\t%s\n", gGeoProbe.key,
+            gGeoProbe.group, gGeoProbe.num, gGeoProbe.x, gGeoProbe.y, gGeoProbe.arrivedGroup, gGeoProbe.arrivedNum,
             snapshot != NULL ? snapshot->mapType : -1, sCells, sStatus, sShots, sFrames, sSettleWaited,
-            gGeoProbe.failure[0] != '\0' ? gGeoProbe.failure : "-");
+            gGeoProbe.failure[0] != '\0' ? gGeoProbe.failure : "-", gGeoProbe.arrivedX, gGeoProbe.arrivedY,
+            gGeoProbe.entered ? "facility" : "warp");
     fclose(file);
 }
 
@@ -180,6 +182,15 @@ void DioramaGeoProbe_RenderFrame(const struct DioramaSceneSnapshot *snapshot,
     if (sPlaceIndex != gGeoProbe.index)
         Begin();
     sFrames++;
+    if (sStep == STEP_WAIT && gGeoProbe.noScene)
+    {
+        /* never reached (its facility did not take the player there): the reason alone, no cells, no pictures */
+        SDL_strlcpy(sStatus, "not-reached", sizeof(sStatus));
+        WriteResult(snapshot);
+        sStep = STEP_FINISHED;
+        SDL_AtomicSet(&gGeoProbe.phase, GEO_DONE);
+        return;
+    }
     if (sStep == STEP_WAIT)
     {
         bool here = snapshot != NULL && snapshot->mapGroup == gGeoProbe.arrivedGroup

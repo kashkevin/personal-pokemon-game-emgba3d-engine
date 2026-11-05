@@ -14,6 +14,17 @@
  * degrees) to <out>/shots/<key>-<camera>.png, against a magenta sky (PKMN_TEST_GEO_SKY=0 keeps the game's), so a
  * hole in the scene is a colour the game never draws. Each place's outcome is a line of <out>/results.tsv. In memory
  * only: nothing is saved. tools/qa/geometry_check.py makes the tour and reads what it writes.
+ *
+ * A place a warp cannot show (KNOWN_ISSUES MS-98: a room its facility's challenge sets up first) is entered through
+ * its facility instead: "<key> <group> <num> <x> <y> enter <g>.<n>:<x>,<y>:<U|D|L|R> <steps>" puts the player at the
+ * start (in front of the attendant, facing it), with the party PKMN_TEST_GEO_PARTY ("species:level,...") gives, and
+ * goes in as a player would: A through every line, question (its first choice) and battle, on the frontier's party
+ * screen the party's first Pokemon (as many as the facility asks, then CONFIRM), and on the field of each map of
+ * <steps> ("<g>.<n>=<action>,...") that map's action: A (talk), U, D, L or R (walk), or pike (the Battle Pike's room of
+ * three paths: into the door its hint points to, or another one when the hinted room is the wild Pokemon's). The cells
+ * and pictures are taken on the first frame the player stands on the place's map with the field free. The challenge's
+ * own save (its attendant saves first) is written to the test save copy the run works on. A place never reached in
+ * time has a result line "not-reached" with the reason, and no cells or pictures.
  */
 
 struct DioramaSceneSnapshot;
@@ -26,6 +37,10 @@ bool DioramaGeoProbe_FieldTick(void);
 /* Game thread, as a warp lands (overworld.c through DioramaBattleEnvTest_TakeWarpCoords): the place's coordinates,
  * which a warp's own s8 ones cannot hold past 127. */
 bool DioramaGeoProbe_TakeWarpCoords(int16_t *x, int16_t *y);
+/* Render thread, the game thread parked (battle_env_test.c DioramaBattleEnvTest_FilterKeys), each game frame: whether a
+ * place is being entered through its facility, and then the keys a player would press for it. */
+bool DioramaGeoProbe_Entering(void);
+uint16_t DioramaGeoProbe_Keys(void);
 
 /* Render thread, each frame the 3D field was synced (gl_compositor.c): the waiting, the cells, the cameras. */
 void DioramaGeoProbe_RenderFrame(const struct DioramaSceneSnapshot *snapshot,

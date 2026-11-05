@@ -1038,13 +1038,10 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
 static void StrengthenParty(void);
 
 /* "species:level[:flags],..." */
-static void SetUpTestParty(void)
+static void SetUpPartyFrom(const char *p)
 {
-    const char *p = s.party;
     int count = 0;
 
-    if (s.party[0] == '\0')
-        return;
     ZeroPlayerPartyMons();
     while (*p != '\0' && count < PARTY_SIZE)
     {
@@ -1064,6 +1061,22 @@ static void SetUpTestParty(void)
     }
     CalculatePlayerPartyCount();
     FlagSet(FLAG_SYS_POKEMON_GET);  /* as any player with a Pokemon: the start menu offers POKeMON */
+}
+
+static void SetUpTestParty(void)
+{
+    if (s.party[0] != '\0')
+        SetUpPartyFrom(s.party);
+}
+
+/* The geometry probe (geometry_probe_game.c): the party a facility's challenge takes, before its way in - a tour's
+ * places never reach the battle set-up above, which is what PKMN_TEST_PARTY's party waits for. */
+void DioramaBattleEnvTest_SetUpParty(const char *spec)
+{
+    if (spec == NULL || spec[0] == '\0')
+        return;
+    SetUpPartyFrom(spec);
+    TestLog("Battle env test: the party is %s (%u Pokemon)", spec, gPartiesCount[B_TRAINER_PLAYER]);
 }
 
 /* PKMN_TEST_BOX="box:slot:species:level[:flags];...": those Pokemon in the PC boxes (in memory; with save:1 in the save),
@@ -4717,6 +4730,12 @@ unsigned short DioramaBattleEnvTest_FilterKeys(unsigned short keys, unsigned int
     /* PKMN_TEST_PLAN: once the autopilot brought the field up, the plan's keys alone */
     if (sPlan.phase != PLAN_OFF && SDL_AtomicGet(&s.fieldSeen) != 0)
         return keys | PlanKeys();
+#ifdef ENABLE_DIORAMA
+    /* PKMN_TEST_GEO_TOUR: a place entered through its facility (KNOWN_ISSUES MS-98) - the probe's keys alone: its
+       attendant's lines and questions, the party screen, the walk to its room */
+    if (DioramaGeoProbe_Entering())
+        return keys | DioramaGeoProbe_Keys();
+#endif
     /* PKMN_TEST_SOFT_RESET: the game started again (its frame count went back: a soft reset, not a battle's end);
      * the field keys stop and, from the title, the autopilot goes as at the start (Start, A to CONTINUE) */
     if (s.softReset && !s.resetSeen && gMain.vblankCounter1 < s.lastVblank)
