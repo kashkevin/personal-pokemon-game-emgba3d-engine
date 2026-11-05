@@ -35,6 +35,7 @@
 #include "native_ui/ui_gfx.h"
 #include "native_ui/ui_screen.h"
 #include "native_ui/ui_text.h"
+#include "native_ui/ui_transition_art.h"
 #include "native_ui/ui_widgets.h"
 
 /* src/platform/gba_easy_draw.c: GBA background layers and OAM entries left out of the picture */
@@ -196,6 +197,7 @@ void NativeUi_Shutdown(void)
     if (!sInitialized)
         return;
     UiGfx_Shutdown();
+    UiArt_Shutdown();
     UiDraw_Shutdown();
     UiKit_Shutdown();
     sInitialized = false;

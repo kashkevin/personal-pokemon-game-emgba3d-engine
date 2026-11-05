@@ -666,3 +666,37 @@ static bool8 CirclesSymmetricSpiralInSeq_End(struct Task *task)
 
     return FALSE;
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (screens/ui_transition.c, MS-108): the logo circles on screen now, as their sprites are this frame,
+// for the UI to draw as smooth shapes in their place. Changes nothing.
+u8 BattleTransitionFrontier_NativeUiCircles(struct NativeTransitionSprite *out, u8 max)
+{
+    u8 count = 0;
+    u32 i;
+
+    if (GetSpriteTileStartByTag(PALTAG_LOGO_CIRCLES) == 0xFFFF)
+        return 0;
+    for (i = 0; i < MAX_SPRITES && count < max; i++)
+    {
+        const struct Sprite *sprite = &gSprites[i];
+        s16 x = sprite->x + sprite->x2 + sprite->centerToCornerVecX;
+        s16 y = sprite->y + sprite->y2 + sprite->centerToCornerVecY;
+
+        if (!sprite->inUse || sprite->invisible || sprite->template != &sSpriteTemplate_LogoCircles
+         || sprite->oam.affineMode == ST_OAM_AFFINE_ERASE)
+            continue;
+        if (sprite->coordOffsetEnabled)
+            x += gSpriteCoordOffsetX, y += gSpriteCoordOffsetY;
+        out[count].x = x;
+        out[count].y = y;
+        out[count].size = 64;
+        out[count].paletteNum = sprite->oam.paletteNum;
+        out[count].tileNum = sprite->oam.tileNum;
+        count++;
+    }
+    return count;
+}
+#endif

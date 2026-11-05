@@ -9,9 +9,14 @@
  * out (BG0's ball and box, the balls' sprites, the windows' stepped masks). The
  * game keeps the transition - its steps, its timing, its end - and this draws
  * what it shows each frame. Transitions this does not draw (the field's waves
- * and slices, the mugshots, the legendaries' and the Frontier's patterns) keep
- * the game's picture of them. The owner's request of 2026-10-26: no old GBA
- * look when a battle starts. Project-owned.
+ * and slices, the mugshots, the Frontier's squares) keep the game's picture of
+ * them. The owner's request of 2026-10-26: no old GBA look when a battle starts.
+ * MS-108 (owner decision #48): the transitions' own art - the teams' and the
+ * Regis' patterns, Kyogre's, Groudon's and Rayquaza's, the Battle Frontier's
+ * logo, its centre and its circles - is the game's own pixels drawn as smooth
+ * shapes at the window's resolution (ui_transition_art.c) in BG0's and the
+ * circles' place: the game's palette of the frame (its cycling, its fades), BG0's
+ * scroll line by line (the weaves and waves) and its blend. Project-owned.
  */
 #include <math.h>
 #include <stdlib.h>
@@ -19,6 +24,7 @@
 
 #include "global.h"
 #include "battle_transition.h"
+#include "gpu_regs.h"
 #include "main.h"
 #include "overworld.h"
 #include "palette.h"
@@ -27,6 +33,7 @@
 #include "native_ui/ui_engine.h"
 #include "native_ui/ui_field.h"
 #include "native_ui/ui_screen.h"
+#include "native_ui/ui_transition_art.h"
 #include "native_ui/ui_widgets.h"
 
 #define BIG_BALL 128       /* the big Poke Ball's size on the GBA screen */
@@ -39,6 +46,12 @@ static bool sBox;          /* the game still shows its message box (window 0) */
 static u8 sMsg[UI_MESSAGE_COPY];
 static UiRGBA sBoxVeil;    /* how far the game has turned the box's colours to another (its flash, its fade) */
 static UiRGBA sBackdrop;   /* the GBA's backdrop colour: what a window's empty side shows */
+/* MS-108: the transition's own art as the game has it this frame (copied at the frame boundary) */
+static bool sArt;                                       /* drawn by the UI now (BG0's art, the circles) */
+static u8 sBg0Art[512 * 512];                           /* BG0's map as palette slots (16 * palette + colour) */
+static int sBg0W, sBg0H;
+static u8 sCircleArt[NATIVE_TRANSITION_CIRCLES][64 * 64]; /* the circles' sprites as colours */
+static u16 sArtPalette[512];
 
 /* ---------------------------------------------------------------- detection */
 
@@ -82,12 +95,90 @@ static UiRGBA PaletteVeil(u32 a, u32 b)
     return UI_RGBA(t[0], t[1], t[2], (int)floor(k * 255.0 + 0.5));
 }
 
+/* ---------------------------------------------------------------- the transition's own art (MS-108) */
+
+/* BG0's map as the GBA shows it (text mode, four bits a pixel): each pixel's palette slot, 0 where see-through */
+static bool DecodeBackground(u16 bgcnt, u8 *out, int *w, int *h)
+{
+    const u8 *vram = (const u8 *)BG_VRAM;
+    u32 charBase = ((bgcnt >> 2) & 3) * 0x4000, screenBase = ((bgcnt >> 8) & 0x1F) * 0x800;
+    int size = bgcnt >> 14, bw = (size & 1) ? 512 : 256, bh = (size & 2) ? 512 : 256;
+
+    if (bgcnt & BGCNT_256COLOR)
+        return false;
+    for (int ty = 0; ty < bh / 8; ty++)
+        for (int tx = 0; tx < bw / 8; tx++)
+        {
+            /* 32 x 32 entries a screen block; a wide map's second block is to the right, a tall one's below */
+            u32 at = screenBase + (u32)(((tx >> 5) + (ty >> 5) * (bw >> 8)) * 1024 + (ty & 31) * 32 + (tx & 31)) * 2;
+            u16 e = at + 1 < BG_VRAM_SIZE ? (u16)(vram[at] | (vram[at + 1] << 8)) : 0;
+            u32 tile = charBase + (u32)(e & 0x3FF) * 32;
+
+            for (int y = 0; y < 8; y++)
+                for (int x = 0; x < 8; x++)
+                {
+                    int sx = (e & 0x400) ? 7 - x : x, sy = (e & 0x800) ? 7 - y : y;
+                    u32 b = tile + (u32)(sy * 4 + (sx >> 1));
+                    int c = b < BG_VRAM_SIZE ? (vram[b] >> ((sx & 1) * 4)) & 15 : 0;
+
+                    out[(ty * 8 + y) * bw + tx * 8 + x] = c != 0 ? (u8)((e >> 12) << 4 | c) : 0;
+                }
+        }
+    *w = bw;
+    *h = bh;
+    return true;
+}
+
+/* a square sprite's tiles (four bits a pixel, from its OAM tiles, one- or two-dimensional mapping): its colours */
+static void DecodeSprite(const struct NativeTransitionSprite *sprite, u8 *out)
+{
+    const u8 *vram = (const u8 *)OBJ_VRAM0;
+    int tiles = sprite->size / 8;
+    bool oneD = (GetGpuReg(REG_OFFSET_DISPCNT) & DISPCNT_OBJ_1D_MAP) != 0;
+
+    for (int ty = 0; ty < tiles; ty++)
+        for (int tx = 0; tx < tiles; tx++)
+        {
+            u32 tile = ((u32)sprite->tileNum + (u32)(oneD ? ty * tiles + tx : ty * 32 + tx)) * 32;
+
+            for (int y = 0; y < 8; y++)
+                for (int x = 0; x < 8; x++)
+                {
+                    u32 b = tile + (u32)(y * 4 + (x >> 1));
+
+                    out[(ty * 8 + y) * sprite->size + tx * 8 + x]
+                        = b < OBJ_VRAM0_SIZE ? (vram[b] >> ((x & 1) * 4)) & 15 : 0;
+                }
+        }
+}
+
+static void CaptureArt(void)
+{
+    sArt = false;
+    if ((!sT.art.bg0 && sT.art.spriteCount == 0) || !UiArt_Ready())
+        return;
+    if (sT.art.bg0 && !DecodeBackground(sT.art.bg0Cnt, sBg0Art, &sBg0W, &sBg0H))
+        sT.art.bg0 = FALSE;
+    for (int i = 0; i < sT.art.spriteCount; i++)
+    {
+        if (sT.art.sprites[i].size != 64)
+        {
+            sT.art.spriteCount = 0;
+            break;
+        }
+        DecodeSprite(&sT.art.sprites[i], sCircleArt[i]);
+    }
+    memcpy(sArtPalette, gPlttBufferFaded, sizeof(sArtPalette));
+    sArt = sT.art.bg0 || sT.art.spriteCount > 0;
+}
+
 static void Capture(void)
 {
     u32 printed;
     bool8 active;
 
     BattleTransition_NativeUiState(&sT);
+    CaptureArt();
     sBox = Window_NativeUiOnScreen(0) && TextPrinter_NativeUiWindowText(0, sMsg, sizeof(sMsg), &printed, &active);
     /* the message box's own colours: its paper (1) and its text (2) */
     sBoxVeil = sBox ? PaletteVeil(gWindows[0].window.paletteNum * 16 + 1, gWindows[0].window.paletteNum * 16 + 2)
@@ -102,8 +193,8 @@ static bool BigBallShown(void)
 
 static enum UiPicture Picture(void)
 {
-    /* the game's message box and its big Poke Ball (both BG0) are drawn here */
-    return sBox || BigBallShown() ? UI_PICTURE_HIDE_BG0 : UI_PICTURE_KEEP;
+    /* the game's message box, its big Poke Ball and the transitions' own art (all BG0) are drawn here */
+    return sBox || BigBallShown() || (sArt && sT.art.bg0) ? UI_PICTURE_HIDE_BG0 : UI_PICTURE_KEEP;
 }
 
 static enum UiWindows Windows(void)
@@ -121,17 +212,22 @@ static enum UiWindows Windows(void)
     return UI_WINDOWS_GAME;
 }
 
-/* the rolling balls' sprites, by their tiles */
+/* the rolling balls' sprites and the Frontier's logo circles, by their tiles */
 static void HideObjects(uint32_t mask[4])
 {
     const struct OamData *oam = (const struct OamData *)OAM;
 
-    if (sT.kind != NATIVE_TRANSITION_TRAIL)
-        return;
     for (int i = 0; i < 128; i++)
-        for (int b = 0; b < sT.ballCount; b++)
-            if (oam[i].tileNum == sT.balls[b].tileNum && oam[i].affineMode != ST_OAM_AFFINE_ERASE)
+    {
+        if (oam[i].affineMode == ST_OAM_AFFINE_ERASE)
+            continue;
+        for (int b = 0; sT.kind == NATIVE_TRANSITION_TRAIL && b < sT.ballCount; b++)
+            if (oam[i].tileNum == sT.balls[b].tileNum)
                 mask[i >> 5] |= 1u << (i & 31);
+        for (int c = 0; sArt && c < sT.art.spriteCount; c++)
+            if (oam[i].tileNum == sT.art.sprites[c].tileNum)
+                mask[i >> 5] |= 1u << (i & 31);
+    }
 }
 
 /* ---------------------------------------------------------------- the GBA screen on the canvas */
@@ -360,11 +456,52 @@ static void TrailBalls(const struct Frame *f)
 
 /* ---------------------------------------------------------------- drawing */
 
+/* The transition's own art at the window's resolution, straight to the GPU (under the UI's quads of the frame: the
+ * message box, the circle's mask): the circles, then BG0 over them (its priority is the first) with the GBA's blend. */
+static void DrawArt(void)
+{
+    const struct UiView *v = UiDraw_View();
+    int px, py, pw, ph, k;
+    bool8 fills;
+
+    if (!sArt)
+        return;
+    Platform_NativeUiPictureRect(v->outputWidth, v->outputHeight, &px, &py, &pw, &ph, &fills);
+    k = pw / DISPLAY_WIDTH;
+    UiArt_SetPalette(sArtPalette);
+    for (int i = 0; i < sT.art.spriteCount; i++)
+    {
+        const struct NativeTransitionSprite *sprite = &sT.art.sprites[i];
+        struct UiArtLayer layer = {
+            .slots = sCircleArt[i], .w = sprite->size, .h = sprite->size, .background = false,
+            .palBase = 256 + 16 * sprite->paletteNum, .originX = sprite->x, .originY = sprite->y,
+            .blend = UI_ART_BLEND_NONE,
+        };
+
+        UiArt_Draw(1 + i, &layer, v->outputWidth, v->outputHeight, px, py, k, fills);
+    }
+    if (sT.art.bg0)
+    {
+        struct UiArtLayer layer = {
+            .slots = sBg0Art, .w = sBg0W, .h = sBg0H, .background = true, .palBase = 0,
+            .scrollX = sT.art.scrollX, .scrollY = sT.art.scrollY,
+            .blend = sT.art.blend == NATIVE_TRANSITION_BLEND_ALPHA     ? UI_ART_BLEND_ALPHA
+                   : sT.art.blend == NATIVE_TRANSITION_BLEND_LIGHTEN ? UI_ART_BLEND_LIGHTEN
+                   : sT.art.blend == NATIVE_TRANSITION_BLEND_DARKEN  ? UI_ART_BLEND_DARKEN
+                                                                     : UI_ART_BLEND_NONE,
+            .eva = sT.art.eva, .evb = sT.art.evb, .y = sT.art.y,
+        };
+
+        UiArt_Draw(0, &layer, v->outputWidth, v->outputHeight, px, py, k, fills);
+    }
+}
+
 static void Draw(int t)
 {
     struct Frame f;
     int bx, by, bw, bh;
 
+    DrawArt();
     Place(&f);
     UiG_Bleed(&bx, &by, &bw, &bh);
     if (sBox)

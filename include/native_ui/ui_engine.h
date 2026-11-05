@@ -2233,6 +2233,38 @@ struct NativeTransitionBall
     s16 matrix[4];  /* its OAM matrix (a, b, c, d; 8.8 fixed point, 256 = 1) */
     u16 tileNum;    /* its OAM tiles (the game's sprite, hidden while the UI draws the ball) */
 };
+/* MS-108: the transition's own art as the game shows it now - a pattern, the Frontier's logo on BG0 (its tiles and map
+ * in VRAM where BG0CNT points), the Frontier's logo circles (sprites under BG0) - for the UI to draw as smooth shapes at
+ * the window's resolution in their place (ui_transition_art.h). As the game set it this frame. */
+enum NativeTransitionBlend
+{
+    NATIVE_TRANSITION_BLEND_NONE,
+    NATIVE_TRANSITION_BLEND_ALPHA,   /* BG0 eva / 16 over evb / 16 of what is under it (BLDALPHA) */
+    NATIVE_TRANSITION_BLEND_LIGHTEN, /* BG0 towards white by y / 16 (BLDY) */
+    NATIVE_TRANSITION_BLEND_DARKEN,  /* towards black */
+};
+#define NATIVE_TRANSITION_CIRCLES 3
+struct NativeTransitionSprite
+{
+    s16 x;          /* its top left on the GBA screen */
+    s16 y;
+    u8 size;        /* square, in pixels (four bits a pixel) */
+    u8 paletteNum;  /* its OBJ palette */
+    u16 tileNum;    /* its OAM tiles (hidden while the UI draws it) */
+};
+struct NativeTransitionArt
+{
+    bool8 bg0;                /* BG0 shows the transition's own picture now */
+    u8 blend;                 /* enum NativeTransitionBlend */
+    u8 eva;                   /* 0..16 each */
+    u8 evb;
+    u8 y;
+    u16 bg0Cnt;               /* BG0CNT: where its tiles and map are, the map's size */
+    s16 scrollX[160];         /* BG0's scroll by line (BG0HOFS, BG0VOFS) */
+    s16 scrollY[160];
+    u8 spriteCount;           /* the Frontier's logo circles */
+    struct NativeTransitionSprite sprites[NATIVE_TRANSITION_CIRCLES];
+};
 struct NativeTransitionState
 {
     u8 id;               /* B_TRANSITION_* */
@@ -2251,8 +2283,12 @@ struct NativeTransitionState
     u8 ballCount;        /* TRAIL */
     struct NativeTransitionBall balls[NATIVE_TRANSITION_BALLS];
     s16 lineOffset[160]; /* WEAVE: BG0's horizontal offset by line */
+    struct NativeTransitionArt art; /* any kind: the transition's own art, if it shows now */
 };
 bool8 BattleTransition_NativeUiState(struct NativeTransitionState *state);
+/* battle_transition_frontier.c: the Frontier's logo circles on screen now (at most max), their sprites as the game has
+ * them this frame */
+u8 BattleTransitionFrontier_NativeUiCircles(struct NativeTransitionSprite *out, u8 max);
 /* field_effect.c: the field move cut-in (FLDEFF_FIELD_MOVE_SHOW_MON: a field move's Pokemon on its banner) as the game
  * has it now, for the native UI to draw (the 3D view shows nothing of the GBA's picture of it); GBA screen pixels */
 struct NativeFieldMoveState

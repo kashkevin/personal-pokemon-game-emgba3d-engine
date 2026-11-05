@@ -4914,9 +4914,125 @@ static const TransitionStateFunc *NativeUiPatternWeaveFuncs(u8 id, u32 *count)
     case B_TRANSITION_REGIROCK:
         *count = ARRAY_COUNT(sRegirock_Funcs);
         return sRegirock_Funcs;
+    case B_TRANSITION_FRONTIER_LOGO_WIGGLE:
+        *count = ARRAY_COUNT(sFrontierLogoWiggle_Funcs);
+        return sFrontierLogoWiggle_Funcs;
     }
     *count = 0;
     return NULL;
+}
+
+// MS-108: the transition's own art on BG0 (a pattern, the Frontier's logo) - its scroll by line and its blend as the
+// game set them this frame - and the Frontier's logo circles, for the UI to draw as smooth shapes in their place.
+static void NativeUiArtScroll(struct NativeTransitionArt *art, const u16 *lineX, const u16 *lineY)
+{
+    s16 x = (s16)GetGpuReg(REG_OFFSET_BG0HOFS), y = (s16)GetGpuReg(REG_OFFSET_BG0VOFS);
+    u32 i;
+
+    for (i = 0; i < DISPLAY_HEIGHT; i++)
+    {
+        art->scrollX[i] = lineX != NULL ? (s16)lineX[i] : x;
+        art->scrollY[i] = lineY != NULL ? (s16)lineY[i] : y;
+    }
+}
+
+static void NativeUiArtBlend(struct NativeTransitionArt *art, u16 bldcnt, u16 bldalpha)
+{
+    art->blend = NATIVE_TRANSITION_BLEND_NONE;
+    if (!(bldcnt & BLDCNT_TGT1_BG0))
+        return;
+    switch (bldcnt & BLDCNT_EFFECT_EFF_MASK)
+    {
+    case BLDCNT_EFFECT_BLEND:
+        art->blend = NATIVE_TRANSITION_BLEND_ALPHA;
+        art->eva = bldalpha & 0x1F;
+        art->evb = (bldalpha >> 8) & 0x1F;
+        break;
+    case BLDCNT_EFFECT_LIGHTEN:
+    case BLDCNT_EFFECT_DARKEN:
+        art->blend = (bldcnt & BLDCNT_EFFECT_EFF_MASK) == BLDCNT_EFFECT_LIGHTEN ? NATIVE_TRANSITION_BLEND_LIGHTEN
+                                                                               : NATIVE_TRANSITION_BLEND_DARKEN;
+        art->y = GetGpuReg(REG_OFFSET_BLDY) & 0x1F;
+        break;
+    }
+}
+
+static void NativeUiArt(struct NativeTransitionState *state, struct Task *main)
+{
+    struct NativeTransitionArt *art = &state->art;
+    const TransitionStateFunc *funcs;
+    TransitionStateFunc func;
+    u16 at = (u16)main->tState;
+    u32 count;
+
+    switch (state->id)
+    {
+    case B_TRANSITION_AQUA:
+    case B_TRANSITION_MAGMA:
+    case B_TRANSITION_REGICE:
+    case B_TRANSITION_REGISTEEL:
+    case B_TRANSITION_REGIROCK:
+    case B_TRANSITION_FRONTIER_LOGO_WIGGLE:
+        // from the weave on (the tiles come in the first state, the map in the second); BG0 moves line by line while it
+        // weaves in, then the buffer holds the circle's window
+        funcs = NativeUiPatternWeaveFuncs(state->id, &count);
+        if (at < 2 || at >= count)
+            break;
+        func = funcs[at];
+        art->bg0 = TRUE;
+        NativeUiArtBlend(art, sTransitionData->BLDCNT, sTransitionData->BLDALPHA);
+        NativeUiArtScroll(art, func == PatternWeave_Blend1 || func == PatternWeave_Blend2
+                                || func == PatternWeave_FinishAppear ? gScanlineEffectRegBuffers[0] : NULL, NULL);
+        break;
+    case B_TRANSITION_KYOGRE:
+    case B_TRANSITION_GROUDON:
+        // after Init (the third state) loaded the tiles and the map; the palette cycles in palette 15
+        if (at < 3
+         || at >= (state->id == B_TRANSITION_KYOGRE ? ARRAY_COUNT(sKyogre_Funcs) : ARRAY_COUNT(sGroudon_Funcs)))
+            break;
+        art->bg0 = TRUE;
+        NativeUiArtBlend(art, GetGpuReg(REG_OFFSET_BLDCNT), GetGpuReg(REG_OFFSET_BLDALPHA));
+        NativeUiArtScroll(art, NULL, NULL);
+        break;
+    case B_TRANSITION_RAYQUAZA:
+        // from the palette flash to the three rings (BG0 goes off as the black hole begins); BG0's lines come from the
+        // first buffer (the markings) or, once the fade has turned to the rings, the second (256 lines down)
+        if (at < 4 || at > 8)
+            break;
+        art->bg0 = TRUE;
+        NativeUiArtBlend(art, GetGpuReg(REG_OFFSET_BLDCNT), GetGpuReg(REG_OFFSET_BLDALPHA));
+        NativeUiArtScroll(art, NULL, sTransitionData->counter == 1 ? gScanlineEffectRegBuffers[1]
+                                                                   : gScanlineEffectRegBuffers[0]);
+        break;
+    case B_TRANSITION_FRONTIER_LOGO_WAVE:
+        // its main state (SetGfx runs on into it) moves BG0 up and down line by line
+        if (at < 3 || at >= ARRAY_COUNT(sFrontierLogoWave_Funcs))
+            break;
+        art->bg0 = TRUE;
+        NativeUiArtBlend(art, sTransitionData->BLDCNT, sTransitionData->BLDALPHA);
+        NativeUiArtScroll(art, NULL, gScanlineEffectRegBuffers[0]);
+        break;
+    case B_TRANSITION_FRONTIER_CIRCLES_MEET:
+    case B_TRANSITION_FRONTIER_CIRCLES_CROSS:
+    case B_TRANSITION_FRONTIER_CIRCLES_ASYMMETRIC_SPIRAL:
+    case B_TRANSITION_FRONTIER_CIRCLES_SYMMETRIC_SPIRAL:
+    case B_TRANSITION_FRONTIER_CIRCLES_MEET_IN_SEQ:
+    case B_TRANSITION_FRONTIER_CIRCLES_CROSS_IN_SEQ:
+    case B_TRANSITION_FRONTIER_CIRCLES_ASYMMETRIC_SPIRAL_IN_SEQ:
+    case B_TRANSITION_FRONTIER_CIRCLES_SYMMETRIC_SPIRAL_IN_SEQ:
+        // the logo's centre on BG0 (loaded by the first state, shown when it fades in) and the circles coming together
+        if (at < 1)
+            break;
+        art->bg0 = TRUE;
+        NativeUiArtBlend(art, GetGpuReg(REG_OFFSET_BLDCNT), GetGpuReg(REG_OFFSET_BLDALPHA));
+        NativeUiArtScroll(art, NULL, NULL);
+        art->spriteCount = BattleTransitionFrontier_NativeUiCircles(art->sprites, NATIVE_TRANSITION_CIRCLES);
+        break;
+    }
+    // where the game put the art (GetBg0TilesDst reads the register too); four bits a pixel only; BG0 on
+    art->bg0Cnt = REG_BG0CNT;
+    if ((art->bg0Cnt & BGCNT_256COLOR) || !(GetGpuReg(REG_OFFSET_DISPCNT) & DISPCNT_BG0_ON))
+        art->bg0 = FALSE;
 }
 
 // The clockwise wipe's line drawn this frame (each state moves its end on after drawing it).
@@ -4962,6 +5078,7 @@ bool8 BattleTransition_NativeUiState(struct NativeTransitionState *state)
     if (mainId == TASK_NONE)
         return TRUE;
     main = &gTasks[mainId];
+    NativeUiArt(state, main);
 
     funcs = NativeUiPatternWeaveFuncs(state->id, &count);
     if (funcs != NULL)
@@ -5011,6 +5128,18 @@ bool8 BattleTransition_NativeUiState(struct NativeTransitionState *state)
             state->wipeId = (u8)main->data[1] + (func == AngledWipes_TryEnd ? 1 : 0);
             state->wipeActive = func == AngledWipes_DoWipe;
             state->wipeCurrY = sTransitionData->data[3];
+        }
+        break;
+    case B_TRANSITION_RAYQUAZA:
+        // its black hole once it shows (the black hole transition's states): smooth as that transition's
+        if ((u16)main->tState < ARRAY_COUNT(sRayquaza_Funcs))
+        {
+            func = sRayquaza_Funcs[main->tState];
+            if ((func == Blackhole_Vibrate && main->data[7]) || func == Blackhole_GrowEnd)
+            {
+                state->kind = NATIVE_TRANSITION_BLACKHOLE;
+                state->radius = main->data[1];
+            }
         }
         break;
     case B_TRANSITION_POKEBALLS_TRAIL:
