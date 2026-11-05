@@ -168,6 +168,8 @@ const char *MpBridge_CheckCaps(const struct MpBridgeCaps *c)
         return "invalid party query capability";
     if (c->menuOpenPage && (c->menu != 2 || c->menuOpenPage != 1))
         return "invalid menu open page capability";
+    if (c->menuNewPage && (c->menu != 2 || c->menuNewPage != 1))
+        return "invalid menu new page capability";
     if (c->tower && (c->tower != 1 || c->menuOpenPage != 1 || c->world != 1))
         return "invalid Battle Tower capability";
     if (c->hostSavePage && (c->hostSavePage != 1 || c->menuOpenPage != 1))
@@ -540,6 +542,9 @@ static bool ValidMenuScreen(const struct MpBridge *b, const uint8_t *p, size_t l
     count = p[9];
     back = U16(p + 10);
     admission = U16(p + 236);
+    /* KNOWN_ISSUES MS-55 (menuNewPage): flags 0x80 an ordinary screen, the first of a page (its cursor on the first row). */
+    if (flags == 0x80 && Enabled(b->caps.menuNewPage))
+        flags = 0;
     /* Battle Tower: Legends (tower=1, src/tower_legends.c): bytes 238-239 a Tower screen's style (0-8) and argument
      * (a floor, 0-100; zero without a style); flags 4 a solo floor's command in the rows area (no rows), flags 5 open
      * Hyper Training (no rows, the rows area zero). */
@@ -2522,10 +2527,11 @@ bool MpBridge_Configure(const char *path)
     long port = -1;
     uint8_t token[32];
     bool haveToken = false;
-    bool optIn[10] = {false, false, false, false, false, false, false, false, false, false};
-    static const char *const sOptIns[10] = {
+    bool optIn[11] = {false, false, false, false, false, false, false, false, false, false, false};
+    static const char *const sOptIns[11] = {
         "trade_effect_prepare=1", "trade_effect_save=1", "trade_effect_choice=1", "menu_open_page=1", "tower=1",
-        "host_save_page=1", "battle_peek=1", "battle_receive_many=1", "tower_next_page=1", "battle_deliver=1"};
+        "host_save_page=1", "battle_peek=1", "battle_receive_many=1", "tower_next_page=1", "battle_deliver=1",
+        "menu_new_page=1"};
     const char *problem;
 
     if (file == NULL)
@@ -2583,6 +2589,8 @@ bool MpBridge_Configure(const char *path)
             optIn[8] = true;
         else if (strcmp(line, sOptIns[9]) == 0 && !optIn[9])
             optIn[9] = true;
+        else if (strcmp(line, sOptIns[10]) == 0 && !optIn[10])
+            optIn[10] = true;
         else if (line[0] != '\0')
         {
             port = 0;
@@ -2642,6 +2650,9 @@ bool MpBridge_Configure(const char *path)
     caps.battleDeliver = optIn[9] && caps.battlePeek == 1 ? *(const volatile u32 *)&gMultiplayerBattleDeliverAbiVersion : 0;
     caps.saveWindow = *(const volatile u32 *)&gMultiplayerSaveWindowAbiVersion;
     caps.menu = *(const volatile u32 *)&gMultiplayerMenuAbiVersion;
+    /* KNOWN_ISSUES MS-55: menu_new_page=1 when the manifest has menu_new_page_abi_version 1: the launcher then marks the
+     * first screen of each page (flags 0x80) and the game's window starts it on its first row. */
+    caps.menuNewPage = optIn[10] && caps.menu == 2 ? *(const volatile u32 *)&gMultiplayerMenuNewPageAbiVersion : 0;
     /* The trade effect transports are explicit opt-ins of the manifest, never
      * inferred from their markers (generate_manifest.py): the launcher writes
      * the matching lines when its manifest has them. */
@@ -2711,7 +2722,7 @@ bool MpBridge_Configure(const char *path)
     sEnabled = true;
     SDL_Log("Multiplayer bridge: companion at 127.0.0.1:%ld; save %u trade %u emergency %u battle %u/%u/%u "
             "window %u menu %u effects %u/%u/%u reset %u/%u world %u spawns %u running %u detail %u ffa %u/%u release %u "
-            "import %u page %u tower %u party %u hostsave %u peek %u many %u towernext %u deliver %u",
+            "import %u page %u tower %u party %u hostsave %u peek %u many %u towernext %u deliver %u newpage %u",
             port, (unsigned)caps.save, (unsigned)caps.trade, (unsigned)caps.emergencySave,
             (unsigned)caps.battle, (unsigned)caps.battleResume, (unsigned)caps.battleAdmissionCleanup,
             (unsigned)caps.saveWindow, (unsigned)caps.menu, (unsigned)caps.tradeEffectPrepare,
@@ -2720,7 +2731,8 @@ bool MpBridge_Configure(const char *path)
             (unsigned)caps.presenceAnimation, (unsigned)caps.presenceDetail, (unsigned)caps.battleFfa,
             (unsigned)caps.battleFfa3, (unsigned)caps.menuRelease, (unsigned)caps.saveImportWindow, (unsigned)caps.menuOpenPage,
             (unsigned)caps.tower, (unsigned)caps.savePartyQuery, (unsigned)caps.hostSavePage, (unsigned)caps.battlePeek,
-            (unsigned)caps.battleReceiveMany, (unsigned)caps.towerNextPage, (unsigned)caps.battleDeliver);
+            (unsigned)caps.battleReceiveMany, (unsigned)caps.towerNextPage, (unsigned)caps.battleDeliver,
+            (unsigned)caps.menuNewPage);
     return true;
 }
 

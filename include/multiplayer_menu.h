@@ -52,6 +52,12 @@ extern const u32 gMultiplayerMenuOpenPageAbiVersion;
 #define MP_MENU_HOST_SAVE_PAGE_ABI 1
 #define MP_MENU_PAGE_HOST_SAVE 3
 extern const u32 gMultiplayerHostSavePageAbiVersion;
+// KNOWN_ISSUES MS-55: an ordinary screen with flags MP_MENU_FLAG_NEW_PAGE is the first of a page the window was not on
+// (bridge cap menuNewPage, the launcher's menu_new_page=1): the cursor starts on its first row. A page's own refreshes
+// and turning through one list's pages keep the row, as before.
+#define MP_MENU_NEW_PAGE_ABI 1
+#define MP_MENU_FLAG_NEW_PAGE 0x80
+extern const u32 gMultiplayerMenuNewPageAbiVersion;
 bool32 MultiplayerMenu_OpenPage(u16 page);
 #endif
 

@@ -94,6 +94,14 @@ bool32 MultiplayerMenu_ValidateScreen(const struct MultiplayerMenuScreen *screen
 {
     u32 admissionAction = screen->reserved[0] | screen->reserved[1] << 8;
 #ifdef PORTABLE
+    // KNOWN_ISSUES MS-55: a new page's screen is checked as the ordinary screen it is.
+    if (screen->flags == MP_MENU_FLAG_NEW_PAGE)
+    {
+        struct MultiplayerMenuScreen ordinary = *screen;
+
+        ordinary.flags = 0;
+        return MultiplayerMenu_ValidateScreen(&ordinary);
+    }
     // Bytes 238-239: the native UI's Tower screen (style, argument); zero otherwise.
     if (!TowerLegends_ValidStyle(screen->reserved[2], screen->reserved[3]))
         return FALSE;
@@ -298,6 +306,7 @@ bool32 MultiplayerMenu_Open(void)
 #ifdef PORTABLE
 const u32 gMultiplayerMenuOpenPageAbiVersion = MP_MENU_OPEN_PAGE_ABI;
 const u32 gMultiplayerHostSavePageAbiVersion = MP_MENU_HOST_SAVE_PAGE_ABI; // MS-61: page 3, the in-game SAVE's host save
+const u32 gMultiplayerMenuNewPageAbiVersion = MP_MENU_NEW_PAGE_ABI; // MS-55: a new page's screen starts on its first row
 
 // Update 32: the Players menu opened on a page of its own (MP_MENU_PAGE_*): the companion shows that page first.
 bool32 MultiplayerMenu_OpenPage(u16 page)
@@ -398,6 +407,14 @@ static void ReadScreen(void)
         else
             TowerLegends_QueueHyperTraining();
         return;
+    }
+    // KNOWN_ISSUES MS-55: the first screen of a page the window was not on: an ordinary screen whose cursor starts on its
+    // first row (a repeated revision changes nothing, as below).
+    if (screen.flags == MP_MENU_FLAG_NEW_PAGE)
+    {
+        if (screen.screen == sMultiplayerMenuScreen.screen) return;
+        screen.flags = 0;
+        sMultiplayerMenuCursor = 0;
     }
 #endif
 #line 264 // gba-line

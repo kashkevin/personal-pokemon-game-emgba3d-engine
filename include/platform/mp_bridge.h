@@ -152,6 +152,8 @@ struct MpBridgeCaps
                                         owner's request of 2026-10-24; needs tower 1; launcher opt-in tower_next_page=1) */
     uint32_t battleDeliver;          /* 1: battle opcode 27 DELIVER, a core's acknowledgement and its blocks in one command
                                         (MS-62, battle speed; needs battle PEEK; launcher opt-in battle_deliver=1) */
+    uint32_t menuNewPage;            /* 1: a menu screen with flags 0x80 is an ordinary one that starts a page on its first
+                                        row (KNOWN_ISSUES MS-55; needs menu 2; launcher opt-in menu_new_page=1) */
 };
 
 enum

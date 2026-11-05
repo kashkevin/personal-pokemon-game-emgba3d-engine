@@ -2296,6 +2296,69 @@ MT_TEST(menu_release_screen_needs_its_capability)
     MT_CHECK(MpBridge_CheckCaps(&caps) != NULL);
 }
 
+// KNOWN_ISSUES MS-55: the first screen of a page (flags 0x80) starts the window's cursor on its first row. The bridge
+// passes it only for a game with the marker whose launcher opted in (bridge.txt menu_new_page=1), as an ordinary screen
+// otherwise checked the same; any other bridge stops on it, as on every screen it cannot read.
+MT_TEST(menu_new_page_screen_needs_its_capability)
+{
+    struct MpBridgeCaps caps;
+    uint8_t screen[240];
+    uint8_t frame[260];
+    uint8_t *m = sMemory[MP_REGION_MENU];
+    size_t n;
+    int capable;
+
+    for (capable = 0; capable <= 1; capable++)
+    {
+        memset(&caps, 0, sizeof(caps));
+        caps.menu = 2;
+        caps.menuNewPage = (uint32_t)capable;
+        MT_CHECK(MpBridge_CheckCaps(&caps) == NULL);
+        Fresh(&caps);
+        sNet.chunk = 0;
+        Ready(0);
+        PutU32(m, 0x31554D45);
+        PutU16(m + 4, 2);
+        PutU16(m + 6, 512);
+        PutU32(m + 16, 9);            // the game's last request: sequence 9,
+        m[26] = 1;                    // an OPEN
+        Step(10);
+        memset(screen, 0, sizeof(screen));
+        PutU32(screen, 9);            // the reply to that request
+        PutU32(screen + 4, 12);       // screen revision
+        screen[8] = 0x80;             // flags: the first screen of a page
+        screen[9] = 2;
+        memcpy(screen + 12, "Tower Shop", 10);
+        memcpy(screen + 36, "Spend BP", 8);
+        PutU16(screen + 68, 1);
+        memcpy(screen + 70, "Gold Bottle Cap", 15);
+        PutU16(screen + 96, 2);
+        memcpy(screen + 98, "Bottle Cap", 10);
+        n = FrameOf(frame, 'M', screen, sizeof(screen));
+        Feed(frame, n, 200);
+        Step(2);
+        MT_CHECK(capable ? !sNet.closed : sNet.closed);
+        if (capable)
+        {
+            MT_CHECK(memcmp(m + 36, screen, 240) == 0);
+            // checked as an ordinary screen: a stray byte past its rows still stops the bridge
+            screen[200] = 1;
+            n = FrameOf(frame, 'M', screen, sizeof(screen));
+            Feed(frame, n, 200);
+            Step(2);
+            MT_CHECK(sNet.closed);
+        }
+    }
+    memset(&caps, 0, sizeof(caps));
+    caps.menuNewPage = 1;                     // without the Players menu ABI 2 it means nothing
+    MT_CHECK(MpBridge_CheckCaps(&caps) != NULL);
+    caps.menu = 1;
+    MT_CHECK(MpBridge_CheckCaps(&caps) != NULL);
+    caps.menu = 2;
+    caps.menuNewPage = 2;
+    MT_CHECK(MpBridge_CheckCaps(&caps) != NULL);
+}
+
 // Update 32: START > PLAYER > RESET opens the Players menu on its soft reset page: the OPEN names page 1. Only a
 // launcher that opted in (bridge.txt menu_open_page=1) is sent such an OPEN; any other's bridge stops on one, as on
 // every request the companion could not read.
@@ -2539,6 +2602,7 @@ int main(void)
     MT_RUN(three_player_free_for_all_commands_reach_the_game);
     MT_RUN(menu_release_screen_needs_its_capability);
     MT_RUN(menu_open_page_needs_the_launcher_opt_in);
+    MT_RUN(menu_new_page_screen_needs_its_capability);
     MT_RUN(tower_next_page_needs_its_capability);
     MT_RUN(save_import_window_needs_its_capability);
     MT_RUN(spawn_capability_waits_for_its_mailbox);
