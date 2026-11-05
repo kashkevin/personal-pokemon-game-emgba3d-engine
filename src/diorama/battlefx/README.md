@@ -324,12 +324,19 @@ not enumerated here (none of the moves past the package branches on one). The ga
 data for those 621 as before: only the moves past it come from this converter.
 
 `core_more.js` holds the callbacks and tasks the moves past the package need that the package's
-core does not have (re-implemented from this game's C, as its behaviour files are) and their HD
-presentation (`HD.moves`: the package's own effects keyed to each script's sprites and tasks). The
-moves added are in `tools/battlefx/moves_more.txt`; each was played by the test build's gallery with
-every compared frame of the game's effect sprites equal to the core's replay (the parity column of
-the audit matrix) before it was added. Not converted: Dragon Darts (`createdragondartsprite`), Tera
-Blast, Ivy Cudgel, Tera Starstorm (`jumpifmovetypeequal`).
+core does not have, re-implemented from this game's C statement for statement as its behaviour files
+are (`SpriteCB_HorizontalSlice` for Stone Axe; `AnimEllipticalGustCentered` for the four storms of the
+Forces of Nature; `AnimTask_AllBattlersInvisible`, `AllBattlersVisible` and
+`AllBattlersInvisibleExceptAttackerAndTarget`; `SpriteCB_FallingObject`, `SpriteCB_PhotonGeyserBeam`,
+`SpriteCB_SpriteOnMonUntilAffineAnimEnds` with `battle_anim_new.c`'s `LoadBattleAnimTarget` and
+`InitSpritePosToGivenTarget`), and the HD presentation of the 16 moves a player can meet (`HD.moves`:
+the package's own effects keyed to each script's sprites and tasks; the others are drawn by the
+package's kits for their sprites, as any move without a config of its own). The moves added are in
+`tools/battlefx/moves_more.txt`; each was played by the test build's gallery with every compared frame
+of the game's effect sprites equal to the core's replay (the parity column of the audit matrix) before
+it was listed. Not converted: Dragon Darts (`createdragondartsprite`), Tera Blast, Ivy Cudgel, Tera
+Starstorm (`jumpifmovetypeequal`); `tools/battlefx/moves_past_package.py` lists what each other move
+still needs (callbacks and tasks to port).
 
 ## Tests
 

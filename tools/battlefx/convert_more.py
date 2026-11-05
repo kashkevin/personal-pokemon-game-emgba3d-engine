@@ -169,9 +169,20 @@ class Consts:
                 pos = start
         return expr
 
+    def ensure(self, names):
+        """Adds the values of more #define / enum names (the moves' data: GEN_CHAMPIONS, B_UPDATED_MOVE_DATA ...)."""
+        want = sorted(set(names) - set(self.val) - set(self.fmacros))
+        if want:
+            self._compile("".join('#include "%s"\n' % h for h in HEADERS), want)
+
     def eval(self, expr):
-        """An integer expression of the scripts (C operators); None when a name is not a constant."""
-        e = self.expand(str(expr).strip())
+        """An integer expression of the scripts (C operators, one `?:`); None when a name is not a constant."""
+        e = str(expr).strip()
+        m = re.match(r"^(.*?)\?(.*?):(.*)$", e)
+        if m and "?" not in m.group(2) and "?" not in m.group(3):
+            c = self.eval(m.group(1))
+            return None if c is None else self.eval(m.group(2) if c else m.group(3))
+        e = self.expand(e)
         names = set(re.findall(r"\b[A-Za-z_]\w*\b", e))
         for n in sorted(names, key=len, reverse=True):
             if n not in self.val:
@@ -393,11 +404,6 @@ class Scripts:
         if v is None:
             raise SystemExit("convert_more.py: cannot evaluate %r" % a)
         return v
-
-
-def s16(v):
-    v &= 0xFFFF
-    return v - 0x10000 if v >= 0x8000 else v
 
 
 # ------------------------------------------------------------------ the script, frame by frame (rows of meta.events)
@@ -650,7 +656,7 @@ DOMAIN = {"AnimTask_GetWeather": list(range(7)), "AnimTask_GetReturnPowerLevel":
 
 def cond_value(c):
     """A path condition's single answer (None: 'any other' of a task with more answers than tested)."""
-    kind, task, arg, v = c[0], c[1], c[2], c[3]
+    kind, task, v = c[0], c[1], c[3]
     if not isinstance(v, tuple):
         return v
     excl = set(v[1])
@@ -930,8 +936,9 @@ def check(scripts, base, ids, verbose=False):
     T = tpls.base["templates"]
     same = differ = failed = 0
     report = []
+    added = set((base.get("meta", {}).get("more") or {}).get("moves", []))   # the moves this converter added
     for m in base["moves"]:
-        if ids and m["id"] not in ids:
+        if (ids and m["id"] not in ids) or m["id"] in added:
             continue
         try:
             dflt, var = convert_move(sim, m["script"])
@@ -1000,7 +1007,9 @@ class MoveInfo:
     def entry(self, mid, num):
         body = self.info[mid]
         name = re.search(r'\.name\s*=\s*COMPOUND_STRING\("([^"]*)"\)', body)
-        power = self.s.consts.eval(self.value(body, "power") or "0") or 0
+        pexpr = self.value(body, "power") or "0"
+        self.s.consts.ensure(re.findall(r"\b[A-Z_][A-Z0-9_]*\b", pexpr))
+        power = self.s.consts.eval(pexpr) or 0
         effect = self.choose(self.value(body, "effect"))
         target = self.choose(self.value(body, "target"))
         tags = []

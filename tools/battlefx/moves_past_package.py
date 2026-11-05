@@ -149,7 +149,8 @@ def reachability(root, ids, names):
             for (meth, param, tgt, cond) in species[sp]["evos"]:
                 if tgt in owned or tgt not in species:
                     continue
-                ok = not (param in UNOBTAINABLE_ITEMS) and not any(i in UNOBTAINABLE_ITEMS for i in re.findall(r"ITEM_\w+", cond))
+                ok = param not in UNOBTAINABLE_ITEMS and not any(i in UNOBTAINABLE_ITEMS
+                                                                 for i in re.findall(r"ITEM_\w+", cond))
                 reg = re.search(r"IF_REGION,\s*(REGION_[A-Z]+)", cond)
                 if reg and reg.group(1) != "REGION_HOENN":
                     ok = False
