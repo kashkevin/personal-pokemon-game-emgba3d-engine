@@ -71,6 +71,9 @@ bool32 MultiplayerWorld_GetPeerCarrier(u32 playerId, u16 *species, u8 *flags);
 #define MP_REWARD_BP_DEBIT          3
 #define MP_REWARD_CATCH_KEEP        4 // payload = event number (23 bits): the host confirms this save's World Event catch
 #define MP_REWARD_CATCH_RELEASE     5 // ... or says another trainer caught it first: the duplicate is released
+// Kind 8: a Legendary Ticket (platform/mp_tickets.h; payload = its index 1-4): the item with its island's flags, all or
+// nothing; the receipt 1 given, 2 already owned, 0 nothing.
+#define MP_REWARD_TICKET            8
 // Battle Tower: Legends (tower_legends.h): reward kinds 6 (the record) and 7 (a milestone Pokemon), and world action 7
 // (a Tower battle's result: eventId the ticket, species the floor).
 #define MP_WORLD_ACTION_TOWER       7
@@ -81,6 +84,7 @@ u32 MultiplayerWorld_ApplyRewardWord(s32 delta, u8 *result);
 void MultiplayerWorld_TestRecordCatch(u32 eventId, u16 species, u32 personality);
 bool32 MultiplayerWorld_TestHasCatchRecord(void);
 #endif
+#line 84 // gba-line
 
 #define MP_WORLD_RESULT_CAUGHT      1
 #define MP_WORLD_RESULT_DEFEATED    2

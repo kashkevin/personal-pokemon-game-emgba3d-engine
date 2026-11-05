@@ -10,6 +10,7 @@
 #include "multiplayer_rival.h"
 #include "tower_legends.h"
 #include "platform/mp_breeding.h"
+#include "platform/mp_tickets.h"
 #include "field_carrier.h"
 #if defined(DIORAMA_BATTLE_ENV_TEST)
 #include "diorama/battle_env_test.h"
@@ -1556,6 +1557,10 @@ u32 MultiplayerWorld_ApplyRewardWord(s32 delta, u8 *result)
     else if (kind == MP_REWARD_TOWER_MON)
     {
         amount = TowerLegends_ApplyMonWord(payload); // 1 made, 2 already delivered, 0 nothing made
+    }
+    else if (kind == MP_REWARD_TICKET)
+    {
+        amount = MultiplayerTickets_Grant(payload); // 1 given, 2 already owned, 0 nothing (mp_tickets.c)
     }
     return amount;
 }
