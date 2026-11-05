@@ -66,6 +66,7 @@ extern const u8 EventScript_TowerLegendsSolo[];
 
 const u32 gMultiplayerTowerAbiVersion = MP_TOWER_ABI;
 const u32 gMultiplayerTowerNextPageAbiVersion = MP_TOWER_NEXT_PAGE_ABI;
+const u32 gMultiplayerTowerRecordAbiVersion = MP_TOWER_RECORD_ABI; // MS-52: a Tower page carries the host's record
 const u32 gMultiplayerChampionshipAbiVersion = MP_CHAMPIONSHIP_ABI;
 
 const struct Trainer gTowerLegendsTrainers[DIFFICULTY_COUNT][TOWER_LEGENDS_TRAINER_COUNT] =
@@ -269,7 +270,7 @@ u32 TowerLegends_Progress(void) { return TowerLegends_RecordValid() ? Record()->
 u32 TowerLegends_Claims(void) { return TowerLegends_RecordValid() ? Record()->claims : 0; }
 bool32 TowerLegends_HasPendingResult(void) { return TowerLegends_RecordValid() && Record()->pendingOutcome != 0; }
 
-static u32 CheckpointBelow(u32 highest)
+u32 TowerLegends_CheckpointBelow(u32 highest)
 {
     u32 i, checkpoint = 0;
 
@@ -279,7 +280,7 @@ static u32 CheckpointBelow(u32 highest)
     return checkpoint;
 }
 
-u32 TowerLegends_Checkpoint(void) { return CheckpointBelow(TowerLegends_Highest()); }
+u32 TowerLegends_Checkpoint(void) { return TowerLegends_CheckpointBelow(TowerLegends_Highest()); }
 u32 TowerLegends_PrizeFloor(u32 bit) { return bit < ARRAY_COUNT(sCheckpoints) ? sCheckpoints[bit] : 0; }
 
 static void BumpRevision(struct MPTowerRecord *record)
@@ -775,7 +776,7 @@ void TowerLegends_BufferResult(void)
         else
         {
             end = StringCopy(end, sText_FloorLost2);
-            end = AppendNumber(end, CheckpointBelow(sTower.lastHighest) + 1);
+            end = AppendNumber(end, TowerLegends_CheckpointBelow(sTower.lastHighest) + 1);
             end = StringCopy(end, sText_Period);
         }
     }
@@ -798,7 +799,7 @@ u32 TowerLegends_NextFloor(void)
     else if (sTower.lastOutcome == TOWER_RESULT_WON)
         next = sTower.lastFloor + 1;
     else
-        next = CheckpointBelow(sTower.lastHighest) + 1;
+        next = TowerLegends_CheckpointBelow(sTower.lastHighest) + 1;
     return next >= 1 && next <= TOWER_FLOOR_COUNT ? next : 0;
 }
 

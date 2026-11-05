@@ -41,6 +41,11 @@
 // launcher's tower_next_page=1 when its manifest has tower_next_page_abi_version 1 (needs the Tower).
 #define MP_MENU_PAGE_TOWER_NEXT     4
 #define MP_TOWER_NEXT_PAGE_ABI      1
+// KNOWN_ISSUES MS-52: a Tower page's screen followed by the host's own Tower record (multiplayer_menu.h struct
+// MultiplayerMenuTowerRecord); bridge cap towerRecord, the launcher's tower_record=1 when its manifest has
+// tower_record_abi_version 1 (needs the Tower). The native Tower screens draw P, H, the checkpoint below H and the
+// claims from it.
+#define MP_TOWER_RECORD_ABI         1
 #define TOWER_COMMAND_MAGIC         0x31525754u // "TWR1"
 #define TOWER_COMMAND_MODE_SOLO     1
 // A Championship match against a computer trainer (step 18; the app's docs/championships-eight.md): the floor's solo
@@ -112,6 +117,7 @@ extern const struct TowerLegendsFloor gTowerLegendsFloors[TOWER_FLOOR_COUNT];
 extern const struct Trainer gTowerLegendsTrainers[DIFFICULTY_COUNT][TOWER_LEGENDS_TRAINER_COUNT];
 extern const u32 gMultiplayerTowerAbiVersion;
 extern const u32 gMultiplayerTowerNextPageAbiVersion;
+extern const u32 gMultiplayerTowerRecordAbiVersion; // KNOWN_ISSUES MS-52
 extern const u32 gMultiplayerChampionshipAbiVersion;
 
 // GetTrainerStructFromId's hook: the floor's trainer for TRAINER_TOWER_A/B while a Tower battle is set up, else NULL.
@@ -140,6 +146,7 @@ bool32 TowerLegends_HasPendingResult(void);
 const struct TowerLegendsFloor *TowerLegends_Floor(u32 floor);
 const struct Trainer *TowerLegends_FloorTrainer(u32 floor, u32 which);
 u32 TowerLegends_Checkpoint(void);
+u32 TowerLegends_CheckpointBelow(u32 highest); // the same rule for any highest floor cleared (MS-52: the host's record)
 u32 TowerLegends_PrizeFloor(u32 bit);
 
 // The wallet words (multiplayer_world.c's MultiplayerWorld_ApplyRewardWord): the receipt's amount.

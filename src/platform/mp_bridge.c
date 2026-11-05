@@ -180,6 +180,8 @@ const char *MpBridge_CheckCaps(const struct MpBridgeCaps *c)
         return "invalid battle receive-many capability";
     if (c->towerNextPage && (c->towerNextPage != 1 || c->tower != 1))
         return "invalid Tower next floor capability";
+    if (c->towerRecord && (c->towerRecord != 1 || c->tower != 1))
+        return "invalid Tower record capability";
     if (c->battleDeliver && (c->battleDeliver != 1 || c->battlePeek != 1))
         return "invalid battle deliver capability";
     if (c->menu > 2)
@@ -533,8 +535,13 @@ static bool ValidMenuScreen(const struct MpBridge *b, const uint8_t *p, size_t l
 {
     uint32_t ack, revision, flags, count, back, admission;
     uint32_t i;
+    /* KNOWN_ISSUES MS-52 (towerRecord): a Tower page's screen followed by the host's Tower record, 8 bytes: "TWH1", the
+     * progress floor (1-101), the highest floor cleared (0-100) and the claim bits. */
+    bool record = length == 248 && Enabled(b->caps.towerRecord);
 
-    if (length != 240)
+    if (length != 240 && !record)
+        return false;
+    if (record && (U32(p + 240) != 0x31485754u /* "TWH1" */ || p[244] < 1 || p[244] > 101 || p[245] > 100))
         return false;
     ack = U32(p);
     revision = U32(p + 4);
@@ -545,6 +552,9 @@ static bool ValidMenuScreen(const struct MpBridge *b, const uint8_t *p, size_t l
     /* KNOWN_ISSUES MS-55 (menuNewPage): flags 0x80 an ordinary screen, the first of a page (its cursor on the first row). */
     if (flags == 0x80 && Enabled(b->caps.menuNewPage))
         flags = 0;
+    /* The record comes only with an ordinary screen that names a Tower page (its style, byte 238). */
+    if (record && (flags != 0 || p[238] == 0))
+        return false;
     /* Battle Tower: Legends (tower=1, src/tower_legends.c): bytes 238-239 a Tower screen's style (0-8) and argument
      * (a floor, 0-100; zero without a style); flags 4 a solo floor's command in the rows area (no rows), flags 5 open
      * Hyper Training (no rows, the rows area zero). */
@@ -592,7 +602,7 @@ static bool ValidMenuScreen(const struct MpBridge *b, const uint8_t *p, size_t l
 }
 
 /* commitMenu */
-static bool CommitMenu(struct MpBridge *b, const uint8_t *p)
+static bool CommitMenu(struct MpBridge *b, const uint8_t *p, size_t length)
 {
     uint32_t odd;
     uint32_t offset;
@@ -606,6 +616,13 @@ static bool CommitMenu(struct MpBridge *b, const uint8_t *p)
     W32(b, MP_REGION_MENU, 32, odd);
     for (offset = 0; offset <= 236; offset += 4)
         W32(b, MP_REGION_MENU, 36 + offset, U32(p + offset));
+    /* KNOWN_ISSUES MS-52: the host's Tower record with its screen, under the same generation; zero after any other
+     * screen, so a record never outlives the page it came with. */
+    if (Enabled(b->caps.towerRecord))
+    {
+        W32(b, MP_REGION_MENU, 276, length == 248 ? U32(p + 240) : 0);
+        W32(b, MP_REGION_MENU, 280, length == 248 ? U32(p + 244) : 0);
+    }
     W32(b, MP_REGION_MENU, 32, odd + 1);
     return true;
 }
@@ -1732,7 +1749,7 @@ static bool Dispatch(struct MpBridge *b, const uint8_t *payload, size_t size)
     }
     else if (payload[0] == 'M')
     {
-        if (!b->menuCapabilitySent || !ValidMenuScreen(b, rest, restLength) || !CommitMenu(b, rest))
+        if (!b->menuCapabilitySent || !ValidMenuScreen(b, rest, restLength) || !CommitMenu(b, rest, restLength))
         {
             Stop(b, "invalid menu screen", true);
             return false;
@@ -2527,11 +2544,11 @@ bool MpBridge_Configure(const char *path)
     long port = -1;
     uint8_t token[32];
     bool haveToken = false;
-    bool optIn[11] = {false, false, false, false, false, false, false, false, false, false, false};
-    static const char *const sOptIns[11] = {
+    bool optIn[12] = {false, false, false, false, false, false, false, false, false, false, false, false};
+    static const char *const sOptIns[12] = {
         "trade_effect_prepare=1", "trade_effect_save=1", "trade_effect_choice=1", "menu_open_page=1", "tower=1",
         "host_save_page=1", "battle_peek=1", "battle_receive_many=1", "tower_next_page=1", "battle_deliver=1",
-        "menu_new_page=1"};
+        "menu_new_page=1", "tower_record=1"};
     const char *problem;
 
     if (file == NULL)
@@ -2591,6 +2608,8 @@ bool MpBridge_Configure(const char *path)
             optIn[9] = true;
         else if (strcmp(line, sOptIns[10]) == 0 && !optIn[10])
             optIn[10] = true;
+        else if (strcmp(line, sOptIns[11]) == 0 && !optIn[11])
+            optIn[11] = true;
         else if (line[0] != '\0')
         {
             port = 0;
@@ -2645,6 +2664,9 @@ bool MpBridge_Configure(const char *path)
     /* The Tower's "go on to floor N?" (the owner's request of 2026-10-24): tower_next_page=1 when the manifest has
      * tower_next_page_abi_version 1: YES opens page 4, which the launcher answers with the next floor's command. */
     caps.towerNextPage = optIn[8] && caps.tower == 1 ? *(const volatile u32 *)&gMultiplayerTowerNextPageAbiVersion : 0;
+    /* KNOWN_ISSUES MS-52: tower_record=1 when the manifest has tower_record_abi_version 1: a Tower page's screen then
+     * carries the host's own Tower record, which the native Tower screens draw. */
+    caps.towerRecord = optIn[11] && caps.tower == 1 ? *(const volatile u32 *)&gMultiplayerTowerRecordAbiVersion : 0;
     /* MS-62, battle speed: battle_deliver=1 when the manifest has battle_deliver_abi_version 1 (beside PEEK): the host's
      * route then hands a core its acknowledgement and every block it is owed in one DELIVER (opcode 27). */
     caps.battleDeliver = optIn[9] && caps.battlePeek == 1 ? *(const volatile u32 *)&gMultiplayerBattleDeliverAbiVersion : 0;
@@ -2722,7 +2744,7 @@ bool MpBridge_Configure(const char *path)
     sEnabled = true;
     SDL_Log("Multiplayer bridge: companion at 127.0.0.1:%ld; save %u trade %u emergency %u battle %u/%u/%u "
             "window %u menu %u effects %u/%u/%u reset %u/%u world %u spawns %u running %u detail %u ffa %u/%u release %u "
-            "import %u page %u tower %u party %u hostsave %u peek %u many %u towernext %u deliver %u newpage %u",
+            "import %u page %u tower %u party %u hostsave %u peek %u many %u towernext %u deliver %u newpage %u towerrecord %u",
             port, (unsigned)caps.save, (unsigned)caps.trade, (unsigned)caps.emergencySave,
             (unsigned)caps.battle, (unsigned)caps.battleResume, (unsigned)caps.battleAdmissionCleanup,
             (unsigned)caps.saveWindow, (unsigned)caps.menu, (unsigned)caps.tradeEffectPrepare,
@@ -2732,7 +2754,7 @@ bool MpBridge_Configure(const char *path)
             (unsigned)caps.battleFfa3, (unsigned)caps.menuRelease, (unsigned)caps.saveImportWindow, (unsigned)caps.menuOpenPage,
             (unsigned)caps.tower, (unsigned)caps.savePartyQuery, (unsigned)caps.hostSavePage, (unsigned)caps.battlePeek,
             (unsigned)caps.battleReceiveMany, (unsigned)caps.towerNextPage, (unsigned)caps.battleDeliver,
-            (unsigned)caps.menuNewPage);
+            (unsigned)caps.menuNewPage, (unsigned)caps.towerRecord);
     return true;
 }
 

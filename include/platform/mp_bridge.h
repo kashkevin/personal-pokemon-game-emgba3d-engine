@@ -154,6 +154,9 @@ struct MpBridgeCaps
                                         (MS-62, battle speed; needs battle PEEK; launcher opt-in battle_deliver=1) */
     uint32_t menuNewPage;            /* 1: a menu screen with flags 0x80 is an ordinary one that starts a page on its first
                                         row (KNOWN_ISSUES MS-55; needs menu 2; launcher opt-in menu_new_page=1) */
+    uint32_t towerRecord;            /* 1: a Tower page's screen (a style 1-8) may be followed by the host's 8-byte Tower
+                                        record, kept at menu offset 276 (KNOWN_ISSUES MS-52; needs tower 1; launcher
+                                        opt-in tower_record=1) */
 };
 
 enum

@@ -2442,6 +2442,132 @@ MT_TEST(tower_next_page_needs_its_capability)
     MT_CHECK(MpBridge_CheckCaps(&caps) != NULL);
 }
 
+// KNOWN_ISSUES MS-52: a Tower page's screen followed by the host's own Tower record (248 bytes) only with towerRecord (the
+// launcher's tower_record=1, which needs the Tower). The record lands at menu offset 276 under the screen's generation
+// and the next screen without one clears it; without the capability those bytes are never written. A record after a
+// screen without a Tower style or after a close, or outside the TOWER_STATE word's bounds, stops the bridge, as every
+// screen it cannot read does.
+static void TowerHomeScreen(uint8_t screen[248], uint32_t revision, uint8_t progress, uint8_t highest, uint16_t claims)
+{
+    memset(screen, 0, 248);
+    PutU32(screen, 9);                // the reply to the game's request 9
+    PutU32(screen + 4, revision);
+    screen[9] = 1;
+    memcpy(screen + 12, "Battle Tower", 12);
+    memcpy(screen + 36, "Floor 13 next", 13);
+    PutU16(screen + 68, 1);
+    memcpy(screen + 70, "Solo: floor 13", 14);
+    screen[238] = 1;                  // style 1: the Tower's home
+    PutU32(screen + 240, 0x31485754); // "TWH1"
+    screen[244] = progress;
+    screen[245] = highest;
+    PutU16(screen + 246, claims);
+}
+
+static void TowerRecordBridge(int capable)
+{
+    struct MpBridgeCaps caps;
+    uint8_t *m = sMemory[MP_REGION_MENU];
+
+    memset(&caps, 0, sizeof(caps));
+    caps.menu = 2;
+    caps.menuOpenPage = 1;
+    caps.world = 1;
+    caps.tower = 1;
+    caps.towerRecord = (uint32_t)capable;
+    MT_CHECK(MpBridge_CheckCaps(&caps) == NULL);
+    Fresh(&caps);
+    sNet.chunk = 0;
+    Ready(0);
+    PutU32(m, 0x31554D45);
+    PutU16(m + 4, 2);
+    PutU16(m + 6, 512);
+    memset(m + 276, 0x5A, 8);         // what lay there before
+    PutU32(m + 16, 9);                // the game's last request: sequence 9,
+    m[26] = 1;                        // an OPEN
+    Step(10);
+}
+
+MT_TEST(tower_record_screen_needs_its_capability)
+{
+    struct MpBridgeCaps caps;
+    uint8_t screen[248];
+    uint8_t frame[270];
+    uint8_t zero[8] = {0};
+    uint8_t *m = sMemory[MP_REGION_MENU];
+    size_t n;
+    int capable, bad;
+
+    for (capable = 0; capable <= 1; capable++)
+    {
+        TowerRecordBridge(capable);
+        // an ordinary Tower page (240 bytes): written as before; the record's bytes only with the capability (cleared)
+        TowerHomeScreen(screen, 11, 13, 12, 3);
+        n = FrameOf(frame, 'M', screen, 240);
+        Feed(frame, n, 200);
+        Step(2);
+        MT_CHECK(!sNet.closed);
+        MT_CHECK(memcmp(m + 36, screen, 240) == 0);
+        MT_CHECK(capable ? memcmp(m + 276, zero, 8) == 0 : (m[276] == 0x5A && m[283] == 0x5A));
+        // the same page with the host's record (248 bytes)
+        TowerHomeScreen(screen, 12, 13, 12, 3);
+        n = FrameOf(frame, 'M', screen, sizeof(screen));
+        Feed(frame, n, 200);
+        Step(2);
+        MT_CHECK(capable ? !sNet.closed : sNet.closed);
+        if (!capable)
+            continue;
+        MT_CHECK(memcmp(m + 36, screen, 240) == 0);
+        MT_CHECK(memcmp(m + 276, screen + 240, 8) == 0);
+        MT_EQ(GetU32(m + 32) & 1, 0);  // the generation even again: the record went in with its screen
+        // the record's bounds: the top of the Tower (P 101, H 100, every claim)
+        TowerHomeScreen(screen, 13, 101, 100, 0xFFFF);
+        n = FrameOf(frame, 'M', screen, sizeof(screen));
+        Feed(frame, n, 200);
+        Step(2);
+        MT_CHECK(!sNet.closed);
+        MT_CHECK(memcmp(m + 276, screen + 240, 8) == 0);
+        // the next screen without a record clears it
+        TowerHomeScreen(screen, 14, 13, 12, 3);
+        n = FrameOf(frame, 'M', screen, 240);
+        Feed(frame, n, 200);
+        Step(2);
+        MT_CHECK(!sNet.closed);
+        MT_CHECK(memcmp(m + 276, zero, 8) == 0);
+    }
+    // what stops a capable bridge: a record after a screen that is not a Tower page, or one it cannot read
+    for (bad = 0; bad < 6; bad++)
+    {
+        TowerRecordBridge(1);
+        TowerHomeScreen(screen, 12, 13, 12, 3);
+        if (bad == 0)
+            screen[238] = 0;           // no Tower style
+        else if (bad == 1)
+            screen[8] = 1;             // a close
+        else if (bad == 2)
+            screen[240] = 'X';         // not "TWH1"
+        else if (bad == 3)
+            screen[244] = 0;           // progress 0
+        else if (bad == 4)
+            screen[244] = 102;         // progress past the top
+        else
+            screen[245] = 101;         // highest past the top
+        n = FrameOf(frame, 'M', screen, sizeof(screen));
+        Feed(frame, n, 200);
+        Step(2);
+        MT_CHECK(sNet.closed);
+    }
+    memset(&caps, 0, sizeof(caps));
+    caps.menu = 2;
+    caps.menuOpenPage = 1;
+    caps.towerRecord = 1;              // without the Tower it means nothing
+    MT_CHECK(MpBridge_CheckCaps(&caps) != NULL);
+    caps.world = 1;
+    caps.tower = 1;
+    caps.towerRecord = 2;
+    MT_CHECK(MpBridge_CheckCaps(&caps) != NULL);
+}
+
 // tests/native/windows-input-guard.c
 static uint32_t AddKeys(struct MpBridgeInput *s, uint32_t keys)
 {
@@ -2604,6 +2730,7 @@ int main(void)
     MT_RUN(menu_open_page_needs_the_launcher_opt_in);
     MT_RUN(menu_new_page_screen_needs_its_capability);
     MT_RUN(tower_next_page_needs_its_capability);
+    MT_RUN(tower_record_screen_needs_its_capability);
     MT_RUN(save_import_window_needs_its_capability);
     MT_RUN(spawn_capability_waits_for_its_mailbox);
     MT_RUN(spawn_record_and_inbound_round_trip);

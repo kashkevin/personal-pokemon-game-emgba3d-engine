@@ -190,6 +190,7 @@ int NativeSelfTest_DumpTowerData(const char *outPath)
 #include "malloc.h"
 #include "multiplayer_ladder.h"
 #include "multiplayer_world.h"
+#include "multiplayer_menu.h"
 #include "overworld.h"
 #include "pokemon_storage_system.h"
 #include "script.h"
@@ -208,6 +209,38 @@ static void ExpectTower(const char *what, bool32 ok)
         sTowerFailures++;
         printf("  FAILED: %s\n", what);
     }
+}
+
+// KNOWN_ISSUES MS-52: a screen as the bridge commits it (the generation odd while it writes, even after), with the
+// host's Tower record at mailbox offset 276 (magic 0: zero there, as after a screen without one).
+static void DeliverTowerPage(u32 *generation, u32 ack, u32 revision, u8 style, u32 magic, u8 progress, u8 highest,
+                             u16 claims)
+{
+    struct MultiplayerMenuScreen screen;
+    struct MultiplayerMenuTowerRecord record;
+
+    memset(&screen, 0, sizeof(screen));
+    memset(&record, 0, sizeof(record));
+    screen.ackRequest = ack;
+    screen.screen = revision;
+    screen.count = 1;
+    memcpy(screen.title, "Battle Tower", 12);
+    screen.rows[0].action = 1;
+    memcpy(screen.rows[0].label, "Solo: floor 13", 14);
+    screen.reserved[2] = style;
+    if (magic != 0)
+    {
+        record.magic = magic;
+        record.progress = progress;
+        record.highest = highest;
+        record.claims = claims;
+    }
+    *generation |= 1;
+    gMultiplayerMenuMailbox.inboundGeneration = *generation;
+    gMultiplayerMenuMailbox.screen = screen;
+    gMultiplayerMenuMailbox.towerRecord = record;
+    *generation += 1;
+    gMultiplayerMenuMailbox.inboundGeneration = *generation;
 }
 
 static u32 TowerWord(u32 kind, u32 payload)
@@ -733,6 +766,78 @@ int NativeSelfTest_Tower(void)
         memset(&gSaveBlock3Ptr->tower, 0, sizeof(gSaveBlock3Ptr->tower));
         TowerLegends_TestReset();
         gMain.callback2 = field;
+    }
+
+    // KNOWN_ISSUES MS-52: the host's own Tower record that comes with a Tower page is kept with that page by the frame's
+    // own ReadScreen and dropped with any other screen; the checkpoint the native screens show below its highest floor
+    // is the save's own rule.
+    {
+        struct MultiplayerMenuTowerRecord shown;
+        u32 sequence, generation, mismatches = 0;
+
+        ExpectTower("MS-52: the manifest's marker", *(const volatile u32 *)&gMultiplayerTowerRecordAbiVersion == 1);
+        for (floor = 0; floor <= TOWER_FLOOR_COUNT; floor++)
+        {
+            memset(&gSaveBlock3Ptr->tower, 0, sizeof(gSaveBlock3Ptr->tower));
+            TowerLegends_ApplyStateWord((TOWER_STATE_OP_PROGRESS << 22) | (floor << 15) | ((floor + 1) << 8));
+            if (TowerLegends_Highest() != floor || TowerLegends_Checkpoint() != TowerLegends_CheckpointBelow(floor))
+                mismatches++;
+        }
+        ExpectTower("MS-52: the checkpoint below each highest floor 0-100 is the save's own rule", mismatches == 0);
+        memset(&gSaveBlock3Ptr->tower, 0, sizeof(gSaveBlock3Ptr->tower));
+
+        MultiplayerMenu_Init();
+        ExpectTower("MS-52: a window opens (no field, no text window)", MultiplayerMenu_SelfTestBegin());
+        sequence = gMultiplayerMenuMailbox.request.sequence;
+        generation = gMultiplayerMenuMailbox.inboundGeneration;
+        DeliverTowerPage(&generation, sequence, 20, TOWER_STYLE_HOME, MP_MENU_TOWER_RECORD_MAGIC, 13, 12, 0x0003);
+        MultiplayerMenu_SelfTestReadScreen();
+        ExpectTower("MS-52: the record that came with a Tower page is kept with it",
+                    MultiplayerMenu_TowerRecordShown(&shown) && shown.progress == 13 && shown.highest == 12
+                    && shown.claims == 0x0003);
+        // the same revision again with other numbers changes nothing (a changed record is a new revision), nor does an
+        // older one
+        DeliverTowerPage(&generation, sequence, 20, TOWER_STYLE_HOME, MP_MENU_TOWER_RECORD_MAGIC, 14, 13, 0x0007);
+        MultiplayerMenu_SelfTestReadScreen();
+        DeliverTowerPage(&generation, sequence, 19, TOWER_STYLE_HOME, MP_MENU_TOWER_RECORD_MAGIC, 14, 13, 0x0007);
+        MultiplayerMenu_SelfTestReadScreen();
+        ExpectTower("MS-52: a repeated or older revision leaves the record shown",
+                    MultiplayerMenu_TowerRecordShown(&shown) && shown.progress == 13 && shown.highest == 12);
+        // a delivery still being written (its generation odd) is not read
+        gMultiplayerMenuMailbox.inboundGeneration = generation | 1;
+        gMultiplayerMenuMailbox.towerRecord.progress = 50;
+        MultiplayerMenu_SelfTestReadScreen();
+        ExpectTower("MS-52: a record still being written is not read",
+                    MultiplayerMenu_TowerRecordShown(&shown) && shown.progress == 13);
+        generation |= 1;
+        DeliverTowerPage(&generation, sequence, 21, TOWER_STYLE_MAP, 0, 0, 0, 0);
+        MultiplayerMenu_SelfTestReadScreen();
+        ExpectTower("MS-52: a Tower page without a record shows the save's", !MultiplayerMenu_TowerRecordShown(&shown));
+        DeliverTowerPage(&generation, sequence, 22, TOWER_STYLE_RECORDS, MP_MENU_TOWER_RECORD_MAGIC, 101, 100, 0xFFFF);
+        MultiplayerMenu_SelfTestReadScreen();
+        ExpectTower("MS-52: the top of the Tower's record is kept",
+                    MultiplayerMenu_TowerRecordShown(&shown) && shown.progress == 101 && shown.highest == 100
+                    && shown.claims == 0xFFFF);
+        DeliverTowerPage(&generation, sequence, 23, TOWER_STYLE_NONE, MP_MENU_TOWER_RECORD_MAGIC, 13, 12, 0x0003);
+        MultiplayerMenu_SelfTestReadScreen();
+        ExpectTower("MS-52: no record is kept with a page that is not the Tower's",
+                    !MultiplayerMenu_TowerRecordShown(&shown));
+        DeliverTowerPage(&generation, sequence, 24, TOWER_STYLE_HOME, MP_MENU_TOWER_RECORD_MAGIC, 102, 12, 0x0003);
+        MultiplayerMenu_SelfTestReadScreen();
+        ExpectTower("MS-52: a record past the top floor is not kept", !MultiplayerMenu_TowerRecordShown(&shown));
+        DeliverTowerPage(&generation, sequence, 25, TOWER_STYLE_HOME, MP_MENU_TOWER_RECORD_MAGIC, 13, 101, 0x0003);
+        MultiplayerMenu_SelfTestReadScreen();
+        ExpectTower("MS-52: a record whose highest floor is past the top is not kept",
+                    !MultiplayerMenu_TowerRecordShown(&shown));
+        DeliverTowerPage(&generation, sequence, 26, TOWER_STYLE_HOME, 0x31485755u, 13, 12, 0x0003);
+        MultiplayerMenu_SelfTestReadScreen();
+        ExpectTower("MS-52: a record without its magic is not kept", !MultiplayerMenu_TowerRecordShown(&shown));
+        DeliverTowerPage(&generation, sequence, 27, TOWER_STYLE_SHOP, MP_MENU_TOWER_RECORD_MAGIC, 1, 0, 0);
+        MultiplayerMenu_SelfTestReadScreen();
+        ExpectTower("MS-52: a first climb's record (floor 1, none cleared) is kept",
+                    MultiplayerMenu_TowerRecordShown(&shown) && shown.progress == 1 && shown.highest == 0);
+        MultiplayerMenu_Init(); // the window gone, as the game starts it
+        ExpectTower("MS-52: no record once the window is gone", !MultiplayerMenu_TowerRecordShown(&shown));
     }
 
     printf("selftest-tower: %d checks, %d failed\n", sTowerChecks, sTowerFailures);

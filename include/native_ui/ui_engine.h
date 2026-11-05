@@ -1867,6 +1867,10 @@ struct NativeMpMenu
     bool8 admission[6];    /* the battle-entry row */
     u8 towerStyle;         /* Battle Tower: Legends: the page's Tower screen (tower_legends.h TOWER_STYLE_*), 0: none */
     u8 towerArg;           /* its argument (a floor) */
+    bool8 hostRecord;      /* KNOWN_ISSUES MS-52: the host's own Tower record came with this page (the three below) */
+    u8 hostProgress;       /* the floor to climb next (1..101) */
+    u8 hostHighest;        /* the highest floor cleared (0..100) */
+    u16 hostClaims;        /* the claim bits as the host holds them */
 };
 bool32 MultiplayerMenu_NativeUiState(struct NativeMpMenu *out);
 /* multiplayer_world.c: the notice banner up now (host notices, wallet, hints): its

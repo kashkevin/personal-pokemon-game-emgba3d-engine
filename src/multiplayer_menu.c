@@ -29,6 +29,8 @@ _Static_assert(offsetof(struct MultiplayerMenuScreen, rows) == 68, "Menu row off
 const u32 gMultiplayerMenuAbiVersion = MP_MENU_ABI;
 #ifdef PORTABLE
 #include "tower_legends.h"
+_Static_assert(sizeof(struct MultiplayerMenuTowerRecord) == 8, "Menu Tower record ABI");
+_Static_assert(offsetof(struct MultiplayerMenuMailbox, towerRecord) == 276, "Menu Tower record offset");
 const u32 gMultiplayerMenuReleaseAbiVersion = MP_MENU_RELEASE_ABI;
 // Battle Tower: Legends (tower_legends.h): flags 4 start a solo floor, 5 open Hyper Training.
 #define MENU_FLAGS_MAX MP_MENU_FLAG_HYPER_TRAINING
@@ -73,6 +75,10 @@ static bool32 ValidText(const u8 *text, u32 size)
 // The owner's report (2026-10-23): the host save page (3) showed the old 2D window for a moment, also in 3D. That page
 // only asks the launcher to save (the companion closes it at once), so it draws nothing.
 static bool8 sQuiet;
+// KNOWN_ISSUES MS-52: the host's Tower record that came with the screen shown (sTowerRecordScreen: that screen's
+// revision; 0: none).
+static struct MultiplayerMenuTowerRecord sTowerRecord;
+static u32 sTowerRecordScreen;
 
 // Battle Tower: Legends: a Tower screen (flags 4 or 5) has no rows; flags 4 carry the solo command in the rows' bytes.
 static bool32 ValidTowerScreen(const struct MultiplayerMenuScreen *screen)
@@ -86,6 +92,24 @@ static bool32 ValidTowerScreen(const struct MultiplayerMenuScreen *screen)
         return Zero(rows, sizeof(screen->rows));
     memcpy(&command, rows, sizeof(command));
     return TowerLegends_ValidCommand(&command) && Zero(rows + sizeof(command), sizeof(screen->rows) - sizeof(command));
+}
+
+// KNOWN_ISSUES MS-52: the record that came with an accepted screen is kept with it when the screen is a Tower page (an
+// ordinary screen with a style) and the record is whole and within the TOWER_STATE word's bounds; any other screen, or
+// a record that is not, leaves none, and the save's record stands.
+static void KeepTowerRecord(const struct MultiplayerMenuTowerRecord *record, const struct MultiplayerMenuScreen *screen)
+{
+    if (screen->flags == 0 && screen->reserved[2] != TOWER_STYLE_NONE && record->magic == MP_MENU_TOWER_RECORD_MAGIC
+     && record->progress >= 1 && record->progress <= TOWER_FLOOR_COUNT + 1 && record->highest <= TOWER_FLOOR_COUNT)
+    {
+        sTowerRecord = *record;
+        sTowerRecordScreen = screen->screen;
+    }
+    else
+    {
+        memset(&sTowerRecord, 0, sizeof(sTowerRecord));
+        sTowerRecordScreen = 0;
+    }
 }
 #endif
 
@@ -247,6 +271,7 @@ static bool32 Begin(void)
     sMultiplayerMenuActive = sMultiplayerMenuWaiting = TRUE;
 #ifdef PORTABLE
     sQuiet = sOpenPage == MP_MENU_PAGE_HOST_SAVE;
+    sTowerRecordScreen = 0;
     Publish(MP_MENU_OPEN, sOpenPage, 0);
     sOpenPage = 0;
 #else
@@ -337,6 +362,7 @@ static bool32 ReleaseAdmission(const struct MultiplayerMenuScreen *screen)
     sBattleAdmissionLatched = FALSE;
     sMultiplayerMenuScreen = *screen;
     sMultiplayerMenuScreen.flags = 0;
+    sTowerRecordScreen = 0; // a release carries no Tower record (MS-52)
     sMultiplayerMenuWaiting = FALSE;
     if (sMultiplayerMenuCursor >= sMultiplayerMenuScreen.count) sMultiplayerMenuCursor = 0;
     Render();
@@ -357,6 +383,11 @@ static void ReadScreen(void)
 #endif
 #line 242 // gba-line
     screen = gMultiplayerMenuMailbox.screen;
+#ifdef PORTABLE
+    // KNOWN_ISSUES MS-52: the host's Tower record, read under the same generation as the screen it came with.
+    struct MultiplayerMenuTowerRecord record = gMultiplayerMenuMailbox.towerRecord;
+#endif
+#line 243 // gba-line
     if (generation != gMultiplayerMenuMailbox.inboundGeneration) return;
 #ifdef PORTABLE
     // Latched: every other screen stays unread, as before; a release is read once.
@@ -423,6 +454,10 @@ static void ReadScreen(void)
     if (screen.flags) { Close(); return; }
     if (screen.screen == sMultiplayerMenuScreen.screen) return;
     sMultiplayerMenuScreen = screen; sMultiplayerMenuWaiting = FALSE;
+#ifdef PORTABLE
+    KeepTowerRecord(&record, &screen);
+#endif
+#line 269 // gba-line
     if (sMultiplayerMenuCursor >= sMultiplayerMenuScreen.count) sMultiplayerMenuCursor = 0;
     Render();
 }
@@ -522,6 +557,17 @@ bool32 MultiplayerMenu_NativeUiState(struct NativeMpMenu *out)
     admission = sMultiplayerMenuScreen.reserved[0] | sMultiplayerMenuScreen.reserved[1] << 8;
     out->towerStyle = sMultiplayerMenuScreen.reserved[2];
     out->towerArg = sMultiplayerMenuScreen.reserved[3];
+    {
+        struct MultiplayerMenuTowerRecord record;
+
+        if (MultiplayerMenu_TowerRecordShown(&record)) // KNOWN_ISSUES MS-52: the host's own numbers for this page
+        {
+            out->hostRecord = TRUE;
+            out->hostProgress = record.progress;
+            out->hostHighest = record.highest;
+            out->hostClaims = record.claims;
+        }
+    }
     for (u32 row = 0; row < out->count; row++)
     {
         memcpy(out->rows[row], sMultiplayerMenuScreen.rows[row].label, sizeof(sMultiplayerMenuScreen.rows[row].label));
@@ -531,3 +577,20 @@ bool32 MultiplayerMenu_NativeUiState(struct NativeMpMenu *out)
     return TRUE;
 }
 #endif // ENABLE_NATIVE_UI
+
+#ifdef PORTABLE
+// KNOWN_ISSUES MS-52: the host's record kept with the Tower page shown, while that page is the window's screen.
+bool32 MultiplayerMenu_TowerRecordShown(struct MultiplayerMenuTowerRecord *out)
+{
+    if (!sMultiplayerMenuActive || sTowerRecordScreen == 0 || sTowerRecordScreen != sMultiplayerMenuScreen.screen
+     || sMultiplayerMenuScreen.reserved[2] == TOWER_STYLE_NONE)
+        return FALSE;
+    *out = sTowerRecord;
+    return TRUE;
+}
+
+// --selftest-tower (src/platform/native_selftest_tower.c): the window without the field or a text window (Render draws
+// nothing without one), and a screen read by the frame's own ReadScreen.
+bool32 MultiplayerMenu_SelfTestBegin(void) { return Begin(); }
+void MultiplayerMenu_SelfTestReadScreen(void) { ReadScreen(); }
+#endif

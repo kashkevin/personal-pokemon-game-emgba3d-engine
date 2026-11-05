@@ -24,6 +24,20 @@ struct MultiplayerMenuScreen {
     struct MultiplayerMenuRow rows[6];
     u8 reserved[4];
 };
+#ifdef PORTABLE
+// KNOWN_ISSUES MS-52 (bridge cap towerRecord, the launcher's tower_record=1; the manifest's marker is tower_legends.c's
+// gMultiplayerTowerRecordAbiVersion): the host's own Tower record for this player, sent after a Tower page's screen (a
+// style 1-8) in the same 'M' frame and kept at mailbox offset 276 with that screen (zero after any other screen). The
+// native Tower screens draw from it while the save's copy waits for the host's TOWER_STATE word, which is applied only
+// on the field.
+#define MP_MENU_TOWER_RECORD_MAGIC 0x31485754u // "TWH1"
+struct MultiplayerMenuTowerRecord {
+    u32 magic;
+    u8 progress;  // the floor to climb next, 1..101 (101: all cleared)
+    u8 highest;   // the highest floor cleared, 0..100
+    u16 claims;   // the claim bits as the host holds them (prizes 0-11, milestone Pokemon 12-15)
+};
+#endif
 struct MultiplayerMenuMailbox {
     u32 magic;
     u16 abiVersion, byteSize;
@@ -31,7 +45,12 @@ struct MultiplayerMenuMailbox {
     struct MultiplayerMenuRequest request;
     u32 inboundGeneration;
     struct MultiplayerMenuScreen screen;
+#ifdef PORTABLE
+    struct MultiplayerMenuTowerRecord towerRecord;
+    u8 reserved[228];
+#else
     u8 reserved[236];
+#endif
 };
 extern const u32 gMultiplayerMenuAbiVersion;
 extern volatile struct MultiplayerMenuMailbox gMultiplayerMenuMailbox;
@@ -59,6 +78,11 @@ extern const u32 gMultiplayerHostSavePageAbiVersion;
 #define MP_MENU_FLAG_NEW_PAGE 0x80
 extern const u32 gMultiplayerMenuNewPageAbiVersion;
 bool32 MultiplayerMenu_OpenPage(u16 page);
+// KNOWN_ISSUES MS-52: the host's record kept with the Tower page shown (FALSE: none; the save's record stands).
+bool32 MultiplayerMenu_TowerRecordShown(struct MultiplayerMenuTowerRecord *out);
+// --selftest-tower: the window without the field or its text window (Begin), a screen read by the frame's ReadScreen.
+bool32 MultiplayerMenu_SelfTestBegin(void);
+void MultiplayerMenu_SelfTestReadScreen(void);
 #endif
 
 void MultiplayerMenu_Init(void);

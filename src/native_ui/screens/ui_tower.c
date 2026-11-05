@@ -5,7 +5,8 @@
  * (the screen's bytes 238-239: NativeMpMenu towerStyle and towerArg), the link
  * device beside the host's sheet (screens/ui_players.c) shows the Tower from
  * what this game itself knows: its save's Tower record (the climb's floor, the
- * highest floor cleared, the checkpoint, the prizes claimed), the floor table
+ * highest floor cleared, the checkpoint, the prizes claimed; the host's own
+ * record instead when it came with the page, KNOWN_ISSUES MS-52), the floor table
  * compiled into it (each floor's kind, region, difficulty and its trainers'
  * names, classes and pictures), its Battle Points, its Bag and its party. The
  * screens: home (the next boss), the 100-floor map, a floor's preview (never
@@ -159,11 +160,27 @@ void UiTower_Capture(const struct NativeMpMenu *menu)
         if (floor > sT.listLast)
             sT.listLast = floor;
     }
-    sT.progress = TowerLegends_Progress();
-    sT.highest = TowerLegends_Highest();
-    sT.checkpoint = TowerLegends_Checkpoint();
-    sT.claims = TowerLegends_Claims();
-    sT.pending = TowerLegends_HasPendingResult();
+    if (menu->hostRecord)
+    {
+        // KNOWN_ISSUES MS-52: the host's own numbers, sent with this page. The save's copy changes only when the host's
+        // TOWER_STATE word is applied on the field, never while this menu is open, so right after a settlement it still
+        // names the floor before. The save's result waiting to be settled is one the host has settled once its record
+        // has moved on from the save's (a result can only wait while the save's numbers are the host's last ones).
+        sT.progress = menu->hostProgress;
+        sT.highest = menu->hostHighest;
+        sT.checkpoint = TowerLegends_CheckpointBelow(sT.highest);
+        sT.claims = menu->hostClaims;
+        sT.pending = TowerLegends_HasPendingResult() && sT.progress == TowerLegends_Progress()
+                  && sT.highest == TowerLegends_Highest();
+    }
+    else
+    {
+        sT.progress = TowerLegends_Progress();
+        sT.highest = TowerLegends_Highest();
+        sT.checkpoint = TowerLegends_Checkpoint();
+        sT.claims = TowerLegends_Claims();
+        sT.pending = TowerLegends_HasPendingResult();
+    }
     sT.bp = gSaveBlock2Ptr->frontier.battlePoints;
     sT.trainers[0].there = sT.trainers[1].there = FALSE;
     sT.focus = 0;
