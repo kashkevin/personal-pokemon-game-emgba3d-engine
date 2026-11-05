@@ -146,7 +146,10 @@ def markdown(entries, args):
               f"    --out {sweep} --jobs 1",
               f"tools/qa/geometry_check.py check --out {sweep} --tour {sweep}/tour.txt",
               f"tools/qa/map_coverage.py --sweep {sweep} --out <this report>"
-              + (" --intro <its introduction>" if args.intro else ""),
+              + (" --intro <its introduction>" if args.intro else "")
+              + (f" \\\n    --previous {args.previous_path or args.previous}" if args.previous else "")
+              + (f" --previous-label \"{args.previous_label}\"" if args.previous and args.previous_label else "")
+              + (" --not-run-note <the note below>" if args.not_run_note else ""),
               "```", "",
               "The pictures and the cell dumps the sweep writes (`shots/`, `cells/`) are the game's art and stay out "
               "of the repositories.", ""]
@@ -178,7 +181,8 @@ def markdown(entries, args):
         if status == "not inspected" and args.not_run_note:
             lines += [args.not_run_note, ""]
         for (label, reason), names in sorted(reasons.items(), key=lambda item: -len(item[1])):
-            shown = ", ".join(names) if len(names) <= 12 else f"{', '.join(names[:6])} ... ({len(names)} maps)"
+            # every map named, but for the long lists of maps outside the game (FireRed/LeafGreen: in the table)
+            shown = ", ".join(names) if len(names) <= 60 else f"{', '.join(names[:6])} ... ({len(names)} maps)"
             why = f"{reason}{'' if reason.endswith('.') else '.'} " if reason else ""
             lines.append(f"* **{label}** ({len(names)}): {why}Maps: {shown}")
             earlier = [e for e in entries if e["map"] in names and e.get("previous")]
@@ -221,6 +225,8 @@ def main():
     parser.add_argument("--previous", help="an earlier sweep's report (its tables' Map / Status / Cells seen): what it "
                                            "made of the maps this run did not get to")
     parser.add_argument("--previous-label", help="that sweep, as the report names it (its date and engine)")
+    parser.add_argument("--previous-path", help="that report's path as the report's commands name it (default "
+                                                "--previous)")
     args = parser.parse_args()
     manifest = json.load(open(os.path.join(args.sweep, "manifest.json")))
     previous = previous_sweep(args.previous) if args.previous else None
