@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
-"""MS-108, the offline step: the battle transitions' own GBA art (the Battle Frontier's logo and circles, the
+"""MS-108, offline previews: the battle transitions' own GBA art (the Battle Frontier's logo and circles, the
 legendaries', Regis' and the teams' patterns) as smooth high-resolution label maps, from the art itself.
 
-    python3 tools/native_ui/transition_art_hd.py OUT_DIR [--scale 8] [--only NAME,...] [--root .]
+    python3 tools/native_ui/transition_art_hd.py OUT_DIR [--scale 8] [--sigma 0.75] [--boost 1.5] [--only NAME,...]
 
 For each picture (a BG0 tileset and tilemap, or the circles' sprite sheet) every palette slot's pixels (and the empty
-background's) become a smooth membership field (nearest-upscaled, blurred: an approximate distance field); each output
-pixel takes the slot with the most, with the runner-up across a one-pixel edge. The pixel stairs become the circles,
-ellipses and straight strokes the art draws, with no seam between colours; the shapes, proportions and colours stay the
-GBA's. Written per picture:
+background's) become a smooth membership field (nearest-upscaled, blurred by a Gaussian of SIGMA art pixels); slots
+whose strokes are thin (a mean width, twice the area over the outline, of 1.5 pixels or less) weigh up to BOOST times as
+much, so one-pixel lines and rims stay whole; each output pixel takes the slot with the most, blended with the
+runner-up over one output pixel. The pixel stairs become the circles, ellipses and straight strokes the art draws; the
+shapes, proportions and colours stay the GBA's. Written per picture:
 
   NAME.slots.png    RGB: R = the winning slot (palette bank << 4 | colour index), G = the runner-up, B = the blend
-                    (255: all R). A renderer colours R and G from the game's own palette of that frame
-                    (gPlttBufferFaded: the patterns' palette cycling and the fades stay the game's) and mixes them by B.
+                    (255: all R), to be coloured from the game's palette of the frame.
   NAME.preview.png  the same coloured with the picture's own palette file, beside the GBA picture at the same size, for
                     a look by eye.
 
-Only reads graphics/battle_transitions/. Not used by the game yet: the native UI's transition screen
-(src/native_ui/screens/ui_transition.c) would draw these at the window's resolution with BG0's scroll and line offsets,
-the GBA BG0 / circle sprites hidden as it already does for the big Poke Ball (docs of the app,
-battle-fx-past-package-20261105.md, MS-108).
+Only reads graphics/battle_transitions/. The game does the same at run time and needs nothing from here: the native
+UI (src/native_ui/ui_transition_art.c) computes these fields in a shader at every window pixel straight from the art in
+VRAM, with the game's palette of the frame and BG0's scroll by line (the same SIGMA and BOOST; its blur is exact where
+this one is PIL's). This tool shows the look offline (the app's docs, battle-fx-past-package-20261105.md, MS-108).
 """
 import argparse
 import os
@@ -40,7 +40,7 @@ PICTURES = {
     "frontier_logo_circles": ("frontier_logo_circles.png", None, None, 0, (0, 0, 64, 192)),
     "kyogre": ("kyogre.png", "kyogre.bin", ("kyogre_pt1.pal", 0), 32, (0, 0, 240, 160)),
     "groudon": ("groudon.png", "groudon.bin", ("groudon_pt1.pal", 0), 32, (0, 0, 240, 160)),
-    "rayquaza": ("rayquaza.png", "rayquaza.bin", ("rayquaza.pal", 5), 32, (0, 0, 256, 320)),
+    "rayquaza": ("rayquaza.png", "rayquaza.bin", ("rayquaza.pal", 5), 32, (0, 0, 256, 416)),  # both pages
     "regice": ("regis.png", "regice.bin", ("regice.pal", 0), 32, (0, 0, 240, 160)),
     "registeel": ("regis.png", "registeel.bin", ("registeel.pal", 0), 32, (0, 0, 240, 160)),
     "regirock": ("regis.png", "regirock.bin", ("regirock.pal", 0), 32, (0, 0, 240, 160)),
@@ -92,22 +92,38 @@ def picture(gfx, tileset, tilemap, mapw):
     return idx, bank, img
 
 
-def label_maps(idx, bank, scale, soft=0.55):
+def stroke_weights(slot, boost):
+    """Each slot's weight from its mean width (twice its pixels over its outline's edges), as the game's."""
+    out = {}
+    right = slot != np.roll(slot, -1, axis=1)
+    down = slot != np.roll(slot, -1, axis=0)
+    for k in sorted(set(slot.flatten().tolist())):
+        m = slot == k
+        edges = ((right & m).sum() + (right & np.roll(m, -1, axis=1)).sum()
+                 + (down & m).sum() + (down & np.roll(m, -1, axis=0)).sum())
+        width = 2.0 * m.sum() / edges if edges else 1e9
+        out[k] = 1.0 if (k & 15) == 0 else 1.0 + (boost - 1.0) * min(max((3.5 - width) / 2.0, 0.0), 1.0)
+    return out
+
+
+def label_maps(idx, bank, scale, sigma=0.75, boost=1.5):
     """R, G, B planes of NAME.slots.png (see the module's text)."""
     h, w = idx.shape
     slot = np.where(idx == 0, 0, (bank.astype(np.int32) << 4) | idx).astype(np.int32)
     keys = sorted(set(slot.flatten().tolist()))
+    weight = stroke_weights(slot, boost)
     fields = []
     for k in keys:
         m = (slot == k).astype(np.uint8) * 255
-        big = Image.fromarray(m).resize((w * scale, h * scale), Image.NEAREST).filter(ImageFilter.GaussianBlur(scale * soft))
-        fields.append(np.asarray(big, np.float32) / 255.0)
+        big = Image.fromarray(m).resize((w * scale, h * scale), Image.NEAREST)
+        big = big.filter(ImageFilter.GaussianBlur(scale * sigma))
+        fields.append(np.asarray(big, np.float32) / 255.0 * weight[k])
     F = np.stack(fields)
     order = np.argsort(-F, axis=0)
     a, b = order[0], order[1] if len(keys) > 1 else order[0]
     fa = np.take_along_axis(F, a[None], 0)[0]
     fb = np.take_along_axis(F, b[None], 0)[0]
-    t = np.clip((fa - fb) * 4.0, 0, 1) * 0.5 + 0.5
+    t = np.clip((fa - fb) * 2.5 * sigma * scale, 0, 1) * 0.5 + 0.5   # over one output pixel, as the game's
     K = np.array(keys, np.int32)
     return K[a].astype(np.uint8), K[b].astype(np.uint8), (t * 255).astype(np.uint8)
 
@@ -127,6 +143,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("out")
     ap.add_argument("--scale", type=int, default=8)
+    ap.add_argument("--sigma", type=float, default=0.75)
+    ap.add_argument("--boost", type=float, default=1.5)
     ap.add_argument("--only", default="")
     ap.add_argument("--root", default=ROOT)
     o = ap.parse_args()
@@ -139,7 +157,7 @@ def main():
         idx, bank, img = picture(gfx, tileset, tilemap, mapw)
         x0, y0, w, h = crop
         idx, bank = idx[y0:y0 + h, x0:x0 + w], bank[y0:y0 + h, x0:x0 + w]
-        r, g, b = label_maps(idx, bank, o.scale)
+        r, g, b = label_maps(idx, bank, o.scale, o.sigma, o.boost)
         Image.fromarray(np.dstack([r, g, b])).save(os.path.join(o.out, name + ".slots.png"))
         keys = sorted(set(r.flatten().tolist()) | set(g.flatten().tolist()))
         col = colours(img, os.path.join(gfx, pal[0]) if pal else None, pal[1] if pal else 0, keys)

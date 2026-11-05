@@ -209,7 +209,8 @@ static void TraceBattlers(void)
 
 // PKMN_DEBUG_BATTLE=wild:species:level | trainer:id  (with the field scene): a battle from the overworld of a fresh game, started
 // when the field has settled and PKMN_DEBUG_BATTLE_AT game frames have passed; PKMN_DEBUG_BATTLE_AGAIN=n starts a second one n frames
-// after the first has ended (the first-battle checks of the battle-to-overworld transition).
+// after the first has ended (the first-battle checks of the battle-to-overworld transition). legend:species:level starts it as the
+// legendaries' scripts do (BattleSetup_StartLegendaryBattle, StartRegiBattle for a Regi), with their own battle transitions.
 static struct { bool read, started; int kind, a, b; unsigned at, frames, again, endedFrame; int count; bool wasInBattle; } sBattleScript;
 
 static void BattleScriptTick(void)
@@ -223,7 +224,8 @@ static void BattleScriptTick(void)
         sBattleScript.read = true;
         if ((value = SDL_getenv("PKMN_DEBUG_BATTLE")) != NULL && sscanf(value, "%15[a-z]:%d:%d", kind, &a, &b) >= 2)
         {
-            sBattleScript.kind = strcmp(kind, "trainer") == 0 ? 2 : strcmp(kind, "first") == 0 ? 3 : strcmp(kind, "bag") == 0 ? 4 : 1;
+            sBattleScript.kind = strcmp(kind, "trainer") == 0 ? 2 : strcmp(kind, "first") == 0 ? 3 : strcmp(kind, "bag") == 0 ? 4
+                               : strcmp(kind, "legend") == 0 ? 5 : 1;
             sBattleScript.a = a;
             sBattleScript.b = b > 0 ? b : 5;
         }
@@ -271,6 +273,14 @@ static void BattleScriptTick(void)
     {
         CreateScriptedWildMon((enum Species)sBattleScript.a, (u8)sBattleScript.b, ITEM_NONE);
         BattleSetup_StartScriptedWildBattle();
+    }
+    else if (sBattleScript.kind == 5)
+    {
+        CreateScriptedWildMon((enum Species)sBattleScript.a, (u8)sBattleScript.b, ITEM_NONE);
+        if (sBattleScript.a == SPECIES_REGIROCK || sBattleScript.a == SPECIES_REGICE || sBattleScript.a == SPECIES_REGISTEEL)
+            StartRegiBattle();
+        else
+            BattleSetup_StartLegendaryBattle();
     }
     else
     {
