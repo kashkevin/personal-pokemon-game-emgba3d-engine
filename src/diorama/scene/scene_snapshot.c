@@ -692,6 +692,225 @@ static bool TryCopySecondMapCell(struct DioramaSceneSnapshot *snapshot, int mapX
     return false;
 }
 
+/*
+ * The border a cell past every map shows (KNOWN_ISSUES MS-118, 2026-11-05): that of the nearest of the map, its
+ * neighbours and theirs (by the cell's distance to each one's layout, the lower map number on a tie), drawn as that
+ * map draws its border. The GBA shows the map's own border block past everything, and so did this view: from
+ * Mauville the trees past the corner of Route 117 were Mauville's border, from Route 117 its own, so crossing the seam
+ * swapped a band of distant trees at once, and every chunk holding them was built again. The nearest map's is the
+ * same from either side of a seam. A map whose tiles this view cannot draw (another primary tileset, no page free)
+ * leaves the map's own, as before; PKMN_DIORAMA_NEAREST_BORDER=0 keeps the map's own everywhere.
+ */
+#define MAX_BORDER_SOURCES 24
+
+struct BorderSource
+{
+    const struct MapHeader *header;
+    u8 mapGroup;
+    u8 mapNum;
+    s32 originX; /* its layout's (0, 0) on the map's own layout */
+    s32 originY;
+};
+
+static struct BorderSource sBorderSources[MAX_BORDER_SOURCES];
+static u8 sBorderSourceCount;
+static const struct MapLayout *sBorderSourcesLayout;
+static u8 sBorderSourcesGroup;
+static u8 sBorderSourcesNum;
+
+static bool NearestBorders(void)
+{
+    static int sEnabled = -1;
+
+    if (sEnabled < 0)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_NEAREST_BORDER");
+
+        sEnabled = value == NULL || value[0] != '0';
+    }
+    return sEnabled;
+}
+
+/* Where a connected map's layout lies on the layout it is connected from (ToConnectedMap's inverse). */
+static void ConnectionOrigin(const struct MapConnection *connection, const struct MapLayout *from,
+                             const struct MapLayout *to, s32 *originX, s32 *originY)
+{
+    switch (connection->direction)
+    {
+    case CONNECTION_NORTH: *originX = connection->offset; *originY = -to->height; break;
+    case CONNECTION_SOUTH: *originX = connection->offset; *originY = from->height; break;
+    case CONNECTION_WEST: *originX = -to->width; *originY = connection->offset; break;
+    case CONNECTION_EAST: *originX = from->width; *originY = connection->offset; break;
+    default: *originX = -100000; *originY = -100000; break;
+    }
+}
+
+static void AddBorderSource(const struct MapHeader *header, u8 mapGroup, u8 mapNum, s32 originX, s32 originY)
+{
+    unsigned i;
+
+    if (header == NULL || header->mapLayout == NULL || header->mapLayout->border == NULL
+     || header->mapLayout->width <= 0 || header->mapLayout->height <= 0 || sBorderSourceCount >= MAX_BORDER_SOURCES)
+        return;
+    for (i = 0; i < sBorderSourceCount; i++)
+        if (sBorderSources[i].mapGroup == mapGroup && sBorderSources[i].mapNum == mapNum)
+            return; /* reached a second way (maps in a ring): the first holds */
+    sBorderSources[sBorderSourceCount].header = header;
+    sBorderSources[sBorderSourceCount].mapGroup = mapGroup;
+    sBorderSources[sBorderSourceCount].mapNum = mapNum;
+    sBorderSources[sBorderSourceCount].originX = originX;
+    sBorderSources[sBorderSourceCount].originY = originY;
+    sBorderSourceCount++;
+}
+
+/* The map, then its neighbours, then theirs: once a map. */
+static void FindBorderSources(void)
+{
+    const struct MapLayout *layout = gMapHeader.mapLayout;
+    u8 mapGroup = gSaveBlock1Ptr->location.mapGroup;
+    u8 mapNum = gSaveBlock1Ptr->location.mapNum;
+    int pass;
+
+    if (layout == sBorderSourcesLayout && mapGroup == sBorderSourcesGroup && mapNum == sBorderSourcesNum)
+        return;
+    sBorderSourcesLayout = layout;
+    sBorderSourcesGroup = mapGroup;
+    sBorderSourcesNum = mapNum;
+    sBorderSourceCount = 0;
+    AddBorderSource(&gMapHeader, mapGroup, mapNum, 0, 0);
+    if (gMapHeader.connections == NULL || layout == NULL)
+        return;
+    for (pass = 0; pass < 2; pass++)
+    {
+        int i;
+
+        for (i = 0; i < gMapHeader.connections->count; i++)
+        {
+            const struct MapConnection *first = &gMapHeader.connections->connections[i];
+            const struct MapHeader *header;
+            s32 x1;
+            s32 y1;
+            int k;
+
+            if (first->direction == CONNECTION_DIVE || first->direction == CONNECTION_EMERGE)
+                continue;
+            header = GetMapHeaderFromConnection(first);
+            if (header == NULL || header->mapLayout == NULL)
+                continue;
+            ConnectionOrigin(first, layout, header->mapLayout, &x1, &y1);
+            if (pass == 0)
+            {
+                AddBorderSource(header, first->mapGroup, first->mapNum, x1, y1);
+                continue;
+            }
+            for (k = 0; header->connections != NULL && k < header->connections->count; k++)
+            {
+                const struct MapConnection *second = &header->connections->connections[k];
+                const struct MapHeader *farHeader; /* not "far": a macro on Windows */
+                s32 x2;
+                s32 y2;
+
+                if (second->direction == CONNECTION_DIVE || second->direction == CONNECTION_EMERGE
+                 || (second->mapGroup == mapGroup && second->mapNum == mapNum))
+                    continue;
+                farHeader = GetMapHeaderFromConnection(second);
+                if (farHeader == NULL || farHeader->mapLayout == NULL)
+                    continue;
+                ConnectionOrigin(second, header->mapLayout, farHeader->mapLayout, &x2, &y2);
+                AddBorderSource(farHeader, second->mapGroup, second->mapNum, x1 + x2, y1 + y2);
+            }
+        }
+    }
+}
+
+/* The nearest border source to (x, y) of the map's own layout (NULL: none). */
+static const struct BorderSource *NearestBorderSource(s32 x, s32 y)
+{
+    const struct BorderSource *best = NULL;
+    u32 bestDistance = 0;
+    unsigned i;
+
+    for (i = 0; i < sBorderSourceCount; i++)
+    {
+        const struct BorderSource *source = &sBorderSources[i];
+        s32 right = source->originX + source->header->mapLayout->width;
+        s32 bottom = source->originY + source->header->mapLayout->height;
+        s32 dx = x < source->originX ? source->originX - x : (x >= right ? x - right + 1 : 0);
+        s32 dy = y < source->originY ? source->originY - y : (y >= bottom ? y - bottom + 1 : 0);
+        u32 distance = (u32)(dx * dx + dy * dy);
+
+        if (best == NULL || distance < bestDistance
+         || (distance == bestDistance
+          && ((source->mapGroup << 8) | source->mapNum) < ((best->mapGroup << 8) | best->mapNum)))
+        {
+            best = source;
+            bestDistance = distance;
+        }
+    }
+    return best;
+}
+
+/* A layout's border block at (x, y) of that layout, as GetBorderBlockAt reads it on its own map. */
+static u16 BorderEntryOf(const struct MapLayout *layout, s32 x, s32 y)
+{
+    if (layout->isFrlg && layout->borderWidth != 0 && layout->borderHeight != 0)
+    {
+        s32 column = ((x % layout->borderWidth) + layout->borderWidth) % layout->borderWidth;
+        s32 row = ((y % layout->borderHeight) + layout->borderHeight) % layout->borderHeight;
+
+        return layout->border[column + row * layout->borderWidth] | MAPGRID_COLLISION_MASK;
+    }
+    {
+        int i = (x + MAP_OFFSET + 1) & 1;
+
+        i += ((y + MAP_OFFSET + 1) & 1) * 2;
+        return layout->border[i] | MAPGRID_IMPASSABLE;
+    }
+}
+
+/* A cell past every map with the border of the nearest map but the map's own, drawn from its tiles or its page.
+ * False when its tiles cannot be drawn here (the cell left as it was). */
+static bool CopyNearestBorderCell(struct DioramaSceneSnapshot *snapshot, int mapX, int mapY,
+                                  struct DioramaCellSnapshot *cell)
+{
+    const struct BorderSource *source;
+    const struct MapLayout *layout;
+    struct DioramaCellSnapshot outside = *cell;
+    u16 entry;
+    u8 page = 0;
+
+    FindBorderSources();
+    source = NearestBorderSource(mapX - MAP_OFFSET, mapY - MAP_OFFSET);
+    if (source == NULL || source->header == &gMapHeader)
+        return false;
+    layout = source->header->mapLayout;
+    if (layout->primaryTileset != gMapHeader.mapLayout->primaryTileset
+     || layout->isFrlg != gMapHeader.mapLayout->isFrlg)
+        return false;
+    if (layout->secondaryTileset != gMapHeader.mapLayout->secondaryTileset)
+    {
+        /* only on a page a real cell of this snapshot took for these tiles: a border's own would bring tilesets
+         * into the atlas for the far border alone, and its pages and their art would come and go as the player
+         * walks (the atlas drawn again each time) */
+        for (page = 0; page < DIORAMA_NEIGHBOUR_PAGES; page++)
+            if (sPageUsed[page] && sPageTilesets[page] == layout->secondaryTileset)
+                break;
+        if (page == DIORAMA_NEIGHBOUR_PAGES)
+            return false;
+        page++;
+    }
+    entry = BorderEntryOf(layout, mapX - MAP_OFFSET - source->originX, mapY - MAP_OFFSET - source->originY);
+    cell->sourceMapGroup = source->mapGroup;
+    cell->sourceMapNum = source->mapNum;
+    cell->sourceLayoutId = source->header->mapLayoutId;
+    cell->flags = DIORAMA_CELL_BORDER;
+    cell->atlasPage = page;
+    if (CopyCellVisual(layout, UNPACK_METATILE(entry), UNPACK_COLLISION(entry), UNPACK_ELEVATION(entry), cell))
+        return true;
+    *cell = outside;
+    return false;
+}
+
 /* A cell past the map and its neighbours: the border block (DIORAMA_CELL_BORDER where no neighbour lies that way). */
 static bool CopyOutsideCell(struct DioramaSceneSnapshot *snapshot, int mapX, int mapY, struct DioramaCellSnapshot *cell)
 {
@@ -905,6 +1124,14 @@ static bool CopyCells(struct DioramaSceneSnapshot *snapshot)
         struct DioramaCellSnapshot *cell = &snapshot->cells[sOutside[i]];
 
         TryCopySecondMapCell(snapshot, cell->mapX, cell->mapY, cell);
+    }
+    /* Last, the border cells left (CopyNearestBorderCell): a page they take is one no real cell wanted. */
+    for (i = 0; NearestBorders() && i < outsideCount; i++)
+    {
+        struct DioramaCellSnapshot *cell = &snapshot->cells[sOutside[i]];
+
+        if ((cell->flags & DIORAMA_CELL_BORDER) && !(cell->flags & DIORAMA_CELL_SOURCE_VALID))
+            CopyNearestBorderCell(snapshot, cell->mapX, cell->mapY, cell);
     }
     snapshot->visibleCellCount = DIORAMA_MAX_VISIBLE_CELLS;
     ApplyTreeSprites(snapshot);

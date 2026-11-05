@@ -49,17 +49,45 @@ struct DioramaAtlasArt
     const uint16_t *unfadedPalette;
 };
 
+/*
+ * The atlas's regions (KNOWN_ISSUES MS-118, 2026-11-05): the secondary
+ * metatiles of a page (scene_snapshot.h, atlasPage) are drawn in a region of
+ * the atlas, region 0 slots 512 to 1023 (after the shared primary metatiles
+ * 0 to 511) and region r (1 on) the r-th DIORAMA_PAGE_METATILE_COUNT slots
+ * after them. A tileset keeps its region while it is in view
+ * (DioramaAtlas_SetPages): crossing into a neighbouring map turns the pages
+ * round (page 0 is always the map the player is on) but not the regions, so
+ * every cell keeps its slot, the atlas keeps its art and the chunks built from
+ * them stand. gDioramaAtlasPageRegion[page] is the region of each page, set by
+ * DioramaAtlas_SetPages on the render thread (identity until the first call).
+ */
+extern uint8_t gDioramaAtlasPageRegion[1 + DIORAMA_NEIGHBOUR_PAGES];
+
 /* The slot of a metatile of a page (0: the map's own), DIORAMA_ATLAS_NO_SLOT
  * for no metatile. */
 static inline uint16_t DioramaAtlas_Slot(uint8_t page, uint16_t metatileId)
 {
+    uint8_t region;
+
     if (metatileId >= DIORAMA_TILE_COUNT || page > DIORAMA_NEIGHBOUR_PAGES)
         return DIORAMA_ATLAS_NO_SLOT;
-    if (page == 0 || metatileId < DIORAMA_PAGE_FIRST_METATILE)
+    if (metatileId < DIORAMA_PAGE_FIRST_METATILE)
         return metatileId;
-    return DIORAMA_TILE_COUNT + (page - 1) * DIORAMA_PAGE_METATILE_COUNT
+    region = gDioramaAtlasPageRegion[page];
+    if (region == 0)
+        return metatileId;
+    return DIORAMA_TILE_COUNT + (region - 1) * DIORAMA_PAGE_METATILE_COUNT
          + (metatileId - DIORAMA_PAGE_FIRST_METATILE);
 }
+
+/* The region (above) of a page, and the secondary tileset a region holds (NULL: none yet). */
+static inline uint8_t DioramaAtlas_PageRegion(uint8_t page)
+{
+    return page <= DIORAMA_NEIGHBOUR_PAGES ? gDioramaAtlasPageRegion[page] : 0;
+}
+const void *DioramaAtlas_RegionTileset(uint8_t region);
+/* False with PKMN_DIORAMA_STICKY_PAGES=0: each page's region is its own number, as before (for comparisons). */
+bool DioramaAtlas_StickyRegions(void);
 
 static inline uint16_t DioramaAtlas_CellSlot(const struct DioramaCellSnapshot *cell)
 {
@@ -94,8 +122,15 @@ struct DioramaAtlasArt DioramaAtlas_PageArt(const struct DioramaSceneSnapshot *s
                                             uint8_t page);
 struct DioramaAtlasArt DioramaAtlas_CellArt(const struct DioramaSceneSnapshot *snapshot,
                                             const struct DioramaCellSnapshot *cell);
-/* The highest page set by DioramaAtlas_SetPages (0: none). */
+/* The highest region (above) of a page set by DioramaAtlas_SetPages (0: none but the map's own): the atlas rows in
+ * use are the map's and those of regions 1 to this one. */
 uint8_t DioramaAtlas_HighestPage(void);
+/*
+ * A signature of the art every region in use is drawn with this snapshot (DioramaAtlas_SetPages): its tileset and
+ * the faded palettes its cells are drawn with, and the live palettes the pages share. The same signature means the
+ * atlas's slots hold what they would be drawn with now, though the map changed (a crossing).
+ */
+uint32_t DioramaAtlas_DrawnSignature(void);
 /*
  * Fades colours as a palette was faded: every step the game takes from an
  * unfaded palette to the faded one (the day/night tint, a weather's colour

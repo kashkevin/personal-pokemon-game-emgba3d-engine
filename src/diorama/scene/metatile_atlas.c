@@ -1,5 +1,6 @@
 #ifdef ENABLE_DIORAMA
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "diorama/metatile_atlas.h"
@@ -19,6 +20,12 @@ static uint16_t sPageUnfaded[DIORAMA_NEIGHBOUR_PAGES][DIORAMA_FADED_PALETTE_ENTR
 static bool sPageSet[DIORAMA_NEIGHBOUR_PAGES];
 static uint8_t sHighestPage;
 static uint32_t sLastPageSignature;
+/* The regions (metatile_atlas.h): each page's, the secondary tileset each holds and the primary they were given
+ * under, and the last snapshot's drawn signature (DioramaAtlas_DrawnSignature). */
+uint8_t gDioramaAtlasPageRegion[1 + DIORAMA_NEIGHBOUR_PAGES] = {0, 1, 2, 3};
+static const void *sRegionTileset[1 + DIORAMA_NEIGHBOUR_PAGES];
+static const void *sRegionPrimary;
+static uint32_t sDrawnSignature;
 
 uint8_t DioramaMetatile_DecodePixel(const uint8_t *tileGraphics, uint16_t tileEntry,
                                     uint8_t x, uint8_t y)
@@ -374,9 +381,98 @@ static uint32_t HashBytes(uint32_t hash, const void *data, size_t size)
     return hash;
 }
 
+_Static_assert(DIORAMA_NEIGHBOUR_PAGES == 3, "gDioramaAtlasPageRegion's first value lists every region");
+
+/* PKMN_DIORAMA_STICKY_PAGES=0: each page's region is its own number (page 0 the map's), as before 2026-11-05. */
+bool DioramaAtlas_StickyRegions(void)
+{
+    static int sEnabled = -1;
+
+    if (sEnabled < 0)
+    {
+        const char *value = getenv("PKMN_DIORAMA_STICKY_PAGES");
+
+        sEnabled = value == NULL || value[0] != '0';
+    }
+    return sEnabled;
+}
+
+/* The first region no page has taken (one is always left: there are as many regions as pages). */
+static uint8_t FreeRegion(const bool *taken, uint8_t preferred)
+{
+    uint8_t region;
+
+    if (!taken[preferred])
+        return preferred;
+    for (region = 0; region <= DIORAMA_NEIGHBOUR_PAGES; region++)
+        if (!taken[region])
+            return region;
+    return preferred;
+}
+
+/*
+ * Each page's region (metatile_atlas.h): a page whose tileset a region holds keeps it; another tileset takes its
+ * own number's region when that is free, else the first free one (a region whose tileset is out of view: its art
+ * is drawn again as cells of the new one come into view, their slots not present). Pages not in use take what is
+ * left (no cell is drawn in them).
+ */
+static void AssignRegions(const struct DioramaSceneSnapshot *snapshot)
+{
+    const void *tilesets[1 + DIORAMA_NEIGHBOUR_PAGES];
+    bool taken[1 + DIORAMA_NEIGHBOUR_PAGES];
+    bool placed[1 + DIORAMA_NEIGHBOUR_PAGES];
+    uint8_t page;
+    uint8_t region;
+
+    memset(taken, 0, sizeof(taken));
+    memset(placed, 0, sizeof(placed));
+    tilesets[0] = snapshot->secondaryTileset;
+    for (page = 0; page < DIORAMA_NEIGHBOUR_PAGES; page++)
+        tilesets[1 + page] = sPageSet[page] ? snapshot->neighbourPages[page].tileset : NULL;
+    if (!DioramaAtlas_StickyRegions() || snapshot->primaryTileset != sRegionPrimary)
+    {
+        /* another primary tileset: the regions' art is another's (only maps sharing one are paged) */
+        memset(sRegionTileset, 0, sizeof(sRegionTileset));
+        sRegionPrimary = snapshot->primaryTileset;
+    }
+    if (DioramaAtlas_StickyRegions())
+        for (page = 0; page <= DIORAMA_NEIGHBOUR_PAGES; page++)
+        {
+            if (tilesets[page] == NULL)
+                continue;
+            for (region = 0; region <= DIORAMA_NEIGHBOUR_PAGES; region++)
+                if (!taken[region] && sRegionTileset[region] == tilesets[page])
+                {
+                    gDioramaAtlasPageRegion[page] = region;
+                    taken[region] = placed[page] = true;
+                    break;
+                }
+        }
+    for (page = 0; page <= DIORAMA_NEIGHBOUR_PAGES; page++)
+    {
+        if (placed[page] || tilesets[page] == NULL)
+            continue;
+        region = FreeRegion(taken, page);
+        gDioramaAtlasPageRegion[page] = region;
+        taken[region] = placed[page] = true;
+        sRegionTileset[region] = tilesets[page];
+    }
+    for (page = 0; page <= DIORAMA_NEIGHBOUR_PAGES; page++)
+    {
+        if (placed[page])
+            continue;
+        region = FreeRegion(taken, page);
+        gDioramaAtlasPageRegion[page] = region;
+        taken[region] = true;
+    }
+}
+
 uint32_t DioramaAtlas_SetPages(const struct DioramaSceneSnapshot *snapshot)
 {
     uint32_t signature = 2166136261u;
+    uint32_t drawn = 2166136261u;
+    const unsigned first = DIORAMA_PAGE_FIRST_PALETTE * 16;
+    const unsigned count = DIORAMA_PAGE_PALETTE_COUNT * 16;
     int page;
 
     sHighestPage = 0;
@@ -384,14 +480,11 @@ uint32_t DioramaAtlas_SetPages(const struct DioramaSceneSnapshot *snapshot)
     {
         const struct DioramaNeighbourPage *source = &snapshot->neighbourPages[page];
         uintptr_t identity = (uintptr_t)source->tileset;
-        const unsigned first = DIORAMA_PAGE_FIRST_PALETTE * 16;
-        const unsigned count = DIORAMA_PAGE_PALETTE_COUNT * 16;
 
         sPageSet[page] = source->tileset != NULL && source->tiles != NULL;
         signature = HashBytes(signature, &identity, sizeof(identity));
         if (!sPageSet[page])
             continue;
-        sHighestPage = page + 1;
         signature = HashBytes(signature, source->palettes, sizeof(source->palettes));
         memcpy(sPageTiles[page], snapshot->tileGraphics, DIORAMA_PAGE_FIRST_TILE * DIORAMA_TILE_BYTES);
         memcpy(sPageTiles[page] + DIORAMA_PAGE_FIRST_TILE * DIORAMA_TILE_BYTES, source->tiles,
@@ -402,8 +495,58 @@ uint32_t DioramaAtlas_SetPages(const struct DioramaSceneSnapshot *snapshot)
         DioramaAtlas_MapPalette(snapshot->unfadedPalette, snapshot->fadedPalette,
                                 source->palettes, sPageFaded[page] + first, count);
     }
-    sLastPageSignature = signature;
-    return signature;
+    AssignRegions(snapshot);
+    /* What the regions in use are drawn with: the live palettes every page shares (0 to 5: the primary metatiles'
+     * slots are every page's), then each region's tileset and its page's palettes 6 to 12. Not 13 to 15: no
+     * metatile is drawn with them (the message box's and the map name pop-up's change as the player walks). */
+    drawn = HashBytes(drawn, &sRegionPrimary, sizeof(sRegionPrimary));
+    drawn = HashBytes(drawn, snapshot->fadedPalette, first * sizeof(uint16_t));
+    {
+        /* by region, not by page: a crossing turns the pages round, and the same regions holding the same art must
+         * give the same signature */
+        const void *regionTileset[1 + DIORAMA_NEIGHBOUR_PAGES];
+        const uint16_t *regionFaded[1 + DIORAMA_NEIGHBOUR_PAGES];
+        uint8_t region;
+
+        memset(regionTileset, 0, sizeof(regionTileset));
+        memset(regionFaded, 0, sizeof(regionFaded));
+        for (page = 0; page <= DIORAMA_NEIGHBOUR_PAGES; page++)
+        {
+            const void *tileset = page == 0 ? snapshot->secondaryTileset
+                                : (sPageSet[page - 1] ? snapshot->neighbourPages[page - 1].tileset : NULL);
+
+            if (tileset == NULL)
+                continue;
+            region = gDioramaAtlasPageRegion[page];
+            regionTileset[region] = tileset;
+            regionFaded[region] = page == 0 ? snapshot->fadedPalette : sPageFaded[page - 1];
+            if (region > sHighestPage)
+                sHighestPage = region;
+        }
+        for (region = 0; region <= DIORAMA_NEIGHBOUR_PAGES; region++)
+        {
+            if (regionTileset[region] == NULL)
+                continue;
+            drawn = HashBytes(drawn, &region, sizeof(region));
+            drawn = HashBytes(drawn, &regionTileset[region], sizeof(regionTileset[region]));
+            drawn = HashBytes(drawn, regionFaded[region] + first, count * sizeof(uint16_t));
+        }
+    }
+    sDrawnSignature = drawn;
+    /* The pages' signature (the terrain's sync key): the regions, not the pages, hold the art, so it is the drawn
+     * one with the sticky regions, the pages' own as before without them. */
+    sLastPageSignature = DioramaAtlas_StickyRegions() ? drawn : signature;
+    return sLastPageSignature;
+}
+
+uint32_t DioramaAtlas_DrawnSignature(void)
+{
+    return sDrawnSignature;
+}
+
+const void *DioramaAtlas_RegionTileset(uint8_t region)
+{
+    return region <= DIORAMA_NEIGHBOUR_PAGES ? sRegionTileset[region] : NULL;
 }
 
 uint32_t DioramaAtlas_LastPageSignature(void)

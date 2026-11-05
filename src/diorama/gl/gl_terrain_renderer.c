@@ -203,7 +203,7 @@ static bool sDebugDrawn;        /* the last Draw was the terrain debug view */
  * far row (the owner's "ship animation is very laggy", 2026-10-25).
  */
 #define TERRAIN_NEAR_CELLS 13
-#define TERRAIN_OFFSCREEN_BUILDS 2
+#define TERRAIN_OFFSCREEN_BUILDS 6 /* at most, within the sync's time budget (DeferredBuildAllowed) */
 #define TERRAIN_MAX_PENDING TERRAIN_GRID_CHUNKS /* every chunk of the grid: none is dropped */
 static int16_t sPending[TERRAIN_MAX_PENDING][2];
 static unsigned sPendingCount;
@@ -232,7 +232,20 @@ static uint32_t sDeferredBuilds;
  * neighbour stood in view and the other's does not), TERRAIN_KEPT_BUILDS are
  * built a sync, on screen or not, nearest first; the rest wait a sync or two,
  * their meshes standing (a crossing built its 10 to 12 such chunks at once). */
-#define TERRAIN_KEPT_BUILDS 4
+#define TERRAIN_KEPT_BUILDS 8 /* at most, within the time budget as the others */
+/*
+ * The builds that may wait (off screen and far, or kept from the map behind) are made while the sync has spent less
+ * than its budget, not a fixed number a sync (KNOWN_ISSUES MS-118, the owner's "spread expensive geometry creation
+ * across frames", 2026-11-05): a chunk's meshing takes about 4 ms on the cloud machine and a fraction of that on a
+ * player's PC, so two a frame cost 8 to 11 ms here and a fast PC could have done more. One that would start past the
+ * budget waits for the next frame, its old mesh standing as before; at least one is made every
+ * TERRAIN_DEFERRED_LONGEST syncs, so a stream of urgent work cannot hold them back for ever.
+ * PKMN_DIORAMA_BUILD_BUDGET_US sets the budget (microseconds; 0: the fixed numbers of before, 2 and 4).
+ */
+#define TERRAIN_DEFERRED_BUDGET_US 3000
+#define TERRAIN_DEFERRED_LONGEST 8
+static uint64_t sSyncStarted;
+static unsigned sSyncsSinceDeferred;
 static unsigned sKeptChecks;
 static unsigned sKeptBuilds;
 /*
@@ -250,7 +263,7 @@ static unsigned sKeptBuilds;
 #define TERRAIN_SUPERSEDED_VERSIONS 2
 static uint32_t sSupersededHits; /* chunks brought back from an earlier version (PKMN_DIORAMA_LOG) */
 static bool sNoSuperseded;       /* PKMN_DIORAMA_SUPERSEDED=0 (development): none kept, as before, to compare */
-static uint8_t sInputPages; /* the pages of the last BuildInput's cells */
+static uint8_t sInputPages; /* the atlas regions (metatile_atlas.h) of the last BuildInput's cells */
 static const void *sPagePrimary;
 static const void *sPageSecondary[1 + DIORAMA_NEIGHBOUR_PAGES];
 static struct DioramaTerrainVertex sScratchVertices[DIORAMA_TERRAIN_MAX_VERTICES];
@@ -1702,6 +1715,39 @@ static uint32_t MicrosSince(uint64_t start)
     return (uint32_t)((SDL_GetPerformanceCounter() - start) * 1000000u / SDL_GetPerformanceFrequency());
 }
 
+static uint32_t DeferredBudget(void)
+{
+    static int sBudget = -1;
+
+    if (sBudget < 0)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_BUILD_BUDGET_US");
+
+        sBudget = value != NULL && value[0] != '\0' ? atoi(value) : TERRAIN_DEFERRED_BUDGET_US;
+        if (sBudget < 0)
+            sBudget = 0;
+    }
+    return (uint32_t)sBudget;
+}
+
+/* Whether a build that may wait is made now: `done` such builds this sync, at most `cap` (TERRAIN_DEFERRED_BUDGET_US
+ * above); with no budget set, `legacyCap` a sync as before. */
+static bool DeferredBuildAllowed(unsigned done, unsigned cap, unsigned legacyCap)
+{
+    uint32_t budget = DeferredBudget();
+
+    if (budget == 0)
+        return done < legacyCap;
+    if (done >= cap)
+        return false;
+    if (MicrosSince(sSyncStarted) < budget || sSyncsSinceDeferred >= TERRAIN_DEFERRED_LONGEST)
+    {
+        sSyncsSinceDeferred = 0;
+        return true;
+    }
+    return false;
+}
+
 static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
                               const struct DioramaResolvedCell *resolvedCells,
                               int chunkX, int chunkY,
@@ -1758,7 +1804,7 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
                 continue;
             cell->present = true;
             sMaterialPage = source->atlasPage;
-            sInputPages |= 1u << (source->atlasPage & 7);
+            sInputPages |= 1u << DioramaAtlas_PageRegion(source->atlasPage);
             cell->metatileId = source->metatileId;
             cell->behavior = source->behavior;
             cell->layerType = source->layerType;
@@ -1996,7 +2042,7 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
                     if (materialId == DIORAMA_MATERIAL_METATILE_SELF)
                         materialId = facadeSource->metatileId;
                     sMaterialPage = facadeSource->atlasPage;
-                    sInputPages |= 1u << (facadeSource->atlasPage & 7);
+                    sInputPages |= 1u << DioramaAtlas_PageRegion(facadeSource->atlasPage);
                     SetTerrainMaterial(&cell->southFacadeMaterials[facadeRow], materialId,
                         resolvedCells[gridIndex].materials[DIORAMA_MATERIAL_FACE_SOUTH].layer);
                 }
@@ -3121,8 +3167,8 @@ static bool EdgeChunkWaits(const struct DioramaSceneSnapshot *snapshot, const st
         && !ChunkUrgent(snapshot, chunk, chunkX, chunkY);
 }
 
-/* Whether a chunk's mesh is drawn from atlas pages that hold what they held
- * when its input was built (sPageSecondary). */
+/* Whether a chunk's mesh is drawn from atlas regions (metatile_atlas.h) that hold what they held
+ * when its input was built (sPageSecondary, by region; pageMask the regions its cells use). */
 static bool KeptMeshStands(const struct GLTerrainChunk *chunk)
 {
     unsigned page;
@@ -3284,7 +3330,7 @@ static bool SyncChunk(const struct DioramaSceneSnapshot *snapshot,
             return true;
         }
     }
-    if (!forceAllDirty && *offscreenBuilds >= TERRAIN_OFFSCREEN_BUILDS)
+    if (!forceAllDirty && !DeferredBuildAllowed(*offscreenBuilds, TERRAIN_OFFSCREEN_BUILDS, 2))
     {
         bool dirty = false;
 
@@ -3367,7 +3413,7 @@ static bool SyncChunk(const struct DioramaSceneSnapshot *snapshot,
            && chunk->mapGeneration == snapshot->mapGeneration && chunk->rulesGeneration == rulesGeneration
            && !ChunkNear(snapshot, chunkX, chunkY))))
         {
-            if (*offscreenBuilds >= TERRAIN_OFFSCREEN_BUILDS)
+            if (!DeferredBuildAllowed(*offscreenBuilds, TERRAIN_OFFSCREEN_BUILDS, 2))
             {
                 AddPending(chunkX, chunkY);
                 sDeferredBuilds++;
@@ -3384,7 +3430,7 @@ static bool SyncChunk(const struct DioramaSceneSnapshot *snapshot,
         else if (!forceDirty && chunk != NULL && chunk->occupied && chunk->mapGeneration != snapshot->mapGeneration
               && chunk->rulesGeneration == rulesGeneration && !chunk->hasPixelObjects && KeptMeshStands(chunk))
         {
-            if (sKeptBuilds >= TERRAIN_KEPT_BUILDS)
+            if (!DeferredBuildAllowed(sKeptBuilds, TERRAIN_KEPT_BUILDS, 4))
             {
                 AddPending(chunkX, chunkY);
                 sDeferredBuilds++;
@@ -3543,15 +3589,18 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
         sMapEditGeneration, snapshot->mapEditGeneration,
         snapshot->dirtyCellCount, snapshot->dirtyOverflow);
 
+    sSyncStarted = SDL_GetPerformanceCounter();
+    sSyncsSinceDeferred++;
     sMetrics.inputBuilds = 0;
     sMetrics.inputMicros = 0;
     sMetrics.meshMicros = 0;
     sMetrics.uploadMicros = 0;
     sMetrics.prepareMicros = 0;
     sPagePrimary = snapshot->primaryTileset;
-    sPageSecondary[0] = snapshot->secondaryTileset;
-    for (i = 0; i < DIORAMA_NEIGHBOUR_PAGES; i++)
-        sPageSecondary[1 + i] = snapshot->neighbourPages[i].tileset;
+    /* by the atlas's regions (metatile_atlas.h), which DioramaAtlas_SetPages (EnsureAtlas) set for this snapshot:
+     * a chunk's slots are the regions', so its mesh stands while they hold what they held (KeptMeshStands) */
+    for (i = 0; i <= DIORAMA_NEIGHBOUR_PAGES; i++)
+        sPageSecondary[i] = DioramaAtlas_RegionTileset((uint8_t)i);
     sClaimDebugVertexCount = 0;
     /* The claim outlines are drawn only by the terrain debug view. */
     for (i = 0; sDebugDrawn && i < snapshot->visibleCellCount && i < DIORAMA_MAX_VISIBLE_CELLS; i++)

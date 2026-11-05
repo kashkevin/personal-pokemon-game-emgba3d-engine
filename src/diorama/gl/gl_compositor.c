@@ -939,9 +939,86 @@ static bool LogEnabled(void)
     return sEnabled;
 }
 
+/* The cells' rules for this snapshot (sAtlasResolvedCells), resolved again only when they could differ. */
+static void ResolveCells(const struct DioramaSceneSnapshot *snapshot, unsigned cellCount)
+{
+    struct ResolveKey key;
+
+    memset(&key, 0, sizeof(key));
+    key.gridOriginX = snapshot->gridOriginX;
+    key.gridOriginY = snapshot->gridOriginY;
+    key.visibleCellCount = (u16)cellCount;
+    key.mapLayoutId = snapshot->mapLayoutId;
+    key.mapGroup = snapshot->mapGroup;
+    key.mapNum = snapshot->mapNum;
+    key.mapCoordinateOffset = snapshot->mapCoordinateOffset;
+    key.mapGeneration = snapshot->mapGeneration;
+    key.rulesGeneration = DioramaRules_GetGeneration();
+    if (!sResolveValid || snapshot->dirtyCellCount != 0 || snapshot->dirtyOverflow
+     || memcmp(&key, &sResolveKey, sizeof(key)) != 0
+     || memcmp(sResolveCells, snapshot->cells, cellCount * sizeof(sResolveCells[0])) != 0)
+    {
+        DioramaRules_ResolveGrid(snapshot, sAtlasResolvedCells);
+        DioramaBuildings_FlattenResolvedCells(snapshot, sAtlasResolvedCells, cellCount);
+        /* Kept for the next snapshot only when no dirty cell shaped it. */
+        sResolveValid = snapshot->dirtyCellCount == 0 && !snapshot->dirtyOverflow;
+        sResolveKey = key;
+        memcpy(sResolveCells, snapshot->cells, cellCount * sizeof(sResolveCells[0]));
+    }
+}
+
+/* PKMN_DIORAMA_DRAW_FADED=1: a screen faded out whole is drawn as before (ScreenObscured never true). */
+static bool DrawFadedFrames(void)
+{
+    static int sEnabled = -1;
+
+    if (sEnabled < 0)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_DRAW_FADED");
+
+        sEnabled = value != NULL && value[0] == '1';
+    }
+    return sEnabled;
+}
+
+/*
+ * Whether the game has turned every colour on the screen into one (KNOWN_ISSUES MS-118, the owner's "avoid
+ * unnecessary rendering during fully obscured fades", 2026-11-05): a fade at its end, every background and sprite
+ * palette the fade's colour, so the GBA's picture is that colour whole. Nothing of the 3D view would be seen: it
+ * clears to the colour instead of drawing the scene, and the atlas keeps its art until the screen shows again (it was
+ * drawn in the fade's colour at each step, then again as the fade lifted).
+ */
+static bool ScreenObscured(const struct DioramaSceneSnapshot *snapshot)
+{
+    uint16_t colour;
+    unsigned i;
+
+    if (snapshot->screenFadeY < 16 || DrawFadedFrames())
+        return false;
+    colour = snapshot->screenFadeColor & 0x7FFF;
+    for (i = 0; i < DIORAMA_FADED_PALETTE_ENTRIES; i++)
+        if ((snapshot->fadedPalette[i] & 0x7FFF) != colour)
+            return false;
+    return true;
+}
+
+static unsigned sObscuredFrames; /* frames cleared to a fade's colour (ScreenObscured), for the log */
+
 /* Returns true when the atlases changed (rebuilt, or slots updated). */
 static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
 {
+    if (ScreenObscured(snapshot))
+    {
+        /* The slots stay as last drawn (their palettes, the state compared below, too): the first frame that shows
+         * draws what changed meanwhile, as any frame does. The pages' regions and the cells' rules are this
+         * snapshot's: the terrain's sync builds from them. */
+        unsigned count = snapshot->visibleCellCount < DIORAMA_MAX_VISIBLE_CELLS ? snapshot->visibleCellCount
+                                                                               : DIORAMA_MAX_VISIBLE_CELLS;
+
+        DioramaAtlas_SetPages(snapshot);
+        ResolveCells(snapshot, count);
+        return false;
+    }
     /* A redraw's time, from here (PKMN_DIORAMA_LOG=1; KNOWN_ISSUES MS-118). */
     Uint64 started = SDL_GetPerformanceCounter();
     /* The neighbouring maps' pages first (metatile_atlas.h): another tileset
@@ -954,9 +1031,14 @@ static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
      * tilesets compares every tile, as the animated tiles do (a map loaded
      * again starts its animations over). */
     bool mapChanged = snapshot->mapGeneration != sAtlasMapGeneration;
+    /* With the atlas's regions (metatile_atlas.h) a crossing keeps every tileset where it was drawn: the regions'
+     * art and the palettes they are drawn with (the page signature, DioramaAtlas_DrawnSignature) say whether the
+     * slots still hold what they would be drawn with, whatever map the player is on (KNOWN_ISSUES MS-118); the
+     * map's own tiles changing is the animated tiles' comparison below. */
+    bool sticky = DioramaAtlas_StickyRegions();
     bool reset = (mapChanged && (snapshot->primaryTileset != sAtlasTilesets[0]
-                              || snapshot->secondaryTileset != sAtlasTilesets[1]))
-              || snapshot->paletteGeneration != sAtlasPaletteGeneration
+                              || (!sticky && snapshot->secondaryTileset != sAtlasTilesets[1])))
+              || (!sticky && snapshot->paletteGeneration != sAtlasPaletteGeneration)
               || pageSignature != sAtlasPageSignature
               || !sHasAtlasTileGraphics;
     bool animationChanged = snapshot->tilesetAnimationGeneration != sAtlasAnimationGeneration || mapChanged;
@@ -999,31 +1081,7 @@ static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
     if (cellCount > DIORAMA_MAX_VISIBLE_CELLS)
         cellCount = DIORAMA_MAX_VISIBLE_CELLS;
     cleared = SDL_GetPerformanceCounter();
-    {
-        struct ResolveKey key;
-
-        memset(&key, 0, sizeof(key));
-        key.gridOriginX = snapshot->gridOriginX;
-        key.gridOriginY = snapshot->gridOriginY;
-        key.visibleCellCount = (u16)cellCount;
-        key.mapLayoutId = snapshot->mapLayoutId;
-        key.mapGroup = snapshot->mapGroup;
-        key.mapNum = snapshot->mapNum;
-        key.mapCoordinateOffset = snapshot->mapCoordinateOffset;
-        key.mapGeneration = snapshot->mapGeneration;
-        key.rulesGeneration = DioramaRules_GetGeneration();
-        if (!sResolveValid || snapshot->dirtyCellCount != 0 || snapshot->dirtyOverflow
-         || memcmp(&key, &sResolveKey, sizeof(key)) != 0
-         || memcmp(sResolveCells, snapshot->cells, cellCount * sizeof(sResolveCells[0])) != 0)
-        {
-            DioramaRules_ResolveGrid(snapshot, sAtlasResolvedCells);
-            DioramaBuildings_FlattenResolvedCells(snapshot, sAtlasResolvedCells, cellCount);
-            /* Kept for the next snapshot only when no dirty cell shaped it. */
-            sResolveValid = snapshot->dirtyCellCount == 0 && !snapshot->dirtyOverflow;
-            sResolveKey = key;
-            memcpy(sResolveCells, snapshot->cells, cellCount * sizeof(sResolveCells[0]));
-        }
-    }
+    ResolveCells(snapshot, cellCount);
     resolved = SDL_GetPerformanceCounter();
     for (i = 0; i < DIORAMA_ATLAS_SLOT_COUNT; i++)
     {
@@ -1088,10 +1146,26 @@ static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
     }
     else if (changed)
     {
+        Uint64 drawn = SDL_GetPerformanceCounter();
+
         UploadAtlasSlots(&sAtlasTexture, sAtlasPixels, sUpdatedMetatiles);
         UploadAtlasSlots(&sBaseAtlasTexture, sBaseAtlasPixels, sUpdatedMetatiles);
         UploadAtlasSlots(&sForegroundAtlasTexture, sForegroundAtlasPixels,
                          sUpdatedMetatiles);
+        if (LogEnabled() && (SDL_GetPerformanceCounter() - started) * 1000 > 5 * SDL_GetPerformanceFrequency())
+        {
+            double unit = 1000.0 / (double)SDL_GetPerformanceFrequency();
+            unsigned slots = 0;
+            unsigned tiles = 0;
+
+            for (i = 0; i < DIORAMA_ATLAS_PRESENT_BYTES; i++)
+                slots += (unsigned)__builtin_popcount(sUpdatedMetatiles[i]);
+            for (i = 0; i < sizeof(sDirtyAtlasTiles); i++)
+                tiles += (unsigned)__builtin_popcount(sDirtyAtlasTiles[i]);
+            SDL_Log("Diorama: atlas slots updated: %u slots (%u changed tiles, map changed %d); ms: cells resolved "
+                    "%.2f, drawn %.2f, uploaded %.2f", slots, tiles, mapChanged, (double)(resolved - cleared) * unit,
+                    (double)(drawn - resolved) * unit, (double)(SDL_GetPerformanceCounter() - drawn) * unit);
+        }
     }
     memcpy(sAtlasTileGraphics, snapshot->tileGraphics, sizeof(sAtlasTileGraphics));
     for (i = 0; i < DIORAMA_ATLAS_SLOT_COUNT; i++)
@@ -2077,7 +2151,26 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         gameX = (outputWidth - gameWidth) / 2;
         gameY = (outputHeight - gameHeight) / 2;
     }
-    if (drawTerrain)
+    /* A screen faded out whole (ScreenObscured, KNOWN_ISSUES MS-118): its colour over the window, nothing drawn
+     * under it; the camera follows on, so the scene shows where it should when the fade lifts. Not while a battle
+     * transition composes over the field (it draws its own picture) or in the views for tests. */
+    if (drawTerrain && sSurveyView < 0 && !sTerrainDebug && sHasRenderedSceneSnapshot
+     && !IsComposableTransition(&sRenderedSceneSnapshot) && !DioramaGLBattle_WantsField()
+     && ScreenObscured(&sRenderedSceneSnapshot))
+    {
+        uint16_t fade = sRenderedSceneSnapshot.screenFadeColor;
+
+        GetCameraPosition(&sRenderedSceneSnapshot, &sPreviousRenderedSceneSnapshot,
+                          sHasPreviousRenderedSceneSnapshot, current3D ? frameAlpha : 1.0f, &cameraX, &cameraZ);
+        UpdateCamera(&sRenderedSceneSnapshot, cameraX, cameraZ);
+        glClearColor((fade & 0x1F) / 31.0f, ((fade >> 5) & 0x1F) / 31.0f, ((fade >> 10) & 0x1F) / 31.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        sObscuredFrames++;
+        if ((sObscuredFrames & 63) == 1 && LogEnabled())
+            SDL_Log("Diorama: %u frames faded out whole, the scene not drawn", sObscuredFrames);
+    }
+    else if (drawTerrain)
     {
         float cameraPitch;
         float cameraFocalLength;
