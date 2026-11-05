@@ -1033,8 +1033,56 @@ MT_TEST(world_outbreak_marker_accepted)
     }
 }
 
-// The wager wallet accepts money (+-999,999) and, for the Battle Frontier, reward words (bit 30, kind 1-3): anything
-// else above the money range closes the connection like any other malformed world record.
+// The wager wallet accepts money (+-999,999) and, for the Battle Frontier, reward words (bit 30, kind 1-5), and a
+// Legendary Ticket (kind 8, every PC game: mp_tickets.c): anything else above the money range closes the connection like
+// any other malformed world record. With the Battle Tower its kinds 6 and 7 too (WorldWalletTowerAndTicketKinds).
+static void WorldWalletKinds(int tower, const uint32_t *good, size_t goodCount, const uint32_t *bad, size_t badCount)
+{
+    struct MpBridgeCaps caps;
+    uint8_t record[208];
+    uint8_t frame[230];
+    uint8_t *w = sMemory[MP_REGION_WORLD];
+    size_t n, i;
+
+    for (i = 0; i < goodCount + badCount; i++)
+    {
+        int accepted = i < goodCount;
+
+        memset(&caps, 0, sizeof(caps));
+        caps.world = 1;
+        caps.tower = (uint32_t)tower;
+        Fresh(&caps);
+        sNet.chunk = 0;
+        Ready(0);
+        PutU32(w, 0x31574D45);
+        PutU16(w + 4, 1);
+        PutU16(w + 6, 256);
+        Step(12);
+        memset(record, 0, sizeof(record));
+        PutU32(record, 1);
+        PutU32(record + 180, 7);                                      /* wallet sequence */
+        PutU32(record + 184, accepted ? good[i] : bad[i - goodCount]);
+        n = FrameOf(frame, 'N', record, sizeof(record));
+        Feed(frame, n, 200);
+        Step(2);
+        MT_CHECK(accepted ? !sNet.closed : sNet.closed);
+    }
+}
+
+// A Legendary Ticket (the app's docs/legendary-tickets.md 6.1: 0x48000000 | index) reaches the game with or without the
+// Battle Tower; the Tower's kinds only with it; kind 9 and above never (the engine's unknown kinds).
+MT_TEST(world_wallet_tower_and_ticket_kinds)
+{
+    const uint32_t plainGood[] = {0x48000001u, 0x48000004u /* the Eon Ticket, the Old Sea Map */};
+    const uint32_t plainBad[] = {0x46000005u /* the Tower's record */, 0x47000010u /* a milestone Pokemon */,
+                                 0x49000001u /* kind 9 */, 0x4F000001u};
+    const uint32_t towerGood[] = {0x46000005u, 0x47000010u, 0x48000002u /* the Mystic Ticket */};
+    const uint32_t towerBad[] = {0x49000001u, 0x4F000001u, 0x40000001u /* no kind */};
+
+    WorldWalletKinds(0, plainGood, 2, plainBad, 4);
+    WorldWalletKinds(1, towerGood, 3, towerBad, 3);
+}
+
 MT_TEST(world_wallet_money_and_reward_words)
 {
     struct MpBridgeCaps caps;
@@ -1043,8 +1091,10 @@ MT_TEST(world_wallet_money_and_reward_words)
     uint8_t *w = sMemory[MP_REGION_WORLD];
     const uint32_t good[] = {1, 999999, 0xFFF0BDC1u /* -999999 */, 0x41000005u /* 5 Battle Points */,
                              0x42006601u /* an item */, 0x43000010u /* a shop debit */,
-                             0x44000007u /* keep a catch */, 0x45000007u /* release a catch */};
-    const uint32_t bad[] = {1000000, 0x40000005u /* no kind */, 0x46000005u /* kind 6 */, 0x61000005u, 0x7F000005u, 0xC1000005u};
+                             0x44000007u /* keep a catch */, 0x45000007u /* release a catch */,
+                             0x48000003u /* the Aurora Ticket */};
+    const uint32_t bad[] = {1000000, 0x40000005u /* no kind */, 0x46000005u /* kind 6 */, 0x61000005u, 0x7F000005u, 0xC1000005u,
+                            0x49000003u /* kind 9 */};
     size_t n, i;
 
     for (i = 0; i < sizeof(good) / sizeof(good[0]) + sizeof(bad) / sizeof(bad[0]); i++)
@@ -2713,6 +2763,7 @@ int main(void)
     MT_RUN(world_outbreak_marker_accepted);
     MT_RUN(trade_record_carries_the_lucky_bit);
     MT_RUN(world_wallet_money_and_reward_words);
+    MT_RUN(world_wallet_tower_and_ticket_kinds);
     MT_RUN(slow_frame_drains_the_backlog);
     MT_RUN(clock_paces_records_by_real_time);
     MT_RUN(no_clock_keeps_the_six_frame_cadence);

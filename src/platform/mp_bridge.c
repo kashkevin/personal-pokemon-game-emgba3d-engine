@@ -304,6 +304,13 @@ static bool ValidOutbreakMarker(const uint8_t *r)
     return r[0] == 1 && r[3] == 0 && U16(r + 4) <= 1700 && r[6] == 0 && r[7] == 0;
 }
 
+/* The reward kinds a wallet word may carry to this game (bits 24-27; multiplayer_world.h MP_REWARD_*): 1-5 always, the
+ * Battle Tower's 6 and 7 with its capability, 8 (MP_REWARD_TICKET, a Legendary Ticket: mp_tickets.c) always. */
+static bool RewardKindAccepted(const struct MpBridge *b, uint32_t kind)
+{
+    return (kind >= 1 && kind <= 5) || ((kind == 6 || kind == 7) && Enabled(b->caps.tower)) || kind == 8;
+}
+
 /* validWorldInbound */
 static bool ValidWorldInbound(const struct MpBridge *b, const uint8_t *p, size_t length)
 {
@@ -349,11 +356,11 @@ static bool ValidWorldInbound(const struct MpBridge *b, const uint8_t *p, size_t
     walletDelta = (int32_t)U32(p + 184);
     teammate = U32(p + 188);
     /* money (+-999,999) or a reward word: bit 30, kind 1-5 in bits 24-27 (src/multiplayer_world.c); with the Battle
-     * Tower also kinds 6 (its record) and 7 (a milestone Pokemon) */
+     * Tower also kinds 6 (its record) and 7 (a milestone Pokemon); and kind 8, a Legendary Ticket, which every PC game
+     * applies (platform/mp_tickets.c; the host sends it only to a game whose manifest has its marker) */
     if (walletSeq > 0xFFFF || walletDelta < -999999
      || (walletDelta > 999999 && (((uint32_t)walletDelta & 0x70000000u) != 0x40000000u
-                                  || ((((uint32_t)walletDelta) >> 24) & 0xFu) < 1
-                                  || ((((uint32_t)walletDelta) >> 24) & 0xFu) > (Enabled(b->caps.tower) ? 7u : 5u)))
+                                  || !RewardKindAccepted(b, (((uint32_t)walletDelta) >> 24) & 0xFu)))
      || (walletSeq == 0) != (walletDelta == 0))
         return false;
     if (teammate != 0)
