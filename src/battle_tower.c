@@ -1186,6 +1186,15 @@ static void LoadMultiPartnerCandidatesData(void)
     challengeNum = gSaveBlock2Ptr->frontier.towerWinStreaks[battleMode][lvlMode] / FRONTIER_STAGES_PER_CHALLENGE;
     species1 = GetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_SPECIES);
     species2 = GetMonData(&gParties[B_TRAINER_PLAYER][1], MON_DATA_SPECIES);
+#ifdef PORTABLE
+    // EmeraldTogether (KNOWN_ISSUES MS-98): the facility's trainer and Pokemon tables, as the original game sets them
+    // here (pret pokeemerald: level = SetFacilityPtrsGetLevel()); the expansion dropped the call with its unused
+    // result. Nothing on a multi battle challenge's way in sets them, so in a session without an earlier Frontier
+    // battle they were NULL when the partner room loaded: the GBA reads its BIOS there and goes on with junk, the PC
+    // stopped (a segmentation fault at the first gFacilityTrainers read below, in play as after a warp).
+    SetFacilityPtrsGetLevel();
+#endif
+#line 1189 // gba-line
 
     j = 0;
     do
