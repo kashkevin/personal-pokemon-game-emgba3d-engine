@@ -407,6 +407,22 @@ def parse(lines):
     return out
 
 
+# Hangs that are the game process's own end (run_shard: a crash, an abort, the run's time limit) or its watchdog's
+# report of no frame (the game's DioramaBattleEnvTest_Watchdog): never the scene's doing, so never blocked.
+PROCESS_STOPS = ("the game stopped", "the game made no frame")
+
+
+def scene_stopped_where_put(state):
+    """Whether a target's map scene began by itself as the check put the player down there (not through the map's
+    entrance) and the game then reported it hung, its map never left: blocked, not failed (the Devon president's walk
+    leads off the map: an assert). Not when the game process itself ended or froze there: that fails like any other
+    target (soak13: AddressSanitizer's memory ran out in Trick House puzzle 1's battle, which began by itself, and the
+    target was filed as blocked)."""
+    hang = state.get("hang") or ""
+    return ("(it began by itself)" in (state.get("at") or "") and bool(hang) and not state.get("maps")
+            and not hang.startswith(PROCESS_STOPS))
+
+
 def judge(target, seen):
     """(passed, reason) for one target from what the game logged."""
     if seen is None or "begin" not in seen:
@@ -644,7 +660,7 @@ def main():
                 f"an object stands on it in this state ({', '.join(target['expect']['covered'])}): the step is "
                 "blocked until the story removes it")))
             continue
-        if "(it began by itself)" in at and state.get("hang") and not state.get("maps"):
+        if scene_stopped_where_put(state):
             # its map's own scene began as the player was put down there, not through the map's entrance, and hung
             # (the Devon president's walk led off the map); the warps into the map play the scene from its entrance
             blocked.append(dict(key=target["key"], kind=target["kind"], map=target["map"], runtime=True, reason=(
