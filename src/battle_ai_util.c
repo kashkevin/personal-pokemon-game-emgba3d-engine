@@ -818,6 +818,13 @@ static inline bool32 ShouldCalcCritDamage(struct DamageContext *ctx)
 
     if (critChanceIndex == CRITICAL_HIT_ALWAYS)
         return TRUE;
+#ifdef PORTABLE
+    // A blocked crit (the target's Battle Armor or Shell Armor, Lucky Chant on its side) is none: the odds table has
+    // no entry for CRITICAL_HIT_BLOCKED (-1), and GetCriticalHitOdds(-1) read the word before it (AddressSanitizer).
+    if (critChanceIndex == CRITICAL_HIT_BLOCKED)
+        return FALSE;
+#endif
+#line 821 // gba-line
     if (GetCriticalHitOdds(critChanceIndex) == 1)
         return TRUE;
     if (critChanceIndex >= RISKY_AI_CRIT_STAGE_THRESHOLD // Not guaranteed but above Risky threshold
