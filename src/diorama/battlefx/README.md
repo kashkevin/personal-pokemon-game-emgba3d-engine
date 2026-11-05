@@ -338,6 +338,14 @@ it was listed. Not converted: Dragon Darts (`createdragondartsprite`), Tera Blas
 Starstorm (`jumpifmovetypeequal`); `tools/battlefx/moves_past_package.py` lists what each other move
 still needs (callbacks and tasks to port).
 
+Seen while testing them, the package's moves as well: in a double battle where one side has a single
+Pokemon (the debug field scene's lone Mudkip against two wild ones), the game draws that battler at
+the singles position (`battle_interface.c` `GetBattlerCoordsIndex`: `gPartiesCount == 1`) and the core
+at the doubles one, 40 pixels apart: every effect placed from that battler is off and parity fails
+(Ember, Focus Energy, Giga Drain, Calm Mind, Swords Dance as well as 7 of the 16). With two Pokemon a
+side it is exact. A fix: the request carries each battler's coordinate set and `kGameHelperJs` gives
+the core's battler coordinates from it.
+
 ## Tests
 
 The test build: `make -f Makefile_pc DIORAMA=1 CC="gcc -DDIORAMA_BATTLE_ENV_TEST -DBATTLEFX_TEST"

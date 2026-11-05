@@ -3,8 +3,9 @@
    reads one script). They only add: callbacks, tasks and HD presentation for the moves past the package's 621 that
    tools/battlefx/convert_more.py converts; nothing the package's own moves use is replaced.
 
-   Callbacks are re-implemented from this game's C (src/battle_anim_new.c), statement for statement, as the package's
-   behaviour files are (the parity tests compare every frame of the game's effect sprites with them). */
+   Callbacks and tasks are re-implemented from this game's C (src/battle_anim_new.c, battle_anim_flying.c), statement
+   for statement, as the package's behaviour files are (the parity tests compare every frame of the game's effect
+   sprites with them). */
 BFX_RT.define(function (A) {
 'use strict';
 const { CB, TK } = A;

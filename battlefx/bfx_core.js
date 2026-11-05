@@ -40805,11 +40805,12 @@ globalThis.BFX_CORE_MANIFEST = {"files":[{"file":"src/rt.js","bytes":120229,"sha
    reads one script). They only add: callbacks, tasks and HD presentation for the moves past the package's 621 that
    tools/battlefx/convert_more.py converts; nothing the package's own moves use is replaced.
 
-   Callbacks are re-implemented from this game's C (src/battle_anim_new.c), statement for statement, as the package's
-   behaviour files are (the parity tests compare every frame of the game's effect sprites with them). */
+   Callbacks and tasks are re-implemented from this game's C (src/battle_anim_new.c, battle_anim_flying.c), statement
+   for statement, as the package's behaviour files are (the parity tests compare every frame of the game's effect
+   sprites with them). */
 BFX_RT.define(function (A) {
 'use strict';
-const { CB } = A;
+const { CB, TK } = A;
 const args = () => A.gBattleAnimArgs;
 
 // ---------------------------------------------------------------- Stone Axe (gSpriteTemplate_StoneAxeSlash)
@@ -40825,6 +40826,122 @@ function horizontalSliceStep(s) {
   s.data[3] += s.data[1];
   if (s.data[3] >= s.data[0]) A.destroySpriteAndMatrix(s);
 }
+
+// ---------------------------------------------------------------- the Forces of Nature's storms (battle_anim_flying.c)
+// AnimEllipticalGustCentered: AnimEllipticalGust centred between the targets in a double battle
+CB.AnimEllipticalGustCentered = function (s) {
+  if (A.isDoubleBattle()) A.initSpritePosToAnimTargetsCentre(s, false); else A.initSpritePosToAnimTarget(s, false);
+  s.y += 20;
+  s.data[1] = 191;
+  s.callback = ellipticalGustStep;
+  s.callback(s);
+};
+function ellipticalGustStep(s) {   // AnimEllipticalGust_Step
+  s.x2 = A.Sin(s.data[1], 32);
+  s.y2 = A.Cos(s.data[1], 8);
+  s.data[1] += 5;
+  s.data[1] &= 0xFF;
+  if (++s.data[0] === 71) A.destroyAnimSprite(s);
+}
+
+// ---------------------------------------------------------------- battle_anim_new.c's helpers (static there)
+function loadBattleAnimTarget(arg) {   // LoadBattleAnimTarget
+  const v = A.gBattleAnimArgs[arg];
+  if (A.isDoubleBattle()) {
+    if (v === 0) return A.gBattleAnimAttacker;                                  // ANIM_ATTACKER
+    if (v === 2) return A.getPartnerBattler(A.gBattleAnimAttacker);             // ANIM_ATK_PARTNER
+    if (v === 3) return A.getPartnerBattler(A.gBattleAnimTarget);               // ANIM_DEF_PARTNER
+    return A.gBattleAnimTarget;
+  }
+  return v === 0 ? A.gBattleAnimAttacker : A.gBattleAnimTarget;
+}
+function initSpritePosToGivenTarget(s, target) {   // InitSpritePosToGivenTarget
+  s.x = A.getBattlerSpriteCoord2(target, A.C.BATTLER_COORD_X);
+  s.y = A.getBattlerSpriteCoord2(target, A.C.BATTLER_COORD_Y);
+  A.setAnimSpriteInitialXOffset(s, A.gBattleAnimArgs[0]);
+  s.y2 = A.gBattleAnimArgs[1];
+}
+
+// ---------------------------------------------------------------- Prismatic Laser, Grav Apple, Take Heart
+// SpriteCB_FallingObject: arg 0, 1: x offset, height; arg 2: speed; arg 3: anim battler
+CB.SpriteCB_FallingObject = function (s) {
+  const a = args(); const target = loadBattleAnimTarget(3);
+  if (!A.isBattlerSpriteVisible(target)) { A.destroyAnimSprite(s); return; }
+  s.x = A.getBattlerSpriteCoord2(target, A.C.BATTLER_COORD_X);
+  s.y = A.getBattlerSpriteCoord2(target, A.C.BATTLER_COORD_Y);
+  s.x2 = a[0];
+  s.y = a[1];
+  s.y2 = -a[1];
+  if (A.isOnPlayerSide(A.gBattleAnimTarget)) { s.y += 45; s.y2 -= 45; }
+  s.data[3] = a[2];
+  s.callback = fallingObjectStep;
+};
+function fallingObjectStep(s) {
+  switch (s.data[0]) {
+    case 0:
+      s.y2 += s.data[3];
+      if (s.y2 >= 0) { s.y2 = 0; s.data[0]++; }
+      break;
+    case 1:
+      if (++s.data[1] > 0) {
+        s.data[1] = 0;
+        s.invisible = !s.invisible;
+        if (++s.data[2] === 10) A.destroySpriteAndMatrix(s);
+      }
+      break;
+  }
+}
+
+// ---------------------------------------------------------------- Photon Geyser, Baddy Bad
+// SpriteCB_PhotonGeyserBeam: arg 0, 1: offset; arg 2: anim battler; arg 3: duration; arg 4: anim; arg 5: affine delay
+CB.SpriteCB_PhotonGeyserBeam = function (s) {
+  const a = args(); const target = loadBattleAnimTarget(2);
+  if (!A.isBattlerSpriteVisible(target)) { A.destroyAnimSprite(s); return; }
+  initSpritePosToGivenTarget(s, target);
+  A.startSpriteAnim(s, a[4]);
+  s.data[0] = a[3];
+  s.data[1] = a[5];
+  s.callback = beamUpStep;
+};
+function beamUpStep(s) {   // SpriteCB_BeamUpStep
+  if (s.data[1]-- === 0) A.startSpriteAffineAnim(s, 1);
+  if (s.data[0]-- <= 0) A.destroySpriteAndMatrix(s);
+}
+
+// ---------------------------------------------------------------- Buzzy Buzz, Spirit Break
+CB.SpriteCB_SpriteOnMonUntilAffineAnimEnds = function (s) {
+  const target = loadBattleAnimTarget(0);
+  if (!A.isBattlerSpriteVisible(target)) { A.destroyAnimSprite(s); return; }
+  s.x = A.getBattlerSpriteCoord(target, A.C.BATTLER_COORD_X_2);
+  s.y = A.getBattlerSpriteCoord(target, A.C.BATTLER_COORD_Y_PIC_OFFSET);
+  A.storeSpriteCallbackInData6(s, A.destroySpriteAndMatrix);
+  s.callback = A.runStoredCallbackWhenAffineAnimEnds;
+};
+
+// ---------------------------------------------------------------- the battlers hidden and shown (battle_anim_new.c)
+// Chloroblast, Ceaseless Edge, Lunar Blessing, Revival Blessing
+TK.AnimTask_AllBattlersInvisible = function (id) {
+  for (let i = 0; i < A.gBattlersCount; i++) {
+    const sid = A.gBattlerSpriteIds(i);
+    if (sid !== 0xFF && A.gSprites[sid]) A.gSprites[sid].invisible = true;
+  }
+  A.destroyAnimVisualTask(id);
+};
+TK.AnimTask_AllBattlersVisible = function (id) {
+  for (let i = 0; i < A.gBattlersCount; i++) {
+    const sid = A.gBattlerSpriteIds(i);
+    if (A.isBattlerSpriteVisible(i) && sid !== 0xFF && A.gSprites[sid]) A.gSprites[sid].invisible = false;
+  }
+  A.destroyAnimVisualTask(id);
+};
+TK.AnimTask_AllBattlersInvisibleExceptAttackerAndTarget = function (id) {
+  for (let i = 0; i < A.gBattlersCount; i++) {
+    const sid = A.gBattlerSpriteIds(i);
+    if (sid === A.getAnimBattlerSpriteId(0) || sid === A.getAnimBattlerSpriteId(1)) continue;   // ANIM_ATTACKER, ANIM_TARGET
+    if ((sid !== 0xFF || !A.isBattlerSpriteVisible(i)) && A.gSprites[sid]) A.gSprites[sid].invisible = true;
+  }
+  A.destroyAnimVisualTask(id);
+};
 });
 
 /* ---------------------------------------------------------------- HD presentation of the moves past the package
