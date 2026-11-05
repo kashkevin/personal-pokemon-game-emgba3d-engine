@@ -96,7 +96,15 @@ static uint32_t sVertexCapacity;
 /* Bumped when the triangles change, not when the same ones are rebuilt:
  * the sun's depth map is kept until then (gl_shadow.h). */
 static uint32_t sGeometryGeneration;
-static uint32_t sGeometryHash;
+/* The triangles last uploaded, to tell a rebuild of the same ones (KNOWN_ISSUES MS-118: the grid moving a step
+ * rebuilds them, the same ones about half the time, 46 of the seam walk's 98; a byte-wise hash of their megabyte was
+ * 60% of this sync, and they were uploaded every time): compared, and uploaded only when they differ or the buffer is
+ * new. */
+static struct GLBuildingVertex *sUploaded;
+static uint32_t sUploadedCount;
+static uint32_t sUploadedCapacity;
+static bool sUploadedKept;        /* sUploaded holds the triangles last uploaded */
+static bool sBufferHoldsUploaded; /* and the vertex buffer holds them, not a new one made since */
 static uint32_t sChangedHash; /* the placements left out (DioramaBuildings_Validate) */
 static uint8_t sPaletteRgba[PALETTE_ROWS * 256 * 4];
 static bool sHasPalette;
@@ -284,6 +292,7 @@ bool DioramaGLBuildings_Init(void)
         return false;
     dglGenVertexArrays(1, &sVertexArray);
     dglGenBuffers(1, &sVertexBuffer);
+    sBufferHoldsUploaded = false;
     dglBindVertexArray(sVertexArray);
     dglBindBuffer(GL_ARRAY_BUFFER, sVertexBuffer);
     dglEnableVertexAttribArray(0);
@@ -565,6 +574,124 @@ static bool CollectInstances(const struct DioramaSceneSnapshot *snapshot,
     return true;
 }
 
+/* The triangles just built into the vertex buffer, unless it holds them already, and the generation moved on
+ * when they differ from the last ones uploaded. */
+static void UploadTriangles(void)
+{
+    size_t size = (size_t)sVertexCount * sizeof(*sVertices);
+    /* none (no buildings in view, rebuilt every frame) counts as the same as none */
+    bool same = sUploadedKept && sUploadedCount == sVertexCount
+             && (size == 0 || memcmp(sUploaded, sVertices, size) == 0);
+
+    if (!same || !sBufferHoldsUploaded)
+    {
+        dglBindBuffer(GL_ARRAY_BUFFER, sVertexBuffer);
+        dglBufferData(GL_ARRAY_BUFFER, size, sVertices, GL_STATIC_DRAW);
+        sBufferHoldsUploaded = true;
+    }
+    if (same)
+        return;
+    sGeometryGeneration++;
+    sUploadedKept = false;
+    if (sVertexCount > sUploadedCapacity)
+    {
+        struct GLBuildingVertex *grown = realloc(sUploaded, (size_t)sVertexCapacity * sizeof(*grown));
+
+        if (grown == NULL)
+            return; /* nothing kept to compare with: the next rebuild uploads and moves the generation on */
+        sUploaded = grown;
+        sUploadedCapacity = sVertexCapacity;
+    }
+    if (size != 0)
+        memcpy(sUploaded, sVertices, size);
+    sUploadedCount = sVertexCount;
+    sUploadedKept = true;
+}
+
+/*
+ * PKMN_DIORAMA_TERRAIN_CHECK=1 (tests; KNOWN_ISSUES MS-118): after each rebuild the vertex buffer is read back and
+ * compared with the triangles just built (a rebuild of the same ones uploads nothing), and the generation is checked
+ * to have moved exactly when they changed (a hash of those it last moved for is kept). Slow; logs each mismatch and
+ * a running count. Its readback functions are looked up only when it is on.
+ */
+static uint32_t sCheckMovedHash;
+static bool sCheckHasMovedHash;
+
+static void CheckUploaded(bool moved)
+{
+    static int sEnabled = -1;
+    static PFNGLGETBUFFERSUBDATAPROC sGetBufferSubData;
+    static PFNGLGETBUFFERPARAMETERIVPROC sGetBufferParameteriv;
+    static uint32_t sChecked;
+    static uint32_t sDiffering;
+    const uint8_t *bytes = (const uint8_t *)sVertices;
+    size_t size = (size_t)sVertexCount * sizeof(*sVertices);
+    uint32_t hash = 2166136261u ^ sVertexCount;
+    GLint bufferSize = -1;
+    bool differs = false;
+    size_t k;
+
+    if (sEnabled < 0)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_TERRAIN_CHECK");
+
+        sEnabled = value != NULL && value[0] == '1';
+        if (sEnabled)
+        {
+            sGetBufferSubData = (PFNGLGETBUFFERSUBDATAPROC)SDL_GL_GetProcAddress("glGetBufferSubData");
+            sGetBufferParameteriv = (PFNGLGETBUFFERPARAMETERIVPROC)SDL_GL_GetProcAddress("glGetBufferParameteriv");
+            if (sGetBufferSubData == NULL || sGetBufferParameteriv == NULL)
+            {
+                SDL_Log("Diorama: buildings check: off (no glGetBufferSubData or glGetBufferParameteriv)");
+                sEnabled = 0;
+            }
+        }
+    }
+    if (!sEnabled)
+        return;
+    for (k = 0; k < size; k++)
+        hash = (hash ^ bytes[k]) * 16777619u;
+    if (sCheckHasMovedHash && moved == (hash == sCheckMovedHash))
+    {
+        differs = true;
+        SDL_Log("Diorama: buildings check: the generation %s though the triangles %s (%u vertices)",
+                moved ? "moved" : "stayed", moved ? "are the same" : "changed", sVertexCount);
+    }
+    if (moved || !sCheckHasMovedHash)
+    {
+        sCheckMovedHash = hash;
+        sCheckHasMovedHash = true;
+    }
+    dglBindBuffer(GL_ARRAY_BUFFER, sVertexBuffer);
+    sGetBufferParameteriv(GL_ARRAY_BUFFER, GL_BUFFER_SIZE, &bufferSize);
+    if (bufferSize < 0 || (size_t)bufferSize != size)
+    {
+        differs = true;
+        SDL_Log("Diorama: buildings check: the buffer holds %d bytes, not the %u of %u vertices", (int)bufferSize,
+                (unsigned)size, sVertexCount);
+    }
+    else if (size != 0)
+    {
+        uint8_t *back = malloc(size);
+
+        if (back != NULL)
+        {
+            sGetBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)size, back);
+            if (memcmp(back, sVertices, size) != 0)
+            {
+                differs = true;
+                SDL_Log("Diorama: buildings check: the buffer's %u vertices differ from those built", sVertexCount);
+            }
+            free(back);
+        }
+    }
+    sChecked++;
+    sDiffering += differs;
+    /* (no buildings in view rebuilds every frame: those counted on, logged now and then) */
+    if (moved || differs || sVertexCount != 0 || (sChecked & 0x3F) == 1)
+        SDL_Log("Diorama: buildings check: %u rebuilds checked, %u differed", sChecked, sDiffering);
+}
+
 void DioramaGLBuildings_Sync(const struct DioramaSceneSnapshot *snapshot,
                              const struct DioramaResolvedCell *resolvedCells)
 {
@@ -649,23 +776,11 @@ void DioramaGLBuildings_Sync(const struct DioramaSceneSnapshot *snapshot,
     }
 full:
     sMetrics.vertices = sVertexCount;
-    dglBindBuffer(GL_ARRAY_BUFFER, sVertexBuffer);
-    dglBufferData(GL_ARRAY_BUFFER, sVertexCount * sizeof(*sVertices), sVertices, GL_STATIC_DRAW);
     {
-        /* FNV-1a over the triangles: the grid moving a step rebuilds them
-         * unchanged nearly every time. */
-        const uint8_t *bytes = (const uint8_t *)sVertices;
-        size_t size = (size_t)sVertexCount * sizeof(*sVertices);
-        uint32_t hash = 2166136261u ^ sVertexCount;
-        size_t k;
+        uint32_t generation = sGeometryGeneration;
 
-        for (k = 0; k < size; k++)
-            hash = (hash ^ bytes[k]) * 16777619u;
-        if (hash != sGeometryHash)
-        {
-            sGeometryHash = hash;
-            sGeometryGeneration++;
-        }
+        UploadTriangles();
+        CheckUploaded(sGeometryGeneration != generation);
     }
 }
 
@@ -778,9 +893,15 @@ void DioramaGLBuildings_Shutdown(void)
     free(sPageTextures);
     free(sBatches);
     free(sVertices);
+    free(sUploaded);
     sPageTextures = NULL;
     sBatches = NULL;
     sVertices = NULL;
+    sUploaded = NULL;
+    sUploadedCount = sUploadedCapacity = 0;
+    sUploadedKept = false;
+    sBufferHoldsUploaded = false;
+    sCheckHasMovedHash = false;
     sPageTextureCount = 0;
     sVertexCount = sVertexCapacity = 0;
     sBatchCount = 0;

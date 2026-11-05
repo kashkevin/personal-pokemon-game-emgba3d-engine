@@ -441,6 +441,11 @@ trees and open routes have neither.
   screen that waits for its build because the sync's two builds are spent
   waits without its input being built first (every waiting chunk's input was
   built every frame). `PKMN_DIORAMA_TERRAIN_CHECK=1` finds no chunk left stale.
+* The buildings (`gl_building_renderer.c` `DioramaGLBuildings_Sync`): a rebuild
+  of the same triangles is told by comparing them with a copy of the last ones
+  uploaded (not a byte-wise hash), uploads nothing and keeps the sun's depth
+  map. `PKMN_DIORAMA_TERRAIN_CHECK=1` also reads the vertex buffer back after
+  each rebuild (`buildings check: N rebuilds checked, M differed`).
 * Development aids: `PKMN_PERF_FRAME_LOG=path` (a CSV line per presented frame:
   frame time, main thread and program CPU time, chunks rebuilt, vertices,
   trees), `PKMN_DIORAMA_PROFILE_FINISH=1` (each profiled section finishes its
