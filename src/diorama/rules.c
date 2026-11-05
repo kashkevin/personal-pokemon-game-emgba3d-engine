@@ -25,21 +25,83 @@ static void DisableMeasuredVolume(struct DioramaResolvedCell *resolved)
     resolved->measuredBandCount = 0;
 }
 
+/*
+ * KNOWN_ISSUES MS-118: a grid's resolve looks up cells by their source (map, layout, coordinates) for every measured
+ * band and every pixel object's cell, each a look through all 6,561 cells; the grid's cells are indexed by their
+ * source once a resolve (DioramaRules_ResolveGrid), and a look-up finds the same cell: the first in the grid's order.
+ */
+#define SOURCE_INDEX_BITS 14
+#define SOURCE_INDEX_SIZE (1u << SOURCE_INDEX_BITS) /* over twice DIORAMA_MAX_VISIBLE_CELLS */
+static uint16_t sSourceIndex[SOURCE_INDEX_SIZE]; /* a cell's index + 1; 0: empty */
+static const struct DioramaSceneSnapshot *sSourceIndexSnapshot; /* the snapshot indexed; NULL: none */
+
+static uint32_t SourceSlot(uint8_t mapGroup, uint8_t mapNum, uint16_t layoutId, int16_t sourceX, int16_t sourceY)
+{
+    uint32_t hash = ((uint32_t)mapGroup << 24) ^ ((uint32_t)mapNum << 16) ^ layoutId;
+
+    hash = (hash * 0x9E3779B1u) ^ (uint16_t)sourceX;
+    hash = (hash * 0x9E3779B1u) ^ (uint16_t)sourceY;
+    return (hash * 0x9E3779B1u) >> (32 - SOURCE_INDEX_BITS);
+}
+
+static bool IsSourceCell(const struct DioramaCellSnapshot *cell, uint8_t mapGroup, uint8_t mapNum, uint16_t layoutId,
+                         int16_t sourceX, int16_t sourceY)
+{
+    return (cell->flags & DIORAMA_CELL_SOURCE_VALID)
+        && cell->sourceMapGroup == mapGroup
+        && cell->sourceMapNum == mapNum
+        && cell->sourceLayoutId == layoutId
+        && cell->sourceMapX == sourceX && cell->sourceMapY == sourceY;
+}
+
+static void IndexSourceCells(const struct DioramaSceneSnapshot *snapshot)
+{
+    uint16_t i;
+
+    memset(sSourceIndex, 0, sizeof(sSourceIndex));
+    for (i = 0; i < snapshot->visibleCellCount && i < DIORAMA_MAX_VISIBLE_CELLS; i++)
+    {
+        const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
+        uint32_t slot;
+
+        if (!(cell->flags & DIORAMA_CELL_SOURCE_VALID))
+            continue;
+        slot = SourceSlot(cell->sourceMapGroup, cell->sourceMapNum, cell->sourceLayoutId, cell->sourceMapX,
+                          cell->sourceMapY);
+        while (sSourceIndex[slot] != 0
+            && !IsSourceCell(&snapshot->cells[sSourceIndex[slot] - 1], cell->sourceMapGroup, cell->sourceMapNum,
+                             cell->sourceLayoutId, cell->sourceMapX, cell->sourceMapY))
+            slot = (slot + 1) & (SOURCE_INDEX_SIZE - 1);
+        if (sSourceIndex[slot] == 0)
+            sSourceIndex[slot] = (uint16_t)(i + 1); /* an earlier cell of the same source stays: the first is found */
+    }
+    sSourceIndexSnapshot = snapshot;
+}
+
 static const struct DioramaCellSnapshot *FindSourceCell(
     const struct DioramaSceneSnapshot *snapshot, const struct DioramaCellSnapshot *origin,
     uint16_t layoutId, int16_t sourceX, int16_t sourceY)
 {
     uint16_t i;
 
+    if (snapshot == sSourceIndexSnapshot)
+    {
+        uint32_t slot = SourceSlot(origin->sourceMapGroup, origin->sourceMapNum, layoutId, sourceX, sourceY);
+
+        for (; sSourceIndex[slot] != 0; slot = (slot + 1) & (SOURCE_INDEX_SIZE - 1))
+        {
+            const struct DioramaCellSnapshot *cell = &snapshot->cells[sSourceIndex[slot] - 1];
+
+            if (IsSourceCell(cell, origin->sourceMapGroup, origin->sourceMapNum, layoutId, sourceX, sourceY))
+                return cell;
+        }
+        return NULL;
+    }
     for (i = 0; i < snapshot->visibleCellCount && i < DIORAMA_MAX_VISIBLE_CELLS; i++)
     {
         const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
 
-        if ((cell->flags & DIORAMA_CELL_SOURCE_VALID)
-         && cell->sourceMapGroup == origin->sourceMapGroup
-         && cell->sourceMapNum == origin->sourceMapNum
-         && cell->sourceLayoutId == layoutId
-         && cell->sourceMapX == sourceX && cell->sourceMapY == sourceY)
+        if (IsSourceCell(cell, origin->sourceMapGroup, origin->sourceMapNum, layoutId, sourceX, sourceY))
             return cell;
     }
     return NULL;
@@ -156,21 +218,97 @@ static const struct DioramaGeneratedTerrainV2 *FindStaticTerrain(
     return NULL;
 }
 
+/*
+ * KNOWN_ISSUES MS-118: every cell of a grid's resolve looked through all the structure overrides (500) for its own;
+ * they are found through an index of them by layout and cell, made once, which keeps their order within a cell: the
+ * first that matches is the one found, as before.
+ */
+static uint16_t *sOverrideOrder; /* the overrides' indexes by (layout, cell offset, index); NULL: not made yet */
+static size_t sOverrideOrderCount;
+
+static bool OverrideBefore(size_t a, size_t b)
+{
+    const struct DioramaGeneratedStructureOverrideV2 *first = &gDioramaStructureOverridesV2[a];
+    const struct DioramaGeneratedStructureOverrideV2 *second = &gDioramaStructureOverridesV2[b];
+
+    if (first->layoutId != second->layoutId)
+        return first->layoutId < second->layoutId;
+    if (first->cellOffset != second->cellOffset)
+        return first->cellOffset < second->cellOffset;
+    return a < b;
+}
+
+static bool OrderOverrides(void)
+{
+    static uint16_t sOrder[4096];
+    size_t i;
+
+    if (sOverrideOrder != NULL)
+        return true;
+    if (gDioramaStructureOverrideV2Count > sizeof(sOrder) / sizeof(sOrder[0]))
+        return false; /* more than the index holds: the look through them all, as before */
+    for (i = 0; i < gDioramaStructureOverrideV2Count; i++)
+    {
+        size_t j = i;
+
+        while (j > 0 && OverrideBefore(i, sOrder[j - 1])) /* insertion: the table is nearly in this order already */
+        {
+            sOrder[j] = sOrder[j - 1];
+            j--;
+        }
+        sOrder[j] = (uint16_t)i;
+    }
+    sOverrideOrderCount = gDioramaStructureOverrideV2Count;
+    sOverrideOrder = sOrder;
+    return true;
+}
+
 static const struct DioramaGeneratedStructureCellV2 *FindStaticStructure(
     const struct DioramaGeneratedLayoutV2 *layout, uint32_t cellOffset,
     uint16_t expectedMetatile, uint8_t mapGroup, uint8_t mapNum)
 {
     size_t i;
 
-    for (i = 0; i < gDioramaStructureOverrideV2Count; i++)
+    if (OrderOverrides())
     {
-        const struct DioramaGeneratedStructureOverrideV2 *override =
-            &gDioramaStructureOverridesV2[i];
+        size_t low = 0, high = sOverrideOrderCount;
 
-        if (override->layoutId == layout->id && override->cellOffset == cellOffset
-         && override->expectedMetatile == expectedMetatile
-         && override->mapGroup == mapGroup && override->mapNumber == mapNum)
-            return &override->cell;
+        while (low < high) /* the first override of this layout and cell, or after them */
+        {
+            size_t middle = low + (high - low) / 2;
+            const struct DioramaGeneratedStructureOverrideV2 *override =
+                &gDioramaStructureOverridesV2[sOverrideOrder[middle]];
+
+            if (override->layoutId < layout->id
+             || (override->layoutId == layout->id && override->cellOffset < cellOffset))
+                low = middle + 1;
+            else
+                high = middle;
+        }
+        for (i = low; i < sOverrideOrderCount; i++)
+        {
+            const struct DioramaGeneratedStructureOverrideV2 *override =
+                &gDioramaStructureOverridesV2[sOverrideOrder[i]];
+
+            if (override->layoutId != layout->id || override->cellOffset != cellOffset)
+                break;
+            if (override->expectedMetatile == expectedMetatile
+             && override->mapGroup == mapGroup && override->mapNumber == mapNum)
+                return &override->cell;
+        }
+    }
+    else
+    {
+        for (i = 0; i < gDioramaStructureOverrideV2Count; i++)
+        {
+            const struct DioramaGeneratedStructureOverrideV2 *override =
+                &gDioramaStructureOverridesV2[i];
+
+            if (override->layoutId == layout->id && override->cellOffset == cellOffset
+             && override->expectedMetatile == expectedMetatile
+             && override->mapGroup == mapGroup && override->mapNumber == mapNum)
+                return &override->cell;
+        }
     }
     if (layout->structureCellOffset > gDioramaStructureOwnerV2Count
      || cellOffset >= gDioramaStructureOwnerV2Count - layout->structureCellOffset)
@@ -1105,6 +1243,7 @@ void DioramaRules_ResolveGrid(const struct DioramaSceneSnapshot *snapshot,
                               struct DioramaResolvedCell *resolvedCells)
 {
     static bool sRedrawn[DIORAMA_MAX_VISIBLE_CELLS];
+    static uint8_t sObjectsMet[65536 / 8]; /* by pixel object id */
     uint16_t count;
     uint16_t i;
 
@@ -1113,6 +1252,7 @@ void DioramaRules_ResolveGrid(const struct DioramaSceneSnapshot *snapshot,
     count = snapshot->visibleCellCount;
     if (count > DIORAMA_MAX_VISIBLE_CELLS)
         count = DIORAMA_MAX_VISIBLE_CELLS;
+    IndexSourceCells(snapshot);
     for (i = 0; i < count; i++)
     {
         const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
@@ -1132,20 +1272,21 @@ void DioramaRules_ResolveGrid(const struct DioramaSceneSnapshot *snapshot,
     }
     ClaimBorderTrees(snapshot, resolvedCells, count);
     FillRedrawnRock(snapshot, resolvedCells, sRedrawn, count);
+    /* Each pixel object is checked at its first cell; the objects already met (KNOWN_ISSUES MS-118: a set, not a look
+     * back through the cells before; an object that fails is taken from all its cells at once, so a later cell of it
+     * has none). */
+    memset(sObjectsMet, 0, sizeof(sObjectsMet));
     for (i = 0; i < count; i++)
     {
         const struct DioramaGeneratedPixelObjectV2 *object =
             DioramaRules_GetPixelObject(resolvedCells[i].pixelObjectId);
-        uint16_t previous;
         uint16_t other;
 
         if (object == NULL)
             continue;
-        for (previous = 0; previous < i; previous++)
-            if (resolvedCells[previous].pixelObjectId == object->id)
-                break;
-        if (previous < i)
+        if (sObjectsMet[object->id / 8] & (1u << (object->id % 8)))
             continue;
+        sObjectsMet[object->id / 8] |= (uint8_t)(1u << (object->id % 8));
         if (PixelObjectMatchesSnapshot(snapshot, &snapshot->cells[i], object)
          && PixelObjectSupportMatchesSnapshot(snapshot, resolvedCells, count,
                                                &snapshot->cells[i], object))
@@ -1213,6 +1354,7 @@ void DioramaRules_ResolveGrid(const struct DioramaSceneSnapshot *snapshot,
     }
     for (i = 0; i < count; i++)
         FinalizeSurfaces(snapshot, &snapshot->cells[i], &resolvedCells[i]);
+    sSourceIndexSnapshot = NULL;
 }
 
 float DioramaRules_DefaultGroundHeight(uint8_t behavior)
