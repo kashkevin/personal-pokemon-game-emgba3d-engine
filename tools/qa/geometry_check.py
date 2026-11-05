@@ -486,7 +486,8 @@ def run(args):
     given_up = [key for key in dict.fromkeys(before + given_up) if key not in done]
     with open(path, "w") as out:
         out.write("\n".join(given_up) + ("\n" if given_up else ""))
-    print(f"done: {len(finished_keys(args.out))} of {len(places)} places; not finished: {len(given_up)}")
+    print(f"done: {sum(place[0] in done for place in places)} of {len(places)} places; not finished: "
+          f"{len(given_up)}")
     return 0
 
 
