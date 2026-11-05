@@ -995,7 +995,8 @@ def seam_shifts(layouts: dict[str, dict], seams: list[tuple[tuple[str, int], tup
     component's regions; the components a walkable cell pair or a jump ledge joins
     in a layout; the ground round one mountain (its art cells: a mountain stands
     between the levels it divides, Route 116's between its grass and its east
-    plateau, Route 118's cliffs under its lake's plateau); water with the ground
+    plateau; Route 118's big rock under its river's head, which compile_rules
+    SEAM_KEEP keeps on its own level); water with the ground
     round it (a lake lies level with its banks), but for the sea the next maps
     share. A group with a component in it that meets another map moves when every
     land cell pair it has with other ground (across the seams, and in its layout

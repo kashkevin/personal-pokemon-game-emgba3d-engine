@@ -1494,6 +1494,23 @@ SEAM_RAMPS: dict[str, dict] = {
                         "banks": (((0, 137, 12, 139), 0),)},
 }
 SEAM_RAMPS["LAYOUT_ROUTE111_NO_MIRAGE_TOWER"] = SEAM_RAMPS["LAYOUT_ROUTE111"]
+# Ground that keeps its own level when its map's ground moves to meet the next map's (terrace_topology.seam_shifts;
+# KNOWN_ISSUES MS-154): "keep", the region of each cell (x, y) given stays where the layout's own solve put it;
+# "banks", (rectangle, level) as SEAM_RAMPS' (terrace_topology.hand_banks), the blocked cells round it that took their
+# level from it before. Route 118's river north of the rocks in it (21-28, 0-4: water between two sand banks, walled
+# off by rocks and ledges, nowhere the player walks) is ground no terrace reaches, the top level, where the route under
+# the forests' ledges lay a level below; the big rock at (28-30, 3-5) joined it to the route's ground as a mountain
+# between two levels, and when the route rose a level to meet Mauville City, Route 119 and Route 123 (MS-162) the
+# river's head rose with it: a plateau a level over the rest of the river and over the forest east of it, and the two
+# ledges from that forest onto its east bank, (29, 0-1), landed a level higher than they leave. The GBA draws one river
+# with the forests on both sides jumped down into it. Its water and both banks keep their level, the route's and the
+# rest of the river's: the east forest's ledges are level banks. The forest west of it (16-19, 0-3) stood on the
+# head's level (lift_blocked_cells) and stays there, a level over the river: its ledges into the river drop, and the
+# one onto the rock's top south of it (18, 4; the top at 18, 5-6 a level up) stays level.
+SEAM_KEEP: dict[str, dict] = {
+    "LAYOUT_ROUTE118": {"keep": ((21, 0), (22, 0), (27, 0)),
+                        "banks": (((16, 0, 19, 1), 16), ((17, 2, 19, 3), 16))},
+}
 # Mountains given by hand (terrace_topology.mountain_by_hand; KNOWN_ISSUES MS-153): "top", a seed cell (x, y) and the
 # level (Q16) its top and everything joined to it stand on; "decks", rectangles of it that are a bridge; "climbs", its
 # stairs (hand_slopes). Route 119's two tops - the west one (3-6, 81-85) and the east one's two tiers (30-38, 83-96) -
@@ -2090,8 +2107,18 @@ def compile_data(root: Path) -> dict:
                                                     in terrace_topology[layout["id"]].items()},
                                          "mountains": mountain_art_cells[layout["id"]]}
                           for layout in layouts}, _seam_pairs(maps, layouts_by_id, maps_by_symbol))
+    for layout_id, keep in SEAM_KEEP.items():
+        # (the regions SEAM_KEEP names stay where the layout's own solve put them)
+        width = layouts_by_id[layout_id]["width"]
+        keys = {members[layout_id].get(y * width + x) for x, y in keep["keep"]} - {None}
+        if layout_id in shifts:
+            shifts[layout_id] = {key: move for key, move in shifts[layout_id].items() if key not in keys}
     for layout_id, layout_shifts in sorted(shifts.items()):
         terrace_topology[layout_id] = solve_terrain(layouts_by_id[layout_id], shifts=layout_shifts)
+    for layout_id, keep in SEAM_KEEP.items():
+        terrace_topology[layout_id] = {**terrace_topology[layout_id],
+                                       **hand_banks(cells[layout_id], layouts_by_id[layout_id]["width"],
+                                                    keep.get("banks", ()))}
     for layout_id, ramp in SEAM_RAMPS.items():
         # A pocket of one map entered only from the next, lying on the next map's ground at the seam, the trees
         # beside it with it (terrace_topology.hand_slopes, hand_banks; SEAM_RAMPS).

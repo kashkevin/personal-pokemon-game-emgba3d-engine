@@ -583,7 +583,7 @@ of terraced walls; Route 112's rock was still a maze of walls.
   other: a terrace component, the components a walkable pair or a jump ledge joins,
   the ground round one mountain (its art: Route 116's grass, its east plateau and
   the top of the mountain between them), water with its banks (Route 118's lake and
-  its plateau), but not the sea the next maps share (the renderer's
+  its sand), but not the sea the next maps share (the renderer's
   `LevelWaterBodies` lays the open sea at one level, so a seam between two seas was
   never a step). Ground no terrace reaches is where the others move to (a town), and
   a group that a mountain or water ties to such ground stays (Route 111's south end:
@@ -685,10 +685,17 @@ of terraced walls; Route 112's rock was still a maze of walls.
   in `gl_terrain_renderer.c` `BuildInput` from the whole scene, so a chunk's halo agrees
   with the chunk that owns the cell): a ledge a level over its landing (24 cells: Route 118 19,
   the Frontier 3, the Safari Zone 2) has its face down to it, one on a lower terrace stands on
-  it; 6 cells land a level higher than they are jumped from (Route 118's by its lake's plateau,
-  none of which the player can jump: the cell behind each is blocked rock) and keep that, the
-  bank between the two. Route 118's 13 others faced its sea, which lay a level over its route
-  until the route met Mauville City's ground (MS-162, above), and Route 116's 5 that dropped
+  it. Six of Route 118's, from the forest east of the head of its river (21-28, 0-4, north of
+  the rocks in it) - (29, 0-2), (30, 2), (31, 3-4), none of which the player can jump (the
+  cell behind each is blocked) - landed a level higher than they leave: the head stood a level
+  over the rest of the river and that forest, with the big rock at (28-30, 3-5) that tied it to
+  the route's ground, and rose with the route to meet the next maps (MS-162, above). The four
+  onto the rock were level or dropping by 7b839ec1 (the rock on the route's level); the head's water and
+  banks keep their level now, the rest of the river's (`compile_rules.py` `SEAM_KEEP`), the
+  forest west of it a level up as before: every ledge there drops or lies level (KNOWN_ISSUES
+  MS-154). Route 118's 13 others faced its sea,
+  which lay a level over its route until the route met Mauville City's ground (MS-162,
+  above), and Route 116's 5 that dropped
   from rock to its grass are level banks since. Route 113's 9 and Route 123's 18 landed higher
   too until the terrace solver put
   a terrace's highest walkable ground on the top level where a ledge leaves it for ground no

@@ -524,6 +524,45 @@ class DioramaRuleCompilerTests(unittest.TestCase):
                                  (x, y))
         self.assertGreater(jumps, 30)
 
+    def test_route118_river_head_lies_with_the_river(self):
+        # KNOWN_ISSUES MS-154: Route 118's river north of the rocks in it (21-28, 0-4: water between two sand banks,
+        # nowhere the player walks) rose with the route when the route rose a level to meet the next maps (MS-162):
+        # a plateau a level over the rest of the river and over the forest east of it, so the two ledges from that
+        # forest onto its east bank, (29, 0-1), landed a level higher than they leave (blocked behind: never jumped).
+        # Its water and banks lie level with the rest of the river and the route (compile_rules.SEAM_KEEP), the forest
+        # west of it a level up as before: no ledge of Route 118's lands higher than the cell behind it, blocked or not.
+        route = next(row for row in self.data["layouts"] if row["symbol"] == "LAYOUT_ROUTE118")
+        width, height = route["width"], route["height"]
+        records = {record["cellOffset"]: record["groundQ16"] for record in route["terrainRecords"]
+                   if record["mapGroup"] == 0xFF}
+
+        def ground(x, y):
+            return records.get(y * width + x, 0)
+
+        self.assertEqual([ground(x, 0) for x in range(21, 29)], [ground(24, 8)] * 8)   # the head and the lake
+        self.assertEqual(ground(30, 0), ground(28, 0))                                 # the east forest and bank
+        self.assertEqual(ground(19, 0), ground(21, 0) + 16)                            # the west forest a level up
+        self.assertEqual(ground(18, 3), ground(18, 5))                                 # and the rock's top beside it
+        tilesets = load_tilesets(ROOT)
+        _, rows = load_world(ROOT)
+        names = {value: name for name, value
+                 in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
+        layout = next(row for row in rows if row["id"] == "LAYOUT_ROUTE118")
+        cells = _load_cells(ROOT, [layout], tilesets, names)[0]["LAYOUT_ROUTE118"]
+        steps = {"MB_JUMP_SOUTH": (0, 1), "MB_JUMP_NORTH": (0, -1), "MB_JUMP_EAST": (1, 0), "MB_JUMP_WEST": (-1, 0),
+                 "MB_JUMP_SOUTHEAST": (1, 1), "MB_JUMP_SOUTHWEST": (-1, 1), "MB_JUMP_NORTHEAST": (1, -1),
+                 "MB_JUMP_NORTHWEST": (-1, -1)}
+        ledges = 0
+        for offset, cell in enumerate(cells):
+            step = steps.get(cell.get("behavior"))
+            x, y = offset % width, offset // width
+            if step is None or not (0 <= x - step[0] < width and 0 <= y - step[1] < height
+                                    and 0 <= x + step[0] < width and 0 <= y + step[1] < height):
+                continue
+            ledges += 1
+            self.assertLessEqual(ground(x + step[0], y + step[1]), ground(x - step[0], y - step[1]), (x, y))
+        self.assertGreater(ledges, 90)
+
     def test_repository_paths_lie_flush_with_the_ground_they_run_through(self):
         # KNOWN_ISSUES MS-162: the Battle Frontier west half's paths of elevation 3 (the walk north from
         # the harbour, the band along its lower ground, the cells by the Battle Pike) run through its
