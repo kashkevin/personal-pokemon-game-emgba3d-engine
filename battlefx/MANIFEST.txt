@@ -8,8 +8,8 @@ pokeemerald-expansion's own battle_anim_scripts.s and C sources (commit in bfx_m
 83454fe17bf4a8e5e60a374d4d7eb98514834efcb5a2c957b1282c841b0646d3  assets/meshes.bin
 2aecb46117d257443a23ddd64d805e6c6a06891bd0941b0d3917ae9929543843  assets/ramps.png
 238929aa7ba8f115f41c34be917d61b0f2556f10bb88837458f9c6da249cf0ca  assets/strips.png
-5c518ef68906402904d58dddb8f5123ff948ffabd08779607a7e58861571bb0a  bfx_core.js
-347ccd58449b38a92d1d8e6bdf0763cb87dfa003c4a584ef3d0e831d55e16e9c  bfx_moves.json
+2090268509ece8f6686ab67789f4c450e7f27a2baf5544915aca6aef363b8bb5  bfx_core.js
+b208c3afced378a681eb17855e3eb9e9f85ab71716a1de92859af508aec547a4  bfx_moves.json
 1802d1709565f7b11d1be28dc3e255a94c5b072afe42b25883b60f58f1da8bc3  se_frames.json
 83db09a13e153a69ee357a9ae36acfe80c73d81079388441ae08afee968af68b  shaders/bright.frag
 75f5838e37636c16ea1eaf823402ca50b94ff070230340c7e9281ffafebdbba9  shaders/card.frag
@@ -27,3 +27,6 @@ cae942c960560b43fb6c1e59eb70a76fecaa799e5a25cf10c45d4421ad9338f6  shaders/mesh.v
 1a2adf6235814bbbf5b1b386300467c069fbfa2e63dbb7ab69cbfe7077a72186  shaders/ribbon.frag
 dff093d84d4ab6824a849fccfaa227d9d49656487eb0894eedd9367eaa1bb6da  shaders/ribbon.vert
 4d93927d3cd7acc2195c6f9cdc9b51070e408d1054feffc2c2ad0202d5b9c3ed  shaders/up.frag
+
+Moves past the package (tools/battlefx/extend_folder.py):
+16 moves past the package's 621 are converted from this game's own scripts by tools/battlefx/convert_more.py (bfx_moves.json meta.more) and bfx_core.js ends with tools/battlefx/core_more.js (their callbacks, tasks and HD presentation): MOVE_FIRST_IMPRESSION, MOVE_HIGH_HORSEPOWER, MOVE_STRENGTH_SAP, MOVE_SPOTLIGHT, MOVE_THROAT_CHOP, MOVE_PSYCHIC_TERRAIN, MOVE_LUNGE, MOVE_POWER_TRIP, MOVE_BURN_UP, MOVE_SPEED_SWAP, MOVE_DRAGON_HAMMER, MOVE_PSYCHIC_FANGS, MOVE_LIQUIDATION, MOVE_TEARFUL_LOOK, MOVE_STONE_AXE, MOVE_KOWTOW_CLEAVE.

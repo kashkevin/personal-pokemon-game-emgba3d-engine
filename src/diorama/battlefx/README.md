@@ -28,7 +28,7 @@ throw at a wild Pokemon with its fall, shakes, break-out or catch and the caught
 (`B_ANIM_SWITCH_OUT_PLAYER_MON`, `B_ANIM_SWITCH_OUT_OPPONENT_MON`) are not taken (`bfx_game.c`
 `PokeBallAnimation`), and the balls and their particles stay in the GBA picture even while another
 animation is drawn in HD (a shiny Pokemon's stars as its ball opens; `IsPokeBallSprite`).
-Everything else - the 621 moves, the status, stat, weather, healing and other battle animations, a
+Everything else - the 621 moves (and the moves past them added below, Moves past the package), the status, stat, weather, healing and other battle animations, a
 shiny's stars, the Pokeblock throw - stays HD. `pokeBalls=hd` (settings) or
 `PKMN_BATTLEFX_POKEBALLS=hd` brings back the HD Poke Ball animations described below (the trainer
 who throws, the caught ball's stars, the send-out).
@@ -290,6 +290,46 @@ the end of a statement as GNU as reads it (Parabolic Charge's
 `goto ParabolicChargeHeal;`, which the package's reader took for a label it could not find, ending
 the double-battle branch early). Redo both after changing animation scripts, the generation config or
 sound effects.
+
+### Moves past the package
+
+The package's data stops at move 621 (Hyperspace Fury); its tables already hold every sprite template
+and graphics tag of the game (1146 and 473), and its kits draw most of the newer tags. The moves past
+it (622 and up) are converted by a converter of this repository's own, since the package's
+(`battlefx_kit/prototype/build_preview_data.py`) is not here:
+
+```sh
+# the converter checked against the package: converts its 621 moves and compares them row by row
+python3 tools/battlefx/convert_more.py --check
+# the folder: the package's data with the moves listed added, bfx_core.js with tools/battlefx/core_more.js after it
+python3 tools/battlefx/extend_folder.py --out battlefx --moves @tools/battlefx/moves_more.txt
+# which of the moves past the package a player can meet, and what an HD version of each still needs
+python3 tools/battlefx/moves_past_package.py --md OUT.md --json OUT.json
+```
+
+`convert_more.py` reads the same sources (the scripts and their macros, the C sprite templates, OAM and
+animation tables, `moves_info.h`) and writes the same rows: the runtime's time model (`delay N` is N + 2
+frames, a sync's rows count from the frame it is met, `monbg`'s frames are the runtime's), the branches
+as the package's variants. `--check` converts the package's 621 moves: 601 give the package's rows
+exactly (every row, every variant). The other 20: 9 differ in the default timeline only - the package
+takes every jump as falling through, this converter the answers of the default battle (the player's
+left Pokemon against the foe's, a single battle: Solar Beam's, Hyper Fang's, Giga Impact's and Power
+Whip's backgrounds are the foe's side's, Return, Frustration, Present, Magnitude, Sky Attack); 6 take
+`jumprettrue` after `AnimTask_IsContest` as the package does not (its `IsTargetPlayerSide = TRUE`
+variants change to the contest's background: Mega Punch, Mega Kick, Focus Punch, Flare Blitz, Head
+Smash, Inferno); Surf's palette argument is this game's (`ANIM_SURF_PAL_SURF` is 0 with
+`B_NEW_SURF_PARTICLE_PALETTE FALSE`, the package has 3); and the multi-valued answers of four old moves
+(Seismic Toss's damage level, Fury Cutter's hit count, Ice Ball's counter, Techno Blast's Drive) are
+not enumerated here (none of the moves past the package branches on one). The game plays the package's
+data for those 621 as before: only the moves past it come from this converter.
+
+`core_more.js` holds the callbacks and tasks the moves past the package need that the package's
+core does not have (re-implemented from this game's C, as its behaviour files are) and their HD
+presentation (`HD.moves`: the package's own effects keyed to each script's sprites and tasks). The
+moves added are in `tools/battlefx/moves_more.txt`; each was played by the test build's gallery with
+every compared frame of the game's effect sprites equal to the core's replay (the parity column of
+the audit matrix) before it was added. Not converted: Dragon Darts (`createdragondartsprite`), Tera
+Blast, Ivy Cudgel, Tera Starstorm (`jumpifmovetypeequal`).
 
 ## Tests
 

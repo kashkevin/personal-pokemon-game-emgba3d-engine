@@ -1,0 +1,21 @@
+# The moves past the Battle FX package that tools/battlefx/extend_folder.py adds to battlefx/ (one a line).
+# Each was played by the test build's gallery with every compared frame of the game's effect sprites equal to the
+# core's replay before it was listed (docs of the app: battle-fx-past-package-20261105.md).
+# Reachable in this game (tools/battlefx/moves_past_package.py): egg moves a hatched Pokemon switches in, Kleavor's and
+# Kingambit's level-up moves.
+MOVE_FIRST_IMPRESSION
+MOVE_HIGH_HORSEPOWER
+MOVE_STRENGTH_SAP
+MOVE_SPOTLIGHT
+MOVE_THROAT_CHOP
+MOVE_PSYCHIC_TERRAIN
+MOVE_LUNGE
+MOVE_POWER_TRIP
+MOVE_BURN_UP
+MOVE_SPEED_SWAP
+MOVE_DRAGON_HAMMER
+MOVE_PSYCHIC_FANGS
+MOVE_LIQUIDATION
+MOVE_TEARFUL_LOOK
+MOVE_STONE_AXE
+MOVE_KOWTOW_CLEAVE

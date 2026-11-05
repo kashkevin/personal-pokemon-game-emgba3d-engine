@@ -40798,3 +40798,136 @@ B.standinMons = function (names) {
 
 /* ==== end ==== */
 globalThis.BFX_CORE_MANIFEST = {"files":[{"file":"src/rt.js","bytes":120229,"sha256":"3ff507cb8d0f2eed"},{"file":"src/anim_resolve.js","bytes":20899,"sha256":"aa75e5fd0b2c9f58"},{"file":"src/behaviors/core.js","bytes":26443,"sha256":"834f47f53ba31a2b"},{"file":"src/behaviors/b01_effects1a.js","bytes":55234,"sha256":"d9464635ee8757de"},{"file":"src/behaviors/b02_effects1b.js","bytes":62644,"sha256":"3de03c8fd7aabbcf"},{"file":"src/behaviors/b03_effects2.js","bytes":70667,"sha256":"00edd41f129a8d85"},{"file":"src/behaviors/b04_effects3a.js","bytes":61757,"sha256":"3c5e6cdb7c1fbf3e"},{"file":"src/behaviors/b05_effects3b.js","bytes":52903,"sha256":"bf5ade4c7198c7a5"},{"file":"src/behaviors/b06_psychic_ghost_dark.js","bytes":80368,"sha256":"bdcd27b67a04dd89"},{"file":"src/behaviors/b07_water_ice_dragon_bug_poison.js","bytes":88258,"sha256":"368cb6065b4cb5b9"},{"file":"src/behaviors/b08_electric_fire_ground_rock.js","bytes":76478,"sha256":"435f8f004b0e3dad"},{"file":"src/behaviors/b09_fight_new_flying.js","bytes":61598,"sha256":"4b3ec3b7f5c38e37"},{"file":"src/behaviors/b10_movement_normal_utility_sound.js","bytes":72287,"sha256":"77234922909414fc"},{"file":"src/behaviors/b11_general.js","bytes":58466,"sha256":"ca8346dc7e51a12e"},{"file":"src/behaviors/b12_controller.js","bytes":13013,"sha256":"95a367877ef32b9c"},{"file":"src/gfx_standin.js","bytes":57473,"sha256":"2667f281c6926b5b"},{"file":"src/source.js","bytes":6658,"sha256":"96911d409e3e1f1a"},{"file":"src/render.js","bytes":57544,"sha256":"36258078684a96c7"},{"file":"src/hd/core.js","bytes":18454,"sha256":"448d19f0f8d38128"},{"file":"src/hd/gpu.js","bytes":38345,"sha256":"38a42dff2730626c"},{"file":"src/hd/kits.js","bytes":78002,"sha256":"c9f36eb1f2de2bcf"},{"file":"src/hd/director.js","bytes":35350,"sha256":"35acd3a9e9aed48c"},{"file":"src/hd/config.js","bytes":28956,"sha256":"530f10fb728da835"},{"file":"src/hd/tasks.js","bytes":9084,"sha256":"a40e925ab33c3d16"},{"file":"src/hd/signature.js","bytes":34627,"sha256":"7682da9966a84034"},{"file":"src/hd/polish.js","bytes":29850,"sha256":"7d5d8aa434a075f6"},{"file":"src/hd/general.js","bytes":31935,"sha256":"c3db3b674eb73227"},{"file":"src/hd/cgrade.js","bytes":59225,"sha256":"6731543d4056e7a5"},{"file":"src/hd/v3_flags.js","bytes":7244,"sha256":"d882fd15a7d085aa"},{"file":"src/hd/v3.js","bytes":59801,"sha256":"1ba4f06f7ced2f0f"},{"file":"src/hd/v3_a.js","bytes":117372,"sha256":"fd4ba8c486b0c427"},{"file":"src/hd/v3_b.js","bytes":191879,"sha256":"10c64a247b8f8c51"},{"file":"src/hd/v3_c.js","bytes":222604,"sha256":"63eac778c8203adb"},{"file":"src/hd/v3_d.js","bytes":213937,"sha256":"31fb8c68a679e62d"},{"file":"src/hd/v3_e.js","bytes":280795,"sha256":"6f82d7b6d7ca6680"},{"file":"src/hd/v3_f.js","bytes":200083,"sha256":"12b7a689bbd15b92"},{"file":"src/hd/v3_g.js","bytes":118899,"sha256":"52d38ee1767720cb"},{"file":"src/hd/v3_h.js","bytes":144475,"sha256":"1d0f62a575150a4e"},{"file":"src/hd/v3_lead.js","bytes":7536,"sha256":"09b85702c4b6c1ca"},{"file":"src/hd/textures.js","bytes":82877,"sha256":"ef6061a2c6c4793f"},{"file":"src/hd/arena.js","bytes":29266,"sha256":"05b078537c72ce31"},{"file":"src/hd/bridge.js","bytes":43595,"sha256":"ed72b50c3cce9ea7"}]};
+
+/* ==== EmeraldTogether additions: tools/battlefx/core_more.js (tools/battlefx/extend_folder.py) ==== */
+/* Battle FX: EmeraldTogether's additions to the package's core (tools/battlefx/core_more.js), appended to
+   battlefx/bfx_core.js by tools/battlefx/extend_folder.py after the package's bundle, so they load with it (the game
+   reads one script). They only add: callbacks, tasks and HD presentation for the moves past the package's 621 that
+   tools/battlefx/convert_more.py converts; nothing the package's own moves use is replaced.
+
+   Callbacks are re-implemented from this game's C (src/battle_anim_new.c), statement for statement, as the package's
+   behaviour files are (the parity tests compare every frame of the game's effect sprites with them). */
+BFX_RT.define(function (A) {
+'use strict';
+const { CB } = A;
+const args = () => A.gBattleAnimArgs;
+
+// ---------------------------------------------------------------- Stone Axe (gSpriteTemplate_StoneAxeSlash)
+// SpriteCB_HorizontalSlice: arg 0, 1: initial x / y offset, arg 2: slice distance, arg 3: speed, arg 4: 1 = to the left
+CB.SpriteCB_HorizontalSlice = function (s) {
+  const a = args();
+  s.x2 = a[0]; s.y2 = a[1];
+  s.data[0] = a[2]; s.data[1] = a[3]; s.data[2] = a[4]; s.data[3] = 0;
+  s.callback = horizontalSliceStep;
+};
+function horizontalSliceStep(s) {
+  if (s.data[2] === 1) s.x2 -= s.data[1]; else s.x2 += s.data[1];
+  s.data[3] += s.data[1];
+  if (s.data[3] >= s.data[0]) A.destroySpriteAndMatrix(s);
+}
+});
+
+/* ---------------------------------------------------------------- HD presentation of the moves past the package
+   The HD layer draws every effect sprite with the kit of its graphics tag / template (the package's), as for the
+   package's moves; these configs add each move's identity the way the package's own configs do (src/hd/v3*.js), from
+   the package's effects only, keyed to the script's own sprites and tasks (`on`) so they follow the game's timing.
+   Presentation only: nothing here changes a frame of the replay (the parity tests compare the game's sprites). */
+(function (root) {
+'use strict';
+const HD = root.BFX_HD; if (!HD || !HD.moves) return;
+const FPS = HD.FPS;
+const on = (name, kind, o, nth) => Object.assign({ on: name, nth: nth == null ? 1 : nth, kind }, o || {});
+const at = (f, kind, o) => Object.assign({ at: f, kind }, o || {});
+const IS = HD.IMPACT_STYLES || {};
+
+// a terrain's field of psychic motes (as Misty Terrain's e_field 'misty', in Psychic Terrain's pink)
+if (HD.MOVE_FX && HD.FX && HD.FX_STEP && HD.PS && HD.PS.e_sparkle) {
+  HD.MOVE_FX.et_psyfield = (d, e) => d.addFx('et_psyfield', { life: (e.dur || 150) / FPS });
+  HD.FX.et_psyfield = function () {};
+  HD.FX_STEP.et_psyfield = function (d, f, age) {
+    if (age / f.life > 0.9) return; const r = d.rng;
+    if (d.frame % 3 === 0) d.emit(HD.PS.e_sparkle, [r.range(-10, 12), r.range(0.2, 1.4), r.range(-13, 5)], 1, { ramp: 'psychic', scale: 1.25 });
+  };
+}
+
+HD.moves({
+  // Bug: the startle (as Astonish), the lunge and the pound
+  MOVE_FIRST_IMPRESSION: { impactStyle: IS.TYPE_BUG, fx: [
+    at(2, 'b_glow', { b: 'attacker', dur: 30, color: [0.55, 1, 0.3], amt: 0.4, rate: 7, ramp: 'bug', rings: false }),
+    on('gFirstImpressionPoundTemplate', 'c_burst', { b: 'target', style: 'bug', size: 0.85 }),
+    on('AnimTask_ShakeMonInPlace', 'camera', { focus: 'target', dur: 34, zoom: 0.12 })] },
+  // Ground: Mega Kick's strike with a horseshoe, dust where it lands
+  MOVE_HIGH_HORSEPOWER: { tpl: { gHighHorsepowerHorseshoeTemplate: { kit: 'strike', cell: 'foot', a_throw: true, a_heavy: 1.3, a_el: 'fight' } }, fx: [
+    at(2, 'a_glowcap', { b: 'target', dur: 150, max: 0.05 }),
+    on('AnimTask_ShakeMon2', 'a_themecap', { hold: 10, fade: 16 }),
+    on('AnimTask_ShakeMon2', 'd2_thud', { b: 'target', size: 0.8, n: 4 }),
+    on('AnimTask_ShakeMon2', 'camera', { focus: 'target', dur: 40, zoom: 0.14 })] },
+  // Grass: the target's strength drawn out in red, the user healed
+  MOVE_STRENGTH_SAP: { fx: [
+    at(3, 'c_glow', { b: 'target', dur: 36, max: 0.18 }),
+    on('gStrengthSapAbsorbTemplate', 'drain', { from: 'target', to: 'attacker', dur: 64, ramp: 'red', rate: 24 }),
+    on('gGrantingStarsSpriteTemplate', 'aura', { b: 'attacker', dur: 50, color: [0.5, 1, 0.4], ramp: 'heal', size: 0.9, distort: false })] },
+  // Normal: Encore's stage light (the GBA spotlight is an OBJ-window mask the HD layer does not draw)
+  MOVE_SPOTLIGHT: { fx: [
+    on('AnimTask_CreateSpotlight', 'a_stage', { dur: 165, dark: 0.5 }),
+    on('AnimTask_CreateSpotlight', 'a_spot', { b: 'target', dur: 165 })] },
+  // Dark: Karate Chop's hand, a dark hit
+  MOVE_THROAT_CHOP: { impactStyle: IS.TYPE_DARK, tpl: { gKarateChopSpriteTemplate: { kit: 'strike', cell: 'hand', a_path: 'chopLow', a_el: 'dark', a_heavy: 0.7, v3size: 0.55 } }, fx: [
+    on('AnimTask_ShakeMon', 'c_burst', { b: 'target', style: 'dark', size: 0.75 }),
+    on('AnimTask_ShakeMon', 'camera', { focus: 'target', dur: 30, zoom: 0.1 })] },
+  // Psychic: the terrain's field (as the package's terrains)
+  MOVE_PSYCHIC_TERRAIN: { fx: [
+    on('AnimTask_BlendMonInAndOut', 'aura', { b: 'attacker', dur: 40, color: [1, 0.45, 0.85], ramp: 'psychic', size: 0.9, distort: false }),
+    on('gPsychicTerrainOrbsTemplate', 'e_env', { theme: 'psychic', amt: 0.26, dur: 140 }),
+    on('gPsychicTerrainOrbsTemplate', 'et_psyfield', { dur: 140 })] },
+  // Bug: the green charge on the user, the lunge's hit
+  MOVE_LUNGE: { impactStyle: IS.TYPE_BUG, fx: [
+    at(3, 'b_glow', { b: 'attacker', dur: 230, color: [0.45, 1, 0.4], amt: 0.45, rate: 8, ramp: 'bug', rings: false }),
+    on('gLungeGreenImpactTemplate', 'c_burst', { b: 'target', style: 'bug', size: 0.95 }),
+    on('AnimTask_ShakeMon', 'camera', { focus: 'target', dur: 34, zoom: 0.12 }, 2)] },
+  // Dark: the user powered up, each impact dark
+  MOVE_POWER_TRIP: { impactStyle: IS.TYPE_DARK, fx: [
+    on('AnimTask_BlendColorCycle', 'aura', { b: 'attacker', dur: 70, color: [0.62, 0.36, 1], ramp: 'dark', size: 1, distort: false }),
+    on('gPowerTripImpactTemplate', 'c_burst', { b: 'target', style: 'dark', size: 0.6 }, 1),
+    on('gPowerTripImpactTemplate', 'c_burst', { b: 'target', style: 'dark', size: 0.6 }, 2),
+    on('gPowerTripImpactTemplate', 'c_burst', { b: 'target', style: 'dark', size: 0.7 }, 3)] },
+  // Fire: the user burns red-hot (as Bide's glow), the flames engulf the target
+  MOVE_BURN_UP: { impactStyle: IS.TYPE_FIRE, fx: [
+    on('AnimTask_ShakeMon', 'b_glow', { b: 'attacker', dur: 70, color: [1, 0.3, 0.08], amt: 0.75, rate: 7, ramp: 'fire', motes: 1, flash: 0.25 }),
+    on('gFireSpreadSpriteTemplate', 'c_engulf', { b: 'target', dur: 44, ramp: 'fire', size: 0.95, height: 1.05 }),
+    on('gFireSpreadSpriteTemplate', 'c_burst', { b: 'target', style: 'fire', size: 1 }),
+    on('gFireSpreadSpriteTemplate', 'camera', { focus: 'target', dur: 40, zoom: 0.12 })] },
+  // Psychic: both battlers glow as their speed changes hands
+  MOVE_SPEED_SWAP: { fx: [
+    on('gSpeedSwapCircleTemplate', 'aura', { b: 'target', dur: 40, color: [1, 0.5, 0.88], ramp: 'psychic', size: 0.85, distort: false }),
+    on('gSpeedSwapOrbMissileTemplate', 'drain', { from: 'target', to: 'attacker', dur: 30, ramp: 'psychic', rate: 26 }),
+    on('gSpeedSwapOrbMissileTemplate', 'aura', { b: 'attacker', dur: 40, color: [1, 0.5, 0.88], ramp: 'psychic', size: 0.85, distort: false })] },
+  // Dragon: the hammer's slam
+  MOVE_DRAGON_HAMMER: { impactStyle: IS.TYPE_DRAGON, fx: [
+    on('AnimTask_SquishTarget', 'g2_slam', { b: 'target', strength: 1.2, crack: true, chips: 4, shake: 0.5, hit: false }),
+    on('AnimTask_SquishTarget', 'c_burst', { b: 'target', style: 'dragon', size: 1 }),
+    on('AnimTask_SquishTarget', 'camera', { focus: 'target', dur: 40, zoom: 0.14 })] },
+  // Psychic: Crunch's jaws, a psychic flare where they close
+  MOVE_PSYCHIC_FANGS: { tpl: { gSharpTeethSpriteTemplate: { kit: 'b2_bite', style: 'normal', scale: 1.15 } }, fx: [
+    on('AnimTask_ShakeMon', 'c2_flare', { b: 'target', dur: 26, color: [1, 0.4, 0.85], size: 0.9, flare: 0.3 })] },
+  // Water: Waterfall's cloak and cascade
+  MOVE_LIQUIDATION: { impactStyle: IS.TYPE_WATER, fx: [
+    at(1, 'b_cloak', { el: 'water', lead: 10 }),
+    on('AnimTask_ShakeMon2', 'g2_cascade', { b: 'target', dur: 40 })] },
+  // Normal: Baby-Doll Eyes' gaze in tearful blue, the target moved
+  MOVE_TEARFUL_LOOK: { tag: { ANIM_TAG_OPENING_EYE: { kit: 'none' } }, fx: [
+    at(14, 'h2_glare', { color: [0.55, 0.78, 1], flash: 22, n: 1, delay: 40, travel: 10, cone: 0, react: null, fear: false }),
+    on('gTearDropSpriteTemplate', 'h2_react', { b: 'target', react: 'sag', dur: 30, amt: 0.8 })] },
+  // Rock: the axe's cut, stone chips and dust
+  MOVE_STONE_AXE: { impactStyle: IS.TYPE_ROCK, fx: [
+    on('AnimTask_ShakeMon', 'd2_thud', { b: 'target', size: 0.7, n: 4 }),
+    on('AnimTask_ShakeMon', 'c_burst', { b: 'target', style: 'ground', size: 0.7 }),
+    on('AnimTask_ShakeMon', 'camera', { focus: 'target', dur: 30, zoom: 0.1 })] },
+  // Dark: the bow, the glare, the great cross cut
+  MOVE_KOWTOW_CLEAVE: { impactStyle: IS.TYPE_DARK, fx: [
+    on('gSpriteTemplate_LargeCrossImpact', 'c_slashx', { b: 'target', color: [0.75, 0.45, 1] }),
+    on('gSpriteTemplate_LargeCrossImpact', 'c_burst', { b: 'target', style: 'dark', size: 1 }),
+    on('gSpriteTemplate_LargeCrossImpact', 'camera', { focus: 'target', dur: 40, zoom: 0.15 }),
+    on('gSpriteTemplate_LargeCrossImpact', 'grade', { dur: 60, sat: 0.5, tint: [0.8, 0.6, 1], amt: 0.25 })] }
+});
+})(typeof window !== 'undefined' ? window : globalThis);
