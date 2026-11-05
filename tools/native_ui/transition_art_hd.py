@@ -31,20 +31,21 @@ from PIL import Image, ImageFilter
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# name: (tileset, tilemap or None, palette (None: the PNG's own; or a .pal and its first bank), map width in tiles,
+# name: (tileset, tilemap or None, palette for the preview (None: the PNG's own; or a .pal and which of its 16-colour
+#        palettes the game loads into BG palette 15 first: battle_transition.c), map width in tiles,
 #        crop in GBA pixels (x, y, w, h))
 PICTURES = {
     "frontier_logo": ("frontier_logo.png", "frontier_logo.bin", None, 32, (0, 0, 240, 160)),
     "frontier_logo_center": ("frontier_logo_center.png", "frontier_logo_center.bin", None, 32, (0, 0, 240, 160)),
     "frontier_logo_circles": ("frontier_logo_circles.png", None, None, 0, (0, 0, 64, 192)),
-    "kyogre": ("kyogre.png", "kyogre.bin", "kyogre_pt1.pal", 32, (0, 0, 240, 160)),
-    "groudon": ("groudon.png", "groudon.bin", "groudon_pt1.pal", 32, (0, 0, 240, 160)),
-    "rayquaza": ("rayquaza.png", "rayquaza.bin", "rayquaza.pal", 32, (0, 0, 256, 320)),
-    "regice": ("regis.png", "regice.bin", "regice.pal", 32, (0, 0, 240, 160)),
-    "registeel": ("regis.png", "registeel.bin", "registeel.pal", 32, (0, 0, 240, 160)),
-    "regirock": ("regis.png", "regirock.bin", "regirock.pal", 32, (0, 0, 240, 160)),
-    "team_aqua": ("team_aqua.png", "team_aqua.bin", "evil_team.pal", 32, (0, 0, 240, 160)),
-    "team_magma": ("team_magma.png", "team_magma.bin", "evil_team.pal", 32, (0, 0, 240, 160)),
+    "kyogre": ("kyogre.png", "kyogre.bin", ("kyogre_pt1.pal", 0), 32, (0, 0, 240, 160)),
+    "groudon": ("groudon.png", "groudon.bin", ("groudon_pt1.pal", 0), 32, (0, 0, 240, 160)),
+    "rayquaza": ("rayquaza.png", "rayquaza.bin", ("rayquaza.pal", 5), 32, (0, 0, 256, 320)),
+    "regice": ("regis.png", "regice.bin", ("regice.pal", 0), 32, (0, 0, 240, 160)),
+    "registeel": ("regis.png", "registeel.bin", ("registeel.pal", 0), 32, (0, 0, 240, 160)),
+    "regirock": ("regis.png", "regirock.bin", ("regirock.pal", 0), 32, (0, 0, 240, 160)),
+    "team_aqua": ("team_aqua.png", "team_aqua.bin", ("evil_team.pal", 0), 32, (0, 0, 240, 160)),
+    "team_magma": ("team_magma.png", "team_magma.bin", ("evil_team.pal", 0), 32, (0, 0, 240, 160)),
 }
 
 
@@ -111,17 +112,15 @@ def label_maps(idx, bank, scale, soft=0.55):
     return K[a].astype(np.uint8), K[b].astype(np.uint8), (t * 255).astype(np.uint8)
 
 
-def colours(pal_png, pal_file, keys):
-    """slot -> RGB for the preview (the picture's own palette; the game's palette at run time)."""
+def colours(pal_png, pal_file, first, keys):
+    """slot -> RGB for the preview (the picture's own palette; the game's palette at run time). These pictures use one
+    BG palette (15), loaded with 16 colours of the file from palette `first` on (the flashes then cycle through the
+    file's others)."""
     if pal_file is None:
         p = pal_png.getpalette() or [0] * 768
         return {k: tuple(p[(k & 15) * 3:(k & 15) * 3 + 3]) for k in keys}
     p = jasc(pal_file)
-    out = {}
-    for k in keys:
-        i = (k >> 4) * 16 + (k & 15)
-        out[k] = p[i] if i < len(p) else p[(k & 15) % len(p)]
-    return out
+    return {k: p[first * 16 + (k & 15)] for k in keys}
 
 
 def main():
@@ -143,7 +142,7 @@ def main():
         r, g, b = label_maps(idx, bank, o.scale)
         Image.fromarray(np.dstack([r, g, b])).save(os.path.join(o.out, name + ".slots.png"))
         keys = sorted(set(r.flatten().tolist()) | set(g.flatten().tolist()))
-        col = colours(img, os.path.join(gfx, pal) if pal else None, keys)
+        col = colours(img, os.path.join(gfx, pal[0]) if pal else None, pal[1] if pal else 0, keys)
         lut = np.zeros((256, 3), np.float32)
         for k, c in col.items():
             lut[k] = c
