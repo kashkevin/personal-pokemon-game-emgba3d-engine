@@ -442,12 +442,19 @@ uint8_t DioramaAtlas_HighestPage(void)
     return sHighestPage;
 }
 
-void DioramaAtlas_Clear(uint32_t *atlasPixels, uint8_t *presentSlots)
+void DioramaAtlas_ClearRows(uint32_t *atlasPixels, uint8_t *presentSlots, unsigned pixelRows)
 {
-    memset(atlasPixels, 0, DIORAMA_ATLAS_PIXEL_COUNT * sizeof(*atlasPixels));
+    if (pixelRows > DIORAMA_ATLAS_HEIGHT)
+        pixelRows = DIORAMA_ATLAS_HEIGHT;
+    memset(atlasPixels, 0, (size_t)pixelRows * DIORAMA_ATLAS_WIDTH * sizeof(*atlasPixels));
     memset(presentSlots, 0, DIORAMA_ATLAS_PRESENT_BYTES);
     memset(sForegroundAlpha, 0, sizeof(sForegroundAlpha));
     memset(sSilhouetteAlpha, 0, sizeof(sSilhouetteAlpha));
+}
+
+void DioramaAtlas_Clear(uint32_t *atlasPixels, uint8_t *presentSlots)
+{
+    DioramaAtlas_ClearRows(atlasPixels, presentSlots, DIORAMA_ATLAS_HEIGHT);
 }
 
 static bool HasBit(const uint8_t *bits, uint16_t slot)

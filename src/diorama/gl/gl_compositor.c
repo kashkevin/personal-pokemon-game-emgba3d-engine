@@ -964,12 +964,17 @@ static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
     unsigned cellCount = snapshot->visibleCellCount;
     unsigned i;
     Uint64 cleared, resolved;
+    /* The map's rows and those of the pages in use (DioramaAtlas_SetPages above): all a redraw draws and uploads. */
+    unsigned usedRows = (DIORAMA_ATLAS_MAP_ROWS + DioramaAtlas_HighestPage() * DIORAMA_ATLAS_PAGE_ROWS)
+                      * DIORAMA_ATLAS_STRIDE;
 
     if (reset)
     {
-        DioramaAtlas_Clear(sAtlasPixels, sPresentMetatiles);
-        memset(sBaseAtlasPixels, 0, sizeof(sBaseAtlasPixels));
-        memset(sForegroundAtlasPixels, 0, sizeof(sForegroundAtlasPixels));
+        /* only those rows: clearing all three atlases whole (10 MB) was half this part of every redraw, at each
+         * step of a screen fade as at a crossing (KNOWN_ISSUES MS-118) */
+        DioramaAtlas_ClearRows(sAtlasPixels, sPresentMetatiles, usedRows);
+        memset(sBaseAtlasPixels, 0, (size_t)usedRows * DIORAMA_ATLAS_WIDTH * sizeof(sBaseAtlasPixels[0]));
+        memset(sForegroundAtlasPixels, 0, (size_t)usedRows * DIORAMA_ATLAS_WIDTH * sizeof(sForegroundAtlasPixels[0]));
         sAtlasTilesets[0] = snapshot->primaryTileset;
         sAtlasTilesets[1] = snapshot->secondaryTileset;
         sAtlasPaletteGeneration = snapshot->paletteGeneration;
@@ -1056,8 +1061,7 @@ static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
     if (reset)
     {
         /* The map's rows and those of the pages in use: the rest is unused. */
-        int height = (DIORAMA_ATLAS_MAP_ROWS + DioramaAtlas_HighestPage() * DIORAMA_ATLAS_PAGE_ROWS)
-                   * DIORAMA_ATLAS_STRIDE;
+        int height = (int)usedRows;
         Uint64 drawn = SDL_GetPerformanceCounter();
 
         glBindTexture(GL_TEXTURE_2D, sAtlasTexture.id);

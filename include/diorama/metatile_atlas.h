@@ -108,6 +108,13 @@ void DioramaAtlas_MapPalette(const uint16_t *liveUnfaded, const uint16_t *liveFa
                              const uint16_t *source, uint16_t *out, unsigned count);
 void DioramaAtlas_Clear(uint32_t *atlasPixels, uint8_t *presentSlots);
 /*
+ * DioramaAtlas_Clear for the first pixelRows rows of the atlas only (the slots' present bits and the masks all
+ * cleared): the rows of the map and of the pages in use, all a redraw uploads (KNOWN_ISSUES MS-118). A slot is
+ * drawn whole into its own box, from the snapshot's art, so the rows below are neither read nor uploaded until a
+ * redraw with more pages in use clears them.
+ */
+void DioramaAtlas_ClearRows(uint32_t *atlasPixels, uint8_t *presentSlots, unsigned pixelRows);
+/*
  * Draws the slots of the snapshot's cells into the three atlases (whole,
  * lower layer, upper layer), those not present yet or using a dirty tile (of
  * the snapshot's tiles; a page's own never change) or forced. Indexed by
