@@ -655,6 +655,11 @@ void OWEKeep_WriteToSave(void)
 {
     struct MPOweKeepRecord *record = &gSaveBlock3Ptr->oweKeep;
     u32 i, j, count = 0;
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+    static u32 sWrites; /* shiny_check.py keep-restart: the last save's entries */
+
+    sWrites++;
+#endif
 
     memset(record, 0, sizeof(*record));
     for (i = 0; i < OWE_KEEP_COUNT && count < MP_OWE_KEEP_COUNT; i++)
@@ -682,6 +687,10 @@ void OWEKeep_WriteToSave(void)
         entry->level = keep->level;
         entry->category = keep->category;
         entry->age = age;
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+        DioramaBattleEnvTest_OweKeepSaved(sWrites, keep->localId, keep->graphicsId & OBJ_EVENT_MON_SPECIES_MASK, keep->x,
+                                          keep->y, keep->mapGroup, keep->mapNum);
+#endif
     }
     if (count == 0)
         return;

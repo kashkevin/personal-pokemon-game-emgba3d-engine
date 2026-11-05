@@ -2211,6 +2211,16 @@ void DioramaBattleEnvTest_OweKept(const char *what, unsigned localId, unsigned s
             gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum);
 }
 
+/* each kept one written into the save (wild_encounter_ow.c OWEKeep_WriteToSave, MS-145): what a restart puts back */
+void DioramaBattleEnvTest_OweKeepSaved(unsigned batch, unsigned localId, unsigned species, int x, int y,
+                                       unsigned mapGroup, unsigned mapNum)
+{
+    if (!s.init)
+        Init();
+    TestLog("Battle env test: owe keep: saved local %u species %u x %d y %d map %u.%u batch %u", localId, species, x, y,
+            mapGroup, mapNum, batch);
+}
+
 /* PKMN_TEST_OWE_COUNT=1: on the field, "owe count: frames F live L made M" each second: the game's own overworld Pokemon
  * out now and made so far (wild_encounter_ow.c gMPOWESpawnCount) - how often the visible spawner makes one */
 extern u32 gMPOWESpawnCount;

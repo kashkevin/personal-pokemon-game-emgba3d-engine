@@ -216,6 +216,10 @@ bool DioramaBattleEnvTest_OweNoBattle(void);
    what: kept (first seen), back (put back on its map), won or caught (gone for good), legend (a Legendary or Mythical
    the roll made of a visible Pokemon, kept after a battle that did not catch or knock it out) */
 void DioramaBattleEnvTest_OweKept(const char *what, unsigned localId, unsigned species, int x, int y);
+/* wild_encounter_ow.c OWEKeep_WriteToSave (MS-145): "owe keep: saved local L species S x X y Y map G.N batch B" for each
+   kept one written into the save, with its own map and place as the save records them; B counts the writes */
+void DioramaBattleEnvTest_OweKeepSaved(unsigned batch, unsigned localId, unsigned species, int x, int y,
+                                       unsigned mapGroup, unsigned mapNum);
 /* multiplayer_spawns.c, MultiplayerSpawns_Tick (game thread): PKMN_TEST_SPAWNS="species:x:y:flags:spawnId:personality;..."
    the shared spawns a world's host would send for the map the player is on, written into the spawn mailbox as the host
    writes them; true (the world taken as connected) while there are any, with *fieldReady as the field's;

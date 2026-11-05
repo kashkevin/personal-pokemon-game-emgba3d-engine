@@ -35,8 +35,9 @@ battle's), and in the 3D build its renderer's (PKMN_DIORAMA_LOG: each field effe
                  won", never put back
   keep-restart   MS-145, a kept shiny outlives the game: as keep, every one shiny and kept on Route 101, the player in
                  Oldale Town saves the game (the field key event SAVE) and the game ends; a second game Continues from that
-                 save (nothing made shiny), walks back south onto Route 101: a kept one is put back where it was, from the
-                 save's own record ("owe keep: back"), drawn shiny there
+                 save (nothing made shiny), walks back south onto Route 101: a kept one is put back where the save's own
+                 record has it ("owe keep: back" against the last write's "owe keep: saved": where it last stood, which
+                 is where it was first seen only if it never wandered), drawn shiny there
   palette-last   a shiny shared spawn on a crowded map, one sprite palette left free (PKMN_TEST_PALETTE_FREE=1): no
                  twinkle (its palette would take the last one, which then pushes out a Pokemon), one palette still free
   palette-two    two free: twinkles, one palette still free
@@ -349,8 +350,17 @@ def main():
         kept = [keep_line(line) for line in case.lines if line.startswith("owe keep: kept")]
         kept_route = {(k["species"], k["x"], k["y"]) for k in kept if k["map"] == ROUTE_101_MAP}
         saved = [numbers(line) for line in case.lines if line.startswith("saved at field frame")]
+        # What the save holds: the entries of its last write ("owe keep: saved ... batch B"). A kept one's record follows
+        # it as it wanders, so it is put back where it last stood on Route 101, not where it was first seen ("kept"):
+        # run 284 on Windows, a Binacle first seen at (22, 21) and put back at (21, 17), the save's own place for it.
+        writes = [(numbers(line)[-1], keep_line(line)) for line in case.lines if line.startswith("owe keep: saved")]
+        last_write = max((batch for batch, _ in writes), default=None)
+        saved_route = {(k["species"], k["x"], k["y"]) for batch, k in writes
+                       if batch == last_write and k["map"] == ROUTE_101_MAP}
         if not kept_route:
             problems.append("keep-restart: no shiny overworld Pokemon kept on Route 101")
+        elif not saved_route:
+            problems.append(f"keep-restart: no kept one of Route 101 in the save's record (kept {sorted(kept_route)})")
         if not saved or tuple(saved[-1][1:3]) != OLDALE or saved[-1][-1] != 1:
             problems.append(f"keep-restart: not saved in Oldale Town with status 1 ({saved})")
         else:
@@ -372,8 +382,12 @@ def main():
                                 f"(kept {sorted(kept_route)}; places {sorted(set(p[0] for p in places))})")
             else:
                 one = next(b for b in back if b["map"] == ROUTE_101_MAP)
-                if not any(one["species"] == k[0] and (one["x"], one["y"]) == (k[1], k[2]) for k in kept_route):
-                    problems.append(f"keep-restart: the one put back {one} is none of the kept ones {sorted(kept_route)}")
+                # every one put back, each where the save has one of its species (not only the first)
+                wrong = [b for b in back if b["map"] == ROUTE_101_MAP
+                         and (b["species"], b["x"], b["y"]) not in saved_route]
+                if wrong:
+                    problems.append(f"keep-restart: put back where the save has none: {wrong} (saved {sorted(saved_route)}; "
+                                    f"first seen at {sorted(kept_route)})")
                 place = [one["x"] - MAP_OFFSET, one["y"] - MAP_OFFSET]
                 drawn = [m for m in mons(seconds) if m[1] & 0xFFF == one["species"] and m[4:6] == place]
                 if not drawn or not all(m[2] == 1 for m in drawn):
