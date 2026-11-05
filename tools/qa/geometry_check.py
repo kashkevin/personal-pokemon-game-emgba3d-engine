@@ -3,7 +3,7 @@
 docs/3d-world-geometry-20261029.md). TEST BUILDS ONLY (DIORAMA=1 BFX_TEST=1: the geometry probe,
 include/diorama/geometry_probe.h).
 
-    tools/qa/geometry_check.py tour --out build/qa/geo/tour.txt [--maps A,B] [--kinds outdoor,cave]
+    tools/qa/geometry_check.py tour --out build/qa/geo/tour.txt [--maps A,B] [--kinds outdoor,cave] [--sample N]
     tools/qa/geometry_check.py run --exe ./pokeemerald-mp-diorama-bfxtest --save S.sav --tour T --out build/qa/geo \\
         [--jobs 2] [--chunk 40] [--xvfb]
     tools/qa/geometry_check.py check --out build/qa/geo [--sheets]
@@ -284,6 +284,10 @@ def tour(args):
     # last: each a game process of its own)
     maps.sort(key=lambda m: (m["name"] in FACILITY_ENTRIES, m["entry"].startswith("scripted"),
                              m["kind"] == "secret_base", numbers[m["name"]]))
+    if args.sample > 1:
+        # every sample-th map in this order (each kind and part of the world, a slow machine's representative
+        # share), the facilities' rooms always
+        maps = [m for i, m in enumerate(maps) if i % args.sample == 0 or m["name"] in FACILITY_ENTRIES]
     for m in maps:
         group, num = numbers[m["name"]]
         if m["name"] in FACILITY_ENTRIES:
@@ -413,9 +417,18 @@ def run(args):
     ranges = [r for r in ranges if any(places[i][0] not in done for i in range(*r))]
     given_up, index = [], len(os.listdir(os.path.join(args.out, "runs"))) \
         if os.path.isdir(os.path.join(args.out, "runs")) else 0
+    # --minutes: no game process started after that (the one running finishes its places); the rest left for a
+    # later run into the same --out
+    stop_at = time.monotonic() + args.minutes * 60 if args.minutes else None
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
         running = {}
         while ranges or running:
+            if stop_at is not None and time.monotonic() > stop_at and ranges:
+                print(f"--minutes {args.minutes} reached: {sum(last - first for first, last in ranges)} places left "
+                      "for a later run", flush=True)
+                ranges = []
+                if not running:
+                    break
             while ranges and len(running) < args.jobs:
                 first, last = ranges.pop(0)
                 running[pool.submit(run_chunk, args, places, first, last, index)] = (first, last)
@@ -452,9 +465,12 @@ def run(args):
             tries += 1
             print(f"place {i} ({place[0]}), try {tries}: exit {code}, {result_status(args.out, place[0])}", flush=True)
             compress_cells(args.out)
+    # (with what earlier runs into this --out left, a place done since taken off)
     done = finished_keys(args.out)
-    given_up = [key for key in dict.fromkeys(given_up) if key not in done]
-    with open(os.path.join(args.out, "stopped.txt"), "w") as out:
+    path = os.path.join(args.out, "stopped.txt")
+    before = open(path).read().split() if os.path.exists(path) else []
+    given_up = [key for key in dict.fromkeys(before + given_up) if key not in done]
+    with open(path, "w") as out:
         out.write("\n".join(given_up) + ("\n" if given_up else ""))
     print(f"done: {len(finished_keys(args.out))} of {len(places)} places; not finished: {len(given_up)}")
     return 0
@@ -794,6 +810,9 @@ def main():
     p.add_argument("--kinds")
     p.add_argument("--with-unreachable", action="store_true",
                    help="the maps no player reaches on PC (NOT_REACHED) too, warped to")
+    p.add_argument("--sample", type=int, default=1,
+                   help="every N-th map of the tour's order only (and the facilities' rooms): a representative share "
+                        "for a slow machine; a later run of the whole tour into the same --out goes on from it")
     p = sub.add_parser("run")
     p.add_argument("--exe", required=True)
     p.add_argument("--save")
@@ -804,6 +823,8 @@ def main():
     p.add_argument("--chunk", type=int, default=40)
     p.add_argument("--cameras", default=CAMERAS)
     p.add_argument("--xvfb", action="store_true", help="each process on a display of its own (xvfb-run)")
+    p.add_argument("--minutes", type=float, default=0,
+                   help="start no game process after this many minutes (the running one finishes); 0: no limit")
     p.add_argument("--facility-tries", type=int, default=3,
                    help="game processes a place entered through its facility may take (a lost battle, its time gone)")
     p = sub.add_parser("check")

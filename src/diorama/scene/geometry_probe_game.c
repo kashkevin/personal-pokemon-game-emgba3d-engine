@@ -180,6 +180,10 @@ static void Arrive(void)
     /* the people stand still: the same picture from every camera (not the player: a surfer's blob is theirs,
        and the next warp moves them) */
     FreezeObjectEventsExceptOne(gPlayerAvatar.objectEventId);
+    /* a facility's room: its own event (the Battle Pike's trainer and battle) waits until the pictures are taken -
+       a map's frame scripts start only while the field's controls are free (DoCB1_Overworld) */
+    if (gGeoProbe.entered)
+        LockPlayerFieldControls();
     gGeoProbe.arrivedGroup = gSaveBlock1Ptr->location.mapGroup;
     gGeoProbe.arrivedNum = gSaveBlock1Ptr->location.mapNum;
     gGeoProbe.arrivedX = gSaveBlock1Ptr->pos.x;
@@ -347,7 +351,12 @@ bool DioramaGeoProbe_FieldTick(void)
         }
         return true;
     case GEO_DONE:
-        sNext++;
+        if (gGeoProbe.entered)
+            UnlockPlayerFieldControls();    /* the room's own event may start now */
+        /* the last place done: the end now, not once the field is free again (a facility's room has its own event
+           to play first, which the probe's keys no longer answer) */
+        if (++sNext >= sLast)
+            Finish();
         SDL_AtomicSet(&gGeoProbe.phase, GEO_IDLE);
         return true;
     default:
