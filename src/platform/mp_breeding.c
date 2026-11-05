@@ -129,17 +129,37 @@ static enum Species sHatched[2];   // the first two hatched since the last banne
 static u32 sHatchedCount;          // how many hatched since the last banner
 static char sLastNotice[80];       // the last banner shown (the test builds' breed log)
 
+const u32 gMultiplayerTradeEggAbiVersion = 1;
+
+// mp_breeding.h: the hatcher becomes the original trainer, its Egg's shininess kept (owner decision 39).
+void MPBreeding_MakeHatcherOriginalTrainer(struct BoxPokemon *mon)
+{
+    u32 otId = READ_OTID_FROM_SAVE;
+
+    if (GetBoxMonData(mon, MON_DATA_OT_ID) != otId)
+    {
+        // Shininess reads from the ID and the personality (with the record's modifier): kept as it was, as every other datum.
+        bool32 shiny = GetBoxMonData(mon, MON_DATA_IS_SHINY);
+
+        if (!SetBoxMonOriginalTrainerId(mon, otId))
+            return;
+        SetBoxMonData(mon, MON_DATA_IS_SHINY, &shiny);
+    }
+    SetBoxMonData(mon, MON_DATA_OT_NAME, gSaveBlock2Ptr->playerName);
+    SetBoxMonData(mon, MON_DATA_OT_GENDER, &gSaveBlock2Ptr->playerGender);
+}
+
 // The changes the party's hatch makes (egg_hatch.c AddHatchedMonToParty), on a boxed Egg: no longer an Egg, its
-// species' name, the game's language, friendship 120, hatched here (met level 0), PP restored, in the Pokedex. Its
-// personality (nature, shininess, ability, gender), IVs, moves, species and ownership serial are not touched. The
-// original trainer is set from the save as the party's hatch does only when it is already this player (the Eggs this
-// player's Day Care made are): the host refuses a save whose Pokemon changed its original trainer.
+// species' name, the game's language, friendship 120, hatched here (met level 0), its hatcher the original trainer
+// (MPBreeding_MakeHatcherOriginalTrainer: an Egg from another trainer's Day Care, received in a trade, takes this
+// player's; the host accepts exactly that change for an Egg that hatched), PP restored, in the Pokedex. Its personality
+// (nature, shininess, ability, gender), IVs, moves, species and ownership serial are not touched.
 static void HatchBoxEgg(struct BoxPokemon *mon)
 {
     enum Species species = GetBoxMonData(mon, MON_DATA_SPECIES);
     enum NationalDexOrder dex = SpeciesToNationalPokedexNum(species);
     u8 name[POKEMON_NAME_LENGTH + 1];
-    u32 notEgg = FALSE, friendship = 120, metLevel = 0, otId = READ_OTID_FROM_SAVE;
+    u32 notEgg = FALSE, friendship = 120, metLevel = 0;
     enum Language language = GAME_LANGUAGE;
     metloc_u8_t metLocation = GetCurrentRegionMapSectionId();
 
@@ -153,11 +173,7 @@ static void HatchBoxEgg(struct BoxPokemon *mon)
     SetBoxMonData(mon, MON_DATA_MET_LEVEL, &metLevel);
     SetBoxMonData(mon, MON_DATA_MET_LOCATION, &metLocation);
     SetBoxMonData(mon, MON_DATA_MET_GAME, &gGameVersion);
-    if (GetBoxMonData(mon, MON_DATA_OT_ID) == otId)
-    {
-        SetBoxMonData(mon, MON_DATA_OT_NAME, gSaveBlock2Ptr->playerName);
-        SetBoxMonData(mon, MON_DATA_OT_GENDER, &gSaveBlock2Ptr->playerGender);
-    }
+    MPBreeding_MakeHatcherOriginalTrainer(mon);   // the hatcher is its original trainer, as in the party
     BoxMonRestorePP(mon);
     IncrementGameStat(GAME_STAT_HATCHED_EGGS);
     if (sHatchedCount < ARRAY_COUNT(sHatched))

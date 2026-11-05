@@ -48,5 +48,15 @@ void MPDaycare_DeliverWaitingEggs(u32 *toParty, u32 *toPc, u32 *pcBox);
 // room. With the party and the PC full it looks again every second.
 void MPDaycare_DeliveryTick(void);
 const char *MPDaycare_LastDeliveryNotice(void);  // the last such banner shown ("" before any)
+
+// Eggs in world trades (owner decision 39, KNOWN_ISSUES "Trades: eggs and Mail"): a hatched Pokemon's original trainer is
+// the player who hatched it, as in the games, in the party (egg_hatch.c) and in the PC (MPBreeding_AdvanceBoxEggs). An
+// Egg made by another trainer takes this save's trainer ID (with its record's key: SetBoxMonOriginalTrainerId), name and
+// gender, and keeps its shininess as it was (a trade keeps every valid datum of a Pokemon); the player's own Eggs are as
+// before. A record whose checksum does not hold is left as it is.
+bool32 SetBoxMonOriginalTrainerId(struct BoxPokemon *boxMon, u32 otId);   // pokemon.c
+void MPBreeding_MakeHatcherOriginalTrainer(struct BoxPokemon *mon);
+// 1: this game hatches traded Eggs as above (generate_manifest.py: trade_egg_abi_version; the host then lets Eggs be traded).
+extern const u32 gMultiplayerTradeEggAbiVersion;
 #endif
 #endif // GUARD_PLATFORM_MP_BREEDING_H

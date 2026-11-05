@@ -1055,6 +1055,122 @@ int NativeSelfTest_Breeding(void)
                   && GetMonData(&gParties[B_TRAINER_PLAYER][1], MON_DATA_SPECIES) == SPECIES_PICHU && !FlagGet(FLAG_PENDING_DAYCARE_EGG));
     }
 
+    if (SectionWanted(11))
+    {
+        // Eggs in world trades (owner decision 39, KNOWN_ISSUES "Trades: eggs and Mail"): an Egg another trainer's Day Care
+        // made hatches here with this player as its original trainer, its record re-keyed (the ID is half of the key its
+        // secure data is encrypted with), in the party and in the PC; everything else of it is kept, shininess included.
+        static const u8 otherName[] = _("RIVAL");
+        static const u8 playerName[] = _("HERO");
+        const u32 otherId = 0x12345678, playerId = 0x3039;     // Setup: playerTrainerId 0x39, 0x30, 0, 0
+        static const u32 kept[] = {MON_DATA_SPECIES, MON_DATA_PERSONALITY, MON_DATA_HP_IV, MON_DATA_ATK_IV, MON_DATA_DEF_IV,
+                                   MON_DATA_SPEED_IV, MON_DATA_SPATK_IV, MON_DATA_SPDEF_IV, MON_DATA_MOVE1, MON_DATA_MOVE2,
+                                   MON_DATA_MOVE3, MON_DATA_MOVE4, MON_DATA_ABILITY_NUM, MON_DATA_HIDDEN_NATURE,
+                                   MON_DATA_POKEBALL, MON_DATA_HELD_ITEM, MON_DATA_IS_SHINY};
+        struct Pokemon egg, before, old;
+        u32 isEgg = TRUE, cycles = 0, otherGender = FEMALE, zero = 0, shiny, same, u;
+        u8 name[PLAYER_NAME_LENGTH + 1];
+        struct Pokemon *got;
+        struct BoxPokemon *boxed;
+
+        Setup();
+        StringCopy(gSaveBlock2Ptr->playerName, playerName);
+        gSaveBlock2Ptr->playerGender = MALE;
+        // another trainer's Egg: shiny for that trainer, a name and gender of its own, its first move's PP used up
+        CreateMonWithIVs(&egg, SPECIES_PICHU, 1, 0x0002A5F1, OTID_STRUCT_PRESET(otherId), 21);
+        u = MOVE_THUNDER_SHOCK;
+        SetMonData(&egg, MON_DATA_MOVE1, &u);
+        shiny = TRUE;
+        SetMonData(&egg, MON_DATA_IS_SHINY, &shiny);
+        SetMonData(&egg, MON_DATA_IS_EGG, &isEgg);
+        SetMonData(&egg, MON_DATA_FRIENDSHIP, &cycles);
+        SetMonData(&egg, MON_DATA_OT_NAME, otherName);
+        SetMonData(&egg, MON_DATA_OT_GENDER, &otherGender);
+        SetMonData(&egg, MON_DATA_PP1, &zero);
+        before = egg;
+        // the hatch's old way, the ID written alone: the record fails its checksum (the defect this mends)
+        old = egg;
+        SetMonData(&old, MON_DATA_OT_ID, &playerId);
+        SetMonData(&old, MON_DATA_OT_GENDER, &gSaveBlock2Ptr->playerGender);
+        ExpectLeg("(the defect) the trainer ID written alone turns another trainer's Egg into a Bad Egg",
+                  GetMonData(&old, MON_DATA_SANITY_IS_BAD_EGG) != 0);
+        // the party's hatch (the script's special)
+        ZeroPlayerPartyMons();
+        gParties[B_TRAINER_PLAYER][0] = egg;
+        gPartiesCount[B_TRAINER_PLAYER] = 1;
+        gSpecialVar_0x8004 = 0;
+        ScriptHatchMon();
+        got = &gParties[B_TRAINER_PLAYER][0];
+        ExpectLeg("another trainer's Egg hatched in the party is no Bad Egg and no longer an Egg",
+                  !GetMonData(got, MON_DATA_SANITY_IS_BAD_EGG) && !GetMonData(got, MON_DATA_IS_EGG)
+                  && GetMonData(got, MON_DATA_SPECIES) == SPECIES_PICHU);
+        GetMonData(got, MON_DATA_OT_NAME, name);
+        ExpectLeg("... its original trainer is the hatcher: this save's ID, name and gender",
+                  GetMonData(got, MON_DATA_OT_ID) == playerId && StringCompare(name, playerName) == 0
+                  && GetMonData(got, MON_DATA_OT_GENDER) == MALE);
+        same = TRUE;
+        for (u = 0; u < ARRAY_COUNT(kept); u++)
+            same = same && GetMonData(got, kept[u]) == GetMonData(&before, kept[u]);
+        ExpectLeg("... its species, personality, IVs, moves, ability, nature, ball, held item and shininess (shiny) as they were",
+                  same && GetMonData(got, MON_DATA_IS_SHINY));
+        ExpectLeg("... its PP restored (Thunder Shock's 30), friendship 120, hatched here (met level 0)",
+                  GetMonData(got, MON_DATA_PP1) == 30 && GetMonData(got, MON_DATA_FRIENDSHIP) == 120
+                  && GetMonData(got, MON_DATA_MET_LEVEL) == 0);
+        // a plain Egg whose personality would be shiny with this player's ID stays plain
+        CreateMonWithIVs(&egg, SPECIES_PICHU, 1, 0x00003039, OTID_STRUCT_PRESET(otherId), 21);
+        shiny = FALSE;
+        SetMonData(&egg, MON_DATA_IS_SHINY, &shiny);
+        SetMonData(&egg, MON_DATA_IS_EGG, &isEgg);
+        SetMonData(&egg, MON_DATA_FRIENDSHIP, &cycles);
+        ZeroPlayerPartyMons();
+        gParties[B_TRAINER_PLAYER][0] = egg;
+        gPartiesCount[B_TRAINER_PLAYER] = 1;
+        ScriptHatchMon();
+        got = &gParties[B_TRAINER_PLAYER][0];
+        ExpectLeg("a plain Egg whose personality is shiny for the hatcher's ID hatches plain (shininess kept as it was)",
+                  !GetMonData(got, MON_DATA_SANITY_IS_BAD_EGG) && GetMonData(got, MON_DATA_OT_ID) == playerId
+                  && !GetMonData(got, MON_DATA_IS_SHINY));
+        // the same in the PC's last slot, hatched by the steps' cycle (MPBreeding_AdvanceBoxEggs)
+        ResetPokemonStorageSystem();
+        ZeroPlayerPartyMons();
+        gPartiesCount[B_TRAINER_PLAYER] = 0;
+        boxed = GetBoxedMonPtr(TOTAL_BOXES_COUNT - 1, IN_BOX_COUNT - 1);
+        *boxed = before.box;
+        MPBreeding_AdvanceBoxEggs(1);
+        BoxMonToMon(boxed, &egg);
+        GetMonData(&egg, MON_DATA_OT_NAME, name);
+        same = TRUE;
+        for (u = 0; u < ARRAY_COUNT(kept); u++)
+            same = same && GetMonData(&egg, kept[u]) == GetMonData(&before, kept[u]);
+        ExpectLeg("in the PC's last slot it hatches the same: no Bad Egg, the hatcher its trainer, everything else (shiny) kept",
+                  !GetBoxMonData(boxed, MON_DATA_SANITY_IS_BAD_EGG) && !GetBoxMonData(boxed, MON_DATA_IS_EGG)
+                  && GetBoxMonData(boxed, MON_DATA_OT_ID) == playerId && StringCompare(name, playerName) == 0
+                  && GetBoxMonData(boxed, MON_DATA_OT_GENDER) == MALE && same);
+        // the player's own Egg: as before (its trainer already this player)
+        CreateMonWithIVs(&egg, SPECIES_AZURILL, 1, 0x00010203, OTID_STRUCT_PLAYER_ID, 21);
+        SetMonData(&egg, MON_DATA_IS_EGG, &isEgg);
+        SetMonData(&egg, MON_DATA_FRIENDSHIP, &cycles);
+        before = egg;
+        ZeroPlayerPartyMons();
+        gParties[B_TRAINER_PLAYER][0] = egg;
+        gPartiesCount[B_TRAINER_PLAYER] = 1;
+        ScriptHatchMon();
+        got = &gParties[B_TRAINER_PLAYER][0];
+        same = TRUE;
+        for (u = 0; u < ARRAY_COUNT(kept); u++)
+            same = same && GetMonData(got, kept[u]) == GetMonData(&before, kept[u]);
+        ExpectLeg("the player's own Egg hatches as before (its trainer, shininess and the rest unchanged)",
+                  !GetMonData(got, MON_DATA_SANITY_IS_BAD_EGG) && GetMonData(got, MON_DATA_OT_ID) == playerId && same);
+        // a record whose checksum does not hold is left alone (no new key over damaged data)
+        egg = before;
+        egg.box.checksum ^= 0x5A5A;
+        old = egg;
+        ExpectLeg("a damaged record is left as it was (SetBoxMonOriginalTrainerId refuses it)",
+                  !SetBoxMonOriginalTrainerId(&egg.box, otherId) && memcmp(&egg.box, &old.box, sizeof(egg.box)) == 0);
+        ExpectLeg("the game says it hatches traded Eggs this way (gMultiplayerTradeEggAbiVersion 1)",
+                  *(const volatile u32 *)&gMultiplayerTradeEggAbiVersion == 1);
+    }
+
     printf("selftest-breeding: %d checks, %d failed\n", sLegChecks, sLegFailures);
     return sLegFailures ? 1 : 0;
 }

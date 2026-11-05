@@ -7158,3 +7158,26 @@ void CreateMonFromTemplate(struct Pokemon *mon, const struct PokemonTemplate *mo
     CalculateMonStats(mon);
     TryFormChange(mon, FORM_CHANGE_ITEM_HOLD, B_TRAINER_PLAYER);
 }
+
+#ifdef PORTABLE
+bool32 SetBoxMonOriginalTrainerId(struct BoxPokemon *boxMon, u32 otId);
+
+// PC only (owner decision 39, KNOWN_ISSUES "Trades: eggs and Mail"): the original trainer's ID is half of the key the
+// record's secure data is encrypted with, so it changes only with that data decrypted and encrypted again under the new
+// key (SetBoxMonData writes the ID alone, and the record then fails its checksum: a Bad Egg). The checksum covers the
+// decrypted data and stays as it is. FALSE, nothing changed, for a Bad Egg or a record whose checksum does not hold.
+bool32 SetBoxMonOriginalTrainerId(struct BoxPokemon *boxMon, u32 otId)
+{
+    if (boxMon->isBadEgg)
+        return FALSE;
+    DecryptBoxMon(boxMon);
+    if (CalculateBoxMonChecksum(boxMon) != boxMon->checksum)
+    {
+        EncryptBoxMon(boxMon);
+        return FALSE;
+    }
+    boxMon->otId = otId;
+    EncryptBoxMon(boxMon);
+    return TRUE;
+}
+#endif

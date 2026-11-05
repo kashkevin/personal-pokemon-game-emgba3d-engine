@@ -37,6 +37,10 @@
 #include "battle.h" // to get rid of later
 #include "constants/rgb.h"
 #include "party_menu.h"
+#ifdef PORTABLE
+#include "platform/mp_breeding.h"
+#endif
+#line 40 // gba-line
 
 #define GFXTAG_EGG       12345
 #define GFXTAG_EGG_SHARD 23456
@@ -342,10 +346,18 @@ static void AddHatchedMonToParty(u8 id)
 
     SetMonData(mon, MON_DATA_MET_GAME, &gGameVersion);
 
+#ifdef PORTABLE
+    // The ID with the record's key, shininess kept (an Egg from another trainer, by trade, was a Bad Egg here: owner
+    // decision 39, KNOWN_ISSUES "Trades: eggs and Mail")
+    MPBreeding_MakeHatcherOriginalTrainer(&mon->box);
+#else
+#line 345 // gba-line
     u32 otId = READ_OTID_FROM_SAVE;
     SetMonData(mon, MON_DATA_OT_ID, &otId);
     SetMonData(mon, MON_DATA_OT_NAME, gSaveBlock2Ptr->playerName);
     SetMonData(mon, MON_DATA_OT_GENDER, &gSaveBlock2Ptr->playerGender);
+#endif
+#line 349 // gba-line
 
     MonRestorePP(mon);
     CalculateMonStats(mon);

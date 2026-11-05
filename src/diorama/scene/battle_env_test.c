@@ -778,7 +778,8 @@ static void Init(void)
  * c<cool>.<beauty>.<cute>.<smart>.<tough>.<sheen>: its contest conditions; r<cool>.<beauty>.<cute>.<smart>.<tough>.<mask>:
  * its contest ribbons' ranks (1 Normal .. 4 Master) and the others it holds (bit 0 Champion .. bit 11 World, the
  * MON_DATA order) - the PokeNav's condition and ribbon pages. M<item>: holding that Mail, written with nine test words
- * and the player's name (the native mail screen's checks).
+ * and the player's name (the native mail screen's checks). g<cycles>: an Egg with that many egg cycles left, made as the
+ * Day Care makes one (the world trades' Egg proofs; 0 hatches at the next egg cycle's end).
  */
 static void TestMonStatList(const char *p, int out[NUM_STATS])
 {
@@ -800,7 +801,7 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
     int gender = -1, item = 0, move = 0, ivs = MAX_PER_STAT_IVS, nature = -1, ball = 0;
     int statIvs[NUM_STATS], statEvs[NUM_STATS], trainedMask = 0;
     bool shiny = false, nextLevelShort = false, ivList = false, evList = false, hatched = false;
-    int ppBonuses = -1, moveList[MAX_MON_MOVES] = {0}, firstPp = -1, abilityNum = -1, mailItem = 0;
+    int ppBonuses = -1, moveList[MAX_MON_MOVES] = {0}, firstPp = -1, abilityNum = -1, mailItem = 0, eggCycles = -1;
     int conditions[NUM_STATS], ribbons[NUM_STATS];
     bool movesSet = false, conditionList = false, ribbonList = false;
     /* the summary's order (I, E, H flags) -> MON_DATA_* field offsets (HP, Atk, Def, Speed, Sp. Atk, Sp. Def) */
@@ -862,6 +863,8 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
             TestMonStatList(flags + 1, ribbons), ribbonList = true;
         else if (*flags == 'M')
             mailItem = atoi(flags + 1);
+        else if (*flags == 'g')
+            eggCycles = atoi(flags + 1); /* g<cycles>: an Egg with that many egg cycles left (the Egg trade proofs) */
     }
     for (i = 0; i < 65536 && ((gender >= 0 && GetGenderFromSpeciesAndPersonality(species, personality) != gender)
                              || (nature >= 0 && GetNatureFromPersonality(personality) != (u32)nature)); i++)
@@ -1000,6 +1003,21 @@ static void CreateTestMon(struct Pokemon *mon, int species, int level, const cha
     TestLog("Battle env test: test Pokemon %d Lv%d%s%s, item %d, first move %d", species, level,
             shiny ? " shiny" : "", gender == MON_FEMALE ? " female" : gender == MON_MALE ? " male" : "", item,
             GetMonData(mon, MON_DATA_MOVE1));
+    if (eggCycles >= 0)
+    {
+        /* as the Day Care's CreateEgg makes one: a Poke Ball, the Japanese "EGG" name and language, met level 0, the
+           cycles left in its friendship */
+        static const u8 sEggName[] = {0x60, 0x6F, 0x8B, EOS};   /* the game's "タマゴ" (charmap.txt), as daycare.c */
+        u32 isEgg = TRUE, cycles = (u32)eggCycles, metLevel = 0, ball = BALL_POKE, language = LANGUAGE_JAPANESE;
+
+        SetMonData(mon, MON_DATA_POKEBALL, &ball);
+        SetMonData(mon, MON_DATA_NICKNAME, sEggName);
+        SetMonData(mon, MON_DATA_FRIENDSHIP, &cycles);
+        SetMonData(mon, MON_DATA_MET_LEVEL, &metLevel);
+        SetMonData(mon, MON_DATA_LANGUAGE, &language);
+        SetMonData(mon, MON_DATA_IS_EGG, &isEgg);
+        TestLog("Battle env test: test Pokemon %d is an Egg, %u cycles left", species, cycles);
+    }
     if (ivList || evList || trainedMask != 0)
     {
         int iv[NUM_STATS], ev[NUM_STATS], ht = 0;
