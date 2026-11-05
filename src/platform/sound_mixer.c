@@ -5,6 +5,7 @@
 
 #ifdef PORTABLE
     #include "cgb_audio.h"
+    #include "platform/audio_volume.h"
 #endif
 
 #define VCOUNT_VBLANK 160
@@ -16,6 +17,9 @@ void SampleMixer(struct SoundMixerState *mixer, u32 scanlineLimit, u16 samplesPe
 static inline bool32 TickEnvelope(struct MixerSource *chan, struct WaveData2 *wav);
 void GeneratePokemonSampleAudio(struct SoundMixerState *mixer, struct MixerSource *chan, s8 *current, float *outBuffer, u16 samplesPerFrame, float sampleRateReciprocal, s32 samplesLeftInWav, signed envR, signed envL, s32 loopLen);
 static s8 sub_82DF758(struct MixerSource *chan, u32 current);
+#ifdef PORTABLE
+static void GenerateAudioAtGain(struct SoundMixerState *mixer, struct MixerSource *chan, struct WaveData2 *wav, float *outBuffer, u16 samplesPerFrame, float sampleRateReciprocal, float gain);
+#endif
 
 void RunMixerFrame(void) {
     struct SoundMixerState *mixer = (struct SoundMixerState *)SOUND_INFO_PTR;
@@ -108,13 +112,42 @@ void SampleMixer(struct SoundMixerState *mixer, u32 scanlineLimit, u16 samplesPe
         
         if (TickEnvelope(chan, wav)) 
         {
+#ifdef PORTABLE
+            // The channel's music, sound effect or cry below 100% (include/platform/audio_volume.h); at 100% it is mixed
+            // as it always was.
+            float gain = AudioVolume_ChannelGain(i);
 
+            if (gain != 1.0f)
+                GenerateAudioAtGain(mixer, chan, wav, outBuffer, samplesPerFrame, sampleRateReciprocal, gain);
+            else
+#endif
             GenerateAudio(mixer, chan, wav, outBuffer, samplesPerFrame, sampleRateReciprocal);
         }
     }
 returnEarly:
     mixer->lockStatus = MIXER_UNLOCKED;
 }
+
+#ifdef PORTABLE
+// A channel below 100%: mixed by the same code into a frame of its own, then added to the frame at its gain (at 0% it
+// still runs, so its note goes on and ends as it would, unheard).
+static __attribute__((noinline)) void GenerateAudioAtGain(struct SoundMixerState *mixer, struct MixerSource *chan, struct WaveData2 *wav, float *outBuffer, u16 samplesPerFrame, float sampleRateReciprocal, float gain)
+{
+    static float sChannelFrame[MIXED_AUDIO_BUFFER_SIZE * 2];
+    int count = samplesPerFrame * 2;
+
+    if (count > MIXED_AUDIO_BUFFER_SIZE * 2)
+        count = MIXED_AUDIO_BUFFER_SIZE * 2;
+    for (int i = 0; i < count; i++)
+        sChannelFrame[i] = 0.0f;
+    GenerateAudio(mixer, chan, wav, sChannelFrame, count / 2, sampleRateReciprocal);
+    gAudioVolumeScaledMixes++;
+    if (gain == 0.0f)
+        return;
+    for (int i = 0; i < count; i++)
+        outBuffer[i] += sChannelFrame[i] * gain;
+}
+#endif
 
 // Returns TRUE if channel is still active after moving envelope forward a frame
 //__attribute__((target("thumb")))
@@ -224,7 +257,7 @@ static inline bool32 TickEnvelope(struct MixerSource *chan, struct WaveData2 *wa
 }
 
 //__attribute__((target("thumb")))
-static inline void GenerateAudio(struct SoundMixerState *mixer, struct MixerSource *chan, struct WaveData2 *wav, float *outBuffer, u16 samplesPerFrame, float sampleRateReciprocal) {/*, [[[]]]) {*/
+static inline __attribute__((always_inline)) void GenerateAudio(struct SoundMixerState *mixer, struct MixerSource *chan, struct WaveData2 *wav, float *outBuffer, u16 samplesPerFrame, float sampleRateReciprocal) {/*, [[[]]]) {*/
     uf8 v = chan->envelopeVol * (mixer->masterVol + 1) / 16U;
     chan->envelopeVolR = chan->rightVol * v / 256U;
     chan->envelopeVolL = chan->leftVol * v / 256U;

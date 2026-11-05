@@ -1,6 +1,8 @@
 #include "global.h"
+#include "gba/m4a_internal.h" // before cgb_audio.h: its MIXED_AUDIO_BUFFER_SIZE macro would break sound_mixer.h's enum
 #include "cgb_audio.h"
 #include "cgb_tables.h"
+#include "platform/audio_volume.h"
 
 struct AudioCGB gb;
 float soundChannelPos[4];
@@ -106,7 +108,10 @@ void cgb_trigger_note(u8 channel){
 }
 
 
-void cgb_audio_generate(u16 samplesPerFrame){
+// One frame of the four GB channels. `gain` (the volume of the music, sound effect or cry each channel plays,
+// include/platform/audio_volume.h) is a constant 1 for a frame with every sounding channel at 100%, which the compiler
+// folds away: that frame is the original code's (cgb_audio_generate below).
+static inline __attribute__((always_inline)) void GenerateFrame(u16 samplesPerFrame, const float *gain){
     float *outBuffer = gb.outBuffer;
     switch(REG_NR11 & 0xC0){
         case 0x00:
@@ -205,16 +210,16 @@ void cgb_audio_generate(u16 samplesPerFrame){
         float outputR = 0;
         if(REG_NR52 & 0x80){
             if((gb.DAC[0]) && (REG_NR52 & 0x01)){
-                if(REG_NR51 & 0x10) outputL += gb.Vol[0] * PU1Table[(int)(soundChannelPos[0])] / 15.0f;
-                if(REG_NR51 & 0x01) outputR += gb.Vol[0] * PU1Table[(int)(soundChannelPos[0])] / 15.0f;
+                if(REG_NR51 & 0x10) outputL += gb.Vol[0] * PU1Table[(int)(soundChannelPos[0])] / 15.0f * gain[0];
+                if(REG_NR51 & 0x01) outputR += gb.Vol[0] * PU1Table[(int)(soundChannelPos[0])] / 15.0f * gain[0];
             }
             if((gb.DAC[1]) && (REG_NR52 & 0x02)){
-                if(REG_NR51 & 0x20) outputL += gb.Vol[1] * PU2Table[(int)(soundChannelPos[1])] / 15.0f;
-                if(REG_NR51 & 0x02) outputR += gb.Vol[1] * PU2Table[(int)(soundChannelPos[1])] / 15.0f;
+                if(REG_NR51 & 0x20) outputL += gb.Vol[1] * PU2Table[(int)(soundChannelPos[1])] / 15.0f * gain[1];
+                if(REG_NR51 & 0x02) outputR += gb.Vol[1] * PU2Table[(int)(soundChannelPos[1])] / 15.0f * gain[1];
             }
             if((REG_NR30 & 0x80) && (REG_NR52 & 0x04)){
-                if(REG_NR51 & 0x40) outputL += gb.Vol[2] * gb.WAVRAM[(int)(soundChannelPos[2])] / 4.0f;
-                if(REG_NR51 & 0x04) outputR += gb.Vol[2] * gb.WAVRAM[(int)(soundChannelPos[2])] / 4.0f;
+                if(REG_NR51 & 0x40) outputL += gb.Vol[2] * gb.WAVRAM[(int)(soundChannelPos[2])] / 4.0f * gain[2];
+                if(REG_NR51 & 0x04) outputR += gb.Vol[2] * gb.WAVRAM[(int)(soundChannelPos[2])] / 4.0f * gain[2];
             }
             if((gb.DAC[3]) && (REG_NR52 & 0x08)){
                 bool32 lfsrMode = ((REG_NR43 & 0x08) == 8);
@@ -242,12 +247,41 @@ void cgb_audio_generate(u16 samplesPerFrame){
                 }
                 float sample = ch4Out;
                 if(avgDiv > 1) sample /= avgDiv;
-                if(REG_NR51 & 0x80) outputL += gb.Vol[3] * sample / 15.0f;
-                if(REG_NR51 & 0x08) outputR += gb.Vol[3] * sample / 15.0f;
+                if(REG_NR51 & 0x80) outputL += gb.Vol[3] * sample / 15.0f * gain[3];
+                if(REG_NR51 & 0x08) outputR += gb.Vol[3] * sample / 15.0f * gain[3];
             }
         }
         outBuffer[0] = outputL / 4.0f;
         outBuffer[1] = outputR / 4.0f;
+    }
+}
+
+static __attribute__((noinline)) void GenerateFrameAtFullVolume(u16 samplesPerFrame){
+    static const float sFull[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    GenerateFrame(samplesPerFrame, sFull);
+}
+
+static __attribute__((noinline)) void GenerateFrameAtGains(u16 samplesPerFrame, const float *gain){
+    GenerateFrame(samplesPerFrame, gain);
+}
+
+void cgb_audio_generate(u16 samplesPerFrame){
+    struct SoundInfo *soundInfo = SOUND_INFO_PTR;
+    float gain[4];
+    bool8 full = TRUE;
+
+    // Only a channel playing a note sounds (m4a silences one whose note ended, CgbOscOff), so only its gain counts:
+    // the gain of the music, sound effect or cry it plays, noted when the note started (music_player.c).
+    for (u8 ch = 0; ch < 4; ch++){
+        gain[ch] = AudioVolume_ChannelGain(AUDIO_GB_CHANNEL(ch));
+        if (gain[ch] != 1.0f && soundInfo->cgbChans != NULL && (soundInfo->cgbChans[ch].statusFlags & SOUND_CHANNEL_SF_ON))
+            full = FALSE;
+    }
+    if (full){
+        GenerateFrameAtFullVolume(samplesPerFrame);
+    }else{
+        gAudioVolumeScaledMixes++;
+        GenerateFrameAtGains(samplesPerFrame, gain);
     }
 }
 

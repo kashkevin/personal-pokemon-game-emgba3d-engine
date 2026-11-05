@@ -13,6 +13,11 @@
  * The Controls page (added 2026-10-15) rebinds the keyboard (include/platform/keybinds.h). Its
  * navigation never follows the bindings - arrows, Enter/Z, Esc/X/Backspace and F10 always work -
  * so the menu stays usable whatever the player binds.
+ *
+ * The Audio page (added 2026-11-05, the owner's decision #45): the master, music, sound effect and
+ * Pokemon cry volumes (include/platform/audio_volume.h), 0-100% in 10% steps with Left and Right,
+ * heard at once and saved. A page of its own because the main sheet has no room for four more
+ * rows on the 640x360 canvas (gl_pc_overlay.c).
  */
 #include <stdbool.h>
 
@@ -37,6 +42,7 @@ enum PcMenuItem
     PC_MENU_FRAME_RATE,
     PC_MENU_CAMERA,
     PC_MENU_TREES,
+    PC_MENU_AUDIO,    /* opens the Audio page */
     PC_MENU_CONTROLS, /* opens the Controls page */
     PC_MENU_CLOSE,
     PC_MENU_ITEM_COUNT,
@@ -65,6 +71,7 @@ enum PcMenuInput
 #define PC_MENU_CHANGED_RENDER_SCALE (1u << 11)
 #define PC_MENU_CHANGED_MEMORY_BUDGET (1u << 12)
 #define PC_MENU_CHANGED_KEYS     (1u << 13) /* the keybinds changed: apply and store them */
+#define PC_MENU_CHANGED_AUDIO    (1u << 14) /* a volume changed: apply and store them */
 #define PC_MENU_DISPLAY_KEPT     (1u << 7) /* the confirmation was answered: keep */
 #define PC_MENU_DISPLAY_REVERTED (1u << 8) /* answered no, or it timed out */
 
@@ -76,7 +83,21 @@ enum PcMenuPage
 {
     PC_MENU_PAGE_MAIN,
     PC_MENU_PAGE_CONTROLS,
+    PC_MENU_PAGE_AUDIO,
 };
+
+/* The Audio page's rows: the four volumes in include/platform/audio_volume.h's order, then Back. */
+enum PcMenuAudioRow
+{
+    PC_MENU_AUDIO_MASTER,
+    PC_MENU_AUDIO_MUSIC,
+    PC_MENU_AUDIO_EFFECTS,
+    PC_MENU_AUDIO_CRIES,
+    PC_MENU_AUDIO_BACK,
+    PC_MENU_AUDIO_ROW_COUNT,
+};
+#define PC_MENU_VOLUMES PC_MENU_AUDIO_BACK
+#define PC_MENU_VOLUME_MAX 10 /* 100% */
 
 struct PcMenuState
 {
@@ -92,6 +113,9 @@ struct PcMenuState
     char message[128];         /* the page's last prompt or result ('|' splits two lines) */
     struct Keybinds keybinds;  /* a copy being edited; the platform applies it on PC_MENU_CHANGED_KEYS */
     const struct KeybindNames *keyNames;
+    /* The Audio page: its cursor and the volumes, 0-10 each (the platform applies them on PC_MENU_CHANGED_AUDIO). */
+    int audioCursor;
+    unsigned char volumes[PC_MENU_VOLUMES];
     struct DisplaySettings settings;
     bool vsync;
     bool pictureFill;   /* the 240x160 picture as large as fits (otherwise 8/9 of the height) */
@@ -120,6 +144,8 @@ void PcMenu_Open(struct PcMenuState *menu, const struct DisplaySettings *setting
                  bool pictureFill, bool showFrameRate, bool hasCamera, bool cameraDiorama, bool trees3ds);
 /* The bindings to edit and SDL's key names (call after PcMenu_Open). */
 void PcMenu_SetKeybinds(struct PcMenuState *menu, const struct Keybinds *keybinds, const struct KeybindNames *names);
+/* The volumes the Audio page shows (call after PcMenu_Open; until then each is 100%). */
+void PcMenu_SetVolumes(struct PcMenuState *menu, const unsigned char volumes[PC_MENU_VOLUMES]);
 /* While true the platform sends the next key press to PcMenu_CaptureKey instead of PcMenu_Input
  * (Esc still goes to PcMenu_Input as BACK, which cancels). */
 bool PcMenu_IsCapturing(const struct PcMenuState *menu);

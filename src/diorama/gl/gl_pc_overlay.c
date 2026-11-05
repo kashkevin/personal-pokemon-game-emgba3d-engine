@@ -738,8 +738,10 @@ static void DrawSettingsSheet(const char *title, const struct DioramaOverlayRow 
     height = 10 + 6 + count * LINE_HEIGHT + 6;
     x = (sWidth - width) / 2;
     y = (sHeight - height - 26) / 2 + 6;
-    if (y < 14)
-        y = 14;
+    /* The title tab reaches 9 above the sheet and the prompts' plate 23 below it. The sheet may come up to 9 from the
+     * top (it was 14): the main sheet's 19 rows (since the Audio row) and both then still fit the 640x360 canvas. */
+    if (y < 9)
+        y = 9;
 
     UiFieldFrame(x, y, width, height, CREAM, CREAM_LO, body);
     UiUpper(caps, sizeof(caps), title);

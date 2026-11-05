@@ -181,7 +181,8 @@ endif
 # into the game sections that src/platform/game_memory.c snapshots and restores.
 # debug_scene.o (the PKMN_DEBUG_* development aids) keeps its key script and frame
 # count, so a scripted check goes on after a soft reset (tools/pc_port/soft_reset_check.py).
-PRESERVED_OBJS := $(addprefix $(OBJ_DIR)/src/platform/,sdl2.o agb_flash_pc.o siirtc_pc.o game_memory.o null_trap.o fault_compat.o crash_report.o mp_bridge.o frame_limiter.o memory_info.o debug_scene.o)
+# audio_volume.o keeps the volumes the player chose (include/platform/audio_volume.h), as sdl2.o keeps their settings.
+PRESERVED_OBJS := $(addprefix $(OBJ_DIR)/src/platform/,sdl2.o agb_flash_pc.o siirtc_pc.o game_memory.o null_trap.o fault_compat.o crash_report.o mp_bridge.o frame_limiter.o memory_info.o debug_scene.o audio_volume.o)
 ifeq ($(DIORAMA),1)
   # The renderer (GL objects, snapshot exchange, caches) is platform state: it
   # keeps its memory across a soft reset like the window does.
@@ -281,7 +282,7 @@ OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS) $(BFX_QJS_OBJS)
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
-.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-special-results check-trade-evolution check-shake-anim check-line-break check-wild-weather check-legend check-shiny check-shiny-paths check-balls check-healing check-bag-items check-held-items check-mints check-evo-items check-ability-items check-rods check-form-items check-megas check-berry-water check-mail check-rare-goods check-rotom-catalog check-tm-catalogue check-item-hub check-coins check-breeding check-rival check-update32 check-hm-box check-move-switch check-species-data check-clock check-mp-objects check-spawn-claims check-secret-base check-rewards check-catch-reconcile check-pokenav-map check-ladder check-coop-exp check-coop-controller check-tower check-keybinds check-graphics-mode check-summary-ivev check-link-replay check-stat-stages check-casino check-wild-items check-ride check-carriers check-frontier-saves check-minigame-partners check-netlink
+.PHONY: all clean check-native check-abi check-game-sections check-decompress check-party-order check-battle-names check-cry-stop check-special-results check-trade-evolution check-shake-anim check-line-break check-wild-weather check-legend check-shiny check-shiny-paths check-balls check-healing check-bag-items check-held-items check-mints check-evo-items check-ability-items check-rods check-form-items check-megas check-berry-water check-mail check-rare-goods check-rotom-catalog check-tm-catalogue check-item-hub check-coins check-breeding check-rival check-update32 check-hm-box check-move-switch check-species-data check-clock check-mp-objects check-spawn-claims check-secret-base check-rewards check-catch-reconcile check-pokenav-map check-ladder check-coop-exp check-coop-controller check-tower check-keybinds check-graphics-mode check-summary-ivev check-link-replay check-stat-stages check-audio-volumes check-casino check-wild-items check-ride check-carriers check-frontier-saves check-minigame-partners check-netlink
 .SUFFIXES:
 .SECONDARY:
 .DELETE_ON_ERROR:
@@ -646,6 +647,14 @@ check-link-replay: $(TARGET)
 # checked against the rates, the classic 2D Slot Machine's payout table too (tools/pc_port/casino_econ.py).
 check-casino:
 	@python3 tools/pc_port/casino_econ.py --check --spins 400000 --rounds 12000
+
+# The volume controls (the owner's decision of 2026-11-05: master, music at 70% by default, sound effects at 100%, and the
+# cries' own): which control each song answers to, a music song, a sound effect, a fanfare and a cry through the game's own
+# mixer at each level of their control and the master, 0% silent, 100% the mix it always was, the settings file and its
+# older form, the F10 menu's Audio page in the 3D build (src/platform/native_selftest_audio.c).
+check-audio-volumes: $(TARGET)
+	@./$(TARGET) --selftest-audio-volumes > $(OBJ_DIR)/selftest-audio-volumes.log 2>&1; status=$$?; \
+	  grep -E "^FAIL" $(OBJ_DIR)/selftest-audio-volumes.log; tail -n 1 $(OBJ_DIR)/selftest-audio-volumes.log; exit $$status
 
 # Stat stages kept until a Pokemon faints or the battle ends (switches through the game's own script commands, Baton
 # Pass, a forced switch, fainting, the battle's end, each party its own), the link master's command and the replaying

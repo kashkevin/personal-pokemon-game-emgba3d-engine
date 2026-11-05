@@ -4,6 +4,7 @@
 
 #ifdef PORTABLE
     #include "cgb_audio.h"
+    #include "platform/audio_volume.h"
 #endif
 
 extern const u8 gCgb3Vol[];
@@ -113,6 +114,14 @@ void m4aSoundInit(void)
         MPlayOpen(mplayInfo, track, 2);
         track->chan = 0;
     }
+#ifdef PORTABLE
+    // The volume controls (include/platform/audio_volume.h): until a song starts on it, the background music player plays
+    // music and the others sound effects; the cry players only ever play cries.
+    for (i = 0; i < NUM_MUSIC_PLAYERS; i++)
+        AudioVolume_PlayerStarted(gMPlayTable[i].info, gMPlayTable[i].info == &gMPlayInfo_BGM ? AUDIO_MUSIC : AUDIO_EFFECTS);
+    for (i = 0; i < MAX_POKEMON_CRIES; i++)
+        AudioVolume_PlayerStarted(&gPokemonCryMusicPlayers[i], AUDIO_CRIES);
+#endif
 }
 
 void m4aSoundMain(void)
@@ -123,6 +132,19 @@ void m4aSoundMain(void)
     RunMixerFrame();
 #endif
 }
+
+#ifdef PORTABLE
+// The volume control a song answers to (include/platform/audio_volume.h), noted once it is the song its player plays: by
+// its number, not its player (the fanfares and jingles play on sound effect player 2 but are music). A start that its
+// player refused (a song of higher priority still playing) leaves the player's category as it was.
+static void NoteSongStarted(const struct MusicPlayer *mplay, const struct Song *song, u16 n)
+{
+    if (mplay->info->songHeader == song->header)
+        AudioVolume_PlayerStarted(mplay->info, AudioVolume_SongCategory(n));
+}
+#else
+#define NoteSongStarted(mplay, song, n)
+#endif
 
 // A song number past the song table: Shadow Force's second turn plays "SOUND_PAN_ATTACKER" (-64, as a
 // u16 65472) as a sound effect (data/battle_anim_scripts.s, `playsewithpan SOUND_PAN_ATTACKER, ...`). The
@@ -153,6 +175,7 @@ void m4aSongNumStart(u16 n)
     const struct MusicPlayer *mplay = &mplayTable[song->ms];
 
     MPlayStart(mplay->info, song->header);
+    NoteSongStarted(mplay, song, n);
 }
 
 void m4aSongNumStartOrChange(u16 n)
@@ -176,6 +199,7 @@ void m4aSongNumStartOrChange(u16 n)
             MPlayStart(mplay->info, song->header);
         }
     }
+    NoteSongStarted(mplay, song, n);
 }
 
 void m4aSongNumStartOrContinue(u16 n)
@@ -193,6 +217,7 @@ void m4aSongNumStartOrContinue(u16 n)
         MPlayStart(mplay->info, song->header);
     else if (mplay->info->status & MUSICPLAYER_STATUS_PAUSE)
         MPlayContinue(mplay->info);
+    NoteSongStarted(mplay, song, n);
 }
 
 void m4aSongNumStop(u16 n)
@@ -1777,6 +1802,9 @@ start_song:
     mplayInfo->ident = ID_NUMBER;
 
     MPlayStart(mplayInfo, (struct SongHeader *)(&gPokemonCrySongs[i]));
+#ifdef PORTABLE
+    AudioVolume_PlayerStarted(mplayInfo, AUDIO_CRIES); // the cries' own volume (include/platform/audio_volume.h)
+#endif
 
     return mplayInfo;
 }

@@ -294,7 +294,9 @@ MT_TEST(menu_without_camera_rows)
     MT_EQ(menu.cursor, PC_MENU_PICTURE_SIZE);
     menu.cursor = PC_MENU_FRAME_RATE;
     PcMenu_Input(&menu, PC_MENU_INPUT_DOWN, 0);
-    MT_EQ(menu.cursor, PC_MENU_CONTROLS); // the Controls page comes before Close
+    MT_EQ(menu.cursor, PC_MENU_AUDIO); // the Audio and Controls pages come before Close
+    PcMenu_Input(&menu, PC_MENU_INPUT_DOWN, 0);
+    MT_EQ(menu.cursor, PC_MENU_CONTROLS);
     PcMenu_Input(&menu, PC_MENU_INPUT_DOWN, 0);
     MT_EQ(menu.cursor, PC_MENU_CLOSE);
 }
@@ -751,6 +753,115 @@ MT_TEST(the_menu_itself_does_not_follow_the_bindings)
     MT_CHECK(menu.open);
 }
 
+// ---- The Audio page (the owner's decision of 2026-11-05: master, music, sound effects; and the cries) ---------------------
+
+static struct PcMenuState AudioMenu(void)
+{
+    static const unsigned char sVolumes[PC_MENU_VOLUMES] = {10, 7, 10, 10};
+    struct PcMenuState menu;
+    struct DisplaySettings s;
+
+    DisplaySettings_Defaults(&s);
+    PcMenu_Open(&menu, &s, true, false, false, true, false, false);
+    PcMenu_SetVolumes(&menu, sVolumes);
+    menu.cursor = PC_MENU_AUDIO;
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_ACCEPT, 0), 0);
+    return menu;
+}
+
+MT_TEST(audio_row_opens_the_audio_page)
+{
+    struct PcMenuState menu;
+    struct PcMenuRow rows[PC_MENU_ITEM_COUNT];
+    struct DisplaySettings s;
+
+    DisplaySettings_Defaults(&s);
+    PcMenu_Open(&menu, &s, true, false, false, true, false, false);
+    MT_EQ(PcMenu_Rows(&menu, rows), PC_MENU_ITEM_COUNT);
+    MT_CHECK(strcmp(rows[PC_MENU_AUDIO].label, "Audio") == 0);
+    MT_CHECK(rows[PC_MENU_AUDIO].value[0] == '\0' && !rows[PC_MENU_AUDIO].adjustable);
+    MT_CHECK(strcmp(rows[PC_MENU_AUDIO + 1].label, "Controls") == 0);
+    menu.cursor = PC_MENU_AUDIO;
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_RIGHT, 0), 0);          // the row itself changes nothing
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_ACCEPT, 0), 0);
+    MT_EQ(menu.page, PC_MENU_PAGE_AUDIO);
+    MT_CHECK(strcmp(PcMenu_Title(&menu), "Audio") == 0);
+    MT_CHECK(strcmp(PcMenu_BackLabel(&menu), "Back") == 0);
+    MT_CHECK(PcMenu_Message(&menu) == NULL);                        // the prompts' plate, no message box
+    MT_EQ(PcMenu_Rows(&menu, rows), PC_MENU_AUDIO_ROW_COUNT);
+    MT_CHECK(strcmp(rows[0].label, "Master volume") == 0 && strcmp(rows[0].value, "100%") == 0);  // not set: 100%
+    MT_CHECK(rows[0].selected && rows[0].adjustable);
+    MT_CHECK(strcmp(rows[4].label, "Back") == 0 && !rows[4].adjustable && rows[4].value[0] == '\0');
+}
+
+MT_TEST(audio_page_shows_and_steps_the_four_volumes)
+{
+    struct PcMenuState menu = AudioMenu();
+    struct PcMenuRow rows[PC_MENU_ITEM_COUNT];
+
+    MT_EQ(PcMenu_Rows(&menu, rows), PC_MENU_AUDIO_ROW_COUNT);
+    MT_CHECK(strcmp(rows[PC_MENU_AUDIO_MASTER].label, "Master volume") == 0);
+    MT_CHECK(strcmp(rows[PC_MENU_AUDIO_MASTER].value, "100%") == 0);
+    MT_CHECK(strcmp(rows[PC_MENU_AUDIO_MUSIC].label, "Music") == 0);
+    MT_CHECK(strcmp(rows[PC_MENU_AUDIO_MUSIC].value, "70%") == 0);
+    MT_CHECK(strcmp(rows[PC_MENU_AUDIO_EFFECTS].label, "Sound effects") == 0);
+    MT_CHECK(strcmp(rows[PC_MENU_AUDIO_EFFECTS].value, "100%") == 0);
+    MT_CHECK(strcmp(rows[PC_MENU_AUDIO_CRIES].label, "Pokemon cries") == 0);
+    MT_CHECK(strcmp(rows[PC_MENU_AUDIO_CRIES].value, "100%") == 0);
+    // Right on Music: 80%, reported for the platform to apply and store.
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_DOWN, 0), 0);
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_RIGHT, 0), PC_MENU_CHANGED_AUDIO);
+    MT_EQ(menu.volumes[PC_MENU_AUDIO_MUSIC], 8);
+    PcMenu_Rows(&menu, rows);
+    MT_CHECK(rows[PC_MENU_AUDIO_MUSIC].selected && strcmp(rows[PC_MENU_AUDIO_MUSIC].value, "80%") == 0);
+    // Up to 100% and no further: no wrap from loud to silent, and nothing reported.
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_RIGHT, 0), PC_MENU_CHANGED_AUDIO);
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_RIGHT, 0), PC_MENU_CHANGED_AUDIO);
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_RIGHT, 0), 0);
+    MT_EQ(menu.volumes[PC_MENU_AUDIO_MUSIC], 10);
+    // Down to 0% and no further on the cries; the others are untouched.
+    menu.audioCursor = PC_MENU_AUDIO_CRIES;
+    for (int i = 0; i < 10; i++)
+        MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_LEFT, 0), PC_MENU_CHANGED_AUDIO);
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_LEFT, 0), 0);
+    PcMenu_Rows(&menu, rows);
+    MT_CHECK(strcmp(rows[PC_MENU_AUDIO_CRIES].value, "0%") == 0);
+    MT_EQ(menu.volumes[PC_MENU_AUDIO_MASTER], 10);
+    MT_EQ(menu.volumes[PC_MENU_AUDIO_EFFECTS], 10);
+    // Enter leaves a volume as it is.
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_ACCEPT, 0), 0);
+    MT_EQ(menu.volumes[PC_MENU_AUDIO_CRIES], 0);
+    MT_EQ(menu.page, PC_MENU_PAGE_AUDIO);
+}
+
+MT_TEST(audio_page_goes_back_and_keeps_its_values)
+{
+    struct PcMenuState menu = AudioMenu();
+    static const unsigned char sTooLoud[PC_MENU_VOLUMES] = {11, 0, 255, 3};
+
+    PcMenu_Input(&menu, PC_MENU_INPUT_LEFT, 0);                     // master 90%
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_UP, 0), 0);             // wraps to Back
+    MT_EQ(menu.audioCursor, PC_MENU_AUDIO_BACK);
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_RIGHT, 0), 0);          // Back has no value
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_ACCEPT, 0), 0);
+    MT_EQ(menu.page, PC_MENU_PAGE_MAIN);
+    MT_EQ(menu.cursor, PC_MENU_AUDIO);                              // the main sheet where it was
+    MT_EQ(menu.volumes[PC_MENU_AUDIO_MASTER], 9);
+    PcMenu_Input(&menu, PC_MENU_INPUT_ACCEPT, 0);                    // and again, then Esc
+    MT_EQ(menu.page, PC_MENU_PAGE_AUDIO);
+    MT_EQ(menu.audioCursor, 0);
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_BACK, 0), 0);
+    MT_EQ(menu.page, PC_MENU_PAGE_MAIN);
+    MT_CHECK(menu.open);
+    MT_EQ(PcMenu_Input(&menu, PC_MENU_INPUT_BACK, 0), PC_MENU_CLOSED);
+    // Values from the platform are kept within 0-100%.
+    PcMenu_SetVolumes(&menu, sTooLoud);
+    MT_EQ(menu.volumes[0], 10);
+    MT_EQ(menu.volumes[1], 0);
+    MT_EQ(menu.volumes[2], 10);
+    MT_EQ(menu.volumes[3], 3);
+}
+
 int main(void)
 {
     MT_RUN(defaults_are_1080p_windowed_high);
@@ -782,5 +893,8 @@ int main(void)
     MT_RUN(controls_page_refuses_the_keys_that_reach_the_menu);
     MT_RUN(controls_page_restores_the_defaults_and_goes_back);
     MT_RUN(the_menu_itself_does_not_follow_the_bindings);
+    MT_RUN(audio_row_opens_the_audio_page);
+    MT_RUN(audio_page_shows_and_steps_the_four_volumes);
+    MT_RUN(audio_page_goes_back_and_keeps_its_values);
     return MT_REPORT();
 }

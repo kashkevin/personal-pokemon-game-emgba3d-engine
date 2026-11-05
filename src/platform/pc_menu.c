@@ -24,6 +24,7 @@ static const char *const sLabels[PC_MENU_ITEM_COUNT] = {
     [PC_MENU_FRAME_RATE]   = "Show frame rate",
     [PC_MENU_CAMERA]       = "Camera",
     [PC_MENU_TREES]        = "Trees",
+    [PC_MENU_AUDIO]        = "Audio",
     [PC_MENU_CONTROLS]     = "Controls",
     [PC_MENU_CLOSE]        = "Close",
 };
@@ -48,12 +49,19 @@ void PcMenu_Open(struct PcMenuState *menu, const struct DisplaySettings *setting
     menu->cameraDiorama = cameraDiorama;
     menu->trees3ds = trees3ds;
     Keybinds_Defaults(&menu->keybinds);
+    memset(menu->volumes, PC_MENU_VOLUME_MAX, sizeof(menu->volumes));
 }
 
 void PcMenu_SetKeybinds(struct PcMenuState *menu, const struct Keybinds *keybinds, const struct KeybindNames *names)
 {
     menu->keybinds = *keybinds;
     menu->keyNames = names;
+}
+
+void PcMenu_SetVolumes(struct PcMenuState *menu, const unsigned char volumes[PC_MENU_VOLUMES])
+{
+    for (int i = 0; i < PC_MENU_VOLUMES; i++)
+        menu->volumes[i] = volumes[i] <= PC_MENU_VOLUME_MAX ? volumes[i] : PC_MENU_VOLUME_MAX;
 }
 
 bool PcMenu_IsCapturing(const struct PcMenuState *menu)
@@ -63,6 +71,8 @@ bool PcMenu_IsCapturing(const struct PcMenuState *menu)
 
 const char *PcMenu_Title(const struct PcMenuState *menu)
 {
+    if (menu->page == PC_MENU_PAGE_AUDIO)
+        return "Audio";
     return menu->page == PC_MENU_PAGE_CONTROLS ? "Controls" : "Display & Graphics";
 }
 
@@ -73,7 +83,53 @@ const char *PcMenu_Message(const struct PcMenuState *menu)
 
 const char *PcMenu_BackLabel(const struct PcMenuState *menu)
 {
-    return menu->page == PC_MENU_PAGE_CONTROLS ? "Back" : "Close";
+    return menu->page == PC_MENU_PAGE_MAIN ? "Close" : "Back";
+}
+
+/* ---- The Audio page ------------------------------------------------------------------------- */
+
+static const char *const sAudioLabels[PC_MENU_AUDIO_ROW_COUNT] = {
+    [PC_MENU_AUDIO_MASTER]  = "Master volume",
+    [PC_MENU_AUDIO_MUSIC]   = "Music",
+    [PC_MENU_AUDIO_EFFECTS] = "Sound effects",
+    [PC_MENU_AUDIO_CRIES]   = "Pokemon cries",
+    [PC_MENU_AUDIO_BACK]    = "Back",
+};
+
+/* Left and Right step a volume by 10% and stop at 0% and 100% (no wrap from loud to silent);
+ * Enter leaves a volume as it is and on Back returns, as Esc does. */
+static unsigned int AudioInput(struct PcMenuState *menu, enum PcMenuInput input)
+{
+    int row = menu->audioCursor;
+    int level;
+
+    switch (input)
+    {
+    case PC_MENU_INPUT_UP:
+        menu->audioCursor = (row + PC_MENU_AUDIO_ROW_COUNT - 1) % PC_MENU_AUDIO_ROW_COUNT;
+        return 0;
+    case PC_MENU_INPUT_DOWN:
+        menu->audioCursor = (row + 1) % PC_MENU_AUDIO_ROW_COUNT;
+        return 0;
+    case PC_MENU_INPUT_LEFT:
+    case PC_MENU_INPUT_RIGHT:
+        if (row >= PC_MENU_VOLUMES)
+            return 0;
+        level = menu->volumes[row] + (input == PC_MENU_INPUT_RIGHT ? 1 : -1);
+        if (level < 0 || level > PC_MENU_VOLUME_MAX)
+            return 0;
+        menu->volumes[row] = (unsigned char)level;
+        return PC_MENU_CHANGED_AUDIO;
+    case PC_MENU_INPUT_ACCEPT:
+        if (row != PC_MENU_AUDIO_BACK)
+            return 0;
+        /* fallthrough */
+    case PC_MENU_INPUT_BACK:
+        menu->page = PC_MENU_PAGE_MAIN;
+        return 0;
+    default:
+        return 0;
+    }
 }
 
 /* ---- The Controls page ---------------------------------------------------------------------- */
@@ -375,6 +431,8 @@ unsigned int PcMenu_Input(struct PcMenuState *menu, enum PcMenuInput input, unsi
     }
     if (menu->page == PC_MENU_PAGE_CONTROLS)
         return ControlsInput(menu, input);
+    if (menu->page == PC_MENU_PAGE_AUDIO)
+        return AudioInput(menu, input);
     switch (input)
     {
     case PC_MENU_INPUT_UP:
@@ -403,6 +461,12 @@ unsigned int PcMenu_Input(struct PcMenuState *menu, enum PcMenuInput input, unsi
             menu->controlsCursor = 0;
             menu->capturing = menu->conflicting = false;
             menu->message[0] = '\0';
+            return 0;
+        }
+        if (menu->cursor == PC_MENU_AUDIO)
+        {
+            menu->page = PC_MENU_PAGE_AUDIO;
+            menu->audioCursor = 0;
             return 0;
         }
         return Change(menu, menu->cursor, 1, nowMs);
@@ -505,6 +569,21 @@ int PcMenu_Rows(const struct PcMenuState *menu, struct PcMenuRow *rows)
         }
         return count;
     }
+    if (menu->page == PC_MENU_PAGE_AUDIO)
+    {
+        for (int row = 0; row < PC_MENU_AUDIO_ROW_COUNT; row++)
+        {
+            struct PcMenuRow *r = &rows[count++];
+
+            r->label = sAudioLabels[row];
+            r->value[0] = '\0';
+            r->selected = row == menu->audioCursor;
+            r->adjustable = row < PC_MENU_VOLUMES;
+            if (row < PC_MENU_VOLUMES)
+                snprintf(r->value, sizeof(r->value), "%u%%", menu->volumes[row] * 10u);
+        }
+        return count;
+    }
     for (int item = 0; item < PC_MENU_ITEM_COUNT; item++)
     {
         struct PcMenuRow *row;
@@ -515,7 +594,7 @@ int PcMenu_Rows(const struct PcMenuState *menu, struct PcMenuRow *rows)
         row->label = sLabels[item];
         row->value[0] = '\0';
         row->selected = item == menu->cursor;
-        row->adjustable = item != PC_MENU_CLOSE && item != PC_MENU_CONTROLS;
+        row->adjustable = item != PC_MENU_CLOSE && item != PC_MENU_CONTROLS && item != PC_MENU_AUDIO;
         switch (item)
         {
         case PC_MENU_RESOLUTION:

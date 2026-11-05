@@ -26,8 +26,10 @@ enum PlatformSetting
     PLATFORM_SETTING_INTEGER_SCALE,
     PLATFORM_SETTING_VSYNC,
     PLATFORM_SETTING_BORDER,
-    PLATFORM_SETTING_VOLUME,
-    PLATFORM_SETTING_CRY_VOLUME, // 0..10 -> 0..100% trim on the HQ Pokemon cries
+    PLATFORM_SETTING_VOLUME,       // the volumes, 0..10 -> 0..100% (include/platform/audio_volume.h): master,
+    PLATFORM_SETTING_CRY_VOLUME,   // the Pokemon cries,
+    PLATFORM_SETTING_MUSIC_VOLUME, // music (the fanfares and jingles included),
+    PLATFORM_SETTING_SFX_VOLUME,   // sound effects
     PLATFORM_SETTING_COUNT,
 };
 

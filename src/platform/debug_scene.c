@@ -64,6 +64,7 @@
 #include "field_player_avatar.h"
 #include "script.h"
 #include "platform/debug_scene.h"
+#include "platform/audio_volume.h"
 #include "platform/mp_bridge.h"
 #include "item_menu.h"
 #include "pokemon_storage_system.h"
@@ -1361,6 +1362,15 @@ static void StartAudioScene(void)
     }
     sAudio.song = sAudio.first;
     sAudio.on = true;
+    // The library as the mixer plays it with music, sound effects and cries at 100% (include/platform/audio_volume.h),
+    // whatever the settings file says, so the numbers compare with earlier audits; the master comes after the measurement.
+    {
+        struct AudioVolumes full;
+
+        AudioVolumes_Defaults(&full);
+        memset(full.level, AUDIO_VOLUME_MAX, sizeof(full.level));
+        AudioVolume_SetLevels(&full);
+    }
     SetMainCallback2(CB2_AudioAudit);
 }
 

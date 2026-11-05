@@ -37,6 +37,7 @@
 #include "platform/framedraw.h"
 #include "platform/mp_bridge.h"
 #include "platform/shell_menu.h"
+#include "platform/audio_volume.h"
 #include "platform/benchmark.h"
 #include "platform/display_settings.h"
 #include "platform/keybinds.h"
@@ -115,7 +116,10 @@ static char sConfigPath[1024] = "pokeemerald.cfg";
 static u8 sBorderBackground;
 static bool sHasBorderBackgroundConfig;
 static u8 sBackgroundOrderVersion;
-static u8 sPlatformSettings[PLATFORM_SETTING_COUNT] = {0, 4, 0, 1, 1, 10, 5};
+// The volume and cry volume entries are not used: the volumes are sAudioVolumes (Platform_GetSetting reads them there).
+static u8 sPlatformSettings[PLATFORM_SETTING_COUNT] = {0, 4, 0, 1, 1, 10, 10, 7, 10};
+// The volume controls (include/platform/audio_volume.h): master, music, sound effects, Pokemon cries, 0-10 each.
+static struct AudioVolumes sAudioVolumes = {{10, 7, 10, 10}, false};
 // Display and graphics settings (include/platform/display_settings.h): the
 // chosen resolution (1920x1080 unless the player chose another), windowed,
 // borderless or fullscreen, and the 3D view's quality. fullscreen= and
@@ -279,6 +283,7 @@ extern int NativeSelfTest_DumpTowerData(const char *outPath);
 extern int NativeSelfTest_Tower(void);
 extern int NativeSelfTest_StartMenu(void);
 extern int NativeSelfTest_SummaryIvEv(void);
+extern int NativeSelfTest_AudioVolumes(void);
 extern bool32 GameMemory_Reset(void);
 
 static jmp_buf sGameResetPoint; // where the game thread restarts after a soft reset
@@ -1400,6 +1405,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_StartMenu()); // src/platform/native_selftest_tower.c (MS-61)
         else if (strcmp(argv[i], "--selftest-summary-ivev") == 0)
             exit(NativeSelfTest_SummaryIvEv()); // src/platform/native_selftest_summary.c (own Pokemon's IVs and EVs)
+        else if (strcmp(argv[i], "--selftest-audio-volumes") == 0)
+            exit(NativeSelfTest_AudioVolumes()); // src/platform/native_selftest_audio.c (master, music, effects, cries)
         else if (strcmp(argv[i], "--dump-wild-weights") == 0 && i + 2 < argc)
         {
             const char *keysPath = argv[++i];
@@ -1474,11 +1481,16 @@ static void ReadConfigFile(void)
 
     DisplaySettings_Defaults(&sDisplay);
     Keybinds_Defaults(&sKeybinds);
+    AudioVolumes_Defaults(&sAudioVolumes);
     if (configFile == NULL)
+    {
+        AudioVolume_SetLevels(&sAudioVolumes);
         return;
+    }
     while (fgets(line, sizeof(line), configFile) != NULL)
     {
-        if (DisplaySettings_ParseLine(&sDisplay, line) || Keybinds_ParseLine(&sKeybinds, line, &sKeyNames))
+        if (DisplaySettings_ParseLine(&sDisplay, line) || Keybinds_ParseLine(&sKeybinds, line, &sKeyNames)
+         || AudioVolumes_ParseLine(&sAudioVolumes, line))
             continue;
         if (sscanf(line, "showFrameRate=%u", &value) == 1)
             sShowFrameRate = value != 0;
@@ -1505,10 +1517,6 @@ static void ReadConfigFile(void)
             sPlatformSettings[PLATFORM_SETTING_VSYNC] = value != 0;
         else if (sscanf(line, "border=%u", &value) == 1)
             sPlatformSettings[PLATFORM_SETTING_BORDER] = value != 0;
-        else if (sscanf(line, "volume=%u", &value) == 1 && value <= 10)
-            sPlatformSettings[PLATFORM_SETTING_VOLUME] = value;
-        else if (sscanf(line, "cryVolume=%u", &value) == 1 && value <= 10)
-            sPlatformSettings[PLATFORM_SETTING_CRY_VOLUME] = value;
         else if (sscanf(line, "battleSpeed=%u", &value) == 1 && value >= 1 && value <= GAME_SPEED_MAX)
             sBattleSpeed = value;
 #ifndef ENABLE_DIORAMA
@@ -1540,6 +1548,8 @@ static void ReadConfigFile(void)
     fclose(configFile);
     DisplaySettings_Finish(&sDisplay);
     Keybinds_Finish(&sKeybinds);
+    AudioVolumes_Finish(&sAudioVolumes); // a file from before musicVolume= and sfxVolume=
+    AudioVolume_SetLevels(&sAudioVolumes);
     // A file written before resolution= and displayMode= existed.
     DisplaySettings_ApplyLegacy(&sDisplay, sLegacyFullscreen, sLegacyWindowScale);
     sPlatformSettings[PLATFORM_SETTING_FULLSCREEN] = sDisplay.mode != DISPLAY_MODE_WINDOWED;
@@ -1578,8 +1588,7 @@ static void StoreConfigFile(void)
     fprintf(configFile, "integerScale=%u\n", sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE]);
     fprintf(configFile, "vsync=%u\n", sPlatformSettings[PLATFORM_SETTING_VSYNC]);
     fprintf(configFile, "border=%u\n", sPlatformSettings[PLATFORM_SETTING_BORDER]);
-    fprintf(configFile, "volume=%u\n", sPlatformSettings[PLATFORM_SETTING_VOLUME]);
-    fprintf(configFile, "cryVolume=%u\n", sPlatformSettings[PLATFORM_SETTING_CRY_VOLUME]);
+    AudioVolumes_Write(&sAudioVolumes, configFile); // volume=, musicVolume=, sfxVolume=, cryVolume=
     if (sBattleSpeed != GAME_SPEED_DEFAULT)
         fprintf(configFile, "battleSpeed=%u\n", sBattleSpeed);
 #ifdef ENABLE_DIORAMA
@@ -1842,6 +1851,13 @@ static void ApplyPcMenuResult(unsigned int bits)
         KeyboardKeysClear();
         store = true;
     }
+    if (bits & PC_MENU_CHANGED_AUDIO)
+    {
+        // The Audio page: heard at once (the mixers and Platform_QueueAudio read the levels each frame) and saved.
+        memcpy(sAudioVolumes.level, sPcMenu.volumes, sizeof(sAudioVolumes.level));
+        AudioVolume_SetLevels(&sAudioVolumes);
+        store = true;
+    }
     if (store)
         StoreConfigFile();
 }
@@ -1906,6 +1922,7 @@ static bool HandlePcMenuKey(const SDL_KeyboardEvent *key)
                         sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE], sShowFrameRate, true,
                         sCameraMode == DIORAMA_CAMERA_DIORAMA, DioramaTreeSprites_Enabled());
             PcMenu_SetKeybinds(&sPcMenu, &sKeybinds, &sKeyNames);
+            PcMenu_SetVolumes(&sPcMenu, sAudioVolumes.level);
             UpdateMenuMemory(true);
             KeyboardKeysClear(); // no button stays held for the game while the menu is open
         }
@@ -2611,19 +2628,8 @@ void Platform_QueueAudio(float *audioBuffer, s32 samplesPerFrame)
         // Battle speed: one game frame's sound a real frame, cross-faded (include/platform/game_speed.h).
         if (GameSpeed_Sound(&sGameSpeed, audioBuffer, floatCount, adjustedAudio) == 0)
             return;
-        // The mixer leaves output headroom, so full volume sounds quiet. Apply a
-        // make-up gain and hard-clamp to [-1,1] so loud passages can't clip. Measured with the audio audit
-        // (PKMN_DEBUG_SCENE=audio, all 479 sounds): music peaks 0.06 at the median and 0.115 at most, a sound effect
-        // 0.04 / 0.10, so the old gain of 2 left music near -18 dBFS peak. Gain 4 puts the loudest music at 0.46 and
-        // music plus the loudest effect at 0.86: still under full scale, no clipping in the whole library.
-        float volume = (sPlatformSettings[PLATFORM_SETTING_VOLUME] / 10.0f) * 4.0f;
-        for (int i = 0; i < floatCount; i++)
-        {
-            float s = adjustedAudio[i] * volume;
-            if (s > 1.0f) s = 1.0f;
-            else if (s < -1.0f) s = -1.0f;
-            adjustedAudio[i] = s;
-        }
+        // The master volume, the make-up gain (x4) and the clamp to [-1, 1] (include/platform/audio_volume.h).
+        AudioVolume_ApplyMaster(adjustedAudio, floatCount, sAudioVolumes.level[AUDIO_MASTER]);
         // The queue never outgrows a few frames (MP+3D update 2026-10-26, progressive lag): the sound card plays on its own
         // clock, and a game clock a little fast or a device that stopped for a moment (a headset waking, the default
         // device changing) left sound queued that never drained, so the sound lagged further behind the longer one
@@ -2675,13 +2681,41 @@ u16 Platform_GetReaderKeys(void)
     return keys;
 }
 
+// The four volumes' settings and their controls (include/platform/audio_volume.h); -1: not a volume.
+static int VolumeControl(enum PlatformSetting setting)
+{
+    switch (setting)
+    {
+    case PLATFORM_SETTING_VOLUME:
+        return AUDIO_MASTER;
+    case PLATFORM_SETTING_MUSIC_VOLUME:
+        return AUDIO_MUSIC;
+    case PLATFORM_SETTING_SFX_VOLUME:
+        return AUDIO_EFFECTS;
+    case PLATFORM_SETTING_CRY_VOLUME:
+        return AUDIO_CRIES;
+    default:
+        return -1;
+    }
+}
+
 u8 Platform_GetSetting(enum PlatformSetting setting)
 {
+    if (VolumeControl(setting) >= 0)
+        return sAudioVolumes.level[VolumeControl(setting)];
     return sPlatformSettings[setting];
 }
 
 void Platform_SetSetting(enum PlatformSetting setting, u8 value)
 {
+    if (VolumeControl(setting) >= 0)
+    {
+        // Heard at once (the mixers read the levels each frame) and saved.
+        sAudioVolumes.level[VolumeControl(setting)] = value <= AUDIO_VOLUME_MAX ? value : AUDIO_VOLUME_MAX;
+        AudioVolume_SetLevels(&sAudioVolumes);
+        StoreConfigFile();
+        return;
+    }
     sPlatformSettings[setting] = value;
     // The older two settings in terms of the display settings.
     if (setting == PLATFORM_SETTING_FULLSCREEN)
@@ -3410,6 +3444,50 @@ static int SelfTestKeybinds(void)
     SDL_Quit();
     return sKeyFailures ? 1 : 0;
 }
+
+// --selftest-audio-volumes (src/platform/native_selftest_audio.c): the settings file and the F10 menu as the game itself
+// reads, writes and drives them.
+_Static_assert(PC_MENU_VOLUMES == AUDIO_CONTROL_COUNT, "the Audio page shows the four volumes");
+
+// The settings file the game uses from now on, read now as at start (ReadConfigFile).
+void Platform_TestSettingsFile(const char *path)
+{
+    SDL_strlcpy(sConfigPath, path, sizeof(sConfigPath));
+    ReadConfigFile();
+}
+
+void Platform_TestStoreSettings(void)
+{
+    StoreConfigFile();
+}
+
+const struct AudioVolumes *Platform_AudioVolumes(void)
+{
+    return &sAudioVolumes;
+}
+
+#ifdef ENABLE_DIORAMA
+// A key pressed as the event loop hands it to the F10 menu (HandlePcMenuKey); returns whether the menu took it.
+bool Platform_TestPcMenuKey(int key)
+{
+    SDL_KeyboardEvent event;
+
+    SDL_zero(event);
+    event.type = SDL_KEYDOWN;
+    event.state = SDL_PRESSED;
+    event.keysym.sym = (SDL_Keycode)key;
+    return HandlePcMenuKey(&event);
+}
+
+// The menu's sheet as it is drawn (0 rows while it is closed).
+int Platform_TestPcMenuRows(struct PcMenuRow *rows, const char **title)
+{
+    if (!sPcMenu.open)
+        return 0;
+    *title = PcMenu_Title(&sPcMenu);
+    return PcMenu_Rows(&sPcMenu, rows);
+}
+#endif
 
 #ifdef _WIN32
 

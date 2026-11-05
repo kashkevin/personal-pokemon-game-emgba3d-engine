@@ -4,6 +4,7 @@
 #include "gba/m4a_internal.h"
 #include "platform.h"
 #include "cgb_audio.h"
+#include "platform/audio_volume.h"
 
 // Don't uncomment this. vvvvv
 // #define POKEMON_EXTENSIONS
@@ -663,6 +664,8 @@ void MP2K_event_nxx(u8 clock, struct MP2KPlayerState *player, struct MP2KTrack *
     }
     track->chan = chan;
     chan->track = track;
+    // The channel now plays this player's music, sound effect or cry, at that volume (include/platform/audio_volume.h).
+    AudioVolume_NoteStarted(cgbType != 0 ? AUDIO_GB_CHANNEL(cgbType - 1) : (int)(chan - mixer->chans), player);
     
     track->lfoDelayCounter = track->lfoDelay;
     if (track->lfoDelay != 0) {
