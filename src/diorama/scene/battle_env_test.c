@@ -3122,10 +3122,18 @@ static bool PlanFieldFree(void)
 }
 
 /* The trainers a script fights if it starts with trainerbattle (as a trainer object's always does). */
+extern const u8 EventScript_MultiplayerCoopGymOffer[];    /* data/scripts/mp_coop_gym.inc */
+
 static bool PlanScriptTrainers(const u8 *script, u16 *a, u16 *b)
 {
     const TrainerBattleParameter *params;
 
+    /* A Gym Leader's script first offers the battle with a world partner (setvar VAR_0x8004 to its Gym, call
+       EventScript_MultiplayerCoopGymOffer); its trainerbattle follows. Without this the plan never knew the Leader's
+       trainer, so Liza after Tate (one double battle, two objects) found it beaten: no battle. */
+    if (script != NULL && script[0] == SCR_OP_SETVAR && script[5] == SCR_OP_CALL
+     && T1_READ_PTR(script + 6) == EventScript_MultiplayerCoopGymOffer)
+        script += 10;
     if (script == NULL || script[0] != SCR_OP_TRAINERBATTLE)
         return false;
     params = (const TrainerBattleParameter *)(script + TRAINERBATTLE_OPCODE_OFFSET);
@@ -3233,6 +3241,9 @@ static void PlanGo(void)
         sPlan.ownFlag = FLAG_HIDDEN_ITEMS_START + events->bgEvents[t->arg].bgUnion.hiddenItem.hiddenItemId;
         FlagClear(sPlan.ownFlag);
     }
+    /* PKMN_TEST_SET_FLAGS and PKMN_TEST_SET_VARS before the warp, so the map it loads sees them, as PKMN_TEST_WARP's
+       does (gameplay_check.py --static-encounters: Rayquaza back on Sky Pillar shows on its map's transition) */
+    SetUpTestFlags();
     HealPlayerParty();
     VarSet(VAR_REPEL_STEP_COUNT, 250);  /* no wild Pokemon below the party's level 100: a step is the target's alone */
     sPlan.money = GetMoney(&gSaveBlock1Ptr->money);

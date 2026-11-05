@@ -22,7 +22,13 @@ Kinds and what passes:
     trigger   each coordinate trigger stepped onto: its script runs exactly when its variable holds the value it runs
               on (the save's state decides which story events are due), and gives the field back
 A target that keeps the field for longer than the plan's budget is a hang: pictured, and the game started again at the
-next target. A target with no tile to stand on is listed as blocked, with the reason. The report:
+next target.
+
+--static-encounters runs instead the reset-guarded static encounters (KNOWN_ISSUES MS-156: the Kecleons of Routes 119
+and 120, New Mauville's Voltorbs, Aqua Hideout's Electrodes, the Regis, Sky Pillar's Rayquaza, Lugia): each talked to
+with its questions answered YES until its battle begins (the Devon Scope used), the story state they need set in memory
+(the Devon Scope in the bag; VAR_SKY_PILLAR_STATE 2, Rayquaza back on the pillar), and each must start its battle: a
+save no world has enrolled meets them as ordinary battles (an enrolled one asks its world's reset admission first). A target with no tile to stand on is listed as blocked, with the reason. The report:
 OUT/gameplay_check.json; exit 0 when every visited target passed.
 """
 import argparse
@@ -184,8 +190,18 @@ def beside(tiles, grid, x, y, occupied, elevation=None, prefer=None, required=No
     return None
 
 
-def plan_targets(root, inventory, kinds, maps_filter=None):
-    """(targets, blocked): each target a dict with its plan line; blocked ones with the reason."""
+# Reset-guarded static encounters --static-encounters does not run (each needs more than a talk): their reason
+STATIC_NOT_RUN = {
+    "object:MAP_BIRTH_ISLAND_EXTERIOR:1": "the triangle's puzzle: pressed in its ten places in turn before Deoxys "
+                                          "appears (DoDeoxysRockInteraction)",
+    "object:MAP_BIRTH_ISLAND_EXTERIOR:2": "Deoxys appears only after the triangle's puzzle",
+    "object:MAP_FARAWAY_ISLAND_INTERIOR:1": "Mew hides in the grass until the player walks onto it (FindMew)",
+}
+
+
+def plan_targets(root, inventory, kinds, maps_filter=None, static=False):
+    """(targets, blocked): each target a dict with its plan line; blocked ones with the reason. static: the
+    reset-guarded static encounters alone, each a target that must start its battle (--static-encounters)."""
     tiles = Tiles(root)
     trainer_ids = defines(os.path.join(root, "include", "constants", "opponents.h"), "TRAINER_")
     weathers = enum_values(os.path.join(root, "include", "constants", "weather.h"), "WEATHER_")
@@ -240,11 +256,14 @@ def plan_targets(root, inventory, kinds, maps_filter=None):
             kind = {"trainer": "trainer", "item_ball": "item", "person": "person"}.get(item["kind"])
             if kind not in kinds:
                 continue
-            if item.get("needs_server"):
-                blocked.append(dict(key=item["key"], kind=kind, map=m["id"], reason=(
-                    "its script asks the multiplayer server first (a reset-guarded static encounter, "
-                    "MultiplayerStaticReset): a game with no server refuses it, as designed (every game the app "
-                    "starts has one, Solo too); the test ROM's admission tests cover the script")))
+            if item.get("needs_server") and (not static or item["key"] in STATIC_NOT_RUN):
+                blocked.append(dict(key=item["key"], kind=kind, map=m["id"], reason=STATIC_NOT_RUN.get(item["key"], (
+                    "a reset-guarded static encounter (MultiplayerStaticReset; a save no world has enrolled meets "
+                    "it as an ordinary battle): its battle needs story state a new character lacks (the Devon "
+                    "Scope, Rayquaza back on Sky Pillar); run by --static-encounters with that state (KNOWN_ISSUES "
+                    "MS-156)"))))
+                continue
+            if static and not item.get("needs_server"):
                 continue
             own = {(obj.get("x"), obj.get("y"))}
             # its elevation is its tile's once in the game (ObjectEventUpdateElevation), the template's only on an
@@ -253,11 +272,12 @@ def plan_targets(root, inventory, kinds, maps_filter=None):
             elevation = under[1] if under is not None and under[1] not in (0, 15) else obj.get("elevation")
             place = free_first(lambda busy: beside(tiles, grid, obj.get("x"), obj.get("y"), busy - own, elevation,
                                                    prefer=FACING.get(obj.get("movement_type"))))
-            expect = {}
+            expect = {"battle": True} if static else {}
             if kind == "trainer":
                 expect["trainers"] = sorted({trainer_ids[b[w]] for b in item.get("battles", ())
                                              for w in ("trainer", "partner") if b.get(w) in trainer_ids})
-            add(item["key"], kind, place, "fight" if kind == "trainer" else "talk", item["local"], expect)
+            # a static encounter's questions answered YES until its battle begins (the Devon Scope used), as a fight's
+            add(item["key"], kind, place, "fight" if kind == "trainer" or static else "talk", item["local"], expect)
         for sign in m["signs"] if "sign" in kinds else ():
             event = data["bg_events"][sign["index"]]
             place = free_first(lambda busy: beside(tiles, grid, sign["x"], sign["y"], busy, event.get("elevation"),
@@ -432,6 +452,12 @@ def judge(target, seen):
         if end["own"] == 0:
             return False, f"item {gained} received, but the ball's flag is not set"
         return True, f"item {gained}"
+    if kind == "person" and expect.get("battle"):
+        # a reset-guarded static encounter (--static-encounters): its battle must start (KNOWN_ISSUES MS-156)
+        if not seen["battles"] and not end["battles"]:
+            return False, ("no battle started (a reset-guarded static encounter: a save no world has enrolled meets "
+                           "it as an ordinary battle; KNOWN_ISSUES MS-156)" if end["script"] else "nothing happened")
+        return True, f"its battle started and ended (outcome {end['outcome']})"
     if kind in ("person", "sign"):
         return (True, "script ran and ended") if end["script"] or end["battles"] else (False, "nothing happened")
     if kind == "hidden":
@@ -474,8 +500,9 @@ def judge(target, seen):
     return False, f"unknown kind {kind}"
 
 
-def run_shard(args, shard, lines, party):
-    """One game process after another through a shard's plan, starting again after each hang or crash."""
+def run_shard(args, shard, lines, party, extra=None):
+    """One game process after another through a shard's plan, starting again after each hang or crash; extra: more of
+    the driver's settings (--static-encounters: the story state they need)."""
     shard_dir = os.path.join(args.out, f"shard-{shard:02d}")
     os.makedirs(shard_dir, exist_ok=True)
     plan = os.path.join(shard_dir, "plan.txt")
@@ -489,7 +516,7 @@ def run_shard(args, shard, lines, party):
             PKMN_TEST_PARTY=party, PKMN_TEST_FIRST_MOVE=str(args.move), PKMN_TEST_MORE_MOVES=args.more_moves,
             PKMN_TEST_PLAN_FRAMES=str(args.frames), PKMN_TEST_PLAN_SHOTS="1" if args.shots else "0",
             PKMN_TEST_SPEED=str(args.speed),
-            PKMN_TEST_MEGA_SHOT_STEM=os.path.join(rundir, "hang")))
+            PKMN_TEST_MEGA_SHOT_STEM=os.path.join(rundir, "hang"), **(extra or {})))
         code = mc.finish(process, output, args.process_timeout)
         log = mc.driver_lines(os.path.join(rundir, "test.log"))
         everything += log
@@ -546,23 +573,37 @@ def main():
     parser.add_argument("--shots", action="store_true", help="a picture of each target as the player faces it")
     parser.add_argument("--speed", type=int, default=4, help="the game's clock this many times as fast (test builds)")
     parser.add_argument("--plan-only", action="store_true", help="write the plan and the blocked list, run nothing")
+    parser.add_argument("--static-encounters", action="store_true",
+                        help="the reset-guarded static encounters alone, each to start its battle (KNOWN_ISSUES MS-156)")
     args = parser.parse_args()
     args.exe, args.out = os.path.abspath(args.exe), os.path.abspath(args.out)
     os.makedirs(args.out, exist_ok=True)
-    kinds = set(args.kinds.split(","))
+    kinds = {"person"} if args.static_encounters else set(args.kinds.split(","))
+    static_state = {}
     if args.plan:   # a plan written before (--plan-only, from an engine checkout): CI's jobs need no checkout
         plan = json.load(open(args.plan))
         targets = [t for t in plan["targets"] if t["kind"] in kinds and (not args.maps or re.search(
             args.maps, t["map"]))]
         blocked = [b for b in plan["blocked"] if b["kind"] in kinds]
+        static_state = plan.get("static_state", {})     # a --static-encounters plan carries the state they need
+        if args.static_encounters != bool(static_state):
+            parser.error("--static-encounters runs a plan written with it, and only such a plan")
     else:
-        targets, blocked = plan_targets(ROOT, inventory_tool.inventory(ROOT), kinds, args.maps)
+        targets, blocked = plan_targets(ROOT, inventory_tool.inventory(ROOT), kinds, args.maps,
+                                        static=args.static_encounters)
+        if args.static_encounters:
+            # the story state they need, in memory: the Devon Scope (the Kecleons), Rayquaza back on Sky Pillar
+            items = enum_values(os.path.join(ROOT, "include", "constants", "items.h"), "ITEM_")
+            variables = defines(os.path.join(ROOT, "include", "constants", "vars.h"), "VAR_")
+            static_state = dict(PKMN_TEST_BAG=f"{items['ITEM_DEVON_SCOPE']}:1",
+                                PKMN_TEST_SET_VARS=f"{variables['VAR_SKY_PILLAR_STATE']}:2")
     if args.shards > 1:     # one CI job's part: every shards-th target from the shard-th
         targets = targets[args.shard::args.shards]
     if args.limit:
         targets = targets[:args.limit]
     with open(os.path.join(args.out, "plan.json"), "w") as out:
-        json.dump(dict(targets=targets, blocked=blocked), out, indent=1)
+        json.dump(dict(targets=targets, blocked=blocked, **({"static_state": static_state} if static_state else {})),
+                  out, indent=1)
     print(json.dumps(dict(targets=len(targets), blocked=len(blocked),
                           by_kind=collections.Counter(t["kind"] for t in targets))), flush=True)
     if args.plan_only:
@@ -585,7 +626,8 @@ def main():
     started = time.monotonic()
     seen, runs = {}, {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        futures = {pool.submit(run_shard, args, i, lines, party): i for i, lines in enumerate(shards) if lines}
+        futures = {pool.submit(run_shard, args, i, lines, party, static_state): i
+                   for i, lines in enumerate(shards) if lines}
         for future in concurrent.futures.as_completed(futures):
             shard_runs, lines = future.result()
             runs[futures[future]] = shard_runs
@@ -614,6 +656,10 @@ def main():
             # left the map: the story's guard (blocked, not judged)
             blocked.append(dict(key=target["key"], kind=target["kind"], map=target["map"], runtime=True, reason=(
                 f"guarded: someone stands on its way in this state ({state['guarded']}); the story moves them")))
+            continue
+        if state.get("absent") and target["expect"].get("battle"):
+            results.append(dict(key=target["key"], kind=target["kind"], map=target["map"], passed=False,
+                                reason="absent: hidden though the check set the state that shows it", seen=state))
             continue
         if state.get("absent") or state.get("moved") or (state.get("closed") and not state.get("maps")):
             # Not there in this game's state: an object a story flag or its map's own script hides, one its map's
