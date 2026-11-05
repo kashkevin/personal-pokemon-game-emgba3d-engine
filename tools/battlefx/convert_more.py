@@ -661,9 +661,13 @@ def cond_value(c):
         return v
     excl = set(v[1])
     if kind == "turn":
-        dom = list(range(max(2, max(excl) + 2)))
-    else:
-        dom = DOMAIN.get(task, [0, 1])
+        # a jump on the turn falls through for every other turn: the first one not taken (Dual Wingbeat's
+        # `jumpifmoveturn 1` leaves turn 0, Triple Kick's turns 0 and 1 leave turn 2)
+        t = 0
+        while t in excl:
+            t += 1
+        return t
+    dom = DOMAIN.get(task, [0, 1])
     rest = [x for x in dom if x not in excl]
     return rest[0] if len(rest) == 1 else None
 
