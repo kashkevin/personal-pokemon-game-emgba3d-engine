@@ -708,6 +708,48 @@ def magma_hideout_machines():
     ])
 
 
+# The hideout's other machines (E9's leftovers), each drawn alike wherever it stands:
+#
+#     the long machine of 3F's second room (x 160-272, rows 96-144: 7 x 3 cells), the server's
+#                  kin: a white top with its emblem (rows 0-30), a khaki front with a screen, keys
+#                  and slats (rows 31-47), its corners cut - it stands its drawn front, 17 rows, as
+#                  deep as its drawn top
+#     the dome and the drill rigs (2 x 2 cells each): a base on two tracks - the side panels its
+#                  top (rows 5-22), a band and the tracks its front (rows 23-31, 9 rows), the floor
+#                  between the tracks - and on the base, at its front, a drum (x 9-22): the dome's
+#                  ribbed side or the drill's bit its front (rows 10-22, 13 rows), the dome's white
+#                  disc or the drill's motor its top (rows 0-9). The drum is cut first, so the base
+#                  keeps the rest.
+#
+# The dome lay flat in 4F (three) and stood as a block of the cave's rock in 3F's third room (one);
+# the drill stood as rock in 2F's third room (four); in 3F's second room (six domes, seven drills)
+# and 4F (four drills) the rules stood both as boxes two tiles tall with the drawing run down
+# them. Cut in 3F 3R (the dome) and 2F 3R (the four drills: a room's own pieces do not stand again
+# in it), they stand in every room their pixels are drawn in, all alike.
+
+MAGMA_ALL = MAGMA_ROOMS | {"LAYOUT_MAGMA_HIDEOUT_2F_2R"}
+
+
+def magma_rig(kind, x0, y0):
+    """A dome or drill rig at (x0, y0) of the room's drawing: its drum, then its base."""
+    facet, own_shell, piece = _helpers()
+    at = "%s_%d_%d" % (kind, x0 // 16, y0 // 16)
+    return [
+        piece(at + "_drum", [(x0 + 9, y0, x0 + 23, y0 + 23)], 13, base=9, solid=True,
+              leave=MAGMA_GROUND, under=False),
+        piece(at + "_base", [(x0, y0, x0 + 32, y0 + 32)], 9, solid=True, leave=MAGMA_GROUND,
+              under=False),
+    ]
+
+
+def magma_long_machine():
+    facet, own_shell, piece = _helpers()
+    return own_shell([
+        piece("long_machine", [(160, 96, 272, 144)], 17, solid=True, leave=MAGMA_GROUND,
+              under=False),
+    ])
+
+
 def furnished_room_specs():
     """The specs, made when voxel_building_specs asks for them (its SPECS end with them)."""
     return [
@@ -823,5 +865,23 @@ def furnished_room_specs():
             "name": "magma_hideout_2f_2r",
             "interior": {"layout": "LAYOUT_MAGMA_HIDEOUT_2F_2R", "ground": [0x3A2],
                          "reuse_in": MAGMA_ROOMS, "pieces": magma_hideout_machines()},
+        },
+        {
+            # (these two before the second room of 3F: their rigs stand there as everywhere)
+            "name": "magma_hideout_3f_3r",
+            "interior": {"layout": "LAYOUT_MAGMA_HIDEOUT_3F_3R", "ground": [0x3A2],
+                         "reuse_in": MAGMA_ALL, "pieces": magma_rig("dome", 288, 320)},
+        },
+        {
+            "name": "magma_hideout_2f_3r",
+            "interior": {"layout": "LAYOUT_MAGMA_HIDEOUT_2F_3R", "ground": [0x308],
+                         "reuse_in": MAGMA_ALL,
+                         "pieces": [pc for (x, y) in ((11, 11), (22, 11), (44, 10), (55, 10))
+                                    for pc in magma_rig("drill", x * 16, y * 16)]},
+        },
+        {
+            "name": "magma_hideout_3f_2r",
+            "interior": {"layout": "LAYOUT_MAGMA_HIDEOUT_3F_2R", "ground": [0x308],
+                         "reuse_in": MAGMA_ALL, "pieces": magma_long_machine()},
         },
     ]
