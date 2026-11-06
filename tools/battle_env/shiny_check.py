@@ -60,6 +60,7 @@ from mega_check import driver_lines, finish, numbers, start  # noqa: E402
 
 ROUTE_101 = "0:16:0:10:11"         # PKMN_TEST_WARP: Route 101 (its grass right of the player)
 ROUTE_101_LEFT = "0:16:0:8:11"     # two tiles further left
+ROUTE_101_NORTH = "0:16:0:10:4"    # the path below Oldale Town's gap, no grass from it north (keep, keep-restart)
 SPECIES_MUDKIP, SPECIES_ZIGZAGOON, ITEM_SHINY_CHARM = 258, 263, 691
 SPECIES_RAIKOU, SPECIES_SEEDOT, SPECIES_LATIAS = 243, 273, 380
 OWE_KIND_ROAMER = 2                # battle_env_test.h OWE_KIND_*
@@ -93,10 +94,13 @@ def mons(seconds, kind=None, event=None):
 ROUTE_101_MAP, OLDALE = (0, 16), (0, 10)
 MOVE_X_SCISSOR = 404
 MAP_OFFSET = 7                      # "owe keep" places are the game's own (the map's 7-tile margin added)
-# From Route 101's grass (10,11): right to x 15, north past the trees to y 2, left to the gap at x 10, north into Oldale
-# Town, a few steps in; then back south onto Route 101. One step a tap (18 frames; a first tap may only turn).
+# From Route 101's path below Oldale Town (10,4) north through the gap into Oldale Town, a few steps in; then back south
+# onto Route 101. One step a tap (18 frames; the first tap turns the player, who arrives facing south). The way is off
+# the grass, and an overworld Pokemon never leaves the grass it stands on (WE_OWE_RESTRICT_METATILE; WE_OWE_UNRESTRICT_SIGHT
+# off): none can stand in it or be bumped into. The old way from the grass at (10,11) crossed two grass patches, where a
+# Pokemon in the way stopped the walk or a bump started a battle (run 363 on Windows: three tries out of three).
 KEEP_WALK_AT = 700                  # the shinies made first
-KEEP_PATH = ["RIGHT"] * 6 + ["UP"] * 10 + ["LEFT"] * 6 + ["UP"] * 7 + ["DOWN"] * 8
+KEEP_PATH = ["UP"] * 9 + ["DOWN"] * 8
 
 
 def keep_steps():
@@ -118,6 +122,15 @@ def shiny_of(line):
     """'owe bumped: ... field shiny X' or 'owe battle: species S shiny X nature N ...': X, read by its name (the battle's
     line goes on with the natures wild_items_check.py reads, so its last number is not the shiny one)."""
     return int(re.search(r"\bshiny (\d+)", line).group(1))
+
+
+def last_place(lines):
+    """Where the player last was by the field's log ('hm field: ... map G.N at X,Y ...'), and who was last talked to."""
+    last = [line for line in lines if line.startswith("hm field: ")][-1:]
+    if not last:
+        return "no place logged"
+    talked = re.search(r"last talked (\d+)", last[0])
+    return f"last at map {hm_place(last[0])}, last talked {talked.group(1) if talked else '?'}"
 
 
 def hm_place(line):
@@ -288,15 +301,16 @@ def main():
 
     # MS-79: kept shinies come back after the player leaves the map, until knocked out
     if want("keep"):
-        # The walk is blind: every Pokemon made is shiny and stays, so one standing on the first tiles of the way blocks
-        # the player (or a bump starts a battle nobody presses through). That is chance, not the keeper: up to three tries.
+        # The walk is blind, but off the grass (KEEP_PATH): nothing made can stand in it. Up to three tries all the same.
         for attempt in range(3):
             name = "keep" if attempt == 0 else f"keep-try{attempt + 1}"
             seconds = case(name, KEEP_FRAMES, dict(PKMN_TEST_OWE_SHINY="2", PKMN_TEST_HM_LOG="1",
+                                                   PKMN_TEST_WARP=ROUTE_101_NORTH,
                                                    PKMN_TEST_FIELD_KEYS=",".join(KEEP_KEYS)), "")
             if any(line.startswith("hm field: ") and hm_place(line)[0] == OLDALE for line in case.lines):
                 break
-            print(f"keep: try {attempt + 1} never left Route 101 (a shiny on the way); trying again", file=sys.stderr)
+            print(f"keep: try {attempt + 1} never reached Oldale Town ({last_place(case.lines)}); trying again",
+                  file=sys.stderr)
         kept = [keep_line(line) for line in case.lines if line.startswith("owe keep: kept")]
         places = [hm_place(line) for line in case.lines if line.startswith("hm field: ")]
         oldale = next((i for i, line in enumerate(case.lines) if line.startswith("hm field: ")
@@ -342,10 +356,11 @@ def main():
         for attempt in range(3):
             first = "keep-restart-1" if attempt == 0 else f"keep-restart-1-try{attempt + 1}"
             case(first, save_at + 240, dict(PKMN_TEST_OWE_SHINY="2", PKMN_TEST_HM_LOG="1",
+                                            PKMN_TEST_WARP=ROUTE_101_NORTH,
                                             PKMN_TEST_FIELD_KEYS=",".join(steps + [f"{save_at}:SAVE"])), "")
             if any(line.startswith("hm field: ") and hm_place(line)[0] == OLDALE for line in case.lines):
                 break
-            print(f"keep-restart: try {attempt + 1} never left Route 101 (a shiny on the way); trying again",
+            print(f"keep-restart: try {attempt + 1} never reached Oldale Town ({last_place(case.lines)}); trying again",
                   file=sys.stderr)
         kept = [keep_line(line) for line in case.lines if line.startswith("owe keep: kept")]
         kept_route = {(k["species"], k["x"], k["y"]) for k in kept if k["map"] == ROUTE_101_MAP}
