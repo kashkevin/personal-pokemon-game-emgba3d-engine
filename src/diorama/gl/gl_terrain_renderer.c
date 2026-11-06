@@ -1228,6 +1228,74 @@ static void DropMountainSpecks(uint16_t rows[DIORAMA_VOXELS_PER_CELL])
     }
 }
 
+/*
+ * The rim the General tileset draws round its rock where the rock meets the
+ * sea or the ground below it: a line of grey (palette 3, colour 5) a pixel or
+ * two wide, the GBA's waterline round a sea stack or a reef and the foot of a
+ * rock outline on grass. A rock edge's cell (the rules' art mode "cutout")
+ * stood it as the first steps of the mass's slope, 1 and 6 voxels high, so
+ * every sea stack stood in a pale band (KNOWN_ISSUES MS-102). Taken out of the
+ * outline, it lies with the ground under the rock (the cell's lower layer: the
+ * sea, the grass) and the mass rises from the rock's own colours. Only rim
+ * pixels at the outline's edge (ROCK_RIM_REACH pixels from the ground beside
+ * them or the cell's side): the rim, never a grey drawn inside the rock.
+ */
+#define ROCK_RIM_PALETTE 3
+#define ROCK_RIM_COLOUR 5
+#define ROCK_RIM_REACH 2
+
+/* Whether a palette's colour is a neutral grey: General's rim in the palette the map has loaded. */
+static bool NeutralGrey(uint16_t bgr555)
+{
+    int red = bgr555 & 0x1F;
+    int green = (bgr555 >> 5) & 0x1F;
+    int blue = (bgr555 >> 10) & 0x1F;
+    int high = red > green ? (red > blue ? red : blue) : (green > blue ? green : blue);
+    int low = red < green ? (red < blue ? red : blue) : (green < blue ? green : blue);
+
+    return high - low <= 2 && high >= 8;
+}
+
+/* Takes the rim out of an outline's mask (the upper layer's pixels, `rows`); whether it took any. */
+static bool DropRockRim(const struct DioramaAtlasArt *art, const uint16_t *tileEntries,
+                        uint16_t rows[DIORAMA_VOXELS_PER_CELL])
+{
+    uint16_t rim[DIORAMA_VOXELS_PER_CELL] = {0};
+    bool any = false;
+
+    if (art->unfadedPalette == NULL || tileEntries == NULL
+     || !NeutralGrey(art->unfadedPalette[ROCK_RIM_PALETTE * 16 + ROCK_RIM_COLOUR]))
+        return false;
+    for (int y = 0; y < DIORAMA_VOXELS_PER_CELL; y++)
+        for (int x = 0; x < DIORAMA_VOXELS_PER_CELL; x++)
+        {
+            /* the upper layer's tile of this quarter (entries 4 to 7) */
+            uint16_t entry = tileEntries[4 + (y / 8) * 2 + x / 8];
+            bool edge = false;
+
+            if (!(rows[y] & (1u << x)) || (entry >> 12) != ROCK_RIM_PALETTE
+             || DioramaMetatile_DecodePixel(art->tileGraphics, entry, x & 7, y & 7) != ROCK_RIM_COLOUR)
+                continue;
+            for (int dy = -ROCK_RIM_REACH; dy <= ROCK_RIM_REACH && !edge; dy++)
+                for (int dx = -ROCK_RIM_REACH; dx <= ROCK_RIM_REACH && !edge; dx++)
+                {
+                    int nx = x + dx;
+                    int ny = y + dy;
+
+                    edge = nx < 0 || ny < 0 || nx >= DIORAMA_VOXELS_PER_CELL || ny >= DIORAMA_VOXELS_PER_CELL
+                        || !(rows[ny] & (1u << nx));
+                }
+            if (edge)
+            {
+                rim[y] |= (uint16_t)(1u << x);
+                any = true;
+            }
+        }
+    for (int y = 0; y < DIORAMA_VOXELS_PER_CELL; y++)
+        rows[y] &= (uint16_t)~rim[y];
+    return any;
+}
+
 /* How a mountain's rock rises from its foot (ShapeRockMasses), in pixels of
  * the cell: on its south, where the GBA draws a mountain's face, over the
  * whole cell; elsewhere, where it draws the rock's outline seen from above, a
@@ -1292,9 +1360,10 @@ static void BuildMountainArtMask(const struct DioramaSceneSnapshot *snapshot,
         uint32_t green = 0;
         uint32_t blue = 0;
         unsigned kept = 0;
+        bool rimDropped = outline && DropRockRim(&art, source->tileEntries, rows);
 
         *rockMass = true;
-        if (visible != 0 && visible != DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL)
+        if (rimDropped || (visible != 0 && visible != DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL))
             DropMountainSpecks(rows);
         for (int pixel = 0; pixel < DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL; pixel++)
             if (rows[pixel / DIORAMA_VOXELS_PER_CELL] & (1u << (pixel % DIORAMA_VOXELS_PER_CELL)))
@@ -1305,6 +1374,12 @@ static void BuildMountainArtMask(const struct DioramaSceneSnapshot *snapshot,
                 kept++;
             }
         memset(heights, 0, DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL);
+        if (kept == 0 && rimDropped)
+        {
+            /* nothing but the rim: the ground beside the rock, the rim lying on it */
+            *rockMass = ROCK_MASS_OUTLINE;
+            return;
+        }
         if (kept == 0 || kept == DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL)
             return;
         if (outline)
@@ -1909,8 +1984,14 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
                     materialLayer,
                     resolvedCells[gridIndex].materials[face].rotation,
                     resolvedCells[gridIndex].materials[face].flags);
+                /* a rock edge's cell in the sea (a reef, a sea stack: its art mode "cutout") is the sea round the
+                 * rock where the rock does not stand (BuildMountainArtMask): its lower layer, the water, not the
+                 * rock's rim drawn on it (KNOWN_ISSUES MS-102) */
                 SetTerrainMaterial(&cell->underlayMaterials[face], source->metatileId,
                                    RiserShowsWholeCell(snapshot, source, cell->shape)
+                                    && !(cell->shape == DIORAMA_SHAPE_CLIFF
+                                         && (cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART)
+                                         && resolvedCells[gridIndex].artMode == DIORAMA_ART_CUTOUT)
                                    ? DIORAMA_MATERIAL_FULL : DIORAMA_MATERIAL_BASE);
             }
             {

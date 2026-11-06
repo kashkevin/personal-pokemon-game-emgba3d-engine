@@ -379,6 +379,16 @@ tilesets are unchanged.
   the sea's level (`compile_rules.py` `_reefs_at_sea_level`), lowered with the
   sea at run time, all its cells together (`buildings.c` `LevelReefs`): Route
   106's reefs were stacks of cubes, then a dome on a plinth of their own edge.
+* The rock's rim (`gl_terrain_renderer.c` `DropRockRim`; KNOWN_ISSUES MS-102):
+  the General tileset draws a grey line (palette 3, colour 5) a pixel or two
+  wide round its rock where the rock meets the sea or the ground below it, the
+  GBA's waterline. A rock edge's cell (art mode "cutout") stood it as the
+  first steps of the mass's slope, 1 and 6 voxels high, and over the sea the
+  cell's flat part drew the whole drawing again (`RiserShowsWholeCell`): every
+  sea stack and reef stood in a pale band. The rim at the outline's edge (2
+  pixels in) is out of the outline, and a rock edge's cell in the sea draws
+  its lower layer, the water, where the rock does not stand. The sea's small
+  round rocks are models (`voxel_props.py`) and keep the rim on their foot.
 * Caves: a cave tileset's rock (the pins and `_cave_rock_cells`) is a mass as a
   mountain's is, so a raised floor's edge is a slope with the face drawn on it,
   not a block a cell square (Granite Cave's stepped walls).
