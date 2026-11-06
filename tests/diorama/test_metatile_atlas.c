@@ -523,6 +523,171 @@ static void TestNeighbourPages(void)
 }
 
 /*
+ * KNOWN_ISSUES MS-82: the drawn signature's parts (the regions' shared art, each region's own) and a region cleared
+ * alone; the slot and region arithmetic agree.
+ */
+static void TestRegionSignaturesAndClear(void)
+{
+    static struct DioramaSceneSnapshot snapshot;
+    static uint8_t pageTiles[DIORAMA_PAGE_TILE_BYTES];
+    static uint32_t atlas[DIORAMA_ATLAS_PIXEL_COUNT];
+    static uint32_t baseAtlas[DIORAMA_ATLAS_PIXEL_COUNT];
+    static uint32_t foregroundAtlas[DIORAMA_ATLAS_PIXEL_COUNT];
+    static const int sTilesets[2] = {0, 0};
+    uint8_t present[DIORAMA_ATLAS_PRESENT_BYTES];
+    uint16_t rows[DIORAMA_METATILE_SIZE];
+    uint32_t shared;
+    uint32_t mapRegionSignature;
+    uint32_t pageRegionSignature;
+    uint8_t mapRegion;
+    uint8_t pageRegion;
+    uint16_t pageSlot;
+    uint16_t first;
+    unsigned region;
+    unsigned slot;
+    bool zero;
+    int i;
+
+    for (region = 0; region <= DIORAMA_NEIGHBOUR_PAGES; region++)
+    {
+        first = DioramaAtlas_RegionFirstSlot((uint8_t)region);
+        CHECK(first % DIORAMA_ATLAS_COLUMNS == 0);
+        CHECK(DioramaAtlas_SlotRegion(first) == region);
+        CHECK(DioramaAtlas_SlotRegion((uint16_t)(first + DIORAMA_PAGE_METATILE_COUNT - 1)) == region);
+    }
+    CHECK(DioramaAtlas_SlotRegion(5) == DIORAMA_ATLAS_NO_REGION);
+    CHECK(DioramaAtlas_SlotRegion(DIORAMA_PAGE_FIRST_METATILE - 1) == DIORAMA_ATLAS_NO_REGION);
+    CHECK(DioramaAtlas_SlotRegion(DIORAMA_ATLAS_SLOT_COUNT) == DIORAMA_ATLAS_NO_REGION);
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    memset(pageTiles, 0x11, sizeof(pageTiles));
+    /* the map's metatile 600, the neighbour's 600 (page 1) and a primary metatile (5) on the neighbour's page */
+    snapshot.visibleCellCount = 3;
+    snapshot.cells[0].metatileId = 600;
+    snapshot.cells[1].metatileId = 600;
+    snapshot.cells[1].atlasPage = 1;
+    snapshot.cells[2].metatileId = 5;
+    snapshot.cells[2].atlasPage = 1;
+    for (i = 0; i < DIORAMA_METATILE_ENTRY_COUNT; i++) /* both layers: an upper layer whole (its mask full) */
+    {
+        snapshot.cells[0].tileEntries[i] = 520 | (6 << 12);
+        snapshot.cells[1].tileEntries[i] = 520 | (6 << 12);
+        snapshot.cells[2].tileEntries[i] = 1 | (1 << 12);
+    }
+    memset(snapshot.tileGraphics + 520 * DIORAMA_TILE_BYTES, 0x11, DIORAMA_TILE_BYTES);
+    memset(snapshot.tileGraphics + 1 * DIORAMA_TILE_BYTES, 0x11, DIORAMA_TILE_BYTES);
+    MakeLivePalettes(snapshot.unfadedPalette, snapshot.fadedPalette, Same);
+    snapshot.unfadedPalette[6 * 16 + 1] = snapshot.fadedPalette[6 * 16 + 1] = Rgb(31, 0, 0);
+    snapshot.unfadedPalette[1 * 16 + 1] = snapshot.fadedPalette[1 * 16 + 1] = Rgb(0, 31, 0);
+    snapshot.secondaryTileset = &sTilesets[1];
+    snapshot.neighbourPages[0].tileset = &sTilesets[0];
+    snapshot.neighbourPages[0].tiles = pageTiles;
+    snapshot.neighbourPages[0].palettes[1] = Rgb(0, 0, 31);
+
+    DioramaAtlas_SetPages(&snapshot);
+    mapRegion = DioramaAtlas_PageRegion(0);
+    pageRegion = DioramaAtlas_PageRegion(1);
+    CHECK(mapRegion != pageRegion);
+    shared = DioramaAtlas_SharedSignature();
+    mapRegionSignature = DioramaAtlas_RegionSignature(mapRegion);
+    pageRegionSignature = DioramaAtlas_RegionSignature(pageRegion);
+    CHECK(mapRegionSignature != 0 && pageRegionSignature != 0 && mapRegionSignature != pageRegionSignature);
+    for (region = 0; region <= DIORAMA_NEIGHBOUR_PAGES; region++)
+        if (region != mapRegion && region != pageRegion)
+            CHECK(DioramaAtlas_RegionSignature((uint8_t)region) == 0);
+    CHECK(DioramaAtlas_RegionSignature(DIORAMA_NEIGHBOUR_PAGES + 1) == 0);
+
+    /* the neighbour's palette 6: its region's art alone */
+    snapshot.neighbourPages[0].palettes[1] = Rgb(0, 31, 31);
+    DioramaAtlas_SetPages(&snapshot);
+    CHECK(DioramaAtlas_PageRegion(1) == pageRegion);
+    CHECK(DioramaAtlas_SharedSignature() == shared);
+    CHECK(DioramaAtlas_RegionSignature(mapRegion) == mapRegionSignature);
+    CHECK(DioramaAtlas_RegionSignature(pageRegion) != pageRegionSignature);
+    snapshot.neighbourPages[0].palettes[1] = Rgb(0, 0, 31);
+    DioramaAtlas_SetPages(&snapshot);
+    CHECK(DioramaAtlas_RegionSignature(pageRegion) == pageRegionSignature);
+    /* the map's palette 6: the map's region's art (and the neighbour's, faded by the live palettes' mapping) */
+    {
+        uint16_t unfaded = snapshot.unfadedPalette[6 * 16 + 2];
+        uint16_t faded = snapshot.fadedPalette[6 * 16 + 2];
+
+        snapshot.fadedPalette[6 * 16 + 2] = snapshot.unfadedPalette[6 * 16 + 2] = Rgb(3, 4, 5);
+        DioramaAtlas_SetPages(&snapshot);
+        CHECK(DioramaAtlas_SharedSignature() == shared);
+        CHECK(DioramaAtlas_RegionSignature(mapRegion) != mapRegionSignature);
+        snapshot.unfadedPalette[6 * 16 + 2] = unfaded;
+        snapshot.fadedPalette[6 * 16 + 2] = faded;
+    }
+    /* a primary palette (a fade's step): the shared art */
+    snapshot.fadedPalette[1 * 16 + 1] = Rgb(0, 15, 0);
+    DioramaAtlas_SetPages(&snapshot);
+    CHECK(DioramaAtlas_SharedSignature() != shared);
+    snapshot.fadedPalette[1 * 16 + 1] = Rgb(0, 31, 0);
+    DioramaAtlas_SetPages(&snapshot);
+    CHECK(DioramaAtlas_SharedSignature() == shared);
+    CHECK(DioramaAtlas_RegionSignature(mapRegion) == mapRegionSignature);
+    /* the neighbour gone: its region unused, its signature 0, the others the same */
+    snapshot.neighbourPages[0].tileset = NULL;
+    snapshot.neighbourPages[0].tiles = NULL;
+    snapshot.cells[1].atlasPage = 0;
+    snapshot.cells[2].atlasPage = 0;
+    DioramaAtlas_SetPages(&snapshot);
+    CHECK(DioramaAtlas_SharedSignature() == shared);
+    CHECK(DioramaAtlas_RegionSignature(mapRegion) == mapRegionSignature);
+    CHECK(DioramaAtlas_RegionSignature(pageRegion) == 0);
+    snapshot.neighbourPages[0].tileset = &sTilesets[0];
+    snapshot.neighbourPages[0].tiles = pageTiles;
+    snapshot.cells[1].atlasPage = 1;
+    snapshot.cells[2].atlasPage = 1;
+    DioramaAtlas_SetPages(&snapshot);
+    CHECK(DioramaAtlas_PageRegion(1) == pageRegion);
+    CHECK(DioramaAtlas_RegionSignature(pageRegion) == pageRegionSignature);
+
+    /* Cleared alone: the region's rows, present bits and masks; the map's slot and the primary slot stand. */
+    pageSlot = DioramaAtlas_Slot(1, 600);
+    CHECK(DioramaAtlas_SlotRegion(pageSlot) == pageRegion);
+    CHECK(DioramaAtlas_SlotRegion(DioramaAtlas_Slot(0, 600)) == mapRegion);
+    DioramaAtlas_Clear(atlas, present);
+    memset(baseAtlas, 0, sizeof(baseAtlas));
+    memset(foregroundAtlas, 0, sizeof(foregroundAtlas));
+    CHECK(DioramaAtlas_Update(&snapshot, NULL, atlas, baseAtlas, foregroundAtlas, present));
+    CHECK((present[pageSlot / 8] & (1 << (pageSlot % 8))) != 0);
+    DioramaAtlas_GetForegroundAlphaMask(pageSlot, rows);
+    CHECK(rows[0] != 0);
+    {
+        uint16_t mapSlot = DioramaAtlas_Slot(0, 600);
+        size_t mapPixel = (size_t)((mapSlot / DIORAMA_ATLAS_COLUMNS) * DIORAMA_ATLAS_STRIDE + DIORAMA_ATLAS_GUTTER)
+                        * DIORAMA_ATLAS_WIDTH + (mapSlot % DIORAMA_ATLAS_COLUMNS) * DIORAMA_ATLAS_STRIDE
+                        + DIORAMA_ATLAS_GUTTER;
+        uint32_t mapColour = atlas[mapPixel];
+
+        CHECK(mapColour != 0);
+        DioramaAtlas_ClearRegion(atlas, present, pageRegion);
+        CHECK((present[pageSlot / 8] & (1 << (pageSlot % 8))) == 0);
+        CHECK((present[mapSlot / 8] & (1 << (mapSlot % 8))) != 0);
+        CHECK((present[5 / 8] & (1 << (5 % 8))) != 0);
+        CHECK(atlas[mapPixel] == mapColour);
+        DioramaAtlas_GetForegroundAlphaMask(pageSlot, rows);
+        CHECK(rows[0] == 0);
+        DioramaAtlas_GetForegroundAlphaMask(mapSlot, rows);
+        CHECK(rows[0] != 0);
+    }
+    first = DioramaAtlas_RegionFirstSlot(pageRegion);
+    zero = true;
+    for (slot = (unsigned)(first / DIORAMA_ATLAS_COLUMNS) * DIORAMA_ATLAS_STRIDE * DIORAMA_ATLAS_WIDTH;
+         slot < (unsigned)(first / DIORAMA_ATLAS_COLUMNS + DIORAMA_ATLAS_PAGE_ROWS) * DIORAMA_ATLAS_STRIDE
+                * DIORAMA_ATLAS_WIDTH; slot++)
+        zero &= atlas[slot] == 0;
+    CHECK(zero);
+    /* drawn again: the same pixels as before */
+    CHECK(DioramaAtlas_Update(&snapshot, NULL, atlas, baseAtlas, foregroundAtlas, present));
+    CHECK((present[pageSlot / 8] & (1 << (pageSlot % 8))) != 0);
+    DioramaAtlas_ClearRegion(atlas, present, DIORAMA_NEIGHBOUR_PAGES + 1); /* none: nothing changes */
+    CHECK((present[pageSlot / 8] & (1 << (pageSlot % 8))) != 0);
+}
+
+/*
  * KNOWN_ISSUES MS-118: the atlas draws a tile's row at a time with each palette's colours converted once; what it
  * draws must stay what the per-pixel functions give (DioramaMetatile_DecodePixel, DioramaMetatile_ConvertColor).
  */
@@ -765,6 +930,7 @@ int main(void)
     TestSlots();
     TestMapPalette();
     TestNeighbourPages();
+    TestRegionSignaturesAndClear();
     puts("metatile atlas tests passed");
     return EXIT_SUCCESS;
 }

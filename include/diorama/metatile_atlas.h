@@ -131,6 +131,34 @@ uint8_t DioramaAtlas_HighestPage(void);
  * atlas's slots hold what they would be drawn with now, though the map changed (a crossing).
  */
 uint32_t DioramaAtlas_DrawnSignature(void);
+
+/*
+ * The drawn signature's parts (KNOWN_ISSUES MS-82, 2026-11-06): what every region shares (the primary tileset the
+ * regions were given under and the live palettes 0 to 5), and each region's own (its tileset and the faded palettes
+ * 6 to 12 its cells are drawn with; 0 for a region no page uses in this snapshot). The same shared part means only a
+ * region whose own part changed holds art its cells are no longer drawn with (DioramaAtlas_ClearRegion).
+ */
+uint32_t DioramaAtlas_SharedSignature(void);
+uint32_t DioramaAtlas_RegionSignature(uint8_t region);
+
+/* A region's first slot (DIORAMA_PAGE_METATILE_COUNT slots from it, whole rows of the atlas), and a slot's region
+ * (DIORAMA_ATLAS_NO_REGION: a primary metatile's slot, which every page shares). */
+#define DIORAMA_ATLAS_NO_REGION 0xFF
+
+static inline uint16_t DioramaAtlas_RegionFirstSlot(uint8_t region)
+{
+    return region == 0 ? DIORAMA_PAGE_FIRST_METATILE
+                       : (uint16_t)(DIORAMA_TILE_COUNT + (region - 1) * DIORAMA_PAGE_METATILE_COUNT);
+}
+
+static inline uint8_t DioramaAtlas_SlotRegion(uint16_t slot)
+{
+    if (slot < DIORAMA_PAGE_FIRST_METATILE || slot >= DIORAMA_ATLAS_SLOT_COUNT)
+        return DIORAMA_ATLAS_NO_REGION;
+    if (slot < DIORAMA_TILE_COUNT)
+        return 0;
+    return (uint8_t)(1 + (slot - DIORAMA_TILE_COUNT) / DIORAMA_PAGE_METATILE_COUNT);
+}
 /*
  * Fades colours as a palette was faded: every step the game takes from an
  * unfaded palette to the faded one (the day/night tint, a weather's colour
@@ -149,6 +177,9 @@ void DioramaAtlas_Clear(uint32_t *atlasPixels, uint8_t *presentSlots);
  * redraw with more pages in use clears them.
  */
 void DioramaAtlas_ClearRows(uint32_t *atlasPixels, uint8_t *presentSlots, unsigned pixelRows);
+/* The same for one region's slots (DioramaAtlas_RegionFirstSlot): its rows of the atlas, their present bits and
+ * masks; every other slot is left as it is (KNOWN_ISSUES MS-82). */
+void DioramaAtlas_ClearRegion(uint32_t *atlasPixels, uint8_t *presentSlots, uint8_t region);
 /*
  * Draws the slots of the snapshot's cells into the three atlases (whole,
  * lower layer, upper layer), those not present yet or using a dirty tile (of

@@ -26,6 +26,9 @@ uint8_t gDioramaAtlasPageRegion[1 + DIORAMA_NEIGHBOUR_PAGES] = {0, 1, 2, 3};
 static const void *sRegionTileset[1 + DIORAMA_NEIGHBOUR_PAGES];
 static const void *sRegionPrimary;
 static uint32_t sDrawnSignature;
+/* The drawn signature's parts (DioramaAtlas_SharedSignature, DioramaAtlas_RegionSignature). */
+static uint32_t sSharedSignature;
+static uint32_t sRegionSignature[1 + DIORAMA_NEIGHBOUR_PAGES];
 
 uint8_t DioramaMetatile_DecodePixel(const uint8_t *tileGraphics, uint16_t tileEntry,
                                     uint8_t x, uint8_t y)
@@ -525,13 +528,23 @@ uint32_t DioramaAtlas_SetPages(const struct DioramaSceneSnapshot *snapshot)
         }
         for (region = 0; region <= DIORAMA_NEIGHBOUR_PAGES; region++)
         {
+            uint32_t own = 2166136261u;
+
+            sRegionSignature[region] = 0;
             if (regionTileset[region] == NULL)
                 continue;
             drawn = HashBytes(drawn, &region, sizeof(region));
             drawn = HashBytes(drawn, &regionTileset[region], sizeof(regionTileset[region]));
             drawn = HashBytes(drawn, regionFaded[region] + first, count * sizeof(uint16_t));
+            /* the same parts alone: a region in use never has 0 */
+            own = HashBytes(own, &region, sizeof(region));
+            own = HashBytes(own, &regionTileset[region], sizeof(regionTileset[region]));
+            own = HashBytes(own, regionFaded[region] + first, count * sizeof(uint16_t));
+            sRegionSignature[region] = own != 0 ? own : 1;
         }
     }
+    sSharedSignature = HashBytes(2166136261u, &sRegionPrimary, sizeof(sRegionPrimary));
+    sSharedSignature = HashBytes(sSharedSignature, snapshot->fadedPalette, first * sizeof(uint16_t));
     sDrawnSignature = drawn;
     /* The pages' signature (the terrain's sync key): the regions, not the pages, hold the art, so it is the drawn
      * one with the sticky regions, the pages' own as before without them. */
@@ -542,6 +555,16 @@ uint32_t DioramaAtlas_SetPages(const struct DioramaSceneSnapshot *snapshot)
 uint32_t DioramaAtlas_DrawnSignature(void)
 {
     return sDrawnSignature;
+}
+
+uint32_t DioramaAtlas_SharedSignature(void)
+{
+    return sSharedSignature;
+}
+
+uint32_t DioramaAtlas_RegionSignature(uint8_t region)
+{
+    return region <= DIORAMA_NEIGHBOUR_PAGES ? sRegionSignature[region] : 0;
 }
 
 const void *DioramaAtlas_RegionTileset(uint8_t region)
@@ -593,6 +616,20 @@ void DioramaAtlas_ClearRows(uint32_t *atlasPixels, uint8_t *presentSlots, unsign
     memset(presentSlots, 0, DIORAMA_ATLAS_PRESENT_BYTES);
     memset(sForegroundAlpha, 0, sizeof(sForegroundAlpha));
     memset(sSilhouetteAlpha, 0, sizeof(sSilhouetteAlpha));
+}
+
+void DioramaAtlas_ClearRegion(uint32_t *atlasPixels, uint8_t *presentSlots, uint8_t region)
+{
+    uint16_t first;
+
+    if (region > DIORAMA_NEIGHBOUR_PAGES)
+        return;
+    first = DioramaAtlas_RegionFirstSlot(region);
+    memset(atlasPixels + (size_t)(first / DIORAMA_ATLAS_COLUMNS) * DIORAMA_ATLAS_STRIDE * DIORAMA_ATLAS_WIDTH, 0,
+           (size_t)DIORAMA_ATLAS_PAGE_ROWS * DIORAMA_ATLAS_STRIDE * DIORAMA_ATLAS_WIDTH * sizeof(*atlasPixels));
+    memset(presentSlots + first / 8, 0, DIORAMA_PAGE_METATILE_COUNT / 8);
+    memset(sForegroundAlpha[first], 0, DIORAMA_PAGE_METATILE_COUNT * sizeof(sForegroundAlpha[0]));
+    memset(sSilhouetteAlpha[first], 0, DIORAMA_PAGE_METATILE_COUNT * sizeof(sSilhouetteAlpha[0]));
 }
 
 void DioramaAtlas_Clear(uint32_t *atlasPixels, uint8_t *presentSlots)

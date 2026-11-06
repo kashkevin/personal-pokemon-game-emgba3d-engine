@@ -124,6 +124,10 @@ static const void *sAtlasTilesets[2]; /* the tilesets of the map the atlas was l
 static u32 sAtlasPaletteGeneration;
 static u32 sAtlasAnimationGeneration;
 static u32 sAtlasPageSignature;
+/* The drawn signature's parts the atlas holds (metatile_atlas.h DioramaAtlas_SharedSignature, _RegionSignature): the
+ * shared part of its last whole redraw, and the art each region was last drawn with (0: none since that redraw). */
+static u32 sAtlasSharedSignature;
+static u32 sAtlasRegionSignature[1 + DIORAMA_NEIGHBOUR_PAGES];
 /*
  * The last grid resolution's inputs (performance work 2026-10-11): the rules
  * resolve a grid from its cells, the map, the rules' generation and the cells
@@ -1004,6 +1008,185 @@ static bool ScreenObscured(const struct DioramaSceneSnapshot *snapshot)
 
 static unsigned sObscuredFrames; /* frames cleared to a fade's colour (ScreenObscured), for the log */
 
+/* PKMN_DIORAMA_REGION_REDRAW=0: a region's new art redraws the whole atlas, as before 2026-11-06 (KNOWN_ISSUES MS-82). */
+static bool RegionRedrawEnabled(void)
+{
+    static int sEnabled = -1;
+
+    if (sEnabled < 0)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_REGION_REDRAW");
+
+        sEnabled = value == NULL || value[0] != '0';
+    }
+    return sEnabled;
+}
+
+/*
+ * The regions (metatile_atlas.h) whose art changed while what they share did not (KNOWN_ISSUES MS-82): a tileset
+ * coming into view on a neighbouring map takes a region, and its cells are drawn from it. The whole atlas was drawn
+ * again for that and all three atlases uploaded whole (by Route 109's dock, 104 slots and 4.5 ms of upload for 8 MB, a
+ * 10 ms frame in the 3D test build), though every other region still held what its cells are drawn with. Each such
+ * region's slots are cleared (their present bits, masks and rows in memory) and drawn again from its cells in view, and
+ * a slot drawn over one of its slots (a cutout's lower layer, sPreviousCutoutBaseMetatiles) is drawn again too; only the
+ * slots drawn are uploaded, as any updated slot. The rest of the region is drawn as its cells come into view, like any
+ * slot not present: until then its texture keeps what it held there, which no mesh built since reads (the textures are
+ * sampled nearest, without mipmaps). The other regions stand. Returns the regions cleared (bit r).
+ */
+static u8 ClearChangedRegions(void)
+{
+    u8 cleared = 0;
+    unsigned region;
+    unsigned i;
+
+    for (region = 0; region <= DIORAMA_NEIGHBOUR_PAGES; region++)
+    {
+        u32 signature = DioramaAtlas_RegionSignature((u8)region);
+        u16 first = DioramaAtlas_RegionFirstSlot((u8)region);
+        size_t start = (size_t)(first / DIORAMA_ATLAS_COLUMNS) * DIORAMA_ATLAS_STRIDE * DIORAMA_ATLAS_WIDTH;
+        size_t pixels = (size_t)DIORAMA_ATLAS_PAGE_ROWS * DIORAMA_ATLAS_STRIDE * DIORAMA_ATLAS_WIDTH;
+
+        /* a region no page uses keeps its art: the same tileset coming back into view finds it */
+        if (signature == 0 || signature == sAtlasRegionSignature[region])
+            continue;
+        cleared |= (u8)(1u << region);
+        sAtlasRegionSignature[region] = signature;
+        DioramaAtlas_ClearRegion(sAtlasPixels, sPresentMetatiles, (u8)region);
+        memset(sBaseAtlasPixels + start, 0, pixels * sizeof(sBaseAtlasPixels[0]));
+        memset(sForegroundAtlasPixels + start, 0, pixels * sizeof(sForegroundAtlasPixels[0]));
+        for (i = first; i < (unsigned)first + DIORAMA_PAGE_METATILE_COUNT; i++)
+            sPreviousCutoutBaseMetatiles[i] = 0xFFFF;
+    }
+    if (cleared == 0)
+        return 0;
+    for (i = 0; i < DIORAMA_ATLAS_SLOT_COUNT; i++)
+    {
+        u16 base = sPreviousCutoutBaseMetatiles[i];
+        u8 baseRegion = base < DIORAMA_ATLAS_SLOT_COUNT ? DioramaAtlas_SlotRegion(base) : DIORAMA_ATLAS_NO_REGION;
+
+        if (baseRegion != DIORAMA_ATLAS_NO_REGION && (cleared & (1u << baseRegion)))
+        {
+            sPresentMetatiles[i / 8] &= (u8)~(1u << (i % 8));
+            sPreviousCutoutBaseMetatiles[i] = 0xFFFF;
+        }
+    }
+    return cleared;
+}
+
+/* PKMN_DIORAMA_ATLAS_CHECK=1 (tests): CheckAtlas. */
+static bool AtlasCheckEnabled(void)
+{
+    static int sEnabled = -1;
+
+    if (sEnabled < 0)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_ATLAS_CHECK");
+
+        sEnabled = value != NULL && value[0] == '1';
+    }
+    return sEnabled;
+}
+
+/* Whether slot's box (its gutter too) differs between two atlases' pixels. */
+static bool AtlasSlotDiffers(const u32 *a, const u32 *b, u16 slot)
+{
+    size_t start = (size_t)(slot / DIORAMA_ATLAS_COLUMNS) * DIORAMA_ATLAS_STRIDE * DIORAMA_ATLAS_WIDTH
+                 + (slot % DIORAMA_ATLAS_COLUMNS) * DIORAMA_ATLAS_STRIDE;
+    int y;
+
+    for (y = 0; y < DIORAMA_ATLAS_STRIDE; y++)
+        if (memcmp(a + start + (size_t)y * DIORAMA_ATLAS_WIDTH, b + start + (size_t)y * DIORAMA_ATLAS_WIDTH,
+                   DIORAMA_ATLAS_STRIDE * sizeof(*a)) != 0)
+            return true;
+    return false;
+}
+
+/*
+ * PKMN_DIORAMA_ATLAS_CHECK=1 (tests; KNOWN_ISSUES MS-82): after each atlas sync, every slot of the cells in view is
+ * drawn again from nothing into scratch atlases (DioramaAtlas_UpdateDirty with nothing present) and compared with the
+ * three atlases, in memory and in their textures (read back), and with its two masks: a difference would be art a
+ * redraw of only some regions or slots left stale. Slow; logs each slot that differs and a running count. The masks of
+ * the slots in view are left as drawn again.
+ */
+static void CheckAtlas(const struct DioramaSceneSnapshot *snapshot)
+{
+    static u32 *sScratch[3];
+    static u32 *sRead[3];
+    static u8 sScratchPresent[DIORAMA_ATLAS_PRESENT_BYTES];
+    static u16 sForeground[DIORAMA_ATLAS_SLOT_COUNT][DIORAMA_METATILE_SIZE];
+    static u16 sSilhouette[DIORAMA_ATLAS_SLOT_COUNT][DIORAMA_METATILE_SIZE];
+    static unsigned sChecks;
+    static unsigned sCompared;
+    static unsigned sDiffered;
+    const u32 *atlases[3] = {sAtlasPixels, sBaseAtlasPixels, sForegroundAtlasPixels};
+    const GLuint textures[3] = {sAtlasTexture.id, sBaseAtlasTexture.id, sForegroundAtlasTexture.id};
+    static const char *const sNames[3] = {"whole", "lower", "upper"};
+    GLint packAlignment = 4;
+    unsigned differed = 0;
+    unsigned i;
+    unsigned k;
+
+    if (!AtlasCheckEnabled())
+        return;
+    for (k = 0; k < 3; k++)
+    {
+        if (sScratch[k] == NULL)
+            sScratch[k] = calloc(DIORAMA_ATLAS_PIXEL_COUNT, sizeof(u32));
+        if (sRead[k] == NULL)
+            sRead[k] = calloc(DIORAMA_ATLAS_PIXEL_COUNT, sizeof(u32));
+        if (sScratch[k] == NULL || sRead[k] == NULL)
+            return;
+    }
+    for (i = 0; i < DIORAMA_ATLAS_SLOT_COUNT; i++)
+    {
+        DioramaAtlas_GetForegroundAlphaMask((u16)i, sForeground[i]);
+        DioramaAtlas_GetSilhouetteAlphaMask((u16)i, sSilhouette[i]);
+    }
+    memset(sScratchPresent, 0, sizeof(sScratchPresent));
+    DioramaAtlas_UpdateDirty(snapshot, sCutoutBaseMetatiles, NULL, NULL, sScratch[0], sScratch[1], sScratch[2],
+                             sScratchPresent, NULL);
+    glGetIntegerv(GL_PACK_ALIGNMENT, &packAlignment);
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    for (k = 0; k < 3; k++)
+    {
+        glBindTexture(GL_TEXTURE_2D, textures[k]);
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_BGRA, GL_UNSIGNED_BYTE, sRead[k]);
+    }
+    glPixelStorei(GL_PACK_ALIGNMENT, packAlignment);
+    for (i = 0; i < DIORAMA_ATLAS_SLOT_COUNT; i++)
+    {
+        u16 foreground[DIORAMA_METATILE_SIZE];
+        u16 silhouette[DIORAMA_METATILE_SIZE];
+        bool masks;
+
+        if (!(sScratchPresent[i / 8] & (1u << (i % 8))))
+            continue;
+        sCompared++;
+        DioramaAtlas_GetForegroundAlphaMask((u16)i, foreground);
+        DioramaAtlas_GetSilhouetteAlphaMask((u16)i, silhouette);
+        masks = memcmp(foreground, sForeground[i], sizeof(foreground)) != 0
+             || memcmp(silhouette, sSilhouette[i], sizeof(silhouette)) != 0;
+        for (k = 0; k < 3; k++)
+        {
+            bool inMemory = AtlasSlotDiffers(atlases[k], sScratch[k], (u16)i);
+            bool inTexture = AtlasSlotDiffers(sRead[k], sScratch[k], (u16)i);
+
+            if (!inMemory && !inTexture && !(masks && k == 0))
+                continue;
+            differed++;
+            SDL_Log("Diorama: atlas check: slot %u (region %d) differs from a redraw: %s atlas in memory %d, in its "
+                    "texture %d, masks %d (sequence %llu)", i, i < DIORAMA_PAGE_FIRST_METATILE
+                    ? -1 : (int)DioramaAtlas_SlotRegion((u16)i), sNames[k], inMemory, inTexture, masks,
+                    (unsigned long long)snapshot->sequence);
+            break;
+        }
+    }
+    sDiffered += differed;
+    sChecks++;
+    if (differed != 0 || (sChecks & 0x3F) == 1)
+        SDL_Log("Diorama: atlas check: %u checks, %u slots compared, %u differed", sChecks, sCompared, sDiffered);
+}
+
 /* Returns true when the atlases changed (rebuilt, or slots updated). */
 static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
 {
@@ -1036,12 +1219,17 @@ static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
      * slots still hold what they would be drawn with, whatever map the player is on (KNOWN_ISSUES MS-118); the
      * map's own tiles changing is the animated tiles' comparison below. */
     bool sticky = DioramaAtlas_StickyRegions();
+    /* The regions' shared art the same as at the last whole redraw: another page signature is some regions' new art,
+     * drawn again alone (ClearChangedRegions; KNOWN_ISSUES MS-82). */
+    bool regionsOnly = sticky && RegionRedrawEnabled() && sHasAtlasTileGraphics
+                    && DioramaAtlas_SharedSignature() == sAtlasSharedSignature;
     bool reset = (mapChanged && (snapshot->primaryTileset != sAtlasTilesets[0]
                               || (!sticky && snapshot->secondaryTileset != sAtlasTilesets[1])))
               || (!sticky && snapshot->paletteGeneration != sAtlasPaletteGeneration)
-              || pageSignature != sAtlasPageSignature
+              || (pageSignature != sAtlasPageSignature && !regionsOnly)
               || !sHasAtlasTileGraphics;
     bool animationChanged = snapshot->tilesetAnimationGeneration != sAtlasAnimationGeneration || mapChanged;
+    u8 clearedRegions = 0;
     bool changed;
     unsigned cellCount = snapshot->visibleCellCount;
     unsigned i;
@@ -1064,6 +1252,17 @@ static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
         if (pageSignature != sAtlasPageSignature && LogEnabled())
             SDL_Log("Diorama: neighbour pages changed (the highest in use: %u); atlas redrawn",
                     DioramaAtlas_HighestPage());
+        sAtlasPageSignature = pageSignature;
+        sAtlasSharedSignature = DioramaAtlas_SharedSignature();
+        for (i = 0; i <= DIORAMA_NEIGHBOUR_PAGES; i++)
+            sAtlasRegionSignature[i] = DioramaAtlas_RegionSignature((u8)i);
+    }
+    else if (pageSignature != sAtlasPageSignature)
+    {
+        clearedRegions = ClearChangedRegions();
+        if (LogEnabled())
+            SDL_Log("Diorama: neighbour pages changed (the highest in use: %u); regions drawn again: %#x",
+                    DioramaAtlas_HighestPage(), clearedRegions);
         sAtlasPageSignature = pageSignature;
     }
     memset(sDirtyAtlasTiles, 0, sizeof(sDirtyAtlasTiles));
@@ -1144,15 +1343,28 @@ static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
                     (double)(drawn - resolved) * unit, (double)(SDL_GetPerformanceCounter() - drawn) * unit);
         }
     }
-    else if (changed)
+    else if (changed || clearedRegions != 0)
     {
         Uint64 drawn = SDL_GetPerformanceCounter();
+        unsigned regionSlots = 0;
 
+        if (clearedRegions != 0)
+            for (i = 0; i < DIORAMA_ATLAS_PRESENT_BYTES; i++)
+                regionSlots += (unsigned)__builtin_popcount(sUpdatedMetatiles[i]);
         UploadAtlasSlots(&sAtlasTexture, sAtlasPixels, sUpdatedMetatiles);
         UploadAtlasSlots(&sBaseAtlasTexture, sBaseAtlasPixels, sUpdatedMetatiles);
         UploadAtlasSlots(&sForegroundAtlasTexture, sForegroundAtlasPixels,
                          sUpdatedMetatiles);
-        if (LogEnabled() && (SDL_GetPerformanceCounter() - started) * 1000 > 5 * SDL_GetPerformanceFrequency())
+        if (clearedRegions != 0 && LogEnabled())
+        {
+            double unit = 1000.0 / (double)SDL_GetPerformanceFrequency();
+
+            SDL_Log("Diorama: atlas regions redrawn (%#x): %u slots; ms: pages and clearing %.2f, cells resolved %.2f, "
+                    "drawn %.2f, uploaded %.2f", clearedRegions, regionSlots, (double)(cleared - started) * unit,
+                    (double)(resolved - cleared) * unit, (double)(drawn - resolved) * unit,
+                    (double)(SDL_GetPerformanceCounter() - drawn) * unit);
+        }
+        else if (LogEnabled() && (SDL_GetPerformanceCounter() - started) * 1000 > 5 * SDL_GetPerformanceFrequency())
         {
             double unit = 1000.0 / (double)SDL_GetPerformanceFrequency();
             unsigned slots = 0;
@@ -1174,7 +1386,8 @@ static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
     sHasAtlasTileGraphics = true;
     sAtlasAnimationGeneration = snapshot->tilesetAnimationGeneration;
     sAtlasMapGeneration = snapshot->mapGeneration;
-    return reset || changed;
+    CheckAtlas(snapshot);
+    return reset || changed || clearedRegions != 0;
 }
 
 /*

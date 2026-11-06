@@ -464,6 +464,24 @@ trees and open routes have neither.
   builds again each chunk kept though its gameplay elevation changed
   (`DioramaTerrain_ElevationSignature`) and compares it with the mesh kept
   (`N chunks kept with another gameplay elevation checked, M differed`).
+* The atlas's regions (`gl_compositor.c` `EnsureAtlas`, `ClearChangedRegions`;
+  `scene/metatile_atlas.c` `DioramaAtlas_SharedSignature`,
+  `DioramaAtlas_RegionSignature`, `DioramaAtlas_ClearRegion`; KNOWN_ISSUES
+  MS-82): a tileset coming into view on a neighbouring map takes a region of
+  the atlas, and only that region is drawn again - its slots cleared, those
+  of the cells in view drawn and uploaded (the rest as their cells come into
+  view, like any slot not present), and a slot whose lower layer is one of
+  its slots drawn again too - while the regions' shared art (the primary
+  tileset, the live palettes 0 to 5) is unchanged; every other region keeps
+  its art, and a region going out of use draws nothing. Before, the whole atlas was drawn again and all
+  three atlases uploaded whole (by Route 109's dock: 104 slots and 4.5 ms of
+  upload, a 10 ms frame in the 3D test build). A change of the shared art (a
+  screen fade's step, the night tint) still draws the whole atlas again.
+  `PKMN_DIORAMA_REGION_REDRAW=0` draws the whole atlas again for any change,
+  as before; `PKMN_DIORAMA_ATLAS_CHECK=1` draws every slot in view again from
+  nothing after each atlas sync and compares it with the three atlases, in
+  memory and in their textures (read back), and with its masks (`atlas
+  check: N checks, M slots compared, K differed`).
 * Development aids: `PKMN_PERF_FRAME_LOG=path` (a CSV line per presented frame:
   frame time, main thread and program CPU time, chunks rebuilt, vertices,
   trees), `PKMN_DIORAMA_PROFILE_FINISH=1` (each profiled section finishes its
