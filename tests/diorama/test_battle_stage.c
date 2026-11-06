@@ -532,6 +532,66 @@ static void TestWallRightBehind(void)
            seen.cramped, walled.seen.cramped, walled.offsetX, walled.offsetY);
 }
 
+/* Whether a stage stands any battler on a cell nobody stands on. */
+static bool OnNoGround(const struct DioramaStageResult *r)
+{
+    for (unsigned b = 0; b < r->battlerCount; ++b)
+    {
+        int x = (int)floorf(r->targetX + r->battlerX[b]), y = (int)floorf(r->targetY + r->battlerY[b]);
+
+        if (x >= 0 && y >= 0 && x < 64 && y < 64 && sWorld.cells[y][x].noFeet)
+            return true;
+    }
+    return false;
+}
+
+/*
+ * Lava (DioramaStageCell.noFeet; KNOWN_ISSUES E13): no battler is stood on it,
+ * however the rest of the scoring would rate the stage, in a single battle or a
+ * double; lava no battler of any stage within reach would stand on changes
+ * nothing; and with lava under every stage the battle still has one.
+ */
+static void TestLavaIsNoGround(void)
+{
+    struct DioramaStageRequest r;
+    struct DioramaStageResult open, far, pool, doubled;
+    int fx, fy;
+
+    Fill(DIORAMA_GROUND_PLAIN);
+    Request(&r, 32, 32);
+    DioramaStage_Choose(&r, &open);
+    assert(open.battlerCount == 2);
+    /* Far to the north, out of every stage's reach: the same stage, the same score. */
+    for (int y = 0; y < 4; ++y)
+        for (int x = 0; x < 64; ++x)
+            sWorld.cells[y][x].noFeet = true;
+    DioramaStage_Choose(&r, &far);
+    assert(far.targetX == open.targetX && far.targetY == open.targetY && far.score == open.score);
+    /* A pool under the opponent's feet at the open field's stage, otherwise the
+     * same plain ground: scored alike, but no stage there stands. */
+    fx = (int)floorf(open.targetX + open.feetX[1]);
+    fy = (int)floorf(open.targetY + open.feetY[1]);
+    for (int y = fy - 1; y <= fy + 1; ++y)
+        for (int x = fx - 1; x <= fx + 1; ++x)
+            sWorld.cells[y][x].noFeet = true;
+    assert(OnNoGround(&open));
+    DioramaStage_Choose(&r, &pool);
+    assert(!OnNoGround(&pool));
+    assert(pool.targetX != open.targetX || pool.targetY != open.targetY);
+    r.doubles = true;
+    DioramaStage_Choose(&r, &doubled);
+    assert(doubled.battlerCount == 4 && !OnNoGround(&doubled));
+    printf("  a pool under the opponent: the stage moves %+.0f,%+.0f (singles), %+.0f,%+.0f (doubles)\n",
+           pool.offsetX, pool.offsetY, doubled.offsetX, doubled.offsetY);
+    /* Lava under every stage within reach: still a stage, the best of them. */
+    for (int y = 0; y < 64; ++y)
+        for (int x = 0; x < 64; ++x)
+            sWorld.cells[y][x].noFeet = true;
+    r.doubles = false;
+    DioramaStage_Choose(&r, &pool);
+    assert(pool.score > -1.0e9f && pool.targetX == open.targetX && pool.targetY == open.targetY);
+}
+
 int main(void)
 {
     TestProjection();
@@ -547,6 +607,7 @@ int main(void)
     TestRoomWallsHideTheBlack();
     TestRoomLowWalls();
     TestWallRightBehind();
+    TestLavaIsNoGround();
     puts("test_battle_stage: all passed");
     return 0;
 }

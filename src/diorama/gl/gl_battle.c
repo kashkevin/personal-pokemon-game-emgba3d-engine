@@ -1325,6 +1325,10 @@ static bool StageCellAt(void *context, int x, int y, struct DioramaStageCell *ce
     if (resolved->shape == DIORAMA_SHAPE_HIDDEN)
         cell->kind = DIORAMA_GROUND_VOID;
     cell->blocked = source->collision != 0;
+    /* Lava, bare or under the rock drawn over its edge: no battler is stood
+     * on it (KNOWN_ISSUES E13; as blocked ground it scored -6, and a battler
+     * was stood in it where nothing else round fit as well). */
+    cell->noFeet = !c->legacy && StageLavaAt(c, x, y);
     cell->lift = resolved->groundHeight;
     cell->slope = resolved->shape == DIORAMA_SHAPE_CLIFF || resolved->shape == DIORAMA_SHAPE_LEDGE
                || resolved->shape == DIORAMA_SHAPE_STAIRS || resolved->cliffEdgeMask != 0;
@@ -1463,8 +1467,8 @@ static void ChooseStage(const struct Layout *layout, const struct DioramaSceneSn
                 (double)(SDL_GetPerformanceCounter() - start) * 1000.0 / SDL_GetPerformanceFrequency(),
                 100.0f * result->seen.voidFraction, 100.0f * result->seen.overlap, result->seen.cramped);
         /* The ground round the player as the search read it: . plain, g grass,
-         * s sand, ~ water, space nothing, # something tall, ? not in the
-         * scene, P the player. */
+         * s sand, ~ water, space nothing, # something tall, L lava (nobody
+         * stands on it), ? not in the scene, P the player. */
         for (int dy = -5; dy <= 5; ++dy)
         {
             char row[16];
@@ -1477,7 +1481,7 @@ static void ChooseStage(const struct Layout *layout, const struct DioramaSceneSn
                 if (dx == 0 && dy == 0)
                     c = 'P';
                 else if (StageCellAt(&context, request.playerX + dx, request.playerY + dy, &cell))
-                    c = cell.top > 0.4f ? '#' : ".gs~ "[cell.kind < 5 ? cell.kind : 4];
+                    c = cell.noFeet ? 'L' : cell.top > 0.4f ? '#' : ".gs~ "[cell.kind < 5 ? cell.kind : 4];
                 row[dx + 7] = c;
             }
             row[15] = '\0';

@@ -110,7 +110,7 @@ bool DioramaStage_Project(const struct DioramaBattleView *view, float x, float h
 
 static struct DioramaStageCell sGrid[GRID_H][GRID_W];
 static int sGridX, sGridZ;
-static const struct DioramaStageCell sNothing = {DIORAMA_GROUND_VOID, true, false, 0.0f, 0.0f, 0.0f};
+static const struct DioramaStageCell sNothing = {DIORAMA_GROUND_VOID, true, false, 0.0f, 0.0f, 0.0f, false};
 
 static void ReadCell(const struct DioramaStageRequest *request, struct DioramaStageCell *cell, int x, int z)
 {
@@ -559,6 +559,17 @@ static float StageScore(const struct StageSearch *s, float tx, float tz, float d
     return score;
 }
 
+/* A battler's feet on a cell nobody stands on (DioramaStageCell.noFeet: lava). */
+static bool AnyFootOnNoGround(const struct StageSearch *s, float tx, float tz)
+{
+    unsigned b;
+
+    for (b = 0; b < s->battlerCount; ++b)
+        if (CellAt(tx + s->battlerX[b], tz + s->battlerZ[b])->noFeet)
+            return true;
+    return false;
+}
+
 static uint8_t KindAt(const struct DioramaStageRequest *request, int x, int z)
 {
     struct DioramaStageCell cell;
@@ -596,6 +607,7 @@ void DioramaStage_Choose(const struct DioramaStageRequest *request, struct Diora
     float baseX, baseZ;
     uint8_t here, front;
     unsigned i;
+    bool standing;
 
     InitSearch(&search, request);
     memset(result, 0, sizeof(*result));
@@ -641,16 +653,28 @@ void DioramaStage_Choose(const struct DioramaStageRequest *request, struct Diora
     result->targetX = baseX;
     result->targetY = baseZ;
     result->score = -1.0e9f;
+    /* A stage that stands a battler on a cell nobody stands on (lava) is not
+     * one, however it scores: any stage where every battler stands comes
+     * first, and the others are not scored once there is one. Only where no
+     * stage within reach stands every battler is the best of the others
+     * taken, so that the battle still has a stage. Without such cells the
+     * search is the same as before, stage for stage. */
+    standing = false;
     for (i = 0; i < STAGE_SIDE * STAGE_SIDE; ++i)
     {
         int dx = (int)(i % STAGE_SIDE) - STAGE_REACH;
         int dz = (int)(i / STAGE_SIDE) - STAGE_REACH;
         float tx = baseX + dx, tz = baseZ + dz;
         struct DioramaStageView seen = {0.0f, 0.0f, 0.0f};
-        float score = StageScore(&search, tx, tz, sqrtf((float)(dx * dx + dz * dz)), &seen);
+        bool stands = !AnyFootOnNoGround(&search, tx, tz);
+        float score;
 
-        if (score > result->score)
+        if (standing && !stands)
+            continue;
+        score = StageScore(&search, tx, tz, sqrtf((float)(dx * dx + dz * dz)), &seen);
+        if ((stands && !standing) || score > result->score)
         {
+            standing = stands;
             result->score = score;
             result->targetX = tx;
             result->targetY = tz;

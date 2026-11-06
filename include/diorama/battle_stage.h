@@ -43,6 +43,7 @@ struct DioramaStageCell
     float lift;     /* height of its ground in the world, tiles */
     float north;    /* how far past the cell's north edge its top reaches, tiles
                      * (a crown leaning back) */
+    bool noFeet;    /* no battler stands on it, whatever else it scores: lava (KNOWN_ISSUES E13) */
 };
 
 /* Fills *cell for tile (x, y); false where nothing is known (past the cells
