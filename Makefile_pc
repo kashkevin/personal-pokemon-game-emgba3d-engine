@@ -772,6 +772,12 @@ check-update26:
 check-battlefx-bg:
 	sh tools/battlefx/bg_check.sh
 
+# MS-200: in a double battle where one side has a single Pokemon the effects are placed where the game draws it (every
+# compared frame equal; needs BFX_TEST=1's build as well).
+.PHONY: check-battlefx-lone
+check-battlefx-lone:
+	sh tools/battlefx/lone_check.sh
+
 # The voxel project's renderer unit tests (Linux, 32-bit host gcc; no game code).
 # check-diorama-tools runs the rule compiler's own Python tests (slow: ~1 h).
 DIORAMA_TEST_DIR   := build/pc-tests/diorama

@@ -788,6 +788,34 @@ static const char kGameHelperJs[] =
     "  };\n"
     "  P.runScript = function () { if (this.taskOrder && !this.inDriver) return; return runScript.apply(this, arguments); };\n"
     "})();\n"
+    /* The battlers' places. The runtime places every battler from its table for the battle's kind (COORDS.single or
+     * COORDS.double, by the world's double: getBattlerSpriteCoord, getBattlerSpriteFinal_Y), and the HD layer's Space
+     * its battlers (their centres, depth and feet) from a table of its own (BFX_HD.COORDS). The game gives each
+     * battler its own coordinate set (battle_anim_mons.c GetBattlerBaseCoords, battle_interface.c
+     * GetBattlerCoordsIndex): in a double battle where one side has a single Pokemon (the debug field scene's lone
+     * Mudkip against two wild Pokemon) that Pokemon stands at the singles place, 40 pixels from the doubles one (24
+     * on the foe's side), and every effect the core placed from it or at it was that far off (MS-200). The request's
+     * coords are each battler's place as the game has it (null: none in this battle, the table's); from the
+     * animation's begin (its plan included) until the next one, both tables answer with them. A request without
+     * coords, or whose places are the table's (a single battle, two Pokemon a side), plays exactly as before. */
+    "(function () {\n"
+    "  const RT = globalThis.BFX_RT, HD = globalThis.BFX_HD, B = globalThis.BFX_BRIDGE; if (!RT || !RT.COORDS || !B) return;\n"
+    "  const begin = B.begin; let game = null;\n"
+    "  const place = (p) => (Array.isArray(p) && p.length === 2 ? [p[0] | 0, p[1] | 0] : null);\n"
+    "  B.begin = function (req) {\n"
+    "    const c = req && Array.isArray(req.coords) && req.coords.length === 4 ? req.coords.map(place) : null;\n"
+    "    game = c && c.some((p) => p) ? c : null; return begin.call(this, req); };\n"
+    "  for (const T of [RT.COORDS, HD && HD.COORDS]) {\n"
+    "    if (!T) continue;\n"
+    "    for (const k of ['single', 'double']) {\n"
+    "      const own = T[k]; let from = null, table = own;\n"
+    "      if (!Array.isArray(own) || own.length !== 4) continue;\n"
+    "      Object.defineProperty(T, k, { configurable: true, enumerable: true, get() {\n"
+    "        if (game !== from) { from = game; table = game ? own.map((p, b) => game[b] || p) : own; }\n"
+    "        return table; } });\n"
+    "    }\n"
+    "  }\n"
+    "})();\n"
     /* A move's script branches in the core's data, in its order: "kind|task|arg|value;..." */
     "globalThis.BFX_GAME_VARIANTS = function (id) {\n"
     "  const D = globalThis.BFX_RT && globalThis.BFX_RT.data; if (!D) return '';\n"
@@ -1013,6 +1041,23 @@ static int AppendSetup(char *buf, int len, int size, u32 attacker, u32 target)
         }
         len = Append(buf, len, size, "%s{\"picW\":%d,\"picH\":%d,\"yOffset\":%d,\"elevation\":%d,\"shiny\":%s}",
                      i ? "," : "", picW, picH, yOffset, elevation, shiny ? "true" : "false");
+    }
+    len = Append(buf, len, size, "]");
+    /* each battler's place on the screen as the game has it (battle_anim_mons.c GetBattlerSpriteCoord's x and y,
+     * where every point a script takes from a battler starts): a battler's own coordinate set, so a double battle's
+     * lone Pokemon of a side stands at the singles place (battle_interface.c GetBattlerCoordsIndex), 40 pixels from
+     * the doubles one the core's table would give it, 24 on the foe's side (kGameHelperJs: the battlers' places).
+     * null: no such battler in this battle (the core keeps its table's). */
+    len = Append(buf, len, size, ",\"coords\":[");
+    for (u32 i = 0; i < MAX_BATTLERS_COUNT; i++)
+    {
+        u32 b = GameBattlerAt(i);
+
+        if (b < gBattlersCount)
+            len = Append(buf, len, size, "%s[%u,%u]", i ? "," : "", (unsigned)GetBattlerSpriteCoord(b, BATTLER_COORD_X),
+                         (unsigned)GetBattlerSpriteCoord(b, BATTLER_COORD_Y));
+        else
+            len = Append(buf, len, size, "%snull", i ? "," : "");
     }
     len = Append(buf, len, size, "]");
     /* The same on every client of a battle: presentation only (particle variety). */

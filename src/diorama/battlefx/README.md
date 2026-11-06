@@ -205,6 +205,14 @@ and position) with the core's. To make the replay the game's own:
   (`spritesInUse`): the core keeps as many taken, so an effect sprite the game cannot make
   (Fairy Lock's last bolt) is not made in the core either. The battlers' sprites start where the
   game has them (`battlerSprites`), not always their home.
+- **The battlers' places.** A script takes every point from a battler's place on the screen
+  (`GetBattlerSpriteCoord`), which the game gives each battler from its own coordinate set
+  (`battle_interface.c` `GetBattlerCoordsIndex`): in a double battle where one side has a single
+  Pokemon, that Pokemon stands at the singles place, 40 pixels from the doubles one the runtime's
+  table gave every battler of a double battle. The request carries each battler's place as the game
+  has it (`coords`), and from the animation's begin the runtime's table and the HD layer's (where its
+  effects find the battlers: their centres, depth and feet) answer with them (MS-200). With two
+  Pokemon a side, or in a single battle, the places are the table's and nothing changes.
 - **The loop that runs the script.** A move's animation is run by its battler's controller
   (`Controller_DoMoveAnimation`, in `BattleMainCB1`): each frame its script first, then
   `AnimateSprites`, `BuildOamBuffer`, `UpdatePaletteFade`, `RunTasks` - the runtime's own order. A
@@ -338,13 +346,16 @@ it was listed. Not converted: Dragon Darts (`createdragondartsprite`), Tera Blas
 Starstorm (`jumpifmovetypeequal`); `tools/battlefx/moves_past_package.py` lists what each other move
 still needs (callbacks and tasks to port).
 
-Seen while testing them, the package's moves as well: in a double battle where one side has a single
-Pokemon (the debug field scene's lone Mudkip against two wild ones), the game draws that battler at
-the singles position (`battle_interface.c` `GetBattlerCoordsIndex`: `gPartiesCount == 1`) and the core
-at the doubles one, 40 pixels apart: every effect placed from that battler is off and parity fails
-(Ember, Focus Energy, Giga Drain, Calm Mind, Swords Dance as well as 7 of the 16). With two Pokemon a
-side it is exact. A fix: the request carries each battler's coordinate set and `kGameHelperJs` gives
-the core's battler coordinates from it.
+Seen while testing them, the package's moves as well, and fixed since (MS-200): in a double battle
+where one side has a single Pokemon (the debug field scene's lone Mudkip against two wild ones), the
+game draws that battler at the singles position (`battle_interface.c` `GetBattlerCoordsIndex`:
+`gPartiesCount == 1`) and the core drew it at the doubles one, 40 pixels apart (24 for a trainer's
+lone Pokemon): every effect placed from or at that battler was off and parity failed (Ember, Focus
+Energy, Giga Drain, Calm Mind, Swords Dance as well as 7 of the 16). The request now carries each
+battler's place (above, the battlers' places). In that battle the 16 (17 animations) and the package's
+moves sampled (the six above, and 41 spread over the 621: 44 animations) play with every compared frame
+equal, the lone Pokemon as the attacker and as the target, and with a trainer's lone Pokemon against
+two as well; with two Pokemon a side and in a single battle they are exact as before.
 
 ## Tests
 
@@ -384,7 +395,13 @@ otherwise a visible wild Pokemon may walk into the player and start another batt
 
 `tools/battlefx/gallery.sh` runs one (a run that crashes the game resumes after the animation
 that crashed; a stuck one goes on in a new game), `tools/battlefx/realsuite.sh` the battles of
-the real-battle suite, and `tools/battlefx/summarize.py` sums the results up. The battle environment test
+the real-battle suite, and `tools/battlefx/summarize.py` sums the results up. Two regression checks
+play galleries and judge them: `tools/battlefx/bg_check.sh` (`make -f Makefile_pc DIORAMA=1
+check-battlefx-bg`: a move's background leaves no black block) and `tools/battlefx/lone_check.sh`
+(`check-battlefx-lone`: a double battle where one side has a single Pokemon - the debug field
+scene's lone Mudkip against two wild ones, a trainer's lone Pokemon against the player's two
+(`PKMN_TEST_BATTLE=double:10 PKMN_DEBUG_PARTY=2`), each as the attacker and as the target - with every
+compared frame equal). The battle environment test
 driver's autopilot only presses A (the first move on the first target): once the lead faints with
 the whole party in the battle, it stays at the party menu, so the suite fights the battles that can
 cost the lead with the lead alone (`PKMN_TEST_LEAD_ONLY=1`: a faint loses the battle). The test
