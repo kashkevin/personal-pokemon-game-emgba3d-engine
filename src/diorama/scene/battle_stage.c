@@ -662,6 +662,12 @@ void DioramaStage_Choose(const struct DioramaStageRequest *request, struct Diora
     result->ground = StageGround(&search, result->targetX, result->targetY);
     result->want[0] = search.want[0];
     result->want[1] = search.want[1];
+    result->battlerCount = search.battlerCount;
+    for (i = 0; i < search.battlerCount; ++i)
+    {
+        result->battlerX[i] = search.battlerX[i];
+        result->battlerY[i] = search.battlerZ[i];
+    }
 }
 
 void DioramaStage_Measure(const struct DioramaStageRequest *request, float targetX, float targetY,

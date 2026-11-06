@@ -1291,6 +1291,23 @@ static float PropTop(const struct DioramaProp *prop)
     return scale * (float)(DioramaProps_ArtBottom(prop) - prop->artTop) / 16.0f;
 }
 
+/* Lava at grid cell (x, y), as no battler can stand on it: the bare lava (Mt. Chimney's lake, the
+ * Magma Hideout's pools; sunk a level, buildings.c SinkLava), or the rock drawn over its edge where
+ * nobody walks (DioramaRules_CellLava). */
+static bool StageLavaAt(const struct StageContext *c, int x, int y)
+{
+    const struct DioramaCellSnapshot *source;
+    uint16_t layoutId;
+    uint8_t lava;
+
+    if (StageResolvedAt(c, x, y, &source) == NULL)
+        return false;
+    layoutId = (source->flags & DIORAMA_CELL_CONNECTED) && source->sourceLayoutId != 0
+             ? source->sourceLayoutId : c->snapshot->mapLayoutId;
+    lava = DioramaRules_CellLava(source, layoutId);
+    return lava == 2 || (lava == 1 && source->collision != 0);
+}
+
 static bool StageCellAt(void *context, int x, int y, struct DioramaStageCell *cell)
 {
     const struct StageContext *c = context;
@@ -1487,7 +1504,25 @@ struct SurveyTally
     float blackSum, coverSum, worst;
     int worstX, worstY;
     bool worstDoubles;
+    unsigned lava;   /* stages with a battler on lava (StageLavaAt) */
+    uint32_t stages; /* FNV-1a of every target chosen, in the survey's order: two runs compared stage for stage */
 };
+
+/* What a chosen stage stands its battlers on, and where it is, into the tally. */
+static void TallyStage(struct SurveyTally *t, const struct StageContext *c, const struct DioramaStageResult *r)
+{
+    int32_t where[2] = {(int32_t)lroundf(r->targetX * 16.0f), (int32_t)lroundf(r->targetY * 16.0f)};
+    const uint8_t *bytes = (const uint8_t *)where;
+
+    for (unsigned b = 0; b < r->battlerCount; ++b)
+        if (StageLavaAt(c, (int)floorf(r->targetX + r->battlerX[b]), (int)floorf(r->targetY + r->battlerY[b])))
+        {
+            ++t->lava;
+            break;
+        }
+    for (unsigned i = 0; i < sizeof(where); ++i)
+        t->stages = (t->stages ^ bytes[i]) * 16777619u;
+}
 
 static void Tally(struct SurveyTally *t, const struct DioramaStageView *v, int x, int y, bool doubles)
 {
@@ -1563,6 +1598,7 @@ static void SurveyStages(const struct DioramaSceneSnapshot *snapshot, const stru
     DumpStageCells(snapshot, &now, &before);
     BattleLayout(window, &layout);
     memset(tally, 0, sizeof(tally));
+    tally[0].stages = tally[1].stages = 2166136261u;
     for (dy = -SURVEY_REACH; dy <= SURVEY_REACH; dy += 2)
         for (dx = -SURVEY_REACH; dx <= SURVEY_REACH; dx += 2)
         {
@@ -1586,11 +1622,13 @@ static void SurveyStages(const struct DioramaSceneSnapshot *snapshot, const stru
                 request.doubles = d != 0;
                 DioramaStage_Choose(&request, &result);
                 Tally(&tally[1], &result.seen, x, y, d != 0);
+                TallyStage(&tally[1], &now, &result);
                 /* As before: the 3DS scoring on the cells as they were read;
                  * measured as the camera sees it now. */
                 request.context = &before;
                 request.legacy = true;
                 DioramaStage_Choose(&request, &result);
+                TallyStage(&tally[0], &now, &result);
                 request.context = &now;
                 request.legacy = false;
                 DioramaStage_Measure(&request, result.targetX, result.targetY, &seen);
@@ -1608,10 +1646,10 @@ static void SurveyStages(const struct DioramaSceneSnapshot *snapshot, const stru
         const struct SurveyTally *t = &tally[d];
 
         SDL_Log("Diorama stage survey:   %s: a battler covered %u, black over 2%% %u (mean %.1f%%), "
-                "pressed %u; worst at %d,%d%s (covered + black %.0f%%)",
+                "pressed %u; worst at %d,%d%s (covered + black %.0f%%); a battler on lava %u; stages %08x",
                 d == 0 ? "3DS scoring" : "now        ", t->covered, t->black, 100.0f * t->blackSum / t->spots,
                 t->pressed, t->worstX - SURVEY_MAP_OFFSET, t->worstY - SURVEY_MAP_OFFSET,
-                t->worstDoubles ? " doubles" : "", 100.0f * t->worst);
+                t->worstDoubles ? " doubles" : "", 100.0f * t->worst, t->lava, (unsigned)t->stages);
     }
 }
 

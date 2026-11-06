@@ -90,6 +90,10 @@ struct DioramaStageResult
     /* Each side's feet, tiles from the target (the 3DS project's feetX/Z). */
     float feetX[2], feetY[2];
     struct DioramaStageView seen; /* from the chosen stage */
+    /* Where each battler stands, tiles from the target: the two sides' feet in a single
+     * battle, the four battlers' in a double. */
+    unsigned battlerCount;
+    float battlerX[4], battlerY[4];
 };
 
 /* Ground under GBA picture point (gx, gy), tiles from the target (y south);
