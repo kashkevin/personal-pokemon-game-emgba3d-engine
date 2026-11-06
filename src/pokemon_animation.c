@@ -3678,7 +3678,15 @@ static void VerticalShakeLowTwice(struct Sprite *sprite)
 
     var6 = sVerticalShakeData[sprite->data[5]][1];
     var7 = 0;
+#ifdef PORTABLE
+    // the table's end ({-1, 0}) divided by zero before the end was checked, as VerticalShakeTwice's did (UBSan;
+    // KNOWN_ISSUES MS-209); the amplitude is not used there
+    if (sVerticalShakeData[sprite->data[5]][0] != (u8)-2 && sVerticalShakeData[sprite->data[5]][0] != (u8)-1)
+#else
+#line 3673 // gba-line
     if (sVerticalShakeData[sprite->data[5]][0] != (u8)-2)
+#endif
+#line 3674 // gba-line
         var7 = (var6 - var9) * var5 / var6;
     else
         var7 = 0;
