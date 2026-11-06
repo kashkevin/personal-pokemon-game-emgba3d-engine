@@ -55,6 +55,7 @@
 #include "native_ui/native_ui.h"
 #endif
 #include "constants/battle.h"
+#include "constants/layouts.h"
 #include "constants/map_types.h"
 #include "constants/weather.h"
 #ifdef DIORAMA_BATTLE_ENV_TEST
@@ -1396,6 +1397,9 @@ static void StageRequest(struct DioramaStageRequest *request, const struct Layou
     VisibleRect(layout, &request->visibleLeft, &request->visibleRight, &request->visibleTop,
                 &request->visibleBottom);
     request->indoor = IsIndoor(snapshot->mapType);
+    /* The Battle Pyramid's top: past its summit the battle shows the Pyramid's sky (its battle background), and the
+     * summit is the one band deep enough for both battlers (KNOWN_ISSUES E5). */
+    request->backdropBeyond = snapshot->mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PYRAMID_TOP;
     request->cellAt = StageCellAt;
     request->context = context;
 }

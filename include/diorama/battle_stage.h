@@ -62,6 +62,9 @@ struct DioramaStageRequest
     bool wild;
     bool indoor;
     bool doubles;   /* four battlers' pictures instead of two */
+    /* What the camera sees past the cells is the map's own battle background by design, not a hole in the world (the
+     * Battle Pyramid's top: its sky and sun, as on the GBA): not counted against a stage (KNOWN_ISSUES E5). */
+    bool backdropBeyond;
     /* The 3DS project's scoring alone (for comparisons; the game never sets
      * it): no camera view, the two sides' shared picture boxes. */
     bool legacy;

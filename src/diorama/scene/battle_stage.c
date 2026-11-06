@@ -545,7 +545,11 @@ static float StageScore(const struct StageSearch *s, float tx, float tz, float d
     cover = FrontCover(s, tx, tz, groundT, &worstCover);
     voids = VoidFraction(s->request, tx, tz, groundT);
     cramped = Cramped(s, tx, tz, groundT, &worstCramped);
-    score -= OVERLAP_WEIGHT * cover + VOID_WEIGHT * voids + CRAMPED_WEIGHT * cramped;
+    /* the same sum as before where the backdrop counts (the order of a float sum decides near ties) */
+    if (s->request->backdropBeyond)
+        score -= OVERLAP_WEIGHT * cover + CRAMPED_WEIGHT * cramped;
+    else
+        score -= OVERLAP_WEIGHT * cover + VOID_WEIGHT * voids + CRAMPED_WEIGHT * cramped;
     if (seen != NULL)
     {
         seen->voidFraction = voids;
