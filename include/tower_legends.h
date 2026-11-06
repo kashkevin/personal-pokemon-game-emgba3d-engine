@@ -184,6 +184,7 @@ u32 TowerLegends_NextFloor(void);       // the floor the question names (0: none
 bool32 TowerLegends_TestStartSolo(u32 floor);
 bool32 TowerLegends_TestStartChampionship(u32 floor, u32 round, bool32 awardExp);
 void TowerLegends_TestReset(void);
+void TowerLegends_TestSetClock(u32 (*clock)(void));
 void TowerLegends_TestSaveHeldItems(void);
 void TowerLegends_TestRestoreHeldItems(void);
 bool32 TowerLegends_TestRefusal(u32 *ticket, u32 *floor);

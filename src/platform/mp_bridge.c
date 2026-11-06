@@ -2770,6 +2770,11 @@ bool MpBridge_IsEnabled(void)
     return sEnabled;
 }
 
+uint32_t MpBridge_Milliseconds(void)
+{
+    return SDL_GetTicks();
+}
+
 bool MpBridge_MenuOpenPageEnabled(void)
 {
     return sEnabled && sBridge.caps.menuOpenPage == 1;

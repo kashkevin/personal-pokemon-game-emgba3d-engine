@@ -69,6 +69,7 @@
 /* Platform API (sdl2.c). */
 bool MpBridge_Configure(const char *path); /* false: refuse to start the game */
 bool MpBridge_IsEnabled(void);
+uint32_t MpBridge_Milliseconds(void); /* monotonic milliseconds (wrapping): the platform's clock for game code */
 bool MpBridge_MenuOpenPageEnabled(void); /* Update 32: a Players menu OPEN may name its page (menu_open_page=1) */
 bool MpBridge_TowerEnabled(void); /* Battle Tower: Legends (tower=1) */
 bool MpBridge_HostSavePageEnabled(void); /* MS-61: an in-game SAVE in a world asks for the host save (host_save_page=1) */

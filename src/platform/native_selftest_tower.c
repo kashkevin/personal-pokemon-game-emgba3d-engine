@@ -243,6 +243,14 @@ static void DeliverTowerPage(u32 *generation, u32 ack, u32 revision, u8 style, u
     gMultiplayerMenuMailbox.inboundGeneration = *generation;
 }
 
+// The clock a queued solo command's wait reads in check 9's slow game (TowerLegends_TestSetClock).
+static u32 sTestClockMs;
+
+static u32 TestClock(void)
+{
+    return sTestClockMs;
+}
+
 static u32 TowerWord(u32 kind, u32 payload)
 {
     return MP_REWARD_FLAG | (kind << 24) | payload;
@@ -680,6 +688,35 @@ int NativeSelfTest_Tower(void)
         ExpectTower("after 45 seconds it is refused for its ticket and floor",
                     TowerLegends_TestRefusal(&ticket, &refusedFloor) && ticket == 0x00054321 && refusedFloor == 7);
         TowerLegends_TestReset();
+
+        // KNOWN_ISSUES MS-49: a slow game's frames run slow, so the same 45 seconds of real time refuse it too: here
+        // 600 frames that took 45 seconds (a game at 13 frames a second), long before 2,700 frames.
+        sTestClockMs = 1000;
+        TowerLegends_TestSetClock(TestClock);
+        TowerLegends_QueueSolo(&command);
+        for (i = 0; i < 599; i++)
+        {
+            sTestClockMs += 75;                      // 13.3 frames a second
+            TowerLegends_Tick();
+        }
+        ExpectTower("a slow game: after 44.9 seconds (599 frames) the queued floor still waits",
+                    !TowerLegends_TestRefusal(&ticket, &refusedFloor));
+        sTestClockMs += 75;
+        TowerLegends_Tick();
+        ExpectTower("a slow game: after 45 seconds of real time (600 frames) it is refused for its ticket and floor",
+                    TowerLegends_TestRefusal(&ticket, &refusedFloor) && ticket == 0x00054321 && refusedFloor == 7);
+        TowerLegends_TestReset();
+        sTestClockMs = 0xFFFFF000u;                  // the clock wraps while it waits: the same
+        TowerLegends_QueueSolo(&command);
+        for (i = 0; i < 600; i++)
+        {
+            sTestClockMs += 75;
+            TowerLegends_Tick();
+        }
+        ExpectTower("a slow game across the clock's wrap: refused after 45 seconds",
+                    TowerLegends_TestRefusal(&ticket, &refusedFloor) && ticket == 0x00054321);
+        TowerLegends_TestReset();
+        TowerLegends_TestSetClock(NULL);
         gMain.callback2 = field;
     }
 

@@ -88,6 +88,9 @@ static const u8 sCheckpoints[] = {10, 20, 25, 30, 40, 50, 60, 70, 75, 80, 90, 10
 // A solo command the field never let start is refused well before the host voids its ticket (tower_service.py
 // ISSUED_SECONDS, 120 s from issue): a battle the game began after that would not count.
 #define QUEUE_FRAMES (60 * 45)
+// The same 45 seconds of real time (KNOWN_ISSUES MS-49): a game running below about 22 frames a second (drawing fewer
+// than 12; sdl2.c runs up to five game frames a drawn one) took longer than the host's two minutes to count them.
+#define QUEUE_MS (45 * 1000)
 // "Go on to floor N?" answered YES while the floor's result is not yet settled in the save: the host's settling word is
 // applied only on a calm field (multiplayer.c FieldReady), never while the Players menu is open, and page 4's ask for
 // the next floor is refused ("tower_saving") until it is. So page 4 waits for it on the calm field, at most this long
@@ -111,6 +114,7 @@ static EWRAM_DATA struct
     u8 saveQueued;       // ... answered NO: the host save
     u16 repostTimer;
     u16 queuedFrames;    // how long the queued solo command has waited for a calm field
+    u32 queuedAtMs;      // when it was queued (TowerClock)
     u16 nextHoldFrames;  // how long page 4 has waited on a calm field for the last result to settle (NEXT_HOLD_FRAMES)
     u8 nextMapGroup;     // where YES was answered: page 4 opens only there
     u8 nextMapNum;
@@ -437,11 +441,15 @@ bool32 TowerLegends_ValidStyle(u32 style, u32 arg)
     return style < TOWER_STYLE_COUNT && arg <= TOWER_FLOOR_COUNT && (style != 0 || arg == 0);
 }
 
+// The clock a queued command's wait is measured by: the platform's (MpBridge_Milliseconds); the self-tests set their own.
+static u32 (*sTowerClock)(void) = MpBridge_Milliseconds;
+
 void TowerLegends_QueueSolo(const struct TowerLegendsCommand *command)
 {
     sTower.command = *command;
     sTower.queued = TRUE;
     sTower.queuedFrames = 0;
+    sTower.queuedAtMs = sTowerClock();
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -526,8 +534,9 @@ void TowerLegends_Tick(void)
     championship = sTower.command.mode == TOWER_COMMAND_MODE_CHAMPIONSHIP;
     if (!FieldCalm())
     {
-        // A field that stays busy (a long script, a menu, the host holding the save) never starts the floor late.
-        if (++sTower.queuedFrames >= QUEUE_FRAMES)
+        // A field that stays busy (a long script, a menu, the host holding the save) never starts the floor late:
+        // 45 seconds of frames or of real time, whichever comes first (MS-49: a slow game's frames run slow).
+        if (++sTower.queuedFrames >= QUEUE_FRAMES || (u32)(sTowerClock() - sTower.queuedAtMs) >= QUEUE_MS)
         {
             sTower.queued = FALSE;
             Refuse(sTower.command.ticket, sTower.command.floor, championship
@@ -981,6 +990,12 @@ bool32 TowerLegends_TestStartChampionship(u32 floor, u32 round, bool32 awardExp)
 void TowerLegends_TestReset(void)
 {
     memset(&sTower, 0, sizeof(sTower));
+}
+
+// The self-tests' clock for a queued command's wait (NULL: the platform's again).
+void TowerLegends_TestSetClock(u32 (*clock)(void))
+{
+    sTowerClock = clock != NULL ? clock : MpBridge_Milliseconds;
 }
 
 // The held items a solo floor saves before its battle and gives back after it (the native self-tests).
