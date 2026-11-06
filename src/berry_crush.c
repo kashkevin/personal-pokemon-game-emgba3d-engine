@@ -1499,6 +1499,15 @@ static void UpdateInputEffects(struct BerryCrushGame *game, struct BerryCrushGam
                 gfx->sparkleSprites[i]->callback = SpriteCB_Sparkle_Init;
                 gfx->sparkleSprites[i]->x = sSparkleCoords[i][0] + 120;
                 gfx->sparkleSprites[i]->y = sSparkleCoords[i][1] + 136 - (yModifier * 4);
+#ifdef PORTABLE
+                // xModifier is 0 one time in three: the GBA's division by zero gives INT_MAX (INT_MIN below 0), and the
+                // sum wraps to the coordinate less 1 (the coordinate itself) in the s16; x86 traps, and fault_compat.c
+                // substituted the same (UBSan; KNOWN_ISSUES MS-207)
+                if (xModifier == 0)
+                    gfx->sparkleSprites[i]->x2 = sSparkleCoords[i][0] > 0 ? sSparkleCoords[i][0] - 1 : sSparkleCoords[i][0];
+                else
+#endif
+#line 1495 // gba-line
                 gfx->sparkleSprites[i]->x2 = sSparkleCoords[i][0] + (sSparkleCoords[i][0] / (xModifier * 4));
                 gfx->sparkleSprites[i]->y2 = sSparkleCoords[i][1];
                 if (linkState->bigSparkle)

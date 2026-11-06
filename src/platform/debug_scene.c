@@ -325,7 +325,7 @@ static void BattleScriptTick(void)
 #endif
 
 // PKMN_DEBUG_DIALOG=name[:frame]  (with the field scene): runs one of the game's own scripts (rescue = Birch's call on Route 101,
-// boy, youngster, sign, bag) once the field has settled (or at game frame `frame`), and logs, every game frame in which
+// boy, youngster, sign, bag, save = an attendant's save before a challenge) once the field has settled (or at game frame `frame`), and logs, every game frame in which
 // anything changed, the line "dialog F: ..." with the script's position (offset into the map's script data and the mode), the
 // window 0 text printer (state, offset into the string, delay), the keys of the frame (held/new), the Native UI's view of the
 // window (printed offset, waiting, the page the 3D box would draw). Written for the Update 28 dialogue bug; see
@@ -422,6 +422,7 @@ static void DialogTick(void)
     extern const u8 MauvilleCity_GameCorner_EventScript_ShinyCharmClerk[], MauvilleCity_Mart_EventScript_MegaStoneDealer[],
         MauvilleCity_GameCorner_EventScript_CoinsClerk[], MauvilleCity_GameCorner_EventScript_Buy5000Coins[],
         MauvilleCity_GameCorner_EventScript_Buy500Coins[];
+    extern const u8 Common_EventScript_SaveGame[];
     static const struct { const char *name; const u8 *script; } scripts[] = {
         {"rescue", Route101_EventScript_StartBirchRescue}, {"boy", Route101_EventScript_Boy}, {"youngster", Route101_EventScript_Youngster},
         {"sign", Route101_EventScript_RouteSign}, {"bag", Route101_EventScript_BirchsBag},
@@ -429,6 +430,9 @@ static void DialogTick(void)
         {"prizes", MauvilleCity_GameCorner_EventScript_ShinyCharmClerk}, {"dealer", MauvilleCity_Mart_EventScript_MegaStoneDealer},
         {"coinclerk", MauvilleCity_GameCorner_EventScript_CoinsClerk}, {"pack5000", MauvilleCity_GameCorner_EventScript_Buy5000Coins},
         {"pack500", MauvilleCity_GameCorner_EventScript_Buy500Coins},
+        // the save an attendant asks for before a challenge or a link (the Battle Frontier's and Battle Tents' lobbies, the
+        // Cable Club, the minigames, Trainer Hill...): the save dialog with no START menu open (KNOWN_ISSUES MS-206)
+        {"save", Common_EventScript_SaveGame},
     };
     static struct { const u8 *pos; int mode, status, state, delay; unsigned printed; bool waiting, printer; char page[200]; u16 held, newk; } prev;
     const char *value;

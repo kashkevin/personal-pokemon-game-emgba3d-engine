@@ -253,6 +253,11 @@ int AddWindowWithoutTileMap(const struct WindowTemplate *template)
 
 void RemoveWindow(u32 windowId)
 {
+#ifdef PORTABLE
+    if (windowId >= WINDOWS_MAX)
+        return;
+#endif
+#line 248 // gba-line
     u32 bgLayer = gWindows[windowId].window.bg;
 #ifdef ENABLE_NATIVE_UI
     TextPrinter_NativeUiForgetWindow(windowId);
@@ -319,6 +324,11 @@ void FreeAllWindowBuffers(void)
 
 void CopyWindowToVram(u32 windowId, u32 mode)
 {
+#ifdef PORTABLE
+    if (windowId >= WINDOWS_MAX)
+        return;
+#endif
+#line 310 // gba-line
     struct Window windowLocal = gWindows[windowId];
     u16 windowSize = 32 * (windowLocal.window.width * windowLocal.window.height);
 
@@ -339,6 +349,11 @@ void CopyWindowToVram(u32 windowId, u32 mode)
 
 void CopyWindowRectToVram(u32 windowId, u32 mode, u32 x, u32 y, u32 w, u32 h)
 {
+#ifdef PORTABLE
+    if (windowId >= WINDOWS_MAX)
+        return;
+#endif
+#line 330 // gba-line
     struct Window windowLocal;
     int rectSize;
     int rectPos;
@@ -395,6 +410,11 @@ void PutWindowTilemap(u32 windowId)
 
 void PutWindowRectTilemapOverridePalette(u32 windowId, u8 x, u8 y, u8 width, u8 height, u8 palette)
 {
+#ifdef PORTABLE
+    if (windowId >= WINDOWS_MAX)
+        return;
+#endif
+#line 378 // gba-line
     struct Window windowLocal = gWindows[windowId];
     u16 currentRow = windowLocal.window.baseBlock + (y * windowLocal.window.width) + x + GetBgAttribute(windowLocal.window.bg, BG_ATTR_BASETILE);
     int i;
@@ -437,6 +457,11 @@ void ClearWindowTilemap(u32 windowId)
 
 void PutWindowRectTilemap(u32 windowId, u8 x, u8 y, u8 width, u8 height)
 {
+#ifdef PORTABLE
+    if (windowId >= WINDOWS_MAX)
+        return;
+#endif
+#line 415 // gba-line
     struct Window windowLocal = gWindows[windowId];
     u16 currentRow = windowLocal.window.baseBlock + (y * windowLocal.window.width) + x + GetBgAttribute(windowLocal.window.bg, BG_ATTR_BASETILE);
     int i;
@@ -464,6 +489,11 @@ void BlitBitmapToWindow(u32 windowId, const u8 *pixels, u16 x, u16 y, u16 width,
 
 void BlitBitmapRectToWindow(u32 windowId, const u8 *pixels, u16 srcX, u16 srcY, u16 srcWidth, int srcHeight, u16 destX, u16 destY, u16 rectWidth, u16 rectHeight)
 {
+#ifdef PORTABLE
+    if (windowId >= WINDOWS_MAX)
+        return;
+#endif
+#line 442 // gba-line
     struct Bitmap sourceRect;
     struct Bitmap destRect;
 
@@ -496,6 +526,11 @@ static void UNUSED BlitBitmapRectToWindowWithColorKey(u32 windowId, const u8 *pi
 
 void FillWindowPixelRect(u32 windowId, u8 fillValue, u16 x, u16 y, u16 width, u16 height)
 {
+#ifdef PORTABLE
+    if (windowId >= WINDOWS_MAX)
+        return;
+#endif
+#line 474 // gba-line
     struct Bitmap pixelRect;
 
     pixelRect.pixels = gWindows[windowId].tileData;
@@ -507,6 +542,11 @@ void FillWindowPixelRect(u32 windowId, u8 fillValue, u16 x, u16 y, u16 width, u1
 
 void CopyToWindowPixelBuffer(u32 windowId, const void *src, u16 size, u16 tileOffset)
 {
+#ifdef PORTABLE
+    if (windowId >= WINDOWS_MAX)
+        return;
+#endif
+#line 485 // gba-line
     if (size != 0)
         CpuCopy16(src, gWindows[windowId].tileData + (32 * tileOffset), size);
     else
@@ -516,6 +556,15 @@ void CopyToWindowPixelBuffer(u32 windowId, const void *src, u16 size, u16 tileOf
 // Sets all pixels within the window to the fillValue color.
 void FillWindowPixelBuffer(u32 windowId, u8 fillValue)
 {
+#ifdef PORTABLE
+    // WINDOW_NONE (a window never added, e.g. the START menu's when an attendant's script saves): its entry
+    // would be memory past gWindows, which natively differs from the GBA's: in the Windows 3D game the
+    // import table, whose function addresses became a tile buffer to fill (KNOWN_ISSUES MS-206). Skip it,
+    // as PutWindowTilemap does; the same in each function here that takes a window id.
+    if (windowId >= WINDOWS_MAX)
+        return;
+#endif
+#line 494 // gba-line
     int fillSize = gWindows[windowId].window.width * gWindows[windowId].window.height;
     CpuFastFill8(fillValue, gWindows[windowId].tileData, 32 * fillSize);
 #ifdef ENABLE_NATIVE_UI
@@ -548,6 +597,11 @@ void FillWindowPixelBuffer(u32 windowId, u8 fillValue)
 
 void ScrollWindow(u32 windowId, u8 direction, u8 distance, u8 fillValue)
 {
+#ifdef PORTABLE
+    if (windowId >= WINDOWS_MAX)
+        return;
+#endif
+#line 522 // gba-line
     struct WindowTemplate window = gWindows[windowId].window;
     u8 *tileData = gWindows[windowId].tileData;
     u32 fillValue32 = (fillValue << 24) | (fillValue << 16) | (fillValue << 8) | fillValue;
@@ -595,12 +649,22 @@ void ScrollWindow(u32 windowId, u8 direction, u8 distance, u8 fillValue)
 
 void CallWindowFunction(u32 windowId, void ( *func)(u8, u8, u8, u8, u8, u8))
 {
+#ifdef PORTABLE
+    if (windowId >= WINDOWS_MAX)
+        return;
+#endif
+#line 569 // gba-line
     struct WindowTemplate window = gWindows[windowId].window;
     func(window.bg, window.tilemapLeft, window.tilemapTop, window.width, window.height, window.paletteNum);
 }
 
 bool32 SetWindowAttribute(u32 windowId, u32 attributeId, u32 value)
 {
+#ifdef PORTABLE
+    if (windowId >= WINDOWS_MAX)
+        return TRUE; // not set
+#endif
+#line 575 // gba-line
     switch (attributeId)
     {
     case WINDOW_TILEMAP_LEFT:
@@ -628,6 +692,11 @@ bool32 SetWindowAttribute(u32 windowId, u32 attributeId, u32 value)
 
 u32 GetWindowAttribute(u32 windowId, u32 attributeId)
 {
+#ifdef PORTABLE
+    if (windowId >= WINDOWS_MAX)
+        return 0;
+#endif
+#line 602 // gba-line
     switch (attributeId)
     {
     case WINDOW_BG:
@@ -717,6 +786,11 @@ u32 AddWindow8Bit(const struct WindowTemplate *template)
 
 void FillWindowPixelBuffer8Bit(u32 windowId, u8 fillValue)
 {
+#ifdef PORTABLE
+    if (windowId >= WINDOWS_MAX)
+        return;
+#endif
+#line 691 // gba-line
     s32 i;
     s32 size;
 
@@ -727,6 +801,11 @@ void FillWindowPixelBuffer8Bit(u32 windowId, u8 fillValue)
 
 void FillWindowPixelRect8Bit(u32 windowId, u8 fillValue, u16 x, u16 y, u16 width, u16 height)
 {
+#ifdef PORTABLE
+    if (windowId >= WINDOWS_MAX)
+        return;
+#endif
+#line 701 // gba-line
     struct Bitmap pixelRect;
 
     pixelRect.pixels = gWindows[windowId].tileData;
@@ -738,6 +817,11 @@ void FillWindowPixelRect8Bit(u32 windowId, u8 fillValue, u16 x, u16 y, u16 width
 
 void BlitBitmapRectToWindow4BitTo8Bit(u32 windowId, const u8 *pixels, u16 srcX, u16 srcY, u16 srcWidth, int srcHeight, u16 destX, u16 destY, u16 rectWidth, u16 rectHeight, u8 paletteNum)
 {
+#ifdef PORTABLE
+    if (windowId >= WINDOWS_MAX)
+        return;
+#endif
+#line 712 // gba-line
     struct Bitmap sourceRect;
     struct Bitmap destRect;
 
@@ -754,6 +838,11 @@ void BlitBitmapRectToWindow4BitTo8Bit(u32 windowId, const u8 *pixels, u16 srcX, 
 
 void CopyWindowToVram8Bit(u32 windowId, u8 mode)
 {
+#ifdef PORTABLE
+    if (windowId >= WINDOWS_MAX)
+        return;
+#endif
+#line 728 // gba-line
     struct Window *window = &gWindows[windowId];
     u16 windowSize = 64 * (window->window.width * window->window.height);
 
@@ -786,6 +875,11 @@ static u32 GetNumActiveWindowsOnBg8Bit(u32 bgId)
 
 u32 WindowWidthPx(u32 windowId)
 {
+#ifdef PORTABLE
+    if (windowId >= WINDOWS_MAX)
+        return 0;
+#endif
+#line 760 // gba-line
     return gWindows[windowId].window.width * TILE_WIDTH;
 }
 
