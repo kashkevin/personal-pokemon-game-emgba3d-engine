@@ -3070,6 +3070,7 @@ static void StrengthenParty(void)
 #define PLAN_MAX 4096
 #define PLAN_SETTLE 30      /* free field frames that end a target */
 #define PLAN_STALL 600      /* frames past the budget with nothing moving on that make it a hang */
+#define PLAN_PRESSES 12     /* a "press" target's presses at most (the Deoxys triangle needs 11) */
 enum { PLAN_TALK, PLAN_SIGN, PLAN_HIDDEN, PLAN_WARP, PLAN_TRIGGER };
 enum { PLAN_OFF, PLAN_START, PLAN_GO, PLAN_ARRIVE, PLAN_ACT, PLAN_RUN, PLAN_DONE, PLAN_HANG, PLAN_FINISHED };
 static struct PlanTarget
@@ -3077,11 +3078,17 @@ static struct PlanTarget
     char key[80];
     u8 kind, dir, group, num;
     bool8 fight;    /* "fight": a trainer, talked to - its questions answered YES until its battle begins */
+    bool8 find;     /* "find": a fight with the object left where its map's own scene put it (Faraway Island's Mew,
+                       walked into the grass by FindMew: its battle begins only there) - the plan puts the player
+                       beside that place */
+    bool8 press;    /* "press": a fight pressed again where the player stands while no battle has begun, at most
+                       PLAN_PRESSES times (Birth Island's triangle: its puzzle's eleven places, then Deoxys) */
     s16 x, y, arg;
 } sPlanTargets[PLAN_MAX];
 static struct
 {
     int count, first, next, phase, frames, budget, settle, pressLeft, gapLeft, presses, hangFrames;
+    int pressed;            /* a "press" target's presses so far */
     int lastPhase, phaseFrames;
     int lastProgress;
     u32 progress, rng;
@@ -3130,7 +3137,9 @@ static void LoadPlan(const char *path)
         }
         if (index++ < sPlan.first)
             continue;
-        t->fight = strcmp(kind, "fight") == 0;
+        t->find = strcmp(kind, "find") == 0;
+        t->press = strcmp(kind, "press") == 0;
+        t->fight = strcmp(kind, "fight") == 0 || t->find || t->press;
         t->kind = strcmp(kind, "talk") == 0 || t->fight ? PLAN_TALK : strcmp(kind, "sign") == 0 ? PLAN_SIGN
                 : strcmp(kind, "hidden") == 0 ? PLAN_HIDDEN : strcmp(kind, "trigger") == 0 ? PLAN_TRIGGER : PLAN_WARP;
         t->dir = dir[0] == 'U' ? DIR_NORTH : dir[0] == 'D' ? DIR_SOUTH : dir[0] == 'L' ? DIR_WEST : DIR_EAST;
@@ -3281,6 +3290,7 @@ static void PlanGo(void)
     for (u32 i = 0; i < ITEMS_COUNT; i++)
         sPlan.bagBefore[i] = CountTotalItemQuantityInBag(i);
     PlanResetRun();
+    sPlan.pressed = 0;
     TestLog("Battle env test: plan target %d %s begin", sPlan.first + sPlan.next, t->key);
     /* the place itself through DioramaBattleEnvTest_TakeWarpCoords: a warp's own coordinates are s8 (Route 123 is 140
        wide, Route 119 140 high; past 127 the game put the player in the map's middle) */
@@ -3311,8 +3321,14 @@ static void PlanArrive(void)
             {
                 own = &events->objectEvents[i];
                 hideFlag = own->flagId;
-                TryMoveObjectEventToMapCoords(t->arg, t->num, t->group, own->x, own->y);  /* it adds MAP_OFFSET itself */
+                if (!t->find)
+                    TryMoveObjectEventToMapCoords(t->arg, t->num, t->group, own->x, own->y);  /* adds MAP_OFFSET */
             }
+        if (t->find && !TryGetObjectEventIdByLocalIdAndMap(t->arg, t->num, t->group, &objectId))
+            TestLog("Battle env test: plan target %d %s found at %d,%d (its template's place %d,%d)",
+                    sPlan.first + sPlan.next, t->key, gObjectEvents[objectId].currentCoords.x - MAP_OFFSET,
+                    gObjectEvents[objectId].currentCoords.y - MAP_OFFSET, own != NULL ? own->x : -1,
+                    own != NULL ? own->y : -1);
         /* Beside the player, so in view: not there with its flag set means the game hides it now (a story flag, the
            map's script); not there because its map's script put it elsewhere for this story step (setobjectxyperm on
            the map's saved copy of its place: the Weather Institute's people while Team Aqua holds it) is "moved";
@@ -3483,6 +3499,20 @@ static void PlanFieldTick(void)
     case PLAN_DONE:
         if (!PlanFieldFree())
             break;
+        if (sPlanTargets[sPlan.next].press && !sPlan.byItself && sPlan.battles == 0 && !sPlan.mapChanged
+         && sPlan.pressed + 1 < PLAN_PRESSES && gSaveBlock1Ptr->pos.x == sPlanTargets[sPlan.next].x
+         && gSaveBlock1Ptr->pos.y == sPlanTargets[sPlan.next].y)
+        {
+            /* pressed, no battle yet: again where the player stands (the object put back beside the player; nothing
+               else is set: the puzzle counts its own presses and the player's steps, none here) */
+            TestLog("Battle env test: plan target %d %s pressed %d, no battle yet: again", sPlan.first + sPlan.next,
+                    sPlanTargets[sPlan.next].key, ++sPlan.pressed);
+            UnfreezeObjectEvents();
+            PlanResetRun();
+            sPlan.settle = 0;
+            sPlan.phase = PLAN_ARRIVE;
+            break;
+        }
         if (sPlan.byItself && !sPlan.again && sPlan.battles == 0 && !sPlan.mapChanged)
         {
             /* a scene of the map's own ran first (its variable said it was due) and the target never had its turn:

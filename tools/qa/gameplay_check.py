@@ -25,11 +25,14 @@ A target that keeps the field for longer than the plan's budget is a hang: pictu
 next target.
 
 --static-encounters runs instead the reset-guarded static encounters (KNOWN_ISSUES MS-156: the Kecleons of Routes 119
-and 120, New Mauville's Voltorbs, Aqua Hideout's Electrodes, the Regis, Sky Pillar's Rayquaza, Lugia): each talked to
-with its questions answered YES until its battle begins (the Devon Scope used), the story state they need set in memory
-(the Devon Scope in the bag; VAR_SKY_PILLAR_STATE 2, Rayquaza back on the pillar), and each must start its battle: a
-save no world has enrolled meets them as ordinary battles (an enrolled one asks its world's reset admission first). A target with no tile to stand on is listed as blocked, with the reason. The report:
-OUT/gameplay_check.json; exit 0 when every visited target passed.
+and 120, New Mauville's Voltorbs, Aqua Hideout's Electrodes, the Regis, Sky Pillar's Rayquaza, Lugia, Faraway Island's
+Mew, Birth Island's Deoxys): each talked to with its questions answered YES until its battle begins (the Devon Scope
+used), the story state they need set in memory (the Devon Scope, the Old Sea Map and the Aurora Ticket in the bag; the
+ship to Faraway Island enabled; VAR_SKY_PILLAR_STATE 2, Rayquaza back on the pillar), and each must start its battle: a
+save no world has enrolled meets them as ordinary battles (an enrolled one asks its world's reset admission first). Mew
+is found where its island's own scene hides it, in the grass (STATIC_FIND); Birth Island's triangle is pressed in each
+place it moves to until Deoxys appears (STATIC_PRESS). A target with no tile to stand on is listed as blocked, with the
+reason. The report: OUT/gameplay_check.json; exit 0 when every visited target passed.
 """
 import argparse
 import collections
@@ -190,13 +193,68 @@ def beside(tiles, grid, x, y, occupied, elevation=None, prefer=None, required=No
     return None
 
 
-# Reset-guarded static encounters --static-encounters does not run (each needs more than a talk): their reason
+# Reset-guarded static encounters --static-encounters does not run as targets of their own: their reason
 STATIC_NOT_RUN = {
-    "object:MAP_BIRTH_ISLAND_EXTERIOR:1": "the triangle's puzzle: pressed in its ten places in turn before Deoxys "
-                                          "appears (DoDeoxysRockInteraction)",
-    "object:MAP_BIRTH_ISLAND_EXTERIOR:2": "Deoxys appears only after the triangle's puzzle",
-    "object:MAP_FARAWAY_ISLAND_INTERIOR:1": "Mew hides in the grass until the player walks onto it (FindMew)",
+    "object:MAP_BIRTH_ISLAND_EXTERIOR:2": "Deoxys appears at the triangle's last press: its battle is the triangle's "
+                                          "target's (STATIC_PRESS)",
 }
+# Reset-guarded static encounters found where their map's own scene puts them, not at their template's place (the
+# driver's "find": the object left there, the player put beside it): the offset from the template's place. Faraway
+# Island's Mew: FindMew walks it three steps north into the grass as the player arrives, and its battle begins only in
+# the grass (MultiplayerStaticReset_CaptureMew); a player walks it down there.
+STATIC_FIND = {
+    "object:MAP_FARAWAY_ISLAND_INTERIOR:1": (0, -3),
+}
+# Reset-guarded static encounters pressed again while no battle has begun (the driver's "press", at most 12 presses,
+# the object put back beside the player each time): Birth Island's triangle moves to the next of its eleven places at
+# each press (DoDeoxysRockInteraction) and Deoxys appears at the last; the puzzle counts the player's steps between
+# presses, none here.
+STATIC_PRESS = {"object:MAP_BIRTH_ISLAND_EXTERIOR:1"}
+
+
+def c_constants(paths):
+    """{name: value} of the #define'd integer constants in these headers whose definition is arithmetic of numbers and
+    other such constants (flags.h's FLAG_ENABLE_SHIP_FARAWAY_ISLAND is (SYSTEM_FLAGS + 0x76), SYSTEM_FLAGS
+    (TRAINER_FLAGS_END + 1), ...); Emerald's branch of an `#if IS_FRLG` (FireRed's definitions skipped)."""
+    raw, skipping = {}, []      # skipping: for each open conditional, whether it is FireRed's branch
+    for path in paths:
+        for line in open(path, encoding="utf-8"):
+            line = line.split("//")[0].strip()
+            if line.startswith(("#if", "#ifdef", "#ifndef")):
+                skipping.append(line.split(None, 1)[1:] == ["IS_FRLG"])
+                continue
+            if line.startswith("#else"):     # Emerald's branch after FireRed's; both branches of any other
+                if skipping:
+                    skipping[-1] = False
+                continue
+            if line.startswith("#endif"):
+                if skipping:
+                    skipping.pop()
+                continue
+            if any(skipping):
+                continue
+            match = re.match(r"^#define\s+([A-Z_][A-Z0-9_]*)\s+(.+)$", line)
+            if match and "(" not in match.group(1):
+                raw[match.group(1)] = match.group(2).strip()
+    values = {}
+
+    def value(name, seen=()):
+        if name in values:
+            return values[name]
+        if name not in raw or name in seen:
+            raise KeyError(name)
+        expression = re.sub(r"[A-Z_][A-Z0-9_]*", lambda m: str(value(m.group(0), seen + (name,))), raw[name])
+        if not re.fullmatch(r"[0-9xA-Fa-f+\-*() ]+", expression):
+            raise KeyError(name)
+        values[name] = eval(expression, {"__builtins__": {}})      # numbers and + - * ( ) only (checked above)
+        return values[name]
+
+    for name in raw:
+        try:
+            value(name)
+        except (KeyError, SyntaxError):
+            pass
+    return values
 
 
 def plan_targets(root, inventory, kinds, maps_filter=None, static=False):
@@ -260,24 +318,29 @@ def plan_targets(root, inventory, kinds, maps_filter=None, static=False):
                 blocked.append(dict(key=item["key"], kind=kind, map=m["id"], reason=STATIC_NOT_RUN.get(item["key"], (
                     "a reset-guarded static encounter (MultiplayerStaticReset; a save no world has enrolled meets "
                     "it as an ordinary battle): its battle needs story state a new character lacks (the Devon "
-                    "Scope, Rayquaza back on Sky Pillar); run by --static-encounters with that state (KNOWN_ISSUES "
-                    "MS-156)"))))
+                    "Scope, Rayquaza back on Sky Pillar, the Old Sea Map and its ship); run by --static-encounters "
+                    "with that state (KNOWN_ISSUES MS-156)"))))
                 continue
             if static and not item.get("needs_server"):
                 continue
             own = {(obj.get("x"), obj.get("y"))}
+            # where the player meets it: its template's place, or where its map's own scene puts it (STATIC_FIND)
+            dx, dy = STATIC_FIND.get(item["key"], (0, 0)) if static else (0, 0)
+            ox, oy = obj.get("x") + dx, obj.get("y") + dy
             # its elevation is its tile's once in the game (ObjectEventUpdateElevation), the template's only on an
             # any-elevation tile: Route 134's Marley (template 1) stands on shallow water (3), walked to, not surfed
-            under = tiles.at(grid, obj.get("x"), obj.get("y"))
+            under = tiles.at(grid, ox, oy)
             elevation = under[1] if under is not None and under[1] not in (0, 15) else obj.get("elevation")
-            place = free_first(lambda busy: beside(tiles, grid, obj.get("x"), obj.get("y"), busy - own, elevation,
+            place = free_first(lambda busy: beside(tiles, grid, ox, oy, busy - own, elevation,
                                                    prefer=FACING.get(obj.get("movement_type"))))
             expect = {"battle": True} if static else {}
             if kind == "trainer":
                 expect["trainers"] = sorted({trainer_ids[b[w]] for b in item.get("battles", ())
                                              for w in ("trainer", "partner") if b.get(w) in trainer_ids})
             # a static encounter's questions answered YES until its battle begins (the Devon Scope used), as a fight's
-            add(item["key"], kind, place, "fight" if kind == "trainer" or static else "talk", item["local"], expect)
+            action = ("find" if item["key"] in STATIC_FIND else "press" if item["key"] in STATIC_PRESS else "fight") \
+                if static else "fight" if kind == "trainer" else "talk"
+            add(item["key"], kind, place, action, item["local"], expect)
         for sign in m["signs"] if "sign" in kinds else ():
             event = data["bg_events"][sign["index"]]
             place = free_first(lambda busy: beside(tiles, grid, sign["x"], sign["y"], busy, event.get("elevation"),
@@ -608,10 +671,16 @@ def main():
         targets, blocked = plan_targets(ROOT, inventory_tool.inventory(ROOT), kinds, args.maps,
                                         static=args.static_encounters)
         if args.static_encounters:
-            # the story state they need, in memory: the Devon Scope (the Kecleons), Rayquaza back on Sky Pillar
+            # the story state they need, in memory: the Devon Scope (the Kecleons), Rayquaza back on Sky Pillar, the
+            # Old Sea Map and the ship to Faraway Island (Mew's battle asks both: MultiplayerStaticReset_CaptureMew),
+            # the Aurora Ticket (Birth Island's, as a player who sailed there holds it)
             items = enum_values(os.path.join(ROOT, "include", "constants", "items.h"), "ITEM_")
             variables = defines(os.path.join(ROOT, "include", "constants", "vars.h"), "VAR_")
-            static_state = dict(PKMN_TEST_BAG=f"{items['ITEM_DEVON_SCOPE']}:1",
+            flags = c_constants([os.path.join(ROOT, "include", "constants", name)
+                                 for name in ("opponents.h", "flags.h")])
+            static_state = dict(PKMN_TEST_BAG=",".join(f"{items[name]}:1" for name in (
+                                    "ITEM_DEVON_SCOPE", "ITEM_OLD_SEA_MAP", "ITEM_AURORA_TICKET")),
+                                PKMN_TEST_SET_FLAGS=hex(flags["FLAG_ENABLE_SHIP_FARAWAY_ISLAND"]),
                                 PKMN_TEST_SET_VARS=f"{variables['VAR_SKY_PILLAR_STATE']}:2")
     if args.shards > 1:     # one CI job's part: every shards-th target from the shard-th
         targets = targets[args.shard::args.shards]
