@@ -265,6 +265,23 @@ def seam_art(layout, spec, art, height, ground, ground_px):
     return out, open_s, open_n
 
 
+# A relief's drawing that lies flat (auto_buildings.OVERRIDES "flat"): half a
+# pixel over the ground drawn under it, as a room's floor marks (vb.Decal).
+FLAT = 0.5
+
+
+def columns_cleared(art, ranges):
+    """The drawing with the pixel columns of every [u0, u1) in `ranges`
+    transparent."""
+    out = art.copy()
+    px = out.load()
+    for (u0, u1) in ranges:
+        for u in range(max(0, u0), min(out.width, u1)):
+            for v in range(out.height):
+                px[u, v] = (0, 0, 0, 0)
+    return out
+
+
 def pick_side(art, height):
     """An 8-column tile of the object's own drawn front, for the faces the
     drawing never shows: the longest stretch of columns whose runs end on the
@@ -1054,12 +1071,29 @@ def make_model(spec, layouts, models):
                         drawing = kept
                         relief = dict(relief, back=back)
                         side = pick_side(drawing, height)
-            parts = [vb.Relief("relief", drawing, height, side,
+            # Columns whose front stands at another height, and columns
+            # whose drawing lies flat (auto_buildings.OVERRIDES "steps" and
+            # "flat"): each a Relief of its own columns of the drawing, the
+            # rest the building's.
+            steps, flat = relief.get("steps", ()), relief.get("flat", ())
+            body = drawing
+            if steps or flat:
+                body = columns_cleared(drawing, [cols for cols, _ in steps] + list(flat))
+                side = pick_side(body, height)
+            parts = [vb.Relief("relief", body, height, side,
                                hull=relief.get("hull", 0), bridge=relief.get("bridge", 0),
                                seam=(h * 16, open_s, open_n), flank_tile=flank,
                                seam_x=(spec.get("west", ()), spec.get("east", ())),
                                back=relief.get("back"), fill=relief.get("fill"),
-                               lid=lid)] + roof_parts
+                               lid=lid)]
+            for k, (cols, rise) in enumerate(steps):
+                part = dimensional.masked(drawing, cols)
+                parts.append(vb.Relief("relief_step%d" % k, part, rise, pick_side(part, rise),
+                                       drawn_flanks=True))
+            for k, cols in enumerate(flat):
+                parts.append(vb.Relief("relief_flat%d" % k, dimensional.masked(drawing, cols),
+                                       FLAT, side))
+            parts += roof_parts
             spec["exact"] = exact
         else:
             parts = spec["parts"]()

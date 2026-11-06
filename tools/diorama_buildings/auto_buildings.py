@@ -78,7 +78,13 @@ GENERAL_BUILDING = (set(range(0x008, 0x00D)) | set(range(0x010, 0x015)) | set(ra
 #   "cells": extra (x, y) cells of the map that are the building's;
 #   "drop": cells the search took that are not;
 #   "top": the map row the building starts at (a cliff behind it is not it);
-#   "cols": the map columns (first, last) it stands in (trees beside it).
+#   "cols": the map columns (first, last) it stands in (trees beside it);
+#   "ground": its ground metatiles, where the cells it takes in would make
+#       others the commonest round it;
+#   "steps": [((x0, x1), height)]: map columns (in cells, halves allowed)
+#       whose front stands `height` pixels high, not the facade's;
+#   "flat": [(x0, x1)]: map columns of its cells whose drawing lies flat on
+#       the ground (a railing drawn in the same cells).
 OVERRIDES = {
     # Tall buildings: the drawing is nearly all facade, a sliver of roof.
     ("LilycoveCity", 27, 6): {"facade": 106},           # the department store
@@ -136,7 +142,23 @@ OVERRIDES = {
     # A second storey over the first (V29): the search stopped at the eave
     # between them and laid the upper storey back as roof.
     ("LilycoveCity", 37, 24): {"facade": 64},    # the Cove Lily Motel, its lattice storey
-    ("BattleFrontier_OutsideWest", 19, 17): {"facade": 56},   # the Battle Dome, two rows of windows
+    # The Battle Dome, two rows of windows (V29). Its front curves round at
+    # its ends (V45): past the upper storey, the lower storey and then the
+    # dome's drum, whose foot the drawing draws curving back to the arches'
+    # feet. The search's reach stops short of them, and the model's last
+    # columns stood two storeys high: thin strips of the arches' feet. They
+    # stand as high as the drum is drawn (29 rows, its pale wall and the
+    # outline at its foot), each column at its own foot, so the drum steps
+    # back along that curve, the dome's flank and the arches lying on top;
+    # the railings drawn in the same cells lie flat; and its ground stays the
+    # one its front stands on (the cells taken in run up to the paving).
+    ("BattleFrontier_OutsideWest", 19, 17): {
+        "facade": 56,
+        "cells": ([(13, y) for y in range(10, 17)] + [(14, y) for y in range(9, 17)]
+                  + [(24, y) for y in range(9, 17)] + [(25, y) for y in range(10, 17)]),
+        "steps": [((13.5, 15.5), 29), ((23.5, 25.5), 29)],
+        "flat": [(13.0, 13.5), (25.5, 26.0)],
+        "ground": [0x001, 0x2DA, 0x2DE]},
 }
 # Maps whose doors are cut into the rock round them (Sootopolis's crater):
 # the door search runs on into the rock. Their houses are found by their
@@ -413,6 +435,12 @@ def building_art(map_, cells, ground=None):
     return (x0, y0, w, h), owned, ground, img
 
 
+def art_cols(x0, cols):
+    """Map columns (x0, x1) - in cells, halves allowed - as the pixel columns
+    of a drawing whose first column is map column `x0`."""
+    return tuple(int(round((c - x0) * 16)) for c in cols)
+
+
 def _glassy(c):
     r, g, b = c
     return b - r >= 40 and g - r >= 24 and g >= 112
@@ -531,18 +559,23 @@ def auto_specs(taken, only_map=None):
                      if min(owner[c], key=lambda j: (gap(c, found_here[j][1]["front"]), j)) == k}
             if len(cells) < 2:
                 continue
-            ground = ground_of(map_, cells)
+            over = OVERRIDES.get((data["name"], x, y), {})
+            ground = list(over["ground"]) if "ground" in over else ground_of(map_, cells)
             body_top = min(c[1] for c in cells)
             cells = cells | north_row(map_, cells, ground)
             for c in cells:
                 done.add((data["layout"], c[0], c[1]))
             (x0, y0, w, h), owned, _, img = building_art(map_, cells, ground)
-            over = OVERRIDES.get((data["name"], x, y), {})
             height = over.get("facade") or facade_height(img, (x - x0) * 16)
             relief = {"height": height, "back": (body_top - y0) * 16, "auto": True}
             band = roof_band(h * 16 - height)
             if band is not None:
                 relief["fill"] = band
+            # map columns as the drawing's pixel columns
+            if "steps" in over:
+                relief["steps"] = [(art_cols(x0, cols), rise) for cols, rise in over["steps"]]
+            if "flat" in over:
+                relief["flat"] = [art_cols(x0, cols) for cols in over["flat"]]
             roof = roof_of(data["name"], (x, y))
             if roof is not None:
                 relief["roof"] = roof

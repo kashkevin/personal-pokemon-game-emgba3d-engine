@@ -945,7 +945,7 @@ class Relief:
 
     def __init__(self, name, art, height, side, hull=0, bridge=0, foot=None, solid=False,
                  back=None, top_tile=None, against=False, seam=None, flank_tile=None,
-                 seam_x=((), ()), fill=None, lid=None):
+                 seam_x=((), ()), fill=None, lid=None, drawn_flanks=False):
         self.name, self.art, self.height, self.side = name, art, height, side
         # `lid` [(x0, x1)], project-owned (dimensional.py): the columns a real
         # roof covers. Their walls stand as before; their top - the drawn roof
@@ -1001,6 +1001,12 @@ class Relief:
         # empty columns, so the solid is the railing's envelope and the
         # texture's own transparency cuts the bars out of it.
         self.hull, self.bridge = hull, bridge
+        # A wall curving back, each column standing at its own foot (the
+        # Battle Dome's drum, auto_buildings.py OVERRIDES "steps"): the
+        # faces between its steps show the drawing, projected - the column
+        # they belong to - not `side`, so seen along the curve it is the wall
+        # the drawing draws, not a comb of the facade's tile.
+        self.drawn_flanks = drawn_flanks
 
     def runs(self):
         W, H = self.art.size
@@ -1174,8 +1180,9 @@ class Relief:
                                        SHADE_EAST if facing > 0 else SHADE_WEST, n + ".flank",
                                        self.flank_tile)
                             continue
-                        if self.hull or (self.foot is not None and not self.solid):
-                            # the end of a railing: the drawn column there, projected
+                        if self.hull or (self.foot is not None and not self.solid) or self.drawn_flanks:
+                            # the end of a railing (or a step of a curving wall):
+                            # the drawn column there, projected
                             col = min(max(u - (1 if facing > 0 else 0), 0), W - 1) + 0.5
                             quad = [(x, -1.0, za), (x, -1.0, zb), (x, t, zb), (x, t, za)]
                             mesh.poly([(q[0], q[1], q[2], col, q[2] - q[1]) for q in quad],

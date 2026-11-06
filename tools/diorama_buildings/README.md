@@ -93,6 +93,20 @@ gradenGnostic/pokeemerald-multiplatform (MIT) for the logic it reuses.
   `LANDMARKS` in `auto_buildings.py` holds buildings with no door on their own
   cells (Trainer Hill), and `OVERRIDES` bounds the landmarks the door search runs
   on from (the Battle Pyramid, the cable car stations, the Trick House).
+* The Battle Dome's curved ends (KNOWN_ISSUES V45; project-owned; tests in
+  `test_auto_buildings.py`): its front curves round at its ends - past the upper storey
+  the lower storey, then the dome's drum, whose foot the drawing draws curving back to
+  the arches' feet - and the search's reach stopped short of them, so the model's last
+  columns stood two storeys high as thin strips of the arches' feet. `OVERRIDES` takes
+  `steps` (map columns whose front stands at another height: each a `Relief` of its own
+  columns of the drawing), `flat` (columns of its cells whose drawing lies flat: a
+  railing drawn in the same cells) and `ground` (where the cells taken in would change
+  it). The Battle Dome takes in its arches' and drum's cells; past the upper storey it
+  stands 29 rows high (the drum's drawn wall), each column at its own foot, so the drum
+  steps back along the curve its foot draws, the dome's flank and the arches lying on
+  top. `voxel_building.py` `Relief` takes `drawn_flanks`: the faces between such steps
+  show the drawing, projected, not the facade's tile. Seen from the side the drum shows
+  its one-pixel steps.
 
 The runtime side is `src/diorama/scene/buildings.c` (a port of the 3DS project's
 `3ds_port/src/voxel/voxel_building.c`) and `src/diorama/gl/gl_building_renderer.c`.

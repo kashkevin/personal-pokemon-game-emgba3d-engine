@@ -221,6 +221,32 @@ class RoofBandTests(unittest.TestCase):
         rows = depth_rows((10, 20))
         self.assertTrue(rows and min(rows) >= 10 and max(rows) <= 20)
 
+    def test_a_curving_wall_shows_its_drawing_between_its_steps(self):
+        from PIL import Image
+        import voxel_building as vb
+
+        # two columns of a wall curving back: the second's foot 3 rows up
+        art = Image.new("RGBA", (2, 32), (0, 0, 0, 0))
+        px = art.load()
+        for v in range(4, 30):
+            px[0, v] = (220, 220, 230, 255)
+        for v in range(4, 27):
+            px[1, v] = (220, 220, 230, 255)
+
+        def flanks(**kw):
+            mesh = vb.Mesh()
+            vb.Relief("r", art, 20, vb.Tile(0, 10, 1, 30), **kw).emit(mesh)
+            return [(tri, tag) for (tri, _, tag) in mesh.tris
+                    if ".flank" in tag and all(abs(p[0] - 1.0) < 1e-9 for p in tri)]
+
+        plain = flanks()
+        self.assertTrue(plain and all(tag.endswith(".flank") for _, tag in plain))
+        steps = flanks(drawn_flanks=True)
+        # the step between them: the first column's drawing, projected
+        self.assertTrue(steps and all(tag.endswith(".flank~proj") for _, tag in steps))
+        self.assertTrue(all(p[3] == 0.5 and abs(p[4] - (p[2] - p[1])) < 1e-9
+                            for tri, _ in steps for p in tri))
+
 
 class LayoutVariantTests(unittest.TestCase):
     """A map whose scripts switch its layout (setmaplayoutindex) keeps its
@@ -286,6 +312,20 @@ class HeightTests(unittest.TestCase):
         self.assertEqual(specs_of("LilycoveCity")["auto_lilycovecity_37_24"]["relief"]["height"], 64)
         dome = specs_of("BattleFrontier_OutsideWest")["auto_battlefrontier_outsidewest_19_17"]
         self.assertEqual(dome["relief"]["height"], 56)   # the Battle Dome
+
+    def test_the_battle_domes_curved_ends_are_its_own(self):
+        dome = specs_of("BattleFrontier_OutsideWest")["auto_battlefrontier_outsidewest_19_17"]
+        x, y, w, h = dome["rect"]
+        cells = {(x + i, y + j) for (i, j) in dome["owned"]}
+        # the arches' feet and the drum each side, past the search's reach
+        self.assertEqual((x, w), (13, 13))
+        self.assertTrue({(13, 13), (14, 16), (24, 16), (25, 13)} <= cells)
+        # past the upper storey (pixel columns 40-168) they stand as high as
+        # the drum is drawn; the railings in the same cells lie flat
+        self.assertEqual(dome["relief"]["steps"], [((8, 40), 29), ((168, 200), 29)])
+        self.assertEqual(dome["relief"]["flat"], [(0, 8), (200, 208)])
+        # its ground is still the one its front stands on, not the paving
+        self.assertEqual(dome["ground"], [0x001, 0x2DA, 0x2DE])
 
     def test_the_glass_workshop_is_its_own_cells(self):
         shop = specs_of("Route113")["auto_route113_33_5"]
