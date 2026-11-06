@@ -1106,7 +1106,7 @@ static bool AtlasSlotDiffers(const u32 *a, const u32 *b, u16 slot)
  * drawn again from nothing into scratch atlases (DioramaAtlas_UpdateDirty with nothing present) and compared with the
  * three atlases, in memory and in their textures (read back), and with its two masks: a difference would be art a
  * redraw of only some regions or slots left stale. Slow; logs each slot that differs and a running count. The masks of
- * the slots in view are left as drawn again.
+ * the slots in view are left as drawn again. A map's first frame is not compared (below).
  */
 static void CheckAtlas(const struct DioramaSceneSnapshot *snapshot)
 {
@@ -1118,6 +1118,8 @@ static void CheckAtlas(const struct DioramaSceneSnapshot *snapshot)
     static unsigned sChecks;
     static unsigned sCompared;
     static unsigned sDiffered;
+    static unsigned sSkipped;
+    static u32 sCheckedMapGeneration;
     const u32 *atlases[3] = {sAtlasPixels, sBaseAtlasPixels, sForegroundAtlasPixels};
     const GLuint textures[3] = {sAtlasTexture.id, sBaseAtlasTexture.id, sForegroundAtlasTexture.id};
     static const char *const sNames[3] = {"whole", "lower", "upper"};
@@ -1128,6 +1130,15 @@ static void CheckAtlas(const struct DioramaSceneSnapshot *snapshot)
 
     if (!AtlasCheckEnabled())
         return;
+    /* A map's first frame is not compared: the game copies a connected map's secondary tiles to video memory a frame
+     * after the map changes, so a redraw from that frame's tiles draws the last map's, while the atlas holds the slots
+     * the map's tileset was drawn into as a neighbouring page (the next frame redraws what the copy changed). */
+    if (snapshot->mapGeneration != sCheckedMapGeneration)
+    {
+        sCheckedMapGeneration = snapshot->mapGeneration;
+        sSkipped++;
+        return;
+    }
     for (k = 0; k < 3; k++)
     {
         if (sScratch[k] == NULL)
@@ -1184,7 +1195,8 @@ static void CheckAtlas(const struct DioramaSceneSnapshot *snapshot)
     sDiffered += differed;
     sChecks++;
     if (differed != 0 || (sChecks & 0x3F) == 1)
-        SDL_Log("Diorama: atlas check: %u checks, %u slots compared, %u differed", sChecks, sCompared, sDiffered);
+        SDL_Log("Diorama: atlas check: %u checks, %u slots compared, %u differed (%u maps' first frames not compared)",
+                sChecks, sCompared, sDiffered, sSkipped);
 }
 
 /* Returns true when the atlases changed (rebuilt, or slots updated). */
@@ -1309,6 +1321,10 @@ static bool EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
         if ((sVisibleMetatiles[i / 8] & (1 << (i % 8)))
          && sCutoutBaseMetatiles[i] != sPreviousCutoutBaseMetatiles[i])
             sForcedMetatiles[i / 8] |= 1 << (i % 8);
+    /* A slot whose cells are out of view when its tiles move on (the sea's animation by the grid's edge) is drawn again
+     * when they come back, not kept with the earlier frame (KNOWN_ISSUES MS-82; PKMN_DIORAMA_ATLAS_CHECK found it). */
+    if (!reset && animationChanged)
+        DioramaAtlas_ForgetHiddenDirty(sDirtyAtlasTiles, sVisibleMetatiles, sPresentMetatiles);
     changed = DioramaAtlas_UpdateDirty(snapshot, sCutoutBaseMetatiles,
                                        reset ? NULL : sDirtyAtlasTiles,
                                        reset ? NULL : sForcedMetatiles,

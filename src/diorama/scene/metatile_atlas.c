@@ -29,6 +29,13 @@ static uint32_t sDrawnSignature;
 /* The drawn signature's parts (DioramaAtlas_SharedSignature, DioramaAtlas_RegionSignature). */
 static uint32_t sSharedSignature;
 static uint32_t sRegionSignature[1 + DIORAMA_NEIGHBOUR_PAGES];
+/* What each slot was last drawn from (DioramaAtlas_ForgetHiddenDirty, KNOWN_ISSUES MS-82): its cell's tile entries and
+ * page, and those of the cell its lower layer was drawn from (sSlotHasBase). */
+static uint16_t sSlotEntries[DIORAMA_ATLAS_SLOT_COUNT][DIORAMA_METATILE_ENTRY_COUNT];
+static uint8_t sSlotPage[DIORAMA_ATLAS_SLOT_COUNT];
+static uint16_t sSlotBaseEntries[DIORAMA_ATLAS_SLOT_COUNT][DIORAMA_METATILE_ENTRY_COUNT];
+static uint8_t sSlotBasePage[DIORAMA_ATLAS_SLOT_COUNT];
+static bool sSlotHasBase[DIORAMA_ATLAS_SLOT_COUNT];
 
 uint8_t DioramaMetatile_DecodePixel(const uint8_t *tileGraphics, uint16_t tileEntry,
                                     uint8_t x, uint8_t y)
@@ -642,9 +649,8 @@ static bool HasBit(const uint8_t *bits, uint16_t slot)
     return (bits[slot / 8] & (1 << (slot % 8))) != 0;
 }
 
-/* Whether a cell's drawing uses a dirty tile of the snapshot's: a page's own
- * tiles (512 on) never change. */
-static bool EntriesUseDirtyTile(const struct DioramaCellSnapshot *cell, const uint8_t *dirtyTiles)
+/* Whether tile entries of a page's cell use a dirty tile of the snapshot's: a page's own tiles (512 on) never change. */
+static bool TileEntriesUseDirtyTile(const uint16_t *tileEntries, uint8_t atlasPage, const uint8_t *dirtyTiles)
 {
     int i;
 
@@ -652,14 +658,56 @@ static bool EntriesUseDirtyTile(const struct DioramaCellSnapshot *cell, const ui
         return false;
     for (i = 0; i < DIORAMA_METATILE_ENTRY_COUNT; i++)
     {
-        uint16_t tileId = cell->tileEntries[i] & TILE_ID_MASK;
+        uint16_t tileId = tileEntries[i] & TILE_ID_MASK;
 
-        if (cell->atlasPage != 0 && tileId >= DIORAMA_PAGE_FIRST_TILE)
+        if (atlasPage != 0 && tileId >= DIORAMA_PAGE_FIRST_TILE)
             continue;
         if (dirtyTiles[tileId / 8] & (1 << (tileId % 8)))
             return true;
     }
     return false;
+}
+
+/* Whether a cell's drawing uses a dirty tile of the snapshot's. */
+static bool EntriesUseDirtyTile(const struct DioramaCellSnapshot *cell, const uint8_t *dirtyTiles)
+{
+    return TileEntriesUseDirtyTile(cell->tileEntries, cell->atlasPage, dirtyTiles);
+}
+
+/* What a slot is drawn from, kept for DioramaAtlas_ForgetHiddenDirty (baseCell NULL: no lower layer of another cell). */
+static void RememberSlot(uint16_t slot, const struct DioramaCellSnapshot *cell, const struct DioramaCellSnapshot *baseCell)
+{
+    memcpy(sSlotEntries[slot], cell->tileEntries, sizeof(sSlotEntries[slot]));
+    sSlotPage[slot] = cell->atlasPage;
+    sSlotHasBase[slot] = baseCell != NULL;
+    if (baseCell != NULL)
+    {
+        memcpy(sSlotBaseEntries[slot], baseCell->tileEntries, sizeof(sSlotBaseEntries[slot]));
+        sSlotBasePage[slot] = baseCell->atlasPage;
+    }
+}
+
+unsigned DioramaAtlas_ForgetHiddenDirty(const uint8_t *dirtyTiles, const uint8_t *visibleSlots, uint8_t *presentSlots)
+{
+    unsigned forgotten = 0;
+    unsigned slot;
+
+    if (dirtyTiles == NULL)
+        return 0;
+    for (slot = 0; slot < DIORAMA_ATLAS_SLOT_COUNT; slot++)
+    {
+        uint8_t bit = (uint8_t)(1u << (slot % 8));
+
+        if (!(presentSlots[slot / 8] & bit) || (visibleSlots[slot / 8] & bit))
+            continue;
+        if (TileEntriesUseDirtyTile(sSlotEntries[slot], sSlotPage[slot], dirtyTiles)
+         || (sSlotHasBase[slot] && TileEntriesUseDirtyTile(sSlotBaseEntries[slot], sSlotBasePage[slot], dirtyTiles)))
+        {
+            presentSlots[slot / 8] &= (uint8_t)~bit;
+            forgotten++;
+        }
+    }
+    return forgotten;
 }
 
 /* The slot's box: the metatile, its edge pixels repeated in the gutter around it (a row at a time, MS-118). */
@@ -826,11 +874,13 @@ bool DioramaAtlas_UpdateDirty(const struct DioramaSceneSnapshot *snapshot,
                     metatilePixels[pixel] = 0;
             BlitWithGutter(foregroundAtlasPixels, slot, metatilePixels);
             DioramaMetatile_BuildAlphaMask(metatilePixels, sForegroundAlpha[slot]);
+            RememberSlot(slot, cell, baseCell);
         }
         else
         {
             DrawSlotLayers(slot, &art, cell->tileEntries, PassPalettes_For(&palettes, art.fadedPalette),
                            atlasPixels, baseAtlasPixels, foregroundAtlasPixels);
+            RememberSlot(slot, cell, NULL);
         }
         presentSlots[slot / 8] |= 1 << (slot % 8);
         if (updatedSlots != NULL)
@@ -855,6 +905,7 @@ bool DioramaAtlas_UpdateDirty(const struct DioramaSceneSnapshot *snapshot,
 
             DrawSlotLayers(slot, &art, rock.tileEntries, PassPalettes_For(&palettes, art.fadedPalette),
                            atlasPixels, baseAtlasPixels, foregroundAtlasPixels);
+            RememberSlot(slot, &rock, NULL);
             presentSlots[slot / 8] |= 1 << (slot % 8);
             if (updatedSlots != NULL)
                 updatedSlots[slot / 8] |= 1 << (slot % 8);

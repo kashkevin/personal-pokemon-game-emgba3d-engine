@@ -199,6 +199,13 @@ bool DioramaAtlas_UpdateDirty(const struct DioramaSceneSnapshot *snapshot,
                               uint32_t *atlasPixels, uint32_t *baseAtlasPixels,
                               uint32_t *foregroundAtlasPixels, uint8_t *presentSlots,
                               uint8_t *updatedSlots);
+/*
+ * A slot present but none of whose cells is in view (not in visibleSlots, indexed by slot) when a tile it was drawn
+ * from changed (dirtyTiles: an animation's step while its cells were out of view) is no longer present, so it is drawn
+ * again when they come back: before, it showed the animation's earlier frame until the next step (KNOWN_ISSUES MS-82,
+ * found by PKMN_DIORAMA_ATLAS_CHECK). Its lower layer's cell counts too. Returns how many were forgotten.
+ */
+unsigned DioramaAtlas_ForgetHiddenDirty(const uint8_t *dirtyTiles, const uint8_t *visibleSlots, uint8_t *presentSlots);
 struct DioramaAtlasUv DioramaAtlas_GetUv(uint16_t slot);
 void DioramaAtlas_GetForegroundAlphaMask(uint16_t slot,
                                          uint16_t rows[DIORAMA_METATILE_SIZE]);

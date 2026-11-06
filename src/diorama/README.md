@@ -481,7 +481,14 @@ trees and open routes have neither.
   as before; `PKMN_DIORAMA_ATLAS_CHECK=1` draws every slot in view again from
   nothing after each atlas sync and compares it with the three atlases, in
   memory and in their textures (read back), and with its masks (`atlas
-  check: N checks, M slots compared, K differed`).
+  check: N checks, M slots compared, K differed`; a map's first frame is not
+  compared: the game copies a connected map's secondary tiles to video memory
+  a frame after the map changes). The check found, before this change too, a
+  slot whose cells were out of view when its tiles moved on (the sea's
+  animation by the grid's edge) kept the earlier frame when they came back,
+  until the next step: such a slot is now forgotten
+  (`DioramaAtlas_ForgetHiddenDirty`, from what each slot was drawn from) and
+  drawn again when its cells come back.
 * Development aids: `PKMN_PERF_FRAME_LOG=path` (a CSV line per presented frame:
   frame time, main thread and program CPU time, chunks rebuilt, vertices,
   trees), `PKMN_DIORAMA_PROFILE_FINISH=1` (each profiled section finishes its

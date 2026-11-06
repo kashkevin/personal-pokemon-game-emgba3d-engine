@@ -688,6 +688,78 @@ static void TestRegionSignaturesAndClear(void)
 }
 
 /*
+ * KNOWN_ISSUES MS-82: a slot whose cells are out of view when a tile it was drawn from changes is no longer present
+ * (drawn again when they come back); one in view, one whose tiles did not change and a page's own tiles stay.
+ */
+static void TestForgetHiddenDirty(void)
+{
+    static struct DioramaSceneSnapshot snapshot;
+    static uint32_t atlas[DIORAMA_ATLAS_PIXEL_COUNT];
+    static uint32_t baseAtlas[DIORAMA_ATLAS_PIXEL_COUNT];
+    static uint32_t foregroundAtlas[DIORAMA_ATLAS_PIXEL_COUNT];
+    uint8_t present[DIORAMA_ATLAS_PRESENT_BYTES];
+    uint8_t visible[DIORAMA_ATLAS_PRESENT_BYTES];
+    uint8_t dirty[DIORAMA_ATLAS_DIRTY_TILE_BYTES];
+    uint16_t cutoutBases[DIORAMA_ATLAS_SLOT_COUNT];
+    int i;
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    memset(snapshot.neighbourPages, 0, sizeof(snapshot.neighbourPages));
+    DioramaAtlas_SetPages(&snapshot);
+    /* 20: water (tile 7); 21: grass (tile 8); 22 drawn over 23's lower layer, 23 the sand (tile 9) */
+    snapshot.visibleCellCount = 4;
+    snapshot.cells[0].metatileId = 20;
+    snapshot.cells[1].metatileId = 21;
+    snapshot.cells[2].metatileId = 22;
+    snapshot.cells[3].metatileId = 23;
+    for (i = 0; i < DIORAMA_METATILE_ENTRY_COUNT; i++)
+    {
+        snapshot.cells[0].tileEntries[i] = 7 | (1 << 12);
+        snapshot.cells[1].tileEntries[i] = 8 | (1 << 12);
+        snapshot.cells[2].tileEntries[i] = i < 4 ? 0 : (8 | (1 << 12));
+        snapshot.cells[3].tileEntries[i] = 9 | (1 << 12);
+    }
+    memset(snapshot.tileGraphics + 7 * DIORAMA_TILE_BYTES, 0x11, DIORAMA_TILE_BYTES);
+    memset(snapshot.tileGraphics + 8 * DIORAMA_TILE_BYTES, 0x22, DIORAMA_TILE_BYTES);
+    memset(snapshot.tileGraphics + 9 * DIORAMA_TILE_BYTES, 0x33, DIORAMA_TILE_BYTES);
+    MakeLivePalettes(snapshot.unfadedPalette, snapshot.fadedPalette, Same);
+    for (i = 0; i < DIORAMA_ATLAS_SLOT_COUNT; i++)
+        cutoutBases[i] = DIORAMA_ATLAS_NO_SLOT;
+    cutoutBases[22] = 23;
+    DioramaAtlas_Clear(atlas, present);
+    CHECK(DioramaAtlas_Update(&snapshot, cutoutBases, atlas, baseAtlas, foregroundAtlas, present));
+    for (i = 20; i <= 23; i++)
+        CHECK((present[i / 8] & (1 << (i % 8))) != 0);
+
+    /* the water moves on (tile 7) while only 21 is in view: 20 forgotten, 21 in view and 22, 23 unchanged stay */
+    memset(dirty, 0, sizeof(dirty));
+    dirty[7 / 8] |= 1 << (7 % 8);
+    memset(visible, 0, sizeof(visible));
+    visible[21 / 8] |= 1 << (21 % 8);
+    CHECK(DioramaAtlas_ForgetHiddenDirty(dirty, visible, present) == 1);
+    CHECK((present[20 / 8] & (1 << (20 % 8))) == 0);
+    CHECK((present[21 / 8] & (1 << (21 % 8))) != 0);
+    CHECK((present[22 / 8] & (1 << (22 % 8))) != 0);
+    /* the sand under 22 moves on (tile 9) with nothing in view: 23 and 22 (drawn over 23) forgotten */
+    memset(dirty, 0, sizeof(dirty));
+    dirty[9 / 8] |= 1 << (9 % 8);
+    memset(visible, 0, sizeof(visible));
+    CHECK(DioramaAtlas_ForgetHiddenDirty(dirty, visible, present) == 2);
+    CHECK((present[22 / 8] & (1 << (22 % 8))) == 0);
+    CHECK((present[23 / 8] & (1 << (23 % 8))) == 0);
+    CHECK((present[21 / 8] & (1 << (21 % 8))) != 0);
+    /* in view: left to the update (which draws it again); no dirty tiles: nothing */
+    dirty[8 / 8] |= 1 << (8 % 8);
+    visible[21 / 8] |= 1 << (21 % 8);
+    CHECK(DioramaAtlas_ForgetHiddenDirty(dirty, visible, present) == 0);
+    CHECK(DioramaAtlas_ForgetHiddenDirty(NULL, visible, present) == 0);
+    /* drawn again: present again */
+    CHECK(DioramaAtlas_Update(&snapshot, cutoutBases, atlas, baseAtlas, foregroundAtlas, present));
+    for (i = 20; i <= 23; i++)
+        CHECK((present[i / 8] & (1 << (i % 8))) != 0);
+}
+
+/*
  * KNOWN_ISSUES MS-118: the atlas draws a tile's row at a time with each palette's colours converted once; what it
  * draws must stay what the per-pixel functions give (DioramaMetatile_DecodePixel, DioramaMetatile_ConvertColor).
  */
@@ -931,6 +1003,7 @@ int main(void)
     TestMapPalette();
     TestNeighbourPages();
     TestRegionSignaturesAndClear();
+    TestForgetHiddenDirty();
     puts("metatile atlas tests passed");
     return EXIT_SUCCESS;
 }
