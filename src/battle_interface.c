@@ -2146,6 +2146,17 @@ void UpdateHealthboxAttribute(u8 healthboxSpriteId, struct Pokemon *mon, u8 elem
             exp = GetMonData(mon, MON_DATA_EXP);
             currLevelExp = gExperienceTables[gSpeciesInfo[species].growthRate][level];
             currExpBarValue = exp - currLevelExp;
+#ifdef PORTABLE
+            // level 100 has no next level: the next one's experience was read past the growth rate's row (UBSan;
+            // KNOWN_ISSUES MS-204); its bar is empty, as it was (the experience stops at the level's)
+            if (level >= MAX_LEVEL)
+            {
+                currExpBarValue = 0;
+                maxExpBarValue = 1;
+            }
+            else
+#endif
+#line 2106 // gba-line
             maxExpBarValue = gExperienceTables[gSpeciesInfo[species].growthRate][level + 1] - currLevelExp;
             SetBattleBarStruct(battler, healthboxSpriteId, maxExpBarValue, currExpBarValue, isDoubles);
             MoveBattleBar(battler, healthboxSpriteId, EXP_BAR, 0);

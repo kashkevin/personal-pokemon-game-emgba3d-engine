@@ -1326,6 +1326,12 @@ bool8 ScrCmd_applymovement(struct ScriptContext *ctx)
         gSprites[objEvent->spriteId].animCmdIndex = 0; // Reset start frame of animation
     }
 
+#ifdef PORTABLE
+    // An object not on the map (its flag set, a coordinate trigger's VAR_LAST_TALKED): the lookup gives
+    // OBJECT_EVENTS_COUNT, and the write below went past gObjectEvents (UBSan; KNOWN_ISSUES MS-204)
+    if (GetObjectEventIdByLocalId(localId) < OBJECT_EVENTS_COUNT)
+#endif
+#line 1293 // gba-line
     gObjectEvents[GetObjectEventIdByLocalId(localId)].directionOverwrite = DIR_NONE;
     ScriptMovement_StartObjectMovementScript(localId, gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->location.mapGroup, movementScript);
     sMovingNpcId = localId;
@@ -1347,6 +1353,11 @@ bool8 ScrCmd_applymovementat(struct ScriptContext *ctx)
 
     Script_RequestEffects(SCREFF_V1 | SCREFF_HARDWARE);
 
+#ifdef PORTABLE
+    // as in ScrCmd_applymovement: no write past gObjectEvents for an object not on the map (KNOWN_ISSUES MS-204)
+    if (GetObjectEventIdByLocalId(localId) < OBJECT_EVENTS_COUNT)
+#endif
+#line 1314 // gba-line
     gObjectEvents[GetObjectEventIdByLocalId(localId)].directionOverwrite = DIR_NONE;
     ScriptMovement_StartObjectMovementScript(localId, mapNum, mapGroup, movementScript);
     sMovingNpcId = localId;
