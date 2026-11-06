@@ -3093,12 +3093,45 @@ static void AddPending(int chunkX, int chunkY)
     }
 }
 
+/* Whether a cell (map coordinates) is what it was in the last sync's grid: in view then and now, the same cell resolved
+ * the same, or in view neither then nor now. *index: its grid index now, -1 when it is not in view. */
+static bool CellAsBefore(const struct DioramaSceneSnapshot *snapshot, const struct DioramaResolvedCell *resolvedCells,
+                         const struct TerrainSyncKey *previous, int mapX, int mapY, int *index)
+{
+    int newX = mapX - snapshot->gridOriginX;
+    int newY = mapY - snapshot->gridOriginY;
+    int oldX = mapX - previous->gridOriginX;
+    int oldY = mapY - previous->gridOriginY;
+    int newIndex = newY * DIORAMA_GRID_WIDTH + newX;
+    int oldIndex = oldY * DIORAMA_GRID_WIDTH + oldX;
+    bool inNew = newX >= 0 && newY >= 0 && newX < DIORAMA_GRID_WIDTH && newY < DIORAMA_GRID_HEIGHT
+              && newIndex < snapshot->visibleCellCount
+              && snapshot->cells[newIndex].mapX == mapX && snapshot->cells[newIndex].mapY == mapY;
+    bool inOld = oldX >= 0 && oldY >= 0 && oldX < DIORAMA_GRID_WIDTH && oldY < DIORAMA_GRID_HEIGHT
+              && oldIndex < previous->visibleCellCount
+              && sSyncCells[oldIndex].mapX == mapX && sSyncCells[oldIndex].mapY == mapY;
+
+    *index = inNew ? newIndex : -1;
+    if (inNew != inOld)
+        return false;
+    return !inNew
+        || (memcmp(&snapshot->cells[newIndex], &sSyncCells[oldIndex], sizeof(sSyncCells[0])) == 0
+         && memcmp(&resolvedCells[newIndex], &sSyncResolved[oldIndex], sizeof(sSyncResolved[0])) == 0);
+}
+
 /*
  * After the grid moved and nothing else changed: whether every cell of a
  * chunk's input area is what it was (the same cells, resolved the same, in
  * view then and now), so its input would be built the same and the chunk can
  * stand. Not for a chunk with pixel objects (their anchors are grid indices)
- * or a south facade (it reads cells past the area).
+ * or a south facade (it reads cells past the area). A cell on the area's edge
+ * whose input reads its neighbours - a jump ledge's grounds
+ * (DioramaRules_LedgeGrounds), a detail object's ground
+ * (DioramaProps_GroundMaterial) - needs those past the area the same too: a
+ * sign at the edge of an input (its ground its neighbours') took another
+ * ground when the cell beside it came into the grid, and its chunk stood with
+ * the input it had had (the terrain check's stale chunks on two of Mr.
+ * Briney's sails, KNOWN_ISSUES MS-82).
  */
 static bool RegionUnchanged(const struct DioramaSceneSnapshot *snapshot,
                             const struct DioramaResolvedCell *resolvedCells,
@@ -3113,29 +3146,30 @@ static bool RegionUnchanged(const struct DioramaSceneSnapshot *snapshot,
     for (y = 0; y < DIORAMA_TERRAIN_INPUT_SIZE; y++)
         for (x = 0; x < DIORAMA_TERRAIN_INPUT_SIZE; x++)
         {
-            int mapX = originX + x;
-            int mapY = originY + y;
-            int newX = mapX - snapshot->gridOriginX;
-            int newY = mapY - snapshot->gridOriginY;
-            int oldX = mapX - previous->gridOriginX;
-            int oldY = mapY - previous->gridOriginY;
-            int newIndex = newY * DIORAMA_GRID_WIDTH + newX;
-            int oldIndex = oldY * DIORAMA_GRID_WIDTH + oldX;
-            bool inNew = newX >= 0 && newY >= 0 && newX < DIORAMA_GRID_WIDTH && newY < DIORAMA_GRID_HEIGHT
-                      && newIndex < snapshot->visibleCellCount
-                      && snapshot->cells[newIndex].mapX == mapX && snapshot->cells[newIndex].mapY == mapY;
-            bool inOld = oldX >= 0 && oldY >= 0 && oldX < DIORAMA_GRID_WIDTH && oldY < DIORAMA_GRID_HEIGHT
-                      && oldIndex < previous->visibleCellCount
-                      && sSyncCells[oldIndex].mapX == mapX && sSyncCells[oldIndex].mapY == mapY;
+            int index;
+            int dx;
+            int dy;
 
-            if (inNew != inOld)
+            if (!CellAsBefore(snapshot, resolvedCells, previous, originX + x, originY + y, &index))
                 return false;
-            if (!inNew)
+            if (index < 0)
                 continue;
-            if (resolvedCells[newIndex].structureSouthFacadeRows != 0
-             || memcmp(&snapshot->cells[newIndex], &sSyncCells[oldIndex], sizeof(sSyncCells[0])) != 0
-             || memcmp(&resolvedCells[newIndex], &sSyncResolved[oldIndex], sizeof(sSyncResolved[0])) != 0)
+            if (resolvedCells[index].structureSouthFacadeRows != 0)
                 return false;
+            if ((x != 0 && y != 0 && x != DIORAMA_TERRAIN_INPUT_SIZE - 1 && y != DIORAMA_TERRAIN_INPUT_SIZE - 1)
+             || (resolvedCells[index].shape != DIORAMA_SHAPE_LEDGE
+              && DioramaProps_ForCell(snapshot, &snapshot->cells[index]) == NULL))
+                continue;
+            for (dy = -1; dy <= 1; dy++)
+                for (dx = -1; dx <= 1; dx++)
+                {
+                    int around;
+
+                    if ((x + dx < 0 || y + dy < 0 || x + dx >= DIORAMA_TERRAIN_INPUT_SIZE
+                      || y + dy >= DIORAMA_TERRAIN_INPUT_SIZE)
+                     && !CellAsBefore(snapshot, resolvedCells, previous, originX + x + dx, originY + y + dy, &around))
+                        return false;
+                }
         }
     return true;
 }
