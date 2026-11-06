@@ -542,7 +542,15 @@ static void ApplyColorMap(u8 startPalIndex, u8 numPalettes, s8 colorMapIndex)
         if (MapHasNaturalLight(gMapHeader.mapType))
         {
             // Time-blend
+#ifdef PORTABLE
+            // every palette (32): the GBA's shift by 32 gives 0, so all of them, where x86's gives 1, so none, and the
+            // weather's last step back to its normal colours was never drawn (UBSan; KNOWN_ISSUES MS-205)
+            u32 palettes = (numPalettes >= 32 ? 0xFFFFFFFFu : (1u << numPalettes) - 1) << startPalIndex;
+#else
+#line 545 // gba-line
             u32 palettes = ((1 << numPalettes) - 1) << startPalIndex;
+#endif
+#line 546 // gba-line
             UpdateAltBgPalettes(palettes & PALETTES_BG);
             UpdatePalettesWithTime(palettes);
         }

@@ -5549,7 +5549,15 @@ void InitEasyChatPhrases(void)
 
 static bool8 InitEasyChatScreenWordData(void)
 {
+#ifdef PORTABLE
+    // zeroed: the native UI reads the selected group's word count before any group is chosen, which Alloc left as
+    // whatever the heap held (UBSan: a read far past selectedGroupWords; KNOWN_ISSUES MS-205)
+    sWordData = AllocZeroed(sizeof(*sWordData));
+#else
+#line 5552 // gba-line
     sWordData = Alloc(sizeof(*sWordData));
+#endif
+#line 5553 // gba-line
     if (!sWordData)
         return FALSE;
 
