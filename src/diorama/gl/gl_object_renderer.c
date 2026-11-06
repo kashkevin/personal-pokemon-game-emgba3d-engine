@@ -118,13 +118,15 @@ static int sPlayerItem = -1;
 #define DOOR_HEIGHT 1.25f  /* the door's own metatile and the 4 pixels drawn over it */
 #define DOOR_DUSK 0.5f     /* tiles before it over which a walker darkens */
 #define DOOR_DARK 0.35f
+#define DOOR_LIFT 0.02f    /* a flat opening, over the drawing it lies on */
 
 static struct
 {
     bool on;
+    bool flat;         /* lying on the door's drawing, which lies flat (FindFlatDoor) */
     float west, east;  /* the doorway's columns, world x */
     float north;       /* the north edge of the door's cell, tiles south */
-    float wall;        /* the wall's face, tiles south */
+    float wall;        /* the wall's face, tiles south; a flat door's: where a walker is gone */
     float ground;
     float open;        /* 0-1 */
 } sDoor;
@@ -1471,31 +1473,85 @@ static float ModelPush(struct DioramaSpritePose pose, float halfWidth)
  * opening on the wall the door is drawn on, widening as the door opens, and
  * a walker going through it darkens and is gone into the dark, as on the GBA
  * it goes behind the wall. Ported from the 3DS project's EmitDoor and
- * DoorLight (voxel_entities.c, MIT; see diorama/buildings.h). Only on
- * modelled buildings: the 3DS also lays it flat on an unmodelled building's
- * door cell, whose drawing lies flat there; ours stand upright.
+ * DoorLight (voxel_entities.c, MIT; see diorama/buildings.h). On a modelled
+ * building it stands on the wall; on a door the terrain draws, whose drawing
+ * lies flat (a room's back wall: the Lilycove Department Store's lift, the
+ * S.S. Tidal's and the Abandoned Ship's cabins, the Battle Tents' and the
+ * Battle Frontier's corridors), it lies on that drawing, as the 3DS lays it on
+ * an unmodelled building's door cell (FindFlatDoor; KNOWN_ISSUES V6).
  */
+
+/* The scene's cell at (mapX, mapY) of this snapshot, and its index; NULL when it is not in the grid. */
+static const struct DioramaCellSnapshot *SnapshotCell(const struct DioramaSceneSnapshot *snapshot,
+                                                      int mapX, int mapY, int *index)
+{
+    int gridX = mapX - snapshot->gridOriginX;
+    int gridY = mapY - snapshot->gridOriginY;
+
+    *index = gridY * DIORAMA_GRID_WIDTH + gridX;
+    if (gridX < 0 || gridY < 0 || gridX >= DIORAMA_GRID_WIDTH || gridY >= DIORAMA_GRID_HEIGHT
+     || *index >= snapshot->visibleCellCount
+     || snapshot->cells[*index].mapX != mapX || snapshot->cells[*index].mapY != mapY)
+        return NULL;
+    return &snapshot->cells[*index];
+}
+
+/*
+ * A door no model stands on: the black opening flat on its drawing when every
+ * cell of it - the door's own and the one over it, which the GBA draws its
+ * top half in, across its width - lies flat at the door's ground, no model's.
+ * DOOR_HEIGHT of it from its foot, as on a wall; a walker going in is gone at
+ * the middle of the door's cell, where the GBA hides it.
+ */
+static bool FindFlatDoor(const struct DioramaSceneSnapshot *snapshot,
+                         const struct DioramaResolvedCell *resolvedCells, float ground)
+{
+    for (int column = 0; column < snapshot->doorWidth; column++)
+        for (int row = 0; row < 2; row++)
+        {
+            int index;
+            const struct DioramaCellSnapshot *cell = SnapshotCell(snapshot, snapshot->doorMapX + column,
+                                                                  snapshot->doorMapY - row, &index);
+
+            if (cell == NULL || !(cell->flags & DIORAMA_CELL_SOURCE_VALID)
+             || DioramaBuildings_CellAt(cell->sourceLayoutId, cell->sourceMapX, cell->sourceMapY,
+                                        NULL, NULL, NULL)
+             || resolvedCells[index].shape != DIORAMA_SHAPE_FLAT
+             || fabsf(resolvedCells[index].groundHeight - ground) > 0.05f
+             || resolvedCells[index].topHeight > resolvedCells[index].groundHeight + 0.05f)
+                return false;
+        }
+    sDoor.on = true;
+    sDoor.flat = true;
+    sDoor.west = snapshot->doorMapX - 0.5f;
+    sDoor.east = sDoor.west + snapshot->doorWidth;
+    sDoor.north = snapshot->doorMapY - 0.5f;
+    sDoor.wall = snapshot->doorMapY - DOOR_DEPTH;
+    sDoor.ground = ground;
+    sDoor.open = snapshot->doorLevel >= 3 ? 1.0f : snapshot->doorLevel / 3.0f;
+    return true;
+}
 
 static void FindDoor(const struct DioramaSceneSnapshot *snapshot,
                      const struct DioramaResolvedCell *resolvedCells)
 {
     const struct DioramaCellSnapshot *cell = NULL;
-    int gridX = snapshot->doorMapX - snapshot->gridOriginX;
-    int gridY = snapshot->doorMapY - snapshot->gridOriginY;
-    int index = gridY * DIORAMA_GRID_WIDTH + gridX;
+    int index;
     float front;
 
     sDoor.on = false;
-    if (snapshot->doorLevel == 0 || snapshot->doorWidth == 0 || !DioramaBuildings_IsAvailable()
-     || gridX < 0 || gridY < 0 || gridX >= DIORAMA_GRID_WIDTH || gridY >= DIORAMA_GRID_HEIGHT
-     || index >= snapshot->visibleCellCount)
+    sDoor.flat = false;
+    if (snapshot->doorLevel == 0 || snapshot->doorWidth == 0 || !DioramaBuildings_IsAvailable())
         return;
-    cell = &snapshot->cells[index];
-    if (cell->mapX != snapshot->doorMapX || cell->mapY != snapshot->doorMapY
-     || !(cell->flags & DIORAMA_CELL_SOURCE_VALID)
-     || !DioramaBuildings_CellAt(cell->sourceLayoutId, cell->sourceMapX, cell->sourceMapY,
+    cell = SnapshotCell(snapshot, snapshot->doorMapX, snapshot->doorMapY, &index);
+    if (cell == NULL || !(cell->flags & DIORAMA_CELL_SOURCE_VALID))
+        return;
+    if (!DioramaBuildings_CellAt(cell->sourceLayoutId, cell->sourceMapX, cell->sourceMapY,
                                  NULL, NULL, NULL))
+    {
+        FindFlatDoor(snapshot, resolvedCells, resolvedCells[index].groundHeight);
         return;
+    }
     /* the 3DS's VoxelBuildings_DoorWall: across the middle of the cell, half a tile up */
     if (!DioramaBuildings_FrontAt(cell->sourceLayoutId, cell->sourceMapX, cell->sourceMapY,
                                   cell->sourceMapX + 0.49f, cell->sourceMapX + 0.51f, 0.5f, &front))
@@ -1516,16 +1572,37 @@ static void DrawDoorOpening(void)
     float half = (sDoor.east - sDoor.west) * 0.5f * sDoor.open;
     float z = -(sDoor.wall + DOOR_DEPTH);
     float top = sDoor.ground + DOOR_HEIGHT;
-    const struct ObjectVertex vertices[6] = {
-        {middle - half, sDoor.ground, z, 0, 0},
-        {middle + half, sDoor.ground, z, 1, 0},
-        {middle + half, top, z, 1, 1},
-        {middle - half, sDoor.ground, z, 0, 0},
-        {middle + half, top, z, 1, 1},
-        {middle - half, top, z, 0, 1},
-    };
 
-    UploadAndDraw(vertices);
+    if (sDoor.flat)
+    {
+        /* from the foot of the door's cell, DOOR_HEIGHT north over its drawing */
+        float y = sDoor.ground + DOOR_LIFT;
+        float foot = -(sDoor.north + 1.0f);
+        float head = foot + DOOR_HEIGHT;
+        const struct ObjectVertex flat[6] = {
+            {middle - half, y, foot, 0, 0},
+            {middle + half, y, foot, 1, 0},
+            {middle + half, y, head, 1, 1},
+            {middle - half, y, foot, 0, 0},
+            {middle + half, y, head, 1, 1},
+            {middle - half, y, head, 0, 1},
+        };
+
+        UploadAndDraw(flat);
+        return;
+    }
+    {
+        const struct ObjectVertex vertices[6] = {
+            {middle - half, sDoor.ground, z, 0, 0},
+            {middle + half, sDoor.ground, z, 1, 0},
+            {middle + half, top, z, 1, 1},
+            {middle - half, sDoor.ground, z, 0, 0},
+            {middle + half, top, z, 1, 1},
+            {middle - half, top, z, 0, 1},
+        };
+
+        UploadAndDraw(vertices);
+    }
 }
 
 /* How lit a walker is: 1 away from the doorway, darker as it comes up to it,
