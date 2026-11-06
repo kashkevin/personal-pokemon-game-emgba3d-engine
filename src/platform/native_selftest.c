@@ -777,6 +777,114 @@ int NativeSelfTest_PaletteSlots(void)
 }
 
 // ---------------------------------------------------------------------------
+//   pokeemerald-mp --selftest-missing-window
+//
+// KNOWN_ISSUES MS-206 and MS-211: a window that is not there - WINDOW_NONE (255), what AddWindow gives when all 32 are
+// taken, or a window id never set - must draw nothing. gWindows[255] lies past the 32-entry table, so a drawing call
+// read its "tile data" pointer from whatever the build placed there (in the Windows 3D game the import table: MS-206
+// wrote into SDL2.dll's code and closed). MS-206 guarded window.c's functions; AddTextPrinter had no check, and a
+// text printer for window 255 drew its glyphs through that pointer. Here a window is planted where gWindows[255] would
+// be, its tile data a buffer of ours: printing to window 255, and window.c's fills and blits, must leave it as it was;
+// a real window (0) still takes the text.
+// ---------------------------------------------------------------------------
+
+#include "text.h"
+#include "window.h"
+#include "constants/characters.h"
+
+static int sMwChecks, sMwFailures;
+static u8 ALIGNED(4) sMwTiles[4 * 2 * TILE_SIZE_4BPP];
+static u8 ALIGNED(4) sMwRealTiles[4 * 2 * TILE_SIZE_4BPP];
+static const u8 sMwText[] = {CHAR_A, CHAR_B, CHAR_C, EOS};
+static struct SaveBlock2 sMwSave;
+
+static void ExpectMw(const char *what, bool32 ok)
+{
+    sMwChecks++;
+    if (ok)
+    {
+        printf("ok %s\n", what);
+    }
+    else
+    {
+        sMwFailures++;
+        printf("FAIL %s\n", what);
+    }
+    fflush(stdout);
+}
+
+static bool32 MwTilesAre(const u8 *tiles, u8 value)
+{
+    u32 i;
+
+    for (i = 0; i < sizeof(sMwTiles); i++)
+    {
+        if (tiles[i] != value)
+            return FALSE;
+    }
+    return TRUE;
+}
+
+int NativeSelfTest_MissingWindow(void)
+{
+    const u8 mark = 0x5A;
+    const struct WindowTemplate shape = {.bg = 0, .tilemapLeft = 0, .tilemapTop = 0, .width = 4, .height = 2,
+                                         .paletteNum = 15, .baseBlock = 1};
+    // where gWindows[255] would be: another variable of the program lives there (kept and put back)
+    struct Window *planted = (struct Window *)((uintptr_t)gWindows + WINDOW_NONE * sizeof(struct Window));
+    struct Window kept;
+    u8 bitmap[TILE_SIZE_4BPP];
+
+    memcpy(&kept, planted, sizeof(kept));
+    planted->window = shape;
+    planted->tileData = sMwTiles;
+    if (gSaveBlock2Ptr == NULL)
+        gSaveBlock2Ptr = &sMwSave; // the text code reads the player's text speed (no save is loaded here)
+    InitHeap(gHeap, HEAP_SIZE); // a letter-by-letter printer is allocated from the game heap
+    SetDefaultFontsPointer();
+    DeactivateAllTextPrinters();
+    memset(bitmap, 0x11, sizeof(bitmap));
+    printf("window 255 would be at %p (the table at %p, %u windows)\n", (void *)planted, (void *)gWindows,
+           (unsigned)WINDOWS_MAX);
+    fflush(stdout);
+
+    memset(sMwTiles, mark, sizeof(sMwTiles));
+    ExpectMw("text printed at once to window 255 is refused",
+             AddTextPrinterParameterized(WINDOW_NONE, FONT_NORMAL, sMwText, 0, 1, TEXT_SKIP_DRAW, NULL) == FALSE);
+    ExpectMw("... and draws nothing", MwTilesAre(sMwTiles, mark));
+    memset(sMwTiles, mark, sizeof(sMwTiles));
+    ExpectMw("text printed letter by letter to window 255 is refused",
+             AddTextPrinterParameterized(WINDOW_NONE, FONT_NORMAL, sMwText, 0, 1, 1, NULL) == FALSE);
+    // (not run here: the printers read the player's text speed from a save this test has not loaded)
+    ExpectMw("... and leaves no printer on it to draw later", !IsTextPrinterActiveOnWindow(WINDOW_NONE));
+    DeactivateAllTextPrinters();
+    memset(sMwTiles, mark, sizeof(sMwTiles));
+    FillWindowPixelBuffer(WINDOW_NONE, PIXEL_FILL(1));
+    ExpectMw("FillWindowPixelBuffer(255) draws nothing (MS-206)", MwTilesAre(sMwTiles, mark));
+    memset(sMwTiles, mark, sizeof(sMwTiles));
+    FillWindowPixelRect(WINDOW_NONE, PIXEL_FILL(2), 0, 0, 8, 8);
+    ExpectMw("FillWindowPixelRect(255) draws nothing (MS-206)", MwTilesAre(sMwTiles, mark));
+    memset(sMwTiles, mark, sizeof(sMwTiles));
+    BlitBitmapToWindow(WINDOW_NONE, bitmap, 0, 0, 8, 8);
+    ExpectMw("BlitBitmapToWindow(255) draws nothing (MS-206)", MwTilesAre(sMwTiles, mark));
+
+    // a real window still takes text: window 0, shaped as the planted one
+    gWindows[0].window = shape;
+    gWindows[0].tileData = sMwRealTiles;
+    memset(sMwRealTiles, mark, sizeof(sMwRealTiles));
+    memset(sMwTiles, mark, sizeof(sMwTiles));
+    AddTextPrinterParameterized(0, FONT_NORMAL, sMwText, 0, 1, TEXT_SKIP_DRAW, NULL);
+    ExpectMw("text printed to window 0 is drawn", !MwTilesAre(sMwRealTiles, mark));
+    ExpectMw("... and nothing through window 255", MwTilesAre(sMwTiles, mark));
+    memset(&gWindows[0], 0, sizeof(gWindows[0]));
+
+    DeactivateAllTextPrinters();
+    memcpy(planted, &kept, sizeof(kept));
+    printf("selftest-missing-window: %d checks, %d failed\n", sMwChecks, sMwFailures);
+    return sMwFailures ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
 //   pokeemerald-mp --selftest-line-break
 //
 // KNOWN_ISSUES U13: BattleStringExpandPlaceholders turns every space of a

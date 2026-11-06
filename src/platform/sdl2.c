@@ -230,6 +230,7 @@ extern int NativeSelfTest_SpecialResults(void);
 extern int NativeSelfTest_TradeEvolution(void);
 extern int NativeSelfTest_ShakeAnim(void);
 extern int NativeSelfTest_PaletteSlots(void);
+extern int NativeSelfTest_MissingWindow(void);
 extern int NativeSelfTest_LineBreak(void);
 extern int NativeSelfTest_WildWeather(void);
 extern int NativeSelfTest_Clock(void);
@@ -1302,6 +1303,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_ShakeAnim()); // src/platform/native_selftest.c (KNOWN_ISSUES N40)
         else if (strcmp(argv[i], "--selftest-palette-slots") == 0)
             exit(NativeSelfTest_PaletteSlots()); // src/platform/native_selftest.c (KNOWN_ISSUES MS-210)
+        else if (strcmp(argv[i], "--selftest-missing-window") == 0)
+            exit(NativeSelfTest_MissingWindow()); // src/platform/native_selftest.c (KNOWN_ISSUES MS-206, MS-211)
         else if (strcmp(argv[i], "--selftest-line-break") == 0)
             exit(NativeSelfTest_LineBreak()); // src/platform/native_selftest.c (KNOWN_ISSUES U13)
         else if (strcmp(argv[i], "--selftest-wild-weather") == 0)

@@ -482,6 +482,12 @@ bool32 AddTextPrinter(struct TextPrinterTemplate *printerTemplate, u8 speed, voi
 {
     if (!gFonts)
         return FALSE;
+#ifdef PORTABLE
+    // a window that is not there (WINDOW_NONE from an AddWindow that found no free one, MS-206's kind): its glyphs went
+    // through the tile data pointer of gWindows[255], read from past the window table (KNOWN_ISSUES MS-211)
+    if (printerTemplate->type == WINDOW_TEXT_PRINTER && printerTemplate->windowId >= WINDOWS_MAX)
+        return FALSE;
+#endif
 #ifdef ENABLE_NATIVE_UI
     if (printerTemplate->type == WINDOW_TEXT_PRINTER && printerTemplate->windowId < WINDOWS_MAX)
     {
