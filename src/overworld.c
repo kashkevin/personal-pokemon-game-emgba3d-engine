@@ -1232,6 +1232,14 @@ static u16 GetNightMusicFromTrack(u16 track)
 {
     if (GetTimeOfDay() != TIME_NIGHT)
         return track;
+#ifdef PORTABLE
+    // Only the table's own tracks can have a night version: MUS_NONE (0xFFFF: the Battle Pyramid, Birth Island, the Cave
+    // of Origin's B1F, the truck) read the table 130 KB past its end, and a music number found there would have been
+    // played (KNOWN_ISSUES MS-213)
+    if (track < START_MUS || track >= END_MUS)
+        return track;
+#endif
+#line 1221 // gba-line
     if (sNightMusicTable[track - START_MUS] >= START_MUS && sNightMusicTable[track - START_MUS] <= END_MUS)
         return sNightMusicTable[track - START_MUS];
     return track;
