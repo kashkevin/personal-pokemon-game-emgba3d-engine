@@ -246,6 +246,15 @@ static uint32_t sDeferredBuilds;
 #define TERRAIN_DEFERRED_LONGEST 8
 static uint64_t sSyncStarted;
 static unsigned sSyncsSinceDeferred;
+/*
+ * The animated tiles' sync (SyncAnimatedTiles) leaves a chunk waiting for its build (sPending, ChunkWaiting) to the
+ * waiting chunks' own sync after it (SyncPending: within the time budget above, or at once if it came into view). It
+ * built every such chunk whose tiles' pixels moved on, at once and outside the budget: on Mr. Briney's sail the grid
+ * moves every few frames, its edge chunks wait their builds, and a step of the sea's animation built up to seven of
+ * them in one frame (12 to 26 ms on the cloud machine; KNOWN_ISSUES MS-82). PKMN_DIORAMA_ANIMATED_WAITS=0
+ * (development) builds them there as before, to compare.
+ */
+static bool sAnimatedBuildsAll;
 static unsigned sKeptChecks;
 static unsigned sKeptBuilds;
 /*
@@ -2472,6 +2481,8 @@ bool DioramaGLTerrain_Init(void)
         const char *value = SDL_getenv("PKMN_DIORAMA_SUPERSEDED");
 
         sNoSuperseded = value != NULL && value[0] == '0';
+        value = SDL_getenv("PKMN_DIORAMA_ANIMATED_WAITS");
+        sAnimatedBuildsAll = value != NULL && value[0] == '0';
     }
     memset(sChunks, 0, sizeof(sChunks));
     memset(&sMetrics, 0, sizeof(sMetrics));
@@ -2944,8 +2955,25 @@ static void FindDirtyTiles(const struct DioramaSceneSnapshot *snapshot)
             sSyncDirtyTiles[tile / 8] |= 1 << (tile % 8);
 }
 
+static bool ChunkUrgent(const struct DioramaSceneSnapshot *snapshot, const struct GLTerrainChunk *chunk,
+                        int chunkX, int chunkY);
+
+/* Whether a chunk waits for its build (sPending, its old mesh standing; SyncPending builds it) and may wait on: off
+ * screen and far from the player (ChunkUrgent). */
+static bool ChunkWaiting(const struct DioramaSceneSnapshot *snapshot, const struct GLTerrainChunk *chunk)
+{
+    unsigned p;
+
+    if (!chunk->stale)
+        return false;
+    for (p = 0; p < sPendingCount; p++)
+        if (sPending[p][0] == chunk->chunkX && sPending[p][1] == chunk->chunkY)
+            return !ChunkUrgent(snapshot, chunk, chunk->chunkX, chunk->chunkY);
+    return false;
+}
+
 /* The chunks a change of the animated tiles alone can reach, built again;
- * the rest stand. */
+ * the rest stand, and those waiting for their builds wait on (sAnimatedBuildsAll). */
 static bool SyncAnimatedTiles(const struct DioramaSceneSnapshot *snapshot,
                               const struct DioramaResolvedCell *resolvedCells,
                               const struct TerrainSyncKey *key)
@@ -2968,6 +2996,10 @@ static bool SyncAnimatedTiles(const struct DioramaSceneSnapshot *snapshot,
         if (!chunk->hasPixelObjects
          && !(chunk->readsPixelCells
            && ChunkUsesDirtyTiles(snapshot, resolvedCells, chunk->chunkX, chunk->chunkY)))
+            continue;
+        /* waiting for its build off screen: SyncPending, after this, builds it from this snapshot within the time
+         * budget (or at once when it has come into view); one in view is built here, as before */
+        if (!sAnimatedBuildsAll && ChunkWaiting(snapshot, chunk))
             continue;
         if (!prepared)
         {
