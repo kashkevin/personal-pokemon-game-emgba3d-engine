@@ -18,9 +18,14 @@
  * banner by its map's repeat). A background may show only inside a window by line (the mugshot's banners): each edge a
  * cubic through the lines' values at their middles where they slope into each other, the GBA's step where they jump,
  * anti-aliased over one window pixel across its slope. A sprite may be drawn as pixel art instead (the mugshot's
- * trainer pictures): each art pixel whole window pixels, not smoothed. Test switches: PKMN_TRANSITION_ART=0 (the GBA
- * picture of the art instead), PKMN_TRANSITION_ART_SIGMA (the Gaussian's width), PKMN_TRANSITION_ART_BOOST (the
- * strokes' weight). Project-owned.
+ * trainer pictures): each art pixel whole window pixels, not smoothed. A layer may be drawn as a vector piece instead
+ * (the Battle Frontier's logo and circles, ui_transition_vectors.c): at each window pixel its shapes' circles in the
+ * art's pixels, each shape's coverage the product of its circles' (each edge's distance in window pixels, over one
+ * window pixel, across the art's stretch by the scroll's own slope), a line along an edge the difference between the
+ * shape's coverage out to the line's outer side and in to its inner side - placed, scrolled and blended as the art.
+ * Test switches: PKMN_TRANSITION_ART=0 (the GBA picture of the art instead), PKMN_TRANSITION_ART_SIGMA (the
+ * Gaussian's width), PKMN_TRANSITION_ART_BOOST (the strokes' weight), PKMN_TRANSITION_ART_VECTORS=0 (the Frontier's
+ * pieces smoothed from their pixels as the rest). Project-owned.
  */
 #include <math.h>
 #include <stdlib.h>
@@ -42,6 +47,12 @@
 #ifndef GL_BLEND_SRC_RGB
 #define GL_BLEND_SRC_RGB 0x80C9
 #define GL_BLEND_DST_RGB 0x80C8
+#endif
+#ifndef GL_RGBA32F
+#define GL_RGBA32F 0x8814
+#endif
+#ifndef GL_TEXTURE3
+#define GL_TEXTURE3 0x84C3
 #endif
 
 #define SIGMA 0.75f        /* the Gaussian's width in art pixels (the 4 x 4 pixels round a point hold 97 % of it) */
@@ -80,6 +91,10 @@ static const char sFragmentShader[] =
     "uniform int uWrapX;\n"          /* 1: a background carried out across by its map's repeat */
     "uniform vec4 uCell;\n"          /* pixel art: the art's top left in window pixels (rows from the top), its pixels'
                                      * size in window pixels (0: smoothed), mirrored (1 across, 2 up and down) */
+    "uniform sampler2D uShapes;\n"   /* a vector piece's shapes, 4 texels each: its colour and its lines' colour, then
+                                     * three circles (x, y, r: < 0 outside, 0 unused; the width of a line along it) */
+    "uniform int uShapeCount;\n"     /* 0: not a vector piece */
+    "uniform vec4 uBox;\n"           /* the piece's box in the art's pixels */
     "out vec4 fragColor;\n"
     "\n"
     "const float OPEN = 8192.0;\n"   /* UI_ART_OPEN: an open window edge */
@@ -177,6 +192,46 @@ static const char sFragmentShader[] =
     "    return col;\n"
     "}\n"
     "\n"
+    /* how much of a window pixel at p (art pixels) is on a circle's side - inside it (c.z > 0) or outside it - the
+     * circle's radius moved out by half its line (shift 1) or in (shift -1): the edge's distance in window pixels
+     * across it (jac: the art's pixels a window pixel spans across and up and down), over one window pixel */
+    "float Side(vec2 p, vec4 c, float shift, vec2 jac)\n"
+    "{\n"
+    "    vec2 v = p - c.xy;\n"
+    "    float len = length(v);\n"
+    "    vec2 n = len > 0.0001 ? v / len : vec2(0.0, 1.0);\n"
+    "    float d = (len - abs(c.z) - (c.z > 0.0 ? shift : -shift) * 0.5 * c.w) / max(length(n * jac), 0.0001);\n"
+    "    return clamp(c.z > 0.0 ? 0.5 - d : 0.5 + d, 0.0, 1.0);\n"
+    "}\n"
+    "\n"
+    /* a vector piece at p (premultiplied): its shapes over each other, each its coverage (the product of its
+     * circles') in its colour, its lines (out to their outer sides, less the shape in to their inner sides) in its
+     * lines' colour */
+    "vec4 Piece(vec2 p, vec2 jac)\n"
+    "{\n"
+    "    vec4 col = vec4(0.0);\n"
+    "    for (int i = 0; i < uShapeCount; i++)\n"
+    "    {\n"
+    "        vec4 kind = texelFetch(uShapes, ivec2(0, i), 0);\n"
+    "        float core = 1.0, halo = 1.0;\n"
+    "        for (int j = 1; j <= 3; j++)\n"
+    "        {\n"
+    "            vec4 c = texelFetch(uShapes, ivec2(j, i), 0);\n"
+    "            if (c.z != 0.0)\n"
+    "            {\n"
+    "                core *= Side(p, c, -1.0, jac);\n"
+    "                halo *= Side(p, c, 1.0, jac);\n"
+    "            }\n"
+    "        }\n"
+    "        if (kind.y < 0.5)\n"
+    "            halo = core;\n"
+    "        if (halo > 0.0)\n"
+    "            col = col * (1.0 - halo) + Colour(uint(kind.y + 0.5)) * (halo - core)\n"
+    "                + Colour(uint(kind.x + 0.5)) * core;\n"
+    "    }\n"
+    "    return col;\n"
+    "}\n"
+    "\n"
     "void main()\n"
     "{\n"
     "    vec2 at = vec2(gl_FragCoord.x, uScreenH - gl_FragCoord.y);\n"
@@ -229,6 +284,21 @@ static const char sFragmentShader[] =
     "    float sy = abs(s1.y - s0.y) <= 8.0 ? mix(s0.y, s1.y, fy - float(l0)) : own.y;\n"
     "    vec2 scroll = vec2(own.x, sy);\n"
     "    vec2 p = g + scroll - uOrigin;\n"
+    /* a vector piece: its circles where the art's pixel would be (a background's repeat taken nearest the piece), the
+     * art's stretch up and down by the scroll's slope (a wave) */
+    "    if (uShapeCount > 0)\n"
+    "    {\n"
+    "        if (uBackground != 0)\n"
+    "            p -= vec2(uSize) * floor((p - 0.5 * (uBox.xy + uBox.zw)) / vec2(uSize) + 0.5);\n"
+    "        if (p.x < uBox.x || p.y < uBox.y || p.x >= uBox.z || p.y >= uBox.w)\n"
+    "            discard;\n"
+    "        float slope = abs(s1.y - s0.y) <= 8.0 ? s1.y - s0.y : 0.0;\n"
+    "        vec4 col = Blend(Piece(p, vec2(1.0, max(abs(1.0 + slope), 0.05)) / uPic.z) * cover);\n"
+    "        if (col.a <= 0.0 && col.r <= 0.0 && col.g <= 0.0 && col.b <= 0.0)\n"
+    "            discard;\n"
+    "        fragColor = col;\n"
+    "        return;\n"
+    "    }\n"
     "    ivec2 c = ivec2(floor(p - 0.5)) - 1;\n"
     "    float wx[4], wy[4];\n"
     "    for (int i = 0; i < 4; i++)\n"
@@ -303,11 +373,13 @@ static const char sFragmentShader[] =
 enum
 {
     U_SLOTS, U_PAL, U_SCREEN_H, U_PIC, U_BACKGROUND, U_CARRY, U_SIZE, U_ORIGIN, U_PAL_BASE, U_LINES, U_WEIGHTS,
-    U_BOOST, U_MODE, U_EFFECT, U_SIGMA, U_BAND, U_WINDOW, U_WIN, U_WRAP_X, U_CELL, U_COUNT
+    U_BOOST, U_MODE, U_EFFECT, U_SIGMA, U_BAND, U_WINDOW, U_WIN, U_WRAP_X, U_CELL, U_SHAPES, U_SHAPE_COUNT, U_BOX,
+    U_COUNT
 };
 static const char *const sUniformNames[U_COUNT] = {
     "uSlots", "uPal", "uScreenH", "uPic", "uBackground", "uCarry", "uSize", "uOrigin", "uPalBase", "uLines[0]",
-    "uWeights", "uBoost", "uMode", "uEffect", "uSigma", "uBand", "uWindow", "uWin[0]", "uWrapX", "uCell",
+    "uWeights", "uBoost", "uMode", "uEffect", "uSigma", "uBand", "uWindow", "uWin[0]", "uWrapX", "uCell", "uShapes",
+    "uShapeCount", "uBox",
 };
 
 typedef void (APIENTRY *PfnUniform2i)(GLint location, GLint v0, GLint v1);
@@ -319,9 +391,11 @@ struct Layer
     int w, h;
     bool background;
     uint8_t *pixels;        /* the art last uploaded (to see a change) */
+    GLuint shapes;          /* 4 x the shapes: the vector piece last uploaded (UploadPiece) */
+    const struct UiArtPiece *piece;
 };
 
-static bool sTried, sReady, sOff;
+static bool sTried, sReady, sOff, sNoVectors;
 static GLuint sProgram, sVertexArray, sPalTexture;
 static GLint sUniforms[U_COUNT];
 static PfnUniform2i sUniform2i;
@@ -367,6 +441,8 @@ static bool Init(void)
         sSigma = (float)atof(value);
     if ((value = SDL_getenv("PKMN_TRANSITION_ART_BOOST")) != NULL && atof(value) >= 1.0)
         sBoost = (float)atof(value);
+    if ((value = SDL_getenv("PKMN_TRANSITION_ART_VECTORS")) != NULL && strcmp(value, "0") == 0)
+        sNoVectors = true;
     sUniform2i = (PfnUniform2i)SDL_GL_GetProcAddress("glUniform2i");
     if (sUniform2i == NULL)
         return false;
@@ -405,8 +481,8 @@ static bool Init(void)
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 512, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, sPalette);
     glBindTexture(GL_TEXTURE_2D, 0);
     dglGenVertexArrays(1, &sVertexArray);
-    SDL_Log("Native UI: the transitions' art drawn smooth at the window's resolution (sigma %.2f, strokes x%.2f)",
-            sSigma, sBoost);
+    SDL_Log("Native UI: the transitions' art drawn smooth at the window's resolution (sigma %.2f, strokes x%.2f%s)",
+            sSigma, sBoost, sNoVectors ? "; the Frontier's vector pieces off: PKMN_TRANSITION_ART_VECTORS=0" : "");
     return true;
 }
 
@@ -415,6 +491,11 @@ bool UiArt_Ready(void)
     if (!sTried)
         sReady = Init();
     return sReady;
+}
+
+bool UiArt_VectorsOn(void)
+{
+    return UiArt_Ready() && !sNoVectors;
 }
 
 void UiArt_SetPalette(const uint16_t *colours)
@@ -558,6 +639,48 @@ static bool Upload(struct Layer *layer, const struct UiArtLayer *art)
     return true;
 }
 
+/* the layer's vector piece on the GPU (again only when it changed): 4 texels a shape - its colour and its lines'
+ * colour, then its three circles (x, y, r, the line's width) */
+static bool UploadPiece(struct Layer *layer, const struct UiArtPiece *piece)
+{
+    float texels[64 * 4 * 4];
+
+    if (piece == layer->piece && layer->shapes != 0)
+        return true;
+    if (piece->count > 64)
+        return false;
+    for (int i = 0; i < piece->count; i++)
+    {
+        const struct UiArtShape *shape = &piece->shapes[i];
+        float *t = &texels[i * 16];
+
+        t[0] = shape->colour;
+        t[1] = shape->line;
+        t[2] = t[3] = 0.0f;
+        for (int j = 0; j < UI_ART_SHAPE_CIRCLES; j++)
+        {
+            t[4 + j * 4 + 0] = shape->circles[j].x;
+            t[4 + j * 4 + 1] = shape->circles[j].y;
+            t[4 + j * 4 + 2] = shape->circles[j].r;
+            t[4 + j * 4 + 3] = shape->line != 0 ? shape->circles[j].line : 0.0f;
+        }
+    }
+    if (layer->shapes == 0)
+    {
+        glGenTextures(1, &layer->shapes);
+        glBindTexture(GL_TEXTURE_2D, layer->shapes);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
+    else
+        glBindTexture(GL_TEXTURE_2D, layer->shapes);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 4, piece->count, 0, GL_RGBA, GL_FLOAT, texels);
+    layer->piece = piece;
+    return true;
+}
+
 static bool PowerOfTwo(int v)
 {
     return v > 0 && (v & (v - 1)) == 0;
@@ -569,10 +692,12 @@ bool UiArt_Draw(int id, const struct UiArtLayer *art, int outputWidth, int outpu
     struct Layer *layer;
     float lines[80 * 4], win[80 * 4];
     bool window = art != NULL && art->background && art->winLeft != NULL && art->winRight != NULL;
-    GLint program = 0, vertexArray = 0, activeTexture = 0, texture0 = 0, texture1 = 0, texture2 = 0;
+    GLint program = 0, vertexArray = 0, activeTexture = 0, texture0 = 0, texture1 = 0, texture2 = 0, texture3 = 0;
     GLint viewport[4], scissorBox[4];
     GLint srcRgb = GL_ONE, dstRgb = GL_ZERO;
     GLboolean blend, scissor, depth, cull, stencil;
+    const struct UiArtPiece *piece;
+    float box[4] = {0, 0, 0, 0};
     int x0, y0, x1, y1;
 
     if (!UiArt_Ready() || id < 0 || id >= UI_ART_LAYER_COUNT || art == NULL || art->slots == NULL || k <= 0
@@ -619,6 +744,8 @@ bool UiArt_Draw(int id, const struct UiArtLayer *art, int outputWidth, int outpu
     depth = glIsEnabled(GL_DEPTH_TEST);
     cull = glIsEnabled(GL_CULL_FACE);
     stencil = glIsEnabled(GL_STENCIL_TEST);
+    dglActiveTexture(GL_TEXTURE3);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture3);
     dglActiveTexture(GL_TEXTURE2);
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture2);
     dglActiveTexture(GL_TEXTURE1);
@@ -633,6 +760,10 @@ bool UiArt_Draw(int id, const struct UiArtLayer *art, int outputWidth, int outpu
         dglActiveTexture((GLenum)activeTexture);
         return false;
     }
+    /* a vector piece instead of the smoothed pixels (unless switched off) */
+    piece = art->piece != NULL && !sNoVectors && UploadPiece(layer, art->piece) ? art->piece : NULL;
+    if (piece != NULL)
+        UiArt_PieceBox(piece, box);
     if (sPaletteDirty)
     {
         glBindTexture(GL_TEXTURE_2D, sPalTexture);
@@ -659,6 +790,8 @@ bool UiArt_Draw(int id, const struct UiArtLayer *art, int outputWidth, int outpu
     dglBindVertexArray(sVertexArray);
     dglActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, layer->texture);
+    dglActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_2D, piece != NULL ? layer->shapes : 0);
     dglActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, layer->weights);
     dglActiveTexture(GL_TEXTURE1);
@@ -688,10 +821,15 @@ bool UiArt_Draw(int id, const struct UiArtLayer *art, int outputWidth, int outpu
     dglUniform4f(sUniforms[U_CELL], (float)art->cornerX, (float)art->cornerY,
                  !art->background && art->cell > 0 ? (float)art->cell : 0.0f,
                  (float)((art->flipX ? 1 : 0) | (art->flipY ? 2 : 0)));
+    dglUniform1i(sUniforms[U_SHAPES], 3);
+    dglUniform1i(sUniforms[U_SHAPE_COUNT], piece != NULL ? piece->count : 0);
+    dglUniform4f(sUniforms[U_BOX], box[0], box[1], box[2], box[3]);
     glDrawArrays(GL_TRIANGLES, 0, 3);
 
     dglBindVertexArray((GLuint)vertexArray);
     glBindTexture(GL_TEXTURE_2D, (GLuint)texture1);
+    dglActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_2D, (GLuint)texture3);
     dglActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, (GLuint)texture2);
     dglActiveTexture(GL_TEXTURE0);
@@ -722,6 +860,8 @@ void UiArt_Shutdown(void)
             glDeleteTextures(1, &sLayers[i].texture);
         if (sLayers[i].weights != 0)
             glDeleteTextures(1, &sLayers[i].weights);
+        if (sLayers[i].shapes != 0)
+            glDeleteTextures(1, &sLayers[i].shapes);
         free(sLayers[i].pixels);
         memset(&sLayers[i], 0, sizeof(sLayers[i]));
     }
@@ -732,7 +872,7 @@ void UiArt_Shutdown(void)
         dglDeleteProgram(sProgram);
     }
     sPalTexture = sVertexArray = sProgram = 0;
-    sReady = sTried = sOff = false;
+    sReady = sTried = sOff = sNoVectors = false;
     memset(sPalette, 0, sizeof(sPalette));
     sPaletteDirty = false;
 }

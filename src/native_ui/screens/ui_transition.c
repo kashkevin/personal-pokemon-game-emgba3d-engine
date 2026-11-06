@@ -22,7 +22,9 @@
  * edges over the 3D field), the trainers' pictures as pixel art at whole window
  * pixels where the GBA's affine sprites put them, and its fades (white spreading
  * from the middle, then black) smooth from line to line, the picture drawn
- * without its BLDY meanwhile. Project-owned.
+ * without its BLDY meanwhile. The Battle Frontier's logo, its centre and its
+ * circles are vector pieces (ui_transition_vectors.c: every edge a true circle,
+ * measured from the art) wherever the game's pixels are that art. Project-owned.
  */
 #include <math.h>
 #include <stdlib.h>
@@ -63,6 +65,10 @@ static u16 sArtPalette[512];
 static u8 sPicArt[NATIVE_TRANSITION_PICS][64 * 64];
 static bool sPicDrawn[NATIVE_TRANSITION_PICS];
 static bool sMugshot;      /* the mugshot is drawn here (its banners, pictures and fades) */
+/* the Frontier's art as vector pieces where the game's pixels are the art they were measured from (BG0's logo or
+ * centre, the circles' frames; NULL: the smoothed pixels), checked again only when the pixels change */
+static const struct UiArtPiece *sBg0Piece, *sCirclePiece[NATIVE_TRANSITION_CIRCLES];
+static int sBg0Palette;
 
 /* ---------------------------------------------------------------- detection */
 
@@ -202,10 +208,92 @@ static void CaptureMugshot(void)
     }
 }
 
+/* the pieces the art may be: none but for the Frontier's transitions */
+static int PieceCandidates(bool background, enum UiArtPieceId *out)
+{
+    switch (sT.id)
+    {
+    case B_TRANSITION_FRONTIER_LOGO_WIGGLE:
+    case B_TRANSITION_FRONTIER_LOGO_WAVE:
+        if (!background)
+            return 0;
+        out[0] = UI_ART_PIECE_FRONTIER_LOGO;
+        return 1;
+    case B_TRANSITION_FRONTIER_CIRCLES_MEET:
+    case B_TRANSITION_FRONTIER_CIRCLES_CROSS:
+    case B_TRANSITION_FRONTIER_CIRCLES_ASYMMETRIC_SPIRAL:
+    case B_TRANSITION_FRONTIER_CIRCLES_SYMMETRIC_SPIRAL:
+    case B_TRANSITION_FRONTIER_CIRCLES_MEET_IN_SEQ:
+    case B_TRANSITION_FRONTIER_CIRCLES_CROSS_IN_SEQ:
+    case B_TRANSITION_FRONTIER_CIRCLES_ASYMMETRIC_SPIRAL_IN_SEQ:
+    case B_TRANSITION_FRONTIER_CIRCLES_SYMMETRIC_SPIRAL_IN_SEQ:
+        if (background)
+        {
+            out[0] = UI_ART_PIECE_FRONTIER_CENTRE;
+            return 1;
+        }
+        out[0] = UI_ART_PIECE_FRONTIER_CIRCLE_TOP;
+        out[1] = UI_ART_PIECE_FRONTIER_CIRCLE_LEFT;
+        out[2] = UI_ART_PIECE_FRONTIER_CIRCLE_RIGHT;
+        return 3;
+    }
+    return 0;
+}
+
+/* The vector piece the art is (UiArt_MatchPiece), the last answer kept while the pixels and the candidates stay the
+ * same (cache: a hash of both, the piece, the palette). */
+struct PieceCache
+{
+    u64 hash;
+    const struct UiArtPiece *piece;
+    int palette;
+};
+
+static const struct UiArtPiece *Piece(struct PieceCache *cache, const u8 *slots, int w, int h, bool background,
+                                      int *palette)
+{
+    enum UiArtPieceId candidates[3];
+    int count = PieceCandidates(background, candidates), differ = 0;
+    u64 hash = 0xCBF29CE484222325ull;
+
+    if (count == 0)
+        return NULL;
+    for (int i = 0; i < w * h; i++)
+        hash = (hash ^ slots[i]) * 0x100000001B3ull;
+    hash = (hash ^ (u64)(w * 3 + h * 5 + count * 7 + candidates[0] * 11)) * 0x100000001B3ull;
+    if (hash != cache->hash)
+    {
+        const struct UiArtPiece *piece = UiArt_MatchPiece(slots, w, h, background, candidates, count, &cache->palette,
+                                                          &differ);
+
+        if (piece != NULL && piece != cache->piece)
+            UiArt_LogPiece(piece, differ);
+        cache->hash = hash;
+        cache->piece = piece;
+    }
+    *palette = cache->palette;
+    return cache->piece;
+}
+
+static void CapturePieces(void)
+{
+    static struct PieceCache sBg0Cache, sCircleCache[NATIVE_TRANSITION_CIRCLES];
+    int palette;
+
+    if (!UiArt_VectorsOn())
+        return;
+    if (sT.art.bg0)
+        sBg0Piece = Piece(&sBg0Cache, sBg0Art, sBg0W, sBg0H, true, &sBg0Palette);
+    for (int i = 0; i < sT.art.spriteCount; i++)
+        sCirclePiece[i] = Piece(&sCircleCache[i], sCircleArt[i], 64, 64, false, &palette);
+}
+
 static void CaptureArt(void)
 {
     sArt = false;
     sMugshot = false;
+    sBg0Piece = NULL;
+    memset(sCirclePiece, 0, sizeof(sCirclePiece));
     if ((!sT.art.bg0 && sT.art.spriteCount == 0 && !sT.mugshot.shown) || !UiArt_Ready())
         return;
     if (sT.art.bg0 && !DecodeBackground(sT.art.bg0Cnt, sBg0Art, &sBg0W, &sBg0H))
@@ -226,6 +314,7 @@ static void CaptureArt(void)
     }
     memcpy(sArtPalette, gPlttBufferFaded, sizeof(sArtPalette));
     sArt = sT.art.bg0 || sT.art.spriteCount > 0 || sMugshot;
+    CapturePieces();
 }
 
 static void Capture(void)
@@ -600,7 +689,7 @@ static void DrawArt(void)
         struct UiArtLayer layer = {
             .slots = sCircleArt[i], .w = sprite->size, .h = sprite->size, .background = false,
             .palBase = 256 + 16 * sprite->paletteNum, .originX = sprite->x, .originY = sprite->y,
-            .blend = UI_ART_BLEND_NONE,
+            .blend = UI_ART_BLEND_NONE, .piece = sCirclePiece[i],
         };
 
         UiArt_Draw(1 + i, &layer, v->outputWidth, v->outputHeight, px, py, k, fills);
@@ -608,7 +697,8 @@ static void DrawArt(void)
     if (sT.art.bg0)
     {
         struct UiArtLayer layer = {
-            .slots = sBg0Art, .w = sBg0W, .h = sBg0H, .background = true, .palBase = 0,
+            .slots = sBg0Art, .w = sBg0W, .h = sBg0H, .background = true,
+            .palBase = sBg0Piece != NULL ? 16 * sBg0Palette : 0, .piece = sBg0Piece,
             .scrollX = sT.art.scrollX, .scrollY = sT.art.scrollY,
             .blend = sT.art.blend == NATIVE_TRANSITION_BLEND_ALPHA     ? UI_ART_BLEND_ALPHA
                    : sT.art.blend == NATIVE_TRANSITION_BLEND_LIGHTEN ? UI_ART_BLEND_LIGHTEN
