@@ -34,6 +34,11 @@ uint32_t gPlatformPictureHideObj[4];
  * 1 every pixel as inside WIN0, 2 every pixel as outside the windows. 0 (the
  * game's windows) outside it. */
 uint8_t gPlatformPictureWindowAs;
+#ifdef ENABLE_NATIVE_UI
+/* ...and the GBA's brightness effect when it draws that itself, smooth from line to line (the mugshot's fades, MS-108):
+ * every line as with BLDY 0 (the register given back after the line). 0 outside it. */
+uint8_t gPlatformPictureNoBrightness;
+#endif
 /* PKMN_DEBUG_HIDEBG=mask (bit n: BG n): layers left out of every frame, to find which layer holds a picture (Update 27's
  * look at the black rectangles behind some animations' backgrounds). 0 when unset. */
 static unsigned DebugHideBg(void)
@@ -1726,6 +1731,12 @@ void DrawFrame(uint16_t *pixels)
                     gIntrTable[0]();
         }
 
+#ifdef ENABLE_NATIVE_UI
+        uint16_t lineBldy = REG_BLDY;
+
+        if (gPlatformPictureNoBrightness)
+            REG_BLDY = 0;
+#endif
         // Render the backdrop color before the each individual scanline.
         // backdrop color brightness effects
         unsigned int blendMode = (REG_BLDCNT >> 6) & 3;
@@ -1745,6 +1756,10 @@ void DrawFrame(uint16_t *pixels)
 
         memsetu16(&pixels[i * DISPLAY_WIDTH], backdropColor, DISPLAY_WIDTH);
         DrawScanline(&pixels[i * DISPLAY_WIDTH], i);
+#ifdef ENABLE_NATIVE_UI
+        if (gPlatformPictureNoBrightness)
+            REG_BLDY = lineBldy;
+#endif
         
         REG_DISPSTAT |= INTR_FLAG_HBLANK;
 

@@ -9,14 +9,20 @@
  * out (BG0's ball and box, the balls' sprites, the windows' stepped masks). The
  * game keeps the transition - its steps, its timing, its end - and this draws
  * what it shows each frame. Transitions this does not draw (the field's waves
- * and slices, the mugshots, the Frontier's squares) keep the game's picture of
- * them. The owner's request of 2026-10-26: no old GBA look when a battle starts.
+ * and slices, the Frontier's squares) keep the game's picture of them. The
+ * owner's request of 2026-10-26: no old GBA look when a battle starts.
  * MS-108 (owner decision #48): the transitions' own art - the teams' and the
  * Regis' patterns, Kyogre's, Groudon's and Rayquaza's, the Battle Frontier's
  * logo, its centre and its circles - is the game's own pixels drawn as smooth
  * shapes at the window's resolution (ui_transition_art.c) in BG0's and the
  * circles' place: the game's palette of the frame (its cycling, its fades), BG0's
- * scroll line by line (the weaves and waves) and its blend. Project-owned.
+ * scroll line by line (the weaves and waves) and its blend. The Elite Four's and
+ * the Champion's mugshot too: its banners inside the game's window by line, their
+ * wavy edges smooth curves through the lines' values (going on past the screen's
+ * edges over the 3D field), the trainers' pictures as pixel art at whole window
+ * pixels where the GBA's affine sprites put them, and its fades (white spreading
+ * from the middle, then black) smooth from line to line, the picture drawn
+ * without its BLDY meanwhile. Project-owned.
  */
 #include <math.h>
 #include <stdlib.h>
@@ -52,6 +58,11 @@ static u8 sBg0Art[512 * 512];                           /* BG0's map as palette 
 static int sBg0W, sBg0H;
 static u8 sCircleArt[NATIVE_TRANSITION_CIRCLES][64 * 64]; /* the circles' sprites as colours */
 static u16 sArtPalette[512];
+/* the mugshot's trainer pictures as colours (each its sprite's size), and which of them the UI draws (an affine sprite
+ * only scaled and mirrored, as the mugshot's are): their OAM entries are left out of the picture */
+static u8 sPicArt[NATIVE_TRANSITION_PICS][64 * 64];
+static bool sPicDrawn[NATIVE_TRANSITION_PICS];
+static bool sMugshot;      /* the mugshot is drawn here (its banners, pictures and fades) */
 
 /* ---------------------------------------------------------------- detection */
 
@@ -152,10 +163,50 @@ static void DecodeSprite(const struct NativeTransitionSprite *sprite, u8 *out)
         }
 }
 
+/* a sprite's tiles (four bits a pixel, w x h, one- or two-dimensional mapping): its colours */
+static void DecodeObj(u16 tileNum, int w, int h, u8 *out)
+{
+    const u8 *vram = (const u8 *)OBJ_VRAM0;
+    bool oneD = (GetGpuReg(REG_OFFSET_DISPCNT) & DISPCNT_OBJ_1D_MAP) != 0;
+
+    for (int ty = 0; ty < h / 8; ty++)
+        for (int tx = 0; tx < w / 8; tx++)
+        {
+            u32 tile = ((u32)tileNum + (u32)(oneD ? ty * (w / 8) + tx : ty * 32 + tx)) * 32;
+
+            for (int y = 0; y < 8; y++)
+                for (int x = 0; x < 8; x++)
+                {
+                    u32 b = tile + (u32)(y * 4 + (x >> 1));
+
+                    out[(ty * 8 + y) * w + tx * 8 + x] = b < OBJ_VRAM0_SIZE ? (vram[b] >> ((x & 1) * 4)) & 15 : 0;
+                }
+        }
+}
+
+/* the mugshot's trainer pictures the UI draws: affine sprites only scaled and mirrored, of a size it keeps */
+static void CaptureMugshot(void)
+{
+    const struct NativeTransitionMugshot *m = &sT.mugshot;
+
+    memset(sPicDrawn, 0, sizeof(sPicDrawn));
+    for (int i = 0; i < m->picCount; i++)
+    {
+        const struct NativeTransitionPic *pic = &m->pics[i];
+
+        if (pic->matrix[1] != 0 || pic->matrix[2] != 0 || pic->matrix[0] == 0 || pic->matrix[3] == 0
+         || pic->width > 64 || pic->height > 64 || pic->width % 8 != 0 || pic->height % 8 != 0)
+            continue;
+        DecodeObj(pic->tileNum, pic->width, pic->height, sPicArt[i]);
+        sPicDrawn[i] = true;
+    }
+}
+
 static void CaptureArt(void)
 {
     sArt = false;
-    if ((!sT.art.bg0 && sT.art.spriteCount == 0) || !UiArt_Ready())
+    sMugshot = false;
+    if ((!sT.art.bg0 && sT.art.spriteCount == 0 && !sT.mugshot.shown) || !UiArt_Ready())
         return;
     if (sT.art.bg0 && !DecodeBackground(sT.art.bg0Cnt, sBg0Art, &sBg0W, &sBg0H))
         sT.art.bg0 = FALSE;
@@ -168,8 +219,13 @@ static void CaptureArt(void)
         }
         DecodeSprite(&sT.art.sprites[i], sCircleArt[i]);
     }
+    if (sT.mugshot.shown)
+    {
+        CaptureMugshot();
+        sMugshot = true;
+    }
     memcpy(sArtPalette, gPlttBufferFaded, sizeof(sArtPalette));
-    sArt = sT.art.bg0 || sT.art.spriteCount > 0;
+    sArt = sT.art.bg0 || sT.art.spriteCount > 0 || sMugshot;
 }
 
 static void Capture(void)
@@ -227,7 +283,16 @@ static void HideObjects(uint32_t mask[4])
         for (int c = 0; sArt && c < sT.art.spriteCount; c++)
             if (oam[i].tileNum == sT.art.sprites[c].tileNum)
                 mask[i >> 5] |= 1u << (i & 31);
+        for (int p = 0; sMugshot && p < sT.mugshot.picCount; p++)
+            if (sPicDrawn[p] && oam[i].tileNum == sT.mugshot.pics[p].tileNum)
+                mask[i >> 5] |= 1u << (i & 31);
     }
+}
+
+/* the mugshot's fades are drawn here, smooth from line to line: the picture leaves BLDY out meanwhile */
+static bool OwnsBrightness(void)
+{
+    return sMugshot && sT.mugshot.fade != NATIVE_TRANSITION_FADE_NONE;
 }
 
 /* ---------------------------------------------------------------- the GBA screen on the canvas */
@@ -456,8 +521,68 @@ static void TrailBalls(const struct Frame *f)
 
 /* ---------------------------------------------------------------- drawing */
 
+static int FloorDiv256(int n)
+{
+    return n >= 0 ? n / 256 : -((-n + 255) / 256);
+}
+
+/* where the GBA puts a picture's pixels along one axis, from its OAM box's middle: the offsets whose picture coordinate
+ * (the matrix's, rounded down as the GBA does) lands in the picture, [lo, hi] - its whole picture, as if the box did not
+ * cut it (the GBA's mirror is a pixel off the box's middle, its last column half outside) */
+static bool PicSpan(int m, int size, int *lo, int *hi)
+{
+    int reach = size * 128 / (m < 0 ? -m : m) + 2;
+
+    *lo = reach + 1;
+    *hi = -reach - 1;
+    for (int d = -reach; d <= reach; d++)
+    {
+        int t = FloorDiv256(m * d) + size / 2;
+
+        if (t >= 0 && t < size)
+        {
+            *lo = min(*lo, d);
+            *hi = max(*hi, d);
+        }
+    }
+    return *lo <= *hi;
+}
+
+/* A mugshot's trainer picture as pixel art (its faces are not smoothed): each art pixel the whole window pixels
+ * nearest the GBA's scale (the Elite Four's 2x exactly; Glacia's, Drake's, the Champion's 1.5x to 1.7x, which the GBA
+ * draws with pixels of two widths, come out even), where the GBA's affine sampling puts it (its mirror's rounding
+ * included): its middle across, its lower edge - the cut the game sets on the banner's lower border - up and down; on
+ * the picture (it slides in from the screen's edge as on the GBA). */
+static void DrawPic(int i, int px, int py, int k, int outputWidth, int outputHeight)
+{
+    const struct NativeTransitionPic *pic = &sT.mugshot.pics[i];
+    int halfX = pic->doubleSize ? pic->width : pic->width / 2, halfY = pic->doubleSize ? pic->height : pic->height / 2;
+    int x0, x1, y0, y1, cell;
+    double cx, bottom;
+
+    if (!PicSpan(pic->matrix[0], pic->width, &x0, &x1) || !PicSpan(pic->matrix[3], pic->height, &y0, &y1))
+        return;
+    cell = (int)floor(k * ((double)(x1 + 1 - x0) / pic->width + (double)(y1 + 1 - y0) / pic->height) / 2.0 + 0.5);
+    if (cell < 1)
+        cell = 1;
+    cx = pic->x + halfX + (x0 + x1 + 1) / 2.0;
+    bottom = pic->y + halfY + y1 + 1;
+    {
+        struct UiArtLayer layer = {
+            .slots = sPicArt[i], .w = pic->width, .h = pic->height, .background = false,
+            .palBase = 256 + 16 * pic->paletteNum, .originX = pic->x, .originY = pic->y, .blend = UI_ART_BLEND_NONE,
+            .cell = cell, .cornerX = (int)floor(px + cx * k - cell * pic->width / 2.0 + 0.5),
+            .cornerY = (int)floor(py + bottom * k - cell * pic->height + 0.5),
+            .flipX = pic->matrix[0] < 0, .flipY = pic->matrix[3] < 0,
+        };
+
+        UiArt_Draw(1 + i, &layer, outputWidth, outputHeight, px, py, k, false);
+    }
+}
+
 /* The transition's own art at the window's resolution, straight to the GPU (under the UI's quads of the frame: the
- * message box, the circle's mask): the circles, then BG0 over them (its priority is the first) with the GBA's blend. */
+ * message box, the circle's mask): the circles, then BG0 over them (its priority is the first) with the GBA's blend;
+ * the mugshot's banners (BG0 inside its window by line, carried out by the map's repeat) and its pictures over them. */
 static void DrawArt(void)
 {
     const struct UiView *v = UiDraw_View();
@@ -490,9 +615,54 @@ static void DrawArt(void)
                    : sT.art.blend == NATIVE_TRANSITION_BLEND_DARKEN  ? UI_ART_BLEND_DARKEN
                                                                      : UI_ART_BLEND_NONE,
             .eva = sT.art.eva, .evb = sT.art.evb, .y = sT.art.y,
+            .winLeft = sMugshot && sT.mugshot.window ? sT.mugshot.winLeft : NULL,
+            .winRight = sMugshot && sT.mugshot.window ? sT.mugshot.winRight : NULL,
+            .wrapX = sMugshot,
         };
 
         UiArt_Draw(0, &layer, v->outputWidth, v->outputHeight, px, py, k, fills);
+    }
+    for (int i = 0; sMugshot && i < sT.mugshot.picCount; i++)
+        if (sPicDrawn[i])
+            DrawPic(i, px, py, k, v->outputWidth, v->outputHeight);
+}
+
+/* the mugshot's fade at GBA row y (0..1): BLDY by line averaged over four lines - the fade's own step (it reaches two
+ * lines further each frame and a line brightens every other frame) - so the white spreads smooth, not in bands */
+static double FadeAt(double y)
+{
+    const u8 *v = sT.mugshot.fadeY;
+    double sum = 0.0, a = y - 2.0, b = y + 2.0;
+
+    for (int line = (int)floor(a); line <= (int)floor(b); line++)
+    {
+        double lo = a > line ? a : line, hi = b < line + 1.0 ? b : line + 1.0;
+
+        if (hi > lo)
+            sum += v[line < 0 ? 0 : line > DISPLAY_HEIGHT - 1 ? DISPLAY_HEIGHT - 1 : line] * (hi - lo);
+    }
+    return sum / 4.0 / 16.0;
+}
+
+/* the mugshot's fades over everything the GBA would fade (every layer: BLDCNT's first target all): white, then black;
+ * rows of one opacity drawn together */
+static void MugshotFade(const struct Frame *f)
+{
+    int tone, run = f->ay, last = -1;
+
+    if (!sMugshot || sT.mugshot.fade == NATIVE_TRANSITION_FADE_NONE)
+        return;
+    tone = sT.mugshot.fade == NATIVE_TRANSITION_FADE_LIGHTEN ? 255 : 0;
+    for (int row = f->ay; row <= f->ay + f->ah; row++)
+    {
+        int alpha = row < f->ay + f->ah ? (int)floor(FadeAt(GbaRow(f, row)) * 255.0 + 0.5) : -1;
+
+        if (alpha == last)
+            continue;
+        if (last > 0)
+            UiG_Rect(f->ax, run, f->aw, row - run, UI_RGBA(tone, tone, tone, last > 255 ? 255 : last));
+        run = row;
+        last = alpha;
     }
 }
 
@@ -539,6 +709,7 @@ static void Draw(int t)
         TrailBalls(&f);
         break;
     }
+    MugshotFade(&f);
     UiG_Restore();
     /* finished: the game has turned every colour black until the battle comes up */
     if (sT.done)
@@ -553,5 +724,6 @@ const struct UiScreen gUiScreen_Transition = {
     .picture = Picture,
     .hideObjects = HideObjects,
     .windows = Windows,
+    .brightness = OwnsBrightness,
 };
 #endif // ENABLE_NATIVE_UI

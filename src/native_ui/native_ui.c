@@ -42,6 +42,7 @@
 extern uint8_t gPlatformPictureHideBgMask;
 extern uint32_t gPlatformPictureHideObj[4];
 extern uint8_t gPlatformPictureWindowAs;
+extern uint8_t gPlatformPictureNoBrightness;
 
 /* The screens in detection order (the first that detects wins). */
 static const struct UiScreen *const sScreens[] = {
@@ -189,6 +190,8 @@ bool NativeUi_Init(SDL_Window *window)
     sInitialized = true;
     SDL_Log("Native UI: on%s%s%s%s", sOnly[0] ? " (screens: " : "", sOnly, sOnly[0] ? ")" : "",
             sTestCard ? ", test card" : "");
+    /* the battle transitions' art shader now, not at a battle's start (a GPU that refuses it leaves their GBA pictures) */
+    UiArt_Ready();
     return true;
 }
 
@@ -429,6 +432,8 @@ void NativeUi_CaptureFrame(void)
         sActive->hideObjects(gPlatformPictureHideObj);
     gPlatformPictureWindowAs = sActive != NULL && sActive->windows != NULL && picture != UI_PICTURE_HIDE_ALL
                              ? (uint8_t)sActive->windows() : UI_WINDOWS_GAME;
+    gPlatformPictureNoBrightness = sActive != NULL && sActive->brightness != NULL && picture != UI_PICTURE_HIDE_ALL
+                                 && sActive->brightness();
 }
 
 const char *NativeUi_ScreenNow(void)

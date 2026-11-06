@@ -211,6 +211,8 @@ static void TraceBattlers(void)
 // when the field has settled and PKMN_DEBUG_BATTLE_AT game frames have passed; PKMN_DEBUG_BATTLE_AGAIN=n starts a second one n frames
 // after the first has ended (the first-battle checks of the battle-to-overworld transition). legend:species:level starts it as the
 // legendaries' scripts do (BattleSetup_StartLegendaryBattle, StartRegiBattle for a Regi), with their own battle transitions.
+// With the native UI, elite:id starts a trainer battle as a trainer's script does (BattleSetup_StartTrainerBattle), with the
+// trainer's own transition (the Elite Four's and the Champion's mugshot, MS-108).
 static struct { bool read, started; int kind, a, b; unsigned at, frames, again, endedFrame; int count; bool wasInBattle; } sBattleScript;
 
 static void BattleScriptTick(void)
@@ -226,6 +228,10 @@ static void BattleScriptTick(void)
         {
             sBattleScript.kind = strcmp(kind, "trainer") == 0 ? 2 : strcmp(kind, "first") == 0 ? 3 : strcmp(kind, "bag") == 0 ? 4
                                : strcmp(kind, "legend") == 0 ? 5 : 1;
+#ifdef ENABLE_NATIVE_UI
+            if (strcmp(kind, "elite") == 0)
+                sBattleScript.kind = 6;
+#endif
             sBattleScript.a = a;
             sBattleScript.b = b > 0 ? b : 5;
         }
@@ -274,6 +280,20 @@ static void BattleScriptTick(void)
         CreateScriptedWildMon((enum Species)sBattleScript.a, (u8)sBattleScript.b, ITEM_NONE);
         BattleSetup_StartScriptedWildBattle();
     }
+#ifdef ENABLE_NATIVE_UI
+    else if (sBattleScript.kind == 6)
+    {
+        // as trainerbattle_no_intro does (an Elite Four room's script): the trainer's own party and transition; the
+        // location pop-up put away as the field does when a script starts (DoCB1_Overworld), else its erase clears BG0
+        SDL_Log("debug battle: trainer %d as its script starts it", sBattleScript.a);
+        LockPlayerFieldControls();
+        HideMapNamePopUpWindow();
+        FreezeObjectEvents();
+        InitTrainerBattleParameter();
+        TRAINER_BATTLE_PARAM.opponentA = (u16)sBattleScript.a;
+        BattleSetup_StartTrainerBattle();
+    }
+#endif
     else if (sBattleScript.kind == 5)
     {
         CreateScriptedWildMon((enum Species)sBattleScript.a, (u8)sBattleScript.b, ITEM_NONE);
@@ -300,6 +320,8 @@ static void BattleScriptTick(void)
 #ifdef ENABLE_NATIVE_UI
 #include "native_ui/ui_engine.h"
 #include "native_ui/ui_widgets.h"
+#include "character_customization.h"
+#include "multiplayer_appearance.h"
 #endif
 
 // PKMN_DEBUG_DIALOG=name[:frame]  (with the field scene): runs one of the game's own scripts (rescue = Birch's call on Route 101,
@@ -765,6 +787,11 @@ static void TransitionTick(void)
     // the Elite Four's mugshot shows its trainer: Sidney's, as no battle chose one
     if (sId == B_TRANSITION_MUGSHOT)
         TRAINER_BATTLE_PARAM.opponentA = TRAINER_SIDNEY;
+#ifdef ENABLE_NATIVE_UI
+    // PKMN_DEBUG_MUGSHOT=id: another trainer's (TRAINER_* number), for the native UI's mugshot tests (MS-108)
+    if (sId == B_TRANSITION_MUGSHOT && (value = SDL_getenv("PKMN_DEBUG_MUGSHOT")) != NULL && atoi(value) > 0)
+        TRAINER_BATTLE_PARAM.opponentA = (u16)atoi(value);
+#endif
     // As the field starts a battle (overworld.c DoCB1_Overworld): the controls locked and the location pop-up put away,
     // which would otherwise draw over the transition's BG0 picture.
     LockPlayerFieldControls();
@@ -1539,6 +1566,18 @@ static void CB2_DebugSceneSetup(void)
         if (Numbers(value, v, 5) >= 5)
             gSaveBlock2Ptr->playerGender = (u8)v[4];
     }
+#ifdef ENABLE_NATIVE_UI
+    // PKMN_DEBUG_CHARACTER=n: the player as character n of the character selection (its look saved as the STYLE editor
+    // saves it), for the native UI's tests of the player's own pictures (the mugshot's, MS-108)
+    if ((value = SDL_getenv("PKMN_DEBUG_CHARACTER")) != NULL && CharCustom_IsValid((u32)atoi(value)))
+    {
+        u8 look[MP_APPEARANCE_BYTES] = {0};
+
+        CharCustom_SetInLook(look, (u32)atoi(value));
+        CharCustom_WriteSavedLook(look, FALSE);
+        SDL_Log("debug scene: the player is character %d", atoi(value));
+    }
+#endif
     gMapHeader = *Overworld_GetMapHeaderByGroupAndId(gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum);
     if (gSaveBlock1Ptr->pos.x < 0 && gMapHeader.mapLayout != NULL) // x < 0: the middle of the map (the visual audit's sweep)
     {

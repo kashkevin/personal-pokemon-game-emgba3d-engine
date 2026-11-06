@@ -2265,6 +2265,41 @@ struct NativeTransitionArt
     u8 spriteCount;           /* the Frontier's logo circles */
     struct NativeTransitionSprite sprites[NATIVE_TRANSITION_CIRCLES];
 };
+/* MS-108: the mugshot (B_TRANSITION_MUGSHOT: the Elite Four's and the Champion's) as the game shows it now - its banners
+ * (BG0: state.art) shown only inside WIN0, whose span on each line slides them in with a wavy edge; the trainers'
+ * pictures (affine sprites: the top half of a front picture, scaled, the player's mirrored); its fades (BLDY by line:
+ * white spreading from the middle, then black) - for the UI to draw at the window's resolution in their place. */
+#define NATIVE_TRANSITION_PICS 4
+#define NATIVE_TRANSITION_OPEN 0x4000 /* a window edge at the screen's edge with nothing past it: open (carried out) */
+struct NativeTransitionPic
+{
+    s16 x;          /* its OAM box's top left (twice the sprite's size when doubleSize) */
+    s16 y;
+    u8 width;       /* the sprite's size in pixels (its OAM shape and size) */
+    u8 height;
+    bool8 doubleSize;
+    u8 paletteNum;  /* its OBJ palette */
+    u16 tileNum;    /* its OAM tiles (hidden while the UI draws it) */
+    s16 matrix[4];  /* its OAM matrix (a, b, c, d; 8.8 fixed point, 256 = 1: screen to picture) */
+};
+enum NativeTransitionFade
+{
+    NATIVE_TRANSITION_FADE_NONE,
+    NATIVE_TRANSITION_FADE_LIGHTEN, /* every layer towards white by fadeY / 16 on its line (BLDY, all targets) */
+    NATIVE_TRANSITION_FADE_DARKEN,  /* towards black */
+};
+struct NativeTransitionMugshot
+{
+    bool8 shown;              /* B_TRANSITION_MUGSHOT plays: the rest is set */
+    bool8 window;             /* BG0 only inside [winLeft, winRight) on each line (GBA pixels; +-OPEN: open, an
+                               * empty line OPEN, OPEN) */
+    s16 winLeft[160];
+    s16 winRight[160];
+    u8 fade;                  /* enum NativeTransitionFade: the UI draws it (the picture leaves BLDY out) */
+    u8 fadeY[160];            /* 0..16 by line */
+    u8 picCount;
+    struct NativeTransitionPic pics[NATIVE_TRANSITION_PICS];
+};
 struct NativeTransitionState
 {
     u8 id;               /* B_TRANSITION_* */
@@ -2284,6 +2319,7 @@ struct NativeTransitionState
     struct NativeTransitionBall balls[NATIVE_TRANSITION_BALLS];
     s16 lineOffset[160]; /* WEAVE: BG0's horizontal offset by line */
     struct NativeTransitionArt art; /* any kind: the transition's own art, if it shows now */
+    struct NativeTransitionMugshot mugshot; /* B_TRANSITION_MUGSHOT */
 };
 bool8 BattleTransition_NativeUiState(struct NativeTransitionState *state);
 /* battle_transition_frontier.c: the Frontier's logo circles on screen now (at most max), their sprites as the game has

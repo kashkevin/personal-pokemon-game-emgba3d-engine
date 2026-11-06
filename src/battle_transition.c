@@ -4957,6 +4957,137 @@ static void NativeUiArtBlend(struct NativeTransitionArt *art, u16 bldcnt, u16 bl
     }
 }
 
+// While the mugshot's banners slide in, ShowBanner cuts their wavy edges at the screen's edges (the upper banner's right
+// edge to 1..240, the lower one's left to 0..239): past them each edge goes on as its wave - line i's edge is the
+// banner's place plus (the upper) or minus (the lower) Sin(index + 16 * i, 16), index the one the frame began with - so
+// that over the 3D field the waves reach past the picture's edges. The places come from the lines the game did not cut.
+static void NativeUiMugshotWaves(struct NativeTransitionMugshot *m, const u16 *lines, u8 index)
+{
+    s32 upper = 0, lower = 0;
+    bool8 upperKnown = FALSE, lowerKnown = FALSE;
+    u32 i;
+
+    for (i = 0; i < DISPLAY_HEIGHT; i++)
+    {
+        s32 wave = Sin((u8)(index + 16 * i), 16), right = lines[i] & 0xFF, left = lines[i] >> 8;
+
+        if (i < DISPLAY_HEIGHT / 2 && right > 1 && right < DISPLAY_WIDTH)
+            upper = right - wave, upperKnown = TRUE;
+        else if (i >= DISPLAY_HEIGHT / 2 && left > 0 && left < DISPLAY_WIDTH - 1)
+            lower = left + wave, lowerKnown = TRUE;
+    }
+    for (i = 0; i < DISPLAY_HEIGHT; i++)
+    {
+        s32 wave = Sin((u8)(index + 16 * i), 16);
+
+        if (i < DISPLAY_HEIGHT / 2 && upperKnown && (m->winRight[i] == 1 || m->winRight[i] == DISPLAY_WIDTH))
+            m->winRight[i] = upper + wave;
+        else if (i >= DISPLAY_HEIGHT / 2 && lowerKnown && (m->winLeft[i] == 0 || m->winLeft[i] == DISPLAY_WIDTH - 1))
+            m->winLeft[i] = lower - wave;
+    }
+}
+
+// MS-108: the mugshot (the Elite Four's and the Champion's) as the game set it this frame: its banners on BG0 and the
+// window that slides them in line by line (WIN0H by line, from the buffer the coming VBlank puts into effect), the
+// trainers' pictures (the sprites its own callbacks slide) and its fades (BLDY by line, all layers), for the UI to draw
+// at the window's resolution in their place.
+static void NativeUiMugshot(struct NativeTransitionState *state, struct Task *main)
+{
+    static const u8 sizes[3][4][2] = {
+        {{8, 8}, {16, 16}, {32, 32}, {64, 64}},
+        {{16, 8}, {32, 8}, {32, 16}, {64, 32}},
+        {{8, 16}, {8, 32}, {16, 32}, {32, 64}},
+    };
+    struct NativeTransitionMugshot *m = &state->mugshot;
+    struct NativeTransitionArt *art = &state->art;
+    TransitionStateFunc func;
+    const u16 *lines;
+    bool8 sliding, fading;
+    u8 top = sTransitionData->WIN0V >> 8, bottom = sTransitionData->WIN0V & 0xFF;
+    u32 i;
+
+    if ((u16)main->tState >= ARRAY_COUNT(sMugshot_Funcs))
+        return;
+    func = sMugshot_Funcs[main->tState];
+    m->shown = TRUE;
+    // the trainers' pictures (affine: the GBA's own mirror and scale; created by Init, off screen until they slide)
+    for (i = 0; i < MAX_SPRITES && m->picCount < NATIVE_TRANSITION_PICS; i++)
+    {
+        const struct Sprite *sprite = &gSprites[i];
+        struct NativeTransitionPic *pic;
+        const struct OamMatrix *matrix;
+
+        if (!sprite->inUse || sprite->invisible || !(sprite->oam.affineMode & ST_OAM_AFFINE_ON_MASK) // not off or erased
+         || sprite->oam.shape > ST_OAM_V_RECTANGLE
+         || (sprite->callback != SpriteCB_MugshotTrainerPic && sprite->callback != SpriteCB_MugshotTrainerPicPartner))
+            continue;
+        pic = &m->pics[m->picCount++];
+        matrix = &gOamMatrices[sprite->oam.matrixNum & (OAM_MATRIX_COUNT - 1)];
+        pic->x = sprite->x + sprite->x2 + sprite->centerToCornerVecX;
+        pic->y = sprite->y + sprite->y2 + sprite->centerToCornerVecY;
+        if (sprite->coordOffsetEnabled)
+            pic->x += gSpriteCoordOffsetX, pic->y += gSpriteCoordOffsetY;
+        pic->width = sizes[sprite->oam.shape][sprite->oam.size][0];
+        pic->height = sizes[sprite->oam.shape][sprite->oam.size][1];
+        pic->doubleSize = sprite->oam.affineMode == ST_OAM_AFFINE_DOUBLE;
+        pic->paletteNum = sprite->oam.paletteNum;
+        pic->tileNum = sprite->oam.tileNum;
+        pic->matrix[0] = matrix->a;
+        pic->matrix[1] = matrix->b;
+        pic->matrix[2] = matrix->c;
+        pic->matrix[3] = matrix->d;
+    }
+    // the banners: their tiles and map come in SetGfx, the window opens with ShowBanner's first lines (nothing of them
+    // shows before); its own fade is drawn over every layer, so BG0 has no blend of its own
+    if (func == Mugshot_Init || func == Mugshot_SetGfx || (func == Mugshot_ShowBanner && !sTransitionData->VBlank_DMA))
+        return;
+    art->bg0 = TRUE;
+    art->blend = NATIVE_TRANSITION_BLEND_NONE;
+    for (i = 0; i < DISPLAY_HEIGHT; i++)
+    {
+        // HBlankCB_Mugshots sets each line's scroll at the line before's end: the upper banner's lines 1 to 80
+        art->scrollX[i] = i >= 1 && i <= DISPLAY_HEIGHT / 2 ? sTransitionData->BG0HOFS_Lower
+                                                            : sTransitionData->BG0HOFS_Upper;
+        art->scrollY[i] = sTransitionData->BG0VOFS;
+    }
+    // the window by line: the buffer the coming VBlank copies in (or the one it keeps); the fade's VBlank set it to the
+    // whole width. An edge at the screen's edge is open (the banner goes on past it over the 3D field), except the edge
+    // a banner slides by while it slides in (the upper one's right, the lower one's left).
+    m->window = (GetGpuReg(REG_OFFSET_DISPCNT) & DISPCNT_WIN0_ON) != 0;
+    fading = func == Mugshot_GradualWhiteFade || func == Mugshot_InitFadeWhiteToBlack || func == Mugshot_FadeToBlack
+          || func == Mugshot_End;
+    sliding = func == Mugshot_ShowBanner || func == Mugshot_StartOpponentSlide;
+    lines = sTransitionData->VBlank_DMA ? gScanlineEffectRegBuffers[0] : gScanlineEffectRegBuffers[1];
+    for (i = 0; i < DISPLAY_HEIGHT; i++)
+    {
+        u16 h = fading ? DISPLAY_WIDTH : lines[i];
+        s16 left = h >> 8, right = h & 0xFF;
+        bool8 inside = top <= bottom ? i >= top && i < bottom : i >= top || i < bottom;
+
+        if (right > DISPLAY_WIDTH || left > right)
+            right = DISPLAY_WIDTH;
+        if (!inside || left >= right)
+        {
+            m->winLeft[i] = m->winRight[i] = NATIVE_TRANSITION_OPEN;
+            continue;
+        }
+        m->winLeft[i] = left == 0 && !(sliding && i >= DISPLAY_HEIGHT / 2) ? -NATIVE_TRANSITION_OPEN : left;
+        m->winRight[i] = right == DISPLAY_WIDTH && !(sliding && i < DISPLAY_HEIGHT / 2) ? NATIVE_TRANSITION_OPEN : right;
+    }
+    if (sliding)
+        NativeUiMugshotWaves(m, lines, (u8)(main->data[1] - 16)); // tSinIndex, moved on after the frame's lines
+    // the fades: every layer lightened, then (the palettes turned white) darkened, by BLDY line by line
+    if (fading && (sTransitionData->BLDCNT & BLDCNT_TGT1_ALL) == BLDCNT_TGT1_ALL
+     && ((sTransitionData->BLDCNT & BLDCNT_EFFECT_EFF_MASK) == BLDCNT_EFFECT_LIGHTEN
+      || (sTransitionData->BLDCNT & BLDCNT_EFFECT_EFF_MASK) == BLDCNT_EFFECT_DARKEN))
+    {
+        m->fade = (sTransitionData->BLDCNT & BLDCNT_EFFECT_EFF_MASK) == BLDCNT_EFFECT_LIGHTEN
+                ? NATIVE_TRANSITION_FADE_LIGHTEN : NATIVE_TRANSITION_FADE_DARKEN;
+        for (i = 0; i < DISPLAY_HEIGHT; i++)
+            m->fadeY[i] = (lines[i] & 0x1F) < 16 ? (lines[i] & 0x1F) : 16;
+    }
+}
+
 static void NativeUiArt(struct NativeTransitionState *state, struct Task *main)
 {
     struct NativeTransitionArt *art = &state->art;
@@ -4967,6 +5098,9 @@ static void NativeUiArt(struct NativeTransitionState *state, struct Task *main)
 
     switch (state->id)
     {
+    case B_TRANSITION_MUGSHOT:
+        NativeUiMugshot(state, main);
+        break;
     case B_TRANSITION_AQUA:
     case B_TRANSITION_MAGMA:
     case B_TRANSITION_REGICE:

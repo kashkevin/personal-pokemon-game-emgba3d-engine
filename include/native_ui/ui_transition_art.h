@@ -14,8 +14,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* the layers kept on the GPU (each its own texture, uploaded when its pixels change): BG0 and the three circles */
-#define UI_ART_LAYER_COUNT 4
+/* the layers kept on the GPU (each its own texture, uploaded when its pixels change): BG0 and the three circles, or BG0
+ * and the mugshot's four trainer pictures */
+#define UI_ART_LAYER_COUNT 5
+/* a window edge (UiArtLayer.winLeft, winRight) this far or further is open: nothing past it, over the 3D field too */
+#define UI_ART_OPEN 8192
 
 enum UiArtBlend
 {
@@ -43,6 +46,21 @@ struct UiArtLayer
     int eva;                /* 0..16 (more is 16, as on the GBA) */
     int evb;
     int y;
+    /* a background shown only inside a window: [winLeft, winRight) on each GBA line (160 lines, GBA pixels; at
+     * +-UI_ART_OPEN or further an edge is open, an empty line is UI_ART_OPEN, UI_ART_OPEN). Its edges are smooth at the
+     * window's resolution: through the lines' values at their middles a cubic where neighbouring lines' edges slope (a
+     * wave), the GBA's own step where they jump, anti-aliased over one window pixel. NULL: everywhere. */
+    const int16_t *winLeft;
+    const int16_t *winRight;
+    bool wrapX;             /* carried out past the picture's left and right edges by its map's repeat (a banner the
+                             * same all across) instead of each line's edge pixel */
+    /* a sprite drawn as pixel art, not smoothed: each art pixel cell x cell window pixels, the art's top left at
+     * (cornerX, cornerY) window pixels, mirrored across with flipX, up and down with flipY (0: smoothed) */
+    int cell;
+    int cornerX;
+    int cornerY;
+    bool flipX;
+    bool flipY;
 };
 
 /* The GPU side is ready (made on the first call; FALSE for good when the GPU refused the shader or the art is switched

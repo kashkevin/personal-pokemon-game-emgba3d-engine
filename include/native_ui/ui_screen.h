@@ -62,6 +62,9 @@ struct UiScreen
     void (*text)(const char *utf8);
     /* the GBA picture's windows while up (NULL: the game's) */
     enum UiWindows (*windows)(void);
+    /* true: the screen draws the GBA's brightness effect itself (BLDY's lighten and darken, smooth from line to line: a
+     * battle transition's fade) and the picture is drawn without it (NULL: the game's) */
+    bool (*brightness)(void);
 };
 
 enum UiPcKey

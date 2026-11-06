@@ -14,9 +14,13 @@
  * slot's mean width, twice its area over its outline: against the background colours for the shape's outline, a
  * stroke 1.2 pixels wide or less at full weight; against any colour for a rim between two colours, 1.5 pixels or
  * less), so lines and rims one pixel wide stay whole. Last the GBA's blend with what is under it. Past
- * the picture's edges over the 3D field a background is carried out as the compositor carries the picture out. Test
- * switches: PKMN_TRANSITION_ART=0 (the GBA picture of the art instead), PKMN_TRANSITION_ART_SIGMA (the Gaussian's
- * width), PKMN_TRANSITION_ART_BOOST (the strokes' weight). Project-owned.
+ * the picture's edges over the 3D field a background is carried out as the compositor carries the picture out (a
+ * banner by its map's repeat). A background may show only inside a window by line (the mugshot's banners): each edge a
+ * cubic through the lines' values at their middles where they slope into each other, the GBA's step where they jump,
+ * anti-aliased over one window pixel across its slope. A sprite may be drawn as pixel art instead (the mugshot's
+ * trainer pictures): each art pixel whole window pixels, not smoothed. Test switches: PKMN_TRANSITION_ART=0 (the GBA
+ * picture of the art instead), PKMN_TRANSITION_ART_SIGMA (the Gaussian's width), PKMN_TRANSITION_ART_BOOST (the
+ * strokes' weight). Project-owned.
  */
 #include <math.h>
 #include <stdlib.h>
@@ -71,7 +75,15 @@ static const char sFragmentShader[] =
     "uniform vec3 uEffect;\n"        /* eva, evb, y (0..1) */
     "uniform float uSigma;\n"
     "uniform float uBand;\n"
+    "uniform int uWindow;\n"         /* 1: a background only inside the window, by line (uWin) */
+    "uniform vec4 uWin[80];\n"       /* the window by GBA line: left, right of an even line, then of the odd one */
+    "uniform int uWrapX;\n"          /* 1: a background carried out across by its map's repeat */
+    "uniform vec4 uCell;\n"          /* pixel art: the art's top left in window pixels (rows from the top), its pixels'
+                                     * size in window pixels (0: smoothed), mirrored (1 across, 2 up and down) */
     "out vec4 fragColor;\n"
+    "\n"
+    "const float OPEN = 8192.0;\n"   /* UI_ART_OPEN: an open window edge */
+    "const float STEP = 24.0;\n"     /* neighbouring lines' edges further apart than this are a step, not a slope */
     "\n"
     "float Cdf(float x)\n"           /* the normal distribution: erf by Abramowitz and Stegun 7.1.26 */
     "{\n"
@@ -90,6 +102,8 @@ static const char sFragmentShader[] =
     "    if (uBackground != 0)\n"
     "    {\n"
     "        vec2 screen = clamp(vec2(q) + 0.5 - scroll, vec2(0.5), vec2(239.5, 159.5));\n"
+    "        if (uWrapX != 0)\n"
+    "            screen.x = float(q.x) + 0.5 - scroll.x;\n"
     "        q = ivec2(floor(screen + scroll));\n"
     "        q = ivec2(q.x & (uSize.x - 1), q.y & (uSize.y - 1));\n"
     "    }\n"
@@ -111,16 +125,99 @@ static const char sFragmentShader[] =
     "    return vec4(texelFetch(uPal, ivec2(uPalBase + int(slot), 0), 0).rgb, 1.0);\n"
     "}\n"
     "\n"
+    "float WinSide(int line, int side)\n"
+    "{\n"
+    "    vec4 w = uWin[line >> 1];\n"
+    "    vec2 v = (line & 1) == 0 ? w.xy : w.zw;\n"
+    "    return side == 0 ? v.x : v.y;\n"
+    "}\n"
+    "\n"
+    /* one edge of the window (side 0 its left, 1 its right) at GBA row y, and its slope: through the lines' values at
+     * their middles a cubic (Catmull-Rom) where the lines round it slope into each other (a wave's edge, carried on
+     * straight past a line that does not), else the line's own value (the GBA's step) */
+    "vec2 Edge(float y, int side)\n"
+    "{\n"
+    "    float fy = clamp(y - 0.5, 0.0, 159.0), t;\n"
+    "    int l1 = int(floor(fy));\n"
+    "    float v0 = WinSide(max(l1 - 1, 0), side), v1 = WinSide(l1, side), v2 = WinSide(min(l1 + 1, 159), side);\n"
+    "    float v3 = WinSide(min(l1 + 2, 159), side);\n"
+    "    vec4 c;\n"
+    "    if (abs(v1) >= OPEN || abs(v2) >= OPEN || abs(v2 - v1) > STEP)\n"
+    "        return vec2(WinSide(int(clamp(floor(y), 0.0, 159.0)), side), 0.0);\n"
+    "    if (abs(v0) >= OPEN || abs(v1 - v0) > STEP)\n"
+    "        v0 = 2.0 * v1 - v2;\n"
+    "    if (abs(v3) >= OPEN || abs(v3 - v2) > STEP)\n"
+    "        v3 = 2.0 * v2 - v1;\n"
+    "    t = fy - float(l1);\n"
+    "    c = 0.5 * vec4(2.0 * v1, v2 - v0, 2.0 * v0 - 5.0 * v1 + 4.0 * v2 - v3, 3.0 * v1 - v0 - 3.0 * v2 + v3);\n"
+    "    return vec2(c.x + t * (c.y + t * (c.z + t * c.w)), c.y + t * (2.0 * c.z + 3.0 * t * c.w));\n"
+    "}\n"
+    "\n"
+    /* how much of a window pixel at GBA position g is inside the window: each edge's distance across its slope, over
+     * one window pixel */
+    "float Inside(vec2 g)\n"
+    "{\n"
+    "    vec2 l = Edge(g.y, 0), r = Edge(g.y, 1);\n"
+    "    float a = l.x <= -OPEN ? 1.0 : l.x >= OPEN ? 0.0\n"
+    "            : clamp(0.5 + (g.x - l.x) * uPic.z * inversesqrt(1.0 + l.y * l.y), 0.0, 1.0);\n"
+    "    float b = r.x >= OPEN ? 1.0 : r.x <= -OPEN ? 0.0\n"
+    "            : clamp(0.5 + (r.x - g.x) * uPic.z * inversesqrt(1.0 + r.y * r.y), 0.0, 1.0);\n"
+    "    return a * b;\n"
+    "}\n"
+    "\n"
+    /* the GBA's blend with what is under it (premultiplied) */
+    "vec4 Blend(vec4 col)\n"
+    "{\n"
+    "    if (uMode == 1)\n"
+    "        col = vec4(col.rgb * uEffect.x, col.a * (1.0 - uEffect.y));\n"
+    "    else if (uMode == 2)\n"
+    "        col.rgb += (col.a - col.rgb) * uEffect.z;\n"
+    "    else if (uMode == 3)\n"
+    "        col.rgb *= 1.0 - uEffect.z;\n"
+    "    return col;\n"
+    "}\n"
+    "\n"
     "void main()\n"
     "{\n"
-    "    vec2 g = (vec2(gl_FragCoord.x, uScreenH - gl_FragCoord.y) - uPic.xy) / uPic.z;\n"
+    "    vec2 at = vec2(gl_FragCoord.x, uScreenH - gl_FragCoord.y);\n"
+    "    vec2 g = (at - uPic.xy) / uPic.z;\n"
+    "    float cover = 1.0;\n"
+    /* pixel art: the art pixel under the window pixel's middle, each whole window pixels */
+    "    if (uCell.z > 0.0)\n"
+    "    {\n"
+    "        ivec2 t = ivec2(floor((at - uCell.xy) / uCell.z));\n"
+    "        int flip = int(uCell.w);\n"
+    "        if (t.x < 0 || t.y < 0 || t.x >= uSize.x || t.y >= uSize.y)\n"
+    "            discard;\n"
+    "        if ((flip & 1) != 0)\n"
+    "            t.x = uSize.x - 1 - t.x;\n"
+    "        if ((flip & 2) != 0)\n"
+    "            t.y = uSize.y - 1 - t.y;\n"
+    "        fragColor = Blend(Colour(texelFetch(uSlots, t, 0).r));\n"
+    "        if (fragColor.a <= 0.0 && fragColor.r <= 0.0 && fragColor.g <= 0.0 && fragColor.b <= 0.0)\n"
+    "            discard;\n"
+    "        return;\n"
+    "    }\n"
+    /* a window's edges where the pixel really is (past the picture's edges too) */
+    "    if (uWindow != 0)\n"
+    "    {\n"
+    "        cover = Inside(g);\n"
+    "        if (cover <= 0.0)\n"
+    "            discard;\n"
+    "    }\n"
     /* carried out as the compositor carries the picture out (gl_battle.c DrawCarriedOut): each line's edge pixel to the
-     * sides, the first line's corner pixels above (the left half the left one), the last line's below */
+     * sides, the first line's corner pixels above (the left half the left one), the last line's below; a banner by
+     * its map's repeat across, its edge lines above and below */
     "    if (uCarry != 0 && (g.x < 0.0 || g.x >= 240.0 || g.y < 0.0 || g.y >= 160.0))\n"
     "    {\n"
-    "        if (g.y < 0.0 || g.y >= 160.0)\n"
-    "            g.x = g.x < 120.0 ? 0.5 : 239.5;\n"
-    "        g = clamp(g, vec2(0.5), vec2(239.5, 159.5));\n"
+    "        if (uWrapX != 0)\n"
+    "            g.y = clamp(g.y, 0.5, 159.5);\n"
+    "        else\n"
+    "        {\n"
+    "            if (g.y < 0.0 || g.y >= 160.0)\n"
+    "                g.x = g.x < 120.0 ? 0.5 : 239.5;\n"
+    "            g = clamp(g, vec2(0.5), vec2(239.5, 159.5));\n"
+    "        }\n"
     "    }\n"
     /* the scroll of the GBA line the pixel is on: across the line's width as the GBA moves it (the weave's comb); up
      * and down from one line's middle to the next where they differ by a few pixels (a wave: the GBA's rows at the
@@ -197,13 +294,7 @@ static const char sFragmentShader[] =
     "        f2 = gb;\n"
     "        c2 = Colour(slots[bb]);\n"
     "    }\n"
-    "    vec4 col = f2 >= 0.0 ? mix(c2, c1, 0.5 + 0.5 * clamp((f1 - f2) * uBand, 0.0, 1.0)) : c1;\n"
-    "    if (uMode == 1)\n"
-    "        col = vec4(col.rgb * uEffect.x, col.a * (1.0 - uEffect.y));\n"
-    "    else if (uMode == 2)\n"
-    "        col.rgb += (col.a - col.rgb) * uEffect.z;\n"
-    "    else if (uMode == 3)\n"
-    "        col.rgb *= 1.0 - uEffect.z;\n"
+    "    vec4 col = Blend((f2 >= 0.0 ? mix(c2, c1, 0.5 + 0.5 * clamp((f1 - f2) * uBand, 0.0, 1.0)) : c1) * cover);\n"
     "    if (col.a <= 0.0 && col.r <= 0.0 && col.g <= 0.0 && col.b <= 0.0)\n"
     "        discard;\n"
     "    fragColor = col;\n"
@@ -212,11 +303,11 @@ static const char sFragmentShader[] =
 enum
 {
     U_SLOTS, U_PAL, U_SCREEN_H, U_PIC, U_BACKGROUND, U_CARRY, U_SIZE, U_ORIGIN, U_PAL_BASE, U_LINES, U_WEIGHTS,
-    U_BOOST, U_MODE, U_EFFECT, U_SIGMA, U_BAND, U_COUNT
+    U_BOOST, U_MODE, U_EFFECT, U_SIGMA, U_BAND, U_WINDOW, U_WIN, U_WRAP_X, U_CELL, U_COUNT
 };
 static const char *const sUniformNames[U_COUNT] = {
     "uSlots", "uPal", "uScreenH", "uPic", "uBackground", "uCarry", "uSize", "uOrigin", "uPalBase", "uLines[0]",
-    "uWeights", "uBoost", "uMode", "uEffect", "uSigma", "uBand",
+    "uWeights", "uBoost", "uMode", "uEffect", "uSigma", "uBand", "uWindow", "uWin[0]", "uWrapX", "uCell",
 };
 
 typedef void (APIENTRY *PfnUniform2i)(GLint location, GLint v0, GLint v1);
@@ -476,7 +567,8 @@ bool UiArt_Draw(int id, const struct UiArtLayer *art, int outputWidth, int outpu
                 bool carry)
 {
     struct Layer *layer;
-    float lines[80 * 4];
+    float lines[80 * 4], win[80 * 4];
+    bool window = art != NULL && art->background && art->winLeft != NULL && art->winRight != NULL;
     GLint program = 0, vertexArray = 0, activeTexture = 0, texture0 = 0, texture1 = 0, texture2 = 0;
     GLint viewport[4], scissorBox[4];
     GLint srcRgb = GL_ONE, dstRgb = GL_ZERO;
@@ -488,12 +580,19 @@ bool UiArt_Draw(int id, const struct UiArtLayer *art, int outputWidth, int outpu
      || outputWidth <= 0 || outputHeight <= 0)
         return false;
     /* where it may draw: the whole window over the 3D field, else the picture; a sprite only round itself (the
-     * smoothing reaches two art pixels past it) */
+     * smoothing reaches two art pixels past it), as pixel art its own box */
     x0 = carry ? 0 : px;
     y0 = carry ? 0 : py;
     x1 = carry ? outputWidth : px + 240 * k;
     y1 = carry ? outputHeight : py + 160 * k;
-    if (!art->background)
+    if (!art->background && art->cell > 0)
+    {
+        x0 = SDL_max(x0, art->cornerX);
+        y0 = SDL_max(y0, art->cornerY);
+        x1 = SDL_min(x1, art->cornerX + art->cell * art->w);
+        y1 = SDL_min(y1, art->cornerY + art->cell * art->h);
+    }
+    else if (!art->background)
     {
         x0 = SDL_max(x0, px + (art->originX - 2) * k);
         y0 = SDL_max(y0, py + (art->originY - 2) * k);
@@ -544,6 +643,8 @@ bool UiArt_Draw(int id, const struct UiArtLayer *art, int outputWidth, int outpu
     {
         lines[i * 2] = art->scrollX != NULL ? (float)art->scrollX[i] : 0.0f;
         lines[i * 2 + 1] = art->scrollY != NULL ? (float)art->scrollY[i] : 0.0f;
+        win[i * 2] = window ? (float)art->winLeft[i] : 0.0f;
+        win[i * 2 + 1] = window ? (float)art->winRight[i] : 0.0f;
     }
 
     glViewport(0, 0, outputWidth, outputHeight);
@@ -581,6 +682,12 @@ bool UiArt_Draw(int id, const struct UiArtLayer *art, int outputWidth, int outpu
     /* the two strongest slots blended over one window pixel: at an edge their weights part by 0.8 / sigma an art
      * pixel */
     dglUniform1f(sUniforms[U_BAND], 2.5f * sSigma * (float)k);
+    dglUniform1i(sUniforms[U_WINDOW], window ? 1 : 0);
+    dglUniform4fv(sUniforms[U_WIN], 80, win);
+    dglUniform1i(sUniforms[U_WRAP_X], art->background && art->wrapX ? 1 : 0);
+    dglUniform4f(sUniforms[U_CELL], (float)art->cornerX, (float)art->cornerY,
+                 !art->background && art->cell > 0 ? (float)art->cell : 0.0f,
+                 (float)((art->flipX ? 1 : 0) | (art->flipY ? 2 : 0)));
     glDrawArrays(GL_TRIANGLES, 0, 3);
 
     dglBindVertexArray((GLuint)vertexArray);
