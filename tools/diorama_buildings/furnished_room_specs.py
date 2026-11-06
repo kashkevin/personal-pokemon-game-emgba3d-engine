@@ -16,7 +16,8 @@ that whoever stands behind it is seen over it, a stool 6 rows, a plant a card; w
 drawn face. Every piece and every room still reproduces the drawing pixel for pixel in the GBA's
 projection (gen_voxel_buildings.py --verify), and each room is looked at from the game's camera
 before it is listed. Their pieces stand in their own room only (`reuse_in`: none), so a tile
-they share with another room does not stand them there.
+they share with another room does not stand them there - but for Team Magma's hideout's machines,
+which stand in every room of the hideout (KNOWN_ISSUES E9).
 
 Conventions as in voxel_building_specs.py: shapes are pixels of the room's drawing; `height` is
 the rows of a piece's front, standing at its drawn foot, the rest of what it claims above that
@@ -669,6 +670,44 @@ def palace_lobby():
     ])
 
 
+# ── Team Magma's hideout: its machines ────────────────────────────────────
+#
+# KNOWN_ISSUES E9. The hideout is a cave: the rules stand its rock (its walls are no room's, so
+# battle_room_specs.AUTO_ROOMS leaves it out) and its machines lay drawn on the floor of the alcoves
+# they stand in, where a 3D battle's stage stood a foe on one. Two machines of the Lavaridge tileset,
+# each 2 x 3 cells against the rock, drawn alike in every room of the hideout:
+#
+#     the server   a white top with a grille (rows 0-23), a khaki front with vents and the white
+#                  band over them (rows 24-47), its corners cut
+#     the console  a disc on its top (rows 0-23), a grey front with a screen and keys (rows 24-47)
+#
+# Each stands its drawn front, 24 rows, and is as deep as its drawn top, 24 rows: the box the
+# drawing shows, a disc or a grille on its top once (run back to the rock's foot, where its
+# collision starts, the top's rows laid over again showed a second disc behind the first). The
+# floor behind it, which the box hides at 45 degrees, is bare (`under`): the marks the generator
+# would carry under a piece from either side of it are the rock's here, not a rug's. The second room
+# of 2F has both machines, twice (x 144-208 and 432-496, rows 32-80); a room's own pieces do not
+# stand again in it, so all four are cut there. The rest of the hideout's rooms stand them where
+# their pixels are drawn again (reuse_in): the colours round them, the rock's and the floor's, are
+# never a machine's.
+
+MAGMA_GROUND = ("d59c8b", "bd8373", "9c6252", "833120", "621000")
+MAGMA_ROOMS = frozenset(("LAYOUT_MAGMA_HIDEOUT_1F", "LAYOUT_MAGMA_HIDEOUT_2F_1R",
+                         "LAYOUT_MAGMA_HIDEOUT_3F_1R", "LAYOUT_MAGMA_HIDEOUT_3F_2R",
+                         "LAYOUT_MAGMA_HIDEOUT_3F_3R", "LAYOUT_MAGMA_HIDEOUT_4F",
+                         "LAYOUT_MAGMA_HIDEOUT_2F_3R"))
+
+
+def magma_hideout_machines():
+    facet, own_shell, piece = _helpers()
+    return own_shell([
+        piece("%s_%s" % (kind, side), [(x0, 32, x0 + 32, 80)], 24, solid=True, leave=MAGMA_GROUND,
+              under=False)
+        for side, x in (("w", 144), ("e", 432))
+        for kind, x0 in (("server", x), ("console", x + 32))
+    ])
+
+
 def furnished_room_specs():
     """The specs, made when voxel_building_specs asks for them (its SPECS end with them)."""
     return [
@@ -779,5 +818,10 @@ def furnished_room_specs():
             "name": "frontier_ranking_hall",
             "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_RANKING_HALL", "ground": [0x20A],
                          "reuse_in": frozenset(), "pieces": ranking_hall()},
+        },
+        {
+            "name": "magma_hideout_2f_2r",
+            "interior": {"layout": "LAYOUT_MAGMA_HIDEOUT_2F_2R", "ground": [0x3A2],
+                         "reuse_in": MAGMA_ROOMS, "pieces": magma_hideout_machines()},
         },
     ]

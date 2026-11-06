@@ -833,12 +833,15 @@ def interior_specs(spec):
                         apx[lx, ly] = fpx[x, y]
                         apx[lx, ly + h * 16] = fpx[x, y]
                     elif owner[y][x] is not None and owner[y][x] >= 0 and not pieces[
-                            owner[y][x]].get("card"):
+                            owner[y][x]].get("card") and pieces[owner[y][x]].get("under", True):
                         # under a piece: what the drawing hides there. On a
                         # rug (a mark either side of it) it is the rug, not
                         # the room's bare floor showing round a chair's legs
                         # from any other angle. Not behind a card (a plant):
-                        # that floor is in view, and its drawing never was
+                        # that floor is in view, and its drawing never was;
+                        # nor under a piece that says its floor is bare
+                        # (`under`: a machine in a cave's alcove, rock either
+                        # side of it, not a rug)
                         under = mark_under(x, y)
                         if under is not None:
                             apx[lx, ly + uo] = under

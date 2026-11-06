@@ -592,7 +592,7 @@ WALL_COLOURS = ("f6b473", "de7b31", "ffe6b4")   # the Center's orange wall
 
 def piece(name, shape, height, base=0, fill=None, leave=(), side=None, solid=False,
           back=None, card=False, top=None, foot=None, walls=(), cells=(), against=None,
-          claim=()):
+          claim=(), under=True):
     """`back`: the Z its top runs back to, where the cartridge's collision
     says it ends (or the wall it stands against); `against`: that wall's Z,
     where a top drawn deeper than the room in front of it stops, its back
@@ -600,11 +600,12 @@ def piece(name, shape, height, base=0, fill=None, leave=(), side=None, solid=Fal
     drawing that depth is laid with, when its own drawn top is too thin to
     repeat; `card`: leaves, not a box; `foot`: the row a wall with a doorway
     stands on; `walls`: the side walls it carries, ((x, z), (x, z)[, height])
-    - facing left of a->b - dressed with `side`."""
+    - facing left of a->b - dressed with `side`; `under` False: the floor its
+    drawing hides is bare, no mark either side of it carried under it."""
     return {"name": name, "shape": shape, "height": height, "base": base,
             "fill": fill, "leave": leave, "side": side, "solid": solid,
             "back": back, "card": card, "top": top, "foot": foot, "walls": walls,
-            "cells": cells, "against": against, "claim": claim}
+            "cells": cells, "against": against, "claim": claim, "under": under}
 
 
 def own_shell(pieces):
