@@ -750,6 +750,48 @@ def magma_long_machine():
     ])
 
 
+# 4F's small console (13,18-19), the last of the hideout's machines that lay flat: a panel with a
+# screen and keys (rows 16-31 of its two cells), its khaki top (rows 9-15) and a white ball on a
+# collar (rows 0-8, x 3-12), the whole of it on the cells' upper layer - over the lava's edge (the
+# upper cell's lower layer is lava, a rim at the floor's level: buildings.c SinkLava sinks only
+# the bare lava round it) and the floor (the lower cell's). It is no room's piece: no room is
+# modelled on 4F, and a modelled room would stand the machines reused there on its plain floor
+# instead of each cell's own paint (find_placements). Like the sea's rocks it stands where it is
+# drawn, on each cell's own lower layer (`at` and `quads`: the model stands for both cells'
+# upper layers), so the lava behind it is the lava the cartridge draws there. One box read off
+# its drawing as the other consoles: its front 16 rows on its foot, as deep as its drawn top, the
+# ball laid on its top as their discs (the ball's columns run deeper by its rows). Its sides and
+# back take its drawing, projected, not a tile of its front (not `solid`): the lava the ball's
+# collar leaves showing under its round edge is a gap through it at 45 degrees, as a railing's
+# gaps are. It waited on E13: standing, it moved the 3D battles in front of it off the floor and
+# onto the lava, until the stage search took lava for no ground (battle_stage.c noFeet); now they
+# stand on the floor beside it.
+
+MAGMA_CONSOLE_AT = ("LAYOUT_MAGMA_HIDEOUT_4F", 13, 18)
+
+
+def magma_small_console():
+    import voxel_building as vb
+    lid, x, y = MAGMA_CONSOLE_AT
+    layout = vb.LayoutArt(lid)
+    art = vb.Image.new("RGBA", (16, 32), (0, 0, 0, 0))
+    px = art.load()
+    for j in range(2):
+        for q, sub in enumerate(layout.subtiles(layout.metatile(x, y + j), 1)):
+            for k, (rgb, index) in enumerate(sub):
+                if index:
+                    px[(q & 1) * 8 + k % 8, j * 16 + (q >> 1) * 8 + k // 8] = rgb + (255,)
+
+    def parts():
+        import gen_voxel_buildings as gen     # (it imports the specs: not at the top)
+        return [vb.Relief("console", art, 16, gen.pick_side(art, 16), foot=32)]
+
+    return {"name": "magma_hideout_4f_small_console", "layout": lid, "rect": (x, y, 1, 2),
+            "ground": [0x3A2], "art": art, "parts": parts,
+            "exact": [(0, 0, 16, 32)], "at": [MAGMA_CONSOLE_AT],
+            "quads": {(0, 0): 15, (0, 1): 15}}
+
+
 def furnished_room_specs():
     """The specs, made when voxel_building_specs asks for them (its SPECS end with them)."""
     return [
@@ -884,4 +926,5 @@ def furnished_room_specs():
             "interior": {"layout": "LAYOUT_MAGMA_HIDEOUT_3F_2R", "ground": [0x308],
                          "reuse_in": MAGMA_ALL, "pieces": magma_long_machine()},
         },
+        magma_small_console(),
     ]
