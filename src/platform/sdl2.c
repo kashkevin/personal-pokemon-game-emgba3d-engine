@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <errno.h>
 #include <time.h>
 #ifdef _WIN32
 #include <direct.h>
@@ -199,7 +201,9 @@ static void ApplyDisplaySettings(bool recenter);
 #ifdef ENABLE_DIORAMA
 static void ApplyMemoryBudget(void);
 #endif
-static void StoreSaveFile(void);
+static bool StoreSaveFile(void);
+static void FlushSaveAtExit(void);
+static int SelfTestSaveRetry(void);
 static void AfterPresent(void);
 
 #ifdef ENABLE_DIORAMA
@@ -1202,7 +1206,7 @@ int main(int argc, char **argv)
 #endif
     }
 
-    FlushSaveIfDirty();
+    FlushSaveAtExit();
     MpBridge_Shutdown();
 #ifdef ENABLE_DIORAMA
     if (sCameraStepsDirty)
@@ -1305,6 +1309,8 @@ static void ParseArguments(int argc, char **argv)
             exit(NativeSelfTest_PaletteSlots()); // src/platform/native_selftest.c (KNOWN_ISSUES MS-210)
         else if (strcmp(argv[i], "--selftest-missing-window") == 0)
             exit(NativeSelfTest_MissingWindow()); // src/platform/native_selftest.c (KNOWN_ISSUES MS-206, MS-211)
+        else if (strcmp(argv[i], "--selftest-save-retry") == 0)
+            exit(SelfTestSaveRetry()); // a failed save file write tried again (KNOWN_ISSUES MS-212)
         else if (strcmp(argv[i], "--selftest-line-break") == 0)
             exit(NativeSelfTest_LineBreak()); // src/platform/native_selftest.c (KNOWN_ISSUES U13)
         else if (strcmp(argv[i], "--selftest-wild-weather") == 0)
@@ -2522,6 +2528,28 @@ static void SyncSaveFile(FILE *file, const char *path)
     }
 }
 
+// Why the last save file write failed, for the log (the operating system's own words)
+static char sSaveFailure[192];
+
+static void NoteSaveFailure(const char *what, const char *path)
+{
+#ifdef _WIN32
+    DWORD code = GetLastError();
+    char text[128] = "";
+
+    if (code != 0)
+        FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, code, 0, text, sizeof(text),
+                       NULL);
+    for (char *end = text + strlen(text); end > text && (end[-1] == '\n' || end[-1] == '\r' || end[-1] == ' '); end--)
+        end[-1] = '\0';
+    SDL_snprintf(sSaveFailure, sizeof(sSaveFailure), "%s %s: %s (Windows error %lu)", what, path,
+                 text[0] ? text : "no detail", (unsigned long)code);
+#else
+    SDL_snprintf(sSaveFailure, sizeof(sSaveFailure), "%s %s: %s", what, path, strerror(errno));
+#endif
+    SDL_Log("%s", sSaveFailure);
+}
+
 // Writes the whole flash image to a temporary file, puts it on the disk and renames it over the save, so a crash or
 // power cut never leaves a half-written file behind (the old save or the new one, whole).
 static bool WriteSaveImage(void)
@@ -2533,17 +2561,18 @@ static bool WriteSaveImage(void)
     Uint32 elapsedMs;
 
     SDL_snprintf(tempPath, sizeof(tempPath), "%s.tmp", sSavePath);
+    errno = 0;
     saveFile = fopen(tempPath, "wb");
     if (saveFile == NULL)
     {
-        SDL_Log("Unable to write save file %s", tempPath);
+        NoteSaveFailure("Unable to write save file", tempPath);
         return false;
     }
     written = fwrite(FLASH_BASE, 1, sizeof(FLASH_BASE), saveFile);
     if (fflush(saveFile) != 0 || written != sizeof(FLASH_BASE))
     {
+        NoteSaveFailure("Short write to", tempPath);
         fclose(saveFile);
-        SDL_Log("Short write to %s", tempPath);
         return false;
     }
     SyncSaveFile(saveFile, tempPath);
@@ -2554,13 +2583,13 @@ static bool WriteSaveImage(void)
 #ifdef _WIN32
     if (!MoveFileExA(tempPath, sSavePath, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
     {
-        SDL_Log("Unable to replace save file %s", sSavePath);
+        NoteSaveFailure("Unable to replace save file", sSavePath);
         return false;
     }
 #else
     if (rename(tempPath, sSavePath) != 0)
     {
-        SDL_Log("Unable to replace save file %s", sSavePath);
+        NoteSaveFailure("Unable to replace save file", sSavePath);
         return false;
     }
 #endif
@@ -2574,7 +2603,7 @@ static u32 sSaveWritesDone;
 static u32 sSaveWritesFailed;
 #endif
 
-static void StoreSaveFile(void)
+static bool StoreSaveFile(void)
 {
     bool ok = WriteSaveImage();
 
@@ -2584,21 +2613,230 @@ static void StoreSaveFile(void)
     else
         sSaveWritesFailed++;
 #endif
-    (void)ok;
+    return ok;
+}
+
+// A save file write that failed - a full disk, the file held open by another program at that moment (an antivirus or a
+// sync tool on Windows), a folder without write access - is tried again, after 1 s, then 2, 4... up to every 30 s, and a
+// few times more as the game closes. The old save stays whole meanwhile (WriteSaveImage). The window's title says so
+// until a write succeeds, and the crash report's error log has the reason (KNOWN_ISSUES MS-212). Before, the game went
+// on as saved and the image was written again only by the next save: closing the game first lost what it held, and the
+// launcher could take the older file.
+#define SAVE_RETRY_FIRST_MS 1000
+#define SAVE_RETRY_MAX_MS 30000
+static u32 sSaveFailedTries;        // failed writes since the last that succeeded
+static Uint32 sSaveRetryAt;         // SDL_GetTicks() when the next try is due (while sSaveFailedTries != 0)
+static Uint32 sSaveRetryDelay;
+
+static void SetSaveFailureTitle(bool failing)
+{
+    if (sdlWindow != NULL)
+        SDL_SetWindowTitle(sdlWindow, failing ? "Pokemon Emerald - the save file could not be written: trying again"
+                                              : "Pokemon Emerald");
+}
+
+static bool TrySaveWrite(void)
+{
+    char message[320];
+
+    gPlatformFlashDirty = FALSE;
+    if (StoreSaveFile())
+    {
+        if (sSaveFailedTries != 0)
+        {
+            SDL_snprintf(message, sizeof(message), "The save file was written after %u failed tries",
+                         (unsigned)sSaveFailedTries);
+            SDL_Log("%s", message);
+            CrashReport_Error(message);
+            sSaveFailedTries = 0;
+            SetSaveFailureTitle(false);
+        }
+        return true;
+    }
+    gPlatformFlashDirty = TRUE; // the image is still to be written
+    if (sSaveFailedTries++ == 0)
+    {
+        SDL_snprintf(message, sizeof(message), "The save file could not be written (%s); trying again", sSaveFailure);
+        CrashReport_Error(message);
+        SetSaveFailureTitle(true);
+        sSaveRetryDelay = SAVE_RETRY_FIRST_MS;
+    }
+    else if (sSaveRetryDelay < SAVE_RETRY_MAX_MS)
+    {
+        sSaveRetryDelay = sSaveRetryDelay * 2 > SAVE_RETRY_MAX_MS ? SAVE_RETRY_MAX_MS : sSaveRetryDelay * 2;
+    }
+    sSaveRetryAt = SDL_GetTicks() + sSaveRetryDelay;
+    return false;
 }
 
 static void FlushSaveIfDirty(void)
 {
+    if (!gPlatformFlashDirty)
+        return;
+    if (sSaveFailedTries != 0 && !SDL_TICKS_PASSED(SDL_GetTicks(), sSaveRetryAt))
+        return; // a failed write waits its turn
+    TrySaveWrite();
+}
+
+// As the game closes: the image still to be written gets five more tries, 300 ms apart, whatever the waiting time
+static void FlushSaveAtExit(void)
+{
+    char message[320];
+    int i;
+
+    for (i = 0; i < 5 && gPlatformFlashDirty; i++)
+    {
+        if (i > 0)
+            SDL_Delay(300);
+        TrySaveWrite();
+    }
     if (gPlatformFlashDirty)
     {
-        gPlatformFlashDirty = FALSE;
-        StoreSaveFile();
+        SDL_snprintf(message, sizeof(message), "The game closed with its last save not written (%s); the save file "
+                     "holds the save before it", sSaveFailure);
+        SDL_Log("%s", message);
+        CrashReport_Error(message);
     }
 }
 
 void Platform_StoreSaveFile(void)
 {
-    StoreSaveFile();
+    TrySaveWrite();
+}
+
+// pokeemerald-mp --selftest-save-retry (KNOWN_ISSUES MS-212), in a folder of its own under the working directory:
+// (1) the temporary file's place taken by a folder, so the write fails before the rename: the old save file must stay
+// as it was, the image stay to be written and the next try wait its turn; with the folder gone the next try writes the
+// file. (2) The save file's own place taken by a folder, so the rename fails: the same. (3) The same failing as the game
+// closes: five tries, then the image still unwritten and said so.
+static int sSrChecks, sSrFailures;
+
+static void ExpectSr(const char *what, bool ok)
+{
+    sSrChecks++;
+    printf("%s %s\n", ok ? "ok" : "FAIL", what);
+    fflush(stdout);
+    if (!ok)
+        sSrFailures++;
+}
+
+static bool SrFileIs(const char *path, u8 value, size_t size)
+{
+    FILE *file = fopen(path, "rb");
+    u8 buffer[4096];
+    size_t total = 0, got, i;
+    bool same = file != NULL;
+
+    while (same && (got = fread(buffer, 1, sizeof(buffer), file)) > 0)
+    {
+        for (i = 0; i < got; i++)
+            if (buffer[i] != value)
+                same = false;
+        total += got;
+    }
+    if (file != NULL)
+        fclose(file);
+    return same && total == size;
+}
+
+static bool SrMakeFolder(const char *path)
+{
+#ifdef _WIN32
+    return _mkdir(path) == 0;
+#else
+    return mkdir(path, 0700) == 0;
+#endif
+}
+
+static bool SrRemoveFolder(const char *path)
+{
+#ifdef _WIN32
+    return _rmdir(path) == 0;
+#else
+    return rmdir(path) == 0;
+#endif
+}
+
+static bool SrWriteFile(const char *path, u8 value, size_t size)
+{
+    FILE *file = fopen(path, "wb");
+    size_t i;
+
+    if (file == NULL)
+        return false;
+    for (i = 0; i < size; i++)
+        fputc(value, file);
+    return fclose(file) == 0;
+}
+
+static int SelfTestSaveRetry(void)
+{
+    const char *dir = "selftest-save-retry";
+    char tempPath[sizeof(sSavePath) + 8];
+    u32 tries;
+
+    SrMakeFolder(dir);
+    SDL_snprintf(sSavePath, sizeof(sSavePath), "%s/game.sav", dir);
+    SDL_snprintf(tempPath, sizeof(tempPath), "%s.tmp", sSavePath);
+    remove(sSavePath);
+    SrRemoveFolder(sSavePath);
+    remove(tempPath);
+    SrRemoveFolder(tempPath);
+    printf("save file %s\n", sSavePath);
+
+    // (1) an old save, the temporary file's place taken
+    ExpectSr("an old save file to keep", SrWriteFile(sSavePath, 0x11, sizeof(FLASH_BASE)));
+    ExpectSr("the temporary file's place taken by a folder", SrMakeFolder(tempPath));
+    memset(FLASH_BASE, 0x5A, sizeof(FLASH_BASE));
+    gPlatformFlashDirty = TRUE;
+    sSaveFailedTries = 0;
+    FlushSaveIfDirty();
+    ExpectSr("the write fails and the image stays to be written", gPlatformFlashDirty && sSaveFailedTries == 1);
+    ExpectSr("... the old save file as it was", SrFileIs(sSavePath, 0x11, sizeof(FLASH_BASE)));
+    ExpectSr("... and the reason kept for the log", sSaveFailure[0] != '\0');
+    FlushSaveIfDirty();
+    ExpectSr("the next frame does not try again before its time", sSaveFailedTries == 1);
+    ExpectSr("the folder taken away", SrRemoveFolder(tempPath));
+    sSaveRetryAt = SDL_GetTicks();
+    FlushSaveIfDirty();
+    ExpectSr("the next try writes the save", !gPlatformFlashDirty && sSaveFailedTries == 0
+             && SrFileIs(sSavePath, 0x5A, sizeof(FLASH_BASE)));
+
+    // (2) the save file's own place taken: the rename fails
+    ExpectSr("the save file's place taken by a folder", remove(sSavePath) == 0 && SrMakeFolder(sSavePath));
+    memset(FLASH_BASE, 0x6B, sizeof(FLASH_BASE));
+    gPlatformFlashDirty = TRUE;
+    FlushSaveIfDirty();
+    ExpectSr("the rename fails and the image stays to be written", gPlatformFlashDirty && sSaveFailedTries == 1);
+    sSaveRetryAt = SDL_GetTicks();
+    FlushSaveIfDirty();
+    ExpectSr("a second failure waits longer (2 s)", gPlatformFlashDirty && sSaveFailedTries == 2
+             && sSaveRetryDelay == 2 * SAVE_RETRY_FIRST_MS);
+    ExpectSr("the folder taken away", SrRemoveFolder(sSavePath));
+    sSaveRetryAt = SDL_GetTicks();
+    FlushSaveIfDirty();
+    ExpectSr("the next try writes the save", !gPlatformFlashDirty && sSaveFailedTries == 0
+             && SrFileIs(sSavePath, 0x6B, sizeof(FLASH_BASE)));
+
+    // (3) failing as the game closes
+    ExpectSr("the save file's place taken again", remove(sSavePath) == 0 && SrMakeFolder(sSavePath));
+    memset(FLASH_BASE, 0x7C, sizeof(FLASH_BASE));
+    gPlatformFlashDirty = TRUE;
+    FlushSaveAtExit();
+    tries = sSaveFailedTries;
+    ExpectSr("closing: five tries, the image still unwritten", gPlatformFlashDirty && tries == 5);
+    SrRemoveFolder(sSavePath);
+    sSaveRetryAt = SDL_GetTicks();
+    FlushSaveAtExit();
+    ExpectSr("closing with the place free: written at the first try", !gPlatformFlashDirty
+             && SrFileIs(sSavePath, 0x7C, sizeof(FLASH_BASE)));
+
+    remove(sSavePath);
+    remove(tempPath);
+    SrRemoveFolder(dir);
+    gPlatformFlashDirty = FALSE;
+    printf("selftest-save-retry: %d checks, %d failed\n", sSrChecks, sSrFailures);
+    return sSrFailures ? 1 : 0;
 }
 
 // Stands in for the GBA timers the game reads to seed its RNG.
@@ -3807,7 +4045,8 @@ void Platform_NativeUiSaveWrites(u32 *written, u32 *failed, bool8 *pending)
 {
     *written = sSaveWritesDone;
     *failed = sSaveWritesFailed;
-    *pending = gPlatformFlashDirty;
+    *pending = gPlatformFlashDirty && sSaveFailedTries == 0; // a failed write waiting to be tried again is no longer
+                                                             // pending: the save screen shows it failed (MS-212)
 }
 
 void Platform_NativeUiPictureRect(int outputWidth, int outputHeight, int *x, int *y, int *w, int *h,

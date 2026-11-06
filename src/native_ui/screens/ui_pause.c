@@ -271,6 +271,14 @@ static void CaptureSave(void)
             ClockText(sSavedClock, sizeof(sSavedClock), gLocalTime.hours, gLocalTime.minutes);
         }
     }
+    if (sSaveResult == 3 && written != sWritesAtSave)
+    {
+        /* the write failed, and a later try wrote it (KNOWN_ISSUES MS-212) */
+        sSaveResult = 1;
+        sStampT = 1;
+        sSavedThisRun = true;
+        ClockText(sSavedClock, sizeof(sSavedClock), gLocalTime.hours, gLocalTime.minutes);
+    }
     if (sMenu.saveStep == NATIVE_SAVE_FAILED)
         sSaveResult = 2;
     if (sStampT > 0 && sStampT < 9)
