@@ -862,6 +862,13 @@ bool8 IsWeatherNotFadingIn(void)
 
 void UpdateSpritePaletteWithWeather(u8 spritePaletteIndex, bool8 allowFog)
 {
+#ifdef PORTABLE
+    // no sprite palette slot (LoadSpritePalette or IndexOfSpritePaletteTag gave 0xFF): 16 colours would be written
+    // past the palette buffers, over other variables natively, gSaveDataBuffer among them (KNOWN_ISSUES MS-208)
+    if (spritePaletteIndex >= 16)
+        return;
+#endif
+#line 857 // gba-line
     u16 paletteIndex = 16 + spritePaletteIndex;
     u16 i;
 

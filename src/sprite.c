@@ -1768,6 +1768,11 @@ u32 IndexOfSpritePaletteTag(u16 tag)
 
 u16 GetSpritePaletteTagByPaletteNum(u8 paletteNum)
 {
+#ifdef PORTABLE
+    if (paletteNum >= 16)
+        return TAG_NONE; // no slot (KNOWN_ISSUES MS-208)
+#endif
+#line 1727 // gba-line
     return sSpritePaletteTags[paletteNum];
 }
 
