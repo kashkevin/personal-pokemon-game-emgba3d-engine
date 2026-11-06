@@ -145,6 +145,12 @@ void FillNamebox(void)
 
 void DrawNamebox(u32 windowId, u32 tileNum, bool32 copyToVram)
 {
+#ifdef PORTABLE
+    // a window that is not there (WINDOW_NONE): its shape and tile data would come from past the window table (MS-211)
+    if (windowId >= WINDOWS_MAX)
+        return;
+#endif
+#line 148 // gba-line
     // manual instead of using CallWindowFunction for extra tileNum param
     struct WindowTemplate *w = &gWindows[windowId].window;
     u32 size = TILE_OFFSET_4BPP(NAME_BOX_BASE_TILES_TOTAL);

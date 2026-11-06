@@ -788,6 +788,7 @@ int NativeSelfTest_PaletteSlots(void)
 // a real window (0) still takes the text.
 // ---------------------------------------------------------------------------
 
+#include "international_string_util.h"
 #include "text.h"
 #include "window.h"
 #include "constants/characters.h"
@@ -867,6 +868,9 @@ int NativeSelfTest_MissingWindow(void)
     memset(sMwTiles, mark, sizeof(sMwTiles));
     BlitBitmapToWindow(WINDOW_NONE, bitmap, 0, 0, 8, 8);
     ExpectMw("BlitBitmapToWindow(255) draws nothing (MS-206)", MwTilesAre(sMwTiles, mark));
+    memset(sMwTiles, mark, sizeof(sMwTiles));
+    FillWindowTilesByRow(WINDOW_NONE, 0, 0, 2, 1); // as the PokeNav's lists clear a row
+    ExpectMw("FillWindowTilesByRow(255) draws nothing", MwTilesAre(sMwTiles, mark));
 
     // a real window still takes text: window 0, shaped as the planted one
     gWindows[0].window = shape;

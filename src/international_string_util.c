@@ -214,6 +214,12 @@ enum Language GetNicknameLanguage(u8 *str)
 // Used by Pokénav's Match Call to erase the previous trainer's flavor text when switching between their info pages.
 void FillWindowTilesByRow(int windowId, int columnStart, int rowStart, int numFillTiles, int numRows)
 {
+#ifdef PORTABLE
+    // a window that is not there (WINDOW_NONE): its shape and tile data would come from past the window table (MS-211)
+    if (windowId < 0 || windowId >= WINDOWS_MAX)
+        return;
+#endif
+#line 217 // gba-line
     u8 *windowTileData;
     int fillSize, windowRowSize, i;
     struct Window *window = &gWindows[windowId];
