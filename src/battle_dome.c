@@ -6046,6 +6046,10 @@ bool32 DomeTree_NativeUiState(struct NativeDomeTree *out)
 
     memset(out, 0, sizeof(*out));
     out->justDecided = 0xFF;
+    // 0 is a space in the game's charset: a name not yet read (the tree still being set up) is empty, not a string
+    // that never ends (the screen draws every name; AddressSanitizer saw it read past its state)
+    for (i = 0; i < (int)ARRAY_COUNT(out->entrants); i++)
+        out->entrants[i].name[0] = EOS;
     if (gMain.callback2 != CB2_TourneyTree
      || FuncIsActiveTask(Task_ShowTourneyInfoCard) || FuncIsActiveTask(Task_HandleInfoCardInput))
         return FALSE;

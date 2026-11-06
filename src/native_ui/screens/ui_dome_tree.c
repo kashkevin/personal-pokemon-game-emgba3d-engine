@@ -59,6 +59,9 @@ static bool Detect(void)
 static void Capture(void)
 {
     DomeTree_NativeUiState(&sD);
+    /* every name ends within its own field, whatever the state gave (the text is drawn up to its end) */
+    for (int i = 0; i < NATIVE_DOME_ENTRANTS; i++)
+        sD.entrants[i].name[sizeof(sD.entrants[i].name) - 1] = EOS;
 }
 
 /* ---------------------------------------------------------------- geometry */

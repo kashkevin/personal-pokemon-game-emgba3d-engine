@@ -10370,6 +10370,7 @@ void Storage_NativeUiBox(u32 box, struct NativeStorageBox *out)
     u32 i;
 
     memset(out, 0, sizeof(*out));
+    out->name[0] = EOS;     // 0 is a space in the game's charset: no box, an empty name (screens draw it to its end)
     if (box >= TOTAL_BOXES_COUNT)
         return;
     StringCopyN(out->name, GetBoxNamePtr(box), BOX_NAME_LENGTH);
@@ -10422,6 +10423,7 @@ void Storage_NativeUiGroup(struct NativeStorageBox *out)
     u32 i, count;
 
     memset(out, 0, sizeof(*out));
+    out->name[0] = EOS;     // a group has no name; never a string that does not end
     if (sMultiMove == NULL)
         return;
     count = min(sMultiMove->columnsTotal * sMultiMove->rowsTotal, IN_BOX_COUNT);
