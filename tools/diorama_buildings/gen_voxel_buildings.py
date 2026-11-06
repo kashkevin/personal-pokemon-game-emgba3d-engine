@@ -101,6 +101,27 @@ def component_specs(spec, layouts):
     return out
 
 
+# How far in from a drawing's outline a rim is (pixels): gl_terrain_renderer.c ROCK_RIM_REACH.
+RIM_REACH = 2
+
+
+def drop_rim(art, colours):
+    """Takes a rock's rim out of its drawing (a `props` spec's `rim`): its pixels of those colours
+    within RIM_REACH of the outline - a transparent pixel or the drawing's edge - never the same
+    colour further in. What the map paints under the model, the water or the ground, shows there
+    (KNOWN_ISSUES MS-102)."""
+    W, H = art.size
+    px = art.load()
+    rim = {tuple(c) for c in colours}
+    out = [(x, y) for y in range(H) for x in range(W)
+           if px[x, y][3] >= 128 and px[x, y][:3] in rim
+           and any(not (0 <= x + dx < W and 0 <= y + dy < H) or px[x + dx, y + dy][3] < 128
+                   for dy in range(-RIM_REACH, RIM_REACH + 1) for dx in range(-RIM_REACH, RIM_REACH + 1))]
+    for (x, y) in out:
+        px[x, y] = (0, 0, 0, 0)
+    return out
+
+
 def prop_specs(spec):
     """Expand a `props` spec - an object drawn as one block of subtiles,
     found by its tiles wherever it lands (voxel_props.py) - into one model
@@ -137,6 +158,8 @@ def prop_specs(spec):
                     apx[X + k % 8, Y + k // 8] = rgb + (255,)
             ci, cj = X // 16, Y // 16
             quads[(ci, cj)] = quads.get((ci, cj), 0) | 1 << ((Y % 16) // 8 * 2 + (X % 16) // 8)
+        if spec.get("rim"):
+            drop_rim(art, spec["rim"])
         drawing = art
         art = vb.Mound.with_ring(art, spec.get("ring", ()))
         # the commonest copy is the object's plain name, its variants numbered

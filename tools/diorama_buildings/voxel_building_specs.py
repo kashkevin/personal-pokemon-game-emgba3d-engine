@@ -1539,8 +1539,13 @@ SPECS = [
         "ground": [0x170],
         "rise": 1.6,
         "step": 4,
-        # its grey shadow on the water
-        "ring": [(131, 131, 139)],
+        # The General tileset's grey rim round its rock (palette 3, colour 5),
+        # where the rock meets the sea or the ground: the GBA's waterline. Not
+        # the rock's, and not laid round its foot as a ring of grey: out of the
+        # drawing, so the water or the ground the map paints under the model
+        # shows there - as the terrain's rock outlines draw it (KNOWN_ISSUES
+        # MS-102; gl_terrain_renderer.c DropRockRim).
+        "rim": [(131, 131, 139)],
     },
     {
         "name": "devon_corporation",

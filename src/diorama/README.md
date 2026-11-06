@@ -387,8 +387,10 @@ tilesets are unchanged.
   cell's flat part drew the whole drawing again (`RiserShowsWholeCell`): every
   sea stack and reef stood in a pale band. The rim at the outline's edge (2
   pixels in) is out of the outline, and a rock edge's cell in the sea draws
-  its lower layer, the water, where the rock does not stand. The sea's small
-  round rocks are models (`voxel_props.py`) and keep the rim on their foot.
+  its lower layer, the water, where the rock does not stand. The small round
+  stacks are models (`voxel_props.py` "sea_stack", on the sea and on the
+  sand): their rim is out of their drawing the same way (`gen_voxel_buildings.py`
+  `drop_rim`, the spec's `rim`), where it lay round their foot as a ring of grey.
 * Caves: a cave tileset's rock (the pins and `_cave_rock_cells`) is a mass as a
   mountain's is, so a raised floor's edge is a slope with the face drawn on it,
   not a block a cell square (Granite Cave's stepped walls).
