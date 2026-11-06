@@ -46,6 +46,12 @@ static const u8 sRoundedDownGrayscaleMap[] = {
 
 void LoadPalette(const void *src, u32 offset, u32 size)
 {
+#ifdef PORTABLE
+    // a sprite palette tag with no slot gives 0xFF, and OBJ_PLTT_ID(0xFF) is 4336: past both buffers (KNOWN_ISSUES MS-210)
+    if (offset + size / 2 > PLTT_BUFFER_SIZE)
+        return;
+#endif
+#line 49 // gba-line
     CpuCopy16(src, &gPlttBufferUnfaded[offset], size);
     CpuCopy16(src, &gPlttBufferFaded[offset], size);
 }
@@ -53,6 +59,12 @@ void LoadPalette(const void *src, u32 offset, u32 size)
 // Drop in replacement for LoadPalette, uses CpuFastCopy, size must be 0 % 32
 void LoadPaletteFast(const void *src, u32 offset, u32 size)
 {
+#ifdef PORTABLE
+    // a sprite palette tag with no slot gives 0xFF, and OBJ_PLTT_ID(0xFF) is 4336: past both buffers (KNOWN_ISSUES MS-210)
+    if (offset + size / 2 > PLTT_BUFFER_SIZE)
+        return;
+#endif
+#line 56 // gba-line
     if ((u32)src & 3) // In case palette is not 4 byte aligned
         return LoadPalette(src, offset, size);
     CpuFastCopy(src, &gPlttBufferUnfaded[offset], size);
@@ -62,6 +74,12 @@ void LoadPaletteFast(const void *src, u32 offset, u32 size)
 
 void FillPalette(u32 value, u32 offset, u32 size)
 {
+#ifdef PORTABLE
+    // a sprite palette tag with no slot gives 0xFF, and OBJ_PLTT_ID(0xFF) is 4336: past both buffers (KNOWN_ISSUES MS-210)
+    if (offset + size / 2 > PLTT_BUFFER_SIZE)
+        return;
+#endif
+#line 65 // gba-line
     CpuFill16(value, &gPlttBufferUnfaded[offset], size);
     CpuFill16(value, &gPlttBufferFaded[offset], size);
 }

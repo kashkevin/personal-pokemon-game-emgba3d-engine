@@ -632,6 +632,151 @@ int NativeSelfTest_ShakeAnim(void)
 }
 
 // ---------------------------------------------------------------------------
+//   pokeemerald-mp --selftest-palette-slots
+//
+// KNOWN_ISSUES MS-210: with all 16 sprite palette slots taken, a palette tag that is not loaded has no slot:
+// IndexOfSpritePaletteTag gives 0xFF, and OBJ_PLTT_ID(0xFF) is 4336, 7.6 KB past each 512-colour palette buffer.
+// Code that colours a palette through its tag without checking it (the Pokemon Center's Poke Ball glow, the naming
+// screen's buttons, the slot machine's displays, the region map's cursor, dowsing, move animations) wrote there
+// through LoadPalette, LoadPaletteFast, FillPalette and Multiply(Inverted)PaletteRGBComponents, over whatever the
+// build placed there (MS-208 lists it). Here every slot is taken, each is called as those callers call it, and the
+// memory where slot 0xFF's colours would be must stay as it was; the last real palette still takes each of them.
+// ---------------------------------------------------------------------------
+
+#include <stdint.h>
+#include "field_effect.h"
+#include "palette.h"
+#include "constants/field_effects.h"
+#include "constants/rgb.h"
+
+static int sPltChecks, sPltFailures;
+static const u16 ALIGNED(4) sPltColors[16] = {
+    0x0001, 0x0421, 0x0842, 0x0C63, 0x1084, 0x14A5, 0x18C6, 0x1CE7,
+    0x2108, 0x2529, 0x294A, 0x2D6B, 0x318C, 0x35AD, 0x39CE, 0x3DEF,
+};
+static const struct SpritePalette sPltGlow = {sPltColors, FLDEFF_PAL_TAG_POKEBALL_GLOW};
+
+static void ExpectPlt(const char *what, bool32 ok)
+{
+    sPltChecks++;
+    if (ok)
+    {
+        printf("ok %s\n", what);
+    }
+    else
+    {
+        sPltFailures++;
+        printf("FAIL %s\n", what);
+    }
+}
+
+// Where slot `slot`'s 16 colours would be in `buffer` (past its end for 0xFF: another variable of the program lives
+// there, read and put back through a plain address)
+static volatile u16 *PltColours(u16 *buffer, u32 slot)
+{
+    return (volatile u16 *)((uintptr_t)buffer + OBJ_PLTT_ID(slot) * sizeof(u16));
+}
+
+static void SetPltColours(u32 slot, u16 value)
+{
+    u32 i;
+
+    for (i = 0; i < 16; i++)
+    {
+        PltColours(gPlttBufferUnfaded, slot)[i] = value;
+        PltColours(gPlttBufferFaded, slot)[i] = value;
+    }
+}
+
+static bool32 PltColoursAre(u32 slot, u16 value)
+{
+    u32 i;
+
+    for (i = 0; i < 16; i++)
+    {
+        if (PltColours(gPlttBufferUnfaded, slot)[i] != value || PltColours(gPlttBufferFaded, slot)[i] != value)
+            return FALSE;
+    }
+    return TRUE;
+}
+
+int NativeSelfTest_PaletteSlots(void)
+{
+    const u16 mark = 0x2A2A; // a colour none of the calls below makes
+    u16 saved[2][16];
+    u32 i, slot;
+
+    FreeAllSpritePalettes();
+    for (i = 0; i < 16; i++)
+        AllocSpritePalette(0x7000 + i);
+    slot = IndexOfSpritePaletteTag(FLDEFF_PAL_TAG_POKEBALL_GLOW);
+    ExpectPlt("every slot taken: a tag not loaded has no slot (0xFF)", slot == 0xFF);
+    ExpectPlt("... and LoadSpritePalette finds none for it off the field", LoadSpritePalette(&sPltGlow) == 0xFF);
+    if (slot != 0xFF)
+        slot = 0xFF;
+    printf("slot 0xFF's colours would be at %u, %p and %p (the buffers end at %u)\n", (unsigned)OBJ_PLTT_ID(slot),
+           (void *)PltColours(gPlttBufferUnfaded, slot), (void *)PltColours(gPlttBufferFaded, slot),
+           (unsigned)PLTT_BUFFER_SIZE);
+    fflush(stdout);
+    for (i = 0; i < 16; i++)
+    {
+        saved[0][i] = PltColours(gPlttBufferUnfaded, slot)[i];
+        saved[1][i] = PltColours(gPlttBufferFaded, slot)[i];
+    }
+
+    // as the slot machine's and the PokeNav's headers load a palette by its tag
+    SetPltColours(slot, mark);
+    LoadPalette(sPltColors, OBJ_PLTT_ID(slot), PLTT_SIZE_4BPP);
+    ExpectPlt("LoadPalette to slot 0xFF writes nothing past the buffers", PltColoursAre(slot, mark));
+    // as a sprite palette is loaded (DoLoadSpritePalette)
+    SetPltColours(slot, mark);
+    LoadPaletteFast(sPltColors, OBJ_PLTT_ID(slot), PLTT_SIZE_4BPP);
+    ExpectPlt("LoadPaletteFast to slot 0xFF writes nothing past the buffers", PltColoursAre(slot, mark));
+    // as dowsing colours its light
+    SetPltColours(slot, mark);
+    FillPalette(RGB_WHITE, OBJ_PLTT_ID(slot) + 3, PLTT_SIZEOF(1));
+    ExpectPlt("FillPalette of slot 0xFF's colour writes nothing past the buffers", PltColoursAre(slot, mark));
+    // as the Pokemon Center's Poke Ball glow flashes (PokeballGlowEffect_Flash1 and _Flash2)
+    SetPltColours(slot, mark);
+    MultiplyInvertedPaletteRGBComponents(OBJ_PLTT_ID(slot) + 8, 16, 16, 16);
+    MultiplyInvertedPaletteRGBComponents(OBJ_PLTT_ID(slot) + 2, 16, 16, 16);
+    ExpectPlt("the Pokemon Center glow's colours in slot 0xFF write nothing past the buffers",
+              PltColoursAre(slot, mark));
+    SetPltColours(slot, mark);
+    MultiplyPaletteRGBComponents(OBJ_PLTT_ID(slot) + 5, 16, 16, 16);
+    ExpectPlt("MultiplyPaletteRGBComponents in slot 0xFF writes nothing past the buffers", PltColoursAre(slot, mark));
+    for (i = 0; i < 16; i++)
+    {
+        PltColours(gPlttBufferUnfaded, slot)[i] = saved[0][i];
+        PltColours(gPlttBufferFaded, slot)[i] = saved[1][i];
+    }
+
+    // the last real palette still takes each of them
+    SetPltColours(15, mark);
+    LoadPalette(sPltColors, OBJ_PLTT_ID(15), PLTT_SIZE_4BPP);
+    ExpectPlt("LoadPalette still loads the last sprite palette", PltColours(gPlttBufferFaded, 15)[15] == sPltColors[15]
+              && PltColours(gPlttBufferUnfaded, 15)[0] == sPltColors[0]);
+    SetPltColours(15, mark);
+    LoadPaletteFast(sPltColors, OBJ_PLTT_ID(15), PLTT_SIZE_4BPP);
+    ExpectPlt("LoadPaletteFast still loads the last sprite palette",
+              PltColours(gPlttBufferFaded, 15)[15] == sPltColors[15]);
+    FillPalette(RGB_WHITE, PLTT_BUFFER_SIZE - 1, PLTT_SIZEOF(1));
+    ExpectPlt("FillPalette still fills the buffers' last colour", gPlttBufferFaded[PLTT_BUFFER_SIZE - 1] == RGB_WHITE);
+    gPlttBufferUnfaded[PLTT_BUFFER_SIZE - 1] = RGB_BLACK;
+    MultiplyInvertedPaletteRGBComponents(PLTT_BUFFER_SIZE - 1, 16, 16, 16);
+    ExpectPlt("MultiplyInvertedPaletteRGBComponents still colours the last colour",
+              gPlttBufferFaded[PLTT_BUFFER_SIZE - 1] == RGB_WHITE);
+    gPlttBufferUnfaded[PLTT_BUFFER_SIZE - 1] = RGB_WHITE;
+    MultiplyPaletteRGBComponents(PLTT_BUFFER_SIZE - 1, 16, 16, 16);
+    ExpectPlt("MultiplyPaletteRGBComponents still colours the last colour",
+              gPlttBufferFaded[PLTT_BUFFER_SIZE - 1] == RGB_BLACK);
+
+    FreeAllSpritePalettes();
+    printf("selftest-palette-slots: %d checks, %d failed\n", sPltChecks, sPltFailures);
+    return sPltFailures ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
 //   pokeemerald-mp --selftest-line-break
 //
 // KNOWN_ISSUES U13: BattleStringExpandPlaceholders turns every space of a

@@ -1068,6 +1068,12 @@ void FreeResourcesAndDestroySprite(struct Sprite *sprite, u8 spriteId)
 // r, g, b are between 0 and 16
 void MultiplyInvertedPaletteRGBComponents(u16 i, u8 r, u8 g, u8 b)
 {
+#ifdef PORTABLE
+    // the Pokemon Center's glow with its palette tag not loaded: OBJ_PLTT_ID(0xFF) + n, past the buffers (KNOWN_ISSUES MS-210)
+    if (i >= PLTT_BUFFER_SIZE)
+        return;
+#endif
+#line 1066 // gba-line
     int curRed, curGreen, curBlue;
     u16 color = gPlttBufferUnfaded[i];
 
@@ -1089,6 +1095,12 @@ void MultiplyInvertedPaletteRGBComponents(u16 i, u8 r, u8 g, u8 b)
 // r, g, b are between 0 and 16
 void MultiplyPaletteRGBComponents(u16 i, u8 r, u8 g, u8 b)
 {
+#ifdef PORTABLE
+    // the Pokemon Center's glow with its palette tag not loaded: OBJ_PLTT_ID(0xFF) + n, past the buffers (KNOWN_ISSUES MS-210)
+    if (i >= PLTT_BUFFER_SIZE)
+        return;
+#endif
+#line 1087 // gba-line
     int curRed, curGreen, curBlue;
     u16 color = gPlttBufferUnfaded[i];
 
