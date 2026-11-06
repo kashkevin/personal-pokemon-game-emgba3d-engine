@@ -10,7 +10,8 @@ each piece at the art's pixel middles as the game's UiArt_MatchPiece does, and c
 frontier_logo_circles.png's three 64 x 64 frames). Prints, per piece, how many coloured pixels differ, of which kinds,
 and how far the differing pixels lie from the nearest edge of the piece (all of them should lie within a pixel: the
 art's own anti-aliasing and ties, not a wrong shape). The game accepts a piece for its art when at most 2 % differ.
---preview writes each piece drawn smooth at SCALE (16 samples a pixel) beside the art, coloured with the art's palette.
+--preview writes each piece as the game's shader draws it at SCALE output pixels an art pixel (each edge over one output
+pixel) beside the art, coloured with the art's palette.
 Exit status 1 if a piece differs from its art by more than 2 % or a differing pixel lies a pixel or more from every
 edge.
 """
