@@ -69,6 +69,8 @@ void FieldCarrier_SetRemote(u32 slot, u16 species, u8 flags, u32 avatarObjectEve
 // under the water (until then, and without one, the original's underwater look is drawn); the graphics id to draw them
 // with (two a slot, taken in turn when their look changes, so that the avatar's pictures are set up again).
 bool32 FieldCarrier_IsRemoteUnderwaterLive(u32 slot);
+// Whether graphicsId is that slot's underwater rider (their avatar is drawn on its carrier now).
+bool32 FieldCarrier_IsRemoteUnderwaterRider(u32 slot, u16 graphicsId);
 u16 FieldCarrier_RemoteUnderwaterGraphicsId(u32 slot, u16 surfingGraphicsId);
 #define FIELD_CARRIER_GFX_UNDERWATER_REMOTE   0x0F01  // + slot * 2 + 0 or 1
 #define FIELD_CARRIER_PAL_TAG_REMOTE_RIDER    0x3CF2  // + slot: their silhouette

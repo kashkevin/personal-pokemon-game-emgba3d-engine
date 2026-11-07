@@ -458,11 +458,18 @@ static void UpdateRemote(u32 i)
     graphicsId = CharCustom_RemoteGraphicsId(MultiplayerWorld_GetPeerAppearance(sRemotes[i].peer.playerId), graphicsId);
     // Under the water on their carrier, drawn as this game draws its own diver (KNOWN_ISSUES MS-181): their character's
     // surfing pose as the silhouette, once their carrier is drawn under them (field_carrier.c; until then, and without
-    // one, the original's underwater look, the blob drawn in)
-    if (pose->movementMode == PLAYER_AVATAR_STATE_UNDERWATER && FieldCarrier_IsRemoteUnderwaterLive(i))
-        graphicsId = FieldCarrier_RemoteUnderwaterGraphicsId(i, CharCustom_RemoteGraphicsId(
-            MultiplayerWorld_GetPeerAppearance(sRemotes[i].peer.playerId),
-            GetPlayerAvatarGraphicsIdByStateIdAndGender(PLAYER_AVATAR_STATE_SURFING, pose->gender)));
+    // one, the original's underwater look, the blob drawn in). Their carrier gone from the relay, the original's look
+    // again first: the carrier is removed only once they no longer sit on it (Multiplayer_UpdateRemoteCarriers)
+    {
+        u16 carrierSpecies;
+        u8 carrierFlags;
+
+        if (pose->movementMode == PLAYER_AVATAR_STATE_UNDERWATER && FieldCarrier_IsRemoteUnderwaterLive(i)
+         && MultiplayerWorld_GetPeerCarrier(sRemotes[i].peer.playerId, &carrierSpecies, &carrierFlags))
+            graphicsId = FieldCarrier_RemoteUnderwaterGraphicsId(i, CharCustom_RemoteGraphicsId(
+                MultiplayerWorld_GetPeerAppearance(sRemotes[i].peer.playerId),
+                GetPlayerAvatarGraphicsIdByStateIdAndGender(PLAYER_AVATAR_STATE_SURFING, pose->gender)));
+    }
 #endif
 #line 406 // gba-line
     if (id >= OBJECT_EVENTS_COUNT || !Multiplayer_IsRemoteObject(&gObjectEvents[id]))
@@ -655,12 +662,27 @@ void Multiplayer_UpdateRemoteCarriers(void)
         u16 species = SPECIES_NONE;
         u8 flags = 0;
 
-        if (sRemotes[i].peer.playerId == 0 || id >= OBJECT_EVENTS_COUNT || !Multiplayer_IsRemoteObject(&gObjectEvents[id])
-         || (mode != PLAYER_AVATAR_STATE_SURFING && mode != PLAYER_AVATAR_STATE_UNDERWATER)
-         || !MultiplayerWorld_GetPeerCarrier(sRemotes[i].peer.playerId, &species, &flags))
+        if (sRemotes[i].peer.playerId == 0 || id >= OBJECT_EVENTS_COUNT
+         || !Multiplayer_IsRemoteObject(&gObjectEvents[id]))
             FieldCarrier_SetRemote(i, SPECIES_NONE, 0, OBJECT_EVENTS_COUNT, FALSE);
+        else if ((mode != PLAYER_AVATAR_STATE_SURFING && mode != PLAYER_AVATAR_STATE_UNDERWATER)
+              || !MultiplayerWorld_GetPeerCarrier(sRemotes[i].peer.playerId, &species, &flags))
+        {
+            // no carrier now: removed once they are no longer drawn on it (their look changes first, UpdateRemote; with
+            // no palette free for that look yet it stays under them meanwhile, not leaving a rider on nothing)
+            if (!FieldCarrier_IsRemoteUnderwaterRider(i, gObjectEvents[id].graphicsId))
+                FieldCarrier_SetRemote(i, SPECIES_NONE, 0, OBJECT_EVENTS_COUNT, FALSE);
+        }
+        else if (mode != PLAYER_AVATAR_STATE_UNDERWATER
+              && FieldCarrier_IsRemoteUnderwaterRider(i, gObjectEvents[id].graphicsId))
+        {
+            // surfaced, still drawn as the diver (no palette free for their surfing look yet): the underwater carrier
+            // stays under them until it is
+        }
         else
+        {
             FieldCarrier_SetRemote(i, species, flags, id, mode == PLAYER_AVATAR_STATE_UNDERWATER);
+        }
     }
 }
 #endif // PORTABLE

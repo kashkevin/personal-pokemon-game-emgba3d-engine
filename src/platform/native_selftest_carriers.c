@@ -50,6 +50,17 @@ static void Expect(const char *what, bool32 ok)
     printf("%s %s\n", ok ? "ok  " : "FAIL", what);
 }
 
+// Sprite palette slots free now
+static u32 FreePaletteSlots(void)
+{
+    u32 i, free = 0;
+
+    for (i = gReservedSpritePaletteCount; i < 16; i++)
+        if (GetSpritePaletteTagByPaletteNum(i) == TAG_NONE)
+            free++;
+    return free;
+}
+
 #define CELL_W 64
 #define CELL_H 96
 #define RIDER_BOTTOM 64   // the row the rider's picture ends on in a cell
@@ -599,6 +610,114 @@ int NativeSelfTest_Carriers(const char *sheetPath)
             FieldCarrier_SetRemote(slot, SPECIES_NONE, 0, OBJECT_EVENTS_COUNT, FALSE);
             FieldCarrier_Tick();
             Expect("gone with them, its palette freed", IndexOfSpritePaletteTag(wailord) == 0xFF);
+            Expect("their rider's ids are the slot's own", FieldCarrier_IsRemoteUnderwaterRider(slot, diver)
+                && FieldCarrier_IsRemoteUnderwaterRider(slot, other) && !FieldCarrier_IsRemoteUnderwaterRider(0, diver)
+                && !FieldCarrier_IsRemoteUnderwaterRider(slot, maySurfing)
+                && !FieldCarrier_IsRemoteUnderwaterRider(FIELD_CARRIER_REMOTES, diver));
+
+            // never a palette taken from anything else (the overworld's loader makes room by removing wild
+            // Pokemon), and each wait starts afresh: a second after a refusal, at once once the slot was released or
+            // a surface carrier made; a carrier left hidden without its rider for two seconds given up, its palette
+            // with it
+            {
+                u16 filler = 0x7E00;
+                u32 calls;
+                bool32 kept = TRUE, live = FALSE;
+
+                avatar->graphicsId = GetPlayerAvatarGraphicsIdByStateIdAndGender(PLAYER_AVATAR_STATE_UNDERWATER, MALE);
+                while (FreePaletteSlots() > 1)
+                    AllocSpritePalette(filler++);
+                FieldCarrier_SetRemote(slot, SPECIES_WAILORD, 0, 1, TRUE);
+                for (calls = 0x7E00; calls < filler; calls++)
+                    kept = kept && IndexOfSpritePaletteTag(calls) < 16;
+                Expect("one palette free (it needs two: its silhouette's, then its rider's): not made, none removed",
+                       filler > 0x7E00 && !FieldCarrier_IsRemoteUnderwaterLive(slot) && kept
+                       && FreePaletteSlots() == 1);
+                while (filler > 0x7E00)
+                    FreeSpritePaletteByTag(--filler);
+                for (calls = 0; calls < 60; calls++)
+                {
+                    FieldCarrier_SetRemote(slot, SPECIES_WAILORD, 0, 1, TRUE);
+                    live = live || FieldCarrier_IsRemoteUnderwaterLive(slot);
+                }
+                Expect("with room again, not tried before a second has passed", !live);
+                FieldCarrier_SetRemote(slot, SPECIES_WAILORD, 0, 1, TRUE);
+                Expect("then made", FieldCarrier_IsRemoteUnderwaterLive(slot));
+
+                for (calls = 0; calls < 119; calls++)
+                    FieldCarrier_SetRemote(slot, SPECIES_WAILORD, 0, 1, TRUE);
+                Expect("waiting hidden for its rider (no palette for their look yet) for two seconds",
+                       FieldCarrier_IsRemoteUnderwaterLive(slot));
+                FieldCarrier_SetRemote(slot, SPECIES_WAILORD, 0, 1, TRUE);
+                FieldCarrier_Tick();
+                Expect("then given up, its silhouette's palette freed", !FieldCarrier_IsRemoteUnderwaterLive(slot)
+                    && IndexOfSpritePaletteTag(FIELD_CARRIER_PAL_TAG_REMOTE_CARRIER + slot) == 0xFF);
+                live = FALSE;
+                for (calls = 0; calls < 60; calls++)
+                {
+                    FieldCarrier_SetRemote(slot, SPECIES_WAILORD, 0, 1, TRUE);
+                    live = live || FieldCarrier_IsRemoteUnderwaterLive(slot);
+                }
+                FieldCarrier_SetRemote(slot, SPECIES_WAILORD, 0, 1, TRUE);
+                Expect("and tried again a second later", !live && FieldCarrier_IsRemoteUnderwaterLive(slot));
+                avatar->graphicsId = other;   // their look comes: on it, it waits no more
+                for (calls = 0; calls < 240; calls++)
+                    FieldCarrier_SetRemote(slot, SPECIES_WAILORD, 0, 1, TRUE);
+                Expect("its rider on it: kept", FieldCarrier_IsRemoteUnderwaterLive(slot));
+                avatar->graphicsId = GetPlayerAvatarGraphicsIdByStateIdAndGender(PLAYER_AVATAR_STATE_UNDERWATER, MALE);
+
+                FieldCarrier_SetRemote(slot, SPECIES_NONE, 0, OBJECT_EVENTS_COUNT, FALSE);
+                FieldCarrier_Tick();
+                while (FreePaletteSlots() > 1)
+                    AllocSpritePalette(filler++);
+                FieldCarrier_SetRemote(slot, SPECIES_WAILORD, 0, 1, TRUE);
+                while (filler > 0x7E00)
+                    FreeSpritePaletteByTag(--filler);
+                FieldCarrier_SetRemote(slot, SPECIES_NONE, 0, OBJECT_EVENTS_COUNT, FALSE);
+                FieldCarrier_SetRemote(slot, SPECIES_WAILORD, 0, 1, TRUE);
+                Expect("refused, then the slot released: the next diver's carrier made at once",
+                       FieldCarrier_IsRemoteUnderwaterLive(slot));
+
+                FieldCarrier_SetRemote(slot, SPECIES_NONE, 0, OBJECT_EVENTS_COUNT, FALSE);
+                FieldCarrier_Tick();
+                while (FreePaletteSlots() > 1)
+                    AllocSpritePalette(filler++);
+                FieldCarrier_SetRemote(slot, SPECIES_WAILORD, 0, 1, TRUE);
+                while (filler > 0x7E00)
+                    FreeSpritePaletteByTag(--filler);
+                FieldCarrier_SetRemote(slot, SPECIES_WAILORD, 0, 1, FALSE);
+                FieldCarrier_SetRemote(slot, SPECIES_WAILORD, 0, 1, TRUE);
+                Expect("refused, then on the water again: under it made at once",
+                       FieldCarrier_IsRemoteUnderwaterLive(slot));
+                FieldCarrier_SetRemote(slot, SPECIES_NONE, 0, OBJECT_EVENTS_COUNT, FALSE);
+                FieldCarrier_Tick();
+
+                // its species' palette in use by another sprite (a wild Wailord) and one slot free: its silhouette
+                // would take the last, none left for its rider's look (it would only wait hidden)
+                {
+                    u8 wild = CreateObjectGraphicsSprite(wailord, SpriteCallbackDummy, 40, 40, 0);
+                    u16 wildPalette = TAG_NONE;
+
+                    if (wild < MAX_SPRITES)
+                        wildPalette = GetSpritePaletteTagByPaletteNum(gSprites[wild].oam.paletteNum);
+
+                    while (FreePaletteSlots() > 1)
+                        AllocSpritePalette(filler++);
+                    FieldCarrier_SetRemote(slot, SPECIES_WAILORD, 0, 1, TRUE);
+                    Expect("its species' palette in use and one free (none would be left for its rider's): not made",
+                           wild < MAX_SPRITES && wildPalette != TAG_NONE && !FieldCarrier_IsRemoteUnderwaterLive(slot)
+                           && FreePaletteSlots() == 1);
+                    while (filler > 0x7E00)
+                        FreeSpritePaletteByTag(--filler);
+                    FieldCarrier_SetRemote(slot, SPECIES_NONE, 0, OBJECT_EVENTS_COUNT, FALSE);
+                    FieldCarrier_Tick();
+                    if (wild < MAX_SPRITES)
+                        DestroySprite(&gSprites[wild]);
+                    FreeSpritePaletteByTag(wildPalette);
+                }
+                Expect("all of it freed", IndexOfSpritePaletteTag(FIELD_CARRIER_PAL_TAG_REMOTE_CARRIER + slot) == 0xFF
+                    && IndexOfSpritePaletteTag(wailord) == 0xFF);
+            }
             DestroySprite(&gSprites[avatarSprite]);
             memset(avatar, 0, sizeof(*avatar));
         }
