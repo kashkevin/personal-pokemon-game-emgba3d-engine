@@ -33,6 +33,11 @@ from elftools.elf.elffile import ELFFile
 #   and up), a co-op battle's waiting result (76 bytes; src/multiplayer_coop.c) and the kept wild Pokemon (140 bytes;
 #   src/wild_encounter_ow.c, KNOWN_ISSUES MS-145).
 PC_ONLY_TAILS = {'SaveBlock3': 5}
+# Types whose PC build carves members out of the GBA's trailing reserved bytes (value: that array's name): the same
+# members before it, the PC's first extra member where the GBA's reserved bytes start, a smaller reserved array of that
+# name last, the same total size. The GBA part is unchanged.
+#   MultiplayerMenuMailbox: the native Tower screens' record sent with the page (KNOWN_ISSUES MS-52, engine eb9d4dfd).
+PC_RESERVED_CARVES = {'MultiplayerMenuMailbox': 'reserved'}
 
 ENGINE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PROBE = 'tools/pc_port/abi_probe.c'
@@ -198,6 +203,21 @@ def compare(gba, pc):
         if g['name'] in PC_ONLY_TAILS and len(p['members']) == len(g['members']) + PC_ONLY_TAILS[g['name']] \
                 and g['members'] == p['members'][:len(g['members'])]:
             # A deliberate PC-only tail after the GBA's members (the same prefix, byte for byte); see PC_ONLY_TAILS.
+            return
+        carve = PC_RESERVED_CARVES.get(g['name'])
+        if carve is not None and g['size'] == p['size'] and len(p['members']) > len(g['members']) \
+                and g['members'][-1][0] == carve and p['members'][-1][0] == carve \
+                and [(m[0], m[1], m[2], m[4]) for m in g['members'][:-1]] \
+                    == [(m[0], m[1], m[2], m[4]) for m in p['members'][:len(g['members']) - 1]] \
+                and p['members'][len(g['members']) - 1][1] == g['members'][-1][1]:
+            # PC-only members carved from the GBA's trailing reserved bytes (the same members before them, by name,
+            # place and size); see PC_RESERVED_CARVES. The members before them are checked as any type's.
+            for gm in g['members'][:-1]:
+                sub_g = gm[3]
+                while isinstance(sub_g, tuple) and sub_g and sub_g[0] == 'array':
+                    sub_g = sub_g[2]
+                if isinstance(sub_g, str) and sub_g.startswith(('structure', 'union')):
+                    walk(sub_g)
             return
         if g['size'] != p['size']:
             bad[key] = 'size gba=%d pc=%d' % (g['size'], p['size'])
