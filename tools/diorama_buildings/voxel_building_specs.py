@@ -1531,6 +1531,11 @@ SPECS = [
         "ground": [0x124],
         "rise": 1.0,
         "step": 2,
+        # The same grey rim as the sea stack's (palette 3, colour 5) at its foot,
+        # where the boulder meets the ground: out of the drawing, so the sand or
+        # the grass under the model shows there, not grey specks laid flat round
+        # it (KNOWN_ISSUES MS-102's last part).
+        "rim": [(131, 131, 139)],
     },
     {
         # The brown stack in the sea: a peak, taller than it is deep.

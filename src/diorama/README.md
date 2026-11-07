@@ -390,7 +390,9 @@ tilesets are unchanged.
   its lower layer, the water, where the rock does not stand. The small round
   stacks are models (`voxel_props.py` "sea_stack", on the sea and on the
   sand): their rim is out of their drawing the same way (`gen_voxel_buildings.py`
-  `drop_rim`, the spec's `rim`), where it lay round their foot as a ring of grey.
+  `drop_rim`, the spec's `rim`), where it lay round their foot as a ring of grey;
+  and so is the land boulders' ("sand_boulder", on the sand and the grass), whose
+  rim lay at their foot as grey specks.
 * Caves: a cave tileset's rock (the pins and `_cave_rock_cells`) is a mass as a
   mountain's is, so a raised floor's edge is a slope with the face drawn on it,
   not a block a cell square (Granite Cave's stepped walls).
