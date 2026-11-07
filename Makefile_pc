@@ -279,6 +279,14 @@ MID_SRCS := $(wildcard sound/songs/midi/*.s)
 MID_OBJS := $(patsubst sound/songs/midi/%.s,$(OBJ_DIR)/sound/songs/midi/%.o,$(MID_SRCS))
 
 OBJS := $(C_OBJS) $(DATA_ASM_OBJS) $(MID_OBJS) $(BFX_QJS_OBJS)
+ifneq ($(NATIVE_LINUX),1)
+# Windows: the application manifest (tools/pc_port/win32), activeCodePage UTF-8. SDL2main gives main() the command line
+# as UTF-8 and the C library opens files with the ANSI calls, which take the system code page (1252 on an English PC)
+# without it: a save, bridge or settings path under a Windows user name with an accent or another script did not open
+# (KNOWN_ISSUES MS-217). Windows 10 1903 and later honour it; earlier ones ignore it.
+RES_OBJ := $(OBJ_DIR)/pokeemerald-mp.res.o
+OBJS += $(RES_OBJ)
+endif
 
 $(shell mkdir -p $(sort $(dir $(OBJS))))
 
@@ -720,6 +728,12 @@ $(OBJ_DIR)/sound/songs/midi/%.o: sound/songs/midi/%.s $(OBJ_DIR)/MPlayDef.s $(BU
 	@sed -e 's|\.include[[:space:]]*"MPlayDef.s"|.include "$(OBJ_DIR)/MPlayDef.s"|' $< | $(ASM_TO_X86) | $(AS) $(ASFLAGS) -I sound -o $@
 	@$(FIX_UNDERSCORE) $@
 	@$(MARK_GAME_MEMORY)
+
+ifneq ($(NATIVE_LINUX),1)
+$(RES_OBJ): tools/pc_port/win32/pokeemerald-mp.rc tools/pc_port/win32/pokeemerald-mp.manifest
+	@echo "RC $<"
+	@$(PREFIX)windres -I tools/pc_port/win32 $< -O coff -o $@
+endif
 
 $(TARGET): $(OBJS)
 	$(file >$(OBJ_DIR)/objs.rsp,$(OBJS))

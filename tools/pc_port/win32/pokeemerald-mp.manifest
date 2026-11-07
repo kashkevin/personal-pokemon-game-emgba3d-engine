@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- The Windows games' application manifest (Makefile_pc links it in through pokeemerald-mp.rc). activeCodePage UTF-8
+     (Windows 10 1903 and later): the C library's file calls take the UTF-8 paths SDL2main gives main(), so a save, bridge
+     or settings file under a Windows user name with an accent or another script opens (KNOWN_ISSUES MS-217). -->
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>

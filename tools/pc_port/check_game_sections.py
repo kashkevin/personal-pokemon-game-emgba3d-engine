@@ -33,7 +33,8 @@ FILE_RE = re.compile(r"^(\S.*?):\s+file format\s+(\S+)")
 SECT_RE = re.compile(r"^\s*\d+\s+(\S+)\s+([0-9a-fA-F]+)\s")
 # PE objects do not mark read-only data as READONLY; the linker maps these names
 # to the read-only .rdata section.
-PE_READONLY_PREFIXES = (".rdata", ".rodata", ".eh_frame", ".xdata", ".pdata", ".debug_", ".ctors", ".dtors")
+PE_READONLY_PREFIXES = (".rdata", ".rodata", ".eh_frame", ".xdata", ".pdata", ".debug_", ".ctors", ".dtors",
+                        ".rsrc")   # the Windows games' resources (their manifest): read-only in the image
 
 
 def section_info(objdump, paths):
