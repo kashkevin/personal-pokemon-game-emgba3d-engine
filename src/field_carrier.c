@@ -33,6 +33,12 @@
 
 STATIC_ASSERT(FIELD_CARRIER_GFX_UNDERWATER_RIDER >= CC_GFX_END && FIELD_CARRIER_GFX_UNDERWATER_RIDER < OBJ_EVENT_MON_FEMALE,
               FieldCarrierGraphicsIdFree);
+STATIC_ASSERT(FIELD_CARRIER_GFX_UNDERWATER_REMOTE == FIELD_CARRIER_GFX_UNDERWATER_RIDER + 1
+              && FIELD_CARRIER_GFX_UNDERWATER_REMOTE + FIELD_CARRIER_REMOTES * 2 < OBJ_EVENT_MON_FEMALE,
+              FieldCarrierRemoteGraphicsIdsFree);
+STATIC_ASSERT(FIELD_CARRIER_PAL_TAG_REMOTE_RIDER == FIELD_CARRIER_PAL_TAG_UNDERWATER_CARRIER + 1
+              && FIELD_CARRIER_PAL_TAG_REMOTE_CARRIER == FIELD_CARRIER_PAL_TAG_REMOTE_RIDER + FIELD_CARRIER_REMOTES
+              && FIELD_CARRIER_PAL_TAG_REMOTE_CARRIER + FIELD_CARRIER_REMOTES <= CC_PAL_TAG_BASE, FieldCarrierRemoteTagsFree);
 
 struct Carrier
 {
@@ -69,6 +75,16 @@ static EWRAM_DATA u16 sRiderSilhouette[16] = {0};
 static EWRAM_DATA u16 sCarrierSilhouette[16] = {0};
 static EWRAM_DATA struct ObjectEventGraphicsInfo sUnderwaterRider = {0};
 static EWRAM_DATA u8 sRemoteAvatar[FIELD_CARRIER_REMOTES] = {0};    // each remote carrier's rider (object event id)
+// Other players under the water on their carriers (KNOWN_ISSUES MS-181): each slot's rider (their character's surfing
+// pose), the id it is drawn with now (two a slot, in turn), and the silhouettes of the rider's and the carrier's palettes
+static EWRAM_DATA bool8 sRemoteUnderwater[FIELD_CARRIER_REMOTES] = {0};
+static EWRAM_DATA bool8 sRemoteRiderSet[FIELD_CARRIER_REMOTES] = {0};
+static EWRAM_DATA u16 sRemoteRiderSource[FIELD_CARRIER_REMOTES] = {0};
+static EWRAM_DATA u8 sRemoteRiderTurn[FIELD_CARRIER_REMOTES] = {0};
+static EWRAM_DATA struct ObjectEventGraphicsInfo sRemoteUnderwaterRider[FIELD_CARRIER_REMOTES] = {0};
+static EWRAM_DATA u16 sRemoteRiderSilhouette[FIELD_CARRIER_REMOTES][16] = {0};
+static EWRAM_DATA u16 sRemoteCarrierSilhouette[FIELD_CARRIER_REMOTES][16] = {0};
+static EWRAM_DATA u8 sRemoteSilhouetteWait[FIELD_CARRIER_REMOTES] = {0};   // calls left before another try (no palette)
 
 static void ReleaseIfGone(u32 which);
 
@@ -360,6 +376,12 @@ static const u16 *RiderPalette(const struct ObjectEventGraphicsInfo *rider)
     return rider->paletteTag == OBJ_EVENT_PAL_TAG_MAY ? gObjectEventPal_May : gObjectEventPal_Brendan;
 }
 
+// Another player's rider under the water: their character's surfing pose (Brendan's until one is set)
+static u16 RemoteRiderSource(u32 slot)
+{
+    return sRemoteRiderSet[slot] ? sRemoteRiderSource[slot] : OBJ_EVENT_GFX_BRENDAN_SURFING;
+}
+
 bool32 FieldCarrier_GetSpritePalette(u16 tag, struct SpritePalette *out)
 {
     if (tag == FIELD_CARRIER_PAL_TAG_UNDERWATER_RIDER)
@@ -369,11 +391,29 @@ bool32 FieldCarrier_GetSpritePalette(u16 tag, struct SpritePalette *out)
         out->tag = tag;
         return TRUE;
     }
+    if (tag >= FIELD_CARRIER_PAL_TAG_REMOTE_RIDER && tag < FIELD_CARRIER_PAL_TAG_REMOTE_RIDER + FIELD_CARRIER_REMOTES)
+    {
+        u32 slot = tag - FIELD_CARRIER_PAL_TAG_REMOTE_RIDER;
+
+        FieldCarrier_Silhouette(RiderPalette(GetObjectEventGraphicsInfo(RemoteRiderSource(slot))), sRemoteRiderSilhouette[slot]);
+        out->data = sRemoteRiderSilhouette[slot];
+        out->tag = tag;
+        return TRUE;
+    }
     return FALSE;
 }
 
 const struct ObjectEventGraphicsInfo *FieldCarrier_ResolveGraphics(u16 graphicsId)
 {
+    if (graphicsId >= FIELD_CARRIER_GFX_UNDERWATER_REMOTE
+     && graphicsId < FIELD_CARRIER_GFX_UNDERWATER_REMOTE + FIELD_CARRIER_REMOTES * 2)
+    {
+        u32 slot = (graphicsId - FIELD_CARRIER_GFX_UNDERWATER_REMOTE) / 2;
+
+        sRemoteUnderwaterRider[slot] = *GetObjectEventGraphicsInfo(RemoteRiderSource(slot));
+        sRemoteUnderwaterRider[slot].paletteTag = FIELD_CARRIER_PAL_TAG_REMOTE_RIDER + slot;
+        return &sRemoteUnderwaterRider[slot];
+    }
     if (graphicsId != FIELD_CARRIER_GFX_UNDERWATER_RIDER)
         return NULL;
     sUnderwaterRider = *GetObjectEventGraphicsInfo(RiderGraphicsId());
@@ -381,24 +421,32 @@ const struct ObjectEventGraphicsInfo *FieldCarrier_ResolveGraphics(u16 graphicsI
     return &sUnderwaterRider;
 }
 
-// The carrier's palette as the silhouette, in a palette of its own (the species' own may be drawn elsewhere)
-static void MakeCarrierSilhouette(struct Sprite *sprite)
+// A carrier's palette as the silhouette, in a palette of its own (the species' own may be drawn elsewhere): the
+// player's (which: OWNED_WATER) or another player's under the water (OWNED_REMOTE + slot). FALSE: no palette was free
+// (its own colours).
+static bool32 MakeSilhouette(struct Sprite *sprite, u32 which, u16 tag, u16 *colours)
 {
-    struct SpritePalette palette = {sCarrierSilhouette, FIELD_CARRIER_PAL_TAG_UNDERWATER_CARRIER};
+    struct SpritePalette palette = {colours, tag};
     u32 old = sprite->oam.paletteNum, paletteNum;
 
-    FieldCarrier_Silhouette(&gPlttBufferUnfaded[OBJ_PLTT_ID(old)], sCarrierSilhouette);
+    FieldCarrier_Silhouette(&gPlttBufferUnfaded[OBJ_PLTT_ID(old)], colours);
     paletteNum = IndexOfSpritePaletteTag(palette.tag);
     if (paletteNum < 16)
-        LoadPalette(sCarrierSilhouette, OBJ_PLTT_ID(paletteNum), PLTT_SIZE_4BPP);   // another carrier's before
+        LoadPalette(colours, OBJ_PLTT_ID(paletteNum), PLTT_SIZE_4BPP);   // another carrier's before
     else
         paletteNum = LoadSpritePalette(&palette);
     if (paletteNum >= 16)
-        return;     // no palette free: its own colours
+        return FALSE;
     sprite->oam.paletteNum = paletteNum;
-    sOwned[OWNED_WATER].paletteNum = paletteNum;
-    sOwned[OWNED_WATER].paletteTag = palette.tag;
+    sOwned[which].paletteNum = paletteNum;
+    sOwned[which].paletteTag = palette.tag;
     FieldEffectFreePaletteIfUnused(old);
+    return TRUE;
+}
+
+static void MakeCarrierSilhouette(struct Sprite *sprite)
+{
+    MakeSilhouette(sprite, OWNED_WATER, FIELD_CARRIER_PAL_TAG_UNDERWATER_CARRIER, sCarrierSilhouette);
 }
 
 // ---------------------------------------------------------------------------
@@ -554,8 +602,14 @@ bool32 FieldCarrier_IsUnderwaterAvatarGraphicsId(u16 graphicsId)
 
 // ---------------------------------------------------------------------------
 // Other players on the water: the multiplayer record carries their carrier (multiplayer_world.c), drawn under their
-// avatar as the player's own is (the 2026-10-27 relay of the real carriers). On the water only: under it another
-// player keeps the original's underwater look.
+// avatar as the player's own is (the 2026-10-27 relay of the real carriers). Under the water too since 2026-11-07
+// (KNOWN_ISSUES MS-181): both as the silhouette, the rider in their character's surfing pose, as the player's own dive.
+
+static bool32 IsRemoteUnderwaterRider(u32 slot, u16 graphicsId)
+{
+    return graphicsId == FIELD_CARRIER_GFX_UNDERWATER_REMOTE + slot * 2
+        || graphicsId == FIELD_CARRIER_GFX_UNDERWATER_REMOTE + slot * 2 + 1;
+}
 
 // After the rider has moved this frame (the carrier is made in the last free slot): under their seat, turned and
 // swimming as they move, in front of them facing the camera and behind otherwise
@@ -564,6 +618,7 @@ static void RemoteCarrierCallback(struct Sprite *sprite)
     u32 slot = (u16)sprite->data[0], which = OWNED_REMOTE + slot, face;
     struct ObjectEvent *avatar;
     struct Sprite *rider;
+    bool32 riding;
 
     if (slot >= FIELD_CARRIER_REMOTES || !IsOwned(which, sprite) || sRemoteAvatar[slot] >= OBJECT_EVENTS_COUNT)
         return;
@@ -574,12 +629,16 @@ static void RemoteCarrierCallback(struct Sprite *sprite)
         return;
     }
     rider = &gSprites[avatar->spriteId];
+    riding = !sRemoteUnderwater[slot] || IsRemoteUnderwaterRider(slot, avatar->graphicsId);
     face = FaceAnim(avatar->facingDirection);
     StartSpriteAnimIfDifferent(sprite, face - ANIM_STD_FACE_SOUTH + (RiderMoving(rider) ? ANIM_STD_GO_FAST_SOUTH : ANIM_STD_GO_SOUTH));
-    PlaceUnder(sprite, sOwned[which].graphicsId, avatar->graphicsId, face, rider->x, SpriteBottom(rider));
+    // under the water the seat is read for the rider's surfing pose, their picture there (as the player's own)
+    PlaceUnder(sprite, sOwned[which].graphicsId, IsRemoteUnderwaterRider(slot, avatar->graphicsId) ? RemoteRiderSource(slot)
+               : avatar->graphicsId, face, rider->x, SpriteBottom(rider));
     sprite->x2 = rider->x2;
     sprite->y2 = rider->y2;
-    sprite->invisible = rider->invisible;
+    // under the water: hidden until the avatar is drawn as its rider (until then the original's look, the blob in it)
+    sprite->invisible = rider->invisible || !riding;
     sprite->coordOffsetEnabled = rider->coordOffsetEnabled;
     sprite->oam.priority = rider->oam.priority;
     if (face == ANIM_STD_FACE_SOUTH)
@@ -616,7 +675,7 @@ bool8 FieldCarrier_GetRemoteOwner(const struct Sprite *sprite, u8 *localId, u8 *
     return FALSE;
 }
 
-void FieldCarrier_SetRemote(u32 slot, u16 species, u8 flags, u32 avatarObjectEventId)
+void FieldCarrier_SetRemote(u32 slot, u16 species, u8 flags, u32 avatarObjectEventId, bool32 underwater)
 {
     struct Carrier carrier = {species, (flags & 1) != 0, (flags & 2) != 0, TRUE};   // MP_WORLD_FOLLOWER_SHINY, _FEMALE
     u32 which = OWNED_REMOTE + slot;
@@ -637,9 +696,14 @@ void FieldCarrier_SetRemote(u32 slot, u16 species, u8 flags, u32 avatarObjectEve
     sRemoteAvatar[slot] = avatarObjectEventId;
     if (sOwned[which].live)
     {
-        if (sOwned[which].graphicsId == graphicsId)
+        if (sOwned[which].graphicsId == graphicsId && sRemoteUnderwater[slot] == (underwater != FALSE))
             return;     // already this one
         RemoveRemote(which);
+    }
+    if (underwater && sRemoteSilhouetteWait[slot] > 0)
+    {
+        sRemoteSilhouetteWait[slot]--;   // no palette was free for its silhouette: tried again a second later
+        return;
     }
     avatar = &gObjectEvents[avatarObjectEventId];
     if (!avatar->active || avatar->spriteId >= MAX_SPRITES)
@@ -655,7 +719,52 @@ void FieldCarrier_SetRemote(u32 slot, u16 species, u8 flags, u32 avatarObjectEve
     if (spriteId >= MAX_SPRITES)
         return;
     gSprites[spriteId].data[0] = slot;
+    sRemoteUnderwater[slot] = underwater != FALSE;
+    // under the water as the silhouette, as the player's own; without a palette free for it not drawn at all (in its
+    // own colours it would be no diver's carrier): the original's underwater look stays
+    if (underwater && !MakeSilhouette(&gSprites[spriteId], which, FIELD_CARRIER_PAL_TAG_REMOTE_CARRIER + slot,
+                                      sRemoteCarrierSilhouette[slot]))
+    {
+        DestroySprite(&gSprites[spriteId]);
+        ReleaseIfGone(which);
+        sRemoteSilhouetteWait[slot] = 60;
+        return;
+    }
     RemoteCarrierCallback(&gSprites[spriteId]);
+}
+
+bool32 FieldCarrier_IsRemoteUnderwaterLive(u32 slot)
+{
+    u32 which = OWNED_REMOTE + slot;
+
+    if (slot >= FIELD_CARRIER_REMOTES)
+        return FALSE;
+    ReleaseIfGone(which);
+    return sOwned[which].live && sRemoteUnderwater[slot];
+}
+
+u16 FieldCarrier_RemoteUnderwaterGraphicsId(u32 slot, u16 surfingGraphicsId)
+{
+    u8 paletteNum;
+
+    if (slot >= FIELD_CARRIER_REMOTES)
+        return surfingGraphicsId;
+    if (!sRemoteRiderSet[slot] || sRemoteRiderSource[slot] != surfingGraphicsId)
+    {
+        // another look (or the first): the other id of the slot, so that the avatar's pictures are set up again, and the
+        // slot's silhouette made again from it if it is loaded
+        if (sRemoteRiderSet[slot])
+            sRemoteRiderTurn[slot] ^= 1;
+        sRemoteRiderSource[slot] = surfingGraphicsId;
+        sRemoteRiderSet[slot] = TRUE;
+        paletteNum = IndexOfSpritePaletteTag(FIELD_CARRIER_PAL_TAG_REMOTE_RIDER + slot);
+        if (paletteNum < 16)
+        {
+            FieldCarrier_Silhouette(RiderPalette(GetObjectEventGraphicsInfo(surfingGraphicsId)), sRemoteRiderSilhouette[slot]);
+            LoadPalette(sRemoteRiderSilhouette[slot], OBJ_PLTT_ID(paletteNum), PLTT_SIZE_4BPP);
+        }
+    }
+    return FIELD_CARRIER_GFX_UNDERWATER_REMOTE + slot * 2 + sRemoteRiderTurn[slot];
 }
 
 // ---------------------------------------------------------------------------

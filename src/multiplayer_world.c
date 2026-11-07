@@ -239,12 +239,14 @@ static void PublishLocalState(void)
     state.mountSpecies = sLocalMount.mountSpecies;
     state.mountFlags = sLocalMount.mountFlags;
 #ifdef PORTABLE
-    // Surfing on the Pokemon that used Surf (its sprite under the player): every other game draws it under them
+    // Surfing on the Pokemon that used Surf (its sprite under the player): every other game draws it under them; and under
+    // the water on the one that dove, which they draw as the silhouette (KNOWN_ISSUES MS-181)
     {
         u16 carrierSpecies;
         bool8 shiny, female;
 
-        if ((gPlayerAvatar.flags & PLAYER_AVATAR_FLAG_SURFING) && FieldCarrier_GetLiveWater(&carrierSpecies, &shiny, &female))
+        if ((gPlayerAvatar.flags & (PLAYER_AVATAR_FLAG_SURFING | PLAYER_AVATAR_FLAG_UNDERWATER))
+         && FieldCarrier_GetLiveWater(&carrierSpecies, &shiny, &female))
         {
             state.mountState = MP_WORLD_MOUNT_CARRIER;
             state.mountSpecies = carrierSpecies;

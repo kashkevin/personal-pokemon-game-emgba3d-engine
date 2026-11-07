@@ -61,8 +61,18 @@ bool32 FieldCarrier_GetWater(u16 *species, bool8 *shiny, bool8 *female);
 bool32 FieldCarrier_GetLiveWater(u16 *species, bool8 *shiny, bool8 *female);
 // Another player surfing (slot: the multiplayer layer's remote 0-2) on their carrier (species, MP_WORLD_FOLLOWER_*
 // flags), drawn under their avatar (its object event id) as this game draws its own; SPECIES_NONE: none (removed).
+// underwater: under the water, as the silhouette (KNOWN_ISSUES MS-181), hidden until their avatar is drawn as its rider.
 #define FIELD_CARRIER_REMOTES 3
-void FieldCarrier_SetRemote(u32 slot, u16 species, u8 flags, u32 avatarObjectEventId);
+void FieldCarrier_SetRemote(u32 slot, u16 species, u8 flags, u32 avatarObjectEventId, bool32 underwater);
+// Another player under the water on their carrier, drawn as this game draws its own: their character's surfing pose
+// (surfingGraphicsId) as the silhouette, in a palette of its own for each slot. TRUE once that slot's carrier is drawn
+// under the water (until then, and without one, the original's underwater look is drawn); the graphics id to draw them
+// with (two a slot, taken in turn when their look changes, so that the avatar's pictures are set up again).
+bool32 FieldCarrier_IsRemoteUnderwaterLive(u32 slot);
+u16 FieldCarrier_RemoteUnderwaterGraphicsId(u32 slot, u16 surfingGraphicsId);
+#define FIELD_CARRIER_GFX_UNDERWATER_REMOTE   0x0F01  // + slot * 2 + 0 or 1
+#define FIELD_CARRIER_PAL_TAG_REMOTE_RIDER    0x3CF2  // + slot: their silhouette
+#define FIELD_CARRIER_PAL_TAG_REMOTE_CARRIER  0x3CF5  // + slot: their carrier's
 // A remote carrier's rider (their avatar object), for the 3D view: it draws the carrier with them, as the emote icons
 bool8 FieldCarrier_GetRemoteOwner(const struct Sprite *sprite, u8 *localId, u8 *mapNum, u8 *mapGroup);
 // Where the rider sits on a carrier facing that way (multiplayer_ride.c's seat; facing the camera, low enough that the

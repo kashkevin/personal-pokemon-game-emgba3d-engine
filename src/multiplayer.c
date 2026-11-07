@@ -150,7 +150,7 @@ static void RemoveRemote(u32 i)
     sRemotes[i].objectEventId = OBJECT_EVENTS_COUNT;
     sRemotes[i].moving = FALSE;
 #ifdef PORTABLE
-    FieldCarrier_SetRemote(i, SPECIES_NONE, 0, OBJECT_EVENTS_COUNT);
+    FieldCarrier_SetRemote(i, SPECIES_NONE, 0, OBJECT_EVENTS_COUNT, FALSE);
 #endif
 #line 145 // gba-line
 }
@@ -456,6 +456,13 @@ static void UpdateRemote(u32 i)
 #ifdef PORTABLE
     // Every other player shows their own character (character_customization.c).
     graphicsId = CharCustom_RemoteGraphicsId(MultiplayerWorld_GetPeerAppearance(sRemotes[i].peer.playerId), graphicsId);
+    // Under the water on their carrier, drawn as this game draws its own diver (KNOWN_ISSUES MS-181): their character's
+    // surfing pose as the silhouette, once their carrier is drawn under them (field_carrier.c; until then, and without
+    // one, the original's underwater look, the blob drawn in)
+    if (pose->movementMode == PLAYER_AVATAR_STATE_UNDERWATER && FieldCarrier_IsRemoteUnderwaterLive(i))
+        graphicsId = FieldCarrier_RemoteUnderwaterGraphicsId(i, CharCustom_RemoteGraphicsId(
+            MultiplayerWorld_GetPeerAppearance(sRemotes[i].peer.playerId),
+            GetPlayerAvatarGraphicsIdByStateIdAndGender(PLAYER_AVATAR_STATE_SURFING, pose->gender)));
 #endif
 #line 406 // gba-line
     if (id >= OBJECT_EVENTS_COUNT || !Multiplayer_IsRemoteObject(&gObjectEvents[id]))
@@ -635,7 +642,8 @@ bool32 Multiplayer_GetRemotePose(u32 i, u32 *playerId, struct MultiplayerPose *p
 }
 
 // Every other player surfing on the Pokemon that used Surf (their game publishes it: multiplayer_world.c) drawn on it as
-// this game draws its own player (field_carrier.c); the 2026-10-27 relay of the real carriers
+// this game draws its own player (field_carrier.c); the 2026-10-27 relay of the real carriers. Under the water too, as
+// the silhouette (KNOWN_ISSUES MS-181).
 void Multiplayer_UpdateRemoteCarriers(void)
 {
     u32 i;
@@ -643,15 +651,16 @@ void Multiplayer_UpdateRemoteCarriers(void)
     for (i = 0; i < MULTIPLAYER_MAX_PEERS; i++)
     {
         u32 id = sRemotes[i].objectEventId;
+        u8 mode = sRemotes[i].peer.pose.movementMode;
         u16 species = SPECIES_NONE;
         u8 flags = 0;
 
         if (sRemotes[i].peer.playerId == 0 || id >= OBJECT_EVENTS_COUNT || !Multiplayer_IsRemoteObject(&gObjectEvents[id])
-         || sRemotes[i].peer.pose.movementMode != PLAYER_AVATAR_STATE_SURFING
+         || (mode != PLAYER_AVATAR_STATE_SURFING && mode != PLAYER_AVATAR_STATE_UNDERWATER)
          || !MultiplayerWorld_GetPeerCarrier(sRemotes[i].peer.playerId, &species, &flags))
-            FieldCarrier_SetRemote(i, SPECIES_NONE, 0, OBJECT_EVENTS_COUNT);
+            FieldCarrier_SetRemote(i, SPECIES_NONE, 0, OBJECT_EVENTS_COUNT, FALSE);
         else
-            FieldCarrier_SetRemote(i, species, flags, id);
+            FieldCarrier_SetRemote(i, species, flags, id, mode == PLAYER_AVATAR_STATE_UNDERWATER);
     }
 }
 #endif // PORTABLE

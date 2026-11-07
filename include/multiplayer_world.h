@@ -62,7 +62,8 @@
 #define MP_WORLD_WALLET_CREDIT      1
 #define MP_WORLD_WALLET_DEBIT       2
 #ifdef PORTABLE
-// Another player surfing on their carrier (MP_WORLD_MOUNT_CARRIER): its species and flags. FALSE: not surfing on one.
+// Another player surfing, or under the water, on their carrier (MP_WORLD_MOUNT_CARRIER): its species and flags. FALSE:
+// not on one.
 bool32 MultiplayerWorld_GetPeerCarrier(u32 playerId, u16 *species, u8 *flags);
 // A wallet delta above MAX_MONEY with this flag is a Frontier reward (src/multiplayer_world.c).
 #define MP_REWARD_FLAG              0x40000000

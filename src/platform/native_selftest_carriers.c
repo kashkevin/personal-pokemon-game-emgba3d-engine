@@ -10,7 +10,10 @@
 //  - the sprites: the surf sprite made after the player's (it reads the player's place of this frame), its species'
 //    palette shiny or not, a silhouette palette under the water, its place under the rider's seat, its animations and
 //    drawing order, and its palette freed once the game destroys it; the flyer's place and drawing order;
-//  - the underwater rider's picture and palette, and a save keeping the original's underwater look.
+//  - the underwater rider's picture and palette, and a save keeping the original's underwater look;
+//  - another player under the water on their carrier (KNOWN_ISSUES MS-181): their surfing pose as the silhouette in
+//    their slot's palette (a new look, the slot's other id), their carrier as the silhouette in another, hidden until
+//    they are drawn as its rider, in its own colours again on the water, both palettes freed with it.
 // With an output path, a contact sheet: per species the carrier with the rider on its back facing south, north, west and
 // east, under the water (west) and in the air (west). Nothing here writes a save file; then the game exits.
 //   --selftest-carriers [SHEET.ppm]
@@ -520,6 +523,85 @@ int NativeSelfTest_Carriers(const char *sheetPath)
                    saved == GetPlayerAvatarGraphicsIdByStateId(PLAYER_AVATAR_STATE_UNDERWATER));
         }
         Expect("the game's own object keeps the carrier's look", gObjectEvents[0].graphicsId == FIELD_CARRIER_GFX_UNDERWATER_RIDER);
+
+        // another player under the water on their carrier (KNOWN_ISSUES MS-181), drawn as the player's own diver
+        {
+            const u32 slot = 1;
+            u16 maySurfing = GetPlayerAvatarGraphicsIdByStateIdAndGender(PLAYER_AVATAR_STATE_SURFING, FEMALE);
+            u16 brendanSurfing = GetPlayerAvatarGraphicsIdByStateIdAndGender(PLAYER_AVATAR_STATE_SURFING, MALE);
+            u16 diver = FieldCarrier_RemoteUnderwaterGraphicsId(slot, maySurfing), again, other, wailord;
+            const struct ObjectEventGraphicsInfo *info = GetObjectEventGraphicsInfo(diver);
+            const struct ObjectEventGraphicsInfo *may = GetObjectEventGraphicsInfo(maySurfing);
+            struct ObjectEvent *avatar = &gObjectEvents[1];
+            struct SpritePalette pal;
+            u8 avatarSprite, remote = MAX_SPRITES, localId, mapNum, mapGroup;
+            u32 i2;
+
+            Expect("another diver: their character's surfing pose", info->images == may->images
+                && info->width == may->width && info->height == may->height);
+            Expect("in their slot's silhouette palette", info->paletteTag == FIELD_CARRIER_PAL_TAG_REMOTE_RIDER + slot
+                && FieldCarrier_GetSpritePalette(FIELD_CARRIER_PAL_TAG_REMOTE_RIDER + slot, &pal) && Bluish(pal.data));
+            Expect("which the object palette loader finds", LoadObjectEventPalette(FIELD_CARRIER_PAL_TAG_REMOTE_RIDER + slot) < 16);
+            Expect("not the player's own underwater look (a save keeps no other player)",
+                   !FieldCarrier_IsUnderwaterAvatarGraphicsId(diver));
+            again = FieldCarrier_RemoteUnderwaterGraphicsId(slot, maySurfing);
+            other = FieldCarrier_RemoteUnderwaterGraphicsId(slot, brendanSurfing);
+            Expect("the same look the same id; another look the slot's other id, with its pictures", again == diver
+                && other != diver && GetObjectEventGraphicsInfo(other)->images == GetObjectEventGraphicsInfo(brendanSurfing)->images);
+            Expect("the slot's palette made again from the new look", IndexOfSpritePaletteTag(FIELD_CARRIER_PAL_TAG_REMOTE_RIDER
+                + slot) < 16 && FieldCarrier_GetSpritePalette(FIELD_CARRIER_PAL_TAG_REMOTE_RIDER + slot, &pal)
+                && memcmp(&gPlttBufferUnfaded[OBJ_PLTT_ID(IndexOfSpritePaletteTag(FIELD_CARRIER_PAL_TAG_REMOTE_RIDER + slot))],
+                          pal.data, PLTT_SIZE_4BPP) == 0);
+            Expect("another slot's ids are its own", FieldCarrier_RemoteUnderwaterGraphicsId(0, maySurfing) != diver
+                && FieldCarrier_RemoteUnderwaterGraphicsId(0, maySurfing) != other);
+            FreeSpritePaletteByTag(FIELD_CARRIER_PAL_TAG_REMOTE_RIDER + slot);
+
+            // their carrier (Wailord): the silhouette in their slot's carrier palette, hidden until they are its rider
+            memset(avatar, 0, sizeof(*avatar));
+            avatar->active = TRUE;
+            avatar->graphicsId = GetPlayerAvatarGraphicsIdByStateIdAndGender(PLAYER_AVATAR_STATE_UNDERWATER, MALE);
+            avatar->facingDirection = DIR_WEST;
+            avatarSprite = CreateObjectGraphicsSprite(avatar->graphicsId, SpriteCallbackDummy, 80, 64, 0);
+            avatar->spriteId = avatarSprite;
+            FieldCarrier_GetGraphicsId(SPECIES_WAILORD, FALSE, FALSE, &wailord);
+            FieldCarrier_SetRemote(slot, SPECIES_WAILORD, 0, 1, TRUE);
+            for (i2 = 0; i2 < MAX_SPRITES; i2++)
+                if (gSprites[i2].inUse && FieldCarrier_GetRemoteOwner(&gSprites[i2], &localId, &mapNum, &mapGroup))
+                    remote = i2;
+            Expect("under the water their carrier is made", remote < MAX_SPRITES && FieldCarrier_IsRemoteUnderwaterLive(slot)
+                && gSprites[remote].images == GetObjectEventGraphicsInfo(wailord)->images);
+            Expect("as the silhouette, in their slot's carrier palette", remote < MAX_SPRITES
+                && GetSpritePaletteTagByPaletteNum(gSprites[remote].oam.paletteNum) == FIELD_CARRIER_PAL_TAG_REMOTE_CARRIER + slot
+                && Bluish(&gPlttBufferUnfaded[OBJ_PLTT_ID(gSprites[remote].oam.paletteNum)]));
+            Expect("its species palette not kept loaded for it", IndexOfSpritePaletteTag(wailord) == 0xFF);
+            if (remote < MAX_SPRITES)
+            {
+                gSprites[remote].callback(&gSprites[remote]);
+                Expect("hidden while they show the original's underwater look (the blob drawn in)", gSprites[remote].invisible);
+                avatar->graphicsId = other;   // the multiplayer layer draws them as its rider once it is live
+                gSprites[remote].callback(&gSprites[remote]);
+                Expect("drawn once they are its rider, under them", !gSprites[remote].invisible
+                    && abs(gSprites[remote].x - gSprites[avatarSprite].x) <= 16);
+                FieldCarrier_SetRemote(slot, SPECIES_WAILORD, 0, 1, TRUE);
+                Expect("the same carrier again: the same sprite kept", gSprites[remote].inUse
+                    && FieldCarrier_GetRemoteOwner(&gSprites[remote], &localId, &mapNum, &mapGroup));
+            }
+            FieldCarrier_SetRemote(slot, SPECIES_WAILORD, 0, 1, FALSE);
+            FieldCarrier_Tick();
+            remote = MAX_SPRITES;
+            for (i2 = 0; i2 < MAX_SPRITES; i2++)
+                if (gSprites[i2].inUse && FieldCarrier_GetRemoteOwner(&gSprites[i2], &localId, &mapNum, &mapGroup))
+                    remote = i2;
+            Expect("back on the water: in its own colours, its silhouette palette freed", remote < MAX_SPRITES
+                && !FieldCarrier_IsRemoteUnderwaterLive(slot)
+                && GetSpritePaletteTagByPaletteNum(gSprites[remote].oam.paletteNum) == wailord
+                && IndexOfSpritePaletteTag(FIELD_CARRIER_PAL_TAG_REMOTE_CARRIER + slot) == 0xFF);
+            FieldCarrier_SetRemote(slot, SPECIES_NONE, 0, OBJECT_EVENTS_COUNT, FALSE);
+            FieldCarrier_Tick();
+            Expect("gone with them, its palette freed", IndexOfSpritePaletteTag(wailord) == 0xFF);
+            DestroySprite(&gSprites[avatarSprite]);
+            memset(avatar, 0, sizeof(*avatar));
+        }
 
         // the flyer
         FieldCarrier_SetFlyer(1);
