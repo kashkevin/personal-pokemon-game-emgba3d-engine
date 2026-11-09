@@ -5,6 +5,7 @@
 
 #include "constants/map_types.h"
 #include "constants/metatile_behaviors.h"
+#include "constants/metatile_labels.h"
 #include "diorama/rules.generated.h"
 #include "diorama/rules.h"
 #include "diorama/terrain_mesh.h"
@@ -381,6 +382,20 @@ static void InitializeResolved(struct DioramaResolvedCell *resolved)
 }
 
 /* Returns whether a script redrew the cell (its record made for another picture). */
+/*
+ * Fortree City's log bridges dip under the player: the plank stepped on is swapped for its pressed picture and back
+ * (field_tasks.c TryLowerFortreeBridge, TryRaiseFortreeBridge). The pressed plank is the same bridge, so the record
+ * made for the raised one stands for it: a deck a level over the forest floor stays a deck. Read as a cell a script
+ * redrew, it fell to a block of ground at the deck's level, its sides showing under the bridge where the player stood.
+ */
+static bool IsPressedPlank(uint16_t expectedMetatile, uint16_t metatileId)
+{
+    return (expectedMetatile == METATILE_Fortree_BridgeOverGrass_Raised
+            && metatileId == METATILE_Fortree_BridgeOverGrass_Lowered)
+        || (expectedMetatile == METATILE_Fortree_BridgeOverTrees_Raised
+            && metatileId == METATILE_Fortree_BridgeOverTrees_Lowered);
+}
+
 static bool ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
                                const struct DioramaCellSnapshot *cell,
                                struct DioramaResolvedCell *resolved)
@@ -390,6 +405,7 @@ static bool ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
     const struct DioramaGeneratedStructureCellV2 *structureCell;
     const struct DioramaGeneratedStructureV2 *structure;
     uint32_t cellOffset;
+    uint16_t metatileId;
 
     if (!(cell->flags & DIORAMA_CELL_SOURCE_VALID) || cell->sourceMapX < 0
      || cell->sourceMapY < 0)
@@ -401,9 +417,11 @@ static bool ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
     record = FindStaticTerrain(layout, cellOffset, cell->sourceMapGroup, cell->sourceMapNum);
     if (record == NULL)
         return false;
+    metatileId = IsPressedPlank(record->expectedMetatile, cell->metatileId) ? record->expectedMetatile
+                                                                              : cell->metatileId;
     /* A crown's top over its ground (the Lavaridge tileset's solid trees) is
      * the place the record was made for, drawn without the crown. */
-    if (record->expectedMetatile != cell->metatileId && !(cell->flags & DIORAMA_CELL_TREE_CANOPY))
+    if (record->expectedMetatile != metatileId && !(cell->flags & DIORAMA_CELL_TREE_CANOPY))
     {
         /* A cell a script redrew (Route 113's ash brushed off the grass the player
          * walks through, a barrier gone): the new picture is not the one this record
@@ -495,7 +513,7 @@ static bool ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
         resolved->measuredBands[bandIndex].layer = band->layer;
         resolved->measuredBands[bandIndex].sourceHalf = band->sourceHalf;
     }
-    structureCell = FindStaticStructure(layout, cellOffset, cell->metatileId,
+    structureCell = FindStaticStructure(layout, cellOffset, metatileId,
                                         cell->sourceMapGroup, cell->sourceMapNum);
     if (structureCell == NULL)
     {

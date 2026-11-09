@@ -1513,7 +1513,32 @@ HAND_LEVELS: dict[str, dict] = {
                                  "ridges": (((18, 2, 25, 2), 0),),
                                  "decks": ((17, 7, 20, 7), (20, 5, 20, 6), (21, 5, 22, 5), (22, 3, 22, 4),
                                            (23, 3, 25, 3))},
+    # Fortree City's tree houses: the GBA draws its six houses, their porches and the plank bridges between them
+    # (MB_FORTREE_BRIDGE) a level over the forest floor - the walkways at elevation 4 over the town's 3, the row
+    # under each walkway its front (planks and posts), a ladder (elevation 0) down from each porch, and the path
+    # (30-33) crossing under the south bridge (elevation 15). The solver found no terrace there and laid all of it
+    # on the forest floor: the bridges and porches planks on the ground, the ladders lying flat in front of them, the
+    # player on the bridge at the height of the people on the path under it. The houses ("banks": their blocked
+    # cells; "floors": their doors), the porches and the walkways stand a level up; the bridges are decks (the path
+    # runs under the south one), the ladders climb from the floor to the porches ("slopes", as SEAM_RAMPS').
+    "LAYOUT_FORTREE_CITY": {
+        "banks": (((9, 1, 11, 1), 16), ((8, 2, 12, 3), 16), ((15, 1, 18, 1), 16), ((15, 2, 19, 3), 16),
+                  ((24, 1, 26, 1), 16), ((23, 2, 27, 2), 16), ((21, 3, 27, 3), 16), ((31, 0, 33, 0), 16),
+                  ((30, 1, 34, 2), 16), ((30, 3, 30, 3), 16), ((34, 3, 34, 3), 16), ((8, 4, 8, 4), 16),
+                  ((34, 4, 34, 4), 16), ((11, 11, 14, 11), 16), ((10, 12, 14, 13), 16), ((10, 14, 10, 14), 16),
+                  ((36, 11, 38, 11), 16), ((35, 12, 39, 13), 16), ((39, 14, 39, 14), 16)),
+        "floors": (((8, 2, 12, 3), 16), ((15, 2, 19, 3), 16), ((21, 3, 27, 3), 16), ((30, 1, 34, 3), 16),
+                   ((9, 4, 33, 4), 16), ((10, 12, 14, 13), 16), ((35, 12, 39, 13), 16), ((11, 14, 38, 14), 16)),
+        "slopes": (((10, 5, 10, 6), "n", 0, 16), ((25, 5, 25, 6), "n", 0, 16), ((32, 5, 32, 6), "n", 0, 16),
+                   ((12, 15, 12, 16), "n", 0, 16), ((37, 15, 37, 16), "n", 0, 16)),
+        "decks": ((13, 4, 14, 4), (20, 4, 22, 4), (28, 4, 29, 4), (15, 14, 34, 14)),
+    },
 }
+# The layouts whose blocked cells lift_blocked_cells leaves where they are: Fortree City's forest stays on its floor
+# round its raised walkways. Lifted to the level of the walkable ground nearest them - the walkways, for most of the
+# forest between the houses - its trees stood on blocks of ground a level up, their sides showing where they met the
+# trees on the floor (before its walkways were raised, every level there was the floor's and nothing lifted).
+HAND_LEVELS_ONLY: frozenset[str] = frozenset({"LAYOUT_FORTREE_CITY"})
 # Ground that keeps its own level when its map's ground moves to meet the next map's (terrace_topology.seam_shifts;
 # KNOWN_ISSUES MS-154): "keep", the region of each cell (x, y) given stays where the layout's own solve put it;
 # "banks", (rectangle, level) as SEAM_RAMPS' (terrace_topology.hand_banks), the blocked cells round it that took their
@@ -2151,8 +2176,10 @@ def compile_data(root: Path) -> dict:
         # Levels given by hand inside a map (HAND_LEVELS; its decks are laid last, below).
         level_width = layouts_by_id[layout_id]["width"]
         terrace_topology[layout_id] = {**terrace_topology[layout_id],
+                                       **hand_banks(cells[layout_id], level_width, levels.get("banks", ())),
                                        **hand_floors(cells[layout_id], level_width, levels.get("floors", ())),
-                                       **hand_ridges(cells[layout_id], level_width, levels.get("ridges", ()))}
+                                       **hand_ridges(cells[layout_id], level_width, levels.get("ridges", ())),
+                                       **hand_slopes(level_width, levels.get("slopes", ()))}
 
     source = load_json(rules_root / "defaults.json")
     _unknown(source, {"schemaVersion", "kind", "default", "semanticPools", "profiles",
@@ -2399,6 +2426,9 @@ def compile_data(root: Path) -> dict:
                 # (on a pass, its jump ledges and the corner pieces of their rings stand on the path they are
                 # jumped from, the higher of the two they part: left at the pass's foot they cut trenches and
                 # pits down to it between its levels; its rock is the rock bands', below)
+                if layout["id"] in HAND_LEVELS_ONLY:
+                    # (the levels given by hand are all that move: the forest round them stays on its floor)
+                    liftable = (lambda offset: False)
                 terrace_topology[layout["id"]] = {
                     **terrace_topology[layout["id"]],
                     **lift_blocked_cells(layout_cells, layout["width"], layout["height"],

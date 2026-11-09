@@ -592,6 +592,38 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertEqual([(at(29, y)["groundQ16"], at(29, y)["topQ16"]) for y in (0, 1, 2)],
                          [(-16, -16), (-16, 0), (0, 16)])
 
+    def test_repository_fortree_city_tree_houses_stand_a_level_up(self):
+        # Fortree City (the 3D sweep of 2026-11-09, MS-222's kind): its six tree houses, their porches and the plank
+        # bridges between them stand a level over the forest floor in the GBA's drawing (the walkways' elevation 4
+        # over the town's 3; the path at 30-33 runs under the south bridge). They lay on the floor: the planks on the
+        # ground, the ladders flat before the porches, the player on a bridge at the height of the people on the path
+        # under it. The houses, their doors, porches and walkways stand a level up, the bridges decks, the ladders
+        # climb from the floor to the porches; the forest round them stays on the floor (none of it lifted).
+        layout = next(row for row in self.data["layouts"] if row["symbol"] == "LAYOUT_FORTREE_CITY")
+        width = layout["width"]
+        records = {record["cellOffset"]: record for record in layout["terrainRecords"] if record["mapGroup"] == 0xFF}
+
+        def at(x, y):
+            return records[y * width + x]
+
+        floor = at(20, 13)["groundQ16"]
+        self.assertEqual(floor, 0)
+        for x, y in ((9, 4), (12, 4), (17, 4), (25, 4), (32, 4), (32, 3), (12, 14), (36, 14),   # porches
+                     (10, 3), (17, 3), (25, 3), (32, 2), (12, 13), (37, 13)):                    # doors
+            self.assertEqual((at(x, y)["shape"], at(x, y)["groundQ16"]), ("flat", floor + 16), (x, y))
+        for x, y in ((10, 2), (17, 2), (25, 2), (32, 1), (12, 12), (37, 12)):                    # the houses
+            self.assertEqual(at(x, y)["groundQ16"], floor + 16, (x, y))
+        for x, y in ((13, 4), (14, 4), (20, 4), (22, 4), (28, 4), (29, 4), (15, 14), (25, 14),
+                     (30, 14), (31, 14), (33, 14), (34, 14)):                                    # the bridges
+            self.assertEqual((at(x, y)["shape"], at(x, y)["groundQ16"]), ("bridge", floor + 16), (x, y))
+        for x in (10, 25, 32):                                                                   # the ladders
+            self.assertEqual([(at(x, y)["groundQ16"], at(x, y)["topQ16"]) for y in (6, 5)], [(0, 8), (8, 16)], x)
+        for x in (12, 37):
+            self.assertEqual([(at(x, y)["groundQ16"], at(x, y)["topQ16"]) for y in (16, 15)], [(0, 8), (8, 16)], x)
+        for x, y in ((31, 13), (31, 15), (10, 7), (12, 17), (25, 7), (37, 17),                   # the floor, the path
+                     (15, 13), (20, 16), (13, 3), (12, 5), (20, 5), (13, 15), (20, 15), (5, 3)):  # the forest
+            self.assertEqual(at(x, y)["groundQ16"], floor, (x, y))
+
     def test_repository_paths_lie_flush_with_the_ground_they_run_through(self):
         # KNOWN_ISSUES MS-162: the Battle Frontier west half's paths of elevation 3 (the walk north from
         # the harbour, the band along its lower ground, the cells by the Battle Pike) run through its

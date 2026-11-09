@@ -1090,7 +1090,7 @@ class TerraceTopologyTests(unittest.TestCase):
         names = {value: name for name, value
                  in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
         lid = "LAYOUT_SAFARI_ZONE_SOUTH"
-        self.assertEqual(set(HAND_LEVELS), {lid})
+        self.assertEqual(set(HAND_LEVELS), {lid, "LAYOUT_FORTREE_CITY"})
         layout = next(row for row in layouts if row["id"] == lid)
         width = layout["width"]
         cells = _load_cells(ROOT, [layout], tilesets, names)[0][lid]
@@ -1112,6 +1112,51 @@ class TerraceTopologyTests(unittest.TestCase):
         ridges = hand_ridges(cells, width, levels["ridges"])
         self.assertEqual(sorted(ridges), [2 * width + x for x in range(18, 26)])
         self.assertEqual({(entry["groundQ16"], entry["topQ16"]) for entry in ridges.values()}, {(0, 16)})
+
+    def test_fortree_citys_tree_houses_given_by_hand(self):
+        # Fortree City's raised walkways (the 3D sweep of 2026-11-09): every walkable cell of the walkways'
+        # elevation (4) - porches and bridges - and the bridges' crossings over the path (15) lie a level up, and
+        # nothing else walkable but the houses' doors; the decks are its plank bridges (MB_FORTREE_BRIDGE), every one;
+        # the slopes are its ladders, the walkable cells of elevation 0 that forbid running, every one, each climbing
+        # north from the floor to its porch; the house over each door stands a level up; its forest is left where it
+        # is (HAND_LEVELS_ONLY).
+        from compile_rules import HAND_LEVELS, HAND_LEVELS_ONLY
+        tilesets = load_tilesets(ROOT)
+        _, layouts = load_world(ROOT)
+        names = {value: name for name, value
+                 in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
+        lid = "LAYOUT_FORTREE_CITY"
+        self.assertEqual(HAND_LEVELS_ONLY, {lid})
+        layout = next(row for row in layouts if row["id"] == lid)
+        width = layout["width"]
+        cells = _load_cells(ROOT, [layout], tilesets, names)[0][lid]
+        levels = HAND_LEVELS[lid]
+        walkable = {offset for offset, c in enumerate(cells) if c["collision"] == 0}
+        doors = {offset for offset in walkable if str(cells[offset]["behavior"]).endswith("_DOOR")}
+        floors = hand_floors(cells, width, levels["floors"])
+        self.assertEqual({entry["groundQ16"] for entry in floors.values()}, {16})
+        walkways = {offset for offset in walkable if cells[offset]["elevation"] == 4}
+        bridges = {offset for offset in walkable if cells[offset]["behavior"] == "MB_FORTREE_BRIDGE"}
+        self.assertEqual(len(walkways), 52)
+        self.assertEqual(len(bridges), 27)
+        self.assertEqual(len(doors), 6)
+        self.assertEqual(set(floors), walkways | bridges | doors)
+        self.assertEqual({cells[offset]["elevation"] for offset in bridges - walkways}, {15})
+        decks = hand_decks(cells, width, levels["decks"], floors)
+        self.assertEqual(set(decks), bridges)
+        slopes = hand_slopes(width, levels["slopes"])
+        ladders = {offset for offset in walkable
+                   if cells[offset]["elevation"] == 0 and cells[offset]["behavior"] == "MB_NO_RUNNING"}
+        self.assertEqual(len(ladders), 10)
+        self.assertEqual(set(slopes), ladders)
+        for offset in ladders:                       # the floor south of each ladder, its porch north of it
+            if offset - width in ladders:
+                self.assertIn(offset + width, walkable)
+                self.assertEqual(cells[offset + width]["elevation"], 3)
+                self.assertIn(offset - 2 * width, floors)
+        banks = hand_banks(cells, width, levels["banks"])
+        self.assertTrue(all(cells[offset]["collision"] for offset in banks))
+        self.assertTrue(all(door - width in banks for door in doors))   # the house over each door
 
     def test_the_safari_zones_plateau_given_by_hand(self):
         # The south-west's muddy slope (8, 2-3) climbs through the rock of its face to the north-west's plateau (its
