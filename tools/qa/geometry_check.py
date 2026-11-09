@@ -28,6 +28,12 @@ per place and per map, in OUT/manifest.json and OUT/report.md:
     water-drop   walkable land three quarters of a tile or more over the water beside it
     hole         pixels of the probe's magenta sky enclosed by the scene (not pockets that open onto its far edge,
                  drawn in the edge fog's colour), or anywhere in the steep view: the scene has a gap
+    level-wall   two walkable cells side by side the game keeps apart by elevation (both 1-14 and different, not
+                 1 and 3, which a surfer crosses: no step between them in play; not water, an object, stairs or
+                 a ledge) drawn at one height, within a fifth of a tile: a wall nothing shows - a walkway the
+                 2D game draws over the ground beside it lying on that ground (KNOWN_ISSUES MS-222's rails,
+                 MS-223's bridges), or an edge the 2D game draws no more of than the 3D view (Mossdeep's
+                 strips): a list to look at beside the 2D game's pictures, not a count to bring to zero
     not-3d       the place was drawn in 2D, or its scene never completed
 A map is covered when every one of its cells was in some place's scene.
 
@@ -67,7 +73,7 @@ CAMERAS = "a,d,s15,s75"
 SECONDS_PER_PLACE = 45                   # a software renderer's worst; a process is given its places' share
 STALL_SECONDS = 240                      # none of its places finished for this long: the process stopped
 CHECKS = ("fin", "spike", "flat-blocked", "card-tree", "walk-step", "seam", "water-wall", "water-drop", "hole",
-          "not-3d")
+          "level-wall", "not-3d")
 WATER_BEHAVIOR = re.compile(r"WATER|SEAWEED|CURRENT|NO_SURFACING|WATERFALL|PUDDLE|HOT_SPRINGS")
 UNSTANDABLE = re.compile(r"WATERFALL|CURRENT|NO_SURFACING|^MB_JUMP_")     # gameplay_check.py's BLOCKED
 
@@ -610,6 +616,13 @@ def cell_checks(cells, group, num, kind):
                     and abs(c["ground"] - d["ground"]) >= 0.33:
                 check = "seam" if (c["group"], c["num"]) != (d["group"], d["num"]) else "walk-step"
                 found[check].add((mine[0]["sx"], mine[0]["sy"]))
+            if len(mine) == 2 and c["collision"] == 0 and d["collision"] == 0 \
+                    and not is_water(c) and not is_water(d) and not is_object(c) and not is_object(d) \
+                    and c["shape_name"] not in STEP_SHAPES and d["shape_name"] not in STEP_SHAPES \
+                    and c["elevation"] not in (0, 15) and d["elevation"] not in (0, 15) \
+                    and c["elevation"] != d["elevation"] and {c["elevation"], d["elevation"]} != {1, 3} \
+                    and abs(c["surface"] - d["surface"]) <= 0.2:
+                found["level-wall"].update(((c["sx"], c["sy"]), (d["sx"], d["sy"])))
             for w, land in ((c, d), (d, c)):
                 if is_water(w) and not is_water(land) and not is_object(land) \
                         and w["archetype_name"] != "WATERFALL":
