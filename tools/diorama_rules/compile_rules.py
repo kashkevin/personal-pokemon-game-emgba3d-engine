@@ -25,8 +25,8 @@ from profiles import NOMINAL_HEIGHTS, TileShape, shape_from_action
 from pixel_objects import UPRIGHT_CLASSES as UPRIGHT_PIXEL_CLASSES, extract_layout
 from structures import analyze_layout
 from terrace_topology import (WATER_BEHAVIORS, cave_climbs, cave_levels, contradiction_ramps, course_ridges,
-                              hall_stairs, hand_banks, hand_floors, hand_slopes, indoor_levels,
-                              mountain_by_hand, stair_runs_between, stair_terraces,
+                              hall_stairs, hand_banks, hand_decks, hand_floors, hand_ridges, hand_slopes,
+                              indoor_levels, mountain_by_hand, stair_runs_between, stair_terraces,
                               join_level_free_cells,
                               join_water,
                               lift_blocked_cells, mountain_ledges, pass_levels, rock_tops, seam_shifts,
@@ -1404,10 +1404,14 @@ RIDGE_LAYOUTS: frozenset[str] = frozenset()
 # wall along (18-25, 2) ends in open grass that its corner puts on the wall's top, the short wall at (35-36, 7)
 # stands between grass the next maps meet at one level, and its enclosure at (9-16, 3-8) is open to the east at
 # (17, 7), so the solver dropped the whole terrace: every wall a block, the enclosure's sides flat. Those two walls
-# are scenery to the solver (SCENERY_COURSES: faces on the ground before them, course_ridges), a ramp at the
-# enclosure's opening climbs west into it (RAMP_HINTS, (x, y): the way each climbs), and the ground before its
-# stairs stays where the next maps meet it (LEVEL_ANCHORS, (x, y) and its groundQ16): the enclosure stands a level
-# over the ground round it, its stairs climb to it, its walls are faces.
+# are scenery to the solver (SCENERY_COURSES: faces on the ground before them, course_ridges), and the ground before
+# its stairs stays where the next maps meet it (LEVEL_ANCHORS, (x, y) and its groundQ16): the enclosure stands a level
+# over the ground round it, its stairs climb to it, its walls are faces. The enclosure's opening at (17, 7) is where
+# its white rails start, a walkway of its elevation (5) over the valley (3) to the east plateau (5, 26-36, 2-7): the
+# enclosure, the rails and the plateau are one region the solver lays a level over the valley (HAND_LEVELS: the rails
+# decks over it). The first fix (2026-11-01) laid a ramp at the opening, which put white stairs there and the rails
+# and the plateau on the valley's level, their cliffs walls on flat ground (KNOWN_ISSUES MS-222, the owner's report
+# of 2026-11-09).
 SCENERY_COURSES: dict[str, tuple[tuple[int, int], ...]] = {
     "LAYOUT_SAFARI_ZONE_SOUTH": tuple((x, 2) for x in range(18, 26)) + ((35, 7), (36, 7)),
 }
@@ -1419,7 +1423,6 @@ SCENERY_COURSES: dict[str, tuple[tuple[int, int], ...]] = {
 # elevation 0 (the game's any level) between its raised sand and the grass south of it, stayed on the top level, a
 # step a level over both; it climbs north from the grass to the sand.
 RAMP_HINTS: dict[str, dict[tuple[int, int], str]] = {
-    "LAYOUT_SAFARI_ZONE_SOUTH": {(17, 7): "w"},
     "LAYOUT_SAFARI_ZONE_NORTH": {(22, 23): "n"},
     "LAYOUT_SAFARI_ZONE_NORTHEAST": {**{(x, 22): "n" for x in (20, 21, 22)}, (30, 9): "n", (26, 13): "n",
                                      **{(x, y): "s" for y in (37, 38, 39) for x in (*range(6, 9), *range(27, 33), 34)}},
@@ -1450,9 +1453,10 @@ PASS_LAYOUTS: frozenset[str] = frozenset({"LAYOUT_JAGGED_PASS"})
 # from the north-west's level to the south-west's, the ledges at its south side jumped level; the trees along the seam
 # over the north-west's low ground (two rows, each tree two by two) stand half way, a level down, whole (a level a row
 # split them). (The game's ledges say the north-west stands over the south-west; standing it so moves every Safari
-# map's levels: MS-162's open part.) The Safari Zone's south: its path at (29-30, 0-1) runs on from the north's, which
-# lies a level under it; its first row lies on the north's level, its second climbs the level, the trees beside them
-# (two by two) on the north's level. (Half a level a row, the first try, left hairline cracks where it met the trees.)
+# map's levels: MS-162's open part.) The Safari Zone's south: its path at (29-30, 0-2) runs on from the north's into
+# its east plateau, which lies two levels over the north's (MS-222: a level up from its valley); its first row lies
+# on the north's level, the next two climb the two levels, a level a row, the trees beside the first two (two by two)
+# on the north's level. (Half a level a row, the first try, left hairline cracks where it met the trees.)
 SEAM_RAMPS: dict[str, dict] = {
     # The Safari Zone's north-west plateau (its elevation 7, rows 27-39, west of x 16), which the south-west's muddy
     # slope (8, 2-3) climbs to through the rock of its face (rows 2-3) and its two rows over the face (7-10, 0-1),
@@ -1473,7 +1477,7 @@ SEAM_RAMPS: dict[str, dict] = {
                                      "banks": (((13, 0, 39, 1), -16), ((1, 0, 6, 1), 16), ((11, 0, 12, 1), 16),
                                                ((0, 2, 7, 2), 16), ((9, 2, 12, 2), 16))},
     "LAYOUT_SAFARI_ZONE_SOUTH": {"floors": (((29, 0, 30, 0), -16),),
-                                 "slopes": (((29, 1, 30, 1), "s", -16, 0),),
+                                 "slopes": (((29, 1, 30, 2), "s", -16, 16),),
                                  "banks": (((17, 0, 39, 1), -16),)},
     # The Battle Frontier's two halves: the west half's south plaza (rows 40-54 along the seam) lies a level under the
     # east half's (MS-162). Its last column lies on the east half's level and the one before it climbs east to it
@@ -1494,6 +1498,22 @@ SEAM_RAMPS: dict[str, dict] = {
                         "banks": (((0, 137, 12, 139), 0),)},
 }
 SEAM_RAMPS["LAYOUT_ROUTE111_NO_MIRAGE_TOWER"] = SEAM_RAMPS["LAYOUT_ROUTE111"]
+# Levels given by hand inside a map where the GBA's drawing gives the solver none it can read (KNOWN_ISSUES MS-222):
+# "floors" and "ridges", laid with SEAM_RAMPS' after the solve - the walkable cells of a rectangle on one level
+# (terrace_topology.hand_floors), its terrace courses faces from one level a level up (hand_ridges) - and "decks",
+# rectangles of walkways laid last as a mountain's bridge (hand_decks: the bridge's shape, the ground under it laid
+# by buildings.c). The Safari Zone's south: its white rails on posts (17-25, 3-7) run from its west enclosure to its
+# east plateau over its valley, at the enclosure's and the plateau's elevation (5) over the valley's (3); they are
+# decks over the valley. The valley's ground they close round (18-21, 3-6: no one walks there, its elevation not
+# theirs) lay with them a level up (the solver lays a region no terrace reaches with the ground beside it), and the
+# wall along (18-25, 2) stood on them, two levels over the valley at its east end: that ground lies on the valley's
+# level, the wall a face from it a level up, the rails along its top.
+HAND_LEVELS: dict[str, dict] = {
+    "LAYOUT_SAFARI_ZONE_SOUTH": {"floors": (((18, 3, 21, 4), 0), ((18, 5, 19, 6), 0)),
+                                 "ridges": (((18, 2, 25, 2), 0),),
+                                 "decks": ((17, 7, 20, 7), (20, 5, 20, 6), (21, 5, 22, 5), (22, 3, 22, 4),
+                                           (23, 3, 25, 3))},
+}
 # Ground that keeps its own level when its map's ground moves to meet the next map's (terrace_topology.seam_shifts;
 # KNOWN_ISSUES MS-154): "keep", the region of each cell (x, y) given stays where the layout's own solve put it;
 # "banks", (rectangle, level) as SEAM_RAMPS' (terrace_topology.hand_banks), the blocked cells round it that took their
@@ -2127,6 +2147,12 @@ def compile_data(root: Path) -> dict:
                                        **hand_banks(cells[layout_id], ramp_width, ramp.get("banks", ())),
                                        **hand_floors(cells[layout_id], ramp_width, ramp.get("floors", ())),
                                        **hand_slopes(ramp_width, ramp.get("slopes", ()))}
+    for layout_id, levels in HAND_LEVELS.items():
+        # Levels given by hand inside a map (HAND_LEVELS; its decks are laid last, below).
+        level_width = layouts_by_id[layout_id]["width"]
+        terrace_topology[layout_id] = {**terrace_topology[layout_id],
+                                       **hand_floors(cells[layout_id], level_width, levels.get("floors", ())),
+                                       **hand_ridges(cells[layout_id], level_width, levels.get("ridges", ()))}
 
     source = load_json(rules_root / "defaults.json")
     _unknown(source, {"schemaVersion", "kind", "default", "semanticPools", "profiles",
@@ -2481,6 +2507,12 @@ def compile_data(root: Path) -> dict:
                     **terrace_topology[layout["id"]],
                     **mountain_by_hand(layout_cells, layout["width"], layout["height"],
                                        MOUNTAIN_LEVELS[layout["id"]], decks=True)}
+            if layout["id"] in HAND_LEVELS and HAND_LEVELS[layout["id"]].get("decks"):
+                # a walkway given by hand, laid last as a mountain's bridge (HAND_LEVELS)
+                terrace_topology[layout["id"]] = {
+                    **terrace_topology[layout["id"]],
+                    **hand_decks(layout_cells, layout["width"], HAND_LEVELS[layout["id"]]["decks"],
+                                 terrace_topology[layout["id"]])}
             if (maps_by_layout.get(layout["id"])
                     and all(_outdoor(row["mapType"]) for row in maps_by_layout[layout["id"]])):
                 # General's terrace stairs whose ends do not meet the ground they join lie between its levels

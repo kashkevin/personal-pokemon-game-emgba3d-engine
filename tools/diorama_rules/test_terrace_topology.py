@@ -8,7 +8,8 @@ from catalog import load_tilesets, load_world
 from compile_rules import _load_cells, parse_behaviors
 from terrace_topology import (CAVE_RISE_Q16, LEDGE_JUMPS, MOUNTAIN_LEDGE_Q16, SLOPE_RISE_Q16, TERRACE_ROLES,
                               contradiction_ramps, course_ridges, cave_climbs, cave_levels, join_level_free_cells, join_water, lift_blocked_cells,
-                              hall_stairs, hand_banks, hand_floors, hand_slopes, indoor_levels,
+                              hall_stairs, hand_banks, hand_decks, hand_floors, hand_ridges, hand_slopes,
+                              indoor_levels,
                               mountain_by_hand, stair_runs_between, stair_terraces,
                               mountain_ledges, pass_levels, rock_tops, role_for_cell, seam_shifts, slope_tops,
                               solve_layout)
@@ -766,9 +767,11 @@ class TerraceTopologyTests(unittest.TestCase):
 
     def test_the_safari_zones_entrance_stands_its_enclosure_a_level_up(self):
         # The owner's report of 2026-11-01 ("some hills are blocks, some hills are 2d"): with compile_rules'
-        # hints for the Safari Zone's entrance (its two walls scenery, a ramp at the enclosure's opening, the
-        # ground before its stairs where the next maps meet it) the enclosure stands a level over the ground before
-        # its stairs, nothing dropped.
+        # hints for the Safari Zone's entrance (its two walls scenery, the ground before its stairs where the next
+        # maps meet it) the enclosure stands a level over the ground before its stairs, nothing dropped. Its white
+        # rails from its opening (17, 7) to the east plateau, of its elevation, stand on its level, and the plateau
+        # with them, over the valley the rails cross (KNOWN_ISSUES MS-222, the owner's report of 2026-11-09: a ramp
+        # laid at the opening stood white stairs there and put the rails and the plateau on the valley).
         from compile_rules import RAMP_HINTS, SCENERY_COURSES
         tilesets = load_tilesets(ROOT)
         _, layouts = load_world(ROOT)
@@ -780,12 +783,18 @@ class TerraceTopologyTests(unittest.TestCase):
         cells = _load_cells(ROOT, [layout], tilesets, names)[0][lid]
         scenery = {y * width + x for x, y in SCENERY_COURSES[lid]}
         cells = tuple(dict(c, metatile=0, localMetatile=0) if o in scenery else c for o, c in enumerate(cells))
-        ramps = {y * width + x: d for (x, y), d in RAMP_HINTS[lid].items()}
+        self.assertNotIn(lid, RAMP_HINTS)
         contradictions = []
-        solved = solve_layout(cells, width, height, contradictions=contradictions, ramps=ramps, open_ends=True)
+        solved = solve_layout(cells, width, height, contradictions=contradictions, open_ends=True)
         self.assertEqual(contradictions, [])
-        self.assertEqual(solved[7 * width + 13]["groundQ16"] - solved[10 * width + 13]["groundQ16"], 16)
+        enclosure, valley = solved[7 * width + 13]["groundQ16"], solved[10 * width + 13]["groundQ16"]
+        self.assertEqual(enclosure - valley, 16)
         self.assertEqual(solved[9 * width + 13]["profile"], "transition-horizontal")   # its stairs climb
+        for x, y in ((17, 7), (20, 6), (22, 4), (25, 3), (26, 4), (30, 3), (35, 4), (26, 7)):   # rails, plateau
+            self.assertEqual((solved[y * width + x]["groundQ16"], solved[y * width + x]["profile"]),
+                             (enclosure, "none"), (x, y))
+        for x, y in ((21, 7), (23, 5), (24, 8)):                                          # the valley by them
+            self.assertEqual(solved[y * width + x]["groundQ16"], valley, (x, y))
 
     def test_the_safari_zones_north_east_steps_down_to_ramps_at_its_south_edge(self):
         # The owner's choice of 2026-11-01 ("Real terraces + slope at edge"): with compile_rules' hints for the
@@ -1021,7 +1030,9 @@ class TerraceTopologyTests(unittest.TestCase):
             floors = tuple((rect, level) for rect, level in ramp.get("floors", ())
                            if rect[0] <= x1 and rect[2] >= x0)
             y0 = min([sy0] + [rect[1] for rect, _ in floors])
-            self.assertEqual((y0, direction, high), (0, "s", 0))     # from the map's north edge to its own ground
+            # from the map's north edge to its own ground (the south's: to its east plateau, a level over its valley,
+            # KNOWN_ISSUES MS-222)
+            self.assertEqual((y0, direction, high), (0, "s", 16 if lid == "LAYOUT_SAFARI_ZONE_SOUTH" else 0))
             self.assertLess(low, high)
             # a floor before the slope lies on its low level, flat, its walkable cells only
             self.assertTrue(all(level == low and rect[3] < sy0 for rect, level in floors))
@@ -1031,9 +1042,10 @@ class TerraceTopologyTests(unittest.TestCase):
             for x in range(x0, x1 + 1):
                 self.assertTrue(all(cells[y * width + x]["collision"] == 0 for y in range(y0, y1 + 1)))
             # the trees beside it: their two rows on one level, from the ramp's low end; the ramp's cells left alone
+            # (the south's last row runs into its plateau, the trees beside it the plateau's)
             seam_banks = tuple((rect, lvl) for rect, lvl in ramp["banks"] if rect[0] <= x1 and rect[2] >= x0)
             ((bx0, by0, bx1, by1), level), = seam_banks
-            self.assertEqual((by0, by1), (y0, y1))
+            self.assertEqual((by0, by1), (y0, y1 - 1 if lid == "LAYOUT_SAFARI_ZONE_SOUTH" else y1))
             self.assertTrue(low <= level < high)
             banks = hand_banks(cells, width, seam_banks)
             self.assertTrue(banks)
@@ -1047,6 +1059,59 @@ class TerraceTopologyTests(unittest.TestCase):
             else:
                 # the south's path runs on south from the ramp
                 self.assertTrue(all(cells[(y1 + 1) * width + x]["collision"] == 0 for x in range(x0, x1 + 1)))
+
+    def test_courses_and_walkways_given_by_hand(self):
+        # compile_rules HAND_LEVELS: a rectangle's terrace courses are faces from the level given a level up, its
+        # other cells left alone (hand_ridges); a rectangle's walkable cells are decks on the level solved for them,
+        # its blocked cells left alone, and a walkable cell with no flat level solved for it is an error (hand_decks).
+        cells = (dict(cell(121), collision=1), ground(), dict(cell(1), collision=1),
+                 ground(), ground(), dict(cell(1), collision=1))
+        self.assertEqual(hand_ridges(cells, 3, (((0, 0, 2, 0), 0),)),
+                         {0: {"groundQ16": 0, "topQ16": 16, "profile": TERRACE_ROLES[121].profile, "solid": True}})
+        self.assertEqual(hand_ridges(cells, 3, (((0, 0, 2, 0), -16),))[0]["topQ16"], 0)
+        solved = {3: {"groundQ16": 16, "topQ16": 16, "profile": "none", "solid": False},
+                  4: {"groundQ16": 16, "topQ16": 16, "profile": "none", "solid": False}}
+        decks = hand_decks(cells, 3, ((0, 1, 2, 1),), solved)
+        self.assertEqual(decks, {3: {**solved[3], "deck": True}, 4: {**solved[4], "deck": True}})
+        self.assertNotIn("deck", solved[3])                        # the solved entries themselves are left alone
+        with self.assertRaises(ValueError):
+            hand_decks(cells, 3, ((0, 0, 2, 0),), solved)          # (1, 0): walkable, no level solved for it
+        with self.assertRaises(ValueError):
+            hand_decks(cells, 3, ((0, 1, 0, 1),), {3: {"groundQ16": 0, "topQ16": 16, "solid": False,
+                                                      "profile": "transition-south"}})  # a ramp is no deck
+
+    def test_the_safari_zones_south_walkway_given_by_hand(self):
+        # KNOWN_ISSUES MS-222: Safari Zone South's white rails on posts are decks over its valley - every rail cell
+        # and nothing else; the valley's ground they close round (no one walks there, its elevation the valley's)
+        # lies on the valley's level; the wall along (18-25, 2) behind them is a face from that level a level up.
+        from compile_rules import HAND_LEVELS
+        tilesets = load_tilesets(ROOT)
+        _, layouts = load_world(ROOT)
+        names = {value: name for name, value
+                 in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
+        lid = "LAYOUT_SAFARI_ZONE_SOUTH"
+        self.assertEqual(set(HAND_LEVELS), {lid})
+        layout = next(row for row in layouts if row["id"] == lid)
+        width = layout["width"]
+        cells = _load_cells(ROOT, [layout], tilesets, names)[0][lid]
+        levels = HAND_LEVELS[lid]
+        flat = {offset: {"groundQ16": 16, "topQ16": 16, "profile": "none", "solid": False}
+                for offset, c in enumerate(cells) if c["collision"] == 0}
+        decks = hand_decks(cells, width, levels["decks"], flat)
+        rails = {offset for offset, c in enumerate(cells) if str(c["behavior"]).endswith("_RAIL")}
+        self.assertEqual(set(decks), rails)
+        self.assertEqual(len(rails), 13)
+        self.assertEqual({cells[offset]["elevation"] for offset in rails}, {5})
+        floors = hand_floors(cells, width, levels["floors"])
+        self.assertEqual(len(floors), 12)
+        self.assertEqual({entry["groundQ16"] for entry in floors.values()}, {0})
+        self.assertEqual({cells[offset]["elevation"] for offset in floors}, {3})
+        for offset in floors:                       # closed round by the rails, the enclosure's cliff and the wall
+            for neighbor in (offset - width, offset + 1, offset + width, offset - 1):
+                self.assertTrue(neighbor in floors or neighbor in rails or cells[neighbor]["collision"], neighbor)
+        ridges = hand_ridges(cells, width, levels["ridges"])
+        self.assertEqual(sorted(ridges), [2 * width + x for x in range(18, 26)])
+        self.assertEqual({(entry["groundQ16"], entry["topQ16"]) for entry in ridges.values()}, {(0, 16)})
 
     def test_the_safari_zones_plateau_given_by_hand(self):
         # The south-west's muddy slope (8, 2-3) climbs through the rock of its face to the north-west's plateau (its

@@ -2052,6 +2052,41 @@ def hand_floors(cells: tuple[dict, ...], width: int, floors) -> dict[int, dict]:
     return out
 
 
+def hand_ridges(cells: tuple[dict, ...], width: int, ridges) -> dict[int, dict]:
+    """Terrace courses of rectangles given by hand (compile_rules HAND_LEVELS): for each (rectangle, level) - the
+    rectangle (x0, y0, x1, y1, both corners in) - its course cells are faces on that level, each its own profile a
+    level up to its top edge (as course_ridges' faces), where course_ridges took the lowest walkable ground round
+    them and that ground is a walkway over their foot. Its other cells are left alone."""
+    out: dict[int, dict] = {}
+    for (x0, y0, x1, y1), level in ridges:
+        for y in range(y0, y1 + 1):
+            for x in range(x0, x1 + 1):
+                offset = y * width + x
+                role = role_for_cell(cells[offset])
+                if role is not None and role.solid:
+                    out[offset] = {"groundQ16": level, "topQ16": level + 16, "profile": role.profile,
+                                   "solid": True}
+    return out
+
+
+def hand_decks(cells: tuple[dict, ...], width: int, decks, solved: dict[int, dict]) -> dict[int, dict]:
+    """Walkways given by hand (compile_rules HAND_LEVELS): the walkable cells of each rectangle (x0, y0, x1, y1, both
+    corners in) are decks on the level solved for them (compile_rules gives them the bridge's shape, buildings.c lays
+    the ground under one with the walkable ground beside it a level or more lower). A walkable cell of one with no
+    level solved is an error: a deck stands on a level, never on the default one by chance."""
+    out: dict[int, dict] = {}
+    for x0, y0, x1, y1 in decks:
+        for y in range(y0, y1 + 1):
+            for x in range(x0, x1 + 1):
+                offset = y * width + x
+                if cells[offset].get("collision", 0) != 0:
+                    continue
+                if offset not in solved or solved[offset].get("profile", "none") != "none":
+                    raise ValueError(f"a deck at ({x}, {y}) has no flat level solved for it")
+                out[offset] = {**solved[offset], "deck": True}
+    return out
+
+
 def mountain_by_hand(cells: tuple[dict, ...], width: int, height: int, spec: dict,
                      decks: bool = False) -> dict[int, dict]:
     """A mountain whose levels the climbs do not give, given by hand (compile_rules MOUNTAIN_LEVELS; KNOWN_ISSUES

@@ -563,6 +563,35 @@ class DioramaRuleCompilerTests(unittest.TestCase):
             self.assertLessEqual(ground(x + step[0], y + step[1]), ground(x - step[0], y - step[1]), (x, y))
         self.assertGreater(ledges, 90)
 
+    def test_repository_safari_zone_south_walkway_and_plateau(self):
+        # KNOWN_ISSUES MS-222 (the owner's report of 2026-11-09): Safari Zone South's white rails (17-25, 3-7) run
+        # from its west enclosure to its east plateau over its valley, the three of elevation 5 over the valley's 3.
+        # They lay on the valley like benches, white stairs at their start (17, 7), the plateau on the valley's level
+        # with its cliffs walls on flat ground. The enclosure, the rails and the plateau stand a level over the
+        # valley, the rails decks (the bridge's shape) over it; the valley's ground the rails close round, the pit in
+        # the plateau and the wall's foot lie on the valley's level; the path north climbs from the north's level at
+        # the seam to the plateau.
+        layout = next(row for row in self.data["layouts"] if row["symbol"] == "LAYOUT_SAFARI_ZONE_SOUTH")
+        width = layout["width"]
+        records = {record["cellOffset"]: record for record in layout["terrainRecords"] if record["mapGroup"] == 0xFF}
+
+        def at(x, y):
+            return records[y * width + x]
+
+        valley = at(22, 7)["groundQ16"]
+        self.assertEqual(valley, 0)
+        for x, y in ((13, 6), (16, 7), (26, 4), (30, 3), (35, 4), (26, 7)):   # the enclosure and the plateau
+            self.assertEqual((at(x, y)["shape"], at(x, y)["groundQ16"]), ("flat", valley + 16), (x, y))
+        for x, y in ((17, 7), (18, 7), (19, 7), (20, 7), (20, 6), (20, 5), (21, 5), (22, 5), (22, 4),
+                     (22, 3), (23, 3), (24, 3), (25, 3)):                      # the rails, end to end
+            self.assertEqual((at(x, y)["shape"], at(x, y)["groundQ16"]), ("bridge", valley + 16), (x, y))
+        for x, y in ((18, 3), (21, 4), (19, 6), (23, 5), (21, 7), (28, 7), (32, 7)):
+            self.assertEqual((at(x, y)["shape"], at(x, y)["groundQ16"]), ("flat", valley), (x, y))
+        for x in range(18, 26):                                                 # the wall
+            self.assertEqual((at(x, 2)["groundQ16"], at(x, 2)["topQ16"]), (valley, valley + 16), x)
+        self.assertEqual([(at(29, y)["groundQ16"], at(29, y)["topQ16"]) for y in (0, 1, 2)],
+                         [(-16, -16), (-16, 0), (0, 16)])
+
     def test_repository_paths_lie_flush_with_the_ground_they_run_through(self):
         # KNOWN_ISSUES MS-162: the Battle Frontier west half's paths of elevation 3 (the walk north from
         # the harbour, the band along its lower ground, the cells by the Battle Pike) run through its
