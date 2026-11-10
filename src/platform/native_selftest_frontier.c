@@ -12,6 +12,7 @@
 
 #include "global.h"
 #include "battle_pyramid.h"
+#include "event_data.h"
 #include "load_save.h"
 #include "main.h"
 #include "malloc.h"
@@ -23,6 +24,7 @@
 #include "pokemon_storage_system.h"
 #include "script_pokemon_util.h"
 #include "constants/battle_frontier.h"
+#include "constants/battle_pyramid.h"
 #include "constants/layouts.h"
 #include "constants/species.h"
 
@@ -182,6 +184,36 @@ int NativeSelfTest_FrontierSaves(void)
     ClearChallenge();
     LoadPlayerParty();
     Expect("back outside, no challenge: allowed", MultiplayerOwnership_CanSaveParty());
+
+    // KNOWN_ISSUES MS-234: the Battle Tower's multi partner room restores the party with the Battle Pyramid's function
+    // when it resumes (pyramid_resetparty, the original game's script), its battle having two of the three choices
+    // made. The empty one (0) read the saved party at index -1 - the end of the saved map view and the saved party
+    // count. While those bytes are zero (the view is 15 x 14, so a save block's 256 entries end in 46 never written),
+    // they read as an empty Pokemon, which matched the empty third slot and was written back over them: the saved
+    // party count went to 0.
+    Setup();
+    SavePlayerParty();
+    ClearSelectedPartyOrder();
+    gSelectedOrderFromParty[0] = 2;
+    gSelectedOrderFromParty[1] = 4;
+    ReducePlayerPartyToSelectedMons();
+    gSaveBlock2Ptr->frontier.selectedPartyMons[0] = 2;
+    gSaveBlock2Ptr->frontier.selectedPartyMons[1] = 4;
+    gSaveBlock2Ptr->frontier.selectedPartyMons[2] = 0;
+    Expect("before the multi partner room's restore the save block keeps six", gSaveBlock1Ptr->playerPartyCount == 6);
+    gSpecialVar_0x8004 = BATTLE_PYRAMID_FUNC_RESTORE_PARTY;
+    CallBattlePyramidFunction();
+    Expect("the restore with two of three chosen leaves the saved party count at 6 (it went to 0)",
+           gSaveBlock1Ptr->playerPartyCount == 6);
+    for (i = 0; i < PARTY_SIZE; i++)
+    {
+        char what[96];
+
+        snprintf(what, sizeof(what), "... and the saved party's Pokemon %u as it was", (unsigned)i + 1);
+        Expect(what, GetMonData(GetSavedPlayerPartyMon(i), MON_DATA_SPECIES) == sParty[i]);
+    }
+    Expect("its choices stay the two (2, 4, none)", gSaveBlock2Ptr->frontier.selectedPartyMons[0] == 2
+           && gSaveBlock2Ptr->frontier.selectedPartyMons[1] == 4 && gSaveBlock2Ptr->frontier.selectedPartyMons[2] == 0);
 
     printf("selftest-frontier-saves: %d checks, %d failed\n", sChecks, sFailures);
     return sFailures == 0 ? 0 : 1;

@@ -1217,6 +1217,15 @@ static void RestorePyramidPlayerParty(void)
     for (i = 0; i < FRONTIER_PARTY_SIZE; i++)
     {
         int partyIndex = gSaveBlock2Ptr->frontier.selectedPartyMons[i] - 1;
+#ifdef PORTABLE
+        // KNOWN_ISSUES MS-234: the Battle Tower's multi partner room runs this when it resumes, two of the three
+        // choices made. The empty one (0) read the saved party at -1 - the saved map view's end and the saved party
+        // count - and, those bytes zero, read an empty Pokemon there that matched the empty third slot and was written
+        // back over them: the saved party count 0. The game's other party restores skip such a choice the same way.
+        if (partyIndex < 0 || partyIndex >= PARTY_SIZE)
+            continue;
+#endif
+#line 1220 // gba-line
         for (j = 0; j < FRONTIER_PARTY_SIZE; j++)
         {
             if (GetMonData(GetSavedPlayerPartyMon(partyIndex), MON_DATA_SPECIES) == GetMonData(&gParties[B_TRAINER_PLAYER][j], MON_DATA_SPECIES))
