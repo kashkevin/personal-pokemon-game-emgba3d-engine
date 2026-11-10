@@ -7,7 +7,8 @@ from pathlib import Path
 from catalog import load_tilesets, load_world
 from compile_rules import _load_cells, parse_behaviors
 from terrace_topology import (CAVE_RISE_Q16, LEDGE_JUMPS, MOUNTAIN_LEDGE_Q16, SLOPE_RISE_Q16, TERRACE_ROLES,
-                              contradiction_ramps, course_ridges, cave_climbs, cave_levels, join_level_free_cells, join_water, lift_blocked_cells,
+                              contradiction_ramps, course_ridges, cave_climbs, cave_levels, cave_stairs,
+                              join_level_free_cells, join_water, lift_blocked_cells,
                               hall_stairs, hand_banks, hand_decks, hand_floors, hand_ridges, hand_slopes,
                               indoor_levels,
                               mountain_by_hand, stair_runs_between, stair_terraces,
@@ -586,6 +587,70 @@ class TerraceTopologyTests(unittest.TestCase):
         self.assertEqual([(raised[y * width + 9]["groundQ16"], raised[y * width + 9]["topQ16"])
                           for y in (10, 9)], [(0, 8), (8, 16)])
         self.assertNotIn(12 * width + 9, raised)
+
+    def test_a_caves_stairs_climb_from_one_floor_to_the_other(self):
+        # Victory Road: stairs (elevation 0, the game's any level) through the face of a raised
+        # floor (4), rock either side, the lower floor (3) at their foot. cave_levels left them on
+        # the lowest floor, a step a tile high at their top; they now climb, a row its share, from
+        # the lower floor's level to the higher's - north, or south where the higher floor is the
+        # south one. A gap with an open side, both ends on one level, an end at no floor or at a
+        # cell of no level, or not a rectangle, keeps its level.
+        def rock():
+            return {"tileset": "gTileset_Cave", "metatile": 1, "behavior": "MB_NORMAL",
+                    "collision": 1, "elevation": 0}
+
+        def floor(elevation):
+            return {"tileset": "gTileset_Cave", "metatile": 2, "behavior": "MB_NORMAL",
+                    "collision": 0, "elevation": elevation}
+
+        make = {"#": rock, "4": lambda: floor(4), "3": lambda: floor(3), "0": lambda: floor(0),
+                "B": lambda: floor(15)}
+
+        def stairs(rows):
+            cells = tuple(make[ch]() for row in rows for ch in row)
+            width, height = len(rows[0]), len(rows)
+            return cave_stairs(cells, width, height, cave_levels(cells, width, height))
+
+        climb = stairs(["44444", "##0##", "##0##", "33333", "33333"])
+        self.assertEqual(set(climb), {7, 12})
+        self.assertEqual([(climb[offset]["groundQ16"], climb[offset]["topQ16"], climb[offset]["rise"])
+                          for offset in (12, 7)], [(0, 8, 8), (8, 16, 8)])
+        self.assertEqual({climb[offset]["profile"] for offset in climb}, {"transition-horizontal"})
+        # two wide, one row: each cell the whole climb
+        climb = stairs(["44444", "#00##", "33333"])
+        self.assertEqual({(climb[offset]["groundQ16"], climb[offset]["topQ16"]) for offset in (6, 7)},
+                         {(0, CAVE_RISE_Q16)})
+        # the higher floor south: climbing south, the north row first
+        climb = stairs(["33333", "##0##", "##0##", "44444"])
+        self.assertEqual([(climb[offset]["groundQ16"], climb[offset]["topQ16"]) for offset in (7, 12)],
+                         [(0, 8), (8, 16)])
+        self.assertEqual({climb[offset]["profile"] for offset in climb}, {"transition-south"})
+        # stairs down into water a player surfs: from its rim (the lowest floor's level); into rock (a
+        # dead end): as they were
+        make["~"] = lambda: dict(floor(3), behavior="MB_DEEP_WATER")
+        climb = stairs(["44444", "##0##", "~~~~~", "33333"])
+        self.assertEqual((climb[7]["groundQ16"], climb[7]["topQ16"]), (0, CAVE_RISE_Q16))
+        self.assertEqual(stairs(["44444", "##0##", "#####", "33333"]), {})
+        # an open side; both ends one level; a bridge (15) at an end; not a rectangle: as they were
+        self.assertEqual(stairs(["44444", "#30##", "##0##", "33333"]), {})
+        self.assertEqual(stairs(["44444", "##0##", "44444", "33333"]), {})
+        self.assertEqual(stairs(["44B44", "##0##", "33333", "44444"]), {})
+        self.assertEqual(stairs(["44444", "#00##", "##0##", "33333"]), {})
+        # the repository's: Victory Road 1F's stairs (13, 27-28) climb north from its lower floor to
+        # its raised one
+        tilesets = load_tilesets(ROOT)
+        _, layouts = load_world(ROOT)
+        names = {value: name for name, value
+                 in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
+        layout = next(row for row in layouts if row["id"] == "LAYOUT_VICTORY_ROAD_1F")
+        cave = _load_cells(ROOT, [layout], tilesets, names)[0]["LAYOUT_VICTORY_ROAD_1F"]
+        width, height = layout["width"], layout["height"]
+        levels = cave_levels(cave, width, height)
+        self.assertEqual(levels[26 * width + 13]["groundQ16"], CAVE_RISE_Q16)
+        climb = cave_stairs(cave, width, height, levels)
+        self.assertEqual([(climb[y * width + 13]["groundQ16"], climb[y * width + 13]["topQ16"])
+                          for y in (28, 27)], [(0, 8), (8, 16)])
+        self.assertNotIn(29 * width + 13, climb)
 
     def test_a_slopes_top_takes_the_level_of_the_ground_round_it(self):
         # Route 119: its muddy slope climbs to a row at the elevation of its foot, which the GBA

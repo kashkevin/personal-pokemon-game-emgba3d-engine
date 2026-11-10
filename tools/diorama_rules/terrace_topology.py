@@ -1309,6 +1309,93 @@ def cave_levels(cells: tuple[dict, ...], width: int, height: int,
     return out
 
 
+def cave_stairs(cells: tuple[dict, ...], width: int, height: int,
+                solved: dict[int, dict] | None = None) -> dict[int, dict]:
+    """A cave's stairs between two of its floors: a gap through a floor's face
+    (walkable cells of elevation 0, the game's any level, rock on both sides of
+    every row) with one floor at its north end and another at its south end, at
+    two levels (cave_levels). cave_levels leaves such cells as they are, on the
+    lowest floor: the stairs lay flat there, and their top row met the higher
+    floor's edge a tile under it - a step a player climbs as if it were not there
+    (the geometry check's walk-steps; Victory Road's, Artisan Cave's, Shoal
+    Cave's; the owner's report of 2026-10-30, its item 4). They now climb from the
+    lower floor's level to the higher's over their rows (General's terrace stairs,
+    a ramp: _climb_entries); stairs down into water a player surfs (Shoal
+    Cave's at high tide) climb from its rim, the lowest floor's level. A gap
+    that is not a rectangle, whose ends meet one level, rock (a dead end), a
+    cell of no level (another of elevation 0, a bridge) or two levels at one
+    end, or whose sides are open, keeps its level."""
+    solved = solved or {}
+
+    def walkable(offset: int) -> bool:
+        cell = cells[offset]
+        return not cell.get("collision") and cell.get("behavior") not in WATER_BEHAVIORS
+
+    zero = {offset for offset in range(len(cells))
+            if walkable(offset) and cells[offset].get("elevation") == 0 and offset not in solved}
+
+    def floor_level(offset: int) -> int | None:
+        """A floor's level beside a gap; None for anything else walkable."""
+        if offset in zero or cells[offset].get("elevation") in (0, 1, 15):
+            return None
+        entry = solved.get(offset)
+        if entry is None:
+            return 0  # the lowest floor (cave_levels gives it no entry)
+        if entry.get("profile", "none") != "none" or entry.get("deck"):
+            return None
+        return entry["groundQ16"]
+
+    out: dict[int, dict] = {}
+    seen: set[int] = set()
+    for start in sorted(zero):
+        if start in seen:
+            continue
+        gap, pending = [], deque((start,))
+        seen.add(start)
+        while pending:
+            offset = pending.popleft()
+            gap.append(offset)
+            for neighbor in _neighbours(offset, width, height):
+                if neighbor in zero and neighbor not in seen:
+                    seen.add(neighbor)
+                    pending.append(neighbor)
+        xs = sorted({offset % width for offset in gap})
+        ys = sorted({offset // width for offset in gap})
+        if len(gap) != len(xs) * len(ys) or ys[0] == 0 or ys[-1] == height - 1:
+            continue  # not a rectangle, or its end is the map's edge
+        left, right = xs[0] - 1, xs[-1] + 1
+        if any(0 <= x < width and walkable(y * width + x) for y in ys for x in (left, right)):
+            continue  # an open side: no gap through a face
+        ends = []
+        for row in (ys[0] - 1, ys[-1] + 1):
+            beyond = [row * width + x for x in xs]
+            touching = [offset for offset in beyond if walkable(offset)]
+            if touching:
+                levels = {floor_level(offset) for offset in touching}
+            elif all(cells[offset].get("behavior") in WATER_BEHAVIORS and not cells[offset].get("collision")
+                     for offset in beyond):
+                levels = {0}  # stairs down into water a player surfs (Shoal Cave's at high tide): its rim
+            else:
+                levels = set()  # rock: a dead end
+            ends.append(levels)
+        north, south = ends
+        if len(north) != 1 or len(south) != 1 or None in north | south or north == south:
+            continue
+        top_level, foot_level = next(iter(north)), next(iter(south))
+        low, rise = min(top_level, foot_level), abs(top_level - foot_level)
+        # the rows from the lower end: south first where the north floor is the higher
+        rows = list(reversed(ys)) if top_level > foot_level else list(ys)
+        # (the compiler's names: "transition-horizontal" climbs north, as General's terrace stairs)
+        profile = "transition-horizontal" if top_level > foot_level else "transition-south"
+        for offset in gap:
+            step = rows.index(offset // width)
+            ground = low + round(rise * step / len(rows))
+            top = low + round(rise * (step + 1) / len(rows))
+            out[offset] = {"groundQ16": ground, "topQ16": top, "profile": profile,
+                           "solid": False, "rise": top - ground}
+    return out
+
+
 def cave_climbs(cells: tuple[dict, ...], width: int, height: int,
                 solved: dict[int, dict] | None = None) -> dict[int, dict]:
     """A cave's muddy slope (MB_MUDDY_SLOPE, the Mach Bike's) between two parts

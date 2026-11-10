@@ -24,8 +24,8 @@ from mountain_art import (MountainArtError, faces_between_levels,
 from profiles import NOMINAL_HEIGHTS, TileShape, shape_from_action
 from pixel_objects import UPRIGHT_CLASSES as UPRIGHT_PIXEL_CLASSES, extract_layout
 from structures import analyze_layout
-from terrace_topology import (WATER_BEHAVIORS, cave_climbs, cave_levels, contradiction_ramps, course_ridges,
-                              hall_stairs, hand_banks, hand_decks, hand_floors, hand_ridges, hand_slopes,
+from terrace_topology import (WATER_BEHAVIORS, cave_climbs, cave_levels, cave_stairs, contradiction_ramps,
+                              course_ridges, hall_stairs, hand_banks, hand_decks, hand_floors, hand_ridges, hand_slopes,
                               indoor_levels, mountain_by_hand, stair_runs_between, stair_terraces,
                               join_level_free_cells,
                               join_water,
@@ -2081,6 +2081,10 @@ def compile_data(root: Path) -> dict:
             solved = {**solved, **cave_levels(cells[layout["id"]], layout["width"],
                                               layout["height"], solved)}
             solved = {**solved, **cave_climbs(cells[layout["id"]], layout["width"],
+                                              layout["height"], solved)}
+            # Its stairs through a floor's face, from the lower floor's level up to
+            # the higher's (cave_stairs: Victory Road's, Artisan Cave's, Shoal Cave's).
+            solved = {**solved, **cave_stairs(cells[layout["id"]], layout["width"],
                                               layout["height"], solved)}
         if rows and all(row["mapType"] == "MAP_TYPE_INDOOR" for row in rows):
             # Ever Grande's halls' staircases up to their landings (terrace_topology.hall_stairs).
