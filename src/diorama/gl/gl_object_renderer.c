@@ -1487,19 +1487,20 @@ static float ModelPush(struct DioramaSpritePose pose, float halfWidth)
          * the desk, a tile and a half. */
         if (DioramaBuildings_PersonOverFront(cell->sourceLayoutId, cell->sourceMapX, cell->sourceMapY))
         {
-            float far = 0.0f;
+            /* not "far": the Windows headers define far and near as nothing (minwindef.h) */
+            float southmost = 0.0f;
             bool any = false;
             int row;
 
             for (row = 0; row < 2; row++)
                 if (DioramaBuildings_FrontAt(cell->sourceLayoutId, cell->sourceMapX, cell->sourceMapY + row,
                                              left - originX, right - originX, MODEL_PUSH_HEIGHT, &front)
-                 && (!any || front > far))
+                 && (!any || front > southmost))
                 {
-                    far = front;
+                    southmost = front;
                     any = true;
                 }
-            need = any && far + CARD_CLEAR > cardZ ? far - cardZ + CARD_CLEAR : CARD_CLEAR;
+            need = any && southmost + CARD_CLEAR > cardZ ? southmost - cardZ + CARD_CLEAR : CARD_CLEAR;
         }
         /* A model's face in the cell, whether or not the cell is the model's:
          * the PC's foot is drawn on the floor the walker uses it from. */
