@@ -396,6 +396,31 @@ static bool IsPressedPlank(uint16_t expectedMetatile, uint16_t metatileId)
             && metatileId == METATILE_Fortree_BridgeOverTrees_Lowered);
 }
 
+/* A record's ground, feature and top, for the map's own cells and the border's (ApplyBorderRecord) alike: water lies
+ * with its ground at its surface. A border cell took the record's ground (0) and top (-1/8) as they stand, so where
+ * the sea is laid on its level (buildings.c LevelWaterBodies: the ground to the level, the top with it) the sea past
+ * the map's edge lay an eighth of a level under the map's own - a thin dark line along the edge of every sea route
+ * (KNOWN_ISSUES MS-229). The records a border takes give the same top either way, and their rock the same ground. */
+static void ApplyRecordHeights(const struct DioramaGeneratedTerrainV2 *record, struct DioramaResolvedCell *resolved)
+{
+    if (record->measuredFlags & DIORAMA_MEASURED_TERRACE_TOPOLOGY)
+    {
+        resolved->groundHeight = record->groundQ16 / 16.0f;
+        resolved->topHeight = record->topQ16 / 16.0f;
+        resolved->featureHeight = resolved->topHeight - resolved->groundHeight;
+    }
+    else
+    {
+        resolved->featureHeight = record->heightQ16 > 0 ? record->heightQ16 / 16.0f : 0.0f;
+        resolved->groundHeight = record->heightQ16 < 0 ? record->heightQ16 / 16.0f : 0.0f;
+        if (record->shape == DIORAMA_SHAPE_LEDGE)
+            resolved->groundHeight = resolved->featureHeight;
+        resolved->topHeight = resolved->groundHeight + resolved->featureHeight;
+        if (record->shape == DIORAMA_SHAPE_LEDGE)
+            resolved->topHeight = resolved->groundHeight;
+    }
+}
+
 static bool ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
                                const struct DioramaCellSnapshot *cell,
                                struct DioramaResolvedCell *resolved)
@@ -468,22 +493,7 @@ static bool ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
     resolved->groundMode = record->propGroundMode;
     resolved->baseMetatileId = record->propGroundMetatile;
     resolved->planeAxis = record->axis;
-    if (record->measuredFlags & DIORAMA_MEASURED_TERRACE_TOPOLOGY)
-    {
-        resolved->groundHeight = record->groundQ16 / 16.0f;
-        resolved->topHeight = record->topQ16 / 16.0f;
-        resolved->featureHeight = resolved->topHeight - resolved->groundHeight;
-    }
-    else
-    {
-        resolved->featureHeight = record->heightQ16 > 0 ? record->heightQ16 / 16.0f : 0.0f;
-        resolved->groundHeight = record->heightQ16 < 0 ? record->heightQ16 / 16.0f : 0.0f;
-        if (record->shape == DIORAMA_SHAPE_LEDGE)
-            resolved->groundHeight = resolved->featureHeight;
-        resolved->topHeight = resolved->groundHeight + resolved->featureHeight;
-        if (record->shape == DIORAMA_SHAPE_LEDGE)
-            resolved->topHeight = resolved->groundHeight;
-    }
+    ApplyRecordHeights(record, resolved);
     resolved->cliffEdgeMask = record->cliffEdgeMask;
     resolved->cliffBaseMask = record->cliffBaseMask;
     resolved->cliffTransitionMask = record->cliffTransitionMask;
@@ -1089,7 +1099,12 @@ static const struct DioramaGeneratedTerrainV2 *BorderRecord(
 
     if (!(cell->flags & DIORAMA_CELL_BORDER) || (cell->flags & DIORAMA_CELL_SOURCE_VALID))
         return NULL;
-    sea = IsOutdoorMap(snapshot->mapType) && IsBorderSea(cell->behavior);
+    /* the open sea round a map: an outdoor map's, and that of the islands the game types as indoor (Birth Island, Navel
+     * Rock, Faraway Island's entrance) and of the Abandoned Ship's deck (underground). Left out, theirs lay flat at the
+     * ground's level, a step over their own sea: a dark line round the map (KNOWN_ISSUES MS-229). Not under the sea. */
+    sea = IsBorderSea(cell->behavior)
+       && (IsOutdoorMap(snapshot->mapType) || snapshot->mapType == MAP_TYPE_INDOOR
+        || snapshot->mapType == MAP_TYPE_UNDERGROUND);
     if (snapshot->mapType != MAP_TYPE_UNDERGROUND && !sea)
         return NULL;
     key = ((uint32_t)cell->sourceLayoutId << 16 | cell->metatileId) + 1;
@@ -1178,9 +1193,7 @@ static void ApplyBorderRecord(const struct DioramaGeneratedTerrainV2 *record,
     resolved->evidenceFlags = record->evidenceFlags;
     resolved->groundMode = record->propGroundMode;
     resolved->planeAxis = record->axis;
-    resolved->groundHeight = record->groundQ16 / 16.0f;
-    resolved->topHeight = record->topQ16 / 16.0f;
-    resolved->featureHeight = resolved->topHeight - resolved->groundHeight;
+    ApplyRecordHeights(record, resolved);
     resolved->cliffEdgeMask = record->cliffEdgeMask;
     resolved->cliffBaseMask = record->cliffBaseMask;
     resolved->cliffTransitionMask = record->cliffTransitionMask;

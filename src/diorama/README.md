@@ -341,6 +341,21 @@ tilesets are unchanged.
   map's edge, an underground map's border block takes the record of the same
   metatile standing as rock inside the map (a border no rock is drawn with -
   Navel Rock's sky - stays flat).
+* The sea past a map's edge (`rules.c` `BorderRecord`, `ApplyRecordHeights`;
+  `buildings.c` `StaticWaterLevel`; KNOWN_ISSUES MS-229, 2026-11-10): the
+  islands the game types as indoor (Birth Island, Navel Rock, Faraway
+  Island's entrance) and the Abandoned Ship's deck (underground) had their
+  border's sea lie flat at the ground's level, a step over their own sea: a
+  dark line round the map. Their border's sea now takes the map's sea record,
+  as an outdoor map's does, and lies at the level of the map's own water at
+  the edge beside it (Faraway Island's own sea lies a level down). A border
+  cell's heights come from its record as the map's own cells' do (water with
+  its ground at its surface): it took the record's ground (0) under its
+  surface (-1/8), and `LevelWaterBodies` lays the sea on its level by its
+  ground, so the sea past every outdoor map's edge lay an eighth of a level
+  under the map's own - a thin dark line along the edge of the sea routes
+  (Route 109's south edge). The records a border takes give the same top
+  either way, and their rock the same ground.
 * Houses (`compile_rules.py` `STANDING_WALLS`, `voxel_building.py` `HipRoof`):
   where the terrace solver puts a walk a level below the top, blocked cells
   stayed on the top level: Route 116's rest house stood a tile up on its own

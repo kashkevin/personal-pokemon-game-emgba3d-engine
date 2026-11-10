@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "constants/map_types.h"
 #include "constants/metatile_behaviors.h"
 #include "diorama/rules.generated.h"
 #include "diorama/rules.h"
@@ -340,6 +341,56 @@ static void TestRepeatedBorderTreeClaim(void)
     assert(resolved[DIORAMA_GRID_WIDTH].archetype == DIORAMA_ARCHETYPE_GROUND);
 }
 
+/* The open sea past the edge of an island the game types as indoor (Birth Island: LAYOUT_BIRTH_ISLAND_EXTERIOR, 404)
+ * lies as water at its own sea's level, as an outdoor map's does; it lay flat at the ground's, a step over the
+ * island's own sea - a dark line round the map (KNOWN_ISSUES MS-229). Its ground is at its surface, as the map's own
+ * sea's is: the sea is laid on its level by its ground (buildings.c LevelWaterBodies), and with the record's ground
+ * (0) under its surface the sea past an outdoor map's edge lay an eighth of a level under the map's own (Route 109:
+ * LAYOUT_ROUTE109, 25). A room's border and the border under the sea are left as they were. */
+static void TestIslandBorderSea(void)
+{
+    struct DioramaSceneSnapshot snapshot;
+    struct DioramaCellSnapshot cell;
+    struct DioramaResolvedCell resolved;
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.mapGroup = 26;
+    snapshot.mapNum = 58;
+    snapshot.mapLayoutId = 404;
+    snapshot.mapType = MAP_TYPE_INDOOR;
+    memset(&cell, 0, sizeof(cell));
+    cell.flags = DIORAMA_CELL_BORDER;
+    cell.sourceLayoutId = 404;
+    cell.metatileId = 0x170;
+    cell.behavior = MB_OCEAN_WATER;
+    assert(DioramaRules_ResolveCell(&snapshot, &cell, &resolved));
+    assert(resolved.shape == DIORAMA_SHAPE_WATER);
+    assert(resolved.topHeight == -0.125f && resolved.groundHeight == -0.125f);
+
+    snapshot.mapGroup = 0;
+    snapshot.mapNum = 24;
+    snapshot.mapLayoutId = 25;
+    snapshot.mapType = MAP_TYPE_ROUTE;
+    cell.sourceLayoutId = 25;
+    assert(DioramaRules_ResolveCell(&snapshot, &cell, &resolved));
+    assert(resolved.shape == DIORAMA_SHAPE_WATER);
+    assert(resolved.topHeight == -0.125f && resolved.groundHeight == -0.125f);
+
+    snapshot.mapGroup = 26;
+    snapshot.mapNum = 58;
+    snapshot.mapLayoutId = 404;
+    snapshot.mapType = MAP_TYPE_INDOOR;
+    cell.sourceLayoutId = 404;
+    cell.behavior = MB_NORMAL;
+    assert(DioramaRules_ResolveCell(&snapshot, &cell, &resolved));
+    assert(resolved.shape != DIORAMA_SHAPE_WATER && resolved.topHeight == 0.0f);
+
+    snapshot.mapType = MAP_TYPE_UNDERWATER;
+    cell.behavior = MB_OCEAN_WATER;
+    assert(DioramaRules_ResolveCell(&snapshot, &cell, &resolved));
+    assert(resolved.shape != DIORAMA_SHAPE_WATER && resolved.topHeight == 0.0f);
+}
+
 static void TestPixelObjectStaysInvalidAfterDirtyPublication(void)
 {
     struct DioramaSceneSnapshot snapshot;
@@ -631,6 +682,7 @@ int main(void)
     TestPixelObjectCatalog();
     TestGroupedTreeClaimsAndDirtyFallback();
     TestRepeatedBorderTreeClaim();
+    TestIslandBorderSea();
     TestPixelObjectStaysInvalidAfterDirtyPublication();
     TestPixelObjectRequiresActiveAuthoredSupport();
     TestNeutralFallbackWithoutCompiledRules();

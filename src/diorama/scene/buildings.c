@@ -599,6 +599,7 @@ struct WaterLevels
     uint32_t used;
     int8_t *level; /* per layout cell: its body's level in tiles, or WATER_LEVEL_NONE */
     uint8_t *sea;  /* per layout cell: 1 when its body is the open sea outdoors (laid on the sea's level, raised if need be) */
+    int8_t edgeSeaLevel; /* the level of most of the sea along the map's edge, or WATER_LEVEL_NONE */
 };
 
 static struct WaterLevels sWaterLevels[WATER_LEVEL_CACHE];
@@ -805,6 +806,29 @@ static const struct WaterLevels *WaterLevelsFor(uint16_t layoutId, bool outdoor)
             entry->sea[queue[b]] = outdoor && sea;
         }
     }
+    /* the sea along the map's edge: the level most of its cells there lie at (StaticWaterLevel: past the edge of a
+     * map that is not outdoors the sea lies at it, all of it, also beside the land that reaches the edge) */
+    {
+        uint16_t counts[256] = {0};
+        int best = -1, l;
+
+        entry->edgeSeaLevel = WATER_LEVEL_NONE;
+        for (i = 0; i < count; i++)
+        {
+            int x = i % layout->width, y = i / layout->width;
+
+            if ((x != 0 && y != 0 && x != layout->width - 1 && y != layout->height - 1)
+             || entry->level[i] == WATER_LEVEL_NONE || !IsSeaBehavior(behavior[i]))
+                continue;
+            if (counts[entry->level[i] + 128] < UINT16_MAX)
+                counts[entry->level[i] + 128]++;
+        }
+        for (l = 0; l < 256; l++)
+            if (counts[l] > 0 && (best < 0 || counts[l] > counts[best]))
+                best = l;
+        if (best >= 0)
+            entry->edgeSeaLevel = (int8_t)(best - 128);
+    }
     free(behavior);
     free(elevation);
     free(queue);
@@ -823,10 +847,25 @@ static bool StaticWaterLevel(const struct DioramaSceneSnapshot *snapshot,
 
     if (!(cell->flags & DIORAMA_CELL_SOURCE_VALID))
     {
-        if (!(cell->flags & DIORAMA_CELL_BORDER) || !outdoor || !IsSeaBehavior(cell->behavior))
+        if (!(cell->flags & DIORAMA_CELL_BORDER) || !IsSeaBehavior(cell->behavior))
             return false;
-        *level = -1.0f;
-        *sea = true;
+        if (outdoor)
+        {
+            *level = -1.0f;
+            *sea = true;
+            return true;
+        }
+        /* the sea round an island the game types as indoor (Faraway Island's entrance, Birth Island, Navel Rock) or
+         * underground (the Abandoned Ship's deck): at the level of the map's own sea along its edge, as that is laid
+         * (lowered only). Faraway Island's own sea lies a level down; the sea past its edge lay at the water's nominal
+         * level, a step up all round the map, its side a line along the edge (KNOWN_ISSUES MS-229). */
+        if (cell->sourceLayoutId != snapshot->mapLayoutId)
+            return false;
+        levels = WaterLevelsFor(snapshot->mapLayoutId, false);
+        if (levels == NULL || levels->edgeSeaLevel == WATER_LEVEL_NONE)
+            return false;
+        *level = (float)levels->edgeSeaLevel;
+        *sea = false;
         return true;
     }
     levels = WaterLevelsFor(CellLayoutId(snapshot, cell), outdoor);
