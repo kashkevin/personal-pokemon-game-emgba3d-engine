@@ -158,5 +158,24 @@ class FloorShadeTests(unittest.TestCase):
         self.assertEqual(pc["height"], 20)
 
 
+class FactoryHallTests(unittest.TestCase):
+    """KNOWN_ISSUES MS-227: the Battle Factory hall's side walls repeat the stretch of the back wall
+    `FACTORY_SIDE` names. It was a whole pillar, whose red band bends up round the pillar's edges and
+    whose edges are grey: repeated along a side wall, a striped wall with a sawtooth for a band."""
+
+    def test_the_side_walls_stretch_repeats_without_a_seam(self):
+        import battle_room_specs as brs
+        L = vb.LayoutArt("LAYOUT_BATTLE_FRONTIER_BATTLE_FACTORY_BATTLE_ROOM")
+        x0, y0, x1, y1 = brs.FACTORY_SIDE
+
+        def pixel(x, y):
+            m = L.blocks[(y // 16) * L.w + x // 16] & 0x3FF
+            return L.cell_image(m).convert("RGBA").getpixel((x % 16, y % 16))[:3]
+        columns = {tuple(pixel(x, y) for y in range(y0, y1)) for x in range(x0, x1)}
+        self.assertEqual(len(columns), 1)
+        # and it carries the band: the dark red of the back wall's pillars, straight across
+        self.assertIn((189, 41, 16), next(iter(columns)))
+
+
 if __name__ == "__main__":
     unittest.main()

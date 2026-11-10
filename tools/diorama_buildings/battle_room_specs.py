@@ -124,7 +124,10 @@ def champion_room():
 DOME_W, DOME_H = 20 * 16, 10 * 16
 DOME_SIDE = (0, 40, 16, 64)        # the rail and the banner's end
 FACTORY_W, FACTORY_H = 13 * 16, 12 * 16
-FACTORY_SIDE = (16, 0, 32, 40)     # a pillar
+# A pillar's face between its edges, its red band straight across: the side walls repeat it. The
+# whole pillar (16-32) bent the band's ends up round its edges and drew its grey edges, so a side
+# wall stood striped, its band a sawtooth (KNOWN_ISSUES MS-227).
+FACTORY_SIDE = (20, 0, 28, 40)
 
 
 # Verdanturf's Battle Tent hall (13 x 9 cells, no collision either): the tent's back wall
