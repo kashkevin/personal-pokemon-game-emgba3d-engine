@@ -10,6 +10,7 @@ from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 from compile_rules import (ARCHETYPES, PASS_LAYOUTS, RuleError, _action, _ground_policy, _grounded_forests, _mask,
+                              _walked_rock_pins,
                               _mountain_masses,
                               _pattern_placements, _patterns, _profiles, _selector,
                               _validate_logical_ids, _validate_pattern_claim_overlaps,
@@ -17,6 +18,7 @@ from compile_rules import (ARCHETYPES, PASS_LAYOUTS, RuleError, _action, _ground
                              _load_cells, compile_data, load_json, parse_behaviors, parse_camera,
                              render_c, render_header)
 from catalog import load_tilesets, load_world
+from profiles import shape_from_action
 from migrate_v1_to_v2 import MigrationError, migrate_document
 
 
@@ -690,6 +692,35 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertTrue({("gTileset_RusturfTunnel", 9), ("gTileset_RusturfTunnel", 17)} <= pins)
         self.assertNotIn(("gTileset_RusturfTunnel", 81), pins)
 
+    def test_repository_walked_cave_rock_is_floor(self):
+        # The Cave of Origin's entrance draws its corridor's middle (8-10, 6-20) with the cave rock's plain fill
+        # (metatile 819, pinned as rock): walkable there, it is floor, at the corridor's level, in the layout's
+        # records and in its map's where it has its own; the same fill past the corridor's walls, blocked, stands as
+        # rock (KNOWN_ISSUES MS-228).
+        layouts = {row["symbol"]: row for row in self.data["layouts"]}
+        origin = layouts["LAYOUT_CAVE_OF_ORIGIN_ENTRANCE"]
+        width = origin["width"]
+        records = {record["cellOffset"]: record for record in origin["terrainRecords"]
+                   if record["mapGroup"] == 0xFF}
+        corridor = {y * width + x for y in range(6, 21) for x in (8, 9, 10)
+                    if records[y * width + x]["expectedMetatile"] == 819}
+        self.assertEqual(len(corridor), 44)
+        for offset in corridor:
+            self.assertEqual(records[offset]["class"], "ground", offset)
+            self.assertFalse(records[offset]["source"].startswith("pin:"), offset)
+        self.assertEqual({records[offset]["groundQ16"] for offset in corridor}, {records[13 * width + 7]["groundQ16"]})
+        self.assertEqual((records[13 * width + 5]["expectedMetatile"], records[13 * width + 5]["class"]),
+                         (819, "cliff"))
+        for record in origin["terrainRecords"]:
+            if (record["mapGroup"], record["mapNumber"]) == (24, 37) and record["cellOffset"] in corridor:
+                self.assertNotEqual(record["class"], "cliff", record["cellOffset"])
+        # The Seafloor Cavern's first room left the fill round its walls walkable where no walk reaches: rock.
+        room = layouts["LAYOUT_SEAFLOOR_CAVERN_ROOM1"]
+        records = {record["cellOffset"]: record for record in room["terrainRecords"] if record["mapGroup"] == 0xFF}
+        for x, y in ((0, 0), (5, 0), (1, 10), (19, 8)):
+            self.assertEqual((records[y * room["width"] + x]["class"],
+                              records[y * room["width"] + x]["source"][:4]), ("cliff", "pin:"), (x, y))
+
     def test_sha256_is_canonical_and_covers_every_ir_section(self):
         canonical_keys = ("schemaVersion", "tilesets", "layouts", "pools", "profiles", "default",
                            "behaviorRules", "tilesetPins", "contextualRules", "exactPatterns",
@@ -1002,6 +1033,59 @@ class ScriptLayoutTests(unittest.TestCase):
         self.assertEqual(switched["LAYOUT_ROUTE111_NO_MIRAGE_TOWER"], "LAYOUT_ROUTE111")
         # switching back to its own layout is not another one
         self.assertNotIn("LAYOUT_SHOAL_CAVE_LOW_TIDE_INNER_ROOM", switched)
+
+
+class WalkedRockPinTests(unittest.TestCase):
+    """A pin that stands a cave's rock up does not stand up the cells of it the player walks on
+    (compile_rules._walked_rock_pins, KNOWN_ISSUES MS-228; no compile needed)."""
+
+    ROCK = shape_from_action({"archetype": "cliff", "pool": "terrain", "height": 1},
+                             source="pin:gTileset_Cave:307", authored=True, confidence=1.0)
+    PAINTED = shape_from_action({"archetype": "cliff", "pool": "terrain", "height": 1},
+                                source="heuristic:mountain-art-family", authored=False, confidence=0.9)
+    FLOOR = shape_from_action({"archetype": "ground", "pool": "terrain"}, source="behavior:MB_CAVE",
+                              authored=False, confidence=0.95)
+
+    def walked(self, *rows, elevations=None):
+        """rows: '#' a blocked cell, '.' floor, 'P' a pinned rock cell the game leaves walkable, 'H' one of
+        rock the pins do not stand up, 'v' a ledge jumped south; `elevations` {(x, y): elevation}, else 3."""
+        width, cells, shapes = len(rows[0]), [], []
+        for y, row in enumerate(rows):
+            for x, kind in enumerate(row):
+                cells.append({"collision": int(kind in "#v"), "elevation": (elevations or {}).get((x, y), 3),
+                              "behavior": "MB_JUMP_SOUTH" if kind == "v" else "MB_CAVE"})
+                shapes.append({"P": self.ROCK, "H": self.PAINTED}.get(kind, self.FLOOR))
+        offsets = _walked_rock_pins(tuple(cells), width, len(rows), tuple(shapes))
+        return sorted((offset % width, offset // width) for offset in offsets)
+
+    def test_rock_beside_the_floor_is_walked(self):
+        # the Cave of Origin's corridor: its middle the rock's plain fill, its edges floor
+        self.assertEqual(self.walked("#.PP.#",
+                                     "#.PP.#"), [(2, 0), (2, 1), (3, 0), (3, 1)])
+
+    def test_rock_closed_in_stays_rock(self):
+        # blocked cells all round, or the map's edge: the fill past a cave's walls
+        self.assertEqual(self.walked("###",
+                                     "#P#",
+                                     "###"), [])
+        self.assertEqual(self.walked("PP#.",
+                                     "P##."), [])
+
+    def test_floor_on_another_level_reaches_no_rock(self):
+        # a step the game does not let the player take: elevation 4 beside 3
+        self.assertEqual(self.walked("#.P#", elevations={(2, 0): 4}), [])
+        # elevation 0 (and 15) are any level's
+        self.assertEqual(self.walked("#.P#", elevations={(1, 0): 0, (2, 0): 4}), [(2, 0)])
+        self.assertEqual(self.walked("#.P#", elevations={(2, 0): 15}), [(2, 0)])
+
+    def test_a_ledge_landing_in_the_rock_walks_it(self):
+        self.assertEqual(self.walked("#.#",
+                                     "#v#",
+                                     "#P#"), [(1, 2)])
+
+    def test_rock_the_pins_do_not_stand_up_is_left_alone(self):
+        # a mountain's enclosed tops are the mountain art's own call (_with_mountain_art)
+        self.assertEqual(self.walked("#.H#"), [])
 
 
 if __name__ == "__main__":

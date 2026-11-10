@@ -12,6 +12,7 @@ import re
 import struct
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Callable
 from pathlib import Path
 
 from catalog import CatalogError, TilesetInfo, load_tilesets, load_world
@@ -933,6 +934,74 @@ def _with_cave_rock(shape: TileShape, cell: dict, accepted: bool) -> TileShape:
         {"archetype": "cliff", "pool": "terrain", "height": 1},
         source="context:cave-rock", authored=False, confidence=0.9,
         evidence=tuple(dict.fromkeys(shape.evidence + ("collision:blocked", "context:cave-rock-mass"))))
+
+
+def _walked_rock_pins(cells: tuple[dict, ...], width: int, height: int,
+                      shapes: tuple[TileShape, ...]) -> frozenset[int]:
+    """Walkable cells a pin stands up as rock that a walk reaches (KNOWN_ISSUES MS-228).
+
+    A cave's pins (tools/battle_env/cave_pins.py) stand a metatile up a cell high wherever it is drawn: it is placed
+    impassable nearly everywhere. Where the game lets the player walk on it, the player stood inside the rock, the
+    head above it - a person's feet are on a cell's ground (rules.c DioramaRules_ObjectGroundHeight): the Cave of
+    Origin's entrance, whose corridor's middle is the rock's plain fill, and corner pieces of the floors of Shoal
+    Cave, Victory Road, the Seafloor Cavern and the Terra and Marine Caves' ends. A region of such cells is walked
+    when a cell beside it is walkable at a level the game lets the player step from (the same elevation, or 0 or 15
+    on either side), or a ledge lands the player in it; one closed in by blocked cells, more of its own and the
+    map's edge stays rock (the fill past a cave's walls the game left walkable: the Seafloor Cavern's first room,
+    the edge of Route 127's sea floor)."""
+    def pinned(offset: int) -> bool:
+        shape = shapes[offset]
+        return (not cells[offset].get("collision") and shape.class_name == "cliff"
+                and shape.source.startswith("pin:"))
+
+    def compatible(first: int, second: int) -> bool:
+        one, other = cells[first].get("elevation", 0), cells[second].get("elevation", 0)
+        return one == other or one in (0, 15) or other in (0, 15)
+
+    landings = set()
+    for offset, cell in enumerate(cells):
+        step = CAVE_LEDGE_TAKEOFF.get(cell.get("behavior"))
+        if step is not None:
+            x, y = offset % width - step[0], offset // width - step[1]
+            if 0 <= x < width and 0 <= y < height:
+                landings.add(y * width + x)
+    walked: set[int] = set()
+    seen: set[int] = set()
+    for start in range(len(cells)):
+        if start in seen or not pinned(start):
+            continue
+        region, pending, reached = [], [start], False
+        seen.add(start)
+        while pending:
+            offset = pending.pop()
+            region.append(offset)
+            reached = reached or offset in landings
+            x, y = offset % width, offset // width
+            for neighbor in ((offset - 1 if x else -1), (offset + 1 if x + 1 < width else -1),
+                             (offset - width if y else -1), (offset + width if y + 1 < height else -1)):
+                if neighbor < 0:
+                    continue
+                if pinned(neighbor):
+                    if neighbor not in seen:
+                        seen.add(neighbor)
+                        pending.append(neighbor)
+                elif not cells[neighbor].get("collision") and compatible(offset, neighbor):
+                    reached = True
+        if reached:
+            walked.update(region)
+    return frozenset(walked)
+
+
+def _without_walked_pins(shapes: tuple[TileShape, ...], cells: tuple[dict, ...], width: int, height: int,
+                         unpinned: Callable[[], tuple[TileShape, ...]]) -> tuple[TileShape, ...]:
+    """`shapes` with the walked cells of _walked_rock_pins given the shape they have without the pins
+    (`unpinned()`: the layout classified with no tileset pins; called only when some cell is walked)."""
+    walked = _walked_rock_pins(cells, width, height, shapes)
+    if not walked:
+        return shapes
+    plain = unpinned()
+    return tuple(_with_animation_provenance(plain[offset], cell) if offset in walked else shape
+                 for offset, (shape, cell) in enumerate(zip(shapes, cells)))
 
 
 def _with_mountain_art(shape: TileShape, cell: dict, accepted: bool,
@@ -2384,6 +2453,10 @@ def compile_data(root: Path) -> dict:
     global_classifier = TileShapeClassifier(
         contextual_rules=contextual_rules, tileset_pins=pins,
         behavior_rules=behavior_rules, default_action=default_action)
+    # the same with no tileset pins: the shapes of the walkable cells a pin stood up as rock (_without_walked_pins)
+    unpinned_classifier = TileShapeClassifier(
+        contextual_rules=contextual_rules, tileset_pins=(),
+        behavior_rules=behavior_rules, default_action=default_action)
     for layout, catalog_row in zip(layouts, layout_catalog):
         layout_cells = cells[layout["id"]]
         records = []
@@ -2394,6 +2467,9 @@ def compile_data(root: Path) -> dict:
                              for shape, cell in zip(wildcard, layout_cells))
             wildcard = tuple(_with_cave_rock(shape, cell, offset in cave_rock_cells[layout["id"]])
                              for offset, (shape, cell) in enumerate(zip(wildcard, layout_cells)))
+            wildcard = _without_walked_pins(
+                wildcard, layout_cells, layout["width"], layout["height"],
+                lambda: unpinned_classifier.classify_layout(layout_cells, layout["width"], layout["height"]))
             rocks = _sea_rock_cells(layout)
             grounded = frozenset()
             if terrace_topology[layout["id"]]:
@@ -2626,6 +2702,13 @@ def compile_data(root: Path) -> dict:
                                for shape, cell in zip(exact, layout_cells))
                 exact = tuple(_with_cave_rock(shape, cell, offset in cave_rock_cells[layout["id"]])
                               for offset, (shape, cell) in enumerate(zip(exact, layout_cells)))
+                exact = _without_walked_pins(
+                    exact, layout_cells, layout["width"], layout["height"],
+                    lambda: TileShapeClassifier(
+                        contextual_rules=tuple(local_rules) + tuple(contextual_rules), tileset_pins=(),
+                        behavior_rules=behavior_rules, default_action=default_action).classify_layout(
+                            layout_cells, layout["width"], layout["height"],
+                            map_type=map_row["mapType"], events=coordinate_events))
                 exact = tuple(_with_mountain_art(
                     shape, cell, offset in mountain_art_cells[layout["id"]],
                 offset in mountain_outlines[layout["id"]])
