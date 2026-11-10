@@ -1544,6 +1544,38 @@ int16_t DioramaRules_StaticGroundQ16(uint16_t layoutId, uint32_t cellOffset)
     return 0;
 }
 
+bool DioramaRules_StaticWaterSurfaceQ16(uint16_t layoutId, uint32_t cellOffset, int16_t *surface)
+{
+    const struct DioramaGeneratedLayoutV2 *layout = FindLayout(layoutId);
+    const struct DioramaGeneratedTerrainV2 *record;
+    uint32_t low = 0;
+    uint32_t high;
+
+    if (layout == NULL || surface == NULL || layout->terrainRecordOffset > gDioramaTerrainV2Count
+     || layout->terrainRecordCount > gDioramaTerrainV2Count - layout->terrainRecordOffset)
+        return false;
+    high = layout->terrainRecordCount;
+    while (low < high)
+    {
+        uint32_t middle = low + (high - low) / 2;
+
+        if (gDioramaTerrainV2[layout->terrainRecordOffset + middle].cellOffset < cellOffset)
+            low = middle + 1;
+        else
+            high = middle;
+    }
+    if (low >= layout->terrainRecordCount
+     || gDioramaTerrainV2[layout->terrainRecordOffset + low].cellOffset != cellOffset)
+        return false;
+    record = &gDioramaTerrainV2[layout->terrainRecordOffset + low];
+    /* water whose ground ApplyRecordHeights lays at its surface: not the terrace solver's (its own ground and top) */
+    if ((record->measuredFlags & DIORAMA_MEASURED_TERRACE_TOPOLOGY)
+     || (record->shape != DIORAMA_SHAPE_WATER && record->terrainClass != DIORAMA_TERRAIN_CLASS_WATER))
+        return false;
+    *surface = record->heightQ16 < 0 ? record->heightQ16 : 0;
+    return true;
+}
+
 bool DioramaRules_LayoutUsesSecondary(uint16_t layoutId, const char *symbol)
 {
     size_t i;

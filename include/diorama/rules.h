@@ -503,6 +503,9 @@ bool DioramaRules_CellOverWater(const struct DioramaCellSnapshot *cell, uint8_t 
  * its static terrain record (any map's using the layout): 0 for a cell with
  * none. The cell's offset is y * the layout's width + x. */
 int16_t DioramaRules_StaticGroundQ16(uint16_t layoutId, uint32_t cellOffset);
+/* The surface (sixteenths of a tile) its static terrain record gives a layout's water cell, its ground at it (a record
+ * of the water's own depth, not the terrace solver's); false for a cell with no such record. */
+bool DioramaRules_StaticWaterSurfaceQ16(uint16_t layoutId, uint32_t cellOffset, int16_t *surface);
 /* Whether the layout's secondary tileset is `symbol` (gTileset_Lavaridge), by
  * the rules' tables. */
 bool DioramaRules_LayoutUsesSecondary(uint16_t layoutId, const char *symbol);

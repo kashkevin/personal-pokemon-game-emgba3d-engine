@@ -365,6 +365,16 @@ tilesets are unchanged.
   half's sides a box of water (Faraway Island's strip; rocks along the sea
   routes' shores). A piece with a cell in water and more of its neighbours
   water than not now lies in it whole; nothing else changes.
+* A body of water at one surface (`buildings.c` `WaterLevelsFor`, `rules.c`
+  `DioramaRules_StaticWaterSurfaceQ16`; KNOWN_ISSUES MS-231, 2026-11-10): the
+  records give shallow water a sixteenth of a tile less depth than deep
+  water, and a body that is not the open sea (which is laid at one level)
+  kept both, a step whose side showed as a thin dark line through a cave's
+  pool (the Marine Cave's and the Seafloor Cavern's entrances, the Shoal
+  Cave's rooms at high tide, the Abandoned Ship's deck). A body whose cells
+  all have such records now lies at its deepest record's surface (lowered
+  only, worked out once per layout); a body with a terrace solver's record
+  in it is left as it was.
 * Houses (`compile_rules.py` `STANDING_WALLS`, `voxel_building.py` `HipRoof`):
   where the terrace solver puts a walk a level below the top, blocked cells
   stayed on the top level: Route 116's rest house stood a tile up on its own

@@ -613,6 +613,7 @@ struct WaterLevels
     uint32_t used;
     int8_t *level; /* per layout cell: its body's level in tiles, or WATER_LEVEL_NONE */
     uint8_t *sea;  /* per layout cell: 1 when its body is the open sea outdoors (laid on the sea's level, raised if need be) */
+    int8_t *surface; /* per layout cell: its body's deepest record's surface in sixteenths of a tile, or WATER_LEVEL_NONE */
     int8_t edgeSeaLevel; /* the level of most of the sea along the map's edge, or WATER_LEVEL_NONE */
 };
 
@@ -712,19 +713,24 @@ static const struct WaterLevels *WaterLevelsFor(uint16_t layoutId, bool outdoor)
             entry = &sWaterLevels[i];
     free(entry->level);
     free(entry->sea);
+    free(entry->surface);
     memset(entry, 0, sizeof(*entry));
     count = layout->width * layout->height;
     entry->level = malloc(count);
     entry->sea = calloc(count, 1);
+    entry->surface = malloc(count);
     behavior = malloc(count);
     elevation = malloc(count);
     queue = malloc(count * sizeof(*queue));
-    if (entry->level == NULL || entry->sea == NULL || behavior == NULL || elevation == NULL || queue == NULL)
+    if (entry->level == NULL || entry->sea == NULL || entry->surface == NULL || behavior == NULL || elevation == NULL
+     || queue == NULL)
     {
         free(entry->level);
         free(entry->sea);
+        free(entry->surface);
         entry->level = NULL;
         entry->sea = NULL;
+        entry->surface = NULL;
         free(behavior);
         free(elevation);
         free(queue);
@@ -739,11 +745,18 @@ static const struct WaterLevels *WaterLevelsFor(uint16_t layoutId, bool outdoor)
         behavior[i] = LayoutBehavior(layout, i, &elevation[i]);
     memset(entry->level, 0, count);
     for (i = 0; i < count; i++)
+    {
         entry->level[i] = WATER_LEVEL_NONE;
+        entry->surface[i] = WATER_LEVEL_NONE;
+    }
     for (i = 0; i < count; i++)
     {
         int head = 0, tail = 0, b;
         int16_t lowest = 0;
+        /* the deepest surface the body's records give it, while each is of the water's own depth (KNOWN_ISSUES
+         * MS-231) */
+        int16_t surface = 0;
+        bool surfaced = true;
         bool sea = false;
 
         if (entry->level[i] != WATER_LEVEL_NONE || !IsWaterBehavior(behavior[i]))
@@ -756,9 +769,17 @@ static const struct WaterLevels *WaterLevelsFor(uint16_t layoutId, bool outdoor)
             int cell = queue[head++];
             int x = cell % layout->width, y = cell / layout->width;
             int16_t ground = DioramaRules_StaticGroundQ16(layoutId, (uint32_t)cell);
+            int16_t own;
 
             if (ground < lowest)
                 lowest = ground;
+            if (DioramaRules_StaticWaterSurfaceQ16(layoutId, (uint32_t)cell, &own))
+            {
+                if (own < surface)
+                    surface = own;
+            }
+            else
+                surfaced = false;
             sea |= IsSeaBehavior(behavior[cell]);
             for (int d = 0; d < 4; d++)
             {
@@ -818,6 +839,8 @@ static const struct WaterLevels *WaterLevelsFor(uint16_t layoutId, bool outdoor)
         {
             entry->level[queue[b]] = (int8_t)lowest;
             entry->sea[queue[b]] = outdoor && sea;
+            if (surfaced && surface > INT8_MIN)
+                entry->surface[queue[b]] = (int8_t)surface;
         }
     }
     /* the sea along the map's edge: the level most of its cells there lie at (StaticWaterLevel: past the edge of a
@@ -891,6 +914,11 @@ static bool StaticWaterLevel(const struct DioramaSceneSnapshot *snapshot,
         return false;
     *level = (float)levels->level[offset];
     *sea = levels->sea[offset] != 0;
+    /* a body that is not the open sea at one surface, its deepest record's (lowered only): its shallow water's records
+     * lie a sixteenth over its deep water's, a step whose side showed as a line through a cave's pool (the Marine Cave's
+     * and the Seafloor Cavern's entrances, the Shoal Cave's rooms at high tide) - KNOWN_ISSUES MS-231 */
+    if (!*sea && levels->surface[offset] != WATER_LEVEL_NONE && levels->surface[offset] / 16.0f < *level)
+        *level = levels->surface[offset] / 16.0f;
     return true;
 }
 
