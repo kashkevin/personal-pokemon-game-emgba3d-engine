@@ -66,6 +66,15 @@ ARROW_STEPS = {'MB_SOUTH_ARROW_WARP': (0, 1), 'MB_NORTH_ARROW_WARP': (0, -1),
                'MB_WATER_SOUTH_ARROW_WARP': (0, 1)}
 MASS_SHARE = 0.5       # of its placements in a rock mass
 MASS_CELLS = 6         # impassable cells joined side by side, at least, or one at the map's edge
+# Metatiles that pass every test but are drawn things, not rock: never pinned (and a pin this tool
+# wrote for one before is dropped). The stolen submarine at the Seafloor Cavern's way in under the
+# sea: its top row is blocked with no behaviour of its own and joins the rock round the hollow it
+# is parked in; its other two rows are deep water, so it stood split, its top a rock block over the
+# rest lying in the hollow (KNOWN_ISSUES MS-227).
+NOT_ROCK = {
+    'gTileset_Underwater': {0xE4: 'the stolen submarine', 0xE5: 'the stolen submarine',
+                            0xE6: 'the stolen submarine', 0xE7: 'the stolen submarine'},
+}
 
 
 def file_name(tileset):
@@ -216,11 +225,14 @@ def drawn_as(L, m, fills, images):
     return None
 
 
-def choose(stats, behaviour, void):
+def choose(stats, behaviour, void, not_rock=None):
+    not_rock = not_rock or {}
     rock, passed = [], []
     for m, s in sorted(stats.items()):
         why = None
-        if behaviour.get(m) not in ROCK_BEHAVIOURS:
+        if m in not_rock:
+            why = not_rock[m]
+        elif behaviour.get(m) not in ROCK_BEHAVIOURS:
             why = behaviour.get(m)
         elif s['exit'] >= EXIT_SHARE * s['uses']:
             why = 'exit %d of %d' % (s['exit'], s['uses'])
@@ -265,7 +277,7 @@ def main():
         void = {k: (None if why == 'water' else why) for k, why in void.items()}
     if not stats:
         sys.exit('no layout uses %s as its secondary tileset' % args.tileset)
-    rock, passed = choose(stats, behaviour, void)
+    rock, passed = choose(stats, behaviour, void, NOT_ROCK.get(args.tileset))
     path = os.path.join(ROOT, 'data/diorama/tilesets', file_name(args.tileset))
     print('%s: %d layouts, %d metatiles placed, %d cave rock' % (
         args.tileset, len(layouts_of(args.tileset)), len(stats), len(rock)))
@@ -284,7 +296,8 @@ def main():
             # Rock chosen before stays rock unless it is a way out: with the behaviours read
             # right the water test also passes over Shoal Cave's icy rock, which stood as wall.
             exits = {m for m, why in passed if why.startswith('exit')}
-            rock = sorted((set(rock) | {p['metatile'] for p in old.get('pins', [])}) - exits)
+            rock = sorted((set(rock) | {p['metatile'] for p in old.get('pins', [])}) - exits
+                          - set(NOT_ROCK.get(args.tileset, {})))
         data = {'schemaVersion': 2, 'kind': 'tileset', 'tileset': args.tileset,
                 'pins': [{'metatile': m, 'reason': REASON,
                           'action': {'archetype': 'cliff', 'pool': 'terrain', 'height': 1}}

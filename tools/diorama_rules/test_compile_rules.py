@@ -110,6 +110,11 @@ class DioramaRuleCompilerTests(unittest.TestCase):
             "gTileset_Underwater", "gTileset_SecretBaseRedCave", "gTileset_SecretBaseBrownCave",
             "gTileset_SecretBaseBlueCave", "gTileset_SecretBaseYellowCave", "gTileset_SecretBaseTree",
             "gTileset_SecretBaseShrub"})
+        # the stolen submarine at the Seafloor Cavern's way in under the sea is no rock: its top
+        # row stood as a rock block over the rest of it (cave_pins.NOT_ROCK, KNOWN_ISSUES MS-227)
+        self.assertFalse([pin for pin in battle_env if pin["tileset"] == "gTileset_Underwater"
+                          and pin["metatile"] in (0xE4, 0xE5, 0xE6, 0xE7, 0x2E4, 0x2E5, 0x2E6, 0x2E7)])
+        self.assertTrue([pin for pin in battle_env if pin["tileset"] == "gTileset_Underwater"])
         pins = [pin for pin in self.data["tilesetPins"] if pin not in battle_env]
         self.assertEqual(len(pins), 1)
         pin = pins[0]
