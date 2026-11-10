@@ -87,7 +87,13 @@ repeats: Mt. Pyre's lower floors stand the graves read on 5F); a piece the proof
 into `AUTO_DROP` and the rest of the room stands. An auto room's pieces stand only in the rooms
 of that list (`reuse_in`), never in a room nobody proved. A blocked component that does not
 fill its rectangle (a maze, a ring of rock) is read as runs of cells each with one foot, so no
-piece lays its drawn top back over the floor between its arms as a slab.
+piece lays its drawn top back over the floor between its arms as a slab. A side wall closes the
+room's floor where it reaches the map's left or right edge: it starts past the outside and the
+faces of the walls in its column, the outside ends it, and a stretch with no floor beside it
+(furniture against the edge) stands none (KNOWN_ISSUES MS-232: before, it ran from the shallowest
+back wall's foot through all of them - in the black either side of the Mauville Gym's alcove,
+its cells drawn with the floor's yellow, and from inside the Battle Tower's back walls, its far
+end showing over them).
 
 What the proof cannot see: it compares the picture the GBA's camera sees. A piece that gives
 back its drawing exactly can still be wrong from the battle camera's angle - the survey's

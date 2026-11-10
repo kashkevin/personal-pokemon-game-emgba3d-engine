@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for battle_room_auto's behaviour names (KNOWN_ISSUES MS-66).
+"""Tests for battle_room_auto: its behaviour names (KNOWN_ISSUES MS-66) and its side walls (MS-232).
 
 The reader counted a name that a comment in include/constants/metatile_behaviors.h mentions as a value of
 its own (MB_INTERIOR_DEEP_WATER's comment names MB_DEEP_WATER), so every behaviour from MB_WATERFALL on read
@@ -13,6 +13,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import battle_room_auto as bra  # noqa: E402
+import voxel_building as vb  # noqa: E402
 import voxel_cells  # noqa: E402
 
 
@@ -45,6 +46,56 @@ class SootopolisGymTests(unittest.TestCase):
         ground, pieces, notes = bra.analyse("LAYOUT_SOOTOPOLIS_CITY_GYM_1F")
         self.assertEqual(ground, [0x20D])
         self.assertTrue(pieces)
+
+
+class SideWallTests(unittest.TestCase):
+    """KNOWN_ISSUES MS-232: a room's side wall closes its floor at the map's edge. It ran from the
+    shallowest back wall's foot through the outside and the faces of the walls in its column: in
+    the Mauville Gym it stood in the black either side of the leader's alcove, its cells drawn
+    with the floor's yellow; in the Mossdeep Gym down 19 rows of black; in the Battle Tower's
+    battle room from inside the back wall, its far end showing over it."""
+
+    ROOMS = ("LAYOUT_MAUVILLE_CITY_GYM", "LAYOUT_MOSSDEEP_CITY_GYM",
+             "LAYOUT_BATTLE_FRONTIER_BATTLE_TOWER_BATTLE_ROOM", "LAYOUT_MT_PYRE_5F")
+
+    @staticmethod
+    def column(layout_id, x):
+        """Each row of column x: 'void', 'floor' or 'blocked', as the reader reads them."""
+        L = vb.LayoutArt(layout_id)
+        cache, out = {}, []
+        for y in range(L.h):
+            m = L.blocks[y * L.w + x] & 0x3FF
+            px = bra._cell_pixels(L, m, cache)
+            dark = sum(1 for p in px if p[3] < 128
+                       or (p[0] <= bra.DARK and p[1] <= bra.DARK and p[2] <= bra.DARK + 8))
+            blocked = (L.blocks[y * L.w + x] >> 10) & 3 != 0
+            out.append("void" if dark >= 0.9 * len(px) else "blocked" if blocked else "floor")
+        return L, out
+
+    def test_side_walls_close_floor_and_stand_on_no_outside(self):
+        for layout_id in self.ROOMS:
+            ground, pieces, notes = bra.analyse(layout_id)
+            for pc in pieces:
+                if pc["name"] not in ("side_w", "side_e"):
+                    continue
+                (xa, za), (xb, zb) = pc["walls"][0][:2]
+                L, col = self.column(layout_id, 0 if xa == 0 else vb.LayoutArt(layout_id).w - 1)
+                rows = range(min(za, zb) // 16, max(za, zb) // 16)
+                with self.subTest(room=layout_id, wall=pc["name"], rows=(rows.start, rows.stop)):
+                    self.assertNotIn("void", [col[y] for y in rows])
+                    self.assertIn("floor", [col[y] for y in rows])
+                    # not from inside a wall's face: the outside, or nothing but blocked cells
+                    # under it up to the outside, above its first row
+                    above = col[:rows.start]
+                    while above and above[-1] == "blocked":
+                        above.pop()
+                    self.assertFalse(col[rows.start] == "blocked" and (not above or above[-1] == "void"))
+
+    def test_the_mauville_gym(self):
+        ground, pieces, notes = bra.analyse("LAYOUT_MAUVILLE_CITY_GYM")
+        walls = {pc["name"]: pc["walls"][0][:2] for pc in pieces if pc["name"].startswith("side_")}
+        # the floor reaches the edges only below the alcove's wings (rows 9 on)
+        self.assertEqual(walls, {"side_w": ((0, 240), (0, 176)), "side_e": ((160, 144), (160, 160))})
 
 
 if __name__ == "__main__":

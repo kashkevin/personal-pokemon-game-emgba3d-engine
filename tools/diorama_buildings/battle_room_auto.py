@@ -327,20 +327,31 @@ def analyse(layout_id, taken=(), drop=()):
                 continue
             # The wall's cells are drawn with the room's floor (ground[0]): it runs along the
             # longest stretch with no other floor in its column (a shaded variant, a mat), which
-            # would lose its own drawing under it.
-            stretches, start = [], back_foot
+            # would lose its own drawing under it. It closes the room's floor (KNOWN_ISSUES
+            # MS-232): it starts past the outside and a wall's face in its column (the black
+            # beside a gym's alcove, the back wall's own cells, where it stood behind the back
+            # wall and its far end showed over it), the outside ends it, and a stretch with no
+            # floor in it (furniture against the edge) is none.
+            stretches, start = [], None
             for y in range(back_foot, max(rows) + 2):
+                if start is None and y <= max(rows):
+                    if void[y][edge_x] or (edge_x, y) in wall_cells:
+                        continue
+                    start = y
                 other = y <= max(rows) and floor[y][edge_x] and not level[y][edge_x] \
                     and meta(edge_x, y) != ground[0]
-                if other or y == max(rows) + 1:
-                    if y > start:
+                outside = y <= max(rows) and void[y][edge_x]
+                if other or outside or y == max(rows) + 1:
+                    if start is not None and y > start \
+                            and any(floor[r][edge_x] for r in range(start, y)):
                         stretches.append((start, y))
-                    start = y + 1
+                    start = None
             if not stretches:
                 continue
             first, end = max(stretches, key=lambda s: (s[1] - s[0], -s[0]))
             if (first, end) != (back_foot, max(rows) + 1):
-                notes.append("%s runs rows %d-%d (other floor in its column)" % (name, first, end - 1))
+                notes.append("%s runs rows %d-%d (other floor, the outside or a wall's face in its column)"
+                             % (name, first, end - 1))
             front = end * 16
             xpx = 0 if edge_x == 0 else W * 16
             seg = ((xpx, front), (xpx, first * 16)) if edge_x == 0 else ((xpx, first * 16), (xpx, front))
