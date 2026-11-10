@@ -331,8 +331,9 @@ const struct DioramaBuildingVertex *DioramaBuildings_Vertices(void)
     return sVertices;
 }
 
-bool DioramaBuildings_CellAt(uint16_t layout, int x, int y,
-                             uint16_t *ground, uint8_t *quarters, float *top)
+/* The placement whose model stands in layout cell (x, y): its index in sPlacements, and the cell's in sHeights; -1
+ * when none does. */
+static int PlacementAt(uint16_t layout, int x, int y, unsigned *heightIndex)
 {
     unsigned first;
     unsigned count = DioramaBuildings_LayoutPlacements(layout, &first);
@@ -352,15 +353,28 @@ bool DioramaBuildings_CellAt(uint16_t layout, int x, int y,
         k = m->heights + (unsigned)cy * m->w + (unsigned)cx;
         if (sHeights[k] == 0xFF)
             continue;
-        if (ground != NULL)
-            *ground = p->ground;
-        if (quarters != NULL)
-            *quarters = sQuarters[k];
-        if (top != NULL)
-            *top = sHeights[k] / 16.0f;
-        return true;
+        if (heightIndex != NULL)
+            *heightIndex = k;
+        return (int)(first + i);
     }
-    return false;
+    return -1;
+}
+
+bool DioramaBuildings_CellAt(uint16_t layout, int x, int y,
+                             uint16_t *ground, uint8_t *quarters, float *top)
+{
+    unsigned k = 0;
+    int placement = PlacementAt(layout, x, y, &k);
+
+    if (placement < 0)
+        return false;
+    if (ground != NULL)
+        *ground = sPlacements[placement].ground;
+    if (quarters != NULL)
+        *quarters = sQuarters[k];
+    if (top != NULL)
+        *top = sHeights[k] / 16.0f;
+    return true;
 }
 
 /*
@@ -1487,12 +1501,73 @@ static void MarkRocksInWater(const struct DioramaSceneSnapshot *snapshot,
     }
 }
 
+/*
+ * A model in the water as one piece (KNOWN_ISSUES MS-230). A cell of a model drawn over its own cells (a rock, a sea
+ * boulder) stands in water when every neighbour not its own is water, and LevelWaterBodies lays such a cell on the
+ * water round it, a level down with the open sea. A boulder at the foot of the land kept its cells beside the land at
+ * the water's nominal level, the rest a level down: half sunk, its raised half's sides a box of water (Faraway Island's
+ * strip, rocks along the sea routes' shores). A piece with a cell in water and more of its neighbours water than not
+ * is in it whole, the cells of it the rules lay at the water's surface (under the land: a sea boulder's pieces); those
+ * at the land's level stay (a rock on Route 132's sandbar, drawn over the sand, sank them as pits in the sand); nothing
+ * else changes.
+ */
+static void JoinModelsInWater(uint8_t *inWater, const int32_t *placementOf, const uint8_t (*sidesOf)[3],
+                              unsigned count)
+{
+    static const int step[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+    static uint8_t visited[DIORAMA_MAX_VISIBLE_CELLS];
+    static uint16_t piece[DIORAMA_MAX_VISIBLE_CELLS];
+    unsigned i;
+
+    memset(visited, 0, count);
+    for (i = 0; i < count; i++)
+    {
+        unsigned head = 0, tail = 0, water = 0, other = 0, k;
+        bool anyIn = false;
+
+        if (visited[i] || placementOf[i] < 0)
+            continue;
+        visited[i] = 1;
+        piece[tail++] = (uint16_t)i;
+        while (head < tail)
+        {
+            int c = piece[head++];
+            int gx = c % DIORAMA_GRID_WIDTH, gy = c / DIORAMA_GRID_WIDTH;
+
+            water += sidesOf[c][0];
+            other += sidesOf[c][1];
+            anyIn |= inWater[c] == 2;
+            for (int d = 0; d < 4; d++)
+            {
+                int nx = gx + step[d][0], ny = gy + step[d][1], n;
+
+                if (nx < 0 || ny < 0 || nx >= DIORAMA_GRID_WIDTH || ny >= DIORAMA_GRID_HEIGHT)
+                    continue;
+                n = ny * DIORAMA_GRID_WIDTH + nx;
+                if ((unsigned)n >= count || visited[n] || placementOf[n] != placementOf[i])
+                    continue;
+                visited[n] = 1;
+                piece[tail++] = (uint16_t)n;
+            }
+        }
+        if (!anyIn || water <= other)
+            continue;
+        for (k = 0; k < tail; k++)
+            if (sidesOf[piece[k]][2])
+                inWater[piece[k]] = 2;
+    }
+}
+
 void DioramaBuildings_FlattenResolvedCells(const struct DioramaSceneSnapshot *snapshot,
                                            struct DioramaResolvedCell *resolved,
                                            unsigned count)
 {
     /* 1: a water cell; 2: a cell of a model standing in water (LevelWaterBodies) */
     static uint8_t inWater[DIORAMA_MAX_VISIBLE_CELLS];
+    /* a model's cell drawn over its own (a rock): its placement; its neighbours not its own, water and other; and
+     * whether the rules lay it under the land, at the water's surface (JoinModelsInWater) */
+    static int32_t placementOf[DIORAMA_MAX_VISIBLE_CELLS];
+    static uint8_t sidesOf[DIORAMA_MAX_VISIBLE_CELLS][3];
     unsigned i;
     int face;
 
@@ -1502,7 +1577,10 @@ void DioramaBuildings_FlattenResolvedCells(const struct DioramaSceneSnapshot *sn
     if (count > DIORAMA_MAX_VISIBLE_CELLS)
         count = DIORAMA_MAX_VISIBLE_CELLS;
     for (i = 0; i < count; i++)
+    {
         inWater[i] = IsWaterCell(snapshot, resolved, count, (int)i) ? 1 : 0;
+        placementOf[i] = -1;
+    }
     for (i = 0; i < count; i++)
     {
         const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
@@ -1546,6 +1624,10 @@ void DioramaBuildings_FlattenResolvedCells(const struct DioramaSceneSnapshot *sn
             }
             if (waterSides > 0 && otherSides == 0)
                 inWater[i] = 2;
+            placementOf[i] = PlacementAt(cell->sourceLayoutId, cell->sourceMapX, cell->sourceMapY, NULL);
+            sidesOf[i][0] = (uint8_t)waterSides;
+            sidesOf[i][1] = (uint8_t)otherSides;
+            sidesOf[i][2] = r->groundHeight < -0.01f;
         }
         groundHeight = r->groundHeight;
         r->shape = DIORAMA_SHAPE_FLAT;
@@ -1607,6 +1689,7 @@ void DioramaBuildings_FlattenResolvedCells(const struct DioramaSceneSnapshot *sn
             r->materials[face].flags = 0;
         }
     }
+    JoinModelsInWater(inWater, placementOf, sidesOf, count);
     MarkRocksInWater(snapshot, resolved, count, inWater);
     LevelWaterBodies(snapshot, resolved, count, inWater);
     SinkCavePools(snapshot, resolved, count, inWater);

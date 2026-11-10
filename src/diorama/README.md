@@ -356,6 +356,15 @@ tilesets are unchanged.
   under the map's own - a thin dark line along the edge of the sea routes
   (Route 109's south edge). The records a border takes give the same top
   either way, and their rock the same ground.
+* A model in the water as one piece (`buildings.c` `JoinModelsInWater`;
+  KNOWN_ISSUES MS-230, 2026-11-10): a cell of a model drawn over its own
+  cells (a rock, a sea boulder) stands in water when every neighbour not its
+  own is water, and is laid on the water round it, a level down with the
+  open sea. A boulder at the foot of the land kept its cells beside the land
+  at the water's nominal level, the rest a level down: half sunk, its raised
+  half's sides a box of water (Faraway Island's strip; rocks along the sea
+  routes' shores). A piece with a cell in water and more of its neighbours
+  water than not now lies in it whole; nothing else changes.
 * Houses (`compile_rules.py` `STANDING_WALLS`, `voxel_building.py` `HipRoof`):
   where the terrace solver puts a walk a level below the top, blocked cells
   stayed on the top level: Route 116's rest house stood a tile up on its own
