@@ -176,6 +176,19 @@ class FactoryHallTests(unittest.TestCase):
         # and it carries the band: the dark red of the back wall's pillars, straight across
         self.assertIn((189, 41, 16), next(iter(columns)))
 
+    def test_its_pieces_stand_on_the_cells_own_drawing(self):
+        # KNOWN_ISSUES MS-227: under a piece's cells the game lays its placement's ground; the
+        # hall's (0x2a2) holds part of the arena's orange ring, which showed in hairlines at the
+        # edges of the pieces' floor decals - orange specks on the white tiles along the walls.
+        # Each cell's own drawing (OWN_GROUND) is what the decals draw over it.
+        import expansion_assets
+        import gen_voxel_buildings as gen
+        models = gen.build_models(only="frontier_factory_hall")
+        self.assertTrue(models)
+        layouts = expansion_assets.emerald_layouts(vb.ROOT)
+        grounds = {p[3] for m in models for p in gen.find_placements(m, layouts)}
+        self.assertEqual(grounds, {gen.OWN_GROUND})
+
 
 if __name__ == "__main__":
     unittest.main()

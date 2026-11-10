@@ -959,7 +959,7 @@ def interior_specs(spec):
                     "rect": (x0, y0, w, h), "ground": room["ground"], "art": art,
                     "parts": (lambda ps: (lambda: ps))(parts),
                     "exact": [(0, 0, w * 16, h * 16)], "interior": spec["name"],
-                    "reuse_in": room.get("reuse_in")})
+                    "reuse_in": room.get("reuse_in"), "under": room.get("under")})
         # `alone`: a room's own shell - its walls, a doorway's recess - which
         # another room does not repeat by having the same floor along an edge
         if not pc.get("alone"):
@@ -1425,7 +1425,11 @@ def find_placements(model, layouts_json):
                     continue
                 odd = [(i, j) for j in range(h) for i in range(w)
                        if (blocks[(py + j) * lw + px + i] & 0x3FF) != template[j * w + i]]
-                found.append((index + 1, px, py, model.ground_metatile, entry["id"], odd))
+                # under the piece the floor the room names (its first ground), or with
+                # "under": "own" each cell's own drawing: where the piece's floor decal
+                # leaves a hairline at a texel's edge, the same colours show through
+                under = OWN_GROUND if model.spec.get("under") == "own" else model.ground_metatile
+                found.append((index + 1, px, py, under, entry["id"], odd))
                 continue
             ring = {}
             for yy in range(py - 1, py + h + 1):
@@ -1842,15 +1846,20 @@ def room_check(models, layout_id, out_dir):
         for lid, px, py, ground, name, odd in find_placements(m, layouts_json):
             if name != layout_id:
                 continue
+            quads = m.spec.get("quads", {})
             for j in range(h):
                 for i in range(w):
-                    covered[(px + i, py + j)] = ground
+                    # OWN_GROUND: the cell's own drawing, as the console lays it - its
+                    # lower layer alone where the model stands for quarters of its upper
+                    covered[(px + i, py + j)] = (
+                        (layout.metatile(px + i, py + j), (0,) if quads.get((i, j)) else (0, 1))
+                        if ground == OWN_GROUND else (ground, (0, 1)))
             items.append((m, px, py))
             patches += [(px + i, py + j, img) for (i, j, img)
                         in placement_patches(m, layout_id, {layout_id: layout}, px, py, odd)]
     for y in range(layout.h):
         for x in range(layout.w):
-            img = layout.cell_image(covered.get((x, y), layout.metatile(x, y)))
+            img = layout.cell_image(*covered.get((x, y), (layout.metatile(x, y), (0, 1))))
             q = [(x * 16, 0, y * 16, 0, 0), (x * 16 + 16, 0, y * 16, 16, 0),
                  (x * 16 + 16, 0, y * 16 + 16, 16, 16), (x * 16, 0, y * 16 + 16, 0, 16)]
             for tri in ((q[0], q[1], q[2]), (q[0], q[2], q[3])):

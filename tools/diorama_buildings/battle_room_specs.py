@@ -290,8 +290,12 @@ def battle_room_specs():
         },
         {
             "name": "frontier_factory_hall",
+            # under its pieces each cell's own drawing, not 0x2a2: that cell holds part
+            # of the arena's orange ring, which showed in hairlines at the edges of the
+            # floor decals along the walls - orange specks on the white tiles
+            # (KNOWN_ISSUES MS-227)
             "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_BATTLE_FACTORY_BATTLE_ROOM",
-                         "ground": [0x2a2], "pieces": factory_hall()},
+                         "ground": [0x2a2], "under": "own", "pieces": factory_hall()},
         },
     ] + [spec for spec in (_auto("auto_" + layout[len("LAYOUT_"):].lower(), layout)
                            for layout in AUTO_ROOMS) if spec is not None]
