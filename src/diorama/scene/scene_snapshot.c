@@ -516,6 +516,14 @@ static bool SameObject(u16 original, u16 now)
     for (i = 0; i < ARRAY_COUNT(sPairs); i++)
         if ((original == sPairs[i][0] && now == sPairs[i][1]) || (original == sPairs[i][1] && now == sPairs[i][0]))
             return true;
+    /* A television switched on or off (tv.c SetTVMetatilesOnMap puts the general tileset's set, off or on,
+     * on every cell whose behaviour is MB_TELEVISION, whatever set its room draws there) is still the set
+     * its modelled room was made with (KNOWN_ISSUES MS-233). Counted as a change, a show on the air dropped
+     * every modelled piece over the set: the Cove Lily Motel's whole back wall, the room's own wall drawn
+     * in its place cut open where its stairwell and its cabinet still stood. */
+    if ((now == METATILE_Building_TV_Off || now == METATILE_Building_TV_On)
+     && GetAttributeByMetatileIdAndMapLayout(original, METATILE_ATTRIBUTE_BEHAVIOR, FALSE) == MB_TELEVISION)
+        return true;
     return false;
 }
 

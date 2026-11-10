@@ -787,8 +787,13 @@ def interior_specs(spec):
             (xa, _, fa), (xb, _, fb) = pieces[k]["facet"]
             pts += [(int(xa), int(fa) - 1), (int(xb) - 1, int(fb) - 1)]
         # cells a piece answers for beyond its pixels: where its side walls
-        # run, the black corners it closes the room at
-        for wall in pieces[k].get("walls", ()):
+        # run, the black corners it closes the room at; a doorway's recess
+        # its doorway alone (`inside`, its far ends open: MS-233)
+        inside = pieces[k].get("inside")
+        if inside is not None:
+            ix0, iz0, ix1, iz1 = inside
+            pts += [(int(ix0), int(iz0)), (int(ix1) - 1, int(iz1) - 1)]
+        for wall in () if inside is not None else pieces[k].get("walls", ()):
             wa, wb = wall[0], wall[1]
             pts += [(min(int(wa[0]), W - 1), min(int(wa[1]), H - 1)),
                     (min(int(wb[0]), W - 1), min(int(wb[1]), H - 1))]

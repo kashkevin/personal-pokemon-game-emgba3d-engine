@@ -808,7 +808,15 @@ def stairwell(name, x0, x1, front, back, opening, side, crest):
         walls = [((x0, front), (x0, mid), opening), ((x0, mid), (x0, back), low),
                  ((x1, back), (x1, mid), low), ((x1, mid), (x1, front), opening)]
     walls.append(((x0, back), (x1, back), low))
-    return piece(name, [], 32, side=side, walls=walls)
+    pc = piece(name, [], 32, side=side, walls=walls)
+    # the cells it answers for: the doorway's, x0..x1 and back..front with both
+    # ends open. Read off its walls' ends, x1 and front, the cells past them
+    # were its too - the next column and the row in front - and where the room's
+    # wall did not stand (a script had changed a cell of it: the Trick House's
+    # last room, its far door closed) the room's own wall was laid flat in the
+    # next column, the floor behind it showing (KNOWN_ISSUES MS-233)
+    pc["inside"] = (x0, back, x1, front)
+    return pc
 
 
 def brendan_1f():
@@ -1586,25 +1594,29 @@ SPECS = [
                      "open": MART_OPEN,
                      "shade": [0x202, 0x204, 0x206, 0x208, 0x20A]},
     },
+    # the four Littleroot houses' shells - walls, side walls, stairwells - are their own
+    # (own_shell): found again by their tiles in the mirrored house, Brendan's stairwell stood
+    # twice in May's, and once a stairwell answered for its doorway alone (MS-233) the side
+    # wall that took its next column's floor stood in the middle of May's living room
     {
         "name": "brendan_1f",
         "interior": {"layout": "LAYOUT_LITTLEROOT_TOWN_BRENDANS_HOUSE_1F", "ground": [0x201],
-                     "pieces": brendan_1f()},
+                     "pieces": own_shell(brendan_1f())},
     },
     {
         "name": "brendan_2f",
         "interior": {"layout": "LAYOUT_LITTLEROOT_TOWN_BRENDANS_HOUSE_2F", "ground": [0x201],
-                     "pieces": brendan_2f()},
+                     "pieces": own_shell(brendan_2f())},
     },
     {
         "name": "may_1f",
         "interior": {"layout": "LAYOUT_LITTLEROOT_TOWN_MAYS_HOUSE_1F", "ground": [0x201],
-                     "pieces": may_1f()},
+                     "pieces": own_shell(may_1f())},
     },
     {
         "name": "may_2f",
         "interior": {"layout": "LAYOUT_LITTLEROOT_TOWN_MAYS_HOUSE_2F", "ground": [0x201],
-                     "pieces": may_2f()},
+                     "pieces": own_shell(may_2f())},
     },
     {
         "name": "lab",
