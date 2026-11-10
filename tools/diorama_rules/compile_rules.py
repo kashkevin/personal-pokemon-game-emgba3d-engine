@@ -1509,6 +1509,17 @@ SEAM_RAMPS["LAYOUT_ROUTE111_NO_MIRAGE_TOWER"] = SEAM_RAMPS["LAYOUT_ROUTE111"]
 # wall along (18-25, 2) stood on them, two levels over the valley at its east end: that ground lies on the valley's
 # level, the wall a face from it a level up, the rails along its top.
 HAND_LEVELS: dict[str, dict] = {
+    # The Battle Frontier's east half: the light strip (12-22, 34-38) between its north plaza (elevation 3, the
+    # solver's level a level down) and its south one (elevation 3 too, on the ground's level) - its two lanes of
+    # elevation 0 and the flower bed between them, the fences and the water beyond - lay on the south plaza's level, a
+    # level over the north plaza where they meet: the player rose a level in one step at the lanes' north end
+    # (KNOWN_ISSUES MS-187's last walk-steps), where the 2D game draws no step, and the flower bed's north row sank a
+    # level, a notch in its frame. The lanes and the flower bed climb from the north plaza's level to the south one's
+    # over the five rows; the fences' columns (11, 23) stay with the banks they stand on.
+    # The slope is laid after the blocked cells are lifted ("late_slopes"): laid before it, the fences' cells beside
+    # its north end took its level, and the bank west of them (0-10, 28-35), a cliff a level over the north plaza,
+    # lay as flat blocks at two levels.
+    "LAYOUT_BATTLE_FRONTIER_OUTSIDE_EAST": {"late_slopes": (((12, 34, 22, 38), "s", -16, 0),)},
     "LAYOUT_SAFARI_ZONE_SOUTH": {"floors": (((18, 3, 21, 4), 0), ((18, 5, 19, 6), 0)),
                                  "ridges": (((18, 2, 25, 2), 0),),
                                  "decks": ((17, 7, 20, 7), (20, 5, 20, 6), (21, 5, 22, 5), (22, 3, 22, 4),
@@ -2547,6 +2558,12 @@ def compile_data(root: Path) -> dict:
                     **terrace_topology[layout["id"]],
                     **hand_decks(layout_cells, layout["width"], HAND_LEVELS[layout["id"]]["decks"],
                                  terrace_topology[layout["id"]])}
+            if layout["id"] in HAND_LEVELS and HAND_LEVELS[layout["id"]].get("late_slopes"):
+                # ramps given by hand laid after the blocked cells are lifted (HAND_LEVELS "late_slopes"): the blocked
+                # cells beside them keep the levels they had without them
+                terrace_topology[layout["id"]] = {
+                    **terrace_topology[layout["id"]],
+                    **hand_slopes(layout["width"], HAND_LEVELS[layout["id"]]["late_slopes"])}
             if (maps_by_layout.get(layout["id"])
                     and all(_outdoor(row["mapType"]) for row in maps_by_layout[layout["id"]])):
                 # General's terrace stairs whose ends do not meet the ground they join lie between its levels

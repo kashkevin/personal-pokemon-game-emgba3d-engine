@@ -1155,7 +1155,7 @@ class TerraceTopologyTests(unittest.TestCase):
         names = {value: name for name, value
                  in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
         lid = "LAYOUT_SAFARI_ZONE_SOUTH"
-        self.assertEqual(set(HAND_LEVELS), {lid, "LAYOUT_FORTREE_CITY"})
+        self.assertEqual(set(HAND_LEVELS), {lid, "LAYOUT_FORTREE_CITY", "LAYOUT_BATTLE_FRONTIER_OUTSIDE_EAST"})
         layout = next(row for row in layouts if row["id"] == lid)
         width = layout["width"]
         cells = _load_cells(ROOT, [layout], tilesets, names)[0][lid]
@@ -1177,6 +1177,38 @@ class TerraceTopologyTests(unittest.TestCase):
         ridges = hand_ridges(cells, width, levels["ridges"])
         self.assertEqual(sorted(ridges), [2 * width + x for x in range(18, 26)])
         self.assertEqual({(entry["groundQ16"], entry["topQ16"]) for entry in ridges.values()}, {(0, 16)})
+
+    def test_the_battle_frontiers_east_strip_given_by_hand(self):
+        # The Battle Frontier's east half (KNOWN_ISSUES MS-187's last walk-steps): the strip (12-22, 34-38) is two
+        # lanes of elevation 0 (12-14, 20-22) and the flower bed between them, between two plazas of elevation 3,
+        # the north one walked into from the lanes and the south one through row 39; the 2D game draws no step
+        # between them. It climbs south from a level down (the north plaza's) to the south plaza's level, a fifth of
+        # a level a row: no step of a third of a level or more along it. The fences' columns beside it are left.
+        from compile_rules import HAND_LEVELS
+        tilesets = load_tilesets(ROOT)
+        _, layouts = load_world(ROOT)
+        names = {value: name for name, value
+                 in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
+        lid = "LAYOUT_BATTLE_FRONTIER_OUTSIDE_EAST"
+        layout = next(row for row in layouts if row["id"] == lid)
+        width = layout["width"]
+        cells = _load_cells(ROOT, [layout], tilesets, names)[0][lid]
+        levels = HAND_LEVELS[lid]
+        self.assertEqual(set(levels), {"late_slopes"})       # laid after the blocked cells are lifted
+        slopes = hand_slopes(width, levels["late_slopes"])
+        self.assertEqual(sorted(slopes), [y * width + x for y in range(34, 39) for x in range(12, 23)])
+        self.assertTrue(all(cells[y * width + x]["collision"] for y in range(34, 39) for x in (11, 23)))
+        lanes = {offset for offset in slopes if cells[offset]["collision"] == 0}
+        self.assertEqual(lanes, {y * width + x for y in range(34, 39) for x in (12, 13, 14, 20, 21, 22)})
+        self.assertEqual({cells[offset]["elevation"] for offset in lanes}, {0})
+        for x in (12, 13, 14, 20, 21, 22):          # the plaza north of each lane, the way south out of it
+            self.assertEqual((cells[33 * width + x]["collision"], cells[33 * width + x]["elevation"]), (0, 3))
+            self.assertEqual((cells[39 * width + x]["collision"], cells[39 * width + x]["elevation"]), (0, 0))
+            self.assertEqual((cells[40 * width + x]["collision"], cells[40 * width + x]["elevation"]), (0, 3))
+            column = [slopes[y * width + x] for y in range(34, 39)]
+            self.assertEqual((column[0]["groundQ16"], column[-1]["topQ16"]), (-16, 0))
+            self.assertTrue(all(entry["topQ16"] - entry["groundQ16"] <= 4 for entry in column))
+            self.assertTrue(all(a["topQ16"] == b["groundQ16"] for a, b in zip(column, column[1:])))
 
     def test_fortree_citys_tree_houses_given_by_hand(self):
         # Fortree City's raised walkways (the 3D sweep of 2026-11-09): every walkable cell of the walkways'
