@@ -83,6 +83,20 @@ bool DioramaBuildings_CellAt(uint16_t layout, int x, int y,
 bool DioramaBuildings_FrontAt(uint16_t layout, int x, int y, float x0, float x1,
                               float height, float *z);
 
+/*
+ * People the map puts on a model's cells (KNOWN_ISSUES MS-226). The 2D game
+ * draws a person over the drawing a model is stood up from; the model stands
+ * over the person's cell. For the few cells listed by hand: PersonOnTop - the
+ * person stands on the model's top there, *top its height in tiles over the
+ * model's base (the Battle Dome battle room's audience in its stands);
+ * PersonOverFront - the person is drawn over the model in front of it, its
+ * face in the person's cell or the next one south (the Battle Tents' attendant
+ * on the low wall at the back wall's foot, the Aqua Hideout B2F's grunt behind
+ * the desk). False for every other cell.
+ */
+bool DioramaBuildings_PersonOnTop(uint16_t layout, int x, int y, float *top);
+bool DioramaBuildings_PersonOverFront(uint16_t layout, int x, int y);
+
 struct DioramaSceneSnapshot;
 struct DioramaResolvedCell;
 /*

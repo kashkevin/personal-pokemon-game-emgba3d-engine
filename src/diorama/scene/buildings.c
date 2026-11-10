@@ -34,6 +34,7 @@
 #include "diorama/props.h"
 #include "diorama/rules.h"
 #include "diorama/scene_snapshot.h"
+#include "constants/layouts.h"
 #include "constants/map_types.h"
 #include "constants/metatile_behaviors.h"
 
@@ -501,6 +502,63 @@ bool DioramaBuildings_FrontAt(uint16_t layout, int x, int y, float x0, float x1,
         found = true;
     }
     return found;
+}
+
+/*
+ * People the map puts on a model's cells, by hand (KNOWN_ISSUES MS-226; the 3D eye review of the rooms, 2026-11-10).
+ * The Battle Dome battle room's stands are a box a tile and a half high over rows 1-3, its top their seats: the
+ * audience the map puts in rows 1 and 2 stood on the floor inside it, only hair and hats over its top. The Battle
+ * Tents' battle room (Fallarbor's and Slateport's) has a low wall at the back wall's foot, a box over row 2: the
+ * attendant Fallarbor's map puts there, at (3, 2), stood inside it. The Aqua Hideout B2F's desk is a box over row 6:
+ * the grunt at (13, 5) behind it showed only the cap. The 2D game draws the audience in the stands and the other two
+ * over the drawing in front of them. Every other cell keeps the rules of ModelPush (gl_object_renderer.c).
+ */
+enum
+{
+    PERSON_ON_TOP = 1,
+    PERSON_OVER_FRONT,
+};
+
+static const struct
+{
+    uint16_t layout;
+    uint8_t x0, y0, x1, y1;
+    uint8_t how;
+} sPeopleOnModels[] =
+{
+    {LAYOUT_BATTLE_FRONTIER_BATTLE_DOME_BATTLE_ROOM, 0, 1, 19, 2, PERSON_ON_TOP},
+    {LAYOUT_BATTLE_TENT_BATTLE_ROOM,                 1, 2,  9, 2, PERSON_OVER_FRONT},
+    {LAYOUT_AQUA_HIDEOUT_B2F,                       11, 5, 13, 5, PERSON_OVER_FRONT},
+};
+
+static uint8_t PersonOnModel(uint16_t layout, int x, int y)
+{
+    unsigned i;
+
+    for (i = 0; i < ARRAY_COUNT(sPeopleOnModels); i++)
+        if (sPeopleOnModels[i].layout == layout
+         && x >= sPeopleOnModels[i].x0 && x <= sPeopleOnModels[i].x1
+         && y >= sPeopleOnModels[i].y0 && y <= sPeopleOnModels[i].y1)
+            return sPeopleOnModels[i].how;
+    return 0;
+}
+
+bool DioramaBuildings_PersonOnTop(uint16_t layout, int x, int y, float *top)
+{
+    float height = 0.0f;
+
+    if (!sReady || PersonOnModel(layout, x, y) != PERSON_ON_TOP
+     || !DioramaBuildings_CellAt(layout, x, y, NULL, NULL, &height) || height <= 0.0f)
+        return false;
+    if (top != NULL)
+        *top = height;
+    return true;
+}
+
+bool DioramaBuildings_PersonOverFront(uint16_t layout, int x, int y)
+{
+    return sReady && PersonOnModel(layout, x, y) == PERSON_OVER_FRONT
+        && DioramaBuildings_CellAt(layout, x, y, NULL, NULL, NULL);
 }
 
 uint32_t DioramaBuildings_Validate(const struct DioramaSceneSnapshot *snapshot)

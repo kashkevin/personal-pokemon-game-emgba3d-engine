@@ -928,6 +928,32 @@ static bool FaceInCell(const struct DioramaSceneSnapshot *snapshot, int mapX, in
     return false;
 }
 
+/*
+ * A person the map puts on a model's top (DioramaBuildings_PersonOnTop, KNOWN_ISSUES MS-226): the Battle Dome battle
+ * room's audience, in its stands as the 2D game draws them, not on the floor inside them. Raised by the model's
+ * height in the person's cell over the floor the model stands on.
+ */
+static void StandOnModelTop(const struct DioramaSceneSnapshot *snapshot, const struct DioramaObjectSnapshot *object,
+                            struct DioramaSpritePose *pose)
+{
+    int gridX = object->currentMapX - snapshot->gridOriginX;
+    int gridY = object->currentMapY - snapshot->gridOriginY;
+    int index = gridY * DIORAMA_GRID_WIDTH + gridX;
+    const struct DioramaCellSnapshot *cell;
+    float top;
+
+    if (gridX < 0 || gridY < 0 || gridX >= DIORAMA_GRID_WIDTH || gridY >= DIORAMA_GRID_HEIGHT
+     || index >= snapshot->visibleCellCount)
+        return;
+    cell = &snapshot->cells[index];
+    if (cell->mapX != object->currentMapX || cell->mapY != object->currentMapY
+     || !(cell->flags & DIORAMA_CELL_SOURCE_VALID)
+     || !DioramaBuildings_PersonOnTop(cell->sourceLayoutId, cell->sourceMapX, cell->sourceMapY, &top))
+        return;
+    pose->groundY += top;
+    pose->y += top;
+}
+
 static void StandOnFace(const struct DioramaSceneSnapshot *snapshot, const struct DioramaObjectSnapshot *object,
                         struct DioramaSpritePose *pose)
 {
@@ -1042,6 +1068,7 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
             LogObjectRefusal(object, "no pose");
             return false;
         }
+        StandOnModelTop(snapshot, object, &item->currentPose);
         item->previousPose = item->currentPose;
         previousObject = FindPreviousObject(object);
         if (previousObject != NULL
@@ -1053,6 +1080,7 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
             DioramaSprite_BuildResolvedPose(&sPreviousSnapshot, sPreviousResolvedCells,
                                             sPreviousResolvedCount, previousObject,
                                             &item->previousPose);
+            StandOnModelTop(&sPreviousSnapshot, previousObject, &item->previousPose);
             item->interpolate = true;
         }
         if (object->flags & DIORAMA_OBJECT_PLAYER)
@@ -1169,6 +1197,7 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
         if (!DioramaSprite_BuildResolvedPose(snapshot, resolvedCells, snapshot->visibleCellCount, object,
                                              &item->currentPose))
             continue;
+        StandOnModelTop(snapshot, object, &item->currentPose);
         nextItemCount++;
         item->object = *object;
         item->texture = texture->texture;
@@ -1451,11 +1480,32 @@ static float ModelPush(struct DioramaSpritePose pose, float halfWidth)
         originX = (float)(mapX - cell->sourceMapX) - 0.5f;
         originY = (float)(mapY - cell->sourceMapY) - 0.5f;
         cardZ = south - originY;
+        /* A person the map puts on a model's cells, drawn over it as the 2D game draws it
+         * (DioramaBuildings_PersonOverFront, KNOWN_ISSUES MS-226): in front of the model's face in
+         * the cell or the next one south, however far - the Battle Tents' attendant on the low wall
+         * at the back wall's foot, half a tile behind its face; the Aqua Hideout B2F's grunt behind
+         * the desk, a tile and a half. */
+        if (DioramaBuildings_PersonOverFront(cell->sourceLayoutId, cell->sourceMapX, cell->sourceMapY))
+        {
+            float far = 0.0f;
+            bool any = false;
+            int row;
+
+            for (row = 0; row < 2; row++)
+                if (DioramaBuildings_FrontAt(cell->sourceLayoutId, cell->sourceMapX, cell->sourceMapY + row,
+                                             left - originX, right - originX, MODEL_PUSH_HEIGHT, &front)
+                 && (!any || front > far))
+                {
+                    far = front;
+                    any = true;
+                }
+            need = any && far + CARD_CLEAR > cardZ ? far - cardZ + CARD_CLEAR : CARD_CLEAR;
+        }
         /* A model's face in the cell, whether or not the cell is the model's:
          * the PC's foot is drawn on the floor the walker uses it from. */
-        if (DioramaBuildings_FrontAt(cell->sourceLayoutId, cell->sourceMapX, cell->sourceMapY,
-                                     left - originX, right - originX, MODEL_PUSH_HEIGHT, &front)
-         && front + CARD_CLEAR > cardZ && front - cardZ + CARD_CLEAR <= MODEL_PUSH_MAX)
+        else if (DioramaBuildings_FrontAt(cell->sourceLayoutId, cell->sourceMapX, cell->sourceMapY,
+                                          left - originX, right - originX, MODEL_PUSH_HEIGHT, &front)
+              && front + CARD_CLEAR > cardZ && front - cardZ + CARD_CLEAR <= MODEL_PUSH_MAX)
             need = front - cardZ + CARD_CLEAR;
         else if (DioramaBuildings_CellAt(cell->sourceLayoutId, cell->sourceMapX,
                                          cell->sourceMapY, NULL, NULL, NULL))
