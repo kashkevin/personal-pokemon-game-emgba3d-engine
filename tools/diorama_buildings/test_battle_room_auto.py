@@ -98,5 +98,65 @@ class SideWallTests(unittest.TestCase):
         self.assertEqual(walls, {"side_w": ((0, 240), (0, 176)), "side_e": ((160, 144), (160, 160))})
 
 
+class FloorShadeTests(unittest.TestCase):
+    """KNOWN_ISSUES MS-227: the floor cell north of a piece of furniture was taken as the piece's drawing
+    going on wherever it differed from the floor - also where it is only the floor shaded in its own
+    colours: the Fortree Gym's lone hedges stood 20 rows tall, the shaded floor laid on their tops, and
+    four of the Sootopolis Gym's ice rocks stood as blocks topped with the ice's highlight beside two
+    others standing 8 rows."""
+
+    @staticmethod
+    def things(layout_id):
+        ground, pieces, notes = bra.analyse(layout_id)
+        return {pc["name"]: pc for pc in pieces if pc["name"].startswith("thing_")}
+
+    @staticmethod
+    def cells(pc):
+        return sorted({(x0 // 16, y0 // 16) for (x0, y0, x1, y1) in pc["shape"]})
+
+    def test_the_fortree_gyms_lone_hedges(self):
+        things = self.things("LAYOUT_FORTREE_CITY_GYM")
+        for x, y in ((8, 13), (6, 17), (3, 18)):
+            pc = things["thing_%d_%d" % (x, y)]
+            with self.subTest(hedge=(x, y)):
+                self.assertEqual(self.cells(pc), [(x, y)])
+                self.assertEqual(pc["height"], 8)
+
+    def test_the_sootopolis_gyms_rocks_stand_alike(self):
+        # its ten ice rocks (0x203, and 0x216 on the ice's highlight): eight stand on the floor
+        # alone, the two at the foot of a ledge (ALONE) too; the two behind a ledge (11, 9 and
+        # 9, 19) lie on its top, where its 20 rows would hide a rock standing behind it
+        things = self.things("LAYOUT_SOOTOPOLIS_CITY_GYM_1F")
+        L = vb.LayoutArt("LAYOUT_SOOTOPOLIS_CITY_GYM_1F")
+        rocks = [(x, y) for y in range(L.h) for x in range(L.w)
+                 if L.blocks[y * L.w + x] & 0x3FF in (0x203, 0x216)]
+        self.assertEqual(len(rocks), 10)
+        for x, y in rocks:
+            if (x, y) in ((11, 9), (9, 19)):
+                continue
+            pc = things["thing_%d_%d" % (x, y)]
+            with self.subTest(rock=(x, y)):
+                self.assertEqual(self.cells(pc), [(x, y)])
+                self.assertEqual(pc["height"], 8)
+
+    def test_the_ledges_behind_the_two_rocks_still_stand(self):
+        # the ledge's column behind each rock at its foot stands on the ledge's own foot: with the
+        # columns beside it (5, 5), or, the ledge's end by the stairs, alone (7, 15-16), not left
+        # flat for the rock taking the floor in front of it
+        things = self.things("LAYOUT_SOOTOPOLIS_CITY_GYM_1F")
+        owner = {cell: name for name, pc in things.items() for cell in self.cells(pc)}
+        self.assertEqual(owner[(5, 5)], owner[(4, 5)])
+        end = things[owner[(7, 16)]]
+        self.assertEqual(self.cells(end), [(7, 15), (7, 16)])
+        self.assertEqual(end["height"], 20)
+
+    def test_a_drawing_running_on_is_still_the_pieces(self):
+        # the Aqua Hideout 1F's machine at (2, 16): its top drawn on over the floor row behind it
+        pc = self.things("LAYOUT_AQUA_HIDEOUT_1F")["thing_2_16"]
+        self.assertIn((2, 15), self.cells(pc))
+        self.assertIn((3, 15), self.cells(pc))
+        self.assertEqual(pc["height"], 20)
+
+
 if __name__ == "__main__":
     unittest.main()

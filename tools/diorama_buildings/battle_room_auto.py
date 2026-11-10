@@ -16,7 +16,9 @@ spec of its own:
   * things: the other blocked cells, a run whose top is floor (a statue, a pole, a machine,
     a maze block), are furniture: they stand on their foot, `THING` rows of front at most,
     their top running back to where their collision starts; the floor cell above one, where
-    its drawing goes on (a statue's head over the floor behind it), is its too.
+    its drawing goes on (a statue's head over the floor behind it), is its too - but not a
+    floor cell that is only the floor shaded or patterned in its own colours, apart from its
+    bottom row (KNOWN_ISSUES MS-227).
   * the room's sides, which the GBA never draws: where the floor reaches the map's left or
     right edge, a side wall from the back wall to the front, dressed with the wall's panels.
 
@@ -41,6 +43,18 @@ def _helpers():
 MAX_WALL = 48       # rows of a wall's face that stand; more of a drawn wall is its top
 THING = 20          # rows of front a piece of furniture stands at most
 DARK = 40           # a pixel at most this bright is the black outside a room
+
+
+# Blocked cells that stand as a thing of their own, not joined to the blocked cells beside them.
+# The Sootopolis Gym 1F's two ice rocks at the foot of an ice ledge (0x216, the rock on the ice's
+# highlight) were read with the ledge's column as one piece, the ledge standing a row out with the
+# rock drawn up its face, where the room's six rocks on the open ice stand alone (KNOWN_ISSUES
+# MS-227). Its two rocks behind a ledge (11, 9 and 9, 19) are not here: standing alone they would
+# have no front on the floor and lie flat behind the ledge's 20 rows, hidden; as one piece with
+# the ledge they lie on its top.
+ALONE = {
+    "LAYOUT_SOOTOPOLIS_CITY_GYM_1F": {(5, 6), (7, 17)},
+}
 
 
 _BEHAVIOURS = None
@@ -178,6 +192,19 @@ def analyse(layout_id, taken=(), drop=()):
                 return True
         return False
 
+    ground_colours = {p[:3] for g in ground_px for p in g}
+
+    def floor_shade(x, y):
+        """Whether a floor cell differs from the floor only as the floor shaded or patterned: every
+        pixel that differs is one of the floor's own colours and none is in its bottom row, where a
+        thing's drawing would run on into it from the cell below (KNOWN_ISSUES MS-227: the Fortree
+        Gym's shade north of its hedges, the Sootopolis Gym's ice highlights north of its rocks)."""
+        px = _cell_pixels(L, meta(x, y), cache)
+        for i, p in enumerate(px):
+            if all(g[i][:3] != p[:3] for g in ground_px) and (i >= 15 * 16 or p[:3] not in ground_colours):
+                return False
+        return True
+
     notes = []
     walls = {}           # (ya, yb) -> list of columns
     wall_cells = set()
@@ -206,6 +233,7 @@ def analyse(layout_id, taken=(), drop=()):
     # things and edges: connected blocked cells that are not a wall's face
     seen = set()
     things = []
+    alone = ALONE.get(layout_id, set())
     for y in range(H):
         for x in range(W):
             if not solid[y][x] or (x, y) in wall_cells or (x, y) in seen:
@@ -215,18 +243,21 @@ def analyse(layout_id, taken=(), drop=()):
             while todo:
                 cx, cy = todo.pop()
                 comp.append((cx, cy))
+                if (cx, cy) in alone:
+                    continue
                 for nx, ny in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
                     if 0 <= nx < W and 0 <= ny < H and solid[ny][nx] and (nx, ny) not in wall_cells \
-                            and (nx, ny) not in seen:
+                            and (nx, ny) not in seen and (nx, ny) not in alone:
                         seen.add((nx, ny))
                         todo.append((nx, ny))
             things.append(comp)
 
     def runs_to_floor(comp):
-        """Whether any column of the component ends on the floor (it has a front to stand)."""
+        """Whether any column of the component ends on the floor (it has a front to stand); a
+        thing standing alone (ALONE) in front of it stands on the floor it would."""
         cells = set(comp)
         for (cx, cy) in comp:
-            if (cx, cy + 1) not in cells and cy + 1 < H and floor[cy + 1][cx]:
+            if (cx, cy + 1) not in cells and cy + 1 < H and (floor[cy + 1][cx] or (cx, cy + 1) in alone):
                 return True
         return False
 
@@ -291,10 +322,11 @@ def analyse(layout_id, taken=(), drop=()):
                              for (nx, ny) in ((cx + 1, cy), (cx - 1, cy), (cx, cy - 1))
                              if 0 <= nx < W and 0 <= ny < H)
             rects = [(cx * 16, cy * 16, cx * 16 + 16, cy * 16 + 16) for (cx, cy) in comp]
-            # its drawing over the floor cell north of it
+            # its drawing over the floor cell north of it (not the floor shaded there: it stood the
+            # piece 20 rows tall with the floor laid on its top, MS-227)
             for (cx, cy) in comp:
                 if (cx, cy - 1) not in cells and cy - 1 >= 0 and floor[cy - 1][cx] \
-                        and differs_from_floor(cx, cy - 1):
+                        and differs_from_floor(cx, cy - 1) and not floor_shade(cx, cy - 1):
                     rects.append((cx * 16, cy * 16 - 16, cx * 16 + 16, cy * 16))
             if not any(differs_from_floor(cx, cy) for (cx, cy) in comp):
                 notes.append("left flat: %d cells at %s (drawn as floor)" % (len(comp), comp[0]))
