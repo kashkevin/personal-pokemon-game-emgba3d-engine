@@ -327,6 +327,20 @@ def finished_keys(out):
     return {line.split("\t", 1)[0] for line in open(path)} if os.path.exists(path) else set()
 
 
+def stop_game(process):
+    """Stop a game process that ran too long or stopped finishing places. On POSIX its session goes, the process and
+    what it started (xvfb-run's server) together. Windows has no sessions or os.killpg (Windows run 432's 3D job ended
+    on that AttributeError, the first stall there: the Battle Palace battle room's own battle): there the game is
+    started directly, starts nothing itself, and is stopped alone."""
+    if os.name == "nt":
+        process.kill()
+        return
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
 def run_chunk(args, places, first, last, index):
     """One game process for tour lines first..last-1: until it ends or stops. Returns its exit code, the place it
     stopped at (when it did not end by itself) and the places it did not finish. A place entered through its facility
@@ -373,10 +387,7 @@ def run_chunk(args, places, first, last, index):
             if done_now != done_before:
                 done_before, progress = done_now, time.monotonic()
             if time.monotonic() > deadline or time.monotonic() - progress > stall:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+                stop_game(process)
                 process.wait()
                 code = None
                 break
