@@ -214,5 +214,40 @@ class PalaceBattleRoomTests(unittest.TestCase):
         self.assertEqual(sorted(pc["name"] for pc in pieces), ["side_e", "side_w"])
 
 
+
+class DoorInWallTests(unittest.TestCase):
+    """KNOWN_ISSUES MS-236: a lift's or a cabin's door in a wall. Its own cell is one the game's door table
+    names (field_door.c), so it was no wall's: it lay back with the room's drawing between the upright wall
+    on either side of it, the outside black over it (the Battle Tower's lobby, the S.S. Tidal's cabins, the
+    Abandoned Ship). Where the wall on both sides makes the same run with the door counted, the door is
+    that wall's, and the renderer opens it on the model (FindDoor)."""
+
+    def walls(self, layout_id):
+        ground, pieces, notes = bra.analyse(layout_id)
+        return ({pc["name"]: pc["shape"][0] for pc in pieces if pc["name"].startswith("wall_")},
+                [n for n in notes if n.startswith("door in the wall")])
+
+    def test_the_tower_lobbys_lifts_stand_in_their_wall(self):
+        walls, doors = self.walls("LAYOUT_BATTLE_FRONTIER_BATTLE_TOWER_LOBBY")
+        # each lift (columns 6, 10, 14 and 18) is one wall with the posts either side of it
+        for x in (5, 9, 13, 17):
+            self.assertEqual(walls["wall_%d_0" % x], (x * 16, 0, (x + 3) * 16, 32))
+        self.assertNotIn("wall_7_0", walls)
+        self.assertEqual(len(doors), 4)
+
+    def test_a_cabins_door_with_its_dark_top(self):
+        # the cabin's doorway black over the door (read as the outside) is the wall's too
+        walls, doors = self.walls("LAYOUT_SS_TIDAL_ROOMS")
+        self.assertEqual(walls["wall_3_0"], (48, 0, 96, 32))
+        self.assertEqual(len(doors), 4)
+
+    def test_a_door_whose_frame_a_script_changes_stays_out(self):
+        # the Battle Pike's doors: their frames are set by its scripts (dynamic), so no wall is made
+        for layout_id in ("LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_NORMAL",
+                          "LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS"):
+            walls, doors = self.walls(layout_id)
+            self.assertEqual(doors, [])
+
+
 if __name__ == "__main__":
     unittest.main()

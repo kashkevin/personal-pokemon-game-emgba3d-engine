@@ -223,6 +223,59 @@ def analyse(layout_id, taken=(), drop=()):
             if top_out and foot_floor:
                 walls.setdefault((ya, yb), []).append(x)
                 wall_cells.update((x, yy) for yy in range(ya, yb))
+    # A lift's or a cabin's door in a wall (KNOWN_ISSUES MS-236): its own cell is one the game's
+    # door table names (field_door.c), so `solid` leaves it out, and its column was no wall: it
+    # lay back with the room's drawing between the upright wall on either side of it, the outside
+    # black over it. The door's animation draws over the map, its metatile unchanged, and the
+    # renderer opens a door on the model that stands on its cell (FindDoor), so a run of door
+    # columns whose cells, the door's own counted, make the same wall as the columns on both
+    # sides of it is that wall. A door beside no such wall stays as it was (opening flat, V6).
+    runs_at = collections.defaultdict(set)      # a column's wall runs (a column may have several)
+    for run, cols in walls.items():
+        for c in cols:
+            runs_at[c].add(run)
+
+    def door_run(x):
+        """The column's run counting its door cells solid, when it has a door: (ya, yb) or None."""
+        cells = [y for y in range(H) if behaviour(meta(x, y)) == "MB_ANIMATED_DOOR" and blocked(x, y)
+                 and not void[y][x] and not level[y][x] and (x, y) not in taken]
+        if not cells:
+            return None
+        part = [solid[y][x] or y in cells for y in range(H)]
+        y = 0
+        while y < H and not part[y]:
+            y += 1
+        ya = y
+        while y < H and part[y]:
+            y += 1
+        yb = y
+        if not (ya <= min(cells) and max(cells) < yb):
+            return None
+        return (ya, yb) if (ya == 0 or void[ya - 1][x]) and yb < H and floor[yb][x] else None
+
+    x = 0
+    while x < W:
+        run = door_run(x)
+        if run is None or run in runs_at[x]:
+            x += 1
+            continue
+        end = x
+        while end + 1 < W and door_run(end + 1) == run and run not in runs_at[end + 1]:
+            end += 1
+        # a door's dark top (a cabin's: the doorway's black over the door, read as the outside)
+        # is the wall's too when the wall beside it starts there
+        for side in sorted(runs_at[x - 1]) if x > 0 else ():
+            if side[1] == run[1] and side[0] < run[0] \
+                    and all(void[yy][c] for c in range(x, end + 1) for yy in range(side[0], run[0])):
+                run = side
+                break
+        if x > 0 and end + 1 < W and run in runs_at[x - 1] and run in runs_at[end + 1]:
+            for c in range(x, end + 1):
+                walls[run].append(c)
+                runs_at[c].add(run)
+                wall_cells.update((c, yy) for yy in range(*run))
+            notes.append("door in the wall: columns %d-%d, rows %d-%d" % (x, end, run[0], run[1] - 1))
+        x = end + 1
     # the room's wall height: the most common standing face
     heights = collections.Counter()
     for (ya, yb), cols in walls.items():
