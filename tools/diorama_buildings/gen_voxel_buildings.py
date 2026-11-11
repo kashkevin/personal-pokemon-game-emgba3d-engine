@@ -849,6 +849,21 @@ def interior_specs(spec):
         # and last, what the pieces hide of the room's floor marks (a rug
         # under a chair), laid under everything
         uo = 2 * h * 16 + sh + th + ch
+        # a back wall: the room's outside behind it, black (vb.Void), from one
+        # black texel of its own drawing's, or else one painted where its page
+        # has room for it (spare_black_texel)
+        void, black = [], None
+        if pc.get("fill") and not pc.get("facet") and not pc.get("base") and mine:
+            ox, oy = x0 * 16, y0 * 16
+
+            def outside_above(u, first, ox=ox, oy=oy):
+                return oy + first - 1 < 0 or fpx[ox + u, oy + first - 1][:3] == (0, 0, 0)
+
+            void = wall_void_spans({(x - ox, y - oy) for (x, y) in list(mine) + list(fill)},
+                                   None if pc.get("foot") is None else pc["foot"] - oy,
+                                   int(pc["height"]), outside_above)
+            black = min(((x - ox, y - oy) for (x, y) in mine if fpx[x, y][:3] == (0, 0, 0)),
+                        key=lambda p: (p[1], p[0]), default=None)
         art = Image.new("RGBA", (max(w * 16, sw, tw), uo + h * 16), (0, 0, 0, 0))
         if sample:
             # a piece's own pixels stay its own: the wall behind a television
@@ -955,6 +970,10 @@ def interior_specs(spec):
             # "~behind": at 45 degrees the piece stands over it; the room's
             # check, with every piece in place, judges it
             parts.append(vb.Decal(pc["name"] + "_under~behind", hidden, uo, lift=0.25))
+        if void:
+            if black is None:
+                art, black = spare_black_texel(art, w, h, sw if sample else 0, sh, set(local))
+            parts.append(vb.Void(pc["name"] + "_void", void, black))
         out.append({"name": "%s_%s" % (spec["name"], pc["name"]), "layout": room["layout"],
                     "rect": (x0, y0, w, h), "ground": room["ground"], "art": art,
                     "parts": (lambda ps: (lambda: ps))(parts),
@@ -1035,6 +1054,75 @@ def build_models(only=None):
           % (", ".join("%d %s" % (n, k) for k, n in sorted(roofs.items())) or "none",
              len(details), sum(1 for m in models if getattr(m, "details", ()))))
     return models
+
+
+def wall_void_spans(pixels, foot, height, outside_above):
+    """Where a back wall has the room's outside behind it: the floor it hides at
+    the GBA's 45 degrees, as (u0, u1, z0, z1) spans in the model's pixels, for
+    vb.Void (KNOWN_ISSUES MS-227).
+
+    `pixels`: the wall's, in the model - its own and what it fills in behind
+    the pieces in front of it. In each column the wall stands on the floor at
+    its foot (`foot`; without one, the end of its last run), and its `height`
+    over its first row hides the floor from that row on (under a drawn top, no
+    floor shows from above either). Over a doorway, where its own pixels stop
+    short of the foot, only the lintel's rows: the floor of the recess behind
+    the opening (a flight of stairs drawn on it) is the room's. Only where the
+    drawing over that first row is the room's outside - `outside_above(u,
+    first)`: black, or past the room's top - for a wall standing free in the
+    room has the room's floor behind it."""
+    cols = {}
+    for (u, v) in pixels:
+        cols.setdefault(u, set()).add(v)
+    found = []
+    for u in sorted(cols):
+        rows = cols[u]
+        if foot is not None:
+            first, stand = min(rows), foot
+            if foot - 1 not in rows:
+                stand = first
+                while stand in rows:
+                    stand += 1
+        else:
+            stand = max(rows) + 1
+            first = stand - 1
+            while first - 1 in rows:
+                first -= 1
+        end = min(first + height, stand)
+        if end > first and outside_above(u, first):
+            found.append((u, first, end))
+    spans = []
+    for (u, z0, z1) in found:
+        if spans and spans[-1][1] == u and spans[-1][2:] == (z0, z1):
+            spans[-1] = (spans[-1][0], u + 1, z0, z1)
+        else:
+            spans.append((u, u + 1, z0, z1))
+    return spans
+
+
+def spare_black_texel(art, w, h, sample_w, sample_h, marked):
+    """A black texel for a back wall's void (vb.Void) whose drawing has none, painted
+    where nothing reads and its page keeps texels already (page_crop keeps the art's
+    opaque box): beside the side wall's sample (rows 2h*16 on, past its `sample_w`
+    columns), or in the copy of its floor's marks in a cell without any (`marked`: the
+    cells its `_floor` decal lays); past the art's right edge, a column more of page,
+    only when neither lies in that box. Returns the art (widened in the last case) and
+    the texel."""
+    box = art.getbbox() or (0, 0, 1, 1)
+
+    def inside(x, y):
+        return box[0] <= x < box[2] and box[1] <= y < box[3]
+
+    spots = [(x, 2 * h * 16 + j) for j in range(sample_h) for x in range(sample_w, art.width)]
+    spots += [(cx * 16 + i, h * 16 + cy * 16 + j) for cy in range(h) for cx in range(w)
+              if (cx, cy) not in marked for j in range(16) for i in range(16)]
+    spot = next((p for p in spots if inside(*p) and art.getpixel(p)[3] == 0), None)
+    if spot is None:
+        wider = Image.new("RGBA", (art.width + 1, art.height), (0, 0, 0, 0))
+        wider.paste(art, (0, 0))
+        art, spot = wider, (art.width, box[1])
+    art.putpixel(spot, (0, 0, 0, 255))
+    return art, spot
 
 
 def bare_parts(parts):

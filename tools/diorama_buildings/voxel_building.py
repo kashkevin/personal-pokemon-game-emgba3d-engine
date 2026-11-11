@@ -1554,6 +1554,39 @@ class Decal:
                       self.name + ".decal")
 
 
+class Void:
+    """The room's outside behind a back wall: black laid flat over the floor
+    the wall hides at the GBA's 45 degrees. `spans` are (u0, u1, z0, z1) in
+    the model's pixels; every corner reads the one black texel at `texel`, so
+    the quad is that colour all over (a texel stretched: `~clamp`). It lies
+    `lift` over the floor and stops `gap` short of the span's near edge, the
+    wall's foot: a floor decal's lift along the GBA's line of sight would carry
+    that edge out in front of the wall, a line of black along the foot of
+    every back wall from the game's own camera; a wall hides far more than
+    the gap from any camera over it. At 45 degrees it lies under the wall's
+    own rows (`~behind`: the room's check judges it). A camera steeper than
+    the GBA's - the diorama camera's 52 degrees - sees over a wall's top: the
+    floor laid under the wall's cells showed there, a strip of floor over the
+    wall where the 2D game draws black (KNOWN_ISSUES MS-227)."""
+
+    def __init__(self, name, spans, texel, lift=0.25, gap=0.5):
+        self.name, self.spans, self.texel = name, spans, texel
+        self.lift, self.gap = lift, gap
+
+    def emit(self, mesh):
+        y = self.lift
+        u, v = self.texel
+        corners = [(u + 0.25, v + 0.25), (u + 0.75, v + 0.25), (u + 0.75, v + 0.75),
+                   (u + 0.25, v + 0.75)]
+        for (u0, u1, z0, z1) in self.spans:
+            z1 -= self.gap
+            if z1 <= z0:
+                continue
+            quad = [(u0, y, z0), (u1, y, z0), (u1, y, z1), (u0, y, z1)]
+            mesh.poly([(x, yy, z, tu, tv) for (x, yy, z), (tu, tv) in zip(quad, corners)],
+                      SHADE_ART, self.name + ".void~behind~clamp")
+
+
 class Cylinder:
     """A short upright cylinder of elliptical footprint - a vent, a pot.
 

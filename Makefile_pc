@@ -871,6 +871,7 @@ check-diorama-tools:
 	python3 -W ignore tools/diorama_buildings/test_dimensional.py
 	python3 -W ignore tools/diorama_buildings/test_page_crop.py
 	python3 -W ignore tools/diorama_buildings/test_bare_twin.py
+	python3 -W ignore tools/diorama_buildings/test_wall_void.py
 	python3 -W ignore tools/diorama_buildings/test_battle_room_auto.py
 endif
 
