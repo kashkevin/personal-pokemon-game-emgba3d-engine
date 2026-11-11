@@ -190,5 +190,29 @@ class FactoryHallTests(unittest.TestCase):
         self.assertEqual(grounds, {gen.OWN_GROUND})
 
 
+class PalaceBattleRoomTests(unittest.TestCase):
+    """The Battle Palace's battle room (the 3D check of 2026-11-11): its back wall has no wall piece,
+    the room's own drawing lays it back; its outer pillars read as walls a row deeper, upright before
+    it, and the door's posts a row shallower, upright behind it. Between those and the laid-back wall
+    the outside showed: black wedges beside the pillars and the door, in the field and in battles."""
+
+    LAYOUT = "LAYOUT_BATTLE_FRONTIER_BATTLE_PALACE_BATTLE_ROOM"
+
+    def test_the_reader_still_finds_the_upright_pieces(self):
+        # what the drop list leaves out: the pieces the reader finds without it (a change to the
+        # reader that stops finding them would leave this list stale, not the room wrong)
+        ground, pieces, notes = bra.analyse(self.LAYOUT)
+        walls = {pc["name"]: pc["foot"] for pc in pieces if pc["name"].startswith("wall_")}
+        # the outer pillars stand on their pedestals' row (48), the door's posts a row behind (32),
+        # the middle pillars run down to the arena's foot (112)
+        self.assertEqual(walls, {"wall_2_0": 48, "wall_11_0": 48, "wall_12_0": 32, "wall_14_0": 32,
+                                 "wall_5_0": 112, "wall_8_0": 112})
+
+    def test_nothing_stands_upright_on_its_back_wall(self):
+        import battle_room_specs as brs
+        ground, pieces, notes = bra.analyse(self.LAYOUT, drop=brs.AUTO_DROP[self.LAYOUT])
+        self.assertEqual(sorted(pc["name"] for pc in pieces), ["side_e", "side_w"])
+
+
 if __name__ == "__main__":
     unittest.main()

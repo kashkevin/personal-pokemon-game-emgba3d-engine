@@ -317,9 +317,17 @@ AUTO_DROP = {
     # The Battle Palace's arena is impassable (the player watches from its edge), so its carpet
     # read as things and its two middle pillars as walls down to the arena's foot: from the
     # battle camera the carpet stood up as a block (the survey's picture). The arena stays the
-    # floor it is; the pillars at its back go with it.
+    # floor it is; the pillars at its back go with it. Its back wall has no wall piece of its own
+    # (the pools and the arena under it are not floor): the room's own drawing lays it back. The
+    # two outer pillars (columns 2 and 11, their pedestals' row over the walkway) read as walls a
+    # row deeper, upright and 16 pixels deep before it, and the door's posts (12 and 14) as walls
+    # a row shallower, upright behind it: between those and the laid-back wall the outside showed,
+    # a black wedge beside each pillar and beside the door, where the 2D game draws the wall whole
+    # (the 3D check of 2026-11-11, the field's and the battle's cameras). All four lie on the back
+    # wall with the two middle pillars; the door between its posts was the wall's already.
     "LAYOUT_BATTLE_FRONTIER_BATTLE_PALACE_BATTLE_ROOM": ["thing_4_4", "thing_6_3", "thing_9_3",
-                                                         "wall_5_0", "wall_8_0"],
+                                                         "wall_5_0", "wall_8_0", "wall_2_0", "wall_11_0",
+                                                         "wall_12_0", "wall_14_0"],
     "LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE1": [
         "thing_10_10", "thing_11_13", "thing_11_17", "thing_11_9", "thing_12_14", "thing_12_18",
         "thing_12_6", "thing_14_18", "thing_14_6", "thing_1_6", "thing_1_8", "thing_2_10",
