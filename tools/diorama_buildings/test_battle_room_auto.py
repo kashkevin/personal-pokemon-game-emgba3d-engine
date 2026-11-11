@@ -242,11 +242,49 @@ class DoorInWallTests(unittest.TestCase):
         self.assertEqual(len(doors), 4)
 
     def test_a_door_whose_frame_a_script_changes_stays_out(self):
-        # the Battle Pike's doors: their frames are set by its scripts (dynamic), so no wall is made
-        for layout_id in ("LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_NORMAL",
-                          "LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS"):
+        # the Battle Pike's curtain: its frames are set by its scripts (dynamic), so this rule makes no
+        # wall of it (it stands by battle_room_auto.STAND instead: PikeCurtainTests)
+        for layout_id in PikeCurtainTests.LAYOUTS:
             walls, doors = self.walls(layout_id)
             self.assertEqual(doors, [])
+
+
+class PikeCurtainTests(unittest.TestCase):
+    """KNOWN_ISSUES MS-236's last four doors: the Battle Pike's rooms' curtain in the middle of the back wall.
+    Its frames are set by setmetatile when the Pike Queen comes out of it, so none of its cells was solid: it
+    lay back with the room's drawing between the wall standing on either side of it, the outside black over
+    it. It stands with the wall (battle_room_auto.STAND); the renderer leaves its pieces out while the Queen's
+    curtain moves (buildings.c DioramaBuildings_Validate)."""
+
+    LAYOUTS = ("LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_NORMAL", "LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS")
+
+    def test_the_back_wall_stands_across_the_room(self):
+        for layout_id in self.LAYOUTS:
+            ground, pieces, notes = bra.analyse(layout_id)
+            walls = {pc["name"]: pc["shape"][0] for pc in pieces if pc["name"].startswith("wall_")}
+            columns = set()
+            for x0, y0, x1, y1 in walls.values():
+                self.assertEqual(y0, 0, layout_id)
+                columns.update(range(x0 // 16, x1 // 16))
+            self.assertEqual(columns, set(range(9)), layout_id)
+            # the curtain's sides stand to their foot on row 4; its opening, whose foot (4, 3) is passable,
+            # a row shallower
+            self.assertEqual(walls["wall_3_0"], (48, 0, 64, 64), layout_id)
+            self.assertEqual(walls["wall_4_0"], (64, 0, 80, 48), layout_id)
+            self.assertEqual(walls["wall_5_0"], (80, 0, 96, 64), layout_id)
+            self.assertFalse([n for n in notes if n.startswith("left flat") and n.endswith(", 0) (no front on the floor)")],
+                             layout_id)
+
+    def test_only_the_curtain_is_stood_up(self):
+        # every cell STAND names is one the game changes, in the curtain's 3 x 3 (its top row the middle cell)
+        dynamic = bra.dynamic_metatiles()
+        self.assertEqual(set(bra.STAND), set(self.LAYOUTS))
+        for layout_id, cells in bra.STAND.items():
+            layout = vb.LayoutArt(layout_id)
+            for x, y in cells:
+                m = layout.blocks[y * layout.w + x] & 0x3FF
+                self.assertIn(((layout.primary if m < 512 else layout.secondary), m), dynamic, (layout_id, x, y))
+                self.assertTrue(3 <= x <= 5 and 1 <= y <= 3 and (y > 1 or x == 4), (layout_id, x, y))
 
 
 if __name__ == "__main__":

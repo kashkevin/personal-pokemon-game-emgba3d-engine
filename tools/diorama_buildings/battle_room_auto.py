@@ -56,6 +56,23 @@ ALONE = {
     "LAYOUT_SOOTOPOLIS_CITY_GYM_1F": {(5, 6), (7, 17)},
 }
 
+# Cells the game's scripts change that stand with the room's wall all the same (`solid` leaves
+# out every cell the game names, dynamic_metatiles). The Battle Pike's rooms have a curtain in the
+# middle of the back wall, its frames set by setmetatile when the Pike Queen comes out of it (in
+# the normal room only, the one time it moves). Left out, the curtain lay back with the room's
+# drawing between the wall standing on either side of it, black over it where the 2D game draws
+# the curtain's top (KNOWN_ISSUES MS-236). It stands with the wall as drawn, open with the stage
+# behind it; the people who leave through it walk into it. While the Queen's curtain moves its
+# cells are not the drawing its pieces were made from, so the renderer leaves those pieces out
+# (buildings.c DioramaBuildings_Validate) and the room's own drawing shows the curtain's frames;
+# they stand again when it is open as drawn (the same metatiles). The passable cell at its foot
+# (4, 3) stays floor.
+_PIKE_CURTAIN = {(4, 1), (3, 2), (4, 2), (5, 2), (3, 3), (4, 3), (5, 3)}
+STAND = {
+    "LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_NORMAL": _PIKE_CURTAIN,
+    "LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS": _PIKE_CURTAIN,
+}
+
 
 _BEHAVIOURS = None
 
@@ -173,8 +190,9 @@ def analyse(layout_id, taken=(), drop=()):
     level = [[bool(LEVEL.match(behaviour(meta(x, y)))) for x in range(W)] for y in range(H)]
     floor = [[(not blocked(x, y) or level[y][x]) and not void[y][x] for x in range(W)]
              for y in range(H)]
+    stand = STAND.get(layout_id, set())
     solid = [[blocked(x, y) and not void[y][x] and not level[y][x] and (x, y) not in taken
-              and not changes(meta(x, y)) for x in range(W)] for y in range(H)]
+              and (not changes(meta(x, y)) or (x, y) in stand) for x in range(W)] for y in range(H)]
 
     counts = collections.Counter(meta(x, y) for y in range(H) for x in range(W)
                                  if floor[y][x] and (not level[y][x] or ICE_FLOOR.match(behaviour(meta(x, y)))))
