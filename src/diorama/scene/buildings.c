@@ -34,9 +34,11 @@
 #include "diorama/props.h"
 #include "diorama/rules.h"
 #include "diorama/scene_snapshot.h"
+#include "diorama/tree_sprites.h"
 #include "constants/layouts.h"
 #include "constants/map_types.h"
 #include "constants/metatile_behaviors.h"
+#include "tilesets.h"
 
 extern const unsigned int gDioramaBuildingsTableSize;
 extern const unsigned char gDioramaBuildingsTable[];
@@ -1654,6 +1656,14 @@ void DioramaBuildings_FlattenResolvedCells(const struct DioramaSceneSnapshot *sn
      * whether the rules lay it under the land, at the water's surface (JoinModelsInWater) */
     static int32_t placementOf[DIORAMA_MAX_VISIBLE_CELLS];
     static uint8_t sidesOf[DIORAMA_MAX_VISIBLE_CELLS][3];
+    /* A placement's ground is the commonest walkable metatile round it in its layout (gen_voxel_buildings.py
+     * find_placements). Where the 3D view stands General's trees it draws a tree's crown top as the ground under
+     * it (scene_snapshot.c ApplyTreeSprites, DioramaTreeSprites_GroundMetatile), so no cell in view keeps that
+     * metatile and the atlas never draws its slot: a model's cells laid with it drew nothing, and the sky showed
+     * where the model does not close (a Fortree tree house's sides under its canopy; KNOWN_ISSUES MS-240). Such a
+     * ground is drawn as the view draws those cells. */
+    bool treeGrounds = DioramaTreeSprites_Enabled() && snapshot->primaryTileset == &gTileset_General
+                    && snapshot->mapType != MAP_TYPE_INDOOR && snapshot->mapType != MAP_TYPE_SECRET_BASE;
     unsigned i;
     int face;
 
@@ -1768,7 +1778,8 @@ void DioramaBuildings_FlattenResolvedCells(const struct DioramaSceneSnapshot *sn
             }
             else
             {
-                r->materials[face].metatileId = ground;
+                r->materials[face].metatileId = treeGrounds && ground < NUM_METATILES_IN_PRIMARY
+                                              ? DioramaTreeSprites_GroundMetatile(false, ground) : ground;
                 r->materials[face].layer = DIORAMA_MATERIAL_FULL;
             }
             r->materials[face].rotation = 0;
