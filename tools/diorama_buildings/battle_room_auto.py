@@ -73,6 +73,19 @@ STAND = {
     "LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS": _PIKE_CURTAIN,
 }
 
+# Rooms whose walls stand no taller than this many rows, the rest of a wall's drawing laid back as
+# its top (MAX_WALL elsewhere). Each column's wall run stands to its own foot: in the Sootopolis
+# Gym 1F the back wall is drawn 32 rows tall on row 2, its two waterfalls 48 on row 3 and its thick
+# side walls are runs down to row 14, so the waterfalls and the side walls stood 48 tall a row and
+# more in front of a 32-row wall. At the GBA's 45 degrees their tops line up; from the 3D cameras
+# their tops stood over the wall's beside them, the outside black between: a notch over columns 3
+# and 13 and a strip beside each side wall (KNOWN_ISSUES MS-237). At the back wall's own 32 every
+# piece's top meets the wall's at the same height and depth: the waterfalls' and the side walls'
+# top rows lie back from the wall's top, as the drawing has them at 45 degrees.
+LEVEL_WALL = {
+    "LAYOUT_SOOTOPOLIS_CITY_GYM_1F": 32,
+}
+
 
 _BEHAVIOURS = None
 
@@ -191,6 +204,7 @@ def analyse(layout_id, taken=(), drop=()):
     floor = [[(not blocked(x, y) or level[y][x]) and not void[y][x] for x in range(W)]
              for y in range(H)]
     stand = STAND.get(layout_id, set())
+    max_wall = min(MAX_WALL, LEVEL_WALL.get(layout_id, MAX_WALL))
     solid = [[blocked(x, y) and not void[y][x] and not level[y][x] and (x, y) not in taken
               and (not changes(meta(x, y)) or (x, y) in stand) for x in range(W)] for y in range(H)]
 
@@ -297,7 +311,7 @@ def analyse(layout_id, taken=(), drop=()):
     # the room's wall height: the most common standing face
     heights = collections.Counter()
     for (ya, yb), cols in walls.items():
-        heights[min(MAX_WALL, (yb - ya) * 16)] += len(cols)
+        heights[min(max_wall, (yb - ya) * 16)] += len(cols)
     wall_h = heights.most_common(1)[0][0] if heights else 32
 
     pieces = []
@@ -343,7 +357,7 @@ def analyse(layout_id, taken=(), drop=()):
                     prev = c
                     continue
                 x0, x1 = start * 16, (prev + 1) * 16
-                tall = min(MAX_WALL, (yb - ya) * 16)
+                tall = min(max_wall, (yb - ya) * 16)
                 shape = [(x0, ya * 16, x1, yb * 16)]
                 side = (x0, max(ya * 16, yb * 16 - tall), x0 + 16, yb * 16)
                 out.append(piece("wall_%d_%d" % (start, ya), shape, tall, fill=16, foot=yb * 16,
@@ -422,7 +436,7 @@ def analyse(layout_id, taken=(), drop=()):
     # the room's sides where its floor reaches the map's edge
     back_foot = min((yb for (ya, yb) in walls), default=None)
     if back_foot is not None:
-        sample = next(((cols[0] * 16, yb * 16 - min(MAX_WALL, (yb - ya) * 16), cols[0] * 16 + 16, yb * 16)
+        sample = next(((cols[0] * 16, yb * 16 - min(max_wall, (yb - ya) * 16), cols[0] * 16 + 16, yb * 16)
                        for (ya, yb), cols in sorted(walls.items())), None)
         for edge_x, name in ((0, "side_w"), (W - 1, "side_e")):
             rows = [y for y in range(back_foot, H) if floor[y][edge_x]]

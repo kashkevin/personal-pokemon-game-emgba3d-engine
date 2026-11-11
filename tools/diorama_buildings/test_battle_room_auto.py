@@ -287,5 +287,37 @@ class PikeCurtainTests(unittest.TestCase):
                 self.assertTrue(3 <= x <= 5 and 1 <= y <= 3 and (y > 1 or x == 4), (layout_id, x, y))
 
 
+class LevelWallTests(unittest.TestCase):
+    """KNOWN_ISSUES MS-237: the Sootopolis Gym 1F's back wall is drawn 32 rows tall, its waterfalls 48 a row in
+    front of it and its side walls as runs down to row 14. Each standing to its own foot at up to MAX_WALL, the
+    waterfalls and the side walls stood 48 tall in front of the 32-row wall: from the 3D cameras their tops stood
+    over the wall's, the outside black between (a notch over columns 3 and 13, a strip beside each side wall).
+    Standing no taller than the back wall (battle_room_auto.LEVEL_WALL), every piece's top meets the wall's: a
+    piece standing h rows on its foot lays the rest of its drawing back, so its top's far edge lies at the depth
+    of its first drawn row plus h, at height h."""
+
+    LAYOUT = "LAYOUT_SOOTOPOLIS_CITY_GYM_1F"
+
+    def test_the_back_walls_pieces_meet_at_one_height(self):
+        ground, pieces, notes = bra.analyse(self.LAYOUT)
+        walls = {pc["name"]: pc for pc in pieces if pc["name"].startswith("wall_")}
+        # the back wall, its two waterfalls and the side walls, each from the drawing's first row
+        for name in ("wall_3_0", "wall_6_0", "wall_13_0", "wall_4_0", "wall_11_0", "wall_1_0", "wall_14_0"):
+            pc = walls[name]
+            x0, y0, x1, y1 = pc["shape"][0]
+            self.assertEqual(y0, 0, name)
+            self.assertEqual(pc["height"], 32, name)
+            # its top's far edge: depth y0 + height, at that height - the back wall's own (32, 32)
+            self.assertEqual((y0 + pc["height"], pc["height"]), (32, 32), name)
+        # the waterfalls still stand on row 3 and the side walls on row 14: only their height changed
+        self.assertEqual(walls["wall_4_0"]["foot"], 48)
+        self.assertEqual(walls["wall_11_0"]["foot"], 48)
+        self.assertEqual(walls["wall_1_0"]["foot"], 224)
+        self.assertEqual(walls["wall_14_0"]["foot"], 224)
+
+    def test_only_that_room_is_levelled(self):
+        self.assertEqual(bra.LEVEL_WALL, {self.LAYOUT: 32})
+
+
 if __name__ == "__main__":
     unittest.main()
