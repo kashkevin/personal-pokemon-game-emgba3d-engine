@@ -927,6 +927,32 @@ static bool RiserShowsWholeCell(const struct DioramaSceneSnapshot *snapshot,
          || DioramaRules_CellLava(source, layoutId) == 1);
 }
 
+/*
+ * Whether a cell's lower layer draws nothing: its four tiles colour 0 throughout, the whole drawing on the upper
+ * layer (the Battle Palace's pillar bases over its pools). The atlas's lower layer of such a cell is empty, and a
+ * riser laid with it was drawn as nothing: the sky in a pixel's line where the bank under the cell meets the pool
+ * (the geometry check's camera d, KNOWN_ISSUES MS-239). Its riser shows the whole cell instead, as a deck's does.
+ */
+static bool LowerLayerDrawsNothing(const struct DioramaSceneSnapshot *snapshot,
+                                   const struct DioramaCellSnapshot *source)
+{
+    struct DioramaAtlasArt art = DioramaAtlas_CellArt(snapshot, source);
+    int entry;
+    int i;
+
+    if (art.tileGraphics == NULL)
+        return false;
+    for (entry = 0; entry < DIORAMA_METATILE_ENTRY_COUNT / 2; entry++)
+    {
+        const uint8_t *tile = art.tileGraphics + (source->tileEntries[entry] & 0x3FF) * DIORAMA_TILE_BYTES;
+
+        for (i = 0; i < DIORAMA_TILE_BYTES; i++)
+            if (tile[i] != 0)
+                return false;
+    }
+    return true;
+}
+
 static uint32_t PixelColor(const struct DioramaSceneSnapshot *snapshot,
                            const struct DioramaCellSnapshot *sourceCell,
                            const struct DioramaGeneratedPixelV2 *pixel)
@@ -1873,6 +1899,7 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
             int gridIndex;
             const struct DioramaCellSnapshot *source;
             struct DioramaTerrainCell *cell;
+            bool riserWhole;
 
             /* The input's cells in the frame's coordinates, as its chunk's. */
             cell = &input->cells[y * DIORAMA_TERRAIN_INPUT_SIZE + x];
@@ -1960,6 +1987,17 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
                 cell->surfaces[face].topHeight = resolvedCells[gridIndex].surfaces[face].topHeight;
                 cell->surfaces[face].gameplayElevation = resolvedCells[gridIndex].surfaces[face].gameplayElevation;
             }
+            /* a rock edge's cell in the sea (a reef, a sea stack: its art mode "cutout") is the sea round the rock
+             * where the rock does not stand (BuildMountainArtMask): its lower layer, the water, not the rock's rim
+             * drawn on it (KNOWN_ISSUES MS-102). A cell whose lower layer draws nothing, and borrows none (a cutout's
+             * base, rules.c), shows its whole drawing on its riser: its lower layer is no ground (MS-239). */
+            riserWhole = (RiserShowsWholeCell(snapshot, source, cell->shape)
+                          && !(cell->shape == DIORAMA_SHAPE_CLIFF
+                               && (cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART)
+                               && resolvedCells[gridIndex].artMode == DIORAMA_ART_CUTOUT))
+                      || (cell->shape != DIORAMA_SHAPE_BRIDGE
+                          && resolvedCells[gridIndex].baseMetatileId == DIORAMA_MATERIAL_METATILE_SELF
+                          && LowerLayerDrawsNothing(snapshot, source));
             for (face = 0; face < DIORAMA_MATERIAL_FACE_COUNT; face++)
             {
                 uint16_t materialId = resolvedCells[gridIndex].materials[face].metatileId;
@@ -1984,15 +2022,8 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
                     materialLayer,
                     resolvedCells[gridIndex].materials[face].rotation,
                     resolvedCells[gridIndex].materials[face].flags);
-                /* a rock edge's cell in the sea (a reef, a sea stack: its art mode "cutout") is the sea round the
-                 * rock where the rock does not stand (BuildMountainArtMask): its lower layer, the water, not the
-                 * rock's rim drawn on it (KNOWN_ISSUES MS-102) */
                 SetTerrainMaterial(&cell->underlayMaterials[face], source->metatileId,
-                                   RiserShowsWholeCell(snapshot, source, cell->shape)
-                                    && !(cell->shape == DIORAMA_SHAPE_CLIFF
-                                         && (cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART)
-                                         && resolvedCells[gridIndex].artMode == DIORAMA_ART_CUTOUT)
-                                   ? DIORAMA_MATERIAL_FULL : DIORAMA_MATERIAL_BASE);
+                                   riserWhole ? DIORAMA_MATERIAL_FULL : DIORAMA_MATERIAL_BASE);
             }
             {
                 /* A detail object stands here (props.h, gl_props.c): the
