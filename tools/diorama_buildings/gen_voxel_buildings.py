@@ -1037,6 +1037,16 @@ def build_models(only=None):
     return models
 
 
+def bare_parts(parts):
+    """A piece's parts as it stands bare on another room's floor (reuse_pieces): without either
+    of its own room's floor decals - the marks round it (_floor) and the floor its drawing hides
+    (_under~behind). The other room's paint is laid round it and its ground under it
+    (place_reused); with the second, the League lobby's PC laid the Pokemon Center's wall top
+    over the lobby's own wall, black over the wall's trim (KNOWN_ISSUES MS-227)."""
+    return [pt for pt in parts
+            if not (isinstance(pt, vb.Decal) and pt.name.endswith(("_floor", "_under~behind")))]
+
+
 def make_model(spec, layouts, models):
     """The model of one expanded spec (and its bare twin), into `models`."""
     if True:
@@ -1122,9 +1132,7 @@ def make_model(spec, layouts, models):
                 for u in range(w * 16):
                     if (u, v) not in own:
                         bpx[u, v] = (0, 0, 0, 0)
-            twin = vb.Model(bare["name"], bare_art, [pt for pt in parts if not (
-                isinstance(pt, vb.Decal) and pt.name.endswith("_floor"))],
-                (w, h), spec["ground"][0])
+            twin = vb.Model(bare["name"], bare_art, bare_parts(parts), (w, h), spec["ground"][0])
             twin.owned, twin.spec, twin.layout = model.owned, bare, layout
             twin.own = set(spec["own"])
             models.append(twin)
