@@ -76,7 +76,8 @@ class DioramaRuleCompilerTests(unittest.TestCase):
                           for row in self.data["behaviorRules"]],
                          [("MB_MOUNTAIN_TOP", "cliff", 1.0)])
         self.assertEqual([row["id"] for row in self.data["contextualRules"]],
-                         ["general-rock-terrace-cell", "general-dense-forest-cell"])
+                         ["general-rock-terrace-cell", "general-dense-forest-cell",
+                          "underwater-stolen-submarine"])
         placements = {row["id"]: row["placementCount"]
                       for row in self.data["exactPatterns"]}
         self.assertTrue(all(placements[name] > 0 for name in (
@@ -115,6 +116,21 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertFalse([pin for pin in battle_env if pin["tileset"] == "gTileset_Underwater"
                           and pin["metatile"] in (0xE4, 0xE5, 0xE6, 0xE7, 0x2E4, 0x2E5, 0x2E6, 0x2E7)])
         self.assertTrue([pin for pin in battle_env if pin["tileset"] == "gTileset_Underwater"])
+        # its other two rows are deep water, drawn in the 2D game as the sea floor under it: they lay as
+        # flat sea floor, not water with its surface over the submarine (an edge of it across the hull);
+        # the hollow's own deep water round it keeps its surface (defaults.json, KNOWN_ISSUES MS-227)
+        submarine = next(row for row in self.data["contextualRules"]
+                         if row["id"] == "underwater-stolen-submarine")
+        self.assertEqual(submarine["placementCount"], 8)
+        hollow = next(row for row in self.data["layouts"]
+                      if row["symbol"] == "LAYOUT_UNDERWATER_SEAFLOOR_CAVERN")
+        cells = {(row["cellOffset"] % hollow["width"], row["cellOffset"] // hollow["width"]): row
+                 for row in hollow["terrainRecords"]}
+        self.assertEqual({(cells[(x, y)]["shape"], cells[(x, y)]["class"], cells[(x, y)]["source"])
+                          for x in range(5, 9) for y in (4, 5)},
+                         {("flat", "ground", "context:underwater-stolen-submarine")})
+        self.assertEqual({cells[cell]["shape"] for cell in [(4, 5), (9, 5)] + [(x, 6) for x in range(3, 10)]},
+                         {"water"})
         pins = [pin for pin in self.data["tilesetPins"] if pin not in battle_env]
         self.assertEqual(len(pins), 1)
         pin = pins[0]

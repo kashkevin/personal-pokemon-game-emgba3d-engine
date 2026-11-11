@@ -44,6 +44,16 @@
         "metatiles": [198, 199]
       },
       "action": { "archetype": "round-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "underwater-stolen-submarine",
+      "priority": 200,
+      "selector": {
+        "tilesets": ["gTileset_Underwater"],
+        "metatiles": [736, 737, 738, 739, 744, 745, 746, 747],
+        "behaviors": ["MB_DEEP_WATER"]
+      },
+      "action": { "archetype": "ground", "pool": "terrain" }
     }
   ],
   "exactPatterns": [
