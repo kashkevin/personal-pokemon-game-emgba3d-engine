@@ -10,6 +10,7 @@
 #ifdef _WIN32
 #include <direct.h>
 #include <io.h>
+#include <sys/stat.h>
 #else
 #include <sys/stat.h>
 #include <unistd.h>
@@ -387,6 +388,10 @@ static Uint32 sCameraStepsChangedMs;
 static bool sPhotoMode;
 static bool sScreenshotRequested;
 static char sScreenshotNotice[160];
+// --screenshots <folder>: where F12 puts its pictures. The launcher starts every game in a new folder of its own
+// (player_runtime.py), so pictures put beside the game there were lost among those folders; it names the player's
+// Pictures folder (KNOWN_ISSUES MS-241). Without it, a "screenshots" folder beside the game, as the tools expect.
+static char sScreenshotFolder[512];
 static Uint32 sScreenshotNoticeMs;
 
 static int EnvironmentStyle(const char *name, int fallback)
@@ -1239,6 +1244,10 @@ static void ParseArguments(int argc, char **argv)
         // starts every game in a new folder, so it names one that stays.
         else if (strcmp(argv[i], "--config") == 0 && i + 1 < argc)
             SDL_strlcpy(sConfigPath, argv[++i], sizeof(sConfigPath));
+#ifdef ENABLE_DIORAMA
+        else if (strcmp(argv[i], "--screenshots") == 0 && i + 1 < argc)
+            SDL_strlcpy(sScreenshotFolder, argv[++i], sizeof(sScreenshotFolder));
+#endif
         else if (strcmp(argv[i], "--bridge") == 0 && i + 1 < argc)
         {
             // Multiplayer (src/platform/mp_bridge.c): never start without the
@@ -1992,29 +2001,78 @@ static bool HandlePcMenuKey(const SDL_KeyboardEvent *key)
     return true;
 }
 
-// F12: the window's picture as a PNG in the screenshots folder beside the
-// game (created when needed), named by the date and time.
+// A folder for F12's pictures: true when it is there (made when needed; its parent must be).
+static bool MakeScreenshotFolder(const char *folder)
+{
+#ifdef _WIN32
+    struct _stat info;
+
+    _mkdir(folder);
+    return _stat(folder, &info) == 0 && (info.st_mode & _S_IFDIR) != 0;
+#else
+    struct stat info;
+
+    mkdir(folder, 0755);
+    return stat(folder, &info) == 0 && S_ISDIR(info.st_mode);
+#endif
+}
+
+// The folder as the notice names it: its last two parts, "/" between (the notice's font has no "\" and no letters
+// past ASCII, which a user's name in the full path may have): "Pictures/EmeraldTogether".
+static void ScreenshotFolderName(const char *folder, char *out, size_t size)
+{
+    size_t length = strlen(folder);
+    size_t start;
+    int parts = 0;
+
+    while (length > 0 && (folder[length - 1] == '/' || folder[length - 1] == '\\'))
+        length--;
+    start = length;
+    while (start > 0)
+    {
+        if (folder[start - 1] == '/' || folder[start - 1] == '\\')
+        {
+            if (++parts == 2)
+                break;
+        }
+        start--;
+    }
+    if (length - start + 1 > size)
+        length = start + size - 1;
+    for (size_t i = start; i < length; i++)
+        *out++ = folder[i] == '\\' ? '/' : folder[i];
+    *out = '\0';
+}
+
+// F12: the window's picture as a PNG, named by the date and time, in the folder the launcher named
+// (--screenshots), or else in a screenshots folder beside the game (made when needed).
 static void SaveScreenshot(int width, int height)
 {
-    char path[96];
+    char path[640];
     time_t now = time(NULL);
     struct tm *local = localtime(&now);
     uint8_t *pixels;
+    const char *folder = "screenshots";
+    char name[64];
 
     if (width <= 0 || height <= 0)
         return;
     pixels = malloc((size_t)width * height * 4);
     if (pixels == NULL)
         return;
-#ifdef _WIN32
-    _mkdir("screenshots");
-#else
-    mkdir("screenshots", 0755);
-#endif
-    if (local != NULL)
-        strftime(path, sizeof(path), "screenshots/emerald-%Y%m%d-%H%M%S", local);
+    if (sScreenshotFolder[0] != '\0' && MakeScreenshotFolder(sScreenshotFolder))
+        folder = sScreenshotFolder;
     else
-        SDL_snprintf(path, sizeof(path), "screenshots/emerald-%u", (unsigned)SDL_GetTicks());
+    {
+        if (sScreenshotFolder[0] != '\0')
+            SDL_Log("Screenshot: the folder %s could not be made; the pictures go beside the game", sScreenshotFolder);
+        MakeScreenshotFolder("screenshots");
+    }
+    if (local != NULL)
+        strftime(name, sizeof(name), "emerald-%Y%m%d-%H%M%S", local);
+    else
+        SDL_snprintf(name, sizeof(name), "emerald-%u", (unsigned)SDL_GetTicks());
+    SDL_snprintf(path, sizeof(path), "%s/%s", folder, name);
     {
         /* Several in one second: -2, -3, ... rather than over the last one. */
         size_t stem = strlen(path);
@@ -2037,7 +2095,16 @@ static void SaveScreenshot(int width, int height)
     glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
     if (PngWrite_RGBA(path, pixels, width, height, true))
     {
-        SDL_snprintf(sScreenshotNotice, sizeof(sScreenshotNotice), "Picture saved: %s", path);
+        if (folder == sScreenshotFolder)
+        {
+            char shown[96];
+
+            ScreenshotFolderName(folder, shown, sizeof(shown));
+            SDL_snprintf(sScreenshotNotice, sizeof(sScreenshotNotice), "Picture saved in %s: %s", shown,
+                         path + strlen(folder) + 1);
+        }
+        else
+            SDL_snprintf(sScreenshotNotice, sizeof(sScreenshotNotice), "Picture saved: %s", path);
         SDL_Log("Screenshot: %s (%dx%d)", path, width, height);
     }
     else
