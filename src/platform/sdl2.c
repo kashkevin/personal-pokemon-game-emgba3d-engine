@@ -2017,26 +2017,38 @@ static bool MakeScreenshotFolder(const char *folder)
 #endif
 }
 
+// A part of a folder's path the notice can show: no letters past ASCII (its font draws each of their bytes as a space).
+static bool ScreenshotPartShown(const char *part, size_t length)
+{
+    for (size_t i = 0; i < length; i++)
+        if ((unsigned char)part[i] >= 0x80)
+            return false;
+    return true;
+}
+
 // The folder as the notice names it: its last two parts, "/" between (the notice's font has no "\" and no letters
-// past ASCII, which a user's name in the full path may have): "Pictures/EmeraldTogether".
+// past ASCII, which a user's name in the full path may have): "Pictures/EmeraldTogether". A part with letters past
+// ASCII is left out (a Pictures folder that OneDrive names in the player's language: "Imágenes", "Изображения"), the
+// parent first; nothing when the last part has them, and the notice then names the picture alone.
 static void ScreenshotFolderName(const char *folder, char *out, size_t size)
 {
     size_t length = strlen(folder);
-    size_t start;
-    int parts = 0;
+    size_t last, parent, start;
 
     while (length > 0 && (folder[length - 1] == '/' || folder[length - 1] == '\\'))
         length--;
-    start = length;
-    while (start > 0)
-    {
-        if (folder[start - 1] == '/' || folder[start - 1] == '\\')
-        {
-            if (++parts == 2)
-                break;
-        }
-        start--;
-    }
+    last = length;
+    while (last > 0 && folder[last - 1] != '/' && folder[last - 1] != '\\')
+        last--;
+    parent = last > 0 ? last - 1 : 0;
+    while (parent > 0 && folder[parent - 1] != '/' && folder[parent - 1] != '\\')
+        parent--;
+    if (!ScreenshotPartShown(folder + last, length - last))
+        start = length;
+    else if (ScreenshotPartShown(folder + parent, last - parent))
+        start = parent;
+    else
+        start = last;
     if (length - start + 1 > size)
         length = start + size - 1;
     for (size_t i = start; i < length; i++)
@@ -2100,12 +2112,16 @@ static void SaveScreenshot(int width, int height)
             char shown[96];
 
             ScreenshotFolderName(folder, shown, sizeof(shown));
-            SDL_snprintf(sScreenshotNotice, sizeof(sScreenshotNotice), "Picture saved in %s: %s", shown,
-                         path + strlen(folder) + 1);
+            if (shown[0] != '\0')
+                SDL_snprintf(sScreenshotNotice, sizeof(sScreenshotNotice), "Picture saved in %s: %s", shown,
+                             path + strlen(folder) + 1);
+            else
+                SDL_snprintf(sScreenshotNotice, sizeof(sScreenshotNotice), "Picture saved: %s",
+                             path + strlen(folder) + 1);
         }
         else
             SDL_snprintf(sScreenshotNotice, sizeof(sScreenshotNotice), "Picture saved: %s", path);
-        SDL_Log("Screenshot: %s (%dx%d)", path, width, height);
+        SDL_Log("Screenshot: %s (%dx%d); the notice: %s", path, width, height, sScreenshotNotice);
     }
     else
     {
