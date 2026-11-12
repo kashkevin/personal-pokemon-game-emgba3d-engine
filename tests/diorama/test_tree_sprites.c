@@ -22,10 +22,10 @@ static void Check(bool condition, const char *expression, int line)
 int main(void)
 {
     /* A forest's 2x2 tree: tops, bottoms (behind other trees, beside open ground). */
-    static const uint16_t sTops[][2] = {{0x1D4, 0x1D5}, {0x1D6, 0x1D7}};
+    static const uint16_t sTops[][2] = {{0x1D4, 0x1D5}, {0x1D6, 0x1D7}, {0x1FC, 0x1FD} /* at a bank */};
     static const uint16_t sBottoms[][2] = {
         {0x1DC, 0x1DD}, {0x1DE, 0x1DF}, {0x1E4, 0x1E5}, {0x1E6, 0x1E7}, {0x1EC, 0x1ED},
-        {0x1F2, 0x1F3}, /* Petalburg Woods, Rustboro, Route 116, the Safari Zone */
+        {0x1F3, 0x1F2}, /* Petalburg Woods, Rustboro, Route 116, the Safari Zone: 1F3 under 1D4, 1F2 under 1D5 */
     };
     unsigned i;
 
@@ -50,6 +50,12 @@ int main(void)
     CHECK(DioramaTreeSprites_Part(false, 0x001) == DIORAMA_TREE_PART_NONE);
     CHECK(DioramaTreeSprites_Part(false, 0x1CE) == DIORAMA_TREE_PART_NONE);
     CHECK(DioramaTreeSprites_GroundMetatile(false, 0x1CE) == 0x001);
+    /* A bank tree's crown tip over the sea and over a pond: the water under it (its bottom layer's own art). */
+    CHECK(DioramaTreeSprites_Part(false, 0x1F6) == DIORAMA_TREE_PART_NONE);
+    CHECK(DioramaTreeSprites_GroundMetatile(false, 0x1F6) == 0x170);
+    CHECK(DioramaTreeSprites_GroundMetatile(false, 0x1F7) == 0x170);
+    CHECK(DioramaTreeSprites_GroundMetatile(false, 0x1FE) == 0x0A1);
+    CHECK(DioramaTreeSprites_GroundMetatile(false, 0x1FF) == 0x0A1);
     CHECK(DioramaTreeSprites_TrunkGround(false) == 0x001);
     CHECK(DioramaTreeSprites_TrunkGround(true) == 0x124);
     /* The Fallarbor tileset's ash-covered trees (step 16): Route 113's wood, the same tree beside open ash, at a

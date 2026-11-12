@@ -1066,7 +1066,16 @@ static void ApplyTreeSprites(struct DioramaSceneSnapshot *snapshot)
         }
         ground = DioramaTreeSprites_GroundMetatile(dewford, cell->metatileId);
         if (ground != cell->metatileId)
-            CopyCellVisual(layout, ground, cell->collision, cell->elevation, cell);
+        {
+            /* a crown's top over water (a small tree's over a pond or the sea, a bank tree's over the sea or a
+             * pond): drawn as that water, it keeps its place's water - the sea's level or the pond's, as the
+             * rules made it for the crown's picture - not the land's level its art as flat ground took, a strip
+             * of water art laid at the bank's height (KNOWN_ISSUES V23) */
+            bool overWater = MetatileBehavior_IsSurfableWaterOrUnderwater(cell->behavior);
+
+            if (CopyCellVisual(layout, ground, cell->collision, cell->elevation, cell) && overWater)
+                cell->flags |= DIORAMA_CELL_TREE_CANOPY;
+        }
     }
 }
 

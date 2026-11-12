@@ -36,14 +36,26 @@ int DioramaTreeSprites_Part(bool dewford, uint16_t metatileId)
     {
     case 0x1D4: case 0x1D6: return 0; /* upper left, including forest edge */
     case 0x1D5: case 0x1D7: return 1;
+    /* The upper row with a bank's line across its top edge, its crown's tip
+     * over the water north of it (1F6-1F7, 1FE-1FF) or over tall grass
+     * (1C6-1C7): the Battle Frontier's east and west halves, the Safari
+     * Zone's south-east and north, Petalburg City's pond, 23 trees. Not in
+     * the 3DS project's list either, so those trees stood as the lower half
+     * of a crown under their upper row's flat art. */
+    case 0x1FC: return 0;
+    case 0x1FD: return 1;
     case 0x1DC: case 0x1DE: case 0x1E4: case 0x1E6: return 2;
     case 0x1DD: case 0x1DF: case 0x1E5: case 0x1E7: return 3;
-    /* The lower row again, beside open ground (Petalburg Woods, Rustboro,
-     * Route 116, the Safari Zone: about 200 cells). Not in the 3DS project's
-     * list, so those trees lost their crowns' lower half and showed a band of
-     * flat trunk art instead (KNOWN_ISSUES V23). */
-    case 0x1F2: return 2;
-    case 0x1F3: return 3;
+    /* The lower row again, over the next row's crowns half a tree to the side
+     * (Petalburg Woods, Rustboro, Route 116, the Safari Zone: about 200
+     * cells). Not in the 3DS project's list, so those trees lost their
+     * crowns' lower half and showed a band of flat trunk art instead
+     * (KNOWN_ISSUES V23). 1F3 is the left of the two and 1F2 the right: the
+     * maps put 1F3 under 1D4/1D6 and 1F2 under 1D5/1D7 everywhere, the trunk
+     * between them (given the other way round, each cell drew the other
+     * side's quarter of the crown, its trunk and its trunk's art). */
+    case 0x1F3: return 2;
+    case 0x1F2: return 3;
     /* A large tree's lower row under a small tree's canopy top. */
     case 0x1EC: return 2;
     case 0x1ED: return 3;
@@ -68,6 +80,10 @@ uint16_t DioramaTreeSprites_GroundMetatile(bool dewford, uint16_t metatileId)
     {
     case 0x1C6: case 0x1C7: return 0x00D; /* tall grass without canopy */
     case 0x1CE: case 0x1CF: return 0x001; /* ordinary grass */
+    /* A shore tree's crown tip (its upper row 1FC-1FD) over the sea, and over
+     * a pond: the water there (the tip's own behaviour, the water's art). */
+    case 0x1F6: case 0x1F7: return 0x170; /* the sea */
+    case 0x1FE: case 0x1FF: return 0x0A1; /* reflective pond water */
     /* A small tree's canopy top, over whatever it stood in front of. The
      * fence feet under 040 have no metatile of their own: grass. */
     case 0x00E: case 0x00F: case 0x040: return 0x001;
