@@ -22,8 +22,9 @@ battle's), and in the 3D build its renderer's (PKMN_DIORAMA_LOG: each field effe
                  over it (its renderer logs a field effect over a walker)
   event          a world's shiny World Event Pokemon (PKMN_TEST_WORLD_EVENT, a stand-in host): drawn shiny, twinkling
   event-plain    the same not shiny: no twinkle
-  roamer         a shiny roamer on the map (PKMN_TEST_ROAMER): its overworld Pokemon drawn shiny and twinkling, bumped
-                 into: its battle's Pokemon shiny
+  roamer         a shiny roamer on the map (PKMN_TEST_ROAMER): its overworld Pokemon drawn shiny and twinkling - bumped
+                 into once it has stood on the GBA's picture for ROAMER_BUMP_DELAY frames (PKMN_TEST_OWE_BUMP_DELAY),
+                 twinkles made by then (the bump's line) - and its battle's Pokemon shiny
   roamer-plain   a roamer that is not shiny: drawn plain, its battle not shiny
   outbreak       a mass outbreak on the map (PKMN_TEST_OUTBREAK), every overworld Pokemon made shiny
                  (PKMN_TEST_OWE_SHINY=2): one bumped into is shiny in battle too (the battle once rolled again)
@@ -64,6 +65,11 @@ ROUTE_101_NORTH = "0:16:0:10:4"    # the path below Oldale Town's gap, no grass 
 SPECIES_MUDKIP, SPECIES_ZIGZAGOON, ITEM_SHINY_CHARM = 258, 263, 691
 SPECIES_RAIKOU, SPECIES_SEEDOT, SPECIES_LATIAS = 243, 273, 380
 OWE_KIND_ROAMER = 2                # battle_env_test.h OWE_KIND_*
+# The frames a roamer stands on the GBA's picture before the bump: two of its twinkles' beats (ow_shiny_sparkle.c
+# SPARKLE_PERIOD, 40 frames). Bumped as it appears, a roamer that appears beside the player is fought 35 frames later
+# (the encounter's approach is no step), before the once-a-second log could show its first twinkle - run 443 on
+# Windows: "made no twinkle" from that log while the game twinkled (a traced Linux run: its first star 24 frames in).
+ROAMER_BUMP_DELAY = 80
 PERSONALITY = 0x12345678
 CHARM_SPAWN = 4457                 # its hash with PERSONALITY is under MP_SPAWN_CHARM_THRESHOLD (multiplayer_spawns.c)
 SPAWNS = f"{SPECIES_ZIGZAGOON}:9:13:1:101:{PERSONALITY};{SPECIES_ZIGZAGOON}:11:13:0:102:{PERSONALITY};" \
@@ -266,14 +272,18 @@ def main():
     for name, shiny in (("roamer", 1), ("roamer-plain", 0)):
         if not want(name):
             continue
-        seconds = case(name, 6000, dict(PKMN_TEST_ROAMER=f"{SPECIES_LATIAS}:40:{shiny}", PKMN_TEST_OWE_BATTLE="roamer"),
-                       "")
+        seconds = case(name, 6000, dict(PKMN_TEST_ROAMER=f"{SPECIES_LATIAS}:40:{shiny}", PKMN_TEST_OWE_BATTLE="roamer",
+                                        PKMN_TEST_OWE_BUMP_DELAY=str(ROAMER_BUMP_DELAY)), "")
         roamer = mons(seconds, kind=OWE_KIND_ROAMER)
         if roamer and any(m[2] != shiny for m in roamer):
             problems.append(f"{name}: the roamer drawn shiny {sorted({m[2] for m in roamer})}, it is {shiny}")
         battle_shiny(name, shiny)
-        if shiny and roamer and seconds and seconds[-1][1] == 0:
-            problems.append(f"{name}: the shiny roamer made no twinkle")
+        # the twinkles made by the bump, the roamer then on the picture for ROAMER_BUMP_DELAY frames (its line's count)
+        bump = [line for line in case.battle if line.startswith("owe bumped: ")]
+        made = re.search(r"\btwinkles made (\d+) skipped (\d+)", bump[0]) if bump else None
+        if shiny and bump and (made is None or int(made.group(1)) == 0):
+            problems.append(f"{name}: the shiny roamer made no twinkle in its {ROAMER_BUMP_DELAY} frames on the picture "
+                            f"before the bump ({bump[0]})")
     # a crowded map: one palette free - no twinkle; two - twinkles; never the last palette taken
     for name, free, twinkles in (("palette-last", 1, False), ("palette-two", 2, True)):
         if not want(name):

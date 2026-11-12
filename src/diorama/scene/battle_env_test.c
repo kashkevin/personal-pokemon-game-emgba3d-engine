@@ -343,6 +343,11 @@ static struct
     bool oweNoBattle;           /* PKMN_TEST_OWE_NO_BATTLE */
     int oweCountFrames;
     bool oweBumped, oweBattleLogged;
+    /* PKMN_TEST_OWE_BUMP_DELAY=N: the bump waits until that Pokemon has stood on the GBA's picture for N field frames
+       (counted while the bump could happen), so whatever it shows on the field (a shiny one's twinkles: a star every
+       40 frames, ow_shiny_sparkle.c) has been shown before its battle - without it a Pokemon that appears beside the
+       player is fought 35 frames after it appears (run 443's roamer); the bump's line carries the twinkles made by then */
+    int oweBumpDelay, oweSeenLocal, oweSeenFrames;
     /* PKMN_TEST_OWE_REBUMP=<field key frame>:<kind>: from that field key frame, once the last battle is over, one more
        bump (the kinds of PKMN_TEST_OWE_BATTLE, and legend: a Legendary or Mythical one); PKMN_TEST_LEGEND=1 (-1): every
        random Legendary/Mythical roll hits (none does), MPLegend_TestForce; PKMN_TEST_SAFARI=1: the field in Safari Zone
@@ -662,6 +667,8 @@ static void Init(void)
     s.oweNoBattle = EnvInt("PKMN_TEST_OWE_NO_BATTLE", 0) != 0;
     value = SDL_getenv("PKMN_TEST_OWE_BATTLE");
     s.oweBattleKind = OweKindNamed(value);
+    s.oweBumpDelay = EnvInt("PKMN_TEST_OWE_BUMP_DELAY", 0);
+    s.oweSeenLocal = -1;
     value = SDL_getenv("PKMN_TEST_OWE_REBUMP");
     s.oweRebumpAt = value != NULL ? atoi(value) : 0;
     s.oweRebumpKind = value != NULL && strchr(value, ':') != NULL ? OweKindNamed(strchr(value, ':') + 1) : 0;
@@ -2309,9 +2316,21 @@ static void OweBattleField(void)
         if (!objectEvent->active || objectEvent->offScreen || !IsOverworldWildEncounter(objectEvent, OWE_ANY)
          || DioramaBattleEnvTest_OweKind(objectEvent) != (unsigned)s.oweBattleKind)
             continue;
+        if (s.oweBumpDelay > 0)
+        {
+            if (s.oweSeenLocal != objectEvent->localId)
+            {
+                s.oweSeenLocal = objectEvent->localId;
+                s.oweSeenFrames = 0;
+            }
+            if (++s.oweSeenFrames < s.oweBumpDelay)
+                return;
+        }
         s.oweBumped = true;
-        TestLog("Battle env test: owe bumped: local %u kind %u species %u field shiny %u", objectEvent->localId,
-                DioramaBattleEnvTest_OweKind(objectEvent), OW_SPECIES(objectEvent), OW_SHINY(objectEvent) ? 1 : 0);
+        TestLog("Battle env test: owe bumped: local %u kind %u species %u field shiny %u after %d frames on the picture, "
+                "twinkles made %u skipped %u", objectEvent->localId, DioramaBattleEnvTest_OweKind(objectEvent),
+                OW_SPECIES(objectEvent), OW_SHINY(objectEvent) ? 1 : 0, s.oweBumpDelay > 0 ? s.oweSeenFrames : 1,
+                (unsigned)OwShinySparkle_Made(), (unsigned)OwShinySparkle_Skipped());
         TryTriggerOverworldWildEncounter(objectEvent, &gObjectEvents[gPlayerAvatar.objectEventId]);
         return;
     }
