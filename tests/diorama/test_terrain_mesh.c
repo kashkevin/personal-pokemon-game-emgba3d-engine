@@ -1516,6 +1516,81 @@ static void TestAuthoredTreeModelBuildsOnceInLocalSpace(void)
         assert(sVertices[vertex].textureLayer == DIORAMA_TERRAIN_TEXTURE_VERTEX_COLOR);
 }
 
+/* The ground under a 2-wide voxel tree (KNOWN_ISSUES MS-242): its column a voxel thick and its skirt down a bank
+ * to the water read the ground under the tree, not the tree's own drawing in bands (its body rows' upper layer,
+ * see-through: the sky showed through the bank under a row of the voxel trees); where the map has a rock wall the
+ * bank a level tall shows it as plain ground's does ("Grass banks rock"), the tree's own claim on its cells not
+ * stopping it. */
+static void TestTreeGroundBankReadsGround(void)
+{
+    struct DioramaTerrainChunkInput input;
+    struct DioramaTerrainMesh mesh;
+    int i;
+
+    InitInput(&input, 3, MB_NORMAL);
+    for (i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
+    {
+        input.cells[i].terrainClass = DIORAMA_TERRAIN_CLASS_GROUND;
+        for (int face = 0; face < DIORAMA_MATERIAL_FACE_COUNT; face++)
+            input.cells[i].underlayMaterials[face].layer = DIORAMA_MATERIAL_FULL;
+    }
+    input.rockFace = input.cells[0].materials[DIORAMA_MATERIAL_FACE_NORTH];
+    input.rockFace.u0 = input.rockFace.v0 = 0.6f;
+    input.rockFace.u1 = input.rockFace.v1 = 0.7f;
+    for (int localX = 0; localX < 2; localX++)
+    {
+        struct DioramaTerrainCell *tree = &input.cells[3 * DIORAMA_TERRAIN_INPUT_SIZE + 3 + localX];
+        struct DioramaTerrainCell *water = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 3 + localX];
+
+        tree->shape = DIORAMA_SHAPE_EXTRUDED;
+        tree->archetype = DIORAMA_ARCHETYPE_GROUPED_HULL;
+        tree->visualHeight = 1.0f;
+        tree->featureHeight = 1.0f;
+        tree->structureId = 10;
+        tree->structureWidth = 2;
+        tree->structureHeight = 1;
+        tree->structureLocalX = localX;
+        tree->structureLocalY = 0;
+        SetTreeMaterial(tree, 0.1f + localX * 0.3f, 0.1f, 0.3f + localX * 0.3f, 0.3f);
+        /* the tree's drawing in bands (rules.c), at u 0.8-0.9 here */
+        tree->measuredAxis = DIORAMA_PLANE_AXIS_Z;
+        tree->measuredBandCount = 2;
+        tree->measuredPeriodBands = 2;
+        for (int band = 0; band < 2; band++)
+        {
+            tree->measuredBands[band] = tree->materials[DIORAMA_MATERIAL_FACE_SOUTH];
+            tree->measuredBands[band].layer = DIORAMA_MATERIAL_FOREGROUND;
+            tree->measuredBands[band].u0 = 0.8f;
+            tree->measuredBands[band].u1 = 0.9f;
+        }
+        water->shape = DIORAMA_SHAPE_WATER;
+        water->terrainClass = DIORAMA_TERRAIN_CLASS_WATER;
+        water->groundHeight = -1.0f;
+        water->visualHeight = -1.0f;
+    }
+    for (int y = 0; y < 16; y++)
+        for (int x = 0; x < 32; x++)
+            SetGroupedTreeShade(&input, 3, 3, x, y, DIORAMA_TREE_SHADE_BLACK);
+    /* no rock wall: the six sides down to the water (the trees' two, the ground's four) read the ground's
+     * drawing (u 0.1-0.3, v 0.2-0.4), none the tree's bands */
+    mesh = CheckSameAsVoxelBuild(&input);
+    assert(mesh.treeInstanceCount == 1);
+    assert(CountSideQuadsReading(&mesh, -1.0f, -1.0f / 16.0f, 0.09f, 0.31f, 0.19f, 0.41f) == 6);
+    assert(CountSideQuadsReading(&mesh, -1.0f, -1.0f / 16.0f, 0.79f, 0.91f, 0.0f, 1.0f) == 0);
+    /* the rock wall: all six a level tall read it, the trees' with their own claim on them too */
+    input.rockFaces = 1;
+    mesh = CheckSameAsVoxelBuild(&input);
+    assert(CountSideQuadsReading(&mesh, -1.0f, -1.0f / 16.0f, 0.59f, 0.71f, 0.59f, 0.71f) == 6);
+    input.cells[3 * DIORAMA_TERRAIN_INPUT_SIZE + 3].claimOwner = 10;
+    input.cells[3 * DIORAMA_TERRAIN_INPUT_SIZE + 4].claimOwner = 10;
+    mesh = CheckSameAsVoxelBuild(&input);
+    assert(CountSideQuadsReading(&mesh, -1.0f, -1.0f / 16.0f, 0.59f, 0.71f, 0.59f, 0.71f) == 6);
+    /* a model's claim on plain ground still keeps that ground's own drawing */
+    input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 2].claimOwner = 11;
+    mesh = CheckSameAsVoxelBuild(&input);
+    assert(CountSideQuadsReading(&mesh, -1.0f, -1.0f / 16.0f, 0.59f, 0.71f, 0.59f, 0.71f) == 5);
+}
+
 static void TestIncompleteLargeTreeFallsBackToFlatGround(void)
 {
     struct DioramaTerrainChunkInput input;
@@ -1845,6 +1920,7 @@ int main(void)
     TestAuthoredTreeModelBuildsOnceInLocalSpace();
     TestLargeGroupedTreeUsesAuthoredVoxelModel();
     TestIncompleteLargeTreeFallsBackToFlatGround();
+    TestTreeGroundBankReadsGround();
     TestWideGroupedHullCentersItsDepth();
     TestDenseRoundHullsStayWithinCapacity();
     TestDenseAuthoredTreesStayWithinCapacity();

@@ -2751,7 +2751,9 @@ static void FaceMaterial(const struct DioramaTerrainCell *cell, uint8_t surface,
  * a rock edge hangs down to ground that far below (its drawing's lower layer, grass: the ring of ledges round the
  * pit in the Safari Zone's north); their own faces keep their drawing. A bank of grass or a path down to the water
  * a level below shows rock too (the owner's choice of 2026-11-01, "Grass banks rock": Route 119's river); a beach's
- * sand keeps its drawing, and a mountain's rock, trees, buildings, stairs and the rest draw their own sides.
+ * sand keeps its drawing, and a mountain's rock, trees, buildings, stairs and the rest draw their own sides. The
+ * ground under a tree (the Diorama's voxel trees, F8: its column a voxel thick, CompressedColumn) is such ground: its
+ * bank shows rock as the ground the 3DS trees stand on does (KNOWN_ISSUES MS-242); the tree draws its own.
  */
 static bool NaturalGround(uint8_t terrainClass)
 {
@@ -2773,10 +2775,12 @@ static bool GroundSideShowsRock(const struct DioramaTerrainChunkInput *input,
     if (!input->rockFaces || face->axis == 1 || surface > 1
      || materialFace < DIORAMA_MATERIAL_FACE_NORTH || materialFace > DIORAMA_MATERIAL_FACE_WEST
      || face->vMax - face->vMin < DIORAMA_VOXELS_PER_CELL - 1
-     || cell->claimOwner != 0 || IsTreeHullColumn(cell)
+     || (cell->claimOwner != 0 && !IsTreeHullColumn(cell))
      || (cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART))
         return false;
-    if (cell->shape == DIORAMA_SHAPE_FLAT)
+    /* the ground under a tree is ground as a flat cell's is (its every face reads its ground's materials, surface
+       1; the claim on it is its own tree's, not a model's that draws its sides) */
+    if (cell->shape == DIORAMA_SHAPE_FLAT || IsTreeHullColumn(cell))
     {
         if (!NaturalGround(cell->terrainClass))
             return false;
@@ -2892,7 +2896,10 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
             int corner;
             unsigned measuredBand = 0;
 
-            if (face->axis != 1 && cell->measuredBandCount != 0)
+            /* a 2-wide tree's own drawing in bands (rules.c, its body rows' upper layer) is not the ground under
+             * it: its column a voxel thick and its skirt down a bank read the ground (the bank under a row of the
+             * Diorama's voxel trees showed the sky through the tree's see-through drawing: KNOWN_ISSUES MS-242) */
+            if (face->axis != 1 && cell->measuredBandCount != 0 && !IsTreeHullColumn(cell))
             {
                 int16_t boundary;
 
