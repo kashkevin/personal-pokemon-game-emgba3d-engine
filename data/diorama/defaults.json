@@ -202,6 +202,384 @@
       "action": { "archetype": "grouped-hull", "pool": "vegetation" }
     },
     {
+      "id": "general-large-tree-1c6-1c7-1d4-1d5-1dc-1dd",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[454, 455], [468, 469], [476, 477]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-1ce-1cf-1d6-1d7-1dc-1dd",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[462, 463], [470, 471], [476, 477]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-1c6-1c7-1d4-1d7-1dc-1dd",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[454, 455], [468, 471], [476, 477]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-1ce-1cf-1d4-1d5-1e4-1e5",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[462, 463], [468, 469], [484, 485]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-1ce-1cf-1d4-1d7-1e4-1e7",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[462, 463], [468, 471], [484, 487]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-1c6-1c7-1d4-1d5-1f3-1f2",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[454, 455], [468, 469], [499, 498]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-1ce-1cf-1d6-1d5-1e6-1e5",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[462, 463], [470, 469], [486, 485]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-1ce-1cf-1d4-1d5-1f3-1f2",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[462, 463], [468, 469], [499, 498]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-1ce-1cf-1d4-1d7-1f3-1f2",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[462, 463], [468, 471], [499, 498]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-1c6-1c7-1d4-1d5-1e4-1e5",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[454, 455], [468, 469], [484, 485]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-1c6-1c7-1d4-1d7-1e4-1e7",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[454, 455], [468, 471], [484, 487]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-1c6-1c7-1d6-1d5-1e4-1e5",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[454, 455], [470, 469], [484, 485]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-1ce-1cf-1d6-1d5-1e6-1f2",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[462, 463], [470, 469], [486, 498]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-1ce-1cf-1d6-1d7-1e6-1e7",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[462, 463], [470, 471], [486, 487]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-1c6-1c7-1d4-1d7-1f3-1f2",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[454, 455], [468, 471], [499, 498]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-1c6-1c7-1d6-1d7-1dc-1dd",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[454, 455], [470, 471], [476, 477]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-1ce-1cf-1d4-1d7-1e4-1f2",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[462, 463], [468, 471], [484, 498]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-1ce-1cf-1d4-1d7-1e6-1e7",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[462, 463], [468, 471], [486, 487]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-1ce-1cf-1d4-1d7-1f3-1e7",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[462, 463], [468, 471], [499, 487]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-1ce-1cf-1d6-1d5-1e4-1e5",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[462, 463], [470, 469], [484, 485]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-1ce-1cf-1d6-1d5-1f3-1f2",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[462, 463], [470, 469], [499, 498]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-1ce-1cf-1d6-1d7-1e6-1e5",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[462, 463], [470, 471], [486, 485]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-1ce-1cf-1d6-1d7-1e6-1f2",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[462, 463], [470, 471], [486, 498]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-1d4-1d5-1f3-1f2",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[468, 469], [499, 498]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-1d6-1d7-1dc-1dd",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[470, 471], [476, 477]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-1d4-1d5-1e4-1f2",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[468, 469], [484, 498]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-1d4-1d7-1e4-1e7",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[468, 471], [484, 487]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-1d4-1d5-1f3-1e5",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[468, 469], [499, 485]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-1d6-1d5-1e6-1f2",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[470, 469], [486, 498]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-1d6-1d5-1e6-1e5",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[470, 469], [486, 485]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-1d4-1d5-1f3-1e7",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[468, 469], [499, 487]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-1d4-1d7-1f3-1f2",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[468, 471], [499, 498]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-1d6-1d7-1e6-1e7",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[470, 471], [486, 487]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-1d4-1d5-1e6-1f2",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[468, 469], [486, 498]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-1d6-1d5-1e4-1e5",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[470, 469], [484, 485]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-1d6-1d7-1e6-1e5",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[470, 471], [486, 485]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-1d4-1d7-1e4-1f2",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[468, 471], [484, 498]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-1d4-1d7-1f3-1e7",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[468, 471], [499, 487]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-1d6-1d5-1f3-1f2",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[470, 469], [499, 498]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-1d4-1d7-1e6-1e7",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[468, 471], [486, 487]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-1d4-1d7-1f3-1e5",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[468, 471], [499, 485]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-1d6-1d7-1e6-1f2",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[470, 471], [486, 498]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
       "id": "petalburg-house-left-shell",
       "dimensions": { "width": 5, "height": 5 },
       "tilesets": { "primary": "gTileset_General", "secondary": "gTileset_Petalburg" },
