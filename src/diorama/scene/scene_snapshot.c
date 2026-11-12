@@ -962,9 +962,8 @@ static void ApplyTreeSprites(struct DioramaSceneSnapshot *snapshot)
     const struct MapLayout *mapLayout = gMapHeader.mapLayout;
     int i;
 
-    if (sTreeStyle <= 0 || mapLayout == NULL
-     || mapLayout->primaryTileset != &gTileset_General
-     || gMapHeader.mapType == MAP_TYPE_INDOOR || gMapHeader.mapType == MAP_TYPE_SECRET_BASE)
+    /* set with the tree style (DioramaScene_PublishOverworld), which the buildings' grounds read too */
+    if (!snapshot->treeSprites || mapLayout == NULL)
         return;
     for (i = 0; i < snapshot->visibleCellCount; i++)
     {
@@ -2761,6 +2760,9 @@ void DioramaScene_PublishOverworld(void)
             sTreeStyle = treeStyle;
         }
     }
+    sDraft.treeSprites = sTreeStyle > 0 && sDraft.valid
+                      && sDraft.primaryTileset == &gTileset_General
+                      && sDraft.mapType != MAP_TYPE_INDOOR && sDraft.mapType != MAP_TYPE_SECRET_BASE;
     sDraft.mapGeneration = sMapGeneration;
     sDraft.mapEditGeneration = sMapEditGeneration;
     sDraft.dirtyCellCount = sDirtyCellCount;

@@ -326,6 +326,10 @@ struct DioramaSceneSnapshot
      * (metatile_atlas.c). rockFaceValid 0 elsewhere. */
     uint8_t rockFaceValid;
     uint16_t rockFaceEntries[DIORAMA_METATILE_ENTRY_COUNT];
+    /* 1 where the snapshot stands General's trees as solids, their cells published as ground (the 3DS project's trees,
+     * tree_sprites.h, on an outdoor map of General's primary tileset: scene_snapshot.c ApplyTreeSprites): the tree
+     * style as of this snapshot's cells, which the renderer's own reading of the style (F8) can be a frame ahead of. */
+    uint8_t treeSprites;
     uint16_t mapWidth;
     uint16_t mapHeight;
     uint8_t mapCoordinateOffset;

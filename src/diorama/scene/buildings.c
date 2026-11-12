@@ -38,7 +38,6 @@
 #include "constants/layouts.h"
 #include "constants/map_types.h"
 #include "constants/metatile_behaviors.h"
-#include "tilesets.h"
 
 extern const unsigned int gDioramaBuildingsTableSize;
 extern const unsigned char gDioramaBuildingsTable[];
@@ -1661,9 +1660,8 @@ void DioramaBuildings_FlattenResolvedCells(const struct DioramaSceneSnapshot *sn
      * it (scene_snapshot.c ApplyTreeSprites, DioramaTreeSprites_GroundMetatile), so no cell in view keeps that
      * metatile and the atlas never draws its slot: a model's cells laid with it drew nothing, and the sky showed
      * where the model does not close (a Fortree tree house's sides under its canopy; KNOWN_ISSUES MS-240). Such a
-     * ground is drawn as the view draws those cells. */
-    bool treeGrounds = DioramaTreeSprites_Enabled() && snapshot->primaryTileset == &gTileset_General
-                    && snapshot->mapType != MAP_TYPE_INDOOR && snapshot->mapType != MAP_TYPE_SECRET_BASE;
+     * ground is drawn as the view draws those cells: by the snapshot's own tree style, as its cells were made. */
+    bool treeGrounds = snapshot->treeSprites != 0;
     unsigned i;
     int face;
 
