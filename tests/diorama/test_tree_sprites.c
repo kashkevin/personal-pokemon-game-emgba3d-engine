@@ -6,6 +6,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "diorama/buildings.h"
+#include "diorama/rules.h"
+#include "diorama/scene_snapshot.h"
 #include "diorama/tree_sprites.h"
 
 #define CHECK(condition) Check((condition), #condition, __LINE__)
@@ -17,6 +20,118 @@ static void Check(bool condition, const char *expression, int line)
         fprintf(stderr, "test_tree_sprites.c:%d: check failed: %s\n", line, expression);
         exit(EXIT_FAILURE);
     }
+}
+
+/* The modelled buildings (buildings.c, not linked here): one cell of layout 7 is a building's, at (40, 41). */
+bool DioramaBuildings_CellAt(uint16_t layout, int x, int y, uint16_t *ground, uint8_t *quarters, float *top)
+{
+    (void)ground;
+    (void)quarters;
+    (void)top;
+    return layout == 7 && x == 40 && y == 41;
+}
+
+static struct DioramaSceneSnapshot sSnapshot;
+static struct DioramaResolvedCell sResolved[DIORAMA_MAX_VISIBLE_CELLS];
+
+static unsigned GridIndex(int x, int y)
+{
+    return (unsigned)(y * DIORAMA_GRID_WIDTH + x);
+}
+
+/* A large tree's quarters at grid (x, y) (quarter 0) with the tops given (quarters 0-3), of the kind first. */
+static void PlaceTree(int x, int y, int first, const float tops[4])
+{
+    int k;
+
+    for (k = 0; k < 4; k++)
+    {
+        unsigned index = GridIndex(x + (k & 1), y + (k >> 1));
+
+        sSnapshot.cells[index].treeSprite = (uint8_t)(first + k);
+        sResolved[index].topHeight = tops[k];
+    }
+}
+
+static float Lift(int x, int y)
+{
+    return DioramaTreeSprites_Lift(&sSnapshot, sResolved, GridIndex(x, y));
+}
+
+/* KNOWN_ISSUES MS-243: a large tree stands whole at its highest quarter's height. */
+static void TestLift(void)
+{
+    static const float sUpperHigher[4] = {1.0f, 1.0f, 0.0f, 0.0f};
+    static const float sColumn[4] = {0.0f, 3.0f, 1.0f, 3.0f};
+    static const float sEven[4] = {2.0f, 2.0f, 2.0f, 2.0f};
+    static const float sOneLow[4] = {-1.0f, -1.0f, -3.0f, -1.0f};
+    int x;
+    int y;
+
+    sSnapshot.visibleCellCount = DIORAMA_MAX_VISIBLE_CELLS;
+    for (y = 0; y < DIORAMA_GRID_HEIGHT; y++)
+        for (x = 0; x < DIORAMA_GRID_WIDTH; x++)
+        {
+            struct DioramaCellSnapshot *cell = &sSnapshot.cells[GridIndex(x, y)];
+
+            cell->flags = DIORAMA_CELL_SOURCE_VALID;
+            cell->sourceLayoutId = 1;
+            cell->sourceMapX = (int16_t)x;
+            cell->sourceMapY = (int16_t)y;
+            sResolved[GridIndex(x, y)].topHeight = 0.5f;
+        }
+    /* the upper row a level up: the lower row's quarters stand a level over their cells */
+    PlaceTree(10, 10, DIORAMA_TREE_SPRITE_QUARTER, sUpperHigher);
+    CHECK(Lift(10, 10) == 0.0f && Lift(11, 10) == 0.0f);
+    CHECK(Lift(10, 11) == 1.0f && Lift(11, 11) == 1.0f);
+    /* the east column three levels up, the west one: the west quarters lift to it */
+    PlaceTree(20, 10, DIORAMA_TREE_SPRITE_QUARTER, sColumn);
+    CHECK(Lift(20, 10) == 3.0f && Lift(21, 10) == 0.0f && Lift(20, 11) == 2.0f && Lift(21, 11) == 0.0f);
+    /* a tree on one level: nothing lifts */
+    PlaceTree(30, 10, DIORAMA_TREE_SPRITE_QUARTER, sEven);
+    CHECK(Lift(30, 10) == 0.0f && Lift(31, 10) == 0.0f && Lift(30, 11) == 0.0f && Lift(31, 11) == 0.0f);
+    /* the other large trees too: the ash-covered, the Lavaridge and the Mossdeep ones */
+    PlaceTree(10, 20, DIORAMA_TREE_SPRITE_ASH_QUARTER, sOneLow);
+    PlaceTree(20, 20, DIORAMA_TREE_SPRITE_LAVARIDGE_QUARTER, sOneLow);
+    PlaceTree(30, 20, DIORAMA_TREE_SPRITE_MOSSDEEP_QUARTER, sOneLow);
+    for (x = 10; x <= 30; x += 10)
+    {
+        CHECK(Lift(x, 20) == 0.0f && Lift(x + 1, 20) == 0.0f && Lift(x + 1, 21) == 0.0f);
+        CHECK(Lift(x, 21) == 2.0f);
+    }
+    /* a neighbour of another kind is not a partner: a General quarter 1 east of an ash quarter 0 */
+    PlaceTree(40, 20, DIORAMA_TREE_SPRITE_ASH_QUARTER, sEven);
+    sSnapshot.cells[GridIndex(41, 20)].treeSprite = DIORAMA_TREE_SPRITE_QUARTER + 1;
+    sResolved[GridIndex(41, 20)].topHeight = 5.0f;
+    CHECK(Lift(40, 20) == 0.0f && Lift(40, 21) == 0.0f);
+    /* a tree with two quarters (a wood's edge cut by a cliff): the two there */
+    sSnapshot.cells[GridIndex(50, 10)].treeSprite = DIORAMA_TREE_SPRITE_QUARTER + 2;
+    sResolved[GridIndex(50, 10)].topHeight = 1.0f;
+    sSnapshot.cells[GridIndex(51, 10)].treeSprite = DIORAMA_TREE_SPRITE_QUARTER + 3;
+    sResolved[GridIndex(51, 10)].topHeight = 2.0f;
+    CHECK(Lift(50, 10) == 1.0f && Lift(51, 10) == 0.0f);
+    /* a quarter a modelled building owns does not count (its model draws that cell) */
+    PlaceTree(40, 40, DIORAMA_TREE_SPRITE_QUARTER, sUpperHigher);
+    sSnapshot.cells[GridIndex(40, 41)].sourceLayoutId = 7;
+    sResolved[GridIndex(40, 41)].topHeight = 4.0f;
+    CHECK(Lift(41, 41) == 1.0f && Lift(40, 40) == 0.0f);
+    /* at the grid's edge: the quarters past it are not read */
+    sSnapshot.cells[GridIndex(0, 0)].treeSprite = DIORAMA_TREE_SPRITE_QUARTER + 3;
+    sResolved[GridIndex(0, 0)].topHeight = 1.0f;
+    CHECK(Lift(0, 0) == 0.0f);
+    sSnapshot.cells[GridIndex(DIORAMA_GRID_WIDTH - 1, DIORAMA_GRID_HEIGHT - 1)].treeSprite =
+        DIORAMA_TREE_SPRITE_QUARTER;
+    CHECK(Lift(DIORAMA_GRID_WIDTH - 1, DIORAMA_GRID_HEIGHT - 1) == 0.0f);
+    /* not a large tree's quarter: a small tree, no tree; and no snapshot, or a cell past it */
+    sSnapshot.cells[GridIndex(60, 60)].treeSprite = DIORAMA_TREE_SPRITE_SMALL;
+    CHECK(Lift(60, 60) == 0.0f && Lift(61, 60) == 0.0f);
+    CHECK(DioramaTreeSprites_Lift(NULL, sResolved, 0) == 0.0f);
+    CHECK(DioramaTreeSprites_Lift(&sSnapshot, sResolved, DIORAMA_MAX_VISIBLE_CELLS) == 0.0f);
+    CHECK(DioramaTreeSprites_QuarterFirst(DIORAMA_TREE_SPRITE_QUARTER + 3) == DIORAMA_TREE_SPRITE_QUARTER);
+    CHECK(DioramaTreeSprites_QuarterFirst(DIORAMA_TREE_SPRITE_MOSSDEEP_QUARTER + 2)
+          == DIORAMA_TREE_SPRITE_MOSSDEEP_QUARTER);
+    CHECK(DioramaTreeSprites_QuarterFirst(DIORAMA_TREE_SPRITE_SMALL) == DIORAMA_TREE_SPRITE_NONE);
+    CHECK(DioramaTreeSprites_QuarterFirst(DIORAMA_TREE_SPRITE_LAVARIDGE_SMALL) == DIORAMA_TREE_SPRITE_NONE);
 }
 
 int main(void)
@@ -180,6 +295,7 @@ int main(void)
         CHECK(DioramaTreeSprites_FortreeCrownGround(0x261) == 0x261);
         CHECK(DioramaTreeSprites_FortreePart(0x224) == DIORAMA_TREE_PART_NONE);
     }
+    TestLift();
     puts("tree sprite tests passed");
     return EXIT_SUCCESS;
 }

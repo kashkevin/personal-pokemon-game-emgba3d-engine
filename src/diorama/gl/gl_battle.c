@@ -1364,7 +1364,12 @@ static bool StageCellAt(void *context, int x, int y, struct DioramaStageCell *ce
     {
         top = Tree3dsTop(source->treeSprite);
         if (!c->legacy)
+        {
+            /* a large tree stands whole at its highest quarter's height, over a lower quarter's cell by as much
+             * (tree_sprites.c DioramaTreeSprites_Lift, KNOWN_ISSUES MS-243) */
+            top += DioramaTreeSprites_Lift(c->snapshot, c->resolved, (unsigned)(source - c->snapshot->cells));
             cell->north = Tree3dsNorth(source->treeSprite);
+        }
     }
     /* The overworld's detail objects (props.h): a sign, a fence, a lamp, a rock, a bush stands
      * as tall as its art, so no battler is stood in one. Grass and flowers do not count: a

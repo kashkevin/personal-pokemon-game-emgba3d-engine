@@ -99,4 +99,17 @@ uint16_t DioramaTreeSprites_FortreeGround(uint16_t metatileId);
  * cell, and for the crown tops no metatile shows the ground of without them. */
 uint16_t DioramaTreeSprites_FortreeCrownGround(uint16_t metatileId);
 
+struct DioramaSceneSnapshot;
+struct DioramaResolvedCell;
+
+/* The sprite of the quarter 0 of the large tree a sprite is a quarter of (DIORAMA_TREE_SPRITE_NONE: not a quarter). */
+int DioramaTreeSprites_QuarterFirst(int sprite);
+/*
+ * How far the large tree a snapshot cell holds a quarter of stands over that cell's own height (tiles, 0 or more):
+ * the whole tree stands at the highest of its quarters' heights, its trunk reaching down to each lower quarter's
+ * ground (KNOWN_ISSUES MS-243). 0 for any other cell.
+ */
+float DioramaTreeSprites_Lift(const struct DioramaSceneSnapshot *snapshot,
+                              const struct DioramaResolvedCell *resolvedCells, unsigned index);
+
 #endif

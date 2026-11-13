@@ -832,7 +832,8 @@ check-diorama: $(DIORAMA_TEST_GEN)
 	  -lm -o $(DIORAMA_TEST_DIR)/test_camera
 	$(DIORAMA_TEST_DIR)/test_camera
 	$(DIORAMA_TEST_CC) $(DIORAMA_TEST_FLAGS) $$($(DIORAMA_TEST_SDL) --cflags sdl2) tests/diorama/test_tree_sprites.c \
-	  src/diorama/scene/tree_sprites.c $$($(DIORAMA_TEST_SDL) --libs sdl2) -o $(DIORAMA_TEST_DIR)/test_tree_sprites
+	  src/diorama/scene/tree_sprites.c src/diorama/scene/tree_lift.c $$($(DIORAMA_TEST_SDL) --libs sdl2) \
+	  -o $(DIORAMA_TEST_DIR)/test_tree_sprites
 	$(DIORAMA_TEST_DIR)/test_tree_sprites
 	$(DIORAMA_TEST_CC) $(DIORAMA_TEST_FLAGS) $$($(DIORAMA_TEST_SDL) --cflags sdl2) tests/diorama/test_far_field.c \
 	  src/diorama/terrain/far_field.c src/diorama/scene/tree_sprites.c src/diorama/rules.c $(DIORAMA_TEST_GEN) \

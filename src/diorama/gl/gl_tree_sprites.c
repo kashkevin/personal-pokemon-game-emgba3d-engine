@@ -84,18 +84,24 @@
 #define MAX_CROWN_HEIGHT 36
 
 /* A model's corner: in its cell, from the cell's north-west corner on its
- * ground (x east, y up, z south). */
+ * ground (x east, y up, z south). drop: 1 for the corners that follow the
+ * cell's own ground down when the tree stands higher than its cell (the
+ * trunk's foot and the trunk's art on the ground, KNOWN_ISSUES MS-243), else 0. */
 struct ModelVertex
 {
     float x, y, z;
     float u, v;
     float shade;
+    float drop;
 };
 
-/* A tree cell: its north-west corner on its ground, in the scene (z north). */
+/* A tree cell: its north-west corner at the tree's height, in the scene (z
+ * north), and how far under it the cell's own ground lies (MS-243: a large tree
+ * stands whole at its highest quarter's height, DioramaTreeSprites_Lift). */
 struct TreeInstance
 {
     float x, y, z;
+    float drop;
 };
 
 /*
@@ -188,6 +194,8 @@ static uint16_t sModelIndices[MAX_MODEL_INDICES];
 static uint32_t sModelVertexCount;
 static uint32_t sModelIndexCount;
 static bool sModelFull;
+/* While the trunk and the trunk's art are made: their corners on the ground follow it down (ModelVertex.drop). */
+static bool sDropping;
 static struct PartModel sParts[SLOT_COUNT];
 /* Each pixel's level while a crown is made: how many CROWN_STEPs it stands out
  * of its plane past its middle voxel, NO_LEAF where there is no leaf. */
@@ -227,6 +235,7 @@ struct TreeKey
     uint8_t slot;
     uint8_t pad[3];
     float ground;
+    float drop;
 };
 static struct TreeKey sKeys[DIORAMA_MAX_VISIBLE_CELLS];
 static struct TreeKey sNewKeys[DIORAMA_MAX_VISIBLE_CELLS];
@@ -241,7 +250,10 @@ static const char sVertexShader[] =
     "layout(location = 0) in vec3 corner;\n"
     "layout(location = 1) in vec2 texCoord;\n"
     "layout(location = 2) in float faceShade;\n"
-    "layout(location = 3) in vec3 cellOrigin;\n"
+    "layout(location = 3) in vec4 cellOrigin;\n"
+    /* 1 at a corner that reaches down to the cell's own ground, cellOrigin.w
+     * under the tree's (the trunk's foot, the trunk's art: MS-243) */
+    "layout(location = 4) in float dropWeight;\n"
     "uniform vec2 cameraPosition;\n"
     "uniform float cameraPitch;\n"
     "uniform float focalLength;\n"
@@ -257,7 +269,8 @@ static const char sVertexShader[] =
     "out vec3 sceneWorldPosition;\n"
     "out float viewDepth;\n"
     "void main() {\n"
-    "  vec3 position = vec3(cellOrigin.x + corner.x, cellOrigin.y + corner.y, cellOrigin.z - corner.z);\n"
+    "  vec3 position = vec3(cellOrigin.x + corner.x, cellOrigin.y + corner.y - dropWeight * cellOrigin.w,\n"
+    "                       cellOrigin.z - corner.z);\n"
     /* The terrain's projection (gl_terrain_renderer.c), so the two meet. */
     "  const float nearDepth = 0.1;\n"
     "  const float farDepth = " DIORAMA_FAR_DEPTH_GLSL ";\n"
@@ -440,6 +453,8 @@ static void AddQuad(const float corners[4][3], const float uv[4][2], float nx, f
         vertex->u = uv[i][0];
         vertex->v = uv[i][1];
         vertex->shade = Shade(ny, nz);
+        /* the trunk's foot and its art on the ground follow the cell's own ground down (MS-243) */
+        vertex->drop = sDropping && corners[i][1] <= TRUNK_LIFT + 0.0001f ? 1.0f : 0.0f;
     }
     for (i = 0; i < 6; i++)
         sModelIndices[sModelIndexCount++] = (uint16_t)(sModelVertexCount + (clockwise ? reversed : order)[i]);
@@ -463,7 +478,9 @@ static void TrunkArt(int texelX, int texelY)
         {1.0f, TRUNK_LIFT, 1.0f}, {0.0f, TRUNK_LIFT, 1.0f},
     };
 
+    sDropping = true;
     ArtQuad(corners, texelX * TEXEL, texelY * TEXEL, (texelX + 16) * TEXEL, (texelY + 16) * TEXEL, 1.0f, 0.0f);
+    sDropping = false;
 }
 
 /*
@@ -810,6 +827,8 @@ static void Trunk(const struct CrownArt *art, int col, int row)
     piece[1][1] = top;
     if (piece[0][0] >= piece[1][0] || piece[0][2] >= piece[1][2])
         return;
+    /* its foot on the cell's own ground, where the tree stands higher than its cell (MS-243) */
+    sDropping = true;
     /* the four sides (south, north, east, west) and the top */
     for (face = 0; face < 5; face++)
     {
@@ -866,23 +885,14 @@ static void Trunk(const struct CrownArt *art, int col, int row)
         AddQuad(corners, uv, face == 2 ? 1.0f : face == 3 ? -1.0f : 0.0f, face == 4 ? 1.0f : 0.0f,
                 face == 0 ? 1.0f : face == 1 ? -1.0f : 0.0f);
     }
+    sDropping = false;
 }
 
 /* The sprite of the quarter 0 of the large tree a part is a quarter of
  * (DIORAMA_TREE_SPRITE_NONE: a small tree). */
 static int QuarterFirst(int part)
 {
-    static const uint8_t firsts[] = {
-        DIORAMA_TREE_SPRITE_QUARTER, DIORAMA_TREE_SPRITE_ASH_QUARTER, DIORAMA_TREE_SPRITE_LAVARIDGE_QUARTER,
-        DIORAMA_TREE_SPRITE_MOSSDEEP_QUARTER,
-    };
-    int sprite = part + 1;
-    size_t i;
-
-    for (i = 0; i < sizeof(firsts); i++)
-        if (sprite >= firsts[i] && sprite < firsts[i] + 4)
-            return firsts[i];
-    return DIORAMA_TREE_SPRITE_NONE;
+    return DioramaTreeSprites_QuarterFirst(part + 1);
 }
 
 /* The models of the parts (PartModel's order), and their bounds. */
@@ -1044,12 +1054,15 @@ bool DioramaGLTreeSprites_Init(void)
     dglEnableVertexAttribArray(2);
     dglVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(struct ModelVertex),
                            (const void *)offsetof(struct ModelVertex, shade));
+    dglEnableVertexAttribArray(4);
+    dglVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, sizeof(struct ModelVertex),
+                           (const void *)offsetof(struct ModelVertex, drop));
     /* the element buffer is the vertex array's */
     dglBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sIndexBuffer);
     dglBufferData(GL_ELEMENT_ARRAY_BUFFER, sModelIndexCount * sizeof(uint16_t), sModelIndices, GL_STATIC_DRAW);
     dglBindBuffer(GL_ARRAY_BUFFER, sInstanceBuffer);
     dglEnableVertexAttribArray(3);
-    dglVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(struct TreeInstance), NULL);
+    dglVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(struct TreeInstance), NULL);
     dglVertexAttribDivisor(3, 1);
     dglBindVertexArray(0);
     dglBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -1129,7 +1142,9 @@ void DioramaGLTreeSprites_Sync(const struct DioramaSceneSnapshot *snapshot,
         key->mapX = cell->mapX;
         key->mapY = cell->mapY;
         key->slot = (uint8_t)CellSlot(snapshot, cell);
-        key->ground = resolvedCells[i].topHeight;
+        /* a large tree whole at its highest quarter's height, the trunk down to this cell's own ground (MS-243) */
+        key->drop = DioramaTreeSprites_Lift(snapshot, resolvedCells, i);
+        key->ground = resolvedCells[i].topHeight + key->drop;
     }
     if (sKeysValid && count == sKeyCount
      && memcmp(sNewKeys, sKeys, count * sizeof(struct TreeKey)) == 0)
@@ -1155,6 +1170,7 @@ void DioramaGLTreeSprites_Sync(const struct DioramaSceneSnapshot *snapshot,
         instance->x = (float)key->mapX - 0.5f;
         instance->y = key->ground;
         instance->z = -((float)key->mapY - 0.5f);
+        instance->drop = key->drop;
     }
     /* Other trees, so other crowns: the sun's depth map is drawn again. */
     sGeometryGeneration++;
@@ -1190,7 +1206,7 @@ static void DrawParts(bool shadow)
 
             if (instanceCount == 0 || indexCount == 0)
                 continue;
-            dglVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(struct TreeInstance),
+            dglVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(struct TreeInstance),
                                    (const void *)(instanceFirst * sizeof(struct TreeInstance)));
             dglDrawElementsInstanced(GL_TRIANGLES, (GLsizei)indexCount, GL_UNSIGNED_SHORT,
                                      (const void *)(first * sizeof(uint16_t)), (GLsizei)instanceCount);
@@ -1239,7 +1255,8 @@ static void ChooseVisible(float cameraX, float cameraZ, float cameraPitch, float
 
             bounds.minX = instance->x + model->minimum[0];
             bounds.maxX = instance->x + model->maximum[0];
-            bounds.minY = instance->y + model->minimum[1];
+            /* the trunk's foot down to the cell's own ground (MS-243) */
+            bounds.minY = instance->y + (model->minimum[1] < -instance->drop ? model->minimum[1] : -instance->drop);
             bounds.maxY = instance->y + model->maximum[1];
             bounds.minZ = instance->z - model->maximum[2];
             bounds.maxZ = instance->z - model->minimum[2];

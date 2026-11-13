@@ -543,7 +543,7 @@ def read_cells(path):
             values = line.rstrip("\n").split("\t")
             row = dict(zip(columns, values))
             for key in columns:
-                if key in ("ground", "top", "feature", "takeoff", "landing"):
+                if key in ("ground", "top", "feature", "takeoff", "landing", "lift"):
                     row[key] = float(row[key])
                 else:
                     row[key] = int(row[key])

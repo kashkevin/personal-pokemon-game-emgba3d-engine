@@ -250,4 +250,18 @@ uint16_t DioramaTreeSprites_LavaridgeGround(uint16_t metatileId)
     }
 }
 
+int DioramaTreeSprites_QuarterFirst(int sprite)
+{
+    static const uint8_t firsts[] = {
+        DIORAMA_TREE_SPRITE_QUARTER, DIORAMA_TREE_SPRITE_ASH_QUARTER, DIORAMA_TREE_SPRITE_LAVARIDGE_QUARTER,
+        DIORAMA_TREE_SPRITE_MOSSDEEP_QUARTER,
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(firsts); i++)
+        if (sprite >= firsts[i] && sprite < firsts[i] + 4)
+            return firsts[i];
+    return DIORAMA_TREE_SPRITE_NONE;
+}
+
 #endif // ENABLE_DIORAMA

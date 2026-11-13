@@ -24,6 +24,7 @@
 #include "diorama/rules.generated.h"
 #include "diorama/rules.h"
 #include "diorama/terrain_mesh.h"
+#include "diorama/tree_sprites.h"
 #include "fieldmap.h"
 #include "metatile_behavior.h"
 #include "platform/png_write.h"
@@ -4550,7 +4551,7 @@ unsigned DioramaGLTerrain_TestDumpCells(const struct DioramaSceneSnapshot *snaps
         return 0;
     fprintf(file, "x\ty\tflags\tlayout\tgroup\tnum\tsx\tsy\tmetatile\tbehavior\tcollision\televation\tlayer\t"
                   "shape\tarchetype\tclass\tmeasured\tterrace\trock\tground\ttop\tfeature\tpixmin\tpixmax\t"
-                  "hull\tstructure\tclaim\tvoid\tmodel\ttakeoff\tlanding\ttree\tcrown\tprop\n");
+                  "hull\tstructure\tclaim\tvoid\tmodel\ttakeoff\tlanding\ttree\tcrown\tprop\tlift\n");
     for (int chunkY = minChunkY; chunkY <= maxChunkY; chunkY++)
         for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++)
         {
@@ -4587,7 +4588,7 @@ unsigned DioramaGLTerrain_TestDumpCells(const struct DioramaSceneSnapshot *snaps
                                                     source->sourceMapY, NULL, NULL, NULL);
                     prop = DioramaProps_ForCell(snapshot, source);
                     fprintf(file, "%d\t%d\t%u\t%u\t%u\t%u\t%d\t%d\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t"
-                                  "%.4f\t%.4f\t%.4f\t%d\t%d\t%u\t%u\t%u\t%u\t%d\t%.4f\t%.4f\t%u\t%u\t%u\n",
+                                  "%.4f\t%.4f\t%.4f\t%d\t%d\t%u\t%u\t%u\t%u\t%d\t%.4f\t%.4f\t%u\t%u\t%u\t%.4f\n",
                             mapX, mapY, (unsigned)source->flags, (unsigned)source->sourceLayoutId,
                             (unsigned)source->sourceMapGroup, (unsigned)source->sourceMapNum,
                             source->sourceMapX, source->sourceMapY, (unsigned)cell->metatileId,
@@ -4602,7 +4603,9 @@ unsigned DioramaGLTerrain_TestDumpCells(const struct DioramaSceneSnapshot *snaps
                             /* how a tree cell's crown stands: 1 a cut-out, 2 a solid */
                             source->treeSprite == 0 ? 0u : DioramaGLTreeSprites_Volumes() ? 2u : 1u,
                             /* a detail object standing on the cell (props.h): its kind + 1 */
-                            prop != NULL ? 1u + prop->kind : 0u);
+                            prop != NULL ? 1u + prop->kind : 0u,
+                            /* how far over the cell's own height its large tree stands (MS-243) */
+                            DioramaTreeSprites_Lift(snapshot, resolvedCells, (unsigned)gridIndex));
                     rows++;
                 }
         }
