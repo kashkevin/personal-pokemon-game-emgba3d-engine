@@ -25,7 +25,8 @@ from mountain_art import (MountainArtError, faces_between_levels,
 from profiles import NOMINAL_HEIGHTS, TileShape, shape_from_action
 from pixel_objects import UPRIGHT_CLASSES as UPRIGHT_PIXEL_CLASSES, extract_layout
 from structures import analyze_layout
-from terrace_topology import (WATER_BEHAVIORS, cave_climbs, cave_levels, cave_stairs, contradiction_ramps,
+from terrace_topology import (WATER_BEHAVIORS, cave_climbs, cave_hand_levels, cave_levels, cave_stairs,
+                              contradiction_ramps,
                               course_ridges, hall_stairs, hand_banks, hand_decks, hand_floors, hand_ridges, hand_slopes,
                               indoor_levels, mountain_by_hand, stair_runs_between, stair_terraces,
                               join_level_free_cells,
@@ -1692,6 +1693,33 @@ INDOOR_LEVELS: dict[str, dict] = {
                    ((0, 16, 33, 16), 32, 48))},
 }
 
+# Cave rooms laid out by hand (terrace_topology.cave_hand_levels): their floors and bridges at levels given by hand
+# over cave_levels', which stands each floor at its GBA elevation's rank (the lowest 0, the highest a tile up).
+# Shoal Cave's low-tide inner room (KNOWN_ISSUES MS-186; the owner's decision #52 of 2026-11-13, a layout of the room's
+# own): its art stacks its floors otherwise than their elevations - the wet sand (5) round its north (x 10-33, y 7-9,
+# the column at x 10-12 to y 17), flooded deep at high tide, is its lowest ground, the walkways (4) its highest, the
+# corridor (3) between - and cave_levels laid the wet sand a tile up, over the walkways: the high bridge (x 10-33,
+# y 5-6) took the wet sand's level beside it, a step half a tile up from the walkways at each end, and the low bridge
+# (x 9-16, y 21-22) stood half a tile over the channel it crosses (x 9-16, y 19-20 and 23, its ends under the decks
+# deep at high tide too), a person under it drawn on its deck. Here both decks lie at the walkways' level, their ends
+# meeting the walkways level; the wet sand half a tile under the corridor's floor (the corridor's lip along its north
+# edge, y 10, is the step up from it), a tile under the high deck; the channel half a tile under the wet sand (its
+# cliff along y 18, the stairs at (11, 18) down from it), a tile and a half under the low deck. A person walking under
+# either deck stands on that ground, drawn through the deck as a silhouette (buildings.c GroundUnderBridges). By hand
+# too, rock lift_blocked_cells would stand otherwise: the cliff's rocks along y 18 (x 8-10 and 12) a tile under the
+# wet sand, their tops its edge; the rock between the wet sand's column and the corridor (13, 10-11) on the wet sand;
+# and the rock east of the cave mouth at (15, 19) on the mouth's floor (16, 18: beside a stair with no floor below it,
+# it stood a level up, and the mouth's tunnel, cut down to the floor, showed the open ground under it). Collision,
+# elevations and the tides are the game's, unchanged.
+CAVE_HAND_LEVELS: dict[str, dict] = {
+    "LAYOUT_SHOAL_CAVE_LOW_TIDE_INNER_ROOM": {
+        "floors": (((10, 7), -8), ((9, 19), -16), ((9, 23), -16)),
+        "decks": (((10, 5), 8), ((9, 21), 8)),
+        "rocks": (((8, 18), -24), ((9, 18), -24), ((10, 18), -24), ((12, 18), -24),
+                  ((13, 10), -8), ((13, 11), -8), ((16, 18), -16)),
+    },
+}
+
 # The trees of a forest (_grounded_forests): the classifier's hulls round the game's trees.
 FOREST_CLASSES = frozenset({"tree", "forest-wall", "round-hull", "grouped-hull"})
 
@@ -2160,6 +2188,10 @@ def compile_data(root: Path) -> dict:
             # (cave_climbs: Granite Cave B1F's).
             solved = {**solved, **cave_levels(cells[layout["id"]], layout["width"],
                                               layout["height"], solved)}
+            if layout["id"] in CAVE_HAND_LEVELS:
+                # a room whose art stacks its floors otherwise than their elevations, laid out by hand
+                solved = {**solved, **cave_hand_levels(cells[layout["id"]], layout["width"], layout["height"],
+                                                       CAVE_HAND_LEVELS[layout["id"]])}
             solved = {**solved, **cave_climbs(cells[layout["id"]], layout["width"],
                                               layout["height"], solved)}
             # Its stairs through a floor's face, from the lower floor's level up to

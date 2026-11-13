@@ -293,7 +293,11 @@ tilesets are unchanged.
 * Cave levels (V38): in caves the walkable floors stand at their GBA
   elevation's level - the lowest where it was, the highest a tile over it -
   and bridges (elevation 15) are decks at the floor they meet
-  (`terrace_topology.py` `cave_levels`).
+  (`terrace_topology.py` `cave_levels`). A room whose art stacks its floors
+  otherwise is laid out by hand (`compile_rules.py` `CAVE_HAND_LEVELS`,
+  `terrace_topology.py` `cave_hand_levels`): Shoal Cave's low-tide inner
+  room, its two bridges' decks on its walkways' level over the wet sand and
+  the channel under them (the owner's decision #52, KNOWN_ISSUES MS-186).
 * Terrain cost (V37): each chunk is drawn from indices, a quad's four corners
   shaded once (`DioramaTerrain_FoldQuads`; the same triangles in the same
   order). The columns' undersides on a cell's floor are kept (V47): the

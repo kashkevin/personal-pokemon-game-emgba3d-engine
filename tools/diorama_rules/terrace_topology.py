@@ -1309,6 +1309,54 @@ def cave_levels(cells: tuple[dict, ...], width: int, height: int,
     return out
 
 
+def cave_hand_levels(cells: tuple[dict, ...], width: int, height: int, spec: dict) -> dict[int, dict]:
+    """A cave room's floors and bridges at levels given by hand (compile_rules CAVE_HAND_LEVELS; KNOWN_ISSUES MS-186,
+    the owner's decision #52), laid over cave_levels' (which stands each floor at its GBA elevation's rank): "floors",
+    (seed (x, y), level Q16) - the walkable cells of the seed's elevation joined to it, the seed's region, on that
+    level; "decks", (seed, level) - the bridge (elevation 15) joined to the seed, a deck on that level; "rocks",
+    (cell, level) - a blocked cell standing its own height on that level, as lift_blocked_cells stands rock on the
+    floor nearest it (one beside a cave mouth's tunnel, which the tunnel cut down to the mouth's floor shows from
+    the side). Their stairs (cave_stairs) then climb between the levels so given."""
+    def walkable(offset: int) -> bool:
+        cell = cells[offset]
+        return not cell.get("collision") and cell.get("behavior") not in WATER_BEHAVIORS
+
+    def region(seed: tuple[int, int]) -> list[int]:
+        start = seed[1] * width + seed[0]
+        if not walkable(start):
+            raise ValueError(f"cave_hand_levels: seed {seed} is not walkable")
+        elevation = cells[start].get("elevation")
+        out, queue, seen = [], deque([start]), {start}
+        while queue:
+            offset = queue.popleft()
+            out.append(offset)
+            x, y = offset % width, offset // width
+            for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                if 0 <= nx < width and 0 <= ny < height:
+                    neighbor = ny * width + nx
+                    if (neighbor not in seen and walkable(neighbor)
+                            and cells[neighbor].get("elevation") == elevation):
+                        seen.add(neighbor)
+                        queue.append(neighbor)
+        return out
+
+    out = {}
+    for seed, level in spec.get("floors", ()):
+        for offset in region(seed):
+            out[offset] = {"groundQ16": level, "topQ16": level, "profile": "none", "solid": False}
+    for seed, level in spec.get("decks", ()):
+        if cells[seed[1] * width + seed[0]].get("elevation") != 15:
+            raise ValueError(f"cave_hand_levels: deck seed {seed} is not a bridge")
+        for offset in region(seed):
+            out[offset] = {"groundQ16": level, "topQ16": level, "profile": "none", "solid": False, "deck": True}
+    for cell, level in spec.get("rocks", ()):
+        offset = cell[1] * width + cell[0]
+        if not cells[offset].get("collision"):
+            raise ValueError(f"cave_hand_levels: rock {cell} is not blocked")
+        out[offset] = {"groundQ16": level, "topQ16": level, "profile": "none", "solid": False, "lift": True}
+    return out
+
+
 def cave_stairs(cells: tuple[dict, ...], width: int, height: int,
                 solved: dict[int, dict] | None = None) -> dict[int, dict]:
     """A cave's stairs between two of its floors: a gap through a floor's face

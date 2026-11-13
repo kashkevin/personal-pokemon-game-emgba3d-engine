@@ -5,9 +5,10 @@ import unittest
 from pathlib import Path
 
 from catalog import load_tilesets, load_world
-from compile_rules import _load_cells, parse_behaviors
+from compile_rules import CAVE_HAND_LEVELS, _load_cells, parse_behaviors
 from terrace_topology import (CAVE_RISE_Q16, LEDGE_JUMPS, MOUNTAIN_LEDGE_Q16, SLOPE_RISE_Q16, TERRACE_ROLES,
-                              contradiction_ramps, course_ridges, cave_climbs, cave_levels, cave_stairs,
+                              contradiction_ramps, course_ridges, cave_climbs, cave_hand_levels, cave_levels,
+                              cave_stairs,
                               join_level_free_cells, join_water, lift_blocked_cells,
                               hall_stairs, hand_banks, hand_decks, hand_floors, hand_ridges, hand_slopes,
                               indoor_levels,
@@ -651,6 +652,67 @@ class TerraceTopologyTests(unittest.TestCase):
         self.assertEqual([(climb[y * width + 13]["groundQ16"], climb[y * width + 13]["topQ16"])
                           for y in (28, 27)], [(0, 8), (8, 16)])
         self.assertNotIn(29 * width + 13, climb)
+
+    def test_a_cave_room_laid_out_by_hand(self):
+        # compile_rules.CAVE_HAND_LEVELS (the owner's decision #52): a floor's region (the walkable cells of its
+        # seed's elevation joined to it, not another of that elevation apart from it), a bridge's deck and single
+        # rocks on levels given by hand, and the stairs between such floors climbing from one to the other
+        def rock():
+            return {"tileset": "gTileset_Cave", "metatile": 1, "behavior": "MB_NORMAL",
+                    "collision": 1, "elevation": 0}
+
+        def floor(elevation):
+            return {"tileset": "gTileset_Cave", "metatile": 2, "behavior": "MB_NORMAL",
+                    "collision": 0, "elevation": elevation}
+
+        make = {"#": rock, "5": lambda: floor(5), "4": lambda: floor(4), "3": lambda: floor(3),
+                "0": lambda: floor(0), "B": lambda: floor(15)}
+        rows = ["4BB4#55", "5555#55", "##0####", "33333##"]
+        cells = tuple(make[ch]() for row in rows for ch in row)
+        width, height = 7, 4
+        hand = cave_hand_levels(cells, width, height, {"floors": (((0, 1), -8), ((0, 3), -16)),
+                                                       "decks": (((1, 0), 8),), "rocks": (((4, 1), -24),)})
+        # the wet sand west of the rock on its level; the 5s east of it, apart from it, left alone
+        self.assertEqual({hand[offset]["groundQ16"] for offset in range(7, 11)}, {-8})
+        self.assertTrue(all(offset not in hand for offset in (5, 6, 12, 13)))
+        self.assertEqual({hand[offset]["groundQ16"] for offset in range(21, 26)}, {-16})
+        self.assertEqual([(hand[offset]["groundQ16"], hand[offset].get("deck")) for offset in (1, 2)],
+                         [(8, True), (8, True)])
+        self.assertEqual((hand[11]["groundQ16"], hand[11]["topQ16"], hand[11]["lift"]), (-24, -24, True))
+        self.assertTrue(all(not entry["solid"] and entry["profile"] == "none" for entry in hand.values()))
+        # the stairs between the two hand floors climb from the lower to the higher
+        climb = cave_stairs(cells, width, height, hand)
+        self.assertEqual((climb[16]["groundQ16"], climb[16]["topQ16"], climb[16]["profile"]),
+                         (-16, -8, "transition-horizontal"))
+        # a seed that is no floor, a deck's that is no bridge, a rock that is no rock: refused
+        for spec in ({"floors": (((4, 0), 0),)}, {"decks": (((0, 0), 8),)}, {"rocks": (((0, 1), 0),)}):
+            with self.assertRaises(ValueError):
+                cave_hand_levels(cells, width, height, spec)
+        # the repository's: Shoal Cave's low-tide inner room - both decks on the walkways' level, a tile or more
+        # over the ground under them (the wet sand under the high one, the channel under the low one); the
+        # stairs from the channel up to the wet sand; the rock east of the cave mouth on the mouth's floor
+        tilesets = load_tilesets(ROOT)
+        _, layouts = load_world(ROOT)
+        names = {value: name for name, value
+                 in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
+        name = "LAYOUT_SHOAL_CAVE_LOW_TIDE_INNER_ROOM"
+        layout = next(row for row in layouts if row["id"] == name)
+        cave = _load_cells(ROOT, [layout], tilesets, names)[0][name]
+        width, height = layout["width"], layout["height"]
+        levels = cave_levels(cave, width, height)
+        levels = {**levels, **cave_hand_levels(cave, width, height, CAVE_HAND_LEVELS[name])}
+        at = lambda x, y: levels[y * width + x]["groundQ16"]
+        walkway = at(5, 5)
+        self.assertEqual((at(9, 5), at(10, 5), at(33, 6), at(34, 6)), (walkway, walkway, walkway, walkway))
+        self.assertEqual((at(8, 21), at(9, 21), at(16, 22), at(17, 22)), (walkway, walkway, walkway, walkway))
+        self.assertGreaterEqual(walkway - at(20, 7), CAVE_RISE_Q16)        # the wet sand under the high deck
+        self.assertGreaterEqual(walkway - at(12, 20), CAVE_RISE_Q16)       # the channel under the low deck
+        self.assertGreaterEqual(walkway - at(12, 23), CAVE_RISE_Q16)
+        self.assertGreater(at(11, 17), at(11, 19))                         # the wet sand over the channel
+        stairs = cave_stairs(cave, width, height, levels)[18 * width + 11]
+        self.assertEqual((stairs["groundQ16"], stairs["topQ16"]), (at(11, 19), at(11, 17)))
+        self.assertEqual(at(16, 18), at(15, 19))                           # the rock beside the cave mouth
+        self.assertEqual(at(15, 19), at(15, 20))
 
     def test_a_slopes_top_takes_the_level_of_the_ground_round_it(self):
         # Route 119: its muddy slope climbs to a row at the elevation of its foot, which the GBA
