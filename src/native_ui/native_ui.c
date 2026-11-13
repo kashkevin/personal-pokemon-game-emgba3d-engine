@@ -316,7 +316,8 @@ double NativeUi_FrameAlpha(void)
  * tiles; the map name's pop-up marked), a battle transition playing
  * (B_TRANSITION_*), the game's main callback when it is neither the field's
  * nor a battle's (a screen of its own), and the field script last started.
- * Addresses are the program's own (nm names them). For the UI audit's walks
+ * Addresses are the program's own (nm names them; the first line gives
+ * CB2_Overworld's, for a program Windows loaded elsewhere). For the UI audit's walks
  * through the game (the owner's request of 2026-10-26: every place the old
  * look stays).
  */
@@ -333,6 +334,10 @@ static void AuditUncovered(void)
         const char *env = SDL_getenv("PKMN_NATIVE_UI_AUDIT");
 
         sOn = env != NULL && strcmp(env, "1") == 0;
+        /* where the program stands in memory (Windows may load it elsewhere than its symbol table says): a symbol
+         * table's address of CB2_Overworld against this names the addresses below */
+        if (sOn)
+            SDL_Log("Native UI audit: on (CB2_Overworld at %p)", (void *)CB2_Overworld);
     }
     if (!sOn)
         return;
